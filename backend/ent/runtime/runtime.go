@@ -22,6 +22,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/setting"
 	"github.com/Wei-Shaw/sub2api/ent/usagecleanuptask"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
+	"github.com/Wei-Shaw/sub2api/ent/usagelogdetail"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/ent/userallowedgroup"
 	"github.com/Wei-Shaw/sub2api/ent/userattributedefinition"
@@ -913,6 +914,28 @@ func init() {
 	usagelogDescCreatedAt := usagelogFields[32].Descriptor()
 	// usagelog.DefaultCreatedAt holds the default value on creation for the created_at field.
 	usagelog.DefaultCreatedAt = usagelogDescCreatedAt.Default.(func() time.Time)
+	usagelogdetailFields := schema.UsageLogDetail{}.Fields()
+	_ = usagelogdetailFields
+	// usagelogdetailDescRequestHeaders is the schema descriptor for request_headers field.
+	usagelogdetailDescRequestHeaders := usagelogdetailFields[1].Descriptor()
+	// usagelogdetail.DefaultRequestHeaders holds the default value on creation for the request_headers field.
+	usagelogdetail.DefaultRequestHeaders = usagelogdetailDescRequestHeaders.Default.(string)
+	// usagelogdetailDescRequestBody is the schema descriptor for request_body field.
+	usagelogdetailDescRequestBody := usagelogdetailFields[2].Descriptor()
+	// usagelogdetail.DefaultRequestBody holds the default value on creation for the request_body field.
+	usagelogdetail.DefaultRequestBody = usagelogdetailDescRequestBody.Default.(string)
+	// usagelogdetailDescResponseHeaders is the schema descriptor for response_headers field.
+	usagelogdetailDescResponseHeaders := usagelogdetailFields[3].Descriptor()
+	// usagelogdetail.DefaultResponseHeaders holds the default value on creation for the response_headers field.
+	usagelogdetail.DefaultResponseHeaders = usagelogdetailDescResponseHeaders.Default.(string)
+	// usagelogdetailDescResponseBody is the schema descriptor for response_body field.
+	usagelogdetailDescResponseBody := usagelogdetailFields[4].Descriptor()
+	// usagelogdetail.DefaultResponseBody holds the default value on creation for the response_body field.
+	usagelogdetail.DefaultResponseBody = usagelogdetailDescResponseBody.Default.(string)
+	// usagelogdetailDescCreatedAt is the schema descriptor for created_at field.
+	usagelogdetailDescCreatedAt := usagelogdetailFields[5].Descriptor()
+	// usagelogdetail.DefaultCreatedAt holds the default value on creation for the created_at field.
+	usagelogdetail.DefaultCreatedAt = usagelogdetailDescCreatedAt.Default.(func() time.Time)
 	userMixin := schema.User{}.Mixin()
 	userMixinHooks1 := userMixin[1].Hooks()
 	user.Hooks[0] = userMixinHooks1[0]

@@ -194,6 +194,36 @@ func TestGatewayServiceRecordUsage_UsageLogWriteErrorDoesNotSkipBilling(t *testi
 	require.Equal(t, 1, quotaSvc.quotaCalls)
 }
 
+func TestGatewayServiceRecordUsage_DetailWriteFailureDoesNotAbortUsageFlow(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: false, err: MarkUsageLogCreateNotPersisted(context.Canceled)}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	subRepo := &openAIRecordUsageSubRepoStub{}
+	quotaSvc := &openAIRecordUsageAPIKeyQuotaStub{}
+	svc := newGatewayRecordUsageServiceForTest(usageRepo, userRepo, subRepo)
+
+	err := svc.RecordUsage(context.Background(), &RecordUsageInput{
+		Result: &ForwardResult{
+			RequestID: "gateway_detail_write_failure",
+			Usage:     ClaudeUsage{InputTokens: 10, OutputTokens: 6},
+			Model:     "claude-sonnet-4",
+			Duration:  time.Second,
+		},
+		APIKey:         &APIKey{ID: 503, Quota: 100},
+		User:           &User{ID: 603},
+		Account:        &Account{ID: 703},
+		DetailSnapshot: &UsageLogDetailSnapshot{RequestBody: "raw"},
+		APIKeyService:  quotaSvc,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, usageRepo.calls)
+	require.Equal(t, 1, userRepo.deductCalls)
+	require.Equal(t, 1, quotaSvc.quotaCalls)
+	require.NotNil(t, usageRepo.lastLog)
+	require.NotNil(t, usageRepo.lastLog.DetailSnapshot)
+	require.Equal(t, "raw", usageRepo.lastLog.DetailSnapshot.RequestBody)
+}
+
 func TestGatewayServiceRecordUsageWithLongContext_BillingUsesDetachedContext(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: false, err: context.DeadlineExceeded}
 	userRepo := &openAIRecordUsageUserRepoStub{}
@@ -419,4 +449,36 @@ func TestGatewayServiceRecordUsage_ReasoningEffortNil(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, usageRepo.lastLog)
 	require.Nil(t, usageRepo.lastLog.ReasoningEffort)
+}
+
+func TestGatewayServiceRecordUsage_AttachesDetailSnapshot(t *testing.T) {
+	usageRepo := &openAIRecordUsageBestEffortLogRepoStub{}
+	svc := newGatewayRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})
+	detail := &UsageLogDetailSnapshot{
+		RequestHeaders:  "X-Test: 1",
+		RequestBody:     `{"message":"hello"}`,
+		ResponseHeaders: "Content-Type: application/json",
+		ResponseBody:    `{"ok":true}`,
+	}
+
+	err := svc.RecordUsage(context.Background(), &RecordUsageInput{
+		Result: &ForwardResult{
+			RequestID: "detail_snapshot_gateway",
+			Usage: ClaudeUsage{
+				InputTokens:  10,
+				OutputTokens: 5,
+			},
+			Model:    "claude-sonnet-4",
+			Duration: time.Second,
+		},
+		APIKey:         &APIKey{ID: 1},
+		User:           &User{ID: 2},
+		Account:        &Account{ID: 3},
+		DetailSnapshot: detail,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.NotNil(t, usageRepo.lastLog.DetailSnapshot)
+	require.Equal(t, detail, usageRepo.lastLog.DetailSnapshot)
 }

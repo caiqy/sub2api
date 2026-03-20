@@ -22,6 +22,8 @@ const messages: Record<string, string> = {
   'usage.original': 'Original',
   'usage.userBilled': 'User billed',
   'usage.accountBilled': 'Account billed',
+  'common.actions': 'Actions',
+  'admin.usage.viewDetail': 'View detail',
 }
 
 vi.mock('vue-i18n', async () => {
@@ -40,6 +42,7 @@ const DataTableStub = {
     <div>
       <div v-for="row in data" :key="row.request_id">
         <slot name="cell-cost" :row="row" />
+        <slot name="cell-actions" :row="row" />
       </div>
     </div>
   `,
@@ -107,5 +110,36 @@ describe('admin UsageTable tooltip', () => {
     expect(text).toContain('$5.0000 / 1M tokens')
     expect(text).toContain('$30.0000 / 1M tokens')
     expect(text).toContain('$0.069568')
+  })
+})
+
+describe('admin UsageTable detail action', () => {
+  it('enables and disables detail button based on has_detail', async () => {
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [
+          { request_id: 'req-1', has_detail: true },
+          { request_id: 'req-2', has_detail: false },
+        ],
+        loading: false,
+        columns: [],
+      },
+      global: {
+        stubs: {
+          DataTable: DataTableStub,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    const buttons = wrapper.findAll('[data-test="usage-detail-button"]')
+    expect(buttons).toHaveLength(2)
+    expect(buttons[0]?.attributes('disabled')).toBeUndefined()
+    expect(buttons[1]?.attributes('disabled')).toBeDefined()
+
+    await buttons[0]!.trigger('click')
+    expect(wrapper.emitted('detail')).toEqual([[[{ request_id: 'req-1', has_detail: true }][0]]])
   })
 })

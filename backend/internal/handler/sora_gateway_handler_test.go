@@ -294,6 +294,7 @@ type stubUsageLogRepo struct{}
 func (s *stubUsageLogRepo) Create(ctx context.Context, log *service.UsageLog) (bool, error) {
 	return true, nil
 }
+func (s *stubUsageLogRepo) PersistDetailBestEffort(ctx context.Context, log *service.UsageLog) {}
 func (s *stubUsageLogRepo) GetByID(ctx context.Context, id int64) (*service.UsageLog, error) {
 	return nil, nil
 }

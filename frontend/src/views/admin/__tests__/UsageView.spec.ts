@@ -1,9 +1,21 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+import { describe, expect, expectTypeOf, it, vi, beforeEach, afterEach } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
+import { apiClient } from '@/api/client'
+import type { AdminUsageDetail, AdminUsageLog } from '@/types'
 import UsageView from '../UsageView.vue'
 
-const { list, getStats, getSnapshotV2, getById } = vi.hoisted(() => {
+const createDeferred = <T>() => {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
+const { list, getStats, getDetail, getSnapshotV2, getModelStats, getById, showError } = vi.hoisted(() => {
   vi.stubGlobal('localStorage', {
     getItem: vi.fn(() => null),
     setItem: vi.fn(),
@@ -13,8 +25,11 @@ const { list, getStats, getSnapshotV2, getById } = vi.hoisted(() => {
   return {
     list: vi.fn(),
     getStats: vi.fn(),
+    getDetail: vi.fn(),
     getSnapshotV2: vi.fn(),
+    getModelStats: vi.fn(),
     getById: vi.fn(),
+    showError: vi.fn(),
   }
 })
 
@@ -23,6 +38,7 @@ const messages: Record<string, string> = {
   'admin.dashboard.day': 'Day',
   'admin.dashboard.hour': 'Hour',
   'admin.usage.failedToLoadUser': 'Failed to load user',
+  'admin.usage.detailNotFound': 'Detail not found',
 }
 
 const formatLocalDate = (date: Date): string => {
@@ -37,9 +53,11 @@ vi.mock('@/api/admin', () => ({
     usage: {
       list,
       getStats,
+      getDetail,
     },
     dashboard: {
       getSnapshotV2,
+      getModelStats,
     },
     users: {
       getById,
@@ -50,12 +68,17 @@ vi.mock('@/api/admin', () => ({
 vi.mock('@/api/admin/usage', () => ({
   adminUsageAPI: {
     list: vi.fn(),
+    getDetail: vi.fn(),
+  },
+  default: {
+    list: vi.fn(),
+    getDetail: vi.fn(),
   },
 }))
 
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
-    showError: vi.fn(),
+    showError,
     showWarning: vi.fn(),
     showSuccess: vi.fn(),
     showInfo: vi.fn(),
@@ -105,12 +128,48 @@ const GroupDistributionChartStub = {
   `,
 }
 
+const UsageTableStub = {
+  emits: ['detail', 'userClick'],
+  template: '<button data-test="open-detail" @click="$emit(\'detail\', { id: 42, request_id: \'req-42\', user: { email: \'alice@example.com\' }, model: \'gpt-4.1\', created_at: \'2026-03-20T10:00:00Z\', has_detail: true })">detail</button>',
+}
+
+const UsageTableMultipleRowsStub = {
+  emits: ['detail', 'userClick'],
+  template: `
+    <div>
+      <button
+        data-test="open-detail-1"
+        @click="$emit('detail', { id: 1, request_id: 'req-1', user: { email: 'alice@example.com' }, model: 'gpt-4.1', created_at: '2026-03-20T10:00:00Z', has_detail: true })"
+      >detail 1</button>
+      <button
+        data-test="open-detail-2"
+        @click="$emit('detail', { id: 2, request_id: 'req-2', user: { email: 'bob@example.com' }, model: 'gpt-4.1-mini', created_at: '2026-03-20T10:01:00Z', has_detail: true })"
+      >detail 2</button>
+    </div>
+  `,
+}
+
+const UsageDetailModalStub = {
+  props: ['show', 'usageLog', 'detail', 'loading', 'error'],
+  emits: ['close', 'retry'],
+  template: `
+    <div v-if="show" data-test="usage-detail-modal">
+      <span class="request-id">{{ usageLog?.request_id }}</span>
+      <span class="detail-id">{{ detail?.usage_log_id }}</span>
+      <span class="error">{{ error }}</span>
+      <button data-test="retry-detail" @click="$emit('retry')">retry</button>
+    </div>
+  `,
+}
+
 describe('admin UsageView distribution metric toggles', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     list.mockReset()
     getStats.mockReset()
+    getDetail.mockReset()
     getSnapshotV2.mockReset()
+    getModelStats.mockReset()
     getById.mockReset()
 
     list.mockResolvedValue({
@@ -133,6 +192,7 @@ describe('admin UsageView distribution metric toggles', () => {
       models: [],
       groups: [],
     })
+    getModelStats.mockResolvedValue([])
   })
 
   afterEach(() => {
@@ -192,5 +252,271 @@ describe('admin UsageView distribution metric toggles', () => {
     expect(modelChart.find('.metric').text()).toBe('actual_cost')
     expect(groupChart.find('.metric').text()).toBe('actual_cost')
     expect(getSnapshotV2).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('admin usage detail API contract', () => {
+  it('calls the usage detail endpoint from admin usage APIs', async () => {
+    const getSpy = vi.spyOn(apiClient, 'get').mockResolvedValue({
+      data: {
+        usage_log_id: 42,
+        request_headers: null,
+        request_body: null,
+        response_headers: null,
+        response_body: null,
+        created_at: '2026-03-20T00:00:00Z',
+      },
+    })
+
+    const { adminAPI } = await import('@/api/admin')
+    const { adminUsageAPI } = await vi.importActual<typeof import('@/api/admin/usage')>('@/api/admin/usage')
+
+    expect(typeof adminAPI.usage.getDetail).toBe('function')
+
+    await adminUsageAPI.getDetail(42)
+
+    expect(getSpy).toHaveBeenCalledWith('/admin/usage/42/detail')
+
+    getSpy.mockRestore()
+  })
+
+  it('includes detail-related fields in admin usage types', () => {
+    expectTypeOf<AdminUsageLog>().toMatchTypeOf<{ has_detail: boolean }>()
+    expectTypeOf<AdminUsageDetail>().toMatchTypeOf<{
+      usage_log_id: number
+      request_headers: string | null
+      request_body: string | null
+      response_headers: string | null
+      response_body: string | null
+      created_at: string
+    }>()
+  })
+})
+
+describe('admin UsageView detail modal', () => {
+  beforeEach(() => {
+    showError.mockReset()
+    getDetail.mockReset()
+    list.mockResolvedValue({ items: [], total: 0, pages: 0 })
+    getStats.mockResolvedValue({
+      total_requests: 0,
+      total_input_tokens: 0,
+      total_output_tokens: 0,
+      total_cache_tokens: 0,
+      total_tokens: 0,
+      total_cost: 0,
+      total_actual_cost: 0,
+      average_duration_ms: 0,
+    })
+    getSnapshotV2.mockResolvedValue({ trend: [], models: [], groups: [] })
+    getModelStats.mockResolvedValue([])
+  })
+
+  it('requests detail and opens modal when detail action is clicked', async () => {
+    getDetail.mockResolvedValue({
+      usage_log_id: 42,
+      request_headers: '{"foo":"bar"}',
+      request_body: '{}',
+      response_headers: null,
+      response_body: null,
+      created_at: '2026-03-20T10:00:00Z',
+    })
+
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          UsageStatsCards: true,
+          UsageFilters: UsageFiltersStub,
+          UsageTable: UsageTableStub,
+          UsageDetailModal: UsageDetailModalStub,
+          UsageExportProgress: true,
+          UsageCleanupDialog: true,
+          UserBalanceHistoryModal: true,
+          Pagination: true,
+          Select: true,
+          DateRangePicker: true,
+          Icon: true,
+          TokenUsageTrend: true,
+          ModelDistributionChart: ModelDistributionChartStub,
+          GroupDistributionChart: GroupDistributionChartStub,
+          EndpointDistributionChart: true,
+        },
+      },
+    })
+
+    await wrapper.find('[data-test="open-detail"]').trigger('click')
+    await flushPromises()
+
+    expect(getDetail).toHaveBeenCalledWith(42)
+    expect(wrapper.find('[data-test="usage-detail-modal"]').exists()).toBe(true)
+    expect(wrapper.find('.request-id').text()).toBe('req-42')
+    expect(wrapper.find('.detail-id').text()).toBe('42')
+  })
+
+  it('shows not found error and can retry detail loading', async () => {
+    getDetail.mockRejectedValueOnce({ response: { status: 404 } })
+    getDetail.mockResolvedValueOnce({
+      usage_log_id: 42,
+      request_headers: null,
+      request_body: null,
+      response_headers: null,
+      response_body: null,
+      created_at: '2026-03-20T10:00:00Z',
+    })
+
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          UsageStatsCards: true,
+          UsageFilters: UsageFiltersStub,
+          UsageTable: UsageTableStub,
+          UsageDetailModal: UsageDetailModalStub,
+          UsageExportProgress: true,
+          UsageCleanupDialog: true,
+          UserBalanceHistoryModal: true,
+          Pagination: true,
+          Select: true,
+          DateRangePicker: true,
+          Icon: true,
+          TokenUsageTrend: true,
+          ModelDistributionChart: ModelDistributionChartStub,
+          GroupDistributionChart: GroupDistributionChartStub,
+          EndpointDistributionChart: true,
+        },
+      },
+    })
+
+    await wrapper.find('[data-test="open-detail"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="usage-detail-modal"]').exists()).toBe(true)
+    expect(wrapper.find('.error').text()).toBe('Detail not found')
+    expect(showError).toHaveBeenCalledWith('Detail not found')
+
+    await wrapper.find('[data-test="retry-detail"]').trigger('click')
+    await flushPromises()
+
+    expect(getDetail).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('.detail-id').text()).toBe('42')
+  })
+
+  it('keeps the latest detail when earlier request resolves later', async () => {
+    const firstRequest = createDeferred<AdminUsageDetail>()
+    const secondRequest = createDeferred<AdminUsageDetail>()
+
+    getDetail.mockImplementation((id: number) => {
+      if (id === 1) return firstRequest.promise
+      if (id === 2) return secondRequest.promise
+      return Promise.reject(new Error(`unexpected id ${id}`))
+    })
+
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          UsageStatsCards: true,
+          UsageFilters: UsageFiltersStub,
+          UsageTable: UsageTableMultipleRowsStub,
+          UsageDetailModal: UsageDetailModalStub,
+          UsageExportProgress: true,
+          UsageCleanupDialog: true,
+          UserBalanceHistoryModal: true,
+          Pagination: true,
+          Select: true,
+          DateRangePicker: true,
+          Icon: true,
+          TokenUsageTrend: true,
+          ModelDistributionChart: ModelDistributionChartStub,
+          GroupDistributionChart: GroupDistributionChartStub,
+          EndpointDistributionChart: true,
+        },
+      },
+    })
+
+    await wrapper.find('[data-test="open-detail-1"]').trigger('click')
+    await wrapper.find('[data-test="open-detail-2"]').trigger('click')
+    await flushPromises()
+
+    secondRequest.resolve({
+      usage_log_id: 2,
+      request_headers: null,
+      request_body: null,
+      response_headers: null,
+      response_body: null,
+      created_at: '2026-03-20T10:01:00Z',
+    })
+    await flushPromises()
+
+    expect(wrapper.find('.request-id').text()).toBe('req-2')
+    expect(wrapper.find('.detail-id').text()).toBe('2')
+
+    firstRequest.resolve({
+      usage_log_id: 1,
+      request_headers: null,
+      request_body: null,
+      response_headers: null,
+      response_body: null,
+      created_at: '2026-03-20T10:00:00Z',
+    })
+    await flushPromises()
+
+    expect(wrapper.find('.request-id').text()).toBe('req-2')
+    expect(wrapper.find('.detail-id').text()).toBe('2')
+  })
+
+  it('does not write detail state after the modal is closed', async () => {
+    const delayedRequest = createDeferred<AdminUsageDetail>()
+    getDetail.mockReturnValue(delayedRequest.promise)
+
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          UsageStatsCards: true,
+          UsageFilters: UsageFiltersStub,
+          UsageTable: UsageTableStub,
+          UsageDetailModal: UsageDetailModalStub,
+          UsageExportProgress: true,
+          UsageCleanupDialog: true,
+          UserBalanceHistoryModal: true,
+          Pagination: true,
+          Select: true,
+          DateRangePicker: true,
+          Icon: true,
+          TokenUsageTrend: true,
+          ModelDistributionChart: ModelDistributionChartStub,
+          GroupDistributionChart: GroupDistributionChartStub,
+          EndpointDistributionChart: true,
+        },
+      },
+    })
+
+    await wrapper.find('[data-test="open-detail"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.findComponent(UsageDetailModalStub).vm.$emit('close')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="usage-detail-modal"]').exists()).toBe(false)
+    expect(wrapper.findComponent(UsageDetailModalStub).props('detail')).toBe(null)
+    expect(wrapper.findComponent(UsageDetailModalStub).props('error')).toBe('')
+    expect(wrapper.findComponent(UsageDetailModalStub).props('loading')).toBe(false)
+
+    delayedRequest.resolve({
+      usage_log_id: 42,
+      request_headers: null,
+      request_body: null,
+      response_headers: null,
+      response_body: null,
+      created_at: '2026-03-20T10:00:00Z',
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="usage-detail-modal"]').exists()).toBe(false)
+    expect(wrapper.findComponent(UsageDetailModalStub).props('detail')).toBe(null)
+    expect(wrapper.findComponent(UsageDetailModalStub).props('error')).toBe('')
+    expect(wrapper.findComponent(UsageDetailModalStub).props('loading')).toBe(false)
   })
 })

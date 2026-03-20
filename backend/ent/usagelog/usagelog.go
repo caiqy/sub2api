@@ -90,6 +90,8 @@ const (
 	EdgeGroup = "group"
 	// EdgeSubscription holds the string denoting the subscription edge name in mutations.
 	EdgeSubscription = "subscription"
+	// EdgeDetail holds the string denoting the detail edge name in mutations.
+	EdgeDetail = "detail"
 	// Table holds the table name of the usagelog in the database.
 	Table = "usage_logs"
 	// UserTable is the table that holds the user relation/edge.
@@ -127,6 +129,13 @@ const (
 	SubscriptionInverseTable = "user_subscriptions"
 	// SubscriptionColumn is the table column denoting the subscription relation/edge.
 	SubscriptionColumn = "subscription_id"
+	// DetailTable is the table that holds the detail relation/edge.
+	DetailTable = "usage_log_details"
+	// DetailInverseTable is the table name for the UsageLogDetail entity.
+	// It exists in this package in order to avoid circular dependency with the "usagelogdetail" package.
+	DetailInverseTable = "usage_log_details"
+	// DetailColumn is the table column denoting the detail relation/edge.
+	DetailColumn = "usage_log_id"
 )
 
 // Columns holds all SQL columns for usagelog fields.
@@ -437,6 +446,13 @@ func BySubscriptionField(field string, opts ...sql.OrderTermOption) OrderOption 
 		sqlgraph.OrderByNeighborTerms(s, newSubscriptionStep(), sql.OrderByField(field, opts...))
 	}
 }
+
+// ByDetailField orders the results by detail field.
+func ByDetailField(field string, opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newDetailStep(), sql.OrderByField(field, opts...))
+	}
+}
 func newUserStep() *sqlgraph.Step {
 	return sqlgraph.NewStep(
 		sqlgraph.From(Table, FieldID),
@@ -470,5 +486,12 @@ func newSubscriptionStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(SubscriptionInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.M2O, true, SubscriptionTable, SubscriptionColumn),
+	)
+}
+func newDetailStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(DetailInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2O, false, DetailTable, DetailColumn),
 	)
 }

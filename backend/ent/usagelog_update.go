@@ -15,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
+	"github.com/Wei-Shaw/sub2api/ent/usagelogdetail"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
 )
@@ -691,6 +692,25 @@ func (_u *UsageLogUpdate) SetSubscription(v *UserSubscription) *UsageLogUpdate {
 	return _u.SetSubscriptionID(v.ID)
 }
 
+// SetDetailID sets the "detail" edge to the UsageLogDetail entity by ID.
+func (_u *UsageLogUpdate) SetDetailID(id int64) *UsageLogUpdate {
+	_u.mutation.SetDetailID(id)
+	return _u
+}
+
+// SetNillableDetailID sets the "detail" edge to the UsageLogDetail entity by ID if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableDetailID(id *int64) *UsageLogUpdate {
+	if id != nil {
+		_u = _u.SetDetailID(*id)
+	}
+	return _u
+}
+
+// SetDetail sets the "detail" edge to the UsageLogDetail entity.
+func (_u *UsageLogUpdate) SetDetail(v *UsageLogDetail) *UsageLogUpdate {
+	return _u.SetDetailID(v.ID)
+}
+
 // Mutation returns the UsageLogMutation object of the builder.
 func (_u *UsageLogUpdate) Mutation() *UsageLogMutation {
 	return _u.mutation
@@ -723,6 +743,12 @@ func (_u *UsageLogUpdate) ClearGroup() *UsageLogUpdate {
 // ClearSubscription clears the "subscription" edge to the UserSubscription entity.
 func (_u *UsageLogUpdate) ClearSubscription() *UsageLogUpdate {
 	_u.mutation.ClearSubscription()
+	return _u
+}
+
+// ClearDetail clears the "detail" edge to the UsageLogDetail entity.
+func (_u *UsageLogUpdate) ClearDetail() *UsageLogUpdate {
+	_u.mutation.ClearDetail()
 	return _u
 }
 
@@ -1111,6 +1137,35 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(usersubscription.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.DetailCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2O,
+			Inverse: false,
+			Table:   usagelog.DetailTable,
+			Columns: []string{usagelog.DetailColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(usagelogdetail.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.DetailIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2O,
+			Inverse: false,
+			Table:   usagelog.DetailTable,
+			Columns: []string{usagelog.DetailColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(usagelogdetail.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {
@@ -1797,6 +1852,25 @@ func (_u *UsageLogUpdateOne) SetSubscription(v *UserSubscription) *UsageLogUpdat
 	return _u.SetSubscriptionID(v.ID)
 }
 
+// SetDetailID sets the "detail" edge to the UsageLogDetail entity by ID.
+func (_u *UsageLogUpdateOne) SetDetailID(id int64) *UsageLogUpdateOne {
+	_u.mutation.SetDetailID(id)
+	return _u
+}
+
+// SetNillableDetailID sets the "detail" edge to the UsageLogDetail entity by ID if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableDetailID(id *int64) *UsageLogUpdateOne {
+	if id != nil {
+		_u = _u.SetDetailID(*id)
+	}
+	return _u
+}
+
+// SetDetail sets the "detail" edge to the UsageLogDetail entity.
+func (_u *UsageLogUpdateOne) SetDetail(v *UsageLogDetail) *UsageLogUpdateOne {
+	return _u.SetDetailID(v.ID)
+}
+
 // Mutation returns the UsageLogMutation object of the builder.
 func (_u *UsageLogUpdateOne) Mutation() *UsageLogMutation {
 	return _u.mutation
@@ -1829,6 +1903,12 @@ func (_u *UsageLogUpdateOne) ClearGroup() *UsageLogUpdateOne {
 // ClearSubscription clears the "subscription" edge to the UserSubscription entity.
 func (_u *UsageLogUpdateOne) ClearSubscription() *UsageLogUpdateOne {
 	_u.mutation.ClearSubscription()
+	return _u
+}
+
+// ClearDetail clears the "detail" edge to the UsageLogDetail entity.
+func (_u *UsageLogUpdateOne) ClearDetail() *UsageLogUpdateOne {
+	_u.mutation.ClearDetail()
 	return _u
 }
 
@@ -2247,6 +2327,35 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(usersubscription.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.DetailCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2O,
+			Inverse: false,
+			Table:   usagelog.DetailTable,
+			Columns: []string{usagelog.DetailColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(usagelogdetail.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.DetailIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2O,
+			Inverse: false,
+			Table:   usagelog.DetailTable,
+			Columns: []string{usagelog.DetailColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(usagelogdetail.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {

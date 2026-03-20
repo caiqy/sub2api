@@ -13,6 +13,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
+	"github.com/Wei-Shaw/sub2api/ent/usagelogdetail"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
 )
@@ -106,9 +107,11 @@ type UsageLogEdges struct {
 	Group *Group `json:"group,omitempty"`
 	// Subscription holds the value of the subscription edge.
 	Subscription *UserSubscription `json:"subscription,omitempty"`
+	// Detail holds the value of the detail edge.
+	Detail *UsageLogDetail `json:"detail,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [5]bool
+	loadedTypes [6]bool
 }
 
 // UserOrErr returns the User value or an error if the edge
@@ -164,6 +167,17 @@ func (e UsageLogEdges) SubscriptionOrErr() (*UserSubscription, error) {
 		return nil, &NotFoundError{label: usersubscription.Label}
 	}
 	return nil, &NotLoadedError{edge: "subscription"}
+}
+
+// DetailOrErr returns the Detail value or an error if the edge
+// was not loaded in eager-loading, or loaded but was not found.
+func (e UsageLogEdges) DetailOrErr() (*UsageLogDetail, error) {
+	if e.Detail != nil {
+		return e.Detail, nil
+	} else if e.loadedTypes[5] {
+		return nil, &NotFoundError{label: usagelogdetail.Label}
+	}
+	return nil, &NotLoadedError{edge: "detail"}
 }
 
 // scanValues returns the types for scanning values from sql.Rows.
@@ -446,6 +460,11 @@ func (_m *UsageLog) QueryGroup() *GroupQuery {
 // QuerySubscription queries the "subscription" edge of the UsageLog entity.
 func (_m *UsageLog) QuerySubscription() *UserSubscriptionQuery {
 	return NewUsageLogClient(_m.config).QuerySubscription(_m)
+}
+
+// QueryDetail queries the "detail" edge of the UsageLog entity.
+func (_m *UsageLog) QueryDetail() *UsageLogDetailQuery {
+	return NewUsageLogClient(_m.config).QueryDetail(_m)
 }
 
 // Update returns a builder for updating this UsageLog.

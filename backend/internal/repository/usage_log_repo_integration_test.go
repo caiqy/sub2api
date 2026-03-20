@@ -87,6 +87,93 @@ func (s *UsageLogRepoSuite) TestCreate() {
 	s.Require().NotZero(log.ID)
 }
 
+func (s *UsageLogRepoSuite) TestCreate_PersistsDetailSnapshotAndPrunesOldRows() {
+	user := mustCreateUser(s.T(), s.client, &service.User{Email: "create-detail-prune@test.com"})
+	apiKey := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: "sk-create-detail-prune", Name: "k"})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-create-detail-prune"})
+
+	base := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	var oldestUsageLogID int64
+	for i := 0; i < 500; i++ {
+		log := &service.UsageLog{
+			UserID:       user.ID,
+			APIKeyID:     apiKey.ID,
+			AccountID:    account.ID,
+			RequestID:    uuid.NewString(),
+			Model:        "claude-3",
+			InputTokens:  10,
+			OutputTokens: 20,
+			TotalCost:    0.5,
+			ActualCost:   0.5,
+			CreatedAt:    base.Add(time.Duration(i) * time.Second),
+		}
+		_, err := s.repo.Create(s.ctx, log)
+		s.Require().NoError(err)
+		if i == 0 {
+			oldestUsageLogID = log.ID
+		}
+		_, err = s.tx.ExecContext(s.ctx, `
+			INSERT INTO usage_log_details (usage_log_id, request_headers, request_body, response_headers, response_body, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6)
+		`, log.ID, "seed-h", fmt.Sprintf("seed-body-%d", i), "seed-rh", "seed-rb", log.CreatedAt)
+		s.Require().NoError(err)
+	}
+
+	log := &service.UsageLog{
+		UserID:       user.ID,
+		APIKeyID:     apiKey.ID,
+		AccountID:    account.ID,
+		RequestID:    uuid.NewString(),
+		Model:        "claude-3",
+		InputTokens:  11,
+		OutputTokens: 22,
+		TotalCost:    0.6,
+		ActualCost:   0.6,
+		CreatedAt:    base.Add(600 * time.Second),
+		DetailSnapshot: (&service.UsageLogDetailSnapshot{
+			RequestHeaders:  "Authorization: Bearer redacted",
+			RequestBody:     `{"hello":"world"}`,
+			ResponseHeaders: "Content-Type: application/json",
+			ResponseBody:    `{"ok":true}`,
+		}).Normalize(),
+	}
+
+	inserted, err := s.repo.Create(s.ctx, log)
+	s.Require().NoError(err)
+	s.Require().True(inserted)
+
+	var total int
+	err = scanSingleRow(s.ctx, s.tx, "SELECT COUNT(*) FROM usage_log_details", nil, &total)
+	s.Require().NoError(err)
+	s.Require().Equal(500, total)
+
+	var detail struct {
+		RequestHeaders  string
+		RequestBody     string
+		ResponseHeaders string
+		ResponseBody    string
+	}
+	err = scanSingleRow(s.ctx, s.tx, `
+		SELECT request_headers, request_body, response_headers, response_body
+		FROM usage_log_details
+		WHERE usage_log_id = $1
+	`, []any{log.ID}, &detail.RequestHeaders, &detail.RequestBody, &detail.ResponseHeaders, &detail.ResponseBody)
+	s.Require().NoError(err)
+	s.Require().Equal("Authorization: Bearer redacted", detail.RequestHeaders)
+	s.Require().Equal(`{"hello":"world"}`, detail.RequestBody)
+	s.Require().Equal("Content-Type: application/json", detail.ResponseHeaders)
+	s.Require().Equal(`{"ok":true}`, detail.ResponseBody)
+
+	var oldestCount int
+	err = scanSingleRow(s.ctx, s.tx, "SELECT COUNT(*) FROM usage_log_details WHERE usage_log_id = $1", []any{oldestUsageLogID}, &oldestCount)
+	s.Require().NoError(err)
+	s.Require().Zero(oldestCount)
+	var newestCount int
+	err = scanSingleRow(s.ctx, s.tx, "SELECT COUNT(*) FROM usage_log_details WHERE usage_log_id = $1", []any{log.ID}, &newestCount)
+	s.Require().NoError(err)
+	s.Require().Equal(1, newestCount)
+}
+
 func TestUsageLogRepositoryCreate_BatchPathConcurrent(t *testing.T) {
 	ctx := context.Background()
 	client := testEntClient(t)
@@ -566,6 +653,39 @@ func (s *UsageLogRepoSuite) TestDelete() {
 	s.Require().Error(err, "expected error after delete")
 }
 
+func (s *UsageLogRepoSuite) TestDelete_RemovesDetail() {
+	user := mustCreateUser(s.T(), s.client, &service.User{Email: "delete-detail@test.com"})
+	apiKey := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: "sk-delete-detail", Name: "k"})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-delete-detail"})
+
+	log := &service.UsageLog{
+		UserID:       user.ID,
+		APIKeyID:     apiKey.ID,
+		AccountID:    account.ID,
+		RequestID:    uuid.NewString(),
+		Model:        "claude-3",
+		InputTokens:  10,
+		OutputTokens: 20,
+		TotalCost:    0.5,
+		ActualCost:   0.5,
+		CreatedAt:    time.Now().UTC(),
+		DetailSnapshot: (&service.UsageLogDetailSnapshot{
+			RequestBody: `{"delete":true}`,
+		}).Normalize(),
+	}
+
+	_, err := s.repo.Create(s.ctx, log)
+	s.Require().NoError(err)
+
+	err = s.repo.Delete(s.ctx, log.ID)
+	s.Require().NoError(err)
+
+	var count int
+	err = scanSingleRow(s.ctx, s.tx, "SELECT COUNT(*) FROM usage_log_details WHERE usage_log_id = $1", []any{log.ID}, &count)
+	s.Require().NoError(err)
+	s.Require().Zero(count)
+}
+
 // --- ListByUser ---
 
 func (s *UsageLogRepoSuite) TestListByUser() {
@@ -647,6 +767,55 @@ func (s *UsageLogRepoSuite) TestListWithFilters() {
 	s.Require().NoError(err, "ListWithFilters")
 	s.Require().Len(logs, 1)
 	s.Require().Equal(int64(1), page.Total)
+}
+
+func (s *UsageLogRepoSuite) TestListWithFilters_PopulatesHasDetail() {
+	user := mustCreateUser(s.T(), s.client, &service.User{Email: "filters-has-detail@test.com"})
+	apiKey := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: "sk-filters-has-detail", Name: "k"})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-filters-has-detail"})
+
+	withDetail := &service.UsageLog{
+		UserID:       user.ID,
+		APIKeyID:     apiKey.ID,
+		AccountID:    account.ID,
+		RequestID:    uuid.NewString(),
+		Model:        "claude-3",
+		InputTokens:  10,
+		OutputTokens: 20,
+		TotalCost:    0.5,
+		ActualCost:   0.5,
+		CreatedAt:    time.Now().UTC(),
+		DetailSnapshot: (&service.UsageLogDetailSnapshot{
+			RequestBody: `{"detail":true}`,
+		}).Normalize(),
+	}
+	_, err := s.repo.Create(s.ctx, withDetail)
+	s.Require().NoError(err)
+
+	withoutDetail := &service.UsageLog{
+		UserID:       user.ID,
+		APIKeyID:     apiKey.ID,
+		AccountID:    account.ID,
+		RequestID:    uuid.NewString(),
+		Model:        "claude-3",
+		InputTokens:  30,
+		OutputTokens: 40,
+		TotalCost:    0.7,
+		ActualCost:   0.7,
+		CreatedAt:    time.Now().UTC().Add(1 * time.Second),
+	}
+	_, err = s.repo.Create(s.ctx, withoutDetail)
+	s.Require().NoError(err)
+
+	filters := usagestats.UsageLogFilters{UserID: user.ID}
+	logs, page, err := s.repo.ListWithFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, filters)
+	s.Require().NoError(err)
+	s.Require().Len(logs, 2)
+	s.Require().Equal(int64(2), page.Total)
+	s.Require().Equal(withoutDetail.ID, logs[0].ID)
+	s.Require().False(logs[0].HasDetail)
+	s.Require().Equal(withDetail.ID, logs[1].ID)
+	s.Require().True(logs[1].HasDetail)
 }
 
 // --- GetDashboardStats ---

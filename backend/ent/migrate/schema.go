@@ -843,6 +843,37 @@ var (
 			},
 		},
 	}
+	// UsageLogDetailsColumns holds the columns for the "usage_log_details" table.
+	UsageLogDetailsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "request_headers", Type: field.TypeString, Size: 2147483647, Default: ""},
+		{Name: "request_body", Type: field.TypeString, Size: 2147483647, Default: ""},
+		{Name: "response_headers", Type: field.TypeString, Size: 2147483647, Default: ""},
+		{Name: "response_body", Type: field.TypeString, Size: 2147483647, Default: ""},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "usage_log_id", Type: field.TypeInt64, Unique: true},
+	}
+	// UsageLogDetailsTable holds the schema information for the "usage_log_details" table.
+	UsageLogDetailsTable = &schema.Table{
+		Name:       "usage_log_details",
+		Columns:    UsageLogDetailsColumns,
+		PrimaryKey: []*schema.Column{UsageLogDetailsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "usage_log_details_usage_logs_detail",
+				Columns:    []*schema.Column{UsageLogDetailsColumns[6]},
+				RefColumns: []*schema.Column{UsageLogsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "usagelogdetail_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{UsageLogDetailsColumns[5]},
+			},
+		},
+	}
 	// UsersColumns holds the columns for the "users" table.
 	UsersColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -1107,6 +1138,7 @@ var (
 		SettingsTable,
 		UsageCleanupTasksTable,
 		UsageLogsTable,
+		UsageLogDetailsTable,
 		UsersTable,
 		UserAllowedGroupsTable,
 		UserAttributeDefinitionsTable,
@@ -1179,6 +1211,10 @@ func init() {
 	UsageLogsTable.ForeignKeys[4].RefTable = UserSubscriptionsTable
 	UsageLogsTable.Annotation = &entsql.Annotation{
 		Table: "usage_logs",
+	}
+	UsageLogDetailsTable.ForeignKeys[0].RefTable = UsageLogsTable
+	UsageLogDetailsTable.Annotation = &entsql.Annotation{
+		Table: "usage_log_details",
 	}
 	UsersTable.Annotation = &entsql.Annotation{
 		Table: "users",
