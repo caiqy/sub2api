@@ -17,6 +17,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 // antigravityFailingWriter 模拟客户端断开连接的 gin.ResponseWriter
@@ -135,14 +136,20 @@ func (s *httpUpstreamStub) DoWithTLS(_ *http.Request, _ string, _ int64, _ int, 
 }
 
 type queuedHTTPUpstreamStub struct {
-	responses     []*http.Response
-	errors        []error
-	requestBodies [][]byte
-	callCount     int
-	onCall        func(*http.Request, *queuedHTTPUpstreamStub)
+	responses      []*http.Response
+	errors         []error
+	requestBodies  [][]byte
+	requestHeaders []http.Header
+	callCount      int
+	onCall         func(*http.Request, *queuedHTTPUpstreamStub)
 }
 
 func (s *queuedHTTPUpstreamStub) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	if req != nil {
+		s.requestHeaders = append(s.requestHeaders, req.Header.Clone())
+	} else {
+		s.requestHeaders = append(s.requestHeaders, nil)
+	}
 	if req != nil && req.Body != nil {
 		body, _ := io.ReadAll(req.Body)
 		s.requestBodies = append(s.requestBodies, body)
@@ -595,6 +602,171 @@ func TestAntigravityGatewayService_ForwardGemini_BillsWithMappedModel(t *testing
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, mappedModel, result.Model)
+}
+
+func TestAntigravityGatewayService_Forward_PassthroughFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	writer := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(writer)
+
+	body, err := json.Marshal(map[string]any{
+		"model": "claude-sonnet-4-5",
+		"messages": []map[string]any{
+			{"role": "user", "content": "hello"},
+		},
+		"max_tokens": 16,
+		"stream":     true,
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	c.Request = req
+
+	upstreamBody := []byte("data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":8,\"candidatesTokenCount\":3}}}\n\n")
+	upstream := &queuedHTTPUpstreamStub{
+		responses: []*http.Response{{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"X-Request-Id": []string{"req-pass-1"}},
+			Body:       io.NopCloser(bytes.NewReader(upstreamBody)),
+		}},
+	}
+
+	svc := &AntigravityGatewayService{
+		settingService: NewSettingService(&antigravitySettingRepoStub{}, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
+		httpUpstream:   upstream,
+	}
+
+	account := &Account{
+		ID:          9,
+		Name:        "acc-antigravity-apikey-pass",
+		Platform:    PlatformAntigravity,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key": "api-key-token",
+			"model_mapping": map[string]any{
+				"claude-sonnet-4-5": "gemini-3-pro-high",
+			},
+		},
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "body", Mode: "inject", Key: "metadata.user_id", Value: "user-123"},
+			},
+		},
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, body, false)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, upstream.requestBodies, 1)
+	require.Equal(t, "user-123", gjson.GetBytes(upstream.requestBodies[0], "metadata.user_id").String())
+}
+
+func TestAntigravityGatewayService_Forward_PassthroughFieldsHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	writer := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(writer)
+
+	body, err := json.Marshal(map[string]any{
+		"model": "claude-sonnet-4-5",
+		"messages": []map[string]any{
+			{"role": "user", "content": "hello"},
+		},
+		"max_tokens": 16,
+		"stream":     true,
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	req.Header.Set("X-Trace-Id", "trace-123")
+	c.Request = req
+
+	upstreamBody := []byte("data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":8,\"candidatesTokenCount\":3}}}\n\n")
+	upstream := &queuedHTTPUpstreamStub{
+		responses: []*http.Response{{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"X-Request-Id": []string{"req-pass-header-1"}},
+			Body:       io.NopCloser(bytes.NewReader(upstreamBody)),
+		}},
+	}
+
+	svc := &AntigravityGatewayService{
+		settingService: NewSettingService(&antigravitySettingRepoStub{}, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
+		httpUpstream:   upstream,
+	}
+
+	account := &Account{
+		ID:          91,
+		Name:        "acc-antigravity-apikey-pass-header",
+		Platform:    PlatformAntigravity,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key": "api-key-token",
+			"model_mapping": map[string]any{
+				"claude-sonnet-4-5": "gemini-3-pro-high",
+			},
+		},
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "header", Mode: "inject", Key: "X-Account-Tag", Value: "prod"},
+				{Target: "header", Mode: "forward", Key: "X-Trace-Id"},
+			},
+		},
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, body, false)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, upstream.requestHeaders, 1)
+	require.Equal(t, "prod", upstream.requestHeaders[0].Get("X-Account-Tag"))
+	require.Equal(t, "trace-123", upstream.requestHeaders[0].Get("X-Trace-Id"))
+}
+
+func TestAntigravityGatewayService_ForwardGemini_PassthroughFieldsStructureConflict(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	logSink, restore := captureStructuredLog(t)
+	defer restore()
+
+	writer := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(writer)
+
+	body, err := json.Marshal(map[string]any{
+		"metadata": "string",
+		"contents": []map[string]any{
+			{"role": "user", "parts": []map[string]any{{"text": "hello"}}},
+		},
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash:generateContent", bytes.NewReader(body))
+	c.Request = req
+
+	svc := &AntigravityGatewayService{}
+	account := &Account{
+		ID:       10,
+		Name:     "acc-antigravity-apikey-conflict",
+		Platform: PlatformAntigravity,
+		Type:     AccountTypeAPIKey,
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "body", Mode: "inject", Key: "metadata.user_id", Value: "user-123"},
+			},
+		},
+	}
+
+	result, err := svc.ForwardGemini(context.Background(), c, account, "gemini-2.5-flash", "generateContent", false, body, false)
+	require.Nil(t, result)
+	require.EqualError(t, err, "invalid_request_error: passthrough body path conflicts with non-object node: metadata")
+	require.Equal(t, http.StatusBadRequest, writer.Code)
+	require.True(t, logSink.ContainsMessage("passthrough body path conflicts with non-object node"))
+	require.True(t, logSink.ContainsFieldValue("account_id", "10"))
+	require.True(t, logSink.ContainsFieldValue("conflict_node", "metadata"))
 }
 
 func TestAntigravityGatewayService_ForwardGemini_RetriesCorruptedThoughtSignature(t *testing.T) {

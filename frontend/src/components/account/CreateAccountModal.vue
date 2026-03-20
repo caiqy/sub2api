@@ -74,6 +74,7 @@
           <button
             type="button"
             @click="form.platform = 'anthropic'"
+            data-testid="platform-anthropic"
             :class="[
               'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
               form.platform === 'anthropic'
@@ -87,6 +88,7 @@
           <button
             type="button"
             @click="form.platform = 'openai'"
+            data-testid="platform-openai"
             :class="[
               'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
               form.platform === 'openai'
@@ -156,9 +158,10 @@
             </svg>
             Gemini
           </button>
-          <button
-            type="button"
-            @click="form.platform = 'antigravity'"
+        <button
+          type="button"
+          data-testid="platform-antigravity"
+          @click="form.platform = 'antigravity'"
             :class="[
               'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
               form.platform === 'antigravity'
@@ -236,6 +239,7 @@
           <button
             type="button"
             @click="accountCategory = 'oauth-based'"
+            data-testid="account-type-oauth"
             :class="[
               'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
               accountCategory === 'oauth-based'
@@ -266,6 +270,7 @@
           <button
             type="button"
             @click="accountCategory = 'apikey'"
+            data-testid="account-type-apikey"
             :class="[
               'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
               accountCategory === 'apikey'
@@ -296,6 +301,7 @@
           <button
             type="button"
             @click="accountCategory = 'bedrock'"
+            data-testid="account-type-bedrock"
             :class="[
               'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
               accountCategory === 'bedrock'
@@ -333,6 +339,7 @@
           <button
             type="button"
             @click="accountCategory = 'oauth-based'"
+            data-testid="account-type-oauth"
             :class="[
               'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
               accountCategory === 'oauth-based'
@@ -359,6 +366,7 @@
           <button
             type="button"
             @click="accountCategory = 'apikey'"
+            data-testid="account-type-apikey"
             :class="[
               'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
               accountCategory === 'apikey'
@@ -730,6 +738,7 @@
         <div class="mt-2 grid grid-cols-2 gap-3">
           <button
             type="button"
+            data-testid="account-type-antigravity-oauth"
             @click="antigravityAccountType = 'oauth'"
             :class="[
               'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
@@ -756,6 +765,7 @@
 
           <button
             type="button"
+            data-testid="account-type-antigravity-upstream"
             @click="antigravityAccountType = 'upstream'"
             :class="[
               'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
@@ -806,6 +816,16 @@
           />
           <p class="input-hint">{{ t('admin.accounts.upstream.apiKeyHint') }}</p>
         </div>
+
+        <section
+          class="border-t border-gray-200 pt-4 dark:border-dark-600"
+          data-testid="passthrough-fields-section"
+        >
+          <PassthroughFieldRulesEditor
+            v-model:enabled="passthroughFieldsEnabled"
+            v-model:rules="passthroughFieldRules"
+          />
+        </section>
       </div>
 
       <!-- Antigravity model restriction (applies to OAuth + Upstream) -->
@@ -951,6 +971,7 @@
             type="password"
             required
             class="input font-mono"
+            data-testid="create-account-apikey-input"
             :placeholder="
               form.platform === 'openai'
                 ? 'sk-proj-...'
@@ -961,6 +982,17 @@
           />
           <p class="input-hint">{{ apiKeyHint }}</p>
         </div>
+
+        <section
+          v-if="accountCategory === 'apikey'"
+          class="border-t border-gray-200 pt-4 dark:border-dark-600"
+          data-testid="passthrough-fields-section"
+        >
+          <PassthroughFieldRulesEditor
+            v-model:enabled="passthroughFieldsEnabled"
+            v-model:rules="passthroughFieldRules"
+          />
+        </section>
 
         <!-- Gemini API Key tier selection -->
         <div v-if="form.platform === 'gemini'">
@@ -1346,6 +1378,7 @@
               type="text"
               required
               class="input font-mono"
+              data-testid="bedrock-access-key-id-input"
               placeholder="AKIA..."
             />
           </div>
@@ -1356,6 +1389,7 @@
               type="password"
               required
               class="input font-mono"
+              data-testid="bedrock-secret-access-key-input"
             />
           </div>
           <div>
@@ -2867,6 +2901,7 @@ import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
+import PassthroughFieldRulesEditor from '@/components/account/PassthroughFieldRulesEditor.vue'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
 import { applyInterceptWarmup } from '@/components/account/credentialsBuilder'
 import { formatDateTimeLocalInput, parseDateTimeLocalInput } from '@/utils/format'
@@ -2879,6 +2914,11 @@ import {
   resolveOpenAIWSModeConcurrencyHintKey,
   type OpenAIWSMode
 } from '@/utils/openaiWsMode'
+import {
+  normalizePassthroughFieldRule,
+  validatePassthroughFieldRules,
+  type PassthroughFieldRuleDraft
+} from './passthroughFieldRules'
 import OAuthAuthorizationFlow from './OAuthAuthorizationFlow.vue'
 
 // Type for exposed OAuthAuthorizationFlow component
@@ -3017,6 +3057,8 @@ const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const codexCLIOnlyEnabled = ref(false)
 const anthropicPassthroughEnabled = ref(false)
+const passthroughFieldsEnabled = ref(false)
+const passthroughFieldRules = ref<PassthroughFieldRuleDraft[]>([])
 const mixedScheduling = ref(false) // For antigravity accounts: enable mixed scheduling
 const allowOverages = ref(false) // For antigravity accounts: enable AI Credits overages
 const antigravityAccountType = ref<'oauth' | 'upstream'>('oauth') // For antigravity: oauth or upstream
@@ -3732,6 +3774,8 @@ const resetForm = () => {
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   codexCLIOnlyEnabled.value = false
   anthropicPassthroughEnabled.value = false
+  passthroughFieldsEnabled.value = false
+  passthroughFieldRules.value = []
   // Reset quota control state
   windowCostEnabled.value = false
   windowCostLimit.value = null
@@ -3819,6 +3863,38 @@ const buildAnthropicExtra = (base?: Record<string, unknown>): Record<string, unk
   }
 
   return Object.keys(extra).length > 0 ? extra : undefined
+}
+
+const buildPassthroughFieldExtra = (base?: Record<string, unknown>): Record<string, unknown> | undefined => {
+  const extra: Record<string, unknown> = { ...(base || {}) }
+
+  const passthroughCapableFlow = accountCategory.value === 'apikey' || (form.platform === 'antigravity' && antigravityAccountType.value === 'upstream')
+
+  if (!passthroughCapableFlow) {
+    delete extra.passthrough_fields_enabled
+    delete extra.passthrough_field_rules
+    return Object.keys(extra).length > 0 ? extra : undefined
+  }
+
+  const normalizedRules = passthroughFieldRules.value
+    .map((rule) => normalizePassthroughFieldRule(rule))
+    .filter((rule) => rule.key)
+
+  if (!passthroughFieldsEnabled.value && normalizedRules.length === 0) {
+    delete extra.passthrough_fields_enabled
+    delete extra.passthrough_field_rules
+    return Object.keys(extra).length > 0 ? extra : undefined
+  }
+
+  extra.passthrough_fields_enabled = passthroughFieldsEnabled.value
+  extra.passthrough_field_rules = normalizedRules.map(({ target, mode, key, value }) => ({
+    target,
+    mode,
+    key: key.trim(),
+    ...(mode === 'inject' ? { value } : {})
+  }))
+
+  return extra
 }
 
 const buildSoraExtra = (
@@ -3979,6 +4055,15 @@ const handleSubmit = async () => {
       return
     }
 
+    const hasPassthroughInput = passthroughFieldsEnabled.value || passthroughFieldRules.value.some((rule) => {
+      const normalizedRule = normalizePassthroughFieldRule(rule)
+      return Boolean(normalizedRule.key || normalizedRule.value.trim())
+    })
+
+    if (hasPassthroughInput && !validatePassthroughFieldRules(passthroughFieldRules.value).ok) {
+      return
+    }
+
     // Build upstream credentials (and optional model restriction)
     const credentials: Record<string, unknown> = {
       base_url: upstreamBaseUrl.value.trim(),
@@ -3997,12 +4082,21 @@ const handleSubmit = async () => {
 
     applyInterceptWarmup(credentials, interceptWarmupRequests.value, 'create')
 
-    const extra = buildAntigravityExtra()
+    const extra = buildPassthroughFieldExtra(buildAntigravityExtra())
     await createAccountAndFinish(form.platform, 'apikey', credentials, extra)
     return
   }
 
   // For apikey type, create directly
+  const hasPassthroughInput = passthroughFieldsEnabled.value || passthroughFieldRules.value.some((rule) => {
+    const normalizedRule = normalizePassthroughFieldRule(rule)
+    return Boolean(normalizedRule.key || normalizedRule.value.trim())
+  })
+
+  if (hasPassthroughInput && !validatePassthroughFieldRules(passthroughFieldRules.value).ok) {
+    return
+  }
+
   if (!apiKeyValue.value.trim()) {
     appStore.showError(t('admin.accounts.pleaseEnterApiKey'))
     return
@@ -4064,7 +4158,7 @@ const handleSubmit = async () => {
   }
 
   form.credentials = credentials
-  const extra = buildAnthropicExtra(buildOpenAIExtra())
+  const extra = buildPassthroughFieldExtra(buildAnthropicExtra(buildOpenAIExtra()))
 
   await doCreateAccount({
     ...form,

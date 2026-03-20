@@ -1,11 +1,10 @@
-//go:build unit
-
 package service
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -31,6 +30,36 @@ type stubSoraClientForPoll struct {
 	parseErr    error
 	postCalls   int
 	deleteCalls int
+}
+
+type stubHTTPUpstreamForSoraPassthrough struct {
+	req  *http.Request
+	body []byte
+}
+
+func (s *stubHTTPUpstreamForSoraPassthrough) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
+	s.req = req.Clone(req.Context())
+	s.req.Header = req.Header.Clone()
+	if req.Body != nil {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		s.body = body
+		req.Body = io.NopCloser(strings.NewReader(string(body)))
+		s.req.Body = io.NopCloser(strings.NewReader(string(body)))
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type": []string{"application/json"},
+		},
+		Body: io.NopCloser(strings.NewReader(`{"ok":true}`)),
+	}, nil
+}
+
+func (s *stubHTTPUpstreamForSoraPassthrough) DoWithTLS(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, enableTLSFingerprint bool) (*http.Response, error) {
+	return s.Do(req, proxyURL, accountID, accountConcurrency)
 }
 
 func (s *stubSoraClientForPoll) Enabled() bool { return true }
@@ -280,6 +309,130 @@ func TestSoraGatewayService_ForwardWatermarkCustomSuccessAndDelete(t *testing.T)
 	require.Equal(t, "https://example.com/no-watermark.mp4", result.MediaURL)
 	require.Equal(t, 1, client.postCalls)
 	require.Equal(t, 1, client.deleteCalls)
+}
+
+func TestSoraGatewayService_Forward_PassthroughFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/sora/v1/chat/completions", strings.NewReader(`{"model":"sora2-landscape-10s","prompt":"cat"}`))
+	c.Request.Header.Set("X-Client-Trace", "trace-123")
+	c.Request.Header.Set("X-Secret", "should-not-leak")
+
+	httpUpstream := &stubHTTPUpstreamForSoraPassthrough{}
+	svc := NewSoraGatewayService(nil, nil, httpUpstream, &config.Config{})
+	account := &Account{
+		ID:       1,
+		Platform: PlatformSora,
+		Type:     AccountTypeAPIKey,
+		Status:   StatusActive,
+		Credentials: map[string]any{
+			"api_key":  "test-key",
+			"base_url": "https://example.com",
+		},
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []any{
+				map[string]any{"target": "header", "mode": "forward", "key": "X-Client-Trace"},
+			},
+		},
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"sora2-landscape-10s","prompt":"cat"}`), false)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, httpUpstream.req)
+	require.Equal(t, "trace-123", httpUpstream.req.Header.Get("X-Client-Trace"))
+	require.Empty(t, httpUpstream.req.Header.Get("X-Secret"))
+	var upstreamBody map[string]any
+	require.NoError(t, json.Unmarshal(httpUpstream.body, &upstreamBody))
+	require.Equal(t, "cat", upstreamBody["prompt"])
+}
+
+func TestSoraGatewayService_Forward_PassthroughFieldsDisabledSkipsRules(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/sora/v1/chat/completions", strings.NewReader(`{"model":"sora2-landscape-10s","prompt":"cat"}`))
+	c.Request.Header.Set("X-Client-Trace", "trace-123")
+
+	httpUpstream := &stubHTTPUpstreamForSoraPassthrough{}
+	svc := NewSoraGatewayService(nil, nil, httpUpstream, &config.Config{})
+	account := &Account{
+		ID:       1,
+		Platform: PlatformSora,
+		Type:     AccountTypeAPIKey,
+		Status:   StatusActive,
+		Credentials: map[string]any{
+			"api_key":  "test-key",
+			"base_url": "https://example.com",
+		},
+		Extra: map[string]any{
+			"passthrough_fields_enabled": false,
+			"passthrough_field_rules": []any{
+				map[string]any{"target": "header", "mode": "forward", "key": "X-Client-Trace"},
+			},
+		},
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"sora2-landscape-10s","prompt":"cat"}`), false)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, httpUpstream.req)
+	require.Empty(t, httpUpstream.req.Header.Get("X-Client-Trace"))
+}
+
+func TestSoraGatewayService_Forward_PassthroughFieldsUsesContextAwarePath(t *testing.T) {
+	originalApply := soraApplyAccountPassthroughFieldsWithContext
+	defer func() {
+		soraApplyAccountPassthroughFieldsWithContext = originalApply
+	}()
+
+	called := false
+	testCtx := context.WithValue(context.Background(), "trace", "ctx-value")
+	soraApplyAccountPassthroughFieldsWithContext = func(
+		ctx context.Context,
+		account *Account,
+		inbound http.Header,
+		sourceBody []byte,
+		targetBody []byte,
+		outbound http.Header,
+	) ([]byte, error) {
+		called = true
+		require.Equal(t, "ctx-value", ctx.Value("trace"))
+		outbound.Set("X-Context-Seen", "yes")
+		return targetBody, nil
+	}
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/sora/v1/chat/completions", strings.NewReader(`{"model":"sora2-landscape-10s","prompt":"cat"}`)).WithContext(testCtx)
+
+	httpUpstream := &stubHTTPUpstreamForSoraPassthrough{}
+	svc := NewSoraGatewayService(nil, nil, httpUpstream, &config.Config{})
+	account := &Account{
+		ID:       1,
+		Platform: PlatformSora,
+		Type:     AccountTypeAPIKey,
+		Status:   StatusActive,
+		Credentials: map[string]any{
+			"api_key":  "test-key",
+			"base_url": "https://example.com",
+		},
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []any{
+				map[string]any{"target": "header", "mode": "inject", "key": "X-Test", "value": "value"},
+			},
+		},
+	}
+
+	result, err := svc.Forward(testCtx, c, account, []byte(`{"model":"sora2-landscape-10s","prompt":"cat"}`), false)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, called)
+	require.Equal(t, "yes", httpUpstream.req.Header.Get("X-Context-Seen"))
 }
 
 func TestSoraGatewayService_PollVideoTaskFailed(t *testing.T) {

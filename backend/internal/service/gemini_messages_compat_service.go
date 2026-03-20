@@ -43,6 +43,8 @@ const (
 // Ref: https://ai.google.dev/gemini-api/docs/thought-signatures
 const geminiDummyThoughtSignature = "skip_thought_signature_validator"
 
+var geminiApplyAccountPassthroughFieldsWithContext = applyAccountPassthroughFieldsWithContext
+
 type GeminiMessagesCompatService struct {
 	accountRepo               AccountRepository
 	groupRepo                 GroupRepository
@@ -79,6 +81,19 @@ func NewGeminiMessagesCompatService(
 		cfg:                       cfg,
 		responseHeaderFilter:      compileResponseHeaderFilter(cfg),
 	}
+}
+
+func (s *GeminiMessagesCompatService) applyGeminiAPIKeyPassthroughFields(ctx context.Context, c *gin.Context, account *Account, sourceBody []byte, targetBody []byte) ([]byte, http.Header, error) {
+	var inbound http.Header
+	if c != nil && c.Request != nil {
+		inbound = c.Request.Header
+	}
+	outbound := http.Header{}
+	updatedBody, err := geminiApplyAccountPassthroughFieldsWithContext(ctx, account, inbound, sourceBody, targetBody, outbound)
+	if err != nil {
+		return nil, nil, err
+	}
+	return updatedBody, outbound, nil
 }
 
 // GetTokenProvider returns the token provider for OAuth accounts
@@ -612,11 +627,22 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				fullURL += "?alt=sse"
 			}
 
-			upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(geminiReq))
+			finalGeminiReq, passthroughHeaders, err := s.applyGeminiAPIKeyPassthroughFields(ctx, c, account, originalClaudeBody, geminiReq)
+			if err != nil {
+				return nil, "", err
+			}
+
+			upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(finalGeminiReq))
 			if err != nil {
 				return nil, "", err
 			}
 			upstreamReq.Header.Set("Content-Type", "application/json")
+			for key, values := range passthroughHeaders {
+				upstreamReq.Header.Del(key)
+				for _, value := range values {
+					upstreamReq.Header.Add(key, value)
+				}
+			}
 			upstreamReq.Header.Set("x-goog-api-key", apiKey)
 			return upstreamReq, "x-request-id", nil
 		}
@@ -2538,7 +2564,7 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 // endpoints like /v1beta/models and /v1beta/models/{model}.
 //
 // This is used to support Gemini SDKs that call models listing endpoints before generation.
-func (s *GeminiMessagesCompatService) ForwardAIStudioGET(ctx context.Context, account *Account, path string) (*UpstreamHTTPResult, error) {
+func (s *GeminiMessagesCompatService) ForwardAIStudioGET(ctx context.Context, account *Account, inbound http.Header, path string) (*UpstreamHTTPResult, error) {
 	if account == nil {
 		return nil, errors.New("account is nil")
 	}
@@ -2569,6 +2595,9 @@ func (s *GeminiMessagesCompatService) ForwardAIStudioGET(ctx context.Context, ac
 		apiKey := strings.TrimSpace(account.GetCredential("api_key"))
 		if apiKey == "" {
 			return nil, errors.New("gemini api_key not configured")
+		}
+		if _, err := geminiApplyAccountPassthroughFieldsWithContext(ctx, account, inbound, nil, nil, req.Header); err != nil {
+			return nil, err
 		}
 		req.Header.Set("x-goog-api-key", apiKey)
 	case AccountTypeOAuth:

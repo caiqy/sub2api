@@ -3,17 +3,14 @@ package service
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -45,108 +42,6 @@ func (u *httpUpstreamRecorder) Do(req *http.Request, proxyURL string, accountID 
 
 func (u *httpUpstreamRecorder) DoWithTLS(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, enableTLSFingerprint bool) (*http.Response, error) {
 	return u.Do(req, proxyURL, accountID, accountConcurrency)
-}
-
-var structuredLogCaptureMu sync.Mutex
-
-type inMemoryLogSink struct {
-	mu     sync.Mutex
-	events []*logger.LogEvent
-}
-
-func (s *inMemoryLogSink) WriteLogEvent(event *logger.LogEvent) {
-	if event == nil {
-		return
-	}
-	cloned := *event
-	if event.Fields != nil {
-		cloned.Fields = make(map[string]any, len(event.Fields))
-		for k, v := range event.Fields {
-			cloned.Fields[k] = v
-		}
-	}
-	s.mu.Lock()
-	s.events = append(s.events, &cloned)
-	s.mu.Unlock()
-}
-
-func (s *inMemoryLogSink) ContainsMessage(substr string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, ev := range s.events {
-		if ev != nil && strings.Contains(ev.Message, substr) {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *inMemoryLogSink) ContainsMessageAtLevel(substr, level string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	wantLevel := strings.ToLower(strings.TrimSpace(level))
-	for _, ev := range s.events {
-		if ev == nil {
-			continue
-		}
-		if strings.Contains(ev.Message, substr) && strings.ToLower(strings.TrimSpace(ev.Level)) == wantLevel {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *inMemoryLogSink) ContainsFieldValue(field, substr string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, ev := range s.events {
-		if ev == nil || ev.Fields == nil {
-			continue
-		}
-		if v, ok := ev.Fields[field]; ok && strings.Contains(fmt.Sprint(v), substr) {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *inMemoryLogSink) ContainsField(field string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, ev := range s.events {
-		if ev == nil || ev.Fields == nil {
-			continue
-		}
-		if _, ok := ev.Fields[field]; ok {
-			return true
-		}
-	}
-	return false
-}
-
-func captureStructuredLog(t *testing.T) (*inMemoryLogSink, func()) {
-	t.Helper()
-	structuredLogCaptureMu.Lock()
-
-	err := logger.Init(logger.InitOptions{
-		Level:       "debug",
-		Format:      "json",
-		ServiceName: "sub2api",
-		Environment: "test",
-		Output: logger.OutputOptions{
-			ToStdout: true,
-			ToFile:   false,
-		},
-		Sampling: logger.SamplingOptions{Enabled: false},
-	})
-	require.NoError(t, err)
-
-	sink := &inMemoryLogSink{}
-	logger.SetSink(sink)
-	return sink, func() {
-		logger.SetSink(nil)
-		structuredLogCaptureMu.Unlock()
-	}
 }
 
 func TestOpenAIGatewayService_OAuthPassthrough_StreamKeepsToolNameAndBodyNormalized(t *testing.T) {
@@ -784,9 +679,10 @@ func TestOpenAIGatewayService_APIKeyPassthrough_PreservesBodyAndUsesResponsesEnd
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 	c.Request.Header.Set("User-Agent", "curl/8.0")
+	c.Request.Header.Set("X-Trace-Id", "trace-123")
 	c.Request.Header.Set("X-Test", "keep")
 
-	originalBody := []byte(`{"model":"gpt-5.2","stream":false,"service_tier":"flex","max_output_tokens":128,"input":[{"type":"text","text":"hi"}]}`)
+	originalBody := []byte(`{"model":"gpt-5.2","stream":false,"service_tier":"flex","max_output_tokens":128,"input":[{"type":"text","text":"hi"}],"client_context":{"trace_id":"trace-123"}}`)
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"application/json"}, "x-request-id": []string{"rid"}},
@@ -800,13 +696,22 @@ func TestOpenAIGatewayService_APIKeyPassthrough_PreservesBodyAndUsesResponsesEnd
 	}
 
 	account := &Account{
-		ID:             456,
-		Name:           "apikey-acc",
-		Platform:       PlatformOpenAI,
-		Type:           AccountTypeAPIKey,
-		Concurrency:    1,
-		Credentials:    map[string]any{"api_key": "sk-api-key", "base_url": "https://api.openai.com"},
-		Extra:          map[string]any{"openai_passthrough": true},
+		ID:          456,
+		Name:        "apikey-acc",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "sk-api-key", "base_url": "https://api.openai.com"},
+		Extra: map[string]any{
+			"openai_passthrough":         true,
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "header", Mode: "inject", Key: "X-Account-Tag", Value: "prod"},
+				{Target: "header", Mode: "forward", Key: "X-Trace-Id"},
+				{Target: "body", Mode: "inject", Key: "metadata.user_id", Value: "user-1"},
+				{Target: "body", Mode: "forward", Key: "client_context.trace_id"},
+			},
+		},
 		Status:         StatusActive,
 		Schedulable:    true,
 		RateMultiplier: f64p(1),
@@ -818,11 +723,149 @@ func TestOpenAIGatewayService_APIKeyPassthrough_PreservesBodyAndUsesResponsesEnd
 	require.NotNil(t, result.ServiceTier)
 	require.Equal(t, "flex", *result.ServiceTier)
 	require.NotNil(t, upstream.lastReq)
-	require.Equal(t, originalBody, upstream.lastBody)
 	require.Equal(t, "https://api.openai.com/v1/responses", upstream.lastReq.URL.String())
 	require.Equal(t, "Bearer sk-api-key", upstream.lastReq.Header.Get("Authorization"))
 	require.Equal(t, "curl/8.0", upstream.lastReq.Header.Get("User-Agent"))
+	require.Equal(t, "prod", upstream.lastReq.Header.Get("X-Account-Tag"))
+	require.Equal(t, "trace-123", upstream.lastReq.Header.Get("X-Trace-Id"))
 	require.Empty(t, upstream.lastReq.Header.Get("X-Test"))
+	require.Equal(t, "user-1", gjson.GetBytes(upstream.lastBody, "metadata.user_id").String())
+	require.Equal(t, "trace-123", gjson.GetBytes(upstream.lastBody, "client_context.trace_id").String())
+}
+
+func TestOpenAIGatewayService_APIKeyPassthrough_DisabledLeavesConfiguredFieldsInactive(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+	c.Request.Header.Set("User-Agent", "curl/8.0")
+	c.Request.Header.Set("X-Trace-Id", "trace-123")
+
+	originalBody := []byte(`{"model":"gpt-5.2","stream":false,"input":[{"type":"text","text":"hi"}]}`)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}, "x-request-id": []string{"rid-disabled"}},
+		Body:       io.NopCloser(strings.NewReader(`{"output":[],"usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`)),
+	}
+	upstream := &httpUpstreamRecorder{resp: resp}
+
+	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: false}}, httpUpstream: upstream}
+	account := &Account{
+		ID:          457,
+		Name:        "apikey-acc-disabled",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "sk-api-key", "base_url": "https://api.openai.com"},
+		Extra: map[string]any{
+			"openai_passthrough":         true,
+			"passthrough_fields_enabled": false,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "header", Mode: "inject", Key: "X-Account-Tag", Value: "prod"},
+				{Target: "header", Mode: "forward", Key: "X-Trace-Id"},
+				{Target: "body", Mode: "inject", Key: "metadata.user_id", Value: "user-1"},
+			},
+		},
+		Status:         StatusActive,
+		Schedulable:    true,
+		RateMultiplier: f64p(1),
+	}
+
+	_, err := svc.Forward(context.Background(), c, account, originalBody)
+	require.NoError(t, err)
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, originalBody, upstream.lastBody)
+	require.Empty(t, upstream.lastReq.Header.Get("X-Account-Tag"))
+	require.Empty(t, upstream.lastReq.Header.Get("X-Trace-Id"))
+}
+
+func TestOpenAIGatewayService_APIKeyFieldsApplyWithoutOpenAIPassthrough(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+	c.Request.Header.Set("User-Agent", "curl/8.0")
+	c.Request.Header.Set("X-Trace-Id", "trace-123")
+
+	originalBody := []byte(`{"model":"gpt-5.2","stream":false,"input":[{"type":"text","text":"hi"}],"client_context":{"trace_id":"trace-123"}}`)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}, "x-request-id": []string{"rid-decoupled"}},
+		Body:       io.NopCloser(strings.NewReader(`{"output":[],"usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`)),
+	}
+	upstream := &httpUpstreamRecorder{resp: resp}
+
+	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: false}}, httpUpstream: upstream}
+	account := &Account{
+		ID:          459,
+		Name:        "apikey-acc-decoupled",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "sk-api-key", "base_url": "https://api.openai.com"},
+		Extra: map[string]any{
+			"openai_passthrough":         false,
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "header", Mode: "inject", Key: "X-Account-Tag", Value: "prod"},
+				{Target: "header", Mode: "forward", Key: "X-Trace-Id"},
+				{Target: "body", Mode: "inject", Key: "metadata.user_id", Value: "user-1"},
+				{Target: "body", Mode: "forward", Key: "client_context.trace_id"},
+			},
+		},
+		Status:         StatusActive,
+		Schedulable:    true,
+		RateMultiplier: f64p(1),
+	}
+
+	_, err := svc.Forward(context.Background(), c, account, originalBody)
+	require.NoError(t, err)
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, "prod", upstream.lastReq.Header.Get("X-Account-Tag"))
+	require.Equal(t, "trace-123", upstream.lastReq.Header.Get("X-Trace-Id"))
+	require.Equal(t, "user-1", gjson.GetBytes(upstream.lastBody, "metadata.user_id").String())
+	require.Equal(t, "trace-123", gjson.GetBytes(upstream.lastBody, "client_context.trace_id").String())
+}
+
+func TestOpenAIGatewayService_APIKeyPassthrough_StructureConflictReturnsInvalidRequest(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+	c.Request.Header.Set("User-Agent", "curl/8.0")
+
+	originalBody := []byte(`{"model":"gpt-5.2","stream":false,"metadata":"string","input":[{"type":"text","text":"hi"}]}`)
+	upstream := &httpUpstreamRecorder{}
+	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: false}}, httpUpstream: upstream}
+	account := &Account{
+		ID:          458,
+		Name:        "apikey-acc-conflict",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "sk-api-key", "base_url": "https://api.openai.com"},
+		Extra: map[string]any{
+			"openai_passthrough":         true,
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "body", Mode: "inject", Key: "metadata.user_id", Value: "user-1"},
+			},
+		},
+		Status:         StatusActive,
+		Schedulable:    true,
+		RateMultiplier: f64p(1),
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, originalBody)
+	require.Error(t, err)
+	require.Nil(t, result)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), `"type":"invalid_request_error"`)
+	require.Contains(t, rec.Body.String(), "passthrough body path conflicts with non-object node: metadata")
+	require.Nil(t, upstream.lastReq)
 }
 
 func TestOpenAIGatewayService_OAuthPassthrough_WarnOnTimeoutHeadersForStream(t *testing.T) {
