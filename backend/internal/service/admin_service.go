@@ -1530,6 +1530,15 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 		Status:      StatusActive,
 		Schedulable: true,
 	}
+	normalizedExtra, err := NormalizeAccountPassthroughFields(NormalizePassthroughFieldsInput{
+		RequestedType:             account.Type,
+		Extra:                     account.Extra,
+		ExplicitlySubmittedConfig: hasPassthroughConfigKeys(input.Extra),
+	})
+	if err != nil {
+		return nil, err
+	}
+	account.Extra = normalizedExtra
 	// 预计算固定时间重置的下次重置时间
 	if account.Extra != nil {
 		if err := ValidateQuotaResetConfig(account.Extra); err != nil {
@@ -1589,6 +1598,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if err != nil {
 		return nil, err
 	}
+	originalType := account.Type
 	wasOveragesEnabled := account.IsOveragesEnabled()
 
 	if input.Name != "" {
@@ -1624,6 +1634,18 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			delete(account.Extra, modelRateLimitsKey)
 			delete(account.Extra, "antigravity_credits_overages") // 清理旧版 overages 运行态
 		}
+	}
+	normalizedExtra, err := NormalizeAccountPassthroughFields(NormalizePassthroughFieldsInput{
+		ExistingType:              originalType,
+		RequestedType:             account.Type,
+		Extra:                     account.Extra,
+		ExplicitlySubmittedConfig: hasPassthroughConfigKeys(input.Extra),
+	})
+	if err != nil {
+		return nil, err
+	}
+	account.Extra = normalizedExtra
+	if input.Extra != nil {
 		// 校验并预计算固定时间重置的下次重置时间
 		if err := ValidateQuotaResetConfig(account.Extra); err != nil {
 			return nil, err
@@ -1741,16 +1763,19 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	}
 
 	needMixedChannelCheck := input.GroupIDs != nil && !input.SkipMixedChannelCheck
+	explicitPassthroughConfig := hasPassthroughConfigKeys(input.Extra)
 
 	// 预加载账号平台信息（混合渠道检查需要）。
+	accountsByID := map[int64]*Account{}
 	platformByID := map[int64]string{}
-	if needMixedChannelCheck {
+	if needMixedChannelCheck || explicitPassthroughConfig {
 		accounts, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
 		}
 		for _, account := range accounts {
 			if account != nil {
+				accountsByID[account.ID] = account
 				platformByID[account.ID] = account.Platform
 			}
 		}
@@ -1774,46 +1799,127 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			return nil, errors.New("rate_multiplier must be >= 0")
 		}
 	}
+	if input.LoadFactor != nil && *input.LoadFactor > 10000 {
+		return nil, errors.New("load_factor must be <= 10000")
+	}
 
-	// Prepare bulk updates for columns and JSONB fields.
-	repoUpdates := AccountBulkUpdate{
-		Credentials: input.Credentials,
-		Extra:       input.Extra,
-	}
-	if input.Name != "" {
-		repoUpdates.Name = &input.Name
-	}
-	if input.ProxyID != nil {
-		repoUpdates.ProxyID = input.ProxyID
-	}
-	if input.Concurrency != nil {
-		repoUpdates.Concurrency = input.Concurrency
-	}
-	if input.Priority != nil {
-		repoUpdates.Priority = input.Priority
-	}
-	if input.RateMultiplier != nil {
-		repoUpdates.RateMultiplier = input.RateMultiplier
-	}
-	if input.LoadFactor != nil {
-		if *input.LoadFactor <= 0 {
-			repoUpdates.LoadFactor = nil // 0 或负数表示清除
-		} else if *input.LoadFactor > 10000 {
-			return nil, errors.New("load_factor must be <= 10000")
-		} else {
-			repoUpdates.LoadFactor = input.LoadFactor
+	if explicitPassthroughConfig {
+		preparedUpdates := make([]*Account, 0, len(input.AccountIDs))
+		for _, accountID := range input.AccountIDs {
+			account := accountsByID[accountID]
+			if account == nil {
+				return nil, ErrAccountNotFound
+			}
+
+			updated := *account
+			if input.Name != "" {
+				updated.Name = input.Name
+			}
+			if input.ProxyID != nil {
+				if *input.ProxyID == 0 {
+					updated.ProxyID = nil
+				} else {
+					proxyID := *input.ProxyID
+					updated.ProxyID = &proxyID
+				}
+			}
+			if input.Concurrency != nil {
+				updated.Concurrency = *input.Concurrency
+			}
+			if input.Priority != nil {
+				updated.Priority = *input.Priority
+			}
+			if input.RateMultiplier != nil {
+				updated.RateMultiplier = input.RateMultiplier
+			}
+			if input.LoadFactor != nil {
+				if *input.LoadFactor <= 0 {
+					updated.LoadFactor = nil
+				} else {
+					loadFactor := *input.LoadFactor
+					updated.LoadFactor = &loadFactor
+				}
+			}
+			if input.Status != "" {
+				updated.Status = input.Status
+			}
+			if input.Schedulable != nil {
+				updated.Schedulable = *input.Schedulable
+			}
+			if len(input.Credentials) > 0 {
+				mergedCredentials := clonePassthroughExtra(updated.Credentials)
+				if mergedCredentials == nil {
+					mergedCredentials = map[string]any{}
+				}
+				for key, value := range input.Credentials {
+					mergedCredentials[key] = value
+				}
+				updated.Credentials = mergedCredentials
+			}
+			mergedExtra := clonePassthroughExtra(updated.Extra)
+			if mergedExtra == nil {
+				mergedExtra = map[string]any{}
+			}
+			for key, value := range input.Extra {
+				mergedExtra[key] = value
+			}
+			normalizedExtra, err := NormalizeAccountPassthroughFields(NormalizePassthroughFieldsInput{
+				RequestedType:             updated.Type,
+				Extra:                     mergedExtra,
+				ExplicitlySubmittedConfig: true,
+			})
+			if err != nil {
+				return nil, err
+			}
+			updated.Extra = normalizedExtra
+			preparedUpdates = append(preparedUpdates, &updated)
 		}
-	}
-	if input.Status != "" {
-		repoUpdates.Status = &input.Status
-	}
-	if input.Schedulable != nil {
-		repoUpdates.Schedulable = input.Schedulable
-	}
+		for _, updated := range preparedUpdates {
+			if err := s.accountRepo.Update(ctx, updated); err != nil {
+				return nil, err
+			}
+		}
+	} else {
+		// Prepare bulk updates for columns and JSONB fields.
+		repoUpdates := AccountBulkUpdate{
+			Credentials: input.Credentials,
+			Extra:       input.Extra,
+		}
+		if input.Name != "" {
+			repoUpdates.Name = &input.Name
+		}
+		if input.ProxyID != nil {
+			repoUpdates.ProxyID = input.ProxyID
+		}
+		if input.Concurrency != nil {
+			repoUpdates.Concurrency = input.Concurrency
+		}
+		if input.Priority != nil {
+			repoUpdates.Priority = input.Priority
+		}
+		if input.RateMultiplier != nil {
+			repoUpdates.RateMultiplier = input.RateMultiplier
+		}
+		if input.LoadFactor != nil {
+			if *input.LoadFactor <= 0 {
+				repoUpdates.LoadFactor = nil // 0 或负数表示清除
+			} else if *input.LoadFactor > 10000 {
+				return nil, errors.New("load_factor must be <= 10000")
+			} else {
+				repoUpdates.LoadFactor = input.LoadFactor
+			}
+		}
+		if input.Status != "" {
+			repoUpdates.Status = &input.Status
+		}
+		if input.Schedulable != nil {
+			repoUpdates.Schedulable = input.Schedulable
+		}
 
-	// Run bulk update for column/jsonb fields first.
-	if _, err := s.accountRepo.BulkUpdate(ctx, input.AccountIDs, repoUpdates); err != nil {
-		return nil, err
+		// Run bulk update for column/jsonb fields first.
+		if _, err := s.accountRepo.BulkUpdate(ctx, input.AccountIDs, repoUpdates); err != nil {
+			return nil, err
+		}
 	}
 
 	// Handle group bindings per account (requires individual operations).

@@ -2045,6 +2045,26 @@ export default {
           unavailableDesc: 'Unavailable - pause 30 minutes'
         }
       },
+      passthroughFields: {
+        title: 'Passthrough Field Rules',
+        description: 'Only applies to API Key accounts and is independent from automatic passthrough',
+        disabledHint: 'Configured rules are preserved, but will not take effect right now',
+        addRule: 'Add Rule',
+        targetHeader: 'Header',
+        targetBody: 'Body',
+        modeForward: 'Forward',
+        modeInject: 'Inject Fixed Value',
+        headerHint: 'Header matching is case-insensitive',
+        bodyHint: 'Only xx.xx style object paths are supported',
+        injectHint: 'Fixed injection writes into the upstream request before forwarding',
+        errors: {
+          keyRequired: 'Field name or path is required',
+          bodyPath: 'Body path must use dot notation and does not support array syntax',
+          valueRequired: 'Inject mode requires a value',
+          duplicateKey: 'Field name or path must be unique within the same target',
+          reservedKey: 'Reserved field names or paths cannot be passed through'
+        }
+      },
       clearRateLimit: 'Clear Rate Limit',
       resetQuota: 'Reset Quota',
       quotaLimit: 'Quota Limit',

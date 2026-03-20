@@ -65,6 +65,13 @@
           <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
         </div>
 
+        <section class="border-t border-gray-200 pt-4 dark:border-dark-600" data-testid="passthrough-fields-section">
+          <PassthroughFieldRulesEditor
+            v-model:enabled="passthroughFieldsEnabled"
+            v-model:rules="passthroughFieldRules"
+          />
+        </section>
+
         <!-- Model Restriction Section (不适用于 Antigravity) -->
         <div v-if="account.platform !== 'antigravity'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
@@ -1716,6 +1723,7 @@ import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
+import PassthroughFieldRulesEditor from '@/components/account/PassthroughFieldRulesEditor.vue'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
 import { applyInterceptWarmup } from '@/components/account/credentialsBuilder'
 import { formatDateTimeLocalInput, parseDateTimeLocalInput } from '@/utils/format'
@@ -1735,6 +1743,12 @@ import {
   buildModelMappingObject,
   isValidWildcardPattern
 } from '@/composables/useModelWhitelist'
+import {
+  createPassthroughFieldRuleDraft,
+  normalizePassthroughFieldRule,
+  validatePassthroughFieldRules,
+  type PassthroughFieldRuleDraft
+} from './passthroughFieldRules'
 
 interface Props {
   show: boolean
@@ -1851,6 +1865,8 @@ const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const codexCLIOnlyEnabled = ref(false)
 const anthropicPassthroughEnabled = ref(false)
+const passthroughFieldsEnabled = ref(false)
+const passthroughFieldRules = ref<PassthroughFieldRuleDraft[]>([])
 const editQuotaLimit = ref<number | null>(null)
 const editQuotaDailyLimit = ref<number | null>(null)
 const editQuotaWeeklyLimit = ref<number | null>(null)
@@ -2013,6 +2029,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   const extra = newAccount.extra as Record<string, unknown> | undefined
   mixedScheduling.value = extra?.mixed_scheduling === true
   allowOverages.value = extra?.allow_overages === true
+  passthroughFieldsEnabled.value = extra?.passthrough_fields_enabled === true
+  passthroughFieldRules.value = toDraftRules(extra?.passthrough_field_rules)
 
   // Load OpenAI passthrough toggle (OpenAI OAuth/API Key)
   openaiPassthroughEnabled.value = false
@@ -2254,6 +2272,13 @@ watch(
       return
     }
     if (!wasShow || newAccount !== previousAccount) {
+      if (
+        previousAccount?.type === 'apikey' &&
+        newAccount.type !== 'apikey' &&
+        hasPassthroughFieldExtra(previousAccount.extra as Record<string, unknown> | undefined)
+      ) {
+        appStore.showInfo(PASSTHROUGH_FIELDS_REMOVAL_MESSAGE)
+      }
       syncFormFromAccount(newAccount)
     }
   },
@@ -2618,6 +2643,232 @@ const ensureAntigravityMixedChannelConfirmed = async (onConfirm: () => Promise<v
 
 const formatDateTimeLocal = formatDateTimeLocalInput
 const parseDateTimeLocal = parseDateTimeLocalInput
+const PASSTHROUGH_FIELDS_REMOVAL_MESSAGE = '保存后将移除透传字段规则配置'
+
+function toDraftRules(value: unknown): PassthroughFieldRuleDraft[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.map((entry) => {
+    const rule = entry as Record<string, unknown>
+    const draft = createPassthroughFieldRuleDraft()
+
+    return {
+      ...draft,
+      target: rule.target === 'body' ? 'body' : 'header',
+      mode: rule.mode === 'inject' ? 'inject' : 'forward',
+      key: typeof rule.key === 'string' ? rule.key : '',
+      value: typeof rule.value === 'string' ? rule.value : ''
+    }
+  })
+}
+
+function hasPassthroughFieldExtra(extra?: Record<string, unknown>) {
+  return extra?.passthrough_fields_enabled === true ||
+    (Array.isArray(extra?.passthrough_field_rules) && extra.passthrough_field_rules.length > 0)
+}
+
+function applyPassthroughFieldExtra(extra: Record<string, unknown>, accountType: Account['type']) {
+  if (accountType !== 'apikey') {
+    delete extra.passthrough_fields_enabled
+    delete extra.passthrough_field_rules
+    return
+  }
+
+  const normalizedRules = passthroughFieldRules.value
+    .map((rule) => normalizePassthroughFieldRule(rule))
+    .filter((rule) => rule.key)
+
+  if (!passthroughFieldsEnabled.value && normalizedRules.length === 0) {
+    delete extra.passthrough_fields_enabled
+    delete extra.passthrough_field_rules
+    return
+  }
+
+  extra.passthrough_fields_enabled = passthroughFieldsEnabled.value
+  extra.passthrough_field_rules = normalizedRules.map(({ target, mode, key, value }) => ({
+    target,
+    mode,
+    key: key.trim(),
+    ...(mode === 'inject' ? { value } : {})
+  }))
+}
+
+function applyAntigravityExtra(extra: Record<string, unknown>) {
+  if (props.account?.platform !== 'antigravity') {
+    return
+  }
+
+  if (mixedScheduling.value) {
+    extra.mixed_scheduling = true
+  } else {
+    delete extra.mixed_scheduling
+  }
+
+  if (allowOverages.value) {
+    extra.allow_overages = true
+  } else {
+    delete extra.allow_overages
+  }
+}
+
+function applyQuotaControlExtra(extra: Record<string, unknown>) {
+  if (props.account?.platform !== 'anthropic' || (props.account.type !== 'oauth' && props.account.type !== 'setup-token')) {
+    return
+  }
+
+  if (windowCostEnabled.value && windowCostLimit.value != null && windowCostLimit.value > 0) {
+    extra.window_cost_limit = windowCostLimit.value
+    extra.window_cost_sticky_reserve = windowCostStickyReserve.value ?? 10
+  } else {
+    delete extra.window_cost_limit
+    delete extra.window_cost_sticky_reserve
+  }
+
+  if (sessionLimitEnabled.value && maxSessions.value != null && maxSessions.value > 0) {
+    extra.max_sessions = maxSessions.value
+    extra.session_idle_timeout_minutes = sessionIdleTimeout.value ?? 5
+  } else {
+    delete extra.max_sessions
+    delete extra.session_idle_timeout_minutes
+  }
+
+  if (rpmLimitEnabled.value) {
+    const DEFAULT_BASE_RPM = 15
+    extra.base_rpm = (baseRpm.value != null && baseRpm.value > 0)
+      ? baseRpm.value
+      : DEFAULT_BASE_RPM
+    extra.rpm_strategy = rpmStrategy.value
+    if (rpmStickyBuffer.value != null && rpmStickyBuffer.value > 0) {
+      extra.rpm_sticky_buffer = rpmStickyBuffer.value
+    } else {
+      delete extra.rpm_sticky_buffer
+    }
+  } else {
+    delete extra.base_rpm
+    delete extra.rpm_strategy
+    delete extra.rpm_sticky_buffer
+  }
+
+  if (userMsgQueueMode.value) {
+    extra.user_msg_queue_mode = userMsgQueueMode.value
+  } else {
+    delete extra.user_msg_queue_mode
+  }
+  delete extra.user_msg_queue_enabled
+
+  if (tlsFingerprintEnabled.value) {
+    extra.enable_tls_fingerprint = true
+  } else {
+    delete extra.enable_tls_fingerprint
+  }
+
+  if (sessionIdMaskingEnabled.value) {
+    extra.session_id_masking_enabled = true
+  } else {
+    delete extra.session_id_masking_enabled
+  }
+
+  if (cacheTTLOverrideEnabled.value) {
+    extra.cache_ttl_override_enabled = true
+    extra.cache_ttl_override_target = cacheTTLOverrideTarget.value
+  } else {
+    delete extra.cache_ttl_override_enabled
+    delete extra.cache_ttl_override_target
+  }
+}
+
+function applyAnthropicPassthroughExtra(extra: Record<string, unknown>) {
+  if (props.account?.platform !== 'anthropic' || props.account.type !== 'apikey') {
+    return
+  }
+
+  if (anthropicPassthroughEnabled.value) {
+    extra.anthropic_passthrough = true
+  } else {
+    delete extra.anthropic_passthrough
+  }
+}
+
+function applyOpenAIExtra(extra: Record<string, unknown>) {
+  if (props.account?.platform !== 'openai' || (props.account.type !== 'oauth' && props.account.type !== 'apikey')) {
+    return
+  }
+
+  const hadCodexCLIOnlyEnabled = (props.account.extra as Record<string, unknown> | undefined)?.codex_cli_only === true
+
+  if (props.account.type === 'oauth') {
+    extra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
+    extra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)
+  } else {
+    extra.openai_apikey_responses_websockets_v2_mode = openaiAPIKeyResponsesWebSocketV2Mode.value
+    extra.openai_apikey_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiAPIKeyResponsesWebSocketV2Mode.value)
+  }
+
+  delete extra.responses_websockets_v2_enabled
+  delete extra.openai_ws_enabled
+
+  if (openaiPassthroughEnabled.value) {
+    extra.openai_passthrough = true
+  } else {
+    delete extra.openai_passthrough
+    delete extra.openai_oauth_passthrough
+  }
+
+  if (props.account.type === 'oauth') {
+    if (codexCLIOnlyEnabled.value) {
+      extra.codex_cli_only = true
+    } else if (hadCodexCLIOnlyEnabled) {
+      extra.codex_cli_only = false
+    } else {
+      delete extra.codex_cli_only
+    }
+  }
+}
+
+function applyQuotaLimitExtra(extra: Record<string, unknown>) {
+  if (props.account?.type !== 'apikey' && props.account?.type !== 'bedrock') {
+    return
+  }
+
+  if (editQuotaLimit.value != null && editQuotaLimit.value > 0) {
+    extra.quota_limit = editQuotaLimit.value
+  } else {
+    delete extra.quota_limit
+  }
+  if (editQuotaDailyLimit.value != null && editQuotaDailyLimit.value > 0) {
+    extra.quota_daily_limit = editQuotaDailyLimit.value
+  } else {
+    delete extra.quota_daily_limit
+  }
+  if (editQuotaWeeklyLimit.value != null && editQuotaWeeklyLimit.value > 0) {
+    extra.quota_weekly_limit = editQuotaWeeklyLimit.value
+  } else {
+    delete extra.quota_weekly_limit
+  }
+  if (editDailyResetMode.value === 'fixed') {
+    extra.quota_daily_reset_mode = 'fixed'
+    extra.quota_daily_reset_hour = editDailyResetHour.value ?? 0
+  } else {
+    delete extra.quota_daily_reset_mode
+    delete extra.quota_daily_reset_hour
+  }
+  if (editWeeklyResetMode.value === 'fixed') {
+    extra.quota_weekly_reset_mode = 'fixed'
+    extra.quota_weekly_reset_day = editWeeklyResetDay.value ?? 1
+    extra.quota_weekly_reset_hour = editWeeklyResetHour.value ?? 0
+  } else {
+    delete extra.quota_weekly_reset_mode
+    delete extra.quota_weekly_reset_day
+    delete extra.quota_weekly_reset_hour
+  }
+  if (editDailyResetMode.value === 'fixed' || editWeeklyResetMode.value === 'fixed') {
+    extra.quota_reset_timezone = editResetTimezone.value || 'UTC'
+  } else {
+    delete extra.quota_reset_timezone
+  }
+}
 
 // Methods
 const handleClose = () => {
@@ -2657,6 +2908,17 @@ const handleSubmit = async () => {
   if (form.status !== 'active' && form.status !== 'inactive' && form.status !== 'error') {
     appStore.showError(t('admin.accounts.pleaseSelectStatus'))
     return
+  }
+
+  if (props.account.type === 'apikey') {
+    const hasPassthroughInput = passthroughFieldsEnabled.value || passthroughFieldRules.value.some((rule) => {
+      const normalizedRule = normalizePassthroughFieldRule(rule)
+      return Boolean(normalizedRule.key || normalizedRule.value.trim())
+    })
+
+    if (hasPassthroughInput && !validatePassthroughFieldRules(passthroughFieldRules.value).ok) {
+      return
+    }
   }
 
   const updatePayload: Record<string, unknown> = { ...form }
@@ -2863,188 +3125,19 @@ const handleSubmit = async () => {
       updatePayload.credentials = newCredentials
     }
 
-    // For antigravity accounts, handle mixed_scheduling and allow_overages in extra
-    if (props.account.platform === 'antigravity') {
-      const currentExtra = (props.account.extra as Record<string, unknown>) || {}
-      const newExtra: Record<string, unknown> = { ...currentExtra }
-      if (mixedScheduling.value) {
-        newExtra.mixed_scheduling = true
-      } else {
-        delete newExtra.mixed_scheduling
-      }
-      if (allowOverages.value) {
-        newExtra.allow_overages = true
-      } else {
-        delete newExtra.allow_overages
-      }
-      updatePayload.extra = newExtra
+    const nextExtra: Record<string, unknown> = {
+      ...((props.account.extra as Record<string, unknown>) || {})
     }
-
-    // For Anthropic OAuth/SetupToken accounts, handle quota control settings in extra
-    if (props.account.platform === 'anthropic' && (props.account.type === 'oauth' || props.account.type === 'setup-token')) {
-      const currentExtra = (props.account.extra as Record<string, unknown>) || {}
-      const newExtra: Record<string, unknown> = { ...currentExtra }
-
-      // Window cost limit settings
-      if (windowCostEnabled.value && windowCostLimit.value != null && windowCostLimit.value > 0) {
-        newExtra.window_cost_limit = windowCostLimit.value
-        newExtra.window_cost_sticky_reserve = windowCostStickyReserve.value ?? 10
-      } else {
-        delete newExtra.window_cost_limit
-        delete newExtra.window_cost_sticky_reserve
-      }
-
-      // Session limit settings
-      if (sessionLimitEnabled.value && maxSessions.value != null && maxSessions.value > 0) {
-        newExtra.max_sessions = maxSessions.value
-        newExtra.session_idle_timeout_minutes = sessionIdleTimeout.value ?? 5
-      } else {
-        delete newExtra.max_sessions
-        delete newExtra.session_idle_timeout_minutes
-      }
-
-      // RPM limit settings
-      if (rpmLimitEnabled.value) {
-        const DEFAULT_BASE_RPM = 15
-        newExtra.base_rpm = (baseRpm.value != null && baseRpm.value > 0)
-          ? baseRpm.value
-          : DEFAULT_BASE_RPM
-        newExtra.rpm_strategy = rpmStrategy.value
-        if (rpmStickyBuffer.value != null && rpmStickyBuffer.value > 0) {
-          newExtra.rpm_sticky_buffer = rpmStickyBuffer.value
-        } else {
-          delete newExtra.rpm_sticky_buffer
-        }
-      } else {
-        delete newExtra.base_rpm
-        delete newExtra.rpm_strategy
-        delete newExtra.rpm_sticky_buffer
-      }
-
-      // UMQ mode（独立于 RPM 保存）
-      if (userMsgQueueMode.value) {
-        newExtra.user_msg_queue_mode = userMsgQueueMode.value
-      } else {
-        delete newExtra.user_msg_queue_mode
-      }
-      delete newExtra.user_msg_queue_enabled  // 清理旧字段
-
-      // TLS fingerprint setting
-      if (tlsFingerprintEnabled.value) {
-        newExtra.enable_tls_fingerprint = true
-      } else {
-        delete newExtra.enable_tls_fingerprint
-      }
-
-      // Session ID masking setting
-      if (sessionIdMaskingEnabled.value) {
-        newExtra.session_id_masking_enabled = true
-      } else {
-        delete newExtra.session_id_masking_enabled
-      }
-
-      // Cache TTL override setting
-      if (cacheTTLOverrideEnabled.value) {
-        newExtra.cache_ttl_override_enabled = true
-        newExtra.cache_ttl_override_target = cacheTTLOverrideTarget.value
-      } else {
-        delete newExtra.cache_ttl_override_enabled
-        delete newExtra.cache_ttl_override_target
-      }
-
-      updatePayload.extra = newExtra
-    }
-
-    // For Anthropic API Key accounts, handle passthrough mode in extra
-    if (props.account.platform === 'anthropic' && props.account.type === 'apikey') {
-      const currentExtra = (props.account.extra as Record<string, unknown>) || {}
-      const newExtra: Record<string, unknown> = { ...currentExtra }
-      if (anthropicPassthroughEnabled.value) {
-        newExtra.anthropic_passthrough = true
-      } else {
-        delete newExtra.anthropic_passthrough
-      }
-      updatePayload.extra = newExtra
-    }
-
-    // For OpenAI OAuth/API Key accounts, handle passthrough mode in extra
-    if (props.account.platform === 'openai' && (props.account.type === 'oauth' || props.account.type === 'apikey')) {
-      const currentExtra = (props.account.extra as Record<string, unknown>) || {}
-      const newExtra: Record<string, unknown> = { ...currentExtra }
-      const hadCodexCLIOnlyEnabled = currentExtra.codex_cli_only === true
-      if (props.account.type === 'oauth') {
-        newExtra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
-        newExtra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)
-      } else if (props.account.type === 'apikey') {
-        newExtra.openai_apikey_responses_websockets_v2_mode = openaiAPIKeyResponsesWebSocketV2Mode.value
-        newExtra.openai_apikey_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiAPIKeyResponsesWebSocketV2Mode.value)
-      }
-      delete newExtra.responses_websockets_v2_enabled
-      delete newExtra.openai_ws_enabled
-      if (openaiPassthroughEnabled.value) {
-        newExtra.openai_passthrough = true
-      } else {
-        delete newExtra.openai_passthrough
-        delete newExtra.openai_oauth_passthrough
-      }
-
-      if (props.account.type === 'oauth') {
-        if (codexCLIOnlyEnabled.value) {
-          newExtra.codex_cli_only = true
-        } else if (hadCodexCLIOnlyEnabled) {
-          // 关闭时显式写 false，避免 extra 为空被后端忽略导致旧值无法清除
-          newExtra.codex_cli_only = false
-        } else {
-          delete newExtra.codex_cli_only
-        }
-      }
-
-      updatePayload.extra = newExtra
-    }
-
-    // For apikey/bedrock accounts, handle quota_limit in extra
-    if (props.account.type === 'apikey' || props.account.type === 'bedrock') {
-      const currentExtra = (updatePayload.extra as Record<string, unknown>) ||
-        (props.account.extra as Record<string, unknown>) || {}
-      const newExtra: Record<string, unknown> = { ...currentExtra }
-      if (editQuotaLimit.value != null && editQuotaLimit.value > 0) {
-        newExtra.quota_limit = editQuotaLimit.value
-      } else {
-        delete newExtra.quota_limit
-      }
-      if (editQuotaDailyLimit.value != null && editQuotaDailyLimit.value > 0) {
-        newExtra.quota_daily_limit = editQuotaDailyLimit.value
-      } else {
-        delete newExtra.quota_daily_limit
-      }
-      if (editQuotaWeeklyLimit.value != null && editQuotaWeeklyLimit.value > 0) {
-        newExtra.quota_weekly_limit = editQuotaWeeklyLimit.value
-      } else {
-        delete newExtra.quota_weekly_limit
-      }
-      // Quota reset mode config
-      if (editDailyResetMode.value === 'fixed') {
-        newExtra.quota_daily_reset_mode = 'fixed'
-        newExtra.quota_daily_reset_hour = editDailyResetHour.value ?? 0
-      } else {
-        delete newExtra.quota_daily_reset_mode
-        delete newExtra.quota_daily_reset_hour
-      }
-      if (editWeeklyResetMode.value === 'fixed') {
-        newExtra.quota_weekly_reset_mode = 'fixed'
-        newExtra.quota_weekly_reset_day = editWeeklyResetDay.value ?? 1
-        newExtra.quota_weekly_reset_hour = editWeeklyResetHour.value ?? 0
-      } else {
-        delete newExtra.quota_weekly_reset_mode
-        delete newExtra.quota_weekly_reset_day
-        delete newExtra.quota_weekly_reset_hour
-      }
-      if (editDailyResetMode.value === 'fixed' || editWeeklyResetMode.value === 'fixed') {
-        newExtra.quota_reset_timezone = editResetTimezone.value || 'UTC'
-      } else {
-        delete newExtra.quota_reset_timezone
-      }
-      updatePayload.extra = newExtra
+    applyAntigravityExtra(nextExtra)
+    applyQuotaControlExtra(nextExtra)
+    applyAnthropicPassthroughExtra(nextExtra)
+    applyOpenAIExtra(nextExtra)
+    applyQuotaLimitExtra(nextExtra)
+    applyPassthroughFieldExtra(nextExtra, props.account.type)
+    if (Object.keys(nextExtra).length > 0) {
+      updatePayload.extra = nextExtra
+    } else {
+      delete updatePayload.extra
     }
 
     const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {

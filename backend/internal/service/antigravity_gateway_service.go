@@ -132,6 +132,7 @@ type antigravityRetryLoopParams struct {
 	accessToken     string
 	action          string
 	body            []byte
+	outboundHeaders http.Header
 	c               *gin.Context
 	httpUpstream    HTTPUpstream
 	settingService  *SettingService
@@ -304,6 +305,7 @@ func (s *AntigravityGatewayService) handleSmartRetry(p antigravityRetryLoopParam
 					},
 				}
 			}
+			applyAntigravityOutboundHeaders(retryReq, p.outboundHeaders)
 
 			retryResp, retryErr := p.httpUpstream.Do(retryReq, p.proxyURL, p.account.ID, p.account.Concurrency)
 			if retryErr == nil && retryResp != nil && retryResp.StatusCode != http.StatusTooManyRequests && retryResp.StatusCode != http.StatusServiceUnavailable {
@@ -489,6 +491,7 @@ func (s *AntigravityGatewayService) handleSingleAccountRetryInPlace(
 			logger.LegacyPrintf("service.antigravity_gateway", "%s single_account_503_retry: request_build_failed error=%v", p.prefix, err)
 			break
 		}
+		applyAntigravityOutboundHeaders(retryReq, p.outboundHeaders)
 
 		retryResp, retryErr := p.httpUpstream.Do(retryReq, p.proxyURL, p.account.ID, p.account.Concurrency)
 		if retryErr == nil && retryResp != nil && retryResp.StatusCode != http.StatusTooManyRequests && retryResp.StatusCode != http.StatusServiceUnavailable {
@@ -626,6 +629,7 @@ urlFallbackLoop:
 			if err != nil {
 				return nil, err
 			}
+			applyAntigravityOutboundHeaders(upstreamReq, p.outboundHeaders)
 
 			// Capture upstream request body for ops retry of this attempt.
 			if p.c != nil && len(p.body) > 0 {
@@ -1153,6 +1157,50 @@ func (s *AntigravityGatewayService) getClaudeTransformOptions(ctx context.Contex
 	return opts
 }
 
+func (s *AntigravityGatewayService) resolveAntigravityAccessToken(ctx context.Context, account *Account) (string, error) {
+	if account == nil {
+		return "", errors.New("account is nil")
+	}
+	if account.Type == AccountTypeAPIKey {
+		if apiKey := strings.TrimSpace(account.GetCredential("api_key")); apiKey != "" {
+			return apiKey, nil
+		}
+		if accessToken := strings.TrimSpace(account.GetCredential("access_token")); accessToken != "" {
+			return accessToken, nil
+		}
+		return "", errors.New("antigravity api key not configured")
+	}
+	if s.tokenProvider == nil {
+		return "", errors.New("Antigravity token provider not configured")
+	}
+	return s.tokenProvider.GetAccessToken(ctx, account)
+}
+
+func applyAntigravityOutboundHeaders(req *http.Request, headers http.Header) {
+	if req == nil || headers == nil {
+		return
+	}
+	for key, values := range headers {
+		req.Header.Del(key)
+		for _, value := range values {
+			req.Header.Add(key, value)
+		}
+	}
+}
+
+func (s *AntigravityGatewayService) applyAntigravityAccountPassthroughFields(ctx context.Context, c *gin.Context, account *Account, sourceBody []byte, targetBody []byte) ([]byte, http.Header, error) {
+	if account == nil || account.Type != AccountTypeAPIKey {
+		return targetBody, nil, nil
+	}
+	var inbound http.Header
+	if c != nil && c.Request != nil {
+		inbound = c.Request.Header
+	}
+	outbound := http.Header{}
+	updatedBody, err := applyAccountPassthroughFieldsWithContext(ctx, account, inbound, sourceBody, targetBody, outbound)
+	return updatedBody, outbound, err
+}
+
 // extractTextFromSSEResponse 从 SSE 流式响应中提取文本
 func extractTextFromSSEResponse(respBody []byte) string {
 	var texts []string
@@ -1353,18 +1401,6 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 	mappedModel = applyThinkingModelSuffix(mappedModel, thinkingEnabled)
 	billingModel := mappedModel
 
-	// 获取 access_token
-	if s.tokenProvider == nil {
-		return nil, s.writeClaudeError(c, http.StatusBadGateway, "api_error", "Antigravity token provider not configured")
-	}
-	accessToken, err := s.tokenProvider.GetAccessToken(ctx, account)
-	if err != nil {
-		return nil, &UpstreamFailoverError{
-			StatusCode:   http.StatusBadGateway,
-			ResponseBody: []byte(`{"error":{"type":"authentication_error","message":"Failed to get upstream access token"},"type":"error"}`),
-		}
-	}
-
 	// 获取 project_id（部分账户类型可能没有）
 	projectID := strings.TrimSpace(account.GetCredential("project_id"))
 
@@ -1384,6 +1420,19 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 	if err != nil {
 		return nil, s.writeClaudeError(c, http.StatusBadRequest, "invalid_request_error", "Invalid request")
 	}
+	passthroughHeaders := http.Header{}
+	geminiBody, passthroughHeaders, err = s.applyAntigravityAccountPassthroughFields(ctx, c, account, body, geminiBody)
+	if err != nil {
+		return nil, s.writeClaudeError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+	}
+
+	accessToken, err := s.resolveAntigravityAccessToken(ctx, account)
+	if err != nil {
+		return nil, &UpstreamFailoverError{
+			StatusCode:   http.StatusBadGateway,
+			ResponseBody: []byte(`{"error":{"type":"authentication_error","message":"Failed to get upstream access token"},"type":"error"}`),
+		}
+	}
 
 	// Antigravity 上游只支持流式请求，统一使用 streamGenerateContent
 	// 如果客户端请求非流式，在响应处理阶段会收集完整流式响应后转换返回
@@ -1398,6 +1447,7 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 		accessToken:     accessToken,
 		action:          action,
 		body:            geminiBody,
+		outboundHeaders: passthroughHeaders,
 		c:               c,
 		httpUpstream:    s.httpUpstream,
 		settingService:  s.settingService,
@@ -2098,18 +2148,6 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 	}
 	billingModel := mappedModel
 
-	// 获取 access_token
-	if s.tokenProvider == nil {
-		return nil, s.writeGoogleError(c, http.StatusBadGateway, "Antigravity token provider not configured")
-	}
-	accessToken, err := s.tokenProvider.GetAccessToken(ctx, account)
-	if err != nil {
-		return nil, &UpstreamFailoverError{
-			StatusCode:   http.StatusBadGateway,
-			ResponseBody: []byte(`{"error":{"message":"Failed to get upstream access token","status":"UNAVAILABLE"}}`),
-		}
-	}
-
 	// 获取 project_id（部分账户类型可能没有）
 	projectID := strings.TrimSpace(account.GetCredential("project_id"))
 
@@ -2132,11 +2170,24 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 	} else {
 		logger.LegacyPrintf("service.antigravity_gateway", "[Antigravity] Failed to clean schema: %v", err)
 	}
+	passthroughHeaders := http.Header{}
+	injectedBody, passthroughHeaders, err = s.applyAntigravityAccountPassthroughFields(ctx, c, account, body, injectedBody)
+	if err != nil {
+		return nil, s.writeGoogleError(c, http.StatusBadRequest, err.Error())
+	}
 
 	// 包装请求
 	wrappedBody, err := s.wrapV1InternalRequest(projectID, mappedModel, injectedBody)
 	if err != nil {
 		return nil, s.writeGoogleError(c, http.StatusInternalServerError, "Failed to build upstream request")
+	}
+
+	accessToken, err := s.resolveAntigravityAccessToken(ctx, account)
+	if err != nil {
+		return nil, &UpstreamFailoverError{
+			StatusCode:   http.StatusBadGateway,
+			ResponseBody: []byte(`{"error":{"message":"Failed to get upstream access token","status":"UNAVAILABLE"}}`),
+		}
 	}
 
 	// Antigravity 上游只支持流式请求，统一使用 streamGenerateContent
@@ -2152,6 +2203,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 		accessToken:     accessToken,
 		action:          upstreamAction,
 		body:            wrappedBody,
+		outboundHeaders: passthroughHeaders,
 		c:               c,
 		httpUpstream:    s.httpUpstream,
 		settingService:  s.settingService,
@@ -2202,6 +2254,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 				if err == nil {
 					fallbackReq, err := antigravity.NewAPIRequest(ctx, upstreamAction, accessToken, fallbackWrapped)
 					if err == nil {
+						applyAntigravityOutboundHeaders(fallbackReq, passthroughHeaders)
 						fallbackResp, err := s.httpUpstream.Do(fallbackReq, proxyURL, account.ID, account.Concurrency)
 						if err == nil && fallbackResp.StatusCode < 400 {
 							_ = resp.Body.Close()
@@ -2251,6 +2304,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 					accessToken:     accessToken,
 					action:          upstreamAction,
 					body:            retryWrappedBody,
+					outboundHeaders: passthroughHeaders,
 					c:               c,
 					httpUpstream:    s.httpUpstream,
 					settingService:  s.settingService,

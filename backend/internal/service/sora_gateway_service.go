@@ -94,6 +94,7 @@ var soraStoryboardPattern = regexp.MustCompile(`\[\d+(?:\.\d+)?s\]`)
 var soraStoryboardShotPattern = regexp.MustCompile(`\[(\d+(?:\.\d+)?)s\]\s*([^\[]+)`)
 var soraRemixTargetPattern = regexp.MustCompile(`s_[a-f0-9]{32}`)
 var soraRemixTargetInURLPattern = regexp.MustCompile(`https://sora\.chatgpt\.com/p/s_[a-f0-9]{32}`)
+var soraApplyAccountPassthroughFieldsWithContext = applyAccountPassthroughFieldsWithContext
 
 type soraPreflightChecker interface {
 	PreflightCheck(ctx context.Context, account *Account, requestedModel string, modelCfg SoraModelConfig) error
@@ -122,7 +123,7 @@ func (s *SoraGatewayService) Forward(ctx context.Context, c *gin.Context, accoun
 			s.writeSoraError(c, http.StatusInternalServerError, "api_error", "HTTP upstream client not configured", clientStream)
 			return nil, errors.New("httpUpstream not configured for sora apikey forwarding")
 		}
-		return s.forwardToUpstream(ctx, c, account, body, clientStream, startTime)
+		return s.forwardToUpstreamWithPassthrough(ctx, c, account, body, clientStream, startTime)
 	}
 
 	if s.soraClient == nil || !s.soraClient.Enabled() {
@@ -429,6 +430,143 @@ func (s *SoraGatewayService) Forward(ctx context.Context, c *gin.Context, accoun
 		MediaURL:     firstMediaURL(finalURLs),
 		ImageCount:   imageCount,
 		ImageSize:    imageSize,
+	}, nil
+}
+
+func (s *SoraGatewayService) forwardToUpstreamWithPassthrough(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	body []byte,
+	clientStream bool,
+	startTime time.Time,
+) (*ForwardResult, error) {
+	apiKey := account.GetCredential("api_key")
+	if apiKey == "" {
+		s.writeSoraError(c, http.StatusBadGateway, "upstream_error", "Sora apikey account missing api_key credential", clientStream)
+		return nil, fmt.Errorf("sora apikey account %d missing api_key", account.ID)
+	}
+
+	baseURL := account.GetBaseURL()
+	if baseURL == "" {
+		s.writeSoraError(c, http.StatusBadGateway, "upstream_error", "Sora apikey account missing base_url", clientStream)
+		return nil, fmt.Errorf("sora apikey account %d missing base_url", account.ID)
+	}
+	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
+		s.writeSoraError(c, http.StatusBadGateway, "upstream_error", "Sora apikey base_url must start with http:// or https://", clientStream)
+		return nil, fmt.Errorf("sora apikey account %d invalid base_url scheme: %s", account.ID, baseURL)
+	}
+
+	inboundHeaders := http.Header{}
+	if c != nil && c.Request != nil {
+		inboundHeaders = c.Request.Header.Clone()
+	}
+	outboundHeaders := http.Header{}
+	upstreamBody, err := soraApplyAccountPassthroughFieldsWithContext(ctx, account, inboundHeaders, body, body, outboundHeaders)
+	if err != nil {
+		s.writeSoraError(c, http.StatusBadRequest, "invalid_request_error", err.Error(), clientStream)
+		return nil, err
+	}
+
+	upstreamURL := strings.TrimRight(baseURL, "/") + "/sora/v1/chat/completions"
+	upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, bytes.NewReader(upstreamBody))
+	if err != nil {
+		s.writeSoraError(c, http.StatusInternalServerError, "api_error", "Failed to create upstream request", clientStream)
+		return nil, fmt.Errorf("create upstream request: %w", err)
+	}
+
+	upstreamReq.Header.Set("Content-Type", "application/json")
+	upstreamReq.Header.Set("Authorization", "Bearer "+apiKey)
+	for _, header := range []string{"Accept", "Accept-Encoding"} {
+		if value := strings.TrimSpace(inboundHeaders.Get(header)); value != "" {
+			upstreamReq.Header.Set(header, value)
+		}
+	}
+	for key, values := range outboundHeaders {
+		for _, value := range values {
+			upstreamReq.Header.Add(key, value)
+		}
+	}
+
+	logger.LegacyPrintf("service.sora", "[ForwardUpstream] account=%d url=%s", account.ID, upstreamURL)
+
+	proxyURL := ""
+	if account.ProxyID != nil && account.Proxy != nil {
+		proxyURL = account.Proxy.URL()
+	}
+
+	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+	if err != nil {
+		s.writeSoraError(c, http.StatusBadGateway, "upstream_error", "Failed to connect to upstream Sora service", clientStream)
+		return nil, &UpstreamFailoverError{StatusCode: http.StatusBadGateway}
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		if s.shouldFailoverUpstreamError(resp.StatusCode) {
+			return nil, &UpstreamFailoverError{
+				StatusCode:      resp.StatusCode,
+				ResponseBody:    respBody,
+				ResponseHeaders: resp.Header.Clone(),
+			}
+		}
+		if c != nil {
+			c.Status(resp.StatusCode)
+			for key, values := range resp.Header {
+				for _, value := range values {
+					c.Writer.Header().Add(key, value)
+				}
+			}
+			if _, writeErr := c.Writer.Write(respBody); writeErr != nil {
+				return nil, fmt.Errorf("write upstream error response: %w", writeErr)
+			}
+		}
+		return nil, fmt.Errorf("upstream error: %d", resp.StatusCode)
+	}
+
+	if c != nil {
+		c.Status(resp.StatusCode)
+		for key, values := range resp.Header {
+			lower := strings.ToLower(key)
+			if lower == "content-type" || lower == "transfer-encoding" || lower == "cache-control" || lower == "x-request-id" {
+				for _, value := range values {
+					c.Writer.Header().Add(key, value)
+				}
+			}
+		}
+		if flusher, ok := c.Writer.(http.Flusher); ok && clientStream {
+			buf := make([]byte, 4096)
+			for {
+				n, readErr := resp.Body.Read(buf)
+				if n > 0 {
+					if _, writeErr := c.Writer.Write(buf[:n]); writeErr != nil {
+						return nil, fmt.Errorf("stream upstream response write: %w", writeErr)
+					}
+					flusher.Flush()
+				}
+				if readErr != nil {
+					break
+				}
+			}
+		} else {
+			if _, copyErr := io.Copy(c.Writer, resp.Body); copyErr != nil {
+				return nil, fmt.Errorf("copy upstream response: %w", copyErr)
+			}
+		}
+	} else {
+		if _, copyErr := io.Copy(io.Discard, resp.Body); copyErr != nil {
+			return nil, fmt.Errorf("discard upstream response: %w", copyErr)
+		}
+	}
+
+	return &ForwardResult{
+		RequestID: resp.Header.Get("x-request-id"),
+		Model:     "",
+		Stream:    clientStream,
+		Duration:  time.Since(startTime),
 	}, nil
 }
 

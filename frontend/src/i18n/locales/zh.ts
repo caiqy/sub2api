@@ -2171,6 +2171,26 @@ export default {
           unavailableDesc: '服务不可用 - 暂停 30 分钟'
         }
       },
+      passthroughFields: {
+        title: '透传字段规则',
+        description: '仅对 API Key 类型账号生效；与自动透传能力独立',
+        disabledHint: '已配置规则会保留，但当前不会生效',
+        addRule: '新增规则',
+        targetHeader: 'Header',
+        targetBody: 'Body',
+        modeForward: '放行透传',
+        modeInject: '固定注入',
+        headerHint: 'Header 比较时不区分大小写',
+        bodyHint: '仅支持 xx.xx 形式的对象层级路径',
+        injectHint: '固定注入将在转发前写入上游请求',
+        errors: {
+          keyRequired: '字段名或路径不能为空',
+          bodyPath: 'Body 路径仅支持点号对象层级，不支持数组语法',
+          valueRequired: '固定注入模式必须填写值',
+          duplicateKey: '同一目标下的字段名或路径不能重复',
+          reservedKey: '保留字段或路径不能透传'
+        }
+      },
       usageWindow: {
         statsTitle: '5小时窗口用量统计',
         statsTitleDaily: '每日用量统计',

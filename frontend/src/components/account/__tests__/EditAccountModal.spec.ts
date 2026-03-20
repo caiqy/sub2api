@@ -1,17 +1,26 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 
-const { updateAccountMock, checkMixedChannelRiskMock } = vi.hoisted(() => ({
+const {
+  updateAccountMock,
+  checkMixedChannelRiskMock,
+  showErrorMock,
+  showSuccessMock,
+  showInfoMock
+} = vi.hoisted(() => ({
   updateAccountMock: vi.fn(),
-  checkMixedChannelRiskMock: vi.fn()
+  checkMixedChannelRiskMock: vi.fn(),
+  showErrorMock: vi.fn(),
+  showSuccessMock: vi.fn(),
+  showInfoMock: vi.fn()
 }))
 
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
-    showError: vi.fn(),
-    showSuccess: vi.fn(),
-    showInfo: vi.fn()
+    showError: showErrorMock,
+    showSuccess: showSuccessMock,
+    showInfo: showInfoMock
   })
 }))
 
@@ -82,8 +91,15 @@ const ModelWhitelistSelectorStub = defineComponent({
   `
 })
 
-function buildAccount() {
-  return {
+const QuotaLimitCardStub = defineComponent({
+  name: 'QuotaLimitCard',
+  emits: ['update:totalLimit'],
+  template: '<button type="button" data-testid="quota-limit-set" @click="$emit(\'update:totalLimit\', 99)">quota</button>'
+})
+
+function buildAccount(overrides: Record<string, any> = {}) {
+  const { credentials: credentialOverrides, extra: extraOverrides, ...restOverrides } = overrides
+  const baseAccount = {
     id: 1,
     name: 'OpenAI Key',
     notes: '',
@@ -105,6 +121,19 @@ function buildAccount() {
     group_ids: [],
     expires_at: null,
     auto_pause_on_expired: false
+  }
+
+  return {
+    ...baseAccount,
+    ...restOverrides,
+    credentials: {
+      ...baseAccount.credentials,
+      ...(credentialOverrides || {})
+    },
+    extra: {
+      ...baseAccount.extra,
+      ...(extraOverrides || {})
+    }
   } as any
 }
 
@@ -123,18 +152,26 @@ function mountModal(account = buildAccount()) {
         Icon: true,
         ProxySelector: true,
         GroupSelector: true,
-        ModelWhitelistSelector: ModelWhitelistSelectorStub
+        ModelWhitelistSelector: ModelWhitelistSelectorStub,
+        QuotaLimitCard: QuotaLimitCardStub
       }
     }
   })
 }
 
 describe('EditAccountModal', () => {
-  it('reopening the same account rehydrates the OpenAI whitelist from props', async () => {
-    const account = buildAccount()
+  beforeEach(() => {
     updateAccountMock.mockReset()
     checkMixedChannelRiskMock.mockReset()
+    showErrorMock.mockReset()
+    showSuccessMock.mockReset()
+    showInfoMock.mockReset()
     checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(buildAccount())
+  })
+
+  it('reopening the same account rehydrates the OpenAI whitelist from props', async () => {
+    const account = buildAccount()
     updateAccountMock.mockResolvedValue(account)
 
     const wrapper = mountModal(account)
@@ -155,5 +192,170 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual({
       'gpt-5.2': 'gpt-5.2'
     })
+  })
+
+  it('rehydrates passthrough field rules from account.extra', async () => {
+    const wrapper = mountModal(buildAccount({
+      extra: {
+        passthrough_fields_enabled: true,
+        passthrough_field_rules: [
+          { target: 'header', mode: 'inject', key: 'X-Env', value: 'prod' }
+        ]
+      }
+    }))
+
+    expect((wrapper.get('[data-testid="passthrough-enabled-toggle"]').element as HTMLInputElement).checked).toBe(true)
+    expect((wrapper.get('[data-testid="passthrough-rule-key-0"]').element as HTMLInputElement).value).toBe('X-Env')
+    expect((wrapper.get('[data-testid="passthrough-rule-value-0"]').element as HTMLInputElement).value).toBe('prod')
+  })
+
+  it('blocks submit when header keys differ only by case', async () => {
+    const wrapper = mountModal(buildAccount())
+
+    await wrapper.get('[data-testid="passthrough-enabled-toggle"]').setValue(true)
+    await wrapper.get('[data-testid="passthrough-rule-mode-0"]').setValue('inject')
+    await wrapper.get('[data-testid="passthrough-rule-key-0"]').setValue('X-Test')
+    await wrapper.get('[data-testid="passthrough-rule-value-0"]').setValue('one')
+    await wrapper.get('[data-testid="passthrough-add-rule"]').trigger('click')
+    await wrapper.get('[data-testid="passthrough-rule-mode-1"]').setValue('inject')
+    await wrapper.get('[data-testid="passthrough-rule-key-1"]').setValue('x-test')
+    await wrapper.get('[data-testid="passthrough-rule-value-1"]').setValue('two')
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(updateAccountMock).not.toHaveBeenCalled()
+  })
+
+  it('submits full passthrough extra for apikey accounts', async () => {
+    const wrapper = mountModal(buildAccount({
+      extra: {
+        openai_passthrough: true,
+        existing_flag: 'keep-me'
+      }
+    }))
+
+    await wrapper.get('[data-testid="passthrough-enabled-toggle"]').setValue(true)
+    await wrapper.get('[data-testid="passthrough-rule-mode-0"]').setValue('inject')
+    await wrapper.get('[data-testid="passthrough-rule-key-0"]').setValue('X-Env')
+    await wrapper.get('[data-testid="passthrough-rule-value-0"]').setValue('prod')
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toEqual(expect.objectContaining({
+      existing_flag: 'keep-me',
+      openai_passthrough: true,
+      openai_apikey_responses_websockets_v2_mode: 'off',
+      openai_apikey_responses_websockets_v2_enabled: false,
+      passthrough_fields_enabled: true,
+      passthrough_field_rules: [
+        { target: 'header', mode: 'inject', key: 'X-Env', value: 'prod' }
+      ]
+    }))
+  })
+
+  it('keeps openai passthrough extra and model mapping when passthrough fields are submitted', async () => {
+    const wrapper = mountModal(buildAccount({
+      credentials: {
+        model_mapping: {
+          'gpt-5.2': 'gpt-5.2',
+          'gpt-4.1-mini': 'gpt-4.1-mini'
+        }
+      },
+      extra: {
+        openai_passthrough: true,
+        openai_apikey_responses_websockets_v2_mode: 'off',
+        openai_apikey_responses_websockets_v2_enabled: false
+      }
+    }))
+
+    await wrapper.get('[data-testid="passthrough-enabled-toggle"]').setValue(true)
+    await wrapper.get('[data-testid="passthrough-rule-key-0"]').setValue('X-Org')
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual({
+      'gpt-5.2': 'gpt-5.2',
+      'gpt-4.1-mini': 'gpt-4.1-mini'
+    })
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toEqual(expect.objectContaining({
+      openai_passthrough: true,
+      openai_apikey_responses_websockets_v2_mode: 'off',
+      openai_apikey_responses_websockets_v2_enabled: false,
+      passthrough_fields_enabled: true,
+      passthrough_field_rules: [
+        { target: 'header', mode: 'forward', key: 'X-Org' }
+      ]
+    }))
+  })
+
+  it('merges passthrough fields with anthropic passthrough and quota extra without overwriting', async () => {
+    const wrapper = mountModal(buildAccount({
+      platform: 'anthropic',
+      extra: {
+        anthropic_passthrough: true
+      }
+    }))
+
+    await wrapper.get('[data-testid="quota-limit-set"]').trigger('click')
+    await wrapper.get('[data-testid="passthrough-enabled-toggle"]').setValue(true)
+    await wrapper.get('[data-testid="passthrough-rule-key-0"]').setValue('X-Tenant')
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toEqual(expect.objectContaining({
+      anthropic_passthrough: true,
+      quota_limit: 99,
+      passthrough_fields_enabled: true,
+      passthrough_field_rules: [
+        { target: 'header', mode: 'forward', key: 'X-Tenant' }
+      ]
+    }))
+  })
+
+  it('does not render passthrough section for non-apikey accounts', () => {
+    const wrapper = mountModal(buildAccount({
+      type: 'oauth'
+    }))
+
+    expect(wrapper.find('[data-testid="passthrough-fields-section"]').exists()).toBe(false)
+  })
+
+  it('warns immediately when switched away from apikey with passthrough config', async () => {
+    const apikeyAccount = buildAccount({
+      extra: {
+        passthrough_fields_enabled: true,
+        passthrough_field_rules: [
+          { target: 'header', mode: 'forward', key: 'X-Test' }
+        ]
+      }
+    })
+    const wrapper = mountModal(apikeyAccount)
+
+    await wrapper.setProps({
+      account: buildAccount({
+        id: apikeyAccount.id,
+        type: 'oauth',
+        extra: apikeyAccount.extra
+      })
+    })
+
+    expect(wrapper.find('[data-testid="passthrough-fields-section"]').exists()).toBe(false)
+    expect(showInfoMock).toHaveBeenCalledWith(expect.stringContaining('移除透传字段规则配置'))
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toEqual(expect.not.objectContaining({
+      passthrough_fields_enabled: expect.anything(),
+      passthrough_field_rules: expect.anything()
+    }))
   })
 })

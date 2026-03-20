@@ -4015,6 +4015,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			}
 		}
 		return s.forwardAnthropicAPIKeyPassthroughWithInput(ctx, c, account, anthropicPassthroughForwardInput{
+			SourceBody:    parsed.Body,
 			Body:          passthroughBody,
 			RequestModel:  passthroughModel,
 			OriginalModel: parsed.Model,
@@ -4126,7 +4127,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
 		// 构建上游请求（每次重试需要重新构建，因为请求体需要重新读取）
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
-		upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, body, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
+		upstreamReq, err := s.buildUpstreamRequestWithSourceBody(upstreamCtx, c, account, parsed.Body, body, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 		releaseUpstreamCtx()
 		if err != nil {
 			return nil, err
@@ -4550,6 +4551,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 }
 
 type anthropicPassthroughForwardInput struct {
+	SourceBody    []byte
 	Body          []byte
 	RequestModel  string
 	OriginalModel string
@@ -4568,6 +4570,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthrough(
 	startTime time.Time,
 ) (*ForwardResult, error) {
 	return s.forwardAnthropicAPIKeyPassthroughWithInput(ctx, c, account, anthropicPassthroughForwardInput{
+		SourceBody:    body,
 		Body:          body,
 		RequestModel:  reqModel,
 		OriginalModel: originalModel,
@@ -4608,9 +4611,29 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	retryStart := time.Now()
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, input.RequestStream)
-		upstreamReq, err := s.buildUpstreamRequestAnthropicAPIKeyPassthrough(upstreamCtx, c, account, input.Body, token)
+		upstreamReq, err := s.buildUpstreamRequestAnthropicAPIKeyPassthrough(upstreamCtx, c, account, input.SourceBody, input.Body, token)
 		releaseUpstreamCtx()
 		if err != nil {
+			if strings.HasPrefix(err.Error(), "invalid_request_error:") {
+				msg := strings.TrimSpace(strings.TrimPrefix(err.Error(), "invalid_request_error:"))
+				setOpsUpstreamError(c, http.StatusBadRequest, msg, "")
+				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+					Platform:           account.Platform,
+					AccountID:          account.ID,
+					AccountName:        account.Name,
+					UpstreamStatusCode: http.StatusBadRequest,
+					Passthrough:        true,
+					Kind:               "request_error",
+					Message:            msg,
+				})
+				c.JSON(http.StatusBadRequest, gin.H{
+					"type": "error",
+					"error": gin.H{
+						"type":    "invalid_request_error",
+						"message": msg,
+					},
+				})
+			}
 			return nil, err
 		}
 
@@ -4800,9 +4823,14 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 	ctx context.Context,
 	c *gin.Context,
 	account *Account,
+	sourceBody []byte,
 	body []byte,
 	token string,
 ) (*http.Request, error) {
+	inboundHeader := http.Header{}
+	if c != nil && c.Request != nil {
+		inboundHeader = c.Request.Header
+	}
 	targetURL := claudeAPIURL
 	baseURL := account.GetBaseURL()
 	if baseURL != "" {
@@ -4813,11 +4841,7 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 		targetURL = validatedURL + "/v1/messages?beta=true"
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-
+	outboundHeader := http.Header{}
 	if c != nil && c.Request != nil {
 		for key, values := range c.Request.Header {
 			lowerKey := strings.ToLower(strings.TrimSpace(key))
@@ -4825,10 +4849,20 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 				continue
 			}
 			for _, v := range values {
-				req.Header.Add(key, v)
+				outboundHeader.Add(key, v)
 			}
 		}
 	}
+	var err error
+	body, err = applyAccountPassthroughFieldsWithContext(ctx, account, inboundHeader, sourceBody, body, outboundHeader)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header = outboundHeader
 
 	// 覆盖入站鉴权残留，并注入上游认证
 	req.Header.Del("authorization")
@@ -5555,6 +5589,10 @@ func (s *GatewayService) handleBedrockNonStreamingResponse(
 }
 
 func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token, tokenType, modelID string, reqStream bool, mimicClaudeCode bool) (*http.Request, error) {
+	return s.buildUpstreamRequestWithSourceBody(ctx, c, account, body, body, token, tokenType, modelID, reqStream, mimicClaudeCode)
+}
+
+func (s *GatewayService) buildUpstreamRequestWithSourceBody(ctx context.Context, c *gin.Context, account *Account, sourceBody []byte, body []byte, token, tokenType, modelID string, reqStream bool, mimicClaudeCode bool) (*http.Request, error) {
 	// 确定目标URL
 	targetURL := claudeAPIURL
 	if account.Type == AccountTypeAPIKey {
@@ -5571,6 +5609,24 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	clientHeaders := http.Header{}
 	if c != nil && c.Request != nil {
 		clientHeaders = c.Request.Header
+	}
+
+	outboundHeader := http.Header{}
+	for key, values := range clientHeaders {
+		lowerKey := strings.ToLower(key)
+		if allowedHeaders[lowerKey] {
+			for _, v := range values {
+				outboundHeader.Add(key, v)
+			}
+		}
+	}
+
+	if account.Type == AccountTypeAPIKey {
+		var err error
+		body, err = applyAccountPassthroughFieldsWithContext(ctx, account, clientHeaders, sourceBody, body, outboundHeader)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// OAuth账号：应用统一指纹
@@ -5602,6 +5658,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	if err != nil {
 		return nil, err
 	}
+	req.Header = outboundHeader
 
 	// 设置认证头
 	if tokenType == "oauth" {
@@ -5610,14 +5667,12 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		req.Header.Set("x-api-key", token)
 	}
 
-	// 白名单透传headers
-	for key, values := range clientHeaders {
-		lowerKey := strings.ToLower(key)
-		if allowedHeaders[lowerKey] {
-			for _, v := range values {
-				req.Header.Add(key, v)
-			}
-		}
+	if tokenType != "oauth" {
+		req.Header.Del("authorization")
+		req.Header.Del("x-api-key")
+		req.Header.Del("x-goog-api-key")
+		req.Header.Del("cookie")
+		req.Header.Set("x-api-key", token)
 	}
 
 	// OAuth账号：应用缓存的指纹到请求头（覆盖白名单透传的头）

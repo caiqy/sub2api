@@ -660,6 +660,18 @@ export interface TempUnschedulableStatus {
   state?: TempUnschedulableState
 }
 
+export interface AccountPassthroughFieldRule {
+  target: 'header' | 'body'
+  mode: 'forward' | 'inject'
+  key: string
+  value?: string
+}
+
+export interface AccountPassthroughExtra {
+  passthrough_fields_enabled?: boolean
+  passthrough_field_rules?: AccountPassthroughFieldRule[]
+}
+
 export interface Account {
   id: number
   name: string
@@ -670,7 +682,7 @@ export interface Account {
   // Extra fields including Codex usage and model-level rate limits (Antigravity smart retry)
   extra?: (CodexUsageSnapshot & {
     model_rate_limits?: Record<string, { rate_limited_at: string; rate_limit_reset_at: string }>
-  } & Record<string, unknown>)
+  } & AccountPassthroughExtra & Record<string, unknown>)
   proxy_id: number | null
   concurrency: number
   load_factor?: number | null
@@ -846,7 +858,7 @@ export interface CreateAccountRequest {
   platform: AccountPlatform
   type: AccountType
   credentials: Record<string, unknown>
-  extra?: Record<string, unknown>
+  extra?: AccountPassthroughExtra & Record<string, unknown>
   proxy_id?: number | null
   concurrency?: number
   load_factor?: number | null
