@@ -396,6 +396,8 @@ type UsageLog struct {
 type AdminUsageLog struct {
 	UsageLog
 
+	HasDetail bool `json:"has_detail"`
+
 	// AccountRateMultiplier 账号计费倍率快照（nil 表示按 1.0 处理）
 	AccountRateMultiplier *float64 `json:"account_rate_multiplier"`
 
@@ -404,6 +406,15 @@ type AdminUsageLog struct {
 
 	// Account 最小账号信息（避免泄露敏感字段）
 	Account *AccountSummary `json:"account,omitempty"`
+}
+
+type AdminUsageDetail struct {
+	UsageLogID      int64     `json:"usage_log_id"`
+	RequestHeaders  string    `json:"request_headers"`
+	RequestBody     string    `json:"request_body"`
+	ResponseHeaders string    `json:"response_headers"`
+	ResponseBody    string    `json:"response_body"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 type UsageCleanupFilters struct {

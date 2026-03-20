@@ -4062,6 +4062,7 @@ type OpenAIRecordUsageInput struct {
 	User               *User
 	Account            *Account
 	Subscription       *UserSubscription
+	DetailSnapshot     *UsageLogDetailSnapshot
 	InboundEndpoint    string
 	UpstreamEndpoint   string
 	UserAgent          string // 请求的 User-Agent
@@ -4158,6 +4159,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		RateMultiplier:        multiplier,
 		AccountRateMultiplier: &accountRateMultiplier,
 		BillingType:           billingType,
+		DetailSnapshot:        input.DetailSnapshot.Normalize(),
 		Stream:                result.Stream,
 		OpenAIWSMode:          result.OpenAIWSMode,
 		DurationMs:            &durationMs,

@@ -947,3 +947,37 @@ func TestOpenAIGatewayServiceRecordUsage_SimpleModeSkipsBillingAfterPersist(t *t
 	require.Equal(t, 0, userRepo.deductCalls)
 	require.Equal(t, 0, subRepo.incrementCalls)
 }
+
+func TestOpenAIRecordUsage_AttachesDetailSnapshot(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	subRepo := &openAIRecordUsageSubRepoStub{}
+	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, subRepo, nil)
+	detail := &UsageLogDetailSnapshot{
+		RequestHeaders:  "X-Test: 1",
+		RequestBody:     `{"model":"gpt-5"}`,
+		ResponseHeaders: "Content-Type: application/json",
+		ResponseBody:    `{"id":"resp_123"}`,
+	}
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID: "resp_detail_snapshot_openai",
+			Usage: OpenAIUsage{
+				InputTokens:  8,
+				OutputTokens: 4,
+			},
+			Model:    "gpt-5.1",
+			Duration: time.Second,
+		},
+		APIKey:         &APIKey{ID: 10},
+		User:           &User{ID: 20},
+		Account:        &Account{ID: 30},
+		DetailSnapshot: detail,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.NotNil(t, usageRepo.lastLog.DetailSnapshot)
+	require.Equal(t, detail, usageRepo.lastLog.DetailSnapshot)
+}

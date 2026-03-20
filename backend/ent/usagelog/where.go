@@ -1770,6 +1770,29 @@ func HasSubscriptionWith(preds ...predicate.UserSubscription) predicate.UsageLog
 	})
 }
 
+// HasDetail applies the HasEdge predicate on the "detail" edge.
+func HasDetail() predicate.UsageLog {
+	return predicate.UsageLog(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.O2O, false, DetailTable, DetailColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasDetailWith applies the HasEdge predicate on the "detail" edge with a given conditions (other predicates).
+func HasDetailWith(preds ...predicate.UsageLogDetail) predicate.UsageLog {
+	return predicate.UsageLog(func(s *sql.Selector) {
+		step := newDetailStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
+}
+
 // And groups predicates with the AND operator between them.
 func And(predicates ...predicate.UsageLog) predicate.UsageLog {
 	return predicate.UsageLog(sql.AndPredicates(predicates...))

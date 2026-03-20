@@ -31,6 +31,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/setting"
 	"github.com/Wei-Shaw/sub2api/ent/usagecleanuptask"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
+	"github.com/Wei-Shaw/sub2api/ent/usagelogdetail"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/ent/userallowedgroup"
 	"github.com/Wei-Shaw/sub2api/ent/userattributedefinition"
@@ -77,6 +78,8 @@ type Client struct {
 	UsageCleanupTask *UsageCleanupTaskClient
 	// UsageLog is the client for interacting with the UsageLog builders.
 	UsageLog *UsageLogClient
+	// UsageLogDetail is the client for interacting with the UsageLogDetail builders.
+	UsageLogDetail *UsageLogDetailClient
 	// User is the client for interacting with the User builders.
 	User *UserClient
 	// UserAllowedGroup is the client for interacting with the UserAllowedGroup builders.
@@ -114,6 +117,7 @@ func (c *Client) init() {
 	c.Setting = NewSettingClient(c.config)
 	c.UsageCleanupTask = NewUsageCleanupTaskClient(c.config)
 	c.UsageLog = NewUsageLogClient(c.config)
+	c.UsageLogDetail = NewUsageLogDetailClient(c.config)
 	c.User = NewUserClient(c.config)
 	c.UserAllowedGroup = NewUserAllowedGroupClient(c.config)
 	c.UserAttributeDefinition = NewUserAttributeDefinitionClient(c.config)
@@ -227,6 +231,7 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		Setting:                 NewSettingClient(cfg),
 		UsageCleanupTask:        NewUsageCleanupTaskClient(cfg),
 		UsageLog:                NewUsageLogClient(cfg),
+		UsageLogDetail:          NewUsageLogDetailClient(cfg),
 		User:                    NewUserClient(cfg),
 		UserAllowedGroup:        NewUserAllowedGroupClient(cfg),
 		UserAttributeDefinition: NewUserAttributeDefinitionClient(cfg),
@@ -267,6 +272,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		Setting:                 NewSettingClient(cfg),
 		UsageCleanupTask:        NewUsageCleanupTaskClient(cfg),
 		UsageLog:                NewUsageLogClient(cfg),
+		UsageLogDetail:          NewUsageLogDetailClient(cfg),
 		User:                    NewUserClient(cfg),
 		UserAllowedGroup:        NewUserAllowedGroupClient(cfg),
 		UserAttributeDefinition: NewUserAttributeDefinitionClient(cfg),
@@ -304,7 +310,7 @@ func (c *Client) Use(hooks ...Hook) {
 		c.APIKey, c.Account, c.AccountGroup, c.Announcement, c.AnnouncementRead,
 		c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord, c.PromoCode,
 		c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting,
-		c.UsageCleanupTask, c.UsageLog, c.User, c.UserAllowedGroup,
+		c.UsageCleanupTask, c.UsageLog, c.UsageLogDetail, c.User, c.UserAllowedGroup,
 		c.UserAttributeDefinition, c.UserAttributeValue, c.UserSubscription,
 	} {
 		n.Use(hooks...)
@@ -318,7 +324,7 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.APIKey, c.Account, c.AccountGroup, c.Announcement, c.AnnouncementRead,
 		c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord, c.PromoCode,
 		c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting,
-		c.UsageCleanupTask, c.UsageLog, c.User, c.UserAllowedGroup,
+		c.UsageCleanupTask, c.UsageLog, c.UsageLogDetail, c.User, c.UserAllowedGroup,
 		c.UserAttributeDefinition, c.UserAttributeValue, c.UserSubscription,
 	} {
 		n.Intercept(interceptors...)
@@ -360,6 +366,8 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.UsageCleanupTask.mutate(ctx, m)
 	case *UsageLogMutation:
 		return c.UsageLog.mutate(ctx, m)
+	case *UsageLogDetailMutation:
+		return c.UsageLogDetail.mutate(ctx, m)
 	case *UserMutation:
 		return c.User.mutate(ctx, m)
 	case *UserAllowedGroupMutation:
@@ -2933,6 +2941,22 @@ func (c *UsageLogClient) QuerySubscription(_m *UsageLog) *UserSubscriptionQuery 
 	return query
 }
 
+// QueryDetail queries the detail edge of a UsageLog.
+func (c *UsageLogClient) QueryDetail(_m *UsageLog) *UsageLogDetailQuery {
+	query := (&UsageLogDetailClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(usagelog.Table, usagelog.FieldID, id),
+			sqlgraph.To(usagelogdetail.Table, usagelogdetail.FieldID),
+			sqlgraph.Edge(sqlgraph.O2O, false, usagelog.DetailTable, usagelog.DetailColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
 // Hooks returns the client hooks.
 func (c *UsageLogClient) Hooks() []Hook {
 	return c.hooks.UsageLog
@@ -2955,6 +2979,155 @@ func (c *UsageLogClient) mutate(ctx context.Context, m *UsageLogMutation) (Value
 		return (&UsageLogDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
 	default:
 		return nil, fmt.Errorf("ent: unknown UsageLog mutation op: %q", m.Op())
+	}
+}
+
+// UsageLogDetailClient is a client for the UsageLogDetail schema.
+type UsageLogDetailClient struct {
+	config
+}
+
+// NewUsageLogDetailClient returns a client for the UsageLogDetail from the given config.
+func NewUsageLogDetailClient(c config) *UsageLogDetailClient {
+	return &UsageLogDetailClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `usagelogdetail.Hooks(f(g(h())))`.
+func (c *UsageLogDetailClient) Use(hooks ...Hook) {
+	c.hooks.UsageLogDetail = append(c.hooks.UsageLogDetail, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `usagelogdetail.Intercept(f(g(h())))`.
+func (c *UsageLogDetailClient) Intercept(interceptors ...Interceptor) {
+	c.inters.UsageLogDetail = append(c.inters.UsageLogDetail, interceptors...)
+}
+
+// Create returns a builder for creating a UsageLogDetail entity.
+func (c *UsageLogDetailClient) Create() *UsageLogDetailCreate {
+	mutation := newUsageLogDetailMutation(c.config, OpCreate)
+	return &UsageLogDetailCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of UsageLogDetail entities.
+func (c *UsageLogDetailClient) CreateBulk(builders ...*UsageLogDetailCreate) *UsageLogDetailCreateBulk {
+	return &UsageLogDetailCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *UsageLogDetailClient) MapCreateBulk(slice any, setFunc func(*UsageLogDetailCreate, int)) *UsageLogDetailCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &UsageLogDetailCreateBulk{err: fmt.Errorf("calling to UsageLogDetailClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*UsageLogDetailCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &UsageLogDetailCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for UsageLogDetail.
+func (c *UsageLogDetailClient) Update() *UsageLogDetailUpdate {
+	mutation := newUsageLogDetailMutation(c.config, OpUpdate)
+	return &UsageLogDetailUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *UsageLogDetailClient) UpdateOne(_m *UsageLogDetail) *UsageLogDetailUpdateOne {
+	mutation := newUsageLogDetailMutation(c.config, OpUpdateOne, withUsageLogDetail(_m))
+	return &UsageLogDetailUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *UsageLogDetailClient) UpdateOneID(id int64) *UsageLogDetailUpdateOne {
+	mutation := newUsageLogDetailMutation(c.config, OpUpdateOne, withUsageLogDetailID(id))
+	return &UsageLogDetailUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for UsageLogDetail.
+func (c *UsageLogDetailClient) Delete() *UsageLogDetailDelete {
+	mutation := newUsageLogDetailMutation(c.config, OpDelete)
+	return &UsageLogDetailDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *UsageLogDetailClient) DeleteOne(_m *UsageLogDetail) *UsageLogDetailDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *UsageLogDetailClient) DeleteOneID(id int64) *UsageLogDetailDeleteOne {
+	builder := c.Delete().Where(usagelogdetail.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &UsageLogDetailDeleteOne{builder}
+}
+
+// Query returns a query builder for UsageLogDetail.
+func (c *UsageLogDetailClient) Query() *UsageLogDetailQuery {
+	return &UsageLogDetailQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeUsageLogDetail},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a UsageLogDetail entity by its id.
+func (c *UsageLogDetailClient) Get(ctx context.Context, id int64) (*UsageLogDetail, error) {
+	return c.Query().Where(usagelogdetail.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *UsageLogDetailClient) GetX(ctx context.Context, id int64) *UsageLogDetail {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryUsageLog queries the usage_log edge of a UsageLogDetail.
+func (c *UsageLogDetailClient) QueryUsageLog(_m *UsageLogDetail) *UsageLogQuery {
+	query := (&UsageLogClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(usagelogdetail.Table, usagelogdetail.FieldID, id),
+			sqlgraph.To(usagelog.Table, usagelog.FieldID),
+			sqlgraph.Edge(sqlgraph.O2O, true, usagelogdetail.UsageLogTable, usagelogdetail.UsageLogColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *UsageLogDetailClient) Hooks() []Hook {
+	return c.hooks.UsageLogDetail
+}
+
+// Interceptors returns the client interceptors.
+func (c *UsageLogDetailClient) Interceptors() []Interceptor {
+	return c.inters.UsageLogDetail
+}
+
+func (c *UsageLogDetailClient) mutate(ctx context.Context, m *UsageLogDetailMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&UsageLogDetailCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&UsageLogDetailUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&UsageLogDetailUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&UsageLogDetailDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown UsageLogDetail mutation op: %q", m.Op())
 	}
 }
 
@@ -3889,16 +4062,16 @@ type (
 	hooks struct {
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead,
 		ErrorPassthroughRule, Group, IdempotencyRecord, PromoCode, PromoCodeUsage,
-		Proxy, RedeemCode, SecuritySecret, Setting, UsageCleanupTask, UsageLog, User,
-		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
-		UserSubscription []ent.Hook
+		Proxy, RedeemCode, SecuritySecret, Setting, UsageCleanupTask, UsageLog,
+		UsageLogDetail, User, UserAllowedGroup, UserAttributeDefinition,
+		UserAttributeValue, UserSubscription []ent.Hook
 	}
 	inters struct {
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead,
 		ErrorPassthroughRule, Group, IdempotencyRecord, PromoCode, PromoCodeUsage,
-		Proxy, RedeemCode, SecuritySecret, Setting, UsageCleanupTask, UsageLog, User,
-		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
-		UserSubscription []ent.Interceptor
+		Proxy, RedeemCode, SecuritySecret, Setting, UsageCleanupTask, UsageLog,
+		UsageLogDetail, User, UserAllowedGroup, UserAttributeDefinition,
+		UserAttributeValue, UserSubscription []ent.Interceptor
 	}
 )
 

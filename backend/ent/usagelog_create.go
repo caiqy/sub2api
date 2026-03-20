@@ -15,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
+	"github.com/Wei-Shaw/sub2api/ent/usagelogdetail"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
 )
@@ -474,6 +475,25 @@ func (_c *UsageLogCreate) SetSubscription(v *UserSubscription) *UsageLogCreate {
 	return _c.SetSubscriptionID(v.ID)
 }
 
+// SetDetailID sets the "detail" edge to the UsageLogDetail entity by ID.
+func (_c *UsageLogCreate) SetDetailID(id int64) *UsageLogCreate {
+	_c.mutation.SetDetailID(id)
+	return _c
+}
+
+// SetNillableDetailID sets the "detail" edge to the UsageLogDetail entity by ID if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableDetailID(id *int64) *UsageLogCreate {
+	if id != nil {
+		_c = _c.SetDetailID(*id)
+	}
+	return _c
+}
+
+// SetDetail sets the "detail" edge to the UsageLogDetail entity.
+func (_c *UsageLogCreate) SetDetail(v *UsageLogDetail) *UsageLogCreate {
+	return _c.SetDetailID(v.ID)
+}
+
 // Mutation returns the UsageLogMutation object of the builder.
 func (_c *UsageLogCreate) Mutation() *UsageLogMutation {
 	return _c.mutation
@@ -920,6 +940,22 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 			edge.Target.Nodes = append(edge.Target.Nodes, k)
 		}
 		_node.SubscriptionID = &nodes[0]
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.DetailIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2O,
+			Inverse: false,
+			Table:   usagelog.DetailTable,
+			Columns: []string{usagelog.DetailColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(usagelogdetail.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
 		_spec.Edges = append(_spec.Edges, edge)
 	}
 	return _node, _spec

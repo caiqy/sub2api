@@ -168,6 +168,8 @@ func (UsageLog) Edges() []ent.Edge {
 			Ref("usage_logs").
 			Field("subscription_id").
 			Unique(),
+		edge.To("detail", UsageLogDetail.Type).
+			Unique(),
 	}
 }
 

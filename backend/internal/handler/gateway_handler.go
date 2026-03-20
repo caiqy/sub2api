@@ -444,6 +444,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			requestPayloadHash := service.HashUsageRequestPayload(body)
 			inboundEndpoint := GetInboundEndpoint(c)
 			upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
+			detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
 
 			if result.ReasoningEffort == nil {
 				result.ReasoningEffort = service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort)
@@ -457,6 +458,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					User:               apiKey.User,
 					Account:            account,
 					Subscription:       subscription,
+					DetailSnapshot:     detailSnapshot,
 					InboundEndpoint:    inboundEndpoint,
 					UpstreamEndpoint:   upstreamEndpoint,
 					UserAgent:          userAgent,
@@ -763,6 +765,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			requestPayloadHash := service.HashUsageRequestPayload(body)
 			inboundEndpoint := GetInboundEndpoint(c)
 			upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
+			detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
 
 			if result.ReasoningEffort == nil {
 				result.ReasoningEffort = service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort)
@@ -776,6 +779,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					User:               currentAPIKey.User,
 					Account:            account,
 					Subscription:       currentSubscription,
+					DetailSnapshot:     detailSnapshot,
 					InboundEndpoint:    inboundEndpoint,
 					UpstreamEndpoint:   upstreamEndpoint,
 					UserAgent:          userAgent,

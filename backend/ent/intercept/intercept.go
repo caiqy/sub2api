@@ -25,6 +25,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/setting"
 	"github.com/Wei-Shaw/sub2api/ent/usagecleanuptask"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
+	"github.com/Wei-Shaw/sub2api/ent/usagelogdetail"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/ent/userallowedgroup"
 	"github.com/Wei-Shaw/sub2api/ent/userattributedefinition"
@@ -520,6 +521,33 @@ func (f TraverseUsageLog) Traverse(ctx context.Context, q ent.Query) error {
 	return fmt.Errorf("unexpected query type %T. expect *ent.UsageLogQuery", q)
 }
 
+// The UsageLogDetailFunc type is an adapter to allow the use of ordinary function as a Querier.
+type UsageLogDetailFunc func(context.Context, *ent.UsageLogDetailQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f UsageLogDetailFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.UsageLogDetailQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.UsageLogDetailQuery", q)
+}
+
+// The TraverseUsageLogDetail type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseUsageLogDetail func(context.Context, *ent.UsageLogDetailQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseUsageLogDetail) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseUsageLogDetail) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.UsageLogDetailQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.UsageLogDetailQuery", q)
+}
+
 // The UserFunc type is an adapter to allow the use of ordinary function as a Querier.
 type UserFunc func(context.Context, *ent.UserQuery) (ent.Value, error)
 
@@ -690,6 +718,8 @@ func NewQuery(q ent.Query) (Query, error) {
 		return &query[*ent.UsageCleanupTaskQuery, predicate.UsageCleanupTask, usagecleanuptask.OrderOption]{typ: ent.TypeUsageCleanupTask, tq: q}, nil
 	case *ent.UsageLogQuery:
 		return &query[*ent.UsageLogQuery, predicate.UsageLog, usagelog.OrderOption]{typ: ent.TypeUsageLog, tq: q}, nil
+	case *ent.UsageLogDetailQuery:
+		return &query[*ent.UsageLogDetailQuery, predicate.UsageLogDetail, usagelogdetail.OrderOption]{typ: ent.TypeUsageLogDetail, tq: q}, nil
 	case *ent.UserQuery:
 		return &query[*ent.UserQuery, predicate.User, user.OrderOption]{typ: ent.TypeUser, tq: q}, nil
 	case *ent.UserAllowedGroupQuery:

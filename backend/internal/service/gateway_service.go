@@ -7189,7 +7189,8 @@ type RecordUsageInput struct {
 	APIKey             *APIKey
 	User               *User
 	Account            *Account
-	Subscription       *UserSubscription  // 可选：订阅信息
+	Subscription       *UserSubscription // 可选：订阅信息
+	DetailSnapshot     *UsageLogDetailSnapshot
 	InboundEndpoint    string             // 入站端点（客户端请求路径）
 	UpstreamEndpoint   string             // 上游端点（标准化后的上游路径）
 	UserAgent          string             // 请求的 User-Agent
@@ -7608,6 +7609,7 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 		RateMultiplier:        multiplier,
 		AccountRateMultiplier: &accountRateMultiplier,
 		BillingType:           billingType,
+		DetailSnapshot:        input.DetailSnapshot.Normalize(),
 		Stream:                result.Stream,
 		DurationMs:            &durationMs,
 		FirstTokenMs:          result.FirstTokenMs,
@@ -7672,7 +7674,8 @@ type RecordUsageLongContextInput struct {
 	APIKey                *APIKey
 	User                  *User
 	Account               *Account
-	Subscription          *UserSubscription  // 可选：订阅信息
+	Subscription          *UserSubscription // 可选：订阅信息
+	DetailSnapshot        *UsageLogDetailSnapshot
 	InboundEndpoint       string             // 入站端点（客户端请求路径）
 	UpstreamEndpoint      string             // 上游端点（标准化后的上游路径）
 	UserAgent             string             // 请求的 User-Agent
@@ -7790,6 +7793,7 @@ func (s *GatewayService) RecordUsageWithLongContext(ctx context.Context, input *
 		RateMultiplier:        multiplier,
 		AccountRateMultiplier: &accountRateMultiplier,
 		BillingType:           billingType,
+		DetailSnapshot:        input.DetailSnapshot.Normalize(),
 		Stream:                result.Stream,
 		DurationMs:            &durationMs,
 		FirstTokenMs:          result.FirstTokenMs,

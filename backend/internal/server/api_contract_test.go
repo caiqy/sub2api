@@ -584,6 +584,12 @@ func TestAPIContracts(t *testing.T) {
 	}
 }
 
+func TestStubUsageLogRepo_ImplementsDetailLookup(t *testing.T) {
+	repo := newStubUsageLogRepo()
+	_, err := repo.GetDetailByUsageLogID(context.Background(), 123)
+	require.Error(t, err)
+}
+
 type contractDeps struct {
 	now         time.Time
 	router      http.Handler
@@ -1586,7 +1592,13 @@ func (r *stubUsageLogRepo) Create(ctx context.Context, log *service.UsageLog) (b
 	return false, errors.New("not implemented")
 }
 
+func (r *stubUsageLogRepo) PersistDetailBestEffort(ctx context.Context, log *service.UsageLog) {}
+
 func (r *stubUsageLogRepo) GetByID(ctx context.Context, id int64) (*service.UsageLog, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (r *stubUsageLogRepo) GetDetailByUsageLogID(ctx context.Context, usageLogID int64) (*service.UsageLogDetail, error) {
 	return nil, errors.New("not implemented")
 }
 

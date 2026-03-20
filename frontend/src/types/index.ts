@@ -1033,6 +1033,9 @@ export interface UsageLogAccountSummary {
 }
 
 export interface AdminUsageLog extends UsageLog {
+  // 是否存在明细数据（仅管理员可见）
+  has_detail: boolean
+
   // 账号计费倍率（仅管理员可见）
   account_rate_multiplier?: number | null
 
@@ -1041,6 +1044,41 @@ export interface AdminUsageLog extends UsageLog {
 
   // 最小账号信息（仅管理员接口返回）
   account?: UsageLogAccountSummary
+}
+
+export interface AdminUsageDetail {
+  usage_log_id: number
+  request_headers: string | null
+  request_body: string | null
+  response_headers: string | null
+  response_body: string | null
+  created_at: string
+}
+
+export interface AdminUsageStatsResponse {
+  total_requests: number
+  total_input_tokens: number
+  total_output_tokens: number
+  total_cache_tokens: number
+  total_tokens: number
+  total_cost: number
+  total_actual_cost: number
+  total_account_cost?: number
+  average_duration_ms: number
+  endpoints?: EndpointStat[]
+  upstream_endpoints?: EndpointStat[]
+  endpoint_paths?: EndpointStat[]
+}
+
+export interface SimpleUser {
+  id: number
+  email: string
+}
+
+export interface SimpleApiKey {
+  id: number
+  name: string
+  user_id: number
 }
 
 export interface UsageCleanupFilters {
@@ -1069,6 +1107,25 @@ export interface UsageCleanupTask {
   finished_at?: string | null
   created_at: string
   updated_at: string
+}
+
+export interface CreateUsageCleanupTaskRequest {
+  start_date: string
+  end_date: string
+  user_id?: number
+  api_key_id?: number
+  account_id?: number
+  group_id?: number
+  model?: string | null
+  request_type?: UsageRequestType | null
+  stream?: boolean | null
+  billing_type?: number | null
+  timezone?: string
+}
+
+export interface AdminUsageQueryParams extends UsageQueryParams {
+  user_id?: number
+  exact_total?: boolean
 }
 
 export interface RedeemCode {

@@ -147,6 +147,18 @@
           <span class="text-sm text-gray-600 dark:text-gray-400">{{ formatDuration(row.duration_ms) }}</span>
         </template>
 
+        <template #cell-actions="{ row }">
+          <button
+            data-test="usage-detail-button"
+            type="button"
+            class="btn btn-secondary btn-sm"
+            :disabled="!row.has_detail"
+            @click="$emit('detail', row)"
+          >
+            {{ t('admin.usage.viewDetail') }}
+          </button>
+        </template>
+
         <template #cell-created_at="{ value }">
           <span class="text-sm text-gray-600 dark:text-gray-400">{{ formatDateTime(value) }}</span>
         </template>
@@ -321,7 +333,7 @@ import Icon from '@/components/icons/Icon.vue'
 import type { AdminUsageLog } from '@/types'
 
 defineProps(['data', 'loading', 'columns'])
-defineEmits(['userClick'])
+defineEmits(['userClick', 'detail'])
 const { t } = useI18n()
 
 // Tooltip state - cost

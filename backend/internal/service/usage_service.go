@@ -13,7 +13,8 @@ import (
 )
 
 var (
-	ErrUsageLogNotFound = infraerrors.NotFound("USAGE_LOG_NOT_FOUND", "usage log not found")
+	ErrUsageLogNotFound       = infraerrors.NotFound("USAGE_LOG_NOT_FOUND", "usage log not found")
+	ErrUsageLogDetailNotFound = infraerrors.NotFound("USAGE_LOG_DETAIL_NOT_FOUND", fmt.Sprintf("usage log detail not found (only recent %d records are retained)", UsageLogDetailRetentionLimit))
 )
 
 // CreateUsageLogRequest 创建使用日志请求
@@ -73,6 +74,7 @@ func NewUsageService(usageRepo UsageLogRepository, userRepo UserRepository, entC
 // Create 创建使用日志
 func (s *UsageService) Create(ctx context.Context, req CreateUsageLogRequest) (*UsageLog, error) {
 	// 使用数据库事务保证「使用日志插入」与「扣费」的原子性，避免重复扣费或漏扣风险。
+	outerTx := dbent.TxFromContext(ctx)
 	tx, err := s.entClient.Tx(ctx)
 	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
 		return nil, fmt.Errorf("begin transaction: %w", err)
@@ -132,11 +134,40 @@ func (s *UsageService) Create(ctx context.Context, req CreateUsageLogRequest) (*
 		if err := tx.Commit(); err != nil {
 			return nil, fmt.Errorf("commit transaction: %w", err)
 		}
+		if inserted {
+			s.persistUsageLogDetailBestEffort(ctx, usageLog)
+		}
+	} else if inserted {
+		s.persistUsageLogDetailOnCommitBestEffort(outerTx, ctx, usageLog)
 	}
 
 	s.invalidateUsageCaches(ctx, req.UserID, balanceUpdated)
 
 	return usageLog, nil
+}
+
+func (s *UsageService) persistUsageLogDetailOnCommitBestEffort(tx *dbent.Tx, ctx context.Context, log *UsageLog) {
+	if tx == nil || log == nil || log.DetailSnapshot == nil {
+		return
+	}
+	tx.OnCommit(func(next dbent.Committer) dbent.Committer {
+		return dbent.CommitFunc(func(commitCtx context.Context, commitTx *dbent.Tx) error {
+			if err := next.Commit(commitCtx, commitTx); err != nil {
+				return err
+			}
+			s.persistUsageLogDetailBestEffort(ctx, log)
+			return nil
+		})
+	})
+}
+
+func (s *UsageService) persistUsageLogDetailBestEffort(ctx context.Context, log *UsageLog) {
+	if log == nil || log.DetailSnapshot == nil {
+		return
+	}
+	detailCtx, cancel := NewUsageLogDetailBestEffortContext(ctx)
+	defer cancel()
+	s.usageRepo.PersistDetailBestEffort(detailCtx, log)
 }
 
 func (s *UsageService) invalidateUsageCaches(ctx context.Context, userID int64, balanceUpdated bool) {
@@ -153,6 +184,11 @@ func (s *UsageService) GetByID(ctx context.Context, id int64) (*UsageLog, error)
 		return nil, fmt.Errorf("get usage log: %w", err)
 	}
 	return log, nil
+}
+
+// GetDetailByUsageLogID 根据 usage log ID 获取详情。
+func (s *UsageService) GetDetailByUsageLogID(ctx context.Context, usageLogID int64) (*UsageLogDetail, error) {
+	return s.usageRepo.GetDetailByUsageLogID(ctx, usageLogID)
 }
 
 // ListByUser 获取用户的使用日志列表

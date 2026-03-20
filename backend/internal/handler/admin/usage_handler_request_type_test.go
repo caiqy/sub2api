@@ -2,11 +2,14 @@ package admin
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -17,12 +20,14 @@ type adminUsageRepoCapture struct {
 	service.UsageLogRepository
 	listFilters  usagestats.UsageLogFilters
 	statsFilters usagestats.UsageLogFilters
+	listLogs     []service.UsageLog
 }
 
 func (s *adminUsageRepoCapture) ListWithFilters(ctx context.Context, params pagination.PaginationParams, filters usagestats.UsageLogFilters) ([]service.UsageLog, *pagination.PaginationResult, error) {
 	s.listFilters = filters
-	return []service.UsageLog{}, &pagination.PaginationResult{
-		Total:    0,
+	logs := s.listLogs
+	return logs, &pagination.PaginationResult{
+		Total:    int64(len(logs)),
 		Page:     params.Page,
 		PageSize: params.PageSize,
 		Pages:    0,
@@ -56,6 +61,38 @@ func TestAdminUsageListRequestTypePriority(t *testing.T) {
 	require.NotNil(t, repo.listFilters.RequestType)
 	require.Equal(t, int16(service.RequestTypeWSV2), *repo.listFilters.RequestType)
 	require.Nil(t, repo.listFilters.Stream)
+}
+
+func TestAdminUsageListRequestTypePriorityHasDetailMapping(t *testing.T) {
+	repo := &adminUsageRepoCapture{listLogs: []service.UsageLog{{
+		ID:          1,
+		UserID:      2,
+		APIKeyID:    3,
+		AccountID:   4,
+		RequestID:   "req-1",
+		Model:       "gpt-4.1",
+		RequestType: service.RequestTypeWSV2,
+		HasDetail:   true,
+		CreatedAt:   time.Date(2026, 3, 20, 12, 0, 0, 0, time.UTC),
+	}}}
+	router := newAdminUsageRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/usage?request_type=ws_v2", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var got response.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	dataBytes, err := json.Marshal(got.Data)
+	require.NoError(t, err)
+	var page struct {
+		Items []map[string]any `json:"items"`
+	}
+	require.NoError(t, json.Unmarshal(dataBytes, &page))
+	require.Len(t, page.Items, 1)
+	require.Equal(t, true, page.Items[0]["has_detail"])
 }
 
 func TestAdminUsageListInvalidRequestType(t *testing.T) {

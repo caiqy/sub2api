@@ -97,7 +97,7 @@
           </div>
         </template>
       </UsageFilters>
-      <UsageTable :data="usageLogs" :loading="loading" :columns="visibleColumns" @userClick="handleUserClick" />
+      <UsageTable :data="usageLogs" :loading="loading" :columns="visibleColumns" @userClick="handleUserClick" @detail="handleDetailClick" />
       <Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
     </div>
   </AppLayout>
@@ -116,6 +116,15 @@
     :hide-actions="true"
     @close="showBalanceHistoryModal = false; balanceHistoryUser = null"
   />
+  <UsageDetailModal
+    :show="showUsageDetailModal"
+    :usage-log="selectedUsageLog"
+    :detail="usageDetail"
+    :loading="usageDetailLoading"
+    :error="usageDetailError"
+    @close="closeUsageDetailModal"
+    @retry="retryUsageDetail"
+  />
 </template>
 
 <script setup lang="ts">
@@ -131,11 +140,12 @@ import AppLayout from '@/components/layout/AppLayout.vue'; import Pagination fro
 import UsageStatsCards from '@/components/admin/usage/UsageStatsCards.vue'; import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
 import UsageTable from '@/components/admin/usage/UsageTable.vue'; import UsageExportProgress from '@/components/admin/usage/UsageExportProgress.vue'
 import UsageCleanupDialog from '@/components/admin/usage/UsageCleanupDialog.vue'
+import UsageDetailModal from '@/components/admin/usage/UsageDetailModal.vue'
 import UserBalanceHistoryModal from '@/components/admin/user/UserBalanceHistoryModal.vue'
 import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'; import GroupDistributionChart from '@/components/charts/GroupDistributionChart.vue'; import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
 import EndpointDistributionChart from '@/components/charts/EndpointDistributionChart.vue'
 import Icon from '@/components/icons/Icon.vue'
-import type { AdminUsageLog, TrendDataPoint, ModelStat, GroupStat, EndpointStat, AdminUser } from '@/types'; import type { AdminUsageStatsResponse, AdminUsageQueryParams } from '@/api/admin/usage'
+import type { AdminUsageDetail, AdminUsageLog, TrendDataPoint, ModelStat, GroupStat, EndpointStat, AdminUser, AdminUsageStatsResponse, AdminUsageQueryParams } from '@/types'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -163,11 +173,17 @@ let abortController: AbortController | null = null; let exportAbortController: A
 let chartReqSeq = 0
 let statsReqSeq = 0
 let modelStatsReqSeq = 0
+let usageDetailReqSeq = 0
 const exportProgress = reactive({ show: false, progress: 0, current: 0, total: 0, estimatedTime: '' })
 const cleanupDialogVisible = ref(false)
 // Balance history modal state
 const showBalanceHistoryModal = ref(false)
 const balanceHistoryUser = ref<AdminUser | null>(null)
+const showUsageDetailModal = ref(false)
+const selectedUsageLog = ref<AdminUsageLog | null>(null)
+const usageDetail = ref<AdminUsageDetail | null>(null)
+const usageDetailLoading = ref(false)
+const usageDetailError = ref('')
 
 const handleUserClick = async (userId: number) => {
   try {
@@ -177,6 +193,54 @@ const handleUserClick = async (userId: number) => {
   } catch {
     appStore.showError(t('admin.usage.failedToLoadUser'))
   }
+}
+
+const getUsageDetailErrorMessage = (error: any) => {
+  if (error?.response?.status === 404) return t('admin.usage.detailNotFound')
+  return t('admin.usage.failedToLoadDetail')
+}
+
+const loadUsageDetail = async () => {
+  if (!selectedUsageLog.value) return
+  const seq = ++usageDetailReqSeq
+  const usageLogId = selectedUsageLog.value.id
+  usageDetailLoading.value = true
+  usageDetailError.value = ''
+  try {
+    const detail = await adminAPI.usage.getDetail(usageLogId)
+    if (seq !== usageDetailReqSeq || !showUsageDetailModal.value || selectedUsageLog.value?.id !== usageLogId) return
+    usageDetail.value = detail
+  } catch (error) {
+    if (seq !== usageDetailReqSeq || !showUsageDetailModal.value || selectedUsageLog.value?.id !== usageLogId) return
+    usageDetail.value = null
+    usageDetailError.value = getUsageDetailErrorMessage(error)
+    appStore.showError(usageDetailError.value)
+  } finally {
+    if (seq === usageDetailReqSeq && showUsageDetailModal.value && selectedUsageLog.value?.id === usageLogId) {
+      usageDetailLoading.value = false
+    }
+  }
+}
+
+const handleDetailClick = async (log: AdminUsageLog) => {
+  selectedUsageLog.value = log
+  usageDetail.value = null
+  usageDetailError.value = ''
+  showUsageDetailModal.value = true
+  await loadUsageDetail()
+}
+
+const retryUsageDetail = async () => {
+  await loadUsageDetail()
+}
+
+const closeUsageDetailModal = () => {
+  usageDetailReqSeq++
+  showUsageDetailModal.value = false
+  selectedUsageLog.value = null
+  usageDetail.value = null
+  usageDetailLoading.value = false
+  usageDetailError.value = ''
 }
 
 const granularityOptions = computed(() => [{ value: 'day', label: t('admin.dashboard.day') }, { value: 'hour', label: t('admin.dashboard.hour') }])
@@ -483,7 +547,8 @@ const allColumns = computed(() => [
   { key: 'duration', label: t('usage.duration'), sortable: false },
   { key: 'created_at', label: t('usage.time'), sortable: true },
   { key: 'user_agent', label: t('usage.userAgent'), sortable: false },
-  { key: 'ip_address', label: t('admin.usage.ipAddress'), sortable: false }
+  { key: 'ip_address', label: t('admin.usage.ipAddress'), sortable: false },
+  { key: 'actions', label: t('common.actions'), sortable: false }
 ])
 
 const hiddenColumns = reactive<Set<string>>(new Set())

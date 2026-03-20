@@ -192,6 +192,24 @@ func (h *UsageHandler) List(c *gin.Context) {
 	response.Paginated(c, out, result.Total, page, pageSize)
 }
 
+// Detail handles getting usage detail by usage log ID.
+// GET /api/v1/admin/usage/:id/detail
+func (h *UsageHandler) Detail(c *gin.Context) {
+	id, err := strconv.ParseInt(strings.TrimSpace(c.Param("id")), 10, 64)
+	if err != nil || id <= 0 {
+		response.BadRequest(c, "Invalid usage id")
+		return
+	}
+
+	detail, err := h.usageService.GetDetailByUsageLogID(c.Request.Context(), id)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, dto.UsageLogDetailFromService(detail))
+}
+
 // Stats handles getting usage statistics with filters
 // GET /api/v1/admin/usage/stats
 func (h *UsageHandler) Stats(c *gin.Context) {

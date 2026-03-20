@@ -580,9 +580,24 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 	}
 	return &AdminUsageLog{
 		UsageLog:              usageLogFromServiceUser(l),
+		HasDetail:             l.HasDetail,
 		AccountRateMultiplier: l.AccountRateMultiplier,
 		IPAddress:             l.IPAddress,
 		Account:               AccountSummaryFromService(l.Account),
+	}
+}
+
+func UsageLogDetailFromService(detail *service.UsageLogDetail) *AdminUsageDetail {
+	if detail == nil {
+		return nil
+	}
+	return &AdminUsageDetail{
+		UsageLogID:      detail.UsageLogID,
+		RequestHeaders:  detail.RequestHeaders,
+		RequestBody:     detail.RequestBody,
+		ResponseHeaders: detail.ResponseHeaders,
+		ResponseBody:    detail.ResponseBody,
+		CreatedAt:       detail.CreatedAt,
 	}
 }
 
