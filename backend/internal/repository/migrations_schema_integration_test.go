@@ -5,21 +5,31 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"net/url"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
 func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
-	tx := testTx(t)
+	db := newIsolatedMigrationDB(t)
+	tx, err := db.BeginTx(context.Background(), nil)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = tx.Rollback()
+	})
 
 	// Re-apply migrations to verify idempotency (no errors, no duplicate rows).
-	require.NoError(t, ApplyMigrations(context.Background(), integrationDB))
+	require.NoError(t, ApplyMigrations(context.Background(), db))
 
 	// schema_migrations should have at least the current migration set.
 	var applied int
 	require.NoError(t, tx.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM schema_migrations").Scan(&applied))
 	require.GreaterOrEqual(t, applied, 7, "expected schema_migrations to contain applied migrations")
+	requireMigrationApplied(t, tx, "077_add_usage_log_details.sql")
 
 	// users: columns required by repository queries
 	requireColumn(t, tx, "users", "username", "character varying", 100, false)
@@ -44,6 +54,20 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	requireColumn(t, tx, "usage_logs", "billing_type", "smallint", 0, false)
 	requireColumn(t, tx, "usage_logs", "request_type", "smallint", 0, false)
 	requireColumn(t, tx, "usage_logs", "openai_ws_mode", "boolean", 0, false)
+
+	// usage_log_details: detail snapshot table for payload retention
+	var usageLogDetailsRegclass sql.NullString
+	require.NoError(t, tx.QueryRowContext(context.Background(), "SELECT to_regclass('public.usage_log_details')").Scan(&usageLogDetailsRegclass))
+	require.True(t, usageLogDetailsRegclass.Valid, "expected usage_log_details table to exist")
+	requireColumn(t, tx, "usage_log_details", "usage_log_id", "bigint", 0, false)
+	requireColumn(t, tx, "usage_log_details", "request_headers", "text", 0, false)
+	requireColumn(t, tx, "usage_log_details", "request_body", "text", 0, false)
+	requireColumn(t, tx, "usage_log_details", "response_headers", "text", 0, false)
+	requireColumn(t, tx, "usage_log_details", "response_body", "text", 0, false)
+	requireColumn(t, tx, "usage_log_details", "created_at", "timestamp with time zone", 0, false)
+	requireUniqueConstraintOnColumn(t, tx, "usage_log_details", "usage_log_id")
+	requireIndexOnColumn(t, tx, "usage_log_details", "created_at")
+	requireForeignKey(t, tx, "usage_log_details", "usage_log_id", "usage_logs", "id", true)
 
 	// usage_billing_dedup: billing idempotency narrow table
 	var usageBillingDedupRegclass sql.NullString
@@ -87,6 +111,59 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 
 	// user_allowed_groups: created_at should be timestamptz
 	requireColumn(t, tx, "user_allowed_groups", "created_at", "timestamp with time zone", 0, false)
+}
+
+func newIsolatedMigrationDB(t *testing.T) *sql.DB {
+	t.Helper()
+	require.NotEmpty(t, integrationDSN, "expected integration dsn to be initialized")
+
+	adminDSN, dbName := isolatedPostgresDSNs(t)
+	adminDB, err := openSQLWithRetry(context.Background(), adminDSN, 30*time.Second)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = adminDB.Close()
+	})
+
+	_, err = adminDB.ExecContext(context.Background(), fmt.Sprintf("CREATE DATABASE %s", pqQuoteIdentifier(dbName)))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = adminDB.ExecContext(context.Background(), fmt.Sprintf("DROP DATABASE IF EXISTS %s WITH (FORCE)", pqQuoteIdentifier(dbName)))
+	})
+
+	testDSN := isolatedDatabaseDSN(t, dbName)
+	db, err := openSQLWithRetry(context.Background(), testDSN, 30*time.Second)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+
+	require.NoError(t, ApplyMigrations(context.Background(), db))
+	return db
+}
+
+func isolatedPostgresDSNs(t *testing.T) (adminDSN, dbName string) {
+	t.Helper()
+
+	parsed, err := url.Parse(integrationDSN)
+	require.NoError(t, err)
+	require.NotEmpty(t, strings.TrimPrefix(parsed.Path, "/"), "expected database name in dsn")
+
+	dbName = fmt.Sprintf("sub2api_migrations_%d", time.Now().UnixNano())
+	parsed.Path = "/postgres"
+	return parsed.String(), dbName
+}
+
+func isolatedDatabaseDSN(t *testing.T, dbName string) string {
+	t.Helper()
+
+	parsed, err := url.Parse(integrationDSN)
+	require.NoError(t, err)
+	parsed.Path = "/" + dbName
+	return parsed.String()
+}
+
+func pqQuoteIdentifier(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
 func requireIndex(t *testing.T, tx *sql.Tx, table, index string) {
@@ -138,4 +215,85 @@ WHERE table_schema = 'public'
 	} else {
 		require.Equal(t, "NO", row.Nullable, "nullable mismatch for %s.%s", table, column)
 	}
+}
+
+func requireMigrationApplied(t *testing.T, tx *sql.Tx, filename string) {
+	t.Helper()
+
+	var exists bool
+	err := tx.QueryRowContext(context.Background(), `
+SELECT EXISTS (
+	SELECT 1 FROM schema_migrations WHERE filename = $1
+)
+`, filename).Scan(&exists)
+	require.NoError(t, err, "query schema_migrations for %s", filename)
+	require.True(t, exists, "expected migration %s to be applied", filename)
+}
+
+func requireUniqueConstraintOnColumn(t *testing.T, tx *sql.Tx, table, column string) {
+	t.Helper()
+
+	var exists bool
+	err := tx.QueryRowContext(context.Background(), `
+SELECT EXISTS (
+	SELECT 1
+	FROM pg_constraint c
+	JOIN pg_class tbl ON tbl.oid = c.conrelid
+	JOIN pg_namespace ns ON ns.oid = tbl.relnamespace
+	JOIN unnest(c.conkey) WITH ORDINALITY AS cols(attnum, ord) ON TRUE
+	JOIN pg_attribute attr ON attr.attrelid = tbl.oid AND attr.attnum = cols.attnum
+	WHERE ns.nspname = 'public'
+	  AND tbl.relname = $1
+	  AND c.contype = 'u'
+	GROUP BY c.oid
+	HAVING COUNT(*) = 1 AND BOOL_AND(attr.attname = $2)
+)
+`, table, column).Scan(&exists)
+	require.NoError(t, err, "query unique constraint for %s.%s", table, column)
+	require.True(t, exists, "expected unique constraint on %s.%s", table, column)
+}
+
+func requireIndexOnColumn(t *testing.T, tx *sql.Tx, table, column string) {
+	t.Helper()
+
+	var exists bool
+	err := tx.QueryRowContext(context.Background(), `
+SELECT EXISTS (
+	SELECT 1
+	FROM pg_indexes
+	WHERE schemaname = 'public'
+	  AND tablename = $1
+	  AND indexdef ILIKE '%' || quote_ident($2) || '%'
+)
+`, table, column).Scan(&exists)
+	require.NoError(t, err, "query index for %s.%s", table, column)
+	require.True(t, exists, "expected index on %s.%s", table, column)
+}
+
+func requireForeignKey(t *testing.T, tx *sql.Tx, table, column, refTable, refColumn string, onDeleteCascade bool) {
+	t.Helper()
+
+	var exists bool
+	err := tx.QueryRowContext(context.Background(), `
+SELECT EXISTS (
+	SELECT 1
+	FROM pg_constraint c
+	JOIN pg_class tbl ON tbl.oid = c.conrelid
+	JOIN pg_namespace ns ON ns.oid = tbl.relnamespace
+	JOIN pg_class ref_tbl ON ref_tbl.oid = c.confrelid
+	JOIN pg_attribute attr ON attr.attrelid = tbl.oid AND attr.attnum = c.conkey[1]
+	JOIN pg_attribute ref_attr ON ref_attr.attrelid = ref_tbl.oid AND ref_attr.attnum = c.confkey[1]
+	WHERE ns.nspname = 'public'
+	  AND c.contype = 'f'
+	  AND array_length(c.conkey, 1) = 1
+	  AND array_length(c.confkey, 1) = 1
+	  AND tbl.relname = $1
+	  AND attr.attname = $2
+	  AND ref_tbl.relname = $3
+	  AND ref_attr.attname = $4
+	  AND ($5 = FALSE OR c.confdeltype = 'c')
+)
+`, table, column, refTable, refColumn, onDeleteCascade).Scan(&exists)
+	require.NoError(t, err, "query foreign key for %s.%s", table, column)
+	require.True(t, exists, "expected foreign key on %s.%s referencing %s.%s", table, column, refTable, refColumn)
 }

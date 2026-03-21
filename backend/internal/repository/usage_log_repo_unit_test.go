@@ -3,10 +3,15 @@
 package repository
 
 import (
+	"context"
+	"database/sql/driver"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -64,4 +69,71 @@ func TestBuildUsageLogBatchInsertQuery_UsesConflictDoNothing(t *testing.T) {
 
 	require.Contains(t, query, "ON CONFLICT (request_id, api_key_id) DO NOTHING")
 	require.NotContains(t, strings.ToUpper(query), "DO UPDATE")
+}
+
+func TestListUsageLogsWithPagination_UsesHasDetailWhenDetailTableExists(t *testing.T) {
+	db, mock := newSQLMock(t)
+	repo := &usageLogRepository{sql: db}
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM usage_logs WHERE user_id = $1")).
+		WithArgs(int64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT to_regclass('public.usage_log_details') IS NOT NULL")).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT "+usageLogListSelectColumns+" FROM usage_logs WHERE user_id = $1 ORDER BY id DESC LIMIT $2 OFFSET $3")).
+		WithArgs(int64(7), 10, 0).
+		WillReturnRows(sqlmock.NewRows(usageLogListRowColumns()).AddRow(usageLogListRowValues(true)...))
+
+	logs, page, err := repo.listUsageLogsWithPagination(context.Background(), "WHERE user_id = $1", []any{int64(7)}, pagination.PaginationParams{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	require.Len(t, logs, 1)
+	require.True(t, logs[0].HasDetail)
+	require.NotNil(t, page)
+	require.Equal(t, int64(1), page.Total)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestListUsageLogsWithPagination_DegradesWhenDetailTableMissing(t *testing.T) {
+	db, mock := newSQLMock(t)
+	repo := &usageLogRepository{sql: db}
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM usage_logs WHERE user_id = $1")).
+		WithArgs(int64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT to_regclass('public.usage_log_details') IS NOT NULL")).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT "+usageLogSelectColumns+", FALSE AS has_detail FROM usage_logs WHERE user_id = $1 ORDER BY id DESC LIMIT $2 OFFSET $3")).
+		WithArgs(int64(7), 10, 0).
+		WillReturnRows(sqlmock.NewRows(usageLogListRowColumns()).AddRow(usageLogListRowValues(false)...))
+
+	logs, page, err := repo.listUsageLogsWithPagination(context.Background(), "WHERE user_id = $1", []any{int64(7)}, pagination.PaginationParams{Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	require.Len(t, logs, 1)
+	require.False(t, logs[0].HasDetail)
+	require.NotNil(t, page)
+	require.Equal(t, int64(1), page.Total)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func usageLogListRowColumns() []string {
+	return []string{
+		"id", "user_id", "api_key_id", "account_id", "request_id", "model", "upstream_model", "group_id", "subscription_id",
+		"input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens", "cache_creation_5m_tokens", "cache_creation_1h_tokens",
+		"input_cost", "output_cost", "cache_creation_cost", "cache_read_cost", "total_cost", "actual_cost", "rate_multiplier",
+		"account_rate_multiplier", "billing_type", "request_type", "stream", "openai_ws_mode", "duration_ms", "first_token_ms",
+		"user_agent", "ip_address", "image_count", "image_size", "media_type", "service_tier", "reasoning_effort",
+		"inbound_endpoint", "upstream_endpoint", "cache_ttl_overridden", "created_at", "has_detail",
+	}
+}
+
+func usageLogListRowValues(hasDetail bool) []driver.Value {
+	createdAt := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
+	return []driver.Value{
+		int64(101), int64(7), int64(8), int64(9), "req-list", "claude-3", nil, nil, nil,
+		10, 20, 0, 0, 0, 0,
+		0.1, 0.2, 0.0, 0.0, 0.3, 0.3, 1.0,
+		nil, int16(0), int16(service.RequestTypeSync), false, false, nil, nil,
+		nil, nil, 0, nil, nil, nil, nil,
+		nil, nil, false, createdAt, hasDetail,
+	}
 }

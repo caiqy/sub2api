@@ -818,6 +818,36 @@ func (s *UsageLogRepoSuite) TestListWithFilters_PopulatesHasDetail() {
 	s.Require().True(logs[1].HasDetail)
 }
 
+func (s *UsageLogRepoSuite) TestListWithFilters_DegradesWhenDetailTableMissing() {
+	user := mustCreateUser(s.T(), s.client, &service.User{Email: "filters-missing-detail-table@test.com"})
+	apiKey := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: "sk-filters-missing-detail-table", Name: "k"})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-filters-missing-detail-table"})
+
+	older := s.createUsageLog(user, apiKey, account, 10, 20, 0.5, time.Now().UTC())
+	newer := s.createUsageLog(user, apiKey, account, 30, 40, 0.7, time.Now().UTC().Add(1*time.Second))
+
+	_, err := s.tx.ExecContext(s.ctx, "DROP TABLE usage_log_details")
+	s.Require().NoError(err)
+
+	var detailTableRegclass *string
+	err = scanSingleRow(s.ctx, s.tx, "SELECT to_regclass('public.usage_log_details')", nil, &detailTableRegclass)
+	s.Require().NoError(err)
+	s.Require().Nil(detailTableRegclass)
+
+	_, err = s.tx.QueryContext(s.ctx, "SELECT EXISTS (SELECT 1 FROM usage_log_details WHERE usage_log_id = $1)", older.ID)
+	s.Require().Error(err)
+
+	filters := usagestats.UsageLogFilters{UserID: user.ID}
+	logs, page, err := s.repo.ListWithFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, filters)
+	s.Require().NoError(err)
+	s.Require().Len(logs, 2)
+	s.Require().Equal(int64(2), page.Total)
+	s.Require().Equal(newer.ID, logs[0].ID)
+	s.Require().False(logs[0].HasDetail)
+	s.Require().Equal(older.ID, logs[1].ID)
+	s.Require().False(logs[1].HasDetail)
+}
+
 // --- GetDashboardStats ---
 
 func (s *UsageLogRepoSuite) TestDashboardStats_TodayTotalsAndPerformance() {

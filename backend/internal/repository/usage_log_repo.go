@@ -30,6 +30,7 @@ import (
 
 const usageLogSelectColumns = "id, user_id, api_key_id, account_id, request_id, model, upstream_model, group_id, subscription_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_creation_5m_tokens, cache_creation_1h_tokens, input_cost, output_cost, cache_creation_cost, cache_read_cost, total_cost, actual_cost, rate_multiplier, account_rate_multiplier, billing_type, request_type, stream, openai_ws_mode, duration_ms, first_token_ms, user_agent, ip_address, image_count, image_size, media_type, service_tier, reasoning_effort, inbound_endpoint, upstream_endpoint, cache_ttl_overridden, created_at"
 const usageLogListSelectColumns = usageLogSelectColumns + ", EXISTS (SELECT 1 FROM usage_log_details WHERE usage_log_id = usage_logs.id) AS has_detail"
+const usageLogListSelectColumnsWithoutDetail = usageLogSelectColumns + ", FALSE AS has_detail"
 
 var usageLogInsertArgTypes = [...]string{
 	"bigint",
@@ -3678,11 +3679,15 @@ func (r *usageLogRepository) listUsageLogsWithPagination(ctx context.Context, wh
 	if err := scanSingleRow(ctx, r.sql, countQuery, args, &total); err != nil {
 		return nil, nil, err
 	}
+	selectColumns, err := r.usageLogListSelectColumns(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	limitPos := len(args) + 1
 	offsetPos := len(args) + 2
 	listArgs := append(append([]any{}, args...), params.Limit(), params.Offset())
-	query := fmt.Sprintf("SELECT %s FROM usage_logs %s ORDER BY id DESC LIMIT $%d OFFSET $%d", usageLogListSelectColumns, whereClause, limitPos, offsetPos)
+	query := fmt.Sprintf("SELECT %s FROM usage_logs %s ORDER BY id DESC LIMIT $%d OFFSET $%d", selectColumns, whereClause, limitPos, offsetPos)
 	logs, err := r.queryUsageLogsWithHasDetail(ctx, query, listArgs...)
 	if err != nil {
 		return nil, nil, err
@@ -3693,11 +3698,15 @@ func (r *usageLogRepository) listUsageLogsWithPagination(ctx context.Context, wh
 func (r *usageLogRepository) listUsageLogsWithFastPagination(ctx context.Context, whereClause string, args []any, params pagination.PaginationParams) ([]service.UsageLog, *pagination.PaginationResult, error) {
 	limit := params.Limit()
 	offset := params.Offset()
+	selectColumns, err := r.usageLogListSelectColumns(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	limitPos := len(args) + 1
 	offsetPos := len(args) + 2
 	listArgs := append(append([]any{}, args...), limit+1, offset)
-	query := fmt.Sprintf("SELECT %s FROM usage_logs %s ORDER BY id DESC LIMIT $%d OFFSET $%d", usageLogListSelectColumns, whereClause, limitPos, offsetPos)
+	query := fmt.Sprintf("SELECT %s FROM usage_logs %s ORDER BY id DESC LIMIT $%d OFFSET $%d", selectColumns, whereClause, limitPos, offsetPos)
 
 	logs, err := r.queryUsageLogsWithHasDetail(ctx, query, listArgs...)
 	if err != nil {
@@ -3717,6 +3726,25 @@ func (r *usageLogRepository) listUsageLogsWithFastPagination(ctx context.Context
 	}
 
 	return logs, paginationResultFromTotal(total, params), nil
+}
+
+func (r *usageLogRepository) usageLogListSelectColumns(ctx context.Context) (string, error) {
+	exists, err := r.usageLogDetailTableExists(ctx)
+	if err != nil {
+		return "", err
+	}
+	if exists {
+		return usageLogListSelectColumns, nil
+	}
+	return usageLogListSelectColumnsWithoutDetail, nil
+}
+
+func (r *usageLogRepository) usageLogDetailTableExists(ctx context.Context) (bool, error) {
+	var exists bool
+	if err := scanSingleRow(ctx, r.sql, "SELECT to_regclass('public.usage_log_details') IS NOT NULL", nil, &exists); err != nil {
+		return false, err
+	}
+	return exists, nil
 }
 
 func (r *usageLogRepository) queryUsageLogs(ctx context.Context, query string, args ...any) (logs []service.UsageLog, err error) {
