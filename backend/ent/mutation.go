@@ -21380,20 +21380,22 @@ func (m *UsageLogMutation) ResetEdge(name string) error {
 // UsageLogDetailMutation represents an operation that mutates the UsageLogDetail nodes in the graph.
 type UsageLogDetailMutation struct {
 	config
-	op               Op
-	typ              string
-	id               *int64
-	request_headers  *string
-	request_body     *string
-	response_headers *string
-	response_body    *string
-	created_at       *time.Time
-	clearedFields    map[string]struct{}
-	usage_log        *int64
-	clearedusage_log bool
-	done             bool
-	oldValue         func(context.Context) (*UsageLogDetail, error)
-	predicates       []predicate.UsageLogDetail
+	op                       Op
+	typ                      string
+	id                       *int64
+	request_headers          *string
+	request_body             *string
+	upstream_request_headers *string
+	upstream_request_body    *string
+	response_headers         *string
+	response_body            *string
+	created_at               *time.Time
+	clearedFields            map[string]struct{}
+	usage_log                *int64
+	clearedusage_log         bool
+	done                     bool
+	oldValue                 func(context.Context) (*UsageLogDetail, error)
+	predicates               []predicate.UsageLogDetail
 }
 
 var _ ent.Mutation = (*UsageLogDetailMutation)(nil)
@@ -21602,6 +21604,78 @@ func (m *UsageLogDetailMutation) ResetRequestBody() {
 	m.request_body = nil
 }
 
+// SetUpstreamRequestHeaders sets the "upstream_request_headers" field.
+func (m *UsageLogDetailMutation) SetUpstreamRequestHeaders(s string) {
+	m.upstream_request_headers = &s
+}
+
+// UpstreamRequestHeaders returns the value of the "upstream_request_headers" field in the mutation.
+func (m *UsageLogDetailMutation) UpstreamRequestHeaders() (r string, exists bool) {
+	v := m.upstream_request_headers
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpstreamRequestHeaders returns the old "upstream_request_headers" field's value of the UsageLogDetail entity.
+// If the UsageLogDetail object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogDetailMutation) OldUpstreamRequestHeaders(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpstreamRequestHeaders is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpstreamRequestHeaders requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpstreamRequestHeaders: %w", err)
+	}
+	return oldValue.UpstreamRequestHeaders, nil
+}
+
+// ResetUpstreamRequestHeaders resets all changes to the "upstream_request_headers" field.
+func (m *UsageLogDetailMutation) ResetUpstreamRequestHeaders() {
+	m.upstream_request_headers = nil
+}
+
+// SetUpstreamRequestBody sets the "upstream_request_body" field.
+func (m *UsageLogDetailMutation) SetUpstreamRequestBody(s string) {
+	m.upstream_request_body = &s
+}
+
+// UpstreamRequestBody returns the value of the "upstream_request_body" field in the mutation.
+func (m *UsageLogDetailMutation) UpstreamRequestBody() (r string, exists bool) {
+	v := m.upstream_request_body
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpstreamRequestBody returns the old "upstream_request_body" field's value of the UsageLogDetail entity.
+// If the UsageLogDetail object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogDetailMutation) OldUpstreamRequestBody(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpstreamRequestBody is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpstreamRequestBody requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpstreamRequestBody: %w", err)
+	}
+	return oldValue.UpstreamRequestBody, nil
+}
+
+// ResetUpstreamRequestBody resets all changes to the "upstream_request_body" field.
+func (m *UsageLogDetailMutation) ResetUpstreamRequestBody() {
+	m.upstream_request_body = nil
+}
+
 // SetResponseHeaders sets the "response_headers" field.
 func (m *UsageLogDetailMutation) SetResponseHeaders(s string) {
 	m.response_headers = &s
@@ -21771,7 +21845,7 @@ func (m *UsageLogDetailMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogDetailMutation) Fields() []string {
-	fields := make([]string, 0, 6)
+	fields := make([]string, 0, 8)
 	if m.usage_log != nil {
 		fields = append(fields, usagelogdetail.FieldUsageLogID)
 	}
@@ -21780,6 +21854,12 @@ func (m *UsageLogDetailMutation) Fields() []string {
 	}
 	if m.request_body != nil {
 		fields = append(fields, usagelogdetail.FieldRequestBody)
+	}
+	if m.upstream_request_headers != nil {
+		fields = append(fields, usagelogdetail.FieldUpstreamRequestHeaders)
+	}
+	if m.upstream_request_body != nil {
+		fields = append(fields, usagelogdetail.FieldUpstreamRequestBody)
 	}
 	if m.response_headers != nil {
 		fields = append(fields, usagelogdetail.FieldResponseHeaders)
@@ -21804,6 +21884,10 @@ func (m *UsageLogDetailMutation) Field(name string) (ent.Value, bool) {
 		return m.RequestHeaders()
 	case usagelogdetail.FieldRequestBody:
 		return m.RequestBody()
+	case usagelogdetail.FieldUpstreamRequestHeaders:
+		return m.UpstreamRequestHeaders()
+	case usagelogdetail.FieldUpstreamRequestBody:
+		return m.UpstreamRequestBody()
 	case usagelogdetail.FieldResponseHeaders:
 		return m.ResponseHeaders()
 	case usagelogdetail.FieldResponseBody:
@@ -21825,6 +21909,10 @@ func (m *UsageLogDetailMutation) OldField(ctx context.Context, name string) (ent
 		return m.OldRequestHeaders(ctx)
 	case usagelogdetail.FieldRequestBody:
 		return m.OldRequestBody(ctx)
+	case usagelogdetail.FieldUpstreamRequestHeaders:
+		return m.OldUpstreamRequestHeaders(ctx)
+	case usagelogdetail.FieldUpstreamRequestBody:
+		return m.OldUpstreamRequestBody(ctx)
 	case usagelogdetail.FieldResponseHeaders:
 		return m.OldResponseHeaders(ctx)
 	case usagelogdetail.FieldResponseBody:
@@ -21860,6 +21948,20 @@ func (m *UsageLogDetailMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetRequestBody(v)
+		return nil
+	case usagelogdetail.FieldUpstreamRequestHeaders:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpstreamRequestHeaders(v)
+		return nil
+	case usagelogdetail.FieldUpstreamRequestBody:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpstreamRequestBody(v)
 		return nil
 	case usagelogdetail.FieldResponseHeaders:
 		v, ok := value.(string)
@@ -21942,6 +22044,12 @@ func (m *UsageLogDetailMutation) ResetField(name string) error {
 		return nil
 	case usagelogdetail.FieldRequestBody:
 		m.ResetRequestBody()
+		return nil
+	case usagelogdetail.FieldUpstreamRequestHeaders:
+		m.ResetUpstreamRequestHeaders()
+		return nil
+	case usagelogdetail.FieldUpstreamRequestBody:
+		m.ResetUpstreamRequestBody()
 		return nil
 	case usagelogdetail.FieldResponseHeaders:
 		m.ResetResponseHeaders()

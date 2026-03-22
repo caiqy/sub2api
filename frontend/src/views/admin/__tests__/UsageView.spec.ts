@@ -286,6 +286,8 @@ describe('admin usage detail API contract', () => {
       usage_log_id: number
       request_headers: string | null
       request_body: string | null
+      upstream_request_headers: string | null
+      upstream_request_body: string | null
       response_headers: string | null
       response_body: string | null
       created_at: string
@@ -317,6 +319,8 @@ describe('admin UsageView detail modal', () => {
       usage_log_id: 42,
       request_headers: '{"foo":"bar"}',
       request_body: '{}',
+      upstream_request_headers: '{"x-upstream":"gateway"}',
+      upstream_request_body: '{}',
       response_headers: null,
       response_body: null,
       created_at: '2026-03-20T10:00:00Z',
@@ -360,6 +364,8 @@ describe('admin UsageView detail modal', () => {
       usage_log_id: 42,
       request_headers: null,
       request_body: null,
+      upstream_request_headers: null,
+      upstream_request_body: null,
       response_headers: null,
       response_body: null,
       created_at: '2026-03-20T10:00:00Z',
@@ -443,6 +449,8 @@ describe('admin UsageView detail modal', () => {
       usage_log_id: 2,
       request_headers: null,
       request_body: null,
+      upstream_request_headers: null,
+      upstream_request_body: null,
       response_headers: null,
       response_body: null,
       created_at: '2026-03-20T10:01:00Z',
@@ -456,6 +464,8 @@ describe('admin UsageView detail modal', () => {
       usage_log_id: 1,
       request_headers: null,
       request_body: null,
+      upstream_request_headers: null,
+      upstream_request_body: null,
       response_headers: null,
       response_body: null,
       created_at: '2026-03-20T10:00:00Z',
@@ -508,6 +518,8 @@ describe('admin UsageView detail modal', () => {
       usage_log_id: 42,
       request_headers: null,
       request_body: null,
+      upstream_request_headers: null,
+      upstream_request_body: null,
       response_headers: null,
       response_body: null,
       created_at: '2026-03-20T10:00:00Z',

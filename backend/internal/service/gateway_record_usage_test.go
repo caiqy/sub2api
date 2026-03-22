@@ -482,3 +482,73 @@ func TestGatewayServiceRecordUsage_AttachesDetailSnapshot(t *testing.T) {
 	require.NotNil(t, usageRepo.lastLog.DetailSnapshot)
 	require.Equal(t, detail, usageRepo.lastLog.DetailSnapshot)
 }
+
+func TestGatewayServiceRecordUsage_AttachesFinalUpstreamRequestSnapshot(t *testing.T) {
+	usageRepo := &openAIRecordUsageBestEffortLogRepoStub{}
+	svc := newGatewayRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})
+	detail := &UsageLogDetailSnapshot{
+		RequestHeaders:         "X-Test: 1\r\n",
+		RequestBody:            `{"message":"hello"}`,
+		UpstreamRequestHeaders: "Authorization: Bearer final\r\nX-Upstream: last\r\n",
+		UpstreamRequestBody:    ` {"model":"claude-final"}`,
+		ResponseHeaders:        "Content-Type: application/json\r\n",
+		ResponseBody:           `{"ok":true}`,
+	}
+
+	err := svc.RecordUsage(context.Background(), &RecordUsageInput{
+		Result: &ForwardResult{
+			RequestID: "detail_snapshot_gateway_upstream",
+			Usage: ClaudeUsage{
+				InputTokens:  10,
+				OutputTokens: 5,
+			},
+			Model:    "claude-sonnet-4",
+			Duration: time.Second,
+		},
+		APIKey:         &APIKey{ID: 1},
+		User:           &User{ID: 2},
+		Account:        &Account{ID: 3},
+		DetailSnapshot: detail,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.NotNil(t, usageRepo.lastLog.DetailSnapshot)
+	require.Equal(t, detail.UpstreamRequestHeaders, usageRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders)
+	require.Equal(t, detail.UpstreamRequestBody, usageRepo.lastLog.DetailSnapshot.UpstreamRequestBody)
+}
+
+func TestGatewayServiceRecordUsage_EarlyFailureLeavesUpstreamRequestEmpty(t *testing.T) {
+	usageRepo := &openAIRecordUsageBestEffortLogRepoStub{}
+	svc := newGatewayRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})
+	detail := &UsageLogDetailSnapshot{
+		RequestHeaders:         "X-Test: 1\r\n",
+		RequestBody:            `{"message":"hello"}`,
+		UpstreamRequestHeaders: "",
+		UpstreamRequestBody:    "",
+		ResponseHeaders:        "Content-Type: application/json\r\n",
+		ResponseBody:           `{"type":"error"}`,
+	}
+
+	err := svc.RecordUsage(context.Background(), &RecordUsageInput{
+		Result: &ForwardResult{
+			RequestID: "detail_snapshot_gateway_early_failure",
+			Usage: ClaudeUsage{
+				InputTokens:  10,
+				OutputTokens: 5,
+			},
+			Model:    "claude-sonnet-4",
+			Duration: time.Second,
+		},
+		APIKey:         &APIKey{ID: 1},
+		User:           &User{ID: 2},
+		Account:        &Account{ID: 3},
+		DetailSnapshot: detail,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.NotNil(t, usageRepo.lastLog.DetailSnapshot)
+	require.Equal(t, "", usageRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders)
+	require.Equal(t, "", usageRepo.lastLog.DetailSnapshot.UpstreamRequestBody)
+}

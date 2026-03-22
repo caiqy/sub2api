@@ -12,10 +12,12 @@ import (
 
 func TestUsageLogDetailSnapshot_PreservesRawContent(t *testing.T) {
 	original := &UsageLogDetailSnapshot{
-		RequestHeaders:  "  Authorization: Bearer token\nX-Test: 1  ",
-		RequestBody:     "  {\"message\":\" hello \"}  ",
-		ResponseHeaders: "  Content-Type: application/json  ",
-		ResponseBody:    "  {\"result\":\" ok \"}  ",
+		RequestHeaders:         "  Authorization: Bearer token\nX-Test: 1  ",
+		RequestBody:            "  {\"message\":\" hello \"}  ",
+		UpstreamRequestHeaders: "  X-Upstream-Test: 1\nAuthorization: Bearer upstream  ",
+		UpstreamRequestBody:    "  {\"upstream\":\" raw body \"}  ",
+		ResponseHeaders:        "  Content-Type: application/json  ",
+		ResponseBody:           "  {\"result\":\" ok \"}  ",
 	}
 
 	snapshot := original.Normalize()
@@ -23,6 +25,8 @@ func TestUsageLogDetailSnapshot_PreservesRawContent(t *testing.T) {
 	require.NotSame(t, original, snapshot)
 	require.Equal(t, original.RequestHeaders, snapshot.RequestHeaders)
 	require.Equal(t, original.RequestBody, snapshot.RequestBody)
+	require.Equal(t, original.UpstreamRequestHeaders, snapshot.UpstreamRequestHeaders)
+	require.Equal(t, original.UpstreamRequestBody, snapshot.UpstreamRequestBody)
 	require.Equal(t, original.ResponseHeaders, snapshot.ResponseHeaders)
 	require.Equal(t, original.ResponseBody, snapshot.ResponseBody)
 }
@@ -37,6 +41,8 @@ func TestUsageLogDetailSnapshot_NormalizeNilSafeAndReturnsSnapshotCopy(t *testin
 	require.NotSame(t, emptyOriginal, emptyNormalized)
 	require.Equal(t, "", emptyNormalized.RequestHeaders)
 	require.Equal(t, "", emptyNormalized.RequestBody)
+	require.Equal(t, "", emptyNormalized.UpstreamRequestHeaders)
+	require.Equal(t, "", emptyNormalized.UpstreamRequestBody)
 	require.Equal(t, "", emptyNormalized.ResponseHeaders)
 	require.Equal(t, "", emptyNormalized.ResponseBody)
 }

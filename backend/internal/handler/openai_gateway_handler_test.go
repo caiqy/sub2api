@@ -956,6 +956,121 @@ func TestOpenAIGatewayHandler_ChatCompletionsUsageTaskUsesCapturedEndpointAndSna
 	}
 }
 
+func TestOpenAIGatewayHandler_RetryPathStoresLastOutboundRequestOnly(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cfg := &config.Config{
+		RunMode: config.RunModeSimple,
+		Default: config.DefaultConfig{RateMultiplier: 1},
+		Gateway: config.GatewayConfig{
+			MaxAccountSwitches: 1,
+			Scheduling:         config.GatewaySchedulingConfig{LoadBatchEnabled: false},
+		},
+		Concurrency: config.ConcurrencyConfig{PingInterval: 0},
+	}
+
+	groupID := int64(1)
+	group := &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{
+		ID:          11,
+		Name:        "openai-test-account",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeAPIKey,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    1,
+		Credentials: map[string]any{"api_key": "sk-test"},
+	}
+	usageRepo := &openAIChatCompletionsUsageLogRepoStub{}
+	httpUpstream := &openAIRetryTrackingHTTPUpstreamStub{
+		responses: []*http.Response{
+			{
+				StatusCode: http.StatusBadRequest,
+				Header: http.Header{
+					"Content-Type": []string{"application/json"},
+					"X-Request-Id": []string{"req_retry_1"},
+				},
+				Body: io.NopCloser(strings.NewReader(`{"error":{"code":"invalid_encrypted_content","message":"encrypted content could not be verified"}}`)),
+			},
+			{
+				StatusCode: http.StatusOK,
+				Header: http.Header{
+					"Content-Type": []string{"application/json"},
+					"X-Request-Id": []string{"req_success_2"},
+				},
+				Body: io.NopCloser(strings.NewReader(`{"id":"resp_retry","object":"response","status":"completed","model":"gpt-4o","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hello"}]}],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}`)),
+			},
+		},
+	}
+	accountRepo := &openAIChatCompletionsAccountRepoStub{account: account}
+	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
+	deferredService := service.NewDeferredService(accountRepo, nil, 0)
+	billingService := service.NewBillingService(cfg, nil)
+	t.Cleanup(func() {
+		billingCacheService.Stop()
+	})
+
+	gatewayService := service.NewOpenAIGatewayService(
+		accountRepo,
+		usageRepo,
+		nil,
+		nil,
+		nil,
+		nil,
+		openAIChatCompletionsGatewayCacheStub{},
+		cfg,
+		nil,
+		concurrencyService,
+		billingService,
+		nil,
+		billingCacheService,
+		httpUpstream,
+		deferredService,
+		nil,
+	)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, cfg)
+
+	apiKey := &service.APIKey{
+		ID:      101,
+		UserID:  202,
+		Status:  service.StatusActive,
+		GroupID: &groupID,
+		User:    &service.User{ID: 202, Status: service.StatusActive, Concurrency: 1},
+		Group:   group,
+	}
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.UserID, Concurrency: apiKey.User.Concurrency})
+		c.Next()
+	})
+	router.Use(middleware.UsageDetailCapture())
+	router.POST("/v1/responses", h.Responses)
+
+	reqBody := `{"model":"gpt-4o","stream":false,"input":[{"type":"reasoning","encrypted_content":"secret"},{"type":"input_text","text":"hello"}]}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Len(t, httpUpstream.requests, 2)
+	firstBody, err := io.ReadAll(httpUpstream.requests[0].Body)
+	require.NoError(t, err)
+	secondBody, err := io.ReadAll(httpUpstream.requests[1].Body)
+	require.NoError(t, err)
+	require.Contains(t, string(firstBody), `"encrypted_content":"secret"`)
+	require.NotContains(t, string(secondBody), `"encrypted_content":"secret"`)
+	require.NotNil(t, usageRepo.lastLog)
+	require.NotNil(t, usageRepo.lastLog.DetailSnapshot)
+	require.Contains(t, usageRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "Authorization: Bearer sk-test")
+	require.NotContains(t, usageRepo.lastLog.DetailSnapshot.UpstreamRequestBody, `"encrypted_content":"secret"`)
+	require.Contains(t, usageRepo.lastLog.DetailSnapshot.UpstreamRequestBody, `"type":"input_text"`)
+}
+
 type openAIChatCompletionsAccountRepoStub struct {
 	service.AccountRepository
 
@@ -988,6 +1103,41 @@ func (s *openAIChatCompletionsAccountRepoStub) ListSchedulableByGroupIDAndPlatfo
 		return nil, nil
 	}
 	return []service.Account{*s.account}, nil
+}
+
+type openAIRetryAccountRepoStub struct {
+	service.AccountRepository
+
+	accounts []*service.Account
+}
+
+func (s *openAIRetryAccountRepoStub) GetByID(ctx context.Context, id int64) (*service.Account, error) {
+	for _, account := range s.accounts {
+		if account != nil && account.ID == id {
+			clone := *account
+			return &clone, nil
+		}
+	}
+	return nil, service.ErrAccountNotFound
+}
+
+func (s *openAIRetryAccountRepoStub) ListSchedulableByPlatform(ctx context.Context, platform string) ([]service.Account, error) {
+	return s.listByPlatform(platform), nil
+}
+
+func (s *openAIRetryAccountRepoStub) ListSchedulableByGroupIDAndPlatform(ctx context.Context, groupID int64, platform string) ([]service.Account, error) {
+	return s.listByPlatform(platform), nil
+}
+
+func (s *openAIRetryAccountRepoStub) listByPlatform(platform string) []service.Account {
+	out := make([]service.Account, 0, len(s.accounts))
+	for _, account := range s.accounts {
+		if account == nil || account.Platform != platform {
+			continue
+		}
+		out = append(out, *account)
+	}
+	return out
 }
 
 type openAIChatCompletionsUsageLogRepoStub struct {
@@ -1034,6 +1184,49 @@ func (s *openAIChatCompletionsHTTPUpstreamStub) Do(req *http.Request, proxyURL s
 }
 
 func (s *openAIChatCompletionsHTTPUpstreamStub) DoWithTLS(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, enableTLSFingerprint bool) (*http.Response, error) {
+	return s.Do(req, proxyURL, accountID, accountConcurrency)
+}
+
+type openAIRetryTrackingHTTPUpstreamStub struct {
+	service.HTTPUpstream
+
+	responses []*http.Response
+	requests  []*http.Request
+}
+
+func (s *openAIRetryTrackingHTTPUpstreamStub) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
+	clonedReq := req.Clone(req.Context())
+	clonedReq.Header = req.Header.Clone()
+	if req.Body != nil {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		req.Body = io.NopCloser(bytes.NewReader(body))
+		clonedReq.Body = io.NopCloser(bytes.NewReader(body))
+	}
+	s.requests = append(s.requests, clonedReq)
+
+	if len(s.responses) == 0 {
+		return nil, nil
+	}
+	resp := s.responses[0]
+	s.responses = s.responses[1:]
+	clonedResp := new(http.Response)
+	*clonedResp = *resp
+	clonedResp.Header = resp.Header.Clone()
+	if resp.Body != nil {
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+		clonedResp.Body = io.NopCloser(bytes.NewReader(body))
+	}
+	return clonedResp, nil
+}
+
+func (s *openAIRetryTrackingHTTPUpstreamStub) DoWithTLS(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, enableTLSFingerprint bool) (*http.Response, error) {
 	return s.Do(req, proxyURL, accountID, accountConcurrency)
 }
 

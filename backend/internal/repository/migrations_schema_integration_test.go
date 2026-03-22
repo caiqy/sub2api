@@ -14,6 +14,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestIsSemanticallyEmptyStringDefault(t *testing.T) {
+	t.Parallel()
+
+	for _, actual := range []string{"''::text", "''", "(''::text)", "(((''::text)))"} {
+		require.True(t, isSemanticallyEmptyStringDefault(actual), "expected %q to be treated as empty-string default", actual)
+	}
+
+	for _, actual := range []string{"NULL", "'x'::text", "0", ""} {
+		require.False(t, isSemanticallyEmptyStringDefault(actual), "expected %q to not be treated as empty-string default", actual)
+	}
+}
+
 func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	db := newIsolatedMigrationDB(t)
 	tx, err := db.BeginTx(context.Background(), nil)
@@ -30,6 +42,7 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	require.NoError(t, tx.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM schema_migrations").Scan(&applied))
 	require.GreaterOrEqual(t, applied, 7, "expected schema_migrations to contain applied migrations")
 	requireMigrationApplied(t, tx, "077_add_usage_log_details.sql")
+	requireMigrationApplied(t, tx, "078_add_usage_log_detail_upstream_request.sql")
 
 	// users: columns required by repository queries
 	requireColumn(t, tx, "users", "username", "character varying", 100, false)
@@ -64,6 +77,10 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	requireColumn(t, tx, "usage_log_details", "request_body", "text", 0, false)
 	requireColumn(t, tx, "usage_log_details", "response_headers", "text", 0, false)
 	requireColumn(t, tx, "usage_log_details", "response_body", "text", 0, false)
+	requireColumn(t, tx, "usage_log_details", "upstream_request_headers", "text", 0, false)
+	requireColumnDefaultEmptyString(t, tx, "usage_log_details", "upstream_request_headers")
+	requireColumn(t, tx, "usage_log_details", "upstream_request_body", "text", 0, false)
+	requireColumnDefaultEmptyString(t, tx, "usage_log_details", "upstream_request_body")
 	requireColumn(t, tx, "usage_log_details", "created_at", "timestamp with time zone", 0, false)
 	requireUniqueConstraintOnColumn(t, tx, "usage_log_details", "usage_log_id")
 	requireIndexOnColumn(t, tx, "usage_log_details", "created_at")
@@ -215,6 +232,36 @@ WHERE table_schema = 'public'
 	} else {
 		require.Equal(t, "NO", row.Nullable, "nullable mismatch for %s.%s", table, column)
 	}
+}
+
+func requireColumnDefaultEmptyString(t *testing.T, tx *sql.Tx, table, column string) {
+	t.Helper()
+
+	var actual sql.NullString
+	err := tx.QueryRowContext(context.Background(), `
+SELECT
+  column_default
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND table_name = $1
+  AND column_name = $2
+`, table, column).Scan(&actual)
+	require.NoError(t, err, "query information_schema.columns (column_default) for %s.%s", table, column)
+	require.True(t, actual.Valid, "expected default for %s.%s", table, column)
+	require.True(t, isSemanticallyEmptyStringDefault(actual.String), "default mismatch for %s.%s: got %q, expected semantically empty string", table, column, actual.String)
+}
+
+func isSemanticallyEmptyStringDefault(actual string) bool {
+	trimmed := strings.TrimSpace(actual)
+	for {
+		unwrapped := strings.TrimPrefix(strings.TrimSuffix(trimmed, ")"), "(")
+		if unwrapped == trimmed {
+			break
+		}
+		trimmed = strings.TrimSpace(unwrapped)
+	}
+
+	return trimmed == "''" || trimmed == "''::text"
 }
 
 func requireMigrationApplied(t *testing.T, tx *sql.Tx, filename string) {

@@ -1062,6 +1062,8 @@ export interface AdminUsageDetail {
   usage_log_id: number
   request_headers: string | null
   request_body: string | null
+  upstream_request_headers: string | null
+  upstream_request_body: string | null
   response_headers: string | null
   response_body: string | null
   created_at: string

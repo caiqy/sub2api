@@ -70,6 +70,34 @@ func (_u *UsageLogDetailUpdate) SetNillableRequestBody(v *string) *UsageLogDetai
 	return _u
 }
 
+// SetUpstreamRequestHeaders sets the "upstream_request_headers" field.
+func (_u *UsageLogDetailUpdate) SetUpstreamRequestHeaders(v string) *UsageLogDetailUpdate {
+	_u.mutation.SetUpstreamRequestHeaders(v)
+	return _u
+}
+
+// SetNillableUpstreamRequestHeaders sets the "upstream_request_headers" field if the given value is not nil.
+func (_u *UsageLogDetailUpdate) SetNillableUpstreamRequestHeaders(v *string) *UsageLogDetailUpdate {
+	if v != nil {
+		_u.SetUpstreamRequestHeaders(*v)
+	}
+	return _u
+}
+
+// SetUpstreamRequestBody sets the "upstream_request_body" field.
+func (_u *UsageLogDetailUpdate) SetUpstreamRequestBody(v string) *UsageLogDetailUpdate {
+	_u.mutation.SetUpstreamRequestBody(v)
+	return _u
+}
+
+// SetNillableUpstreamRequestBody sets the "upstream_request_body" field if the given value is not nil.
+func (_u *UsageLogDetailUpdate) SetNillableUpstreamRequestBody(v *string) *UsageLogDetailUpdate {
+	if v != nil {
+		_u.SetUpstreamRequestBody(*v)
+	}
+	return _u
+}
+
 // SetResponseHeaders sets the "response_headers" field.
 func (_u *UsageLogDetailUpdate) SetResponseHeaders(v string) *UsageLogDetailUpdate {
 	_u.mutation.SetResponseHeaders(v)
@@ -167,6 +195,12 @@ func (_u *UsageLogDetailUpdate) sqlSave(ctx context.Context) (_node int, err err
 	if value, ok := _u.mutation.RequestBody(); ok {
 		_spec.SetField(usagelogdetail.FieldRequestBody, field.TypeString, value)
 	}
+	if value, ok := _u.mutation.UpstreamRequestHeaders(); ok {
+		_spec.SetField(usagelogdetail.FieldUpstreamRequestHeaders, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.UpstreamRequestBody(); ok {
+		_spec.SetField(usagelogdetail.FieldUpstreamRequestBody, field.TypeString, value)
+	}
 	if value, ok := _u.mutation.ResponseHeaders(); ok {
 		_spec.SetField(usagelogdetail.FieldResponseHeaders, field.TypeString, value)
 	}
@@ -260,6 +294,34 @@ func (_u *UsageLogDetailUpdateOne) SetRequestBody(v string) *UsageLogDetailUpdat
 func (_u *UsageLogDetailUpdateOne) SetNillableRequestBody(v *string) *UsageLogDetailUpdateOne {
 	if v != nil {
 		_u.SetRequestBody(*v)
+	}
+	return _u
+}
+
+// SetUpstreamRequestHeaders sets the "upstream_request_headers" field.
+func (_u *UsageLogDetailUpdateOne) SetUpstreamRequestHeaders(v string) *UsageLogDetailUpdateOne {
+	_u.mutation.SetUpstreamRequestHeaders(v)
+	return _u
+}
+
+// SetNillableUpstreamRequestHeaders sets the "upstream_request_headers" field if the given value is not nil.
+func (_u *UsageLogDetailUpdateOne) SetNillableUpstreamRequestHeaders(v *string) *UsageLogDetailUpdateOne {
+	if v != nil {
+		_u.SetUpstreamRequestHeaders(*v)
+	}
+	return _u
+}
+
+// SetUpstreamRequestBody sets the "upstream_request_body" field.
+func (_u *UsageLogDetailUpdateOne) SetUpstreamRequestBody(v string) *UsageLogDetailUpdateOne {
+	_u.mutation.SetUpstreamRequestBody(v)
+	return _u
+}
+
+// SetNillableUpstreamRequestBody sets the "upstream_request_body" field if the given value is not nil.
+func (_u *UsageLogDetailUpdateOne) SetNillableUpstreamRequestBody(v *string) *UsageLogDetailUpdateOne {
+	if v != nil {
+		_u.SetUpstreamRequestBody(*v)
 	}
 	return _u
 }
@@ -390,6 +452,12 @@ func (_u *UsageLogDetailUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog
 	}
 	if value, ok := _u.mutation.RequestBody(); ok {
 		_spec.SetField(usagelogdetail.FieldRequestBody, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.UpstreamRequestHeaders(); ok {
+		_spec.SetField(usagelogdetail.FieldUpstreamRequestHeaders, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.UpstreamRequestBody(); ok {
+		_spec.SetField(usagelogdetail.FieldUpstreamRequestBody, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.ResponseHeaders(); ok {
 		_spec.SetField(usagelogdetail.FieldResponseHeaders, field.TypeString, value)

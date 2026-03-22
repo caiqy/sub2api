@@ -169,7 +169,8 @@ func (UsageLog) Edges() []ent.Edge {
 			Field("subscription_id").
 			Unique(),
 		edge.To("detail", UsageLogDetail.Type).
-			Unique(),
+			Unique().
+			Annotations(entsql.OnDelete(entsql.Cascade)),
 	}
 }
 

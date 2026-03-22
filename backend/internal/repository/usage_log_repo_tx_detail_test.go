@@ -180,7 +180,7 @@ func TestUsageLogDetailRepositoryCreate_WrapsPruneError(t *testing.T) {
 			if query == "" {
 				return usageLogDetailRepoResult(1), nil
 			}
-			if len(args) == 6 {
+			if len(args) == 8 {
 				return usageLogDetailRepoResult(1), nil
 			}
 			return nil, pruneErr

@@ -113,9 +113,17 @@ func (s *UsageLogRepoSuite) TestCreate_PersistsDetailSnapshotAndPrunesOldRows() 
 			oldestUsageLogID = log.ID
 		}
 		_, err = s.tx.ExecContext(s.ctx, `
-			INSERT INTO usage_log_details (usage_log_id, request_headers, request_body, response_headers, response_body, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6)
-		`, log.ID, "seed-h", fmt.Sprintf("seed-body-%d", i), "seed-rh", "seed-rb", log.CreatedAt)
+			INSERT INTO usage_log_details (
+				usage_log_id,
+				request_headers,
+				request_body,
+				upstream_request_headers,
+				upstream_request_body,
+				response_headers,
+				response_body,
+				created_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		`, log.ID, "seed-h", fmt.Sprintf("seed-body-%d", i), "seed-upstream-h", fmt.Sprintf("seed-upstream-body-%d", i), "seed-rh", "seed-rb", log.CreatedAt)
 		s.Require().NoError(err)
 	}
 
@@ -131,10 +139,12 @@ func (s *UsageLogRepoSuite) TestCreate_PersistsDetailSnapshotAndPrunesOldRows() 
 		ActualCost:   0.6,
 		CreatedAt:    base.Add(600 * time.Second),
 		DetailSnapshot: (&service.UsageLogDetailSnapshot{
-			RequestHeaders:  "Authorization: Bearer redacted",
-			RequestBody:     `{"hello":"world"}`,
-			ResponseHeaders: "Content-Type: application/json",
-			ResponseBody:    `{"ok":true}`,
+			RequestHeaders:         "Authorization: Bearer redacted",
+			RequestBody:            `{"hello":"world"}`,
+			UpstreamRequestHeaders: "X-Upstream-Auth: upstream-token",
+			UpstreamRequestBody:    `{"upstream":"world"}`,
+			ResponseHeaders:        "Content-Type: application/json",
+			ResponseBody:           `{"ok":true}`,
 		}).Normalize(),
 	}
 
@@ -148,21 +158,34 @@ func (s *UsageLogRepoSuite) TestCreate_PersistsDetailSnapshotAndPrunesOldRows() 
 	s.Require().Equal(500, total)
 
 	var detail struct {
-		RequestHeaders  string
-		RequestBody     string
-		ResponseHeaders string
-		ResponseBody    string
+		RequestHeaders         string
+		RequestBody            string
+		UpstreamRequestHeaders string
+		UpstreamRequestBody    string
+		ResponseHeaders        string
+		ResponseBody           string
 	}
 	err = scanSingleRow(s.ctx, s.tx, `
-		SELECT request_headers, request_body, response_headers, response_body
+		SELECT request_headers, request_body, upstream_request_headers, upstream_request_body, response_headers, response_body
 		FROM usage_log_details
 		WHERE usage_log_id = $1
-	`, []any{log.ID}, &detail.RequestHeaders, &detail.RequestBody, &detail.ResponseHeaders, &detail.ResponseBody)
+	`, []any{log.ID}, &detail.RequestHeaders, &detail.RequestBody, &detail.UpstreamRequestHeaders, &detail.UpstreamRequestBody, &detail.ResponseHeaders, &detail.ResponseBody)
 	s.Require().NoError(err)
 	s.Require().Equal("Authorization: Bearer redacted", detail.RequestHeaders)
 	s.Require().Equal(`{"hello":"world"}`, detail.RequestBody)
+	s.Require().Equal("X-Upstream-Auth: upstream-token", detail.UpstreamRequestHeaders)
+	s.Require().Equal(`{"upstream":"world"}`, detail.UpstreamRequestBody)
 	s.Require().Equal("Content-Type: application/json", detail.ResponseHeaders)
 	s.Require().Equal(`{"ok":true}`, detail.ResponseBody)
+
+	persistedDetail, err := newUsageLogDetailRepositoryWithSQL(s.tx).GetByUsageLogID(s.ctx, log.ID)
+	s.Require().NoError(err)
+	s.Require().Equal("Authorization: Bearer redacted", persistedDetail.RequestHeaders)
+	s.Require().Equal(`{"hello":"world"}`, persistedDetail.RequestBody)
+	s.Require().Equal("X-Upstream-Auth: upstream-token", persistedDetail.UpstreamRequestHeaders)
+	s.Require().Equal(`{"upstream":"world"}`, persistedDetail.UpstreamRequestBody)
+	s.Require().Equal("Content-Type: application/json", persistedDetail.ResponseHeaders)
+	s.Require().Equal(`{"ok":true}`, persistedDetail.ResponseBody)
 
 	var oldestCount int
 	err = scanSingleRow(s.ctx, s.tx, "SELECT COUNT(*) FROM usage_log_details WHERE usage_log_id = $1", []any{oldestUsageLogID}, &oldestCount)

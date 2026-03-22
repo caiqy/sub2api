@@ -31,11 +31,13 @@ func (r *usageLogDetailRepository) Create(ctx context.Context, detail *service.U
 			usage_log_id,
 			request_headers,
 			request_body,
+			upstream_request_headers,
+			upstream_request_body,
 			response_headers,
 			response_body,
 			created_at
-		) VALUES ($1, $2, $3, $4, $5, $6)
-	`, detail.UsageLogID, detail.RequestHeaders, detail.RequestBody, detail.ResponseHeaders, detail.ResponseBody, createdAt)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+	`, detail.UsageLogID, detail.RequestHeaders, detail.RequestBody, detail.UpstreamRequestHeaders, detail.UpstreamRequestBody, detail.ResponseHeaders, detail.ResponseBody, createdAt)
 	if err != nil {
 		return fmt.Errorf("insert usage log detail: %w", err)
 	}
@@ -51,10 +53,10 @@ func (r *usageLogDetailRepository) GetByUsageLogID(ctx context.Context, usageLog
 	}
 	detail := &service.UsageLogDetail{}
 	err := scanSingleRow(ctx, r.sql, `
-		SELECT usage_log_id, request_headers, request_body, response_headers, response_body, created_at
+		SELECT usage_log_id, request_headers, request_body, upstream_request_headers, upstream_request_body, response_headers, response_body, created_at
 		FROM usage_log_details
 		WHERE usage_log_id = $1
-	`, []any{usageLogID}, &detail.UsageLogID, &detail.RequestHeaders, &detail.RequestBody, &detail.ResponseHeaders, &detail.ResponseBody, &detail.CreatedAt)
+	`, []any{usageLogID}, &detail.UsageLogID, &detail.RequestHeaders, &detail.RequestBody, &detail.UpstreamRequestHeaders, &detail.UpstreamRequestBody, &detail.ResponseHeaders, &detail.ResponseBody, &detail.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -82,12 +84,14 @@ func usageLogDetailFromSnapshot(usageLogID int64, createdAt time.Time, snapshot 
 		return nil
 	}
 	return &service.UsageLogDetail{
-		UsageLogID:      usageLogID,
-		RequestHeaders:  snapshot.RequestHeaders,
-		RequestBody:     snapshot.RequestBody,
-		ResponseHeaders: snapshot.ResponseHeaders,
-		ResponseBody:    snapshot.ResponseBody,
-		CreatedAt:       createdAt,
+		UsageLogID:             usageLogID,
+		RequestHeaders:         snapshot.RequestHeaders,
+		RequestBody:            snapshot.RequestBody,
+		UpstreamRequestHeaders: snapshot.UpstreamRequestHeaders,
+		UpstreamRequestBody:    snapshot.UpstreamRequestBody,
+		ResponseHeaders:        snapshot.ResponseHeaders,
+		ResponseBody:           snapshot.ResponseBody,
+		CreatedAt:              createdAt,
 	}
 }
 

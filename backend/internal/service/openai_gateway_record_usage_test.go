@@ -981,3 +981,40 @@ func TestOpenAIRecordUsage_AttachesDetailSnapshot(t *testing.T) {
 	require.NotNil(t, usageRepo.lastLog.DetailSnapshot)
 	require.Equal(t, detail, usageRepo.lastLog.DetailSnapshot)
 }
+
+func TestOpenAIRecordUsage_AttachesFinalUpstreamRequestSnapshot(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	subRepo := &openAIRecordUsageSubRepoStub{}
+	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, subRepo, nil)
+	detail := &UsageLogDetailSnapshot{
+		RequestHeaders:         "X-Test: 1\r\n",
+		RequestBody:            `{"model":"gpt-5"}`,
+		UpstreamRequestHeaders: "Authorization: Bearer final-token\r\nOpenAI-Beta: responses=v1\r\n",
+		UpstreamRequestBody:    ` {"model":"gpt-5.1-codex"}`,
+		ResponseHeaders:        "Content-Type: application/json\r\n",
+		ResponseBody:           `{"id":"resp_123"}`,
+	}
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID: "resp_detail_snapshot_openai_upstream",
+			Usage: OpenAIUsage{
+				InputTokens:  8,
+				OutputTokens: 4,
+			},
+			Model:    "gpt-5.1",
+			Duration: time.Second,
+		},
+		APIKey:         &APIKey{ID: 10},
+		User:           &User{ID: 20},
+		Account:        &Account{ID: 30},
+		DetailSnapshot: detail,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.NotNil(t, usageRepo.lastLog.DetailSnapshot)
+	require.Equal(t, detail.UpstreamRequestHeaders, usageRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders)
+	require.Equal(t, detail.UpstreamRequestBody, usageRepo.lastLog.DetailSnapshot.UpstreamRequestBody)
+}

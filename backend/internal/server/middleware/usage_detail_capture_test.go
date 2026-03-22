@@ -8,9 +8,41 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestUsageDetailCapture_SetUsageUpstreamRequest_PreservesHeaderTextAndBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var snapshot *UsageDetailSnapshot
+	r := gin.New()
+	r.Use(UsageDetailCapture())
+	r.POST("/capture", func(c *gin.Context) {
+		upstreamReq, err := http.NewRequest(http.MethodPost, "https://example.com/v1/messages", strings.NewReader("ignored"))
+		require.NoError(t, err)
+		upstreamReq.Header.Add("X-Multi", "a")
+		upstreamReq.Header.Add("X-Multi", "b")
+		upstreamReq.Header.Set("Authorization", "Bearer secret-token")
+
+		SetUsageUpstreamRequest(c, upstreamReq, "  {\"raw\":true}\n")
+		snapshot = BuildUsageDetailSnapshot(c)
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/capture", strings.NewReader(`{"message":"hi"}`))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNoContent, w.Code)
+	require.NotNil(t, snapshot)
+	require.Equal(t, service.FormatUsageDetailHeadersText(http.Header{
+		"Authorization": []string{"Bearer secret-token"},
+		"X-Multi":       []string{"a", "b"},
+	}), snapshot.UpstreamRequestHeaders)
+	require.Equal(t, "  {\"raw\":true}\n", snapshot.UpstreamRequestBody)
+}
 
 func TestUsageDetailCaptureMiddleware_CapturesRequestAndResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
