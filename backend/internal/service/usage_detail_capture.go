@@ -14,6 +14,10 @@ type usageDetailUpstreamRequestSetter interface {
 	SetUsageUpstreamRequest(headers, body string)
 }
 
+type usageDetailResponseSnapshotSetter interface {
+	SetUsageResponseSnapshot(headers, body string)
+}
+
 func FormatUsageDetailHeadersText(headers http.Header) string {
 	if len(headers) == 0 {
 		return ""
@@ -50,4 +54,19 @@ func SetUsageUpstreamRequest(c *gin.Context, req *http.Request, body string) {
 		return
 	}
 	collector.SetUsageUpstreamRequest(FormatUsageDetailHeadersText(req.Header), body)
+}
+
+func SetUsageResponseSnapshot(c *gin.Context, headers, body string) {
+	if c == nil {
+		return
+	}
+	v, ok := c.Get(UsageDetailCaptureContextKey)
+	if !ok {
+		return
+	}
+	collector, ok := v.(usageDetailResponseSnapshotSetter)
+	if !ok || collector == nil {
+		return
+	}
+	collector.SetUsageResponseSnapshot(headers, body)
 }

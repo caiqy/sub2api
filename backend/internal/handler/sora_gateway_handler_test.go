@@ -5,6 +5,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -289,13 +290,19 @@ func (r *stubGroupRepo) UpdateSortOrders(ctx context.Context, updates []service.
 	return nil
 }
 
-type stubUsageLogRepo struct{}
+type stubUsageLogRepo struct {
+	lastLog *service.UsageLog
+}
 
 func (s *stubUsageLogRepo) Create(ctx context.Context, log *service.UsageLog) (bool, error) {
+	s.lastLog = log
 	return true, nil
 }
 func (s *stubUsageLogRepo) PersistDetailBestEffort(ctx context.Context, log *service.UsageLog) {}
 func (s *stubUsageLogRepo) GetByID(ctx context.Context, id int64) (*service.UsageLog, error) {
+	return nil, nil
+}
+func (s *stubUsageLogRepo) GetDetailByUsageLogID(ctx context.Context, usageLogID int64) (*service.UsageLogDetail, error) {
 	return nil, nil
 }
 func (s *stubUsageLogRepo) Delete(ctx context.Context, id int64) error { return nil }
@@ -495,6 +502,353 @@ func TestSoraGatewayHandler_ChatCompletions(t *testing.T) {
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	require.NotEmpty(t, resp["media_url"])
+}
+
+func TestSoraGatewayHandler_ChatCompletions_UpstreamErrorStillCreatesUsageLog(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{
+		RunMode: config.RunModeSimple,
+		Gateway: config.GatewayConfig{
+			SoraStreamMode:     "force",
+			MaxAccountSwitches: 1,
+			Scheduling: config.GatewaySchedulingConfig{
+				LoadBatchEnabled: false,
+			},
+		},
+		Concurrency: config.ConcurrencyConfig{PingInterval: 0},
+		Sora: config.SoraConfig{
+			Client: config.SoraClientConfig{
+				BaseURL:             "https://sora.test",
+				PollIntervalSeconds: 1,
+				MaxPollAttempts:     1,
+			},
+		},
+	}
+
+	group := &service.Group{ID: 1, Platform: service.PlatformSora, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{
+		ID:          1,
+		Platform:    service.PlatformSora,
+		Type:        service.AccountTypeAPIKey,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    1,
+		Credentials: map[string]any{"api_key": "sk-sora-test", "base_url": "https://sora.test"},
+	}
+	accountRepo := &stubAccountRepo{accounts: map[int64]*service.Account{account.ID: account}}
+	groupRepo := &stubGroupRepo{group: group}
+	usageLogRepo := &stubUsageLogRepo{}
+	deferredService := service.NewDeferredService(accountRepo, nil, 0)
+	billingService := service.NewBillingService(cfg, nil)
+	concurrencyService := service.NewConcurrencyService(testutil.StubConcurrencyCache{})
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
+	t.Cleanup(func() {
+		billingCacheService.Stop()
+	})
+
+	gatewayService := service.NewGatewayService(
+		accountRepo,
+		groupRepo,
+		usageLogRepo,
+		nil,
+		nil,
+		nil,
+		nil,
+		testutil.StubGatewayCache{},
+		cfg,
+		nil,
+		concurrencyService,
+		billingService,
+		nil,
+		billingCacheService,
+		nil,
+		nil,
+		deferredService,
+		nil,
+		testutil.StubSessionLimitCache{},
+		nil,
+		nil,
+		nil,
+	)
+
+	httpUpstream := &openAIChatCompletionsHTTPUpstreamStub{
+		response: &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Header: http.Header{
+				"Content-Type": []string{"application/json"},
+				"X-Request-Id": []string{"sora_failed_123"},
+			},
+			Body: io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_request_error","message":"sora upstream rejected payload"}}`)),
+		},
+	}
+	soraGatewayService := service.NewSoraGatewayService(nil, nil, httpUpstream, cfg)
+	handler := NewSoraGatewayHandler(gatewayService, soraGatewayService, concurrencyService, billingCacheService, nil, cfg)
+
+	apiKey := &service.APIKey{
+		ID:      1,
+		UserID:  1,
+		Status:  service.StatusActive,
+		GroupID: &group.ID,
+		User:    &service.User{ID: 1, Concurrency: 1, Status: service.StatusActive},
+		Group:   group,
+	}
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.UserID, Concurrency: apiKey.User.Concurrency})
+		c.Next()
+	})
+	router.Use(middleware.UsageDetailCapture())
+	router.POST("/sora/v1/chat/completions", handler.ChatCompletions)
+
+	reqBody := `{"model":"gpt-image","messages":[{"role":"user","content":"hello"}],"stream":false}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/sora/v1/chat/completions", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.NotNil(t, usageLogRepo.lastLog)
+	require.Equal(t, 0, usageLogRepo.lastLog.InputTokens)
+	require.Equal(t, 0, usageLogRepo.lastLog.OutputTokens)
+	require.Equal(t, 0.0, usageLogRepo.lastLog.TotalCost)
+	require.Equal(t, 0.0, usageLogRepo.lastLog.ActualCost)
+	require.NotNil(t, usageLogRepo.lastLog.DetailSnapshot)
+	require.JSONEq(t, reqBody, usageLogRepo.lastLog.DetailSnapshot.RequestBody)
+	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, "sora upstream rejected payload")
+	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "Authorization: Bearer sk-sora-test")
+}
+
+func TestSoraGatewayHandler_ChatCompletions_FailoverExhaustedStillCreatesUsageLog(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{
+		RunMode: config.RunModeSimple,
+		Gateway: config.GatewayConfig{
+			SoraStreamMode:     "force",
+			MaxAccountSwitches: 1,
+			Scheduling: config.GatewaySchedulingConfig{
+				LoadBatchEnabled: false,
+			},
+		},
+		Concurrency: config.ConcurrencyConfig{PingInterval: 0},
+		Sora: config.SoraConfig{
+			Client: config.SoraClientConfig{
+				BaseURL:             "https://sora.test",
+				PollIntervalSeconds: 1,
+				MaxPollAttempts:     1,
+			},
+		},
+	}
+
+	group := &service.Group{ID: 1, Platform: service.PlatformSora, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{
+		ID:          1,
+		Platform:    service.PlatformSora,
+		Type:        service.AccountTypeAPIKey,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    1,
+		Credentials: map[string]any{"api_key": "sk-sora-test", "base_url": "https://sora.test"},
+	}
+	accountRepo := &stubAccountRepo{accounts: map[int64]*service.Account{account.ID: account}}
+	groupRepo := &stubGroupRepo{group: group}
+	usageLogRepo := &stubUsageLogRepo{}
+	deferredService := service.NewDeferredService(accountRepo, nil, 0)
+	billingService := service.NewBillingService(cfg, nil)
+	concurrencyService := service.NewConcurrencyService(testutil.StubConcurrencyCache{})
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
+	t.Cleanup(func() {
+		billingCacheService.Stop()
+	})
+
+	gatewayService := service.NewGatewayService(
+		accountRepo,
+		groupRepo,
+		usageLogRepo,
+		nil,
+		nil,
+		nil,
+		nil,
+		testutil.StubGatewayCache{},
+		cfg,
+		nil,
+		concurrencyService,
+		billingService,
+		nil,
+		billingCacheService,
+		nil,
+		nil,
+		deferredService,
+		nil,
+		testutil.StubSessionLimitCache{},
+		nil,
+		nil,
+		nil,
+	)
+
+	httpUpstream := &openAIChatCompletionsHTTPUpstreamStub{
+		response: &http.Response{
+			StatusCode: http.StatusTooManyRequests,
+			Header: http.Header{
+				"Content-Type": []string{"application/json"},
+				"X-Request-Id": []string{"sora_failover_123"},
+			},
+			Body: io.NopCloser(strings.NewReader(`{"error":{"code":"cf_shield_429","message":"sora upstream raw failover"}}`)),
+		},
+	}
+	soraGatewayService := service.NewSoraGatewayService(nil, nil, httpUpstream, cfg)
+	handler := NewSoraGatewayHandler(gatewayService, soraGatewayService, concurrencyService, billingCacheService, nil, cfg)
+	handler.maxAccountSwitches = 0
+
+	apiKey := &service.APIKey{
+		ID:      1,
+		UserID:  1,
+		Status:  service.StatusActive,
+		GroupID: &group.ID,
+		User:    &service.User{ID: 1, Concurrency: 1, Status: service.StatusActive},
+		Group:   group,
+	}
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.UserID, Concurrency: apiKey.User.Concurrency})
+		c.Next()
+	})
+	router.Use(middleware.UsageDetailCapture())
+	router.POST("/sora/v1/chat/completions", handler.ChatCompletions)
+
+	reqBody := `{"model":"gpt-image","messages":[{"role":"user","content":"hello"}],"stream":false}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/sora/v1/chat/completions", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusTooManyRequests, rec.Code)
+	require.NotNil(t, usageLogRepo.lastLog)
+	require.NotNil(t, usageLogRepo.lastLog.DetailSnapshot)
+	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, `"cf_shield_429"`)
+	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, "sora upstream raw failover")
+	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "Authorization: Bearer sk-sora-test")
+}
+
+func TestSoraGatewayHandler_ChatCompletions_SelectionExhaustedAfterFailoverStillCreatesUsageLog(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{
+		RunMode: config.RunModeSimple,
+		Gateway: config.GatewayConfig{
+			SoraStreamMode:     "force",
+			MaxAccountSwitches: 1,
+			Scheduling: config.GatewaySchedulingConfig{
+				LoadBatchEnabled: false,
+			},
+		},
+		Concurrency: config.ConcurrencyConfig{PingInterval: 0},
+		Sora: config.SoraConfig{
+			Client: config.SoraClientConfig{
+				BaseURL:             "https://sora.test",
+				PollIntervalSeconds: 1,
+				MaxPollAttempts:     1,
+			},
+		},
+	}
+
+	group := &service.Group{ID: 1, Platform: service.PlatformSora, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{
+		ID:          1,
+		Platform:    service.PlatformSora,
+		Type:        service.AccountTypeAPIKey,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    1,
+		Credentials: map[string]any{"api_key": "sk-sora-test", "base_url": "https://sora.test"},
+	}
+	accountRepo := &stubAccountRepo{accounts: map[int64]*service.Account{account.ID: account}}
+	groupRepo := &stubGroupRepo{group: group}
+	usageLogRepo := &stubUsageLogRepo{}
+	deferredService := service.NewDeferredService(accountRepo, nil, 0)
+	billingService := service.NewBillingService(cfg, nil)
+	concurrencyService := service.NewConcurrencyService(testutil.StubConcurrencyCache{})
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
+	t.Cleanup(func() {
+		billingCacheService.Stop()
+	})
+
+	gatewayService := service.NewGatewayService(
+		accountRepo,
+		groupRepo,
+		usageLogRepo,
+		nil,
+		nil,
+		nil,
+		nil,
+		testutil.StubGatewayCache{},
+		cfg,
+		nil,
+		concurrencyService,
+		billingService,
+		nil,
+		billingCacheService,
+		nil,
+		nil,
+		deferredService,
+		nil,
+		testutil.StubSessionLimitCache{},
+		nil,
+		nil,
+		nil,
+	)
+
+	httpUpstream := &openAIChatCompletionsHTTPUpstreamStub{
+		response: &http.Response{
+			StatusCode: http.StatusTooManyRequests,
+			Header: http.Header{
+				"Content-Type": []string{"application/json"},
+				"X-Request-Id": []string{"sora_selection_exhausted_123"},
+			},
+			Body: io.NopCloser(strings.NewReader(`{"error":{"code":"cf_shield_429","message":"sora upstream raw failover"}}`)),
+		},
+	}
+	soraGatewayService := service.NewSoraGatewayService(nil, nil, httpUpstream, cfg)
+	handler := NewSoraGatewayHandler(gatewayService, soraGatewayService, concurrencyService, billingCacheService, nil, cfg)
+
+	apiKey := &service.APIKey{
+		ID:      1,
+		UserID:  1,
+		Status:  service.StatusActive,
+		GroupID: &group.ID,
+		User:    &service.User{ID: 1, Concurrency: 1, Status: service.StatusActive},
+		Group:   group,
+	}
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.UserID, Concurrency: apiKey.User.Concurrency})
+		c.Next()
+	})
+	router.Use(middleware.UsageDetailCapture())
+	router.POST("/sora/v1/chat/completions", handler.ChatCompletions)
+
+	reqBody := `{"model":"gpt-image","messages":[{"role":"user","content":"hello"}],"stream":false}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/sora/v1/chat/completions", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusTooManyRequests, rec.Code)
+	require.JSONEq(t, `{"error":{"message":"Sora request blocked by Cloudflare shield (429). Please switch to a clean proxy/network and retry.","type":"rate_limit_error"}}`, rec.Body.String())
+	require.NotNil(t, usageLogRepo.lastLog)
+	require.NotNil(t, usageLogRepo.lastLog.DetailSnapshot)
+	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseHeaders, "Content-Type: application/json")
+	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseHeaders, "X-Request-Id: sora_selection_exhausted_123")
+	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, `"cf_shield_429"`)
+	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, "sora upstream raw failover")
+	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "Authorization: Bearer sk-sora-test")
 }
 
 // TestSoraHandler_StreamForcing 验证 sora handler 的 stream 强制逻辑

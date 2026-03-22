@@ -220,6 +220,7 @@ func (h *SoraGatewayHandler) ChatCompletions(c *gin.Context) {
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
 	failedAccountIDs := make(map[int64]struct{})
+	var lastFailedAccount *service.Account
 	lastFailoverStatus := 0
 	var lastFailoverBody []byte
 	var lastFailoverHeaders http.Header
@@ -250,6 +251,28 @@ func (h *SoraGatewayHandler) ChatCompletions(c *gin.Context) {
 			}
 			reqLog.Warn("sora.failover_exhausted_no_available_accounts", fields...)
 			h.handleFailoverExhausted(c, lastFailoverStatus, lastFailoverHeaders, lastFailoverBody, streamStarted)
+			if lastFailedAccount != nil {
+				userAgent := c.GetHeader("User-Agent")
+				clientIP := ip.GetClientIP(c)
+				inboundEndpoint := GetInboundEndpoint(c)
+				upstreamEndpoint := GetUpstreamEndpoint(c, lastFailedAccount.Platform)
+				service.SetUsageResponseSnapshot(c, service.FormatUsageDetailHeadersText(lastFailoverHeaders), string(lastFailoverBody))
+				detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
+				h.submitUsageRecordTask(func(ctx context.Context) {
+					service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), &service.FailedUsageLogInput{
+						APIKey:           apiKey,
+						User:             apiKey.User,
+						Account:          lastFailedAccount,
+						Model:            reqModel,
+						Stream:           clientStream,
+						InboundEndpoint:  inboundEndpoint,
+						UpstreamEndpoint: upstreamEndpoint,
+						UserAgent:        userAgent,
+						IPAddress:        clientIP,
+						DetailSnapshot:   detailSnapshot,
+					}, "handler.sora_gateway.chat_completions")
+				})
+			}
 			return
 		}
 		account := selection.Account
@@ -330,6 +353,7 @@ func (h *SoraGatewayHandler) ChatCompletions(c *gin.Context) {
 		if err != nil {
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
+				lastFailedAccount = account
 				failedAccountIDs[account.ID] = struct{}{}
 				if switchCount >= maxAccountSwitches {
 					lastFailoverStatus = failoverErr.StatusCode
@@ -356,6 +380,26 @@ func (h *SoraGatewayHandler) ChatCompletions(c *gin.Context) {
 					}
 					reqLog.Warn("sora.upstream_failover_exhausted", fields...)
 					h.handleFailoverExhausted(c, lastFailoverStatus, lastFailoverHeaders, lastFailoverBody, streamStarted)
+					userAgent := c.GetHeader("User-Agent")
+					clientIP := ip.GetClientIP(c)
+					inboundEndpoint := GetInboundEndpoint(c)
+					upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
+					service.SetUsageResponseSnapshot(c, service.FormatUsageDetailHeadersText(lastFailoverHeaders), string(lastFailoverBody))
+					detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
+					h.submitUsageRecordTask(func(ctx context.Context) {
+						service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), &service.FailedUsageLogInput{
+							APIKey:           apiKey,
+							User:             apiKey.User,
+							Account:          account,
+							Model:            reqModel,
+							Stream:           clientStream,
+							InboundEndpoint:  inboundEndpoint,
+							UpstreamEndpoint: upstreamEndpoint,
+							UserAgent:        userAgent,
+							IPAddress:        clientIP,
+							DetailSnapshot:   detailSnapshot,
+						}, "handler.sora_gateway.chat_completions")
+					})
 					return
 				}
 				lastFailoverStatus = failoverErr.StatusCode
@@ -394,6 +438,25 @@ func (h *SoraGatewayHandler) ChatCompletions(c *gin.Context) {
 				zap.Bool("tls_fingerprint_enabled", tlsFingerprintEnabled),
 				zap.Error(err),
 			)
+			userAgent := c.GetHeader("User-Agent")
+			clientIP := ip.GetClientIP(c)
+			inboundEndpoint := GetInboundEndpoint(c)
+			upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
+			detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
+			h.submitUsageRecordTask(func(ctx context.Context) {
+				service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), &service.FailedUsageLogInput{
+					APIKey:           apiKey,
+					User:             apiKey.User,
+					Account:          account,
+					Model:            reqModel,
+					Stream:           clientStream,
+					InboundEndpoint:  inboundEndpoint,
+					UpstreamEndpoint: upstreamEndpoint,
+					UserAgent:        userAgent,
+					IPAddress:        clientIP,
+					DetailSnapshot:   detailSnapshot,
+				}, "handler.sora_gateway.chat_completions")
+			})
 			return
 		}
 

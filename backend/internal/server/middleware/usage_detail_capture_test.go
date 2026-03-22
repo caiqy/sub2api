@@ -204,6 +204,29 @@ func TestUsageDetailCaptureMiddleware_CapturesFullRequestAndResponseBodies(t *te
 	require.Equal(t, oversizedResponse, snapshot.ResponseBody)
 }
 
+func TestUsageDetailCapture_SetUsageResponseSnapshot_AllowsExplicitEmptyOverride(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var snapshot *UsageDetailSnapshot
+	r := gin.New()
+	r.Use(UsageDetailCapture())
+	r.GET("/empty-override", func(c *gin.Context) {
+		_, err := c.Writer.Write([]byte("local fallback body"))
+		require.NoError(t, err)
+		service.SetUsageResponseSnapshot(c, "", "")
+		snapshot = BuildUsageDetailSnapshot(c)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/empty-override", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.NotNil(t, snapshot)
+	require.Equal(t, "", snapshot.ResponseHeaders)
+	require.Equal(t, "", snapshot.ResponseBody)
+}
+
 type failingReadCloser struct {
 	chunks [][]byte
 	err    error

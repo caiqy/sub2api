@@ -18,6 +18,9 @@ type usageDetailCollector struct {
 	upstreamBody    string
 	responseHeaders string
 	responseBody    bytes.Buffer
+	overrideHeaders string
+	overrideBody    string
+	hasOverride     bool
 }
 
 type usageDetailResponseWriter struct {
@@ -104,13 +107,21 @@ func buildUsageDetailSnapshot(c *gin.Context) *UsageDetailSnapshot {
 	if collector.responseHeaders == "" {
 		collector.responseHeaders = service.FormatUsageDetailHeadersText(c.Writer.Header())
 	}
+	responseHeaders := collector.responseHeaders
+	responseBody := collector.responseBody.String()
+	if collector.hasOverride {
+		responseHeaders = collector.overrideHeaders
+	}
+	if collector.hasOverride {
+		responseBody = collector.overrideBody
+	}
 	return (&service.UsageLogDetailSnapshot{
 		RequestHeaders:         collector.requestHeaders,
 		RequestBody:            collector.requestBody,
 		UpstreamRequestHeaders: collector.upstreamHeaders,
 		UpstreamRequestBody:    collector.upstreamBody,
-		ResponseHeaders:        collector.responseHeaders,
-		ResponseBody:           collector.responseBody.String(),
+		ResponseHeaders:        responseHeaders,
+		ResponseBody:           responseBody,
 	}).Normalize()
 }
 
@@ -157,6 +168,15 @@ func (c *usageDetailCollector) SetUsageUpstreamRequest(headers, body string) {
 	}
 	c.upstreamHeaders = headers
 	c.upstreamBody = body
+}
+
+func (c *usageDetailCollector) SetUsageResponseSnapshot(headers, body string) {
+	if c == nil {
+		return
+	}
+	c.overrideHeaders = headers
+	c.overrideBody = body
+	c.hasOverride = true
 }
 
 type usageDetailCaptureSink struct {

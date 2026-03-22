@@ -215,6 +215,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	failedAccountIDs := make(map[int64]struct{})
 	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
+	var lastFailedAccount *service.Account
 
 	for {
 		// Select account supporting the requested model
@@ -238,6 +239,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				return
 			}
 			if lastFailoverErr != nil {
+				h.submitFailoverFailedUsageLog(c, apiKey, lastFailedAccount, reqModel, reqStream, lastFailoverErr, "handler.openai_gateway.responses")
 				h.handleFailoverExhausted(c, lastFailoverErr, streamStarted)
 			} else {
 				h.handleFailoverExhaustedSimple(c, 502, streamStarted)
@@ -313,7 +315,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				h.gatewayService.RecordOpenAIAccountSwitch()
 				failedAccountIDs[account.ID] = struct{}{}
 				lastFailoverErr = failoverErr
+				lastFailedAccount = account
 				if switchCount >= maxAccountSwitches {
+					h.submitFailoverFailedUsageLog(c, apiKey, account, reqModel, reqStream, failoverErr, "handler.openai_gateway.responses")
 					h.handleFailoverExhausted(c, failoverErr, streamStarted)
 					return
 				}
@@ -328,6 +332,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			}
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
 			wroteFallback := h.ensureForwardErrorResponse(c, streamStarted)
+			h.submitFailedUsageLog(c, apiKey, account, reqModel, reqStream, nil, nil, "handler.openai_gateway.responses")
 			fields := []zap.Field{
 				zap.Int64("account_id", account.ID),
 				zap.Bool("fallback_error_response_written", wroteFallback),
@@ -588,6 +593,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	failedAccountIDs := make(map[int64]struct{})
 	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
+	var lastFailedAccount *service.Account
 
 	for {
 		// 清除上一次迭代的降级模型标记，避免残留影响本次迭代
@@ -636,6 +642,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 				}
 			} else {
 				if lastFailoverErr != nil {
+					h.submitFailoverFailedUsageLog(c, apiKey, lastFailedAccount, reqModel, reqStream, lastFailoverErr, "handler.openai_gateway.messages")
 					h.handleAnthropicFailoverExhausted(c, lastFailoverErr, streamStarted)
 				} else {
 					h.anthropicStreamingAwareError(c, http.StatusBadGateway, "api_error", "Upstream request failed", streamStarted)
@@ -664,6 +671,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		// 仅在调度时实际触发了降级（原模型无可用账号、改用默认模型重试成功）时，
 		// 才将降级模型传给 Forward 层做模型替换；否则保持用户请求的原始模型。
 		defaultMappedModel := c.GetString("openai_messages_fallback_model")
+		setOpenAIFailedUsageExactUpstreamModel(c, resolveOpenAIFailedUsageExactUpstreamModel(account, reqModel, defaultMappedModel))
 		result, err := h.gatewayService.ForwardAsAnthropic(c.Request.Context(), c, account, body, promptCacheKey, defaultMappedModel)
 
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
@@ -705,7 +713,9 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 				h.gatewayService.RecordOpenAIAccountSwitch()
 				failedAccountIDs[account.ID] = struct{}{}
 				lastFailoverErr = failoverErr
+				lastFailedAccount = account
 				if switchCount >= maxAccountSwitches {
+					h.submitFailoverFailedUsageLog(c, apiKey, account, reqModel, reqStream, failoverErr, "handler.openai_gateway.messages")
 					h.handleAnthropicFailoverExhausted(c, failoverErr, streamStarted)
 					return
 				}
@@ -720,6 +730,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			}
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
 			wroteFallback := h.ensureAnthropicErrorResponse(c, streamStarted)
+			h.submitFailedUsageLog(c, apiKey, account, reqModel, reqStream, nil, nil, "handler.openai_gateway.messages")
 			reqLog.Warn("openai_messages.forward_failed",
 				zap.Int64("account_id", account.ID),
 				zap.Bool("fallback_error_response_written", wroteFallback),
@@ -1411,6 +1422,93 @@ func (h *OpenAIGatewayHandler) submitUsageRecordTask(task service.UsageRecordTas
 		}
 	}()
 	task(ctx)
+}
+
+func (h *OpenAIGatewayHandler) submitFailedUsageLog(c *gin.Context, apiKey *service.APIKey, account *service.Account, model string, stream bool, responseHeaders http.Header, responseBody []byte, logKey string) {
+	if c == nil || apiKey == nil || apiKey.User == nil || account == nil {
+		return
+	}
+	if responseHeaders != nil || responseBody != nil {
+		headersText := service.FormatUsageDetailHeadersText(responseHeaders)
+		service.SetUsageResponseSnapshot(c, headersText, string(responseBody))
+	}
+	userAgent := c.GetHeader("User-Agent")
+	clientIP := ip.GetClientIP(c)
+	detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
+	inboundEndpoint := GetInboundEndpoint(c)
+	upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
+	upstreamModel := resolveOpenAIFailedUsageUpstreamModel(c, account, model)
+	h.submitUsageRecordTask(func(ctx context.Context) {
+		service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), &service.FailedUsageLogInput{
+			APIKey:           apiKey,
+			User:             apiKey.User,
+			Account:          account,
+			Model:            model,
+			UpstreamModel:    upstreamModel,
+			Stream:           stream,
+			InboundEndpoint:  inboundEndpoint,
+			UpstreamEndpoint: upstreamEndpoint,
+			UserAgent:        userAgent,
+			IPAddress:        clientIP,
+			DetailSnapshot:   detailSnapshot,
+		}, logKey)
+	})
+}
+
+const openAIFailedUsageExactUpstreamModelKey = "openai_failed_usage_upstream_model"
+
+func setOpenAIFailedUsageExactUpstreamModel(c *gin.Context, upstreamModel string) {
+	if c == nil {
+		return
+	}
+	c.Set(openAIFailedUsageExactUpstreamModelKey, strings.TrimSpace(upstreamModel))
+}
+
+func resolveOpenAIFailedUsageExactUpstreamModel(account *service.Account, requestedModel, defaultMappedModel string) string {
+	if account == nil {
+		if strings.TrimSpace(defaultMappedModel) != "" {
+			return strings.TrimSpace(defaultMappedModel)
+		}
+		return strings.TrimSpace(requestedModel)
+	}
+
+	mappedModel, matched := account.ResolveMappedModel(requestedModel)
+	if !matched {
+		if fallbackModel := strings.TrimSpace(defaultMappedModel); fallbackModel != "" {
+			return fallbackModel
+		}
+	}
+	return strings.TrimSpace(mappedModel)
+}
+
+func resolveOpenAIFailedUsageUpstreamModel(c *gin.Context, account *service.Account, requestedModel string) string {
+	if c != nil {
+		if exactModel := strings.TrimSpace(c.GetString(openAIFailedUsageExactUpstreamModelKey)); exactModel != "" {
+			return exactModel
+		}
+	}
+
+	selectedModel := strings.TrimSpace(requestedModel)
+	if c != nil {
+		if fallbackModel := strings.TrimSpace(c.GetString("openai_messages_fallback_model")); fallbackModel != "" {
+			selectedModel = fallbackModel
+		}
+		if fallbackModel := strings.TrimSpace(c.GetString("openai_chat_completions_fallback_model")); fallbackModel != "" {
+			selectedModel = fallbackModel
+		}
+	}
+	if account == nil || selectedModel == "" {
+		return selectedModel
+	}
+	return account.GetMappedModel(selectedModel)
+}
+
+func (h *OpenAIGatewayHandler) submitFailoverFailedUsageLog(c *gin.Context, apiKey *service.APIKey, account *service.Account, model string, stream bool, failoverErr *service.UpstreamFailoverError, logKey string) {
+	if failoverErr == nil {
+		h.submitFailedUsageLog(c, apiKey, account, model, stream, nil, nil, logKey)
+		return
+	}
+	h.submitFailedUsageLog(c, apiKey, account, model, stream, failoverErr.ResponseHeaders, failoverErr.ResponseBody, logKey)
 }
 
 // handleConcurrencyError handles concurrency-related errors with proper 429 response

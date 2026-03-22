@@ -343,6 +343,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 	cleanedForUnknownBinding := false
 
 	fs := NewFailoverState(h.maxAccountSwitchesGemini, hasBoundSession)
+	var lastFailedAccount *service.Account
 
 	// 单账号分组提前设置 SingleAccountRetry 标记，让 Service 层首次 503 就不设模型限流标记。
 	// 避免单账号分组收到 503 (MODEL_CAPACITY_EXHAUSTED) 时设 29s 限流，导致后续请求连续快速失败。
@@ -368,6 +369,9 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				return
 			default: // FailoverExhausted
 				h.handleGeminiFailoverExhausted(c, fs.LastFailoverErr)
+				if fs.LastFailoverErr != nil && lastFailedAccount != nil {
+					h.submitFailedUsageLogFromFailover(c, apiKey, lastFailedAccount, modelName, stream, fs.LastFailoverErr, "handler.gemini_v1beta.models")
+				}
 				return
 			}
 		}
@@ -467,12 +471,14 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		if err != nil {
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
+				lastFailedAccount = account
 				failoverAction := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, failoverErr)
 				switch failoverAction {
 				case FailoverContinue:
 					continue
 				case FailoverExhausted:
 					h.handleGeminiFailoverExhausted(c, fs.LastFailoverErr)
+					h.submitFailedUsageLogFromFailover(c, apiKey, account, modelName, stream, fs.LastFailoverErr, "handler.gemini_v1beta.models")
 					return
 				case FailoverCanceled:
 					return
@@ -480,6 +486,25 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			}
 			// ForwardNative already wrote the response
 			reqLog.Error("gemini.forward_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+			userAgent := c.GetHeader("User-Agent")
+			clientIP := ip.GetClientIP(c)
+			inboundEndpoint := GetInboundEndpoint(c)
+			upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
+			detailSnapshot := middleware.BuildUsageDetailSnapshot(c)
+			h.submitUsageRecordTask(func(ctx context.Context) {
+				service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), &service.FailedUsageLogInput{
+					APIKey:           apiKey,
+					User:             apiKey.User,
+					Account:          account,
+					Model:            modelName,
+					Stream:           stream,
+					InboundEndpoint:  inboundEndpoint,
+					UpstreamEndpoint: upstreamEndpoint,
+					UserAgent:        userAgent,
+					IPAddress:        clientIP,
+					DetailSnapshot:   detailSnapshot,
+				}, "handler.gemini_v1beta.models")
+			})
 			return
 		}
 
