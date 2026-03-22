@@ -80,12 +80,17 @@ describe('UsageDetailModal', () => {
     expect(wrapper.text()).toContain('gpt-4.1')
     expect(wrapper.text()).toContain('2026-03-20T10:00:00Z')
     expect(wrapper.findAll('button[data-test^="tab-"]')).toHaveLength(6)
+    const detailPanel = wrapper.find('[data-test="detail-content-panel"]')
+    expect(detailPanel.exists()).toBe(true)
+    expect(detailPanel.classes()).toContain('h-[60vh]')
     expect(wrapper.text()).toContain('Client Request Headers')
     expect(wrapper.text()).toContain('Client Request Body')
     expect(wrapper.text()).toContain('Upstream Request Headers')
     expect(wrapper.text()).toContain('Upstream Request Body')
     expect(wrapper.text()).toContain('Response Headers')
     expect(wrapper.text()).toContain('Response Body')
+    expect(wrapper.find('pre').classes()).toContain('whitespace-pre-wrap')
+    expect(wrapper.find('pre').classes()).toContain('break-words')
     expect(wrapper.text()).toContain(`{
   "authorization": "Bearer token"
 }`)

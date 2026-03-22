@@ -44,21 +44,23 @@
         </button>
       </div>
 
-      <div v-if="loading" class="rounded-lg border border-dashed border-gray-200 p-6 text-sm text-gray-500 dark:border-dark-700 dark:text-gray-400">
-        {{ t('common.loading') }}
-      </div>
+      <div data-test="detail-content-panel" class="h-[60vh] overflow-auto">
+        <div v-if="loading" class="h-full rounded-lg border border-dashed border-gray-200 p-6 text-sm text-gray-500 dark:border-dark-700 dark:text-gray-400">
+          {{ t('common.loading') }}
+        </div>
 
-      <div v-else-if="error" class="rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-900/40 dark:bg-red-900/10">
-        <div class="text-sm text-red-700 dark:text-red-300">{{ error }}</div>
-        <button data-test="usage-detail-retry" type="button" class="btn btn-secondary mt-3" @click="emit('retry')">
-          {{ t('common.retry') }}
-        </button>
-      </div>
+        <div v-else-if="error" class="h-full rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-900/40 dark:bg-red-900/10">
+          <div class="text-sm text-red-700 dark:text-red-300">{{ error }}</div>
+          <button data-test="usage-detail-retry" type="button" class="btn btn-secondary mt-3" @click="emit('retry')">
+            {{ t('common.retry') }}
+          </button>
+        </div>
 
-      <pre v-else-if="activeContent" class="max-h-[60vh] overflow-auto rounded-lg bg-gray-50 p-4 text-xs text-gray-800 dark:bg-dark-900 dark:text-gray-100">{{ activeContent }}</pre>
+        <pre v-else-if="activeContent" class="h-full whitespace-pre-wrap break-words rounded-lg bg-gray-50 p-4 text-xs text-gray-800 dark:bg-dark-900 dark:text-gray-100">{{ activeContent }}</pre>
 
-      <div v-else class="rounded-lg border border-dashed border-gray-200 p-6 text-sm text-gray-500 dark:border-dark-700 dark:text-gray-400">
-        {{ t('admin.usage.emptyDetailContent') }}
+        <div v-else class="h-full rounded-lg border border-dashed border-gray-200 p-6 text-sm text-gray-500 dark:border-dark-700 dark:text-gray-400">
+          {{ t('admin.usage.emptyDetailContent') }}
+        </div>
       </div>
     </div>
   </BaseDialog>
