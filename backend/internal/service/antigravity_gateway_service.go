@@ -306,6 +306,7 @@ func (s *AntigravityGatewayService) handleSmartRetry(p antigravityRetryLoopParam
 				}
 			}
 			applyAntigravityOutboundHeaders(retryReq, p.outboundHeaders)
+			SetUsageUpstreamRequest(p.c, retryReq, string(p.body))
 
 			retryResp, retryErr := p.httpUpstream.Do(retryReq, p.proxyURL, p.account.ID, p.account.Concurrency)
 			if retryErr == nil && retryResp != nil && retryResp.StatusCode != http.StatusTooManyRequests && retryResp.StatusCode != http.StatusServiceUnavailable {
@@ -492,6 +493,7 @@ func (s *AntigravityGatewayService) handleSingleAccountRetryInPlace(
 			break
 		}
 		applyAntigravityOutboundHeaders(retryReq, p.outboundHeaders)
+		SetUsageUpstreamRequest(p.c, retryReq, string(p.body))
 
 		retryResp, retryErr := p.httpUpstream.Do(retryReq, p.proxyURL, p.account.ID, p.account.Concurrency)
 		if retryErr == nil && retryResp != nil && retryResp.StatusCode != http.StatusTooManyRequests && retryResp.StatusCode != http.StatusServiceUnavailable {
@@ -635,6 +637,7 @@ urlFallbackLoop:
 			if p.c != nil && len(p.body) > 0 {
 				p.c.Set(OpsUpstreamRequestBodyKey, string(p.body))
 			}
+			SetUsageUpstreamRequest(p.c, upstreamReq, string(p.body))
 
 			resp, err = p.httpUpstream.Do(upstreamReq, p.proxyURL, p.account.ID, p.account.Concurrency)
 			if err == nil && resp == nil {
@@ -2255,6 +2258,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 					fallbackReq, err := antigravity.NewAPIRequest(ctx, upstreamAction, accessToken, fallbackWrapped)
 					if err == nil {
 						applyAntigravityOutboundHeaders(fallbackReq, passthroughHeaders)
+						SetUsageUpstreamRequest(c, fallbackReq, string(fallbackWrapped))
 						fallbackResp, err := s.httpUpstream.Do(fallbackReq, proxyURL, account.ID, account.Concurrency)
 						if err == nil && fallbackResp.StatusCode < 400 {
 							_ = resp.Body.Close()
@@ -4287,6 +4291,7 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 	}
 
 	// 发送请求
+	SetUsageUpstreamRequest(c, req, string(body))
 	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
 		logger.LegacyPrintf("service.antigravity_gateway", "%s upstream request failed: %v", prefix, err)

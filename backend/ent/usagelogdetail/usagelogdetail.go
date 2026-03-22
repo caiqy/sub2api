@@ -20,6 +20,10 @@ const (
 	FieldRequestHeaders = "request_headers"
 	// FieldRequestBody holds the string denoting the request_body field in the database.
 	FieldRequestBody = "request_body"
+	// FieldUpstreamRequestHeaders holds the string denoting the upstream_request_headers field in the database.
+	FieldUpstreamRequestHeaders = "upstream_request_headers"
+	// FieldUpstreamRequestBody holds the string denoting the upstream_request_body field in the database.
+	FieldUpstreamRequestBody = "upstream_request_body"
 	// FieldResponseHeaders holds the string denoting the response_headers field in the database.
 	FieldResponseHeaders = "response_headers"
 	// FieldResponseBody holds the string denoting the response_body field in the database.
@@ -45,6 +49,8 @@ var Columns = []string{
 	FieldUsageLogID,
 	FieldRequestHeaders,
 	FieldRequestBody,
+	FieldUpstreamRequestHeaders,
+	FieldUpstreamRequestBody,
 	FieldResponseHeaders,
 	FieldResponseBody,
 	FieldCreatedAt,
@@ -65,6 +71,10 @@ var (
 	DefaultRequestHeaders string
 	// DefaultRequestBody holds the default value on creation for the "request_body" field.
 	DefaultRequestBody string
+	// DefaultUpstreamRequestHeaders holds the default value on creation for the "upstream_request_headers" field.
+	DefaultUpstreamRequestHeaders string
+	// DefaultUpstreamRequestBody holds the default value on creation for the "upstream_request_body" field.
+	DefaultUpstreamRequestBody string
 	// DefaultResponseHeaders holds the default value on creation for the "response_headers" field.
 	DefaultResponseHeaders string
 	// DefaultResponseBody holds the default value on creation for the "response_body" field.
@@ -94,6 +104,16 @@ func ByRequestHeaders(opts ...sql.OrderTermOption) OrderOption {
 // ByRequestBody orders the results by the request_body field.
 func ByRequestBody(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldRequestBody, opts...).ToFunc()
+}
+
+// ByUpstreamRequestHeaders orders the results by the upstream_request_headers field.
+func ByUpstreamRequestHeaders(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldUpstreamRequestHeaders, opts...).ToFunc()
+}
+
+// ByUpstreamRequestBody orders the results by the upstream_request_body field.
+func ByUpstreamRequestBody(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldUpstreamRequestBody, opts...).ToFunc()
 }
 
 // ByResponseHeaders orders the results by the response_headers field.

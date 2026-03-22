@@ -592,12 +592,14 @@ func UsageLogDetailFromService(detail *service.UsageLogDetail) *AdminUsageDetail
 		return nil
 	}
 	return &AdminUsageDetail{
-		UsageLogID:      detail.UsageLogID,
-		RequestHeaders:  detail.RequestHeaders,
-		RequestBody:     detail.RequestBody,
-		ResponseHeaders: detail.ResponseHeaders,
-		ResponseBody:    detail.ResponseBody,
-		CreatedAt:       detail.CreatedAt,
+		UsageLogID:             detail.UsageLogID,
+		RequestHeaders:         detail.RequestHeaders,
+		RequestBody:            detail.RequestBody,
+		UpstreamRequestHeaders: detail.UpstreamRequestHeaders,
+		UpstreamRequestBody:    detail.UpstreamRequestBody,
+		ResponseHeaders:        detail.ResponseHeaders,
+		ResponseBody:           detail.ResponseBody,
+		CreatedAt:              detail.CreatedAt,
 	}
 }
 

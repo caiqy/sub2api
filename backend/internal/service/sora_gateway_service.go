@@ -495,6 +495,7 @@ func (s *SoraGatewayService) forwardToUpstreamWithPassthrough(
 		proxyURL = account.Proxy.URL()
 	}
 
+	SetUsageUpstreamRequest(c, upstreamReq, string(upstreamBody))
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
 		s.writeSoraError(c, http.StatusBadGateway, "upstream_error", "Failed to connect to upstream Sora service", clientStream)

@@ -9,8 +9,10 @@ const messages: Record<string, string> = {
   'common.close': 'Close',
   'common.loading': 'Loading...',
   'common.retry': 'Retry',
-  'admin.usage.requestHeaders': 'Request Headers',
-  'admin.usage.requestBody': 'Request Body',
+  'admin.usage.clientRequestHeaders': 'Client Request Headers',
+  'admin.usage.clientRequestBody': 'Client Request Body',
+  'admin.usage.upstreamRequestHeaders': 'Upstream Request Headers',
+  'admin.usage.upstreamRequestBody': 'Upstream Request Body',
   'admin.usage.responseHeaders': 'Response Headers',
   'admin.usage.responseBody': 'Response Body',
   'admin.usage.requestId': 'Request ID',
@@ -40,7 +42,7 @@ describe('UsageDetailModal', () => {
     })
   })
 
-  it('renders header info, formats JSON, switches tabs, shows empty state and copied state', async () => {
+  it('renders six top-level tabs and supports upstream detail tabs', async () => {
     const wrapper = mount(UsageDetailModal, {
       props: {
         show: true,
@@ -54,6 +56,8 @@ describe('UsageDetailModal', () => {
           usage_log_id: 1,
           request_headers: '{"authorization":"Bearer token"}',
           request_body: '{"foo":1}',
+          upstream_request_headers: '{"x-upstream":"gateway"}',
+          upstream_request_body: '{"bar":2}',
           response_headers: null,
           response_body: 'not-json',
           created_at: '2026-03-20T10:00:00Z',
@@ -75,18 +79,35 @@ describe('UsageDetailModal', () => {
     expect(wrapper.text()).toContain('alice@example.com')
     expect(wrapper.text()).toContain('gpt-4.1')
     expect(wrapper.text()).toContain('2026-03-20T10:00:00Z')
+    expect(wrapper.findAll('button[data-test^="tab-"]')).toHaveLength(6)
+    expect(wrapper.text()).toContain('Client Request Headers')
+    expect(wrapper.text()).toContain('Client Request Body')
+    expect(wrapper.text()).toContain('Upstream Request Headers')
+    expect(wrapper.text()).toContain('Upstream Request Body')
+    expect(wrapper.text()).toContain('Response Headers')
+    expect(wrapper.text()).toContain('Response Body')
     expect(wrapper.text()).toContain(`{
   "authorization": "Bearer token"
 }`)
 
-    await wrapper.find('[data-test="tab-request-body"]').trigger('click')
+    await wrapper.find('[data-test="tab-client-request-body"]').trigger('click')
     expect(wrapper.text()).toContain(`{
   "foo": 1
 }`)
 
+    await wrapper.find('[data-test="tab-upstream-request-headers"]').trigger('click')
+    expect(wrapper.text()).toContain(`{
+  "x-upstream": "gateway"
+}`)
+
+    await wrapper.find('[data-test="tab-upstream-request-body"]').trigger('click')
+    expect(wrapper.text()).toContain(`{
+  "bar": 2
+}`)
+
     await wrapper.find('[data-test="copy-current-tab"]').trigger('click')
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(`{
-  "foo": 1
+  "bar": 2
 }`)
     expect(wrapper.text()).toContain('Copied')
 
@@ -95,6 +116,46 @@ describe('UsageDetailModal', () => {
 
     await wrapper.find('[data-test="tab-response-body"]').trigger('click')
     expect(wrapper.text()).toContain('not-json')
+  })
+
+  it('shows empty state when legacy upstream fields are missing', async () => {
+    const wrapper = mount(UsageDetailModal, {
+      props: {
+        show: true,
+        usageLog: {
+          request_id: 'req-legacy',
+          user: { email: 'legacy@example.com' },
+          model: 'gpt-4.1',
+          created_at: '2026-03-20T10:00:00Z',
+        },
+        detail: {
+          usage_log_id: 2,
+          request_headers: 'client-headers',
+          request_body: 'client-body',
+          upstream_request_headers: null,
+          upstream_request_body: null,
+          response_headers: 'response-headers',
+          response_body: 'response-body',
+          created_at: '2026-03-20T10:00:00Z',
+        },
+        loading: false,
+        error: '',
+      },
+      global: {
+        stubs: {
+          BaseDialog: {
+            props: ['show', 'title'],
+            template: '<div v-if="show"><slot /></div>',
+          },
+        },
+      },
+    })
+
+    await wrapper.find('[data-test="tab-upstream-request-headers"]').trigger('click')
+    expect(wrapper.text()).toContain('No content')
+
+    await wrapper.find('[data-test="tab-upstream-request-body"]').trigger('click')
+    expect(wrapper.text()).toContain('No content')
   })
 
   it('shows retry button when error is present', async () => {

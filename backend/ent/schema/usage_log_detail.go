@@ -31,6 +31,10 @@ func (UsageLogDetail) Fields() []ent.Field {
 			Default(""),
 		field.Text("request_body").
 			Default(""),
+		field.Text("upstream_request_headers").
+			Default(""),
+		field.Text("upstream_request_body").
+			Default(""),
 		field.Text("response_headers").
 			Default(""),
 		field.Text("response_body").
@@ -48,8 +52,7 @@ func (UsageLogDetail) Edges() []ent.Edge {
 			Ref("detail").
 			Field("usage_log_id").
 			Unique().
-			Required().
-			Annotations(entsql.OnDelete(entsql.Cascade)),
+			Required(),
 	}
 }
 

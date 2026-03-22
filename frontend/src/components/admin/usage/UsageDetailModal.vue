@@ -70,7 +70,13 @@ import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import type { AdminUsageDetail, AdminUsageLog } from '@/types'
 
-type DetailTabKey = 'request-headers' | 'request-body' | 'response-headers' | 'response-body'
+type DetailTabKey =
+  | 'client-request-headers'
+  | 'client-request-body'
+  | 'upstream-request-headers'
+  | 'upstream-request-body'
+  | 'response-headers'
+  | 'response-body'
 
 interface Props {
   show: boolean
@@ -87,12 +93,14 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const activeTab = ref<DetailTabKey>('request-headers')
+const activeTab = ref<DetailTabKey>('client-request-headers')
 const copied = ref(false)
 
 const tabs = computed(() => [
-  { key: 'request-headers' as const, label: t('admin.usage.requestHeaders') },
-  { key: 'request-body' as const, label: t('admin.usage.requestBody') },
+  { key: 'client-request-headers' as const, label: t('admin.usage.clientRequestHeaders') },
+  { key: 'client-request-body' as const, label: t('admin.usage.clientRequestBody') },
+  { key: 'upstream-request-headers' as const, label: t('admin.usage.upstreamRequestHeaders') },
+  { key: 'upstream-request-body' as const, label: t('admin.usage.upstreamRequestBody') },
   { key: 'response-headers' as const, label: t('admin.usage.responseHeaders') },
   { key: 'response-body' as const, label: t('admin.usage.responseBody') },
 ])
@@ -115,8 +123,10 @@ const formatJsonLike = (value: unknown) => {
 
 const activeContent = computed(() => {
   if (!props.detail) return ''
-  if (activeTab.value === 'request-headers') return formatJsonLike(props.detail.request_headers)
-  if (activeTab.value === 'request-body') return formatJsonLike(props.detail.request_body)
+  if (activeTab.value === 'client-request-headers') return formatJsonLike(props.detail.request_headers)
+  if (activeTab.value === 'client-request-body') return formatJsonLike(props.detail.request_body)
+  if (activeTab.value === 'upstream-request-headers') return formatJsonLike(props.detail.upstream_request_headers)
+  if (activeTab.value === 'upstream-request-body') return formatJsonLike(props.detail.upstream_request_body)
   if (activeTab.value === 'response-headers') return formatJsonLike(props.detail.response_headers)
   return formatJsonLike(props.detail.response_body)
 })
@@ -134,7 +144,7 @@ watch(
   () => props.show,
   (show) => {
     if (show) {
-      activeTab.value = 'request-headers'
+      activeTab.value = 'client-request-headers'
       copied.value = false
     }
   },

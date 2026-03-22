@@ -19,21 +19,25 @@ func NewUsageLogDetailBestEffortContext(parent context.Context) (context.Context
 
 // UsageLogDetail 表示持久化后的 usage log 详情实体。
 type UsageLogDetail struct {
-	UsageLogID      int64
-	RequestHeaders  string
-	RequestBody     string
-	ResponseHeaders string
-	ResponseBody    string
-	CreatedAt       time.Time
+	UsageLogID             int64
+	RequestHeaders         string
+	RequestBody            string
+	UpstreamRequestHeaders string
+	UpstreamRequestBody    string
+	ResponseHeaders        string
+	ResponseBody           string
+	CreatedAt              time.Time
 }
 
 // UsageLogDetailSnapshot 保存 usage log 的请求/响应明细快照。
 // 字段内容按原样保留，用于后续持久化或跨层传递。
 type UsageLogDetailSnapshot struct {
-	RequestHeaders  string
-	RequestBody     string
-	ResponseHeaders string
-	ResponseBody    string
+	RequestHeaders         string
+	RequestBody            string
+	UpstreamRequestHeaders string
+	UpstreamRequestBody    string
+	ResponseHeaders        string
+	ResponseBody           string
 }
 
 // Normalize 返回一个可安全持久化/传递的快照副本。

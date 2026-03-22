@@ -3,8 +3,10 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { expectTypeOf } from 'vitest'
 
 import { apiClient } from '@/api/client'
+import type { AdminUsageDetail } from '@/types'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
 const usageModulePath = resolve(currentDir, '../usage.ts')
@@ -29,6 +31,8 @@ describe('admin usage module', () => {
         usage_log_id: 42,
         request_headers: null,
         request_body: null,
+        upstream_request_headers: null,
+        upstream_request_body: null,
         response_headers: null,
         response_body: null,
         created_at: '2026-03-20T00:00:00Z'
@@ -42,5 +46,12 @@ describe('admin usage module', () => {
     await adminAPI.usage.getDetail(42)
 
     expect(getSpy).toHaveBeenCalledWith('/admin/usage/42/detail')
+  })
+
+  it('includes upstream request detail fields in the shared admin usage detail type', () => {
+    expectTypeOf<AdminUsageDetail>().toMatchTypeOf<{
+      upstream_request_headers: string | null
+      upstream_request_body: string | null
+    }>()
   })
 })

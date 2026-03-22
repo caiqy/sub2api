@@ -14,6 +14,8 @@ type UsageDetailSnapshot = service.UsageLogDetailSnapshot
 type usageDetailCollector struct {
 	requestHeaders  string
 	requestBody     string
+	upstreamHeaders string
+	upstreamBody    string
 	responseHeaders string
 	responseBody    bytes.Buffer
 }
@@ -57,7 +59,7 @@ func UsageDetailCapture() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		requestHeaders := ""
 		if c.Request != nil {
-			requestHeaders = formatHeadersText(c.Request.Header)
+			requestHeaders = service.FormatUsageDetailHeadersText(c.Request.Header)
 		}
 		collector := &usageDetailCollector{
 			requestHeaders: requestHeaders,
@@ -72,10 +74,10 @@ func UsageDetailCapture() gin.HandlerFunc {
 				err:    err,
 			}
 		}
-		c.Set(usageDetailContextKey, collector)
+		c.Set(service.UsageDetailCaptureContextKey, collector)
 		c.Writer = &usageDetailResponseWriter{ResponseWriter: c.Writer, collector: collector}
 		c.Next()
-		collector.responseHeaders = formatHeadersText(c.Writer.Header())
+		collector.responseHeaders = service.FormatUsageDetailHeadersText(c.Writer.Header())
 	}
 }
 
@@ -91,7 +93,7 @@ func buildUsageDetailSnapshot(c *gin.Context) *UsageDetailSnapshot {
 	if c == nil {
 		return nil
 	}
-	v, ok := c.Get(usageDetailContextKey)
+	v, ok := c.Get(service.UsageDetailCaptureContextKey)
 	if !ok {
 		return nil
 	}
@@ -100,27 +102,16 @@ func buildUsageDetailSnapshot(c *gin.Context) *UsageDetailSnapshot {
 		return nil
 	}
 	if collector.responseHeaders == "" {
-		collector.responseHeaders = formatHeadersText(c.Writer.Header())
+		collector.responseHeaders = service.FormatUsageDetailHeadersText(c.Writer.Header())
 	}
 	return (&service.UsageLogDetailSnapshot{
-		RequestHeaders:  collector.requestHeaders,
-		RequestBody:     collector.requestBody,
-		ResponseHeaders: collector.responseHeaders,
-		ResponseBody:    collector.responseBody.String(),
+		RequestHeaders:         collector.requestHeaders,
+		RequestBody:            collector.requestBody,
+		UpstreamRequestHeaders: collector.upstreamHeaders,
+		UpstreamRequestBody:    collector.upstreamBody,
+		ResponseHeaders:        collector.responseHeaders,
+		ResponseBody:           collector.responseBody.String(),
 	}).Normalize()
-}
-
-func formatHeadersText(headers http.Header) string {
-	if len(headers) == 0 {
-		return ""
-	}
-	clone := headers.Clone()
-	if len(clone) == 0 {
-		return ""
-	}
-	var buf bytes.Buffer
-	_ = clone.Write(&buf)
-	return buf.String()
 }
 
 func (r *replayRequestBody) Read(p []byte) (int, error) {
@@ -158,6 +149,14 @@ func (c *usageDetailCollector) captureResponseChunk(data []byte) {
 		return
 	}
 	_, _ = c.responseBody.Write(data)
+}
+
+func (c *usageDetailCollector) SetUsageUpstreamRequest(headers, body string) {
+	if c == nil {
+		return
+	}
+	c.upstreamHeaders = headers
+	c.upstreamBody = body
 }
 
 type usageDetailCaptureSink struct {
@@ -200,4 +199,6 @@ func captureRequestPrefix(body io.Reader) (captured string, replayPrefix []byte,
 	return string(payload), payload, readErr
 }
 
-const usageDetailContextKey = "usage_detail_capture"
+func SetUsageUpstreamRequest(c *gin.Context, req *http.Request, body string) {
+	service.SetUsageUpstreamRequest(c, req, body)
+}

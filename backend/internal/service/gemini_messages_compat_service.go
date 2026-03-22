@@ -747,6 +747,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 			// In this code path `body` is already the JSON sent to upstream.
 			c.Set(OpsUpstreamRequestBodyKey, string(body))
 		}
+		SetUsageUpstreamRequest(c, upstreamReq, "")
 
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		if err != nil {
@@ -1246,6 +1247,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 			// In this code path `body` is already the JSON sent to upstream.
 			c.Set(OpsUpstreamRequestBodyKey, string(body))
 		}
+		SetUsageUpstreamRequest(c, upstreamReq, "")
 
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		if err != nil {

@@ -409,12 +409,14 @@ type AdminUsageLog struct {
 }
 
 type AdminUsageDetail struct {
-	UsageLogID      int64     `json:"usage_log_id"`
-	RequestHeaders  string    `json:"request_headers"`
-	RequestBody     string    `json:"request_body"`
-	ResponseHeaders string    `json:"response_headers"`
-	ResponseBody    string    `json:"response_body"`
-	CreatedAt       time.Time `json:"created_at"`
+	UsageLogID             int64     `json:"usage_log_id"`
+	RequestHeaders         string    `json:"request_headers"`
+	RequestBody            string    `json:"request_body"`
+	UpstreamRequestHeaders string    `json:"upstream_request_headers"`
+	UpstreamRequestBody    string    `json:"upstream_request_body"`
+	ResponseHeaders        string    `json:"response_headers"`
+	ResponseBody           string    `json:"response_body"`
+	CreatedAt              time.Time `json:"created_at"`
 }
 
 type UsageCleanupFilters struct {
