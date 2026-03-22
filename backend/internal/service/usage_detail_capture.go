@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -31,6 +32,78 @@ func FormatUsageDetailHeadersText(headers http.Header) string {
 	return buf.String()
 }
 
+func FormatUsageDetailRequestHeadersText(req *http.Request) string {
+	if req == nil {
+		return ""
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString(":method: ")
+	buf.WriteString(req.Method)
+	buf.WriteByte('\n')
+	buf.WriteString(":url: ")
+	buf.WriteString(formatUsageDetailRequestURL(req))
+	buf.WriteByte('\n')
+	buf.WriteString(FormatUsageDetailHeadersText(req.Header))
+
+	return buf.String()
+}
+
+func formatUsageDetailRequestURL(req *http.Request) string {
+	if req == nil {
+		return ""
+	}
+	if req.URL != nil && req.URL.IsAbs() {
+		return req.URL.Redacted()
+	}
+
+	scheme := firstNonEmptyHeaderValue(req.Header, "X-Forwarded-Proto")
+	if scheme == "" {
+		scheme = "http"
+		if req.TLS != nil {
+			scheme = "https"
+		}
+	}
+
+	host := firstNonEmptyHeaderValue(req.Header, "X-Forwarded-Host")
+	if host == "" {
+		host = req.Host
+	}
+	if host == "" && req.URL != nil {
+		host = req.URL.Host
+	}
+
+	requestURI := req.RequestURI
+	if requestURI == "" && req.URL != nil {
+		requestURI = req.URL.RequestURI()
+	}
+
+	if host == "" {
+		if req.URL != nil {
+			return req.URL.Redacted()
+		}
+		return requestURI
+	}
+
+	if requestURI == "" {
+		return scheme + "://" + host
+	}
+
+	return scheme + "://" + host + requestURI
+}
+
+func firstNonEmptyHeaderValue(headers http.Header, key string) string {
+	for _, value := range headers.Values(key) {
+		for _, part := range strings.Split(value, ",") {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				return part
+			}
+		}
+	}
+	return ""
+}
+
 func SetUsageUpstreamRequest(c *gin.Context, req *http.Request, body string) {
 	if c == nil || req == nil {
 		return
@@ -53,7 +126,7 @@ func SetUsageUpstreamRequest(c *gin.Context, req *http.Request, body string) {
 	if !ok || collector == nil {
 		return
 	}
-	collector.SetUsageUpstreamRequest(FormatUsageDetailHeadersText(req.Header), body)
+	collector.SetUsageUpstreamRequest(FormatUsageDetailRequestHeadersText(req), body)
 }
 
 func SetUsageResponseSnapshot(c *gin.Context, headers, body string) {

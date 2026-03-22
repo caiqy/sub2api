@@ -62,7 +62,7 @@ func UsageDetailCapture() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		requestHeaders := ""
 		if c.Request != nil {
-			requestHeaders = service.FormatUsageDetailHeadersText(c.Request.Header)
+			requestHeaders = service.FormatUsageDetailRequestHeadersText(c.Request)
 		}
 		collector := &usageDetailCollector{
 			requestHeaders: requestHeaders,

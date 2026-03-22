@@ -1066,7 +1066,7 @@ func TestAntigravityGatewayService_ForwardGemini_ModelFallbackUpdatesUsageSnapsh
 	require.Contains(t, string(upstream.requestBodies[0]), mappedModel)
 	require.Contains(t, string(upstream.requestBodies[1]), fallbackModel)
 	require.Equal(t, string(upstream.requestBodies[1]), collector.body)
-	require.Equal(t, FormatUsageDetailHeadersText(upstream.requestHeaders[1]), collector.headers)
+	require.Equal(t, ":method: POST\n:url: https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse\n"+FormatUsageDetailHeadersText(upstream.requestHeaders[1]), collector.headers)
 	if len(upstream.requestBodies[0]) > 0 {
 		require.NotEqual(t, string(upstream.requestBodies[0]), collector.body)
 	}
@@ -1128,7 +1128,7 @@ func TestAntigravityGatewayService_ForwardUpstream_CapturesUsageSnapshotBeforeSe
 	require.Len(t, upstream.requestBodies, 1)
 	require.Len(t, upstream.requestHeaders, 1)
 	require.Equal(t, string(body), collector.body)
-	require.Equal(t, FormatUsageDetailHeadersText(upstream.requestHeaders[0]), collector.headers)
+	require.Equal(t, ":method: POST\n:url: https://example.com/v1/messages\n"+FormatUsageDetailHeadersText(upstream.requestHeaders[0]), collector.headers)
 	require.Contains(t, collector.headers, "Authorization: Bearer api-key-token")
 	require.Contains(t, collector.headers, "X-Api-Key: api-key-token")
 	require.Contains(t, collector.headers, "Anthropic-Version: 2023-06-01")

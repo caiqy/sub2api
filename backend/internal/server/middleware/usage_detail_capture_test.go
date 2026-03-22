@@ -37,10 +37,11 @@ func TestUsageDetailCapture_SetUsageUpstreamRequest_PreservesHeaderTextAndBody(t
 
 	require.Equal(t, http.StatusNoContent, w.Code)
 	require.NotNil(t, snapshot)
-	require.Equal(t, service.FormatUsageDetailHeadersText(http.Header{
-		"Authorization": []string{"Bearer secret-token"},
-		"X-Multi":       []string{"a", "b"},
-	}), snapshot.UpstreamRequestHeaders)
+	require.Contains(t, snapshot.UpstreamRequestHeaders, ":method: POST")
+	require.Contains(t, snapshot.UpstreamRequestHeaders, ":url: https://example.com/v1/messages")
+	require.Contains(t, snapshot.UpstreamRequestHeaders, "Authorization: Bearer secret-token")
+	require.Contains(t, snapshot.UpstreamRequestHeaders, "X-Multi: a")
+	require.Contains(t, snapshot.UpstreamRequestHeaders, "X-Multi: b")
 	require.Equal(t, "  {\"raw\":true}\n", snapshot.UpstreamRequestBody)
 }
 
@@ -83,6 +84,76 @@ func TestUsageDetailCaptureMiddleware_CapturesRequestAndResponse(t *testing.T) {
 	require.Equal(t, "hello world", snapshotRequest.ResponseBody)
 }
 
+func TestUsageDetailCaptureMiddleware_RequestHeadersIncludeMethodAndAbsoluteURL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var snapshot *UsageDetailSnapshot
+	r := gin.New()
+	r.Use(UsageDetailCapture())
+	r.POST("/capture", func(c *gin.Context) {
+		snapshot = BuildUsageDetailSnapshot(c)
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "https://api.example.com/capture?debug=1", strings.NewReader(`{"message":"hi"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNoContent, w.Code)
+	require.NotNil(t, snapshot)
+	require.Contains(t, snapshot.RequestHeaders, ":method: POST")
+	require.Contains(t, snapshot.RequestHeaders, ":url: https://api.example.com/capture?debug=1")
+	require.Contains(t, snapshot.RequestHeaders, "Content-Type: application/json")
+}
+
+func TestUsageDetailCaptureMiddleware_RequestHeadersUseFirstForwardedValues(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var snapshot *UsageDetailSnapshot
+	r := gin.New()
+	r.Use(UsageDetailCapture())
+	r.POST("/capture", func(c *gin.Context) {
+		snapshot = BuildUsageDetailSnapshot(c)
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/capture?debug=1", strings.NewReader(`{"message":"hi"}`))
+	req.Host = "origin.example.com"
+	req.Header.Set("X-Forwarded-Proto", " , https, http")
+	req.Header.Set("X-Forwarded-Host", " , api.example.com, fallback.example.com")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNoContent, w.Code)
+	require.NotNil(t, snapshot)
+	require.Contains(t, snapshot.RequestHeaders, ":url: https://api.example.com/capture?debug=1")
+}
+
+func TestUsageDetailCaptureMiddleware_RequestHeadersStillIncludeMetaWhenHeadersEmpty(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var snapshot *UsageDetailSnapshot
+	r := gin.New()
+	r.Use(UsageDetailCapture())
+	r.GET("/empty", func(c *gin.Context) {
+		snapshot = BuildUsageDetailSnapshot(c)
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "https://api.example.com/empty", nil)
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNoContent, w.Code)
+	require.NotNil(t, snapshot)
+	require.Equal(t, ":method: GET\n:url: https://api.example.com/empty\n", snapshot.RequestHeaders)
+}
+
 func TestUsageDetailCaptureMiddleware_HandlesEmptyBodyAndHeaders(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -103,7 +174,7 @@ func TestUsageDetailCaptureMiddleware_HandlesEmptyBodyAndHeaders(t *testing.T) {
 	require.NotNil(t, snapshotRequest)
 	require.Equal(t, "", snapshotRequest.RequestBody)
 	require.Equal(t, "", snapshotRequest.ResponseBody)
-	require.Equal(t, "", snapshotRequest.RequestHeaders)
+	require.Equal(t, ":method: GET\n:url: http://example.com/empty\n", snapshotRequest.RequestHeaders)
 	require.Equal(t, "", snapshotRequest.ResponseHeaders)
 }
 

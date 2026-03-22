@@ -54,9 +54,9 @@ describe('UsageDetailModal', () => {
         },
         detail: {
           usage_log_id: 1,
-          request_headers: '{"authorization":"Bearer token"}',
+          request_headers: ':method: POST\n:url: https://api.example.com/v1/chat/completions\nauthorization: Bearer token\nx-trace-id: trace-client',
           request_body: '{"foo":1}',
-          upstream_request_headers: '{"x-upstream":"gateway"}',
+          upstream_request_headers: ':method: POST\n:url: https://upstream.example.com/v1/chat/completions\nx-upstream: gateway\nx-upstream-trace-id: trace-upstream',
           upstream_request_body: '{"bar":2}',
           response_headers: null,
           response_body: 'not-json',
@@ -91,9 +91,17 @@ describe('UsageDetailModal', () => {
     expect(wrapper.text()).toContain('Response Body')
     expect(wrapper.find('pre').classes()).toContain('whitespace-pre-wrap')
     expect(wrapper.find('pre').classes()).toContain('break-words')
-    expect(wrapper.text()).toContain(`{
-  "authorization": "Bearer token"
-}`)
+    expect(wrapper.text()).toContain(`:method: POST
+:url: https://api.example.com/v1/chat/completions
+authorization: Bearer token
+x-trace-id: trace-client`)
+
+    await wrapper.find('[data-test="copy-current-tab"]').trigger('click')
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(`:method: POST
+:url: https://api.example.com/v1/chat/completions
+authorization: Bearer token
+x-trace-id: trace-client`)
+    expect(wrapper.text()).toContain('Copied')
 
     await wrapper.find('[data-test="tab-client-request-body"]').trigger('click')
     expect(wrapper.text()).toContain(`{
@@ -101,9 +109,17 @@ describe('UsageDetailModal', () => {
 }`)
 
     await wrapper.find('[data-test="tab-upstream-request-headers"]').trigger('click')
-    expect(wrapper.text()).toContain(`{
-  "x-upstream": "gateway"
-}`)
+    expect(wrapper.text()).toContain(`:method: POST
+:url: https://upstream.example.com/v1/chat/completions
+x-upstream: gateway
+x-upstream-trace-id: trace-upstream`)
+
+    await wrapper.find('[data-test="copy-current-tab"]').trigger('click')
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(`:method: POST
+:url: https://upstream.example.com/v1/chat/completions
+x-upstream: gateway
+x-upstream-trace-id: trace-upstream`)
+    expect(wrapper.text()).toContain('Copied')
 
     await wrapper.find('[data-test="tab-upstream-request-body"]').trigger('click')
     expect(wrapper.text()).toContain(`{
@@ -111,10 +127,9 @@ describe('UsageDetailModal', () => {
 }`)
 
     await wrapper.find('[data-test="copy-current-tab"]').trigger('click')
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(`{
+    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(`{
   "bar": 2
 }`)
-    expect(wrapper.text()).toContain('Copied')
 
     await wrapper.find('[data-test="tab-response-headers"]').trigger('click')
     expect(wrapper.text()).toContain('No content')
