@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"regexp"
 	"testing"
@@ -191,4 +192,116 @@ func TestUsageLogDetailRepositoryCreate_WrapsPruneError(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorIs(t, err, pruneErr)
 	require.ErrorContains(t, err, "prune usage log detail")
+}
+
+func TestUsageLogRepositoryFlushBestEffortBatch_PersistsDetailForInsertedRows(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	repo := newUsageLogRepositoryWithSQL(nil, db)
+	createdAt := time.Now().UTC().Truncate(time.Second)
+	log := &service.UsageLog{
+		UserID:       1,
+		APIKeyID:     2,
+		AccountID:    3,
+		RequestID:    "req-best-effort-detail",
+		Model:        "claude-3",
+		InputTokens:  10,
+		OutputTokens: 20,
+		TotalCost:    0.5,
+		ActualCost:   0.5,
+		CreatedAt:    createdAt,
+		DetailSnapshot: (&service.UsageLogDetailSnapshot{
+			RequestHeaders:         "Authorization: Bearer best-effort",
+			RequestBody:            `{"request":"payload"}`,
+			UpstreamRequestHeaders: "X-Upstream: value",
+			UpstreamRequestBody:    `{"upstream":"payload"}`,
+			ResponseHeaders:        "Content-Type: application/json",
+			ResponseBody:           `{"ok":true}`,
+		}).Normalize(),
+	}
+	payload, err := json.Marshal([]usageLogBatchRow{{
+		RequestID: log.RequestID,
+		APIKeyID:  log.APIKeyID,
+		ID:        123,
+		CreatedAt: createdAt,
+		Inserted:  true,
+	}})
+	require.NoError(t, err)
+
+	mock.ExpectQuery(`WITH input \(.*'\[\]'::json`).
+		WillReturnRows(sqlmock.NewRows([]string{"payload"}).AddRow(payload))
+	mock.ExpectExec(`INSERT INTO usage_log_details`).
+		WithArgs(
+			int64(123),
+			"Authorization: Bearer best-effort",
+			`{"request":"payload"}`,
+			"X-Upstream: value",
+			`{"upstream":"payload"}`,
+			"Content-Type: application/json",
+			`{"ok":true}`,
+			createdAt,
+		).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`DELETE FROM usage_log_details`).
+		WithArgs(service.UsageLogDetailRetentionLimit).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	req := usageLogBestEffortRequest{
+		prepared: prepareUsageLogInsert(log),
+		apiKeyID: log.APIKeyID,
+		log:      log,
+		resultCh: make(chan error, 1),
+	}
+	repo.flushBestEffortBatch(db, []usageLogBestEffortRequest{req})
+
+	require.NoError(t, <-req.resultCh)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestUsageLogRepositoryFlushBestEffortBatch_DoesNotPersistDetailForDuplicateRows(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	repo := newUsageLogRepositoryWithSQL(nil, db)
+	createdAt := time.Now().UTC().Truncate(time.Second)
+	log := &service.UsageLog{
+		UserID:       1,
+		APIKeyID:     2,
+		AccountID:    3,
+		RequestID:    "req-best-effort-duplicate",
+		Model:        "claude-3",
+		InputTokens:  10,
+		OutputTokens: 20,
+		TotalCost:    0.5,
+		ActualCost:   0.5,
+		CreatedAt:    createdAt,
+		DetailSnapshot: (&service.UsageLogDetailSnapshot{
+			RequestBody: `{"request":"payload"}`,
+		}).Normalize(),
+	}
+	payload, err := json.Marshal([]usageLogBatchRow{{
+		RequestID: log.RequestID,
+		APIKeyID:  log.APIKeyID,
+		ID:        456,
+		CreatedAt: createdAt,
+		Inserted:  false,
+	}})
+	require.NoError(t, err)
+
+	mock.ExpectQuery(`WITH input \(.*'\[\]'::json`).
+		WillReturnRows(sqlmock.NewRows([]string{"payload"}).AddRow(payload))
+
+	req := usageLogBestEffortRequest{
+		prepared: prepareUsageLogInsert(log),
+		apiKeyID: log.APIKeyID,
+		log:      log,
+		resultCh: make(chan error, 1),
+	}
+	repo.flushBestEffortBatch(db, []usageLogBestEffortRequest{req})
+
+	require.NoError(t, <-req.resultCh)
+	require.NoError(t, mock.ExpectationsWereMet())
 }

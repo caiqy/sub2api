@@ -374,6 +374,12 @@ func TestUsageLogRepositoryCreateBestEffort_BatchPathDuplicateRequestID(t *testi
 		TotalCost:    0.5,
 		ActualCost:   0.5,
 		CreatedAt:    time.Now().UTC(),
+		DetailSnapshot: (&service.UsageLogDetailSnapshot{
+			RequestHeaders:  "X-Debug: first",
+			RequestBody:     `{"request":"first"}`,
+			ResponseHeaders: "Content-Type: application/json",
+			ResponseBody:    `{"ok":true}`,
+		}).Normalize(),
 	}
 	log2 := &service.UsageLog{
 		UserID:       user.ID,
@@ -386,6 +392,12 @@ func TestUsageLogRepositoryCreateBestEffort_BatchPathDuplicateRequestID(t *testi
 		TotalCost:    0.5,
 		ActualCost:   0.5,
 		CreatedAt:    time.Now().UTC(),
+		DetailSnapshot: (&service.UsageLogDetailSnapshot{
+			RequestHeaders:  "X-Debug: second",
+			RequestBody:     `{"request":"second"}`,
+			ResponseHeaders: "Content-Type: application/json",
+			ResponseBody:    `{"ok":true}`,
+		}).Normalize(),
 	}
 
 	require.NoError(t, repo.CreateBestEffort(ctx, log1))
@@ -396,6 +408,67 @@ func TestUsageLogRepositoryCreateBestEffort_BatchPathDuplicateRequestID(t *testi
 		err := integrationDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM usage_logs WHERE request_id = $1 AND api_key_id = $2", requestID, apiKey.ID).Scan(&count)
 		return err == nil && count == 1
 	}, 3*time.Second, 20*time.Millisecond)
+
+	var usageLogID int64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT id FROM usage_logs WHERE request_id = $1 AND api_key_id = $2", requestID, apiKey.ID).Scan(&usageLogID))
+
+	var detailCount int
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM usage_log_details WHERE usage_log_id = $1", usageLogID).Scan(&detailCount))
+	require.Equal(t, 1, detailCount)
+}
+
+func TestUsageLogRepositoryCreateBestEffort_PersistsDetailForInsertedRows(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := newUsageLogRepositoryWithSQL(client, integrationDB)
+
+	user := mustCreateUser(t, client, &service.User{Email: fmt.Sprintf("usage-best-effort-detail-%d@example.com", time.Now().UnixNano())})
+	apiKey := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: "sk-usage-best-effort-detail-" + uuid.NewString(), Name: "k"})
+	account := mustCreateAccount(t, client, &service.Account{Name: "acc-usage-best-effort-detail-" + uuid.NewString()})
+
+	requestID := uuid.NewString()
+	createdAt := time.Now().UTC()
+	log := &service.UsageLog{
+		UserID:       user.ID,
+		APIKeyID:     apiKey.ID,
+		AccountID:    account.ID,
+		RequestID:    requestID,
+		Model:        "claude-3",
+		InputTokens:  10,
+		OutputTokens: 20,
+		TotalCost:    0.5,
+		ActualCost:   0.5,
+		CreatedAt:    createdAt,
+		DetailSnapshot: (&service.UsageLogDetailSnapshot{
+			RequestHeaders:         "Authorization: Bearer best-effort",
+			RequestBody:            `{"request":"payload"}`,
+			UpstreamRequestHeaders: "X-Upstream: best-effort",
+			UpstreamRequestBody:    `{"upstream":"payload"}`,
+			ResponseHeaders:        "Content-Type: application/json",
+			ResponseBody:           `{"ok":true}`,
+		}).Normalize(),
+	}
+
+	require.NoError(t, repo.CreateBestEffort(ctx, log))
+
+	var usageLogID int64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT id FROM usage_logs WHERE request_id = $1 AND api_key_id = $2", requestID, apiKey.ID).Scan(&usageLogID))
+
+	detail, err := newUsageLogDetailRepositoryWithSQL(integrationDB).GetByUsageLogID(ctx, usageLogID)
+	require.NoError(t, err)
+	require.Equal(t, "Authorization: Bearer best-effort", detail.RequestHeaders)
+	require.Equal(t, `{"request":"payload"}`, detail.RequestBody)
+	require.Equal(t, "X-Upstream: best-effort", detail.UpstreamRequestHeaders)
+	require.Equal(t, `{"upstream":"payload"}`, detail.UpstreamRequestBody)
+	require.Equal(t, "Content-Type: application/json", detail.ResponseHeaders)
+	require.Equal(t, `{"ok":true}`, detail.ResponseBody)
+
+	logs, page, err := repo.ListWithFilters(ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, usagestats.UsageLogFilters{UserID: user.ID})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), page.Total)
+	require.Len(t, logs, 1)
+	require.Equal(t, usageLogID, logs[0].ID)
+	require.True(t, logs[0].HasDetail)
 }
 
 func TestUsageLogRepositoryCreateBestEffort_QueueFullReturnsDropped(t *testing.T) {

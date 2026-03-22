@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -40,6 +42,20 @@ func (r *usageLogDetailRepository) Create(ctx context.Context, detail *service.U
 	`, detail.UsageLogID, detail.RequestHeaders, detail.RequestBody, detail.UpstreamRequestHeaders, detail.UpstreamRequestBody, detail.ResponseHeaders, detail.ResponseBody, createdAt)
 	if err != nil {
 		return fmt.Errorf("insert usage log detail: %w", err)
+	}
+	if err := r.PruneToRecentLimit(ctx, service.UsageLogDetailRetentionLimit); err != nil {
+		return fmt.Errorf("prune usage log detail: %w", err)
+	}
+	return nil
+}
+
+func (r *usageLogDetailRepository) CreateBatch(ctx context.Context, details []*service.UsageLogDetail) error {
+	if r == nil || r.sql == nil || len(details) == 0 {
+		return nil
+	}
+	query, args := buildUsageLogDetailBatchInsertQuery(details)
+	if _, err := r.sql.ExecContext(ctx, query, args...); err != nil {
+		return fmt.Errorf("insert usage log detail batch: %w", err)
 	}
 	if err := r.PruneToRecentLimit(ctx, service.UsageLogDetailRetentionLimit); err != nil {
 		return fmt.Errorf("prune usage log detail: %w", err)
@@ -93,6 +109,57 @@ func usageLogDetailFromSnapshot(usageLogID int64, createdAt time.Time, snapshot 
 		ResponseBody:           snapshot.ResponseBody,
 		CreatedAt:              createdAt,
 	}
+}
+
+func buildUsageLogDetailBatchInsertQuery(details []*service.UsageLogDetail) (string, []any) {
+	var query strings.Builder
+	_, _ = query.WriteString(`
+		INSERT INTO usage_log_details (
+			usage_log_id,
+			request_headers,
+			request_body,
+			upstream_request_headers,
+			upstream_request_body,
+			response_headers,
+			response_body,
+			created_at
+		) VALUES `)
+
+	args := make([]any, 0, len(details)*8)
+	argPos := 1
+	for idx, detail := range details {
+		if idx > 0 {
+			_, _ = query.WriteString(",")
+		}
+		createdAt := detail.CreatedAt
+		if createdAt.IsZero() {
+			createdAt = time.Now().UTC()
+		}
+		_, _ = query.WriteString("(")
+		for i := 0; i < 8; i++ {
+			if i > 0 {
+				_, _ = query.WriteString(",")
+			}
+			_, _ = query.WriteString("$")
+			_, _ = query.WriteString(strconv.Itoa(argPos))
+			argPos++
+		}
+		_, _ = query.WriteString(")")
+		args = append(args,
+			detail.UsageLogID,
+			detail.RequestHeaders,
+			detail.RequestBody,
+			detail.UpstreamRequestHeaders,
+			detail.UpstreamRequestBody,
+			detail.ResponseHeaders,
+			detail.ResponseBody,
+			createdAt,
+		)
+	}
+	_, _ = query.WriteString(`
+		ON CONFLICT (usage_log_id) DO NOTHING
+	`)
+	return query.String(), args
 }
 
 func isUsageLogDetailMissing(err error) bool {
