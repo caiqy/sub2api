@@ -1444,3 +1444,61 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_StreamingUpstreamReadErrorAft
 	require.True(t, result.clientDisconnect)
 	require.Equal(t, 8, result.usage.InputTokens)
 }
+
+func TestGatewayService_AnthropicAPIKeyPassthrough_OpsBodyReflectsPassthroughInjection(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	inputBody := []byte(`{"model":"claude-3-5-sonnet-latest","messages":[{"role":"user","content":"hi"}]}`)
+	parsed := &ParsedRequest{Body: inputBody, Model: "claude-3-5-sonnet-latest"}
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"msg_1","type":"message","usage":{"input_tokens":5,"output_tokens":3}}`)),
+		},
+	}
+	svc := &GatewayService{
+		cfg: &config.Config{
+			Security: config.SecurityConfig{
+				URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+			},
+		},
+		httpUpstream:     upstream,
+		rateLimitService: &RateLimitService{},
+	}
+	account := &Account{
+		ID:          501,
+		Name:        "anthropic-apikey-ops-body-test",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "upstream-anthropic-key",
+			"base_url": "https://api.anthropic.com",
+		},
+		Extra: map[string]any{
+			"anthropic_passthrough":      true,
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "body", Mode: "inject", Key: "metadata.ops_tag", Value: "injected-value"},
+			},
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	_, err := svc.Forward(context.Background(), c, account, parsed)
+	require.NoError(t, err)
+
+	rawBody, ok := c.Get(OpsUpstreamRequestBodyKey)
+	require.True(t, ok)
+	bodyBytes, ok := rawBody.([]byte)
+	require.True(t, ok)
+	require.Equal(t, "injected-value", gjson.GetBytes(bodyBytes, "metadata.ops_tag").String(),
+		"ops upstream request body should reflect passthrough-injected fields")
+}

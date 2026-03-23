@@ -4125,9 +4125,6 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	// 调试日志：记录即将转发的账号信息
 	logger.LegacyPrintf("service.gateway", "[Forward] Using account: ID=%d Name=%s Platform=%s Type=%s TLSFingerprint=%v Proxy=%s",
 		account.ID, account.Name, account.Platform, account.Type, account.IsTLSFingerprintEnabled(), proxyURL)
-	// 重试间复用同一请求体，避免每次 string(body) 产生额外分配。
-	setOpsUpstreamRequestBody(c, body)
-
 	// 重试循环
 	var resp *http.Response
 	retryStart := time.Now()
@@ -4142,6 +4139,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 
 		// 发送请求
 		SetUsageUpstreamRequest(c, upstreamReq, "")
+		setOpsUpstreamRequestBodyFromRequest(c, upstreamReq)
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, account.IsTLSFingerprintEnabled())
 		if err != nil {
 			if resp != nil && resp.Body != nil {
@@ -4219,6 +4217,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					releaseRetryCtx()
 					if buildErr == nil {
 						SetUsageUpstreamRequest(c, retryReq, "")
+						setOpsUpstreamRequestBodyFromRequest(c, retryReq)
 						retryResp, retryErr := s.httpUpstream.DoWithTLS(retryReq, proxyURL, account.ID, account.Concurrency, account.IsTLSFingerprintEnabled())
 						if retryErr == nil {
 							if retryResp.StatusCode < 400 {
@@ -4254,6 +4253,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 									releaseRetryCtx2()
 									if buildErr2 == nil {
 										SetUsageUpstreamRequest(c, retryReq2, "")
+										setOpsUpstreamRequestBodyFromRequest(c, retryReq2)
 										retryResp2, retryErr2 := s.httpUpstream.DoWithTLS(retryReq2, proxyURL, account.ID, account.Concurrency, account.IsTLSFingerprintEnabled())
 										if retryErr2 == nil {
 											resp = retryResp2
@@ -4617,9 +4617,6 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	if c != nil {
 		c.Set("anthropic_passthrough", true)
 	}
-	// 重试间复用同一请求体，避免每次 string(body) 产生额外分配。
-	setOpsUpstreamRequestBody(c, input.Body)
-
 	var resp *http.Response
 	retryStart := time.Now()
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
@@ -4651,6 +4648,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		}
 
 		SetUsageUpstreamRequest(c, upstreamReq, "")
+		setOpsUpstreamRequestBodyFromRequest(c, upstreamReq)
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, account.IsTLSFingerprintEnabled())
 		if err != nil {
 			if resp != nil && resp.Body != nil {
