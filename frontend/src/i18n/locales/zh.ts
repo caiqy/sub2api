@@ -2181,15 +2181,21 @@ export default {
         targetBody: 'Body',
         modeForward: '放行透传',
         modeInject: '固定注入',
+        modeMap: '映射透传',
+        sourceKey: '来源字段或路径',
+        targetKey: '目标字段或路径',
         headerHint: 'Header 比较时不区分大小写',
         bodyHint: '仅支持 xx.xx 形式的对象层级路径',
         injectHint: '固定注入将在转发前写入上游请求',
+        mapHint: '映射透传会复制来源字段到目标字段，且不会修改原字段',
+        hiddenRulesError: '规则列表已隐藏，请重新开启后处理错误',
         errors: {
           keyRequired: '字段名或路径不能为空',
+          sourceKeyRequired: '来源字段或路径不能为空',
           bodyPath: 'Body 路径仅支持点号对象层级，不支持数组语法',
           valueRequired: '固定注入模式必须填写值',
           duplicateKey: '同一目标下的字段名或路径不能重复',
-          reservedKey: '保留字段或路径不能透传'
+          sameSourceAndTarget: '来源字段与目标字段不能相同'
         }
       },
       usageWindow: {

@@ -415,45 +415,123 @@ func TestAdminServiceCreateAccountPassthrough_ErrorIncludesConflictingField(t *t
 	require.Nil(t, repo.created)
 }
 
-func TestAdminServiceBulkUpdatePassthrough_RejectsNonAPIKeyAccounts(t *testing.T) {
+func TestPassthroughFieldsV2Admin_CreateAccount_SavesMapModeAndSourceKey(t *testing.T) {
+	repo := &passthroughAdminAccountRepo{}
+	service := &adminServiceImpl{accountRepo: repo, groupRepo: &passthroughAdminGroupRepo{}}
+
+	account, err := service.CreateAccount(context.Background(), &CreateAccountInput{
+		Name:        "api key",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Credentials: map[string]any{"api_key": "sk-test"},
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []any{
+				map[string]any{"target": "header", "mode": "map", "key": "X-Target", "source_key": "X-Source"},
+			},
+		},
+		Concurrency:          1,
+		SkipDefaultGroupBind: true,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.NotNil(t, repo.created)
+	require.Equal(t, true, repo.created.Extra["passthrough_fields_enabled"])
+	require.Equal(t, []PassthroughFieldRule{{Target: "header", Mode: "map", Key: "X-Target", SourceKey: "X-Source"}}, repo.created.Extra["passthrough_field_rules"])
+}
+
+func TestPassthroughFieldsV2Admin_UpdateAccount_SavesMapModeAndSourceKey(t *testing.T) {
 	repo := &passthroughAdminAccountRepo{
 		accountsByID: map[int64]*Account{
 			1: {
 				ID:       1,
-				Name:     "oauth",
+				Name:     "api key",
 				Platform: PlatformOpenAI,
-				Type:     AccountTypeOAuth,
+				Type:     AccountTypeAPIKey,
 				Status:   StatusActive,
+				Extra:    map[string]any{"other": "keep"},
 			},
 		},
 	}
 	service := &adminServiceImpl{accountRepo: repo, groupRepo: &passthroughAdminGroupRepo{}}
 
-	_, err := service.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
-		AccountIDs: []int64{1},
+	account, err := service.UpdateAccount(context.Background(), 1, &UpdateAccountInput{
 		Extra: map[string]any{
 			"passthrough_fields_enabled": true,
 			"passthrough_field_rules": []any{
-				map[string]any{"target": "header", "mode": "inject", "key": "X-Env", "value": "prod"},
+				map[string]any{"target": "header", "mode": "map", "key": "X-Target", "source_key": "X-Source"},
 			},
 		},
 	})
 
-	require.EqualError(t, err, "passthrough field rules are only supported for apikey accounts")
-	require.Nil(t, repo.bulkUpdated)
-	require.Nil(t, repo.updated)
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.NotNil(t, repo.updated)
+	require.Equal(t, true, repo.updated.Extra["passthrough_fields_enabled"])
+	require.Equal(t, []PassthroughFieldRule{{Target: "header", Mode: "map", Key: "X-Target", SourceKey: "X-Source"}}, repo.updated.Extra["passthrough_field_rules"])
 }
 
-func TestAdminServiceBulkUpdatePassthrough_NormalizesAPIKeyAccounts(t *testing.T) {
+func TestPassthroughFieldsV2Admin_CreateAndUpdate_RejectInvalidRulesEvenWhenDisabled(t *testing.T) {
+	t.Run("create", func(t *testing.T) {
+		repo := &passthroughAdminAccountRepo{}
+		service := &adminServiceImpl{accountRepo: repo, groupRepo: &passthroughAdminGroupRepo{}}
+
+		_, err := service.CreateAccount(context.Background(), &CreateAccountInput{
+			Name:        "api key",
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Credentials: map[string]any{"api_key": "sk-test"},
+			Extra: map[string]any{
+				"passthrough_fields_enabled": false,
+				"passthrough_field_rules": []any{
+					map[string]any{"target": "header", "mode": "map", "key": "X-Target", "source_key": "X-Target"},
+				},
+			},
+			Concurrency:          1,
+			SkipDefaultGroupBind: true,
+		})
+
+		require.ErrorContains(t, err, "source_key and key must be different")
+		require.Nil(t, repo.created)
+	})
+
+	t.Run("update", func(t *testing.T) {
+		repo := &passthroughAdminAccountRepo{
+			accountsByID: map[int64]*Account{
+				1: {ID: 1, Name: "api key", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive},
+			},
+		}
+		service := &adminServiceImpl{accountRepo: repo, groupRepo: &passthroughAdminGroupRepo{}}
+
+		_, err := service.UpdateAccount(context.Background(), 1, &UpdateAccountInput{
+			Extra: map[string]any{
+				"passthrough_fields_enabled": false,
+				"passthrough_field_rules": []any{
+					map[string]any{"target": "header", "mode": "map", "key": "X-Target", "source_key": "X-Target"},
+				},
+			},
+		})
+
+		require.ErrorContains(t, err, "source_key and key must be different")
+		require.Nil(t, repo.updated)
+	})
+}
+
+func TestPassthroughFieldsV2Admin_UpdateAccount_ClearsPassthroughWhenTypeChangesAwayFromAPIKey(t *testing.T) {
 	repo := &passthroughAdminAccountRepo{
 		accountsByID: map[int64]*Account{
 			1: {
 				ID:       1,
-				Name:     "apikey",
+				Name:     "api key",
 				Platform: PlatformOpenAI,
 				Type:     AccountTypeAPIKey,
 				Status:   StatusActive,
 				Extra: map[string]any{
+					"passthrough_fields_enabled": true,
+					"passthrough_field_rules": []any{
+						map[string]any{"target": "header", "mode": "map", "key": "X-Target", "source_key": "X-Source"},
+					},
 					"other": "keep",
 				},
 			},
@@ -461,58 +539,36 @@ func TestAdminServiceBulkUpdatePassthrough_NormalizesAPIKeyAccounts(t *testing.T
 	}
 	service := &adminServiceImpl{accountRepo: repo, groupRepo: &passthroughAdminGroupRepo{}}
 
+	updated, err := service.UpdateAccount(context.Background(), 1, &UpdateAccountInput{Type: AccountTypeOAuth})
+
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	require.NotNil(t, repo.updated)
+	require.Equal(t, AccountTypeOAuth, repo.updated.Type)
+	require.Equal(t, "keep", repo.updated.Extra["other"])
+	require.NotContains(t, repo.updated.Extra, "passthrough_fields_enabled")
+	require.NotContains(t, repo.updated.Extra, "passthrough_field_rules")
+}
+
+func TestPassthroughFieldsV2Admin_BulkUpdateAccounts_StripsPassthroughExtraKeys(t *testing.T) {
+	repo := &passthroughAdminAccountRepo{}
+	service := &adminServiceImpl{accountRepo: repo, groupRepo: &passthroughAdminGroupRepo{}}
+
 	result, err := service.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
-		AccountIDs: []int64{1},
+		AccountIDs: []int64{1, 2},
 		Extra: map[string]any{
 			"passthrough_fields_enabled": true,
 			"passthrough_field_rules": []any{
-				map[string]any{"target": "header", "mode": "inject", "key": "X-Env", "value": "prod"},
+				map[string]any{"target": "header", "mode": "forward", "key": "X-Test"},
 			},
+			"mixed_scheduling": true,
 		},
 	})
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	require.NotNil(t, repo.updated)
-	require.Equal(t, "keep", repo.updated.Extra["other"])
-	require.Equal(t, true, repo.updated.Extra["passthrough_fields_enabled"])
-	require.Equal(t, []PassthroughFieldRule{{Target: "header", Mode: "inject", Key: "X-Env", Value: "prod"}}, repo.updated.Extra["passthrough_field_rules"])
-	require.Nil(t, repo.bulkUpdated)
-}
-
-func TestAdminServiceBulkUpdatePassthrough_PrevalidatesAllAccountsBeforeWriting(t *testing.T) {
-	repo := &passthroughAdminAccountRepo{
-		accountsByID: map[int64]*Account{
-			1: {
-				ID:       1,
-				Name:     "apikey",
-				Platform: PlatformOpenAI,
-				Type:     AccountTypeAPIKey,
-				Status:   StatusActive,
-			},
-			2: {
-				ID:       2,
-				Name:     "oauth",
-				Platform: PlatformOpenAI,
-				Type:     AccountTypeOAuth,
-				Status:   StatusActive,
-			},
-		},
-	}
-	service := &adminServiceImpl{accountRepo: repo, groupRepo: &passthroughAdminGroupRepo{}}
-
-	_, err := service.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
-		AccountIDs: []int64{1, 2},
-		Extra: map[string]any{
-			"passthrough_fields_enabled": true,
-			"passthrough_field_rules": []any{
-				map[string]any{"target": "header", "mode": "inject", "key": "X-Env", "value": "prod"},
-			},
-		},
-	})
-
-	require.EqualError(t, err, "passthrough field rules are only supported for apikey accounts")
-	require.Empty(t, repo.updatedIDs)
-	require.Equal(t, "apikey", repo.accountsByID[1].Name)
-	require.NotContains(t, repo.accountsByID[1].Extra, "passthrough_fields_enabled")
+	require.NotNil(t, repo.bulkUpdated)
+	require.Equal(t, map[string]any{
+		"mixed_scheduling": true,
+	}, repo.bulkUpdated.Extra)
 }

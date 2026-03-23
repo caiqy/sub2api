@@ -19,28 +19,14 @@ const (
 
 var (
 	passthroughBodyPathPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$`)
-	reservedPassthroughHeaders = map[string]struct{}{
-		"authorization":     {},
-		"cookie":            {},
-		"x-goog-api-key":    {},
-		"x-api-key":         {},
-		"api-key":           {},
-		"host":              {},
-		"content-length":    {},
-		"transfer-encoding": {},
-		"connection":        {},
-	}
-	reservedPassthroughBodyPaths = map[string]struct{}{
-		"model":  {},
-		"stream": {},
-	}
 )
 
 type PassthroughFieldRule struct {
-	Target string `json:"target"`
-	Mode   string `json:"mode"`
-	Key    string `json:"key"`
-	Value  string `json:"value,omitempty"`
+	Target    string `json:"target"`
+	Mode      string `json:"mode"`
+	Key       string `json:"key"`
+	Value     string `json:"value,omitempty"`
+	SourceKey string `json:"source_key,omitempty"`
 }
 
 type NormalizePassthroughFieldsInput struct {
@@ -120,7 +106,7 @@ func parsePassthroughRules(raw any) ([]PassthroughFieldRule, bool, error) {
 	switch typed := raw.(type) {
 	case []PassthroughFieldRule:
 		validated := make([]PassthroughFieldRule, 0, len(typed))
-		seenRulesByTarget := map[string]map[string]struct{}{}
+		seenRulesByTarget := map[string]map[string]PassthroughFieldRule{}
 		for _, rule := range typed {
 			normalizedRule, err := normalizePassthroughRule(rule)
 			if err != nil {
@@ -134,21 +120,33 @@ func parsePassthroughRules(raw any) ([]PassthroughFieldRule, bool, error) {
 		return validated, true, nil
 	case []any:
 		validated := make([]PassthroughFieldRule, 0, len(typed))
-		seenRulesByTarget := map[string]map[string]struct{}{}
+		seenRulesByTarget := map[string]map[string]PassthroughFieldRule{}
 		for _, item := range typed {
 			entry, ok := item.(map[string]any)
 			if !ok {
 				return nil, false, fmt.Errorf("invalid passthrough field rule")
 			}
 			rule := PassthroughFieldRule{}
-			if v, ok := entry["target"].(string); ok {
-				rule.Target = v
+			if value, exists := entry["target"]; exists {
+				stringValue, ok := value.(string)
+				if !ok {
+					return nil, false, fmt.Errorf("passthrough target must be a string")
+				}
+				rule.Target = stringValue
 			}
-			if v, ok := entry["mode"].(string); ok {
-				rule.Mode = v
+			if value, exists := entry["key"]; exists {
+				stringValue, ok := value.(string)
+				if !ok {
+					return nil, false, fmt.Errorf("passthrough key must be a string")
+				}
+				rule.Key = stringValue
 			}
-			if v, ok := entry["key"].(string); ok {
-				rule.Key = v
+			if value, exists := entry["mode"]; exists {
+				stringValue, ok := value.(string)
+				if !ok {
+					return nil, false, fmt.Errorf("passthrough mode must be a string: %s", strings.TrimSpace(rule.Key))
+				}
+				rule.Mode = stringValue
 			}
 			if value, exists := entry["value"]; exists {
 				stringValue, ok := value.(string)
@@ -156,6 +154,13 @@ func parsePassthroughRules(raw any) ([]PassthroughFieldRule, bool, error) {
 					return nil, false, fmt.Errorf("passthrough inject value must be a string: %s", strings.TrimSpace(rule.Key))
 				}
 				rule.Value = stringValue
+			}
+			if sourceKey, exists := entry["source_key"]; exists {
+				stringSourceKey, ok := sourceKey.(string)
+				if !ok {
+					return nil, false, fmt.Errorf("passthrough map source_key must be a string: %s", strings.TrimSpace(rule.Key))
+				}
+				rule.SourceKey = stringSourceKey
 			}
 			normalizedRule, err := normalizePassthroughRule(rule)
 			if err != nil {
@@ -176,22 +181,16 @@ func normalizePassthroughRule(rule PassthroughFieldRule) (PassthroughFieldRule, 
 	rule.Target = strings.TrimSpace(rule.Target)
 	rule.Mode = strings.TrimSpace(rule.Mode)
 	rule.Key = strings.TrimSpace(rule.Key)
+	rule.SourceKey = strings.TrimSpace(rule.SourceKey)
 
 	switch rule.Target {
 	case "header":
 		if rule.Key == "" {
 			return PassthroughFieldRule{}, fmt.Errorf("passthrough header key is required")
 		}
-		lowerKey := strings.ToLower(rule.Key)
-		if _, reserved := reservedPassthroughHeaders[lowerKey]; reserved {
-			return PassthroughFieldRule{}, fmt.Errorf("reserved passthrough header key: %s", lowerKey)
-		}
 	case "body":
 		if !passthroughBodyPathPattern.MatchString(rule.Key) {
 			return PassthroughFieldRule{}, fmt.Errorf("invalid passthrough body path: %s", rule.Key)
-		}
-		if _, reserved := reservedPassthroughBodyPaths[rule.Key]; reserved {
-			return PassthroughFieldRule{}, fmt.Errorf("reserved passthrough body path: %s", rule.Key)
 		}
 	default:
 		return PassthroughFieldRule{}, fmt.Errorf("invalid passthrough field target: %s", rule.Target)
@@ -200,10 +199,27 @@ func normalizePassthroughRule(rule PassthroughFieldRule) (PassthroughFieldRule, 
 	switch rule.Mode {
 	case "forward":
 		rule.Value = ""
+		rule.SourceKey = ""
 	case "inject":
 		if strings.TrimSpace(rule.Value) == "" {
 			return PassthroughFieldRule{}, fmt.Errorf("passthrough inject value cannot be blank: %s", rule.Key)
 		}
+		rule.SourceKey = ""
+	case "map":
+		if rule.SourceKey == "" {
+			return PassthroughFieldRule{}, fmt.Errorf("passthrough map source_key is required: %s", rule.Key)
+		}
+		if rule.Target == "body" {
+			if !passthroughBodyPathPattern.MatchString(rule.SourceKey) {
+				return PassthroughFieldRule{}, fmt.Errorf("invalid passthrough body path: %s", rule.SourceKey)
+			}
+			if rule.SourceKey == rule.Key {
+				return PassthroughFieldRule{}, fmt.Errorf("passthrough map source_key and key must be different: %s", rule.SourceKey)
+			}
+		} else if strings.EqualFold(rule.SourceKey, rule.Key) {
+			return PassthroughFieldRule{}, fmt.Errorf("passthrough map source_key and key must be different: %s", strings.ToLower(rule.SourceKey))
+		}
+		rule.Value = ""
 	default:
 		return PassthroughFieldRule{}, fmt.Errorf("invalid passthrough field mode: %s", rule.Mode)
 	}
@@ -220,10 +236,10 @@ func hasPassthroughConfigKeys(extra map[string]any) bool {
 	return hasEnabled || hasRules
 }
 
-func validatePassthroughRuleDuplicate(seenRulesByTarget map[string]map[string]struct{}, rule PassthroughFieldRule) error {
+func validatePassthroughRuleDuplicate(seenRulesByTarget map[string]map[string]PassthroughFieldRule, rule PassthroughFieldRule) error {
 	seenKeys, ok := seenRulesByTarget[rule.Target]
 	if !ok {
-		seenKeys = map[string]struct{}{}
+		seenKeys = map[string]PassthroughFieldRule{}
 		seenRulesByTarget[rule.Target] = seenKeys
 	}
 	comparisonKey := rule.Key
@@ -236,8 +252,22 @@ func validatePassthroughRuleDuplicate(seenRulesByTarget map[string]map[string]st
 		}
 		return fmt.Errorf("duplicate passthrough body path: %s", comparisonKey)
 	}
-	seenKeys[comparisonKey] = struct{}{}
+	if rule.Target == "body" {
+		for existingKey := range seenKeys {
+			if passthroughBodyPathHasPrefixConflict(existingKey, comparisonKey) {
+				return fmt.Errorf("conflicting passthrough body path prefixes: %s, %s", existingKey, comparisonKey)
+			}
+		}
+	}
+	seenKeys[comparisonKey] = rule
 	return nil
+}
+
+func passthroughBodyPathHasPrefixConflict(existing string, candidate string) bool {
+	if existing == candidate {
+		return false
+	}
+	return strings.HasPrefix(existing, candidate+".") || strings.HasPrefix(candidate, existing+".")
 }
 
 func clonePassthroughExtra(extra map[string]any) map[string]any {
@@ -274,10 +304,16 @@ func applyAccountPassthroughFieldsWithContext(
 		return targetBody, err
 	}
 	if outbound == nil {
+		for _, rule := range rules {
+			if rule.Target == "header" {
+				return nil, fmt.Errorf("passthrough outbound headers are required for header rules")
+			}
+		}
 		outbound = http.Header{}
 	}
+	baseOutbound := clonePassthroughHeader(outbound)
 
-	for _, mode := range []string{"inject", "forward"} {
+	for _, mode := range []string{"inject", "map", "forward"} {
 		for _, rule := range rules {
 			if rule.Mode != mode {
 				continue
@@ -287,11 +323,16 @@ func applyAccountPassthroughFieldsWithContext(
 				switch rule.Mode {
 				case "inject":
 					outbound.Set(rule.Key, rule.Value)
+				case "map":
+					if passthroughHeaderHasKey(inbound, rule.Key) || passthroughHeaderHasKey(baseOutbound, rule.Key) || passthroughHeaderHasKey(outbound, rule.Key) {
+						continue
+					}
+					if values, ok := passthroughHeaderValues(inbound, rule.SourceKey); ok {
+						setPassthroughHeaderValues(outbound, rule.Key, values)
+					}
 				case "forward":
-					if value := strings.TrimSpace(inbound.Get(rule.Key)); value != "" {
-						if _, reserved := reservedPassthroughHeaders[strings.ToLower(rule.Key)]; !reserved {
-							outbound.Set(rule.Key, value)
-						}
+					if values, ok := passthroughHeaderValues(inbound, rule.Key); ok {
+						setPassthroughHeaderValues(outbound, rule.Key, values)
 					}
 				}
 			case "body":
@@ -301,6 +342,15 @@ func applyAccountPassthroughFieldsWithContext(
 				case "inject":
 					bodyValue = rule.Value
 					shouldApply = true
+				case "map":
+					bodyValue, shouldApply = lookupPassthroughBodyValue(sourceBody, rule.SourceKey)
+					if !shouldApply {
+						continue
+					}
+					if passthroughBodyPathExists(sourceBody, rule.Key) || passthroughBodyPathExists(targetBody, rule.Key) {
+						continue
+					}
+					bodyValue = clonePassthroughJSONValue(bodyValue)
 				case "forward":
 					bodyValue, shouldApply = lookupPassthroughBodyValue(sourceBody, rule.Key)
 				}
@@ -328,6 +378,11 @@ func lookupPassthroughBodyValue(body []byte, path string) (any, bool) {
 	}
 	value, ok := walkPassthroughBodyPath(payload, strings.Split(path, "."))
 	return value, ok
+}
+
+func passthroughBodyPathExists(body []byte, path string) bool {
+	_, ok := lookupPassthroughBodyValue(body, path)
+	return ok
 }
 
 func walkPassthroughBodyPath(node any, parts []string) (any, bool) {
@@ -383,6 +438,60 @@ func setPassthroughBodyValue(ctx context.Context, account *Account, targetBody [
 	}
 	current[parts[len(parts)-1]] = value
 	return json.Marshal(obj)
+}
+
+func passthroughHeaderValues(header http.Header, key string) ([]string, bool) {
+	if header == nil {
+		return nil, false
+	}
+	for existingKey, values := range header {
+		if strings.EqualFold(existingKey, key) {
+			return append([]string(nil), values...), true
+		}
+	}
+	return nil, false
+}
+
+func passthroughHeaderHasKey(header http.Header, key string) bool {
+	_, ok := passthroughHeaderValues(header, key)
+	return ok
+}
+
+func clonePassthroughHeader(header http.Header) http.Header {
+	if header == nil {
+		return nil
+	}
+	cloned := make(http.Header, len(header))
+	for key, values := range header {
+		cloned[key] = append([]string(nil), values...)
+	}
+	return cloned
+}
+
+func setPassthroughHeaderValues(header http.Header, key string, values []string) {
+	if header == nil {
+		return
+	}
+	header[http.CanonicalHeaderKey(key)] = append([]string(nil), values...)
+}
+
+func clonePassthroughJSONValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		cloned := make(map[string]any, len(typed))
+		for key, child := range typed {
+			cloned[key] = clonePassthroughJSONValue(child)
+		}
+		return cloned
+	case []any:
+		cloned := make([]any, len(typed))
+		for i, child := range typed {
+			cloned[i] = clonePassthroughJSONValue(child)
+		}
+		return cloned
+	default:
+		return typed
+	}
 }
 
 func accountIDForPassthroughLog(account *Account) int64 {

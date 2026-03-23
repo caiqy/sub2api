@@ -26,7 +26,15 @@
       <span>{{ t('admin.accounts.passthroughFields.title') }}</span>
     </label>
 
+    <p
+      v-if="!enabled && hasValidationErrors"
+      class="text-xs text-red-500"
+    >
+      {{ t('admin.accounts.passthroughFields.hiddenRulesError') }}
+    </p>
+
     <div
+      v-if="enabled"
       :class="[
         'space-y-3 rounded-lg border border-gray-200 p-3 dark:border-dark-600',
         !enabled ? 'opacity-50' : ''
@@ -60,19 +68,36 @@
           >
             <option value="forward">{{ t('admin.accounts.passthroughFields.modeForward') }}</option>
             <option value="inject">{{ t('admin.accounts.passthroughFields.modeInject') }}</option>
+            <option value="map">{{ t('admin.accounts.passthroughFields.modeMap') }}</option>
           </select>
 
           <div class="min-w-[220px] flex-1">
             <input
               :value="rule.key"
               :disabled="disabled"
+              :placeholder="t('admin.accounts.passthroughFields.targetKey')"
               :data-testid="`passthrough-rule-key-${index}`"
               class="input w-full"
               type="text"
               @input="updateRule(index, 'key', ($event.target as HTMLInputElement).value)"
             />
             <p v-if="validationErrors[index]?.key" class="mt-1 text-xs text-red-500">
-              {{ formatValidationError(validationErrors[index]?.key) }}
+              {{ formatValidationError('key', validationErrors[index]?.key) }}
+            </p>
+          </div>
+
+          <div v-if="rule.mode === 'map'" class="min-w-[220px] flex-1">
+            <input
+              :value="rule.source_key"
+              :disabled="disabled"
+              :placeholder="t('admin.accounts.passthroughFields.sourceKey')"
+              :data-testid="`passthrough-rule-source-key-${index}`"
+              class="input w-full"
+              type="text"
+              @input="updateRule(index, 'source_key', ($event.target as HTMLInputElement).value)"
+            />
+            <p v-if="validationErrors[index]?.source_key" class="mt-1 text-xs text-red-500">
+              {{ formatValidationError('source_key', validationErrors[index]?.source_key) }}
             </p>
           </div>
 
@@ -86,7 +111,7 @@
               @input="updateRule(index, 'value', ($event.target as HTMLInputElement).value)"
             />
             <p v-if="validationErrors[index]?.value" class="mt-1 text-xs text-red-500">
-              {{ formatValidationError(validationErrors[index]?.value) }}
+              {{ formatValidationError('value', validationErrors[index]?.value) }}
             </p>
           </div>
 
@@ -105,6 +130,12 @@
           {{ rule.target === 'header'
             ? t('admin.accounts.passthroughFields.headerHint')
             : t('admin.accounts.passthroughFields.bodyHint') }}
+        </p>
+        <p
+          v-if="rule.mode === 'map'"
+          class="text-xs text-blue-600 dark:text-blue-400"
+        >
+          {{ t('admin.accounts.passthroughFields.mapHint') }}
         </p>
         <p
           v-if="rule.mode === 'inject'"
@@ -132,6 +163,7 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   createPassthroughFieldRuleDraft,
+  normalizePassthroughFieldRule,
   type PassthroughFieldRuleErrorCode,
   type PassthroughFieldMode,
   type PassthroughFieldRuleDraft,
@@ -172,6 +204,11 @@ watch(
 )
 
 const validationErrors = computed(() => validatePassthroughFieldRules(localRules.value).errors)
+const hasMeaningfulRules = computed(() => localRules.value.some((rule) => {
+  const normalizedRule = normalizePassthroughFieldRule(rule)
+  return Boolean(normalizedRule.key || normalizedRule.source_key || normalizedRule.value.trim())
+}))
+const hasValidationErrors = computed(() => hasMeaningfulRules.value && Object.keys(validationErrors.value).length > 0)
 
 function cloneRules(rules: PassthroughFieldRuleDraft[]): PassthroughFieldRuleDraft[] {
   return rules.map(rule => ({ ...rule }))
@@ -206,18 +243,25 @@ function removeRule(index: number) {
   syncRules(cloneRules(localRules.value).filter((_, currentIndex) => currentIndex !== index))
 }
 
-function formatValidationError(error?: PassthroughFieldRuleErrorCode) {
+function formatValidationError(
+  field: keyof Pick<PassthroughFieldRuleDraft, 'key' | 'source_key' | 'value'>,
+  error?: PassthroughFieldRuleErrorCode | 'source_key_required' | 'same_source_and_target'
+) {
   switch (error) {
     case 'key_required':
-      return t('admin.accounts.passthroughFields.errors.keyRequired')
+      return field === 'source_key'
+        ? t('admin.accounts.passthroughFields.errors.sourceKeyRequired')
+        : t('admin.accounts.passthroughFields.errors.keyRequired')
     case 'invalid_body_path':
       return t('admin.accounts.passthroughFields.errors.bodyPath')
     case 'value_required':
       return t('admin.accounts.passthroughFields.errors.valueRequired')
+    case 'source_key_required':
+      return t('admin.accounts.passthroughFields.errors.sourceKeyRequired')
     case 'duplicate_key':
       return t('admin.accounts.passthroughFields.errors.duplicateKey')
-    case 'reserved_key':
-      return t('admin.accounts.passthroughFields.errors.reservedKey')
+    case 'same_source_and_target':
+      return t('admin.accounts.passthroughFields.errors.sameSourceAndTarget')
     default:
       return error ?? ''
   }
