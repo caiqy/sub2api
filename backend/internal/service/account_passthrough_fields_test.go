@@ -952,3 +952,23 @@ func TestClonePassthroughJSONValue_DeepCopiesArrayValues(t *testing.T) {
 	require.NoError(t, err)
 	require.JSONEq(t, `[{"nested":["a"]}]`, string(encoded))
 }
+
+func TestApplyAccountPassthroughFields_DisabledSkipsParsingEvenWithMalformedRules(t *testing.T) {
+	account := &Account{
+		ID:   200,
+		Type: AccountTypeAPIKey,
+		Extra: map[string]any{
+			"passthrough_fields_enabled": false,
+			// 坏规则：source_key == key，NormalizeAccountPassthroughFields 会报错
+			"passthrough_field_rules": []any{
+				map[string]any{"target": "header", "mode": "map", "key": "X-Bad", "source_key": "X-Bad"},
+			},
+		},
+	}
+	inBody := []byte(`{"model":"claude-3"}`)
+
+	got, err := ApplyAccountPassthroughFields(account, http.Header{}, inBody, inBody, http.Header{})
+
+	require.NoError(t, err, "disabled passthrough 应直接短路，不应解析坏规则")
+	require.Equal(t, inBody, got)
+}

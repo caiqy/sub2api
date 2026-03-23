@@ -299,6 +299,18 @@ func applyAccountPassthroughFieldsWithContext(
 	targetBody []byte,
 	outbound http.Header,
 ) ([]byte, error) {
+	// Fast-path: if passthrough is explicitly disabled, skip all rule parsing.
+	// This ensures the toggle works as an emergency stop even when stored rules
+	// are malformed.
+	if account == nil || account.Type != AccountTypeAPIKey {
+		return targetBody, nil
+	}
+	if rawEnabled, ok := account.Extra[accountPassthroughEnabledKey]; ok {
+		if enabled, ok := rawEnabled.(bool); ok && !enabled {
+			return targetBody, nil
+		}
+	}
+
 	enabled, rules, err := AccountPassthroughFieldRules(account)
 	if err != nil || !enabled || len(rules) == 0 {
 		return targetBody, err
