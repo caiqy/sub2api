@@ -13,6 +13,7 @@ type FailedUsageLogInput struct {
 	Account          *Account
 	Model            string
 	UpstreamModel    string
+	ReasoningEffort  *string
 	Stream           bool
 	OpenAIWSMode     bool
 	InboundEndpoint  string
@@ -39,6 +40,7 @@ func WriteFailedUsageLogBestEffort(ctx context.Context, repo UsageLogRepository,
 		RequestID:             resolveUsageBillingRequestID(ctx, ""),
 		Model:                 input.Model,
 		UpstreamModel:         optionalNonEqualStringPtr(input.UpstreamModel, input.Model),
+		ReasoningEffort:       input.ReasoningEffort,
 		InboundEndpoint:       optionalTrimmedStringPtr(input.InboundEndpoint),
 		UpstreamEndpoint:      optionalTrimmedStringPtr(input.UpstreamEndpoint),
 		TotalCost:             0,

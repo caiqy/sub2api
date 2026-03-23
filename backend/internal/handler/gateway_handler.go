@@ -283,6 +283,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	if platform == service.PlatformGemini {
 		fs := NewFailoverState(h.maxAccountSwitchesGemini, hasBoundSession)
 		var lastFailedAccount *service.Account
+		var lastFailedDuration time.Duration
 
 		// 单账号分组提前设置 SingleAccountRetry 标记，让 Service 层首次 503 就不设模型限流标记。
 		// 避免单账号分组收到 503 (MODEL_CAPACITY_EXHAUSTED) 时设 29s 限流，导致后续请求连续快速失败。
@@ -310,7 +311,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					if fs.LastFailoverErr != nil {
 						h.handleFailoverExhausted(c, fs.LastFailoverErr, service.PlatformGemini, streamStarted)
 						if lastFailedAccount != nil {
-							h.submitFailedUsageLogFromFailover(c, apiKey, lastFailedAccount, reqModel, reqStream, fs.LastFailoverErr, "handler.gateway.messages")
+							h.submitFailedUsageLogFromFailover(c, apiKey, lastFailedAccount, reqModel, reqStream, fs.LastFailoverErr, lastFailedDuration, service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort), "handler.gateway.messages")
 						}
 					} else {
 						h.handleFailoverExhaustedSimple(c, 502, streamStarted)
@@ -397,11 +398,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
 			writerSizeBeforeForward := c.Writer.Size()
+			forwardStartedAt := time.Now()
 			if account.Platform == service.PlatformAntigravity {
 				result, err = h.antigravityGatewayService.ForwardGemini(requestCtx, c, account, reqModel, "generateContent", reqStream, body, hasBoundSession)
 			} else {
 				result, err = h.geminiCompatService.Forward(requestCtx, c, account, body)
 			}
+			forwardDuration := time.Since(forwardStartedAt)
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
 			}
@@ -409,9 +412,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
 					lastFailedAccount = account
+					lastFailedDuration = forwardDuration
 					// 流式内容已写入客户端，无法撤销，禁止 failover 以防止流拼接腐化
 					if c.Writer.Size() != writerSizeBeforeForward {
-						h.submitFailedUsageLogFromFailover(c, apiKey, account, reqModel, reqStream, failoverErr, "handler.gateway.messages")
+						h.submitFailedUsageLogFromFailover(c, apiKey, account, reqModel, reqStream, failoverErr, forwardDuration, service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort), "handler.gateway.messages")
 						h.handleFailoverExhausted(c, failoverErr, service.PlatformGemini, true)
 						return
 					}
@@ -421,7 +425,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						continue
 					case FailoverExhausted:
 						h.handleFailoverExhausted(c, fs.LastFailoverErr, service.PlatformGemini, streamStarted)
-						h.submitFailedUsageLogFromFailover(c, apiKey, account, reqModel, reqStream, fs.LastFailoverErr, "handler.gateway.messages")
+						h.submitFailedUsageLogFromFailover(c, apiKey, account, reqModel, reqStream, fs.LastFailoverErr, forwardDuration, service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort), "handler.gateway.messages")
 						return
 					case FailoverCanceled:
 						return
@@ -444,12 +448,14 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						User:             apiKey.User,
 						Account:          account,
 						Model:            reqModel,
+						ReasoningEffort:  service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort),
 						Stream:           reqStream,
 						InboundEndpoint:  inboundEndpoint,
 						UpstreamEndpoint: upstreamEndpoint,
 						UserAgent:        userAgent,
 						IPAddress:        clientIP,
 						DetailSnapshot:   detailSnapshot,
+						Duration:         forwardDuration,
 					}, "handler.gateway.messages")
 				})
 				return
@@ -526,6 +532,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		fs := NewFailoverState(h.maxAccountSwitches, hasBoundSession)
 		retryWithFallback := false
 		var lastFailedAccount *service.Account
+		var lastFailedDuration time.Duration
 
 		for {
 			// 选择支持该模型的账号
@@ -547,7 +554,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					if fs.LastFailoverErr != nil {
 						h.handleFailoverExhausted(c, fs.LastFailoverErr, platform, streamStarted)
 						if lastFailedAccount != nil {
-							h.submitFailedUsageLogFromFailover(c, currentAPIKey, lastFailedAccount, reqModel, parsedReq.Stream, fs.LastFailoverErr, "handler.gateway.messages")
+							h.submitFailedUsageLogFromFailover(c, currentAPIKey, lastFailedAccount, reqModel, parsedReq.Stream, fs.LastFailoverErr, lastFailedDuration, service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort), "handler.gateway.messages")
 						}
 					} else {
 						h.handleFailoverExhaustedSimple(c, 502, streamStarted)
@@ -686,11 +693,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
 			writerSizeBeforeForward := c.Writer.Size()
+			forwardStartedAt := time.Now()
 			if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
 				result, err = h.antigravityGatewayService.Forward(requestCtx, c, account, body, hasBoundSession)
 			} else {
 				result, err = h.gatewayService.Forward(requestCtx, c, account, parsedReq)
 			}
+			forwardDuration := time.Since(forwardStartedAt)
 
 			// 兜底释放串行锁（正常情况已通过回调提前释放）
 			if queueRelease != nil {
@@ -756,9 +765,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
 					lastFailedAccount = account
+					lastFailedDuration = forwardDuration
 					// 流式内容已写入客户端，无法撤销，禁止 failover 以防止流拼接腐化
 					if c.Writer.Size() != writerSizeBeforeForward {
-						h.submitFailedUsageLogFromFailover(c, currentAPIKey, account, reqModel, parsedReq.Stream, failoverErr, "handler.gateway.messages")
+						h.submitFailedUsageLogFromFailover(c, currentAPIKey, account, reqModel, parsedReq.Stream, failoverErr, forwardDuration, service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort), "handler.gateway.messages")
 						h.handleFailoverExhausted(c, failoverErr, account.Platform, true)
 						return
 					}
@@ -768,7 +778,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						continue
 					case FailoverExhausted:
 						h.handleFailoverExhausted(c, fs.LastFailoverErr, account.Platform, streamStarted)
-						h.submitFailedUsageLogFromFailover(c, currentAPIKey, account, reqModel, parsedReq.Stream, fs.LastFailoverErr, "handler.gateway.messages")
+						h.submitFailedUsageLogFromFailover(c, currentAPIKey, account, reqModel, parsedReq.Stream, fs.LastFailoverErr, forwardDuration, service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort), "handler.gateway.messages")
 						return
 					case FailoverCanceled:
 						return
@@ -791,12 +801,14 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						User:             currentAPIKey.User,
 						Account:          account,
 						Model:            reqModel,
+						ReasoningEffort:  service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort),
 						Stream:           parsedReq.Stream,
 						InboundEndpoint:  inboundEndpoint,
 						UpstreamEndpoint: upstreamEndpoint,
 						UserAgent:        userAgent,
 						IPAddress:        clientIP,
 						DetailSnapshot:   detailSnapshot,
+						Duration:         forwardDuration,
 					}, "handler.gateway.messages")
 				})
 				return
@@ -1247,7 +1259,7 @@ func (h *GatewayHandler) handleConcurrencyError(c *gin.Context, err error, slotT
 		fmt.Sprintf("Concurrency limit exceeded for %s, please retry later", slotType), streamStarted)
 }
 
-func (h *GatewayHandler) submitFailedUsageLogFromFailover(c *gin.Context, apiKey *service.APIKey, account *service.Account, model string, stream bool, failoverErr *service.UpstreamFailoverError, logKey string) {
+func (h *GatewayHandler) submitFailedUsageLogFromFailover(c *gin.Context, apiKey *service.APIKey, account *service.Account, model string, stream bool, failoverErr *service.UpstreamFailoverError, duration time.Duration, reasoningEffort *string, logKey string) {
 	if c == nil || apiKey == nil || apiKey.User == nil || account == nil {
 		return
 	}
@@ -1265,12 +1277,14 @@ func (h *GatewayHandler) submitFailedUsageLogFromFailover(c *gin.Context, apiKey
 			User:             apiKey.User,
 			Account:          account,
 			Model:            model,
+			ReasoningEffort:  reasoningEffort,
 			Stream:           stream,
 			InboundEndpoint:  inboundEndpoint,
 			UpstreamEndpoint: upstreamEndpoint,
 			UserAgent:        userAgent,
 			IPAddress:        clientIP,
 			DetailSnapshot:   detailSnapshot,
+			Duration:         duration,
 		}, logKey)
 	})
 }

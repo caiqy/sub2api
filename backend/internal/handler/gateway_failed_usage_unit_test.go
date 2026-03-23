@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -48,6 +49,7 @@ func TestGatewayHandler_MessagesForwardErrorStillCreatesUsageLog(t *testing.T) {
 	groupRepo := &stubGroupRepo{group: group}
 	usageLogRepo := &stubUsageLogRepo{}
 	httpUpstream := &openAIChatCompletionsHTTPUpstreamStub{
+		delay: 5 * time.Millisecond,
 		response: &http.Response{
 			StatusCode: http.StatusBadRequest,
 			Header: http.Header{
@@ -108,7 +110,7 @@ func TestGatewayHandler_MessagesForwardErrorStillCreatesUsageLog(t *testing.T) {
 	router.Use(middleware.UsageDetailCapture())
 	router.POST("/v1/messages", h.Messages)
 
-	reqBody := `{"model":"claude-3-5-sonnet-20241022","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`
+	reqBody := `{"model":"claude-3-5-sonnet-20241022","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"output_config":{"effort":"high"}}`
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
@@ -120,6 +122,10 @@ func TestGatewayHandler_MessagesForwardErrorStillCreatesUsageLog(t *testing.T) {
 	require.Equal(t, 0, usageLogRepo.lastLog.OutputTokens)
 	require.Equal(t, 0.0, usageLogRepo.lastLog.TotalCost)
 	require.Equal(t, 0.0, usageLogRepo.lastLog.ActualCost)
+	require.NotNil(t, usageLogRepo.lastLog.DurationMs)
+	require.Greater(t, *usageLogRepo.lastLog.DurationMs, 0)
+	require.NotNil(t, usageLogRepo.lastLog.ReasoningEffort)
+	require.Equal(t, "high", *usageLogRepo.lastLog.ReasoningEffort)
 	require.NotNil(t, usageLogRepo.lastLog.DetailSnapshot)
 	require.JSONEq(t, reqBody, usageLogRepo.lastLog.DetailSnapshot.RequestBody)
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, "anthropic upstream rejected payload")

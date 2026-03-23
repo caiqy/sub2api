@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
@@ -344,6 +345,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 
 	fs := NewFailoverState(h.maxAccountSwitchesGemini, hasBoundSession)
 	var lastFailedAccount *service.Account
+	var lastFailedDuration time.Duration
 
 	// 单账号分组提前设置 SingleAccountRetry 标记，让 Service 层首次 503 就不设模型限流标记。
 	// 避免单账号分组收到 503 (MODEL_CAPACITY_EXHAUSTED) 时设 29s 限流，导致后续请求连续快速失败。
@@ -370,7 +372,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			default: // FailoverExhausted
 				h.handleGeminiFailoverExhausted(c, fs.LastFailoverErr)
 				if fs.LastFailoverErr != nil && lastFailedAccount != nil {
-					h.submitFailedUsageLogFromFailover(c, apiKey, lastFailedAccount, modelName, stream, fs.LastFailoverErr, "handler.gemini_v1beta.models")
+					h.submitFailedUsageLogFromFailover(c, apiKey, lastFailedAccount, modelName, stream, fs.LastFailoverErr, lastFailedDuration, nil, "handler.gemini_v1beta.models")
 				}
 				return
 			}
@@ -460,11 +462,13 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		if fs.SwitchCount > 0 {
 			requestCtx = service.WithAccountSwitchCount(requestCtx, fs.SwitchCount, h.metadataBridgeEnabled())
 		}
+		forwardStartedAt := time.Now()
 		if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
 			result, err = h.antigravityGatewayService.ForwardGemini(requestCtx, c, account, modelName, action, stream, body, hasBoundSession)
 		} else {
 			result, err = h.geminiCompatService.ForwardNative(requestCtx, c, account, modelName, action, stream, body)
 		}
+		forwardDuration := time.Since(forwardStartedAt)
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
 		}
@@ -472,13 +476,14 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
 				lastFailedAccount = account
+				lastFailedDuration = forwardDuration
 				failoverAction := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, failoverErr)
 				switch failoverAction {
 				case FailoverContinue:
 					continue
 				case FailoverExhausted:
 					h.handleGeminiFailoverExhausted(c, fs.LastFailoverErr)
-					h.submitFailedUsageLogFromFailover(c, apiKey, account, modelName, stream, fs.LastFailoverErr, "handler.gemini_v1beta.models")
+					h.submitFailedUsageLogFromFailover(c, apiKey, account, modelName, stream, fs.LastFailoverErr, forwardDuration, nil, "handler.gemini_v1beta.models")
 					return
 				case FailoverCanceled:
 					return
@@ -503,6 +508,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 					UserAgent:        userAgent,
 					IPAddress:        clientIP,
 					DetailSnapshot:   detailSnapshot,
+					Duration:         forwardDuration,
 				}, "handler.gemini_v1beta.models")
 			})
 			return

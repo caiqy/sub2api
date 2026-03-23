@@ -221,6 +221,7 @@ func (h *SoraGatewayHandler) ChatCompletions(c *gin.Context) {
 	switchCount := 0
 	failedAccountIDs := make(map[int64]struct{})
 	var lastFailedAccount *service.Account
+	var lastFailedDuration time.Duration
 	lastFailoverStatus := 0
 	var lastFailoverBody []byte
 	var lastFailoverHeaders http.Header
@@ -270,6 +271,7 @@ func (h *SoraGatewayHandler) ChatCompletions(c *gin.Context) {
 						UserAgent:        userAgent,
 						IPAddress:        clientIP,
 						DetailSnapshot:   detailSnapshot,
+						Duration:         lastFailedDuration,
 					}, "handler.sora_gateway.chat_completions")
 				})
 			}
@@ -346,7 +348,9 @@ func (h *SoraGatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 		accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
 
+		forwardStartedAt := time.Now()
 		result, err := h.soraGatewayService.Forward(c.Request.Context(), c, account, body, clientStream)
+		forwardDuration := time.Since(forwardStartedAt)
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
 		}
@@ -354,6 +358,7 @@ func (h *SoraGatewayHandler) ChatCompletions(c *gin.Context) {
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
 				lastFailedAccount = account
+				lastFailedDuration = forwardDuration
 				failedAccountIDs[account.ID] = struct{}{}
 				if switchCount >= maxAccountSwitches {
 					lastFailoverStatus = failoverErr.StatusCode
@@ -398,6 +403,7 @@ func (h *SoraGatewayHandler) ChatCompletions(c *gin.Context) {
 							UserAgent:        userAgent,
 							IPAddress:        clientIP,
 							DetailSnapshot:   detailSnapshot,
+							Duration:         forwardDuration,
 						}, "handler.sora_gateway.chat_completions")
 					})
 					return
@@ -455,6 +461,7 @@ func (h *SoraGatewayHandler) ChatCompletions(c *gin.Context) {
 					UserAgent:        userAgent,
 					IPAddress:        clientIP,
 					DetailSnapshot:   detailSnapshot,
+					Duration:         forwardDuration,
 				}, "handler.sora_gateway.chat_completions")
 			})
 			return

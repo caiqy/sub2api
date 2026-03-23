@@ -1266,9 +1266,13 @@ type openAIChatCompletionsHTTPUpstreamStub struct {
 
 	response *http.Response
 	err      error
+	delay    time.Duration
 }
 
 func (s *openAIChatCompletionsHTTPUpstreamStub) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
+	if s.delay > 0 {
+		time.Sleep(s.delay)
+	}
 	if s.err != nil {
 		return nil, s.err
 	}

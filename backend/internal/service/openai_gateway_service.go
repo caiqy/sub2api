@@ -4708,6 +4708,10 @@ func extractOpenAIReasoningEffortFromBody(body []byte, requestedModel string) *s
 	return &value
 }
 
+func ExtractOpenAIReasoningEffortFromBody(body []byte, requestedModel string) *string {
+	return extractOpenAIReasoningEffortFromBody(body, requestedModel)
+}
+
 func extractOpenAIServiceTier(reqBody map[string]any) *string {
 	if reqBody == nil {
 		return nil

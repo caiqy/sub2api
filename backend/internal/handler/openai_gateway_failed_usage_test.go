@@ -48,7 +48,7 @@ func TestOpenAIGatewayHandler_SubmitFailedUsageLog_UsesMessagesFallbackModelAsUp
 	router.Use(middleware.UsageDetailCapture())
 	router.POST("/v1/messages", func(c *gin.Context) {
 		c.Set("openai_messages_fallback_model", fallbackModel)
-		h.submitFailedUsageLog(c, apiKey, account, reqModel, false, nil, nil, "handler.openai_gateway.messages")
+		h.submitFailedUsageLog(c, apiKey, account, reqModel, false, nil, nil, 0, nil, "handler.openai_gateway.messages")
 		c.Status(http.StatusBadRequest)
 	})
 
@@ -79,7 +79,7 @@ func TestOpenAIGatewayHandler_SubmitFailoverFailedUsageLog_UsesChatCompletionsFa
 	router.Use(middleware.UsageDetailCapture())
 	router.POST("/chat/completions", func(c *gin.Context) {
 		c.Set("openai_chat_completions_fallback_model", fallbackModel)
-		h.submitFailoverFailedUsageLog(c, apiKey, account, reqModel, false, &service.UpstreamFailoverError{}, "handler.openai_gateway.chat_completions")
+		h.submitFailoverFailedUsageLog(c, apiKey, account, reqModel, false, &service.UpstreamFailoverError{}, 0, nil, "handler.openai_gateway.chat_completions")
 		c.Status(http.StatusTooManyRequests)
 	})
 
@@ -121,7 +121,7 @@ func TestOpenAIGatewayHandler_SubmitFailedUsageLog_PrefersExactUpstreamModelOver
 	router.POST("/v1/messages", func(c *gin.Context) {
 		c.Set("openai_messages_fallback_model", fallbackModel)
 		c.Set("openai_failed_usage_upstream_model", exactUpstreamModel)
-		h.submitFailedUsageLog(c, apiKey, account, reqModel, false, nil, nil, "handler.openai_gateway.messages")
+		h.submitFailedUsageLog(c, apiKey, account, reqModel, false, nil, nil, 0, nil, "handler.openai_gateway.messages")
 		c.Status(http.StatusBadRequest)
 	})
 
@@ -164,6 +164,7 @@ func TestOpenAIGatewayHandler_MessagesUpstreamErrorStillCreatesUsageLog(t *testi
 	}
 	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
 	httpUpstream := &openAIChatCompletionsHTTPUpstreamStub{
+		delay: 5 * time.Millisecond,
 		response: &http.Response{
 			StatusCode: http.StatusBadRequest,
 			Header: http.Header{
@@ -218,7 +219,7 @@ func TestOpenAIGatewayHandler_MessagesUpstreamErrorStillCreatesUsageLog(t *testi
 	router.Use(middleware.UsageDetailCapture())
 	router.POST("/v1/messages", h.Messages)
 
-	reqBody := `{"model":"claude-3-5-sonnet-20241022","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`
+	reqBody := `{"model":"claude-3-5-sonnet-20241022","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"output_config":{"effort":"high"}}`
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
@@ -227,6 +228,10 @@ func TestOpenAIGatewayHandler_MessagesUpstreamErrorStillCreatesUsageLog(t *testi
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	log := waitForOpenAIFailedUsageLog(t, usageRepo)
 	require.NotNil(t, log, "failed usage log should be created for non-failover errors")
+	require.NotNil(t, log.DurationMs)
+	require.Greater(t, *log.DurationMs, 0)
+	require.NotNil(t, log.ReasoningEffort)
+	require.Equal(t, "high", *log.ReasoningEffort)
 	require.NotNil(t, log.DetailSnapshot)
 	require.JSONEq(t, reqBody, log.DetailSnapshot.RequestBody)
 	require.Contains(t, log.DetailSnapshot.ResponseBody, "messages upstream rejected payload")
@@ -458,6 +463,7 @@ func TestOpenAIGatewayHandler_UpstreamErrorStillCreatesUsageLog(t *testing.T) {
 	}
 	usageRepo := &openAIChatCompletionsUsageLogRepoStub{}
 	httpUpstream := &openAIChatCompletionsHTTPUpstreamStub{
+		delay: 5 * time.Millisecond,
 		response: &http.Response{
 			StatusCode: http.StatusBadRequest,
 			Header: http.Header{
@@ -513,7 +519,7 @@ func TestOpenAIGatewayHandler_UpstreamErrorStillCreatesUsageLog(t *testing.T) {
 	router.Use(middleware.UsageDetailCapture())
 	router.POST("/v1/responses", h.Responses)
 
-	reqBody := `{"model":"gpt-5.4","stream":false,"input":"hello"}`
+	reqBody := `{"model":"gpt-5.4","reasoning":{"effort":"high"},"stream":false,"input":"hello"}`
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
@@ -525,6 +531,10 @@ func TestOpenAIGatewayHandler_UpstreamErrorStillCreatesUsageLog(t *testing.T) {
 	require.Equal(t, 0, usageRepo.lastLog.OutputTokens)
 	require.Equal(t, 0.0, usageRepo.lastLog.TotalCost)
 	require.Equal(t, 0.0, usageRepo.lastLog.ActualCost)
+	require.NotNil(t, usageRepo.lastLog.DurationMs)
+	require.Greater(t, *usageRepo.lastLog.DurationMs, 0)
+	require.NotNil(t, usageRepo.lastLog.ReasoningEffort)
+	require.Equal(t, "high", *usageRepo.lastLog.ReasoningEffort)
 	require.NotNil(t, usageRepo.lastLog.DetailSnapshot)
 	require.JSONEq(t, reqBody, usageRepo.lastLog.DetailSnapshot.RequestBody)
 	require.Contains(t, usageRepo.lastLog.DetailSnapshot.ResponseBody, "upstream rejected payload")
