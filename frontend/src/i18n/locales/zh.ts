@@ -2195,7 +2195,8 @@ export default {
           bodyPath: 'Body 路径仅支持点号对象层级，不支持数组语法',
           valueRequired: '固定注入模式必须填写值',
           duplicateKey: '同一目标下的字段名或路径不能重复',
-          sameSourceAndTarget: '来源字段与目标字段不能相同'
+          sameSourceAndTarget: '来源字段与目标字段不能相同',
+          bodyPathPrefixConflict: 'Body 路径不能与其他规则存在父子层级关系'
         }
       },
       usageWindow: {

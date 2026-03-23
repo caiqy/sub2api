@@ -23,6 +23,7 @@ export type PassthroughFieldRuleErrorCode =
   | 'value_required'
   | 'duplicate_key'
   | 'same_source_and_target'
+  | 'body_path_prefix_conflict'
 
 const BODY_PATH_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/
 
@@ -61,6 +62,8 @@ export function validatePassthroughFieldRules(rules: PassthroughFieldRuleDraft[]
 } {
   const errors: Record<number, PassthroughFieldRuleErrors> = {}
   const seenKeys = new Map<string, number>()
+  // Collect valid body keys (index -> normalized key) for prefix-conflict check
+  const validBodyKeys: Array<{ index: number; key: string }> = []
 
   rules.forEach((rule, index) => {
     const normalizedRule = normalizePassthroughFieldRule(rule)
@@ -94,6 +97,10 @@ export function validatePassthroughFieldRules(rules: PassthroughFieldRuleDraft[]
         rowErrors.key = 'duplicate_key'
       } else {
         seenKeys.set(comparableKey, index)
+        // Accumulate valid body keys for prefix-conflict check below
+        if (normalizedRule.target === 'body') {
+          validBodyKeys.push({ index, key: normalizedRule.key })
+        }
       }
     }
 
@@ -101,6 +108,21 @@ export function validatePassthroughFieldRules(rules: PassthroughFieldRuleDraft[]
       errors[index] = rowErrors
     }
   })
+
+  // Prefix-conflict check: flag later rule when one body key is prefix of another
+  for (let i = 0; i < validBodyKeys.length; i++) {
+    for (let j = i + 1; j < validBodyKeys.length; j++) {
+      const a = validBodyKeys[i]
+      const b = validBodyKeys[j]
+      if (isBodyPathPrefixOf(a.key, b.key) || isBodyPathPrefixOf(b.key, a.key)) {
+        // Mark the later-occurring rule (higher index = j)
+        if (!errors[b.index]) {
+          errors[b.index] = {}
+        }
+        errors[b.index].key = 'body_path_prefix_conflict'
+      }
+    }
+  }
 
   return {
     ok: Object.keys(errors).length === 0,
@@ -131,4 +153,9 @@ function isValidTargetKey(target: PassthroughFieldTarget, key: string): boolean 
 
 function isValidBodyPath(path: string): boolean {
   return BODY_PATH_PATTERN.test(path)
+}
+
+/** Returns true if `prefix` is a strict ancestor of `path` in dot-notation. */
+function isBodyPathPrefixOf(prefix: string, path: string): boolean {
+  return path.startsWith(prefix + '.')
 }

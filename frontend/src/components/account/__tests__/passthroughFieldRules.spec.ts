@@ -200,4 +200,43 @@ describe('passthroughFieldRules', () => {
     expect(result.ok).toBe(true)
     expect(result.errors).toEqual({})
   })
+
+  it('rejects body path prefix conflict: ancestor before descendant', () => {
+    const result = validatePassthroughFieldRules([
+      { id: 'rule-1', target: 'body', mode: 'inject', key: 'metadata', source_key: '', value: 'v1' },
+      { id: 'rule-2', target: 'body', mode: 'inject', key: 'metadata.user_id', source_key: '', value: 'v2' }
+    ])
+
+    expect(result.ok).toBe(false)
+    // 后出现的规则报错（与 duplicate 逻辑保持一致，报 conflicting rule 的 index）
+    expect(result.errors[1]?.key).toBe('body_path_prefix_conflict')
+  })
+
+  it('rejects body path prefix conflict: descendant before ancestor', () => {
+    const result = validatePassthroughFieldRules([
+      { id: 'rule-1', target: 'body', mode: 'forward', key: 'metadata.user_id', source_key: '', value: '' },
+      { id: 'rule-2', target: 'body', mode: 'inject', key: 'metadata', source_key: '', value: 'v2' }
+    ])
+
+    expect(result.ok).toBe(false)
+    expect(result.errors[1]?.key).toBe('body_path_prefix_conflict')
+  })
+
+  it('does not flag unrelated body paths as prefix conflict', () => {
+    const result = validatePassthroughFieldRules([
+      { id: 'rule-1', target: 'body', mode: 'inject', key: 'metadata', source_key: '', value: 'v1' },
+      { id: 'rule-2', target: 'body', mode: 'inject', key: 'meta', source_key: '', value: 'v2' }
+    ])
+
+    expect(result.ok).toBe(true)
+  })
+
+  it('does not flag header keys as prefix conflict even if one is prefix of another', () => {
+    const result = validatePassthroughFieldRules([
+      { id: 'rule-1', target: 'header', mode: 'forward', key: 'X-A', source_key: '', value: '' },
+      { id: 'rule-2', target: 'header', mode: 'forward', key: 'X-A-Extended', source_key: '', value: '' }
+    ])
+
+    expect(result.ok).toBe(true)
+  })
 })

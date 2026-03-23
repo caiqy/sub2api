@@ -2069,7 +2069,8 @@ export default {
           bodyPath: 'Body path must use dot notation and does not support array syntax',
           valueRequired: 'Inject mode requires a value',
           duplicateKey: 'Field name or path must be unique within the same target',
-          sameSourceAndTarget: 'Source and target fields must be different'
+          sameSourceAndTarget: 'Source and target fields must be different',
+          bodyPathPrefixConflict: 'Body path cannot be an ancestor or descendant of another rule\'s path'
         }
       },
       clearRateLimit: 'Clear Rate Limit',

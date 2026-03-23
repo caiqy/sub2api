@@ -262,6 +262,8 @@ function formatValidationError(
       return t('admin.accounts.passthroughFields.errors.duplicateKey')
     case 'same_source_and_target':
       return t('admin.accounts.passthroughFields.errors.sameSourceAndTarget')
+    case 'body_path_prefix_conflict':
+      return t('admin.accounts.passthroughFields.errors.bodyPathPrefixConflict')
     default:
       return error ?? ''
   }
