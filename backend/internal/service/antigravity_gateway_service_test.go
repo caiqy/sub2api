@@ -1072,6 +1072,66 @@ func TestAntigravityGatewayService_ForwardGemini_ModelFallbackUpdatesUsageSnapsh
 	}
 }
 
+func TestPassthroughFieldsV2AntigravityForwardGemini_BodyInjectAndMapDoNotChain(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	writer := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(writer)
+
+	body, err := json.Marshal(map[string]any{
+		"metadata": map[string]any{"client_trace": "trace-123"},
+		"contents": []map[string]any{
+			{"role": "user", "parts": []map[string]any{{"text": "hello"}}},
+		},
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash:generateContent", bytes.NewReader(body))
+	c.Request = req
+
+	upstreamBody := []byte("data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":8,\"candidatesTokenCount\":3}}}\n\n")
+	upstream := &queuedHTTPUpstreamStub{
+		responses: []*http.Response{{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(bytes.NewReader(upstreamBody)),
+		}},
+	}
+
+	svc := &AntigravityGatewayService{
+		settingService: NewSettingService(&antigravitySettingRepoStub{}, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
+		tokenProvider:  &AntigravityTokenProvider{},
+		httpUpstream:   upstream,
+	}
+
+	account := &Account{
+		ID:          13,
+		Name:        "acc-antigravity-v2-map",
+		Platform:    PlatformAntigravity,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key": "api-key-token",
+		},
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "body", Mode: "inject", Key: "requestMetadata.user_id", Value: "user-123"},
+				{Target: "body", Mode: "map", Key: "requestMetadata.copied_user_id", SourceKey: "requestMetadata.user_id"},
+				{Target: "body", Mode: "map", Key: "requestMetadata.client_trace", SourceKey: "metadata.client_trace"},
+			},
+		},
+	}
+
+	result, err := svc.ForwardGemini(context.Background(), c, account, "gemini-2.5-flash", "generateContent", true, body, false)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, upstream.requestBodies, 1)
+	require.Equal(t, "user-123", gjson.GetBytes(upstream.requestBodies[0], "request.requestMetadata.user_id").String())
+	require.False(t, gjson.GetBytes(upstream.requestBodies[0], "request.requestMetadata.copied_user_id").Exists())
+	require.Equal(t, "trace-123", gjson.GetBytes(upstream.requestBodies[0], "request.requestMetadata.client_trace").String())
+}
+
 func TestAntigravityGatewayService_ForwardUpstream_CapturesUsageSnapshotBeforeSend(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	writer := httptest.NewRecorder()

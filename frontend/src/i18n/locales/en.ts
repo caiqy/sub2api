@@ -2055,15 +2055,21 @@ export default {
         targetBody: 'Body',
         modeForward: 'Forward',
         modeInject: 'Inject Fixed Value',
+        modeMap: 'Map from Source',
+        sourceKey: 'Source field or path',
+        targetKey: 'Target field or path',
         headerHint: 'Header matching is case-insensitive',
         bodyHint: 'Only xx.xx style object paths are supported',
         injectHint: 'Fixed injection writes into the upstream request before forwarding',
+        mapHint: 'Map mode copies the source field to the target field without changing the original field',
+        hiddenRulesError: 'Rules are hidden. Re-enable passthrough fields to review errors',
         errors: {
           keyRequired: 'Field name or path is required',
+          sourceKeyRequired: 'Source field or path is required',
           bodyPath: 'Body path must use dot notation and does not support array syntax',
           valueRequired: 'Inject mode requires a value',
           duplicateKey: 'Field name or path must be unique within the same target',
-          reservedKey: 'Reserved field names or paths cannot be passed through'
+          sameSourceAndTarget: 'Source and target fields must be different'
         }
       },
       clearRateLimit: 'Clear Rate Limit',

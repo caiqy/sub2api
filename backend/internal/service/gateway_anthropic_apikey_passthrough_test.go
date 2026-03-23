@@ -301,6 +301,50 @@ func TestGatewayService_AnthropicFieldsApplyWithoutAnthropicPassthrough(t *testi
 	require.Equal(t, "trace-123", gjson.GetBytes(upstream.lastBody, "metadata.client_trace").String())
 }
 
+func TestPassthroughFieldsV2AnthropicAPIKeyPassthrough_BodyInjectAndMapDoNotChain(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	body := []byte(`{"model":"claude-3-5-sonnet-latest","metadata":{"client_trace":"trace-123"},"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`)
+	parsed := &ParsedRequest{Body: body, Model: "claude-3-5-sonnet-latest"}
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"msg_1","type":"message","usage":{"input_tokens":5,"output_tokens":3}}`)),
+		},
+	}
+	svc := &GatewayService{cfg: &config.Config{}, httpUpstream: upstream, rateLimitService: &RateLimitService{}}
+	account := &Account{
+		ID:          106,
+		Name:        "anthropic-apikey-v2-map",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "upstream-anthropic-key", "base_url": "https://api.anthropic.com"},
+		Extra: map[string]any{
+			"anthropic_passthrough":      true,
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "body", Mode: "inject", Key: "metadata.user_id", Value: "user-1"},
+				{Target: "body", Mode: "map", Key: "metadata.copied_user_id", SourceKey: "metadata.user_id"},
+				{Target: "body", Mode: "map", Key: "metadata.client_trace_copy", SourceKey: "metadata.client_trace"},
+			},
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	_, err := svc.Forward(context.Background(), c, account, parsed)
+	require.NoError(t, err)
+	require.Equal(t, "user-1", gjson.GetBytes(upstream.lastBody, "metadata.user_id").String())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "metadata.copied_user_id").Exists())
+	require.Equal(t, "trace-123", gjson.GetBytes(upstream.lastBody, "metadata.client_trace_copy").String())
+}
+
 func TestGatewayService_AnthropicAPIKeyPassthrough_StructureConflictReturnsInvalidRequest(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

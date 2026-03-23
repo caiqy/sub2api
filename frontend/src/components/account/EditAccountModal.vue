@@ -34,15 +34,7 @@
             v-model="editBaseUrl"
             type="text"
             class="input"
-            :placeholder="
-              account.platform === 'openai' || account.platform === 'sora'
-                ? 'https://api.openai.com'
-                : account.platform === 'gemini'
-                  ? 'https://generativelanguage.googleapis.com'
-                  : account.platform === 'antigravity'
-                    ? 'https://cloudcode-pa.googleapis.com'
-                    : 'https://api.anthropic.com'
-            "
+            :placeholder="defaultBaseUrl"
           />
           <p class="input-hint">{{ baseUrlHint }}</p>
         </div>
@@ -65,7 +57,11 @@
           <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
         </div>
 
-        <section class="border-t border-gray-200 pt-4 dark:border-dark-600" data-testid="passthrough-fields-section">
+        <section
+          v-if="isPassthroughFieldSupportedAccount"
+          class="border-t border-gray-200 pt-4 dark:border-dark-600"
+          data-testid="passthrough-fields-section"
+        >
           <PassthroughFieldRulesEditor
             v-model:enabled="passthroughFieldsEnabled"
             v-model:rules="passthroughFieldRules"
@@ -554,7 +550,7 @@
             v-model="editBaseUrl"
             type="text"
             class="input"
-            placeholder="https://cloudcode-pa.googleapis.com"
+            :placeholder="getDefaultBaseUrl('antigravity')"
           />
           <p class="input-hint">{{ t('admin.accounts.upstream.baseUrlHint') }}</p>
         </div>
@@ -1749,6 +1745,7 @@ import {
   validatePassthroughFieldRules,
   type PassthroughFieldRuleDraft
 } from './passthroughFieldRules'
+import { getDefaultBaseUrl, supportsPassthroughFields } from './passthroughFieldSupport'
 
 interface Props {
   show: boolean
@@ -1793,7 +1790,7 @@ interface TempUnschedRuleForm {
 
 // State
 const submitting = ref(false)
-const editBaseUrl = ref('https://api.anthropic.com')
+const editBaseUrl = ref(getDefaultBaseUrl('anthropic'))
 const editApiKey = ref('')
 // Bedrock credentials
 const editBedrockAccessKeyId = ref('')
@@ -1900,6 +1897,10 @@ const openaiResponsesWebSocketV2Mode = computed({
 const openAIWSModeConcurrencyHintKey = computed(() =>
   resolveOpenAIWSModeConcurrencyHintKey(openaiResponsesWebSocketV2Mode.value)
 )
+const isPassthroughFieldSupportedAccount = computed(() => supportsPassthroughFields({
+  platform: props.account?.platform,
+  type: props.account?.type
+}))
 const isOpenAIModelRestrictionDisabled = computed(() =>
   props.account?.platform === 'openai' && openaiPassthroughEnabled.value
 )
@@ -1937,11 +1938,7 @@ const tempUnschedPresets = computed(() => [
 ])
 
 // Computed: default base URL based on platform
-const defaultBaseUrl = computed(() => {
-  if (props.account?.platform === 'openai' || props.account?.platform === 'sora') return 'https://api.openai.com'
-  if (props.account?.platform === 'gemini') return 'https://generativelanguage.googleapis.com'
-  return 'https://api.anthropic.com'
-})
+const defaultBaseUrl = computed(() => getDefaultBaseUrl(props.account?.platform))
 
 const mixedChannelWarningMessageText = computed(() => {
   if (mixedChannelWarningDetails.value) {
@@ -2127,12 +2124,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   // Initialize API Key fields for apikey type
   if (newAccount.type === 'apikey' && newAccount.credentials) {
     const credentials = newAccount.credentials as Record<string, unknown>
-    const platformDefaultUrl =
-      newAccount.platform === 'openai' || newAccount.platform === 'sora'
-        ? 'https://api.openai.com'
-        : newAccount.platform === 'gemini'
-          ? 'https://generativelanguage.googleapis.com'
-          : 'https://api.anthropic.com'
+    const platformDefaultUrl = getDefaultBaseUrl(newAccount.platform)
     editBaseUrl.value = (credentials.base_url as string) || platformDefaultUrl
 
     // Load model mappings and detect mode
@@ -2221,14 +2213,9 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     }
   } else if (newAccount.type === 'upstream' && newAccount.credentials) {
     const credentials = newAccount.credentials as Record<string, unknown>
-    editBaseUrl.value = (credentials.base_url as string) || ''
+    editBaseUrl.value = (credentials.base_url as string) || getDefaultBaseUrl(newAccount.platform)
   } else {
-    const platformDefaultUrl =
-      newAccount.platform === 'openai' || newAccount.platform === 'sora'
-        ? 'https://api.openai.com'
-        : newAccount.platform === 'gemini'
-          ? 'https://generativelanguage.googleapis.com'
-          : 'https://api.anthropic.com'
+    const platformDefaultUrl = getDefaultBaseUrl(newAccount.platform)
     editBaseUrl.value = platformDefaultUrl
 
     // Load model mappings for OpenAI OAuth accounts
@@ -2273,8 +2260,9 @@ watch(
     }
     if (!wasShow || newAccount !== previousAccount) {
       if (
-        previousAccount?.type === 'apikey' &&
-        newAccount.type !== 'apikey' &&
+        previousAccount &&
+        supportsPassthroughFieldExtra(previousAccount) &&
+        !supportsPassthroughFieldExtra(newAccount) &&
         hasPassthroughFieldExtra(previousAccount.extra as Record<string, unknown> | undefined)
       ) {
         appStore.showInfo(PASSTHROUGH_FIELDS_REMOVAL_MESSAGE)
@@ -2657,8 +2645,9 @@ function toDraftRules(value: unknown): PassthroughFieldRuleDraft[] {
     return {
       ...draft,
       target: rule.target === 'body' ? 'body' : 'header',
-      mode: rule.mode === 'inject' ? 'inject' : 'forward',
+      mode: rule.mode === 'inject' ? 'inject' : rule.mode === 'map' ? 'map' : 'forward',
       key: typeof rule.key === 'string' ? rule.key : '',
+      source_key: typeof rule.source_key === 'string' ? rule.source_key : '',
       value: typeof rule.value === 'string' ? rule.value : ''
     }
   })
@@ -2669,8 +2658,12 @@ function hasPassthroughFieldExtra(extra?: Record<string, unknown>) {
     (Array.isArray(extra?.passthrough_field_rules) && extra.passthrough_field_rules.length > 0)
 }
 
+function supportsPassthroughFieldExtra(account?: Pick<Account, 'type' | 'platform'> | null) {
+  return supportsPassthroughFields(account || {})
+}
+
 function applyPassthroughFieldExtra(extra: Record<string, unknown>, accountType: Account['type']) {
-  if (accountType !== 'apikey') {
+  if (accountType !== 'apikey' || !isPassthroughFieldSupportedAccount.value) {
     delete extra.passthrough_fields_enabled
     delete extra.passthrough_field_rules
     return
@@ -2687,10 +2680,11 @@ function applyPassthroughFieldExtra(extra: Record<string, unknown>, accountType:
   }
 
   extra.passthrough_fields_enabled = passthroughFieldsEnabled.value
-  extra.passthrough_field_rules = normalizedRules.map(({ target, mode, key, value }) => ({
+  extra.passthrough_field_rules = normalizedRules.map(({ target, mode, key, source_key, value }) => ({
     target,
     mode,
     key: key.trim(),
+    ...(mode === 'map' ? { source_key } : {}),
     ...(mode === 'inject' ? { value } : {})
   }))
 }
@@ -2910,10 +2904,10 @@ const handleSubmit = async () => {
     return
   }
 
-  if (props.account.type === 'apikey') {
+  if (isPassthroughFieldSupportedAccount.value) {
     const hasPassthroughInput = passthroughFieldsEnabled.value || passthroughFieldRules.value.some((rule) => {
       const normalizedRule = normalizePassthroughFieldRule(rule)
-      return Boolean(normalizedRule.key || normalizedRule.value.trim())
+      return Boolean(normalizedRule.key || normalizedRule.source_key || normalizedRule.value.trim())
     })
 
     if (hasPassthroughInput && !validatePassthroughFieldRules(passthroughFieldRules.value).ok) {
@@ -3002,7 +2996,7 @@ const handleSubmit = async () => {
       const currentCredentials = (props.account.credentials as Record<string, unknown>) || {}
       const newCredentials: Record<string, unknown> = { ...currentCredentials }
 
-      newCredentials.base_url = editBaseUrl.value.trim()
+      newCredentials.base_url = editBaseUrl.value.trim() || defaultBaseUrl.value
 
       if (editApiKey.value.trim()) {
         newCredentials.api_key = editApiKey.value.trim()

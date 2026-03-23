@@ -801,7 +801,7 @@
             type="text"
             required
             class="input"
-            placeholder="https://cloudcode-pa.googleapis.com"
+            :placeholder="getDefaultBaseUrl('antigravity')"
           />
           <p class="input-hint">{{ t('admin.accounts.upstream.baseUrlHint') }}</p>
         </div>
@@ -818,6 +818,7 @@
         </div>
 
         <section
+          v-if="isPassthroughFieldSupportedFlow"
           class="border-t border-gray-200 pt-4 dark:border-dark-600"
           data-testid="passthrough-fields-section"
         >
@@ -826,6 +827,7 @@
             v-model:rules="passthroughFieldRules"
           />
         </section>
+
       </div>
 
       <!-- Antigravity model restriction (applies to OAuth + Upstream) -->
@@ -954,13 +956,7 @@
             v-model="apiKeyBaseUrl"
             type="text"
             class="input"
-            :placeholder="
-              form.platform === 'openai' || form.platform === 'sora'
-                ? 'https://api.openai.com'
-                : form.platform === 'gemini'
-                  ? 'https://generativelanguage.googleapis.com'
-                  : 'https://api.anthropic.com'
-            "
+            :placeholder="getDefaultBaseUrl(form.platform)"
           />
           <p class="input-hint">{{ form.platform === 'sora' ? t('admin.accounts.soraUpstreamBaseUrlHint') : baseUrlHint }}</p>
         </div>
@@ -984,7 +980,7 @@
         </div>
 
         <section
-          v-if="accountCategory === 'apikey'"
+          v-if="isPassthroughFieldSupportedFlow"
           class="border-t border-gray-200 pt-4 dark:border-dark-600"
           data-testid="passthrough-fields-section"
         >
@@ -2919,6 +2915,7 @@ import {
   validatePassthroughFieldRules,
   type PassthroughFieldRuleDraft
 } from './passthroughFieldRules'
+import { getDefaultBaseUrl, supportsPassthroughFields } from './passthroughFieldSupport'
 import OAuthAuthorizationFlow from './OAuthAuthorizationFlow.vue'
 
 // Type for exposed OAuthAuthorizationFlow component
@@ -3029,7 +3026,7 @@ const step = ref(1)
 const submitting = ref(false)
 const accountCategory = ref<'oauth-based' | 'apikey' | 'bedrock'>('oauth-based') // UI selection for account category
 const addMethod = ref<AddMethod>('oauth') // For oauth-based: 'oauth' or 'setup-token'
-const apiKeyBaseUrl = ref('https://api.anthropic.com')
+const apiKeyBaseUrl = ref(getDefaultBaseUrl('anthropic'))
 const apiKeyValue = ref('')
 const editQuotaLimit = ref<number | null>(null)
 const editQuotaDailyLimit = ref<number | null>(null)
@@ -3063,7 +3060,7 @@ const mixedScheduling = ref(false) // For antigravity accounts: enable mixed sch
 const allowOverages = ref(false) // For antigravity accounts: enable AI Credits overages
 const antigravityAccountType = ref<'oauth' | 'upstream'>('oauth') // For antigravity: oauth or upstream
 const soraAccountType = ref<'oauth' | 'apikey'>('oauth') // For sora: oauth or apikey (upstream)
-const upstreamBaseUrl = ref('') // For upstream type: base URL
+const upstreamBaseUrl = ref(getDefaultBaseUrl('antigravity')) // For upstream type: base URL
 const upstreamApiKey = ref('') // For upstream type: API key
 const antigravityModelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
 const antigravityWhitelistModels = ref<string[]>([])
@@ -3170,6 +3167,11 @@ const openaiResponsesWebSocketV2Mode = computed({
 const openAIWSModeConcurrencyHintKey = computed(() =>
   resolveOpenAIWSModeConcurrencyHintKey(openaiResponsesWebSocketV2Mode.value)
 )
+
+const isPassthroughFieldSupportedFlow = computed(() => supportsPassthroughFields({
+  platform: form.platform,
+  type: form.type
+}))
 
 const isOpenAIModelRestrictionDisabled = computed(() =>
   form.platform === 'openai' && openaiPassthroughEnabled.value
@@ -3340,12 +3342,7 @@ watch(
   () => form.platform,
   (newPlatform) => {
     // Reset base URL based on platform
-    apiKeyBaseUrl.value =
-      (newPlatform === 'openai' || newPlatform === 'sora')
-        ? 'https://api.openai.com'
-        : newPlatform === 'gemini'
-          ? 'https://generativelanguage.googleapis.com'
-          : 'https://api.anthropic.com'
+    apiKeyBaseUrl.value = getDefaultBaseUrl(newPlatform)
     // Clear model-related settings
     allowedModels.value = []
     modelMappings.value = []
@@ -3383,6 +3380,10 @@ watch(
       form.type = 'oauth'
       soraAccountType.value = 'oauth'
     }
+    if (newPlatform !== 'antigravity') {
+      upstreamBaseUrl.value = getDefaultBaseUrl('antigravity')
+      upstreamApiKey.value = ''
+    }
     if (newPlatform !== 'openai') {
       openaiPassthroughEnabled.value = false
       openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
@@ -3398,6 +3399,16 @@ watch(
     soraOAuth.resetState()
     geminiOAuth.resetState()
     antigravityOAuth.resetState()
+  }
+)
+
+watch(
+  antigravityAccountType,
+  (newType) => {
+    if (newType !== 'upstream') {
+      upstreamBaseUrl.value = getDefaultBaseUrl('antigravity')
+      upstreamApiKey.value = ''
+    }
   }
 )
 
@@ -3428,6 +3439,28 @@ watch(
     }
   },
   { immediate: true }
+)
+
+watch(
+  isPassthroughFieldSupportedFlow,
+  (supported, previousSupported) => {
+    if (!previousSupported || supported) {
+      return
+    }
+
+    if (form.platform === 'antigravity' && antigravityAccountType.value !== 'upstream') {
+      return
+    }
+
+    const hasPassthroughInput = passthroughFieldsEnabled.value || passthroughFieldRules.value.some((rule) => {
+      const normalizedRule = normalizePassthroughFieldRule(rule)
+      return Boolean(normalizedRule.key || normalizedRule.source_key || normalizedRule.value.trim())
+    })
+
+    if (hasPassthroughInput) {
+      appStore.showInfo('保存后将移除透传字段规则配置')
+    }
+  }
 )
 
 const handleSelectGeminiOAuthType = (oauthType: 'code_assist' | 'google_one' | 'ai_studio') => {
@@ -3742,7 +3775,7 @@ const resetForm = () => {
   form.expires_at = null
   accountCategory.value = 'oauth-based'
   addMethod.value = 'oauth'
-  apiKeyBaseUrl.value = 'https://api.anthropic.com'
+  apiKeyBaseUrl.value = getDefaultBaseUrl('anthropic')
   apiKeyValue.value = ''
   editQuotaLimit.value = null
   editQuotaDailyLimit.value = null
@@ -3794,7 +3827,7 @@ const resetForm = () => {
   cacheTTLOverrideTarget.value = '5m'
   allowOverages.value = false
   antigravityAccountType.value = 'oauth'
-  upstreamBaseUrl.value = ''
+  upstreamBaseUrl.value = getDefaultBaseUrl('antigravity')
   upstreamApiKey.value = ''
   tempUnschedEnabled.value = false
   tempUnschedRules.value = []
@@ -3868,7 +3901,7 @@ const buildAnthropicExtra = (base?: Record<string, unknown>): Record<string, unk
 const buildPassthroughFieldExtra = (base?: Record<string, unknown>): Record<string, unknown> | undefined => {
   const extra: Record<string, unknown> = { ...(base || {}) }
 
-  const passthroughCapableFlow = accountCategory.value === 'apikey' || (form.platform === 'antigravity' && antigravityAccountType.value === 'upstream')
+  const passthroughCapableFlow = isPassthroughFieldSupportedFlow.value
 
   if (!passthroughCapableFlow) {
     delete extra.passthrough_fields_enabled
@@ -3887,10 +3920,11 @@ const buildPassthroughFieldExtra = (base?: Record<string, unknown>): Record<stri
   }
 
   extra.passthrough_fields_enabled = passthroughFieldsEnabled.value
-  extra.passthrough_field_rules = normalizedRules.map(({ target, mode, key, value }) => ({
+  extra.passthrough_field_rules = normalizedRules.map(({ target, mode, key, source_key, value }) => ({
     target,
     mode,
     key: key.trim(),
+    ...(mode === 'map' ? { source_key } : {}),
     ...(mode === 'inject' ? { value } : {})
   }))
 
@@ -4046,19 +4080,15 @@ const handleSubmit = async () => {
       appStore.showError(t('admin.accounts.pleaseEnterAccountName'))
       return
     }
-    if (!upstreamBaseUrl.value.trim()) {
-      appStore.showError(t('admin.accounts.upstream.pleaseEnterBaseUrl'))
-      return
-    }
     if (!upstreamApiKey.value.trim()) {
       appStore.showError(t('admin.accounts.upstream.pleaseEnterApiKey'))
       return
     }
 
-    const hasPassthroughInput = passthroughFieldsEnabled.value || passthroughFieldRules.value.some((rule) => {
+    const hasPassthroughInput = isPassthroughFieldSupportedFlow.value && (passthroughFieldsEnabled.value || passthroughFieldRules.value.some((rule) => {
       const normalizedRule = normalizePassthroughFieldRule(rule)
-      return Boolean(normalizedRule.key || normalizedRule.value.trim())
-    })
+      return Boolean(normalizedRule.key || normalizedRule.source_key || normalizedRule.value.trim())
+    }))
 
     if (hasPassthroughInput && !validatePassthroughFieldRules(passthroughFieldRules.value).ok) {
       return
@@ -4066,7 +4096,7 @@ const handleSubmit = async () => {
 
     // Build upstream credentials (and optional model restriction)
     const credentials: Record<string, unknown> = {
-      base_url: upstreamBaseUrl.value.trim(),
+      base_url: upstreamBaseUrl.value.trim() || getDefaultBaseUrl('antigravity'),
       api_key: upstreamApiKey.value.trim()
     }
 
@@ -4088,10 +4118,10 @@ const handleSubmit = async () => {
   }
 
   // For apikey type, create directly
-  const hasPassthroughInput = passthroughFieldsEnabled.value || passthroughFieldRules.value.some((rule) => {
+  const hasPassthroughInput = isPassthroughFieldSupportedFlow.value && (passthroughFieldsEnabled.value || passthroughFieldRules.value.some((rule) => {
     const normalizedRule = normalizePassthroughFieldRule(rule)
-    return Boolean(normalizedRule.key || normalizedRule.value.trim())
-  })
+    return Boolean(normalizedRule.key || normalizedRule.source_key || normalizedRule.value.trim())
+  }))
 
   if (hasPassthroughInput && !validatePassthroughFieldRules(passthroughFieldRules.value).ok) {
     return
@@ -4116,12 +4146,7 @@ const handleSubmit = async () => {
   }
 
   // Determine default base URL based on platform
-  const defaultBaseUrl =
-    form.platform === 'openai'
-      ? 'https://api.openai.com'
-      : form.platform === 'gemini'
-        ? 'https://generativelanguage.googleapis.com'
-        : 'https://api.anthropic.com'
+  const defaultBaseUrl = getDefaultBaseUrl(form.platform)
 
   // Build credentials with optional model mapping
   const credentials: Record<string, unknown> = {

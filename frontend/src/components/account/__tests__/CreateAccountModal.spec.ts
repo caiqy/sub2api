@@ -1,18 +1,21 @@
 import { computed, defineComponent, ref } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
-const { createAccountMock, checkMixedChannelRiskMock, showErrorMock } = vi.hoisted(() => ({
+const { createAccountMock, checkMixedChannelRiskMock, showErrorMock, showInfoMock } = vi.hoisted(() => ({
   createAccountMock: vi.fn(),
   checkMixedChannelRiskMock: vi.fn(),
-  showErrorMock: vi.fn()
+  showErrorMock: vi.fn(),
+  showInfoMock: vi.fn()
 }))
 
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
     showError: showErrorMock,
     showSuccess: vi.fn(),
-    showInfo: vi.fn(),
+    showInfo: showInfoMock,
     showWarning: vi.fn()
   })
 }))
@@ -90,6 +93,7 @@ vi.mock('vue-i18n', async () => {
 
 import CreateAccountModal from '../CreateAccountModal.vue'
 import PassthroughFieldRulesEditor from '../PassthroughFieldRulesEditor.vue'
+import { getDefaultBaseUrl } from '../passthroughFieldSupport'
 
 const BaseDialogStub = defineComponent({
   name: 'BaseDialog',
@@ -253,7 +257,7 @@ async function setPassthroughState(
   wrapper: ReturnType<typeof mountModal>,
   payload: {
     enabled?: boolean
-    rules?: Array<{ id: string; target: 'header' | 'body'; mode: 'forward' | 'inject'; key: string; value: string }>
+    rules?: Array<{ id: string; target: 'header' | 'body'; mode: 'forward' | 'inject' | 'map'; key: string; source_key?: string; value: string }>
   }
 ) {
   const editor = wrapper.getComponent(PassthroughFieldRulesEditor)
@@ -276,6 +280,7 @@ describe('CreateAccountModal', () => {
     checkMixedChannelRiskMock.mockReset()
     checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
     showErrorMock.mockReset()
+    showInfoMock.mockReset()
   })
 
   it('submits passthrough field rules for API key accounts only', async () => {
@@ -299,6 +304,69 @@ describe('CreateAccountModal', () => {
         passthrough_field_rules: [
           { target: 'header', mode: 'inject', key: 'X-Env', value: 'prod' },
           { target: 'body', mode: 'forward', key: 'metadata.user_id' }
+        ]
+      })
+    }))
+  })
+
+  it('uses helper default base_url for initial anthropic apikey flow when left empty', async () => {
+    const wrapper = mountModal()
+
+    await wrapper.get('[data-tour="account-form-name"]').setValue('Anthropic API Key')
+    await wrapper.get('[data-testid="platform-anthropic"]').trigger('click')
+    await wrapper.get('[data-testid="account-type-apikey"]').trigger('click')
+    await wrapper.get('[data-testid="create-account-apikey-input"]').setValue('sk-ant-test')
+    await wrapper.get(`input[placeholder="${getDefaultBaseUrl('anthropic')}"]`).setValue('')
+
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledWith(expect.objectContaining({
+      platform: 'anthropic',
+      type: 'apikey',
+      credentials: expect.objectContaining({
+        base_url: getDefaultBaseUrl('anthropic')
+      })
+    }))
+  })
+
+  it('initial anthropic base_url state is sourced from helper', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/components/account/CreateAccountModal.vue'), 'utf8')
+
+    expect(source).toContain("const apiKeyBaseUrl = ref(getDefaultBaseUrl('anthropic'))")
+  })
+
+  it('submits map passthrough rules with source_key in create payload', async () => {
+    const wrapper = mountModal()
+
+    await switchToOpenAIApiKey(wrapper)
+    await setPassthroughState(wrapper, {
+      enabled: true,
+      rules: [
+        {
+          id: 'rule-1',
+          target: 'body',
+          mode: 'map',
+          key: 'metadata.target',
+          source_key: 'metadata.source',
+          value: ''
+        }
+      ]
+    })
+
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledWith(expect.objectContaining({
+      extra: expect.objectContaining({
+        passthrough_fields_enabled: true,
+        passthrough_field_rules: [
+          {
+            target: 'body',
+            mode: 'map',
+            key: 'metadata.target',
+            source_key: 'metadata.source'
+          }
         ]
       })
     }))
@@ -377,22 +445,34 @@ describe('CreateAccountModal', () => {
     }))
   })
 
-  it('blocks create submit when passthrough rules are invalid', async () => {
+  it('blocks create submit with hidden invalid rules and shows only toggle error until reopened', async () => {
     const wrapper = mountModal()
 
     await switchToOpenAIApiKey(wrapper)
-    await setPassthroughState(wrapper, {
-      enabled: true,
-      rules: [
-        { id: 'rule-1', target: 'header', mode: 'forward', key: 'authorization', value: '' }
-      ]
-    })
+    await wrapper.get('[data-testid="passthrough-enabled-toggle"]').setValue(true)
+    await wrapper.get('[data-testid="passthrough-rule-mode-0"]').setValue('map')
+    await wrapper.get('[data-testid="passthrough-rule-key-0"]').setValue('metadata.target')
+    await wrapper.get('[data-testid="passthrough-enabled-toggle"]').setValue(false)
 
     await wrapper.get('form#create-account-form').trigger('submit.prevent')
     await flushPromises()
 
     expect(createAccountMock).not.toHaveBeenCalled()
     expect(showErrorMock).not.toHaveBeenCalledWith('admin.accounts.pleaseEnterApiKey')
+    expect(wrapper.find('[data-testid="passthrough-rules-section"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('admin.accounts.passthroughFields.hiddenRulesError')
+    expect(wrapper.text()).not.toContain('admin.accounts.passthroughFields.errors.sourceKeyRequired')
+
+    await wrapper.get('[data-testid="passthrough-enabled-toggle"]').setValue(true)
+
+    expect(wrapper.find('[data-testid="passthrough-rules-section"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('admin.accounts.passthroughFields.errors.sourceKeyRequired')
+
+    await wrapper.get('[data-testid="passthrough-rule-source-key-0"]').setValue('metadata.source')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
   })
 
   it('does not render passthrough field section for non-apikey account types', async () => {
@@ -404,22 +484,17 @@ describe('CreateAccountModal', () => {
     expect(wrapper.find('[data-testid="passthrough-fields-section"]').exists()).toBe(false)
   })
 
-  it('renders passthrough field section for antigravity upstream create flow', async () => {
+  it('renders passthrough field section for antigravity upstream create flow and submits rules', async () => {
     const wrapper = mountModal()
 
     await switchToAntigravityUpstream(wrapper)
 
     expect(wrapper.find('[data-testid="passthrough-fields-section"]').exists()).toBe(true)
-  })
 
-  it('submits passthrough field rules for antigravity upstream create flow', async () => {
-    const wrapper = mountModal()
-
-    await switchToAntigravityUpstream(wrapper)
     await setPassthroughState(wrapper, {
       enabled: true,
       rules: [
-        { id: 'rule-1', target: 'header', mode: 'inject', key: 'X-Env', value: 'prod' }
+        { id: 'rule-1', target: 'header', mode: 'forward', key: 'X-Antigravity', value: '' }
       ]
     })
 
@@ -432,9 +507,80 @@ describe('CreateAccountModal', () => {
       extra: expect.objectContaining({
         passthrough_fields_enabled: true,
         passthrough_field_rules: [
-          { target: 'header', mode: 'inject', key: 'X-Env', value: 'prod' }
+          { target: 'header', mode: 'forward', key: 'X-Antigravity' }
         ]
       })
     }))
+  })
+
+  it('uses helper default base_url for create apikey fallback and antigravity upstream input', async () => {
+    const wrapper = mountModal()
+
+    await switchToOpenAIApiKey(wrapper)
+
+    const openaiBaseUrlInput = wrapper.get('input[placeholder="https://api.openai.com"]')
+    await openaiBaseUrlInput.setValue('')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledWith(expect.objectContaining({
+      credentials: expect.objectContaining({
+        base_url: getDefaultBaseUrl('openai')
+      })
+    }))
+
+    await wrapper.get('[data-testid="platform-antigravity"]').trigger('click')
+    await wrapper.get('[data-testid="account-type-antigravity-upstream"]').trigger('click')
+
+    const upstreamBaseUrlInput = wrapper.get(`input[placeholder="${getDefaultBaseUrl('antigravity')}"]`)
+    expect((upstreamBaseUrlInput.element as HTMLInputElement).value).toBe(getDefaultBaseUrl('antigravity'))
+  })
+
+  it('submits antigravity upstream with helper default base_url when cleared', async () => {
+    const wrapper = mountModal()
+
+    await switchToAntigravityUpstream(wrapper)
+    await wrapper.get(`input[placeholder="${getDefaultBaseUrl('antigravity')}"]`).setValue('')
+
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledWith(expect.objectContaining({
+      platform: 'antigravity',
+      type: 'apikey',
+      credentials: expect.objectContaining({
+        base_url: getDefaultBaseUrl('antigravity'),
+        api_key: 'sk-antigravity-test'
+      })
+    }))
+  })
+
+  it('clears hidden upstream credentials after switching away and back', async () => {
+    const wrapper = mountModal()
+
+    await switchToAntigravityUpstream(wrapper)
+    await wrapper.get('input[placeholder="sk-..."]').setValue('sk-hidden-upstream')
+    await wrapper.get('[data-testid="platform-openai"]').trigger('click')
+    await wrapper.get('[data-testid="platform-antigravity"]').trigger('click')
+    await wrapper.get('[data-testid="account-type-antigravity-upstream"]').trigger('click')
+
+    expect((wrapper.get('input[placeholder="sk-..."]').element as HTMLInputElement).value).toBe('')
+  })
+
+  it('keeps passthrough support after switching from supported apikey to antigravity upstream', async () => {
+    const wrapper = mountModal()
+
+    await switchToOpenAIApiKey(wrapper)
+    await setPassthroughState(wrapper, {
+      enabled: true,
+      rules: [
+        { id: 'rule-1', target: 'header', mode: 'forward', key: 'X-Test', value: '' }
+      ]
+    })
+
+    await switchToAntigravityUpstream(wrapper)
+
+    expect(wrapper.find('[data-testid="passthrough-fields-section"]').exists()).toBe(true)
+    expect(showInfoMock).not.toHaveBeenCalledWith(expect.stringContaining('移除透传字段规则配置'))
   })
 })

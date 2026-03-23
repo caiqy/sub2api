@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 const {
   updateAccountMock,
@@ -54,6 +56,7 @@ vi.mock('vue-i18n', async () => {
 })
 
 import EditAccountModal from '../EditAccountModal.vue'
+import { getDefaultBaseUrl } from '../passthroughFieldSupport'
 
 const BaseDialogStub = defineComponent({
   name: 'BaseDialog',
@@ -209,6 +212,23 @@ describe('EditAccountModal', () => {
     expect((wrapper.get('[data-testid="passthrough-rule-value-0"]').element as HTMLInputElement).value).toBe('prod')
   })
 
+  it('rehydrates map passthrough rules with source and target fields from account.extra', async () => {
+    const wrapper = mountModal(buildAccount({
+      extra: {
+        passthrough_fields_enabled: true,
+        passthrough_field_rules: [
+          { target: 'body', mode: 'map', key: 'metadata.target', source_key: 'metadata.source' }
+        ]
+      }
+    }))
+
+    expect((wrapper.get('[data-testid="passthrough-enabled-toggle"]').element as HTMLInputElement).checked).toBe(true)
+    expect((wrapper.get('[data-testid="passthrough-rule-target-0"]').element as HTMLSelectElement).value).toBe('body')
+    expect((wrapper.get('[data-testid="passthrough-rule-mode-0"]').element as HTMLSelectElement).value).toBe('map')
+    expect((wrapper.get('[data-testid="passthrough-rule-key-0"]').element as HTMLInputElement).value).toBe('metadata.target')
+    expect((wrapper.get('[data-testid="passthrough-rule-source-key-0"]').element as HTMLInputElement).value).toBe('metadata.source')
+  })
+
   it('blocks submit when header keys differ only by case', async () => {
     const wrapper = mountModal(buildAccount())
 
@@ -225,6 +245,34 @@ describe('EditAccountModal', () => {
     await flushPromises()
 
     expect(updateAccountMock).not.toHaveBeenCalled()
+  })
+
+  it('blocks submit with hidden invalid rules and shows only toggle error until reopened', async () => {
+    const wrapper = mountModal(buildAccount())
+
+    await wrapper.get('[data-testid="passthrough-enabled-toggle"]').setValue(true)
+    await wrapper.get('[data-testid="passthrough-rule-mode-0"]').setValue('map')
+    await wrapper.get('[data-testid="passthrough-rule-key-0"]').setValue('metadata.target')
+    await wrapper.get('[data-testid="passthrough-enabled-toggle"]').setValue(false)
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(updateAccountMock).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="passthrough-rules-section"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('admin.accounts.passthroughFields.hiddenRulesError')
+    expect(wrapper.text()).not.toContain('admin.accounts.passthroughFields.errors.sourceKeyRequired')
+
+    await wrapper.get('[data-testid="passthrough-enabled-toggle"]').setValue(true)
+
+    expect(wrapper.find('[data-testid="passthrough-rules-section"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('admin.accounts.passthroughFields.errors.sourceKeyRequired')
+
+    await wrapper.get('[data-testid="passthrough-rule-source-key-0"]').setValue('metadata.source')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
   })
 
   it('submits full passthrough extra for apikey accounts', async () => {
@@ -252,6 +300,32 @@ describe('EditAccountModal', () => {
       passthrough_fields_enabled: true,
       passthrough_field_rules: [
         { target: 'header', mode: 'inject', key: 'X-Env', value: 'prod' }
+      ]
+    }))
+  })
+
+  it('submits map passthrough rules with source_key for edit payload', async () => {
+    const wrapper = mountModal(buildAccount())
+
+    await wrapper.get('[data-testid="passthrough-enabled-toggle"]').setValue(true)
+    await wrapper.get('[data-testid="passthrough-rule-target-0"]').setValue('body')
+    await wrapper.get('[data-testid="passthrough-rule-mode-0"]').setValue('map')
+    await wrapper.get('[data-testid="passthrough-rule-key-0"]').setValue('metadata.target')
+    await wrapper.get('[data-testid="passthrough-rule-source-key-0"]').setValue('metadata.source')
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toEqual(expect.objectContaining({
+      passthrough_fields_enabled: true,
+      passthrough_field_rules: [
+        {
+          target: 'body',
+          mode: 'map',
+          key: 'metadata.target',
+          source_key: 'metadata.source'
+        }
       ]
     }))
   })
@@ -327,6 +401,119 @@ describe('EditAccountModal', () => {
     expect(wrapper.find('[data-testid="passthrough-fields-section"]').exists()).toBe(false)
   })
 
+  it('renders passthrough section for antigravity apikey edit accounts', () => {
+    const wrapper = mountModal(buildAccount({
+      platform: 'antigravity',
+      type: 'apikey',
+      credentials: {
+        api_key: 'sk-antigravity',
+        base_url: 'https://cloudcode-pa.googleapis.com'
+      },
+      extra: {
+        passthrough_fields_enabled: true,
+        passthrough_field_rules: [
+          { target: 'header', mode: 'forward', key: 'X-Test' }
+        ]
+      }
+    }))
+
+    expect(wrapper.find('[data-testid="passthrough-fields-section"]').exists()).toBe(true)
+  })
+
+  it('submits passthrough extra for antigravity apikey edit accounts', async () => {
+    const wrapper = mountModal(buildAccount({
+      platform: 'antigravity',
+      type: 'apikey',
+      credentials: {
+        api_key: 'sk-antigravity',
+        base_url: 'https://cloudcode-pa.googleapis.com'
+      },
+      extra: {
+        passthrough_fields_enabled: true,
+        passthrough_field_rules: [
+          { target: 'header', mode: 'forward', key: 'X-Test' }
+        ],
+        mixed_scheduling: true
+      }
+    }))
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toEqual(expect.objectContaining({
+      passthrough_fields_enabled: true,
+      passthrough_field_rules: [
+        { target: 'header', mode: 'forward', key: 'X-Test' }
+      ],
+      mixed_scheduling: true
+    }))
+  })
+
+  it('uses antigravity default base_url when cleared before submit', async () => {
+    const wrapper = mountModal(buildAccount({
+      platform: 'antigravity',
+      type: 'apikey',
+      credentials: {
+        api_key: 'sk-antigravity',
+        base_url: 'https://cloudcode-pa.googleapis.com'
+      }
+    }))
+
+    await wrapper.get('input[placeholder="https://cloudcode-pa.googleapis.com"]').setValue('')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.base_url).toBe('https://cloudcode-pa.googleapis.com')
+  })
+
+  it('initial anthropic base_url state is sourced from helper', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/components/account/EditAccountModal.vue'), 'utf8')
+
+    expect(source).toContain("const editBaseUrl = ref(getDefaultBaseUrl('anthropic'))")
+  })
+
+  it('uses antigravity default base_url on open-and-save when history base_url is missing', async () => {
+    const wrapper = mountModal(buildAccount({
+      platform: 'antigravity',
+      type: 'apikey',
+      credentials: {
+        api_key: 'sk-antigravity',
+        base_url: ''
+      }
+    }))
+
+    const antigravityBaseUrlInput = wrapper.get(`input[placeholder="${getDefaultBaseUrl('antigravity')}"]`)
+    expect((antigravityBaseUrlInput.element as HTMLInputElement).value).toBe(getDefaultBaseUrl('antigravity'))
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.base_url).toBe('https://cloudcode-pa.googleapis.com')
+  })
+
+  it('keeps legacy upstream branch on antigravity default base_url path', async () => {
+    const wrapper = mountModal(buildAccount({
+      platform: 'antigravity',
+      type: 'upstream',
+      credentials: {
+        api_key: 'sk-antigravity',
+        base_url: ''
+      }
+    }))
+
+    const upstreamBaseUrlInput = wrapper.get(`input[placeholder="${getDefaultBaseUrl('antigravity')}"]`)
+    expect((upstreamBaseUrlInput.element as HTMLInputElement).value).toBe(getDefaultBaseUrl('antigravity'))
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.base_url).toBe(getDefaultBaseUrl('antigravity'))
+  })
+
   it('warns immediately when switched away from apikey with passthrough config', async () => {
     const apikeyAccount = buildAccount({
       extra: {
@@ -357,5 +544,35 @@ describe('EditAccountModal', () => {
       passthrough_fields_enabled: expect.anything(),
       passthrough_field_rules: expect.anything()
     }))
+  })
+
+  it('keeps passthrough support after switching from supported apikey to antigravity apikey', async () => {
+    const apikeyAccount = buildAccount({
+      platform: 'openai',
+      type: 'apikey',
+      extra: {
+        passthrough_fields_enabled: true,
+        passthrough_field_rules: [
+          { target: 'header', mode: 'forward', key: 'X-Test' }
+        ]
+      }
+    })
+    const wrapper = mountModal(apikeyAccount)
+
+    await wrapper.setProps({
+      account: buildAccount({
+        id: apikeyAccount.id,
+        platform: 'antigravity',
+        type: 'apikey',
+        credentials: {
+          api_key: 'sk-antigravity',
+          base_url: 'https://cloudcode-pa.googleapis.com'
+        },
+        extra: apikeyAccount.extra
+      })
+    })
+
+    expect(wrapper.find('[data-testid="passthrough-fields-section"]').exists()).toBe(true)
+    expect(showInfoMock).not.toHaveBeenCalledWith(expect.stringContaining('移除透传字段规则配置'))
   })
 })

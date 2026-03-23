@@ -435,6 +435,40 @@ func TestSoraGatewayService_Forward_PassthroughFieldsUsesContextAwarePath(t *tes
 	require.Equal(t, "yes", httpUpstream.req.Header.Get("X-Context-Seen"))
 }
 
+func TestPassthroughFieldsV2SoraForward_HeaderMapDoesNotChainAcrossRules(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/sora/v1/chat/completions", strings.NewReader(`{"model":"sora2-landscape-10s","prompt":"cat"}`))
+	c.Request.Header.Set("X-Source-Trace", "trace-123")
+
+	httpUpstream := &stubHTTPUpstreamForSoraPassthrough{}
+	svc := NewSoraGatewayService(nil, nil, httpUpstream, &config.Config{})
+	account := &Account{
+		ID:       2,
+		Platform: PlatformSora,
+		Type:     AccountTypeAPIKey,
+		Status:   StatusActive,
+		Credentials: map[string]any{
+			"api_key":  "test-key",
+			"base_url": "https://example.com",
+		},
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "header", Mode: "map", Key: "X-First-Trace", SourceKey: "X-Source-Trace"},
+				{Target: "header", Mode: "map", Key: "X-Second-Trace", SourceKey: "X-First-Trace"},
+			},
+		},
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"sora2-landscape-10s","prompt":"cat"}`), false)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "trace-123", httpUpstream.req.Header.Get("X-First-Trace"))
+	require.Empty(t, httpUpstream.req.Header.Get("X-Second-Trace"))
+}
+
 func TestSoraGatewayService_PollVideoTaskFailed(t *testing.T) {
 	client := &stubSoraClientForPoll{
 		videoStatus: &SoraVideoTaskStatus{

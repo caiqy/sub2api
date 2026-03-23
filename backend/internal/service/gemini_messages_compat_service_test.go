@@ -819,3 +819,63 @@ func TestGeminiMessagesCompatService_Forward_PreservesAccountAPIKeyOverPassthrou
 	require.Equal(t, "gemini-upstream-key", upstream.lastReq.Header.Get("X-Goog-Api-Key"))
 	require.Equal(t, "prod", upstream.lastReq.Header.Get("X-Env"))
 }
+
+func TestPassthroughFieldsV2GeminiForward_BodyMapSkipsExistingTransformedField(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	claudeBody := []byte(`{
+		"model":"gemini-2.5-flash",
+		"max_tokens":16,
+		"metadata":{"alt_tokens":99},
+		"messages":[{"role":"user","content":[{"type":"text","text":"hello gemini"}]}]
+	}`)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(string(claudeBody)))
+	c.Request.Header.Set("X-Trace-Id", "trace-123")
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}`)),
+		},
+	}
+
+	svc := &GeminiMessagesCompatService{
+		cfg: &config.Config{
+			Security: config.SecurityConfig{
+				URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+			},
+		},
+		httpUpstream: upstream,
+	}
+
+	account := &Account{
+		ID:          305,
+		Name:        "gemini-apikey-v2-map",
+		Platform:    PlatformGemini,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "gemini-upstream-key",
+			"base_url": "https://generativelanguage.googleapis.com",
+		},
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "header", Mode: "map", Key: "X-Mapped-Trace", SourceKey: "X-Trace-Id"},
+				{Target: "body", Mode: "map", Key: "generationConfig.maxOutputTokens", SourceKey: "metadata.alt_tokens"},
+			},
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, claudeBody)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "trace-123", upstream.lastReq.Header.Get("X-Mapped-Trace"))
+	require.Equal(t, "16", gjson.GetBytes(upstream.lastBody, "generationConfig.maxOutputTokens").String())
+}
