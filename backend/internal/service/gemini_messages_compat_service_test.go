@@ -879,3 +879,177 @@ func TestPassthroughFieldsV2GeminiForward_BodyMapSkipsExistingTransformedField(t
 	require.Equal(t, "trace-123", upstream.lastReq.Header.Get("X-Mapped-Trace"))
 	require.Equal(t, "16", gjson.GetBytes(upstream.lastBody, "generationConfig.maxOutputTokens").String())
 }
+
+func TestGeminiMessagesCompatService_Forward_APIKeyStoresFinalOpsUpstreamRequestBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	claudeBody := []byte(`{
+		"model":"gemini-2.5-flash",
+		"max_tokens":16,
+		"messages":[{"role":"user","content":[{"type":"text","text":"hello gemini"}]}]
+	}`)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(string(claudeBody)))
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}`)),
+		},
+	}
+
+	svc := &GeminiMessagesCompatService{
+		cfg: &config.Config{
+			Security: config.SecurityConfig{
+				URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+			},
+		},
+		httpUpstream: upstream,
+	}
+
+	account := &Account{
+		ID:          401,
+		Name:        "gemini-apikey-ops-upstream-body",
+		Platform:    PlatformGemini,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "gemini-upstream-key",
+			"base_url": "https://generativelanguage.googleapis.com",
+		},
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "body", Mode: "inject", Key: "generationConfig.candidateCount", Value: "1"},
+			},
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, claudeBody)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	rawBody, ok := c.Get(OpsUpstreamRequestBodyKey)
+	require.True(t, ok)
+	opsBody := string(rawBody.([]byte))
+	require.JSONEq(t, string(upstream.lastBody), opsBody)
+	require.Equal(t, "1", gjson.Get(opsBody, "generationConfig.candidateCount").String())
+}
+
+func TestGeminiMessagesCompatService_Forward_OAuthProjectStoresWrappedOpsUpstreamRequestBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	claudeBody := []byte(`{
+		"model":"gemini-2.5-flash",
+		"max_tokens":16,
+		"messages":[{"role":"user","content":[{"type":"text","text":"hello gemini oauth"}]}]
+	}`)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(string(claudeBody)))
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}`)),
+		},
+	}
+
+	svc := &GeminiMessagesCompatService{
+		cfg: &config.Config{
+			Security: config.SecurityConfig{
+				URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+			},
+		},
+		tokenProvider: &GeminiTokenProvider{},
+		httpUpstream:  upstream,
+	}
+
+	account := &Account{
+		ID:          402,
+		Name:        "gemini-oauth-project-ops-upstream-body",
+		Platform:    PlatformGemini,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token": "oauth-token",
+			"project_id":   "project-123",
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, claudeBody)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	rawBody, ok := c.Get(OpsUpstreamRequestBodyKey)
+	require.True(t, ok)
+	opsBody := string(rawBody.([]byte))
+	require.JSONEq(t, string(upstream.lastBody), opsBody)
+	require.Equal(t, "project-123", gjson.Get(opsBody, "project").String())
+	require.True(t, gjson.Get(opsBody, "request").Exists())
+}
+
+func TestGeminiMessagesCompatService_ForwardNative_OAuthProjectStoresWrappedOpsUpstreamRequestBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	geminiBody := []byte(`{
+		"contents":[{"role":"user","parts":[{"text":"hello native oauth"}]}],
+		"generationConfig":{"maxOutputTokens":16}
+	}`)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash:generateContent", strings.NewReader(string(geminiBody)))
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}`)),
+		},
+	}
+
+	svc := &GeminiMessagesCompatService{
+		cfg: &config.Config{
+			Security: config.SecurityConfig{
+				URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+			},
+		},
+		tokenProvider: &GeminiTokenProvider{},
+		httpUpstream:  upstream,
+	}
+
+	account := &Account{
+		ID:          403,
+		Name:        "gemini-native-oauth-project-ops-upstream-body",
+		Platform:    PlatformGemini,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token": "oauth-token",
+			"project_id":   "project-456",
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.ForwardNative(context.Background(), c, account, "gemini-2.5-flash", "generateContent", false, geminiBody)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	rawBody, ok := c.Get(OpsUpstreamRequestBodyKey)
+	require.True(t, ok)
+	opsBody := string(rawBody.([]byte))
+	require.JSONEq(t, string(upstream.lastBody), opsBody)
+	require.Equal(t, "project-456", gjson.Get(opsBody, "project").String())
+	require.True(t, gjson.Get(opsBody, "request").Exists())
+}

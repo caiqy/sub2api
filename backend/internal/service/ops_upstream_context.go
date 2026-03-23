@@ -2,6 +2,8 @@ package service
 
 import (
 	"encoding/json"
+	"io"
+	"net/http"
 	"strings"
 	"time"
 
@@ -44,6 +46,22 @@ func setOpsUpstreamRequestBody(c *gin.Context, body []byte) {
 	}
 	// 热路径避免 string(body) 额外分配，按需在落库前再转换。
 	c.Set(OpsUpstreamRequestBodyKey, body)
+}
+
+func setOpsUpstreamRequestBodyFromRequest(c *gin.Context, req *http.Request) {
+	if c == nil || req == nil || req.GetBody == nil {
+		return
+	}
+	clone, err := req.GetBody()
+	if err != nil || clone == nil {
+		return
+	}
+	defer func() { _ = clone.Close() }()
+	body, err := io.ReadAll(clone)
+	if err != nil {
+		return
+	}
+	setOpsUpstreamRequestBody(c, body)
 }
 
 func SetOpsLatencyMs(c *gin.Context, key string, value int64) {

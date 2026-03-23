@@ -1071,6 +1071,112 @@ func TestOpenAIGatewayHandler_RetryPathStoresLastOutboundRequestOnly(t *testing.
 	require.Contains(t, usageRepo.lastLog.DetailSnapshot.UpstreamRequestBody, `"type":"input_text"`)
 }
 
+func TestOpenAIGatewayHandler_UsageDetailStoresInjectedUpstreamRequestBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cfg := &config.Config{
+		RunMode: config.RunModeSimple,
+		Default: config.DefaultConfig{RateMultiplier: 1},
+		Gateway: config.GatewayConfig{
+			Scheduling: config.GatewaySchedulingConfig{LoadBatchEnabled: false},
+		},
+		Concurrency: config.ConcurrencyConfig{PingInterval: 0},
+	}
+
+	groupID := int64(1)
+	group := &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{
+		ID:          12,
+		Name:        "openai-passthrough-detail-account",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeAPIKey,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    1,
+		Credentials: map[string]any{"api_key": "sk-test"},
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []service.PassthroughFieldRule{
+				{Target: "body", Mode: "inject", Key: "service_tier", Value: "default"},
+			},
+		},
+	}
+	usageRepo := &openAIChatCompletionsUsageLogRepoStub{}
+	httpUpstream := &openAIRetryTrackingHTTPUpstreamStub{
+		responses: []*http.Response{{
+			StatusCode: http.StatusOK,
+			Header: http.Header{
+				"Content-Type": []string{"application/json"},
+				"X-Request-Id": []string{"req_usage_detail_1"},
+			},
+			Body: io.NopCloser(strings.NewReader(`{"id":"resp_detail","object":"response","status":"completed","model":"gpt-4o","service_tier":"default","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hello"}]}],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}`)),
+		}},
+	}
+	accountRepo := &openAIChatCompletionsAccountRepoStub{account: account}
+	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
+	deferredService := service.NewDeferredService(accountRepo, nil, 0)
+	billingService := service.NewBillingService(cfg, nil)
+	t.Cleanup(func() {
+		billingCacheService.Stop()
+	})
+
+	gatewayService := service.NewOpenAIGatewayService(
+		accountRepo,
+		usageRepo,
+		nil,
+		nil,
+		nil,
+		nil,
+		openAIChatCompletionsGatewayCacheStub{},
+		cfg,
+		nil,
+		concurrencyService,
+		billingService,
+		nil,
+		billingCacheService,
+		httpUpstream,
+		deferredService,
+		nil,
+	)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, cfg)
+
+	apiKey := &service.APIKey{
+		ID:      101,
+		UserID:  202,
+		Status:  service.StatusActive,
+		GroupID: &groupID,
+		User:    &service.User{ID: 202, Status: service.StatusActive, Concurrency: 1},
+		Group:   group,
+	}
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.UserID, Concurrency: apiKey.User.Concurrency})
+		c.Next()
+	})
+	router.Use(middleware.UsageDetailCapture())
+	router.POST("/v1/responses", h.Responses)
+
+	reqBody := `{"model":"gpt-4o","stream":false,"input":"hello","service_tier":"auto"}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Len(t, httpUpstream.requests, 1)
+	upstreamBody, err := io.ReadAll(httpUpstream.requests[0].Body)
+	require.NoError(t, err)
+	require.Equal(t, "default", gjson.GetBytes(upstreamBody, "service_tier").String())
+	require.NotNil(t, usageRepo.lastLog)
+	require.NotNil(t, usageRepo.lastLog.DetailSnapshot)
+	require.Equal(t, "auto", gjson.Get(usageRepo.lastLog.DetailSnapshot.RequestBody, "service_tier").String())
+	require.Equal(t, "default", gjson.Get(usageRepo.lastLog.DetailSnapshot.UpstreamRequestBody, "service_tier").String())
+}
+
 type openAIChatCompletionsAccountRepoStub struct {
 	service.AccountRepository
 

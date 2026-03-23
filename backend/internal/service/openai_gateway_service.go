@@ -2178,7 +2178,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 		// Send request
 		upstreamStart := time.Now()
-		SetUsageUpstreamRequest(c, upstreamReq, string(body))
+		setOpsUpstreamRequestBodyFromRequest(c, upstreamReq)
+		SetUsageUpstreamRequest(c, upstreamReq, "")
 		resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		if err != nil {
@@ -2407,13 +2408,13 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		proxyURL = account.Proxy.URL()
 	}
 
-	setOpsUpstreamRequestBody(c, body)
+	setOpsUpstreamRequestBodyFromRequest(c, upstreamReq)
 	if c != nil {
 		c.Set("openai_passthrough", true)
 	}
 
 	upstreamStart := time.Now()
-	SetUsageUpstreamRequest(c, upstreamReq, string(body))
+	SetUsageUpstreamRequest(c, upstreamReq, "")
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {

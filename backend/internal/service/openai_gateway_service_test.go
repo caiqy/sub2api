@@ -1605,6 +1605,62 @@ func TestPassthroughFieldsV2OpenAIForward_DisabledLeavesConfiguredRulesInactive(
 	require.False(t, gjson.GetBytes(upstream.lastBody, "metadata.user_id").Exists())
 }
 
+func TestPassthroughFieldsV2OpenAIForward_StoresFinalOpsUpstreamRequestBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	body := []byte(`{"model":"gpt-5","input":"hello","service_tier":"auto"}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+
+	upstream := &openAIHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"resp_ops_1","object":"response","model":"gpt-5","service_tier":"default","usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`)),
+		},
+	}
+
+	svc := &OpenAIGatewayService{
+		cfg: &config.Config{
+			Security: config.SecurityConfig{
+				URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+			},
+		},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:          403,
+		Name:        "openai-apikey-v2-ops-body",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "upstream-openai-key",
+			"base_url": "https://example.com/v1",
+		},
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "body", Mode: "inject", Key: "service_tier", Value: "default"},
+			},
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	rawBody, ok := c.Get(OpsUpstreamRequestBodyKey)
+	require.True(t, ok)
+	opsBody, ok := rawBody.([]byte)
+	require.True(t, ok)
+	require.JSONEq(t, string(upstream.lastBody), string(opsBody))
+	require.Equal(t, "default", gjson.GetBytes(opsBody, "service_tier").String())
+}
+
 func TestPassthroughFieldsV2OpenAIForward_BodyPathConflictReturnsError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
