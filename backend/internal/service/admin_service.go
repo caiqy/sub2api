@@ -1800,12 +1800,16 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		return nil, errors.New("load_factor must be <= 10000")
 	}
 
-	// Prepare bulk updates for columns and JSONB fields.
+	// Passthrough config must go through single-account update to ensure per-account
+	// validation runs. Reject bulk updates that include these keys instead of
+	// silently dropping them.
+	if input.Extra != nil && hasPassthroughConfigKeys(input.Extra) {
+		return nil, errors.New("bulk update does not support passthrough config; use single-account update instead")
+	}
+
 	var sanitizedExtra map[string]any
 	if input.Extra != nil {
 		sanitizedExtra = clonePassthroughExtra(input.Extra)
-		delete(sanitizedExtra, accountPassthroughEnabledKey)
-		delete(sanitizedExtra, accountPassthroughRulesKey)
 		if len(sanitizedExtra) == 0 {
 			sanitizedExtra = nil
 		}

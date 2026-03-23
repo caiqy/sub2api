@@ -550,25 +550,48 @@ func TestPassthroughFieldsV2Admin_UpdateAccount_ClearsPassthroughWhenTypeChanges
 	require.NotContains(t, repo.updated.Extra, "passthrough_field_rules")
 }
 
-func TestPassthroughFieldsV2Admin_BulkUpdateAccounts_StripsPassthroughExtraKeys(t *testing.T) {
-	repo := &passthroughAdminAccountRepo{}
-	service := &adminServiceImpl{accountRepo: repo, groupRepo: &passthroughAdminGroupRepo{}}
+func TestPassthroughFieldsV2Admin_BulkUpdateAccounts_RejectsPassthroughExtraKeys(t *testing.T) {
+	t.Run("rejects passthrough_fields_enabled", func(t *testing.T) {
+		repo := &passthroughAdminAccountRepo{}
+		service := &adminServiceImpl{accountRepo: repo, groupRepo: &passthroughAdminGroupRepo{}}
 
-	result, err := service.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
-		AccountIDs: []int64{1, 2},
-		Extra: map[string]any{
-			"passthrough_fields_enabled": true,
-			"passthrough_field_rules": []any{
-				map[string]any{"target": "header", "mode": "forward", "key": "X-Test"},
+		_, err := service.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+			AccountIDs: []int64{1, 2},
+			Extra: map[string]any{
+				"passthrough_fields_enabled": true,
+				"other":                      "value",
 			},
-			"mixed_scheduling": true,
-		},
+		})
+
+		require.EqualError(t, err, "bulk update does not support passthrough config; use single-account update instead")
+		require.Nil(t, repo.bulkUpdated)
 	})
 
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	require.NotNil(t, repo.bulkUpdated)
-	require.Equal(t, map[string]any{
-		"mixed_scheduling": true,
-	}, repo.bulkUpdated.Extra)
+	t.Run("rejects passthrough_field_rules", func(t *testing.T) {
+		repo := &passthroughAdminAccountRepo{}
+		service := &adminServiceImpl{accountRepo: repo, groupRepo: &passthroughAdminGroupRepo{}}
+
+		_, err := service.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+			AccountIDs: []int64{1},
+			Extra: map[string]any{
+				"passthrough_field_rules": []any{},
+			},
+		})
+
+		require.EqualError(t, err, "bulk update does not support passthrough config; use single-account update instead")
+		require.Nil(t, repo.bulkUpdated)
+	})
+
+	t.Run("allows other extra keys without passthrough", func(t *testing.T) {
+		repo := &passthroughAdminAccountRepo{}
+		service := &adminServiceImpl{accountRepo: repo, groupRepo: &passthroughAdminGroupRepo{}}
+
+		result, err := service.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+			AccountIDs: []int64{1, 2},
+			Extra:      map[string]any{"mixed_scheduling": true},
+		})
+
+		require.NoError(t, err)
+		require.NotNil(t, result)
+	})
 }
