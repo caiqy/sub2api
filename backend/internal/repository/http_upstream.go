@@ -496,6 +496,20 @@ func (s *httpUpstreamService) removeClientLocked(key string, entry *upstreamClie
 	}
 }
 
+// InvalidateIdleClients 显式清理所有空闲客户端
+// 仅移除没有进行中请求的客户端，活跃客户端保持不变
+func (s *httpUpstreamService) InvalidateIdleClients() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for key, entry := range s.clients {
+		if atomic.LoadInt64(&entry.inFlight) != 0 {
+			continue
+		}
+		s.removeClientLocked(key, entry)
+	}
+}
+
 // evictIdleLocked 淘汰空闲超时的客户端（需持有锁）
 // 遍历所有客户端，移除超过 TTL 且无活跃请求的条目
 //
@@ -637,6 +651,7 @@ func (s *httpUpstreamService) resolvePoolSettings(isolation string, accountConcu
 
 // buildPoolKey 构建连接池配置键
 // 用于检测配置变更，配置变更时需要重建客户端
+// 当前仅编码会影响本次问题修复的动态参数：账户并发与 ResponseHeaderTimeout
 //
 // 参数:
 //   - isolation: 隔离模式
@@ -645,12 +660,14 @@ func (s *httpUpstreamService) resolvePoolSettings(isolation string, accountConcu
 // 返回:
 //   - string: 配置键
 func (s *httpUpstreamService) buildPoolKey(isolation string, accountConcurrency int) string {
+	settings := s.resolvePoolSettings(isolation, accountConcurrency)
+	responseHeaderTimeout := settings.responseHeaderTimeout.Nanoseconds()
 	if isolation == config.ConnectionPoolIsolationAccount || isolation == config.ConnectionPoolIsolationAccountProxy {
 		if accountConcurrency > 0 {
-			return fmt.Sprintf("account:%d", accountConcurrency)
+			return fmt.Sprintf("account:%d:rht:%d", accountConcurrency, responseHeaderTimeout)
 		}
 	}
-	return "default"
+	return fmt.Sprintf("default:rht:%d", responseHeaderTimeout)
 }
 
 // buildCacheKey 构建客户端缓存键

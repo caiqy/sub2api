@@ -21,6 +21,9 @@ func (s *settingUpdateRepoStub) Get(ctx context.Context, key string) (*Setting, 
 }
 
 func (s *settingUpdateRepoStub) GetValue(ctx context.Context, key string) (string, error) {
+	if key == SettingKeyGatewayRuntimeSettings {
+		return "", ErrSettingNotFound
+	}
 	panic("unexpected GetValue call")
 }
 
