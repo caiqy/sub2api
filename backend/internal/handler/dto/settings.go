@@ -164,6 +164,12 @@ type OverloadCooldownSettings struct {
 	CooldownMinutes int  `json:"cooldown_minutes"`
 }
 
+// GatewayRuntimeSettings 网关运行参数 DTO
+type GatewayRuntimeSettings struct {
+	ResponseHeaderTimeout     int `json:"response_header_timeout"`
+	StreamDataIntervalTimeout int `json:"stream_data_interval_timeout"`
+}
+
 // StreamTimeoutSettings 流超时处理配置 DTO
 type StreamTimeoutSettings struct {
 	Enabled                bool   `json:"enabled"`

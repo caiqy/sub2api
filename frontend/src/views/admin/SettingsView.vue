@@ -171,6 +171,123 @@
         <!-- Tab: Gateway -->
         <div v-show="activeTab === 'gateway'" class="space-y-6">
 
+        <!-- Gateway Runtime Settings -->
+        <div class="card">
+          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              {{ t('admin.settings.gatewayRuntime.title') }}
+            </h2>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              {{ t('admin.settings.gatewayRuntime.description') }}
+            </p>
+          </div>
+          <div class="space-y-5 p-6">
+            <div v-if="gatewayRuntimeLoading" class="flex items-center gap-2 text-gray-500">
+              <div class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"></div>
+              {{ t('common.loading') }}
+            </div>
+
+            <template v-else>
+              <div
+                v-if="gatewayRuntimeLoadFailed"
+                class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300"
+              >
+                {{ t('admin.settings.gatewayRuntime.loadFailedInline') }}
+              </div>
+
+              <div class="space-y-2">
+                <div class="flex flex-wrap items-center gap-2">
+                  <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ t('admin.settings.gatewayRuntime.responseHeaderTimeout') }}
+                  </label>
+                  <code
+                    class="select-all break-all rounded bg-gray-50 px-2 py-1 font-mono text-xs text-gray-600 dark:bg-dark-800 dark:text-gray-300"
+                  >
+                    gateway.response_header_timeout
+                  </code>
+                </div>
+                <input
+                  v-model.number="gatewayRuntimeForm.response_header_timeout"
+                  type="number"
+                  min="1"
+                  class="input w-40"
+                />
+                <p class="text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.gatewayRuntime.responseHeaderTimeoutHint') }}
+                </p>
+                <div
+                  class="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-900/20"
+                >
+                  <div class="flex items-start">
+                    <Icon
+                      name="exclamationTriangle"
+                      size="md"
+                      class="mt-0.5 flex-shrink-0 text-amber-500"
+                    />
+                    <p class="ml-3 text-sm text-amber-700 dark:text-amber-300">
+                      {{ t('admin.settings.gatewayRuntime.responseHeaderTimeoutWarning') }}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="space-y-2 border-t border-gray-100 pt-4 dark:border-dark-700">
+                <div class="flex flex-wrap items-center gap-2">
+                  <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ t('admin.settings.gatewayRuntime.streamDataIntervalTimeout') }}
+                  </label>
+                  <code
+                    class="select-all break-all rounded bg-gray-50 px-2 py-1 font-mono text-xs text-gray-600 dark:bg-dark-800 dark:text-gray-300"
+                  >
+                    gateway.stream_data_interval_timeout
+                  </code>
+                </div>
+                <input
+                  v-model.number="gatewayRuntimeForm.stream_data_interval_timeout"
+                  type="number"
+                  min="0"
+                  max="300"
+                  class="input w-40"
+                />
+                <p class="text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.gatewayRuntime.streamDataIntervalTimeoutHint') }}
+                </p>
+              </div>
+
+              <div class="flex justify-end border-t border-gray-100 pt-4 dark:border-dark-700">
+                <button
+                  type="button"
+                  @click="saveGatewayRuntimeSettings"
+                  :disabled="gatewayRuntimeSaving || gatewayRuntimeLoadFailed"
+                  class="btn btn-primary btn-sm"
+                >
+                  <svg
+                    v-if="gatewayRuntimeSaving"
+                    class="mr-1 h-4 w-4 animate-spin"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      class="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      stroke-width="4"
+                    ></circle>
+                    <path
+                      class="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    ></path>
+                  </svg>
+                  {{ gatewayRuntimeSaving ? t('common.saving') : t('common.save') }}
+                </button>
+              </div>
+            </template>
+          </div>
+        </div>
+
         <!-- Overload Cooldown (529) Settings -->
         <div class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
@@ -1809,7 +1926,8 @@ import { adminAPI } from '@/api'
 import type {
   SystemSettings,
   UpdateSettingsRequest,
-  DefaultSubscriptionSetting
+  DefaultSubscriptionSetting,
+  GatewayRuntimeSettings
 } from '@/api/admin/settings'
 import type { AdminGroup } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -1863,6 +1981,15 @@ const adminApiKeyMasked = ref('')
 const adminApiKeyOperating = ref(false)
 const newAdminApiKey = ref('')
 const subscriptionGroups = ref<AdminGroup[]>([])
+
+// Gateway Runtime 状态
+const gatewayRuntimeLoading = ref(true)
+const gatewayRuntimeSaving = ref(false)
+const gatewayRuntimeLoadFailed = ref(false)
+const gatewayRuntimeForm = reactive<GatewayRuntimeSettings>({
+  response_header_timeout: 600,
+  stream_data_interval_timeout: 180
+})
 
 // Overload Cooldown (529) 状态
 const overloadCooldownLoading = ref(true)
@@ -2383,6 +2510,45 @@ function copyNewKey() {
     })
 }
 
+// Gateway Runtime 方法
+async function loadGatewayRuntimeSettings() {
+  gatewayRuntimeLoading.value = true
+  gatewayRuntimeLoadFailed.value = false
+  try {
+    const settings = await adminAPI.settings.getGatewayRuntimeSettings()
+    Object.assign(gatewayRuntimeForm, settings)
+  } catch (error: any) {
+    gatewayRuntimeLoadFailed.value = true
+    appStore.showError(
+      t('admin.settings.gatewayRuntime.loadFailed') + ': ' + (error.message || t('common.unknownError'))
+    )
+  } finally {
+    gatewayRuntimeLoading.value = false
+  }
+}
+
+async function saveGatewayRuntimeSettings() {
+  if (gatewayRuntimeLoadFailed.value) {
+    return
+  }
+
+  gatewayRuntimeSaving.value = true
+  try {
+    const updated = await adminAPI.settings.updateGatewayRuntimeSettings({
+      response_header_timeout: gatewayRuntimeForm.response_header_timeout,
+      stream_data_interval_timeout: gatewayRuntimeForm.stream_data_interval_timeout
+    })
+    Object.assign(gatewayRuntimeForm, updated)
+    appStore.showSuccess(t('admin.settings.gatewayRuntime.saved'))
+  } catch (error: any) {
+    appStore.showError(
+      t('admin.settings.gatewayRuntime.saveFailed') + ': ' + (error.message || t('common.unknownError'))
+    )
+  } finally {
+    gatewayRuntimeSaving.value = false
+  }
+}
+
 // Overload Cooldown 方法
 async function loadOverloadCooldownSettings() {
   overloadCooldownLoading.value = true
@@ -2536,6 +2702,7 @@ onMounted(() => {
   loadSettings()
   loadSubscriptionGroups()
   loadAdminApiKey()
+  loadGatewayRuntimeSettings()
   loadOverloadCooldownSettings()
   loadStreamTimeoutSettings()
   loadRectifierSettings()

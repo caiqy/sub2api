@@ -4422,6 +4422,19 @@ export default {
           testFailed: 'Google Drive storage test failed'
         }
       },
+      gatewayRuntime: {
+        title: 'Gateway Runtime Parameters',
+        description: 'Configure runtime timeout parameters for gateway upstream connections. Changes only affect new requests after saving.',
+        loadFailed: 'Failed to load gateway runtime settings',
+        loadFailedInline: 'Gateway runtime settings failed to load. Saving is disabled until data loads successfully.',
+        responseHeaderTimeout: 'Upstream Response Header Timeout (seconds)',
+        responseHeaderTimeoutHint: 'Default: 600 seconds. Maximum wait time for upstream response headers and must be greater than 0.',
+        responseHeaderTimeoutWarning: 'Updating this will clear idle connection pools, and new requests will use the new configuration.',
+        streamDataIntervalTimeout: 'Stream Data Interval Timeout (seconds)',
+        streamDataIntervalTimeoutHint: 'Default: 180 seconds. Set to 0, or any value between 30 and 300 seconds.',
+        saved: 'Gateway runtime settings saved',
+        saveFailed: 'Failed to save gateway runtime settings'
+      },
       overloadCooldown: {
         title: '529 Overload Cooldown',
         description: 'Configure account scheduling pause strategy when upstream returns 529 (overloaded)',

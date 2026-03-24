@@ -37,6 +37,27 @@ func ProvideEmailQueueService(emailService *EmailService) *EmailQueueService {
 	return NewEmailQueueService(emailService, 3)
 }
 
+// ProvideRateLimitCacheInvalidatorFromBillingCache exposes BillingCache as RateLimitCacheInvalidator.
+func ProvideRateLimitCacheInvalidatorFromBillingCache(cache BillingCache) RateLimitCacheInvalidator {
+	return cache
+}
+
+// ProvideAPIKeyService creates APIKeyService with optional cache invalidator injection.
+func ProvideAPIKeyService(
+	apiKeyRepo APIKeyRepository,
+	userRepo UserRepository,
+	groupRepo GroupRepository,
+	userSubRepo UserSubscriptionRepository,
+	userGroupRateRepo UserGroupRateRepository,
+	cache APIKeyCache,
+	cfg *config.Config,
+	billingCache RateLimitCacheInvalidator,
+) *APIKeyService {
+	svc := NewAPIKeyService(apiKeyRepo, userRepo, groupRepo, userSubRepo, userGroupRateRepo, cache, cfg)
+	svc.SetRateLimitCacheInvalidator(billingCache)
+	return svc
+}
+
 // ProvideTokenRefreshService creates and starts TokenRefreshService
 func ProvideTokenRefreshService(
 	accountRepo AccountRepository,
@@ -286,6 +307,13 @@ func ProvideSoraMediaStorage(cfg *config.Config) *SoraMediaStorage {
 	return NewSoraMediaStorage(cfg)
 }
 
+// ProvideSoraS3StorageWithRefresh creates SoraS3Storage and registers refresh callback.
+func ProvideSoraS3StorageWithRefresh(settingService *SettingService) *SoraS3Storage {
+	storage := NewSoraS3Storage(settingService)
+	settingService.SetOnS3UpdateCallback(storage.RefreshClient)
+	return storage
+}
+
 func ProvideSoraSDKClient(
 	cfg *config.Config,
 	httpUpstream HTTPUpstream,
@@ -398,10 +426,13 @@ func ProvideBackupService(
 	return svc
 }
 
-// ProvideSettingService wires SettingService with group reader for default subscription validation.
-func ProvideSettingService(settingRepo SettingRepository, groupRepo GroupRepository, cfg *config.Config) *SettingService {
+// ProvideSettingService wires SettingService with optional collaborators.
+func ProvideSettingService(settingRepo SettingRepository, groupRepo GroupRepository, cfg *config.Config, httpUpstream HTTPUpstream) *SettingService {
 	svc := NewSettingService(settingRepo, cfg)
 	svc.SetDefaultSubscriptionGroupReader(groupRepo)
+	if invalidator, ok := httpUpstream.(interface{ InvalidateIdleClients() }); ok {
+		svc.SetGatewayRuntimeIdleInvalidator(invalidator)
+	}
 	return svc
 }
 
@@ -410,7 +441,8 @@ var ProviderSet = wire.NewSet(
 	// Core services
 	NewAuthService,
 	NewUserService,
-	NewAPIKeyService,
+	ProvideRateLimitCacheInvalidatorFromBillingCache,
+	ProvideAPIKeyService,
 	ProvideAPIKeyAuthCacheInvalidator,
 	NewGroupService,
 	NewAccountService,
@@ -427,8 +459,11 @@ var ProviderSet = wire.NewSet(
 	NewGatewayService,
 	ProvideSoraMediaStorage,
 	ProvideSoraMediaCleanupService,
+	ProvideSoraS3StorageWithRefresh,
 	ProvideSoraSDKClient,
 	wire.Bind(new(SoraClient), new(*SoraSDKClient)),
+	NewSoraQuotaService,
+	NewSoraGenerationService,
 	NewSoraGatewayService,
 	NewOpenAIGatewayService,
 	NewOAuthService,

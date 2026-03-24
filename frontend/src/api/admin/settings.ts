@@ -244,6 +244,28 @@ export async function deleteAdminApiKey(): Promise<{ message: string }> {
   return data
 }
 
+// ==================== Gateway Runtime Settings ====================
+
+/**
+ * Gateway runtime settings interface
+ */
+export interface GatewayRuntimeSettings {
+  response_header_timeout: number
+  stream_data_interval_timeout: number
+}
+
+export async function getGatewayRuntimeSettings(): Promise<GatewayRuntimeSettings> {
+  const { data } = await apiClient.get<GatewayRuntimeSettings>('/admin/settings/gateway-runtime')
+  return data
+}
+
+export async function updateGatewayRuntimeSettings(
+  settings: GatewayRuntimeSettings
+): Promise<GatewayRuntimeSettings> {
+  const { data } = await apiClient.put<GatewayRuntimeSettings>('/admin/settings/gateway-runtime', settings)
+  return data
+}
+
 // ==================== Overload Cooldown Settings ====================
 
 /**
@@ -528,6 +550,8 @@ export const settingsAPI = {
   getAdminApiKey,
   regenerateAdminApiKey,
   deleteAdminApiKey,
+  getGatewayRuntimeSettings,
+  updateGatewayRuntimeSettings,
   getOverloadCooldownSettings,
   updateOverloadCooldownSettings,
   getStreamTimeoutSettings,

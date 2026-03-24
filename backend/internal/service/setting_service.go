@@ -84,27 +84,109 @@ type DefaultSubscriptionGroupReader interface {
 	GetByID(ctx context.Context, id int64) (*Group, error)
 }
 
+type gatewayRuntimeIdleInvalidator interface {
+	InvalidateIdleClients()
+}
+
 // SettingService 系统设置服务
 type SettingService struct {
-	settingRepo           SettingRepository
-	defaultSubGroupReader DefaultSubscriptionGroupReader
-	cfg                   *config.Config
-	onUpdate              func() // Callback when settings are updated (for cache invalidation)
-	onS3Update            func() // Callback when Sora S3 settings are updated
-	version               string // Application version
+	settingRepo                   SettingRepository
+	defaultSubGroupReader         DefaultSubscriptionGroupReader
+	gatewayRuntimeIdleInvalidator gatewayRuntimeIdleInvalidator
+	cfg                           *config.Config
+	onUpdate                      func() // Callback when settings are updated (for cache invalidation)
+	onS3Update                    func() // Callback when Sora S3 settings are updated
+	version                       string // Application version
 }
 
 // NewSettingService 创建系统设置服务实例
 func NewSettingService(settingRepo SettingRepository, cfg *config.Config) *SettingService {
-	return &SettingService{
+	svc := &SettingService{
 		settingRepo: settingRepo,
 		cfg:         cfg,
 	}
+	svc.loadGatewayRuntimeSettingsFromDB(context.Background())
+	return svc
 }
 
 // SetDefaultSubscriptionGroupReader injects an optional group reader for default subscription validation.
 func (s *SettingService) SetDefaultSubscriptionGroupReader(reader DefaultSubscriptionGroupReader) {
 	s.defaultSubGroupReader = reader
+}
+
+// SetGatewayRuntimeIdleInvalidator injects an optional gateway idle client invalidator.
+func (s *SettingService) SetGatewayRuntimeIdleInvalidator(invalidator gatewayRuntimeIdleInvalidator) {
+	s.gatewayRuntimeIdleInvalidator = invalidator
+}
+
+// GetGatewayRuntimeSettings returns the currently effective gateway runtime settings.
+func (s *SettingService) GetGatewayRuntimeSettings(ctx context.Context) (*GatewayRuntimeSettings, error) {
+	_ = ctx
+	settings := &GatewayRuntimeSettings{}
+	if s == nil || s.cfg == nil {
+		return settings, nil
+	}
+	settings.ResponseHeaderTimeout = s.cfg.Gateway.ResponseHeaderTimeout
+	settings.StreamDataIntervalTimeout = s.cfg.Gateway.StreamDataIntervalTimeout
+	return settings, nil
+}
+
+// SetGatewayRuntimeSettings persists and applies gateway runtime settings.
+func (s *SettingService) SetGatewayRuntimeSettings(ctx context.Context, settings *GatewayRuntimeSettings) error {
+	if settings == nil {
+		return infraerrors.BadRequest("INVALID_GATEWAY_RUNTIME_SETTINGS", "settings cannot be nil")
+	}
+	if settings.ResponseHeaderTimeout <= 0 {
+		return infraerrors.BadRequest("INVALID_GATEWAY_RUNTIME_SETTINGS", "response_header_timeout must be positive")
+	}
+	if settings.StreamDataIntervalTimeout != 0 &&
+		(settings.StreamDataIntervalTimeout < 30 || settings.StreamDataIntervalTimeout > 300) {
+		return infraerrors.BadRequest("INVALID_GATEWAY_RUNTIME_SETTINGS", "stream_data_interval_timeout must be 0 or between 30-300")
+	}
+
+	data, err := json.Marshal(settings)
+	if err != nil {
+		return fmt.Errorf("marshal gateway runtime settings: %w", err)
+	}
+	if err := s.settingRepo.Set(ctx, SettingKeyGatewayRuntimeSettings, string(data)); err != nil {
+		return err
+	}
+
+	oldResponseHeaderTimeout := 0
+	if s != nil && s.cfg != nil {
+		oldResponseHeaderTimeout = s.cfg.Gateway.ResponseHeaderTimeout
+		s.cfg.Gateway.ResponseHeaderTimeout = settings.ResponseHeaderTimeout
+		s.cfg.Gateway.StreamDataIntervalTimeout = settings.StreamDataIntervalTimeout
+	}
+	if settings.ResponseHeaderTimeout != oldResponseHeaderTimeout && s.gatewayRuntimeIdleInvalidator != nil {
+		s.gatewayRuntimeIdleInvalidator.InvalidateIdleClients()
+	}
+
+	return nil
+}
+
+func (s *SettingService) loadGatewayRuntimeSettingsFromDB(ctx context.Context) {
+	if s == nil || s.settingRepo == nil || s.cfg == nil {
+		return
+	}
+
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyGatewayRuntimeSettings)
+	if err != nil || strings.TrimSpace(value) == "" {
+		return
+	}
+
+	var settings GatewayRuntimeSettings
+	if err := json.Unmarshal([]byte(value), &settings); err != nil {
+		return
+	}
+
+	if settings.ResponseHeaderTimeout > 0 {
+		s.cfg.Gateway.ResponseHeaderTimeout = settings.ResponseHeaderTimeout
+	}
+	if settings.StreamDataIntervalTimeout == 0 ||
+		(settings.StreamDataIntervalTimeout >= 30 && settings.StreamDataIntervalTimeout <= 300) {
+		s.cfg.Gateway.StreamDataIntervalTimeout = settings.StreamDataIntervalTimeout
+	}
 }
 
 // GetAllSettings 获取所有系统设置

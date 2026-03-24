@@ -276,6 +276,69 @@ func (s *HTTPUpstreamSuite) TestIdleTTLDoesNotEvictActive() {
 	require.True(s.T(), hasEntry(svc, entry1), "有活跃请求时不应回收")
 }
 
+// TestInvalidateIdleClients_RemovesOnlyIdleEntries 测试显式清理空闲客户端
+// 验证只移除 inFlight == 0 的条目，保留活跃客户端
+func (s *HTTPUpstreamSuite) TestInvalidateIdleClients_RemovesOnlyIdleEntries() {
+	s.cfg.Gateway = config.GatewayConfig{ConnectionPoolIsolation: config.ConnectionPoolIsolationAccountProxy}
+	svc := s.newService()
+	idleEntry := mustGetOrCreateClient(s.T(), svc, "http://proxy-a:8080", 1, 1)
+	busyEntry := mustGetOrCreateClient(s.T(), svc, "http://proxy-b:8080", 2, 1)
+	atomic.StoreInt64(&busyEntry.inFlight, 1)
+
+	callInvalidateIdleClients(s.T(), svc)
+
+	require.False(s.T(), hasEntry(svc, idleEntry), "空闲客户端应被移除")
+	require.True(s.T(), hasEntry(svc, busyEntry), "活跃客户端不应被移除")
+}
+
+// TestInvalidateIdleClients_RecreatesClientWithUpdatedResponseHeaderTimeout 测试清理后重建客户端使用新配置
+// 验证更新 ResponseHeaderTimeout 并清理空闲客户端后，下一次新建 client 使用新的超时值
+func (s *HTTPUpstreamSuite) TestInvalidateIdleClients_RecreatesClientWithUpdatedResponseHeaderTimeout() {
+	s.cfg.Gateway = config.GatewayConfig{ResponseHeaderTimeout: 7}
+	svc := s.newService()
+	entry1 := mustGetOrCreateClient(s.T(), svc, "", 1, 0)
+	transport1, ok := entry1.client.Transport.(*http.Transport)
+	require.True(s.T(), ok, "expected *http.Transport")
+	require.Equal(s.T(), 7*time.Second, transport1.ResponseHeaderTimeout)
+
+	s.cfg.Gateway.ResponseHeaderTimeout = 11
+	callInvalidateIdleClients(s.T(), svc)
+	require.False(s.T(), hasEntry(svc, entry1), "空闲客户端应被清理")
+
+	entry2 := mustGetOrCreateClient(s.T(), svc, "", 1, 0)
+	transport2, ok := entry2.client.Transport.(*http.Transport)
+	require.True(s.T(), ok, "expected *http.Transport")
+	require.NotSame(s.T(), entry1, entry2, "清理后应创建新客户端")
+	require.Equal(s.T(), 11*time.Second, transport2.ResponseHeaderTimeout, "应使用更新后的 ResponseHeaderTimeout")
+}
+
+// TestInvalidateIdleClients_BusyClientWithUpdatedResponseHeaderTimeoutIsNotReused 测试活跃客户端在配置更新后不会被后续请求继续复用
+// 验证更新时处于 busy 状态的客户端不会被 InvalidateIdleClients 移除，但在后续变 idle 后，同 cache key 的新请求会创建带新超时的新客户端
+func (s *HTTPUpstreamSuite) TestInvalidateIdleClients_BusyClientWithUpdatedResponseHeaderTimeoutIsNotReused() {
+	s.cfg.Gateway = config.GatewayConfig{
+		ConnectionPoolIsolation: config.ConnectionPoolIsolationAccount,
+		ResponseHeaderTimeout:   7,
+	}
+	svc := s.newService()
+	entry1 := mustGetOrCreateClient(s.T(), svc, "http://proxy-a:8080", 1, 0)
+	transport1, ok := entry1.client.Transport.(*http.Transport)
+	require.True(s.T(), ok, "expected *http.Transport")
+	require.Equal(s.T(), 7*time.Second, transport1.ResponseHeaderTimeout)
+
+	atomic.StoreInt64(&entry1.inFlight, 1)
+	s.cfg.Gateway.ResponseHeaderTimeout = 11
+	callInvalidateIdleClients(s.T(), svc)
+	require.True(s.T(), hasEntry(svc, entry1), "更新时 busy 的客户端不应被移除")
+
+	atomic.StoreInt64(&entry1.inFlight, 0)
+	entry2 := mustGetOrCreateClient(s.T(), svc, "http://proxy-a:8080", 1, 0)
+	transport2, ok := entry2.client.Transport.(*http.Transport)
+	require.True(s.T(), ok, "expected *http.Transport")
+	require.NotSame(s.T(), entry1, entry2, "配置更新后同 cache key 请求不应继续复用旧客户端")
+	require.Equal(s.T(), 11*time.Second, transport2.ResponseHeaderTimeout, "应使用更新后的 ResponseHeaderTimeout")
+	require.False(s.T(), hasEntry(svc, entry1), "旧客户端应在重建后从缓存移除")
+}
+
 // TestHTTPUpstreamSuite 运行测试套件
 func TestHTTPUpstreamSuite(t *testing.T) {
 	suite.Run(t, new(HTTPUpstreamSuite))
@@ -298,4 +361,16 @@ func hasEntry(svc *httpUpstreamService, target *upstreamClientEntry) bool {
 		}
 	}
 	return false
+}
+
+// callInvalidateIdleClients 调用具体实现上的 InvalidateIdleClients
+// 通过运行时断言确保测试在方法缺失时按预期失败
+func callInvalidateIdleClients(t *testing.T, svc *httpUpstreamService) {
+	t.Helper()
+	type idleInvalidator interface {
+		InvalidateIdleClients()
+	}
+	invalidator, ok := any(svc).(idleInvalidator)
+	require.True(t, ok, "expected *httpUpstreamService to implement InvalidateIdleClients")
+	invalidator.InvalidateIdleClients()
 }

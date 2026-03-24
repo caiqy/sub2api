@@ -1052,6 +1052,57 @@ func (h *SettingHandler) UpdateOverloadCooldownSettings(c *gin.Context) {
 	})
 }
 
+// GetGatewayRuntimeSettings 获取网关运行参数配置
+// GET /api/v1/admin/settings/gateway-runtime
+func (h *SettingHandler) GetGatewayRuntimeSettings(c *gin.Context) {
+	settings, err := h.settingService.GetGatewayRuntimeSettings(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, dto.GatewayRuntimeSettings{
+		ResponseHeaderTimeout:     settings.ResponseHeaderTimeout,
+		StreamDataIntervalTimeout: settings.StreamDataIntervalTimeout,
+	})
+}
+
+// UpdateGatewayRuntimeSettingsRequest 更新网关运行参数配置请求
+type UpdateGatewayRuntimeSettingsRequest struct {
+	ResponseHeaderTimeout     int `json:"response_header_timeout"`
+	StreamDataIntervalTimeout int `json:"stream_data_interval_timeout"`
+}
+
+// UpdateGatewayRuntimeSettings 更新网关运行参数配置
+// PUT /api/v1/admin/settings/gateway-runtime
+func (h *SettingHandler) UpdateGatewayRuntimeSettings(c *gin.Context) {
+	var req UpdateGatewayRuntimeSettingsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	settings := &service.GatewayRuntimeSettings{
+		ResponseHeaderTimeout:     req.ResponseHeaderTimeout,
+		StreamDataIntervalTimeout: req.StreamDataIntervalTimeout,
+	}
+	if err := h.settingService.SetGatewayRuntimeSettings(c.Request.Context(), settings); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	updatedSettings, err := h.settingService.GetGatewayRuntimeSettings(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, dto.GatewayRuntimeSettings{
+		ResponseHeaderTimeout:     updatedSettings.ResponseHeaderTimeout,
+		StreamDataIntervalTimeout: updatedSettings.StreamDataIntervalTimeout,
+	})
+}
+
 // GetStreamTimeoutSettings 获取流超时处理配置
 // GET /api/v1/admin/settings/stream-timeout
 func (h *SettingHandler) GetStreamTimeoutSettings(c *gin.Context) {

@@ -4586,6 +4586,19 @@ export default {
           testFailed: 'Google Drive 存储测试失败'
         }
       },
+      gatewayRuntime: {
+        title: '网关运行参数',
+        description: '配置网关与上游连接的运行时超时参数，保存后仅影响新请求。',
+        loadFailed: '加载网关运行参数失败',
+        loadFailedInline: '网关运行参数加载失败，保存按钮已禁用，请先排查加载问题后再重试。',
+        responseHeaderTimeout: '上游响应头超时（秒）',
+        responseHeaderTimeoutHint: '默认 600 秒。等待上游返回响应头的最长时间，必须大于 0。',
+        responseHeaderTimeoutWarning: '修改后会清理空闲连接池，后续新请求会使用新配置。',
+        streamDataIntervalTimeout: '流数据间隔超时（秒）',
+        streamDataIntervalTimeoutHint: '默认 180 秒。可设为 0，或设置为 30-300 秒。',
+        saved: '网关运行参数保存成功',
+        saveFailed: '保存网关运行参数失败'
+      },
       overloadCooldown: {
         title: '529 过载冷却',
         description: '配置上游返回 529（过载）时的账号调度暂停策略',
