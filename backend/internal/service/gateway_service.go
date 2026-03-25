@@ -24,6 +24,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tokencount"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
@@ -4934,6 +4935,12 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 	clientDisconnected := false
 	sawTerminalEvent := false
 
+	// output_tokens 回退估算：累积 content_block_delta 文本
+	var passthroughOutputTextBuilder strings.Builder
+	defer func() {
+		applyOutputTokenEstimation(usage, passthroughOutputTextBuilder.String())
+	}()
+
 	scanner := bufio.NewScanner(resp.Body)
 	maxLineSize := defaultMaxLineSize
 	if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
@@ -5028,6 +5035,23 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 					firstTokenMs = &ms
 				}
 				s.parseSSEUsagePassthrough(data, usage)
+
+				// 累积 content_block_delta 中的输出文本，用于 output_tokens 回退估算
+				if trimmed != "" && trimmed != "[DONE]" {
+					parsed := gjson.Parse(data)
+					if parsed.Get("type").String() == "content_block_delta" {
+						delta := parsed.Get("delta")
+						if t := delta.Get("text").String(); t != "" {
+							passthroughOutputTextBuilder.WriteString(t)
+						}
+						if pj := delta.Get("partial_json").String(); pj != "" {
+							passthroughOutputTextBuilder.WriteString(pj)
+						}
+						if tk := delta.Get("thinking").String(); tk != "" {
+							passthroughOutputTextBuilder.WriteString(tk)
+						}
+					}
+				}
 			} else {
 				trimmed := strings.TrimSpace(line)
 				if strings.HasPrefix(trimmed, "event:") && anthropicStreamEventIsTerminal(strings.TrimSpace(strings.TrimPrefix(trimmed, "event:")), "") {
@@ -5211,6 +5235,11 @@ func (s *GatewayService) handleNonStreamingResponseAnthropicAPIKeyPassthrough(
 	}
 
 	usage := parseClaudeUsageFromResponseBody(body)
+
+	// output_tokens 回退估算：当上游未报告 output_tokens 时，从 content 提取文本估算
+	if usage != nil && usage.OutputTokens == 0 {
+		applyOutputTokenEstimation(usage, extractContentTextFromResponseBody(body))
+	}
 
 	writeAnthropicPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	contentType := strings.TrimSpace(resp.Header.Get("Content-Type"))
@@ -6607,6 +6636,14 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 	scanBuf := getSSEScannerBuf64K()
 	scanner.Buffer(scanBuf[:0], maxLineSize)
 
+	// ↓ output_tokens 回退估算变量，在流结束时检查
+	// 	 streamOutputTextBuilder 在 processSSEEvent 中累积 content_block_delta 文本
+	// 	 defer 确保无论哪个返回路径都会执行估算
+	var streamOutputTextBuilder strings.Builder
+	defer func() {
+		applyOutputTokenEstimation(usage, streamOutputTextBuilder.String())
+	}()
+
 	type scanEvent struct {
 		line string
 		err  error
@@ -6739,6 +6776,22 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			eventName = eventType
 		}
 		eventChanged := false
+
+		// 累积 content_block_delta 中的输出文本，用于 output_tokens 回退估算
+		if eventType == "content_block_delta" {
+			if delta, ok := event["delta"].(map[string]any); ok {
+				if t, ok := delta["text"].(string); ok && t != "" {
+					streamOutputTextBuilder.WriteString(t)
+				}
+				if pj, ok := delta["partial_json"].(string); ok && pj != "" {
+					streamOutputTextBuilder.WriteString(pj)
+				}
+				// thinking_delta 也算输出 token
+				if tk, ok := delta["thinking"].(string); ok && tk != "" {
+					streamOutputTextBuilder.WriteString(tk)
+				}
+			}
+		}
 
 		// 兼容 Kimi cached_tokens → cache_read_input_tokens
 		if eventType == "message_start" {
@@ -6919,6 +6972,47 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 		}
 	}
 
+}
+
+// applyOutputTokenEstimation 当上游未报告 output_tokens（为 0）但存在实际输出内容时，
+// 使用 tiktoken tokenizer 对累积文本做回退估算，确保 usage log 不会记录 0。
+func applyOutputTokenEstimation(usage *ClaudeUsage, accumulatedText string) {
+	if usage == nil || usage.OutputTokens > 0 || accumulatedText == "" {
+		return
+	}
+	estimated := tokencount.CountTokens(accumulatedText)
+	if estimated > 0 {
+		usage.OutputTokens = estimated
+		logger.LegacyPrintf("service.gateway", "output_tokens fallback estimation applied: estimated=%d text_len=%d", estimated, len(accumulatedText))
+	}
+}
+
+// extractContentTextFromResponseBody 从非流式 Anthropic 响应体中提取 content 数组内的文本，
+// 用于 output_tokens 回退估算。覆盖 text、tool_use（input JSON）和 thinking 三种 block 类型。
+func extractContentTextFromResponseBody(body []byte) string {
+	contentArr := gjson.GetBytes(body, "content")
+	if !contentArr.IsArray() {
+		return ""
+	}
+	var b strings.Builder
+	contentArr.ForEach(func(_, item gjson.Result) bool {
+		switch item.Get("type").String() {
+		case "text":
+			if t := item.Get("text").String(); t != "" {
+				b.WriteString(t)
+			}
+		case "tool_use":
+			if input := item.Get("input").Raw; input != "" {
+				b.WriteString(input)
+			}
+		case "thinking":
+			if tk := item.Get("thinking").String(); tk != "" {
+				b.WriteString(tk)
+			}
+		}
+		return true
+	})
+	return b.String()
 }
 
 func (s *GatewayService) parseSSEUsage(data string, usage *ClaudeUsage) {
@@ -7199,6 +7293,11 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 				body = newBody
 			}
 		}
+	}
+
+	// output_tokens 回退估算：当上游未报告 output_tokens 时，从 content 提取文本估算
+	if response.Usage.OutputTokens == 0 {
+		applyOutputTokenEstimation(&response.Usage, extractContentTextFromResponseBody(body))
 	}
 
 	// 如果有模型映射，替换响应中的model字段
