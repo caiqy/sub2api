@@ -175,7 +175,7 @@ func TestUsageDetailCaptureMiddleware_HandlesEmptyBodyAndHeaders(t *testing.T) {
 	require.Equal(t, "", snapshotRequest.RequestBody)
 	require.Equal(t, "", snapshotRequest.ResponseBody)
 	require.Equal(t, ":method: GET\n:url: http://example.com/empty\n", snapshotRequest.RequestHeaders)
-	require.Equal(t, "", snapshotRequest.ResponseHeaders)
+	require.Equal(t, ":status: 200\n", snapshotRequest.ResponseHeaders)
 }
 
 func TestUsageDetailCaptureMiddleware_RestoresPartialBodyAndErrorToDownstream(t *testing.T) {

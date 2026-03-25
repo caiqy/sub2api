@@ -48,7 +48,7 @@ func TestOpenAIGatewayHandler_SubmitFailedUsageLog_UsesMessagesFallbackModelAsUp
 	router.Use(middleware.UsageDetailCapture())
 	router.POST("/v1/messages", func(c *gin.Context) {
 		c.Set("openai_messages_fallback_model", fallbackModel)
-		h.submitFailedUsageLog(c, apiKey, account, reqModel, false, nil, nil, 0, nil, "handler.openai_gateway.messages")
+		h.submitFailedUsageLog(c, apiKey, account, reqModel, false, 0, nil, nil, 0, nil, "handler.openai_gateway.messages")
 		c.Status(http.StatusBadRequest)
 	})
 
@@ -121,7 +121,7 @@ func TestOpenAIGatewayHandler_SubmitFailedUsageLog_PrefersExactUpstreamModelOver
 	router.POST("/v1/messages", func(c *gin.Context) {
 		c.Set("openai_messages_fallback_model", fallbackModel)
 		c.Set("openai_failed_usage_upstream_model", exactUpstreamModel)
-		h.submitFailedUsageLog(c, apiKey, account, reqModel, false, nil, nil, 0, nil, "handler.openai_gateway.messages")
+		h.submitFailedUsageLog(c, apiKey, account, reqModel, false, 0, nil, nil, 0, nil, "handler.openai_gateway.messages")
 		c.Status(http.StatusBadRequest)
 	})
 

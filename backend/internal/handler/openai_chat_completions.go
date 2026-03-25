@@ -246,7 +246,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			}
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
 			wroteFallback := h.ensureForwardErrorResponse(c, streamStarted)
-			h.submitFailedUsageLog(c, apiKey, account, reqModel, reqStream, nil, nil, forwardDuration, service.ExtractOpenAIReasoningEffortFromBody(body, reqModel), "handler.openai_gateway.chat_completions")
+			h.submitFailedUsageLog(c, apiKey, account, reqModel, reqStream, 0, nil, nil, forwardDuration, service.ExtractOpenAIReasoningEffortFromBody(body, reqModel), "handler.openai_gateway.chat_completions")
 			reqLog.Warn("openai_chat_completions.forward_failed",
 				zap.Int64("account_id", account.ID),
 				zap.Bool("fallback_error_response_written", wroteFallback),

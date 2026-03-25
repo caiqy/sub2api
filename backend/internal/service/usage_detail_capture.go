@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -29,6 +30,20 @@ func FormatUsageDetailHeadersText(headers http.Header) string {
 	}
 	var buf bytes.Buffer
 	_ = clone.Write(&buf)
+	return buf.String()
+}
+
+// FormatUsageDetailResponseHeadersText formats response headers with a
+// leading `:status: <code>` pseudo-header so admin detail views can display
+// the HTTP status code alongside the response headers.
+func FormatUsageDetailResponseHeadersText(statusCode int, headers http.Header) string {
+	var buf bytes.Buffer
+	if statusCode > 0 {
+		buf.WriteString(":status: ")
+		buf.WriteString(strconv.Itoa(statusCode))
+		buf.WriteByte('\n')
+	}
+	buf.WriteString(FormatUsageDetailHeadersText(headers))
 	return buf.String()
 }
 

@@ -335,7 +335,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			}
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
 			wroteFallback := h.ensureForwardErrorResponse(c, streamStarted)
-			h.submitFailedUsageLog(c, apiKey, account, reqModel, reqStream, nil, nil, forwardDuration, service.ExtractOpenAIReasoningEffortFromBody(body, reqModel), "handler.openai_gateway.responses")
+			h.submitFailedUsageLog(c, apiKey, account, reqModel, reqStream, 0, nil, nil, forwardDuration, service.ExtractOpenAIReasoningEffortFromBody(body, reqModel), "handler.openai_gateway.responses")
 			fields := []zap.Field{
 				zap.Int64("account_id", account.ID),
 				zap.Bool("fallback_error_response_written", wroteFallback),
@@ -736,7 +736,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			}
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
 			wroteFallback := h.ensureAnthropicErrorResponse(c, streamStarted)
-			h.submitFailedUsageLog(c, apiKey, account, reqModel, reqStream, nil, nil, forwardDuration, service.NormalizeClaudeOutputEffort(gjson.GetBytes(body, "output_config.effort").String()), "handler.openai_gateway.messages")
+			h.submitFailedUsageLog(c, apiKey, account, reqModel, reqStream, 0, nil, nil, forwardDuration, service.NormalizeClaudeOutputEffort(gjson.GetBytes(body, "output_config.effort").String()), "handler.openai_gateway.messages")
 			reqLog.Warn("openai_messages.forward_failed",
 				zap.Int64("account_id", account.ID),
 				zap.Bool("fallback_error_response_written", wroteFallback),
@@ -1430,12 +1430,12 @@ func (h *OpenAIGatewayHandler) submitUsageRecordTask(task service.UsageRecordTas
 	task(ctx)
 }
 
-func (h *OpenAIGatewayHandler) submitFailedUsageLog(c *gin.Context, apiKey *service.APIKey, account *service.Account, model string, stream bool, responseHeaders http.Header, responseBody []byte, duration time.Duration, reasoningEffort *string, logKey string) {
+func (h *OpenAIGatewayHandler) submitFailedUsageLog(c *gin.Context, apiKey *service.APIKey, account *service.Account, model string, stream bool, upstreamStatusCode int, responseHeaders http.Header, responseBody []byte, duration time.Duration, reasoningEffort *string, logKey string) {
 	if c == nil || apiKey == nil || apiKey.User == nil || account == nil {
 		return
 	}
 	if responseHeaders != nil || responseBody != nil {
-		headersText := service.FormatUsageDetailHeadersText(responseHeaders)
+		headersText := service.FormatUsageDetailResponseHeadersText(upstreamStatusCode, responseHeaders)
 		service.SetUsageResponseSnapshot(c, headersText, string(responseBody))
 	}
 	userAgent := c.GetHeader("User-Agent")
@@ -1513,10 +1513,10 @@ func resolveOpenAIFailedUsageUpstreamModel(c *gin.Context, account *service.Acco
 
 func (h *OpenAIGatewayHandler) submitFailoverFailedUsageLog(c *gin.Context, apiKey *service.APIKey, account *service.Account, model string, stream bool, failoverErr *service.UpstreamFailoverError, duration time.Duration, reasoningEffort *string, logKey string) {
 	if failoverErr == nil {
-		h.submitFailedUsageLog(c, apiKey, account, model, stream, nil, nil, duration, reasoningEffort, logKey)
+		h.submitFailedUsageLog(c, apiKey, account, model, stream, 0, nil, nil, duration, reasoningEffort, logKey)
 		return
 	}
-	h.submitFailedUsageLog(c, apiKey, account, model, stream, failoverErr.ResponseHeaders, failoverErr.ResponseBody, duration, reasoningEffort, logKey)
+	h.submitFailedUsageLog(c, apiKey, account, model, stream, failoverErr.StatusCode, failoverErr.ResponseHeaders, failoverErr.ResponseBody, duration, reasoningEffort, logKey)
 }
 
 // handleConcurrencyError handles concurrency-related errors with proper 429 response

@@ -80,7 +80,7 @@ func UsageDetailCapture() gin.HandlerFunc {
 		c.Set(service.UsageDetailCaptureContextKey, collector)
 		c.Writer = &usageDetailResponseWriter{ResponseWriter: c.Writer, collector: collector}
 		c.Next()
-		collector.responseHeaders = service.FormatUsageDetailHeadersText(c.Writer.Header())
+		collector.responseHeaders = service.FormatUsageDetailResponseHeadersText(c.Writer.Status(), c.Writer.Header())
 	}
 }
 
@@ -105,7 +105,7 @@ func buildUsageDetailSnapshot(c *gin.Context) *UsageDetailSnapshot {
 		return nil
 	}
 	if collector.responseHeaders == "" {
-		collector.responseHeaders = service.FormatUsageDetailHeadersText(c.Writer.Header())
+		collector.responseHeaders = service.FormatUsageDetailResponseHeadersText(c.Writer.Status(), c.Writer.Header())
 	}
 	responseHeaders := collector.responseHeaders
 	responseBody := collector.responseBody.String()

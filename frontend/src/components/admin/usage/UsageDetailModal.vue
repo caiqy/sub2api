@@ -44,7 +44,7 @@
         </button>
       </div>
 
-      <div data-test="detail-content-panel" class="h-[60vh] overflow-auto">
+      <div data-test="detail-content-panel" class="h-[60vh] overflow-auto rounded-lg" :class="{ 'bg-gray-50 dark:bg-dark-900': !loading && !error && activeContent }">
         <div v-if="loading" class="h-full rounded-lg border border-dashed border-gray-200 p-6 text-sm text-gray-500 dark:border-dark-700 dark:text-gray-400">
           {{ t('common.loading') }}
         </div>
@@ -56,7 +56,7 @@
           </button>
         </div>
 
-        <pre v-else-if="activeContent" class="h-full whitespace-pre-wrap break-words rounded-lg bg-gray-50 p-4 text-xs text-gray-800 dark:bg-dark-900 dark:text-gray-100">{{ activeContent }}</pre>
+        <pre v-else-if="activeContent" class="min-h-full whitespace-pre-wrap break-words p-4 text-xs text-gray-800 dark:text-gray-100">{{ activeContent }}</pre>
 
         <div v-else class="h-full rounded-lg border border-dashed border-gray-200 p-6 text-sm text-gray-500 dark:border-dark-700 dark:text-gray-400">
           {{ t('admin.usage.emptyDetailContent') }}
