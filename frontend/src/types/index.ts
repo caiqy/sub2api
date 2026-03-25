@@ -1087,6 +1087,8 @@ export interface AdminUsageStatsResponse {
 export interface SimpleUser {
   id: number
   email: string
+  /** May be empty string '' for legacy users; UI falls back to email when falsy */
+  username: string
 }
 
 export interface SimpleApiKey {

@@ -35,7 +35,7 @@
               @click="selectUser(u)"
               class="w-full px-4 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-700"
             >
-              <span>{{ u.email }}</span>
+              <span>{{ u.username || u.email }}</span>
               <span class="ml-2 text-xs text-gray-400">#{{ u.id }}</span>
             </button>
           </div>
@@ -264,7 +264,7 @@ const debounceApiKeySearch = () => {
 }
 
 const selectUser = async (u: SimpleUser) => {
-  userKeyword.value = u.email
+  userKeyword.value = u.username || u.email
   showUserDropdown.value = false
   filters.value.user_id = u.id
   clearApiKey()

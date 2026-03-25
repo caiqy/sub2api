@@ -8,7 +8,7 @@
         </div>
         <div>
           <div class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.usage.user') }}</div>
-          <div class="break-all text-gray-900 dark:text-white">{{ usageLog?.user?.email || '-' }}</div>
+          <div class="break-all text-gray-900 dark:text-white">{{ usageLog?.user?.username || usageLog?.user?.email || '-' }}</div>
         </div>
         <div>
           <div class="text-xs text-gray-500 dark:text-gray-400">{{ t('usage.model') }}</div>
