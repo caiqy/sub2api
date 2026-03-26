@@ -12,15 +12,17 @@ import (
 type UsageDetailSnapshot = service.UsageLogDetailSnapshot
 
 type usageDetailCollector struct {
-	requestHeaders  string
-	requestBody     string
-	upstreamHeaders string
-	upstreamBody    string
-	responseHeaders string
-	responseBody    bytes.Buffer
-	overrideHeaders string
-	overrideBody    string
-	hasOverride     bool
+	requestHeaders      string
+	requestBody         string
+	upstreamHeaders     string
+	upstreamBody        string
+	upstreamRespHeaders string
+	upstreamRespBody    string
+	responseHeaders     string
+	responseBody        bytes.Buffer
+	overrideHeaders     string
+	overrideBody        string
+	hasOverride         bool
 }
 
 type usageDetailResponseWriter struct {
@@ -116,12 +118,14 @@ func buildUsageDetailSnapshot(c *gin.Context) *UsageDetailSnapshot {
 		responseBody = collector.overrideBody
 	}
 	return (&service.UsageLogDetailSnapshot{
-		RequestHeaders:         collector.requestHeaders,
-		RequestBody:            collector.requestBody,
-		UpstreamRequestHeaders: collector.upstreamHeaders,
-		UpstreamRequestBody:    collector.upstreamBody,
-		ResponseHeaders:        responseHeaders,
-		ResponseBody:           responseBody,
+		RequestHeaders:          collector.requestHeaders,
+		RequestBody:             collector.requestBody,
+		UpstreamRequestHeaders:  collector.upstreamHeaders,
+		UpstreamRequestBody:     collector.upstreamBody,
+		UpstreamResponseHeaders: collector.upstreamRespHeaders,
+		UpstreamResponseBody:    collector.upstreamRespBody,
+		ResponseHeaders:         responseHeaders,
+		ResponseBody:            responseBody,
 	}).Normalize()
 }
 
@@ -177,6 +181,14 @@ func (c *usageDetailCollector) SetUsageResponseSnapshot(headers, body string) {
 	c.overrideHeaders = headers
 	c.overrideBody = body
 	c.hasOverride = true
+}
+
+func (c *usageDetailCollector) SetUsageUpstreamResponse(headers, body string) {
+	if c == nil {
+		return
+	}
+	c.upstreamRespHeaders = headers
+	c.upstreamRespBody = body
 }
 
 type usageDetailCaptureSink struct {

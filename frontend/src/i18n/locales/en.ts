@@ -3274,6 +3274,8 @@ export default {
       clientRequestBody: 'Client Request Body',
       upstreamRequestHeaders: 'Upstream Request Headers',
       upstreamRequestBody: 'Upstream Request Body',
+      upstreamResponseHeaders: 'Upstream Response Headers',
+      upstreamResponseBody: 'Upstream Response Body',
       responseHeaders: 'Response Headers',
       responseBody: 'Response Body',
       emptyDetailContent: 'No content',

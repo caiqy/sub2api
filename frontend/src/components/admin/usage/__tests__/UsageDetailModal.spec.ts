@@ -13,6 +13,8 @@ const messages: Record<string, string> = {
   'admin.usage.clientRequestBody': 'Client Request Body',
   'admin.usage.upstreamRequestHeaders': 'Upstream Request Headers',
   'admin.usage.upstreamRequestBody': 'Upstream Request Body',
+  'admin.usage.upstreamResponseHeaders': 'Upstream Response Headers',
+  'admin.usage.upstreamResponseBody': 'Upstream Response Body',
   'admin.usage.responseHeaders': 'Response Headers',
   'admin.usage.responseBody': 'Response Body',
   'admin.usage.requestId': 'Request ID',
@@ -42,7 +44,7 @@ describe('UsageDetailModal', () => {
     })
   })
 
-  it('renders six top-level tabs and supports upstream detail tabs', async () => {
+  it('renders eight top-level tabs and supports upstream detail tabs', async () => {
     const wrapper = mount(UsageDetailModal, {
       props: {
         show: true,
@@ -58,6 +60,8 @@ describe('UsageDetailModal', () => {
           request_body: '{"foo":1}',
           upstream_request_headers: ':method: POST\n:url: https://upstream.example.com/v1/chat/completions\nx-upstream: gateway\nx-upstream-trace-id: trace-upstream',
           upstream_request_body: '{"bar":2}',
+          upstream_response_headers: ':status: 200\nContent-Type: application/json',
+          upstream_response_body: '{"upstream_result":"ok"}',
           response_headers: null,
           response_body: 'not-json',
           created_at: '2026-03-20T10:00:00Z',
@@ -79,7 +83,7 @@ describe('UsageDetailModal', () => {
     expect(wrapper.text()).toContain('alice@example.com')
     expect(wrapper.text()).toContain('gpt-4.1')
     expect(wrapper.text()).toContain('2026-03-20T10:00:00Z')
-    expect(wrapper.findAll('button[data-test^="tab-"]')).toHaveLength(6)
+    expect(wrapper.findAll('button[data-test^="tab-"]')).toHaveLength(8)
     const detailPanel = wrapper.find('[data-test="detail-content-panel"]')
     expect(detailPanel.exists()).toBe(true)
     expect(detailPanel.classes()).toContain('h-[60vh]')
@@ -87,6 +91,8 @@ describe('UsageDetailModal', () => {
     expect(wrapper.text()).toContain('Client Request Body')
     expect(wrapper.text()).toContain('Upstream Request Headers')
     expect(wrapper.text()).toContain('Upstream Request Body')
+    expect(wrapper.text()).toContain('Upstream Response Headers')
+    expect(wrapper.text()).toContain('Upstream Response Body')
     expect(wrapper.text()).toContain('Response Headers')
     expect(wrapper.text()).toContain('Response Body')
     expect(wrapper.find('pre').classes()).toContain('whitespace-pre-wrap')
@@ -154,6 +160,8 @@ x-upstream-trace-id: trace-upstream`)
           request_body: 'client-body',
           upstream_request_headers: null,
           upstream_request_body: null,
+          upstream_response_headers: null,
+          upstream_response_body: null,
           response_headers: 'response-headers',
           response_body: 'response-body',
           created_at: '2026-03-20T10:00:00Z',

@@ -181,7 +181,7 @@ func TestUsageLogDetailRepositoryCreate_WrapsPruneError(t *testing.T) {
 			if query == "" {
 				return usageLogDetailRepoResult(1), nil
 			}
-			if len(args) == 8 {
+			if len(args) == 10 {
 				return usageLogDetailRepoResult(1), nil
 			}
 			return nil, pruneErr
@@ -241,6 +241,8 @@ func TestUsageLogRepositoryFlushBestEffortBatch_PersistsDetailForInsertedRows(t 
 			`{"upstream":"payload"}`,
 			"Content-Type: application/json",
 			`{"ok":true}`,
+			"",
+			"",
 			createdAt,
 		).
 		WillReturnResult(sqlmock.NewResult(0, 1))

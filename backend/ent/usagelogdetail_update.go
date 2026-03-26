@@ -126,6 +126,34 @@ func (_u *UsageLogDetailUpdate) SetNillableResponseBody(v *string) *UsageLogDeta
 	return _u
 }
 
+// SetUpstreamResponseHeaders sets the "upstream_response_headers" field.
+func (_u *UsageLogDetailUpdate) SetUpstreamResponseHeaders(v string) *UsageLogDetailUpdate {
+	_u.mutation.SetUpstreamResponseHeaders(v)
+	return _u
+}
+
+// SetNillableUpstreamResponseHeaders sets the "upstream_response_headers" field if the given value is not nil.
+func (_u *UsageLogDetailUpdate) SetNillableUpstreamResponseHeaders(v *string) *UsageLogDetailUpdate {
+	if v != nil {
+		_u.SetUpstreamResponseHeaders(*v)
+	}
+	return _u
+}
+
+// SetUpstreamResponseBody sets the "upstream_response_body" field.
+func (_u *UsageLogDetailUpdate) SetUpstreamResponseBody(v string) *UsageLogDetailUpdate {
+	_u.mutation.SetUpstreamResponseBody(v)
+	return _u
+}
+
+// SetNillableUpstreamResponseBody sets the "upstream_response_body" field if the given value is not nil.
+func (_u *UsageLogDetailUpdate) SetNillableUpstreamResponseBody(v *string) *UsageLogDetailUpdate {
+	if v != nil {
+		_u.SetUpstreamResponseBody(*v)
+	}
+	return _u
+}
+
 // SetUsageLog sets the "usage_log" edge to the UsageLog entity.
 func (_u *UsageLogDetailUpdate) SetUsageLog(v *UsageLog) *UsageLogDetailUpdate {
 	return _u.SetUsageLogID(v.ID)
@@ -206,6 +234,12 @@ func (_u *UsageLogDetailUpdate) sqlSave(ctx context.Context) (_node int, err err
 	}
 	if value, ok := _u.mutation.ResponseBody(); ok {
 		_spec.SetField(usagelogdetail.FieldResponseBody, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.UpstreamResponseHeaders(); ok {
+		_spec.SetField(usagelogdetail.FieldUpstreamResponseHeaders, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.UpstreamResponseBody(); ok {
+		_spec.SetField(usagelogdetail.FieldUpstreamResponseBody, field.TypeString, value)
 	}
 	if _u.mutation.UsageLogCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -354,6 +388,34 @@ func (_u *UsageLogDetailUpdateOne) SetNillableResponseBody(v *string) *UsageLogD
 	return _u
 }
 
+// SetUpstreamResponseHeaders sets the "upstream_response_headers" field.
+func (_u *UsageLogDetailUpdateOne) SetUpstreamResponseHeaders(v string) *UsageLogDetailUpdateOne {
+	_u.mutation.SetUpstreamResponseHeaders(v)
+	return _u
+}
+
+// SetNillableUpstreamResponseHeaders sets the "upstream_response_headers" field if the given value is not nil.
+func (_u *UsageLogDetailUpdateOne) SetNillableUpstreamResponseHeaders(v *string) *UsageLogDetailUpdateOne {
+	if v != nil {
+		_u.SetUpstreamResponseHeaders(*v)
+	}
+	return _u
+}
+
+// SetUpstreamResponseBody sets the "upstream_response_body" field.
+func (_u *UsageLogDetailUpdateOne) SetUpstreamResponseBody(v string) *UsageLogDetailUpdateOne {
+	_u.mutation.SetUpstreamResponseBody(v)
+	return _u
+}
+
+// SetNillableUpstreamResponseBody sets the "upstream_response_body" field if the given value is not nil.
+func (_u *UsageLogDetailUpdateOne) SetNillableUpstreamResponseBody(v *string) *UsageLogDetailUpdateOne {
+	if v != nil {
+		_u.SetUpstreamResponseBody(*v)
+	}
+	return _u
+}
+
 // SetUsageLog sets the "usage_log" edge to the UsageLog entity.
 func (_u *UsageLogDetailUpdateOne) SetUsageLog(v *UsageLog) *UsageLogDetailUpdateOne {
 	return _u.SetUsageLogID(v.ID)
@@ -464,6 +526,12 @@ func (_u *UsageLogDetailUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog
 	}
 	if value, ok := _u.mutation.ResponseBody(); ok {
 		_spec.SetField(usagelogdetail.FieldResponseBody, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.UpstreamResponseHeaders(); ok {
+		_spec.SetField(usagelogdetail.FieldUpstreamResponseHeaders, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.UpstreamResponseBody(); ok {
+		_spec.SetField(usagelogdetail.FieldUpstreamResponseBody, field.TypeString, value)
 	}
 	if _u.mutation.UsageLogCleared() {
 		edge := &sqlgraph.EdgeSpec{

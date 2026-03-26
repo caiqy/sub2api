@@ -258,6 +258,7 @@ func (h *SoraGatewayHandler) ChatCompletions(c *gin.Context) {
 				inboundEndpoint := GetInboundEndpoint(c)
 				upstreamEndpoint := GetUpstreamEndpoint(c, lastFailedAccount.Platform)
 				service.SetUsageResponseSnapshot(c, service.FormatUsageDetailResponseHeadersText(lastFailoverStatus, lastFailoverHeaders), string(lastFailoverBody))
+				service.SetUsageUpstreamResponse(c, lastFailoverStatus, lastFailoverHeaders, string(lastFailoverBody))
 				detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
 				h.submitUsageRecordTask(func(ctx context.Context) {
 					service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), &service.FailedUsageLogInput{
@@ -390,6 +391,7 @@ func (h *SoraGatewayHandler) ChatCompletions(c *gin.Context) {
 					inboundEndpoint := GetInboundEndpoint(c)
 					upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 					service.SetUsageResponseSnapshot(c, service.FormatUsageDetailResponseHeadersText(lastFailoverStatus, lastFailoverHeaders), string(lastFailoverBody))
+					service.SetUsageUpstreamResponse(c, lastFailoverStatus, lastFailoverHeaders, string(lastFailoverBody))
 					detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
 					h.submitUsageRecordTask(func(ctx context.Context) {
 						service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), &service.FailedUsageLogInput{

@@ -1066,6 +1066,8 @@ export interface AdminUsageDetail {
   upstream_request_body: string | null
   response_headers: string | null
   response_body: string | null
+  upstream_response_headers: string | null
+  upstream_response_body: string | null
   created_at: string
 }
 

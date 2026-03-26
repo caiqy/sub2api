@@ -1437,6 +1437,7 @@ func (h *OpenAIGatewayHandler) submitFailedUsageLog(c *gin.Context, apiKey *serv
 	if responseHeaders != nil || responseBody != nil {
 		headersText := service.FormatUsageDetailResponseHeadersText(upstreamStatusCode, responseHeaders)
 		service.SetUsageResponseSnapshot(c, headersText, string(responseBody))
+		service.SetUsageUpstreamResponse(c, upstreamStatusCode, responseHeaders, string(responseBody))
 	}
 	userAgent := c.GetHeader("User-Agent")
 	clientIP := ip.GetClientIP(c)

@@ -77,6 +77,8 @@ type DetailTabKey =
   | 'client-request-body'
   | 'upstream-request-headers'
   | 'upstream-request-body'
+  | 'upstream-response-headers'
+  | 'upstream-response-body'
   | 'response-headers'
   | 'response-body'
 
@@ -103,6 +105,8 @@ const tabs = computed(() => [
   { key: 'client-request-body' as const, label: t('admin.usage.clientRequestBody') },
   { key: 'upstream-request-headers' as const, label: t('admin.usage.upstreamRequestHeaders') },
   { key: 'upstream-request-body' as const, label: t('admin.usage.upstreamRequestBody') },
+  { key: 'upstream-response-headers' as const, label: t('admin.usage.upstreamResponseHeaders') },
+  { key: 'upstream-response-body' as const, label: t('admin.usage.upstreamResponseBody') },
   { key: 'response-headers' as const, label: t('admin.usage.responseHeaders') },
   { key: 'response-body' as const, label: t('admin.usage.responseBody') },
 ])
@@ -129,6 +133,8 @@ const activeContent = computed(() => {
   if (activeTab.value === 'client-request-body') return formatJsonLike(props.detail.request_body)
   if (activeTab.value === 'upstream-request-headers') return formatJsonLike(props.detail.upstream_request_headers)
   if (activeTab.value === 'upstream-request-body') return formatJsonLike(props.detail.upstream_request_body)
+  if (activeTab.value === 'upstream-response-headers') return formatJsonLike(props.detail.upstream_response_headers)
+  if (activeTab.value === 'upstream-response-body') return formatJsonLike(props.detail.upstream_response_body)
   if (activeTab.value === 'response-headers') return formatJsonLike(props.detail.response_headers)
   return formatJsonLike(props.detail.response_body)
 })

@@ -3433,6 +3433,8 @@ export default {
       clientRequestBody: '客户端请求体',
       upstreamRequestHeaders: '上游请求头',
       upstreamRequestBody: '上游请求体',
+      upstreamResponseHeaders: '上游响应头',
+      upstreamResponseBody: '上游响应体',
       responseHeaders: '响应头',
       responseBody: '响应体',
       emptyDetailContent: '暂无内容',

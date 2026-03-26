@@ -1265,6 +1265,7 @@ func (h *GatewayHandler) submitFailedUsageLogFromFailover(c *gin.Context, apiKey
 	}
 	if failoverErr != nil {
 		service.SetUsageResponseSnapshot(c, service.FormatUsageDetailResponseHeadersText(failoverErr.StatusCode, failoverErr.ResponseHeaders), string(failoverErr.ResponseBody))
+		service.SetUsageUpstreamResponse(c, failoverErr.StatusCode, failoverErr.ResponseHeaders, string(failoverErr.ResponseBody))
 	}
 	userAgent := c.GetHeader("User-Agent")
 	clientIP := ip.GetClientIP(c)

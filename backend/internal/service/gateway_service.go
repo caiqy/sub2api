@@ -6329,6 +6329,7 @@ func isCountTokensUnsupported404(statusCode int, body []byte) bool {
 
 func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account) (*ForwardResult, error) {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	SetUsageUpstreamResponse(c, resp.StatusCode, resp.Header, string(body))
 
 	// 调试日志：打印上游错误响应
 	logger.LegacyPrintf("service.gateway", "[Forward] Upstream error (non-retryable): Account=%d(%s) Status=%d RequestID=%s Body=%s",
@@ -7253,6 +7254,7 @@ func (s *GatewayService) handleNonStreamingResponse(ctx context.Context, resp *h
 		}
 		return nil, err
 	}
+	SetUsageUpstreamResponse(c, resp.StatusCode, resp.Header, string(body))
 
 	// 解析usage
 	var response struct {

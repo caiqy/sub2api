@@ -39,6 +39,10 @@ func (UsageLogDetail) Fields() []ent.Field {
 			Default(""),
 		field.Text("response_body").
 			Default(""),
+		field.Text("upstream_response_headers").
+			Default(""),
+		field.Text("upstream_response_body").
+			Default(""),
 		field.Time("created_at").
 			Default(time.Now).
 			Immutable().

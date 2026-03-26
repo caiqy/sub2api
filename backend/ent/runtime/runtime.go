@@ -940,8 +940,16 @@ func init() {
 	usagelogdetailDescResponseBody := usagelogdetailFields[6].Descriptor()
 	// usagelogdetail.DefaultResponseBody holds the default value on creation for the response_body field.
 	usagelogdetail.DefaultResponseBody = usagelogdetailDescResponseBody.Default.(string)
+	// usagelogdetailDescUpstreamResponseHeaders is the schema descriptor for upstream_response_headers field.
+	usagelogdetailDescUpstreamResponseHeaders := usagelogdetailFields[7].Descriptor()
+	// usagelogdetail.DefaultUpstreamResponseHeaders holds the default value on creation for the upstream_response_headers field.
+	usagelogdetail.DefaultUpstreamResponseHeaders = usagelogdetailDescUpstreamResponseHeaders.Default.(string)
+	// usagelogdetailDescUpstreamResponseBody is the schema descriptor for upstream_response_body field.
+	usagelogdetailDescUpstreamResponseBody := usagelogdetailFields[8].Descriptor()
+	// usagelogdetail.DefaultUpstreamResponseBody holds the default value on creation for the upstream_response_body field.
+	usagelogdetail.DefaultUpstreamResponseBody = usagelogdetailDescUpstreamResponseBody.Default.(string)
 	// usagelogdetailDescCreatedAt is the schema descriptor for created_at field.
-	usagelogdetailDescCreatedAt := usagelogdetailFields[7].Descriptor()
+	usagelogdetailDescCreatedAt := usagelogdetailFields[9].Descriptor()
 	// usagelogdetail.DefaultCreatedAt holds the default value on creation for the created_at field.
 	usagelogdetail.DefaultCreatedAt = usagelogdetailDescCreatedAt.Default.(func() time.Time)
 	userMixin := schema.User{}.Mixin()

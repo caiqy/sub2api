@@ -113,6 +113,34 @@ func (_c *UsageLogDetailCreate) SetNillableResponseBody(v *string) *UsageLogDeta
 	return _c
 }
 
+// SetUpstreamResponseHeaders sets the "upstream_response_headers" field.
+func (_c *UsageLogDetailCreate) SetUpstreamResponseHeaders(v string) *UsageLogDetailCreate {
+	_c.mutation.SetUpstreamResponseHeaders(v)
+	return _c
+}
+
+// SetNillableUpstreamResponseHeaders sets the "upstream_response_headers" field if the given value is not nil.
+func (_c *UsageLogDetailCreate) SetNillableUpstreamResponseHeaders(v *string) *UsageLogDetailCreate {
+	if v != nil {
+		_c.SetUpstreamResponseHeaders(*v)
+	}
+	return _c
+}
+
+// SetUpstreamResponseBody sets the "upstream_response_body" field.
+func (_c *UsageLogDetailCreate) SetUpstreamResponseBody(v string) *UsageLogDetailCreate {
+	_c.mutation.SetUpstreamResponseBody(v)
+	return _c
+}
+
+// SetNillableUpstreamResponseBody sets the "upstream_response_body" field if the given value is not nil.
+func (_c *UsageLogDetailCreate) SetNillableUpstreamResponseBody(v *string) *UsageLogDetailCreate {
+	if v != nil {
+		_c.SetUpstreamResponseBody(*v)
+	}
+	return _c
+}
+
 // SetCreatedAt sets the "created_at" field.
 func (_c *UsageLogDetailCreate) SetCreatedAt(v time.Time) *UsageLogDetailCreate {
 	_c.mutation.SetCreatedAt(v)
@@ -191,6 +219,14 @@ func (_c *UsageLogDetailCreate) defaults() {
 		v := usagelogdetail.DefaultResponseBody
 		_c.mutation.SetResponseBody(v)
 	}
+	if _, ok := _c.mutation.UpstreamResponseHeaders(); !ok {
+		v := usagelogdetail.DefaultUpstreamResponseHeaders
+		_c.mutation.SetUpstreamResponseHeaders(v)
+	}
+	if _, ok := _c.mutation.UpstreamResponseBody(); !ok {
+		v := usagelogdetail.DefaultUpstreamResponseBody
+		_c.mutation.SetUpstreamResponseBody(v)
+	}
 	if _, ok := _c.mutation.CreatedAt(); !ok {
 		v := usagelogdetail.DefaultCreatedAt()
 		_c.mutation.SetCreatedAt(v)
@@ -219,6 +255,12 @@ func (_c *UsageLogDetailCreate) check() error {
 	}
 	if _, ok := _c.mutation.ResponseBody(); !ok {
 		return &ValidationError{Name: "response_body", err: errors.New(`ent: missing required field "UsageLogDetail.response_body"`)}
+	}
+	if _, ok := _c.mutation.UpstreamResponseHeaders(); !ok {
+		return &ValidationError{Name: "upstream_response_headers", err: errors.New(`ent: missing required field "UsageLogDetail.upstream_response_headers"`)}
+	}
+	if _, ok := _c.mutation.UpstreamResponseBody(); !ok {
+		return &ValidationError{Name: "upstream_response_body", err: errors.New(`ent: missing required field "UsageLogDetail.upstream_response_body"`)}
 	}
 	if _, ok := _c.mutation.CreatedAt(); !ok {
 		return &ValidationError{Name: "created_at", err: errors.New(`ent: missing required field "UsageLogDetail.created_at"`)}
@@ -276,6 +318,14 @@ func (_c *UsageLogDetailCreate) createSpec() (*UsageLogDetail, *sqlgraph.CreateS
 	if value, ok := _c.mutation.ResponseBody(); ok {
 		_spec.SetField(usagelogdetail.FieldResponseBody, field.TypeString, value)
 		_node.ResponseBody = value
+	}
+	if value, ok := _c.mutation.UpstreamResponseHeaders(); ok {
+		_spec.SetField(usagelogdetail.FieldUpstreamResponseHeaders, field.TypeString, value)
+		_node.UpstreamResponseHeaders = value
+	}
+	if value, ok := _c.mutation.UpstreamResponseBody(); ok {
+		_spec.SetField(usagelogdetail.FieldUpstreamResponseBody, field.TypeString, value)
+		_node.UpstreamResponseBody = value
 	}
 	if value, ok := _c.mutation.CreatedAt(); ok {
 		_spec.SetField(usagelogdetail.FieldCreatedAt, field.TypeTime, value)
@@ -434,6 +484,30 @@ func (u *UsageLogDetailUpsert) UpdateResponseBody() *UsageLogDetailUpsert {
 	return u
 }
 
+// SetUpstreamResponseHeaders sets the "upstream_response_headers" field.
+func (u *UsageLogDetailUpsert) SetUpstreamResponseHeaders(v string) *UsageLogDetailUpsert {
+	u.Set(usagelogdetail.FieldUpstreamResponseHeaders, v)
+	return u
+}
+
+// UpdateUpstreamResponseHeaders sets the "upstream_response_headers" field to the value that was provided on create.
+func (u *UsageLogDetailUpsert) UpdateUpstreamResponseHeaders() *UsageLogDetailUpsert {
+	u.SetExcluded(usagelogdetail.FieldUpstreamResponseHeaders)
+	return u
+}
+
+// SetUpstreamResponseBody sets the "upstream_response_body" field.
+func (u *UsageLogDetailUpsert) SetUpstreamResponseBody(v string) *UsageLogDetailUpsert {
+	u.Set(usagelogdetail.FieldUpstreamResponseBody, v)
+	return u
+}
+
+// UpdateUpstreamResponseBody sets the "upstream_response_body" field to the value that was provided on create.
+func (u *UsageLogDetailUpsert) UpdateUpstreamResponseBody() *UsageLogDetailUpsert {
+	u.SetExcluded(usagelogdetail.FieldUpstreamResponseBody)
+	return u
+}
+
 // UpdateNewValues updates the mutable fields using the new values that were set on create.
 // Using this option is equivalent to using:
 //
@@ -574,6 +648,34 @@ func (u *UsageLogDetailUpsertOne) SetResponseBody(v string) *UsageLogDetailUpser
 func (u *UsageLogDetailUpsertOne) UpdateResponseBody() *UsageLogDetailUpsertOne {
 	return u.Update(func(s *UsageLogDetailUpsert) {
 		s.UpdateResponseBody()
+	})
+}
+
+// SetUpstreamResponseHeaders sets the "upstream_response_headers" field.
+func (u *UsageLogDetailUpsertOne) SetUpstreamResponseHeaders(v string) *UsageLogDetailUpsertOne {
+	return u.Update(func(s *UsageLogDetailUpsert) {
+		s.SetUpstreamResponseHeaders(v)
+	})
+}
+
+// UpdateUpstreamResponseHeaders sets the "upstream_response_headers" field to the value that was provided on create.
+func (u *UsageLogDetailUpsertOne) UpdateUpstreamResponseHeaders() *UsageLogDetailUpsertOne {
+	return u.Update(func(s *UsageLogDetailUpsert) {
+		s.UpdateUpstreamResponseHeaders()
+	})
+}
+
+// SetUpstreamResponseBody sets the "upstream_response_body" field.
+func (u *UsageLogDetailUpsertOne) SetUpstreamResponseBody(v string) *UsageLogDetailUpsertOne {
+	return u.Update(func(s *UsageLogDetailUpsert) {
+		s.SetUpstreamResponseBody(v)
+	})
+}
+
+// UpdateUpstreamResponseBody sets the "upstream_response_body" field to the value that was provided on create.
+func (u *UsageLogDetailUpsertOne) UpdateUpstreamResponseBody() *UsageLogDetailUpsertOne {
+	return u.Update(func(s *UsageLogDetailUpsert) {
+		s.UpdateUpstreamResponseBody()
 	})
 }
 
@@ -883,6 +985,34 @@ func (u *UsageLogDetailUpsertBulk) SetResponseBody(v string) *UsageLogDetailUpse
 func (u *UsageLogDetailUpsertBulk) UpdateResponseBody() *UsageLogDetailUpsertBulk {
 	return u.Update(func(s *UsageLogDetailUpsert) {
 		s.UpdateResponseBody()
+	})
+}
+
+// SetUpstreamResponseHeaders sets the "upstream_response_headers" field.
+func (u *UsageLogDetailUpsertBulk) SetUpstreamResponseHeaders(v string) *UsageLogDetailUpsertBulk {
+	return u.Update(func(s *UsageLogDetailUpsert) {
+		s.SetUpstreamResponseHeaders(v)
+	})
+}
+
+// UpdateUpstreamResponseHeaders sets the "upstream_response_headers" field to the value that was provided on create.
+func (u *UsageLogDetailUpsertBulk) UpdateUpstreamResponseHeaders() *UsageLogDetailUpsertBulk {
+	return u.Update(func(s *UsageLogDetailUpsert) {
+		s.UpdateUpstreamResponseHeaders()
+	})
+}
+
+// SetUpstreamResponseBody sets the "upstream_response_body" field.
+func (u *UsageLogDetailUpsertBulk) SetUpstreamResponseBody(v string) *UsageLogDetailUpsertBulk {
+	return u.Update(func(s *UsageLogDetailUpsert) {
+		s.SetUpstreamResponseBody(v)
+	})
+}
+
+// UpdateUpstreamResponseBody sets the "upstream_response_body" field to the value that was provided on create.
+func (u *UsageLogDetailUpsertBulk) UpdateUpstreamResponseBody() *UsageLogDetailUpsertBulk {
+	return u.Update(func(s *UsageLogDetailUpsert) {
+		s.UpdateUpstreamResponseBody()
 	})
 }
 

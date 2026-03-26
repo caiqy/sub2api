@@ -32,6 +32,10 @@ type UsageLogDetail struct {
 	ResponseHeaders string `json:"response_headers,omitempty"`
 	// ResponseBody holds the value of the "response_body" field.
 	ResponseBody string `json:"response_body,omitempty"`
+	// UpstreamResponseHeaders holds the value of the "upstream_response_headers" field.
+	UpstreamResponseHeaders string `json:"upstream_response_headers,omitempty"`
+	// UpstreamResponseBody holds the value of the "upstream_response_body" field.
+	UpstreamResponseBody string `json:"upstream_response_body,omitempty"`
 	// CreatedAt holds the value of the "created_at" field.
 	CreatedAt time.Time `json:"created_at,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
@@ -67,7 +71,7 @@ func (*UsageLogDetail) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case usagelogdetail.FieldID, usagelogdetail.FieldUsageLogID:
 			values[i] = new(sql.NullInt64)
-		case usagelogdetail.FieldRequestHeaders, usagelogdetail.FieldRequestBody, usagelogdetail.FieldUpstreamRequestHeaders, usagelogdetail.FieldUpstreamRequestBody, usagelogdetail.FieldResponseHeaders, usagelogdetail.FieldResponseBody:
+		case usagelogdetail.FieldRequestHeaders, usagelogdetail.FieldRequestBody, usagelogdetail.FieldUpstreamRequestHeaders, usagelogdetail.FieldUpstreamRequestBody, usagelogdetail.FieldResponseHeaders, usagelogdetail.FieldResponseBody, usagelogdetail.FieldUpstreamResponseHeaders, usagelogdetail.FieldUpstreamResponseBody:
 			values[i] = new(sql.NullString)
 		case usagelogdetail.FieldCreatedAt:
 			values[i] = new(sql.NullTime)
@@ -133,6 +137,18 @@ func (_m *UsageLogDetail) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field response_body", values[i])
 			} else if value.Valid {
 				_m.ResponseBody = value.String
+			}
+		case usagelogdetail.FieldUpstreamResponseHeaders:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field upstream_response_headers", values[i])
+			} else if value.Valid {
+				_m.UpstreamResponseHeaders = value.String
+			}
+		case usagelogdetail.FieldUpstreamResponseBody:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field upstream_response_body", values[i])
+			} else if value.Valid {
+				_m.UpstreamResponseBody = value.String
 			}
 		case usagelogdetail.FieldCreatedAt:
 			if value, ok := values[i].(*sql.NullTime); !ok {
@@ -201,6 +217,12 @@ func (_m *UsageLogDetail) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("response_body=")
 	builder.WriteString(_m.ResponseBody)
+	builder.WriteString(", ")
+	builder.WriteString("upstream_response_headers=")
+	builder.WriteString(_m.UpstreamResponseHeaders)
+	builder.WriteString(", ")
+	builder.WriteString("upstream_response_body=")
+	builder.WriteString(_m.UpstreamResponseBody)
 	builder.WriteString(", ")
 	builder.WriteString("created_at=")
 	builder.WriteString(_m.CreatedAt.Format(time.ANSIC))

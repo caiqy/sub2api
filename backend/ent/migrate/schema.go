@@ -852,6 +852,8 @@ var (
 		{Name: "upstream_request_body", Type: field.TypeString, Size: 2147483647, Default: ""},
 		{Name: "response_headers", Type: field.TypeString, Size: 2147483647, Default: ""},
 		{Name: "response_body", Type: field.TypeString, Size: 2147483647, Default: ""},
+		{Name: "upstream_response_headers", Type: field.TypeString, Size: 2147483647, Default: ""},
+		{Name: "upstream_response_body", Type: field.TypeString, Size: 2147483647, Default: ""},
 		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
 		{Name: "usage_log_id", Type: field.TypeInt64, Unique: true},
 	}
@@ -863,7 +865,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "usage_log_details_usage_logs_detail",
-				Columns:    []*schema.Column{UsageLogDetailsColumns[8]},
+				Columns:    []*schema.Column{UsageLogDetailsColumns[10]},
 				RefColumns: []*schema.Column{UsageLogsColumns[0]},
 				OnDelete:   schema.Cascade,
 			},
@@ -872,7 +874,7 @@ var (
 			{
 				Name:    "usagelogdetail_created_at",
 				Unique:  false,
-				Columns: []*schema.Column{UsageLogDetailsColumns[7]},
+				Columns: []*schema.Column{UsageLogDetailsColumns[9]},
 			},
 		},
 	}

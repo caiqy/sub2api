@@ -37,9 +37,11 @@ func (r *usageLogDetailRepository) Create(ctx context.Context, detail *service.U
 			upstream_request_body,
 			response_headers,
 			response_body,
+			upstream_response_headers,
+			upstream_response_body,
 			created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`, detail.UsageLogID, detail.RequestHeaders, detail.RequestBody, detail.UpstreamRequestHeaders, detail.UpstreamRequestBody, detail.ResponseHeaders, detail.ResponseBody, createdAt)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+	`, detail.UsageLogID, detail.RequestHeaders, detail.RequestBody, detail.UpstreamRequestHeaders, detail.UpstreamRequestBody, detail.ResponseHeaders, detail.ResponseBody, detail.UpstreamResponseHeaders, detail.UpstreamResponseBody, createdAt)
 	if err != nil {
 		return fmt.Errorf("insert usage log detail: %w", err)
 	}
@@ -69,10 +71,10 @@ func (r *usageLogDetailRepository) GetByUsageLogID(ctx context.Context, usageLog
 	}
 	detail := &service.UsageLogDetail{}
 	err := scanSingleRow(ctx, r.sql, `
-		SELECT usage_log_id, request_headers, request_body, upstream_request_headers, upstream_request_body, response_headers, response_body, created_at
+		SELECT usage_log_id, request_headers, request_body, upstream_request_headers, upstream_request_body, response_headers, response_body, upstream_response_headers, upstream_response_body, created_at
 		FROM usage_log_details
 		WHERE usage_log_id = $1
-	`, []any{usageLogID}, &detail.UsageLogID, &detail.RequestHeaders, &detail.RequestBody, &detail.UpstreamRequestHeaders, &detail.UpstreamRequestBody, &detail.ResponseHeaders, &detail.ResponseBody, &detail.CreatedAt)
+	`, []any{usageLogID}, &detail.UsageLogID, &detail.RequestHeaders, &detail.RequestBody, &detail.UpstreamRequestHeaders, &detail.UpstreamRequestBody, &detail.ResponseHeaders, &detail.ResponseBody, &detail.UpstreamResponseHeaders, &detail.UpstreamResponseBody, &detail.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -100,14 +102,16 @@ func usageLogDetailFromSnapshot(usageLogID int64, createdAt time.Time, snapshot 
 		return nil
 	}
 	return &service.UsageLogDetail{
-		UsageLogID:             usageLogID,
-		RequestHeaders:         snapshot.RequestHeaders,
-		RequestBody:            snapshot.RequestBody,
-		UpstreamRequestHeaders: snapshot.UpstreamRequestHeaders,
-		UpstreamRequestBody:    snapshot.UpstreamRequestBody,
-		ResponseHeaders:        snapshot.ResponseHeaders,
-		ResponseBody:           snapshot.ResponseBody,
-		CreatedAt:              createdAt,
+		UsageLogID:              usageLogID,
+		RequestHeaders:          snapshot.RequestHeaders,
+		RequestBody:             snapshot.RequestBody,
+		UpstreamRequestHeaders:  snapshot.UpstreamRequestHeaders,
+		UpstreamRequestBody:     snapshot.UpstreamRequestBody,
+		ResponseHeaders:         snapshot.ResponseHeaders,
+		ResponseBody:            snapshot.ResponseBody,
+		UpstreamResponseHeaders: snapshot.UpstreamResponseHeaders,
+		UpstreamResponseBody:    snapshot.UpstreamResponseBody,
+		CreatedAt:               createdAt,
 	}
 }
 
@@ -122,10 +126,12 @@ func buildUsageLogDetailBatchInsertQuery(details []*service.UsageLogDetail) (str
 			upstream_request_body,
 			response_headers,
 			response_body,
+			upstream_response_headers,
+			upstream_response_body,
 			created_at
 		) VALUES `)
 
-	args := make([]any, 0, len(details)*8)
+	args := make([]any, 0, len(details)*10)
 	argPos := 1
 	for idx, detail := range details {
 		if idx > 0 {
@@ -136,7 +142,7 @@ func buildUsageLogDetailBatchInsertQuery(details []*service.UsageLogDetail) (str
 			createdAt = time.Now().UTC()
 		}
 		_, _ = query.WriteString("(")
-		for i := 0; i < 8; i++ {
+		for i := 0; i < 10; i++ {
 			if i > 0 {
 				_, _ = query.WriteString(",")
 			}
@@ -153,6 +159,8 @@ func buildUsageLogDetailBatchInsertQuery(details []*service.UsageLogDetail) (str
 			detail.UpstreamRequestBody,
 			detail.ResponseHeaders,
 			detail.ResponseBody,
+			detail.UpstreamResponseHeaders,
+			detail.UpstreamResponseBody,
 			createdAt,
 		)
 	}

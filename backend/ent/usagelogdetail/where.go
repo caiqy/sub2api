@@ -90,6 +90,16 @@ func ResponseBody(v string) predicate.UsageLogDetail {
 	return predicate.UsageLogDetail(sql.FieldEQ(FieldResponseBody, v))
 }
 
+// UpstreamResponseHeaders applies equality check predicate on the "upstream_response_headers" field. It's identical to UpstreamResponseHeadersEQ.
+func UpstreamResponseHeaders(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldEQ(FieldUpstreamResponseHeaders, v))
+}
+
+// UpstreamResponseBody applies equality check predicate on the "upstream_response_body" field. It's identical to UpstreamResponseBodyEQ.
+func UpstreamResponseBody(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldEQ(FieldUpstreamResponseBody, v))
+}
+
 // CreatedAt applies equality check predicate on the "created_at" field. It's identical to CreatedAtEQ.
 func CreatedAt(v time.Time) predicate.UsageLogDetail {
 	return predicate.UsageLogDetail(sql.FieldEQ(FieldCreatedAt, v))
@@ -503,6 +513,136 @@ func ResponseBodyEqualFold(v string) predicate.UsageLogDetail {
 // ResponseBodyContainsFold applies the ContainsFold predicate on the "response_body" field.
 func ResponseBodyContainsFold(v string) predicate.UsageLogDetail {
 	return predicate.UsageLogDetail(sql.FieldContainsFold(FieldResponseBody, v))
+}
+
+// UpstreamResponseHeadersEQ applies the EQ predicate on the "upstream_response_headers" field.
+func UpstreamResponseHeadersEQ(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldEQ(FieldUpstreamResponseHeaders, v))
+}
+
+// UpstreamResponseHeadersNEQ applies the NEQ predicate on the "upstream_response_headers" field.
+func UpstreamResponseHeadersNEQ(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldNEQ(FieldUpstreamResponseHeaders, v))
+}
+
+// UpstreamResponseHeadersIn applies the In predicate on the "upstream_response_headers" field.
+func UpstreamResponseHeadersIn(vs ...string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldIn(FieldUpstreamResponseHeaders, vs...))
+}
+
+// UpstreamResponseHeadersNotIn applies the NotIn predicate on the "upstream_response_headers" field.
+func UpstreamResponseHeadersNotIn(vs ...string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldNotIn(FieldUpstreamResponseHeaders, vs...))
+}
+
+// UpstreamResponseHeadersGT applies the GT predicate on the "upstream_response_headers" field.
+func UpstreamResponseHeadersGT(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldGT(FieldUpstreamResponseHeaders, v))
+}
+
+// UpstreamResponseHeadersGTE applies the GTE predicate on the "upstream_response_headers" field.
+func UpstreamResponseHeadersGTE(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldGTE(FieldUpstreamResponseHeaders, v))
+}
+
+// UpstreamResponseHeadersLT applies the LT predicate on the "upstream_response_headers" field.
+func UpstreamResponseHeadersLT(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldLT(FieldUpstreamResponseHeaders, v))
+}
+
+// UpstreamResponseHeadersLTE applies the LTE predicate on the "upstream_response_headers" field.
+func UpstreamResponseHeadersLTE(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldLTE(FieldUpstreamResponseHeaders, v))
+}
+
+// UpstreamResponseHeadersContains applies the Contains predicate on the "upstream_response_headers" field.
+func UpstreamResponseHeadersContains(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldContains(FieldUpstreamResponseHeaders, v))
+}
+
+// UpstreamResponseHeadersHasPrefix applies the HasPrefix predicate on the "upstream_response_headers" field.
+func UpstreamResponseHeadersHasPrefix(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldHasPrefix(FieldUpstreamResponseHeaders, v))
+}
+
+// UpstreamResponseHeadersHasSuffix applies the HasSuffix predicate on the "upstream_response_headers" field.
+func UpstreamResponseHeadersHasSuffix(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldHasSuffix(FieldUpstreamResponseHeaders, v))
+}
+
+// UpstreamResponseHeadersEqualFold applies the EqualFold predicate on the "upstream_response_headers" field.
+func UpstreamResponseHeadersEqualFold(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldEqualFold(FieldUpstreamResponseHeaders, v))
+}
+
+// UpstreamResponseHeadersContainsFold applies the ContainsFold predicate on the "upstream_response_headers" field.
+func UpstreamResponseHeadersContainsFold(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldContainsFold(FieldUpstreamResponseHeaders, v))
+}
+
+// UpstreamResponseBodyEQ applies the EQ predicate on the "upstream_response_body" field.
+func UpstreamResponseBodyEQ(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldEQ(FieldUpstreamResponseBody, v))
+}
+
+// UpstreamResponseBodyNEQ applies the NEQ predicate on the "upstream_response_body" field.
+func UpstreamResponseBodyNEQ(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldNEQ(FieldUpstreamResponseBody, v))
+}
+
+// UpstreamResponseBodyIn applies the In predicate on the "upstream_response_body" field.
+func UpstreamResponseBodyIn(vs ...string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldIn(FieldUpstreamResponseBody, vs...))
+}
+
+// UpstreamResponseBodyNotIn applies the NotIn predicate on the "upstream_response_body" field.
+func UpstreamResponseBodyNotIn(vs ...string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldNotIn(FieldUpstreamResponseBody, vs...))
+}
+
+// UpstreamResponseBodyGT applies the GT predicate on the "upstream_response_body" field.
+func UpstreamResponseBodyGT(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldGT(FieldUpstreamResponseBody, v))
+}
+
+// UpstreamResponseBodyGTE applies the GTE predicate on the "upstream_response_body" field.
+func UpstreamResponseBodyGTE(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldGTE(FieldUpstreamResponseBody, v))
+}
+
+// UpstreamResponseBodyLT applies the LT predicate on the "upstream_response_body" field.
+func UpstreamResponseBodyLT(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldLT(FieldUpstreamResponseBody, v))
+}
+
+// UpstreamResponseBodyLTE applies the LTE predicate on the "upstream_response_body" field.
+func UpstreamResponseBodyLTE(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldLTE(FieldUpstreamResponseBody, v))
+}
+
+// UpstreamResponseBodyContains applies the Contains predicate on the "upstream_response_body" field.
+func UpstreamResponseBodyContains(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldContains(FieldUpstreamResponseBody, v))
+}
+
+// UpstreamResponseBodyHasPrefix applies the HasPrefix predicate on the "upstream_response_body" field.
+func UpstreamResponseBodyHasPrefix(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldHasPrefix(FieldUpstreamResponseBody, v))
+}
+
+// UpstreamResponseBodyHasSuffix applies the HasSuffix predicate on the "upstream_response_body" field.
+func UpstreamResponseBodyHasSuffix(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldHasSuffix(FieldUpstreamResponseBody, v))
+}
+
+// UpstreamResponseBodyEqualFold applies the EqualFold predicate on the "upstream_response_body" field.
+func UpstreamResponseBodyEqualFold(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldEqualFold(FieldUpstreamResponseBody, v))
+}
+
+// UpstreamResponseBodyContainsFold applies the ContainsFold predicate on the "upstream_response_body" field.
+func UpstreamResponseBodyContainsFold(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldContainsFold(FieldUpstreamResponseBody, v))
 }
 
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.

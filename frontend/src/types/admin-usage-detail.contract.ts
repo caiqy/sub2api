@@ -9,6 +9,8 @@ const adminUsageDetailContractSample: AdminUsageDetail = {
   upstream_request_body: '{"model":"gpt-4.1"}',
   response_headers: '{"x-request-id":"req_123"}',
   response_body: '{"id":"resp_123"}',
+  upstream_response_headers: ':status: 200\nContent-Type: application/json',
+  upstream_response_body: '{"id":"resp_123","choices":[]}',
   created_at: '2026-03-20T00:00:00Z'
 }
 

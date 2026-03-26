@@ -2656,6 +2656,7 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 	setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, upstreamDetail)
 	logOpenAIInstructionsRequiredDebug(ctx, c, account, resp.StatusCode, upstreamMsg, requestBody, body)
 	SetUsageResponseSnapshot(c, FormatUsageDetailResponseHeadersText(resp.StatusCode, resp.Header), string(body))
+	SetUsageUpstreamResponse(c, resp.StatusCode, resp.Header, string(body))
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 		Platform:             account.Platform,
 		AccountID:            account.ID,
@@ -3087,6 +3088,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		"Upstream request failed",
 	); matched {
 		SetUsageResponseSnapshot(c, FormatUsageDetailResponseHeadersText(resp.StatusCode, resp.Header), string(body))
+		SetUsageUpstreamResponse(c, resp.StatusCode, resp.Header, string(body))
 		c.JSON(status, gin.H{
 			"error": gin.H{
 				"type":    errType,
@@ -3115,6 +3117,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 			Detail:             upstreamDetail,
 		})
 		SetUsageResponseSnapshot(c, FormatUsageDetailResponseHeadersText(resp.StatusCode, resp.Header), string(body))
+		SetUsageUpstreamResponse(c, resp.StatusCode, resp.Header, string(body))
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": gin.H{
 				"type":    "upstream_error",
@@ -3183,6 +3186,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 	}
 
 	SetUsageResponseSnapshot(c, FormatUsageDetailResponseHeadersText(resp.StatusCode, resp.Header), string(body))
+	SetUsageUpstreamResponse(c, resp.StatusCode, resp.Header, string(body))
 	c.JSON(statusCode, gin.H{
 		"error": gin.H{
 			"type":    errType,

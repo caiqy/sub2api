@@ -28,6 +28,10 @@ const (
 	FieldResponseHeaders = "response_headers"
 	// FieldResponseBody holds the string denoting the response_body field in the database.
 	FieldResponseBody = "response_body"
+	// FieldUpstreamResponseHeaders holds the string denoting the upstream_response_headers field in the database.
+	FieldUpstreamResponseHeaders = "upstream_response_headers"
+	// FieldUpstreamResponseBody holds the string denoting the upstream_response_body field in the database.
+	FieldUpstreamResponseBody = "upstream_response_body"
 	// FieldCreatedAt holds the string denoting the created_at field in the database.
 	FieldCreatedAt = "created_at"
 	// EdgeUsageLog holds the string denoting the usage_log edge name in mutations.
@@ -53,6 +57,8 @@ var Columns = []string{
 	FieldUpstreamRequestBody,
 	FieldResponseHeaders,
 	FieldResponseBody,
+	FieldUpstreamResponseHeaders,
+	FieldUpstreamResponseBody,
 	FieldCreatedAt,
 }
 
@@ -79,6 +85,10 @@ var (
 	DefaultResponseHeaders string
 	// DefaultResponseBody holds the default value on creation for the "response_body" field.
 	DefaultResponseBody string
+	// DefaultUpstreamResponseHeaders holds the default value on creation for the "upstream_response_headers" field.
+	DefaultUpstreamResponseHeaders string
+	// DefaultUpstreamResponseBody holds the default value on creation for the "upstream_response_body" field.
+	DefaultUpstreamResponseBody string
 	// DefaultCreatedAt holds the default value on creation for the "created_at" field.
 	DefaultCreatedAt func() time.Time
 )
@@ -124,6 +134,16 @@ func ByResponseHeaders(opts ...sql.OrderTermOption) OrderOption {
 // ByResponseBody orders the results by the response_body field.
 func ByResponseBody(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldResponseBody, opts...).ToFunc()
+}
+
+// ByUpstreamResponseHeaders orders the results by the upstream_response_headers field.
+func ByUpstreamResponseHeaders(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldUpstreamResponseHeaders, opts...).ToFunc()
+}
+
+// ByUpstreamResponseBody orders the results by the upstream_response_body field.
+func ByUpstreamResponseBody(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldUpstreamResponseBody, opts...).ToFunc()
 }
 
 // ByCreatedAt orders the results by the created_at field.
