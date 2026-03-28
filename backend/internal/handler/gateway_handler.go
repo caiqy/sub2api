@@ -178,6 +178,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	c.Request = c.Request.WithContext(service.WithThinkingEnabled(c.Request.Context(), parsedReq.ThinkingEnabled, h.metadataBridgeEnabled()))
 
 	setOpsRequestContext(c, reqModel, reqStream, body)
+	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
 
 	// 验证 model 必填
 	if reqModel == "" {
@@ -432,11 +433,23 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					}
 				}
 				wroteFallback := h.ensureForwardErrorResponse(c, streamStarted)
-				reqLog.Error("gateway.forward_failed",
+				forwardFailedFields := []zap.Field{
 					zap.Int64("account_id", account.ID),
+					zap.String("account_name", account.Name),
+					zap.String("account_platform", account.Platform),
 					zap.Bool("fallback_error_response_written", wroteFallback),
 					zap.Error(err),
-				)
+				}
+				if account.Proxy != nil {
+					forwardFailedFields = append(forwardFailedFields,
+						zap.Int64("proxy_id", account.Proxy.ID),
+						zap.String("proxy_name", account.Proxy.Name),
+						zap.String("proxy_host", account.Proxy.Host),
+						zap.Int("proxy_port", account.Proxy.Port),
+					)
+				} else if account.ProxyID != nil {
+					forwardFailedFields = append(forwardFailedFields, zap.Int64p("proxy_id", account.ProxyID))
+				}
 				userAgent := c.GetHeader("User-Agent")
 				clientIP := ip.GetClientIP(c)
 				inboundEndpoint := GetInboundEndpoint(c)
@@ -458,6 +471,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						Duration:         forwardDuration,
 					}, "handler.gateway.messages")
 				})
+				reqLog.Error("gateway.forward_failed", forwardFailedFields...)
 				return
 			}
 
@@ -785,11 +799,23 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					}
 				}
 				wroteFallback := h.ensureForwardErrorResponse(c, streamStarted)
-				reqLog.Error("gateway.forward_failed",
+				forwardFailedFields := []zap.Field{
 					zap.Int64("account_id", account.ID),
+					zap.String("account_name", account.Name),
+					zap.String("account_platform", account.Platform),
 					zap.Bool("fallback_error_response_written", wroteFallback),
 					zap.Error(err),
-				)
+				}
+				if account.Proxy != nil {
+					forwardFailedFields = append(forwardFailedFields,
+						zap.Int64("proxy_id", account.Proxy.ID),
+						zap.String("proxy_name", account.Proxy.Name),
+						zap.String("proxy_host", account.Proxy.Host),
+						zap.Int("proxy_port", account.Proxy.Port),
+					)
+				} else if account.ProxyID != nil {
+					forwardFailedFields = append(forwardFailedFields, zap.Int64p("proxy_id", account.ProxyID))
+				}
 				userAgent := c.GetHeader("User-Agent")
 				clientIP := ip.GetClientIP(c)
 				inboundEndpoint := GetInboundEndpoint(c)
@@ -811,6 +837,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						Duration:         forwardDuration,
 					}, "handler.gateway.messages")
 				})
+				reqLog.Error("gateway.forward_failed", forwardFailedFields...)
 				return
 			}
 
@@ -1495,6 +1522,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	}
 
 	setOpsRequestContext(c, parsedReq.Model, parsedReq.Stream, body)
+	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(parsedReq.Stream, false)))
 
 	// 获取订阅信息（可能为nil）
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)

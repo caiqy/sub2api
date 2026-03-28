@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -58,7 +59,7 @@ func (s *stubHTTPUpstreamForSoraPassthrough) Do(req *http.Request, proxyURL stri
 	}, nil
 }
 
-func (s *stubHTTPUpstreamForSoraPassthrough) DoWithTLS(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, enableTLSFingerprint bool) (*http.Response, error) {
+func (s *stubHTTPUpstreamForSoraPassthrough) DoWithTLS(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, profile *tlsfingerprint.Profile) (*http.Response, error) {
 	return s.Do(req, proxyURL, accountID, accountConcurrency)
 }
 
@@ -173,6 +174,11 @@ func TestSoraGatewayService_ForwardPromptEnhance(t *testing.T) {
 		ID:       1,
 		Platform: PlatformSora,
 		Status:   StatusActive,
+		Credentials: map[string]any{
+			"model_mapping": map[string]any{
+				"prompt-enhance-short-10s": "prompt-enhance-short-15s",
+			},
+		},
 	}
 	body := []byte(`{"model":"prompt-enhance-short-10s","messages":[{"role":"user","content":"cat running"}],"stream":false}`)
 
@@ -181,6 +187,7 @@ func TestSoraGatewayService_ForwardPromptEnhance(t *testing.T) {
 	require.NotNil(t, result)
 	require.Equal(t, "prompt", result.MediaType)
 	require.Equal(t, "prompt-enhance-short-10s", result.Model)
+	require.Equal(t, "prompt-enhance-short-15s", result.UpstreamModel)
 }
 
 func TestSoraGatewayService_ForwardStoryboardPrompt(t *testing.T) {

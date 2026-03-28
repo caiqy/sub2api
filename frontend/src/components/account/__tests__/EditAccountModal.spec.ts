@@ -7,12 +7,14 @@ import { resolve } from 'node:path'
 const {
   updateAccountMock,
   checkMixedChannelRiskMock,
+  listTLSFingerprintProfilesMock,
   showErrorMock,
   showSuccessMock,
   showInfoMock
 } = vi.hoisted(() => ({
   updateAccountMock: vi.fn(),
   checkMixedChannelRiskMock: vi.fn(),
+  listTLSFingerprintProfilesMock: vi.fn(),
   showErrorMock: vi.fn(),
   showSuccessMock: vi.fn(),
   showInfoMock: vi.fn()
@@ -37,6 +39,9 @@ vi.mock('@/api/admin', () => ({
     accounts: {
       update: updateAccountMock,
       checkMixedChannelRisk: checkMixedChannelRiskMock
+    },
+    tlsFingerprintProfiles: {
+      list: listTLSFingerprintProfilesMock
     }
   }
 }))
@@ -169,8 +174,32 @@ describe('EditAccountModal', () => {
     showErrorMock.mockReset()
     showSuccessMock.mockReset()
     showInfoMock.mockReset()
+    listTLSFingerprintProfilesMock.mockReset()
     checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    listTLSFingerprintProfilesMock.mockResolvedValue([{ id: 101, name: 'Chrome 136' }])
     updateAccountMock.mockResolvedValue(buildAccount())
+  })
+
+  it('keeps random TLS fingerprint profile selected and submits -1 for anthropic oauth accounts', async () => {
+	  const wrapper = mountModal(buildAccount({
+	    platform: 'anthropic',
+	    type: 'oauth',
+	    enable_tls_fingerprint: true,
+	    tls_fingerprint_profile_id: -1,
+	    extra: {
+	      enable_tls_fingerprint: true,
+	      tls_fingerprint_profile_id: -1
+	    }
+	  }))
+
+	  await flushPromises()
+	  expect(listTLSFingerprintProfilesMock).toHaveBeenCalledTimes(1)
+
+	  await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+	  await flushPromises()
+
+	  expect(updateAccountMock).toHaveBeenCalledTimes(1)
+	  expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.tls_fingerprint_profile_id).toBe(-1)
   })
 
   it('reopening the same account rehydrates the OpenAI whitelist from props', async () => {

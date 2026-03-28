@@ -86,7 +86,7 @@ func (m *passthroughAdminAccountRepo) Delete(ctx context.Context, id int64) erro
 func (m *passthroughAdminAccountRepo) List(ctx context.Context, params pagination.PaginationParams) ([]Account, *pagination.PaginationResult, error) {
 	return nil, nil, nil
 }
-func (m *passthroughAdminAccountRepo) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64) ([]Account, *pagination.PaginationResult, error) {
+func (m *passthroughAdminAccountRepo) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]Account, *pagination.PaginationResult, error) {
 	return nil, nil, nil
 }
 func (m *passthroughAdminAccountRepo) ListByGroup(ctx context.Context, groupID int64) ([]Account, error) {
