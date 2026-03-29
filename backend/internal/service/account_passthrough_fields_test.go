@@ -13,8 +13,8 @@ import (
 )
 
 func TestNormalizeAccountPassthroughFields(t *testing.T) {
-	t.Run("RejectsNonAPIKeyAccount", func(t *testing.T) {
-		_, err := NormalizeAccountPassthroughFields(NormalizePassthroughFieldsInput{
+	t.Run("AllowsNonAPIKeyAccount", func(t *testing.T) {
+		normalized, err := NormalizeAccountPassthroughFields(NormalizePassthroughFieldsInput{
 			RequestedType:             AccountTypeOAuth,
 			ExplicitlySubmittedConfig: true,
 			Extra: map[string]any{
@@ -22,7 +22,8 @@ func TestNormalizeAccountPassthroughFields(t *testing.T) {
 			},
 		})
 
-		require.EqualError(t, err, "passthrough field rules are only supported for apikey accounts")
+		require.NoError(t, err)
+		require.Equal(t, true, normalized["passthrough_fields_enabled"])
 	})
 
 	t.Run("RejectsDuplicateHeadersCaseInsensitive", func(t *testing.T) {
@@ -347,7 +348,7 @@ func TestNormalizeAccountPassthroughFields(t *testing.T) {
 		require.EqualError(t, err, "duplicate passthrough body path: metadata.user_id")
 	})
 
-	t.Run("RemovesRulesWhenTypeChangesAwayFromAPIKey", func(t *testing.T) {
+	t.Run("PreservesRulesWhenTypeChanges", func(t *testing.T) {
 		normalized, err := NormalizeAccountPassthroughFields(NormalizePassthroughFieldsInput{
 			ExistingType:  AccountTypeAPIKey,
 			RequestedType: AccountTypeOAuth,
@@ -362,8 +363,8 @@ func TestNormalizeAccountPassthroughFields(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Equal(t, "keep", normalized["other"])
-		require.NotContains(t, normalized, "passthrough_fields_enabled")
-		require.NotContains(t, normalized, "passthrough_field_rules")
+		require.Equal(t, true, normalized["passthrough_fields_enabled"])
+		require.Contains(t, normalized, "passthrough_field_rules")
 	})
 }
 

@@ -817,17 +817,6 @@
           <p class="input-hint">{{ t('admin.accounts.upstream.apiKeyHint') }}</p>
         </div>
 
-        <section
-          v-if="isPassthroughFieldSupportedFlow"
-          class="border-t border-gray-200 pt-4 dark:border-dark-600"
-          data-testid="passthrough-fields-section"
-        >
-          <PassthroughFieldRulesEditor
-            v-model:enabled="passthroughFieldsEnabled"
-            v-model:rules="passthroughFieldRules"
-          />
-        </section>
-
       </div>
 
       <!-- Antigravity model restriction (applies to OAuth + Upstream) -->
@@ -978,17 +967,6 @@
           />
           <p class="input-hint">{{ apiKeyHint }}</p>
         </div>
-
-        <section
-          v-if="isPassthroughFieldSupportedFlow"
-          class="border-t border-gray-200 pt-4 dark:border-dark-600"
-          data-testid="passthrough-fields-section"
-        >
-          <PassthroughFieldRulesEditor
-            v-model:enabled="passthroughFieldsEnabled"
-            v-model:rules="passthroughFieldRules"
-          />
-        </section>
 
         <!-- Gemini API Key tier selection -->
         <div v-if="form.platform === 'gemini'">
@@ -2317,6 +2295,18 @@
         <input v-model="expiresAtInput" type="datetime-local" class="input" />
         <p class="input-hint">{{ t('admin.accounts.expiresAtHint') }}</p>
       </div>
+
+      <!-- Passthrough Field Rules (all account types) -->
+      <section
+        v-if="isPassthroughFieldSupportedFlow"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+        data-testid="passthrough-fields-section"
+      >
+        <PassthroughFieldRulesEditor
+          v-model:enabled="passthroughFieldsEnabled"
+          v-model:rules="passthroughFieldRules"
+        />
+      </section>
 
       <!-- OpenAI 自动透传开关（OAuth/API Key） -->
       <div

@@ -1,8 +1,8 @@
-export function supportsPassthroughFields(params: {
+export function supportsPassthroughFields(_params?: {
   platform?: string | null
   type?: string | null
 }) {
-  return params.type === 'apikey'
+  return true
 }
 
 export function getDefaultBaseUrl(platform?: string | null) {

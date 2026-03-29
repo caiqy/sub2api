@@ -325,13 +325,12 @@ func TestAdminServiceUpdateAccountPassthrough_RemovesRulesWhenTypeChanges(t *tes
 	require.NotNil(t, repo.updated)
 	require.Equal(t, AccountTypeOAuth, repo.updated.Type)
 	require.Equal(t, "keep", repo.updated.Extra["other"])
-	require.NotContains(t, repo.updated.Extra, "passthrough_fields_enabled")
-	require.NotContains(t, repo.updated.Extra, "passthrough_field_rules")
-	_, enabled := updated.Extra["passthrough_fields_enabled"]
-	require.False(t, enabled)
+	// passthrough fields are now preserved for all account types
+	require.Contains(t, repo.updated.Extra, "passthrough_fields_enabled")
+	require.Contains(t, repo.updated.Extra, "passthrough_field_rules")
 }
 
-func TestAdminServiceUpdateAccountPassthrough_RemovesRulesForNonAPIKeyWithoutExplicitExtra(t *testing.T) {
+func TestAdminServiceUpdateAccountPassthrough_PreservesRulesForNonAPIKeyWithoutExplicitExtra(t *testing.T) {
 	repo := &passthroughAdminAccountRepo{
 		accountsByID: map[int64]*Account{
 			1: {
@@ -359,20 +358,21 @@ func TestAdminServiceUpdateAccountPassthrough_RemovesRulesForNonAPIKeyWithoutExp
 	require.NoError(t, err)
 	require.NotNil(t, repo.updated)
 	require.Equal(t, "keep", repo.updated.Extra["other"])
-	require.NotContains(t, repo.updated.Extra, "passthrough_fields_enabled")
-	require.NotContains(t, repo.updated.Extra, "passthrough_field_rules")
-	require.NotContains(t, updated.Extra, "passthrough_fields_enabled")
-	require.NotContains(t, updated.Extra, "passthrough_field_rules")
+	// passthrough fields are now preserved for all account types
+	require.Contains(t, repo.updated.Extra, "passthrough_fields_enabled")
+	require.Contains(t, repo.updated.Extra, "passthrough_field_rules")
+	require.Contains(t, updated.Extra, "passthrough_fields_enabled")
+	require.Contains(t, updated.Extra, "passthrough_field_rules")
 }
 
-func TestAdminServiceCreateAccountPassthrough_RejectsNonAPIKeySubmission(t *testing.T) {
+func TestAdminServiceCreateAccountPassthrough_AllowsNonAPIKeySubmission(t *testing.T) {
 	repo := &passthroughAdminAccountRepo{}
 	service := &adminServiceImpl{
 		accountRepo: repo,
 		groupRepo:   &passthroughAdminGroupRepo{},
 	}
 
-	_, err := service.CreateAccount(context.Background(), &CreateAccountInput{
+	created, err := service.CreateAccount(context.Background(), &CreateAccountInput{
 		Name:        "oauth",
 		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
@@ -384,8 +384,9 @@ func TestAdminServiceCreateAccountPassthrough_RejectsNonAPIKeySubmission(t *test
 		SkipDefaultGroupBind: true,
 	})
 
-	require.EqualError(t, err, "passthrough field rules are only supported for apikey accounts")
-	require.Nil(t, repo.created)
+	require.NoError(t, err)
+	require.NotNil(t, created)
+	require.Equal(t, true, created.Extra["passthrough_fields_enabled"])
 }
 
 func TestAdminServiceCreateAccountPassthrough_ErrorIncludesConflictingField(t *testing.T) {
@@ -518,7 +519,7 @@ func TestPassthroughFieldsV2Admin_CreateAndUpdate_RejectInvalidRulesEvenWhenDisa
 	})
 }
 
-func TestPassthroughFieldsV2Admin_UpdateAccount_ClearsPassthroughWhenTypeChangesAwayFromAPIKey(t *testing.T) {
+func TestPassthroughFieldsV2Admin_UpdateAccount_PreservesPassthroughWhenTypeChanges(t *testing.T) {
 	repo := &passthroughAdminAccountRepo{
 		accountsByID: map[int64]*Account{
 			1: {
@@ -546,8 +547,9 @@ func TestPassthroughFieldsV2Admin_UpdateAccount_ClearsPassthroughWhenTypeChanges
 	require.NotNil(t, repo.updated)
 	require.Equal(t, AccountTypeOAuth, repo.updated.Type)
 	require.Equal(t, "keep", repo.updated.Extra["other"])
-	require.NotContains(t, repo.updated.Extra, "passthrough_fields_enabled")
-	require.NotContains(t, repo.updated.Extra, "passthrough_field_rules")
+	// passthrough fields are now preserved for all account types
+	require.Contains(t, repo.updated.Extra, "passthrough_fields_enabled")
+	require.Contains(t, repo.updated.Extra, "passthrough_field_rules")
 }
 
 func TestPassthroughFieldsV2Admin_BulkUpdateAccounts_RejectsPassthroughExtraKeys(t *testing.T) {

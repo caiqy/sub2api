@@ -1195,7 +1195,7 @@ func applyAntigravityOutboundHeaders(req *http.Request, headers http.Header) {
 }
 
 func (s *AntigravityGatewayService) applyAntigravityAccountPassthroughFields(ctx context.Context, c *gin.Context, account *Account, sourceBody []byte, targetBody []byte) ([]byte, http.Header, error) {
-	if account == nil || account.Type != AccountTypeAPIKey {
+	if account == nil {
 		return targetBody, nil, nil
 	}
 	var inbound http.Header

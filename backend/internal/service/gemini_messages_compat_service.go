@@ -665,6 +665,12 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				action = "streamGenerateContent"
 			}
 
+			// Apply passthrough field rules for OAuth accounts
+			finalGeminiReq, passthroughHeaders, err := s.applyGeminiAPIKeyPassthroughFields(ctx, c, account, originalClaudeBody, geminiReq)
+			if err != nil {
+				return nil, "", err
+			}
+
 			// Two modes for OAuth:
 			// 1. With project_id -> Code Assist API (wrapped request)
 			// 2. Without project_id -> AI Studio API (direct OAuth, like API key but with Bearer token)
@@ -684,7 +690,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 					"project": projectID,
 				}
 				var inner any
-				if err := json.Unmarshal(geminiReq, &inner); err != nil {
+				if err := json.Unmarshal(finalGeminiReq, &inner); err != nil {
 					return nil, "", fmt.Errorf("failed to parse gemini request: %w", err)
 				}
 				wrapped["request"] = inner
@@ -695,6 +701,11 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 					return nil, "", err
 				}
 				upstreamReq.Header.Set("Content-Type", "application/json")
+				for key, values := range passthroughHeaders {
+					for _, v := range values {
+						upstreamReq.Header.Add(key, v)
+					}
+				}
 				upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
 				upstreamReq.Header.Set("User-Agent", geminicli.GeminiCLIUserAgent)
 				return upstreamReq, "x-request-id", nil
@@ -711,11 +722,16 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 					fullURL += "?alt=sse"
 				}
 
-				upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(geminiReq))
+				upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(finalGeminiReq))
 				if err != nil {
 					return nil, "", err
 				}
 				upstreamReq.Header.Set("Content-Type", "application/json")
+				for key, values := range passthroughHeaders {
+					for _, v := range values {
+						upstreamReq.Header.Add(key, v)
+					}
+				}
 				upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
 				return upstreamReq, "x-request-id", nil
 			}
@@ -2611,6 +2627,9 @@ func (s *GeminiMessagesCompatService) ForwardAIStudioGET(ctx context.Context, ac
 		}
 		accessToken, err := s.tokenProvider.GetAccessToken(ctx, account)
 		if err != nil {
+			return nil, err
+		}
+		if _, err := geminiApplyAccountPassthroughFieldsWithContext(ctx, account, inbound, nil, nil, req.Header); err != nil {
 			return nil, err
 		}
 		req.Header.Set("Authorization", "Bearer "+accessToken)

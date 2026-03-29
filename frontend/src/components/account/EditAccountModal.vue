@@ -57,17 +57,6 @@
           <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
         </div>
 
-        <section
-          v-if="isPassthroughFieldSupportedAccount"
-          class="border-t border-gray-200 pt-4 dark:border-dark-600"
-          data-testid="passthrough-fields-section"
-        >
-          <PassthroughFieldRulesEditor
-            v-model:enabled="passthroughFieldsEnabled"
-            v-model:rules="passthroughFieldRules"
-          />
-        </section>
-
         <!-- Model Restriction Section (不适用于 Antigravity) -->
         <div v-if="account.platform !== 'antigravity'" class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <label class="input-label">{{ t('admin.accounts.modelRestriction') }}</label>
@@ -849,6 +838,18 @@
           </div>
         </div>
       </div>
+
+      <!-- Passthrough Field Rules (all account types) -->
+      <section
+        v-if="isPassthroughFieldSupportedAccount"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+        data-testid="passthrough-fields-section"
+      >
+        <PassthroughFieldRulesEditor
+          v-model:enabled="passthroughFieldsEnabled"
+          v-model:rules="passthroughFieldRules"
+        />
+      </section>
 
       <!-- Temp Unschedulable Rules -->
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4">
@@ -2684,8 +2685,8 @@ function supportsPassthroughFieldExtra(account?: Pick<Account, 'type' | 'platfor
   return supportsPassthroughFields(account || {})
 }
 
-function applyPassthroughFieldExtra(extra: Record<string, unknown>, accountType: Account['type']) {
-  if (accountType !== 'apikey' || !isPassthroughFieldSupportedAccount.value) {
+function applyPassthroughFieldExtra(extra: Record<string, unknown>, _accountType: Account['type']) {
+  if (!isPassthroughFieldSupportedAccount.value) {
     delete extra.passthrough_fields_enabled
     delete extra.passthrough_field_rules
     return

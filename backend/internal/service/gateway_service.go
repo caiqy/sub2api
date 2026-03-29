@@ -5732,12 +5732,9 @@ func (s *GatewayService) buildUpstreamRequestWithSourceBody(ctx context.Context,
 		}
 	}
 
-	if account.Type == AccountTypeAPIKey {
-		var err error
-		body, err = applyAccountPassthroughFieldsWithContext(ctx, account, clientHeaders, sourceBody, body, outboundHeader)
-		if err != nil {
-			return nil, err
-		}
+	body, passthroughErr := applyAccountPassthroughFieldsWithContext(ctx, account, clientHeaders, sourceBody, body, outboundHeader)
+	if passthroughErr != nil {
+		return nil, passthroughErr
 	}
 
 	// OAuth账号：应用统一指纹和metadata重写（受设置开关控制）

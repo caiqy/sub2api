@@ -3007,12 +3007,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithSourceBody(ctx context.Co
 		}
 	}
 
-	if account.Type == AccountTypeAPIKey {
-		var err error
-		body, err = applyAccountPassthroughFieldsWithContext(ctx, account, clientHeaders, sourceBody, body, outboundHeader)
-		if err != nil {
-			return nil, err
-		}
+	body, passthroughErr := applyAccountPassthroughFieldsWithContext(ctx, account, clientHeaders, sourceBody, body, outboundHeader)
+	if passthroughErr != nil {
+		return nil, passthroughErr
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(body))

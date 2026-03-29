@@ -37,20 +37,7 @@ type NormalizePassthroughFieldsInput struct {
 }
 
 func NormalizeAccountPassthroughFields(input NormalizePassthroughFieldsInput) (map[string]any, error) {
-	requestedType := strings.TrimSpace(input.RequestedType)
-	if requestedType == "" {
-		requestedType = strings.TrimSpace(input.ExistingType)
-	}
-
 	normalized := clonePassthroughExtra(input.Extra)
-	if requestedType != AccountTypeAPIKey {
-		if input.ExplicitlySubmittedConfig && hasPassthroughConfigKeys(normalized) {
-			return nil, fmt.Errorf("passthrough field rules are only supported for apikey accounts")
-		}
-		delete(normalized, accountPassthroughEnabledKey)
-		delete(normalized, accountPassthroughRulesKey)
-		return normalized, nil
-	}
 
 	enabled := false
 	if rawEnabled, ok := normalized[accountPassthroughEnabledKey]; ok {
@@ -79,7 +66,7 @@ func NormalizeAccountPassthroughFields(input NormalizePassthroughFieldsInput) (m
 }
 
 func AccountPassthroughFieldRules(account *Account) (enabled bool, rules []PassthroughFieldRule, err error) {
-	if account == nil || account.Type != AccountTypeAPIKey {
+	if account == nil {
 		return false, nil, nil
 	}
 	normalized, err := NormalizeAccountPassthroughFields(NormalizePassthroughFieldsInput{
@@ -302,7 +289,7 @@ func applyAccountPassthroughFieldsWithContext(
 	// Fast-path: if passthrough is explicitly disabled, skip all rule parsing.
 	// This ensures the toggle works as an emergency stop even when stored rules
 	// are malformed.
-	if account == nil || account.Type != AccountTypeAPIKey {
+	if account == nil {
 		return targetBody, nil
 	}
 	if rawEnabled, ok := account.Extra[accountPassthroughEnabledKey]; ok {
