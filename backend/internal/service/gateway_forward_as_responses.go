@@ -109,8 +109,11 @@ func (s *GatewayService) ForwardAsResponses(
 	}
 
 	// 10. Build upstream request
+	// Use buildUpstreamRequestWithSourceBody so that passthrough field rules
+	// (map/forward modes) read values from the original Responses body
+	// rather than the converted Anthropic body.
 	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
-	upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, anthropicBody, token, tokenType, mappedModel, reqStream, shouldMimicClaudeCode)
+	upstreamReq, err := s.buildUpstreamRequestWithSourceBody(upstreamCtx, c, account, body, anthropicBody, token, tokenType, mappedModel, reqStream, shouldMimicClaudeCode)
 	releaseUpstreamCtx()
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
