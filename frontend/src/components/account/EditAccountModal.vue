@@ -2713,7 +2713,13 @@ function toDraftRules(value: unknown): PassthroughFieldRuleDraft[] {
     return {
       ...draft,
       target: rule.target === 'body' ? 'body' : 'header',
-      mode: rule.mode === 'inject' ? 'inject' : rule.mode === 'map' ? 'map' : 'forward',
+      mode: rule.mode === 'inject'
+        ? 'inject'
+        : rule.mode === 'map'
+          ? 'map'
+          : rule.mode === 'delete'
+            ? 'delete'
+            : 'forward',
       key: typeof rule.key === 'string' ? rule.key : '',
       source_key: typeof rule.source_key === 'string' ? rule.source_key : '',
       value: typeof rule.value === 'string' ? rule.value : ''

@@ -669,8 +669,9 @@ export interface TempUnschedulableStatus {
 
 export interface AccountPassthroughFieldRule {
   target: 'header' | 'body'
-  mode: 'forward' | 'inject'
+  mode: 'forward' | 'inject' | 'map' | 'delete'
   key: string
+  source_key?: string
   value?: string
 }
 

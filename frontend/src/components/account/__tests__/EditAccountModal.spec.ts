@@ -258,6 +258,22 @@ describe('EditAccountModal', () => {
     expect((wrapper.get('[data-testid="passthrough-rule-source-key-0"]').element as HTMLInputElement).value).toBe('metadata.source')
   })
 
+  it('rehydrates delete passthrough rules without downgrading mode to forward', async () => {
+    const wrapper = mountModal(buildAccount({
+      extra: {
+        passthrough_fields_enabled: true,
+        passthrough_field_rules: [
+          { target: 'body', mode: 'delete', key: 'metadata.internal' }
+        ]
+      }
+    }))
+
+    expect((wrapper.get('[data-testid="passthrough-enabled-toggle"]').element as HTMLInputElement).checked).toBe(true)
+    expect((wrapper.get('[data-testid="passthrough-rule-target-0"]').element as HTMLSelectElement).value).toBe('body')
+    expect((wrapper.get('[data-testid="passthrough-rule-mode-0"]').element as HTMLSelectElement).value).toBe('delete')
+    expect((wrapper.get('[data-testid="passthrough-rule-key-0"]').element as HTMLInputElement).value).toBe('metadata.internal')
+  })
+
   it('blocks submit when header keys differ only by case', async () => {
     const wrapper = mountModal(buildAccount())
 
@@ -422,12 +438,12 @@ describe('EditAccountModal', () => {
     }))
   })
 
-  it('does not render passthrough section for non-apikey accounts', () => {
+  it('renders passthrough section for oauth accounts', () => {
     const wrapper = mountModal(buildAccount({
       type: 'oauth'
     }))
 
-    expect(wrapper.find('[data-testid="passthrough-fields-section"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="passthrough-fields-section"]').exists()).toBe(true)
   })
 
   it('renders passthrough section for antigravity apikey edit accounts', () => {
@@ -543,7 +559,7 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.base_url).toBe(getDefaultBaseUrl('antigravity'))
   })
 
-  it('warns immediately when switched away from apikey with passthrough config', async () => {
+  it('keeps passthrough section and config when switched from apikey to oauth with passthrough config', async () => {
     const apikeyAccount = buildAccount({
       extra: {
         passthrough_fields_enabled: true,
@@ -562,16 +578,18 @@ describe('EditAccountModal', () => {
       })
     })
 
-    expect(wrapper.find('[data-testid="passthrough-fields-section"]').exists()).toBe(false)
-    expect(showInfoMock).toHaveBeenCalledWith(expect.stringContaining('移除透传字段规则配置'))
+    expect(wrapper.find('[data-testid="passthrough-fields-section"]').exists()).toBe(true)
+    expect(showInfoMock).not.toHaveBeenCalledWith(expect.stringContaining('移除透传字段规则配置'))
 
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     await flushPromises()
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
-    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toEqual(expect.not.objectContaining({
-      passthrough_fields_enabled: expect.anything(),
-      passthrough_field_rules: expect.anything()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toEqual(expect.objectContaining({
+      passthrough_fields_enabled: true,
+      passthrough_field_rules: [
+        { target: 'header', mode: 'forward', key: 'X-Test' }
+      ]
     }))
   })
 
