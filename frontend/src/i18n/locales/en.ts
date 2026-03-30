@@ -2062,7 +2062,7 @@ export default {
       },
       passthroughFields: {
         title: 'Passthrough Field Rules',
-        description: 'Only applies to API Key accounts and is independent from automatic passthrough',
+        description: 'Applies to all account types and is independent from automatic passthrough',
         disabledHint: 'Configured rules are preserved, but will not take effect right now',
         addRule: 'Add Rule',
         targetHeader: 'Header',

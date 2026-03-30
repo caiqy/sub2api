@@ -2188,7 +2188,7 @@ export default {
       },
       passthroughFields: {
         title: '透传字段规则',
-        description: '仅对 API Key 类型账号生效；与自动透传能力独立',
+        description: '适用于所有账号类型；与自动透传能力独立',
         disabledHint: '已配置规则会保留，但当前不会生效',
         addRule: '新增规则',
         targetHeader: 'Header',

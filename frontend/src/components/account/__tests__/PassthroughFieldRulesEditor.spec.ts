@@ -9,7 +9,7 @@ vi.mock('vue-i18n', async () => {
 
   const messages: Record<string, string> = {
     'admin.accounts.passthroughFields.title': '透传字段规则',
-    'admin.accounts.passthroughFields.description': '仅对 API Key 类型账号生效；与自动透传能力独立',
+    'admin.accounts.passthroughFields.description': '适用于所有账号类型；与自动透传能力独立',
     'admin.accounts.passthroughFields.disabledHint': '已配置规则会保留，但当前不会生效',
     'admin.accounts.passthroughFields.addRule': '新增规则',
     'admin.accounts.passthroughFields.targetHeader': 'Header',
