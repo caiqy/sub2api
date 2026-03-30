@@ -2845,6 +2845,15 @@ function applyQuotaControlExtra(extra: Record<string, unknown>) {
     delete extra.cache_ttl_override_enabled
     delete extra.cache_ttl_override_target
   }
+
+  // Custom base URL relay setting
+  if (customBaseUrlEnabled.value && customBaseUrl.value.trim()) {
+    extra.custom_base_url_enabled = true
+    extra.custom_base_url = customBaseUrl.value.trim()
+  } else {
+    delete extra.custom_base_url_enabled
+    delete extra.custom_base_url
+  }
 }
 
 function applyAnthropicPassthroughExtra(extra: Record<string, unknown>) {
