@@ -372,6 +372,23 @@ func applyAccountPassthroughFieldsWithContext(
 		}
 	}
 
+	// Delete phase: runs after all write modes to ensure deletions are final.
+	for _, rule := range rules {
+		if rule.Mode != "delete" {
+			continue
+		}
+		switch rule.Target {
+		case "header":
+			deletePassthroughHeader(outbound, rule.Key)
+		case "body":
+			var err error
+			targetBody, err = deletePassthroughBodyValue(targetBody, rule.Key)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	return targetBody, nil
 }
 
@@ -445,6 +462,53 @@ func setPassthroughBodyValue(ctx context.Context, account *Account, targetBody [
 	}
 	current[parts[len(parts)-1]] = value
 	return json.Marshal(obj)
+}
+
+func deletePassthroughBodyValue(targetBody []byte, path string) ([]byte, error) {
+	if len(targetBody) == 0 {
+		return targetBody, nil
+	}
+	var payload any
+	if err := json.Unmarshal(targetBody, &payload); err != nil {
+		return targetBody, nil
+	}
+	obj, ok := payload.(map[string]any)
+	if !ok {
+		return targetBody, nil
+	}
+
+	parts := strings.Split(path, ".")
+	current := obj
+	for i := 0; i < len(parts)-1; i++ {
+		next, exists := current[parts[i]]
+		if !exists {
+			return targetBody, nil
+		}
+		child, ok := next.(map[string]any)
+		if !ok {
+			return targetBody, nil
+		}
+		current = child
+	}
+
+	lastKey := parts[len(parts)-1]
+	if _, exists := current[lastKey]; !exists {
+		return targetBody, nil
+	}
+	delete(current, lastKey)
+	return json.Marshal(obj)
+}
+
+func deletePassthroughHeader(header http.Header, key string) {
+	if header == nil {
+		return
+	}
+	for existingKey := range header {
+		if strings.EqualFold(existingKey, key) {
+			delete(header, existingKey)
+			return
+		}
+	}
 }
 
 func passthroughHeaderValues(header http.Header, key string) ([]string, bool) {

@@ -1084,3 +1084,253 @@ func TestApplyAccountPassthroughFields_DisabledSkipsParsingEvenWithMalformedRule
 	require.NoError(t, err, "disabled passthrough 应直接短路，不应解析坏规则")
 	require.Equal(t, inBody, got)
 }
+
+func TestApplyAccountPassthroughFields_DeleteHeaderRemovesFromOutbound(t *testing.T) {
+	account := &Account{
+		ID:   1060,
+		Type: AccountTypeAPIKey,
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "header", Mode: "delete", Key: "X-Remove-Me"},
+			},
+		},
+	}
+	outbound := http.Header{}
+	outbound.Set("X-Remove-Me", "should-be-gone")
+	outbound.Set("X-Keep-Me", "should-stay")
+
+	_, err := ApplyAccountPassthroughFields(account, http.Header{}, nil, []byte(`{}`), outbound)
+
+	require.NoError(t, err)
+	require.Empty(t, outbound.Get("X-Remove-Me"))
+	require.Equal(t, "should-stay", outbound.Get("X-Keep-Me"))
+}
+
+func TestApplyAccountPassthroughFields_DeleteHeaderSkipsWhenNotPresent(t *testing.T) {
+	account := &Account{
+		ID:   1061,
+		Type: AccountTypeAPIKey,
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "header", Mode: "delete", Key: "X-Nonexistent"},
+			},
+		},
+	}
+	outbound := http.Header{}
+	outbound.Set("X-Keep", "value")
+
+	_, err := ApplyAccountPassthroughFields(account, http.Header{}, nil, []byte(`{}`), outbound)
+
+	require.NoError(t, err)
+	require.Equal(t, "value", outbound.Get("X-Keep"))
+}
+
+func TestApplyAccountPassthroughFields_DeleteHeaderCaseInsensitive(t *testing.T) {
+	account := &Account{
+		ID:   1062,
+		Type: AccountTypeAPIKey,
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "header", Mode: "delete", Key: "x-remove-me"},
+			},
+		},
+	}
+	outbound := http.Header{}
+	outbound.Set("X-Remove-Me", "should-be-gone")
+
+	_, err := ApplyAccountPassthroughFields(account, http.Header{}, nil, []byte(`{}`), outbound)
+
+	require.NoError(t, err)
+	require.Empty(t, outbound.Get("X-Remove-Me"))
+}
+
+func TestApplyAccountPassthroughFields_DeleteBodyRemovesField(t *testing.T) {
+	account := &Account{
+		ID:   1063,
+		Type: AccountTypeAPIKey,
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "body", Mode: "delete", Key: "metadata.internal"},
+			},
+		},
+	}
+
+	gotBody, err := ApplyAccountPassthroughFields(account, http.Header{}, nil, []byte(`{"metadata":{"internal":"secret","public":"visible"},"input":[]}`), http.Header{})
+
+	require.NoError(t, err)
+	require.False(t, gjson.GetBytes(gotBody, "metadata.internal").Exists())
+	require.Equal(t, "visible", gjson.GetBytes(gotBody, "metadata.public").String())
+	require.True(t, gjson.GetBytes(gotBody, "input").Exists())
+}
+
+func TestApplyAccountPassthroughFields_DeleteBodySkipsWhenPathMissing(t *testing.T) {
+	account := &Account{
+		ID:   1064,
+		Type: AccountTypeAPIKey,
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "body", Mode: "delete", Key: "nonexistent.path"},
+			},
+		},
+	}
+
+	gotBody, err := ApplyAccountPassthroughFields(account, http.Header{}, nil, []byte(`{"input":[]}`), http.Header{})
+
+	require.NoError(t, err)
+	require.JSONEq(t, `{"input":[]}`, string(gotBody))
+}
+
+func TestApplyAccountPassthroughFields_DeleteBodySkipsNonObjectAncestor(t *testing.T) {
+	account := &Account{
+		ID:   1065,
+		Type: AccountTypeAPIKey,
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "body", Mode: "delete", Key: "metadata.internal"},
+			},
+		},
+	}
+
+	gotBody, err := ApplyAccountPassthroughFields(account, http.Header{}, nil, []byte(`{"metadata":"string-value"}`), http.Header{})
+
+	require.NoError(t, err)
+	require.JSONEq(t, `{"metadata":"string-value"}`, string(gotBody))
+}
+
+func TestApplyAccountPassthroughFields_DeleteBodyPreservesEmptyParent(t *testing.T) {
+	account := &Account{
+		ID:   1066,
+		Type: AccountTypeAPIKey,
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "body", Mode: "delete", Key: "metadata.only_child"},
+			},
+		},
+	}
+
+	gotBody, err := ApplyAccountPassthroughFields(account, http.Header{}, nil, []byte(`{"metadata":{"only_child":"value"}}`), http.Header{})
+
+	require.NoError(t, err)
+	require.JSONEq(t, `{"metadata":{}}`, string(gotBody))
+}
+
+func TestApplyAccountPassthroughFields_DeleteBodyTopLevelKey(t *testing.T) {
+	account := &Account{
+		ID:   1067,
+		Type: AccountTypeAPIKey,
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "body", Mode: "delete", Key: "remove_me"},
+			},
+		},
+	}
+
+	gotBody, err := ApplyAccountPassthroughFields(account, http.Header{}, nil, []byte(`{"remove_me":"gone","keep_me":"here"}`), http.Header{})
+
+	require.NoError(t, err)
+	require.False(t, gjson.GetBytes(gotBody, "remove_me").Exists())
+	require.Equal(t, "here", gjson.GetBytes(gotBody, "keep_me").String())
+}
+
+func TestApplyAccountPassthroughFields_DeleteRunsAfterInject(t *testing.T) {
+	account := &Account{
+		ID:   1068,
+		Type: AccountTypeAPIKey,
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "header", Mode: "inject", Key: "X-Injected", Value: "injected-value"},
+				{Target: "header", Mode: "delete", Key: "X-Injected"},
+			},
+		},
+	}
+	outbound := http.Header{}
+
+	_, err := ApplyAccountPassthroughFields(account, http.Header{}, nil, []byte(`{}`), outbound)
+
+	require.NoError(t, err)
+	require.Empty(t, outbound.Get("X-Injected"))
+}
+
+func TestApplyAccountPassthroughFields_DeleteRunsAfterForward(t *testing.T) {
+	account := &Account{
+		ID:   1069,
+		Type: AccountTypeAPIKey,
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "header", Mode: "forward", Key: "X-Forwarded"},
+				{Target: "header", Mode: "delete", Key: "X-Forwarded"},
+			},
+		},
+	}
+	outbound := http.Header{}
+
+	_, err := ApplyAccountPassthroughFields(account, http.Header{"X-Forwarded": []string{"forwarded-value"}}, nil, []byte(`{}`), outbound)
+
+	require.NoError(t, err)
+	require.Empty(t, outbound.Get("X-Forwarded"))
+}
+
+func TestApplyAccountPassthroughFields_DeleteBodyRunsAfterInject(t *testing.T) {
+	account := &Account{
+		ID:   1070,
+		Type: AccountTypeAPIKey,
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "body", Mode: "inject", Key: "metadata.injected", Value: "injected-value"},
+				{Target: "body", Mode: "delete", Key: "metadata.injected"},
+			},
+		},
+	}
+
+	gotBody, err := ApplyAccountPassthroughFields(account, http.Header{}, nil, []byte(`{}`), http.Header{})
+
+	require.NoError(t, err)
+	require.False(t, gjson.GetBytes(gotBody, "metadata.injected").Exists())
+}
+
+func TestApplyAccountPassthroughFields_DeleteHeaderWithNilOutbound(t *testing.T) {
+	account := &Account{
+		ID:   1071,
+		Type: AccountTypeAPIKey,
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "header", Mode: "delete", Key: "X-Remove"},
+			},
+		},
+	}
+
+	_, err := ApplyAccountPassthroughFields(account, http.Header{}, nil, []byte(`{}`), nil)
+
+	require.EqualError(t, err, "passthrough outbound headers are required for header rules")
+}
+
+func TestApplyAccountPassthroughFields_DeleteBodyOnlyAllowsNilOutbound(t *testing.T) {
+	account := &Account{
+		ID:   1072,
+		Type: AccountTypeAPIKey,
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "body", Mode: "delete", Key: "remove_me"},
+			},
+		},
+	}
+
+	gotBody, err := ApplyAccountPassthroughFields(account, http.Header{}, nil, []byte(`{"remove_me":"gone","keep":"here"}`), nil)
+
+	require.NoError(t, err)
+	require.False(t, gjson.GetBytes(gotBody, "remove_me").Exists())
+	require.Equal(t, "here", gjson.GetBytes(gotBody, "keep").String())
+}
