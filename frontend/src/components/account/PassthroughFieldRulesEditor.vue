@@ -69,6 +69,7 @@
             <option value="forward">{{ t('admin.accounts.passthroughFields.modeForward') }}</option>
             <option value="inject">{{ t('admin.accounts.passthroughFields.modeInject') }}</option>
             <option value="map">{{ t('admin.accounts.passthroughFields.modeMap') }}</option>
+            <option value="delete">{{ t('admin.accounts.passthroughFields.modeDelete') }}</option>
           </select>
 
           <div class="min-w-[220px] flex-1">
@@ -142,6 +143,12 @@
           class="text-xs text-blue-600 dark:text-blue-400"
         >
           {{ t('admin.accounts.passthroughFields.injectHint') }}
+        </p>
+        <p
+          v-if="rule.mode === 'delete'"
+          class="text-xs text-blue-600 dark:text-blue-400"
+        >
+          {{ t('admin.accounts.passthroughFields.deleteHint') }}
         </p>
       </div>
 

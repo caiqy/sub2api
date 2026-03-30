@@ -17,12 +17,14 @@ vi.mock('vue-i18n', async () => {
     'admin.accounts.passthroughFields.modeForward': '放行透传',
     'admin.accounts.passthroughFields.modeInject': '固定注入',
     'admin.accounts.passthroughFields.modeMap': '映射透传',
+    'admin.accounts.passthroughFields.modeDelete': '删除字段',
     'admin.accounts.passthroughFields.sourceKey': '来源字段',
     'admin.accounts.passthroughFields.targetKey': '目标字段',
     'admin.accounts.passthroughFields.headerHint': 'Header 比较时不区分大小写',
     'admin.accounts.passthroughFields.bodyHint': '仅支持 xx.xx 形式的对象层级路径',
     'admin.accounts.passthroughFields.injectHint': '固定注入将在转发前写入上游请求',
     'admin.accounts.passthroughFields.mapHint': '映射透传会复制来源字段到目标字段，且不会修改原字段',
+    'admin.accounts.passthroughFields.deleteHint': '删除模式会在转发前从上游请求中移除指定字段',
     'admin.accounts.passthroughFields.hiddenRulesError': '规则列表已隐藏，请重新开启后处理错误',
     'admin.accounts.passthroughFields.errors.duplicateKey': '同一目标下的字段名或路径不能重复',
     'admin.accounts.passthroughFields.errors.sourceKeyRequired': '来源字段或路径不能为空',
@@ -316,6 +318,8 @@ describe('PassthroughFieldRulesEditor', () => {
     expect(zh.admin.accounts.passthroughFields.sourceKey).toBeTruthy()
     expect(zh.admin.accounts.passthroughFields.targetKey).toBeTruthy()
     expect(zh.admin.accounts.passthroughFields.mapHint).toBe('映射透传会复制来源字段到目标字段，且不会修改原字段')
+    expect(zh.admin.accounts.passthroughFields.modeDelete).toBe('删除字段')
+    expect(zh.admin.accounts.passthroughFields.deleteHint).toBe('删除模式会在转发前从上游请求中移除指定字段')
     expect(zh.admin.accounts.passthroughFields.hiddenRulesError).toBeTruthy()
     expect(zh.admin.accounts.passthroughFields.errors.sourceKeyRequired).toBeTruthy()
     expect(zh.admin.accounts.passthroughFields.errors.sameSourceAndTarget).toBeTruthy()
@@ -325,9 +329,37 @@ describe('PassthroughFieldRulesEditor', () => {
     expect(en.admin.accounts.passthroughFields.sourceKey).toBeTruthy()
     expect(en.admin.accounts.passthroughFields.targetKey).toBeTruthy()
     expect(en.admin.accounts.passthroughFields.mapHint).toBe('Map mode copies the source field to the target field without changing the original field')
+    expect(en.admin.accounts.passthroughFields.modeDelete).toBe('Delete')
+    expect(en.admin.accounts.passthroughFields.deleteHint).toBe('Delete mode removes the specified field from the upstream request before forwarding')
     expect(en.admin.accounts.passthroughFields.hiddenRulesError).toBeTruthy()
     expect(en.admin.accounts.passthroughFields.errors.sourceKeyRequired).toBeTruthy()
     expect(en.admin.accounts.passthroughFields.errors.sameSourceAndTarget).toBeTruthy()
     expect(en.admin.accounts.passthroughFields.errors.reservedKey).toBeUndefined()
+  })
+
+  it('mode=delete 时隐藏 value 和 source_key 输入框并显示 deleteHint', () => {
+    const wrapper = mount(PassthroughFieldRulesEditor, {
+      props: {
+        enabled: true,
+        rules: [{ id: '1', target: 'header', mode: 'delete', key: 'X-Remove', source_key: '', value: '' }]
+      }
+    })
+
+    expect(wrapper.find('[data-testid="passthrough-rule-value-0"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="passthrough-rule-source-key-0"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('删除模式会在转发前从上游请求中移除指定字段')
+  })
+
+  it('mode=delete 下拉选项存在', () => {
+    const wrapper = mount(PassthroughFieldRulesEditor, {
+      props: {
+        enabled: true,
+        rules: [{ id: '1', target: 'header', mode: 'forward', key: '', source_key: '', value: '' }]
+      }
+    })
+
+    const options = wrapper.get('[data-testid="passthrough-rule-mode-0"]').findAll('option')
+    const values = options.map(o => o.attributes('value'))
+    expect(values).toContain('delete')
   })
 })

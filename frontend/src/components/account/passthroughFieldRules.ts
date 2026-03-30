@@ -1,5 +1,5 @@
 export type PassthroughFieldTarget = 'header' | 'body'
-export type PassthroughFieldMode = 'forward' | 'inject' | 'map'
+export type PassthroughFieldMode = 'forward' | 'inject' | 'map' | 'delete'
 
 export interface PassthroughFieldRuleDraft {
   id: string
@@ -132,7 +132,8 @@ export function validatePassthroughFieldRules(rules: PassthroughFieldRuleDraft[]
 
 function getComparableKey(rule: PassthroughFieldRuleDraft): string {
   const normalizedKey = rule.target === 'header' ? rule.key.toLowerCase() : rule.key
-  return `${rule.target}:${normalizedKey}`
+  const modeGroup = rule.mode === 'delete' ? 'delete' : 'write'
+  return `${rule.target}:${modeGroup}:${normalizedKey}`
 }
 
 function isSameSourceAndTarget(rule: PassthroughFieldRuleDraft): boolean {
