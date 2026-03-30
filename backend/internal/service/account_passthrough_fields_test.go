@@ -366,6 +366,117 @@ func TestNormalizeAccountPassthroughFields(t *testing.T) {
 		require.Equal(t, true, normalized["passthrough_fields_enabled"])
 		require.Contains(t, normalized, "passthrough_field_rules")
 	})
+
+	t.Run("AcceptsDeleteModeHeaderRule", func(t *testing.T) {
+		normalized, err := NormalizeAccountPassthroughFields(NormalizePassthroughFieldsInput{
+			RequestedType: AccountTypeAPIKey,
+			Extra: map[string]any{
+				"passthrough_fields_enabled": true,
+				"passthrough_field_rules": []any{
+					map[string]any{"target": "header", "mode": "delete", "key": " X-Remove-Me "},
+				},
+			},
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, []PassthroughFieldRule{
+			{Target: "header", Mode: "delete", Key: "X-Remove-Me"},
+		}, normalized["passthrough_field_rules"])
+	})
+
+	t.Run("AcceptsDeleteModeBodyRule", func(t *testing.T) {
+		normalized, err := NormalizeAccountPassthroughFields(NormalizePassthroughFieldsInput{
+			RequestedType: AccountTypeAPIKey,
+			Extra: map[string]any{
+				"passthrough_fields_enabled": true,
+				"passthrough_field_rules": []any{
+					map[string]any{"target": "body", "mode": "delete", "key": "metadata.internal"},
+				},
+			},
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, []PassthroughFieldRule{
+			{Target: "body", Mode: "delete", Key: "metadata.internal"},
+		}, normalized["passthrough_field_rules"])
+	})
+
+	t.Run("DeleteModeClearsResidualValueAndSourceKey", func(t *testing.T) {
+		normalized, err := NormalizeAccountPassthroughFields(NormalizePassthroughFieldsInput{
+			RequestedType: AccountTypeAPIKey,
+			Extra: map[string]any{
+				"passthrough_fields_enabled": true,
+				"passthrough_field_rules": []any{
+					map[string]any{"target": "header", "mode": "delete", "key": "X-Remove", "value": "leftover", "source_key": "leftover"},
+				},
+			},
+		})
+
+		require.NoError(t, err)
+		require.Equal(t, []PassthroughFieldRule{
+			{Target: "header", Mode: "delete", Key: "X-Remove"},
+		}, normalized["passthrough_field_rules"])
+	})
+
+	t.Run("RejectsDeleteModeWithBlankKey", func(t *testing.T) {
+		_, err := NormalizeAccountPassthroughFields(NormalizePassthroughFieldsInput{
+			RequestedType: AccountTypeAPIKey,
+			Extra: map[string]any{
+				"passthrough_fields_enabled": true,
+				"passthrough_field_rules": []any{
+					map[string]any{"target": "header", "mode": "delete", "key": "   "},
+				},
+			},
+		})
+
+		require.EqualError(t, err, "passthrough header key is required")
+	})
+
+	t.Run("RejectsDeleteModeWithInvalidBodyPath", func(t *testing.T) {
+		_, err := NormalizeAccountPassthroughFields(NormalizePassthroughFieldsInput{
+			RequestedType: AccountTypeAPIKey,
+			Extra: map[string]any{
+				"passthrough_fields_enabled": true,
+				"passthrough_field_rules": []any{
+					map[string]any{"target": "body", "mode": "delete", "key": "messages.0.role"},
+				},
+			},
+		})
+
+		require.EqualError(t, err, "invalid passthrough body path: messages.0.role")
+	})
+
+	t.Run("RejectsDuplicateDeleteSameTarget", func(t *testing.T) {
+		_, err := NormalizeAccountPassthroughFields(NormalizePassthroughFieldsInput{
+			RequestedType: AccountTypeAPIKey,
+			Extra: map[string]any{
+				"passthrough_fields_enabled": true,
+				"passthrough_field_rules": []any{
+					map[string]any{"target": "header", "mode": "delete", "key": "X-Remove"},
+					map[string]any{"target": "header", "mode": "delete", "key": "x-remove"},
+				},
+			},
+		})
+
+		require.EqualError(t, err, "duplicate passthrough header key: x-remove")
+	})
+
+	t.Run("AllowsDeleteAndInjectSameKey", func(t *testing.T) {
+		normalized, err := NormalizeAccountPassthroughFields(NormalizePassthroughFieldsInput{
+			RequestedType: AccountTypeAPIKey,
+			Extra: map[string]any{
+				"passthrough_fields_enabled": true,
+				"passthrough_field_rules": []any{
+					map[string]any{"target": "header", "mode": "inject", "key": "X-Env", "value": "prod"},
+					map[string]any{"target": "header", "mode": "delete", "key": "X-Env"},
+				},
+			},
+		})
+
+		require.NoError(t, err)
+		rules := normalized["passthrough_field_rules"].([]PassthroughFieldRule)
+		require.Len(t, rules, 2)
+	})
 }
 
 func TestApplyAccountPassthroughFields_InjectsHeader(t *testing.T) {

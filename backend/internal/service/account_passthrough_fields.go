@@ -207,6 +207,9 @@ func normalizePassthroughRule(rule PassthroughFieldRule) (PassthroughFieldRule, 
 			return PassthroughFieldRule{}, fmt.Errorf("passthrough map source_key and key must be different: %s", strings.ToLower(rule.SourceKey))
 		}
 		rule.Value = ""
+	case "delete":
+		rule.Value = ""
+		rule.SourceKey = ""
 	default:
 		return PassthroughFieldRule{}, fmt.Errorf("invalid passthrough field mode: %s", rule.Mode)
 	}
@@ -224,10 +227,15 @@ func hasPassthroughConfigKeys(extra map[string]any) bool {
 }
 
 func validatePassthroughRuleDuplicate(seenRulesByTarget map[string]map[string]PassthroughFieldRule, rule PassthroughFieldRule) error {
-	seenKeys, ok := seenRulesByTarget[rule.Target]
+	trackingTarget := rule.Target
+	if rule.Mode == "delete" {
+		trackingTarget = rule.Target + ":delete"
+	}
+
+	seenKeys, ok := seenRulesByTarget[trackingTarget]
 	if !ok {
 		seenKeys = map[string]PassthroughFieldRule{}
-		seenRulesByTarget[rule.Target] = seenKeys
+		seenRulesByTarget[trackingTarget] = seenKeys
 	}
 	comparisonKey := rule.Key
 	if rule.Target == "header" {
