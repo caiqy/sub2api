@@ -1299,6 +1299,25 @@ func TestApplyAccountPassthroughFields_DeleteBodyRunsAfterInject(t *testing.T) {
 	require.False(t, gjson.GetBytes(gotBody, "metadata.injected").Exists())
 }
 
+func TestApplyAccountPassthroughFields_DeleteBodyRunsAfterMap(t *testing.T) {
+	account := &Account{
+		ID:   10701,
+		Type: AccountTypeAPIKey,
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "body", Mode: "map", Key: "metadata.mapped", SourceKey: "source.value"},
+				{Target: "body", Mode: "delete", Key: "metadata.mapped"},
+			},
+		},
+	}
+
+	gotBody, err := ApplyAccountPassthroughFields(account, http.Header{}, []byte(`{"source":{"value":"mapped-value"}}`), []byte(`{}`), http.Header{})
+
+	require.NoError(t, err)
+	require.False(t, gjson.GetBytes(gotBody, "metadata.mapped").Exists())
+}
+
 func TestApplyAccountPassthroughFields_DeleteHeaderWithNilOutbound(t *testing.T) {
 	account := &Account{
 		ID:   1071,

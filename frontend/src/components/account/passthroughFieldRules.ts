@@ -62,8 +62,8 @@ export function validatePassthroughFieldRules(rules: PassthroughFieldRuleDraft[]
 } {
   const errors: Record<number, PassthroughFieldRuleErrors> = {}
   const seenKeys = new Map<string, number>()
-  // Collect valid body keys (index -> normalized key) for prefix-conflict check
-  const validBodyKeys: Array<{ index: number; key: string }> = []
+  // Collect valid body keys within the same conflict group for prefix-conflict check
+  const validBodyKeys: Array<{ index: number; key: string; modeGroup: 'delete' | 'write' }> = []
 
   rules.forEach((rule, index) => {
     const normalizedRule = normalizePassthroughFieldRule(rule)
@@ -99,7 +99,11 @@ export function validatePassthroughFieldRules(rules: PassthroughFieldRuleDraft[]
         seenKeys.set(comparableKey, index)
         // Accumulate valid body keys for prefix-conflict check below
         if (normalizedRule.target === 'body') {
-          validBodyKeys.push({ index, key: normalizedRule.key })
+          validBodyKeys.push({
+            index,
+            key: normalizedRule.key,
+            modeGroup: normalizedRule.mode === 'delete' ? 'delete' : 'write'
+          })
         }
       }
     }
@@ -114,6 +118,9 @@ export function validatePassthroughFieldRules(rules: PassthroughFieldRuleDraft[]
     for (let j = i + 1; j < validBodyKeys.length; j++) {
       const a = validBodyKeys[i]
       const b = validBodyKeys[j]
+      if (a.modeGroup !== b.modeGroup) {
+        continue
+      }
       if (isBodyPathPrefixOf(a.key, b.key) || isBodyPathPrefixOf(b.key, a.key)) {
         // Mark the later-occurring rule (higher index = j)
         if (!errors[b.index]) {

@@ -239,4 +239,14 @@ describe('passthroughFieldRules', () => {
 
     expect(result.ok).toBe(true)
   })
+
+  it('allows body delete ancestor with body write descendant because they are in different conflict groups', () => {
+    const result = validatePassthroughFieldRules([
+      { id: 'rule-1', target: 'body', mode: 'delete', key: 'metadata', source_key: '', value: '' },
+      { id: 'rule-2', target: 'body', mode: 'inject', key: 'metadata.user_id', source_key: '', value: 'v2' }
+    ])
+
+    expect(result.ok).toBe(true)
+    expect(result.errors).toEqual({})
+  })
 })
