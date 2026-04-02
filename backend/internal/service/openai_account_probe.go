@@ -42,14 +42,20 @@ type openAIAccountProbe struct {
 	stats   *openAIAccountRuntimeStats
 	entries sync.Map // key: int64(accountID), value: *openAIAccountProbeEntry
 	stopCh  chan struct{}
+	ctx     context.Context
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
 	stopped atomic.Bool
 }
 
 func newOpenAIAccountProbe(service *OpenAIGatewayService, stats *openAIAccountRuntimeStats) *openAIAccountProbe {
+	ctx, cancel := context.WithCancel(context.Background())
 	p := &openAIAccountProbe{
 		service: service,
 		stats:   stats,
 		stopCh:  make(chan struct{}),
+		ctx:     ctx,
+		cancel:  cancel,
 	}
 	go p.loop()
 	return p
@@ -117,7 +123,11 @@ func (p *openAIAccountProbe) stop() {
 		return
 	}
 	if p.stopped.CompareAndSwap(false, true) {
+		if p.cancel != nil {
+			p.cancel()
+		}
 		close(p.stopCh)
+		p.wg.Wait()
 	}
 }
 
@@ -146,7 +156,7 @@ func (p *openAIAccountProbe) loop() {
 
 // tick 遍历所有 entry，按策略调度探活请求。
 func (p *openAIAccountProbe) tick() {
-	if p == nil || p.service == nil {
+	if p == nil || p.service == nil || p.stopped.Load() {
 		return
 	}
 	lcfg := p.service.openAIWSSchedulerLayeredConfig()
@@ -191,12 +201,20 @@ func (p *openAIAccountProbe) tick() {
 			return true
 		}
 
+		if p.stopped.Load() {
+			return false
+		}
+
 		// single-flight：一个 entry 同一时间只有一个探活 goroutine
 		if !entry.probing.CompareAndSwap(false, true) {
 			return true
 		}
 
-		go p.probeAccount(account, entry, lcfg)
+		p.wg.Add(1)
+		go func() {
+			defer p.wg.Done()
+			p.probeAccount(account, entry, lcfg)
+		}()
 		return true
 	})
 }
@@ -206,7 +224,7 @@ func (p *openAIAccountProbe) probeAccount(account *Account, entry *openAIAccount
 	defer entry.probing.Store(false)
 
 	model := p.resolveProbeModel(account)
-	result := p.sendProbeRequest(account, model, lcfg)
+	result := p.sendProbeRequest(p.ctx, account, model, lcfg)
 
 	if result.err == nil {
 		// 探活成功：上报 TTFT 到 EWMA（而不是直接重置），让 EWMA 自然回落
@@ -282,7 +300,7 @@ type probeResult struct {
 }
 
 // sendProbeRequest 发送轻量级探活请求，测量首 token 延迟。
-func (p *openAIAccountProbe) sendProbeRequest(account *Account, model string, lcfg GatewayOpenAIWSSchedulerLayeredConfig) probeResult {
+func (p *openAIAccountProbe) sendProbeRequest(ctx context.Context, account *Account, model string, lcfg GatewayOpenAIWSSchedulerLayeredConfig) probeResult {
 	if p.service == nil || account == nil {
 		return probeResult{err: fmt.Errorf("nil service or account")}
 	}
@@ -291,7 +309,10 @@ func (p *openAIAccountProbe) sendProbeRequest(account *Account, model string, lc
 	if timeout <= 0 {
 		timeout = 15 * time.Second
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	token, _, err := p.service.GetAccessToken(ctx, account)
@@ -349,7 +370,11 @@ func (p *openAIAccountProbe) recoverAccount(accountID int64, entry *openAIAccoun
 		p.stats.resetAccount(accountID)
 	}
 	if entry.dbFlagSet.Load() && p.service != nil && p.service.accountRepo != nil {
-		if err := p.service.accountRepo.ClearTempUnschedulable(context.Background(), accountID); err != nil {
+		ctx := p.ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		if err := p.service.accountRepo.ClearTempUnschedulable(ctx, accountID); err != nil {
 			slog.Warn("probe: failed to clear temp unschedulable",
 				"account_id", accountID,
 				"error", err.Error(),
@@ -367,7 +392,11 @@ func (p *openAIAccountProbe) setTempUnschedulable(accountID int64, entry *openAI
 	}
 	until := time.Now().Add(probePermanentBlockDuration)
 	reason := "layered scheduler probe: consecutive failures exceeded threshold"
-	if err := p.service.accountRepo.SetTempUnschedulable(context.Background(), accountID, until, reason); err != nil {
+	ctx := p.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := p.service.accountRepo.SetTempUnschedulable(ctx, accountID, until, reason); err != nil {
 		slog.Warn("probe: failed to set temp unschedulable",
 			"account_id", accountID,
 			"error", err.Error(),

@@ -2,6 +2,7 @@ package service
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -161,4 +162,33 @@ func TestProbe_Stop_PreventsNewRegistrations(t *testing.T) {
 
 	_, ok := probe.entries.Load(int64(99))
 	require.False(t, ok, "markPenalized should be no-op after stop()")
+}
+
+func TestProbe_StopCancelsRootContextAndPreventsNewWork(t *testing.T) {
+	probe := newOpenAIAccountProbe(nil, newOpenAIAccountRuntimeStats())
+	require.NotNil(t, probe)
+
+	// Simulate one in-flight worker
+	probe.wg.Add(1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer probe.wg.Done()
+		<-probe.ctx.Done()
+	}()
+
+	probe.stop()
+
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("probe.stop() did not wait for in-flight work to observe cancellation")
+	}
+
+	require.True(t, probe.stopped.Load())
+	select {
+	case <-probe.ctx.Done():
+	default:
+		t.Fatal("probe root context should be canceled after stop")
+	}
 }
