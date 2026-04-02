@@ -188,11 +188,11 @@ func TestLayered_TTFTPenalty_UsesGroupLevelBaseline(t *testing.T) {
 	}
 }
 
-// TestLayered_TTFTPenalty_ProbeAndSchedulerUseSameBaseline verifies that the
-// evaluateRuntimePenalty helper produces consistent group-level TTFT baseline
-// regardless of which account is being evaluated, ensuring probe and scheduler
-// share the same penalty semantics.
-func TestLayered_TTFTPenalty_ProbeAndSchedulerUseSameBaseline(t *testing.T) {
+// TestLayered_TTFTPenalty_SharedEvaluatorUsesConsistentGroupBaseline verifies
+// that the shared evaluator helpers compute and apply the same group-level TTFT
+// baseline regardless of which account is being evaluated. This covers helper
+// consistency only; it does not verify probe end-to-end recovery behavior.
+func TestLayered_TTFTPenalty_SharedEvaluatorUsesConsistentGroupBaseline(t *testing.T) {
 	accounts := []Account{
 		{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 3, Priority: 10},
 		{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 3, Priority: 50},
