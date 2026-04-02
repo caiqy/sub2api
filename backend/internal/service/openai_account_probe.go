@@ -261,6 +261,12 @@ func (p *openAIAccountProbe) probeAccount(account *Account, entry *openAIAccount
 		entry.errorPenalized.Store(eval.ErrorPenalized)
 		entry.ttftPenalized.Store(eval.TTFTPenalized)
 		entry.consecutiveFail.Store(0)
+		slog.Info("probe succeeded",
+			"account_id", account.ID,
+			"error_penalized", entry.errorPenalized.Load(),
+			"ttft_penalized", entry.ttftPenalized.Load(),
+			"last_probe_ttft_ms", entry.lastProbeTTFTMs.Load(),
+		)
 		p.finalizePenaltyState(account.ID, entry)
 		return
 	}
@@ -484,8 +490,16 @@ func (p *openAIAccountProbe) recoverAccount(accountID int64, entry *openAIAccoun
 	)
 }
 
+// applyManualRecovery 执行管理员手动恢复：完整清除内存中的惩罚原因与分组上下文，
+// 但仅重置错误 EWMA，故意保留 TTFT EWMA，让调度在人工干预后仍保有延迟证据。
 func (p *openAIAccountProbe) applyManualRecovery(accountID int64, entry *openAIAccountProbeEntry) {
+	prevError := false
+	prevTTFT := false
+	lastProbeTTFTMs := int64(0)
 	if entry != nil {
+		prevError = entry.errorPenalized.Load()
+		prevTTFT = entry.ttftPenalized.Load()
+		lastProbeTTFTMs = entry.lastProbeTTFTMs.Load()
 		entry.errorPenalized.Store(false)
 		entry.ttftPenalized.Store(false)
 		entry.groupIDSet.Store(false)
@@ -497,12 +511,10 @@ func (p *openAIAccountProbe) applyManualRecovery(accountID int64, entry *openAIA
 			ctx = context.Background()
 		}
 		if err := p.service.accountRepo.ClearTempUnschedulable(ctx, accountID); err != nil {
-			lastProbeTTFTMs := int64(0)
-			if entry != nil {
-				lastProbeTTFTMs = entry.lastProbeTTFTMs.Load()
-			}
 			slog.Warn("probe: manual recovery failed to clear temp unschedulable",
 				"account_id", accountID,
+				"prev_error_penalized", prevError,
+				"prev_ttft_penalized", prevTTFT,
 				"error_penalized", false,
 				"ttft_penalized", false,
 				"last_probe_ttft_ms", lastProbeTTFTMs,
@@ -516,14 +528,11 @@ func (p *openAIAccountProbe) applyManualRecovery(accountID int64, entry *openAIA
 	p.entries.Delete(accountID)
 	slog.Info("probe: manual recovery applied",
 		"account_id", accountID,
+		"prev_error_penalized", prevError,
+		"prev_ttft_penalized", prevTTFT,
 		"error_penalized", false,
 		"ttft_penalized", false,
-		"last_probe_ttft_ms", func() int64 {
-			if entry == nil {
-				return 0
-			}
-			return entry.lastProbeTTFTMs.Load()
-		}(),
+		"last_probe_ttft_ms", lastProbeTTFTMs,
 	)
 }
 
