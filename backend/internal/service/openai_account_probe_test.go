@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -387,6 +388,40 @@ func TestProbe_ManualRecovery_ClearsReasonsButPreservesTTFT(t *testing.T) {
 	require.InDelta(t, 1500.0, ttftAfter, 0.01)
 	_, ok = probe.entries.Load(int64(1))
 	require.False(t, ok)
+}
+
+func TestProbe_ManualRecovery_MarksEntryToIgnoreStaleProbeResults(t *testing.T) {
+	probe := &openAIAccountProbe{stats: newOpenAIAccountRuntimeStats(), stopCh: make(chan struct{}), ctx: context.Background()}
+	defer probe.stop()
+	probe.markPenalized(1, nil, true, true)
+
+	value, ok := probe.entries.Load(int64(1))
+	require.True(t, ok)
+	entry := value.(*openAIAccountProbeEntry)
+
+	probe.applyManualRecovery(1, entry)
+	require.True(t, entry.ignoreResults.Load(), "manual recovery should mark stale in-flight probe results to be ignored")
+}
+
+func TestProbe_ExplainabilityFields_IncludeRuntimeMetrics(t *testing.T) {
+	stats := newOpenAIAccountRuntimeStats()
+	ttft := 1200
+	stats.report(1, true, &ttft)
+	probe := &openAIAccountProbe{stats: stats, stopCh: make(chan struct{}), ctx: context.Background()}
+	defer probe.stop()
+	probe.markPenalized(1, nil, true, false)
+
+	value, ok := probe.entries.Load(int64(1))
+	require.True(t, ok)
+	entry := value.(*openAIAccountProbeEntry)
+	entry.lastProbeTTFTMs.Store(1200)
+
+	fields := probe.explainabilityFields(1, entry)
+	joined := fmt.Sprint(fields...)
+	require.Contains(t, joined, "error_rate")
+	require.Contains(t, joined, "ttft")
+	require.Contains(t, joined, "group_min_ttft")
+	require.Contains(t, joined, "last_probe_ttft_ms")
 }
 
 func TestProbe_SuccessPath_LeavesEntryWhenTTFTStillPenalized(t *testing.T) {

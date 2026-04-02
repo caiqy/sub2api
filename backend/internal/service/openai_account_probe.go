@@ -28,6 +28,7 @@ type openAIAccountProbeEntry struct {
 	stateMu         sync.Mutex
 	consecutiveFail atomic.Int32
 	dbFlagSet       atomic.Bool
+	ignoreResults   atomic.Bool
 	probing         atomic.Bool
 	errorPenalized  atomic.Bool
 	ttftPenalized   atomic.Bool
@@ -244,6 +245,9 @@ func (p *openAIAccountProbe) probeAccount(account *Account, entry *openAIAccount
 
 	model := p.resolveProbeModel(account)
 	result := p.sendProbeRequest(p.ctx, account, model, lcfg)
+	if entry != nil && entry.ignoreResults.Load() {
+		return
+	}
 
 	if result.err == nil {
 		ttft := result.ttftMs
@@ -261,26 +265,16 @@ func (p *openAIAccountProbe) probeAccount(account *Account, entry *openAIAccount
 		entry.errorPenalized.Store(eval.ErrorPenalized)
 		entry.ttftPenalized.Store(eval.TTFTPenalized)
 		entry.consecutiveFail.Store(0)
-		slog.Info("probe succeeded",
-			"account_id", account.ID,
-			"error_penalized", entry.errorPenalized.Load(),
-			"ttft_penalized", entry.ttftPenalized.Load(),
-			"last_probe_ttft_ms", entry.lastProbeTTFTMs.Load(),
-		)
+		slog.Info("probe succeeded", p.explainabilityFields(account.ID, entry)...)
 		p.finalizePenaltyState(account.ID, entry)
 		return
 	}
 
 	// 探活失败
 	fails := entry.consecutiveFail.Add(1)
-	slog.Debug("probe failed",
-		"account_id", account.ID,
-		"consecutive_fail", fails,
-		"error_penalized", entry.errorPenalized.Load(),
-		"ttft_penalized", entry.ttftPenalized.Load(),
-		"last_probe_ttft_ms", entry.lastProbeTTFTMs.Load(),
-		"error", result.err.Error(),
-	)
+	fields := p.explainabilityFields(account.ID, entry)
+	fields = append(fields, "consecutive_fail", fails, "error", result.err.Error())
+	slog.Debug("probe failed", fields...)
 
 	if int(fails) >= lcfg.ProbeMaxFailures {
 		p.setTempUnschedulable(account.ID, entry)
@@ -348,6 +342,45 @@ func (p *openAIAccountProbe) reevaluatePenaltyReasons(ctx context.Context, accou
 	}
 	groupMinTTFT, hasGroupMin := ls.computeGroupMinTTFT(ctx, groupID)
 	return ls.evaluateRuntimePenalty(accountID, groupMinTTFT, hasGroupMin), nil
+}
+
+func (p *openAIAccountProbe) explainabilityFields(accountID int64, entry *openAIAccountProbeEntry) []any {
+	fields := []any{"account_id", accountID}
+	if entry != nil {
+		fields = append(fields,
+			"error_penalized", entry.errorPenalized.Load(),
+			"ttft_penalized", entry.ttftPenalized.Load(),
+			"last_probe_ttft_ms", entry.lastProbeTTFTMs.Load(),
+		)
+	} else {
+		fields = append(fields,
+			"error_penalized", false,
+			"ttft_penalized", false,
+			"last_probe_ttft_ms", int64(0),
+		)
+	}
+
+	if p != nil && p.stats != nil {
+		errorRate, ttft, hasTTFT := p.stats.snapshot(accountID)
+		fields = append(fields, "error_rate", errorRate)
+		if hasTTFT {
+			fields = append(fields, "ttft", ttft)
+		} else {
+			fields = append(fields, "ttft", float64(0))
+		}
+	} else {
+		fields = append(fields, "error_rate", float64(0), "ttft", float64(0))
+	}
+
+	groupMinTTFT := float64(0)
+	if p != nil {
+		groupID := probeEntryGroupID(entry)
+		if eval, err := p.reevaluatePenaltyReasons(context.Background(), accountID, groupID); err == nil && eval.HasGroupMin {
+			groupMinTTFT = eval.GroupMinTTFT
+		}
+	}
+	fields = append(fields, "group_min_ttft", groupMinTTFT)
+	return fields
 }
 
 func (p *openAIAccountProbe) finalizePenaltyState(accountID int64, entry *openAIAccountProbeEntry) {
@@ -455,7 +488,7 @@ func (p *openAIAccountProbe) sendProbeRequest(ctx context.Context, account *Acco
 	return probeResult{ttftMs: ttftMs}
 }
 
-// recoverAccount 恢复被惩罚的账号：重置 EWMA 统计，清除 DB 标记，从 entry 列表移除。
+// recoverAccount 恢复被惩罚的账号：重置错误 EWMA、保留 TTFT EWMA，清除 DB 标记，并从 entry 列表移除。
 func (p *openAIAccountProbe) recoverAccount(accountID int64, entry *openAIAccountProbeEntry) {
 	lastProbeTTFTMs := int64(0)
 	if entry != nil {
@@ -482,12 +515,12 @@ func (p *openAIAccountProbe) recoverAccount(accountID int64, entry *openAIAccoun
 		entry.dbFlagSet.Store(false)
 	}
 	p.entries.Delete(accountID)
-	slog.Info("probe: account recovered",
-		"account_id", accountID,
-		"error_penalized", false,
-		"ttft_penalized", false,
-		"last_probe_ttft_ms", lastProbeTTFTMs,
-	)
+	if entry != nil {
+		entry.errorPenalized.Store(false)
+		entry.ttftPenalized.Store(false)
+		entry.lastProbeTTFTMs.Store(lastProbeTTFTMs)
+	}
+	slog.Info("probe: account recovered", p.explainabilityFields(accountID, entry)...)
 }
 
 // applyManualRecovery 执行管理员手动恢复：完整清除内存中的惩罚原因与分组上下文，
@@ -497,6 +530,7 @@ func (p *openAIAccountProbe) applyManualRecovery(accountID int64, entry *openAIA
 	prevTTFT := false
 	lastProbeTTFTMs := int64(0)
 	if entry != nil {
+		entry.ignoreResults.Store(true)
 		prevError = entry.errorPenalized.Load()
 		prevTTFT = entry.ttftPenalized.Load()
 		lastProbeTTFTMs = entry.lastProbeTTFTMs.Load()
@@ -526,14 +560,12 @@ func (p *openAIAccountProbe) applyManualRecovery(accountID int64, entry *openAIA
 		p.stats.resetAccount(accountID)
 	}
 	p.entries.Delete(accountID)
-	slog.Info("probe: manual recovery applied",
-		"account_id", accountID,
+	fields := p.explainabilityFields(accountID, entry)
+	fields = append(fields,
 		"prev_error_penalized", prevError,
 		"prev_ttft_penalized", prevTTFT,
-		"error_penalized", false,
-		"ttft_penalized", false,
-		"last_probe_ttft_ms", lastProbeTTFTMs,
 	)
+	slog.Info("probe: manual recovery applied", fields...)
 }
 
 // setTempUnschedulable 将账号标记为临时不可调度（100 年，等待探活或管理员恢复）。
@@ -558,10 +590,5 @@ func (p *openAIAccountProbe) setTempUnschedulable(accountID int64, entry *openAI
 		return
 	}
 	entry.dbFlagSet.Store(true)
-	slog.Warn("probe: account marked temp unschedulable",
-		"account_id", accountID,
-		"error_penalized", entry.errorPenalized.Load(),
-		"ttft_penalized", entry.ttftPenalized.Load(),
-		"last_probe_ttft_ms", entry.lastProbeTTFTMs.Load(),
-	)
+	slog.Warn("probe: account marked temp unschedulable", p.explainabilityFields(accountID, entry)...)
 }
