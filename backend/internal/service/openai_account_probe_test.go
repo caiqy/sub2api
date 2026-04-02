@@ -14,6 +14,10 @@ type failingClearTempUnschedulableRepo struct{ stubOpenAIAccountRepo }
 
 type probeGroupAwareRepo struct{ stubOpenAIAccountRepo }
 
+func newProbeGroupAwareRepo(accounts []Account) probeGroupAwareRepo {
+	return probeGroupAwareRepo{stubOpenAIAccountRepo{accounts: accounts}}
+}
+
 func (f failingClearTempUnschedulableRepo) ClearTempUnschedulable(ctx context.Context, id int64) error {
 	return errors.New("clear failed")
 }
@@ -50,7 +54,7 @@ func TestProbe_MarkPenalized_RegistersAccount(t *testing.T) {
 		stopCh: make(chan struct{}),
 	}
 	defer probe.stop()
-	probe.markPenalized(42, true, false)
+	probe.markPenalized(42, nil, true, false)
 	_, ok := probe.entries.Load(int64(42))
 	require.True(t, ok)
 }
@@ -62,11 +66,11 @@ func TestProbe_MarkPenalized_IsIdempotent(t *testing.T) {
 	}
 	defer probe.stop()
 
-	probe.markPenalized(42, true, false)
+	probe.markPenalized(42, nil, true, false)
 	val1, ok1 := probe.entries.Load(int64(42))
 	require.True(t, ok1)
 
-	probe.markPenalized(42, true, false)
+	probe.markPenalized(42, nil, true, false)
 	val2, ok2 := probe.entries.Load(int64(42))
 	require.True(t, ok2)
 
@@ -78,14 +82,14 @@ func TestProbe_MarkPenalized_UpdatesReasonFlags(t *testing.T) {
 	probe := &openAIAccountProbe{stats: newOpenAIAccountRuntimeStats(), stopCh: make(chan struct{})}
 	defer probe.stop()
 
-	probe.markPenalized(42, true, false)
+	probe.markPenalized(42, nil, true, false)
 	v, ok := probe.entries.Load(int64(42))
 	require.True(t, ok)
 	entry := v.(*openAIAccountProbeEntry)
 	require.True(t, entry.errorPenalized.Load())
 	require.False(t, entry.ttftPenalized.Load())
 
-	probe.markPenalized(42, false, true)
+	probe.markPenalized(42, nil, false, true)
 	v, _ = probe.entries.Load(int64(42))
 	entry = v.(*openAIAccountProbeEntry)
 	require.True(t, entry.errorPenalized.Load())
@@ -96,7 +100,7 @@ func TestProbe_ClearPenaltyReasons_RemovesEntryWhenNoReasonsRemain(t *testing.T)
 	probe := &openAIAccountProbe{stats: newOpenAIAccountRuntimeStats(), stopCh: make(chan struct{})}
 	defer probe.stop()
 
-	probe.markPenalized(7, true, true)
+	probe.markPenalized(7, nil, true, true)
 	probe.clearPenaltyReasons(7)
 	_, ok := probe.entries.Load(int64(7))
 	require.False(t, ok)
@@ -106,7 +110,7 @@ func TestProbe_ClearPenaltyReasons_DoesNotRemoveEntryWhenProbing(t *testing.T) {
 	probe := &openAIAccountProbe{stats: newOpenAIAccountRuntimeStats(), stopCh: make(chan struct{})}
 	defer probe.stop()
 
-	probe.markPenalized(9, true, true)
+	probe.markPenalized(9, nil, true, true)
 	value, ok := probe.entries.Load(int64(9))
 	require.True(t, ok)
 	entry := value.(*openAIAccountProbeEntry)
@@ -123,7 +127,7 @@ func TestProbe_ClearPenaltyReasons_DoesNotRemoveEntryWhenDBFlagSet(t *testing.T)
 	probe := &openAIAccountProbe{stats: newOpenAIAccountRuntimeStats(), stopCh: make(chan struct{})}
 	defer probe.stop()
 
-	probe.markPenalized(10, true, true)
+	probe.markPenalized(10, nil, true, true)
 	value, ok := probe.entries.Load(int64(10))
 	require.True(t, ok)
 	entry := value.(*openAIAccountProbeEntry)
@@ -140,7 +144,7 @@ func TestProbe_FinalizePenaltyState_KeepsEntryWhenTTFTReasonRemains(t *testing.T
 	probe := &openAIAccountProbe{stats: newOpenAIAccountRuntimeStats(), stopCh: make(chan struct{}), ctx: context.Background()}
 	defer probe.stop()
 
-	probe.markPenalized(1, true, true)
+	probe.markPenalized(1, nil, true, true)
 	value, ok := probe.entries.Load(int64(1))
 	require.True(t, ok)
 	entry := value.(*openAIAccountProbeEntry)
@@ -157,7 +161,7 @@ func TestProbe_FinalizePenaltyState_RemovesEntryWhenBothReasonsClear(t *testing.
 	probe := &openAIAccountProbe{stats: newOpenAIAccountRuntimeStats(), stopCh: make(chan struct{}), ctx: context.Background()}
 	defer probe.stop()
 
-	probe.markPenalized(1, true, true)
+	probe.markPenalized(1, nil, true, true)
 	value, ok := probe.entries.Load(int64(1))
 	require.True(t, ok)
 	entry := value.(*openAIAccountProbeEntry)
@@ -215,7 +219,7 @@ func TestProbe_ReevaluatePenaltyReasons_UsesAccountGroupID(t *testing.T) {
 			AccountGroups: []AccountGroup{{GroupID: 200}},
 		},
 	}
-	repo := probeGroupAwareRepo{stubOpenAIAccountRepo{accounts: accounts}}
+	repo := newProbeGroupAwareRepo(accounts)
 	cfg := &config.Config{}
 	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
 	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold = 0.3
@@ -247,6 +251,63 @@ func TestProbe_ReevaluatePenaltyReasons_UsesAccountGroupID(t *testing.T) {
 	require.InDelta(t, 1000.0, eval.GroupMinTTFT, 0.01, "group min TTFT must come from same group, not other groups")
 }
 
+func TestProbe_ReevaluatePenaltyReasons_UsesStoredEntryGroupID(t *testing.T) {
+	groupA := int64(100)
+	groupB := int64(200)
+
+	accounts := []Account{
+		{
+			ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive,
+			Schedulable: true, Concurrency: 3, Priority: 10,
+			AccountGroups: []AccountGroup{{GroupID: groupA}, {GroupID: groupB}},
+		},
+		{
+			ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive,
+			Schedulable: true, Concurrency: 3, Priority: 50,
+			AccountGroups: []AccountGroup{{GroupID: groupA}},
+		},
+		{
+			ID: 3, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive,
+			Schedulable: true, Concurrency: 3, Priority: 50,
+			AccountGroups: []AccountGroup{{GroupID: groupB}},
+		},
+	}
+	repo := newProbeGroupAwareRepo(accounts)
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold = 0.3
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyValue = 100
+	cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyMultiplier = 3.0
+	cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyValue = 50
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeCooldownSeconds = 60
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeIntervalSeconds = 30
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeMaxFailures = 3
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTimeoutSeconds = 15
+
+	svc := &OpenAIGatewayService{accountRepo: repo, cfg: cfg}
+	stats := newOpenAIAccountRuntimeStats()
+	probe := newOpenAIAccountProbe(svc, stats)
+	defer probe.stop()
+
+	for i := 0; i < 5; i++ {
+		slow := 9000
+		fastA := 1000
+		fastB := 500
+		stats.report(1, true, &slow)
+		stats.report(2, true, &fastA)
+		stats.report(3, true, &fastB)
+	}
+
+	probe.markPenalized(1, &groupA, false, true)
+	value, _ := probe.entries.Load(int64(1))
+	entry := value.(*openAIAccountProbeEntry)
+
+	eval, err := probe.reevaluatePenaltyReasons(context.Background(), 1, probeEntryGroupID(entry))
+	require.NoError(t, err)
+	require.True(t, eval.TTFTPenalized)
+	require.InDelta(t, 1000.0, eval.GroupMinTTFT, 0.01, "must use stored group A baseline, not group B")
+}
+
 func TestProbe_RecoverAccount_ResetsEWMA(t *testing.T) {
 	stats := newOpenAIAccountRuntimeStats()
 	probe := &openAIAccountProbe{
@@ -263,7 +324,7 @@ func TestProbe_RecoverAccount_ResetsEWMA(t *testing.T) {
 	require.Greater(t, errorRate, 0.3, "errorRate should exceed 0.3 after 5 failures")
 
 	// Register entry in probe list
-	probe.markPenalized(1, true, false)
+	probe.markPenalized(1, nil, true, false)
 	val, ok := probe.entries.Load(int64(1))
 	require.True(t, ok)
 	entry := val.(*openAIAccountProbeEntry)
@@ -291,7 +352,7 @@ func TestProbe_RecoverAccount_KeepsEntryWhenClearTempUnschedulableFails(t *testi
 	}
 	defer probe.stop()
 
-	probe.markPenalized(123, true, false)
+	probe.markPenalized(123, nil, true, false)
 	value, ok := probe.entries.Load(int64(123))
 	require.True(t, ok)
 	entry := value.(*openAIAccountProbeEntry)
@@ -307,7 +368,7 @@ func TestProbe_RecoverAccount_KeepsEntryWhenClearTempUnschedulableFails(t *testi
 func TestProbe_SuccessPath_LeavesEntryWhenTTFTStillPenalized(t *testing.T) {
 	probe := &openAIAccountProbe{stats: newOpenAIAccountRuntimeStats(), stopCh: make(chan struct{}), ctx: context.Background()}
 	defer probe.stop()
-	probe.markPenalized(1, true, true)
+	probe.markPenalized(1, nil, true, true)
 	value, _ := probe.entries.Load(int64(1))
 	entry := value.(*openAIAccountProbeEntry)
 
@@ -345,7 +406,7 @@ func TestProbe_Stop_PreventsNewRegistrations(t *testing.T) {
 	}
 	probe.stop()
 
-	probe.markPenalized(99, true, false)
+	probe.markPenalized(99, nil, true, false)
 
 	_, ok := probe.entries.Load(int64(99))
 	require.False(t, ok, "markPenalized should be no-op after stop()")

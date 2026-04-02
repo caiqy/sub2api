@@ -256,7 +256,7 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 		acc := s.applyPenaltyToAccount(c.account, eval)
 
 		if eval.ErrorPenalized || eval.TTFTPenalized {
-			s.probe.markPenalized(c.account.ID, eval.ErrorPenalized, eval.TTFTPenalized)
+			s.probe.markPenalized(c.account.ID, req.GroupID, eval.ErrorPenalized, eval.TTFTPenalized)
 		} else {
 			s.probe.clearPenaltyReasons(c.account.ID)
 		}

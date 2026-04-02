@@ -31,6 +31,8 @@ type openAIAccountProbeEntry struct {
 	probing         atomic.Bool
 	errorPenalized  atomic.Bool
 	ttftPenalized   atomic.Bool
+	groupIDValue    atomic.Int64
+	groupIDSet      atomic.Bool
 	lastProbeTTFTMs atomic.Int64
 	lastProbeAtUnix atomic.Int64
 }
@@ -66,8 +68,8 @@ func newOpenAIAccountProbe(service *OpenAIGatewayService, stats *openAIAccountRu
 	return p
 }
 
-// markPenalized 注册一个账号进入探活列表（幂等），并记录惩罚原因。
-func (p *openAIAccountProbe) markPenalized(accountID int64, errorPenalized bool, ttftPenalized bool) {
+// markPenalized 注册一个账号进入探活列表（幂等），并记录惩罚原因与分组上下文。
+func (p *openAIAccountProbe) markPenalized(accountID int64, groupID *int64, errorPenalized bool, ttftPenalized bool) {
 	if p == nil || accountID <= 0 || p.stopped.Load() {
 		return
 	}
@@ -81,6 +83,10 @@ func (p *openAIAccountProbe) markPenalized(accountID int64, errorPenalized bool,
 	}
 	entry.stateMu.Lock()
 	defer entry.stateMu.Unlock()
+	if groupID != nil && *groupID > 0 {
+		entry.groupIDValue.Store(*groupID)
+		entry.groupIDSet.Store(true)
+	}
 	if errorPenalized {
 		entry.errorPenalized.Store(true)
 	}
@@ -244,7 +250,7 @@ func (p *openAIAccountProbe) probeAccount(account *Account, entry *openAIAccount
 		p.stats.report(account.ID, true, &ttft)
 		p.updateProbeObservations(entry, ttft)
 
-		groupID := probeAccountGroupID(account)
+		groupID := probeEntryGroupID(entry)
 		eval, evalErr := p.reevaluatePenaltyReasons(p.ctx, account.ID, groupID)
 		if evalErr != nil {
 			entry.consecutiveFail.Store(0)
@@ -309,6 +315,18 @@ func probeAccountGroupID(account *Account) *int64 {
 		}
 	}
 	return nil
+}
+
+func probeEntryGroupID(entry *openAIAccountProbeEntry) *int64 {
+	if entry == nil || !entry.groupIDSet.Load() {
+		return nil
+	}
+	gid := entry.groupIDValue.Load()
+	if gid <= 0 {
+		return nil
+	}
+	groupID := gid
+	return &groupID
 }
 
 func (p *openAIAccountProbe) reevaluatePenaltyReasons(ctx context.Context, accountID int64, groupID *int64) (layeredPenaltyEvaluation, error) {
