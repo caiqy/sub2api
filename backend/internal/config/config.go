@@ -594,7 +594,9 @@ type GatewayOpenAIWSConfig struct {
 	// StickyPreviousResponseTTLSeconds: 兼容旧键（当新键未设置时回退）
 	StickyPreviousResponseTTLSeconds int `mapstructure:"sticky_previous_response_ttl_seconds"`
 
-	SchedulerScoreWeights GatewayOpenAIWSSchedulerScoreWeights `mapstructure:"scheduler_score_weights"`
+	SchedulerScoreWeights GatewayOpenAIWSSchedulerScoreWeights  `mapstructure:"scheduler_score_weights"`
+	SchedulerMode         string                                `mapstructure:"scheduler_mode"`
+	SchedulerLayered      GatewayOpenAIWSSchedulerLayeredConfig `mapstructure:"scheduler_layered"`
 }
 
 // GatewayOpenAIWSSchedulerScoreWeights 账号调度打分权重。
@@ -604,6 +606,18 @@ type GatewayOpenAIWSSchedulerScoreWeights struct {
 	Queue     float64 `mapstructure:"queue"`
 	ErrorRate float64 `mapstructure:"error_rate"`
 	TTFT      float64 `mapstructure:"ttft"`
+}
+
+// GatewayOpenAIWSSchedulerLayeredConfig 分层调度器配置。
+type GatewayOpenAIWSSchedulerLayeredConfig struct {
+	ErrorPenaltyThreshold float64 `mapstructure:"error_penalty_threshold"`
+	ErrorPenaltyValue     int     `mapstructure:"error_penalty_value"`
+	TTFTPenaltyMultiplier float64 `mapstructure:"ttft_penalty_multiplier"`
+	TTFTPenaltyValue      int     `mapstructure:"ttft_penalty_value"`
+	ProbeCooldownSeconds  int     `mapstructure:"probe_cooldown_seconds"`
+	ProbeIntervalSeconds  int     `mapstructure:"probe_interval_seconds"`
+	ProbeMaxFailures      int     `mapstructure:"probe_max_failures"`
+	ProbeTimeoutSeconds   int     `mapstructure:"probe_timeout_seconds"`
 }
 
 // GatewayUsageRecordConfig 使用量记录异步队列配置
@@ -1396,6 +1410,15 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.queue", 0.7)
 	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.error_rate", 0.8)
 	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.ttft", 0.5)
+	viper.SetDefault("gateway.openai_ws.scheduler_mode", "weighted")
+	viper.SetDefault("gateway.openai_ws.scheduler_layered.error_penalty_threshold", 0.3)
+	viper.SetDefault("gateway.openai_ws.scheduler_layered.error_penalty_value", 100)
+	viper.SetDefault("gateway.openai_ws.scheduler_layered.ttft_penalty_multiplier", 3.0)
+	viper.SetDefault("gateway.openai_ws.scheduler_layered.ttft_penalty_value", 50)
+	viper.SetDefault("gateway.openai_ws.scheduler_layered.probe_cooldown_seconds", 60)
+	viper.SetDefault("gateway.openai_ws.scheduler_layered.probe_interval_seconds", 30)
+	viper.SetDefault("gateway.openai_ws.scheduler_layered.probe_max_failures", 3)
+	viper.SetDefault("gateway.openai_ws.scheduler_layered.probe_timeout_seconds", 15)
 	viper.SetDefault("gateway.antigravity_fallback_cooldown_minutes", 1)
 	viper.SetDefault("gateway.antigravity_extra_retries", 10)
 	viper.SetDefault("gateway.max_body_size", int64(256*1024*1024))
@@ -2118,6 +2141,38 @@ func (c *Config) Validate() error {
 		c.Gateway.OpenAIWS.SchedulerScoreWeights.TTFT
 	if weightSum <= 0 {
 		return fmt.Errorf("gateway.openai_ws.scheduler_score_weights must not all be zero")
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Gateway.OpenAIWS.SchedulerMode)) {
+	case "", "weighted", "layered":
+	default:
+		return fmt.Errorf("gateway.openai_ws.scheduler_mode must be one of weighted|layered")
+	}
+	if c.Gateway.OpenAIWS.SchedulerMode == "layered" {
+		sl := c.Gateway.OpenAIWS.SchedulerLayered
+		if sl.ErrorPenaltyThreshold <= 0 || sl.ErrorPenaltyThreshold > 1 {
+			return fmt.Errorf("gateway.openai_ws.scheduler_layered.error_penalty_threshold must be in (0,1]")
+		}
+		if sl.ErrorPenaltyValue <= 0 {
+			return fmt.Errorf("gateway.openai_ws.scheduler_layered.error_penalty_value must be positive")
+		}
+		if sl.TTFTPenaltyMultiplier <= 1 {
+			return fmt.Errorf("gateway.openai_ws.scheduler_layered.ttft_penalty_multiplier must be > 1")
+		}
+		if sl.TTFTPenaltyValue <= 0 {
+			return fmt.Errorf("gateway.openai_ws.scheduler_layered.ttft_penalty_value must be positive")
+		}
+		if sl.ProbeCooldownSeconds <= 0 {
+			return fmt.Errorf("gateway.openai_ws.scheduler_layered.probe_cooldown_seconds must be positive")
+		}
+		if sl.ProbeIntervalSeconds <= 0 {
+			return fmt.Errorf("gateway.openai_ws.scheduler_layered.probe_interval_seconds must be positive")
+		}
+		if sl.ProbeMaxFailures <= 0 {
+			return fmt.Errorf("gateway.openai_ws.scheduler_layered.probe_max_failures must be positive")
+		}
+		if sl.ProbeTimeoutSeconds <= 0 {
+			return fmt.Errorf("gateway.openai_ws.scheduler_layered.probe_timeout_seconds must be positive")
+		}
 	}
 	if c.Gateway.MaxLineSize < 0 {
 		return fmt.Errorf("gateway.max_line_size must be non-negative")
