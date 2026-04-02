@@ -819,7 +819,15 @@ func (s *OpenAIGatewayService) getOpenAIAccountScheduler() OpenAIAccountSchedule
 			s.openaiAccountStats = newOpenAIAccountRuntimeStats()
 		}
 		if s.openaiScheduler == nil {
-			s.openaiScheduler = newDefaultOpenAIAccountScheduler(s, s.openaiAccountStats)
+			mode := ""
+			if s.cfg != nil {
+				mode = s.cfg.Gateway.OpenAIWS.SchedulerMode
+			}
+			if mode == "layered" {
+				s.openaiScheduler = newLayeredOpenAIAccountScheduler(s, s.openaiAccountStats)
+			} else {
+				s.openaiScheduler = newDefaultOpenAIAccountScheduler(s, s.openaiAccountStats)
+			}
 		}
 	})
 	return s.openaiScheduler
@@ -923,6 +931,39 @@ type GatewayOpenAIWSSchedulerScoreWeightsView struct {
 	Queue     float64
 	ErrorRate float64
 	TTFT      float64
+}
+
+func (s *OpenAIGatewayService) openAIWSSchedulerLayeredConfig() GatewayOpenAIWSSchedulerLayeredConfig {
+	if s != nil && s.cfg != nil {
+		return GatewayOpenAIWSSchedulerLayeredConfig{
+			ErrorPenaltyThreshold: s.cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold,
+			ErrorPenaltyValue:     s.cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyValue,
+			TTFTPenaltyMultiplier: s.cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyMultiplier,
+			TTFTPenaltyValue:      s.cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyValue,
+			ProbeCooldownSeconds:  s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeCooldownSeconds,
+			ProbeIntervalSeconds:  s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeIntervalSeconds,
+			ProbeMaxFailures:      s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeMaxFailures,
+			ProbeTimeoutSeconds:   s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTimeoutSeconds,
+		}
+	}
+	return GatewayOpenAIWSSchedulerLayeredConfig{
+		ErrorPenaltyThreshold: 0.3, ErrorPenaltyValue: 100,
+		TTFTPenaltyMultiplier: 3.0, TTFTPenaltyValue: 50,
+		ProbeCooldownSeconds: 60, ProbeIntervalSeconds: 30,
+		ProbeMaxFailures: 3, ProbeTimeoutSeconds: 15,
+	}
+}
+
+// GatewayOpenAIWSSchedulerLayeredConfig 分层调度器运行时视图。
+type GatewayOpenAIWSSchedulerLayeredConfig struct {
+	ErrorPenaltyThreshold float64
+	ErrorPenaltyValue     int
+	TTFTPenaltyMultiplier float64
+	TTFTPenaltyValue      int
+	ProbeCooldownSeconds  int
+	ProbeIntervalSeconds  int
+	ProbeMaxFailures      int
+	ProbeTimeoutSeconds   int
 }
 
 func clamp01(value float64) float64 {
