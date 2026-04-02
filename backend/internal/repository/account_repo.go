@@ -1845,6 +1845,7 @@ const nextWeeklyResetAtExpr = `(
 // IncrementQuotaUsed 原子递增账号的配额用量（总/日/周三个维度）
 // 日/周额度在周期过期时自动重置为 0 再递增。
 // 支持滚动窗口（rolling）和固定时间（fixed）两种重置模式。
+// 任一维度配额首次超限时触发调度快照刷新。
 func (r *accountRepository) IncrementQuotaUsed(ctx context.Context, id int64, amount float64) error {
 	rows, err := r.sql.QueryContext(ctx,
 		`UPDATE accounts SET extra = (
@@ -1889,25 +1890,40 @@ func (r *accountRepository) IncrementQuotaUsed(ctx context.Context, id int64, am
 		WHERE id = $2 AND deleted_at IS NULL
 		RETURNING
 			COALESCE((extra->>'quota_used')::numeric, 0),
-			COALESCE((extra->>'quota_limit')::numeric, 0)`,
+			COALESCE((extra->>'quota_limit')::numeric, 0),
+			COALESCE((extra->>'quota_daily_used')::numeric, 0),
+			COALESCE((extra->>'quota_daily_limit')::numeric, 0),
+			COALESCE((extra->>'quota_weekly_used')::numeric, 0),
+			COALESCE((extra->>'quota_weekly_limit')::numeric, 0)`,
 		amount, id)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = rows.Close() }()
 
-	var newUsed, limit float64
+	var totalUsed, totalLimit, dailyUsed, dailyLimit, weeklyUsed, weeklyLimit float64
 	if rows.Next() {
-		if err := rows.Scan(&newUsed, &limit); err != nil {
+		if err := rows.Scan(&totalUsed, &totalLimit, &dailyUsed, &dailyLimit, &weeklyUsed, &weeklyLimit); err != nil {
 			return err
 		}
+	} else {
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return service.ErrAccountNotFound
 	}
 	if err := rows.Err(); err != nil {
 		return err
 	}
 
-	// 任一维度配额刚超限时触发调度快照刷新
-	if limit > 0 && newUsed >= limit && (newUsed-amount) < limit {
+	// 任一维度配额刚超限时触发调度快照刷新。
+	// 注：此路径为非事务调用（postUsageBilling 异步），outbox 写失败仅记录日志而不回滚，
+	// 避免因 outbox 瞬态故障导致配额更新丢失。与 usage_billing_repo 事务路径的
+	// "outbox 失败即回滚"策略不同——事务路径可安全重试，此处不可。
+	exceeded := (totalLimit > 0 && totalUsed >= totalLimit && (totalUsed-amount) < totalLimit) ||
+		(dailyLimit > 0 && dailyUsed >= dailyLimit && (dailyUsed-amount) < dailyLimit) ||
+		(weeklyLimit > 0 && weeklyUsed >= weeklyLimit && (weeklyUsed-amount) < weeklyLimit)
+	if exceeded {
 		if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
 			logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue quota exceeded failed: account=%d err=%v", id, err)
 		}

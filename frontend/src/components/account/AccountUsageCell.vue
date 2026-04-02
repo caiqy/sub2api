@@ -976,14 +976,23 @@ const makeQuotaBar = (
     if (mode === 'fixed') {
       // Use pre-computed next reset time for fixed mode
       const resetAtKey = isDaily ? 'quota_daily_reset_at' : 'quota_weekly_reset_at'
-      resetsAt = (extra?.[resetAtKey] as string) || null
+      const resetStr = extra?.[resetAtKey] as string | undefined
+      // Only show countdown if reset time is in the future (defensive: backend should
+      // already filter out expired reset_at, but guard against edge cases)
+      if (resetStr && new Date(resetStr).getTime() > Date.now()) {
+        resetsAt = resetStr
+      }
     } else {
       // Rolling mode: compute from start + period
       const startStr = extra?.[startKey] as string | undefined
       if (startStr) {
         const startDate = new Date(startStr)
         const periodMs = isDaily ? 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000
-        resetsAt = new Date(startDate.getTime() + periodMs).toISOString()
+        const resetTime = new Date(startDate.getTime() + periodMs)
+        // Only show countdown if reset time is in the future
+        if (resetTime.getTime() > Date.now()) {
+          resetsAt = resetTime.toISOString()
+        }
       }
     }
   }

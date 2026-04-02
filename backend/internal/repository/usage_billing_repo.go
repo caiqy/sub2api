@@ -240,53 +240,68 @@ func incrementUsageBillingAPIKeyRateLimit(ctx context.Context, tx *sql.Tx, apiKe
 	return nil
 }
 
+// incrementUsageBillingAccountQuota 原子递增账号的配额用量（总/日/周三个维度）
+// 日/周额度在周期过期时自动重置为 0 再递增。
+// 支持滚动窗口（rolling）和固定时间（fixed）两种重置模式。
+// 任一维度配额首次超限时触发调度快照刷新。
 func incrementUsageBillingAccountQuota(ctx context.Context, tx *sql.Tx, accountID int64, amount float64) error {
 	rows, err := tx.QueryContext(ctx,
 		`UPDATE accounts SET extra = (
 			COALESCE(extra, '{}'::jsonb)
+			-- 总额度：始终递增
 			|| jsonb_build_object('quota_used', COALESCE((extra->>'quota_used')::numeric, 0) + $1)
+			-- 日额度：仅在 quota_daily_limit > 0 时处理
 			|| CASE WHEN COALESCE((extra->>'quota_daily_limit')::numeric, 0) > 0 THEN
 				jsonb_build_object(
 					'quota_daily_used',
-					CASE WHEN COALESCE((extra->>'quota_daily_start')::timestamptz, '1970-01-01'::timestamptz)
-						+ '24 hours'::interval <= NOW()
+					CASE WHEN `+dailyExpiredExpr+`
 					THEN $1
 					ELSE COALESCE((extra->>'quota_daily_used')::numeric, 0) + $1 END,
 					'quota_daily_start',
-					CASE WHEN COALESCE((extra->>'quota_daily_start')::timestamptz, '1970-01-01'::timestamptz)
-						+ '24 hours'::interval <= NOW()
+					CASE WHEN `+dailyExpiredExpr+`
 					THEN `+nowUTC+`
 					ELSE COALESCE(extra->>'quota_daily_start', `+nowUTC+`) END
 				)
+				-- 固定模式重置时更新下次重置时间
+				|| CASE WHEN `+dailyExpiredExpr+` AND `+nextDailyResetAtExpr+` IS NOT NULL
+				   THEN jsonb_build_object('quota_daily_reset_at', `+nextDailyResetAtExpr+`)
+				   ELSE '{}'::jsonb END
 			ELSE '{}'::jsonb END
+			-- 周额度：仅在 quota_weekly_limit > 0 时处理
 			|| CASE WHEN COALESCE((extra->>'quota_weekly_limit')::numeric, 0) > 0 THEN
 				jsonb_build_object(
 					'quota_weekly_used',
-					CASE WHEN COALESCE((extra->>'quota_weekly_start')::timestamptz, '1970-01-01'::timestamptz)
-						+ '168 hours'::interval <= NOW()
+					CASE WHEN `+weeklyExpiredExpr+`
 					THEN $1
 					ELSE COALESCE((extra->>'quota_weekly_used')::numeric, 0) + $1 END,
 					'quota_weekly_start',
-					CASE WHEN COALESCE((extra->>'quota_weekly_start')::timestamptz, '1970-01-01'::timestamptz)
-						+ '168 hours'::interval <= NOW()
+					CASE WHEN `+weeklyExpiredExpr+`
 					THEN `+nowUTC+`
 					ELSE COALESCE(extra->>'quota_weekly_start', `+nowUTC+`) END
 				)
+				-- 固定模式重置时更新下次重置时间
+				|| CASE WHEN `+weeklyExpiredExpr+` AND `+nextWeeklyResetAtExpr+` IS NOT NULL
+				   THEN jsonb_build_object('quota_weekly_reset_at', `+nextWeeklyResetAtExpr+`)
+				   ELSE '{}'::jsonb END
 			ELSE '{}'::jsonb END
 		), updated_at = NOW()
 		WHERE id = $2 AND deleted_at IS NULL
 		RETURNING
 			COALESCE((extra->>'quota_used')::numeric, 0),
-			COALESCE((extra->>'quota_limit')::numeric, 0)`,
+			COALESCE((extra->>'quota_limit')::numeric, 0),
+			COALESCE((extra->>'quota_daily_used')::numeric, 0),
+			COALESCE((extra->>'quota_daily_limit')::numeric, 0),
+			COALESCE((extra->>'quota_weekly_used')::numeric, 0),
+			COALESCE((extra->>'quota_weekly_limit')::numeric, 0)`,
 		amount, accountID)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = rows.Close() }()
 
-	var newUsed, limit float64
+	var totalUsed, totalLimit, dailyUsed, dailyLimit, weeklyUsed, weeklyLimit float64
 	if rows.Next() {
-		if err := rows.Scan(&newUsed, &limit); err != nil {
+		if err := rows.Scan(&totalUsed, &totalLimit, &dailyUsed, &dailyLimit, &weeklyUsed, &weeklyLimit); err != nil {
 			return err
 		}
 	} else {
@@ -298,7 +313,12 @@ func incrementUsageBillingAccountQuota(ctx context.Context, tx *sql.Tx, accountI
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	if limit > 0 && newUsed >= limit && (newUsed-amount) < limit {
+
+	// 任一维度配额刚超限时触发调度快照刷新
+	exceeded := (totalLimit > 0 && totalUsed >= totalLimit && (totalUsed-amount) < totalLimit) ||
+		(dailyLimit > 0 && dailyUsed >= dailyLimit && (dailyUsed-amount) < dailyLimit) ||
+		(weeklyLimit > 0 && weeklyUsed >= weeklyLimit && (weeklyUsed-amount) < weeklyLimit)
+	if exceeded {
 		if err := enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &accountID, nil, nil); err != nil {
 			logger.LegacyPrintf("repository.usage_billing", "[SchedulerOutbox] enqueue quota exceeded failed: account=%d err=%v", accountID, err)
 			return err

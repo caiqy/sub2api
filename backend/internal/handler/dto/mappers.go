@@ -319,11 +319,15 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 			out.QuotaResetTimezone = &tz
 		}
 		if a.Extra != nil {
-			if v, ok := a.Extra["quota_daily_reset_at"].(string); ok && v != "" {
-				out.QuotaDailyResetAt = &v
+			if !a.IsDailyQuotaPeriodExpired() {
+				if v, ok := a.Extra["quota_daily_reset_at"].(string); ok && v != "" {
+					out.QuotaDailyResetAt = &v
+				}
 			}
-			if v, ok := a.Extra["quota_weekly_reset_at"].(string); ok && v != "" {
-				out.QuotaWeeklyResetAt = &v
+			if !a.IsWeeklyQuotaPeriodExpired() {
+				if v, ok := a.Extra["quota_weekly_reset_at"].(string); ok && v != "" {
+					out.QuotaWeeklyResetAt = &v
+				}
 			}
 		}
 	}
