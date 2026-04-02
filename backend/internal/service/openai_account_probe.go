@@ -157,12 +157,36 @@ func (p *openAIAccountProbe) probeAccount(account *Account, entry *openAIAccount
 	defer entry.probing.Store(false)
 
 	model := p.resolveProbeModel(account)
-	err := p.sendProbeRequest(account, model, lcfg)
+	result := p.sendProbeRequest(account, model, lcfg)
 
-	if err == nil {
-		// 探活成功
-		entry.consecutiveFail.Store(0)
-		p.recoverAccount(account.ID, entry)
+	if result.err == nil {
+		// 探活成功：上报 TTFT 到 EWMA（而不是直接重置），让 EWMA 自然回落
+		ttft := result.ttftMs
+		p.stats.report(account.ID, true, &ttft)
+
+		// 检查更新后的 EWMA 是否仍然触发惩罚
+		errorRate, ttftEWMA, hasTTFT := p.stats.snapshot(account.ID)
+		stillPenalized := errorRate >= lcfg.ErrorPenaltyThreshold
+		if !stillPenalized && hasTTFT {
+			// 需要知道 minTTFT 才能判断 TTFT 是否仍超标。
+			// 但探针无法获取其他账号的 TTFT（那是调度时才计算的）。
+			// 所以这里用一个保守策略：如果 TTFT EWMA 降到了惩罚前探针记录的基线以下，
+			// 则认为恢复。否则继续探测。
+			// 简化处理：探针成功 + errorRate 正常 → 恢复。让调度器在下次选中时重新评估 TTFT。
+			_ = ttftEWMA
+		}
+
+		if !stillPenalized {
+			entry.consecutiveFail.Store(0)
+			p.recoverAccount(account.ID, entry)
+		} else {
+			// errorRate 仍然超阈值，不恢复，但重置连续失败计数
+			entry.consecutiveFail.Store(0)
+			slog.Debug("probe succeeded but account still penalized",
+				"account_id", account.ID,
+				"error_rate", errorRate,
+			)
+		}
 		return
 	}
 
@@ -171,7 +195,7 @@ func (p *openAIAccountProbe) probeAccount(account *Account, entry *openAIAccount
 	slog.Debug("probe failed",
 		"account_id", account.ID,
 		"consecutive_fail", fails,
-		"error", err.Error(),
+		"error", result.err.Error(),
 	)
 
 	if int(fails) >= lcfg.ProbeMaxFailures {
@@ -202,10 +226,16 @@ func (p *openAIAccountProbe) resolveProbeModel(account *Account) string {
 	return probeDefaultFallbackModel
 }
 
-// sendProbeRequest 发送轻量级探活请求。
-func (p *openAIAccountProbe) sendProbeRequest(account *Account, model string, lcfg GatewayOpenAIWSSchedulerLayeredConfig) error {
+// probeResult 包含探活请求的结果。
+type probeResult struct {
+	err    error
+	ttftMs int // 首 token 延迟（毫秒），仅在成功时有效
+}
+
+// sendProbeRequest 发送轻量级探活请求，测量首 token 延迟。
+func (p *openAIAccountProbe) sendProbeRequest(account *Account, model string, lcfg GatewayOpenAIWSSchedulerLayeredConfig) probeResult {
 	if p.service == nil || account == nil {
-		return fmt.Errorf("nil service or account")
+		return probeResult{err: fmt.Errorf("nil service or account")}
 	}
 
 	timeout := time.Duration(lcfg.ProbeTimeoutSeconds) * time.Second
@@ -217,7 +247,7 @@ func (p *openAIAccountProbe) sendProbeRequest(account *Account, model string, lc
 
 	token, _, err := p.service.GetAccessToken(ctx, account)
 	if err != nil {
-		return fmt.Errorf("get access token: %w", err)
+		return probeResult{err: fmt.Errorf("get access token: %w", err)}
 	}
 
 	baseURL := account.GetOpenAIBaseURL()
@@ -233,12 +263,12 @@ func (p *openAIAccountProbe) sendProbeRequest(account *Account, model string, lc
 	}
 	bodyBytes, err := json.Marshal(body)
 	if err != nil {
-		return fmt.Errorf("marshal body: %w", err)
+		return probeResult{err: fmt.Errorf("marshal body: %w", err)}
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(bodyBytes))
 	if err != nil {
-		return fmt.Errorf("new request: %w", err)
+		return probeResult{err: fmt.Errorf("new request: %w", err)}
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -248,18 +278,20 @@ func (p *openAIAccountProbe) sendProbeRequest(account *Account, model string, lc
 		proxyURL = account.Proxy.URL()
 	}
 
+	start := time.Now()
 	resp, err := p.service.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+	ttftMs := int(time.Since(start).Milliseconds())
 	if err != nil {
-		return fmt.Errorf("do request: %w", err)
+		return probeResult{err: fmt.Errorf("do request: %w", err)}
 	}
 	defer resp.Body.Close()
 	// 读取并丢弃 body
 	_, _ = io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("upstream status %d", resp.StatusCode)
+		return probeResult{err: fmt.Errorf("upstream status %d", resp.StatusCode)}
 	}
-	return nil
+	return probeResult{ttftMs: ttftMs}
 }
 
 // recoverAccount 恢复被惩罚的账号：重置 EWMA 统计，清除 DB 标记，从 entry 列表移除。
