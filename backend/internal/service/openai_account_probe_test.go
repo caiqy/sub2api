@@ -168,7 +168,11 @@ func TestProbe_StopCancelsRootContextAndPreventsNewWork(t *testing.T) {
 	probe := newOpenAIAccountProbe(nil, newOpenAIAccountRuntimeStats())
 	require.NotNil(t, probe)
 
-	// Simulate one in-flight worker
+	// stop() 的生命周期契约：
+	// 1) 会取消 probe 根 context；
+	// 2) 会等待 loop 与所有已注册 worker 退出；
+	// 3) 一旦 stop 开始，就不应再接受新的已注册工作。
+	// 这里用一个已注册的 in-flight worker 来验证 stop 会等待其观察到取消。
 	probe.wg.Add(1)
 	done := make(chan struct{})
 	go func() {
@@ -190,5 +194,11 @@ func TestProbe_StopCancelsRootContextAndPreventsNewWork(t *testing.T) {
 	case <-probe.ctx.Done():
 	default:
 		t.Fatal("probe root context should be canceled after stop")
+	}
+
+	select {
+	case <-probe.stopCh:
+	default:
+		t.Fatal("probe stopCh should be closed after stop")
 	}
 }

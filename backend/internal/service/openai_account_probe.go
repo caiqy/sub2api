@@ -38,14 +38,15 @@ type openAIAccountProbeEntry struct {
 // openAIAccountProbe 异步探活：对被分层调度器惩罚的账号发送轻量级请求，
 // 判断其是否已恢复或需要被标记为临时不可调度。
 type openAIAccountProbe struct {
-	service *OpenAIGatewayService
-	stats   *openAIAccountRuntimeStats
-	entries sync.Map // key: int64(accountID), value: *openAIAccountProbeEntry
-	stopCh  chan struct{}
-	ctx     context.Context
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
-	stopped atomic.Bool
+	service    *OpenAIGatewayService
+	stats      *openAIAccountRuntimeStats
+	entries    sync.Map // key: int64(accountID), value: *openAIAccountProbeEntry
+	dispatchMu sync.Mutex
+	stopCh     chan struct{}
+	ctx        context.Context
+	cancel     context.CancelFunc
+	wg         sync.WaitGroup
+	stopped    atomic.Bool
 }
 
 func newOpenAIAccountProbe(service *OpenAIGatewayService, stats *openAIAccountRuntimeStats) *openAIAccountProbe {
@@ -57,7 +58,11 @@ func newOpenAIAccountProbe(service *OpenAIGatewayService, stats *openAIAccountRu
 		ctx:     ctx,
 		cancel:  cancel,
 	}
-	go p.loop()
+	p.wg.Add(1)
+	go func() {
+		defer p.wg.Done()
+		p.loop()
+	}()
 	return p
 }
 
@@ -123,10 +128,12 @@ func (p *openAIAccountProbe) stop() {
 		return
 	}
 	if p.stopped.CompareAndSwap(false, true) {
+		p.dispatchMu.Lock()
 		if p.cancel != nil {
 			p.cancel()
 		}
 		close(p.stopCh)
+		p.dispatchMu.Unlock()
 		p.wg.Wait()
 	}
 }
@@ -210,6 +217,12 @@ func (p *openAIAccountProbe) tick() {
 			return true
 		}
 
+		p.dispatchMu.Lock()
+		defer p.dispatchMu.Unlock()
+		if p.stopped.Load() {
+			entry.probing.Store(false)
+			return false
+		}
 		p.wg.Add(1)
 		go func() {
 			defer p.wg.Done()
