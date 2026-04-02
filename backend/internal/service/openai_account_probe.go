@@ -28,6 +28,10 @@ type openAIAccountProbeEntry struct {
 	consecutiveFail atomic.Int32
 	dbFlagSet       atomic.Bool
 	probing         atomic.Bool
+	errorPenalized  atomic.Bool
+	ttftPenalized   atomic.Bool
+	lastProbeTTFTMs atomic.Int64
+	lastProbeAtUnix atomic.Int64
 }
 
 // openAIAccountProbe 异步探活：对被分层调度器惩罚的账号发送轻量级请求，
@@ -50,16 +54,48 @@ func newOpenAIAccountProbe(service *OpenAIGatewayService, stats *openAIAccountRu
 	return p
 }
 
-// markPenalized 注册一个账号进入探活列表（幂等）。
-func (p *openAIAccountProbe) markPenalized(accountID int64) {
+// markPenalized 注册一个账号进入探活列表（幂等），并记录惩罚原因。
+func (p *openAIAccountProbe) markPenalized(accountID int64, errorPenalized bool, ttftPenalized bool) {
 	if p == nil || accountID <= 0 || p.stopped.Load() {
 		return
 	}
-	entry := &openAIAccountProbeEntry{
+	entryAny, _ := p.entries.LoadOrStore(accountID, &openAIAccountProbeEntry{
 		accountID:   accountID,
 		penalizedAt: time.Now(),
+	})
+	entry, _ := entryAny.(*openAIAccountProbeEntry)
+	if entry == nil {
+		return
 	}
-	p.entries.LoadOrStore(accountID, entry)
+	if errorPenalized {
+		entry.errorPenalized.Store(true)
+	}
+	if ttftPenalized {
+		entry.ttftPenalized.Store(true)
+	}
+	if entry.penalizedAt.IsZero() {
+		entry.penalizedAt = time.Now()
+	}
+}
+
+func (p *openAIAccountProbe) clearPenaltyReasons(accountID int64) {
+	if p == nil || accountID <= 0 {
+		return
+	}
+	value, ok := p.entries.Load(accountID)
+	if !ok {
+		return
+	}
+	entry, _ := value.(*openAIAccountProbeEntry)
+	if entry == nil {
+		p.entries.Delete(accountID)
+		return
+	}
+	entry.errorPenalized.Store(false)
+	entry.ttftPenalized.Store(false)
+	if !entry.dbFlagSet.Load() {
+		p.entries.Delete(accountID)
+	}
 }
 
 // stop 停止探活 goroutine。
