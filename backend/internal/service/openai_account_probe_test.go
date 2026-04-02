@@ -107,6 +107,66 @@ func TestProbe_ClearPenaltyReasons_DoesNotRemoveEntryWhenDBFlagSet(t *testing.T)
 	require.False(t, entry.ttftPenalized.Load())
 }
 
+func TestProbe_FinalizePenaltyState_KeepsEntryWhenTTFTReasonRemains(t *testing.T) {
+	probe := &openAIAccountProbe{stats: newOpenAIAccountRuntimeStats(), stopCh: make(chan struct{}), ctx: context.Background()}
+	defer probe.stop()
+
+	probe.markPenalized(1, true, true)
+	value, ok := probe.entries.Load(int64(1))
+	require.True(t, ok)
+	entry := value.(*openAIAccountProbeEntry)
+
+	entry.errorPenalized.Store(false)
+	entry.ttftPenalized.Store(true)
+	probe.finalizePenaltyState(1, entry)
+
+	_, ok = probe.entries.Load(int64(1))
+	require.True(t, ok, "entry must remain while TTFT reason is still active")
+}
+
+func TestProbe_FinalizePenaltyState_RemovesEntryWhenBothReasonsClear(t *testing.T) {
+	probe := &openAIAccountProbe{stats: newOpenAIAccountRuntimeStats(), stopCh: make(chan struct{}), ctx: context.Background()}
+	defer probe.stop()
+
+	probe.markPenalized(1, true, true)
+	value, ok := probe.entries.Load(int64(1))
+	require.True(t, ok)
+	entry := value.(*openAIAccountProbeEntry)
+
+	entry.errorPenalized.Store(false)
+	entry.ttftPenalized.Store(false)
+	probe.finalizePenaltyState(1, entry)
+
+	_, ok = probe.entries.Load(int64(1))
+	require.False(t, ok, "entry should be removed only after both reasons clear")
+}
+
+func TestProbe_ReevaluatePenaltyReasons_UsesSharedGroupBaseline(t *testing.T) {
+	accounts := []Account{
+		{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 3, Priority: 10},
+		{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 3, Priority: 50},
+	}
+	svc := newLayeredTestService(accounts)
+	defer svc.StopOpenAIAccountScheduler()
+
+	stats := newOpenAIAccountRuntimeStats()
+	probe := newOpenAIAccountProbe(svc, stats)
+	defer probe.stop()
+
+	for i := 0; i < 5; i++ {
+		slow := 9000
+		fast := 1000
+		stats.report(1, true, &slow)
+		stats.report(2, true, &fast)
+	}
+
+	eval, err := probe.reevaluatePenaltyReasons(context.Background(), 1, nil)
+	require.NoError(t, err)
+	require.True(t, eval.TTFTPenalized)
+	require.False(t, eval.ErrorPenalized)
+	require.Greater(t, eval.GroupMinTTFT, 0.0)
+}
+
 func TestProbe_RecoverAccount_ResetsEWMA(t *testing.T) {
 	stats := newOpenAIAccountRuntimeStats()
 	probe := &openAIAccountProbe{
@@ -162,6 +222,21 @@ func TestProbe_RecoverAccount_KeepsEntryWhenClearTempUnschedulableFails(t *testi
 	_, ok = probe.entries.Load(int64(123))
 	require.True(t, ok, "entry must remain so future probes can retry DB cleanup")
 	require.True(t, entry.dbFlagSet.Load(), "dbFlagSet should remain true after failed clear")
+}
+
+func TestProbe_SuccessPath_LeavesEntryWhenTTFTStillPenalized(t *testing.T) {
+	probe := &openAIAccountProbe{stats: newOpenAIAccountRuntimeStats(), stopCh: make(chan struct{}), ctx: context.Background()}
+	defer probe.stop()
+	probe.markPenalized(1, true, true)
+	value, _ := probe.entries.Load(int64(1))
+	entry := value.(*openAIAccountProbeEntry)
+
+	entry.errorPenalized.Store(false)
+	entry.ttftPenalized.Store(true)
+	probe.finalizePenaltyState(1, entry)
+
+	_, ok := probe.entries.Load(int64(1))
+	require.True(t, ok)
 }
 
 func TestProbe_ResetAccount_PreservesTTFT(t *testing.T) {

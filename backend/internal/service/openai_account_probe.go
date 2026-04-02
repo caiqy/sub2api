@@ -240,33 +240,21 @@ func (p *openAIAccountProbe) probeAccount(account *Account, entry *openAIAccount
 	result := p.sendProbeRequest(p.ctx, account, model, lcfg)
 
 	if result.err == nil {
-		// 探活成功：上报 TTFT 到 EWMA（而不是直接重置），让 EWMA 自然回落
 		ttft := result.ttftMs
 		p.stats.report(account.ID, true, &ttft)
+		p.updateProbeObservations(entry, ttft)
 
-		// 检查更新后的 EWMA 是否仍然触发惩罚
-		errorRate, ttftEWMA, hasTTFT := p.stats.snapshot(account.ID)
-		stillPenalized := errorRate >= lcfg.ErrorPenaltyThreshold
-		if !stillPenalized && hasTTFT {
-			// 需要知道 minTTFT 才能判断 TTFT 是否仍超标。
-			// 但探针无法获取其他账号的 TTFT（那是调度时才计算的）。
-			// 所以这里用一个保守策略：如果 TTFT EWMA 降到了惩罚前探针记录的基线以下，
-			// 则认为恢复。否则继续探测。
-			// 简化处理：探针成功 + errorRate 正常 → 恢复。让调度器在下次选中时重新评估 TTFT。
-			_ = ttftEWMA
+		eval, evalErr := p.reevaluatePenaltyReasons(p.ctx, account.ID, nil)
+		if evalErr != nil {
+			entry.consecutiveFail.Store(0)
+			slog.Warn("probe: failed to reevaluate penalty reasons", "account_id", account.ID, "error", evalErr.Error())
+			return
 		}
 
-		if !stillPenalized {
-			entry.consecutiveFail.Store(0)
-			p.recoverAccount(account.ID, entry)
-		} else {
-			// errorRate 仍然超阈值，不恢复，但重置连续失败计数
-			entry.consecutiveFail.Store(0)
-			slog.Debug("probe succeeded but account still penalized",
-				"account_id", account.ID,
-				"error_rate", errorRate,
-			)
-		}
+		entry.errorPenalized.Store(eval.ErrorPenalized)
+		entry.ttftPenalized.Store(eval.TTFTPenalized)
+		entry.consecutiveFail.Store(0)
+		p.finalizePenaltyState(account.ID, entry)
 		return
 	}
 
@@ -281,6 +269,37 @@ func (p *openAIAccountProbe) probeAccount(account *Account, entry *openAIAccount
 	if int(fails) >= lcfg.ProbeMaxFailures {
 		p.setTempUnschedulable(account.ID, entry)
 	}
+}
+
+func (p *openAIAccountProbe) updateProbeObservations(entry *openAIAccountProbeEntry, ttft int) {
+	if entry == nil {
+		return
+	}
+	entry.lastProbeTTFTMs.Store(int64(ttft))
+	entry.lastProbeAtUnix.Store(time.Now().Unix())
+}
+
+func (p *openAIAccountProbe) reevaluatePenaltyReasons(ctx context.Context, accountID int64, groupID *int64) (layeredPenaltyEvaluation, error) {
+	if p == nil || p.service == nil {
+		return layeredPenaltyEvaluation{}, fmt.Errorf("nil probe service")
+	}
+	ls := &layeredOpenAIAccountScheduler{
+		service: p.service,
+		stats:   p.stats,
+	}
+	groupMinTTFT, hasGroupMin := ls.computeGroupMinTTFT(ctx, groupID)
+	return ls.evaluateRuntimePenalty(accountID, groupMinTTFT, hasGroupMin), nil
+}
+
+func (p *openAIAccountProbe) finalizePenaltyState(accountID int64, entry *openAIAccountProbeEntry) {
+	if entry == nil {
+		p.entries.Delete(accountID)
+		return
+	}
+	if entry.errorPenalized.Load() || entry.ttftPenalized.Load() {
+		return
+	}
+	p.recoverAccount(accountID, entry)
 }
 
 // resolveProbeModel 为探活请求选择模型。
