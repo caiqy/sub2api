@@ -199,8 +199,9 @@ func (s *openAIAccountRuntimeStats) snapshot(accountID int64) (errorRate float64
 	return errorRate, ttftValue, true
 }
 
-// resetAccount clears the EWMA error rate and TTFT for the given account.
-// Used by the layered scheduler's probe system when an account recovers.
+// resetAccount clears the EWMA error rate for the given account.
+// TTFT EWMA is preserved — probe requests inject real TTFT samples via report(),
+// providing valid latency data for scheduling decisions after recovery.
 func (s *openAIAccountRuntimeStats) resetAccount(accountID int64) {
 	if s == nil || accountID <= 0 {
 		return
@@ -214,7 +215,6 @@ func (s *openAIAccountRuntimeStats) resetAccount(accountID int64) {
 		return
 	}
 	stat.errorRateEWMABits.Store(math.Float64bits(0))
-	stat.ttftEWMABits.Store(math.Float64bits(math.NaN()))
 }
 
 func (s *openAIAccountRuntimeStats) size() int {
