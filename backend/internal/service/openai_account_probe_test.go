@@ -1,11 +1,19 @@
 package service
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+type failingClearTempUnschedulableRepo struct{ stubOpenAIAccountRepo }
+
+func (f failingClearTempUnschedulableRepo) ClearTempUnschedulable(ctx context.Context, id int64) error {
+	return errors.New("clear failed")
+}
 
 func TestProbe_MarkPenalized_RegistersAccount(t *testing.T) {
 	probe := &openAIAccountProbe{
@@ -130,6 +138,30 @@ func TestProbe_RecoverAccount_ResetsEWMA(t *testing.T) {
 	// Entry should be removed from probe list
 	_, ok = probe.entries.Load(int64(1))
 	require.False(t, ok, "entry should be removed from probe list after recovery")
+}
+
+func TestProbe_RecoverAccount_KeepsEntryWhenClearTempUnschedulableFails(t *testing.T) {
+	probe := &openAIAccountProbe{
+		stats:  newOpenAIAccountRuntimeStats(),
+		stopCh: make(chan struct{}),
+		ctx:    context.Background(),
+		service: &OpenAIGatewayService{
+			accountRepo: failingClearTempUnschedulableRepo{},
+		},
+	}
+	defer probe.stop()
+
+	probe.markPenalized(123, true, false)
+	value, ok := probe.entries.Load(int64(123))
+	require.True(t, ok)
+	entry := value.(*openAIAccountProbeEntry)
+	entry.dbFlagSet.Store(true)
+
+	probe.recoverAccount(123, entry)
+
+	_, ok = probe.entries.Load(int64(123))
+	require.True(t, ok, "entry must remain so future probes can retry DB cleanup")
+	require.True(t, entry.dbFlagSet.Load(), "dbFlagSet should remain true after failed clear")
 }
 
 func TestProbe_ResetAccount_PreservesTTFT(t *testing.T) {

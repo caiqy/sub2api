@@ -392,7 +392,9 @@ func (p *openAIAccountProbe) recoverAccount(accountID int64, entry *openAIAccoun
 				"account_id", accountID,
 				"error", err.Error(),
 			)
+			return
 		}
+		entry.dbFlagSet.Store(false)
 	}
 	p.entries.Delete(accountID)
 	slog.Info("probe: account recovered", "account_id", accountID)
