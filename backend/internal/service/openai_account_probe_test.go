@@ -365,6 +365,30 @@ func TestProbe_RecoverAccount_KeepsEntryWhenClearTempUnschedulableFails(t *testi
 	require.True(t, entry.dbFlagSet.Load(), "dbFlagSet should remain true after failed clear")
 }
 
+func TestProbe_ManualRecovery_ClearsReasonsButPreservesTTFT(t *testing.T) {
+	stats := newOpenAIAccountRuntimeStats()
+	ttft := 1500
+	stats.report(1, true, &ttft)
+
+	probe := &openAIAccountProbe{stats: stats, stopCh: make(chan struct{}), ctx: context.Background()}
+	defer probe.stop()
+	probe.markPenalized(1, nil, true, true)
+
+	value, ok := probe.entries.Load(int64(1))
+	require.True(t, ok)
+	entry := value.(*openAIAccountProbeEntry)
+	entry.dbFlagSet.Store(true)
+
+	probe.applyManualRecovery(1, entry)
+
+	errRate, ttftAfter, hasTTFT := stats.snapshot(1)
+	require.Equal(t, 0.0, errRate)
+	require.True(t, hasTTFT)
+	require.InDelta(t, 1500.0, ttftAfter, 0.01)
+	_, ok = probe.entries.Load(int64(1))
+	require.False(t, ok)
+}
+
 func TestProbe_SuccessPath_LeavesEntryWhenTTFTStillPenalized(t *testing.T) {
 	probe := &openAIAccountProbe{stats: newOpenAIAccountRuntimeStats(), stopCh: make(chan struct{}), ctx: context.Background()}
 	defer probe.stop()

@@ -204,7 +204,7 @@ func (p *openAIAccountProbe) tick() {
 		// 如果 dbFlagSet 为 true 但 TempUnschedulableUntil 已被清除（管理员手动恢复），则恢复账号
 		if entry.dbFlagSet.Load() {
 			if account.TempUnschedulableUntil == nil || account.TempUnschedulableUntil.Before(now) {
-				p.recoverAccount(accountID, entry)
+				p.applyManualRecovery(accountID, entry)
 				return true
 			}
 		}
@@ -270,6 +270,9 @@ func (p *openAIAccountProbe) probeAccount(account *Account, entry *openAIAccount
 	slog.Debug("probe failed",
 		"account_id", account.ID,
 		"consecutive_fail", fails,
+		"error_penalized", entry.errorPenalized.Load(),
+		"ttft_penalized", entry.ttftPenalized.Load(),
+		"last_probe_ttft_ms", entry.lastProbeTTFTMs.Load(),
 		"error", result.err.Error(),
 	)
 
@@ -448,10 +451,14 @@ func (p *openAIAccountProbe) sendProbeRequest(ctx context.Context, account *Acco
 
 // recoverAccount 恢复被惩罚的账号：重置 EWMA 统计，清除 DB 标记，从 entry 列表移除。
 func (p *openAIAccountProbe) recoverAccount(accountID int64, entry *openAIAccountProbeEntry) {
+	lastProbeTTFTMs := int64(0)
+	if entry != nil {
+		lastProbeTTFTMs = entry.lastProbeTTFTMs.Load()
+	}
 	if p.stats != nil {
 		p.stats.resetAccount(accountID)
 	}
-	if entry.dbFlagSet.Load() && p.service != nil && p.service.accountRepo != nil {
+	if entry != nil && entry.dbFlagSet.Load() && p.service != nil && p.service.accountRepo != nil {
 		ctx := p.ctx
 		if ctx == nil {
 			ctx = context.Background()
@@ -459,6 +466,9 @@ func (p *openAIAccountProbe) recoverAccount(accountID int64, entry *openAIAccoun
 		if err := p.service.accountRepo.ClearTempUnschedulable(ctx, accountID); err != nil {
 			slog.Warn("probe: failed to clear temp unschedulable",
 				"account_id", accountID,
+				"error_penalized", entry.errorPenalized.Load(),
+				"ttft_penalized", entry.ttftPenalized.Load(),
+				"last_probe_ttft_ms", lastProbeTTFTMs,
 				"error", err.Error(),
 			)
 			return
@@ -466,7 +476,55 @@ func (p *openAIAccountProbe) recoverAccount(accountID int64, entry *openAIAccoun
 		entry.dbFlagSet.Store(false)
 	}
 	p.entries.Delete(accountID)
-	slog.Info("probe: account recovered", "account_id", accountID)
+	slog.Info("probe: account recovered",
+		"account_id", accountID,
+		"error_penalized", false,
+		"ttft_penalized", false,
+		"last_probe_ttft_ms", lastProbeTTFTMs,
+	)
+}
+
+func (p *openAIAccountProbe) applyManualRecovery(accountID int64, entry *openAIAccountProbeEntry) {
+	if entry != nil {
+		entry.errorPenalized.Store(false)
+		entry.ttftPenalized.Store(false)
+		entry.groupIDSet.Store(false)
+		entry.groupIDValue.Store(0)
+	}
+	if p.service != nil && p.service.accountRepo != nil {
+		ctx := p.ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		if err := p.service.accountRepo.ClearTempUnschedulable(ctx, accountID); err != nil {
+			lastProbeTTFTMs := int64(0)
+			if entry != nil {
+				lastProbeTTFTMs = entry.lastProbeTTFTMs.Load()
+			}
+			slog.Warn("probe: manual recovery failed to clear temp unschedulable",
+				"account_id", accountID,
+				"error_penalized", false,
+				"ttft_penalized", false,
+				"last_probe_ttft_ms", lastProbeTTFTMs,
+				"error", err.Error(),
+			)
+		}
+	}
+	if p.stats != nil {
+		p.stats.resetAccount(accountID)
+	}
+	p.entries.Delete(accountID)
+	slog.Info("probe: manual recovery applied",
+		"account_id", accountID,
+		"error_penalized", false,
+		"ttft_penalized", false,
+		"last_probe_ttft_ms", func() int64 {
+			if entry == nil {
+				return 0
+			}
+			return entry.lastProbeTTFTMs.Load()
+		}(),
+	)
 }
 
 // setTempUnschedulable 将账号标记为临时不可调度（100 年，等待探活或管理员恢复）。
@@ -483,10 +541,18 @@ func (p *openAIAccountProbe) setTempUnschedulable(accountID int64, entry *openAI
 	if err := p.service.accountRepo.SetTempUnschedulable(ctx, accountID, until, reason); err != nil {
 		slog.Warn("probe: failed to set temp unschedulable",
 			"account_id", accountID,
+			"error_penalized", entry.errorPenalized.Load(),
+			"ttft_penalized", entry.ttftPenalized.Load(),
+			"last_probe_ttft_ms", entry.lastProbeTTFTMs.Load(),
 			"error", err.Error(),
 		)
 		return
 	}
 	entry.dbFlagSet.Store(true)
-	slog.Warn("probe: account marked temp unschedulable", "account_id", accountID)
+	slog.Warn("probe: account marked temp unschedulable",
+		"account_id", accountID,
+		"error_penalized", entry.errorPenalized.Load(),
+		"ttft_penalized", entry.ttftPenalized.Load(),
+		"last_probe_ttft_ms", entry.lastProbeTTFTMs.Load(),
+	)
 }
