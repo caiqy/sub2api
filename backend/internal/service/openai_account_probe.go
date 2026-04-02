@@ -215,7 +215,7 @@ func (p *openAIAccountProbe) sendProbeRequest(account *Account, model string, lc
 	}
 
 	baseURL := account.GetOpenAIBaseURL()
-	reqURL := baseURL + "/v1/chat/completions"
+	reqURL := strings.TrimRight(baseURL, "/") + "/v1/chat/completions"
 
 	body := map[string]any{
 		"model": model,

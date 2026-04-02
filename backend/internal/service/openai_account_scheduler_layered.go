@@ -280,7 +280,9 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 
 		// 错误率惩罚
 		if c.errorRate >= errorPenaltyThreshold {
-			// 浅拷贝 Account 并调整 Priority
+			// Shallow copy: only Priority is modified. Do NOT modify any pointer fields
+			// (Proxy, LastUsedAt, ExpiresAt, etc.) on the copy — they are shared with
+			// the original cached Account.
 			copied := *acc
 			copied.Priority += errorPenaltyValue
 			acc = &copied

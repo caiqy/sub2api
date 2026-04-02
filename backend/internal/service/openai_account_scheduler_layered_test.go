@@ -38,6 +38,7 @@ func TestLayered_PriorityDeterminism(t *testing.T) {
 	}
 	svc := newLayeredTestService(accounts)
 	scheduler := svc.getOpenAIAccountScheduler()
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
 	require.NotNil(t, scheduler)
 
 	ctx := context.Background()
@@ -65,6 +66,7 @@ func TestLayered_ErrorPenaltyPushesToLowerPriority(t *testing.T) {
 	}
 	svc := newLayeredTestService(accounts)
 	scheduler := svc.getOpenAIAccountScheduler()
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
 	require.NotNil(t, scheduler)
 
 	// Report 5 consecutive failures on account 1.
@@ -134,6 +136,7 @@ func TestLayered_FallbackWhenHighPriorityFullyLoaded(t *testing.T) {
 		concurrencyService: NewConcurrencyService(cc),
 	}
 	scheduler := svc.getOpenAIAccountScheduler()
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
 	require.NotNil(t, scheduler)
 
 	ctx := context.Background()
