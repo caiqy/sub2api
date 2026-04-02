@@ -153,6 +153,70 @@ func TestLayered_ErrorPenaltyPushesToLowerPriority(t *testing.T) {
 	}
 }
 
+// TestLayered_TTFTPenalty_UsesGroupLevelBaseline verifies that the TTFT penalty
+// uses the group-level minimum TTFT (across all schedulable accounts in the same
+// group), not a request-context-local minimum computed only from filtered candidates.
+func TestLayered_TTFTPenalty_UsesGroupLevelBaseline(t *testing.T) {
+	accounts := []Account{
+		{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 3, Priority: 10},
+		{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 3, Priority: 50},
+		{ID: 3, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 3, Priority: 50},
+	}
+	svc := newLayeredTestService(accounts)
+	scheduler := svc.getOpenAIAccountScheduler()
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	for i := 0; i < 5; i++ {
+		slow := 9000
+		fast := 1000
+		normal := 2000
+		scheduler.ReportResult(1, true, &slow)
+		scheduler.ReportResult(2, true, &fast)
+		scheduler.ReportResult(3, true, &normal)
+	}
+
+	result, _, err := scheduler.Select(context.Background(), OpenAIAccountScheduleRequest{})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Account)
+	require.Equal(t, int64(2), result.Account.ID)
+	if result.ReleaseFunc != nil {
+		result.ReleaseFunc()
+	}
+}
+
+// TestLayered_TTFTPenalty_ProbeAndSchedulerUseSameBaseline verifies that the
+// evaluateRuntimePenalty helper produces consistent group-level TTFT baseline
+// regardless of which account is being evaluated, ensuring probe and scheduler
+// share the same penalty semantics.
+func TestLayered_TTFTPenalty_ProbeAndSchedulerUseSameBaseline(t *testing.T) {
+	accounts := []Account{
+		{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 3, Priority: 10},
+		{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 3, Priority: 50},
+	}
+	svc := newLayeredTestService(accounts)
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	stats := newOpenAIAccountRuntimeStats()
+	for i := 0; i < 5; i++ {
+		slow := 9000
+		fast := 1000
+		stats.report(1, true, &slow)
+		stats.report(2, true, &fast)
+	}
+
+	ls := newLayeredOpenAIAccountScheduler(svc, stats)
+	t.Cleanup(func() { ls.Stop() })
+
+	eval1 := ls.evaluateRuntimePenalty(context.Background(), 1, nil)
+	eval2 := ls.evaluateRuntimePenalty(context.Background(), 2, nil)
+
+	require.True(t, eval1.TTFTPenalized)
+	require.False(t, eval2.TTFTPenalized)
+	require.Greater(t, eval1.GroupMinTTFT, 0.0)
+	require.InDelta(t, eval1.GroupMinTTFT, eval2.GroupMinTTFT, 0.01)
+}
+
 // TestLayered_FallbackWhenHighPriorityFullyLoaded verifies that when the
 // highest-priority account's concurrency slots are exhausted, the scheduler
 // falls back to the next available account.

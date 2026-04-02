@@ -228,77 +228,33 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 		}
 	}
 
-	// 3. 获取运行时统计并计算 minTTFT
-	lcfg := s.service.openAIWSSchedulerLayeredConfig()
-	errorPenaltyThreshold := lcfg.ErrorPenaltyThreshold
-	errorPenaltyValue := lcfg.ErrorPenaltyValue
-	ttftPenaltyMultiplier := lcfg.TTFTPenaltyMultiplier
-	ttftPenaltyValue := lcfg.TTFTPenaltyValue
-
+	// 3. 构建候选列表并加载负载信息
 	type candidateInfo struct {
-		account   *Account
-		loadInfo  *AccountLoadInfo
-		errorRate float64
-		ttft      float64
-		hasTTFT   bool
+		account  *Account
+		loadInfo *AccountLoadInfo
 	}
 	candidates := make([]candidateInfo, 0, len(filtered))
-	minTTFT := 0.0
-	hasTTFTSample := false
-
 	for _, account := range filtered {
 		loadInfo := loadMap[account.ID]
 		if loadInfo == nil {
 			loadInfo = &AccountLoadInfo{AccountID: account.ID}
 		}
-		errorRate, ttft, hasTTFT := s.stats.snapshot(account.ID)
-		if hasTTFT && ttft > 0 {
-			if !hasTTFTSample {
-				minTTFT = ttft
-				hasTTFTSample = true
-			} else if ttft < minTTFT {
-				minTTFT = ttft
-			}
-		}
 		candidates = append(candidates, candidateInfo{
-			account:   account,
-			loadInfo:  loadInfo,
-			errorRate: errorRate,
-			ttft:      ttft,
-			hasTTFT:   hasTTFT,
+			account:  account,
+			loadInfo: loadInfo,
 		})
 	}
 
-	// 4. 应用运行时惩罚（创建浅拷贝调整 Priority）
+	// 4. 应用运行时惩罚（使用 group-level 共享评估）并过滤满载候选
 	available := make([]accountWithLoad, 0, len(candidates))
 	loadRateSum := 0.0
 	loadRateSumSquares := 0.0
 
 	for _, c := range candidates {
-		acc := c.account
-		penaltyApplied := false
+		eval := s.evaluateRuntimePenalty(ctx, c.account.ID, req.GroupID)
+		acc := s.applyPenaltyToAccount(c.account, eval)
 
-		// 错误率惩罚
-		if c.errorRate >= errorPenaltyThreshold {
-			// Shallow copy: only Priority is modified. Do NOT modify any pointer fields
-			// (Proxy, LastUsedAt, ExpiresAt, etc.) on the copy — they are shared with
-			// the original cached Account.
-			copied := *acc
-			copied.Priority += errorPenaltyValue
-			acc = &copied
-			penaltyApplied = true
-			s.probe.markPenalized(c.account.ID)
-		}
-
-		// TTFT 惩罚
-		if hasTTFTSample && c.hasTTFT && c.ttft > 0 && minTTFT > 0 && c.ttft >= minTTFT*ttftPenaltyMultiplier {
-			if !penaltyApplied {
-				copied := *acc
-				copied.Priority += ttftPenaltyValue
-				acc = &copied
-			} else {
-				acc.Priority += ttftPenaltyValue
-			}
+		if eval.ErrorPenalized || eval.TTFTPenalized {
 			s.probe.markPenalized(c.account.ID)
 		}
 
@@ -375,6 +331,74 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 	}
 
 	return nil, len(candidates), loadSkew, ErrNoAvailableAccounts
+}
+
+// layeredPenaltyEvaluation 封装一次运行时惩罚评估的结果。
+// 调度器和探针共用同一评估逻辑，保证 TTFT 基线一致。
+type layeredPenaltyEvaluation struct {
+	ErrorPenalized bool
+	TTFTPenalized  bool
+	ErrorRate      float64
+	TTFT           float64
+	HasTTFT        bool
+	GroupMinTTFT   float64
+	HasGroupMin    bool
+}
+
+// evaluateRuntimePenalty 使用 group-level 的所有可调度 OpenAI 账号来计算
+// 最小 TTFT（GroupMinTTFT），然后判断 accountID 是否需要被惩罚。
+func (s *layeredOpenAIAccountScheduler) evaluateRuntimePenalty(ctx context.Context, accountID int64, groupID *int64) layeredPenaltyEvaluation {
+	result := layeredPenaltyEvaluation{}
+	if s == nil || s.stats == nil || accountID <= 0 {
+		return result
+	}
+	result.ErrorRate, result.TTFT, result.HasTTFT = s.stats.snapshot(accountID)
+
+	lcfg := s.service.openAIWSSchedulerLayeredConfig()
+	result.ErrorPenalized = result.ErrorRate >= lcfg.ErrorPenaltyThreshold
+
+	accounts, err := s.service.listSchedulableAccounts(ctx, groupID)
+	if err != nil {
+		return result
+	}
+	for i := range accounts {
+		account := &accounts[i]
+		if !account.IsSchedulable() || !account.IsOpenAI() {
+			continue
+		}
+		_, ttft, hasTTFT := s.stats.snapshot(account.ID)
+		if !hasTTFT || ttft <= 0 {
+			continue
+		}
+		if !result.HasGroupMin || ttft < result.GroupMinTTFT {
+			result.GroupMinTTFT = ttft
+			result.HasGroupMin = true
+		}
+	}
+	if result.HasTTFT && result.HasGroupMin && result.GroupMinTTFT > 0 {
+		result.TTFTPenalized = result.TTFT >= result.GroupMinTTFT*lcfg.TTFTPenaltyMultiplier
+	}
+	return result
+}
+
+// applyPenaltyToAccount 根据评估结果对账号的 Priority 施加惩罚。
+// 若有惩罚则返回浅拷贝（仅修改 Priority），否则返回原指针。
+func (s *layeredOpenAIAccountScheduler) applyPenaltyToAccount(account *Account, eval layeredPenaltyEvaluation) *Account {
+	if account == nil {
+		return nil
+	}
+	if !eval.ErrorPenalized && !eval.TTFTPenalized {
+		return account
+	}
+	// Shallow copy: only Priority is modified. Do NOT modify any pointer fields.
+	copied := *account
+	if eval.ErrorPenalized {
+		copied.Priority += s.service.openAIWSSchedulerLayeredConfig().ErrorPenaltyValue
+	}
+	if eval.TTFTPenalized {
+		copied.Priority += s.service.openAIWSSchedulerLayeredConfig().TTFTPenaltyValue
+	}
+	return &copied
 }
 
 // removeFromAvailable 从候选列表中移除指定 ID 的账号。
