@@ -299,6 +299,7 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 			} else {
 				acc.Priority += ttftPenaltyValue
 			}
+			s.probe.markPenalized(c.account.ID)
 		}
 
 		// 过滤 loadRate >= 100%
