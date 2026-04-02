@@ -283,6 +283,26 @@ gateway:
       queue: 0.7
       error_rate: 0.8
       ttft: 0.5
+    # 调度模式："weighted"（默认，加权随机） 或 "layered"（分层过滤，优先级决定性）
+    scheduler_mode: "weighted"
+    # 分层调度参数（仅 scheduler_mode=layered 时生效）
+    scheduler_layered:
+      # EWMA 错误率触发惩罚的阈值
+      error_penalty_threshold: 0.3
+      # 错误率惩罚时 priority 增加的值
+      error_penalty_value: 100
+      # TTFT 超过最低值的倍数时触发惩罚
+      ttft_penalty_multiplier: 3.0
+      # TTFT 惩罚时 priority 增加的值
+      ttft_penalty_value: 50
+      # 被惩罚后多久开始第一次探针（秒）
+      probe_cooldown_seconds: 60
+      # 探针轮询间隔（秒）
+      probe_interval_seconds: 30
+      # 连续失败多少次后写 DB TempUnschedulable
+      probe_max_failures: 3
+      # 单次探针请求超时（秒）
+      probe_timeout_seconds: 15
   # HTTP upstream connection pool settings (HTTP/2 + multi-proxy scenario defaults)
   # HTTP 上游连接池配置（HTTP/2 + 多代理场景默认值）
   # Max idle connections across all hosts
