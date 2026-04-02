@@ -15,12 +15,18 @@ type failingClearTempUnschedulableRepo struct{ stubOpenAIAccountRepo }
 
 type probeGroupAwareRepo struct{ stubOpenAIAccountRepo }
 
+type failingGroupLookupProbeRepo struct{ stubOpenAIAccountRepo }
+
 func newProbeGroupAwareRepo(accounts []Account) probeGroupAwareRepo {
 	return probeGroupAwareRepo{stubOpenAIAccountRepo{accounts: accounts}}
 }
 
 func (f failingClearTempUnschedulableRepo) ClearTempUnschedulable(ctx context.Context, id int64) error {
 	return errors.New("clear failed")
+}
+
+func (r failingGroupLookupProbeRepo) ListSchedulableByGroupIDAndPlatform(ctx context.Context, groupID int64, platform string) ([]Account, error) {
+	return nil, errors.New("group lookup failed")
 }
 
 func (r probeGroupAwareRepo) ListSchedulableUngroupedByPlatform(ctx context.Context, platform string) ([]Account, error) {
@@ -79,22 +85,20 @@ func TestProbe_MarkPenalized_IsIdempotent(t *testing.T) {
 	require.Same(t, val1.(*openAIAccountProbeEntry), val2.(*openAIAccountProbeEntry))
 }
 
-func TestProbe_MarkPenalized_UpdatesReasonFlags(t *testing.T) {
+func TestProbe_MarkPenalized_OverwritesReasonFlagsToCurrentEvaluation(t *testing.T) {
 	probe := &openAIAccountProbe{stats: newOpenAIAccountRuntimeStats(), stopCh: make(chan struct{})}
 	defer probe.stop()
 
-	probe.markPenalized(42, nil, true, false)
-	v, ok := probe.entries.Load(int64(42))
+	probe.markPenalized(42, nil, true, true)
+	value, ok := probe.entries.Load(int64(42))
 	require.True(t, ok)
-	entry := v.(*openAIAccountProbeEntry)
-	require.True(t, entry.errorPenalized.Load())
-	require.False(t, entry.ttftPenalized.Load())
-
-	probe.markPenalized(42, nil, false, true)
-	v, _ = probe.entries.Load(int64(42))
-	entry = v.(*openAIAccountProbeEntry)
+	entry := value.(*openAIAccountProbeEntry)
 	require.True(t, entry.errorPenalized.Load())
 	require.True(t, entry.ttftPenalized.Load())
+
+	probe.markPenalized(42, nil, true, false)
+	require.True(t, entry.errorPenalized.Load())
+	require.False(t, entry.ttftPenalized.Load(), "reason flags should reflect current evaluation, not accumulate stale true values")
 }
 
 func TestProbe_ClearPenaltyReasons_RemovesEntryWhenNoReasonsRemain(t *testing.T) {
@@ -307,6 +311,21 @@ func TestProbe_ReevaluatePenaltyReasons_UsesStoredEntryGroupID(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, eval.TTFTPenalized)
 	require.InDelta(t, 1000.0, eval.GroupMinTTFT, 0.01, "must use stored group A baseline, not group B")
+}
+
+func TestProbe_ReevaluatePenaltyReasons_ReturnsErrorWhenGroupBaselineQueryFails(t *testing.T) {
+	groupID := int64(100)
+	svc := &OpenAIGatewayService{
+		accountRepo: failingGroupLookupProbeRepo{},
+		cfg:         &config.Config{},
+	}
+	stats := newOpenAIAccountRuntimeStats()
+	probe := newOpenAIAccountProbe(svc, stats)
+	defer probe.stop()
+
+	_, err := probe.reevaluatePenaltyReasons(context.Background(), 1, &groupID)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "group lookup failed")
 }
 
 func TestProbe_RecoverAccount_ResetsEWMA(t *testing.T) {

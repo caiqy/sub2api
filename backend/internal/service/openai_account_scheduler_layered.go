@@ -246,7 +246,11 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 	}
 
 	// 4. 应用运行时惩罚（使用 group-level 共享评估）并过滤满载候选
-	groupMinTTFT, hasGroupMin := s.computeGroupMinTTFT(ctx, req.GroupID)
+	groupMinTTFT, hasGroupMin, err := s.computeGroupMinTTFT(ctx, req.GroupID)
+	if err != nil {
+		hasGroupMin = false
+		groupMinTTFT = 0
+	}
 	available := make([]accountWithLoad, 0, len(candidates))
 	loadRateSum := 0.0
 	loadRateSumSquares := 0.0
@@ -350,13 +354,13 @@ type layeredPenaltyEvaluation struct {
 
 // computeGroupMinTTFT 计算 group-level 的最小 TTFT 基线，遍历该组所有可调度
 // OpenAI 账号的运行时统计。调用者应在候选循环之前调用一次，避免重复查询。
-func (s *layeredOpenAIAccountScheduler) computeGroupMinTTFT(ctx context.Context, groupID *int64) (float64, bool) {
+func (s *layeredOpenAIAccountScheduler) computeGroupMinTTFT(ctx context.Context, groupID *int64) (float64, bool, error) {
 	if s == nil || s.service == nil || s.stats == nil {
-		return 0, false
+		return 0, false, nil
 	}
 	accounts, err := s.service.listSchedulableAccounts(ctx, groupID)
 	if err != nil {
-		return 0, false
+		return 0, false, err
 	}
 	var minTTFT float64
 	var hasMin bool
@@ -374,7 +378,7 @@ func (s *layeredOpenAIAccountScheduler) computeGroupMinTTFT(ctx context.Context,
 			hasMin = true
 		}
 	}
-	return minTTFT, hasMin
+	return minTTFT, hasMin, nil
 }
 
 // evaluateRuntimePenalty 基于预计算的 group-level 最小 TTFT 基线，

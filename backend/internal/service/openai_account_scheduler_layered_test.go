@@ -211,7 +211,8 @@ func TestLayered_TTFTPenalty_SharedEvaluatorUsesConsistentGroupBaseline(t *testi
 	ls := newLayeredOpenAIAccountScheduler(svc, stats)
 	t.Cleanup(func() { ls.Stop() })
 
-	groupMinTTFT, hasGroupMin := ls.computeGroupMinTTFT(context.Background(), nil)
+	groupMinTTFT, hasGroupMin, err := ls.computeGroupMinTTFT(context.Background(), nil)
+	require.NoError(t, err)
 	eval1 := ls.evaluateRuntimePenalty(1, groupMinTTFT, hasGroupMin)
 	eval2 := ls.evaluateRuntimePenalty(2, groupMinTTFT, hasGroupMin)
 

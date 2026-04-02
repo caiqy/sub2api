@@ -88,12 +88,8 @@ func (p *openAIAccountProbe) markPenalized(accountID int64, groupID *int64, erro
 		entry.groupIDValue.Store(*groupID)
 		entry.groupIDSet.Store(true)
 	}
-	if errorPenalized {
-		entry.errorPenalized.Store(true)
-	}
-	if ttftPenalized {
-		entry.ttftPenalized.Store(true)
-	}
+	entry.errorPenalized.Store(errorPenalized)
+	entry.ttftPenalized.Store(ttftPenalized)
 	if entry.penalizedAt.IsZero() {
 		entry.penalizedAt = time.Now()
 	}
@@ -245,6 +241,8 @@ func (p *openAIAccountProbe) probeAccount(account *Account, entry *openAIAccount
 
 	model := p.resolveProbeModel(account)
 	result := p.sendProbeRequest(p.ctx, account, model, lcfg)
+	entry.stateMu.Lock()
+	defer entry.stateMu.Unlock()
 	if entry != nil && entry.ignoreResults.Load() {
 		return
 	}
@@ -340,7 +338,10 @@ func (p *openAIAccountProbe) reevaluatePenaltyReasons(ctx context.Context, accou
 		service: p.service,
 		stats:   p.stats,
 	}
-	groupMinTTFT, hasGroupMin := ls.computeGroupMinTTFT(ctx, groupID)
+	groupMinTTFT, hasGroupMin, err := ls.computeGroupMinTTFT(ctx, groupID)
+	if err != nil {
+		return layeredPenaltyEvaluation{}, err
+	}
 	return ls.evaluateRuntimePenalty(accountID, groupMinTTFT, hasGroupMin), nil
 }
 
@@ -530,6 +531,8 @@ func (p *openAIAccountProbe) applyManualRecovery(accountID int64, entry *openAIA
 	prevTTFT := false
 	lastProbeTTFTMs := int64(0)
 	if entry != nil {
+		entry.stateMu.Lock()
+		defer entry.stateMu.Unlock()
 		entry.ignoreResults.Store(true)
 		prevError = entry.errorPenalized.Load()
 		prevTTFT = entry.ttftPenalized.Load()
