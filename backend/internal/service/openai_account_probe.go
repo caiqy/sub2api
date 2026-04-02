@@ -15,6 +15,12 @@ import (
 	"time"
 )
 
+const (
+	probePermanentBlockDuration = 100 * 365 * 24 * time.Hour
+	probeDefaultFallbackModel   = "gpt-4o-mini"
+	probeMaxTokens              = 1
+)
+
 // openAIAccountProbeEntry 记录一个被惩罚账号的探活状态。
 type openAIAccountProbeEntry struct {
 	accountID       int64
@@ -177,7 +183,7 @@ func (p *openAIAccountProbe) probeAccount(account *Account, entry *openAIAccount
 // 优先使用 model_mapping 中第一个非通配符模型，回退到 gpt-4o-mini。
 func (p *openAIAccountProbe) resolveProbeModel(account *Account) string {
 	if account == nil {
-		return "gpt-4o-mini"
+		return probeDefaultFallbackModel
 	}
 	mapping := account.GetModelMapping()
 	if len(mapping) > 0 {
@@ -193,7 +199,7 @@ func (p *openAIAccountProbe) resolveProbeModel(account *Account) string {
 			}
 		}
 	}
-	return "gpt-4o-mini"
+	return probeDefaultFallbackModel
 }
 
 // sendProbeRequest 发送轻量级探活请求。
@@ -222,7 +228,7 @@ func (p *openAIAccountProbe) sendProbeRequest(account *Account, model string, lc
 		"messages": []map[string]string{
 			{"role": "user", "content": "hi"},
 		},
-		"max_tokens": 1,
+		"max_tokens": probeMaxTokens,
 		"stream":     false,
 	}
 	bodyBytes, err := json.Marshal(body)
@@ -278,7 +284,7 @@ func (p *openAIAccountProbe) setTempUnschedulable(accountID int64, entry *openAI
 	if p.service == nil || p.service.accountRepo == nil {
 		return
 	}
-	until := time.Now().Add(100 * 365 * 24 * time.Hour) // ~100 years
+	until := time.Now().Add(probePermanentBlockDuration)
 	reason := "layered scheduler probe: consecutive failures exceeded threshold"
 	if err := p.service.accountRepo.SetTempUnschedulable(context.Background(), accountID, until, reason); err != nil {
 		slog.Warn("probe: failed to set temp unschedulable",

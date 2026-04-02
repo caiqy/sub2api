@@ -56,6 +56,65 @@ func TestLayered_PriorityDeterminism(t *testing.T) {
 	}
 }
 
+// TestLayered_TTFTPenaltyPushesToLowerPriority verifies that an account with
+// high TTFT (exceeding minTTFT * TTFTPenaltyMultiplier) receives a priority
+// penalty, causing the scheduler to prefer a lower-priority but faster account.
+func TestLayered_TTFTPenaltyPushesToLowerPriority(t *testing.T) {
+	accounts := []Account{
+		{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 3, Priority: 10},
+		{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 3, Priority: 50},
+	}
+
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold = 0.3
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyValue = 100
+	cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyMultiplier = 3.0
+	cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyValue = 50
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeCooldownSeconds = 60
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeIntervalSeconds = 30
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeMaxFailures = 3
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTimeoutSeconds = 15
+	cfg.Gateway.OpenAIWS.LBTopK = 7
+	cfg.Gateway.OpenAIWS.StickySessionTTLSeconds = 3600
+	cfg.Gateway.OpenAIWS.StickyResponseIDTTLSeconds = 3600
+
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: accounts},
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+	}
+	scheduler := svc.getOpenAIAccountScheduler()
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+	require.NotNil(t, scheduler)
+
+	// Report multiple results to stabilize EWMA:
+	//   Account 1: high TTFT (9000ms) → EWMA converges toward 9000
+	//   Account 2: low  TTFT (1000ms) → EWMA converges toward 1000
+	for i := 0; i < 10; i++ {
+		scheduler.ReportResult(1, true, intPtr(9000))
+		scheduler.ReportResult(2, true, intPtr(1000))
+	}
+
+	// After EWMA stabilization:
+	//   minTTFT ≈ 1000, threshold = 1000 * 3.0 = 3000
+	//   Account 1 TTFT ≈ 9000 > 3000 → penalty applied: effectivePriority = 10 + 50 = 60
+	//   Account 2 TTFT ≈ 1000 < 3000 → no penalty:       effectivePriority = 50
+	//   Account 2 (60 > 50) should be selected.
+
+	ctx := context.Background()
+	req := OpenAIAccountScheduleRequest{RequestedModel: ""}
+
+	result, _, err := scheduler.Select(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Account)
+	require.Equal(t, int64(2), result.Account.ID, "account 1 should be TTFT-penalized; account 2 (priority=50) should be selected")
+	if result.ReleaseFunc != nil {
+		result.ReleaseFunc()
+	}
+}
+
 // TestLayered_ErrorPenaltyPushesToLowerPriority verifies that reporting
 // consecutive failures raises the effective priority via the error penalty,
 // causing the scheduler to prefer the other account.

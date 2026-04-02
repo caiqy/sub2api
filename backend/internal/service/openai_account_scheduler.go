@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"hash/fnv"
+	"log/slog"
 	"math"
 	"sort"
 	"strconv"
@@ -840,6 +841,10 @@ func (s *OpenAIGatewayService) getOpenAIAccountScheduler() OpenAIAccountSchedule
 			if mode == "layered" {
 				s.openaiScheduler = newLayeredOpenAIAccountScheduler(s, s.openaiAccountStats)
 			} else {
+				if mode != "" && mode != "weighted" {
+					slog.Warn("openai_scheduler.unknown_mode_fallback_to_weighted",
+						"configured_mode", mode)
+				}
 				s.openaiScheduler = newDefaultOpenAIAccountScheduler(s, s.openaiAccountStats)
 			}
 		}
