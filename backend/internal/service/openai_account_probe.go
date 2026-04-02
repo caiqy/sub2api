@@ -46,7 +46,7 @@ func newOpenAIAccountProbe(service *OpenAIGatewayService, stats *openAIAccountRu
 
 // markPenalized 注册一个账号进入探活列表（幂等）。
 func (p *openAIAccountProbe) markPenalized(accountID int64) {
-	if p == nil || accountID <= 0 {
+	if p == nil || accountID <= 0 || p.stopped.Load() {
 		return
 	}
 	entry := &openAIAccountProbeEntry{
