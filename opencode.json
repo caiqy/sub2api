@@ -4,5 +4,11 @@
     "playwright": {
       "enabled": true
     }
+  },
+  "permission": {
+    "skill": {
+      "writing-skills": "deny",
+      "using-git-worktrees": "deny"
+    }
   }
 }
