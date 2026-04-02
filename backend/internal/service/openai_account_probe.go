@@ -25,6 +25,7 @@ const (
 type openAIAccountProbeEntry struct {
 	accountID       int64
 	penalizedAt     time.Time
+	stateMu         sync.Mutex
 	consecutiveFail atomic.Int32
 	dbFlagSet       atomic.Bool
 	probing         atomic.Bool
@@ -67,6 +68,8 @@ func (p *openAIAccountProbe) markPenalized(accountID int64, errorPenalized bool,
 	if entry == nil {
 		return
 	}
+	entry.stateMu.Lock()
+	defer entry.stateMu.Unlock()
 	if errorPenalized {
 		entry.errorPenalized.Store(true)
 	}
@@ -78,6 +81,7 @@ func (p *openAIAccountProbe) markPenalized(accountID int64, errorPenalized bool,
 	}
 }
 
+// clearPenaltyReasons 清除 entry 的惩罚原因；仅在无 DB 标记且无探活进行中时移除 entry。
 func (p *openAIAccountProbe) clearPenaltyReasons(accountID int64) {
 	if p == nil || accountID <= 0 {
 		return
@@ -91,11 +95,20 @@ func (p *openAIAccountProbe) clearPenaltyReasons(accountID int64) {
 		p.entries.Delete(accountID)
 		return
 	}
+
+	entry.stateMu.Lock()
+	defer entry.stateMu.Unlock()
+
 	entry.errorPenalized.Store(false)
 	entry.ttftPenalized.Store(false)
-	if !entry.dbFlagSet.Load() {
-		p.entries.Delete(accountID)
+
+	if entry.probing.Load() {
+		return
 	}
+	if entry.dbFlagSet.Load() {
+		return
+	}
+	p.entries.Delete(accountID)
 }
 
 // stop 停止探活 goroutine。

@@ -64,6 +64,40 @@ func TestProbe_ClearPenaltyReasons_RemovesEntryWhenNoReasonsRemain(t *testing.T)
 	require.False(t, ok)
 }
 
+func TestProbe_ClearPenaltyReasons_DoesNotRemoveEntryWhenProbing(t *testing.T) {
+	probe := &openAIAccountProbe{stats: newOpenAIAccountRuntimeStats(), stopCh: make(chan struct{})}
+	defer probe.stop()
+
+	probe.markPenalized(9, true, true)
+	value, ok := probe.entries.Load(int64(9))
+	require.True(t, ok)
+	entry := value.(*openAIAccountProbeEntry)
+	entry.probing.Store(true)
+
+	probe.clearPenaltyReasons(9)
+	_, ok = probe.entries.Load(int64(9))
+	require.True(t, ok, "entry must remain while probing is in-flight")
+	require.False(t, entry.errorPenalized.Load())
+	require.False(t, entry.ttftPenalized.Load())
+}
+
+func TestProbe_ClearPenaltyReasons_DoesNotRemoveEntryWhenDBFlagSet(t *testing.T) {
+	probe := &openAIAccountProbe{stats: newOpenAIAccountRuntimeStats(), stopCh: make(chan struct{})}
+	defer probe.stop()
+
+	probe.markPenalized(10, true, true)
+	value, ok := probe.entries.Load(int64(10))
+	require.True(t, ok)
+	entry := value.(*openAIAccountProbeEntry)
+	entry.dbFlagSet.Store(true)
+
+	probe.clearPenaltyReasons(10)
+	_, ok = probe.entries.Load(int64(10))
+	require.True(t, ok, "entry must remain while db flag is set")
+	require.False(t, entry.errorPenalized.Load())
+	require.False(t, entry.ttftPenalized.Load())
+}
+
 func TestProbe_RecoverAccount_ResetsEWMA(t *testing.T) {
 	stats := newOpenAIAccountRuntimeStats()
 	probe := &openAIAccountProbe{
