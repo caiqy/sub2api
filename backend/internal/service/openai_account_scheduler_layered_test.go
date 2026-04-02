@@ -166,20 +166,23 @@ func TestLayered_TTFTPenalty_UsesGroupLevelBaseline(t *testing.T) {
 	scheduler := svc.getOpenAIAccountScheduler()
 	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
 
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 10; i++ {
 		slow := 9000
 		fast := 1000
-		normal := 2000
+		normal := 2500
 		scheduler.ReportResult(1, true, &slow)
 		scheduler.ReportResult(2, true, &fast)
 		scheduler.ReportResult(3, true, &normal)
 	}
 
-	result, _, err := scheduler.Select(context.Background(), OpenAIAccountScheduleRequest{})
+	excluded := map[int64]struct{}{2: {}}
+	result, _, err := scheduler.Select(context.Background(), OpenAIAccountScheduleRequest{
+		ExcludedIDs: excluded,
+	})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, result.Account)
-	require.NotEqual(t, int64(1), result.Account.ID, "account 1 should be TTFT-penalized")
+	require.Equal(t, int64(3), result.Account.ID)
 	if result.ReleaseFunc != nil {
 		result.ReleaseFunc()
 	}
