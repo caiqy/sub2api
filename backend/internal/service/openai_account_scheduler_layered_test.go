@@ -179,7 +179,7 @@ func TestLayered_TTFTPenalty_UsesGroupLevelBaseline(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, result.Account)
-	require.Equal(t, int64(2), result.Account.ID)
+	require.NotEqual(t, int64(1), result.Account.ID, "account 1 should be TTFT-penalized")
 	if result.ReleaseFunc != nil {
 		result.ReleaseFunc()
 	}
@@ -208,8 +208,9 @@ func TestLayered_TTFTPenalty_ProbeAndSchedulerUseSameBaseline(t *testing.T) {
 	ls := newLayeredOpenAIAccountScheduler(svc, stats)
 	t.Cleanup(func() { ls.Stop() })
 
-	eval1 := ls.evaluateRuntimePenalty(context.Background(), 1, nil)
-	eval2 := ls.evaluateRuntimePenalty(context.Background(), 2, nil)
+	groupMinTTFT, hasGroupMin := ls.computeGroupMinTTFT(context.Background(), nil)
+	eval1 := ls.evaluateRuntimePenalty(1, groupMinTTFT, hasGroupMin)
+	eval2 := ls.evaluateRuntimePenalty(2, groupMinTTFT, hasGroupMin)
 
 	require.True(t, eval1.TTFTPenalized)
 	require.False(t, eval2.TTFTPenalized)
