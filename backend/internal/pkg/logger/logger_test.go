@@ -1,13 +1,206 @@
 package logger
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
+	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestClose_LegacyPrintfFallsBackToStdLog(t *testing.T) {
+	Close()
+
+	logR, logW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create log pipe: %v", err)
+	}
+	prevWriter := log.Writer()
+	prevFlags := log.Flags()
+	prevPrefix := log.Prefix()
+	log.SetOutput(logW)
+	log.SetFlags(0)
+	log.SetPrefix("")
+
+	t.Cleanup(func() {
+		Close()
+		log.SetOutput(prevWriter)
+		log.SetFlags(prevFlags)
+		log.SetPrefix(prevPrefix)
+		_ = logR.Close()
+		_ = logW.Close()
+	})
+
+	err = Init(InitOptions{
+		Level:  "debug",
+		Format: "json",
+		Output: OutputOptions{ToStdout: false, ToFile: false},
+	})
+	if err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	Close()
+	log.SetOutput(logW)
+	log.SetFlags(0)
+	log.SetPrefix("")
+	LegacyPrintf("service.test", "fallback after close")
+	_ = logW.Close()
+
+	logBytes, _ := io.ReadAll(logR)
+	if !strings.Contains(string(logBytes), "fallback after close") {
+		t.Fatalf("LegacyPrintf should fallback to std log after Close, got: %s", string(logBytes))
+	}
+}
+
+func TestClose_CurrentLevelResetsToDefault(t *testing.T) {
+	Close()
+	t.Cleanup(Close)
+
+	err := Init(InitOptions{
+		Level:  "debug",
+		Format: "json",
+		Output: OutputOptions{ToStdout: false, ToFile: false},
+	})
+	if err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	if got := CurrentLevel(); got != "debug" {
+		t.Fatalf("CurrentLevel()=%s want debug before Close", got)
+	}
+
+	Close()
+
+	if got := CurrentLevel(); got != "info" {
+		t.Fatalf("CurrentLevel()=%s want info after Close", got)
+	}
+}
+
+func TestClose_SlogFallsBackToPreviousDefault(t *testing.T) {
+	Close()
+	t.Cleanup(Close)
+
+	var buf bytes.Buffer
+	prevDefault := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() {
+		slog.SetDefault(prevDefault)
+	})
+
+	err := Init(InitOptions{
+		Level:  "info",
+		Format: "json",
+		Output: OutputOptions{ToStdout: false, ToFile: false},
+	})
+	if err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	Close()
+	slog.Info("slog fallback after close")
+
+	if !strings.Contains(buf.String(), "slog fallback after close") {
+		t.Fatalf("slog should fallback to previous default after Close, got: %s", buf.String())
+	}
+}
+
+func TestReconfigure_TracksPreviousClosersUntilClose(t *testing.T) {
+	Close()
+	t.Cleanup(Close)
+
+	tmpDir := t.TempDir()
+	firstPath := filepath.Join(tmpDir, "first.log")
+	secondPath := filepath.Join(tmpDir, "second.log")
+
+	err := Init(InitOptions{
+		Level:  "info",
+		Format: "json",
+		Output: OutputOptions{ToStdout: false, ToFile: true, FilePath: firstPath},
+	})
+	if err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+	if got := len(resourceClose); got != 1 {
+		t.Fatalf("len(resourceClose)=%d want 1 after first Init", got)
+	}
+
+	err = Reconfigure(func(opts *InitOptions) error {
+		opts.Output.FilePath = secondPath
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Reconfigure() error: %v", err)
+	}
+
+	if got := len(resourceClose); got != 2 {
+		t.Fatalf("len(resourceClose)=%d want 2 after Reconfigure", got)
+	}
+
+	Close()
+	if got := len(resourceClose); got != 0 {
+		t.Fatalf("len(resourceClose)=%d want 0 after Close", got)
+	}
+}
+
+func TestReconfigure_PreviousLoggerRemainsUsable(t *testing.T) {
+	Close()
+	t.Cleanup(Close)
+
+	tmpDir := t.TempDir()
+	firstPath := filepath.Join(tmpDir, "first.log")
+	secondPath := filepath.Join(tmpDir, "second.log")
+
+	err := Init(InitOptions{
+		Level:       "info",
+		Format:      "json",
+		ServiceName: "sub2api",
+		Environment: "test",
+		Output:      OutputOptions{ToStdout: false, ToFile: true, FilePath: firstPath},
+	})
+	if err != nil {
+		t.Fatalf("Init() error: %v", err)
+	}
+
+	oldLogger := L().Named("old")
+
+	err = Reconfigure(func(opts *InitOptions) error {
+		opts.Output.FilePath = secondPath
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Reconfigure() error: %v", err)
+	}
+
+	oldLogger.Info("written by old logger after reconfigure")
+	L().Info("written by new logger after reconfigure")
+	Close()
+
+	firstBytes, err := os.ReadFile(firstPath)
+	if err != nil {
+		t.Fatalf("read first log file: %v", err)
+	}
+	secondBytes, err := os.ReadFile(secondPath)
+	if err != nil {
+		t.Fatalf("read second log file: %v", err)
+	}
+
+	if !strings.Contains(string(firstBytes), "written by old logger after reconfigure") {
+		t.Fatalf("old logger should keep writing to original file, got: %s", string(firstBytes))
+	}
+	if !strings.Contains(string(secondBytes), "written by new logger after reconfigure") {
+		t.Fatalf("new logger should write to reconfigured file, got: %s", string(secondBytes))
+	}
+	if err := os.Remove(firstPath); err != nil {
+		t.Fatalf("first log file should be removable after Close: %v", err)
+	}
+	if err := os.Remove(secondPath); err != nil {
+		t.Fatalf("second log file should be removable after Close: %v", err)
+	}
+}
 
 func TestInit_DualOutput(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -26,6 +219,7 @@ func TestInit_DualOutput(t *testing.T) {
 	os.Stdout = stdoutW
 	os.Stderr = stderrW
 	t.Cleanup(func() {
+		Close()
 		os.Stdout = origStdout
 		os.Stderr = origStderr
 		_ = stdoutR.Close()
@@ -97,6 +291,7 @@ func TestInit_FileOutputFailureDowngrade(t *testing.T) {
 	os.Stdout = stdoutW
 	os.Stderr = stderrW
 	t.Cleanup(func() {
+		Close()
 		os.Stdout = origStdout
 		os.Stderr = origStderr
 		_ = stdoutW.Close()
@@ -143,6 +338,7 @@ func TestInit_CallerShouldPointToCallsite(t *testing.T) {
 	os.Stdout = stdoutW
 	os.Stderr = stderrW
 	t.Cleanup(func() {
+		Close()
 		os.Stdout = origStdout
 		os.Stderr = origStderr
 		_ = stdoutR.Close()

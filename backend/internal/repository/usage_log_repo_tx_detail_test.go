@@ -66,6 +66,7 @@ func TestUsageLogRepositoryCreateSingle_SkipsDetailPersistenceWhenDisabled(t *te
 			account_id,
 			request_id,
 			model,
+			requested_model,
 			upstream_model,
 			group_id,
 			subscription_id,
@@ -101,12 +102,12 @@ func TestUsageLogRepositoryCreateSingle_SkipsDetailPersistenceWhenDisabled(t *te
 			cache_ttl_overridden,
 			created_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6,
-			$7, $8,
-			$9, $10, $11, $12,
-			$13, $14,
-			$15, $16, $17, $18, $19, $20,
-			$21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39
+			$1, $2, $3, $4, $5, $6, $7,
+			$8, $9,
+			$10, $11, $12, $13,
+			$14, $15,
+			$16, $17, $18, $19, $20, $21,
+			$22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 		RETURNING id, created_at

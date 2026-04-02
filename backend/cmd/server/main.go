@@ -56,7 +56,7 @@ func init() {
 // In non-release mode, Debug level logs are enabled.
 func main() {
 	logger.InitBootstrap()
-	defer logger.Sync()
+	defer logger.Close()
 
 	// Parse command line flags
 	setupMode := flag.Bool("setup", false, "Run setup wizard in CLI mode")

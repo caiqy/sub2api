@@ -18,6 +18,14 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
+type noOpSyncWriter struct {
+	io.Writer
+}
+
+func (w noOpSyncWriter) Sync() error {
+	return nil
+}
+
 type Level = zapcore.Level
 
 const (
@@ -48,6 +56,8 @@ var (
 	atomicLevel   zap.AtomicLevel
 	initOptions   InitOptions
 	currentSink   atomic.Value // sinkState
+	resourceClose []io.Closer
+	slogUndo      func()
 	stdLogUndo    func()
 	bootstrapOnce sync.Once
 )
@@ -72,16 +82,19 @@ func Init(options InitOptions) error {
 
 func initLocked(options InitOptions) error {
 	normalized := options.normalized()
-	zl, al, err := buildLogger(normalized)
+	zl, al, closers, err := buildLogger(normalized)
 	if err != nil {
 		return err
 	}
 
 	prev := global.Load()
+	allClosers := append([]io.Closer{}, resourceClose...)
+	allClosers = append(allClosers, closers...)
 	global.Store(zl)
 	sugar.Store(zl.Sugar())
 	atomicLevel = al
 	initOptions = normalized
+	resourceClose = allClosers
 
 	bridgeSlogLocked()
 	bridgeStdLogLocked()
@@ -89,6 +102,12 @@ func initLocked(options InitOptions) error {
 	if prev != nil {
 		_ = prev.Sync()
 	}
+	// Existing *zap.Logger instances may still be held by callers obtained via
+	// L/With/IntoContext before reconfiguration. Writers such as lumberjack reopen
+	// lazily on write after Close(), so releasing only the previous generation's
+	// currently-open file handle here would let old logger instances resurrect
+	// untracked file descriptors later. Keep every generation's closer tracked
+	// until Close(), where all resources are released together.
 	return nil
 }
 
@@ -205,6 +224,30 @@ func Sync() {
 	}
 }
 
+func Close() {
+	mu.Lock()
+	defer mu.Unlock()
+
+	if l := global.Load(); l != nil {
+		_ = l.Sync()
+	}
+	closeClosers(resourceClose)
+	resourceClose = nil
+	global.Store(nil)
+	sugar.Store(nil)
+	atomicLevel = zap.NewAtomicLevelAt(zap.InfoLevel)
+	initOptions = InitOptions{}
+
+	if stdLogUndo != nil {
+		stdLogUndo()
+		stdLogUndo = nil
+	}
+	if slogUndo != nil {
+		slogUndo()
+		slogUndo = nil
+	}
+}
+
 func bridgeStdLogLocked() {
 	if stdLogUndo != nil {
 		stdLogUndo()
@@ -231,16 +274,25 @@ func bridgeStdLogLocked() {
 }
 
 func bridgeSlogLocked() {
+	if slogUndo != nil {
+		slogUndo()
+		slogUndo = nil
+	}
+	prev := slog.Default()
 	base := global.Load()
 	if base == nil {
 		base = zap.NewNop()
 	}
 	slog.SetDefault(slog.New(newSlogZapHandler(base.Named("slog"))))
+	slogUndo = func() {
+		slog.SetDefault(prev)
+	}
 }
 
-func buildLogger(options InitOptions) (*zap.Logger, zap.AtomicLevel, error) {
+func buildLogger(options InitOptions) (*zap.Logger, zap.AtomicLevel, []io.Closer, error) {
 	level, _ := parseLevel(options.Level)
 	atomic := zap.NewAtomicLevelAt(level)
+	closers := make([]io.Closer, 0, 1)
 
 	encoderCfg := zapcore.EncoderConfig{
 		TimeKey:        "time",
@@ -273,8 +325,8 @@ func buildLogger(options InitOptions) (*zap.Logger, zap.AtomicLevel, error) {
 		errPriority := zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
 			return lvl >= atomic.Level() && lvl >= zapcore.WarnLevel
 		})
-		cores = append(cores, zapcore.NewCore(enc, zapcore.Lock(os.Stdout), infoPriority))
-		cores = append(cores, zapcore.NewCore(enc, zapcore.Lock(os.Stderr), errPriority))
+		cores = append(cores, zapcore.NewCore(enc, zapcore.Lock(noOpSyncWriter{Writer: os.Stdout}), infoPriority))
+		cores = append(cores, zapcore.NewCore(enc, zapcore.Lock(noOpSyncWriter{Writer: os.Stderr}), errPriority))
 	}
 
 	if options.Output.ToFile {
@@ -286,12 +338,13 @@ func buildLogger(options InitOptions) (*zap.Logger, zap.AtomicLevel, error) {
 				fileErr,
 			)
 		} else {
-			cores = append(cores, fileCore)
+			cores = append(cores, fileCore.core)
+			closers = append(closers, fileCore.closer)
 		}
 	}
 
 	if len(cores) == 0 {
-		cores = append(cores, zapcore.NewCore(enc, zapcore.Lock(os.Stdout), atomic))
+		cores = append(cores, zapcore.NewCore(enc, zapcore.Lock(noOpSyncWriter{Writer: os.Stdout}), atomic))
 	}
 
 	core := zapcore.NewTee(cores...)
@@ -313,10 +366,15 @@ func buildLogger(options InitOptions) (*zap.Logger, zap.AtomicLevel, error) {
 		zap.String("service", options.ServiceName),
 		zap.String("env", options.Environment),
 	)
-	return logger, atomic, nil
+	return logger, atomic, closers, nil
 }
 
-func buildFileCore(enc zapcore.Encoder, atomic zap.AtomicLevel, options InitOptions) (zapcore.Core, string, error) {
+type fileCoreHandle struct {
+	core   zapcore.Core
+	closer io.Closer
+}
+
+func buildFileCore(enc zapcore.Encoder, atomic zap.AtomicLevel, options InitOptions) (*fileCoreHandle, string, error) {
 	filePath := options.Output.FilePath
 	if strings.TrimSpace(filePath) == "" {
 		filePath = resolveLogFilePath("")
@@ -334,7 +392,16 @@ func buildFileCore(enc zapcore.Encoder, atomic zap.AtomicLevel, options InitOpti
 		Compress:   options.Rotation.Compress,
 		LocalTime:  options.Rotation.LocalTime,
 	}
-	return zapcore.NewCore(enc, zapcore.AddSync(lj), atomic), filePath, nil
+	return &fileCoreHandle{core: zapcore.NewCore(enc, zapcore.AddSync(lj), atomic), closer: lj}, filePath, nil
+}
+
+func closeClosers(closers []io.Closer) {
+	for _, closer := range closers {
+		if closer == nil {
+			continue
+		}
+		_ = closer.Close()
+	}
 }
 
 type sinkCore struct {
