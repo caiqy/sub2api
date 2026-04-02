@@ -6,13 +6,42 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
 type failingClearTempUnschedulableRepo struct{ stubOpenAIAccountRepo }
 
+type probeGroupAwareRepo struct{ stubOpenAIAccountRepo }
+
 func (f failingClearTempUnschedulableRepo) ClearTempUnschedulable(ctx context.Context, id int64) error {
 	return errors.New("clear failed")
+}
+
+func (r probeGroupAwareRepo) ListSchedulableUngroupedByPlatform(ctx context.Context, platform string) ([]Account, error) {
+	var result []Account
+	for _, acc := range r.accounts {
+		if acc.Platform == platform && acc.IsSchedulable() && len(acc.AccountGroups) == 0 {
+			result = append(result, acc)
+		}
+	}
+	return result, nil
+}
+
+func (r probeGroupAwareRepo) ListSchedulableByGroupIDAndPlatform(ctx context.Context, groupID int64, platform string) ([]Account, error) {
+	var result []Account
+	for _, acc := range r.accounts {
+		if acc.Platform != platform || !acc.IsSchedulable() {
+			continue
+		}
+		for _, ag := range acc.AccountGroups {
+			if ag.GroupID == groupID {
+				result = append(result, acc)
+				break
+			}
+		}
+	}
+	return result, nil
 }
 
 func TestProbe_MarkPenalized_RegistersAccount(t *testing.T) {
@@ -165,6 +194,57 @@ func TestProbe_ReevaluatePenaltyReasons_UsesSharedGroupBaseline(t *testing.T) {
 	require.True(t, eval.TTFTPenalized)
 	require.False(t, eval.ErrorPenalized)
 	require.Greater(t, eval.GroupMinTTFT, 0.0)
+}
+
+func TestProbe_ReevaluatePenaltyReasons_UsesAccountGroupID(t *testing.T) {
+	groupID := int64(100)
+	accounts := []Account{
+		{
+			ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive,
+			Schedulable: true, Concurrency: 3, Priority: 10,
+			AccountGroups: []AccountGroup{{GroupID: groupID}},
+		},
+		{
+			ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive,
+			Schedulable: true, Concurrency: 3, Priority: 50,
+			AccountGroups: []AccountGroup{{GroupID: groupID}},
+		},
+		{
+			ID: 3, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive,
+			Schedulable: true, Concurrency: 3, Priority: 50,
+			AccountGroups: []AccountGroup{{GroupID: 200}},
+		},
+	}
+	repo := probeGroupAwareRepo{stubOpenAIAccountRepo{accounts: accounts}}
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold = 0.3
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyValue = 100
+	cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyMultiplier = 3.0
+	cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyValue = 50
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeCooldownSeconds = 60
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeIntervalSeconds = 30
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeMaxFailures = 3
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTimeoutSeconds = 15
+
+	svc := &OpenAIGatewayService{accountRepo: repo, cfg: cfg}
+	stats := newOpenAIAccountRuntimeStats()
+	probe := newOpenAIAccountProbe(svc, stats)
+	defer probe.stop()
+
+	for i := 0; i < 5; i++ {
+		slow := 9000
+		fastSameGroup := 1000
+		fastOtherGroup := 500
+		stats.report(1, true, &slow)
+		stats.report(2, true, &fastSameGroup)
+		stats.report(3, true, &fastOtherGroup)
+	}
+
+	eval, err := probe.reevaluatePenaltyReasons(context.Background(), 1, probeAccountGroupID(&accounts[0]))
+	require.NoError(t, err)
+	require.True(t, eval.TTFTPenalized, "account 1 should compare against same-group min TTFT")
+	require.InDelta(t, 1000.0, eval.GroupMinTTFT, 0.01, "group min TTFT must come from same group, not other groups")
 }
 
 func TestProbe_RecoverAccount_ResetsEWMA(t *testing.T) {

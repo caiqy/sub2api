@@ -244,7 +244,8 @@ func (p *openAIAccountProbe) probeAccount(account *Account, entry *openAIAccount
 		p.stats.report(account.ID, true, &ttft)
 		p.updateProbeObservations(entry, ttft)
 
-		eval, evalErr := p.reevaluatePenaltyReasons(p.ctx, account.ID, nil)
+		groupID := probeAccountGroupID(account)
+		eval, evalErr := p.reevaluatePenaltyReasons(p.ctx, account.ID, groupID)
 		if evalErr != nil {
 			entry.consecutiveFail.Store(0)
 			slog.Warn("probe: failed to reevaluate penalty reasons", "account_id", account.ID, "error", evalErr.Error())
@@ -277,6 +278,37 @@ func (p *openAIAccountProbe) updateProbeObservations(entry *openAIAccountProbeEn
 	}
 	entry.lastProbeTTFTMs.Store(int64(ttft))
 	entry.lastProbeAtUnix.Store(time.Now().Unix())
+}
+
+func probeAccountGroupID(account *Account) *int64 {
+	if account == nil {
+		return nil
+	}
+	if len(account.AccountGroups) > 0 {
+		for _, ag := range account.AccountGroups {
+			if ag.GroupID > 0 {
+				gid := ag.GroupID
+				return &gid
+			}
+		}
+	}
+	if len(account.GroupIDs) > 0 {
+		for _, gid := range account.GroupIDs {
+			if gid > 0 {
+				groupID := gid
+				return &groupID
+			}
+		}
+	}
+	if len(account.Groups) > 0 {
+		for _, grp := range account.Groups {
+			if grp != nil && grp.ID > 0 {
+				gid := grp.ID
+				return &gid
+			}
+		}
+	}
+	return nil
 }
 
 func (p *openAIAccountProbe) reevaluatePenaltyReasons(ctx context.Context, accountID int64, groupID *int64) (layeredPenaltyEvaluation, error) {
