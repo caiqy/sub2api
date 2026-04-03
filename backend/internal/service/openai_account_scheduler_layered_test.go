@@ -10,6 +10,7 @@ import (
 
 func newLayeredTestService(accounts []Account) *OpenAIGatewayService {
 	cfg := &config.Config{}
+	cfg.Gateway.Sticky.OpenAI.Enabled = true
 	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
 	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold = 0.3
 	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyValue = 100
@@ -66,6 +67,7 @@ func TestLayered_TTFTPenaltyPushesToLowerPriority(t *testing.T) {
 	}
 
 	cfg := &config.Config{}
+	cfg.Gateway.Sticky.OpenAI.Enabled = true
 	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
 	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold = 0.3
 	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyValue = 100
@@ -245,6 +247,7 @@ func TestLayered_FallbackWhenHighPriorityFullyLoaded(t *testing.T) {
 	}
 
 	cfg := &config.Config{}
+	cfg.Gateway.Sticky.OpenAI.Enabled = true
 	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
 	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold = 0.3
 	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyValue = 100
@@ -279,5 +282,161 @@ func TestLayered_FallbackWhenHighPriorityFullyLoaded(t *testing.T) {
 	require.Equal(t, int64(2), result.Account.ID, "should fall back to account 2 when account 1 is fully loaded")
 	if result.ReleaseFunc != nil {
 		result.ReleaseFunc()
+	}
+}
+
+func TestLayered_PreviousResponseStickyEnabled(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(9201)
+	stickyAccount := Account{ID: 92011, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 9, Extra: map[string]any{"openai_apikey_responses_websockets_v2_enabled": true}}
+	backupAccount := Account{ID: 92012, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, Extra: map[string]any{"openai_apikey_responses_websockets_v2_enabled": true}}
+	cache := &stubGatewayCache{}
+	stateStore := &openAIWSStateStoreSpy{responseAccounts: map[string]int64{"resp_layered_enabled": stickyAccount.ID}}
+	cfg := &config.Config{}
+	cfg.Gateway.Sticky.OpenAI.Enabled = true
+	cfg.Gateway.Sticky.Gemini.Enabled = true
+	cfg.Gateway.Sticky.Anthropic.Enabled = true
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+	cfg.Gateway.OpenAIWS.OAuthEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.StickySessionTTLSeconds = 3600
+	cfg.Gateway.OpenAIWS.StickyResponseIDTTLSeconds = 3600
+
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{stickyAccount, backupAccount}},
+		cache:              cache,
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+		openaiWSStateStore: stateStore,
+	}
+	scheduler := svc.getOpenAIAccountScheduler()
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	selection, decision, err := scheduler.Select(ctx, OpenAIAccountScheduleRequest{GroupID: &groupID, PreviousResponseID: "resp_layered_enabled", SessionHash: "session_hash_layered_enabled", RequestedModel: "gpt-5.1"})
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, stickyAccount.ID, selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerPreviousResponse, decision.Layer)
+	require.True(t, decision.StickyPreviousHit)
+	require.Equal(t, 1, stateStore.getResponseAccountCalls["resp_layered_enabled"])
+	require.Equal(t, 1, stateStore.bindResponseCalls["resp_layered_enabled"])
+	require.Equal(t, stickyAccount.ID, cache.sessionBindings["openai:session_hash_layered_enabled"])
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func TestLayered_SessionStickyEnabled(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(9202)
+	stickyAccount := Account{ID: 92021, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 9}
+	backupAccount := Account{ID: 92022, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0}
+	cache := &stubGatewayCache{sessionBindings: map[string]int64{"openai:session_hash_layered_sticky": stickyAccount.ID}}
+	cfg := &config.Config{}
+	cfg.Gateway.Sticky.OpenAI.Enabled = true
+	cfg.Gateway.Sticky.Gemini.Enabled = true
+	cfg.Gateway.Sticky.Anthropic.Enabled = true
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	cfg.Gateway.OpenAIWS.StickySessionTTLSeconds = 3600
+
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{stickyAccount, backupAccount}},
+		cache:              cache,
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+	}
+	scheduler := svc.getOpenAIAccountScheduler()
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	selection, decision, err := scheduler.Select(ctx, OpenAIAccountScheduleRequest{GroupID: &groupID, SessionHash: "session_hash_layered_sticky", RequestedModel: "gpt-5.1"})
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, stickyAccount.ID, selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerSessionSticky, decision.Layer)
+	require.True(t, decision.StickySessionHit)
+	require.Equal(t, 1, cache.getCalls["openai:session_hash_layered_sticky"])
+	require.Equal(t, 1, cache.refreshCalls["openai:session_hash_layered_sticky"])
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func TestLayered_PreviousResponseStickyDisabledBypassesStickyLookupAndBind(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(9203)
+	stickyAccount := Account{ID: 92031, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 9, Extra: map[string]any{"openai_apikey_responses_websockets_v2_enabled": true}}
+	bestAccount := Account{ID: 92032, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, Extra: map[string]any{"openai_apikey_responses_websockets_v2_enabled": true}}
+	cache := &stubGatewayCache{}
+	stateStore := &openAIWSStateStoreSpy{responseAccounts: map[string]int64{"resp_layered_disabled": stickyAccount.ID}}
+	cfg := &config.Config{}
+	cfg.Gateway.Sticky.OpenAI.Enabled = false
+	cfg.Gateway.Sticky.Gemini.Enabled = true
+	cfg.Gateway.Sticky.Anthropic.Enabled = true
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{stickyAccount, bestAccount}},
+		cache:              cache,
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+		openaiWSStateStore: stateStore,
+	}
+	scheduler := svc.getOpenAIAccountScheduler()
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	selection, decision, err := scheduler.Select(ctx, OpenAIAccountScheduleRequest{GroupID: &groupID, PreviousResponseID: "resp_layered_disabled", SessionHash: "session_hash_layered_disabled", RequestedModel: "gpt-5.1"})
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, bestAccount.ID, selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.False(t, decision.StickyPreviousHit)
+	require.Zero(t, stateStore.getResponseAccountCalls["resp_layered_disabled"])
+	require.Zero(t, stateStore.bindResponseCalls["resp_layered_disabled"])
+	require.Zero(t, cache.getCalls["openai:session_hash_layered_disabled"])
+	require.Zero(t, cache.setCalls["openai:session_hash_layered_disabled"])
+	require.Zero(t, cache.refreshCalls["openai:session_hash_layered_disabled"])
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func TestLayered_SessionStickyDisabledBypassesLookupBindAndRefresh(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(9204)
+	stickyAccount := Account{ID: 92041, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 9}
+	bestAccount := Account{ID: 92042, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0}
+	cache := &stubGatewayCache{sessionBindings: map[string]int64{"openai:session_hash_layered_disabled_only": stickyAccount.ID}}
+	cfg := &config.Config{}
+	cfg.Gateway.Sticky.OpenAI.Enabled = false
+	cfg.Gateway.Sticky.Gemini.Enabled = true
+	cfg.Gateway.Sticky.Anthropic.Enabled = true
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{stickyAccount, bestAccount}},
+		cache:              cache,
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+	}
+	scheduler := svc.getOpenAIAccountScheduler()
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	selection, decision, err := scheduler.Select(ctx, OpenAIAccountScheduleRequest{GroupID: &groupID, SessionHash: "session_hash_layered_disabled_only", RequestedModel: "gpt-5.1"})
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, bestAccount.ID, selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.False(t, decision.StickySessionHit)
+	require.Zero(t, cache.getCalls["openai:session_hash_layered_disabled_only"])
+	require.Zero(t, cache.setCalls["openai:session_hash_layered_disabled_only"])
+	require.Zero(t, cache.refreshCalls["openai:session_hash_layered_disabled_only"])
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
 	}
 }

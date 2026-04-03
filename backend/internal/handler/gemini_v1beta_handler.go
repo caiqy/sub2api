@@ -241,107 +241,30 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 	}
 
 	// 3) select account (sticky session based on request body)
-	// 优先使用 Gemini CLI 的会话标识（privileged-user-id + tmp 目录哈希）
-	sessionHash := extractGeminiCLISessionHash(c, body)
-	if sessionHash == "" {
-		// Fallback: 使用通用的会话哈希生成逻辑（适用于其他客户端）
-		parsedReq, _ := service.ParseGatewayRequest(body, domain.PlatformGemini)
-		if parsedReq != nil {
-			parsedReq.SessionContext = &service.SessionContext{
-				ClientIP:  ip.GetClientIP(c),
-				UserAgent: c.GetHeader("User-Agent"),
-				APIKeyID:  apiKey.ID,
-			}
-		}
-		sessionHash = h.gatewayService.GenerateSessionHash(parsedReq)
+	stickyState := h.prepareGeminiStickySelectionFromRequest(c, apiKey, authSubject, modelName, body)
+	selectionSessionKey := stickyState.SelectionSessionKey
+	sessionBoundAccountID := stickyState.SessionBoundAccountID
+	useDigestFallback := stickyState.UseDigestFallback
+	geminiSessionUUID := stickyState.GeminiSessionUUID
+	matchedDigestChain := stickyState.MatchedDigestChain
+	if useDigestFallback && matchedDigestChain != "" && sessionBoundAccountID > 0 {
+		reqLog.Info("gemini.digest_fallback_matched",
+			zap.String("session_uuid_prefix", safeShortPrefix(geminiSessionUUID, 8)),
+			zap.Int64("account_id", sessionBoundAccountID),
+			zap.String("digest_chain", truncateDigestChain(stickyState.GeminiDigestChain)),
+		)
 	}
-	sessionKey := sessionHash
-	if sessionHash != "" {
-		sessionKey = "gemini:" + sessionHash
-	}
-
-	// 查询粘性会话绑定的账号 ID（用于检测账号切换）
-	var sessionBoundAccountID int64
-	if sessionKey != "" {
-		sessionBoundAccountID, _ = h.gatewayService.GetCachedSessionAccountID(c.Request.Context(), apiKey.GroupID, sessionKey)
-		if sessionBoundAccountID > 0 {
-			prefetchedGroupID := int64(0)
-			if apiKey.GroupID != nil {
-				prefetchedGroupID = *apiKey.GroupID
-			}
-			ctx := service.WithPrefetchedStickySession(c.Request.Context(), sessionBoundAccountID, prefetchedGroupID, h.metadataBridgeEnabled())
-			c.Request = c.Request.WithContext(ctx)
+	if sessionBoundAccountID > 0 {
+		prefetchedGroupID := int64(0)
+		if apiKey.GroupID != nil {
+			prefetchedGroupID = *apiKey.GroupID
 		}
-	}
-
-	// === Gemini 内容摘要会话 Fallback 逻辑 ===
-	// 当原有会话标识无效时（sessionBoundAccountID == 0），尝试基于内容摘要链匹配
-	var geminiDigestChain string
-	var geminiPrefixHash string
-	var geminiSessionUUID string
-	var matchedDigestChain string
-	useDigestFallback := sessionBoundAccountID == 0
-
-	if useDigestFallback {
-		// 解析 Gemini 请求体
-		var geminiReq antigravity.GeminiRequest
-		if err := json.Unmarshal(body, &geminiReq); err == nil && len(geminiReq.Contents) > 0 {
-			// 生成摘要链
-			geminiDigestChain = service.BuildGeminiDigestChain(&geminiReq)
-			if geminiDigestChain != "" {
-				// 生成前缀 hash
-				userAgent := c.GetHeader("User-Agent")
-				clientIP := ip.GetClientIP(c)
-				platform := ""
-				if apiKey.Group != nil {
-					platform = apiKey.Group.Platform
-				}
-				geminiPrefixHash = service.GenerateGeminiPrefixHash(
-					authSubject.UserID,
-					apiKey.ID,
-					clientIP,
-					userAgent,
-					platform,
-					modelName,
-				)
-
-				// 查找会话
-				foundUUID, foundAccountID, foundMatchedChain, found := h.gatewayService.FindGeminiSession(
-					c.Request.Context(),
-					derefGroupID(apiKey.GroupID),
-					geminiPrefixHash,
-					geminiDigestChain,
-				)
-				if found {
-					matchedDigestChain = foundMatchedChain
-					sessionBoundAccountID = foundAccountID
-					geminiSessionUUID = foundUUID
-					reqLog.Info("gemini.digest_fallback_matched",
-						zap.String("session_uuid_prefix", safeShortPrefix(foundUUID, 8)),
-						zap.Int64("account_id", foundAccountID),
-						zap.String("digest_chain", truncateDigestChain(geminiDigestChain)),
-					)
-
-					// 关键：如果原 sessionKey 为空，使用 prefixHash + uuid 作为 sessionKey
-					// 这样 SelectAccountWithLoadAwareness 的粘性会话逻辑会优先使用匹配到的账号
-					if sessionKey == "" {
-						sessionKey = service.GenerateGeminiDigestSessionKey(geminiPrefixHash, foundUUID)
-					}
-					_ = h.gatewayService.BindStickySession(c.Request.Context(), apiKey.GroupID, sessionKey, foundAccountID)
-				} else {
-					// 生成新的会话 UUID
-					geminiSessionUUID = uuid.New().String()
-					// 为新会话也生成 sessionKey（用于后续请求的粘性会话）
-					if sessionKey == "" {
-						sessionKey = service.GenerateGeminiDigestSessionKey(geminiPrefixHash, geminiSessionUUID)
-					}
-				}
-			}
-		}
+		ctx := service.WithPrefetchedStickySession(c.Request.Context(), sessionBoundAccountID, prefetchedGroupID, h.metadataBridgeEnabled())
+		c.Request = c.Request.WithContext(ctx)
 	}
 
 	// 判断是否真的绑定了粘性会话：有 sessionKey 且已经绑定到某个账号
-	hasBoundSession := sessionKey != "" && sessionBoundAccountID > 0
+	hasBoundSession := selectionSessionKey != "" && sessionBoundAccountID > 0
 	cleanedForUnknownBinding := false
 
 	fs := NewFailoverState(h.maxAccountSwitchesGemini, hasBoundSession)
@@ -356,7 +279,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 	}
 
 	for {
-		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, sessionKey, modelName, fs.FailedAccountIDs, "") // Gemini 不使用会话限制
+		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, selectionSessionKey, modelName, fs.FailedAccountIDs, "") // Gemini 不使用会话限制
 		if err != nil {
 			if len(fs.FailedAccountIDs) == 0 {
 				googleError(c, http.StatusServiceUnavailable, "No available Gemini accounts: "+err.Error())
@@ -391,7 +314,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			)
 			body = service.CleanGeminiNativeThoughtSignatures(body)
 			sessionBoundAccountID = account.ID
-		} else if sessionKey != "" && sessionBoundAccountID == 0 && !cleanedForUnknownBinding && bytes.Contains(body, []byte(`"thoughtSignature"`)) {
+		} else if selectionSessionKey != "" && sessionBoundAccountID == 0 && !cleanedForUnknownBinding && bytes.Contains(body, []byte(`"thoughtSignature"`)) {
 			// 无缓存绑定但请求里已有 thoughtSignature：常见于缓存丢失/TTL 过期后，客户端继续携带旧签名。
 			// 为避免第一次转发就 400，这里做一次确定性清理，让新账号重新生成签名链路。
 			reqLog.Info("gemini.sticky_session_binding_missing",
@@ -450,7 +373,9 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				geminiConcurrency.DecrementAccountWaitCount(c.Request.Context(), account.ID)
 				accountWaitCounted = false
 			}
-			if err := h.gatewayService.BindStickySession(c.Request.Context(), apiKey.GroupID, sessionKey, account.ID); err != nil {
+			stickyState.bindSelectedAccount = true
+			stickyState.SelectionSessionKey = selectionSessionKey
+			if err := h.finalizeGeminiStickySelection(c.Request.Context(), stickyState, account.ID); err != nil {
 				reqLog.Warn("gemini.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			}
 		}
@@ -520,12 +445,12 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		clientIP := ip.GetClientIP(c)
 
 		// 保存 Gemini 内容摘要会话（用于 Fallback 匹配）
-		if useDigestFallback && geminiDigestChain != "" && geminiPrefixHash != "" {
-			if err := h.gatewayService.SaveGeminiSession(
+		if useDigestFallback && stickyState.GeminiDigestChain != "" && stickyState.GeminiPrefixHash != "" {
+			if err := h.saveGeminiDigestSession(
 				c.Request.Context(),
 				derefGroupID(apiKey.GroupID),
-				geminiPrefixHash,
-				geminiDigestChain,
+				stickyState.GeminiPrefixHash,
+				stickyState.GeminiDigestChain,
 				geminiSessionUUID,
 				account.ID,
 				matchedDigestChain,
@@ -592,6 +517,165 @@ func parseGeminiModelAction(rest string) (model string, action string, err error
 	}
 
 	return "", "", &pathParseError{"invalid model action path"}
+}
+
+type geminiStickySelectionInput struct {
+	GroupID           *int64
+	SessionKey        string
+	DigestGroupID     int64
+	GeminiPrefixHash  string
+	GeminiDigestChain string
+}
+
+type geminiStickySelectionState struct {
+	GroupID               *int64
+	SelectionSessionKey   string
+	SessionBoundAccountID int64
+	UseDigestFallback     bool
+	GeminiPrefixHash      string
+	GeminiDigestChain     string
+	GeminiSessionUUID     string
+	MatchedDigestChain    string
+	bindSelectedAccount   bool
+}
+
+func (h *GatewayHandler) geminiStickyEnabled() bool {
+	if h == nil || h.cfg == nil {
+		return true
+	}
+	return h.cfg.Gateway.Sticky.Gemini.Enabled
+}
+
+func (h *GatewayHandler) prepareGeminiStickySelection(ctx context.Context, input geminiStickySelectionInput) geminiStickySelectionState {
+	state := geminiStickySelectionState{}
+	if !h.geminiStickyEnabled() {
+		return state
+	}
+
+	state.GroupID = input.GroupID
+	state.SelectionSessionKey = input.SessionKey
+	state.GeminiPrefixHash = input.GeminiPrefixHash
+	state.GeminiDigestChain = input.GeminiDigestChain
+	if input.SessionKey != "" {
+		state.SessionBoundAccountID = h.getGeminiCachedSessionAccountID(ctx, input.GroupID, input.SessionKey)
+	}
+	state.UseDigestFallback = state.SessionBoundAccountID == 0 && input.GeminiDigestChain != "" && input.GeminiPrefixHash != ""
+	if !state.UseDigestFallback {
+		return state
+	}
+
+	foundUUID, foundAccountID, foundMatchedChain, found := h.findGeminiDigestSession(ctx, input.DigestGroupID, input.GeminiPrefixHash, input.GeminiDigestChain)
+	if found {
+		state.SessionBoundAccountID = foundAccountID
+		state.GeminiSessionUUID = foundUUID
+		state.MatchedDigestChain = foundMatchedChain
+		if state.SelectionSessionKey == "" {
+			state.SelectionSessionKey = service.GenerateGeminiDigestSessionKey(input.GeminiPrefixHash, foundUUID)
+		}
+		_ = h.bindGeminiStickySession(ctx, input.GroupID, state.SelectionSessionKey, foundAccountID)
+		return state
+	}
+
+	state.GeminiSessionUUID = uuid.New().String()
+	if state.SelectionSessionKey == "" {
+		state.SelectionSessionKey = service.GenerateGeminiDigestSessionKey(input.GeminiPrefixHash, state.GeminiSessionUUID)
+	}
+	return state
+}
+
+func (h *GatewayHandler) prepareGeminiStickySelectionFromRequest(c *gin.Context, apiKey *service.APIKey, authSubject middleware.AuthSubject, modelName string, body []byte) geminiStickySelectionState {
+	if !h.geminiStickyEnabled() {
+		return geminiStickySelectionState{}
+	}
+
+	sessionHash := extractGeminiCLISessionHash(c, body)
+	if sessionHash == "" {
+		parsedReq, _ := service.ParseGatewayRequest(body, domain.PlatformGemini)
+		if parsedReq != nil {
+			parsedReq.SessionContext = &service.SessionContext{
+				ClientIP:  ip.GetClientIP(c),
+				UserAgent: c.GetHeader("User-Agent"),
+				APIKeyID:  apiKey.ID,
+			}
+		}
+		sessionHash = h.gatewayService.GenerateSessionHash(parsedReq)
+	}
+	sessionKey := sessionHash
+	if sessionHash != "" {
+		sessionKey = "gemini:" + sessionHash
+	}
+
+	var geminiDigestChain string
+	var geminiPrefixHash string
+	var geminiReq antigravity.GeminiRequest
+	if err := json.Unmarshal(body, &geminiReq); err == nil && len(geminiReq.Contents) > 0 {
+		geminiDigestChain = service.BuildGeminiDigestChain(&geminiReq)
+		if geminiDigestChain != "" {
+			platform := ""
+			if apiKey.Group != nil {
+				platform = apiKey.Group.Platform
+			}
+			geminiPrefixHash = service.GenerateGeminiPrefixHash(
+				authSubject.UserID,
+				apiKey.ID,
+				ip.GetClientIP(c),
+				c.GetHeader("User-Agent"),
+				platform,
+				modelName,
+			)
+		}
+	}
+
+	return h.prepareGeminiStickySelection(c.Request.Context(), geminiStickySelectionInput{
+		GroupID:           apiKey.GroupID,
+		SessionKey:        sessionKey,
+		DigestGroupID:     derefGroupID(apiKey.GroupID),
+		GeminiPrefixHash:  geminiPrefixHash,
+		GeminiDigestChain: geminiDigestChain,
+	})
+}
+
+func (h *GatewayHandler) finalizeGeminiStickySelection(ctx context.Context, state geminiStickySelectionState, accountID int64) error {
+	if !h.geminiStickyEnabled() || !state.bindSelectedAccount {
+		return nil
+	}
+	return h.bindGeminiStickySession(ctx, state.GroupID, state.SelectionSessionKey, accountID)
+}
+
+func (h *GatewayHandler) geminiStickySessionKey(sessionKey string) string {
+	if !h.geminiStickyEnabled() {
+		return ""
+	}
+	return sessionKey
+}
+
+func (h *GatewayHandler) getGeminiCachedSessionAccountID(ctx context.Context, groupID *int64, sessionKey string) int64 {
+	if !h.geminiStickyEnabled() || h == nil || h.gatewayService == nil {
+		return 0
+	}
+	accountID, _ := h.gatewayService.GetGeminiCachedSessionAccountID(ctx, groupID, sessionKey)
+	return accountID
+}
+
+func (h *GatewayHandler) bindGeminiStickySession(ctx context.Context, groupID *int64, sessionKey string, accountID int64) error {
+	if !h.geminiStickyEnabled() || h == nil || h.gatewayService == nil {
+		return nil
+	}
+	return h.gatewayService.BindGeminiStickySession(ctx, groupID, sessionKey, accountID)
+}
+
+func (h *GatewayHandler) findGeminiDigestSession(ctx context.Context, groupID int64, prefixHash, digestChain string) (uuid string, accountID int64, matchedChain string, found bool) {
+	if !h.geminiStickyEnabled() || h == nil || h.gatewayService == nil {
+		return "", 0, "", false
+	}
+	return h.gatewayService.FindGeminiSession(ctx, groupID, prefixHash, digestChain)
+}
+
+func (h *GatewayHandler) saveGeminiDigestSession(ctx context.Context, groupID int64, prefixHash, digestChain, uuid string, accountID int64, oldDigestChain string) error {
+	if !h.geminiStickyEnabled() || h == nil || h.gatewayService == nil {
+		return nil
+	}
+	return h.gatewayService.SaveGeminiSession(ctx, groupID, prefixHash, digestChain, uuid, accountID, oldDigestChain)
 }
 
 func (h *GatewayHandler) handleGeminiFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError) {

@@ -268,8 +268,25 @@ func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_BusyKeepsSticky(
 	require.Equal(t, int64(21), selection.WaitPlan.AccountID)
 }
 
+func TestOpenAIGatewayService_SelectAccountByPreviousResponseID_DisabledMissesWithoutStateStoreAccess(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(25)
+	store := &openAIWSStateStoreSpy{responseAccounts: map[string]int64{"resp_prev_disabled_direct": 99}}
+	svc := &OpenAIGatewayService{
+		cfg:                &config.Config{Gateway: config.GatewayConfig{Sticky: config.GatewayStickyConfig{}}},
+		openaiWSStateStore: store,
+	}
+
+	selection, err := svc.SelectAccountByPreviousResponseID(ctx, &groupID, "resp_prev_disabled_direct", "gpt-5.1", nil)
+	require.NoError(t, err)
+	require.Nil(t, selection)
+	require.Zero(t, store.getResponseAccountCalls["resp_prev_disabled_direct"])
+	require.Zero(t, store.bindResponseCalls["resp_prev_disabled_direct"])
+}
+
 func newOpenAIWSV2TestConfig() *config.Config {
 	cfg := &config.Config{}
+	cfg.Gateway.Sticky.OpenAI.Enabled = true
 	cfg.Gateway.OpenAIWS.Enabled = true
 	cfg.Gateway.OpenAIWS.OAuthEnabled = true
 	cfg.Gateway.OpenAIWS.APIKeyEnabled = true

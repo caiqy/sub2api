@@ -708,6 +708,9 @@ func TestSelectAccountWithLoadAwareness_StickyReadReuse(t *testing.T) {
 	cfg := &config.Config{
 		RunMode: config.RunModeStandard,
 		Gateway: config.GatewayConfig{
+			Sticky: config.GatewayStickyConfig{
+				Anthropic: config.GatewayStickyPlatformConfig{Enabled: true},
+			},
 			Scheduling: config.GatewaySchedulingConfig{
 				LoadBatchEnabled:         true,
 				StickySessionMaxWaiting:  3,
@@ -783,4 +786,69 @@ func TestSelectAccountWithLoadAwareness_StickyReadReuse(t *testing.T) {
 		require.Equal(t, account.ID, result.Account.ID)
 		require.Equal(t, int64(1), cache.getCalls.Load())
 	})
+}
+
+func TestSelectAccountWithLoadAwareness_StickyDisabledBypassesPrefetchAndCacheRead(t *testing.T) {
+	stickyLastUsed := time.Now()
+	fallbackLastUsed := time.Now().Add(-time.Minute)
+	stickyAccount := Account{
+		ID:          88,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 4,
+		Priority:    5,
+		LastUsedAt:  &stickyLastUsed,
+	}
+	fallbackAccount := Account{
+		ID:          89,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 4,
+		Priority:    1,
+		LastUsedAt:  &fallbackLastUsed,
+	}
+
+	repo := stubOpenAIAccountRepo{accounts: []Account{stickyAccount, fallbackAccount}}
+	concurrency := NewConcurrencyService(stubConcurrencyCache{})
+	cache := &stickyGatewayCacheHotpathStub{stickyID: stickyAccount.ID}
+	cfg := &config.Config{
+		RunMode: config.RunModeStandard,
+		Gateway: config.GatewayConfig{
+			Sticky: config.GatewayStickyConfig{
+				Anthropic: config.GatewayStickyPlatformConfig{Enabled: false},
+			},
+			Scheduling: config.GatewaySchedulingConfig{
+				LoadBatchEnabled:         true,
+				StickySessionMaxWaiting:  3,
+				StickySessionWaitTimeout: time.Second,
+				FallbackWaitTimeout:      time.Second,
+				FallbackMaxWaiting:       10,
+			},
+		},
+	}
+
+	ctx := context.WithValue(context.Background(), ctxkey.ForcePlatform, PlatformAnthropic)
+	ctx = context.WithValue(ctx, ctxkey.PrefetchedStickyAccountID, stickyAccount.ID)
+	ctx = context.WithValue(ctx, ctxkey.PrefetchedStickyGroupID, int64(0))
+
+	svc := &GatewayService{
+		accountRepo:        repo,
+		cache:              cache,
+		cfg:                cfg,
+		concurrencyService: concurrency,
+		userGroupRateCache: gocache.New(time.Minute, time.Minute),
+		modelsListCache:    gocache.New(time.Minute, time.Minute),
+		modelsListCacheTTL: time.Minute,
+	}
+
+	result, err := svc.SelectAccountWithLoadAwareness(ctx, nil, "sess-disabled", "", nil, "")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Account)
+	require.Equal(t, fallbackAccount.ID, result.Account.ID)
+	require.Equal(t, int64(0), cache.getCalls.Load())
 }

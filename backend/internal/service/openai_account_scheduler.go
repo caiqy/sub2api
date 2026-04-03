@@ -251,45 +251,47 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		s.metrics.recordSelect(decision)
 	}()
 
-	previousResponseID := strings.TrimSpace(req.PreviousResponseID)
-	if previousResponseID != "" {
-		selection, err := s.service.SelectAccountByPreviousResponseID(
-			ctx,
-			req.GroupID,
-			previousResponseID,
-			req.RequestedModel,
-			req.ExcludedIDs,
-		)
+	if s.service != nil && s.service.openAIStickyEnabled() {
+		previousResponseID := strings.TrimSpace(req.PreviousResponseID)
+		if previousResponseID != "" {
+			selection, err := s.service.SelectAccountByPreviousResponseID(
+				ctx,
+				req.GroupID,
+				previousResponseID,
+				req.RequestedModel,
+				req.ExcludedIDs,
+			)
+			if err != nil {
+				return nil, decision, err
+			}
+			if selection != nil && selection.Account != nil {
+				if !s.isAccountTransportCompatible(selection.Account, req.RequiredTransport) {
+					selection = nil
+				}
+			}
+			if selection != nil && selection.Account != nil {
+				decision.Layer = openAIAccountScheduleLayerPreviousResponse
+				decision.StickyPreviousHit = true
+				decision.SelectedAccountID = selection.Account.ID
+				decision.SelectedAccountType = selection.Account.Type
+				if req.SessionHash != "" {
+					_ = s.service.BindStickySession(ctx, req.GroupID, req.SessionHash, selection.Account.ID)
+				}
+				return selection, decision, nil
+			}
+		}
+
+		selection, err := s.selectBySessionHash(ctx, req)
 		if err != nil {
 			return nil, decision, err
 		}
 		if selection != nil && selection.Account != nil {
-			if !s.isAccountTransportCompatible(selection.Account, req.RequiredTransport) {
-				selection = nil
-			}
-		}
-		if selection != nil && selection.Account != nil {
-			decision.Layer = openAIAccountScheduleLayerPreviousResponse
-			decision.StickyPreviousHit = true
+			decision.Layer = openAIAccountScheduleLayerSessionSticky
+			decision.StickySessionHit = true
 			decision.SelectedAccountID = selection.Account.ID
 			decision.SelectedAccountType = selection.Account.Type
-			if req.SessionHash != "" {
-				_ = s.service.BindStickySession(ctx, req.GroupID, req.SessionHash, selection.Account.ID)
-			}
 			return selection, decision, nil
 		}
-	}
-
-	selection, err := s.selectBySessionHash(ctx, req)
-	if err != nil {
-		return nil, decision, err
-	}
-	if selection != nil && selection.Account != nil {
-		decision.Layer = openAIAccountScheduleLayerSessionSticky
-		decision.StickySessionHit = true
-		decision.SelectedAccountID = selection.Account.ID
-		decision.SelectedAccountType = selection.Account.Type
-		return selection, decision, nil
 	}
 
 	selection, candidateCount, topK, loadSkew, err := s.selectByLoadBalance(ctx, req)

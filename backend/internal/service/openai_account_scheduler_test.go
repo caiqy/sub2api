@@ -12,6 +12,64 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type openAIWSStateStoreSpy struct {
+	responseAccounts        map[string]int64
+	getResponseAccountCalls map[string]int
+	bindResponseCalls       map[string]int
+}
+
+func (s *openAIWSStateStoreSpy) BindResponseAccount(ctx context.Context, groupID int64, responseID string, accountID int64, ttl time.Duration) error {
+	if s.bindResponseCalls == nil {
+		s.bindResponseCalls = make(map[string]int)
+	}
+	s.bindResponseCalls[responseID]++
+	if s.responseAccounts == nil {
+		s.responseAccounts = make(map[string]int64)
+	}
+	s.responseAccounts[responseID] = accountID
+	return nil
+}
+
+func (s *openAIWSStateStoreSpy) GetResponseAccount(ctx context.Context, groupID int64, responseID string) (int64, error) {
+	if s.getResponseAccountCalls == nil {
+		s.getResponseAccountCalls = make(map[string]int)
+	}
+	s.getResponseAccountCalls[responseID]++
+	if s.responseAccounts == nil {
+		return 0, nil
+	}
+	return s.responseAccounts[responseID], nil
+}
+
+func (s *openAIWSStateStoreSpy) DeleteResponseAccount(ctx context.Context, groupID int64, responseID string) error {
+	if s.responseAccounts != nil {
+		delete(s.responseAccounts, responseID)
+	}
+	return nil
+}
+
+func (s *openAIWSStateStoreSpy) BindResponseConn(responseID, connID string, ttl time.Duration) {}
+func (s *openAIWSStateStoreSpy) GetResponseConn(responseID string) (string, bool)              { return "", false }
+func (s *openAIWSStateStoreSpy) DeleteResponseConn(responseID string)                          {}
+func (s *openAIWSStateStoreSpy) BindSessionTurnState(groupID int64, sessionHash, turnState string, ttl time.Duration) {
+}
+func (s *openAIWSStateStoreSpy) GetSessionTurnState(groupID int64, sessionHash string) (string, bool) {
+	return "", false
+}
+func (s *openAIWSStateStoreSpy) DeleteSessionTurnState(groupID int64, sessionHash string) {}
+func (s *openAIWSStateStoreSpy) BindSessionConn(groupID int64, sessionHash, connID string, ttl time.Duration) {
+}
+func (s *openAIWSStateStoreSpy) GetSessionConn(groupID int64, sessionHash string) (string, bool) {
+	return "", false
+}
+func (s *openAIWSStateStoreSpy) DeleteSessionConn(groupID int64, sessionHash string) {}
+
+func newOpenAIStickyEnabledTestConfig() *config.Config {
+	cfg := &config.Config{}
+	cfg.Gateway.Sticky.OpenAI.Enabled = true
+	return cfg
+}
+
 type openAISnapshotCacheStub struct {
 	SchedulerCache
 	snapshotAccounts []*Account
@@ -56,7 +114,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyRateLimite
 	cache := &stubGatewayCache{sessionBindings: map[string]int64{"openai:session_hash_rate_limited": 31001}}
 	snapshotCache := &openAISnapshotCacheStub{snapshotAccounts: []*Account{staleSticky, staleBackup}, accountsByID: map[int64]*Account{31001: freshSticky, 31002: freshBackup}}
 	snapshotService := &SchedulerSnapshotService{cache: snapshotCache}
-	svc := &OpenAIGatewayService{accountRepo: stubOpenAIAccountRepo{accounts: []Account{*freshSticky, *freshBackup}}, cache: cache, cfg: &config.Config{}, schedulerSnapshot: snapshotService, concurrencyService: NewConcurrencyService(stubConcurrencyCache{})}
+	svc := &OpenAIGatewayService{accountRepo: stubOpenAIAccountRepo{accounts: []Account{*freshSticky, *freshBackup}}, cache: cache, cfg: newOpenAIStickyEnabledTestConfig(), schedulerSnapshot: snapshotService, concurrencyService: NewConcurrencyService(stubConcurrencyCache{})}
 
 	selection, decision, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "session_hash_rate_limited", "gpt-5.1", nil, OpenAIUpstreamTransportAny)
 	require.NoError(t, err)
@@ -76,7 +134,7 @@ func TestOpenAIGatewayService_SelectAccountForModelWithExclusions_SkipsFreshlyRa
 	freshSecondary := &Account{ID: 32002, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 5}
 	snapshotCache := &openAISnapshotCacheStub{snapshotAccounts: []*Account{stalePrimary, staleSecondary}, accountsByID: map[int64]*Account{32001: freshPrimary, 32002: freshSecondary}}
 	snapshotService := &SchedulerSnapshotService{cache: snapshotCache}
-	svc := &OpenAIGatewayService{accountRepo: stubOpenAIAccountRepo{accounts: []Account{*freshPrimary, *freshSecondary}}, cfg: &config.Config{}, schedulerSnapshot: snapshotService}
+	svc := &OpenAIGatewayService{accountRepo: stubOpenAIAccountRepo{accounts: []Account{*freshPrimary, *freshSecondary}}, cfg: newOpenAIStickyEnabledTestConfig(), schedulerSnapshot: snapshotService}
 
 	account, err := svc.SelectAccountForModelWithExclusions(ctx, &groupID, "", "gpt-5.1", nil)
 	require.NoError(t, err)
@@ -101,7 +159,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyDBRuntimeR
 	svc := &OpenAIGatewayService{
 		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{dbSticky, dbBackup}},
 		cache:              cache,
-		cfg:                &config.Config{},
+		cfg:                newOpenAIStickyEnabledTestConfig(),
 		schedulerSnapshot:  snapshotService,
 		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
 	}
@@ -129,7 +187,7 @@ func TestOpenAIGatewayService_SelectAccountForModelWithExclusions_DBRuntimeReche
 	snapshotService := &SchedulerSnapshotService{cache: snapshotCache}
 	svc := &OpenAIGatewayService{
 		accountRepo:       stubOpenAIAccountRepo{accounts: []Account{dbPrimary, dbSecondary}},
-		cfg:               &config.Config{},
+		cfg:               newOpenAIStickyEnabledTestConfig(),
 		schedulerSnapshot: snapshotService,
 	}
 
@@ -154,7 +212,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_PreviousResponseSticky(
 		},
 	}
 	cache := &stubGatewayCache{}
-	cfg := &config.Config{}
+	cfg := newOpenAIStickyEnabledTestConfig()
 	cfg.Gateway.OpenAIWS.Enabled = true
 	cfg.Gateway.OpenAIWS.OAuthEnabled = true
 	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
@@ -213,7 +271,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionSticky(t *testin
 	svc := &OpenAIGatewayService{
 		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{account}},
 		cache:              cache,
-		cfg:                &config.Config{},
+		cfg:                newOpenAIStickyEnabledTestConfig(),
 		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
 	}
 
@@ -235,6 +293,88 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionSticky(t *testin
 	if selection.ReleaseFunc != nil {
 		selection.ReleaseFunc()
 	}
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_PreviousResponseStickyDisabledBypassesStickyLookupAndBind(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(9101)
+	stickyAccount := Account{ID: 91011, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 9, Extra: map[string]any{"openai_apikey_responses_websockets_v2_enabled": true}}
+	bestAccount := Account{ID: 91012, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, Extra: map[string]any{"openai_apikey_responses_websockets_v2_enabled": true}}
+	cache := &stubGatewayCache{}
+	stateStore := &openAIWSStateStoreSpy{responseAccounts: map[string]int64{"resp_prev_disabled": stickyAccount.ID}}
+	cfg := newOpenAIStickyEnabledTestConfig()
+	cfg.Gateway.Sticky.OpenAI.Enabled = false
+	cfg.Gateway.Sticky.Gemini.Enabled = true
+	cfg.Gateway.Sticky.Anthropic.Enabled = true
+	cfg.Gateway.OpenAIWS.SchedulerMode = "weighted"
+
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{stickyAccount, bestAccount}},
+		cache:              cache,
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+		openaiWSStateStore: stateStore,
+	}
+
+	selection, decision, err := svc.SelectAccountWithScheduler(ctx, &groupID, "resp_prev_disabled", "session_hash_prev_disabled", "gpt-5.1", nil, OpenAIUpstreamTransportAny)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.False(t, decision.StickyPreviousHit)
+	require.Zero(t, stateStore.getResponseAccountCalls["resp_prev_disabled"])
+	require.Zero(t, stateStore.bindResponseCalls["resp_prev_disabled"])
+	require.Zero(t, cache.getCalls["openai:session_hash_prev_disabled"])
+	require.Zero(t, cache.setCalls["openai:session_hash_prev_disabled"])
+	require.Zero(t, cache.refreshCalls["openai:session_hash_prev_disabled"])
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyDisabledBypassesLookupBindAndRefresh(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(9102)
+	stickyAccount := Account{ID: 91021, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 9}
+	bestAccount := Account{ID: 91022, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0}
+	cache := &stubGatewayCache{sessionBindings: map[string]int64{"openai:session_hash_disabled": stickyAccount.ID}}
+	cfg := newOpenAIStickyEnabledTestConfig()
+	cfg.Gateway.Sticky.OpenAI.Enabled = false
+	cfg.Gateway.Sticky.Gemini.Enabled = true
+	cfg.Gateway.Sticky.Anthropic.Enabled = true
+	cfg.Gateway.OpenAIWS.SchedulerMode = "weighted"
+
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{stickyAccount, bestAccount}},
+		cache:              cache,
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+	}
+
+	selection, decision, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "session_hash_disabled", "gpt-5.1", nil, OpenAIUpstreamTransportAny)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.False(t, decision.StickySessionHit)
+	require.Zero(t, cache.getCalls["openai:session_hash_disabled"])
+	require.Zero(t, cache.setCalls["openai:session_hash_disabled"])
+	require.Zero(t, cache.refreshCalls["openai:session_hash_disabled"])
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func TestOpenAIGatewayService_BindOpenAIResponseAccount_DisabledSkipsStateStoreBind(t *testing.T) {
+	store := &openAIWSStateStoreSpy{}
+	svc := &OpenAIGatewayService{
+		cfg:                &config.Config{Gateway: config.GatewayConfig{Sticky: config.GatewayStickyConfig{}}},
+		openaiWSStateStore: store,
+	}
+
+	err := svc.bindOpenAIResponseAccount(context.Background(), 1, "resp_bind_disabled", 7, time.Hour)
+	require.NoError(t, err)
+	require.Zero(t, store.bindResponseCalls["resp_bind_disabled"])
 }
 
 func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyBusyKeepsSticky(t *testing.T) {
@@ -265,7 +405,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyBusyKeepsS
 			"openai:session_hash_sticky_busy": 21001,
 		},
 	}
-	cfg := &config.Config{}
+	cfg := newOpenAIStickyEnabledTestConfig()
 	cfg.Gateway.Scheduling.StickySessionMaxWaiting = 2
 	cfg.Gateway.Scheduling.StickySessionWaitTimeout = 45 * time.Second
 	cfg.Gateway.OpenAIWS.Enabled = true
@@ -337,7 +477,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionSticky_ForceHTTP
 	svc := &OpenAIGatewayService{
 		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{account}},
 		cache:              cache,
-		cfg:                &config.Config{},
+		cfg:                newOpenAIStickyEnabledTestConfig(),
 		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
 	}
 
@@ -499,7 +639,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceTopKFallback
 		},
 	}
 
-	cfg := &config.Config{}
+	cfg := newOpenAIStickyEnabledTestConfig()
 	cfg.Gateway.OpenAIWS.LBTopK = 2
 	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Priority = 0.4
 	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Load = 1.0
@@ -567,7 +707,7 @@ func TestOpenAIGatewayService_OpenAIAccountSchedulerMetrics(t *testing.T) {
 	svc := &OpenAIGatewayService{
 		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{account}},
 		cache:              cache,
-		cfg:                &config.Config{},
+		cfg:                newOpenAIStickyEnabledTestConfig(),
 		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
 	}
 
@@ -741,7 +881,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceDistributesA
 			Priority:    0,
 		},
 	}
-	cfg := &config.Config{}
+	cfg := newOpenAIStickyEnabledTestConfig()
 	cfg.Gateway.OpenAIWS.LBTopK = 3
 	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Priority = 1
 	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Load = 1
@@ -921,7 +1061,7 @@ func TestOpenAIGatewayService_SchedulerWrappersAndDefaults(t *testing.T) {
 	require.Equal(t, 0.8, defaultWeights.ErrorRate)
 	require.Equal(t, 0.5, defaultWeights.TTFT)
 
-	cfg := &config.Config{}
+	cfg := newOpenAIStickyEnabledTestConfig()
 	cfg.Gateway.OpenAIWS.LBTopK = 9
 	cfg.Gateway.OpenAIWS.StickySessionTTLSeconds = 180
 	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Priority = 0.2

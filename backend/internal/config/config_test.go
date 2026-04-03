@@ -158,6 +158,47 @@ func TestLoadDefaultOpenAIWSConfig(t *testing.T) {
 	}
 }
 
+func TestLoadDefaultGatewayStickyPlatformConfig(t *testing.T) {
+	resetViperWithJWTSecret(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if !cfg.Gateway.Sticky.OpenAI.Enabled {
+		t.Fatalf("Gateway.Sticky.OpenAI.Enabled = false, want true")
+	}
+	if !cfg.Gateway.Sticky.Gemini.Enabled {
+		t.Fatalf("Gateway.Sticky.Gemini.Enabled = false, want true")
+	}
+	if !cfg.Gateway.Sticky.Anthropic.Enabled {
+		t.Fatalf("Gateway.Sticky.Anthropic.Enabled = false, want true")
+	}
+}
+
+func TestLoadGatewayStickyPlatformConfigFromEnv(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("GATEWAY_STICKY_OPENAI_ENABLED", "false")
+	t.Setenv("GATEWAY_STICKY_GEMINI_ENABLED", "false")
+	t.Setenv("GATEWAY_STICKY_ANTHROPIC_ENABLED", "false")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.Gateway.Sticky.OpenAI.Enabled {
+		t.Fatalf("Gateway.Sticky.OpenAI.Enabled = true, want false")
+	}
+	if cfg.Gateway.Sticky.Gemini.Enabled {
+		t.Fatalf("Gateway.Sticky.Gemini.Enabled = true, want false")
+	}
+	if cfg.Gateway.Sticky.Anthropic.Enabled {
+		t.Fatalf("Gateway.Sticky.Anthropic.Enabled = true, want false")
+	}
+}
+
 func TestLoadOpenAIWSStickyTTLCompatibility(t *testing.T) {
 	resetViperWithJWTSecret(t)
 	t.Setenv("GATEWAY_OPENAI_WS_STICKY_RESPONSE_ID_TTL_SECONDS", "0")

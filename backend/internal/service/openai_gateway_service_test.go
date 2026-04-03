@@ -276,9 +276,16 @@ func (c stubConcurrencyCache) GetAccountWaitingCount(ctx context.Context, accoun
 type stubGatewayCache struct {
 	sessionBindings map[string]int64
 	deletedSessions map[string]int
+	getCalls        map[string]int
+	setCalls        map[string]int
+	refreshCalls    map[string]int
 }
 
 func (c *stubGatewayCache) GetSessionAccountID(ctx context.Context, groupID int64, sessionHash string) (int64, error) {
+	if c.getCalls == nil {
+		c.getCalls = make(map[string]int)
+	}
+	c.getCalls[sessionHash]++
 	if id, ok := c.sessionBindings[sessionHash]; ok {
 		return id, nil
 	}
@@ -286,6 +293,10 @@ func (c *stubGatewayCache) GetSessionAccountID(ctx context.Context, groupID int6
 }
 
 func (c *stubGatewayCache) SetSessionAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) error {
+	if c.setCalls == nil {
+		c.setCalls = make(map[string]int)
+	}
+	c.setCalls[sessionHash]++
 	if c.sessionBindings == nil {
 		c.sessionBindings = make(map[string]int64)
 	}
@@ -294,6 +305,10 @@ func (c *stubGatewayCache) SetSessionAccountID(ctx context.Context, groupID int6
 }
 
 func (c *stubGatewayCache) RefreshSessionTTL(ctx context.Context, groupID int64, sessionHash string, ttl time.Duration) error {
+	if c.refreshCalls == nil {
+		c.refreshCalls = make(map[string]int)
+	}
+	c.refreshCalls[sessionHash]++
 	return nil
 }
 

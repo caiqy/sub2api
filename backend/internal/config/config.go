@@ -377,6 +377,8 @@ type GatewayConfig struct {
 	// OpenAIPassthroughAllowTimeoutHeaders: OpenAI 透传模式是否放行客户端超时头
 	// 关闭（默认）可避免 x-stainless-timeout 等头导致上游提前断流。
 	OpenAIPassthroughAllowTimeoutHeaders bool `mapstructure:"openai_passthrough_allow_timeout_headers"`
+	// Sticky: 按平台拆分的 sticky 总开关（默认全部启用，缺失配置保持向后兼容）
+	Sticky GatewayStickyConfig `mapstructure:"sticky"`
 	// OpenAIWS: OpenAI Responses WebSocket 配置（默认开启，可按需回滚到 HTTP）
 	OpenAIWS GatewayOpenAIWSConfig `mapstructure:"openai_ws"`
 
@@ -467,6 +469,18 @@ type GatewayConfig struct {
 	// UserMessageQueue: 用户消息串行队列配置
 	// 对 role:"user" 的真实用户消息实施账号级串行化 + RPM 自适应延迟
 	UserMessageQueue UserMessageQueueConfig `mapstructure:"user_message_queue"`
+}
+
+// GatewayStickyConfig 按平台拆分的 sticky 总开关配置。
+type GatewayStickyConfig struct {
+	OpenAI    GatewayStickyPlatformConfig `mapstructure:"openai"`
+	Gemini    GatewayStickyPlatformConfig `mapstructure:"gemini"`
+	Anthropic GatewayStickyPlatformConfig `mapstructure:"anthropic"`
+}
+
+// GatewayStickyPlatformConfig 单个平台的 sticky 总开关配置。
+type GatewayStickyPlatformConfig struct {
+	Enabled bool `mapstructure:"enabled"`
 }
 
 // UserMessageQueueConfig 用户消息串行队列配置
@@ -1364,6 +1378,9 @@ func setDefaults() {
 	viper.SetDefault("gateway.max_account_switches_gemini", 3)
 	viper.SetDefault("gateway.force_codex_cli", false)
 	viper.SetDefault("gateway.openai_passthrough_allow_timeout_headers", false)
+	viper.SetDefault("gateway.sticky.openai.enabled", true)
+	viper.SetDefault("gateway.sticky.gemini.enabled", true)
+	viper.SetDefault("gateway.sticky.anthropic.enabled", true)
 	// OpenAI Responses WebSocket（默认开启；可通过 force_http 紧急回滚）
 	viper.SetDefault("gateway.openai_ws.enabled", true)
 	viper.SetDefault("gateway.openai_ws.mode_router_v2_enabled", false)

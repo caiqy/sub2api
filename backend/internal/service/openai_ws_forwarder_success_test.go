@@ -95,6 +95,7 @@ func TestOpenAIGatewayService_Forward_WSv2_SuccessAndBindSticky(t *testing.T) {
 	c.Set("api_key", &APIKey{GroupID: &groupID})
 
 	cfg := &config.Config{}
+	cfg.Gateway.Sticky.OpenAI.Enabled = true
 	cfg.Security.URLAllowlist.Enabled = false
 	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 	cfg.Gateway.OpenAIWS.Enabled = true

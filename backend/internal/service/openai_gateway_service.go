@@ -1105,8 +1105,29 @@ func resolveOpenAIUpstreamOriginator(c *gin.Context, isOfficialClient bool) stri
 	return "opencode"
 }
 
+func (s *OpenAIGatewayService) openAIStickyEnabled() bool {
+	if s == nil || s.cfg == nil {
+		return true
+	}
+	return s.cfg.Gateway.Sticky.OpenAI.Enabled
+}
+
+func (s *OpenAIGatewayService) bindOpenAIResponseAccount(ctx context.Context, groupID int64, responseID string, accountID int64, ttl time.Duration) error {
+	if !s.openAIStickyEnabled() {
+		return nil
+	}
+	store := s.getOpenAIWSStateStore()
+	if store == nil {
+		return nil
+	}
+	return store.BindResponseAccount(ctx, groupID, responseID, accountID, ttl)
+}
+
 // BindStickySession sets session -> account binding with standard TTL.
 func (s *OpenAIGatewayService) BindStickySession(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
+	if !s.openAIStickyEnabled() {
+		return nil
+	}
 	if sessionHash == "" || accountID <= 0 {
 		return nil
 	}

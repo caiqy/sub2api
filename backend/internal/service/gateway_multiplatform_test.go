@@ -3,8 +3,11 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,9 +17,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func captureSlogOutput(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	prevDefault := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() {
+		slog.SetDefault(prevDefault)
+	})
+	return &buf
+}
+
 // testConfig 返回一个用于测试的默认配置
 func testConfig() *config.Config {
-	return &config.Config{RunMode: config.RunModeStandard}
+	return &config.Config{
+		RunMode: config.RunModeStandard,
+		Gateway: config.GatewayConfig{
+			Sticky: config.GatewayStickyConfig{
+				Anthropic: config.GatewayStickyPlatformConfig{Enabled: true},
+			},
+		},
+	}
 }
 
 // mockAccountRepoForPlatform 单平台测试用的 mock
@@ -202,9 +223,16 @@ var _ AccountRepository = (*mockAccountRepoForPlatform)(nil)
 type mockGatewayCacheForPlatform struct {
 	sessionBindings map[string]int64
 	deletedSessions map[string]int
+	getCalls        map[string]int
+	setCalls        map[string]int
+	refreshCalls    map[string]int
 }
 
 func (m *mockGatewayCacheForPlatform) GetSessionAccountID(ctx context.Context, groupID int64, sessionHash string) (int64, error) {
+	if m.getCalls == nil {
+		m.getCalls = make(map[string]int)
+	}
+	m.getCalls[sessionHash]++
 	if id, ok := m.sessionBindings[sessionHash]; ok {
 		return id, nil
 	}
@@ -212,6 +240,10 @@ func (m *mockGatewayCacheForPlatform) GetSessionAccountID(ctx context.Context, g
 }
 
 func (m *mockGatewayCacheForPlatform) SetSessionAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) error {
+	if m.setCalls == nil {
+		m.setCalls = make(map[string]int)
+	}
+	m.setCalls[sessionHash]++
 	if m.sessionBindings == nil {
 		m.sessionBindings = make(map[string]int64)
 	}
@@ -220,6 +252,10 @@ func (m *mockGatewayCacheForPlatform) SetSessionAccountID(ctx context.Context, g
 }
 
 func (m *mockGatewayCacheForPlatform) RefreshSessionTTL(ctx context.Context, groupID int64, sessionHash string, ttl time.Duration) error {
+	if m.refreshCalls == nil {
+		m.refreshCalls = make(map[string]int)
+	}
+	m.refreshCalls[sessionHash]++
 	return nil
 }
 
@@ -667,6 +703,170 @@ func TestGatewayService_SelectAccountForModelWithPlatform_StickySession(t *testi
 		require.NoError(t, err)
 		require.NotNil(t, acc)
 		require.Equal(t, int64(2), acc.ID, "粘性会话账户不可调度，应选择其他账户")
+	})
+}
+
+func TestGatewayService_GenericStickyHelpersRespectToggle(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(42)
+	sessionHash := "sticky-helper"
+
+	t.Run("enabled_reads_and_writes_sticky_binding", func(t *testing.T) {
+		cache := &mockGatewayCacheForPlatform{sessionBindings: map[string]int64{sessionHash: 11}}
+		svc := &GatewayService{
+			cache: cache,
+			cfg: &config.Config{Gateway: config.GatewayConfig{Sticky: config.GatewayStickyConfig{
+				Anthropic: config.GatewayStickyPlatformConfig{Enabled: true},
+			}}},
+		}
+
+		accountID, err := svc.GetCachedSessionAccountID(ctx, &groupID, sessionHash)
+		require.NoError(t, err)
+		require.Equal(t, int64(11), accountID)
+		require.Equal(t, 1, cache.getCalls[sessionHash])
+
+		require.NoError(t, svc.BindStickySession(ctx, &groupID, sessionHash, 22))
+		require.Equal(t, 1, cache.setCalls[sessionHash])
+		require.Equal(t, int64(22), cache.sessionBindings[sessionHash])
+	})
+
+	t.Run("disabled_bypasses_sticky_binding_read_and_write", func(t *testing.T) {
+		cache := &mockGatewayCacheForPlatform{sessionBindings: map[string]int64{sessionHash: 11}}
+		svc := &GatewayService{
+			cache: cache,
+			cfg: &config.Config{Gateway: config.GatewayConfig{Sticky: config.GatewayStickyConfig{
+				Anthropic: config.GatewayStickyPlatformConfig{Enabled: false},
+			}}},
+		}
+
+		accountID, err := svc.GetCachedSessionAccountID(ctx, &groupID, sessionHash)
+		require.NoError(t, err)
+		require.Zero(t, accountID)
+		require.Empty(t, cache.getCalls)
+
+		require.NoError(t, svc.BindStickySession(ctx, &groupID, sessionHash, 22))
+		require.Empty(t, cache.setCalls)
+		require.Equal(t, int64(11), cache.sessionBindings[sessionHash])
+	})
+}
+
+func TestGatewayService_SelectAccountForModelWithPlatform_StickyDisabledBypassesStickyReadAndWrite(t *testing.T) {
+	ctx := context.Background()
+	repo := &mockAccountRepoForPlatform{
+		accounts: []Account{
+			{ID: 1, Platform: PlatformAnthropic, Priority: 5, Status: StatusActive, Schedulable: true},
+			{ID: 2, Platform: PlatformAnthropic, Priority: 1, Status: StatusActive, Schedulable: true},
+		},
+		accountsByID: map[int64]*Account{},
+	}
+	for i := range repo.accounts {
+		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+	}
+
+	cache := &mockGatewayCacheForPlatform{sessionBindings: map[string]int64{"sticky-disabled": 1}}
+	svc := &GatewayService{
+		accountRepo: repo,
+		cache:       cache,
+		cfg: &config.Config{Gateway: config.GatewayConfig{Sticky: config.GatewayStickyConfig{
+			Anthropic: config.GatewayStickyPlatformConfig{Enabled: false},
+		}}},
+	}
+
+	acc, err := svc.selectAccountForModelWithPlatform(ctx, nil, "sticky-disabled", "claude-3-5-sonnet-20241022", nil, PlatformAnthropic)
+	require.NoError(t, err)
+	require.NotNil(t, acc)
+	require.Equal(t, int64(2), acc.ID)
+	require.Empty(t, cache.getCalls)
+	require.Empty(t, cache.setCalls)
+	require.Equal(t, int64(1), cache.sessionBindings["sticky-disabled"])
+}
+
+func TestGatewayService_SelectAccountForModelWithPlatform_GeminiStickyWriteIndependentFromAnthropicToggle(t *testing.T) {
+	ctx := context.Background()
+	repo := &mockAccountRepoForPlatform{
+		accounts: []Account{
+			{ID: 1, Platform: PlatformGemini, Type: AccountTypeAPIKey, Priority: 3, Status: StatusActive, Schedulable: true},
+			{ID: 2, Platform: PlatformGemini, Type: AccountTypeOAuth, Priority: 1, Status: StatusActive, Schedulable: true},
+		},
+		accountsByID: map[int64]*Account{},
+	}
+	for i := range repo.accounts {
+		repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+	}
+
+	cache := &mockGatewayCacheForPlatform{}
+	cfg := testConfig()
+	cfg.Gateway.Sticky.Anthropic.Enabled = false
+	cfg.Gateway.Sticky.Gemini.Enabled = true
+
+	svc := &GatewayService{
+		accountRepo: repo,
+		cache:       cache,
+		cfg:         cfg,
+	}
+
+	acc, err := svc.selectAccountForModelWithPlatform(ctx, nil, "gemini-sticky-write", "gemini-2.5-pro", nil, PlatformGemini)
+	require.NoError(t, err)
+	require.NotNil(t, acc)
+	require.Equal(t, int64(2), acc.ID)
+	require.Equal(t, 1, cache.setCalls["gemini-sticky-write"])
+	require.Equal(t, int64(2), cache.sessionBindings["gemini-sticky-write"])
+}
+
+func TestGatewayService_StickyDisabledBypassLogs(t *testing.T) {
+	t.Run("generic helper lookup logs bypass", func(t *testing.T) {
+		buf := captureSlogOutput(t)
+		svc := &GatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{Sticky: config.GatewayStickyConfig{Anthropic: config.GatewayStickyPlatformConfig{Enabled: false}}}}}
+
+		accountID, err := svc.GetCachedSessionAccountID(context.Background(), nil, "sticky-log-lookup")
+		require.NoError(t, err)
+		require.Zero(t, accountID)
+		out := buf.String()
+		require.True(t, strings.Contains(out, "sticky disabled: bypassing sticky path"))
+		require.True(t, strings.Contains(out, "platform=anthropic"))
+		require.True(t, strings.Contains(out, "sticky_layer=gateway_helper"))
+		require.True(t, strings.Contains(out, "action=lookup"))
+	})
+
+	t.Run("gemini helper bind logs bypass", func(t *testing.T) {
+		buf := captureSlogOutput(t)
+		svc := &GatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{Sticky: config.GatewayStickyConfig{Gemini: config.GatewayStickyPlatformConfig{Enabled: false}}}}}
+
+		err := svc.BindGeminiStickySession(context.Background(), nil, "sticky-log-bind", 42)
+		require.NoError(t, err)
+		out := buf.String()
+		require.True(t, strings.Contains(out, "sticky disabled: bypassing sticky path"))
+		require.True(t, strings.Contains(out, "platform=gemini"))
+		require.True(t, strings.Contains(out, "sticky_layer=gateway_helper"))
+		require.True(t, strings.Contains(out, "action=bind"))
+	})
+
+	t.Run("load aware lookup logs bypass", func(t *testing.T) {
+		buf := captureSlogOutput(t)
+		repo := &mockAccountRepoForPlatform{
+			accounts:     []Account{{ID: 1, Platform: PlatformAnthropic, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 5}},
+			accountsByID: map[int64]*Account{},
+		}
+		for i := range repo.accounts {
+			repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+		}
+		cfg := testConfig()
+		cfg.Gateway.Sticky.Anthropic.Enabled = false
+		cfg.Gateway.Scheduling.LoadBatchEnabled = true
+		svc := &GatewayService{
+			accountRepo:        repo,
+			cache:              &mockGatewayCacheForPlatform{sessionBindings: map[string]int64{"sticky-log-load-aware": 1}},
+			cfg:                cfg,
+			concurrencyService: NewConcurrencyService(&mockConcurrencyCache{loadMap: map[int64]*AccountLoadInfo{1: {AccountID: 1, LoadRate: 10}}}),
+		}
+
+		result, err := svc.SelectAccountWithLoadAwareness(context.Background(), nil, "sticky-log-load-aware", "claude-3-5-sonnet-20241022", nil, "")
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		out := buf.String()
+		require.True(t, strings.Contains(out, "sticky disabled: bypassing sticky path"))
+		require.True(t, strings.Contains(out, "platform=anthropic"))
+		require.True(t, strings.Contains(out, "sticky_layer=gateway_load_aware"))
 	})
 }
 
@@ -1176,6 +1376,36 @@ func TestGatewayService_isModelSupportedByAccount(t *testing.T) {
 // TestGatewayService_selectAccountWithMixedScheduling 测试混合调度
 func TestGatewayService_selectAccountWithMixedScheduling(t *testing.T) {
 	ctx := context.Background()
+
+	t.Run("混合调度-Gemini sticky 命中不受 Anthropic 开关影响", func(t *testing.T) {
+		repo := &mockAccountRepoForPlatform{
+			accounts: []Account{
+				{ID: 1, Platform: PlatformGemini, Type: AccountTypeAPIKey, Priority: 5, Status: StatusActive, Schedulable: true},
+				{ID: 2, Platform: PlatformGemini, Type: AccountTypeOAuth, Priority: 1, Status: StatusActive, Schedulable: true},
+			},
+			accountsByID: map[int64]*Account{},
+		}
+		for i := range repo.accounts {
+			repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+		}
+
+		cache := &mockGatewayCacheForPlatform{sessionBindings: map[string]int64{"gemini-mixed-sticky": 1}}
+		cfg := testConfig()
+		cfg.Gateway.Sticky.Anthropic.Enabled = false
+		cfg.Gateway.Sticky.Gemini.Enabled = true
+
+		svc := &GatewayService{
+			accountRepo: repo,
+			cache:       cache,
+			cfg:         cfg,
+		}
+
+		acc, err := svc.selectAccountWithMixedScheduling(ctx, nil, "gemini-mixed-sticky", "gemini-2.5-pro", nil, PlatformGemini)
+		require.NoError(t, err)
+		require.NotNil(t, acc)
+		require.Equal(t, int64(1), acc.ID)
+		require.Equal(t, 1, cache.getCalls["gemini-mixed-sticky"])
+	})
 
 	t.Run("混合调度-Gemini优先选择OAuth账户", func(t *testing.T) {
 		repo := &mockAccountRepoForPlatform{
@@ -2007,6 +2237,54 @@ func (m *mockConcurrencyCache) GetUsersLoadBatch(ctx context.Context, users []Us
 func TestGatewayService_SelectAccountWithLoadAwareness(t *testing.T) {
 	ctx := context.Background()
 
+	t.Run("Gemini sticky 命中不受 Anthropic 开关影响", func(t *testing.T) {
+		groupID := int64(68)
+		now := time.Now().Add(-time.Minute)
+		repo := &mockAccountRepoForPlatform{
+			accounts: []Account{
+				{ID: 1, Platform: PlatformGemini, Type: AccountTypeAPIKey, Priority: 5, Status: StatusActive, Schedulable: true, Concurrency: 4, LastUsedAt: &now, AccountGroups: []AccountGroup{{GroupID: groupID}}},
+				{ID: 2, Platform: PlatformGemini, Type: AccountTypeOAuth, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 4, LastUsedAt: &now, AccountGroups: []AccountGroup{{GroupID: groupID}}},
+			},
+			accountsByID: map[int64]*Account{},
+		}
+		for i := range repo.accounts {
+			repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+		}
+
+		cache := &mockGatewayCacheForPlatform{sessionBindings: map[string]int64{"gemini-sticky-hit": 1}}
+		groupRepo := &mockGroupRepoForGateway{
+			groups: map[int64]*Group{
+				groupID: {ID: groupID, Platform: PlatformGemini, Status: StatusActive, Hydrated: true},
+			},
+		}
+		cfg := testConfig()
+		cfg.Gateway.Sticky.Anthropic.Enabled = false
+		cfg.Gateway.Sticky.Gemini.Enabled = true
+		cfg.Gateway.Scheduling.LoadBatchEnabled = true
+
+		concurrencyCache := &mockConcurrencyCache{
+			loadMap: map[int64]*AccountLoadInfo{
+				1: {AccountID: 1, LoadRate: 10},
+				2: {AccountID: 2, LoadRate: 10},
+			},
+		}
+
+		svc := &GatewayService{
+			accountRepo:        repo,
+			groupRepo:          groupRepo,
+			cache:              cache,
+			cfg:                cfg,
+			concurrencyService: NewConcurrencyService(concurrencyCache),
+		}
+
+		result, err := svc.SelectAccountWithLoadAwareness(ctx, &groupID, "gemini-sticky-hit", "gemini-2.5-pro", nil, "")
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.NotNil(t, result.Account)
+		require.Equal(t, int64(1), result.Account.ID)
+		require.Equal(t, 1, cache.getCalls["gemini-sticky-hit"])
+	})
+
 	t.Run("禁用负载批量查询-降级到传统选择", func(t *testing.T) {
 		repo := &mockAccountRepoForPlatform{
 			accounts: []Account{
@@ -2657,6 +2935,66 @@ func TestGatewayService_SelectAccountWithLoadAwareness(t *testing.T) {
 		require.NotNil(t, result.Account)
 		require.Equal(t, int64(2), result.Account.ID)
 		require.Equal(t, int64(2), cache.sessionBindings["route"])
+	})
+
+	t.Run("模型路由-load-aware-sticky关闭时不写入粘性绑定", func(t *testing.T) {
+		groupID := int64(230)
+		sessionHash := "route-disabled"
+
+		repo := &mockAccountRepoForPlatform{
+			accounts: []Account{
+				{ID: 1, Platform: PlatformAnthropic, Priority: 2, Status: StatusActive, Schedulable: true, Concurrency: 5},
+				{ID: 2, Platform: PlatformAnthropic, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 5},
+			},
+			accountsByID: map[int64]*Account{},
+		}
+		for i := range repo.accounts {
+			repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+		}
+
+		cache := &mockGatewayCacheForPlatform{}
+
+		groupRepo := &mockGroupRepoForGateway{
+			groups: map[int64]*Group{
+				groupID: {
+					ID:                  groupID,
+					Platform:            PlatformAnthropic,
+					Status:              StatusActive,
+					Hydrated:            true,
+					ModelRoutingEnabled: true,
+					ModelRouting: map[string][]int64{
+						"claude-3-5-sonnet-20241022": {1, 2},
+					},
+				},
+			},
+		}
+
+		cfg := testConfig()
+		cfg.Gateway.Scheduling.LoadBatchEnabled = true
+		cfg.Gateway.Sticky.Anthropic.Enabled = false
+
+		concurrencyCache := &mockConcurrencyCache{
+			loadMap: map[int64]*AccountLoadInfo{
+				1: {AccountID: 1, LoadRate: 80},
+				2: {AccountID: 2, LoadRate: 20},
+			},
+		}
+
+		svc := &GatewayService{
+			accountRepo:        repo,
+			groupRepo:          groupRepo,
+			cache:              cache,
+			cfg:                cfg,
+			concurrencyService: NewConcurrencyService(concurrencyCache),
+		}
+
+		result, err := svc.SelectAccountWithLoadAwareness(ctx, &groupID, sessionHash, "claude-3-5-sonnet-20241022", nil, "")
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.NotNil(t, result.Account)
+		require.Equal(t, int64(2), result.Account.ID)
+		require.Empty(t, cache.setCalls)
+		require.Empty(t, cache.sessionBindings)
 	})
 
 	t.Run("模型路由-路由账号全满返回等待计划", func(t *testing.T) {
