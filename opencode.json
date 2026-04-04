@@ -10,5 +10,8 @@
       "writing-skills": "deny",
       "using-git-worktrees": "deny"
     }
+  },
+  "tools": {
+    "chrome-devtools_take_screenshot": false
   }
 }
