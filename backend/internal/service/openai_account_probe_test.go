@@ -2,20 +2,327 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/stretchr/testify/require"
 )
+
+func TestProbe_SendProbeRequest_OAuthUsesCodexResponsesEndpoint(t *testing.T) {
+	upstream := &openAIHTTPUpstreamRecorder{
+		resp: &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("data: {\"id\":\"resp_123\",\"type\":\"response.created\"}\n\n"))},
+	}
+	probe := &openAIAccountProbe{
+		service: &OpenAIGatewayService{httpUpstream: upstream},
+	}
+	account := &Account{
+		ID:          1,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token":       "oauth-token",
+			"chatgpt_account_id": "acct-123",
+		},
+	}
+
+	result := probe.sendProbeRequest(context.Background(), account, "gpt-4o-mini", GatewayOpenAIWSSchedulerLayeredConfig{ProbeTimeoutSeconds: 1})
+	require.NoError(t, result.err)
+
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, chatgptCodexURL, upstream.lastReq.URL.String())
+	require.Equal(t, "chatgpt.com", upstream.lastReq.Host)
+	require.Equal(t, "text/event-stream", upstream.lastReq.Header.Get("accept"))
+	require.Equal(t, "responses=experimental", upstream.lastReq.Header.Get("OpenAI-Beta"))
+	require.Equal(t, "codex_cli_rs", upstream.lastReq.Header.Get("originator"))
+	require.Equal(t, codexCLIUserAgent, upstream.lastReq.Header.Get("User-Agent"))
+	require.Equal(t, "Bearer oauth-token", upstream.lastReq.Header.Get("Authorization"))
+	require.Equal(t, "acct-123", upstream.lastReq.Header.Get("chatgpt-account-id"))
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(upstream.lastBody, &body))
+	require.Equal(t, "gpt-4o-mini", body["model"])
+	require.Equal(t, true, body["stream"])
+	require.Contains(t, body, "input")
+	require.Equal(t, float64(probeMaxTokens), body["max_output_tokens"])
+	require.NotContains(t, body, "max_tokens")
+	require.NotContains(t, body, "instructions")
+	require.NotContains(t, string(upstream.lastBody), "messages")
+}
+
+func TestProbe_SendProbeRequest_OAuthUsesCustomUserAgentWhenConfigured(t *testing.T) {
+	upstream := &openAIHTTPUpstreamRecorder{
+		resp: &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("data: {\"id\":\"resp_123\",\"type\":\"response.created\"}\n\n"))},
+	}
+	probe := &openAIAccountProbe{
+		service: &OpenAIGatewayService{httpUpstream: upstream},
+	}
+	account := &Account{
+		ID:          11,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token":       "oauth-token",
+			"chatgpt_account_id": "acct-123",
+			"user_agent":         "custom-probe-ua/1.0",
+		},
+	}
+
+	result := probe.sendProbeRequest(context.Background(), account, "gpt-4o-mini", GatewayOpenAIWSSchedulerLayeredConfig{ProbeTimeoutSeconds: 1})
+	require.NoError(t, result.err)
+	require.Equal(t, "custom-probe-ua/1.0", upstream.lastReq.Header.Get("User-Agent"))
+}
+
+func TestProbe_SendProbeRequest_APIKeyUsesResponsesURLBuilder(t *testing.T) {
+	upstream := &openAIHTTPUpstreamRecorder{
+		resp: &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("data: {\"id\":\"resp_123\",\"type\":\"response.created\"}\n\n"))},
+	}
+	probe := &openAIAccountProbe{
+		service: &OpenAIGatewayService{httpUpstream: upstream},
+	}
+	account := &Account{
+		ID:          2,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "sk-test",
+			"base_url": "https://example.com/v1",
+		},
+	}
+
+	result := probe.sendProbeRequest(context.Background(), account, "gpt-4o-mini", GatewayOpenAIWSSchedulerLayeredConfig{ProbeTimeoutSeconds: 1})
+	require.NoError(t, result.err)
+
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, "https://example.com/v1/responses", upstream.lastReq.URL.String())
+	require.Equal(t, "Bearer sk-test", upstream.lastReq.Header.Get("Authorization"))
+	require.Equal(t, "application/json", upstream.lastReq.Header.Get("Content-Type"))
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(upstream.lastBody, &body))
+	require.Equal(t, "gpt-4o-mini", body["model"])
+	require.Equal(t, true, body["stream"])
+	require.Contains(t, body, "input")
+	require.Equal(t, float64(probeMaxTokens), body["max_output_tokens"])
+	require.NotContains(t, body, "max_tokens")
+	require.NotContains(t, body, "instructions")
+	require.NotContains(t, string(upstream.lastBody), "messages")
+}
+
+func TestProbe_SendProbeRequest_UsesFirstValidSSEEventAsTTFT(t *testing.T) {
+	fixture := newAPIKeyProbeFixtureWithUpstream(&contextAwareBlockingProbeUpstream{bodyFactory: func(ctx context.Context) io.ReadCloser {
+		return &contextAwareBlockingProbeBody{
+			ctx: ctx,
+			chunks: []string{
+				": keep-alive\n\n",
+				"\n",
+				"data: {\"id\":\"resp_123\",\"type\":\"response.created\"}\n\n",
+			},
+		}
+	}})
+	fixture.lcfg.ProbeTimeoutSeconds = 1
+	start := time.Now()
+
+	result := fixture.probe.sendProbeRequest(context.Background(), fixture.account, "gpt-4o-mini", fixture.lcfg)
+	elapsed := time.Since(start)
+
+	require.NoError(t, result.err)
+	require.GreaterOrEqual(t, result.ttftMs, 0)
+	require.Less(t, elapsed, 700*time.Millisecond, "should return as soon as the first valid SSE event arrives, without waiting for stream completion or timeout")
+}
+
+func TestProbe_SendProbeRequest_AcceptsMultiLineDataEvent(t *testing.T) {
+	fixture := newAPIKeyProbeFixture(io.NopCloser(strings.NewReader("data: {\"id\":\"resp_123\",\n" +
+		"data: \"type\":\"response.created\"}\n\n")))
+
+	result := fixture.probe.sendProbeRequest(context.Background(), fixture.account, "gpt-4o-mini", fixture.lcfg)
+
+	require.NoError(t, result.err)
+	require.GreaterOrEqual(t, result.ttftMs, 0)
+}
+
+func TestProbe_SendProbeRequest_IgnoresNonJSONDataBeforeValidEvent(t *testing.T) {
+	fixture := newAPIKeyProbeFixture(io.NopCloser(strings.NewReader("data: not-json\n\n" +
+		"data: {\"id\":\"resp_123\",\"type\":\"response.created\"}\n\n")))
+
+	result := fixture.probe.sendProbeRequest(context.Background(), fixture.account, "gpt-4o-mini", fixture.lcfg)
+
+	require.NoError(t, result.err)
+	require.GreaterOrEqual(t, result.ttftMs, 0)
+}
+
+func TestProbe_SendProbeRequest_AcceptsFinalValidDataWithoutTrailingNewline(t *testing.T) {
+	fixture := newAPIKeyProbeFixture(io.NopCloser(strings.NewReader("data: {\"id\":\"resp_123\",\"type\":\"response.created\"}")))
+
+	result := fixture.probe.sendProbeRequest(context.Background(), fixture.account, "gpt-4o-mini", fixture.lcfg)
+
+	require.NoError(t, result.err)
+	require.GreaterOrEqual(t, result.ttftMs, 0)
+}
+
+func TestProbe_SendProbeRequest_FailsOnErrorEvent(t *testing.T) {
+	fixture := newAPIKeyProbeFixture(io.NopCloser(strings.NewReader("data: {\"error\":{\"message\":\"boom\"}}\n\n")))
+
+	result := fixture.probe.sendProbeRequest(context.Background(), fixture.account, "gpt-4o-mini", fixture.lcfg)
+
+	require.Error(t, result.err)
+	require.ErrorContains(t, result.err, "boom")
+}
+
+func TestProbe_SendProbeRequest_FailsOnExplicitSSEErrorEventType(t *testing.T) {
+	fixture := newAPIKeyProbeFixture(io.NopCloser(strings.NewReader("event: error\n" +
+		"data: {\"message\":\"boom\"}\n\n")))
+
+	result := fixture.probe.sendProbeRequest(context.Background(), fixture.account, "gpt-4o-mini", fixture.lcfg)
+
+	require.Error(t, result.err)
+	require.ErrorContains(t, result.err, "boom")
+}
+
+func TestProbe_SendProbeRequest_FailsOnExplicitSSEErrorEventWithoutData(t *testing.T) {
+	fixture := newAPIKeyProbeFixture(io.NopCloser(strings.NewReader("event: error\n\n")))
+
+	result := fixture.probe.sendProbeRequest(context.Background(), fixture.account, "gpt-4o-mini", fixture.lcfg)
+
+	require.Error(t, result.err)
+	require.ErrorContains(t, result.err, "error event")
+}
+
+func TestProbe_SendProbeRequest_FailsOnDoneBeforeValidEvent(t *testing.T) {
+	fixture := newAPIKeyProbeFixture(io.NopCloser(strings.NewReader("data: [DONE]\n\n")))
+
+	result := fixture.probe.sendProbeRequest(context.Background(), fixture.account, "gpt-4o-mini", fixture.lcfg)
+
+	require.Error(t, result.err)
+	require.ErrorContains(t, result.err, "before valid event")
+	require.ErrorContains(t, result.err, "[DONE]")
+}
+
+func TestProbe_SendProbeRequest_FailsWhenStreamEndsBeforeValidEvent(t *testing.T) {
+	fixture := newAPIKeyProbeFixture(io.NopCloser(strings.NewReader(": keep-alive\n\n\n")))
+
+	result := fixture.probe.sendProbeRequest(context.Background(), fixture.account, "gpt-4o-mini", fixture.lcfg)
+
+	require.Error(t, result.err)
+	require.ErrorContains(t, result.err, "before valid event")
+}
+
+func TestProbe_SendProbeRequest_TimesOutWithoutValidEvent(t *testing.T) {
+	fixture := newAPIKeyProbeFixtureWithUpstream(&contextAwareBlockingProbeUpstream{})
+	fixture.lcfg.ProbeTimeoutSeconds = 1
+
+	result := fixture.probe.sendProbeRequest(context.Background(), fixture.account, "gpt-4o-mini", fixture.lcfg)
+
+	require.Error(t, result.err)
+	require.ErrorContains(t, result.err, "context deadline exceeded")
+}
+
+func TestProbe_ResolveProbeModel_KeepsExistingSelectionRules(t *testing.T) {
+	probe := &openAIAccountProbe{}
+	mappedAccount := &Account{
+		Credentials: map[string]any{
+			"model_mapping": map[string]any{
+				"*":             "gpt-4.1-mini",
+				"gpt-5.1-codex": "gpt-4.1-mini",
+				"gpt-4o-mini":   "gpt-4o-mini-upstream",
+			},
+		},
+	}
+	fallbackAccount := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{}}
+
+	require.Equal(t, "gpt-4o-mini", probe.resolveProbeModel(mappedAccount))
+	require.Equal(t, "gpt-4o-mini", probe.resolveProbeModel(fallbackAccount))
+}
+
+type apiKeyProbeFixture struct {
+	probe   *openAIAccountProbe
+	account *Account
+	lcfg    GatewayOpenAIWSSchedulerLayeredConfig
+}
+
+func newAPIKeyProbeFixture(body io.ReadCloser) apiKeyProbeFixture {
+	return newAPIKeyProbeFixtureWithUpstream(&openAIHTTPUpstreamRecorder{
+		resp: &http.Response{StatusCode: http.StatusOK, Body: body},
+	})
+}
+
+func newAPIKeyProbeFixtureWithUpstream(upstream HTTPUpstream) apiKeyProbeFixture {
+	return apiKeyProbeFixture{
+		probe: &openAIAccountProbe{service: &OpenAIGatewayService{httpUpstream: upstream}},
+		account: &Account{
+			ID:          3,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Concurrency: 1,
+			Credentials: map[string]any{
+				"api_key":  "sk-test",
+				"base_url": "https://example.com/v1",
+			},
+		},
+		lcfg: GatewayOpenAIWSSchedulerLayeredConfig{ProbeTimeoutSeconds: 2},
+	}
+}
+
+type contextAwareBlockingProbeBody struct {
+	ctx    context.Context
+	chunks []string
+	index  int
+}
+
+func (b *contextAwareBlockingProbeBody) Read(p []byte) (int, error) {
+	if b.index < len(b.chunks) {
+		chunk := b.chunks[b.index]
+		b.index++
+		copyLen := copy(p, []byte(chunk))
+		return copyLen, nil
+	}
+	if b.ctx == nil {
+		return 0, io.EOF
+	}
+	<-b.ctx.Done()
+	return 0, b.ctx.Err()
+}
+
+func (b *contextAwareBlockingProbeBody) Close() error {
+	return nil
+}
+
+type contextAwareBlockingProbeUpstream struct {
+	bodyFactory func(context.Context) io.ReadCloser
+}
+
+func (u *contextAwareBlockingProbeUpstream) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
+	body := io.ReadCloser(&contextAwareBlockingProbeBody{ctx: req.Context()})
+	if u.bodyFactory != nil {
+		body = u.bodyFactory(req.Context())
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       body,
+	}, nil
+}
+
+func (u *contextAwareBlockingProbeUpstream) DoWithTLS(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, profile *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, proxyURL, accountID, accountConcurrency)
+}
 
 type failingClearTempUnschedulableRepo struct{ stubOpenAIAccountRepo }
 
 type probeGroupAwareRepo struct{ stubOpenAIAccountRepo }
 
 type failingGroupLookupProbeRepo struct{ stubOpenAIAccountRepo }
+
+type panicExplainabilityRepo struct{ stubOpenAIAccountRepo }
 
 func newProbeGroupAwareRepo(accounts []Account) probeGroupAwareRepo {
 	return probeGroupAwareRepo{stubOpenAIAccountRepo{accounts: accounts}}
@@ -27,6 +334,14 @@ func (f failingClearTempUnschedulableRepo) ClearTempUnschedulable(ctx context.Co
 
 func (r failingGroupLookupProbeRepo) ListSchedulableByGroupIDAndPlatform(ctx context.Context, groupID int64, platform string) ([]Account, error) {
 	return nil, errors.New("group lookup failed")
+}
+
+func (r panicExplainabilityRepo) ListSchedulableByGroupIDAndPlatform(ctx context.Context, groupID int64, platform string) ([]Account, error) {
+	panic("unexpected explainability repo call")
+}
+
+func (r panicExplainabilityRepo) ListSchedulableUngroupedByPlatform(ctx context.Context, platform string) ([]Account, error) {
+	panic("unexpected explainability repo call")
 }
 
 func (r probeGroupAwareRepo) ListSchedulableUngroupedByPlatform(ctx context.Context, platform string) ([]Account, error) {
@@ -426,7 +741,7 @@ func TestProbe_ExplainabilityFields_IncludeRuntimeMetrics(t *testing.T) {
 	stats := newOpenAIAccountRuntimeStats()
 	ttft := 1200
 	stats.report(1, true, &ttft)
-	probe := &openAIAccountProbe{stats: stats, stopCh: make(chan struct{}), ctx: context.Background()}
+	probe := &openAIAccountProbe{stats: stats, stopCh: make(chan struct{}), ctx: context.Background(), service: &OpenAIGatewayService{accountRepo: panicExplainabilityRepo{}}}
 	defer probe.stop()
 	probe.markPenalized(1, nil, true, false)
 
@@ -435,7 +750,10 @@ func TestProbe_ExplainabilityFields_IncludeRuntimeMetrics(t *testing.T) {
 	entry := value.(*openAIAccountProbeEntry)
 	entry.lastProbeTTFTMs.Store(1200)
 
-	fields := probe.explainabilityFields(1, entry)
+	var fields []any
+	require.NotPanics(t, func() {
+		fields = probe.explainabilityFields(1, entry, 0)
+	})
 	joined := fmt.Sprint(fields...)
 	require.Contains(t, joined, "error_rate")
 	require.Contains(t, joined, "ttft")

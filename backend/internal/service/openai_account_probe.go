@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -263,14 +264,18 @@ func (p *openAIAccountProbe) probeAccount(account *Account, entry *openAIAccount
 		entry.errorPenalized.Store(eval.ErrorPenalized)
 		entry.ttftPenalized.Store(eval.TTFTPenalized)
 		entry.consecutiveFail.Store(0)
-		slog.Info("probe succeeded", p.explainabilityFields(account.ID, entry)...)
+		groupMinTTFT := float64(0)
+		if eval.HasGroupMin {
+			groupMinTTFT = eval.GroupMinTTFT
+		}
+		slog.Info("probe succeeded", p.explainabilityFields(account.ID, entry, groupMinTTFT)...)
 		p.finalizePenaltyState(account.ID, entry)
 		return
 	}
 
 	// 探活失败
 	fails := entry.consecutiveFail.Add(1)
-	fields := p.explainabilityFields(account.ID, entry)
+	fields := p.explainabilityFields(account.ID, entry, 0)
 	fields = append(fields, "consecutive_fail", fails, "error", result.err.Error())
 	slog.Debug("probe failed", fields...)
 
@@ -345,7 +350,7 @@ func (p *openAIAccountProbe) reevaluatePenaltyReasons(ctx context.Context, accou
 	return ls.evaluateRuntimePenalty(accountID, groupMinTTFT, hasGroupMin), nil
 }
 
-func (p *openAIAccountProbe) explainabilityFields(accountID int64, entry *openAIAccountProbeEntry) []any {
+func (p *openAIAccountProbe) explainabilityFields(accountID int64, entry *openAIAccountProbeEntry, groupMinTTFT float64) []any {
 	fields := []any{"account_id", accountID}
 	if entry != nil {
 		fields = append(fields,
@@ -371,14 +376,6 @@ func (p *openAIAccountProbe) explainabilityFields(accountID int64, entry *openAI
 		}
 	} else {
 		fields = append(fields, "error_rate", float64(0), "ttft", float64(0))
-	}
-
-	groupMinTTFT := float64(0)
-	if p != nil {
-		groupID := probeEntryGroupID(entry)
-		if eval, err := p.reevaluatePenaltyReasons(context.Background(), accountID, groupID); err == nil && eval.HasGroupMin {
-			groupMinTTFT = eval.GroupMinTTFT
-		}
 	}
 	fields = append(fields, "group_min_ttft", groupMinTTFT)
 	return fields
@@ -421,10 +418,161 @@ func (p *openAIAccountProbe) resolveProbeModel(account *Account) string {
 // probeResult 包含探活请求的结果。
 type probeResult struct {
 	err    error
-	ttftMs int // 首 token 延迟（毫秒），仅在成功时有效
+	ttftMs int // 记录真实流式首个有效事件时间（TTFT）。
 }
 
-// sendProbeRequest 发送轻量级探活请求，测量首 token 延迟。
+func buildOpenAIProbeResponsesURL(account *Account) string {
+	if account != nil && account.IsOAuth() {
+		return chatgptCodexURL
+	}
+	baseURL := ""
+	if account != nil {
+		baseURL = account.GetOpenAIBaseURL()
+	}
+	return buildOpenAIResponsesURL(baseURL)
+}
+
+func createOpenAIProbePayload(model string, isOAuth bool) ([]byte, error) {
+	payload := map[string]any{
+		"model": model,
+		"input": []map[string]any{
+			{
+				"role": "user",
+				"content": []map[string]any{
+					{
+						"type": "input_text",
+						"text": "hi",
+					},
+				},
+			},
+		},
+		"stream":            true,
+		"max_output_tokens": probeMaxTokens,
+	}
+	if isOAuth {
+		payload["store"] = false
+	}
+	return json.Marshal(payload)
+}
+
+func parseOpenAIProbeEventPayload(eventType string, payload string) (bool, string, error) {
+	payload = strings.TrimSpace(payload)
+	if payload == "" {
+		return false, "", nil
+	}
+	if payload == "[DONE]" {
+		return false, "", fmt.Errorf("probe stream received [DONE] before valid event")
+	}
+
+	var data map[string]any
+	if err := json.Unmarshal([]byte(payload), &data); err != nil {
+		if eventType == "error" {
+			return false, "", fmt.Errorf("probe stream error event")
+		}
+		return false, "", nil
+	}
+
+	if eventType == "error" {
+		if msg := extractOpenAIProbeErrorMessage(data); msg != "" {
+			return false, "", fmt.Errorf("probe stream error event: %s", msg)
+		}
+		return false, "", fmt.Errorf("probe stream error event")
+	}
+
+	if errEvent := extractOpenAIProbeErrorMessage(data); errEvent != "" {
+		return false, "", fmt.Errorf("probe stream error event: %s", errEvent)
+	}
+	if eventType, _ := data["type"].(string); eventType == "error" {
+		return false, "", fmt.Errorf("probe stream error event")
+	}
+	if _, hasError := data["error"]; hasError {
+		return false, "", fmt.Errorf("probe stream error event")
+	}
+	return true, payload, nil
+}
+
+func extractOpenAIProbeErrorMessage(data map[string]any) string {
+	if data == nil {
+		return ""
+	}
+	if msg, ok := data["message"].(string); ok {
+		return strings.TrimSpace(msg)
+	}
+	if errData, ok := data["error"].(map[string]any); ok {
+		if msg, ok := errData["message"].(string); ok {
+			return strings.TrimSpace(msg)
+		}
+	}
+	return ""
+}
+
+func readOpenAIProbeResponseStream(ctx context.Context, body io.Reader, start time.Time) (int, error) {
+	reader := bufio.NewReader(body)
+	var eventDataLines []string
+	eventType := ""
+
+	flushEvent := func() (int, bool, error) {
+		if len(eventDataLines) == 0 {
+			if eventType == "error" {
+				eventType = ""
+				return 0, false, fmt.Errorf("probe stream error event")
+			}
+			eventType = ""
+			return 0, false, nil
+		}
+		payload := strings.Join(eventDataLines, "\n")
+		eventDataLines = nil
+		currentEventType := eventType
+		eventType = ""
+		valid, _, err := parseOpenAIProbeEventPayload(currentEventType, payload)
+		if err != nil {
+			return 0, false, err
+		}
+		if valid {
+			return int(time.Since(start).Milliseconds()), true, nil
+		}
+		return 0, false, nil
+	}
+
+	for {
+		line, err := reader.ReadString('\n')
+		if len(line) > 0 {
+			trimmedLine := strings.TrimSpace(line)
+			if trimmedLine == "" {
+				ttftMs, ok, flushErr := flushEvent()
+				if flushErr != nil {
+					return 0, flushErr
+				}
+				if ok {
+					return ttftMs, nil
+				}
+			} else if sseDataPrefix.MatchString(trimmedLine) {
+				eventDataLines = append(eventDataLines, sseDataPrefix.ReplaceAllString(trimmedLine, ""))
+			} else if strings.HasPrefix(trimmedLine, "event:") {
+				eventType = strings.TrimSpace(strings.TrimPrefix(trimmedLine, "event:"))
+			}
+		}
+
+		if err != nil {
+			if err == io.EOF {
+				ttftMs, ok, flushErr := flushEvent()
+				if flushErr != nil {
+					return 0, flushErr
+				}
+				if ok {
+					return ttftMs, nil
+				}
+				return 0, fmt.Errorf("probe stream ended before valid event: %w", err)
+			}
+			if ctx != nil && ctx.Err() != nil {
+				return 0, fmt.Errorf("probe stream read error before valid event: %w", ctx.Err())
+			}
+			return 0, fmt.Errorf("probe stream read error before valid event: %w", err)
+		}
+	}
+}
+
+// sendProbeRequest 发送轻量级探活请求，并记录真实流式首个有效事件时间。
 func (p *openAIAccountProbe) sendProbeRequest(ctx context.Context, account *Account, model string, lcfg GatewayOpenAIWSSchedulerLayeredConfig) probeResult {
 	if p.service == nil || account == nil {
 		return probeResult{err: fmt.Errorf("nil service or account")}
@@ -445,18 +593,9 @@ func (p *openAIAccountProbe) sendProbeRequest(ctx context.Context, account *Acco
 		return probeResult{err: fmt.Errorf("get access token: %w", err)}
 	}
 
-	baseURL := account.GetOpenAIBaseURL()
-	reqURL := strings.TrimRight(baseURL, "/") + "/v1/chat/completions"
-
-	body := map[string]any{
-		"model": model,
-		"messages": []map[string]string{
-			{"role": "user", "content": "hi"},
-		},
-		"max_tokens": probeMaxTokens,
-		"stream":     false,
-	}
-	bodyBytes, err := json.Marshal(body)
+	isOAuth := account.IsOAuth()
+	reqURL := buildOpenAIProbeResponsesURL(account)
+	bodyBytes, err := createOpenAIProbePayload(model, isOAuth)
 	if err != nil {
 		return probeResult{err: fmt.Errorf("marshal body: %w", err)}
 	}
@@ -467,6 +606,21 @@ func (p *openAIAccountProbe) sendProbeRequest(ctx context.Context, account *Acco
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
+	if isOAuth {
+		req.Host = "chatgpt.com"
+		req.Header.Set("accept", "text/event-stream")
+		req.Header.Set("OpenAI-Beta", "responses=experimental")
+		req.Header.Set("originator", "codex_cli_rs")
+		customUA := account.GetOpenAIUserAgent()
+		if customUA != "" {
+			req.Header.Set("User-Agent", customUA)
+		} else {
+			req.Header.Set("User-Agent", codexCLIUserAgent)
+		}
+		if chatgptAccountID := account.GetChatGPTAccountID(); chatgptAccountID != "" {
+			req.Header.Set("chatgpt-account-id", chatgptAccountID)
+		}
+	}
 
 	proxyURL := ""
 	if account.Proxy != nil && account.Proxy.IsActive() {
@@ -475,16 +629,18 @@ func (p *openAIAccountProbe) sendProbeRequest(ctx context.Context, account *Acco
 
 	start := time.Now()
 	resp, err := p.service.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
-	ttftMs := int(time.Since(start).Milliseconds())
 	if err != nil {
 		return probeResult{err: fmt.Errorf("do request: %w", err)}
 	}
 	defer resp.Body.Close()
-	// 读取并丢弃 body
-	_, _ = io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode >= 400 {
 		return probeResult{err: fmt.Errorf("upstream status %d", resp.StatusCode)}
+	}
+
+	ttftMs, err := readOpenAIProbeResponseStream(ctx, resp.Body, start)
+	if err != nil {
+		return probeResult{err: err}
 	}
 	return probeResult{ttftMs: ttftMs}
 }
@@ -521,7 +677,7 @@ func (p *openAIAccountProbe) recoverAccount(accountID int64, entry *openAIAccoun
 		entry.ttftPenalized.Store(false)
 		entry.lastProbeTTFTMs.Store(lastProbeTTFTMs)
 	}
-	slog.Info("probe: account recovered", p.explainabilityFields(accountID, entry)...)
+	slog.Info("probe: account recovered", p.explainabilityFields(accountID, entry, 0)...)
 }
 
 // applyManualRecovery 执行管理员手动恢复：完整清除内存中的惩罚原因与分组上下文，
@@ -563,7 +719,7 @@ func (p *openAIAccountProbe) applyManualRecovery(accountID int64, entry *openAIA
 		p.stats.resetAccount(accountID)
 	}
 	p.entries.Delete(accountID)
-	fields := p.explainabilityFields(accountID, entry)
+	fields := p.explainabilityFields(accountID, entry, 0)
 	fields = append(fields,
 		"prev_error_penalized", prevError,
 		"prev_ttft_penalized", prevTTFT,
@@ -593,5 +749,5 @@ func (p *openAIAccountProbe) setTempUnschedulable(accountID int64, entry *openAI
 		return
 	}
 	entry.dbFlagSet.Store(true)
-	slog.Warn("probe: account marked temp unschedulable", p.explainabilityFields(accountID, entry)...)
+	slog.Warn("probe: account marked temp unschedulable", p.explainabilityFields(accountID, entry, 0)...)
 }
