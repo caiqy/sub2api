@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+const layeredSchedulerStartupRehydrateTimeout = 2 * time.Second
+
 // layeredOpenAIAccountScheduler 分层调度器：使用确定性优先级过滤 + LRU 选择，
 // 替代 defaultOpenAIAccountScheduler 的加权随机评分。
 type layeredOpenAIAccountScheduler struct {

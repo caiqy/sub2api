@@ -324,6 +324,20 @@ type failingGroupLookupProbeRepo struct{ stubOpenAIAccountRepo }
 
 type panicExplainabilityRepo struct{ stubOpenAIAccountRepo }
 
+type startupRehydrateRepoStub struct {
+	stubOpenAIAccountRepo
+	tempUnschedAccounts []Account
+	listErr             error
+	getErr              error
+	listCalls           int
+	lastPlatform        string
+	lastNow             time.Time
+	requireDeadline     bool
+	sawDeadline         bool
+	requireGetDeadline  bool
+	sawGetDeadline      bool
+}
+
 func newProbeGroupAwareRepo(accounts []Account) probeGroupAwareRepo {
 	return probeGroupAwareRepo{stubOpenAIAccountRepo{accounts: accounts}}
 }
@@ -342,6 +356,52 @@ func (r panicExplainabilityRepo) ListSchedulableByGroupIDAndPlatform(ctx context
 
 func (r panicExplainabilityRepo) ListSchedulableUngroupedByPlatform(ctx context.Context, platform string) ([]Account, error) {
 	panic("unexpected explainability repo call")
+}
+
+func (r *startupRehydrateRepoStub) ListTempUnschedulableByPlatform(ctx context.Context, platform string, now time.Time) ([]Account, error) {
+	r.listCalls++
+	r.lastPlatform = platform
+	r.lastNow = now
+	if r.requireDeadline {
+		if _, ok := ctx.Deadline(); !ok {
+			return nil, errors.New("missing deadline")
+		}
+		r.sawDeadline = true
+	}
+	if r.listErr != nil {
+		return nil, r.listErr
+	}
+	return r.tempUnschedAccounts, nil
+}
+
+func (r *startupRehydrateRepoStub) GetByID(ctx context.Context, id int64) (*Account, error) {
+	if r.requireGetDeadline {
+		if _, ok := ctx.Deadline(); !ok {
+			return nil, errors.New("missing get deadline")
+		}
+		r.sawGetDeadline = true
+	}
+	if r.getErr != nil {
+		return nil, r.getErr
+	}
+	for i := range r.tempUnschedAccounts {
+		if r.tempUnschedAccounts[i].ID == id {
+			cloned := r.tempUnschedAccounts[i]
+			return &cloned, nil
+		}
+	}
+	return r.stubOpenAIAccountRepo.GetByID(ctx, id)
+}
+
+func (r *startupRehydrateRepoStub) ClearTempUnschedulable(ctx context.Context, id int64) error {
+	for i := range r.tempUnschedAccounts {
+		if r.tempUnschedAccounts[i].ID == id {
+			r.tempUnschedAccounts[i].TempUnschedulableUntil = nil
+			r.tempUnschedAccounts[i].TempUnschedulableReason = ""
+			return nil
+		}
+	}
+	return nil
 }
 
 func (r probeGroupAwareRepo) ListSchedulableUngroupedByPlatform(ctx context.Context, platform string) ([]Account, error) {
@@ -379,6 +439,608 @@ func TestProbe_MarkPenalized_RegistersAccount(t *testing.T) {
 	probe.markPenalized(42, nil, true, false)
 	_, ok := probe.entries.Load(int64(42))
 	require.True(t, ok)
+}
+
+func TestProbe_RehydrateTempUnschedulableEntries_FiltersByBootstrapEligibility(t *testing.T) {
+	now := time.Now()
+	future := now.Add(10 * time.Minute)
+	reason, err := buildLayeredProbeTempUnschedReason("consecutive_failures", 3)
+	require.NoError(t, err)
+	repo := &startupRehydrateRepoStub{tempUnschedAccounts: []Account{
+		{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, TempUnschedulableUntil: &future, TempUnschedulableReason: reason},
+		{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: false, TempUnschedulableUntil: &future, TempUnschedulableReason: reason},
+		{ID: 3, Platform: PlatformGemini, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, TempUnschedulableUntil: &future, TempUnschedulableReason: reason},
+		{ID: 4, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusDisabled, Schedulable: true, TempUnschedulableUntil: &future, TempUnschedulableReason: reason},
+	}}
+	probe := &openAIAccountProbe{
+		service: &OpenAIGatewayService{accountRepo: repo},
+		stats:   newOpenAIAccountRuntimeStats(),
+		stopCh:  make(chan struct{}),
+	}
+	defer probe.stop()
+
+	err = probe.rehydrateTempUnschedulableEntries(context.Background(), now)
+	require.NoError(t, err)
+	require.Equal(t, PlatformOpenAI, repo.lastPlatform)
+	require.WithinDuration(t, now, repo.lastNow, time.Millisecond)
+
+	_, ok1 := probe.entries.Load(int64(1))
+	_, ok2 := probe.entries.Load(int64(2))
+	_, ok3 := probe.entries.Load(int64(3))
+	_, ok4 := probe.entries.Load(int64(4))
+	require.True(t, ok1)
+	require.False(t, ok2)
+	require.False(t, ok3)
+	require.False(t, ok4)
+}
+
+func TestProbe_LayeredTempUnschedReason_RoundTripSource(t *testing.T) {
+	reason, err := buildLayeredProbeTempUnschedReason("consecutive_failures", 3)
+	require.NoError(t, err)
+
+	parsed, ok := parseTempUnschedReason(reason)
+	require.True(t, ok)
+	require.Equal(t, "layered_probe", parsed.Source)
+	require.Equal(t, "consecutive_failures", parsed.Kind)
+	require.Equal(t, 3, parsed.ConsecutiveFailures)
+}
+
+func TestProbe_LayeredTempUnschedReason_RejectsLegacyReasonWithoutSource(t *testing.T) {
+	parsed, ok := parseTempUnschedReason("layered scheduler probe: consecutive failures exceeded threshold")
+	require.False(t, ok)
+	require.Empty(t, parsed.Source)
+}
+
+func TestProbe_LayeredTempUnschedReason_RejectsOtherSourceReason(t *testing.T) {
+	reason := `{"source":"oauth_401","status_code":401,"until_unix":1735689600}`
+	parsed, ok := parseTempUnschedReason(reason)
+	require.True(t, ok)
+	require.Equal(t, "oauth_401", parsed.Source)
+	require.NotEqual(t, "layered_probe", parsed.Source)
+}
+
+func TestProbe_RehydrateTempUnschedulableEntries_OnlyHydratesLayeredProbeSource(t *testing.T) {
+	now := time.Now()
+	future := now.Add(10 * time.Minute)
+	layeredReason, err := buildLayeredProbeTempUnschedReason("consecutive_failures", 3)
+	require.NoError(t, err)
+
+	repo := &startupRehydrateRepoStub{tempUnschedAccounts: []Account{
+		{ID: 11, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, TempUnschedulableUntil: &future, TempUnschedulableReason: layeredReason},
+		{ID: 12, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, TempUnschedulableUntil: &future, TempUnschedulableReason: `{"source":"oauth_401","status_code":401}`},
+		{ID: 13, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, TempUnschedulableUntil: &future, TempUnschedulableReason: `{"source":"token_refresh_retry_exhausted"}`},
+		{ID: 14, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, TempUnschedulableUntil: &future, TempUnschedulableReason: "layered scheduler probe: consecutive failures exceeded threshold"},
+	}}
+	probe := &openAIAccountProbe{
+		service: &OpenAIGatewayService{accountRepo: repo},
+		stats:   newOpenAIAccountRuntimeStats(),
+		stopCh:  make(chan struct{}),
+	}
+	defer probe.stop()
+
+	err = probe.rehydrateTempUnschedulableEntries(context.Background(), now)
+	require.NoError(t, err)
+
+	_, ok1 := probe.entries.Load(int64(11))
+	_, ok2 := probe.entries.Load(int64(12))
+	_, ok3 := probe.entries.Load(int64(13))
+	_, ok4 := probe.entries.Load(int64(14))
+	require.True(t, ok1)
+	require.False(t, ok2)
+	require.False(t, ok3)
+	require.False(t, ok4)
+}
+
+func TestProbe_RehydrateTempUnschedulableEntries_SkipsLegacyReasonWithoutSource(t *testing.T) {
+	now := time.Now()
+	future := now.Add(10 * time.Minute)
+	repo := &startupRehydrateRepoStub{tempUnschedAccounts: []Account{
+		{ID: 19, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, TempUnschedulableUntil: &future, TempUnschedulableReason: "layered scheduler probe: consecutive failures exceeded threshold"},
+	}}
+	probe := &openAIAccountProbe{
+		service: &OpenAIGatewayService{accountRepo: repo},
+		stats:   newOpenAIAccountRuntimeStats(),
+		stopCh:  make(chan struct{}),
+	}
+	defer probe.stop()
+
+	err := probe.rehydrateTempUnschedulableEntries(context.Background(), now)
+	require.NoError(t, err)
+	_, ok := probe.entries.Load(int64(19))
+	require.False(t, ok)
+}
+
+func TestProbe_BootstrapRegister_MakesEntryImmediatelyEligibleForNextTick(t *testing.T) {
+	now := time.Now()
+	probe := &openAIAccountProbe{stats: newOpenAIAccountRuntimeStats(), stopCh: make(chan struct{})}
+	defer probe.stop()
+	account := &Account{ID: 101, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true}
+
+	probe.bootstrapRegister(account, now, 2*time.Minute)
+
+	value, ok := probe.entries.Load(account.ID)
+	require.True(t, ok, "entry should be created during bootstrap registration")
+	entry := value.(*openAIAccountProbeEntry)
+	require.True(t, entry.dbFlagSet.Load())
+	require.False(t, entry.errorPenalized.Load())
+	require.False(t, entry.ttftPenalized.Load())
+	require.GreaterOrEqual(t, now.Sub(entry.penalizedAt), 2*time.Minute)
+}
+
+func TestProbe_RehydrateTempUnschedulableEntries_QueryFailureDoesNotBreakProbeConstruction(t *testing.T) {
+	repo := &startupRehydrateRepoStub{listErr: errors.New("boom")}
+	stats := newOpenAIAccountRuntimeStats()
+	svc := &OpenAIGatewayService{accountRepo: repo, cfg: &config.Config{}}
+	probe := newOpenAIAccountProbe(svc, stats)
+	defer probe.stop()
+
+	err := probe.rehydrateTempUnschedulableEntries(context.Background(), time.Now())
+
+	require.Error(t, err)
+	require.ErrorContains(t, err, "boom")
+	require.False(t, probe.stopped.Load(), "rehydrate failure should not stop probe construction")
+}
+
+func TestProbe_Tick_DoesNotTreatStaleSnapshotAsManualRecoveryForRehydratedEntry(t *testing.T) {
+	now := time.Now()
+	future := now.Add(10 * time.Minute)
+	reason, err := buildLayeredProbeTempUnschedReason("consecutive_failures", 3)
+	require.NoError(t, err)
+	fresh := Account{
+		ID:                      77,
+		Platform:                PlatformOpenAI,
+		Type:                    AccountTypeAPIKey,
+		Status:                  StatusActive,
+		Schedulable:             true,
+		TempUnschedulableUntil:  &future,
+		TempUnschedulableReason: reason,
+	}
+	stale := fresh
+	stale.TempUnschedulableUntil = nil
+	stale.TempUnschedulableReason = ""
+
+	repo := &startupRehydrateRepoStub{tempUnschedAccounts: []Account{fresh}}
+	snapshot := &SchedulerSnapshotService{cache: &openAISnapshotCacheStub{accountsByID: map[int64]*Account{77: &stale}}}
+	probe := &openAIAccountProbe{
+		service: &OpenAIGatewayService{accountRepo: repo, schedulerSnapshot: snapshot, cfg: &config.Config{}},
+		stats:   newOpenAIAccountRuntimeStats(),
+		stopCh:  make(chan struct{}),
+	}
+	defer probe.stop()
+
+	probe.bootstrapRegister(&fresh, now, 2*time.Minute)
+	value, ok := probe.entries.Load(int64(77))
+	require.True(t, ok)
+	entry := value.(*openAIAccountProbeEntry)
+	entry.dbFlagSet.Store(true)
+	entry.penalizedAt = now
+
+	probe.tick()
+
+	_, stillPresent := probe.entries.Load(int64(77))
+	require.True(t, stillPresent, "stale snapshot must not be treated as manual recovery for startup-rehydrated entry")
+}
+
+func TestProbe_Tick_DoesNotDeleteStartupRehydratedEntryWhenSnapshotMissFallsBackToDB(t *testing.T) {
+	now := time.Now()
+	future := now.Add(10 * time.Minute)
+	reason, err := buildLayeredProbeTempUnschedReason("consecutive_failures", 3)
+	require.NoError(t, err)
+	fresh := Account{
+		ID:                      78,
+		Platform:                PlatformOpenAI,
+		Type:                    AccountTypeAPIKey,
+		Status:                  StatusActive,
+		Schedulable:             true,
+		TempUnschedulableUntil:  &future,
+		TempUnschedulableReason: reason,
+	}
+
+	repo := &startupRehydrateRepoStub{tempUnschedAccounts: []Account{fresh}}
+	snapshot := &SchedulerSnapshotService{cache: &openAISnapshotCacheStub{accountsByID: map[int64]*Account{}}, accountRepo: repo, cfg: &config.Config{}}
+	probe := &openAIAccountProbe{
+		service: &OpenAIGatewayService{accountRepo: repo, schedulerSnapshot: snapshot, cfg: &config.Config{}},
+		stats:   newOpenAIAccountRuntimeStats(),
+		stopCh:  make(chan struct{}),
+	}
+	defer probe.stop()
+
+	probe.bootstrapRegister(&fresh, now, 2*time.Minute)
+	value, ok := probe.entries.Load(int64(78))
+	require.True(t, ok)
+	entry := value.(*openAIAccountProbeEntry)
+	entry.dbFlagSet.Store(true)
+	entry.penalizedAt = now
+
+	probe.tick()
+
+	_, stillPresent := probe.entries.Load(int64(78))
+	require.True(t, stillPresent, "snapshot miss should fall back to DB truth for startup-rehydrated entry")
+}
+
+func TestProbe_Tick_DoesNotDeleteStartupRehydratedEntryWhenSnapshotStaleSchedulableFalse(t *testing.T) {
+	now := time.Now()
+	future := now.Add(10 * time.Minute)
+	reason, err := buildLayeredProbeTempUnschedReason("consecutive_failures", 3)
+	require.NoError(t, err)
+	fresh := Account{
+		ID:                      79,
+		Platform:                PlatformOpenAI,
+		Type:                    AccountTypeAPIKey,
+		Status:                  StatusActive,
+		Schedulable:             true,
+		TempUnschedulableUntil:  &future,
+		TempUnschedulableReason: reason,
+	}
+	stale := fresh
+	stale.Schedulable = false
+
+	repo := &startupRehydrateRepoStub{tempUnschedAccounts: []Account{fresh}}
+	snapshot := &SchedulerSnapshotService{cache: &openAISnapshotCacheStub{accountsByID: map[int64]*Account{79: &stale}}, accountRepo: repo, cfg: &config.Config{}}
+	probe := &openAIAccountProbe{
+		service: &OpenAIGatewayService{accountRepo: repo, schedulerSnapshot: snapshot, cfg: &config.Config{}},
+		stats:   newOpenAIAccountRuntimeStats(),
+		stopCh:  make(chan struct{}),
+	}
+	defer probe.stop()
+
+	probe.bootstrapRegister(&fresh, now, 2*time.Minute)
+	value, ok := probe.entries.Load(int64(79))
+	require.True(t, ok)
+	entry := value.(*openAIAccountProbeEntry)
+	entry.dbFlagSet.Store(true)
+	entry.penalizedAt = now
+
+	probe.tick()
+
+	_, stillPresent := probe.entries.Load(int64(79))
+	require.True(t, stillPresent, "stale snapshot schedulable=false must not delete startup-rehydrated entry before DB truth check")
+}
+
+func TestProbe_Tick_UsesDeadlineWhenReloadingDBTruthForStartupRehydratedEntry(t *testing.T) {
+	now := time.Now()
+	future := now.Add(10 * time.Minute)
+	reason, err := buildLayeredProbeTempUnschedReason("consecutive_failures", 3)
+	require.NoError(t, err)
+	fresh := Account{
+		ID:                      80,
+		Platform:                PlatformOpenAI,
+		Type:                    AccountTypeAPIKey,
+		Status:                  StatusActive,
+		Schedulable:             true,
+		TempUnschedulableUntil:  &future,
+		TempUnschedulableReason: reason,
+	}
+	stale := fresh
+	stale.Schedulable = false
+
+	repo := &startupRehydrateRepoStub{tempUnschedAccounts: []Account{fresh}, requireGetDeadline: true}
+	snapshot := &SchedulerSnapshotService{cache: &openAISnapshotCacheStub{accountsByID: map[int64]*Account{80: &stale}}, accountRepo: repo, cfg: &config.Config{}}
+	probe := &openAIAccountProbe{
+		service: &OpenAIGatewayService{accountRepo: repo, schedulerSnapshot: snapshot, cfg: &config.Config{}},
+		stats:   newOpenAIAccountRuntimeStats(),
+		stopCh:  make(chan struct{}),
+	}
+	defer probe.stop()
+
+	probe.bootstrapRegister(&fresh, now, 2*time.Minute)
+	value, ok := probe.entries.Load(int64(80))
+	require.True(t, ok)
+	entry := value.(*openAIAccountProbeEntry)
+	entry.dbFlagSet.Store(true)
+	entry.penalizedAt = now
+
+	probe.tick()
+
+	_, stillPresent := probe.entries.Load(int64(80))
+	require.True(t, stillPresent, "DB truth reload should succeed with a bounded deadline for startup-rehydrated entry")
+	require.True(t, repo.sawGetDeadline, "DB truth reload should use a deadline-bound context")
+}
+
+func TestProbe_Tick_UsesDeadlineWhenCheckingManualRecoveryForStartupRehydratedEntry(t *testing.T) {
+	now := time.Now()
+	future := now.Add(10 * time.Minute)
+	reason, err := buildLayeredProbeTempUnschedReason("consecutive_failures", 3)
+	require.NoError(t, err)
+	snapshotAccount := Account{
+		ID:                      81,
+		Platform:                PlatformOpenAI,
+		Type:                    AccountTypeAPIKey,
+		Status:                  StatusActive,
+		Schedulable:             true,
+		TempUnschedulableUntil:  &future,
+		TempUnschedulableReason: reason,
+	}
+	dbRecovered := snapshotAccount
+	dbRecovered.TempUnschedulableUntil = nil
+	dbRecovered.TempUnschedulableReason = ""
+
+	repo := &startupRehydrateRepoStub{tempUnschedAccounts: []Account{dbRecovered}, requireGetDeadline: true}
+	snapshot := &SchedulerSnapshotService{cache: &openAISnapshotCacheStub{accountsByID: map[int64]*Account{81: &snapshotAccount}}, accountRepo: repo, cfg: &config.Config{}}
+	probe := &openAIAccountProbe{
+		service: &OpenAIGatewayService{accountRepo: repo, schedulerSnapshot: snapshot, cfg: &config.Config{}},
+		stats:   newOpenAIAccountRuntimeStats(),
+		stopCh:  make(chan struct{}),
+	}
+	defer probe.stop()
+
+	probe.bootstrapRegister(&snapshotAccount, now, 2*time.Minute)
+	value, ok := probe.entries.Load(int64(81))
+	require.True(t, ok)
+	entry := value.(*openAIAccountProbeEntry)
+	entry.dbFlagSet.Store(true)
+	entry.penalizedAt = now
+
+	probe.tick()
+
+	_, stillPresent := probe.entries.Load(int64(81))
+	require.False(t, stillPresent, "manual recovery check should use DB truth and remove the entry once temp-unsched flag is cleared")
+	require.True(t, repo.sawGetDeadline, "manual recovery DB truth check should use a deadline-bound context")
+}
+
+func TestProbe_Tick_KeepsStartupRehydratedEntryWhenDBTruthReloadFailsAfterSnapshotMiss(t *testing.T) {
+	now := time.Now()
+	future := now.Add(10 * time.Minute)
+	reason, err := buildLayeredProbeTempUnschedReason("consecutive_failures", 3)
+	require.NoError(t, err)
+	fresh := Account{
+		ID:                      82,
+		Platform:                PlatformOpenAI,
+		Type:                    AccountTypeAPIKey,
+		Status:                  StatusActive,
+		Schedulable:             true,
+		TempUnschedulableUntil:  &future,
+		TempUnschedulableReason: reason,
+	}
+
+	repo := &startupRehydrateRepoStub{tempUnschedAccounts: []Account{fresh}, getErr: errors.New("db unavailable")}
+	snapshot := &SchedulerSnapshotService{cache: &openAISnapshotCacheStub{accountsByID: map[int64]*Account{}}, accountRepo: repo, cfg: &config.Config{}}
+	probe := &openAIAccountProbe{
+		service: &OpenAIGatewayService{accountRepo: repo, schedulerSnapshot: snapshot, cfg: &config.Config{}},
+		stats:   newOpenAIAccountRuntimeStats(),
+		stopCh:  make(chan struct{}),
+	}
+	defer probe.stop()
+
+	probe.bootstrapRegister(&fresh, now, 2*time.Minute)
+	value, ok := probe.entries.Load(int64(82))
+	require.True(t, ok)
+	entry := value.(*openAIAccountProbeEntry)
+	entry.dbFlagSet.Store(true)
+	entry.penalizedAt = now
+
+	probe.tick()
+
+	_, stillPresent := probe.entries.Load(int64(82))
+	require.True(t, stillPresent, "startup-rehydrated entry should be kept when DB truth reload fails after snapshot miss")
+}
+
+func TestProbe_Tick_KeepsStartupRehydratedEntryWhenDBTruthReloadFailsAfterStaleSchedulableFalse(t *testing.T) {
+	now := time.Now()
+	future := now.Add(10 * time.Minute)
+	reason, err := buildLayeredProbeTempUnschedReason("consecutive_failures", 3)
+	require.NoError(t, err)
+	fresh := Account{
+		ID:                      83,
+		Platform:                PlatformOpenAI,
+		Type:                    AccountTypeAPIKey,
+		Status:                  StatusActive,
+		Schedulable:             true,
+		TempUnschedulableUntil:  &future,
+		TempUnschedulableReason: reason,
+	}
+	stale := fresh
+	stale.Schedulable = false
+
+	repo := &startupRehydrateRepoStub{tempUnschedAccounts: []Account{fresh}, getErr: errors.New("db unavailable")}
+	snapshot := &SchedulerSnapshotService{cache: &openAISnapshotCacheStub{accountsByID: map[int64]*Account{83: &stale}}, accountRepo: repo, cfg: &config.Config{}}
+	probe := &openAIAccountProbe{
+		service: &OpenAIGatewayService{accountRepo: repo, schedulerSnapshot: snapshot, cfg: &config.Config{}},
+		stats:   newOpenAIAccountRuntimeStats(),
+		stopCh:  make(chan struct{}),
+	}
+	defer probe.stop()
+
+	probe.bootstrapRegister(&fresh, now, 2*time.Minute)
+	value, ok := probe.entries.Load(int64(83))
+	require.True(t, ok)
+	entry := value.(*openAIAccountProbeEntry)
+	entry.dbFlagSet.Store(true)
+	entry.penalizedAt = now
+
+	probe.tick()
+
+	_, stillPresent := probe.entries.Load(int64(83))
+	require.True(t, stillPresent, "startup-rehydrated entry should be kept when DB truth reload fails after stale schedulable=false snapshot")
+}
+
+func TestProbe_Tick_DeletesStartupRehydratedEntryWhenDBTruthReturnsAccountNotFound(t *testing.T) {
+	now := time.Now()
+	future := now.Add(10 * time.Minute)
+	reason, err := buildLayeredProbeTempUnschedReason("consecutive_failures", 3)
+	require.NoError(t, err)
+	fresh := Account{
+		ID:                      84,
+		Platform:                PlatformOpenAI,
+		Type:                    AccountTypeAPIKey,
+		Status:                  StatusActive,
+		Schedulable:             true,
+		TempUnschedulableUntil:  &future,
+		TempUnschedulableReason: reason,
+	}
+
+	repo := &startupRehydrateRepoStub{tempUnschedAccounts: []Account{fresh}, getErr: ErrAccountNotFound}
+	snapshot := &SchedulerSnapshotService{cache: &openAISnapshotCacheStub{accountsByID: map[int64]*Account{}}, accountRepo: repo, cfg: &config.Config{}}
+	probe := &openAIAccountProbe{
+		service: &OpenAIGatewayService{accountRepo: repo, schedulerSnapshot: snapshot, cfg: &config.Config{}},
+		stats:   newOpenAIAccountRuntimeStats(),
+		stopCh:  make(chan struct{}),
+	}
+	defer probe.stop()
+
+	probe.bootstrapRegister(&fresh, now, 2*time.Minute)
+	value, ok := probe.entries.Load(int64(84))
+	require.True(t, ok)
+	entry := value.(*openAIAccountProbeEntry)
+	entry.dbFlagSet.Store(true)
+	entry.penalizedAt = now
+
+	probe.tick()
+
+	_, stillPresent := probe.entries.Load(int64(84))
+	require.False(t, stillPresent, "startup-rehydrated entry should be deleted when DB truth reports account not found")
+}
+
+func TestProbe_Tick_DeletesStartupRehydratedEntryWhenManualRecoveryDBTruthReturnsAccountNotFound(t *testing.T) {
+	now := time.Now()
+	future := now.Add(10 * time.Minute)
+	reason, err := buildLayeredProbeTempUnschedReason("consecutive_failures", 3)
+	require.NoError(t, err)
+	snapshotAccount := Account{
+		ID:                      85,
+		Platform:                PlatformOpenAI,
+		Type:                    AccountTypeAPIKey,
+		Status:                  StatusActive,
+		Schedulable:             true,
+		TempUnschedulableUntil:  &future,
+		TempUnschedulableReason: reason,
+	}
+
+	repo := &startupRehydrateRepoStub{tempUnschedAccounts: []Account{snapshotAccount}, getErr: ErrAccountNotFound}
+	snapshot := &SchedulerSnapshotService{cache: &openAISnapshotCacheStub{accountsByID: map[int64]*Account{85: &snapshotAccount}}, accountRepo: repo, cfg: &config.Config{}}
+	probe := &openAIAccountProbe{
+		service: &OpenAIGatewayService{accountRepo: repo, schedulerSnapshot: snapshot, cfg: &config.Config{}},
+		stats:   newOpenAIAccountRuntimeStats(),
+		stopCh:  make(chan struct{}),
+	}
+	defer probe.stop()
+
+	probe.bootstrapRegister(&snapshotAccount, now, 2*time.Minute)
+	value, ok := probe.entries.Load(int64(85))
+	require.True(t, ok)
+	entry := value.(*openAIAccountProbeEntry)
+	entry.dbFlagSet.Store(true)
+	entry.penalizedAt = now
+
+	probe.tick()
+
+	_, stillPresent := probe.entries.Load(int64(85))
+	require.False(t, stillPresent, "startup-rehydrated entry should be deleted when manual recovery DB truth reports account not found")
+}
+
+func TestProbe_Tick_DoesNotTreatRuntimeDBFlagEntryAsManualRecoveryWhenSnapshotIsStale(t *testing.T) {
+	now := time.Now()
+	future := now.Add(10 * time.Minute)
+	reason, err := buildLayeredProbeTempUnschedReason("consecutive_failures", 3)
+	require.NoError(t, err)
+	fresh := Account{
+		ID:                      86,
+		Platform:                PlatformOpenAI,
+		Type:                    AccountTypeAPIKey,
+		Status:                  StatusActive,
+		Schedulable:             true,
+		TempUnschedulableUntil:  &future,
+		TempUnschedulableReason: reason,
+	}
+	stale := fresh
+	stale.TempUnschedulableUntil = nil
+	stale.TempUnschedulableReason = ""
+
+	repo := &startupRehydrateRepoStub{tempUnschedAccounts: []Account{fresh}}
+	snapshot := &SchedulerSnapshotService{cache: &openAISnapshotCacheStub{accountsByID: map[int64]*Account{86: &stale}}, accountRepo: repo, cfg: &config.Config{}}
+	probe := &openAIAccountProbe{
+		service: &OpenAIGatewayService{accountRepo: repo, schedulerSnapshot: snapshot, cfg: &config.Config{}},
+		stats:   newOpenAIAccountRuntimeStats(),
+		stopCh:  make(chan struct{}),
+	}
+	defer probe.stop()
+
+	entry := &openAIAccountProbeEntry{accountID: 86, penalizedAt: now}
+	entry.dbFlagSet.Store(true)
+	entry.errorPenalized.Store(true)
+	probe.entries.Store(int64(86), entry)
+
+	probe.tick()
+
+	value, stillPresent := probe.entries.Load(int64(86))
+	require.True(t, stillPresent, "runtime db-flagged entry should not be treated as manual recovery from stale snapshot")
+	remaining := value.(*openAIAccountProbeEntry)
+	require.True(t, remaining.dbFlagSet.Load())
+	require.NotNil(t, repo.tempUnschedAccounts[0].TempUnschedulableUntil, "DB temp-unsched flag should remain intact")
+}
+
+func TestProbe_Tick_DoesNotDeleteRuntimeDBFlagEntryWhenSnapshotStaleSchedulableFalse(t *testing.T) {
+	now := time.Now()
+	future := now.Add(10 * time.Minute)
+	reason, err := buildLayeredProbeTempUnschedReason("consecutive_failures", 3)
+	require.NoError(t, err)
+	fresh := Account{
+		ID:                      87,
+		Platform:                PlatformOpenAI,
+		Type:                    AccountTypeAPIKey,
+		Status:                  StatusActive,
+		Schedulable:             true,
+		TempUnschedulableUntil:  &future,
+		TempUnschedulableReason: reason,
+	}
+	stale := fresh
+	stale.Schedulable = false
+
+	repo := &startupRehydrateRepoStub{tempUnschedAccounts: []Account{fresh}}
+	snapshot := &SchedulerSnapshotService{cache: &openAISnapshotCacheStub{accountsByID: map[int64]*Account{87: &stale}}, accountRepo: repo, cfg: &config.Config{}}
+	probe := &openAIAccountProbe{
+		service: &OpenAIGatewayService{accountRepo: repo, schedulerSnapshot: snapshot, cfg: &config.Config{}},
+		stats:   newOpenAIAccountRuntimeStats(),
+		stopCh:  make(chan struct{}),
+	}
+	defer probe.stop()
+
+	entry := &openAIAccountProbeEntry{accountID: 87, penalizedAt: now}
+	entry.dbFlagSet.Store(true)
+	entry.errorPenalized.Store(true)
+	probe.entries.Store(int64(87), entry)
+
+	probe.tick()
+
+	_, stillPresent := probe.entries.Load(int64(87))
+	require.True(t, stillPresent, "runtime db-flagged entry should not be deleted when snapshot has stale schedulable=false")
+}
+
+func TestProbe_Tick_DoesNotDeleteRuntimeDBFlagEntryWhenSnapshotStaleNonOpenAI(t *testing.T) {
+	now := time.Now()
+	future := now.Add(10 * time.Minute)
+	reason, err := buildLayeredProbeTempUnschedReason("consecutive_failures", 3)
+	require.NoError(t, err)
+	fresh := Account{
+		ID:                      88,
+		Platform:                PlatformOpenAI,
+		Type:                    AccountTypeAPIKey,
+		Status:                  StatusActive,
+		Schedulable:             true,
+		TempUnschedulableUntil:  &future,
+		TempUnschedulableReason: reason,
+	}
+	stale := fresh
+	stale.Platform = PlatformGemini
+
+	repo := &startupRehydrateRepoStub{tempUnschedAccounts: []Account{fresh}}
+	snapshot := &SchedulerSnapshotService{cache: &openAISnapshotCacheStub{accountsByID: map[int64]*Account{88: &stale}}, accountRepo: repo, cfg: &config.Config{}}
+	probe := &openAIAccountProbe{
+		service: &OpenAIGatewayService{accountRepo: repo, schedulerSnapshot: snapshot, cfg: &config.Config{}},
+		stats:   newOpenAIAccountRuntimeStats(),
+		stopCh:  make(chan struct{}),
+	}
+	defer probe.stop()
+
+	entry := &openAIAccountProbeEntry{accountID: 88, penalizedAt: now}
+	entry.dbFlagSet.Store(true)
+	entry.errorPenalized.Store(true)
+	probe.entries.Store(int64(88), entry)
+
+	probe.tick()
+
+	_, stillPresent := probe.entries.Load(int64(88))
+	require.True(t, stillPresent, "runtime db-flagged entry should not be deleted when snapshot has stale non-OpenAI platform")
 }
 
 func TestProbe_MarkPenalized_IsIdempotent(t *testing.T) {

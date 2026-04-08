@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
@@ -55,6 +56,89 @@ func TestLayered_PriorityDeterminism(t *testing.T) {
 			result.ReleaseFunc()
 		}
 	}
+}
+
+func TestLayeredScheduler_ConstructionDoesNotRehydrateTempUnschedulableAccounts(t *testing.T) {
+	future := time.Now().Add(10 * time.Minute)
+	reason, err := buildLayeredProbeTempUnschedReason("consecutive_failures", 3)
+	require.NoError(t, err)
+	repo := &startupRehydrateRepoStub{tempUnschedAccounts: []Account{{
+		ID:                      301,
+		Platform:                PlatformOpenAI,
+		Type:                    AccountTypeAPIKey,
+		Status:                  StatusActive,
+		Schedulable:             true,
+		TempUnschedulableUntil:  &future,
+		TempUnschedulableReason: reason,
+	}}}
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	svc := &OpenAIGatewayService{accountRepo: repo, cfg: cfg}
+
+	scheduler := svc.getOpenAIAccountScheduler()
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	require.NotNil(t, scheduler)
+	layered, ok := scheduler.(*layeredOpenAIAccountScheduler)
+	require.True(t, ok, "scheduler should be layered")
+	require.NotNil(t, layered.probe)
+	_, exists := layered.probe.entries.Load(int64(301))
+	require.False(t, exists, "scheduler construction must not implicitly rehydrate temp-unschedulable accounts")
+	require.Equal(t, 0, repo.listCalls, "scheduler construction must not query startup recovery state")
+}
+
+func TestLayeredScheduler_StartOpenAIBackgroundRecoveryRehydratesTempUnschedulableAccounts(t *testing.T) {
+	now := time.Now()
+	future := now.Add(10 * time.Minute)
+	cooldown := 60 * time.Second
+	reason, err := buildLayeredProbeTempUnschedReason("consecutive_failures", 3)
+	require.NoError(t, err)
+	repo := &startupRehydrateRepoStub{tempUnschedAccounts: []Account{{
+		ID:                      301,
+		Platform:                PlatformOpenAI,
+		Type:                    AccountTypeAPIKey,
+		Status:                  StatusActive,
+		Schedulable:             true,
+		TempUnschedulableUntil:  &future,
+		TempUnschedulableReason: reason,
+	}}}
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	svc := &OpenAIGatewayService{accountRepo: repo, cfg: cfg}
+
+	scheduler := svc.getOpenAIAccountScheduler()
+	svc.StartOpenAIBackgroundRecovery()
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	require.NotNil(t, scheduler)
+	layered, ok := scheduler.(*layeredOpenAIAccountScheduler)
+	require.True(t, ok, "scheduler should be layered")
+	value, exists := layered.probe.entries.Load(int64(301))
+	require.True(t, exists, "explicit startup recovery should rehydrate temp-unschedulable accounts into probe entries")
+	entry := value.(*openAIAccountProbeEntry)
+	require.True(t, entry.dbFlagSet.Load(), "startup bootstrap entry should preserve db flag state")
+	require.True(t, entry.startupRehydrated.Load(), "startup bootstrap entry should remember it was rehydrated from DB truth")
+	require.False(t, entry.errorPenalized.Load(), "startup bootstrap entry should not set error penalty")
+	require.False(t, entry.ttftPenalized.Load(), "startup bootstrap entry should not set ttft penalty")
+	require.GreaterOrEqual(t, now.Sub(entry.penalizedAt), cooldown, "startup bootstrap entry should be immediately eligible for next tick")
+	require.Equal(t, 1, repo.listCalls, "explicit startup recovery should query temp-unschedulable accounts exactly once")
+}
+
+func TestLayeredScheduler_StartOpenAIBackgroundRecoveryUsesTimeoutContext(t *testing.T) {
+	repo := &startupRehydrateRepoStub{requireDeadline: true}
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	svc := &OpenAIGatewayService{accountRepo: repo, cfg: cfg}
+
+	scheduler := svc.getOpenAIAccountScheduler()
+	svc.StartOpenAIBackgroundRecovery()
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	require.NotNil(t, scheduler)
+	_, ok := scheduler.(*layeredOpenAIAccountScheduler)
+	require.True(t, ok, "scheduler should be layered")
+	require.Equal(t, 1, repo.listCalls, "explicit startup recovery should attempt temp-unschedulable rehydrate with timeout context")
+	require.True(t, repo.sawDeadline, "explicit startup recovery should use a timeout context")
 }
 
 // TestLayered_TTFTPenaltyPushesToLowerPriority verifies that an account with

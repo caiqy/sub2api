@@ -138,6 +138,9 @@ func (m *passthroughAdminAccountRepo) ListSchedulableUngroupedByPlatform(ctx con
 func (m *passthroughAdminAccountRepo) ListSchedulableUngroupedByPlatforms(ctx context.Context, platforms []string) ([]Account, error) {
 	return nil, nil
 }
+func (m *passthroughAdminAccountRepo) ListTempUnschedulableByPlatform(ctx context.Context, platform string, now time.Time) ([]Account, error) {
+	return nil, nil
+}
 func (m *passthroughAdminAccountRepo) SetRateLimited(ctx context.Context, id int64, resetAt time.Time) error {
 	return nil
 }

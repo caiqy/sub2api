@@ -174,6 +174,15 @@ func (m *mockAccountRepoForPlatform) ListSchedulableUngroupedByPlatform(ctx cont
 func (m *mockAccountRepoForPlatform) ListSchedulableUngroupedByPlatforms(ctx context.Context, platforms []string) ([]Account, error) {
 	return m.ListSchedulableByPlatforms(ctx, platforms)
 }
+func (m *mockAccountRepoForPlatform) ListTempUnschedulableByPlatform(ctx context.Context, platform string, now time.Time) ([]Account, error) {
+	var result []Account
+	for _, acc := range m.accounts {
+		if acc.Platform == platform && acc.TempUnschedulableUntil != nil && acc.TempUnschedulableUntil.After(now) {
+			result = append(result, acc)
+		}
+	}
+	return result, nil
+}
 func (m *mockAccountRepoForPlatform) SetRateLimited(ctx context.Context, id int64, resetAt time.Time) error {
 	return nil
 }

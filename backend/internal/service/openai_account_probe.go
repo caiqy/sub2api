@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -24,19 +25,20 @@ const (
 
 // openAIAccountProbeEntry 记录一个被惩罚账号的探活状态。
 type openAIAccountProbeEntry struct {
-	accountID       int64
-	penalizedAt     time.Time
-	stateMu         sync.Mutex
-	consecutiveFail atomic.Int32
-	dbFlagSet       atomic.Bool
-	ignoreResults   atomic.Bool
-	probing         atomic.Bool
-	errorPenalized  atomic.Bool
-	ttftPenalized   atomic.Bool
-	groupIDValue    atomic.Int64
-	groupIDSet      atomic.Bool
-	lastProbeTTFTMs atomic.Int64
-	lastProbeAtUnix atomic.Int64
+	accountID         int64
+	penalizedAt       time.Time
+	stateMu           sync.Mutex
+	startupRehydrated atomic.Bool
+	consecutiveFail   atomic.Int32
+	dbFlagSet         atomic.Bool
+	ignoreResults     atomic.Bool
+	probing           atomic.Bool
+	errorPenalized    atomic.Bool
+	ttftPenalized     atomic.Bool
+	groupIDValue      atomic.Int64
+	groupIDSet        atomic.Bool
+	lastProbeTTFTMs   atomic.Int64
+	lastProbeAtUnix   atomic.Int64
 }
 
 // openAIAccountProbe 异步探活：对被分层调度器惩罚的账号发送轻量级请求，
@@ -51,6 +53,42 @@ type openAIAccountProbe struct {
 	cancel     context.CancelFunc
 	wg         sync.WaitGroup
 	stopped    atomic.Bool
+}
+
+type layeredProbeTempUnschedReason struct {
+	Version             int    `json:"version"`
+	Source              string `json:"source"`
+	Kind                string `json:"kind"`
+	ConsecutiveFailures int    `json:"consecutive_failures,omitempty"`
+}
+
+func buildLayeredProbeTempUnschedReason(kind string, consecutiveFailures int) (string, error) {
+	reason := layeredProbeTempUnschedReason{
+		Version:             1,
+		Source:              "layered_probe",
+		Kind:                kind,
+		ConsecutiveFailures: consecutiveFailures,
+	}
+	raw, err := json.Marshal(reason)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+func parseTempUnschedReason(raw string) (layeredProbeTempUnschedReason, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return layeredProbeTempUnschedReason{}, false
+	}
+	var parsed layeredProbeTempUnschedReason
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		return layeredProbeTempUnschedReason{}, false
+	}
+	if parsed.Source == "" {
+		return layeredProbeTempUnschedReason{}, false
+	}
+	return parsed, true
 }
 
 func newOpenAIAccountProbe(service *OpenAIGatewayService, stats *openAIAccountRuntimeStats) *openAIAccountProbe {
@@ -94,6 +132,68 @@ func (p *openAIAccountProbe) markPenalized(accountID int64, groupID *int64, erro
 	if entry.penalizedAt.IsZero() {
 		entry.penalizedAt = time.Now()
 	}
+}
+
+func (p *openAIAccountProbe) bootstrapRegister(account *Account, now time.Time, cooldown time.Duration) {
+	if p == nil || account == nil || account.ID <= 0 || p.stopped.Load() {
+		return
+	}
+	entryAny, _ := p.entries.LoadOrStore(account.ID, &openAIAccountProbeEntry{accountID: account.ID})
+	entry, _ := entryAny.(*openAIAccountProbeEntry)
+	if entry == nil {
+		return
+	}
+	entry.stateMu.Lock()
+	defer entry.stateMu.Unlock()
+	entry.dbFlagSet.Store(true)
+	entry.startupRehydrated.Store(true)
+	entry.errorPenalized.Store(false)
+	entry.ttftPenalized.Store(false)
+	entry.ignoreResults.Store(false)
+	entry.consecutiveFail.Store(0)
+	if gid := probeAccountGroupID(account); gid != nil && *gid > 0 {
+		entry.groupIDValue.Store(*gid)
+		entry.groupIDSet.Store(true)
+	}
+	if cooldown <= 0 {
+		cooldown = 60 * time.Second
+	}
+	entry.penalizedAt = now.Add(-cooldown)
+}
+
+func (p *openAIAccountProbe) rehydrateTempUnschedulableEntries(ctx context.Context, now time.Time) error {
+	if p == nil || p.service == nil || p.service.accountRepo == nil {
+		return nil
+	}
+	accounts, err := p.service.accountRepo.ListTempUnschedulableByPlatform(ctx, PlatformOpenAI, now)
+	if err != nil {
+		return err
+	}
+	cooldown := time.Duration(p.service.openAIWSSchedulerLayeredConfig().ProbeCooldownSeconds) * time.Second
+	hydrated := 0
+	skipped := 0
+	for i := range accounts {
+		account := &accounts[i]
+		parsed, ok := parseTempUnschedReason(account.TempUnschedulableReason)
+		if !ok || parsed.Source != "layered_probe" {
+			skipped++
+			slog.Debug("probe: startup rehydrate skipped account", "account_id", account.ID, "reason", "reason_source_not_layered_probe")
+			continue
+		}
+		if !account.IsOpenAI() || !account.IsActive() || !account.Schedulable {
+			skipped++
+			slog.Debug("probe: startup rehydrate skipped account", "account_id", account.ID, "reason", "not_bootstrap_eligible")
+			continue
+		}
+		if account.TempUnschedulableUntil == nil || !account.TempUnschedulableUntil.After(now) {
+			skipped++
+			continue
+		}
+		p.bootstrapRegister(account, now, cooldown)
+		hydrated++
+	}
+	slog.Info("probe: startup rehydrate completed", "scanned", len(accounts), "hydrated", hydrated, "skipped", skipped)
+	return nil
 }
 
 // clearPenaltyReasons 清除 entry 的惩罚原因；仅在无 DB 标记且无探活进行中时移除 entry。
@@ -188,8 +288,15 @@ func (p *openAIAccountProbe) tick() {
 			return true
 		}
 
+		stateCheckCtx, cancel := p.stateCheckContext()
+		defer cancel()
+
 		// 检查账号是否还存在且为 OpenAI
-		account, err := p.service.getSchedulableAccount(context.Background(), accountID)
+		account, err := p.service.getSchedulableAccount(stateCheckCtx, accountID)
+		account, err, keepEntry := p.loadDBFlaggedAccountForStateCheck(stateCheckCtx, accountID, account, err, entry)
+		if keepEntry {
+			return true
+		}
 		if err != nil || account == nil || !account.IsOpenAI() {
 			p.entries.Delete(accountID)
 			return true
@@ -201,7 +308,7 @@ func (p *openAIAccountProbe) tick() {
 		}
 		// 如果 dbFlagSet 为 true 但 TempUnschedulableUntil 已被清除（管理员手动恢复），则恢复账号
 		if entry.dbFlagSet.Load() {
-			if account.TempUnschedulableUntil == nil || account.TempUnschedulableUntil.Before(now) {
+			if p.shouldTreatAsManualRecovery(stateCheckCtx, accountID, account, entry, now) {
 				p.applyManualRecovery(accountID, entry)
 				return true
 			}
@@ -234,6 +341,54 @@ func (p *openAIAccountProbe) tick() {
 		}()
 		return true
 	})
+}
+
+func (p *openAIAccountProbe) stateCheckContext() (context.Context, context.CancelFunc) {
+	timeout := layeredSchedulerStartupRehydrateTimeout
+	if timeout <= 0 {
+		return context.WithCancel(context.Background())
+	}
+	return context.WithTimeout(context.Background(), timeout)
+}
+
+func (p *openAIAccountProbe) loadDBFlaggedAccountForStateCheck(ctx context.Context, accountID int64, account *Account, currentErr error, entry *openAIAccountProbeEntry) (*Account, error, bool) {
+	if entry == nil || !entry.dbFlagSet.Load() || p == nil || p.service == nil || p.service.accountRepo == nil {
+		return account, currentErr, false
+	}
+	if currentErr == nil && account != nil && account.IsOpenAI() && account.Schedulable {
+		return account, nil, false
+	}
+	dbAccount, err := p.service.accountRepo.GetByID(ctx, accountID)
+	if err != nil {
+		if errors.Is(err, ErrAccountNotFound) {
+			return nil, err, false
+		}
+		return account, currentErr, true
+	}
+	if dbAccount == nil {
+		return account, currentErr, false
+	}
+	return dbAccount, nil, false
+}
+
+func (p *openAIAccountProbe) shouldTreatAsManualRecovery(ctx context.Context, accountID int64, account *Account, entry *openAIAccountProbeEntry, now time.Time) bool {
+	if entry == nil {
+		return account == nil || account.TempUnschedulableUntil == nil || account.TempUnschedulableUntil.Before(now)
+	}
+	if p == nil || p.service == nil || p.service.accountRepo == nil {
+		return account == nil || account.TempUnschedulableUntil == nil || account.TempUnschedulableUntil.Before(now)
+	}
+	dbAccount, err := p.service.accountRepo.GetByID(ctx, accountID)
+	if err != nil {
+		if errors.Is(err, ErrAccountNotFound) {
+			return true
+		}
+		return false
+	}
+	if dbAccount == nil {
+		return false
+	}
+	return dbAccount.TempUnschedulableUntil == nil || dbAccount.TempUnschedulableUntil.Before(now)
 }
 
 // probeAccount 对单个账号执行一次探活请求。
@@ -733,7 +888,14 @@ func (p *openAIAccountProbe) setTempUnschedulable(accountID int64, entry *openAI
 		return
 	}
 	until := time.Now().Add(probePermanentBlockDuration)
-	reason := "layered scheduler probe: consecutive failures exceeded threshold"
+	consecutiveFailures := 0
+	if entry != nil {
+		consecutiveFailures = int(entry.consecutiveFail.Load())
+	}
+	reason, err := buildLayeredProbeTempUnschedReason("consecutive_failures", consecutiveFailures)
+	if err != nil {
+		reason = "layered scheduler probe: consecutive failures exceeded threshold"
+	}
 	ctx := p.ctx
 	if ctx == nil {
 		ctx = context.Background()

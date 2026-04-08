@@ -614,6 +614,67 @@ func (s *AccountRepoSuite) TestTempUnschedulableFieldsLoadedByGetByIDAndGetByIDs
 	s.Require().Equal("", cleared.TempUnschedulableReason)
 }
 
+func (s *AccountRepoSuite) TestListTempUnschedulableByPlatform_ReturnsOpenAIAccountsWithFutureUntil() {
+	now := time.Now().UTC()
+	future := now.Add(10 * time.Minute)
+	past := now.Add(-10 * time.Minute)
+
+	openAIFuture := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:     "openai-future",
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeAPIKey,
+	})
+	openAIFutureUnschedulable := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:        "openai-future-unschedulable",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeAPIKey,
+		Schedulable: false,
+	})
+	openAIFutureInactive := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:     "openai-future-inactive",
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeAPIKey,
+		Status:   service.StatusDisabled,
+	})
+	openAIExactNow := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:     "openai-exact-now",
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeAPIKey,
+	})
+	openAIPast := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:     "openai-past",
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeAPIKey,
+	})
+	geminiFuture := mustCreateAccount(s.T(), s.client, &service.Account{
+		Name:     "gemini-future",
+		Platform: service.PlatformGemini,
+		Type:     service.AccountTypeAPIKey,
+	})
+
+	s.Require().NoError(s.repo.SetTempUnschedulable(s.ctx, openAIFuture.ID, future, "probe"))
+	s.Require().NoError(s.repo.SetTempUnschedulable(s.ctx, openAIFutureUnschedulable.ID, future, "probe"))
+	s.Require().NoError(s.repo.SetTempUnschedulable(s.ctx, openAIFutureInactive.ID, future, "probe"))
+	s.Require().NoError(s.repo.SetTempUnschedulable(s.ctx, openAIExactNow.ID, now, "probe"))
+	s.Require().NoError(s.repo.SetTempUnschedulable(s.ctx, openAIPast.ID, past, "probe"))
+	s.Require().NoError(s.repo.SetTempUnschedulable(s.ctx, geminiFuture.ID, future, "probe"))
+
+	accounts, err := s.repo.ListTempUnschedulableByPlatform(s.ctx, service.PlatformOpenAI, now)
+	s.Require().NoError(err)
+	s.Require().Len(accounts, 3)
+
+	ids := make([]int64, 0, len(accounts))
+	for _, account := range accounts {
+		ids = append(ids, account.ID)
+	}
+	s.Require().Contains(ids, openAIFuture.ID)
+	s.Require().Contains(ids, openAIFutureUnschedulable.ID)
+	s.Require().Contains(ids, openAIFutureInactive.ID)
+	s.Require().NotContains(ids, openAIExactNow.ID)
+	s.Require().NotContains(ids, openAIPast.ID)
+	s.Require().NotContains(ids, geminiFuture.ID)
+}
+
 // --- UpdateLastUsed ---
 
 func (s *AccountRepoSuite) TestUpdateLastUsed() {

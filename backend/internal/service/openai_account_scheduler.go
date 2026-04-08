@@ -816,7 +816,13 @@ func (s *defaultOpenAIAccountScheduler) SnapshotMetrics() OpenAIAccountScheduler
 // StopOpenAIAccountScheduler stops the scheduler if it has background resources (e.g., probe goroutine).
 // Should be called during service shutdown.
 func (s *OpenAIGatewayService) StopOpenAIAccountScheduler() {
-	if s == nil || s.openaiScheduler == nil {
+	if s == nil {
+		return
+	}
+	if s.schedulerSnapshot != nil {
+		s.schedulerSnapshot.SetOpenAIAccountChangeHandler(nil)
+	}
+	if s.openaiScheduler == nil {
 		return
 	}
 	type stoppable interface {

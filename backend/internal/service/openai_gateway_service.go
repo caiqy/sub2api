@@ -406,6 +406,58 @@ func (s *OpenAIGatewayService) getCodexSnapshotThrottle() *accountWriteThrottle 
 	return defaultOpenAICodexSnapshotPersistThrottle
 }
 
+func (s *OpenAIGatewayService) StartOpenAIBackgroundRecovery() {
+	if s == nil {
+		return
+	}
+	if s.schedulerSnapshot != nil {
+		s.schedulerSnapshot.SetOpenAIAccountChangeHandler(func(ctx context.Context, accountID int64) {
+			s.ReattachLayeredProbeTempUnschedAccount(ctx, accountID)
+		})
+	}
+	scheduler := s.getOpenAIAccountScheduler()
+	layered, ok := scheduler.(*layeredOpenAIAccountScheduler)
+	if !ok || layered == nil || layered.probe == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), layeredSchedulerStartupRehydrateTimeout)
+	defer cancel()
+	if err := layered.probe.rehydrateTempUnschedulableEntries(ctx, time.Now()); err != nil {
+		logger.LegacyPrintf("service.openai_gateway", "Warning: startup rehydrate failed: %v", err)
+	}
+}
+
+func (s *OpenAIGatewayService) ReattachLayeredProbeTempUnschedAccount(ctx context.Context, accountID int64) {
+	if s == nil || accountID <= 0 || s.accountRepo == nil {
+		return
+	}
+	scheduler := s.getOpenAIAccountScheduler()
+	layered, ok := scheduler.(*layeredOpenAIAccountScheduler)
+	if !ok || layered == nil || layered.probe == nil {
+		return
+	}
+	if _, exists := layered.probe.entries.Load(accountID); exists {
+		return
+	}
+	account, err := s.accountRepo.GetByID(ctx, accountID)
+	if err != nil || account == nil {
+		return
+	}
+	if !account.IsOpenAI() || !account.IsActive() || !account.Schedulable {
+		return
+	}
+	now := time.Now()
+	if account.TempUnschedulableUntil == nil || !account.TempUnschedulableUntil.After(now) {
+		return
+	}
+	parsed, ok := parseTempUnschedReason(account.TempUnschedulableReason)
+	if !ok || parsed.Source != "layered_probe" {
+		return
+	}
+	cooldown := time.Duration(s.openAIWSSchedulerLayeredConfig().ProbeCooldownSeconds) * time.Second
+	layered.probe.bootstrapRegister(account, now, cooldown)
+}
+
 func (s *OpenAIGatewayService) billingDeps() *billingDeps {
 	return &billingDeps{
 		accountRepo:         s.accountRepo,

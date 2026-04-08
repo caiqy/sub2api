@@ -104,6 +104,10 @@ func (s *stubAntigravityAccountRepo) UpdateExtra(ctx context.Context, id int64, 
 	return nil
 }
 
+func (s *stubAntigravityAccountRepo) ListTempUnschedulableByPlatform(ctx context.Context, platform string, now time.Time) ([]Account, error) {
+	return nil, nil
+}
+
 func TestAntigravityRetryLoop_NoURLFallback_UsesConfiguredBaseURL(t *testing.T) {
 	t.Setenv(antigravityForwardBaseURLEnv, "")
 

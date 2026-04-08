@@ -61,6 +61,13 @@ type snapshotUpdateAccountRepo struct {
 	updateExtraCalls chan map[string]any
 }
 
+type startupRecoveryRepoStub struct {
+	stubOpenAIAccountRepo
+	tempUnschedAccounts []Account
+	listCalls           int
+	getByIDCalls        int
+}
+
 func (r *snapshotUpdateAccountRepo) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
 	if r.updateExtraCalls != nil {
 		copied := make(map[string]any, len(updates))
@@ -104,6 +111,168 @@ func (r stubOpenAIAccountRepo) ListSchedulableByPlatform(ctx context.Context, pl
 func (r stubOpenAIAccountRepo) ListSchedulableUngroupedByPlatform(ctx context.Context, platform string) ([]Account, error) {
 	return r.ListSchedulableByPlatform(ctx, platform)
 }
+
+func (r stubOpenAIAccountRepo) ListTempUnschedulableByPlatform(ctx context.Context, platform string, now time.Time) ([]Account, error) {
+	var result []Account
+	for _, acc := range r.accounts {
+		if acc.Platform == platform && acc.TempUnschedulableUntil != nil && acc.TempUnschedulableUntil.After(now) {
+			result = append(result, acc)
+		}
+	}
+	return result, nil
+}
+
+func (r *startupRecoveryRepoStub) ListTempUnschedulableByPlatform(ctx context.Context, platform string, now time.Time) ([]Account, error) {
+	r.listCalls++
+	var result []Account
+	for _, acc := range r.tempUnschedAccounts {
+		if acc.Platform == platform && acc.TempUnschedulableUntil != nil && acc.TempUnschedulableUntil.After(now) {
+			result = append(result, acc)
+		}
+	}
+	return result, nil
+}
+
+func (r *startupRecoveryRepoStub) GetByID(ctx context.Context, id int64) (*Account, error) {
+	r.getByIDCalls++
+	for i := range r.tempUnschedAccounts {
+		if r.tempUnschedAccounts[i].ID == id {
+			cloned := r.tempUnschedAccounts[i]
+			return &cloned, nil
+		}
+	}
+	return r.stubOpenAIAccountRepo.GetByID(ctx, id)
+}
+
+func TestOpenAIGatewayService_StartOpenAIBackgroundRecovery_RehydratesWithoutFirstRequest(t *testing.T) {
+	future := time.Now().Add(10 * time.Minute)
+	reason, err := buildLayeredProbeTempUnschedReason("consecutive_failures", 3)
+	require.NoError(t, err)
+	repo := &startupRecoveryRepoStub{tempUnschedAccounts: []Account{{
+		ID:                      51,
+		Platform:                PlatformOpenAI,
+		Type:                    AccountTypeAPIKey,
+		Status:                  StatusActive,
+		Schedulable:             true,
+		TempUnschedulableUntil:  &future,
+		TempUnschedulableReason: reason,
+	}}}
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	svc := &OpenAIGatewayService{accountRepo: repo, cfg: cfg}
+
+	svc.StartOpenAIBackgroundRecovery()
+	scheduler := svc.getOpenAIAccountScheduler()
+	require.NotNil(t, scheduler)
+	layered := scheduler.(*layeredOpenAIAccountScheduler)
+	_, ok := layered.probe.entries.Load(int64(51))
+	require.True(t, ok)
+	require.Equal(t, 1, repo.listCalls)
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+}
+
+func TestOpenAIGatewayService_ReattachesLayeredProbeTempUnschedAccountOnRuntimeAccountChange(t *testing.T) {
+	now := time.Now()
+	future := now.Add(10 * time.Minute)
+	reason, err := buildLayeredProbeTempUnschedReason("consecutive_failures", 3)
+	require.NoError(t, err)
+
+	repo := &startupRecoveryRepoStub{tempUnschedAccounts: []Account{{
+		ID:                      52,
+		Platform:                PlatformOpenAI,
+		Type:                    AccountTypeAPIKey,
+		Status:                  StatusActive,
+		Schedulable:             false,
+		TempUnschedulableUntil:  &future,
+		TempUnschedulableReason: reason,
+	}}}
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	snapshot := &SchedulerSnapshotService{}
+	svc := &OpenAIGatewayService{accountRepo: repo, cfg: cfg, schedulerSnapshot: snapshot}
+
+	svc.StartOpenAIBackgroundRecovery()
+	scheduler := svc.getOpenAIAccountScheduler()
+	layered := scheduler.(*layeredOpenAIAccountScheduler)
+	_, presentBefore := layered.probe.entries.Load(int64(52))
+	require.False(t, presentBefore, "startup should skip non-schedulable layered-probe temp account")
+
+	repo.tempUnschedAccounts[0].Schedulable = true
+	snapshot.handleAccountEvent(context.Background(), ptrInt64(52), nil)
+
+	_, presentAfter := layered.probe.entries.Load(int64(52))
+	require.True(t, presentAfter, "runtime account change should reattach layered-probe temp account when it becomes schedulable")
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+}
+
+func TestOpenAIGatewayService_RuntimeAccountChange_DoesNotRebootstrapAlreadyAttachedLayeredProbeTempAccount(t *testing.T) {
+	now := time.Now()
+	future := now.Add(10 * time.Minute)
+	reason, err := buildLayeredProbeTempUnschedReason("consecutive_failures", 3)
+	require.NoError(t, err)
+
+	repo := &startupRecoveryRepoStub{tempUnschedAccounts: []Account{{
+		ID:                      53,
+		Platform:                PlatformOpenAI,
+		Type:                    AccountTypeAPIKey,
+		Status:                  StatusActive,
+		Schedulable:             false,
+		TempUnschedulableUntil:  &future,
+		TempUnschedulableReason: reason,
+	}}}
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	snapshot := &SchedulerSnapshotService{}
+	svc := &OpenAIGatewayService{accountRepo: repo, cfg: cfg, schedulerSnapshot: snapshot}
+
+	svc.StartOpenAIBackgroundRecovery()
+	scheduler := svc.getOpenAIAccountScheduler()
+	layered := scheduler.(*layeredOpenAIAccountScheduler)
+
+	repo.tempUnschedAccounts[0].Schedulable = true
+	snapshot.handleAccountEvent(context.Background(), ptrInt64(53), nil)
+
+	value, present := layered.probe.entries.Load(int64(53))
+	require.True(t, present)
+	entry := value.(*openAIAccountProbeEntry)
+	entry.consecutiveFail.Store(9)
+
+	snapshot.handleAccountEvent(context.Background(), ptrInt64(53), nil)
+
+	require.EqualValues(t, 9, entry.consecutiveFail.Load(), "runtime reattach should only happen for accounts that newly become eligible, not already-attached entries")
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+}
+
+func TestOpenAIGatewayService_StopOpenAIAccountScheduler_UnregistersRuntimeReattachHandler(t *testing.T) {
+	now := time.Now()
+	future := now.Add(10 * time.Minute)
+	reason, err := buildLayeredProbeTempUnschedReason("consecutive_failures", 3)
+	require.NoError(t, err)
+
+	repo := &startupRecoveryRepoStub{tempUnschedAccounts: []Account{{
+		ID:                      54,
+		Platform:                PlatformOpenAI,
+		Type:                    AccountTypeAPIKey,
+		Status:                  StatusActive,
+		Schedulable:             false,
+		TempUnschedulableUntil:  &future,
+		TempUnschedulableReason: reason,
+	}}}
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	snapshot := &SchedulerSnapshotService{}
+	svc := &OpenAIGatewayService{accountRepo: repo, cfg: cfg, schedulerSnapshot: snapshot}
+
+	svc.StartOpenAIBackgroundRecovery()
+	svc.StopOpenAIAccountScheduler()
+
+	repo.tempUnschedAccounts[0].Schedulable = true
+	snapshot.handleAccountEvent(context.Background(), ptrInt64(54), nil)
+
+	require.Equal(t, 0, repo.getByIDCalls, "stopping the scheduler should unregister runtime reattach handler")
+}
+
+func ptrInt64(v int64) *int64 { return &v }
 
 type stubConcurrencyCache struct {
 	ConcurrencyCache

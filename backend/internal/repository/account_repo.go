@@ -938,6 +938,20 @@ func (r *accountRepository) ListSchedulableUngroupedByPlatforms(ctx context.Cont
 	return r.accountsToService(ctx, accounts)
 }
 
+func (r *accountRepository) ListTempUnschedulableByPlatform(ctx context.Context, platform string, now time.Time) ([]service.Account, error) {
+	accounts, err := r.client.Account.Query().
+		Where(
+			dbaccount.PlatformEQ(platform),
+			dbaccount.TempUnschedulableUntilGT(now),
+		).
+		Order(dbent.Asc(dbaccount.FieldPriority)).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return r.accountsToService(ctx, accounts)
+}
+
 func (r *accountRepository) ListSchedulableByGroupIDAndPlatforms(ctx context.Context, groupID int64, platforms []string) ([]service.Account, error) {
 	if len(platforms) == 0 {
 		return nil, nil

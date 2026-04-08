@@ -21,17 +21,40 @@ var (
 const outboxEventTimeout = 2 * time.Minute
 
 type SchedulerSnapshotService struct {
-	cache         SchedulerCache
-	outboxRepo    SchedulerOutboxRepository
-	accountRepo   AccountRepository
-	groupRepo     GroupRepository
-	cfg           *config.Config
-	stopCh        chan struct{}
-	stopOnce      sync.Once
-	wg            sync.WaitGroup
-	fallbackLimit *fallbackLimiter
-	lagMu         sync.Mutex
-	lagFailures   int
+	cache                        SchedulerCache
+	outboxRepo                   SchedulerOutboxRepository
+	accountRepo                  AccountRepository
+	groupRepo                    GroupRepository
+	openAIAccountChangeHandlerMu sync.RWMutex
+	openAIAccountChangeHandler   func(context.Context, int64)
+	cfg                          *config.Config
+	stopCh                       chan struct{}
+	stopOnce                     sync.Once
+	wg                           sync.WaitGroup
+	fallbackLimit                *fallbackLimiter
+	lagMu                        sync.Mutex
+	lagFailures                  int
+}
+
+func (s *SchedulerSnapshotService) SetOpenAIAccountChangeHandler(handler func(context.Context, int64)) {
+	if s == nil {
+		return
+	}
+	s.openAIAccountChangeHandlerMu.Lock()
+	defer s.openAIAccountChangeHandlerMu.Unlock()
+	s.openAIAccountChangeHandler = handler
+}
+
+func (s *SchedulerSnapshotService) invokeOpenAIAccountChangeHandler(ctx context.Context, accountID int64) {
+	if s == nil || accountID <= 0 {
+		return
+	}
+	s.openAIAccountChangeHandlerMu.RLock()
+	handler := s.openAIAccountChangeHandler
+	s.openAIAccountChangeHandlerMu.RUnlock()
+	if handler != nil {
+		handler(ctx, accountID)
+	}
 }
 
 func NewSchedulerSnapshotService(
@@ -384,6 +407,7 @@ func (s *SchedulerSnapshotService) handleAccountEvent(ctx context.Context, accou
 		return nil
 	}
 	if s.accountRepo == nil {
+		s.invokeOpenAIAccountChangeHandler(ctx, *accountID)
 		return nil
 	}
 
@@ -412,7 +436,13 @@ func (s *SchedulerSnapshotService) handleAccountEvent(ctx context.Context, accou
 	if len(groupIDs) == 0 {
 		groupIDs = account.GroupIDs
 	}
-	return s.rebuildByAccount(ctx, account, groupIDs, "account_change")
+	if err := s.rebuildByAccount(ctx, account, groupIDs, "account_change"); err != nil {
+		return err
+	}
+	if account.IsOpenAI() {
+		s.invokeOpenAIAccountChangeHandler(ctx, account.ID)
+	}
+	return nil
 }
 
 func (s *SchedulerSnapshotService) handleGroupEvent(ctx context.Context, groupID *int64) error {
