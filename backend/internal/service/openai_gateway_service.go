@@ -1626,6 +1626,26 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 	return accounts, nil
 }
 
+func (s *OpenAIGatewayService) isAccountSchedulableForQuota(account *Account) bool {
+	if account == nil || !account.IsOpenAIApiKey() {
+		return true
+	}
+	return !account.IsQuotaExceeded()
+}
+
+func (s *OpenAIGatewayService) isSchedulableOpenAISelectionAccount(account *Account, requestedModel string) bool {
+	if account == nil || !account.IsSchedulable() || !account.IsOpenAI() {
+		return false
+	}
+	if !s.isAccountSchedulableForQuota(account) {
+		return false
+	}
+	if requestedModel != "" && !account.IsModelSupported(requestedModel) {
+		return false
+	}
+	return true
+}
+
 func (s *OpenAIGatewayService) tryAcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int) (*AcquireResult, error) {
 	if s.concurrencyService == nil {
 		return &AcquireResult{Acquired: true, ReleaseFunc: func() {}}, nil
@@ -1647,10 +1667,7 @@ func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccount(ctx context.
 		fresh = current
 	}
 
-	if !fresh.IsSchedulable() || !fresh.IsOpenAI() {
-		return nil
-	}
-	if requestedModel != "" && !fresh.IsModelSupported(requestedModel) {
+	if !s.isSchedulableOpenAISelectionAccount(fresh, requestedModel) {
 		return nil
 	}
 	return fresh
@@ -1660,19 +1677,16 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDB(ctx context.Co
 	if account == nil {
 		return nil
 	}
-	if s.schedulerSnapshot == nil || s.accountRepo == nil {
-		return account
+	latest := account
+	if s.schedulerSnapshot != nil && s.accountRepo != nil {
+		fetched, err := s.accountRepo.GetByID(ctx, account.ID)
+		if err != nil || fetched == nil {
+			return nil
+		}
+		latest = fetched
+		syncOpenAICodexRateLimitFromExtra(ctx, s.accountRepo, latest, time.Now())
 	}
-
-	latest, err := s.accountRepo.GetByID(ctx, account.ID)
-	if err != nil || latest == nil {
-		return nil
-	}
-	syncOpenAICodexRateLimitFromExtra(ctx, s.accountRepo, latest, time.Now())
-	if !latest.IsSchedulable() || !latest.IsOpenAI() {
-		return nil
-	}
-	if requestedModel != "" && !latest.IsModelSupported(requestedModel) {
+	if !s.isSchedulableOpenAISelectionAccount(latest, requestedModel) {
 		return nil
 	}
 	return latest
