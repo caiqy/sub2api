@@ -5,6 +5,38 @@
 import { config } from '@vue/test-utils'
 import { vi } from 'vitest'
 
+// Mock window.matchMedia (jsdom 默认不提供)
+if (typeof window !== 'undefined' && typeof window.matchMedia === 'undefined') {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => {
+      const minWidth = query.match(/min-width:\s*(\d+)px/)
+      const maxWidth = query.match(/max-width:\s*(\d+)px/)
+      const prefersDark = query.includes('prefers-color-scheme: dark')
+
+      let matches = false
+      if (minWidth) {
+        matches = window.innerWidth >= Number(minWidth[1])
+      } else if (maxWidth) {
+        matches = window.innerWidth <= Number(maxWidth[1])
+      } else if (prefersDark) {
+        matches = false
+      }
+
+      return {
+        matches,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn()
+      }
+    })
+  })
+}
+
 // Mock requestIdleCallback (Safari < 15 不支持)
 if (typeof globalThis.requestIdleCallback === 'undefined') {
   globalThis.requestIdleCallback = ((callback: IdleRequestCallback) => {

@@ -4,9 +4,18 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-const { createAccountMock, checkMixedChannelRiskMock, showErrorMock, showInfoMock } = vi.hoisted(() => ({
+const {
+  createAccountMock,
+  checkMixedChannelRiskMock,
+  getSettingsMock,
+  getWebSearchEmulationConfigMock,
+  showErrorMock,
+  showInfoMock
+} = vi.hoisted(() => ({
   createAccountMock: vi.fn(),
   checkMixedChannelRiskMock: vi.fn(),
+  getSettingsMock: vi.fn(),
+  getWebSearchEmulationConfigMock: vi.fn(),
   showErrorMock: vi.fn(),
   showInfoMock: vi.fn()
 }))
@@ -31,6 +40,10 @@ vi.mock('@/api/admin', () => ({
     accounts: {
       create: createAccountMock,
       checkMixedChannelRisk: checkMixedChannelRiskMock
+    },
+    settings: {
+      getSettings: getSettingsMock,
+      getWebSearchEmulationConfig: getWebSearchEmulationConfigMock
     }
   }
 }))
@@ -175,10 +188,32 @@ const QuotaLimitCardStub = defineComponent({
     'update:weeklyResetMode',
     'update:weeklyResetDay',
     'update:weeklyResetHour',
-    'update:resetTimezone'
+    'update:resetTimezone',
+    'update:quotaNotifyDailyEnabled',
+    'update:quotaNotifyDailyThreshold',
+    'update:quotaNotifyDailyThresholdType',
+    'update:quotaNotifyWeeklyEnabled',
+    'update:quotaNotifyWeeklyThreshold',
+    'update:quotaNotifyWeeklyThresholdType',
+    'update:quotaNotifyTotalEnabled',
+    'update:quotaNotifyTotalThreshold',
+    'update:quotaNotifyTotalThresholdType'
   ],
   template: '<div />'
 })
+
+function findWebSearchSelect(wrapper: ReturnType<typeof mountModal>) {
+  const select = wrapper.findAll('select').find((candidate) => {
+    const html = candidate.html()
+    return html.includes('value="default"') && html.includes('value="enabled"') && html.includes('value="disabled"')
+  })
+
+  if (!select) {
+    throw new Error('web search select not found')
+  }
+
+  return select
+}
 
 const SelectStub = defineComponent({
   name: 'Select',
@@ -279,8 +314,54 @@ describe('CreateAccountModal', () => {
     createAccountMock.mockResolvedValue({ id: 1 })
     checkMixedChannelRiskMock.mockReset()
     checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    getSettingsMock.mockReset()
+    getSettingsMock.mockResolvedValue({ account_quota_notify_enabled: true })
+    getWebSearchEmulationConfigMock.mockReset()
+    getWebSearchEmulationConfigMock.mockResolvedValue({ enabled: true, providers: ['brave'] })
     showErrorMock.mockReset()
     showInfoMock.mockReset()
+  })
+
+  it('merges passthrough fields with anthropic web search and quota notify settings on create', async () => {
+    const wrapper = mountModal()
+
+    await wrapper.get('[data-tour="account-form-name"]').setValue('Anthropic API Key')
+    await wrapper.get('[data-testid="platform-anthropic"]').trigger('click')
+    await wrapper.get('[data-testid="account-type-apikey"]').trigger('click')
+    await wrapper.get('[data-testid="create-account-apikey-input"]').setValue('sk-ant-test')
+    await flushPromises()
+
+    await setPassthroughState(wrapper, {
+      enabled: true,
+      rules: [
+        { id: 'rule-1', target: 'header', mode: 'inject', key: 'X-Env', value: 'prod' }
+      ]
+    })
+    await findWebSearchSelect(wrapper).setValue('disabled')
+
+    const quotaCard = wrapper.getComponent({ name: 'QuotaLimitCard' })
+    quotaCard.vm.$emit('update:totalLimit', 50)
+    quotaCard.vm.$emit('update:quotaNotifyTotalEnabled', true)
+    quotaCard.vm.$emit('update:quotaNotifyTotalThreshold', 80)
+    quotaCard.vm.$emit('update:quotaNotifyTotalThresholdType', 'percentage')
+    await flushPromises()
+
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledWith(expect.objectContaining({
+      extra: expect.objectContaining({
+        passthrough_fields_enabled: true,
+        passthrough_field_rules: [
+          { target: 'header', mode: 'inject', key: 'X-Env', value: 'prod' }
+        ],
+        web_search_emulation: 'disabled',
+        quota_limit: 50,
+        quota_notify_total_enabled: true,
+        quota_notify_total_threshold: 80,
+        quota_notify_total_threshold_type: 'percentage'
+      })
+    }))
   })
 
   it('submits passthrough field rules for API key accounts only', async () => {
@@ -475,13 +556,13 @@ describe('CreateAccountModal', () => {
     expect(createAccountMock).toHaveBeenCalledTimes(1)
   })
 
-  it('does not render passthrough field section for non-apikey account types', async () => {
+  it('renders passthrough field section for oauth account types', async () => {
     const wrapper = mountModal()
 
     await wrapper.get('[data-testid="platform-openai"]').trigger('click')
     await wrapper.get('[data-testid="account-type-oauth"]').trigger('click')
 
-    expect(wrapper.find('[data-testid="passthrough-fields-section"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="passthrough-fields-section"]').exists()).toBe(true)
   })
 
   it('renders passthrough field section for antigravity upstream create flow and submits rules', async () => {

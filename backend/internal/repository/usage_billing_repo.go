@@ -113,9 +113,11 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 	}
 
 	if cmd.BalanceCost > 0 {
-		if err := deductUsageBillingBalance(ctx, tx, cmd.UserID, cmd.BalanceCost); err != nil {
+		newBalance, err := deductUsageBillingBalance(ctx, tx, cmd.UserID, cmd.BalanceCost)
+		if err != nil {
 			return err
 		}
+		result.NewBalance = &newBalance
 	}
 
 	if cmd.APIKeyQuotaCost > 0 {
@@ -133,9 +135,11 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 	}
 
 	if cmd.AccountQuotaCost > 0 && (strings.EqualFold(cmd.AccountType, service.AccountTypeAPIKey) || strings.EqualFold(cmd.AccountType, service.AccountTypeBedrock)) {
-		if err := incrementUsageBillingAccountQuota(ctx, tx, cmd.AccountID, cmd.AccountQuotaCost); err != nil {
+		quotaState, err := incrementUsageBillingAccountQuota(ctx, tx, cmd.AccountID, cmd.AccountQuotaCost)
+		if err != nil {
 			return err
 		}
+		result.QuotaState = quotaState
 	}
 
 	return nil
@@ -169,24 +173,22 @@ func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, subscrip
 	return service.ErrSubscriptionNotFound
 }
 
-func deductUsageBillingBalance(ctx context.Context, tx *sql.Tx, userID int64, amount float64) error {
-	res, err := tx.ExecContext(ctx, `
+func deductUsageBillingBalance(ctx context.Context, tx *sql.Tx, userID int64, amount float64) (float64, error) {
+	var newBalance float64
+	err := tx.QueryRowContext(ctx, `
 		UPDATE users
 		SET balance = balance - $1,
 			updated_at = NOW()
 		WHERE id = $2 AND deleted_at IS NULL
-	`, amount, userID)
+		RETURNING balance
+	`, amount, userID).Scan(&newBalance)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, service.ErrUserNotFound
+	}
 	if err != nil {
-		return err
+		return 0, err
 	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected > 0 {
-		return nil
-	}
-	return service.ErrUserNotFound
+	return newBalance, nil
 }
 
 func incrementUsageBillingAPIKeyQuota(ctx context.Context, tx *sql.Tx, apiKeyID int64, amount float64) (bool, error) {
@@ -240,11 +242,7 @@ func incrementUsageBillingAPIKeyRateLimit(ctx context.Context, tx *sql.Tx, apiKe
 	return nil
 }
 
-// incrementUsageBillingAccountQuota 原子递增账号的配额用量（总/日/周三个维度）
-// 日/周额度在周期过期时自动重置为 0 再递增。
-// 支持滚动窗口（rolling）和固定时间（fixed）两种重置模式。
-// 任一维度配额首次超限时触发调度快照刷新。
-func incrementUsageBillingAccountQuota(ctx context.Context, tx *sql.Tx, accountID int64, amount float64) error {
+func incrementUsageBillingAccountQuota(ctx context.Context, tx *sql.Tx, accountID int64, amount float64) (*service.AccountQuotaState, error) {
 	rows, err := tx.QueryContext(ctx,
 		`UPDATE accounts SET extra = (
 			COALESCE(extra, '{}'::jsonb)
@@ -262,7 +260,6 @@ func incrementUsageBillingAccountQuota(ctx context.Context, tx *sql.Tx, accountI
 					THEN `+nowUTC+`
 					ELSE COALESCE(extra->>'quota_daily_start', `+nowUTC+`) END
 				)
-				-- 固定模式重置时更新下次重置时间
 				|| CASE WHEN `+dailyExpiredExpr+` AND `+nextDailyResetAtExpr+` IS NOT NULL
 				   THEN jsonb_build_object('quota_daily_reset_at', `+nextDailyResetAtExpr+`)
 				   ELSE '{}'::jsonb END
@@ -279,7 +276,6 @@ func incrementUsageBillingAccountQuota(ctx context.Context, tx *sql.Tx, accountI
 					THEN `+nowUTC+`
 					ELSE COALESCE(extra->>'quota_weekly_start', `+nowUTC+`) END
 				)
-				-- 固定模式重置时更新下次重置时间
 				|| CASE WHEN `+weeklyExpiredExpr+` AND `+nextWeeklyResetAtExpr+` IS NOT NULL
 				   THEN jsonb_build_object('quota_weekly_reset_at', `+nextWeeklyResetAtExpr+`)
 				   ELSE '{}'::jsonb END
@@ -295,34 +291,37 @@ func incrementUsageBillingAccountQuota(ctx context.Context, tx *sql.Tx, accountI
 			COALESCE((extra->>'quota_weekly_limit')::numeric, 0)`,
 		amount, accountID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 
-	var totalUsed, totalLimit, dailyUsed, dailyLimit, weeklyUsed, weeklyLimit float64
+	var state service.AccountQuotaState
 	if rows.Next() {
-		if err := rows.Scan(&totalUsed, &totalLimit, &dailyUsed, &dailyLimit, &weeklyUsed, &weeklyLimit); err != nil {
-			return err
+		if err := rows.Scan(
+			&state.TotalUsed, &state.TotalLimit,
+			&state.DailyUsed, &state.DailyLimit,
+			&state.WeeklyUsed, &state.WeeklyLimit,
+		); err != nil {
+			return nil, err
 		}
 	} else {
 		if err := rows.Err(); err != nil {
-			return err
+			return nil, err
 		}
-		return service.ErrAccountNotFound
+		return nil, service.ErrAccountNotFound
 	}
 	if err := rows.Err(); err != nil {
-		return err
+		return nil, err
 	}
-
-	// 任一维度配额刚超限时触发调度快照刷新
-	exceeded := (totalLimit > 0 && totalUsed >= totalLimit && (totalUsed-amount) < totalLimit) ||
-		(dailyLimit > 0 && dailyUsed >= dailyLimit && (dailyUsed-amount) < dailyLimit) ||
-		(weeklyLimit > 0 && weeklyUsed >= weeklyLimit && (weeklyUsed-amount) < weeklyLimit)
+	exceeded :=
+		(state.TotalLimit > 0 && state.TotalUsed >= state.TotalLimit && (state.TotalUsed-amount) < state.TotalLimit) ||
+			(state.DailyLimit > 0 && state.DailyUsed >= state.DailyLimit && (state.DailyUsed-amount) < state.DailyLimit) ||
+			(state.WeeklyLimit > 0 && state.WeeklyUsed >= state.WeeklyLimit && (state.WeeklyUsed-amount) < state.WeeklyLimit)
 	if exceeded {
 		if err := enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &accountID, nil, nil); err != nil {
 			logger.LegacyPrintf("repository.usage_billing", "[SchedulerOutbox] enqueue quota exceeded failed: account=%d err=%v", accountID, err)
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return &state, nil
 }

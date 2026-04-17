@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { expectTypeOf } from 'vitest'
 
 import { apiClient } from '@/api/client'
-import type { AdminUsageDetail } from '@/types'
+import type { AdminUsageDetail, AdminUsageQueryParams } from '@/types'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
 const usageModulePath = resolve(currentDir, '../usage.ts')
@@ -52,6 +52,15 @@ describe('admin usage module', () => {
     expectTypeOf<AdminUsageDetail>().toMatchTypeOf<{
       upstream_request_headers: string | null
       upstream_request_body: string | null
+    }>()
+  })
+
+  it('keeps upstream usage list filter fields in shared query types', () => {
+    expectTypeOf<AdminUsageQueryParams>().toMatchTypeOf<{
+      billing_mode?: string
+      exact_total?: boolean
+      sort_by?: string
+      sort_order?: 'asc' | 'desc'
     }>()
   })
 })

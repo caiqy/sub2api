@@ -7,6 +7,8 @@ import { resolve } from 'node:path'
 const {
   updateAccountMock,
   checkMixedChannelRiskMock,
+  getSettingsMock,
+  getWebSearchEmulationConfigMock,
   listTLSFingerprintProfilesMock,
   showErrorMock,
   showSuccessMock,
@@ -14,6 +16,8 @@ const {
 } = vi.hoisted(() => ({
   updateAccountMock: vi.fn(),
   checkMixedChannelRiskMock: vi.fn(),
+  getSettingsMock: vi.fn(),
+  getWebSearchEmulationConfigMock: vi.fn(),
   listTLSFingerprintProfilesMock: vi.fn(),
   showErrorMock: vi.fn(),
   showSuccessMock: vi.fn(),
@@ -39,6 +43,10 @@ vi.mock('@/api/admin', () => ({
     accounts: {
       update: updateAccountMock,
       checkMixedChannelRisk: checkMixedChannelRiskMock
+    },
+    settings: {
+      getSettings: getSettingsMock,
+      getWebSearchEmulationConfig: getWebSearchEmulationConfigMock
     },
     tlsFingerprintProfiles: {
       list: listTLSFingerprintProfilesMock
@@ -101,9 +109,33 @@ const ModelWhitelistSelectorStub = defineComponent({
 
 const QuotaLimitCardStub = defineComponent({
   name: 'QuotaLimitCard',
-  emits: ['update:totalLimit'],
+  emits: [
+    'update:totalLimit',
+    'update:quotaNotifyDailyEnabled',
+    'update:quotaNotifyDailyThreshold',
+    'update:quotaNotifyDailyThresholdType',
+    'update:quotaNotifyWeeklyEnabled',
+    'update:quotaNotifyWeeklyThreshold',
+    'update:quotaNotifyWeeklyThresholdType',
+    'update:quotaNotifyTotalEnabled',
+    'update:quotaNotifyTotalThreshold',
+    'update:quotaNotifyTotalThresholdType'
+  ],
   template: '<button type="button" data-testid="quota-limit-set" @click="$emit(\'update:totalLimit\', 99)">quota</button>'
 })
+
+function findWebSearchSelect(wrapper: ReturnType<typeof mountModal>) {
+  const select = wrapper.findAll('select').find((candidate) => {
+    const html = candidate.html()
+    return html.includes('value="default"') && html.includes('value="enabled"') && html.includes('value="disabled"')
+  })
+
+  if (!select) {
+    throw new Error('web search select not found')
+  }
+
+  return select
+}
 
 function buildAccount(overrides: Record<string, any> = {}) {
   const { credentials: credentialOverrides, extra: extraOverrides, ...restOverrides } = overrides
@@ -171,6 +203,10 @@ describe('EditAccountModal', () => {
   beforeEach(() => {
     updateAccountMock.mockReset()
     checkMixedChannelRiskMock.mockReset()
+    getSettingsMock.mockReset()
+    getSettingsMock.mockResolvedValue({ account_quota_notify_enabled: true })
+    getWebSearchEmulationConfigMock.mockReset()
+    getWebSearchEmulationConfigMock.mockResolvedValue({ enabled: true, providers: ['brave'] })
     showErrorMock.mockReset()
     showSuccessMock.mockReset()
     showInfoMock.mockReset()
@@ -435,6 +471,50 @@ describe('EditAccountModal', () => {
       passthrough_field_rules: [
         { target: 'header', mode: 'forward', key: 'X-Tenant' }
       ]
+    }))
+  })
+
+  it('merges passthrough fields with anthropic web search and quota notify settings on edit', async () => {
+    const wrapper = mountModal(buildAccount({
+      platform: 'anthropic',
+      extra: {
+        anthropic_passthrough: true,
+        passthrough_fields_enabled: true,
+        passthrough_field_rules: [
+          { target: 'header', mode: 'forward', key: 'X-Test' }
+        ],
+        quota_notify_total_enabled: true,
+        quota_notify_total_threshold: 60,
+        quota_notify_total_threshold_type: 'fixed'
+      }
+    }))
+
+    await flushPromises()
+    await findWebSearchSelect(wrapper).setValue('disabled')
+    await wrapper.get('[data-testid="passthrough-rule-key-0"]').setValue('X-Tenant')
+
+    const quotaCard = wrapper.getComponent({ name: 'QuotaLimitCard' })
+    quotaCard.vm.$emit('update:totalLimit', 120)
+    quotaCard.vm.$emit('update:quotaNotifyTotalEnabled', true)
+    quotaCard.vm.$emit('update:quotaNotifyTotalThreshold', 70)
+    quotaCard.vm.$emit('update:quotaNotifyTotalThresholdType', 'percentage')
+    await flushPromises()
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toEqual(expect.objectContaining({
+      anthropic_passthrough: true,
+      passthrough_fields_enabled: true,
+      passthrough_field_rules: [
+        { target: 'header', mode: 'forward', key: 'X-Tenant' }
+      ],
+      web_search_emulation: 'disabled',
+      quota_limit: 120,
+      quota_notify_total_enabled: true,
+      quota_notify_total_threshold: 70,
+      quota_notify_total_threshold_type: 'percentage'
     }))
   })
 

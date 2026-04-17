@@ -42,6 +42,7 @@ describe('GroupDistributionChart', () => {
       total_tokens: 1200,
       cost: 1.8,
       actual_cost: 0.1,
+      account_cost: 0.08,
     },
     {
       group_id: 2,
@@ -50,6 +51,7 @@ describe('GroupDistributionChart', () => {
       total_tokens: 600,
       cost: 0.7,
       actual_cost: 0.9,
+      account_cost: 0.75,
     },
   ]
 
@@ -110,5 +112,28 @@ describe('GroupDistributionChart', () => {
       dataset: { data: [0.9, 0.1] },
     })
     expect(label).toBe('group-b: $0.900 (90.0%)')
+  })
+
+  it('renders without crashing when group cost fields are missing', () => {
+    const wrapper = mount(GroupDistributionChart, {
+      props: {
+        groupStats: [
+          {
+            group_id: 1,
+            group_name: 'group-a',
+            requests: 9,
+            total_tokens: 1200,
+          },
+        ],
+      },
+      global: {
+        stubs: {
+          LoadingSpinner: true,
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('group-a')
+    expect(wrapper.text()).toContain('$0.0000')
   })
 })

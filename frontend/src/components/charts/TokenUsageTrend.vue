@@ -64,7 +64,8 @@ const chartColors = computed(() => ({
   input: '#3b82f6',
   output: '#10b981',
   cacheCreation: '#f59e0b',
-  cacheRead: '#06b6d4'
+  cacheRead: '#06b6d4',
+  cacheHitRate: '#8b5cf6'
 }))
 
 const chartData = computed(() => {
@@ -104,6 +105,19 @@ const chartData = computed(() => {
         backgroundColor: `${chartColors.value.cacheRead}20`,
         fill: true,
         tension: 0.3
+      },
+      {
+        label: 'Cache Hit Rate',
+        data: props.trendData.map((d) => {
+          const total = d.cache_read_tokens + d.cache_creation_tokens
+          return total > 0 ? (d.cache_read_tokens / total) * 100 : 0
+        }),
+        borderColor: chartColors.value.cacheHitRate,
+        backgroundColor: `${chartColors.value.cacheHitRate}20`,
+        borderDash: [5, 5],
+        fill: false,
+        tension: 0.3,
+        yAxisID: 'yPercent'
       }
     ]
   }
@@ -132,6 +146,9 @@ const lineOptions = computed(() => ({
     tooltip: {
       callbacks: {
         label: (context: any) => {
+          if (context.dataset.yAxisID === 'yPercent') {
+            return `${context.dataset.label}: ${context.raw.toFixed(1)}%`
+          }
           return `${context.dataset.label}: ${formatTokens(context.raw)}`
         },
         footer: (tooltipItems: any) => {
@@ -168,6 +185,21 @@ const lineOptions = computed(() => ({
         },
         callback: (value: string | number) => formatTokens(Number(value))
       }
+    },
+    yPercent: {
+      position: 'right' as const,
+      min: 0,
+      max: 100,
+      grid: {
+        drawOnChartArea: false
+      },
+      ticks: {
+        color: chartColors.value.cacheHitRate,
+        font: {
+          size: 10
+        },
+        callback: (value: string | number) => `${value}%`
+      }
     }
   }
 }))
@@ -183,14 +215,15 @@ const formatTokens = (value: number): string => {
   return value.toLocaleString()
 }
 
-const formatCost = (value: number): string => {
-  if (value >= 1000) {
-    return (value / 1000).toFixed(2) + 'K'
-  } else if (value >= 1) {
-    return value.toFixed(2)
-  } else if (value >= 0.01) {
-    return value.toFixed(3)
+const formatCost = (value: number | null | undefined): string => {
+  const normalizedValue = value ?? 0
+  if (normalizedValue >= 1000) {
+    return (normalizedValue / 1000).toFixed(2) + 'K'
+  } else if (normalizedValue >= 1) {
+    return normalizedValue.toFixed(2)
+  } else if (normalizedValue >= 0.01) {
+    return normalizedValue.toFixed(3)
   }
-  return value.toFixed(4)
+  return normalizedValue.toFixed(4)
 }
 </script>

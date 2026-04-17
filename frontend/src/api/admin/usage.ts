@@ -17,7 +17,6 @@ import type {
   UsageRequestType
 } from '@/types'
 
-// ==================== Types ====================
 export type {
   AdminUsageQueryParams,
   AdminUsageStatsResponse,
@@ -58,6 +57,7 @@ export async function getStats(params: {
   model?: string
   request_type?: UsageRequestType
   stream?: boolean
+  billing_mode?: string
   period?: string
   start_date?: string
   end_date?: string

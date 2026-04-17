@@ -107,6 +107,19 @@ vi.mock('vue-router', () => ({
 
 const AppLayoutStub = { template: '<div><slot /></div>' }
 const UsageFiltersStub = { template: '<div><slot name="after-reset" /></div>' }
+const UsageFiltersBillingModeStub = {
+  props: ['modelValue'],
+  emits: ['update:modelValue', 'change'],
+  template: `
+    <div>
+      <slot name="after-reset" />
+      <button
+        data-test="apply-billing-mode-filter"
+        @click="$emit('update:modelValue', { ...modelValue, billing_mode: 'image' }); $emit('change')"
+      >billing mode</button>
+    </div>
+  `,
+}
 const ModelDistributionChartStub = {
   props: ['metric'],
   emits: ['update:metric'],
@@ -145,6 +158,26 @@ const UsageTableMultipleRowsStub = {
         data-test="open-detail-2"
         @click="$emit('detail', { id: 2, request_id: 'req-2', user: { email: 'bob@example.com' }, model: 'gpt-4.1-mini', created_at: '2026-03-20T10:01:00Z', has_detail: true })"
       >detail 2</button>
+    </div>
+  `,
+}
+
+const UsageTableSortAndDetailStub = {
+  props: ['serverSideSort', 'defaultSortKey', 'defaultSortOrder'],
+  emits: ['detail', 'sort', 'userClick'],
+  template: `
+    <div>
+      <span data-test="server-side-sort">{{ serverSideSort }}</span>
+      <span data-test="default-sort-key">{{ defaultSortKey }}</span>
+      <span data-test="default-sort-order">{{ defaultSortOrder }}</span>
+      <button
+        data-test="emit-sort"
+        @click="$emit('sort', 'model', 'asc')"
+      >sort</button>
+      <button
+        data-test="emit-detail"
+        @click="$emit('detail', { id: 7, request_id: 'req-7', user: { email: 'sort@example.com' }, model: 'gpt-4.1', created_at: '2026-03-20T10:00:00Z', has_detail: true })"
+      >detail</button>
     </div>
   `,
 }
@@ -253,6 +286,45 @@ describe('admin UsageView distribution metric toggles', () => {
     expect(groupChart.find('.metric').text()).toBe('actual_cost')
     expect(getSnapshotV2).toHaveBeenCalledTimes(1)
   })
+
+  it('does not refetch unsupported chart or model endpoints when billing_mode filter is active', async () => {
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          UsageStatsCards: true,
+          UsageFilters: UsageFiltersBillingModeStub,
+          UsageTable: true,
+          UsageExportProgress: true,
+          UsageCleanupDialog: true,
+          UserBalanceHistoryModal: true,
+          Pagination: true,
+          Select: true,
+          DateRangePicker: true,
+          Icon: true,
+          TokenUsageTrend: true,
+          ModelDistributionChart: ModelDistributionChartStub,
+          GroupDistributionChart: GroupDistributionChartStub,
+          EndpointDistributionChart: true,
+        },
+      },
+    })
+
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+
+    expect(getModelStats).toHaveBeenCalledTimes(1)
+    expect(getSnapshotV2).toHaveBeenCalledTimes(1)
+
+    getModelStats.mockClear()
+    getSnapshotV2.mockClear()
+
+    await wrapper.find('[data-test="apply-billing-mode-filter"]').trigger('click')
+    await flushPromises()
+
+    expect(getModelStats).not.toHaveBeenCalled()
+    expect(getSnapshotV2).not.toHaveBeenCalled()
+  })
 })
 
 describe('admin usage detail API contract', () => {
@@ -356,6 +428,55 @@ describe('admin UsageView detail modal', () => {
     expect(wrapper.find('[data-test="usage-detail-modal"]').exists()).toBe(true)
     expect(wrapper.find('.request-id').text()).toBe('req-42')
     expect(wrapper.find('.detail-id').text()).toBe('42')
+  })
+
+  it('keeps server-side sort while preserving detail entrypoint', async () => {
+    getDetail.mockResolvedValue({
+      usage_log_id: 7,
+      request_headers: null,
+      request_body: null,
+      upstream_request_headers: null,
+      upstream_request_body: null,
+      response_headers: null,
+      response_body: null,
+      created_at: '2026-03-20T10:00:00Z',
+    })
+
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          UsageStatsCards: true,
+          UsageFilters: UsageFiltersStub,
+          UsageTable: UsageTableSortAndDetailStub,
+          UsageDetailModal: UsageDetailModalStub,
+          UsageExportProgress: true,
+          UsageCleanupDialog: true,
+          UserBalanceHistoryModal: true,
+          Pagination: true,
+          Select: true,
+          DateRangePicker: true,
+          Icon: true,
+          TokenUsageTrend: true,
+          ModelDistributionChart: ModelDistributionChartStub,
+          GroupDistributionChart: GroupDistributionChartStub,
+          EndpointDistributionChart: true,
+        },
+      },
+    })
+
+    expect(wrapper.find('[data-test="server-side-sort"]').text()).toBe('true')
+    expect(wrapper.find('[data-test="default-sort-key"]').text()).toBe('created_at')
+    expect(wrapper.find('[data-test="default-sort-order"]').text()).toBe('desc')
+
+    await wrapper.find('[data-test="emit-sort"]').trigger('click')
+    await flushPromises()
+    expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ sort_by: 'model', sort_order: 'asc' }), expect.anything())
+
+    await wrapper.find('[data-test="emit-detail"]').trigger('click')
+    await flushPromises()
+    expect(getDetail).toHaveBeenCalledWith(7)
+    expect(wrapper.find('.detail-id').text()).toBe('7')
   })
 
   it('shows not found error and can retry detail loading', async () => {

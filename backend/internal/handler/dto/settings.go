@@ -51,6 +51,29 @@ type SystemSettings struct {
 	LinuxDoConnectClientSecretConfigured bool   `json:"linuxdo_connect_client_secret_configured"`
 	LinuxDoConnectRedirectURL            string `json:"linuxdo_connect_redirect_url"`
 
+	OIDCConnectEnabled                bool   `json:"oidc_connect_enabled"`
+	OIDCConnectProviderName           string `json:"oidc_connect_provider_name"`
+	OIDCConnectClientID               string `json:"oidc_connect_client_id"`
+	OIDCConnectClientSecretConfigured bool   `json:"oidc_connect_client_secret_configured"`
+	OIDCConnectIssuerURL              string `json:"oidc_connect_issuer_url"`
+	OIDCConnectDiscoveryURL           string `json:"oidc_connect_discovery_url"`
+	OIDCConnectAuthorizeURL           string `json:"oidc_connect_authorize_url"`
+	OIDCConnectTokenURL               string `json:"oidc_connect_token_url"`
+	OIDCConnectUserInfoURL            string `json:"oidc_connect_userinfo_url"`
+	OIDCConnectJWKSURL                string `json:"oidc_connect_jwks_url"`
+	OIDCConnectScopes                 string `json:"oidc_connect_scopes"`
+	OIDCConnectRedirectURL            string `json:"oidc_connect_redirect_url"`
+	OIDCConnectFrontendRedirectURL    string `json:"oidc_connect_frontend_redirect_url"`
+	OIDCConnectTokenAuthMethod        string `json:"oidc_connect_token_auth_method"`
+	OIDCConnectUsePKCE                bool   `json:"oidc_connect_use_pkce"`
+	OIDCConnectValidateIDToken        bool   `json:"oidc_connect_validate_id_token"`
+	OIDCConnectAllowedSigningAlgs     string `json:"oidc_connect_allowed_signing_algs"`
+	OIDCConnectClockSkewSeconds       int    `json:"oidc_connect_clock_skew_seconds"`
+	OIDCConnectRequireEmailVerified   bool   `json:"oidc_connect_require_email_verified"`
+	OIDCConnectUserInfoEmailPath      string `json:"oidc_connect_userinfo_email_path"`
+	OIDCConnectUserInfoIDPath         string `json:"oidc_connect_userinfo_id_path"`
+	OIDCConnectUserInfoUsernamePath   string `json:"oidc_connect_userinfo_username_path"`
+
 	SiteName                    string           `json:"site_name"`
 	SiteLogo                    string           `json:"site_logo"`
 	SiteSubtitle                string           `json:"site_subtitle"`
@@ -61,7 +84,8 @@ type SystemSettings struct {
 	HideCcsImportButton         bool             `json:"hide_ccs_import_button"`
 	PurchaseSubscriptionEnabled bool             `json:"purchase_subscription_enabled"`
 	PurchaseSubscriptionURL     string           `json:"purchase_subscription_url"`
-	SoraClientEnabled           bool             `json:"sora_client_enabled"`
+	TableDefaultPageSize        int              `json:"table_default_page_size"`
+	TablePageSizeOptions        []int            `json:"table_page_size_options"`
 	CustomMenuItems             []CustomMenuItem `json:"custom_menu_items"`
 	CustomEndpoints             []CustomEndpoint `json:"custom_endpoints"`
 
@@ -95,9 +119,60 @@ type SystemSettings struct {
 	// Backend Mode
 	BackendModeEnabled bool `json:"backend_mode_enabled"`
 
+	// Gateway sticky platform switches
+	GatewayStickyOpenAIEnabled    bool `json:"gateway_sticky_openai_enabled"`
+	GatewayStickyGeminiEnabled    bool `json:"gateway_sticky_gemini_enabled"`
+	GatewayStickyAnthropicEnabled bool `json:"gateway_sticky_anthropic_enabled"`
+
+	// OpenAI WS scheduler settings
+	GatewayOpenAIWSSchedulerMode                         string  `json:"gateway_openai_ws_scheduler_mode"`
+	GatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold float64 `json:"gateway_openai_ws_scheduler_layered_error_penalty_threshold"`
+	GatewayOpenAIWSSchedulerLayeredErrorPenaltyValue     int     `json:"gateway_openai_ws_scheduler_layered_error_penalty_value"`
+	GatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier float64 `json:"gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier"`
+	GatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue      int     `json:"gateway_openai_ws_scheduler_layered_ttft_penalty_value"`
+	GatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds  int     `json:"gateway_openai_ws_scheduler_layered_probe_cooldown_seconds"`
+	GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds  int     `json:"gateway_openai_ws_scheduler_layered_probe_interval_seconds"`
+	GatewayOpenAIWSSchedulerLayeredProbeMaxFailures      int     `json:"gateway_openai_ws_scheduler_layered_probe_max_failures"`
+	GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds   int     `json:"gateway_openai_ws_scheduler_layered_probe_timeout_seconds"`
+
 	// Gateway forwarding behavior
 	EnableFingerprintUnification bool `json:"enable_fingerprint_unification"`
 	EnableMetadataPassthrough    bool `json:"enable_metadata_passthrough"`
+	EnableCCHSigning             bool `json:"enable_cch_signing"`
+
+	// Web Search Emulation
+	WebSearchEmulationEnabled bool `json:"web_search_emulation_enabled"`
+
+	// Payment configuration
+	PaymentEnabled                   bool     `json:"payment_enabled"`
+	PaymentMinAmount                 float64  `json:"payment_min_amount"`
+	PaymentMaxAmount                 float64  `json:"payment_max_amount"`
+	PaymentDailyLimit                float64  `json:"payment_daily_limit"`
+	PaymentOrderTimeoutMin           int      `json:"payment_order_timeout_minutes"`
+	PaymentMaxPendingOrders          int      `json:"payment_max_pending_orders"`
+	PaymentEnabledTypes              []string `json:"payment_enabled_types"`
+	PaymentBalanceDisabled           bool     `json:"payment_balance_disabled"`
+	PaymentBalanceRechargeMultiplier float64  `json:"payment_balance_recharge_multiplier"`
+	PaymentRechargeFeeRate           float64  `json:"payment_recharge_fee_rate"`
+	PaymentLoadBalanceStrat          string   `json:"payment_load_balance_strategy"`
+	PaymentProductNamePrefix         string   `json:"payment_product_name_prefix"`
+	PaymentProductNameSuffix         string   `json:"payment_product_name_suffix"`
+	PaymentHelpImageURL              string   `json:"payment_help_image_url"`
+	PaymentHelpText                  string   `json:"payment_help_text"`
+
+	// Cancel rate limit
+	PaymentCancelRateLimitEnabled bool   `json:"payment_cancel_rate_limit_enabled"`
+	PaymentCancelRateLimitMax     int    `json:"payment_cancel_rate_limit_max"`
+	PaymentCancelRateLimitWindow  int    `json:"payment_cancel_rate_limit_window"`
+	PaymentCancelRateLimitUnit    string `json:"payment_cancel_rate_limit_unit"`
+	PaymentCancelRateLimitMode    string `json:"payment_cancel_rate_limit_window_mode"`
+
+	// Balance low notification
+	BalanceLowNotifyEnabled     bool               `json:"balance_low_notify_enabled"`
+	BalanceLowNotifyThreshold   float64            `json:"balance_low_notify_threshold"`
+	BalanceLowNotifyRechargeURL string             `json:"balance_low_notify_recharge_url"`
+	AccountQuotaNotifyEnabled   bool               `json:"account_quota_notify_enabled"`
+	AccountQuotaNotifyEmails    []NotifyEmailEntry `json:"account_quota_notify_emails"`
 }
 
 type DefaultSubscriptionSetting struct {
@@ -125,50 +200,20 @@ type PublicSettings struct {
 	HideCcsImportButton              bool             `json:"hide_ccs_import_button"`
 	PurchaseSubscriptionEnabled      bool             `json:"purchase_subscription_enabled"`
 	PurchaseSubscriptionURL          string           `json:"purchase_subscription_url"`
+	TableDefaultPageSize             int              `json:"table_default_page_size"`
+	TablePageSizeOptions             []int            `json:"table_page_size_options"`
 	CustomMenuItems                  []CustomMenuItem `json:"custom_menu_items"`
 	CustomEndpoints                  []CustomEndpoint `json:"custom_endpoints"`
 	LinuxDoOAuthEnabled              bool             `json:"linuxdo_oauth_enabled"`
-	SoraClientEnabled                bool             `json:"sora_client_enabled"`
+	OIDCOAuthEnabled                 bool             `json:"oidc_oauth_enabled"`
+	OIDCOAuthProviderName            string           `json:"oidc_oauth_provider_name"`
 	BackendModeEnabled               bool             `json:"backend_mode_enabled"`
+	PaymentEnabled                   bool             `json:"payment_enabled"`
 	Version                          string           `json:"version"`
-}
-
-// SoraS3Settings Sora S3 存储配置 DTO（响应用，不含敏感字段）
-type SoraS3Settings struct {
-	Enabled                   bool   `json:"enabled"`
-	Endpoint                  string `json:"endpoint"`
-	Region                    string `json:"region"`
-	Bucket                    string `json:"bucket"`
-	AccessKeyID               string `json:"access_key_id"`
-	SecretAccessKeyConfigured bool   `json:"secret_access_key_configured"`
-	Prefix                    string `json:"prefix"`
-	ForcePathStyle            bool   `json:"force_path_style"`
-	CDNURL                    string `json:"cdn_url"`
-	DefaultStorageQuotaBytes  int64  `json:"default_storage_quota_bytes"`
-}
-
-// SoraS3Profile Sora S3 存储配置项 DTO（响应用，不含敏感字段）
-type SoraS3Profile struct {
-	ProfileID                 string `json:"profile_id"`
-	Name                      string `json:"name"`
-	IsActive                  bool   `json:"is_active"`
-	Enabled                   bool   `json:"enabled"`
-	Endpoint                  string `json:"endpoint"`
-	Region                    string `json:"region"`
-	Bucket                    string `json:"bucket"`
-	AccessKeyID               string `json:"access_key_id"`
-	SecretAccessKeyConfigured bool   `json:"secret_access_key_configured"`
-	Prefix                    string `json:"prefix"`
-	ForcePathStyle            bool   `json:"force_path_style"`
-	CDNURL                    string `json:"cdn_url"`
-	DefaultStorageQuotaBytes  int64  `json:"default_storage_quota_bytes"`
-	UpdatedAt                 string `json:"updated_at"`
-}
-
-// ListSoraS3ProfilesResponse Sora S3 配置列表响应
-type ListSoraS3ProfilesResponse struct {
-	ActiveProfileID string          `json:"active_profile_id"`
-	Items           []SoraS3Profile `json:"items"`
+	BalanceLowNotifyEnabled          bool             `json:"balance_low_notify_enabled"`
+	AccountQuotaNotifyEnabled        bool             `json:"account_quota_notify_enabled"`
+	BalanceLowNotifyThreshold        float64          `json:"balance_low_notify_threshold"`
+	BalanceLowNotifyRechargeURL      string           `json:"balance_low_notify_recharge_url"`
 }
 
 // OverloadCooldownSettings 529过载冷却配置 DTO
@@ -203,10 +248,13 @@ type RectifierSettings struct {
 
 // BetaPolicyRule Beta 策略规则 DTO
 type BetaPolicyRule struct {
-	BetaToken    string `json:"beta_token"`
-	Action       string `json:"action"`
-	Scope        string `json:"scope"`
-	ErrorMessage string `json:"error_message,omitempty"`
+	BetaToken            string   `json:"beta_token"`
+	Action               string   `json:"action"`
+	Scope                string   `json:"scope"`
+	ErrorMessage         string   `json:"error_message,omitempty"`
+	ModelWhitelist       []string `json:"model_whitelist,omitempty"`
+	FallbackAction       string   `json:"fallback_action,omitempty"`
+	FallbackErrorMessage string   `json:"fallback_error_message,omitempty"`
 }
 
 // BetaPolicySettings Beta 策略配置 DTO

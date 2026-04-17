@@ -195,7 +195,7 @@ func newGeminiStickyToggleHandler(t *testing.T, enabled bool, cache service.Gate
 	t.Helper()
 	cfg := &config.Config{}
 	cfg.Gateway.Sticky.Gemini.Enabled = enabled
-	gatewayService := service.NewGatewayService(nil, nil, nil, nil, nil, nil, nil, cache, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, digestStore, nil, nil)
+	gatewayService := service.NewGatewayService(nil, nil, nil, nil, nil, nil, nil, cache, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, digestStore, nil, nil, nil, nil, nil)
 	return &GatewayHandler{gatewayService: gatewayService, cfg: cfg}
 }
 

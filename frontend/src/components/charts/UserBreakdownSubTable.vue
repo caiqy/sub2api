@@ -25,6 +25,9 @@
           <td class="py-1 text-right text-green-600 dark:text-green-400">
             ${{ formatCost(user.actual_cost) }}
           </td>
+          <td class="py-1 text-right text-orange-500 dark:text-orange-400">
+            ${{ formatCost(user.account_cost) }}
+          </td>
           <td class="py-1 pr-1 text-right text-gray-400 dark:text-gray-500">
             ${{ formatCost(user.cost) }}
           </td>
@@ -53,10 +56,11 @@ const formatTokens = (value: number): string => {
   return value.toLocaleString()
 }
 
-const formatCost = (value: number): string => {
-  if (value >= 1000) return (value / 1000).toFixed(2) + 'K'
-  if (value >= 1) return value.toFixed(2)
-  if (value >= 0.01) return value.toFixed(3)
-  return value.toFixed(4)
+const formatCost = (value: number | null | undefined): string => {
+  const normalizedValue = value ?? 0
+  if (normalizedValue >= 1000) return (normalizedValue / 1000).toFixed(2) + 'K'
+  if (normalizedValue >= 1) return normalizedValue.toFixed(2)
+  if (normalizedValue >= 0.01) return normalizedValue.toFixed(3)
+  return normalizedValue.toFixed(4)
 }
 </script>

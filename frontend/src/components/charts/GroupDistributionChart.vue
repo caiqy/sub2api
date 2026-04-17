@@ -45,6 +45,7 @@
               <th class="pb-2 text-right">{{ t('admin.dashboard.requests') }}</th>
               <th class="pb-2 text-right">{{ t('admin.dashboard.tokens') }}</th>
               <th class="pb-2 text-right">{{ t('admin.dashboard.actual') }}</th>
+              <th class="pb-2 text-right">{{ t('admin.dashboard.accountCost') }}</th>
               <th class="pb-2 text-right">{{ t('admin.dashboard.standard') }}</th>
             </tr>
           </thead>
@@ -75,13 +76,16 @@
                 <td class="py-1.5 text-right text-green-600 dark:text-green-400">
                   ${{ formatCost(group.actual_cost) }}
                 </td>
+                <td class="py-1.5 text-right text-orange-500 dark:text-orange-400">
+                  ${{ formatCost(group.account_cost) }}
+                </td>
                 <td class="py-1.5 text-right text-gray-400 dark:text-gray-500">
                   ${{ formatCost(group.cost) }}
                 </td>
               </tr>
               <!-- User breakdown sub-rows -->
               <tr v-if="expandedKey === `group-${group.group_id}`">
-                <td colspan="5" class="p-0">
+                <td colspan="6" class="p-0">
                   <UserBreakdownSubTable
                     :items="breakdownItems"
                     :loading="breakdownLoading"
@@ -125,6 +129,7 @@ const props = withDefaults(defineProps<{
   showMetricToggle?: boolean
   startDate?: string
   endDate?: string
+  filters?: Record<string, any>
 }>(), {
   loading: false,
   metric: 'tokens',
@@ -150,6 +155,7 @@ const toggleBreakdown = async (type: string, id: number | string) => {
   breakdownItems.value = []
   try {
     const res = await getUserBreakdown({
+      ...props.filters,
       start_date: props.startDate,
       end_date: props.endDate,
       group_id: Number(id),
@@ -235,14 +241,15 @@ const formatNumber = (value: number): string => {
   return value.toLocaleString()
 }
 
-const formatCost = (value: number): string => {
-  if (value >= 1000) {
-    return (value / 1000).toFixed(2) + 'K'
-  } else if (value >= 1) {
-    return value.toFixed(2)
-  } else if (value >= 0.01) {
-    return value.toFixed(3)
+const formatCost = (value: number | null | undefined): string => {
+  const normalizedValue = value ?? 0
+  if (normalizedValue >= 1000) {
+    return (normalizedValue / 1000).toFixed(2) + 'K'
+  } else if (normalizedValue >= 1) {
+    return normalizedValue.toFixed(2)
+  } else if (normalizedValue >= 0.01) {
+    return normalizedValue.toFixed(3)
   }
-  return value.toFixed(4)
+  return normalizedValue.toFixed(4)
 }
 </script>
