@@ -33,6 +33,11 @@ type ConcurrencyCache interface {
 	ReleaseUserSlot(ctx context.Context, userID int64, requestID string) error
 	GetUserConcurrency(ctx context.Context, userID int64) (int, error)
 
+	// 分组级用户槽位管理
+	// 键格式: concurrency:user:{userID}:group:{groupID}（有序集合，成员为 requestID）
+	AcquireUserGroupSlot(ctx context.Context, userID, groupID int64, maxConcurrency int, requestID string) (bool, error)
+	ReleaseUserGroupSlot(ctx context.Context, userID, groupID int64, requestID string) error
+
 	// 等待队列计数（只在首次创建时设置 TTL）
 	IncrementWaitCount(ctx context.Context, userID int64, maxWait int) (bool, error)
 	DecrementWaitCount(ctx context.Context, userID int64) error
@@ -190,6 +195,42 @@ func (s *ConcurrencyService) AcquireUserSlot(ctx context.Context, userID int64, 
 				defer cancel()
 				if err := s.cache.ReleaseUserSlot(bgCtx, userID, requestID); err != nil {
 					logger.LegacyPrintf("service.concurrency", "Warning: failed to release user slot for %d (req=%s): %v", userID, requestID, err)
+				}
+			},
+		}, nil
+	}
+
+	return &AcquireResult{
+		Acquired:    false,
+		ReleaseFunc: nil,
+	}, nil
+}
+
+// AcquireUserGroupSlot attempts to acquire a concurrency slot for a user within a specific group.
+// Returns a release function that MUST be called when the request completes.
+func (s *ConcurrencyService) AcquireUserGroupSlot(ctx context.Context, userID, groupID int64, maxConcurrency int) (*AcquireResult, error) {
+	if maxConcurrency <= 0 {
+		return &AcquireResult{
+			Acquired:    true,
+			ReleaseFunc: func() {},
+		}, nil
+	}
+
+	requestID := generateRequestID()
+
+	acquired, err := s.cache.AcquireUserGroupSlot(ctx, userID, groupID, maxConcurrency, requestID)
+	if err != nil {
+		return nil, err
+	}
+
+	if acquired {
+		return &AcquireResult{
+			Acquired: true,
+			ReleaseFunc: func() {
+				bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := s.cache.ReleaseUserGroupSlot(bgCtx, userID, groupID, requestID); err != nil {
+					logger.LegacyPrintf("service.concurrency", "Warning: failed to release user-group slot for user=%d group=%d (req=%s): %v", userID, groupID, requestID, err)
 				}
 			},
 		}, nil

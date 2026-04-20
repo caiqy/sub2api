@@ -220,6 +220,17 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		defer userReleaseFunc()
 	}
 
+	// Acquire group-level user concurrency slot (if enabled)
+	if apiKey.GroupID != nil && apiKey.Group != nil {
+		groupUserReleaseFunc, groupAcquired := h.acquireUserGroupSlot(c, subject.UserID, *apiKey.GroupID, apiKey.Group, reqStream, &streamStarted, reqLog)
+		if !groupAcquired {
+			return
+		}
+		if groupUserReleaseFunc != nil {
+			defer groupUserReleaseFunc()
+		}
+	}
+
 	// 2. Re-check billing eligibility after wait
 	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription); err != nil {
 		reqLog.Info("openai.billing_eligibility_check_failed", zap.Error(err))
@@ -600,6 +611,17 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		defer userReleaseFunc()
 	}
 
+	// Acquire group-level user concurrency slot (if enabled)
+	if apiKey.GroupID != nil && apiKey.Group != nil {
+		groupUserReleaseFunc, groupAcquired := h.acquireUserGroupSlot(c, subject.UserID, *apiKey.GroupID, apiKey.Group, reqStream, &streamStarted, reqLog)
+		if !groupAcquired {
+			return
+		}
+		if groupUserReleaseFunc != nil {
+			defer groupUserReleaseFunc()
+		}
+	}
+
 	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription); err != nil {
 		reqLog.Info("openai_messages.billing_eligibility_check_failed", zap.Error(err))
 		status, code, message := billingErrorDetails(err)
@@ -951,6 +973,44 @@ func (h *OpenAIGatewayHandler) acquireResponsesUserSlot(
 		waitCounted = false
 	}
 	return wrapReleaseOnDone(ctx, userReleaseFunc), true
+}
+
+// acquireUserGroupSlot acquires a group-level user concurrency slot if the group has it enabled.
+// Returns (releaseFunc, acquired). If the group does not have user concurrency enabled, returns (nil, true).
+func (h *OpenAIGatewayHandler) acquireUserGroupSlot(
+	c *gin.Context,
+	userID int64,
+	groupID int64,
+	group *service.Group,
+	reqStream bool,
+	streamStarted *bool,
+	reqLog *zap.Logger,
+) (func(), bool) {
+	if group == nil || !group.UserConcurrencyEnabled || group.UserConcurrencyLimit <= 0 {
+		return nil, true
+	}
+
+	ctx := c.Request.Context()
+	limit := group.UserConcurrencyLimit
+
+	releaseFunc, acquired, err := h.concurrencyHelper.TryAcquireUserGroupSlot(ctx, userID, groupID, limit)
+	if err != nil {
+		reqLog.Warn("openai.user_group_slot_acquire_failed", zap.Error(err), zap.Int64("group_id", groupID))
+		h.handleConcurrencyError(c, err, "user_group", *streamStarted)
+		return nil, false
+	}
+	if acquired {
+		return wrapReleaseOnDone(ctx, releaseFunc), true
+	}
+
+	releaseFunc, err = h.concurrencyHelper.AcquireUserGroupSlotWithWait(c, userID, groupID, limit, reqStream, streamStarted)
+	if err != nil {
+		reqLog.Warn("openai.user_group_slot_acquire_failed_after_wait", zap.Error(err), zap.Int64("group_id", groupID))
+		h.handleConcurrencyError(c, err, "user_group", *streamStarted)
+		return nil, false
+	}
+
+	return wrapReleaseOnDone(ctx, releaseFunc), true
 }
 
 func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(

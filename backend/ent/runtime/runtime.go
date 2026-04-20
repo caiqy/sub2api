@@ -478,6 +478,14 @@ func init() {
 	groupDescMessagesDispatchModelConfig := groupFields[26].Descriptor()
 	// group.DefaultMessagesDispatchModelConfig holds the default value on creation for the messages_dispatch_model_config field.
 	group.DefaultMessagesDispatchModelConfig = groupDescMessagesDispatchModelConfig.Default.(domain.OpenAIMessagesDispatchModelConfig)
+	// groupDescUserConcurrencyEnabled is the schema descriptor for user_concurrency_enabled field.
+	groupDescUserConcurrencyEnabled := groupFields[27].Descriptor()
+	// group.DefaultUserConcurrencyEnabled holds the default value on creation for the user_concurrency_enabled field.
+	group.DefaultUserConcurrencyEnabled = groupDescUserConcurrencyEnabled.Default.(bool)
+	// groupDescUserConcurrencyLimit is the schema descriptor for user_concurrency_limit field.
+	groupDescUserConcurrencyLimit := groupFields[28].Descriptor()
+	// group.DefaultUserConcurrencyLimit holds the default value on creation for the user_concurrency_limit field.
+	group.DefaultUserConcurrencyLimit = groupDescUserConcurrencyLimit.Default.(int)
 	idempotencyrecordMixin := schema.IdempotencyRecord{}.Mixin()
 	idempotencyrecordMixinFields0 := idempotencyrecordMixin[0].Fields()
 	_ = idempotencyrecordMixinFields0

@@ -133,6 +133,12 @@ func (f *fakeConcurrencyCache) GetAccountConcurrencyBatch(_ context.Context, acc
 	}
 	return result, nil
 }
+func (f *fakeConcurrencyCache) AcquireUserGroupSlot(context.Context, int64, int64, int, string) (bool, error) {
+	return true, nil
+}
+func (f *fakeConcurrencyCache) ReleaseUserGroupSlot(context.Context, int64, int64, string) error {
+	return nil
+}
 func (f *fakeConcurrencyCache) CleanupExpiredAccountSlots(context.Context, int64) error { return nil }
 func (f *fakeConcurrencyCache) CleanupStaleProcessSlots(context.Context, string) error  { return nil }
 

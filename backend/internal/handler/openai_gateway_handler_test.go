@@ -1460,6 +1460,12 @@ func (openAIChatCompletionsConcurrencyCacheStub) GetUsersLoadBatch(context.Conte
 func (openAIChatCompletionsConcurrencyCacheStub) GetAccountConcurrencyBatch(context.Context, []int64) (map[int64]int, error) {
 	return map[int64]int{}, nil
 }
+func (openAIChatCompletionsConcurrencyCacheStub) AcquireUserGroupSlot(context.Context, int64, int64, int, string) (bool, error) {
+	return true, nil
+}
+func (openAIChatCompletionsConcurrencyCacheStub) ReleaseUserGroupSlot(context.Context, int64, int64, string) error {
+	return nil
+}
 func (openAIChatCompletionsConcurrencyCacheStub) CleanupExpiredAccountSlots(context.Context, int64) error {
 	return nil
 }

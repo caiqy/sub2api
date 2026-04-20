@@ -124,6 +124,14 @@ func (s *helperConcurrencyCacheStub) CleanupStaleProcessSlots(ctx context.Contex
 	return nil
 }
 
+func (s *helperConcurrencyCacheStub) AcquireUserGroupSlot(ctx context.Context, userID, groupID int64, maxConcurrency int, requestID string) (bool, error) {
+	return true, nil
+}
+
+func (s *helperConcurrencyCacheStub) ReleaseUserGroupSlot(ctx context.Context, userID, groupID int64, requestID string) error {
+	return nil
+}
+
 func newHelperTestContext(method, path string) (*gin.Context, *httptest.ResponseRecorder) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()

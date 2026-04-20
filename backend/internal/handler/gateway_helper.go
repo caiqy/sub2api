@@ -228,6 +228,19 @@ func (h *ConcurrencyHelper) TryAcquireUserSlot(ctx context.Context, userID int64
 	return result.ReleaseFunc, true, nil
 }
 
+// TryAcquireUserGroupSlot 尝试立即获取分组级用户并发槽位。
+// 返回值: (releaseFunc, acquired, error)
+func (h *ConcurrencyHelper) TryAcquireUserGroupSlot(ctx context.Context, userID, groupID int64, maxConcurrency int) (func(), bool, error) {
+	result, err := h.concurrencyService.AcquireUserGroupSlot(ctx, userID, groupID, maxConcurrency)
+	if err != nil {
+		return nil, false, err
+	}
+	if !result.Acquired {
+		return nil, false, nil
+	}
+	return result.ReleaseFunc, true, nil
+}
+
 // TryAcquireAccountSlot 尝试立即获取账号并发槽位。
 // 返回值: (releaseFunc, acquired, error)
 func (h *ConcurrencyHelper) TryAcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int) (func(), bool, error) {
@@ -259,6 +272,89 @@ func (h *ConcurrencyHelper) AcquireUserSlotWithWait(c *gin.Context, userID int64
 
 	// Need to wait - handle streaming ping if needed
 	return h.waitForSlotWithPing(c, "user", userID, maxConcurrency, isStream, streamStarted)
+}
+
+// AcquireUserGroupSlotWithWait acquires a group-level user concurrency slot, waiting if necessary.
+// For streaming requests, sends ping events during the wait.
+func (h *ConcurrencyHelper) AcquireUserGroupSlotWithWait(c *gin.Context, userID, groupID int64, maxConcurrency int, isStream bool, streamStarted *bool) (func(), error) {
+	ctx := c.Request.Context()
+
+	releaseFunc, acquired, err := h.TryAcquireUserGroupSlot(ctx, userID, groupID, maxConcurrency)
+	if err != nil {
+		return nil, err
+	}
+
+	if acquired {
+		return releaseFunc, nil
+	}
+
+	return h.waitForUserGroupSlot(c, userID, groupID, maxConcurrency, isStream, streamStarted)
+}
+
+// waitForUserGroupSlot waits for a group-level user concurrency slot with exponential backoff.
+func (h *ConcurrencyHelper) waitForUserGroupSlot(c *gin.Context, userID, groupID int64, maxConcurrency int, isStream bool, streamStarted *bool) (func(), error) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), maxConcurrencyWait)
+	defer cancel()
+
+	acquireSlot := func() (*service.AcquireResult, error) {
+		return h.concurrencyService.AcquireUserGroupSlot(ctx, userID, groupID, maxConcurrency)
+	}
+
+	needPing := isStream && h.pingFormat != ""
+
+	var flusher http.Flusher
+	if needPing {
+		var ok bool
+		flusher, ok = c.Writer.(http.Flusher)
+		if !ok {
+			return nil, fmt.Errorf("streaming not supported")
+		}
+	}
+
+	var pingCh <-chan time.Time
+	if needPing {
+		pingTicker := time.NewTicker(h.pingInterval)
+		defer pingTicker.Stop()
+		pingCh = pingTicker.C
+	}
+
+	backoff := initialBackoff
+	timer := time.NewTimer(backoff)
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, &ConcurrencyError{
+				SlotType:  "user_group",
+				IsTimeout: true,
+			}
+
+		case <-pingCh:
+			if !*streamStarted {
+				c.Header("Content-Type", "text/event-stream")
+				c.Header("Cache-Control", "no-cache")
+				c.Header("Connection", "keep-alive")
+				c.Header("X-Accel-Buffering", "no")
+				*streamStarted = true
+			}
+			if _, err := fmt.Fprint(c.Writer, string(h.pingFormat)); err != nil {
+				return nil, err
+			}
+			flusher.Flush()
+
+		case <-timer.C:
+			result, err := acquireSlot()
+			if err != nil {
+				return nil, err
+			}
+			if result.Acquired {
+				return result.ReleaseFunc, nil
+			}
+			backoff = nextBackoff(backoff)
+			timer.Reset(backoff)
+		}
+	}
 }
 
 // AcquireAccountSlotWithWait acquires an account concurrency slot, waiting if necessary.

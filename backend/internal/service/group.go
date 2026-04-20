@@ -59,6 +59,10 @@ type Group struct {
 	DefaultMappedModel          string
 	MessagesDispatchModelConfig OpenAIMessagesDispatchModelConfig
 
+	// 分组级用户并发限制
+	UserConcurrencyEnabled bool
+	UserConcurrencyLimit   int
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
 

@@ -1781,6 +1781,11 @@ export default {
         title: '图片生成计费',
         description: '配置图片生成模型的图片生成价格，留空则使用默认价格'
       },
+      userConcurrency: {
+        title: '用户并发限制',
+        description: '启用后，限制每个用户在此分组的最大并发请求数',
+        limit: '每用户最大并发数',
+      },
       claudeCode: {
         title: 'Claude Code 客户端限制',
         tooltip:

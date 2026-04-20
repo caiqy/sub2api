@@ -27,6 +27,8 @@ const (
 	accountSlotKeyPrefix = "concurrency:account:"
 	// 格式: concurrency:user:{userID}
 	userSlotKeyPrefix = "concurrency:user:"
+	// 格式: concurrency:user:{userID}:group:{groupID}
+	userGroupSlotKeyPrefix = "concurrency:user:"
 	// 等待队列计数器格式: concurrency:wait:{userID}
 	waitQueueKeyPrefix = "concurrency:wait:"
 	// 账号级等待队列计数器格式: wait:account:{accountID}
@@ -230,6 +232,10 @@ func accountWaitKey(accountID int64) string {
 	return fmt.Sprintf("%s%d", accountWaitKeyPrefix, accountID)
 }
 
+func userGroupSlotKey(userID, groupID int64) string {
+	return fmt.Sprintf("%s%d:group:%d", userGroupSlotKeyPrefix, userID, groupID)
+}
+
 // Account slot operations
 
 func (c *concurrencyCache) AcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
@@ -319,6 +325,22 @@ func (c *concurrencyCache) GetUserConcurrency(ctx context.Context, userID int64)
 		return 0, err
 	}
 	return result, nil
+}
+
+// User-group slot operations
+
+func (c *concurrencyCache) AcquireUserGroupSlot(ctx context.Context, userID, groupID int64, maxConcurrency int, requestID string) (bool, error) {
+	key := userGroupSlotKey(userID, groupID)
+	result, err := acquireScript.Run(ctx, c.rdb, []string{key}, maxConcurrency, c.slotTTLSeconds, requestID).Int()
+	if err != nil {
+		return false, err
+	}
+	return result == 1, nil
+}
+
+func (c *concurrencyCache) ReleaseUserGroupSlot(ctx context.Context, userID, groupID int64, requestID string) error {
+	key := userGroupSlotKey(userID, groupID)
+	return c.rdb.ZRem(ctx, key, requestID).Err()
 }
 
 // Wait queue operations

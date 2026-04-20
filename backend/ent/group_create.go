@@ -425,6 +425,34 @@ func (_c *GroupCreate) SetNillableMessagesDispatchModelConfig(v *domain.OpenAIMe
 	return _c
 }
 
+// SetUserConcurrencyEnabled sets the "user_concurrency_enabled" field.
+func (_c *GroupCreate) SetUserConcurrencyEnabled(v bool) *GroupCreate {
+	_c.mutation.SetUserConcurrencyEnabled(v)
+	return _c
+}
+
+// SetNillableUserConcurrencyEnabled sets the "user_concurrency_enabled" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableUserConcurrencyEnabled(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetUserConcurrencyEnabled(*v)
+	}
+	return _c
+}
+
+// SetUserConcurrencyLimit sets the "user_concurrency_limit" field.
+func (_c *GroupCreate) SetUserConcurrencyLimit(v int) *GroupCreate {
+	_c.mutation.SetUserConcurrencyLimit(v)
+	return _c
+}
+
+// SetNillableUserConcurrencyLimit sets the "user_concurrency_limit" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableUserConcurrencyLimit(v *int) *GroupCreate {
+	if v != nil {
+		_c.SetUserConcurrencyLimit(*v)
+	}
+	return _c
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_c *GroupCreate) AddAPIKeyIDs(ids ...int64) *GroupCreate {
 	_c.mutation.AddAPIKeyIDs(ids...)
@@ -630,6 +658,14 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultMessagesDispatchModelConfig
 		_c.mutation.SetMessagesDispatchModelConfig(v)
 	}
+	if _, ok := _c.mutation.UserConcurrencyEnabled(); !ok {
+		v := group.DefaultUserConcurrencyEnabled
+		_c.mutation.SetUserConcurrencyEnabled(v)
+	}
+	if _, ok := _c.mutation.UserConcurrencyLimit(); !ok {
+		v := group.DefaultUserConcurrencyLimit
+		_c.mutation.SetUserConcurrencyLimit(v)
+	}
 	return nil
 }
 
@@ -716,6 +752,12 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.MessagesDispatchModelConfig(); !ok {
 		return &ValidationError{Name: "messages_dispatch_model_config", err: errors.New(`ent: missing required field "Group.messages_dispatch_model_config"`)}
+	}
+	if _, ok := _c.mutation.UserConcurrencyEnabled(); !ok {
+		return &ValidationError{Name: "user_concurrency_enabled", err: errors.New(`ent: missing required field "Group.user_concurrency_enabled"`)}
+	}
+	if _, ok := _c.mutation.UserConcurrencyLimit(); !ok {
+		return &ValidationError{Name: "user_concurrency_limit", err: errors.New(`ent: missing required field "Group.user_concurrency_limit"`)}
 	}
 	return nil
 }
@@ -863,6 +905,14 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.MessagesDispatchModelConfig(); ok {
 		_spec.SetField(group.FieldMessagesDispatchModelConfig, field.TypeJSON, value)
 		_node.MessagesDispatchModelConfig = value
+	}
+	if value, ok := _c.mutation.UserConcurrencyEnabled(); ok {
+		_spec.SetField(group.FieldUserConcurrencyEnabled, field.TypeBool, value)
+		_node.UserConcurrencyEnabled = value
+	}
+	if value, ok := _c.mutation.UserConcurrencyLimit(); ok {
+		_spec.SetField(group.FieldUserConcurrencyLimit, field.TypeInt, value)
+		_node.UserConcurrencyLimit = value
 	}
 	if nodes := _c.mutation.APIKeysIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -1500,6 +1550,36 @@ func (u *GroupUpsert) UpdateMessagesDispatchModelConfig() *GroupUpsert {
 	return u
 }
 
+// SetUserConcurrencyEnabled sets the "user_concurrency_enabled" field.
+func (u *GroupUpsert) SetUserConcurrencyEnabled(v bool) *GroupUpsert {
+	u.Set(group.FieldUserConcurrencyEnabled, v)
+	return u
+}
+
+// UpdateUserConcurrencyEnabled sets the "user_concurrency_enabled" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateUserConcurrencyEnabled() *GroupUpsert {
+	u.SetExcluded(group.FieldUserConcurrencyEnabled)
+	return u
+}
+
+// SetUserConcurrencyLimit sets the "user_concurrency_limit" field.
+func (u *GroupUpsert) SetUserConcurrencyLimit(v int) *GroupUpsert {
+	u.Set(group.FieldUserConcurrencyLimit, v)
+	return u
+}
+
+// UpdateUserConcurrencyLimit sets the "user_concurrency_limit" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateUserConcurrencyLimit() *GroupUpsert {
+	u.SetExcluded(group.FieldUserConcurrencyLimit)
+	return u
+}
+
+// AddUserConcurrencyLimit adds v to the "user_concurrency_limit" field.
+func (u *GroupUpsert) AddUserConcurrencyLimit(v int) *GroupUpsert {
+	u.Add(group.FieldUserConcurrencyLimit, v)
+	return u
+}
+
 // UpdateNewValues updates the mutable fields using the new values that were set on create.
 // Using this option is equivalent to using:
 //
@@ -2102,6 +2182,41 @@ func (u *GroupUpsertOne) SetMessagesDispatchModelConfig(v domain.OpenAIMessagesD
 func (u *GroupUpsertOne) UpdateMessagesDispatchModelConfig() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateMessagesDispatchModelConfig()
+	})
+}
+
+// SetUserConcurrencyEnabled sets the "user_concurrency_enabled" field.
+func (u *GroupUpsertOne) SetUserConcurrencyEnabled(v bool) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetUserConcurrencyEnabled(v)
+	})
+}
+
+// UpdateUserConcurrencyEnabled sets the "user_concurrency_enabled" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateUserConcurrencyEnabled() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateUserConcurrencyEnabled()
+	})
+}
+
+// SetUserConcurrencyLimit sets the "user_concurrency_limit" field.
+func (u *GroupUpsertOne) SetUserConcurrencyLimit(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetUserConcurrencyLimit(v)
+	})
+}
+
+// AddUserConcurrencyLimit adds v to the "user_concurrency_limit" field.
+func (u *GroupUpsertOne) AddUserConcurrencyLimit(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddUserConcurrencyLimit(v)
+	})
+}
+
+// UpdateUserConcurrencyLimit sets the "user_concurrency_limit" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateUserConcurrencyLimit() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateUserConcurrencyLimit()
 	})
 }
 
@@ -2873,6 +2988,41 @@ func (u *GroupUpsertBulk) SetMessagesDispatchModelConfig(v domain.OpenAIMessages
 func (u *GroupUpsertBulk) UpdateMessagesDispatchModelConfig() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateMessagesDispatchModelConfig()
+	})
+}
+
+// SetUserConcurrencyEnabled sets the "user_concurrency_enabled" field.
+func (u *GroupUpsertBulk) SetUserConcurrencyEnabled(v bool) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetUserConcurrencyEnabled(v)
+	})
+}
+
+// UpdateUserConcurrencyEnabled sets the "user_concurrency_enabled" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateUserConcurrencyEnabled() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateUserConcurrencyEnabled()
+	})
+}
+
+// SetUserConcurrencyLimit sets the "user_concurrency_limit" field.
+func (u *GroupUpsertBulk) SetUserConcurrencyLimit(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetUserConcurrencyLimit(v)
+	})
+}
+
+// AddUserConcurrencyLimit adds v to the "user_concurrency_limit" field.
+func (u *GroupUpsertBulk) AddUserConcurrencyLimit(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddUserConcurrencyLimit(v)
+	})
+}
+
+// UpdateUserConcurrencyLimit sets the "user_concurrency_limit" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateUserConcurrencyLimit() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateUserConcurrencyLimit()
 	})
 }
 

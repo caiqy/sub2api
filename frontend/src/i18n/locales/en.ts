@@ -1696,6 +1696,11 @@ export default {
         title: 'Image Generation Pricing',
         description: 'Configure pricing for image generation models. Leave empty to use default prices.'
       },
+      userConcurrency: {
+        title: 'User Concurrency Limit',
+        description: 'When enabled, limits the max concurrent requests per user in this group',
+        limit: 'Max Concurrent Per User',
+      },
       claudeCode: {
         title: 'Claude Code Client Restriction',
         tooltip: 'When enabled, this group only allows official Claude Code clients. Non-Claude Code requests will be rejected or fallback to the specified group.',

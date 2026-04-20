@@ -99,6 +99,17 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		defer userReleaseFunc()
 	}
 
+	// Acquire group-level user concurrency slot (if enabled)
+	if apiKey.GroupID != nil && apiKey.Group != nil {
+		groupUserReleaseFunc, groupAcquired := h.acquireUserGroupSlot(c, subject.UserID, *apiKey.GroupID, apiKey.Group, reqStream, &streamStarted, reqLog)
+		if !groupAcquired {
+			return
+		}
+		if groupUserReleaseFunc != nil {
+			defer groupUserReleaseFunc()
+		}
+	}
+
 	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription); err != nil {
 		reqLog.Info("openai_chat_completions.billing_eligibility_check_failed", zap.Error(err))
 		status, code, message := billingErrorDetails(err)

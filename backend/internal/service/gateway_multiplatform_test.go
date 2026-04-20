@@ -2229,6 +2229,14 @@ func (m *mockConcurrencyCache) CleanupStaleProcessSlots(ctx context.Context, act
 	return nil
 }
 
+func (m *mockConcurrencyCache) AcquireUserGroupSlot(ctx context.Context, userID, groupID int64, maxConcurrency int, requestID string) (bool, error) {
+	return true, nil
+}
+
+func (m *mockConcurrencyCache) ReleaseUserGroupSlot(ctx context.Context, userID, groupID int64, requestID string) error {
+	return nil
+}
+
 func (m *mockConcurrencyCache) GetUsersLoadBatch(ctx context.Context, users []UserWithConcurrency) (map[int64]*UserLoadInfo, error) {
 	result := make(map[int64]*UserLoadInfo, len(users))
 	for _, user := range users {
