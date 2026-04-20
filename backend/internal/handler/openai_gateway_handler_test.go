@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -598,6 +599,161 @@ func TestOpenAIResponsesWebSocket_PreviousResponseIDKindLoggedBeforeAcquireFailu
 	require.Contains(t, strings.ToLower(closeErr.Reason), "failed to acquire user concurrency slot")
 }
 
+func TestOpenAIResponsesWebSocket_AcquiresUserGroupSlotWhenEnabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var groupAcquireCalls int32
+	cache := &concurrencyCacheMock{
+		acquireUserSlotFn: func(ctx context.Context, userID int64, maxConcurrency int, requestID string) (bool, error) {
+			return true, nil
+		},
+		acquireUserGroupSlotFn: func(ctx context.Context, userID, groupID int64, maxConcurrency int, requestID string) (bool, error) {
+			atomic.AddInt32(&groupAcquireCalls, 1)
+			return true, nil
+		},
+		acquireAccountSlotFn: func(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
+			return false, errors.New("account slot unavailable")
+		},
+	}
+	h := newOpenAIHandlerForPreviousResponseIDValidation(t, cache)
+	wsServer := newOpenAIWSHandlerTestServerWithAPIKey(t, h, middleware.AuthSubject{UserID: 1, Concurrency: 1}, &service.APIKey{
+		ID:      101,
+		GroupID: ptrInt64(2),
+		User:    &service.User{ID: 1},
+		Group: &service.Group{
+			ID:                     2,
+			UserConcurrencyEnabled: true,
+			UserConcurrencyLimit:   1,
+		},
+	})
+	defer wsServer.Close()
+
+	dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
+	clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(wsServer.URL, "http")+"/openai/v1/responses", nil)
+	cancelDial()
+	require.NoError(t, err)
+	defer func() {
+		_ = clientConn.CloseNow()
+	}()
+
+	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
+	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(
+		`{"type":"response.create","model":"gpt-5.1","stream":false}`,
+	))
+	cancelWrite()
+	require.NoError(t, err)
+
+	readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
+	_, _, err = clientConn.Read(readCtx)
+	cancelRead()
+	require.Error(t, err)
+	require.Equal(t, int32(1), atomic.LoadInt32(&groupAcquireCalls))
+}
+
+func TestOpenAIResponsesWebSocket_ReacquireSlotsOnSecondTurnWithoutDoubleRelease(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cache := &concurrencyCacheMock{
+		acquireUserSlotFn: func(ctx context.Context, userID int64, maxConcurrency int, requestID string) (bool, error) {
+			return true, nil
+		},
+		acquireUserGroupSlotFn: func(ctx context.Context, userID, groupID int64, maxConcurrency int, requestID string) (bool, error) {
+			return true, nil
+		},
+		acquireAccountSlotFn: func(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
+			return true, nil
+		},
+	}
+	env := newOpenAIWSRegressionEnv(t, cache, openAIWSRegressionEnvOptions{})
+	defer env.Close()
+
+	env.RunTwoTurns(t)
+
+	require.Equal(t, int32(2), atomic.LoadInt32(&cache.releaseUserCalled))
+	require.Equal(t, int32(2), atomic.LoadInt32(&cache.releaseUserGroupCalled))
+	require.Equal(t, int32(2), atomic.LoadInt32(&cache.releaseAccountCalled))
+}
+
+func TestOpenAIResponsesWebSocket_SecondTurnGroupAcquireFailureRollsBackUserSlot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var groupAcquireCalls int32
+	cache := &concurrencyCacheMock{
+		acquireUserSlotFn: func(ctx context.Context, userID int64, maxConcurrency int, requestID string) (bool, error) {
+			return true, nil
+		},
+		acquireUserGroupSlotFn: func(ctx context.Context, userID, groupID int64, maxConcurrency int, requestID string) (bool, error) {
+			if atomic.AddInt32(&groupAcquireCalls, 1) == 2 {
+				return false, errors.New("group slot unavailable on second turn")
+			}
+			return true, nil
+		},
+		acquireAccountSlotFn: func(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
+			return true, nil
+		},
+	}
+	env := newOpenAIWSRegressionEnv(t, cache, openAIWSRegressionEnvOptions{ExpectSecondTurnCloseCode: coderws.StatusInternalError})
+	defer env.Close()
+
+	env.RunTwoTurns(t)
+
+	require.Equal(t, int32(2), atomic.LoadInt32(&cache.releaseUserCalled))
+	require.Equal(t, int32(1), atomic.LoadInt32(&cache.releaseUserGroupCalled))
+	require.Equal(t, int32(1), atomic.LoadInt32(&cache.releaseAccountCalled))
+}
+
+func TestOpenAIResponsesWebSocket_SecondTurnAccountAcquireFailureRollsBackUserAndGroupSlots(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var accountAcquireCalls int32
+	cache := &concurrencyCacheMock{
+		acquireUserSlotFn: func(ctx context.Context, userID int64, maxConcurrency int, requestID string) (bool, error) {
+			return true, nil
+		},
+		acquireUserGroupSlotFn: func(ctx context.Context, userID, groupID int64, maxConcurrency int, requestID string) (bool, error) {
+			return true, nil
+		},
+		acquireAccountSlotFn: func(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
+			if atomic.AddInt32(&accountAcquireCalls, 1) == 2 {
+				return false, errors.New("account slot unavailable on second turn")
+			}
+			return true, nil
+		},
+	}
+	env := newOpenAIWSRegressionEnv(t, cache, openAIWSRegressionEnvOptions{ExpectSecondTurnCloseCode: coderws.StatusInternalError})
+	defer env.Close()
+
+	env.RunTwoTurns(t)
+
+	require.Equal(t, int32(2), atomic.LoadInt32(&cache.releaseUserCalled))
+	require.Equal(t, int32(2), atomic.LoadInt32(&cache.releaseUserGroupCalled))
+	require.Equal(t, int32(1), atomic.LoadInt32(&cache.releaseAccountCalled))
+}
+
+func TestOpenAIResponsesWebSocket_GetAccessTokenFailureReleasesInitialSlotsOnce(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cache := &concurrencyCacheMock{
+		acquireUserSlotFn: func(ctx context.Context, userID int64, maxConcurrency int, requestID string) (bool, error) {
+			return true, nil
+		},
+		acquireUserGroupSlotFn: func(ctx context.Context, userID, groupID int64, maxConcurrency int, requestID string) (bool, error) {
+			return true, nil
+		},
+		acquireAccountSlotFn: func(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
+			return true, nil
+		},
+	}
+	env := newOpenAIWSRegressionEnv(t, cache, openAIWSRegressionEnvOptions{MissingAPIKeyCredential: true, SkipUpstream: true})
+	defer env.Close()
+
+	env.RunFirstTurnExpectClose(t, coderws.StatusInternalError)
+
+	require.Equal(t, int32(1), atomic.LoadInt32(&cache.releaseUserCalled))
+	require.Equal(t, int32(1), atomic.LoadInt32(&cache.releaseUserGroupCalled))
+	require.Equal(t, int32(1), atomic.LoadInt32(&cache.releaseAccountCalled))
+}
+
 func TestSetOpenAIClientTransportHTTP(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -747,22 +903,74 @@ func newOpenAIHandlerForPreviousResponseIDValidation(t *testing.T, cache *concur
 			},
 		}
 	}
+	cfg := &config.Config{
+		RunMode: config.RunModeSimple,
+		Default: config.DefaultConfig{RateMultiplier: 1},
+		Gateway: config.GatewayConfig{
+			MaxAccountSwitches: 1,
+			Scheduling:         config.GatewaySchedulingConfig{LoadBatchEnabled: false},
+		},
+		Concurrency: config.ConcurrencyConfig{PingInterval: 0},
+	}
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
+	concurrencyService := service.NewConcurrencyService(cache)
+	accountRepo := &openAIChatCompletionsAccountRepoStub{account: &service.Account{
+		ID:          11,
+		Name:        "openai-test-account",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeAPIKey,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    1,
+		Credentials: map[string]any{"api_key": "sk-test"},
+	}}
+	deferredService := service.NewDeferredService(accountRepo, nil, 0)
+	billingService := service.NewBillingService(cfg, nil)
+	gatewayService := service.NewOpenAIGatewayService(
+		accountRepo,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		openAIChatCompletionsGatewayCacheStub{},
+		cfg,
+		nil,
+		concurrencyService,
+		billingService,
+		nil,
+		billingCacheService,
+		nil,
+		deferredService,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+	t.Cleanup(func() {
+		billingCacheService.Stop()
+	})
 	return &OpenAIGatewayHandler{
-		gatewayService:      &service.OpenAIGatewayService{},
-		billingCacheService: &service.BillingCacheService{},
+		gatewayService:      gatewayService,
+		billingCacheService: billingCacheService,
 		apiKeyService:       &service.APIKeyService{},
-		concurrencyHelper:   NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatNone, time.Second),
+		concurrencyHelper:   NewConcurrencyHelper(concurrencyService, SSEPingFormatNone, time.Second),
 	}
 }
 
 func newOpenAIWSHandlerTestServer(t *testing.T, h *OpenAIGatewayHandler, subject middleware.AuthSubject) *httptest.Server {
 	t.Helper()
-	groupID := int64(2)
 	apiKey := &service.APIKey{
 		ID:      101,
-		GroupID: &groupID,
+		GroupID: ptrInt64(2),
 		User:    &service.User{ID: subject.UserID},
 	}
+	return newOpenAIWSHandlerTestServerWithAPIKey(t, h, subject, apiKey)
+}
+
+func newOpenAIWSHandlerTestServerWithAPIKey(t *testing.T, h *OpenAIGatewayHandler, subject middleware.AuthSubject, apiKey *service.APIKey) *httptest.Server {
+	t.Helper()
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
@@ -771,6 +979,263 @@ func newOpenAIWSHandlerTestServer(t *testing.T, h *OpenAIGatewayHandler, subject
 	})
 	router.GET("/openai/v1/responses", h.ResponsesWebSocket)
 	return httptest.NewServer(router)
+}
+
+func ptrInt64(v int64) *int64 {
+	return &v
+}
+
+type openAIWSRegressionEnvOptions struct {
+	ExpectSecondTurnCloseCode coderws.StatusCode
+	MissingAPIKeyCredential   bool
+	SkipUpstream              bool
+}
+
+type openAIWSRegressionEnv struct {
+	t           *testing.T
+	opts        openAIWSRegressionEnvOptions
+	server      *httptest.Server
+	upstream    *httptest.Server
+	requestDone chan struct{}
+}
+
+func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts openAIWSRegressionEnvOptions) *openAIWSRegressionEnv {
+	t.Helper()
+
+	cfg := &config.Config{}
+	cfg.RunMode = config.RunModeSimple
+	cfg.Default.RateMultiplier = 1
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	cfg.Gateway.MaxAccountSwitches = 1
+	cfg.Gateway.Scheduling.LoadBatchEnabled = false
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.OAuthEnabled = true
+	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
+	cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
+	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
+	cfg.Gateway.OpenAIWS.QueueLimitPerConn = 8
+	cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
+	cfg.Concurrency.PingInterval = 0
+
+	var upstreamServer *httptest.Server
+	if !opts.SkipUpstream {
+		upstreamServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			conn, err := coderws.Accept(w, r, &coderws.AcceptOptions{CompressionMode: coderws.CompressionContextTakeover})
+			if err != nil {
+				return
+			}
+			defer func() {
+				_ = conn.CloseNow()
+			}()
+
+			turn := 0
+			for {
+				readCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+				_, _, err := conn.Read(readCtx)
+				cancel()
+				if err != nil {
+					return
+				}
+				turn++
+				writeCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+				err = conn.Write(writeCtx, coderws.MessageText, []byte(fmt.Sprintf(`{"type":"response.completed","response":{"id":"resp_ingress_turn_%d","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`, turn)))
+				cancel()
+				if err != nil {
+					return
+				}
+			}
+		}))
+	}
+
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
+	t.Cleanup(func() {
+		billingCacheService.Stop()
+	})
+	concurrencyService := service.NewConcurrencyService(cache)
+	credentials := map[string]any{}
+	if !opts.MissingAPIKeyCredential {
+		credentials["api_key"] = "sk-test"
+	}
+	if upstreamServer != nil {
+		credentials["base_url"] = upstreamServer.URL
+	}
+	accountRepo := &openAIChatCompletionsAccountRepoStub{account: &service.Account{
+		ID:          11,
+		Name:        "openai-ws-regression-account",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeAPIKey,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    1,
+		Credentials: credentials,
+		Extra: map[string]any{
+			"responses_websockets_v2_enabled": true,
+		},
+	}}
+	deferredService := service.NewDeferredService(accountRepo, nil, 0)
+	billingService := service.NewBillingService(cfg, nil)
+	gatewayService := service.NewOpenAIGatewayService(
+		accountRepo,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		openAIChatCompletionsGatewayCacheStub{},
+		cfg,
+		nil,
+		concurrencyService,
+		billingService,
+		nil,
+		billingCacheService,
+		nil,
+		deferredService,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, cfg)
+
+	groupID := int64(2)
+	apiKey := &service.APIKey{
+		ID:      101,
+		GroupID: &groupID,
+		User:    &service.User{ID: 1},
+		Group: &service.Group{
+			ID:                     groupID,
+			UserConcurrencyEnabled: true,
+			UserConcurrencyLimit:   1,
+		},
+	}
+	requestDone := make(chan struct{}, 1)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 1, Concurrency: 1})
+		c.Next()
+	})
+	router.GET("/openai/v1/responses", func(c *gin.Context) {
+		defer func() {
+			requestDone <- struct{}{}
+		}()
+		h.ResponsesWebSocket(c)
+	})
+
+	return &openAIWSRegressionEnv{
+		t:           t,
+		opts:        opts,
+		server:      httptest.NewServer(router),
+		upstream:    upstreamServer,
+		requestDone: requestDone,
+	}
+}
+
+func (e *openAIWSRegressionEnv) Close() {
+	if e.upstream != nil {
+		e.upstream.Close()
+	}
+	if e.server != nil {
+		e.server.Close()
+	}
+}
+
+func (e *openAIWSRegressionEnv) RunFirstTurnExpectClose(t *testing.T, closeCode coderws.StatusCode) {
+	t.Helper()
+	clientConn := e.dial(t)
+	defer func() {
+		_ = clientConn.CloseNow()
+	}()
+
+	e.writeMessage(t, clientConn, `{"type":"response.create","model":"gpt-5.1","stream":false}`)
+	e.readCloseError(t, clientConn, closeCode)
+	e.waitRequestDone(t)
+}
+
+func (e *openAIWSRegressionEnv) RunTwoTurns(t *testing.T) {
+	t.Helper()
+	clientConn := e.dial(t)
+	defer func() {
+		_ = clientConn.CloseNow()
+	}()
+
+	e.writeMessage(t, clientConn, `{"type":"response.create","model":"gpt-5.1","stream":false}`)
+	firstTurnEvent := e.readMessage(t, clientConn)
+	require.Equal(t, "response.completed", gjson.GetBytes(firstTurnEvent, "type").String())
+	require.Equal(t, "resp_ingress_turn_1", gjson.GetBytes(firstTurnEvent, "response.id").String())
+
+	e.writeMessage(t, clientConn, `{"type":"response.create","model":"gpt-5.1","stream":false,"previous_response_id":"resp_ingress_turn_1"}`)
+	if e.expectSecondTurnCloseCode() != 0 {
+		e.readCloseError(t, clientConn, e.expectSecondTurnCloseCode())
+		e.waitRequestDone(t)
+		return
+	}
+
+	secondTurnEvent := e.readMessage(t, clientConn)
+	require.Equal(t, "response.completed", gjson.GetBytes(secondTurnEvent, "type").String())
+	require.Equal(t, "resp_ingress_turn_2", gjson.GetBytes(secondTurnEvent, "response.id").String())
+
+	require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
+	e.waitRequestDone(t)
+}
+
+func (e *openAIWSRegressionEnv) expectSecondTurnCloseCode() coderws.StatusCode {
+	if e == nil {
+		return 0
+	}
+	return e.opts.ExpectSecondTurnCloseCode
+}
+
+func (e *openAIWSRegressionEnv) dial(t *testing.T) *coderws.Conn {
+	t.Helper()
+	dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
+	clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(e.server.URL, "http")+"/openai/v1/responses", nil)
+	cancelDial()
+	require.NoError(t, err)
+	return clientConn
+}
+
+func (e *openAIWSRegressionEnv) writeMessage(t *testing.T, conn *coderws.Conn, payload string) {
+	t.Helper()
+	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancelWrite()
+	require.NoError(t, conn.Write(writeCtx, coderws.MessageText, []byte(payload)))
+}
+
+func (e *openAIWSRegressionEnv) readMessage(t *testing.T, conn *coderws.Conn) []byte {
+	t.Helper()
+	readCtx, cancelRead := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelRead()
+	msgType, message, err := conn.Read(readCtx)
+	require.NoError(t, err)
+	require.Equal(t, coderws.MessageText, msgType)
+	return message
+}
+
+func (e *openAIWSRegressionEnv) readCloseError(t *testing.T, conn *coderws.Conn, closeCode coderws.StatusCode) {
+	t.Helper()
+	readCtx, cancelRead := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelRead()
+	_, _, err := conn.Read(readCtx)
+	require.Error(t, err)
+	var closeErr coderws.CloseError
+	require.ErrorAs(t, err, &closeErr)
+	require.Equal(t, closeCode, closeErr.Code)
+}
+
+func (e *openAIWSRegressionEnv) waitRequestDone(t *testing.T) {
+	t.Helper()
+	select {
+	case <-e.requestDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("等待 websocket handler 结束超时")
+	}
 }
 
 func TestOpenAIGatewayHandler_ChatCompletionsPassesDetailSnapshotToRecordUsage(t *testing.T) {

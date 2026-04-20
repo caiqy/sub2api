@@ -239,6 +239,14 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		defer userReleaseFunc()
 	}
 
+	userGroupReleaseFunc, ok := h.acquireUserGroupSlot(c, geminiConcurrency, authSubject.UserID, apiKey.GroupID, apiKey.Group, stream, &streamStarted, reqLog)
+	if !ok {
+		return
+	}
+	if userGroupReleaseFunc != nil {
+		defer userGroupReleaseFunc()
+	}
+
 	// 2) billing eligibility check (after wait)
 	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription); err != nil {
 		reqLog.Info("gemini.billing_eligibility_check_failed", zap.Error(err))

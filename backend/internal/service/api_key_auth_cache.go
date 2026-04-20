@@ -76,6 +76,8 @@ type APIKeyAuthGroupSnapshot struct {
 	AllowMessagesDispatch       bool                              `json:"allow_messages_dispatch"`
 	DefaultMappedModel          string                            `json:"default_mapped_model,omitempty"`
 	MessagesDispatchModelConfig OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config,omitempty"`
+	UserConcurrencyEnabled      bool                              `json:"user_concurrency_enabled"`
+	UserConcurrencyLimit        int                               `json:"user_concurrency_limit"`
 }
 
 // APIKeyAuthCacheEntry 缓存条目，支持负缓存

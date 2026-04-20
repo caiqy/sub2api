@@ -271,6 +271,99 @@ func TestAPIKeyService_SnapshotRoundTrip_PreservesMessagesDispatchModelConfig(t 
 	require.Equal(t, apiKey.Group.MessagesDispatchModelConfig, roundTrip.Group.MessagesDispatchModelConfig)
 }
 
+func TestAPIKeyService_SnapshotRoundTrip_PreservesGroupUserConcurrencyFields(t *testing.T) {
+	svc := NewAPIKeyService(nil, nil, nil, nil, nil, nil, &config.Config{})
+	groupID := int64(9)
+	apiKey := &APIKey{
+		ID:      1,
+		UserID:  2,
+		GroupID: &groupID,
+		Key:     "k-roundtrip-group-user-concurrency",
+		Status:  StatusActive,
+		User: &User{
+			ID:          2,
+			Status:      StatusActive,
+			Role:        RoleUser,
+			Balance:     10,
+			Concurrency: 3,
+		},
+		Group: &Group{
+			ID:                     groupID,
+			Name:                   "anthropic",
+			Platform:               PlatformAnthropic,
+			Status:                 StatusActive,
+			SubscriptionType:       SubscriptionTypeStandard,
+			RateMultiplier:         1,
+			UserConcurrencyEnabled: true,
+			UserConcurrencyLimit:   7,
+		},
+	}
+
+	snapshot := svc.snapshotFromAPIKey(apiKey)
+	roundTrip := svc.snapshotToAPIKey(apiKey.Key, snapshot)
+
+	require.NotNil(t, roundTrip)
+	require.NotNil(t, roundTrip.Group)
+	require.Equal(t, apiKey.Group.UserConcurrencyEnabled, roundTrip.Group.UserConcurrencyEnabled)
+	require.Equal(t, apiKey.Group.UserConcurrencyLimit, roundTrip.Group.UserConcurrencyLimit)
+}
+
+func TestAPIKeyService_GetByKey_CacheHitPreservesGroupUserConcurrencyFields(t *testing.T) {
+	var repoCalls int32
+	repo := &authRepoStub{
+		getByKeyForAuth: func(ctx context.Context, key string) (*APIKey, error) {
+			atomic.AddInt32(&repoCalls, 1)
+			groupID := int64(9)
+			return &APIKey{
+				ID:      1,
+				UserID:  2,
+				GroupID: &groupID,
+				Status:  StatusActive,
+				User: &User{
+					ID:          2,
+					Status:      StatusActive,
+					Role:        RoleUser,
+					Balance:     10,
+					Concurrency: 3,
+				},
+				Group: &Group{
+					ID:                     groupID,
+					Name:                   "anthropic",
+					Platform:               PlatformAnthropic,
+					Status:                 StatusActive,
+					Hydrated:               true,
+					SubscriptionType:       SubscriptionTypeStandard,
+					RateMultiplier:         1,
+					UserConcurrencyEnabled: true,
+					UserConcurrencyLimit:   7,
+				},
+			}, nil
+		},
+	}
+	cache := &authCacheStub{}
+	cfg := &config.Config{
+		APIKeyAuth: config.APIKeyAuthCacheConfig{
+			L1Size:       1000,
+			L1TTLSeconds: 60,
+		},
+	}
+	svc := NewAPIKeyService(repo, nil, nil, nil, nil, cache, cfg)
+
+	first, err := svc.GetByKey(context.Background(), "k-cache-hit-group-user-concurrency")
+	require.NoError(t, err)
+	require.NotNil(t, first.Group)
+	require.True(t, first.Group.UserConcurrencyEnabled)
+	require.Equal(t, 7, first.Group.UserConcurrencyLimit)
+
+	svc.authCacheL1.Wait()
+	second, err := svc.GetByKey(context.Background(), "k-cache-hit-group-user-concurrency")
+	require.NoError(t, err)
+	require.NotNil(t, second.Group)
+	require.True(t, second.Group.UserConcurrencyEnabled)
+	require.Equal(t, 7, second.Group.UserConcurrencyLimit)
+	require.Equal(t, int32(1), atomic.LoadInt32(&repoCalls))
+}
+
 func TestAPIKeyService_GetByKey_IgnoresLegacyAuthCacheSnapshotWithoutMessagesDispatchConfig(t *testing.T) {
 	cache := &authCacheStub{}
 	var repoCalls int32

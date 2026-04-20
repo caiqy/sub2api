@@ -107,6 +107,57 @@ func NewGatewayHandler(
 	}
 }
 
+func (h *GatewayHandler) acquireUserGroupSlot(
+	c *gin.Context,
+	helper *ConcurrencyHelper,
+	userID int64,
+	groupID *int64,
+	group *service.Group,
+	reqStream bool,
+	streamStarted *bool,
+	reqLog *zap.Logger,
+) (func(), bool) {
+	if groupID == nil || group == nil || !group.UserConcurrencyEnabled || group.UserConcurrencyLimit <= 0 {
+		return nil, true
+	}
+	if helper == nil {
+		helper = h.concurrencyHelper
+	}
+	if helper == nil {
+		return nil, true
+	}
+	if reqLog == nil {
+		reqLog = zap.NewNop()
+	}
+	effectiveStreamStarted := streamStarted
+	if effectiveStreamStarted == nil {
+		started := false
+		effectiveStreamStarted = &started
+	}
+
+	ctx := c.Request.Context()
+	limit := group.UserConcurrencyLimit
+
+	releaseFunc, acquired, err := helper.TryAcquireUserGroupSlot(ctx, userID, *groupID, limit)
+	if err != nil {
+		reqLog.Warn("gateway.user_group_slot_acquire_failed", zap.Error(err), zap.Int64("group_id", *groupID))
+		h.handleConcurrencyError(c, err, "user_group", *effectiveStreamStarted)
+		return nil, false
+	}
+	if acquired {
+		return wrapReleaseOnDone(ctx, releaseFunc), true
+	}
+
+	releaseFunc, err = helper.AcquireUserGroupSlotWithWait(c, userID, *groupID, limit, reqStream, effectiveStreamStarted)
+	if err != nil {
+		reqLog.Warn("gateway.user_group_slot_acquire_failed_after_wait", zap.Error(err), zap.Int64("group_id", *groupID))
+		h.handleConcurrencyError(c, err, "user_group", *effectiveStreamStarted)
+		return nil, false
+	}
+
+	return wrapReleaseOnDone(ctx, releaseFunc), true
+}
+
 // Messages handles Claude API compatible messages endpoint
 // POST /v1/messages
 func (h *GatewayHandler) Messages(c *gin.Context) {
@@ -238,6 +289,14 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	userReleaseFunc = wrapReleaseOnDone(c.Request.Context(), userReleaseFunc)
 	if userReleaseFunc != nil {
 		defer userReleaseFunc()
+	}
+
+	userGroupReleaseFunc, ok := h.acquireUserGroupSlot(c, h.concurrencyHelper, subject.UserID, apiKey.GroupID, apiKey.Group, reqStream, &streamStarted, reqLog)
+	if !ok {
+		return
+	}
+	if userGroupReleaseFunc != nil {
+		defer userGroupReleaseFunc()
 	}
 
 	// 2. 【新增】Wait后二次检查余额/订阅

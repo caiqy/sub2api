@@ -1201,11 +1201,16 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	channelMappingWS, _ := h.gatewayService.ResolveChannelMappingAndRestrict(ctx, apiKey.GroupID, reqModel)
 
 	var currentUserRelease func()
+	var currentUserGroupRelease func()
 	var currentAccountRelease func()
 	releaseTurnSlots := func() {
 		if currentAccountRelease != nil {
 			currentAccountRelease()
 			currentAccountRelease = nil
+		}
+		if currentUserGroupRelease != nil {
+			currentUserGroupRelease()
+			currentUserGroupRelease = nil
 		}
 		if currentUserRelease != nil {
 			currentUserRelease()
@@ -1226,6 +1231,22 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		return
 	}
 	currentUserRelease = wrapReleaseOnDone(ctx, userReleaseFunc)
+
+	if apiKey.GroupID != nil && apiKey.Group != nil && apiKey.Group.UserConcurrencyEnabled && apiKey.Group.UserConcurrencyLimit > 0 {
+		groupUserReleaseFunc, groupUserAcquired, err := h.concurrencyHelper.TryAcquireUserGroupSlot(ctx, subject.UserID, *apiKey.GroupID, apiKey.Group.UserConcurrencyLimit)
+		if err != nil {
+			releaseTurnSlots()
+			reqLog.Warn("openai.websocket_user_group_slot_acquire_failed", zap.Error(err), zap.Int64("group_id", *apiKey.GroupID))
+			closeOpenAIClientWS(wsConn, coderws.StatusInternalError, "failed to acquire user group concurrency slot")
+			return
+		}
+		if !groupUserAcquired {
+			releaseTurnSlots()
+			closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "too many concurrent requests, please retry later")
+			return
+		}
+		currentUserGroupRelease = wrapReleaseOnDone(ctx, groupUserReleaseFunc)
+	}
 
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	if err := h.billingCacheService.CheckBillingEligibility(ctx, apiKey.User, apiKey, apiKey.Group, subscription); err != nil {
@@ -1275,11 +1296,13 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			selection.WaitPlan.MaxConcurrency,
 		)
 		if err != nil {
+			releaseTurnSlots()
 			reqLog.Warn("openai.websocket_account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			closeOpenAIClientWS(wsConn, coderws.StatusInternalError, "failed to acquire account concurrency slot")
 			return
 		}
 		if !fastAcquired {
+			releaseTurnSlots()
 			closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "account is busy, please retry later")
 			return
 		}
@@ -1319,20 +1342,44 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			if !userAcquired {
 				return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "too many concurrent requests, please retry later", nil)
 			}
+			var groupUserReleaseFunc func()
+			var userGroupAcquired bool
+			if apiKey.GroupID != nil && apiKey.Group != nil && apiKey.Group.UserConcurrencyEnabled && apiKey.Group.UserConcurrencyLimit > 0 {
+				groupUserReleaseFunc, userGroupAcquired, err = h.concurrencyHelper.TryAcquireUserGroupSlot(ctx, subject.UserID, *apiKey.GroupID, apiKey.Group.UserConcurrencyLimit)
+				if err != nil {
+					if userReleaseFunc != nil {
+						userReleaseFunc()
+					}
+					return service.NewOpenAIWSClientCloseError(coderws.StatusInternalError, "failed to acquire user group concurrency slot", err)
+				}
+				if !userGroupAcquired {
+					if userReleaseFunc != nil {
+						userReleaseFunc()
+					}
+					return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "too many concurrent requests, please retry later", nil)
+				}
+			}
 			accountReleaseFunc, accountAcquired, err := h.concurrencyHelper.TryAcquireAccountSlot(ctx, account.ID, accountMaxConcurrency)
 			if err != nil {
+				if groupUserReleaseFunc != nil {
+					groupUserReleaseFunc()
+				}
 				if userReleaseFunc != nil {
 					userReleaseFunc()
 				}
 				return service.NewOpenAIWSClientCloseError(coderws.StatusInternalError, "failed to acquire account concurrency slot", err)
 			}
 			if !accountAcquired {
+				if groupUserReleaseFunc != nil {
+					groupUserReleaseFunc()
+				}
 				if userReleaseFunc != nil {
 					userReleaseFunc()
 				}
 				return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "account is busy, please retry later", nil)
 			}
 			currentUserRelease = wrapReleaseOnDone(ctx, userReleaseFunc)
+			currentUserGroupRelease = wrapReleaseOnDone(ctx, groupUserReleaseFunc)
 			currentAccountRelease = wrapReleaseOnDone(ctx, accountReleaseFunc)
 			return nil
 		},

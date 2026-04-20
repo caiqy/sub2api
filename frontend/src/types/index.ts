@@ -523,6 +523,8 @@ export interface CreateGroupRequest {
   claude_code_only?: boolean
   fallback_group_id?: number | null
   fallback_group_id_on_invalid_request?: number | null
+  user_concurrency_enabled?: boolean
+  user_concurrency_limit?: number
   mcp_xml_inject?: boolean
   supported_model_scopes?: string[]
   require_oauth_only?: boolean
@@ -548,6 +550,8 @@ export interface UpdateGroupRequest {
   claude_code_only?: boolean
   fallback_group_id?: number | null
   fallback_group_id_on_invalid_request?: number | null
+  user_concurrency_enabled?: boolean
+  user_concurrency_limit?: number
   mcp_xml_inject?: boolean
   supported_model_scopes?: string[]
   require_oauth_only?: boolean

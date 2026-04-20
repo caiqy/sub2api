@@ -133,6 +133,14 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		defer userReleaseFunc()
 	}
 
+	userGroupReleaseFunc, ok := h.acquireUserGroupSlot(c, h.concurrencyHelper, subject.UserID, apiKey.GroupID, apiKey.Group, reqStream, &streamStarted, reqLog)
+	if !ok {
+		return
+	}
+	if userGroupReleaseFunc != nil {
+		defer userGroupReleaseFunc()
+	}
+
 	// 2. Re-check billing
 	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription); err != nil {
 		reqLog.Info("gateway.cc.billing_check_failed", zap.Error(err))

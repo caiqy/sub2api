@@ -11,10 +11,12 @@ import (
 )
 
 type concurrencyCacheMock struct {
-	acquireUserSlotFn    func(ctx context.Context, userID int64, maxConcurrency int, requestID string) (bool, error)
-	acquireAccountSlotFn func(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error)
-	releaseUserCalled    int32
-	releaseAccountCalled int32
+	acquireUserSlotFn      func(ctx context.Context, userID int64, maxConcurrency int, requestID string) (bool, error)
+	acquireUserGroupSlotFn func(ctx context.Context, userID, groupID int64, maxConcurrency int, requestID string) (bool, error)
+	acquireAccountSlotFn   func(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error)
+	releaseUserCalled      int32
+	releaseUserGroupCalled int32
+	releaseAccountCalled   int32
 }
 
 func (m *concurrencyCacheMock) AcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
@@ -94,10 +96,14 @@ func (m *concurrencyCacheMock) CleanupStaleProcessSlots(ctx context.Context, act
 }
 
 func (m *concurrencyCacheMock) AcquireUserGroupSlot(ctx context.Context, userID, groupID int64, maxConcurrency int, requestID string) (bool, error) {
+	if m.acquireUserGroupSlotFn != nil {
+		return m.acquireUserGroupSlotFn(ctx, userID, groupID, maxConcurrency, requestID)
+	}
 	return true, nil
 }
 
 func (m *concurrencyCacheMock) ReleaseUserGroupSlot(ctx context.Context, userID, groupID int64, requestID string) error {
+	atomic.AddInt32(&m.releaseUserGroupCalled, 1)
 	return nil
 }
 

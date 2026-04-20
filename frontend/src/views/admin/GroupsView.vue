@@ -2813,6 +2813,10 @@ import {
   resetMessagesDispatchFormState,
   type MessagesDispatchMappingRow,
 } from "./groupsMessagesDispatch";
+import {
+  applyGroupUserConcurrencyToEditForm,
+  resetGroupUserConcurrencyCreateForm,
+} from "./groupsUserConcurrency";
 
 const { t } = useI18n();
 const appStore = useAppStore();
@@ -3533,6 +3537,7 @@ const closeCreateModal = () => {
   createForm.claude_code_only = false;
   createForm.fallback_group_id = null;
   createForm.fallback_group_id_on_invalid_request = null;
+  resetGroupUserConcurrencyCreateForm(createForm);
   resetMessagesDispatchFormState(createForm);
   createForm.require_oauth_only = false;
   createForm.require_privacy_set = false;
@@ -3637,8 +3642,7 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.fallback_group_id = group.fallback_group_id;
   editForm.fallback_group_id_on_invalid_request =
     group.fallback_group_id_on_invalid_request;
-  editForm.user_concurrency_enabled = group.user_concurrency_enabled || false;
-  editForm.user_concurrency_limit = group.user_concurrency_limit > 0 ? group.user_concurrency_limit : 1;
+  applyGroupUserConcurrencyToEditForm(editForm, group);
   const messagesDispatchFormState = messagesDispatchConfigToFormState(
     group.messages_dispatch_model_config,
   );
