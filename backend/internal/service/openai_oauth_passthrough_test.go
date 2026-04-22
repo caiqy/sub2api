@@ -561,8 +561,6 @@ func TestOpenAIGatewayService_OpenAIPassthrough_429And529TriggerFailover(t *test
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
 			c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
-			collector := &usageDetailCollectorStub{}
-			c.Set(UsageDetailCaptureContextKey, collector)
 
 			resp := &http.Response{
 				StatusCode: tc.statusCode,
@@ -595,6 +593,8 @@ func TestOpenAIGatewayService_OpenAIPassthrough_429And529TriggerFailover(t *test
 			var failoverErr *UpstreamFailoverError
 			require.ErrorAs(t, err, &failoverErr)
 			require.Equal(t, tc.statusCode, failoverErr.StatusCode)
+			require.Equal(t, resp.Header, failoverErr.ResponseHeaders)
+			require.Equal(t, tc.body, string(failoverErr.ResponseBody))
 			require.False(t, c.Writer.Written(), "429/529 passthrough 应返回 failover 错误给上层换号，而不是直接向客户端写响应")
 
 			v, ok := c.Get(OpsUpstreamErrorsKey)
@@ -605,10 +605,6 @@ func TestOpenAIGatewayService_OpenAIPassthrough_429And529TriggerFailover(t *test
 			require.True(t, arr[len(arr)-1].Passthrough)
 			require.Equal(t, "failover", arr[len(arr)-1].Kind)
 			require.Equal(t, tc.statusCode, arr[len(arr)-1].UpstreamStatusCode)
-			require.Contains(t, collector.responseHeaders, fmt.Sprintf(":status: %d", tc.statusCode))
-			require.Contains(t, collector.responseBody, tc.body)
-			require.Contains(t, collector.upstreamHeaders, fmt.Sprintf(":status: %d", tc.statusCode))
-			require.Contains(t, collector.upstreamBody, tc.body)
 
 			tc.assertRepo(t, repo, start)
 		})
