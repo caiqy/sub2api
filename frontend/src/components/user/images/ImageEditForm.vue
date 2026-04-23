@@ -52,8 +52,23 @@
       <div>
         <label class="input-label mb-1.5 block" for="image-edit-size">{{ t('images.forms.generate.size') }}</label>
         <select id="image-edit-size" v-model="form.size" :class="selectClass">
-          <option v-for="option in sizeOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+          <option v-for="option in sizeOptions" :key="option.value" :value="option.value">
+            {{ option.value === CUSTOM_IMAGE_SIZE_OPTION_VALUE ? t('images.forms.generate.customSize') : option.label }}
+          </option>
         </select>
+        <div v-if="form.size === CUSTOM_IMAGE_SIZE_OPTION_VALUE" class="mt-3">
+          <label class="input-label mb-1.5 block" for="image-edit-custom-size">{{ t('images.forms.generate.customSize') }}</label>
+          <input
+            id="image-edit-custom-size"
+            v-model.trim="customSize"
+            class="input w-full"
+            :placeholder="t('images.forms.generate.customSizePlaceholder')"
+            data-testid="image-edit-custom-size"
+            type="text"
+            @input="handleCustomSizeInput"
+          />
+        </div>
+        <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400" data-testid="image-edit-size-hint">{{ t('images.forms.generate.sizeHint') }}</p>
       </div>
 
       <div>
@@ -111,7 +126,7 @@
 import { computed, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { createDefaultImageFormValues, useImageFormOptions } from '@/composables/useImageFormOptions'
+import { CUSTOM_IMAGE_SIZE_OPTION_VALUE, createDefaultImageFormValues, isPresetImageSize, useImageFormOptions } from '@/composables/useImageFormOptions'
 import type { ImageCommonFormValues } from '@/composables/useImageFormOptions'
 
 interface Props {
@@ -131,10 +146,15 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const defaultValues = createDefaultImageFormValues()
+const initialSize = props.initialValues.size
+const usesPresetInitialSize = !initialSize || isPresetImageSize(initialSize)
 const form = reactive({
-  ...createDefaultImageFormValues(),
+  ...defaultValues,
   ...props.initialValues,
+  size: usesPresetInitialSize ? (initialSize ?? defaultValues.size) : CUSTOM_IMAGE_SIZE_OPTION_VALUE,
 })
+const customSize = ref(usesPresetInitialSize ? '' : initialSize ?? '')
 const sourceImage = ref<File | null>(null)
 const maskImage = ref<File | null>(null)
 const hasInvalidSourceImage = ref(false)
@@ -152,6 +172,12 @@ function isImageFile(file: File | null): file is File {
 
 function handlePromptInput() {
   if (form.prompt.trim() && validationError.value === t('images.forms.generate.promptRequired')) {
+    validationError.value = ''
+  }
+}
+
+function handleCustomSizeInput() {
+  if (customSize.value.trim()) {
     validationError.value = ''
   }
 }
@@ -189,6 +215,12 @@ function handleSubmit() {
     return
   }
 
+  const size = form.size === CUSTOM_IMAGE_SIZE_OPTION_VALUE ? customSize.value.trim() : form.size
+  if (!size) {
+    validationError.value = t('images.forms.generate.customSizeRequired')
+    return
+  }
+
   if (hasInvalidSourceImage.value) {
     validationError.value = t('images.forms.edit.sourceImageInvalid')
     return
@@ -212,7 +244,7 @@ function handleSubmit() {
   payload.append('prompt', prompt)
   payload.append('image', sourceImage.value)
   payload.append('model', form.model)
-  payload.append('size', form.size)
+  payload.append('size', size)
   payload.append('quality', form.quality)
   payload.append('background', form.background)
   payload.append('output_format', form.output_format)

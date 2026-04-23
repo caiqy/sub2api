@@ -1118,6 +1118,119 @@ export default {
     selectDateRange: '选择日期范围'
   },
 
+  images: {
+    badge: 'AI 生图工作台',
+    title: 'AI生图',
+    description: '在一个页面中完成 AI 图片生成、编辑与历史查看。',
+    tabs: {
+      ariaLabel: 'AI 生图功能标签',
+      generate: '生成',
+      edit: '编辑',
+      history: '历史'
+    },
+    keySelector: {
+      label: 'API 密钥',
+      loading: '正在加载 API 密钥...',
+      placeholder: '选择一个 API 密钥',
+      empty: '当前页暂无可用 API 密钥',
+      count: '当前页已加载 {count} 个 API 密钥',
+      pageHint: '默认仅使用当前页的第一个 API 密钥，后续任务会补充更完整的选择逻辑。',
+      loadFailed: 'API 密钥加载失败，请重试。',
+      retry: '重新加载'
+    },
+    summary: {
+      selectedTab: '当前标签',
+      selectedKey: '当前密钥',
+      placeholder: '每次提交后的最新结果会展示在右侧结果区。'
+    },
+    panels: {
+      generate: {
+        title: '生成',
+        description: '基于提示词与标准网关参数发起全新图片生成。'
+      },
+      edit: {
+        title: '编辑',
+        description: '上传源图、可选遮罩，并以 multipart 方式提交编辑请求。'
+      },
+      history: {
+        title: '历史',
+        description: '查看历史图片请求，并将参数回填到表单。'
+      }
+    },
+    forms: {
+      generate: {
+        prompt: '提示词',
+        promptPlaceholder: '描述你想创建的图片',
+        model: '模型',
+        size: '尺寸',
+        sizeHint: '这里展示的是官方常用预设尺寸。GPT Image 2 也支持 auto，以及更多满足 OpenAI 约束条件的自定义尺寸。',
+        customSize: '自定义尺寸',
+        customSizePlaceholder: '例如 2048x1152',
+        customSizeRequired: '请输入自定义尺寸。',
+        quality: '质量',
+        background: '背景',
+        outputFormat: '输出格式',
+        moderation: '审核级别',
+        n: '生成数量',
+        submit: '生成图片',
+        submitting: '生成中...',
+        apiKeyRequired: '请先选择一个 API 密钥再提交。',
+        promptRequired: '提示词不能为空。'
+      },
+      edit: {
+        sourceImage: '源图片',
+        sourceImageHint: '支持 PNG、WEBP 或 JPEG。',
+        sourceImageInvalid: '源图片必须是图片文件。',
+        maskImage: '遮罩图片',
+        maskImageHint: '透明区域表示允许编辑的范围。',
+        sourceImageRequired: '必须上传源图片。',
+        submit: '编辑图片',
+        submitting: '编辑中...'
+      }
+    },
+    results: {
+      title: '结果',
+      description: '这里会展示最新一次网关返回的图片预览。',
+      loading: '正在加载最新结果...',
+      empty: '提交一次生成或编辑请求后，这里会显示结果。',
+      errorTitle: '请求失败',
+      revisedPrompt: '修订后的提示词'
+    },
+    history: {
+      listTitle: '最近请求',
+      empty: '还没有图片历史记录。',
+      loading: '正在加载图片历史...',
+      loadFailed: '加载图片历史失败。',
+      retry: '重试',
+      detailTitle: '历史详情',
+      detailEmpty: '选择一条历史记录后可查看详情。',
+      detailLoading: '正在加载历史详情...',
+      detailLoadFailed: '加载历史详情失败。',
+      prompt: '提示词',
+      parameters: '参数',
+      images: '图片',
+      status: '状态',
+      apiKey: 'API 密钥',
+      createdAt: '创建时间',
+      count: '图片数量',
+      errorMessage: '错误信息',
+      replay: '回填到表单',
+      booleanYes: '是',
+      booleanNo: '否',
+      hadSourceImage: '已上传源图',
+      hadMask: '已上传遮罩',
+      replayEditNotice: '已回填编辑参数。再次提交前需要重新上传源图，如有需要也请重新上传遮罩。',
+      modes: {
+        generate: '生成',
+        edit: '编辑'
+      },
+      statuses: {
+        success: '成功',
+        error: '失败'
+      }
+    }
+  },
+
   // Admin
   admin: {
     // Dashboard
@@ -3707,115 +3820,6 @@ export default {
       failedToUpdate: '更新优惠码失败',
       failedToDelete: '删除优惠码失败',
       failedToLoadUsages: '加载使用记录失败'
-  },
-
-  images: {
-    badge: 'AI 生图工作台',
-    title: 'AI生图',
-    description: '在一个页面中完成 AI 图片生成、编辑与历史查看。',
-    tabs: {
-      ariaLabel: 'AI 生图功能标签',
-      generate: '生成',
-      edit: '编辑',
-      history: '历史'
-    },
-    keySelector: {
-      label: 'API 密钥',
-      loading: '正在加载 API 密钥...',
-      placeholder: '选择一个 API 密钥',
-      empty: '当前页暂无可用 API 密钥',
-      count: '当前页已加载 {count} 个 API 密钥',
-      pageHint: '默认仅使用当前页的第一个 API 密钥，后续任务会补充更完整的选择逻辑。',
-      loadFailed: 'API 密钥加载失败，请重试。',
-      retry: '重新加载'
-    },
-    summary: {
-      selectedTab: '当前标签',
-      selectedKey: '当前密钥',
-      placeholder: '每次提交后的最新结果会展示在右侧结果区。'
-    },
-    panels: {
-      generate: {
-        title: '生成',
-        description: '基于提示词与标准网关参数发起全新图片生成。'
-      },
-      edit: {
-        title: '编辑',
-        description: '上传源图、可选遮罩，并以 multipart 方式提交编辑请求。'
-      },
-      history: {
-        title: '历史',
-        description: '查看历史图片请求，并将参数回填到表单。'
-      }
-    },
-    forms: {
-      generate: {
-        prompt: '提示词',
-        promptPlaceholder: '描述你想创建的图片',
-        model: '模型',
-        size: '尺寸',
-        quality: '质量',
-        background: '背景',
-        outputFormat: '输出格式',
-        moderation: '审核级别',
-        n: '生成数量',
-        submit: '生成图片',
-        submitting: '生成中...',
-        apiKeyRequired: '请先选择一个 API 密钥再提交。',
-        promptRequired: '提示词不能为空。'
-      },
-      edit: {
-        sourceImage: '源图片',
-        sourceImageHint: '支持 PNG、WEBP 或 JPEG。',
-        sourceImageInvalid: '源图片必须是图片文件。',
-        maskImage: '遮罩图片',
-        maskImageHint: '透明区域表示允许编辑的范围。',
-        sourceImageRequired: '必须上传源图片。',
-        submit: '编辑图片',
-        submitting: '编辑中...'
-      }
-    },
-    results: {
-      title: '结果',
-      description: '这里会展示最新一次网关返回的图片预览。',
-      loading: '正在加载最新结果...',
-      empty: '提交一次生成或编辑请求后，这里会显示结果。',
-      errorTitle: '请求失败',
-      revisedPrompt: '修订后的提示词'
-    },
-    history: {
-      listTitle: '最近请求',
-      empty: '还没有图片历史记录。',
-      loading: '正在加载图片历史...',
-      loadFailed: '加载图片历史失败。',
-      retry: '重试',
-      detailTitle: '历史详情',
-      detailEmpty: '选择一条历史记录后可查看详情。',
-      detailLoading: '正在加载历史详情...',
-      detailLoadFailed: '加载历史详情失败。',
-      prompt: '提示词',
-      parameters: '参数',
-      images: '图片',
-      status: '状态',
-      apiKey: 'API 密钥',
-      createdAt: '创建时间',
-      count: '图片数量',
-      errorMessage: '错误信息',
-      replay: '回填到表单',
-      booleanYes: '是',
-      booleanNo: '否',
-      hadSourceImage: '已上传源图',
-      hadMask: '已上传遮罩',
-      replayEditNotice: '已回填编辑参数。再次提交前需要重新上传源图，如有需要也请重新上传遮罩。',
-      modes: {
-        generate: '生成',
-        edit: '编辑'
-      },
-      statuses: {
-        success: '成功',
-        error: '失败'
-      }
-    }
   },
 
   // Usage Records

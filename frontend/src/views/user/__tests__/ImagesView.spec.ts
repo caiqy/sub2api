@@ -40,6 +40,10 @@ const messages: Record<string, string> = {
   'images.forms.generate.promptPlaceholder': 'Describe the image you want to create',
   'images.forms.generate.model': 'Model',
   'images.forms.generate.size': 'Size',
+  'images.forms.generate.sizeHint': 'Official popular presets are shown here. GPT Image 2 also supports auto and more custom sizes that satisfy OpenAI constraints.',
+  'images.forms.generate.customSize': 'Custom size',
+  'images.forms.generate.customSizePlaceholder': 'e.g. 2048x1152',
+  'images.forms.generate.customSizeRequired': 'Custom size is required.',
   'images.forms.generate.quality': 'Quality',
   'images.forms.generate.background': 'Background',
   'images.forms.generate.outputFormat': 'Output format',
@@ -290,6 +294,25 @@ describe('ImagesView', () => {
     expect(wrapper.text()).toContain('Generate')
     expect(wrapper.text()).toContain('Edit')
     expect(wrapper.text()).toContain('History')
+  })
+
+  it('shows the size guidance in both generate and edit forms', async () => {
+    const wrapper = mount(ImagesView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' }
+        }
+      }
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Official popular presets are shown here. GPT Image 2 also supports auto and more custom sizes that satisfy OpenAI constraints.')
+
+    await wrapper.get('[data-testid="images-tab-edit"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Official popular presets are shown here. GPT Image 2 also supports auto and more custom sizes that satisfy OpenAI constraints.')
   })
 
   it('loads current user api keys on mount with explicit paging and stable sorting', async () => {
@@ -675,6 +698,34 @@ describe('ImagesView', () => {
     expect(selectedApiKey).not.toBe('7')
   })
 
+  it('submits image generation with a custom size', async () => {
+    list.mockResolvedValue({
+      items: [primaryApiKey]
+    })
+
+    const wrapper = mount(ImagesView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' }
+        }
+      }
+    })
+
+    await flushPromises()
+    await wrapper.get('#image-generate-size').setValue('custom')
+    await wrapper.get('[data-testid="image-generate-custom-size"]').setValue('3072x1728')
+    await wrapper.get('[data-testid="image-generate-prompt"]').setValue('Draw a wide editorial hero image')
+    await wrapper.get('[data-testid="image-generate-submit"]').trigger('click')
+    await flushPromises()
+
+    expect(generate).toHaveBeenCalledTimes(1)
+    expect(generate.mock.calls[0][0]).toEqual(
+      expect.objectContaining({
+        size: '3072x1728'
+      })
+    )
+  })
+
   it('renders preview results for non-png base64 responses using the selected output format mime', async () => {
     list.mockResolvedValue({
       items: [primaryApiKey]
@@ -850,6 +901,39 @@ describe('ImagesView', () => {
     expect(selectedApiKey).toBe('sk-vision-key-a')
     expect(selectedApiKey).not.toBe('7')
     expect(options).toBeUndefined()
+  })
+
+  it('submits image edits with a custom size in FormData', async () => {
+    list.mockResolvedValue({
+      items: [primaryApiKey]
+    })
+
+    const wrapper = mount(ImagesView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' }
+        }
+      }
+    })
+
+    await flushPromises()
+    await wrapper.get('[data-testid="images-tab-edit"]').trigger('click')
+    await wrapper.get('#image-edit-size').setValue('custom')
+    await wrapper.get('[data-testid="image-edit-custom-size"]').setValue('3072x1728')
+    await wrapper.get('[data-testid="image-edit-prompt"]').setValue('Retouch the wide composition')
+
+    const sourceInput = wrapper.get('[data-testid="image-edit-source-input"]')
+    Object.defineProperty(sourceInput.element, 'files', {
+      value: [new File(['source-bytes'], 'source.png', { type: 'image/png' })],
+      configurable: true
+    })
+
+    await sourceInput.trigger('change')
+    await wrapper.get('[data-testid="image-edit-submit"]').trigger('click')
+    await flushPromises()
+
+    expect(edit).toHaveBeenCalledTimes(1)
+    expect((edit.mock.calls[0][0] as FormData).get('size')).toBe('3072x1728')
   })
 
   it('does not submit generation when no api key is selected', async () => {

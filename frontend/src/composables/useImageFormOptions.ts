@@ -20,10 +20,23 @@ const modelOptions: ImageFormOption[] = [
   { value: 'gpt-image-1', label: 'gpt-image-1' },
 ]
 
-const sizeOptions: ImageFormOption[] = [
+export const CUSTOM_IMAGE_SIZE_OPTION_VALUE = 'custom'
+const DEFAULT_IMAGE_SIZE = '1024x1024'
+
+const presetSizeOptions: ImageFormOption[] = [
+  { value: 'auto', label: 'auto' },
   { value: '1024x1024', label: '1024x1024' },
   { value: '1536x1024', label: '1536x1024' },
   { value: '1024x1536', label: '1024x1536' },
+  { value: '2048x2048', label: '2048x2048' },
+  { value: '2048x1152', label: '2048x1152' },
+  { value: '3840x2160', label: '3840x2160' },
+  { value: '2160x3840', label: '2160x3840' },
+]
+
+const sizeOptions: ImageFormOption[] = [
+  ...presetSizeOptions,
+  { value: CUSTOM_IMAGE_SIZE_OPTION_VALUE, label: CUSTOM_IMAGE_SIZE_OPTION_VALUE },
 ]
 
 const qualityOptions: ImageFormOption[] = [
@@ -60,13 +73,17 @@ export function createDefaultImageFormValues(): ImageCommonFormValues {
   return {
     model: modelOptions[0].value,
     prompt: '',
-    size: sizeOptions[0].value,
+    size: DEFAULT_IMAGE_SIZE,
     quality: qualityOptions[0].value,
     background: backgroundOptions[0].value,
     output_format: outputFormatOptions[0].value,
     moderation: moderationOptions[0].value,
     n: countOptions[0].value,
   }
+}
+
+export function isPresetImageSize(value?: string): value is string {
+  return !!value && presetSizeOptions.some((option) => option.value === value)
 }
 
 export function useImageFormOptions() {
