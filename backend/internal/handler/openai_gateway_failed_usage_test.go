@@ -1,11 +1,24 @@
 package handler
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"io"
+	"math/big"
+	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +27,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func waitForOpenAIFailedUsageLog(t *testing.T, repo *openAIChatCompletionsUsageLogRepoStub) *service.UsageLog {
@@ -228,7 +242,7 @@ func TestOpenAIGatewayHandler_MessagesUpstreamErrorStillCreatesUsageLog(t *testi
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, http.StatusBadGateway, rec.Code)
 	log := waitForOpenAIFailedUsageLog(t, usageRepo)
 	require.NotNil(t, log, "failed usage log should be created for non-failover errors")
 	require.NotNil(t, log.DurationMs)
@@ -341,6 +355,402 @@ func TestOpenAIGatewayHandler_MessagesFailoverExhaustedStillCreatesUsageLog(t *t
 	require.Contains(t, log.DetailSnapshot.ResponseHeaders, "X-Request-Id: req_messages_failover_123")
 	require.Contains(t, log.DetailSnapshot.ResponseBody, `"openai_messages_rate_limited_raw"`)
 	require.Contains(t, log.DetailSnapshot.ResponseBody, "openai messages raw failover")
+}
+
+func TestOpenAIGatewayHandler_ImagesForwardFailedUsageLogCreated(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router, usageRepo, cleanup := newOpenAIImagesHandlerTestRouter(t, "/v1/images/generations", &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header: http.Header{
+			"Content-Type": []string{"application/json"},
+			"X-Request-Id": []string{"req_image_failed_123"},
+		},
+		Body: io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_request_error","message":"images upstream rejected payload"}}`)),
+	})
+	defer cleanup()
+	usageRepo.created = make(chan *service.UsageLog, 1)
+
+	reqBody := `{"model":"gpt-image-2","prompt":"draw a lantern","size":"1024x1024"}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+	log := waitForOpenAIFailedUsageLog(t, usageRepo)
+	require.NotNil(t, log, "failed usage log should be created for non-failover image errors")
+	require.NotNil(t, log.DurationMs)
+	require.NotNil(t, log.DetailSnapshot)
+	require.JSONEq(t, reqBody, log.DetailSnapshot.RequestBody)
+	require.Contains(t, log.DetailSnapshot.ResponseBody, "images upstream rejected payload")
+	require.NotNil(t, log.InboundEndpoint)
+	require.Equal(t, "/v1/images/generations", *log.InboundEndpoint)
+	require.NotNil(t, log.UpstreamEndpoint)
+	require.Contains(t, *log.UpstreamEndpoint, "/v1/images/generations")
+}
+
+func TestOpenAIGatewayHandler_ImagesEditMultipartForwardFailedUsageLogUsesMetadataSnapshot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router, usageRepo, cleanup := newOpenAIImagesHandlerTestRouter(t, "/v1/images/edits", &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header: http.Header{
+			"Content-Type": []string{"application/json"},
+			"X-Request-Id": []string{"req_image_edit_failed_123"},
+		},
+		Body: io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_request_error","message":"images edit upstream rejected payload"}}`)),
+	})
+	defer cleanup()
+	usageRepo.created = make(chan *service.UsageLog, 1)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	require.NoError(t, writer.WriteField("model", "gpt-image-2"))
+	require.NoError(t, writer.WriteField("prompt", "replace background"))
+	require.NoError(t, writer.WriteField("size", "1536x1024"))
+	require.NoError(t, writer.WriteField("quality", "high"))
+	require.NoError(t, writer.WriteField("background", "transparent"))
+	require.NoError(t, writer.WriteField("output_format", "webp"))
+	require.NoError(t, writer.WriteField("moderation", "low"))
+	require.NoError(t, writer.WriteField("n", "2"))
+	imagePart, err := writer.CreateFormFile("image", "source.png")
+	require.NoError(t, err)
+	_, err = imagePart.Write([]byte("raw-source-image-bytes"))
+	require.NoError(t, err)
+	maskPart, err := writer.CreateFormFile("mask", "mask.png")
+	require.NoError(t, err)
+	_, err = maskPart.Write([]byte("raw-mask-bytes"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body.Bytes()))
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+	log := waitForOpenAIFailedUsageLog(t, usageRepo)
+	require.NotNil(t, log, "failed usage log should be created for multipart edit errors")
+	require.NotNil(t, log.DetailSnapshot)
+	require.NotContains(t, log.DetailSnapshot.RequestBody, "raw-source-image-bytes")
+	require.NotContains(t, log.DetailSnapshot.RequestBody, "raw-mask-bytes")
+	require.Equal(t, "gpt-image-2", gjson.Get(log.DetailSnapshot.RequestBody, "model").String())
+	require.Equal(t, "replace background", gjson.Get(log.DetailSnapshot.RequestBody, "prompt").String())
+	require.Equal(t, "1536x1024", gjson.Get(log.DetailSnapshot.RequestBody, "size").String())
+	require.Equal(t, "high", gjson.Get(log.DetailSnapshot.RequestBody, "quality").String())
+	require.Equal(t, "transparent", gjson.Get(log.DetailSnapshot.RequestBody, "background").String())
+	require.Equal(t, "webp", gjson.Get(log.DetailSnapshot.RequestBody, "output_format").String())
+	require.Equal(t, "low", gjson.Get(log.DetailSnapshot.RequestBody, "moderation").String())
+	require.Equal(t, int64(2), gjson.Get(log.DetailSnapshot.RequestBody, "n").Int())
+	require.True(t, gjson.Get(log.DetailSnapshot.RequestBody, "had_source_image").Bool())
+	require.True(t, gjson.Get(log.DetailSnapshot.RequestBody, "had_mask").Bool())
+	require.Contains(t, log.DetailSnapshot.ResponseBody, "images edit upstream rejected payload")
+}
+
+func TestOpenAIGatewayHandler_ImagesOAuthForwardFailedUsagePreservesUpstreamSnapshot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cfg := &config.Config{
+		RunMode: config.RunModeSimple,
+		Default: config.DefaultConfig{RateMultiplier: 1},
+		Gateway: config.GatewayConfig{
+			MaxAccountSwitches: 1,
+			Scheduling:         config.GatewaySchedulingConfig{LoadBatchEnabled: false},
+		},
+		Concurrency: config.ConcurrencyConfig{PingInterval: 0},
+	}
+
+	groupID := int64(1)
+	group := &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{
+		ID:          11,
+		Name:        "openai-oauth-image-account",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeOAuth,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    1,
+		Credentials: map[string]any{
+			"access_token":       "oauth-token",
+			"chatgpt_account_id": "acct_test",
+		},
+		Extra: map[string]any{
+			"openai_device_id":  "device_test",
+			"openai_session_id": "session_test",
+		},
+	}
+	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
+	accountRepo := &openAIChatCompletionsAccountRepoStub{account: account}
+	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
+	deferredService := service.NewDeferredService(accountRepo, nil, 0)
+	billingService := service.NewBillingService(cfg, nil)
+	t.Cleanup(func() { billingCacheService.Stop() })
+
+	gatewayService := service.NewOpenAIGatewayService(
+		accountRepo,
+		usageRepo,
+		nil,
+		nil,
+		nil,
+		nil,
+		openAIChatCompletionsGatewayCacheStub{},
+		cfg,
+		nil,
+		concurrencyService,
+		billingService,
+		nil,
+		billingCacheService,
+		nil,
+		deferredService,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, cfg)
+
+	apiKey := &service.APIKey{
+		ID:      101,
+		UserID:  202,
+		Status:  service.StatusActive,
+		GroupID: &groupID,
+		User:    &service.User{ID: 202, Status: service.StatusActive, Concurrency: 1},
+		Group:   group,
+	}
+
+	upstreamHeaders := http.Header{
+		"Content-Type": []string{"application/json"},
+		"X-Request-Id": []string{"req_oauth_image_failed_123"},
+	}
+	upstreamBody := []byte(`{"error":{"message":"oauth images upstream rejected payload"}}`)
+	reqBody := `{"model":"gpt-image-2","prompt":"draw a lantern"}`
+
+	proxy, cleanup := newOAuthImagesFailureProxy(t, upstreamHeaders, upstreamBody)
+	defer cleanup()
+	proxyID := int64(99)
+	account.ProxyID = &proxyID
+	account.Proxy = proxy
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.UserID, Concurrency: apiKey.User.Concurrency})
+		c.Next()
+	})
+	router.Use(middleware.UsageDetailCapture())
+	router.POST("/v1/images/generations", h.Images)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+	log := waitForOpenAIFailedUsageLog(t, usageRepo)
+	require.NotNil(t, log)
+	require.NotNil(t, log.DetailSnapshot)
+	require.JSONEq(t, reqBody, log.DetailSnapshot.RequestBody)
+	require.Contains(t, log.DetailSnapshot.ResponseHeaders, ":status: 400")
+	require.NotContains(t, log.DetailSnapshot.ResponseHeaders, ":status: 502")
+	require.Contains(t, log.DetailSnapshot.ResponseHeaders, "Content-Type: application/json")
+	require.Contains(t, log.DetailSnapshot.ResponseHeaders, "X-Request-Id: req_oauth_image_failed_123")
+	require.Contains(t, log.DetailSnapshot.ResponseBody, "oauth images upstream rejected payload")
+	require.NotEmpty(t, strings.TrimSpace(log.DetailSnapshot.ResponseBody))
+}
+
+func TestOpenAIGatewayHandler_ImagesFailoverExhaustedFailedUsageLogCreated(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router, usageRepo, cleanup := newOpenAIImagesHandlerTestRouter(t, "/v1/images/generations", &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Header: http.Header{
+			"Content-Type": []string{"application/json"},
+			"X-Request-Id": []string{"req_image_failover_123"},
+		},
+		Body: io.NopCloser(strings.NewReader(`{"error":{"type":"rate_limit_error","message":"images upstream overloaded"}}`)),
+	})
+	defer cleanup()
+	usageRepo.created = make(chan *service.UsageLog, 1)
+
+	reqBody := `{"model":"gpt-image-2","prompt":"draw a lantern","size":"1024x1024"}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusTooManyRequests, rec.Code)
+	log := waitForOpenAIFailedUsageLog(t, usageRepo)
+	require.NotNil(t, log, "failed usage log should be created when image failover is exhausted")
+	require.NotNil(t, log.DurationMs)
+	require.NotNil(t, log.DetailSnapshot)
+	require.JSONEq(t, reqBody, log.DetailSnapshot.RequestBody)
+	require.Contains(t, log.DetailSnapshot.ResponseBody, "images upstream overloaded")
+	require.NotNil(t, log.InboundEndpoint)
+	require.Equal(t, "/v1/images/generations", *log.InboundEndpoint)
+	require.NotNil(t, log.UpstreamEndpoint)
+	require.Contains(t, *log.UpstreamEndpoint, "/v1/images/generations")
+}
+
+type fakeOpenAIImagesOAuthUpstreamError struct {
+	statusCode      int
+	responseHeaders http.Header
+	responseBody    []byte
+}
+
+func (e fakeOpenAIImagesOAuthUpstreamError) Error() string {
+	return "fake openai images oauth upstream error"
+}
+
+func (e fakeOpenAIImagesOAuthUpstreamError) OpenAIImageUpstreamStatusCode() int {
+	return e.statusCode
+}
+
+func (e fakeOpenAIImagesOAuthUpstreamError) OpenAIImageUpstreamResponseHeaders() http.Header {
+	return e.responseHeaders.Clone()
+}
+
+func (e fakeOpenAIImagesOAuthUpstreamError) OpenAIImageUpstreamResponseBody() []byte {
+	return append([]byte(nil), e.responseBody...)
+}
+
+var oauthImagesFallbackRootsOnce sync.Once
+
+func newOAuthImagesFailureProxy(t *testing.T, upstreamHeaders http.Header, upstreamBody []byte) (*service.Proxy, func()) {
+	t.Helper()
+
+	serverCert, rootCert := newChatGPTDotComTLSCert(t)
+	installOAuthImagesFallbackRoots(t, rootCert)
+
+	upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/":
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPost && r.URL.Path == "/backend-api/sentinel/chat-requirements":
+			for key, values := range upstreamHeaders {
+				for _, value := range values {
+					w.Header().Add(key, value)
+				}
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write(upstreamBody)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	upstream.TLS = &tls.Config{Certificates: []tls.Certificate{serverCert}}
+	upstream.StartTLS()
+
+	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodConnect {
+			http.Error(w, "connect required", http.StatusBadGateway)
+			return
+		}
+
+		targetConn, err := net.Dial("tcp", upstream.Listener.Addr().String())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			targetConn.Close()
+			http.Error(w, "hijack unsupported", http.StatusInternalServerError)
+			return
+		}
+		clientConn, _, err := hijacker.Hijack()
+		if err != nil {
+			targetConn.Close()
+			return
+		}
+		_, _ = clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+
+		go func() {
+			_, _ = io.Copy(targetConn, clientConn)
+			_ = targetConn.Close()
+			_ = clientConn.Close()
+		}()
+		go func() {
+			_, _ = io.Copy(clientConn, targetConn)
+			_ = clientConn.Close()
+			_ = targetConn.Close()
+		}()
+	}))
+
+	parsed, err := url.Parse(proxyServer.URL)
+	require.NoError(t, err)
+	port := 0
+	if parsed.Port() != "" {
+		port, err = strconv.Atoi(parsed.Port())
+		require.NoError(t, err)
+	}
+
+	cleanup := func() {
+		proxyServer.Close()
+		upstream.Close()
+	}
+
+	return &service.Proxy{
+		ID:       99,
+		Protocol: parsed.Scheme,
+		Host:     parsed.Hostname(),
+		Port:     port,
+		Status:   service.StatusActive,
+	}, cleanup
+}
+
+func installOAuthImagesFallbackRoots(t *testing.T, rootCert *x509.Certificate) {
+	t.Helper()
+	t.Setenv("GODEBUG", "x509usefallbackroots=1")
+	oauthImagesFallbackRootsOnce.Do(func() {
+		pool := x509.NewCertPool()
+		pool.AddCert(rootCert)
+		x509.SetFallbackRoots(pool)
+	})
+}
+
+func newChatGPTDotComTLSCert(t *testing.T) (tls.Certificate, *x509.Certificate) {
+	t.Helper()
+
+	caKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	caTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "sub2api test root"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
+	require.NoError(t, err)
+	rootCert, err := x509.ParseCertificate(caDER)
+	require.NoError(t, err)
+
+	leafKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	leafTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: "chatgpt.com"},
+		DNSNames:     []string{"chatgpt.com"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, rootCert, &leafKey.PublicKey, caKey)
+	require.NoError(t, err)
+
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leafDER})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(leafKey)})
+	serverCert, err := tls.X509KeyPair(certPEM, keyPEM)
+	require.NoError(t, err)
+
+	return serverCert, rootCert
 }
 
 func TestOpenAIGatewayHandler_MessagesSelectionExhaustedAfterFailoverStillCreatesUsageLog(t *testing.T) {

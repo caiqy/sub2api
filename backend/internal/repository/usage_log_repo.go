@@ -1488,6 +1488,46 @@ func (r *usageLogRepository) ListByUser(ctx context.Context, userID int64, param
 	return r.listUsageLogsWithPagination(ctx, "WHERE user_id = $1", []any{userID}, params)
 }
 
+func (r *usageLogRepository) ListImageHistoryByUser(ctx context.Context, userID int64, params pagination.PaginationParams, filters service.ImageHistoryListFilters) ([]service.UsageLog, *pagination.PaginationResult, error) {
+	conditions := []string{
+		fmt.Sprintf("user_id = $%d", 1),
+		"(COALESCE(inbound_endpoint, '') LIKE '%/images/generations%' OR COALESCE(inbound_endpoint, '') LIKE '%/images/edits%')",
+	}
+	args := []any{userID}
+
+	if filters.APIKeyID > 0 {
+		conditions = append(conditions, fmt.Sprintf("api_key_id = $%d", len(args)+1))
+		args = append(args, filters.APIKeyID)
+	}
+
+	switch strings.ToLower(strings.TrimSpace(filters.Mode)) {
+	case string(service.ImageHistoryModeGenerate):
+		conditions = append(conditions, fmt.Sprintf("COALESCE(inbound_endpoint, '') LIKE $%d", len(args)+1))
+		args = append(args, "%/images/generations%")
+	case string(service.ImageHistoryModeEdit):
+		conditions = append(conditions, fmt.Sprintf("COALESCE(inbound_endpoint, '') LIKE $%d", len(args)+1))
+		args = append(args, "%/images/edits%")
+	}
+
+	switch strings.ToLower(strings.TrimSpace(filters.Status)) {
+	case string(service.ImageHistoryStatusSuccess):
+		conditions = append(conditions, "image_count > 0")
+	case string(service.ImageHistoryStatusError):
+		conditions = append(conditions, "image_count <= 0")
+	}
+
+	logs, page, err := r.listUsageLogsWithPagination(ctx, "WHERE "+strings.Join(conditions, " AND "), args, params)
+	if err != nil {
+		return nil, nil, err
+	}
+	if r.client != nil {
+		if err := r.hydrateUsageLogAssociations(ctx, logs); err != nil {
+			return nil, nil, err
+		}
+	}
+	return logs, page, nil
+}
+
 func (r *usageLogRepository) ListByAPIKey(ctx context.Context, apiKeyID int64, params pagination.PaginationParams) ([]service.UsageLog, *pagination.PaginationResult, error) {
 	return r.listUsageLogsWithPagination(ctx, "WHERE api_key_id = $1", []any{apiKeyID}, params)
 }

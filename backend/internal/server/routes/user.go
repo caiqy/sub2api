@@ -61,6 +61,12 @@ func RegisterUserRoutes(
 			keys.DELETE("/:id", h.APIKey.Delete)
 		}
 
+		images := authenticated.Group("/images")
+		{
+			images.GET("/history", h.ImageHistory.List)
+			images.GET("/history/:id", h.ImageHistory.GetByID)
+		}
+
 		// 用户可用分组（非管理员接口）
 		groups := authenticated.Group("/groups")
 		{

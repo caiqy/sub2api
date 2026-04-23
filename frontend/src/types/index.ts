@@ -372,6 +372,110 @@ export interface UserStats {
   last_conversion: string | null
 }
 
+// ==================== Image Types ====================
+
+export type ImageHistoryMode = 'generate' | 'edit'
+
+export type ImageHistoryStatus = 'success' | 'error'
+
+export interface ImageHistoryListParams {
+  tab?: ImageHistoryMode
+  status?: ImageHistoryStatus
+  api_key_id?: number
+  page?: number
+  page_size?: number
+}
+
+export interface ImageHistoryListItem {
+  id: number
+  api_key_id: number
+  api_key_name?: string
+  api_key_masked?: string
+  mode: ImageHistoryMode
+  status: ImageHistoryStatus
+  model: string
+  image_count: number
+  image_size?: string
+  actual_cost: number
+  created_at: string
+}
+
+export interface ImageHistoryImage {
+  data_url: string
+  revised_prompt?: string
+}
+
+export interface ImageHistoryReplay {
+  mode: ImageHistoryMode
+  model: string
+  prompt?: string
+  size?: string
+  quality?: string
+  background?: string
+  output_format?: string
+  moderation?: string
+  n: number
+  requires_source_image_upload: boolean
+  requires_mask_upload: boolean
+}
+
+export interface ImageHistoryDetail {
+  id: number
+  api_key_id: number
+  api_key_name?: string
+  api_key_masked?: string
+  mode: ImageHistoryMode
+  status: ImageHistoryStatus
+  model: string
+  prompt?: string
+  size?: string
+  quality?: string
+  background?: string
+  output_format?: string
+  moderation?: string
+  n: number
+  had_source_image: boolean
+  had_mask: boolean
+  images?: ImageHistoryImage[]
+  error_message?: string
+  replay: ImageHistoryReplay
+  created_at: string
+}
+
+export interface ImageGenerationRequest {
+  prompt: string
+  model?: string
+  background?: string
+  moderation?: string
+  n?: number
+  output_compression?: number
+  output_format?: string
+  quality?: string
+  response_format?: string
+  size?: string
+  stream?: boolean
+  style?: string
+  user?: string
+  [key: string]: unknown
+}
+
+export type ImageGatewayDataItem =
+  | {
+      b64_json: string
+      url?: never
+      revised_prompt?: string
+    }
+  | {
+      url: string
+      b64_json?: never
+      revised_prompt?: string
+    }
+
+export interface ImageGatewayResponse {
+  created: number
+  data: ImageGatewayDataItem[]
+}
+
 // ==================== API Response Types ====================
 
 export interface ApiResponse<T = unknown> {
