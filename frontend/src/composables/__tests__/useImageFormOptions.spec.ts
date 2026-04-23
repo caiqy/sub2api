@@ -19,8 +19,12 @@ describe('useImageFormOptions', () => {
     ])
   })
 
-  it('keeps the existing square size as default form value', () => {
-    expect(createDefaultImageFormValues().size).toBe('1024x1024')
+  it('defaults image size to auto', () => {
+    expect(createDefaultImageFormValues().size).toBe('auto')
+  })
+
+  it('defaults image quality to high', () => {
+    expect(createDefaultImageFormValues().quality).toBe('high')
   })
 
   it('rejects custom sizes that violate OpenAI constraints', () => {

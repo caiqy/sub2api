@@ -1198,6 +1198,10 @@ export default {
       loading: 'Loading latest result...',
       empty: 'Submit a generate or edit request to see results.',
       errorTitle: 'Request failed',
+      openPreview: 'Open preview',
+      download: 'Download',
+      previewTitle: 'Preview',
+      closePreview: 'Close preview',
       revisedPrompt: 'Revised prompt'
     },
     history: {

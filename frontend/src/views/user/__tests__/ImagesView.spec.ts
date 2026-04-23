@@ -74,6 +74,10 @@ const messages: Record<string, string> = {
   'images.results.loading': 'Loading latest result...',
   'images.results.empty': 'Submit a generate or edit request to see results.',
   'images.results.errorTitle': 'Request failed',
+  'images.results.openPreview': 'Open preview',
+  'images.results.download': 'Download',
+  'images.results.previewTitle': 'Preview',
+  'images.results.closePreview': 'Close preview',
   'images.results.revisedPrompt': 'Revised prompt',
   'images.history.listTitle': 'Recent requests',
   'images.history.empty': 'No image history yet.',
@@ -622,8 +626,8 @@ describe('ImagesView', () => {
     await wrapper.get('[data-testid="image-history-replay"]').trigger('click')
     await flushPromises()
 
-    expect((wrapper.get('#image-generate-size').element as HTMLSelectElement).value).toBe('1024x1024')
-    expect((wrapper.get('#image-generate-quality').element as HTMLSelectElement).value).toBe('medium')
+    expect((wrapper.get('#image-generate-size').element as HTMLSelectElement).value).toBe('auto')
+    expect((wrapper.get('#image-generate-quality').element as HTMLSelectElement).value).toBe('high')
     expect((wrapper.get('#image-generate-background').element as HTMLSelectElement).value).toBe('auto')
     expect((wrapper.get('#image-generate-output-format').element as HTMLSelectElement).value).toBe('png')
   })
@@ -811,6 +815,73 @@ describe('ImagesView', () => {
     const preview = wrapper.get('[data-testid="image-result-preview-0"]')
     expect(preview.attributes('src')).toBe('data:image/webp;base64,QUJD')
     expect(wrapper.text()).toContain('Draw a paper crane over water')
+  })
+
+  it('renders a download link for generated results', async () => {
+    list.mockResolvedValue({
+      items: [primaryApiKey]
+    })
+    generate.mockResolvedValue({
+      created: 1,
+      data: [
+        {
+          b64_json: 'QUJD',
+          revised_prompt: 'Draw a paper crane over water'
+        }
+      ]
+    })
+
+    const wrapper = mount(ImagesView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' }
+        }
+      }
+    })
+
+    await flushPromises()
+    await wrapper.get('#image-generate-output-format').setValue('webp')
+    await wrapper.get('[data-testid="image-generate-prompt"]').setValue('Draw a paper crane')
+    await wrapper.get('[data-testid="image-generate-submit"]').trigger('click')
+    await flushPromises()
+
+    const downloadLink = wrapper.get('[data-testid="image-result-download-0"]')
+    expect(downloadLink.attributes('href')).toBe('data:image/webp;base64,QUJD')
+    expect(downloadLink.attributes('download')).toContain('sub2api-image-1')
+  })
+
+  it('opens a larger image preview when a generated result is clicked', async () => {
+    list.mockResolvedValue({
+      items: [primaryApiKey]
+    })
+    generate.mockResolvedValue({
+      created: 1,
+      data: [
+        {
+          b64_json: 'QUJD',
+          revised_prompt: 'Draw a paper crane over water'
+        }
+      ]
+    })
+
+    const wrapper = mount(ImagesView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' }
+        }
+      }
+    })
+
+    await flushPromises()
+    await wrapper.get('#image-generate-output-format').setValue('webp')
+    await wrapper.get('[data-testid="image-generate-prompt"]').setValue('Draw a paper crane')
+    await wrapper.get('[data-testid="image-generate-submit"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-testid="image-result-open-0"]').trigger('click')
+
+    expect(wrapper.get('[data-testid="image-result-preview-modal"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="image-result-preview-modal-image"]').attributes('src')).toBe('data:image/webp;base64,QUJD')
   })
 
   it('sanitizes unsafe url results before rendering previews', async () => {

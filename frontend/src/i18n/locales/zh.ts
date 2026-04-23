@@ -1202,6 +1202,10 @@ export default {
       loading: '正在加载最新结果...',
       empty: '提交一次生成或编辑请求后，这里会显示结果。',
       errorTitle: '请求失败',
+      openPreview: '放大查看',
+      download: '下载',
+      previewTitle: '图片预览',
+      closePreview: '关闭预览',
       revisedPrompt: '修订后的提示词'
     },
     history: {

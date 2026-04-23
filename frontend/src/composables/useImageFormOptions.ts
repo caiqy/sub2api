@@ -21,7 +21,8 @@ const modelOptions: ImageFormOption[] = [
 ]
 
 export const CUSTOM_IMAGE_SIZE_OPTION_VALUE = 'custom'
-const DEFAULT_IMAGE_SIZE = '1024x1024'
+const DEFAULT_IMAGE_SIZE = 'auto'
+const DEFAULT_IMAGE_QUALITY = 'high'
 
 const presetSizeOptions: ImageFormOption[] = [
   { value: 'auto', label: 'auto' },
@@ -74,7 +75,7 @@ export function createDefaultImageFormValues(): ImageCommonFormValues {
     model: modelOptions[0].value,
     prompt: '',
     size: DEFAULT_IMAGE_SIZE,
-    quality: qualityOptions[0].value,
+    quality: DEFAULT_IMAGE_QUALITY,
     background: backgroundOptions[0].value,
     output_format: outputFormatOptions[0].value,
     moderation: moderationOptions[0].value,
