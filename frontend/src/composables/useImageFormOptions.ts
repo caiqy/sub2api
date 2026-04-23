@@ -86,6 +86,41 @@ export function isPresetImageSize(value?: string): value is string {
   return !!value && presetSizeOptions.some((option) => option.value === value)
 }
 
+export function validateCustomImageSize(value: string): string | null {
+  const trimmedValue = value.trim()
+  const match = trimmedValue.match(/^(\d+)x(\d+)$/i)
+
+  if (!match) {
+    return 'images.forms.generate.customSizeFormat'
+  }
+
+  const width = Number(match[1])
+  const height = Number(match[2])
+
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
+    return 'images.forms.generate.customSizeFormat'
+  }
+
+  if (width % 16 !== 0 || height % 16 !== 0) {
+    return 'images.forms.generate.customSizeMultipleOf16'
+  }
+
+  if (Math.max(width, height) > 3840) {
+    return 'images.forms.generate.customSizeMaxEdge'
+  }
+
+  if (Math.max(width, height) / Math.min(width, height) > 3) {
+    return 'images.forms.generate.customSizeAspectRatio'
+  }
+
+  const totalPixels = width * height
+  if (totalPixels < 655_360 || totalPixels > 8_294_400) {
+    return 'images.forms.generate.customSizePixelRange'
+  }
+
+  return null
+}
+
 export function useImageFormOptions() {
   return {
     modelOptions,

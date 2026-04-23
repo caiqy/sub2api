@@ -99,6 +99,7 @@
                 :disabled="!canSubmitWithApiKey"
                 :initial-values="generateReplayValues"
                 :loading="isLoading"
+                :loading-seconds="loadingSeconds"
                 @submit="handleGenerateSubmit"
               />
               <ImageEditForm
@@ -107,6 +108,7 @@
                 :disabled="!canSubmitWithApiKey"
                 :initial-values="editReplayValues"
                 :loading="isLoading"
+                :loading-seconds="loadingSeconds"
                 @submit="handleEditSubmit"
               />
             </div>
@@ -191,7 +193,7 @@ const apiKeys = ref<ApiKey[]>([])
 const apiKeyLoadState = ref<ApiKeyLoadState>('loading')
 const selectedApiKeyId = ref('')
 const activeTab = ref<ImagesTabKey>('generate')
-const { error, isLoading, results, submitEdit, submitGenerate } = useImageGeneration()
+const { error, isLoading, loadingSeconds, results, submitEdit, submitGenerate } = useImageGeneration()
 const {
   detail: historyDetail,
   detailError: historyDetailError,

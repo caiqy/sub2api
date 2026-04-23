@@ -41,9 +41,15 @@ const messages: Record<string, string> = {
   'images.forms.generate.model': 'Model',
   'images.forms.generate.size': 'Size',
   'images.forms.generate.sizeHint': 'Official popular presets are shown here. GPT Image 2 also supports auto and more custom sizes that satisfy OpenAI constraints.',
+  'images.forms.generate.customSizeRequirements': 'Requirements: multiple of 16, max 3840, aspect ratio ≤ 3:1',
   'images.forms.generate.customSize': 'Custom size',
   'images.forms.generate.customSizePlaceholder': 'e.g. 2048x1152',
   'images.forms.generate.customSizeRequired': 'Custom size is required.',
+  'images.forms.generate.customSizeFormat': 'Custom size must use the WIDTHxHEIGHT format, for example 2048x1152.',
+  'images.forms.generate.customSizeMultipleOf16': 'Custom size width and height must both be multiples of 16.',
+  'images.forms.generate.customSizeMaxEdge': 'Custom size cannot exceed 3840px on either edge.',
+  'images.forms.generate.customSizeAspectRatio': 'Custom size aspect ratio cannot exceed 3:1.',
+  'images.forms.generate.customSizePixelRange': 'Custom size pixel count must stay between 655360 and 8294400.',
   'images.forms.generate.quality': 'Quality',
   'images.forms.generate.background': 'Background',
   'images.forms.generate.outputFormat': 'Output format',
@@ -51,6 +57,7 @@ const messages: Record<string, string> = {
   'images.forms.generate.n': 'Images',
   'images.forms.generate.submit': 'Generate image',
   'images.forms.generate.submitting': 'Generating...',
+  'images.forms.generate.submittingWithSeconds': 'Generating... {seconds}s',
   'images.forms.generate.apiKeyRequired': 'Select an API key before submitting.',
   'images.forms.generate.promptRequired': 'Prompt is required.',
   'images.forms.edit.sourceImage': 'Source image',
@@ -61,6 +68,7 @@ const messages: Record<string, string> = {
   'images.forms.edit.sourceImageRequired': 'Source image is required.',
   'images.forms.edit.submit': 'Edit image',
   'images.forms.edit.submitting': 'Editing...',
+  'images.forms.edit.submittingWithSeconds': 'Editing... {seconds}s',
   'images.results.title': 'Results',
   'images.results.description': 'Latest gateway response previews render here.',
   'images.results.loading': 'Loading latest result...',
@@ -266,6 +274,7 @@ const secondaryApiKey = {
 
 describe('ImagesView', () => {
   beforeEach(() => {
+    vi.useRealTimers()
     edit.mockReset()
     generate.mockReset()
     getHistoryDetail.mockReset()
@@ -313,6 +322,27 @@ describe('ImagesView', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('Official popular presets are shown here. GPT Image 2 also supports auto and more custom sizes that satisfy OpenAI constraints.')
+  })
+
+  it('shows a compact custom size requirements hint below the custom size input in both forms', async () => {
+    const wrapper = mount(ImagesView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' }
+        }
+      }
+    })
+
+    await flushPromises()
+    await wrapper.get('#image-generate-size').setValue('custom')
+
+    expect(wrapper.get('[data-testid="image-generate-custom-size-requirements"]').text()).toContain('Requirements: multiple of 16, max 3840, aspect ratio ≤ 3:1')
+
+    await wrapper.get('[data-testid="images-tab-edit"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('#image-edit-size').setValue('custom')
+
+    expect(wrapper.get('[data-testid="image-edit-custom-size-requirements"]').text()).toContain('Requirements: multiple of 16, max 3840, aspect ratio ≤ 3:1')
   })
 
   it('loads current user api keys on mount with explicit paging and stable sorting', async () => {
@@ -726,6 +756,30 @@ describe('ImagesView', () => {
     )
   })
 
+  it('blocks generation submission when custom size violates OpenAI constraints', async () => {
+    list.mockResolvedValue({
+      items: [primaryApiKey]
+    })
+
+    const wrapper = mount(ImagesView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' }
+        }
+      }
+    })
+
+    await flushPromises()
+    await wrapper.get('#image-generate-size').setValue('custom')
+    await wrapper.get('[data-testid="image-generate-custom-size"]').setValue('2050x1152')
+    await wrapper.get('[data-testid="image-generate-prompt"]').setValue('Draw a wide editorial hero image')
+    await wrapper.get('[data-testid="image-generate-submit"]').trigger('click')
+    await flushPromises()
+
+    expect(generate).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Custom size width and height must both be multiples of 16.')
+  })
+
   it('renders preview results for non-png base64 responses using the selected output format mime', async () => {
     list.mockResolvedValue({
       items: [primaryApiKey]
@@ -936,6 +990,39 @@ describe('ImagesView', () => {
     expect((edit.mock.calls[0][0] as FormData).get('size')).toBe('3072x1728')
   })
 
+  it('blocks edit submission when custom size violates OpenAI constraints', async () => {
+    list.mockResolvedValue({
+      items: [primaryApiKey]
+    })
+
+    const wrapper = mount(ImagesView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' }
+        }
+      }
+    })
+
+    await flushPromises()
+    await wrapper.get('[data-testid="images-tab-edit"]').trigger('click')
+    await wrapper.get('#image-edit-size').setValue('custom')
+    await wrapper.get('[data-testid="image-edit-custom-size"]').setValue('4096x1024')
+    await wrapper.get('[data-testid="image-edit-prompt"]').setValue('Retouch the wide composition')
+
+    const sourceInput = wrapper.get('[data-testid="image-edit-source-input"]')
+    Object.defineProperty(sourceInput.element, 'files', {
+      value: [new File(['source-bytes'], 'source.png', { type: 'image/png' })],
+      configurable: true
+    })
+
+    await sourceInput.trigger('change')
+    await wrapper.get('[data-testid="image-edit-submit"]').trigger('click')
+    await flushPromises()
+
+    expect(edit).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Custom size cannot exceed 3840px on either edge.')
+  })
+
   it('does not submit generation when no api key is selected', async () => {
     const wrapper = mount(ImagesView, {
       global: {
@@ -1013,5 +1100,33 @@ describe('ImagesView', () => {
 
     expect(wrapper.text()).toContain('Gateway failed')
     expect(wrapper.find('[data-testid="image-result-preview-0"]').exists()).toBe(false)
+  })
+
+  it('shows elapsed seconds while an image generation request is in flight', async () => {
+    vi.useFakeTimers()
+
+    list.mockResolvedValue({
+      items: [primaryApiKey]
+    })
+
+    generate.mockImplementationOnce(() => new Promise(() => {}))
+
+    const wrapper = mount(ImagesView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' }
+        }
+      }
+    })
+
+    await flushPromises()
+    await wrapper.get('[data-testid="image-generate-prompt"]').setValue('Draw a timed result')
+    await wrapper.get('[data-testid="image-generate-submit"]').trigger('click')
+    await flushPromises()
+
+    await vi.advanceTimersByTimeAsync(2100)
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="image-generate-submit"]').text()).toContain('Generating... 2s')
   })
 })

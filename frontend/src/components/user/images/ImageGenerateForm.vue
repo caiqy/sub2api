@@ -39,6 +39,9 @@
             type="text"
             @input="handleCustomSizeInput"
           />
+          <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400" data-testid="image-generate-custom-size-requirements">
+            {{ t('images.forms.generate.customSizeRequirements') }}
+          </p>
         </div>
         <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400" data-testid="image-generate-size-hint">{{ t('images.forms.generate.sizeHint') }}</p>
       </div>
@@ -94,7 +97,7 @@
         type="button"
         @click="handleSubmit"
       >
-        {{ loading ? t('images.forms.generate.submitting') : t('images.forms.generate.submit') }}
+        {{ loading ? t('images.forms.generate.submittingWithSeconds', { seconds: loadingSeconds }) : t('images.forms.generate.submit') }}
       </button>
     </div>
   </form>
@@ -104,7 +107,7 @@
 import { reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { CUSTOM_IMAGE_SIZE_OPTION_VALUE, createDefaultImageFormValues, isPresetImageSize, useImageFormOptions } from '@/composables/useImageFormOptions'
+import { CUSTOM_IMAGE_SIZE_OPTION_VALUE, createDefaultImageFormValues, isPresetImageSize, useImageFormOptions, validateCustomImageSize } from '@/composables/useImageFormOptions'
 import type { ImageCommonFormValues } from '@/composables/useImageFormOptions'
 import type { ImageGenerationRequest } from '@/types'
 
@@ -112,12 +115,14 @@ interface Props {
   disabled?: boolean
   initialValues?: Partial<ImageCommonFormValues>
   loading?: boolean
+  loadingSeconds?: number
 }
 
 const props = withDefaults(defineProps<Props>(), {
   disabled: false,
   initialValues: () => ({}),
   loading: false,
+  loadingSeconds: 0,
 })
 
 const emit = defineEmits<{
@@ -140,13 +145,18 @@ const { backgroundOptions, countOptions, modelOptions, moderationOptions, output
 const selectClass = 'input w-full'
 
 function handlePromptInput() {
-  if (form.prompt.trim()) {
+  if (form.prompt.trim() && validationError.value === t('images.forms.generate.promptRequired')) {
     validationError.value = ''
   }
 }
 
 function handleCustomSizeInput() {
-  if (customSize.value.trim()) {
+  const size = customSize.value.trim()
+  if (!size) {
+    return
+  }
+
+  if (form.size === CUSTOM_IMAGE_SIZE_OPTION_VALUE && validateCustomImageSize(size) === null) {
     validationError.value = ''
   }
 }
@@ -166,6 +176,14 @@ function handleSubmit() {
   if (!size) {
     validationError.value = t('images.forms.generate.customSizeRequired')
     return
+  }
+
+  if (form.size === CUSTOM_IMAGE_SIZE_OPTION_VALUE) {
+    const sizeValidationKey = validateCustomImageSize(size)
+    if (sizeValidationKey) {
+      validationError.value = t(sizeValidationKey)
+      return
+    }
   }
 
   validationError.value = ''

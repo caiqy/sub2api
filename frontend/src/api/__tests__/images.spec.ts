@@ -85,6 +85,15 @@ describe('images api', () => {
     expect(get).toHaveBeenCalledWith('/images/history/31')
   })
 
+  it('uses a dedicated 180 second timeout for direct image gateway requests', async () => {
+    await import('@/api/images')
+
+    expect(create).toHaveBeenCalledWith({
+      timeout: 180000,
+      withCredentials: true,
+    })
+  })
+
   it('targets absolute gateway urls for image generation and sends the selected api key', async () => {
     vi.stubEnv('VITE_API_BASE_URL', 'https://gateway.example.com/api/v1')
     const { imagesAPI } = await import('@/api/images')

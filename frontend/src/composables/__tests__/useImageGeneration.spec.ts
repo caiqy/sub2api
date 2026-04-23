@@ -16,6 +16,7 @@ vi.mock('@/api', () => ({
 
 describe('useImageGeneration', () => {
   beforeEach(() => {
+    vi.useRealTimers()
     edit.mockReset()
     generate.mockReset()
   })
@@ -66,5 +67,27 @@ describe('useImageGeneration', () => {
         src: 'data:image/jpeg;base64,QUJD',
       }),
     ])
+  })
+
+  it('tracks elapsed loading seconds while a generate request is in flight and resets after completion', async () => {
+    vi.useFakeTimers()
+
+    let resolveGenerate: ((value: { created: number; data: Array<{ url: string }> }) => void) | undefined
+    generate.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveGenerate = resolve })
+    )
+
+    const { loadingSeconds, submitGenerate } = useImageGeneration()
+
+    const pendingRequest = submitGenerate({ prompt: 'timed request' }, 'sk-primary')
+    expect(loadingSeconds.value).toBe(0)
+
+    await vi.advanceTimersByTimeAsync(3100)
+    expect(loadingSeconds.value).toBe(3)
+
+    resolveGenerate?.({ created: 1, data: [{ url: 'https://cdn.example.com/image.png' }] })
+    await pendingRequest
+
+    expect(loadingSeconds.value).toBe(0)
   })
 })

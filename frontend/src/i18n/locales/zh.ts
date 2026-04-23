@@ -1166,7 +1166,13 @@ export default {
         sizeHint: '这里展示的是官方常用预设尺寸。GPT Image 2 也支持 auto，以及更多满足 OpenAI 约束条件的自定义尺寸。',
         customSize: '自定义尺寸',
         customSizePlaceholder: '例如 2048x1152',
+        customSizeRequirements: '要求：16倍数，最大3840，长宽比≤3:1',
         customSizeRequired: '请输入自定义尺寸。',
+        customSizeFormat: '自定义尺寸必须使用 宽x高 格式，例如 2048x1152。',
+        customSizeMultipleOf16: '自定义尺寸的宽和高都必须是 16 的倍数。',
+        customSizeMaxEdge: '自定义尺寸任一边都不能超过 3840px。',
+        customSizeAspectRatio: '自定义尺寸的长宽比不能超过 3:1。',
+        customSizePixelRange: '自定义尺寸的总像素必须介于 655360 到 8294400 之间。',
         quality: '质量',
         background: '背景',
         outputFormat: '输出格式',
@@ -1174,6 +1180,7 @@ export default {
         n: '生成数量',
         submit: '生成图片',
         submitting: '生成中...',
+        submittingWithSeconds: '生成中... {seconds} 秒',
         apiKeyRequired: '请先选择一个 API 密钥再提交。',
         promptRequired: '提示词不能为空。'
       },
@@ -1185,7 +1192,8 @@ export default {
         maskImageHint: '透明区域表示允许编辑的范围。',
         sourceImageRequired: '必须上传源图片。',
         submit: '编辑图片',
-        submitting: '编辑中...'
+        submitting: '编辑中...',
+        submittingWithSeconds: '编辑中... {seconds} 秒'
       }
     },
     results: {

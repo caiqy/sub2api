@@ -13,9 +13,10 @@ import type {
 } from '@/types'
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) || '/api/v1'
+const IMAGE_GATEWAY_TIMEOUT_MS = 180000
 
 const imageGatewayClient = axios.create({
-  timeout: apiClient.defaults.timeout,
+  timeout: IMAGE_GATEWAY_TIMEOUT_MS,
   withCredentials: apiClient.defaults.withCredentials,
 })
 

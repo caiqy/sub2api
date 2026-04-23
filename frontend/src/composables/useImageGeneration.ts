@@ -83,9 +83,32 @@ function normalizeGatewayResult(item: ImageGatewayDataItem, requestedOutputForma
 
 export function useImageGeneration() {
   const isLoading = ref(false)
+  const loadingSeconds = ref(0)
   const error = ref('')
   const results = ref<ImageResultPreview[]>([])
   const lastResponse = ref<ImageGatewayResponse | null>(null)
+  let loadingTimer: ReturnType<typeof setInterval> | null = null
+
+  function startLoadingTimer() {
+    loadingSeconds.value = 0
+
+    if (loadingTimer) {
+      clearInterval(loadingTimer)
+    }
+
+    loadingTimer = setInterval(() => {
+      loadingSeconds.value += 1
+    }, 1000)
+  }
+
+  function stopLoadingTimer() {
+    if (loadingTimer) {
+      clearInterval(loadingTimer)
+      loadingTimer = null
+    }
+
+    loadingSeconds.value = 0
+  }
 
   async function submitGenerate(payload: ImageGenerationRequest, selectedApiKey: string) {
     if (isLoading.value || !selectedApiKey.trim()) {
@@ -93,6 +116,7 @@ export function useImageGeneration() {
     }
 
     isLoading.value = true
+    startLoadingTimer()
     error.value = ''
 
     try {
@@ -107,6 +131,7 @@ export function useImageGeneration() {
       return null
     } finally {
       isLoading.value = false
+      stopLoadingTimer()
     }
   }
 
@@ -116,6 +141,7 @@ export function useImageGeneration() {
     }
 
     isLoading.value = true
+    startLoadingTimer()
     error.value = ''
 
     try {
@@ -130,6 +156,7 @@ export function useImageGeneration() {
       return null
     } finally {
       isLoading.value = false
+      stopLoadingTimer()
     }
   }
 
@@ -144,6 +171,7 @@ export function useImageGeneration() {
 
   return {
     isLoading,
+    loadingSeconds,
     error,
     results,
     lastResponse,

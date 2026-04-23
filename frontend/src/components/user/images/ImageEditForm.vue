@@ -67,6 +67,9 @@
             type="text"
             @input="handleCustomSizeInput"
           />
+          <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400" data-testid="image-edit-custom-size-requirements">
+            {{ t('images.forms.generate.customSizeRequirements') }}
+          </p>
         </div>
         <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400" data-testid="image-edit-size-hint">{{ t('images.forms.generate.sizeHint') }}</p>
       </div>
@@ -116,7 +119,7 @@
 
     <div class="flex justify-end">
       <button class="btn btn-primary" :disabled="disabled || loading" data-testid="image-edit-submit" type="button" @click="handleSubmit">
-        {{ loading ? t('images.forms.edit.submitting') : t('images.forms.edit.submit') }}
+        {{ loading ? t('images.forms.edit.submittingWithSeconds', { seconds: loadingSeconds }) : t('images.forms.edit.submit') }}
       </button>
     </div>
   </form>
@@ -126,19 +129,21 @@
 import { computed, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { CUSTOM_IMAGE_SIZE_OPTION_VALUE, createDefaultImageFormValues, isPresetImageSize, useImageFormOptions } from '@/composables/useImageFormOptions'
+import { CUSTOM_IMAGE_SIZE_OPTION_VALUE, createDefaultImageFormValues, isPresetImageSize, useImageFormOptions, validateCustomImageSize } from '@/composables/useImageFormOptions'
 import type { ImageCommonFormValues } from '@/composables/useImageFormOptions'
 
 interface Props {
   disabled?: boolean
   initialValues?: Partial<ImageCommonFormValues>
   loading?: boolean
+  loadingSeconds?: number
 }
 
 const props = withDefaults(defineProps<Props>(), {
   disabled: false,
   initialValues: () => ({}),
   loading: false,
+  loadingSeconds: 0,
 })
 
 const emit = defineEmits<{
@@ -177,7 +182,12 @@ function handlePromptInput() {
 }
 
 function handleCustomSizeInput() {
-  if (customSize.value.trim()) {
+  const size = customSize.value.trim()
+  if (!size) {
+    return
+  }
+
+  if (form.size === CUSTOM_IMAGE_SIZE_OPTION_VALUE && validateCustomImageSize(size) === null) {
     validationError.value = ''
   }
 }
@@ -219,6 +229,14 @@ function handleSubmit() {
   if (!size) {
     validationError.value = t('images.forms.generate.customSizeRequired')
     return
+  }
+
+  if (form.size === CUSTOM_IMAGE_SIZE_OPTION_VALUE) {
+    const sizeValidationKey = validateCustomImageSize(size)
+    if (sizeValidationKey) {
+      validationError.value = t(sizeValidationKey)
+      return
+    }
   }
 
   if (hasInvalidSourceImage.value) {

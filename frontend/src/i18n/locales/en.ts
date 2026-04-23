@@ -1162,7 +1162,13 @@ export default {
         sizeHint: 'Official popular presets are shown here. GPT Image 2 also supports auto and more custom sizes that satisfy OpenAI constraints.',
         customSize: 'Custom size',
         customSizePlaceholder: 'e.g. 2048x1152',
+        customSizeRequirements: 'Requirements: multiple of 16, max 3840, aspect ratio ≤ 3:1',
         customSizeRequired: 'Custom size is required.',
+        customSizeFormat: 'Custom size must use the WIDTHxHEIGHT format, for example 2048x1152.',
+        customSizeMultipleOf16: 'Custom size width and height must both be multiples of 16.',
+        customSizeMaxEdge: 'Custom size cannot exceed 3840px on either edge.',
+        customSizeAspectRatio: 'Custom size aspect ratio cannot exceed 3:1.',
+        customSizePixelRange: 'Custom size pixel count must stay between 655360 and 8294400.',
         quality: 'Quality',
         background: 'Background',
         outputFormat: 'Output format',
@@ -1170,6 +1176,7 @@ export default {
         n: 'Images',
         submit: 'Generate image',
         submitting: 'Generating...',
+        submittingWithSeconds: 'Generating... {seconds}s',
         apiKeyRequired: 'Select an API key before submitting.',
         promptRequired: 'Prompt is required.'
       },
@@ -1181,7 +1188,8 @@ export default {
         maskImageHint: 'Transparent areas mark editable regions.',
         sourceImageRequired: 'Source image is required.',
         submit: 'Edit image',
-        submitting: 'Editing...'
+        submitting: 'Editing...',
+        submittingWithSeconds: 'Editing... {seconds}s'
       }
     },
     results: {
