@@ -8,7 +8,13 @@
   "permission": {
     "skill": {
       "writing-skills": "deny",
-      "using-git-worktrees": "deny"
+      "using-git-worktrees": "deny",
+      "installing-dotnet-framework-48-dev-environment": "deny",
+      "docx": "deny",
+      "pdf": "deny",
+      "pptx": "deny",
+      "xlsx": "deny",
+      "brainstorming": "allow"
     }
   },
   "tools": {
