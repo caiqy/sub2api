@@ -242,7 +242,9 @@ func TestOpenAIGatewayHandler_MessagesUpstreamErrorStillCreatesUsageLog(t *testi
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusBadGateway, rec.Code)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), `"type":"invalid_request_error"`)
+	require.Contains(t, rec.Body.String(), "messages upstream rejected payload")
 	log := waitForOpenAIFailedUsageLog(t, usageRepo)
 	require.NotNil(t, log, "failed usage log should be created for non-failover errors")
 	require.NotNil(t, log.DurationMs)
