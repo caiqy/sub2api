@@ -3728,6 +3728,11 @@ export default {
       upstreamResponseBody: 'Upstream Response Body',
       responseHeaders: 'Response Headers',
       responseBody: 'Response Body',
+      imagePreview: 'Image Preview',
+      rawResponseBody: 'Raw Response JSON',
+      openImagePreview: 'Open image preview',
+      previewImageTitle: 'Image Preview Modal',
+      closeImagePreview: 'Close preview',
       emptyDetailContent: 'No content',
       cleanup: {
         button: 'Cleanup',

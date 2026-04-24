@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"errors"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -102,4 +103,30 @@ func TestOpenAIGatewayServiceParseOpenAIImagesRequest_ExplicitSizeRequiresNative
 	require.NoError(t, err)
 	require.NotNil(t, parsed)
 	require.Equal(t, OpenAIImagesCapabilityNative, parsed.RequiredCapability)
+}
+
+func TestOpenAIGatewayServiceWrapOpenAIImageBackendError_NonStatusErrorCapturesRawDetail(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+
+	svc := &OpenAIGatewayService{}
+	account := &Account{ID: 27, Name: "openai-free #6", Platform: PlatformOpenAI}
+	rawErr := errors.New("dial tcp 104.18.33.45:443: i/o timeout")
+	wrappedErr := svc.wrapOpenAIImageBackendError(c.Request.Context(), c, account, rawErr)
+
+	require.ErrorIs(t, wrappedErr, rawErr)
+	require.Equal(t, "Upstream request failed", c.GetString(OpsUpstreamErrorMessageKey))
+	require.Contains(t, c.GetString(OpsUpstreamErrorDetailKey), "dial tcp")
+
+	rawEvents, ok := c.Get(OpsUpstreamErrorsKey)
+	require.True(t, ok)
+	events, ok := rawEvents.([]*OpsUpstreamErrorEvent)
+	require.True(t, ok)
+	require.Len(t, events, 1)
+	require.Equal(t, "request_error", events[0].Kind)
+	require.Equal(t, "Upstream request failed", events[0].Message)
+	require.Contains(t, events[0].Detail, "i/o timeout")
+	require.Equal(t, int64(27), events[0].AccountID)
 }

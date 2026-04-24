@@ -848,7 +848,12 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		SetBodyJsonMarshal(convReq).
 		Post(openAIChatGPTConversationURL)
 	if err != nil {
-		return nil, fmt.Errorf("openai image conversation request failed: %w", err)
+		return nil, s.wrapOpenAIImageBackendError(
+			ctx,
+			c,
+			account,
+			fmt.Errorf("openai image conversation request failed: %w", err),
+		)
 	}
 	defer func() {
 		if resp != nil && resp.Body != nil {
@@ -1872,6 +1877,18 @@ func (s *OpenAIGatewayService) wrapOpenAIImageBackendError(
 ) error {
 	var statusErr *openAIImageStatusError
 	if !errors.As(err, &statusErr) || statusErr == nil {
+		rawDetail := strings.TrimSpace(err.Error())
+		if rawDetail != "" {
+			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+				Platform:    account.Platform,
+				AccountID:   account.ID,
+				AccountName: account.Name,
+				Kind:        "request_error",
+				Message:     "Upstream request failed",
+				Detail:      rawDetail,
+			})
+			setOpsUpstreamError(c, 0, "Upstream request failed", rawDetail)
+		}
 		return err
 	}
 

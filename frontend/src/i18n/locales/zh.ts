@@ -3886,6 +3886,11 @@ export default {
       upstreamResponseBody: '上游响应体',
       responseHeaders: '响应头',
       responseBody: '响应体',
+      imagePreview: '图片预览',
+      rawResponseBody: '原始响应 JSON',
+      openImagePreview: '打开图片预览',
+      previewImageTitle: '图片放大预览',
+      closeImagePreview: '关闭预览',
       emptyDetailContent: '暂无内容',
       cleanup: {
         button: '清理',
