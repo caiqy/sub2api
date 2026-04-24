@@ -33,6 +33,7 @@ type UsageLogRepository interface {
 	Delete(ctx context.Context, id int64) error
 
 	ListByUser(ctx context.Context, userID int64, params pagination.PaginationParams) ([]UsageLog, *pagination.PaginationResult, error)
+	ListImageHistoryByUser(ctx context.Context, userID int64, params pagination.PaginationParams, filters ImageHistoryListFilters) ([]UsageLog, *pagination.PaginationResult, error)
 	ListByAPIKey(ctx context.Context, apiKeyID int64, params pagination.PaginationParams) ([]UsageLog, *pagination.PaginationResult, error)
 	ListByAccount(ctx context.Context, accountID int64, params pagination.PaginationParams) ([]UsageLog, *pagination.PaginationResult, error)
 

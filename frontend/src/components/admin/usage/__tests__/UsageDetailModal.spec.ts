@@ -17,6 +17,11 @@ const messages: Record<string, string> = {
   'admin.usage.upstreamResponseBody': 'Upstream Response Body',
   'admin.usage.responseHeaders': 'Response Headers',
   'admin.usage.responseBody': 'Response Body',
+  'admin.usage.imagePreview': 'Image Preview',
+  'admin.usage.rawResponseBody': 'Raw Response JSON',
+  'admin.usage.openImagePreview': 'Open image preview',
+  'admin.usage.previewImageTitle': 'Image Preview Modal',
+  'admin.usage.closeImagePreview': 'Close preview',
   'admin.usage.requestId': 'Request ID',
   'admin.usage.user': 'User',
   'usage.model': 'Model',
@@ -184,6 +189,96 @@ x-upstream-trace-id: trace-upstream`)
 
     await wrapper.find('[data-test="tab-upstream-request-body"]').trigger('click')
     expect(wrapper.text()).toContain('No content')
+  })
+
+  it('renders gpt-image previews from response body while keeping raw json visible', async () => {
+    const wrapper = mount(UsageDetailModal, {
+      props: {
+        show: true,
+        usageLog: {
+          request_id: 'req-image-123',
+          user: { email: 'image@example.com' },
+          model: 'gpt-image-2',
+          created_at: '2026-03-20T10:00:00Z',
+        },
+        detail: {
+          usage_log_id: 3,
+          request_headers: null,
+          request_body: '{"model":"gpt-image-2","output_format":"webp"}',
+          upstream_request_headers: null,
+          upstream_request_body: null,
+          upstream_response_headers: null,
+          upstream_response_body: null,
+          response_headers: ':status: 200\nContent-Type: application/json',
+          response_body: '{"created":1776989094,"data":[{"b64_json":"QUJD","revised_prompt":"draw a neon fox"}]}',
+          created_at: '2026-03-20T10:00:00Z',
+        },
+        loading: false,
+        error: '',
+      },
+      global: {
+        stubs: {
+          BaseDialog: {
+            props: ['show', 'title'],
+            template: '<div v-if="show"><slot /></div>',
+          },
+        },
+      },
+    })
+
+    await wrapper.find('[data-test="tab-response-body"]').trigger('click')
+
+    const previewImage = wrapper.get('[data-test="usage-detail-image-preview-0"]')
+    expect(previewImage.attributes('src')).toBe('data:image/webp;base64,QUJD')
+    expect(wrapper.text()).toContain('Image Preview')
+    expect(wrapper.text()).toContain('draw a neon fox')
+    expect(wrapper.text()).toContain('Raw Response JSON')
+    expect(wrapper.text()).toContain('"b64_json": "QUJD"')
+  })
+
+  it('opens an enlarged preview modal when clicking a rendered gpt-image preview', async () => {
+    const wrapper = mount(UsageDetailModal, {
+      props: {
+        show: true,
+        usageLog: {
+          request_id: 'req-image-zoom',
+          user: { email: 'image@example.com' },
+          model: 'gpt-image-2',
+          created_at: '2026-03-20T10:00:00Z',
+        },
+        detail: {
+          usage_log_id: 4,
+          request_headers: null,
+          request_body: '{"model":"gpt-image-2"}',
+          upstream_request_headers: null,
+          upstream_request_body: null,
+          upstream_response_headers: null,
+          upstream_response_body: null,
+          response_headers: ':status: 200\nContent-Type: application/json',
+          response_body: '{"created":1776989094,"data":[{"b64_json":"QUJD"}]}',
+          created_at: '2026-03-20T10:00:00Z',
+        },
+        loading: false,
+        error: '',
+      },
+      global: {
+        stubs: {
+          BaseDialog: {
+            props: ['show', 'title'],
+            template: '<div v-if="show"><slot /></div>',
+          },
+        },
+      },
+    })
+
+    await wrapper.find('[data-test="tab-response-body"]').trigger('click')
+    await wrapper.get('[data-test="usage-detail-image-open-0"]').trigger('click')
+
+    expect(wrapper.get('[data-test="usage-detail-image-preview-modal"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="usage-detail-image-preview-modal-image"]').attributes('src')).toBe('data:image/png;base64,QUJD')
+
+    await wrapper.get('[data-test="usage-detail-image-preview-close"]').trigger('click')
+    expect(wrapper.find('[data-test="usage-detail-image-preview-modal"]').exists()).toBe(false)
   })
 
   it('shows retry button when error is present', async () => {

@@ -39,6 +39,7 @@ type Handlers struct {
 	Auth           *AuthHandler
 	User           *UserHandler
 	APIKey         *APIKeyHandler
+	ImageHistory   *ImageHistoryHandler
 	Usage          *UsageHandler
 	Redeem         *RedeemHandler
 	Subscription   *SubscriptionHandler

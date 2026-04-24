@@ -75,6 +75,10 @@ type OpenAIImagesRequest struct {
 	Stream             bool
 	N                  int
 	Size               string
+	Quality            string
+	Background         string
+	OutputFormat       string
+	Moderation         string
 	ExplicitSize       bool
 	SizeTier           string
 	ResponseFormat     string
@@ -181,6 +185,10 @@ func parseOpenAIImagesJSONRequest(body []byte, req *OpenAIImagesRequest) error {
 		req.Size = strings.TrimSpace(sizeResult.String())
 		req.ExplicitSize = req.Size != ""
 	}
+	req.Quality = strings.TrimSpace(gjson.GetBytes(body, "quality").String())
+	req.Background = strings.TrimSpace(gjson.GetBytes(body, "background").String())
+	req.OutputFormat = strings.TrimSpace(gjson.GetBytes(body, "output_format").String())
+	req.Moderation = strings.TrimSpace(gjson.GetBytes(body, "moderation").String())
 	req.ResponseFormat = strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, "response_format").String()))
 	req.HasMask = gjson.GetBytes(body, "mask").Exists()
 	req.HasNativeOptions = hasOpenAINativeImageOptions(func(path string) bool {
@@ -250,6 +258,18 @@ func parseOpenAIImagesMultipartRequest(body []byte, contentType string, req *Ope
 		case "size":
 			req.Size = value
 			req.ExplicitSize = value != ""
+		case "quality":
+			req.Quality = value
+			req.HasNativeOptions = value != ""
+		case "background":
+			req.Background = value
+			req.HasNativeOptions = value != ""
+		case "output_format":
+			req.OutputFormat = value
+			req.HasNativeOptions = value != ""
+		case "moderation":
+			req.Moderation = value
+			req.HasNativeOptions = value != ""
 		case "response_format":
 			req.ResponseFormat = strings.ToLower(value)
 		case "stream":
@@ -828,7 +848,12 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		SetBodyJsonMarshal(convReq).
 		Post(openAIChatGPTConversationURL)
 	if err != nil {
-		return nil, fmt.Errorf("openai image conversation request failed: %w", err)
+		return nil, s.wrapOpenAIImageBackendError(
+			ctx,
+			c,
+			account,
+			fmt.Errorf("openai image conversation request failed: %w", err),
+		)
 	}
 	defer func() {
 		if resp != nil && resp.Body != nil {
@@ -1735,6 +1760,34 @@ func (e *openAIImageStatusError) Error() string {
 	return "openai image backend request failed"
 }
 
+type OpenAIImageUpstreamError interface {
+	error
+	OpenAIImageUpstreamStatusCode() int
+	OpenAIImageUpstreamResponseHeaders() http.Header
+	OpenAIImageUpstreamResponseBody() []byte
+}
+
+func (e *openAIImageStatusError) OpenAIImageUpstreamStatusCode() int {
+	if e == nil {
+		return 0
+	}
+	return e.StatusCode
+}
+
+func (e *openAIImageStatusError) OpenAIImageUpstreamResponseHeaders() http.Header {
+	if e == nil || e.ResponseHeaders == nil {
+		return nil
+	}
+	return e.ResponseHeaders.Clone()
+}
+
+func (e *openAIImageStatusError) OpenAIImageUpstreamResponseBody() []byte {
+	if e == nil || e.ResponseBody == nil {
+		return nil
+	}
+	return append([]byte(nil), e.ResponseBody...)
+}
+
 func newOpenAIImageStatusError(resp *req.Response, fallback string) error {
 	if resp == nil {
 		if strings.TrimSpace(fallback) == "" {
@@ -1824,6 +1877,18 @@ func (s *OpenAIGatewayService) wrapOpenAIImageBackendError(
 ) error {
 	var statusErr *openAIImageStatusError
 	if !errors.As(err, &statusErr) || statusErr == nil {
+		rawDetail := strings.TrimSpace(err.Error())
+		if rawDetail != "" {
+			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+				Platform:    account.Platform,
+				AccountID:   account.ID,
+				AccountName: account.Name,
+				Kind:        "request_error",
+				Message:     "Upstream request failed",
+				Detail:      rawDetail,
+			})
+			setOpsUpstreamError(c, 0, "Upstream request failed", rawDetail)
+		}
 		return err
 	}
 

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -1549,6 +1550,89 @@ func TestOpenAIGatewayHandler_ChatCompletionsUsageTaskUsesCapturedEndpointAndSna
 	}
 }
 
+func TestOpenAIGatewayHandler_ImagesGenerateDetailSnapshotIncludesRequestAndResponse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router, usageRepo, cleanup := newOpenAIImagesHandlerTestRouter(t, "/v1/images/generations", &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type": []string{"application/json"},
+			"X-Request-Id": []string{"req_image_generate_123"},
+		},
+		Body: io.NopCloser(strings.NewReader(`{"created":1,"data":[{"b64_json":"QUJD","revised_prompt":"draw a lantern at dusk"}]}`)),
+	})
+	defer cleanup()
+
+	reqBody := `{"model":"gpt-image-2","prompt":"draw a lantern","size":"1536x1024","output_format":"webp","n":1}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, usageRepo.lastLog)
+	require.NotNil(t, usageRepo.lastLog.DetailSnapshot)
+	require.JSONEq(t, reqBody, usageRepo.lastLog.DetailSnapshot.RequestBody)
+	require.Contains(t, usageRepo.lastLog.DetailSnapshot.ResponseBody, `"b64_json":"QUJD"`)
+	require.Contains(t, usageRepo.lastLog.DetailSnapshot.ResponseBody, "draw a lantern at dusk")
+}
+
+func TestOpenAIGatewayHandler_ImagesEditDetailSnapshotSanitizesMultipartMetadata(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router, usageRepo, cleanup := newOpenAIImagesHandlerTestRouter(t, "/v1/images/edits", &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type": []string{"application/json"},
+			"X-Request-Id": []string{"req_image_edit_123"},
+		},
+		Body: io.NopCloser(strings.NewReader(`{"created":1,"data":[{"b64_json":"RURJVA==","revised_prompt":"replace background"}]}`)),
+	})
+	defer cleanup()
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	require.NoError(t, writer.WriteField("model", "gpt-image-2"))
+	require.NoError(t, writer.WriteField("prompt", "replace background"))
+	require.NoError(t, writer.WriteField("size", "1536x1024"))
+	require.NoError(t, writer.WriteField("quality", "high"))
+	require.NoError(t, writer.WriteField("background", "transparent"))
+	require.NoError(t, writer.WriteField("output_format", "webp"))
+	require.NoError(t, writer.WriteField("moderation", "low"))
+	require.NoError(t, writer.WriteField("n", "2"))
+	imagePart, err := writer.CreateFormFile("image", "source.png")
+	require.NoError(t, err)
+	_, err = imagePart.Write([]byte("raw-source-image-bytes"))
+	require.NoError(t, err)
+	maskPart, err := writer.CreateFormFile("mask", "mask.png")
+	require.NoError(t, err)
+	_, err = maskPart.Write([]byte("raw-mask-bytes"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body.Bytes()))
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, usageRepo.lastLog)
+	require.NotNil(t, usageRepo.lastLog.DetailSnapshot)
+	require.NotContains(t, usageRepo.lastLog.DetailSnapshot.RequestBody, "raw-source-image-bytes")
+	require.NotContains(t, usageRepo.lastLog.DetailSnapshot.RequestBody, "raw-mask-bytes")
+	require.Equal(t, "gpt-image-2", gjson.Get(usageRepo.lastLog.DetailSnapshot.RequestBody, "model").String())
+	require.Equal(t, "replace background", gjson.Get(usageRepo.lastLog.DetailSnapshot.RequestBody, "prompt").String())
+	require.Equal(t, "1536x1024", gjson.Get(usageRepo.lastLog.DetailSnapshot.RequestBody, "size").String())
+	require.Equal(t, "high", gjson.Get(usageRepo.lastLog.DetailSnapshot.RequestBody, "quality").String())
+	require.Equal(t, "transparent", gjson.Get(usageRepo.lastLog.DetailSnapshot.RequestBody, "background").String())
+	require.Equal(t, "webp", gjson.Get(usageRepo.lastLog.DetailSnapshot.RequestBody, "output_format").String())
+	require.Equal(t, "low", gjson.Get(usageRepo.lastLog.DetailSnapshot.RequestBody, "moderation").String())
+	require.Equal(t, int64(2), gjson.Get(usageRepo.lastLog.DetailSnapshot.RequestBody, "n").Int())
+	require.True(t, gjson.Get(usageRepo.lastLog.DetailSnapshot.RequestBody, "had_source_image").Bool())
+	require.True(t, gjson.Get(usageRepo.lastLog.DetailSnapshot.RequestBody, "had_mask").Bool())
+	require.Contains(t, usageRepo.lastLog.DetailSnapshot.ResponseBody, `"b64_json":"RURJVA=="`)
+}
+
 func TestOpenAIGatewayHandler_RetryPathStoresLastOutboundRequestOnly(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -1780,6 +1864,87 @@ type openAIChatCompletionsAccountRepoStub struct {
 	service.AccountRepository
 
 	account *service.Account
+}
+
+func newOpenAIImagesHandlerTestRouter(t *testing.T, route string, upstreamResponse *http.Response) (*gin.Engine, *openAIChatCompletionsUsageLogRepoStub, func()) {
+	t.Helper()
+
+	cfg := &config.Config{
+		RunMode: config.RunModeSimple,
+		Default: config.DefaultConfig{RateMultiplier: 1},
+		Gateway: config.GatewayConfig{
+			MaxAccountSwitches: 1,
+			Scheduling:         config.GatewaySchedulingConfig{LoadBatchEnabled: false},
+		},
+		Concurrency: config.ConcurrencyConfig{PingInterval: 0},
+	}
+
+	groupID := int64(1)
+	group := &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{
+		ID:          11,
+		Name:        "openai-test-account",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeAPIKey,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    1,
+		Credentials: map[string]any{"api_key": "sk-test"},
+	}
+	usageRepo := &openAIChatCompletionsUsageLogRepoStub{}
+	httpUpstream := &openAIChatCompletionsHTTPUpstreamStub{response: upstreamResponse}
+	accountRepo := &openAIChatCompletionsAccountRepoStub{account: account}
+	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
+	deferredService := service.NewDeferredService(accountRepo, nil, 0)
+	billingService := service.NewBillingService(cfg, nil)
+	gatewayService := service.NewOpenAIGatewayService(
+		accountRepo,
+		usageRepo,
+		nil,
+		nil,
+		nil,
+		nil,
+		openAIChatCompletionsGatewayCacheStub{},
+		cfg,
+		nil,
+		concurrencyService,
+		billingService,
+		nil,
+		billingCacheService,
+		httpUpstream,
+		deferredService,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, cfg)
+
+	apiKey := &service.APIKey{
+		ID:      101,
+		UserID:  202,
+		Status:  service.StatusActive,
+		GroupID: &groupID,
+		User:    &service.User{ID: 202, Status: service.StatusActive, Concurrency: 1},
+		Group:   group,
+	}
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.UserID, Concurrency: apiKey.User.Concurrency})
+		c.Next()
+	})
+	router.Use(middleware.UsageDetailCapture())
+	router.POST(route, h.Images)
+
+	cleanup := func() {
+		billingCacheService.Stop()
+	}
+
+	return router, usageRepo, cleanup
 }
 
 func (s *openAIChatCompletionsAccountRepoStub) GetByID(ctx context.Context, id int64) (*service.Account, error) {

@@ -115,25 +115,53 @@ func TestListUsageLogsWithPagination_DegradesWhenDetailTableMissing(t *testing.T
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestListImageHistoryByUser_AppliesImageFilters(t *testing.T) {
+	db, mock := newSQLMock(t)
+	repo := &usageLogRepository{sql: db}
+	params := pagination.PaginationParams{Page: 1, PageSize: 10, SortBy: "created_at", SortOrder: pagination.SortOrderDesc}
+	filters := service.ImageHistoryListFilters{
+		APIKeyID: 11,
+		Mode:     string(service.ImageHistoryModeEdit),
+		Status:   string(service.ImageHistoryStatusError),
+	}
+	whereClause := "WHERE user_id = $1 AND (COALESCE(inbound_endpoint, '') LIKE '%/images/generations%' OR COALESCE(inbound_endpoint, '') LIKE '%/images/edits%') AND api_key_id = $2 AND COALESCE(inbound_endpoint, '') LIKE $3 AND image_count <= 0"
+
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM usage_logs "+whereClause)).
+		WithArgs(int64(7), int64(11), "%/images/edits%").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(0)))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT to_regclass('public.usage_log_details') IS NOT NULL")).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT "+usageLogListSelectColumns+" FROM usage_logs "+whereClause+" ORDER BY created_at DESC, id DESC LIMIT $4 OFFSET $5")).
+		WithArgs(int64(7), int64(11), "%/images/edits%", 10, 0).
+		WillReturnRows(sqlmock.NewRows(usageLogListRowColumns()))
+
+	logs, page, err := repo.ListImageHistoryByUser(context.Background(), 7, params, filters)
+	require.NoError(t, err)
+	require.Empty(t, logs)
+	require.NotNil(t, page)
+	require.Zero(t, page.Total)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func usageLogListRowColumns() []string {
 	return []string{
-		"id", "user_id", "api_key_id", "account_id", "request_id", "model", "upstream_model", "group_id", "subscription_id",
+		"id", "user_id", "api_key_id", "account_id", "request_id", "model", "requested_model", "upstream_model", "group_id", "subscription_id",
 		"input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens", "cache_creation_5m_tokens", "cache_creation_1h_tokens",
-		"input_cost", "output_cost", "cache_creation_cost", "cache_read_cost", "total_cost", "actual_cost", "rate_multiplier",
+		"image_output_tokens", "image_output_cost", "input_cost", "output_cost", "cache_creation_cost", "cache_read_cost", "total_cost", "actual_cost", "rate_multiplier",
 		"account_rate_multiplier", "billing_type", "request_type", "stream", "openai_ws_mode", "duration_ms", "first_token_ms",
-		"user_agent", "ip_address", "image_count", "image_size", "media_type", "service_tier", "reasoning_effort",
-		"inbound_endpoint", "upstream_endpoint", "cache_ttl_overridden", "created_at", "has_detail",
+		"user_agent", "ip_address", "image_count", "image_size", "service_tier", "reasoning_effort",
+		"inbound_endpoint", "upstream_endpoint", "cache_ttl_overridden", "channel_id", "model_mapping_chain", "billing_tier", "billing_mode", "account_stats_cost", "created_at", "has_detail",
 	}
 }
 
 func usageLogListRowValues(hasDetail bool) []driver.Value {
 	createdAt := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
 	return []driver.Value{
-		int64(101), int64(7), int64(8), int64(9), "req-list", "claude-3", nil, nil, nil,
+		int64(101), int64(7), int64(8), int64(9), "req-list", "claude-3", nil, nil, nil, nil,
 		10, 20, 0, 0, 0, 0,
-		0.1, 0.2, 0.0, 0.0, 0.3, 0.3, 1.0,
+		0, 0.0, 0.1, 0.2, 0.0, 0.0, 0.3, 0.3, 1.0,
 		nil, int16(0), int16(service.RequestTypeSync), false, false, nil, nil,
-		nil, nil, 0, nil, nil, nil, nil,
-		nil, nil, false, createdAt, hasDetail,
+		nil, nil, 0, nil, nil, nil,
+		nil, nil, false, nil, nil, nil, nil, nil, createdAt, hasDetail,
 	}
 }
