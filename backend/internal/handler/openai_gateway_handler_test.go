@@ -971,7 +971,7 @@ func newOpenAIHandlerForPreviousResponseIDValidation(t *testing.T, cache *concur
 		},
 		Concurrency: config.ConcurrencyConfig{PingInterval: 0},
 	}
-	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg)
 	concurrencyService := service.NewConcurrencyService(cache)
 	accountRepo := &openAIChatCompletionsAccountRepoStub{account: &service.Account{
 		ID:          11,
@@ -1111,7 +1111,7 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 		}))
 	}
 
-	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg)
 	t.Cleanup(func() {
 		billingCacheService.Stop()
 	})
@@ -1340,7 +1340,7 @@ func TestOpenAIGatewayHandler_ChatCompletionsPassesDetailSnapshotToRecordUsage(t
 	}
 	accountRepo := &openAIChatCompletionsAccountRepoStub{account: account}
 	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
-	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg)
 	deferredService := service.NewDeferredService(accountRepo, nil, 0)
 	billingService := service.NewBillingService(cfg, nil)
 	t.Cleanup(func() {
@@ -1445,7 +1445,7 @@ func TestOpenAIGatewayHandler_ChatCompletionsUsageTaskUsesCapturedEndpointAndSna
 	}
 	accountRepo := &openAIChatCompletionsAccountRepoStub{account: account}
 	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
-	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg)
 	deferredService := service.NewDeferredService(accountRepo, nil, 0)
 	billingService := service.NewBillingService(cfg, nil)
 	pool := service.NewUsageRecordWorkerPoolWithOptions(service.UsageRecordWorkerPoolOptions{
@@ -1682,7 +1682,7 @@ func TestOpenAIGatewayHandler_RetryPathStoresLastOutboundRequestOnly(t *testing.
 	}
 	accountRepo := &openAIChatCompletionsAccountRepoStub{account: account}
 	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
-	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg)
 	deferredService := service.NewDeferredService(accountRepo, nil, 0)
 	billingService := service.NewBillingService(cfg, nil)
 	t.Cleanup(func() {
@@ -1795,7 +1795,7 @@ func TestOpenAIGatewayHandler_UsageDetailStoresInjectedUpstreamRequestBody(t *te
 	}
 	accountRepo := &openAIChatCompletionsAccountRepoStub{account: account}
 	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
-	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg)
 	deferredService := service.NewDeferredService(accountRepo, nil, 0)
 	billingService := service.NewBillingService(cfg, nil)
 	t.Cleanup(func() {
@@ -1896,7 +1896,7 @@ func newOpenAIImagesHandlerTestRouter(t *testing.T, route string, upstreamRespon
 	httpUpstream := &openAIChatCompletionsHTTPUpstreamStub{response: upstreamResponse}
 	accountRepo := &openAIChatCompletionsAccountRepoStub{account: account}
 	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
-	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg)
 	deferredService := service.NewDeferredService(accountRepo, nil, 0)
 	billingService := service.NewBillingService(cfg, nil)
 	gatewayService := service.NewOpenAIGatewayService(

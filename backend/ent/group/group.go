@@ -80,6 +80,8 @@ const (
 	FieldUserConcurrencyEnabled = "user_concurrency_enabled"
 	// FieldUserConcurrencyLimit holds the string denoting the user_concurrency_limit field in the database.
 	FieldUserConcurrencyLimit = "user_concurrency_limit"
+	// FieldRpmLimit holds the string denoting the rpm_limit field in the database.
+	FieldRpmLimit = "rpm_limit"
 	// EdgeAPIKeys holds the string denoting the api_keys edge name in mutations.
 	EdgeAPIKeys = "api_keys"
 	// EdgeRedeemCodes holds the string denoting the redeem_codes edge name in mutations.
@@ -187,6 +189,7 @@ var Columns = []string{
 	FieldMessagesDispatchModelConfig,
 	FieldUserConcurrencyEnabled,
 	FieldUserConcurrencyLimit,
+	FieldRpmLimit,
 }
 
 var (
@@ -268,6 +271,8 @@ var (
 	DefaultUserConcurrencyEnabled bool
 	// DefaultUserConcurrencyLimit holds the default value on creation for the "user_concurrency_limit" field.
 	DefaultUserConcurrencyLimit int
+	// DefaultRpmLimit holds the default value on creation for the "rpm_limit" field.
+	DefaultRpmLimit int
 )
 
 // OrderOption defines the ordering options for the Group queries.
@@ -421,6 +426,11 @@ func ByUserConcurrencyEnabled(opts ...sql.OrderTermOption) OrderOption {
 // ByUserConcurrencyLimit orders the results by the user_concurrency_limit field.
 func ByUserConcurrencyLimit(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldUserConcurrencyLimit, opts...).ToFunc()
+}
+
+// ByRpmLimit orders the results by the rpm_limit field.
+func ByRpmLimit(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldRpmLimit, opts...).ToFunc()
 }
 
 // ByAPIKeysCount orders the results by api_keys count.

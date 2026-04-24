@@ -7,8 +7,6 @@ import SettingsView from "../SettingsView.vue";
 const {
   getSettings,
   updateSettings,
-  getGatewayRuntimeSettings,
-  updateGatewayRuntimeSettings,
   getWebSearchEmulationConfig,
   updateWebSearchEmulationConfig,
   getAdminApiKey,
@@ -29,8 +27,6 @@ const {
 } = vi.hoisted(() => ({
   getSettings: vi.fn(),
   updateSettings: vi.fn(),
-  getGatewayRuntimeSettings: vi.fn(),
-  updateGatewayRuntimeSettings: vi.fn(),
   getWebSearchEmulationConfig: vi.fn(),
   updateWebSearchEmulationConfig: vi.fn(),
   getAdminApiKey: vi.fn(),
@@ -57,8 +53,6 @@ vi.mock("@/api", () => ({
     settings: {
       getSettings,
       updateSettings,
-      getGatewayRuntimeSettings,
-      updateGatewayRuntimeSettings,
       getWebSearchEmulationConfig,
       updateWebSearchEmulationConfig,
       getAdminApiKey,
@@ -161,6 +155,8 @@ vi.mock("vue-i18n", async () => {
     "admin.settings.payment.findProvider": "查看支持的支付方式",
     "admin.settings.openaiExperimentalScheduler.title": "OpenAI 实验调度策略",
     "admin.settings.openaiExperimentalScheduler.description": "默认关闭。开启后仅影响本网关在 OpenAI 账号间的实验性调度选择逻辑，不代表上游 OpenAI 官方能力。",
+    "admin.settings.site.uploadImage": "上传图片",
+    "admin.settings.site.remove": "移除",
   };
   return {
     ...actual,
@@ -243,6 +239,37 @@ const SelectStub = defineComponent({
           ),
         ),
       );
+  },
+});
+
+const ImageUploadStub = defineComponent({
+  props: {
+    modelValue: {
+      type: String,
+      default: "",
+    },
+    uploadLabel: {
+      type: String,
+      default: "",
+    },
+    removeLabel: {
+      type: String,
+      default: "",
+    },
+    placeholder: {
+      type: String,
+      default: "",
+    },
+  },
+  setup(props) {
+    return () =>
+      h("div", {
+        class: "image-upload-stub",
+        "data-model-value": props.modelValue,
+        "data-upload-label": props.uploadLabel,
+        "data-remove-label": props.removeLabel,
+        "data-placeholder": props.placeholder,
+      });
   },
 });
 
@@ -381,7 +408,7 @@ function mountView() {
         GroupBadge: true,
         GroupOptionItem: true,
         ProxySelector: true,
-        ImageUpload: true,
+        ImageUpload: ImageUploadStub,
         BackupSettings: true,
       },
     },
@@ -424,8 +451,6 @@ describe("admin SettingsView payment visible method controls", () => {
     updateSettings.mockReset();
     getWebSearchEmulationConfig.mockReset();
     updateWebSearchEmulationConfig.mockReset();
-    getGatewayRuntimeSettings.mockReset();
-    updateGatewayRuntimeSettings.mockReset();
     getAdminApiKey.mockReset();
     getOverloadCooldownSettings.mockReset();
     getStreamTimeoutSettings.mockReset();
@@ -456,11 +481,6 @@ describe("admin SettingsView payment visible method controls", () => {
       enabled: false,
       providers: [],
     });
-    getGatewayRuntimeSettings.mockResolvedValue({
-      response_header_timeout: 90,
-      stream_data_interval_timeout: 15,
-    });
-    updateGatewayRuntimeSettings.mockImplementation(async (payload) => payload);
     getAdminApiKey.mockResolvedValue({
       exists: false,
       masked_key: "",
@@ -595,7 +615,7 @@ describe("admin SettingsView payment visible method controls", () => {
           GroupBadge: true,
           GroupOptionItem: true,
           ProxySelector: true,
-          ImageUpload: true,
+          ImageUpload: ImageUploadStub,
           BackupSettings: true,
         },
       },
@@ -622,37 +642,22 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(wrapper.text()).not.toContain("OpenAI 高级调度器");
   });
 
-  it("loads and saves gateway runtime settings independently", async () => {
+  it("passes translated upload and remove labels to the payment help image uploader", async () => {
     const wrapper = mountView();
 
     await flushPromises();
+    await openPaymentTab(wrapper);
 
-    expect(getGatewayRuntimeSettings).toHaveBeenCalledTimes(1);
-    expect(
-      (
-        wrapper.get('[data-testid="gateway-runtime-response-header-timeout"]').element as HTMLInputElement
-      ).value,
-    ).toBe("90");
-    expect(
-      (
-        wrapper.get('[data-testid="gateway-runtime-stream-interval-timeout"]').element as HTMLInputElement
-      ).value,
-    ).toBe("15");
+    const imageUploads = wrapper.findAll(".image-upload-stub");
+    expect(imageUploads.length).toBeGreaterThan(0);
 
-    await wrapper
-      .get('[data-testid="gateway-runtime-response-header-timeout"]')
-      .setValue("120");
-    await wrapper
-      .get('[data-testid="gateway-runtime-stream-interval-timeout"]')
-      .setValue("30");
+    const paymentHelpImageUpload = imageUploads.find(
+      (node) => node.attributes("data-placeholder") === "admin.settings.payment.helpImagePlaceholder",
+    );
 
-    await wrapper.get('[data-testid="gateway-runtime-save"]').trigger("click");
-    await flushPromises();
-
-    expect(updateGatewayRuntimeSettings).toHaveBeenCalledWith({
-      response_header_timeout: 120,
-      stream_data_interval_timeout: 30,
-    });
+    expect(paymentHelpImageUpload).toBeDefined();
+    expect(paymentHelpImageUpload?.attributes("data-upload-label")).toBe("上传图片");
+    expect(paymentHelpImageUpload?.attributes("data-remove-label")).toBe("移除");
   });
 });
 
@@ -660,8 +665,6 @@ describe("admin SettingsView wechat connect controls", () => {
   beforeEach(() => {
     getSettings.mockReset();
     updateSettings.mockReset();
-    getGatewayRuntimeSettings.mockReset();
-    updateGatewayRuntimeSettings.mockReset();
     getWebSearchEmulationConfig.mockReset();
     updateWebSearchEmulationConfig.mockReset();
     getAdminApiKey.mockReset();
@@ -697,11 +700,6 @@ describe("admin SettingsView wechat connect controls", () => {
       enabled: false,
       providers: [],
     });
-    getGatewayRuntimeSettings.mockResolvedValue({
-      response_header_timeout: 90,
-      stream_data_interval_timeout: 15,
-    });
-    updateGatewayRuntimeSettings.mockImplementation(async (payload) => payload);
     getAdminApiKey.mockResolvedValue({
       exists: false,
       masked_key: "",

@@ -190,7 +190,7 @@ func TestOpenAIGatewayHandler_MessagesUpstreamErrorStillCreatesUsageLog(t *testi
 	}
 	accountRepo := &openAIChatCompletionsAccountRepoStub{account: account}
 	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
-	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg)
 	deferredService := service.NewDeferredService(accountRepo, nil, 0)
 	billingService := service.NewBillingService(cfg, nil)
 	t.Cleanup(func() { billingCacheService.Stop() })
@@ -296,7 +296,7 @@ func TestOpenAIGatewayHandler_MessagesFailoverExhaustedStillCreatesUsageLog(t *t
 	}
 	accountRepo := &openAIChatCompletionsAccountRepoStub{account: account}
 	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
-	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg)
 	deferredService := service.NewDeferredService(accountRepo, nil, 0)
 	billingService := service.NewBillingService(cfg, nil)
 	t.Cleanup(func() { billingCacheService.Stop() })
@@ -485,8 +485,18 @@ func TestOpenAIGatewayHandler_ImagesOAuthForwardFailedUsagePreservesUpstreamSnap
 	}
 	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
 	accountRepo := &openAIChatCompletionsAccountRepoStub{account: account}
+	httpUpstream := &openAIChatCompletionsHTTPUpstreamStub{
+		response: &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Header: http.Header{
+				"Content-Type": []string{"application/json"},
+				"X-Request-Id": []string{"req_oauth_image_failed_123"},
+			},
+			Body: io.NopCloser(strings.NewReader(`{"error":{"message":"oauth images upstream rejected payload"}}`)),
+		},
+	}
 	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
-	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg)
 	deferredService := service.NewDeferredService(accountRepo, nil, 0)
 	billingService := service.NewBillingService(cfg, nil)
 	t.Cleanup(func() { billingCacheService.Stop() })
@@ -505,7 +515,7 @@ func TestOpenAIGatewayHandler_ImagesOAuthForwardFailedUsagePreservesUpstreamSnap
 		billingService,
 		nil,
 		billingCacheService,
-		nil,
+		httpUpstream,
 		deferredService,
 		nil,
 		nil,
@@ -523,18 +533,7 @@ func TestOpenAIGatewayHandler_ImagesOAuthForwardFailedUsagePreservesUpstreamSnap
 		Group:   group,
 	}
 
-	upstreamHeaders := http.Header{
-		"Content-Type": []string{"application/json"},
-		"X-Request-Id": []string{"req_oauth_image_failed_123"},
-	}
-	upstreamBody := []byte(`{"error":{"message":"oauth images upstream rejected payload"}}`)
 	reqBody := `{"model":"gpt-image-2","prompt":"draw a lantern"}`
-
-	proxy, cleanup := newOAuthImagesFailureProxy(t, upstreamHeaders, upstreamBody)
-	defer cleanup()
-	proxyID := int64(99)
-	account.ProxyID = &proxyID
-	account.Proxy = proxy
 
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
@@ -589,11 +588,85 @@ func TestOpenAIGatewayHandler_ImagesFailoverExhaustedFailedUsageLogCreated(t *te
 	require.NotNil(t, log.DurationMs)
 	require.NotNil(t, log.DetailSnapshot)
 	require.JSONEq(t, reqBody, log.DetailSnapshot.RequestBody)
+	require.Contains(t, log.DetailSnapshot.ResponseHeaders, ":status: 429")
+	require.Contains(t, log.DetailSnapshot.ResponseHeaders, "Content-Type: application/json")
+	require.Contains(t, log.DetailSnapshot.ResponseHeaders, "X-Request-Id: req_image_failover_123")
 	require.Contains(t, log.DetailSnapshot.ResponseBody, "images upstream overloaded")
 	require.NotNil(t, log.InboundEndpoint)
 	require.Equal(t, "/v1/images/generations", *log.InboundEndpoint)
 	require.NotNil(t, log.UpstreamEndpoint)
 	require.Contains(t, *log.UpstreamEndpoint, "/v1/images/generations")
+}
+
+func TestOpenAIGatewayHandler_SubmitOpenAIImagesFailedUsageLog_UsesErrorSnapshot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cfg := &config.Config{
+		RunMode: config.RunModeSimple,
+		Default: config.DefaultConfig{RateMultiplier: 1},
+	}
+	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
+	gatewayService := service.NewOpenAIGatewayService(
+		nil,
+		usageRepo,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		cfg,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+	h := &OpenAIGatewayHandler{gatewayService: gatewayService}
+
+	groupID := int64(1)
+	apiKey := &service.APIKey{
+		ID:      101,
+		UserID:  202,
+		Status:  service.StatusActive,
+		GroupID: &groupID,
+		User:    &service.User{ID: 202, Status: service.StatusActive, Concurrency: 1},
+		Group:   &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true},
+	}
+	account := &service.Account{ID: 11, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive}
+	parsed := &service.OpenAIImagesRequest{Endpoint: "/v1/images/generations", Model: "gpt-image-2", Prompt: "draw a lantern", N: 1}
+
+	router := gin.New()
+	router.Use(middleware.UsageDetailCapture())
+	router.POST("/test", func(c *gin.Context) {
+		h.submitOpenAIImagesFailedUsageLog(c, apiKey, account, parsed, fakeOpenAIImagesOAuthUpstreamError{
+			statusCode: 418,
+			responseHeaders: http.Header{
+				"Content-Type": []string{"application/json"},
+				"X-Request-Id": []string{"req_err_snapshot_123"},
+			},
+			responseBody: []byte(`{"error":{"message":"err-carried image snapshot"}}`),
+		}, time.Second)
+		c.Status(http.StatusTeapot)
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/test", strings.NewReader(`{"model":"gpt-image-2","prompt":"draw a lantern"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	log := waitForOpenAIFailedUsageLog(t, usageRepo)
+	require.NotNil(t, log)
+	require.NotNil(t, log.DetailSnapshot)
+	require.Contains(t, log.DetailSnapshot.ResponseHeaders, ":status: 418")
+	require.Contains(t, log.DetailSnapshot.ResponseHeaders, "Content-Type: application/json")
+	require.Contains(t, log.DetailSnapshot.ResponseHeaders, "X-Request-Id: req_err_snapshot_123")
+	require.Contains(t, log.DetailSnapshot.ResponseBody, "err-carried image snapshot")
 }
 
 type fakeOpenAIImagesOAuthUpstreamError struct {
@@ -794,7 +867,7 @@ func TestOpenAIGatewayHandler_MessagesSelectionExhaustedAfterFailoverStillCreate
 	}
 	accountRepo := &openAIChatCompletionsAccountRepoStub{account: account}
 	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
-	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg)
 	deferredService := service.NewDeferredService(accountRepo, nil, 0)
 	billingService := service.NewBillingService(cfg, nil)
 	t.Cleanup(func() { billingCacheService.Stop() })
@@ -896,7 +969,7 @@ func TestOpenAIGatewayHandler_UpstreamErrorStillCreatesUsageLog(t *testing.T) {
 	}
 	accountRepo := &openAIChatCompletionsAccountRepoStub{account: account}
 	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
-	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg)
 	deferredService := service.NewDeferredService(accountRepo, nil, 0)
 	billingService := service.NewBillingService(cfg, nil)
 	t.Cleanup(func() { billingCacheService.Stop() })
@@ -1004,7 +1077,7 @@ func TestOpenAIGatewayHandler_ChatCompletionsUpstreamErrorStillCreatesUsageLog(t
 	}
 	accountRepo := &openAIChatCompletionsAccountRepoStub{account: account}
 	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
-	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg)
 	deferredService := service.NewDeferredService(accountRepo, nil, 0)
 	billingService := service.NewBillingService(cfg, nil)
 	t.Cleanup(func() { billingCacheService.Stop() })
@@ -1115,7 +1188,7 @@ func TestOpenAIGatewayHandler_FailoverExhaustedStillCreatesUsageLog(t *testing.T
 	}
 	accountRepo := &openAIChatCompletionsAccountRepoStub{account: account}
 	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
-	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg)
 	deferredService := service.NewDeferredService(accountRepo, nil, 0)
 	billingService := service.NewBillingService(cfg, nil)
 	t.Cleanup(func() { billingCacheService.Stop() })
@@ -1215,7 +1288,7 @@ func TestOpenAIGatewayHandler_ChatCompletionsFailoverExhaustedStillCreatesUsageL
 	}
 	accountRepo := &openAIChatCompletionsAccountRepoStub{account: account}
 	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
-	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg)
 	deferredService := service.NewDeferredService(accountRepo, nil, 0)
 	billingService := service.NewBillingService(cfg, nil)
 	t.Cleanup(func() { billingCacheService.Stop() })
@@ -1311,7 +1384,7 @@ func TestOpenAIGatewayHandler_RetrySuccessDoesNotReuseFailoverErrorSnapshot(t *t
 	accountRepo := &openAIFailoverAccountRepoStub{openAIRetryAccountRepoStub{accounts: []*service.Account{account1, account2}}}
 	rateLimitService := service.NewRateLimitService(accountRepo, nil, cfg, nil, nil)
 	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
-	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, cfg)
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg)
 	deferredService := service.NewDeferredService(accountRepo, nil, 0)
 	billingService := service.NewBillingService(cfg, nil)
 	t.Cleanup(func() { billingCacheService.Stop() })

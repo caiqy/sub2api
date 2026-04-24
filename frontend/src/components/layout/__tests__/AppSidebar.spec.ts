@@ -50,7 +50,10 @@ vi.mock('vue-router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-router')>()
   return {
     ...actual,
-    useRoute: () => routeState
+    useRoute: () => routeState,
+    useRouter: () => ({
+      push: vi.fn()
+    })
   }
 })
 
@@ -76,6 +79,10 @@ vi.mock('@/stores', () => ({
     fetch: fetchMock
   }),
   useOnboardingStore: () => onboardingState
+}))
+
+vi.mock('@/stores/app', () => ({
+  useAppStore: () => appState
 }))
 
 vi.mock('@/utils/sanitize', () => ({
