@@ -543,6 +543,11 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 	if err != nil {
 		return nil, err
 	}
+	usageUpstreamBody := string(forwardBody)
+	if parsed.Multipart {
+		usageUpstreamBody = "[multipart body omitted]"
+	}
+	SetUsageUpstreamRequest(c, upstreamReq, usageUpstreamBody)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {

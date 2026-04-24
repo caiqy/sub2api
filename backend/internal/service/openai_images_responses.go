@@ -769,6 +769,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	}
 	upstreamReq.Header.Set("Content-Type", "application/json")
 	upstreamReq.Header.Set("Accept", "text/event-stream")
+	SetUsageUpstreamRequest(c, upstreamReq, string(responsesBody))
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
