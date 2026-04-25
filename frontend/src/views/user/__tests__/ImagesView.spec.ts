@@ -311,7 +311,7 @@ describe('ImagesView', () => {
     expect(wrapper.text()).toContain('History')
   })
 
-  it('uses a wide workbench container for image page', async () => {
+  it('uses a full-width workbench container for image page', async () => {
     const wrapper = mount(ImagesView, {
       global: {
         stubs: {
@@ -322,7 +322,10 @@ describe('ImagesView', () => {
 
     await flushPromises()
 
-    expect(wrapper.find('[data-testid="images-view"]').classes().join(' ')).toContain('max-w-[1600px]')
+    const classes = wrapper.find('[data-testid="images-view"]').classes()
+    expect(classes).toContain('w-full')
+    expect(classes).not.toContain('mx-auto')
+    expect(classes).not.toContain('max-w-[1600px]')
   })
 
   it('renders tabs and api key selector in the workbench toolbar', async () => {
@@ -338,16 +341,21 @@ describe('ImagesView', () => {
 
     await flushPromises()
 
+    expect(wrapper.get('[data-testid="images-view"]').element.firstElementChild).toBe(wrapper.get('[data-testid="images-workbench-toolbar"]').element)
+
     const toolbar = wrapper.get('[data-testid="images-workbench-toolbar"]')
     const toolbarLayout = toolbar.get('.flex.flex-col.gap-3')
     expect(toolbar.get('[role="tablist"]').exists()).toBe(true)
+    expect(toolbar.classes()).toContain('p-2')
     expect(toolbarLayout.classes()).toContain('flex-col')
     expect(toolbarLayout.classes()).toContain('lg:flex-row')
+    expect(toolbar.get('[data-testid="image-api-key-selector-shell"]').classes()).toContain('sm:flex-row')
     expect(toolbar.get('[data-testid="images-tab-generate"]').text()).toBe('Generate')
     expect(toolbar.get('[data-testid="images-tab-edit"]').text()).toBe('Edit')
     expect(toolbar.get('[data-testid="images-tab-history"]').text()).toBe('History')
     expect(toolbar.text()).toContain('API Key')
     expect(toolbar.text()).toContain('Vision Key A')
+    expect(toolbar.text()).not.toContain('Selection uses the first API key from the current page only.')
   })
 
   it('associates tabs with the active tabpanel using ARIA relationships', async () => {
@@ -609,7 +617,7 @@ describe('ImagesView', () => {
     const select = wrapper.get('[data-testid="image-api-key-selector"]')
     expect((select.element as HTMLSelectElement).value).toBe('7')
     expect(wrapper.text()).toContain('Vision Key A')
-    expect(wrapper.text()).toContain('Selection uses the first API key from the current page only.')
+    expect(wrapper.text()).not.toContain('Selection uses the first API key from the current page only.')
   })
 
   it('switches the active panel when a tab is clicked', async () => {

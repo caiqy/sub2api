@@ -1,20 +1,8 @@
 <template>
   <AppLayout>
-    <div class="mx-auto max-w-[1600px] space-y-5 px-3 sm:px-4 xl:px-6 2xl:px-8" data-testid="images-view">
-      <section class="px-1 py-1 sm:px-0">
-        <p class="text-xs font-semibold uppercase tracking-[0.22em] text-primary-600 dark:text-primary-400">
-          {{ t('images.badge') }}
-        </p>
-        <h1 class="mt-2 text-2xl font-bold text-gray-900 dark:text-white">
-          {{ t('images.title') }}
-        </h1>
-        <p class="mt-1 max-w-3xl text-sm leading-6 text-gray-600 dark:text-gray-300">
-          {{ t('images.description') }}
-        </p>
-      </section>
-
+    <div class="w-full space-y-4 px-3 sm:px-4 xl:px-6" data-testid="images-view">
       <section
-        class="card border border-gray-200/80 bg-white/90 p-3 shadow-sm backdrop-blur dark:border-dark-700 dark:bg-dark-800/90"
+        class="card border border-gray-200/80 bg-white/90 p-2 shadow-sm backdrop-blur dark:border-dark-700 dark:bg-dark-800/90"
         data-testid="images-workbench-toolbar"
       >
         <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -47,6 +35,7 @@
             v-model="selectedApiKeyId"
             class="lg:min-w-[320px]"
             :api-keys="apiKeys"
+            compact
             :disabled="apiKeyLoadState !== 'success' || apiKeys.length === 0"
             :label="t('images.keySelector.label')"
             :load-state="apiKeyLoadState"
@@ -62,23 +51,14 @@
       <section
         v-for="tab in tabs"
         :key="tab.key"
-        class="card p-6"
+        class="card p-4"
         :id="getTabPanelId(tab.key)"
         :aria-labelledby="getTabId(tab.key)"
         :data-testid="`images-panel-${tab.key}`"
         :hidden="tab.key !== activePanel.key"
         role="tabpanel"
       >
-        <div v-if="tab.key === activePanel.key" class="space-y-6">
-          <div class="space-y-2">
-            <h2 class="text-xl font-semibold text-gray-900 dark:text-white">
-              {{ t(tab.panelTitleKey) }}
-            </h2>
-            <p class="max-w-2xl text-sm leading-6 text-gray-600 dark:text-gray-300">
-              {{ t(tab.panelDescriptionKey) }}
-            </p>
-          </div>
-
+        <div v-if="tab.key === activePanel.key" class="space-y-5">
           <div v-if="tab.key === 'history'" class="grid gap-6 xl:grid-cols-[minmax(320px,0.9fr)_minmax(0,1.1fr)]">
             <ImageHistoryList
               :error="historyListError"
@@ -97,8 +77,17 @@
             />
           </div>
 
-          <div v-else class="grid gap-6 xl:grid-cols-[minmax(390px,0.85fr)_minmax(0,1.15fr)] 2xl:grid-cols-[minmax(420px,0.78fr)_minmax(0,1.22fr)]">
+          <div v-else class="grid gap-4 xl:grid-cols-[minmax(390px,0.85fr)_minmax(0,1.15fr)] 2xl:grid-cols-[minmax(420px,0.78fr)_minmax(0,1.22fr)]">
             <div class="rounded-3xl border border-gray-200 bg-white p-5 shadow-sm dark:border-dark-700 dark:bg-dark-800 xl:self-start">
+              <div class="mb-5 space-y-2">
+                <h2 class="text-xl font-semibold text-gray-900 dark:text-white">
+                  {{ t(tab.panelTitleKey) }}
+                </h2>
+                <p class="max-w-2xl text-sm leading-6 text-gray-600 dark:text-gray-300">
+                  {{ t(tab.panelDescriptionKey) }}
+                </p>
+              </div>
+
               <p
                 v-if="tab.key === 'edit' && editReplayNotice"
                 class="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-900/10 dark:text-amber-300"
