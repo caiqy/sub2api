@@ -88,12 +88,15 @@ func (s *UsageLogRepoSuite) TestCreate() {
 }
 
 func (s *UsageLogRepoSuite) TestCreate_PersistsDetailSnapshotAndPrunesOldRows() {
+	resetUsageLogDetailRetentionLimitsForRepositoryTest(s.T())
+
 	user := mustCreateUser(s.T(), s.client, &service.User{Email: "create-detail-prune@test.com"})
 	apiKey := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: "sk-create-detail-prune", Name: "k"})
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-create-detail-prune"})
 
 	base := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	var oldestUsageLogID int64
+	var imageUsageLogID int64
 	for i := 0; i < 500; i++ {
 		log := &service.UsageLog{
 			UserID:       user.ID,
@@ -115,6 +118,7 @@ func (s *UsageLogRepoSuite) TestCreate_PersistsDetailSnapshotAndPrunesOldRows() 
 		_, err = s.tx.ExecContext(s.ctx, `
 			INSERT INTO usage_log_details (
 				usage_log_id,
+				detail_type,
 				request_headers,
 				request_body,
 				upstream_request_headers,
@@ -122,10 +126,41 @@ func (s *UsageLogRepoSuite) TestCreate_PersistsDetailSnapshotAndPrunesOldRows() 
 				response_headers,
 				response_body,
 				created_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		`, log.ID, "seed-h", fmt.Sprintf("seed-body-%d", i), "seed-upstream-h", fmt.Sprintf("seed-upstream-body-%d", i), "seed-rh", "seed-rb", log.CreatedAt)
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		`, log.ID, string(service.UsageLogDetailTypeNormal), "seed-h", fmt.Sprintf("seed-body-%d", i), "seed-upstream-h", fmt.Sprintf("seed-upstream-body-%d", i), "seed-rh", "seed-rb", log.CreatedAt)
 		s.Require().NoError(err)
 	}
+
+	imageLog := &service.UsageLog{
+		UserID:       user.ID,
+		APIKeyID:     apiKey.ID,
+		AccountID:    account.ID,
+		RequestID:    uuid.NewString(),
+		Model:        "gpt-image-1",
+		InputTokens:  10,
+		OutputTokens: 20,
+		TotalCost:    0.5,
+		ActualCost:   0.5,
+		ImageCount:   1,
+		CreatedAt:    base.Add(-time.Second),
+	}
+	_, err := s.repo.Create(s.ctx, imageLog)
+	s.Require().NoError(err)
+	imageUsageLogID = imageLog.ID
+	_, err = s.tx.ExecContext(s.ctx, `
+		INSERT INTO usage_log_details (
+			usage_log_id,
+			detail_type,
+			request_headers,
+			request_body,
+			upstream_request_headers,
+			upstream_request_body,
+			response_headers,
+			response_body,
+			created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	`, imageLog.ID, string(service.UsageLogDetailTypeImage), "image-seed-h", "image-seed-body", "image-seed-upstream-h", "image-seed-upstream-body", "image-seed-rh", "image-seed-rb", imageLog.CreatedAt)
+	s.Require().NoError(err)
 
 	log := &service.UsageLog{
 		UserID:       user.ID,
@@ -155,7 +190,17 @@ func (s *UsageLogRepoSuite) TestCreate_PersistsDetailSnapshotAndPrunesOldRows() 
 	var total int
 	err = scanSingleRow(s.ctx, s.tx, "SELECT COUNT(*) FROM usage_log_details", nil, &total)
 	s.Require().NoError(err)
-	s.Require().Equal(500, total)
+	s.Require().Equal(service.UsageLogDetailRetentionLimitDefault+1, total)
+
+	var normalTotal int
+	err = scanSingleRow(s.ctx, s.tx, "SELECT COUNT(*) FROM usage_log_details WHERE detail_type = $1", []any{string(service.UsageLogDetailTypeNormal)}, &normalTotal)
+	s.Require().NoError(err)
+	s.Require().Equal(service.UsageLogDetailRetentionLimitDefault, normalTotal)
+
+	var imageTotal int
+	err = scanSingleRow(s.ctx, s.tx, "SELECT COUNT(*) FROM usage_log_details WHERE detail_type = $1", []any{string(service.UsageLogDetailTypeImage)}, &imageTotal)
+	s.Require().NoError(err)
+	s.Require().Equal(1, imageTotal)
 
 	var detail struct {
 		RequestHeaders         string
@@ -180,6 +225,7 @@ func (s *UsageLogRepoSuite) TestCreate_PersistsDetailSnapshotAndPrunesOldRows() 
 
 	persistedDetail, err := newUsageLogDetailRepositoryWithSQL(s.tx).GetByUsageLogID(s.ctx, log.ID)
 	s.Require().NoError(err)
+	s.Require().Equal(service.UsageLogDetailTypeNormal, persistedDetail.DetailType)
 	s.Require().Equal("Authorization: Bearer redacted", persistedDetail.RequestHeaders)
 	s.Require().Equal(`{"hello":"world"}`, persistedDetail.RequestBody)
 	s.Require().Equal("X-Upstream-Auth: upstream-token", persistedDetail.UpstreamRequestHeaders)
@@ -195,6 +241,10 @@ func (s *UsageLogRepoSuite) TestCreate_PersistsDetailSnapshotAndPrunesOldRows() 
 	err = scanSingleRow(s.ctx, s.tx, "SELECT COUNT(*) FROM usage_log_details WHERE usage_log_id = $1", []any{log.ID}, &newestCount)
 	s.Require().NoError(err)
 	s.Require().Equal(1, newestCount)
+	var imageCount int
+	err = scanSingleRow(s.ctx, s.tx, "SELECT COUNT(*) FROM usage_log_details WHERE usage_log_id = $1", []any{imageUsageLogID}, &imageCount)
+	s.Require().NoError(err)
+	s.Require().Equal(1, imageCount)
 }
 
 func TestUsageLogRepositoryCreate_BatchPathConcurrent(t *testing.T) {

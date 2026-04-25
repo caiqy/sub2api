@@ -577,9 +577,13 @@ type ConcurrencyConfig struct {
 
 // GatewayConfig API网关相关配置
 type GatewayConfig struct {
-	// 等待上游响应头的超时时间（秒），0表示无超时
-	// 注意：这不影响流式数据传输，只控制等待响应头的时间
+	// 等待上游响应头的超时时间（秒）。配置文件中 0 表示无超时；运行时设置接口要求大于 0。
+	// 注意：这不影响流式数据传输，只控制等待响应头的时间。
 	ResponseHeaderTimeout int `mapstructure:"response_header_timeout"`
+	// 普通调用详情保留数量，0 表示不保留。
+	UsageLogDetailRetentionLimit int `mapstructure:"usage_log_detail_retention_limit"`
+	// 生图调用详情保留数量，0 表示不保留。
+	ImageUsageLogDetailRetentionLimit int `mapstructure:"image_usage_log_detail_retention_limit"`
 	// 请求体最大字节数，用于网关请求体大小限制
 	MaxBodySize int64 `mapstructure:"max_body_size"`
 	// 非流式上游响应体读取上限（字节），用于防止无界读取导致内存放大
@@ -1646,6 +1650,8 @@ func setDefaults() {
 
 	// Gateway
 	viper.SetDefault("gateway.response_header_timeout", 600) // 600秒(10分钟)等待上游响应头，LLM高负载时可能排队较久
+	viper.SetDefault("gateway.usage_log_detail_retention_limit", 300)
+	viper.SetDefault("gateway.image_usage_log_detail_retention_limit", 300)
 	viper.SetDefault("gateway.log_upstream_error_body", true)
 	viper.SetDefault("gateway.log_upstream_error_body_max_bytes", 2048)
 	viper.SetDefault("gateway.inject_beta_for_apikey", false)
@@ -2309,6 +2315,12 @@ func (c *Config) Validate() error {
 	if c.Gateway.StreamDataIntervalTimeout != 0 &&
 		(c.Gateway.StreamDataIntervalTimeout < 30 || c.Gateway.StreamDataIntervalTimeout > 300) {
 		return fmt.Errorf("gateway.stream_data_interval_timeout must be 0 or between 30-300 seconds")
+	}
+	if c.Gateway.UsageLogDetailRetentionLimit < 0 {
+		return fmt.Errorf("gateway.usage_log_detail_retention_limit must be non-negative")
+	}
+	if c.Gateway.ImageUsageLogDetailRetentionLimit < 0 {
+		return fmt.Errorf("gateway.image_usage_log_detail_retention_limit must be non-negative")
 	}
 	if c.Gateway.StreamKeepaliveInterval < 0 {
 		return fmt.Errorf("gateway.stream_keepalive_interval must be non-negative")

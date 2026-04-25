@@ -78,6 +78,29 @@ func TestLoadDefaultSchedulingConfig(t *testing.T) {
 	}
 }
 
+func TestLoadDefaultUsageLogDetailRetentionLimits(t *testing.T) {
+	resetViperWithJWTSecret(t)
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, 300, cfg.Gateway.UsageLogDetailRetentionLimit)
+	require.Equal(t, 300, cfg.Gateway.ImageUsageLogDetailRetentionLimit)
+}
+
+func TestConfigValidateRejectsNegativeUsageLogDetailRetentionLimits(t *testing.T) {
+	resetViperWithJWTSecret(t)
+
+	cfg, err := Load()
+	require.NoError(t, err)
+
+	cfg.Gateway.UsageLogDetailRetentionLimit = -1
+	require.ErrorContains(t, cfg.Validate(), "gateway.usage_log_detail_retention_limit must be non-negative")
+
+	cfg.Gateway.UsageLogDetailRetentionLimit = 300
+	cfg.Gateway.ImageUsageLogDetailRetentionLimit = -1
+	require.ErrorContains(t, cfg.Validate(), "gateway.image_usage_log_detail_retention_limit must be non-negative")
+}
+
 func TestLoadDefaultOpenAIWSConfig(t *testing.T) {
 	resetViperWithJWTSecret(t)
 

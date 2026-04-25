@@ -5519,6 +5519,11 @@ export default {
         responseHeaderTimeoutWarning: 'Updating this will clear idle connection pools, and new requests will use the new configuration.',
         streamDataIntervalTimeout: 'Stream Data Interval Timeout (seconds)',
         streamDataIntervalTimeoutHint: 'Default: 180 seconds. Set to 0, or any value between 30 and 300 seconds.',
+        usageLogDetailRetentionLimit: 'Normal call detail retention limit',
+        usageLogDetailRetentionLimitHint: 'Default: 300. Set to 0 to stop retaining normal call details.',
+        imageUsageLogDetailRetentionLimit: 'Image call detail retention limit',
+        imageUsageLogDetailRetentionLimitHint: 'Default: 300. Set to 0 to stop retaining image call details.',
+        validationFailed: 'Gateway runtime settings contain invalid values. Check the fields and save again.',
         saved: 'Gateway runtime settings saved',
         saveFailed: 'Failed to save gateway runtime settings'
       },

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"testing"
 	"time"
 
@@ -132,7 +131,9 @@ func TestUsageHandlerDetailNotFound(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, got.Code)
 	require.Equal(t, "USAGE_LOG_DETAIL_NOT_FOUND", got.Reason)
 	require.Equal(t, infraerrors.Message(service.ErrUsageLogDetailNotFound), got.Message)
-	require.Contains(t, got.Message, strconv.Itoa(service.UsageLogDetailRetentionLimit))
+	require.Contains(t, got.Message, "regular and image usage details are retained separately")
+	require.Contains(t, got.Message, "retention limit of 0")
+	require.NotContains(t, got.Message, "500")
 }
 
 func TestUsageHandlerDetailUsageLogMissing(t *testing.T) {

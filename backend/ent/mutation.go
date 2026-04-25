@@ -37629,6 +37629,7 @@ type UsageLogDetailMutation struct {
 	op                        Op
 	typ                       string
 	id                        *int64
+	detail_type               *string
 	request_headers           *string
 	request_body              *string
 	upstream_request_headers  *string
@@ -37778,6 +37779,42 @@ func (m *UsageLogDetailMutation) OldUsageLogID(ctx context.Context) (v int64, er
 // ResetUsageLogID resets all changes to the "usage_log_id" field.
 func (m *UsageLogDetailMutation) ResetUsageLogID() {
 	m.usage_log = nil
+}
+
+// SetDetailType sets the "detail_type" field.
+func (m *UsageLogDetailMutation) SetDetailType(s string) {
+	m.detail_type = &s
+}
+
+// DetailType returns the value of the "detail_type" field in the mutation.
+func (m *UsageLogDetailMutation) DetailType() (r string, exists bool) {
+	v := m.detail_type
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDetailType returns the old "detail_type" field's value of the UsageLogDetail entity.
+// If the UsageLogDetail object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogDetailMutation) OldDetailType(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDetailType is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDetailType requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDetailType: %w", err)
+	}
+	return oldValue.DetailType, nil
+}
+
+// ResetDetailType resets all changes to the "detail_type" field.
+func (m *UsageLogDetailMutation) ResetDetailType() {
+	m.detail_type = nil
 }
 
 // SetRequestHeaders sets the "request_headers" field.
@@ -38165,9 +38202,12 @@ func (m *UsageLogDetailMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogDetailMutation) Fields() []string {
-	fields := make([]string, 0, 10)
+	fields := make([]string, 0, 11)
 	if m.usage_log != nil {
 		fields = append(fields, usagelogdetail.FieldUsageLogID)
+	}
+	if m.detail_type != nil {
+		fields = append(fields, usagelogdetail.FieldDetailType)
 	}
 	if m.request_headers != nil {
 		fields = append(fields, usagelogdetail.FieldRequestHeaders)
@@ -38206,6 +38246,8 @@ func (m *UsageLogDetailMutation) Field(name string) (ent.Value, bool) {
 	switch name {
 	case usagelogdetail.FieldUsageLogID:
 		return m.UsageLogID()
+	case usagelogdetail.FieldDetailType:
+		return m.DetailType()
 	case usagelogdetail.FieldRequestHeaders:
 		return m.RequestHeaders()
 	case usagelogdetail.FieldRequestBody:
@@ -38235,6 +38277,8 @@ func (m *UsageLogDetailMutation) OldField(ctx context.Context, name string) (ent
 	switch name {
 	case usagelogdetail.FieldUsageLogID:
 		return m.OldUsageLogID(ctx)
+	case usagelogdetail.FieldDetailType:
+		return m.OldDetailType(ctx)
 	case usagelogdetail.FieldRequestHeaders:
 		return m.OldRequestHeaders(ctx)
 	case usagelogdetail.FieldRequestBody:
@@ -38268,6 +38312,13 @@ func (m *UsageLogDetailMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetUsageLogID(v)
+		return nil
+	case usagelogdetail.FieldDetailType:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDetailType(v)
 		return nil
 	case usagelogdetail.FieldRequestHeaders:
 		v, ok := value.(string)
@@ -38386,6 +38437,9 @@ func (m *UsageLogDetailMutation) ResetField(name string) error {
 	switch name {
 	case usagelogdetail.FieldUsageLogID:
 		m.ResetUsageLogID()
+		return nil
+	case usagelogdetail.FieldDetailType:
+		m.ResetDetailType()
 		return nil
 	case usagelogdetail.FieldRequestHeaders:
 		m.ResetRequestHeaders()

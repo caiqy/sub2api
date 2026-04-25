@@ -86,15 +86,19 @@ type gatewayRuntimeEnvelope struct {
 }
 
 type gatewayRuntimePayload struct {
-	ResponseHeaderTimeout     int `json:"response_header_timeout"`
-	StreamDataIntervalTimeout int `json:"stream_data_interval_timeout"`
+	ResponseHeaderTimeout             int `json:"response_header_timeout"`
+	StreamDataIntervalTimeout         int `json:"stream_data_interval_timeout"`
+	UsageLogDetailRetentionLimit      int `json:"usage_log_detail_retention_limit"`
+	ImageUsageLogDetailRetentionLimit int `json:"image_usage_log_detail_retention_limit"`
 }
 
 func newGatewayRuntimeHandlerTestConfig(responseHeaderTimeout, streamDataIntervalTimeout int) *config.Config {
 	return &config.Config{
 		Gateway: config.GatewayConfig{
-			ResponseHeaderTimeout:     responseHeaderTimeout,
-			StreamDataIntervalTimeout: streamDataIntervalTimeout,
+			ResponseHeaderTimeout:             responseHeaderTimeout,
+			StreamDataIntervalTimeout:         streamDataIntervalTimeout,
+			UsageLogDetailRetentionLimit:      service.UsageLogDetailRetentionLimitDefault,
+			ImageUsageLogDetailRetentionLimit: service.ImageUsageLogDetailRetentionLimitDefault,
 		},
 	}
 }
@@ -136,7 +140,12 @@ func TestSettingHandler_GetGatewayRuntimeSettings_FallsBackToCurrentConfig(t *te
 
 	var payload gatewayRuntimePayload
 	require.NoError(t, json.Unmarshal(resp.Data, &payload))
-	require.Equal(t, gatewayRuntimePayload{ResponseHeaderTimeout: 120, StreamDataIntervalTimeout: 60}, payload)
+	require.Equal(t, gatewayRuntimePayload{
+		ResponseHeaderTimeout:             120,
+		StreamDataIntervalTimeout:         60,
+		UsageLogDetailRetentionLimit:      service.UsageLogDetailRetentionLimitDefault,
+		ImageUsageLogDetailRetentionLimit: service.ImageUsageLogDetailRetentionLimitDefault,
+	}, payload)
 	require.Empty(t, repo.setCalls)
 	require.Zero(t, httpUpstream.invalidateCalls)
 }
@@ -147,7 +156,7 @@ func TestSettingHandler_UpdateGatewayRuntimeSettings_UpdatesConfigAndInvalidates
 	httpUpstream := &gatewayRuntimeHTTPUpstreamStub{}
 	router, _ := newGatewayRuntimeTestRouter(t, repo, cfg, httpUpstream)
 
-	body := bytes.NewBufferString(`{"response_header_timeout":180,"stream_data_interval_timeout":0}`)
+	body := bytes.NewBufferString(`{"response_header_timeout":180,"stream_data_interval_timeout":0,"usage_log_detail_retention_limit":9,"image_usage_log_detail_retention_limit":0}`)
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/gateway-runtime", body)
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -160,12 +169,52 @@ func TestSettingHandler_UpdateGatewayRuntimeSettings_UpdatesConfigAndInvalidates
 
 	var payload gatewayRuntimePayload
 	require.NoError(t, json.Unmarshal(resp.Data, &payload))
-	require.Equal(t, gatewayRuntimePayload{ResponseHeaderTimeout: 180, StreamDataIntervalTimeout: 0}, payload)
+	require.Equal(t, gatewayRuntimePayload{
+		ResponseHeaderTimeout:             180,
+		StreamDataIntervalTimeout:         0,
+		UsageLogDetailRetentionLimit:      9,
+		ImageUsageLogDetailRetentionLimit: 0,
+	}, payload)
 	require.Equal(t, 180, cfg.Gateway.ResponseHeaderTimeout)
 	require.Equal(t, 0, cfg.Gateway.StreamDataIntervalTimeout)
+	require.Equal(t, 9, cfg.Gateway.UsageLogDetailRetentionLimit)
+	require.Equal(t, 0, cfg.Gateway.ImageUsageLogDetailRetentionLimit)
 	require.Len(t, repo.setCalls, 1)
 	require.Equal(t, service.SettingKeyGatewayRuntimeSettings, repo.setCalls[0].key)
 	require.Equal(t, 1, httpUpstream.invalidateCalls)
+}
+
+func TestSettingHandler_UpdateGatewayRuntimeSettings_PreservesOmittedOptionalRuntimeFields(t *testing.T) {
+	repo := &gatewayRuntimeHandlerRepoStub{}
+	cfg := newGatewayRuntimeHandlerTestConfig(120, 60)
+	cfg.Gateway.UsageLogDetailRetentionLimit = 11
+	cfg.Gateway.ImageUsageLogDetailRetentionLimit = 22
+	httpUpstream := &gatewayRuntimeHTTPUpstreamStub{}
+	router, _ := newGatewayRuntimeTestRouter(t, repo, cfg, httpUpstream)
+
+	body := bytes.NewBufferString(`{"response_header_timeout":180}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/gateway-runtime", body)
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, req)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	resp := decodeGatewayRuntimeResponse(t, recorder)
+	require.Equal(t, 0, resp.Code)
+
+	var payload gatewayRuntimePayload
+	require.NoError(t, json.Unmarshal(resp.Data, &payload))
+	require.Equal(t, gatewayRuntimePayload{
+		ResponseHeaderTimeout:             180,
+		StreamDataIntervalTimeout:         60,
+		UsageLogDetailRetentionLimit:      11,
+		ImageUsageLogDetailRetentionLimit: 22,
+	}, payload)
+	require.Equal(t, 180, cfg.Gateway.ResponseHeaderTimeout)
+	require.Equal(t, 60, cfg.Gateway.StreamDataIntervalTimeout)
+	require.Equal(t, 11, cfg.Gateway.UsageLogDetailRetentionLimit)
+	require.Equal(t, 22, cfg.Gateway.ImageUsageLogDetailRetentionLimit)
 }
 
 func TestSettingHandler_UpdateGatewayRuntimeSettings_ReturnsBadRequestForInvalidPayload(t *testing.T) {

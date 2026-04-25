@@ -14,7 +14,7 @@ import (
 
 var (
 	ErrUsageLogNotFound       = infraerrors.NotFound("USAGE_LOG_NOT_FOUND", "usage log not found")
-	ErrUsageLogDetailNotFound = infraerrors.NotFound("USAGE_LOG_DETAIL_NOT_FOUND", fmt.Sprintf("usage log detail not found (only recent %d records are retained)", UsageLogDetailRetentionLimit))
+	ErrUsageLogDetailNotFound = infraerrors.NotFound("USAGE_LOG_DETAIL_NOT_FOUND", "usage log detail not found (regular and image usage details are retained separately according to gateway runtime settings; a retention limit of 0 means that detail type is not retained)")
 )
 
 // CreateUsageLogRequest 创建使用日志请求

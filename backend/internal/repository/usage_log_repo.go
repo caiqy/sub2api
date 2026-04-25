@@ -224,6 +224,13 @@ func newUsageLogRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor) *usage
 	return repo
 }
 
+func (r *usageLogRepository) PruneToConfiguredLimits(ctx context.Context) error {
+	if r == nil || r.sql == nil {
+		return nil
+	}
+	return newUsageLogDetailRepositoryWithSQL(r.sql).PruneToConfiguredLimits(ctx)
+}
+
 // getPerformanceStats 获取 RPM 和 TPM（近5分钟平均值，可选按用户过滤）
 func (r *usageLogRepository) getPerformanceStats(ctx context.Context, userID int64) (rpm, tpm int64, err error) {
 	fiveMinutesAgo := time.Now().Add(-5 * time.Minute)
@@ -653,7 +660,7 @@ func (r *usageLogRepository) persistUsageLogDetailsBestEffort(ctx context.Contex
 		if log == nil || log.ID <= 0 || log.DetailSnapshot == nil {
 			continue
 		}
-		detail := usageLogDetailFromSnapshot(log.ID, log.CreatedAt, log.DetailSnapshot.Normalize())
+		detail := usageLogDetailFromSnapshot(log.ID, log.CreatedAt, service.UsageLogDetailTypeFromUsageLog(log), log.DetailSnapshot.Normalize())
 		if detail != nil {
 			details = append(details, detail)
 		}
@@ -4113,7 +4120,7 @@ func (r *usageLogRepository) persistUsageLogDetailBestEffort(ctx context.Context
 	if log == nil || log.ID <= 0 || log.DetailSnapshot == nil {
 		return
 	}
-	detail := usageLogDetailFromSnapshot(log.ID, log.CreatedAt, log.DetailSnapshot.Normalize())
+	detail := usageLogDetailFromSnapshot(log.ID, log.CreatedAt, service.UsageLogDetailTypeFromUsageLog(log), log.DetailSnapshot.Normalize())
 	if detail == nil {
 		return
 	}

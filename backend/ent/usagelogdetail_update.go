@@ -42,6 +42,20 @@ func (_u *UsageLogDetailUpdate) SetNillableUsageLogID(v *int64) *UsageLogDetailU
 	return _u
 }
 
+// SetDetailType sets the "detail_type" field.
+func (_u *UsageLogDetailUpdate) SetDetailType(v string) *UsageLogDetailUpdate {
+	_u.mutation.SetDetailType(v)
+	return _u
+}
+
+// SetNillableDetailType sets the "detail_type" field if the given value is not nil.
+func (_u *UsageLogDetailUpdate) SetNillableDetailType(v *string) *UsageLogDetailUpdate {
+	if v != nil {
+		_u.SetDetailType(*v)
+	}
+	return _u
+}
+
 // SetRequestHeaders sets the "request_headers" field.
 func (_u *UsageLogDetailUpdate) SetRequestHeaders(v string) *UsageLogDetailUpdate {
 	_u.mutation.SetRequestHeaders(v)
@@ -199,6 +213,11 @@ func (_u *UsageLogDetailUpdate) ExecX(ctx context.Context) {
 
 // check runs all checks and user-defined validators on the builder.
 func (_u *UsageLogDetailUpdate) check() error {
+	if v, ok := _u.mutation.DetailType(); ok {
+		if err := usagelogdetail.DetailTypeValidator(v); err != nil {
+			return &ValidationError{Name: "detail_type", err: fmt.Errorf(`ent: validator failed for field "UsageLogDetail.detail_type": %w`, err)}
+		}
+	}
 	if _u.mutation.UsageLogCleared() && len(_u.mutation.UsageLogIDs()) > 0 {
 		return errors.New(`ent: clearing a required unique edge "UsageLogDetail.usage_log"`)
 	}
@@ -216,6 +235,9 @@ func (_u *UsageLogDetailUpdate) sqlSave(ctx context.Context) (_node int, err err
 				ps[i](selector)
 			}
 		}
+	}
+	if value, ok := _u.mutation.DetailType(); ok {
+		_spec.SetField(usagelogdetail.FieldDetailType, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.RequestHeaders(); ok {
 		_spec.SetField(usagelogdetail.FieldRequestHeaders, field.TypeString, value)
@@ -300,6 +322,20 @@ func (_u *UsageLogDetailUpdateOne) SetUsageLogID(v int64) *UsageLogDetailUpdateO
 func (_u *UsageLogDetailUpdateOne) SetNillableUsageLogID(v *int64) *UsageLogDetailUpdateOne {
 	if v != nil {
 		_u.SetUsageLogID(*v)
+	}
+	return _u
+}
+
+// SetDetailType sets the "detail_type" field.
+func (_u *UsageLogDetailUpdateOne) SetDetailType(v string) *UsageLogDetailUpdateOne {
+	_u.mutation.SetDetailType(v)
+	return _u
+}
+
+// SetNillableDetailType sets the "detail_type" field if the given value is not nil.
+func (_u *UsageLogDetailUpdateOne) SetNillableDetailType(v *string) *UsageLogDetailUpdateOne {
+	if v != nil {
+		_u.SetDetailType(*v)
 	}
 	return _u
 }
@@ -474,6 +510,11 @@ func (_u *UsageLogDetailUpdateOne) ExecX(ctx context.Context) {
 
 // check runs all checks and user-defined validators on the builder.
 func (_u *UsageLogDetailUpdateOne) check() error {
+	if v, ok := _u.mutation.DetailType(); ok {
+		if err := usagelogdetail.DetailTypeValidator(v); err != nil {
+			return &ValidationError{Name: "detail_type", err: fmt.Errorf(`ent: validator failed for field "UsageLogDetail.detail_type": %w`, err)}
+		}
+	}
 	if _u.mutation.UsageLogCleared() && len(_u.mutation.UsageLogIDs()) > 0 {
 		return errors.New(`ent: clearing a required unique edge "UsageLogDetail.usage_log"`)
 	}
@@ -508,6 +549,9 @@ func (_u *UsageLogDetailUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog
 				ps[i](selector)
 			}
 		}
+	}
+	if value, ok := _u.mutation.DetailType(); ok {
+		_spec.SetField(usagelogdetail.FieldDetailType, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.RequestHeaders(); ok {
 		_spec.SetField(usagelogdetail.FieldRequestHeaders, field.TypeString, value)

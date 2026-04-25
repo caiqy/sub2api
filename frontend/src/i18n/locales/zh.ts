@@ -5680,6 +5680,11 @@ export default {
         responseHeaderTimeoutWarning: '修改后会清理空闲连接池，后续新请求会使用新配置。',
         streamDataIntervalTimeout: '流数据间隔超时（秒）',
         streamDataIntervalTimeoutHint: '默认 180 秒。可设为 0，或设置为 30-300 秒。',
+        usageLogDetailRetentionLimit: '普通调用详情保留数量',
+        usageLogDetailRetentionLimitHint: '默认 300。设为 0 表示不保留普通调用详情。',
+        imageUsageLogDetailRetentionLimit: '生图调用详情保留数量',
+        imageUsageLogDetailRetentionLimitHint: '默认 300。设为 0 表示不保留生图调用详情。',
+        validationFailed: '网关运行参数包含无效数值，请检查后再保存。',
         saved: '网关运行参数保存成功',
         saveFailed: '保存网关运行参数失败'
       },

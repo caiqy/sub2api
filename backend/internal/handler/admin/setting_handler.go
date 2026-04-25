@@ -2288,15 +2288,19 @@ func (h *SettingHandler) GetGatewayRuntimeSettings(c *gin.Context) {
 	}
 
 	response.Success(c, dto.GatewayRuntimeSettings{
-		ResponseHeaderTimeout:     settings.ResponseHeaderTimeout,
-		StreamDataIntervalTimeout: settings.StreamDataIntervalTimeout,
+		ResponseHeaderTimeout:             settings.ResponseHeaderTimeout,
+		StreamDataIntervalTimeout:         settings.StreamDataIntervalTimeout,
+		UsageLogDetailRetentionLimit:      settings.UsageLogDetailRetentionLimit,
+		ImageUsageLogDetailRetentionLimit: settings.ImageUsageLogDetailRetentionLimit,
 	})
 }
 
 // UpdateGatewayRuntimeSettingsRequest 更新网关运行参数配置请求
 type UpdateGatewayRuntimeSettingsRequest struct {
-	ResponseHeaderTimeout     int `json:"response_header_timeout"`
-	StreamDataIntervalTimeout int `json:"stream_data_interval_timeout"`
+	ResponseHeaderTimeout             int  `json:"response_header_timeout"`
+	StreamDataIntervalTimeout         *int `json:"stream_data_interval_timeout"`
+	UsageLogDetailRetentionLimit      *int `json:"usage_log_detail_retention_limit"`
+	ImageUsageLogDetailRetentionLimit *int `json:"image_usage_log_detail_retention_limit"`
 }
 
 // UpdateGatewayRuntimeSettings 更新网关运行参数配置
@@ -2308,9 +2312,26 @@ func (h *SettingHandler) UpdateGatewayRuntimeSettings(c *gin.Context) {
 		return
 	}
 
+	currentSettings, err := h.settingService.GetGatewayRuntimeSettings(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
 	settings := &service.GatewayRuntimeSettings{
-		ResponseHeaderTimeout:     req.ResponseHeaderTimeout,
-		StreamDataIntervalTimeout: req.StreamDataIntervalTimeout,
+		ResponseHeaderTimeout:             req.ResponseHeaderTimeout,
+		StreamDataIntervalTimeout:         currentSettings.StreamDataIntervalTimeout,
+		UsageLogDetailRetentionLimit:      currentSettings.UsageLogDetailRetentionLimit,
+		ImageUsageLogDetailRetentionLimit: currentSettings.ImageUsageLogDetailRetentionLimit,
+	}
+	if req.StreamDataIntervalTimeout != nil {
+		settings.StreamDataIntervalTimeout = *req.StreamDataIntervalTimeout
+	}
+	if req.UsageLogDetailRetentionLimit != nil {
+		settings.UsageLogDetailRetentionLimit = *req.UsageLogDetailRetentionLimit
+	}
+	if req.ImageUsageLogDetailRetentionLimit != nil {
+		settings.ImageUsageLogDetailRetentionLimit = *req.ImageUsageLogDetailRetentionLimit
 	}
 	if err := h.settingService.SetGatewayRuntimeSettings(c.Request.Context(), settings); err != nil {
 		response.ErrorFrom(c, err)
@@ -2324,8 +2345,10 @@ func (h *SettingHandler) UpdateGatewayRuntimeSettings(c *gin.Context) {
 	}
 
 	response.Success(c, dto.GatewayRuntimeSettings{
-		ResponseHeaderTimeout:     updatedSettings.ResponseHeaderTimeout,
-		StreamDataIntervalTimeout: updatedSettings.StreamDataIntervalTimeout,
+		ResponseHeaderTimeout:             updatedSettings.ResponseHeaderTimeout,
+		StreamDataIntervalTimeout:         updatedSettings.StreamDataIntervalTimeout,
+		UsageLogDetailRetentionLimit:      updatedSettings.UsageLogDetailRetentionLimit,
+		ImageUsageLogDetailRetentionLimit: updatedSettings.ImageUsageLogDetailRetentionLimit,
 	})
 }
 

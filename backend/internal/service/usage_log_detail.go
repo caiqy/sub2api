@@ -2,13 +2,48 @@ package service
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 )
 
+type UsageLogDetailType string
+
 const (
-	UsageLogDetailBestEffortTimeout = 10 * time.Second
-	UsageLogDetailRetentionLimit    = 500
+	UsageLogDetailTypeNormal UsageLogDetailType = "normal"
+	UsageLogDetailTypeImage  UsageLogDetailType = "image"
+
+	UsageLogDetailBestEffortTimeout          = 10 * time.Second
+	UsageLogDetailRetentionLimitDefault      = 300
+	ImageUsageLogDetailRetentionLimitDefault = 300
+
+	UsageLogDetailRetentionLimit = UsageLogDetailRetentionLimitDefault
 )
+
+var usageLogDetailRetentionLimit atomic.Int64
+var imageUsageLogDetailRetentionLimit atomic.Int64
+
+func init() {
+	usageLogDetailRetentionLimit.Store(UsageLogDetailRetentionLimitDefault)
+	imageUsageLogDetailRetentionLimit.Store(ImageUsageLogDetailRetentionLimitDefault)
+}
+
+// SetUsageLogDetailRetentionLimits updates runtime retention limits.
+// Negative values fall back to defaults; 0 is valid and means retain none.
+func SetUsageLogDetailRetentionLimits(normalLimit int, imageLimit int) {
+	if normalLimit < 0 {
+		normalLimit = UsageLogDetailRetentionLimitDefault
+	}
+	if imageLimit < 0 {
+		imageLimit = ImageUsageLogDetailRetentionLimitDefault
+	}
+	usageLogDetailRetentionLimit.Store(int64(normalLimit))
+	imageUsageLogDetailRetentionLimit.Store(int64(imageLimit))
+}
+
+// GetUsageLogDetailRetentionLimits returns the current runtime retention limits.
+func GetUsageLogDetailRetentionLimits() (normalLimit int, imageLimit int) {
+	return int(usageLogDetailRetentionLimit.Load()), int(imageUsageLogDetailRetentionLimit.Load())
+}
 
 func NewUsageLogDetailBestEffortContext(parent context.Context) (context.Context, context.CancelFunc) {
 	if parent == nil {
@@ -19,7 +54,9 @@ func NewUsageLogDetailBestEffortContext(parent context.Context) (context.Context
 
 // UsageLogDetail 表示持久化后的 usage log 详情实体。
 type UsageLogDetail struct {
-	UsageLogID              int64
+	UsageLogID int64
+	// DetailType is normal or image; persistence uses it to separate retention pools.
+	DetailType              UsageLogDetailType
 	RequestHeaders          string
 	RequestBody             string
 	UpstreamRequestHeaders  string

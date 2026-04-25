@@ -411,6 +411,22 @@ func ProvideSettingService(settingRepo SettingRepository, groupRepo GroupReposit
 	return svc
 }
 
+// ProvideSettingServiceWithUsageLogPruner wires SettingService with usage detail pruning when available.
+func ProvideSettingServiceWithUsageLogPruner(
+	settingRepo SettingRepository,
+	groupRepo GroupRepository,
+	proxyRepo ProxyRepository,
+	cfg *config.Config,
+	httpUpstream HTTPUpstream,
+	usageLogRepo UsageLogRepository,
+) *SettingService {
+	svc := ProvideSettingService(settingRepo, groupRepo, proxyRepo, cfg, httpUpstream)
+	if pruner, ok := usageLogRepo.(UsageLogDetailPruner); ok {
+		svc.SetUsageLogDetailPruner(pruner)
+	}
+	return svc
+}
+
 func ProvideOpenAIGatewayServiceWithStartupRecovery(
 	accountRepo AccountRepository,
 	usageLogRepo UsageLogRepository,
@@ -510,7 +526,7 @@ var ProviderSet = wire.NewSet(
 	NewAccountUsageService,
 	NewAccountTestService,
 	NewImageHistoryService,
-	ProvideSettingService,
+	ProvideSettingServiceWithUsageLogPruner,
 	NewDataManagementService,
 	ProvideBackupService,
 	ProvideOpsSystemLogSink,

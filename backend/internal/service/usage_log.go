@@ -205,3 +205,27 @@ func (u *UsageLog) SyncRequestTypeAndLegacyFields() {
 	u.RequestType = requestType
 	u.Stream, u.OpenAIWSMode = ApplyLegacyRequestFields(requestType, u.Stream, u.OpenAIWSMode)
 }
+
+func UsageLogDetailTypeFromUsageLog(log *UsageLog) UsageLogDetailType {
+	if log == nil {
+		return UsageLogDetailTypeNormal
+	}
+	if isImageEndpoint(log.InboundEndpoint) || isImageEndpoint(log.UpstreamEndpoint) {
+		return UsageLogDetailTypeImage
+	}
+	if log.BillingMode != nil && strings.EqualFold(strings.TrimSpace(*log.BillingMode), string(BillingModeImage)) {
+		return UsageLogDetailTypeImage
+	}
+	if log.ImageCount > 0 {
+		return UsageLogDetailTypeImage
+	}
+	return UsageLogDetailTypeNormal
+}
+
+func isImageEndpoint(endpoint *string) bool {
+	if endpoint == nil {
+		return false
+	}
+	path := strings.ToLower(strings.TrimSpace(*endpoint))
+	return strings.Contains(path, "/v1/images/generations") || strings.Contains(path, "/v1/images/edits")
+}

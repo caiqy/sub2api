@@ -391,8 +391,10 @@ type OverloadCooldownSettings struct {
 
 // GatewayRuntimeSettings 网关运行参数配置
 type GatewayRuntimeSettings struct {
-	ResponseHeaderTimeout     int `json:"response_header_timeout"`
-	StreamDataIntervalTimeout int `json:"stream_data_interval_timeout"`
+	ResponseHeaderTimeout             int `json:"response_header_timeout"`
+	StreamDataIntervalTimeout         int `json:"stream_data_interval_timeout"`
+	UsageLogDetailRetentionLimit      int `json:"usage_log_detail_retention_limit"`
+	ImageUsageLogDetailRetentionLimit int `json:"image_usage_log_detail_retention_limit"`
 }
 
 // DefaultOverloadCooldownSettings 返回默认的过载冷却配置（启用，10分钟）

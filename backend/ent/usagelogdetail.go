@@ -20,6 +20,8 @@ type UsageLogDetail struct {
 	ID int64 `json:"id,omitempty"`
 	// UsageLogID holds the value of the "usage_log_id" field.
 	UsageLogID int64 `json:"usage_log_id,omitempty"`
+	// DetailType holds the value of the "detail_type" field.
+	DetailType string `json:"detail_type,omitempty"`
 	// RequestHeaders holds the value of the "request_headers" field.
 	RequestHeaders string `json:"request_headers,omitempty"`
 	// RequestBody holds the value of the "request_body" field.
@@ -71,7 +73,7 @@ func (*UsageLogDetail) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case usagelogdetail.FieldID, usagelogdetail.FieldUsageLogID:
 			values[i] = new(sql.NullInt64)
-		case usagelogdetail.FieldRequestHeaders, usagelogdetail.FieldRequestBody, usagelogdetail.FieldUpstreamRequestHeaders, usagelogdetail.FieldUpstreamRequestBody, usagelogdetail.FieldResponseHeaders, usagelogdetail.FieldResponseBody, usagelogdetail.FieldUpstreamResponseHeaders, usagelogdetail.FieldUpstreamResponseBody:
+		case usagelogdetail.FieldDetailType, usagelogdetail.FieldRequestHeaders, usagelogdetail.FieldRequestBody, usagelogdetail.FieldUpstreamRequestHeaders, usagelogdetail.FieldUpstreamRequestBody, usagelogdetail.FieldResponseHeaders, usagelogdetail.FieldResponseBody, usagelogdetail.FieldUpstreamResponseHeaders, usagelogdetail.FieldUpstreamResponseBody:
 			values[i] = new(sql.NullString)
 		case usagelogdetail.FieldCreatedAt:
 			values[i] = new(sql.NullTime)
@@ -101,6 +103,12 @@ func (_m *UsageLogDetail) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field usage_log_id", values[i])
 			} else if value.Valid {
 				_m.UsageLogID = value.Int64
+			}
+		case usagelogdetail.FieldDetailType:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field detail_type", values[i])
+			} else if value.Valid {
+				_m.DetailType = value.String
 			}
 		case usagelogdetail.FieldRequestHeaders:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -199,6 +207,9 @@ func (_m *UsageLogDetail) String() string {
 	builder.WriteString(fmt.Sprintf("id=%v, ", _m.ID))
 	builder.WriteString("usage_log_id=")
 	builder.WriteString(fmt.Sprintf("%v", _m.UsageLogID))
+	builder.WriteString(", ")
+	builder.WriteString("detail_type=")
+	builder.WriteString(_m.DetailType)
 	builder.WriteString(", ")
 	builder.WriteString("request_headers=")
 	builder.WriteString(_m.RequestHeaders)

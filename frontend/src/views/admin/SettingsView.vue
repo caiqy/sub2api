@@ -282,6 +282,52 @@
                   </p>
                 </div>
 
+                <div class="space-y-2 border-t border-gray-100 pt-4 dark:border-dark-700">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {{ t("admin.settings.gatewayRuntime.usageLogDetailRetentionLimit") }}
+                    </label>
+                    <code
+                      class="select-all break-all rounded bg-gray-50 px-2 py-1 font-mono text-xs text-gray-600 dark:bg-dark-800 dark:text-gray-300"
+                    >
+                      gateway.usage_log_detail_retention_limit
+                    </code>
+                  </div>
+                  <input
+                    v-model.number="gatewayRuntimeForm.usage_log_detail_retention_limit"
+                    data-testid="gateway-runtime-usage-log-detail-retention-limit"
+                    type="number"
+                    min="0"
+                    class="input w-40"
+                  />
+                  <p class="text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.gatewayRuntime.usageLogDetailRetentionLimitHint") }}
+                  </p>
+                </div>
+
+                <div class="space-y-2 border-t border-gray-100 pt-4 dark:border-dark-700">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {{ t("admin.settings.gatewayRuntime.imageUsageLogDetailRetentionLimit") }}
+                    </label>
+                    <code
+                      class="select-all break-all rounded bg-gray-50 px-2 py-1 font-mono text-xs text-gray-600 dark:bg-dark-800 dark:text-gray-300"
+                    >
+                      gateway.image_usage_log_detail_retention_limit
+                    </code>
+                  </div>
+                  <input
+                    v-model.number="gatewayRuntimeForm.image_usage_log_detail_retention_limit"
+                    data-testid="gateway-runtime-image-usage-log-detail-retention-limit"
+                    type="number"
+                    min="0"
+                    class="input w-40"
+                  />
+                  <p class="text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.gatewayRuntime.imageUsageLogDetailRetentionLimitHint") }}
+                  </p>
+                </div>
+
                 <div class="flex justify-end border-t border-gray-100 pt-4 dark:border-dark-700">
                   <button
                     type="button"
@@ -5121,6 +5167,8 @@ const gatewayRuntimeLoadFailed = ref(false);
 const gatewayRuntimeForm = reactive<GatewayRuntimeSettings>({
   response_header_timeout: 600,
   stream_data_interval_timeout: 180,
+  usage_log_detail_retention_limit: 300,
+  image_usage_log_detail_retention_limit: 300,
 });
 
 // Overload Cooldown (529) 状态
@@ -6513,18 +6561,67 @@ async function loadGatewayRuntimeSettings() {
   }
 }
 
+function normalizeGatewayRuntimeNumber(value: unknown): number | null {
+  if (typeof value === "string" && value.trim() === "") {
+    return null;
+  }
+
+  const normalized = Number(value);
+  return Number.isFinite(normalized) ? normalized : null;
+}
+
+function buildGatewayRuntimePayload(): GatewayRuntimeSettings | null {
+  const responseHeaderTimeout = normalizeGatewayRuntimeNumber(
+    gatewayRuntimeForm.response_header_timeout,
+  );
+  const streamDataIntervalTimeout = normalizeGatewayRuntimeNumber(
+    gatewayRuntimeForm.stream_data_interval_timeout,
+  );
+  const usageLogDetailRetentionLimit = normalizeGatewayRuntimeNumber(
+    gatewayRuntimeForm.usage_log_detail_retention_limit,
+  );
+  const imageUsageLogDetailRetentionLimit = normalizeGatewayRuntimeNumber(
+    gatewayRuntimeForm.image_usage_log_detail_retention_limit,
+  );
+
+  if (
+    responseHeaderTimeout === null ||
+    responseHeaderTimeout < 1 ||
+    streamDataIntervalTimeout === null ||
+    !(
+      streamDataIntervalTimeout === 0 ||
+      (streamDataIntervalTimeout >= 30 && streamDataIntervalTimeout <= 300)
+    ) ||
+    usageLogDetailRetentionLimit === null ||
+    usageLogDetailRetentionLimit < 0 ||
+    imageUsageLogDetailRetentionLimit === null ||
+    imageUsageLogDetailRetentionLimit < 0
+  ) {
+    return null;
+  }
+
+  return {
+    response_header_timeout: responseHeaderTimeout,
+    stream_data_interval_timeout: streamDataIntervalTimeout,
+    usage_log_detail_retention_limit: usageLogDetailRetentionLimit,
+    image_usage_log_detail_retention_limit: imageUsageLogDetailRetentionLimit,
+  };
+}
+
 async function saveGatewayRuntimeSettings() {
   if (gatewayRuntimeLoadFailed.value) {
     return;
   }
 
+  const payload = buildGatewayRuntimePayload();
+  if (!payload) {
+    appStore.showError(t("admin.settings.gatewayRuntime.validationFailed"));
+    return;
+  }
+
   gatewayRuntimeSaving.value = true;
   try {
-    const updated = await adminAPI.settings.updateGatewayRuntimeSettings({
-      response_header_timeout: gatewayRuntimeForm.response_header_timeout,
-      stream_data_interval_timeout:
-        gatewayRuntimeForm.stream_data_interval_timeout,
-    });
+    const updated = await adminAPI.settings.updateGatewayRuntimeSettings(payload);
     Object.assign(gatewayRuntimeForm, updated);
     appStore.showSuccess(t("admin.settings.gatewayRuntime.saved"));
   } catch (error: unknown) {

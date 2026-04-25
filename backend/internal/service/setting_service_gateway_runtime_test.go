@@ -1,5 +1,3 @@
-//go:build unit
-
 package service
 
 import (
@@ -68,16 +66,36 @@ func (s *gatewayRuntimeIdleInvalidatorStub) InvalidateIdleClients() {
 	s.calls++
 }
 
+type gatewayRuntimeDetailPrunerStub struct {
+	calls int
+	err   error
+}
+
+func (s *gatewayRuntimeDetailPrunerStub) PruneToConfiguredLimits(ctx context.Context) error {
+	s.calls++
+	return s.err
+}
+
+func resetGatewayRuntimeRetentionLimitsForTest(t *testing.T) {
+	t.Helper()
+	oldNormal, oldImage := GetUsageLogDetailRetentionLimits()
+	SetUsageLogDetailRetentionLimits(UsageLogDetailRetentionLimitDefault, ImageUsageLogDetailRetentionLimitDefault)
+	t.Cleanup(func() { SetUsageLogDetailRetentionLimits(oldNormal, oldImage) })
+}
+
 func newGatewayRuntimeTestConfig(responseHeaderTimeout, streamDataIntervalTimeout int) *config.Config {
 	return &config.Config{
 		Gateway: config.GatewayConfig{
-			ResponseHeaderTimeout:     responseHeaderTimeout,
-			StreamDataIntervalTimeout: streamDataIntervalTimeout,
+			ResponseHeaderTimeout:             responseHeaderTimeout,
+			StreamDataIntervalTimeout:         streamDataIntervalTimeout,
+			UsageLogDetailRetentionLimit:      UsageLogDetailRetentionLimitDefault,
+			ImageUsageLogDetailRetentionLimit: ImageUsageLogDetailRetentionLimitDefault,
 		},
 	}
 }
 
 func TestSettingService_GetGatewayRuntimeSettings_FallsBackToConfigWhenDBValueMissing(t *testing.T) {
+	resetGatewayRuntimeRetentionLimitsForTest(t)
 	repo := &gatewayRuntimeSettingRepoStub{}
 	cfg := newGatewayRuntimeTestConfig(120, 60)
 
@@ -86,15 +104,21 @@ func TestSettingService_GetGatewayRuntimeSettings_FallsBackToConfigWhenDBValueMi
 
 	require.NoError(t, err)
 	require.Equal(t, &GatewayRuntimeSettings{
-		ResponseHeaderTimeout:     120,
-		StreamDataIntervalTimeout: 60,
+		ResponseHeaderTimeout:             120,
+		StreamDataIntervalTimeout:         60,
+		UsageLogDetailRetentionLimit:      UsageLogDetailRetentionLimitDefault,
+		ImageUsageLogDetailRetentionLimit: ImageUsageLogDetailRetentionLimitDefault,
 	}, got)
+	normal, image := GetUsageLogDetailRetentionLimits()
+	require.Equal(t, UsageLogDetailRetentionLimitDefault, normal)
+	require.Equal(t, ImageUsageLogDetailRetentionLimitDefault, image)
 }
 
 func TestNewSettingService_LoadsGatewayRuntimeSettingsFromDB(t *testing.T) {
+	resetGatewayRuntimeRetentionLimitsForTest(t)
 	repo := &gatewayRuntimeSettingRepoStub{
 		getValueByKey: map[string]string{
-			SettingKeyGatewayRuntimeSettings: `{"response_header_timeout":45,"stream_data_interval_timeout":90}`,
+			SettingKeyGatewayRuntimeSettings: `{"response_header_timeout":45,"stream_data_interval_timeout":90,"usage_log_detail_retention_limit":8,"image_usage_log_detail_retention_limit":0}`,
 		},
 	}
 	cfg := newGatewayRuntimeTestConfig(120, 60)
@@ -106,10 +130,17 @@ func TestNewSettingService_LoadsGatewayRuntimeSettingsFromDB(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 45, cfg.Gateway.ResponseHeaderTimeout)
 	require.Equal(t, 90, cfg.Gateway.StreamDataIntervalTimeout)
+	require.Equal(t, 8, cfg.Gateway.UsageLogDetailRetentionLimit)
+	require.Equal(t, 0, cfg.Gateway.ImageUsageLogDetailRetentionLimit)
 	require.Equal(t, &GatewayRuntimeSettings{
-		ResponseHeaderTimeout:     45,
-		StreamDataIntervalTimeout: 90,
+		ResponseHeaderTimeout:             45,
+		StreamDataIntervalTimeout:         90,
+		UsageLogDetailRetentionLimit:      8,
+		ImageUsageLogDetailRetentionLimit: 0,
 	}, got)
+	normal, image := GetUsageLogDetailRetentionLimits()
+	require.Equal(t, 8, normal)
+	require.Equal(t, 0, image)
 }
 
 func TestSettingService_SetGatewayRuntimeSettings_PersistsUpdatesCfgAndInvalidatesOnResponseHeaderTimeoutChange(t *testing.T) {
@@ -118,10 +149,14 @@ func TestSettingService_SetGatewayRuntimeSettings_PersistsUpdatesCfgAndInvalidat
 	svc := NewSettingService(repo, cfg)
 	invalidator := &gatewayRuntimeIdleInvalidatorStub{}
 	svc.SetGatewayRuntimeIdleInvalidator(invalidator)
+	pruner := &gatewayRuntimeDetailPrunerStub{}
+	svc.SetUsageLogDetailPruner(pruner)
 
 	err := svc.SetGatewayRuntimeSettings(context.Background(), &GatewayRuntimeSettings{
-		ResponseHeaderTimeout:     180,
-		StreamDataIntervalTimeout: 0,
+		ResponseHeaderTimeout:             180,
+		StreamDataIntervalTimeout:         0,
+		UsageLogDetailRetentionLimit:      9,
+		ImageUsageLogDetailRetentionLimit: 0,
 	})
 
 	require.NoError(t, err)
@@ -131,12 +166,154 @@ func TestSettingService_SetGatewayRuntimeSettings_PersistsUpdatesCfgAndInvalidat
 	var persisted GatewayRuntimeSettings
 	require.NoError(t, json.Unmarshal([]byte(repo.setCalls[0].value), &persisted))
 	require.Equal(t, GatewayRuntimeSettings{
-		ResponseHeaderTimeout:     180,
-		StreamDataIntervalTimeout: 0,
+		ResponseHeaderTimeout:             180,
+		StreamDataIntervalTimeout:         0,
+		UsageLogDetailRetentionLimit:      9,
+		ImageUsageLogDetailRetentionLimit: 0,
 	}, persisted)
 	require.Equal(t, 180, cfg.Gateway.ResponseHeaderTimeout)
 	require.Equal(t, 0, cfg.Gateway.StreamDataIntervalTimeout)
+	require.Equal(t, 9, cfg.Gateway.UsageLogDetailRetentionLimit)
+	require.Equal(t, 0, cfg.Gateway.ImageUsageLogDetailRetentionLimit)
 	require.Equal(t, 1, invalidator.calls)
+	require.Equal(t, 1, pruner.calls)
+}
+
+func TestSettingServiceGatewayRuntimeSettings_DetailRetentionLimits(t *testing.T) {
+	resetGatewayRuntimeRetentionLimitsForTest(t)
+	repo := &gatewayRuntimeSettingRepoStub{}
+	cfg := newGatewayRuntimeTestConfig(120, 60)
+	svc := NewSettingService(repo, cfg)
+
+	err := svc.SetGatewayRuntimeSettings(context.Background(), &GatewayRuntimeSettings{
+		ResponseHeaderTimeout:             180,
+		StreamDataIntervalTimeout:         90,
+		UsageLogDetailRetentionLimit:      7,
+		ImageUsageLogDetailRetentionLimit: 0,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 7, cfg.Gateway.UsageLogDetailRetentionLimit)
+	require.Equal(t, 0, cfg.Gateway.ImageUsageLogDetailRetentionLimit)
+	normal, image := GetUsageLogDetailRetentionLimits()
+	require.Equal(t, 7, normal)
+	require.Equal(t, 0, image)
+}
+
+func TestSettingServiceGatewayRuntimeSettings_RejectsNegativeRetentionLimits(t *testing.T) {
+	tests := []struct {
+		name     string
+		settings *GatewayRuntimeSettings
+		wantErr  string
+	}{
+		{
+			name: "normal retention negative",
+			settings: &GatewayRuntimeSettings{
+				ResponseHeaderTimeout:             120,
+				StreamDataIntervalTimeout:         60,
+				UsageLogDetailRetentionLimit:      -1,
+				ImageUsageLogDetailRetentionLimit: 300,
+			},
+			wantErr: "usage_log_detail_retention_limit must be non-negative",
+		},
+		{
+			name: "image retention negative",
+			settings: &GatewayRuntimeSettings{
+				ResponseHeaderTimeout:             120,
+				StreamDataIntervalTimeout:         60,
+				UsageLogDetailRetentionLimit:      300,
+				ImageUsageLogDetailRetentionLimit: -1,
+			},
+			wantErr: "image_usage_log_detail_retention_limit must be non-negative",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetGatewayRuntimeRetentionLimitsForTest(t)
+			repo := &gatewayRuntimeSettingRepoStub{}
+			svc := NewSettingService(repo, &config.Config{})
+
+			err := svc.SetGatewayRuntimeSettings(context.Background(), tt.settings)
+
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
+func TestNewSettingService_LoadsGatewayRuntimeSettingsFromLegacyJSONPreservesConfiguredRetentionLimits(t *testing.T) {
+	resetGatewayRuntimeRetentionLimitsForTest(t)
+	repo := &gatewayRuntimeSettingRepoStub{
+		getValueByKey: map[string]string{
+			SettingKeyGatewayRuntimeSettings: `{"response_header_timeout":45,"stream_data_interval_timeout":90}`,
+		},
+	}
+	cfg := newGatewayRuntimeTestConfig(120, 60)
+	cfg.Gateway.UsageLogDetailRetentionLimit = 17
+	cfg.Gateway.ImageUsageLogDetailRetentionLimit = 0
+
+	NewSettingService(repo, cfg)
+
+	require.Equal(t, 17, cfg.Gateway.UsageLogDetailRetentionLimit)
+	require.Equal(t, 0, cfg.Gateway.ImageUsageLogDetailRetentionLimit)
+	normal, image := GetUsageLogDetailRetentionLimits()
+	require.Equal(t, 17, normal)
+	require.Equal(t, 0, image)
+}
+
+func TestNewSettingService_LoadsGatewayRuntimeSettingsFromLegacyJSONDefaultsNegativeConfiguredRetentionLimits(t *testing.T) {
+	resetGatewayRuntimeRetentionLimitsForTest(t)
+	repo := &gatewayRuntimeSettingRepoStub{
+		getValueByKey: map[string]string{
+			SettingKeyGatewayRuntimeSettings: `{"response_header_timeout":45,"stream_data_interval_timeout":90}`,
+		},
+	}
+	cfg := newGatewayRuntimeTestConfig(120, 60)
+	cfg.Gateway.UsageLogDetailRetentionLimit = -1
+	cfg.Gateway.ImageUsageLogDetailRetentionLimit = -2
+
+	NewSettingService(repo, cfg)
+
+	require.Equal(t, UsageLogDetailRetentionLimitDefault, cfg.Gateway.UsageLogDetailRetentionLimit)
+	require.Equal(t, ImageUsageLogDetailRetentionLimitDefault, cfg.Gateway.ImageUsageLogDetailRetentionLimit)
+	normal, image := GetUsageLogDetailRetentionLimits()
+	require.Equal(t, UsageLogDetailRetentionLimitDefault, normal)
+	require.Equal(t, ImageUsageLogDetailRetentionLimitDefault, image)
+}
+
+func TestNewSettingService_LoadsGatewayRuntimeSettingsFromLegacyJSONPreservesMissingStreamTimeout(t *testing.T) {
+	repo := &gatewayRuntimeSettingRepoStub{
+		getValueByKey: map[string]string{
+			SettingKeyGatewayRuntimeSettings: `{"response_header_timeout":45,"usage_log_detail_retention_limit":8,"image_usage_log_detail_retention_limit":9}`,
+		},
+	}
+	cfg := newGatewayRuntimeTestConfig(120, 60)
+
+	NewSettingService(repo, cfg)
+
+	require.Equal(t, 45, cfg.Gateway.ResponseHeaderTimeout)
+	require.Equal(t, 60, cfg.Gateway.StreamDataIntervalTimeout)
+	require.Equal(t, 8, cfg.Gateway.UsageLogDetailRetentionLimit)
+	require.Equal(t, 9, cfg.Gateway.ImageUsageLogDetailRetentionLimit)
+}
+
+func TestNewSettingService_LoadsGatewayRuntimeSettingsFromDBPreservesExplicitZeroRetentionLimits(t *testing.T) {
+	resetGatewayRuntimeRetentionLimitsForTest(t)
+	repo := &gatewayRuntimeSettingRepoStub{
+		getValueByKey: map[string]string{
+			SettingKeyGatewayRuntimeSettings: `{"response_header_timeout":45,"stream_data_interval_timeout":90,"usage_log_detail_retention_limit":0,"image_usage_log_detail_retention_limit":0}`,
+		},
+	}
+	cfg := newGatewayRuntimeTestConfig(120, 60)
+
+	NewSettingService(repo, cfg)
+
+	require.Equal(t, 0, cfg.Gateway.UsageLogDetailRetentionLimit)
+	require.Equal(t, 0, cfg.Gateway.ImageUsageLogDetailRetentionLimit)
+	normal, image := GetUsageLogDetailRetentionLimits()
+	require.Equal(t, 0, normal)
+	require.Equal(t, 0, image)
 }
 
 func TestSettingService_SetGatewayRuntimeSettings_RejectsInvalidValues(t *testing.T) {
@@ -189,22 +366,35 @@ func TestSettingService_SetGatewayRuntimeSettings_DoesNotInvalidateWhenResponseH
 }
 
 func TestSettingService_SetGatewayRuntimeSettings_DoesNotMutateCfgOrInvalidateWhenPersistFails(t *testing.T) {
+	resetGatewayRuntimeRetentionLimitsForTest(t)
 	repo := &gatewayRuntimeSettingRepoStub{setErr: errors.New("db write failed")}
 	cfg := newGatewayRuntimeTestConfig(120, 60)
+	cfg.Gateway.UsageLogDetailRetentionLimit = 11
+	cfg.Gateway.ImageUsageLogDetailRetentionLimit = 22
 	svc := NewSettingService(repo, cfg)
 	invalidator := &gatewayRuntimeIdleInvalidatorStub{}
 	svc.SetGatewayRuntimeIdleInvalidator(invalidator)
+	pruner := &gatewayRuntimeDetailPrunerStub{}
+	svc.SetUsageLogDetailPruner(pruner)
 
 	err := svc.SetGatewayRuntimeSettings(context.Background(), &GatewayRuntimeSettings{
-		ResponseHeaderTimeout:     180,
-		StreamDataIntervalTimeout: 90,
+		ResponseHeaderTimeout:             180,
+		StreamDataIntervalTimeout:         90,
+		UsageLogDetailRetentionLimit:      7,
+		ImageUsageLogDetailRetentionLimit: 8,
 	})
 
 	require.Error(t, err)
 	require.Len(t, repo.setCalls, 1)
 	require.Equal(t, 120, cfg.Gateway.ResponseHeaderTimeout)
 	require.Equal(t, 60, cfg.Gateway.StreamDataIntervalTimeout)
+	require.Equal(t, 11, cfg.Gateway.UsageLogDetailRetentionLimit)
+	require.Equal(t, 22, cfg.Gateway.ImageUsageLogDetailRetentionLimit)
+	normal, image := GetUsageLogDetailRetentionLimits()
+	require.Equal(t, 11, normal)
+	require.Equal(t, 22, image)
 	require.Zero(t, invalidator.calls)
+	require.Zero(t, pruner.calls)
 }
 
 func TestNewSettingService_LoadsGatewayRuntimeSettings_IgnoreInvalidDBPayloads(t *testing.T) {

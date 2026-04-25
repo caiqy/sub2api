@@ -1428,6 +1428,7 @@ var (
 	// UsageLogDetailsColumns holds the columns for the "usage_log_details" table.
 	UsageLogDetailsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "detail_type", Type: field.TypeString, Size: 20, Default: "normal"},
 		{Name: "request_headers", Type: field.TypeString, Size: 2147483647, Default: ""},
 		{Name: "request_body", Type: field.TypeString, Size: 2147483647, Default: ""},
 		{Name: "upstream_request_headers", Type: field.TypeString, Size: 2147483647, Default: ""},
@@ -1447,7 +1448,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "usage_log_details_usage_logs_detail",
-				Columns:    []*schema.Column{UsageLogDetailsColumns[10]},
+				Columns:    []*schema.Column{UsageLogDetailsColumns[11]},
 				RefColumns: []*schema.Column{UsageLogsColumns[0]},
 				OnDelete:   schema.Cascade,
 			},
@@ -1456,7 +1457,12 @@ var (
 			{
 				Name:    "usagelogdetail_created_at",
 				Unique:  false,
-				Columns: []*schema.Column{UsageLogDetailsColumns[9]},
+				Columns: []*schema.Column{UsageLogDetailsColumns[10]},
+			},
+			{
+				Name:    "usagelogdetail_detail_type_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{UsageLogDetailsColumns[1], UsageLogDetailsColumns[10]},
 			},
 		},
 	}

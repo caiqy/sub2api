@@ -103,6 +103,10 @@ type gatewayRuntimeIdleInvalidator interface {
 	InvalidateIdleClients()
 }
 
+type UsageLogDetailPruner interface {
+	PruneToConfiguredLimits(ctx context.Context) error
+}
+
 // WebSearchManagerBuilder creates a websearch.Manager from config (injected by infra layer).
 // proxyURLs maps proxy ID to resolved URL for provider-level proxy support.
 type WebSearchManagerBuilder func(cfg *WebSearchEmulationConfig, proxyURLs map[int64]string)
@@ -113,6 +117,7 @@ type SettingService struct {
 	defaultSubGroupReader         DefaultSubscriptionGroupReader
 	proxyRepo                     ProxyRepository // for resolving websearch provider proxy URLs
 	gatewayRuntimeIdleInvalidator gatewayRuntimeIdleInvalidator
+	usageLogDetailPruner          UsageLogDetailPruner
 	cfg                           *config.Config
 	onUpdate                      func() // Callback when settings are updated (for cache invalidation)
 	version                       string // Application version
@@ -373,6 +378,7 @@ func NewSettingService(settingRepo SettingRepository, cfg *config.Config) *Setti
 		cfg:         cfg,
 	}
 	service.loadGatewayRuntimeSettingsFromDB(context.Background())
+	service.syncUsageLogDetailRetentionLimitsFromConfig()
 	return service
 }
 
@@ -386,6 +392,11 @@ func (s *SettingService) SetGatewayRuntimeIdleInvalidator(invalidator gatewayRun
 	s.gatewayRuntimeIdleInvalidator = invalidator
 }
 
+// SetUsageLogDetailPruner injects an optional usage log detail pruner.
+func (s *SettingService) SetUsageLogDetailPruner(pruner UsageLogDetailPruner) {
+	s.usageLogDetailPruner = pruner
+}
+
 // GetGatewayRuntimeSettings returns the currently effective gateway runtime settings.
 func (s *SettingService) GetGatewayRuntimeSettings(ctx context.Context) (*GatewayRuntimeSettings, error) {
 	_ = ctx
@@ -395,6 +406,8 @@ func (s *SettingService) GetGatewayRuntimeSettings(ctx context.Context) (*Gatewa
 	}
 	settings.ResponseHeaderTimeout = s.cfg.Gateway.ResponseHeaderTimeout
 	settings.StreamDataIntervalTimeout = s.cfg.Gateway.StreamDataIntervalTimeout
+	settings.UsageLogDetailRetentionLimit = gatewayRuntimeRetentionLimitOrDefault(s.cfg.Gateway.UsageLogDetailRetentionLimit)
+	settings.ImageUsageLogDetailRetentionLimit = gatewayRuntimeRetentionLimitOrDefault(s.cfg.Gateway.ImageUsageLogDetailRetentionLimit)
 	return settings, nil
 }
 
@@ -410,6 +423,12 @@ func (s *SettingService) SetGatewayRuntimeSettings(ctx context.Context, settings
 		(settings.StreamDataIntervalTimeout < 30 || settings.StreamDataIntervalTimeout > 300) {
 		return infraerrors.BadRequest("INVALID_GATEWAY_RUNTIME_SETTINGS", "stream_data_interval_timeout must be 0 or between 30-300")
 	}
+	if settings.UsageLogDetailRetentionLimit < 0 {
+		return infraerrors.BadRequest("INVALID_GATEWAY_RUNTIME_SETTINGS", "usage_log_detail_retention_limit must be non-negative")
+	}
+	if settings.ImageUsageLogDetailRetentionLimit < 0 {
+		return infraerrors.BadRequest("INVALID_GATEWAY_RUNTIME_SETTINGS", "image_usage_log_detail_retention_limit must be non-negative")
+	}
 
 	data, err := json.Marshal(settings)
 	if err != nil {
@@ -424,6 +443,14 @@ func (s *SettingService) SetGatewayRuntimeSettings(ctx context.Context, settings
 		oldResponseHeaderTimeout = s.cfg.Gateway.ResponseHeaderTimeout
 		s.cfg.Gateway.ResponseHeaderTimeout = settings.ResponseHeaderTimeout
 		s.cfg.Gateway.StreamDataIntervalTimeout = settings.StreamDataIntervalTimeout
+		s.cfg.Gateway.UsageLogDetailRetentionLimit = settings.UsageLogDetailRetentionLimit
+		s.cfg.Gateway.ImageUsageLogDetailRetentionLimit = settings.ImageUsageLogDetailRetentionLimit
+	}
+	SetUsageLogDetailRetentionLimits(settings.UsageLogDetailRetentionLimit, settings.ImageUsageLogDetailRetentionLimit)
+	if s.usageLogDetailPruner != nil {
+		if err := s.usageLogDetailPruner.PruneToConfiguredLimits(ctx); err != nil {
+			slog.Warn("failed to prune usage log details after gateway runtime settings update", "error", err)
+		}
 	}
 	if settings.ResponseHeaderTimeout != oldResponseHeaderTimeout && s.gatewayRuntimeIdleInvalidator != nil {
 		s.gatewayRuntimeIdleInvalidator.InvalidateIdleClients()
@@ -446,14 +473,49 @@ func (s *SettingService) loadGatewayRuntimeSettingsFromDB(ctx context.Context) {
 	if err := json.Unmarshal([]byte(value), &settings); err != nil {
 		return
 	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(value), &raw); err != nil {
+		return
+	}
+	if _, ok := raw["usage_log_detail_retention_limit"]; !ok {
+		settings.UsageLogDetailRetentionLimit = gatewayRuntimeRetentionLimitOrDefault(s.cfg.Gateway.UsageLogDetailRetentionLimit)
+	}
+	if _, ok := raw["image_usage_log_detail_retention_limit"]; !ok {
+		settings.ImageUsageLogDetailRetentionLimit = gatewayRuntimeRetentionLimitOrDefault(s.cfg.Gateway.ImageUsageLogDetailRetentionLimit)
+	}
 
 	if settings.ResponseHeaderTimeout > 0 {
 		s.cfg.Gateway.ResponseHeaderTimeout = settings.ResponseHeaderTimeout
 	}
-	if settings.StreamDataIntervalTimeout == 0 ||
-		(settings.StreamDataIntervalTimeout >= 30 && settings.StreamDataIntervalTimeout <= 300) {
-		s.cfg.Gateway.StreamDataIntervalTimeout = settings.StreamDataIntervalTimeout
+	if _, ok := raw["stream_data_interval_timeout"]; ok {
+		if settings.StreamDataIntervalTimeout == 0 ||
+			(settings.StreamDataIntervalTimeout >= 30 && settings.StreamDataIntervalTimeout <= 300) {
+			s.cfg.Gateway.StreamDataIntervalTimeout = settings.StreamDataIntervalTimeout
+		}
 	}
+	if settings.UsageLogDetailRetentionLimit >= 0 {
+		s.cfg.Gateway.UsageLogDetailRetentionLimit = settings.UsageLogDetailRetentionLimit
+	}
+	if settings.ImageUsageLogDetailRetentionLimit >= 0 {
+		s.cfg.Gateway.ImageUsageLogDetailRetentionLimit = settings.ImageUsageLogDetailRetentionLimit
+	}
+}
+
+func (s *SettingService) syncUsageLogDetailRetentionLimitsFromConfig() {
+	if s == nil || s.cfg == nil {
+		return
+	}
+	SetUsageLogDetailRetentionLimits(
+		gatewayRuntimeRetentionLimitOrDefault(s.cfg.Gateway.UsageLogDetailRetentionLimit),
+		gatewayRuntimeRetentionLimitOrDefault(s.cfg.Gateway.ImageUsageLogDetailRetentionLimit),
+	)
+}
+
+func gatewayRuntimeRetentionLimitOrDefault(value int) int {
+	if value < 0 {
+		return UsageLogDetailRetentionLimitDefault
+	}
+	return value
 }
 
 func (s *SettingService) loadGatewayControlSettingsFromDB(ctx context.Context) {

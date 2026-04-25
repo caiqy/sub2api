@@ -27,6 +27,9 @@ func (UsageLogDetail) Fields() []ent.Field {
 	return []ent.Field{
 		field.Int64("usage_log_id").
 			Unique(),
+		field.String("detail_type").
+			MaxLen(20).
+			Default("normal"),
 		field.Text("request_headers").
 			Default(""),
 		field.Text("request_body").
@@ -63,5 +66,6 @@ func (UsageLogDetail) Edges() []ent.Edge {
 func (UsageLogDetail) Indexes() []ent.Index {
 	return []ent.Index{
 		index.Fields("created_at"),
+		index.Fields("detail_type", "created_at"),
 	}
 }

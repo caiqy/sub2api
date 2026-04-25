@@ -28,9 +28,17 @@ func (r *usageLogDetailRepository) Create(ctx context.Context, detail *service.U
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
 	}
+	detailType := normalizeUsageLogDetailType(detail.DetailType)
+	if usageLogDetailRetentionLimitForType(detailType) == 0 {
+		if err := r.pruneDetailTypeToRecentLimit(ctx, detailType, 0); err != nil {
+			return fmt.Errorf("prune usage log detail: %w", err)
+		}
+		return nil
+	}
 	_, err := r.sql.ExecContext(ctx, `
 		INSERT INTO usage_log_details (
 			usage_log_id,
+			detail_type,
 			request_headers,
 			request_body,
 			upstream_request_headers,
@@ -40,12 +48,12 @@ func (r *usageLogDetailRepository) Create(ctx context.Context, detail *service.U
 			upstream_response_headers,
 			upstream_response_body,
 			created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-	`, detail.UsageLogID, detail.RequestHeaders, detail.RequestBody, detail.UpstreamRequestHeaders, detail.UpstreamRequestBody, detail.ResponseHeaders, detail.ResponseBody, detail.UpstreamResponseHeaders, detail.UpstreamResponseBody, createdAt)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+	`, detail.UsageLogID, string(detailType), detail.RequestHeaders, detail.RequestBody, detail.UpstreamRequestHeaders, detail.UpstreamRequestBody, detail.ResponseHeaders, detail.ResponseBody, detail.UpstreamResponseHeaders, detail.UpstreamResponseBody, createdAt)
 	if err != nil {
 		return fmt.Errorf("insert usage log detail: %w", err)
 	}
-	if err := r.PruneToRecentLimit(ctx, service.UsageLogDetailRetentionLimit); err != nil {
+	if err := r.PruneToConfiguredLimits(ctx); err != nil {
 		return fmt.Errorf("prune usage log detail: %w", err)
 	}
 	return nil
@@ -55,11 +63,18 @@ func (r *usageLogDetailRepository) CreateBatch(ctx context.Context, details []*s
 	if r == nil || r.sql == nil || len(details) == 0 {
 		return nil
 	}
-	query, args := buildUsageLogDetailBatchInsertQuery(details)
+	filtered := filterUsageLogDetailsForConfiguredLimits(details)
+	if len(filtered) == 0 {
+		if err := r.PruneToConfiguredLimits(ctx); err != nil {
+			return fmt.Errorf("prune usage log detail: %w", err)
+		}
+		return nil
+	}
+	query, args := buildUsageLogDetailBatchInsertQuery(filtered)
 	if _, err := r.sql.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("insert usage log detail batch: %w", err)
 	}
-	if err := r.PruneToRecentLimit(ctx, service.UsageLogDetailRetentionLimit); err != nil {
+	if err := r.PruneToConfiguredLimits(ctx); err != nil {
 		return fmt.Errorf("prune usage log detail: %w", err)
 	}
 	return nil
@@ -71,38 +86,93 @@ func (r *usageLogDetailRepository) GetByUsageLogID(ctx context.Context, usageLog
 	}
 	detail := &service.UsageLogDetail{}
 	err := scanSingleRow(ctx, r.sql, `
-		SELECT usage_log_id, request_headers, request_body, upstream_request_headers, upstream_request_body, response_headers, response_body, upstream_response_headers, upstream_response_body, created_at
+		SELECT usage_log_id, detail_type, request_headers, request_body, upstream_request_headers, upstream_request_body, response_headers, response_body, upstream_response_headers, upstream_response_body, created_at
 		FROM usage_log_details
 		WHERE usage_log_id = $1
-	`, []any{usageLogID}, &detail.UsageLogID, &detail.RequestHeaders, &detail.RequestBody, &detail.UpstreamRequestHeaders, &detail.UpstreamRequestBody, &detail.ResponseHeaders, &detail.ResponseBody, &detail.UpstreamResponseHeaders, &detail.UpstreamResponseBody, &detail.CreatedAt)
+	`, []any{usageLogID}, &detail.UsageLogID, &detail.DetailType, &detail.RequestHeaders, &detail.RequestBody, &detail.UpstreamRequestHeaders, &detail.UpstreamRequestBody, &detail.ResponseHeaders, &detail.ResponseBody, &detail.UpstreamResponseHeaders, &detail.UpstreamResponseBody, &detail.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
+	detail.DetailType = normalizeUsageLogDetailType(detail.DetailType)
 	return detail, nil
 }
 
 func (r *usageLogDetailRepository) PruneToRecentLimit(ctx context.Context, limit int) error {
-	if r == nil || r.sql == nil || limit <= 0 {
+	// A zero limit means retain no normal details.
+	return r.pruneDetailTypeToRecentLimit(ctx, service.UsageLogDetailTypeNormal, limit)
+}
+
+func normalizeUsageLogDetailType(detailType service.UsageLogDetailType) service.UsageLogDetailType {
+	switch detailType {
+	case service.UsageLogDetailTypeImage:
+		return service.UsageLogDetailTypeImage
+	default:
+		return service.UsageLogDetailTypeNormal
+	}
+}
+
+func (r *usageLogDetailRepository) PruneToConfiguredLimits(ctx context.Context) error {
+	normalLimit, imageLimit := service.GetUsageLogDetailRetentionLimits()
+	if err := r.pruneDetailTypeToRecentLimit(ctx, service.UsageLogDetailTypeNormal, normalLimit); err != nil {
+		return err
+	}
+	return r.pruneDetailTypeToRecentLimit(ctx, service.UsageLogDetailTypeImage, imageLimit)
+}
+
+func usageLogDetailRetentionLimitForType(detailType service.UsageLogDetailType) int {
+	normalLimit, imageLimit := service.GetUsageLogDetailRetentionLimits()
+	if normalizeUsageLogDetailType(detailType) == service.UsageLogDetailTypeImage {
+		return imageLimit
+	}
+	return normalLimit
+}
+
+func filterUsageLogDetailsForConfiguredLimits(details []*service.UsageLogDetail) []*service.UsageLogDetail {
+	filtered := make([]*service.UsageLogDetail, 0, len(details))
+	for _, detail := range details {
+		if detail == nil || detail.UsageLogID <= 0 {
+			continue
+		}
+		if usageLogDetailRetentionLimitForType(detail.DetailType) == 0 {
+			continue
+		}
+		filtered = append(filtered, detail)
+	}
+	return filtered
+}
+
+func (r *usageLogDetailRepository) pruneDetailTypeToRecentLimit(ctx context.Context, detailType service.UsageLogDetailType, limit int) error {
+	if r == nil || r.sql == nil || limit < 0 {
 		return nil
+	}
+	normalized := normalizeUsageLogDetailType(detailType)
+	if limit == 0 {
+		_, err := r.sql.ExecContext(ctx, `
+			DELETE FROM usage_log_details
+			WHERE detail_type = $1
+		`, string(normalized))
+		return err
 	}
 	_, err := r.sql.ExecContext(ctx, `
 		DELETE FROM usage_log_details
 		WHERE id IN (
 			SELECT id
 			FROM usage_log_details
+			WHERE detail_type = $1
 			ORDER BY created_at DESC, id DESC
-			OFFSET $1
+			OFFSET $2
 		)
-	`, limit)
+	`, string(normalized), limit)
 	return err
 }
 
-func usageLogDetailFromSnapshot(usageLogID int64, createdAt time.Time, snapshot *service.UsageLogDetailSnapshot) *service.UsageLogDetail {
+func usageLogDetailFromSnapshot(usageLogID int64, createdAt time.Time, detailType service.UsageLogDetailType, snapshot *service.UsageLogDetailSnapshot) *service.UsageLogDetail {
 	if snapshot == nil || usageLogID <= 0 {
 		return nil
 	}
 	return &service.UsageLogDetail{
 		UsageLogID:              usageLogID,
+		DetailType:              normalizeUsageLogDetailType(detailType),
 		RequestHeaders:          snapshot.RequestHeaders,
 		RequestBody:             snapshot.RequestBody,
 		UpstreamRequestHeaders:  snapshot.UpstreamRequestHeaders,
@@ -120,6 +190,7 @@ func buildUsageLogDetailBatchInsertQuery(details []*service.UsageLogDetail) (str
 	_, _ = query.WriteString(`
 		INSERT INTO usage_log_details (
 			usage_log_id,
+			detail_type,
 			request_headers,
 			request_body,
 			upstream_request_headers,
@@ -131,7 +202,7 @@ func buildUsageLogDetailBatchInsertQuery(details []*service.UsageLogDetail) (str
 			created_at
 		) VALUES `)
 
-	args := make([]any, 0, len(details)*10)
+	args := make([]any, 0, len(details)*11)
 	argPos := 1
 	for idx, detail := range details {
 		if idx > 0 {
@@ -142,7 +213,7 @@ func buildUsageLogDetailBatchInsertQuery(details []*service.UsageLogDetail) (str
 			createdAt = time.Now().UTC()
 		}
 		_, _ = query.WriteString("(")
-		for i := 0; i < 10; i++ {
+		for i := 0; i < 11; i++ {
 			if i > 0 {
 				_, _ = query.WriteString(",")
 			}
@@ -153,6 +224,7 @@ func buildUsageLogDetailBatchInsertQuery(details []*service.UsageLogDetail) (str
 		_, _ = query.WriteString(")")
 		args = append(args,
 			detail.UsageLogID,
+			string(normalizeUsageLogDetailType(detail.DetailType)),
 			detail.RequestHeaders,
 			detail.RequestBody,
 			detail.UpstreamRequestHeaders,

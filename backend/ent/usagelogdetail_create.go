@@ -29,6 +29,20 @@ func (_c *UsageLogDetailCreate) SetUsageLogID(v int64) *UsageLogDetailCreate {
 	return _c
 }
 
+// SetDetailType sets the "detail_type" field.
+func (_c *UsageLogDetailCreate) SetDetailType(v string) *UsageLogDetailCreate {
+	_c.mutation.SetDetailType(v)
+	return _c
+}
+
+// SetNillableDetailType sets the "detail_type" field if the given value is not nil.
+func (_c *UsageLogDetailCreate) SetNillableDetailType(v *string) *UsageLogDetailCreate {
+	if v != nil {
+		_c.SetDetailType(*v)
+	}
+	return _c
+}
+
 // SetRequestHeaders sets the "request_headers" field.
 func (_c *UsageLogDetailCreate) SetRequestHeaders(v string) *UsageLogDetailCreate {
 	_c.mutation.SetRequestHeaders(v)
@@ -195,6 +209,10 @@ func (_c *UsageLogDetailCreate) ExecX(ctx context.Context) {
 
 // defaults sets the default values of the builder before save.
 func (_c *UsageLogDetailCreate) defaults() {
+	if _, ok := _c.mutation.DetailType(); !ok {
+		v := usagelogdetail.DefaultDetailType
+		_c.mutation.SetDetailType(v)
+	}
 	if _, ok := _c.mutation.RequestHeaders(); !ok {
 		v := usagelogdetail.DefaultRequestHeaders
 		_c.mutation.SetRequestHeaders(v)
@@ -237,6 +255,14 @@ func (_c *UsageLogDetailCreate) defaults() {
 func (_c *UsageLogDetailCreate) check() error {
 	if _, ok := _c.mutation.UsageLogID(); !ok {
 		return &ValidationError{Name: "usage_log_id", err: errors.New(`ent: missing required field "UsageLogDetail.usage_log_id"`)}
+	}
+	if _, ok := _c.mutation.DetailType(); !ok {
+		return &ValidationError{Name: "detail_type", err: errors.New(`ent: missing required field "UsageLogDetail.detail_type"`)}
+	}
+	if v, ok := _c.mutation.DetailType(); ok {
+		if err := usagelogdetail.DetailTypeValidator(v); err != nil {
+			return &ValidationError{Name: "detail_type", err: fmt.Errorf(`ent: validator failed for field "UsageLogDetail.detail_type": %w`, err)}
+		}
 	}
 	if _, ok := _c.mutation.RequestHeaders(); !ok {
 		return &ValidationError{Name: "request_headers", err: errors.New(`ent: missing required field "UsageLogDetail.request_headers"`)}
@@ -295,6 +321,10 @@ func (_c *UsageLogDetailCreate) createSpec() (*UsageLogDetail, *sqlgraph.CreateS
 		_spec = sqlgraph.NewCreateSpec(usagelogdetail.Table, sqlgraph.NewFieldSpec(usagelogdetail.FieldID, field.TypeInt64))
 	)
 	_spec.OnConflict = _c.conflict
+	if value, ok := _c.mutation.DetailType(); ok {
+		_spec.SetField(usagelogdetail.FieldDetailType, field.TypeString, value)
+		_node.DetailType = value
+	}
 	if value, ok := _c.mutation.RequestHeaders(); ok {
 		_spec.SetField(usagelogdetail.FieldRequestHeaders, field.TypeString, value)
 		_node.RequestHeaders = value
@@ -409,6 +439,18 @@ func (u *UsageLogDetailUpsert) SetUsageLogID(v int64) *UsageLogDetailUpsert {
 // UpdateUsageLogID sets the "usage_log_id" field to the value that was provided on create.
 func (u *UsageLogDetailUpsert) UpdateUsageLogID() *UsageLogDetailUpsert {
 	u.SetExcluded(usagelogdetail.FieldUsageLogID)
+	return u
+}
+
+// SetDetailType sets the "detail_type" field.
+func (u *UsageLogDetailUpsert) SetDetailType(v string) *UsageLogDetailUpsert {
+	u.Set(usagelogdetail.FieldDetailType, v)
+	return u
+}
+
+// UpdateDetailType sets the "detail_type" field to the value that was provided on create.
+func (u *UsageLogDetailUpsert) UpdateDetailType() *UsageLogDetailUpsert {
+	u.SetExcluded(usagelogdetail.FieldDetailType)
 	return u
 }
 
@@ -564,6 +606,20 @@ func (u *UsageLogDetailUpsertOne) SetUsageLogID(v int64) *UsageLogDetailUpsertOn
 func (u *UsageLogDetailUpsertOne) UpdateUsageLogID() *UsageLogDetailUpsertOne {
 	return u.Update(func(s *UsageLogDetailUpsert) {
 		s.UpdateUsageLogID()
+	})
+}
+
+// SetDetailType sets the "detail_type" field.
+func (u *UsageLogDetailUpsertOne) SetDetailType(v string) *UsageLogDetailUpsertOne {
+	return u.Update(func(s *UsageLogDetailUpsert) {
+		s.SetDetailType(v)
+	})
+}
+
+// UpdateDetailType sets the "detail_type" field to the value that was provided on create.
+func (u *UsageLogDetailUpsertOne) UpdateDetailType() *UsageLogDetailUpsertOne {
+	return u.Update(func(s *UsageLogDetailUpsert) {
+		s.UpdateDetailType()
 	})
 }
 
@@ -901,6 +957,20 @@ func (u *UsageLogDetailUpsertBulk) SetUsageLogID(v int64) *UsageLogDetailUpsertB
 func (u *UsageLogDetailUpsertBulk) UpdateUsageLogID() *UsageLogDetailUpsertBulk {
 	return u.Update(func(s *UsageLogDetailUpsert) {
 		s.UpdateUsageLogID()
+	})
+}
+
+// SetDetailType sets the "detail_type" field.
+func (u *UsageLogDetailUpsertBulk) SetDetailType(v string) *UsageLogDetailUpsertBulk {
+	return u.Update(func(s *UsageLogDetailUpsert) {
+		s.SetDetailType(v)
+	})
+}
+
+// UpdateDetailType sets the "detail_type" field to the value that was provided on create.
+func (u *UsageLogDetailUpsertBulk) UpdateDetailType() *UsageLogDetailUpsertBulk {
+	return u.Update(func(s *UsageLogDetailUpsert) {
+		s.UpdateDetailType()
 	})
 }
 

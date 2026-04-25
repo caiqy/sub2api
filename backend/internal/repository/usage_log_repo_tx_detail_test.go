@@ -188,7 +188,7 @@ func TestUsageLogDetailRepositoryCreate_WrapsPruneError(t *testing.T) {
 			if query == "" {
 				return usageLogDetailRepoResult(1), nil
 			}
-			if len(args) == 10 {
+			if len(args) == 11 {
 				return usageLogDetailRepoResult(1), nil
 			}
 			return nil, pruneErr
@@ -207,18 +207,21 @@ func TestUsageLogRepositoryFlushBestEffortBatch_PersistsDetailForInsertedRows(t 
 	defer func() { _ = db.Close() }()
 
 	repo := newUsageLogRepositoryWithSQL(nil, db)
+	resetUsageLogDetailRetentionLimitsForRepositoryTest(t)
 	createdAt := time.Now().UTC().Truncate(time.Second)
+	imageEndpoint := "/v1/images/generations"
 	log := &service.UsageLog{
-		UserID:       1,
-		APIKeyID:     2,
-		AccountID:    3,
-		RequestID:    "req-best-effort-detail",
-		Model:        "claude-3",
-		InputTokens:  10,
-		OutputTokens: 20,
-		TotalCost:    0.5,
-		ActualCost:   0.5,
-		CreatedAt:    createdAt,
+		UserID:          1,
+		APIKeyID:        2,
+		AccountID:       3,
+		RequestID:       "req-best-effort-detail",
+		Model:           "claude-3",
+		InputTokens:     10,
+		OutputTokens:    20,
+		TotalCost:       0.5,
+		ActualCost:      0.5,
+		InboundEndpoint: &imageEndpoint,
+		CreatedAt:       createdAt,
 		DetailSnapshot: (&service.UsageLogDetailSnapshot{
 			RequestHeaders:         "Authorization: Bearer best-effort",
 			RequestBody:            `{"request":"payload"}`,
@@ -242,6 +245,7 @@ func TestUsageLogRepositoryFlushBestEffortBatch_PersistsDetailForInsertedRows(t 
 	mock.ExpectExec(`INSERT INTO usage_log_details`).
 		WithArgs(
 			int64(123),
+			string(service.UsageLogDetailTypeImage),
 			"Authorization: Bearer best-effort",
 			`{"request":"payload"}`,
 			"X-Upstream: value",
@@ -254,7 +258,10 @@ func TestUsageLogRepositoryFlushBestEffortBatch_PersistsDetailForInsertedRows(t 
 		).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`DELETE FROM usage_log_details`).
-		WithArgs(service.UsageLogDetailRetentionLimit).
+		WithArgs(string(service.UsageLogDetailTypeNormal), service.UsageLogDetailRetentionLimitDefault).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(`DELETE FROM usage_log_details`).
+		WithArgs(string(service.UsageLogDetailTypeImage), service.ImageUsageLogDetailRetentionLimitDefault).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
 	req := usageLogBestEffortRequest{

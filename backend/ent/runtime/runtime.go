@@ -1729,40 +1729,46 @@ func init() {
 	usagelog.DefaultCreatedAt = usagelogDescCreatedAt.Default.(func() time.Time)
 	usagelogdetailFields := schema.UsageLogDetail{}.Fields()
 	_ = usagelogdetailFields
+	// usagelogdetailDescDetailType is the schema descriptor for detail_type field.
+	usagelogdetailDescDetailType := usagelogdetailFields[1].Descriptor()
+	// usagelogdetail.DefaultDetailType holds the default value on creation for the detail_type field.
+	usagelogdetail.DefaultDetailType = usagelogdetailDescDetailType.Default.(string)
+	// usagelogdetail.DetailTypeValidator is a validator for the "detail_type" field. It is called by the builders before save.
+	usagelogdetail.DetailTypeValidator = usagelogdetailDescDetailType.Validators[0].(func(string) error)
 	// usagelogdetailDescRequestHeaders is the schema descriptor for request_headers field.
-	usagelogdetailDescRequestHeaders := usagelogdetailFields[1].Descriptor()
+	usagelogdetailDescRequestHeaders := usagelogdetailFields[2].Descriptor()
 	// usagelogdetail.DefaultRequestHeaders holds the default value on creation for the request_headers field.
 	usagelogdetail.DefaultRequestHeaders = usagelogdetailDescRequestHeaders.Default.(string)
 	// usagelogdetailDescRequestBody is the schema descriptor for request_body field.
-	usagelogdetailDescRequestBody := usagelogdetailFields[2].Descriptor()
+	usagelogdetailDescRequestBody := usagelogdetailFields[3].Descriptor()
 	// usagelogdetail.DefaultRequestBody holds the default value on creation for the request_body field.
 	usagelogdetail.DefaultRequestBody = usagelogdetailDescRequestBody.Default.(string)
 	// usagelogdetailDescUpstreamRequestHeaders is the schema descriptor for upstream_request_headers field.
-	usagelogdetailDescUpstreamRequestHeaders := usagelogdetailFields[3].Descriptor()
+	usagelogdetailDescUpstreamRequestHeaders := usagelogdetailFields[4].Descriptor()
 	// usagelogdetail.DefaultUpstreamRequestHeaders holds the default value on creation for the upstream_request_headers field.
 	usagelogdetail.DefaultUpstreamRequestHeaders = usagelogdetailDescUpstreamRequestHeaders.Default.(string)
 	// usagelogdetailDescUpstreamRequestBody is the schema descriptor for upstream_request_body field.
-	usagelogdetailDescUpstreamRequestBody := usagelogdetailFields[4].Descriptor()
+	usagelogdetailDescUpstreamRequestBody := usagelogdetailFields[5].Descriptor()
 	// usagelogdetail.DefaultUpstreamRequestBody holds the default value on creation for the upstream_request_body field.
 	usagelogdetail.DefaultUpstreamRequestBody = usagelogdetailDescUpstreamRequestBody.Default.(string)
 	// usagelogdetailDescResponseHeaders is the schema descriptor for response_headers field.
-	usagelogdetailDescResponseHeaders := usagelogdetailFields[5].Descriptor()
+	usagelogdetailDescResponseHeaders := usagelogdetailFields[6].Descriptor()
 	// usagelogdetail.DefaultResponseHeaders holds the default value on creation for the response_headers field.
 	usagelogdetail.DefaultResponseHeaders = usagelogdetailDescResponseHeaders.Default.(string)
 	// usagelogdetailDescResponseBody is the schema descriptor for response_body field.
-	usagelogdetailDescResponseBody := usagelogdetailFields[6].Descriptor()
+	usagelogdetailDescResponseBody := usagelogdetailFields[7].Descriptor()
 	// usagelogdetail.DefaultResponseBody holds the default value on creation for the response_body field.
 	usagelogdetail.DefaultResponseBody = usagelogdetailDescResponseBody.Default.(string)
 	// usagelogdetailDescUpstreamResponseHeaders is the schema descriptor for upstream_response_headers field.
-	usagelogdetailDescUpstreamResponseHeaders := usagelogdetailFields[7].Descriptor()
+	usagelogdetailDescUpstreamResponseHeaders := usagelogdetailFields[8].Descriptor()
 	// usagelogdetail.DefaultUpstreamResponseHeaders holds the default value on creation for the upstream_response_headers field.
 	usagelogdetail.DefaultUpstreamResponseHeaders = usagelogdetailDescUpstreamResponseHeaders.Default.(string)
 	// usagelogdetailDescUpstreamResponseBody is the schema descriptor for upstream_response_body field.
-	usagelogdetailDescUpstreamResponseBody := usagelogdetailFields[8].Descriptor()
+	usagelogdetailDescUpstreamResponseBody := usagelogdetailFields[9].Descriptor()
 	// usagelogdetail.DefaultUpstreamResponseBody holds the default value on creation for the upstream_response_body field.
 	usagelogdetail.DefaultUpstreamResponseBody = usagelogdetailDescUpstreamResponseBody.Default.(string)
 	// usagelogdetailDescCreatedAt is the schema descriptor for created_at field.
-	usagelogdetailDescCreatedAt := usagelogdetailFields[9].Descriptor()
+	usagelogdetailDescCreatedAt := usagelogdetailFields[10].Descriptor()
 	// usagelogdetail.DefaultCreatedAt holds the default value on creation for the created_at field.
 	usagelogdetail.DefaultCreatedAt = usagelogdetailDescCreatedAt.Default.(func() time.Time)
 	userMixin := schema.User{}.Mixin()

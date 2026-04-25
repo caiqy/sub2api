@@ -34,10 +34,13 @@ const {
 const messages: Record<string, string> = {
   'admin.settings.tabs.gateway': 'Gateway',
   'admin.settings.gatewayRuntime.title': 'Gateway Runtime',
+  'admin.settings.gatewayRuntime.usageLogDetailRetentionLimit': 'Usage log detail retention limit',
+  'admin.settings.gatewayRuntime.imageUsageLogDetailRetentionLimit': 'Image usage log detail retention limit',
   'admin.settings.gatewayRuntime.loadFailed': 'Failed to load gateway runtime settings',
   'admin.settings.gatewayRuntime.loadFailedInline': 'Gateway runtime settings failed to load. Saving is disabled until data loads successfully.',
   'admin.settings.gatewayRuntime.saved': 'Gateway runtime settings saved',
   'admin.settings.gatewayRuntime.saveFailed': 'Failed to save gateway runtime settings',
+  'admin.settings.gatewayRuntime.validationFailed': 'Gateway runtime settings contain invalid values',
   'common.save': 'Save',
   'common.saving': 'Saving...',
   'common.loading': 'Loading...',
@@ -87,6 +90,7 @@ vi.mock('vue-i18n', async () => {
   return {
     ...actual,
     useI18n: () => ({
+      locale: { value: 'en' },
       t: (key: string) => messages[key] ?? key
     })
   }
@@ -98,6 +102,7 @@ function createWrapper() {
       stubs: {
         AppLayout: { template: '<div><slot /></div>' },
         Icon: true,
+        RouterLink: true,
         Select: true,
         GroupBadge: true,
         GroupOptionItem: true,
@@ -152,11 +157,15 @@ describe('admin SettingsView gateway runtime card', () => {
     getBetaPolicySettings.mockResolvedValue({ rules: [] })
     getGatewayRuntimeSettings.mockResolvedValue({
       response_header_timeout: 120,
-      stream_data_interval_timeout: 45
+      stream_data_interval_timeout: 45,
+      usage_log_detail_retention_limit: 320,
+      image_usage_log_detail_retention_limit: 80
     })
     updateGatewayRuntimeSettings.mockResolvedValue({
       response_header_timeout: 240,
-      stream_data_interval_timeout: 90
+      stream_data_interval_timeout: 90,
+      usage_log_detail_retention_limit: 500,
+      image_usage_log_detail_retention_limit: 120
     })
   })
 
@@ -171,10 +180,33 @@ describe('admin SettingsView gateway runtime card', () => {
     expect(runtimeCard?.exists()).toBe(true)
     expect(runtimeCard?.text()).toContain('gateway.response_header_timeout')
     expect(runtimeCard?.text()).toContain('gateway.stream_data_interval_timeout')
+    expect(runtimeCard?.text()).toContain('Usage log detail retention limit')
+    expect(runtimeCard?.text()).toContain('Image usage log detail retention limit')
 
-    const inputs = runtimeCard!.findAll('input[type="number"]')
-    expect((inputs[0].element as HTMLInputElement).value).toBe('120')
-    expect((inputs[1].element as HTMLInputElement).value).toBe('45')
+    expect(
+      (
+        runtimeCard!.find('[data-testid="gateway-runtime-response-header-timeout"]')
+          .element as HTMLInputElement
+      ).value
+    ).toBe('120')
+    expect(
+      (
+        runtimeCard!.find('[data-testid="gateway-runtime-stream-interval-timeout"]')
+          .element as HTMLInputElement
+      ).value
+    ).toBe('45')
+    expect(
+      (
+        runtimeCard!.find('[data-testid="gateway-runtime-usage-log-detail-retention-limit"]')
+          .element as HTMLInputElement
+      ).value
+    ).toBe('320')
+    expect(
+      (
+        runtimeCard!.find('[data-testid="gateway-runtime-image-usage-log-detail-retention-limit"]')
+          .element as HTMLInputElement
+      ).value
+    ).toBe('80')
   })
 
   it('updates gateway runtime settings and shows success feedback', async () => {
@@ -183,18 +215,65 @@ describe('admin SettingsView gateway runtime card', () => {
     await flushPromises()
 
     const runtimeCard = createGatewayRuntimeCard(wrapper)!
-    const inputs = runtimeCard.findAll('input[type="number"]')
 
-    await inputs[0].setValue('240')
-    await inputs[1].setValue('90')
-    await runtimeCard.find('button').trigger('click')
+    await runtimeCard
+      .find('[data-testid="gateway-runtime-response-header-timeout"]')
+      .setValue('240')
+    await runtimeCard
+      .find('[data-testid="gateway-runtime-stream-interval-timeout"]')
+      .setValue('90')
+    await runtimeCard
+      .find('[data-testid="gateway-runtime-usage-log-detail-retention-limit"]')
+      .setValue('500')
+    await runtimeCard
+      .find('[data-testid="gateway-runtime-image-usage-log-detail-retention-limit"]')
+      .setValue('120')
+    await runtimeCard.find('[data-testid="gateway-runtime-save"]').trigger('click')
     await flushPromises()
 
     expect(updateGatewayRuntimeSettings).toHaveBeenCalledWith({
       response_header_timeout: 240,
-      stream_data_interval_timeout: 90
+      stream_data_interval_timeout: 90,
+      usage_log_detail_retention_limit: 500,
+      image_usage_log_detail_retention_limit: 120
     })
     expect(showSuccess).toHaveBeenCalledWith('Gateway runtime settings saved')
+  })
+
+  it.each([
+    {
+      name: 'empty response header timeout',
+      testId: 'gateway-runtime-response-header-timeout',
+      value: ''
+    },
+    {
+      name: 'stream interval outside the allowed non-zero range',
+      testId: 'gateway-runtime-stream-interval-timeout',
+      value: '20'
+    },
+    {
+      name: 'negative normal detail retention limit',
+      testId: 'gateway-runtime-usage-log-detail-retention-limit',
+      value: '-1'
+    },
+    {
+      name: 'negative image detail retention limit',
+      testId: 'gateway-runtime-image-usage-log-detail-retention-limit',
+      value: '-1'
+    }
+  ])('does not submit gateway runtime settings with $name', async ({ testId, value }) => {
+    const wrapper = createWrapper()
+
+    await flushPromises()
+
+    const runtimeCard = createGatewayRuntimeCard(wrapper)!
+
+    await runtimeCard.find(`[data-testid="${testId}"]`).setValue(value)
+    await runtimeCard.find('[data-testid="gateway-runtime-save"]').trigger('click')
+    await flushPromises()
+
+    expect(updateGatewayRuntimeSettings).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenCalledWith('Gateway runtime settings contain invalid values')
   })
 
   it('shows error feedback when saving gateway runtime settings fails', async () => {
@@ -205,7 +284,7 @@ describe('admin SettingsView gateway runtime card', () => {
     await flushPromises()
 
     const runtimeCard = createGatewayRuntimeCard(wrapper)!
-    await runtimeCard.find('button').trigger('click')
+    await runtimeCard.find('[data-testid="gateway-runtime-save"]').trigger('click')
     await flushPromises()
 
     expect(showError).toHaveBeenCalledWith('Failed to save gateway runtime settings: boom')
@@ -219,7 +298,7 @@ describe('admin SettingsView gateway runtime card', () => {
     await flushPromises()
 
     const runtimeCard = createGatewayRuntimeCard(wrapper)!
-    const saveButton = runtimeCard.find('button')
+    const saveButton = runtimeCard.find('[data-testid="gateway-runtime-save"]')
 
     expect(showError).toHaveBeenCalledWith('Failed to load gateway runtime settings: load boom')
     expect(runtimeCard.text()).toContain(

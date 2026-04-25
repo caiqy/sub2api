@@ -16,6 +16,8 @@ const (
 	FieldID = "id"
 	// FieldUsageLogID holds the string denoting the usage_log_id field in the database.
 	FieldUsageLogID = "usage_log_id"
+	// FieldDetailType holds the string denoting the detail_type field in the database.
+	FieldDetailType = "detail_type"
 	// FieldRequestHeaders holds the string denoting the request_headers field in the database.
 	FieldRequestHeaders = "request_headers"
 	// FieldRequestBody holds the string denoting the request_body field in the database.
@@ -51,6 +53,7 @@ const (
 var Columns = []string{
 	FieldID,
 	FieldUsageLogID,
+	FieldDetailType,
 	FieldRequestHeaders,
 	FieldRequestBody,
 	FieldUpstreamRequestHeaders,
@@ -73,6 +76,10 @@ func ValidColumn(column string) bool {
 }
 
 var (
+	// DefaultDetailType holds the default value on creation for the "detail_type" field.
+	DefaultDetailType string
+	// DetailTypeValidator is a validator for the "detail_type" field. It is called by the builders before save.
+	DetailTypeValidator func(string) error
 	// DefaultRequestHeaders holds the default value on creation for the "request_headers" field.
 	DefaultRequestHeaders string
 	// DefaultRequestBody holds the default value on creation for the "request_body" field.
@@ -104,6 +111,11 @@ func ByID(opts ...sql.OrderTermOption) OrderOption {
 // ByUsageLogID orders the results by the usage_log_id field.
 func ByUsageLogID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldUsageLogID, opts...).ToFunc()
+}
+
+// ByDetailType orders the results by the detail_type field.
+func ByDetailType(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldDetailType, opts...).ToFunc()
 }
 
 // ByRequestHeaders orders the results by the request_headers field.

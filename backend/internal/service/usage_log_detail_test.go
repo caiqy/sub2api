@@ -3,12 +3,66 @@
 package service
 
 import (
-	"strconv"
 	"testing"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
+
+// ResetUsageLogDetailRetentionLimitsForTest resets package-level runtime state.
+// Do not use it in parallel tests.
+func ResetUsageLogDetailRetentionLimitsForTest(t *testing.T) {
+	t.Helper()
+	oldNormal, oldImage := GetUsageLogDetailRetentionLimits()
+	SetUsageLogDetailRetentionLimits(UsageLogDetailRetentionLimitDefault, ImageUsageLogDetailRetentionLimitDefault)
+	t.Cleanup(func() { SetUsageLogDetailRetentionLimits(oldNormal, oldImage) })
+}
+
+func TestUsageLogDetailTypeFromUsageLog(t *testing.T) {
+	imageEndpoint := "/v1/images/generations"
+	imageEditsEndpoint := "/v1/images/edits"
+	imageBillingMode := string(BillingModeImage)
+	imageBillingModeWithWhitespace := " IMAGE "
+
+	tests := []struct {
+		name string
+		log  *UsageLog
+		want UsageLogDetailType
+	}{
+		{name: "nil_log", log: nil, want: UsageLogDetailTypeNormal},
+		{name: "inbound_images_endpoint", log: &UsageLog{InboundEndpoint: &imageEndpoint}, want: UsageLogDetailTypeImage},
+		{name: "inbound_image_edits_endpoint", log: &UsageLog{InboundEndpoint: &imageEditsEndpoint}, want: UsageLogDetailTypeImage},
+		{name: "upstream_images_endpoint", log: &UsageLog{UpstreamEndpoint: &imageEndpoint}, want: UsageLogDetailTypeImage},
+		{name: "image_billing_mode", log: &UsageLog{BillingMode: &imageBillingMode}, want: UsageLogDetailTypeImage},
+		{name: "image_billing_mode_trim_case_insensitive", log: &UsageLog{BillingMode: &imageBillingModeWithWhitespace}, want: UsageLogDetailTypeImage},
+		{name: "image_count_fallback", log: &UsageLog{ImageCount: 1}, want: UsageLogDetailTypeImage},
+		{name: "normal", log: &UsageLog{Model: "gpt-5"}, want: UsageLogDetailTypeNormal},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, UsageLogDetailTypeFromUsageLog(tc.log))
+		})
+	}
+}
+
+func TestUsageLogDetailRetentionLimits(t *testing.T) {
+	ResetUsageLogDetailRetentionLimitsForTest(t)
+
+	normal, image := GetUsageLogDetailRetentionLimits()
+	require.Equal(t, UsageLogDetailRetentionLimitDefault, normal)
+	require.Equal(t, ImageUsageLogDetailRetentionLimitDefault, image)
+
+	SetUsageLogDetailRetentionLimits(12, 0)
+	normal, image = GetUsageLogDetailRetentionLimits()
+	require.Equal(t, 12, normal)
+	require.Equal(t, 0, image)
+
+	SetUsageLogDetailRetentionLimits(-1, -1)
+	normal, image = GetUsageLogDetailRetentionLimits()
+	require.Equal(t, UsageLogDetailRetentionLimitDefault, normal)
+	require.Equal(t, ImageUsageLogDetailRetentionLimitDefault, image)
+}
 
 func TestUsageLogDetailSnapshot_PreservesRawContent(t *testing.T) {
 	original := &UsageLogDetailSnapshot{
@@ -59,7 +113,10 @@ func TestUsageLog_HasDetailAndDetailSnapshotRepresentDifferentLifecycles(t *test
 	require.Nil(t, queryModel.DetailSnapshot)
 }
 
-func TestErrUsageLogDetailNotFoundIncludesRetentionHint(t *testing.T) {
+func TestErrUsageLogDetailNotFoundMentionsConfiguredRetentionPools(t *testing.T) {
 	require.Equal(t, "USAGE_LOG_DETAIL_NOT_FOUND", infraerrors.Reason(ErrUsageLogDetailNotFound))
-	require.Contains(t, infraerrors.Message(ErrUsageLogDetailNotFound), strconv.Itoa(UsageLogDetailRetentionLimit))
+	msg := infraerrors.Message(ErrUsageLogDetailNotFound)
+	require.Contains(t, msg, "regular and image usage details are retained separately")
+	require.Contains(t, msg, "retention limit of 0")
+	require.NotContains(t, msg, "500")
 }

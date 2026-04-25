@@ -60,6 +60,11 @@ func UsageLogID(v int64) predicate.UsageLogDetail {
 	return predicate.UsageLogDetail(sql.FieldEQ(FieldUsageLogID, v))
 }
 
+// DetailType applies equality check predicate on the "detail_type" field. It's identical to DetailTypeEQ.
+func DetailType(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldEQ(FieldDetailType, v))
+}
+
 // RequestHeaders applies equality check predicate on the "request_headers" field. It's identical to RequestHeadersEQ.
 func RequestHeaders(v string) predicate.UsageLogDetail {
 	return predicate.UsageLogDetail(sql.FieldEQ(FieldRequestHeaders, v))
@@ -123,6 +128,71 @@ func UsageLogIDIn(vs ...int64) predicate.UsageLogDetail {
 // UsageLogIDNotIn applies the NotIn predicate on the "usage_log_id" field.
 func UsageLogIDNotIn(vs ...int64) predicate.UsageLogDetail {
 	return predicate.UsageLogDetail(sql.FieldNotIn(FieldUsageLogID, vs...))
+}
+
+// DetailTypeEQ applies the EQ predicate on the "detail_type" field.
+func DetailTypeEQ(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldEQ(FieldDetailType, v))
+}
+
+// DetailTypeNEQ applies the NEQ predicate on the "detail_type" field.
+func DetailTypeNEQ(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldNEQ(FieldDetailType, v))
+}
+
+// DetailTypeIn applies the In predicate on the "detail_type" field.
+func DetailTypeIn(vs ...string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldIn(FieldDetailType, vs...))
+}
+
+// DetailTypeNotIn applies the NotIn predicate on the "detail_type" field.
+func DetailTypeNotIn(vs ...string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldNotIn(FieldDetailType, vs...))
+}
+
+// DetailTypeGT applies the GT predicate on the "detail_type" field.
+func DetailTypeGT(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldGT(FieldDetailType, v))
+}
+
+// DetailTypeGTE applies the GTE predicate on the "detail_type" field.
+func DetailTypeGTE(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldGTE(FieldDetailType, v))
+}
+
+// DetailTypeLT applies the LT predicate on the "detail_type" field.
+func DetailTypeLT(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldLT(FieldDetailType, v))
+}
+
+// DetailTypeLTE applies the LTE predicate on the "detail_type" field.
+func DetailTypeLTE(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldLTE(FieldDetailType, v))
+}
+
+// DetailTypeContains applies the Contains predicate on the "detail_type" field.
+func DetailTypeContains(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldContains(FieldDetailType, v))
+}
+
+// DetailTypeHasPrefix applies the HasPrefix predicate on the "detail_type" field.
+func DetailTypeHasPrefix(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldHasPrefix(FieldDetailType, v))
+}
+
+// DetailTypeHasSuffix applies the HasSuffix predicate on the "detail_type" field.
+func DetailTypeHasSuffix(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldHasSuffix(FieldDetailType, v))
+}
+
+// DetailTypeEqualFold applies the EqualFold predicate on the "detail_type" field.
+func DetailTypeEqualFold(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldEqualFold(FieldDetailType, v))
+}
+
+// DetailTypeContainsFold applies the ContainsFold predicate on the "detail_type" field.
+func DetailTypeContainsFold(v string) predicate.UsageLogDetail {
+	return predicate.UsageLogDetail(sql.FieldContainsFold(FieldDetailType, v))
 }
 
 // RequestHeadersEQ applies the EQ predicate on the "request_headers" field.
