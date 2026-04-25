@@ -1301,6 +1301,7 @@ export default {
         customSizeMaxEdge: '自定义尺寸任一边都不能超过 3840px。',
         customSizeAspectRatio: '自定义尺寸的长宽比不能超过 3:1。',
         customSizePixelRange: '自定义尺寸的总像素必须介于 655360 到 8294400 之间。',
+        transparentFormatAdjusted: '透明背景不支持 JPEG，已自动将输出格式改为 PNG。',
         quality: '质量',
         background: '背景',
         outputFormat: '输出格式',

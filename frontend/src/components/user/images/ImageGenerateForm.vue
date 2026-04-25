@@ -74,19 +74,16 @@
         </select>
       </div>
 
-      <div>
-        <label class="input-label mb-1.5 block" for="image-generate-n">{{ t('images.forms.generate.n') }}</label>
-        <select id="image-generate-n" v-model.number="form.n" :class="selectClass">
-          <option v-for="option in countOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-        </select>
-      </div>
     </div>
 
     <p v-if="disabled" class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-900/10 dark:text-amber-300">
       {{ t('images.forms.generate.apiKeyRequired') }}
     </p>
-    <p v-if="validationError" class="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/10 dark:text-red-300">
-      {{ validationError }}
+    <p v-if="validationErrorKey" class="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/10 dark:text-red-300">
+      {{ t(validationErrorKey) }}
+    </p>
+    <p v-if="noticeKey" class="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700 dark:border-sky-900/40 dark:bg-sky-900/10 dark:text-sky-300">
+      {{ t(noticeKey) }}
     </p>
 
     <div class="flex justify-end">
@@ -104,10 +101,19 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { CUSTOM_IMAGE_SIZE_OPTION_VALUE, createDefaultImageFormValues, isPresetImageSize, useImageFormOptions, validateCustomImageSize } from '@/composables/useImageFormOptions'
+import {
+  CUSTOM_IMAGE_SIZE_OPTION_VALUE,
+  createDefaultImageFormValues,
+  getImageSizeOptions,
+  isPresetImageSize,
+  normalizeImageFormValues,
+  sanitizeImageGenerationPayload,
+  useImageFormOptions,
+  validateCustomImageSize,
+} from '@/composables/useImageFormOptions'
 import type { ImageCommonFormValues } from '@/composables/useImageFormOptions'
 import type { ImageGenerationRequest } from '@/types'
 
@@ -131,22 +137,75 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const defaultValues = createDefaultImageFormValues()
-const initialSize = props.initialValues.size
-const usesPresetInitialSize = !initialSize || isPresetImageSize(initialSize)
-const form = reactive({
+const normalizedInitialValues = normalizeImageFormValues({
   ...defaultValues,
   ...props.initialValues,
-  size: usesPresetInitialSize ? (initialSize ?? defaultValues.size) : CUSTOM_IMAGE_SIZE_OPTION_VALUE,
+  model: props.initialValues.model ?? defaultValues.model,
+  size: props.initialValues.size ?? defaultValues.size,
 })
-const customSize = ref(usesPresetInitialSize ? '' : initialSize ?? '')
-const validationError = ref('')
-const { backgroundOptions, countOptions, modelOptions, moderationOptions, outputFormatOptions, qualityOptions, sizeOptions } = useImageFormOptions()
+const usesCustomInitialSize = normalizedInitialValues.model === 'gpt-image-2' && !isPresetImageSize(normalizedInitialValues.size, normalizedInitialValues.model) && validateCustomImageSize(normalizedInitialValues.size) === null
+const form = reactive({
+  ...normalizedInitialValues,
+  size: usesCustomInitialSize ? CUSTOM_IMAGE_SIZE_OPTION_VALUE : normalizedInitialValues.size,
+})
+const customSize = ref(usesCustomInitialSize ? normalizedInitialValues.size : '')
+const validationErrorKey = ref('')
+const noticeKey = ref('')
+if (props.initialValues.background === 'transparent' && props.initialValues.output_format === 'jpeg') {
+  noticeKey.value = 'images.forms.generate.transparentFormatAdjusted'
+}
+const { backgroundOptions, modelOptions, moderationOptions, outputFormatOptions, qualityOptions } = useImageFormOptions()
+const sizeOptions = computed(() => getImageSizeOptions(form.model))
 
 const selectClass = 'input w-full'
+const customSizeValidationKeys = [
+  'images.forms.generate.customSizeRequired',
+  'images.forms.generate.customSizeFormat',
+  'images.forms.generate.customSizeMultipleOf16',
+  'images.forms.generate.customSizeMaxEdge',
+  'images.forms.generate.customSizeAspectRatio',
+  'images.forms.generate.customSizePixelRange',
+]
+
+function clearCustomSizeValidationError() {
+  if (customSizeValidationKeys.includes(validationErrorKey.value)) {
+    validationErrorKey.value = ''
+  }
+}
+
+watch(
+  () => [form.model, form.background, form.output_format] as const,
+  () => {
+    const size = form.size === CUSTOM_IMAGE_SIZE_OPTION_VALUE ? customSize.value.trim() : form.size
+    const shouldShowTransparentFormatNotice = form.background === 'transparent' && form.output_format === 'jpeg'
+    const normalized = normalizeImageFormValues({ ...form, size })
+    // Preserve the UI sentinel while editing custom sizes; payload sanitization validates the real size on submit.
+    const keepCustomSize = form.model === 'gpt-image-2' && form.size === CUSTOM_IMAGE_SIZE_OPTION_VALUE
+    Object.assign(form, normalized)
+    if (keepCustomSize) {
+      form.size = CUSTOM_IMAGE_SIZE_OPTION_VALUE
+    }
+    if (shouldShowTransparentFormatNotice) {
+      noticeKey.value = 'images.forms.generate.transparentFormatAdjusted'
+    } else if (form.background !== 'transparent' || form.output_format !== 'png') {
+      noticeKey.value = ''
+    }
+  },
+  { immediate: true }
+)
+
+watch(
+  () => form.size,
+  (size) => {
+    if (size !== CUSTOM_IMAGE_SIZE_OPTION_VALUE) {
+      clearCustomSizeValidationError()
+    }
+  }
+)
 
 function handlePromptInput() {
-  if (form.prompt.trim() && validationError.value === t('images.forms.generate.promptRequired')) {
-    validationError.value = ''
+  if (form.prompt.trim() && validationErrorKey.value === 'images.forms.generate.promptRequired') {
+    validationErrorKey.value = ''
   }
 }
 
@@ -157,7 +216,7 @@ function handleCustomSizeInput() {
   }
 
   if (form.size === CUSTOM_IMAGE_SIZE_OPTION_VALUE && validateCustomImageSize(size) === null) {
-    validationError.value = ''
+    clearCustomSizeValidationError()
   }
 }
 
@@ -168,35 +227,35 @@ function handleSubmit() {
 
   const prompt = form.prompt.trim()
   if (!prompt) {
-    validationError.value = t('images.forms.generate.promptRequired')
+    validationErrorKey.value = 'images.forms.generate.promptRequired'
     return
   }
 
   const size = form.size === CUSTOM_IMAGE_SIZE_OPTION_VALUE ? customSize.value.trim() : form.size
   if (!size) {
-    validationError.value = t('images.forms.generate.customSizeRequired')
+    validationErrorKey.value = 'images.forms.generate.customSizeRequired'
     return
   }
 
   if (form.size === CUSTOM_IMAGE_SIZE_OPTION_VALUE) {
     const sizeValidationKey = validateCustomImageSize(size)
     if (sizeValidationKey) {
-      validationError.value = t(sizeValidationKey)
+      validationErrorKey.value = sizeValidationKey
       return
     }
   }
 
-  validationError.value = ''
+  validationErrorKey.value = ''
 
-  emit('submit', {
+  emit('submit', sanitizeImageGenerationPayload({
     background: form.background,
     model: form.model,
     moderation: form.moderation,
-    n: Number(form.n),
+    n: 1,
     output_format: form.output_format,
     prompt,
     quality: form.quality,
     size,
-  })
+  }))
 }
 </script>

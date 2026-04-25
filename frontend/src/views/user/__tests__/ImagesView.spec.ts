@@ -309,6 +309,78 @@ describe('ImagesView', () => {
     expect(wrapper.text()).toContain('History')
   })
 
+  it('uses a wide workbench container for image page', async () => {
+    const wrapper = mount(ImagesView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' }
+        }
+      }
+    })
+
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="images-view"]').classes().join(' ')).toContain('max-w-[1600px]')
+  })
+
+  it('does not restore replay n into generated form values', async () => {
+    listHistory.mockResolvedValue({ items: historyListItems, total: 2, page: 1, page_size: 20, pages: 1 })
+    getHistoryDetail.mockResolvedValue(generateHistoryDetail)
+
+    const wrapper = mount(ImagesView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          ImageGenerateForm: {
+            props: ['initialValues'],
+            template: '<pre data-testid="generate-values">{{ JSON.stringify(initialValues) }}</pre>'
+          }
+        }
+      }
+    })
+
+    await flushPromises()
+    await wrapper.get('[data-testid="images-tab-history"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="image-history-list-item-31"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="image-history-replay"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="generate-values"]').text()).not.toContain('"n"')
+  })
+
+  it('falls back unsupported replay models to the default generated form model', async () => {
+    listHistory.mockResolvedValue({ items: historyListItems, total: 2, page: 1, page_size: 20, pages: 1 })
+    getHistoryDetail.mockResolvedValue({
+      ...generateHistoryDetail,
+      replay: {
+        ...generateHistoryDetail.replay,
+        model: 'legacy-image-model',
+        size: '3840x2160'
+      }
+    })
+
+    const wrapper = mount(ImagesView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' }
+        }
+      }
+    })
+
+    await flushPromises()
+    await wrapper.get('[data-testid="images-tab-history"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="image-history-list-item-31"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="image-history-replay"]').trigger('click')
+    await flushPromises()
+
+    expect((wrapper.get('#image-generate-model').element as HTMLSelectElement).value).toBe('gpt-image-2')
+    expect((wrapper.get('#image-generate-size').element as HTMLSelectElement).value).toBe('3840x2160')
+  })
+
   it('shows the size guidance in both generate and edit forms', async () => {
     const wrapper = mount(ImagesView, {
       global: {
@@ -627,7 +699,7 @@ describe('ImagesView', () => {
     await flushPromises()
 
     expect((wrapper.get('#image-generate-size').element as HTMLSelectElement).value).toBe('auto')
-    expect((wrapper.get('#image-generate-quality').element as HTMLSelectElement).value).toBe('high')
+    expect((wrapper.get('#image-generate-quality').element as HTMLSelectElement).value).toBe('auto')
     expect((wrapper.get('#image-generate-background').element as HTMLSelectElement).value).toBe('auto')
     expect((wrapper.get('#image-generate-output-format').element as HTMLSelectElement).value).toBe('png')
   })

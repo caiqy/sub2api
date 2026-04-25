@@ -1,7 +1,7 @@
 <template>
   <AppLayout>
-    <div class="mx-auto max-w-6xl space-y-6" data-testid="images-view">
-      <section class="card overflow-hidden border border-primary-100 bg-gradient-to-br from-white via-white to-primary-50/70 p-6 dark:border-primary-900/40 dark:from-dark-900 dark:via-dark-900 dark:to-primary-950/20">
+    <div class="mx-auto max-w-[1600px] space-y-5 px-3 sm:px-4 xl:px-6 2xl:px-8" data-testid="images-view">
+      <section class="card overflow-hidden border border-primary-100 bg-gradient-to-br from-white via-white to-primary-50/70 p-5 dark:border-primary-900/40 dark:from-dark-900 dark:via-dark-900 dark:to-primary-950/20">
         <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div class="space-y-2">
             <p class="text-xs font-semibold uppercase tracking-[0.22em] text-primary-600 dark:text-primary-400">
@@ -83,8 +83,8 @@
             />
           </div>
 
-          <div v-else class="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.95fr)]">
-            <div class="rounded-3xl border border-gray-200 bg-white p-5 shadow-sm dark:border-dark-700 dark:bg-dark-800">
+          <div v-else class="grid gap-6 xl:grid-cols-[minmax(390px,0.85fr)_minmax(0,1.15fr)] 2xl:grid-cols-[minmax(420px,0.78fr)_minmax(0,1.22fr)]">
+            <div class="rounded-3xl border border-gray-200 bg-white p-5 shadow-sm dark:border-dark-700 dark:bg-dark-800 xl:self-start">
               <p
                 v-if="activeTab === 'edit' && editReplayNotice"
                 class="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-900/10 dark:text-amber-300"
@@ -332,7 +332,6 @@ function toReplayValues(detail: ImageHistoryDetailType): Partial<ImageCommonForm
   setReplayValue('background', detail.replay.background)
   setReplayValue('model', detail.replay.model)
   setReplayValue('moderation', detail.replay.moderation)
-  setReplayValue('n', detail.replay.n)
   setReplayValue('output_format', detail.replay.output_format)
   setReplayValue('prompt', detail.replay.prompt)
   setReplayValue('quality', detail.replay.quality)

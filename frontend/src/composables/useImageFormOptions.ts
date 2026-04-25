@@ -1,3 +1,5 @@
+import type { ImageGenerationRequest } from '@/types'
+
 export interface ImageFormOption<T extends string | number = string> {
   value: T
   label: string
@@ -14,17 +16,20 @@ export interface ImageCommonFormValues {
   n: number
 }
 
+export const CUSTOM_IMAGE_SIZE_OPTION_VALUE = 'custom'
+
+const DEFAULT_IMAGE_MODEL = 'gpt-image-2'
+const DEFAULT_IMAGE_SIZE = 'auto'
+const DEFAULT_IMAGE_QUALITY = 'auto'
+const DEFAULT_IMAGE_COUNT = 1
+
 const modelOptions: ImageFormOption[] = [
   { value: 'gpt-image-2', label: 'gpt-image-2' },
   { value: 'gpt-image-1.5', label: 'gpt-image-1.5' },
   { value: 'gpt-image-1', label: 'gpt-image-1' },
 ]
 
-export const CUSTOM_IMAGE_SIZE_OPTION_VALUE = 'custom'
-const DEFAULT_IMAGE_SIZE = 'auto'
-const DEFAULT_IMAGE_QUALITY = 'high'
-
-const presetSizeOptions: ImageFormOption[] = [
+const gptImage2PresetSizeOptions: ImageFormOption[] = [
   { value: 'auto', label: 'auto' },
   { value: '1024x1024', label: '1024x1024' },
   { value: '1536x1024', label: '1536x1024' },
@@ -35,15 +40,23 @@ const presetSizeOptions: ImageFormOption[] = [
   { value: '2160x3840', label: '2160x3840' },
 ]
 
-const sizeOptions: ImageFormOption[] = [
-  ...presetSizeOptions,
+const officialGptImagePresetSizeOptions: ImageFormOption[] = [
+  { value: 'auto', label: 'auto' },
+  { value: '1024x1024', label: '1024x1024' },
+  { value: '1536x1024', label: '1536x1024' },
+  { value: '1024x1536', label: '1024x1536' },
+]
+
+const gptImage2SizeOptions: ImageFormOption[] = [
+  ...gptImage2PresetSizeOptions,
   { value: CUSTOM_IMAGE_SIZE_OPTION_VALUE, label: CUSTOM_IMAGE_SIZE_OPTION_VALUE },
 ]
 
 const qualityOptions: ImageFormOption[] = [
+  { value: 'auto', label: 'auto' },
+  { value: 'low', label: 'low' },
   { value: 'medium', label: 'medium' },
   { value: 'high', label: 'high' },
-  { value: 'low', label: 'low' },
 ]
 
 const backgroundOptions: ImageFormOption[] = [
@@ -63,28 +76,91 @@ const moderationOptions: ImageFormOption[] = [
   { value: 'low', label: 'low' },
 ]
 
-const countOptions: ImageFormOption<number>[] = [
-  { value: 1, label: '1' },
-  { value: 2, label: '2' },
-  { value: 3, label: '3' },
-  { value: 4, label: '4' },
-]
+export function getImageSizeOptions(model: string): ImageFormOption[] {
+  return model === 'gpt-image-2' ? gptImage2SizeOptions : officialGptImagePresetSizeOptions
+}
+
+export function isPresetImageSize(value?: string, model = DEFAULT_IMAGE_MODEL): value is string {
+  return !!value && getImageSizeOptions(model).some((option) => option.value === value && option.value !== CUSTOM_IMAGE_SIZE_OPTION_VALUE)
+}
 
 export function createDefaultImageFormValues(): ImageCommonFormValues {
   return {
-    model: modelOptions[0].value,
+    model: DEFAULT_IMAGE_MODEL,
     prompt: '',
     size: DEFAULT_IMAGE_SIZE,
     quality: DEFAULT_IMAGE_QUALITY,
     background: backgroundOptions[0].value,
     output_format: outputFormatOptions[0].value,
     moderation: moderationOptions[0].value,
-    n: countOptions[0].value,
+    n: DEFAULT_IMAGE_COUNT,
   }
 }
 
-export function isPresetImageSize(value?: string): value is string {
-  return !!value && presetSizeOptions.some((option) => option.value === value)
+export function normalizeImageFormValues(values: ImageCommonFormValues): ImageCommonFormValues {
+  const next = { ...values, n: DEFAULT_IMAGE_COUNT, size: values.size.trim() }
+  if (!modelOptions.some((option) => option.value === next.model)) {
+    next.model = DEFAULT_IMAGE_MODEL
+  }
+  const sizeOptions = getImageSizeOptions(next.model)
+  const supportsPresetSize = next.size !== CUSTOM_IMAGE_SIZE_OPTION_VALUE && sizeOptions.some((option) => option.value === next.size)
+  const supportsCustomSize = next.model === 'gpt-image-2' && next.size !== CUSTOM_IMAGE_SIZE_OPTION_VALUE && validateCustomImageSize(next.size) === null
+
+  if (!supportsPresetSize && !supportsCustomSize) {
+    next.size = DEFAULT_IMAGE_SIZE
+  }
+
+  if (!qualityOptions.some((option) => option.value === next.quality)) {
+    next.quality = DEFAULT_IMAGE_QUALITY
+  }
+
+  if (!backgroundOptions.some((option) => option.value === next.background)) {
+    next.background = backgroundOptions[0].value
+  }
+
+  if (!outputFormatOptions.some((option) => option.value === next.output_format)) {
+    next.output_format = outputFormatOptions[0].value
+  }
+
+  if (!moderationOptions.some((option) => option.value === next.moderation)) {
+    next.moderation = moderationOptions[0].value
+  }
+
+  if (next.background === 'transparent' && next.output_format === 'jpeg') {
+    next.output_format = 'png'
+  }
+
+  return next
+}
+
+export function sanitizeImageGenerationPayload(payload: ImageGenerationRequest): ImageGenerationRequest {
+  const normalized = normalizeImageFormValues({
+    model: String(payload.model ?? DEFAULT_IMAGE_MODEL),
+    prompt: String(payload.prompt ?? '').trim(),
+    size: String(payload.size ?? DEFAULT_IMAGE_SIZE),
+    quality: String(payload.quality ?? DEFAULT_IMAGE_QUALITY),
+    background: String(payload.background ?? 'auto'),
+    output_format: String(payload.output_format ?? 'png'),
+    moderation: String(payload.moderation ?? 'auto'),
+    n: DEFAULT_IMAGE_COUNT,
+  })
+
+  const sanitized: ImageGenerationRequest = {
+    prompt: normalized.prompt,
+    model: normalized.model,
+    size: normalized.size,
+    quality: normalized.quality,
+    background: normalized.background,
+    output_format: normalized.output_format,
+    moderation: normalized.moderation,
+    n: DEFAULT_IMAGE_COUNT,
+  }
+
+  if ((normalized.output_format === 'webp' || normalized.output_format === 'jpeg') && typeof payload.output_compression === 'number') {
+    sanitized.output_compression = payload.output_compression
+  }
+
+  return sanitized
 }
 
 export function validateCustomImageSize(value: string): string | null {
@@ -125,11 +201,11 @@ export function validateCustomImageSize(value: string): string | null {
 export function useImageFormOptions() {
   return {
     modelOptions,
-    sizeOptions,
+    sizeOptions: gptImage2SizeOptions,
     qualityOptions,
     backgroundOptions,
     outputFormatOptions,
     moderationOptions,
-    countOptions,
+    getImageSizeOptions,
   }
 }

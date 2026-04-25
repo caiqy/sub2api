@@ -16,7 +16,7 @@
       {{ t('images.results.empty') }}
     </p>
 
-    <div v-else class="mt-4 grid gap-4 sm:grid-cols-2">
+    <div v-else class="mt-4 grid grid-cols-1 gap-4" data-testid="image-result-grid">
       <figure v-for="(result, index) in displayResults" :key="`${result.source}-${index}-${result.src}`" class="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50 dark:border-dark-700 dark:bg-dark-900/60">
         <div class="relative">
           <button
@@ -29,7 +29,7 @@
             <img
               :src="result.src"
               :alt="`preview-${index + 1}`"
-              class="aspect-square w-full bg-white object-contain dark:bg-dark-950"
+              class="max-h-[70vh] min-h-[240px] w-full bg-white object-contain dark:bg-dark-950 sm:min-h-[360px]"
               :data-testid="`image-result-preview-${index}`"
             />
           </button>

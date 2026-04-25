@@ -1297,6 +1297,7 @@ export default {
         customSizeMaxEdge: 'Custom size cannot exceed 3840px on either edge.',
         customSizeAspectRatio: 'Custom size aspect ratio cannot exceed 3:1.',
         customSizePixelRange: 'Custom size pixel count must stay between 655360 and 8294400.',
+        transparentFormatAdjusted: 'Transparent background does not support JPEG, so the output format was changed to PNG.',
         quality: 'Quality',
         background: 'Background',
         outputFormat: 'Output format',

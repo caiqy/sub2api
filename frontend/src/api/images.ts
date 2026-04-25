@@ -17,7 +17,8 @@ const IMAGE_GATEWAY_TIMEOUT_MS = 180000
 
 const imageGatewayClient = axios.create({
   timeout: IMAGE_GATEWAY_TIMEOUT_MS,
-  withCredentials: apiClient.defaults.withCredentials,
+  // Keep image gateway requests aligned with the shared API client's cookie/credential policy.
+  withCredentials: apiClient.defaults?.withCredentials ?? false,
 })
 
 function buildGatewayImageURL(endpoint: '/v1/images/generations' | '/v1/images/edits'): string {
