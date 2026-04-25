@@ -21,10 +21,10 @@
         <div class="relative">
           <button
             class="block w-full overflow-hidden bg-white transition hover:opacity-95 focus:outline-none focus:ring-2 focus:ring-primary-400 dark:bg-dark-950"
-            :aria-label="t('images.results.openPreview')"
+            :aria-label="buildIndexedActionLabel('images.results.openPreview', index)"
             :data-testid="`image-result-open-${index}`"
             type="button"
-            @click="openPreview(result)"
+            @click="openPreview(result, index, $event)"
           >
             <img
               :src="result.src"
@@ -37,15 +37,15 @@
           <div class="absolute right-3 top-3 flex gap-2">
             <button
               class="rounded-full bg-black/65 px-3 py-1.5 text-xs font-medium text-white shadow-sm backdrop-blur transition hover:bg-black/80"
-              :aria-label="t('images.results.openPreview')"
+              :aria-label="buildIndexedActionLabel('images.results.openPreview', index)"
               type="button"
-              @click="openPreview(result)"
+              @click="openPreview(result, index, $event)"
             >
               {{ t('images.results.openPreview') }}
             </button>
             <a
               class="rounded-full bg-black/65 px-3 py-1.5 text-xs font-medium text-white shadow-sm backdrop-blur transition hover:bg-black/80"
-              :aria-label="t('images.results.download')"
+              :aria-label="buildIndexedActionLabel('images.results.download', index)"
               :data-testid="`image-result-download-${index}`"
               :download="buildDownloadFilename(result, index)"
               :href="result.src"
@@ -65,40 +65,50 @@
 
     <div
       v-if="selectedPreview"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6 backdrop-blur-sm"
+      class="fixed inset-0 z-50 flex min-h-screen items-center justify-center bg-black/95 p-4 backdrop-blur-sm sm:p-6"
+      :aria-label="t('images.results.previewTitle')"
+      aria-modal="true"
       data-testid="image-result-preview-modal"
       role="dialog"
+      @keydown="handleModalKeydown"
       @click.self="closePreview"
     >
-      <div class="relative w-full max-w-5xl overflow-hidden rounded-3xl border border-white/10 bg-slate-950 shadow-2xl">
-        <div class="flex items-center justify-between border-b border-white/10 px-5 py-4 text-white">
-          <h4 class="text-sm font-semibold uppercase tracking-[0.18em]">{{ t('images.results.previewTitle') }}</h4>
-          <button
-            class="rounded-full border border-white/15 px-3 py-1.5 text-xs font-medium text-white transition hover:border-white/30 hover:bg-white/10"
-            :aria-label="t('images.results.closePreview')"
-            data-testid="image-result-preview-close"
-            type="button"
-            @click="closePreview"
-          >
-            {{ t('images.results.closePreview') }}
-          </button>
-        </div>
-
-        <div class="flex max-h-[80vh] items-center justify-center bg-black px-4 py-4">
-          <img
-            :src="selectedPreview.src"
-            :alt="t('images.results.previewTitle')"
-            class="max-h-[72vh] w-auto max-w-full object-contain"
-            data-testid="image-result-preview-modal-image"
-          />
-        </div>
+      <div class="absolute right-4 top-4 z-10 flex items-center gap-2 sm:right-6 sm:top-6">
+        <a
+          ref="previewDownloadRef"
+          class="rounded-full border border-white/15 bg-white/10 px-4 py-2 text-sm font-medium text-white shadow-lg backdrop-blur transition hover:border-white/30 hover:bg-white/20"
+          :aria-label="buildIndexedActionLabel('images.results.download', selectedPreview.index)"
+          data-testid="image-result-preview-modal-download"
+          :download="buildDownloadFilename(selectedPreview.result, selectedPreview.index)"
+          :href="selectedPreview.result.src"
+          @click.stop
+        >
+          {{ t('images.results.download') }}
+        </a>
+        <button
+          ref="previewCloseButtonRef"
+          class="rounded-full border border-white/15 bg-white/10 px-4 py-2 text-sm font-medium text-white shadow-lg backdrop-blur transition hover:border-white/30 hover:bg-white/20"
+          :aria-label="t('images.results.closePreview')"
+          data-testid="image-result-preview-close"
+          type="button"
+          @click="closePreview"
+        >
+          {{ t('images.results.closePreview') }}
+        </button>
       </div>
+
+      <img
+        :src="selectedPreview.result.src"
+        :alt="t('images.results.previewTitle')"
+        class="max-h-[calc(100vh-6rem)] max-w-[calc(100vw-2rem)] object-contain shadow-2xl sm:max-w-[calc(100vw-3rem)]"
+        data-testid="image-result-preview-modal-image"
+      />
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import type { ImageResultPreview } from '@/composables/useImageGeneration'
@@ -111,7 +121,11 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
-const selectedPreview = ref<ImageResultPreview | null>(null)
+const selectedPreview = ref<{ result: ImageResultPreview, index: number } | null>(null)
+const previewCloseButtonRef = ref<HTMLButtonElement | null>(null)
+const previewDownloadRef = ref<HTMLAnchorElement | null>(null)
+const lastPreviewTrigger = ref<HTMLElement | null>(null)
+let hasPreviewKeydownListener = false
 
 const displayResults = computed(() => props.results.flatMap((result) => {
   if (result.source !== 'url') {
@@ -129,13 +143,76 @@ const displayResults = computed(() => props.results.flatMap((result) => {
   }]
 }))
 
-function openPreview(result: ImageResultPreview) {
-  selectedPreview.value = result
+function buildIndexedActionLabel(labelKey: string, index: number): string {
+  return `${t(labelKey)} ${index + 1}`
 }
 
-function closePreview() {
-  selectedPreview.value = null
+async function openPreview(result: ImageResultPreview, index: number, event?: MouseEvent) {
+  lastPreviewTrigger.value = event?.currentTarget instanceof HTMLElement ? event.currentTarget : null
+  selectedPreview.value = { result, index }
+  await nextTick()
+  previewCloseButtonRef.value?.focus()
 }
+
+async function closePreview() {
+  const returnFocusTarget = lastPreviewTrigger.value
+  selectedPreview.value = null
+  await nextTick()
+  if (returnFocusTarget?.isConnected) {
+    returnFocusTarget.focus()
+  }
+}
+
+function handlePreviewKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && selectedPreview.value) {
+    closePreview()
+  }
+}
+
+function syncPreviewKeydownListener(shouldListen: boolean) {
+  if (shouldListen && !hasPreviewKeydownListener) {
+    window.addEventListener('keydown', handlePreviewKeydown)
+    hasPreviewKeydownListener = true
+    return
+  }
+
+  if (!shouldListen && hasPreviewKeydownListener) {
+    window.removeEventListener('keydown', handlePreviewKeydown)
+    hasPreviewKeydownListener = false
+  }
+}
+
+function handleModalKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Tab') {
+    return
+  }
+
+  const focusableControls = [previewDownloadRef.value, previewCloseButtonRef.value].filter(
+    (element): element is HTMLAnchorElement | HTMLButtonElement => element !== null
+  )
+
+  if (focusableControls.length === 0) {
+    return
+  }
+
+  event.preventDefault()
+
+  const activeElement = document.activeElement as HTMLElement | null
+  const currentIndex = focusableControls.findIndex((element) => element === activeElement)
+  const nextIndex = event.shiftKey
+    ? (currentIndex <= 0 ? focusableControls.length - 1 : currentIndex - 1)
+    : (currentIndex + 1) % focusableControls.length
+
+  focusableControls[nextIndex]?.focus()
+}
+
+watch(selectedPreview, (preview) => {
+  syncPreviewKeydownListener(preview !== null)
+})
+
+onBeforeUnmount(() => {
+  syncPreviewKeydownListener(false)
+})
 
 function buildDownloadFilename(result: ImageResultPreview, index: number): string {
   if (result.source === 'data-url') {

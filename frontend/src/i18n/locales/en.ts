@@ -1262,11 +1262,6 @@ export default {
       loadFailed: 'Failed to load API keys.',
       retry: 'Retry'
     },
-    summary: {
-      selectedTab: 'Selected tab',
-      selectedKey: 'Selected key',
-      placeholder: 'Results update after each submission.'
-    },
     panels: {
       generate: {
         title: 'Generate',

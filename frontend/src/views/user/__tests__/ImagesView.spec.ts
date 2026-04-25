@@ -1,5 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import ImagesView from '../ImagesView.vue'
 
@@ -27,9 +27,6 @@ const messages: Record<string, string> = {
   'images.keySelector.pageHint': 'Selection uses the first API key from the current page only.',
   'images.keySelector.loadFailed': 'Failed to load API keys.',
   'images.keySelector.retry': 'Retry',
-  'images.summary.selectedTab': 'Selected tab',
-  'images.summary.selectedKey': 'Selected key',
-  'images.summary.placeholder': 'Results update after each submission.',
   'images.panels.generate.title': 'Generate',
   'images.panels.generate.description': 'Create a fresh image from a prompt and standard gateway parameters.',
   'images.panels.edit.title': 'Edit',
@@ -293,6 +290,11 @@ describe('ImagesView', () => {
     vi.spyOn(console, 'error').mockImplementation(errorSpy)
   })
 
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
   it('renders generate, edit, and history tabs', async () => {
     const wrapper = mount(ImagesView, {
       global: {
@@ -321,6 +323,156 @@ describe('ImagesView', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-testid="images-view"]').classes().join(' ')).toContain('max-w-[1600px]')
+  })
+
+  it('renders tabs and api key selector in the workbench toolbar', async () => {
+    list.mockResolvedValue({ items: [primaryApiKey, secondaryApiKey] })
+
+    const wrapper = mount(ImagesView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' }
+        }
+      }
+    })
+
+    await flushPromises()
+
+    const toolbar = wrapper.get('[data-testid="images-workbench-toolbar"]')
+    const toolbarLayout = toolbar.get('.flex.flex-col.gap-3')
+    expect(toolbar.get('[role="tablist"]').exists()).toBe(true)
+    expect(toolbarLayout.classes()).toContain('flex-col')
+    expect(toolbarLayout.classes()).toContain('lg:flex-row')
+    expect(toolbar.get('[data-testid="images-tab-generate"]').text()).toBe('Generate')
+    expect(toolbar.get('[data-testid="images-tab-edit"]').text()).toBe('Edit')
+    expect(toolbar.get('[data-testid="images-tab-history"]').text()).toBe('History')
+    expect(toolbar.text()).toContain('API Key')
+    expect(toolbar.text()).toContain('Vision Key A')
+  })
+
+  it('associates tabs with the active tabpanel using ARIA relationships', async () => {
+    const wrapper = mount(ImagesView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' }
+        }
+      }
+    })
+
+    await flushPromises()
+
+    const generateTab = wrapper.get('[data-testid="images-tab-generate"]')
+    const editTab = wrapper.get('[data-testid="images-tab-edit"]')
+    const historyTab = wrapper.get('[data-testid="images-tab-history"]')
+    const generatePanelId = generateTab.attributes('aria-controls')
+    const editPanelId = editTab.attributes('aria-controls')
+    const historyPanelId = historyTab.attributes('aria-controls')
+    const generatePanel = wrapper.find(`#${generatePanelId}`)
+    const editPanel = wrapper.find(`#${editPanelId}`)
+    const historyPanel = wrapper.find(`#${historyPanelId}`)
+
+    expect(generateTab.attributes('id')).toBe('images-tab-generate')
+    expect(generateTab.attributes('aria-controls')).toBe('images-tabpanel-generate')
+    expect(editTab.attributes('aria-controls')).toBe('images-tabpanel-edit')
+    expect(historyTab.attributes('aria-controls')).toBe('images-tabpanel-history')
+
+    expect(generatePanelId).toBeTruthy()
+    expect(editPanelId).toBeTruthy()
+    expect(historyPanelId).toBeTruthy()
+    expect(generatePanel.exists()).toBe(true)
+    expect(editPanel.exists()).toBe(true)
+    expect(historyPanel.exists()).toBe(true)
+
+    expect(generatePanel.attributes('id')).toBe('images-tabpanel-generate')
+    expect(generatePanel.attributes('role')).toBe('tabpanel')
+    expect(generatePanel.attributes('aria-labelledby')).toBe('images-tab-generate')
+    expect(generatePanel.attributes('hidden')).toBeUndefined()
+
+    expect(editPanel.attributes('role')).toBe('tabpanel')
+    expect(editPanel.attributes('aria-labelledby')).toBe('images-tab-edit')
+    expect(editPanel.attributes('hidden')).toBeDefined()
+
+    expect(historyPanel.attributes('role')).toBe('tabpanel')
+    expect(historyPanel.attributes('aria-labelledby')).toBe('images-tab-history')
+    expect(historyPanel.attributes('hidden')).toBeDefined()
+  })
+
+  it('supports arrow and home end keyboard navigation between tabs', async () => {
+    const wrapper = mount(ImagesView, {
+      attachTo: document.body,
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' }
+        }
+      }
+    })
+
+    await flushPromises()
+
+    const generateTab = wrapper.get('[data-testid="images-tab-generate"]')
+    generateTab.element.focus()
+
+    expect(document.activeElement).toBe(generateTab.element)
+
+    await generateTab.trigger('keydown', { key: 'ArrowRight' })
+    await flushPromises()
+
+    const editTab = wrapper.get('[data-testid="images-tab-edit"]')
+    expect(editTab.attributes('aria-selected')).toBe('true')
+    expect(document.activeElement).toBe(editTab.element)
+
+    await editTab.trigger('keydown', { key: 'Home' })
+    await flushPromises()
+
+    const firstTab = wrapper.get('[data-testid="images-tab-generate"]')
+    expect(firstTab.attributes('aria-selected')).toBe('true')
+    expect(document.activeElement).toBe(firstTab.element)
+
+    await firstTab.trigger('keydown', { key: 'End' })
+    await flushPromises()
+
+    const lastTab = wrapper.get('[data-testid="images-tab-history"]')
+    expect(lastTab.attributes('aria-selected')).toBe('true')
+    expect(document.activeElement).toBe(lastTab.element)
+
+    await lastTab.trigger('keydown', { key: 'ArrowLeft' })
+    await flushPromises()
+
+    expect(editTab.attributes('aria-selected')).toBe('true')
+    expect(document.activeElement).toBe(editTab.element)
+
+    wrapper.unmount()
+  })
+
+  it('does not render the current information summary in generate and edit panels', async () => {
+    list.mockResolvedValue({ items: [primaryApiKey, secondaryApiKey] })
+
+    const wrapper = mount(ImagesView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' }
+        }
+      }
+    })
+
+    await flushPromises()
+
+    const generatePanel = wrapper.get('[data-testid="images-panel-generate"]')
+    generatePanel.get('[data-testid="image-result-panel"]')
+    expect(generatePanel.find('[data-testid="images-current-info"]').exists()).toBe(false)
+    expect(generatePanel.text()).not.toContain('images.summary.selectedTab')
+    expect(generatePanel.text()).not.toContain('images.summary.selectedKey')
+    expect(generatePanel.text()).not.toContain('images.summary.placeholder')
+
+    await wrapper.get('[data-testid="images-tab-edit"]').trigger('click')
+    await flushPromises()
+
+    const editPanel = wrapper.get('[data-testid="images-panel-edit"]')
+    editPanel.get('[data-testid="image-result-panel"]')
+    expect(editPanel.find('[data-testid="images-current-info"]').exists()).toBe(false)
+    expect(editPanel.text()).not.toContain('images.summary.selectedTab')
+    expect(editPanel.text()).not.toContain('images.summary.selectedKey')
+    expect(editPanel.text()).not.toContain('images.summary.placeholder')
   })
 
   it('does not restore replay n into generated form values', async () => {
@@ -454,7 +606,7 @@ describe('ImagesView', () => {
 
     await flushPromises()
 
-    const select = wrapper.get('select')
+    const select = wrapper.get('[data-testid="image-api-key-selector"]')
     expect((select.element as HTMLSelectElement).value).toBe('7')
     expect(wrapper.text()).toContain('Vision Key A')
     expect(wrapper.text()).toContain('Selection uses the first API key from the current page only.')
@@ -575,6 +727,58 @@ describe('ImagesView', () => {
     expect((wrapper.get('#image-generate-model').element as HTMLSelectElement).value).toBe('gpt-image-2')
     expect((wrapper.get('#image-generate-size').element as HTMLSelectElement).value).toBe('1536x1024')
     expect((wrapper.get('#image-generate-output-format').element as HTMLSelectElement).value).toBe('webp')
+  })
+
+  it('moves focus to the replayed tab after replaying history details', async () => {
+    listHistory.mockResolvedValue({ items: historyListItems, total: 2, page: 1, page_size: 20, pages: 1 })
+    getHistoryDetail
+      .mockResolvedValueOnce(generateHistoryDetail)
+      .mockResolvedValueOnce(editHistoryDetail)
+
+    const wrapper = mount(ImagesView, {
+      attachTo: document.body,
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' }
+        }
+      }
+    })
+
+    await flushPromises()
+    await wrapper.get('[data-testid="images-tab-history"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-testid="image-history-list-item-31"]').trigger('click')
+    await flushPromises()
+
+    const generateReplayButton = wrapper.get('[data-testid="image-history-replay"]')
+    generateReplayButton.element.focus()
+    expect(document.activeElement).toBe(generateReplayButton.element)
+
+    await generateReplayButton.trigger('click')
+    await flushPromises()
+
+    const generateTab = wrapper.get('[data-testid="images-tab-generate"]')
+    expect(generateTab.attributes('aria-selected')).toBe('true')
+    expect(document.activeElement).toBe(generateTab.element)
+
+    await wrapper.get('[data-testid="images-tab-history"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="image-history-list-item-32"]').trigger('click')
+    await flushPromises()
+
+    const editReplayButton = wrapper.get('[data-testid="image-history-replay"]')
+    editReplayButton.element.focus()
+    expect(document.activeElement).toBe(editReplayButton.element)
+
+    await editReplayButton.trigger('click')
+    await flushPromises()
+
+    const editTab = wrapper.get('[data-testid="images-tab-edit"]')
+    expect(editTab.attributes('aria-selected')).toBe('true')
+    expect(document.activeElement).toBe(editTab.element)
+
+    wrapper.unmount()
   })
 
   it('replays edit history parameters back into the edit form and shows the upload reminder', async () => {
@@ -1271,5 +1475,7 @@ describe('ImagesView', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-testid="image-generate-submit"]').text()).toContain('Generating... 2s')
+
+    wrapper.unmount()
   })
 })

@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { getCurrentScope, onScopeDispose, ref } from 'vue'
 
 import { imagesAPI } from '@/api'
 import type { ImageGatewayDataItem, ImageGatewayResponse, ImageGenerationRequest } from '@/types'
@@ -108,6 +108,10 @@ export function useImageGeneration() {
     }
 
     loadingSeconds.value = 0
+  }
+
+  if (getCurrentScope()) {
+    onScopeDispose(stopLoadingTimer)
   }
 
   async function submitGenerate(payload: ImageGenerationRequest, selectedApiKey: string) {

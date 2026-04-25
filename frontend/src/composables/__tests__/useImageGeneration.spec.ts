@@ -1,3 +1,4 @@
+import { effectScope } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useImageGeneration } from '@/composables/useImageGeneration'
@@ -89,5 +90,35 @@ describe('useImageGeneration', () => {
     await pendingRequest
 
     expect(loadingSeconds.value).toBe(0)
+  })
+
+  it('stops and resets the loading timer when the owning effect scope is disposed before generate resolves', async () => {
+    vi.useFakeTimers()
+
+    let resolveGenerate: ((value: { created: number; data: Array<{ url: string }> }) => void) | undefined
+    generate.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveGenerate = resolve })
+    )
+
+    const scope = effectScope()
+    const composable = scope.run(() => useImageGeneration())
+
+    expect(composable).toBeTruthy()
+
+    const { loadingSeconds, submitGenerate } = composable!
+    const pendingRequest = submitGenerate({ prompt: 'scope disposal request' }, 'sk-primary')
+
+    await vi.advanceTimersByTimeAsync(2100)
+    expect(loadingSeconds.value).toBe(2)
+
+    scope.stop()
+
+    expect(loadingSeconds.value).toBe(0)
+
+    await vi.advanceTimersByTimeAsync(3100)
+    expect(loadingSeconds.value).toBe(0)
+
+    resolveGenerate?.({ created: 1, data: [{ url: 'https://cdn.example.com/image.png' }] })
+    await pendingRequest
   })
 })

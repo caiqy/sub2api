@@ -1,24 +1,51 @@
 <template>
   <AppLayout>
     <div class="mx-auto max-w-[1600px] space-y-5 px-3 sm:px-4 xl:px-6 2xl:px-8" data-testid="images-view">
-      <section class="card overflow-hidden border border-primary-100 bg-gradient-to-br from-white via-white to-primary-50/70 p-5 dark:border-primary-900/40 dark:from-dark-900 dark:via-dark-900 dark:to-primary-950/20">
-        <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-          <div class="space-y-2">
-            <p class="text-xs font-semibold uppercase tracking-[0.22em] text-primary-600 dark:text-primary-400">
-              {{ t('images.badge') }}
-            </p>
-            <div>
-              <h1 class="text-2xl font-bold text-gray-900 dark:text-white">
-                {{ t('images.title') }}
-              </h1>
-              <p class="mt-2 max-w-2xl text-sm leading-6 text-gray-600 dark:text-gray-300">
-                {{ t('images.description') }}
-              </p>
-            </div>
+      <section class="px-1 py-1 sm:px-0">
+        <p class="text-xs font-semibold uppercase tracking-[0.22em] text-primary-600 dark:text-primary-400">
+          {{ t('images.badge') }}
+        </p>
+        <h1 class="mt-2 text-2xl font-bold text-gray-900 dark:text-white">
+          {{ t('images.title') }}
+        </h1>
+        <p class="mt-1 max-w-3xl text-sm leading-6 text-gray-600 dark:text-gray-300">
+          {{ t('images.description') }}
+        </p>
+      </section>
+
+      <section
+        class="card border border-gray-200/80 bg-white/90 p-3 shadow-sm backdrop-blur dark:border-dark-700 dark:bg-dark-800/90"
+        data-testid="images-workbench-toolbar"
+      >
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div class="flex flex-wrap gap-2" role="tablist" :aria-label="t('images.tabs.ariaLabel')">
+            <button
+              v-for="tab in tabs"
+              :key="tab.key"
+              :id="getTabId(tab.key)"
+              :aria-selected="activeTab === tab.key"
+              :aria-controls="getTabPanelId(tab.key)"
+              :class="[
+                'rounded-xl px-4 py-2.5 text-sm font-medium transition-all',
+                activeTab === tab.key
+                  ? 'bg-primary-600 text-white shadow-sm dark:bg-primary-500'
+                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-dark-700 dark:hover:text-white'
+              ]"
+              :data-testid="`images-tab-${tab.key}`"
+              :ref="(element) => setTabButtonRef(tab.key, element)"
+              :tabindex="activeTab === tab.key ? 0 : -1"
+              role="tab"
+              type="button"
+              @click="selectTab(tab.key)"
+              @keydown="handleTabKeydown($event, tab.key)"
+            >
+              {{ t(tab.labelKey) }}
+            </button>
           </div>
 
           <ImageApiKeySelector
             v-model="selectedApiKeyId"
+            class="lg:min-w-[320px]"
             :api-keys="apiKeys"
             :disabled="apiKeyLoadState !== 'success' || apiKeys.length === 0"
             :label="t('images.keySelector.label')"
@@ -32,40 +59,27 @@
         </div>
       </section>
 
-      <section class="card p-2">
-        <div class="flex flex-wrap gap-2" role="tablist" :aria-label="t('images.tabs.ariaLabel')">
-          <button
-            v-for="tab in tabs"
-            :key="tab.key"
-            :aria-selected="activeTab === tab.key"
-            :class="[
-              'rounded-xl px-4 py-2.5 text-sm font-medium transition-all',
-              activeTab === tab.key
-                ? 'bg-primary-600 text-white shadow-sm dark:bg-primary-500'
-                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-dark-700 dark:hover:text-white'
-            ]"
-            :data-testid="`images-tab-${tab.key}`"
-            role="tab"
-            type="button"
-            @click="activeTab = tab.key"
-          >
-            {{ t(tab.labelKey) }}
-          </button>
-        </div>
-      </section>
-
-      <section class="card p-6" :data-testid="`images-panel-${activePanel.key}`">
-        <div class="space-y-6">
+      <section
+        v-for="tab in tabs"
+        :key="tab.key"
+        class="card p-6"
+        :id="getTabPanelId(tab.key)"
+        :aria-labelledby="getTabId(tab.key)"
+        :data-testid="`images-panel-${tab.key}`"
+        :hidden="tab.key !== activePanel.key"
+        role="tabpanel"
+      >
+        <div v-if="tab.key === activePanel.key" class="space-y-6">
           <div class="space-y-2">
             <h2 class="text-xl font-semibold text-gray-900 dark:text-white">
-              {{ t(activePanel.panelTitleKey) }}
+              {{ t(tab.panelTitleKey) }}
             </h2>
             <p class="max-w-2xl text-sm leading-6 text-gray-600 dark:text-gray-300">
-              {{ t(activePanel.panelDescriptionKey) }}
+              {{ t(tab.panelDescriptionKey) }}
             </p>
           </div>
 
-          <div v-if="activeTab === 'history'" class="grid gap-6 xl:grid-cols-[minmax(320px,0.9fr)_minmax(0,1.1fr)]">
+          <div v-if="tab.key === 'history'" class="grid gap-6 xl:grid-cols-[minmax(320px,0.9fr)_minmax(0,1.1fr)]">
             <ImageHistoryList
               :error="historyListError"
               :items="historyItems"
@@ -86,7 +100,7 @@
           <div v-else class="grid gap-6 xl:grid-cols-[minmax(390px,0.85fr)_minmax(0,1.15fr)] 2xl:grid-cols-[minmax(420px,0.78fr)_minmax(0,1.22fr)]">
             <div class="rounded-3xl border border-gray-200 bg-white p-5 shadow-sm dark:border-dark-700 dark:bg-dark-800 xl:self-start">
               <p
-                v-if="activeTab === 'edit' && editReplayNotice"
+                v-if="tab.key === 'edit' && editReplayNotice"
                 class="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-900/10 dark:text-amber-300"
                 data-testid="image-edit-replay-notice"
               >
@@ -94,7 +108,7 @@
               </p>
 
               <ImageGenerateForm
-                v-if="activeTab === 'generate'"
+                v-if="tab.key === 'generate'"
                 :key="`generate-${generateFormKey}`"
                 :disabled="!canSubmitWithApiKey"
                 :initial-values="generateReplayValues"
@@ -113,24 +127,7 @@
               />
             </div>
 
-            <div class="space-y-6">
-              <div class="grid gap-3 rounded-2xl border border-dashed border-gray-300 bg-gray-50/80 p-4 text-sm text-gray-500 dark:border-dark-600 dark:bg-dark-900/60 dark:text-gray-400">
-                <div class="flex items-center justify-between">
-                  <span>{{ t('images.summary.selectedTab') }}</span>
-                  <span class="font-medium text-gray-900 dark:text-white">{{ t(activePanel.labelKey) }}</span>
-                </div>
-                <div class="flex items-center justify-between">
-                  <span>{{ t('images.summary.selectedKey') }}</span>
-                  <span class="font-medium text-gray-900 dark:text-white">{{ selectedApiKeyLabel }}</span>
-                </div>
-                <div class="h-px bg-gray-200 dark:bg-dark-700"></div>
-                <p>
-                  {{ t('images.summary.placeholder') }}
-                </p>
-              </div>
-
-              <ImageResultPanel :error="error" :loading="isLoading" :results="results" />
-            </div>
+            <ImageResultPanel :error="error" :loading="isLoading" :results="results" />
           </div>
         </div>
       </section>
@@ -139,7 +136,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch, type ComponentPublicInstance } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { keysAPI } from '@/api'
@@ -210,6 +207,11 @@ const editFormKey = ref(0)
 const generateReplayValues = ref<Partial<ImageCommonFormValues>>({})
 const editReplayValues = ref<Partial<ImageCommonFormValues>>({})
 const editReplayNotice = ref('')
+const tabButtonRefs = ref<Record<ImagesTabKey, HTMLButtonElement | null>>({
+  generate: null,
+  edit: null,
+  history: null
+})
 
 const activePanel = computed(() => tabs.find((tab) => tab.key === activeTab.value) ?? tabs[0])
 const canSubmitWithApiKey = computed(() => apiKeyLoadState.value === 'success' && selectedApiKeyId.value.trim().length > 0)
@@ -243,22 +245,6 @@ const keyStatusMessage = computed(() => {
   }
 
   return t('images.keySelector.count', { count: apiKeys.value.length })
-})
-
-const selectedApiKeyLabel = computed(() => {
-  if (apiKeyLoadState.value === 'loading') {
-    return t('images.keySelector.loading')
-  }
-
-  if (apiKeyLoadState.value === 'error') {
-    return t('images.keySelector.loadFailed')
-  }
-
-  if (!selectedApiKeyId.value) {
-    return t('images.keySelector.placeholder')
-  }
-
-  return apiKeys.value.find((key) => String(key.id) === selectedApiKeyId.value)?.name ?? t('images.keySelector.placeholder')
 })
 
 async function loadApiKeys() {
@@ -320,6 +306,57 @@ async function handleHistorySelect(id: number) {
   await selectHistory(id)
 }
 
+function getTabId(tabKey: ImagesTabKey): string {
+  return `images-tab-${tabKey}`
+}
+
+function getTabPanelId(tabKey: ImagesTabKey): string {
+  return `images-tabpanel-${tabKey}`
+}
+
+function setTabButtonRef(tabKey: ImagesTabKey, element: Element | ComponentPublicInstance | null) {
+  tabButtonRefs.value[tabKey] = element instanceof HTMLButtonElement ? element : null
+}
+
+async function focusTab(tabKey: ImagesTabKey) {
+  await nextTick()
+  tabButtonRefs.value[tabKey]?.focus()
+}
+
+async function selectTab(tabKey: ImagesTabKey) {
+  activeTab.value = tabKey
+  await focusTab(tabKey)
+}
+
+async function handleTabKeydown(event: KeyboardEvent, tabKey: ImagesTabKey) {
+  const currentIndex = tabs.findIndex((tab) => tab.key === tabKey)
+  if (currentIndex === -1) {
+    return
+  }
+
+  let targetIndex: number | null = null
+
+  switch (event.key) {
+    case 'ArrowLeft':
+      targetIndex = (currentIndex - 1 + tabs.length) % tabs.length
+      break
+    case 'ArrowRight':
+      targetIndex = (currentIndex + 1) % tabs.length
+      break
+    case 'Home':
+      targetIndex = 0
+      break
+    case 'End':
+      targetIndex = tabs.length - 1
+      break
+    default:
+      return
+  }
+
+  event.preventDefault()
+  await selectTab(tabs[targetIndex].key)
+}
+
 function toReplayValues(detail: ImageHistoryDetailType): Partial<ImageCommonFormValues> {
   const replayValues: Partial<ImageCommonFormValues> = {}
 
@@ -361,20 +398,20 @@ function clearEditReplayState() {
   }
 }
 
-function handleHistoryReplay(detail: ImageHistoryDetailType) {
+async function handleHistoryReplay(detail: ImageHistoryDetailType) {
   if (detail.replay.mode === 'edit') {
     clearGenerateReplayState()
     editReplayValues.value = toReplayValues(detail)
     editFormKey.value += 1
     editReplayNotice.value = t('images.history.replayEditNotice')
-    activeTab.value = 'edit'
+    await selectTab('edit')
     return
   }
 
   clearEditReplayState()
   generateReplayValues.value = toReplayValues(detail)
   generateFormKey.value += 1
-  activeTab.value = 'generate'
+  await selectTab('generate')
 }
 
 watch(activeTab, async (tab, previousTab) => {

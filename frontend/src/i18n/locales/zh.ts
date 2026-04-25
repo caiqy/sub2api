@@ -1266,11 +1266,6 @@ export default {
       loadFailed: 'API 密钥加载失败，请重试。',
       retry: '重新加载'
     },
-    summary: {
-      selectedTab: '当前标签',
-      selectedKey: '当前密钥',
-      placeholder: '每次提交后的最新结果会展示在右侧结果区。'
-    },
     panels: {
       generate: {
         title: '生成',
