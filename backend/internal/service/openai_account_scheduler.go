@@ -92,6 +92,29 @@ type openAIAccountSchedulerMetrics struct {
 	loadSkewMilliTotal     atomic.Int64
 }
 
+func schedulerGroupForRequest(ctx context.Context, service *OpenAIGatewayService, groupID *int64) *Group {
+	if service == nil || groupID == nil || service.schedulerSnapshot == nil {
+		return nil
+	}
+	group, _ := service.schedulerSnapshot.GetGroupByID(ctx, *groupID)
+	return group
+}
+
+func accountSatisfiesPrivacyRequirement(account *Account, group *Group) bool {
+	if group == nil || !group.RequirePrivacySet {
+		return true
+	}
+	return account != nil && account.IsPrivacySet()
+}
+
+func recordPrivacyRequirementError(ctx context.Context, service *OpenAIGatewayService, account *Account, group *Group) {
+	if service == nil || service.accountRepo == nil || account == nil || group == nil || !group.RequirePrivacySet {
+		return
+	}
+	_ = service.accountRepo.SetError(ctx, account.ID,
+		fmt.Sprintf("Privacy not set, required by group [%s]", group.Name))
+}
+
 func (m *openAIAccountSchedulerMetrics) recordSelect(decision OpenAIAccountScheduleDecision) {
 	if m == nil {
 		return
@@ -263,6 +286,7 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	req OpenAIAccountScheduleRequest,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
 	decision := OpenAIAccountScheduleDecision{}
+	schedGroup := schedulerGroupForRequest(ctx, s.service, req.GroupID)
 	start := time.Now()
 	defer func() {
 		decision.LatencyMs = time.Since(start).Milliseconds()
@@ -285,6 +309,15 @@ func (s *defaultOpenAIAccountScheduler) Select(
 			}
 			if selection != nil && selection.Account != nil {
 				if !s.isAccountTransportCompatible(selection.Account, req.RequiredTransport) {
+					if selection.ReleaseFunc != nil {
+						selection.ReleaseFunc()
+					}
+					selection = nil
+				}
+			}
+			if selection != nil && selection.Account != nil {
+				if !s.isAccountRequestCompatible(selection.Account, req) || !accountSatisfiesPrivacyRequirement(selection.Account, schedGroup) {
+					recordPrivacyRequirementError(ctx, s.service, selection.Account, schedGroup)
 					if selection.ReleaseFunc != nil {
 						selection.ReleaseFunc()
 					}
@@ -336,6 +369,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	req OpenAIAccountScheduleRequest,
 ) (*AccountSelectionResult, error) {
 	sessionHash := strings.TrimSpace(req.SessionHash)
+	schedGroup := schedulerGroupForRequest(ctx, s.service, req.GroupID)
 	if sessionHash == "" || s == nil || s.service == nil || s.service.cache == nil {
 		return nil, nil
 	}
@@ -374,7 +408,8 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		return nil, nil
 	}
 	account = s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.RequestedModel, req.RequireCompact)
-	if account == nil || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
+	if account == nil || !s.isAccountRequestCompatible(account, req) || !accountSatisfiesPrivacyRequirement(account, schedGroup) || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
+		recordPrivacyRequirementError(ctx, s.service, account, schedGroup)
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		return nil, nil
 	}
@@ -969,10 +1004,20 @@ func (s *OpenAIGatewayService) StopOpenAIAccountScheduler() {
 	if s == nil {
 		return
 	}
+	s.openaiSchedulerMu.Lock()
+	defer s.openaiSchedulerMu.Unlock()
+	s.stopOpenAIAccountSchedulerLocked()
+}
+
+func (s *OpenAIGatewayService) stopOpenAIAccountSchedulerLocked() {
+	if s == nil {
+		return
+	}
 	if s.schedulerSnapshot != nil {
 		s.schedulerSnapshot.SetOpenAIAccountChangeHandler(nil)
 	}
 	if s.openaiScheduler == nil {
+		s.openaiSchedulerOnce = sync.Once{}
 		return
 	}
 	type stoppable interface {
@@ -981,6 +1026,8 @@ func (s *OpenAIGatewayService) StopOpenAIAccountScheduler() {
 	if st, ok := s.openaiScheduler.(stoppable); ok {
 		st.Stop()
 	}
+	s.openaiScheduler = nil
+	s.openaiSchedulerOnce = sync.Once{}
 }
 
 func (s *OpenAIGatewayService) openAIAdvancedSchedulerSettingRepo() SettingRepository {
@@ -1046,24 +1093,34 @@ func (s *OpenAIGatewayService) getOpenAIAccountSchedulerWithContext(ctx context.
 	if s == nil {
 		return nil
 	}
-	if !s.isOpenAIAdvancedSchedulerEnabled(ctx) {
+	enabled := s.isOpenAIAdvancedSchedulerEnabled(ctx)
+	s.openaiSchedulerMu.Lock()
+	defer s.openaiSchedulerMu.Unlock()
+	if !enabled {
+		s.stopOpenAIAccountSchedulerLocked()
 		return nil
+	}
+	desiredMode := "weighted"
+	if s.cfg != nil && strings.EqualFold(strings.TrimSpace(s.cfg.Gateway.OpenAIWS.SchedulerMode), "layered") {
+		desiredMode = "layered"
+	}
+	if s.openaiScheduler != nil {
+		_, isLayered := s.openaiScheduler.(*layeredOpenAIAccountScheduler)
+		if (desiredMode == "layered") != isLayered {
+			s.stopOpenAIAccountSchedulerLocked()
+		}
 	}
 	s.openaiSchedulerOnce.Do(func() {
 		if s.openaiAccountStats == nil {
 			s.openaiAccountStats = newOpenAIAccountRuntimeStats()
 		}
 		if s.openaiScheduler == nil {
-			mode := ""
-			if s.cfg != nil {
-				mode = s.cfg.Gateway.OpenAIWS.SchedulerMode
-			}
-			if mode == "layered" {
+			if desiredMode == "layered" {
 				s.openaiScheduler = newLayeredOpenAIAccountScheduler(s, s.openaiAccountStats)
 			} else {
-				if mode != "" && mode != "weighted" {
+				if s.cfg != nil && s.cfg.Gateway.OpenAIWS.SchedulerMode != "" && !strings.EqualFold(strings.TrimSpace(s.cfg.Gateway.OpenAIWS.SchedulerMode), "weighted") {
 					slog.Warn("openai_scheduler.unknown_mode_fallback_to_weighted",
-						"configured_mode", mode)
+						"configured_mode", s.cfg.Gateway.OpenAIWS.SchedulerMode)
 				}
 				s.openaiScheduler = newDefaultOpenAIAccountScheduler(s, s.openaiAccountStats)
 			}
@@ -1121,6 +1178,13 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	requireCompact bool,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
 	decision := OpenAIAccountScheduleDecision{}
+	if s.checkChannelPricingRestriction(ctx, groupID, requestedModel) {
+		slog.Warn("channel pricing restriction blocked request",
+			"group_id", derefGroupID(groupID),
+			"model", requestedModel)
+		return nil, decision, fmt.Errorf("%w supporting model: %s (channel pricing restriction)", ErrNoAvailableAccounts, requestedModel)
+	}
+	needsUpstreamCheck := s.needsUpstreamChannelRestrictionCheck(ctx, groupID)
 	scheduler := s.getOpenAIAccountSchedulerWithContext(ctx)
 	if scheduler == nil {
 		decision.Layer = openAIAccountScheduleLayerLoadBalance
@@ -1182,17 +1246,46 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 		}
 	}
 
-	return scheduler.Select(ctx, OpenAIAccountScheduleRequest{
-		GroupID:                 groupID,
-		SessionHash:             sessionHash,
-		StickyAccountID:         stickyAccountID,
-		PreviousResponseID:      previousResponseID,
-		RequestedModel:          requestedModel,
-		RequiredTransport:       requiredTransport,
-		RequiredImageCapability: requiredImageCapability,
-		RequireCompact:          requireCompact,
-		ExcludedIDs:             excludedIDs,
-	})
+	effectiveExcludedIDs := cloneExcludedAccountIDs(excludedIDs)
+	for scheduler != nil {
+		selection, nextDecision, err := scheduler.Select(ctx, OpenAIAccountScheduleRequest{
+			GroupID:                 groupID,
+			SessionHash:             sessionHash,
+			StickyAccountID:         stickyAccountID,
+			PreviousResponseID:      previousResponseID,
+			RequestedModel:          requestedModel,
+			RequiredTransport:       requiredTransport,
+			RequiredImageCapability: requiredImageCapability,
+			RequireCompact:          requireCompact,
+			ExcludedIDs:             effectiveExcludedIDs,
+		})
+		decision = nextDecision
+		if err != nil || selection == nil || selection.Account == nil || !needsUpstreamCheck || groupID == nil {
+			return selection, decision, err
+		}
+		if !s.isUpstreamModelRestrictedByChannel(ctx, *groupID, selection.Account, requestedModel, requireCompact) {
+			return selection, decision, nil
+		}
+		if selection.ReleaseFunc != nil {
+			selection.ReleaseFunc()
+		}
+		if sessionHash != "" {
+			_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
+		}
+		if previousResponseID != "" {
+			if store := s.getOpenAIWSStateStore(); store != nil {
+				_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), strings.TrimSpace(previousResponseID))
+			}
+		}
+		if effectiveExcludedIDs == nil {
+			effectiveExcludedIDs = make(map[int64]struct{})
+		}
+		if _, exists := effectiveExcludedIDs[selection.Account.ID]; exists {
+			return nil, decision, ErrNoAvailableAccounts
+		}
+		effectiveExcludedIDs[selection.Account.ID] = struct{}{}
+	}
+	return nil, decision, ErrNoAvailableAccounts
 }
 
 func cloneExcludedAccountIDs(excludedIDs map[int64]struct{}) map[int64]struct{} {

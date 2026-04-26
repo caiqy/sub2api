@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -120,8 +121,9 @@ type SettingService struct {
 	gatewayRuntimeIdleInvalidator gatewayRuntimeIdleInvalidator
 	usageLogDetailPruner          UsageLogDetailPruner
 	cfg                           *config.Config
-	onUpdate                      func() // Callback when settings are updated (for cache invalidation)
-	version                       string // Application version
+	onUpdateMu                    sync.RWMutex
+	onUpdateCallbacks             []func() // Callbacks when settings are updated (for cache invalidation)
+	version                       string   // Application version
 	webSearchManagerBuilder       WebSearchManagerBuilder
 }
 
@@ -848,7 +850,12 @@ func (s *SettingService) GetAvailableChannelsRuntime(ctx context.Context) Availa
 // SetOnUpdateCallback sets a callback function to be called when settings are updated
 // This is used for cache invalidation (e.g., HTML cache in frontend server)
 func (s *SettingService) SetOnUpdateCallback(callback func()) {
-	s.onUpdate = callback
+	if s == nil || callback == nil {
+		return
+	}
+	s.onUpdateMu.Lock()
+	defer s.onUpdateMu.Unlock()
+	s.onUpdateCallbacks = append(s.onUpdateCallbacks, callback)
 }
 
 // SetVersion sets the application version for injection into public settings
@@ -1565,8 +1572,13 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		enabled:   settings.OpenAIAdvancedSchedulerEnabled,
 		expiresAt: time.Now().Add(openAIAdvancedSchedulerSettingCacheTTL).UnixNano(),
 	})
-	if s.onUpdate != nil {
-		s.onUpdate() // Invalidate cache after settings update
+	s.onUpdateMu.RLock()
+	callbacks := append([]func(){}, s.onUpdateCallbacks...)
+	s.onUpdateMu.RUnlock()
+	for _, callback := range callbacks {
+		if callback != nil {
+			callback()
+		}
 	}
 }
 

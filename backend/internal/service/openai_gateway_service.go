@@ -339,6 +339,7 @@ type OpenAIGatewayService struct {
 	openaiWSPoolOnce              sync.Once
 	openaiWSStateStoreOnce        sync.Once
 	openaiSchedulerOnce           sync.Once
+	openaiSchedulerMu             sync.Mutex
 	openaiWSPassthroughDialerOnce sync.Once
 	openaiWSPool                  *openAIWSConnPool
 	openaiWSStateStore            OpenAIWSStateStore
@@ -413,8 +414,27 @@ func NewOpenAIGatewayService(
 		responseHeaderFilter:  compileResponseHeaderFilter(cfg),
 		codexSnapshotThrottle: newAccountWriteThrottle(openAICodexSnapshotPersistMinInterval),
 	}
+	if rateLimitService != nil && rateLimitService.settingService != nil {
+		rateLimitService.settingService.SetOnUpdateCallback(func() {
+			svc.handleOpenAISchedulerSettingsUpdate()
+		})
+	}
 	svc.logOpenAIWSModeBootstrap()
 	return svc
+}
+
+func (s *OpenAIGatewayService) handleOpenAISchedulerSettingsUpdate() {
+	if s == nil {
+		return
+	}
+	enabled := s.isOpenAIAdvancedSchedulerEnabled(context.Background())
+	s.openaiSchedulerMu.Lock()
+	s.stopOpenAIAccountSchedulerLocked()
+	s.openaiSchedulerMu.Unlock()
+	if enabled {
+		_ = s.getOpenAIAccountSchedulerWithContext(context.Background())
+		s.StartOpenAIBackgroundRecovery()
+	}
 }
 
 // ResolveChannelMapping 解析渠道级模型映射（代理到 ChannelService）

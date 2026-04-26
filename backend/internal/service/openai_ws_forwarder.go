@@ -3849,6 +3849,11 @@ func (s *OpenAIGatewayService) SelectAccountByPreviousResponseID(
 		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 		return nil, nil
 	}
+	if schedGroup := schedulerGroupForRequest(ctx, s, groupID); !accountSatisfiesPrivacyRequirement(account, schedGroup) {
+		recordPrivacyRequirementError(ctx, s, account, schedGroup)
+		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
+		return nil, nil
+	}
 	// 兜底：若上游 compact 能力刚被探测为不支持，但 sticky 还在，需要主动放弃。
 	if requireCompact && openAICompactSupportTier(account) == 0 {
 		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
