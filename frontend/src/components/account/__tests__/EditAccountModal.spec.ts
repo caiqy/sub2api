@@ -137,6 +137,32 @@ function findWebSearchSelect(wrapper: ReturnType<typeof mountModal>) {
   return select
 }
 
+const SelectStub = defineComponent({
+  name: 'SelectStub',
+  props: {
+    modelValue: {
+      type: [String, Number, Boolean, null],
+      default: ''
+    },
+    options: {
+      type: Array,
+      default: () => []
+    }
+  },
+  emits: ['update:modelValue'],
+  template: `
+    <select
+      v-bind="$attrs"
+      :value="modelValue"
+      @change="$emit('update:modelValue', $event.target.value)"
+    >
+      <option v-for="option in options" :key="option.value" :value="option.value">
+        {{ option.label }}
+      </option>
+    </select>
+  `
+})
+
 function buildAccount(overrides: Record<string, any> = {}) {
   const { credentials: credentialOverrides, extra: extraOverrides, ...restOverrides } = overrides
   const baseAccount = {
@@ -188,7 +214,7 @@ function mountModal(account = buildAccount()) {
     global: {
       stubs: {
         BaseDialog: BaseDialogStub,
-        Select: true,
+        Select: SelectStub,
         Icon: true,
         ProxySelector: true,
         GroupSelector: true,
@@ -701,5 +727,43 @@ describe('EditAccountModal', () => {
 
     expect(wrapper.find('[data-testid="passthrough-fields-section"]').exists()).toBe(true)
     expect(showInfoMock).not.toHaveBeenCalledWith(expect.stringContaining('移除透传字段规则配置'))
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toEqual(expect.objectContaining({
+      passthrough_fields_enabled: true,
+      passthrough_field_rules: [
+        { target: 'header', mode: 'forward', key: 'X-Test' }
+      ]
+    }))
+  })
+
+  it('submits OpenAI compact mode and compact-only model mapping', async () => {
+    const account = buildAccount({
+      extra: {
+        openai_compact_mode: 'force_on'
+      },
+      credentials: {
+        compact_model_mapping: {
+          'gpt-5.4': 'gpt-5.4-openai-compact'
+        }
+      }
+    })
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_compact_mode).toBe('force_on')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.compact_model_mapping).toEqual({
+      'gpt-5.4': 'gpt-5.4-openai-compact'
+    })
   })
 })

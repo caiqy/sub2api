@@ -52,12 +52,16 @@ func (s *layeredOpenAIAccountScheduler) Select(
 				previousResponseID,
 				req.RequestedModel,
 				req.ExcludedIDs,
+				req.RequireCompact,
 			)
 			if err != nil {
 				return nil, decision, err
 			}
 			if selection != nil && selection.Account != nil {
 				if !s.isAccountTransportCompatible(selection.Account, req.RequiredTransport) {
+					if selection.ReleaseFunc != nil {
+						selection.ReleaseFunc()
+					}
 					selection = nil
 				}
 			}
@@ -141,12 +145,15 @@ func (s *layeredOpenAIAccountScheduler) selectBySessionHash(
 	if req.RequestedModel != "" && !account.IsModelSupported(req.RequestedModel) {
 		return nil, nil
 	}
+	if !account.SupportsOpenAIImageCapability(req.RequiredImageCapability) {
+		return nil, nil
+	}
 	if !s.isAccountTransportCompatible(account, req.RequiredTransport) {
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		return nil, nil
 	}
-	account = s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.RequestedModel)
-	if account == nil {
+	account = s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.RequestedModel, req.RequireCompact)
+	if account == nil || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		return nil, nil
 	}
@@ -291,12 +298,12 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 			break
 		}
 
-		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, selected.account, req.RequestedModel)
+		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, selected.account, req.RequestedModel, req.RequireCompact)
 		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
 			available = removeFromAvailable(available, selected.account.ID)
 			continue
 		}
-		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.RequestedModel)
+		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.RequestedModel, req.RequireCompact)
 		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
 			available = removeFromAvailable(available, selected.account.ID)
 			continue
@@ -323,7 +330,7 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 	cfg := s.service.schedulingConfig()
 	fallbackAccounts := make([]*Account, 0, len(filtered))
 	for _, account := range filtered {
-		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, account, req.RequestedModel)
+		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, account, req.RequestedModel, req.RequireCompact)
 		if fresh != nil && s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
 			fallbackAccounts = append(fallbackAccounts, fresh)
 		}
