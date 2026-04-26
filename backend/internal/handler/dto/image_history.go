@@ -14,9 +14,11 @@ type ImageHistoryListItem struct {
 	Mode         string    `json:"mode"`
 	Status       string    `json:"status"`
 	Model        string    `json:"model"`
+	Prompt       string    `json:"prompt,omitempty"`
 	ImageCount   int       `json:"image_count"`
 	ImageSize    string    `json:"image_size,omitempty"`
 	ActualCost   float64   `json:"actual_cost"`
+	DurationMs   *int      `json:"duration_ms,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 }
 
@@ -58,6 +60,7 @@ type ImageHistoryDetail struct {
 	HadMask        bool                `json:"had_mask"`
 	Images         []ImageHistoryImage `json:"images,omitempty"`
 	ErrorMessage   string              `json:"error_message,omitempty"`
+	DurationMs     *int                `json:"duration_ms,omitempty"`
 	Replay         ImageHistoryReplay  `json:"replay"`
 	CreatedAt      time.Time           `json:"created_at"`
 }
@@ -74,9 +77,11 @@ func ImageHistoryListItemFromService(item *service.ImageHistoryListItem) *ImageH
 		Mode:         string(item.Mode),
 		Status:       string(item.Status),
 		Model:        item.Model,
+		Prompt:       item.Prompt,
 		ImageCount:   item.ImageCount,
 		ImageSize:    item.ImageSize,
 		ActualCost:   item.ActualCost,
+		DurationMs:   item.DurationMs,
 		CreatedAt:    item.CreatedAt,
 	}
 }
@@ -111,6 +116,7 @@ func ImageHistoryDetailFromService(detail *service.ImageHistoryDetail) *ImageHis
 		HadMask:        detail.HadMask,
 		Images:         images,
 		ErrorMessage:   detail.ErrorMessage,
+		DurationMs:     detail.DurationMs,
 		Replay: ImageHistoryReplay{
 			Mode:                      string(detail.Replay.Mode),
 			Model:                     detail.Replay.Model,

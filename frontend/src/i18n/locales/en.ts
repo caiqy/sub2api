@@ -1326,7 +1326,8 @@ export default {
       download: 'Download',
       previewTitle: 'Preview',
       closePreview: 'Close preview',
-      revisedPrompt: 'Revised prompt'
+      revisedPrompt: 'Revised prompt',
+      duration: 'Duration'
     },
     history: {
       listTitle: 'Recent requests',
@@ -1339,11 +1340,13 @@ export default {
       detailLoading: 'Loading history detail...',
       detailLoadFailed: 'Failed to load history detail.',
       prompt: 'Prompt',
+      noPrompt: 'No prompt',
       parameters: 'Parameters',
       images: 'Images',
       status: 'Status',
       apiKey: 'API key',
       createdAt: 'Created at',
+      duration: 'Duration',
       count: 'Images',
       errorMessage: 'Error message',
       replay: 'Replay with these settings',

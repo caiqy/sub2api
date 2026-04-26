@@ -398,9 +398,11 @@ export interface ImageHistoryListItem {
   mode: ImageHistoryMode
   status: ImageHistoryStatus
   model: string
+  prompt?: string
   image_count: number
   image_size?: string
   actual_cost: number
+  duration_ms?: number
   created_at: string
 }
 
@@ -442,6 +444,7 @@ export interface ImageHistoryDetail {
   had_mask: boolean
   images?: ImageHistoryImage[]
   error_message?: string
+  duration_ms?: number
   replay: ImageHistoryReplay
   created_at: string
 }

@@ -76,6 +76,7 @@ const messages: Record<string, string> = {
   'images.results.previewTitle': 'Preview',
   'images.results.closePreview': 'Close preview',
   'images.results.revisedPrompt': 'Revised prompt',
+  'images.results.duration': 'Duration',
   'images.history.listTitle': 'Recent requests',
   'images.history.empty': 'No image history yet.',
   'images.history.loading': 'Loading image history...',
@@ -86,11 +87,13 @@ const messages: Record<string, string> = {
   'images.history.detailLoading': 'Loading history detail...',
   'images.history.detailLoadFailed': 'Failed to load history detail.',
   'images.history.prompt': 'Prompt',
+  'images.history.noPrompt': 'No prompt',
   'images.history.parameters': 'Parameters',
   'images.history.images': 'Images',
   'images.history.status': 'Status',
   'images.history.apiKey': 'API key',
   'images.history.createdAt': 'Created at',
+  'images.history.duration': 'Duration',
   'images.history.count': 'Images',
   'images.history.errorMessage': 'Error message',
   'images.history.replay': 'Replay with these settings',
@@ -146,9 +149,11 @@ const historyListItems = [
     mode: 'generate',
     status: 'success',
     model: 'gpt-image-2',
+    prompt: 'Draw a paper crane over water with a very long prompt that should truncate in one row',
     image_count: 2,
     image_size: '1536x1024',
     actual_cost: 0.24,
+    duration_ms: 2140,
     created_at: '2026-04-20T10:00:00Z'
   },
   {
@@ -189,6 +194,7 @@ const generateHistoryDetail = {
       revised_prompt: 'Draw a paper crane over water at dusk'
     }
   ],
+  duration_ms: 2140,
   replay: {
     mode: 'generate',
     model: 'gpt-image-2',
@@ -315,7 +321,10 @@ describe('ImagesView', () => {
     const wrapper = mount(ImagesView, {
       global: {
         stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
+          AppLayout: {
+            props: ['mainClass'],
+            template: '<div data-testid="app-layout" :data-main-class="mainClass"><slot /></div>'
+          }
         }
       }
     })
@@ -326,6 +335,12 @@ describe('ImagesView', () => {
     expect(classes).toContain('w-full')
     expect(classes).not.toContain('mx-auto')
     expect(classes).not.toContain('max-w-[1600px]')
+    expect(classes).not.toContain('px-3')
+    expect(classes).not.toContain('sm:px-4')
+    expect(classes).not.toContain('xl:px-6')
+    expect(wrapper.get('[data-testid="images-panel-generate"]').classes()).toContain('p-2')
+    expect(wrapper.get('[data-testid="images-panel-generate"]').classes()).not.toContain('p-4')
+    expect(wrapper.get('[data-testid="app-layout"]').attributes('data-main-class')).toBeUndefined()
   })
 
   it('renders tabs and api key selector in the workbench toolbar', async () => {
@@ -966,6 +981,7 @@ describe('ImagesView', () => {
 
     expect(wrapper.text()).toContain('Loading API keys...')
     expect(wrapper.text()).not.toContain('No API keys available yet')
+    expect(wrapper.text()).not.toContain('Select an API key before submitting.')
   })
 
   it('shows a load failure state when api keys cannot be fetched', async () => {
@@ -1485,5 +1501,115 @@ describe('ImagesView', () => {
     expect(wrapper.get('[data-testid="image-generate-submit"]').text()).toContain('Generating... 2s')
 
     wrapper.unmount()
+  })
+
+  it('shows prompt and backend duration in the history list', async () => {
+    list.mockResolvedValue({ items: [primaryApiKey] })
+    listHistory.mockResolvedValue({ items: historyListItems })
+
+    const wrapper = mount(ImagesView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' }
+        }
+      }
+    })
+
+    await flushPromises()
+    await wrapper.get('[data-testid="images-tab-history"]').trigger('click')
+    await flushPromises()
+
+    const item = wrapper.get('[data-testid="image-history-list-item-31"]')
+    expect(item.text()).toContain('Draw a paper crane over water')
+    expect(item.text()).toContain('Duration: 2.1s')
+    expect(wrapper.get('[data-testid="image-history-list-prompt-31"]').classes()).toContain('truncate')
+  })
+
+  it('uses the same 390px left column for generate edit and history panels', async () => {
+    list.mockResolvedValue({ items: [primaryApiKey] })
+    listHistory.mockResolvedValue({ items: historyListItems })
+
+    const wrapper = mount(ImagesView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' }
+        }
+      }
+    })
+
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="images-panel-layout-generate"]').classes().join(' ')).toContain('xl:grid-cols-[minmax(360px,390px)_minmax(0,1fr)]')
+
+    await wrapper.get('[data-testid="images-tab-edit"]').trigger('click')
+    expect(wrapper.get('[data-testid="images-panel-layout-edit"]').classes().join(' ')).toContain('xl:grid-cols-[minmax(360px,390px)_minmax(0,1fr)]')
+
+    await wrapper.get('[data-testid="images-tab-history"]').trigger('click')
+    expect(wrapper.get('[data-testid="images-panel-layout-history"]').classes().join(' ')).toContain('xl:grid-cols-[minmax(360px,390px)_minmax(0,1fr)]')
+  })
+
+  it('shows history detail duration and full-width preview controls', async () => {
+    list.mockResolvedValue({ items: [primaryApiKey] })
+    listHistory.mockResolvedValue({ items: historyListItems })
+    getHistoryDetail.mockResolvedValue(generateHistoryDetail)
+
+    const wrapper = mount(ImagesView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' }
+        }
+      },
+      attachTo: document.body,
+    })
+
+    await flushPromises()
+    await wrapper.get('[data-testid="images-tab-history"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="image-history-list-item-31"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="image-history-detail-duration"]').text()).toContain('2.1s')
+    expect(wrapper.get('[data-testid="image-history-detail-image-0"]').classes()).toContain('w-full')
+
+    await wrapper.get('[data-testid="image-preview-open-0"]').trigger('click')
+    expect(wrapper.find('[data-testid="image-preview-modal"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="image-preview-modal-download"]').attributes('href')).toBe('data:image/webp;base64,QUJD')
+
+    wrapper.unmount()
+  })
+
+  it('refreshes history after generation and shows the backend recorded duration in results', async () => {
+    list.mockResolvedValue({ items: [primaryApiKey] })
+    listHistory.mockResolvedValueOnce({
+      items: [{
+        id: 61,
+        api_key_id: 7,
+        mode: 'generate',
+        status: 'success',
+        model: 'gpt-image-2',
+        prompt: 'Draw a timed backend result',
+        image_count: 1,
+        actual_cost: 0.12,
+        duration_ms: 2140,
+        created_at: '2026-04-26T10:00:00Z',
+      }],
+    })
+    generate.mockResolvedValue({ data: [{ b64_json: 'QUJD' }] })
+
+    const wrapper = mount(ImagesView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' }
+        }
+      }
+    })
+
+    await flushPromises()
+    await wrapper.get('[data-testid="image-generate-prompt"]').setValue('Draw a timed backend result')
+    await wrapper.get('[data-testid="image-generate-submit"]').trigger('click')
+    await flushPromises()
+
+    expect(listHistory).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-testid="image-result-duration"]').text()).toContain('2.1s')
   })
 })

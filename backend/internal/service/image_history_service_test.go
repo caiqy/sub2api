@@ -13,6 +13,7 @@ type imageHistoryRepoStub struct {
 	UsageLogRepository
 	logs       []UsageLog
 	detail     *UsageLogDetail
+	details    map[int64]*UsageLogDetail
 	gotUserID  int64
 	gotParams  pagination.PaginationParams
 	gotFilters ImageHistoryListFilters
@@ -41,10 +42,100 @@ func (s *imageHistoryRepoStub) GetByID(ctx context.Context, id int64) (*UsageLog
 
 func (s *imageHistoryRepoStub) GetDetailByUsageLogID(ctx context.Context, usageLogID int64) (*UsageLogDetail, error) {
 	s.gotDetail = usageLogID
+	if s.details != nil {
+		if detail, ok := s.details[usageLogID]; ok {
+			return detail, nil
+		}
+		return nil, ErrUsageLogDetailNotFound
+	}
 	if s.detail == nil {
 		return nil, ErrUsageLogDetailNotFound
 	}
 	return s.detail, nil
+}
+
+func TestImageHistoryServiceList_IncludesPromptAndDuration(t *testing.T) {
+	t.Parallel()
+
+	durationMs := 2140
+	repo := &imageHistoryRepoStub{
+		logs: []UsageLog{{
+			ID:              51,
+			UserID:          7,
+			APIKeyID:        4,
+			Model:           "gpt-image-2",
+			ImageCount:      1,
+			DurationMs:      &durationMs,
+			InboundEndpoint: stringPtr("/v1/images/generations"),
+			CreatedAt:       time.Date(2026, 4, 26, 8, 0, 0, 0, time.UTC),
+		}},
+		details: map[int64]*UsageLogDetail{
+			51: {
+				RequestHeaders: "Content-Type: application/json\n",
+				RequestBody:    `{"prompt":"draw a compact workbench"}`,
+			},
+		},
+	}
+	svc := NewImageHistoryService(repo)
+
+	out, _, err := svc.List(context.Background(), 7, ImageHistoryListQuery{})
+
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	require.Equal(t, "draw a compact workbench", out[0].Prompt)
+	require.NotNil(t, out[0].DurationMs)
+	require.Equal(t, 2140, *out[0].DurationMs)
+}
+
+func TestImageHistoryServiceList_IgnoresMissingDetailForPrompt(t *testing.T) {
+	t.Parallel()
+
+	repo := &imageHistoryRepoStub{logs: []UsageLog{{
+		ID:              52,
+		UserID:          7,
+		APIKeyID:        4,
+		Model:           "gpt-image-2",
+		ImageCount:      1,
+		InboundEndpoint: stringPtr("/v1/images/generations"),
+		CreatedAt:       time.Date(2026, 4, 26, 9, 0, 0, 0, time.UTC),
+	}}}
+	svc := NewImageHistoryService(repo)
+
+	out, _, err := svc.List(context.Background(), 7, ImageHistoryListQuery{})
+
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	require.Empty(t, out[0].Prompt)
+	require.Nil(t, out[0].DurationMs)
+}
+
+func TestImageHistoryServiceGetDetail_IncludesDuration(t *testing.T) {
+	t.Parallel()
+
+	durationMs := 987
+	repo := &imageHistoryRepoStub{
+		logs: []UsageLog{{
+			ID:              53,
+			UserID:          7,
+			APIKeyID:        4,
+			Model:           "gpt-image-2",
+			ImageCount:      1,
+			DurationMs:      &durationMs,
+			InboundEndpoint: stringPtr("/v1/images/generations"),
+		}},
+		detail: &UsageLogDetail{
+			RequestHeaders: "Content-Type: application/json\n",
+			RequestBody:    `{"prompt":"draw a fast result"}`,
+			ResponseBody:   `{"created":1,"data":[{"b64_json":"QUJD"}]}`,
+		},
+	}
+	svc := NewImageHistoryService(repo)
+
+	detail, err := svc.GetDetail(context.Background(), 7, 53)
+
+	require.NoError(t, err)
+	require.NotNil(t, detail.DurationMs)
+	require.Equal(t, 987, *detail.DurationMs)
 }
 
 func TestImageHistoryServiceList_MapsImageModesAndStatuses(t *testing.T) {

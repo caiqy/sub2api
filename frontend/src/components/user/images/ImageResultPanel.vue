@@ -5,6 +5,10 @@
       <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('images.results.description') }}</p>
     </div>
 
+    <p v-if="formattedDuration" class="mt-2 text-xs font-medium text-gray-500 dark:text-gray-400" data-testid="image-result-duration">
+      {{ t('images.results.duration') }}: {{ formattedDuration }}
+    </p>
+
     <p v-if="loading" class="mt-4 text-sm text-gray-600 dark:text-gray-300">{{ t('images.results.loading') }}</p>
 
     <div v-else-if="error" class="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/10 dark:text-red-300" role="alert">
@@ -112,12 +116,14 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import type { ImageResultPreview } from '@/composables/useImageGeneration'
+import { formatImageDuration } from '@/utils/imageDuration'
 import { sanitizeUrl } from '@/utils/url'
 
 const props = defineProps<{
   loading: boolean
   error: string
   results: ImageResultPreview[]
+  durationMs?: number | null
 }>()
 
 const { t } = useI18n()
@@ -142,6 +148,8 @@ const displayResults = computed(() => props.results.flatMap((result) => {
     src: safeSrc,
   }]
 }))
+
+const formattedDuration = computed(() => formatImageDuration(props.durationMs))
 
 function buildIndexedActionLabel(labelKey: string, index: number): string {
   return `${t(labelKey)} ${index + 1}`

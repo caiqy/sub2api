@@ -1330,7 +1330,8 @@ export default {
       download: '下载',
       previewTitle: '图片预览',
       closePreview: '关闭预览',
-      revisedPrompt: '修订后的提示词'
+      revisedPrompt: '修订后的提示词',
+      duration: '耗时'
     },
     history: {
       listTitle: '最近请求',
@@ -1343,11 +1344,13 @@ export default {
       detailLoading: '正在加载历史详情...',
       detailLoadFailed: '加载历史详情失败。',
       prompt: '提示词',
+      noPrompt: '无提示词',
       parameters: '参数',
       images: '图片',
       status: '状态',
       apiKey: 'API 密钥',
       createdAt: '创建时间',
+      duration: '耗时',
       count: '图片数量',
       errorMessage: '错误信息',
       replay: '回填到表单',

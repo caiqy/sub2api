@@ -20,6 +20,7 @@ type imageHistoryHandlerRepoStub struct {
 	service.UsageLogRepository
 	logs       []service.UsageLog
 	detail     *service.UsageLogDetail
+	details    map[int64]*service.UsageLogDetail
 	gotUserID  int64
 	gotParams  pagination.PaginationParams
 	gotFilters service.ImageHistoryListFilters
@@ -63,6 +64,12 @@ func (s *imageHistoryHandlerRepoStub) GetByID(_ context.Context, id int64) (*ser
 
 func (s *imageHistoryHandlerRepoStub) GetDetailByUsageLogID(_ context.Context, usageLogID int64) (*service.UsageLogDetail, error) {
 	s.gotDetail = usageLogID
+	if s.details != nil {
+		if detail, ok := s.details[usageLogID]; ok {
+			return detail, nil
+		}
+		return nil, service.ErrUsageLogDetailNotFound
+	}
 	if s.detail == nil {
 		return nil, service.ErrUsageLogDetailNotFound
 	}
@@ -84,6 +91,7 @@ func (s *imageHistoryAPIKeyRepoStub) GetByID(_ context.Context, id int64) (*serv
 func TestImageHistoryHandlerListSuccess(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
+	durationMs := 2140
 	repo := &imageHistoryHandlerRepoStub{logs: []service.UsageLog{{
 		ID:              31,
 		UserID:          7,
@@ -93,10 +101,16 @@ func TestImageHistoryHandlerListSuccess(t *testing.T) {
 		ImageCount:      1,
 		ImageSize:       imageHistoryStringPtr("1024x1024"),
 		ActualCost:      0.42,
+		DurationMs:      &durationMs,
 		InboundEndpoint: imageHistoryStringPtr("/v1/images/edits"),
 		CreatedAt:       time.Date(2026, 4, 23, 10, 0, 0, 0, time.UTC),
 		APIKey:          &service.APIKey{Name: "primary", Key: "sk-test-1234567890"},
-	}}}
+	}}, details: map[int64]*service.UsageLogDetail{
+		31: {
+			RequestHeaders: "Content-Type: application/json\n",
+			RequestBody:    `{"prompt":"draw a neon list row"}`,
+		},
+	}}
 	h := newImageHistoryHandlerForTest(repo, &imageHistoryAPIKeyRepoStub{apiKeys: map[int64]*service.APIKey{
 		9: {ID: 9, UserID: 7},
 	}})
@@ -133,6 +147,8 @@ func TestImageHistoryHandlerListSuccess(t *testing.T) {
 	require.Equal(t, "edit", resp.Data.Items[0]["mode"])
 	require.Equal(t, "success", resp.Data.Items[0]["status"])
 	require.Equal(t, "primary", resp.Data.Items[0]["api_key_name"])
+	require.Equal(t, "draw a neon list row", resp.Data.Items[0]["prompt"])
+	require.Equal(t, float64(2140), resp.Data.Items[0]["duration_ms"])
 	require.NotContains(t, resp.Data.Items[0], "request_body")
 }
 
@@ -162,6 +178,7 @@ func TestImageHistoryHandlerGetByIDUnauthorized(t *testing.T) {
 func TestImageHistoryHandlerGetByIDSuccess(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
+	durationMs := 987
 	repo := &imageHistoryHandlerRepoStub{
 		logs: []service.UsageLog{{
 			ID:              31,
@@ -169,6 +186,7 @@ func TestImageHistoryHandlerGetByIDSuccess(t *testing.T) {
 			APIKeyID:        9,
 			Model:           "gpt-image-2",
 			ImageCount:      1,
+			DurationMs:      &durationMs,
 			InboundEndpoint: imageHistoryStringPtr("/v1/images/generations"),
 			CreatedAt:       time.Date(2026, 4, 23, 11, 0, 0, 0, time.UTC),
 			APIKey:          &service.APIKey{Name: "primary", Key: "sk-test-1234567890"},
@@ -203,6 +221,7 @@ func TestImageHistoryHandlerGetByIDSuccess(t *testing.T) {
 	require.Equal(t, "generate", resp.Data["mode"])
 	require.Equal(t, "success", resp.Data["status"])
 	require.Equal(t, "draw a neon fox", resp.Data["prompt"])
+	require.Equal(t, float64(987), resp.Data["duration_ms"])
 	require.NotContains(t, resp.Data, "request_body")
 
 	images, ok := resp.Data["images"].([]any)

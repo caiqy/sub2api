@@ -39,9 +39,18 @@
           </div>
         </div>
 
+        <p
+          class="mt-2 truncate text-xs text-gray-500 dark:text-gray-400"
+          :data-testid="`image-history-list-prompt-${item.id}`"
+          :title="item.prompt || t('images.history.noPrompt')"
+        >
+          {{ item.prompt || t('images.history.noPrompt') }}
+        </p>
+
         <div class="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs text-gray-500 dark:text-gray-400">
           <span>{{ t('images.history.count') }}: {{ item.image_count }}</span>
           <span v-if="item.image_size">{{ item.image_size }}</span>
+          <span v-if="formatImageDuration(item.duration_ms)">{{ t('images.history.duration') }}: {{ formatImageDuration(item.duration_ms) }}</span>
           <span v-if="item.api_key_name">{{ t('images.history.apiKey') }}: {{ item.api_key_name }}</span>
         </div>
       </button>
@@ -53,6 +62,7 @@
 import { useI18n } from 'vue-i18n'
 
 import type { ImageHistoryListItem } from '@/types'
+import { formatImageDuration } from '@/utils/imageDuration'
 
 defineProps<{
   error: string

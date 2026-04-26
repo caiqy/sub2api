@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <div class="w-full space-y-4 px-3 sm:px-4 xl:px-6" data-testid="images-view">
+    <div class="w-full space-y-4" data-testid="images-view">
       <section
         class="card border border-gray-200/80 bg-white/90 p-2 shadow-sm backdrop-blur dark:border-dark-700 dark:bg-dark-800/90"
         data-testid="images-workbench-toolbar"
@@ -51,7 +51,7 @@
       <section
         v-for="tab in tabs"
         :key="tab.key"
-        class="card p-4"
+        class="card p-2"
         :id="getTabPanelId(tab.key)"
         :aria-labelledby="getTabId(tab.key)"
         :data-testid="`images-panel-${tab.key}`"
@@ -59,7 +59,7 @@
         role="tabpanel"
       >
         <div v-if="tab.key === activePanel.key" class="space-y-5">
-          <div v-if="tab.key === 'history'" class="grid gap-6 xl:grid-cols-[minmax(320px,0.9fr)_minmax(0,1.1fr)]">
+          <div v-if="tab.key === 'history'" class="grid gap-4 xl:grid-cols-[minmax(360px,390px)_minmax(0,1fr)]" data-testid="images-panel-layout-history">
             <ImageHistoryList
               :error="historyListError"
               :items="historyItems"
@@ -77,7 +77,7 @@
             />
           </div>
 
-          <div v-else class="grid gap-4 xl:grid-cols-[minmax(390px,0.85fr)_minmax(0,1.15fr)] 2xl:grid-cols-[minmax(420px,0.78fr)_minmax(0,1.22fr)]">
+          <div v-else :data-testid="`images-panel-layout-${tab.key}`" class="grid gap-4 xl:grid-cols-[minmax(360px,390px)_minmax(0,1fr)]">
             <div class="rounded-3xl border border-gray-200 bg-white p-5 shadow-sm dark:border-dark-700 dark:bg-dark-800 xl:self-start">
               <div class="mb-5 space-y-2">
                 <h2 class="text-xl font-semibold text-gray-900 dark:text-white">
@@ -103,6 +103,7 @@
                 :initial-values="generateReplayValues"
                 :loading="isLoading"
                 :loading-seconds="loadingSeconds"
+                :show-api-key-required-message="showApiKeyRequiredMessage"
                 @submit="handleGenerateSubmit"
               />
               <ImageEditForm
@@ -112,11 +113,12 @@
                 :initial-values="editReplayValues"
                 :loading="isLoading"
                 :loading-seconds="loadingSeconds"
+                :show-api-key-required-message="showApiKeyRequiredMessage"
                 @submit="handleEditSubmit"
               />
             </div>
 
-            <ImageResultPanel :error="error" :loading="isLoading" :results="results" />
+            <ImageResultPanel :duration-ms="lastResultDurationMs" :error="error" :loading="isLoading" :results="results" />
           </div>
         </div>
       </section>
@@ -196,6 +198,7 @@ const editFormKey = ref(0)
 const generateReplayValues = ref<Partial<ImageCommonFormValues>>({})
 const editReplayValues = ref<Partial<ImageCommonFormValues>>({})
 const editReplayNotice = ref('')
+const lastResultDurationMs = ref<number | null>(null)
 const tabButtonRefs = ref<Record<ImagesTabKey, HTMLButtonElement | null>>({
   generate: null,
   edit: null,
@@ -204,6 +207,7 @@ const tabButtonRefs = ref<Record<ImagesTabKey, HTMLButtonElement | null>>({
 
 const activePanel = computed(() => tabs.find((tab) => tab.key === activeTab.value) ?? tabs[0])
 const canSubmitWithApiKey = computed(() => apiKeyLoadState.value === 'success' && selectedApiKeyId.value.trim().length > 0)
+const showApiKeyRequiredMessage = computed(() => apiKeyLoadState.value === 'success' && apiKeys.value.length > 0 && selectedApiKeyId.value.trim().length === 0)
 const isHistoryListLoading = computed(() => historyListState.value === 'loading')
 const isHistoryDetailLoading = computed(() => historyDetailState.value === 'loading')
 const selectedApiKey = computed(() => apiKeys.value.find((key) => String(key.id) === selectedApiKeyId.value) ?? null)
@@ -271,7 +275,12 @@ async function handleGenerateSubmit(payload: ImageGenerationRequest) {
     return
   }
 
-  await submitGenerate(payload, selectedApiKeyValue)
+  lastResultDurationMs.value = null
+  const response = await submitGenerate(payload, selectedApiKeyValue)
+  if (response) {
+    await loadHistory()
+    lastResultDurationMs.value = findLatestMatchingHistoryDuration('generate', payload)
+  }
 }
 
 async function handleEditSubmit(payload: FormData) {
@@ -284,7 +293,35 @@ async function handleEditSubmit(payload: FormData) {
     return
   }
 
-  await submitEdit(payload, selectedApiKeyValue)
+  lastResultDurationMs.value = null
+  const response = await submitEdit(payload, selectedApiKeyValue)
+  if (response) {
+    await loadHistory()
+    lastResultDurationMs.value = findLatestMatchingHistoryDuration('edit', payload)
+  }
+}
+
+function findLatestMatchingHistoryDuration(mode: 'generate' | 'edit', payload: ImageGenerationRequest | FormData) {
+  const prompt = payload instanceof FormData ? String(payload.get('prompt') ?? '').trim() : String(payload.prompt ?? '').trim()
+  const model = payload instanceof FormData ? String(payload.get('model') ?? '').trim() : String(payload.model ?? '').trim()
+
+  const match = historyItems.value.find((item) => {
+    if (item.mode !== mode || item.status !== 'success') {
+      return false
+    }
+
+    if (model && item.model !== model) {
+      return false
+    }
+
+    if (prompt && item.prompt && item.prompt !== prompt) {
+      return false
+    }
+
+    return typeof item.duration_ms === 'number'
+  })
+
+  return match?.duration_ms ?? null
 }
 
 async function handleHistoryRetry() {

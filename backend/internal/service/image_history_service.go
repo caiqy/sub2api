@@ -48,9 +48,11 @@ type ImageHistoryListItem struct {
 	Mode         ImageHistoryMode
 	Status       ImageHistoryStatus
 	Model        string
+	Prompt       string
 	ImageCount   int
 	ImageSize    string
 	ActualCost   float64
+	DurationMs   *int
 	CreatedAt    time.Time
 }
 
@@ -92,6 +94,7 @@ type ImageHistoryDetail struct {
 	HadMask        bool
 	Images         []ImageHistoryImage
 	ErrorMessage   string
+	DurationMs     *int
 	Replay         ImageHistoryReplay
 	CreatedAt      time.Time
 }
@@ -137,12 +140,19 @@ func (s *ImageHistoryService) List(ctx context.Context, userID int64, query Imag
 			ActualCost: log.ActualCost,
 			CreatedAt:  log.CreatedAt,
 		}
+		if log.DurationMs != nil {
+			durationMs := *log.DurationMs
+			item.DurationMs = &durationMs
+		}
 		if log.ImageSize != nil {
 			item.ImageSize = strings.TrimSpace(*log.ImageSize)
 		}
 		if log.APIKey != nil {
 			item.APIKeyName = log.APIKey.Name
 			item.APIKeyMasked = maskImageHistoryAPIKey(log.APIKey.Key)
+		}
+		if detailRow, detailErr := s.usageRepo.GetDetailByUsageLogID(ctx, log.ID); detailErr == nil {
+			item.Prompt = parseImageHistoryRequestSnapshot(detailRow).Prompt
 		}
 		items = append(items, item)
 	}
@@ -186,6 +196,7 @@ func (s *ImageHistoryService) GetDetail(ctx context.Context, userID int64, usage
 		HadMask:        parsedRequest.HadMask,
 		Images:         images,
 		ErrorMessage:   parseImageHistoryErrorMessage(detailRow),
+		DurationMs:     log.DurationMs,
 		CreatedAt:      log.CreatedAt,
 	}
 	if log.APIKey != nil {

@@ -40,6 +40,10 @@
           <span class="text-gray-500 dark:text-gray-400">{{ t('images.history.createdAt') }}</span>
           <span class="text-right font-medium text-gray-900 dark:text-white">{{ formatCreatedAt(detail.created_at) }}</span>
         </div>
+        <div v-if="formattedDuration" class="flex items-center justify-between gap-3" data-testid="image-history-detail-duration">
+          <span class="text-gray-500 dark:text-gray-400">{{ t('images.history.duration') }}</span>
+          <span class="text-right font-medium text-gray-900 dark:text-white">{{ formattedDuration }}</span>
+        </div>
       </div>
 
       <div class="space-y-2">
@@ -71,15 +75,7 @@
         <p v-if="displayImages.length === 0" class="rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-sm text-gray-500 dark:border-dark-600 dark:bg-dark-900/60 dark:text-gray-400">
           {{ t('images.results.empty') }}
         </p>
-        <div v-else class="grid gap-4 sm:grid-cols-2">
-          <figure v-for="(image, index) in displayImages" :key="`${index}-${image.src}`" class="overflow-hidden rounded-2xl border border-gray-200 bg-gray-50 dark:border-dark-700 dark:bg-dark-900/60">
-            <img :src="image.src" :alt="`history-preview-${index + 1}`" class="aspect-square w-full bg-white object-contain dark:bg-dark-950" :data-testid="`image-history-detail-image-${index}`" />
-            <figcaption v-if="image.revisedPrompt" class="border-t border-gray-200 px-4 py-3 text-sm text-gray-600 dark:border-dark-700 dark:text-gray-300">
-              <span class="font-medium text-gray-900 dark:text-white">{{ t('images.results.revisedPrompt') }}:</span>
-              {{ image.revisedPrompt }}
-            </figcaption>
-          </figure>
-        </div>
+        <ImagePreviewGallery v-else :images="displayImages" image-test-id-prefix="image-history-detail-image" />
       </div>
     </div>
   </section>
@@ -89,7 +85,9 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import ImagePreviewGallery from './ImagePreviewGallery.vue'
 import type { ImageHistoryDetail as ImageHistoryDetailType } from '@/types'
+import { formatImageDuration } from '@/utils/imageDuration'
 import { sanitizeUrl } from '@/utils/url'
 
 const props = defineProps<{
@@ -133,6 +131,8 @@ const parameters = computed(() => {
   ]
 })
 
+const formattedDuration = computed(() => formatImageDuration(props.detail?.duration_ms))
+
 const displayImages = computed(() => (props.detail?.images ?? []).flatMap((image) => {
   const safeSrc = sanitizeUrl(image.data_url, { allowDataUrl: true })
   if (!safeSrc) {
@@ -142,6 +142,7 @@ const displayImages = computed(() => (props.detail?.images ?? []).flatMap((image
   return [{
     src: safeSrc,
     revisedPrompt: image.revised_prompt,
+    source: 'data-url' as const,
   }]
 }))
 

@@ -10,6 +10,20 @@ vi.mock('vue-i18n', () => ({
 }))
 
 describe('ImageResultPanel', () => {
+  it('shows backend recorded duration when provided', () => {
+    const wrapper = mount(ImageResultPanel, {
+      props: {
+        loading: false,
+        error: '',
+        durationMs: 2140,
+        results: [{ src: 'data:image/png;base64,QUJD', source: 'data-url' }],
+      },
+    })
+
+    expect(wrapper.text()).toContain('images.results.duration')
+    expect(wrapper.text()).toContain('2.1s')
+  })
+
   it('uses a single-column large preview layout for one image', () => {
     const wrapper = mount(ImageResultPanel, {
       props: {

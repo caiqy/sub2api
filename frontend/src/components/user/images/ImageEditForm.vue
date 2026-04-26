@@ -104,7 +104,7 @@
 
     </div>
 
-    <p v-if="disabled" class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-900/10 dark:text-amber-300">
+    <p v-if="showApiKeyRequiredMessage" class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-900/10 dark:text-amber-300">
       {{ t('images.forms.generate.apiKeyRequired') }}
     </p>
     <p v-if="validationErrorKey" class="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/10 dark:text-red-300">
@@ -143,6 +143,7 @@ interface Props {
   initialValues?: Partial<ImageCommonFormValues>
   loading?: boolean
   loadingSeconds?: number
+  showApiKeyRequiredMessage?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -150,6 +151,7 @@ const props = withDefaults(defineProps<Props>(), {
   initialValues: () => ({}),
   loading: false,
   loadingSeconds: 0,
+  showApiKeyRequiredMessage: false,
 })
 
 const emit = defineEmits<{
