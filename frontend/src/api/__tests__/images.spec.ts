@@ -85,11 +85,11 @@ describe('images api', () => {
     expect(get).toHaveBeenCalledWith('/images/history/31')
   })
 
-  it('uses a dedicated 600 second timeout for direct image gateway requests', async () => {
+  it('uses a dedicated 30 minute timeout for direct image gateway requests', async () => {
     await import('@/api/images')
 
     expect(create).toHaveBeenCalledWith({
-      timeout: 600000,
+      timeout: 1800000,
       withCredentials: true,
     })
   })
