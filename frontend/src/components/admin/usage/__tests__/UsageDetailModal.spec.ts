@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { defineComponent, onMounted, onUnmounted } from 'vue'
 
 import UsageDetailModal from '../UsageDetailModal.vue'
 
@@ -22,6 +23,11 @@ const messages: Record<string, string> = {
   'admin.usage.openImagePreview': 'Open image preview',
   'admin.usage.previewImageTitle': 'Image Preview Modal',
   'admin.usage.closeImagePreview': 'Close preview',
+  'images.results.openPreview': 'Open preview',
+  'images.results.download': 'Download',
+  'images.results.closePreview': 'Close preview',
+  'images.results.previewTitle': 'Preview image',
+  'images.results.revisedPrompt': 'Revised prompt',
   'admin.usage.requestId': 'Request ID',
   'admin.usage.user': 'User',
   'usage.model': 'Model',
@@ -38,6 +44,29 @@ vi.mock('vue-i18n', async () => {
       t: (key: string) => messages[key] ?? key,
     }),
   }
+})
+
+const EscapeClosingBaseDialogStub = defineComponent({
+  props: ['show', 'title'],
+  emits: ['close'],
+  setup(_props, { emit }) {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        emit('close')
+      }
+    }
+
+    onMounted(() => {
+      document.addEventListener('keydown', handleEscape)
+    })
+
+    onUnmounted(() => {
+      document.removeEventListener('keydown', handleEscape)
+    })
+
+    return {}
+  },
+  template: '<div v-if="show"><slot /></div>',
 })
 
 describe('UsageDetailModal', () => {
@@ -191,7 +220,7 @@ x-upstream-trace-id: trace-upstream`)
     expect(wrapper.text()).toContain('No content')
   })
 
-  it('renders gpt-image previews from response body while keeping raw json visible', async () => {
+  it('renders gpt-image previews through the shared gallery while keeping raw json visible', async () => {
     const wrapper = mount(UsageDetailModal, {
       props: {
         show: true,
@@ -228,15 +257,16 @@ x-upstream-trace-id: trace-upstream`)
 
     await wrapper.find('[data-test="tab-response-body"]').trigger('click')
 
-    const previewImage = wrapper.get('[data-test="usage-detail-image-preview-0"]')
-    expect(previewImage.attributes('src')).toBe('data:image/webp;base64,QUJD')
+    expect(wrapper.get('[data-testid="image-preview-gallery"]').classes()).toContain('grid-cols-1')
+    expect(wrapper.get('[data-testid="usage-detail-image-preview-0"]').attributes('src')).toBe('data:image/webp;base64,QUJD')
     expect(wrapper.text()).toContain('Image Preview')
+    expect(wrapper.text()).toContain('Revised prompt')
     expect(wrapper.text()).toContain('draw a neon fox')
     expect(wrapper.text()).toContain('Raw Response JSON')
     expect(wrapper.text()).toContain('"b64_json": "QUJD"')
   })
 
-  it('opens an enlarged preview modal when clicking a rendered gpt-image preview', async () => {
+  it('opens the shared fullscreen gallery preview and exposes download', async () => {
     const wrapper = mount(UsageDetailModal, {
       props: {
         show: true,
@@ -261,6 +291,7 @@ x-upstream-trace-id: trace-upstream`)
         loading: false,
         error: '',
       },
+      attachTo: document.body,
       global: {
         stubs: {
           BaseDialog: {
@@ -272,13 +303,103 @@ x-upstream-trace-id: trace-upstream`)
     })
 
     await wrapper.find('[data-test="tab-response-body"]').trigger('click')
-    await wrapper.get('[data-test="usage-detail-image-open-0"]').trigger('click')
+    await wrapper.get('[data-testid="image-preview-open-0"]').trigger('click')
 
-    expect(wrapper.get('[data-test="usage-detail-image-preview-modal"]').exists()).toBe(true)
-    expect(wrapper.get('[data-test="usage-detail-image-preview-modal-image"]').attributes('src')).toBe('data:image/png;base64,QUJD')
+    expect(wrapper.get('[data-testid="image-preview-modal"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="image-preview-modal-image"]').attributes('src')).toBe('data:image/png;base64,QUJD')
+    expect(wrapper.get('[data-testid="image-preview-modal-download"]').attributes('href')).toBe('data:image/png;base64,QUJD')
 
-    await wrapper.get('[data-test="usage-detail-image-preview-close"]').trigger('click')
-    expect(wrapper.find('[data-test="usage-detail-image-preview-modal"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="image-preview-close"]').trigger('click')
+    expect(wrapper.find('[data-testid="image-preview-modal"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('passes upstream image urls through the shared gallery and keeps raw json visible', async () => {
+    const wrapper = mount(UsageDetailModal, {
+      props: {
+        show: true,
+        usageLog: {
+          request_id: 'req-upstream-image',
+          user: { email: 'image@example.com' },
+          model: 'gpt-image-2',
+          created_at: '2026-03-20T10:00:00Z',
+        },
+        detail: {
+          usage_log_id: 5,
+          request_headers: null,
+          request_body: '{"model":"gpt-image-2"}',
+          upstream_request_headers: null,
+          upstream_request_body: null,
+          upstream_response_headers: ':status: 200\nContent-Type: application/json',
+          upstream_response_body: '{"data":[{"url":"https://cdn.example.com/output.png","revised_prompt":"draw a teal fox"}]}',
+          response_headers: null,
+          response_body: null,
+          created_at: '2026-03-20T10:00:00Z',
+        },
+        loading: false,
+        error: '',
+      },
+      global: {
+        stubs: {
+          BaseDialog: {
+            props: ['show', 'title'],
+            template: '<div v-if="show"><slot /></div>',
+          },
+        },
+      },
+    })
+
+    await wrapper.find('[data-test="tab-upstream-response-body"]').trigger('click')
+
+    expect(wrapper.get('[data-testid="usage-detail-image-preview-0"]').attributes('src')).toBe('https://cdn.example.com/output.png')
+    expect(wrapper.text()).toContain('draw a teal fox')
+    expect(wrapper.text()).toContain('"url": "https://cdn.example.com/output.png"')
+  })
+
+  it('pressing Escape closes only the shared image preview, not the parent usage dialog', async () => {
+    const wrapper = mount(UsageDetailModal, {
+      props: {
+        show: true,
+        usageLog: {
+          request_id: 'req-image-escape',
+          user: { email: 'image@example.com' },
+          model: 'gpt-image-2',
+          created_at: '2026-03-20T10:00:00Z',
+        },
+        detail: {
+          usage_log_id: 6,
+          request_headers: null,
+          request_body: '{"model":"gpt-image-2"}',
+          upstream_request_headers: null,
+          upstream_request_body: null,
+          upstream_response_headers: null,
+          upstream_response_body: null,
+          response_headers: ':status: 200\nContent-Type: application/json',
+          response_body: '{"created":1776989094,"data":[{"b64_json":"QUJD"}]}',
+          created_at: '2026-03-20T10:00:00Z',
+        },
+        loading: false,
+        error: '',
+      },
+      attachTo: document.body,
+      global: {
+        stubs: {
+          BaseDialog: EscapeClosingBaseDialogStub,
+        },
+      },
+    })
+
+    await wrapper.find('[data-test="tab-response-body"]').trigger('click')
+    await wrapper.get('[data-testid="image-preview-open-0"]').trigger('click')
+    expect(wrapper.get('[data-testid="image-preview-modal"]').exists()).toBe(true)
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('[data-testid="image-preview-modal"]').exists()).toBe(false)
+    expect(wrapper.emitted('close')).toBeUndefined()
+
+    wrapper.unmount()
   })
 
   it('shows retry button when error is present', async () => {

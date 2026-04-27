@@ -122,6 +122,7 @@ type stickyGatewayCacheHotpathStub struct {
 
 	stickyID int64
 	getCalls atomic.Int64
+	setCalls atomic.Int64
 }
 
 func (s *stickyGatewayCacheHotpathStub) GetSessionAccountID(ctx context.Context, groupID int64, sessionHash string) (int64, error) {
@@ -133,6 +134,7 @@ func (s *stickyGatewayCacheHotpathStub) GetSessionAccountID(ctx context.Context,
 }
 
 func (s *stickyGatewayCacheHotpathStub) SetSessionAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) error {
+	s.setCalls.Add(1)
 	return nil
 }
 
@@ -851,4 +853,5 @@ func TestSelectAccountWithLoadAwareness_StickyDisabledBypassesPrefetchAndCacheRe
 	require.NotNil(t, result.Account)
 	require.Equal(t, fallbackAccount.ID, result.Account.ID)
 	require.Equal(t, int64(0), cache.getCalls.Load())
+	require.Equal(t, int64(0), cache.setCalls.Load())
 }

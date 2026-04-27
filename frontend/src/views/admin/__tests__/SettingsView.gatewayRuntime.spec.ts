@@ -13,6 +13,7 @@ const {
   getBetaPolicySettings,
   getGatewayRuntimeSettings,
   updateGatewayRuntimeSettings,
+  updateSettings,
   showSuccess,
   showError,
   fetchAdminSettings
@@ -26,6 +27,7 @@ const {
   getBetaPolicySettings: vi.fn(),
   getGatewayRuntimeSettings: vi.fn(),
   updateGatewayRuntimeSettings: vi.fn(),
+  updateSettings: vi.fn(),
   showSuccess: vi.fn(),
   showError: vi.fn(),
   fetchAdminSettings: vi.fn()
@@ -57,7 +59,8 @@ vi.mock('@/api', () => ({
       getRectifierSettings,
       getBetaPolicySettings,
       getGatewayRuntimeSettings,
-      updateGatewayRuntimeSettings
+      updateGatewayRuntimeSettings,
+      updateSettings
     },
     groups: {
       getAll: getAllGroups
@@ -106,7 +109,11 @@ function createWrapper() {
         Select: true,
         GroupBadge: true,
         GroupOptionItem: true,
-        Toggle: true,
+        Toggle: {
+          props: ['modelValue'],
+          emits: ['update:modelValue'],
+          template: '<input type="checkbox" :checked="modelValue" @change="$emit(\'update:modelValue\', $event.target.checked)" />'
+        },
         ImageUpload: true,
         BackupSettings: true,
         DataManagementSettings: true,
@@ -130,6 +137,7 @@ describe('admin SettingsView gateway runtime card', () => {
     getBetaPolicySettings.mockReset()
     getGatewayRuntimeSettings.mockReset()
     updateGatewayRuntimeSettings.mockReset()
+    updateSettings.mockReset()
     showSuccess.mockReset()
     showError.mockReset()
     fetchAdminSettings.mockReset()
@@ -137,7 +145,19 @@ describe('admin SettingsView gateway runtime card', () => {
     getSettings.mockResolvedValue({
       backend_mode_enabled: false,
       default_subscriptions: [],
-      registration_email_suffix_whitelist: []
+      registration_email_suffix_whitelist: [],
+      gateway_sticky_openai_enabled: false,
+      gateway_sticky_gemini_enabled: true,
+      gateway_sticky_anthropic_enabled: false,
+      gateway_openai_ws_scheduler_mode: 'layered',
+      gateway_openai_ws_scheduler_layered_error_penalty_threshold: 0.6,
+      gateway_openai_ws_scheduler_layered_error_penalty_value: 100,
+      gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier: 12,
+      gateway_openai_ws_scheduler_layered_ttft_penalty_value: 50,
+      gateway_openai_ws_scheduler_layered_probe_cooldown_seconds: 20,
+      gateway_openai_ws_scheduler_layered_probe_interval_seconds: 20,
+      gateway_openai_ws_scheduler_layered_probe_max_failures: 3,
+      gateway_openai_ws_scheduler_layered_probe_timeout_seconds: 15
     } as any)
     getAllGroups.mockResolvedValue([])
     getAdminApiKey.mockResolvedValue({ exists: false, masked_key: '' })
@@ -166,6 +186,23 @@ describe('admin SettingsView gateway runtime card', () => {
       stream_data_interval_timeout: 90,
       usage_log_detail_retention_limit: 500,
       image_usage_log_detail_retention_limit: 120
+    })
+    updateSettings.mockResolvedValue({
+      backend_mode_enabled: false,
+      default_subscriptions: [],
+      registration_email_suffix_whitelist: [],
+      gateway_sticky_openai_enabled: false,
+      gateway_sticky_gemini_enabled: true,
+      gateway_sticky_anthropic_enabled: false,
+      gateway_openai_ws_scheduler_mode: 'layered',
+      gateway_openai_ws_scheduler_layered_error_penalty_threshold: 0.6,
+      gateway_openai_ws_scheduler_layered_error_penalty_value: 100,
+      gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier: 12,
+      gateway_openai_ws_scheduler_layered_ttft_penalty_value: 50,
+      gateway_openai_ws_scheduler_layered_probe_cooldown_seconds: 20,
+      gateway_openai_ws_scheduler_layered_probe_interval_seconds: 20,
+      gateway_openai_ws_scheduler_layered_probe_max_failures: 3,
+      gateway_openai_ws_scheduler_layered_probe_timeout_seconds: 15
     })
   })
 
@@ -207,6 +244,39 @@ describe('admin SettingsView gateway runtime card', () => {
           .element as HTMLInputElement
       ).value
     ).toBe('80')
+  })
+
+  it('loads sticky and OpenAI WS scheduler settings and includes them when saving system settings', async () => {
+    const wrapper = createWrapper()
+
+    await flushPromises()
+
+    expect((wrapper.find('[data-testid="gateway-sticky-openai-enabled"]').element as HTMLInputElement).checked).toBe(false)
+    expect((wrapper.find('[data-testid="gateway-sticky-gemini-enabled"]').element as HTMLInputElement).checked).toBe(true)
+    expect((wrapper.find('[data-testid="gateway-sticky-anthropic-enabled"]').element as HTMLInputElement).checked).toBe(false)
+    expect((wrapper.find('[data-testid="gateway-openai-ws-scheduler-mode"]').element as HTMLSelectElement).value).toBe('layered')
+    expect((wrapper.find('[data-testid="gateway-openai-ws-scheduler-layered-error-penalty-threshold"]').element as HTMLInputElement).value).toBe('0.6')
+    expect((wrapper.find('[data-testid="gateway-openai-ws-scheduler-layered-ttft-penalty-multiplier"]').element as HTMLInputElement).value).toBe('12')
+
+    await wrapper.find('[data-testid="settings-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        gateway_sticky_openai_enabled: false,
+        gateway_sticky_gemini_enabled: true,
+        gateway_sticky_anthropic_enabled: false,
+        gateway_openai_ws_scheduler_mode: 'layered',
+        gateway_openai_ws_scheduler_layered_error_penalty_threshold: 0.6,
+        gateway_openai_ws_scheduler_layered_error_penalty_value: 100,
+        gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier: 12,
+        gateway_openai_ws_scheduler_layered_ttft_penalty_value: 50,
+        gateway_openai_ws_scheduler_layered_probe_cooldown_seconds: 20,
+        gateway_openai_ws_scheduler_layered_probe_interval_seconds: 20,
+        gateway_openai_ws_scheduler_layered_probe_max_failures: 3,
+        gateway_openai_ws_scheduler_layered_probe_timeout_seconds: 15
+      })
+    )
   })
 
   it('updates gateway runtime settings and shows success feedback', async () => {

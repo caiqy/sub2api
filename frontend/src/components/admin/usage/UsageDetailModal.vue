@@ -59,31 +59,10 @@
         <div v-else-if="activeContent && activeImagePreviews.length > 0" class="space-y-4 p-4">
           <section class="space-y-3">
             <h4 class="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">{{ t('admin.usage.imagePreview') }}</h4>
-            <div class="grid gap-4 sm:grid-cols-2">
-              <figure
-                v-for="(preview, index) in activeImagePreviews"
-                :key="`${preview.src}-${index}`"
-                class="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800"
-              >
-                <button
-                  type="button"
-                  class="block w-full overflow-hidden bg-white transition hover:opacity-95 focus:outline-none focus:ring-2 focus:ring-primary-400 dark:bg-dark-950"
-                  :aria-label="t('admin.usage.openImagePreview')"
-                  :data-test="`usage-detail-image-open-${index}`"
-                  @click="openPreview(preview)"
-                >
-                  <img
-                    :src="preview.src"
-                    :alt="`usage-image-preview-${index + 1}`"
-                    :data-test="`usage-detail-image-preview-${index}`"
-                    class="aspect-square w-full bg-white object-contain dark:bg-dark-950"
-                  />
-                </button>
-                <figcaption v-if="preview.revisedPrompt" class="border-t border-gray-200 px-4 py-3 text-sm text-gray-600 dark:border-dark-700 dark:text-gray-300">
-                  {{ preview.revisedPrompt }}
-                </figcaption>
-              </figure>
-            </div>
+            <ImagePreviewGallery
+              :images="activeImagePreviews"
+              image-test-id-prefix="usage-detail-image-preview"
+            />
           </section>
 
           <section class="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800">
@@ -101,37 +80,6 @@
         </div>
       </div>
 
-      <div
-        v-if="selectedPreview"
-        class="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-6 backdrop-blur-sm"
-        data-test="usage-detail-image-preview-modal"
-        role="dialog"
-        @click.self="closePreview"
-      >
-        <div class="relative w-full max-w-5xl overflow-hidden rounded-3xl border border-white/10 bg-slate-950 shadow-2xl">
-          <div class="flex items-center justify-between border-b border-white/10 px-5 py-4 text-white">
-            <h4 class="text-sm font-semibold uppercase tracking-[0.18em]">{{ t('admin.usage.previewImageTitle') }}</h4>
-            <button
-              type="button"
-              class="rounded-full border border-white/15 px-3 py-1.5 text-xs font-medium text-white transition hover:border-white/30 hover:bg-white/10"
-              :aria-label="t('admin.usage.closeImagePreview')"
-              data-test="usage-detail-image-preview-close"
-              @click="closePreview"
-            >
-              {{ t('admin.usage.closeImagePreview') }}
-            </button>
-          </div>
-
-          <div class="flex max-h-[80vh] items-center justify-center bg-black px-4 py-4">
-            <img
-              :src="selectedPreview.src"
-              :alt="t('admin.usage.previewImageTitle')"
-              class="max-h-[72vh] w-auto max-w-full object-contain"
-              data-test="usage-detail-image-preview-modal-image"
-            />
-          </div>
-        </div>
-      </div>
     </div>
   </BaseDialog>
 </template>
@@ -140,8 +88,8 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import ImagePreviewGallery from '@/components/user/images/ImagePreviewGallery.vue'
 import type { AdminUsageDetail, AdminUsageLog } from '@/types'
-import { sanitizeUrl } from '@/utils/url'
 
 type DetailTabKey =
   | 'client-request-headers'
@@ -170,11 +118,11 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const activeTab = ref<DetailTabKey>('client-request-headers')
 const copied = ref(false)
-const selectedPreview = ref<UsageDetailImagePreview | null>(null)
 
 interface UsageDetailImagePreview {
   src: string
   revisedPrompt?: string
+  source: 'data-url' | 'url'
 }
 
 const OUTPUT_FORMAT_MIME_MAP: Record<string, string> = {
@@ -286,15 +234,12 @@ const buildImagePreviews = (responseBody: string | null, requestBody: string | n
       return [{
         src: `data:${inferPreviewMimeType(imageItem, requestBody)};base64,${imageItem.b64_json.trim()}`,
         revisedPrompt,
+        source: 'data-url',
       }]
     }
 
-    if (typeof imageItem.url === 'string') {
-      const safeSrc = sanitizeUrl(imageItem.url)
-      if (!safeSrc) {
-        return []
-      }
-      return [{ src: safeSrc, revisedPrompt }]
+    if (typeof imageItem.url === 'string' && imageItem.url.trim()) {
+      return [{ src: imageItem.url.trim(), revisedPrompt, source: 'url' }]
     }
 
     return []
@@ -318,14 +263,6 @@ const activeResponseBody = computed(() => {
 })
 
 const activeImagePreviews = computed(() => buildImagePreviews(activeResponseBody.value, props.detail?.request_body ?? null))
-
-const openPreview = (preview: UsageDetailImagePreview) => {
-  selectedPreview.value = preview
-}
-
-const closePreview = () => {
-  selectedPreview.value = null
-}
 
 const activeContent = computed(() => {
   if (!props.detail) return ''
@@ -354,7 +291,6 @@ watch(
     if (show) {
       activeTab.value = 'client-request-headers'
       copied.value = false
-      selectedPreview.value = null
     }
   },
 )

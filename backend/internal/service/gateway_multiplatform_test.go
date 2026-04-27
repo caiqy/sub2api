@@ -2302,6 +2302,42 @@ func TestGatewayService_SelectAccountWithLoadAwareness(t *testing.T) {
 		require.Equal(t, 1, cache.getCalls["gemini-sticky-hit"])
 	})
 
+	t.Run("Anthropic sticky disabled skips load-aware sticky bind", func(t *testing.T) {
+		repo := &mockAccountRepoForPlatform{
+			accounts: []Account{
+				{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeOAuth, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 4},
+			},
+			accountsByID: map[int64]*Account{},
+		}
+		for i := range repo.accounts {
+			repo.accountsByID[repo.accounts[i].ID] = &repo.accounts[i]
+		}
+
+		cache := &mockGatewayCacheForPlatform{sessionBindings: map[string]int64{"anthropic-disabled-load-aware": 99}}
+		cfg := testConfig()
+		cfg.Gateway.Sticky.Anthropic.Enabled = false
+		cfg.Gateway.Scheduling.LoadBatchEnabled = true
+
+		svc := &GatewayService{
+			accountRepo:        repo,
+			cache:              cache,
+			cfg:                cfg,
+			concurrencyService: NewConcurrencyService(&mockConcurrencyCache{loadMap: map[int64]*AccountLoadInfo{1: {AccountID: 1, LoadRate: 0}}}),
+		}
+
+		result, err := svc.SelectAccountWithLoadAwareness(ctx, nil, "anthropic-disabled-load-aware", "claude-3-5-sonnet-20241022", nil, "", int64(0))
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.NotNil(t, result.Account)
+		require.Equal(t, int64(1), result.Account.ID)
+		require.Empty(t, cache.getCalls)
+		require.Empty(t, cache.setCalls)
+		require.Equal(t, int64(99), cache.sessionBindings["anthropic-disabled-load-aware"])
+		if result.ReleaseFunc != nil {
+			result.ReleaseFunc()
+		}
+	})
+
 	t.Run("禁用负载批量查询-降级到传统选择", func(t *testing.T) {
 		repo := &mockAccountRepoForPlatform{
 			accounts: []Account{

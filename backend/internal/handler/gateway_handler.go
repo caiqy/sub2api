@@ -107,6 +107,28 @@ func NewGatewayHandler(
 	}
 }
 
+func (h *GatewayHandler) getCachedSessionAccountIDForPlatform(ctx context.Context, platform string, groupID *int64, sessionKey string) int64 {
+	if h == nil || h.gatewayService == nil || sessionKey == "" {
+		return 0
+	}
+	if platform == service.PlatformGemini {
+		accountID, _ := h.gatewayService.GetGeminiCachedSessionAccountID(ctx, groupID, sessionKey)
+		return accountID
+	}
+	accountID, _ := h.gatewayService.GetCachedSessionAccountID(ctx, groupID, sessionKey)
+	return accountID
+}
+
+func (h *GatewayHandler) bindStickySessionForPlatform(ctx context.Context, platform string, groupID *int64, sessionKey string, accountID int64) error {
+	if h == nil || h.gatewayService == nil || sessionKey == "" {
+		return nil
+	}
+	if platform == service.PlatformGemini {
+		return h.gatewayService.BindGeminiStickySession(ctx, groupID, sessionKey, accountID)
+	}
+	return h.gatewayService.BindStickySession(ctx, groupID, sessionKey, accountID)
+}
+
 func (h *GatewayHandler) acquireUserGroupSlot(
 	c *gin.Context,
 	helper *ConcurrencyHelper,
@@ -336,7 +358,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	// 查询粘性会话绑定的账号 ID
 	var sessionBoundAccountID int64
 	if sessionKey != "" {
-		sessionBoundAccountID, _ = h.gatewayService.GetCachedSessionAccountID(c.Request.Context(), apiKey.GroupID, sessionKey)
+		sessionBoundAccountID = h.getCachedSessionAccountIDForPlatform(c.Request.Context(), platform, apiKey.GroupID, sessionKey)
 		if sessionBoundAccountID > 0 {
 			prefetchedGroupID := int64(0)
 			if apiKey.GroupID != nil {
@@ -463,7 +485,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 				// Slot acquired: no longer waiting in queue.
 				releaseWait()
-				if err := h.gatewayService.BindStickySession(c.Request.Context(), apiKey.GroupID, sessionKey, account.ID); err != nil {
+				if err := h.bindStickySessionForPlatform(c.Request.Context(), platform, apiKey.GroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
@@ -733,7 +755,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 				// Slot acquired: no longer waiting in queue.
 				releaseWait()
-				if err := h.gatewayService.BindStickySession(c.Request.Context(), currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
+				if err := h.bindStickySessionForPlatform(c.Request.Context(), platform, currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}

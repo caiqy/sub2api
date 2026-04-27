@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -36,6 +37,7 @@ func (s *layeredOpenAIAccountScheduler) Select(
 	req OpenAIAccountScheduleRequest,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
 	decision := OpenAIAccountScheduleDecision{}
+	schedGroup := schedulerGroupForRequest(ctx, s.service, req.GroupID)
 	start := time.Now()
 	defer func() {
 		decision.LatencyMs = time.Since(start).Milliseconds()
@@ -52,12 +54,27 @@ func (s *layeredOpenAIAccountScheduler) Select(
 				previousResponseID,
 				req.RequestedModel,
 				req.ExcludedIDs,
+				req.RequireCompact,
 			)
 			if err != nil {
 				return nil, decision, err
 			}
 			if selection != nil && selection.Account != nil {
 				if !s.isAccountTransportCompatible(selection.Account, req.RequiredTransport) {
+					if selection.ReleaseFunc != nil {
+						selection.ReleaseFunc()
+					}
+					selection = nil
+				}
+			}
+			if selection != nil && selection.Account != nil {
+				if (req.RequestedModel != "" && !selection.Account.IsModelSupported(req.RequestedModel)) ||
+					!selection.Account.SupportsOpenAIImageCapability(req.RequiredImageCapability) ||
+					!accountSatisfiesPrivacyRequirement(selection.Account, schedGroup) {
+					recordPrivacyRequirementError(ctx, s.service, selection.Account, schedGroup)
+					if selection.ReleaseFunc != nil {
+						selection.ReleaseFunc()
+					}
 					selection = nil
 				}
 			}
@@ -108,6 +125,7 @@ func (s *layeredOpenAIAccountScheduler) selectBySessionHash(
 	req OpenAIAccountScheduleRequest,
 ) (*AccountSelectionResult, error) {
 	sessionHash := strings.TrimSpace(req.SessionHash)
+	schedGroup := schedulerGroupForRequest(ctx, s.service, req.GroupID)
 	if sessionHash == "" || s == nil || s.service == nil || s.service.cache == nil {
 		return nil, nil
 	}
@@ -138,15 +156,25 @@ func (s *layeredOpenAIAccountScheduler) selectBySessionHash(
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		return nil, nil
 	}
+	if schedGroup != nil && schedGroup.RequirePrivacySet && !account.IsPrivacySet() {
+		_ = s.service.accountRepo.SetError(ctx, account.ID,
+			fmt.Sprintf("Privacy not set, required by group [%s]", schedGroup.Name))
+		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
+		return nil, nil
+	}
 	if req.RequestedModel != "" && !account.IsModelSupported(req.RequestedModel) {
+		return nil, nil
+	}
+	if !account.SupportsOpenAIImageCapability(req.RequiredImageCapability) {
 		return nil, nil
 	}
 	if !s.isAccountTransportCompatible(account, req.RequiredTransport) {
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		return nil, nil
 	}
-	account = s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.RequestedModel)
-	if account == nil {
+	account = s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.RequestedModel, req.RequireCompact)
+	if account == nil || (req.RequestedModel != "" && !account.IsModelSupported(req.RequestedModel)) || !account.SupportsOpenAIImageCapability(req.RequiredImageCapability) || !accountSatisfiesPrivacyRequirement(account, schedGroup) || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
+		recordPrivacyRequirementError(ctx, s.service, account, schedGroup)
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		return nil, nil
 	}
@@ -187,6 +215,7 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 	ctx context.Context,
 	req OpenAIAccountScheduleRequest,
 ) (*AccountSelectionResult, int, float64, error) {
+	schedGroup := schedulerGroupForRequest(ctx, s.service, req.GroupID)
 	accounts, err := s.service.listSchedulableAccounts(ctx, req.GroupID)
 	if err != nil {
 		return nil, 0, 0, err
@@ -206,6 +235,14 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 			}
 		}
 		if !account.IsSchedulable() || !account.IsOpenAI() {
+			continue
+		}
+		if schedGroup != nil && schedGroup.RequirePrivacySet && !account.IsPrivacySet() {
+			_ = s.service.accountRepo.SetError(ctx, account.ID,
+				fmt.Sprintf("Privacy not set, required by group [%s]", schedGroup.Name))
+			continue
+		}
+		if !account.SupportsOpenAIImageCapability(req.RequiredImageCapability) {
 			continue
 		}
 		if req.RequestedModel != "" && !account.IsModelSupported(req.RequestedModel) {
@@ -250,10 +287,10 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 	}
 
 	// 4. 应用运行时惩罚（使用 group-level 共享评估）并过滤满载候选
-	groupMinTTFT, hasGroupMin, err := s.computeGroupMinTTFT(ctx, req.GroupID)
-	if err != nil {
-		hasGroupMin = false
+	groupMinTTFT, hasGroupMin, groupMinErr := s.computeGroupMinTTFT(ctx, req.GroupID)
+	if groupMinErr != nil {
 		groupMinTTFT = 0
+		hasGroupMin = false
 	}
 	available := make([]accountWithLoad, 0, len(candidates))
 	loadRateSum := 0.0
@@ -291,13 +328,15 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 			break
 		}
 
-		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, selected.account, req.RequestedModel)
-		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
+		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, selected.account, req.RequestedModel, req.RequireCompact)
+		if fresh == nil || !fresh.SupportsOpenAIImageCapability(req.RequiredImageCapability) || !accountSatisfiesPrivacyRequirement(fresh, schedGroup) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
+			recordPrivacyRequirementError(ctx, s.service, fresh, schedGroup)
 			available = removeFromAvailable(available, selected.account.ID)
 			continue
 		}
-		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.RequestedModel)
-		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
+		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.RequestedModel, req.RequireCompact)
+		if fresh == nil || !fresh.SupportsOpenAIImageCapability(req.RequiredImageCapability) || !accountSatisfiesPrivacyRequirement(fresh, schedGroup) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
+			recordPrivacyRequirementError(ctx, s.service, fresh, schedGroup)
 			available = removeFromAvailable(available, selected.account.ID)
 			continue
 		}
@@ -323,10 +362,17 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 	cfg := s.service.schedulingConfig()
 	fallbackAccounts := make([]*Account, 0, len(filtered))
 	for _, account := range filtered {
-		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, account, req.RequestedModel)
-		if fresh != nil && s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
-			fallbackAccounts = append(fallbackAccounts, fresh)
+		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, account, req.RequestedModel, req.RequireCompact)
+		if fresh == nil || !fresh.SupportsOpenAIImageCapability(req.RequiredImageCapability) || !accountSatisfiesPrivacyRequirement(fresh, schedGroup) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
+			recordPrivacyRequirementError(ctx, s.service, fresh, schedGroup)
+			continue
 		}
+		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.RequestedModel, req.RequireCompact)
+		if fresh == nil || !fresh.SupportsOpenAIImageCapability(req.RequiredImageCapability) || !accountSatisfiesPrivacyRequirement(fresh, schedGroup) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
+			recordPrivacyRequirementError(ctx, s.service, fresh, schedGroup)
+			continue
+		}
+		fallbackAccounts = append(fallbackAccounts, fresh)
 	}
 	sortAccountsByPriorityAndLastUsed(fallbackAccounts, false)
 	for _, account := range fallbackAccounts {
@@ -383,6 +429,28 @@ func (s *layeredOpenAIAccountScheduler) computeGroupMinTTFT(ctx context.Context,
 		}
 	}
 	return minTTFT, hasMin, nil
+}
+
+func (s *layeredOpenAIAccountScheduler) computeMinTTFTForAccounts(accounts []*Account) (float64, bool) {
+	if s == nil || s.stats == nil {
+		return 0, false
+	}
+	var minTTFT float64
+	var hasMin bool
+	for _, account := range accounts {
+		if account == nil || !account.IsSchedulable() || !account.IsOpenAI() {
+			continue
+		}
+		_, ttft, hasTTFT := s.stats.snapshot(account.ID)
+		if !hasTTFT || ttft <= 0 {
+			continue
+		}
+		if !hasMin || ttft < minTTFT {
+			minTTFT = ttft
+			hasMin = true
+		}
+	}
+	return minTTFT, hasMin
 }
 
 // evaluateRuntimePenalty 基于预计算的 group-level 最小 TTFT 基线，

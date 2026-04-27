@@ -157,19 +157,22 @@ async function closePreview() {
 
 function handlePreviewKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape' && selectedPreview.value) {
+    // 在嵌套于 BaseDialog 等父级弹窗时，优先消费 Escape，避免父子弹窗被同一次按键一起关闭。
+    event.preventDefault()
+    event.stopPropagation()
     closePreview()
   }
 }
 
 function syncPreviewKeydownListener(shouldListen: boolean) {
   if (shouldListen && !hasPreviewKeydownListener) {
-    window.addEventListener('keydown', handlePreviewKeydown)
+    window.addEventListener('keydown', handlePreviewKeydown, true)
     hasPreviewKeydownListener = true
     return
   }
 
   if (!shouldListen && hasPreviewKeydownListener) {
-    window.removeEventListener('keydown', handlePreviewKeydown)
+    window.removeEventListener('keydown', handlePreviewKeydown, true)
     hasPreviewKeydownListener = false
   }
 }
