@@ -337,6 +337,88 @@ func TestSettingHandler_UpdateSettings_AllowsWeightedSchedulerWithoutLayeredValu
 	require.Equal(t, "weighted", data["gateway_openai_ws_scheduler_mode"])
 }
 
+func TestSettingHandler_UpdateSettings_PersistsStickyAndLayeredSchedulerSettings(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{values: map[string]string{service.SettingKeyPromoCodeEnabled: "true"}}
+	cfg := &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}}
+	svc := service.NewSettingService(repo, cfg)
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil)
+
+	body := map[string]any{
+		"promo_code_enabled":                                          false,
+		"gateway_sticky_openai_enabled":                               false,
+		"gateway_sticky_gemini_enabled":                               true,
+		"gateway_sticky_anthropic_enabled":                            false,
+		"gateway_openai_ws_scheduler_mode":                            " Layered ",
+		"gateway_openai_ws_scheduler_layered_error_penalty_threshold": 0.6,
+		"gateway_openai_ws_scheduler_layered_error_penalty_value":     100,
+		"gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier": 12,
+		"gateway_openai_ws_scheduler_layered_ttft_penalty_value":      50,
+		"gateway_openai_ws_scheduler_layered_probe_cooldown_seconds":  20,
+		"gateway_openai_ws_scheduler_layered_probe_interval_seconds":  20,
+		"gateway_openai_ws_scheduler_layered_probe_max_failures":      3,
+		"gateway_openai_ws_scheduler_layered_probe_timeout_seconds":   15,
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "false", repo.values[service.SettingKeyGatewayStickyOpenAIEnabled])
+	require.Equal(t, "true", repo.values[service.SettingKeyGatewayStickyGeminiEnabled])
+	require.Equal(t, "false", repo.values[service.SettingKeyGatewayStickyAnthropicEnabled])
+	require.Equal(t, "layered", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerMode])
+	require.Equal(t, "0.6", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold])
+	require.Equal(t, "100", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyValue])
+	require.Equal(t, "12", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier])
+	require.Equal(t, "50", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue])
+	require.Equal(t, "20", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds])
+	require.Equal(t, "20", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds])
+	require.Equal(t, "3", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeMaxFailures])
+	require.Equal(t, "15", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds])
+	require.False(t, cfg.Gateway.Sticky.OpenAI.Enabled)
+	require.True(t, cfg.Gateway.Sticky.Gemini.Enabled)
+	require.False(t, cfg.Gateway.Sticky.Anthropic.Enabled)
+	require.Equal(t, "layered", cfg.Gateway.OpenAIWS.SchedulerMode)
+}
+
+func TestSettingHandler_UpdateSettings_NormalizesConfiguredSchedulerModeWhenRequestOmitsMode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{values: map[string]string{service.SettingKeyPromoCodeEnabled: "true"}}
+	cfg := &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}}
+	cfg.Gateway.OpenAIWS.SchedulerMode = " Layered "
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold = 0.3
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyValue = 100
+	cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyMultiplier = 3
+	cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyValue = 50
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeCooldownSeconds = 60
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeIntervalSeconds = 30
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeMaxFailures = 3
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTimeoutSeconds = 15
+	svc := service.NewSettingService(repo, cfg)
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil)
+
+	rawBody, err := json.Marshal(map[string]any{"promo_code_enabled": false})
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "layered", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerMode])
+	require.Equal(t, "layered", cfg.Gateway.OpenAIWS.SchedulerMode)
+}
+
 func TestSettingHandler_UpdateSettings_PreservesLegacyBlankPaymentVisibleMethodSource(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &settingHandlerRepoStub{

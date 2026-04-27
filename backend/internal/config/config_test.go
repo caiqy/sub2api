@@ -224,6 +224,18 @@ func TestLoadGatewayStickyPlatformConfigFromEnv(t *testing.T) {
 	}
 }
 
+func TestValidateOpenAIWSSchedulerLayeredModeNormalizesBeforeValidatingLayeredFields(t *testing.T) {
+	resetViperWithJWTSecret(t)
+
+	cfg, err := Load()
+	require.NoError(t, err)
+
+	cfg.Gateway.OpenAIWS.SchedulerMode = " Layered "
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold = 0
+
+	require.ErrorContains(t, cfg.Validate(), "gateway.openai_ws.scheduler_layered.error_penalty_threshold")
+}
+
 func TestLoadOpenAIWSStickyTTLCompatibility(t *testing.T) {
 	resetViperWithJWTSecret(t)
 	t.Setenv("GATEWAY_OPENAI_WS_STICKY_RESPONSE_ID_TTL_SECONDS", "0")

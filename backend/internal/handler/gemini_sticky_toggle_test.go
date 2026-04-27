@@ -245,6 +245,68 @@ func TestGeminiStickyEnabled_BindStickySession(t *testing.T) {
 	})
 }
 
+func TestGatewayHandler_GeminiRouteStickyLookupUsesGeminiToggleNotAnthropicToggle(t *testing.T) {
+	t.Run("gemini disabled bypasses lookup even when anthropic enabled", func(t *testing.T) {
+		cache := &geminiStickyGatewayCacheStub{sessionBindings: map[string]int64{"gemini:gateway-route-disabled": 707}}
+		cfg := &config.Config{}
+		cfg.Gateway.Sticky.Gemini.Enabled = false
+		cfg.Gateway.Sticky.Anthropic.Enabled = true
+		gatewayService := service.NewGatewayService(nil, nil, nil, nil, nil, nil, nil, cache, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+		h := &GatewayHandler{gatewayService: gatewayService, cfg: cfg}
+
+		accountID := h.getCachedSessionAccountIDForPlatform(context.Background(), service.PlatformGemini, nil, "gemini:gateway-route-disabled")
+
+		require.Zero(t, accountID)
+		require.Zero(t, cache.getCalls["gemini:gateway-route-disabled"])
+	})
+
+	t.Run("gemini enabled performs lookup even when anthropic disabled", func(t *testing.T) {
+		cache := &geminiStickyGatewayCacheStub{sessionBindings: map[string]int64{"gemini:gateway-route-enabled": 808}}
+		cfg := &config.Config{}
+		cfg.Gateway.Sticky.Gemini.Enabled = true
+		cfg.Gateway.Sticky.Anthropic.Enabled = false
+		gatewayService := service.NewGatewayService(nil, nil, nil, nil, nil, nil, nil, cache, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+		h := &GatewayHandler{gatewayService: gatewayService, cfg: cfg}
+
+		accountID := h.getCachedSessionAccountIDForPlatform(context.Background(), service.PlatformGemini, nil, "gemini:gateway-route-enabled")
+
+		require.Equal(t, int64(808), accountID)
+		require.Equal(t, 1, cache.getCalls["gemini:gateway-route-enabled"])
+	})
+}
+
+func TestGatewayHandler_GeminiRouteStickyBindUsesGeminiToggleNotAnthropicToggle(t *testing.T) {
+	t.Run("gemini disabled bypasses bind even when anthropic enabled", func(t *testing.T) {
+		cache := &geminiStickyGatewayCacheStub{}
+		cfg := &config.Config{}
+		cfg.Gateway.Sticky.Gemini.Enabled = false
+		cfg.Gateway.Sticky.Anthropic.Enabled = true
+		gatewayService := service.NewGatewayService(nil, nil, nil, nil, nil, nil, nil, cache, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+		h := &GatewayHandler{gatewayService: gatewayService, cfg: cfg}
+
+		err := h.bindStickySessionForPlatform(context.Background(), service.PlatformGemini, nil, "gemini:gateway-bind-disabled", 909)
+
+		require.NoError(t, err)
+		require.Zero(t, cache.setCalls["gemini:gateway-bind-disabled"])
+		require.Zero(t, cache.sessionBindings["gemini:gateway-bind-disabled"])
+	})
+
+	t.Run("gemini enabled writes bind even when anthropic disabled", func(t *testing.T) {
+		cache := &geminiStickyGatewayCacheStub{}
+		cfg := &config.Config{}
+		cfg.Gateway.Sticky.Gemini.Enabled = true
+		cfg.Gateway.Sticky.Anthropic.Enabled = false
+		gatewayService := service.NewGatewayService(nil, nil, nil, nil, nil, nil, nil, cache, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+		h := &GatewayHandler{gatewayService: gatewayService, cfg: cfg}
+
+		err := h.bindStickySessionForPlatform(context.Background(), service.PlatformGemini, nil, "gemini:gateway-bind-enabled", 1001)
+
+		require.NoError(t, err)
+		require.Equal(t, 1, cache.setCalls["gemini:gateway-bind-enabled"])
+		require.Equal(t, int64(1001), cache.sessionBindings["gemini:gateway-bind-enabled"])
+	})
+}
+
 func TestGeminiStickyEnabled_DigestSession(t *testing.T) {
 	t.Run("enabled keeps digest fallback behavior", func(t *testing.T) {
 		digestStore := service.NewDigestSessionStore()

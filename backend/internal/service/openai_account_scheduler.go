@@ -1041,7 +1041,8 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerModeRequested() bool {
 	if s == nil || s.cfg == nil {
 		return false
 	}
-	return strings.EqualFold(strings.TrimSpace(s.cfg.Gateway.OpenAIWS.SchedulerMode), "layered")
+	mode := strings.ToLower(strings.TrimSpace(s.cfg.Gateway.OpenAIWS.SchedulerMode))
+	return mode == "weighted" || mode == "layered"
 }
 
 func (s *OpenAIGatewayService) isOpenAIAdvancedSchedulerEnabled(ctx context.Context) bool {
@@ -1053,6 +1054,10 @@ func (s *OpenAIGatewayService) isOpenAIAdvancedSchedulerEnabled(ctx context.Cont
 	}
 	if cached, ok := openAIAdvancedSchedulerSettingCache.Load().(*cachedOpenAIAdvancedSchedulerSetting); ok && cached != nil {
 		if time.Now().UnixNano() < cached.expiresAt {
+			// scheduler_mode is the primary runtime control; the legacy DB flag is only a fallback.
+			if s.openAIAdvancedSchedulerModeRequested() {
+				return true
+			}
 			return cached.enabled
 		}
 	}
@@ -1060,25 +1065,29 @@ func (s *OpenAIGatewayService) isOpenAIAdvancedSchedulerEnabled(ctx context.Cont
 	result, _, _ := openAIAdvancedSchedulerSettingSF.Do(openAIAdvancedSchedulerSettingKey, func() (any, error) {
 		if cached, ok := openAIAdvancedSchedulerSettingCache.Load().(*cachedOpenAIAdvancedSchedulerSetting); ok && cached != nil {
 			if time.Now().UnixNano() < cached.expiresAt {
+				if s.openAIAdvancedSchedulerModeRequested() {
+					return true, nil
+				}
 				return cached.enabled, nil
 			}
 		}
 
-		enabled := s.openAIAdvancedSchedulerModeRequested()
+		modeRequested := s.openAIAdvancedSchedulerModeRequested()
 		repo := s.openAIAdvancedSchedulerSettingRepo()
 		dbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), openAIAdvancedSchedulerSettingDBTimeout)
 		defer cancel()
 
+		legacyEnabled := false
 		value, err := repo.GetValue(dbCtx, openAIAdvancedSchedulerSettingKey)
 		if err == nil {
-			enabled = strings.EqualFold(strings.TrimSpace(value), "true")
+			legacyEnabled = strings.EqualFold(strings.TrimSpace(value), "true")
 		}
 
 		openAIAdvancedSchedulerSettingCache.Store(&cachedOpenAIAdvancedSchedulerSetting{
-			enabled:   enabled,
+			enabled:   legacyEnabled,
 			expiresAt: time.Now().Add(openAIAdvancedSchedulerSettingCacheTTL).UnixNano(),
 		})
-		return enabled, nil
+		return modeRequested || legacyEnabled, nil
 	})
 
 	enabled, _ := result.(bool)
@@ -1272,7 +1281,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 		if sessionHash != "" {
 			_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 		}
-		if previousResponseID != "" {
+		if s.openAIStickyEnabled() && previousResponseID != "" {
 			if store := s.getOpenAIWSStateStore(); store != nil {
 				_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), strings.TrimSpace(previousResponseID))
 			}

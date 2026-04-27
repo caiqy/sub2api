@@ -2443,12 +2443,13 @@ func (c *Config) Validate() error {
 	if weightSum <= 0 {
 		return fmt.Errorf("gateway.openai_ws.scheduler_score_weights must not all be zero")
 	}
-	switch strings.ToLower(strings.TrimSpace(c.Gateway.OpenAIWS.SchedulerMode)) {
+	schedulerMode := strings.ToLower(strings.TrimSpace(c.Gateway.OpenAIWS.SchedulerMode))
+	switch schedulerMode {
 	case "", "weighted", "layered":
 	default:
 		return fmt.Errorf("gateway.openai_ws.scheduler_mode must be one of weighted|layered")
 	}
-	if c.Gateway.OpenAIWS.SchedulerMode == "layered" {
+	if schedulerMode == "layered" {
 		sl := c.Gateway.OpenAIWS.SchedulerLayered
 		if sl.ErrorPenaltyThreshold <= 0 || sl.ErrorPenaltyThreshold > 1 {
 			return fmt.Errorf("gateway.openai_ws.scheduler_layered.error_penalty_threshold must be in (0,1]")

@@ -287,7 +287,11 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 	}
 
 	// 4. 应用运行时惩罚（使用 group-level 共享评估）并过滤满载候选
-	groupMinTTFT, hasGroupMin := s.computeMinTTFTForAccounts(filtered)
+	groupMinTTFT, hasGroupMin, groupMinErr := s.computeGroupMinTTFT(ctx, req.GroupID)
+	if groupMinErr != nil {
+		groupMinTTFT = 0
+		hasGroupMin = false
+	}
 	available := make([]accountWithLoad, 0, len(candidates))
 	loadRateSum := 0.0
 	loadRateSumSquares := 0.0

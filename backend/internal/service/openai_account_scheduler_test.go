@@ -18,6 +18,7 @@ type openAIWSStateStoreSpy struct {
 	responseAccounts        map[string]int64
 	getResponseAccountCalls map[string]int
 	bindResponseCalls       map[string]int
+	deleteResponseCalls     map[string]int
 }
 
 func (s *openAIWSStateStoreSpy) BindResponseAccount(ctx context.Context, groupID int64, responseID string, accountID int64, ttl time.Duration) error {
@@ -44,6 +45,10 @@ func (s *openAIWSStateStoreSpy) GetResponseAccount(ctx context.Context, groupID 
 }
 
 func (s *openAIWSStateStoreSpy) DeleteResponseAccount(ctx context.Context, groupID int64, responseID string) error {
+	if s.deleteResponseCalls == nil {
+		s.deleteResponseCalls = make(map[string]int)
+	}
+	s.deleteResponseCalls[responseID]++
 	if s.responseAccounts != nil {
 		delete(s.responseAccounts, responseID)
 	}
@@ -727,9 +732,64 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_AdvancedUpstreamRestric
 	require.Equal(t, backupAccount.ID, selection.Account.ID)
 	_, exists := stateStore.responseAccounts["resp_prev_restricted"]
 	require.False(t, exists, "restricted previous_response sticky binding should be cleared")
-	if selection.ReleaseFunc != nil {
-		selection.ReleaseFunc()
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_StickyDisabledDoesNotDeletePreviousResponseOnRestriction(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	ctx := context.Background()
+	groupID := int64(41004)
+	restrictedAccount := Account{
+		ID:          410041,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    0,
+		Extra:       map[string]any{"openai_apikey_responses_websockets_v2_enabled": true},
+		Credentials: map[string]any{"model_mapping": map[string]any{"gpt-5.1": "restricted-upstream"}},
 	}
+	channelSvc := newSchedulerTestChannelService(Channel{
+		ID:                 4,
+		Status:             StatusActive,
+		GroupIDs:           []int64{groupID},
+		RestrictModels:     true,
+		BillingModelSource: BillingModelSourceUpstream,
+		ModelPricing: []ChannelModelPricing{{
+			Platform: "openai",
+			Models:   []string{"allowed-upstream"},
+		}},
+	}, map[int64]string{groupID: "openai"})
+	stateStore := &openAIWSStateStoreSpy{responseAccounts: map[string]int64{"resp_prev_disabled_restricted": restrictedAccount.ID}}
+	cfg := newOpenAIStickyEnabledTestConfig()
+	cfg.Gateway.Sticky.OpenAI.Enabled = false
+	cfg.Gateway.Sticky.Gemini.Enabled = true
+	cfg.Gateway.Sticky.Anthropic.Enabled = true
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+	cfg.Gateway.OpenAIWS.OAuthEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.StickyResponseIDTTLSeconds = 3600
+	cfg.Gateway.OpenAIWS.SchedulerMode = "weighted"
+
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{restrictedAccount}},
+		cache:              &schedulerTestGatewayCache{},
+		cfg:                cfg,
+		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+		channelService:     channelSvc,
+		openaiWSStateStore: stateStore,
+	}
+
+	selection, decision, err := svc.SelectAccountWithScheduler(ctx, &groupID, "resp_prev_disabled_restricted", "session_hash_prev_disabled_restricted", "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
+	require.Error(t, err)
+	require.Nil(t, selection)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.Zero(t, stateStore.getResponseAccountCalls["resp_prev_disabled_restricted"])
+	require.Zero(t, stateStore.deleteResponseCalls["resp_prev_disabled_restricted"])
+	require.Equal(t, restrictedAccount.ID, stateStore.responseAccounts["resp_prev_disabled_restricted"])
 }
 
 func TestOpenAIGatewayService_SelectAccountWithScheduler_LayeredRequirePrivacySet(t *testing.T) {
@@ -792,7 +852,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LayeredRequirePrivacySe
 	require.Contains(t, repo.setErrors[410021], "Privacy not set")
 }
 
-func TestOpenAIGatewayService_GetOpenAIAccountScheduler_RuntimeRefreshRecreatesAndDisablesScheduler(t *testing.T) {
+func TestOpenAIGatewayService_GetOpenAIAccountScheduler_RuntimeRefreshRecreatesAndIgnoresLegacyDisableWhenModeConfigured(t *testing.T) {
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 
 	ctx := context.Background()
@@ -831,8 +891,74 @@ func TestOpenAIGatewayService_GetOpenAIAccountScheduler_RuntimeRefreshRecreatesA
 	})
 
 	scheduler = svc.getOpenAIAccountSchedulerWithContext(ctx)
-	require.Nil(t, scheduler)
-	require.Nil(t, svc.openaiScheduler)
+	require.IsType(t, &layeredOpenAIAccountScheduler{}, scheduler)
+	require.NotNil(t, svc.openaiScheduler)
+}
+
+func TestOpenAIGatewayService_SchedulerModeLayeredIgnoresLegacyAdvancedSchedulerDisabledFlag(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	ctx := context.Background()
+	cfg := newOpenAIStickyEnabledTestConfig()
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold = 0.2
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyValue = 1
+	cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyMultiplier = 2
+	cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyValue = 1
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeCooldownSeconds = 1
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeIntervalSeconds = 1
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeMaxFailures = 1
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTimeoutSeconds = 1
+	settingSvc := NewSettingService(&openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{
+		openAIAdvancedSchedulerSettingKey: "false",
+	}}, cfg)
+	svc := &OpenAIGatewayService{cfg: cfg, rateLimitService: &RateLimitService{settingService: settingSvc}}
+
+	scheduler := svc.getOpenAIAccountSchedulerWithContext(ctx)
+
+	require.IsType(t, &layeredOpenAIAccountScheduler{}, scheduler)
+}
+
+func TestOpenAIGatewayService_SchedulerModeWeightedUsesDefaultSchedulerWithoutLegacyAdvancedFlag(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	ctx := context.Background()
+	cfg := newOpenAIStickyEnabledTestConfig()
+	cfg.Gateway.OpenAIWS.SchedulerMode = "weighted"
+	settingSvc := NewSettingService(&openAIAdvancedSchedulerSettingRepoStub{}, cfg)
+	svc := &OpenAIGatewayService{cfg: cfg, rateLimitService: &RateLimitService{settingService: settingSvc}}
+
+	scheduler := svc.getOpenAIAccountSchedulerWithContext(ctx)
+
+	require.IsType(t, &defaultOpenAIAccountScheduler{}, scheduler)
+}
+
+func TestOpenAIGatewayService_SchedulerModeCacheDoesNotLeakEffectiveEnabledAcrossServices(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	ctx := context.Background()
+	repo := &openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{
+		openAIAdvancedSchedulerSettingKey: "false",
+	}}
+	modeCfg := newOpenAIStickyEnabledTestConfig()
+	modeCfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	modeCfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold = 0.2
+	modeCfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyValue = 1
+	modeCfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyMultiplier = 2
+	modeCfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyValue = 1
+	modeCfg.Gateway.OpenAIWS.SchedulerLayered.ProbeCooldownSeconds = 1
+	modeCfg.Gateway.OpenAIWS.SchedulerLayered.ProbeIntervalSeconds = 1
+	modeCfg.Gateway.OpenAIWS.SchedulerLayered.ProbeMaxFailures = 1
+	modeCfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTimeoutSeconds = 1
+	modeSettingSvc := NewSettingService(repo, modeCfg)
+	modeSvc := &OpenAIGatewayService{cfg: modeCfg, rateLimitService: &RateLimitService{settingService: modeSettingSvc}}
+	require.IsType(t, &layeredOpenAIAccountScheduler{}, modeSvc.getOpenAIAccountSchedulerWithContext(ctx))
+
+	legacyCfg := newOpenAIStickyEnabledTestConfig()
+	legacySettingSvc := NewSettingService(repo, legacyCfg)
+	legacySvc := &OpenAIGatewayService{cfg: legacyCfg, rateLimitService: &RateLimitService{settingService: legacySettingSvc}}
+
+	require.Nil(t, legacySvc.getOpenAIAccountSchedulerWithContext(ctx))
 }
 
 func TestOpenAIGatewayService_SettingsRefreshRecreatesLayeredSchedulerOnProbeIntervalChange(t *testing.T) {

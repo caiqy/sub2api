@@ -2190,12 +2190,12 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		GatewayStickyOpenAIEnabled:       s.cfg != nil && s.cfg.Gateway.Sticky.OpenAI.Enabled,
 		GatewayStickyGeminiEnabled:       s.cfg != nil && s.cfg.Gateway.Sticky.Gemini.Enabled,
 		GatewayStickyAnthropicEnabled:    s.cfg != nil && s.cfg.Gateway.Sticky.Anthropic.Enabled,
-		GatewayOpenAIWSSchedulerMode: strings.TrimSpace(func() string {
+		GatewayOpenAIWSSchedulerMode: strings.ToLower(strings.TrimSpace(func() string {
 			if s != nil && s.cfg != nil {
 				return s.cfg.Gateway.OpenAIWS.SchedulerMode
 			}
 			return ""
-		}()),
+		}())),
 		GatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold: func() float64 {
 			if s != nil && s.cfg != nil {
 				return s.cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold

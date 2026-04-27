@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -330,7 +331,7 @@ func TestLayered_TTFTPenalty_SharedEvaluatorUsesConsistentGroupBaseline(t *testi
 	require.InDelta(t, eval1.GroupMinTTFT, eval2.GroupMinTTFT, 0.01)
 }
 
-func TestLayered_TTFTBaselineUsesOnlyRequestEligibleAccounts(t *testing.T) {
+func TestLayered_TTFTPenaltyUsesGroupLevelBaselineEvenWhenFastestAccountIsRequestIneligible(t *testing.T) {
 	groupID := int64(93001)
 	repo := schedulerTestOpenAIAccountRepo{accounts: []Account{
 		{ID: 21, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, Extra: map[string]any{}},
@@ -364,7 +365,42 @@ func TestLayered_TTFTBaselineUsesOnlyRequestEligibleAccounts(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, result.Account)
-	require.Equal(t, int64(22), result.Account.ID)
+	require.Equal(t, int64(23), result.Account.ID)
+	if result.ReleaseFunc != nil {
+		result.ReleaseFunc()
+	}
+}
+
+type layeredBaselineFailingAccountRepo struct {
+	AccountRepository
+	accounts []Account
+	calls    int
+}
+
+func (r *layeredBaselineFailingAccountRepo) ListSchedulableUngroupedByPlatform(ctx context.Context, platform string) ([]Account, error) {
+	r.calls++
+	if r.calls > 1 {
+		return nil, errors.New("baseline unavailable")
+	}
+	return append([]Account(nil), r.accounts...), nil
+}
+
+func TestLayered_TTFTBaselineFailureDoesNotFailScheduling(t *testing.T) {
+	repo := &layeredBaselineFailingAccountRepo{accounts: []Account{
+		{ID: 31, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0},
+	}}
+	svc := newLayeredTestService(repo.accounts)
+	svc.accountRepo = repo
+	scheduler := svc.getOpenAIAccountScheduler()
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+	require.NotNil(t, scheduler)
+
+	result, _, err := scheduler.Select(context.Background(), OpenAIAccountScheduleRequest{RequestedModel: "gpt-5.1"})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Account)
+	require.Equal(t, int64(31), result.Account.ID)
+	require.Equal(t, 2, repo.calls)
 	if result.ReleaseFunc != nil {
 		result.ReleaseFunc()
 	}

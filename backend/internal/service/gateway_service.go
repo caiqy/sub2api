@@ -1975,7 +1975,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				if !s.checkAndRegisterSession(ctx, selected.account, sessionHash) {
 					result.ReleaseFunc() // 释放槽位，继续尝试下一个账号
 				} else {
-					if sessionHash != "" && s.cache != nil {
+					if stickyEnabled && sessionHash != "" && s.cache != nil {
 						_ = s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, selected.account.ID, stickySessionTTL)
 					}
 					return s.newSelectionResult(ctx, selected.account, true, result.ReleaseFunc, nil)

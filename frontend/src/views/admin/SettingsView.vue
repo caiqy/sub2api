@@ -9,7 +9,7 @@
       </div>
 
       <!-- Settings Form -->
-      <form v-else @submit.prevent="saveSettings" class="space-y-6" novalidate>
+      <form v-else data-testid="settings-form" @submit.prevent="saveSettings" class="space-y-6" novalidate>
         <!-- Tab Navigation -->
         <div class="sticky top-0 z-10 overflow-x-auto settings-tabs-scroll">
           <nav class="settings-tabs">
@@ -2899,7 +2899,7 @@
                     {{ t("admin.settings.gatewaySticky.openaiHint") }}
                   </p>
                 </div>
-                <Toggle v-model="form.gateway_sticky_openai_enabled" />
+                <Toggle data-testid="gateway-sticky-openai-enabled" v-model="form.gateway_sticky_openai_enabled" />
               </div>
               <div class="flex items-center justify-between">
                 <div>
@@ -2908,7 +2908,7 @@
                     {{ t("admin.settings.gatewaySticky.geminiHint") }}
                   </p>
                 </div>
-                <Toggle v-model="form.gateway_sticky_gemini_enabled" />
+                <Toggle data-testid="gateway-sticky-gemini-enabled" v-model="form.gateway_sticky_gemini_enabled" />
               </div>
               <div class="flex items-center justify-between">
                 <div>
@@ -2917,7 +2917,7 @@
                     {{ t("admin.settings.gatewaySticky.anthropicHint") }}
                   </p>
                 </div>
-                <Toggle v-model="form.gateway_sticky_anthropic_enabled" />
+                <Toggle data-testid="gateway-sticky-anthropic-enabled" v-model="form.gateway_sticky_anthropic_enabled" />
               </div>
             </div>
           </div>
@@ -2938,7 +2938,7 @@
                 <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
                   {{ t("admin.settings.openaiWsScheduler.mode") }}
                 </label>
-                <select v-model="form.gateway_openai_ws_scheduler_mode" class="input max-w-xs">
+                <select data-testid="gateway-openai-ws-scheduler-mode" v-model="form.gateway_openai_ws_scheduler_mode" class="input max-w-xs">
                   <option value="weighted">weighted</option>
                   <option value="layered">layered</option>
                 </select>
@@ -2950,35 +2950,35 @@
               <div v-if="form.gateway_openai_ws_scheduler_mode === 'layered'" class="grid gap-4 md:grid-cols-2">
                 <div>
                   <label class="input-label">{{ t("admin.settings.openaiWsScheduler.errorPenaltyThreshold") }}</label>
-                  <input v-model.number="form.gateway_openai_ws_scheduler_layered_error_penalty_threshold" type="number" min="0.01" max="1" step="0.01" class="input" />
+                  <input data-testid="gateway-openai-ws-scheduler-layered-error-penalty-threshold" v-model.number="form.gateway_openai_ws_scheduler_layered_error_penalty_threshold" type="number" min="0.01" max="1" step="0.01" class="input" />
                 </div>
                 <div>
                   <label class="input-label">{{ t("admin.settings.openaiWsScheduler.errorPenaltyValue") }}</label>
-                  <input v-model.number="form.gateway_openai_ws_scheduler_layered_error_penalty_value" type="number" min="1" step="1" class="input" />
+                  <input data-testid="gateway-openai-ws-scheduler-layered-error-penalty-value" v-model.number="form.gateway_openai_ws_scheduler_layered_error_penalty_value" type="number" min="1" step="1" class="input" />
                 </div>
                 <div>
                   <label class="input-label">{{ t("admin.settings.openaiWsScheduler.ttftPenaltyMultiplier") }}</label>
-                  <input v-model.number="form.gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier" type="number" min="1.01" step="0.01" class="input" />
+                  <input data-testid="gateway-openai-ws-scheduler-layered-ttft-penalty-multiplier" v-model.number="form.gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier" type="number" min="1.01" step="0.01" class="input" />
                 </div>
                 <div>
                   <label class="input-label">{{ t("admin.settings.openaiWsScheduler.ttftPenaltyValue") }}</label>
-                  <input v-model.number="form.gateway_openai_ws_scheduler_layered_ttft_penalty_value" type="number" min="1" step="1" class="input" />
+                  <input data-testid="gateway-openai-ws-scheduler-layered-ttft-penalty-value" v-model.number="form.gateway_openai_ws_scheduler_layered_ttft_penalty_value" type="number" min="1" step="1" class="input" />
                 </div>
                 <div>
                   <label class="input-label">{{ t("admin.settings.openaiWsScheduler.probeCooldownSeconds") }}</label>
-                  <input v-model.number="form.gateway_openai_ws_scheduler_layered_probe_cooldown_seconds" type="number" min="1" step="1" class="input" />
+                  <input data-testid="gateway-openai-ws-scheduler-layered-probe-cooldown-seconds" v-model.number="form.gateway_openai_ws_scheduler_layered_probe_cooldown_seconds" type="number" min="1" step="1" class="input" />
                 </div>
                 <div>
                   <label class="input-label">{{ t("admin.settings.openaiWsScheduler.probeIntervalSeconds") }}</label>
-                  <input v-model.number="form.gateway_openai_ws_scheduler_layered_probe_interval_seconds" type="number" min="1" step="1" class="input" />
+                  <input data-testid="gateway-openai-ws-scheduler-layered-probe-interval-seconds" v-model.number="form.gateway_openai_ws_scheduler_layered_probe_interval_seconds" type="number" min="1" step="1" class="input" />
                 </div>
                 <div>
                   <label class="input-label">{{ t("admin.settings.openaiWsScheduler.probeMaxFailures") }}</label>
-                  <input v-model.number="form.gateway_openai_ws_scheduler_layered_probe_max_failures" type="number" min="1" step="1" class="input" />
+                  <input data-testid="gateway-openai-ws-scheduler-layered-probe-max-failures" v-model.number="form.gateway_openai_ws_scheduler_layered_probe_max_failures" type="number" min="1" step="1" class="input" />
                 </div>
                 <div>
                   <label class="input-label">{{ t("admin.settings.openaiWsScheduler.probeTimeoutSeconds") }}</label>
-                  <input v-model.number="form.gateway_openai_ws_scheduler_layered_probe_timeout_seconds" type="number" min="1" step="1" class="input" />
+                  <input data-testid="gateway-openai-ws-scheduler-layered-probe-timeout-seconds" v-model.number="form.gateway_openai_ws_scheduler_layered_probe_timeout_seconds" type="number" min="1" step="1" class="input" />
                 </div>
               </div>
             </div>
@@ -5391,6 +5391,7 @@
         <div v-show="activeTab !== 'backup'" class="flex justify-end">
           <button
             type="submit"
+            data-testid="settings-save"
             :disabled="saving || loadFailed"
             class="btn btn-primary"
           >
