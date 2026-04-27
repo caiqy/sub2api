@@ -1776,6 +1776,11 @@ func lastFixedWeeklyReset(day, hour int, tz *time.Location, now time.Time) time.
 
 // isFixedDailyPeriodExpired 检查日配额是否在固定时间模式下已过期
 func (a *Account) isFixedDailyPeriodExpired(periodStart time.Time) bool {
+	// 优先信任预计算的 reset_at，使显示层/超限判断与数据库计费窗口保持一致；
+	// 仅在历史数据缺少该字段时，才回退到基于 start 的旧逻辑。
+	if resetAt := a.getExtraTime("quota_daily_reset_at"); !resetAt.IsZero() {
+		return !time.Now().Before(resetAt)
+	}
 	if periodStart.IsZero() {
 		return true
 	}
@@ -1789,6 +1794,10 @@ func (a *Account) isFixedDailyPeriodExpired(periodStart time.Time) bool {
 
 // isFixedWeeklyPeriodExpired 检查周配额是否在固定时间模式下已过期
 func (a *Account) isFixedWeeklyPeriodExpired(periodStart time.Time) bool {
+	// 同 daily：优先使用 reset_at，与数据库窗口语义对齐；缺失时兼容旧数据。
+	if resetAt := a.getExtraTime("quota_weekly_reset_at"); !resetAt.IsZero() {
+		return !time.Now().Before(resetAt)
+	}
 	if periodStart.IsZero() {
 		return true
 	}
