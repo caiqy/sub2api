@@ -19,6 +19,8 @@ import (
 type settingHandlerRepoStub struct {
 	values      map[string]string
 	lastUpdates map[string]string
+	setErrKey   string
+	setErr      error
 }
 
 func (s *settingHandlerRepoStub) Get(ctx context.Context, key string) (*service.Setting, error) {
@@ -35,7 +37,18 @@ func (s *settingHandlerRepoStub) GetValue(ctx context.Context, key string) (stri
 }
 
 func (s *settingHandlerRepoStub) Set(ctx context.Context, key, value string) error {
-	panic("unexpected Set call")
+	if s.setErr != nil && key == s.setErrKey {
+		return s.setErr
+	}
+	if s.values == nil {
+		s.values = map[string]string{}
+	}
+	if s.lastUpdates == nil {
+		s.lastUpdates = map[string]string{}
+	}
+	s.lastUpdates[key] = value
+	s.values[key] = value
+	return nil
 }
 
 func (s *settingHandlerRepoStub) GetMultiple(ctx context.Context, keys []string) (map[string]string, error) {
@@ -388,6 +401,171 @@ func TestSettingHandler_UpdateSettings_PersistsStickyAndLayeredSchedulerSettings
 	require.True(t, cfg.Gateway.Sticky.Gemini.Enabled)
 	require.False(t, cfg.Gateway.Sticky.Anthropic.Enabled)
 	require.Equal(t, "layered", cfg.Gateway.OpenAIWS.SchedulerMode)
+}
+
+func TestSettingHandler_UpdateSettings_PersistsFastPolicyTogetherWithStickyAndLayeredSettings(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{values: map[string]string{service.SettingKeyPromoCodeEnabled: "true"}}
+	cfg := &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}}
+	svc := service.NewSettingService(repo, cfg)
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil)
+
+	body := map[string]any{
+		"promo_code_enabled":                                          true,
+		"gateway_sticky_openai_enabled":                               true,
+		"gateway_sticky_gemini_enabled":                               false,
+		"gateway_sticky_anthropic_enabled":                            true,
+		"gateway_openai_ws_scheduler_mode":                            "layered",
+		"gateway_openai_ws_scheduler_layered_error_penalty_threshold": 0.55,
+		"gateway_openai_ws_scheduler_layered_error_penalty_value":     77,
+		"gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier": 6,
+		"gateway_openai_ws_scheduler_layered_ttft_penalty_value":      33,
+		"gateway_openai_ws_scheduler_layered_probe_cooldown_seconds":  44,
+		"gateway_openai_ws_scheduler_layered_probe_interval_seconds":  22,
+		"gateway_openai_ws_scheduler_layered_probe_max_failures":      5,
+		"gateway_openai_ws_scheduler_layered_probe_timeout_seconds":   11,
+		"openai_fast_policy_settings": map[string]any{
+			"rules": []map[string]any{{
+				"service_tier":           "priority",
+				"action":                 "filter",
+				"scope":                  "oauth",
+				"model_whitelist":        []string{"gpt-4.1", "gpt-4o"},
+				"fallback_action":        "block",
+				"fallback_error_message": "tier blocked",
+			}},
+		},
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "true", repo.values[service.SettingKeyGatewayStickyOpenAIEnabled])
+	require.Equal(t, "false", repo.values[service.SettingKeyGatewayStickyGeminiEnabled])
+	require.Equal(t, "true", repo.values[service.SettingKeyGatewayStickyAnthropicEnabled])
+	require.Equal(t, "layered", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerMode])
+	require.Equal(t, "0.55", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold])
+	require.Equal(t, "77", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyValue])
+	require.Equal(t, "6", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier])
+	require.Equal(t, "33", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue])
+	require.Equal(t, "44", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds])
+	require.Equal(t, "22", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds])
+	require.Equal(t, "5", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeMaxFailures])
+	require.Equal(t, "11", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds])
+	require.NotEmpty(t, repo.values[service.SettingKeyOpenAIFastPolicySettings])
+
+	var persistedFastPolicy map[string]any
+	require.NoError(t, json.Unmarshal([]byte(repo.values[service.SettingKeyOpenAIFastPolicySettings]), &persistedFastPolicy))
+	rules, ok := persistedFastPolicy["rules"].([]any)
+	require.True(t, ok)
+	require.Len(t, rules, 1)
+	persistedRule, ok := rules[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "priority", persistedRule["service_tier"])
+	require.Equal(t, "filter", persistedRule["action"])
+	require.Equal(t, "oauth", persistedRule["scope"])
+	require.Equal(t, "block", persistedRule["fallback_action"])
+	require.Equal(t, "tier blocked", persistedRule["fallback_error_message"])
+	persistedWhitelist, ok := persistedRule["model_whitelist"].([]any)
+	require.True(t, ok)
+	require.Len(t, persistedWhitelist, 2)
+	require.ElementsMatch(t, []any{"gpt-4.1", "gpt-4o"}, persistedWhitelist)
+
+	var resp response.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	data, ok := resp.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, true, data["gateway_sticky_openai_enabled"])
+	require.Equal(t, false, data["gateway_sticky_gemini_enabled"])
+	require.Equal(t, true, data["gateway_sticky_anthropic_enabled"])
+	require.Equal(t, "layered", data["gateway_openai_ws_scheduler_mode"])
+	require.Equal(t, 0.55, data["gateway_openai_ws_scheduler_layered_error_penalty_threshold"])
+	require.Equal(t, float64(77), data["gateway_openai_ws_scheduler_layered_error_penalty_value"])
+	require.Equal(t, float64(6), data["gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier"])
+	require.Equal(t, float64(33), data["gateway_openai_ws_scheduler_layered_ttft_penalty_value"])
+	require.Equal(t, float64(44), data["gateway_openai_ws_scheduler_layered_probe_cooldown_seconds"])
+	require.Equal(t, float64(22), data["gateway_openai_ws_scheduler_layered_probe_interval_seconds"])
+	require.Equal(t, float64(5), data["gateway_openai_ws_scheduler_layered_probe_max_failures"])
+	require.Equal(t, float64(11), data["gateway_openai_ws_scheduler_layered_probe_timeout_seconds"])
+
+	fastPolicyResp, ok := data["openai_fast_policy_settings"].(map[string]any)
+	require.True(t, ok)
+	respRules, ok := fastPolicyResp["rules"].([]any)
+	require.True(t, ok)
+	require.Len(t, respRules, 1)
+	respRule, ok := respRules[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "priority", respRule["service_tier"])
+	require.Equal(t, "filter", respRule["action"])
+	require.Equal(t, "oauth", respRule["scope"])
+	require.Equal(t, "block", respRule["fallback_action"])
+	require.Equal(t, "tier blocked", respRule["fallback_error_message"])
+	respWhitelist, ok := respRule["model_whitelist"].([]any)
+	require.True(t, ok)
+	require.Len(t, respWhitelist, 2)
+	require.ElementsMatch(t, []any{"gpt-4.1", "gpt-4o"}, respWhitelist)
+}
+
+func TestSettingHandler_UpdateSettings_FastPolicyWriteFailurePreservesEarlierSystemSettingsWrites(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{
+		values:    map[string]string{service.SettingKeyPromoCodeEnabled: "true"},
+		setErrKey: service.SettingKeyOpenAIFastPolicySettings,
+		setErr:    errors.New("write fast policy failed"),
+	}
+	cfg := &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}}
+	svc := service.NewSettingService(repo, cfg)
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil)
+
+	body := map[string]any{
+		"promo_code_enabled":                                          true,
+		"gateway_sticky_openai_enabled":                               true,
+		"gateway_sticky_gemini_enabled":                               false,
+		"gateway_sticky_anthropic_enabled":                            true,
+		"gateway_openai_ws_scheduler_mode":                            "layered",
+		"gateway_openai_ws_scheduler_layered_error_penalty_threshold": 0.55,
+		"gateway_openai_ws_scheduler_layered_error_penalty_value":     77,
+		"gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier": 6,
+		"gateway_openai_ws_scheduler_layered_ttft_penalty_value":      33,
+		"gateway_openai_ws_scheduler_layered_probe_cooldown_seconds":  44,
+		"gateway_openai_ws_scheduler_layered_probe_interval_seconds":  22,
+		"gateway_openai_ws_scheduler_layered_probe_max_failures":      5,
+		"gateway_openai_ws_scheduler_layered_probe_timeout_seconds":   11,
+		"openai_fast_policy_settings": map[string]any{
+			"rules": []map[string]any{{
+				"service_tier":           "priority",
+				"action":                 "filter",
+				"scope":                  "oauth",
+				"model_whitelist":        []string{"gpt-4.1", "gpt-4o"},
+				"fallback_action":        "block",
+				"fallback_error_message": "tier blocked",
+			}},
+		},
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, "true", repo.values[service.SettingKeyGatewayStickyOpenAIEnabled])
+	require.Equal(t, "false", repo.values[service.SettingKeyGatewayStickyGeminiEnabled])
+	require.Equal(t, "true", repo.values[service.SettingKeyGatewayStickyAnthropicEnabled])
+	require.Equal(t, "layered", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerMode])
+	require.Equal(t, "0.55", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold])
+	_, exists := repo.values[service.SettingKeyOpenAIFastPolicySettings]
+	require.False(t, exists)
 }
 
 func TestSettingHandler_UpdateSettings_NormalizesConfiguredSchedulerModeWhenRequestOmitsMode(t *testing.T) {
