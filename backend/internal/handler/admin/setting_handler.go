@@ -107,7 +107,48 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		paymentCfg = &service.PaymentConfig{}
 	}
 	payload := systemSettingsPayload(settings, defaultSubscriptions, paymentCfg, h.settingService.IsTotpEncryptionKeyConfigured(), opsEnabled && settings.OpsMonitoringEnabled)
+	// OpenAI fast policy (stored under a dedicated setting key)
+	if fastPolicy, err := h.settingService.GetOpenAIFastPolicySettings(c.Request.Context()); err != nil {
+		slog.Error("openai_fast_policy_settings_get_failed", "error", err)
+	} else if fastPolicy != nil {
+		payload.OpenAIFastPolicySettings = openaiFastPolicySettingsToDTO(fastPolicy)
+	}
+
 	response.Success(c, systemSettingsResponseData(payload, authSourceDefaults))
+}
+
+// openaiFastPolicySettingsToDTO converts service -> dto for OpenAI fast policy.
+func openaiFastPolicySettingsToDTO(s *service.OpenAIFastPolicySettings) *dto.OpenAIFastPolicySettings {
+	if s == nil {
+		return nil
+	}
+	rules := make([]dto.OpenAIFastPolicyRule, len(s.Rules))
+	for i, r := range s.Rules {
+		rules[i] = dto.OpenAIFastPolicyRule(r)
+	}
+	return &dto.OpenAIFastPolicySettings{Rules: rules}
+}
+
+// openaiFastPolicySettingsFromDTO converts dto -> service for OpenAI fast policy.
+//
+// 规范化 ServiceTier：在 DTO 进入 service 层之前统一把空字符串归一为
+// service.OpenAIFastTierAny ("all")，避免管理员保存时空串与 "all" 同时
+// 表达"匹配任意 tier"造成数据库取值的二义性。其它非空值原样透传，由
+// service.SetOpenAIFastPolicySettings 负责合法值校验。
+func openaiFastPolicySettingsFromDTO(s *dto.OpenAIFastPolicySettings) *service.OpenAIFastPolicySettings {
+	if s == nil {
+		return nil
+	}
+	rules := make([]service.OpenAIFastPolicyRule, len(s.Rules))
+	for i, r := range s.Rules {
+		rules[i] = service.OpenAIFastPolicyRule(r)
+		tier := strings.ToLower(strings.TrimSpace(rules[i].ServiceTier))
+		if tier == "" {
+			tier = service.OpenAIFastTierAny
+		}
+		rules[i].ServiceTier = tier
+	}
+	return &service.OpenAIFastPolicySettings{Rules: rules}
 }
 
 // UpdateSettingsRequest 更新设置请求
@@ -274,9 +315,10 @@ type UpdateSettingsRequest struct {
 	GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds   *int     `json:"gateway_openai_ws_scheduler_layered_probe_timeout_seconds"`
 
 	// Gateway forwarding behavior
-	EnableFingerprintUnification *bool `json:"enable_fingerprint_unification"`
-	EnableMetadataPassthrough    *bool `json:"enable_metadata_passthrough"`
-	EnableCCHSigning             *bool `json:"enable_cch_signing"`
+	EnableFingerprintUnification       *bool `json:"enable_fingerprint_unification"`
+	EnableMetadataPassthrough          *bool `json:"enable_metadata_passthrough"`
+	EnableCCHSigning                   *bool `json:"enable_cch_signing"`
+	EnableAnthropicCacheTTL1hInjection *bool `json:"enable_anthropic_cache_ttl_1h_injection"`
 
 	// Payment visible method routing
 	PaymentVisibleMethodAlipaySource  *string `json:"payment_visible_method_alipay_source"`
@@ -327,6 +369,9 @@ type UpdateSettingsRequest struct {
 
 	// Affiliate (邀请返利) feature switch
 	AffiliateEnabled *bool `json:"affiliate_enabled"`
+
+	// OpenAI fast/flex policy (optional, only updated when provided)
+	OpenAIFastPolicySettings *dto.OpenAIFastPolicySettings `json:"openai_fast_policy_settings,omitempty"`
 }
 
 // UpdateSettings 更新系统设置
@@ -1182,6 +1227,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.EnableCCHSigning
 		}(),
+		EnableAnthropicCacheTTL1hInjection: func() bool {
+			if req.EnableAnthropicCacheTTL1hInjection != nil {
+				return *req.EnableAnthropicCacheTTL1hInjection
+			}
+			return previousSettings.EnableAnthropicCacheTTL1hInjection
+		}(),
 		PaymentVisibleMethodAlipaySource: func() string {
 			if req.PaymentVisibleMethodAlipaySource != nil {
 				return strings.TrimSpace(*req.PaymentVisibleMethodAlipaySource)
@@ -1329,6 +1380,14 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		return
 	}
 
+	// Update OpenAI fast policy (stored under dedicated key, only when provided).
+	if req.OpenAIFastPolicySettings != nil {
+		if err := h.settingService.SetOpenAIFastPolicySettings(c.Request.Context(), openaiFastPolicySettingsFromDTO(req.OpenAIFastPolicySettings)); err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
+	}
+
 	// Update payment configuration (integrated into system settings).
 	// Skip if no payment fields were provided (prevents accidental wipe).
 	if h.paymentConfigService != nil && hasPaymentFields(req) {
@@ -1395,6 +1454,11 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	}
 	updatedOpsEnabled := h.opsService != nil && h.opsService.IsMonitoringEnabled(c.Request.Context())
 	payload := systemSettingsPayload(updatedSettings, updatedDefaultSubscriptions, updatedPaymentCfg, h.settingService.IsTotpEncryptionKeyConfigured(), updatedOpsEnabled && updatedSettings.OpsMonitoringEnabled)
+	if fastPolicy, err := h.settingService.GetOpenAIFastPolicySettings(c.Request.Context()); err != nil {
+		slog.Error("openai_fast_policy_settings_get_failed", "error", err)
+	} else if fastPolicy != nil {
+		payload.OpenAIFastPolicySettings = openaiFastPolicySettingsToDTO(fastPolicy)
+	}
 	response.Success(c, systemSettingsResponseData(payload, updatedAuthSourceDefaults))
 }
 
@@ -1734,6 +1798,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.EnableCCHSigning != after.EnableCCHSigning {
 		changed = append(changed, "enable_cch_signing")
 	}
+	if before.EnableAnthropicCacheTTL1hInjection != after.EnableAnthropicCacheTTL1hInjection {
+		changed = append(changed, "enable_anthropic_cache_ttl_1h_injection")
+	}
 	if before.PaymentVisibleMethodAlipaySource != after.PaymentVisibleMethodAlipaySource {
 		changed = append(changed, "payment_visible_method_alipay_source")
 	}
@@ -2006,6 +2073,7 @@ func systemSettingsPayload(settings *service.SystemSettings, defaultSubscription
 		EnableFingerprintUnification:                         settings.EnableFingerprintUnification,
 		EnableMetadataPassthrough:                            settings.EnableMetadataPassthrough,
 		EnableCCHSigning:                                     settings.EnableCCHSigning,
+		EnableAnthropicCacheTTL1hInjection:                   settings.EnableAnthropicCacheTTL1hInjection,
 		WebSearchEmulationEnabled:                            settings.WebSearchEmulationEnabled,
 		PaymentVisibleMethodAlipaySource:                     settings.PaymentVisibleMethodAlipaySource,
 		PaymentVisibleMethodWxpaySource:                      settings.PaymentVisibleMethodWxpaySource,

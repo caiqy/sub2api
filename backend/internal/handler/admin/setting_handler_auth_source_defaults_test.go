@@ -26,10 +26,12 @@ func (s *settingHandlerRepoStub) Get(ctx context.Context, key string) (*service.
 }
 
 func (s *settingHandlerRepoStub) GetValue(ctx context.Context, key string) (string, error) {
-	if key == service.SettingKeyGatewayRuntimeSettings {
-		return "", service.ErrSettingNotFound
+	if s.values != nil {
+		if value, ok := s.values[key]; ok {
+			return value, nil
+		}
 	}
-	panic("unexpected GetValue call")
+	return "", nil
 }
 
 func (s *settingHandlerRepoStub) Set(ctx context.Context, key, value string) error {

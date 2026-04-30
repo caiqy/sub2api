@@ -39,27 +39,6 @@ func ProvideEmailQueueService(emailService *EmailService) *EmailQueueService {
 	return NewEmailQueueService(emailService, 3)
 }
 
-// ProvideRateLimitCacheInvalidatorFromBillingCache exposes BillingCache as RateLimitCacheInvalidator.
-func ProvideRateLimitCacheInvalidatorFromBillingCache(cache BillingCache) RateLimitCacheInvalidator {
-	return cache
-}
-
-// ProvideAPIKeyService creates APIKeyService with optional cache invalidator injection.
-func ProvideAPIKeyService(
-	apiKeyRepo APIKeyRepository,
-	userRepo UserRepository,
-	groupRepo GroupRepository,
-	userSubRepo UserSubscriptionRepository,
-	userGroupRateRepo UserGroupRateRepository,
-	cache APIKeyCache,
-	cfg *config.Config,
-	billingCache RateLimitCacheInvalidator,
-) *APIKeyService {
-	svc := NewAPIKeyService(apiKeyRepo, userRepo, groupRepo, userSubRepo, userGroupRateRepo, cache, cfg)
-	svc.SetRateLimitCacheInvalidator(billingCache)
-	return svc
-}
-
 // ProvideTokenRefreshService creates and starts TokenRefreshService
 func ProvideTokenRefreshService(
 	accountRepo AccountRepository,
@@ -447,6 +426,7 @@ func ProvideOpenAIGatewayServiceWithStartupRecovery(
 	resolver *ModelPricingResolver,
 	channelService *ChannelService,
 	balanceNotifyService *BalanceNotifyService,
+	settingService *SettingService,
 ) *OpenAIGatewayService {
 	svc := NewOpenAIGatewayService(
 		accountRepo,
@@ -468,6 +448,7 @@ func ProvideOpenAIGatewayServiceWithStartupRecovery(
 		resolver,
 		channelService,
 		balanceNotifyService,
+		settingService,
 	)
 	svc.StartOpenAIBackgroundRecovery()
 	return svc
@@ -486,12 +467,27 @@ func ProvideBillingCacheService(
 	return NewBillingCacheService(cache, userRepo, subRepo, apiKeyRepo, rpmCache, rateRepo, cfg)
 }
 
+// ProvideAPIKeyService wires APIKeyService and connects rate-limit cache invalidation.
+func ProvideAPIKeyService(
+	apiKeyRepo APIKeyRepository,
+	userRepo UserRepository,
+	groupRepo GroupRepository,
+	userSubRepo UserSubscriptionRepository,
+	userGroupRateRepo UserGroupRateRepository,
+	cache APIKeyCache,
+	cfg *config.Config,
+	billingCacheService *BillingCacheService,
+) *APIKeyService {
+	svc := NewAPIKeyService(apiKeyRepo, userRepo, groupRepo, userSubRepo, userGroupRateRepo, cache, cfg)
+	svc.SetRateLimitCacheInvalidator(billingCacheService)
+	return svc
+}
+
 // ProviderSet is the Wire provider set for all services
 var ProviderSet = wire.NewSet(
 	// Core services
 	NewAuthService,
 	NewUserService,
-	ProvideRateLimitCacheInvalidatorFromBillingCache,
 	ProvideAPIKeyService,
 	ProvideAPIKeyAuthCacheInvalidator,
 	NewGroupService,
