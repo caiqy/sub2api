@@ -559,6 +559,27 @@ func TestOpenAIResponses_FunctionCallOutputHTTPGuidanceDoesNotSuggestPreviousRes
 	require.NotContains(t, w.Body.String(), "reuse previous_response_id")
 }
 
+func TestReplaceOpenAIForwardModelAndSyncParsedCache_UpdatesCachedModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	cached := map[string]any{
+		"model":  "gpt-5.5",
+		"stream": false,
+		"input": []any{
+			map[string]any{"type": "function_call_output", "call_id": "call_1", "output": "{}"},
+		},
+	}
+	c.Set(service.OpenAIParsedRequestBodyKey, cached)
+
+	body := []byte(`{"model":"gpt-5.5","stream":false,"input":[{"type":"function_call_output","call_id":"call_1","output":"{}"}]}`)
+	updated := replaceOpenAIForwardModelAndSyncParsedCache(c, body, "gpt-5.4")
+
+	require.Equal(t, "gpt-5.4", gjson.GetBytes(updated, "model").String())
+	require.Equal(t, "gpt-5.4", cached["model"])
+}
+
 func TestOpenAIResponsesWebSocket_SetsClientTransportWSWhenUpgradeValid(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

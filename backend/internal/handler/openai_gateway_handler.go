@@ -343,7 +343,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		// 应用渠道模型映射到请求体
 		forwardBody := body
 		if channelMapping.Mapped {
-			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
+			forwardBody = replaceOpenAIForwardModelAndSyncParsedCache(c, body, channelMapping.MappedModel)
 		}
 		result, err := h.gatewayService.Forward(c.Request.Context(), c, account, forwardBody)
 		forwardDuration := time.Since(forwardStart)
@@ -753,7 +753,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		// 应用渠道模型映射到请求体
 		forwardBody := body
 		if channelMappingMsg.Mapped {
-			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMappingMsg.MappedModel)
+			forwardBody = replaceOpenAIForwardModelAndSyncParsedCache(c, body, channelMappingMsg.MappedModel)
 		}
 		result, err := h.gatewayService.ForwardAsAnthropic(c.Request.Context(), c, account, forwardBody, promptCacheKey, defaultMappedModel)
 
@@ -1523,7 +1523,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	// 应用渠道模型映射到 WebSocket 首条消息
 	wsFirstMessage := firstMessage
 	if channelMappingWS.Mapped {
-		wsFirstMessage = h.gatewayService.ReplaceModelInBody(firstMessage, channelMappingWS.MappedModel)
+		wsFirstMessage = replaceOpenAIForwardModelAndSyncParsedCache(c, firstMessage, channelMappingWS.MappedModel)
 	}
 
 	if err := h.gatewayService.ProxyResponsesWebSocketFromClient(ctx, c, wsConn, account, token, wsFirstMessage, hooks); err != nil {
@@ -1919,6 +1919,23 @@ func (h *OpenAIGatewayHandler) ensureForwardErrorResponse(c *gin.Context, stream
 	}
 	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed", streamStarted)
 	return true
+}
+
+func replaceOpenAIForwardModelAndSyncParsedCache(c *gin.Context, body []byte, mappedModel string) []byte {
+	updated := service.ReplaceModelInBody(body, mappedModel)
+	if c == nil {
+		return updated
+	}
+	cached, ok := c.Get(service.OpenAIParsedRequestBodyKey)
+	if !ok {
+		return updated
+	}
+	reqBody, ok := cached.(map[string]any)
+	if !ok || reqBody == nil {
+		return updated
+	}
+	reqBody["model"] = mappedModel
+	return updated
 }
 
 func shouldLogOpenAIForwardFailureAsWarn(c *gin.Context, wroteFallback bool) bool {
