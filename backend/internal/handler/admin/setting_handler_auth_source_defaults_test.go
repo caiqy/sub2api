@@ -273,6 +273,97 @@ func TestSettingHandler_UpdateSettings_PreservesOmittedBackendModeFlags(t *testi
 	require.Equal(t, true, data["backend_mode_enabled"])
 }
 
+func TestSettingHandler_UpdateSettings_PreservesOmittedLoginOAuthAndRiskSettings(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	loginDocs := `[{"id":"tos","title":"Terms","content_md":"# Terms"}]`
+	repo := &settingHandlerRepoStub{
+		values: map[string]string{
+			service.SettingKeyPromoCodeEnabled:                                     "true",
+			service.SettingKeyLoginAgreementEnabled:                                "true",
+			service.SettingKeyLoginAgreementMode:                                   "checkbox",
+			service.SettingKeyLoginAgreementUpdatedAt:                              "2026-05-01",
+			service.SettingKeyLoginAgreementDocuments:                              loginDocs,
+			service.SettingKeyGitHubOAuthEnabled:                                   "true",
+			service.SettingKeyGitHubOAuthClientID:                                  "github-client",
+			service.SettingKeyGitHubOAuthClientSecret:                              "github-secret",
+			service.SettingKeyGitHubOAuthRedirectURL:                               "https://example.com/api/oauth/github/callback",
+			service.SettingKeyGitHubOAuthFrontendRedirectURL:                       "/auth/oauth/callback",
+			service.SettingKeyGoogleOAuthEnabled:                                   "true",
+			service.SettingKeyGoogleOAuthClientID:                                  "google-client",
+			service.SettingKeyGoogleOAuthClientSecret:                              "google-secret",
+			service.SettingKeyGoogleOAuthRedirectURL:                               "https://example.com/api/oauth/google/callback",
+			service.SettingKeyGoogleOAuthFrontendRedirectURL:                       "/auth/oauth/callback",
+			service.SettingKeyRiskControlEnabled:                                   "true",
+			service.SettingKeyRegistrationEnabled:                                  "false",
+			service.SettingKeyInvitationCodeEnabled:                                "false",
+			service.SettingKeyPasswordResetEnabled:                                 "false",
+			service.SettingKeyEmailVerifyEnabled:                                   "false",
+			service.SettingKeyHideCcsImportButton:                                  "false",
+			service.SettingKeyPurchaseSubscriptionEnabled:                          "false",
+			service.SettingKeyEnableModelFallback:                                  "false",
+			service.SettingKeyEnableIdentityPatch:                                  "true",
+			service.SettingKeyOpsMonitoringEnabled:                                 "true",
+			service.SettingKeyOpsRealtimeMonitoringEnabled:                         "true",
+			service.SettingKeyOpsQueryModeDefault:                                  "fast",
+			service.SettingKeyOpsMetricsIntervalSeconds:                            "120",
+			service.SettingKeyAllowUngroupedKeyScheduling:                          "true",
+			service.SettingKeyBackendModeEnabled:                                   "true",
+			service.SettingKeyGatewayOpenAIWSSchedulerMode:                         "weighted",
+			service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold: "0.5",
+			service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyValue:     "10",
+			service.SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier: "2",
+			service.SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue:      "5",
+			service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds:  "60",
+			service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds:  "30",
+			service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeMaxFailures:      "3",
+			service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds:   "10",
+		},
+	}
+	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil)
+
+	body := map[string]any{
+		"registration_enabled": true,
+		"promo_code_enabled":   true,
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "true", repo.values[service.SettingKeyLoginAgreementEnabled])
+	require.Equal(t, "checkbox", repo.values[service.SettingKeyLoginAgreementMode])
+	require.Equal(t, "2026-05-01", repo.values[service.SettingKeyLoginAgreementUpdatedAt])
+	require.JSONEq(t, loginDocs, repo.values[service.SettingKeyLoginAgreementDocuments])
+	require.Equal(t, "true", repo.values[service.SettingKeyGitHubOAuthEnabled])
+	require.Equal(t, "github-client", repo.values[service.SettingKeyGitHubOAuthClientID])
+	require.Equal(t, "github-secret", repo.values[service.SettingKeyGitHubOAuthClientSecret])
+	require.Equal(t, "https://example.com/api/oauth/github/callback", repo.values[service.SettingKeyGitHubOAuthRedirectURL])
+	require.Equal(t, "/auth/oauth/callback", repo.values[service.SettingKeyGitHubOAuthFrontendRedirectURL])
+	require.Equal(t, "true", repo.values[service.SettingKeyGoogleOAuthEnabled])
+	require.Equal(t, "google-client", repo.values[service.SettingKeyGoogleOAuthClientID])
+	require.Equal(t, "google-secret", repo.values[service.SettingKeyGoogleOAuthClientSecret])
+	require.Equal(t, "https://example.com/api/oauth/google/callback", repo.values[service.SettingKeyGoogleOAuthRedirectURL])
+	require.Equal(t, "/auth/oauth/callback", repo.values[service.SettingKeyGoogleOAuthFrontendRedirectURL])
+	require.Equal(t, "true", repo.values[service.SettingKeyRiskControlEnabled])
+
+	var resp response.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	data, ok := resp.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, true, data["login_agreement_enabled"])
+	require.Equal(t, true, data["github_oauth_enabled"])
+	require.Equal(t, true, data["google_oauth_enabled"])
+	require.Equal(t, true, data["risk_control_enabled"])
+}
+
 func TestSettingHandler_UpdateSettings_PersistsPaymentVisibleMethodsAndAdvancedScheduler(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &settingHandlerRepoStub{
