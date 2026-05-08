@@ -51,7 +51,7 @@ func TestOpenAIGatewayHandler_SubmitFailedUsageLog_UsesMessagesFallbackModelAsUp
 
 	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
 	gatewayService := service.NewOpenAIGatewayService(nil, usageRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	h := NewOpenAIGatewayHandler(gatewayService, nil, nil, nil, nil, nil, nil)
+	h := NewOpenAIGatewayHandler(gatewayService, nil, nil, nil, nil, nil, nil, nil)
 
 	apiKey := &service.APIKey{ID: 101, UserID: 202, User: &service.User{ID: 202}}
 	account := &service.Account{ID: 11, Platform: service.PlatformOpenAI, Credentials: map[string]any{"api_key": "sk-test"}}
@@ -82,7 +82,7 @@ func TestOpenAIGatewayHandler_SubmitFailoverFailedUsageLog_UsesChatCompletionsFa
 
 	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
 	gatewayService := service.NewOpenAIGatewayService(nil, usageRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	h := NewOpenAIGatewayHandler(gatewayService, nil, nil, nil, nil, nil, nil)
+	h := NewOpenAIGatewayHandler(gatewayService, nil, nil, nil, nil, nil, nil, nil)
 
 	apiKey := &service.APIKey{ID: 101, UserID: 202, User: &service.User{ID: 202}}
 	account := &service.Account{ID: 11, Platform: service.PlatformOpenAI, Credentials: map[string]any{"api_key": "sk-test"}}
@@ -113,7 +113,7 @@ func TestOpenAIGatewayHandler_SubmitFailedUsageLog_PrefersExactUpstreamModelOver
 
 	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
 	gatewayService := service.NewOpenAIGatewayService(nil, usageRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	h := NewOpenAIGatewayHandler(gatewayService, nil, nil, nil, nil, nil, nil)
+	h := NewOpenAIGatewayHandler(gatewayService, nil, nil, nil, nil, nil, nil, nil)
 
 	apiKey := &service.APIKey{ID: 101, UserID: 202, User: &service.User{ID: 202}}
 	account := &service.Account{
@@ -216,7 +216,7 @@ func TestOpenAIGatewayHandler_MessagesUpstreamErrorStillCreatesUsageLog(t *testi
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, cfg)
 
 	apiKey := &service.APIKey{
 		ID:      101,
@@ -322,7 +322,7 @@ func TestOpenAIGatewayHandler_MessagesFailoverExhaustedStillCreatesUsageLog(t *t
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, cfg)
 	h.maxAccountSwitches = 0
 
 	apiKey := &service.APIKey{
@@ -526,7 +526,7 @@ func TestOpenAIGatewayHandler_ImagesOAuthForwardFailedUsagePreservesUpstreamSnap
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, cfg)
 
 	apiKey := &service.APIKey{
 		ID:      101,
@@ -897,7 +897,7 @@ func TestOpenAIGatewayHandler_MessagesSelectionExhaustedAfterFailoverStillCreate
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, cfg)
 
 	apiKey := &service.APIKey{
 		ID:      101,
@@ -999,7 +999,7 @@ func TestOpenAIGatewayHandler_UpstreamErrorStillCreatesUsageLog(t *testing.T) {
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, cfg)
 	h.maxAccountSwitches = 0
 
 	apiKey := &service.APIKey{
@@ -1107,7 +1107,7 @@ func TestOpenAIGatewayHandler_ChatCompletionsUpstreamErrorStillCreatesUsageLog(t
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, cfg)
 
 	apiKey := &service.APIKey{
 		ID:      101,
@@ -1218,7 +1218,7 @@ func TestOpenAIGatewayHandler_FailoverExhaustedStillCreatesUsageLog(t *testing.T
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, cfg)
 
 	apiKey := &service.APIKey{
 		ID:      101,
@@ -1318,7 +1318,7 @@ func TestOpenAIGatewayHandler_ChatCompletionsFailoverExhaustedStillCreatesUsageL
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, cfg)
 	h.maxAccountSwitches = 0
 
 	apiKey := &service.APIKey{
@@ -1414,7 +1414,7 @@ func TestOpenAIGatewayHandler_RetrySuccessDoesNotReuseFailoverErrorSnapshot(t *t
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, cfg)
 
 	apiKey := &service.APIKey{ID: 101, UserID: 202, Status: service.StatusActive, GroupID: &groupID, User: &service.User{ID: 202, Status: service.StatusActive, Concurrency: 1}, Group: group}
 

@@ -3961,6 +3961,7 @@ func (s *OpenAIGatewayService) SelectAccountByPreviousResponseID(
 		return nil, nil
 	}
 	if requestedModel != "" && !account.IsModelSupported(requestedModel) {
+		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 		return nil, nil
 	}
 	account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, requestedModel, requireCompact)

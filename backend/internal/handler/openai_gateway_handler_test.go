@@ -1160,7 +1160,7 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, cfg)
 
 	groupID := int64(2)
 	apiKey := &service.APIKey{
@@ -1368,7 +1368,7 @@ func TestOpenAIGatewayHandler_ChatCompletionsPassesDetailSnapshotToRecordUsage(t
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, cfg)
 
 	apiKey := &service.APIKey{
 		ID:      101,
@@ -1498,7 +1498,7 @@ func TestOpenAIGatewayHandler_ChatCompletionsUsageTaskUsesCapturedEndpointAndSna
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, pool, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, pool, nil, nil, cfg)
 
 	apiKey := &service.APIKey{
 		ID:      101,
@@ -1710,7 +1710,7 @@ func TestOpenAIGatewayHandler_RetryPathStoresLastOutboundRequestOnly(t *testing.
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, cfg)
 
 	apiKey := &service.APIKey{
 		ID:      101,
@@ -1823,7 +1823,7 @@ func TestOpenAIGatewayHandler_UsageDetailStoresInjectedUpstreamRequestBody(t *te
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, cfg)
 
 	apiKey := &service.APIKey{
 		ID:      101,
@@ -1920,7 +1920,7 @@ func newOpenAIImagesHandlerTestRouter(t *testing.T, route string, upstreamRespon
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, cfg)
 
 	apiKey := &service.APIKey{
 		ID:      101,

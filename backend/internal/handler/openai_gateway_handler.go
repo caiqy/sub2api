@@ -53,35 +53,10 @@ func NewOpenAIGatewayHandler(
 	billingCacheService *service.BillingCacheService,
 	apiKeyService *service.APIKeyService,
 	usageRecordWorkerPool *service.UsageRecordWorkerPool,
-	errorPassthroughOrCfg any,
-	optional ...any,
+	errorPassthroughService *service.ErrorPassthroughService,
+	contentModerationService *service.ContentModerationService,
+	cfg *config.Config,
 ) *OpenAIGatewayHandler {
-	var errorPassthroughService *service.ErrorPassthroughService
-	var contentModerationService *service.ContentModerationService
-	var cfg *config.Config
-	switch v := errorPassthroughOrCfg.(type) {
-	case *service.ErrorPassthroughService:
-		errorPassthroughService = v
-	case *config.Config:
-		cfg = v
-	case nil:
-		// Keep nil.
-	}
-	if len(optional) > 0 {
-		switch v := optional[0].(type) {
-		case *service.ContentModerationService:
-			contentModerationService = v
-		case *config.Config:
-			cfg = v
-		case nil:
-			// Keep nil.
-		}
-	}
-	if len(optional) > 1 {
-		if v, ok := optional[1].(*config.Config); ok {
-			cfg = v
-		}
-	}
 	pingInterval := time.Duration(0)
 	maxAccountSwitches := 3
 	if cfg != nil {
