@@ -8,6 +8,7 @@ import (
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/google/wire"
 	"github.com/redis/go-redis/v9"
@@ -394,6 +395,7 @@ func ProvideSettingService(settingRepo SettingRepository, groupRepo GroupReposit
 	if invalidator, ok := httpUpstream.(interface{ InvalidateIdleClients() }); ok {
 		svc.SetGatewayRuntimeIdleInvalidator(invalidator)
 	}
+	antigravity.SetUserAgentVersionResolver(svc.GetAntigravityUserAgentVersion)
 	return svc
 }
 

@@ -222,6 +222,153 @@ func TestSettingHandler_UpdateSettings_PreservesOmittedAuthSourceDefaults(t *tes
 	require.Equal(t, true, data["force_email_on_third_party_signup"])
 }
 
+func TestSettingHandler_UpdateSettings_PreservesOmittedGitHubAndGoogleAuthSourceDefaults(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{
+		values: map[string]string{
+			service.SettingKeyRegistrationEnabled:                     "false",
+			service.SettingKeyPromoCodeEnabled:                        "true",
+			service.SettingKeyAuthSourceDefaultGitHubBalance:          "21.5",
+			service.SettingKeyAuthSourceDefaultGitHubConcurrency:      "11",
+			service.SettingKeyAuthSourceDefaultGitHubSubscriptions:    `[{"group_id":41,"validity_days":30}]`,
+			service.SettingKeyAuthSourceDefaultGitHubGrantOnSignup:    "true",
+			service.SettingKeyAuthSourceDefaultGitHubGrantOnFirstBind: "true",
+			service.SettingKeyAuthSourceDefaultGoogleBalance:          "31.5",
+			service.SettingKeyAuthSourceDefaultGoogleConcurrency:      "12",
+			service.SettingKeyAuthSourceDefaultGoogleSubscriptions:    `[{"group_id":42,"validity_days":45}]`,
+			service.SettingKeyAuthSourceDefaultGoogleGrantOnSignup:    "false",
+			service.SettingKeyAuthSourceDefaultGoogleGrantOnFirstBind: "true",
+		},
+	}
+	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil)
+
+	body := map[string]any{
+		"registration_enabled": true,
+		"promo_code_enabled":   true,
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "21.50000000", repo.values[service.SettingKeyAuthSourceDefaultGitHubBalance])
+	require.Equal(t, "11", repo.values[service.SettingKeyAuthSourceDefaultGitHubConcurrency])
+	require.Equal(t, `[{"group_id":41,"validity_days":30}]`, repo.values[service.SettingKeyAuthSourceDefaultGitHubSubscriptions])
+	require.Equal(t, "true", repo.values[service.SettingKeyAuthSourceDefaultGitHubGrantOnSignup])
+	require.Equal(t, "true", repo.values[service.SettingKeyAuthSourceDefaultGitHubGrantOnFirstBind])
+	require.Equal(t, "31.50000000", repo.values[service.SettingKeyAuthSourceDefaultGoogleBalance])
+	require.Equal(t, "12", repo.values[service.SettingKeyAuthSourceDefaultGoogleConcurrency])
+	require.Equal(t, `[{"group_id":42,"validity_days":45}]`, repo.values[service.SettingKeyAuthSourceDefaultGoogleSubscriptions])
+	require.Equal(t, "false", repo.values[service.SettingKeyAuthSourceDefaultGoogleGrantOnSignup])
+	require.Equal(t, "true", repo.values[service.SettingKeyAuthSourceDefaultGoogleGrantOnFirstBind])
+
+	var resp response.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	data, ok := resp.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, 21.5, data["auth_source_default_github_balance"])
+	require.Equal(t, float64(11), data["auth_source_default_github_concurrency"])
+	require.Equal(t, 31.5, data["auth_source_default_google_balance"])
+	require.Equal(t, float64(12), data["auth_source_default_google_concurrency"])
+}
+
+func TestSettingHandler_UpdateSettings_UpdatesGitHubAndGoogleAuthSourceDefaults(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{
+		values: map[string]string{
+			service.SettingKeyRegistrationEnabled:                     "false",
+			service.SettingKeyPromoCodeEnabled:                        "true",
+			service.SettingKeyAuthSourceDefaultGitHubBalance:          "21.5",
+			service.SettingKeyAuthSourceDefaultGitHubConcurrency:      "11",
+			service.SettingKeyAuthSourceDefaultGitHubSubscriptions:    `[{"group_id":41,"validity_days":30}]`,
+			service.SettingKeyAuthSourceDefaultGitHubGrantOnSignup:    "true",
+			service.SettingKeyAuthSourceDefaultGitHubGrantOnFirstBind: "true",
+			service.SettingKeyAuthSourceDefaultGoogleBalance:          "31.5",
+			service.SettingKeyAuthSourceDefaultGoogleConcurrency:      "12",
+			service.SettingKeyAuthSourceDefaultGoogleSubscriptions:    `[{"group_id":42,"validity_days":45}]`,
+			service.SettingKeyAuthSourceDefaultGoogleGrantOnSignup:    "false",
+			service.SettingKeyAuthSourceDefaultGoogleGrantOnFirstBind: "true",
+		},
+	}
+	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil)
+
+	body := map[string]any{
+		"registration_enabled":                           true,
+		"promo_code_enabled":                             true,
+		"auth_source_default_github_balance":             25.25,
+		"auth_source_default_github_concurrency":         15,
+		"auth_source_default_github_subscriptions":       []map[string]any{{"group_id": 51, "validity_days": 60}},
+		"auth_source_default_github_grant_on_signup":     false,
+		"auth_source_default_google_balance":             35.25,
+		"auth_source_default_google_concurrency":         16,
+		"auth_source_default_google_subscriptions":       []map[string]any{{"group_id": 52, "validity_days": 90}},
+		"auth_source_default_google_grant_on_first_bind": false,
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "25.25000000", repo.values[service.SettingKeyAuthSourceDefaultGitHubBalance])
+	require.Equal(t, "15", repo.values[service.SettingKeyAuthSourceDefaultGitHubConcurrency])
+	require.Equal(t, `[{"group_id":51,"validity_days":60}]`, repo.values[service.SettingKeyAuthSourceDefaultGitHubSubscriptions])
+	require.Equal(t, "false", repo.values[service.SettingKeyAuthSourceDefaultGitHubGrantOnSignup])
+	require.Equal(t, "true", repo.values[service.SettingKeyAuthSourceDefaultGitHubGrantOnFirstBind])
+	require.Equal(t, "35.25000000", repo.values[service.SettingKeyAuthSourceDefaultGoogleBalance])
+	require.Equal(t, "16", repo.values[service.SettingKeyAuthSourceDefaultGoogleConcurrency])
+	require.Equal(t, `[{"group_id":52,"validity_days":90}]`, repo.values[service.SettingKeyAuthSourceDefaultGoogleSubscriptions])
+	require.Equal(t, "false", repo.values[service.SettingKeyAuthSourceDefaultGoogleGrantOnSignup])
+	require.Equal(t, "false", repo.values[service.SettingKeyAuthSourceDefaultGoogleGrantOnFirstBind])
+}
+
+func TestSettingHandler_UpdateSettings_ClearsExplicitEmptyGitHubAndGoogleSubscriptions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{
+		values: map[string]string{
+			service.SettingKeyRegistrationEnabled:                  "false",
+			service.SettingKeyPromoCodeEnabled:                     "true",
+			service.SettingKeyAuthSourceDefaultGitHubSubscriptions: `[ {"group_id":41,"validity_days":30} ]`,
+			service.SettingKeyAuthSourceDefaultGoogleSubscriptions: `[ {"group_id":42,"validity_days":45} ]`,
+		},
+	}
+	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil)
+
+	body := map[string]any{
+		"registration_enabled":                     true,
+		"promo_code_enabled":                       true,
+		"auth_source_default_github_subscriptions": []map[string]any{},
+		"auth_source_default_google_subscriptions": []map[string]any{},
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, `[]`, repo.values[service.SettingKeyAuthSourceDefaultGitHubSubscriptions])
+	require.Equal(t, `[]`, repo.values[service.SettingKeyAuthSourceDefaultGoogleSubscriptions])
+}
+
 func TestSettingHandler_UpdateSettings_PreservesOmittedBackendModeFlags(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &settingHandlerRepoStub{
@@ -943,4 +1090,55 @@ func TestDiffSettings_IncludesAuthSourceDefaultsAndForceEmail(t *testing.T) {
 	require.Contains(t, changed, "auth_source_default_email_grant_on_signup")
 	require.Contains(t, changed, "auth_source_default_email_grant_on_first_bind")
 	require.Contains(t, changed, "force_email_on_third_party_signup")
+}
+
+func TestDiffSettings_IncludesGitHubAndGoogleAuthSourceDefaults(t *testing.T) {
+	changed := diffSettings(
+		&service.SystemSettings{},
+		&service.SystemSettings{},
+		&service.AuthSourceDefaultSettings{
+			GitHub: service.ProviderDefaultGrantSettings{
+				Balance:          1,
+				Concurrency:      2,
+				Subscriptions:    []service.DefaultSubscriptionSetting{{GroupID: 11, ValidityDays: 15}},
+				GrantOnSignup:    true,
+				GrantOnFirstBind: false,
+			},
+			Google: service.ProviderDefaultGrantSettings{
+				Balance:          3,
+				Concurrency:      4,
+				Subscriptions:    []service.DefaultSubscriptionSetting{{GroupID: 12, ValidityDays: 30}},
+				GrantOnSignup:    false,
+				GrantOnFirstBind: true,
+			},
+		},
+		&service.AuthSourceDefaultSettings{
+			GitHub: service.ProviderDefaultGrantSettings{
+				Balance:          5,
+				Concurrency:      6,
+				Subscriptions:    []service.DefaultSubscriptionSetting{},
+				GrantOnSignup:    false,
+				GrantOnFirstBind: true,
+			},
+			Google: service.ProviderDefaultGrantSettings{
+				Balance:          7,
+				Concurrency:      8,
+				Subscriptions:    []service.DefaultSubscriptionSetting{},
+				GrantOnSignup:    true,
+				GrantOnFirstBind: false,
+			},
+		},
+		UpdateSettingsRequest{},
+	)
+
+	require.Contains(t, changed, "auth_source_default_github_balance")
+	require.Contains(t, changed, "auth_source_default_github_concurrency")
+	require.Contains(t, changed, "auth_source_default_github_subscriptions")
+	require.Contains(t, changed, "auth_source_default_github_grant_on_signup")
+	require.Contains(t, changed, "auth_source_default_github_grant_on_first_bind")
+	require.Contains(t, changed, "auth_source_default_google_balance")
+	require.Contains(t, changed, "auth_source_default_google_concurrency")
+	require.Contains(t, changed, "auth_source_default_google_subscriptions")
+	require.Contains(t, changed, "auth_source_default_google_grant_on_signup")
+	require.Contains(t, changed, "auth_source_default_google_grant_on_first_bind")
 }
