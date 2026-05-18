@@ -35,6 +35,7 @@ func TestOpenAIGatewayHandler_ImagesAcquiresUserGroupSlotWhenEnabled(t *testing.
 		Platform:               service.PlatformOpenAI,
 		Status:                 service.StatusActive,
 		Hydrated:               true,
+		AllowImageGeneration:   true,
 		UserConcurrencyEnabled: true,
 		UserConcurrencyLimit:   1,
 	}
@@ -96,7 +97,7 @@ func TestOpenAIGatewayHandler_ImagesAcquiresUserGroupSlotWhenEnabled(t *testing.
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, cfg)
 
 	apiKey := &service.APIKey{
 		ID:      101,

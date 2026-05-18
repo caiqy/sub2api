@@ -107,20 +107,65 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		paymentCfg = &service.PaymentConfig{}
 	}
 	payload := systemSettingsPayload(settings, defaultSubscriptions, paymentCfg, h.settingService.IsTotpEncryptionKeyConfigured(), opsEnabled && settings.OpsMonitoringEnabled)
+	// OpenAI fast policy (stored under a dedicated setting key)
+	if fastPolicy, err := h.settingService.GetOpenAIFastPolicySettings(c.Request.Context()); err != nil {
+		slog.Error("openai_fast_policy_settings_get_failed", "error", err)
+	} else if fastPolicy != nil {
+		payload.OpenAIFastPolicySettings = openaiFastPolicySettingsToDTO(fastPolicy)
+	}
+
 	response.Success(c, systemSettingsResponseData(payload, authSourceDefaults))
+}
+
+// openaiFastPolicySettingsToDTO converts service -> dto for OpenAI fast policy.
+func openaiFastPolicySettingsToDTO(s *service.OpenAIFastPolicySettings) *dto.OpenAIFastPolicySettings {
+	if s == nil {
+		return nil
+	}
+	rules := make([]dto.OpenAIFastPolicyRule, len(s.Rules))
+	for i, r := range s.Rules {
+		rules[i] = dto.OpenAIFastPolicyRule(r)
+	}
+	return &dto.OpenAIFastPolicySettings{Rules: rules}
+}
+
+// openaiFastPolicySettingsFromDTO converts dto -> service for OpenAI fast policy.
+//
+// 规范化 ServiceTier：在 DTO 进入 service 层之前统一把空字符串归一为
+// service.OpenAIFastTierAny ("all")，避免管理员保存时空串与 "all" 同时
+// 表达"匹配任意 tier"造成数据库取值的二义性。其它非空值原样透传，由
+// service.SetOpenAIFastPolicySettings 负责合法值校验。
+func openaiFastPolicySettingsFromDTO(s *dto.OpenAIFastPolicySettings) *service.OpenAIFastPolicySettings {
+	if s == nil {
+		return nil
+	}
+	rules := make([]service.OpenAIFastPolicyRule, len(s.Rules))
+	for i, r := range s.Rules {
+		rules[i] = service.OpenAIFastPolicyRule(r)
+		tier := strings.ToLower(strings.TrimSpace(rules[i].ServiceTier))
+		if tier == "" {
+			tier = service.OpenAIFastTierAny
+		}
+		rules[i].ServiceTier = tier
+	}
+	return &service.OpenAIFastPolicySettings{Rules: rules}
 }
 
 // UpdateSettingsRequest 更新设置请求
 type UpdateSettingsRequest struct {
 	// 注册设置
-	RegistrationEnabled              bool     `json:"registration_enabled"`
-	EmailVerifyEnabled               bool     `json:"email_verify_enabled"`
-	RegistrationEmailSuffixWhitelist []string `json:"registration_email_suffix_whitelist"`
-	PromoCodeEnabled                 bool     `json:"promo_code_enabled"`
-	PasswordResetEnabled             bool     `json:"password_reset_enabled"`
-	FrontendURL                      string   `json:"frontend_url"`
-	InvitationCodeEnabled            bool     `json:"invitation_code_enabled"`
-	TotpEnabled                      bool     `json:"totp_enabled"` // TOTP 双因素认证
+	RegistrationEnabled              bool                          `json:"registration_enabled"`
+	EmailVerifyEnabled               bool                          `json:"email_verify_enabled"`
+	RegistrationEmailSuffixWhitelist []string                      `json:"registration_email_suffix_whitelist"`
+	PromoCodeEnabled                 bool                          `json:"promo_code_enabled"`
+	PasswordResetEnabled             bool                          `json:"password_reset_enabled"`
+	FrontendURL                      string                        `json:"frontend_url"`
+	InvitationCodeEnabled            bool                          `json:"invitation_code_enabled"`
+	TotpEnabled                      bool                          `json:"totp_enabled"` // TOTP 双因素认证
+	LoginAgreementEnabled            *bool                         `json:"login_agreement_enabled"`
+	LoginAgreementMode               *string                       `json:"login_agreement_mode"`
+	LoginAgreementUpdatedAt          *string                       `json:"login_agreement_updated_at"`
+	LoginAgreementDocuments          *[]dto.LoginAgreementDocument `json:"login_agreement_documents"`
 
 	// 邮件服务设置
 	SMTPHost     string `json:"smtp_host"`
@@ -184,6 +229,18 @@ type UpdateSettingsRequest struct {
 	OIDCConnectUserInfoIDPath       string `json:"oidc_connect_userinfo_id_path"`
 	OIDCConnectUserInfoUsernamePath string `json:"oidc_connect_userinfo_username_path"`
 
+	// GitHub / Google OAuth 登录
+	GitHubOAuthEnabled             *bool   `json:"github_oauth_enabled"`
+	GitHubOAuthClientID            *string `json:"github_oauth_client_id"`
+	GitHubOAuthClientSecret        *string `json:"github_oauth_client_secret"`
+	GitHubOAuthRedirectURL         *string `json:"github_oauth_redirect_url"`
+	GitHubOAuthFrontendRedirectURL *string `json:"github_oauth_frontend_redirect_url"`
+	GoogleOAuthEnabled             *bool   `json:"google_oauth_enabled"`
+	GoogleOAuthClientID            *string `json:"google_oauth_client_id"`
+	GoogleOAuthClientSecret        *string `json:"google_oauth_client_secret"`
+	GoogleOAuthRedirectURL         *string `json:"google_oauth_redirect_url"`
+	GoogleOAuthFrontendRedirectURL *string `json:"google_oauth_frontend_redirect_url"`
+
 	// OEM设置
 	SiteName                    string                `json:"site_name"`
 	SiteLogo                    string                `json:"site_logo"`
@@ -203,6 +260,7 @@ type UpdateSettingsRequest struct {
 	// 默认配置
 	DefaultConcurrency                       int                               `json:"default_concurrency"`
 	DefaultBalance                           float64                           `json:"default_balance"`
+	RiskControlEnabled                       *bool                             `json:"risk_control_enabled"`
 	AffiliateRebateRate                      *float64                          `json:"affiliate_rebate_rate"`
 	AffiliateRebateFreezeHours               *int                              `json:"affiliate_rebate_freeze_hours"`
 	AffiliateRebateDurationDays              *int                              `json:"affiliate_rebate_duration_days"`
@@ -274,9 +332,10 @@ type UpdateSettingsRequest struct {
 	GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds   *int     `json:"gateway_openai_ws_scheduler_layered_probe_timeout_seconds"`
 
 	// Gateway forwarding behavior
-	EnableFingerprintUnification *bool `json:"enable_fingerprint_unification"`
-	EnableMetadataPassthrough    *bool `json:"enable_metadata_passthrough"`
-	EnableCCHSigning             *bool `json:"enable_cch_signing"`
+	EnableFingerprintUnification       *bool `json:"enable_fingerprint_unification"`
+	EnableMetadataPassthrough          *bool `json:"enable_metadata_passthrough"`
+	EnableCCHSigning                   *bool `json:"enable_cch_signing"`
+	EnableAnthropicCacheTTL1hInjection *bool `json:"enable_anthropic_cache_ttl_1h_injection"`
 
 	// Payment visible method routing
 	PaymentVisibleMethodAlipaySource  *string `json:"payment_visible_method_alipay_source"`
@@ -327,6 +386,9 @@ type UpdateSettingsRequest struct {
 
 	// Affiliate (邀请返利) feature switch
 	AffiliateEnabled *bool `json:"affiliate_enabled"`
+
+	// OpenAI fast/flex policy (optional, only updated when provided)
+	OpenAIFastPolicySettings *dto.OpenAIFastPolicySettings `json:"openai_fast_policy_settings,omitempty"`
 }
 
 // UpdateSettings 更新系统设置
@@ -988,6 +1050,25 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		FrontendURL:                      req.FrontendURL,
 		InvitationCodeEnabled:            req.InvitationCodeEnabled,
 		TotpEnabled:                      req.TotpEnabled,
+		LoginAgreementEnabled:            boolValueOrDefault(req.LoginAgreementEnabled, previousSettings.LoginAgreementEnabled),
+		LoginAgreementMode: func() string {
+			if req.LoginAgreementMode != nil {
+				return strings.TrimSpace(*req.LoginAgreementMode)
+			}
+			return previousSettings.LoginAgreementMode
+		}(),
+		LoginAgreementUpdatedAt: func() string {
+			if req.LoginAgreementUpdatedAt != nil {
+				return strings.TrimSpace(*req.LoginAgreementUpdatedAt)
+			}
+			return previousSettings.LoginAgreementUpdatedAt
+		}(),
+		LoginAgreementDocuments: func() []service.LoginAgreementDocument {
+			if req.LoginAgreementDocuments != nil {
+				return loginAgreementDocumentsFromDTO(*req.LoginAgreementDocuments)
+			}
+			return previousSettings.LoginAgreementDocuments
+		}(),
 		SMTPHost:                         req.SMTPHost,
 		SMTPPort:                         req.SMTPPort,
 		SMTPUsername:                     req.SMTPUsername,
@@ -1040,39 +1121,90 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		OIDCConnectUserInfoEmailPath:     req.OIDCConnectUserInfoEmailPath,
 		OIDCConnectUserInfoIDPath:        req.OIDCConnectUserInfoIDPath,
 		OIDCConnectUserInfoUsernamePath:  req.OIDCConnectUserInfoUsernamePath,
-		SiteName:                         req.SiteName,
-		SiteLogo:                         req.SiteLogo,
-		SiteSubtitle:                     req.SiteSubtitle,
-		APIBaseURL:                       req.APIBaseURL,
-		ContactInfo:                      req.ContactInfo,
-		DocURL:                           req.DocURL,
-		HomeContent:                      req.HomeContent,
-		HideCcsImportButton:              req.HideCcsImportButton,
-		PurchaseSubscriptionEnabled:      purchaseEnabled,
-		PurchaseSubscriptionURL:          purchaseURL,
-		TableDefaultPageSize:             req.TableDefaultPageSize,
-		TablePageSizeOptions:             req.TablePageSizeOptions,
-		CustomMenuItems:                  customMenuJSON,
-		CustomEndpoints:                  customEndpointsJSON,
-		DefaultConcurrency:               req.DefaultConcurrency,
-		DefaultBalance:                   req.DefaultBalance,
-		AffiliateRebateRate:              affiliateRebateRate,
-		AffiliateRebateFreezeHours:       affiliateRebateFreezeHours,
-		AffiliateRebateDurationDays:      affiliateRebateDurationDays,
-		AffiliateRebatePerInviteeCap:     affiliateRebatePerInviteeCap,
-		DefaultUserRPMLimit:              req.DefaultUserRPMLimit,
-		DefaultSubscriptions:             defaultSubscriptions,
-		EnableModelFallback:              req.EnableModelFallback,
-		FallbackModelAnthropic:           req.FallbackModelAnthropic,
-		FallbackModelOpenAI:              req.FallbackModelOpenAI,
-		FallbackModelGemini:              req.FallbackModelGemini,
-		FallbackModelAntigravity:         req.FallbackModelAntigravity,
-		EnableIdentityPatch:              req.EnableIdentityPatch,
-		IdentityPatchPrompt:              req.IdentityPatchPrompt,
-		MinClaudeCodeVersion:             req.MinClaudeCodeVersion,
-		MaxClaudeCodeVersion:             req.MaxClaudeCodeVersion,
-		AllowUngroupedKeyScheduling:      boolValueOrDefault(req.AllowUngroupedKeyScheduling, previousSettings.AllowUngroupedKeyScheduling),
-		BackendModeEnabled:               boolValueOrDefault(req.BackendModeEnabled, previousSettings.BackendModeEnabled),
+		GitHubOAuthEnabled:               boolValueOrDefault(req.GitHubOAuthEnabled, previousSettings.GitHubOAuthEnabled),
+		GitHubOAuthClientID: func() string {
+			if req.GitHubOAuthClientID != nil {
+				return strings.TrimSpace(*req.GitHubOAuthClientID)
+			}
+			return previousSettings.GitHubOAuthClientID
+		}(),
+		GitHubOAuthClientSecret: func() string {
+			if req.GitHubOAuthClientSecret != nil {
+				return strings.TrimSpace(*req.GitHubOAuthClientSecret)
+			}
+			return previousSettings.GitHubOAuthClientSecret
+		}(),
+		GitHubOAuthRedirectURL: func() string {
+			if req.GitHubOAuthRedirectURL != nil {
+				return strings.TrimSpace(*req.GitHubOAuthRedirectURL)
+			}
+			return previousSettings.GitHubOAuthRedirectURL
+		}(),
+		GitHubOAuthFrontendRedirectURL: func() string {
+			if req.GitHubOAuthFrontendRedirectURL != nil {
+				return strings.TrimSpace(*req.GitHubOAuthFrontendRedirectURL)
+			}
+			return previousSettings.GitHubOAuthFrontendRedirectURL
+		}(),
+		GoogleOAuthEnabled: boolValueOrDefault(req.GoogleOAuthEnabled, previousSettings.GoogleOAuthEnabled),
+		GoogleOAuthClientID: func() string {
+			if req.GoogleOAuthClientID != nil {
+				return strings.TrimSpace(*req.GoogleOAuthClientID)
+			}
+			return previousSettings.GoogleOAuthClientID
+		}(),
+		GoogleOAuthClientSecret: func() string {
+			if req.GoogleOAuthClientSecret != nil {
+				return strings.TrimSpace(*req.GoogleOAuthClientSecret)
+			}
+			return previousSettings.GoogleOAuthClientSecret
+		}(),
+		GoogleOAuthRedirectURL: func() string {
+			if req.GoogleOAuthRedirectURL != nil {
+				return strings.TrimSpace(*req.GoogleOAuthRedirectURL)
+			}
+			return previousSettings.GoogleOAuthRedirectURL
+		}(),
+		GoogleOAuthFrontendRedirectURL: func() string {
+			if req.GoogleOAuthFrontendRedirectURL != nil {
+				return strings.TrimSpace(*req.GoogleOAuthFrontendRedirectURL)
+			}
+			return previousSettings.GoogleOAuthFrontendRedirectURL
+		}(),
+		SiteName:                     req.SiteName,
+		SiteLogo:                     req.SiteLogo,
+		SiteSubtitle:                 req.SiteSubtitle,
+		APIBaseURL:                   req.APIBaseURL,
+		ContactInfo:                  req.ContactInfo,
+		DocURL:                       req.DocURL,
+		HomeContent:                  req.HomeContent,
+		HideCcsImportButton:          req.HideCcsImportButton,
+		PurchaseSubscriptionEnabled:  purchaseEnabled,
+		PurchaseSubscriptionURL:      purchaseURL,
+		TableDefaultPageSize:         req.TableDefaultPageSize,
+		TablePageSizeOptions:         req.TablePageSizeOptions,
+		CustomMenuItems:              customMenuJSON,
+		CustomEndpoints:              customEndpointsJSON,
+		DefaultConcurrency:           req.DefaultConcurrency,
+		DefaultBalance:               req.DefaultBalance,
+		RiskControlEnabled:           boolValueOrDefault(req.RiskControlEnabled, previousSettings.RiskControlEnabled),
+		AffiliateRebateRate:          affiliateRebateRate,
+		AffiliateRebateFreezeHours:   affiliateRebateFreezeHours,
+		AffiliateRebateDurationDays:  affiliateRebateDurationDays,
+		AffiliateRebatePerInviteeCap: affiliateRebatePerInviteeCap,
+		DefaultUserRPMLimit:          req.DefaultUserRPMLimit,
+		DefaultSubscriptions:         defaultSubscriptions,
+		EnableModelFallback:          req.EnableModelFallback,
+		FallbackModelAnthropic:       req.FallbackModelAnthropic,
+		FallbackModelOpenAI:          req.FallbackModelOpenAI,
+		FallbackModelGemini:          req.FallbackModelGemini,
+		FallbackModelAntigravity:     req.FallbackModelAntigravity,
+		EnableIdentityPatch:          req.EnableIdentityPatch,
+		IdentityPatchPrompt:          req.IdentityPatchPrompt,
+		MinClaudeCodeVersion:         req.MinClaudeCodeVersion,
+		MaxClaudeCodeVersion:         req.MaxClaudeCodeVersion,
+		AllowUngroupedKeyScheduling:  boolValueOrDefault(req.AllowUngroupedKeyScheduling, previousSettings.AllowUngroupedKeyScheduling),
+		BackendModeEnabled:           boolValueOrDefault(req.BackendModeEnabled, previousSettings.BackendModeEnabled),
 		GatewayStickyOpenAIEnabled: func() bool {
 			if req.GatewayStickyOpenAIEnabled != nil {
 				return *req.GatewayStickyOpenAIEnabled
@@ -1181,6 +1313,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 				return *req.EnableCCHSigning
 			}
 			return previousSettings.EnableCCHSigning
+		}(),
+		EnableAnthropicCacheTTL1hInjection: func() bool {
+			if req.EnableAnthropicCacheTTL1hInjection != nil {
+				return *req.EnableAnthropicCacheTTL1hInjection
+			}
+			return previousSettings.EnableAnthropicCacheTTL1hInjection
 		}(),
 		PaymentVisibleMethodAlipaySource: func() string {
 			if req.PaymentVisibleMethodAlipaySource != nil {
@@ -1329,6 +1467,14 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		return
 	}
 
+	// Update OpenAI fast policy (stored under dedicated key, only when provided).
+	if req.OpenAIFastPolicySettings != nil {
+		if err := h.settingService.SetOpenAIFastPolicySettings(c.Request.Context(), openaiFastPolicySettingsFromDTO(req.OpenAIFastPolicySettings)); err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
+	}
+
 	// Update payment configuration (integrated into system settings).
 	// Skip if no payment fields were provided (prevents accidental wipe).
 	if h.paymentConfigService != nil && hasPaymentFields(req) {
@@ -1395,6 +1541,11 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	}
 	updatedOpsEnabled := h.opsService != nil && h.opsService.IsMonitoringEnabled(c.Request.Context())
 	payload := systemSettingsPayload(updatedSettings, updatedDefaultSubscriptions, updatedPaymentCfg, h.settingService.IsTotpEncryptionKeyConfigured(), updatedOpsEnabled && updatedSettings.OpsMonitoringEnabled)
+	if fastPolicy, err := h.settingService.GetOpenAIFastPolicySettings(c.Request.Context()); err != nil {
+		slog.Error("openai_fast_policy_settings_get_failed", "error", err)
+	} else if fastPolicy != nil {
+		payload.OpenAIFastPolicySettings = openaiFastPolicySettingsToDTO(fastPolicy)
+	}
 	response.Success(c, systemSettingsResponseData(payload, updatedAuthSourceDefaults))
 }
 
@@ -1734,6 +1885,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.EnableCCHSigning != after.EnableCCHSigning {
 		changed = append(changed, "enable_cch_signing")
 	}
+	if before.EnableAnthropicCacheTTL1hInjection != after.EnableAnthropicCacheTTL1hInjection {
+		changed = append(changed, "enable_anthropic_cache_ttl_1h_injection")
+	}
 	if before.PaymentVisibleMethodAlipaySource != after.PaymentVisibleMethodAlipaySource {
 		changed = append(changed, "payment_visible_method_alipay_source")
 	}
@@ -1884,6 +2038,30 @@ func defaultSubscriptionsValueOrDefault(input *[]dto.DefaultSubscriptionSetting,
 	return result
 }
 
+func loginAgreementDocumentsToDTO(items []service.LoginAgreementDocument) []dto.LoginAgreementDocument {
+	result := make([]dto.LoginAgreementDocument, 0, len(items))
+	for _, item := range items {
+		result = append(result, dto.LoginAgreementDocument{
+			ID:        item.ID,
+			Title:     item.Title,
+			ContentMD: item.ContentMD,
+		})
+	}
+	return result
+}
+
+func loginAgreementDocumentsFromDTO(items []dto.LoginAgreementDocument) []service.LoginAgreementDocument {
+	result := make([]service.LoginAgreementDocument, 0, len(items))
+	for _, item := range items {
+		result = append(result, service.LoginAgreementDocument{
+			ID:        item.ID,
+			Title:     item.Title,
+			ContentMD: item.ContentMD,
+		})
+	}
+	return result
+}
+
 func systemSettingsPayload(settings *service.SystemSettings, defaultSubscriptions []dto.DefaultSubscriptionSetting, paymentCfg *service.PaymentConfig, totpConfigured bool, opsMonitoringEnabled bool) dto.SystemSettings {
 	if settings == nil {
 		settings = &service.SystemSettings{}
@@ -1902,6 +2080,10 @@ func systemSettingsPayload(settings *service.SystemSettings, defaultSubscription
 		InvitationCodeEnabled:                  settings.InvitationCodeEnabled,
 		TotpEnabled:                            settings.TotpEnabled,
 		TotpEncryptionKeyConfigured:            totpConfigured,
+		LoginAgreementEnabled:                  settings.LoginAgreementEnabled,
+		LoginAgreementMode:                     settings.LoginAgreementMode,
+		LoginAgreementUpdatedAt:                settings.LoginAgreementUpdatedAt,
+		LoginAgreementDocuments:                loginAgreementDocumentsToDTO(settings.LoginAgreementDocuments),
 		SMTPHost:                               settings.SMTPHost,
 		SMTPPort:                               settings.SMTPPort,
 		SMTPUsername:                           settings.SMTPUsername,
@@ -1954,6 +2136,16 @@ func systemSettingsPayload(settings *service.SystemSettings, defaultSubscription
 		OIDCConnectUserInfoEmailPath:           settings.OIDCConnectUserInfoEmailPath,
 		OIDCConnectUserInfoIDPath:              settings.OIDCConnectUserInfoIDPath,
 		OIDCConnectUserInfoUsernamePath:        settings.OIDCConnectUserInfoUsernamePath,
+		GitHubOAuthEnabled:                     settings.GitHubOAuthEnabled,
+		GitHubOAuthClientID:                    settings.GitHubOAuthClientID,
+		GitHubOAuthClientSecretConfigured:      settings.GitHubOAuthClientSecretConfigured,
+		GitHubOAuthRedirectURL:                 settings.GitHubOAuthRedirectURL,
+		GitHubOAuthFrontendRedirectURL:         settings.GitHubOAuthFrontendRedirectURL,
+		GoogleOAuthEnabled:                     settings.GoogleOAuthEnabled,
+		GoogleOAuthClientID:                    settings.GoogleOAuthClientID,
+		GoogleOAuthClientSecretConfigured:      settings.GoogleOAuthClientSecretConfigured,
+		GoogleOAuthRedirectURL:                 settings.GoogleOAuthRedirectURL,
+		GoogleOAuthFrontendRedirectURL:         settings.GoogleOAuthFrontendRedirectURL,
 		SiteName:                               settings.SiteName,
 		SiteLogo:                               settings.SiteLogo,
 		SiteSubtitle:                           settings.SiteSubtitle,
@@ -1970,6 +2162,7 @@ func systemSettingsPayload(settings *service.SystemSettings, defaultSubscription
 		CustomEndpoints:                        dto.ParseCustomEndpoints(settings.CustomEndpoints),
 		DefaultConcurrency:                     settings.DefaultConcurrency,
 		DefaultBalance:                         settings.DefaultBalance,
+		RiskControlEnabled:                     settings.RiskControlEnabled,
 		AffiliateRebateRate:                    settings.AffiliateRebateRate,
 		AffiliateRebateFreezeHours:             settings.AffiliateRebateFreezeHours,
 		AffiliateRebateDurationDays:            settings.AffiliateRebateDurationDays,
@@ -2006,6 +2199,7 @@ func systemSettingsPayload(settings *service.SystemSettings, defaultSubscription
 		EnableFingerprintUnification:                         settings.EnableFingerprintUnification,
 		EnableMetadataPassthrough:                            settings.EnableMetadataPassthrough,
 		EnableCCHSigning:                                     settings.EnableCCHSigning,
+		EnableAnthropicCacheTTL1hInjection:                   settings.EnableAnthropicCacheTTL1hInjection,
 		WebSearchEmulationEnabled:                            settings.WebSearchEmulationEnabled,
 		PaymentVisibleMethodAlipaySource:                     settings.PaymentVisibleMethodAlipaySource,
 		PaymentVisibleMethodWxpaySource:                      settings.PaymentVisibleMethodWxpaySource,
@@ -2392,6 +2586,58 @@ func (h *SettingHandler) UpdateOverloadCooldownSettings(c *gin.Context) {
 	response.Success(c, dto.OverloadCooldownSettings{
 		Enabled:         updatedSettings.Enabled,
 		CooldownMinutes: updatedSettings.CooldownMinutes,
+	})
+}
+
+// GetRateLimit429CooldownSettings 获取429默认回避配置
+// GET /api/v1/admin/settings/rate-limit-429-cooldown
+func (h *SettingHandler) GetRateLimit429CooldownSettings(c *gin.Context) {
+	settings, err := h.settingService.GetRateLimit429CooldownSettings(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, dto.RateLimit429CooldownSettings{
+		Enabled:         settings.Enabled,
+		CooldownSeconds: settings.CooldownSeconds,
+	})
+}
+
+// UpdateRateLimit429CooldownSettingsRequest 更新429默认回避配置请求
+type UpdateRateLimit429CooldownSettingsRequest struct {
+	Enabled         bool `json:"enabled"`
+	CooldownSeconds int  `json:"cooldown_seconds"`
+}
+
+// UpdateRateLimit429CooldownSettings 更新429默认回避配置
+// PUT /api/v1/admin/settings/rate-limit-429-cooldown
+func (h *SettingHandler) UpdateRateLimit429CooldownSettings(c *gin.Context) {
+	var req UpdateRateLimit429CooldownSettingsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	settings := &service.RateLimit429CooldownSettings{
+		Enabled:         req.Enabled,
+		CooldownSeconds: req.CooldownSeconds,
+	}
+
+	if err := h.settingService.SetRateLimit429CooldownSettings(c.Request.Context(), settings); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	updatedSettings, err := h.settingService.GetRateLimit429CooldownSettings(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, dto.RateLimit429CooldownSettings{
+		Enabled:         updatedSettings.Enabled,
+		CooldownSeconds: updatedSettings.CooldownSeconds,
 	})
 }
 

@@ -559,6 +559,27 @@ func TestOpenAIResponses_FunctionCallOutputHTTPGuidanceDoesNotSuggestPreviousRes
 	require.NotContains(t, w.Body.String(), "reuse previous_response_id")
 }
 
+func TestReplaceOpenAIForwardModelAndSyncParsedCache_UpdatesCachedModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	cached := map[string]any{
+		"model":  "gpt-5.5",
+		"stream": false,
+		"input": []any{
+			map[string]any{"type": "function_call_output", "call_id": "call_1", "output": "{}"},
+		},
+	}
+	c.Set(service.OpenAIParsedRequestBodyKey, cached)
+
+	body := []byte(`{"model":"gpt-5.5","stream":false,"input":[{"type":"function_call_output","call_id":"call_1","output":"{}"}]}`)
+	updated := replaceOpenAIForwardModelAndSyncParsedCache(c, body, "gpt-5.4")
+
+	require.Equal(t, "gpt-5.4", gjson.GetBytes(updated, "model").String())
+	require.Equal(t, "gpt-5.4", cached["model"])
+}
+
 func TestOpenAIResponsesWebSocket_SetsClientTransportWSWhenUpgradeValid(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -1160,7 +1181,7 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, cfg)
 
 	groupID := int64(2)
 	apiKey := &service.APIKey{
@@ -1311,7 +1332,7 @@ func TestOpenAIGatewayHandler_ChatCompletionsPassesDetailSnapshotToRecordUsage(t
 	}
 
 	groupID := int64(1)
-	group := &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+	group := &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
 	account := &service.Account{
 		ID:          11,
 		Name:        "openai-test-account",
@@ -1368,7 +1389,7 @@ func TestOpenAIGatewayHandler_ChatCompletionsPassesDetailSnapshotToRecordUsage(t
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, cfg)
 
 	apiKey := &service.APIKey{
 		ID:      101,
@@ -1388,7 +1409,7 @@ func TestOpenAIGatewayHandler_ChatCompletionsPassesDetailSnapshotToRecordUsage(t
 	router.Use(middleware.UsageDetailCapture())
 	router.POST("/chat/completions", h.ChatCompletions)
 
-	reqBody := `{"model":"gpt-4o","messages":[{"role":"user","content":"hello"}],"stream":false}`
+	reqBody := `{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":false}`
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/chat/completions", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
@@ -1416,7 +1437,7 @@ func TestOpenAIGatewayHandler_ChatCompletionsUsageTaskUsesCapturedEndpointAndSna
 	}
 
 	groupID := int64(1)
-	group := &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+	group := &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
 	account := &service.Account{
 		ID:          11,
 		Name:        "openai-test-account",
@@ -1498,7 +1519,7 @@ func TestOpenAIGatewayHandler_ChatCompletionsUsageTaskUsesCapturedEndpointAndSna
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, pool, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, pool, nil, nil, cfg)
 
 	apiKey := &service.APIKey{
 		ID:      101,
@@ -1519,7 +1540,7 @@ func TestOpenAIGatewayHandler_ChatCompletionsUsageTaskUsesCapturedEndpointAndSna
 	router.Use(middleware.UsageDetailCapture())
 	router.POST("/chat/completions", h.ChatCompletions)
 
-	firstBody := `{"model":"gpt-4o","messages":[{"role":"user","content":"first"}],"stream":false}`
+	firstBody := `{"model":"gpt-5.4","messages":[{"role":"user","content":"first"}],"stream":false}`
 	firstReq := httptest.NewRequest(http.MethodPost, "/chat/completions", strings.NewReader(firstBody))
 	firstReq.Header.Set("Content-Type", "application/json")
 	firstReq.Header.Set("X-Test-Inbound", "/first/inbound")
@@ -1676,7 +1697,7 @@ func TestOpenAIGatewayHandler_RetryPathStoresLastOutboundRequestOnly(t *testing.
 					"Content-Type": []string{"application/json"},
 					"X-Request-Id": []string{"req_success_2"},
 				},
-				Body: io.NopCloser(strings.NewReader(`{"id":"resp_retry","object":"response","status":"completed","model":"gpt-4o","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hello"}]}],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}`)),
+				Body: io.NopCloser(strings.NewReader(`{"id":"resp_retry","object":"response","status":"completed","model":"gpt-5.4","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hello"}]}],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}`)),
 			},
 		},
 	}
@@ -1710,7 +1731,7 @@ func TestOpenAIGatewayHandler_RetryPathStoresLastOutboundRequestOnly(t *testing.
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, cfg)
 
 	apiKey := &service.APIKey{
 		ID:      101,
@@ -1730,7 +1751,7 @@ func TestOpenAIGatewayHandler_RetryPathStoresLastOutboundRequestOnly(t *testing.
 	router.Use(middleware.UsageDetailCapture())
 	router.POST("/v1/responses", h.Responses)
 
-	reqBody := `{"model":"gpt-4o","stream":false,"input":[{"type":"reasoning","encrypted_content":"secret"},{"type":"input_text","text":"hello"}]}`
+	reqBody := `{"model":"gpt-5.4","stream":false,"input":[{"type":"reasoning","encrypted_content":"secret"},{"type":"input_text","text":"hello"}]}`
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
@@ -1790,7 +1811,7 @@ func TestOpenAIGatewayHandler_UsageDetailStoresInjectedUpstreamRequestBody(t *te
 				"Content-Type": []string{"application/json"},
 				"X-Request-Id": []string{"req_usage_detail_1"},
 			},
-			Body: io.NopCloser(strings.NewReader(`{"id":"resp_detail","object":"response","status":"completed","model":"gpt-4o","service_tier":"default","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hello"}]}],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}`)),
+			Body: io.NopCloser(strings.NewReader(`{"id":"resp_detail","object":"response","status":"completed","model":"gpt-5.4","service_tier":"default","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hello"}]}],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}`)),
 		}},
 	}
 	accountRepo := &openAIChatCompletionsAccountRepoStub{account: account}
@@ -1823,7 +1844,7 @@ func TestOpenAIGatewayHandler_UsageDetailStoresInjectedUpstreamRequestBody(t *te
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, cfg)
 
 	apiKey := &service.APIKey{
 		ID:      101,
@@ -1843,7 +1864,7 @@ func TestOpenAIGatewayHandler_UsageDetailStoresInjectedUpstreamRequestBody(t *te
 	router.Use(middleware.UsageDetailCapture())
 	router.POST("/v1/responses", h.Responses)
 
-	reqBody := `{"model":"gpt-4o","stream":false,"input":"hello","service_tier":"auto"}`
+	reqBody := `{"model":"gpt-5.4","stream":false,"input":"hello","service_tier":"auto"}`
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
@@ -1880,7 +1901,7 @@ func newOpenAIImagesHandlerTestRouter(t *testing.T, route string, upstreamRespon
 	}
 
 	groupID := int64(1)
-	group := &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+	group := &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
 	account := &service.Account{
 		ID:          11,
 		Name:        "openai-test-account",
@@ -1920,7 +1941,7 @@ func newOpenAIImagesHandlerTestRouter(t *testing.T, route string, upstreamRespon
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, cfg)
 
 	apiKey := &service.APIKey{
 		ID:      101,
