@@ -143,7 +143,7 @@ func TestLayeredScheduler_StartOpenAIBackgroundRecoveryRehydratesTempUnschedulab
 	require.True(t, entry.startupRehydrated.Load(), "startup bootstrap entry should remember it was rehydrated from DB truth")
 	require.False(t, entry.errorPenalized.Load(), "startup bootstrap entry should not set error penalty")
 	require.False(t, entry.ttftPenalized.Load(), "startup bootstrap entry should not set ttft penalty")
-	require.GreaterOrEqual(t, now.Sub(entry.penalizedAt), cooldown, "startup bootstrap entry should be immediately eligible for next tick")
+	require.GreaterOrEqual(t, time.Since(entry.penalizedAt), cooldown, "startup bootstrap entry should be immediately eligible for next tick")
 	require.Equal(t, 1, repo.listCalls, "explicit startup recovery should query temp-unschedulable accounts exactly once")
 }
 

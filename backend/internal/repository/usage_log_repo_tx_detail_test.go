@@ -96,6 +96,10 @@ func TestUsageLogRepositoryCreateSingle_SkipsDetailPersistenceWhenDisabled(t *te
 			ip_address,
 			image_count,
 			image_size,
+			image_input_size,
+			image_output_size,
+			image_size_source,
+			image_size_breakdown,
 			service_tier,
 			reasoning_effort,
 			inbound_endpoint,
@@ -113,7 +117,7 @@ func TestUsageLogRepositoryCreateSingle_SkipsDetailPersistenceWhenDisabled(t *te
 			$10, $11, $12, $13,
 			$14, $15, $16, $17,
 			$18, $19, $20, $21, $22, $23,
-			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46
+			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 		RETURNING id, created_at

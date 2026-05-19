@@ -108,7 +108,7 @@ func newGatewayRuntimeTestRouter(t *testing.T, repo *gatewayRuntimeHandlerRepoSt
 	gin.SetMode(gin.TestMode)
 
 	settingService := service.ProvideSettingService(repo, nil, nil, cfg, httpUpstream)
-	handler := NewSettingHandler(settingService, nil, nil, nil, nil, nil)
+	handler := NewSettingHandler(settingService, nil, nil, nil, nil, nil, nil)
 
 	router := gin.New()
 	router.GET("/api/v1/admin/settings/gateway-runtime", handler.GetGatewayRuntimeSettings)
