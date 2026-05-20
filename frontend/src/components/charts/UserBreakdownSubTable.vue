@@ -13,8 +13,8 @@
           :key="user.user_id"
           class="border-t border-gray-100/50 dark:border-gray-700/50"
         >
-          <td class="max-w-[120px] truncate py-1 pl-6 text-gray-600 dark:text-gray-300" :title="user.email">
-            {{ user.email || `User #${user.user_id}` }}
+          <td class="max-w-[120px] truncate py-1 pl-6 text-gray-600 dark:text-gray-300" :title="getUserLabel(user)">
+            {{ getUserLabel(user) }}
           </td>
           <td class="py-1 text-right text-gray-500 dark:text-gray-400">
             {{ user.requests.toLocaleString() }}
@@ -48,6 +48,14 @@ defineProps<{
   items: UserBreakdownItem[]
   loading?: boolean
 }>()
+
+const getUserLabel = (user: UserBreakdownItem): string => {
+  const username = user.username?.trim()
+  if (username) return username
+  const email = user.email?.trim()
+  if (email) return email
+  return t('admin.redeem.userPrefix', { id: user.user_id })
+}
 
 const formatTokens = (value: number): string => {
   if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`

@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -175,7 +176,8 @@ func TestDashboardUsersRankingLimitAndCache(t *testing.T) {
 	dashboardUsersRankingCache = newSnapshotCache(5 * time.Minute)
 	repo := &dashboardUsageRepoCapture{
 		ranking: []usagestats.UserSpendingRankingItem{
-			{UserID: 7, Email: "rank@example.com", ActualCost: 10.5, Requests: 3, Tokens: 300},
+			{UserID: 7, Email: "rank@example.com", Username: "Rank User", ActualCost: 10.5, Requests: 3, Tokens: 300},
+			{UserID: 8, Email: "fallback@example.com", Username: "", ActualCost: 3.5, Requests: 2, Tokens: 120},
 		},
 		rankingTotal: 88.8,
 	}
@@ -191,6 +193,20 @@ func TestDashboardUsersRankingLimitAndCache(t *testing.T) {
 	require.Contains(t, rec.Body.String(), "\"total_requests\":44")
 	require.Contains(t, rec.Body.String(), "\"total_tokens\":1234")
 	require.Equal(t, "miss", rec.Header().Get("X-Snapshot-Cache"))
+
+	var resp struct {
+		Code int `json:"code"`
+		Data struct {
+			Ranking []usagestats.UserSpendingRankingItem `json:"ranking"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, 0, resp.Code)
+	require.Len(t, resp.Data.Ranking, 2)
+	require.Equal(t, "rank@example.com", resp.Data.Ranking[0].Email)
+	require.Equal(t, "Rank User", resp.Data.Ranking[0].Username)
+	require.Equal(t, "fallback@example.com", resp.Data.Ranking[1].Email)
+	require.Equal(t, "", resp.Data.Ranking[1].Username)
 
 	req2 := httptest.NewRequest(http.MethodGet, "/admin/dashboard/users-ranking?limit=100&start_date=2025-01-01&end_date=2025-01-02", nil)
 	rec2 := httptest.NewRecorder()
