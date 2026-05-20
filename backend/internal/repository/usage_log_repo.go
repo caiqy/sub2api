@@ -733,7 +733,7 @@ func (r *usageLogRepository) flushBestEffortBatch(db *sql.DB, batch []usageLogBe
 	groupOrder := make([]*bestEffortGroup, 0, len(batch))
 	fallback := make([]usageLogBestEffortRequest, 0)
 
-	for idx, req := range batch {
+	for _, req := range batch {
 		if req.log == nil {
 			sendUsageLogBestEffortResult(req.resultCh, nil)
 			continue
@@ -743,8 +743,7 @@ func (r *usageLogRepository) flushBestEffortBatch(db *sql.DB, batch []usageLogBe
 			fallback = append(fallback, req)
 			continue
 		}
-		key := fmt.Sprintf("__best_effort_%d", idx)
-		key = usageLogBatchKey(prepared.requestID, req.apiKeyID)
+		key := usageLogBatchKey(prepared.requestID, req.apiKeyID)
 		group, exists := groupsByKey[key]
 		if !exists {
 			group = &bestEffortGroup{

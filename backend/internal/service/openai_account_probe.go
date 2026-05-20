@@ -380,10 +380,7 @@ func (p *openAIAccountProbe) shouldTreatAsManualRecovery(ctx context.Context, ac
 	}
 	dbAccount, err := p.service.accountRepo.GetByID(ctx, accountID)
 	if err != nil {
-		if errors.Is(err, ErrAccountNotFound) {
-			return true
-		}
-		return false
+		return errors.Is(err, ErrAccountNotFound)
 	}
 	if dbAccount == nil {
 		return false
@@ -393,13 +390,16 @@ func (p *openAIAccountProbe) shouldTreatAsManualRecovery(ctx context.Context, ac
 
 // probeAccount 对单个账号执行一次探活请求。
 func (p *openAIAccountProbe) probeAccount(account *Account, entry *openAIAccountProbeEntry, lcfg GatewayOpenAIWSSchedulerLayeredConfig) {
+	if entry == nil {
+		return
+	}
 	defer entry.probing.Store(false)
 
 	model := p.resolveProbeModel(account)
 	result := p.sendProbeRequest(p.ctx, account, model, lcfg)
 	entry.stateMu.Lock()
 	defer entry.stateMu.Unlock()
-	if entry != nil && entry.ignoreResults.Load() {
+	if entry.ignoreResults.Load() {
 		return
 	}
 
@@ -787,7 +787,7 @@ func (p *openAIAccountProbe) sendProbeRequest(ctx context.Context, account *Acco
 	if err != nil {
 		return probeResult{err: fmt.Errorf("do request: %w", err)}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		return probeResult{err: fmt.Errorf("upstream status %d", resp.StatusCode)}

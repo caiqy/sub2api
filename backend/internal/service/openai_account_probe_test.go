@@ -560,7 +560,8 @@ func TestProbe_BootstrapRegister_MakesEntryImmediatelyEligibleForNextTick(t *tes
 
 	value, ok := probe.entries.Load(account.ID)
 	require.True(t, ok, "entry should be created during bootstrap registration")
-	entry := value.(*openAIAccountProbeEntry)
+	entry, ok := value.(*openAIAccountProbeEntry)
+	require.True(t, ok)
 	require.True(t, entry.dbFlagSet.Load())
 	require.False(t, entry.errorPenalized.Load())
 	require.False(t, entry.ttftPenalized.Load())
@@ -611,7 +612,8 @@ func TestProbe_Tick_DoesNotTreatStaleSnapshotAsManualRecoveryForRehydratedEntry(
 	probe.bootstrapRegister(&fresh, now, 2*time.Minute)
 	value, ok := probe.entries.Load(int64(77))
 	require.True(t, ok)
-	entry := value.(*openAIAccountProbeEntry)
+	entry, ok := value.(*openAIAccountProbeEntry)
+	require.True(t, ok)
 	entry.dbFlagSet.Store(true)
 	entry.penalizedAt = now
 
@@ -648,7 +650,8 @@ func TestProbe_Tick_DoesNotDeleteStartupRehydratedEntryWhenSnapshotMissFallsBack
 	probe.bootstrapRegister(&fresh, now, 2*time.Minute)
 	value, ok := probe.entries.Load(int64(78))
 	require.True(t, ok)
-	entry := value.(*openAIAccountProbeEntry)
+	entry, ok := value.(*openAIAccountProbeEntry)
+	require.True(t, ok)
 	entry.dbFlagSet.Store(true)
 	entry.penalizedAt = now
 
@@ -687,7 +690,8 @@ func TestProbe_Tick_DoesNotDeleteStartupRehydratedEntryWhenSnapshotStaleSchedula
 	probe.bootstrapRegister(&fresh, now, 2*time.Minute)
 	value, ok := probe.entries.Load(int64(79))
 	require.True(t, ok)
-	entry := value.(*openAIAccountProbeEntry)
+	entry, ok := value.(*openAIAccountProbeEntry)
+	require.True(t, ok)
 	entry.dbFlagSet.Store(true)
 	entry.penalizedAt = now
 
@@ -726,7 +730,8 @@ func TestProbe_Tick_UsesDeadlineWhenReloadingDBTruthForStartupRehydratedEntry(t 
 	probe.bootstrapRegister(&fresh, now, 2*time.Minute)
 	value, ok := probe.entries.Load(int64(80))
 	require.True(t, ok)
-	entry := value.(*openAIAccountProbeEntry)
+	entry, ok := value.(*openAIAccountProbeEntry)
+	require.True(t, ok)
 	entry.dbFlagSet.Store(true)
 	entry.penalizedAt = now
 
@@ -767,7 +772,8 @@ func TestProbe_Tick_UsesDeadlineWhenCheckingManualRecoveryForStartupRehydratedEn
 	probe.bootstrapRegister(&snapshotAccount, now, 2*time.Minute)
 	value, ok := probe.entries.Load(int64(81))
 	require.True(t, ok)
-	entry := value.(*openAIAccountProbeEntry)
+	entry, ok := value.(*openAIAccountProbeEntry)
+	require.True(t, ok)
 	entry.dbFlagSet.Store(true)
 	entry.penalizedAt = now
 
@@ -805,7 +811,8 @@ func TestProbe_Tick_KeepsStartupRehydratedEntryWhenDBTruthReloadFailsAfterSnapsh
 	probe.bootstrapRegister(&fresh, now, 2*time.Minute)
 	value, ok := probe.entries.Load(int64(82))
 	require.True(t, ok)
-	entry := value.(*openAIAccountProbeEntry)
+	entry, ok := value.(*openAIAccountProbeEntry)
+	require.True(t, ok)
 	entry.dbFlagSet.Store(true)
 	entry.penalizedAt = now
 
@@ -844,7 +851,8 @@ func TestProbe_Tick_KeepsStartupRehydratedEntryWhenDBTruthReloadFailsAfterStaleS
 	probe.bootstrapRegister(&fresh, now, 2*time.Minute)
 	value, ok := probe.entries.Load(int64(83))
 	require.True(t, ok)
-	entry := value.(*openAIAccountProbeEntry)
+	entry, ok := value.(*openAIAccountProbeEntry)
+	require.True(t, ok)
 	entry.dbFlagSet.Store(true)
 	entry.penalizedAt = now
 
@@ -881,7 +889,8 @@ func TestProbe_Tick_DeletesStartupRehydratedEntryWhenDBTruthReturnsAccountNotFou
 	probe.bootstrapRegister(&fresh, now, 2*time.Minute)
 	value, ok := probe.entries.Load(int64(84))
 	require.True(t, ok)
-	entry := value.(*openAIAccountProbeEntry)
+	entry, ok := value.(*openAIAccountProbeEntry)
+	require.True(t, ok)
 	entry.dbFlagSet.Store(true)
 	entry.penalizedAt = now
 
@@ -918,7 +927,8 @@ func TestProbe_Tick_DeletesStartupRehydratedEntryWhenManualRecoveryDBTruthReturn
 	probe.bootstrapRegister(&snapshotAccount, now, 2*time.Minute)
 	value, ok := probe.entries.Load(int64(85))
 	require.True(t, ok)
-	entry := value.(*openAIAccountProbeEntry)
+	entry, ok := value.(*openAIAccountProbeEntry)
+	require.True(t, ok)
 	entry.dbFlagSet.Store(true)
 	entry.penalizedAt = now
 
@@ -964,7 +974,8 @@ func TestProbe_Tick_DoesNotTreatRuntimeDBFlagEntryAsManualRecoveryWhenSnapshotIs
 
 	value, stillPresent := probe.entries.Load(int64(86))
 	require.True(t, stillPresent, "runtime db-flagged entry should not be treated as manual recovery from stale snapshot")
-	remaining := value.(*openAIAccountProbeEntry)
+	remaining, ok := value.(*openAIAccountProbeEntry)
+	require.True(t, ok)
 	require.True(t, remaining.dbFlagSet.Load())
 	require.NotNil(t, repo.tempUnschedAccounts[0].TempUnschedulableUntil, "DB temp-unsched flag should remain intact")
 }
@@ -1053,13 +1064,17 @@ func TestProbe_MarkPenalized_IsIdempotent(t *testing.T) {
 	probe.markPenalized(42, nil, true, false)
 	val1, ok1 := probe.entries.Load(int64(42))
 	require.True(t, ok1)
+	entry1, ok := val1.(*openAIAccountProbeEntry)
+	require.True(t, ok)
 
 	probe.markPenalized(42, nil, true, false)
 	val2, ok2 := probe.entries.Load(int64(42))
 	require.True(t, ok2)
+	entry2, ok := val2.(*openAIAccountProbeEntry)
+	require.True(t, ok)
 
 	// LoadOrStore returns the existing entry on second call, so pointers must match.
-	require.Same(t, val1.(*openAIAccountProbeEntry), val2.(*openAIAccountProbeEntry))
+	require.Same(t, entry1, entry2)
 }
 
 func TestProbe_MarkPenalized_OverwritesReasonFlagsToCurrentEvaluation(t *testing.T) {
@@ -1069,7 +1084,8 @@ func TestProbe_MarkPenalized_OverwritesReasonFlagsToCurrentEvaluation(t *testing
 	probe.markPenalized(42, nil, true, true)
 	value, ok := probe.entries.Load(int64(42))
 	require.True(t, ok)
-	entry := value.(*openAIAccountProbeEntry)
+	entry, ok := value.(*openAIAccountProbeEntry)
+	require.True(t, ok)
 	require.True(t, entry.errorPenalized.Load())
 	require.True(t, entry.ttftPenalized.Load())
 
@@ -1095,7 +1111,8 @@ func TestProbe_ClearPenaltyReasons_DoesNotRemoveEntryWhenProbing(t *testing.T) {
 	probe.markPenalized(9, nil, true, true)
 	value, ok := probe.entries.Load(int64(9))
 	require.True(t, ok)
-	entry := value.(*openAIAccountProbeEntry)
+	entry, ok := value.(*openAIAccountProbeEntry)
+	require.True(t, ok)
 	entry.probing.Store(true)
 
 	probe.clearPenaltyReasons(9)
@@ -1112,7 +1129,8 @@ func TestProbe_ClearPenaltyReasons_DoesNotRemoveEntryWhenDBFlagSet(t *testing.T)
 	probe.markPenalized(10, nil, true, true)
 	value, ok := probe.entries.Load(int64(10))
 	require.True(t, ok)
-	entry := value.(*openAIAccountProbeEntry)
+	entry, ok := value.(*openAIAccountProbeEntry)
+	require.True(t, ok)
 	entry.dbFlagSet.Store(true)
 
 	probe.clearPenaltyReasons(10)
@@ -1129,7 +1147,8 @@ func TestProbe_FinalizePenaltyState_KeepsEntryWhenTTFTReasonRemains(t *testing.T
 	probe.markPenalized(1, nil, true, true)
 	value, ok := probe.entries.Load(int64(1))
 	require.True(t, ok)
-	entry := value.(*openAIAccountProbeEntry)
+	entry, ok := value.(*openAIAccountProbeEntry)
+	require.True(t, ok)
 
 	entry.errorPenalized.Store(false)
 	entry.ttftPenalized.Store(true)
@@ -1146,7 +1165,8 @@ func TestProbe_FinalizePenaltyState_RemovesEntryWhenBothReasonsClear(t *testing.
 	probe.markPenalized(1, nil, true, true)
 	value, ok := probe.entries.Load(int64(1))
 	require.True(t, ok)
-	entry := value.(*openAIAccountProbeEntry)
+	entry, ok := value.(*openAIAccountProbeEntry)
+	require.True(t, ok)
 
 	entry.errorPenalized.Store(false)
 	entry.ttftPenalized.Store(false)
@@ -1281,8 +1301,10 @@ func TestProbe_ReevaluatePenaltyReasons_UsesStoredEntryGroupID(t *testing.T) {
 	}
 
 	probe.markPenalized(1, &groupA, false, true)
-	value, _ := probe.entries.Load(int64(1))
-	entry := value.(*openAIAccountProbeEntry)
+	value, ok := probe.entries.Load(int64(1))
+	require.True(t, ok)
+	entry, ok := value.(*openAIAccountProbeEntry)
+	require.True(t, ok)
 
 	eval, err := probe.reevaluatePenaltyReasons(context.Background(), 1, probeEntryGroupID(entry))
 	require.NoError(t, err)
@@ -1324,7 +1346,8 @@ func TestProbe_RecoverAccount_ResetsEWMA(t *testing.T) {
 	probe.markPenalized(1, nil, true, false)
 	val, ok := probe.entries.Load(int64(1))
 	require.True(t, ok)
-	entry := val.(*openAIAccountProbeEntry)
+	entry, ok := val.(*openAIAccountProbeEntry)
+	require.True(t, ok)
 
 	// Recover
 	probe.recoverAccount(1, entry)
@@ -1352,7 +1375,8 @@ func TestProbe_RecoverAccount_KeepsEntryWhenClearTempUnschedulableFails(t *testi
 	probe.markPenalized(123, nil, true, false)
 	value, ok := probe.entries.Load(int64(123))
 	require.True(t, ok)
-	entry := value.(*openAIAccountProbeEntry)
+	entry, ok := value.(*openAIAccountProbeEntry)
+	require.True(t, ok)
 	entry.dbFlagSet.Store(true)
 
 	probe.recoverAccount(123, entry)
@@ -1373,7 +1397,8 @@ func TestProbe_ManualRecovery_ClearsReasonsButPreservesTTFT(t *testing.T) {
 
 	value, ok := probe.entries.Load(int64(1))
 	require.True(t, ok)
-	entry := value.(*openAIAccountProbeEntry)
+	entry, ok := value.(*openAIAccountProbeEntry)
+	require.True(t, ok)
 	entry.dbFlagSet.Store(true)
 
 	probe.applyManualRecovery(1, entry)
@@ -1393,7 +1418,8 @@ func TestProbe_ManualRecovery_MarksEntryToIgnoreStaleProbeResults(t *testing.T) 
 
 	value, ok := probe.entries.Load(int64(1))
 	require.True(t, ok)
-	entry := value.(*openAIAccountProbeEntry)
+	entry, ok := value.(*openAIAccountProbeEntry)
+	require.True(t, ok)
 
 	probe.applyManualRecovery(1, entry)
 	require.True(t, entry.ignoreResults.Load(), "manual recovery should mark stale in-flight probe results to be ignored")
@@ -1409,7 +1435,8 @@ func TestProbe_ExplainabilityFields_IncludeRuntimeMetrics(t *testing.T) {
 
 	value, ok := probe.entries.Load(int64(1))
 	require.True(t, ok)
-	entry := value.(*openAIAccountProbeEntry)
+	entry, ok := value.(*openAIAccountProbeEntry)
+	require.True(t, ok)
 	entry.lastProbeTTFTMs.Store(1200)
 
 	var fields []any
@@ -1427,14 +1454,16 @@ func TestProbe_SuccessPath_LeavesEntryWhenTTFTStillPenalized(t *testing.T) {
 	probe := &openAIAccountProbe{stats: newOpenAIAccountRuntimeStats(), stopCh: make(chan struct{}), ctx: context.Background()}
 	defer probe.stop()
 	probe.markPenalized(1, nil, true, true)
-	value, _ := probe.entries.Load(int64(1))
-	entry := value.(*openAIAccountProbeEntry)
+	value, ok := probe.entries.Load(int64(1))
+	require.True(t, ok)
+	entry, ok := value.(*openAIAccountProbeEntry)
+	require.True(t, ok)
 
 	entry.errorPenalized.Store(false)
 	entry.ttftPenalized.Store(true)
 	probe.finalizePenaltyState(1, entry)
 
-	_, ok := probe.entries.Load(int64(1))
+	_, ok = probe.entries.Load(int64(1))
 	require.True(t, ok)
 }
 

@@ -182,20 +182,6 @@ func (s *GatewayService) debugClaudeMimicEnabled() bool {
 	return s.debugClaudeMimic.Load()
 }
 
-func (s *GatewayService) genericStickyEnabled() bool {
-	if s == nil || s.cfg == nil {
-		return true
-	}
-	return s.cfg.Gateway.Sticky.Anthropic.Enabled
-}
-
-func (s *GatewayService) geminiStickyEnabled() bool {
-	if s == nil || s.cfg == nil {
-		return true
-	}
-	return s.cfg.Gateway.Sticky.Gemini.Enabled
-}
-
 func (s *GatewayService) stickyEnabledForPlatform(platform string) bool {
 	if s == nil || s.cfg == nil {
 		return true
@@ -5566,13 +5552,13 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 					if parsed.Get("type").String() == "content_block_delta" {
 						delta := parsed.Get("delta")
 						if t := delta.Get("text").String(); t != "" {
-							passthroughOutputTextBuilder.WriteString(t)
+							_, _ = passthroughOutputTextBuilder.WriteString(t)
 						}
 						if pj := delta.Get("partial_json").String(); pj != "" {
-							passthroughOutputTextBuilder.WriteString(pj)
+							_, _ = passthroughOutputTextBuilder.WriteString(pj)
 						}
 						if tk := delta.Get("thinking").String(); tk != "" {
-							passthroughOutputTextBuilder.WriteString(tk)
+							_, _ = passthroughOutputTextBuilder.WriteString(tk)
 						}
 					}
 				}
@@ -7568,14 +7554,14 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 		if eventType == "content_block_delta" {
 			if delta, ok := event["delta"].(map[string]any); ok {
 				if t, ok := delta["text"].(string); ok && t != "" {
-					streamOutputTextBuilder.WriteString(t)
+					_, _ = streamOutputTextBuilder.WriteString(t)
 				}
 				if pj, ok := delta["partial_json"].(string); ok && pj != "" {
-					streamOutputTextBuilder.WriteString(pj)
+					_, _ = streamOutputTextBuilder.WriteString(pj)
 				}
 				// thinking_delta 也算输出 token
 				if tk, ok := delta["thinking"].(string); ok && tk != "" {
-					streamOutputTextBuilder.WriteString(tk)
+					_, _ = streamOutputTextBuilder.WriteString(tk)
 				}
 			}
 		}
@@ -7809,15 +7795,15 @@ func extractContentTextFromResponseBody(body []byte) string {
 		switch item.Get("type").String() {
 		case "text":
 			if t := item.Get("text").String(); t != "" {
-				b.WriteString(t)
+				_, _ = b.WriteString(t)
 			}
 		case "tool_use":
 			if input := item.Get("input").Raw; input != "" {
-				b.WriteString(input)
+				_, _ = b.WriteString(input)
 			}
 		case "thinking":
 			if tk := item.Get("thinking").String(); tk != "" {
-				b.WriteString(tk)
+				_, _ = b.WriteString(tk)
 			}
 		}
 		return true

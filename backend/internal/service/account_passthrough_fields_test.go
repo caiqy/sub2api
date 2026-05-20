@@ -474,7 +474,8 @@ func TestNormalizeAccountPassthroughFields(t *testing.T) {
 		})
 
 		require.NoError(t, err)
-		rules := normalized["passthrough_field_rules"].([]PassthroughFieldRule)
+		rules, ok := normalized["passthrough_field_rules"].([]PassthroughFieldRule)
+		require.True(t, ok)
 		require.Len(t, rules, 2)
 	})
 }

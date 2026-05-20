@@ -1195,7 +1195,7 @@ func (s *AntigravityGatewayService) resolveAntigravityAccessToken(ctx context.Co
 		return "", errors.New("antigravity api key not configured")
 	}
 	if s.tokenProvider == nil {
-		return "", errors.New("Antigravity token provider not configured")
+		return "", errors.New("antigravity token provider not configured")
 	}
 	return s.tokenProvider.GetAccessToken(ctx, account)
 }
@@ -1444,7 +1444,7 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 	if err != nil {
 		return nil, s.writeClaudeError(c, http.StatusBadRequest, "invalid_request_error", "Invalid request")
 	}
-	passthroughHeaders := http.Header{}
+	var passthroughHeaders http.Header
 	geminiBody, passthroughHeaders, err = s.applyAntigravityAccountPassthroughFields(ctx, c, account, body, geminiBody)
 	if err != nil {
 		return nil, s.writeClaudeError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
@@ -2196,7 +2196,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 	} else {
 		logger.LegacyPrintf("service.antigravity_gateway", "[Antigravity] Failed to clean schema: %v", err)
 	}
-	passthroughHeaders := http.Header{}
+	var passthroughHeaders http.Header
 	injectedBody, passthroughHeaders, err = s.applyAntigravityAccountPassthroughFields(ctx, c, account, body, injectedBody)
 	if err != nil {
 		return nil, s.writeGoogleError(c, http.StatusBadRequest, err.Error())

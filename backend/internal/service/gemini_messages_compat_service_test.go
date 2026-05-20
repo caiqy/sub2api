@@ -673,6 +673,7 @@ func TestExtractGeminiUsage(t *testing.T) {
 			}
 			if got == nil {
 				t.Fatalf("期望返回非 nil，实际返回 nil")
+				return
 			}
 			if got.InputTokens != tt.wantUsage.InputTokens {
 				t.Errorf("InputTokens: 期望 %d，实际 %d", tt.wantUsage.InputTokens, got.InputTokens)
@@ -1202,7 +1203,9 @@ func TestGeminiMessagesCompatService_Forward_APIKeyStoresFinalOpsUpstreamRequest
 
 	rawBody, ok := c.Get(OpsUpstreamRequestBodyKey)
 	require.True(t, ok)
-	opsBody := string(rawBody.([]byte))
+	opsBodyBytes, ok := rawBody.([]byte)
+	require.True(t, ok)
+	opsBody := string(opsBodyBytes)
 	require.JSONEq(t, string(upstream.lastBody), opsBody)
 	require.Equal(t, "1", gjson.Get(opsBody, "generationConfig.candidateCount").String())
 }
@@ -1258,7 +1261,9 @@ func TestGeminiMessagesCompatService_Forward_OAuthProjectStoresWrappedOpsUpstrea
 
 	rawBody, ok := c.Get(OpsUpstreamRequestBodyKey)
 	require.True(t, ok)
-	opsBody := string(rawBody.([]byte))
+	opsBodyBytes, ok := rawBody.([]byte)
+	require.True(t, ok)
+	opsBody := string(opsBodyBytes)
 	require.JSONEq(t, string(upstream.lastBody), opsBody)
 	require.Equal(t, "project-123", gjson.Get(opsBody, "project").String())
 	require.True(t, gjson.Get(opsBody, "request").Exists())
@@ -1314,7 +1319,9 @@ func TestGeminiMessagesCompatService_ForwardNative_OAuthProjectStoresWrappedOpsU
 
 	rawBody, ok := c.Get(OpsUpstreamRequestBodyKey)
 	require.True(t, ok)
-	opsBody := string(rawBody.([]byte))
+	opsBodyBytes, ok := rawBody.([]byte)
+	require.True(t, ok)
+	opsBody := string(opsBodyBytes)
 	require.JSONEq(t, string(upstream.lastBody), opsBody)
 	require.Equal(t, "project-456", gjson.Get(opsBody, "project").String())
 	require.True(t, gjson.Get(opsBody, "request").Exists())

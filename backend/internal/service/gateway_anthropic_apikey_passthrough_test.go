@@ -459,9 +459,9 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardCountTokensPreservesBo
 	require.Equal(t, "trace-ct-1", getHeaderRaw(upstream.lastReq.Header, "X-Trace-Id"))
 	require.Empty(t, getHeaderRaw(upstream.lastReq.Header, "authorization"))
 	require.Empty(t, getHeaderRaw(upstream.lastReq.Header, "cookie"))
-	_, hasRawAPIKey := upstream.lastReq.Header["x-api-key"]
+	_, hasRawAPIKey := upstream.lastReq.Header["x-api-key"] //nolint:staticcheck // intentionally verify raw upstream header key casing
 	require.True(t, hasRawAPIKey)
-	_, hasRawAnthropicVersion := upstream.lastReq.Header["anthropic-version"]
+	_, hasRawAnthropicVersion := upstream.lastReq.Header["anthropic-version"] //nolint:staticcheck // intentionally verify raw upstream header key casing
 	require.True(t, hasRawAnthropicVersion)
 	rawBody, ok := c.Get(OpsUpstreamRequestBodyKey)
 	require.True(t, ok)

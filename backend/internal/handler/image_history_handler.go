@@ -116,7 +116,7 @@ func parseImageHistoryTab(value string) (string, error) {
 	case "", string(service.ImageHistoryModeGenerate), string(service.ImageHistoryModeEdit):
 		return normalized, nil
 	default:
-		return "", errors.New("Invalid tab")
+		return "", errors.New("invalid tab")
 	}
 }
 
@@ -126,6 +126,6 @@ func parseImageHistoryStatus(value string) (string, error) {
 	case "", string(service.ImageHistoryStatusSuccess), string(service.ImageHistoryStatusError):
 		return normalized, nil
 	default:
-		return "", errors.New("Invalid status")
+		return "", errors.New("invalid status")
 	}
 }

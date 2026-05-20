@@ -431,28 +431,6 @@ func (s *layeredOpenAIAccountScheduler) computeGroupMinTTFT(ctx context.Context,
 	return minTTFT, hasMin, nil
 }
 
-func (s *layeredOpenAIAccountScheduler) computeMinTTFTForAccounts(accounts []*Account) (float64, bool) {
-	if s == nil || s.stats == nil {
-		return 0, false
-	}
-	var minTTFT float64
-	var hasMin bool
-	for _, account := range accounts {
-		if account == nil || !account.IsSchedulable() || !account.IsOpenAI() {
-			continue
-		}
-		_, ttft, hasTTFT := s.stats.snapshot(account.ID)
-		if !hasTTFT || ttft <= 0 {
-			continue
-		}
-		if !hasMin || ttft < minTTFT {
-			minTTFT = ttft
-			hasMin = true
-		}
-	}
-	return minTTFT, hasMin
-}
-
 // evaluateRuntimePenalty 基于预计算的 group-level 最小 TTFT 基线，
 // 判断 accountID 是否需要被惩罚。不执行额外的数据库/缓存查询。
 func (s *layeredOpenAIAccountScheduler) evaluateRuntimePenalty(accountID int64, groupMinTTFT float64, hasGroupMin bool) layeredPenaltyEvaluation {

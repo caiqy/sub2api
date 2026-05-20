@@ -43,11 +43,11 @@ func FormatUsageDetailHeadersText(headers http.Header) string {
 func FormatUsageDetailResponseHeadersText(statusCode int, headers http.Header) string {
 	var buf bytes.Buffer
 	if statusCode > 0 {
-		buf.WriteString(":status: ")
-		buf.WriteString(strconv.Itoa(statusCode))
-		buf.WriteByte('\n')
+		_, _ = buf.WriteString(":status: ")
+		_, _ = buf.WriteString(strconv.Itoa(statusCode))
+		_ = buf.WriteByte('\n')
 	}
-	buf.WriteString(FormatUsageDetailHeadersText(headers))
+	_, _ = buf.WriteString(FormatUsageDetailHeadersText(headers))
 	return buf.String()
 }
 
@@ -57,13 +57,13 @@ func FormatUsageDetailRequestHeadersText(req *http.Request) string {
 	}
 
 	var buf bytes.Buffer
-	buf.WriteString(":method: ")
-	buf.WriteString(req.Method)
-	buf.WriteByte('\n')
-	buf.WriteString(":url: ")
-	buf.WriteString(formatUsageDetailRequestURL(req))
-	buf.WriteByte('\n')
-	buf.WriteString(FormatUsageDetailHeadersText(req.Header))
+	_, _ = buf.WriteString(":method: ")
+	_, _ = buf.WriteString(req.Method)
+	_ = buf.WriteByte('\n')
+	_, _ = buf.WriteString(":url: ")
+	_, _ = buf.WriteString(formatUsageDetailRequestURL(req))
+	_ = buf.WriteByte('\n')
+	_, _ = buf.WriteString(FormatUsageDetailHeadersText(req.Header))
 
 	return buf.String()
 }

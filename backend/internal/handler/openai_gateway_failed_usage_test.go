@@ -3,22 +3,11 @@ package handler
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/tls"
-	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/pem"
 	"io"
-	"math/big"
 	"mime/multipart"
-	"net"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -693,143 +682,6 @@ func (e fakeOpenAIImagesOAuthUpstreamError) OpenAIImageUpstreamResponseHeaders()
 
 func (e fakeOpenAIImagesOAuthUpstreamError) OpenAIImageUpstreamResponseBody() []byte {
 	return append([]byte(nil), e.responseBody...)
-}
-
-var oauthImagesFallbackRootsOnce sync.Once
-
-func newOAuthImagesFailureProxy(t *testing.T, upstreamHeaders http.Header, upstreamBody []byte) (*service.Proxy, func()) {
-	t.Helper()
-
-	serverCert, rootCert := newChatGPTDotComTLSCert(t)
-	installOAuthImagesFallbackRoots(t, rootCert)
-
-	upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/":
-			w.WriteHeader(http.StatusOK)
-		case r.Method == http.MethodPost && r.URL.Path == "/backend-api/sentinel/chat-requirements":
-			for key, values := range upstreamHeaders {
-				for _, value := range values {
-					w.Header().Add(key, value)
-				}
-			}
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = w.Write(upstreamBody)
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	upstream.TLS = &tls.Config{Certificates: []tls.Certificate{serverCert}}
-	upstream.StartTLS()
-
-	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodConnect {
-			http.Error(w, "connect required", http.StatusBadGateway)
-			return
-		}
-
-		targetConn, err := net.Dial("tcp", upstream.Listener.Addr().String())
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-
-		hijacker, ok := w.(http.Hijacker)
-		if !ok {
-			targetConn.Close()
-			http.Error(w, "hijack unsupported", http.StatusInternalServerError)
-			return
-		}
-		clientConn, _, err := hijacker.Hijack()
-		if err != nil {
-			targetConn.Close()
-			return
-		}
-		_, _ = clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
-
-		go func() {
-			_, _ = io.Copy(targetConn, clientConn)
-			_ = targetConn.Close()
-			_ = clientConn.Close()
-		}()
-		go func() {
-			_, _ = io.Copy(clientConn, targetConn)
-			_ = clientConn.Close()
-			_ = targetConn.Close()
-		}()
-	}))
-
-	parsed, err := url.Parse(proxyServer.URL)
-	require.NoError(t, err)
-	port := 0
-	if parsed.Port() != "" {
-		port, err = strconv.Atoi(parsed.Port())
-		require.NoError(t, err)
-	}
-
-	cleanup := func() {
-		proxyServer.Close()
-		upstream.Close()
-	}
-
-	return &service.Proxy{
-		ID:       99,
-		Protocol: parsed.Scheme,
-		Host:     parsed.Hostname(),
-		Port:     port,
-		Status:   service.StatusActive,
-	}, cleanup
-}
-
-func installOAuthImagesFallbackRoots(t *testing.T, rootCert *x509.Certificate) {
-	t.Helper()
-	t.Setenv("GODEBUG", "x509usefallbackroots=1")
-	oauthImagesFallbackRootsOnce.Do(func() {
-		pool := x509.NewCertPool()
-		pool.AddCert(rootCert)
-		x509.SetFallbackRoots(pool)
-	})
-}
-
-func newChatGPTDotComTLSCert(t *testing.T) (tls.Certificate, *x509.Certificate) {
-	t.Helper()
-
-	caKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	require.NoError(t, err)
-	caTemplate := &x509.Certificate{
-		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "sub2api test root"},
-		NotBefore:             time.Now().Add(-time.Hour),
-		NotAfter:              time.Now().Add(time.Hour),
-		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
-		BasicConstraintsValid: true,
-		IsCA:                  true,
-	}
-	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
-	require.NoError(t, err)
-	rootCert, err := x509.ParseCertificate(caDER)
-	require.NoError(t, err)
-
-	leafKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	require.NoError(t, err)
-	leafTemplate := &x509.Certificate{
-		SerialNumber: big.NewInt(2),
-		Subject:      pkix.Name{CommonName: "chatgpt.com"},
-		DNSNames:     []string{"chatgpt.com"},
-		NotBefore:    time.Now().Add(-time.Hour),
-		NotAfter:     time.Now().Add(time.Hour),
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-	}
-	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, rootCert, &leafKey.PublicKey, caKey)
-	require.NoError(t, err)
-
-	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leafDER})
-	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(leafKey)})
-	serverCert, err := tls.X509KeyPair(certPEM, keyPEM)
-	require.NoError(t, err)
-
-	return serverCert, rootCert
 }
 
 func TestOpenAIGatewayHandler_MessagesSelectionExhaustedAfterFailoverStillCreatesUsageLog(t *testing.T) {

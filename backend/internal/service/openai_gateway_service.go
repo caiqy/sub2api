@@ -1949,26 +1949,6 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 	return accounts, nil
 }
 
-func (s *OpenAIGatewayService) isAccountSchedulableForQuota(account *Account) bool {
-	if account == nil || !account.IsOpenAIApiKey() {
-		return true
-	}
-	return !account.IsQuotaExceeded()
-}
-
-func (s *OpenAIGatewayService) isSchedulableOpenAISelectionAccount(account *Account, requestedModel string) bool {
-	if account == nil || !account.IsSchedulable() || !account.IsOpenAI() {
-		return false
-	}
-	if !s.isAccountSchedulableForQuota(account) {
-		return false
-	}
-	if requestedModel != "" && !account.IsModelSupported(requestedModel) {
-		return false
-	}
-	return true
-}
-
 func (s *OpenAIGatewayService) tryAcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int) (*AcquireResult, error) {
 	if s.concurrencyService == nil {
 		return &AcquireResult{Acquired: true, ReleaseFunc: func() {}}, nil
