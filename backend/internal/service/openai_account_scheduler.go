@@ -947,18 +947,30 @@ func (s *defaultOpenAIAccountScheduler) isAccountTransportCompatible(account *Ac
 }
 
 func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatible(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest) bool {
+	var service *OpenAIGatewayService
+	if s != nil {
+		service = s.service
+	}
+	return isOpenAIAccountRequestCompatible(ctx, service, account, req)
+}
+
+func isOpenAIAccountRequestCompatible(ctx context.Context, service *OpenAIGatewayService, account *Account, req OpenAIAccountScheduleRequest) bool {
 	if account == nil {
 		return false
 	}
 	if req.RequestedModel != "" && !account.IsModelSupported(req.RequestedModel) {
 		return false
 	}
-	if req.GroupID != nil && s != nil && s.service != nil &&
-		s.service.needsUpstreamChannelRestrictionCheck(ctx, req.GroupID) &&
-		s.service.isUpstreamModelRestrictedByChannel(ctx, *req.GroupID, account, req.RequestedModel, req.RequireCompact) {
+	if isOpenAIAccountUpstreamRestrictedByChannel(ctx, service, account, req) {
 		return false
 	}
 	return account.SupportsOpenAIImageCapability(req.RequiredImageCapability)
+}
+
+func isOpenAIAccountUpstreamRestrictedByChannel(ctx context.Context, service *OpenAIGatewayService, account *Account, req OpenAIAccountScheduleRequest) bool {
+	return account != nil && req.GroupID != nil && service != nil &&
+		service.needsUpstreamChannelRestrictionCheck(ctx, req.GroupID) &&
+		service.isUpstreamModelRestrictedByChannel(ctx, *req.GroupID, account, req.RequestedModel, req.RequireCompact)
 }
 
 func (s *defaultOpenAIAccountScheduler) deletePreviousResponseStickyForRequest(ctx context.Context, req OpenAIAccountScheduleRequest) {

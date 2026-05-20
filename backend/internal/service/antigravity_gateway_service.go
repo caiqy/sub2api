@@ -635,9 +635,7 @@ urlFallbackLoop:
 			applyAntigravityOutboundHeaders(upstreamReq, p.outboundHeaders)
 
 			// Capture upstream request body for ops retry of this attempt.
-			if p.c != nil && len(p.body) > 0 {
-				p.c.Set(OpsUpstreamRequestBodyKey, string(p.body))
-			}
+			setOpsUpstreamRequestBody(p.c, p.body)
 			SetUsageUpstreamRequest(p.c, upstreamReq, string(p.body))
 
 			resp, err = p.httpUpstream.Do(upstreamReq, p.proxyURL, p.account.ID, p.account.Concurrency)

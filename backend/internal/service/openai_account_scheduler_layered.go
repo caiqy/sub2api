@@ -61,6 +61,7 @@ func (s *layeredOpenAIAccountScheduler) Select(
 			}
 			if selection != nil && selection.Account != nil {
 				if !s.isAccountTransportCompatible(selection.Account, req.RequiredTransport) {
+					s.deletePreviousResponseStickyForRequest(ctx, req)
 					if selection.ReleaseFunc != nil {
 						selection.ReleaseFunc()
 					}
@@ -68,9 +69,9 @@ func (s *layeredOpenAIAccountScheduler) Select(
 				}
 			}
 			if selection != nil && selection.Account != nil {
-				if (req.RequestedModel != "" && !selection.Account.IsModelSupported(req.RequestedModel)) ||
-					!selection.Account.SupportsOpenAIImageCapability(req.RequiredImageCapability) ||
+				if !s.isAccountRequestCompatible(ctx, selection.Account, req) ||
 					!accountSatisfiesPrivacyRequirement(selection.Account, schedGroup) {
+					s.deletePreviousResponseStickyForRequest(ctx, req)
 					recordPrivacyRequirementError(ctx, s.service, selection.Account, schedGroup)
 					if selection.ReleaseFunc != nil {
 						selection.ReleaseFunc()
@@ -119,7 +120,11 @@ func (s *layeredOpenAIAccountScheduler) Select(
 	return selection, decision, nil
 }
 
-// selectBySessionHash 复用 defaultOpenAIAccountScheduler 的 session hash 粘连逻辑。
+// selectBySessionHash handles layered scheduler session sticky selection.
+// Request-scoped incompatibility falls back without deleting sticky; binding-level
+// invalidation (for example missing account, transport/privacy/upstream channel
+// restriction) clears it. DB recheck model/image/compact mismatches are treated
+// as request-scoped fallback.
 func (s *layeredOpenAIAccountScheduler) selectBySessionHash(
 	ctx context.Context,
 	req OpenAIAccountScheduleRequest,
@@ -162,20 +167,22 @@ func (s *layeredOpenAIAccountScheduler) selectBySessionHash(
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		return nil, nil
 	}
-	if req.RequestedModel != "" && !account.IsModelSupported(req.RequestedModel) {
-		return nil, nil
-	}
-	if !account.SupportsOpenAIImageCapability(req.RequiredImageCapability) {
+	if !s.isAccountRequestCompatible(ctx, account, req) {
+		if s.isAccountUpstreamRestrictedByChannel(ctx, account, req) {
+			_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
+		}
 		return nil, nil
 	}
 	if !s.isAccountTransportCompatible(account, req.RequiredTransport) {
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		return nil, nil
 	}
-	account = s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.RequestedModel, req.RequireCompact)
-	if account == nil || (req.RequestedModel != "" && !account.IsModelSupported(req.RequestedModel)) || !account.SupportsOpenAIImageCapability(req.RequiredImageCapability) || !accountSatisfiesPrivacyRequirement(account, schedGroup) || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
-		recordPrivacyRequirementError(ctx, s.service, account, schedGroup)
-		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
+	var clearSticky bool
+	account, clearSticky = s.recheckSessionStickyAccountFromDB(ctx, account, req, schedGroup)
+	if account == nil {
+		if clearSticky {
+			_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
+		}
 		return nil, nil
 	}
 
@@ -242,10 +249,7 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 				fmt.Sprintf("Privacy not set, required by group [%s]", schedGroup.Name))
 			continue
 		}
-		if !account.SupportsOpenAIImageCapability(req.RequiredImageCapability) {
-			continue
-		}
-		if req.RequestedModel != "" && !account.IsModelSupported(req.RequestedModel) {
+		if !s.isAccountRequestCompatible(ctx, account, req) {
 			continue
 		}
 		if !s.isAccountTransportCompatible(account, req.RequiredTransport) {
@@ -329,13 +333,13 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 		}
 
 		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, selected.account, req.RequestedModel, req.RequireCompact)
-		if fresh == nil || !fresh.SupportsOpenAIImageCapability(req.RequiredImageCapability) || !accountSatisfiesPrivacyRequirement(fresh, schedGroup) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
+		if fresh == nil || !s.isAccountRequestCompatible(ctx, fresh, req) || !accountSatisfiesPrivacyRequirement(fresh, schedGroup) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
 			recordPrivacyRequirementError(ctx, s.service, fresh, schedGroup)
 			available = removeFromAvailable(available, selected.account.ID)
 			continue
 		}
 		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.RequestedModel, req.RequireCompact)
-		if fresh == nil || !fresh.SupportsOpenAIImageCapability(req.RequiredImageCapability) || !accountSatisfiesPrivacyRequirement(fresh, schedGroup) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
+		if fresh == nil || !s.isAccountRequestCompatible(ctx, fresh, req) || !accountSatisfiesPrivacyRequirement(fresh, schedGroup) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
 			recordPrivacyRequirementError(ctx, s.service, fresh, schedGroup)
 			available = removeFromAvailable(available, selected.account.ID)
 			continue
@@ -363,12 +367,12 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 	fallbackAccounts := make([]*Account, 0, len(filtered))
 	for _, account := range filtered {
 		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, account, req.RequestedModel, req.RequireCompact)
-		if fresh == nil || !fresh.SupportsOpenAIImageCapability(req.RequiredImageCapability) || !accountSatisfiesPrivacyRequirement(fresh, schedGroup) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
+		if fresh == nil || !s.isAccountRequestCompatible(ctx, fresh, req) || !accountSatisfiesPrivacyRequirement(fresh, schedGroup) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
 			recordPrivacyRequirementError(ctx, s.service, fresh, schedGroup)
 			continue
 		}
 		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.RequestedModel, req.RequireCompact)
-		if fresh == nil || !fresh.SupportsOpenAIImageCapability(req.RequiredImageCapability) || !accountSatisfiesPrivacyRequirement(fresh, schedGroup) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
+		if fresh == nil || !s.isAccountRequestCompatible(ctx, fresh, req) || !accountSatisfiesPrivacyRequirement(fresh, schedGroup) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
 			recordPrivacyRequirementError(ctx, s.service, fresh, schedGroup)
 			continue
 		}
@@ -491,6 +495,94 @@ func (s *layeredOpenAIAccountScheduler) isAccountTransportCompatible(account *Ac
 		return false
 	}
 	return s.service.getOpenAIWSProtocolResolver().Resolve(account).Transport == requiredTransport
+}
+
+func (s *layeredOpenAIAccountScheduler) recheckSessionStickyAccountFromDB(
+	ctx context.Context,
+	account *Account,
+	req OpenAIAccountScheduleRequest,
+	schedGroup *Group,
+) (*Account, bool) {
+	if s == nil || s.service == nil || account == nil {
+		return nil, true
+	}
+	if s.service.schedulerSnapshot == nil || s.service.accountRepo == nil {
+		fresh := s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.RequestedModel, req.RequireCompact)
+		if fresh == nil {
+			return nil, false
+		}
+		return s.classifySessionStickyAccount(ctx, fresh, req, schedGroup)
+	}
+
+	latest, err := s.service.accountRepo.GetByID(ctx, account.ID)
+	if err != nil || latest == nil {
+		return nil, true
+	}
+	return s.classifySessionStickyAccount(ctx, latest, req, schedGroup)
+}
+
+func (s *layeredOpenAIAccountScheduler) classifySessionStickyAccount(
+	ctx context.Context,
+	account *Account,
+	req OpenAIAccountScheduleRequest,
+	schedGroup *Group,
+) (*Account, bool) {
+	if account == nil {
+		return nil, true
+	}
+	if shouldClearStickySession(account, req.RequestedModel) || !account.IsOpenAI() || !account.IsSchedulable() {
+		return nil, true
+	}
+	if !accountSatisfiesPrivacyRequirement(account, schedGroup) {
+		return nil, true
+	}
+	if !s.isAccountTransportCompatible(account, req.RequiredTransport) {
+		return nil, true
+	}
+	if s.isAccountUpstreamRestrictedByChannel(ctx, account, req) {
+		return nil, true
+	}
+	if req.RequestedModel != "" && !account.IsModelSupported(req.RequestedModel) {
+		return nil, false
+	}
+	if !account.SupportsOpenAIImageCapability(req.RequiredImageCapability) {
+		return nil, false
+	}
+	if req.RequireCompact && openAICompactSupportTier(account) == 0 {
+		return nil, false
+	}
+	return account, false
+}
+
+func (s *layeredOpenAIAccountScheduler) isAccountRequestCompatible(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest) bool {
+	var service *OpenAIGatewayService
+	if s != nil {
+		service = s.service
+	}
+	return isOpenAIAccountRequestCompatible(ctx, service, account, req)
+}
+
+func (s *layeredOpenAIAccountScheduler) isAccountUpstreamRestrictedByChannel(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest) bool {
+	var service *OpenAIGatewayService
+	if s != nil {
+		service = s.service
+	}
+	return isOpenAIAccountUpstreamRestrictedByChannel(ctx, service, account, req)
+}
+
+func (s *layeredOpenAIAccountScheduler) deletePreviousResponseStickyForRequest(ctx context.Context, req OpenAIAccountScheduleRequest) {
+	if s == nil || s.service == nil || !s.service.openAIStickyEnabled() {
+		return
+	}
+	previousResponseID := strings.TrimSpace(req.PreviousResponseID)
+	if previousResponseID == "" {
+		return
+	}
+	store := s.service.getOpenAIWSStateStore()
+	if store == nil {
+		return
+	}
+	_ = store.DeleteResponseAccount(ctx, derefGroupID(req.GroupID), previousResponseID)
 }
 
 func (s *layeredOpenAIAccountScheduler) ReportResult(accountID int64, success bool, firstTokenMs *int) {
