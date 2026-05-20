@@ -1637,6 +1637,7 @@ export interface GroupStat {
 export interface UserBreakdownItem {
   user_id: number
   email: string
+  username: string
   requests: number
   total_tokens: number
   cost: number
@@ -1658,6 +1659,7 @@ export interface UserUsageTrendPoint {
 export interface UserSpendingRankingItem {
   user_id: number
   email: string
+  username: string
   actual_cost: number
   requests: number
   tokens: number

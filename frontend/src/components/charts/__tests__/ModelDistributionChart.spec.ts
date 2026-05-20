@@ -29,7 +29,10 @@ vi.mock('vue-i18n', async () => {
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string) => messages[key] ?? key,
+      t: (key: string, params?: Record<string, unknown>) => {
+        if (key === 'admin.redeem.userPrefix') return `User #${params?.id}`
+        return messages[key] ?? key
+      },
     }),
   }
 })
@@ -160,8 +163,9 @@ describe('ModelDistributionChart', () => {
         modelStats: [],
         enableRankingView: true,
         rankingItems: [
-          { user_id: 1, email: 'alpha@example.com', actual_cost: 12, requests: 10, tokens: 1000 },
-          { user_id: 2, email: 'beta@example.com', actual_cost: 8, requests: 6, tokens: 600 },
+          { user_id: 1, email: 'alpha@example.com', username: 'Alpha', actual_cost: 12, requests: 10, tokens: 1000 },
+          { user_id: 2, email: 'beta@example.com', username: '   ', actual_cost: 8, requests: 6, tokens: 600 },
+          { user_id: 3, email: '', username: '', actual_cost: 1, requests: 1, tokens: 50 },
         ],
         rankingTotalActualCost: 30,
         rankingTotalRequests: 20,
@@ -180,20 +184,33 @@ describe('ModelDistributionChart', () => {
 
     const chartData = JSON.parse(wrapper.find('.chart-data').text())
     expect(chartData.labels).toEqual([
-      '#1 alpha@example.com',
+      '#1 Alpha',
       '#2 beta@example.com',
+      '#3 User #3',
       'Others',
     ])
-    expect(chartData.datasets[0].data).toEqual([12, 8, 10])
+    expect(chartData.datasets[0].data).toEqual([12, 8, 1, 9])
     expect(chartData.datasets[0].backgroundColor[0]).toBe('#3b82f6')
-    expect(chartData.datasets[0].backgroundColor[2]).toBe('#94a3b8')
-    expect(chartData.datasets[0].backgroundColor[2]).not.toBe(chartData.datasets[0].backgroundColor[0])
+    expect(chartData.datasets[0].backgroundColor[3]).toBe('#94a3b8')
+    expect(chartData.datasets[0].backgroundColor[3]).not.toBe(chartData.datasets[0].backgroundColor[0])
+
+    const options = (wrapper.vm as any).$?.setupState.rankingDoughnutOptions
+    const label = options.plugins.tooltip.callbacks.label({
+      label: '#1 Alpha',
+      raw: 12,
+      dataset: { data: [12, 8, 1, 9] },
+    })
+    expect(label).toBe('#1 Alpha: $12.00 (40.0%)')
 
     const rows = wrapper.findAll('tbody tr')
-    expect(rows).toHaveLength(3)
-    expect(rows[2].text()).toContain('Others')
-    expect(rows[2].text()).toContain('4')
-    expect(rows[2].text()).toContain('400')
-    expect(rows[2].text()).toContain('$10.00')
+    expect(rows).toHaveLength(4)
+    expect(rows[0].text()).toContain('Alpha')
+    expect(rows[0].text()).not.toContain('alpha@example.com')
+    expect(rows[1].text()).toContain('beta@example.com')
+    expect(rows[2].text()).toContain('User #3')
+    expect(rows[3].text()).toContain('Others')
+    expect(rows[3].text()).toContain('3')
+    expect(rows[3].text()).toContain('350')
+    expect(rows[3].text()).toContain('$9.00')
   })
 })
