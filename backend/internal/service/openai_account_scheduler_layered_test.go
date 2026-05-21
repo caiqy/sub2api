@@ -512,6 +512,460 @@ func TestLayered_PreviousResponseStickyEnabled(t *testing.T) {
 	}
 }
 
+func TestLayered_PreviousResponseStickyClearsBindingWhenTransportIncompatible(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(92014)
+	stickyAccount := Account{ID: 920141, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, Extra: map[string]any{"openai_apikey_responses_websockets_v2_enabled": true}}
+	stateStore := &openAIWSStateStoreSpy{responseAccounts: map[string]int64{"resp_layered_transport_mismatch": stickyAccount.ID}}
+	cfg := &config.Config{}
+	cfg.Gateway.Sticky.OpenAI.Enabled = true
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.StickyResponseIDTTLSeconds = 3600
+
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{stickyAccount}},
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+		openaiWSStateStore: stateStore,
+	}
+	scheduler := svc.getOpenAIAccountScheduler()
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	selection, _, err := scheduler.Select(ctx, OpenAIAccountScheduleRequest{
+		GroupID:            &groupID,
+		PreviousResponseID: "resp_layered_transport_mismatch",
+		RequestedModel:     "gpt-5.1",
+		RequiredTransport:  OpenAIUpstreamTransportResponsesWebsocket,
+	})
+	require.Error(t, err)
+	require.Nil(t, selection)
+	require.Equal(t, 1, stateStore.deleteResponseCalls["resp_layered_transport_mismatch"])
+	_, exists := stateStore.responseAccounts["resp_layered_transport_mismatch"]
+	require.False(t, exists, "incompatible previous-response binding should be cleared")
+}
+
+func TestLayered_PreviousResponseStickyClearsBindingWhenUpstreamRestricted(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(92015)
+	stickyAccount := Account{
+		ID:          920151,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    0,
+		Extra:       map[string]any{"openai_apikey_responses_websockets_v2_enabled": true},
+		Credentials: map[string]any{"model_mapping": map[string]any{"gpt-5.1": "restricted-upstream"}},
+	}
+	backupAccount := Account{
+		ID:          920152,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    50,
+		Extra:       map[string]any{"openai_apikey_responses_websockets_v2_enabled": true},
+		Credentials: map[string]any{"model_mapping": map[string]any{"gpt-5.1": "allowed-upstream"}},
+	}
+	channelSvc := newSchedulerTestChannelService(Channel{
+		ID:                 92015,
+		Status:             StatusActive,
+		GroupIDs:           []int64{groupID},
+		RestrictModels:     true,
+		BillingModelSource: BillingModelSourceUpstream,
+		ModelPricing: []ChannelModelPricing{{
+			Platform: "openai",
+			Models:   []string{"allowed-upstream"},
+		}},
+	}, map[int64]string{groupID: "openai"})
+	stateStore := &openAIWSStateStoreSpy{responseAccounts: map[string]int64{"resp_layered_upstream_restricted": stickyAccount.ID}}
+	cfg := &config.Config{}
+	cfg.Gateway.Sticky.OpenAI.Enabled = true
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.StickyResponseIDTTLSeconds = 3600
+
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{stickyAccount, backupAccount}},
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+		channelService:     channelSvc,
+		openaiWSStateStore: stateStore,
+	}
+	scheduler := svc.getOpenAIAccountScheduler()
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	selection, decision, err := scheduler.Select(ctx, OpenAIAccountScheduleRequest{
+		GroupID:            &groupID,
+		PreviousResponseID: "resp_layered_upstream_restricted",
+		RequestedModel:     "gpt-5.1",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, backupAccount.ID, selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.False(t, decision.StickyPreviousHit)
+	require.Equal(t, 1, stateStore.deleteResponseCalls["resp_layered_upstream_restricted"])
+	_, exists := stateStore.responseAccounts["resp_layered_upstream_restricted"]
+	require.False(t, exists, "restricted previous-response binding should be cleared")
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func TestLayered_SessionStickyClearsBindingWhenUpstreamRestricted(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(92016)
+	stickyAccount := Account{
+		ID:          920161,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    0,
+		Extra:       map[string]any{"openai_apikey_responses_websockets_v2_enabled": true},
+		Credentials: map[string]any{"model_mapping": map[string]any{"gpt-5.1": "restricted-upstream"}},
+	}
+	backupAccount := Account{
+		ID:          920162,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    50,
+		Extra:       map[string]any{"openai_apikey_responses_websockets_v2_enabled": true},
+		Credentials: map[string]any{"model_mapping": map[string]any{"gpt-5.1": "allowed-upstream"}},
+	}
+	channelSvc := newSchedulerTestChannelService(Channel{
+		ID:                 92016,
+		Status:             StatusActive,
+		GroupIDs:           []int64{groupID},
+		RestrictModels:     true,
+		BillingModelSource: BillingModelSourceUpstream,
+		ModelPricing: []ChannelModelPricing{{
+			Platform: "openai",
+			Models:   []string{"allowed-upstream"},
+		}},
+	}, map[int64]string{groupID: "openai"})
+	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:session_hash_layered_upstream_restricted": stickyAccount.ID}}
+	cfg := &config.Config{}
+	cfg.Gateway.Sticky.OpenAI.Enabled = true
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.StickySessionTTLSeconds = 3600
+
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{stickyAccount, backupAccount}},
+		cache:              cache,
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+		channelService:     channelSvc,
+	}
+	scheduler := svc.getOpenAIAccountScheduler()
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	selection, decision, err := scheduler.Select(ctx, OpenAIAccountScheduleRequest{
+		GroupID:        &groupID,
+		SessionHash:    "session_hash_layered_upstream_restricted",
+		RequestedModel: "gpt-5.1",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, backupAccount.ID, selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.False(t, decision.StickySessionHit)
+	require.Equal(t, 1, cache.deletedSessions["openai:session_hash_layered_upstream_restricted"])
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func TestLayered_SessionStickyDoesNotDeleteBindingWhenModelRequestIncompatible(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(92017)
+	stickyAccount := Account{
+		ID:          920171,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    0,
+		Credentials: map[string]any{"model_mapping": map[string]any{"gpt-supported": "gpt-supported"}},
+	}
+	backupAccount := Account{
+		ID:          920172,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    50,
+		Credentials: map[string]any{"model_mapping": map[string]any{"gpt-requested": "gpt-requested"}},
+	}
+	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:session_hash_layered_model_mismatch": stickyAccount.ID}}
+	cfg := &config.Config{}
+	cfg.Gateway.Sticky.OpenAI.Enabled = true
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	cfg.Gateway.OpenAIWS.StickySessionTTLSeconds = 3600
+
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{stickyAccount, backupAccount}},
+		cache:              cache,
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+	}
+	scheduler := svc.getOpenAIAccountScheduler()
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	selection, decision, err := scheduler.Select(ctx, OpenAIAccountScheduleRequest{
+		GroupID:        &groupID,
+		SessionHash:    "session_hash_layered_model_mismatch",
+		RequestedModel: "gpt-requested",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, backupAccount.ID, selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.False(t, decision.StickySessionHit)
+	require.Zero(t, cache.deletedSessions["openai:session_hash_layered_model_mismatch"])
+	require.Equal(t, backupAccount.ID, cache.sessionBindings["openai:session_hash_layered_model_mismatch"])
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func TestLayered_SessionStickyDoesNotDeleteBindingWhenDBRecheckModelMismatch(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(92020)
+	stickySnapshotAccount := Account{
+		ID:          920201,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    0,
+		Credentials: map[string]any{"model_mapping": map[string]any{"gpt-requested": "gpt-requested"}},
+	}
+	stickyDBAccount := stickySnapshotAccount
+	stickyDBAccount.Credentials = map[string]any{"model_mapping": map[string]any{"gpt-supported": "gpt-supported"}}
+	backupAccount := Account{
+		ID:          920202,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    50,
+		Credentials: map[string]any{"model_mapping": map[string]any{"gpt-requested": "gpt-requested"}},
+	}
+	repo := schedulerTestOpenAIAccountRepo{accounts: []Account{stickyDBAccount, backupAccount}}
+	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:session_hash_layered_db_model_mismatch": stickySnapshotAccount.ID}}
+	snapshotCfg := &config.Config{}
+	snapshotCfg.Gateway.Scheduling.DbFallbackEnabled = true
+	cfg := &config.Config{}
+	cfg.Gateway.Sticky.OpenAI.Enabled = true
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	cfg.Gateway.OpenAIWS.StickySessionTTLSeconds = 3600
+
+	svc := &OpenAIGatewayService{
+		accountRepo:        repo,
+		cache:              cache,
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+		schedulerSnapshot: NewSchedulerSnapshotService(&openAISnapshotCacheStub{
+			snapshotAccounts: []*Account{&stickySnapshotAccount, &backupAccount},
+			accountsByID: map[int64]*Account{
+				stickySnapshotAccount.ID: &stickySnapshotAccount,
+				backupAccount.ID:         &backupAccount,
+			},
+		}, nil, repo, nil, snapshotCfg),
+	}
+	scheduler := svc.getOpenAIAccountScheduler()
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	selection, decision, err := scheduler.Select(ctx, OpenAIAccountScheduleRequest{
+		GroupID:        &groupID,
+		SessionHash:    "session_hash_layered_db_model_mismatch",
+		RequestedModel: "gpt-requested",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, backupAccount.ID, selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.False(t, decision.StickySessionHit)
+	require.Zero(t, cache.deletedSessions["openai:session_hash_layered_db_model_mismatch"])
+	require.Equal(t, backupAccount.ID, cache.sessionBindings["openai:session_hash_layered_db_model_mismatch"])
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func TestLayered_Layer3RecheckSkipsUpstreamRestrictedAccount(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(92018)
+	staleSnapshotAccount := Account{
+		ID:          920181,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    0,
+		Credentials: map[string]any{"model_mapping": map[string]any{"gpt-5.1": "allowed-upstream"}},
+	}
+	staleDBAccount := staleSnapshotAccount
+	staleDBAccount.Credentials = map[string]any{"model_mapping": map[string]any{"gpt-5.1": "restricted-upstream"}}
+	backupAccount := Account{
+		ID:          920182,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    50,
+		Credentials: map[string]any{"model_mapping": map[string]any{"gpt-5.1": "allowed-upstream"}},
+	}
+	channelSvc := newSchedulerTestChannelService(Channel{
+		ID:                 92018,
+		Status:             StatusActive,
+		GroupIDs:           []int64{groupID},
+		RestrictModels:     true,
+		BillingModelSource: BillingModelSourceUpstream,
+		ModelPricing: []ChannelModelPricing{{
+			Platform: "openai",
+			Models:   []string{"allowed-upstream"},
+		}},
+	}, map[int64]string{groupID: "openai"})
+	snapshotCfg := &config.Config{}
+	snapshotCfg.Gateway.Scheduling.DbFallbackEnabled = true
+	cfg := &config.Config{}
+	cfg.Gateway.Sticky.OpenAI.Enabled = true
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{staleDBAccount, backupAccount}},
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+		channelService:     channelSvc,
+		schedulerSnapshot: NewSchedulerSnapshotService(&openAISnapshotCacheStub{
+			snapshotAccounts: []*Account{&staleSnapshotAccount, &backupAccount},
+			accountsByID: map[int64]*Account{
+				staleSnapshotAccount.ID: &staleSnapshotAccount,
+				backupAccount.ID:        &backupAccount,
+			},
+		}, nil, schedulerTestOpenAIAccountRepo{accounts: []Account{staleDBAccount, backupAccount}}, nil, snapshotCfg),
+	}
+	scheduler := svc.getOpenAIAccountScheduler()
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	selection, decision, err := scheduler.Select(ctx, OpenAIAccountScheduleRequest{
+		GroupID:        &groupID,
+		RequestedModel: "gpt-5.1",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, backupAccount.ID, selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func TestLayered_WaitPlanFallbackSkipsUpstreamRestrictedAccount(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(92019)
+	staleSnapshotAccount := Account{
+		ID:          920191,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    0,
+		Credentials: map[string]any{"model_mapping": map[string]any{"gpt-5.1": "allowed-upstream"}},
+	}
+	staleDBAccount := staleSnapshotAccount
+	staleDBAccount.Credentials = map[string]any{"model_mapping": map[string]any{"gpt-5.1": "restricted-upstream"}}
+	backupAccount := Account{
+		ID:          920192,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    50,
+		Credentials: map[string]any{"model_mapping": map[string]any{"gpt-5.1": "allowed-upstream"}},
+	}
+	channelSvc := newSchedulerTestChannelService(Channel{
+		ID:                 92019,
+		Status:             StatusActive,
+		GroupIDs:           []int64{groupID},
+		RestrictModels:     true,
+		BillingModelSource: BillingModelSourceUpstream,
+		ModelPricing: []ChannelModelPricing{{
+			Platform: "openai",
+			Models:   []string{"allowed-upstream"},
+		}},
+	}, map[int64]string{groupID: "openai"})
+	snapshotCfg := &config.Config{}
+	snapshotCfg.Gateway.Scheduling.DbFallbackEnabled = true
+	cfg := &config.Config{}
+	cfg.Gateway.Sticky.OpenAI.Enabled = true
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	cfg.Gateway.Scheduling.FallbackWaitTimeout = 5 * time.Second
+	cfg.Gateway.Scheduling.FallbackMaxWaiting = 3
+
+	svc := &OpenAIGatewayService{
+		accountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{staleDBAccount, backupAccount}},
+		cfg:         cfg,
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{
+			acquireResults: map[int64]bool{
+				staleSnapshotAccount.ID: false,
+				backupAccount.ID:        false,
+			},
+		}),
+		channelService: channelSvc,
+		schedulerSnapshot: NewSchedulerSnapshotService(&openAISnapshotCacheStub{
+			snapshotAccounts: []*Account{&staleSnapshotAccount, &backupAccount},
+			accountsByID: map[int64]*Account{
+				staleSnapshotAccount.ID: &staleSnapshotAccount,
+				backupAccount.ID:        &backupAccount,
+			},
+		}, nil, schedulerTestOpenAIAccountRepo{accounts: []Account{staleDBAccount, backupAccount}}, nil, snapshotCfg),
+	}
+	scheduler := svc.getOpenAIAccountScheduler()
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	selection, decision, err := scheduler.Select(ctx, OpenAIAccountScheduleRequest{
+		GroupID:        &groupID,
+		RequestedModel: "gpt-5.1",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.WaitPlan)
+	require.Equal(t, backupAccount.ID, selection.Account.ID)
+	require.Equal(t, backupAccount.ID, selection.WaitPlan.AccountID)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+}
+
 func TestLayered_PreviousResponseStickyHonorsRequirePrivacySet(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(92011)
