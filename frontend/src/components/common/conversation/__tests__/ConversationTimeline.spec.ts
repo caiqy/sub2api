@@ -11,6 +11,7 @@ vi.mock('vue-i18n', async () => {
     'conversation.collapse': 'Collapse',
     'conversation.toolCall': 'Tool Call',
     'conversation.toolResult': 'Tool Result',
+    'conversation.reasoning': 'Reasoning',
     'conversation.raw': 'Raw',
     'conversation.rawRequest': 'Raw Request',
     'conversation.rawResponse': 'Raw Response',
