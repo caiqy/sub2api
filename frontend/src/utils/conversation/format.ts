@@ -1,4 +1,4 @@
-import type { ConversationContentPart, ConversationFlow, ConversationNode } from './types'
+import type { ConversationContentPart, ConversationFlow, ConversationPart, ConversationToolPart } from './types'
 
 // Treat JSON null, empty input, and parse failures as no usable JSON value.
 export const parseJsonValue = (value: string | null | undefined): unknown | null => {
@@ -56,25 +56,43 @@ export const textFromParts = (parts: ConversationContentPart[]): string => {
   }).filter(Boolean).join('\n')
 }
 
-const copyLabelForNode = (node: ConversationNode): string => {
-  if (node.type === 'tool_call' && node.toolName) return `tool_call: ${node.toolName}`
-  if (node.type === 'tool_result' && node.toolName) return `tool_result: ${node.toolName}`
-  if (node.type === 'reasoning') return 'reasoning'
-  return node.type
+const formatToolPartForCopy = (part: ConversationToolPart): string => {
+  const lines: string[] = []
+  const command = part.state.input && typeof part.state.input === 'object' && !Array.isArray(part.state.input)
+    ? (part.state.input as Record<string, unknown>).command
+    : undefined
+
+  if (part.tool === 'bash' && typeof command === 'string' && command.length > 0) lines.push(`$ ${command}`)
+  else if (part.state.input !== undefined && part.state.output === undefined) lines.push(formatRawValue(part.state.input))
+
+  if (part.state.output !== undefined) lines.push(formatRawValue(part.state.output))
+  if (part.state.error) lines.push(part.state.error)
+
+  return lines.filter(Boolean).join('\n')
 }
 
-const copyBodyForNode = (node: ConversationNode): string => {
-  if ('parts' in node) return textFromParts(node.parts)
-  if (node.type === 'tool_call') return formatRawValue(node.input ?? node.metadata ?? '')
-  if (node.type === 'tool_result') return formatRawValue(node.output ?? node.metadata ?? '')
-  if (node.type === 'raw') return node.raw
-  if (node.type === 'error') return [node.error, node.raw].filter(Boolean).join('\n')
-  return node.summary || ''
+const copyLabelForPart = (part: ConversationPart): string => {
+  if (part.type === 'tool') return `tool: ${part.tool}`
+  return part.type
+}
+
+const copyBodyForPart = (part: ConversationPart): string => {
+  if (part.type === 'text') return part.text
+  if (part.type === 'reasoning') return part.text
+  if (part.type === 'image') return `[image: ${part.alt || part.src}]`
+  if (part.type === 'file') return `[file: ${part.filename || part.url || part.mimeType || 'attachment'}]`
+  if (part.type === 'tool') return formatToolPartForCopy(part)
+  if (part.type === 'raw') return part.raw
+  if (part.type === 'error') return [part.error, part.raw].filter(Boolean).join('\n')
+  return ''
 }
 
 export const formatConversationAsText = (flow: ConversationFlow): string => {
-  return flow.nodes.map((node) => {
-    const body = copyBodyForNode(node)
-    return [`[${copyLabelForNode(node)}]`, body].filter(Boolean).join('\n')
-  }).join('\n\n')
+  return (flow.messages ?? []).map((message) => {
+    const partText = message.parts.map((part) => {
+      const body = copyBodyForPart(part)
+      return [`[${copyLabelForPart(part)}]`, body].filter(Boolean).join('\n')
+    }).filter(Boolean).join('\n\n')
+    return [`[${message.role}]`, partText].filter(Boolean).join('\n')
+  }).filter(Boolean).join('\n\n')
 }

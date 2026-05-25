@@ -28,7 +28,7 @@
 ## Preferences
 
 - 将高频约定、长期偏好或重要协作规则记录在这里。
-- 本地版本号不能超过上游版本号；如需发布本地版本，应基于上游最新版本号追加第四级版本号（例如上游 `0.1.127`，本地可用 `0.1.127.1`）。
+- 发布本地版本时，只能基于当前 `HEAD` 已包含的最高上游三段式 tag 递增四段式版本；不要基于尚未合入的上游 tag 发 `.1`。
 - 发版后需要使用 `gh` 跟进 Release workflow 结果，不要只校验远端 tag。
 - 前端调试预览 → `memory/context/frontend-debug-preview.md`
 - 发版流程 → `memory/context/release-workflow.md`

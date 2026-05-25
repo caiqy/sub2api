@@ -41,6 +41,30 @@ const messages: Record<string, string> = {
   'conversation.collapse': 'Collapse',
   'conversation.timelineLabel': 'Conversation timeline',
   'conversation.imageAlt': 'Conversation image',
+  'conversation.tool': '工具',
+  'conversation.toolInput': '输入',
+  'conversation.toolOutput': '输出',
+  'conversation.toolMetadata': '元数据',
+  'conversation.role.you': '你',
+  'conversation.role.user': '用户',
+  'conversation.role.assistant': '助手',
+  'conversation.role.system': '系统',
+  'conversation.role.developer': '开发者',
+  'conversation.toolLabels.bash': '执行命令',
+  'conversation.toolLabels.read': '查看',
+  'conversation.toolLabels.write': '写入',
+  'conversation.toolLabels.edit': '编辑',
+  'conversation.toolLabels.multiedit': '批量编辑',
+  'conversation.toolLabels.apply_patch': '文件补丁',
+  'conversation.toolLabels.list': '浏览目录',
+  'conversation.toolLabels.glob': '路径匹配',
+  'conversation.toolLabels.grep': '文本查找',
+  'conversation.toolLabels.webfetch': '抓取网页',
+  'conversation.toolLabels.websearch': '网页搜索',
+  'conversation.toolLabels.task': '委派子任务',
+  'conversation.toolLabels.question': '提问',
+  'conversation.toolLabels.todoread': '查看任务列表',
+  'conversation.toolLabels.todowrite': '更新任务列表',
 }
 
 vi.mock('vue-i18n', async () => {
@@ -49,6 +73,7 @@ vi.mock('vue-i18n', async () => {
     ...actual,
     useI18n: () => ({
       t: (key: string) => messages[key] ?? key,
+      te: (key: string) => Object.prototype.hasOwnProperty.call(messages, key),
     }),
   }
 })
@@ -236,16 +261,53 @@ x-upstream-trace-id: trace-upstream`)
 
     await wrapper.find('[data-test="tab-conversation-flow"]').trigger('click')
 
+    expect(wrapper.find('[data-test="conversation-message-row-user"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="conversation-message-row-assistant"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('Hello')
     expect(wrapper.html()).toContain('<strong>world</strong>')
-    expect(wrapper.text()).toContain('Hi there.')
     expect(wrapper.text()).toContain('Found')
+    expect(wrapper.text()).toContain('Hi there.')
     expect(wrapper.text()).toContain('Be concise.')
 
     await wrapper.find('[data-test="copy-current-tab"]').trigger('click')
     expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(expect.stringContaining('[user]'))
     expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(expect.stringContaining('Hello **world**'))
     expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(expect.stringContaining('[assistant]'))
+  })
+
+  it('renders matched tool call and tool result as a single webgui-like tool part', async () => {
+    const wrapper = mount(UsageDetailModal, {
+      props: {
+        show: true,
+        usageLog: { request_id: 'req-tool', user: { email: 'alice@example.com' }, model: 'gpt-4.1', created_at: '2026-05-25T10:00:00Z' },
+        detail: {
+          usage_log_id: 13,
+          request_headers: null,
+          request_body: JSON.stringify({
+            messages: [
+              { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'bash', arguments: '{"command":"pwd","description":"显示当前目录"}' } }] },
+              { role: 'tool', tool_call_id: 'call_1', name: 'bash', content: '/repo' },
+            ],
+          }),
+          upstream_request_headers: null,
+          upstream_request_body: null,
+          upstream_response_headers: null,
+          upstream_response_body: null,
+          response_headers: null,
+          response_body: null,
+          created_at: '2026-05-25T10:00:00Z',
+        },
+        loading: false,
+        error: '',
+      },
+      global: { stubs: { BaseDialog: { props: ['show', 'title'], template: '<div v-if="show"><slot /></div>' } } },
+    })
+
+    await wrapper.find('[data-test="tab-conversation-flow"]').trigger('click')
+    expect(wrapper.findAll('[data-test="conversation-part-tool"]')).toHaveLength(1)
+    expect(wrapper.text()).toContain('执行命令：显示当前目录')
+    expect(wrapper.text()).not.toContain('Tool Result')
+    expect(wrapper.text()).not.toContain('call_1')
   })
 
   it('在非安全上下文复制当前详情标签页时使用 fallback', async () => {

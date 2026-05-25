@@ -2,11 +2,112 @@ export type ConversationSource = 'client' | 'upstream'
 
 export type ConversationFormat = 'openai-chat' | 'openai-responses' | 'unknown'
 
+export type ConversationMessageRole = 'user' | 'assistant' | 'system' | 'developer'
+
+export type ConversationPartType = 'text' | 'reasoning' | 'tool' | 'image' | 'file' | 'raw' | 'error'
+
+export interface ConversationFlow {
+  messages?: ConversationMessage[]
+  nodes: ConversationNode[]
+  source: ConversationSource
+  format: ConversationFormat
+  warnings: string[]
+}
+
+export interface ConversationMessage {
+  id: string
+  role: ConversationMessageRole
+  parts: ConversationPart[]
+  metadata?: Record<string, unknown>
+}
+
+export interface ConversationBasePart {
+  id: string
+  type: ConversationPartType
+  metadata?: Record<string, unknown>
+}
+
+export interface ConversationTextPart extends ConversationBasePart {
+  type: 'text'
+  text: string
+}
+
+export interface ConversationReasoningPart extends ConversationBasePart {
+  type: 'reasoning'
+  text: string
+  defaultCollapsed: true
+}
+
+export interface ConversationImagePart extends ConversationBasePart {
+  type: 'image'
+  src: string
+  alt?: string
+}
+
+export interface ConversationFilePart extends ConversationBasePart {
+  type: 'file'
+  filename?: string
+  mimeType?: string
+  url?: string
+  text?: string
+}
+
+export type ConversationLegacyTextPart = Omit<ConversationTextPart, 'id'> & { id?: string }
+
+export type ConversationLegacyImagePart = Omit<ConversationImagePart, 'id'> & { id?: string }
+
+export type ConversationLegacyFilePart = Omit<ConversationFilePart, 'id'> & { id?: string }
+
+export type ConversationContentPart = ConversationLegacyTextPart | ConversationLegacyImagePart | ConversationLegacyFilePart
+
+export type ConversationToolStatus = 'pending' | 'running' | 'completed' | 'error'
+
+export interface ConversationToolPart extends ConversationBasePart {
+  type: 'tool'
+  callId?: string
+  tool: string
+  state: {
+    status: ConversationToolStatus
+    input?: unknown
+    output?: unknown
+    title?: string
+    error?: string
+    metadata?: Record<string, unknown>
+  }
+}
+
+export interface ConversationRawPart extends ConversationBasePart {
+  type: 'raw'
+  title?: string
+  raw: string
+  defaultCollapsed: true
+}
+
+export interface ConversationErrorPart extends ConversationBasePart {
+  type: 'error'
+  error: string
+  raw?: string
+  defaultCollapsed: true
+}
+
+export type ConversationPart =
+  | ConversationTextPart
+  | ConversationReasoningPart
+  | ConversationToolPart
+  | ConversationImagePart
+  | ConversationFilePart
+  | ConversationRawPart
+  | ConversationErrorPart
+
+export interface ParseConversationPayloadInput {
+  requestBody: string | null | undefined
+  responseBody: string | null | undefined
+  source?: ConversationSource
+  formatHint?: ConversationFormat | 'auto'
+}
+
 export type ConversationNodeType =
-  | 'user'
-  | 'assistant'
-  | 'system'
-  | 'developer'
+  | ConversationMessageRole
   | 'reasoning'
   | 'tool_call'
   | 'tool_result'
@@ -14,13 +115,6 @@ export type ConversationNodeType =
   | 'file'
   | 'raw'
   | 'error'
-
-export interface ConversationFlow {
-  nodes: ConversationNode[]
-  source: ConversationSource
-  format: ConversationFormat
-  warnings: string[]
-}
 
 export interface ConversationBaseNode {
   id: string
@@ -31,30 +125,9 @@ export interface ConversationBaseNode {
   metadata?: Record<string, unknown>
 }
 
-export interface ConversationTextPart {
-  type: 'text'
-  text: string
-}
-
-export interface ConversationImagePart {
-  type: 'image'
-  src: string
-  alt?: string
-}
-
-export interface ConversationFilePart {
-  type: 'file'
-  filename?: string
-  mimeType?: string
-  url?: string
-  text?: string
-}
-
-export type ConversationContentPart = ConversationTextPart | ConversationImagePart | ConversationFilePart
-
 export interface ConversationMessageNode extends ConversationBaseNode {
-  type: 'user' | 'assistant' | 'system' | 'developer'
-  role: 'user' | 'assistant' | 'system' | 'developer'
+  type: ConversationMessageRole
+  role: ConversationMessageRole
   parts: ConversationContentPart[]
 }
 
@@ -94,10 +167,3 @@ export type ConversationNode =
   | ConversationMediaNode
   | ConversationRawNode
   | ConversationErrorNode
-
-export interface ParseConversationPayloadInput {
-  requestBody: string | null | undefined
-  responseBody: string | null | undefined
-  source?: ConversationSource
-  formatHint?: ConversationFormat | 'auto'
-}

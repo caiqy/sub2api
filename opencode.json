@@ -16,8 +16,9 @@
       "xlsx": "deny",
       "brainstorming": "allow",
       "gpt-image-2": "allow",
-      "agent-browser-cli": "allow",
-      "chrome-devtools": "deny"
+      "agent-browser-cli": "deny",
+      "chrome-devtools": "allow",
+      "customize-opencode": "deny"
     }
   },
   "tools": {

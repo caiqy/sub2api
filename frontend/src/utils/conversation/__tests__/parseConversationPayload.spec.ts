@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { formatConversationAsText, formatRawValue, parseJsonValue, summarizeText } from '../format'
 import { parseConversationPayload } from '../parseConversationPayload'
-import type { ConversationNode } from '../types'
+import { getToolDisplayName, getToolLabel } from '../toolDisplay'
+import type { ConversationPart, ConversationToolPart } from '../types'
 
 describe('conversation format helpers', () => {
   it('parses valid JSON and returns null for invalid JSON', () => {
@@ -31,35 +32,68 @@ describe('conversation format helpers', () => {
     expect(summarizeText('abcdefghijklmnopqrstuvwxyz', 2)).toBe('ab')
   })
 
-  it('formats conversation nodes as plain text for copying', () => {
+  it('maps common tool labels like webgui', () => {
+    expect(getToolLabel('bash')).toBe('执行命令')
+    expect(getToolLabel('read')).toBe('查看')
+    expect(getToolLabel('grep')).toBe('文本查找')
+    expect(getToolLabel('webfetch')).toBe('抓取网页')
+    expect(getToolLabel('unknown_tool')).toBe('unknown_tool')
+  })
+
+  it('builds webgui-style tool display names without call ids', () => {
+    expect(getToolDisplayName({ tool: 'bash', input: { description: '列出文件', command: 'ls' } })).toBe('执行命令：列出文件')
+    expect(getToolDisplayName({ tool: 'read', input: { filePath: 'src/app.ts' } })).toBe('查看：src/app.ts')
+    expect(getToolDisplayName({ tool: 'grep', input: { pattern: 'timeout', include: '*.ts' } })).toBe('文本查找：timeout (*.ts)')
+    expect(getToolDisplayName({ tool: 'webfetch', input: { url: 'https://example.com' } })).toBe('抓取网页：https://example.com')
+    expect(getToolDisplayName({ tool: 'bash', callId: 'call_123', input: { command: 'pwd' } } satisfies Partial<ConversationToolPart> & { tool: string })).toBe('执行命令')
+  })
+
+  it('builds todo tool display names from JSON output arrays', () => {
+    expect(getToolDisplayName({ tool: 'todowrite', output: '[{"status":"completed"},{"status":"pending"}]' })).toBe('更新任务列表：已完成 1/2')
+    expect(getToolDisplayName({ tool: 'todowrite', output: [{ status: 'completed' }, { status: 'pending' }] })).toBe('更新任务列表：已完成 1/2')
+    expect(getToolDisplayName({ tool: 'todoread', output: '[{"status":"pending"},{"status":"in_progress"}]' })).toBe('读取任务列表：共 2 项')
+    expect(getToolDisplayName({ tool: 'todowrite', output: 'not-json' })).toBe('更新任务列表')
+  })
+
+  it('formats conversation messages and merged tool parts as plain text for copying', () => {
     const text = formatConversationAsText({
       source: 'client',
       format: 'openai-chat',
       warnings: [],
-      nodes: [
+      nodes: [],
+      messages: [
         {
-          id: 'n1',
-          type: 'user',
+          id: 'message-user-0',
           role: 'user',
-          title: 'User',
-          defaultCollapsed: false,
-          parts: [{ type: 'text', text: 'Hello' }],
+          parts: [{ id: 'part-text-0', type: 'text', text: 'Hello' }],
         },
         {
-          id: 'n2',
-          type: 'tool_call',
-          title: 'Tool Call · web_search',
-          defaultCollapsed: true,
-          toolName: 'web_search',
-          input: { query: 'timeout' },
+          id: 'message-assistant-1',
+          role: 'assistant',
+          parts: [
+            { id: 'part-reasoning-1', type: 'reasoning', text: 'Thinking', defaultCollapsed: true },
+            {
+              id: 'part-tool-2',
+              type: 'tool',
+              tool: 'bash',
+              callId: 'call_ignored_in_title',
+              state: { status: 'completed', input: { command: 'pwd' }, output: '/repo' },
+            },
+            { id: 'part-text-3', type: 'text', text: 'Done' },
+          ],
         },
       ],
     })
 
     expect(text).toContain('[user]')
     expect(text).toContain('Hello')
-    expect(text).toContain('[tool_call: web_search]')
-    expect(text).toContain('"query": "timeout"')
+    expect(text).toContain('[assistant]')
+    expect(text).toContain('[reasoning]')
+    expect(text).toContain('Thinking')
+    expect(text).toContain('[tool: bash]')
+    expect(text).toContain('$ pwd')
+    expect(text).toContain('/repo')
+    expect(text).not.toContain('call_ignored_in_title')
   })
 })
 
@@ -81,30 +115,140 @@ describe('parseConversationPayload', () => {
     })
 
     expect(flow.format).toBe('openai-chat')
-    expect(flow.nodes.map((node) => node.type)).toEqual(['system', 'user', 'assistant', 'user', 'assistant'])
-    expect(flow.nodes[0].defaultCollapsed).toBe(true)
-    expect(flow.nodes[1].defaultCollapsed).toBe(false)
-    expect(flow.nodes[3]).toMatchObject({ type: 'user' })
-    expect('parts' in flow.nodes[3] ? flow.nodes[3].parts.some((part) => part.type === 'image') : false).toBe(true)
+    expect(flow.messages?.map((message) => message.role)).toEqual(['system', 'user', 'assistant', 'user', 'assistant'])
+    expect(flow.messages?.[0].parts).toMatchObject([{ type: 'text', text: 'Be concise.' }])
+    expect(flow.messages?.[3].parts.some((part) => part.type === 'image')).toBe(true)
+    expect(flow.messages?.[4].parts).toMatchObject([{ type: 'text', text: '**Done**\n\n```ts\nconst ok = true\n```' }])
   })
 
-  it('creates independent tool call and tool result cards', () => {
+  it('merges OpenAI chat tool calls and tool results into one tool part', () => {
     const flow = parseConversationPayload({
       requestBody: JSON.stringify({
         messages: [
-          { role: 'assistant', content: 'Searching', tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'web_search', arguments: '{"query":"timeout"}' } }] },
+          {
+            role: 'assistant',
+            content: 'Searching',
+            tool_calls: [
+              { id: 'call_1', type: 'function', function: { name: 'web_search', arguments: '{"query":"timeout"}' } },
+            ],
+          },
           { role: 'tool', tool_call_id: 'call_1', name: 'web_search', content: '{"ok":true}' },
         ],
       }),
       responseBody: null,
     })
 
-    expect(flow.nodes.map((node) => node.type)).toEqual(['assistant', 'tool_call', 'tool_result'])
-    expect(flow.nodes[1]).toMatchObject({ type: 'tool_call', toolName: 'web_search', defaultCollapsed: true })
-    expect(flow.nodes[2]).toMatchObject({ type: 'tool_result', toolName: 'web_search', defaultCollapsed: true })
+    expect(flow.messages).toHaveLength(1)
+    expect(flow.messages?.[0].role).toBe('assistant')
+    expect(flow.messages?.[0].parts.map((part) => part.type)).toEqual(['text', 'tool'])
+    const tool = flow.messages?.[0].parts[1] as ConversationToolPart
+    expect(tool).toMatchObject({ type: 'tool', tool: 'web_search', callId: 'call_1' })
+    expect(tool.state.input).toEqual({ query: 'timeout' })
+    expect(tool.state.output).toEqual({ ok: true })
+    expect(tool.state.status).toBe('completed')
   })
 
-  it('skips blank assistant messages while preserving tool call cards', () => {
+  it('does not let generic OpenAI chat tool titles override input descriptions', () => {
+    const flow = parseConversationPayload({
+      requestBody: JSON.stringify({
+        messages: [
+          {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              { id: 'call_1', type: 'function', function: { name: 'bash', arguments: '{"command":"pwd","description":"显示当前目录"}' } },
+            ],
+          },
+          { role: 'tool', tool_call_id: 'call_1', name: 'bash', content: '/repo' },
+        ],
+      }),
+      responseBody: null,
+    })
+
+    const tool = flow.messages?.[0].parts[0] as ConversationToolPart
+    expect(tool.state.title).toBeUndefined()
+    expect(getToolDisplayName({
+      tool: tool.tool,
+      input: tool.state.input,
+      title: tool.state.title,
+      output: tool.state.output,
+    })).toBe('执行命令：显示当前目录')
+  })
+
+  it('preserves explicit OpenAI chat tool titles for display names', () => {
+    const flow = parseConversationPayload({
+      requestBody: JSON.stringify({
+        messages: [
+          {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'call_1',
+                type: 'function',
+                title: '自定义标题',
+                function: { name: 'bash', arguments: '{"command":"pwd","description":"显示当前目录"}' },
+              },
+            ],
+          },
+          { role: 'tool', tool_call_id: 'call_1', name: 'bash', content: '/repo' },
+        ],
+      }),
+      responseBody: null,
+    })
+
+    const tool = flow.messages?.[0].parts[0] as ConversationToolPart
+    expect(tool.state.title).toBe('自定义标题')
+    expect(getToolDisplayName({
+      tool: tool.tool,
+      input: tool.state.input,
+      title: tool.state.title,
+      output: tool.state.output,
+    })).toBe('执行命令：自定义标题')
+  })
+
+  it('pairs multiple tool results by call id regardless of result order', () => {
+    const flow = parseConversationPayload({
+      requestBody: JSON.stringify({
+        messages: [
+          {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              { id: 'call_a', type: 'function', function: { name: 'read', arguments: '{"filePath":"a.ts"}' } },
+              { id: 'call_b', type: 'function', function: { name: 'grep', arguments: '{"pattern":"x","include":"*.ts"}' } },
+            ],
+          },
+          { role: 'tool', tool_call_id: 'call_b', name: 'grep', content: 'matched' },
+          { role: 'tool', tool_call_id: 'call_a', name: 'read', content: 'file contents' },
+        ],
+      }),
+      responseBody: null,
+    })
+
+    const tools = flow.messages?.[0].parts.filter((part): part is ConversationToolPart => part.type === 'tool') ?? []
+    expect(tools).toHaveLength(2)
+    expect(tools.find((tool) => tool.callId === 'call_a')?.state.output).toBe('file contents')
+    expect(tools.find((tool) => tool.callId === 'call_b')?.state.output).toBe('matched')
+  })
+
+  it('keeps unmatched tool results as orphan tool parts', () => {
+    const flow = parseConversationPayload({
+      requestBody: JSON.stringify({ messages: [{ role: 'tool', tool_call_id: 'missing', name: 'lookup', content: '{"value":1}' }] }),
+      responseBody: null,
+    })
+
+    expect(flow.messages).toHaveLength(1)
+    expect(flow.messages?.[0].role).toBe('assistant')
+    const tool = flow.messages?.[0].parts[0] as ConversationToolPart
+    expect(tool.type).toBe('tool')
+    expect(tool.tool).toBe('lookup')
+    expect(tool.callId).toBe('missing')
+    expect(tool.state.input).toBeUndefined()
+    expect(tool.state.output).toEqual({ value: 1 })
+  })
+
+  it('keeps blank assistant messages when they contain tool parts', () => {
     const flow = parseConversationPayload({
       requestBody: JSON.stringify({
         messages: [
@@ -114,8 +258,8 @@ describe('parseConversationPayload', () => {
       responseBody: null,
     })
 
-    expect(flow.nodes.map((node) => node.type)).toEqual(['tool_call'])
-    expect(flow.nodes[0]).toMatchObject({ type: 'tool_call', toolName: 'lookup' })
+    expect(flow.messages?.map((message) => message.role)).toEqual(['assistant'])
+    expect(flow.messages?.[0].parts).toMatchObject([{ type: 'tool', tool: 'lookup', callId: 'call_empty' }])
   })
 
   it('keeps raw response when known format response JSON is invalid', () => {
@@ -128,11 +272,11 @@ describe('parseConversationPayload', () => {
 
     expect(flow.format).toBe('openai-chat')
     expect(flow.warnings).toContain('Response body is not valid JSON.')
-    expect(flow.nodes.map((node) => node.type)).toEqual(['user', 'raw'])
-    expect(flow.nodes[1]).toMatchObject({ type: 'raw', title: 'Raw Response', defaultCollapsed: true, raw: 'not-json' })
+    expect(flow.messages?.map((message) => message.role)).toEqual(['user', 'assistant'])
+    expect(flow.messages?.[1].parts).toMatchObject([{ type: 'raw', title: 'Raw Response', defaultCollapsed: true, raw: 'not-json' }])
   })
 
-  it('keeps unrecognized chat messages as collapsed raw nodes', () => {
+  it('keeps unrecognized chat messages as collapsed raw parts', () => {
     const flow = parseConversationPayload({
       requestBody: JSON.stringify({
         messages: [
@@ -146,8 +290,8 @@ describe('parseConversationPayload', () => {
     })
 
     expect(flow.format).toBe('openai-chat')
-    expect(flow.nodes.map((node) => node.type)).toEqual(['user', 'raw', 'raw', 'raw'])
-    expect(flow.nodes.slice(1)).toEqual(
+    expect(flow.messages?.map((message) => message.role)).toEqual(['user', 'assistant', 'assistant', 'assistant'])
+    expect(flow.messages?.slice(1).map((message) => message.parts[0])).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ type: 'raw', defaultCollapsed: true, raw: 'orphan message' }),
         expect.objectContaining({ type: 'raw', defaultCollapsed: true, raw: expect.stringContaining('visible unknown role') }),
@@ -156,7 +300,7 @@ describe('parseConversationPayload', () => {
     )
   })
 
-  it('keeps unrecognized chat response choices as collapsed raw nodes', () => {
+  it('keeps unrecognized chat response choices as collapsed raw parts', () => {
     const flow = parseConversationPayload({
       requestBody: JSON.stringify({
         messages: [{ role: 'user', content: 'Hello' }],
@@ -171,15 +315,15 @@ describe('parseConversationPayload', () => {
     })
 
     expect(flow.format).toBe('openai-chat')
-    expect(flow.nodes.map((node) => node.type)).toEqual(['user', 'assistant', 'raw', 'raw'])
-    expect(flow.nodes[1]).toMatchObject({ type: 'assistant', summary: 'Known' })
-    expect(flow.nodes[2]).toMatchObject({
+    expect(flow.messages?.map((message) => message.role)).toEqual(['user', 'assistant', 'assistant', 'assistant'])
+    expect(flow.messages?.[1].parts).toMatchObject([{ type: 'text', text: 'Known' }])
+    expect(flow.messages?.[2].parts[0]).toMatchObject({
       type: 'raw',
       defaultCollapsed: true,
       raw: expect.stringContaining('custom_choice'),
       metadata: expect.objectContaining({ rawSource: 'response', nestedSource: 'choices' }),
     })
-    expect(flow.nodes[3]).toMatchObject({
+    expect(flow.messages?.[3].parts[0]).toMatchObject({
       type: 'raw',
       defaultCollapsed: true,
       raw: 'legacy-choice',
@@ -187,7 +331,7 @@ describe('parseConversationPayload', () => {
     })
   })
 
-  it('keeps null chat response choices as non-empty collapsed raw nodes', () => {
+  it('keeps null chat response choices as non-empty collapsed raw parts', () => {
     const flow = parseConversationPayload({
       requestBody: JSON.stringify({
         messages: [{ role: 'user', content: 'Hello' }],
@@ -198,8 +342,8 @@ describe('parseConversationPayload', () => {
     })
 
     expect(flow.format).toBe('openai-chat')
-    expect(flow.nodes.map((node) => node.type)).toEqual(['user', 'raw'])
-    expect(flow.nodes[1]).toMatchObject({
+    expect(flow.messages?.map((message) => message.role)).toEqual(['user', 'assistant'])
+    expect(flow.messages?.[1].parts[0]).toMatchObject({
       type: 'raw',
       defaultCollapsed: true,
       raw: 'null',
@@ -223,11 +367,45 @@ describe('parseConversationPayload', () => {
     })
 
     expect(flow.format).toBe('openai-responses')
-    expect(flow.nodes.map((node) => node.type)).toEqual(['user', 'assistant', 'tool_call'])
-    expect(flow.nodes[2]).toMatchObject({ type: 'tool_call', toolName: 'read_log' })
+    expect(flow.messages?.map((message) => message.role)).toEqual(['user', 'assistant'])
+    expect(flow.messages?.[1].parts.map((part) => part.type)).toEqual(['text', 'tool'])
+    expect(flow.messages?.[1].parts[1]).toMatchObject({ type: 'tool', tool: 'read_log', callId: 'call_2' })
   })
 
-  it('keeps unrecognized Responses input and output items as collapsed raw nodes', () => {
+  it('uses Responses output_text only as fallback when output has no assistant text', () => {
+    const flow = parseConversationPayload({
+      requestBody: JSON.stringify({ input: [{ role: 'user', content: [{ type: 'input_text', text: 'Say hi' }] }] }),
+      responseBody: JSON.stringify({
+        output: [
+          { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Hi' }] },
+        ],
+        output_text: 'Hi',
+      }),
+    })
+
+    expect(flow.format).toBe('openai-responses')
+    expect(flow.messages?.map((message) => message.role)).toEqual(['user', 'assistant'])
+    expect(flow.messages?.[1].parts).toMatchObject([{ type: 'text', text: 'Hi' }])
+    expect(flow.messages?.[1].parts).toHaveLength(1)
+  })
+
+  it('keeps Responses output_text fallback when output has only non-answer assistant parts', () => {
+    const flow = parseConversationPayload({
+      requestBody: JSON.stringify({ input: [{ role: 'user', content: [{ type: 'input_text', text: 'Summarize logs' }] }] }),
+      responseBody: JSON.stringify({
+        output: [
+          { type: 'reasoning', summary: [{ type: 'summary_text', text: '检查日志。' }] },
+          { type: 'function_call', call_id: 'call_2', name: 'read', arguments: '{"filePath":"app.log"}' },
+        ],
+        output_text: 'Summary complete.',
+      }),
+    })
+
+    expect(flow.messages?.[1].parts.map((part) => part.type)).toEqual(['reasoning', 'tool', 'text'])
+    expect(flow.messages?.[1].parts[2]).toMatchObject({ type: 'text', text: 'Summary complete.' })
+  })
+
+  it('keeps unrecognized Responses input and output items as collapsed raw parts', () => {
     const flow = parseConversationPayload({
       requestBody: JSON.stringify({
         input: [
@@ -244,42 +422,146 @@ describe('parseConversationPayload', () => {
     })
 
     expect(flow.format).toBe('openai-responses')
-    expect(flow.nodes.map((node) => node.type)).toEqual(['user', 'raw', 'assistant', 'raw'])
-    expect(flow.nodes[1]).toMatchObject({ type: 'raw', defaultCollapsed: true, raw: expect.stringContaining('custom_input') })
-    expect(flow.nodes[3]).toMatchObject({ type: 'raw', defaultCollapsed: true, raw: expect.stringContaining('custom_output') })
+    expect(flow.messages?.map((message) => message.role)).toEqual(['user', 'user', 'assistant', 'assistant'])
+    expect(flow.messages?.[1].parts[0]).toMatchObject({ type: 'raw', defaultCollapsed: true, raw: expect.stringContaining('custom_input') })
+    expect(flow.messages?.[3].parts[0]).toMatchObject({ type: 'raw', defaultCollapsed: true, raw: expect.stringContaining('custom_output') })
   })
 
-  it('renders Responses reasoning summary text as collapsed reasoning card and hides encrypted content', () => {
+  it('parses Responses reasoning and paired function call output as parts', () => {
     const flow = parseConversationPayload({
-      requestBody: JSON.stringify({
-        input: [{ role: 'user', content: [{ type: 'input_text', text: 'Translate' }] }],
-      }),
+      requestBody: JSON.stringify({ input: [{ role: 'user', content: [{ type: 'input_text', text: 'Summarize logs' }] }] }),
       responseBody: JSON.stringify({
         output: [
-          {
-            type: 'reasoning',
-            id: 'rs-1',
-            summary: [
-              { type: 'summary_text', text: '考虑到这是一个翻译任务' },
-              { type: 'summary_text', text: '需要保持原文语气' },
-            ],
-            encrypted_content: '...',
-          },
-          { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Hello' }] },
+          { type: 'reasoning', summary: [{ type: 'summary_text', text: '检查日志。' }], encrypted_content: 'secret' },
+          { type: 'function_call', call_id: 'call_2', name: 'read', arguments: '{"filePath":"app.log"}' },
+          { type: 'function_call_output', call_id: 'call_2', output: 'done' },
+          { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Summary complete.' }] },
         ],
       }),
     })
 
-    expect(flow.format).toBe('openai-responses')
-    expect(flow.nodes.map((node) => node.type)).toEqual(['user', 'reasoning', 'assistant'])
-    const reasoningNode = flow.nodes[1] as Extract<ConversationNode, { type: 'reasoning' }>
-    expect(reasoningNode.type).toBe('reasoning')
-    expect(reasoningNode.defaultCollapsed).toBe(true)
-    expect(reasoningNode.parts.every((p) => p.type === 'text')).toBe(true)
-    expect(reasoningNode.parts.map((p) => (p as { text: string }).text).join('\n')).toContain('翻译任务')
+    expect(flow.messages?.map((message) => message.role)).toEqual(['user', 'assistant'])
+    expect(flow.messages?.[1].parts.map((part) => part.type)).toEqual(['reasoning', 'tool', 'text'])
+    expect((flow.messages?.[1].parts[0] as { text: string }).text).toBe('检查日志。')
+    expect(JSON.stringify(flow.messages?.[1])).not.toContain('secret')
+    const tool = flow.messages?.[1].parts[1] as ConversationToolPart
+    expect(tool.state.input).toEqual({ filePath: 'app.log' })
+    expect(tool.state.output).toBe('done')
   })
 
-  it('keeps reasoning item as raw node when summary has no displayable text', () => {
+  it('keeps Responses response parts separate from assistant messages in request history', () => {
+    const flow = parseConversationPayload({
+      requestBody: JSON.stringify({
+        input: [
+          { role: 'user', content: [{ type: 'input_text', text: 'Continue' }] },
+          { role: 'assistant', content: [{ type: 'output_text', text: 'Previous assistant answer.' }] },
+        ],
+      }),
+      responseBody: JSON.stringify({
+        output: [
+          { type: 'reasoning', summary: [{ type: 'summary_text', text: 'Need fresh answer.' }] },
+          { type: 'function_call', call_id: 'response_call', name: 'read', arguments: '{"filePath":"new.log"}' },
+          { type: 'function_call_output', call_id: 'response_call', output: 'new contents' },
+          { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'New assistant answer.' }] },
+        ],
+      }),
+    })
+
+    expect(flow.messages?.map((message) => message.role)).toEqual(['user', 'assistant', 'assistant'])
+    expect(flow.messages?.[1].parts.map((part) => part.type)).toEqual(['text'])
+    expect(flow.messages?.[1].parts[0]).toMatchObject({ type: 'text', text: 'Previous assistant answer.' })
+    expect(flow.messages?.[2].parts.map((part) => part.type)).toEqual(['reasoning', 'tool', 'text'])
+  })
+
+  it('does not pair Responses response tool outputs with request-history tool calls that reuse a call id', () => {
+    const flow = parseConversationPayload({
+      requestBody: JSON.stringify({
+        input: [
+          { type: 'function_call', call_id: 'reused_call', name: 'read', arguments: '{"filePath":"old.log"}' },
+          { type: 'function_call_output', call_id: 'reused_call', output: 'old contents' },
+        ],
+      }),
+      responseBody: JSON.stringify({
+        output: [
+          { type: 'function_call_output', call_id: 'reused_call', output: 'new contents' },
+        ],
+      }),
+    })
+
+    expect(flow.messages).toHaveLength(2)
+    const requestTool = flow.messages?.[0].parts[0] as ConversationToolPart
+    const responseTool = flow.messages?.[1].parts[0] as ConversationToolPart
+    expect(requestTool.state.output).toBe('old contents')
+    expect(responseTool).toMatchObject({ type: 'tool', callId: 'reused_call' })
+    expect(responseTool.state.input).toBeUndefined()
+    expect(responseTool.state.output).toBe('new contents')
+  })
+
+  it('redacts nested encrypted content from raw Responses items and tool metadata', () => {
+    const flow = parseConversationPayload({
+      requestBody: JSON.stringify({ input: [{ role: 'user', content: [{ type: 'input_text', text: 'Check secrets' }] }] }),
+      responseBody: JSON.stringify({
+        output: [
+          { type: 'custom_output', payload: { nested: { encrypted_content: 'raw-secret', keep: true } } },
+          { type: 'function_call', call_id: 'secret_call', name: 'lookup', arguments: '{}', extra: { encrypted_content: 'tool-secret' } },
+          { type: 'function_call_output', call_id: 'secret_call', output: { value: 1, nested: { encrypted_content: 'result-secret' } } },
+        ],
+      }),
+    })
+
+    const serialized = JSON.stringify(flow.messages)
+    expect(serialized).not.toContain('raw-secret')
+    expect(serialized).not.toContain('tool-secret')
+    expect(serialized).not.toContain('result-secret')
+  })
+
+  it('redacts encrypted content from unknown-format raw fallback JSON strings', () => {
+    const flow = parseConversationPayload({
+      requestBody: JSON.stringify({ payload: { encrypted_content: 'unknown-request-secret', keep: true } }),
+      responseBody: JSON.stringify({ encrypted_content: 'unknown-response-secret', ok: true }),
+    })
+
+    const serialized = JSON.stringify(flow.messages)
+    expect(serialized).not.toContain('encrypted_content')
+    expect(serialized).not.toContain('unknown-request-secret')
+    expect(serialized).not.toContain('unknown-response-secret')
+  })
+
+  it('redacts encrypted content from known-format raw response strings', () => {
+    const flow = parseConversationPayload({
+      requestBody: JSON.stringify({ messages: [{ role: 'user', content: 'Hello' }] }),
+      responseBody: JSON.stringify({ encrypted_content: 'known-response-secret', ok: true }),
+    })
+
+    const serialized = JSON.stringify(flow.messages)
+    expect(serialized).not.toContain('encrypted_content')
+    expect(serialized).not.toContain('known-response-secret')
+  })
+
+  it('redacts encrypted content from JSON strings in tool metadata', () => {
+    const flow = parseConversationPayload({
+      requestBody: JSON.stringify({
+        messages: [
+          {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              { id: 'call_secret', type: 'function', function: { name: 'lookup', arguments: '{"encrypted_content":"argument-secret","keep":true}' } },
+            ],
+          },
+          { role: 'tool', tool_call_id: 'call_secret', name: 'lookup', content: '{"encrypted_content":"content-secret","ok":true}' },
+        ],
+      }),
+      responseBody: null,
+    })
+
+    const serialized = JSON.stringify(flow.messages)
+    expect(serialized).not.toContain('encrypted_content')
+    expect(serialized).not.toContain('argument-secret')
+    expect(serialized).not.toContain('content-secret')
+  })
+
+  it('keeps reasoning item as raw part when summary has no displayable text', () => {
     const flow = parseConversationPayload({
       requestBody: null,
       responseBody: JSON.stringify({
@@ -290,16 +572,18 @@ describe('parseConversationPayload', () => {
     })
 
     expect(flow.format).toBe('openai-responses')
-    expect(flow.nodes.map((node) => node.type)).toEqual(['raw'])
+    expect(flow.messages?.map((message) => message.role)).toEqual(['assistant'])
+    expect(flow.messages?.[0].parts.map((part) => part.type)).toEqual(['raw'])
   })
 
-  it('falls back to raw nodes for unrecognized payloads and empty nodes for empty input', () => {
+  it('falls back to raw parts for unrecognized payloads and empty messages for empty input', () => {
     const rawFlow = parseConversationPayload({ requestBody: '{"foo":1}', responseBody: 'not-json' })
     expect(rawFlow.format).toBe('unknown')
-    expect(rawFlow.nodes.map((node) => node.type)).toEqual(['raw', 'raw'])
-    expect(rawFlow.nodes.every((node) => node.defaultCollapsed)).toBe(true)
+    const rawParts = rawFlow.messages?.flatMap((message) => message.parts) as ConversationPart[]
+    expect(rawParts.map((part) => part.type)).toEqual(['raw', 'raw'])
+    expect(rawParts.every((part) => part.type === 'raw' && part.defaultCollapsed)).toBe(true)
 
     const emptyFlow = parseConversationPayload({ requestBody: null, responseBody: null })
-    expect(emptyFlow.nodes).toEqual([])
+    expect(emptyFlow.messages).toEqual([])
   })
 })

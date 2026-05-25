@@ -1,11 +1,12 @@
-import { createConversationNodeId, formatRawValue, parseJsonValue, summarizeText, textFromParts } from './format'
+import { createConversationNodeId, formatRawValue, parseJsonValue } from './format'
 import type {
   ConversationContentPart,
   ConversationFlow,
   ConversationFormat,
-  ConversationMessageNode,
-  ConversationNode,
-  ConversationToolNode,
+  ConversationMessage,
+  ConversationMessageRole,
+  ConversationPart,
+  ConversationToolPart,
   ParseConversationPayloadInput,
 } from './types'
 
@@ -20,7 +21,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-const isMessageRole = (value: unknown): value is ConversationMessageNode['role'] => {
+const isMessageRole = (value: unknown): value is ConversationMessageRole => {
   return value === 'user' || value === 'assistant' || value === 'system' || value === 'developer'
 }
 
@@ -46,15 +47,34 @@ const stringValue = (value: unknown): string | undefined => {
   return typeof value === 'string' && value.length > 0 ? value : undefined
 }
 
-const titleForRole = (role: ConversationMessageNode['role']): string => {
-  if (role === 'user') return 'User'
-  if (role === 'assistant') return 'Assistant'
-  if (role === 'system') return 'System'
-  return 'Developer'
+const normalizeToolName = (value: unknown): string => {
+  return stringValue(value) ?? 'tool'
 }
 
-const defaultCollapsedForRole = (role: ConversationMessageNode['role']): boolean => {
-  return role === 'system' || role === 'developer'
+const sanitizeString = (value: string): string => {
+  const parsed = parseJsonValue(value)
+  if (parsed !== null) {
+    const sanitized = sanitizeMetadata(parsed)
+    return typeof sanitized === 'string' ? sanitizeString(sanitized) : JSON.stringify(sanitized)
+  }
+
+  return value.includes('encrypted_content') ? '[redacted]' : value
+}
+
+const sanitizeMetadata = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(sanitizeMetadata)
+  if (typeof value === 'string') return sanitizeString(value)
+  if (!isRecord(value)) return value
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => key !== 'encrypted_content')
+      .map(([key, nestedValue]) => [key, sanitizeMetadata(nestedValue)]),
+  )
+}
+
+const sanitizeRecord = (value: Record<string, unknown>): Record<string, unknown> => {
+  return sanitizeMetadata(value) as Record<string, unknown>
 }
 
 const imageUrlFromPart = (part: Record<string, unknown>): string | undefined => {
@@ -82,7 +102,7 @@ const partsFromContent = (content: unknown): ConversationContentPart[] => {
   if (Array.isArray(content)) {
     return content.flatMap((part): ConversationContentPart[] => {
       if (typeof part === 'string') return part ? [{ type: 'text', text: part }] : []
-      if (!isRecord(part)) return [{ type: 'text', text: formatRawValue(part) }]
+      if (!isRecord(part)) return [{ type: 'text', text: formatRawValue(sanitizeMetadata(part)) }]
 
       const type = part.type
       if (type === 'text' || type === 'input_text' || type === 'output_text') {
@@ -102,7 +122,7 @@ const partsFromContent = (content: unknown): ConversationContentPart[] => {
 
       const text = stringValue(part.text)
       if (text) return [{ type: 'text', text }]
-      return [{ type: 'text', text: formatRawValue(part) }]
+      return [{ type: 'text', text: formatRawValue(sanitizeMetadata(part)) }]
     })
   }
 
@@ -113,14 +133,7 @@ const partsFromContent = (content: unknown): ConversationContentPart[] => {
     if (src) return [{ type: 'image', src, alt: stringValue(content.alt) }]
   }
 
-  return [{ type: 'text', text: formatRawValue(content) }]
-}
-
-const isDuplicateAssistant = (previous: ConversationNode | undefined, next: ConversationMessageNode): boolean => {
-  // Only collapse adjacent assistant messages when their renderable parts are exactly identical.
-  return previous?.type === 'assistant'
-    && next.type === 'assistant'
-    && textFromParts(previous.parts) === textFromParts(next.parts)
+  return [{ type: 'text', text: formatRawValue(sanitizeMetadata(content)) }]
 }
 
 const detectFormat = (
@@ -149,96 +162,200 @@ export const parseConversationPayload = (input: ParseConversationPayloadInput): 
   if (request.invalid) warnings.push('Request body is not valid JSON.')
   if (response.invalid) warnings.push('Response body is not valid JSON.')
 
-  const nodes: ConversationNode[] = []
-  const toolNamesByCallId = new Map<string, string>()
-  let nodeIndex = 0
+  const messages: ConversationMessage[] = []
+  const toolPartsByCallId = new Map<string, ConversationToolPart>()
+  let messageIndex = 0
+  let partIndex = 0
 
-  const nextId = (prefix: string) => createConversationNodeId(prefix, nodeIndex++)
+  const nextMessageId = (role: ConversationMessageRole): string => createConversationNodeId(`message-${role}`, messageIndex++)
+  const nextPartId = (type: ConversationPart['type']): string => createConversationNodeId(`part-${type}`, partIndex++)
 
-  const pushMessage = (role: ConversationMessageNode['role'], content: unknown, metadata?: Record<string, unknown>): boolean => {
-    const parts = partsFromContent(content)
-    if (parts.length === 0) return false
-
-    const node: ConversationMessageNode = {
-      id: nextId(role),
-      type: role,
+  const pushMessage = (role: ConversationMessageRole, metadata?: Record<string, unknown>): ConversationMessage => {
+    const message: ConversationMessage = {
+      id: nextMessageId(role),
       role,
-      title: titleForRole(role),
-      summary: summarizeText(textFromParts(parts)),
-      defaultCollapsed: defaultCollapsedForRole(role),
-      parts,
-      metadata,
+      parts: [],
+      metadata: metadata ? sanitizeRecord(metadata) : undefined,
     }
+    messages.push(message)
+    return message
+  }
 
-    if (!isDuplicateAssistant(nodes[nodes.length - 1], node)) nodes.push(node)
-    return true
+  const getLastMessage = (role?: ConversationMessageRole): ConversationMessage | undefined => {
+    const message = messages[messages.length - 1]
+    if (!message) return undefined
+    if (role && message.role !== role) return undefined
+    return message
+  }
+
+  const mergeMessageMetadata = (message: ConversationMessage, metadata?: Record<string, unknown>) => {
+    if (!metadata) return
+    message.metadata = { ...message.metadata, ...sanitizeRecord(metadata) }
+  }
+
+  const pushPartMessage = (
+    role: ConversationMessageRole,
+    parts: ConversationPart[],
+    metadata?: Record<string, unknown>,
+    target?: ConversationMessage,
+  ): ConversationMessage => {
+    const message = target ?? getLastMessage(role) ?? pushMessage(role, metadata)
+    if (message !== target) mergeMessageMetadata(message, metadata)
+    message.parts.push(...parts)
+    return message
+  }
+
+  const assignContentPartIds = (parts: ConversationContentPart[]): ConversationPart[] => {
+    return parts.map((part) => ({ ...part, id: nextPartId(part.type) })) as ConversationPart[]
+  }
+
+  const pushContentParts = (
+    role: ConversationMessageRole,
+    content: unknown,
+    metadata?: Record<string, unknown>,
+    appendToLast = false,
+    target?: ConversationMessage,
+  ): ConversationMessage | undefined => {
+    const parts = assignContentPartIds(partsFromContent(content))
+    if (parts.length === 0) return undefined
+
+    if (target) return pushPartMessage(role, parts, metadata, target)
+    if (appendToLast) return pushPartMessage(role, parts, metadata)
+
+    const message = pushMessage(role, metadata)
+    message.parts.push(...parts)
+    return message
   }
 
   const formatNestedRawValue = (raw: unknown): string => {
-    if (raw === null) return 'null'
-    if (raw === undefined) return 'undefined'
-    return formatRawValue(raw)
+    const safeRaw = sanitizeMetadata(raw)
+    if (safeRaw === null) return 'null'
+    if (safeRaw === undefined) return 'undefined'
+    return formatRawValue(safeRaw)
   }
 
-  const pushRawNode = (raw: unknown, metadata: Record<string, unknown>, prefix = 'raw') => {
-    nodes.push({
-      id: nextId(prefix),
+  const rawTitle = (metadata: Record<string, unknown>): string => {
+    if (metadata.rawSource === 'request') return 'Raw Request'
+    if (metadata.rawSource === 'response') return 'Raw Response'
+    return 'Raw'
+  }
+
+  const pushRawPart = (raw: unknown, metadata: Record<string, unknown>, role: ConversationMessageRole = 'assistant') => {
+    const safeMetadata = sanitizeRecord(metadata)
+    const part: ConversationPart = {
+      id: nextPartId('raw'),
       type: 'raw',
-      title: 'Raw',
-      defaultCollapsed: true,
+      title: rawTitle(safeMetadata),
       raw: formatNestedRawValue(raw),
-      metadata,
-    })
+      defaultCollapsed: true,
+      metadata: safeMetadata,
+    }
+    const message = pushMessage(role, safeMetadata)
+    message.parts.push(part)
   }
 
-  const pushToolCall = (toolCall: Record<string, unknown>) => {
+  const pushRawRequest = () => {
+    if (request.raw !== null) pushRawPart(request.raw, { rawSource: 'request' }, 'assistant')
+  }
+
+  const pushRawResponse = () => {
+    if (response.raw !== null) pushRawPart(response.raw, { rawSource: 'response' }, 'assistant')
+  }
+
+  const pushRawFallback = () => {
+    if (request.hasBody) pushRawRequest()
+    if (response.hasBody) pushRawResponse()
+  }
+
+  const mergeToolResultMetadata = (part: ConversationToolPart, result: Record<string, unknown>) => {
+    const safeResult = sanitizeRecord(result)
+    part.state.metadata = { ...part.state.metadata, result: safeResult }
+    part.metadata = { ...part.metadata, result: safeResult }
+  }
+
+  const pushToolCall = (toolCall: Record<string, unknown>, target?: ConversationMessage) => {
     const fn = isRecord(toolCall.function) ? toolCall.function : undefined
-    const toolName = stringValue(fn?.name) ?? stringValue(toolCall.name) ?? stringValue(toolCall.tool_name)
+    const tool = normalizeToolName(fn?.name ?? toolCall.name ?? toolCall.tool_name)
     const callId = stringValue(toolCall.id) ?? stringValue(toolCall.call_id) ?? stringValue(toolCall.callId)
     const rawArguments = fn?.arguments ?? toolCall.arguments ?? toolCall.input
-    const parsedArguments = parsePossiblyJson(rawArguments)
-
-    if (callId && toolName) toolNamesByCallId.set(callId, toolName)
-
-    const node: ConversationToolNode = {
-      id: nextId('tool-call'),
-      type: 'tool_call',
-      title: `Tool Call${toolName ? ` · ${toolName}` : ''}`,
-      summary: toolName,
-      defaultCollapsed: true,
-      toolName,
+    const parsedArguments = sanitizeMetadata(parsePossiblyJson(rawArguments))
+    const metadata = { call: sanitizeRecord(toolCall) }
+    const title = stringValue(toolCall.title)
+    const part: ConversationToolPart = {
+      id: nextPartId('tool'),
+      type: 'tool',
       callId,
-      input: parsedArguments,
-      metadata: toolCall,
+      tool,
+      state: {
+        status: 'running',
+        input: parsedArguments,
+        ...(title ? { title } : {}),
+        metadata,
+      },
+      metadata,
     }
-    nodes.push(node)
+
+    pushPartMessage('assistant', [part], undefined, target)
+    if (callId) toolPartsByCallId.set(callId, part)
   }
 
-  const pushToolResult = (toolResult: Record<string, unknown>) => {
-    const callId = stringValue(toolResult.tool_call_id) ?? stringValue(toolResult.call_id) ?? stringValue(toolResult.callId)
-    const toolName = stringValue(toolResult.name) ?? stringValue(toolResult.tool_name) ?? (callId ? toolNamesByCallId.get(callId) : undefined)
-    const output = parsePossiblyJson(toolResult.content ?? toolResult.output ?? toolResult.result)
+  const toolOutputFromResult = (toolResult: Record<string, unknown>): unknown => {
+    if (Object.prototype.hasOwnProperty.call(toolResult, 'content')) return toolResult.content
+    if (Object.prototype.hasOwnProperty.call(toolResult, 'output')) return toolResult.output
+    return toolResult.result
+  }
 
-    const node: ConversationToolNode = {
-      id: nextId('tool-result'),
-      type: 'tool_result',
-      title: `Tool Result${toolName ? ` · ${toolName}` : ''}`,
-      summary: toolName,
-      defaultCollapsed: true,
-      toolName,
-      callId,
-      output,
-      metadata: toolResult,
+  const pushToolResult = (toolResult: Record<string, unknown>, target?: ConversationMessage) => {
+    const callId = stringValue(toolResult.tool_call_id) ?? stringValue(toolResult.call_id) ?? stringValue(toolResult.callId)
+    const matched = callId ? toolPartsByCallId.get(callId) : undefined
+    const tool = normalizeToolName(toolResult.name ?? toolResult.tool_name ?? matched?.tool)
+    const output = sanitizeMetadata(parsePossiblyJson(toolOutputFromResult(toolResult)))
+
+    if (matched) {
+      matched.tool = tool
+      matched.state.status = 'completed'
+      matched.state.output = output
+      mergeToolResultMetadata(matched, toolResult)
+      return
     }
-    nodes.push(node)
+
+    const metadata = { result: sanitizeRecord(toolResult) }
+    const part: ConversationToolPart = {
+      id: nextPartId('tool'),
+      type: 'tool',
+      callId,
+      tool,
+      state: {
+        status: 'completed',
+        output,
+        metadata,
+      },
+      metadata,
+    }
+
+    const message = target ?? pushMessage('assistant')
+    message.parts.push(part)
+    if (callId) toolPartsByCallId.set(callId, part)
+  }
+
+  const pushReasoningPart = (text: string, metadata?: Record<string, unknown>, target?: ConversationMessage) => {
+    const part: ConversationPart = {
+      id: nextPartId('reasoning'),
+      type: 'reasoning',
+      text,
+      defaultCollapsed: true,
+      metadata: metadata ? sanitizeRecord(metadata) : undefined,
+    }
+    pushPartMessage('assistant', [part], metadata, target)
   }
 
   const parseChatMessage = (message: unknown, rawSource: 'request' | 'response', nestedSource: string) => {
-    const nodeCount = nodes.length
+    const messageCount = messages.length
     let handled = false
+    let target: ConversationMessage | undefined
 
     if (!isRecord(message)) {
-      pushRawNode(message, { rawSource, nestedSource }, `raw-${rawSource}`)
+      pushRawPart(message, { rawSource, nestedSource })
       return
     }
 
@@ -247,86 +364,106 @@ export const parseConversationPayload = (input: ParseConversationPayloadInput): 
       return
     }
 
-    if (isMessageRole(message.role)) handled = pushMessage(message.role, message.content, message)
+    const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : []
+    const hasToolCalls = toolCalls.length > 0
+    if (isMessageRole(message.role)) {
+      target = pushContentParts(message.role, message.content, message)
+      if (!target && hasToolCalls && message.role === 'assistant') target = pushMessage('assistant', message)
+      handled = Boolean(target)
+    }
 
-    if (Array.isArray(message.tool_calls)) {
-      message.tool_calls.forEach((toolCall) => {
+    if (hasToolCalls) {
+      toolCalls.forEach((toolCall) => {
         if (isRecord(toolCall)) {
-          pushToolCall(toolCall)
+          pushToolCall(toolCall, target)
           handled = true
         }
       })
     }
 
-    if (!handled && nodes.length === nodeCount) pushRawNode(message, { rawSource, nestedSource }, `raw-${rawSource}`)
+    if (!handled && messages.length === messageCount) pushRawPart(message, { rawSource, nestedSource })
   }
 
   const parseChat = () => {
-    const requestNodeCount = nodes.length
+    const requestMessageCount = messages.length
     if (isRecord(request.value) && Array.isArray(request.value.messages)) {
       request.value.messages.forEach((message) => parseChatMessage(message, 'request', 'messages'))
     }
-    if (request.hasBody && nodes.length === requestNodeCount) pushRawRequest()
+    if (request.hasBody && messages.length === requestMessageCount) pushRawRequest()
 
-    const responseNodeCount = nodes.length
+    toolPartsByCallId.clear()
+
+    const responseMessageCount = messages.length
     if (isRecord(response.value) && Array.isArray(response.value.choices)) {
       response.value.choices.forEach((choice) => {
         if (!isRecord(choice)) {
-          pushRawNode(choice, { rawSource: 'response', nestedSource: 'choices' }, 'raw-response')
+          pushRawPart(choice, { rawSource: 'response', nestedSource: 'choices' })
           return
         }
 
         const hasMessage = Object.prototype.hasOwnProperty.call(choice, 'message')
         const hasDelta = Object.prototype.hasOwnProperty.call(choice, 'delta')
         if (!hasMessage && !hasDelta) {
-          pushRawNode(choice, { rawSource: 'response', nestedSource: 'choices' }, 'raw-response')
+          pushRawPart(choice, { rawSource: 'response', nestedSource: 'choices' })
           return
         }
 
         const message = choice.message ?? choice.delta
         if (message == null) {
-          pushRawNode(choice, { rawSource: 'response', nestedSource: 'choices' }, 'raw-response')
+          pushRawPart(choice, { rawSource: 'response', nestedSource: 'choices' })
           return
         }
 
         parseChatMessage(message, 'response', 'choices')
       })
     }
-    if (response.hasBody && nodes.length === responseNodeCount) pushRawResponse()
+    if (response.hasBody && messages.length === responseMessageCount) pushRawResponse()
   }
 
-  const parseResponsesItem = (item: unknown, fallbackRole: ConversationMessageNode['role'], rawSource: 'request' | 'response', nestedSource: string) => {
+  const parseResponsesItem = (
+    item: unknown,
+    fallbackRole: ConversationMessageRole,
+    rawSource: 'request' | 'response',
+    nestedSource: string,
+    getResponseTarget?: () => ConversationMessage,
+  ) => {
+    const appendToLast = rawSource === 'response' && !getResponseTarget
+
     if (typeof item === 'string') {
-      pushMessage(fallbackRole, item)
+      const target = fallbackRole === 'assistant' ? getResponseTarget?.() : undefined
+      pushContentParts(fallbackRole, item, undefined, appendToLast, target)
       return
     }
 
     if (!isRecord(item)) {
-      pushRawNode(item, { rawSource, nestedSource }, `raw-${rawSource}`)
+      pushRawPart(item, { rawSource, nestedSource }, fallbackRole)
       return
     }
 
     const type = item.type
 
     if (type === 'message' || isMessageRole(item.role)) {
-      const pushed = pushMessage(isMessageRole(item.role) ? item.role : fallbackRole, item.content ?? item.output_text ?? item.text, item)
-      if (!pushed) pushRawNode(item, { rawSource, nestedSource }, `raw-${rawSource}`)
+      const role = isMessageRole(item.role) ? item.role : fallbackRole
+      const target = role === 'assistant' ? getResponseTarget?.() : undefined
+      const pushed = pushContentParts(role, item.content ?? item.output_text ?? item.text, item, appendToLast, target)
+      if (!pushed) pushRawPart(item, { rawSource, nestedSource }, role)
       return
     }
 
     if (type === 'function_call' || type === 'tool_call') {
-      pushToolCall(item)
+      pushToolCall(item, fallbackRole === 'assistant' ? getResponseTarget?.() : undefined)
       return
     }
 
     if (type === 'function_call_output' || type === 'tool_result') {
-      pushToolResult(item)
+      pushToolResult(item, fallbackRole === 'assistant' ? getResponseTarget?.() : undefined)
       return
     }
 
     if (type === 'output_text' || type === 'input_text') {
-      const pushed = pushMessage(fallbackRole, [item])
-      if (!pushed) pushRawNode(item, { rawSource, nestedSource }, `raw-${rawSource}`)
+      const target = fallbackRole === 'assistant' ? getResponseTarget?.() : undefined
+      const pushed = pushContentParts(fallbackRole, [item], item, appendToLast, target)
+      if (!pushed) pushRawPart(item, { rawSource, nestedSource }, fallbackRole)
       return
     }
 
@@ -334,25 +471,20 @@ export const parseConversationPayload = (input: ParseConversationPayloadInput): 
       const summary = Array.isArray(item.summary) ? item.summary : undefined
       if (summary && summary.length > 0) {
         const texts = summary
-          .filter((s) => isRecord(s) && s.type === 'summary_text')
-          .map((s) => stringValue(s.text))
+          .filter((summaryItem) => isRecord(summaryItem) && summaryItem.type === 'summary_text')
+          .map((summaryItem) => stringValue(summaryItem.text))
           .filter(Boolean) as string[]
         if (texts.length > 0) {
-          nodes.push({
-            id: nextId('reasoning'),
-            type: 'reasoning',
-            title: 'Reasoning',
-            summary: summarizeText(texts.join(' ')),
-            defaultCollapsed: true,
-            parts: texts.map((text) => ({ type: 'text' as const, text })),
-            metadata: item,
-          })
+          pushReasoningPart(texts.join('\n'), sanitizeRecord(item), fallbackRole === 'assistant' ? getResponseTarget?.() : undefined)
           return
         }
       }
+
+      pushRawPart(sanitizeRecord(item), { rawSource, nestedSource }, fallbackRole)
+      return
     }
 
-    pushRawNode(item, { rawSource, nestedSource }, `raw-${rawSource}`)
+    pushRawPart(item, { rawSource, nestedSource }, fallbackRole)
   }
 
   const parseResponsesInput = (value: unknown) => {
@@ -361,53 +493,37 @@ export const parseConversationPayload = (input: ParseConversationPayloadInput): 
       return
     }
 
-    if (typeof value === 'string') pushMessage('user', value)
+    if (typeof value === 'string') pushContentParts('user', value)
     else if (value != null) parseResponsesItem(value, 'user', 'request', 'input')
   }
 
   const parseResponses = () => {
-    const requestNodeCount = nodes.length
+    const requestMessageCount = messages.length
     if (isRecord(request.value) && Object.prototype.hasOwnProperty.call(request.value, 'input')) {
       parseResponsesInput(request.value.input)
     }
-    if (request.hasBody && nodes.length === requestNodeCount) pushRawRequest()
+    if (request.hasBody && messages.length === requestMessageCount) pushRawRequest()
 
-    const responseNodeCount = nodes.length
+    toolPartsByCallId.clear()
+
+    const responseMessageCount = messages.length
+    let responseAssistantTarget: ConversationMessage | undefined
+    const getResponseAssistantTarget = (): ConversationMessage => {
+      responseAssistantTarget ??= pushMessage('assistant')
+      return responseAssistantTarget
+    }
+
     if (isRecord(response.value)) {
       if (Array.isArray(response.value.output)) {
-        response.value.output.forEach((item) => parseResponsesItem(item, 'assistant', 'response', 'output'))
+        response.value.output.forEach((item) => parseResponsesItem(item, 'assistant', 'response', 'output', getResponseAssistantTarget))
       }
 
-      if (typeof response.value.output_text === 'string') pushMessage('assistant', response.value.output_text)
+      const hasStructuredAssistantText = responseAssistantTarget?.parts.some((part) => part.type === 'text') ?? false
+      if (typeof response.value.output_text === 'string' && !hasStructuredAssistantText) {
+        pushContentParts('assistant', response.value.output_text, undefined, false, getResponseAssistantTarget())
+      }
     }
-    if (response.hasBody && nodes.length === responseNodeCount) pushRawResponse()
-  }
-
-  const pushRawRequest = () => {
-    nodes.push({
-      id: nextId('raw-request'),
-      type: 'raw',
-      title: 'Raw Request',
-      defaultCollapsed: true,
-      raw: formatRawValue(request.raw),
-      metadata: { rawSource: 'request' },
-    })
-  }
-
-  const pushRawResponse = () => {
-    nodes.push({
-      id: nextId('raw-response'),
-      type: 'raw',
-      title: 'Raw Response',
-      defaultCollapsed: true,
-      raw: formatRawValue(response.raw),
-      metadata: { rawSource: 'response' },
-    })
-  }
-
-  const pushRawFallback = () => {
-    if (request.hasBody) pushRawRequest()
-    if (response.hasBody) pushRawResponse()
+    if (response.hasBody && messages.length === responseMessageCount) pushRawResponse()
   }
 
   const format = detectFormat(request.value, response.value, input.formatHint)
@@ -419,7 +535,8 @@ export const parseConversationPayload = (input: ParseConversationPayloadInput): 
     if (format === 'unknown') pushRawFallback()
   } catch (error) {
     warnings.push(error instanceof Error ? error.message : 'Failed to parse conversation payload.')
-    nodes.length = 0
+    messages.length = 0
+    toolPartsByCallId.clear()
     pushRawFallback()
   }
 
@@ -427,6 +544,7 @@ export const parseConversationPayload = (input: ParseConversationPayloadInput): 
     source: input.source ?? 'client',
     format,
     warnings,
-    nodes,
+    messages: messages.filter((message) => message.parts.length > 0),
+    nodes: [],
   }
 }
