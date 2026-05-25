@@ -97,6 +97,7 @@ const rawContent = computed(() => {
 const tone = computed(() => {
   if (props.node.type === 'tool_call' || props.node.type === 'tool_result') return 'tool'
   if (props.node.type === 'system' || props.node.type === 'developer') return 'system'
+  if (props.node.type === 'reasoning') return 'reasoning'
   if (props.node.type === 'error') return 'error'
   return props.node.type
 })
@@ -113,6 +114,7 @@ const displayTitle = computed(() => {
   const node = props.node
 
   if (node.type === 'user' || node.type === 'assistant' || node.type === 'system' || node.type === 'developer') return roleTitle(node.role)
+  if (node.type === 'reasoning') return t('conversation.reasoning')
   if (node.type === 'tool_call') return `${t('conversation.toolCall')}${node.toolName ? ` · ${node.toolName}` : ''}`
   if (node.type === 'tool_result') return `${t('conversation.toolResult')}${node.toolName ? ` · ${node.toolName}` : ''}`
   if (node.type === 'raw') return rawTitle()
@@ -124,6 +126,7 @@ const roleLabel = computed(() => {
   const node = props.node
 
   if (node.type === 'user' || node.type === 'assistant' || node.type === 'system' || node.type === 'developer') return roleTitle(node.role)
+  if (node.type === 'reasoning') return t('conversation.reasoning')
   if (node.type === 'tool_call') return t('conversation.toolCall')
   if (node.type === 'tool_result') return t('conversation.toolResult')
   if (node.type === 'raw') return rawTitle()
@@ -200,6 +203,22 @@ const roleLabel = computed(() => {
 
 .conversation-card--system .conversation-role-chip {
   @apply border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300;
+}
+
+.conversation-card--reasoning {
+  @apply border-violet-200/80 bg-gradient-to-br from-violet-50/70 to-white dark:border-violet-900/50 dark:from-violet-950/20 dark:to-dark-900;
+}
+
+.conversation-card--reasoning::before {
+  @apply from-violet-400 via-purple-400;
+}
+
+.conversation-card--reasoning .conversation-role-chip {
+  @apply border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900/60 dark:bg-violet-950/30 dark:text-violet-300;
+}
+
+.conversation-card--reasoning .conversation-role-dot {
+  @apply bg-violet-500;
 }
 
 .conversation-card--assistant .conversation-role-dot,

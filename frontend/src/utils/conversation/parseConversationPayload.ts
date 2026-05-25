@@ -338,8 +338,15 @@ export const parseConversationPayload = (input: ParseConversationPayloadInput): 
           .map((s) => stringValue(s.text))
           .filter(Boolean) as string[]
         if (texts.length > 0) {
-          const pushed = pushMessage('assistant', texts.join('\n'), item)
-          if (pushed) nodes[nodes.length - 1].defaultCollapsed = true
+          nodes.push({
+            id: nextId('reasoning'),
+            type: 'reasoning',
+            title: 'Reasoning',
+            summary: summarizeText(texts.join(' ')),
+            defaultCollapsed: true,
+            parts: texts.map((text) => ({ type: 'text' as const, text })),
+            metadata: item,
+          })
           return
         }
       }

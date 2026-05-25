@@ -59,6 +59,7 @@ export const textFromParts = (parts: ConversationContentPart[]): string => {
 const copyLabelForNode = (node: ConversationNode): string => {
   if (node.type === 'tool_call' && node.toolName) return `tool_call: ${node.toolName}`
   if (node.type === 'tool_result' && node.toolName) return `tool_result: ${node.toolName}`
+  if (node.type === 'reasoning') return 'reasoning'
   return node.type
 }
 

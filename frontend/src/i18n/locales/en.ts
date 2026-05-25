@@ -348,6 +348,7 @@ export default {
     empty: 'No conversation content found',
     expand: 'Expand',
     collapse: 'Collapse',
+    reasoning: 'Reasoning',
     toolCall: 'Tool Call',
     toolResult: 'Tool Result',
     raw: 'Raw',

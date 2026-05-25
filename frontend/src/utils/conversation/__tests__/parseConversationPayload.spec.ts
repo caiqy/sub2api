@@ -249,7 +249,7 @@ describe('parseConversationPayload', () => {
     expect(flow.nodes[3]).toMatchObject({ type: 'raw', defaultCollapsed: true, raw: expect.stringContaining('custom_output') })
   })
 
-  it('renders Responses reasoning summary text as collapsed assistant text card and hides encrypted content', () => {
+  it('renders Responses reasoning summary text as collapsed reasoning card and hides encrypted content', () => {
     const flow = parseConversationPayload({
       requestBody: JSON.stringify({
         input: [{ role: 'user', content: [{ type: 'input_text', text: 'Translate' }] }],
@@ -271,9 +271,9 @@ describe('parseConversationPayload', () => {
     })
 
     expect(flow.format).toBe('openai-responses')
-    expect(flow.nodes.map((node) => node.type)).toEqual(['user', 'assistant', 'assistant'])
-    const reasoningNode = flow.nodes[1] as Extract<ConversationNode, { type: 'assistant' }>
-    expect(reasoningNode.type).toBe('assistant')
+    expect(flow.nodes.map((node) => node.type)).toEqual(['user', 'reasoning', 'assistant'])
+    const reasoningNode = flow.nodes[1] as Extract<ConversationNode, { type: 'reasoning' }>
+    expect(reasoningNode.type).toBe('reasoning')
     expect(reasoningNode.defaultCollapsed).toBe(true)
     expect(reasoningNode.parts.every((p) => p.type === 'text')).toBe(true)
     expect(reasoningNode.parts.map((p) => (p as { text: string }).text).join('\n')).toContain('翻译任务')

@@ -7,6 +7,7 @@ export type ConversationNodeType =
   | 'assistant'
   | 'system'
   | 'developer'
+  | 'reasoning'
   | 'tool_call'
   | 'tool_result'
   | 'image'
@@ -65,6 +66,11 @@ export interface ConversationToolNode extends ConversationBaseNode {
   output?: unknown
 }
 
+export interface ConversationReasoningNode extends ConversationBaseNode {
+  type: 'reasoning'
+  parts: ConversationContentPart[]
+}
+
 export interface ConversationMediaNode extends ConversationBaseNode {
   type: 'image' | 'file'
   parts: ConversationContentPart[]
@@ -84,6 +90,7 @@ export interface ConversationErrorNode extends ConversationBaseNode {
 export type ConversationNode =
   | ConversationMessageNode
   | ConversationToolNode
+  | ConversationReasoningNode
   | ConversationMediaNode
   | ConversationRawNode
   | ConversationErrorNode

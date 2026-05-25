@@ -348,6 +348,7 @@ export default {
     empty: '未找到可展示的对话内容',
     expand: '展开',
     collapse: '收起',
+    reasoning: '推理',
     toolCall: '工具调用',
     toolResult: '工具结果',
     raw: '原始内容',
