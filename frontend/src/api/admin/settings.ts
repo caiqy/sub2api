@@ -134,26 +134,26 @@ export function buildAuthSourceDefaultsState(
 
 export function appendAuthSourceDefaultsToUpdateRequest(
   payload: UpdateSettingsRequest,
-  authSourceDefaults: AuthSourceDefaultsState,
+  authSourceDefaults: Partial<AuthSourceDefaultsState>,
 ): UpdateSettingsRequest {
   const target = payload as Record<string, unknown>;
 
   for (const source of AUTH_SOURCE_TYPES) {
     const current = authSourceDefaults[source];
     target[`auth_source_default_${source}_balance`] =
-      Number(current.balance) || 0;
+      Number(current?.balance ?? AUTH_SOURCE_DEFAULT_BALANCE) || 0;
     target[`auth_source_default_${source}_concurrency`] = Math.max(
       1,
       Math.floor(
-        Number(current.concurrency) || AUTH_SOURCE_DEFAULT_CONCURRENCY,
+        Number(current?.concurrency) || AUTH_SOURCE_DEFAULT_CONCURRENCY,
       ),
     );
     target[`auth_source_default_${source}_subscriptions`] =
-      normalizeDefaultSubscriptionSettings(current.subscriptions);
+      normalizeDefaultSubscriptionSettings(current?.subscriptions);
     target[`auth_source_default_${source}_grant_on_signup`] =
-      current.grant_on_signup;
+      current?.grant_on_signup === true;
     target[`auth_source_default_${source}_grant_on_first_bind`] =
-      current.grant_on_first_bind;
+      current?.grant_on_first_bind === true;
   }
 
   return payload;
