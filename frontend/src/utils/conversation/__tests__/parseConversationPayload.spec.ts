@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { formatConversationAsText, formatRawValue, parseJsonValue, summarizeText } from '../format'
 import { parseConversationPayload } from '../parseConversationPayload'
+import type { ConversationNode } from '../types'
 
 describe('conversation format helpers', () => {
   it('parses valid JSON and returns null for invalid JSON', () => {
@@ -246,6 +247,50 @@ describe('parseConversationPayload', () => {
     expect(flow.nodes.map((node) => node.type)).toEqual(['user', 'raw', 'assistant', 'raw'])
     expect(flow.nodes[1]).toMatchObject({ type: 'raw', defaultCollapsed: true, raw: expect.stringContaining('custom_input') })
     expect(flow.nodes[3]).toMatchObject({ type: 'raw', defaultCollapsed: true, raw: expect.stringContaining('custom_output') })
+  })
+
+  it('renders Responses reasoning summary text as collapsed assistant text card and hides encrypted content', () => {
+    const flow = parseConversationPayload({
+      requestBody: JSON.stringify({
+        input: [{ role: 'user', content: [{ type: 'input_text', text: 'Translate' }] }],
+      }),
+      responseBody: JSON.stringify({
+        output: [
+          {
+            type: 'reasoning',
+            id: 'rs-1',
+            summary: [
+              { type: 'summary_text', text: '考虑到这是一个翻译任务' },
+              { type: 'summary_text', text: '需要保持原文语气' },
+            ],
+            encrypted_content: '...',
+          },
+          { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Hello' }] },
+        ],
+      }),
+    })
+
+    expect(flow.format).toBe('openai-responses')
+    expect(flow.nodes.map((node) => node.type)).toEqual(['user', 'assistant', 'assistant'])
+    const reasoningNode = flow.nodes[1] as Extract<ConversationNode, { type: 'assistant' }>
+    expect(reasoningNode.type).toBe('assistant')
+    expect(reasoningNode.defaultCollapsed).toBe(true)
+    expect(reasoningNode.parts.every((p) => p.type === 'text')).toBe(true)
+    expect(reasoningNode.parts.map((p) => (p as { text: string }).text).join('\n')).toContain('翻译任务')
+  })
+
+  it('keeps reasoning item as raw node when summary has no displayable text', () => {
+    const flow = parseConversationPayload({
+      requestBody: null,
+      responseBody: JSON.stringify({
+        output: [
+          { type: 'reasoning', id: 'rs-2', summary: [], encrypted_content: '...' },
+        ],
+      }),
+    })
+
+    expect(flow.format).toBe('openai-responses')
+    expect(flow.nodes.map((node) => node.type)).toEqual(['raw'])
   })
 
   it('falls back to raw nodes for unrecognized payloads and empty nodes for empty input', () => {

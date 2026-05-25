@@ -330,6 +330,21 @@ export const parseConversationPayload = (input: ParseConversationPayloadInput): 
       return
     }
 
+    if (type === 'reasoning') {
+      const summary = Array.isArray(item.summary) ? item.summary : undefined
+      if (summary && summary.length > 0) {
+        const texts = summary
+          .filter((s) => isRecord(s) && s.type === 'summary_text')
+          .map((s) => stringValue(s.text))
+          .filter(Boolean) as string[]
+        if (texts.length > 0) {
+          const pushed = pushMessage('assistant', texts.join('\n'), item)
+          if (pushed) nodes[nodes.length - 1].defaultCollapsed = true
+          return
+        }
+      }
+    }
+
     pushRawNode(item, { rawSource, nestedSource }, `raw-${rawSource}`)
   }
 
