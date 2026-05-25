@@ -344,6 +344,26 @@ export default {
     }
   },
 
+  conversation: {
+    empty: 'No conversation content found',
+    expand: 'Expand',
+    collapse: 'Collapse',
+    toolCall: 'Tool Call',
+    toolResult: 'Tool Result',
+    raw: 'Raw',
+    rawRequest: 'Raw Request',
+    rawResponse: 'Raw Response',
+    error: 'Error',
+    timelineLabel: 'Conversation timeline',
+    imageAlt: 'Conversation image',
+    role: {
+      user: 'User',
+      assistant: 'Assistant',
+      system: 'System',
+      developer: 'Developer',
+    },
+  },
+
   // Navigation
   nav: {
     dashboard: 'Dashboard',
@@ -4572,6 +4592,10 @@ export default {
       upstreamResponseBody: 'Upstream Response Body',
       responseHeaders: 'Response Headers',
       responseBody: 'Response Body',
+      conversationFlow: 'Conversation Flow',
+      conversationFlowEmpty: 'No conversation content found',
+      conversationFlowRawRequest: 'Unrecognized request body',
+      conversationFlowRawResponse: 'Unrecognized response body',
       imagePreview: 'Image Preview',
       rawResponseBody: 'Raw Response JSON',
       openImagePreview: 'Open image preview',

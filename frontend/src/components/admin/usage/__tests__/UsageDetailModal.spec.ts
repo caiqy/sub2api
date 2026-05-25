@@ -1,5 +1,6 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent, onMounted, onUnmounted } from 'vue'
 
 import UsageDetailModal from '../UsageDetailModal.vue'
@@ -18,6 +19,7 @@ const messages: Record<string, string> = {
   'admin.usage.upstreamResponseBody': 'Upstream Response Body',
   'admin.usage.responseHeaders': 'Response Headers',
   'admin.usage.responseBody': 'Response Body',
+  'admin.usage.conversationFlow': 'Conversation Flow',
   'admin.usage.imagePreview': 'Image Preview',
   'admin.usage.rawResponseBody': 'Raw Response JSON',
   'admin.usage.openImagePreview': 'Open image preview',
@@ -34,6 +36,11 @@ const messages: Record<string, string> = {
   'usage.time': 'Time',
   'admin.usage.emptyDetailContent': 'No content',
   'admin.usage.detailLoadFailed': 'Failed to load detail',
+  'conversation.empty': 'No conversation content found',
+  'conversation.expand': 'Expand',
+  'conversation.collapse': 'Collapse',
+  'conversation.timelineLabel': 'Conversation timeline',
+  'conversation.imageAlt': 'Conversation image',
 }
 
 vi.mock('vue-i18n', async () => {
@@ -71,6 +78,8 @@ const EscapeClosingBaseDialogStub = defineComponent({
 
 describe('UsageDetailModal', () => {
   beforeEach(() => {
+    setActivePinia(createPinia())
+    Object.defineProperty(window, 'isSecureContext', { value: true, writable: true })
     vi.stubGlobal('navigator', {
       clipboard: {
         writeText: vi.fn().mockResolvedValue(undefined),
@@ -78,7 +87,14 @@ describe('UsageDetailModal', () => {
     })
   })
 
-  it('renders eight top-level tabs and supports upstream detail tabs', async () => {
+  afterEach(() => {
+    if ('execCommand' in document) {
+      delete (document as Document & { execCommand?: typeof document.execCommand }).execCommand
+    }
+    vi.unstubAllGlobals()
+  })
+
+  it('renders nine top-level tabs and supports upstream detail tabs', async () => {
     const wrapper = mount(UsageDetailModal, {
       props: {
         show: true,
@@ -117,7 +133,7 @@ describe('UsageDetailModal', () => {
     expect(wrapper.text()).toContain('alice@example.com')
     expect(wrapper.text()).toContain('gpt-4.1')
     expect(wrapper.text()).toContain('2026-03-20T10:00:00Z')
-    expect(wrapper.findAll('button[data-test^="tab-"]')).toHaveLength(8)
+    expect(wrapper.findAll('button[data-test^="tab-"]')).toHaveLength(9)
     const detailPanel = wrapper.find('[data-test="detail-content-panel"]')
     expect(detailPanel.exists()).toBe(true)
     expect(detailPanel.classes()).toContain('h-[60vh]')
@@ -129,6 +145,7 @@ describe('UsageDetailModal', () => {
     expect(wrapper.text()).toContain('Upstream Response Body')
     expect(wrapper.text()).toContain('Response Headers')
     expect(wrapper.text()).toContain('Response Body')
+    expect(wrapper.text()).toContain('Conversation Flow')
     expect(wrapper.find('pre').classes()).toContain('whitespace-pre-wrap')
     expect(wrapper.find('pre').classes()).toContain('break-words')
     expect(wrapper.text()).toContain(`:method: POST
@@ -176,6 +193,108 @@ x-upstream-trace-id: trace-upstream`)
 
     await wrapper.find('[data-test="tab-response-body"]').trigger('click')
     expect(wrapper.text()).toContain('not-json')
+  })
+
+  it('renders conversation flow from client request and response and copies formatted flow', async () => {
+    const wrapper = mount(UsageDetailModal, {
+      props: {
+        show: true,
+        usageLog: {
+          request_id: 'req-conversation',
+          user: { email: 'alice@example.com' },
+          model: 'gpt-4.1',
+          created_at: '2026-05-23T10:00:00Z',
+        },
+        detail: {
+          usage_log_id: 11,
+          request_headers: null,
+          request_body: JSON.stringify({
+            messages: [
+              { role: 'system', content: 'Be concise.' },
+              { role: 'user', content: 'Hello **world**' },
+              { role: 'assistant', content: 'Hi there.' },
+              { role: 'user', content: 'Search logs' },
+            ],
+          }),
+          upstream_request_headers: null,
+          upstream_request_body: null,
+          upstream_response_headers: null,
+          upstream_response_body: null,
+          response_headers: null,
+          response_body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'Found `timeout`.' } }] }),
+          created_at: '2026-05-23T10:00:00Z',
+        },
+        loading: false,
+        error: '',
+      },
+      global: {
+        stubs: {
+          BaseDialog: { props: ['show', 'title'], template: '<div v-if="show"><slot /></div>' },
+        },
+      },
+    })
+
+    await wrapper.find('[data-test="tab-conversation-flow"]').trigger('click')
+
+    expect(wrapper.text()).toContain('Hello')
+    expect(wrapper.html()).toContain('<strong>world</strong>')
+    expect(wrapper.text()).toContain('Hi there.')
+    expect(wrapper.text()).toContain('Found')
+    expect(wrapper.text()).toContain('Be concise.')
+
+    await wrapper.find('[data-test="copy-current-tab"]').trigger('click')
+    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(expect.stringContaining('[user]'))
+    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(expect.stringContaining('Hello **world**'))
+    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(expect.stringContaining('[assistant]'))
+  })
+
+  it('在非安全上下文复制当前详情标签页时使用 fallback', async () => {
+    Object.defineProperty(window, 'isSecureContext', { value: false, writable: true })
+    const execCommand = vi.fn().mockReturnValue(true)
+    Object.defineProperty(document, 'execCommand', {
+      value: execCommand,
+      configurable: true,
+    })
+
+    const wrapper = mount(UsageDetailModal, {
+      props: {
+        show: true,
+        usageLog: {
+          request_id: 'req-insecure-copy',
+          user: { email: 'copy@example.com' },
+          model: 'gpt-5.5',
+          created_at: '2026-05-23T10:00:00Z',
+        },
+        detail: {
+          usage_log_id: 7,
+          request_headers: ':method: POST\n:url: http://192.168.2.110:8080/v1/responses',
+          request_body: null,
+          upstream_request_headers: null,
+          upstream_request_body: null,
+          upstream_response_headers: null,
+          upstream_response_body: null,
+          response_headers: null,
+          response_body: null,
+          created_at: '2026-05-23T10:00:00Z',
+        },
+        loading: false,
+        error: '',
+      },
+      global: {
+        stubs: {
+          BaseDialog: {
+            props: ['show', 'title'],
+            template: '<div v-if="show"><slot /></div>',
+          },
+        },
+      },
+    })
+
+    await wrapper.find('[data-test="copy-current-tab"]').trigger('click')
+
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled()
+    expect(execCommand).toHaveBeenCalledWith('copy')
+    expect(wrapper.text()).toContain('Copied')
   })
 
   it('shows empty state when legacy upstream fields are missing', async () => {
@@ -354,6 +473,46 @@ x-upstream-trace-id: trace-upstream`)
     expect(wrapper.get('[data-testid="usage-detail-image-preview-0"]').attributes('src')).toBe('https://cdn.example.com/output.png')
     expect(wrapper.text()).toContain('draw a teal fox')
     expect(wrapper.text()).toContain('"url": "https://cdn.example.com/output.png"')
+  })
+
+  it('infers upstream base64 image mime type from upstream request body output format', async () => {
+    const wrapper = mount(UsageDetailModal, {
+      props: {
+        show: true,
+        usageLog: {
+          request_id: 'req-upstream-base64-image',
+          user: { email: 'image@example.com' },
+          model: 'gpt-image-2',
+          created_at: '2026-03-20T10:00:00Z',
+        },
+        detail: {
+          usage_log_id: 12,
+          request_headers: null,
+          request_body: '{"model":"gpt-image-2","output_format":"png"}',
+          upstream_request_headers: null,
+          upstream_request_body: '{"model":"gpt-image-2","output_format":"webp"}',
+          upstream_response_headers: ':status: 200\nContent-Type: application/json',
+          upstream_response_body: '{"data":[{"b64_json":"V0VCUA=="}]}',
+          response_headers: null,
+          response_body: null,
+          created_at: '2026-03-20T10:00:00Z',
+        },
+        loading: false,
+        error: '',
+      },
+      global: {
+        stubs: {
+          BaseDialog: {
+            props: ['show', 'title'],
+            template: '<div v-if="show"><slot /></div>',
+          },
+        },
+      },
+    })
+
+    await wrapper.find('[data-test="tab-upstream-response-body"]').trigger('click')
+
+    expect(wrapper.get('[data-testid="usage-detail-image-preview-0"]').attributes('src')).toBe('data:image/webp;base64,V0VCUA==')
   })
 
   it('pressing Escape closes only the shared image preview, not the parent usage dialog', async () => {

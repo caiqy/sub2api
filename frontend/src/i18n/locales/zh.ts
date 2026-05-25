@@ -344,6 +344,26 @@ export default {
     }
   },
 
+  conversation: {
+    empty: '未找到可展示的对话内容',
+    expand: '展开',
+    collapse: '收起',
+    toolCall: '工具调用',
+    toolResult: '工具结果',
+    raw: '原始内容',
+    rawRequest: '原始请求',
+    rawResponse: '原始响应',
+    error: '错误',
+    timelineLabel: '对话时间轴',
+    imageAlt: '对话图片',
+    role: {
+      user: '用户',
+      assistant: '助手',
+      system: '系统',
+      developer: '开发者',
+    },
+  },
+
   // Navigation
   nav: {
     dashboard: '仪表盘',
@@ -4728,6 +4748,10 @@ export default {
       upstreamResponseBody: '上游响应体',
       responseHeaders: '响应头',
       responseBody: '响应体',
+      conversationFlow: '对话流',
+      conversationFlowEmpty: '未找到可展示的对话内容',
+      conversationFlowRawRequest: '无法识别请求体',
+      conversationFlowRawResponse: '无法识别响应体',
       imagePreview: '图片预览',
       rawResponseBody: '原始响应 JSON',
       openImagePreview: '打开图片预览',

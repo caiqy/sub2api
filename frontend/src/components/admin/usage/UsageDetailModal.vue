@@ -56,6 +56,8 @@
           </button>
         </div>
 
+        <ConversationTimeline v-else-if="isConversationFlowTab" :flow="conversationFlow" />
+
         <div v-else-if="activeContent && activeImagePreviews.length > 0" class="space-y-4 p-4">
           <section class="space-y-3">
             <h4 class="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">{{ t('admin.usage.imagePreview') }}</h4>
@@ -88,8 +90,12 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import ConversationTimeline from '@/components/common/conversation/ConversationTimeline.vue'
 import ImagePreviewGallery from '@/components/user/images/ImagePreviewGallery.vue'
+import { useClipboard } from '@/composables/useClipboard'
 import type { AdminUsageDetail, AdminUsageLog } from '@/types'
+import { formatConversationAsText } from '@/utils/conversation/format'
+import { parseConversationPayload } from '@/utils/conversation/parseConversationPayload'
 
 type DetailTabKey =
   | 'client-request-headers'
@@ -100,6 +106,7 @@ type DetailTabKey =
   | 'upstream-response-body'
   | 'response-headers'
   | 'response-body'
+  | 'conversation-flow'
 
 interface Props {
   show: boolean
@@ -116,8 +123,8 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const { copied, copyToClipboard } = useClipboard()
 const activeTab = ref<DetailTabKey>('client-request-headers')
-const copied = ref(false)
 
 interface UsageDetailImagePreview {
   src: string
@@ -141,7 +148,17 @@ const tabs = computed(() => [
   { key: 'upstream-response-body' as const, label: t('admin.usage.upstreamResponseBody') },
   { key: 'response-headers' as const, label: t('admin.usage.responseHeaders') },
   { key: 'response-body' as const, label: t('admin.usage.responseBody') },
+  { key: 'conversation-flow' as const, label: t('admin.usage.conversationFlow') },
 ])
+
+const conversationFlow = computed(() => parseConversationPayload({
+  requestBody: props.detail?.request_body ?? null,
+  responseBody: props.detail?.response_body ?? null,
+  source: 'client',
+  formatHint: 'auto',
+}))
+
+const isConversationFlowTab = computed(() => activeTab.value === 'conversation-flow')
 
 const formatJsonLike = (value: unknown) => {
   if (value == null) return ''
@@ -194,6 +211,7 @@ const inferPreviewMimeType = (item: Record<string, unknown>, requestBody: string
     item.output_format,
     item.outputFormat,
     item.format,
+    // Request output_format is the MIME fallback when response items omit format metadata.
     requestPayload?.output_format,
   ]
 
@@ -251,6 +269,10 @@ const activeResponseBody = computed(() => {
     return null
   }
 
+  if (isConversationFlowTab.value) {
+    return null
+  }
+
   if (activeTab.value === 'upstream-response-body') {
     return props.detail.upstream_response_body
   }
@@ -262,10 +284,27 @@ const activeResponseBody = computed(() => {
   return null
 })
 
-const activeImagePreviews = computed(() => buildImagePreviews(activeResponseBody.value, props.detail?.request_body ?? null))
+const activePreviewRequestBody = computed(() => {
+  if (!props.detail) {
+    return null
+  }
+
+  if (activeTab.value === 'response-body') {
+    return props.detail.request_body
+  }
+
+  if (activeTab.value === 'upstream-response-body') {
+    return props.detail.upstream_request_body
+  }
+
+  return null
+})
+
+const activeImagePreviews = computed(() => buildImagePreviews(activeResponseBody.value, activePreviewRequestBody.value))
 
 const activeContent = computed(() => {
   if (!props.detail) return ''
+  if (isConversationFlowTab.value) return formatConversationAsText(conversationFlow.value)
   if (activeTab.value === 'client-request-headers') return formatJsonLike(props.detail.request_headers)
   if (activeTab.value === 'client-request-body') return formatJsonLike(props.detail.request_body)
   if (activeTab.value === 'upstream-request-headers') return formatJsonLike(props.detail.upstream_request_headers)
@@ -278,11 +317,7 @@ const activeContent = computed(() => {
 
 const copyCurrentTab = async () => {
   if (!activeContent.value) return
-  await navigator.clipboard.writeText(activeContent.value)
-  copied.value = true
-  setTimeout(() => {
-    copied.value = false
-  }, 1500)
+  await copyToClipboard(activeContent.value, t('common.copied'))
 }
 
 watch(
