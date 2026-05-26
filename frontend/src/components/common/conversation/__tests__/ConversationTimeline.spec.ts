@@ -1,6 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ConversationTimeline from '../ConversationTimeline.vue'
+import messageRowSource from '../ConversationMessageRow.vue?raw'
 import type { ConversationFlow } from '@/utils/conversation/types'
 
 const i18nMock = vi.hoisted(() => ({ locale: 'zh' }))
@@ -19,6 +20,9 @@ vi.mock('vue-i18n', async () => {
     'conversation.rawRequest': 'Raw Request',
     'conversation.rawResponse': 'Raw Response',
     'conversation.error': 'Error',
+    'conversation.systemPrompt.title': 'Developer instructions',
+    'conversation.systemPrompt.segments': '{n} segments',
+    'conversation.injection.title': 'System injection',
     'conversation.timelineLabel': 'Conversation timeline',
     'conversation.imageAlt': 'Conversation image',
     'conversation.role.you': '你',
@@ -39,6 +43,11 @@ vi.mock('vue-i18n', async () => {
     'conversation.toolLabels.glob': '路径匹配',
     'conversation.toolLabels.webfetch': '抓取网页',
       'conversation.toolLabels.task': '委派子任务',
+      'conversation.reasoningMeta.collapsedLabel': 'Reasoning',
+      'conversation.reasoningMeta.segments': '{n} segments',
+      'conversation.toolMeta.error': 'error',
+      'conversation.toolMeta.lines': '{n} lines',
+      'conversation.toolMeta.sizeWithLines': '{lines} · {size}',
     },
     en: {
       'conversation.empty': 'No conversation content found',
@@ -51,6 +60,9 @@ vi.mock('vue-i18n', async () => {
       'conversation.rawRequest': 'Raw Request',
       'conversation.rawResponse': 'Raw Response',
       'conversation.error': 'Error',
+      'conversation.systemPrompt.title': 'Developer instructions',
+      'conversation.systemPrompt.segments': '{n} segments',
+      'conversation.injection.title': 'System injection',
       'conversation.timelineLabel': 'Conversation timeline',
       'conversation.imageAlt': 'Conversation image',
       'conversation.role.you': 'You',
@@ -63,13 +75,23 @@ vi.mock('vue-i18n', async () => {
       'conversation.toolOutput': 'Output',
       'conversation.toolMetadata': 'Metadata',
       'conversation.toolLabels.bash': 'Run Command',
+      'conversation.reasoningMeta.collapsedLabel': 'Reasoning',
+      'conversation.reasoningMeta.segments': '{n} segments',
+      'conversation.toolMeta.error': 'error',
+      'conversation.toolMeta.lines': '{n} lines',
+      'conversation.toolMeta.sizeWithLines': '{lines} · {size}',
     },
   }
 
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string) => messagesByLocale[i18nMock.locale][key] ?? key,
+      t: (key: string, values?: Record<string, string | number>) => {
+        const message = messagesByLocale[i18nMock.locale][key] ?? key
+        return values
+          ? Object.entries(values).reduce((text, [name, value]) => text.replace(`{${name}}`, String(value)), message)
+          : message
+      },
       te: (key: string) => Object.prototype.hasOwnProperty.call(messagesByLocale[i18nMock.locale], key),
     }),
   }
@@ -345,6 +367,119 @@ describe('ConversationTimeline', () => {
     expect(wrapper.text()).toContain('stack')
   })
 
+  it('renders system prompt bar collapsed by default', () => {
+    const flow: ConversationFlow = {
+      source: 'client',
+      format: 'openai-chat',
+      warnings: [],
+      nodes: [],
+      systemPrompt: { id: 'sp-0', text: 'You are helpful.', sources: ['developer'] },
+      messages: [{ id: 'msg-0', role: 'user', parts: [{ id: 'p-0', type: 'text', text: 'Hi' }] }],
+    }
+
+    const wrapper = mount(ConversationTimeline, {
+      props: { flow },
+    })
+
+    expect(wrapper.find('[data-test="conversation-system-prompt-bar"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('You are helpful.')
+  })
+
+  it('system prompt bar toggles open and shows markdown content', async () => {
+    const flow: ConversationFlow = {
+      source: 'client',
+      format: 'openai-chat',
+      warnings: [],
+      nodes: [],
+      systemPrompt: { id: 'sp-0', text: 'You are helpful.', sources: ['developer'] },
+      messages: [{ id: 'msg-0', role: 'user', parts: [{ id: 'p-0', type: 'text', text: 'Hi' }] }],
+    }
+
+    const wrapper = mount(ConversationTimeline, {
+      props: { flow },
+    })
+
+    await wrapper.get('[data-test="conversation-system-prompt-bar"] button').trigger('click')
+
+    expect(wrapper.text()).toContain('You are helpful.')
+  })
+
+  it('does not render developer/system as message rows', () => {
+    const flow: ConversationFlow = {
+      source: 'client',
+      format: 'openai-chat',
+      warnings: [],
+      nodes: [],
+      systemPrompt: { id: 'sp-0', text: 'Developer instructions', sources: ['developer', 'system'] },
+      messages: [{ id: 'msg-0', role: 'user', parts: [{ id: 'p-0', type: 'text', text: 'Hi' }] }],
+    }
+
+    const wrapper = mount(ConversationTimeline, {
+      props: { flow },
+    })
+
+    expect(wrapper.find('[data-test="conversation-system-prompt-bar"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="conversation-message-row-user"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="conversation-message-row-developer"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="conversation-message-row-system"]').exists()).toBe(false)
+  })
+
+  it('renders injection part collapsed with tag label', () => {
+    const flow: ConversationFlow = {
+      source: 'client',
+      format: 'openai-chat',
+      warnings: [],
+      nodes: [],
+      messages: [
+        {
+          id: 'msg-0',
+          role: 'user',
+          parts: [
+            { id: 'p-0', type: 'injection', tag: 'EXTREMELY_IMPORTANT', text: '<EXTREMELY_IMPORTANT>\nRules\n</EXTREMELY_IMPORTANT>', defaultCollapsed: true },
+            { id: 'p-1', type: 'text', text: 'Question' },
+          ],
+        },
+      ],
+    }
+
+    const wrapper = mount(ConversationTimeline, {
+      props: { flow },
+    })
+
+    expect(wrapper.find('[data-test="conversation-part-injection"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('[EXTREMELY_IMPORTANT]')
+    expect(wrapper.find('[data-test="conversation-part-injection"] pre').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Rules')
+  })
+
+  it('injection part expands to show raw text in pre', async () => {
+    const injectionText = '<EXTREMELY_IMPORTANT>\nRules\n</EXTREMELY_IMPORTANT>'
+    const flow: ConversationFlow = {
+      source: 'client',
+      format: 'openai-chat',
+      warnings: [],
+      nodes: [],
+      messages: [
+        {
+          id: 'msg-0',
+          role: 'user',
+          parts: [
+            { id: 'p-0', type: 'injection', tag: 'EXTREMELY_IMPORTANT', text: injectionText, defaultCollapsed: true },
+            { id: 'p-1', type: 'text', text: 'Question' },
+          ],
+        },
+      ],
+    }
+
+    const wrapper = mount(ConversationTimeline, {
+      props: { flow },
+    })
+
+    await wrapper.get('[data-test="conversation-part-injection"] button').trigger('click')
+
+    expect(wrapper.get('[data-test="conversation-part-injection"] pre').text()).toContain(injectionText)
+  })
+
   it('renders the empty state when there are no messages', () => {
     const wrapper = mount(ConversationTimeline, {
       props: {
@@ -353,5 +488,113 @@ describe('ConversationTimeline', () => {
     })
 
     expect(wrapper.text()).toContain('No conversation content found')
+  })
+
+  it('user bubble uses neutral background with primary left bar', () => {
+    const wrapper = mount(ConversationTimeline, {
+      props: {
+        flow: createFlow([
+          {
+            id: 'message-user-neutral-shell',
+            role: 'user',
+            parts: [{ id: 'part-text-user-neutral-shell', type: 'text', text: 'Hello' }],
+          },
+        ]),
+      },
+    })
+
+    const row = wrapper.get('[data-test="conversation-message-row-user"]')
+    const shell = row.get('.conversation-message-shell')
+
+    expect(shell.attributes('class')).toContain('conversation-message-shell')
+    expect(shell.attributes('class')).not.toContain('bg-primary-50')
+    expect(messageRowSource).toContain('border-l-primary-500')
+    expect(messageRowSource).toContain('bg-gray-100')
+    expect(messageRowSource).not.toContain('bg-primary-50')
+  })
+
+  it('reasoning part shows minimalist collapsed label with segments count', () => {
+    const wrapper = mount(ConversationTimeline, {
+      props: {
+        flow: createFlow([
+          {
+            id: 'message-assistant-reasoning-segments',
+            role: 'assistant',
+            parts: [
+              {
+                id: 'part-reasoning-segments',
+                type: 'reasoning',
+                text: 'First thought\n\nSecond thought\n\nThird thought',
+                defaultCollapsed: true,
+                metadata: { segments: 3 },
+              },
+            ],
+          },
+        ]),
+      },
+    })
+
+    const toggle = wrapper.get('[data-test="conversation-part-reasoning"] button')
+
+    expect(toggle.text()).toContain('Reasoning')
+    expect(toggle.text()).toContain('3 segments')
+  })
+
+  it('tool card header shows lines and size when outputSize is present', () => {
+    const wrapper = mount(ConversationTimeline, {
+      props: {
+        flow: createFlow([
+          {
+            id: 'message-assistant-tool-size',
+            role: 'assistant',
+            parts: [
+              {
+                id: 'part-tool-size',
+                type: 'tool',
+                tool: 'bash',
+                state: {
+                  status: 'completed',
+                  input: { command: 'ls' },
+                  output: 'file.txt',
+                  outputSize: { bytes: 2048, lines: 15 },
+                },
+              },
+            ],
+          },
+        ]),
+      },
+    })
+
+    const meta = wrapper.get('.conversation-tool-meta')
+
+    expect(meta.text()).toContain('15 lines')
+    expect(meta.text()).toContain('KB')
+  })
+
+  it('tool card header shows error label when state.error is set', () => {
+    const wrapper = mount(ConversationTimeline, {
+      props: {
+        flow: createFlow([
+          {
+            id: 'message-assistant-tool-error',
+            role: 'assistant',
+            parts: [
+              {
+                id: 'part-tool-error',
+                type: 'tool',
+                tool: 'bash',
+                state: {
+                  status: 'error',
+                  input: { command: 'npm test' },
+                  error: 'something failed',
+                },
+              },
+            ],
+          },
+        ]),
+      },
+    })
+
+    expect(wrapper.get('.conversation-tool-meta').text()).toBe('error')
   })
 })

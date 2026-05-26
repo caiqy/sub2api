@@ -385,6 +385,23 @@ export default {
       todoread: '查看任务列表',
       todowrite: '更新任务列表',
     },
+    systemPrompt: {
+      title: '系统提示',
+      segments: '{n} 段',
+    },
+    injection: {
+      title: '系统注入',
+    },
+    reasoningMeta: {
+      segments: '{n} 段',
+      collapsedLabel: '推理',
+    },
+    toolMeta: {
+      error: '错误',
+      lines: '{n} 行',
+      sizeWithLines: '{lines} · {size}',
+      bytes: { b: 'B', kb: 'KB', mb: 'MB' },
+    },
   },
 
   // Navigation

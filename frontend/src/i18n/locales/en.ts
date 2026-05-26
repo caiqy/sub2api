@@ -385,6 +385,23 @@ export default {
       todoread: 'Read Todos',
       todowrite: 'Update Todos',
     },
+    systemPrompt: {
+      title: 'Developer instructions',
+      segments: '{n} segments',
+    },
+    injection: {
+      title: 'System injection',
+    },
+    reasoningMeta: {
+      segments: '{n} segments',
+      collapsedLabel: 'Reasoning',
+    },
+    toolMeta: {
+      error: 'error',
+      lines: '{n} lines',
+      sizeWithLines: '{lines} · {size}',
+      bytes: { b: 'B', kb: 'KB', mb: 'MB' },
+    },
   },
 
   // Navigation

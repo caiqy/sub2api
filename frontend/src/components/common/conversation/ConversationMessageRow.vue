@@ -16,6 +16,7 @@
           <ConversationToolPart v-else-if="part.type === 'tool'" :part="part" />
           <ConversationMediaPreview v-else-if="part.type === 'image' || part.type === 'file'" :parts="[part]" />
           <ConversationRawPart v-else-if="part.type === 'raw' || part.type === 'error'" :part="part" />
+          <ConversationInjectionPart v-else-if="part.type === 'injection'" :part="part" />
         </template>
       </div>
     </div>
@@ -26,6 +27,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ConversationMediaPreview from './ConversationMediaPreview.vue'
+import ConversationInjectionPart from './ConversationInjectionPart.vue'
 import ConversationRawPart from './ConversationRawPart.vue'
 import ConversationReasoningPart from './ConversationReasoningPart.vue'
 import ConversationTextPart from './ConversationTextPart.vue'
@@ -69,16 +71,11 @@ const sortedParts = computed(() => {
 }
 
 .conversation-message-row--user .conversation-message-shell {
-  @apply max-w-[min(100%,44rem)] border-primary-100 bg-primary-50/70 shadow-sm dark:border-primary-900/50 dark:bg-primary-950/20;
+  @apply max-w-[min(100%,40rem)] rounded-lg border-l-4 border-l-primary-500 border-y-0 border-r-0 bg-gray-100 px-4 py-3 shadow-none dark:bg-dark-800/40;
 }
 
 .conversation-message-row--assistant .conversation-message-shell {
   @apply px-0 py-1;
-}
-
-.conversation-message-row--system .conversation-message-shell,
-.conversation-message-row--developer .conversation-message-shell {
-  @apply border-amber-200/70 bg-amber-50/60 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/15;
 }
 
 .conversation-message-header {
@@ -90,11 +87,7 @@ const sortedParts = computed(() => {
 }
 
 .conversation-message-role {
-  @apply text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-dark-400;
-}
-
-.conversation-message-row--user .conversation-message-role {
-  @apply text-primary-700 dark:text-primary-300;
+  @apply text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-400 dark:text-dark-500;
 }
 
 .conversation-message-parts {

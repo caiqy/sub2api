@@ -1,5 +1,5 @@
 <template>
-  <section data-test="conversation-part-tool" class="conversation-tool-part">
+  <section data-test="conversation-part-tool" class="conversation-tool-part" :class="statusBarClass">
     <button
       data-test="conversation-tool-toggle"
       type="button"
@@ -10,6 +10,7 @@
       <span class="conversation-tool-status" :class="statusClass" aria-hidden="true"></span>
       <span class="sr-only">{{ statusText }}</span>
       <span class="conversation-tool-title">{{ displayName }}</span>
+      <span v-if="metaRight" class="conversation-tool-meta" :class="{ 'conversation-tool-meta--error': part.state.error }">{{ metaRight }}</span>
       <svg
         viewBox="0 0 20 20"
         fill="currentColor"
@@ -49,7 +50,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { formatRawValue } from '@/utils/conversation/format'
+import { formatHumanBytes, formatRawValue } from '@/utils/conversation/format'
 import { getToolDisplayName } from '@/utils/conversation/toolDisplay'
 import type { ConversationToolPart } from '@/utils/conversation/types'
 
@@ -89,6 +90,17 @@ const displayName = computed(() => getToolDisplayName({
   label: toolLabel.value,
 }))
 
+const metaRight = computed(() => {
+  if (props.part.state.error) return t('conversation.toolMeta.error')
+  const size = props.part.state.outputSize
+  if (!size) return ''
+  const lines = t('conversation.toolMeta.lines', { n: size.lines })
+  const bytes = formatHumanBytes(size.bytes)
+  return t('conversation.toolMeta.sizeWithLines', { lines, size: bytes })
+})
+
+const statusBarClass = computed(() => `conversation-tool-part--${props.part.state.status}`)
+
 const statusClass = computed(() => ({
   'conversation-tool-status--pending': props.part.state.status === 'pending',
   'conversation-tool-status--running': props.part.state.status === 'running',
@@ -106,43 +118,67 @@ const statusText = computed(() => {
 
 <style scoped>
 .conversation-tool-part {
-  @apply overflow-hidden rounded-xl border border-cyan-200/80 bg-cyan-50/50 shadow-sm dark:border-cyan-900/50 dark:bg-cyan-950/15;
+  @apply overflow-hidden rounded-lg border border-gray-200 border-l-2 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-900/40;
+}
+
+.conversation-tool-part--pending {
+  @apply border-l-gray-300;
+}
+
+.conversation-tool-part--running {
+  @apply border-l-amber-400;
+}
+
+.conversation-tool-part--completed {
+  @apply border-l-emerald-500;
+}
+
+.conversation-tool-part--error {
+  @apply border-l-red-500;
 }
 
 .conversation-tool-header {
-  @apply flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-cyan-900 transition-colors hover:bg-cyan-100/70 focus:outline-none focus:ring-2 focus:ring-cyan-500/25 dark:text-cyan-100 dark:hover:bg-cyan-950/35;
+  @apply flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400/25 dark:text-dark-100 dark:hover:bg-dark-800/50;
 }
 
 .conversation-tool-status {
-  @apply h-2 w-2 shrink-0 rounded-full bg-gray-400;
+  @apply h-2 w-2 shrink-0 rounded-full;
 }
 
 .conversation-tool-status--pending {
-  @apply bg-gray-400;
+  @apply bg-gray-300;
 }
 
 .conversation-tool-status--running {
-  @apply bg-amber-400 shadow-[0_0_0_3px_rgba(251,191,36,0.18)];
+  @apply bg-amber-400;
 }
 
 .conversation-tool-status--completed {
-  @apply bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.16)];
+  @apply bg-emerald-500;
 }
 
 .conversation-tool-status--error {
-  @apply bg-red-500 shadow-[0_0_0_3px_rgba(239,68,68,0.16)];
+  @apply bg-red-500;
 }
 
 .conversation-tool-title {
   @apply min-w-0 flex-1 truncate;
 }
 
+.conversation-tool-meta {
+  @apply shrink-0 text-[11px] text-gray-500 dark:text-dark-400;
+}
+
+.conversation-tool-meta--error {
+  @apply text-red-500 dark:text-red-400;
+}
+
 .conversation-tool-arrow {
-  @apply h-4 w-4 shrink-0 transition-transform duration-200;
+  @apply h-4 w-4 shrink-0 text-gray-400 transition-transform duration-200 dark:text-dark-500;
 }
 
 .conversation-tool-body {
-  @apply space-y-2 border-t border-cyan-200/70 bg-white/75 p-3 dark:border-cyan-900/50 dark:bg-dark-950/45;
+  @apply space-y-2 border-t border-gray-200 bg-gray-50/50 px-3 py-2 dark:border-dark-700 dark:bg-dark-900/60;
 }
 
 .conversation-tool-section {

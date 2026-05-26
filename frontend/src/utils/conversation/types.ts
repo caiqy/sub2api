@@ -4,7 +4,7 @@ export type ConversationFormat = 'openai-chat' | 'openai-responses' | 'unknown'
 
 export type ConversationMessageRole = 'user' | 'assistant' | 'system' | 'developer'
 
-export type ConversationPartType = 'text' | 'reasoning' | 'tool' | 'image' | 'file' | 'raw' | 'error'
+export type ConversationPartType = 'text' | 'reasoning' | 'tool' | 'image' | 'file' | 'raw' | 'error' | 'injection'
 
 export interface ConversationFlow {
   messages?: ConversationMessage[]
@@ -12,6 +12,13 @@ export interface ConversationFlow {
   source: ConversationSource
   format: ConversationFormat
   warnings: string[]
+  systemPrompt?: ConversationSystemPrompt
+}
+
+export interface ConversationSystemPrompt {
+  id: string
+  text: string
+  sources: ('developer' | 'system')[]
 }
 
 export interface ConversationMessage {
@@ -34,6 +41,13 @@ export interface ConversationTextPart extends ConversationBasePart {
 
 export interface ConversationReasoningPart extends ConversationBasePart {
   type: 'reasoning'
+  text: string
+  defaultCollapsed: true
+}
+
+export interface ConversationInjectionPart extends ConversationBasePart {
+  type: 'injection'
+  tag: string
   text: string
   defaultCollapsed: true
 }
@@ -72,6 +86,7 @@ export interface ConversationToolPart extends ConversationBasePart {
     output?: unknown
     title?: string
     error?: string
+    outputSize?: { bytes: number; lines: number }
     metadata?: Record<string, unknown>
   }
 }
@@ -93,6 +108,7 @@ export interface ConversationErrorPart extends ConversationBasePart {
 export type ConversationPart =
   | ConversationTextPart
   | ConversationReasoningPart
+  | ConversationInjectionPart
   | ConversationToolPart
   | ConversationImagePart
   | ConversationFilePart

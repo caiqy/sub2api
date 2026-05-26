@@ -37,6 +37,15 @@ export const summarizeText = (value: string, maxLength = 120): string => {
   return `${compact.slice(0, Math.max(0, maxLength - 3))}...`
 }
 
+export const formatHumanBytes = (bytes: number): string => {
+  if (bytes < 1024) return `${bytes} B`
+
+  const unit = bytes < 1024 * 1024 ? 'KB' : 'MB'
+  const value = bytes / (unit === 'KB' ? 1024 : 1024 * 1024)
+  const formatted = value < 10 ? value.toFixed(1) : Math.round(value).toString()
+  return `${formatted} ${unit}`
+}
+
 export const createConversationNodeId = (prefix: string, index: number): string => `${prefix}-${index}`
 
 export const textFromParts = (parts: ConversationContentPart[]): string => {
@@ -73,6 +82,7 @@ const formatToolPartForCopy = (part: ConversationToolPart): string => {
 
 const copyLabelForPart = (part: ConversationPart): string => {
   if (part.type === 'tool') return `tool: ${part.tool}`
+  if (part.type === 'injection') return `injection: ${part.tag}`
   return part.type
 }
 
@@ -84,15 +94,25 @@ const copyBodyForPart = (part: ConversationPart): string => {
   if (part.type === 'tool') return formatToolPartForCopy(part)
   if (part.type === 'raw') return part.raw
   if (part.type === 'error') return [part.error, part.raw].filter(Boolean).join('\n')
+  if (part.type === 'injection') return part.text
   return ''
 }
 
 export const formatConversationAsText = (flow: ConversationFlow): string => {
-  return (flow.messages ?? []).map((message) => {
+  const blocks: string[] = []
+
+  if (flow.systemPrompt) {
+    blocks.push(`[system prompt]\n${flow.systemPrompt.text}`)
+  }
+
+  const messageBlocks = (flow.messages ?? []).map((message) => {
     const partText = message.parts.map((part) => {
       const body = copyBodyForPart(part)
       return [`[${copyLabelForPart(part)}]`, body].filter(Boolean).join('\n')
     }).filter(Boolean).join('\n\n')
     return [`[${message.role}]`, partText].filter(Boolean).join('\n')
-  }).filter(Boolean).join('\n\n')
+  }).filter(Boolean)
+
+  blocks.push(...messageBlocks)
+  return blocks.join('\n\n')
 }

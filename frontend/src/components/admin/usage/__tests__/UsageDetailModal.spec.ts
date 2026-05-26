@@ -267,9 +267,12 @@ x-upstream-trace-id: trace-upstream`)
     expect(wrapper.html()).toContain('<strong>world</strong>')
     expect(wrapper.text()).toContain('Found')
     expect(wrapper.text()).toContain('Hi there.')
-    expect(wrapper.text()).toContain('Be concise.')
+    // System message is now lifted into a collapsed system prompt bar
+    expect(wrapper.find('[data-test="conversation-system-prompt-bar"]').exists()).toBe(true)
 
     await wrapper.find('[data-test="copy-current-tab"]').trigger('click')
+    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(expect.stringContaining('[system prompt]'))
+    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(expect.stringContaining('Be concise.'))
     expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(expect.stringContaining('[user]'))
     expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(expect.stringContaining('Hello **world**'))
     expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(expect.stringContaining('[assistant]'))

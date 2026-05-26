@@ -3,9 +3,11 @@ import type {
   ConversationContentPart,
   ConversationFlow,
   ConversationFormat,
+  ConversationInjectionPart,
   ConversationMessage,
   ConversationMessageRole,
   ConversationPart,
+  ConversationReasoningPart,
   ConversationToolPart,
   ParseConversationPayloadInput,
 } from './types'
@@ -15,6 +17,139 @@ type JsonParseResult = {
   raw: string | null
   hasBody: boolean
   invalid: boolean
+}
+
+export const INJECTION_TAG_WHITELIST = ['EXTREMELY_IMPORTANT', 'EXTREMELY-IMPORTANT', 'SUBAGENT-STOP', 'system-reminder', 'reminder', 'important']
+
+type SplitInjectionPart = { type: 'text' | 'injection'; text: string; tag?: string }
+type UserContentPart = ConversationContentPart | Omit<ConversationInjectionPart, 'id'>
+
+const MAX_INJECTION_EXTRACTIONS = 32
+
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+const splitTextIntoInjectionParts = (text: string): SplitInjectionPart[] => {
+  const parts: SplitInjectionPart[] = []
+  const tagPattern = INJECTION_TAG_WHITELIST.map(escapeRegExp).join('|')
+  const openTagRegex = new RegExp(`<(${tagPattern})\\s*>`, 'i')
+  let cursor = 0
+  let searchStart = 0
+  let extractions = 0
+
+  while (extractions < MAX_INJECTION_EXTRACTIONS && searchStart < text.length) {
+    const openMatch = openTagRegex.exec(text.slice(searchStart))
+    if (!openMatch || openMatch.index === undefined) break
+
+    const openStart = searchStart + openMatch.index
+    const openEnd = openStart + openMatch[0].length
+    const tag = openMatch[1]
+    const closeTagRegex = new RegExp(`</${escapeRegExp(tag)}\\s*>`, 'i')
+    const closeMatch = closeTagRegex.exec(text.slice(openEnd))
+
+    if (!closeMatch || closeMatch.index === undefined) {
+      searchStart = openEnd
+      continue
+    }
+
+    const precedingText = text.slice(cursor, openStart)
+    if (precedingText.trim()) parts.push({ type: 'text', text: precedingText })
+
+    const closeEnd = openEnd + closeMatch.index + closeMatch[0].length
+    parts.push({ type: 'injection', text: text.slice(openStart, closeEnd), tag })
+    cursor = closeEnd
+    searchStart = closeEnd
+    extractions++
+  }
+
+  const rest = text.slice(cursor)
+  if (rest.trim()) parts.push({ type: 'text', text: rest })
+  return parts
+}
+
+const splitUserContentParts = (contentParts: ConversationContentPart[]): UserContentPart[] => {
+  const expandedParts: UserContentPart[] = []
+
+  for (const part of contentParts) {
+    if (part.type !== 'text') {
+      expandedParts.push(part)
+      continue
+    }
+
+    const splits = splitTextIntoInjectionParts(part.text)
+    if (splits.length === 0) {
+      expandedParts.push(part)
+      continue
+    }
+
+    if (splits.length === 1 && splits[0].type === 'text') {
+      expandedParts.push(part)
+      continue
+    }
+
+    for (const split of splits) {
+      if (split.type === 'injection') {
+        expandedParts.push({ type: 'injection', tag: split.tag!, text: split.text, defaultCollapsed: true })
+        continue
+      }
+
+      expandedParts.push({ type: 'text', text: split.text })
+    }
+  }
+
+  return expandedParts
+}
+
+const mergeConsecutiveReasoning = (message: ConversationMessage): void => {
+  const mergedParts: ConversationPart[] = []
+  let reasoningRun: ConversationReasoningPart[] = []
+
+  const flushReasoningRun = () => {
+    if (reasoningRun.length === 0) return
+
+    const lastPart = reasoningRun[reasoningRun.length - 1]
+    const metadata = { ...lastPart.metadata, segments: reasoningRun.length }
+
+    if (reasoningRun.length === 1) {
+      reasoningRun[0].metadata = metadata
+      mergedParts.push(reasoningRun[0])
+    } else {
+      mergedParts.push({
+        id: reasoningRun[0].id,
+        type: 'reasoning',
+        text: reasoningRun.map((part) => part.text).join('\n\n'),
+        defaultCollapsed: true,
+        metadata,
+      })
+    }
+
+    reasoningRun = []
+  }
+
+  for (const part of message.parts) {
+    if (part.type === 'reasoning') {
+      reasoningRun.push(part)
+      continue
+    }
+
+    flushReasoningRun()
+    mergedParts.push(part)
+  }
+
+  flushReasoningRun()
+  message.parts.splice(0, message.parts.length, ...mergedParts)
+}
+
+const attachToolOutputSize = (part: ConversationToolPart): void => {
+  if (part.state.error) return
+  if (part.state.output === undefined) return
+
+  const formatted = formatRawValue(part.state.output)
+  if (!formatted) return
+
+  part.state.outputSize = {
+    bytes: new TextEncoder().encode(formatted).length,
+    lines: formatted.split('\n').length,
+  }
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
@@ -163,7 +298,10 @@ export const parseConversationPayload = (input: ParseConversationPayloadInput): 
   if (response.invalid) warnings.push('Response body is not valid JSON.')
 
   const messages: ConversationMessage[] = []
+  const systemPromptParts: string[] = []
+  const systemPromptSources: ('developer' | 'system')[] = []
   const toolPartsByCallId = new Map<string, ConversationToolPart>()
+  let systemPromptHandled = false
   let messageIndex = 0
   let partIndex = 0
 
@@ -205,8 +343,25 @@ export const parseConversationPayload = (input: ParseConversationPayloadInput): 
     return message
   }
 
-  const assignContentPartIds = (parts: ConversationContentPart[]): ConversationPart[] => {
+  const assignContentPartIds = (parts: UserContentPart[]): ConversationPart[] => {
     return parts.map((part) => ({ ...part, id: nextPartId(part.type) })) as ConversationPart[]
+  }
+
+  const isSystemPromptSource = (value: unknown): value is 'developer' | 'system' => {
+    return value === 'developer' || value === 'system'
+  }
+
+  const pushSystemPrompt = (source: 'developer' | 'system', content: unknown) => {
+    systemPromptHandled = true
+    const text = partsFromContent(content)
+      .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
+      .map((part) => part.text)
+      .join('\n')
+
+    if (text.trim()) {
+      systemPromptParts.push(text)
+      systemPromptSources.push(source)
+    }
   }
 
   const pushContentParts = (
@@ -216,7 +371,9 @@ export const parseConversationPayload = (input: ParseConversationPayloadInput): 
     appendToLast = false,
     target?: ConversationMessage,
   ): ConversationMessage | undefined => {
-    const parts = assignContentPartIds(partsFromContent(content))
+    const rawParts = partsFromContent(content)
+    const expandedParts = role === 'user' ? splitUserContentParts(rawParts) : rawParts
+    const parts = assignContentPartIds(expandedParts)
     if (parts.length === 0) return undefined
 
     if (target) return pushPartMessage(role, parts, metadata, target)
@@ -315,6 +472,7 @@ export const parseConversationPayload = (input: ParseConversationPayloadInput): 
       matched.tool = tool
       matched.state.status = 'completed'
       matched.state.output = output
+      attachToolOutputSize(matched)
       mergeToolResultMetadata(matched, toolResult)
       return
     }
@@ -335,6 +493,7 @@ export const parseConversationPayload = (input: ParseConversationPayloadInput): 
 
     const message = target ?? pushMessage('assistant')
     message.parts.push(part)
+    attachToolOutputSize(part)
     if (callId) toolPartsByCallId.set(callId, part)
   }
 
@@ -356,6 +515,11 @@ export const parseConversationPayload = (input: ParseConversationPayloadInput): 
 
     if (!isRecord(message)) {
       pushRawPart(message, { rawSource, nestedSource })
+      return
+    }
+
+    if (isSystemPromptSource(message.role)) {
+      pushSystemPrompt(message.role, message.content)
       return
     }
 
@@ -389,7 +553,7 @@ export const parseConversationPayload = (input: ParseConversationPayloadInput): 
     if (isRecord(request.value) && Array.isArray(request.value.messages)) {
       request.value.messages.forEach((message) => parseChatMessage(message, 'request', 'messages'))
     }
-    if (request.hasBody && messages.length === requestMessageCount) pushRawRequest()
+    if (request.hasBody && messages.length === requestMessageCount && !systemPromptHandled) pushRawRequest()
 
     toolPartsByCallId.clear()
 
@@ -441,6 +605,16 @@ export const parseConversationPayload = (input: ParseConversationPayloadInput): 
     }
 
     const type = item.type
+    const systemPromptSource = isSystemPromptSource(item.role)
+      ? item.role
+      : isSystemPromptSource(type)
+        ? type
+        : undefined
+
+    if (systemPromptSource) {
+      pushSystemPrompt(systemPromptSource, item.content ?? item.output_text ?? item.text)
+      return
+    }
 
     if (type === 'message' || isMessageRole(item.role)) {
       const role = isMessageRole(item.role) ? item.role : fallbackRole
@@ -502,7 +676,7 @@ export const parseConversationPayload = (input: ParseConversationPayloadInput): 
     if (isRecord(request.value) && Object.prototype.hasOwnProperty.call(request.value, 'input')) {
       parseResponsesInput(request.value.input)
     }
-    if (request.hasBody && messages.length === requestMessageCount) pushRawRequest()
+    if (request.hasBody && messages.length === requestMessageCount && !systemPromptHandled) pushRawRequest()
 
     toolPartsByCallId.clear()
 
@@ -540,11 +714,22 @@ export const parseConversationPayload = (input: ParseConversationPayloadInput): 
     pushRawFallback()
   }
 
+  messages.forEach(mergeConsecutiveReasoning)
+
+  const systemPrompt = systemPromptParts.length > 0
+    ? {
+        id: createConversationNodeId('system-prompt', 0),
+        text: systemPromptParts.join('\n\n'),
+        sources: [...new Set(systemPromptSources)],
+      }
+    : undefined
+
   return {
     source: input.source ?? 'client',
     format,
     warnings,
     messages: messages.filter((message) => message.parts.length > 0),
     nodes: [],
+    ...(systemPrompt ? { systemPrompt } : {}),
   }
 }

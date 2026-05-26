@@ -98,6 +98,214 @@ describe('conversation format helpers', () => {
 })
 
 describe('parseConversationPayload', () => {
+  it('splits user EXTREMELY_IMPORTANT block into injection part and trailing text', () => {
+    const input = {
+      requestBody: JSON.stringify({
+        messages: [
+          { role: 'user', content: '<EXTREMELY_IMPORTANT>\nYou must follow these rules.\n</EXTREMELY_IMPORTANT>\nWhat is 2+2?' },
+        ],
+      }),
+      responseBody: null,
+    }
+
+    const flow = parseConversationPayload(input)
+    const userMsg = flow.messages!.find((message) => message.role === 'user')!
+
+    expect(userMsg.parts.length).toBe(2)
+    expect(userMsg.parts[0].type).toBe('injection')
+    const injPart = userMsg.parts[0] as any
+    expect(injPart.tag).toBe('EXTREMELY_IMPORTANT')
+    expect(injPart.text).toContain('<EXTREMELY_IMPORTANT>')
+    expect(injPart.text).toContain('</EXTREMELY_IMPORTANT>')
+    expect(injPart.defaultCollapsed).toBe(true)
+    expect(userMsg.parts[1].type).toBe('text')
+    expect((userMsg.parts[1] as any).text).toContain('What is 2+2?')
+  })
+
+  it('extracts multiple injections from a single user text part', () => {
+    const input = {
+      requestBody: JSON.stringify({
+        messages: [
+          { role: 'user', content: '<EXTREMELY_IMPORTANT>\nRule 1\n</EXTREMELY_IMPORTANT>\n<reminder>\nRemember this\n</reminder>\nActual question' },
+        ],
+      }),
+      responseBody: null,
+    }
+
+    const flow = parseConversationPayload(input)
+    const userMsg = flow.messages!.find((message) => message.role === 'user')!
+    const injections = userMsg.parts.filter((part) => part.type === 'injection')
+    expect(injections.length).toBe(2)
+    expect((injections[0] as any).tag).toBe('EXTREMELY_IMPORTANT')
+    expect((injections[1] as any).tag).toBe('reminder')
+    const texts = userMsg.parts.filter((part) => part.type === 'text')
+    expect(texts.length).toBe(1)
+    expect((texts[0] as any).text).toContain('Actual question')
+  })
+
+  it('preserves literal tag name casing in injection part', () => {
+    const input = {
+      requestBody: JSON.stringify({
+        messages: [
+          { role: 'user', content: '<EXTREMELY-IMPORTANT>\nStuff\n</EXTREMELY-IMPORTANT>\nQuestion' },
+        ],
+      }),
+      responseBody: null,
+    }
+
+    const flow = parseConversationPayload(input)
+    const userMsg = flow.messages!.find((message) => message.role === 'user')!
+    const inj = userMsg.parts.find((part) => part.type === 'injection') as any
+
+    expect(inj.tag).toBe('EXTREMELY-IMPORTANT')
+  })
+
+  it('does not split unknown tags (leaves text intact)', () => {
+    const input = {
+      requestBody: JSON.stringify({
+        messages: [
+          { role: 'user', content: '<unknown_tag>\nContent\n</unknown_tag>\nQuestion' },
+        ],
+      }),
+      responseBody: null,
+    }
+
+    const flow = parseConversationPayload(input)
+    const userMsg = flow.messages!.find((message) => message.role === 'user')!
+
+    expect(userMsg.parts.length).toBe(1)
+    expect(userMsg.parts[0].type).toBe('text')
+    expect((userMsg.parts[0] as any).text).toContain('<unknown_tag>')
+  })
+
+  it('handles missing close tag gracefully (skips, keeps text)', () => {
+    const input = {
+      requestBody: JSON.stringify({
+        messages: [
+          { role: 'user', content: '<EXTREMELY_IMPORTANT>\nNo close tag here\nQuestion' },
+        ],
+      }),
+      responseBody: null,
+    }
+
+    const flow = parseConversationPayload(input)
+    const userMsg = flow.messages!.find((message) => message.role === 'user')!
+
+    expect(userMsg.parts.length).toBe(1)
+    expect(userMsg.parts[0].type).toBe('text')
+    expect((userMsg.parts[0] as any).text).toContain('<EXTREMELY_IMPORTANT>')
+    expect((userMsg.parts[0] as any).text).toContain('Question')
+  })
+
+  it('[chat] lifts developer message into flow.systemPrompt and excludes from messages', () => {
+    const input = {
+      requestBody: JSON.stringify({
+        messages: [
+          { role: 'developer', content: 'You are a helpful assistant.' },
+          { role: 'user', content: 'Hello' },
+        ],
+      }),
+      responseBody: null,
+    }
+
+    const flow = parseConversationPayload(input)
+
+    expect(flow.systemPrompt).toBeDefined()
+    expect(flow.systemPrompt!.text).toBe('You are a helpful assistant.')
+    expect(flow.systemPrompt!.sources).toEqual(['developer'])
+    expect(flow.messages!.every((message) => message.role !== 'developer')).toBe(true)
+  })
+
+  it('[chat] does not create systemPrompt when developer message has empty content', () => {
+    const input = {
+      requestBody: JSON.stringify({
+        messages: [
+          { role: 'developer', content: '' },
+          { role: 'user', content: 'Hello' },
+        ],
+      }),
+      responseBody: null,
+    }
+
+    const flow = parseConversationPayload(input)
+
+    expect(flow.systemPrompt).toBeUndefined()
+  })
+
+  it('[chat] does not produce raw fallback when only system/developer messages exist', () => {
+    const input = {
+      requestBody: JSON.stringify({
+        messages: [
+          { role: 'system', content: 'You are helpful.' },
+        ],
+      }),
+      responseBody: null,
+    }
+
+    const flow = parseConversationPayload(input)
+
+    expect(flow.systemPrompt).toBeDefined()
+    expect(flow.systemPrompt!.text).toBe('You are helpful.')
+    expect(flow.messages!.length).toBe(0)
+  })
+
+  it('[chat] concatenates multiple system/developer entries with blank-line separator', () => {
+    const input = {
+      requestBody: JSON.stringify({
+        messages: [
+          { role: 'system', content: 'System instructions.' },
+          { role: 'developer', content: 'Developer instructions.' },
+          { role: 'user', content: 'Hi' },
+        ],
+      }),
+      responseBody: null,
+    }
+
+    const flow = parseConversationPayload(input)
+
+    expect(flow.systemPrompt!.text).toBe('System instructions.\n\nDeveloper instructions.')
+    expect(flow.systemPrompt!.sources).toContain('system')
+    expect(flow.systemPrompt!.sources).toContain('developer')
+  })
+
+  it('[responses] lifts developer role input item into flow.systemPrompt', () => {
+    const input = {
+      requestBody: JSON.stringify({
+        input: [
+          { role: 'developer', content: [{ type: 'input_text', text: 'Be concise.' }] },
+          { role: 'user', content: [{ type: 'input_text', text: 'What is 2+2?' }] },
+        ],
+      }),
+      responseBody: JSON.stringify({ output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '4' }] }] }),
+    }
+
+    const flow = parseConversationPayload(input)
+
+    expect(flow.systemPrompt).toBeDefined()
+    expect(flow.systemPrompt!.text).toBe('Be concise.')
+    expect(flow.systemPrompt!.sources).toEqual(['developer'])
+    expect(flow.messages!.every((message) => message.role !== 'developer')).toBe(true)
+  })
+
+  it('[chat] records unique sources array (developer + system)', () => {
+    const input = {
+      requestBody: JSON.stringify({
+        messages: [
+          { role: 'system', content: 'A' },
+          { role: 'system', content: 'B' },
+          { role: 'developer', content: 'C' },
+          { role: 'user', content: 'D' },
+        ],
+      }),
+      responseBody: null,
+    }
+
+    const flow = parseConversationPayload(input)
+
+    expect(flow.systemPrompt!.text).toBe('A\n\nB\n\nC')
+    expect(flow.systemPrompt!.sources).toEqual(['system', 'developer'])
+  })
+
   it('parses OpenAI chat history and appends response assistant message', () => {
     const flow = parseConversationPayload({
       requestBody: JSON.stringify({
@@ -115,10 +323,10 @@ describe('parseConversationPayload', () => {
     })
 
     expect(flow.format).toBe('openai-chat')
-    expect(flow.messages?.map((message) => message.role)).toEqual(['system', 'user', 'assistant', 'user', 'assistant'])
-    expect(flow.messages?.[0].parts).toMatchObject([{ type: 'text', text: 'Be concise.' }])
-    expect(flow.messages?.[3].parts.some((part) => part.type === 'image')).toBe(true)
-    expect(flow.messages?.[4].parts).toMatchObject([{ type: 'text', text: '**Done**\n\n```ts\nconst ok = true\n```' }])
+    expect(flow.systemPrompt).toMatchObject({ text: 'Be concise.', sources: ['system'] })
+    expect(flow.messages?.map((message) => message.role)).toEqual(['user', 'assistant', 'user', 'assistant'])
+    expect(flow.messages?.[2].parts.some((part) => part.type === 'image')).toBe(true)
+    expect(flow.messages?.[3].parts).toMatchObject([{ type: 'text', text: '**Done**\n\n```ts\nconst ok = true\n```' }])
   })
 
   it('merges OpenAI chat tool calls and tool results into one tool part', () => {
@@ -447,6 +655,77 @@ describe('parseConversationPayload', () => {
     const tool = flow.messages?.[1].parts[1] as ConversationToolPart
     expect(tool.state.input).toEqual({ filePath: 'app.log' })
     expect(tool.state.output).toBe('done')
+  })
+
+  it('merges consecutive assistant reasoning into one part with metadata.segments', () => {
+    const flow = parseConversationPayload({
+      requestBody: JSON.stringify({ input: 'Hello' }),
+      responseBody: JSON.stringify({
+        output: [
+          { type: 'reasoning', summary: [{ type: 'summary_text', text: 'Thinking step 1' }] },
+          { type: 'reasoning', summary: [{ type: 'summary_text', text: 'Thinking step 2' }] },
+          { type: 'reasoning', summary: [{ type: 'summary_text', text: 'Thinking step 3' }] },
+          { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Answer' }] },
+        ],
+      }),
+    })
+    const assistantMsg = flow.messages!.find((message) => message.role === 'assistant')!
+    const reasoningParts = assistantMsg.parts.filter((part) => part.type === 'reasoning')
+
+    expect(reasoningParts.length).toBe(1)
+    expect((reasoningParts[0] as any).text).toBe('Thinking step 1\n\nThinking step 2\n\nThinking step 3')
+    expect(reasoningParts[0].metadata?.segments).toBe(3)
+  })
+
+  it('single reasoning part gets metadata.segments === 1', () => {
+    const flow = parseConversationPayload({
+      requestBody: JSON.stringify({ input: 'Hello' }),
+      responseBody: JSON.stringify({
+        output: [
+          { type: 'reasoning', summary: [{ type: 'summary_text', text: 'Quick thought' }] },
+          { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Answer' }] },
+        ],
+      }),
+    })
+    const assistantMsg = flow.messages!.find((message) => message.role === 'assistant')!
+    const reasoningParts = assistantMsg.parts.filter((part) => part.type === 'reasoning')
+
+    expect(reasoningParts.length).toBe(1)
+    expect((reasoningParts[0] as any).text).toBe('Quick thought')
+    expect(reasoningParts[0].metadata?.segments).toBe(1)
+  })
+
+  it('attaches outputSize bytes/lines to completed tool part', () => {
+    const flow = parseConversationPayload({
+      requestBody: JSON.stringify({
+        messages: [
+          { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', function: { name: 'bash', arguments: '{"command":"echo hello"}' } }] },
+          { role: 'tool', tool_call_id: 'call_1', content: 'hello\nworld\nthird line' },
+        ],
+      }),
+      responseBody: null,
+    })
+    const assistantMsg = flow.messages!.find((message) => message.role === 'assistant')!
+    const toolPart = assistantMsg.parts.find((part) => part.type === 'tool') as any
+
+    expect(toolPart.state.outputSize).toBeDefined()
+    expect(toolPart.state.outputSize.lines).toBe(3)
+    expect(toolPart.state.outputSize.bytes).toBeGreaterThan(0)
+  })
+
+  it('does not attach outputSize when output is undefined', () => {
+    const flow = parseConversationPayload({
+      requestBody: JSON.stringify({
+        messages: [
+          { role: 'assistant', content: null, tool_calls: [{ id: 'call_pending', function: { name: 'read', arguments: '{"path":"file.txt"}' } }] },
+        ],
+      }),
+      responseBody: null,
+    })
+    const assistantMsg = flow.messages!.find((message) => message.role === 'assistant')!
+    const toolPart = assistantMsg.parts.find((part) => part.type === 'tool') as any
+
+    expect(toolPart.state.outputSize).toBeUndefined()
   })
 
   it('keeps Responses response parts separate from assistant messages in request history', () => {

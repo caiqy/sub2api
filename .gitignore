@@ -134,7 +134,10 @@ docs/*
 .serena/
 .codex/
 .superpowers/
+.codegraph/
 frontend/coverage/
 aicodex
 output/
 .worktrees/
+input.txt
+result.txt
