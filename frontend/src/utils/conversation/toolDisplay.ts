@@ -60,12 +60,18 @@ const detailForTodoOutput = (tool: string, output: unknown): string | undefined 
   }
 }
 
+const extractFilename = (filePath: string): string => {
+  const parts = filePath.replace(/\\/g, '/').split('/')
+  return parts[parts.length - 1] || filePath
+}
+
 const detailForTool = (tool: string, input: Record<string, unknown> | undefined): string | undefined => {
   if (!input) return undefined
 
   if (tool === 'bash') return stringValue(input.description)
   if (tool === 'read' || tool === 'write' || tool === 'edit' || tool === 'multiedit') {
-    return stringValue(input.filePath) ?? stringValue(input.path)
+    const path = stringValue(input.filePath) ?? stringValue(input.path)
+    return path ? extractFilename(path) : undefined
   }
   if (tool === 'glob') return stringValue(input.pattern)
   if (tool === 'grep') {

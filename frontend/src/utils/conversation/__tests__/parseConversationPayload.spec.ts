@@ -42,7 +42,7 @@ describe('conversation format helpers', () => {
 
   it('builds webgui-style tool display names without call ids', () => {
     expect(getToolDisplayName({ tool: 'bash', input: { description: '列出文件', command: 'ls' } })).toBe('执行命令：列出文件')
-    expect(getToolDisplayName({ tool: 'read', input: { filePath: 'src/app.ts' } })).toBe('查看：src/app.ts')
+    expect(getToolDisplayName({ tool: 'read', input: { filePath: 'src/app.ts' } })).toBe('查看：app.ts')
     expect(getToolDisplayName({ tool: 'grep', input: { pattern: 'timeout', include: '*.ts' } })).toBe('文本查找：timeout (*.ts)')
     expect(getToolDisplayName({ tool: 'webfetch', input: { url: 'https://example.com' } })).toBe('抓取网页：https://example.com')
     expect(getToolDisplayName({ tool: 'bash', callId: 'call_123', input: { command: 'pwd' } } satisfies Partial<ConversationToolPart> & { tool: string })).toBe('执行命令')

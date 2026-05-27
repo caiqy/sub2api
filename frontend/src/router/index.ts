@@ -665,6 +665,14 @@ const routes: RouteRecordRaw[] = [
     }
   },
 
+  // ==================== Dev Preview (development only) ====================
+  {
+    path: '/dev/conversation-preview',
+    name: 'DevConversationPreview',
+    component: () => import('@/views/dev/ConversationPreview.vue'),
+    meta: { requiresAuth: false, title: 'Conversation Preview' }
+  },
+
   // ==================== 404 Not Found ====================
   {
     path: '/:pathMatch(.*)*',

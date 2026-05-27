@@ -67,7 +67,7 @@ const sortedParts = computed(() => {
 }
 
 .conversation-message-shell {
-  @apply max-w-[min(100%,52rem)] rounded-2xl border border-transparent px-4 py-3;
+  @apply w-full rounded-2xl border border-transparent px-4 py-3;
 }
 
 .conversation-message-row--user .conversation-message-shell {

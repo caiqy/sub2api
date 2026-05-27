@@ -8,13 +8,15 @@
     <p>{{ t('conversation.empty') }}</p>
   </div>
 
-  <div v-else class="conversation-timeline-shell">
-    <ConversationSystemPromptBar v-if="flow.systemPrompt" :prompt="flow.systemPrompt" />
-    <ol class="conversation-timeline" :aria-label="t('conversation.timelineLabel')">
-      <li v-for="message in flow.messages ?? []" :key="message.id" class="conversation-timeline-item">
-        <ConversationMessageRow :message="message" />
-      </li>
-    </ol>
+  <div v-else class="conversation-timeline-container">
+    <div class="conversation-timeline-shell">
+      <ConversationSystemPromptBar v-if="flow.systemPrompt" :prompt="flow.systemPrompt" />
+      <ol class="conversation-timeline" :aria-label="t('conversation.timelineLabel')">
+        <li v-for="message in flow.messages ?? []" :key="message.id" class="conversation-timeline-item">
+          <ConversationMessageRow :message="message" />
+        </li>
+      </ol>
+    </div>
   </div>
 </template>
 
@@ -48,12 +50,61 @@ const { t } = useI18n()
   @apply h-7 w-7;
 }
 
+.conversation-timeline-container {
+  @apply mx-auto h-full max-w-[45rem] overflow-y-scroll rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800/50;
+  scrollbar-gutter: stable;
+}
+
+/* Scrollbar styles - unscoped to handle .dark ancestor */
+</style>
+
+<style>
+.conversation-timeline-container {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(156, 163, 175, 0.6) rgba(0, 0, 0, 0.05);
+}
+
+.dark .conversation-timeline-container {
+  scrollbar-color: rgba(148, 163, 184, 0.4) rgba(255, 255, 255, 0.05);
+}
+
+.conversation-timeline-container::-webkit-scrollbar {
+  width: 8px;
+}
+
+.conversation-timeline-container::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 4px;
+}
+
+.conversation-timeline-container::-webkit-scrollbar-thumb {
+  background-color: rgba(156, 163, 175, 0.6);
+  border-radius: 4px;
+  border: 1px solid transparent;
+}
+
+.conversation-timeline-container::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(156, 163, 175, 0.85);
+}
+
+.dark .conversation-timeline-container::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.dark .conversation-timeline-container::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.4);
+}
+
+.dark .conversation-timeline-container::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(148, 163, 184, 0.6);
+}
+
 .conversation-timeline {
   @apply space-y-6;
 }
 
 .conversation-timeline-shell {
-  @apply space-y-4;
+  @apply space-y-4 px-5 py-5;
 }
 
 .conversation-timeline-item {

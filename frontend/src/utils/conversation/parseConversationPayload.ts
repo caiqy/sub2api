@@ -160,16 +160,161 @@ const isMessageRole = (value: unknown): value is ConversationMessageRole => {
   return value === 'user' || value === 'assistant' || value === 'system' || value === 'developer'
 }
 
+/**
+ * Detect and parse SSE (Server-Sent Events) streaming response body.
+ * Extracts the final complete response from `response.done` or `response.completed` events,
+ * or reconstructs from `*.done` item events if no terminal event is found.
+ * For chat completions streaming, concatenates delta content from choices.
+ */
+const parseSSEBody = (body: string): unknown | null => {
+  // Quick check: SSE bodies have lines starting with "event:" or "data:"
+  if (!body.includes('data:')) return null
+
+  const lines = body.split('\n')
+  const dataLines: string[] = []
+  let currentEvent = ''
+
+  for (const line of lines) {
+    if (line.startsWith('event:')) {
+      currentEvent = line.slice(6).trim()
+    } else if (line.startsWith('data:')) {
+      const data = line.slice(5).trim()
+      if (data && data !== '[DONE]') {
+        dataLines.push(JSON.stringify({ _event: currentEvent, _data: data }))
+      }
+    }
+  }
+
+  if (dataLines.length === 0) return null
+
+  // Strategy 1: Look for response.done (OpenAI Responses API terminal event)
+  for (const line of lines) {
+    if (!line.startsWith('data:')) continue
+    const data = line.slice(5).trim()
+    if (!data || data === '[DONE]') continue
+    try {
+      const parsed = JSON.parse(data)
+      if (parsed?.type === 'response.done' && isRecord(parsed.response)) {
+        return parsed.response
+      }
+      if (parsed?.type === 'response.completed' && isRecord(parsed.response)) {
+        return parsed.response
+      }
+    } catch { /* skip unparseable lines */ }
+  }
+
+  // Strategy 2: Collect output_item.done events to reconstruct response output array
+  const outputItems: unknown[] = []
+  for (const line of lines) {
+    if (!line.startsWith('data:')) continue
+    const data = line.slice(5).trim()
+    if (!data || data === '[DONE]') continue
+    try {
+      const parsed = JSON.parse(data)
+      if (parsed?.type === 'response.output_item.done' && parsed.item) {
+        outputItems.push(parsed.item)
+      }
+    } catch { /* skip */ }
+  }
+  if (outputItems.length > 0) {
+    return { output: outputItems }
+  }
+
+  // Strategy 3: Chat completions streaming — reconstruct from deltas
+  let chatContent = ''
+  let chatRole: string | undefined
+  const chatToolCalls: Record<string, { name: string; arguments: string }> = {}
+
+  for (const line of lines) {
+    if (!line.startsWith('data:')) continue
+    const data = line.slice(5).trim()
+    if (!data || data === '[DONE]') continue
+    try {
+      const parsed = JSON.parse(data)
+      if (!isRecord(parsed)) continue
+
+      // Standard chat completions streaming format
+      const choices = Array.isArray(parsed.choices) ? parsed.choices : []
+      for (const choice of choices) {
+        if (!isRecord(choice)) continue
+        const delta = isRecord(choice.delta) ? choice.delta : undefined
+        if (!delta) continue
+        if (typeof delta.role === 'string') chatRole = delta.role
+        if (typeof delta.content === 'string') chatContent += delta.content
+        // Tool call deltas
+        const toolCallDeltas = Array.isArray(delta.tool_calls) ? delta.tool_calls : []
+        for (const tc of toolCallDeltas) {
+          if (!isRecord(tc)) continue
+          const idx = String(tc.index ?? '0')
+          if (!chatToolCalls[idx]) chatToolCalls[idx] = { name: '', arguments: '' }
+          const fn = isRecord(tc.function) ? tc.function : undefined
+          if (fn) {
+            if (typeof fn.name === 'string') chatToolCalls[idx].name += fn.name
+            if (typeof fn.arguments === 'string') chatToolCalls[idx].arguments += fn.arguments
+          }
+        }
+      }
+
+      // Responses API content deltas
+      if (parsed.type === 'response.output_text.delta' && typeof parsed.delta === 'string') {
+        chatContent += parsed.delta
+      }
+      if (parsed.type === 'response.function_call_arguments.delta' && typeof parsed.delta === 'string') {
+        const itemId = String(parsed.item_id ?? '0')
+        if (!chatToolCalls[itemId]) chatToolCalls[itemId] = { name: '', arguments: '' }
+        chatToolCalls[itemId].arguments += parsed.delta
+      }
+      if (parsed.type === 'response.function_call_arguments.done') {
+        const itemId = String(parsed.item_id ?? '0')
+        if (!chatToolCalls[itemId]) chatToolCalls[itemId] = { name: '', arguments: '' }
+        if (typeof parsed.arguments === 'string') chatToolCalls[itemId].arguments = parsed.arguments
+        if (typeof parsed.name === 'string') chatToolCalls[itemId].name = parsed.name
+      }
+    } catch { /* skip */ }
+  }
+
+  // Build reconstructed response
+  const hasContent = chatContent.length > 0
+  const toolCallEntries = Object.values(chatToolCalls).filter(tc => tc.name || tc.arguments)
+  const hasToolCalls = toolCallEntries.length > 0
+
+  if (hasContent || hasToolCalls) {
+    const message: Record<string, unknown> = { role: chatRole ?? 'assistant' }
+    if (hasContent) message.content = chatContent
+    if (hasToolCalls) {
+      message.tool_calls = toolCallEntries.map((tc, i) => ({
+        id: `reconstructed_${i}`,
+        type: 'function',
+        function: { name: tc.name, arguments: tc.arguments },
+      }))
+    }
+    return { choices: [{ message }] }
+  }
+
+  return null
+}
+
 const parseBody = (body: string | null | undefined): JsonParseResult => {
   const hasBody = typeof body === 'string' && body.trim().length > 0
   if (!hasBody) return { value: null, raw: null, hasBody: false, invalid: false }
 
+  // Try direct JSON parse first
   const value = parseJsonValue(body)
+  if (value !== null) {
+    return { value, raw: body, hasBody: true, invalid: false }
+  }
+
+  // Try SSE streaming format
+  const sseValue = parseSSEBody(body!)
+  if (sseValue !== null) {
+    return { value: sseValue, raw: body, hasBody: true, invalid: false }
+  }
+
   return {
-    value,
+    value: null,
     raw: body,
     hasBody: true,
-    invalid: value === null && body.trim() !== 'null',
+    invalid: body!.trim() !== 'null',
   }
 }
 
@@ -654,7 +799,7 @@ export const parseConversationPayload = (input: ParseConversationPayloadInput): 
         }
       }
 
-      pushRawPart(sanitizeRecord(item), { rawSource, nestedSource }, fallbackRole)
+      // Empty reasoning (e.g. summary: []) — skip silently, no raw fallback
       return
     }
 

@@ -23,12 +23,33 @@
     </button>
 
     <div v-if="!collapsed" class="conversation-tool-body">
-      <template v-if="part.tool === 'bash'">
+      <!-- Todo list rendering for todowrite/todoread -->
+      <template v-if="isTodoTool && todoItems.length > 0">
+        <ul class="conversation-todo-list">
+          <li v-for="(item, idx) in todoItems" :key="idx" class="conversation-todo-item">
+            <span class="conversation-todo-status" :class="`conversation-todo-status--${item.status}`">
+              <svg v-if="item.status === 'completed'" viewBox="0 0 16 16" fill="currentColor" class="h-3 w-3">
+                <path fill-rule="evenodd" d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 0 1 1.04-.207Z" clip-rule="evenodd" />
+              </svg>
+              <svg v-else-if="item.status === 'in_progress'" viewBox="0 0 16 16" fill="currentColor" class="h-3 w-3 animate-spin">
+                <path d="M8 1a7 7 0 0 0 0 14 .75.75 0 0 1 0 1.5A8.5 8.5 0 1 1 16.5 8 .75.75 0 0 1 15 8a7 7 0 0 0-7-7Z" />
+              </svg>
+              <span v-else class="h-2 w-2 rounded-full bg-current"></span>
+            </span>
+            <span class="conversation-todo-content" :class="{ 'line-through opacity-50': item.status === 'completed' }">{{ item.content }}</span>
+            <span v-if="item.priority" class="conversation-todo-priority" :class="`conversation-todo-priority--${item.priority}`">{{ item.priority }}</span>
+          </li>
+        </ul>
+      </template>
+
+      <!-- Bash tool -->
+      <template v-else-if="part.tool === 'bash'">
         <pre v-if="command" class="conversation-tool-code">$ {{ command }}</pre>
         <pre v-if="outputText" class="conversation-tool-code">{{ outputText }}</pre>
         <pre v-if="part.state.error" class="conversation-tool-code conversation-tool-code--error">{{ part.state.error }}</pre>
       </template>
 
+      <!-- Generic tools -->
       <template v-else>
         <div v-if="part.state.error" class="conversation-tool-section">
           <p class="conversation-tool-section-label">{{ t('conversation.error') }}</p>
@@ -54,6 +75,12 @@ import { formatHumanBytes, formatRawValue } from '@/utils/conversation/format'
 import { getToolDisplayName } from '@/utils/conversation/toolDisplay'
 import type { ConversationToolPart } from '@/utils/conversation/types'
 
+interface TodoItem {
+  content: string
+  status: string
+  priority?: string
+}
+
 const props = defineProps<{
   part: ConversationToolPart
 }>()
@@ -67,6 +94,26 @@ watch(
     collapsed.value = true
   },
 )
+
+const isTodoTool = computed(() => props.part.tool === 'todowrite' || props.part.tool === 'todoread')
+
+const todoItems = computed<TodoItem[]>(() => {
+  if (!isTodoTool.value) return []
+  try {
+    // Try output first (todoread returns list), then input (todowrite sends list)
+    const raw = props.part.state.output ?? props.part.state.input
+    if (!raw) return []
+    const data = typeof raw === 'string' ? JSON.parse(raw) : raw
+    // todowrite input has { todos: [...] } or is directly an array
+    const items = Array.isArray(data) ? data : (data?.todos ?? data?.items ?? [])
+    if (!Array.isArray(items)) return []
+    return items.filter((item): item is TodoItem =>
+      typeof item === 'object' && item !== null && typeof item.content === 'string'
+    )
+  } catch {
+    return []
+  }
+})
 
 const command = computed(() => {
   const input = props.part.state.input
@@ -195,5 +242,54 @@ const statusText = computed(() => {
 
 .conversation-tool-code--error {
   @apply text-red-100;
+}
+
+/* Todo list styles */
+.conversation-todo-list {
+  @apply space-y-1;
+}
+
+.conversation-todo-item {
+  @apply flex items-start gap-2 rounded px-2 py-1.5 text-xs;
+}
+
+.conversation-todo-status {
+  @apply mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center;
+}
+
+.conversation-todo-status--completed {
+  @apply text-emerald-500;
+}
+
+.conversation-todo-status--in_progress {
+  @apply text-amber-500;
+}
+
+.conversation-todo-status--pending {
+  @apply text-gray-400 dark:text-dark-500;
+}
+
+.conversation-todo-status--cancelled {
+  @apply text-gray-300 dark:text-dark-600;
+}
+
+.conversation-todo-content {
+  @apply flex-1 text-gray-700 dark:text-dark-200;
+}
+
+.conversation-todo-priority {
+  @apply shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase;
+}
+
+.conversation-todo-priority--high {
+  @apply bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300;
+}
+
+.conversation-todo-priority--medium {
+  @apply bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300;
+}
+
+.conversation-todo-priority--low {
+  @apply bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-dark-300;
 }
 </style>

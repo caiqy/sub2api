@@ -394,7 +394,7 @@ export default {
     },
     reasoningMeta: {
       segments: '{n} 段',
-      collapsedLabel: '推理',
+      collapsedLabel: '思考内容',
     },
     toolMeta: {
       error: '错误',
