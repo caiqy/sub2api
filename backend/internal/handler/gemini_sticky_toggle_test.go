@@ -195,7 +195,7 @@ func newGeminiStickyToggleHandler(t *testing.T, enabled bool, cache service.Gate
 	t.Helper()
 	cfg := &config.Config{}
 	cfg.Gateway.Sticky.Gemini.Enabled = enabled
-	gatewayService := service.NewGatewayService(nil, nil, nil, nil, nil, nil, nil, cache, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, digestStore, nil, nil, nil, nil, nil)
+	gatewayService := service.NewGatewayService(nil, nil, nil, nil, nil, nil, nil, cache, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, digestStore, nil, nil, nil, nil, nil, nil)
 	return &GatewayHandler{gatewayService: gatewayService, cfg: cfg}
 }
 
@@ -251,7 +251,7 @@ func TestGatewayHandler_GeminiRouteStickyLookupUsesGeminiToggleNotAnthropicToggl
 		cfg := &config.Config{}
 		cfg.Gateway.Sticky.Gemini.Enabled = false
 		cfg.Gateway.Sticky.Anthropic.Enabled = true
-		gatewayService := service.NewGatewayService(nil, nil, nil, nil, nil, nil, nil, cache, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+		gatewayService := service.NewGatewayService(nil, nil, nil, nil, nil, nil, nil, cache, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 		h := &GatewayHandler{gatewayService: gatewayService, cfg: cfg}
 
 		accountID := h.getCachedSessionAccountIDForPlatform(context.Background(), service.PlatformGemini, nil, "gemini:gateway-route-disabled")
@@ -265,7 +265,7 @@ func TestGatewayHandler_GeminiRouteStickyLookupUsesGeminiToggleNotAnthropicToggl
 		cfg := &config.Config{}
 		cfg.Gateway.Sticky.Gemini.Enabled = true
 		cfg.Gateway.Sticky.Anthropic.Enabled = false
-		gatewayService := service.NewGatewayService(nil, nil, nil, nil, nil, nil, nil, cache, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+		gatewayService := service.NewGatewayService(nil, nil, nil, nil, nil, nil, nil, cache, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 		h := &GatewayHandler{gatewayService: gatewayService, cfg: cfg}
 
 		accountID := h.getCachedSessionAccountIDForPlatform(context.Background(), service.PlatformGemini, nil, "gemini:gateway-route-enabled")
@@ -281,7 +281,7 @@ func TestGatewayHandler_GeminiRouteStickyBindUsesGeminiToggleNotAnthropicToggle(
 		cfg := &config.Config{}
 		cfg.Gateway.Sticky.Gemini.Enabled = false
 		cfg.Gateway.Sticky.Anthropic.Enabled = true
-		gatewayService := service.NewGatewayService(nil, nil, nil, nil, nil, nil, nil, cache, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+		gatewayService := service.NewGatewayService(nil, nil, nil, nil, nil, nil, nil, cache, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 		h := &GatewayHandler{gatewayService: gatewayService, cfg: cfg}
 
 		err := h.bindStickySessionForPlatform(context.Background(), service.PlatformGemini, nil, "gemini:gateway-bind-disabled", 909)
@@ -296,7 +296,7 @@ func TestGatewayHandler_GeminiRouteStickyBindUsesGeminiToggleNotAnthropicToggle(
 		cfg := &config.Config{}
 		cfg.Gateway.Sticky.Gemini.Enabled = true
 		cfg.Gateway.Sticky.Anthropic.Enabled = false
-		gatewayService := service.NewGatewayService(nil, nil, nil, nil, nil, nil, nil, cache, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+		gatewayService := service.NewGatewayService(nil, nil, nil, nil, nil, nil, nil, cache, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 		h := &GatewayHandler{gatewayService: gatewayService, cfg: cfg}
 
 		err := h.bindStickySessionForPlatform(context.Background(), service.PlatformGemini, nil, "gemini:gateway-bind-enabled", 1001)

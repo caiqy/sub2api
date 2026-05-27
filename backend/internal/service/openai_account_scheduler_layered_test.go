@@ -367,9 +367,25 @@ func TestLayered_TTFTPenaltyUsesGroupLevelBaselineEvenWhenFastestAccountIsReques
 	require.NotNil(t, result)
 	require.NotNil(t, result.Account)
 	require.Equal(t, int64(23), result.Account.ID)
+	require.True(t, svc.isOpenAIAccountRuntimeBlocked(&repo.accounts[0]), "layered scheduler should runtime-block privacy-ineligible accounts like the default scheduler")
 	if result.ReleaseFunc != nil {
 		result.ReleaseFunc()
 	}
+}
+
+func TestLayered_NoAvailableRequestedModelReturnsModelSpecificError(t *testing.T) {
+	accounts := []Account{
+		{ID: 93011, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, Credentials: map[string]any{"model_mapping": map[string]any{"gpt-4.1": "gpt-4.1"}}},
+	}
+	svc := newLayeredTestService(accounts)
+	scheduler := svc.getOpenAIAccountScheduler()
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+	require.NotNil(t, scheduler)
+
+	selection, _, err := scheduler.Select(context.Background(), OpenAIAccountScheduleRequest{RequestedModel: "gpt-5.1"})
+	require.Error(t, err)
+	require.Nil(t, selection)
+	require.Contains(t, err.Error(), "no available OpenAI accounts supporting model: gpt-5.1")
 }
 
 type layeredBaselineFailingAccountRepo struct {
