@@ -479,6 +479,25 @@ func TestOpenAIGatewayService_GenerateSessionHashWithFallback(t *testing.T) {
 	require.Equal(t, "", empty)
 }
 
+func TestOpenAIGatewayService_GenerateSessionHashWithFallbackUsesSeedWhenExplicitSignalsMissing(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+
+	svc := &OpenAIGatewayService{}
+	seed := "openai_ws_ingress:group=9:api_key=100:account=200:ip=192.0.2.10:ua=codex"
+	bodyWithoutExplicitSignal := []byte(`{"model":"gpt-5.1","stream":false}`)
+
+	got := svc.GenerateSessionHashWithFallback(c, bodyWithoutExplicitSignal, seed)
+	want := fmt.Sprintf("%016x", xxhash.Sum64String(seed))
+	require.Equal(t, want, got, "WS ingress fallback seed should win when session_id/conversation_id/prompt_cache_key are absent")
+
+	c.Request.Header.Set("session_id", "explicit-session")
+	explicit := svc.GenerateSessionHashWithFallback(c, bodyWithoutExplicitSignal, seed)
+	require.Equal(t, fmt.Sprintf("%016x", xxhash.Sum64String("explicit-session")), explicit, "explicit session signal should still have highest priority")
+}
+
 func TestOpenAIGatewayService_GenerateSessionHash_ContentFallback(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
@@ -2140,6 +2159,7 @@ func TestOpenAIBuildUpstreamRequestOpenAIPassthroughPreservesCompactPath(t *test
 	require.Equal(t, "application/json", req.Header.Get("Accept"))
 	require.Equal(t, codexCLIVersion, req.Header.Get("Version"))
 	require.NotEmpty(t, req.Header.Get("Session_Id"))
+	require.Equal(t, HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileFromContext(req.Context()))
 }
 
 func TestOpenAIBuildUpstreamRequestCompactForcesJSONAcceptForOAuth(t *testing.T) {
@@ -2160,6 +2180,7 @@ func TestOpenAIBuildUpstreamRequestCompactForcesJSONAcceptForOAuth(t *testing.T)
 	require.Equal(t, "application/json", req.Header.Get("Accept"))
 	require.Equal(t, codexCLIVersion, req.Header.Get("Version"))
 	require.NotEmpty(t, req.Header.Get("Session_Id"))
+	require.Equal(t, HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileFromContext(req.Context()))
 }
 
 func TestOpenAIBuildUpstreamRequestOAuthMessagesBridgeUsesSessionOnly(t *testing.T) {

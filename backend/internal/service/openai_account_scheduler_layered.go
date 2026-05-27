@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -228,12 +227,13 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 		return nil, 0, 0, err
 	}
 	if len(accounts) == 0 {
-		return nil, 0, 0, errors.New("no available OpenAI accounts")
+		return nil, 0, 0, noAvailableOpenAISelectionError(req.RequestedModel, false)
 	}
 
 	// 1. 过滤候选
 	filtered := make([]*Account, 0, len(accounts))
 	loadReq := make([]AccountWithConcurrency, 0, len(accounts))
+	compactBlocked := false
 	for i := range accounts {
 		account := &accounts[i]
 		if req.ExcludedIDs != nil {
@@ -245,6 +245,7 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 			continue
 		}
 		if schedGroup != nil && schedGroup.RequirePrivacySet && !account.IsPrivacySet() {
+			s.service.BlockAccountScheduling(account, time.Time{}, "privacy_not_set")
 			_ = s.service.accountRepo.SetError(ctx, account.ID,
 				fmt.Sprintf("Privacy not set, required by group [%s]", schedGroup.Name))
 			continue
@@ -255,6 +256,10 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 		if !s.isAccountTransportCompatible(account, req.RequiredTransport) {
 			continue
 		}
+		if req.RequireCompact && openAICompactSupportTier(account) == 0 {
+			compactBlocked = true
+			continue
+		}
 		filtered = append(filtered, account)
 		loadReq = append(loadReq, AccountWithConcurrency{
 			ID:             account.ID,
@@ -262,7 +267,7 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 		})
 	}
 	if len(filtered) == 0 {
-		return nil, 0, 0, errors.New("no available OpenAI accounts")
+		return nil, 0, 0, noAvailableOpenAISelectionError(req.RequestedModel, compactBlocked)
 	}
 
 	// 2. 批量加载负载信息

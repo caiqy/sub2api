@@ -149,12 +149,15 @@ gateway:
   # Timeout for waiting upstream response headers (seconds)
   # 等待上游响应头超时时间（秒）
   response_header_timeout: 600
+  # OpenAI/Codex upstream response header timeout (seconds, 0=disabled)
+  # OpenAI/Codex 等待上游响应头超时时间（秒，0=禁用本地响应头超时）
+  openai_response_header_timeout: 0
   # Max request body size in bytes (default: 256MB)
   # 请求体最大字节数（默认 256MB）
   max_body_size: 268435456
-  # Max bytes to read for non-stream upstream responses (default: 8MB)
-  # 非流式上游响应体读取上限（默认 8MB）
-  upstream_response_read_max_bytes: 8388608
+  # Max bytes to read for non-stream upstream responses (default: 128MB)
+  # 非流式上游响应体读取上限（默认 128MB）
+  upstream_response_read_max_bytes: 134217728
   # Max bytes to read for proxy probe responses (default: 1MB)
   # 代理探测响应体读取上限（默认 1MB）
   proxy_probe_response_read_max_bytes: 1048576
@@ -348,6 +351,14 @@ gateway:
       probe_max_failures: 3
       # 单次探针请求超时（秒）
       probe_timeout_seconds: 15
+  # OpenAI HTTP upstream protocol strategy.
+  # OpenAI HTTP 上游协议策略（gateway.openai_http2；默认 HTTP/2；代理明确不兼容时可临时回退 HTTP/1.1）。
+  openai_http2:
+    enabled: true
+    allow_proxy_fallback_to_http1: true
+    fallback_error_threshold: 2
+    fallback_window_seconds: 60
+    fallback_ttl_seconds: 600
   # HTTP upstream connection pool settings (HTTP/2 + multi-proxy scenario defaults)
   # HTTP 上游连接池配置（HTTP/2 + 多代理场景默认值）
   # Max idle connections across all hosts
@@ -436,6 +447,9 @@ gateway:
     # Enable batch load calculation for scheduling
     # 启用调度批量负载计算
     load_batch_enabled: true
+    # Tiny in-process TTL for batch load reads in milliseconds (0 disables)
+    # 调度批量负载读取的进程内短缓存 TTL（毫秒，0 表示禁用）
+    load_batch_cache_ttl_ms: 200
     # Slot cleanup interval (duration)
     # 并发槽位清理周期（时间段）
     slot_cleanup_interval: 30s
@@ -1029,6 +1043,9 @@ billing:
     # Number of requests to allow in half-open state
     # 半开状态允许通过的请求数
     half_open_requests: 3
+  # Cache TTL (seconds) for per-user × per-platform quota records
+  # 用户 × 平台 quota 缓存 TTL（秒），默认 86400=1天，覆盖典型 daily 窗口
+  user_platform_quota_cache_ttl_seconds: 86400
 
 # =============================================================================
 # Turnstile Configuration

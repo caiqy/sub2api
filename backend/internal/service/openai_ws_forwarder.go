@@ -1548,9 +1548,31 @@ func openAIWSRawItemsHasPrefix(items []json.RawMessage, prefix []json.RawMessage
 
 func openAIWSRawItemsHasFunctionCallOutput(items []json.RawMessage) bool {
 	for _, item := range items {
-		if gjson.GetBytes(item, "type").String() == "function_call_output" {
+		if isCodexToolCallOutputItemType(gjson.GetBytes(item, "type").String()) {
 			return true
 		}
+	}
+	return false
+}
+
+func openAIWSRawPayloadHasToolCallOutput(payload []byte) bool {
+	if len(payload) == 0 {
+		return false
+	}
+	input := gjson.GetBytes(payload, "input")
+	if !input.Exists() {
+		return false
+	}
+	if input.IsArray() {
+		for _, item := range input.Array() {
+			if isCodexToolCallOutputItemType(item.Get("type").String()) {
+				return true
+			}
+		}
+		return false
+	}
+	if input.Type == gjson.JSON {
+		return isCodexToolCallOutputItemType(input.Get("type").String())
 	}
 	return false
 }
@@ -2634,7 +2656,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	turnState := strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader))
 	stateStore := s.getOpenAIWSStateStore()
 	groupID := getOpenAIGroupIDFromContext(c)
-	sessionHash := s.GenerateSessionHash(c, firstPayload.rawForHash)
+	sessionHash := s.GenerateSessionHashWithFallback(c, firstPayload.rawForHash, openAIWSIngressSessionFallbackSeed(c, account, groupID))
 	if turnState == "" && stateStore != nil && sessionHash != "" {
 		if savedTurnState, ok := stateStore.GetSessionTurnState(groupID, sessionHash); ok {
 			turnState = savedTurnState
@@ -2855,7 +2877,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		turnPreviousResponseIDKind := ClassifyOpenAIPreviousResponseIDKind(turnPreviousResponseID)
 		turnPromptCacheKey := openAIWSPayloadStringFromRaw(payload, "prompt_cache_key")
 		turnStoreDisabled := s.isOpenAIWSStoreDisabledInRequestRaw(payload, account)
-		turnHasFunctionCallOutput := gjson.GetBytes(payload, `input.#(type=="function_call_output")`).Exists()
+		turnHasFunctionCallOutput := openAIWSRawPayloadHasToolCallOutput(payload)
 		eventCount := 0
 		tokenEventCount := 0
 		terminalEventCount := 0
@@ -3131,7 +3153,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	currentTurnReplayInputExists := false
 	skipBeforeTurn := false
 	hasCurrentOrReplayFunctionCallOutput := func(payload []byte) bool {
-		if gjson.GetBytes(payload, `input.#(type=="function_call_output")`).Exists() {
+		if openAIWSRawPayloadHasToolCallOutput(payload) {
 			return true
 		}
 		return currentTurnReplayInputExists && openAIWSRawItemsHasFunctionCallOutput(currentTurnReplayInput)
@@ -3256,7 +3278,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		currentPreviousResponseID := openAIWSPayloadStringFromRaw(currentPayload, "previous_response_id")
 		expectedPrev := strings.TrimSpace(lastTurnResponseID)
 		toolSignals := ToolContinuationSignals{
-			HasFunctionCallOutput: gjson.GetBytes(currentPayload, `input.#(type=="function_call_output")`).Exists(),
+			HasFunctionCallOutput: openAIWSRawPayloadHasToolCallOutput(currentPayload),
 		}
 		if toolSignals.HasFunctionCallOutput {
 			var currentReqBody map[string]any
@@ -3943,6 +3965,25 @@ func getOpenAIGroupIDFromContext(c *gin.Context) int64 {
 	return *apiKey.GroupID
 }
 
+func openAIWSIngressSessionFallbackSeed(c *gin.Context, account *Account, groupID int64) string {
+	if c == nil || account == nil || account.ID <= 0 {
+		return ""
+	}
+	apiKeyID := int64(0)
+	if apiKey := getAPIKeyFromContext(c); apiKey != nil {
+		apiKeyID = apiKey.ID
+	}
+	clientIP := strings.TrimSpace(c.ClientIP())
+	if clientIP == "" && c.Request != nil {
+		clientIP = strings.TrimSpace(c.Request.RemoteAddr)
+	}
+	userAgent := ""
+	if c.Request != nil {
+		userAgent = strings.TrimSpace(c.GetHeader("User-Agent"))
+	}
+	return fmt.Sprintf("openai_ws_ingress:group=%d:api_key=%d:account=%d:ip=%s:ua=%s", groupID, apiKeyID, account.ID, clientIP, userAgent)
+}
+
 // SelectAccountByPreviousResponseID 按 previous_response_id 命中账号粘连。
 // 未命中或账号不可用时返回 (nil, nil)，由调用方继续走常规调度。
 func (s *OpenAIGatewayService) SelectAccountByPreviousResponseID(
@@ -4100,7 +4141,7 @@ func (s *OpenAIGatewayService) persistOpenAIWSRateLimitSignal(ctx context.Contex
 	if !isOpenAIWSRateLimitError(codeRaw, errTypeRaw, msgRaw) {
 		return
 	}
-	s.rateLimitService.HandleUpstreamError(ctx, account, http.StatusTooManyRequests, headers, responseBody)
+	s.handleOpenAIAccountUpstreamError(ctx, account, http.StatusTooManyRequests, headers, responseBody)
 }
 
 func classifyOpenAIWSErrorEventFromRaw(codeRaw, errTypeRaw, msgRaw string) (string, bool) {
