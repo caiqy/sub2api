@@ -162,60 +162,62 @@ const isMessageRole = (value: unknown): value is ConversationMessageRole => {
 
 /**
  * Detect and parse SSE (Server-Sent Events) streaming response body.
- * Extracts the final complete response from `response.done` or `response.completed` events,
- * or reconstructs from `*.done` item events if no terminal event is found.
- * For chat completions streaming, concatenates delta content from choices.
+ *
+ * Strategy for OpenAI Responses API streams:
+ * - Collect the terminal `response.done` / `response.completed` envelope (carries id/model/usage/status)
+ * - Collect every `response.output_item.done` item (these carry the actual message/tool content)
+ * - If the terminal envelope already has a non-empty `output` array, return it as-is
+ * - Otherwise merge the collected items into the envelope's `output` (some servers omit `output`
+ *   on the terminal event when streaming is enabled, e.g. `store: false`)
+ * - If there's no terminal envelope at all, fall back to `{ output: items }`
+ *
+ * For Chat Completions streams, concatenate delta content from choices.
  */
 const parseSSEBody = (body: string): unknown | null => {
   // Quick check: SSE bodies have lines starting with "event:" or "data:"
   if (!body.includes('data:')) return null
 
   const lines = body.split('\n')
-  const dataLines: string[] = []
-  let currentEvent = ''
+  let hasData = false
 
-  for (const line of lines) {
-    if (line.startsWith('event:')) {
-      currentEvent = line.slice(6).trim()
-    } else if (line.startsWith('data:')) {
-      const data = line.slice(5).trim()
-      if (data && data !== '[DONE]') {
-        dataLines.push(JSON.stringify({ _event: currentEvent, _data: data }))
-      }
-    }
-  }
+  // Single pass: collect terminal envelope + output items
+  let terminalResponse: Record<string, unknown> | null = null
+  const outputItems: unknown[] = []
 
-  if (dataLines.length === 0) return null
-
-  // Strategy 1: Look for response.done (OpenAI Responses API terminal event)
   for (const line of lines) {
     if (!line.startsWith('data:')) continue
     const data = line.slice(5).trim()
     if (!data || data === '[DONE]') continue
+    hasData = true
     try {
       const parsed = JSON.parse(data)
-      if (parsed?.type === 'response.done' && isRecord(parsed.response)) {
-        return parsed.response
+      if (!isRecord(parsed)) continue
+      if (
+        (parsed.type === 'response.done' || parsed.type === 'response.completed') &&
+        isRecord(parsed.response)
+      ) {
+        // Last terminal event wins (Responses API only emits one, but be defensive).
+        terminalResponse = parsed.response
       }
-      if (parsed?.type === 'response.completed' && isRecord(parsed.response)) {
-        return parsed.response
+      if (parsed.type === 'response.output_item.done' && parsed.item !== undefined) {
+        outputItems.push(parsed.item)
       }
     } catch { /* skip unparseable lines */ }
   }
 
-  // Strategy 2: Collect output_item.done events to reconstruct response output array
-  const outputItems: unknown[] = []
-  for (const line of lines) {
-    if (!line.startsWith('data:')) continue
-    const data = line.slice(5).trim()
-    if (!data || data === '[DONE]') continue
-    try {
-      const parsed = JSON.parse(data)
-      if (parsed?.type === 'response.output_item.done' && parsed.item) {
-        outputItems.push(parsed.item)
-      }
-    } catch { /* skip */ }
+  if (!hasData) return null
+
+  if (terminalResponse) {
+    const terminalOutput = terminalResponse.output
+    const hasTerminalOutput = Array.isArray(terminalOutput) && terminalOutput.length > 0
+    if (hasTerminalOutput) return terminalResponse
+    if (outputItems.length > 0) {
+      // Preserve envelope metadata, fill missing output from collected items.
+      return { ...terminalResponse, output: outputItems }
+    }
+    return terminalResponse
   }
+
   if (outputItems.length > 0) {
     return { output: outputItems }
   }

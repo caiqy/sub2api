@@ -16,6 +16,7 @@ export const TOOL_LABELS: Record<string, string> = {
   question: '提问',
   todoread: '读取任务列表',
   todowrite: '更新任务列表',
+  skill: '加载技能',
 }
 
 type ToolDisplayOptions = {
@@ -83,6 +84,7 @@ const detailForTool = (tool: string, input: Record<string, unknown> | undefined)
   if (tool === 'webfetch') return stringValue(input.url)
   if (tool === 'websearch') return stringValue(input.query)
   if (tool === 'task' || tool === 'question') return stringValue(input.description) ?? stringValue(input.prompt)
+  if (tool === 'skill') return stringValue(input.name)
 
   return undefined
 }

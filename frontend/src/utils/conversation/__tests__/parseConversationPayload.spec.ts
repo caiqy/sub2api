@@ -37,6 +37,7 @@ describe('conversation format helpers', () => {
     expect(getToolLabel('read')).toBe('查看')
     expect(getToolLabel('grep')).toBe('文本查找')
     expect(getToolLabel('webfetch')).toBe('抓取网页')
+    expect(getToolLabel('skill')).toBe('加载技能')
     expect(getToolLabel('unknown_tool')).toBe('unknown_tool')
   })
 
@@ -45,6 +46,8 @@ describe('conversation format helpers', () => {
     expect(getToolDisplayName({ tool: 'read', input: { filePath: 'src/app.ts' } })).toBe('查看：app.ts')
     expect(getToolDisplayName({ tool: 'grep', input: { pattern: 'timeout', include: '*.ts' } })).toBe('文本查找：timeout (*.ts)')
     expect(getToolDisplayName({ tool: 'webfetch', input: { url: 'https://example.com' } })).toBe('抓取网页：https://example.com')
+    expect(getToolDisplayName({ tool: 'skill', input: { name: 'requesting-code-review' } })).toBe('加载技能：requesting-code-review')
+    expect(getToolDisplayName({ tool: 'skill', input: {} })).toBe('加载技能')
     expect(getToolDisplayName({ tool: 'bash', callId: 'call_123', input: { command: 'pwd' } } satisfies Partial<ConversationToolPart> & { tool: string })).toBe('执行命令')
   })
 
@@ -611,6 +614,54 @@ describe('parseConversationPayload', () => {
 
     expect(flow.messages?.[1].parts.map((part) => part.type)).toEqual(['reasoning', 'tool', 'text'])
     expect(flow.messages?.[1].parts[2]).toMatchObject({ type: 'text', text: 'Summary complete.' })
+  })
+
+  it('[SSE] reconstructs Responses stream when response.completed envelope omits output', () => {
+    // Real-world shape: store=false streams send `response.completed` without an `output` array;
+    // the actual content lives in `response.output_item.done` items.
+    const sse = [
+      'event: response.created',
+      'data: {"type":"response.created","response":{"id":"resp_1","status":"in_progress"}}',
+      '',
+      'event: response.output_item.added',
+      'data: {"type":"response.output_item.added","item":{"id":"msg_1","type":"message","role":"assistant","content":[]},"output_index":0}',
+      '',
+      'event: response.output_text.delta',
+      'data: {"type":"response.output_text.delta","delta":"已完成","item_id":"msg_1","output_index":0}',
+      '',
+      'event: response.output_item.done',
+      'data: {"type":"response.output_item.done","item":{"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"已完成：合并到 main"}]},"output_index":0}',
+      '',
+      'event: response.completed',
+      'data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","model":"gpt-5","usage":{"total_tokens":42}}}',
+      '',
+    ].join('\n')
+
+    const flow = parseConversationPayload({
+      requestBody: JSON.stringify({ input: [{ role: 'user', content: [{ type: 'input_text', text: 'merge' }] }] }),
+      responseBody: sse,
+    })
+
+    expect(flow.format).toBe('openai-responses')
+    expect(flow.messages?.map((message) => message.role)).toEqual(['user', 'assistant'])
+    expect(flow.messages?.[1].parts).toMatchObject([{ type: 'text', text: '已完成：合并到 main' }])
+    // Should NOT degrade to raw response when content is reconstructable.
+    expect(flow.messages?.[1].parts.some((part) => part.type === 'raw')).toBe(false)
+  })
+
+  it('[SSE] preserves response.completed envelope output when already populated', () => {
+    const sse = [
+      'event: response.completed',
+      'data: {"type":"response.completed","response":{"id":"resp_2","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"From envelope"}]}]}}',
+      '',
+    ].join('\n')
+
+    const flow = parseConversationPayload({
+      requestBody: JSON.stringify({ input: [{ role: 'user', content: [{ type: 'input_text', text: 'q' }] }] }),
+      responseBody: sse,
+    })
+
+    expect(flow.messages?.[1].parts).toMatchObject([{ type: 'text', text: 'From envelope' }])
   })
 
   it('keeps unrecognized Responses input and output items as collapsed raw parts', () => {
