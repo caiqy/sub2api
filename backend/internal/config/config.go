@@ -970,14 +970,15 @@ type GatewayOpenAIWSSchedulerScoreWeights struct {
 
 // GatewayOpenAIWSSchedulerLayeredConfig 分层调度器配置。
 type GatewayOpenAIWSSchedulerLayeredConfig struct {
-	ErrorPenaltyThreshold float64 `mapstructure:"error_penalty_threshold"`
-	ErrorPenaltyValue     int     `mapstructure:"error_penalty_value"`
-	TTFTPenaltyMultiplier float64 `mapstructure:"ttft_penalty_multiplier"`
-	TTFTPenaltyValue      int     `mapstructure:"ttft_penalty_value"`
-	ProbeCooldownSeconds  int     `mapstructure:"probe_cooldown_seconds"`
-	ProbeIntervalSeconds  int     `mapstructure:"probe_interval_seconds"`
-	ProbeMaxFailures      int     `mapstructure:"probe_max_failures"`
-	ProbeTimeoutSeconds   int     `mapstructure:"probe_timeout_seconds"`
+	ErrorPenaltyThreshold         float64 `mapstructure:"error_penalty_threshold"`
+	ErrorPenaltyValue             int     `mapstructure:"error_penalty_value"`
+	TTFTPenaltyMultiplier         float64 `mapstructure:"ttft_penalty_multiplier"`
+	TTFTPenaltyValue              int     `mapstructure:"ttft_penalty_value"`
+	ProbeCooldownSeconds          int     `mapstructure:"probe_cooldown_seconds"`
+	ProbeIntervalSeconds          int     `mapstructure:"probe_interval_seconds"`
+	ProbeMaxFailures              int     `mapstructure:"probe_max_failures"`
+	ProbeTimeoutSeconds           int     `mapstructure:"probe_timeout_seconds"`
+	ProbeTempUnschedulableSeconds int     `mapstructure:"probe_temp_unschedulable_seconds"`
 }
 
 // GatewayUsageRecordConfig 使用量记录异步队列配置
@@ -1872,6 +1873,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_ws.scheduler_layered.probe_interval_seconds", 30)
 	viper.SetDefault("gateway.openai_ws.scheduler_layered.probe_max_failures", 3)
 	viper.SetDefault("gateway.openai_ws.scheduler_layered.probe_timeout_seconds", 15)
+	viper.SetDefault("gateway.openai_ws.scheduler_layered.probe_temp_unschedulable_seconds", 1800)
 	// OpenAI HTTP upstream protocol strategy
 	viper.SetDefault("gateway.openai_http2.enabled", true)
 	viper.SetDefault("gateway.openai_http2.allow_proxy_fallback_to_http1", true)
@@ -2686,6 +2688,9 @@ func (c *Config) Validate() error {
 		}
 		if sl.ProbeTimeoutSeconds <= 0 {
 			return fmt.Errorf("gateway.openai_ws.scheduler_layered.probe_timeout_seconds must be positive")
+		}
+		if sl.ProbeTempUnschedulableSeconds <= 0 {
+			return fmt.Errorf("gateway.openai_ws.scheduler_layered.probe_temp_unschedulable_seconds must be positive")
 		}
 	}
 	if c.Gateway.MaxLineSize < 0 {

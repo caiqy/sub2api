@@ -598,19 +598,20 @@ func TestSettingHandler_UpdateSettings_PersistsStickyAndLayeredSchedulerSettings
 	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
 
 	body := map[string]any{
-		"promo_code_enabled":                                          false,
-		"gateway_sticky_openai_enabled":                               false,
-		"gateway_sticky_gemini_enabled":                               true,
-		"gateway_sticky_anthropic_enabled":                            false,
-		"gateway_openai_ws_scheduler_mode":                            " Layered ",
-		"gateway_openai_ws_scheduler_layered_error_penalty_threshold": 0.6,
-		"gateway_openai_ws_scheduler_layered_error_penalty_value":     100,
-		"gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier": 12,
-		"gateway_openai_ws_scheduler_layered_ttft_penalty_value":      50,
-		"gateway_openai_ws_scheduler_layered_probe_cooldown_seconds":  20,
-		"gateway_openai_ws_scheduler_layered_probe_interval_seconds":  20,
-		"gateway_openai_ws_scheduler_layered_probe_max_failures":      3,
-		"gateway_openai_ws_scheduler_layered_probe_timeout_seconds":   15,
+		"promo_code_enabled":                                                   false,
+		"gateway_sticky_openai_enabled":                                        false,
+		"gateway_sticky_gemini_enabled":                                        true,
+		"gateway_sticky_anthropic_enabled":                                     false,
+		"gateway_openai_ws_scheduler_mode":                                     " Layered ",
+		"gateway_openai_ws_scheduler_layered_error_penalty_threshold":          0.6,
+		"gateway_openai_ws_scheduler_layered_error_penalty_value":              100,
+		"gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier":          12,
+		"gateway_openai_ws_scheduler_layered_ttft_penalty_value":               50,
+		"gateway_openai_ws_scheduler_layered_probe_cooldown_seconds":           20,
+		"gateway_openai_ws_scheduler_layered_probe_interval_seconds":           20,
+		"gateway_openai_ws_scheduler_layered_probe_max_failures":               3,
+		"gateway_openai_ws_scheduler_layered_probe_timeout_seconds":            15,
+		"gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds": 900,
 	}
 	rawBody, err := json.Marshal(body)
 	require.NoError(t, err)
@@ -635,10 +636,12 @@ func TestSettingHandler_UpdateSettings_PersistsStickyAndLayeredSchedulerSettings
 	require.Equal(t, "20", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds])
 	require.Equal(t, "3", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeMaxFailures])
 	require.Equal(t, "15", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds])
+	require.Equal(t, "900", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds])
 	require.False(t, cfg.Gateway.Sticky.OpenAI.Enabled)
 	require.True(t, cfg.Gateway.Sticky.Gemini.Enabled)
 	require.False(t, cfg.Gateway.Sticky.Anthropic.Enabled)
 	require.Equal(t, "layered", cfg.Gateway.OpenAIWS.SchedulerMode)
+	require.Equal(t, 900, cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTempUnschedulableSeconds)
 }
 
 func TestSettingHandler_UpdateSettings_PersistsFastPolicyTogetherWithStickyAndLayeredSettings(t *testing.T) {
@@ -649,19 +652,20 @@ func TestSettingHandler_UpdateSettings_PersistsFastPolicyTogetherWithStickyAndLa
 	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
 
 	body := map[string]any{
-		"promo_code_enabled":                                          true,
-		"gateway_sticky_openai_enabled":                               true,
-		"gateway_sticky_gemini_enabled":                               false,
-		"gateway_sticky_anthropic_enabled":                            true,
-		"gateway_openai_ws_scheduler_mode":                            "layered",
-		"gateway_openai_ws_scheduler_layered_error_penalty_threshold": 0.55,
-		"gateway_openai_ws_scheduler_layered_error_penalty_value":     77,
-		"gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier": 6,
-		"gateway_openai_ws_scheduler_layered_ttft_penalty_value":      33,
-		"gateway_openai_ws_scheduler_layered_probe_cooldown_seconds":  44,
-		"gateway_openai_ws_scheduler_layered_probe_interval_seconds":  22,
-		"gateway_openai_ws_scheduler_layered_probe_max_failures":      5,
-		"gateway_openai_ws_scheduler_layered_probe_timeout_seconds":   11,
+		"promo_code_enabled":                                                   true,
+		"gateway_sticky_openai_enabled":                                        true,
+		"gateway_sticky_gemini_enabled":                                        false,
+		"gateway_sticky_anthropic_enabled":                                     true,
+		"gateway_openai_ws_scheduler_mode":                                     "layered",
+		"gateway_openai_ws_scheduler_layered_error_penalty_threshold":          0.55,
+		"gateway_openai_ws_scheduler_layered_error_penalty_value":              77,
+		"gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier":          6,
+		"gateway_openai_ws_scheduler_layered_ttft_penalty_value":               33,
+		"gateway_openai_ws_scheduler_layered_probe_cooldown_seconds":           44,
+		"gateway_openai_ws_scheduler_layered_probe_interval_seconds":           22,
+		"gateway_openai_ws_scheduler_layered_probe_max_failures":               5,
+		"gateway_openai_ws_scheduler_layered_probe_timeout_seconds":            11,
+		"gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds": 1200,
 		"openai_fast_policy_settings": map[string]any{
 			"rules": []map[string]any{{
 				"service_tier":           "priority",
@@ -696,6 +700,7 @@ func TestSettingHandler_UpdateSettings_PersistsFastPolicyTogetherWithStickyAndLa
 	require.Equal(t, "22", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds])
 	require.Equal(t, "5", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeMaxFailures])
 	require.Equal(t, "11", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds])
+	require.Equal(t, "1200", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds])
 	require.NotEmpty(t, repo.values[service.SettingKeyOpenAIFastPolicySettings])
 
 	var persistedFastPolicy map[string]any
@@ -731,6 +736,7 @@ func TestSettingHandler_UpdateSettings_PersistsFastPolicyTogetherWithStickyAndLa
 	require.Equal(t, float64(22), data["gateway_openai_ws_scheduler_layered_probe_interval_seconds"])
 	require.Equal(t, float64(5), data["gateway_openai_ws_scheduler_layered_probe_max_failures"])
 	require.Equal(t, float64(11), data["gateway_openai_ws_scheduler_layered_probe_timeout_seconds"])
+	require.Equal(t, float64(1200), data["gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds"])
 
 	fastPolicyResp, ok := data["openai_fast_policy_settings"].(map[string]any)
 	require.True(t, ok)

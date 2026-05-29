@@ -13,6 +13,50 @@ import (
 
 type openaiOAuthClientRefreshStub struct {
 	refreshCalls int32
+	tokenResp    *openai.TokenResponse
+	err          error
+}
+
+type openAITokenProviderRefreshRepoStub struct {
+	AccountRepository
+	account *Account
+}
+
+func (r *openAITokenProviderRefreshRepoStub) GetByID(context.Context, int64) (*Account, error) {
+	return r.account, nil
+}
+
+func (r *openAITokenProviderRefreshRepoStub) Update(context.Context, *Account) error {
+	return nil
+}
+
+func (r *openAITokenProviderRefreshRepoStub) UpdateCredentials(_ context.Context, _ int64, credentials map[string]any) error {
+	if r.account != nil {
+		r.account.Credentials = cloneCredentials(credentials)
+	}
+	return nil
+}
+
+type openAITokenProviderRefreshCacheStub struct{}
+
+func (c *openAITokenProviderRefreshCacheStub) GetAccessToken(context.Context, string) (string, error) {
+	return "", nil
+}
+
+func (c *openAITokenProviderRefreshCacheStub) SetAccessToken(context.Context, string, string, time.Duration) error {
+	return nil
+}
+
+func (c *openAITokenProviderRefreshCacheStub) DeleteAccessToken(context.Context, string) error {
+	return nil
+}
+
+func (c *openAITokenProviderRefreshCacheStub) AcquireRefreshLock(context.Context, string, time.Duration) (bool, error) {
+	return true, nil
+}
+
+func (c *openAITokenProviderRefreshCacheStub) ReleaseRefreshLock(context.Context, string) error {
+	return nil
 }
 
 func (s *openaiOAuthClientRefreshStub) ExchangeCode(ctx context.Context, code, codeVerifier, redirectURI, proxyURL, clientID string) (*openai.TokenResponse, error) {
@@ -21,11 +65,23 @@ func (s *openaiOAuthClientRefreshStub) ExchangeCode(ctx context.Context, code, c
 
 func (s *openaiOAuthClientRefreshStub) RefreshToken(ctx context.Context, refreshToken, proxyURL string) (*openai.TokenResponse, error) {
 	atomic.AddInt32(&s.refreshCalls, 1)
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.tokenResp != nil {
+		return s.tokenResp, nil
+	}
 	return nil, errors.New("not implemented")
 }
 
 func (s *openaiOAuthClientRefreshStub) RefreshTokenWithClientID(ctx context.Context, refreshToken, proxyURL string, clientID string) (*openai.TokenResponse, error) {
 	atomic.AddInt32(&s.refreshCalls, 1)
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.tokenResp != nil {
+		return s.tokenResp, nil
+	}
 	return nil, errors.New("not implemented")
 }
 
@@ -95,4 +151,35 @@ func TestOpenAITokenProvider_NoRefreshTokenExpiredAccessTokenReturnsError(t *tes
 	require.Error(t, err)
 	require.Empty(t, token)
 	require.Contains(t, err.Error(), "refresh_token is missing")
+}
+
+func TestOpenAITokenProvider_RefreshesWhenAccessTokenMissingWithFutureExpiry(t *testing.T) {
+	client := &openaiOAuthClientRefreshStub{tokenResp: &openai.TokenResponse{
+		AccessToken:  "new-access-token",
+		RefreshToken: "new-refresh-token",
+		ExpiresIn:    3600,
+	}}
+	repo := &openAITokenProviderRefreshRepoStub{}
+	cache := &openAITokenProviderRefreshCacheStub{}
+	provider := NewOpenAITokenProvider(repo, cache, NewOpenAIOAuthService(nil, client))
+	refreshAPI := NewOAuthRefreshAPI(repo, cache)
+	provider.SetRefreshAPI(refreshAPI, NewOpenAITokenRefresher(NewOpenAIOAuthService(nil, client), repo))
+
+	expiresAt := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	account := &Account{
+		ID:       78,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"refresh_token": "old-refresh-token",
+			"expires_at":    expiresAt,
+		},
+	}
+	repo.account = account
+
+	token, err := provider.GetAccessToken(context.Background(), account)
+
+	require.NoError(t, err)
+	require.Equal(t, "new-access-token", token)
+	require.Equal(t, int32(1), atomic.LoadInt32(&client.refreshCalls))
 }

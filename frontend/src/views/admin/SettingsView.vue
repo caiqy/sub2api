@@ -4042,6 +4042,10 @@
                   <label class="input-label">{{ t("admin.settings.openaiWsScheduler.probeTimeoutSeconds") }}</label>
                   <input data-testid="gateway-openai-ws-scheduler-layered-probe-timeout-seconds" v-model.number="form.gateway_openai_ws_scheduler_layered_probe_timeout_seconds" type="number" min="1" step="1" class="input" />
                 </div>
+                <div>
+                  <label class="input-label">{{ t("admin.settings.openaiWsScheduler.probeTempUnschedulableSeconds") }}</label>
+                  <input data-testid="gateway-openai-ws-scheduler-layered-probe-temp-unschedulable-seconds" v-model.number="form.gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds" type="number" min="1" step="1" class="input" />
+                </div>
               </div>
             </div>
           </div>
@@ -7457,6 +7461,7 @@ const form = reactive<SettingsForm>({
   gateway_openai_ws_scheduler_layered_probe_interval_seconds: 30,
   gateway_openai_ws_scheduler_layered_probe_max_failures: 3,
   gateway_openai_ws_scheduler_layered_probe_timeout_seconds: 15,
+  gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds: 1800,
   openai_advanced_scheduler_enabled: false,
   // Gateway forwarding behavior
   enable_fingerprint_unification: true,
@@ -8581,6 +8586,8 @@ async function saveSettings() {
         form.gateway_openai_ws_scheduler_layered_probe_max_failures,
       gateway_openai_ws_scheduler_layered_probe_timeout_seconds:
         form.gateway_openai_ws_scheduler_layered_probe_timeout_seconds,
+      gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds:
+        form.gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds,
       enable_fingerprint_unification: form.enable_fingerprint_unification,
       enable_metadata_passthrough: form.enable_metadata_passthrough,
       enable_cch_signing: form.enable_cch_signing,

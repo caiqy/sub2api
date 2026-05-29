@@ -62,6 +62,7 @@ func TestGatewayHandler_GeminiV1BetaModels_UpstreamErrorStillCreatesUsageLog(t *
 	billingService := service.NewBillingService(cfg, nil)
 	concurrencyService := service.NewConcurrencyService(testutil.StubConcurrencyCache{})
 	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg)
+	settingService := newHandlerTestSettingService(cfg)
 	t.Cleanup(func() { billingCacheService.Stop() })
 
 	gatewayService := service.NewGatewayService(
@@ -86,6 +87,11 @@ func TestGatewayHandler_GeminiV1BetaModels_UpstreamErrorStillCreatesUsageLog(t *
 		testutil.StubSessionLimitCache{},
 		nil,
 		nil,
+		settingService,
+		nil,
+		nil,
+		nil,
+		nil,
 		nil,
 	)
 	geminiCompatService := service.NewGeminiMessagesCompatService(
@@ -99,7 +105,7 @@ func TestGatewayHandler_GeminiV1BetaModels_UpstreamErrorStillCreatesUsageLog(t *
 		nil,
 		cfg,
 	)
-	h := NewGatewayHandler(gatewayService, geminiCompatService, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, cfg, nil)
+	h := NewGatewayHandler(gatewayService, geminiCompatService, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 
 	apiKey := &service.APIKey{
 		ID:      101,
@@ -182,6 +188,7 @@ func TestGatewayHandler_GeminiV1BetaModels_FailoverExhaustedStillCreatesUsageLog
 	billingService := service.NewBillingService(cfg, nil)
 	concurrencyService := service.NewConcurrencyService(testutil.StubConcurrencyCache{})
 	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg)
+	settingService := newHandlerTestSettingService(cfg)
 	t.Cleanup(func() { billingCacheService.Stop() })
 
 	gatewayService := service.NewGatewayService(
@@ -206,6 +213,11 @@ func TestGatewayHandler_GeminiV1BetaModels_FailoverExhaustedStillCreatesUsageLog
 		testutil.StubSessionLimitCache{},
 		nil,
 		nil,
+		settingService,
+		nil,
+		nil,
+		nil,
+		nil,
 		nil,
 	)
 	geminiCompatService := service.NewGeminiMessagesCompatService(
@@ -219,7 +231,7 @@ func TestGatewayHandler_GeminiV1BetaModels_FailoverExhaustedStillCreatesUsageLog
 		nil,
 		cfg,
 	)
-	h := NewGatewayHandler(gatewayService, geminiCompatService, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, cfg, nil)
+	h := NewGatewayHandler(gatewayService, geminiCompatService, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 	h.maxAccountSwitchesGemini = 0
 
 	apiKey := &service.APIKey{
@@ -299,6 +311,7 @@ func TestGatewayHandler_GeminiV1BetaModels_SelectionExhaustedAfterFailoverStillC
 	billingService := service.NewBillingService(cfg, nil)
 	concurrencyService := service.NewConcurrencyService(testutil.StubConcurrencyCache{})
 	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg)
+	settingService := newHandlerTestSettingService(cfg)
 	t.Cleanup(func() { billingCacheService.Stop() })
 
 	gatewayService := service.NewGatewayService(
@@ -323,6 +336,11 @@ func TestGatewayHandler_GeminiV1BetaModels_SelectionExhaustedAfterFailoverStillC
 		testutil.StubSessionLimitCache{},
 		nil,
 		nil,
+		settingService,
+		nil,
+		nil,
+		nil,
+		nil,
 		nil,
 	)
 	geminiCompatService := service.NewGeminiMessagesCompatService(
@@ -336,7 +354,7 @@ func TestGatewayHandler_GeminiV1BetaModels_SelectionExhaustedAfterFailoverStillC
 		nil,
 		cfg,
 	)
-	h := NewGatewayHandler(gatewayService, geminiCompatService, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, cfg, nil)
+	h := NewGatewayHandler(gatewayService, geminiCompatService, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 
 	apiKey := &service.APIKey{
 		ID:      101,

@@ -6508,7 +6508,8 @@ export default {
         probeCooldownSeconds: '探测冷却（秒）',
         probeIntervalSeconds: '探测间隔（秒）',
         probeMaxFailures: '探测最大失败次数',
-        probeTimeoutSeconds: '探测超时（秒）'
+        probeTimeoutSeconds: '探测超时（秒）',
+        probeTempUnschedulableSeconds: '临时不可调度冷却（秒）'
       },
       overloadCooldown: {
         title: '529 过载冷却',

@@ -805,6 +805,9 @@ func (s *SettingService) loadGatewayControlSettingsFromDB(ctx context.Context) {
 	if value, err := s.settingRepo.GetValue(ctx, SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds); err == nil {
 		applyPositiveIntSetting(&s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTimeoutSeconds, value)
 	}
+	if value, err := s.settingRepo.GetValue(ctx, SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds); err == nil {
+		applyPositiveIntSettingWithDefault(&s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTempUnschedulableSeconds, value, probeDefaultTempUnschedulableSeconds)
+	}
 }
 
 func applyGatewayOpenAIWSSchedulerMode(target *string, raw string) {
@@ -823,6 +826,19 @@ func applyPositiveIntSetting(target *int, raw string) {
 	}
 	if parsed, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && parsed > 0 {
 		*target = parsed
+	}
+}
+
+func applyPositiveIntSettingWithDefault(target *int, raw string, defaultValue int) {
+	if target == nil {
+		return
+	}
+	if parsed, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && parsed > 0 {
+		*target = parsed
+		return
+	}
+	if defaultValue > 0 {
+		*target = defaultValue
 	}
 }
 
@@ -2050,6 +2066,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds] = strconv.Itoa(settings.GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds)
 	updates[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeMaxFailures] = strconv.Itoa(settings.GatewayOpenAIWSSchedulerLayeredProbeMaxFailures)
 	updates[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds] = strconv.Itoa(settings.GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds)
+	updates[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds] = strconv.Itoa(settings.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds)
 
 	// Gateway forwarding behavior
 	updates[SettingKeyEnableFingerprintUnification] = strconv.FormatBool(settings.EnableFingerprintUnification)
@@ -2176,6 +2193,7 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeIntervalSeconds = settings.GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds
 		s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeMaxFailures = settings.GatewayOpenAIWSSchedulerLayeredProbeMaxFailures
 		s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTimeoutSeconds = settings.GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds
+		s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTempUnschedulableSeconds = settings.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds
 	}
 
 	// 先使 inflight singleflight 失效，再刷新缓存，缩小旧值覆盖新值的竞态窗口
@@ -3092,6 +3110,12 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 			}
 			return 0
 		}(),
+		GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds: func() int {
+			if s != nil && s.cfg != nil {
+				return s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTempUnschedulableSeconds
+			}
+			return 0
+		}(),
 	}
 	if raw, ok := settings[SettingKeyGatewayStickyOpenAIEnabled]; ok && strings.TrimSpace(raw) != "" {
 		result.GatewayStickyOpenAIEnabled = raw == "true"
@@ -3128,6 +3152,11 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	}
 	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds]; ok {
 		applyPositiveIntSetting(&result.GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds, raw)
+	}
+	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds]; ok {
+		applyPositiveIntSettingWithDefault(&result.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds, raw, probeDefaultTempUnschedulableSeconds)
+	} else if result.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds <= 0 {
+		result.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds = probeDefaultTempUnschedulableSeconds
 	}
 	result.TableDefaultPageSize, result.TablePageSizeOptions = parseTablePreferences(
 		settings[SettingKeyTableDefaultPageSize],

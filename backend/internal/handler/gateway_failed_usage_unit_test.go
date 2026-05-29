@@ -64,6 +64,7 @@ func TestGatewayHandler_MessagesForwardErrorStillCreatesUsageLog(t *testing.T) {
 	billingService := service.NewBillingService(cfg, nil)
 	concurrencyService := service.NewConcurrencyService(testutil.StubConcurrencyCache{})
 	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg)
+	settingService := newHandlerTestSettingService(cfg)
 	t.Cleanup(func() { billingCacheService.Stop() })
 
 	gatewayService := service.NewGatewayService(
@@ -88,9 +89,14 @@ func TestGatewayHandler_MessagesForwardErrorStillCreatesUsageLog(t *testing.T) {
 		testutil.StubSessionLimitCache{},
 		nil,
 		nil,
+		settingService,
+		nil,
+		nil,
+		nil,
+		nil,
 		nil,
 	)
-	h := NewGatewayHandler(gatewayService, nil, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, cfg, nil)
+	h := NewGatewayHandler(gatewayService, nil, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 
 	apiKey := &service.APIKey{
 		ID:      101,
@@ -129,7 +135,7 @@ func TestGatewayHandler_MessagesForwardErrorStillCreatesUsageLog(t *testing.T) {
 	require.NotNil(t, usageLogRepo.lastLog.DetailSnapshot)
 	require.JSONEq(t, reqBody, usageLogRepo.lastLog.DetailSnapshot.RequestBody)
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, "anthropic upstream rejected payload")
-	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "X-Api-Key: anthropic-test-key")
+	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "x-api-key: anthropic-test-key")
 }
 
 func TestGatewayHandler_MessagesFailoverExhaustedStillCreatesUsageLog(t *testing.T) {
@@ -177,6 +183,7 @@ func TestGatewayHandler_MessagesFailoverExhaustedStillCreatesUsageLog(t *testing
 	billingService := service.NewBillingService(cfg, nil)
 	concurrencyService := service.NewConcurrencyService(testutil.StubConcurrencyCache{})
 	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg)
+	settingService := newHandlerTestSettingService(cfg)
 	t.Cleanup(func() { billingCacheService.Stop() })
 
 	gatewayService := service.NewGatewayService(
@@ -201,9 +208,14 @@ func TestGatewayHandler_MessagesFailoverExhaustedStillCreatesUsageLog(t *testing
 		testutil.StubSessionLimitCache{},
 		nil,
 		nil,
+		settingService,
+		nil,
+		nil,
+		nil,
+		nil,
 		nil,
 	)
-	h := NewGatewayHandler(gatewayService, nil, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, cfg, nil)
+	h := NewGatewayHandler(gatewayService, nil, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 	h.maxAccountSwitches = 0
 
 	apiKey := &service.APIKey{
@@ -237,7 +249,7 @@ func TestGatewayHandler_MessagesFailoverExhaustedStillCreatesUsageLog(t *testing
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseHeaders, "X-Request-Id: gateway_failover_123")
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, `"anthropic_rate_limited_raw"`)
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, "anthropic raw failover")
-	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "X-Api-Key: anthropic-test-key")
+	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "x-api-key: anthropic-test-key")
 }
 
 func TestGatewayHandler_MessagesSelectionExhaustedAfterFailoverStillCreatesUsageLog(t *testing.T) {
@@ -285,6 +297,7 @@ func TestGatewayHandler_MessagesSelectionExhaustedAfterFailoverStillCreatesUsage
 	billingService := service.NewBillingService(cfg, nil)
 	concurrencyService := service.NewConcurrencyService(testutil.StubConcurrencyCache{})
 	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg)
+	settingService := newHandlerTestSettingService(cfg)
 	t.Cleanup(func() { billingCacheService.Stop() })
 
 	gatewayService := service.NewGatewayService(
@@ -309,9 +322,14 @@ func TestGatewayHandler_MessagesSelectionExhaustedAfterFailoverStillCreatesUsage
 		testutil.StubSessionLimitCache{},
 		nil,
 		nil,
+		settingService,
+		nil,
+		nil,
+		nil,
+		nil,
 		nil,
 	)
-	h := NewGatewayHandler(gatewayService, nil, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, cfg, nil)
+	h := NewGatewayHandler(gatewayService, nil, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 
 	apiKey := &service.APIKey{
 		ID:      101,
@@ -343,7 +361,7 @@ func TestGatewayHandler_MessagesSelectionExhaustedAfterFailoverStillCreatesUsage
 	require.NotNil(t, usageLogRepo.lastLog.DetailSnapshot)
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, `"anthropic_rate_limited_raw"`)
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, "anthropic raw failover")
-	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "X-Api-Key: anthropic-test-key")
+	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "x-api-key: anthropic-test-key")
 }
 
 func TestGatewayHandler_MessagesStreamingPartialWriteFailureStillCreatesUsageLog(t *testing.T) {
@@ -393,6 +411,7 @@ func TestGatewayHandler_MessagesStreamingPartialWriteFailureStillCreatesUsageLog
 	billingService := service.NewBillingService(cfg, nil)
 	concurrencyService := service.NewConcurrencyService(testutil.StubConcurrencyCache{})
 	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg)
+	settingService := newHandlerTestSettingService(cfg)
 	t.Cleanup(func() { billingCacheService.Stop() })
 
 	gatewayService := service.NewGatewayService(
@@ -417,9 +436,14 @@ func TestGatewayHandler_MessagesStreamingPartialWriteFailureStillCreatesUsageLog
 		testutil.StubSessionLimitCache{},
 		nil,
 		nil,
+		settingService,
+		nil,
+		nil,
+		nil,
+		nil,
 		nil,
 	)
-	h := NewGatewayHandler(gatewayService, nil, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, cfg, nil)
+	h := NewGatewayHandler(gatewayService, nil, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 
 	apiKey := &service.APIKey{
 		ID:      101,

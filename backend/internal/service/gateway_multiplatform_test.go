@@ -852,6 +852,7 @@ func TestGatewayService_StickyDisabledBypassLogs(t *testing.T) {
 
 	t.Run("load aware lookup logs bypass", func(t *testing.T) {
 		buf := captureSlogOutput(t)
+		ctx := WithPrefetchedStickySession(context.Background(), 1, 0, false)
 		repo := &mockAccountRepoForPlatform{
 			accounts:     []Account{{ID: 1, Platform: PlatformAnthropic, Priority: 1, Status: StatusActive, Schedulable: true, Concurrency: 5}},
 			accountsByID: map[int64]*Account{},
@@ -869,7 +870,7 @@ func TestGatewayService_StickyDisabledBypassLogs(t *testing.T) {
 			concurrencyService: NewConcurrencyService(&mockConcurrencyCache{loadMap: map[int64]*AccountLoadInfo{1: {AccountID: 1, LoadRate: 10}}}),
 		}
 
-		result, err := svc.SelectAccountWithLoadAwareness(context.Background(), nil, "sticky-log-load-aware", "claude-3-5-sonnet-20241022", nil, "", int64(0))
+		result, err := svc.SelectAccountWithLoadAwareness(ctx, nil, "sticky-log-load-aware", "claude-3-5-sonnet-20241022", nil, "", int64(0))
 		require.NoError(t, err)
 		require.NotNil(t, result)
 		out := buf.String()

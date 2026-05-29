@@ -183,15 +183,16 @@ type SystemSettings struct {
 	GatewayStickyAnthropicEnabled bool `json:"gateway_sticky_anthropic_enabled"`
 
 	// OpenAI WS scheduler settings
-	GatewayOpenAIWSSchedulerMode                         string  `json:"gateway_openai_ws_scheduler_mode"`
-	GatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold float64 `json:"gateway_openai_ws_scheduler_layered_error_penalty_threshold"`
-	GatewayOpenAIWSSchedulerLayeredErrorPenaltyValue     int     `json:"gateway_openai_ws_scheduler_layered_error_penalty_value"`
-	GatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier float64 `json:"gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier"`
-	GatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue      int     `json:"gateway_openai_ws_scheduler_layered_ttft_penalty_value"`
-	GatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds  int     `json:"gateway_openai_ws_scheduler_layered_probe_cooldown_seconds"`
-	GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds  int     `json:"gateway_openai_ws_scheduler_layered_probe_interval_seconds"`
-	GatewayOpenAIWSSchedulerLayeredProbeMaxFailures      int     `json:"gateway_openai_ws_scheduler_layered_probe_max_failures"`
-	GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds   int     `json:"gateway_openai_ws_scheduler_layered_probe_timeout_seconds"`
+	GatewayOpenAIWSSchedulerMode                                 string  `json:"gateway_openai_ws_scheduler_mode"`
+	GatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold         float64 `json:"gateway_openai_ws_scheduler_layered_error_penalty_threshold"`
+	GatewayOpenAIWSSchedulerLayeredErrorPenaltyValue             int     `json:"gateway_openai_ws_scheduler_layered_error_penalty_value"`
+	GatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier         float64 `json:"gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier"`
+	GatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue              int     `json:"gateway_openai_ws_scheduler_layered_ttft_penalty_value"`
+	GatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds          int     `json:"gateway_openai_ws_scheduler_layered_probe_cooldown_seconds"`
+	GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds          int     `json:"gateway_openai_ws_scheduler_layered_probe_interval_seconds"`
+	GatewayOpenAIWSSchedulerLayeredProbeMaxFailures              int     `json:"gateway_openai_ws_scheduler_layered_probe_max_failures"`
+	GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds           int     `json:"gateway_openai_ws_scheduler_layered_probe_timeout_seconds"`
+	GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds int     `json:"gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds"`
 
 	// Gateway forwarding behavior
 	EnableFingerprintUnification       bool   `json:"enable_fingerprint_unification"`

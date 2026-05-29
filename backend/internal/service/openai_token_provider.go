@@ -155,9 +155,13 @@ func (p *OpenAITokenProvider) GetAccessToken(ctx context.Context, account *Accou
 	slog.Debug("openai_token_cache_miss", "account_id", account.ID)
 
 	// 2) Refresh if needed (pre-expiry skew).
+	accessTokenMissing := strings.TrimSpace(account.GetOpenAIAccessToken()) == ""
 	expiresAt := account.GetCredentialAsTime("expires_at")
-	needsRefresh := expiresAt == nil || time.Until(*expiresAt) <= openAITokenRefreshSkew
+	needsRefresh := accessTokenMissing || expiresAt == nil || time.Until(*expiresAt) <= openAITokenRefreshSkew
 	if needsRefresh && strings.TrimSpace(account.GetOpenAIRefreshToken()) == "" {
+		if accessTokenMissing {
+			return "", errors.New("access_token not found in credentials")
+		}
 		if expiresAt != nil && !time.Now().Before(*expiresAt) {
 			const reason = "openai access_token expired and refresh_token is missing"
 			// 永久故障：缺失 refresh_token 时账号无法自愈，必须立即从调度池剔除，

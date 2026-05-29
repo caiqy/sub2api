@@ -376,15 +376,16 @@ type UpdateSettingsRequest struct {
 	GatewayStickyAnthropicEnabled *bool `json:"gateway_sticky_anthropic_enabled"`
 
 	// OpenAI WS scheduler settings
-	GatewayOpenAIWSSchedulerMode                         *string  `json:"gateway_openai_ws_scheduler_mode"`
-	GatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold *float64 `json:"gateway_openai_ws_scheduler_layered_error_penalty_threshold"`
-	GatewayOpenAIWSSchedulerLayeredErrorPenaltyValue     *int     `json:"gateway_openai_ws_scheduler_layered_error_penalty_value"`
-	GatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier *float64 `json:"gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier"`
-	GatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue      *int     `json:"gateway_openai_ws_scheduler_layered_ttft_penalty_value"`
-	GatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds  *int     `json:"gateway_openai_ws_scheduler_layered_probe_cooldown_seconds"`
-	GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds  *int     `json:"gateway_openai_ws_scheduler_layered_probe_interval_seconds"`
-	GatewayOpenAIWSSchedulerLayeredProbeMaxFailures      *int     `json:"gateway_openai_ws_scheduler_layered_probe_max_failures"`
-	GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds   *int     `json:"gateway_openai_ws_scheduler_layered_probe_timeout_seconds"`
+	GatewayOpenAIWSSchedulerMode                                 *string  `json:"gateway_openai_ws_scheduler_mode"`
+	GatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold         *float64 `json:"gateway_openai_ws_scheduler_layered_error_penalty_threshold"`
+	GatewayOpenAIWSSchedulerLayeredErrorPenaltyValue             *int     `json:"gateway_openai_ws_scheduler_layered_error_penalty_value"`
+	GatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier         *float64 `json:"gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier"`
+	GatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue              *int     `json:"gateway_openai_ws_scheduler_layered_ttft_penalty_value"`
+	GatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds          *int     `json:"gateway_openai_ws_scheduler_layered_probe_cooldown_seconds"`
+	GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds          *int     `json:"gateway_openai_ws_scheduler_layered_probe_interval_seconds"`
+	GatewayOpenAIWSSchedulerLayeredProbeMaxFailures              *int     `json:"gateway_openai_ws_scheduler_layered_probe_max_failures"`
+	GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds           *int     `json:"gateway_openai_ws_scheduler_layered_probe_timeout_seconds"`
+	GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds *int     `json:"gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds"`
 
 	// Gateway forwarding behavior
 	EnableFingerprintUnification       *bool   `json:"enable_fingerprint_unification"`
@@ -1485,6 +1486,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds
 		}(),
+		GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds: func() int {
+			if req.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds != nil {
+				return *req.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds
+			}
+			return previousSettings.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds
+		}(),
 		OpsMonitoringEnabled: func() bool {
 			if req.OpsMonitoringEnabled != nil {
 				return *req.OpsMonitoringEnabled
@@ -1662,7 +1669,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		if settings.GatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds <= 0 ||
 			settings.GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds <= 0 ||
 			settings.GatewayOpenAIWSSchedulerLayeredProbeMaxFailures <= 0 ||
-			settings.GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds <= 0 {
+			settings.GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds <= 0 ||
+			settings.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds <= 0 {
 			response.BadRequest(c, "gateway_openai_ws_scheduler_layered probe settings must be positive")
 			return
 		}
@@ -2571,48 +2579,50 @@ func systemSettingsPayload(settings *service.SystemSettings, defaultSubscription
 		GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds:  settings.GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds,
 		GatewayOpenAIWSSchedulerLayeredProbeMaxFailures:      settings.GatewayOpenAIWSSchedulerLayeredProbeMaxFailures,
 		GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds:   settings.GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds,
-		EnableFingerprintUnification:                         settings.EnableFingerprintUnification,
-		EnableMetadataPassthrough:                            settings.EnableMetadataPassthrough,
-		EnableCCHSigning:                                     settings.EnableCCHSigning,
-		EnableAnthropicCacheTTL1hInjection:                   settings.EnableAnthropicCacheTTL1hInjection,
-		RewriteMessageCacheControl:                           settings.RewriteMessageCacheControl,
-		AntigravityUserAgentVersion:                          settings.AntigravityUserAgentVersion,
-		OpenAICodexUserAgent:                                 settings.OpenAICodexUserAgent,
-		WebSearchEmulationEnabled:                            settings.WebSearchEmulationEnabled,
-		PaymentVisibleMethodAlipaySource:                     settings.PaymentVisibleMethodAlipaySource,
-		PaymentVisibleMethodWxpaySource:                      settings.PaymentVisibleMethodWxpaySource,
-		PaymentVisibleMethodAlipayEnabled:                    settings.PaymentVisibleMethodAlipayEnabled,
-		PaymentVisibleMethodWxpayEnabled:                     settings.PaymentVisibleMethodWxpayEnabled,
-		OpenAIAdvancedSchedulerEnabled:                       settings.OpenAIAdvancedSchedulerEnabled,
-		BalanceLowNotifyEnabled:                              settings.BalanceLowNotifyEnabled,
-		BalanceLowNotifyThreshold:                            settings.BalanceLowNotifyThreshold,
-		BalanceLowNotifyRechargeURL:                          settings.BalanceLowNotifyRechargeURL,
-		AccountQuotaNotifyEnabled:                            settings.AccountQuotaNotifyEnabled,
-		AccountQuotaNotifyEmails:                             dto.NotifyEmailEntriesFromService(settings.AccountQuotaNotifyEmails),
-		PaymentEnabled:                                       paymentCfg.Enabled,
-		PaymentMinAmount:                                     paymentCfg.MinAmount,
-		PaymentMaxAmount:                                     paymentCfg.MaxAmount,
-		PaymentDailyLimit:                                    paymentCfg.DailyLimit,
-		PaymentOrderTimeoutMin:                               paymentCfg.OrderTimeoutMin,
-		PaymentMaxPendingOrders:                              paymentCfg.MaxPendingOrders,
-		PaymentEnabledTypes:                                  paymentCfg.EnabledTypes,
-		PaymentBalanceDisabled:                               paymentCfg.BalanceDisabled,
-		PaymentBalanceRechargeMultiplier:                     paymentCfg.BalanceRechargeMultiplier,
-		PaymentRechargeFeeRate:                               paymentCfg.RechargeFeeRate,
-		PaymentLoadBalanceStrat:                              paymentCfg.LoadBalanceStrategy,
-		PaymentProductNamePrefix:                             paymentCfg.ProductNamePrefix,
-		PaymentProductNameSuffix:                             paymentCfg.ProductNameSuffix,
-		PaymentHelpImageURL:                                  paymentCfg.HelpImageURL,
-		PaymentHelpText:                                      paymentCfg.HelpText,
-		PaymentCancelRateLimitEnabled:                        paymentCfg.CancelRateLimitEnabled,
-		PaymentCancelRateLimitMax:                            paymentCfg.CancelRateLimitMax,
-		PaymentCancelRateLimitWindow:                         paymentCfg.CancelRateLimitWindow,
-		PaymentCancelRateLimitUnit:                           paymentCfg.CancelRateLimitUnit,
-		PaymentCancelRateLimitMode:                           paymentCfg.CancelRateLimitMode,
-		ChannelMonitorEnabled:                                settings.ChannelMonitorEnabled,
-		ChannelMonitorDefaultIntervalSeconds:                 settings.ChannelMonitorDefaultIntervalSeconds,
-		AvailableChannelsEnabled:                             settings.AvailableChannelsEnabled,
-		AffiliateEnabled:                                     settings.AffiliateEnabled,
+		GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds: settings.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds,
+		EnableFingerprintUnification:                                 settings.EnableFingerprintUnification,
+		EnableMetadataPassthrough:                                    settings.EnableMetadataPassthrough,
+		EnableCCHSigning:                                             settings.EnableCCHSigning,
+		EnableAnthropicCacheTTL1hInjection:                           settings.EnableAnthropicCacheTTL1hInjection,
+		RewriteMessageCacheControl:                                   settings.RewriteMessageCacheControl,
+		AntigravityUserAgentVersion:                                  settings.AntigravityUserAgentVersion,
+		OpenAICodexUserAgent:                                         settings.OpenAICodexUserAgent,
+		WebSearchEmulationEnabled:                                    settings.WebSearchEmulationEnabled,
+		PaymentVisibleMethodAlipaySource:                             settings.PaymentVisibleMethodAlipaySource,
+		PaymentVisibleMethodWxpaySource:                              settings.PaymentVisibleMethodWxpaySource,
+		PaymentVisibleMethodAlipayEnabled:                            settings.PaymentVisibleMethodAlipayEnabled,
+		PaymentVisibleMethodWxpayEnabled:                             settings.PaymentVisibleMethodWxpayEnabled,
+		OpenAIAdvancedSchedulerEnabled:                               settings.OpenAIAdvancedSchedulerEnabled,
+		BalanceLowNotifyEnabled:                                      settings.BalanceLowNotifyEnabled,
+		BalanceLowNotifyThreshold:                                    settings.BalanceLowNotifyThreshold,
+		BalanceLowNotifyRechargeURL:                                  settings.BalanceLowNotifyRechargeURL,
+		AccountQuotaNotifyEnabled:                                    settings.AccountQuotaNotifyEnabled,
+		AccountQuotaNotifyEmails:                                     dto.NotifyEmailEntriesFromService(settings.AccountQuotaNotifyEmails),
+		SubscriptionExpiryNotifyEnabled:                              settings.SubscriptionExpiryNotifyEnabled,
+		PaymentEnabled:                                               paymentCfg.Enabled,
+		PaymentMinAmount:                                             paymentCfg.MinAmount,
+		PaymentMaxAmount:                                             paymentCfg.MaxAmount,
+		PaymentDailyLimit:                                            paymentCfg.DailyLimit,
+		PaymentOrderTimeoutMin:                                       paymentCfg.OrderTimeoutMin,
+		PaymentMaxPendingOrders:                                      paymentCfg.MaxPendingOrders,
+		PaymentEnabledTypes:                                          paymentCfg.EnabledTypes,
+		PaymentBalanceDisabled:                                       paymentCfg.BalanceDisabled,
+		PaymentBalanceRechargeMultiplier:                             paymentCfg.BalanceRechargeMultiplier,
+		PaymentRechargeFeeRate:                                       paymentCfg.RechargeFeeRate,
+		PaymentLoadBalanceStrat:                                      paymentCfg.LoadBalanceStrategy,
+		PaymentProductNamePrefix:                                     paymentCfg.ProductNamePrefix,
+		PaymentProductNameSuffix:                                     paymentCfg.ProductNameSuffix,
+		PaymentHelpImageURL:                                          paymentCfg.HelpImageURL,
+		PaymentHelpText:                                              paymentCfg.HelpText,
+		PaymentCancelRateLimitEnabled:                                paymentCfg.CancelRateLimitEnabled,
+		PaymentCancelRateLimitMax:                                    paymentCfg.CancelRateLimitMax,
+		PaymentCancelRateLimitWindow:                                 paymentCfg.CancelRateLimitWindow,
+		PaymentCancelRateLimitUnit:                                   paymentCfg.CancelRateLimitUnit,
+		PaymentCancelRateLimitMode:                                   paymentCfg.CancelRateLimitMode,
+		ChannelMonitorEnabled:                                        settings.ChannelMonitorEnabled,
+		ChannelMonitorDefaultIntervalSeconds:                         settings.ChannelMonitorDefaultIntervalSeconds,
+		AvailableChannelsEnabled:                                     settings.AvailableChannelsEnabled,
+		AffiliateEnabled:                                             settings.AffiliateEnabled,
 	}
 }
 

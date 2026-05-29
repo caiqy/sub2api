@@ -70,14 +70,15 @@ func newGatewayControlTestConfig() *config.Config {
 			OpenAIWS: config.GatewayOpenAIWSConfig{
 				SchedulerMode: "weighted",
 				SchedulerLayered: config.GatewayOpenAIWSSchedulerLayeredConfig{
-					ErrorPenaltyThreshold: 0.3,
-					ErrorPenaltyValue:     100,
-					TTFTPenaltyMultiplier: 3.0,
-					TTFTPenaltyValue:      50,
-					ProbeCooldownSeconds:  60,
-					ProbeIntervalSeconds:  30,
-					ProbeMaxFailures:      3,
-					ProbeTimeoutSeconds:   15,
+					ErrorPenaltyThreshold:         0.3,
+					ErrorPenaltyValue:             100,
+					TTFTPenaltyMultiplier:         3.0,
+					TTFTPenaltyValue:              50,
+					ProbeCooldownSeconds:          60,
+					ProbeIntervalSeconds:          30,
+					ProbeMaxFailures:              3,
+					ProbeTimeoutSeconds:           15,
+					ProbeTempUnschedulableSeconds: 1800,
 				},
 			},
 		},
@@ -90,18 +91,19 @@ func TestSettingService_UpdateSettings_PersistsAndHotUpdatesGatewayControls(t *t
 	svc := service.NewSettingService(repo, cfg)
 
 	err := svc.UpdateSettings(context.Background(), &service.SystemSettings{
-		GatewayStickyOpenAIEnabled:                           false,
-		GatewayStickyGeminiEnabled:                           true,
-		GatewayStickyAnthropicEnabled:                        false,
-		GatewayOpenAIWSSchedulerMode:                         "layered",
-		GatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold: 0.45,
-		GatewayOpenAIWSSchedulerLayeredErrorPenaltyValue:     120,
-		GatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier: 4.5,
-		GatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue:      70,
-		GatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds:  90,
-		GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds:  40,
-		GatewayOpenAIWSSchedulerLayeredProbeMaxFailures:      5,
-		GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds:   20,
+		GatewayStickyOpenAIEnabled:                                   false,
+		GatewayStickyGeminiEnabled:                                   true,
+		GatewayStickyAnthropicEnabled:                                false,
+		GatewayOpenAIWSSchedulerMode:                                 "layered",
+		GatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold:         0.45,
+		GatewayOpenAIWSSchedulerLayeredErrorPenaltyValue:             120,
+		GatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier:         4.5,
+		GatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue:              70,
+		GatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds:          90,
+		GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds:          40,
+		GatewayOpenAIWSSchedulerLayeredProbeMaxFailures:              5,
+		GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds:           20,
+		GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds: 600,
 	})
 
 	require.NoError(t, err)
@@ -117,6 +119,7 @@ func TestSettingService_UpdateSettings_PersistsAndHotUpdatesGatewayControls(t *t
 	require.Equal(t, "40", repo.updates[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds])
 	require.Equal(t, "5", repo.updates[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeMaxFailures])
 	require.Equal(t, "20", repo.updates[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds])
+	require.Equal(t, "600", repo.updates[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds])
 
 	require.False(t, cfg.Gateway.Sticky.OpenAI.Enabled)
 	require.True(t, cfg.Gateway.Sticky.Gemini.Enabled)
@@ -130,13 +133,15 @@ func TestSettingService_UpdateSettings_PersistsAndHotUpdatesGatewayControls(t *t
 	require.Equal(t, 40, cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeIntervalSeconds)
 	require.Equal(t, 5, cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeMaxFailures)
 	require.Equal(t, 20, cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTimeoutSeconds)
+	require.Equal(t, 600, cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTempUnschedulableSeconds)
 }
 
 func TestSettingService_GetAllSettings_BackfillsGatewayControlsFromConfigAndDB(t *testing.T) {
 	repo := &gatewayControlSettingRepoStub{all: map[string]string{
-		service.SettingKeyGatewayStickyOpenAIEnabled:                         "false",
-		service.SettingKeyGatewayOpenAIWSSchedulerMode:                       "layered",
-		service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds: "22",
+		service.SettingKeyGatewayStickyOpenAIEnabled:                                   "false",
+		service.SettingKeyGatewayOpenAIWSSchedulerMode:                                 "layered",
+		service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds:           "22",
+		service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds: "700",
 	}}
 	cfg := newGatewayControlTestConfig()
 	svc := service.NewSettingService(repo, cfg)
@@ -156,22 +161,24 @@ func TestSettingService_GetAllSettings_BackfillsGatewayControlsFromConfigAndDB(t
 	require.Equal(t, 30, settings.GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds)
 	require.Equal(t, 3, settings.GatewayOpenAIWSSchedulerLayeredProbeMaxFailures)
 	require.Equal(t, 22, settings.GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds)
+	require.Equal(t, 700, settings.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds)
 }
 
 func TestProvideSettingService_LoadsGatewayControlsFromDBIntoConfig(t *testing.T) {
 	repo := &gatewayControlSettingRepoStub{values: map[string]string{
-		service.SettingKeyGatewayStickyOpenAIEnabled:                           "false",
-		service.SettingKeyGatewayStickyGeminiEnabled:                           "true",
-		service.SettingKeyGatewayStickyAnthropicEnabled:                        "false",
-		service.SettingKeyGatewayOpenAIWSSchedulerMode:                         "layered",
-		service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold: "0.4",
-		service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyValue:     "150",
-		service.SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier: "6",
-		service.SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue:      "90",
-		service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds:  "120",
-		service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds:  "45",
-		service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeMaxFailures:      "6",
-		service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds:   "25",
+		service.SettingKeyGatewayStickyOpenAIEnabled:                                   "false",
+		service.SettingKeyGatewayStickyGeminiEnabled:                                   "true",
+		service.SettingKeyGatewayStickyAnthropicEnabled:                                "false",
+		service.SettingKeyGatewayOpenAIWSSchedulerMode:                                 "layered",
+		service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold:         "0.4",
+		service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyValue:             "150",
+		service.SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier:         "6",
+		service.SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue:              "90",
+		service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds:          "120",
+		service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds:          "45",
+		service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeMaxFailures:              "6",
+		service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds:           "25",
+		service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds: "800",
 	}}
 	cfg := newGatewayControlTestConfig()
 
@@ -189,4 +196,5 @@ func TestProvideSettingService_LoadsGatewayControlsFromDBIntoConfig(t *testing.T
 	require.Equal(t, 45, cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeIntervalSeconds)
 	require.Equal(t, 6, cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeMaxFailures)
 	require.Equal(t, 25, cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTimeoutSeconds)
+	require.Equal(t, 800, cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTempUnschedulableSeconds)
 }

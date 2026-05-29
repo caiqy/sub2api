@@ -75,6 +75,12 @@ func (c *stubConcurrencyCacheForTest) AcquireUserSlot(_ context.Context, _ int64
 func (c *stubConcurrencyCacheForTest) ReleaseUserSlot(_ context.Context, _ int64, _ string) error {
 	return c.releaseErr
 }
+func (c *stubConcurrencyCacheForTest) AcquireUserGroupSlot(_ context.Context, _ int64, _ int64, _ int, _ string) (bool, error) {
+	return c.acquireResult, c.acquireErr
+}
+func (c *stubConcurrencyCacheForTest) ReleaseUserGroupSlot(_ context.Context, _ int64, _ int64, _ string) error {
+	return c.releaseErr
+}
 func (c *stubConcurrencyCacheForTest) GetUserConcurrency(_ context.Context, _ int64) (int, error) {
 	return c.concurrency, c.concurrencyErr
 }

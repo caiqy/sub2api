@@ -24,7 +24,10 @@ func (s *settingHandlerPublicRepoStub) Get(ctx context.Context, key string) (*se
 }
 
 func (s *settingHandlerPublicRepoStub) GetValue(ctx context.Context, key string) (string, error) {
-	panic("unexpected GetValue call")
+	if s.values == nil {
+		return "", nil
+	}
+	return s.values[key], nil
 }
 
 func (s *settingHandlerPublicRepoStub) Set(ctx context.Context, key, value string) error {

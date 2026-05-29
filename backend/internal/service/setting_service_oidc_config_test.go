@@ -22,7 +22,10 @@ func (s *settingOIDCRepoStub) Get(ctx context.Context, key string) (*Setting, er
 }
 
 func (s *settingOIDCRepoStub) GetValue(ctx context.Context, key string) (string, error) {
-	panic("unexpected GetValue call")
+	if s.values == nil {
+		return "", nil
+	}
+	return s.values[key], nil
 }
 
 func (s *settingOIDCRepoStub) Set(ctx context.Context, key, value string) error {

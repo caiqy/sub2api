@@ -1507,34 +1507,36 @@ type GatewayOpenAIWSSchedulerScoreWeightsView struct {
 func (s *OpenAIGatewayService) openAIWSSchedulerLayeredConfig() GatewayOpenAIWSSchedulerLayeredConfig {
 	if s != nil && s.cfg != nil {
 		return GatewayOpenAIWSSchedulerLayeredConfig{
-			ErrorPenaltyThreshold: s.cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold,
-			ErrorPenaltyValue:     s.cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyValue,
-			TTFTPenaltyMultiplier: s.cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyMultiplier,
-			TTFTPenaltyValue:      s.cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyValue,
-			ProbeCooldownSeconds:  s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeCooldownSeconds,
-			ProbeIntervalSeconds:  s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeIntervalSeconds,
-			ProbeMaxFailures:      s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeMaxFailures,
-			ProbeTimeoutSeconds:   s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTimeoutSeconds,
+			ErrorPenaltyThreshold:         s.cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold,
+			ErrorPenaltyValue:             s.cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyValue,
+			TTFTPenaltyMultiplier:         s.cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyMultiplier,
+			TTFTPenaltyValue:              s.cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyValue,
+			ProbeCooldownSeconds:          s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeCooldownSeconds,
+			ProbeIntervalSeconds:          s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeIntervalSeconds,
+			ProbeMaxFailures:              s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeMaxFailures,
+			ProbeTimeoutSeconds:           s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTimeoutSeconds,
+			ProbeTempUnschedulableSeconds: s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTempUnschedulableSeconds,
 		}
 	}
 	return GatewayOpenAIWSSchedulerLayeredConfig{
 		ErrorPenaltyThreshold: 0.3, ErrorPenaltyValue: 100,
 		TTFTPenaltyMultiplier: 3.0, TTFTPenaltyValue: 50,
 		ProbeCooldownSeconds: 60, ProbeIntervalSeconds: 30,
-		ProbeMaxFailures: 3, ProbeTimeoutSeconds: 15,
+		ProbeMaxFailures: 3, ProbeTimeoutSeconds: 15, ProbeTempUnschedulableSeconds: probeDefaultTempUnschedulableSeconds,
 	}
 }
 
 // GatewayOpenAIWSSchedulerLayeredConfig 分层调度器运行时视图。
 type GatewayOpenAIWSSchedulerLayeredConfig struct {
-	ErrorPenaltyThreshold float64
-	ErrorPenaltyValue     int
-	TTFTPenaltyMultiplier float64
-	TTFTPenaltyValue      int
-	ProbeCooldownSeconds  int
-	ProbeIntervalSeconds  int
-	ProbeMaxFailures      int
-	ProbeTimeoutSeconds   int
+	ErrorPenaltyThreshold         float64
+	ErrorPenaltyValue             int
+	TTFTPenaltyMultiplier         float64
+	TTFTPenaltyValue              int
+	ProbeCooldownSeconds          int
+	ProbeIntervalSeconds          int
+	ProbeMaxFailures              int
+	ProbeTimeoutSeconds           int
+	ProbeTempUnschedulableSeconds int
 }
 
 func clamp01(value float64) float64 {

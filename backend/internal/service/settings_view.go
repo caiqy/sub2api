@@ -193,15 +193,16 @@ type SystemSettings struct {
 	GatewayStickyAnthropicEnabled bool
 
 	// OpenAI WS scheduler settings
-	GatewayOpenAIWSSchedulerMode                         string
-	GatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold float64
-	GatewayOpenAIWSSchedulerLayeredErrorPenaltyValue     int
-	GatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier float64
-	GatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue      int
-	GatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds  int
-	GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds  int
-	GatewayOpenAIWSSchedulerLayeredProbeMaxFailures      int
-	GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds   int
+	GatewayOpenAIWSSchedulerMode                                 string
+	GatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold         float64
+	GatewayOpenAIWSSchedulerLayeredErrorPenaltyValue             int
+	GatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier         float64
+	GatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue              int
+	GatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds          int
+	GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds          int
+	GatewayOpenAIWSSchedulerLayeredProbeMaxFailures              int
+	GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds           int
+	GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds int
 
 	// Gateway forwarding behavior
 	EnableFingerprintUnification       bool   // 是否统一 OAuth 账号的指纹头（默认 true）

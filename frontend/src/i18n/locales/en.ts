@@ -6350,7 +6350,8 @@ export default {
         probeCooldownSeconds: 'Probe Cooldown (seconds)',
         probeIntervalSeconds: 'Probe Interval (seconds)',
         probeMaxFailures: 'Probe Max Failures',
-        probeTimeoutSeconds: 'Probe Timeout (seconds)'
+        probeTimeoutSeconds: 'Probe Timeout (seconds)',
+        probeTempUnschedulableSeconds: 'Temp Unschedulable Cooldown (seconds)'
       },
       overloadCooldown: {
         title: '529 Overload Cooldown',

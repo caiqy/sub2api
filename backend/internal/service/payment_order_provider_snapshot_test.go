@@ -187,10 +187,3 @@ func TestBuildPaymentOrderProviderSnapshot_IncludesProviderCurrency(t *testing.T
 	require.Equal(t, "USD", airwallexSnapshot["currency"])
 	require.Equal(t, "acct-78", airwallexSnapshot["merchant_id"])
 }
-
-func valueOrEmpty(v *string) string {
-	if v == nil {
-		return ""
-	}
-	return *v
-}

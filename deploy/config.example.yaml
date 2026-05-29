@@ -351,6 +351,8 @@ gateway:
       probe_max_failures: 3
       # 单次探针请求超时（秒）
       probe_timeout_seconds: 15
+      # 连续探针失败后写入 DB TempUnschedulable 的有限冷却时间（秒）
+      probe_temp_unschedulable_seconds: 1800
   # OpenAI HTTP upstream protocol strategy.
   # OpenAI HTTP 上游协议策略（gateway.openai_http2；默认 HTTP/2；代理明确不兼容时可临时回退 HTTP/1.1）。
   openai_http2:

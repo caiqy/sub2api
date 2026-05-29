@@ -367,6 +367,7 @@ export interface SystemSettings {
   gateway_openai_ws_scheduler_layered_probe_interval_seconds: number;
   gateway_openai_ws_scheduler_layered_probe_max_failures: number;
   gateway_openai_ws_scheduler_layered_probe_timeout_seconds: number;
+  gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds: number;
   custom_menu_items: CustomMenuItem[];
   custom_endpoints: CustomEndpoint[];
   // SMTP settings
@@ -635,6 +636,7 @@ export interface UpdateSettingsRequest {
   gateway_openai_ws_scheduler_layered_probe_interval_seconds?: number;
   gateway_openai_ws_scheduler_layered_probe_max_failures?: number;
   gateway_openai_ws_scheduler_layered_probe_timeout_seconds?: number;
+  gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds?: number;
   custom_menu_items?: CustomMenuItem[];
   custom_endpoints?: CustomEndpoint[];
   smtp_host?: string;

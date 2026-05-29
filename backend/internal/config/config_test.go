@@ -239,6 +239,18 @@ func TestValidateOpenAIWSSchedulerLayeredModeNormalizesBeforeValidatingLayeredFi
 	require.ErrorContains(t, cfg.Validate(), "gateway.openai_ws.scheduler_layered.error_penalty_threshold")
 }
 
+func TestValidateOpenAIWSSchedulerLayeredRejectsNonPositiveProbeTempUnschedulableSeconds(t *testing.T) {
+	resetViperWithJWTSecret(t)
+
+	cfg, err := Load()
+	require.NoError(t, err)
+
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTempUnschedulableSeconds = 0
+
+	require.ErrorContains(t, cfg.Validate(), "gateway.openai_ws.scheduler_layered.probe_temp_unschedulable_seconds must be positive")
+}
+
 func TestLoadDefaultOpenAIHTTP2Enabled(t *testing.T) {
 	resetViperWithJWTSecret(t)
 

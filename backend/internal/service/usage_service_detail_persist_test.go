@@ -61,6 +61,9 @@ func (s *usageServiceDetailPersisterStub) Delete(context.Context, int64) error {
 func (s *usageServiceDetailPersisterStub) ListByUser(context.Context, int64, pagination.PaginationParams) ([]UsageLog, *pagination.PaginationResult, error) {
 	return nil, nil, nil
 }
+func (s *usageServiceDetailPersisterStub) ListImageHistoryByUser(context.Context, int64, pagination.PaginationParams, ImageHistoryListFilters) ([]UsageLog, *pagination.PaginationResult, error) {
+	return nil, nil, nil
+}
 func (s *usageServiceDetailPersisterStub) ListByAPIKey(context.Context, int64, pagination.PaginationParams) ([]UsageLog, *pagination.PaginationResult, error) {
 	return nil, nil, nil
 }

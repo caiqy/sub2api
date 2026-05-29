@@ -18,9 +18,10 @@ import (
 )
 
 const (
-	probePermanentBlockDuration = 100 * 365 * 24 * time.Hour
-	probeDefaultFallbackModel   = "gpt-4o-mini"
-	probeMaxTokens              = 1
+	probeDefaultTempUnschedulableDuration = 30 * time.Minute
+	probeDefaultTempUnschedulableSeconds  = int(probeDefaultTempUnschedulableDuration / time.Second)
+	probeDefaultFallbackModel             = "gpt-4o-mini"
+	probeMaxTokens                        = 1
 )
 
 // openAIAccountProbeEntry 记录一个被惩罚账号的探活状态。
@@ -843,7 +844,6 @@ func (p *openAIAccountProbe) applyManualRecovery(accountID int64, entry *openAIA
 	lastProbeTTFTMs := int64(0)
 	if entry != nil {
 		entry.stateMu.Lock()
-		defer entry.stateMu.Unlock()
 		entry.ignoreResults.Store(true)
 		prevError = entry.errorPenalized.Load()
 		prevTTFT = entry.ttftPenalized.Load()
@@ -852,6 +852,7 @@ func (p *openAIAccountProbe) applyManualRecovery(accountID int64, entry *openAIA
 		entry.ttftPenalized.Store(false)
 		entry.groupIDSet.Store(false)
 		entry.groupIDValue.Store(0)
+		entry.stateMu.Unlock()
 	}
 	if p.service != nil && p.service.accountRepo != nil {
 		ctx := p.ctx
@@ -873,7 +874,10 @@ func (p *openAIAccountProbe) applyManualRecovery(accountID int64, entry *openAIA
 	if p.stats != nil {
 		p.stats.resetAccount(accountID)
 	}
-	p.entries.Delete(accountID)
+	p.probeImmediatelyAfterManualRecovery(accountID)
+	if stored, ok := p.entries.Load(accountID); !ok || stored == entry {
+		p.entries.Delete(accountID)
+	}
 	fields := p.explainabilityFields(accountID, entry, 0)
 	fields = append(fields,
 		"prev_error_penalized", prevError,
@@ -882,12 +886,55 @@ func (p *openAIAccountProbe) applyManualRecovery(accountID int64, entry *openAIA
 	slog.Info("probe: manual recovery applied", fields...)
 }
 
-// setTempUnschedulable 将账号标记为临时不可调度（100 年，等待探活或管理员恢复）。
-func (p *openAIAccountProbe) setTempUnschedulable(accountID int64, entry *openAIAccountProbeEntry) {
-	if p.service == nil || p.service.accountRepo == nil {
+func (p *openAIAccountProbe) probeImmediatelyAfterManualRecovery(accountID int64) {
+	if p == nil || p.service == nil || p.service.httpUpstream == nil || accountID <= 0 {
 		return
 	}
-	until := time.Now().Add(probePermanentBlockDuration)
+	ctx := p.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	account, err := p.service.getManualRecoveryProbeAccount(ctx, accountID)
+	if err != nil || account == nil || !account.IsOpenAI() || !account.Schedulable {
+		return
+	}
+	model := p.resolveProbeModel(account)
+	result := p.sendProbeRequest(ctx, account, model, p.service.openAIWSSchedulerLayeredConfig())
+	if result.err != nil {
+		slog.Warn("probe: manual recovery immediate probe failed", "account_id", accountID, "error", result.err.Error())
+		entry := &openAIAccountProbeEntry{accountID: accountID, penalizedAt: time.Now()}
+		entry.consecutiveFail.Store(1)
+		entry.errorPenalized.Store(true)
+		if groupID := probeAccountGroupID(account); groupID != nil && *groupID > 0 {
+			entry.groupIDValue.Store(*groupID)
+			entry.groupIDSet.Store(true)
+		}
+		p.setTempUnschedulable(accountID, entry)
+		p.entries.Store(accountID, entry)
+		return
+	}
+	if p.stats != nil {
+		ttft := result.ttftMs
+		p.stats.report(accountID, true, &ttft)
+	}
+	slog.Info("probe: manual recovery immediate probe succeeded", "account_id", accountID, "last_probe_ttft_ms", result.ttftMs)
+}
+
+func (s *OpenAIGatewayService) getManualRecoveryProbeAccount(ctx context.Context, accountID int64) (*Account, error) {
+	if s == nil || s.accountRepo == nil || accountID <= 0 {
+		return nil, nil
+	}
+	// 管理员恢复刚清除 DB 状态，调度快照可能仍含旧的 TempUnschedulable/不可调度副本。
+	// 立即探针必须读取 DB 最新账号，避免被陈旧 snapshot 跳过。
+	return s.accountRepo.GetByID(ctx, accountID)
+}
+
+// setTempUnschedulable 将账号标记为临时不可调度（有限冷却期，等待探活或管理员恢复）。
+func (p *openAIAccountProbe) setTempUnschedulable(accountID int64, entry *openAIAccountProbeEntry) {
+	if p.service == nil || p.service.accountRepo == nil || entry == nil {
+		return
+	}
+	until := time.Now().Add(p.tempUnschedulableDuration())
 	consecutiveFailures := 0
 	if entry != nil {
 		consecutiveFailures = int(entry.consecutiveFail.Load())
@@ -912,4 +959,14 @@ func (p *openAIAccountProbe) setTempUnschedulable(accountID int64, entry *openAI
 	}
 	entry.dbFlagSet.Store(true)
 	slog.Warn("probe: account marked temp unschedulable", p.explainabilityFields(accountID, entry, 0)...)
+}
+
+func (p *openAIAccountProbe) tempUnschedulableDuration() time.Duration {
+	if p != nil && p.service != nil {
+		seconds := p.service.openAIWSSchedulerLayeredConfig().ProbeTempUnschedulableSeconds
+		if seconds > 0 {
+			return time.Duration(seconds) * time.Second
+		}
+	}
+	return time.Duration(probeDefaultTempUnschedulableSeconds) * time.Second
 }
