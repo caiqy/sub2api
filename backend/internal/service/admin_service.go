@@ -2039,7 +2039,7 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	if input.UserConcurrencyLimit != nil {
 		group.UserConcurrencyLimit = *input.UserConcurrencyLimit
- 	}
+	}
 	if input.ModelsListConfig != nil {
 		group.ModelsListConfig = normalizeGroupModelsListConfig(*input.ModelsListConfig)
 	}

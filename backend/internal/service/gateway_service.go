@@ -5020,8 +5020,8 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 						truncateForLog(respBody, s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes),
 					)
 				} else {
-				logger.LegacyPrintf("service.gateway", "Account %d: 400 error, attempting failover", account.ID)
-			}
+					logger.LegacyPrintf("service.gateway", "Account %d: 400 error, attempting failover", account.ID)
+				}
 				s.handleFailoverSideEffects(ctx, resp, account, reqModel)
 				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, ResponseHeaders: resp.Header.Clone()}
 			}
