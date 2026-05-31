@@ -47,12 +47,13 @@ func (s *layeredOpenAIAccountScheduler) Select(
 		// Layer 1: previous_response_id
 		previousResponseID := strings.TrimSpace(req.PreviousResponseID)
 		if previousResponseID != "" {
-			selection, err := s.service.SelectAccountByPreviousResponseID(
+			selection, err := s.service.selectAccountByPreviousResponseIDForCapability(
 				ctx,
 				req.GroupID,
 				previousResponseID,
 				req.RequestedModel,
 				req.ExcludedIDs,
+				req.RequiredCapability,
 				req.RequireCompact,
 			)
 			if err != nil {
@@ -337,13 +338,13 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 			break
 		}
 
-		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, selected.account, req.RequestedModel, req.RequireCompact)
+		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, selected.account, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
 		if fresh == nil || !s.isAccountRequestCompatible(ctx, fresh, req) || !accountSatisfiesPrivacyRequirement(fresh, schedGroup) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
 			recordPrivacyRequirementError(ctx, s.service, fresh, schedGroup)
 			available = removeFromAvailable(available, selected.account.ID)
 			continue
 		}
-		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.RequestedModel, req.RequireCompact)
+		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
 		if fresh == nil || !s.isAccountRequestCompatible(ctx, fresh, req) || !accountSatisfiesPrivacyRequirement(fresh, schedGroup) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
 			recordPrivacyRequirementError(ctx, s.service, fresh, schedGroup)
 			available = removeFromAvailable(available, selected.account.ID)
@@ -371,12 +372,12 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 	cfg := s.service.schedulingConfig()
 	fallbackAccounts := make([]*Account, 0, len(filtered))
 	for _, account := range filtered {
-		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, account, req.RequestedModel, req.RequireCompact)
+		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, account, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
 		if fresh == nil || !s.isAccountRequestCompatible(ctx, fresh, req) || !accountSatisfiesPrivacyRequirement(fresh, schedGroup) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
 			recordPrivacyRequirementError(ctx, s.service, fresh, schedGroup)
 			continue
 		}
-		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.RequestedModel, req.RequireCompact)
+		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
 		if fresh == nil || !s.isAccountRequestCompatible(ctx, fresh, req) || !accountSatisfiesPrivacyRequirement(fresh, schedGroup) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
 			recordPrivacyRequirementError(ctx, s.service, fresh, schedGroup)
 			continue
@@ -512,7 +513,7 @@ func (s *layeredOpenAIAccountScheduler) recheckSessionStickyAccountFromDB(
 		return nil, true
 	}
 	if s.service.schedulerSnapshot == nil || s.service.accountRepo == nil {
-		fresh := s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.RequestedModel, req.RequireCompact)
+		fresh := s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
 		if fresh == nil {
 			return nil, false
 		}

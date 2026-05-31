@@ -395,6 +395,7 @@ type UpdateSettingsRequest struct {
 	RewriteMessageCacheControl         *bool   `json:"rewrite_message_cache_control"`
 	AntigravityUserAgentVersion        *string `json:"antigravity_user_agent_version"`
 	OpenAICodexUserAgent               *string `json:"openai_codex_user_agent"`
+	OpenAIAllowClaudeCodeCodexPlugin   *bool   `json:"openai_allow_claude_code_codex_plugin"`
 
 	// Payment visible method routing
 	PaymentVisibleMethodAlipaySource  *string `json:"payment_visible_method_alipay_source"`
@@ -1558,6 +1559,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.OpenAICodexUserAgent
 		}(),
+		OpenAIAllowClaudeCodeCodexPlugin: func() bool {
+			if req.OpenAIAllowClaudeCodeCodexPlugin != nil {
+				return *req.OpenAIAllowClaudeCodeCodexPlugin
+			}
+			return previousSettings.OpenAIAllowClaudeCodeCodexPlugin
+		}(),
 		PaymentVisibleMethodAlipaySource: func() string {
 			if req.PaymentVisibleMethodAlipaySource != nil {
 				return strings.TrimSpace(*req.PaymentVisibleMethodAlipaySource)
@@ -2587,6 +2594,7 @@ func systemSettingsPayload(settings *service.SystemSettings, defaultSubscription
 		RewriteMessageCacheControl:                                   settings.RewriteMessageCacheControl,
 		AntigravityUserAgentVersion:                                  settings.AntigravityUserAgentVersion,
 		OpenAICodexUserAgent:                                         settings.OpenAICodexUserAgent,
+		OpenAIAllowClaudeCodeCodexPlugin:                             settings.OpenAIAllowClaudeCodeCodexPlugin,
 		WebSearchEmulationEnabled:                                    settings.WebSearchEmulationEnabled,
 		PaymentVisibleMethodAlipaySource:                             settings.PaymentVisibleMethodAlipaySource,
 		PaymentVisibleMethodWxpaySource:                              settings.PaymentVisibleMethodWxpaySource,

@@ -3,16 +3,14 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
-  updateAccountMock,
-  clearErrorMock,
+  applyOAuthCredentialsMock,
   showSuccessMock,
   showErrorMock,
   exchangeAuthCodeMock,
   buildCredentialsMock,
   buildExtraInfoMock
 } = vi.hoisted(() => ({
-  updateAccountMock: vi.fn(),
-  clearErrorMock: vi.fn(),
+  applyOAuthCredentialsMock: vi.fn(),
   showSuccessMock: vi.fn(),
   showErrorMock: vi.fn(),
   exchangeAuthCodeMock: vi.fn(),
@@ -40,8 +38,7 @@ vi.mock('vue-i18n', async () => {
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
-      update: updateAccountMock,
-      clearError: clearErrorMock
+      applyOAuthCredentials: applyOAuthCredentialsMock
     }
   }
 }))
@@ -154,8 +151,7 @@ function buildAccount() {
 
 describe('admin ReAuthAccountModal', () => {
   beforeEach(() => {
-    updateAccountMock.mockReset()
-    clearErrorMock.mockReset()
+    applyOAuthCredentialsMock.mockReset()
     showSuccessMock.mockReset()
     showErrorMock.mockReset()
     exchangeAuthCodeMock.mockReset()
@@ -173,11 +169,10 @@ describe('admin ReAuthAccountModal', () => {
       name: 'New Name',
       privacy_mode: 'strict'
     })
-    updateAccountMock.mockResolvedValue(buildAccount())
-    clearErrorMock.mockResolvedValue(buildAccount())
+    applyOAuthCredentialsMock.mockResolvedValue(buildAccount())
   })
 
-  it('merges existing account config into the OpenAI reauth update payload', async () => {
+  it('merges existing account config into the OpenAI reauth apply payload', async () => {
     const wrapper = mount(ReAuthAccountModal, {
       props: {
         show: true,
@@ -196,8 +191,8 @@ describe('admin ReAuthAccountModal', () => {
     await wrapper.get('button.btn.btn-primary').trigger('click')
     await flushPromises()
 
-    expect(updateAccountMock).toHaveBeenCalledTimes(1)
-    expect(updateAccountMock).toHaveBeenCalledWith(99, {
+    expect(applyOAuthCredentialsMock).toHaveBeenCalledTimes(1)
+    expect(applyOAuthCredentialsMock).toHaveBeenCalledWith(99, {
       type: 'oauth',
       credentials: {
         access_token: 'new-at',
@@ -218,6 +213,5 @@ describe('admin ReAuthAccountModal', () => {
         privacy_mode: 'strict'
       }
     })
-    expect(clearErrorMock).toHaveBeenCalledWith(99)
   })
 })

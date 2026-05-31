@@ -871,16 +871,20 @@ func init() {
 	groupDescMessagesDispatchModelConfig := groupFields[29].Descriptor()
 	// group.DefaultMessagesDispatchModelConfig holds the default value on creation for the messages_dispatch_model_config field.
 	group.DefaultMessagesDispatchModelConfig = groupDescMessagesDispatchModelConfig.Default.(domain.OpenAIMessagesDispatchModelConfig)
+	// groupDescModelsListConfig is the schema descriptor for models_list_config field.
+	groupDescModelsListConfig := groupFields[30].Descriptor()
+	// group.DefaultModelsListConfig holds the default value on creation for the models_list_config field.
+	group.DefaultModelsListConfig = groupDescModelsListConfig.Default.(domain.GroupModelsListConfig)
 	// groupDescUserConcurrencyEnabled is the schema descriptor for user_concurrency_enabled field.
-	groupDescUserConcurrencyEnabled := groupFields[30].Descriptor()
+	groupDescUserConcurrencyEnabled := groupFields[31].Descriptor()
 	// group.DefaultUserConcurrencyEnabled holds the default value on creation for the user_concurrency_enabled field.
 	group.DefaultUserConcurrencyEnabled = groupDescUserConcurrencyEnabled.Default.(bool)
 	// groupDescUserConcurrencyLimit is the schema descriptor for user_concurrency_limit field.
-	groupDescUserConcurrencyLimit := groupFields[31].Descriptor()
+	groupDescUserConcurrencyLimit := groupFields[32].Descriptor()
 	// group.DefaultUserConcurrencyLimit holds the default value on creation for the user_concurrency_limit field.
 	group.DefaultUserConcurrencyLimit = groupDescUserConcurrencyLimit.Default.(int)
 	// groupDescRpmLimit is the schema descriptor for rpm_limit field.
-	groupDescRpmLimit := groupFields[32].Descriptor()
+	groupDescRpmLimit := groupFields[33].Descriptor()
 	// group.DefaultRpmLimit holds the default value on creation for the rpm_limit field.
 	group.DefaultRpmLimit = groupDescRpmLimit.Default.(int)
 	idempotencyrecordMixin := schema.IdempotencyRecord{}.Mixin()

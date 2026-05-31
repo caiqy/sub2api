@@ -2244,7 +2244,6 @@ import {
   OPENAI_WS_MODE_CTX_POOL,
   OPENAI_WS_MODE_OFF,
   OPENAI_WS_MODE_PASSTHROUGH,
-  isOpenAIWSModeEnabled,
   resolveOpenAIWSModeConcurrencyHintKey,
   type OpenAIWSMode,
   resolveOpenAIWSModeFromExtra
@@ -2390,6 +2389,11 @@ const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
 const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const codexCLIOnlyEnabled = ref(false)
+const codexCLIOnlyAllowClaudeCodeEnabled = ref(false)
+const autoPause5hThreshold = ref<number | null>(null)
+const autoPause7dThreshold = ref<number | null>(null)
+const autoPause5hDisabled = ref(false)
+const autoPause7dDisabled = ref(false)
 type CodexImageGenerationBridgeMode = 'inherit' | 'enabled' | 'disabled'
 const codexImageGenerationBridgeMode = ref<CodexImageGenerationBridgeMode>('inherit')
 const anthropicPassthroughEnabled = ref(false)
@@ -2676,6 +2680,10 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   allowOverages.value = extra?.allow_overages === true
   passthroughFieldsEnabled.value = extra?.passthrough_fields_enabled === true
   passthroughFieldRules.value = toDraftRules(extra?.passthrough_field_rules)
+  autoPause5hThreshold.value = typeof extra?.auto_pause_5h_threshold === 'number' ? extra.auto_pause_5h_threshold * 100 : null
+  autoPause7dThreshold.value = typeof extra?.auto_pause_7d_threshold === 'number' ? extra.auto_pause_7d_threshold * 100 : null
+  autoPause5hDisabled.value = extra?.auto_pause_5h_disabled === true
+  autoPause7dDisabled.value = extra?.auto_pause_7d_disabled === true
 
   // Load OpenAI passthrough toggle (OpenAI OAuth/API Key)
   openaiPassthroughEnabled.value = false
@@ -2716,6 +2724,9 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     })
     if (newAccount.type === 'oauth') {
       codexCLIOnlyEnabled.value = extra?.codex_cli_only === true
+      codexCLIOnlyAllowClaudeCodeEnabled.value =
+        Array.isArray(extra?.codex_cli_only_allowed_clients) &&
+        (extra.codex_cli_only_allowed_clients as unknown[]).includes('claude_code')
     }
     const credentials = newAccount.credentials as Record<string, unknown> | undefined
     const compactMappings = credentials?.compact_model_mapping as Record<string, string> | undefined
@@ -3376,11 +3387,17 @@ function applyPassthroughFieldExtra(extra: Record<string, unknown>, _accountType
     return
   }
 
+  if (!passthroughFieldsEnabled.value) {
+    delete extra.passthrough_fields_enabled
+    delete extra.passthrough_field_rules
+    return
+  }
+
   const normalizedRules = passthroughFieldRules.value
     .map((rule) => normalizePassthroughFieldRule(rule))
     .filter((rule) => rule.key)
 
-  if (!passthroughFieldsEnabled.value && normalizedRules.length === 0) {
+  if (normalizedRules.length === 0) {
     delete extra.passthrough_fields_enabled
     delete extra.passthrough_field_rules
     return
@@ -3521,11 +3538,21 @@ function applyOpenAIExtra(extra: Record<string, unknown>) {
   const hadCodexCLIOnlyEnabled = (props.account.extra as Record<string, unknown> | undefined)?.codex_cli_only === true
 
   if (props.account.type === 'oauth') {
-    extra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
-    extra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)
+    if (openaiOAuthResponsesWebSocketV2Mode.value === OPENAI_WS_MODE_OFF) {
+      delete extra.openai_oauth_responses_websockets_v2_mode
+      delete extra.openai_oauth_responses_websockets_v2_enabled
+    } else {
+      extra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
+      extra.openai_oauth_responses_websockets_v2_enabled = true
+    }
   } else {
-    extra.openai_apikey_responses_websockets_v2_mode = openaiAPIKeyResponsesWebSocketV2Mode.value
-    extra.openai_apikey_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiAPIKeyResponsesWebSocketV2Mode.value)
+    if (openaiAPIKeyResponsesWebSocketV2Mode.value === OPENAI_WS_MODE_OFF) {
+      delete extra.openai_apikey_responses_websockets_v2_mode
+      delete extra.openai_apikey_responses_websockets_v2_enabled
+    } else {
+      extra.openai_apikey_responses_websockets_v2_mode = openaiAPIKeyResponsesWebSocketV2Mode.value
+      extra.openai_apikey_responses_websockets_v2_enabled = true
+    }
   }
 
   delete extra.responses_websockets_v2_enabled
@@ -3552,6 +3579,27 @@ function applyOpenAIExtra(extra: Record<string, unknown>) {
     }
   }
 
+  if (autoPause5hThreshold.value != null && autoPause5hThreshold.value > 0) {
+    extra.auto_pause_5h_threshold = autoPause5hThreshold.value / 100
+  } else {
+    delete extra.auto_pause_5h_threshold
+  }
+  if (autoPause7dThreshold.value != null && autoPause7dThreshold.value > 0) {
+    extra.auto_pause_7d_threshold = autoPause7dThreshold.value / 100
+  } else {
+    delete extra.auto_pause_7d_threshold
+  }
+  if (autoPause5hDisabled.value) {
+    extra.auto_pause_5h_disabled = true
+  } else {
+    delete extra.auto_pause_5h_disabled
+  }
+  if (autoPause7dDisabled.value) {
+    extra.auto_pause_7d_disabled = true
+  } else {
+    delete extra.auto_pause_7d_disabled
+  }
+
   delete extra.codex_image_generation_bridge_enabled
   if (codexImageGenerationBridgeMode.value === 'inherit') {
     delete extra.codex_image_generation_bridge
@@ -3566,6 +3614,11 @@ function applyOpenAIExtra(extra: Record<string, unknown>) {
       extra.codex_cli_only = false
     } else {
       delete extra.codex_cli_only
+    }
+    if (codexCLIOnlyEnabled.value && codexCLIOnlyAllowClaudeCodeEnabled.value) {
+      extra.codex_cli_only_allowed_clients = ['claude_code']
+    } else {
+      delete extra.codex_cli_only_allowed_clients
     }
   }
 }
@@ -3938,8 +3991,9 @@ const handleSubmit = async () => {
       updatePayload.credentials = newCredentials
     }
 
+    const currentExtra = ((props.account.extra as Record<string, unknown>) || {})
     const nextExtra: Record<string, unknown> = {
-      ...((props.account.extra as Record<string, unknown>) || {})
+      ...currentExtra
     }
     applyAntigravityExtra(nextExtra)
     applyQuotaControlExtra(nextExtra)
@@ -3949,6 +4003,8 @@ const handleSubmit = async () => {
     applyPassthroughFieldExtra(nextExtra, props.account.type)
     if (Object.keys(nextExtra).length > 0) {
       updatePayload.extra = nextExtra
+    } else if (Object.keys(currentExtra).length > 0) {
+      updatePayload.extra = {}
     } else {
       delete updatePayload.extra
     }

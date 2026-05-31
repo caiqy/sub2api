@@ -185,6 +185,7 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 				group.FieldMessagesDispatchModelConfig,
 				group.FieldUserConcurrencyEnabled,
 				group.FieldUserConcurrencyLimit,
+				group.FieldModelsListConfig,
 				group.FieldRpmLimit,
 			)
 		}).
@@ -727,6 +728,7 @@ func groupEntityToService(g *dbent.Group) *service.Group {
 		MessagesDispatchModelConfig:     g.MessagesDispatchModelConfig,
 		UserConcurrencyEnabled:          g.UserConcurrencyEnabled,
 		UserConcurrencyLimit:            g.UserConcurrencyLimit,
+		ModelsListConfig:                g.ModelsListConfig,
 		RPMLimit:                        g.RpmLimit,
 		CreatedAt:                       g.CreatedAt,
 		UpdatedAt:                       g.UpdatedAt,

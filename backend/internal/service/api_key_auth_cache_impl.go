@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 10 // v10: reload snapshots for group availability checks
+const apiKeyAuthSnapshotVersion = 12 // v12: reload snapshots for models_list_config + user_concurrency fields
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -274,6 +274,7 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			MessagesDispatchModelConfig:     apiKey.Group.MessagesDispatchModelConfig,
 			UserConcurrencyEnabled:          apiKey.Group.UserConcurrencyEnabled,
 			UserConcurrencyLimit:            apiKey.Group.UserConcurrencyLimit,
+			ModelsListConfig:                apiKey.Group.ModelsListConfig,
 			RPMLimit:                        apiKey.Group.RPMLimit,
 		}
 	}
@@ -346,6 +347,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			MessagesDispatchModelConfig:     snapshot.Group.MessagesDispatchModelConfig,
 			UserConcurrencyEnabled:          snapshot.Group.UserConcurrencyEnabled,
 			UserConcurrencyLimit:            snapshot.Group.UserConcurrencyLimit,
+			ModelsListConfig:                snapshot.Group.ModelsListConfig,
 			RPMLimit:                        snapshot.Group.RPMLimit,
 		}
 	}

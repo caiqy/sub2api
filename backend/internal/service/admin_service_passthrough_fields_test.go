@@ -144,7 +144,7 @@ func (m *passthroughAdminAccountRepo) ListTempUnschedulableByPlatform(ctx contex
 func (m *passthroughAdminAccountRepo) SetRateLimited(ctx context.Context, id int64, resetAt time.Time) error {
 	return nil
 }
-func (m *passthroughAdminAccountRepo) SetModelRateLimit(ctx context.Context, id int64, scope string, resetAt time.Time) error {
+func (m *passthroughAdminAccountRepo) SetModelRateLimit(ctx context.Context, id int64, scope string, resetAt time.Time, _ ...string) error {
 	return nil
 }
 func (m *passthroughAdminAccountRepo) SetOverloaded(ctx context.Context, id int64, until time.Time) error {

@@ -82,6 +82,8 @@ const (
 	FieldDefaultMappedModel = "default_mapped_model"
 	// FieldMessagesDispatchModelConfig holds the string denoting the messages_dispatch_model_config field in the database.
 	FieldMessagesDispatchModelConfig = "messages_dispatch_model_config"
+	// FieldModelsListConfig holds the string denoting the models_list_config field in the database.
+	FieldModelsListConfig = "models_list_config"
 	// FieldUserConcurrencyEnabled holds the string denoting the user_concurrency_enabled field in the database.
 	FieldUserConcurrencyEnabled = "user_concurrency_enabled"
 	// FieldUserConcurrencyLimit holds the string denoting the user_concurrency_limit field in the database.
@@ -196,6 +198,7 @@ var Columns = []string{
 	FieldRequirePrivacySet,
 	FieldDefaultMappedModel,
 	FieldMessagesDispatchModelConfig,
+	FieldModelsListConfig,
 	FieldUserConcurrencyEnabled,
 	FieldUserConcurrencyLimit,
 	FieldRpmLimit,
@@ -282,6 +285,8 @@ var (
 	DefaultMappedModelValidator func(string) error
 	// DefaultMessagesDispatchModelConfig holds the default value on creation for the "messages_dispatch_model_config" field.
 	DefaultMessagesDispatchModelConfig domain.OpenAIMessagesDispatchModelConfig
+	// DefaultModelsListConfig holds the default value on creation for the "models_list_config" field.
+	DefaultModelsListConfig domain.GroupModelsListConfig
 	// DefaultUserConcurrencyEnabled holds the default value on creation for the "user_concurrency_enabled" field.
 	DefaultUserConcurrencyEnabled bool
 	// DefaultUserConcurrencyLimit holds the default value on creation for the "user_concurrency_limit" field.
