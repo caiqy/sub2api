@@ -563,6 +563,7 @@ var ProviderSet = wire.NewSet(
 	NewGatewayService,
 	ProvideOpenAIGatewayServiceWithStartupRecovery,
 	wire.Bind(new(AccountRuntimeBlocker), new(*OpenAIGatewayService)),
+	wire.Bind(new(OpenAIProbeController), new(*OpenAIGatewayService)),
 	NewOAuthService,
 	NewOpenAIOAuthService,
 	NewGeminiOAuthService,

@@ -529,6 +529,13 @@ const (
 var ErrRPMStatusUnavailable = infraerrors.New(http.StatusNotImplemented, "RPM_STATUS_UNAVAILABLE", "RPM cache not available")
 
 // adminServiceImpl implements AdminService
+// OpenAIProbeController is used by admin service to notify the OpenAI probe
+// subsystem about account configuration changes. Narrow interface to avoid
+// direct coupling to *OpenAIGatewayService.
+type OpenAIProbeController interface {
+	DropProbeEntry(accountID int64)
+}
+
 type adminServiceImpl struct {
 	userRepo             UserRepository
 	groupRepo            GroupRepository
@@ -548,6 +555,7 @@ type adminServiceImpl struct {
 	userSubRepo          UserSubscriptionRepository
 	privacyClientFactory PrivacyClientFactory
 	runtimeBlocker       AccountRuntimeBlocker
+	openaiProbeControl   OpenAIProbeController
 }
 
 type userGroupRateBatchReader interface {
@@ -574,6 +582,7 @@ func NewAdminService(
 	userSubRepo UserSubscriptionRepository,
 	privacyClientFactory PrivacyClientFactory,
 	runtimeBlocker AccountRuntimeBlocker,
+	openaiProbeControl OpenAIProbeController,
 ) AdminService {
 	return &adminServiceImpl{
 		userRepo:             userRepo,
@@ -594,6 +603,7 @@ func NewAdminService(
 		userSubRepo:          userSubRepo,
 		privacyClientFactory: privacyClientFactory,
 		runtimeBlocker:       runtimeBlocker,
+		openaiProbeControl:   openaiProbeControl,
 	}
 }
 
@@ -2577,6 +2587,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	}
 	originalType := account.Type
 	wasOveragesEnabled := account.IsOveragesEnabled()
+	wasProbeEnabledBefore := account.IsOpenAIProbeEnabled()
 
 	if input.Name != "" {
 		account.Name = input.Name
@@ -2695,6 +2706,8 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if err := s.accountRepo.Update(ctx, account); err != nil {
 		return nil, err
 	}
+
+	s.applyProbeToggleSideEffects(ctx, account, wasProbeEnabledBefore)
 
 	// 绑定分组
 	if input.GroupIDs != nil {
@@ -3861,4 +3874,41 @@ func (s *adminServiceImpl) ForceAntigravityPrivacy(ctx context.Context, account 
 	}
 	applyAntigravityPrivacyMode(account, mode)
 	return mode
+}
+
+// applyProbeToggleSideEffects handles side effects when probe_enabled flips to false.
+// Layer 1 (always): DropProbeEntry — idempotent removal of probe entry.
+// Layer 2 (only when DB temp source = layered_probe): ClearTempUnschedulable + ClearAccountSchedulingBlock.
+func (s *adminServiceImpl) applyProbeToggleSideEffects(ctx context.Context, account *Account, wasEnabledBefore bool) {
+	if account == nil || account.Platform != PlatformOpenAI {
+		return
+	}
+	// Only trigger on true → false flip
+	if !wasEnabledBefore || account.IsOpenAIProbeEnabled() {
+		return
+	}
+
+	// Layer 1: drop probe entry (idempotent)
+	if s.openaiProbeControl != nil {
+		s.openaiProbeControl.DropProbeEntry(account.ID)
+	}
+
+	// Layer 2: only clear DB temp state if source is layered_probe
+	if account.TempUnschedulableUntil == nil {
+		return
+	}
+	parsed, ok := parseTempUnschedReason(account.TempUnschedulableReason)
+	if !ok || parsed.Source != "layered_probe" {
+		return
+	}
+	if err := s.accountRepo.ClearTempUnschedulable(ctx, account.ID); err != nil {
+		slog.Warn("admin: probe toggle off failed to clear temp unschedulable",
+			"account_id", account.ID, "error", err)
+		return
+	}
+	if s.runtimeBlocker != nil {
+		s.runtimeBlocker.ClearAccountSchedulingBlock(account.ID)
+	}
+	slog.Info("admin: probe toggle off cleared layered_probe temp unschedulable",
+		"account_id", account.ID)
 }
