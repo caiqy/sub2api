@@ -2720,6 +2720,49 @@
             + {{ t('admin.accounts.addMapping') }}
           </button>
         </div>
+
+        <!-- 故障自动检查 + 自检模型 -->
+        <div class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4">
+          <div class="flex items-center justify-between gap-4">
+            <div class="flex-1">
+              <label class="input-label mb-0">{{ t('admin.accounts.openai.probeEnabled') }}</label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.accounts.openai.probeEnabledDesc') }}
+              </p>
+            </div>
+            <button
+              type="button"
+              @click="openAIProbeEnabled = !openAIProbeEnabled"
+              :class="[
+                'relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors',
+                openAIProbeEnabled ? 'bg-primary-600' : 'bg-gray-300 dark:bg-dark-500'
+              ]"
+            >
+              <span
+                :class="[
+                  'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
+                  openAIProbeEnabled ? 'translate-x-6' : 'translate-x-1'
+                ]"
+              />
+            </button>
+          </div>
+          <p
+            v-if="!openAIProbeEnabled"
+            class="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
+          >
+            {{ t('admin.accounts.openai.probeEnabledOffHint') }}
+          </p>
+          <div>
+            <label class="input-label">{{ t('admin.accounts.openai.probeModel') }}</label>
+            <input
+              v-model="openAIProbeModel"
+              type="text"
+              class="input"
+              :placeholder="t('admin.accounts.openai.probeModelPlaceholder')"
+            />
+            <p class="input-hint">{{ t('admin.accounts.openai.probeModelHint') }}</p>
+          </div>
+        </div>
       </div>
 
       <!-- OpenAI APIKey Responses API support mode -->
@@ -3431,6 +3474,8 @@ const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(true)
 const openaiPassthroughEnabled = ref(false)
 const openAICompactMode = ref<OpenAICompactMode>('auto')
+const openAIProbeEnabled = ref<boolean>(true)
+const openAIProbeModel = ref<string>('')
 const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>(['chat_completions', 'embeddings'])
 const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
@@ -4404,6 +4449,21 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
     extra.openai_responses_mode = openAIResponsesMode.value
   } else {
     delete extra.openai_responses_mode
+  }
+
+  // openai_probe_enabled: only write when explicitly false (default is true)
+  if (openAIProbeEnabled.value === false) {
+    extra.openai_probe_enabled = false
+  } else {
+    delete extra.openai_probe_enabled
+  }
+
+  // openai_probe_model: only write when non-empty
+  const probeModel = openAIProbeModel.value.trim()
+  if (probeModel !== '') {
+    extra.openai_probe_model = probeModel
+  } else {
+    delete extra.openai_probe_model
   }
 
   return Object.keys(extra).length > 0 ? extra : undefined
