@@ -139,6 +139,9 @@ func (p *openAIAccountProbe) bootstrapRegister(account *Account, now time.Time, 
 	if p == nil || account == nil || account.ID <= 0 || p.stopped.Load() {
 		return
 	}
+	if !account.IsOpenAIProbeEnabled() {
+		return
+	}
 	entryAny, _ := p.entries.LoadOrStore(account.ID, &openAIAccountProbeEntry{accountID: account.ID})
 	entry, _ := entryAny.(*openAIAccountProbeEntry)
 	if entry == nil {
@@ -184,6 +187,11 @@ func (p *openAIAccountProbe) rehydrateTempUnschedulableEntries(ctx context.Conte
 		if !account.IsOpenAI() || !account.IsActive() || !account.Schedulable {
 			skipped++
 			slog.Debug("probe: startup rehydrate skipped account", "account_id", account.ID, "reason", "not_bootstrap_eligible")
+			continue
+		}
+		if !account.IsOpenAIProbeEnabled() {
+			skipped++
+			slog.Debug("probe: startup rehydrate skipped account", "account_id", account.ID, "reason", "probe_disabled_for_account")
 			continue
 		}
 		if account.TempUnschedulableUntil == nil || !account.TempUnschedulableUntil.After(now) {

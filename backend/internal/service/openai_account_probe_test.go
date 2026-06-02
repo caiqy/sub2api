@@ -1598,3 +1598,34 @@ func TestMarkPenalized_KeepsExistingSemanticsRegardlessOfAccountConfig(t *testin
 	_, ok := probe.entries.Load(int64(42))
 	require.True(t, ok, "markPenalized must keep its existing semantics")
 }
+
+func TestBootstrapRegister_SkipsProbeDisabledAccount(t *testing.T) {
+	probe := newOpenAIAccountProbe(nil, newOpenAIAccountRuntimeStats())
+	t.Cleanup(probe.stop)
+
+	disabled := &Account{
+		ID:       91,
+		Platform: PlatformOpenAI,
+		Extra:    map[string]any{"openai_probe_enabled": false},
+	}
+
+	probe.bootstrapRegister(disabled, time.Now(), 60*time.Second)
+
+	_, present := probe.entries.Load(int64(91))
+	require.False(t, present, "bootstrapRegister must skip probe-disabled accounts")
+}
+
+func TestBootstrapRegister_RegistersProbeEnabledAccount(t *testing.T) {
+	probe := newOpenAIAccountProbe(nil, newOpenAIAccountRuntimeStats())
+	t.Cleanup(probe.stop)
+
+	enabled := &Account{
+		ID:       92,
+		Platform: PlatformOpenAI,
+	}
+
+	probe.bootstrapRegister(enabled, time.Now(), 60*time.Second)
+
+	_, present := probe.entries.Load(int64(92))
+	require.True(t, present, "bootstrapRegister must keep registering probe-enabled accounts")
+}
