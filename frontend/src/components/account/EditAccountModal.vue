@@ -2733,6 +2733,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   // Load OpenAI passthrough toggle (OpenAI OAuth/API Key)
   openaiPassthroughEnabled.value = false
   openAICompactMode.value = 'auto'
+  openAIProbeEnabled.value = true
+  openAIProbeModel.value = ''
   openAIResponsesMode.value = 'auto'
   openAICompactModelMappings.value = []
   openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF

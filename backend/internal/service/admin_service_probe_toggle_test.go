@@ -196,3 +196,39 @@ func TestAdminService_UpdateAccount_ProbeToggleOff_NoTempState_OnlyDropsEntry(t 
 	require.Equal(t, 0, repo.clearTempUnschedCalls)
 	require.Empty(t, blocker.clearedIDs)
 }
+
+func TestAdminService_BulkUpdateAccounts_ProbeToggleOff_DropsProbeEntry(t *testing.T) {
+	until := time.Now().Add(20 * time.Minute)
+	probeReason, err := buildLayeredProbeTempUnschedReason("consecutive_failures", 5)
+	require.NoError(t, err)
+
+	repo := &probeToggleRepoStub{
+		account: &Account{
+			ID:                      601,
+			Platform:                PlatformOpenAI,
+			Type:                    AccountTypeAPIKey,
+			Status:                  StatusActive,
+			Extra:                   map[string]any{"openai_probe_enabled": true},
+			TempUnschedulableUntil:  &until,
+			TempUnschedulableReason: probeReason,
+		},
+	}
+	probeCtrl := &probeControllerRecorder{}
+	blocker := &runtimeBlockRecorder{}
+	svc := &adminServiceImpl{
+		accountRepo:        repo,
+		runtimeBlocker:     blocker,
+		openaiProbeControl: probeCtrl,
+	}
+
+	// Simulate what BulkUpdateAccounts does: apply extra with probe_enabled=false
+	account := repo.account
+	wasProbeEnabledBefore := account.IsOpenAIProbeEnabled()
+	account.Extra = map[string]any{"openai_probe_enabled": false}
+
+	svc.applyProbeToggleSideEffects(context.Background(), account, wasProbeEnabledBefore)
+
+	require.Equal(t, []int64{601}, probeCtrl.droppedIDs, "bulk: Layer 1 DropProbeEntry called")
+	require.Equal(t, 1, repo.clearTempUnschedCalls, "bulk: Layer 2 ClearTempUnschedulable called")
+	require.Equal(t, []int64{601}, blocker.clearedIDs, "bulk: Layer 2 ClearAccountSchedulingBlock called")
+}

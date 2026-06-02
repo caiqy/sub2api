@@ -2847,9 +2847,39 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		repoUpdates.Schedulable = input.Schedulable
 	}
 
+	// Probe toggle side effects: capture pre-update state.
+	var probeWasEnabled map[int64]bool
+	if sanitizedExtra != nil {
+		if val, ok := sanitizedExtra["openai_probe_enabled"]; ok && val == false {
+			preAccounts, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
+			if err == nil {
+				probeWasEnabled = make(map[int64]bool, len(preAccounts))
+				for _, acct := range preAccounts {
+					if acct != nil {
+						probeWasEnabled[acct.ID] = acct.IsOpenAIProbeEnabled()
+					}
+				}
+			}
+		}
+	}
+
 	// Run bulk update for column/jsonb fields first.
 	if _, err := s.accountRepo.BulkUpdate(ctx, input.AccountIDs, repoUpdates); err != nil {
 		return nil, err
+	}
+
+	// Apply probe toggle side effects for accounts that flipped from enabled to disabled.
+	if len(probeWasEnabled) > 0 {
+		updatedAccounts, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
+		if err == nil {
+			for _, acct := range updatedAccounts {
+				if acct != nil {
+					if wasEnabled, ok := probeWasEnabled[acct.ID]; ok {
+						s.applyProbeToggleSideEffects(ctx, acct, wasEnabled)
+					}
+				}
+			}
+		}
 	}
 
 	// Handle group bindings per account (requires individual operations).

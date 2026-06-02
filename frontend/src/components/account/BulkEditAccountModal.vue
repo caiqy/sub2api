@@ -1605,7 +1605,11 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
 
   if (updateOpenAIProbeEnabled.value) {
     const extra = ensureExtra()
-    extra.openai_probe_enabled = openAIProbeEnabled.value
+    if (openAIProbeEnabled.value === false) {
+      extra.openai_probe_enabled = false
+    } else {
+      delete extra.openai_probe_enabled
+    }
   }
   if (updateOpenAIProbeModel.value) {
     const extra = ensureExtra()
