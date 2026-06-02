@@ -2847,16 +2847,19 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		repoUpdates.Schedulable = input.Schedulable
 	}
 
-	// Probe toggle side effects: capture pre-update state.
+	// Capture pre-update probe_enabled state: after BulkUpdate persists, account.Extra
+	// reflects the new value, so post-fetch alone cannot detect a true→false flip.
 	var probeWasEnabled map[int64]bool
 	if sanitizedExtra != nil {
-		if val, ok := sanitizedExtra["openai_probe_enabled"]; ok && val == false {
-			preAccounts, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
-			if err == nil {
-				probeWasEnabled = make(map[int64]bool, len(preAccounts))
-				for _, acct := range preAccounts {
-					if acct != nil {
-						probeWasEnabled[acct.ID] = acct.IsOpenAIProbeEnabled()
+		if val, ok := sanitizedExtra["openai_probe_enabled"]; ok {
+			if b, ok := val.(bool); ok && !b {
+				preAccounts, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
+				if err == nil {
+					probeWasEnabled = make(map[int64]bool, len(preAccounts))
+					for _, acct := range preAccounts {
+						if acct != nil {
+							probeWasEnabled[acct.ID] = acct.IsOpenAIProbeEnabled()
+						}
 					}
 				}
 			}
@@ -2879,6 +2882,8 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 					}
 				}
 			}
+		} else {
+			slog.Warn("admin: bulk probe toggle side effects skipped due to post-fetch error", "error", err)
 		}
 	}
 

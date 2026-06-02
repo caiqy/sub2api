@@ -1613,7 +1613,12 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
   }
   if (updateOpenAIProbeModel.value) {
     const extra = ensureExtra()
-    extra.openai_probe_model = openAIProbeModel.value.trim()
+    const probeModel = openAIProbeModel.value.trim()
+    if (probeModel !== '') {
+      extra.openai_probe_model = probeModel
+    } else {
+      delete extra.openai_probe_model
+    }
   }
 
   if (enableOpenAICompactModelMapping.value) {
