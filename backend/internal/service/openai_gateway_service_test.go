@@ -2972,3 +2972,38 @@ func TestOpenAICompatSSEFrameParserResetsEventTypeAtFrameBoundary(t *testing.T) 
 	require.Empty(t, frame.EventType)
 	require.JSONEq(t, `{"delta":"ok"}`, frame.Data)
 }
+
+func TestOpenAIGatewayService_ReattachSkipsProbeDisabledAccount(t *testing.T) {
+	now := time.Now()
+	future := now.Add(10 * time.Minute)
+	reason, err := buildLayeredProbeTempUnschedReason("consecutive_failures", 3)
+	require.NoError(t, err)
+
+	repo := &startupRecoveryRepoStub{tempUnschedAccounts: []Account{{
+		ID:                      201,
+		Platform:                PlatformOpenAI,
+		Type:                    AccountTypeAPIKey,
+		Status:                  StatusActive,
+		Schedulable:             true,
+		TempUnschedulableUntil:  &future,
+		TempUnschedulableReason: reason,
+		Extra:                   map[string]any{"openai_probe_enabled": false},
+	}}}
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	snapshot := &SchedulerSnapshotService{}
+	svc := &OpenAIGatewayService{accountRepo: repo, cfg: cfg, schedulerSnapshot: snapshot}
+
+	svc.StartOpenAIBackgroundRecovery()
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	scheduler := svc.getOpenAIAccountScheduler()
+	layered, ok := scheduler.(*layeredOpenAIAccountScheduler)
+	require.True(t, ok)
+
+	// Startup should skip (Task 3.2's guard). Now trigger runtime reattach to verify this guard too.
+	require.NoError(t, snapshot.handleAccountEvent(context.Background(), ptrInt64(201), nil))
+
+	_, present := layered.probe.entries.Load(int64(201))
+	require.False(t, present, "ReattachLayeredProbeTempUnschedAccount must skip probe-disabled accounts")
+}

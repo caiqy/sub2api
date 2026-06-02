@@ -605,6 +605,9 @@ func (s *OpenAIGatewayService) ReattachLayeredProbeTempUnschedAccount(ctx contex
 	if !account.IsOpenAI() || !account.IsActive() || !account.Schedulable {
 		return
 	}
+	if !account.IsOpenAIProbeEnabled() {
+		return
+	}
 	now := time.Now()
 	if account.TempUnschedulableUntil == nil || !account.TempUnschedulableUntil.After(now) {
 		return
