@@ -3007,3 +3007,44 @@ func TestOpenAIGatewayService_ReattachSkipsProbeDisabledAccount(t *testing.T) {
 	_, present := layered.probe.entries.Load(int64(201))
 	require.False(t, present, "ReattachLayeredProbeTempUnschedAccount must skip probe-disabled accounts")
 }
+
+func TestOpenAIGatewayService_DropProbeEntry_RemovesExistingEntry(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	svc := &OpenAIGatewayService{cfg: cfg}
+
+	scheduler := svc.getOpenAIAccountScheduler()
+	layered, ok := scheduler.(*layeredOpenAIAccountScheduler)
+	require.True(t, ok)
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	layered.probe.entries.Store(int64(411), &openAIAccountProbeEntry{accountID: 411})
+
+	svc.DropProbeEntry(411)
+
+	_, present := layered.probe.entries.Load(int64(411))
+	require.False(t, present, "DropProbeEntry must remove the entry")
+}
+
+func TestOpenAIGatewayService_DropProbeEntry_NoopWhenEntryAbsent(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	svc := &OpenAIGatewayService{cfg: cfg}
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	require.NotPanics(t, func() { svc.DropProbeEntry(412) })
+}
+
+func TestOpenAIGatewayService_DropProbeEntry_NoopForNonLayeredScheduler(t *testing.T) {
+	svc := &OpenAIGatewayService{
+		openaiScheduler: &defaultOpenAIAccountScheduler{},
+	}
+
+	require.NotPanics(t, func() { svc.DropProbeEntry(413) })
+}
+
+func TestOpenAIGatewayService_DropProbeEntry_NoopForZeroID(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	require.NotPanics(t, func() { svc.DropProbeEntry(0) })
+	require.NotPanics(t, func() { svc.DropProbeEntry(-1) })
+}

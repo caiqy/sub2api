@@ -620,6 +620,23 @@ func (s *OpenAIGatewayService) ReattachLayeredProbeTempUnschedAccount(ctx contex
 	layered.probe.bootstrapRegister(account, now, cooldown)
 }
 
+// DropProbeEntry removes the specified account from the layered probe's
+// runtime entry table. Idempotent: no-op when the entry doesn't exist,
+// the scheduler is not layered, or the probe subsystem is not initialized.
+// Used by admin service when probe_enabled flips to false.
+func (s *OpenAIGatewayService) DropProbeEntry(accountID int64) {
+	if s == nil || accountID <= 0 {
+		return
+	}
+	s.openaiSchedulerMu.Lock()
+	scheduler, _ := s.openaiScheduler.(*layeredOpenAIAccountScheduler)
+	s.openaiSchedulerMu.Unlock()
+	if scheduler == nil || scheduler.probe == nil {
+		return
+	}
+	scheduler.probe.entries.Delete(accountID)
+}
+
 func (s *OpenAIGatewayService) billingDeps() *billingDeps {
 	return &billingDeps{
 		accountRepo:           s.accountRepo,
