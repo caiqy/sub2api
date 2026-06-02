@@ -1588,3 +1588,13 @@ func TestResolveProbeModel_ExplicitOverridesEvenWithoutMapping(t *testing.T) {
 	}
 	require.Equal(t, "custom-model", probe.resolveProbeModel(account))
 }
+
+func TestMarkPenalized_KeepsExistingSemanticsRegardlessOfAccountConfig(t *testing.T) {
+	// Contract: markPenalized itself does not check account config — caller is responsible for guard.
+	probe := newOpenAIAccountProbe(nil, newOpenAIAccountRuntimeStats())
+	t.Cleanup(probe.stop)
+
+	probe.markPenalized(42, nil, true, false)
+	_, ok := probe.entries.Load(int64(42))
+	require.True(t, ok, "markPenalized must keep its existing semantics")
+}

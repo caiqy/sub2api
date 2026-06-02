@@ -310,11 +310,7 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 		eval := s.evaluateRuntimePenalty(c.account.ID, groupMinTTFT, hasGroupMin)
 		acc := s.applyPenaltyToAccount(c.account, eval)
 
-		if eval.ErrorPenalized || eval.TTFTPenalized {
-			s.probe.markPenalized(c.account.ID, req.GroupID, eval.ErrorPenalized, eval.TTFTPenalized)
-		} else {
-			s.probe.clearPenaltyReasons(c.account.ID)
-		}
+		s.applyProbeRegistration(c.account, eval.ErrorPenalized, eval.TTFTPenalized, req.GroupID)
 
 		// 过滤 loadRate >= 100%
 		if c.loadInfo.LoadRate >= 100 {
@@ -640,4 +636,22 @@ func (s *layeredOpenAIAccountScheduler) Stop() {
 	if s != nil && s.probe != nil {
 		s.probe.stop()
 	}
+}
+
+// applyProbeRegistration routes runtime penalty evaluation results into probe registration.
+// Accounts with probe disabled (openai_probe_enabled=false) are completely skipped —
+// they won't be markPenalized and won't have their entries cleared — avoiding
+// interference with state from other sources.
+func (s *layeredOpenAIAccountScheduler) applyProbeRegistration(account *Account, errorPenalized, ttftPenalized bool, groupID *int64) {
+	if s == nil || s.probe == nil || account == nil {
+		return
+	}
+	if !account.IsOpenAIProbeEnabled() {
+		return
+	}
+	if errorPenalized || ttftPenalized {
+		s.probe.markPenalized(account.ID, groupID, errorPenalized, ttftPenalized)
+		return
+	}
+	s.probe.clearPenaltyReasons(account.ID)
 }
