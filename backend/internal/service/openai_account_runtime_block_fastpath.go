@@ -113,13 +113,13 @@ func (s *OpenAIGatewayService) ClearAccountSchedulingBlock(accountID int64) {
 		return
 	}
 	s.openaiAccountRuntimeBlockUntil.Delete(accountID)
-	// 清除 TempUnschedulable/运行时 block 后，layered probe 需要立即对账号做一次有界探活，
-	// 避免管理员恢复或成功恢复路径还要等待下一次 probe tick 才重新验证账号可用性。
-	// 注意：这里是同步触发，调用方可能阻塞到 probe timeout 上限；非 layered scheduler/probe 缺失时会直接 no-op。
-	s.probeAccountAfterManualTempUnschedulableClear(accountID)
+	// After clearing runtime block, have layered probe clean up its entry and EWMA
+	// so the next tick doesn't treat this account with stale penalty state.
+	// Manual recovery no longer sends a probe request.
+	s.dropProbeEntryAfterManualClear(accountID)
 }
 
-func (s *OpenAIGatewayService) probeAccountAfterManualTempUnschedulableClear(accountID int64) {
+func (s *OpenAIGatewayService) dropProbeEntryAfterManualClear(accountID int64) {
 	if s == nil || accountID <= 0 {
 		return
 	}

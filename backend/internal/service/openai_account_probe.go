@@ -891,7 +891,6 @@ func (p *openAIAccountProbe) applyManualRecovery(accountID int64, entry *openAIA
 	if p.stats != nil {
 		p.stats.resetAccount(accountID)
 	}
-	p.probeImmediatelyAfterManualRecovery(accountID)
 	if stored, ok := p.entries.Load(accountID); !ok || stored == entry {
 		p.entries.Delete(accountID)
 	}
@@ -901,49 +900,6 @@ func (p *openAIAccountProbe) applyManualRecovery(accountID int64, entry *openAIA
 		"prev_ttft_penalized", prevTTFT,
 	)
 	slog.Info("probe: manual recovery applied", fields...)
-}
-
-func (p *openAIAccountProbe) probeImmediatelyAfterManualRecovery(accountID int64) {
-	if p == nil || p.service == nil || p.service.httpUpstream == nil || accountID <= 0 {
-		return
-	}
-	ctx := p.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	account, err := p.service.getManualRecoveryProbeAccount(ctx, accountID)
-	if err != nil || account == nil || !account.IsOpenAI() || !account.Schedulable {
-		return
-	}
-	model := p.resolveProbeModel(account)
-	result := p.sendProbeRequest(ctx, account, model, p.service.openAIWSSchedulerLayeredConfig())
-	if result.err != nil {
-		slog.Warn("probe: manual recovery immediate probe failed", "account_id", accountID, "error", result.err.Error())
-		entry := &openAIAccountProbeEntry{accountID: accountID, penalizedAt: time.Now()}
-		entry.consecutiveFail.Store(1)
-		entry.errorPenalized.Store(true)
-		if groupID := probeAccountGroupID(account); groupID != nil && *groupID > 0 {
-			entry.groupIDValue.Store(*groupID)
-			entry.groupIDSet.Store(true)
-		}
-		p.setTempUnschedulable(accountID, entry)
-		p.entries.Store(accountID, entry)
-		return
-	}
-	if p.stats != nil {
-		ttft := result.ttftMs
-		p.stats.report(accountID, true, &ttft)
-	}
-	slog.Info("probe: manual recovery immediate probe succeeded", "account_id", accountID, "last_probe_ttft_ms", result.ttftMs)
-}
-
-func (s *OpenAIGatewayService) getManualRecoveryProbeAccount(ctx context.Context, accountID int64) (*Account, error) {
-	if s == nil || s.accountRepo == nil || accountID <= 0 {
-		return nil, nil
-	}
-	// 管理员恢复刚清除 DB 状态，调度快照可能仍含旧的 TempUnschedulable/不可调度副本。
-	// 立即探针必须读取 DB 最新账号，避免被陈旧 snapshot 跳过。
-	return s.accountRepo.GetByID(ctx, accountID)
 }
 
 // setTempUnschedulable 将账号标记为临时不可调度（有限冷却期，等待探活或管理员恢复）。

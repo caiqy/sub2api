@@ -3,11 +3,10 @@ package service
 import (
 	"context"
 	"errors"
-	"io"
-	"net/http"
-	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 type manualRecoverySnapshotCacheStub struct {
@@ -22,7 +21,7 @@ func (c *manualRecoverySnapshotCacheStub) SetSnapshot(context.Context, Scheduler
 	return nil
 }
 
-func (c *manualRecoverySnapshotCacheStub) GetAccount(context.Context, int64) (*Account, error) {
+func (c *manualRecoverySnapshotCacheStub) GetAccount(_ context.Context, _ int64) (*Account, error) {
 	if c.account != nil {
 		cloned := *c.account
 		return &cloned, nil
@@ -60,22 +59,22 @@ func (c *manualRecoverySnapshotCacheStub) SetOutboxWatermark(context.Context, in
 
 type manualRecoveryProbeRepo struct {
 	stubOpenAIAccountRepo
-	until time.Time
+	clearCalls int
+	setCalls   int
 }
 
 func (r *manualRecoveryProbeRepo) ClearTempUnschedulable(context.Context, int64) error {
+	r.clearCalls++
 	return nil
 }
 
-func (r *manualRecoveryProbeRepo) SetTempUnschedulable(_ context.Context, _ int64, until time.Time, _ string) error {
-	r.until = until
+func (r *manualRecoveryProbeRepo) SetTempUnschedulable(context.Context, int64, time.Time, string) error {
+	r.setCalls++
 	return nil
 }
 
-func TestProbeManualRecoveryRunsImmediateProbe(t *testing.T) {
-	upstream := &openAIHTTPUpstreamRecorder{
-		resp: &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\"}\n\n"))},
-	}
+func TestProbeManualRecoveryDoesNotSendImmediateProbe(t *testing.T) {
+	upstream := &openAIHTTPUpstreamRecorder{}
 	repo := &manualRecoveryProbeRepo{stubOpenAIAccountRepo: stubOpenAIAccountRepo{accounts: []Account{{
 		ID:          91,
 		Platform:    PlatformOpenAI,
@@ -90,9 +89,8 @@ func TestProbeManualRecoveryRunsImmediateProbe(t *testing.T) {
 	}}}}
 	probe := &openAIAccountProbe{
 		service: &OpenAIGatewayService{
-			accountRepo:       repo,
-			httpUpstream:      upstream,
-			schedulerSnapshot: nil,
+			accountRepo:  repo,
+			httpUpstream: upstream,
 		},
 		stats:  newOpenAIAccountRuntimeStats(),
 		ctx:    context.Background(),
@@ -105,58 +103,12 @@ func TestProbeManualRecoveryRunsImmediateProbe(t *testing.T) {
 
 	probe.applyManualRecovery(91, entry)
 
-	if upstream.lastReq == nil {
-		t.Fatalf("manual recovery should run an immediate probe request")
-	}
+	require.Nil(t, upstream.lastReq, "manual recovery must not send any probe request")
+	require.Equal(t, 1, repo.clearCalls, "manual recovery still clears DB temp unschedulable")
+	require.Equal(t, 0, repo.setCalls, "manual recovery must not re-mark temp unschedulable")
 }
 
-func TestProbeManualRecoveryImmediateProbeUsesDBWhenSnapshotIsStale(t *testing.T) {
-	upstream := &openAIHTTPUpstreamRecorder{
-		resp: &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\"}\n\n"))},
-	}
-	repo := &manualRecoveryProbeRepo{stubOpenAIAccountRepo: stubOpenAIAccountRepo{accounts: []Account{{
-		ID:          93,
-		Platform:    PlatformOpenAI,
-		Type:        AccountTypeOAuth,
-		Status:      StatusActive,
-		Schedulable: true,
-		Concurrency: 1,
-		Credentials: map[string]any{
-			"access_token": "oauth-token",
-			"expires_at":   "2999-01-01T00:00:00Z",
-		},
-	}}}}
-	probe := &openAIAccountProbe{
-		service: &OpenAIGatewayService{
-			accountRepo:  repo,
-			httpUpstream: upstream,
-			schedulerSnapshot: NewSchedulerSnapshotService(&manualRecoverySnapshotCacheStub{account: &Account{
-				ID:          93,
-				Platform:    PlatformOpenAI,
-				Type:        AccountTypeOAuth,
-				Status:      StatusActive,
-				Schedulable: false,
-			}}, nil, repo, nil, nil),
-		},
-		stats:  newOpenAIAccountRuntimeStats(),
-		ctx:    context.Background(),
-		stopCh: make(chan struct{}),
-	}
-	defer probe.stop()
-	entry := &openAIAccountProbeEntry{accountID: 93}
-	entry.dbFlagSet.Store(true)
-
-	probe.applyManualRecovery(93, entry)
-
-	if upstream.lastReq == nil {
-		t.Fatalf("manual recovery should bypass stale scheduler snapshot and run immediate probe with DB account")
-	}
-}
-
-func TestProbeManualRecoveryReflagsWhenImmediateProbeFails(t *testing.T) {
-	upstream := &openAIHTTPUpstreamRecorder{
-		resp: &http.Response{StatusCode: http.StatusInternalServerError, Body: io.NopCloser(strings.NewReader("boom"))},
-	}
+func TestProbeManualRecoveryRemovesEntry(t *testing.T) {
 	repo := &manualRecoveryProbeRepo{stubOpenAIAccountRepo: stubOpenAIAccountRepo{accounts: []Account{{
 		ID:          92,
 		Platform:    PlatformOpenAI,
@@ -164,72 +116,26 @@ func TestProbeManualRecoveryReflagsWhenImmediateProbeFails(t *testing.T) {
 		Status:      StatusActive,
 		Schedulable: true,
 		Concurrency: 1,
-		Credentials: map[string]any{
-			"access_token": "oauth-token",
-			"expires_at":   "2999-01-01T00:00:00Z",
-		},
 	}}}}
 	probe := &openAIAccountProbe{
-		service: &OpenAIGatewayService{
-			accountRepo:  repo,
-			httpUpstream: upstream,
-		},
-		stats:  newOpenAIAccountRuntimeStats(),
-		ctx:    context.Background(),
-		stopCh: make(chan struct{}),
+		service: &OpenAIGatewayService{accountRepo: repo},
+		stats:   newOpenAIAccountRuntimeStats(),
+		ctx:     context.Background(),
+		stopCh:  make(chan struct{}),
 	}
 	defer probe.stop()
 	entry := &openAIAccountProbeEntry{accountID: 92}
 	entry.dbFlagSet.Store(true)
+	probe.entries.Store(int64(92), entry)
 
 	probe.applyManualRecovery(92, entry)
 
-	if repo.until.IsZero() {
-		t.Fatalf("manual recovery should re-mark account temp unschedulable when immediate probe fails")
-	}
+	_, present := probe.entries.Load(int64(92))
+	require.False(t, present, "manual recovery removes the probe entry")
 }
 
-func TestProbeManualRecoveryFailedImmediateProbeKeepsEntryForFutureProbes(t *testing.T) {
-	upstream := &openAIHTTPUpstreamRecorder{
-		resp: &http.Response{StatusCode: http.StatusInternalServerError, Body: io.NopCloser(strings.NewReader("boom"))},
-	}
-	repo := &manualRecoveryProbeRepo{stubOpenAIAccountRepo: stubOpenAIAccountRepo{accounts: []Account{{
-		ID:          94,
-		Platform:    PlatformOpenAI,
-		Type:        AccountTypeOAuth,
-		Status:      StatusActive,
-		Schedulable: true,
-		Concurrency: 1,
-		Credentials: map[string]any{
-			"access_token": "oauth-token",
-			"expires_at":   "2999-01-01T00:00:00Z",
-		},
-	}}}}
-	probe := &openAIAccountProbe{
-		service: &OpenAIGatewayService{
-			accountRepo:  repo,
-			httpUpstream: upstream,
-		},
-		stats:  newOpenAIAccountRuntimeStats(),
-		ctx:    context.Background(),
-		stopCh: make(chan struct{}),
-	}
-	defer probe.stop()
-	entry := &openAIAccountProbeEntry{accountID: 94}
-	entry.dbFlagSet.Store(true)
-
-	probe.applyManualRecovery(94, entry)
-
-	stored, ok := probe.entries.Load(int64(94))
-	if !ok || stored == nil {
-		t.Fatalf("manual recovery should keep a probe entry after immediate probe failure")
-	}
-}
-
-func TestOpenAIManualTempUnschedulableClearTriggersImmediateProbeRecovery(t *testing.T) {
-	upstream := &openAIHTTPUpstreamRecorder{
-		resp: &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\"}\n\n"))},
-	}
+func TestOpenAIManualTempUnschedulableClearDoesNotTriggerProbe(t *testing.T) {
+	upstream := &openAIHTTPUpstreamRecorder{}
 	repo := &manualRecoveryProbeRepo{stubOpenAIAccountRepo: stubOpenAIAccountRepo{accounts: []Account{{
 		ID:          95,
 		Platform:    PlatformOpenAI,
@@ -237,10 +143,6 @@ func TestOpenAIManualTempUnschedulableClearTriggersImmediateProbeRecovery(t *tes
 		Status:      StatusActive,
 		Schedulable: true,
 		Concurrency: 1,
-		Credentials: map[string]any{
-			"access_token": "oauth-token",
-			"expires_at":   "2999-01-01T00:00:00Z",
-		},
 	}}}}
 	probe := &openAIAccountProbe{
 		stats:  newOpenAIAccountRuntimeStats(),
@@ -258,9 +160,9 @@ func TestOpenAIManualTempUnschedulableClearTriggersImmediateProbeRecovery(t *tes
 
 	svc.ClearAccountSchedulingBlock(95)
 
-	if upstream.lastReq == nil {
-		t.Fatalf("clearing scheduling block should trigger immediate layered probe recovery")
-	}
+	require.Nil(t, upstream.lastReq, "ClearAccountSchedulingBlock must not trigger any probe request")
+	_, blockPresent := svc.openaiAccountRuntimeBlockUntil.Load(int64(95))
+	require.False(t, blockPresent, "ClearAccountSchedulingBlock still clears the runtime block")
 }
 
 func TestOpenAIManualTempUnschedulableClearWithoutLayeredProbeIsNoop(t *testing.T) {
@@ -269,27 +171,6 @@ func TestOpenAIManualTempUnschedulableClearWithoutLayeredProbeIsNoop(t *testing.
 
 	svc.ClearAccountSchedulingBlock(96)
 
-	if _, ok := svc.openaiAccountRuntimeBlockUntil.Load(int64(96)); ok {
-		t.Fatalf("clearing scheduling block should still clear runtime block when no layered probe is configured")
-	}
-}
-
-func TestOpenAIManualTempUnschedulableClearWithDefaultSchedulerDoesNotTriggerProbe(t *testing.T) {
-	upstream := &openAIHTTPUpstreamRecorder{
-		resp: &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\"}\n\n"))},
-	}
-	svc := &OpenAIGatewayService{
-		httpUpstream:    upstream,
-		openaiScheduler: &defaultOpenAIAccountScheduler{},
-	}
-	svc.openaiAccountRuntimeBlockUntil.Store(int64(97), time.Now().Add(time.Minute))
-
-	svc.ClearAccountSchedulingBlock(97)
-
-	if upstream.lastReq != nil {
-		t.Fatalf("clearing scheduling block should not trigger probe when scheduler is not layered")
-	}
-	if _, ok := svc.openaiAccountRuntimeBlockUntil.Load(int64(97)); ok {
-		t.Fatalf("clearing scheduling block should still clear runtime block for non-layered scheduler")
-	}
+	_, ok := svc.openaiAccountRuntimeBlockUntil.Load(int64(96))
+	require.False(t, ok, "ClearAccountSchedulingBlock clears runtime block even when no probe is configured")
 }
