@@ -549,10 +549,13 @@ func (p *openAIAccountProbe) finalizePenaltyState(accountID int64, entry *openAI
 }
 
 // resolveProbeModel 为探活请求选择模型。
-// 优先使用 model_mapping 中第一个非通配符模型，回退到 gpt-4o-mini。
+// 优先级：账号 extra.openai_probe_model（trim 后非空） > model_mapping 第一个非通配键 > gpt-4o-mini。
 func (p *openAIAccountProbe) resolveProbeModel(account *Account) string {
 	if account == nil {
 		return probeDefaultFallbackModel
+	}
+	if explicit := strings.TrimSpace(account.GetOpenAIProbeModel()); explicit != "" {
+		return explicit
 	}
 	mapping := account.GetModelMapping()
 	if len(mapping) > 0 {

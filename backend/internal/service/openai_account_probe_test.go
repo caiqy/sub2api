@@ -1537,3 +1537,54 @@ func TestProbe_StopCancelsRootContextAndPreventsNewWork(t *testing.T) {
 		t.Fatal("probe stopCh should be closed after stop")
 	}
 }
+
+func TestResolveProbeModel_ExplicitOverridesModelMapping(t *testing.T) {
+	probe := &openAIAccountProbe{}
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Extra:    map[string]any{"openai_probe_model": "gpt-image-2"},
+		Credentials: map[string]any{
+			"model_mapping": map[string]any{"gpt-4o": "upstream-foo"},
+		},
+	}
+	require.Equal(t, "gpt-image-2", probe.resolveProbeModel(account))
+}
+
+func TestResolveProbeModel_EmptyExplicitFallsBackToMapping(t *testing.T) {
+	probe := &openAIAccountProbe{}
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Extra:    map[string]any{"openai_probe_model": ""},
+		Credentials: map[string]any{
+			"model_mapping": map[string]any{"gpt-4o": "upstream-foo"},
+		},
+	}
+	require.Equal(t, "gpt-4o", probe.resolveProbeModel(account))
+}
+
+func TestResolveProbeModel_WhitespaceExplicitFallsBackToMapping(t *testing.T) {
+	probe := &openAIAccountProbe{}
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Extra:    map[string]any{"openai_probe_model": "   "},
+		Credentials: map[string]any{
+			"model_mapping": map[string]any{"gpt-4o": "upstream-foo"},
+		},
+	}
+	require.Equal(t, "gpt-4o", probe.resolveProbeModel(account))
+}
+
+func TestResolveProbeModel_EmptyExplicitNoMappingFallsBackToDefault(t *testing.T) {
+	probe := &openAIAccountProbe{}
+	account := &Account{Platform: PlatformOpenAI}
+	require.Equal(t, probeDefaultFallbackModel, probe.resolveProbeModel(account))
+}
+
+func TestResolveProbeModel_ExplicitOverridesEvenWithoutMapping(t *testing.T) {
+	probe := &openAIAccountProbe{}
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Extra:    map[string]any{"openai_probe_model": "custom-model"},
+	}
+	require.Equal(t, "custom-model", probe.resolveProbeModel(account))
+}
