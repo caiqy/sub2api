@@ -3623,6 +3623,15 @@ export default {
         testMode: 'Test mode',
         testModeDefault: 'Default request',
         testModeCompact: 'Compact probe',
+        probeEnabled: 'Auto health check',
+        probeEnabledDesc:
+          'When enabled, this account participates in the layered scheduler health check. Disable to stop automatic checks; existing probe-induced temp unschedulable state is cleared on save.',
+        probeEnabledOffHint:
+          'This account will not be enrolled in automatic health checks. If currently in a probe-induced temp unschedulable state, saving will restore scheduling immediately.',
+        probeModel: 'Probe model',
+        probeModelPlaceholder: 'Leave blank for default',
+        probeModelHint:
+          'When set, health checks use this model. For image-only upstreams, set to a model the upstream supports (e.g. gpt-image-2).',
         modelRestrictionDisabledByPassthrough: 'Automatic passthrough is enabled: model whitelist/mapping will not take effect.',
       },
       anthropic: {

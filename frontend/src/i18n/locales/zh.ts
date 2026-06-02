@@ -3766,6 +3766,15 @@ export default {
         testMode: '测试模式',
         testModeDefault: '常规请求',
         testModeCompact: 'Compact 探测',
+        probeEnabled: '故障自动检查',
+        probeEnabledDesc:
+          '开启时该账号会被分层调度器健康检查；关闭后不再被自动检查，已有的探活临时不可用状态会立即清除。',
+        probeEnabledOffHint:
+          '关闭后该账号不再进入自动健康检查；当前若处于自动检查导致的临时不可用状态，保存后会立即恢复调度。',
+        probeModel: '自检模型',
+        probeModelPlaceholder: '留空使用默认逻辑',
+        probeModelHint:
+          '填写后该模型将用于账号健康检查；图像专用上游建议填写实际支持的模型（如 gpt-image-2）。',
         modelRestrictionDisabledByPassthrough: '已开启自动透传：模型白名单/映射不会生效。',
       },
       anthropic: {
