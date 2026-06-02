@@ -1629,3 +1629,39 @@ func TestBootstrapRegister_RegistersProbeEnabledAccount(t *testing.T) {
 	_, present := probe.entries.Load(int64(92))
 	require.True(t, present, "bootstrapRegister must keep registering probe-enabled accounts")
 }
+
+func TestProbeTick_RemovesEntryWhenAccountProbeDisabled(t *testing.T) {
+	account := &Account{
+		ID:          303,
+		Platform:    PlatformOpenAI,
+		Status:      StatusActive,
+		Schedulable: true,
+		Extra:       map[string]any{"openai_probe_enabled": false},
+	}
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeCooldownSeconds = 1
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeIntervalSeconds = 60
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeMaxFailures = 3
+
+	svc := &OpenAIGatewayService{cfg: cfg}
+	stats := newOpenAIAccountRuntimeStats()
+	probe := newOpenAIAccountProbe(svc, stats)
+	t.Cleanup(probe.stop)
+
+	// Inject a schedulerSnapshot that returns our probe-disabled account
+	svc.schedulerSnapshot = NewSchedulerSnapshotService(
+		&manualRecoverySnapshotCacheStub{account: account},
+		nil, nil, nil, nil,
+	)
+
+	// Simulate orphan entry: account was registered before config changed
+	probe.entries.Store(int64(303), &openAIAccountProbeEntry{
+		accountID:   303,
+		penalizedAt: time.Now().Add(-2 * time.Second), // past cooldown
+	})
+
+	probe.tick()
+
+	_, present := probe.entries.Load(int64(303))
+	require.False(t, present, "tick must remove orphan entries for probe-disabled accounts")
+}

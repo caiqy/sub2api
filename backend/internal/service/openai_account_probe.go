@@ -315,6 +315,12 @@ func (p *openAIAccountProbe) tick() {
 			p.entries.Delete(accountID)
 			return true
 		}
+		// 防御性 guard：账号探活开关被运行中改为关闭时，清理孤儿 entry。
+		if !account.IsOpenAIProbeEnabled() {
+			p.entries.Delete(accountID)
+			slog.Debug("probe: tick removed orphan entry for probe-disabled account", "account_id", accountID)
+			return true
+		}
 		// 如果 dbFlagSet 为 true 但 TempUnschedulableUntil 已被清除（管理员手动恢复），则恢复账号
 		if entry.dbFlagSet.Load() {
 			if p.shouldTreatAsManualRecovery(stateCheckCtx, accountID, account, entry, now) {
