@@ -667,6 +667,39 @@ func (a *Account) GetOpenAICompactMode() string {
 	return normalizeOpenAICompactMode(mode)
 }
 
+// IsOpenAIProbeEnabled reports whether the layered probe subsystem may
+// take over this account. Missing or non-bool extra values fall back to
+// true to preserve backward compatibility for accounts created before
+// this option existed.
+func (a *Account) IsOpenAIProbeEnabled() bool {
+	if a == nil || !a.IsOpenAI() || a.Extra == nil {
+		return true
+	}
+	v, ok := a.Extra["openai_probe_enabled"]
+	if !ok {
+		return true
+	}
+	enabled, ok := v.(bool)
+	if !ok {
+		return true
+	}
+	return enabled
+}
+
+// GetOpenAIProbeModel returns the explicit probe model configured on the
+// account. Empty string means "fall back to the default selection logic
+// in resolveProbeModel" (model_mapping first key, then gpt-4o-mini).
+func (a *Account) GetOpenAIProbeModel() string {
+	if a == nil || a.Extra == nil {
+		return ""
+	}
+	v, ok := a.Extra["openai_probe_model"].(string)
+	if !ok {
+		return ""
+	}
+	return v
+}
+
 // OpenAICompactSupportKnown reports whether compact capability is known for this
 // account and, when known, whether it is supported.
 func (a *Account) OpenAICompactSupportKnown() (supported bool, known bool) {
