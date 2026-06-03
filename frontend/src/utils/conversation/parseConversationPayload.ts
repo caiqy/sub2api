@@ -178,13 +178,15 @@ const isAnthropicMessageObject = (value: unknown): value is Record<string, unkno
   })
 }
 
+const isAnthropicModelName = (value: unknown): boolean => typeof value === 'string' && value.toLowerCase().includes('claude')
+
 const isAnthropicMessagesRequest = (value: unknown): value is Record<string, unknown> => {
   if (!isRecord(value) || !Array.isArray(value.messages)) return false
   if (Object.prototype.hasOwnProperty.call(value, 'input')) return false
 
   const hasTopLevelSignal = Object.prototype.hasOwnProperty.call(value, 'system')
     || Object.prototype.hasOwnProperty.call(value, 'thinking')
-    || Object.prototype.hasOwnProperty.call(value, 'max_tokens')
+    || (Object.prototype.hasOwnProperty.call(value, 'max_tokens') && isAnthropicModelName(value.model))
   const hasBlockSignal = value.messages.some((message) => isRecord(message) && hasAnthropicContentBlock(message.content))
 
   return hasTopLevelSignal || hasBlockSignal

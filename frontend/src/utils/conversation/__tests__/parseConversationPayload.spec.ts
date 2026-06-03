@@ -906,6 +906,20 @@ describe('parseConversationPayload', () => {
     expect(flow.messages?.[0].parts.map((part) => part.type)).toEqual(['raw'])
   })
 
+  it('[chat] does not misclassify OpenAI Chat request with max_tokens as Anthropic', () => {
+    const flow = parseConversationPayload({
+      requestBody: JSON.stringify({
+        model: 'gpt-4o',
+        max_tokens: 4096,
+        messages: [{ role: 'user', content: 'Hello' }],
+      }),
+      responseBody: null,
+    })
+
+    expect(flow.format).toBe('openai-chat')
+    expect(flow.messages?.[0].parts).toMatchObject([{ type: 'text', text: 'Hello' }])
+  })
+
   it('[anthropic] detects Messages API request before OpenAI chat', () => {
     const flow = parseConversationPayload({
       requestBody: JSON.stringify({
