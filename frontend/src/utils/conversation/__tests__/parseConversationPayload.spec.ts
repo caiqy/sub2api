@@ -1003,6 +1003,64 @@ describe('parseConversationPayload', () => {
     expect(flow.messages?.[2].parts).toMatchObject([{ type: 'text', text: 'Summarize it.' }])
   })
 
+  it('[anthropic][SSE] reconstructs thinking and text content blocks', () => {
+    const sse = [
+      'event: message_start',
+      'data: {"type":"message_start","message":{"id":"msg_1","model":"claude-opus-4.6","role":"assistant","content":[],"type":"message","usage":{"input_tokens":10,"output_tokens":0}}}',
+      '',
+      'event: content_block_start',
+      'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
+      '',
+      'event: content_block_delta',
+      'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\\n"}}',
+      '',
+      'event: content_block_stop',
+      'data: {"type":"content_block_stop","index":0}',
+      '',
+      'event: content_block_start',
+      'data: {"type":"content_block_start","index":1,"content_block":{"type":"thinking","thinking":""}}',
+      '',
+      'event: content_block_delta',
+      'data: {"type":"content_block_delta","index":1,"delta":{"type":"thinking_delta","thinking":"I should summarize."}}',
+      '',
+      'event: content_block_stop',
+      'data: {"type":"content_block_stop","index":1}',
+      '',
+      'event: content_block_start',
+      'data: {"type":"content_block_start","index":2,"content_block":{"type":"text","text":""}}',
+      '',
+      'event: content_block_delta',
+      'data: {"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"**结果总结：**\\n\\n- 成功写出 `tour.json`"}}',
+      '',
+      'event: content_block_stop',
+      'data: {"type":"content_block_stop","index":2}',
+      '',
+      'event: message_delta',
+      'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":20,"output_tokens":30}}',
+      '',
+      'event: message_stop',
+      'data: {"type":"message_stop"}',
+      '',
+    ].join('\n')
+
+    const flow = parseConversationPayload({
+      requestBody: JSON.stringify({
+        model: 'claude-opus-4-6',
+        max_tokens: 128000,
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'Build tour.' }] }],
+      }),
+      responseBody: sse,
+    })
+
+    expect(flow.format).toBe('anthropic-messages')
+    expect(flow.messages?.map((message) => message.role)).toEqual(['user', 'assistant'])
+    expect(flow.messages?.[1].metadata).toMatchObject({ model: 'claude-opus-4.6', stop_reason: 'end_turn' })
+    expect(flow.messages?.[1].parts.map((part) => part.type)).toEqual(['reasoning', 'text'])
+    expect(flow.messages?.[1].parts[0]).toMatchObject({ type: 'reasoning', text: 'I should summarize.' })
+    expect(flow.messages?.[1].parts[1]).toMatchObject({ type: 'text', text: expect.stringContaining('成功写出') })
+    expect(flow.messages?.[1].parts.some((part) => part.type === 'raw')).toBe(false)
+  })
+
   it('falls back to raw parts for unrecognized payloads and empty messages for empty input', () => {
     const rawFlow = parseConversationPayload({ requestBody: '{"foo":1}', responseBody: 'not-json' })
     expect(rawFlow.format).toBe('unknown')

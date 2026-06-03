@@ -254,6 +254,88 @@ const parseSSEBody = (body: string): unknown | null => {
     return { output: outputItems }
   }
 
+  // Anthropic Messages SSE stream reconstruction
+  const hasAnthropicStream = lines.some((line) => {
+    if (!line.startsWith('data:')) return false
+    const data = line.slice(5).trim()
+    if (!data || data === '[DONE]') return false
+    try {
+      const parsed = JSON.parse(data)
+      return isRecord(parsed) && parsed.type === 'message_start'
+    } catch { return false }
+  })
+
+  if (hasAnthropicStream) {
+    let baseMessage: Record<string, unknown> | null = null
+    const blocks: Record<number, Record<string, unknown>> = {}
+
+    for (const line of lines) {
+      if (!line.startsWith('data:')) continue
+      const data = line.slice(5).trim()
+      if (!data || data === '[DONE]') continue
+      try {
+        const parsed = JSON.parse(data)
+        if (!isRecord(parsed)) continue
+
+        if (parsed.type === 'message_start' && isRecord(parsed.message)) {
+          baseMessage = { ...parsed.message }
+        }
+
+        if (parsed.type === 'content_block_start' && typeof parsed.index === 'number' && isRecord(parsed.content_block)) {
+          blocks[parsed.index] = { ...parsed.content_block }
+        }
+
+        if (parsed.type === 'content_block_delta' && typeof parsed.index === 'number' && isRecord(parsed.delta)) {
+          const idx = parsed.index
+          const block = blocks[idx]
+          if (!block) continue
+          const delta = parsed.delta
+          if (delta.type === 'text_delta' && typeof delta.text === 'string') {
+            block.text = (typeof block.text === 'string' ? block.text : '') + delta.text
+          }
+          if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
+            block.thinking = (typeof block.thinking === 'string' ? block.thinking : '') + delta.thinking
+          }
+        }
+
+        if (parsed.type === 'message_delta') {
+          const delta = isRecord(parsed.delta) ? parsed.delta : undefined
+          const usage = isRecord(parsed.usage) ? parsed.usage : undefined
+          if (baseMessage) {
+            if (delta) {
+              if (typeof delta.stop_reason === 'string') baseMessage.stop_reason = delta.stop_reason
+              if (delta.stop_sequence !== undefined) baseMessage.stop_sequence = delta.stop_sequence
+            }
+            if (usage) {
+              baseMessage.usage = { ...(isRecord(baseMessage.usage) ? baseMessage.usage : {}), ...usage }
+            }
+          }
+        }
+      } catch { /* skip */ }
+    }
+
+    if (baseMessage) {
+      const sortedIndices = Object.keys(blocks).map(Number).sort((a, b) => a - b)
+      const content = sortedIndices.map((i) => blocks[i])
+      const message: Record<string, unknown> = {
+        type: 'message',
+        role: typeof baseMessage.role === 'string' ? baseMessage.role : 'assistant',
+        content,
+        model: baseMessage.model,
+        usage: baseMessage.usage,
+      }
+      if (typeof baseMessage.stop_reason === 'string') {
+        message.stop_reason = baseMessage.stop_reason
+      }
+      if (baseMessage.stop_sequence !== undefined) {
+        message.stop_sequence = baseMessage.stop_sequence
+      }
+      return message
+    }
+
+    return null
+  }
+
   // Strategy 3: Chat completions streaming — reconstruct from deltas
   let chatContent = ''
   let chatRole: string | undefined
