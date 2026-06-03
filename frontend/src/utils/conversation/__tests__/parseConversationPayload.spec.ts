@@ -1061,6 +1061,32 @@ describe('parseConversationPayload', () => {
     expect(flow.messages?.[1].parts.some((part) => part.type === 'raw')).toBe(false)
   })
 
+  it('[anthropic] keeps unknown content blocks as collapsed raw parts', () => {
+    const flow = parseConversationPayload({
+      requestBody: JSON.stringify({
+        model: 'claude-opus-4-6',
+        max_tokens: 1024,
+        messages: [
+          {
+            role: 'assistant',
+            content: [
+              { type: 'server_tool_use', id: 'srv_1', name: 'web_search', input: { query: 'sub2api' } },
+            ],
+          },
+        ],
+      }),
+      responseBody: null,
+    })
+
+    expect(flow.format).toBe('anthropic-messages')
+    expect(flow.messages?.[0].parts[0]).toMatchObject({
+      type: 'raw',
+      defaultCollapsed: true,
+      raw: expect.stringContaining('server_tool_use'),
+      metadata: expect.objectContaining({ rawSource: 'request', nestedSource: 'messages' }),
+    })
+  })
+
   it('falls back to raw parts for unrecognized payloads and empty messages for empty input', () => {
     const rawFlow = parseConversationPayload({ requestBody: '{"foo":1}', responseBody: 'not-json' })
     expect(rawFlow.format).toBe('unknown')
