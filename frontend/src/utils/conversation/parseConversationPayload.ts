@@ -160,6 +160,36 @@ const isMessageRole = (value: unknown): value is ConversationMessageRole => {
   return value === 'user' || value === 'assistant' || value === 'system' || value === 'developer'
 }
 
+const hasAnthropicContentBlock = (content: unknown): boolean => {
+  if (!Array.isArray(content)) return false
+  return content.some((part) => {
+    if (!isRecord(part)) return false
+    return part.type === 'tool_use' || part.type === 'tool_result' || part.type === 'thinking'
+  })
+}
+
+const isAnthropicMessageObject = (value: unknown): value is Record<string, unknown> => {
+  if (!isRecord(value)) return false
+  if (value.type !== 'message') return false
+  if (!Array.isArray(value.content)) return false
+  return value.content.some((part) => {
+    if (!isRecord(part)) return false
+    return part.type === 'text' || part.type === 'tool_use' || part.type === 'tool_result' || part.type === 'thinking'
+  })
+}
+
+const isAnthropicMessagesRequest = (value: unknown): value is Record<string, unknown> => {
+  if (!isRecord(value) || !Array.isArray(value.messages)) return false
+  if (Object.prototype.hasOwnProperty.call(value, 'input')) return false
+
+  const hasTopLevelSignal = Object.prototype.hasOwnProperty.call(value, 'system')
+    || Object.prototype.hasOwnProperty.call(value, 'thinking')
+    || Object.prototype.hasOwnProperty.call(value, 'max_tokens')
+  const hasBlockSignal = value.messages.some((message) => isRecord(message) && hasAnthropicContentBlock(message.content))
+
+  return hasTopLevelSignal || hasBlockSignal
+}
+
 /**
  * Detect and parse SSE (Server-Sent Events) streaming response body.
  *
@@ -423,7 +453,10 @@ const detectFormat = (
   response: unknown,
   hint: ParseConversationPayloadInput['formatHint'],
 ): ConversationFormat => {
-  if (hint === 'openai-chat' || hint === 'openai-responses' || hint === 'unknown') return hint
+  if (hint === 'openai-chat' || hint === 'openai-responses' || hint === 'anthropic-messages' || hint === 'unknown') return hint
+
+  if (isAnthropicMessagesRequest(request)) return 'anthropic-messages'
+  if (isAnthropicMessageObject(response)) return 'anthropic-messages'
 
   if (isRecord(request) && Array.isArray(request.messages)) return 'openai-chat'
   if (isRecord(response) && Array.isArray(response.choices)) return 'openai-chat'
@@ -731,6 +764,113 @@ export const parseConversationPayload = (input: ParseConversationPayloadInput): 
     if (response.hasBody && messages.length === responseMessageCount) pushRawResponse()
   }
 
+  const parseAnthropicContentBlock = (
+    block: unknown,
+    role: ConversationMessageRole,
+    rawSource: 'request' | 'response',
+    nestedSource: string,
+    target?: ConversationMessage,
+  ): boolean => {
+    if (typeof block === 'string') {
+      const text = block.trim().length > 0 || role === 'user' ? block : ''
+      if (!text) return false
+      pushContentParts(role, text, undefined, true, target)
+      return true
+    }
+
+    if (!isRecord(block)) {
+      pushRawPart(block, { rawSource, nestedSource }, role)
+      return true
+    }
+
+    if (block.type === 'text') {
+      const text = stringValue(block.text)
+      if (!text || (rawSource === 'response' && text.trim().length === 0)) return false
+      pushContentParts(role, [{ type: 'text', text }], sanitizeRecord(block), true, target)
+      return true
+    }
+
+    if (block.type === 'thinking') {
+      const thinking = stringValue(block.thinking)
+      if (!thinking || thinking.trim().length === 0) return false
+      pushReasoningPart(thinking, sanitizeRecord(block), role === 'assistant' ? target : undefined)
+      return true
+    }
+
+    if (block.type === 'tool_use') {
+      const normalizedToolCall = {
+        ...block,
+        id: stringValue(block.id),
+        name: stringValue(block.name),
+        input: block.input,
+      }
+      pushToolCall(normalizedToolCall, role === 'assistant' ? target : undefined)
+      return true
+    }
+
+    if (block.type === 'tool_result') {
+      const normalizedToolResult = {
+        ...block,
+        call_id: stringValue(block.tool_use_id),
+        content: block.content,
+      }
+      pushToolResult(normalizedToolResult, role === 'assistant' ? target : undefined)
+      return true
+    }
+
+    pushRawPart(block, { rawSource, nestedSource }, role)
+    return true
+  }
+
+  const parseAnthropicMessage = (message: unknown, rawSource: 'request' | 'response', nestedSource: string, target?: ConversationMessage) => {
+    const before = messages.length
+
+    if (!isRecord(message)) {
+      pushRawPart(message, { rawSource, nestedSource })
+      return
+    }
+
+    const role = isMessageRole(message.role) ? message.role : 'assistant'
+    if (role === 'system' || role === 'developer') {
+      pushSystemPrompt(role, message.content)
+      return
+    }
+
+    const messageTarget = target ?? pushMessage(role, message)
+    const content = Array.isArray(message.content) ? message.content : [message.content]
+    let handled = false
+
+    for (const block of content) {
+      handled = parseAnthropicContentBlock(block, role, rawSource, nestedSource, messageTarget) || handled
+    }
+
+    if (!handled && messages.length === before + 1) {
+      messages.pop()
+      pushRawPart(message, { rawSource, nestedSource }, role)
+    }
+  }
+
+  const parseAnthropic = () => {
+    const requestMessageCount = messages.length
+    if (isRecord(request.value)) {
+      if (Object.prototype.hasOwnProperty.call(request.value, 'system')) {
+        pushSystemPrompt('system', request.value.system)
+      }
+      if (Array.isArray(request.value.messages)) {
+        request.value.messages.forEach((message) => parseAnthropicMessage(message, 'request', 'messages'))
+      }
+    }
+    if (request.hasBody && messages.length === requestMessageCount && !systemPromptHandled) pushRawRequest()
+
+    toolPartsByCallId.clear()
+
+    const responseMessageCount = messages.length
+    if (isAnthropicMessageObject(response.value)) {
+      parseAnthropicMessage(response.value, 'response', 'message')
+    }
+    if (response.hasBody && messages.length === responseMessageCount) pushRawResponse()
+  }
+
   const parseResponsesItem = (
     item: unknown,
     fallbackRole: ConversationMessageRole,
@@ -852,6 +992,7 @@ export const parseConversationPayload = (input: ParseConversationPayloadInput): 
   try {
     if (format === 'openai-chat') parseChat()
     else if (format === 'openai-responses') parseResponses()
+    else if (format === 'anthropic-messages') parseAnthropic()
 
     if (format === 'unknown') pushRawFallback()
   } catch (error) {

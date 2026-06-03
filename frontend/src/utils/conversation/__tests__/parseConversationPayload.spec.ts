@@ -906,6 +906,89 @@ describe('parseConversationPayload', () => {
     expect(flow.messages?.[0].parts.map((part) => part.type)).toEqual(['raw'])
   })
 
+  it('[anthropic] detects Messages API request before OpenAI chat', () => {
+    const flow = parseConversationPayload({
+      requestBody: JSON.stringify({
+        model: 'claude-opus-4-6',
+        max_tokens: 128000,
+        system: [{ type: 'text', text: 'You are OpenCode.' }],
+        messages: [
+          { role: 'user', content: [{ type: 'text', text: 'Build a tour.' }] },
+        ],
+      }),
+      responseBody: null,
+    })
+
+    expect(flow.format).toBe('anthropic-messages')
+    expect(flow.systemPrompt?.text).toBe('You are OpenCode.')
+    expect(flow.systemPrompt?.sources).toEqual(['system'])
+    expect(flow.messages?.map((message) => message.role)).toEqual(['user'])
+    expect(flow.messages?.[0].parts).toMatchObject([{ type: 'text', text: 'Build a tour.' }])
+  })
+
+  it('[anthropic] detects content-block-specific Messages API request', () => {
+    const flow = parseConversationPayload({
+      requestBody: JSON.stringify({
+        messages: [
+          {
+            role: 'assistant',
+            content: [
+              { type: 'tool_use', id: 'toolu_1', name: 'read', input: { filePath: 'README.md' } },
+            ],
+          },
+        ],
+      }),
+      responseBody: null,
+    })
+
+    expect(flow.format).toBe('anthropic-messages')
+    expect(flow.messages?.[0].parts).toMatchObject([
+      { type: 'tool', tool: 'read', callId: 'toolu_1' },
+    ])
+  })
+
+  it('[anthropic] parses system, text, thinking, tool_use, and tool_result blocks', () => {
+    const flow = parseConversationPayload({
+      requestBody: JSON.stringify({
+        system: [
+          { type: 'text', text: 'System prompt.' },
+          { type: 'text', text: 'Second system block.', cache_control: { type: 'ephemeral' } },
+        ],
+        messages: [
+          { role: 'user', content: [{ type: 'text', text: 'Read README.' }] },
+          {
+            role: 'assistant',
+            content: [
+              { type: 'thinking', thinking: 'I need to inspect the file.' },
+              { type: 'tool_use', id: 'toolu_read', name: 'read', input: { filePath: 'README.md' } },
+            ],
+          },
+          {
+            role: 'user',
+            content: [
+              { type: 'tool_result', tool_use_id: 'toolu_read', content: '<content>README</content>' },
+              { type: 'text', text: 'Summarize it.' },
+            ],
+          },
+        ],
+      }),
+      responseBody: null,
+    })
+
+    expect(flow.format).toBe('anthropic-messages')
+    expect(flow.systemPrompt?.text).toBe('System prompt.\nSecond system block.')
+    expect(flow.messages?.map((message) => message.role)).toEqual(['user', 'assistant', 'user'])
+    expect(flow.messages?.[0].parts).toMatchObject([{ type: 'text', text: 'Read README.' }])
+    expect(flow.messages?.[1].parts.map((part) => part.type)).toEqual(['reasoning', 'tool'])
+    expect(flow.messages?.[1].parts[0]).toMatchObject({ type: 'reasoning', text: 'I need to inspect the file.' })
+    const tool = flow.messages?.[1].parts[1] as ConversationToolPart
+    expect(tool).toMatchObject({ type: 'tool', tool: 'read', callId: 'toolu_read' })
+    expect(tool.state.status).toBe('completed')
+    expect(tool.state.input).toEqual({ filePath: 'README.md' })
+    expect(tool.state.output).toBe('<content>README</content>')
+    expect(flow.messages?.[2].parts).toMatchObject([{ type: 'text', text: 'Summarize it.' }])
+  })
+
   it('falls back to raw parts for unrecognized payloads and empty messages for empty input', () => {
     const rawFlow = parseConversationPayload({ requestBody: '{"foo":1}', responseBody: 'not-json' })
     expect(rawFlow.format).toBe('unknown')

@@ -1,6 +1,6 @@
 export type ConversationSource = 'client' | 'upstream'
 
-export type ConversationFormat = 'openai-chat' | 'openai-responses' | 'unknown'
+export type ConversationFormat = 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'unknown'
 
 export type ConversationMessageRole = 'user' | 'assistant' | 'system' | 'developer'
 
