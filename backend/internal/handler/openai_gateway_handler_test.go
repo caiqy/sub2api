@@ -592,6 +592,58 @@ func TestOpenAIResponses_FunctionCallOutputHTTPGuidanceDoesNotSuggestPreviousRes
 	require.NotContains(t, w.Body.String(), "reuse previous_response_id")
 }
 
+func TestOpenAIResponses_ToolOutputHTTPValidationCoversObjectInputAndAllOutputTypes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cases := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "single_object_function_call_output",
+			body: `{"model":"gpt-5.1","stream":false,"input":{"type":"function_call_output","call_id":"call_1","output":"{}"}}`,
+		},
+		{
+			name: "array_custom_tool_call_output",
+			body: `{"model":"gpt-5.1","stream":false,"input":[{"type":"custom_tool_call_output","call_id":"call_1","output":"{}"}]}`,
+		},
+		{
+			name: "array_tool_search_output_missing_call_id",
+			body: `{"model":"gpt-5.1","stream":false,"input":[{"type":"tool_search_output","output":"{}"}]}`,
+		},
+		{
+			name: "array_mcp_tool_call_output",
+			body: `{"model":"gpt-5.1","stream":false,"input":[{"type":"mcp_tool_call_output","call_id":"call_1","output":"{}"}]}`,
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(tt.body))
+			c.Request.Header.Set("Content-Type", "application/json")
+
+			groupID := int64(2)
+			c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{
+				ID:      101,
+				GroupID: &groupID,
+				User:    &service.User{ID: 1},
+			})
+			c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{
+				UserID:      1,
+				Concurrency: 1,
+			})
+
+			h := newOpenAIHandlerForPreviousResponseIDValidation(t, nil)
+			h.Responses(c)
+
+			require.Equal(t, http.StatusBadRequest, w.Code)
+			require.Contains(t, w.Body.String(), "Responses WebSocket v2")
+		})
+	}
+}
+
 func TestReplaceOpenAIForwardModelAndSyncParsedCache_UpdatesCachedModel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -2231,4 +2283,45 @@ func (openAIChatCompletionsGatewayCacheStub) RefreshSessionTTL(context.Context, 
 }
 func (openAIChatCompletionsGatewayCacheStub) DeleteSessionAccountID(context.Context, int64, string) error {
 	return nil
+}
+
+func TestOpenAIForwardErrorAlreadyCommunicated(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("upstream response failed after write", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, EndpointResponses, nil)
+		before := c.Writer.Size()
+		_, _ = c.Writer.WriteString(`event: response.failed
+data: {"type":"response.failed","error":{"message":"This content was flagged"}}
+
+`)
+
+		reported := openAIForwardErrorAlreadyCommunicated(c, before, errors.New("upstream response failed: This content was flagged"))
+
+		require.True(t, reported)
+	})
+
+	t.Run("no write still needs fallback", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, EndpointResponses, nil)
+
+		reported := openAIForwardErrorAlreadyCommunicated(c, c.Writer.Size(), errors.New("upstream response failed: This content was flagged"))
+
+		require.False(t, reported)
+	})
+
+	t.Run("generic error after write still needs fallback", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, EndpointResponses, nil)
+		before := c.Writer.Size()
+		_, _ = c.Writer.WriteString(":\n\n")
+
+		reported := openAIForwardErrorAlreadyCommunicated(c, before, errors.New("stream read error: unexpected EOF"))
+
+		require.False(t, reported)
+	})
 }

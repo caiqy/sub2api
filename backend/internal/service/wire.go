@@ -633,6 +633,7 @@ var ProviderSet = wire.NewSet(
 	ProvidePaymentService,
 	ProvidePaymentOrderExpiryService,
 	ProvideBalanceNotifyService,
+	NewUserPlatformQuotaUsageFlusher,
 	ProvideChannelMonitorService,
 	ProvideChannelMonitorRunner,
 	NewChannelMonitorRequestTemplateService,

@@ -80,6 +80,26 @@ func NewOpenAIGatewayHandler(
 	}
 }
 
+func openAIForwardErrorAlreadyCommunicated(c *gin.Context, writerSizeBeforeForward int, err error) bool {
+	if err == nil || c == nil || c.Writer == nil {
+		return false
+	}
+	if c.Writer.Size() == writerSizeBeforeForward {
+		return false
+	}
+
+	msg := strings.TrimSpace(err.Error())
+	for _, prefix := range []string{
+		"upstream response failed:",
+		"non-streaming openai protocol error:",
+	} {
+		if strings.HasPrefix(msg, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // Responses handles OpenAI Responses API endpoint
 // POST /openai/v1/responses
 func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
@@ -966,7 +986,8 @@ func (h *OpenAIGatewayHandler) ensureAnthropicErrorResponse(c *gin.Context, stre
 }
 
 func (h *OpenAIGatewayHandler) validateFunctionCallOutputRequest(c *gin.Context, body []byte, reqLog *zap.Logger) bool {
-	if !gjson.GetBytes(body, `input.#(type=="function_call_output")`).Exists() {
+	bytesValidation := service.ValidateFunctionCallOutputContextBytes(body)
+	if !bytesValidation.HasFunctionCallOutput {
 		return true
 	}
 

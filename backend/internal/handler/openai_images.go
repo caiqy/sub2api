@@ -216,6 +216,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 					accountReleaseFunc()
 				}
 			}()
+			c.Set("openai_images_handler_wrap_upstream_4xx", true)
 			return h.gatewayService.ForwardImages(c.Request.Context(), c, account, body, parsed, channelMapping.MappedModel)
 		}()
 		forwardDuration := time.Since(forwardStart)
@@ -229,6 +230,12 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		if result != nil && result.FirstTokenMs != nil {
 			service.SetOpsLatencyMs(c, service.OpsTimeToFirstTokenMsKey, int64(*result.FirstTokenMs))
 		}
+		ensureImagesForwardErrorResponse := func() bool {
+			if c != nil && c.Writer != nil && c.Writer.Written() {
+				return false
+			}
+			return h.ensureForwardErrorResponse(c, streamStarted)
+		}
 		if err != nil {
 			if result != nil && result.ImageCount > 0 {
 				reqLog.Warn("openai.images.forward_partial_error_with_image_result",
@@ -239,6 +246,22 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			} else {
 				var imageUpstreamErr *service.OpenAIImagesUpstreamError
 				if errors.As(err, &imageUpstreamErr) {
+					if account.Type == service.AccountTypeOAuth {
+						h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
+						wroteFallback := ensureImagesForwardErrorResponse()
+						h.submitOpenAIImagesFailedUsageLog(c, apiKey, account, parsed, err, forwardDuration)
+						fields := []zap.Field{
+							zap.Int64("account_id", account.ID),
+							zap.Bool("fallback_error_response_written", wroteFallback),
+							zap.Error(err),
+						}
+						if shouldLogOpenAIForwardFailureAsWarn(c, wroteFallback) {
+							reqLog.Warn("openai.images.forward_failed", fields...)
+							return
+						}
+						reqLog.Error("openai.images.forward_failed", fields...)
+						return
+					}
 					h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, true, nil)
 					reqLog.Warn("openai.images.upstream_user_error",
 						zap.Int64("account_id", account.ID),
@@ -295,7 +318,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 				}
 			}
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
-			wroteFallback := h.ensureForwardErrorResponse(c, streamStarted)
+			wroteFallback := ensureImagesForwardErrorResponse()
 			h.submitOpenAIImagesFailedUsageLog(c, apiKey, account, parsed, err, forwardDuration)
 			fields := []zap.Field{
 				zap.Int64("account_id", account.ID),

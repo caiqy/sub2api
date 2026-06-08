@@ -1,7 +1,6 @@
 package service
 
 import (
-	"encoding/json"
 	"strings"
 
 	"github.com/tidwall/gjson"
@@ -91,7 +90,7 @@ func openAIJSONToolsContainImageGeneration(tools gjson.Result) bool {
 	}
 	found := false
 	tools.ForEach(func(_, item gjson.Result) bool {
-		if strings.TrimSpace(item.Get("type").String()) == "image_generation" {
+		if openAIJSONString(item.Get("type")) == "image_generation" {
 			found = true
 			return false
 		}
@@ -159,17 +158,6 @@ func apiKeyGroup(apiKey *APIKey) *Group {
 	return apiKey.Group
 }
 
-func cloneRequestMapForImageIntent(body []byte) map[string]any {
-	if len(body) == 0 {
-		return nil
-	}
-	var out map[string]any
-	if err := json.Unmarshal(body, &out); err != nil {
-		return nil
-	}
-	return out
-}
-
 type OpenAIResponsesImageBillingConfig struct {
 	Model     string
 	SizeTier  string
@@ -225,8 +213,43 @@ func resolveOpenAIResponsesImageBillingConfigFromBody(body []byte, fallbackModel
 }
 
 func resolveOpenAIResponsesImageBillingConfigDetailedFromBody(body []byte, fallbackModel string) (OpenAIResponsesImageBillingConfig, error) {
-	reqBody := cloneRequestMapForImageIntent(body)
-	return resolveOpenAIResponsesImageBillingConfigDetailed(reqBody, fallbackModel)
+	imageModel := ""
+	imageSize := ""
+	hasImageTool := false
+	if len(body) > 0 && gjson.ValidBytes(body) {
+		tools := gjson.GetBytes(body, "tools")
+		if tools.IsArray() {
+			tools.ForEach(func(_, item gjson.Result) bool {
+				if openAIJSONString(item.Get("type")) != "image_generation" {
+					return true
+				}
+				hasImageTool = true
+				imageModel = openAIJSONString(item.Get("model"))
+				imageSize = openAIJSONString(item.Get("size"))
+				return false
+			})
+		}
+		if imageSize == "" {
+			imageSize = openAIJSONString(gjson.GetBytes(body, "size"))
+		}
+		if imageModel == "" {
+			bodyModel := openAIJSONString(gjson.GetBytes(body, "model"))
+			if isOpenAIImageBillingModelAlias(bodyModel) || !hasImageTool {
+				imageModel = bodyModel
+			}
+		}
+	}
+	if imageModel == "" && hasImageTool {
+		imageModel = "gpt-image-2"
+	}
+	if imageModel == "" {
+		imageModel = strings.TrimSpace(fallbackModel)
+	}
+	return OpenAIResponsesImageBillingConfig{
+		Model:     imageModel,
+		SizeTier:  normalizeOpenAIImageSizeTier(imageSize),
+		InputSize: imageSize,
+	}, nil
 }
 
 func isOpenAIImageBillingModelAlias(model string) bool {
@@ -235,4 +258,11 @@ func isOpenAIImageBillingModelAlias(model string) bool {
 		return false
 	}
 	return isOpenAIImageGenerationModel(normalized) || strings.Contains(normalized, "image")
+}
+
+func openAIJSONString(value gjson.Result) string {
+	if value.Type != gjson.String {
+		return ""
+	}
+	return strings.TrimSpace(value.String())
 }

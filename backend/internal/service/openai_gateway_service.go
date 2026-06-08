@@ -53,11 +53,12 @@ const (
 	// 与 Codex 客户端保持一致：失败后最多重连 5 次。
 	openAIWSReconnectRetryLimit = 5
 	// OpenAI WS Mode 重连退避默认值（可由配置覆盖）。
-	openAIWSRetryBackoffInitialDefault = 120 * time.Millisecond
-	openAIWSRetryBackoffMaxDefault     = 2 * time.Second
-	openAIWSRetryJitterRatioDefault    = 0.2
-	openAICompactSessionSeedKey        = "openai_compact_session_seed"
-	codexCLIVersion                    = "0.125.0"
+	openAIWSRetryBackoffInitialDefault       = 120 * time.Millisecond
+	openAIWSRetryBackoffMaxDefault           = 2 * time.Second
+	openAIWSRetryJitterRatioDefault          = 0.2
+	openAIUpstreamErrorBodyReadLimit   int64 = 512 << 10
+	openAICompactSessionSeedKey              = "openai_compact_session_seed"
+	codexCLIVersion                          = "0.125.0"
 	// Codex 限额快照仅用于后台展示/诊断，不需要每个成功请求都立即落库。
 	openAICodexSnapshotPersistMinInterval = 30 * time.Second
 )
@@ -231,19 +232,126 @@ type OpenAIForwardResult struct {
 	ServiceTier *string
 	// ReasoningEffort is extracted from request body (reasoning.effort) or derived from model suffix.
 	// Stored for usage records display; nil means not provided / not applicable.
-	ReasoningEffort    *string
+	ReasoningEffort     *string
+	Stream              bool
+	OpenAIWSMode        bool
+	ResponseHeaders     http.Header
+	Duration            time.Duration
+	FirstTokenMs        *int
+	ClientDisconnect    bool
+	ImageCount          int
+	ImageSize           string
+	ImageInputSize      string
+	ImageOutputSize     string
+	ImageOutputSizes    []string
+	ImageSizeSource     string
+	ImageSizeBreakdown  map[string]int
+	wsReplayInput       []json.RawMessage
+	wsReplayInputExists bool
+}
+
+type openAIRequestView struct {
+	body               []byte
+	Model              string
 	Stream             bool
-	OpenAIWSMode       bool
-	ResponseHeaders    http.Header
-	Duration           time.Duration
-	FirstTokenMs       *int
-	ImageCount         int
-	ImageSize          string
-	ImageInputSize     string
-	ImageOutputSize    string
-	ImageOutputSizes   []string
-	ImageSizeSource    string
-	ImageSizeBreakdown map[string]int
+	PromptCacheKey     string
+	PreviousResponseID string
+	ServiceTier        string
+	ReasoningEffort    string
+	patches            []openAIRequestPatch
+	patchesDisabled    bool
+}
+
+type openAIRequestPatch struct {
+	path   string
+	delete bool
+	value  any
+}
+
+func newOpenAIRequestView(body []byte) openAIRequestView {
+	if len(body) == 0 {
+		return openAIRequestView{}
+	}
+	return openAIRequestView{
+		body:               body,
+		Model:              strings.TrimSpace(gjson.GetBytes(body, "model").String()),
+		Stream:             gjson.GetBytes(body, "stream").Bool(),
+		PromptCacheKey:     strings.TrimSpace(gjson.GetBytes(body, "prompt_cache_key").String()),
+		PreviousResponseID: strings.TrimSpace(gjson.GetBytes(body, "previous_response_id").String()),
+		ServiceTier:        strings.TrimSpace(gjson.GetBytes(body, "service_tier").String()),
+		ReasoningEffort:    strings.TrimSpace(gjson.GetBytes(body, "reasoning.effort").String()),
+	}
+}
+
+func (v openAIRequestView) Decode(c *gin.Context) (map[string]any, error) {
+	return getOpenAIRequestBodyMap(c, v.body)
+}
+
+func (v *openAIRequestView) MarkPatchSet(path string, value any) {
+	if v == nil || v.patchesDisabled {
+		return
+	}
+	path = strings.TrimSpace(path)
+	if !isSimpleOpenAIRequestPatchPath(path) {
+		v.DisablePatches()
+		return
+	}
+	v.patches = append(v.patches, openAIRequestPatch{path: path, value: value})
+}
+
+func (v *openAIRequestView) MarkPatchDelete(path string) {
+	if v == nil || v.patchesDisabled {
+		return
+	}
+	path = strings.TrimSpace(path)
+	if !isSimpleOpenAIRequestPatchPath(path) {
+		v.DisablePatches()
+		return
+	}
+	v.patches = append(v.patches, openAIRequestPatch{path: path, delete: true})
+}
+
+func isSimpleOpenAIRequestPatchPath(path string) bool {
+	if path == "" || strings.ContainsRune(path, '\\') {
+		return false
+	}
+	for _, part := range strings.Split(path, ".") {
+		if strings.TrimSpace(part) == "" {
+			return false
+		}
+	}
+	return true
+}
+
+func (v *openAIRequestView) DisablePatches() {
+	if v == nil {
+		return
+	}
+	v.patchesDisabled = true
+	v.patches = nil
+}
+
+func (v openAIRequestView) HasPatches() bool {
+	return !v.patchesDisabled && len(v.patches) > 0
+}
+
+func (v openAIRequestView) ApplyPatches() ([]byte, error) {
+	if v.patchesDisabled || len(v.patches) == 0 {
+		return nil, errors.New("openai request patches disabled")
+	}
+	body := v.body
+	for _, patch := range v.patches {
+		var err error
+		if patch.delete {
+			body, err = sjson.DeleteBytes(body, patch.path)
+		} else {
+			body, err = sjson.SetBytes(body, patch.path, patch.value)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	return body, nil
 }
 
 type OpenAIWSRetryMetricsSnapshot struct {
@@ -1398,6 +1506,33 @@ func (s *OpenAIGatewayService) bindOpenAIResponseAccount(ctx context.Context, gr
 	return store.BindResponseAccount(ctx, groupID, responseID, accountID, ttl)
 }
 
+func extractOpenAIResponseIDFromJSONBytes(body []byte) string {
+	if len(body) == 0 || !gjson.ValidBytes(body) {
+		return ""
+	}
+	if id := strings.TrimSpace(gjson.GetBytes(body, "id").String()); id != "" {
+		return id
+	}
+	return strings.TrimSpace(gjson.GetBytes(body, "response.id").String())
+}
+
+func (s *OpenAIGatewayService) bindHTTPResponseAccount(ctx context.Context, c *gin.Context, account *Account, responseID string) {
+	if s == nil || account == nil || account.ID <= 0 {
+		return
+	}
+	responseID = strings.TrimSpace(responseID)
+	if responseID == "" {
+		return
+	}
+	store := s.getOpenAIWSStateStore()
+	if store == nil {
+		return
+	}
+	groupID := getOpenAIGroupIDFromContext(c)
+	ttl := s.openAIWSResponseStickyTTL()
+	logOpenAIWSBindResponseAccountWarn(groupID, account.ID, responseID, store.BindResponseAccount(ctx, groupID, responseID, account.ID, ttl))
+}
+
 // BindStickySession sets session -> account binding with standard TTL.
 func (s *OpenAIGatewayService) BindStickySession(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
 	if !s.openAIStickyEnabled() {
@@ -2435,12 +2570,32 @@ func (s *OpenAIGatewayService) handleFailoverSideEffects(ctx context.Context, re
 			).Error("openai.failover_side_effects_panic_recovered")
 		}
 	}()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	body := s.readUpstreamErrorBody(resp)
 	if len(requestedModel) > 0 {
 		s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body, requestedModel[0])
 		return
 	}
 	s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body)
+}
+
+func openAIUpstreamErrorBodyReadLimitForConfig(cfg *config.Config) int64 {
+	limit := openAIUpstreamErrorBodyReadLimit
+	if cfg != nil && cfg.Gateway.LogUpstreamErrorBody && cfg.Gateway.LogUpstreamErrorBodyMaxBytes > int(limit) {
+		limit = int64(cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
+	}
+	return limit
+}
+
+func (s *OpenAIGatewayService) readUpstreamErrorBody(resp *http.Response) []byte {
+	if resp == nil || resp.Body == nil {
+		return nil
+	}
+	cfg := (*config.Config)(nil)
+	if s != nil {
+		cfg = s.cfg
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, openAIUpstreamErrorBodyReadLimitForConfig(cfg)))
+	return body
 }
 
 // Forward forwards request to OpenAI API
@@ -2599,9 +2754,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 	// 非透传模式下，instructions 为空时注入默认指令。
 	if isInstructionsEmpty(reqBody) && !compatMessagesBridge {
-		reqBody["instructions"] = "You are a helpful coding assistant."
+		reqBody["instructions"] = defaultCodexSynthInstructions(reqModel)
 		bodyModified = true
-		markPatchSet("instructions", "You are a helpful coding assistant.")
+		markPatchSet("instructions", defaultCodexSynthInstructions(reqModel))
 	}
 
 	if codexImageGenerationBridgeEnabled && ensureOpenAIResponsesImageGenerationTool(reqBody) {
@@ -4889,6 +5044,9 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 	}
 
 	needModelReplace := originalModel != mappedModel
+	streamOutputAccumulator := apicompat.NewBufferedResponseAccumulator()
+	streamImageOutputs := make([]json.RawMessage, 0, 1)
+	streamSeenImages := make(map[string]struct{})
 	resultWithUsage := func() *openaiStreamingResult {
 		return &openaiStreamingResult{
 			usage:            usage,
@@ -4969,11 +5127,6 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 		if data, ok := extractOpenAISSEDataLine(line); ok {
 
 			// Replace model in response if needed.
-			// Fast path: most events do not contain model field values.
-			if needModelReplace && mappedModel != "" && strings.Contains(data, mappedModel) {
-				line = s.replaceModelInSSELine(line, mappedModel, originalModel)
-			}
-
 			dataBytes := []byte(data)
 			if openAIStreamEventIsTerminal(data) {
 				sawTerminalEvent = true
@@ -4990,6 +5143,9 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 				forceFlushFailedEvent = true
 				sawFailedEvent = true
 			}
+			if imageOutput, ok := extractImageGenerationOutputFromSSEData(dataBytes, streamSeenImages); ok {
+				streamImageOutputs = append(streamImageOutputs, imageOutput)
+			}
 			imageCounter.AddSSEData(dataBytes)
 
 			// Correct Codex tool calls if needed (apply_patch -> edit, etc.)
@@ -4998,6 +5154,23 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 				data = string(correctedData)
 				line = "data: " + data
 				eventType = strings.TrimSpace(gjson.GetBytes(dataBytes, "type").String())
+			}
+			if responsesStreamEventMayContributeToOutput(eventType) {
+				var streamEvent apicompat.ResponsesStreamEvent
+				if err := json.Unmarshal(dataBytes, &streamEvent); err == nil {
+					streamOutputAccumulator.ProcessEvent(&streamEvent)
+				}
+			}
+			if normalizedData, normalized := normalizeResponsesStreamingTerminalOutput(dataBytes, streamOutputAccumulator, streamImageOutputs); normalized {
+				dataBytes = normalizedData
+				data = string(normalizedData)
+				line = "data: " + data
+				eventType = strings.TrimSpace(gjson.GetBytes(dataBytes, "type").String())
+			}
+
+			// Fast path: most events do not contain model field values.
+			if needModelReplace && mappedModel != "" && strings.Contains(data, mappedModel) {
+				line = s.replaceModelInSSELine(line, mappedModel, originalModel)
 			}
 			startsClientOutput := forceFlushFailedEvent || openAIStreamDataStartsClientOutput(data, eventType)
 
@@ -5608,6 +5781,68 @@ func (s *OpenAIGatewayService) parseSSEUsageFromBody(body string) *OpenAIUsage {
 	return usage
 }
 
+func normalizeResponsesStreamingTerminalOutput(data []byte, acc *apicompat.BufferedResponseAccumulator, imageOutputs []json.RawMessage) ([]byte, bool) {
+	eventType := strings.TrimSpace(gjson.GetBytes(data, "type").String())
+	switch eventType {
+	case "response.completed", "response.done", "response.incomplete", "response.cancelled", "response.canceled":
+	default:
+		return data, false
+	}
+
+	output := gjson.GetBytes(data, "response.output")
+	hasAccumulatedOutput := (acc != nil && acc.HasContent()) || len(imageOutputs) > 0
+	if output.Exists() && output.IsArray() {
+		if len(output.Array()) > 0 || !hasAccumulatedOutput {
+			return data, false
+		}
+	}
+
+	outputJSON := []byte("[]")
+	if reconstructed, ok := buildResponsesOutputJSON(acc, imageOutputs); ok {
+		outputJSON = reconstructed
+	}
+	updated, err := sjson.SetRawBytes(data, "response.output", outputJSON)
+	if err != nil {
+		return data, false
+	}
+	return updated, true
+}
+
+func responsesStreamEventMayContributeToOutput(eventType string) bool {
+	switch eventType {
+	case "response.output_text.delta",
+		"response.output_item.added",
+		"response.function_call_arguments.delta",
+		"response.reasoning_summary_text.delta":
+		return true
+	default:
+		return false
+	}
+}
+
+func buildResponsesOutputJSON(acc *apicompat.BufferedResponseAccumulator, imageOutputs []json.RawMessage) ([]byte, bool) {
+	if (acc == nil || !acc.HasContent()) && len(imageOutputs) == 0 {
+		return nil, false
+	}
+	var output []json.RawMessage
+	if acc != nil && acc.HasContent() {
+		outputJSON, err := json.Marshal(acc.BuildOutput())
+		if err == nil {
+			_ = json.Unmarshal(outputJSON, &output)
+		}
+	}
+	output = append(output, imageOutputs...)
+	if len(output) == 0 {
+		return nil, false
+	}
+
+	outputJSON, err := json.Marshal(output)
+	if err != nil {
+		return nil, false
+	}
+	return outputJSON, true
+}
+
 func (s *OpenAIGatewayService) replaceModelInSSEBody(body, fromModel, toModel string) string {
 	lines := strings.Split(body, "\n")
 	for i, line := range lines {
@@ -5980,6 +6215,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	durationMs := int(result.Duration.Milliseconds())
 	accountRateMultiplier := account.BillingRateMultiplier()
 	requestID := resolveUsageBillingRequestID(ctx, result.RequestID)
+	if result.OpenAIWSMode {
+		if upstreamRequestID := strings.TrimSpace(result.RequestID); upstreamRequestID != "" {
+			requestID = upstreamRequestID
+		}
+	}
 
 	// 确定 RequestedModel（渠道映射前的原始模型）
 	requestedModel := result.Model
@@ -6921,7 +7161,7 @@ func buildOpenAIFastPolicyBlockedWSEvent(err *OpenAIFastBlockedError) []byte {
 }
 
 func sanitizeEmptyBase64InputImagesInOpenAIBody(body []byte) ([]byte, bool, error) {
-	if len(body) == 0 || !bytes.Contains(body, []byte(`"image_url"`)) || !bytes.Contains(body, []byte(`base64,`)) {
+	if !openAIRequestBodyMayContainEmptyBase64InputImage(body) {
 		return body, false, nil
 	}
 
@@ -6937,6 +7177,48 @@ func sanitizeEmptyBase64InputImagesInOpenAIBody(body []byte) ([]byte, bool, erro
 		return body, false, fmt.Errorf("serialize sanitized request body: %w", err)
 	}
 	return normalized, true, nil
+}
+
+func openAIRequestBodyMayContainEmptyBase64InputImage(body []byte) bool {
+	if len(body) == 0 || !openAIRequestBodyMayContainInputImageToken(body) {
+		return false
+	}
+	input := gjson.GetBytes(body, "input")
+	if !input.Exists() {
+		return false
+	}
+	return openAIJSONValueMayContainEmptyBase64InputImage(input)
+}
+
+func openAIRequestBodyMayContainInputImageToken(body []byte) bool {
+	if bytes.Contains(body, []byte("input_image")) {
+		return true
+	}
+	return bytes.Contains(body, []byte("\\u"))
+}
+
+func openAIJSONValueMayContainEmptyBase64InputImage(value gjson.Result) bool {
+	if !value.Exists() {
+		return false
+	}
+	if value.IsArray() {
+		found := false
+		value.ForEach(func(_, item gjson.Result) bool {
+			if openAIJSONValueMayContainEmptyBase64InputImage(item) {
+				found = true
+				return false
+			}
+			return true
+		})
+		return found
+	}
+	if value.IsObject() {
+		if strings.TrimSpace(value.Get("type").String()) == "input_image" && isEmptyBase64DataURI(value.Get("image_url").String()) {
+			return true
+		}
+		return openAIJSONValueMayContainEmptyBase64InputImage(value.Get("content"))
+	}
+	return false
 }
 
 func sanitizeEmptyBase64InputImagesInOpenAIRequestBodyMap(reqBody map[string]any) bool {
@@ -7037,21 +7319,12 @@ func isEmptyBase64DataURI(raw string) bool {
 	return strings.TrimSpace(strings.TrimPrefix(rest, "base64,")) == ""
 }
 
-func getOpenAIRequestBodyMap(c *gin.Context, body []byte) (map[string]any, error) {
-	if c != nil {
-		if cached, ok := c.Get(OpenAIParsedRequestBodyKey); ok {
-			if reqBody, ok := cached.(map[string]any); ok && reqBody != nil {
-				return reqBody, nil
-			}
-		}
-	}
-
+func getOpenAIRequestBodyMap(_ *gin.Context, body []byte) (map[string]any, error) {
 	var reqBody map[string]any
-	if err := json.Unmarshal(body, &reqBody); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	if err := decoder.Decode(&reqBody); err != nil {
 		return nil, fmt.Errorf("parse request: %w", err)
-	}
-	if c != nil {
-		c.Set(OpenAIParsedRequestBodyKey, reqBody)
 	}
 	return reqBody, nil
 }
