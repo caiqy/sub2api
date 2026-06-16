@@ -386,6 +386,7 @@ type ContentModerationLog struct {
 	CategoryScores    map[string]float64 `json:"category_scores"`
 	ThresholdSnapshot map[string]float64 `json:"threshold_snapshot"`
 	InputExcerpt      string             `json:"input_excerpt"`
+	MatchedKeyword    string             `json:"matched_keyword"`
 	UpstreamLatencyMS *int               `json:"upstream_latency_ms,omitempty"`
 	Error             string             `json:"error"`
 	ViolationCount    int                `json:"violation_count"`
@@ -880,7 +881,7 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 					"keyword_blocking_mode", cfg.KeywordBlockingMode,
 					"keyword", keyword)
 				scores := map[string]float64{contentModerationKeywordCategory: 1.0}
-				log := s.buildLog(input, cfg, ContentModerationActionKeywordBlock, true, contentModerationKeywordCategory, 1.0, scores, content.ExcerptText(), nil, nil, "")
+				log := s.buildLog(input, cfg, ContentModerationActionKeywordBlock, true, contentModerationKeywordCategory, 1.0, scores, content.ExcerptText(), keyword, nil, nil, "")
 				s.enqueueRecord(input, cfg, log, hashText, false, true)
 				return &ContentModerationDecision{
 					Allowed:         false,
@@ -927,7 +928,7 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 				message = fmt.Sprintf("%s（hash: %s）", message, hashText)
 			}
 			scores := map[string]float64{"hash": 1.0}
-			log := s.buildLog(input, cfg, ContentModerationActionHashBlock, true, "hash", 1.0, scores, content.ExcerptText(), nil, nil, "")
+			log := s.buildLog(input, cfg, ContentModerationActionHashBlock, true, "hash", 1.0, scores, content.ExcerptText(), "", nil, nil, "")
 			s.enqueueRecord(input, cfg, log, hashText, false, false)
 			return &ContentModerationDecision{
 				Allowed:    false,
@@ -1009,7 +1010,7 @@ func (s *ContentModerationService) checkSync(ctx context.Context, input ContentM
 			s.asyncErrors.Add(1)
 		}
 		if cfg.RecordNonHits {
-			log := s.buildLog(input, cfg, ContentModerationActionError, false, "", 0, nil, content.ExcerptText(), &latency, queueDelay, err.Error())
+			log := s.buildLog(input, cfg, ContentModerationActionError, false, "", 0, nil, content.ExcerptText(), "", &latency, queueDelay, err.Error())
 			_ = s.repo.CreateLog(ctx, log)
 		}
 		return allow
@@ -1042,7 +1043,7 @@ func (s *ContentModerationService) checkSync(ctx context.Context, input ContentM
 		"latency_ms", latency,
 		"queue_delay_ms", queueDelay)
 	if flagged || cfg.RecordNonHits {
-		log := s.buildLog(input, cfg, action, flagged, highestCategory, highestScore, result.CategoryScores, content.ExcerptText(), &latency, queueDelay, "")
+		log := s.buildLog(input, cfg, action, flagged, highestCategory, highestScore, result.CategoryScores, content.ExcerptText(), "", &latency, queueDelay, "")
 		if queueDelay == nil && cfg.Mode == ContentModerationModePreBlock {
 			s.enqueueRecord(input, cfg, log, hashText, flagged, flagged)
 		} else {
@@ -1581,7 +1582,7 @@ func (s *ContentModerationService) callModerationOnceWithInput(ctx context.Conte
 	return &out.Results[0], nil
 }
 
-func (s *ContentModerationService) buildLog(input ContentModerationCheckInput, cfg *ContentModerationConfig, action string, flagged bool, highestCategory string, highestScore float64, scores map[string]float64, text string, latency *int, queueDelay *int, errText string) *ContentModerationLog {
+func (s *ContentModerationService) buildLog(input ContentModerationCheckInput, cfg *ContentModerationConfig, action string, flagged bool, highestCategory string, highestScore float64, scores map[string]float64, text string, matchedKeyword string, latency *int, queueDelay *int, errText string) *ContentModerationLog {
 	var userID *int64
 	if input.UserID > 0 {
 		userID = &input.UserID
@@ -1609,6 +1610,7 @@ func (s *ContentModerationService) buildLog(input ContentModerationCheckInput, c
 		CategoryScores:    cloneFloatMap(scores),
 		ThresholdSnapshot: cloneFloatMap(cfg.Thresholds),
 		InputExcerpt:      trimRunes(redactContentModerationSecrets(text), maxModerationExcerptRunes),
+		MatchedKeyword:    strings.TrimSpace(matchedKeyword),
 		UpstreamLatencyMS: latency,
 		QueueDelayMS:      queueDelay,
 		Error:             errText,

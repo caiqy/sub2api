@@ -387,7 +387,7 @@ func TestBuildContentModerationLog_RedactsInputExcerpt(t *testing.T) {
 		Provider:  "openai",
 	}
 
-	log := svc.buildLog(input, cfg, ContentModerationActionAllow, true, "sexual", 0.8, map[string]float64{"sexual": 0.8}, "hello sk-proj-1234567890abcdef", nil, nil, "")
+	log := svc.buildLog(input, cfg, ContentModerationActionAllow, true, "sexual", 0.8, map[string]float64{"sexual": 0.8}, "hello sk-proj-1234567890abcdef", "", nil, nil, "")
 
 	require.NotContains(t, log.InputExcerpt, "sk-proj-1234567890abcdef")
 	require.Contains(t, log.InputExcerpt, "[已脱敏]")
@@ -478,6 +478,7 @@ func TestContentModerationCheck_PreBlockKeywordHitSkipsUpstreamCall(t *testing.T
 	require.True(t, logs[0].Flagged)
 	require.Equal(t, ContentModerationActionKeywordBlock, logs[0].Action)
 	require.Equal(t, contentModerationKeywordCategory, logs[0].HighestCategory)
+	require.Equal(t, "secret-token", logs[0].MatchedKeyword)
 }
 
 func TestContentModerationCheck_KeywordsIgnoredInObserveMode(t *testing.T) {
@@ -866,7 +867,7 @@ func TestExtractContentModerationInput_AnthropicImageSourceOnlyParticipatesInMem
 	require.Equal(t, "检查这张图", input.Text)
 	require.Equal(t, []string{"data:image/png;base64,aGVsbG8="}, input.Images)
 
-	log := (&ContentModerationService{}).buildLog(ContentModerationCheckInput{}, defaultContentModerationConfig(), ContentModerationActionAllow, false, "", 0, nil, input.ExcerptText(), nil, nil, "")
+	log := (&ContentModerationService{}).buildLog(ContentModerationCheckInput{}, defaultContentModerationConfig(), ContentModerationActionAllow, false, "", 0, nil, input.ExcerptText(), "", nil, nil, "")
 	require.Equal(t, "检查这张图", log.InputExcerpt)
 	require.NotContains(t, log.InputExcerpt, "aGVsbG8=")
 }

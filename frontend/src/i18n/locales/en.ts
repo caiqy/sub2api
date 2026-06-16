@@ -2787,6 +2787,7 @@ export default {
       unbanFailed: 'Failed to unban user',
       inputDetailTitle: 'Input Summary Detail',
       inputDetailContent: 'Full Content',
+      matchedKeyword: 'Matched keyword',
       queueDelay: 'Queued {ms} ms',
       allGroups: 'All Groups',
       allGroupsHint: 'Auditing all groups',
