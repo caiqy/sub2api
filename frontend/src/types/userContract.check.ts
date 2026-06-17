@@ -55,6 +55,7 @@ type ExpectedCreateUserRequest = {
   notes?: string
   balance?: number
   concurrency?: number
+  rpm_limit?: number
   allowed_groups?: number[] | null
 }
 

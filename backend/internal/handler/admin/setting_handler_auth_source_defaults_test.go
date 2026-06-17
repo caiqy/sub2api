@@ -19,6 +19,7 @@ import (
 type settingHandlerRepoStub struct {
 	values      map[string]string
 	lastUpdates map[string]string
+	history     []map[string]string
 	setErrKey   string
 	setErr      error
 }
@@ -70,6 +71,11 @@ func (s *settingHandlerRepoStub) SetMultiple(ctx context.Context, settings map[s
 		}
 		s.values[key] = value
 	}
+	historyEntry := make(map[string]string, len(settings))
+	for key, value := range settings {
+		historyEntry[key] = value
+	}
+	s.history = append(s.history, historyEntry)
 	return nil
 }
 
@@ -153,7 +159,8 @@ func TestSettingHandler_GetSettings_InjectsAuthSourceDefaults(t *testing.T) {
 		},
 	}
 	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
-	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
+	paymentConfigService := service.NewPaymentConfigService(nil, repo, nil)
+	handler := NewSettingHandler(svc, nil, nil, nil, paymentConfigService, nil, nil)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -220,6 +227,107 @@ func TestSettingHandler_UpdateSettings_PreservesOmittedAuthSourceDefaults(t *tes
 	require.Equal(t, 12.75, data["auth_source_default_email_balance"])
 	require.Equal(t, float64(8), data["auth_source_default_email_concurrency"])
 	require.Equal(t, true, data["force_email_on_third_party_signup"])
+}
+
+func TestSettingHandler_UpdateSettings_RoundTripsCyberAndClaudeOAuthFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{
+		values: map[string]string{
+			service.SettingKeyRegistrationEnabled:                    "false",
+			service.SettingKeyPromoCodeEnabled:                       "true",
+			service.SettingKeyRiskControlEnabled:                     "true",
+			service.SettingKeyCyberSessionBlockEnabled:               "false",
+			service.SettingKeyCyberSessionBlockTTLSeconds:            "3600",
+			service.SettingKeyEnableClaudeOAuthSystemPromptInjection: "false",
+			service.SettingKeyClaudeOAuthSystemPrompt:                "",
+			service.SettingKeyClaudeOAuthSystemPromptBlocks:          "[]",
+		},
+	}
+	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
+
+	body := map[string]any{
+		"registration_enabled":                        true,
+		"promo_code_enabled":                          true,
+		"risk_control_enabled":                        true,
+		"cyber_session_block_enabled":                 true,
+		"cyber_session_block_ttl_seconds":             7200,
+		"enable_claude_oauth_system_prompt_injection": true,
+		"claude_oauth_system_prompt":                  "You are a compliance assistant.",
+		"claude_oauth_system_prompt_blocks":           `[{"type":"text","text":"block-1","cache_control":true}]`,
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp response.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	data, ok := resp.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, true, data["cyber_session_block_enabled"])
+	require.Equal(t, float64(7200), data["cyber_session_block_ttl_seconds"])
+	require.Equal(t, true, data["enable_claude_oauth_system_prompt_injection"])
+	require.Equal(t, "You are a compliance assistant.", data["claude_oauth_system_prompt"])
+	require.Equal(t, `[{"type":"text","text":"block-1","cache_control":true}]`, data["claude_oauth_system_prompt_blocks"])
+
+	rec2 := httptest.NewRecorder()
+	c2, _ := gin.CreateTestContext(rec2)
+	c2.Request = httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings", nil)
+	handler.GetSettings(c2)
+
+	require.Equal(t, http.StatusOK, rec2.Code)
+	var resp2 response.Response
+	require.NoError(t, json.Unmarshal(rec2.Body.Bytes(), &resp2))
+	data2, ok := resp2.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, true, data2["cyber_session_block_enabled"])
+	require.Equal(t, float64(7200), data2["cyber_session_block_ttl_seconds"])
+	require.Equal(t, true, data2["enable_claude_oauth_system_prompt_injection"])
+	require.Equal(t, "You are a compliance assistant.", data2["claude_oauth_system_prompt"])
+	require.Equal(t, `[{"type":"text","text":"block-1","cache_control":true}]`, data2["claude_oauth_system_prompt_blocks"])
+}
+
+func TestPaymentConfigService_UpdatePaymentConfig_PersistsAlipayForceQRCode(t *testing.T) {
+	repo := &settingHandlerRepoStub{values: map[string]string{}}
+	svc := service.NewPaymentConfigService(nil, repo, nil)
+	enabled := true
+
+	err := svc.UpdatePaymentConfig(context.Background(), service.UpdatePaymentConfigRequest{
+		AlipayForceQRCode: &enabled,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "true", repo.values[service.SettingAlipayForceQRCode])
+}
+
+func TestSettingHandler_UpdateSettings_PersistsPaymentAlipayForceQRCode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{values: map[string]string{}}
+	settingSvc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+	paymentConfigSvc := service.NewPaymentConfigService(nil, repo, nil)
+	handler := NewSettingHandler(settingSvc, nil, nil, nil, paymentConfigSvc, nil, nil)
+
+	body := []byte(`{"payment_alipay_force_qrcode":true}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "true", repo.values[service.SettingAlipayForceQRCode])
+	var resp response.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	data, ok := resp.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, true, data["payment_alipay_force_qrcode"])
 }
 
 func TestSettingHandler_UpdateSettings_PreservesOmittedGitHubAndGoogleAuthSourceDefaults(t *testing.T) {
@@ -555,6 +663,52 @@ func TestSettingHandler_UpdateSettings_PersistsPaymentVisibleMethodsAndAdvancedS
 	require.Equal(t, true, data["payment_visible_method_alipay_enabled"])
 	require.Equal(t, false, data["payment_visible_method_wxpay_enabled"])
 	require.Equal(t, true, data["openai_advanced_scheduler_enabled"])
+}
+
+func TestSettingHandler_UpdateSettings_VisibleMethodOnlyDoesNotTouchPaymentConfig(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{
+		values: map[string]string{
+			service.SettingKeyPromoCodeEnabled:               "true",
+			service.SettingPaymentEnabled:                    "true",
+			service.SettingMinRechargeAmount:                 "12.00",
+			service.SettingMaxRechargeAmount:                 "500.00",
+			service.SettingEnabledPaymentTypes:               "alipay,wxpay",
+			service.SettingPaymentVisibleMethodAlipaySource:  service.VisibleMethodSourceEasyPayAlipay,
+			service.SettingPaymentVisibleMethodWxpaySource:   service.VisibleMethodSourceOfficialWechat,
+			service.SettingPaymentVisibleMethodAlipayEnabled: "true",
+			service.SettingPaymentVisibleMethodWxpayEnabled:  "false",
+		},
+	}
+	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
+
+	body := map[string]any{
+		"promo_code_enabled":                    true,
+		"payment_visible_method_alipay_source":  "alipay",
+		"payment_visible_method_wxpay_source":   "wxpay",
+		"payment_visible_method_alipay_enabled": false,
+		"payment_visible_method_wxpay_enabled":  true,
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "true", repo.values[service.SettingPaymentEnabled])
+	require.Equal(t, "12.00", repo.values[service.SettingMinRechargeAmount])
+	require.Equal(t, "500.00", repo.values[service.SettingMaxRechargeAmount])
+	require.Equal(t, "alipay,wxpay", repo.values[service.SettingEnabledPaymentTypes])
+	require.Equal(t, service.VisibleMethodSourceOfficialAlipay, repo.values[service.SettingPaymentVisibleMethodAlipaySource])
+	require.Equal(t, service.VisibleMethodSourceOfficialWechat, repo.values[service.SettingPaymentVisibleMethodWxpaySource])
+	require.Equal(t, "false", repo.values[service.SettingPaymentVisibleMethodAlipayEnabled])
+	require.Equal(t, "true", repo.values[service.SettingPaymentVisibleMethodWxpayEnabled])
 }
 
 func TestSettingHandler_UpdateSettings_AllowsWeightedSchedulerWithoutLayeredValues(t *testing.T) {

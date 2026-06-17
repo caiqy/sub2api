@@ -116,7 +116,7 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardStreamPreservesBodyAnd
 
 	body := []byte(`{"model":"claude-3-7-sonnet-20250219","stream":true,"system":[{"type":"text","text":"x-anthropic-billing-header keep"}],"metadata":{"client_trace":"trace-123"},"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`)
 	parsed := &ParsedRequest{
-		Body:   body,
+		Body:   NewRequestBodyRef(body),
 		Model:  "claude-3-7-sonnet-20250219",
 		Stream: true,
 	}
@@ -215,7 +215,7 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_DisabledLeavesConfiguredField
 	c.Request.Header.Set("X-Trace-Id", "trace-123")
 
 	body := []byte(`{"model":"claude-3-5-sonnet-latest","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`)
-	parsed := &ParsedRequest{Body: body, Model: "claude-3-5-sonnet-latest"}
+	parsed := &ParsedRequest{Body: NewRequestBodyRef(body), Model: "claude-3-5-sonnet-latest"}
 	upstream := &anthropicHTTPUpstreamRecorder{
 		resp: &http.Response{
 			StatusCode: http.StatusOK,
@@ -260,7 +260,7 @@ func TestGatewayService_AnthropicFieldsApplyWithoutAnthropicPassthrough(t *testi
 	c.Request.Header.Set("X-Trace-Id", "trace-123")
 
 	body := []byte(`{"model":"claude-3-5-sonnet-latest","metadata":{"client_trace":"trace-123"},"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`)
-	parsed := &ParsedRequest{Body: body, Model: "claude-3-5-sonnet-latest"}
+	parsed := &ParsedRequest{Body: NewRequestBodyRef(body), Model: "claude-3-5-sonnet-latest"}
 	upstream := &anthropicHTTPUpstreamRecorder{
 		resp: &http.Response{
 			StatusCode: http.StatusOK,
@@ -307,7 +307,7 @@ func TestPassthroughFieldsV2AnthropicAPIKeyPassthrough_BodyInjectAndMapDoNotChai
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 
 	body := []byte(`{"model":"claude-3-5-sonnet-latest","metadata":{"client_trace":"trace-123"},"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`)
-	parsed := &ParsedRequest{Body: body, Model: "claude-3-5-sonnet-latest"}
+	parsed := &ParsedRequest{Body: NewRequestBodyRef(body), Model: "claude-3-5-sonnet-latest"}
 	upstream := &anthropicHTTPUpstreamRecorder{
 		resp: &http.Response{
 			StatusCode: http.StatusOK,
@@ -351,7 +351,7 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_StructureConflictReturnsInval
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 
 	body := []byte(`{"model":"claude-3-5-sonnet-latest","metadata":"string","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`)
-	parsed := &ParsedRequest{Body: body, Model: "claude-3-5-sonnet-latest"}
+	parsed := &ParsedRequest{Body: NewRequestBodyRef(body), Model: "claude-3-5-sonnet-latest"}
 	upstream := &anthropicHTTPUpstreamRecorder{}
 	svc := &GatewayService{cfg: &config.Config{}, httpUpstream: upstream, rateLimitService: &RateLimitService{}}
 	account := &Account{
@@ -393,7 +393,7 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardCountTokensPreservesBo
 
 	body := []byte(`{"model":"claude-3-5-sonnet-latest","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}],"thinking":{"type":"enabled"}}`)
 	parsed := &ParsedRequest{
-		Body:  body,
+		Body:  NewRequestBodyRef(body),
 		Model: "claude-3-5-sonnet-latest",
 	}
 
@@ -551,7 +551,7 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ModelMappingEdgeCases(t *test
 
 			body := []byte(`{"model":"` + tt.model + `","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`)
 			parsed := &ParsedRequest{
-				Body:  body,
+				Body:  NewRequestBodyRef(body),
 				Model: tt.model,
 			}
 
@@ -636,7 +636,7 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ModelMappingPreservesOtherFie
 	// 包含复杂字段的请求体：system、thinking、messages
 	body := []byte(`{"model":"claude-sonnet-4-20250514","system":[{"type":"text","text":"You are a helpful assistant."}],"messages":[{"role":"user","content":[{"type":"text","text":"hello world"}]}],"thinking":{"type":"enabled","budget_tokens":5000},"max_tokens":1024}`)
 	parsed := &ParsedRequest{
-		Body:  body,
+		Body:  NewRequestBodyRef(body),
 		Model: "claude-sonnet-4-20250514",
 	}
 
@@ -692,7 +692,7 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_CountTokensFiltersGenerationF
 
 	body := []byte(`{"model":"claude-sonnet-4-20250514","system":[{"type":"text","text":"sys"}],"messages":[{"role":"user","content":"hello"}],"tools":[{"name":"tool","input_schema":{"type":"object"}}],"temperature":0.7,"top_p":0.9,"top_k":40,"stream":true,"stop_sequences":["END"],"max_tokens":1024,"thinking":{"type":"enabled","budget_tokens":5000}}`)
 	parsed := &ParsedRequest{
-		Body:  body,
+		Body:  NewRequestBodyRef(body),
 		Model: "claude-sonnet-4-20250514",
 	}
 
@@ -754,7 +754,7 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_EmptyModelSkipsMapping(t *tes
 
 	body := []byte(`{"messages":[{"role":"user","content":"hello"}]}`)
 	parsed := &ParsedRequest{
-		Body:  body,
+		Body:  NewRequestBodyRef(body),
 		Model: "", // 空模型
 	}
 
@@ -843,7 +843,7 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_CountTokens404PassthroughNotE
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", nil)
 
 			body := []byte(`{"model":"claude-sonnet-4-5-20250929","messages":[{"role":"user","content":"hi"}]}`)
-			parsed := &ParsedRequest{Body: body, Model: "claude-sonnet-4-5-20250929"}
+			parsed := &ParsedRequest{Body: NewRequestBodyRef(body), Model: "claude-sonnet-4-5-20250929"}
 
 			upstream := &anthropicHTTPUpstreamRecorder{
 				resp: &http.Response{
@@ -974,7 +974,7 @@ func TestGatewayService_AnthropicOAuth_ForwardPreservesBillingHeaderSystemBlock(
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 
-			parsed, err := ParseGatewayRequest([]byte(tt.body), PlatformAnthropic)
+			parsed, err := ParseGatewayRequest(NewRequestBodyRef([]byte(tt.body)), PlatformAnthropic)
 			require.NoError(t, err)
 
 			upstream := &anthropicHTTPUpstreamRecorder{
@@ -1041,6 +1041,70 @@ func TestGatewayService_AnthropicOAuth_ForwardPreservesBillingHeaderSystemBlock(
 			require.Contains(t, firstMsg.Get("content.0.text").String(), "x-anthropic-billing-header keep")
 		})
 	}
+}
+
+func TestGatewayService_AnthropicOAuth_SystemPromptInjectionCanBeDisabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	resetGatewayForwardingSettingsCacheForTest(t)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	body := []byte(`{"model":"claude-3-5-sonnet-latest","system":"Original system prompt","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`)
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+	require.NoError(t, err)
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header: http.Header{
+				"Content-Type": []string{"application/json"},
+				"x-request-id": []string{"rid-oauth-no-system-injection"},
+			},
+			Body: io.NopCloser(strings.NewReader(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-3-5-sonnet-20241022","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":12,"output_tokens":7}}`)),
+		},
+	}
+
+	cfg := &config.Config{
+		Gateway: config.GatewayConfig{
+			MaxLineSize: defaultMaxLineSize,
+		},
+	}
+	settingService := NewSettingService(&gatewayTTLSettingRepo{data: map[string]string{
+		SettingKeyEnableClaudeOAuthSystemPromptInjection: "false",
+	}}, cfg)
+	svc := &GatewayService{
+		cfg:                  cfg,
+		responseHeaderFilter: compileResponseHeaderFilter(cfg),
+		httpUpstream:         upstream,
+		rateLimitService:     &RateLimitService{},
+		deferredService:      &DeferredService{},
+		settingService:       settingService,
+	}
+
+	account := &Account{
+		ID:          302,
+		Name:        "anthropic-oauth-no-system-injection",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token": "oauth-token",
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, parsed)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	system := gjson.GetBytes(upstream.lastBody, "system")
+	require.True(t, system.Exists())
+	require.Equal(t, "Original system prompt", system.String())
+	require.NotContains(t, string(upstream.lastBody), "x-anthropic-billing-header:")
+	require.NotContains(t, string(upstream.lastBody), "[System Instructions]")
 }
 
 func TestGatewayService_AnthropicAPIKeyPassthrough_StreamingStillCollectsUsageAfterClientDisconnect(t *testing.T) {
@@ -1631,7 +1695,7 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_OpsBodyReflectsPassthroughInj
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 
 	inputBody := []byte(`{"model":"claude-3-5-sonnet-latest","messages":[{"role":"user","content":"hi"}]}`)
-	parsed := &ParsedRequest{Body: inputBody, Model: "claude-3-5-sonnet-latest"}
+	parsed := &ParsedRequest{Body: NewRequestBodyRef(inputBody), Model: "claude-3-5-sonnet-latest"}
 
 	upstream := &anthropicHTTPUpstreamRecorder{
 		resp: &http.Response{

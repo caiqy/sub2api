@@ -132,6 +132,8 @@ docs/*
 !docs/PAYMENT.md
 !docs/PAYMENT_CN.md
 !docs/ADMIN_PAYMENT_INTEGRATION_API.md
+!docs/legal/
+!docs/legal/*.md
 .serena/
 .codex/
 .superpowers/
@@ -142,3 +144,4 @@ output/
 .worktrees/
 input.txt
 result.txt
+knowledge-base/
