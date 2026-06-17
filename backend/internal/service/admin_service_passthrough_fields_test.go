@@ -19,6 +19,18 @@ type passthroughAdminAccountRepo struct {
 	bulkIDs      []int64
 }
 
+func (m *passthroughAdminAccountRepo) ListOAuthRefreshCandidates(context.Context) ([]Account, error) {
+	return nil, nil
+}
+
+func (m *passthroughAdminAccountRepo) RevertProxyFallback(context.Context, int64) error {
+	return nil
+}
+
+func (m *passthroughAdminAccountRepo) UpdateSessionWindowEnd(context.Context, int64, time.Time) error {
+	return nil
+}
+
 func (m *passthroughAdminAccountRepo) GetByID(ctx context.Context, id int64) (*Account, error) {
 	if account, ok := m.accountsByID[id]; ok {
 		return cloneAccountForPassthroughTest(account), nil

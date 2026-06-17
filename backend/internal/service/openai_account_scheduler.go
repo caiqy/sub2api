@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -41,6 +42,7 @@ type OpenAIAccountScheduleRequest struct {
 	GroupID                 *int64
 	SessionHash             string
 	StickyAccountID         int64
+	SkipStickyBind          bool
 	PreviousResponseID      string
 	RequestedModel          string
 	RequiredTransport       OpenAIUpstreamTransport
@@ -350,7 +352,8 @@ func (s *defaultOpenAIAccountScheduler) Select(
 			}
 		}
 
-		selection, err := s.selectBySessionHash(ctx, req)
+		selection, updatedReq, err := s.selectBySessionHash(ctx, req)
+		req = updatedReq
 		if err != nil {
 			return nil, decision, err
 		}
@@ -381,11 +384,11 @@ func (s *defaultOpenAIAccountScheduler) Select(
 func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	ctx context.Context,
 	req OpenAIAccountScheduleRequest,
-) (*AccountSelectionResult, error) {
+) (*AccountSelectionResult, OpenAIAccountScheduleRequest, error) {
 	sessionHash := strings.TrimSpace(req.SessionHash)
 	schedGroup := schedulerGroupForRequest(ctx, s.service, req.GroupID)
 	if sessionHash == "" || s == nil || s.service == nil || s.service.cache == nil {
-		return nil, nil
+		return nil, req, nil
 	}
 
 	accountID := req.StickyAccountID
@@ -393,40 +396,52 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		var err error
 		accountID, err = s.service.getStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		if err != nil || accountID <= 0 {
-			return nil, nil
+			return nil, req, nil
 		}
 	}
 	if accountID <= 0 {
-		return nil, nil
+		return nil, req, nil
 	}
 	if req.ExcludedIDs != nil {
 		if _, excluded := req.ExcludedIDs[accountID]; excluded {
-			return nil, nil
+			return nil, req, nil
 		}
 	}
 
 	account, err := s.service.getSchedulableAccount(ctx, accountID)
 	if err != nil || account == nil {
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
-		return nil, nil
+		return nil, req, nil
 	}
-	if shouldClearStickySession(account, req.RequestedModel) || !account.IsOpenAI() || !account.IsSchedulable() {
-		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
-		return nil, nil
+	account, clearSticky := s.classifySessionStickyAccount(ctx, account, req, schedGroup)
+	if account == nil {
+		if clearSticky {
+			_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
+		} else {
+			req.SkipStickyBind = true
+		}
+		return nil, req, nil
 	}
-	if !s.isAccountRequestCompatible(ctx, account, req) {
-		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
-		return nil, nil
-	}
-	if !s.isAccountTransportCompatible(account, req.RequiredTransport) {
-		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
-		return nil, nil
-	}
-	account = s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
-	if account == nil || !s.isAccountRequestCompatible(ctx, account, req) || !accountSatisfiesPrivacyRequirement(account, schedGroup) || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
+	account, clearSticky = s.recheckSessionStickyAccountFromDB(ctx, account, req, schedGroup)
+	if account == nil {
 		recordPrivacyRequirementError(ctx, s.service, account, schedGroup)
-		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
-		return nil, nil
+		if clearSticky {
+			_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
+		} else {
+			req.SkipStickyBind = true
+		}
+		return nil, req, nil
+	}
+	escapeCfg := s.service.openAIStickyEscapeConfig()
+	if reason, errorRate, ttft, shouldEscape := s.shouldEscapeStickyAccount(accountID, escapeCfg); shouldEscape {
+		slog.Info("sticky_escape_triggered",
+			"account_id", accountID,
+			"reason", reason,
+			"error_rate", errorRate,
+			"ttft", ttft,
+		)
+		req.SkipStickyBind = true
+		return nil, req, nil
 	}
 
 	result, acquireErr := s.service.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
@@ -436,12 +451,20 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 			Account:     account,
 			Acquired:    true,
 			ReleaseFunc: result.ReleaseFunc,
-		}, nil
+		}, req, nil
 	}
 
 	cfg := s.service.schedulingConfig()
 	// WaitPlan.MaxConcurrency 使用 Concurrency（非 EffectiveLoadFactor），因为 WaitPlan 控制的是 Redis 实际并发槽位等待。
 	if s.service.concurrencyService != nil {
+		if s.shouldEscapeBusyStickyAccount(ctx, accountID, cfg) {
+			if req.ExcludedIDs == nil {
+				req.ExcludedIDs = make(map[int64]struct{})
+			}
+			req.ExcludedIDs[accountID] = struct{}{}
+			req.SkipStickyBind = true
+			return nil, req, nil
+		}
 		return &AccountSelectionResult{
 			Account: account,
 			WaitPlan: &AccountWaitPlan{
@@ -450,9 +473,131 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 				Timeout:        cfg.StickySessionWaitTimeout,
 				MaxWaiting:     cfg.StickySessionMaxWaiting,
 			},
-		}, nil
+		}, req, nil
 	}
-	return nil, nil
+	return nil, req, nil
+}
+
+func (s *defaultOpenAIAccountScheduler) recheckSessionStickyAccountFromDB(
+	ctx context.Context,
+	account *Account,
+	req OpenAIAccountScheduleRequest,
+	schedGroup *Group,
+) (*Account, bool) {
+	if s == nil || s.service == nil || account == nil {
+		return nil, true
+	}
+	latest := account
+	if s.service.schedulerSnapshot != nil && s.service.accountRepo != nil {
+		fresh, err := s.service.accountRepo.GetByID(ctx, account.ID)
+		if err != nil || fresh == nil {
+			return nil, true
+		}
+		latest = fresh
+	}
+	if !openAIStickyAccountMatchesGroup(latest, req.GroupID) {
+		return nil, true
+	}
+	return s.classifySessionStickyAccount(ctx, latest, req, schedGroup)
+}
+
+func (s *defaultOpenAIAccountScheduler) classifySessionStickyAccount(
+	ctx context.Context,
+	account *Account,
+	req OpenAIAccountScheduleRequest,
+	schedGroup *Group,
+) (*Account, bool) {
+	if account == nil {
+		return nil, true
+	}
+	if shouldClearStickySession(account, req.RequestedModel) || !account.IsOpenAI() || !account.IsSchedulable() {
+		return nil, true
+	}
+	if !accountSatisfiesPrivacyRequirement(account, schedGroup) {
+		return nil, true
+	}
+	if !s.isAccountTransportCompatible(account, req.RequiredTransport) {
+		return nil, true
+	}
+	if isOpenAIAccountUpstreamRestrictedByChannel(ctx, s.service, account, req) {
+		return nil, true
+	}
+	if req.RequestedModel != "" && !account.IsModelSupported(req.RequestedModel) {
+		return nil, false
+	}
+	if !account.SupportsOpenAIEndpointCapability(req.RequiredCapability) || !account.SupportsOpenAIImageCapability(req.RequiredImageCapability) {
+		return nil, false
+	}
+	if req.RequireCompact && openAICompactSupportTier(account) == 0 {
+		return nil, false
+	}
+	return account, false
+}
+
+func openAIStickyAccountMatchesGroup(account *Account, groupID *int64) bool {
+	if account == nil {
+		return false
+	}
+	if groupID == nil {
+		return len(account.AccountGroups) == 0 && len(account.GroupIDs) == 0
+	}
+	for _, accountGroupID := range account.GroupIDs {
+		if accountGroupID == *groupID {
+			return true
+		}
+	}
+	for _, accountGroup := range account.AccountGroups {
+		if accountGroup.GroupID == *groupID {
+			return true
+		}
+	}
+	return false
+}
+
+type openAIStickyEscapeConfig struct {
+	enabled   bool
+	ttftMs    float64
+	errorRate float64
+}
+
+func (s *OpenAIGatewayService) openAIStickyEscapeConfig() openAIStickyEscapeConfig {
+	if s == nil || s.cfg == nil {
+		return openAIStickyEscapeConfig{}
+	}
+	cfg := s.cfg.Gateway.OpenAIScheduler
+	return openAIStickyEscapeConfig{
+		enabled:   cfg.StickyEscapeEnabled,
+		ttftMs:    float64(cfg.StickyEscapeTTFTMs),
+		errorRate: cfg.StickyEscapeErrorRate,
+	}
+}
+
+func (s *defaultOpenAIAccountScheduler) shouldEscapeStickyAccount(accountID int64, cfg openAIStickyEscapeConfig) (reason string, errorRate float64, ttft float64, shouldEscape bool) {
+	if !cfg.enabled || s == nil || s.stats == nil || accountID <= 0 {
+		return "", 0, 0, false
+	}
+	errorRate, ttft, hasTTFT := s.stats.snapshot(accountID)
+	if hasTTFT && ttft > cfg.ttftMs {
+		return "ttft", errorRate, ttft, true
+	}
+	if errorRate > cfg.errorRate {
+		return "error_rate", errorRate, ttft, true
+	}
+	return "", errorRate, ttft, false
+}
+
+func (s *defaultOpenAIAccountScheduler) shouldEscapeBusyStickyAccount(ctx context.Context, accountID int64, cfg config.GatewaySchedulingConfig) bool {
+	if s == nil || s.service == nil || !s.service.openAIStickyEscapeConfig().enabled || s.service.concurrencyService == nil || accountID <= 0 {
+		return false
+	}
+	if cfg.StickySessionMaxWaiting <= 0 {
+		return false
+	}
+	waiting, err := s.service.concurrencyService.GetAccountWaitingCount(ctx, accountID)
+	if err != nil {
+		return false
+	}
+	return waiting >= cfg.StickySessionMaxWaiting
 }
 
 type openAIAccountCandidateScore struct {
@@ -868,7 +1013,7 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrder(
 			return nil, compactBlocked, acquireErr
 		}
 		if result != nil && result.Acquired {
-			if req.SessionHash != "" {
+			if req.SessionHash != "" && !req.SkipStickyBind {
 				_ = s.service.BindStickySession(ctx, req.GroupID, req.SessionHash, fresh.ID)
 			}
 			return &AccountSelectionResult{

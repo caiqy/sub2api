@@ -759,7 +759,7 @@ func TestLayered_SessionStickyDoesNotDeleteBindingWhenModelRequestIncompatible(t
 	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
 	require.False(t, decision.StickySessionHit)
 	require.Zero(t, cache.deletedSessions["openai:session_hash_layered_model_mismatch"])
-	require.Equal(t, backupAccount.ID, cache.sessionBindings["openai:session_hash_layered_model_mismatch"])
+	require.Equal(t, stickyAccount.ID, cache.sessionBindings["openai:session_hash_layered_model_mismatch"])
 	if selection.ReleaseFunc != nil {
 		selection.ReleaseFunc()
 	}
@@ -827,7 +827,7 @@ func TestLayered_SessionStickyDoesNotDeleteBindingWhenDBRecheckModelMismatch(t *
 	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
 	require.False(t, decision.StickySessionHit)
 	require.Zero(t, cache.deletedSessions["openai:session_hash_layered_db_model_mismatch"])
-	require.Equal(t, backupAccount.ID, cache.sessionBindings["openai:session_hash_layered_db_model_mismatch"])
+	require.Equal(t, stickySnapshotAccount.ID, cache.sessionBindings["openai:session_hash_layered_db_model_mismatch"])
 	if selection.ReleaseFunc != nil {
 		selection.ReleaseFunc()
 	}

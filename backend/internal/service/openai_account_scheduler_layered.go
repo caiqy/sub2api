@@ -3,8 +3,11 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/config"
 )
 
 const layeredSchedulerStartupRehydrateTimeout = 2 * time.Second
@@ -92,7 +95,8 @@ func (s *layeredOpenAIAccountScheduler) Select(
 		}
 
 		// Layer 2: session_hash sticky
-		selection, err := s.selectBySessionHash(ctx, req)
+		selection, updatedReq, err := s.selectBySessionHash(ctx, req)
+		req = updatedReq
 		if err != nil {
 			return nil, decision, err
 		}
@@ -128,11 +132,11 @@ func (s *layeredOpenAIAccountScheduler) Select(
 func (s *layeredOpenAIAccountScheduler) selectBySessionHash(
 	ctx context.Context,
 	req OpenAIAccountScheduleRequest,
-) (*AccountSelectionResult, error) {
+) (*AccountSelectionResult, OpenAIAccountScheduleRequest, error) {
 	sessionHash := strings.TrimSpace(req.SessionHash)
 	schedGroup := schedulerGroupForRequest(ctx, s.service, req.GroupID)
 	if sessionHash == "" || s == nil || s.service == nil || s.service.cache == nil {
-		return nil, nil
+		return nil, req, nil
 	}
 
 	accountID := req.StickyAccountID
@@ -140,63 +144,85 @@ func (s *layeredOpenAIAccountScheduler) selectBySessionHash(
 		var err error
 		accountID, err = s.service.getStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		if err != nil || accountID <= 0 {
-			return nil, nil
+			return nil, req, nil
 		}
 	}
 	if accountID <= 0 {
-		return nil, nil
+		return nil, req, nil
 	}
 	if req.ExcludedIDs != nil {
 		if _, excluded := req.ExcludedIDs[accountID]; excluded {
-			return nil, nil
+			return nil, req, nil
 		}
 	}
 
 	account, err := s.service.getSchedulableAccount(ctx, accountID)
 	if err != nil || account == nil {
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
-		return nil, nil
+		return nil, req, nil
 	}
 	if shouldClearStickySession(account, req.RequestedModel) || !account.IsOpenAI() || !account.IsSchedulable() {
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
-		return nil, nil
+		return nil, req, nil
 	}
 	if schedGroup != nil && schedGroup.RequirePrivacySet && !account.IsPrivacySet() {
 		_ = s.service.accountRepo.SetError(ctx, account.ID,
 			fmt.Sprintf("Privacy not set, required by group [%s]", schedGroup.Name))
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
-		return nil, nil
+		return nil, req, nil
 	}
 	if !s.isAccountRequestCompatible(ctx, account, req) {
 		if s.isAccountUpstreamRestrictedByChannel(ctx, account, req) {
 			_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
+		} else {
+			req.SkipStickyBind = true
 		}
-		return nil, nil
+		return nil, req, nil
 	}
 	if !s.isAccountTransportCompatible(account, req.RequiredTransport) {
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
-		return nil, nil
+		return nil, req, nil
 	}
 	var clearSticky bool
 	account, clearSticky = s.recheckSessionStickyAccountFromDB(ctx, account, req, schedGroup)
 	if account == nil {
 		if clearSticky {
 			_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
+		} else {
+			req.SkipStickyBind = true
 		}
-		return nil, nil
+		return nil, req, nil
+	}
+	if reason, errorRate, ttft, shouldEscape := s.shouldEscapeStickyAccount(accountID); shouldEscape {
+		slog.Info("sticky_escape_triggered",
+			"account_id", accountID,
+			"reason", reason,
+			"error_rate", errorRate,
+			"ttft", ttft,
+		)
+		req.SkipStickyBind = true
+		return nil, req, nil
 	}
 
 	result, acquireErr := s.service.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
-	if acquireErr == nil && result.Acquired {
+	if acquireErr == nil && result != nil && result.Acquired {
 		_ = s.service.refreshStickySessionTTL(ctx, req.GroupID, sessionHash, s.service.openAIWSSessionStickyTTL())
 		return &AccountSelectionResult{
 			Account:     account,
 			Acquired:    true,
 			ReleaseFunc: result.ReleaseFunc,
-		}, nil
+		}, req, nil
 	}
 
 	cfg := s.service.schedulingConfig()
+	if s.shouldEscapeBusyStickyAccount(accountID, account.Concurrency, cfg) {
+		if req.ExcludedIDs == nil {
+			req.ExcludedIDs = make(map[int64]struct{})
+		}
+		req.ExcludedIDs[accountID] = struct{}{}
+		req.SkipStickyBind = true
+		return nil, req, nil
+	}
 	if s.service.concurrencyService != nil {
 		return &AccountSelectionResult{
 			Account: account,
@@ -206,9 +232,9 @@ func (s *layeredOpenAIAccountScheduler) selectBySessionHash(
 				Timeout:        cfg.StickySessionWaitTimeout,
 				MaxWaiting:     cfg.StickySessionMaxWaiting,
 			},
-		}, nil
+		}, req, nil
 	}
-	return nil, nil
+	return nil, req, nil
 }
 
 // selectByLayeredFilter 是分层调度器的核心算法：
@@ -352,7 +378,7 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 			return nil, len(candidates), loadSkew, acquireErr
 		}
 		if result != nil && result.Acquired {
-			if req.SessionHash != "" {
+			if req.SessionHash != "" && !req.SkipStickyBind {
 				_ = s.service.BindStickySession(ctx, req.GroupID, req.SessionHash, fresh.ID)
 			}
 			return &AccountSelectionResult{
@@ -554,6 +580,29 @@ func (s *layeredOpenAIAccountScheduler) classifySessionStickyAccount(
 		return nil, false
 	}
 	return account, false
+}
+
+func (s *layeredOpenAIAccountScheduler) shouldEscapeStickyAccount(accountID int64) (reason string, errorRate float64, ttft float64, shouldEscape bool) {
+	if s == nil || s.service == nil {
+		return "", 0, 0, false
+	}
+	delegate := &defaultOpenAIAccountScheduler{stats: s.stats}
+	return delegate.shouldEscapeStickyAccount(accountID, s.service.openAIStickyEscapeConfig())
+}
+
+func (s *layeredOpenAIAccountScheduler) shouldEscapeBusyStickyAccount(accountID int64, maxConcurrency int, cfg config.GatewaySchedulingConfig) bool {
+	if s == nil || s.service == nil || !s.service.openAIStickyEscapeConfig().enabled || s.service.concurrencyService == nil || accountID <= 0 {
+		return false
+	}
+	maxWaiting := cfg.StickySessionMaxWaiting
+	if maxWaiting <= 0 {
+		return false
+	}
+	waiting, err := s.service.concurrencyService.GetAccountWaitingCount(context.Background(), accountID)
+	if err != nil {
+		return false
+	}
+	return waiting >= maxWaiting
 }
 
 func (s *layeredOpenAIAccountScheduler) isAccountRequestCompatible(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest) bool {
