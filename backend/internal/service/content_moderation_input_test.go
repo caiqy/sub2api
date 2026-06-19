@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// 当数组末尾不是用户消息时（典型场景：Agent 工具循环结束于 tool/assistant），
+// 当数组末尾不是可审计用户输入时（典型场景：Agent 工具循环结束于 tool/assistant），
 // 应直接跳过审计——不再回溯查找历史中的某条用户消息。
 
 func TestExtractContentModerationInput_AnthropicAgentToolLoopSkipsAudit(t *testing.T) {
@@ -36,18 +36,28 @@ func TestExtractContentModerationInput_AnthropicFirstTurnExtractsUser(t *testing
 	require.Equal(t, "Q1", input.Text)
 }
 
-func TestExtractContentModerationInput_AnthropicMultiTurnExtractsLatestUser(t *testing.T) {
+func TestExtractContentModerationInput_AnthropicMultiTurnExtractsRecentUniqueUsers(t *testing.T) {
 	body := []byte(`{
 		"messages": [
 			{"role":"user","content":"Q1"},
 			{"role":"assistant","content":"A1"},
-			{"role":"user","content":"Q2"}
+			{"role":"user","content":"Q2"},
+			{"role":"assistant","content":"A2"},
+			{"role":"user","content":"Q2"},
+			{"role":"assistant","content":"A3"},
+			{"role":"user","content":"Q3"},
+			{"role":"assistant","content":"A4"},
+			{"role":"user","content":"Q4"},
+			{"role":"assistant","content":"A5"},
+			{"role":"user","content":"Q5"},
+			{"role":"assistant","content":"A6"},
+			{"role":"user","content":"Q6"}
 		]
 	}`)
 
 	input := ExtractContentModerationInput(ContentModerationProtocolAnthropicMessages, body)
 
-	require.Equal(t, "Q2", input.Text)
+	require.Equal(t, "Q2 Q3 Q4 Q5 Q6", input.Text)
 }
 
 func TestExtractContentModerationInput_AnthropicStreamResendExtractsResend(t *testing.T) {
@@ -61,7 +71,7 @@ func TestExtractContentModerationInput_AnthropicStreamResendExtractsResend(t *te
 
 	input := ExtractContentModerationInput(ContentModerationProtocolAnthropicMessages, body)
 
-	require.Equal(t, "重发", input.Text)
+	require.Equal(t, "原问题 重发", input.Text)
 }
 
 func TestExtractContentModerationInput_OpenAIChatAgentToolLoopSkipsAudit(t *testing.T) {
@@ -80,18 +90,26 @@ func TestExtractContentModerationInput_OpenAIChatAgentToolLoopSkipsAudit(t *test
 	require.Empty(t, input.Images)
 }
 
-func TestExtractContentModerationInput_OpenAIChatMultiTurnExtractsLatestUser(t *testing.T) {
+func TestExtractContentModerationInput_OpenAIChatMultiTurnExtractsRecentUniqueUsers(t *testing.T) {
 	body := []byte(`{
 		"messages": [
 			{"role":"user","content":"Q1"},
 			{"role":"assistant","content":"A1"},
-			{"role":"user","content":"Q2"}
+			{"role":"user","content":"Q2"},
+			{"role":"assistant","content":"A2"},
+			{"role":"user","content":"Q3"},
+			{"role":"assistant","content":"A3"},
+			{"role":"user","content":"Q4"},
+			{"role":"assistant","content":"A4"},
+			{"role":"user","content":"Q5"},
+			{"role":"assistant","content":"A5"},
+			{"role":"user","content":"Q6"}
 		]
 	}`)
 
 	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIChat, body)
 
-	require.Equal(t, "Q2", input.Text)
+	require.Equal(t, "Q2 Q3 Q4 Q5 Q6", input.Text)
 }
 
 func TestExtractContentModerationInput_GeminiAgentToolLoopSkipsAudit(t *testing.T) {
@@ -121,18 +139,26 @@ func TestExtractContentModerationInput_GeminiFirstTurnExtractsUser(t *testing.T)
 	require.Equal(t, "你好", input.Text)
 }
 
-func TestExtractContentModerationInput_GeminiMultiTurnExtractsLatestUser(t *testing.T) {
+func TestExtractContentModerationInput_GeminiMultiTurnExtractsRecentUniqueUsers(t *testing.T) {
 	body := []byte(`{
 		"contents": [
 			{"role":"user","parts":[{"text":"Q1"}]},
 			{"role":"model","parts":[{"text":"A1"}]},
-			{"role":"user","parts":[{"text":"Q2"}]}
+			{"role":"user","parts":[{"text":"Q2"}]},
+			{"role":"model","parts":[{"text":"A2"}]},
+			{"role":"user","parts":[{"text":"Q3"}]},
+			{"role":"model","parts":[{"text":"A3"}]},
+			{"role":"user","parts":[{"text":"Q4"}]},
+			{"role":"model","parts":[{"text":"A4"}]},
+			{"role":"user","parts":[{"text":"Q5"}]},
+			{"role":"model","parts":[{"text":"A5"}]},
+			{"role":"user","parts":[{"text":"Q6"}]}
 		]
 	}`)
 
 	input := ExtractContentModerationInput(ContentModerationProtocolGemini, body)
 
-	require.Equal(t, "Q2", input.Text)
+	require.Equal(t, "Q2 Q3 Q4 Q5 Q6", input.Text)
 }
 
 func TestExtractContentModerationInput_ResponsesAgentToolLoopSkipsAudit(t *testing.T) {
@@ -150,18 +176,54 @@ func TestExtractContentModerationInput_ResponsesAgentToolLoopSkipsAudit(t *testi
 	require.Empty(t, input.Images)
 }
 
-func TestExtractContentModerationInput_ResponsesLastUserMessageExtracted(t *testing.T) {
+func TestExtractContentModerationInput_ResponsesToolOutputWithContentSkipsAudit(t *testing.T) {
 	body := []byte(`{
 		"input":[
-			{"type":"message","role":"user","content":[{"type":"input_text","text":"first"}]},
-			{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]},
-			{"type":"message","role":"user","content":[{"type":"input_text","text":"latest"}]}
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"运行测试"}]},
+			{"type":"function_call_output","call_id":"call_1","content":[{"type":"input_text","text":"tool text"}]}
 		]
 	}`)
 
 	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, body)
 
-	require.Equal(t, "latest", input.Text)
+	require.Empty(t, input.Text)
+	require.Empty(t, input.Images)
+}
+
+func TestExtractContentModerationInput_ResponsesRolelessUntypedContentSkipsAudit(t *testing.T) {
+	body := []byte(`{
+		"input":[
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"运行测试"}]},
+			{"content":[{"type":"input_text","text":"untyped text"}]}
+		]
+	}`)
+
+	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, body)
+
+	require.Empty(t, input.Text)
+	require.Empty(t, input.Images)
+}
+
+func TestExtractContentModerationInput_ResponsesRecentUniqueUserMessagesExtracted(t *testing.T) {
+	body := []byte(`{
+		"input":[
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"first"}]},
+			{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"second"}]},
+			{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"third"}]},
+			{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"fourth"}]},
+			{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"fifth"}]},
+			{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"sixth"}]}
+		]
+	}`)
+
+	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, body)
+
+	require.Equal(t, "second third fourth fifth sixth", input.Text)
 }
 
 func TestExtractContentModerationInput_ResponsesLastIsAssistantSkipped(t *testing.T) {
