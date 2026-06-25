@@ -32,7 +32,7 @@ func TestExtractContentModerationInput_AnthropicFirstTurnExtractsUser(t *testing
 	require.Equal(t, "Q1", input.Text)
 }
 
-func TestExtractContentModerationInput_AnthropicMultiTurnExtractsRecentUniqueUsers(t *testing.T) {
+func TestExtractContentModerationInput_AnthropicMultiTurnExtractsAllAuditableContent(t *testing.T) {
 	body := []byte(`{
 		"messages": [
 			{"role":"user","content":"Q1"},
@@ -86,7 +86,7 @@ func TestExtractContentModerationInput_OpenAIChatAgentToolLoopFiltersTools(t *te
 	require.Empty(t, input.Images)
 }
 
-func TestExtractContentModerationInput_OpenAIChatMultiTurnExtractsRecentUniqueUsers(t *testing.T) {
+func TestExtractContentModerationInput_OpenAIChatMultiTurnExtractsAllAuditableContent(t *testing.T) {
 	body := []byte(`{
 		"messages": [
 			{"role":"user","content":"Q1"},
@@ -135,7 +135,7 @@ func TestExtractContentModerationInput_GeminiFirstTurnExtractsUser(t *testing.T)
 	require.Equal(t, "你好", input.Text)
 }
 
-func TestExtractContentModerationInput_GeminiMultiTurnExtractsRecentUniqueUsers(t *testing.T) {
+func TestExtractContentModerationInput_GeminiMultiTurnExtractsAllAuditableContent(t *testing.T) {
 	body := []byte(`{
 		"contents": [
 			{"role":"user","parts":[{"text":"Q1"}]},
@@ -172,7 +172,7 @@ func TestExtractContentModerationInput_ResponsesAgentToolLoopFiltersTools(t *tes
 	require.Empty(t, input.Images)
 }
 
-func TestExtractContentModerationInput_ResponsesToolOutputWithContentSkipsAudit(t *testing.T) {
+func TestExtractContentModerationInput_ResponsesToolOutputItemFiltered(t *testing.T) {
 	body := []byte(`{
 		"input":[
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"运行测试"}]},
@@ -186,7 +186,7 @@ func TestExtractContentModerationInput_ResponsesToolOutputWithContentSkipsAudit(
 }
 
 
-func TestExtractContentModerationInput_ResponsesRecentUniqueUserMessagesExtracted(t *testing.T) {
+func TestExtractContentModerationInput_ResponsesAllAuditableContentExtracted(t *testing.T) {
 	body := []byte(`{
 		"input":[
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"first"}]},
@@ -208,7 +208,7 @@ func TestExtractContentModerationInput_ResponsesRecentUniqueUserMessagesExtracte
 	require.Equal(t, "first answer second third fourth fifth sixth", input.Text)
 }
 
-func TestExtractContentModerationInput_ResponsesLastIsAssistantSkipped(t *testing.T) {
+func TestExtractContentModerationInput_ResponsesUserAndAssistantBothExtracted(t *testing.T) {
 	body := []byte(`{
 		"input":[
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"q1"}]},
@@ -340,4 +340,15 @@ func TestExtractContentModerationInput_GeminiFunctionCallPartSkipped(t *testing.
 	}`)
 	input := ExtractContentModerationInput(ContentModerationProtocolGemini, body)
 	require.Equal(t, "Q1 A1", input.Text)
+}
+
+func TestExtractContentModerationInput_ResponsesRolelessTypedMessageExtracted(t *testing.T) {
+	body := []byte(`{
+		"input":[
+			{"type":"message","role":"","content":[{"type":"input_text","text":"roleless msg"}]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"user msg"}]}
+		]
+	}`)
+	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, body)
+	require.Equal(t, "roleless msg user msg", input.Text)
 }

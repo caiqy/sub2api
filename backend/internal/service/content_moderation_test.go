@@ -899,7 +899,7 @@ func TestExtractContentModerationInput_AnthropicKeepsEphemeralUserTextAndSkipsSy
 	require.Empty(t, input.Images)
 }
 
-func TestExtractContentModerationInput_OpenAIChatUsesLastUserMessage(t *testing.T) {
+func TestExtractContentModerationInput_OpenAIChatUsesAllAuditableContent(t *testing.T) {
 	body := []byte(`{
 		"model":"gpt-5.5",
 		"messages":[
