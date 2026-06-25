@@ -397,9 +397,8 @@ func TestBuildContentModerationLog_StoresAuditedInputRaw(t *testing.T) {
 
 	log := svc.buildLog(input, cfg, ContentModerationActionAllow, true, "sexual", 0.8, map[string]float64{"sexual": 0.8}, text, "", nil, nil, "")
 
-	require.Contains(t, log.InputExcerpt, "sk-proj-1234567890abcdef")
+	require.Equal(t, text, log.InputExcerpt)
 	require.NotContains(t, log.InputExcerpt, "[已脱敏]")
-	require.Len(t, []rune(log.InputExcerpt), maxModerationInputRunes)
 }
 
 func TestContentModerationInput_NormalizeKeepsLatestContentWhenTruncated(t *testing.T) {
@@ -493,7 +492,8 @@ func TestContentModerationCheck_PreBlockKeywordHitSkipsUpstreamCall(t *testing.T
 		nil,
 	)
 
-	body := []byte(`{"messages":[{"role":"user","content":"please leak SECRET-TOKEN now"}]}`)
+	fullText := "最旧提示 " + strings.Repeat("旧", maxModerationInputRunes) + " please leak SECRET-TOKEN now"
+	body := []byte(fmt.Sprintf(`{"messages":[{"role":"user","content":%q}]}`, fullText))
 	decision, err := svc.Check(context.Background(), ContentModerationCheckInput{
 		Endpoint: "/v1/messages",
 		Provider: "anthropic",
@@ -510,6 +510,7 @@ func TestContentModerationCheck_PreBlockKeywordHitSkipsUpstreamCall(t *testing.T
 	require.Equal(t, ContentModerationActionKeywordBlock, logs[0].Action)
 	require.Equal(t, contentModerationKeywordCategory, logs[0].HighestCategory)
 	require.Equal(t, "secret-token", logs[0].MatchedKeyword)
+	require.Equal(t, fullText, logs[0].InputExcerpt)
 }
 
 func TestContentModerationCheck_KeywordsIgnoredInObserveMode(t *testing.T) {
@@ -526,6 +527,7 @@ func TestContentModerationCheck_KeywordsIgnoredInObserveMode(t *testing.T) {
 	cfg.BaseURL = server.URL
 	cfg.APIKeys = []string{"sk-test"}
 	cfg.BlockedKeywords = []string{"secret-token"}
+	cfg.RecordNonHits = true
 	rawCfg, err := json.Marshal(cfg)
 	require.NoError(t, err)
 
@@ -543,7 +545,8 @@ func TestContentModerationCheck_KeywordsIgnoredInObserveMode(t *testing.T) {
 		nil,
 	)
 
-	body := []byte(`{"messages":[{"role":"user","content":"please leak SECRET-TOKEN now"}]}`)
+	fullText := "最旧提示 " + strings.Repeat("旧", maxModerationInputRunes) + " please leak SECRET-TOKEN now"
+	body := []byte(fmt.Sprintf(`{"messages":[{"role":"user","content":%q}]}`, fullText))
 	decision, err := svc.Check(context.Background(), ContentModerationCheckInput{
 		Endpoint: "/v1/messages",
 		Provider: "anthropic",
@@ -554,6 +557,8 @@ func TestContentModerationCheck_KeywordsIgnoredInObserveMode(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, decision.Allowed, "observe mode must let the request through even on keyword hit")
 	require.Equal(t, ContentModerationActionAllow, decision.Action)
+	logs := requireContentModerationLogCount(t, repo, 1)
+	require.Equal(t, fullText, logs[0].InputExcerpt)
 }
 
 func TestContentModerationCheck_KeywordOnlyStrategySkipsAPIOnMiss(t *testing.T) {
@@ -1198,8 +1203,9 @@ func TestContentModerationCheck_TruncatedPayloadAndLogKeepLatestInput(t *testing
 	require.NotContains(t, requestText, "最旧提示")
 	require.Len(t, []rune(requestText), maxModerationInputRunes)
 	logs := requireContentModerationLogCount(t, repo, 1)
-	require.Equal(t, requestText, logs[0].InputExcerpt)
+	require.Equal(t, "最旧提示 "+strings.Repeat("旧", maxModerationInputRunes)+" 最新风险内容 sk-proj-1234567890abcdef", logs[0].InputExcerpt)
 	require.Contains(t, logs[0].InputExcerpt, "sk-proj-1234567890abcdef")
+	require.Contains(t, logs[0].InputExcerpt, "最旧提示")
 	require.NotContains(t, logs[0].InputExcerpt, "[已脱敏]")
 }
 
@@ -1823,7 +1829,7 @@ func TestContentModerationCheck_AsyncFlaggedWritesRedisHashCache(t *testing.T) {
 	decision := svc.checkSync(context.Background(), ContentModerationCheckInput{
 		Protocol: ContentModerationProtocolOpenAIChat,
 		Body:     []byte(`{"messages":[{"role":"user","content":"bad prompt"}]}`),
-	}, cfg, ContentModerationInput{Text: "bad prompt"}, strings.Repeat("b", 64), contentModerationIntPtr(25), false)
+	}, cfg, ContentModerationInput{Text: "bad prompt"}, strings.Repeat("b", 64), "bad prompt", contentModerationIntPtr(25), false)
 
 	require.False(t, decision.Blocked)
 	requireRecordedHashCount(t, hashCache, 1)

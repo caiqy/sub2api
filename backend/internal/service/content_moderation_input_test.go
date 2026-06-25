@@ -185,7 +185,6 @@ func TestExtractContentModerationInput_ResponsesToolOutputItemFiltered(t *testin
 	require.Equal(t, "运行测试", input.Text)
 }
 
-
 func TestExtractContentModerationInput_ResponsesAllAuditableContentExtracted(t *testing.T) {
 	body := []byte(`{
 		"input":[
@@ -219,6 +218,19 @@ func TestExtractContentModerationInput_ResponsesUserAndAssistantBothExtracted(t 
 	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, body)
 
 	require.Equal(t, "q1 a1", input.Text)
+}
+
+func TestExtractContentModerationInput_ResponsesAssistantWithoutTypeExtracted(t *testing.T) {
+	body := []byte(`{
+		"input":[
+			{"role":"user","content":[{"type":"input_text","text":"q1"}]},
+			{"role":"assistant","content":[{"type":"output_text","text":"assistant answer"}]}
+		]
+	}`)
+
+	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, body)
+
+	require.Equal(t, "q1 assistant answer", input.Text)
 }
 
 func TestExtractContentModerationInput_OpenAIChatUserAndAssistantExtracted(t *testing.T) {
@@ -351,4 +363,20 @@ func TestExtractContentModerationInput_ResponsesRolelessTypedMessageExtracted(t 
 	}`)
 	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, body)
 	require.Equal(t, "roleless msg user msg", input.Text)
+}
+
+func TestExtractContentModerationInput_ResponsesTranscriptItemsExtracted(t *testing.T) {
+	body := []byte(`{
+		"input":[
+			{"role":"developer","content":"developer secret"},
+			{"role":"user","content":[{"type":"input_text","text":"user prompt"}]},
+			{"type":"reasoning","encrypted_content":"gAAAA"},
+			{"role":"assistant","content":[{"type":"output_text","text":"assistant answer"}]},
+			{"type":"function_call_output","content":[{"type":"input_text","text":"tool result"}]}
+		]
+	}`)
+
+	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, body)
+
+	require.Equal(t, "user prompt assistant answer", input.Text)
 }

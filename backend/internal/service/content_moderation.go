@@ -518,6 +518,7 @@ type ContentModerationService struct {
 type contentModerationTask struct {
 	input            ContentModerationCheckInput
 	content          ContentModerationInput
+	logText          string
 	inputHash        string
 	log              *ContentModerationLog
 	config           *ContentModerationConfig
@@ -862,6 +863,7 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 		return allow, nil
 	}
 	content := ExtractContentModerationInput(input.Protocol, input.Body)
+	logText := content.ExcerptText()
 	if content.IsEmpty() {
 		slog.Info("content_moderation.skip_empty_input",
 			"user_id", input.UserID,
@@ -895,7 +897,7 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 					"keyword_blocking_mode", cfg.KeywordBlockingMode,
 					"keyword", keyword)
 				scores := map[string]float64{contentModerationKeywordCategory: 1.0}
-				log := s.buildLog(input, cfg, ContentModerationActionKeywordBlock, true, contentModerationKeywordCategory, 1.0, scores, content.ExcerptText(), keyword, nil, nil, "")
+				log := s.buildLog(input, cfg, ContentModerationActionKeywordBlock, true, contentModerationKeywordCategory, 1.0, scores, logText, keyword, nil, nil, "")
 				s.enqueueRecord(input, cfg, log, hashText, false, true)
 				return &ContentModerationDecision{
 					Allowed:         false,
@@ -942,7 +944,7 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 				message = fmt.Sprintf("%s（hash: %s）", message, hashText)
 			}
 			scores := map[string]float64{"hash": 1.0}
-			log := s.buildLog(input, cfg, ContentModerationActionHashBlock, true, "hash", 1.0, scores, content.ExcerptText(), "", nil, nil, "")
+			log := s.buildLog(input, cfg, ContentModerationActionHashBlock, true, "hash", 1.0, scores, logText, "", nil, nil, "")
 			s.enqueueRecord(input, cfg, log, hashText, false, false)
 			return &ContentModerationDecision{
 				Allowed:    false,
@@ -988,14 +990,14 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 			"endpoint", input.Endpoint,
 			"protocol", input.Protocol,
 			"queue_len", len(s.asyncQueue))
-		s.enqueueAsync(input, cfg, content, hashText)
+		s.enqueueAsync(input, cfg, content, hashText, logText)
 		return allow, nil
 	}
 
-	return s.checkSync(ctx, input, cfg, content, hashText, nil, true), nil
+	return s.checkSync(ctx, input, cfg, content, hashText, logText, nil, true), nil
 }
 
-func (s *ContentModerationService) checkSync(ctx context.Context, input ContentModerationCheckInput, cfg *ContentModerationConfig, content ContentModerationInput, hashText string, queueDelay *int, allowBlock bool) *ContentModerationDecision {
+func (s *ContentModerationService) checkSync(ctx context.Context, input ContentModerationCheckInput, cfg *ContentModerationConfig, content ContentModerationInput, hashText string, logText string, queueDelay *int, allowBlock bool) *ContentModerationDecision {
 	allow := &ContentModerationDecision{Allowed: true, Action: ContentModerationActionAllow}
 	trackPreBlock := queueDelay == nil && allowBlock && cfg != nil && cfg.Mode == ContentModerationModePreBlock
 	if trackPreBlock {
@@ -1024,7 +1026,7 @@ func (s *ContentModerationService) checkSync(ctx context.Context, input ContentM
 			s.asyncErrors.Add(1)
 		}
 		if cfg.RecordNonHits {
-			log := s.buildLog(input, cfg, ContentModerationActionError, false, "", 0, nil, content.ExcerptText(), "", &latency, queueDelay, err.Error())
+			log := s.buildLog(input, cfg, ContentModerationActionError, false, "", 0, nil, logText, "", &latency, queueDelay, err.Error())
 			_ = s.repo.CreateLog(ctx, log)
 		}
 		return allow
@@ -1057,7 +1059,7 @@ func (s *ContentModerationService) checkSync(ctx context.Context, input ContentM
 		"latency_ms", latency,
 		"queue_delay_ms", queueDelay)
 	if flagged || cfg.RecordNonHits {
-		log := s.buildLog(input, cfg, action, flagged, highestCategory, highestScore, result.CategoryScores, content.ExcerptText(), "", &latency, queueDelay, "")
+		log := s.buildLog(input, cfg, action, flagged, highestCategory, highestScore, result.CategoryScores, logText, "", &latency, queueDelay, "")
 		if queueDelay == nil && cfg.Mode == ContentModerationModePreBlock {
 			s.enqueueRecord(input, cfg, log, hashText, flagged, flagged)
 		} else {
@@ -1107,7 +1109,7 @@ func (s *ContentModerationService) recordPreBlockSyncMetric(latencyMS int, actio
 	}
 }
 
-func (s *ContentModerationService) enqueueAsync(input ContentModerationCheckInput, cfg *ContentModerationConfig, content ContentModerationInput, hashText string) {
+func (s *ContentModerationService) enqueueAsync(input ContentModerationCheckInput, cfg *ContentModerationConfig, content ContentModerationInput, hashText string, logText string) {
 	if s == nil || s.asyncQueue == nil {
 		return
 	}
@@ -1123,6 +1125,7 @@ func (s *ContentModerationService) enqueueAsync(input ContentModerationCheckInpu
 	task := contentModerationTask{
 		input:      input,
 		content:    content,
+		logText:    logText,
 		inputHash:  hashText,
 		enqueuedAt: time.Now(),
 	}
@@ -1219,7 +1222,7 @@ func (s *ContentModerationService) worker(id int) {
 			s.asyncActive.Add(1)
 			defer s.asyncActive.Add(-1)
 			queueDelay := int(time.Since(task.enqueuedAt).Milliseconds())
-			_ = s.checkSync(ctx, task.input, cfg, task.content, task.inputHash, &queueDelay, false)
+			_ = s.checkSync(ctx, task.input, cfg, task.content, task.inputHash, task.logText, &queueDelay, false)
 			s.asyncProcessed.Add(1)
 		}()
 	}
@@ -1623,7 +1626,7 @@ func (s *ContentModerationService) buildLog(input ContentModerationCheckInput, c
 		HighestScore:      highestScore,
 		CategoryScores:    cloneFloatMap(scores),
 		ThresholdSnapshot: cloneFloatMap(cfg.Thresholds),
-		InputExcerpt:      trimLatestRunes(text, maxModerationInputRunes),
+		InputExcerpt:      text,
 		MatchedKeyword:    strings.TrimSpace(matchedKeyword),
 		UpstreamLatencyMS: latency,
 		QueueDelayMS:      queueDelay,

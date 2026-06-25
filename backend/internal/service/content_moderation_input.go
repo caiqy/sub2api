@@ -9,7 +9,6 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-
 type moderationInputCandidate struct {
 	parts  []string
 	images []string
@@ -46,11 +45,8 @@ func ExtractContentModerationInput(protocol string, body []byte) ContentModerati
 		Text:   normalizeContentModerationText(strings.Join(parts, "\n")),
 		Images: normalizeModerationImages(images),
 	}
-	out.Normalize()
 	return out
 }
-
-
 
 func appendUniqueModerationCandidates(parts *[]string, images *[]string, candidates []moderationInputCandidate) {
 	seen := make(map[string]struct{})
@@ -95,7 +91,6 @@ func collectAllOpenAIChatMessages(messages gjson.Result, parts *[]string, images
 	}
 	appendUniqueModerationCandidates(parts, images, candidates)
 }
-
 
 func collectAnthropicUserContentValue(value gjson.Result, parts *[]string, images *[]string) {
 	switch {
@@ -175,7 +170,6 @@ func isAnthropicSystemReminderText(text string) bool {
 	return strings.HasPrefix(strings.TrimSpace(text), "<system-reminder>")
 }
 
-
 func collectAllResponsesInput(input gjson.Result, parts *[]string, images *[]string) {
 	switch {
 	case !input.Exists():
@@ -220,7 +214,7 @@ func isResponsesAuditableItem(item gjson.Result) bool {
 	if role == "user" || typ == "input_text" {
 		return true
 	}
-	if role == "assistant" && typ == "message" {
+	if role == "assistant" && (typ == "" || typ == "message") {
 		return true
 	}
 	if role == "" && (typ == "message" || typ == "input_text") {
@@ -228,8 +222,6 @@ func isResponsesAuditableItem(item gjson.Result) bool {
 	}
 	return false
 }
-
-
 
 func collectAllGeminiContents(contents gjson.Result, parts *[]string, images *[]string) {
 	if !contents.IsArray() {
