@@ -20,8 +20,7 @@ func TestExtractContentModerationInput_AnthropicAgentToolLoopSkipsAudit(t *testi
 
 	input := ExtractContentModerationInput(ContentModerationProtocolAnthropicMessages, body)
 
-	require.Empty(t, input.Text)
-	require.Empty(t, input.Images)
+	require.Equal(t, "调用一下天气工具", input.Text)
 }
 
 func TestExtractContentModerationInput_AnthropicFirstTurnExtractsUser(t *testing.T) {
@@ -57,7 +56,7 @@ func TestExtractContentModerationInput_AnthropicMultiTurnExtractsRecentUniqueUse
 
 	input := ExtractContentModerationInput(ContentModerationProtocolAnthropicMessages, body)
 
-	require.Equal(t, "Q2 Q3 Q4 Q5 Q6", input.Text)
+	require.Equal(t, "Q1 A1 Q2 A2 A3 Q3 A4 Q4 A5 Q5 A6 Q6", input.Text)
 }
 
 func TestExtractContentModerationInput_AnthropicStreamResendExtractsResend(t *testing.T) {
@@ -71,7 +70,7 @@ func TestExtractContentModerationInput_AnthropicStreamResendExtractsResend(t *te
 
 	input := ExtractContentModerationInput(ContentModerationProtocolAnthropicMessages, body)
 
-	require.Equal(t, "原问题 重发", input.Text)
+	require.Equal(t, "原问题 部分回答…… 重发", input.Text)
 }
 
 func TestExtractContentModerationInput_OpenAIChatAgentToolLoopSkipsAudit(t *testing.T) {
@@ -283,4 +282,30 @@ func TestExtractContentModerationInput_OpenAIChatToolAtEndStillAudits(t *testing
 	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIChat, body)
 
 	require.Equal(t, "Q1", input.Text)
+}
+
+func TestExtractContentModerationInput_AnthropicUserAndAssistantExtracted(t *testing.T) {
+	body := []byte(`{
+		"messages": [
+			{"role":"user","content":"Q1"},
+			{"role":"assistant","content":"A1"},
+			{"role":"user","content":"Q2"},
+			{"role":"assistant","content":[{"type":"text","text":"A2"}]}
+		]
+	}`)
+	input := ExtractContentModerationInput(ContentModerationProtocolAnthropicMessages, body)
+	require.Equal(t, "Q1 A1 Q2 A2", input.Text)
+}
+
+func TestExtractContentModerationInput_AnthropicToolUseAndResultSkipped(t *testing.T) {
+	body := []byte(`{
+		"messages": [
+			{"role":"user","content":"Q1"},
+			{"role":"assistant","content":[{"type":"tool_use","id":"tool_1","name":"x","input":{}}]},
+			{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool_1","content":"result"}]},
+			{"role":"assistant","content":[{"type":"text","text":"A2"}]}
+		]
+	}`)
+	input := ExtractContentModerationInput(ContentModerationProtocolAnthropicMessages, body)
+	require.Equal(t, "Q1 A2", input.Text)
 }

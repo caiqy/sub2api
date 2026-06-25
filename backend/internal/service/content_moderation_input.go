@@ -28,7 +28,7 @@ func ExtractContentModerationInput(protocol string, body []byte) ContentModerati
 	var images []string
 	switch protocol {
 	case ContentModerationProtocolAnthropicMessages:
-		collectLastAnthropicUserMessage(gjson.GetBytes(body, "messages"), &parts, &images)
+		collectAllAnthropicMessages(gjson.GetBytes(body, "messages"), &parts, &images)
 	case ContentModerationProtocolOpenAIChat:
 		collectAllOpenAIChatMessages(gjson.GetBytes(body, "messages"), &parts, &images)
 	case ContentModerationProtocolOpenAIResponses:
@@ -216,6 +216,51 @@ func collectAnthropicUserContentValue(value gjson.Result, parts *[]string, image
 			collectContentValue(value, parts, images)
 		}
 	}
+}
+
+func collectAnthropicAssistantTextOnly(value gjson.Result, parts *[]string) {
+	switch {
+	case !value.Exists():
+		return
+	case value.Type == gjson.String:
+		addModerationText(parts, value.String())
+	case value.IsArray():
+		value.ForEach(func(_, item gjson.Result) bool {
+			collectAnthropicAssistantTextOnly(item, parts)
+			return true
+		})
+	case value.IsObject():
+		typ := strings.ToLower(strings.TrimSpace(value.Get("type").String()))
+		if typ == "" || typ == "text" || typ == "output_text" {
+			addModerationText(parts, value.Get("text").String())
+		}
+	}
+}
+
+func collectAllAnthropicMessages(messages gjson.Result, parts *[]string, images *[]string) {
+	if !messages.IsArray() {
+		return
+	}
+	array := messages.Array()
+	candidates := make([]moderationInputCandidate, 0, len(array))
+	for _, msg := range array {
+		role := strings.ToLower(strings.TrimSpace(msg.Get("role").String()))
+		if role != "user" && role != "assistant" {
+			continue
+		}
+		var candidate []string
+		var candidateImages []string
+		if role == "user" {
+			collectAnthropicUserContentValue(msg.Get("content"), &candidate, &candidateImages)
+		} else {
+			collectAnthropicAssistantTextOnly(msg.Get("content"), &candidate)
+		}
+		if normalizeContentModerationText(strings.Join(candidate, "\n")) == "" && len(candidateImages) == 0 {
+			continue
+		}
+		candidates = append(candidates, moderationInputCandidate{parts: candidate, images: candidateImages})
+	}
+	appendUniqueModerationCandidates(parts, images, candidates)
 }
 
 func isAnthropicSystemReminderText(text string) bool {

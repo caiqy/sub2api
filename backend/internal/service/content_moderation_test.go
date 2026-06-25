@@ -871,11 +871,11 @@ func TestExtractContentModerationInput_AnthropicImageSourceOnlyParticipatesInMem
 	}`)
 
 	input := ExtractContentModerationInput(ContentModerationProtocolAnthropicMessages, body)
-	require.Equal(t, "old 检查这张图", input.Text)
+	require.Equal(t, "old ok 检查这张图", input.Text)
 	require.Equal(t, []string{"data:image/png;base64,aGVsbG8="}, input.Images)
 
 	log := (&ContentModerationService{}).buildLog(ContentModerationCheckInput{}, defaultContentModerationConfig(), ContentModerationActionAllow, false, "", 0, nil, input.ExcerptText(), "", nil, nil, "")
-	require.Equal(t, "old 检查这张图", log.InputExcerpt)
+	require.Equal(t, "old ok 检查这张图", log.InputExcerpt)
 	require.NotContains(t, log.InputExcerpt, "aGVsbG8=")
 }
 
