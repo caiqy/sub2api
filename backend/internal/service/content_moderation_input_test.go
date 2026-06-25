@@ -171,7 +171,7 @@ func TestExtractContentModerationInput_ResponsesAgentToolLoopSkipsAudit(t *testi
 
 	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, body)
 
-	require.Empty(t, input.Text)
+	require.Equal(t, "运行测试", input.Text)
 	require.Empty(t, input.Images)
 }
 
@@ -185,8 +185,7 @@ func TestExtractContentModerationInput_ResponsesToolOutputWithContentSkipsAudit(
 
 	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, body)
 
-	require.Empty(t, input.Text)
-	require.Empty(t, input.Images)
+	require.Equal(t, "运行测试", input.Text)
 }
 
 func TestExtractContentModerationInput_ResponsesRolelessUntypedContentSkipsAudit(t *testing.T) {
@@ -199,8 +198,7 @@ func TestExtractContentModerationInput_ResponsesRolelessUntypedContentSkipsAudit
 
 	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, body)
 
-	require.Empty(t, input.Text)
-	require.Empty(t, input.Images)
+	require.Equal(t, "运行测试", input.Text)
 }
 
 func TestExtractContentModerationInput_ResponsesRecentUniqueUserMessagesExtracted(t *testing.T) {
@@ -222,7 +220,7 @@ func TestExtractContentModerationInput_ResponsesRecentUniqueUserMessagesExtracte
 
 	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, body)
 
-	require.Equal(t, "second third fourth fifth sixth", input.Text)
+	require.Equal(t, "first answer second third fourth fifth sixth", input.Text)
 }
 
 func TestExtractContentModerationInput_ResponsesLastIsAssistantSkipped(t *testing.T) {
@@ -235,8 +233,7 @@ func TestExtractContentModerationInput_ResponsesLastIsAssistantSkipped(t *testin
 
 	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, body)
 
-	require.Empty(t, input.Text)
-	require.Empty(t, input.Images)
+	require.Equal(t, "q1 a1", input.Text)
 }
 
 func TestExtractContentModerationInput_OpenAIChatUserAndAssistantExtracted(t *testing.T) {
@@ -308,4 +305,29 @@ func TestExtractContentModerationInput_AnthropicToolUseAndResultSkipped(t *testi
 	}`)
 	input := ExtractContentModerationInput(ContentModerationProtocolAnthropicMessages, body)
 	require.Equal(t, "Q1 A2", input.Text)
+}
+
+func TestExtractContentModerationInput_ResponsesUserAndAssistantExtracted(t *testing.T) {
+	body := []byte(`{
+		"input":[
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"Q1"}]},
+			{"type":"message","role":"assistant","content":[{"type":"output_text","text":"A1"}]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"Q2"}]}
+		]
+	}`)
+	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, body)
+	require.Equal(t, "Q1 A1 Q2", input.Text)
+}
+
+func TestExtractContentModerationInput_ResponsesFunctionCallItemSkipped(t *testing.T) {
+	body := []byte(`{
+		"input":[
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"Q1"}]},
+			{"type":"function_call","call_id":"c1","name":"tool","arguments":"{}"},
+			{"type":"function_call_output","call_id":"c1","output":"result"},
+			{"type":"message","role":"assistant","content":[{"type":"output_text","text":"A1"}]}
+		]
+	}`)
+	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, body)
+	require.Equal(t, "Q1 A1", input.Text)
 }

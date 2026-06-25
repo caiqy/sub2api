@@ -32,7 +32,7 @@ func ExtractContentModerationInput(protocol string, body []byte) ContentModerati
 	case ContentModerationProtocolOpenAIChat:
 		collectAllOpenAIChatMessages(gjson.GetBytes(body, "messages"), &parts, &images)
 	case ContentModerationProtocolOpenAIResponses:
-		collectLastResponsesInput(gjson.GetBytes(body, "input"), &parts, &images)
+		collectAllResponsesInput(gjson.GetBytes(body, "input"), &parts, &images)
 	case ContentModerationProtocolGemini:
 		collectLastGeminiContent(gjson.GetBytes(body, "contents"), &parts, &images)
 	case ContentModerationProtocolOpenAIImages:
@@ -305,6 +305,59 @@ func collectLastResponsesInput(input gjson.Result, parts *[]string, images *[]st
 	}
 }
 
+func collectAllResponsesInput(input gjson.Result, parts *[]string, images *[]string) {
+	switch {
+	case !input.Exists():
+		return
+	case input.Type == gjson.String:
+		addModerationText(parts, input.String())
+	case input.IsArray():
+		array := input.Array()
+		candidates := make([]moderationInputCandidate, 0, len(array))
+		for _, item := range array {
+			if !isResponsesAuditableItem(item) {
+				continue
+			}
+			var candidate []string
+			var candidateImages []string
+			collectContentValue(item.Get("content"), &candidate, &candidateImages)
+			if item.Get("type").String() == "input_text" || item.Get("text").Exists() {
+				collectContentValue(item, &candidate, &candidateImages)
+			}
+			if normalizeContentModerationText(strings.Join(candidate, "\n")) == "" && len(candidateImages) == 0 {
+				continue
+			}
+			candidates = append(candidates, moderationInputCandidate{parts: candidate, images: candidateImages})
+		}
+		appendUniqueModerationCandidates(parts, images, candidates)
+	case input.IsObject():
+		if isResponsesAuditableItem(input) {
+			collectContentValue(input.Get("content"), parts, images)
+			if input.Get("type").String() == "input_text" || input.Get("text").Exists() {
+				collectContentValue(input, parts, images)
+			}
+		}
+	}
+}
+
+func isResponsesAuditableItem(item gjson.Result) bool {
+	typ := strings.ToLower(strings.TrimSpace(item.Get("type").String()))
+	role := strings.ToLower(strings.TrimSpace(item.Get("role").String()))
+	if typ == "function_call" || typ == "function_call_output" || typ == "item_reference" {
+		return false
+	}
+	if role == "user" || typ == "input_text" {
+		return true
+	}
+	if role == "assistant" && typ == "message" {
+		return true
+	}
+	if role == "" && (typ == "message" || typ == "input_text") {
+		return true
+	}
+	return false
+}
+
 func isResponsesUserTextItem(item gjson.Result) bool {
 	role := strings.ToLower(strings.TrimSpace(item.Get("role").String()))
 	if role == "user" {
@@ -397,7 +450,7 @@ func collectContentValue(value gjson.Result, parts *[]string, images *[]string) 
 		addModerationImage(images, value.Get("data").String())
 		addModerationImage(images, value.Get("base64").String())
 		switch typ {
-		case "", "text", "input_text", "message":
+		case "", "text", "input_text", "output_text", "message":
 			if value.Get("text").Exists() {
 				addModerationText(parts, value.Get("text").String())
 			}
