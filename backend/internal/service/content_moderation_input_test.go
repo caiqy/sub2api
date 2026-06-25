@@ -6,10 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// 当数组末尾不是可审计用户输入时（典型场景：Agent 工具循环结束于 tool/assistant），
-// 应直接跳过审计——不再回溯查找历史中的某条用户消息。
-
-func TestExtractContentModerationInput_AnthropicAgentToolLoopSkipsAudit(t *testing.T) {
+func TestExtractContentModerationInput_AnthropicAgentToolLoopFiltersTools(t *testing.T) {
 	body := []byte(`{
 		"messages": [
 			{"role":"user","content":"调用一下天气工具"},
@@ -73,7 +70,7 @@ func TestExtractContentModerationInput_AnthropicStreamResendExtractsResend(t *te
 	require.Equal(t, "原问题 部分回答…… 重发", input.Text)
 }
 
-func TestExtractContentModerationInput_OpenAIChatAgentToolLoopSkipsAudit(t *testing.T) {
+func TestExtractContentModerationInput_OpenAIChatAgentToolLoopFiltersTools(t *testing.T) {
 	body := []byte(`{
 		"messages": [
 			{"role":"system","content":"sys"},
@@ -111,7 +108,7 @@ func TestExtractContentModerationInput_OpenAIChatMultiTurnExtractsRecentUniqueUs
 	require.Equal(t, "Q1 A1 Q2 A2 Q3 A3 Q4 A4 Q5 A5 Q6", input.Text)
 }
 
-func TestExtractContentModerationInput_GeminiAgentToolLoopSkipsAudit(t *testing.T) {
+func TestExtractContentModerationInput_GeminiAgentToolLoopFiltersTools(t *testing.T) {
 	body := []byte(`{
 		"contents": [
 			{"role":"user","parts":[{"text":"查询天气"}]},
@@ -160,7 +157,7 @@ func TestExtractContentModerationInput_GeminiMultiTurnExtractsRecentUniqueUsers(
 	require.Equal(t, "Q1 A1 Q2 A2 Q3 A3 Q4 A4 Q5 A5 Q6", input.Text)
 }
 
-func TestExtractContentModerationInput_ResponsesAgentToolLoopSkipsAudit(t *testing.T) {
+func TestExtractContentModerationInput_ResponsesAgentToolLoopFiltersTools(t *testing.T) {
 	body := []byte(`{
 		"input":[
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"运行测试"}]},

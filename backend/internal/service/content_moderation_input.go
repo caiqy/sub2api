@@ -55,10 +55,7 @@ func ExtractContentModerationInput(protocol string, body []byte) ContentModerati
 func appendUniqueModerationCandidates(parts *[]string, images *[]string, candidates []moderationInputCandidate) {
 	seen := make(map[string]struct{})
 	for _, c := range candidates {
-		key := normalizeContentModerationText(strings.Join(c.parts, "\n"))
-		if key == "" {
-			key = strings.Join(c.images, "\n")
-		}
+		key := normalizeContentModerationText(strings.Join(c.parts, "\n")) + "\x00" + strings.Join(c.images, "\n")
 		if _, ok := seen[key]; ok {
 			continue
 		}
@@ -81,7 +78,7 @@ func collectAllOpenAIChatMessages(messages gjson.Result, parts *[]string, images
 		role := strings.ToLower(strings.TrimSpace(msg.Get("role").String()))
 		switch role {
 		case "user":
-		case "assistant", "":
+		case "assistant":
 			if msg.Get("tool_calls").Exists() || msg.Get("function_call").Exists() {
 				continue
 			}
