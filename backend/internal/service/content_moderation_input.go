@@ -30,7 +30,7 @@ func ExtractContentModerationInput(protocol string, body []byte) ContentModerati
 	case ContentModerationProtocolAnthropicMessages:
 		collectLastAnthropicUserMessage(gjson.GetBytes(body, "messages"), &parts, &images)
 	case ContentModerationProtocolOpenAIChat:
-		collectLastRoleMessage(gjson.GetBytes(body, "messages"), "user", &parts, &images)
+		collectAllOpenAIChatMessages(gjson.GetBytes(body, "messages"), &parts, &images)
 	case ContentModerationProtocolOpenAIResponses:
 		collectLastResponsesInput(gjson.GetBytes(body, "input"), &parts, &images)
 	case ContentModerationProtocolGemini:
@@ -106,6 +106,53 @@ func appendRecentUniqueModerationCandidates(parts *[]string, images *[]string, c
 		*parts = append(*parts, selected[i].parts...)
 		*images = append(*images, selected[i].images...)
 	}
+}
+
+func appendUniqueModerationCandidates(parts *[]string, images *[]string, candidates []moderationInputCandidate) {
+	seen := make(map[string]struct{})
+	for _, c := range candidates {
+		key := normalizeContentModerationText(strings.Join(c.parts, "\n"))
+		if key == "" {
+			key = strings.Join(c.images, "\n")
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		*parts = append(*parts, c.parts...)
+		*images = append(*images, c.images...)
+	}
+}
+
+func collectAllOpenAIChatMessages(messages gjson.Result, parts *[]string, images *[]string) {
+	if !messages.IsArray() {
+		return
+	}
+	array := messages.Array()
+	if len(array) == 0 {
+		return
+	}
+	candidates := make([]moderationInputCandidate, 0, len(array))
+	for _, msg := range array {
+		role := strings.ToLower(strings.TrimSpace(msg.Get("role").String()))
+		switch role {
+		case "user":
+		case "assistant", "":
+			if msg.Get("tool_calls").Exists() || msg.Get("function_call").Exists() {
+				continue
+			}
+		default:
+			continue
+		}
+		var candidate []string
+		var candidateImages []string
+		collectContentValue(msg.Get("content"), &candidate, &candidateImages)
+		if normalizeContentModerationText(strings.Join(candidate, "\n")) == "" && len(candidateImages) == 0 {
+			continue
+		}
+		candidates = append(candidates, moderationInputCandidate{parts: candidate, images: candidateImages})
+	}
+	appendUniqueModerationCandidates(parts, images, candidates)
 }
 
 func collectLastAnthropicUserMessage(messages gjson.Result, parts *[]string, images *[]string) {

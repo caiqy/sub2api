@@ -86,7 +86,7 @@ func TestExtractContentModerationInput_OpenAIChatAgentToolLoopSkipsAudit(t *test
 
 	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIChat, body)
 
-	require.Empty(t, input.Text)
+	require.Equal(t, "列出我的订单", input.Text)
 	require.Empty(t, input.Images)
 }
 
@@ -109,7 +109,7 @@ func TestExtractContentModerationInput_OpenAIChatMultiTurnExtractsRecentUniqueUs
 
 	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIChat, body)
 
-	require.Equal(t, "Q2 Q3 Q4 Q5 Q6", input.Text)
+	require.Equal(t, "Q1 A1 Q2 A2 Q3 A3 Q4 A4 Q5 A5 Q6", input.Text)
 }
 
 func TestExtractContentModerationInput_GeminiAgentToolLoopSkipsAudit(t *testing.T) {
@@ -238,4 +238,49 @@ func TestExtractContentModerationInput_ResponsesLastIsAssistantSkipped(t *testin
 
 	require.Empty(t, input.Text)
 	require.Empty(t, input.Images)
+}
+
+func TestExtractContentModerationInput_OpenAIChatUserAndAssistantExtracted(t *testing.T) {
+	body := []byte(`{
+		"messages": [
+			{"role":"user","content":"Q1"},
+			{"role":"assistant","content":"A1"},
+			{"role":"user","content":"Q2"},
+			{"role":"assistant","content":"A2"}
+		]
+	}`)
+
+	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIChat, body)
+
+	require.Equal(t, "Q1 A1 Q2 A2", input.Text)
+}
+
+func TestExtractContentModerationInput_OpenAIChatToolCallsAssistantSkipped(t *testing.T) {
+	body := []byte(`{
+		"messages": [
+			{"role":"user","content":"Q1"},
+			{"role":"assistant","content":"safe text"},
+			{"role":"assistant","content":"tool msg","tool_calls":[{"id":"call_1"}]},
+			{"role":"tool","tool_call_id":"call_1","content":"result"},
+			{"role":"user","content":"Q2"}
+		]
+	}`)
+
+	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIChat, body)
+
+	require.Equal(t, "Q1 safe text Q2", input.Text)
+}
+
+func TestExtractContentModerationInput_OpenAIChatToolAtEndStillAudits(t *testing.T) {
+	body := []byte(`{
+		"messages": [
+			{"role":"user","content":"Q1"},
+			{"role":"assistant","content":null,"tool_calls":[{"id":"call_1"}]},
+			{"role":"tool","tool_call_id":"call_1","content":"result"}
+		]
+	}`)
+
+	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIChat, body)
+
+	require.Equal(t, "Q1", input.Text)
 }

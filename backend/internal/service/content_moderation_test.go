@@ -912,7 +912,7 @@ func TestExtractContentModerationInput_OpenAIChatUsesLastUserMessage(t *testing.
 
 	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIChat, body)
 
-	require.Equal(t, "old user latest user", input.Text)
+	require.Equal(t, "old user ok latest user", input.Text)
 	require.Equal(t, []string{"https://example.com/a.png"}, input.Images)
 	require.NotContains(t, input.Text, "system prompt")
 }
