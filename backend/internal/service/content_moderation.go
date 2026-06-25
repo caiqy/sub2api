@@ -318,7 +318,7 @@ func (in *ContentModerationInput) Normalize() {
 	if in == nil {
 		return
 	}
-	in.Text = trimRunes(normalizeContentModerationText(in.Text), maxModerationInputRunes)
+	in.Text = trimLatestRunes(normalizeContentModerationText(in.Text), maxModerationInputRunes)
 	in.Images = normalizeModerationImages(in.Images)
 }
 
@@ -1623,7 +1623,7 @@ func (s *ContentModerationService) buildLog(input ContentModerationCheckInput, c
 		HighestScore:      highestScore,
 		CategoryScores:    cloneFloatMap(scores),
 		ThresholdSnapshot: cloneFloatMap(cfg.Thresholds),
-		InputExcerpt:      trimRunes(redactContentModerationSecrets(text), maxModerationExcerptRunes),
+		InputExcerpt:      trimLatestRunes(text, maxModerationInputRunes),
 		MatchedKeyword:    strings.TrimSpace(matchedKeyword),
 		UpstreamLatencyMS: latency,
 		QueueDelayMS:      queueDelay,
@@ -2309,7 +2309,7 @@ func moderationAPIKeyHash(key string) string {
 }
 
 func buildModerationTestInput(prompt string, images []string) (any, int, error) {
-	prompt = trimRunes(normalizeContentModerationText(prompt), maxModerationInputRunes)
+	prompt = trimLatestRunes(normalizeContentModerationText(prompt), maxModerationInputRunes)
 	normalizedImages := make([]string, 0, len(images))
 	for _, image := range images {
 		image = strings.TrimSpace(image)
@@ -2694,6 +2694,17 @@ func trimRunes(text string, max int) string {
 		return text
 	}
 	return string(runes[:max])
+}
+
+func trimLatestRunes(text string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	runes := []rune(text)
+	if len(runes) <= max {
+		return text
+	}
+	return string(runes[len(runes)-max:])
 }
 
 func maskSecretTail(secret string) string {

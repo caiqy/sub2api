@@ -385,7 +385,7 @@ func (c *contentModerationTestHashCache) snapshotDeleted() []string {
 	return out
 }
 
-func TestBuildContentModerationLog_RedactsInputExcerpt(t *testing.T) {
+func TestBuildContentModerationLog_StoresAuditedInputRaw(t *testing.T) {
 	svc := &ContentModerationService{}
 	cfg := defaultContentModerationConfig()
 	input := ContentModerationCheckInput{
@@ -393,11 +393,35 @@ func TestBuildContentModerationLog_RedactsInputExcerpt(t *testing.T) {
 		Endpoint:  "/v1/chat/completions",
 		Provider:  "openai",
 	}
+	text := strings.Repeat("x", maxModerationInputRunes) + " hello sk-proj-1234567890abcdef"
 
-	log := svc.buildLog(input, cfg, ContentModerationActionAllow, true, "sexual", 0.8, map[string]float64{"sexual": 0.8}, "hello sk-proj-1234567890abcdef", "", nil, nil, "")
+	log := svc.buildLog(input, cfg, ContentModerationActionAllow, true, "sexual", 0.8, map[string]float64{"sexual": 0.8}, text, "", nil, nil, "")
 
-	require.NotContains(t, log.InputExcerpt, "sk-proj-1234567890abcdef")
-	require.Contains(t, log.InputExcerpt, "[已脱敏]")
+	require.Contains(t, log.InputExcerpt, "sk-proj-1234567890abcdef")
+	require.NotContains(t, log.InputExcerpt, "[已脱敏]")
+	require.Len(t, []rune(log.InputExcerpt), maxModerationInputRunes)
+}
+
+func TestContentModerationInput_NormalizeKeepsLatestContentWhenTruncated(t *testing.T) {
+	input := ContentModerationInput{Text: "最旧内容 " + strings.Repeat("旧", maxModerationInputRunes) + " 最新风险内容"}
+
+	input.Normalize()
+
+	require.Contains(t, input.Text, "最新风险内容")
+	require.NotContains(t, input.Text, "最旧内容")
+	require.Len(t, []rune(input.Text), maxModerationInputRunes)
+}
+
+func TestBuildModerationTestInput_KeepsLatestContentWhenTruncated(t *testing.T) {
+	input, imageCount, err := buildModerationTestInput("最旧测试内容 "+strings.Repeat("旧", maxModerationInputRunes)+" 最新测试风险", nil)
+
+	require.NoError(t, err)
+	require.Zero(t, imageCount)
+	text, ok := input.(string)
+	require.True(t, ok)
+	require.Contains(t, text, "最新测试风险")
+	require.NotContains(t, text, "最旧测试内容")
+	require.Len(t, []rune(text), maxModerationInputRunes)
 }
 
 func TestRedactContentModerationSecrets_LongHexAndTokens(t *testing.T) {
@@ -1112,6 +1136,71 @@ func TestContentModerationCheck_PreBlockBlocksCodexResponsesLatestUserInput(t *t
 	require.Equal(t, ContentModerationModePreBlock, logs[0].Mode)
 	require.Equal(t, "environment context latest blocked prompt", logs[0].InputExcerpt)
 	require.Equal(t, "environment context latest blocked prompt", moderationRequest.Input)
+}
+
+func TestContentModerationCheck_TruncatedPayloadAndLogKeepLatestInput(t *testing.T) {
+	var moderationRequest moderationAPIRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v1/moderations", r.URL.Path)
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&moderationRequest))
+		_ = json.NewEncoder(w).Encode(moderationAPIResponse{
+			Results: []moderationAPIResult{{
+				CategoryScores: map[string]float64{"sexual": 0.01},
+			}},
+		})
+	}))
+	defer server.Close()
+
+	cfg := defaultContentModerationConfig()
+	cfg.Enabled = true
+	cfg.Mode = ContentModerationModePreBlock
+	cfg.BaseURL = server.URL
+	cfg.APIKeys = []string{"sk-test"}
+	cfg.RecordNonHits = true
+	rawCfg, err := json.Marshal(cfg)
+	require.NoError(t, err)
+
+	repo := &contentModerationTestRepo{}
+	svc := NewContentModerationService(
+		&contentModerationTestSettingRepo{values: map[string]string{
+			SettingKeyRiskControlEnabled:      "true",
+			SettingKeyContentModerationConfig: string(rawCfg),
+		}},
+		repo,
+		&contentModerationTestHashCache{},
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+
+	body := []byte(fmt.Sprintf(`{
+		"model":"gpt-5.5",
+		"messages":[
+			{"role":"user","content":"最旧提示 %s"},
+			{"role":"assistant","content":"最新风险内容 sk-proj-1234567890abcdef"}
+		]
+	}`, strings.Repeat("旧", maxModerationInputRunes)))
+	decision, err := svc.Check(context.Background(), ContentModerationCheckInput{
+		UserID:   1001,
+		Endpoint: "/v1/chat/completions",
+		Provider: "openai",
+		Model:    "gpt-5.5",
+		Protocol: ContentModerationProtocolOpenAIChat,
+		Body:     body,
+	})
+
+	require.NoError(t, err)
+	require.False(t, decision.Blocked)
+	requestText, ok := moderationRequest.Input.(string)
+	require.True(t, ok)
+	require.Contains(t, requestText, "最新风险内容 sk-proj-1234567890abcdef")
+	require.NotContains(t, requestText, "最旧提示")
+	require.Len(t, []rune(requestText), maxModerationInputRunes)
+	logs := requireContentModerationLogCount(t, repo, 1)
+	require.Equal(t, requestText, logs[0].InputExcerpt)
+	require.Contains(t, logs[0].InputExcerpt, "sk-proj-1234567890abcdef")
+	require.NotContains(t, logs[0].InputExcerpt, "[已脱敏]")
 }
 
 func TestContentModerationStatusTracksPreBlockSyncMetrics(t *testing.T) {
