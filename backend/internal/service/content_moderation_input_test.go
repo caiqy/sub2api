@@ -188,18 +188,6 @@ func TestExtractContentModerationInput_ResponsesToolOutputWithContentSkipsAudit(
 	require.Equal(t, "运行测试", input.Text)
 }
 
-func TestExtractContentModerationInput_ResponsesRolelessUntypedContentSkipsAudit(t *testing.T) {
-	body := []byte(`{
-		"input":[
-			{"type":"message","role":"user","content":[{"type":"input_text","text":"运行测试"}]},
-			{"content":[{"type":"input_text","text":"untyped text"}]}
-		]
-	}`)
-
-	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, body)
-
-	require.Equal(t, "运行测试", input.Text)
-}
 
 func TestExtractContentModerationInput_ResponsesRecentUniqueUserMessagesExtracted(t *testing.T) {
 	body := []byte(`{
