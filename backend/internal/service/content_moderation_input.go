@@ -34,7 +34,7 @@ func ExtractContentModerationInput(protocol string, body []byte) ContentModerati
 	case ContentModerationProtocolOpenAIResponses:
 		collectAllResponsesInput(gjson.GetBytes(body, "input"), &parts, &images)
 	case ContentModerationProtocolGemini:
-		collectLastGeminiContent(gjson.GetBytes(body, "contents"), &parts, &images)
+		collectAllGeminiContents(gjson.GetBytes(body, "contents"), &parts, &images)
 	case ContentModerationProtocolOpenAIImages:
 		addModerationText(&parts, gjson.GetBytes(body, "prompt").String())
 		collectContentValue(gjson.GetBytes(body, "images"), &parts, &images)
@@ -423,6 +423,38 @@ func collectLastGeminiContent(contents gjson.Result, parts *[]string, images *[]
 		return
 	}
 	appendRecentUniqueModerationCandidates(parts, images, candidates)
+}
+
+func collectAllGeminiContents(contents gjson.Result, parts *[]string, images *[]string) {
+	if !contents.IsArray() {
+		return
+	}
+	array := contents.Array()
+	candidates := make([]moderationInputCandidate, 0, len(array))
+	for _, content := range array {
+		role := strings.ToLower(strings.TrimSpace(content.Get("role").String()))
+		if role != "" && role != "user" && role != "model" {
+			continue
+		}
+		var candidate []string
+		var candidateImages []string
+		if arr := content.Get("parts"); arr.IsArray() {
+			arr.ForEach(func(_, part gjson.Result) bool {
+				if part.Get("functionCall").Exists() || part.Get("function_call").Exists() ||
+					part.Get("functionResponse").Exists() || part.Get("function_response").Exists() {
+					return true
+				}
+				addModerationText(&candidate, part.Get("text").String())
+				addGeminiModerationImage(&candidateImages, part)
+				return true
+			})
+		}
+		if normalizeContentModerationText(strings.Join(candidate, "\n")) == "" && len(candidateImages) == 0 {
+			continue
+		}
+		candidates = append(candidates, moderationInputCandidate{parts: candidate, images: candidateImages})
+	}
+	appendUniqueModerationCandidates(parts, images, candidates)
 }
 
 func collectContentValue(value gjson.Result, parts *[]string, images *[]string) {
