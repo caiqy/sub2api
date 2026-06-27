@@ -380,3 +380,21 @@ func TestExtractContentModerationInput_ResponsesTranscriptItemsExtracted(t *test
 
 	require.Equal(t, "user prompt assistant answer", input.Text)
 }
+
+func TestExtractContentModerationInput_ResponsesCodexSkipsInstructionsAndDeveloperContext(t *testing.T) {
+	body := []byte(`{
+		"model":"gpt-5.5",
+		"instructions":"You are Codex, a coding agent based on GPT-5.",
+		"input":[
+			{"type":"message","role":"developer","content":[
+				{"type":"input_text","text":"<permissions instructions> Filesystem sandboxing"},
+				{"type":"input_text","text":"<app-context> Codex desktop context"}
+			]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":"用户真实问题"}]}
+		]
+	}`)
+
+	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, body)
+
+	require.Equal(t, "用户真实问题", input.Text)
+}
