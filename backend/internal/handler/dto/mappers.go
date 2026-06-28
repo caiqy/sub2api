@@ -191,6 +191,8 @@ func groupFromServiceBase(g *service.Group) Group {
 		ClaudeCodeOnly:                  g.ClaudeCodeOnly,
 		FallbackGroupID:                 g.FallbackGroupID,
 		FallbackGroupIDOnInvalidRequest: g.FallbackGroupIDOnInvalidRequest,
+		UserConcurrencyEnabled:          g.UserConcurrencyEnabled,
+		UserConcurrencyLimit:            g.UserConcurrencyLimit,
 		AllowMessagesDispatch:           g.AllowMessagesDispatch,
 		RequireOAuthOnly:                g.RequireOAuthOnly,
 		RequirePrivacySet:               g.RequirePrivacySet,
@@ -273,7 +275,7 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 			out.EnableTLSFingerprint = &enabled
 		}
 		// TLS指纹模板ID
-		if profileID := a.GetTLSFingerprintProfileID(); profileID > 0 {
+		if profileID := a.GetTLSFingerprintProfileID(); profileID != 0 {
 			out.TLSFingerprintProfileID = &profileID
 		}
 		// 会话ID伪装开关
@@ -339,11 +341,15 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 			out.QuotaResetTimezone = &tz
 		}
 		if a.Extra != nil {
-			if v, ok := a.Extra["quota_daily_reset_at"].(string); ok && v != "" {
-				out.QuotaDailyResetAt = &v
+			if !a.IsDailyQuotaPeriodExpired() {
+				if v, ok := a.Extra["quota_daily_reset_at"].(string); ok && v != "" {
+					out.QuotaDailyResetAt = &v
+				}
 			}
-			if v, ok := a.Extra["quota_weekly_reset_at"].(string); ok && v != "" {
-				out.QuotaWeeklyResetAt = &v
+			if !a.IsWeeklyQuotaPeriodExpired() {
+				if v, ok := a.Extra["quota_weekly_reset_at"].(string); ok && v != "" {
+					out.QuotaWeeklyResetAt = &v
+				}
 			}
 		}
 
@@ -658,6 +664,7 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 	usageLog.UpstreamEndpoint = l.UpstreamEndpoint
 	return &AdminUsageLog{
 		UsageLog:              usageLog,
+		HasDetail:             l.HasDetail,
 		UpstreamModel:         l.UpstreamModel,
 		ChannelID:             l.ChannelID,
 		ModelMappingChain:     l.ModelMappingChain,
@@ -666,6 +673,24 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 		AccountStatsCost:      l.AccountStatsCost,
 		IPAddress:             l.IPAddress,
 		Account:               AccountSummaryFromService(l.Account),
+	}
+}
+
+func UsageLogDetailFromService(detail *service.UsageLogDetail) *AdminUsageDetail {
+	if detail == nil {
+		return nil
+	}
+	return &AdminUsageDetail{
+		UsageLogID:              detail.UsageLogID,
+		RequestHeaders:          detail.RequestHeaders,
+		RequestBody:             detail.RequestBody,
+		UpstreamRequestHeaders:  detail.UpstreamRequestHeaders,
+		UpstreamRequestBody:     detail.UpstreamRequestBody,
+		ResponseHeaders:         detail.ResponseHeaders,
+		ResponseBody:            detail.ResponseBody,
+		UpstreamResponseHeaders: detail.UpstreamResponseHeaders,
+		UpstreamResponseBody:    detail.UpstreamResponseBody,
+		CreatedAt:               detail.CreatedAt,
 	}
 }
 

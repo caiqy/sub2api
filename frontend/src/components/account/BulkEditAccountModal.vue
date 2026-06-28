@@ -927,6 +927,53 @@
         </div>
       </div>
 
+      <!-- 故障自动检查 -->
+      <div v-if="allOpenAIPassthroughCapable" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <label class="flex items-center gap-2">
+          <input v-model="updateOpenAIProbeEnabled" type="checkbox" class="rounded border-gray-300 dark:border-dark-500" />
+          <span class="text-sm font-medium">{{ t('admin.accounts.openai.probeEnabled') }}</span>
+        </label>
+        <p class="mt-1 ml-6 text-xs text-gray-500 dark:text-gray-400">
+          {{ t('admin.accounts.openai.probeEnabledDesc') }}
+        </p>
+        <div v-if="updateOpenAIProbeEnabled" class="ml-6 mt-2">
+          <button
+            type="button"
+            @click="openAIProbeEnabled = !openAIProbeEnabled"
+            :class="[
+              'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
+              openAIProbeEnabled ? 'bg-primary-600' : 'bg-gray-300 dark:bg-dark-500'
+            ]"
+          >
+            <span
+              :class="[
+                'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
+                openAIProbeEnabled ? 'translate-x-6' : 'translate-x-1'
+              ]"
+            />
+          </button>
+        </div>
+      </div>
+
+      <!-- 自检模型 -->
+      <div v-if="allOpenAIPassthroughCapable" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <label class="flex items-center gap-2">
+          <input v-model="updateOpenAIProbeModel" type="checkbox" class="rounded border-gray-300 dark:border-dark-500" />
+          <span class="text-sm font-medium">{{ t('admin.accounts.openai.probeModel') }}</span>
+        </label>
+        <p class="mt-1 ml-6 text-xs text-gray-500 dark:text-gray-400">
+          {{ t('admin.accounts.openai.probeModelHint') }}
+        </p>
+        <div v-if="updateOpenAIProbeModel" class="ml-6 mt-2">
+          <input
+            v-model="openAIProbeModel"
+            type="text"
+            class="input"
+            :placeholder="t('admin.accounts.openai.probeModelPlaceholder')"
+          />
+        </div>
+      </div>
+
       <!-- RPM Limit (仅全部为 Anthropic OAuth/SetupToken 时显示) -->
       <div v-if="allAnthropicOAuthOrSetupToken" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
@@ -1294,6 +1341,10 @@ const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OF
 const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
 const openAICompactMode = ref<OpenAICompactMode>('auto')
+const updateOpenAIProbeEnabled = ref<boolean>(false)
+const openAIProbeEnabled = ref<boolean>(true)
+const updateOpenAIProbeModel = ref<boolean>(false)
+const openAIProbeModel = ref<string>('')
 const openAICompactModelMappings = ref<ModelMapping[]>([])
 const rpmLimitEnabled = ref(false)
 const bulkBaseRpm = ref<number | null>(null)
@@ -1560,6 +1611,24 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     extra.openai_compact_mode = openAICompactMode.value
   }
 
+  if (updateOpenAIProbeEnabled.value) {
+    const extra = ensureExtra()
+    if (openAIProbeEnabled.value === false) {
+      extra.openai_probe_enabled = false
+    } else {
+      delete extra.openai_probe_enabled
+    }
+  }
+  if (updateOpenAIProbeModel.value) {
+    const extra = ensureExtra()
+    const probeModel = openAIProbeModel.value.trim()
+    if (probeModel !== '') {
+      extra.openai_probe_model = probeModel
+    } else {
+      delete extra.openai_probe_model
+    }
+  }
+
   if (enableOpenAICompactModelMapping.value) {
     credentials.compact_model_mapping = buildOpenAICompactModelMapping() ?? {}
     credentialsChanged = true
@@ -1664,6 +1733,8 @@ const handleSubmit = async () => {
     enableCodexCLIOnlyAppServer.value ||
     enableOpenAICompactMode.value ||
     enableOpenAICompactModelMapping.value ||
+    updateOpenAIProbeEnabled.value ||
+    updateOpenAIProbeModel.value ||
     enableRpmLimit.value ||
     userMsgQueueMode.value !== null
 
@@ -1767,6 +1838,8 @@ watch(
       enableCodexCLIOnlyAppServer.value = false
       enableOpenAICompactMode.value = false
       enableOpenAICompactModelMapping.value = false
+      updateOpenAIProbeEnabled.value = false
+      updateOpenAIProbeModel.value = false
       enableRpmLimit.value = false
 
       // Reset all values
@@ -1790,6 +1863,8 @@ watch(
       codexCLIOnlyEnabled.value = false
       codexCLIOnlyAppServerEnabled.value = false
       openAICompactMode.value = 'auto'
+      openAIProbeEnabled.value = true
+      openAIProbeModel.value = ''
       openAICompactModelMappings.value = []
       rpmLimitEnabled.value = false
       bulkBaseRpm.value = null

@@ -80,20 +80,7 @@ export type AuthSourceDefaultsState = Record<
   AuthSourceType,
   AuthSourceDefaultsValue
 >;
-export type PaymentVisibleMethod = "alipay" | "wxpay";
-export type PaymentVisibleMethodSource =
-  | ""
-  | "official_alipay"
-  | "easypay_alipay"
-  | "official_wxpay"
-  | "easypay_wxpay";
 export type WeChatConnectMode = "open" | "mp" | "mobile";
-
-export interface PaymentVisibleMethodSourceOption {
-  value: PaymentVisibleMethodSource;
-  labelZh: string;
-  labelEn: string;
-}
 
 export interface WeChatConnectModeOption {
   value: WeChatConnectMode;
@@ -112,59 +99,6 @@ const AUTH_SOURCE_TYPES: AuthSourceType[] = [
 ];
 const AUTH_SOURCE_DEFAULT_BALANCE = 0;
 const AUTH_SOURCE_DEFAULT_CONCURRENCY = 5;
-const PAYMENT_VISIBLE_METHOD_SOURCE_OPTIONS: Record<
-  PaymentVisibleMethod,
-  PaymentVisibleMethodSourceOption[]
-> = {
-  alipay: [
-    { value: "", labelZh: "未配置", labelEn: "Not configured" },
-    {
-      value: "official_alipay",
-      labelZh: "支付宝官方",
-      labelEn: "Official Alipay",
-    },
-    {
-      value: "easypay_alipay",
-      labelZh: "易支付支付宝",
-      labelEn: "EasyPay Alipay",
-    },
-  ],
-  wxpay: [
-    { value: "", labelZh: "未配置", labelEn: "Not configured" },
-    {
-      value: "official_wxpay",
-      labelZh: "微信官方",
-      labelEn: "Official WeChat Pay",
-    },
-    {
-      value: "easypay_wxpay",
-      labelZh: "易支付微信",
-      labelEn: "EasyPay WeChat Pay",
-    },
-  ],
-};
-const PAYMENT_VISIBLE_METHOD_SOURCE_ALIASES: Record<
-  PaymentVisibleMethod,
-  Record<string, PaymentVisibleMethodSource>
-> = {
-  alipay: {
-    official_alipay: "official_alipay",
-    alipay: "official_alipay",
-    alipay_direct: "official_alipay",
-    official: "official_alipay",
-    easypay_alipay: "easypay_alipay",
-    easypay: "easypay_alipay",
-  },
-  wxpay: {
-    official_wxpay: "official_wxpay",
-    wxpay: "official_wxpay",
-    wxpay_direct: "official_wxpay",
-    wechat: "official_wxpay",
-    official: "official_wxpay",
-    easypay_wxpay: "easypay_wxpay",
-    easypay: "easypay_wxpay",
-  },
-};
 const WECHAT_CONNECT_MODE_OPTIONS: WeChatConnectModeOption[] = [
   { value: "open", labelZh: "PC 应用", labelEn: "PC App" },
   {
@@ -244,48 +178,31 @@ export function buildAuthSourceDefaultsState(
 
 export function appendAuthSourceDefaultsToUpdateRequest(
   payload: UpdateSettingsRequest,
-  authSourceDefaults: AuthSourceDefaultsState,
+  authSourceDefaults: Partial<AuthSourceDefaultsState>,
 ): UpdateSettingsRequest {
   const target = payload as Record<string, unknown>;
 
   for (const source of AUTH_SOURCE_TYPES) {
     const current = authSourceDefaults[source];
     target[`auth_source_default_${source}_balance`] =
-      Number(current.balance) || 0;
+      Number(current?.balance ?? AUTH_SOURCE_DEFAULT_BALANCE) || 0;
     target[`auth_source_default_${source}_concurrency`] = Math.max(
       1,
       Math.floor(
-        Number(current.concurrency) || AUTH_SOURCE_DEFAULT_CONCURRENCY,
+        Number(current?.concurrency) || AUTH_SOURCE_DEFAULT_CONCURRENCY,
       ),
     );
     target[`auth_source_default_${source}_subscriptions`] =
-      normalizeDefaultSubscriptionSettings(current.subscriptions);
-    target[`auth_source_default_${source}_grant_on_signup`] =
-      current.grant_on_signup;
-    target[`auth_source_default_${source}_grant_on_first_bind`] =
-      current.grant_on_first_bind;
-    target[`auth_source_default_${source}_platform_quotas`] = sanitizePlatformQuotasMap(current.platform_quotas)
-  }
+      normalizeDefaultSubscriptionSettings(current?.subscriptions);
+		target[`auth_source_default_${source}_grant_on_signup`] =
+			current?.grant_on_signup === true;
+		target[`auth_source_default_${source}_grant_on_first_bind`] =
+			current?.grant_on_first_bind === true;
+		target[`auth_source_default_${source}_platform_quotas`] =
+			sanitizePlatformQuotasMap(current?.platform_quotas);
+	}
 
   return payload;
-}
-
-export function getPaymentVisibleMethodSourceOptions(
-  method: PaymentVisibleMethod,
-): PaymentVisibleMethodSourceOption[] {
-  return PAYMENT_VISIBLE_METHOD_SOURCE_OPTIONS[method];
-}
-
-export function normalizePaymentVisibleMethodSource(
-  method: PaymentVisibleMethod,
-  source: unknown,
-): PaymentVisibleMethodSource {
-  if (typeof source !== "string") return "";
-
-  const normalized = source.trim().toLowerCase();
-  if (!normalized) return "";
-
-  return PAYMENT_VISIBLE_METHOD_SOURCE_ALIASES[method][normalized] ?? "";
 }
 
 export function getWeChatConnectModeOptions(): WeChatConnectModeOption[] {
@@ -433,9 +350,24 @@ export interface SystemSettings {
   doc_url: string;
   home_content: string;
   hide_ccs_import_button: boolean;
+  purchase_subscription_enabled: boolean;
+  purchase_subscription_url: string;
   table_default_page_size: number;
   table_page_size_options: number[];
   backend_mode_enabled: boolean;
+  gateway_sticky_openai_enabled: boolean;
+  gateway_sticky_gemini_enabled: boolean;
+  gateway_sticky_anthropic_enabled: boolean;
+  gateway_openai_ws_scheduler_mode: "weighted" | "layered" | string;
+  gateway_openai_ws_scheduler_layered_error_penalty_threshold: number;
+  gateway_openai_ws_scheduler_layered_error_penalty_value: number;
+  gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier: number;
+  gateway_openai_ws_scheduler_layered_ttft_penalty_value: number;
+  gateway_openai_ws_scheduler_layered_probe_cooldown_seconds: number;
+  gateway_openai_ws_scheduler_layered_probe_interval_seconds: number;
+  gateway_openai_ws_scheduler_layered_probe_max_failures: number;
+  gateway_openai_ws_scheduler_layered_probe_timeout_seconds: number;
+  gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds: number;
   custom_menu_items: CustomMenuItem[];
   custom_endpoints: CustomEndpoint[];
   // SMTP settings
@@ -706,9 +638,24 @@ export interface UpdateSettingsRequest {
   doc_url?: string;
   home_content?: string;
   hide_ccs_import_button?: boolean;
+  purchase_subscription_enabled?: boolean;
+  purchase_subscription_url?: string;
   table_default_page_size?: number;
   table_page_size_options?: number[];
   backend_mode_enabled?: boolean;
+  gateway_sticky_openai_enabled?: boolean;
+  gateway_sticky_gemini_enabled?: boolean;
+  gateway_sticky_anthropic_enabled?: boolean;
+  gateway_openai_ws_scheduler_mode?: "weighted" | "layered" | string;
+  gateway_openai_ws_scheduler_layered_error_penalty_threshold?: number;
+  gateway_openai_ws_scheduler_layered_error_penalty_value?: number;
+  gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier?: number;
+  gateway_openai_ws_scheduler_layered_ttft_penalty_value?: number;
+  gateway_openai_ws_scheduler_layered_probe_cooldown_seconds?: number;
+  gateway_openai_ws_scheduler_layered_probe_interval_seconds?: number;
+  gateway_openai_ws_scheduler_layered_probe_max_failures?: number;
+  gateway_openai_ws_scheduler_layered_probe_timeout_seconds?: number;
+  gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds?: number;
   custom_menu_items?: CustomMenuItem[];
   custom_endpoints?: CustomEndpoint[];
   smtp_host?: string;
@@ -1100,6 +1047,32 @@ export async function deleteAdminApiKey(): Promise<{ message: string }> {
   return data;
 }
 
+// ==================== Gateway Runtime Settings ====================
+
+export interface GatewayRuntimeSettings {
+  response_header_timeout: number;
+  stream_data_interval_timeout: number;
+  usage_log_detail_retention_limit: number;
+  image_usage_log_detail_retention_limit: number;
+}
+
+export async function getGatewayRuntimeSettings(): Promise<GatewayRuntimeSettings> {
+  const { data } = await apiClient.get<GatewayRuntimeSettings>(
+    "/admin/settings/gateway-runtime",
+  );
+  return data;
+}
+
+export async function updateGatewayRuntimeSettings(
+  settings: GatewayRuntimeSettings,
+): Promise<GatewayRuntimeSettings> {
+  const { data } = await apiClient.put<GatewayRuntimeSettings>(
+    "/admin/settings/gateway-runtime",
+    settings,
+  );
+  return data;
+}
+
 // ==================== Overload Cooldown Settings ====================
 
 /**
@@ -1373,6 +1346,8 @@ export const settingsAPI = {
   getAdminApiKey,
   regenerateAdminApiKey,
   deleteAdminApiKey,
+  getGatewayRuntimeSettings,
+  updateGatewayRuntimeSettings,
   getOverloadCooldownSettings,
   updateOverloadCooldownSettings,
   getRateLimit429CooldownSettings,

@@ -231,6 +231,183 @@ func TestCalculateProgress_ExpiredSubscription(t *testing.T) {
 	assert.Equal(t, 0, progress.ExpiresInDays, "过期订阅的剩余天数应为 0")
 }
 
+func TestCalculateProgress_LegacyMidnightProgressShowsEffectiveAnchor(t *testing.T) {
+	svc := newTestSubscriptionService()
+	loc := time.UTC
+	startsAt := time.Date(2024, 6, 15, 10, 30, 0, 0, loc)
+	weeklyMidnight := time.Date(2024, 6, 15, 0, 0, 0, 0, loc)
+	monthlyMidnight := time.Date(2024, 6, 15, 0, 0, 0, 0, loc)
+
+	sub := &UserSubscription{
+		ID:                 1,
+		StartsAt:           startsAt,
+		ExpiresAt:          startsAt.Add(90 * 24 * time.Hour),
+		WeeklyUsageUSD:     10.0,
+		MonthlyUsageUSD:    20.0,
+		WeeklyWindowStart:  ptrTime(weeklyMidnight),
+		MonthlyWindowStart: ptrTime(monthlyMidnight),
+	}
+	group := &Group{
+		Name:            "Legacy",
+		WeeklyLimitUSD:  ptrFloat64(100.0),
+		MonthlyLimitUSD: ptrFloat64(200.0),
+	}
+
+	progress := svc.calculateProgress(sub, group)
+
+	// Legacy midnight: WindowStart 应以 effective anchor 为基准（子时刻非 00:00），
+	// 且因为是 2024 年的陈旧窗口，WindowStart 已前移对齐到当前周期。
+	// 验证 WindowStart 时刻保留 StartsAt 的时分秒（而非 midnight 的 00:00）。
+	require.NotNil(t, progress.Weekly)
+	assert.Equal(t, startsAt.Hour(), progress.Weekly.WindowStart.Hour(), "legacy 周 WindowStart 的小时应等于 StartsAt 的小时，而非 00")
+	assert.Equal(t, startsAt.Minute(), progress.Weekly.WindowStart.Minute(), "legacy 周 WindowStart 的分钟应等于 StartsAt 的分钟，而非 00")
+
+	require.NotNil(t, progress.Monthly)
+	assert.Equal(t, startsAt.Hour(), progress.Monthly.WindowStart.Hour(), "legacy 月 WindowStart 的小时应等于 StartsAt 的小时，而非 00")
+	assert.Equal(t, startsAt.Minute(), progress.Monthly.WindowStart.Minute(), "legacy 月 WindowStart 的分钟应等于 StartsAt 的分钟，而非 00")
+}
+
+func TestCalculateProgress_StaleWindowShowsNextFutureReset(t *testing.T) {
+	svc := newTestSubscriptionService()
+	loc := time.UTC
+	startsAt := time.Date(2024, 1, 1, 12, 0, 0, 0, loc)
+	windowStart := startsAt // 窗口锚点，已落后多个周期
+
+	sub := &UserSubscription{
+		ID:                 1,
+		StartsAt:           startsAt,
+		ExpiresAt:          startsAt.Add(365 * 24 * time.Hour),
+		WeeklyUsageUSD:     10.0,
+		MonthlyUsageUSD:    20.0,
+		WeeklyWindowStart:  ptrTime(windowStart),
+		MonthlyWindowStart: ptrTime(windowStart),
+	}
+	group := &Group{
+		Name:            "Stale",
+		WeeklyLimitUSD:  ptrFloat64(100.0),
+		MonthlyLimitUSD: ptrFloat64(200.0),
+	}
+
+	progress := svc.calculateProgress(sub, group)
+
+	// stale weekly: WindowStart 应为最新对齐后的边界，ResetsAt 为下一个未来边界
+	require.NotNil(t, progress.Weekly)
+	ws := startsAt
+	periods := int(time.Since(ws) / (7 * 24 * time.Hour))
+	expectedWinStart := ws.Add(time.Duration(periods) * 7 * 24 * time.Hour)
+	expectedReset := ws.Add(time.Duration(periods+1) * 7 * 24 * time.Hour)
+	assert.Equal(t, expectedWinStart, progress.Weekly.WindowStart,
+		"stale weekly: WindowStart 应为最新有效边界（start+periods*7d）")
+	assert.Equal(t, expectedReset, progress.Weekly.ResetsAt,
+		"stale weekly: ResetsAt 应为下一个未来边界（start+(periods+1)*7d），而非第一个过期边界")
+	assert.Equal(t, 0.0, progress.Weekly.UsedUSD,
+		"stale weekly: WindowStart 已推进到新窗口，展示用量应与 reset 后状态一致")
+
+	// stale monthly
+	require.NotNil(t, progress.Monthly)
+	ms := startsAt
+	mPeriods := int(time.Since(ms) / (30 * 24 * time.Hour))
+	expectedMWinStart := ms.Add(time.Duration(mPeriods) * 30 * 24 * time.Hour)
+	expectedMReset := ms.Add(time.Duration(mPeriods+1) * 30 * 24 * time.Hour)
+	assert.Equal(t, expectedMWinStart, progress.Monthly.WindowStart,
+		"stale monthly: WindowStart 应为最新有效边界")
+	assert.Equal(t, expectedMReset, progress.Monthly.ResetsAt,
+		"stale monthly: ResetsAt 应为下一个未来边界")
+	assert.Equal(t, 0.0, progress.Monthly.UsedUSD,
+		"stale monthly: WindowStart 已推进到新窗口，展示用量应与 reset 后状态一致")
+
+	// ResetsAt 应在未来
+	assert.True(t, progress.Weekly.ResetsAt.After(time.Now()), "stale weekly ResetsAt 应在未来")
+	assert.True(t, progress.Monthly.ResetsAt.After(time.Now()), "stale monthly ResetsAt 应在未来")
+}
+
+func TestCalculateProgress_StaleDailyWindowShowsCurrentBoundary(t *testing.T) {
+	svc := newTestSubscriptionService()
+	start := time.Now().UTC().Add(-75 * time.Hour)
+	dailyLimit := 100.0
+	sub := &UserSubscription{
+		ID:               1,
+		StartsAt:         start,
+		ExpiresAt:        start.Add(10 * 24 * time.Hour),
+		DailyUsageUSD:    10,
+		DailyWindowStart: ptrTime(start),
+	}
+	group := &Group{Name: "StaleDaily", DailyLimitUSD: ptrFloat64(dailyLimit)}
+
+	progress := svc.calculateProgress(sub, group)
+
+	require.NotNil(t, progress.Daily)
+	require.True(t, progress.Daily.WindowStart.After(start), "stale daily: WindowStart 应追到当前有效边界")
+	require.Equal(t, 0.0, progress.Daily.UsedUSD, "stale daily: WindowStart 已推进到新窗口，展示用量应与 reset 后状态一致")
+	require.True(t, progress.Daily.ResetsAt.After(progress.Daily.WindowStart), "stale daily: ResetsAt 应晚于 WindowStart")
+	assert.InDelta(t, 24*time.Hour.Seconds(), progress.Daily.ResetsAt.Sub(progress.Daily.WindowStart).Seconds(), 1)
+}
+
+func TestCalculateProgress_LegacyMidnightDailyProgressShowsEffectiveAnchor(t *testing.T) {
+	svc := newTestSubscriptionService()
+	startsAt := time.Now().UTC().Add(12 * time.Hour).Truncate(time.Minute)
+	startsAt = time.Date(startsAt.Year(), startsAt.Month(), startsAt.Day(), 15, 30, 0, 0, time.UTC)
+	if !startsAt.After(time.Now().UTC()) {
+		startsAt = startsAt.Add(24 * time.Hour)
+	}
+	legacyMidnight := startOfDay(startsAt)
+	dailyLimit := 100.0
+	sub := &UserSubscription{
+		ID:               1,
+		StartsAt:         startsAt,
+		ExpiresAt:        startsAt.Add(7 * 24 * time.Hour),
+		DailyUsageUSD:    10,
+		DailyWindowStart: ptrTime(legacyMidnight),
+	}
+	group := &Group{Name: "LegacyDaily", DailyLimitUSD: ptrFloat64(dailyLimit)}
+
+	progress := svc.calculateProgress(sub, group)
+
+	require.NotNil(t, progress.Daily)
+	require.Equal(t, startsAt, progress.Daily.WindowStart)
+	require.Equal(t, startsAt.Add(24*time.Hour), progress.Daily.ResetsAt)
+}
+
+func TestCalculateProgress_AlignedWindowStaysStable(t *testing.T) {
+	svc := newTestSubscriptionService()
+	loc := time.UTC
+	startsAt := time.Date(2024, 1, 1, 12, 0, 0, 0, loc)
+	// 窗口已经对齐到 StartsAt+7d / StartsAt+30d
+	weeklyWin := startsAt.Add(7 * 24 * time.Hour)
+	monthlyWin := startsAt.Add(30 * 24 * time.Hour)
+
+	sub := &UserSubscription{
+		ID:                 1,
+		StartsAt:           startsAt,
+		ExpiresAt:          startsAt.Add(365 * 24 * time.Hour),
+		WeeklyUsageUSD:     10.0,
+		MonthlyUsageUSD:    20.0,
+		WeeklyWindowStart:  ptrTime(weeklyWin),
+		MonthlyWindowStart: ptrTime(monthlyWin),
+	}
+	group := &Group{
+		Name:            "Aligned",
+		WeeklyLimitUSD:  ptrFloat64(100.0),
+		MonthlyLimitUSD: ptrFloat64(200.0),
+	}
+
+	progress := svc.calculateProgress(sub, group)
+
+	require.NotNil(t, progress.Weekly)
+	// 窗口非 midnight，effective anchor 保留 12:00 时刻，且因 2024 年数据已陈旧，
+	// CurrentWeeklyWindowStart 会将日期推进到当前周期，但锚点时刻（12:00）保持不变。
+	assert.Equal(t, weeklyWin.Hour(), progress.Weekly.WindowStart.Hour(),
+		"对齐窗口的锚点小时应保持稳定")
+	assert.Equal(t, weeklyWin.Minute(), progress.Weekly.WindowStart.Minute(),
+		"对齐窗口的锚点分钟应保持稳定")
+
+	require.NotNil(t, progress.Monthly)
+	assert.Equal(t, monthlyWin.Hour(), progress.Monthly.WindowStart.Hour(),
+		"对齐窗口的锚点小时应保持稳定")
+	assert.Equal(t, monthlyWin.Minute(), progress.Monthly.WindowStart.Minute(),
+		"对齐窗口的锚点分钟应保持稳定")
+}
+
 func TestCalculateProgress_ResetsInSeconds_NotNegative(t *testing.T) {
 	svc := newTestSubscriptionService()
 	// 使用过去的窗口起始时间，使得重置时间已过

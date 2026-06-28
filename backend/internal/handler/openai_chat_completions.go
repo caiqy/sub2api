@@ -101,7 +101,6 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	}
 
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
-	requestPlatform := openAICompatibleRequestPlatform(apiKey)
 
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
 	routingStart := time.Now()
@@ -112,6 +111,17 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	}
 	if userReleaseFunc != nil {
 		defer userReleaseFunc()
+	}
+
+	// Acquire group-level user concurrency slot (if enabled)
+	if apiKey.GroupID != nil && apiKey.Group != nil {
+		groupUserReleaseFunc, groupAcquired := h.acquireUserGroupSlot(c, subject.UserID, *apiKey.GroupID, apiKey.Group, reqStream, &streamStarted, reqLog)
+		if !groupAcquired {
+			return
+		}
+		if groupUserReleaseFunc != nil {
+			defer groupUserReleaseFunc()
+		}
 	}
 
 	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
@@ -132,6 +142,8 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	failedAccountIDs := make(map[int64]struct{})
 	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
+	var lastFailedAccount *service.Account
+	var lastFailedDuration time.Duration
 
 	for {
 		reqLog.Debug("openai_chat_completions.account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
@@ -145,7 +157,6 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			service.OpenAIUpstreamTransportAny,
 			service.OpenAIEndpointCapabilityChatCompletions,
 			false,
-			requestPlatform,
 		)
 		if err != nil {
 			reqLog.Warn("openai_chat_completions.account_select_failed",
@@ -153,15 +164,13 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
 			)
 			if len(failedAccountIDs) == 0 {
-				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, service.PlatformOpenAI)
-				if !cls.ModelNotFound {
-					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
-				}
-				h.handleStreamingAwareError(c, cls.Status, cls.ErrType, cls.Message, streamStarted)
+				markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
+				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable", streamStarted)
 				return
 			} else {
 				if lastFailoverErr != nil {
 					h.handleFailoverExhausted(c, lastFailoverErr, streamStarted)
+					h.submitFailoverFailedUsageLog(c, apiKey, lastFailedAccount, reqModel, reqStream, lastFailoverErr, lastFailedDuration, service.ExtractOpenAIReasoningEffortFromBody(body, reqModel), "handler.openai_gateway.chat_completions")
 				} else {
 					h.handleStreamingAwareError(c, http.StatusBadGateway, "api_error", "Upstream request failed", streamStarted)
 				}
@@ -169,11 +178,8 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			}
 		}
 		if selection == nil || selection.Account == nil {
-			cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, service.PlatformOpenAI)
-			if !cls.ModelNotFound {
-				markOpsRoutingCapacityLimited(c)
-			}
-			h.handleStreamingAwareError(c, cls.Status, cls.ErrType, cls.Message, streamStarted)
+			markOpsRoutingCapacityLimited(c)
+			h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts", streamStarted)
 			return
 		}
 		account := selection.Account
@@ -189,7 +195,8 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
-
+		defaultMappedModel := resolveOpenAIForwardDefaultMappedModel(apiKey, c.GetString("openai_chat_completions_fallback_model"))
+		setOpenAIFailedUsageExactUpstreamModel(c, resolveOpenAIFailedUsageExactUpstreamModel(account, reqModel, defaultMappedModel))
 		forwardBody := body
 		if channelMapping.Mapped {
 			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
@@ -209,7 +216,8 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 		h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, err != nil, cyberBlockKeyChat, channelMapping.ToUsageFields(reqModel, ""), service.HashUsageRequestPayload(body))
 
-		forwardDurationMs := time.Since(forwardStart).Milliseconds()
+		forwardDuration := time.Since(forwardStart)
+		forwardDurationMs := forwardDuration.Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
 		responseLatencyMs := forwardDurationMs
 		if upstreamLatencyMs > 0 && forwardDurationMs > upstreamLatencyMs {
@@ -256,8 +264,11 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 					h.gatewayService.RecordOpenAIAccountSwitch()
 					failedAccountIDs[account.ID] = struct{}{}
 					lastFailoverErr = failoverErr
+					lastFailedAccount = account
+					lastFailedDuration = forwardDuration
 					if switchCount >= maxAccountSwitches {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
+						h.submitFailoverFailedUsageLog(c, apiKey, account, reqModel, reqStream, failoverErr, forwardDuration, service.ExtractOpenAIReasoningEffortFromBody(body, reqModel), "handler.openai_gateway.chat_completions")
 						return
 					}
 					switchCount++
@@ -274,15 +285,13 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 					continue
 				}
 				h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
-				upstreamErrorAlreadyCommunicated := openAIForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
-				wroteFallback := false
-				if !upstreamErrorAlreadyCommunicated {
-					wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
+				wroteFallback := h.ensureForwardErrorResponse(c, streamStarted)
+				if service.GetOpsCyberPolicy(c) == nil {
+					h.submitFailedUsageLog(c, apiKey, account, reqModel, reqStream, 0, nil, nil, forwardDuration, service.ExtractOpenAIReasoningEffortFromBody(body, reqModel), "handler.openai_gateway.chat_completions")
 				}
 				reqLog.Warn("openai_chat_completions.forward_failed",
 					zap.Int64("account_id", account.ID),
 					zap.Bool("fallback_error_response_written", wroteFallback),
-					zap.Bool("upstream_error_response_already_written", upstreamErrorAlreadyCommunicated),
 					zap.Error(err),
 				)
 				return
@@ -297,7 +306,8 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
 		inboundEndpoint := GetInboundEndpoint(c)
-		upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account)
+		upstreamEndpoint := resolveRawCCUpstreamEndpoint(c, account)
+		detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
 		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 
 		cyberBlocked := service.GetOpsCyberPolicy(c) != nil
@@ -312,6 +322,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 				UpstreamEndpoint:   upstreamEndpoint,
 				UserAgent:          userAgent,
 				IPAddress:          clientIP,
+				DetailSnapshot:     detailSnapshot,
 				APIKeyService:      h.apiKeyService,
 				QuotaPlatform:      quotaPlatform,
 				ChannelUsageFields: channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
@@ -335,12 +346,12 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	}
 }
 
-// resolveOpenAIUpstreamEndpoint returns the actual upstream endpoint for an
-// OpenAI account, used by every OpenAI usage-recording site. APIKey accounts
-// whose upstream is forced or probed to not support the Responses API are
-// served directly via /v1/chat/completions (the raw chat path) regardless of
-// the inbound endpoint; everything else goes through the Responses API.
-func resolveOpenAIUpstreamEndpoint(c *gin.Context, account *service.Account) string {
+// resolveRawCCUpstreamEndpoint returns the actual upstream endpoint for
+// OpenAI Chat Completions requests. For APIKey accounts whose upstream
+// is forced or probed to not support the Responses API, the request is
+// forwarded directly to /v1/chat/completions — not through the default
+// CC→Responses conversion path.
+func resolveRawCCUpstreamEndpoint(c *gin.Context, account *service.Account) string {
 	if account != nil && account.Type == service.AccountTypeAPIKey &&
 		!openai_compat.ShouldUseResponsesAPI(account.Extra) {
 		return "/v1/chat/completions"

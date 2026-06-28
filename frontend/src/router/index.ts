@@ -218,6 +218,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/images',
+    name: 'Images',
+    component: () => import('@/views/user/ImagesView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'AI Images',
+      titleKey: 'images.title',
+      descriptionKey: 'images.description'
+    }
+  },
+  {
     path: '/redeem',
     name: 'Redeem',
     component: () => import('@/views/user/RedeemView.vue'),
@@ -652,6 +664,14 @@ const routes: RouteRecordRaw[] = [
       titleKey: 'nav.paymentPlans',
       requiresPayment: true
     }
+  },
+
+  // ==================== Dev Preview (development only) ====================
+  {
+    path: '/dev/conversation-preview',
+    name: 'DevConversationPreview',
+    component: () => import('@/views/dev/ConversationPreview.vue'),
+    meta: { requiresAuth: false, title: 'Conversation Preview' }
   },
 
   // ==================== 404 Not Found ====================

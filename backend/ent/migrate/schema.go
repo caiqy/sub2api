@@ -689,6 +689,8 @@ var (
 		{Name: "default_mapped_model", Type: field.TypeString, Size: 100, Default: ""},
 		{Name: "messages_dispatch_model_config", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
 		{Name: "models_list_config", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
+		{Name: "user_concurrency_enabled", Type: field.TypeBool, Default: false},
+		{Name: "user_concurrency_limit", Type: field.TypeInt, Default: 0},
 		{Name: "rpm_limit", Type: field.TypeInt, Default: 0},
 	}
 	// GroupsTable holds the schema information for the "groups" table.
@@ -1490,6 +1492,47 @@ var (
 			},
 		},
 	}
+	// UsageLogDetailsColumns holds the columns for the "usage_log_details" table.
+	UsageLogDetailsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "detail_type", Type: field.TypeString, Size: 20, Default: "normal"},
+		{Name: "request_headers", Type: field.TypeString, Size: 2147483647, Default: ""},
+		{Name: "request_body", Type: field.TypeString, Size: 2147483647, Default: ""},
+		{Name: "upstream_request_headers", Type: field.TypeString, Size: 2147483647, Default: ""},
+		{Name: "upstream_request_body", Type: field.TypeString, Size: 2147483647, Default: ""},
+		{Name: "response_headers", Type: field.TypeString, Size: 2147483647, Default: ""},
+		{Name: "response_body", Type: field.TypeString, Size: 2147483647, Default: ""},
+		{Name: "upstream_response_headers", Type: field.TypeString, Size: 2147483647, Default: ""},
+		{Name: "upstream_response_body", Type: field.TypeString, Size: 2147483647, Default: ""},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "usage_log_id", Type: field.TypeInt64, Unique: true},
+	}
+	// UsageLogDetailsTable holds the schema information for the "usage_log_details" table.
+	UsageLogDetailsTable = &schema.Table{
+		Name:       "usage_log_details",
+		Columns:    UsageLogDetailsColumns,
+		PrimaryKey: []*schema.Column{UsageLogDetailsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "usage_log_details_usage_logs_detail",
+				Columns:    []*schema.Column{UsageLogDetailsColumns[11]},
+				RefColumns: []*schema.Column{UsageLogsColumns[0]},
+				OnDelete:   schema.Cascade,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "usagelogdetail_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{UsageLogDetailsColumns[10]},
+			},
+			{
+				Name:    "usagelogdetail_detail_type_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{UsageLogDetailsColumns[1], UsageLogDetailsColumns[10]},
+			},
+		},
+	}
 	// UsersColumns holds the columns for the "users" table.
 	UsersColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -1821,6 +1864,7 @@ var (
 		TLSFingerprintProfilesTable,
 		UsageCleanupTasksTable,
 		UsageLogsTable,
+		UsageLogDetailsTable,
 		UsersTable,
 		UserAllowedGroupsTable,
 		UserAttributeDefinitionsTable,
@@ -1944,6 +1988,10 @@ func init() {
 	UsageLogsTable.ForeignKeys[4].RefTable = UserSubscriptionsTable
 	UsageLogsTable.Annotation = &entsql.Annotation{
 		Table: "usage_logs",
+	}
+	UsageLogDetailsTable.ForeignKeys[0].RefTable = UsageLogsTable
+	UsageLogDetailsTable.Annotation = &entsql.Annotation{
+		Table: "usage_log_details",
 	}
 	UsersTable.Annotation = &entsql.Annotation{
 		Table: "users",

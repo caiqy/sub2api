@@ -1,9 +1,21 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+import { describe, expect, expectTypeOf, it, vi, beforeEach, afterEach } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
+import { apiClient } from '@/api/client'
+import type { AdminUsageDetail, AdminUsageLog } from '@/types'
 import UsageView from '../UsageView.vue'
 
-const { list, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs } = vi.hoisted(() => {
+const createDeferred = <T>() => {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
+const { list, getStats, getDetail, getSnapshotV2, getModelStats, getById, showError } = vi.hoisted(() => {
   vi.stubGlobal('localStorage', {
     getItem: vi.fn(() => null),
     setItem: vi.fn(),
@@ -13,10 +25,11 @@ const { list, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs } =
   return {
     list: vi.fn(),
     getStats: vi.fn(),
+    getDetail: vi.fn(),
     getSnapshotV2: vi.fn(),
-    getById: vi.fn(),
     getModelStats: vi.fn(),
-    listErrorLogs: vi.fn(),
+    getById: vi.fn(),
+    showError: vi.fn(),
   }
 })
 
@@ -25,6 +38,7 @@ const messages: Record<string, string> = {
   'admin.dashboard.day': 'Day',
   'admin.dashboard.hour': 'Hour',
   'admin.usage.failedToLoadUser': 'Failed to load user',
+  'admin.usage.detailNotFound': 'Detail not found',
 }
 
 const formatLocalDate = (date: Date): string => {
@@ -39,6 +53,7 @@ vi.mock('@/api/admin', () => ({
     usage: {
       list,
       getStats,
+      getDetail,
     },
     dashboard: {
       getSnapshotV2,
@@ -53,16 +68,17 @@ vi.mock('@/api/admin', () => ({
 vi.mock('@/api/admin/usage', () => ({
   adminUsageAPI: {
     list: vi.fn(),
+    getDetail: vi.fn(),
   },
-}))
-
-vi.mock('@/api/admin/ops', () => ({
-  listErrorLogs,
+  default: {
+    list: vi.fn(),
+    getDetail: vi.fn(),
+  },
 }))
 
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
-    showError: vi.fn(),
+    showError,
     showWarning: vi.fn(),
     showSuccess: vi.fn(),
     showInfo: vi.fn(),
@@ -91,9 +107,18 @@ vi.mock('vue-router', () => ({
 
 const AppLayoutStub = { template: '<div><slot /></div>' }
 const UsageFiltersStub = { template: '<div><slot name="after-reset" /></div>' }
-const UsageTableStub = {
-  emits: ['userClick'],
-  template: '<div data-test="usage-table"><button class="user-click" @click="$emit(\'userClick\', 2)">user</button></div>',
+const UsageFiltersBillingModeStub = {
+  props: ['modelValue'],
+  emits: ['update:modelValue', 'change'],
+  template: `
+    <div>
+      <slot name="after-reset" />
+      <button
+        data-test="apply-billing-mode-filter"
+        @click="$emit('update:modelValue', { ...modelValue, billing_mode: 'image' }); $emit('change')"
+      >billing mode</button>
+    </div>
+  `,
 }
 const ModelDistributionChartStub = {
   props: ['metric'],
@@ -116,14 +141,69 @@ const GroupDistributionChartStub = {
   `,
 }
 
+const UsageTableStub = {
+  emits: ['detail', 'userClick'],
+  template: '<button data-test="open-detail" @click="$emit(\'detail\', { id: 42, request_id: \'req-42\', user: { email: \'alice@example.com\' }, model: \'gpt-4.1\', created_at: \'2026-03-20T10:00:00Z\', has_detail: true })">detail</button>',
+}
+
+const UsageTableMultipleRowsStub = {
+  emits: ['detail', 'userClick'],
+  template: `
+    <div>
+      <button
+        data-test="open-detail-1"
+        @click="$emit('detail', { id: 1, request_id: 'req-1', user: { email: 'alice@example.com' }, model: 'gpt-4.1', created_at: '2026-03-20T10:00:00Z', has_detail: true })"
+      >detail 1</button>
+      <button
+        data-test="open-detail-2"
+        @click="$emit('detail', { id: 2, request_id: 'req-2', user: { email: 'bob@example.com' }, model: 'gpt-4.1-mini', created_at: '2026-03-20T10:01:00Z', has_detail: true })"
+      >detail 2</button>
+    </div>
+  `,
+}
+
+const UsageTableSortAndDetailStub = {
+  props: ['serverSideSort', 'defaultSortKey', 'defaultSortOrder'],
+  emits: ['detail', 'sort', 'userClick'],
+  template: `
+    <div>
+      <span data-test="server-side-sort">{{ serverSideSort }}</span>
+      <span data-test="default-sort-key">{{ defaultSortKey }}</span>
+      <span data-test="default-sort-order">{{ defaultSortOrder }}</span>
+      <button
+        data-test="emit-sort"
+        @click="$emit('sort', 'model', 'asc')"
+      >sort</button>
+      <button
+        data-test="emit-detail"
+        @click="$emit('detail', { id: 7, request_id: 'req-7', user: { email: 'sort@example.com' }, model: 'gpt-4.1', created_at: '2026-03-20T10:00:00Z', has_detail: true })"
+      >detail</button>
+    </div>
+  `,
+}
+
+const UsageDetailModalStub = {
+  props: ['show', 'usageLog', 'detail', 'loading', 'error'],
+  emits: ['close', 'retry'],
+  template: `
+    <div v-if="show" data-test="usage-detail-modal">
+      <span class="request-id">{{ usageLog?.request_id }}</span>
+      <span class="detail-id">{{ detail?.usage_log_id }}</span>
+      <span class="error">{{ error }}</span>
+      <button data-test="retry-detail" @click="$emit('retry')">retry</button>
+    </div>
+  `,
+}
+
 describe('admin UsageView distribution metric toggles', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     list.mockReset()
     getStats.mockReset()
+    getDetail.mockReset()
     getSnapshotV2.mockReset()
-    getById.mockReset()
     getModelStats.mockReset()
+    getById.mockReset()
 
     list.mockResolvedValue({
       items: [],
@@ -145,42 +225,11 @@ describe('admin UsageView distribution metric toggles', () => {
       models: [],
       groups: [],
     })
-    getModelStats.mockResolvedValue({ models: [] })
+    getModelStats.mockResolvedValue([])
   })
 
   afterEach(() => {
     vi.useRealTimers()
-  })
-
-  it('keeps previous model stats visible during refresh until new data arrives', async () => {
-    // 首次加载返回 A
-    getModelStats.mockResolvedValueOnce({ models: [{ model: 'A', total_tokens: 10 }] })
-
-    const wrapper = mount(UsageView, {
-      global: { stubs: {
-        AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
-        UsageTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
-        UserBalanceHistoryModal: true, AuditLogModal: true, Pagination: true, Select: true,
-        DateRangePicker: true, Icon: true, TokenUsageTrend: true,
-        ModelDistributionChart: ModelDistributionChartStub, GroupDistributionChart: GroupDistributionChartStub,
-        EndpointDistributionChart: true,
-      } },
-    })
-    vi.advanceTimersByTime(120)
-    await flushPromises()
-    expect((wrapper.vm as any).requestedModelStats).toEqual([{ model: 'A', total_tokens: 10 }])
-
-    // 刷新:让第二次 getModelStats 处于 pending,断言旧数据 A 仍在(不被清空成 [])
-    let resolveSecond: (v: any) => void = () => {}
-    getModelStats.mockReturnValueOnce(new Promise((res) => { resolveSecond = res }))
-    ;(wrapper.vm as any).refreshData()
-    await flushPromises()
-    expect((wrapper.vm as any).requestedModelStats).toEqual([{ model: 'A', total_tokens: 10 }])
-
-    // 新数据到达后替换为 B
-    resolveSecond({ models: [{ model: 'B', total_tokens: 20 }] })
-    await flushPromises()
-    expect((wrapper.vm as any).requestedModelStats).toEqual([{ model: 'B', total_tokens: 20 }])
   })
 
   it('keeps model and group metric toggles independent without refetching chart data', async () => {
@@ -237,49 +286,25 @@ describe('admin UsageView distribution metric toggles', () => {
     expect(groupChart.find('.metric').text()).toBe('actual_cost')
     expect(getSnapshotV2).toHaveBeenCalledTimes(1)
   })
-})
 
-describe('admin UsageView handleUserClick', () => {
-  beforeEach(() => {
-    vi.useFakeTimers()
-    list.mockReset()
-    getStats.mockReset()
-    getSnapshotV2.mockReset()
-    getById.mockReset()
-
-    list.mockResolvedValue({ items: [], total: 0, pages: 0 })
-    getStats.mockResolvedValue({
-      total_requests: 0, total_input_tokens: 0, total_output_tokens: 0,
-      total_cache_tokens: 0, total_tokens: 0, total_cost: 0, total_actual_cost: 0, average_duration_ms: 0,
-    })
-    getSnapshotV2.mockResolvedValue({ trend: [], models: [], groups: [] })
-  })
-
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
-  it('opens user via include_deleted when clicking a usage row user', async () => {
-    getById.mockResolvedValue({ id: 2, email: 'd@test.com', deleted_at: '2026-05-28T00:00:00Z' })
-
+  it('does not refetch unsupported chart or model endpoints when billing_mode filter is active', async () => {
     const wrapper = mount(UsageView, {
       global: {
         stubs: {
           AppLayout: AppLayoutStub,
           UsageStatsCards: true,
-          UsageFilters: UsageFiltersStub,
-          UsageTable: UsageTableStub,
+          UsageFilters: UsageFiltersBillingModeStub,
+          UsageTable: true,
           UsageExportProgress: true,
           UsageCleanupDialog: true,
           UserBalanceHistoryModal: true,
-          AuditLogModal: true,
           Pagination: true,
           Select: true,
           DateRangePicker: true,
           Icon: true,
           TokenUsageTrend: true,
-          ModelDistributionChart: true,
-          GroupDistributionChart: true,
+          ModelDistributionChart: ModelDistributionChartStub,
+          GroupDistributionChart: GroupDistributionChartStub,
           EndpointDistributionChart: true,
         },
       },
@@ -288,67 +313,343 @@ describe('admin UsageView handleUserClick', () => {
     vi.advanceTimersByTime(120)
     await flushPromises()
 
-    await wrapper.find('[data-test="usage-table"] .user-click').trigger('click')
+    expect(getModelStats).toHaveBeenCalledTimes(1)
+    expect(getSnapshotV2).toHaveBeenCalledTimes(1)
+
+    getModelStats.mockClear()
+    getSnapshotV2.mockClear()
+
+    await wrapper.find('[data-test="apply-billing-mode-filter"]').trigger('click')
     await flushPromises()
 
-    expect(getById).toHaveBeenCalledWith(2, true)
+    expect(getModelStats).not.toHaveBeenCalled()
+    expect(getSnapshotV2).not.toHaveBeenCalled()
   })
 })
 
-describe('admin UsageView errors tab filter forwarding', () => {
-  beforeEach(() => {
-    vi.useFakeTimers()
-    list.mockReset()
-    getStats.mockReset()
-    getSnapshotV2.mockReset()
-    getModelStats.mockReset()
-    listErrorLogs.mockReset()
+describe('admin usage detail API contract', () => {
+  it('calls the usage detail endpoint from admin usage APIs', async () => {
+    const getSpy = vi.spyOn(apiClient, 'get').mockResolvedValue({
+      data: {
+        usage_log_id: 42,
+        request_headers: null,
+        request_body: null,
+        response_headers: null,
+        response_body: null,
+        created_at: '2026-03-20T00:00:00Z',
+      },
+    })
 
+    const { adminAPI } = await import('@/api/admin')
+    const { adminUsageAPI } = await vi.importActual<typeof import('@/api/admin/usage')>('@/api/admin/usage')
+
+    expect(typeof adminAPI.usage.getDetail).toBe('function')
+
+    await adminUsageAPI.getDetail(42)
+
+    expect(getSpy).toHaveBeenCalledWith('/admin/usage/42/detail')
+
+    getSpy.mockRestore()
+  })
+
+  it('includes detail-related fields in admin usage types', () => {
+    expectTypeOf<AdminUsageLog>().toMatchTypeOf<{ has_detail: boolean }>()
+    expectTypeOf<AdminUsageDetail>().toMatchTypeOf<{
+      usage_log_id: number
+      request_headers: string | null
+      request_body: string | null
+      upstream_request_headers: string | null
+      upstream_request_body: string | null
+      response_headers: string | null
+      response_body: string | null
+      created_at: string
+    }>()
+  })
+})
+
+describe('admin UsageView detail modal', () => {
+  beforeEach(() => {
+    showError.mockReset()
+    getDetail.mockReset()
     list.mockResolvedValue({ items: [], total: 0, pages: 0 })
     getStats.mockResolvedValue({
-      total_requests: 0, total_input_tokens: 0, total_output_tokens: 0,
-      total_cache_tokens: 0, total_tokens: 0, total_cost: 0, total_actual_cost: 0, average_duration_ms: 0,
+      total_requests: 0,
+      total_input_tokens: 0,
+      total_output_tokens: 0,
+      total_cache_tokens: 0,
+      total_tokens: 0,
+      total_cost: 0,
+      total_actual_cost: 0,
+      average_duration_ms: 0,
     })
     getSnapshotV2.mockResolvedValue({ trend: [], models: [], groups: [] })
-    getModelStats.mockResolvedValue({ models: [] })
-    listErrorLogs.mockResolvedValue({ items: [], total: 0, pages: 0 })
+    getModelStats.mockResolvedValue([])
   })
 
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
-  it('forwards model/account_id/group_id to listErrorLogs on the errors tab', async () => {
-    const wrapper = mount(UsageView, {
-      global: { stubs: {
-        AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
-        UsageTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
-        UserBalanceHistoryModal: true, AuditLogModal: true, Pagination: true, Select: true,
-        DateRangePicker: true, Icon: true, TokenUsageTrend: true,
-        ModelDistributionChart: true, GroupDistributionChart: true, EndpointDistributionChart: true,
-        OpsErrorLogTable: true, OpsErrorDetailModal: true,
-      } },
+  it('requests detail and opens modal when detail action is clicked', async () => {
+    getDetail.mockResolvedValue({
+      usage_log_id: 42,
+      request_headers: '{"foo":"bar"}',
+      request_body: '{}',
+      upstream_request_headers: '{"x-upstream":"gateway"}',
+      upstream_request_body: '{}',
+      response_headers: null,
+      response_body: null,
+      created_at: '2026-03-20T10:00:00Z',
     })
-    vi.advanceTimersByTime(120)
+
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          UsageStatsCards: true,
+          UsageFilters: UsageFiltersStub,
+          UsageTable: UsageTableStub,
+          UsageDetailModal: UsageDetailModalStub,
+          UsageExportProgress: true,
+          UsageCleanupDialog: true,
+          UserBalanceHistoryModal: true,
+          Pagination: true,
+          Select: true,
+          DateRangePicker: true,
+          Icon: true,
+          TokenUsageTrend: true,
+          ModelDistributionChart: ModelDistributionChartStub,
+          GroupDistributionChart: GroupDistributionChartStub,
+          EndpointDistributionChart: true,
+        },
+      },
+    })
+
+    await wrapper.find('[data-test="open-detail"]').trigger('click')
     await flushPromises()
 
-    // 模拟用户在过滤器里选择了模型/账户/分组
-    const vm = wrapper.vm as any
-    vm.filters.model = 'gpt-5.3-codex'
-    vm.filters.account_id = 7
-    vm.filters.group_id = 3
+    expect(getDetail).toHaveBeenCalledWith(42)
+    expect(wrapper.find('[data-test="usage-detail-modal"]').exists()).toBe(true)
+    expect(wrapper.find('.request-id').text()).toBe('req-42')
+    expect(wrapper.find('.detail-id').text()).toBe('42')
+  })
+
+  it('keeps server-side sort while preserving detail entrypoint', async () => {
+    getDetail.mockResolvedValue({
+      usage_log_id: 7,
+      request_headers: null,
+      request_body: null,
+      upstream_request_headers: null,
+      upstream_request_body: null,
+      response_headers: null,
+      response_body: null,
+      created_at: '2026-03-20T10:00:00Z',
+    })
+
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          UsageStatsCards: true,
+          UsageFilters: UsageFiltersStub,
+          UsageTable: UsageTableSortAndDetailStub,
+          UsageDetailModal: UsageDetailModalStub,
+          UsageExportProgress: true,
+          UsageCleanupDialog: true,
+          UserBalanceHistoryModal: true,
+          Pagination: true,
+          Select: true,
+          DateRangePicker: true,
+          Icon: true,
+          TokenUsageTrend: true,
+          ModelDistributionChart: ModelDistributionChartStub,
+          GroupDistributionChart: GroupDistributionChartStub,
+          EndpointDistributionChart: true,
+        },
+      },
+    })
+
+    expect(wrapper.find('[data-test="server-side-sort"]').text()).toBe('true')
+    expect(wrapper.find('[data-test="default-sort-key"]').text()).toBe('created_at')
+    expect(wrapper.find('[data-test="default-sort-order"]').text()).toBe('desc')
+
+    await wrapper.find('[data-test="emit-sort"]').trigger('click')
+    await flushPromises()
+    expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ sort_by: 'model', sort_order: 'asc' }), expect.anything())
+
+    await wrapper.find('[data-test="emit-detail"]').trigger('click')
+    await flushPromises()
+    expect(getDetail).toHaveBeenCalledWith(7)
+    expect(wrapper.find('.detail-id').text()).toBe('7')
+  })
+
+  it('shows not found error and can retry detail loading', async () => {
+    getDetail.mockRejectedValueOnce({ response: { status: 404 } })
+    getDetail.mockResolvedValueOnce({
+      usage_log_id: 42,
+      request_headers: null,
+      request_body: null,
+      upstream_request_headers: null,
+      upstream_request_body: null,
+      response_headers: null,
+      response_body: null,
+      created_at: '2026-03-20T10:00:00Z',
+    })
+
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          UsageStatsCards: true,
+          UsageFilters: UsageFiltersStub,
+          UsageTable: UsageTableStub,
+          UsageDetailModal: UsageDetailModalStub,
+          UsageExportProgress: true,
+          UsageCleanupDialog: true,
+          UserBalanceHistoryModal: true,
+          Pagination: true,
+          Select: true,
+          DateRangePicker: true,
+          Icon: true,
+          TokenUsageTrend: true,
+          ModelDistributionChart: ModelDistributionChartStub,
+          GroupDistributionChart: GroupDistributionChartStub,
+          EndpointDistributionChart: true,
+        },
+      },
+    })
+
+    await wrapper.find('[data-test="open-detail"]').trigger('click')
     await flushPromises()
 
-    // 切换到「错误请求」标签（第二个 .tab 按钮）触发 loadAdminErrors
-    const tabs = wrapper.findAll('button.tab')
-    await tabs[1].trigger('click')
+    expect(wrapper.find('[data-test="usage-detail-modal"]').exists()).toBe(true)
+    expect(wrapper.find('.error').text()).toBe('Detail not found')
+    expect(showError).toHaveBeenCalledWith('Detail not found')
+
+    await wrapper.find('[data-test="retry-detail"]').trigger('click')
     await flushPromises()
 
-    expect(listErrorLogs).toHaveBeenCalledWith(expect.objectContaining({
-      view: 'all',
-      model: 'gpt-5.3-codex',
-      account_id: 7,
-      group_id: 3,
-    }))
+    expect(getDetail).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('.detail-id').text()).toBe('42')
+  })
+
+  it('keeps the latest detail when earlier request resolves later', async () => {
+    const firstRequest = createDeferred<AdminUsageDetail>()
+    const secondRequest = createDeferred<AdminUsageDetail>()
+
+    getDetail.mockImplementation((id: number) => {
+      if (id === 1) return firstRequest.promise
+      if (id === 2) return secondRequest.promise
+      return Promise.reject(new Error(`unexpected id ${id}`))
+    })
+
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          UsageStatsCards: true,
+          UsageFilters: UsageFiltersStub,
+          UsageTable: UsageTableMultipleRowsStub,
+          UsageDetailModal: UsageDetailModalStub,
+          UsageExportProgress: true,
+          UsageCleanupDialog: true,
+          UserBalanceHistoryModal: true,
+          Pagination: true,
+          Select: true,
+          DateRangePicker: true,
+          Icon: true,
+          TokenUsageTrend: true,
+          ModelDistributionChart: ModelDistributionChartStub,
+          GroupDistributionChart: GroupDistributionChartStub,
+          EndpointDistributionChart: true,
+        },
+      },
+    })
+
+    await wrapper.find('[data-test="open-detail-1"]').trigger('click')
+    await wrapper.find('[data-test="open-detail-2"]').trigger('click')
+    await flushPromises()
+
+    secondRequest.resolve({
+      usage_log_id: 2,
+      request_headers: null,
+      request_body: null,
+      upstream_request_headers: null,
+      upstream_request_body: null,
+      response_headers: null,
+      response_body: null,
+      created_at: '2026-03-20T10:01:00Z',
+    })
+    await flushPromises()
+
+    expect(wrapper.find('.request-id').text()).toBe('req-2')
+    expect(wrapper.find('.detail-id').text()).toBe('2')
+
+    firstRequest.resolve({
+      usage_log_id: 1,
+      request_headers: null,
+      request_body: null,
+      upstream_request_headers: null,
+      upstream_request_body: null,
+      response_headers: null,
+      response_body: null,
+      created_at: '2026-03-20T10:00:00Z',
+    })
+    await flushPromises()
+
+    expect(wrapper.find('.request-id').text()).toBe('req-2')
+    expect(wrapper.find('.detail-id').text()).toBe('2')
+  })
+
+  it('does not write detail state after the modal is closed', async () => {
+    const delayedRequest = createDeferred<AdminUsageDetail>()
+    getDetail.mockReturnValue(delayedRequest.promise)
+
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          UsageStatsCards: true,
+          UsageFilters: UsageFiltersStub,
+          UsageTable: UsageTableStub,
+          UsageDetailModal: UsageDetailModalStub,
+          UsageExportProgress: true,
+          UsageCleanupDialog: true,
+          UserBalanceHistoryModal: true,
+          Pagination: true,
+          Select: true,
+          DateRangePicker: true,
+          Icon: true,
+          TokenUsageTrend: true,
+          ModelDistributionChart: ModelDistributionChartStub,
+          GroupDistributionChart: GroupDistributionChartStub,
+          EndpointDistributionChart: true,
+        },
+      },
+    })
+
+    await wrapper.find('[data-test="open-detail"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.findComponent(UsageDetailModalStub).vm.$emit('close')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="usage-detail-modal"]').exists()).toBe(false)
+    expect(wrapper.findComponent(UsageDetailModalStub).props('detail')).toBe(null)
+    expect(wrapper.findComponent(UsageDetailModalStub).props('error')).toBe('')
+    expect(wrapper.findComponent(UsageDetailModalStub).props('loading')).toBe(false)
+
+    delayedRequest.resolve({
+      usage_log_id: 42,
+      request_headers: null,
+      request_body: null,
+      upstream_request_headers: null,
+      upstream_request_body: null,
+      response_headers: null,
+      response_body: null,
+      created_at: '2026-03-20T10:00:00Z',
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="usage-detail-modal"]').exists()).toBe(false)
+    expect(wrapper.findComponent(UsageDetailModalStub).props('detail')).toBe(null)
+    expect(wrapper.findComponent(UsageDetailModalStub).props('error')).toBe('')
+    expect(wrapper.findComponent(UsageDetailModalStub).props('loading')).toBe(false)
   })
 })

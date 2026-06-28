@@ -293,14 +293,15 @@ const formatNumber = (value: number): string => {
   return value.toLocaleString()
 }
 
-const formatCost = (value: number): string => {
-  if (value >= 1000) {
-    return (value / 1000).toFixed(2) + 'K'
-  } else if (value >= 1) {
-    return value.toFixed(2)
-  } else if (value >= 0.01) {
-    return value.toFixed(3)
+const formatCost = (value: number | null | undefined): string => {
+  const normalizedValue = value ?? 0
+  if (normalizedValue >= 1000) {
+    return (normalizedValue / 1000).toFixed(2) + 'K'
+  } else if (normalizedValue >= 1) {
+    return normalizedValue.toFixed(2)
+  } else if (normalizedValue >= 0.01) {
+    return normalizedValue.toFixed(3)
   }
-  return value.toFixed(4)
+  return normalizedValue.toFixed(4)
 }
 </script>

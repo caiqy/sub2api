@@ -91,8 +91,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { AdminUsageStatsResponse } from '@/api/admin/usage'
-import type { UsageStatsResponse } from '@/types'
+import type { AdminUsageStatsResponse, UsageStatsResponse } from '@/types'
 import Icon from '@/components/icons/Icon.vue'
 
 const props = withDefaults(defineProps<{

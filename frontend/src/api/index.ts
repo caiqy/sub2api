@@ -19,6 +19,7 @@ export { userGroupsAPI } from './groups'
 export { userChannelsAPI } from './channels'
 export { totpAPI } from './totp'
 export { default as announcementsAPI } from './announcements'
+export { imagesAPI } from './images'
 export { channelMonitorUserAPI } from './channelMonitor'
 
 // Admin APIs

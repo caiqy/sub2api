@@ -115,6 +115,10 @@ type Group struct {
 	// 无效请求兜底分组
 	FallbackGroupIDOnInvalidRequest *int64 `json:"fallback_group_id_on_invalid_request"`
 
+	// 分组级用户并发限制
+	UserConcurrencyEnabled bool `json:"user_concurrency_enabled"`
+	UserConcurrencyLimit   int  `json:"user_concurrency_limit"`
+
 	// OpenAI Messages 调度开关（用户侧需要此字段判断是否展示 Claude Code 教程）
 	AllowMessagesDispatch bool `json:"allow_messages_dispatch"`
 
@@ -517,6 +521,7 @@ type UsageLog struct {
 type AdminUsageLog struct {
 	UsageLog
 
+	HasDetail bool `json:"has_detail"`
 	// UpstreamModel is the actual model sent to the upstream provider after mapping.
 	// Omitted when no mapping was applied (requested model was used as-is).
 	UpstreamModel *string `json:"upstream_model,omitempty"`
@@ -538,6 +543,19 @@ type AdminUsageLog struct {
 
 	// Account 最小账号信息（避免泄露敏感字段）
 	Account *AccountSummary `json:"account,omitempty"`
+}
+
+type AdminUsageDetail struct {
+	UsageLogID              int64     `json:"usage_log_id"`
+	RequestHeaders          string    `json:"request_headers"`
+	RequestBody             string    `json:"request_body"`
+	UpstreamRequestHeaders  string    `json:"upstream_request_headers"`
+	UpstreamRequestBody     string    `json:"upstream_request_body"`
+	ResponseHeaders         string    `json:"response_headers"`
+	ResponseBody            string    `json:"response_body"`
+	UpstreamResponseHeaders string    `json:"upstream_response_headers"`
+	UpstreamResponseBody    string    `json:"upstream_response_body"`
+	CreatedAt               time.Time `json:"created_at"`
 }
 
 type UsageCleanupFilters struct {

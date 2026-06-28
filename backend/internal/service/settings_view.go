@@ -189,6 +189,23 @@ type SystemSettings struct {
 	// Backend 模式：禁用用户注册和自助服务，仅管理员可登录
 	BackendModeEnabled bool
 
+	// Gateway sticky platform switches
+	GatewayStickyOpenAIEnabled    bool
+	GatewayStickyGeminiEnabled    bool
+	GatewayStickyAnthropicEnabled bool
+
+	// OpenAI WS scheduler settings
+	GatewayOpenAIWSSchedulerMode                                 string
+	GatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold         float64
+	GatewayOpenAIWSSchedulerLayeredErrorPenaltyValue             int
+	GatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier         float64
+	GatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue              int
+	GatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds          int
+	GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds          int
+	GatewayOpenAIWSSchedulerLayeredProbeMaxFailures              int
+	GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds           int
+	GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds int
+
 	// Gateway forwarding behavior
 	EnableFingerprintUnification           bool   // 是否统一 OAuth 账号的指纹头（默认 true）
 	EnableMetadataPassthrough              bool   // 是否透传客户端原始 metadata（默认 false）
@@ -425,6 +442,7 @@ func DefaultRectifierSettings() *RectifierSettings {
 		Enabled:                  true,
 		ThinkingSignatureEnabled: true,
 		ThinkingBudgetEnabled:    true,
+		APIKeySignatureEnabled:   true,
 	}
 }
 
@@ -462,6 +480,14 @@ type OverloadCooldownSettings struct {
 	Enabled bool `json:"enabled"`
 	// CooldownMinutes 冷却时长（分钟）
 	CooldownMinutes int `json:"cooldown_minutes"`
+}
+
+// GatewayRuntimeSettings 网关运行参数配置
+type GatewayRuntimeSettings struct {
+	ResponseHeaderTimeout             int `json:"response_header_timeout"`
+	StreamDataIntervalTimeout         int `json:"stream_data_interval_timeout"`
+	UsageLogDetailRetentionLimit      int `json:"usage_log_detail_retention_limit"`
+	ImageUsageLogDetailRetentionLimit int `json:"image_usage_log_detail_retention_limit"`
 }
 
 // RateLimit429CooldownSettings 429默认回避配置

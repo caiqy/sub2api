@@ -162,6 +162,14 @@ type UsageLog struct {
 	FirstTokenMs *int
 	UserAgent    *string
 	IPAddress    *string
+	// HasDetail 是列表/查询侧的投影字段，表示当前 usage log 已存在持久化详情。
+	// 它反映的是读模型状态，不表示本次写入路径是否携带了待落库快照。
+	HasDetail bool
+
+	// DetailSnapshot 是写入路径附带的待持久化详情快照。
+	// 它用于把原始请求/响应内容交给 repository 持久化，不等价于“数据库中已经有详情”。
+	// HasDetail 与 DetailSnapshot 处于不同生命周期，不要求始终同步。
+	DetailSnapshot *UsageLogDetailSnapshot
 
 	// Cache TTL Override 标记（管理员强制替换了缓存 TTL 计费）
 	CacheTTLOverridden bool
@@ -205,4 +213,28 @@ func (u *UsageLog) SyncRequestTypeAndLegacyFields() {
 	requestType := u.EffectiveRequestType()
 	u.RequestType = requestType
 	u.Stream, u.OpenAIWSMode = ApplyLegacyRequestFields(requestType, u.Stream, u.OpenAIWSMode)
+}
+
+func UsageLogDetailTypeFromUsageLog(log *UsageLog) UsageLogDetailType {
+	if log == nil {
+		return UsageLogDetailTypeNormal
+	}
+	if isImageEndpoint(log.InboundEndpoint) || isImageEndpoint(log.UpstreamEndpoint) {
+		return UsageLogDetailTypeImage
+	}
+	if log.BillingMode != nil && strings.EqualFold(strings.TrimSpace(*log.BillingMode), string(BillingModeImage)) {
+		return UsageLogDetailTypeImage
+	}
+	if log.ImageCount > 0 {
+		return UsageLogDetailTypeImage
+	}
+	return UsageLogDetailTypeNormal
+}
+
+func isImageEndpoint(endpoint *string) bool {
+	if endpoint == nil {
+		return false
+	}
+	path := strings.ToLower(strings.TrimSpace(*endpoint))
+	return strings.Contains(path, "/v1/images/generations") || strings.Contains(path, "/v1/images/edits")
 }

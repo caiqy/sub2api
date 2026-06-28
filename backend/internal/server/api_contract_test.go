@@ -365,12 +365,14 @@ func TestAPIContracts(t *testing.T) {
 						"allow_messages_dispatch": false,
 						"fallback_group_id": null,
 						"fallback_group_id_on_invalid_request": null,
-						"require_oauth_only": false,
-						"require_privacy_set": false,
-						"rpm_limit": 0,
-						"created_at": "2025-01-02T03:04:05Z",
-						"updated_at": "2025-01-02T03:04:05Z"
-					}
+					"require_oauth_only": false,
+					"require_privacy_set": false,
+					"rpm_limit": 0,
+					"user_concurrency_enabled": false,
+					"user_concurrency_limit": 0,
+					"created_at": "2025-01-02T03:04:05Z",
+					"updated_at": "2025-01-02T03:04:05Z"
+				}
 				]
 			}`,
 		},
@@ -845,6 +847,19 @@ func TestAPIContracts(t *testing.T) {
 					"codex_cli_only_engine_fingerprint_signals": "[{\"type\":\"header_prefix\",\"match\":[\"x-codex-\"],\"required\":true},{\"type\":\"header_exact\",\"match\":[\"session-id\",\"session_id\"],\"required\":false},{\"type\":\"header_exact\",\"match\":[\"thread-id\",\"thread_id\"],\"required\":false},{\"type\":\"body_path\",\"match\":[\"client_metadata.x-codex-window-id\",\"client_metadata.x-codex-installation-id\"],\"required\":false}]",
 					"allow_ungrouped_key_scheduling": false,
 					"backend_mode_enabled": false,
+					"gateway_sticky_openai_enabled": false,
+					"gateway_sticky_gemini_enabled": false,
+					"gateway_sticky_anthropic_enabled": false,
+					"gateway_openai_ws_scheduler_mode": "",
+					"gateway_openai_ws_scheduler_layered_error_penalty_threshold": 0,
+					"gateway_openai_ws_scheduler_layered_error_penalty_value": 0,
+					"gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier": 0,
+					"gateway_openai_ws_scheduler_layered_ttft_penalty_value": 0,
+					"gateway_openai_ws_scheduler_layered_probe_cooldown_seconds": 0,
+					"gateway_openai_ws_scheduler_layered_probe_interval_seconds": 0,
+					"gateway_openai_ws_scheduler_layered_probe_max_failures": 0,
+					"gateway_openai_ws_scheduler_layered_probe_timeout_seconds": 0,
+					"gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds": 1800,
 					"enable_cch_signing": false,
 					"enable_claude_oauth_system_prompt_injection": true,
 					"claude_oauth_system_prompt": "",
@@ -1088,6 +1103,19 @@ func TestAPIContracts(t *testing.T) {
 					"max_claude_code_version": "",
 					"allow_ungrouped_key_scheduling": false,
 					"backend_mode_enabled": false,
+					"gateway_sticky_openai_enabled": false,
+					"gateway_sticky_gemini_enabled": false,
+					"gateway_sticky_anthropic_enabled": false,
+					"gateway_openai_ws_scheduler_mode": "",
+					"gateway_openai_ws_scheduler_layered_error_penalty_threshold": 0,
+					"gateway_openai_ws_scheduler_layered_error_penalty_value": 0,
+					"gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier": 0,
+					"gateway_openai_ws_scheduler_layered_ttft_penalty_value": 0,
+					"gateway_openai_ws_scheduler_layered_probe_cooldown_seconds": 0,
+					"gateway_openai_ws_scheduler_layered_probe_interval_seconds": 0,
+					"gateway_openai_ws_scheduler_layered_probe_max_failures": 0,
+					"gateway_openai_ws_scheduler_layered_probe_timeout_seconds": 0,
+					"gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds": 1800,
 					"enable_fingerprint_unification": true,
 					"enable_metadata_passthrough": false,
 					"enable_cch_signing": false,
@@ -1244,6 +1272,12 @@ func TestAPIContracts(t *testing.T) {
 	}
 }
 
+func TestStubUsageLogRepo_ImplementsDetailLookup(t *testing.T) {
+	repo := newStubUsageLogRepo()
+	_, err := repo.GetDetailByUsageLogID(context.Background(), 123)
+	require.Error(t, err)
+}
+
 type contractDeps struct {
 	now         time.Time
 	router      http.Handler
@@ -1309,7 +1343,7 @@ func newContractDeps(t *testing.T) *contractDeps {
 	settingRepo := newStubSettingRepo()
 	settingService := service.NewSettingService(settingRepo, cfg)
 
-	adminService := service.NewAdminService(userRepo, groupRepo, &accountRepo, proxyRepo, apiKeyRepo, redeemRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	adminService := service.NewAdminService(userRepo, groupRepo, &accountRepo, proxyRepo, apiKeyRepo, redeemRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	authHandler := handler.NewAuthHandler(cfg, nil, userService, settingService, nil, redeemService, nil, nil)
 	apiKeyHandler := handler.NewAPIKeyHandler(apiKeyService)
 	usageHandler := handler.NewUsageHandler(usageService, apiKeyService, nil, nil)
@@ -1707,6 +1741,10 @@ func (s *stubAccountRepo) ListOAuthRefreshCandidates(ctx context.Context) ([]ser
 }
 
 func (s *stubAccountRepo) ListByPlatform(ctx context.Context, platform string) ([]service.Account, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *stubAccountRepo) ListTempUnschedulableByPlatform(ctx context.Context, platform string, now time.Time) ([]service.Account, error) {
 	return nil, errors.New("not implemented")
 }
 
@@ -2336,7 +2374,13 @@ func (r *stubUsageLogRepo) Create(ctx context.Context, log *service.UsageLog) (b
 	return false, errors.New("not implemented")
 }
 
+func (r *stubUsageLogRepo) PersistDetailBestEffort(ctx context.Context, log *service.UsageLog) {}
+
 func (r *stubUsageLogRepo) GetByID(ctx context.Context, id int64) (*service.UsageLog, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (r *stubUsageLogRepo) GetDetailByUsageLogID(ctx context.Context, usageLogID int64) (*service.UsageLogDetail, error) {
 	return nil, errors.New("not implemented")
 }
 
@@ -2345,6 +2389,13 @@ func (r *stubUsageLogRepo) Delete(ctx context.Context, id int64) error {
 }
 
 func (r *stubUsageLogRepo) ListByUser(ctx context.Context, userID int64, params pagination.PaginationParams) ([]service.UsageLog, *pagination.PaginationResult, error) {
+	logs := r.userLogs[userID]
+	total := int64(len(logs))
+	out := paginateLogs(logs, params)
+	return out, paginationResult(total, params), nil
+}
+
+func (r *stubUsageLogRepo) ListImageHistoryByUser(ctx context.Context, userID int64, params pagination.PaginationParams, filters service.ImageHistoryListFilters) ([]service.UsageLog, *pagination.PaginationResult, error) {
 	logs := r.userLogs[userID]
 	total := int64(len(logs))
 	out := paginateLogs(logs, params)

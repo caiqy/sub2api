@@ -435,6 +435,23 @@ const (
 	// SettingKeyBackendModeEnabled Backend 模式：禁用用户注册和自助服务，仅管理员可登录
 	SettingKeyBackendModeEnabled = "backend_mode_enabled"
 
+	// SettingKeyGatewayRuntimeSettings stores JSON config for gateway runtime settings.
+	SettingKeyGatewayRuntimeSettings = "gateway_runtime_settings"
+	// Gateway sticky platform switches
+	SettingKeyGatewayStickyOpenAIEnabled    = "gateway_sticky_openai_enabled"
+	SettingKeyGatewayStickyGeminiEnabled    = "gateway_sticky_gemini_enabled"
+	SettingKeyGatewayStickyAnthropicEnabled = "gateway_sticky_anthropic_enabled"
+	// OpenAI WS scheduler settings
+	SettingKeyGatewayOpenAIWSSchedulerMode                                 = "gateway_openai_ws_scheduler_mode"
+	SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold         = "gateway_openai_ws_scheduler_layered_error_penalty_threshold"
+	SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyValue             = "gateway_openai_ws_scheduler_layered_error_penalty_value"
+	SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier         = "gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier"
+	SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue              = "gateway_openai_ws_scheduler_layered_ttft_penalty_value"
+	SettingKeyGatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds          = "gateway_openai_ws_scheduler_layered_probe_cooldown_seconds"
+	SettingKeyGatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds          = "gateway_openai_ws_scheduler_layered_probe_interval_seconds"
+	SettingKeyGatewayOpenAIWSSchedulerLayeredProbeMaxFailures              = "gateway_openai_ws_scheduler_layered_probe_max_failures"
+	SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds           = "gateway_openai_ws_scheduler_layered_probe_timeout_seconds"
+	SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds = "gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds"
 	// Gateway Forwarding Behavior
 	// SettingKeyEnableFingerprintUnification 是否统一 OAuth 账号的 X-Stainless-* 指纹头（默认 true）
 	SettingKeyEnableFingerprintUnification = "enable_fingerprint_unification"

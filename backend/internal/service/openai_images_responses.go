@@ -37,6 +37,8 @@ type OpenAIImagesUpstreamError struct {
 	Message           string
 	Param             string
 	UpstreamRequestID string
+	ResponseHeaders   http.Header
+	ResponseBody      []byte
 }
 
 func (e *OpenAIImagesUpstreamError) Error() string {
@@ -68,6 +70,27 @@ func (e *OpenAIImagesUpstreamError) clientStatusCode() int {
 		return e.StatusCode
 	}
 	return http.StatusBadGateway
+}
+
+func (e *OpenAIImagesUpstreamError) OpenAIImageUpstreamStatusCode() int {
+	if e == nil {
+		return 0
+	}
+	return e.StatusCode
+}
+
+func (e *OpenAIImagesUpstreamError) OpenAIImageUpstreamResponseHeaders() http.Header {
+	if e == nil || e.ResponseHeaders == nil {
+		return nil
+	}
+	return e.ResponseHeaders.Clone()
+}
+
+func (e *OpenAIImagesUpstreamError) OpenAIImageUpstreamResponseBody() []byte {
+	if e == nil || e.ResponseBody == nil {
+		return nil
+	}
+	return append([]byte(nil), e.ResponseBody...)
 }
 
 func (e *OpenAIImagesUpstreamError) clientErrorType() string {
@@ -805,6 +828,8 @@ func openAIImagesUpstreamErrorFromHTTP(statusCode int, header http.Header, body 
 		Message:           message,
 		Param:             param,
 		UpstreamRequestID: requestID,
+		ResponseHeaders:   header.Clone(),
+		ResponseBody:      append([]byte(nil), body...),
 	}
 }
 
@@ -865,6 +890,8 @@ func (s *OpenAIGatewayService) handleOpenAIImagesErrorResponse(
 			ErrorType:         errType,
 			Message:           errMsg,
 			UpstreamRequestID: strings.TrimSpace(resp.Header.Get("x-request-id")),
+			ResponseHeaders:   resp.Header.Clone(),
+			ResponseBody:      append([]byte(nil), body...),
 		}
 		writeOpenAIImagesUpstreamErrorResponse(c, upErr)
 		return nil, upErr
@@ -889,6 +916,8 @@ func (s *OpenAIGatewayService) handleOpenAIImagesErrorResponse(
 			ErrorType:         "upstream_error",
 			Message:           "Upstream gateway error",
 			UpstreamRequestID: strings.TrimSpace(resp.Header.Get("x-request-id")),
+			ResponseHeaders:   resp.Header.Clone(),
+			ResponseBody:      append([]byte(nil), body...),
 		}
 		writeOpenAIImagesUpstreamErrorResponse(c, upErr)
 		return nil, upErr
@@ -1022,6 +1051,9 @@ func writeOpenAIImagesUpstreamErrorResponse(c *gin.Context, err *OpenAIImagesUps
 	}
 	if param := strings.TrimSpace(err.Param); param != "" {
 		errorObj["param"] = param
+	}
+	if requestID := strings.TrimSpace(err.UpstreamRequestID); requestID != "" {
+		c.Header("x-request-id", requestID)
 	}
 	c.JSON(err.clientStatusCode(), gin.H{
 		"error": errorObj,
@@ -1535,6 +1567,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	}
 	upstreamReq.Header.Set("Content-Type", "application/json")
 	upstreamReq.Header.Set("Accept", "text/event-stream")
+	SetUsageUpstreamRequest(c, upstreamReq, string(responsesBody))
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -1578,6 +1611,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 			return nil, &UpstreamFailoverError{
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           respBody,
+				ResponseHeaders:        resp.Header.Clone(),
 				RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 			}
 		}

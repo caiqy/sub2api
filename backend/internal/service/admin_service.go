@@ -236,7 +236,10 @@ type CreateGroupInput struct {
 	RequireOAuthOnly            bool
 	RequirePrivacySet           bool
 	MessagesDispatchModelConfig OpenAIMessagesDispatchModelConfig
-	ModelsListConfig            GroupModelsListConfig
+	// 分组级用户并发限制
+	UserConcurrencyEnabled bool
+	UserConcurrencyLimit   int
+	ModelsListConfig       GroupModelsListConfig
 	// RPMLimit 分组 RPM 上限（0 = 不限制）
 	RPMLimit int
 	// 从指定分组复制账号（创建分组后在同一事务内绑定）
@@ -282,7 +285,10 @@ type UpdateGroupInput struct {
 	RequireOAuthOnly            *bool
 	RequirePrivacySet           *bool
 	MessagesDispatchModelConfig *OpenAIMessagesDispatchModelConfig
-	ModelsListConfig            *GroupModelsListConfig
+	// 分组级用户并发限制
+	UserConcurrencyEnabled *bool
+	UserConcurrencyLimit   *int
+	ModelsListConfig       *GroupModelsListConfig
 	// RPMLimit 分组 RPM 上限（0 = 不限制），nil 表示未提供不改动。
 	RPMLimit *int
 	// 从指定分组复制账号（同步操作：先清空当前分组的账号绑定，再绑定源分组的账号）
@@ -561,6 +567,13 @@ const (
 var ErrRPMStatusUnavailable = infraerrors.New(http.StatusNotImplemented, "RPM_STATUS_UNAVAILABLE", "RPM cache not available")
 
 // adminServiceImpl implements AdminService
+// OpenAIProbeController is used by admin service to notify the OpenAI probe
+// subsystem about account configuration changes. Narrow interface to avoid
+// direct coupling to *OpenAIGatewayService.
+type OpenAIProbeController interface {
+	DropProbeEntry(accountID int64)
+}
+
 type adminServiceImpl struct {
 	userRepo             UserRepository
 	groupRepo            GroupRepository
@@ -580,6 +593,7 @@ type adminServiceImpl struct {
 	userSubRepo          UserSubscriptionRepository
 	privacyClientFactory PrivacyClientFactory
 	runtimeBlocker       AccountRuntimeBlocker
+	openaiProbeControl   OpenAIProbeController
 }
 
 type userGroupRateBatchReader interface {
@@ -606,6 +620,7 @@ func NewAdminService(
 	userSubRepo UserSubscriptionRepository,
 	privacyClientFactory PrivacyClientFactory,
 	runtimeBlocker AccountRuntimeBlocker,
+	openaiProbeControl OpenAIProbeController,
 ) AdminService {
 	return &adminServiceImpl{
 		userRepo:             userRepo,
@@ -626,6 +641,7 @@ func NewAdminService(
 		userSubRepo:          userSubRepo,
 		privacyClientFactory: privacyClientFactory,
 		runtimeBlocker:       runtimeBlocker,
+		openaiProbeControl:   openaiProbeControl,
 	}
 }
 
@@ -1951,6 +1967,8 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		RequirePrivacySet:               input.RequirePrivacySet,
 		DefaultMappedModel:              input.DefaultMappedModel,
 		MessagesDispatchModelConfig:     normalizeOpenAIMessagesDispatchModelConfig(input.MessagesDispatchModelConfig),
+		UserConcurrencyEnabled:          input.UserConcurrencyEnabled,
+		UserConcurrencyLimit:            input.UserConcurrencyLimit,
 		ModelsListConfig:                normalizeGroupModelsListConfig(input.ModelsListConfig),
 		RPMLimit:                        input.RPMLimit,
 	}
@@ -2217,6 +2235,12 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	if input.MessagesDispatchModelConfig != nil {
 		group.MessagesDispatchModelConfig = normalizeOpenAIMessagesDispatchModelConfig(*input.MessagesDispatchModelConfig)
+	}
+	if input.UserConcurrencyEnabled != nil {
+		group.UserConcurrencyEnabled = *input.UserConcurrencyEnabled
+	}
+	if input.UserConcurrencyLimit != nil {
+		group.UserConcurrencyLimit = *input.UserConcurrencyLimit
 	}
 	if input.ModelsListConfig != nil {
 		group.ModelsListConfig = normalizeGroupModelsListConfig(*input.ModelsListConfig)
@@ -2684,6 +2708,15 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 		Status:      StatusActive,
 		Schedulable: true,
 	}
+	normalizedExtra, err := NormalizeAccountPassthroughFields(NormalizePassthroughFieldsInput{
+		RequestedType:             account.Type,
+		Extra:                     account.Extra,
+		ExplicitlySubmittedConfig: hasPassthroughConfigKeys(input.Extra),
+	})
+	if err != nil {
+		return nil, err
+	}
+	account.Extra = normalizedExtra
 	// 预计算固定时间重置的下次重置时间
 	if account.Extra != nil {
 		if err := ValidateQuotaResetConfig(account.Extra); err != nil {
@@ -2757,6 +2790,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if err != nil {
 		return nil, err
 	}
+	originalType := account.Type
 	// 安全/身份不变量(影子账号):通用更新路径被 edit/re-auth/refresh/batch 共用,
 	// 必须在此守住,否则仅在创建时的保证可被这些路径绕过。
 	if account.IsCredentialShadow() {
@@ -2785,6 +2819,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 	}
 	wasOveragesEnabled := account.IsOveragesEnabled()
+	wasProbeEnabledBefore := account.IsOpenAIProbeEnabled()
 
 	if input.Name != "" {
 		account.Name = input.Name
@@ -2823,6 +2858,18 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			delete(account.Extra, modelRateLimitsKey)
 			delete(account.Extra, "antigravity_credits_overages") // 清理旧版 overages 运行态
 		}
+	}
+	normalizedExtra, err := NormalizeAccountPassthroughFields(NormalizePassthroughFieldsInput{
+		ExistingType:              originalType,
+		RequestedType:             account.Type,
+		Extra:                     account.Extra,
+		ExplicitlySubmittedConfig: hasPassthroughConfigKeys(input.Extra),
+	})
+	if err != nil {
+		return nil, err
+	}
+	account.Extra = normalizedExtra
+	if input.Extra != nil {
 		// 校验并预计算固定时间重置的下次重置时间
 		if err := ValidateQuotaResetConfig(account.Extra); err != nil {
 			return nil, err
@@ -2896,7 +2943,6 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if err := s.accountRepo.Update(ctx, account); err != nil {
 		return nil, err
 	}
-
 	// 将 proxy 变更传播到 spark 影子账号（同步；Update 内部已触发调度快照）。
 	// 影子自身 proxy 不可独立编辑(见上),故对影子的更新不触发传播。
 	if input.ProxyID != nil && !account.IsCredentialShadow() {
@@ -2904,6 +2950,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			return nil, err
 		}
 	}
+	s.applyProbeToggleSideEffects(ctx, account, wasProbeEnabledBefore)
 
 	// 绑定分组
 	if input.GroupIDs != nil {
@@ -3018,11 +3065,28 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			return nil, errors.New("rate_multiplier must be >= 0")
 		}
 	}
+	if input.LoadFactor != nil && *input.LoadFactor > 10000 {
+		return nil, errors.New("load_factor must be <= 10000")
+	}
 
-	// Prepare bulk updates for columns and JSONB fields.
+	// Passthrough config must go through single-account update to ensure per-account
+	// validation runs. Reject bulk updates that include these keys instead of
+	// silently dropping them.
+	if input.Extra != nil && hasPassthroughConfigKeys(input.Extra) {
+		return nil, errors.New("bulk update does not support passthrough config; use single-account update instead")
+	}
+
+	var sanitizedExtra map[string]any
+	if input.Extra != nil {
+		sanitizedExtra = clonePassthroughExtra(input.Extra)
+		if len(sanitizedExtra) == 0 {
+			sanitizedExtra = nil
+		}
+	}
+
 	repoUpdates := AccountBulkUpdate{
 		Credentials: input.Credentials,
-		Extra:       input.Extra,
+		Extra:       sanitizedExtra,
 	}
 	if input.Name != "" {
 		repoUpdates.Name = &input.Name
@@ -3055,11 +3119,29 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		repoUpdates.Schedulable = input.Schedulable
 	}
 
+	// Capture pre-update probe_enabled state: after BulkUpdate persists, account.Extra
+	// reflects the new value, so post-fetch alone cannot detect a true→false flip.
+	var probeWasEnabled map[int64]bool
+	if sanitizedExtra != nil {
+		if val, ok := sanitizedExtra["openai_probe_enabled"]; ok {
+			if b, ok := val.(bool); ok && !b {
+				preAccounts, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
+				if err == nil {
+					probeWasEnabled = make(map[int64]bool, len(preAccounts))
+					for _, acct := range preAccounts {
+						if acct != nil {
+							probeWasEnabled[acct.ID] = acct.IsOpenAIProbeEnabled()
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Run bulk update for column/jsonb fields first.
 	if _, err := s.accountRepo.BulkUpdate(ctx, input.AccountIDs, repoUpdates); err != nil {
 		return nil, err
 	}
-
 	// 将 proxy 变更传播到每个目标账号的 spark 影子账号
 	if repoUpdates.ProxyID != nil {
 		var effectiveProxyID *int64
@@ -3070,6 +3152,22 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			if err := s.propagateProxyToShadows(ctx, accountID, effectiveProxyID); err != nil {
 				return nil, err
 			}
+		}
+	}
+
+	// Apply probe toggle side effects for accounts that flipped from enabled to disabled.
+	if len(probeWasEnabled) > 0 {
+		updatedAccounts, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
+		if err == nil {
+			for _, acct := range updatedAccounts {
+				if acct != nil {
+					if wasEnabled, ok := probeWasEnabled[acct.ID]; ok {
+						s.applyProbeToggleSideEffects(ctx, acct, wasEnabled)
+					}
+				}
+			}
+		} else {
+			slog.Warn("admin: bulk probe toggle side effects skipped due to post-fetch error", "error", err)
 		}
 	}
 
@@ -4319,4 +4417,41 @@ func (s *adminServiceImpl) ForceAntigravityPrivacy(ctx context.Context, account 
 	}
 	applyAntigravityPrivacyMode(account, mode)
 	return mode
+}
+
+// applyProbeToggleSideEffects handles side effects when probe_enabled flips to false.
+// Layer 1 (always): DropProbeEntry — idempotent removal of probe entry.
+// Layer 2 (only when DB temp source = layered_probe): ClearTempUnschedulable + ClearAccountSchedulingBlock.
+func (s *adminServiceImpl) applyProbeToggleSideEffects(ctx context.Context, account *Account, wasEnabledBefore bool) {
+	if account == nil || account.Platform != PlatformOpenAI {
+		return
+	}
+	// Only trigger on true → false flip
+	if !wasEnabledBefore || account.IsOpenAIProbeEnabled() {
+		return
+	}
+
+	// Layer 1: drop probe entry (idempotent)
+	if s.openaiProbeControl != nil {
+		s.openaiProbeControl.DropProbeEntry(account.ID)
+	}
+
+	// Layer 2: only clear DB temp state if source is layered_probe
+	if account.TempUnschedulableUntil == nil {
+		return
+	}
+	parsed, ok := parseTempUnschedReason(account.TempUnschedulableReason)
+	if !ok || parsed.Source != "layered_probe" {
+		return
+	}
+	if err := s.accountRepo.ClearTempUnschedulable(ctx, account.ID); err != nil {
+		slog.Warn("admin: probe toggle off failed to clear temp unschedulable",
+			"account_id", account.ID, "error", err)
+		return
+	}
+	if s.runtimeBlocker != nil {
+		s.runtimeBlocker.ClearAccountSchedulingBlock(account.ID)
+	}
+	slog.Info("admin: probe toggle off cleared layered_probe temp unschedulable",
+		"account_id", account.ID)
 }

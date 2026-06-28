@@ -261,7 +261,9 @@ func incrementUsageBillingAccountQuota(ctx context.Context, tx *sql.Tx, accountI
 	rows, err := tx.QueryContext(ctx,
 		`UPDATE accounts SET extra = (
 			COALESCE(extra, '{}'::jsonb)
+			-- 总额度：始终递增
 			|| jsonb_build_object('quota_used', COALESCE((extra->>'quota_used')::numeric, 0) + $1)
+			-- 日额度：仅在 quota_daily_limit > 0 时处理
 			|| CASE WHEN COALESCE((extra->>'quota_daily_limit')::numeric, 0) > 0 THEN
 				jsonb_build_object(
 					'quota_daily_used',
@@ -277,6 +279,7 @@ func incrementUsageBillingAccountQuota(ctx context.Context, tx *sql.Tx, accountI
 				   THEN jsonb_build_object('quota_daily_reset_at', `+nextDailyResetAtExpr+`)
 				   ELSE '{}'::jsonb END
 			ELSE '{}'::jsonb END
+			-- 周额度：仅在 quota_weekly_limit > 0 时处理
 			|| CASE WHEN COALESCE((extra->>'quota_weekly_limit')::numeric, 0) > 0 THEN
 				jsonb_build_object(
 					'quota_weekly_used',

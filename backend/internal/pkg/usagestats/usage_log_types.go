@@ -149,6 +149,7 @@ type UserUsageTrendPoint struct {
 type UserSpendingRankingItem struct {
 	UserID     int64   `json:"user_id"`
 	Email      string  `json:"email"`
+	Username   string  `json:"username"`
 	ActualCost float64 `json:"actual_cost"` // 实际扣除
 	Requests   int64   `json:"requests"`
 	Tokens     int64   `json:"tokens"`
@@ -166,6 +167,7 @@ type UserSpendingRankingResponse struct {
 type UserBreakdownItem struct {
 	UserID      int64   `json:"user_id"`
 	Email       string  `json:"email"`
+	Username    string  `json:"username"`
 	Requests    int64   `json:"requests"`
 	TotalTokens int64   `json:"total_tokens"`
 	Cost        float64 `json:"cost"`         // 标准计费

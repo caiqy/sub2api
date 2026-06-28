@@ -81,6 +81,29 @@ func TestLoadDefaultSchedulingConfig(t *testing.T) {
 	}
 }
 
+func TestLoadDefaultUsageLogDetailRetentionLimits(t *testing.T) {
+	resetViperWithJWTSecret(t)
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, 300, cfg.Gateway.UsageLogDetailRetentionLimit)
+	require.Equal(t, 300, cfg.Gateway.ImageUsageLogDetailRetentionLimit)
+}
+
+func TestConfigValidateRejectsNegativeUsageLogDetailRetentionLimits(t *testing.T) {
+	resetViperWithJWTSecret(t)
+
+	cfg, err := Load()
+	require.NoError(t, err)
+
+	cfg.Gateway.UsageLogDetailRetentionLimit = -1
+	require.ErrorContains(t, cfg.Validate(), "gateway.usage_log_detail_retention_limit must be non-negative")
+
+	cfg.Gateway.UsageLogDetailRetentionLimit = 300
+	cfg.Gateway.ImageUsageLogDetailRetentionLimit = -1
+	require.ErrorContains(t, cfg.Validate(), "gateway.image_usage_log_detail_retention_limit must be non-negative")
+}
+
 func TestLoadDefaultOpenAIWSConfig(t *testing.T) {
 	resetViperWithJWTSecret(t)
 
@@ -199,6 +222,71 @@ func TestLoadOpenAICompactModelFromEnv(t *testing.T) {
 	cfg, err := Load()
 	require.NoError(t, err)
 	require.Equal(t, "gpt-5.3-codex", cfg.Gateway.OpenAICompactModel)
+}
+
+func TestLoadDefaultGatewayStickyPlatformConfig(t *testing.T) {
+	resetViperWithJWTSecret(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if !cfg.Gateway.Sticky.OpenAI.Enabled {
+		t.Fatalf("Gateway.Sticky.OpenAI.Enabled = false, want true")
+	}
+	if !cfg.Gateway.Sticky.Gemini.Enabled {
+		t.Fatalf("Gateway.Sticky.Gemini.Enabled = false, want true")
+	}
+	if !cfg.Gateway.Sticky.Anthropic.Enabled {
+		t.Fatalf("Gateway.Sticky.Anthropic.Enabled = false, want true")
+	}
+}
+
+func TestLoadGatewayStickyPlatformConfigFromEnv(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("GATEWAY_STICKY_OPENAI_ENABLED", "false")
+	t.Setenv("GATEWAY_STICKY_GEMINI_ENABLED", "false")
+	t.Setenv("GATEWAY_STICKY_ANTHROPIC_ENABLED", "false")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.Gateway.Sticky.OpenAI.Enabled {
+		t.Fatalf("Gateway.Sticky.OpenAI.Enabled = true, want false")
+	}
+	if cfg.Gateway.Sticky.Gemini.Enabled {
+		t.Fatalf("Gateway.Sticky.Gemini.Enabled = true, want false")
+	}
+	if cfg.Gateway.Sticky.Anthropic.Enabled {
+		t.Fatalf("Gateway.Sticky.Anthropic.Enabled = true, want false")
+	}
+}
+
+func TestValidateOpenAIWSSchedulerLayeredModeNormalizesBeforeValidatingLayeredFields(t *testing.T) {
+	resetViperWithJWTSecret(t)
+
+	cfg, err := Load()
+	require.NoError(t, err)
+
+	cfg.Gateway.OpenAIWS.SchedulerMode = " Layered "
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold = 0
+
+	require.ErrorContains(t, cfg.Validate(), "gateway.openai_ws.scheduler_layered.error_penalty_threshold")
+}
+
+func TestValidateOpenAIWSSchedulerLayeredRejectsNonPositiveProbeTempUnschedulableSeconds(t *testing.T) {
+	resetViperWithJWTSecret(t)
+
+	cfg, err := Load()
+	require.NoError(t, err)
+
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTempUnschedulableSeconds = 0
+
+	require.ErrorContains(t, cfg.Validate(), "gateway.openai_ws.scheduler_layered.probe_temp_unschedulable_seconds must be positive")
 }
 
 func TestLoadDefaultOpenAIHTTP2Enabled(t *testing.T) {

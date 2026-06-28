@@ -99,36 +99,6 @@ func openAIJSONToolsContainImageGeneration(tools gjson.Result) bool {
 	return found
 }
 
-func openAIRequestBodyHasImageGenerationTool(body []byte) bool {
-	if len(body) == 0 || !gjson.ValidBytes(body) {
-		return false
-	}
-	return openAIJSONToolsContainImageGeneration(gjson.GetBytes(body, "tools"))
-}
-
-func openAIRequestBodyImageGenerationToolNeedsNormalization(body []byte) bool {
-	if len(body) == 0 || !gjson.ValidBytes(body) {
-		return false
-	}
-	tools := gjson.GetBytes(body, "tools")
-	if !tools.IsArray() {
-		return false
-	}
-	needsNormalization := false
-	tools.ForEach(func(_, item gjson.Result) bool {
-		if openAIJSONString(item.Get("type")) != "image_generation" {
-			return true
-		}
-		// 只有旧字段需要迁移时才进入 map 修改，纯计费读取保持 raw 路径。
-		if item.Get("format").Exists() || item.Get("compression").Exists() {
-			needsNormalization = true
-			return false
-		}
-		return true
-	})
-	return needsNormalization
-}
-
 func openAIJSONToolChoiceSelectsImageGeneration(choice gjson.Result) bool {
 	if !choice.Exists() {
 		return false

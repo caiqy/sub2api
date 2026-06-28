@@ -15,6 +15,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/cespare/xxhash/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -30,9 +31,41 @@ type stubOpenAIAccountRepo struct {
 	accounts []Account
 }
 
+type openAIHTTPUpstreamRecorder struct {
+	lastReq  *http.Request
+	lastBody []byte
+	resp     *http.Response
+	err      error
+}
+
+func (u *openAIHTTPUpstreamRecorder) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
+	u.lastReq = req
+	if req != nil && req.Body != nil {
+		b, _ := io.ReadAll(req.Body)
+		u.lastBody = b
+		_ = req.Body.Close()
+		req.Body = io.NopCloser(bytes.NewReader(b))
+	}
+	if u.err != nil {
+		return nil, u.err
+	}
+	return u.resp, nil
+}
+
+func (u *openAIHTTPUpstreamRecorder) DoWithTLS(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, profile *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, proxyURL, accountID, accountConcurrency)
+}
+
 type snapshotUpdateAccountRepo struct {
 	stubOpenAIAccountRepo
 	updateExtraCalls chan map[string]any
+}
+
+type startupRecoveryRepoStub struct {
+	stubOpenAIAccountRepo
+	tempUnschedAccounts []Account
+	listCalls           int
+	getByIDCalls        int
 }
 
 func (r *snapshotUpdateAccountRepo) UpdateExtra(ctx context.Context, id int64, updates map[string]any) error {
@@ -79,6 +112,16 @@ func (r stubOpenAIAccountRepo) ListSchedulableUngroupedByPlatform(ctx context.Co
 	return r.ListSchedulableByPlatform(ctx, platform)
 }
 
+func (r stubOpenAIAccountRepo) ListTempUnschedulableByPlatform(ctx context.Context, platform string, now time.Time) ([]Account, error) {
+	var result []Account
+	for _, acc := range r.accounts {
+		if acc.Platform == platform && acc.TempUnschedulableUntil != nil && acc.TempUnschedulableUntil.After(now) {
+			result = append(result, acc)
+		}
+	}
+	return result, nil
+}
+
 type groupAwareStubOpenAIAccountRepo struct {
 	stubOpenAIAccountRepo
 }
@@ -87,6 +130,17 @@ func (r groupAwareStubOpenAIAccountRepo) ListSchedulableByGroupIDAndPlatform(ctx
 	var result []Account
 	for _, acc := range r.accounts {
 		if acc.Platform == platform && openAIStickyAccountMatchesGroup(&acc, &groupID) {
+			result = append(result, acc)
+		}
+	}
+	return result, nil
+}
+
+func (r *startupRecoveryRepoStub) ListTempUnschedulableByPlatform(ctx context.Context, platform string, now time.Time) ([]Account, error) {
+	r.listCalls++
+	var result []Account
+	for _, acc := range r.tempUnschedAccounts {
+		if acc.Platform == platform && acc.TempUnschedulableUntil != nil && acc.TempUnschedulableUntil.After(now) {
 			result = append(result, acc)
 		}
 	}
@@ -102,6 +156,151 @@ func (r groupAwareStubOpenAIAccountRepo) ListSchedulableUngroupedByPlatform(ctx 
 	}
 	return result, nil
 }
+
+func (r *startupRecoveryRepoStub) GetByID(ctx context.Context, id int64) (*Account, error) {
+	r.getByIDCalls++
+	for i := range r.tempUnschedAccounts {
+		if r.tempUnschedAccounts[i].ID == id {
+			cloned := r.tempUnschedAccounts[i]
+			return &cloned, nil
+		}
+	}
+	return r.stubOpenAIAccountRepo.GetByID(ctx, id)
+}
+
+func TestOpenAIGatewayService_StartOpenAIBackgroundRecovery_RehydratesWithoutFirstRequest(t *testing.T) {
+	future := time.Now().Add(10 * time.Minute)
+	reason, err := buildLayeredProbeTempUnschedReason("consecutive_failures", 3)
+	require.NoError(t, err)
+	repo := &startupRecoveryRepoStub{tempUnschedAccounts: []Account{{
+		ID:                      51,
+		Platform:                PlatformOpenAI,
+		Type:                    AccountTypeAPIKey,
+		Status:                  StatusActive,
+		Schedulable:             true,
+		TempUnschedulableUntil:  &future,
+		TempUnschedulableReason: reason,
+	}}}
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	svc := &OpenAIGatewayService{accountRepo: repo, cfg: cfg}
+
+	svc.StartOpenAIBackgroundRecovery()
+	scheduler := svc.getOpenAIAccountScheduler()
+	require.NotNil(t, scheduler)
+	layered, ok := scheduler.(*layeredOpenAIAccountScheduler)
+	require.True(t, ok)
+	_, ok = layered.probe.entries.Load(int64(51))
+	require.True(t, ok)
+	require.Equal(t, 1, repo.listCalls)
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+}
+
+func TestOpenAIGatewayService_ReattachesLayeredProbeTempUnschedAccountOnRuntimeAccountChange(t *testing.T) {
+	now := time.Now()
+	future := now.Add(10 * time.Minute)
+	reason, err := buildLayeredProbeTempUnschedReason("consecutive_failures", 3)
+	require.NoError(t, err)
+
+	repo := &startupRecoveryRepoStub{tempUnschedAccounts: []Account{{
+		ID:                      52,
+		Platform:                PlatformOpenAI,
+		Type:                    AccountTypeAPIKey,
+		Status:                  StatusActive,
+		Schedulable:             false,
+		TempUnschedulableUntil:  &future,
+		TempUnschedulableReason: reason,
+	}}}
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	snapshot := &SchedulerSnapshotService{}
+	svc := &OpenAIGatewayService{accountRepo: repo, cfg: cfg, schedulerSnapshot: snapshot}
+
+	svc.StartOpenAIBackgroundRecovery()
+	scheduler := svc.getOpenAIAccountScheduler()
+	layered, ok := scheduler.(*layeredOpenAIAccountScheduler)
+	require.True(t, ok)
+	_, presentBefore := layered.probe.entries.Load(int64(52))
+	require.False(t, presentBefore, "startup should skip non-schedulable layered-probe temp account")
+
+	repo.tempUnschedAccounts[0].Schedulable = true
+	require.NoError(t, snapshot.handleAccountEvent(context.Background(), ptrInt64(52), nil))
+
+	_, presentAfter := layered.probe.entries.Load(int64(52))
+	require.True(t, presentAfter, "runtime account change should reattach layered-probe temp account when it becomes schedulable")
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+}
+
+func TestOpenAIGatewayService_RuntimeAccountChange_DoesNotRebootstrapAlreadyAttachedLayeredProbeTempAccount(t *testing.T) {
+	now := time.Now()
+	future := now.Add(10 * time.Minute)
+	reason, err := buildLayeredProbeTempUnschedReason("consecutive_failures", 3)
+	require.NoError(t, err)
+
+	repo := &startupRecoveryRepoStub{tempUnschedAccounts: []Account{{
+		ID:                      53,
+		Platform:                PlatformOpenAI,
+		Type:                    AccountTypeAPIKey,
+		Status:                  StatusActive,
+		Schedulable:             false,
+		TempUnschedulableUntil:  &future,
+		TempUnschedulableReason: reason,
+	}}}
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	snapshot := &SchedulerSnapshotService{}
+	svc := &OpenAIGatewayService{accountRepo: repo, cfg: cfg, schedulerSnapshot: snapshot}
+
+	svc.StartOpenAIBackgroundRecovery()
+	scheduler := svc.getOpenAIAccountScheduler()
+	layered, ok := scheduler.(*layeredOpenAIAccountScheduler)
+	require.True(t, ok)
+
+	repo.tempUnschedAccounts[0].Schedulable = true
+	require.NoError(t, snapshot.handleAccountEvent(context.Background(), ptrInt64(53), nil))
+
+	value, present := layered.probe.entries.Load(int64(53))
+	require.True(t, present)
+	entry, ok := value.(*openAIAccountProbeEntry)
+	require.True(t, ok)
+	entry.consecutiveFail.Store(9)
+
+	require.NoError(t, snapshot.handleAccountEvent(context.Background(), ptrInt64(53), nil))
+
+	require.EqualValues(t, 9, entry.consecutiveFail.Load(), "runtime reattach should only happen for accounts that newly become eligible, not already-attached entries")
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+}
+
+func TestOpenAIGatewayService_StopOpenAIAccountScheduler_UnregistersRuntimeReattachHandler(t *testing.T) {
+	now := time.Now()
+	future := now.Add(10 * time.Minute)
+	reason, err := buildLayeredProbeTempUnschedReason("consecutive_failures", 3)
+	require.NoError(t, err)
+
+	repo := &startupRecoveryRepoStub{tempUnschedAccounts: []Account{{
+		ID:                      54,
+		Platform:                PlatformOpenAI,
+		Type:                    AccountTypeAPIKey,
+		Status:                  StatusActive,
+		Schedulable:             false,
+		TempUnschedulableUntil:  &future,
+		TempUnschedulableReason: reason,
+	}}}
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	snapshot := &SchedulerSnapshotService{}
+	svc := &OpenAIGatewayService{accountRepo: repo, cfg: cfg, schedulerSnapshot: snapshot}
+
+	svc.StartOpenAIBackgroundRecovery()
+	svc.StopOpenAIAccountScheduler()
+
+	repo.tempUnschedAccounts[0].Schedulable = true
+	require.NoError(t, snapshot.handleAccountEvent(context.Background(), ptrInt64(54), nil))
+
+	require.Equal(t, 0, repo.getByIDCalls, "stopping the scheduler should unregister runtime reattach handler")
+}
+
+func ptrInt64(v int64) *int64 { return &v }
 
 type stubConcurrencyCache struct {
 	ConcurrencyCache
@@ -328,6 +527,25 @@ func TestOpenAIGatewayService_GenerateSessionHashWithFallback(t *testing.T) {
 	require.Equal(t, "", empty)
 }
 
+func TestOpenAIGatewayService_GenerateSessionHashWithFallbackUsesSeedWhenExplicitSignalsMissing(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+
+	svc := &OpenAIGatewayService{}
+	seed := "openai_ws_ingress:group=9:api_key=100:account=200:ip=192.0.2.10:ua=codex"
+	bodyWithoutExplicitSignal := []byte(`{"model":"gpt-5.1","stream":false}`)
+
+	got := svc.GenerateSessionHashWithFallback(c, bodyWithoutExplicitSignal, seed)
+	want := fmt.Sprintf("%016x", xxhash.Sum64String(seed))
+	require.Equal(t, want, got, "WS ingress fallback seed should win when session_id/conversation_id/prompt_cache_key are absent")
+
+	c.Request.Header.Set("session_id", "explicit-session")
+	explicit := svc.GenerateSessionHashWithFallback(c, bodyWithoutExplicitSignal, seed)
+	require.Equal(t, fmt.Sprintf("%016x", xxhash.Sum64String("explicit-session")), explicit, "explicit session signal should still have highest priority")
+}
+
 func TestOpenAIGatewayService_GenerateSessionHash_ContentFallback(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
@@ -394,9 +612,16 @@ func (c stubConcurrencyCache) GetAccountWaitingCount(ctx context.Context, accoun
 type stubGatewayCache struct {
 	sessionBindings map[string]int64
 	deletedSessions map[string]int
+	getCalls        map[string]int
+	setCalls        map[string]int
+	refreshCalls    map[string]int
 }
 
 func (c *stubGatewayCache) GetSessionAccountID(ctx context.Context, groupID int64, sessionHash string) (int64, error) {
+	if c.getCalls == nil {
+		c.getCalls = make(map[string]int)
+	}
+	c.getCalls[sessionHash]++
 	if id, ok := c.sessionBindings[sessionHash]; ok {
 		return id, nil
 	}
@@ -404,6 +629,10 @@ func (c *stubGatewayCache) GetSessionAccountID(ctx context.Context, groupID int6
 }
 
 func (c *stubGatewayCache) SetSessionAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) error {
+	if c.setCalls == nil {
+		c.setCalls = make(map[string]int)
+	}
+	c.setCalls[sessionHash]++
 	if c.sessionBindings == nil {
 		c.sessionBindings = make(map[string]int64)
 	}
@@ -412,6 +641,10 @@ func (c *stubGatewayCache) SetSessionAccountID(ctx context.Context, groupID int6
 }
 
 func (c *stubGatewayCache) RefreshSessionTTL(ctx context.Context, groupID int64, sessionHash string, ttl time.Duration) error {
+	if c.refreshCalls == nil {
+		c.refreshCalls = make(map[string]int)
+	}
+	c.refreshCalls[sessionHash]++
 	return nil
 }
 
@@ -559,6 +792,91 @@ func TestOpenAISelectAccountWithLoadAwareness_FiltersUnschedulableWhenNoConcurre
 	}
 	if selection == nil || selection.Account == nil {
 		t.Fatalf("expected selection with account")
+	}
+	if selection.Account.ID != available.ID {
+		t.Fatalf("expected account %d, got %d", available.ID, selection.Account.ID)
+	}
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func TestOpenAISelectAccountForModelWithExclusions_SkipsQuotaExceededAPIKey(t *testing.T) {
+	overQuota := Account{
+		ID:          1,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    0,
+		Extra: map[string]any{
+			"quota_used":  79.9,
+			"quota_limit": 78.0,
+		},
+	}
+	available := Account{
+		ID:          2,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    1,
+	}
+
+	svc := &OpenAIGatewayService{
+		accountRepo: stubOpenAIAccountRepo{accounts: []Account{overQuota, available}},
+	}
+
+	acc, err := svc.SelectAccountForModelWithExclusions(context.Background(), nil, "", "gpt-5.2", nil)
+	if err != nil {
+		t.Fatalf("SelectAccountForModelWithExclusions error: %v", err)
+	}
+	if acc == nil {
+		t.Fatal("expected selected account")
+		return
+	}
+	if acc.ID != available.ID {
+		t.Fatalf("expected account %d, got %d", available.ID, acc.ID)
+	}
+}
+
+func TestOpenAISelectAccountWithLoadAwareness_SkipsQuotaExceededAPIKey(t *testing.T) {
+	groupID := int64(1)
+	overQuota := Account{
+		ID:          1,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    0,
+		Extra: map[string]any{
+			"quota_used":  79.9,
+			"quota_limit": 78.0,
+		},
+	}
+	available := Account{
+		ID:          2,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    1,
+	}
+
+	svc := &OpenAIGatewayService{
+		accountRepo: stubOpenAIAccountRepo{accounts: []Account{overQuota, available}},
+	}
+
+	selection, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "", "gpt-5.2", nil)
+	if err != nil {
+		t.Fatalf("SelectAccountWithLoadAwareness error: %v", err)
+	}
+	if selection == nil || selection.Account == nil {
+		t.Fatal("expected selection with account")
 	}
 	if selection.Account.ID != available.ID {
 		t.Fatalf("expected account %d, got %d", available.ID, selection.Account.ID)
@@ -2258,7 +2576,7 @@ func TestOpenAIBuildUpstreamRequestOpenAIPassthroughPreservesCompactPath(t *test
 	svc := &OpenAIGatewayService{}
 	account := &Account{Type: AccountTypeOAuth}
 
-	req, err := svc.buildUpstreamRequestOpenAIPassthrough(c.Request.Context(), c, account, []byte(`{"model":"gpt-5"}`), "token")
+	req, err := svc.buildUpstreamRequestOpenAIPassthrough(c.Request.Context(), c, account, []byte(`{"model":"gpt-5"}`), []byte(`{"model":"gpt-5"}`), "token")
 	require.NoError(t, err)
 	require.Equal(t, chatgptCodexURL+"/compact", req.URL.String())
 	require.Equal(t, "application/json", req.Header.Get("Accept"))
@@ -2331,6 +2649,244 @@ func TestOpenAIBuildUpstreamRequestPreservesCompactPathForAPIKeyBaseURL(t *testi
 	req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, []byte(`{"model":"gpt-5"}`), "token", false, "", false)
 	require.NoError(t, err)
 	require.Equal(t, "https://example.com/v1/responses/compact", req.URL.String())
+}
+
+func TestPassthroughFieldsV2OpenAIForward_APIKeyBodyMapCopiesFromOriginalInboundRequest(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	body := []byte(`{"model":"gpt-5","metadata":{"client_trace":"trace-123"},"input":"hello"}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+
+	upstream := &openAIHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"resp_1","object":"response","model":"gpt-5","usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`)),
+		},
+	}
+
+	svc := &OpenAIGatewayService{
+		cfg: &config.Config{
+			Security: config.SecurityConfig{
+				URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+			},
+		},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:          401,
+		Name:        "openai-apikey-v2-forward",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "upstream-openai-key",
+			"base_url": "https://example.com/v1",
+		},
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "body", Mode: "map", Key: "metadata.trace_copy", SourceKey: "metadata.client_trace"},
+			},
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "trace-123", gjson.GetBytes(upstream.lastBody, "metadata.trace_copy").String())
+	require.Equal(t, "trace-123", gjson.GetBytes(upstream.lastBody, "metadata.client_trace").String())
+	require.Equal(t, "Bearer upstream-openai-key", upstream.lastReq.Header.Get("Authorization"))
+}
+
+func TestPassthroughFieldsV2OpenAIForward_DisabledLeavesConfiguredRulesInactive(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	body := []byte(`{"model":"gpt-5","metadata":{"client_trace":"trace-123"},"input":"hello"}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+
+	upstream := &openAIHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"resp_2","object":"response","model":"gpt-5","usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`)),
+		},
+	}
+
+	svc := &OpenAIGatewayService{
+		cfg: &config.Config{
+			Security: config.SecurityConfig{
+				URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+			},
+		},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:          402,
+		Name:        "openai-apikey-v2-disabled",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "upstream-openai-key",
+			"base_url": "https://example.com/v1",
+		},
+		Extra: map[string]any{
+			"passthrough_fields_enabled": false,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "body", Mode: "inject", Key: "metadata.user_id", Value: "user-1"},
+				{Target: "body", Mode: "map", Key: "metadata.trace_copy", SourceKey: "metadata.client_trace"},
+			},
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "trace-123", gjson.GetBytes(upstream.lastBody, "metadata.client_trace").String())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "metadata.trace_copy").Exists())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "metadata.user_id").Exists())
+}
+
+func TestPassthroughFieldsV2OpenAIForward_StoresFinalOpsUpstreamRequestBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	body := []byte(`{"model":"gpt-5","input":"hello","service_tier":"auto"}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+
+	upstream := &openAIHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"resp_ops_1","object":"response","model":"gpt-5","service_tier":"default","usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`)),
+		},
+	}
+
+	svc := &OpenAIGatewayService{
+		cfg: &config.Config{
+			Security: config.SecurityConfig{
+				URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+			},
+		},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:          403,
+		Name:        "openai-apikey-v2-ops-body",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "upstream-openai-key",
+			"base_url": "https://example.com/v1",
+		},
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "body", Mode: "inject", Key: "service_tier", Value: "default"},
+			},
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	rawBody, ok := c.Get(OpsUpstreamRequestBodyKey)
+	require.True(t, ok)
+	opsBody, ok := rawBody.([]byte)
+	require.True(t, ok)
+	require.JSONEq(t, string(upstream.lastBody), string(opsBody))
+	require.Equal(t, "default", gjson.GetBytes(opsBody, "service_tier").String())
+}
+
+func TestPassthroughFieldsV2OpenAIForward_BodyPathConflictReturnsError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	body := []byte(`{"model":"gpt-5","metadata":"string","input":"hello"}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+
+	upstream := &openAIHTTPUpstreamRecorder{}
+	svc := &OpenAIGatewayService{
+		cfg: &config.Config{
+			Security: config.SecurityConfig{
+				URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+			},
+		},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:          403,
+		Name:        "openai-apikey-v2-conflict",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "upstream-openai-key",
+			"base_url": "https://example.com/v1",
+		},
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "body", Mode: "inject", Key: "metadata.user_id", Value: "user-1"},
+			},
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, body)
+	require.Nil(t, result)
+	require.EqualError(t, err, "invalid_request_error: passthrough body path conflicts with non-object node: metadata")
+	require.Nil(t, upstream.lastReq)
+}
+
+func TestPassthroughFieldsV2OpenAIBuildUpstreamRequest_HeaderMapSkipsExistingBaseOutbound(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5"}`)))
+	c.Request.Header.Set("X-Source-Trace", "mapped-trace")
+	c.Request.Header.Set("conversation_id", "conv-existing")
+
+	svc := &OpenAIGatewayService{cfg: &config.Config{
+		Security: config.SecurityConfig{
+			URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+		},
+	}}
+	account := &Account{
+		Type:     AccountTypeAPIKey,
+		Platform: PlatformOpenAI,
+		Credentials: map[string]any{
+			"base_url": "https://example.com/v1",
+		},
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "header", Mode: "map", Key: "conversation_id", SourceKey: "X-Source-Trace"},
+				{Target: "header", Mode: "forward", Key: "X-Source-Trace"},
+			},
+		},
+	}
+
+	req, err := svc.buildUpstreamRequestWithSourceBody(c.Request.Context(), c, account, []byte(`{"model":"gpt-5"}`), []byte(`{"model":"gpt-5"}`), "token", false, "", false)
+	require.NoError(t, err)
+	require.Equal(t, "conv-existing", req.Header.Get("conversation_id"))
+	require.Equal(t, "mapped-trace", req.Header.Get("X-Source-Trace"))
 }
 
 func TestOpenAIBuildUpstreamRequestOAuthOfficialClientOriginatorCompatibility(t *testing.T) {
@@ -2838,6 +3394,82 @@ func TestOpenAICompatSSEFrameParserResetsEventTypeAtFrameBoundary(t *testing.T) 
 	require.True(t, ok)
 	require.Empty(t, frame.EventType)
 	require.JSONEq(t, `{"delta":"ok"}`, frame.Data)
+}
+
+func TestOpenAIGatewayService_ReattachSkipsProbeDisabledAccount(t *testing.T) {
+	now := time.Now()
+	future := now.Add(10 * time.Minute)
+	reason, err := buildLayeredProbeTempUnschedReason("consecutive_failures", 3)
+	require.NoError(t, err)
+
+	repo := &startupRecoveryRepoStub{tempUnschedAccounts: []Account{{
+		ID:                      201,
+		Platform:                PlatformOpenAI,
+		Type:                    AccountTypeAPIKey,
+		Status:                  StatusActive,
+		Schedulable:             true,
+		TempUnschedulableUntil:  &future,
+		TempUnschedulableReason: reason,
+		Extra:                   map[string]any{"openai_probe_enabled": false},
+	}}}
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	snapshot := &SchedulerSnapshotService{}
+	svc := &OpenAIGatewayService{accountRepo: repo, cfg: cfg, schedulerSnapshot: snapshot}
+
+	svc.StartOpenAIBackgroundRecovery()
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	scheduler := svc.getOpenAIAccountScheduler()
+	layered, ok := scheduler.(*layeredOpenAIAccountScheduler)
+	require.True(t, ok)
+
+	// Startup should skip (Task 3.2's guard). Now trigger runtime reattach to verify this guard too.
+	require.NoError(t, snapshot.handleAccountEvent(context.Background(), ptrInt64(201), nil))
+
+	_, present := layered.probe.entries.Load(int64(201))
+	require.False(t, present, "ReattachLayeredProbeTempUnschedAccount must skip probe-disabled accounts")
+}
+
+func TestOpenAIGatewayService_DropProbeEntry_RemovesExistingEntry(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	svc := &OpenAIGatewayService{cfg: cfg}
+
+	scheduler := svc.getOpenAIAccountScheduler()
+	layered, ok := scheduler.(*layeredOpenAIAccountScheduler)
+	require.True(t, ok)
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	layered.probe.entries.Store(int64(411), &openAIAccountProbeEntry{accountID: 411})
+
+	svc.DropProbeEntry(411)
+
+	_, present := layered.probe.entries.Load(int64(411))
+	require.False(t, present, "DropProbeEntry must remove the entry")
+}
+
+func TestOpenAIGatewayService_DropProbeEntry_NoopWhenEntryAbsent(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	svc := &OpenAIGatewayService{cfg: cfg}
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	require.NotPanics(t, func() { svc.DropProbeEntry(412) })
+}
+
+func TestOpenAIGatewayService_DropProbeEntry_NoopForNonLayeredScheduler(t *testing.T) {
+	svc := &OpenAIGatewayService{
+		openaiScheduler: &defaultOpenAIAccountScheduler{},
+	}
+
+	require.NotPanics(t, func() { svc.DropProbeEntry(413) })
+}
+
+func TestOpenAIGatewayService_DropProbeEntry_NoopForZeroID(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	require.NotPanics(t, func() { svc.DropProbeEntry(0) })
+	require.NotPanics(t, func() { svc.DropProbeEntry(-1) })
 }
 
 func TestStreamingPassthroughCyberPolicyMarksAndPassesThrough(t *testing.T) {

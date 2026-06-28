@@ -66,6 +66,8 @@ func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) er
 		SetRequirePrivacySet(groupIn.RequirePrivacySet).
 		SetDefaultMappedModel(groupIn.DefaultMappedModel).
 		SetMessagesDispatchModelConfig(groupIn.MessagesDispatchModelConfig).
+		SetUserConcurrencyEnabled(groupIn.UserConcurrencyEnabled).
+		SetUserConcurrencyLimit(groupIn.UserConcurrencyLimit).
 		SetModelsListConfig(groupIn.ModelsListConfig).
 		SetRpmLimit(groupIn.RPMLimit).
 		SetPeakRateEnabled(groupIn.PeakRateEnabled).
@@ -146,6 +148,8 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetRequirePrivacySet(groupIn.RequirePrivacySet).
 		SetDefaultMappedModel(groupIn.DefaultMappedModel).
 		SetMessagesDispatchModelConfig(groupIn.MessagesDispatchModelConfig).
+		SetUserConcurrencyEnabled(groupIn.UserConcurrencyEnabled).
+		SetUserConcurrencyLimit(groupIn.UserConcurrencyLimit).
 		SetModelsListConfig(groupIn.ModelsListConfig).
 		SetRpmLimit(groupIn.RPMLimit).
 		SetPeakRateEnabled(groupIn.PeakRateEnabled).

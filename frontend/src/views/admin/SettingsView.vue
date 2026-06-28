@@ -9,7 +9,7 @@
       </div>
 
       <!-- Settings Form -->
-      <form v-else @submit.prevent="saveSettings" class="space-y-6" novalidate>
+      <form v-else data-testid="settings-form" @submit.prevent="saveSettings" class="space-y-6" novalidate>
         <!-- Tab Navigation -->
         <div class="settings-tabs-shell">
           <nav
@@ -203,6 +203,179 @@
 
         <!-- Tab: Gateway -->
         <div v-show="activeTab === 'gateway'" class="space-y-6">
+          <!-- Gateway Runtime Settings -->
+          <div class="card">
+            <div
+              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
+            >
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                {{ t("admin.settings.gatewayRuntime.title") }}
+              </h2>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {{ t("admin.settings.gatewayRuntime.description") }}
+              </p>
+            </div>
+            <div class="space-y-5 p-6">
+              <div
+                v-if="gatewayRuntimeLoading"
+                class="flex items-center gap-2 text-gray-500"
+              >
+                <div
+                  class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"
+                ></div>
+                {{ t("common.loading") }}
+              </div>
+
+              <template v-else>
+                <div
+                  v-if="gatewayRuntimeLoadFailed"
+                  class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300"
+                >
+                  {{ t("admin.settings.gatewayRuntime.loadFailedInline") }}
+                </div>
+
+                <div class="space-y-2">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {{ t("admin.settings.gatewayRuntime.responseHeaderTimeout") }}
+                    </label>
+                    <code
+                      class="select-all break-all rounded bg-gray-50 px-2 py-1 font-mono text-xs text-gray-600 dark:bg-dark-800 dark:text-gray-300"
+                    >
+                      gateway.response_header_timeout
+                    </code>
+                  </div>
+                  <input
+                    v-model.number="gatewayRuntimeForm.response_header_timeout"
+                    data-testid="gateway-runtime-response-header-timeout"
+                    type="number"
+                    min="1"
+                    class="input w-40"
+                  />
+                  <p class="text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.gatewayRuntime.responseHeaderTimeoutHint") }}
+                  </p>
+                  <div
+                    class="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-900/20"
+                  >
+                    <div class="flex items-start">
+                      <Icon
+                        name="exclamationTriangle"
+                        size="md"
+                        class="mt-0.5 flex-shrink-0 text-amber-500"
+                      />
+                      <p class="ml-3 text-sm text-amber-700 dark:text-amber-300">
+                        {{ t("admin.settings.gatewayRuntime.responseHeaderTimeoutWarning") }}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="space-y-2 border-t border-gray-100 pt-4 dark:border-dark-700">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {{ t("admin.settings.gatewayRuntime.streamDataIntervalTimeout") }}
+                    </label>
+                    <code
+                      class="select-all break-all rounded bg-gray-50 px-2 py-1 font-mono text-xs text-gray-600 dark:bg-dark-800 dark:text-gray-300"
+                    >
+                      gateway.stream_data_interval_timeout
+                    </code>
+                  </div>
+                  <input
+                    v-model.number="gatewayRuntimeForm.stream_data_interval_timeout"
+                    data-testid="gateway-runtime-stream-interval-timeout"
+                    type="number"
+                    min="0"
+                    max="300"
+                    class="input w-40"
+                  />
+                  <p class="text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.gatewayRuntime.streamDataIntervalTimeoutHint") }}
+                  </p>
+                </div>
+
+                <div class="space-y-2 border-t border-gray-100 pt-4 dark:border-dark-700">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {{ t("admin.settings.gatewayRuntime.usageLogDetailRetentionLimit") }}
+                    </label>
+                    <code
+                      class="select-all break-all rounded bg-gray-50 px-2 py-1 font-mono text-xs text-gray-600 dark:bg-dark-800 dark:text-gray-300"
+                    >
+                      gateway.usage_log_detail_retention_limit
+                    </code>
+                  </div>
+                  <input
+                    v-model.number="gatewayRuntimeForm.usage_log_detail_retention_limit"
+                    data-testid="gateway-runtime-usage-log-detail-retention-limit"
+                    type="number"
+                    min="0"
+                    class="input w-40"
+                  />
+                  <p class="text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.gatewayRuntime.usageLogDetailRetentionLimitHint") }}
+                  </p>
+                </div>
+
+                <div class="space-y-2 border-t border-gray-100 pt-4 dark:border-dark-700">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {{ t("admin.settings.gatewayRuntime.imageUsageLogDetailRetentionLimit") }}
+                    </label>
+                    <code
+                      class="select-all break-all rounded bg-gray-50 px-2 py-1 font-mono text-xs text-gray-600 dark:bg-dark-800 dark:text-gray-300"
+                    >
+                      gateway.image_usage_log_detail_retention_limit
+                    </code>
+                  </div>
+                  <input
+                    v-model.number="gatewayRuntimeForm.image_usage_log_detail_retention_limit"
+                    data-testid="gateway-runtime-image-usage-log-detail-retention-limit"
+                    type="number"
+                    min="0"
+                    class="input w-40"
+                  />
+                  <p class="text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.gatewayRuntime.imageUsageLogDetailRetentionLimitHint") }}
+                  </p>
+                </div>
+
+                <div class="flex justify-end border-t border-gray-100 pt-4 dark:border-dark-700">
+                  <button
+                    type="button"
+                    data-testid="gateway-runtime-save"
+                    @click="saveGatewayRuntimeSettings"
+                    :disabled="gatewayRuntimeSaving || gatewayRuntimeLoadFailed"
+                    class="btn btn-primary btn-sm"
+                  >
+                    <svg
+                      v-if="gatewayRuntimeSaving"
+                      class="mr-1 h-4 w-4 animate-spin"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        class="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        stroke-width="4"
+                      ></circle>
+                      <path
+                        class="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      ></path>
+                    </svg>
+                    {{ gatewayRuntimeSaving ? t("common.saving") : t("common.save") }}
+                  </button>
+                </div>
+              </template>
+            </div>
+          </div>
+
           <!-- Overload Cooldown (529) Settings -->
           <div class="card">
             <div
@@ -4017,6 +4190,114 @@
             </div>
           </div>
 
+          <div class="card">
+            <div
+              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
+            >
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                {{ t("admin.settings.gatewaySticky.title") }}
+              </h2>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {{ t("admin.settings.gatewaySticky.description") }}
+              </p>
+            </div>
+            <div class="space-y-5 p-6">
+              <div class="flex items-center justify-between">
+                <div>
+                  <label class="text-sm font-medium text-gray-700 dark:text-gray-300">OpenAI</label>
+                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.gatewaySticky.openaiHint") }}
+                  </p>
+                </div>
+                <Toggle data-testid="gateway-sticky-openai-enabled" v-model="form.gateway_sticky_openai_enabled" />
+              </div>
+              <div class="flex items-center justify-between">
+                <div>
+                  <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Gemini</label>
+                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.gatewaySticky.geminiHint") }}
+                  </p>
+                </div>
+                <Toggle data-testid="gateway-sticky-gemini-enabled" v-model="form.gateway_sticky_gemini_enabled" />
+              </div>
+              <div class="flex items-center justify-between">
+                <div>
+                  <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Anthropic</label>
+                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.gatewaySticky.anthropicHint") }}
+                  </p>
+                </div>
+                <Toggle data-testid="gateway-sticky-anthropic-enabled" v-model="form.gateway_sticky_anthropic_enabled" />
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div
+              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
+            >
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                {{ t("admin.settings.openaiWsScheduler.title") }}
+              </h2>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {{ t("admin.settings.openaiWsScheduler.description") }}
+              </p>
+            </div>
+            <div class="space-y-5 p-6">
+              <div class="space-y-2">
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t("admin.settings.openaiWsScheduler.mode") }}
+                </label>
+                <select data-testid="gateway-openai-ws-scheduler-mode" v-model="form.gateway_openai_ws_scheduler_mode" class="input max-w-xs">
+                  <option value="weighted">weighted</option>
+                  <option value="layered">layered</option>
+                </select>
+                <p class="text-xs text-gray-500 dark:text-gray-400">
+                  {{ t("admin.settings.openaiWsScheduler.modeHint") }}
+                </p>
+              </div>
+
+              <div v-if="form.gateway_openai_ws_scheduler_mode === 'layered'" class="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label class="input-label">{{ t("admin.settings.openaiWsScheduler.errorPenaltyThreshold") }}</label>
+                  <input data-testid="gateway-openai-ws-scheduler-layered-error-penalty-threshold" v-model.number="form.gateway_openai_ws_scheduler_layered_error_penalty_threshold" type="number" min="0.01" max="1" step="0.01" class="input" />
+                </div>
+                <div>
+                  <label class="input-label">{{ t("admin.settings.openaiWsScheduler.errorPenaltyValue") }}</label>
+                  <input data-testid="gateway-openai-ws-scheduler-layered-error-penalty-value" v-model.number="form.gateway_openai_ws_scheduler_layered_error_penalty_value" type="number" min="1" step="1" class="input" />
+                </div>
+                <div>
+                  <label class="input-label">{{ t("admin.settings.openaiWsScheduler.ttftPenaltyMultiplier") }}</label>
+                  <input data-testid="gateway-openai-ws-scheduler-layered-ttft-penalty-multiplier" v-model.number="form.gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier" type="number" min="1.01" step="0.01" class="input" />
+                </div>
+                <div>
+                  <label class="input-label">{{ t("admin.settings.openaiWsScheduler.ttftPenaltyValue") }}</label>
+                  <input data-testid="gateway-openai-ws-scheduler-layered-ttft-penalty-value" v-model.number="form.gateway_openai_ws_scheduler_layered_ttft_penalty_value" type="number" min="1" step="1" class="input" />
+                </div>
+                <div>
+                  <label class="input-label">{{ t("admin.settings.openaiWsScheduler.probeCooldownSeconds") }}</label>
+                  <input data-testid="gateway-openai-ws-scheduler-layered-probe-cooldown-seconds" v-model.number="form.gateway_openai_ws_scheduler_layered_probe_cooldown_seconds" type="number" min="1" step="1" class="input" />
+                </div>
+                <div>
+                  <label class="input-label">{{ t("admin.settings.openaiWsScheduler.probeIntervalSeconds") }}</label>
+                  <input data-testid="gateway-openai-ws-scheduler-layered-probe-interval-seconds" v-model.number="form.gateway_openai_ws_scheduler_layered_probe_interval_seconds" type="number" min="1" step="1" class="input" />
+                </div>
+                <div>
+                  <label class="input-label">{{ t("admin.settings.openaiWsScheduler.probeMaxFailures") }}</label>
+                  <input data-testid="gateway-openai-ws-scheduler-layered-probe-max-failures" v-model.number="form.gateway_openai_ws_scheduler_layered_probe_max_failures" type="number" min="1" step="1" class="input" />
+                </div>
+                <div>
+                  <label class="input-label">{{ t("admin.settings.openaiWsScheduler.probeTimeoutSeconds") }}</label>
+                  <input data-testid="gateway-openai-ws-scheduler-layered-probe-timeout-seconds" v-model.number="form.gateway_openai_ws_scheduler_layered_probe_timeout_seconds" type="number" min="1" step="1" class="input" />
+                </div>
+                <div>
+                  <label class="input-label">{{ t("admin.settings.openaiWsScheduler.probeTempUnschedulableSeconds") }}</label>
+                  <input data-testid="gateway-openai-ws-scheduler-layered-probe-temp-unschedulable-seconds" v-model.number="form.gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds" type="number" min="1" step="1" class="input" />
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- Gateway Forwarding Behavior -->
           <div class="card">
             <div
@@ -7143,6 +7424,7 @@
         <div v-show="activeTab !== 'backup'" class="flex justify-end">
           <button
             type="submit"
+            data-testid="settings-save"
             :disabled="saving || loadFailed"
             class="btn btn-primary"
           >
@@ -7227,6 +7509,7 @@ import {
 import type {
   AuthSourceDefaultsState,
   AuthSourceType,
+  GatewayRuntimeSettings,
   SystemSettings,
   UpdateSettingsRequest,
   DefaultSubscriptionSetting,
@@ -7390,6 +7673,17 @@ const adminApiKeyMasked = ref("");
 const adminApiKeyOperating = ref(false);
 const newAdminApiKey = ref("");
 const subscriptionGroups = ref<AdminGroup[]>([]);
+
+// Gateway Runtime 状态
+const gatewayRuntimeLoading = ref(true);
+const gatewayRuntimeSaving = ref(false);
+const gatewayRuntimeLoadFailed = ref(false);
+const gatewayRuntimeForm = reactive<GatewayRuntimeSettings>({
+  response_header_timeout: 600,
+  stream_data_interval_timeout: 180,
+  usage_log_detail_retention_limit: 300,
+  image_usage_log_detail_retention_limit: 300,
+});
 
 // Overload Cooldown (529) 状态
 const overloadCooldownLoading = ref(true);
@@ -7939,6 +8233,8 @@ const form = reactive<SettingsForm>({
   home_content: "",
   backend_mode_enabled: false,
   hide_ccs_import_button: false,
+  purchase_subscription_enabled: false,
+  purchase_subscription_url: "",
   payment_enabled: false,
   risk_control_enabled: false,
   cyber_session_block_enabled: false,
@@ -8093,6 +8389,19 @@ const form = reactive<SettingsForm>({
   max_claude_code_version: "",
   // 分组隔离
   allow_ungrouped_key_scheduling: false,
+  gateway_sticky_openai_enabled: true,
+  gateway_sticky_gemini_enabled: true,
+  gateway_sticky_anthropic_enabled: true,
+  gateway_openai_ws_scheduler_mode: "weighted",
+  gateway_openai_ws_scheduler_layered_error_penalty_threshold: 0.3,
+  gateway_openai_ws_scheduler_layered_error_penalty_value: 100,
+  gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier: 3,
+  gateway_openai_ws_scheduler_layered_ttft_penalty_value: 50,
+  gateway_openai_ws_scheduler_layered_probe_cooldown_seconds: 60,
+  gateway_openai_ws_scheduler_layered_probe_interval_seconds: 30,
+  gateway_openai_ws_scheduler_layered_probe_max_failures: 3,
+  gateway_openai_ws_scheduler_layered_probe_timeout_seconds: 15,
+  gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds: 1800,
   openai_advanced_scheduler_enabled: false,
   // Gateway forwarding behavior
   enable_fingerprint_unification: true,
@@ -9296,6 +9605,28 @@ async function saveSettings() {
       min_claude_code_version: form.min_claude_code_version,
       max_claude_code_version: form.max_claude_code_version,
       allow_ungrouped_key_scheduling: form.allow_ungrouped_key_scheduling,
+      gateway_sticky_openai_enabled: form.gateway_sticky_openai_enabled,
+      gateway_sticky_gemini_enabled: form.gateway_sticky_gemini_enabled,
+      gateway_sticky_anthropic_enabled: form.gateway_sticky_anthropic_enabled,
+      gateway_openai_ws_scheduler_mode: form.gateway_openai_ws_scheduler_mode,
+      gateway_openai_ws_scheduler_layered_error_penalty_threshold:
+        form.gateway_openai_ws_scheduler_layered_error_penalty_threshold,
+      gateway_openai_ws_scheduler_layered_error_penalty_value:
+        form.gateway_openai_ws_scheduler_layered_error_penalty_value,
+      gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier:
+        form.gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier,
+      gateway_openai_ws_scheduler_layered_ttft_penalty_value:
+        form.gateway_openai_ws_scheduler_layered_ttft_penalty_value,
+      gateway_openai_ws_scheduler_layered_probe_cooldown_seconds:
+        form.gateway_openai_ws_scheduler_layered_probe_cooldown_seconds,
+      gateway_openai_ws_scheduler_layered_probe_interval_seconds:
+        form.gateway_openai_ws_scheduler_layered_probe_interval_seconds,
+      gateway_openai_ws_scheduler_layered_probe_max_failures:
+        form.gateway_openai_ws_scheduler_layered_probe_max_failures,
+      gateway_openai_ws_scheduler_layered_probe_timeout_seconds:
+        form.gateway_openai_ws_scheduler_layered_probe_timeout_seconds,
+      gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds:
+        form.gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds,
       enable_fingerprint_unification: form.enable_fingerprint_unification,
       enable_metadata_passthrough: form.enable_metadata_passthrough,
       enable_cch_signing: form.enable_cch_signing,
@@ -9612,6 +9943,99 @@ function copyNewKey() {
     .catch(() => {
       appStore.showError(t("common.copyFailed"));
     });
+}
+
+// Gateway Runtime 方法
+async function loadGatewayRuntimeSettings() {
+  gatewayRuntimeLoading.value = true;
+  gatewayRuntimeLoadFailed.value = false;
+  try {
+    const settings = await adminAPI.settings.getGatewayRuntimeSettings();
+    Object.assign(gatewayRuntimeForm, settings);
+  } catch (error: unknown) {
+    gatewayRuntimeLoadFailed.value = true;
+    const message =
+      error instanceof Error ? error.message : t("common.unknownError");
+    appStore.showError(
+      `${t("admin.settings.gatewayRuntime.loadFailed")}: ${message}`,
+    );
+  } finally {
+    gatewayRuntimeLoading.value = false;
+  }
+}
+
+function normalizeGatewayRuntimeNumber(value: unknown): number | null {
+  if (typeof value === "string" && value.trim() === "") {
+    return null;
+  }
+
+  const normalized = Number(value);
+  return Number.isFinite(normalized) ? normalized : null;
+}
+
+function buildGatewayRuntimePayload(): GatewayRuntimeSettings | null {
+  const responseHeaderTimeout = normalizeGatewayRuntimeNumber(
+    gatewayRuntimeForm.response_header_timeout,
+  );
+  const streamDataIntervalTimeout = normalizeGatewayRuntimeNumber(
+    gatewayRuntimeForm.stream_data_interval_timeout,
+  );
+  const usageLogDetailRetentionLimit = normalizeGatewayRuntimeNumber(
+    gatewayRuntimeForm.usage_log_detail_retention_limit,
+  );
+  const imageUsageLogDetailRetentionLimit = normalizeGatewayRuntimeNumber(
+    gatewayRuntimeForm.image_usage_log_detail_retention_limit,
+  );
+
+  if (
+    responseHeaderTimeout === null ||
+    responseHeaderTimeout < 1 ||
+    streamDataIntervalTimeout === null ||
+    !(
+      streamDataIntervalTimeout === 0 ||
+      (streamDataIntervalTimeout >= 30 && streamDataIntervalTimeout <= 300)
+    ) ||
+    usageLogDetailRetentionLimit === null ||
+    usageLogDetailRetentionLimit < 0 ||
+    imageUsageLogDetailRetentionLimit === null ||
+    imageUsageLogDetailRetentionLimit < 0
+  ) {
+    return null;
+  }
+
+  return {
+    response_header_timeout: responseHeaderTimeout,
+    stream_data_interval_timeout: streamDataIntervalTimeout,
+    usage_log_detail_retention_limit: usageLogDetailRetentionLimit,
+    image_usage_log_detail_retention_limit: imageUsageLogDetailRetentionLimit,
+  };
+}
+
+async function saveGatewayRuntimeSettings() {
+  if (gatewayRuntimeLoadFailed.value) {
+    return;
+  }
+
+  const payload = buildGatewayRuntimePayload();
+  if (!payload) {
+    appStore.showError(t("admin.settings.gatewayRuntime.validationFailed"));
+    return;
+  }
+
+  gatewayRuntimeSaving.value = true;
+  try {
+    const updated = await adminAPI.settings.updateGatewayRuntimeSettings(payload);
+    Object.assign(gatewayRuntimeForm, updated);
+    appStore.showSuccess(t("admin.settings.gatewayRuntime.saved"));
+  } catch (error: unknown) {
+    const message =
+      error instanceof Error ? error.message : t("common.unknownError");
+    appStore.showError(
+      `${t("admin.settings.gatewayRuntime.saveFailed")}: ${message}`,
+    );
+  } finally {
+    gatewayRuntimeSaving.value = false;
+  }
 }
 
 // Overload Cooldown 方法
@@ -10305,6 +10729,7 @@ onMounted(() => {
   loadSettings();
   loadSubscriptionGroups();
   loadAdminApiKey();
+  loadGatewayRuntimeSettings();
   loadOverloadCooldownSettings();
   loadRateLimit429CooldownSettings();
   loadStreamTimeoutSettings();

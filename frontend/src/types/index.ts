@@ -91,8 +91,10 @@ export interface User {
   status: 'active' | 'disabled' // Account status
   allowed_groups: number[] | null // Allowed group IDs (null = all non-exclusive groups)
   balance_notify_enabled: boolean
+  balance_notify_threshold_type: string
   balance_notify_threshold: number | null
   balance_notify_extra_emails: NotifyEmailEntry[]
+  total_recharged: number
   subscriptions?: UserSubscription[] // User's active subscriptions
   last_active_at?: string | null
   created_at: string
@@ -425,6 +427,113 @@ export interface UserStats {
   last_conversion: string | null
 }
 
+// ==================== Image Types ====================
+
+export type ImageHistoryMode = 'generate' | 'edit'
+
+export type ImageHistoryStatus = 'success' | 'error'
+
+export interface ImageHistoryListParams {
+  tab?: ImageHistoryMode
+  status?: ImageHistoryStatus
+  api_key_id?: number
+  page?: number
+  page_size?: number
+}
+
+export interface ImageHistoryListItem {
+  id: number
+  api_key_id: number
+  api_key_name?: string
+  api_key_masked?: string
+  mode: ImageHistoryMode
+  status: ImageHistoryStatus
+  model: string
+  prompt?: string
+  image_count: number
+  image_size?: string
+  actual_cost: number
+  duration_ms?: number
+  created_at: string
+}
+
+export interface ImageHistoryImage {
+  data_url: string
+  revised_prompt?: string
+}
+
+export interface ImageHistoryReplay {
+  mode: ImageHistoryMode
+  model: string
+  prompt?: string
+  size?: string
+  quality?: string
+  background?: string
+  output_format?: string
+  moderation?: string
+  n: number
+  requires_source_image_upload: boolean
+  requires_mask_upload: boolean
+}
+
+export interface ImageHistoryDetail {
+  id: number
+  api_key_id: number
+  api_key_name?: string
+  api_key_masked?: string
+  mode: ImageHistoryMode
+  status: ImageHistoryStatus
+  model: string
+  prompt?: string
+  size?: string
+  quality?: string
+  background?: string
+  output_format?: string
+  moderation?: string
+  n: number
+  had_source_image: boolean
+  had_mask: boolean
+  images?: ImageHistoryImage[]
+  error_message?: string
+  duration_ms?: number
+  replay: ImageHistoryReplay
+  created_at: string
+}
+
+export interface ImageGenerationRequest {
+  prompt: string
+  model?: string
+  background?: string
+  moderation?: string
+  n?: number
+  output_compression?: number
+  output_format?: string
+  quality?: string
+  response_format?: string
+  size?: string
+  stream?: boolean
+  style?: string
+  user?: string
+  [key: string]: unknown
+}
+
+export type ImageGatewayDataItem =
+  | {
+      b64_json: string
+      url?: never
+      revised_prompt?: string
+    }
+  | {
+      url: string
+      b64_json?: never
+      revised_prompt?: string
+    }
+
+export interface ImageGatewayResponse {
+  created: number
+  data: ImageGatewayDataItem[]
+}
+
 // ==================== API Response Types ====================
 
 export interface ApiResponse<T = unknown> {
@@ -531,6 +640,9 @@ export interface Group {
   claude_code_only: boolean
   fallback_group_id: number | null
   fallback_group_id_on_invalid_request: number | null
+  // 分组级用户并发限制
+  user_concurrency_enabled: boolean
+  user_concurrency_limit: number
   // OpenAI Messages 调度开关（用户侧需要此字段判断是否展示 Claude Code 教程）
   allow_messages_dispatch?: boolean
   default_mapped_model?: string
@@ -652,6 +764,8 @@ export interface CreateGroupRequest {
   claude_code_only?: boolean
   fallback_group_id?: number | null
   fallback_group_id_on_invalid_request?: number | null
+  user_concurrency_enabled?: boolean
+  user_concurrency_limit?: number
   mcp_xml_inject?: boolean
   supported_model_scopes?: string[]
   models_list_config?: ModelsListConfig
@@ -691,6 +805,8 @@ export interface UpdateGroupRequest {
   claude_code_only?: boolean
   fallback_group_id?: number | null
   fallback_group_id_on_invalid_request?: number | null
+  user_concurrency_enabled?: boolean
+  user_concurrency_limit?: number
   mcp_xml_inject?: boolean
   supported_model_scopes?: string[]
   models_list_config?: ModelsListConfig
@@ -834,6 +950,35 @@ export interface TempUnschedulableStatus {
   state?: TempUnschedulableState
 }
 
+export interface AccountPassthroughFieldRule {
+  target: 'header' | 'body'
+  mode: 'forward' | 'inject' | 'map' | 'delete'
+  key: string
+  source_key?: string
+  value?: string
+}
+
+export interface AccountPassthroughExtra {
+  passthrough_fields_enabled?: boolean
+  passthrough_field_rules?: AccountPassthroughFieldRule[]
+}
+
+export interface AccountWebSearchExtra {
+  web_search_emulation?: 'default' | 'enabled' | 'disabled' | boolean
+}
+
+export interface AccountQuotaNotifyExtra {
+  quota_notify_daily_enabled?: boolean
+  quota_notify_daily_threshold?: number
+  quota_notify_daily_threshold_type?: 'fixed' | 'percentage'
+  quota_notify_weekly_enabled?: boolean
+  quota_notify_weekly_threshold?: number
+  quota_notify_weekly_threshold_type?: 'fixed' | 'percentage'
+  quota_notify_total_enabled?: boolean
+  quota_notify_total_threshold?: number
+  quota_notify_total_threshold_type?: 'fixed' | 'percentage'
+}
+
 export interface Account {
   id: number
   name: string
@@ -850,7 +995,7 @@ export interface Account {
   extra?: (CodexUsageSnapshot & OpenAICompactState & {
     model_rate_limits?: Record<string, { rate_limited_at: string; rate_limit_reset_at: string }>
     antigravity_credits_overages?: Record<string, { activated_at: string; active_until: string }>
-  } & Record<string, unknown>)
+  } & AccountPassthroughExtra & AccountWebSearchExtra & AccountQuotaNotifyExtra & Record<string, unknown>)
   proxy_id: number | null
   proxy_fallback_origin_id?: number | null
   proxy_fallback_origin_name?: string | null
@@ -1070,7 +1215,7 @@ export interface CreateAccountRequest {
   platform: AccountPlatform
   type: AccountType
   credentials: Record<string, unknown>
-  extra?: Record<string, unknown>
+  extra?: AccountPassthroughExtra & AccountWebSearchExtra & AccountQuotaNotifyExtra & Record<string, unknown>
   proxy_id?: number | null
   concurrency?: number
   load_factor?: number | null
@@ -1087,7 +1232,7 @@ export interface UpdateAccountRequest {
   notes?: string | null
   type?: AccountType
   credentials?: Record<string, unknown>
-  extra?: Record<string, unknown>
+  extra?: AccountPassthroughExtra & AccountWebSearchExtra & AccountQuotaNotifyExtra & Record<string, unknown>
   proxy_id?: number | null
   concurrency?: number
   load_factor?: number | null
@@ -1341,6 +1486,8 @@ export interface UsageLogAccountSummary {
 }
 
 export interface AdminUsageLog extends UsageLog {
+  // 是否存在明细数据（仅管理员可见）
+  has_detail: boolean
   upstream_model?: string | null
   model_mapping_chain?: string | null
 
@@ -1355,6 +1502,50 @@ export interface AdminUsageLog extends UsageLog {
 
   // 最小账号信息（仅管理员接口返回）
   account?: UsageLogAccountSummary
+}
+
+export interface AdminUsageDetail {
+  usage_log_id: number
+  request_headers: string | null
+  request_body: string | null
+  upstream_request_headers: string | null
+  upstream_request_body: string | null
+  response_headers: string | null
+  response_body: string | null
+  upstream_response_headers: string | null
+  upstream_response_body: string | null
+  created_at: string
+}
+
+export interface AdminUsageStatsResponse {
+  total_requests: number
+  total_input_tokens: number
+  total_output_tokens: number
+  total_cache_tokens: number
+  total_cache_creation_tokens: number
+  total_cache_read_tokens: number
+  total_tokens: number
+  total_cost: number
+  total_actual_cost: number
+  total_account_cost?: number
+  average_duration_ms: number
+  endpoints?: EndpointStat[]
+  upstream_endpoints?: EndpointStat[]
+  endpoint_paths?: EndpointStat[]
+}
+
+export interface SimpleUser {
+  id: number
+  email: string
+  /** May be empty string '' for legacy users; UI falls back to email when falsy */
+  username: string
+  deleted?: boolean
+}
+
+export interface SimpleApiKey {
+  id: number
+  name: string
+  user_id: number
 }
 
 export interface UsageCleanupFilters {
@@ -1383,6 +1574,28 @@ export interface UsageCleanupTask {
   finished_at?: string | null
   created_at: string
   updated_at: string
+}
+
+export interface CreateUsageCleanupTaskRequest {
+  start_date: string
+  end_date: string
+  user_id?: number
+  api_key_id?: number
+  account_id?: number
+  group_id?: number
+  model?: string | null
+  request_type?: UsageRequestType | null
+  stream?: boolean | null
+  billing_type?: number | null
+  timezone?: string
+}
+
+export interface AdminUsageQueryParams extends UsageQueryParams {
+  user_id?: number
+  exact_total?: boolean
+  billing_mode?: string
+  sort_by?: string
+  sort_order?: 'asc' | 'desc'
 }
 
 export interface RedeemCode {
@@ -1548,6 +1761,7 @@ export interface GroupStat {
 export interface UserBreakdownItem {
   user_id: number
   email: string
+  username: string
   requests: number
   total_tokens: number
   cost: number
@@ -1569,6 +1783,7 @@ export interface UserUsageTrendPoint {
 export interface UserSpendingRankingItem {
   user_id: number
   email: string
+  username: string
   actual_cost: number
   requests: number
   tokens: number

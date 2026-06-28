@@ -92,6 +92,10 @@ const (
 	FieldMessagesDispatchModelConfig = "messages_dispatch_model_config"
 	// FieldModelsListConfig holds the string denoting the models_list_config field in the database.
 	FieldModelsListConfig = "models_list_config"
+	// FieldUserConcurrencyEnabled holds the string denoting the user_concurrency_enabled field in the database.
+	FieldUserConcurrencyEnabled = "user_concurrency_enabled"
+	// FieldUserConcurrencyLimit holds the string denoting the user_concurrency_limit field in the database.
+	FieldUserConcurrencyLimit = "user_concurrency_limit"
 	// FieldRpmLimit holds the string denoting the rpm_limit field in the database.
 	FieldRpmLimit = "rpm_limit"
 	// EdgeAPIKeys holds the string denoting the api_keys edge name in mutations.
@@ -207,6 +211,8 @@ var Columns = []string{
 	FieldDefaultMappedModel,
 	FieldMessagesDispatchModelConfig,
 	FieldModelsListConfig,
+	FieldUserConcurrencyEnabled,
+	FieldUserConcurrencyLimit,
 	FieldRpmLimit,
 }
 
@@ -305,6 +311,10 @@ var (
 	DefaultMessagesDispatchModelConfig domain.OpenAIMessagesDispatchModelConfig
 	// DefaultModelsListConfig holds the default value on creation for the "models_list_config" field.
 	DefaultModelsListConfig domain.GroupModelsListConfig
+	// DefaultUserConcurrencyEnabled holds the default value on creation for the "user_concurrency_enabled" field.
+	DefaultUserConcurrencyEnabled bool
+	// DefaultUserConcurrencyLimit holds the default value on creation for the "user_concurrency_limit" field.
+	DefaultUserConcurrencyLimit int
 	// DefaultRpmLimit holds the default value on creation for the "rpm_limit" field.
 	DefaultRpmLimit int
 )
@@ -485,6 +495,16 @@ func ByRequirePrivacySet(opts ...sql.OrderTermOption) OrderOption {
 // ByDefaultMappedModel orders the results by the default_mapped_model field.
 func ByDefaultMappedModel(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldDefaultMappedModel, opts...).ToFunc()
+}
+
+// ByUserConcurrencyEnabled orders the results by the user_concurrency_enabled field.
+func ByUserConcurrencyEnabled(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldUserConcurrencyEnabled, opts...).ToFunc()
+}
+
+// ByUserConcurrencyLimit orders the results by the user_concurrency_limit field.
+func ByUserConcurrencyLimit(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldUserConcurrencyLimit, opts...).ToFunc()
 }
 
 // ByRpmLimit orders the results by the rpm_limit field.

@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 type geminiCompatHTTPUpstreamStub struct {
@@ -716,6 +717,7 @@ func TestExtractGeminiUsage(t *testing.T) {
 			}
 			if got == nil {
 				t.Fatalf("期望返回非 nil，实际返回 nil")
+				return
 			}
 			if got.InputTokens != tt.wantUsage.InputTokens {
 				t.Errorf("InputTokens: 期望 %d，实际 %d", tt.wantUsage.InputTokens, got.InputTokens)
@@ -875,6 +877,498 @@ func TestParseGeminiRateLimitResetTime(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGeminiMessagesCompatService_Forward_PassthroughFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	originalApply := geminiApplyAccountPassthroughFieldsWithContext
+	defer func() {
+		geminiApplyAccountPassthroughFieldsWithContext = originalApply
+	}()
+
+	claudeBody := []byte(`{
+		"model":"gemini-2.5-flash",
+		"max_tokens":16,
+		"messages":[
+			{"role":"user","content":[{"type":"text","text":"hello gemini"}]}
+		]
+	}`)
+
+	upstreamRespBody := `{
+		"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}],
+		"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}
+	}`
+
+	tests := []struct {
+		name               string
+		account            *Account
+		wantInjectedHeader string
+		wantCandidateCount string
+		wantApplyCalls     int
+	}{
+		{
+			name: "enabled applies header and body inject to final gemini upstream body",
+			account: &Account{
+				ID:          301,
+				Name:        "gemini-apikey-passthrough-enabled",
+				Platform:    PlatformGemini,
+				Type:        AccountTypeAPIKey,
+				Concurrency: 1,
+				Credentials: map[string]any{
+					"api_key":  "gemini-upstream-key",
+					"base_url": "https://generativelanguage.googleapis.com",
+				},
+				Extra: map[string]any{
+					"passthrough_fields_enabled": true,
+					"passthrough_field_rules": []PassthroughFieldRule{
+						{Target: "header", Mode: "inject", Key: "X-Env", Value: "prod"},
+						{Target: "body", Mode: "inject", Key: "generationConfig.candidateCount", Value: "1"},
+					},
+				},
+				Status:      StatusActive,
+				Schedulable: true,
+			},
+			wantInjectedHeader: "prod",
+			wantCandidateCount: "1",
+			wantApplyCalls:     1,
+		},
+		{
+			name: "disabled leaves configured header and body fields inactive",
+			account: &Account{
+				ID:          302,
+				Name:        "gemini-apikey-passthrough-disabled",
+				Platform:    PlatformGemini,
+				Type:        AccountTypeAPIKey,
+				Concurrency: 1,
+				Credentials: map[string]any{
+					"api_key":  "gemini-upstream-key",
+					"base_url": "https://generativelanguage.googleapis.com",
+				},
+				Extra: map[string]any{
+					"passthrough_fields_enabled": false,
+					"passthrough_field_rules": []PassthroughFieldRule{
+						{Target: "header", Mode: "inject", Key: "X-Env", Value: "prod"},
+						{Target: "body", Mode: "inject", Key: "generationConfig.candidateCount", Value: "1"},
+					},
+				},
+				Status:      StatusActive,
+				Schedulable: true,
+			},
+			wantInjectedHeader: "",
+			wantCandidateCount: "",
+			wantApplyCalls:     1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			applyCalls := 0
+			geminiApplyAccountPassthroughFieldsWithContext = func(
+				ctx context.Context,
+				account *Account,
+				inbound http.Header,
+				sourceBody []byte,
+				targetBody []byte,
+				outbound http.Header,
+			) ([]byte, error) {
+				applyCalls++
+				return originalApply(ctx, account, inbound, sourceBody, targetBody, outbound)
+			}
+
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(string(claudeBody)))
+
+			upstream := &anthropicHTTPUpstreamRecorder{
+				resp: &http.Response{
+					StatusCode: http.StatusOK,
+					Header: http.Header{
+						"Content-Type": []string{"application/json"},
+						"x-request-id": []string{"rid-gemini-pass"},
+					},
+					Body: io.NopCloser(strings.NewReader(upstreamRespBody)),
+				},
+			}
+
+			svc := &GeminiMessagesCompatService{
+				cfg: &config.Config{
+					Security: config.SecurityConfig{
+						URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+					},
+				},
+				httpUpstream: upstream,
+			}
+
+			result, err := svc.Forward(context.Background(), c, tt.account, claudeBody)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+
+			require.Equal(t, tt.wantInjectedHeader, upstream.lastReq.Header.Get("X-Env"))
+			require.Equal(t, tt.wantCandidateCount, gjson.GetBytes(upstream.lastBody, "generationConfig.candidateCount").String())
+			require.Equal(t, tt.wantApplyCalls, applyCalls)
+		})
+	}
+}
+
+func TestGeminiMessagesCompatService_ForwardAIStudioGET_PassthroughHeaders(t *testing.T) {
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header: http.Header{
+				"Content-Type": []string{"application/json"},
+			},
+			Body: io.NopCloser(strings.NewReader(`{"models":[]}`)),
+		},
+	}
+
+	svc := &GeminiMessagesCompatService{
+		cfg: &config.Config{
+			Security: config.SecurityConfig{
+				URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+			},
+		},
+		httpUpstream: upstream,
+	}
+
+	account := &Account{
+		ID:          303,
+		Name:        "gemini-apikey-models-get",
+		Platform:    PlatformGemini,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "gemini-upstream-key",
+			"base_url": "https://generativelanguage.googleapis.com",
+		},
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "header", Mode: "inject", Key: "X-Env", Value: "prod"},
+				{Target: "header", Mode: "forward", Key: "X-Trace-Id"},
+			},
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	inbound := http.Header{"X-Trace-Id": []string{"trace-123"}}
+
+	result, err := svc.ForwardAIStudioGET(context.Background(), account, inbound, "/v1beta/models")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, http.MethodGet, upstream.lastReq.Method)
+	require.Equal(t, "prod", upstream.lastReq.Header.Get("X-Env"))
+	require.Equal(t, "trace-123", upstream.lastReq.Header.Get("X-Trace-Id"))
+}
+
+func TestGeminiMessagesCompatService_Forward_PreservesAccountAPIKeyOverPassthroughHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	originalApply := geminiApplyAccountPassthroughFieldsWithContext
+	defer func() {
+		geminiApplyAccountPassthroughFieldsWithContext = originalApply
+	}()
+
+	geminiApplyAccountPassthroughFieldsWithContext = func(
+		ctx context.Context,
+		account *Account,
+		inbound http.Header,
+		sourceBody []byte,
+		targetBody []byte,
+		outbound http.Header,
+	) ([]byte, error) {
+		outbound.Set("X-Goog-Api-Key", "evil-key")
+		outbound.Set("X-Env", "prod")
+		return targetBody, nil
+	}
+
+	claudeBody := []byte(`{
+		"model":"gemini-2.5-flash",
+		"max_tokens":16,
+		"messages":[{"role":"user","content":[{"type":"text","text":"hello gemini"}]}]
+	}`)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(string(claudeBody)))
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}`)),
+		},
+	}
+
+	svc := &GeminiMessagesCompatService{
+		cfg: &config.Config{
+			Security: config.SecurityConfig{
+				URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+			},
+		},
+		httpUpstream: upstream,
+	}
+
+	account := &Account{
+		ID:          304,
+		Name:        "gemini-apikey-preserve-auth",
+		Platform:    PlatformGemini,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "gemini-upstream-key",
+			"base_url": "https://generativelanguage.googleapis.com",
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, claudeBody)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, "gemini-upstream-key", upstream.lastReq.Header.Get("X-Goog-Api-Key"))
+	require.Equal(t, "prod", upstream.lastReq.Header.Get("X-Env"))
+}
+
+func TestPassthroughFieldsV2GeminiForward_BodyMapSkipsExistingTransformedField(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	claudeBody := []byte(`{
+		"model":"gemini-2.5-flash",
+		"max_tokens":16,
+		"metadata":{"alt_tokens":99},
+		"messages":[{"role":"user","content":[{"type":"text","text":"hello gemini"}]}]
+	}`)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(string(claudeBody)))
+	c.Request.Header.Set("X-Trace-Id", "trace-123")
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}`)),
+		},
+	}
+
+	svc := &GeminiMessagesCompatService{
+		cfg: &config.Config{
+			Security: config.SecurityConfig{
+				URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+			},
+		},
+		httpUpstream: upstream,
+	}
+
+	account := &Account{
+		ID:          305,
+		Name:        "gemini-apikey-v2-map",
+		Platform:    PlatformGemini,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "gemini-upstream-key",
+			"base_url": "https://generativelanguage.googleapis.com",
+		},
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "header", Mode: "map", Key: "X-Mapped-Trace", SourceKey: "X-Trace-Id"},
+				{Target: "body", Mode: "map", Key: "generationConfig.maxOutputTokens", SourceKey: "metadata.alt_tokens"},
+			},
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, claudeBody)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "trace-123", upstream.lastReq.Header.Get("X-Mapped-Trace"))
+	require.Equal(t, "16", gjson.GetBytes(upstream.lastBody, "generationConfig.maxOutputTokens").String())
+}
+
+func TestGeminiMessagesCompatService_Forward_APIKeyStoresFinalOpsUpstreamRequestBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	claudeBody := []byte(`{
+		"model":"gemini-2.5-flash",
+		"max_tokens":16,
+		"messages":[{"role":"user","content":[{"type":"text","text":"hello gemini"}]}]
+	}`)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(string(claudeBody)))
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}`)),
+		},
+	}
+
+	svc := &GeminiMessagesCompatService{
+		cfg: &config.Config{
+			Security: config.SecurityConfig{
+				URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+			},
+		},
+		httpUpstream: upstream,
+	}
+
+	account := &Account{
+		ID:          401,
+		Name:        "gemini-apikey-ops-upstream-body",
+		Platform:    PlatformGemini,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "gemini-upstream-key",
+			"base_url": "https://generativelanguage.googleapis.com",
+		},
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "body", Mode: "inject", Key: "generationConfig.candidateCount", Value: "1"},
+			},
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, claudeBody)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	rawBody, ok := c.Get(OpsUpstreamRequestBodyKey)
+	require.True(t, ok)
+	opsBodyBytes, ok := rawBody.([]byte)
+	require.True(t, ok)
+	opsBody := string(opsBodyBytes)
+	require.JSONEq(t, string(upstream.lastBody), opsBody)
+	require.Equal(t, "1", gjson.Get(opsBody, "generationConfig.candidateCount").String())
+}
+
+func TestGeminiMessagesCompatService_Forward_OAuthProjectStoresWrappedOpsUpstreamRequestBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	claudeBody := []byte(`{
+		"model":"gemini-2.5-flash",
+		"max_tokens":16,
+		"messages":[{"role":"user","content":[{"type":"text","text":"hello gemini oauth"}]}]
+	}`)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(string(claudeBody)))
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}`)),
+		},
+	}
+
+	svc := &GeminiMessagesCompatService{
+		cfg: &config.Config{
+			Security: config.SecurityConfig{
+				URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+			},
+		},
+		tokenProvider: &GeminiTokenProvider{},
+		httpUpstream:  upstream,
+	}
+
+	account := &Account{
+		ID:          402,
+		Name:        "gemini-oauth-project-ops-upstream-body",
+		Platform:    PlatformGemini,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token": "oauth-token",
+			"project_id":   "project-123",
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, claudeBody)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	rawBody, ok := c.Get(OpsUpstreamRequestBodyKey)
+	require.True(t, ok)
+	opsBodyBytes, ok := rawBody.([]byte)
+	require.True(t, ok)
+	opsBody := string(opsBodyBytes)
+	require.JSONEq(t, string(upstream.lastBody), opsBody)
+	require.Equal(t, "project-123", gjson.Get(opsBody, "project").String())
+	require.True(t, gjson.Get(opsBody, "request").Exists())
+}
+
+func TestGeminiMessagesCompatService_ForwardNative_OAuthProjectStoresWrappedOpsUpstreamRequestBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	geminiBody := []byte(`{
+		"contents":[{"role":"user","parts":[{"text":"hello native oauth"}]}],
+		"generationConfig":{"maxOutputTokens":16}
+	}`)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash:generateContent", strings.NewReader(string(geminiBody)))
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}`)),
+		},
+	}
+
+	svc := &GeminiMessagesCompatService{
+		cfg: &config.Config{
+			Security: config.SecurityConfig{
+				URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+			},
+		},
+		tokenProvider: &GeminiTokenProvider{},
+		httpUpstream:  upstream,
+	}
+
+	account := &Account{
+		ID:          403,
+		Name:        "gemini-native-oauth-project-ops-upstream-body",
+		Platform:    PlatformGemini,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token": "oauth-token",
+			"project_id":   "project-456",
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.ForwardNative(context.Background(), c, account, "gemini-2.5-flash", "generateContent", false, geminiBody)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	rawBody, ok := c.Get(OpsUpstreamRequestBodyKey)
+	require.True(t, ok)
+	opsBodyBytes, ok := rawBody.([]byte)
+	require.True(t, ok)
+	opsBody := string(opsBodyBytes)
+	require.JSONEq(t, string(upstream.lastBody), opsBody)
+	require.Equal(t, "project-456", gjson.Get(opsBody, "project").String())
+	require.True(t, gjson.Get(opsBody, "request").Exists())
 }
 
 // TestGeminiMessagesHandleStreamingResponse_ClosesToolBlockBeforeText guards the

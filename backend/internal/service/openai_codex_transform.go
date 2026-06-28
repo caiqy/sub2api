@@ -642,6 +642,24 @@ func stripCodexSparkImageGenerationTools(reqBody map[string]any) bool {
 	return true
 }
 
+func stripCodexSparkImageGenerationToolFromRawPayload(payload []byte, model string) ([]byte, bool, error) {
+	if !isCodexSparkModel(model) || len(payload) == 0 {
+		return payload, false, nil
+	}
+	var reqBody map[string]any
+	if err := json.Unmarshal(payload, &reqBody); err != nil {
+		return nil, false, err
+	}
+	if !stripCodexSparkImageGenerationTools(reqBody) {
+		return payload, false, nil
+	}
+	updated, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, false, err
+	}
+	return updated, true, nil
+}
+
 func hasOpenAIInputImage(reqBody map[string]any) bool {
 	if reqBody == nil {
 		return false

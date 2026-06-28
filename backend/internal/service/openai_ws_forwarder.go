@@ -1561,29 +1561,50 @@ func openAIWSRawItemsHasFunctionCallOutput(items []json.RawMessage) bool {
 	return false
 }
 
-func openAIWSRawItemsHaveToolCallContextForOutputs(items []json.RawMessage) bool {
-	if len(items) == 0 {
+func openAIWSRawItemsHaveContextForPayloadFunctionCallOutputs(payload []byte, items []json.RawMessage) bool {
+	if len(payload) == 0 || len(items) == 0 {
+		return false
+	}
+	input := gjson.GetBytes(payload, "input")
+	if !input.Exists() {
+		return false
+	}
+	outputCallIDs := make(map[string]struct{})
+	addOutputCallID := func(item gjson.Result) bool {
+		if !item.Exists() || !isCodexToolCallOutputItemType(item.Get("type").String()) {
+			return true
+		}
+		callID := strings.TrimSpace(item.Get("call_id").String())
+		if callID == "" {
+			return false
+		}
+		outputCallIDs[callID] = struct{}{}
+		return true
+	}
+	if input.IsArray() {
+		for _, item := range input.Array() {
+			if !addOutputCallID(item) {
+				return false
+			}
+		}
+	} else if input.Type == gjson.JSON {
+		if !addOutputCallID(input) {
+			return false
+		}
+	}
+	if len(outputCallIDs) == 0 {
 		return false
 	}
 	contextCallIDs := make(map[string]struct{})
-	outputCallIDs := make(map[string]struct{})
 	for _, item := range items {
-		itemType := gjson.GetBytes(item, "type").String()
-		callID := strings.TrimSpace(gjson.GetBytes(item, "call_id").String())
-		switch {
-		case isCodexToolCallContextItemType(itemType):
-			if callID != "" {
-				contextCallIDs[callID] = struct{}{}
-			}
-		case isCodexToolCallOutputItemType(itemType):
-			if callID == "" {
-				return false
-			}
-			outputCallIDs[callID] = struct{}{}
+		parsed := gjson.ParseBytes(item)
+		if !isCodexToolCallContextItemType(parsed.Get("type").String()) {
+			continue
 		}
-	}
-	if len(outputCallIDs) == 0 || len(contextCallIDs) == 0 {
-		return false
+		callID := strings.TrimSpace(parsed.Get("call_id").String())
+		if callID != "" {
+			contextCallIDs[callID] = struct{}{}
+		}
 	}
 	for callID := range outputCallIDs {
 		if _, ok := contextCallIDs[callID]; !ok {
@@ -2391,7 +2412,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 
 	if responseID != "" && stateStore != nil {
 		ttl := s.openAIWSResponseStickyTTL()
-		logOpenAIWSBindResponseAccountWarn(groupID, account.ID, responseID, stateStore.BindResponseAccount(ctx, groupID, responseID, account.ID, ttl))
+		logOpenAIWSBindResponseAccountWarn(groupID, account.ID, responseID, s.bindOpenAIResponseAccount(ctx, groupID, responseID, account.ID, ttl))
 		stateStore.BindResponseConn(responseID, lease.ConnID(), ttl)
 	}
 	if stateStore != nil && storeDisabled && sessionHash != "" {
@@ -2439,29 +2460,6 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 
 // ProxyResponsesWebSocketFromClient 处理客户端入站 WebSocket（OpenAI Responses WS Mode）并转发到上游。
 // 当前实现按“单请求 -> 终止事件 -> 下一请求”的顺序代理，适配 Codex CLI 的 turn 模式。
-// stripCodexSparkImageGenerationToolFromRawPayload removes the image_generation
-// tool from a raw /responses payload when the upstream model is gpt-5.3-codex-spark.
-// Spark rejects that tool upstream with HTTP 400 (invalid_request_error, param=tools);
-// Codex clients advertise it by default. Returns the (possibly unchanged) payload,
-// whether it changed, and any JSON decode error.
-func stripCodexSparkImageGenerationToolFromRawPayload(payload []byte, model string) ([]byte, bool, error) {
-	if !isCodexSparkModel(model) || !openAIRequestBodyHasImageGenerationTool(payload) {
-		return payload, false, nil
-	}
-	payloadMap := make(map[string]any)
-	if err := json.Unmarshal(payload, &payloadMap); err != nil {
-		return payload, false, err
-	}
-	if !stripCodexSparkImageGenerationTools(payloadMap) {
-		return payload, false, nil
-	}
-	rebuilt, err := json.Marshal(payloadMap)
-	if err != nil {
-		return payload, false, err
-	}
-	return rebuilt, true, nil
-}
-
 func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	ctx context.Context,
 	c *gin.Context,
@@ -2559,7 +2557,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 	}
 	debugEnabled := isOpenAIWSModeDebugEnabled()
-	isCodexCLI := openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) || (s.cfg != nil && s.cfg.Gateway.ForceCodexCLI)
 
 	type openAIWSClientPayload struct {
 		payloadRaw         []byte
@@ -2573,6 +2570,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		payloadBytes       int
 	}
 	ingressSessionOriginalModel := ""
+	apiKey := getAPIKeyFromContext(c)
+	imageGenerationAllowed := GroupAllowsImageGeneration(apiKeyGroup(apiKey))
+	isCodexCLI := openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) || (s.cfg != nil && s.cfg.Gateway.ForceCodexCLI)
+	codexImageGenerationBridgeEnabled := isCodexCLI && imageGenerationAllowed && s.isCodexImageGenerationBridgeEnabled(ctx, account, apiKey)
 
 	applyPayloadMutation := func(current []byte, path string, value any) ([]byte, error) {
 		next, err := sjson.SetBytes(current, path, value)
@@ -2669,6 +2670,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			normalized = next
 		}
+
 		apiKey := getAPIKeyFromContext(c)
 		imageGenerationAllowed := GroupAllowsImageGeneration(apiKeyGroup(apiKey))
 		codexBridgeEnabled := isCodexCLI && imageGenerationAllowed && s.isCodexImageGenerationBridgeEnabled(ctx, account, apiKey)
@@ -2709,11 +2711,31 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			normalized = next
 		}
-		if stripped, changed, stripErr := stripCodexSparkImageGenerationToolFromRawPayload(normalized, upstreamModel); stripErr != nil {
-			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", stripErr)
-		} else if changed {
-			normalized = stripped
-			logOpenAIWSModeInfo("ingress_ws_codex_spark_image_tool_stripped account_id=%d", account.ID)
+		if codexImageGenerationBridgeEnabled {
+			var reqBody map[string]any
+			if unmarshalErr := json.Unmarshal(normalized, &reqBody); unmarshalErr != nil || reqBody == nil {
+				if unmarshalErr == nil {
+					unmarshalErr = errors.New("response.create payload must be a JSON object")
+				}
+				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", unmarshalErr)
+			}
+			bodyModified := false
+			if ensureOpenAIResponsesImageGenerationTool(reqBody) {
+				bodyModified = true
+			}
+			if normalizeOpenAIResponsesImageGenerationTools(reqBody) {
+				bodyModified = true
+			}
+			if applyCodexImageGenerationBridgeInstructions(reqBody) {
+				bodyModified = true
+			}
+			if bodyModified {
+				rebuilt, marshalErr := json.Marshal(reqBody)
+				if marshalErr != nil {
+					return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", marshalErr)
+				}
+				normalized = rebuilt
+			}
 		}
 		imageIntent := IsImageGenerationIntent(openAIResponsesEndpoint, originalModel, normalized)
 		if imageIntent && !imageGenerationAllowed {
@@ -2785,27 +2807,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}, nil
 	}
 
-	writeClientMessage := func(message []byte) error {
-		writeCtx, cancel := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
-		defer cancel()
-		return clientConn.Write(writeCtx, coderws.MessageText, message)
-	}
-
-	readClientMessage := func() ([]byte, error) {
-		msgType, payload, readErr := clientConn.Read(ctx)
-		if readErr != nil {
-			return nil, readErr
-		}
-		if msgType != coderws.MessageText && msgType != coderws.MessageBinary {
-			return nil, NewOpenAIWSClientCloseError(
-				coderws.StatusPolicyViolation,
-				fmt.Sprintf("unsupported websocket client message type: %s", msgType.String()),
-				nil,
-			)
-		}
-		return payload, nil
-	}
-
 	firstPayload, err := parseClientPayload(firstClientMessage)
 	if err != nil {
 		return err
@@ -2814,33 +2815,27 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	turnState := strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader))
 	stateStore := s.getOpenAIWSStateStore()
 	groupID := getOpenAIGroupIDFromContext(c)
-	storeDisabledConnMode := s.openAIWSStoreDisabledConnMode()
-	sessionHash := ""
-	preferredConnID := ""
-	storeDisabled := false
-	refreshIngressRouteState := func(payload openAIWSClientPayload) {
-		sessionHash = s.GenerateSessionHash(c, payload.rawForHash)
-		if turnState == "" && stateStore != nil && sessionHash != "" {
-			if savedTurnState, ok := stateStore.GetSessionTurnState(groupID, sessionHash); ok {
-				turnState = savedTurnState
-			}
-		}
-
-		preferredConnID = ""
-		if stateStore != nil && payload.previousResponseID != "" {
-			if connID, ok := stateStore.GetResponseConn(payload.previousResponseID); ok {
-				preferredConnID = connID
-			}
-		}
-
-		storeDisabled = s.isOpenAIWSStoreDisabledInRequestRaw(payload.payloadRaw, account)
-		if stateStore != nil && storeDisabled && payload.previousResponseID == "" && sessionHash != "" {
-			if connID, ok := stateStore.GetSessionConn(groupID, sessionHash); ok {
-				preferredConnID = connID
-			}
+	sessionHash := s.GenerateSessionHashWithFallback(c, firstPayload.rawForHash, openAIWSIngressSessionFallbackSeed(c, account, groupID))
+	if turnState == "" && stateStore != nil && sessionHash != "" {
+		if savedTurnState, ok := stateStore.GetSessionTurnState(groupID, sessionHash); ok {
+			turnState = savedTurnState
 		}
 	}
-	refreshIngressRouteState(firstPayload)
+
+	preferredConnID := ""
+	if stateStore != nil && firstPayload.previousResponseID != "" {
+		if connID, ok := stateStore.GetResponseConn(firstPayload.previousResponseID); ok {
+			preferredConnID = connID
+		}
+	}
+
+	storeDisabled := s.isOpenAIWSStoreDisabledInRequestRaw(firstPayload.payloadRaw, account)
+	storeDisabledConnMode := s.openAIWSStoreDisabledConnMode()
+	if stateStore != nil && storeDisabled && firstPayload.previousResponseID == "" && sessionHash != "" {
+		if connID, ok := stateStore.GetSessionConn(groupID, sessionHash); ok {
+			preferredConnID = connID
+		}
+	}
 
 	if forceHTTPBridge || s.shouldBridgeOpenAIWSHTTP(account, firstPayload.payloadBytes, firstPayload.previousResponseID) {
 		logOpenAIWSModeInfo(
@@ -3115,6 +3110,27 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		return lease, nil
 	}
 
+	writeClientMessage := func(message []byte) error {
+		writeCtx, cancel := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
+		defer cancel()
+		return clientConn.Write(writeCtx, coderws.MessageText, message)
+	}
+
+	readClientMessage := func() ([]byte, error) {
+		msgType, payload, readErr := clientConn.Read(ctx)
+		if readErr != nil {
+			return nil, readErr
+		}
+		if msgType != coderws.MessageText && msgType != coderws.MessageBinary {
+			return nil, NewOpenAIWSClientCloseError(
+				coderws.StatusPolicyViolation,
+				fmt.Sprintf("unsupported websocket client message type: %s", msgType.String()),
+				nil,
+			)
+		}
+		return payload, nil
+	}
+
 	sendAndRelay := func(turn int, lease *openAIWSConnLease, payload []byte, payloadBytes int, originalModel string, imageBillingModel string, imageSizeTier string, imageInputSize string) (*OpenAIForwardResult, error) {
 		if lease == nil {
 			return nil, errors.New("upstream websocket lease is nil")
@@ -3141,6 +3157,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		responseID := ""
 		usage := OpenAIUsage{}
 		imageCounter := newOpenAIImageOutputCounter()
+		replayCollector := &openAIWSToolCallReplayCollector{}
 		var firstTokenMs *int
 		reqStream := openAIWSPayloadBoolFromRaw(payload, "stream", true)
 		turnPreviousResponseID := openAIWSPayloadStringFromRaw(payload, "previous_response_id")
@@ -3151,7 +3168,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		eventCount := 0
 		tokenEventCount := 0
 		terminalEventCount := 0
-		replayCollector := &openAIWSToolCallReplayCollector{}
 		firstEventType := ""
 		lastEventType := ""
 		needModelReplace := false
@@ -3449,6 +3465,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	currentTurnReplayInput := []json.RawMessage(nil)
 	currentTurnReplayInputExists := false
 	skipBeforeTurn := false
+	httpBridgeMode := false
 	hasCurrentOrReplayFunctionCallOutput := func(payload []byte) bool {
 		if openAIWSRawPayloadHasToolCallOutput(payload) {
 			return true
@@ -3724,6 +3741,114 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 			}
 		}
+		if !httpBridgeMode && s.shouldBridgeOpenAIWSHTTP(currentPayloadBytes, currentPreviousResponseID) {
+			httpBridgeMode = true
+		}
+		if httpBridgeMode {
+			if currentPreviousResponseID != "" {
+				updatedPayload, removed, dropErr := dropPreviousResponseIDFromRawPayload(currentPayload)
+				if dropErr != nil || !removed {
+					reason := "not_removed"
+					if dropErr != nil {
+						reason = "drop_error"
+					}
+					logOpenAIWSModeInfo(
+						"ingress_ws_http_bridge_prev_response_drop_skip account_id=%d turn=%d reason=%s previous_response_id=%s",
+						account.ID,
+						turn,
+						normalizeOpenAIWSLogValue(reason),
+						truncateOpenAIWSLogValue(currentPreviousResponseID, openAIWSIDValueMaxLen),
+					)
+				} else if updatedWithInput, setInputErr := setOpenAIWSPayloadInputSequence(updatedPayload, currentTurnReplayInput, currentTurnReplayInputExists); setInputErr != nil {
+					logOpenAIWSModeInfo(
+						"ingress_ws_http_bridge_prev_response_drop_skip account_id=%d turn=%d reason=set_full_input_error previous_response_id=%s cause=%s",
+						account.ID,
+						turn,
+						truncateOpenAIWSLogValue(currentPreviousResponseID, openAIWSIDValueMaxLen),
+						truncateOpenAIWSLogValue(setInputErr.Error(), openAIWSLogValueMaxLen),
+					)
+				} else {
+					currentPayload = updatedWithInput
+					currentPayloadBytes = len(updatedWithInput)
+				}
+			}
+
+			result, relayErr := s.proxyOpenAIWSHTTPBridgeTurn(ctx, c, account, token, currentPayload, currentPayloadBytes, currentOriginalModel, currentImageBillingModel, currentImageSizeTier, currentImageInputSize, turn, writeClientMessage)
+			if relayErr != nil {
+				finalErr := relayErr
+				if unwrapped := errors.Unwrap(relayErr); unwrapped != nil {
+					finalErr = unwrapped
+				}
+				if hooks != nil && hooks.AfterTurn != nil {
+					hooks.AfterTurn(turn, result, finalErr)
+				}
+				return finalErr
+			}
+			turnRetry = 0
+			turnPrevRecoveryTried = false
+			lastTurnFinishedAt = time.Now()
+			lastTurnClean = true
+			if hooks != nil && hooks.AfterTurn != nil {
+				hooks.AfterTurn(turn, result, nil)
+			}
+			if result == nil {
+				return errors.New("websocket http bridge turn result is nil")
+			}
+			responseID := strings.TrimSpace(result.RequestID)
+			lastTurnResponseID = responseID
+			lastTurnPayload = cloneOpenAIWSPayloadBytes(currentPayload)
+			lastTurnReplayInput = cloneOpenAIWSRawMessages(currentTurnReplayInput)
+			lastTurnReplayInputExists = currentTurnReplayInputExists
+			if result.wsReplayInputExists {
+				lastTurnReplayInput = append(lastTurnReplayInput, cloneOpenAIWSRawMessages(result.wsReplayInput)...)
+				lastTurnReplayInputExists = true
+			}
+			nextStrictState, strictStateErr := buildOpenAIWSIngressPreviousTurnStrictState(currentPayload)
+			if strictStateErr != nil {
+				lastTurnStrictState = nil
+				logOpenAIWSModeInfo(
+					"ingress_ws_prev_response_strict_state_skip account_id=%d turn=%d conn_id=%s reason=build_error cause=%s",
+					account.ID,
+					turn,
+					"-",
+					truncateOpenAIWSLogValue(strictStateErr.Error(), openAIWSLogValueMaxLen),
+				)
+			} else {
+				lastTurnStrictState = nextStrictState
+			}
+			if responseID != "" && stateStore != nil {
+				logOpenAIWSBindResponseAccountWarn(groupID, account.ID, responseID, s.bindOpenAIResponseAccount(ctx, groupID, responseID, account.ID, s.openAIWSResponseStickyTTL()))
+			}
+
+			nextClientMessage, readErr := readClientMessage()
+			if readErr != nil {
+				if isOpenAIWSClientDisconnectError(readErr) {
+					closeStatus, closeReason := summarizeOpenAIWSReadCloseError(readErr)
+					logOpenAIWSModeInfo(
+						"ingress_ws_client_closed account_id=%d conn_id=%s close_status=%s close_reason=%s",
+						account.ID,
+						"-",
+						closeStatus,
+						truncateOpenAIWSLogValue(closeReason, openAIWSHeaderValueMaxLen),
+					)
+					return nil
+				}
+				return fmt.Errorf("read client websocket request: %w", readErr)
+			}
+			nextPayload, parseErr := parseClientPayload(nextClientMessage)
+			if parseErr != nil {
+				return parseErr
+			}
+			currentPayload = nextPayload.payloadRaw
+			currentOriginalModel = nextPayload.originalModel
+			currentImageBillingModel = nextPayload.imageBillingModel
+			currentImageSizeTier = nextPayload.imageSizeTier
+			currentImageInputSize = nextPayload.imageInputSize
+			currentPayloadBytes = nextPayload.payloadBytes
+			storeDisabled = s.isOpenAIWSStoreDisabledInRequestRaw(currentPayload, account)
+			turn++
+			continue
+		}
 		forcePreferredConn := isStrictAffinityTurn(currentPayload)
 		if sessionLease == nil {
 			acquiredLease, acquireErr := acquireTurnLease(turn, preferredConnID, forcePreferredConn)
@@ -3756,12 +3881,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				if forcePreferredConn {
 					// 携带 function_call_output 的请求不能丢弃 previous_response_id：
 					// 上游 API 需要 response chain 来匹配 tool_result 与之前的 tool_use，
-					// 除非 replay input 已经包含与每个 tool_result 匹配的 tool_use 上下文。
+					// 丢弃后会导致 "No tool call found for function call output" 400 错误。
 					hasFCOutput := hasFunctionCallOutput
-					hasReplayToolContext := hasFCOutput &&
-						currentTurnReplayInputExists &&
-						openAIWSRawItemsHaveToolCallContextForOutputs(currentTurnReplayInput)
-					if !turnPrevRecoveryTried && currentPreviousResponseID != "" && (!hasFCOutput || hasReplayToolContext) {
+					canReplayFunctionCallOutputWithoutPrev := openAIWSRawPayloadHasToolCallOutput(currentPayload) && currentTurnReplayInputExists && openAIWSRawItemsHaveContextForPayloadFunctionCallOutputs(currentPayload, currentTurnReplayInput)
+					if !turnPrevRecoveryTried && currentPreviousResponseID != "" && (!hasFCOutput || canReplayFunctionCallOutputWithoutPrev) {
 						updatedPayload, removed, dropErr := dropPreviousResponseIDFromRawPayload(currentPayload)
 						if dropErr != nil || !removed {
 							reason := "not_removed"
@@ -3793,13 +3916,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 								)
 							} else {
 								logOpenAIWSModeInfo(
-									"ingress_ws_preflight_ping_recovery account_id=%d turn=%d conn_id=%s action=drop_previous_response_id_retry previous_response_id=%s has_function_call_output=%v has_replay_tool_context=%v",
+									"ingress_ws_preflight_ping_recovery account_id=%d turn=%d conn_id=%s action=drop_previous_response_id_retry previous_response_id=%s",
 									account.ID,
 									turn,
 									truncateOpenAIWSLogValue(sessionConnID, openAIWSIDValueMaxLen),
 									truncateOpenAIWSLogValue(currentPreviousResponseID, openAIWSIDValueMaxLen),
-									hasFCOutput,
-									hasReplayToolContext,
 								)
 								turnPrevRecoveryTried = true
 								currentPayload = updatedWithInput
@@ -3811,18 +3932,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 						}
 					}
 					if hasFCOutput && currentPreviousResponseID != "" {
-						reason := "function_call_output_missing_replay_context"
-						if hasReplayToolContext {
-							reason = "function_call_output_replay_not_applied"
-						}
 						logOpenAIWSModeInfo(
-							"ingress_ws_preflight_ping_recovery_skip account_id=%d turn=%d conn_id=%s reason=%s action=fail_close previous_response_id=%s has_replay_tool_context=%v",
+							"ingress_ws_preflight_ping_recovery_skip account_id=%d turn=%d conn_id=%s reason=function_call_output action=fail_close previous_response_id=%s",
 							account.ID,
 							turn,
 							truncateOpenAIWSLogValue(sessionConnID, openAIWSIDValueMaxLen),
-							reason,
 							truncateOpenAIWSLogValue(currentPreviousResponseID, openAIWSIDValueMaxLen),
-							hasReplayToolContext,
 						)
 					}
 					resetSessionLease(true)
@@ -3922,7 +4037,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 
 		if responseID != "" && stateStore != nil {
 			ttl := s.openAIWSResponseStickyTTL()
-			logOpenAIWSBindResponseAccountWarn(groupID, account.ID, responseID, stateStore.BindResponseAccount(ctx, groupID, responseID, account.ID, ttl))
+			logOpenAIWSBindResponseAccountWarn(groupID, account.ID, responseID, s.bindOpenAIResponseAccount(ctx, groupID, responseID, account.ID, ttl))
 			stateStore.BindResponseConn(responseID, connID, ttl)
 		}
 		if stateStore != nil && storeDisabled && sessionHash != "" {
@@ -4161,7 +4276,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 	lease.MarkPrewarmed()
 	if prewarmResponseID != "" && stateStore != nil {
 		ttl := s.openAIWSResponseStickyTTL()
-		logOpenAIWSBindResponseAccountWarn(groupID, account.ID, prewarmResponseID, stateStore.BindResponseAccount(ctx, groupID, prewarmResponseID, account.ID, ttl))
+		logOpenAIWSBindResponseAccountWarn(groupID, account.ID, prewarmResponseID, s.bindOpenAIResponseAccount(ctx, groupID, prewarmResponseID, account.ID, ttl))
 		stateStore.BindResponseConn(prewarmResponseID, lease.ConnID(), ttl)
 	}
 	logOpenAIWSModeInfo(
@@ -4284,6 +4399,25 @@ func getOpenAIGroupIDFromContext(c *gin.Context) int64 {
 	return *apiKey.GroupID
 }
 
+func openAIWSIngressSessionFallbackSeed(c *gin.Context, account *Account, groupID int64) string {
+	if c == nil || account == nil || account.ID <= 0 {
+		return ""
+	}
+	apiKeyID := int64(0)
+	if apiKey := getAPIKeyFromContext(c); apiKey != nil {
+		apiKeyID = apiKey.ID
+	}
+	clientIP := strings.TrimSpace(c.ClientIP())
+	if clientIP == "" && c.Request != nil {
+		clientIP = strings.TrimSpace(c.Request.RemoteAddr)
+	}
+	userAgent := ""
+	if c.Request != nil {
+		userAgent = strings.TrimSpace(c.GetHeader("User-Agent"))
+	}
+	return fmt.Sprintf("openai_ws_ingress:group=%d:api_key=%d:account=%d:ip=%s:ua=%s", groupID, apiKeyID, account.ID, clientIP, userAgent)
+}
+
 // SelectAccountByPreviousResponseID 按 previous_response_id 命中账号粘连。
 // 未命中或账号不可用时返回 (nil, nil)，由调用方继续走常规调度。
 func (s *OpenAIGatewayService) SelectAccountByPreviousResponseID(
@@ -4307,6 +4441,9 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 	requireCompact bool,
 ) (*AccountSelectionResult, error) {
 	if s == nil {
+		return nil, nil
+	}
+	if !s.openAIStickyEnabled() {
 		return nil, nil
 	}
 	responseID := strings.TrimSpace(previousResponseID)
@@ -4347,9 +4484,15 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 		return nil, nil
 	}
 	if requestedModel != "" && !account.IsModelSupported(requestedModel) {
+		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 		return nil, nil
 	}
 	if !account.SupportsOpenAIEndpointCapability(requiredCapability) {
+		return nil, nil
+	}
+	if schedGroup := schedulerGroupForRequest(ctx, s, groupID); !accountSatisfiesPrivacyRequirement(account, schedGroup) {
+		recordPrivacyRequirementError(ctx, s, account, schedGroup)
+		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 		return nil, nil
 	}
 	// Quota auto-pause must also gate the previous_response_id sticky path; otherwise an
@@ -4388,6 +4531,7 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 		}
 		account = latest
 	}
+	// 兜底：若上游 compact 能力刚被探测为不支持，但 sticky 还在，需要主动放弃。
 	if requireCompact && openAICompactSupportTier(account) == 0 {
 		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 		return nil, nil
@@ -4399,7 +4543,7 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 			derefGroupID(groupID),
 			accountID,
 			responseID,
-			store.BindResponseAccount(ctx, derefGroupID(groupID), responseID, accountID, s.openAIWSResponseStickyTTL()),
+			s.bindOpenAIResponseAccount(ctx, derefGroupID(groupID), responseID, accountID, s.openAIWSResponseStickyTTL()),
 		)
 		return &AccountSelectionResult{
 			Account:     account,

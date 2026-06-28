@@ -155,9 +155,9 @@ gateway:
   # Max request body size in bytes (default: 256MB)
   # 请求体最大字节数（默认 256MB）
   max_body_size: 268435456
-  # Max bytes to read for non-stream upstream responses (default: 8MB)
-  # 非流式上游响应体读取上限（默认 8MB）
-  upstream_response_read_max_bytes: 8388608
+  # Max bytes to read for non-stream upstream responses (default: 128MB)
+  # 非流式上游响应体读取上限（默认 128MB）
+  upstream_response_read_max_bytes: 134217728
   # Max bytes to read for proxy probe responses (default: 1MB)
   # 代理探测响应体读取上限（默认 1MB）
   proxy_probe_response_read_max_bytes: 1048576
@@ -247,6 +247,17 @@ gateway:
   # Use this to avoid compact failures when newer models are not yet supported by the compact endpoint.
   # 当 compact 端点暂未支持更新模型时，可通过这里降级规避失败。
   openai_compact_model: "gpt-5.4"
+  # sticky 总开关（按平台拆分；本任务仅配置结构，默认全部启用以保持向后兼容）
+  sticky:
+    openai:
+      # 是否启用 OpenAI 平台 sticky 总开关；缺失配置时默认为 true
+      enabled: true
+    gemini:
+      # 是否启用 Gemini 平台 sticky 总开关；缺失配置时默认为 true
+      enabled: true
+    anthropic:
+      # 是否启用 Anthropic 平台 sticky 总开关；缺失配置时默认为 true
+      enabled: true
   # OpenAI Responses WebSocket 配置（默认开启，可按需回滚到 HTTP）
   openai_ws:
     # 新版 WS mode 路由（默认关闭）。关闭时保持当前 legacy 实现行为。
@@ -325,11 +336,32 @@ gateway:
       queue: 0.7
       error_rate: 0.8
       ttft: 0.5
-      # use-it-or-lose-it：倾向「会话窗口最早重置」的账号，剩余重置时间越短得分越高。
-      # 0 表示关闭（默认，不改变原有行为）；调大可让即将重置的账号被优先用尽。
+      # use-it-or-lose-it：倾向「会话窗口最早重置」的账号，0 表示关闭。
       reset: 0.0
       # 倾向 7d 剩余额度更健康的账号；0 表示关闭（默认，不改变原有行为），小流量灰度可设为 0.3。
       quota_headroom: 0.0
+    # 调度模式："weighted"（默认，加权随机） 或 "layered"（分层过滤，优先级决定性）
+    scheduler_mode: "weighted"
+    # 分层调度参数（仅 scheduler_mode=layered 时生效）
+    scheduler_layered:
+      # EWMA 错误率触发惩罚的阈值
+      error_penalty_threshold: 0.3
+      # 错误率惩罚时 priority 增加的值
+      error_penalty_value: 100
+      # TTFT 超过最低值的倍数时触发惩罚
+      ttft_penalty_multiplier: 3.0
+      # TTFT 惩罚时 priority 增加的值
+      ttft_penalty_value: 50
+      # 被惩罚后多久开始第一次探针（秒）
+      probe_cooldown_seconds: 60
+      # 探针轮询间隔（秒）
+      probe_interval_seconds: 30
+      # 连续失败多少次后写 DB TempUnschedulable
+      probe_max_failures: 3
+      # 单次探针请求超时（秒）
+      probe_timeout_seconds: 15
+      # 连续探针失败后写入 DB TempUnschedulable 的有限冷却时间（秒）
+      probe_temp_unschedulable_seconds: 1800
   # OpenAI 高级调度器补充配置
   openai_scheduler:
     # 是否允许 session_hash sticky 在账号健康度恶化时临时逃逸；false 可一键回退旧行为
@@ -339,7 +371,7 @@ gateway:
     # 错误率 EWMA 超过该阈值时跳过 sticky，默认 0.5，仅在明显降级时触发
     sticky_escape_error_rate: 0.5
   # OpenAI HTTP upstream protocol strategy.
-  # OpenAI HTTP 上游协议策略（默认 HTTP/2；代理明确不兼容时可临时回退 HTTP/1.1）。
+  # OpenAI HTTP 上游协议策略（gateway.openai_http2；默认 HTTP/2；代理明确不兼容时可临时回退 HTTP/1.1）。
   openai_http2:
     enabled: true
     allow_proxy_fallback_to_http1: true
@@ -431,10 +463,6 @@ gateway:
     # Fallback max waiting queue size
     # 兜底最大排队长度
     fallback_max_waiting: 100
-    # Prefer the account whose session window resets soonest (use-it-or-lose-it).
-    # 负载感知选择时优先用尽「会话窗口最早重置」的账号；false 保持
-    # 原有「优先级 → 负载率 → LRU」行为（默认）。
-    prefer_soonest_reset: false
     # Enable batch load calculation for scheduling
     # 启用调度批量负载计算
     load_batch_enabled: true
@@ -1034,10 +1062,6 @@ billing:
     # Number of requests to allow in half-open state
     # 半开状态允许通过的请求数
     half_open_requests: 3
-  # Conservative minimum balance required before forwarding balance-billed requests.
-  # Set to 0 to only require balance > 0.
-  # 余额计费请求转发前要求的保守最小余额；设为 0 则仅要求余额 > 0。
-  minimum_balance_reserve: 0.000001
   # Cache TTL (seconds) for per-user × per-platform quota records
   # 用户 × 平台 quota 缓存 TTL（秒），默认 86400=1天，覆盖典型 daily 窗口
   user_platform_quota_cache_ttl_seconds: 86400

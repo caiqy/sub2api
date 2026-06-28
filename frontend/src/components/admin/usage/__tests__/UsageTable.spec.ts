@@ -13,7 +13,6 @@ import { nextTick } from 'vue'
 import UsageTable from '../UsageTable.vue'
 
 const messages: Record<string, string> = {
-  'admin.usage.userDeletedBadge': 'Deleted',
   'usage.costDetails': 'Cost Breakdown',
   'admin.usage.inputCost': 'Input Cost',
   'admin.usage.outputCost': 'Output Cost',
@@ -31,6 +30,8 @@ const messages: Record<string, string> = {
   'usage.original': 'Original',
   'usage.userBilled': 'User billed',
   'usage.accountBilled': 'Account billed',
+  'common.actions': 'Actions',
+  'admin.usage.viewDetail': 'View detail',
   'usage.imageUnit': ' images',
   'usage.imageCount': 'Image count',
   'usage.imageBillingSize': 'Billing size',
@@ -72,6 +73,7 @@ const DataTableStub = {
         <slot name="cell-billing_mode" :row="row" />
         <slot name="cell-tokens" :row="row" />
         <slot name="cell-cost" :row="row" />
+        <slot name="cell-actions" :row="row" />
       </div>
     </div>
   `,
@@ -465,7 +467,7 @@ describe('admin UsageTable deleted-user badge', () => {
       props: {
         data: [row],
         loading: false,
-        columns: [{ key: 'user', label: 'User' }],
+        columns: [],
       },
       global: {
         stubs: {
@@ -477,34 +479,24 @@ describe('admin UsageTable deleted-user badge', () => {
       },
     })
 
-    expect(wrapper.text()).toContain('Deleted')
-    expect(wrapper.text()).toContain('d@test.com')
+    expect(wrapper.text()).toContain('admin.usage.userDeletedBadge')
   })
+})
 
-  it('does NOT render deleted badge for an active user row', () => {
-    const row = {
-      request_id: 'req-active-user-1',
-      model: 'claude-3',
-      user_id: 3,
-      user: { id: 3, email: 'active@test.com', deleted_at: null },
-      actual_cost: 0,
-      total_cost: 0,
-      input_cost: 0,
-      output_cost: 0,
-      rate_multiplier: 1,
-      input_tokens: 1,
-      output_tokens: 1,
-    }
-
+describe('admin UsageTable detail action', () => {
+  it('enables and disables detail button based on has_detail', async () => {
     const wrapper = mount(UsageTable, {
       props: {
-        data: [row],
+        data: [
+          { request_id: 'req-1', has_detail: true },
+          { request_id: 'req-2', has_detail: false },
+        ],
         loading: false,
-        columns: [{ key: 'user', label: 'User' }],
+        columns: [],
       },
       global: {
         stubs: {
-          DataTable: DataTableStubWithUser,
+          DataTable: DataTableStub,
           EmptyState: true,
           Icon: true,
           Teleport: true,
@@ -512,7 +504,12 @@ describe('admin UsageTable deleted-user badge', () => {
       },
     })
 
-    expect(wrapper.text()).not.toContain('Deleted')
-    expect(wrapper.text()).toContain('active@test.com')
+    const buttons = wrapper.findAll('[data-test="usage-detail-button"]')
+    expect(buttons).toHaveLength(2)
+    expect(buttons[0]?.attributes('disabled')).toBeUndefined()
+    expect(buttons[1]?.attributes('disabled')).toBeDefined()
+
+    await buttons[0]!.trigger('click')
+    expect(wrapper.emitted('detail')).toEqual([[[{ request_id: 'req-1', has_detail: true }][0]]])
   })
 })

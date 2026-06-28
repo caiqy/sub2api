@@ -363,8 +363,8 @@ func TestBuildUpstreamRequestAnthropicAPIKeyPassthrough_StripsContextManagementW
 
 	body := []byte(`{"model":"claude-haiku-4-5","context_management":{"edits":[{"type":"clear_thinking_20251015"}]},"messages":[]}`)
 	svc := &GatewayService{cfg: &config.Config{}}
-	req, _, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(
-		context.Background(), c, newAnthropicAPIKeyPassthroughAccountForBetaTest(), body, "token",
+	req, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(
+		context.Background(), c, newAnthropicAPIKeyPassthroughAccountForBetaTest(), body, body, "token",
 	)
 	require.NoError(t, err)
 	require.False(t, gjson.GetBytes(readUpstreamBodyForTest(t, req), "context_management").Exists(),
@@ -380,8 +380,8 @@ func TestBuildUpstreamRequestAnthropicAPIKeyPassthrough_PreservesContextManageme
 
 	body := []byte(`{"model":"claude-haiku-4-5","context_management":{"edits":[{"type":"clear_thinking_20251015"}]},"messages":[]}`)
 	svc := &GatewayService{cfg: &config.Config{}}
-	req, _, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(
-		context.Background(), c, newAnthropicAPIKeyPassthroughAccountForBetaTest(), body, "token",
+	req, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(
+		context.Background(), c, newAnthropicAPIKeyPassthroughAccountForBetaTest(), body, body, "token",
 	)
 	require.NoError(t, err)
 	require.True(t, gjson.GetBytes(readUpstreamBodyForTest(t, req), "context_management").Exists(),
@@ -426,7 +426,7 @@ func TestBuildUpstreamRequest_OAuthMimicHaiku_StripsContextManagementEndToEnd(t 
 	// body 必须 strip。
 	body := []byte(`{"model":"claude-haiku-4-5","context_management":{"edits":[{"type":"clear_thinking_20251015"}]},"messages":[]}`)
 	svc := &GatewayService{cfg: &config.Config{}}
-	req, _, err := svc.buildUpstreamRequest(
+	req, err := svc.buildUpstreamRequest(
 		context.Background(), c, account, body,
 		"oauth-tok", "oauth", "claude-haiku-4-5", false, true, // mimicClaudeCode=true
 	)
@@ -456,7 +456,7 @@ func TestBuildUpstreamRequest_OAuthMimicNonHaiku_PreservesContextManagementEndTo
 	// body 保留。
 	body := []byte(`{"model":"claude-sonnet-4-6","context_management":{"edits":[{"type":"clear_thinking_20251015"}]},"messages":[]}`)
 	svc := &GatewayService{cfg: &config.Config{}}
-	req, _, err := svc.buildUpstreamRequest(
+	req, err := svc.buildUpstreamRequest(
 		context.Background(), c, account, body,
 		"oauth-tok", "oauth", "claude-sonnet-4-6", false, true,
 	)
@@ -487,7 +487,7 @@ func TestBuildUpstreamRequest_OAuthTransparentHaikuWithRealCCBeta_PreservesField
 	}
 	body := []byte(`{"model":"claude-haiku-4-5","context_management":{"edits":[{"type":"clear_thinking_20251015","keep":"all"}]},"messages":[]}`)
 	svc := &GatewayService{cfg: &config.Config{}}
-	req, _, err := svc.buildUpstreamRequest(
+	req, err := svc.buildUpstreamRequest(
 		context.Background(), c, account, body,
 		"oauth-tok", "oauth", "claude-haiku-4-5", false, false, // mimicClaudeCode=false（真 CC）
 	)
@@ -517,7 +517,7 @@ func TestBuildCountTokensRequest_OAuthMimicHaiku_PreservesContextManagementEndTo
 	}
 	body := []byte(`{"model":"claude-haiku-4-5","context_management":{"edits":[{"type":"clear_thinking_20251015"}]},"messages":[]}`)
 	svc := &GatewayService{cfg: &config.Config{}}
-	req, _, err := svc.buildCountTokensRequest(
+	req, err := svc.buildCountTokensRequest(
 		context.Background(), c, account, body,
 		"oauth-tok", "oauth", "claude-haiku-4-5", true, // mimicClaudeCode=true
 	)
@@ -548,7 +548,7 @@ func TestBuildCountTokensRequest_APIKeyHaiku_StripsContextManagementEndToEnd(t *
 	}
 	body := []byte(`{"model":"claude-haiku-4-5","context_management":{"edits":[]},"messages":[]}`)
 	svc := &GatewayService{cfg: &config.Config{}}
-	req, _, err := svc.buildCountTokensRequest(
+	req, err := svc.buildCountTokensRequest(
 		context.Background(), c, account, body,
 		"sk-ant-xxx", "apikey", "claude-haiku-4-5", false,
 	)
@@ -592,7 +592,7 @@ func TestBuildUpstreamRequest_APIKeyHaikuWithContextManagement_StripsField(t *te
 	}
 	body := []byte(`{"model":"claude-haiku-4-5","context_management":{"edits":[]},"messages":[]}`)
 	svc := &GatewayService{cfg: &config.Config{}}
-	req, _, err := svc.buildUpstreamRequest(
+	req, err := svc.buildUpstreamRequest(
 		context.Background(), c, account, body,
 		"sk-ant-xxx", "apikey", "claude-haiku-4-5", false, false,
 	)

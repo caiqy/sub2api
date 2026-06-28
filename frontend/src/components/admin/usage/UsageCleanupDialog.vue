@@ -124,7 +124,7 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
 import { adminUsageAPI } from '@/api/admin/usage'
-import type { AdminUsageQueryParams, UsageCleanupTask, CreateUsageCleanupTaskRequest } from '@/api/admin/usage'
+import type { AdminUsageQueryParams, UsageCleanupTask, CreateUsageCleanupTaskRequest } from '@/types'
 import { requestTypeToLegacyStream } from '@/utils/usageRequestType'
 
 interface Props {

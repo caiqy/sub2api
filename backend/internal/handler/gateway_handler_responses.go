@@ -129,6 +129,14 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		defer userReleaseFunc()
 	}
 
+	userGroupReleaseFunc, ok := h.acquireUserGroupSlot(c, h.concurrencyHelper, subject.UserID, apiKey.GroupID, apiKey.Group, reqStream, &streamStarted, reqLog)
+	if !ok {
+		return
+	}
+	if userGroupReleaseFunc != nil {
+		defer userGroupReleaseFunc()
+	}
+
 	// 2. Re-check billing
 	if err := h.billingCacheService.CheckBillingEligibility(requestCtx, apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(requestCtx, apiKey)); err != nil {
 		reqLog.Info("gateway.responses.billing_check_failed", zap.Error(err))

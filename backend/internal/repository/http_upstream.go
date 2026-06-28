@@ -45,9 +45,9 @@ const (
 	// defaultIdleConnTimeout: 默认空闲连接超时时间（90秒）
 	// 超时后连接会被关闭，释放系统资源（建议小于上游 LB 超时）
 	defaultIdleConnTimeout = 90 * time.Second
-	// defaultResponseHeaderTimeout: 默认等待响应头超时时间（5分钟）
+	// defaultResponseHeaderTimeout: 默认等待响应头超时时间（10分钟）
 	// LLM 请求可能排队较久，需要较长超时
-	defaultResponseHeaderTimeout = 300 * time.Second
+	defaultResponseHeaderTimeout = 600 * time.Second
 	// defaultMaxUpstreamClients: 默认最大客户端缓存数量
 	// 超出后会淘汰最久未使用的客户端
 	defaultMaxUpstreamClients = 5000
@@ -526,6 +526,20 @@ func (s *httpUpstreamService) removeClientLocked(key string, entry *upstreamClie
 		// 关闭空闲连接，释放系统资源
 		// 注意：这不会中断活跃连接
 		entry.client.CloseIdleConnections()
+	}
+}
+
+// InvalidateIdleClients 显式清理所有空闲客户端
+// 仅移除没有进行中请求的客户端，活跃客户端保持不变
+func (s *httpUpstreamService) InvalidateIdleClients() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for key, entry := range s.clients {
+		if atomic.LoadInt64(&entry.inFlight) != 0 {
+			continue
+		}
+		s.removeClientLocked(key, entry)
 	}
 }
 

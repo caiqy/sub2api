@@ -300,6 +300,7 @@ export default {
     available: '可用',
     copiedToClipboard: '已复制到剪贴板',
     copied: '已复制',
+    copy: '复制',
     copyFailed: '复制失败',
     verifying: '验证中...',
     processing: '处理中...',
@@ -324,7 +325,6 @@ export default {
     view: '查看',
     settings: '设置',
     chooseFile: '选择文件',
-    copy: '复制',
     notAvailable: '不可用',
     now: '现在',
     today: '今天',
@@ -344,6 +344,66 @@ export default {
         withSuffix: '{time} 后解除'
       }
     }
+  },
+
+  conversation: {
+    empty: '未找到可展示的对话内容',
+    expand: '展开',
+    collapse: '收起',
+    reasoning: '推理',
+    toolCall: '工具调用',
+    toolResult: '工具结果',
+    raw: '原始内容',
+    rawRequest: '原始请求',
+    rawResponse: '原始响应',
+    error: '错误',
+    timelineLabel: '对话时间轴',
+    imageAlt: '对话图片',
+    tool: '工具',
+    toolInput: '输入',
+    toolOutput: '输出',
+    toolMetadata: '元数据',
+    role: {
+      you: '你',
+      user: '用户',
+      assistant: '助手',
+      system: '系统',
+      developer: '开发者',
+    },
+    toolLabels: {
+      bash: '执行命令',
+      read: '查看',
+      write: '写入',
+      edit: '编辑',
+      multiedit: '批量编辑',
+      apply_patch: '文件补丁',
+      list: '浏览目录',
+      glob: '路径匹配',
+      grep: '文本查找',
+      webfetch: '抓取网页',
+      websearch: '网页搜索',
+      task: '委派子任务',
+      question: '提问',
+      todoread: '查看任务列表',
+      todowrite: '更新任务列表',
+    },
+    systemPrompt: {
+      title: '系统提示',
+      segments: '{n} 段',
+    },
+    injection: {
+      title: '系统注入',
+    },
+    reasoningMeta: {
+      segments: '{n} 段',
+      collapsedLabel: '思考内容',
+    },
+    toolMeta: {
+      error: '错误',
+      lines: '{n} 行',
+      sizeWithLines: '{lines} · {size}',
+      bytes: { b: 'B', kb: 'KB', mb: 'MB' },
+    },
   },
 
   adminCompliance: {
@@ -396,6 +456,7 @@ export default {
     dashboard: '仪表盘',
     announcements: '公告',
     apiKeys: 'API 密钥',
+    aiImages: 'AI生图',
     usage: '使用记录',
     redeem: '兑换',
     affiliate: '邀请返利',
@@ -1468,6 +1529,130 @@ export default {
     selectDateRange: '选择日期范围'
   },
 
+  images: {
+    badge: 'AI 生图工作台',
+    title: 'AI生图',
+    description: '在一个页面中完成 AI 图片生成、编辑与历史查看。',
+    tabs: {
+      ariaLabel: 'AI 生图功能标签',
+      generate: '生成',
+      edit: '编辑',
+      history: '历史'
+    },
+    keySelector: {
+      label: 'API 密钥',
+      loading: '正在加载 API 密钥...',
+      placeholder: '选择一个 API 密钥',
+      empty: '当前页暂无可用 API 密钥',
+      count: '当前页已加载 {count} 个 API 密钥',
+      pageHint: '默认仅使用当前页的第一个 API 密钥，后续任务会补充更完整的选择逻辑。',
+      loadFailed: 'API 密钥加载失败，请重试。',
+      retry: '重新加载'
+    },
+    panels: {
+      generate: {
+        title: '生成',
+        description: '基于提示词与标准网关参数发起全新图片生成。'
+      },
+      edit: {
+        title: '编辑',
+        description: '上传源图、可选遮罩，并以 multipart 方式提交编辑请求。'
+      },
+      history: {
+        title: '历史',
+        description: '查看历史图片请求，并将参数回填到表单。'
+      }
+    },
+    forms: {
+      generate: {
+        prompt: '提示词',
+        promptPlaceholder: '描述你想创建的图片',
+        model: '模型',
+        size: '尺寸',
+        sizeHint: '这里展示的是官方常用预设尺寸。GPT Image 2 也支持 auto，以及更多满足 OpenAI 约束条件的自定义尺寸。',
+        customSize: '自定义尺寸',
+        customSizePlaceholder: '例如 2048x1152',
+        customSizeRequirements: '要求：16倍数，最大3840，长宽比≤3:1',
+        customSizeRequired: '请输入自定义尺寸。',
+        customSizeFormat: '自定义尺寸必须使用 宽x高 格式，例如 2048x1152。',
+        customSizeMultipleOf16: '自定义尺寸的宽和高都必须是 16 的倍数。',
+        customSizeMaxEdge: '自定义尺寸任一边都不能超过 3840px。',
+        customSizeAspectRatio: '自定义尺寸的长宽比不能超过 3:1。',
+        customSizePixelRange: '自定义尺寸的总像素必须介于 655360 到 8294400 之间。',
+        transparentFormatAdjusted: '透明背景不支持 JPEG，已自动将输出格式改为 PNG。',
+        quality: '质量',
+        background: '背景',
+        outputFormat: '输出格式',
+        moderation: '审核级别',
+        n: '生成数量',
+        submit: '生成图片',
+        submitting: '生成中...',
+        submittingWithSeconds: '生成中... {seconds} 秒',
+        apiKeyRequired: '请先选择一个 API 密钥再提交。',
+        promptRequired: '提示词不能为空。'
+      },
+      edit: {
+        sourceImage: '源图片',
+        sourceImageHint: '支持 PNG、WEBP 或 JPEG。',
+        sourceImageInvalid: '源图片必须是图片文件。',
+        maskImage: '遮罩图片',
+        maskImageHint: '透明区域表示允许编辑的范围。',
+        sourceImageRequired: '必须上传源图片。',
+        submit: '编辑图片',
+        submitting: '编辑中...',
+        submittingWithSeconds: '编辑中... {seconds} 秒'
+      }
+    },
+    results: {
+      title: '结果',
+      description: '这里会展示最新一次网关返回的图片预览。',
+      loading: '正在加载最新结果...',
+      empty: '提交一次生成或编辑请求后，这里会显示结果。',
+      errorTitle: '请求失败',
+      openPreview: '放大查看',
+      download: '下载',
+      previewTitle: '图片预览',
+      closePreview: '关闭预览',
+      revisedPrompt: '修订后的提示词',
+      duration: '耗时'
+    },
+    history: {
+      listTitle: '最近请求',
+      empty: '还没有图片历史记录。',
+      loading: '正在加载图片历史...',
+      loadFailed: '加载图片历史失败。',
+      retry: '重试',
+      detailTitle: '历史详情',
+      detailEmpty: '选择一条历史记录后可查看详情。',
+      detailLoading: '正在加载历史详情...',
+      detailLoadFailed: '加载历史详情失败。',
+      prompt: '提示词',
+      noPrompt: '无提示词',
+      parameters: '参数',
+      images: '图片',
+      status: '状态',
+      apiKey: 'API 密钥',
+      createdAt: '创建时间',
+      duration: '耗时',
+      count: '图片数量',
+      errorMessage: '错误信息',
+      replay: '回填到表单',
+      booleanYes: '是',
+      booleanNo: '否',
+      hadSourceImage: '已上传源图',
+      hadMask: '已上传遮罩',
+      replayEditNotice: '已回填编辑参数。再次提交前需要重新上传源图，如有需要也请重新上传遮罩。',
+      modes: {
+        generate: '生成',
+        edit: '编辑'
+      },
+      statuses: {
+        success: '成功',
+        error: '失败'
+      }
+    }
+  },
+
   // Admin
   admin: {
     // Dashboard
@@ -2379,6 +2564,11 @@ export default {
         modeHint: '默认关闭独立倍率时，图片费用 = 图片价格 × 当前分组有效倍率；开启独立倍率后，图片费用 = 图片价格 × 生图独立倍率。',
         finalPricePreview: '最终单张价格预览',
         notConfigured: '未配置'
+      },
+      userConcurrency: {
+        title: '用户并发限制',
+        description: '启用后，限制每个用户在此分组的最大并发请求数',
+        limit: '每用户最大并发数'
       },
       peakRate: {
         enable: '启用高峰倍率',
@@ -3486,6 +3676,35 @@ export default {
           unavailableDesc: '服务不可用 - 暂停 30 分钟'
         }
       },
+      passthroughFields: {
+        title: '透传字段规则',
+        description: '适用于所有账号类型；与自动透传能力独立',
+        disabledHint: '已配置规则会保留，但当前不会生效',
+        addRule: '新增规则',
+        targetHeader: 'Header',
+        targetBody: 'Body',
+        modeForward: '放行透传',
+        modeInject: '固定注入',
+        modeMap: '映射透传',
+        modeDelete: '删除字段',
+        sourceKey: '来源字段或路径',
+        targetKey: '目标字段或路径',
+        headerHint: 'Header 比较时不区分大小写',
+        bodyHint: '仅支持 xx.xx 形式的对象层级路径',
+        injectHint: '固定注入将在转发前写入上游请求',
+        mapHint: '映射透传会复制来源字段到目标字段，且不会修改原字段',
+        deleteHint: '删除模式会在转发前从上游请求中移除指定字段',
+        hiddenRulesError: '规则列表已隐藏，请重新开启后处理错误',
+        errors: {
+          keyRequired: '字段名或路径不能为空',
+          sourceKeyRequired: '来源字段或路径不能为空',
+          bodyPath: 'Body 路径仅支持点号对象层级，不支持数组语法',
+          valueRequired: '固定注入模式必须填写值',
+          duplicateKey: '同一目标下的字段名或路径不能重复',
+          sameSourceAndTarget: '来源字段与目标字段不能相同',
+          bodyPathPrefixConflict: 'Body 路径不能与其他规则存在父子层级关系'
+        }
+      },
       usageWindow: {
         statsTitle: '5小时窗口用量统计',
         statsTitleDaily: '每日用量统计',
@@ -3759,6 +3978,15 @@ export default {
         testMode: '测试模式',
         testModeDefault: '常规请求',
         testModeCompact: 'Compact 探测',
+        probeEnabled: '故障自动检查',
+        probeEnabledDesc:
+          '开启时该账号会被分层调度器健康检查；关闭后不再被自动检查，已有的探活临时不可用状态会立即清除。',
+        probeEnabledOffHint:
+          '关闭后该账号不再进入自动健康检查；当前若处于自动检查导致的临时不可用状态，保存后会立即恢复调度。',
+        probeModel: '自检模型',
+        probeModelPlaceholder: '留空使用默认逻辑',
+        probeModelHint:
+          '填写后该模型将用于账号健康检查；图像专用上游建议填写实际支持的模型（如 gpt-image-2）。',
         modelRestrictionDisabledByPassthrough: '已开启自动透传：模型白名单/映射不会生效。',
       },
       grok: {
@@ -4913,18 +5141,18 @@ export default {
       failedToUpdate: '更新优惠码失败',
       failedToDelete: '删除优惠码失败',
       failedToLoadUsages: '加载使用记录失败'
-    },
+  },
 
-    // Usage Records
-    usage: {
+  // Usage Records
+  usage: {
       title: '使用记录',
       description: '查看和管理所有用户的使用记录',
       userFilter: '用户',
-      searchUserPlaceholder: '按邮箱搜索用户...',
+      searchUserPlaceholder: '按用户名或邮箱搜索...',
       searchApiKeyPlaceholder: '按名称搜索 API 密钥...',
       searchAccountPlaceholder: '按名称搜索账号...',
       selectedUser: '已选择',
-      user: '用户',
+      user: '用户名',
       account: '账户',
       group: '分组',
       requestId: '请求ID',
@@ -4956,6 +5184,27 @@ export default {
       ipAddress: 'IP',
       clickToViewBalance: '点击查看充值记录',
       failedToLoadUser: '加载用户信息失败',
+      viewDetail: '查看详情',
+      failedToLoadDetail: '加载详情失败',
+      detailNotFound: '详情不存在或已被删除',
+      clientRequestHeaders: '客户端请求头',
+      clientRequestBody: '客户端请求体',
+      upstreamRequestHeaders: '上游请求头',
+      upstreamRequestBody: '上游请求体',
+      upstreamResponseHeaders: '上游响应头',
+      upstreamResponseBody: '上游响应体',
+      responseHeaders: '响应头',
+      responseBody: '响应体',
+      conversationFlow: '对话流',
+      conversationFlowEmpty: '未找到可展示的对话内容',
+      conversationFlowRawRequest: '无法识别请求体',
+      conversationFlowRawResponse: '无法识别响应体',
+      imagePreview: '图片预览',
+      rawResponseBody: '原始响应 JSON',
+      openImagePreview: '打开图片预览',
+      previewImageTitle: '图片放大预览',
+      closeImagePreview: '关闭预览',
+      emptyDetailContent: '暂无内容',
       userDeletedBadge: '已删除',
       cleanup: {
         button: '清理',
@@ -6684,6 +6933,46 @@ export default {
           testSuccess: 'Google Drive 存储测试成功（上传、访问、删除均正常）',
           testFailed: 'Google Drive 存储测试失败'
         }
+      },
+      gatewayRuntime: {
+        title: '网关运行参数',
+        description: '配置网关与上游连接的运行时超时参数，保存后仅影响新请求。',
+        loadFailed: '加载网关运行参数失败',
+        loadFailedInline: '网关运行参数加载失败，保存按钮已禁用，请先排查加载问题后再重试。',
+        responseHeaderTimeout: '上游响应头超时（秒）',
+        responseHeaderTimeoutHint: '默认 600 秒。等待上游返回响应头的最长时间，必须大于 0。',
+        responseHeaderTimeoutWarning: '修改后会清理空闲连接池，后续新请求会使用新配置。',
+        streamDataIntervalTimeout: '流数据间隔超时（秒）',
+        streamDataIntervalTimeoutHint: '默认 180 秒。可设为 0，或设置为 30-300 秒。',
+        usageLogDetailRetentionLimit: '普通调用详情保留数量',
+        usageLogDetailRetentionLimitHint: '默认 300。设为 0 表示不保留普通调用详情。',
+        imageUsageLogDetailRetentionLimit: '生图调用详情保留数量',
+        imageUsageLogDetailRetentionLimitHint: '默认 300。设为 0 表示不保留生图调用详情。',
+        validationFailed: '网关运行参数包含无效数值，请检查后再保存。',
+        saved: '网关运行参数保存成功',
+        saveFailed: '保存网关运行参数失败'
+      },
+      gatewaySticky: {
+        title: 'Sticky 分平台开关',
+        description: '分别控制 OpenAI、Gemini、Anthropic 的 sticky 会话能力。',
+        openaiHint: '关闭后，OpenAI 不再使用 sticky 会话绑定。',
+        geminiHint: '关闭后，Gemini 不再使用 sticky 会话绑定。',
+        anthropicHint: '关闭后，Anthropic 不再使用 sticky 会话绑定。'
+      },
+      openaiWsScheduler: {
+        title: 'OpenAI WS 调度器',
+        description: '配置 OpenAI Responses WebSocket 调度模式，以及 layered 模式下的分层参数。',
+        mode: '调度模式',
+        modeHint: 'weighted 为加权调度；layered 为分层调度。',
+        errorPenaltyThreshold: '错误率惩罚阈值',
+        errorPenaltyValue: '错误率惩罚值',
+        ttftPenaltyMultiplier: 'TTFT 惩罚倍数',
+        ttftPenaltyValue: 'TTFT 惩罚值',
+        probeCooldownSeconds: '探测冷却（秒）',
+        probeIntervalSeconds: '探测间隔（秒）',
+        probeMaxFailures: '探测最大失败次数',
+        probeTimeoutSeconds: '探测超时（秒）',
+        probeTempUnschedulableSeconds: '临时不可调度冷却（秒）'
       },
       overloadCooldown: {
         title: '529 过载冷却',

@@ -137,8 +137,12 @@ func NewBillingCacheService(
 	userRPMCache UserRPMCache,
 	userGroupRateRepo UserGroupRateRepository,
 	cfg *config.Config,
-	userPlatformQuotaRepo UserPlatformQuotaRepository,
+	userPlatformQuotaRepos ...UserPlatformQuotaRepository,
 ) *BillingCacheService {
+	var userPlatformQuotaRepo UserPlatformQuotaRepository
+	if len(userPlatformQuotaRepos) > 0 {
+		userPlatformQuotaRepo = userPlatformQuotaRepos[0]
+	}
 	svc := &BillingCacheService{
 		cache:                 cache,
 		userRepo:              userRepo,

@@ -61,7 +61,7 @@ func (m *mockUserSettingRepo) Get(context.Context, string) (*Setting, error) {
 }
 
 func (m *mockUserSettingRepo) GetValue(context.Context, string) (string, error) {
-	panic("unexpected GetValue call")
+	return "", nil
 }
 
 func (m *mockUserSettingRepo) Set(context.Context, string, string) error {

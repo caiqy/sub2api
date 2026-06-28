@@ -43,6 +43,8 @@ const (
 // Ref: https://ai.google.dev/gemini-api/docs/thought-signatures
 const geminiDummyThoughtSignature = "skip_thought_signature_validator"
 
+var geminiApplyAccountPassthroughFieldsWithContext = applyAccountPassthroughFieldsWithContext
+
 type GeminiMessagesCompatService struct {
 	accountRepo               AccountRepository
 	groupRepo                 GroupRepository
@@ -91,6 +93,19 @@ func NewGeminiMessagesCompatService(
 		cfg:                       cfg,
 		responseHeaderFilter:      compileResponseHeaderFilter(cfg),
 	}
+}
+
+func (s *GeminiMessagesCompatService) applyGeminiAPIKeyPassthroughFields(ctx context.Context, c *gin.Context, account *Account, sourceBody []byte, targetBody []byte) ([]byte, http.Header, error) {
+	var inbound http.Header
+	if c != nil && c.Request != nil {
+		inbound = c.Request.Header
+	}
+	outbound := http.Header{}
+	updatedBody, err := geminiApplyAccountPassthroughFieldsWithContext(ctx, account, inbound, sourceBody, targetBody, outbound)
+	if err != nil {
+		return nil, nil, err
+	}
+	return updatedBody, outbound, nil
 }
 
 // GetTokenProvider returns the token provider for OAuth accounts
@@ -642,12 +657,23 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				fullURL += "?alt=sse"
 			}
 
-			restGeminiReq := normalizeGeminiRequestForAIStudio(geminiReq)
+			finalGeminiReq, passthroughHeaders, err := s.applyGeminiAPIKeyPassthroughFields(ctx, c, account, originalClaudeBody, geminiReq)
+			if err != nil {
+				return nil, "", err
+			}
+
+			restGeminiReq := normalizeGeminiRequestForAIStudio(finalGeminiReq)
 			upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(restGeminiReq))
 			if err != nil {
 				return nil, "", err
 			}
 			upstreamReq.Header.Set("Content-Type", "application/json")
+			for key, values := range passthroughHeaders {
+				upstreamReq.Header.Del(key)
+				for _, value := range values {
+					upstreamReq.Header.Add(key, value)
+				}
+			}
 			upstreamReq.Header.Set("x-goog-api-key", apiKey)
 			return upstreamReq, "x-request-id", nil
 		}
@@ -670,6 +696,12 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				action = "streamGenerateContent"
 			}
 
+			// Apply passthrough field rules for OAuth accounts
+			finalGeminiReq, passthroughHeaders, err := s.applyGeminiAPIKeyPassthroughFields(ctx, c, account, originalClaudeBody, geminiReq)
+			if err != nil {
+				return nil, "", err
+			}
+
 			// Two modes for OAuth:
 			// 1. With project_id -> Code Assist API (wrapped request)
 			// 2. Without project_id -> AI Studio API (direct OAuth, like API key but with Bearer token)
@@ -689,7 +721,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 					"project": projectID,
 				}
 				var inner any
-				if err := json.Unmarshal(geminiReq, &inner); err != nil {
+				if err := json.Unmarshal(finalGeminiReq, &inner); err != nil {
 					return nil, "", fmt.Errorf("failed to parse gemini request: %w", err)
 				}
 				wrapped["request"] = inner
@@ -700,6 +732,11 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 					return nil, "", err
 				}
 				upstreamReq.Header.Set("Content-Type", "application/json")
+				for key, values := range passthroughHeaders {
+					for _, v := range values {
+						upstreamReq.Header.Add(key, v)
+					}
+				}
 				upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
 				upstreamReq.Header.Set("User-Agent", geminicli.GeminiCLIUserAgent)
 				return upstreamReq, "x-request-id", nil
@@ -716,12 +753,17 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 					fullURL += "?alt=sse"
 				}
 
-				restGeminiReq := normalizeGeminiRequestForAIStudio(geminiReq)
+				restGeminiReq := normalizeGeminiRequestForAIStudio(finalGeminiReq)
 				upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(restGeminiReq))
 				if err != nil {
 					return nil, "", err
 				}
 				upstreamReq.Header.Set("Content-Type", "application/json")
+				for key, values := range passthroughHeaders {
+					for _, v := range values {
+						upstreamReq.Header.Add(key, v)
+					}
+				}
 				upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
 				return upstreamReq, "x-request-id", nil
 			}
@@ -777,6 +819,12 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 			return nil, s.writeClaudeError(c, http.StatusBadGateway, "upstream_error", err.Error())
 		}
 		requestIDHeader = idHeader
+
+		// Capture upstream request body for ops retry of this attempt.
+		if c != nil {
+			setOpsUpstreamRequestBodyFromRequest(c, upstreamReq)
+		}
+		SetUsageUpstreamRequest(c, upstreamReq, "")
 
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		if err != nil {
@@ -970,7 +1018,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 					Message:            upstreamMsg,
 					Detail:             upstreamDetail,
 				})
-				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
+				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, ResponseHeaders: resp.Header.Clone()}
 			}
 		}
 
@@ -1004,7 +1052,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 					Message:            upstreamMsg,
 					Detail:             upstreamDetail,
 				})
-				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, RetryableOnSameAccount: true}
+				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, ResponseHeaders: resp.Header.Clone(), RetryableOnSameAccount: true}
 			}
 		}
 		if s.shouldFailoverGeminiUpstreamError(resp.StatusCode) {
@@ -1032,7 +1080,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				Message:            upstreamMsg,
 				Detail:             upstreamDetail,
 			})
-			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
+			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, ResponseHeaders: resp.Header.Clone()}
 		}
 		upstreamReqID := resp.Header.Get(requestIDHeader)
 		if upstreamReqID == "" {
@@ -1302,6 +1350,12 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		}
 		requestIDHeader = idHeader
 
+		// Capture upstream request body for ops retry of this attempt.
+		if c != nil {
+			setOpsUpstreamRequestBodyFromRequest(c, upstreamReq)
+		}
+		SetUsageUpstreamRequest(c, upstreamReq, "")
+
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		if err != nil {
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
@@ -1478,7 +1532,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 					Message:            upstreamMsg,
 					Detail:             upstreamDetail,
 				})
-				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
+				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, ResponseHeaders: resp.Header.Clone()}
 			}
 		}
 
@@ -1509,7 +1563,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 					Message:            upstreamMsg,
 					Detail:             upstreamDetail,
 				})
-				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: evBody, RetryableOnSameAccount: true}
+				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: evBody, ResponseHeaders: resp.Header.Clone(), RetryableOnSameAccount: true}
 			}
 		}
 		if s.shouldFailoverGeminiUpstreamError(resp.StatusCode) {
@@ -1534,7 +1588,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				Message:            upstreamMsg,
 				Detail:             upstreamDetail,
 			})
-			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: evBody}
+			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: evBody, ResponseHeaders: resp.Header.Clone()}
 		}
 
 		respBody = unwrapIfNeeded(isOAuth, respBody)
@@ -2636,7 +2690,7 @@ func (s *GeminiMessagesCompatService) handleNativeStreamingResponse(c *gin.Conte
 // endpoints like /v1beta/models and /v1beta/models/{model}.
 //
 // This is used to support Gemini SDKs that call models listing endpoints before generation.
-func (s *GeminiMessagesCompatService) ForwardAIStudioGET(ctx context.Context, account *Account, path string) (*UpstreamHTTPResult, error) {
+func (s *GeminiMessagesCompatService) ForwardAIStudioGET(ctx context.Context, account *Account, inbound http.Header, path string) (*UpstreamHTTPResult, error) {
 	if account == nil {
 		return nil, errors.New("account is nil")
 	}
@@ -2668,6 +2722,9 @@ func (s *GeminiMessagesCompatService) ForwardAIStudioGET(ctx context.Context, ac
 		if apiKey == "" {
 			return nil, errors.New("gemini api_key not configured")
 		}
+		if _, err := geminiApplyAccountPassthroughFieldsWithContext(ctx, account, inbound, nil, nil, req.Header); err != nil {
+			return nil, err
+		}
 		req.Header.Set("x-goog-api-key", apiKey)
 	case AccountTypeOAuth:
 		if s.tokenProvider == nil {
@@ -2675,6 +2732,9 @@ func (s *GeminiMessagesCompatService) ForwardAIStudioGET(ctx context.Context, ac
 		}
 		accessToken, err := s.tokenProvider.GetAccessToken(ctx, account)
 		if err != nil {
+			return nil, err
+		}
+		if _, err := geminiApplyAccountPassthroughFieldsWithContext(ctx, account, inbound, nil, nil, req.Header); err != nil {
 			return nil, err
 		}
 		req.Header.Set("Authorization", "Bearer "+accessToken)

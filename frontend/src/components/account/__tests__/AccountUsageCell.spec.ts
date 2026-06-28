@@ -338,7 +338,8 @@ describe('AccountUsageCell', () => {
 
     // 手动刷新再拉一次
     expect(getUsage).toHaveBeenCalledTimes(2)
-    expect(getUsage).toHaveBeenCalledWith(2010)
+    expect(getUsage).toHaveBeenNthCalledWith(1, 2010)
+    expect(getUsage).toHaveBeenNthCalledWith(2, 2010)
     // 单一数据源：始终使用 /usage API 值
     expect(wrapper.text()).toContain('5h|18|900')
   })
@@ -468,6 +469,8 @@ describe('AccountUsageCell', () => {
 
 	await flushPromises()
 	expect(getUsage).toHaveBeenCalledTimes(2)
+	expect(getUsage).toHaveBeenNthCalledWith(1, 2003)
+	expect(getUsage).toHaveBeenNthCalledWith(2, 2003)
 	expect(wrapper.text()).toContain('5h|0|200')
   })
 

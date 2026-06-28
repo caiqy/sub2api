@@ -116,6 +116,52 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_CompactRejectsExplicitl
 	require.Nil(t, selection)
 }
 
+func TestOpenAIGatewayService_SelectAccountWithLayeredScheduler_CompactRejectsExplicitlyUnsupported(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	ctx := context.Background()
+	groupID := int64(91022)
+	accounts := []Account{
+		{
+			ID:          71110,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Priority:    0,
+			Extra:       map[string]any{"openai_compact_mode": OpenAICompactModeForceOff},
+		},
+		{
+			ID:          71111,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Priority:    0,
+			Extra:       map[string]any{"openai_compact_supported": false},
+		},
+	}
+	svc := newLayeredTestService(accounts)
+	svc.accountRepo = schedulerTestOpenAIAccountRepo{accounts: accounts}
+	svc.cache = &schedulerTestGatewayCache{}
+
+	selection, _, err := svc.SelectAccountWithScheduler(
+		ctx,
+		&groupID,
+		"",
+		"",
+		"gpt-5.4",
+		nil,
+		OpenAIUpstreamTransportAny,
+		true,
+	)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrNoAvailableCompactAccounts), "layered scheduler should preserve compact-specific no-available error")
+	require.Nil(t, selection)
+}
+
 // TestOpenAIGatewayService_SelectAccountWithScheduler_CompactFallsBackToUnknown
 // 验证当没有"已知支持"账号时，compact 请求会回退到"未探测"账号。
 func TestOpenAIGatewayService_SelectAccountWithScheduler_CompactFallsBackToUnknown(t *testing.T) {

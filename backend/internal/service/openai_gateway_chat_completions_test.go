@@ -98,6 +98,43 @@ func TestNormalizeResponsesBodyServiceTier(t *testing.T) {
 	require.False(t, gjson.GetBytes(body, "service_tier").Exists())
 }
 
+func TestForwardAsChatCompletions_OAuthPromptCacheKeyKeepsAPIKeyIsolatedSessionID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(nil))
+	apiKey := &APIKey{ID: 4242}
+	c.Set("api_key", apiKey)
+
+	upstream := &openAIHTTPUpstreamRecorder{err: errors.New("boom")}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:          101,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+	}
+	body := []byte(`{"model":"gpt-5.1","messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	promptCacheKey := "pk_chat_branch_001"
+
+	_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, promptCacheKey, "")
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
+	require.NotNil(t, upstream.lastReq)
+
+	isolationSeed := isolateOpenAISessionID(apiKey.ID, promptCacheKey)
+	require.Equal(t, isolationSeed, upstream.lastReq.Header.Get("conversation_id"))
+	require.Equal(t, generateSessionUUID(isolationSeed), upstream.lastReq.Header.Get("session_id"))
+}
+
 func TestForwardAsChatCompletions_UnknownModelDoesNotUseDefaultMappedModel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

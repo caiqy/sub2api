@@ -74,6 +74,7 @@
           <button
             type="button"
             @click="form.platform = 'anthropic'"
+            data-testid="platform-anthropic"
             :class="[
               'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
               form.platform === 'anthropic'
@@ -87,6 +88,7 @@
           <button
             type="button"
             @click="form.platform = 'openai'"
+            data-testid="platform-openai"
             :class="[
               'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
               form.platform === 'openai'
@@ -134,9 +136,10 @@
             </svg>
             Gemini
           </button>
-          <button
-            type="button"
-            @click="form.platform = 'antigravity'"
+        <button
+          type="button"
+          data-testid="platform-antigravity"
+          @click="form.platform = 'antigravity'"
             :class="[
               'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
               form.platform === 'antigravity'
@@ -170,6 +173,7 @@
           <button
             type="button"
             @click="accountCategory = 'oauth-based'"
+            data-testid="account-type-oauth"
             :class="[
               'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
               accountCategory === 'oauth-based'
@@ -200,6 +204,7 @@
           <button
             type="button"
             @click="accountCategory = 'apikey'"
+            data-testid="account-type-apikey"
             :class="[
               'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
               accountCategory === 'apikey'
@@ -230,6 +235,7 @@
           <button
             type="button"
             @click="accountCategory = 'bedrock'"
+            data-testid="account-type-bedrock"
             :class="[
               'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
               accountCategory === 'bedrock'
@@ -300,6 +306,7 @@
           <button
             type="button"
             @click="accountCategory = 'oauth-based'"
+            data-testid="account-type-oauth"
             :class="[
               'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
               accountCategory === 'oauth-based'
@@ -326,6 +333,7 @@
           <button
             type="button"
             @click="accountCategory = 'apikey'"
+            data-testid="account-type-apikey"
             :class="[
               'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
               accountCategory === 'apikey'
@@ -776,6 +784,7 @@
         <div class="mt-2 grid grid-cols-2 gap-3">
           <button
             type="button"
+            data-testid="account-type-antigravity-oauth"
             @click="antigravityAccountType = 'oauth'"
             :class="[
               'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
@@ -802,6 +811,7 @@
 
           <button
             type="button"
+            data-testid="account-type-antigravity-upstream"
             @click="antigravityAccountType = 'upstream'"
             :class="[
               'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
@@ -849,7 +859,7 @@
             type="text"
             required
             class="input"
-            placeholder="https://cloudcode-pa.googleapis.com"
+            :placeholder="getDefaultBaseUrl('antigravity')"
           />
           <p class="input-hint">{{ t('admin.accounts.upstream.baseUrlHint') }}</p>
         </div>
@@ -864,6 +874,7 @@
           />
           <p class="input-hint">{{ t('admin.accounts.upstream.apiKeyHint') }}</p>
         </div>
+
       </div>
 
       <!-- Vertex Service Account -->
@@ -1082,13 +1093,7 @@
             v-model="apiKeyBaseUrl"
             type="text"
             class="input"
-            :placeholder="
-              form.platform === 'openai'
-                ? 'https://api.openai.com'
-                : form.platform === 'gemini'
-                  ? 'https://generativelanguage.googleapis.com'
-                  : 'https://api.anthropic.com'
-            "
+            :placeholder="getDefaultBaseUrl(form.platform)"
           />
           <p class="input-hint">{{ baseUrlHint }}</p>
         </div>
@@ -1099,6 +1104,7 @@
             type="password"
             required
             class="input font-mono"
+            data-testid="create-account-apikey-input"
             :placeholder="
               form.platform === 'openai'
                 ? 'sk-proj-...'
@@ -1506,6 +1512,7 @@
               type="text"
               required
               class="input font-mono"
+              data-testid="bedrock-access-key-id-input"
               placeholder="AKIA..."
             />
           </div>
@@ -1516,6 +1523,7 @@
               type="password"
               required
               class="input font-mono"
+              data-testid="bedrock-secret-access-key-input"
             />
           </div>
           <div>
@@ -2572,6 +2580,18 @@
         <p class="input-hint">{{ t('admin.accounts.expiresAtHint') }}</p>
       </div>
 
+      <!-- Passthrough Field Rules (all account types) -->
+      <section
+        v-if="isPassthroughFieldSupportedFlow"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+        data-testid="passthrough-fields-section"
+      >
+        <PassthroughFieldRulesEditor
+          v-model:enabled="passthroughFieldsEnabled"
+          v-model:rules="passthroughFieldRules"
+        />
+      </section>
+
       <!-- OpenAI 自动透传开关（OAuth/API Key） -->
       <div
         v-if="form.platform === 'openai'"
@@ -2783,6 +2803,49 @@
           <button type="button" @click="addOpenAICompactModelMapping" class="btn btn-secondary text-sm">
             + {{ t('admin.accounts.addMapping') }}
           </button>
+        </div>
+
+        <!-- 故障自动检查 + 自检模型 -->
+        <div class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4">
+          <div class="flex items-center justify-between gap-4">
+            <div class="flex-1">
+              <label class="input-label mb-0">{{ t('admin.accounts.openai.probeEnabled') }}</label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.accounts.openai.probeEnabledDesc') }}
+              </p>
+            </div>
+            <button
+              type="button"
+              @click="openAIProbeEnabled = !openAIProbeEnabled"
+              :class="[
+                'relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors',
+                openAIProbeEnabled ? 'bg-primary-600' : 'bg-gray-300 dark:bg-dark-500'
+              ]"
+            >
+              <span
+                :class="[
+                  'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
+                  openAIProbeEnabled ? 'translate-x-6' : 'translate-x-1'
+                ]"
+              />
+            </button>
+          </div>
+          <p
+            v-if="!openAIProbeEnabled"
+            class="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
+          >
+            {{ t('admin.accounts.openai.probeEnabledOffHint') }}
+          </p>
+          <div>
+            <label class="input-label">{{ t('admin.accounts.openai.probeModel') }}</label>
+            <input
+              v-model="openAIProbeModel"
+              type="text"
+              class="input"
+              :placeholder="t('admin.accounts.openai.probeModelPlaceholder')"
+            />
+            <p class="input-hint">{{ t('admin.accounts.openai.probeModelHint') }}</p>
+          </div>
         </div>
       </div>
 
@@ -3325,6 +3388,7 @@ import ProxySelector from '@/components/common/ProxySelector.vue'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
+import PassthroughFieldRulesEditor from '@/components/account/PassthroughFieldRulesEditor.vue'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
 import {
   applyAntigravityProjectID,
@@ -3342,6 +3406,12 @@ import {
   resolveOpenAIWSModeConcurrencyHintKey,
   type OpenAIWSMode
 } from '@/utils/openaiWsMode'
+import {
+  normalizePassthroughFieldRule,
+  validatePassthroughFieldRules,
+  type PassthroughFieldRuleDraft
+} from './passthroughFieldRules'
+import { getDefaultBaseUrl, supportsPassthroughFields } from './passthroughFieldSupport'
 import OAuthAuthorizationFlow from './OAuthAuthorizationFlow.vue'
 
 // Type for exposed OAuthAuthorizationFlow component
@@ -3460,7 +3530,7 @@ const step = ref(1)
 const submitting = ref(false)
 const accountCategory = ref<'oauth-based' | 'apikey' | 'bedrock' | 'service_account'>('oauth-based') // UI selection for account category
 const addMethod = ref<AddMethod>('oauth') // For oauth-based: 'oauth' or 'setup-token'
-const apiKeyBaseUrl = ref('https://api.anthropic.com')
+const apiKeyBaseUrl = ref(getDefaultBaseUrl('anthropic'))
 const apiKeyValue = ref('')
 
 const syncPreviewCredentials = computed(() => {
@@ -3516,6 +3586,8 @@ const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(true)
 const openaiPassthroughEnabled = ref(false)
 const openAICompactMode = ref<OpenAICompactMode>('auto')
+const openAIProbeEnabled = ref<boolean>(true)
+const openAIProbeModel = ref<string>('')
 const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>(['chat_completions', 'embeddings'])
 const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
@@ -3525,6 +3597,8 @@ const codexCLIOnlyAppServerEnabled = ref(false)
 type AnthropicAPIKeyAuthScheme = 'x_api_key' | 'authorization_bearer'
 const anthropicPassthroughEnabled = ref(false)
 const anthropicAPIKeyAuthScheme = ref<AnthropicAPIKeyAuthScheme>('x_api_key')
+const passthroughFieldsEnabled = ref(false)
+const passthroughFieldRules = ref<PassthroughFieldRuleDraft[]>([])
 const webSearchEmulationMode = ref('default')
 const webSearchGlobalEnabled = ref(false)
 const {
@@ -3534,7 +3608,6 @@ const {
   writeToExtra: writeQuotaNotifyToExtra,
 } = useQuotaNotifyState()
 
-// Load global feature states once
 adminAPI.settings.getWebSearchEmulationConfig().then(cfg => {
   webSearchGlobalEnabled.value = cfg?.enabled === true && (cfg?.providers?.length ?? 0) > 0
 }).catch(() => { webSearchGlobalEnabled.value = false })
@@ -3544,7 +3617,7 @@ const mixedScheduling = ref(false) // For antigravity accounts: enable mixed sch
 const allowOverages = ref(false) // For antigravity accounts: enable AI Credits overages
 const antigravityAccountType = ref<'oauth' | 'upstream'>('oauth') // For antigravity: oauth or upstream
 const antigravityProjectId = ref('')
-const upstreamBaseUrl = ref('') // For upstream type: base URL
+const upstreamBaseUrl = ref(getDefaultBaseUrl('antigravity')) // For upstream type: base URL
 const upstreamApiKey = ref('') // For upstream type: API key
 const antigravityModelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
 const antigravityWhitelistModels = ref<string[]>([])
@@ -3728,6 +3801,11 @@ const openAIWSModeConcurrencyHintKey = computed(() =>
   resolveOpenAIWSModeConcurrencyHintKey(openaiResponsesWebSocketV2Mode.value)
 )
 
+const isPassthroughFieldSupportedFlow = computed(() => supportsPassthroughFields({
+  platform: form.platform,
+  type: form.type
+}))
+
 const isOpenAIModelRestrictionDisabled = computed(() =>
   form.platform === 'openai' && openaiPassthroughEnabled.value
 )
@@ -3901,14 +3979,7 @@ watch(
   () => form.platform,
   (newPlatform) => {
     // Reset base URL based on platform
-    apiKeyBaseUrl.value =
-      (newPlatform === 'openai')
-        ? 'https://api.openai.com'
-        : newPlatform === 'gemini'
-          ? 'https://generativelanguage.googleapis.com'
-          : newPlatform === 'grok'
-            ? 'https://api.x.ai/v1'
-            : 'https://api.anthropic.com'
+    apiKeyBaseUrl.value = getDefaultBaseUrl(newPlatform)
     // Clear model-related settings
     allowedModels.value = []
     modelMappings.value = []
@@ -3957,6 +4028,10 @@ watch(
     if (newPlatform !== 'anthropic' && newPlatform !== 'antigravity') {
       interceptWarmupRequests.value = false
     }
+    if (newPlatform !== 'antigravity') {
+      upstreamBaseUrl.value = getDefaultBaseUrl('antigravity')
+      upstreamApiKey.value = ''
+    }
     if (newPlatform !== 'openai') {
       openaiPassthroughEnabled.value = false
       openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
@@ -3977,6 +4052,16 @@ watch(
     geminiOAuth.resetState()
     antigravityOAuth.resetState()
     grokOAuth.resetState()
+  }
+)
+
+watch(
+  antigravityAccountType,
+  (newType) => {
+    if (newType !== 'upstream') {
+      upstreamBaseUrl.value = getDefaultBaseUrl('antigravity')
+      upstreamApiKey.value = ''
+    }
   }
 )
 
@@ -4010,6 +4095,28 @@ watch(
     }
   },
   { immediate: true }
+)
+
+watch(
+  isPassthroughFieldSupportedFlow,
+  (supported, previousSupported) => {
+    if (!previousSupported || supported) {
+      return
+    }
+
+    if (form.platform === 'antigravity' && antigravityAccountType.value !== 'upstream') {
+      return
+    }
+
+    const hasPassthroughInput = passthroughFieldsEnabled.value || passthroughFieldRules.value.some((rule) => {
+      const normalizedRule = normalizePassthroughFieldRule(rule)
+      return Boolean(normalizedRule.key || normalizedRule.source_key || normalizedRule.value.trim())
+    })
+
+    if (hasPassthroughInput) {
+      appStore.showInfo('保存后将移除透传字段规则配置')
+    }
+  }
 )
 
 const handleSelectGeminiOAuthType = (oauthType: 'code_assist' | 'google_one' | 'ai_studio') => {
@@ -4332,7 +4439,7 @@ const resetForm = () => {
   form.expires_at = null
   accountCategory.value = 'oauth-based'
   addMethod.value = 'oauth'
-  apiKeyBaseUrl.value = 'https://api.anthropic.com'
+  apiKeyBaseUrl.value = getDefaultBaseUrl('anthropic')
   apiKeyValue.value = ''
   editQuotaLimit.value = null
   editQuotaDailyLimit.value = null
@@ -4371,6 +4478,8 @@ const resetForm = () => {
   codexCLIOnlyAppServerEnabled.value = false
   anthropicPassthroughEnabled.value = false
   anthropicAPIKeyAuthScheme.value = 'x_api_key'
+  passthroughFieldsEnabled.value = false
+  passthroughFieldRules.value = []
   webSearchEmulationMode.value = 'default'
   // Reset quota control state
   windowCostEnabled.value = false
@@ -4394,7 +4503,7 @@ const resetForm = () => {
   allowOverages.value = false
   antigravityAccountType.value = 'oauth'
   antigravityProjectId.value = ''
-  upstreamBaseUrl.value = ''
+  upstreamBaseUrl.value = getDefaultBaseUrl('antigravity')
   upstreamApiKey.value = ''
   vertexServiceAccountJson.value = ''
   vertexProjectId.value = ''
@@ -4476,6 +4585,21 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
     delete extra.openai_responses_mode
   }
 
+  // openai_probe_enabled: only write when explicitly false (default is true)
+  if (openAIProbeEnabled.value === false) {
+    extra.openai_probe_enabled = false
+  } else {
+    delete extra.openai_probe_enabled
+  }
+
+  // openai_probe_model: only write when non-empty
+  const probeModel = openAIProbeModel.value.trim()
+  if (probeModel !== '') {
+    extra.openai_probe_model = probeModel
+  } else {
+    delete extra.openai_probe_model
+  }
+
   return Object.keys(extra).length > 0 ? extra : undefined
 }
 
@@ -4502,6 +4626,39 @@ const buildAnthropicExtra = (base?: Record<string, unknown>): Record<string, unk
   }
 
   return Object.keys(extra).length > 0 ? extra : undefined
+}
+
+const buildPassthroughFieldExtra = (base?: Record<string, unknown>): Record<string, unknown> | undefined => {
+  const extra: Record<string, unknown> = { ...(base || {}) }
+
+  const passthroughCapableFlow = isPassthroughFieldSupportedFlow.value
+
+  if (!passthroughCapableFlow) {
+    delete extra.passthrough_fields_enabled
+    delete extra.passthrough_field_rules
+    return Object.keys(extra).length > 0 ? extra : undefined
+  }
+
+  const normalizedRules = passthroughFieldRules.value
+    .map((rule) => normalizePassthroughFieldRule(rule))
+    .filter((rule) => rule.key)
+
+  if (!passthroughFieldsEnabled.value && normalizedRules.length === 0) {
+    delete extra.passthrough_fields_enabled
+    delete extra.passthrough_field_rules
+    return Object.keys(extra).length > 0 ? extra : undefined
+  }
+
+  extra.passthrough_fields_enabled = passthroughFieldsEnabled.value
+  extra.passthrough_field_rules = normalizedRules.map(({ target, mode, key, source_key, value }) => ({
+    target,
+    mode,
+    key: key.trim(),
+    ...(mode === 'map' ? { source_key } : {}),
+    ...(mode === 'inject' ? { value } : {})
+  }))
+
+  return extra
 }
 
 // Helper function to create account with mixed channel warning handling
@@ -4680,18 +4837,23 @@ const handleSubmit = async () => {
       appStore.showError(t('admin.accounts.pleaseEnterAccountName'))
       return
     }
-    if (!upstreamBaseUrl.value.trim()) {
-      appStore.showError(t('admin.accounts.upstream.pleaseEnterBaseUrl'))
-      return
-    }
     if (!upstreamApiKey.value.trim()) {
       appStore.showError(t('admin.accounts.upstream.pleaseEnterApiKey'))
       return
     }
 
+    const hasPassthroughInput = isPassthroughFieldSupportedFlow.value && (passthroughFieldsEnabled.value || passthroughFieldRules.value.some((rule) => {
+      const normalizedRule = normalizePassthroughFieldRule(rule)
+      return Boolean(normalizedRule.key || normalizedRule.source_key || normalizedRule.value.trim())
+    }))
+
+    if (hasPassthroughInput && !validatePassthroughFieldRules(passthroughFieldRules.value).ok) {
+      return
+    }
+
     // Build upstream credentials (and optional model restriction)
     const credentials: Record<string, unknown> = {
-      base_url: upstreamBaseUrl.value.trim(),
+      base_url: upstreamBaseUrl.value.trim() || getDefaultBaseUrl('antigravity'),
       api_key: upstreamApiKey.value.trim()
     }
 
@@ -4707,7 +4869,7 @@ const handleSubmit = async () => {
 
     applyInterceptWarmup(credentials, interceptWarmupRequests.value, 'create')
 
-    const extra = buildAntigravityExtra()
+    const extra = buildPassthroughFieldExtra(buildAntigravityExtra())
     await createAccountAndFinish(form.platform, 'apikey', credentials, extra)
     return
   }
@@ -4736,18 +4898,22 @@ const handleSubmit = async () => {
   }
 
   // For apikey type, create directly
+  const hasPassthroughInput = isPassthroughFieldSupportedFlow.value && (passthroughFieldsEnabled.value || passthroughFieldRules.value.some((rule) => {
+    const normalizedRule = normalizePassthroughFieldRule(rule)
+    return Boolean(normalizedRule.key || normalizedRule.source_key || normalizedRule.value.trim())
+  }))
+
+  if (hasPassthroughInput && !validatePassthroughFieldRules(passthroughFieldRules.value).ok) {
+    return
+  }
+
   if (!apiKeyValue.value.trim()) {
     appStore.showError(t('admin.accounts.pleaseEnterApiKey'))
     return
   }
 
   // Determine default base URL based on platform
-  const defaultBaseUrl =
-    form.platform === 'openai'
-      ? 'https://api.openai.com'
-      : form.platform === 'gemini'
-        ? 'https://generativelanguage.googleapis.com'
-        : 'https://api.anthropic.com'
+  const defaultBaseUrl = getDefaultBaseUrl(form.platform)
 
   // Build credentials with optional model mapping
   const credentials: Record<string, unknown> = {
@@ -4790,19 +4956,11 @@ const handleSubmit = async () => {
   }
 
   applyInterceptWarmup(credentials, interceptWarmupRequests.value, 'create')
-  if (!applyTempUnschedConfig(credentials)) {
-    return
-  }
 
   form.credentials = credentials
-  const extra = buildAnthropicExtra(buildOpenAIExtra())
+  const extra = buildPassthroughFieldExtra(buildAnthropicExtra(buildOpenAIExtra()))
 
-  await doCreateAccount({
-    ...form,
-    group_ids: form.group_ids,
-    extra,
-    auto_pause_on_expired: autoPauseOnExpired.value
-  })
+  await createAccountAndFinish(form.platform, 'apikey', credentials, extra)
 }
 
 const goBackToBasicInfo = () => {

@@ -260,3 +260,37 @@ func TestOpenAITokenRefresher_CanRefresh(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenAITokenRefresherNeedsRefreshWhenAccessTokenMissing(t *testing.T) {
+	refresher := NewOpenAITokenRefresher(nil, nil)
+	account := &Account{
+		ID:       2882,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"refresh_token": "refresh-token",
+			"expires_at":    time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+		},
+	}
+
+	if !refresher.NeedsRefresh(account, openAITokenRefreshSkew) {
+		t.Fatalf("OpenAI OAuth account with refresh_token but missing access_token must refresh")
+	}
+}
+
+func TestOpenAITokenRefresherNeedsRefreshWhenExpiresAtMissing(t *testing.T) {
+	refresher := NewOpenAITokenRefresher(nil, nil)
+	account := &Account{
+		ID:       2883,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token":  "access-token",
+			"refresh_token": "refresh-token",
+		},
+	}
+
+	if !refresher.NeedsRefresh(account, openAITokenRefreshSkew) {
+		t.Fatalf("OpenAI OAuth account with refresh_token but missing expires_at must refresh")
+	}
+}

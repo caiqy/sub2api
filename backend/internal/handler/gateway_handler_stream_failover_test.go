@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -119,4 +120,27 @@ func TestStreamWrittenGuard_NoByteWritten_GuardNotTriggered(t *testing.T) {
 	guardTriggered := c.Writer.Size() != sizeBeforeForward
 	require.False(t, guardTriggered,
 		"未写入任何字节时，守卫条件必须为 false，应允许正常 failover 继续")
+}
+
+func TestGatewayHandler_EarlyFailureDetailSnapshotContainsErrorBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var snapshot *middleware.UsageDetailSnapshot
+	r := gin.New()
+	r.Use(middleware.UsageDetailCapture())
+	r.POST("/v1/messages", func(c *gin.Context) {
+		h := &GatewayHandler{}
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
+		snapshot = middleware.BuildUsageDetailSnapshot(c)
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	r.ServeHTTP(w, req)
+
+	require.NotNil(t, snapshot)
+	require.Equal(t, "", snapshot.RequestBody)
+	require.Contains(t, snapshot.ResponseHeaders, "Content-Type: application/json")
+	require.Contains(t, snapshot.ResponseBody, `"type":"error"`)
+	require.Contains(t, snapshot.ResponseBody, `"message":"Request body is empty"`)
 }

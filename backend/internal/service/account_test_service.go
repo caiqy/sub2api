@@ -68,6 +68,7 @@ type AccountTestService struct {
 	geminiTokenProvider       *GeminiTokenProvider
 	claudeTokenProvider       *ClaudeTokenProvider
 	grokTokenProvider         *GrokTokenProvider
+	openAITokenProvider       *OpenAITokenProvider
 	antigravityGatewayService *AntigravityGatewayService
 	httpUpstream              HTTPUpstream
 	cfg                       *config.Config
@@ -80,6 +81,7 @@ func NewAccountTestService(
 	geminiTokenProvider *GeminiTokenProvider,
 	claudeTokenProvider *ClaudeTokenProvider,
 	grokTokenProvider *GrokTokenProvider,
+	openAITokenProvider *OpenAITokenProvider,
 	antigravityGatewayService *AntigravityGatewayService,
 	httpUpstream HTTPUpstream,
 	cfg *config.Config,
@@ -90,11 +92,23 @@ func NewAccountTestService(
 		geminiTokenProvider:       geminiTokenProvider,
 		claudeTokenProvider:       claudeTokenProvider,
 		grokTokenProvider:         grokTokenProvider,
+		openAITokenProvider:       openAITokenProvider,
 		antigravityGatewayService: antigravityGatewayService,
 		httpUpstream:              httpUpstream,
 		cfg:                       cfg,
 		tlsFPProfileService:       tlsFPProfileService,
 	}
+}
+
+func (s *AccountTestService) getOpenAIOAuthAccessToken(ctx context.Context, account *Account) (string, error) {
+	if s.openAITokenProvider != nil {
+		return s.openAITokenProvider.GetAccessToken(ctx, account)
+	}
+	token := account.GetOpenAIAccessToken()
+	if strings.TrimSpace(token) == "" {
+		return "", errors.New("no access token available")
+	}
+	return token, nil
 }
 
 func (s *AccountTestService) validateUpstreamBaseURL(raw string) (string, error) {
@@ -542,9 +556,10 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	if credentialAccount.IsOAuth() {
 		isOAuth = true
 		// OAuth - use Bearer token with ChatGPT internal API
-		authToken = credentialAccount.GetOpenAIAccessToken()
-		if authToken == "" {
-			return s.sendErrorAndEnd(c, "No access token available")
+		var err error
+		authToken, err = s.getOpenAIOAuthAccessToken(ctx, credentialAccount)
+		if err != nil {
+			return s.sendErrorAndEnd(c, err.Error())
 		}
 
 		// OAuth uses ChatGPT internal API
@@ -794,9 +809,10 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	switch {
 	case account.IsOAuth():
 		isOAuth = true
-		authToken = account.GetOpenAIAccessToken()
-		if authToken == "" {
-			return s.sendErrorAndEnd(c, "No access token available")
+		var err error
+		authToken, err = s.getOpenAIOAuthAccessToken(ctx, account)
+		if err != nil {
+			return s.sendErrorAndEnd(c, err.Error())
 		}
 		apiURL = chatgptCodexAPIURL + "/compact"
 	case account.Type == AccountTypeAPIKey:
@@ -1653,9 +1669,9 @@ func (s *AccountTestService) testOpenAIImageAPIKey(c *gin.Context, ctx context.C
 
 // testOpenAIImageOAuth tests OpenAI image generation using an OAuth account via Codex /responses API.
 func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Context, account *Account, modelID, prompt string) error {
-	authToken := account.GetOpenAIAccessToken()
-	if authToken == "" {
-		return s.sendErrorAndEnd(c, "No access token available")
+	authToken, err := s.getOpenAIOAuthAccessToken(ctx, account)
+	if err != nil {
+		return s.sendErrorAndEnd(c, err.Error())
 	}
 
 	// Set SSE headers

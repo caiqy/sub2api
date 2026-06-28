@@ -29,12 +29,12 @@
         <template #cell-user="{ row }">
           <div class="text-sm">
             <button
-              v-if="row.user?.email"
+              v-if="row.user?.username || row.user?.email"
               class="font-medium text-primary-600 underline decoration-dashed underline-offset-2 transition-colors hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
-              @click="$emit('userClick', row.user_id, row.user?.email)"
+              @click="$emit('userClick', row.user_id)"
               :title="t('admin.usage.clickToViewBalance')"
             >
-              {{ row.user.email }}
+              {{ row.user.username || row.user.email }}
             </button>
             <span v-else class="font-medium text-gray-900 dark:text-white">-</span>
             <span v-if="row.user?.deleted_at" class="ml-1 inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-400 dark:ring-rose-500/30">
@@ -192,6 +192,18 @@
 
         <template #cell-duration="{ row }">
           <span class="text-sm text-gray-600 dark:text-gray-400">{{ formatDuration(row.duration_ms) }}</span>
+        </template>
+
+        <template #cell-actions="{ row }">
+          <button
+            data-test="usage-detail-button"
+            type="button"
+            class="btn btn-secondary btn-sm"
+            :disabled="!row.has_detail"
+            @click="$emit('detail', row)"
+          >
+            {{ t('admin.usage.viewDetail') }}
+          </button>
         </template>
 
         <template #cell-created_at="{ value }">
@@ -488,6 +500,7 @@ const emit = defineEmits<{
   userClick: [userID: number, email?: string]
   sort: [key: string, order: 'asc' | 'desc']
   ipGeoBatchFailed: []
+  detail: [row: AdminUsageLog]
 }>()
 const { t } = useI18n()
 const showAccountBilling = props.showAccountBilling

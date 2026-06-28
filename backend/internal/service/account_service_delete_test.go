@@ -95,6 +95,10 @@ func (s *accountRepoStub) ListByPlatform(ctx context.Context, platform string) (
 	panic("unexpected ListByPlatform call")
 }
 
+func (s *accountRepoStub) ListTempUnschedulableByPlatform(ctx context.Context, platform string, now time.Time) ([]Account, error) {
+	panic("unexpected ListTempUnschedulableByPlatform call")
+}
+
 func (s *accountRepoStub) UpdateLastUsed(ctx context.Context, id int64) error {
 	panic("unexpected UpdateLastUsed call")
 }

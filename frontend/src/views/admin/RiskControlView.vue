@@ -1095,9 +1095,17 @@
                   {{ inputDetailRow.endpoint || '-' }} · {{ inputDetailRow.provider || '-' }} / {{ inputDetailRow.model || '-' }}
                 </p>
               </div>
-              <span v-if="inputDetailRow.group_name" class="inline-flex rounded-md bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700 dark:bg-sky-900/20 dark:text-sky-300">
-                {{ inputDetailRow.group_name }}
-              </span>
+              <div class="flex flex-wrap items-center gap-2">
+                <span
+                  v-if="inputDetailRow.action === 'keyword_block' && inputDetailRow.matched_keyword"
+                  class="inline-flex rounded-md bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700 dark:bg-red-900/20 dark:text-red-300"
+                >
+                  {{ t('admin.riskControl.matchedKeyword') }}：{{ inputDetailRow.matched_keyword }}
+                </span>
+                <span v-if="inputDetailRow.group_name" class="inline-flex rounded-md bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700 dark:bg-sky-900/20 dark:text-sky-300">
+                  {{ inputDetailRow.group_name }}
+                </span>
+              </div>
             </div>
             <pre class="mt-4 max-h-[420px] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-gray-950 p-4 text-sm leading-6 text-gray-100 shadow-inner dark:bg-black/50">{{ inputDetailText }}</pre>
           </div>

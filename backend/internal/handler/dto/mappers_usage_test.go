@@ -186,6 +186,27 @@ func TestUsageLogFromService_FallsBackToLegacyModelWhenRequestedModelMissing(t *
 	require.Equal(t, "claude-3", adminDTO.Model)
 }
 
+func TestAccountFromServiceShallow_PreservesRandomTLSFingerprintProfileID(t *testing.T) {
+	t.Parallel()
+
+	account := &service.Account{
+		ID:       9,
+		Name:     "anthropic-oauth-random-tls",
+		Platform: service.PlatformAnthropic,
+		Type:     service.AccountTypeOAuth,
+		Extra: map[string]any{
+			"enable_tls_fingerprint":     true,
+			"tls_fingerprint_profile_id": int64(-1),
+		},
+	}
+
+	dtoAccount := AccountFromServiceShallow(account)
+	require.NotNil(t, dtoAccount.EnableTLSFingerprint)
+	require.True(t, *dtoAccount.EnableTLSFingerprint)
+	require.NotNil(t, dtoAccount.TLSFingerprintProfileID)
+	require.EqualValues(t, -1, *dtoAccount.TLSFingerprintProfileID)
+}
+
 func TestUsageLogFromService_IncludesImageBillingMetadataForUserAndAdmin(t *testing.T) {
 	t.Parallel()
 

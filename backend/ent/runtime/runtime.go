@@ -35,6 +35,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/tlsfingerprintprofile"
 	"github.com/Wei-Shaw/sub2api/ent/usagecleanuptask"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
+	"github.com/Wei-Shaw/sub2api/ent/usagelogdetail"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/ent/userallowedgroup"
 	"github.com/Wei-Shaw/sub2api/ent/userattributedefinition"
@@ -900,8 +901,16 @@ func init() {
 	groupDescModelsListConfig := groupFields[34].Descriptor()
 	// group.DefaultModelsListConfig holds the default value on creation for the models_list_config field.
 	group.DefaultModelsListConfig = groupDescModelsListConfig.Default.(domain.GroupModelsListConfig)
+	// groupDescUserConcurrencyEnabled is the schema descriptor for user_concurrency_enabled field.
+	groupDescUserConcurrencyEnabled := groupFields[35].Descriptor()
+	// group.DefaultUserConcurrencyEnabled holds the default value on creation for the user_concurrency_enabled field.
+	group.DefaultUserConcurrencyEnabled = groupDescUserConcurrencyEnabled.Default.(bool)
+	// groupDescUserConcurrencyLimit is the schema descriptor for user_concurrency_limit field.
+	groupDescUserConcurrencyLimit := groupFields[36].Descriptor()
+	// group.DefaultUserConcurrencyLimit holds the default value on creation for the user_concurrency_limit field.
+	group.DefaultUserConcurrencyLimit = groupDescUserConcurrencyLimit.Default.(int)
 	// groupDescRpmLimit is the schema descriptor for rpm_limit field.
-	groupDescRpmLimit := groupFields[35].Descriptor()
+	groupDescRpmLimit := groupFields[37].Descriptor()
 	// group.DefaultRpmLimit holds the default value on creation for the rpm_limit field.
 	group.DefaultRpmLimit = groupDescRpmLimit.Default.(int)
 	idempotencyrecordMixin := schema.IdempotencyRecord{}.Mixin()
@@ -1795,6 +1804,50 @@ func init() {
 	usagelogDescCreatedAt := usagelogFields[40].Descriptor()
 	// usagelog.DefaultCreatedAt holds the default value on creation for the created_at field.
 	usagelog.DefaultCreatedAt = usagelogDescCreatedAt.Default.(func() time.Time)
+	usagelogdetailFields := schema.UsageLogDetail{}.Fields()
+	_ = usagelogdetailFields
+	// usagelogdetailDescDetailType is the schema descriptor for detail_type field.
+	usagelogdetailDescDetailType := usagelogdetailFields[1].Descriptor()
+	// usagelogdetail.DefaultDetailType holds the default value on creation for the detail_type field.
+	usagelogdetail.DefaultDetailType = usagelogdetailDescDetailType.Default.(string)
+	// usagelogdetail.DetailTypeValidator is a validator for the "detail_type" field. It is called by the builders before save.
+	usagelogdetail.DetailTypeValidator = usagelogdetailDescDetailType.Validators[0].(func(string) error)
+	// usagelogdetailDescRequestHeaders is the schema descriptor for request_headers field.
+	usagelogdetailDescRequestHeaders := usagelogdetailFields[2].Descriptor()
+	// usagelogdetail.DefaultRequestHeaders holds the default value on creation for the request_headers field.
+	usagelogdetail.DefaultRequestHeaders = usagelogdetailDescRequestHeaders.Default.(string)
+	// usagelogdetailDescRequestBody is the schema descriptor for request_body field.
+	usagelogdetailDescRequestBody := usagelogdetailFields[3].Descriptor()
+	// usagelogdetail.DefaultRequestBody holds the default value on creation for the request_body field.
+	usagelogdetail.DefaultRequestBody = usagelogdetailDescRequestBody.Default.(string)
+	// usagelogdetailDescUpstreamRequestHeaders is the schema descriptor for upstream_request_headers field.
+	usagelogdetailDescUpstreamRequestHeaders := usagelogdetailFields[4].Descriptor()
+	// usagelogdetail.DefaultUpstreamRequestHeaders holds the default value on creation for the upstream_request_headers field.
+	usagelogdetail.DefaultUpstreamRequestHeaders = usagelogdetailDescUpstreamRequestHeaders.Default.(string)
+	// usagelogdetailDescUpstreamRequestBody is the schema descriptor for upstream_request_body field.
+	usagelogdetailDescUpstreamRequestBody := usagelogdetailFields[5].Descriptor()
+	// usagelogdetail.DefaultUpstreamRequestBody holds the default value on creation for the upstream_request_body field.
+	usagelogdetail.DefaultUpstreamRequestBody = usagelogdetailDescUpstreamRequestBody.Default.(string)
+	// usagelogdetailDescResponseHeaders is the schema descriptor for response_headers field.
+	usagelogdetailDescResponseHeaders := usagelogdetailFields[6].Descriptor()
+	// usagelogdetail.DefaultResponseHeaders holds the default value on creation for the response_headers field.
+	usagelogdetail.DefaultResponseHeaders = usagelogdetailDescResponseHeaders.Default.(string)
+	// usagelogdetailDescResponseBody is the schema descriptor for response_body field.
+	usagelogdetailDescResponseBody := usagelogdetailFields[7].Descriptor()
+	// usagelogdetail.DefaultResponseBody holds the default value on creation for the response_body field.
+	usagelogdetail.DefaultResponseBody = usagelogdetailDescResponseBody.Default.(string)
+	// usagelogdetailDescUpstreamResponseHeaders is the schema descriptor for upstream_response_headers field.
+	usagelogdetailDescUpstreamResponseHeaders := usagelogdetailFields[8].Descriptor()
+	// usagelogdetail.DefaultUpstreamResponseHeaders holds the default value on creation for the upstream_response_headers field.
+	usagelogdetail.DefaultUpstreamResponseHeaders = usagelogdetailDescUpstreamResponseHeaders.Default.(string)
+	// usagelogdetailDescUpstreamResponseBody is the schema descriptor for upstream_response_body field.
+	usagelogdetailDescUpstreamResponseBody := usagelogdetailFields[9].Descriptor()
+	// usagelogdetail.DefaultUpstreamResponseBody holds the default value on creation for the upstream_response_body field.
+	usagelogdetail.DefaultUpstreamResponseBody = usagelogdetailDescUpstreamResponseBody.Default.(string)
+	// usagelogdetailDescCreatedAt is the schema descriptor for created_at field.
+	usagelogdetailDescCreatedAt := usagelogdetailFields[10].Descriptor()
+	// usagelogdetail.DefaultCreatedAt holds the default value on creation for the created_at field.
+	usagelogdetail.DefaultCreatedAt = usagelogdetailDescCreatedAt.Default.(func() time.Time)
 	userMixin := schema.User{}.Mixin()
 	userMixinHooks1 := userMixin[1].Hooks()
 	user.Hooks[0] = userMixinHooks1[0]

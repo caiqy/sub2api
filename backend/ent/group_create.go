@@ -537,6 +537,34 @@ func (_c *GroupCreate) SetNillableModelsListConfig(v *domain.GroupModelsListConf
 	return _c
 }
 
+// SetUserConcurrencyEnabled sets the "user_concurrency_enabled" field.
+func (_c *GroupCreate) SetUserConcurrencyEnabled(v bool) *GroupCreate {
+	_c.mutation.SetUserConcurrencyEnabled(v)
+	return _c
+}
+
+// SetNillableUserConcurrencyEnabled sets the "user_concurrency_enabled" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableUserConcurrencyEnabled(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetUserConcurrencyEnabled(*v)
+	}
+	return _c
+}
+
+// SetUserConcurrencyLimit sets the "user_concurrency_limit" field.
+func (_c *GroupCreate) SetUserConcurrencyLimit(v int) *GroupCreate {
+	_c.mutation.SetUserConcurrencyLimit(v)
+	return _c
+}
+
+// SetNillableUserConcurrencyLimit sets the "user_concurrency_limit" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableUserConcurrencyLimit(v *int) *GroupCreate {
+	if v != nil {
+		_c.SetUserConcurrencyLimit(*v)
+	}
+	return _c
+}
+
 // SetRpmLimit sets the "rpm_limit" field.
 func (_c *GroupCreate) SetRpmLimit(v int) *GroupCreate {
 	_c.mutation.SetRpmLimit(v)
@@ -788,6 +816,14 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultModelsListConfig
 		_c.mutation.SetModelsListConfig(v)
 	}
+	if _, ok := _c.mutation.UserConcurrencyEnabled(); !ok {
+		v := group.DefaultUserConcurrencyEnabled
+		_c.mutation.SetUserConcurrencyEnabled(v)
+	}
+	if _, ok := _c.mutation.UserConcurrencyLimit(); !ok {
+		v := group.DefaultUserConcurrencyLimit
+		_c.mutation.SetUserConcurrencyLimit(v)
+	}
 	if _, ok := _c.mutation.RpmLimit(); !ok {
 		v := group.DefaultRpmLimit
 		_c.mutation.SetRpmLimit(v)
@@ -912,6 +948,12 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.ModelsListConfig(); !ok {
 		return &ValidationError{Name: "models_list_config", err: errors.New(`ent: missing required field "Group.models_list_config"`)}
+	}
+	if _, ok := _c.mutation.UserConcurrencyEnabled(); !ok {
+		return &ValidationError{Name: "user_concurrency_enabled", err: errors.New(`ent: missing required field "Group.user_concurrency_enabled"`)}
+	}
+	if _, ok := _c.mutation.UserConcurrencyLimit(); !ok {
+		return &ValidationError{Name: "user_concurrency_limit", err: errors.New(`ent: missing required field "Group.user_concurrency_limit"`)}
 	}
 	if _, ok := _c.mutation.RpmLimit(); !ok {
 		return &ValidationError{Name: "rpm_limit", err: errors.New(`ent: missing required field "Group.rpm_limit"`)}
@@ -1094,6 +1136,14 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.ModelsListConfig(); ok {
 		_spec.SetField(group.FieldModelsListConfig, field.TypeJSON, value)
 		_node.ModelsListConfig = value
+	}
+	if value, ok := _c.mutation.UserConcurrencyEnabled(); ok {
+		_spec.SetField(group.FieldUserConcurrencyEnabled, field.TypeBool, value)
+		_node.UserConcurrencyEnabled = value
+	}
+	if value, ok := _c.mutation.UserConcurrencyLimit(); ok {
+		_spec.SetField(group.FieldUserConcurrencyLimit, field.TypeInt, value)
+		_node.UserConcurrencyLimit = value
 	}
 	if value, ok := _c.mutation.RpmLimit(); ok {
 		_spec.SetField(group.FieldRpmLimit, field.TypeInt, value)
@@ -1843,6 +1893,36 @@ func (u *GroupUpsert) UpdateModelsListConfig() *GroupUpsert {
 	return u
 }
 
+// SetUserConcurrencyEnabled sets the "user_concurrency_enabled" field.
+func (u *GroupUpsert) SetUserConcurrencyEnabled(v bool) *GroupUpsert {
+	u.Set(group.FieldUserConcurrencyEnabled, v)
+	return u
+}
+
+// UpdateUserConcurrencyEnabled sets the "user_concurrency_enabled" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateUserConcurrencyEnabled() *GroupUpsert {
+	u.SetExcluded(group.FieldUserConcurrencyEnabled)
+	return u
+}
+
+// SetUserConcurrencyLimit sets the "user_concurrency_limit" field.
+func (u *GroupUpsert) SetUserConcurrencyLimit(v int) *GroupUpsert {
+	u.Set(group.FieldUserConcurrencyLimit, v)
+	return u
+}
+
+// UpdateUserConcurrencyLimit sets the "user_concurrency_limit" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateUserConcurrencyLimit() *GroupUpsert {
+	u.SetExcluded(group.FieldUserConcurrencyLimit)
+	return u
+}
+
+// AddUserConcurrencyLimit adds v to the "user_concurrency_limit" field.
+func (u *GroupUpsert) AddUserConcurrencyLimit(v int) *GroupUpsert {
+	u.Add(group.FieldUserConcurrencyLimit, v)
+	return u
+}
+
 // SetRpmLimit sets the "rpm_limit" field.
 func (u *GroupUpsert) SetRpmLimit(v int) *GroupUpsert {
 	u.Set(group.FieldRpmLimit, v)
@@ -2589,6 +2669,41 @@ func (u *GroupUpsertOne) SetModelsListConfig(v domain.GroupModelsListConfig) *Gr
 func (u *GroupUpsertOne) UpdateModelsListConfig() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateModelsListConfig()
+	})
+}
+
+// SetUserConcurrencyEnabled sets the "user_concurrency_enabled" field.
+func (u *GroupUpsertOne) SetUserConcurrencyEnabled(v bool) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetUserConcurrencyEnabled(v)
+	})
+}
+
+// UpdateUserConcurrencyEnabled sets the "user_concurrency_enabled" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateUserConcurrencyEnabled() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateUserConcurrencyEnabled()
+	})
+}
+
+// SetUserConcurrencyLimit sets the "user_concurrency_limit" field.
+func (u *GroupUpsertOne) SetUserConcurrencyLimit(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetUserConcurrencyLimit(v)
+	})
+}
+
+// AddUserConcurrencyLimit adds v to the "user_concurrency_limit" field.
+func (u *GroupUpsertOne) AddUserConcurrencyLimit(v int) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddUserConcurrencyLimit(v)
+	})
+}
+
+// UpdateUserConcurrencyLimit sets the "user_concurrency_limit" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateUserConcurrencyLimit() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateUserConcurrencyLimit()
 	})
 }
 
@@ -3507,6 +3622,41 @@ func (u *GroupUpsertBulk) SetModelsListConfig(v domain.GroupModelsListConfig) *G
 func (u *GroupUpsertBulk) UpdateModelsListConfig() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateModelsListConfig()
+	})
+}
+
+// SetUserConcurrencyEnabled sets the "user_concurrency_enabled" field.
+func (u *GroupUpsertBulk) SetUserConcurrencyEnabled(v bool) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetUserConcurrencyEnabled(v)
+	})
+}
+
+// UpdateUserConcurrencyEnabled sets the "user_concurrency_enabled" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateUserConcurrencyEnabled() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateUserConcurrencyEnabled()
+	})
+}
+
+// SetUserConcurrencyLimit sets the "user_concurrency_limit" field.
+func (u *GroupUpsertBulk) SetUserConcurrencyLimit(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetUserConcurrencyLimit(v)
+	})
+}
+
+// AddUserConcurrencyLimit adds v to the "user_concurrency_limit" field.
+func (u *GroupUpsertBulk) AddUserConcurrencyLimit(v int) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddUserConcurrencyLimit(v)
+	})
+}
+
+// UpdateUserConcurrencyLimit sets the "user_concurrency_limit" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateUserConcurrencyLimit() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateUserConcurrencyLimit()
 	})
 }
 

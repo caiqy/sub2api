@@ -19,6 +19,9 @@ import (
 type settingHandlerRepoStub struct {
 	values      map[string]string
 	lastUpdates map[string]string
+	history     []map[string]string
+	setErrKey   string
+	setErr      error
 }
 
 func (s *settingHandlerRepoStub) Get(ctx context.Context, key string) (*service.Setting, error) {
@@ -35,7 +38,18 @@ func (s *settingHandlerRepoStub) GetValue(ctx context.Context, key string) (stri
 }
 
 func (s *settingHandlerRepoStub) Set(ctx context.Context, key, value string) error {
-	panic("unexpected Set call")
+	if s.setErr != nil && key == s.setErrKey {
+		return s.setErr
+	}
+	if s.values == nil {
+		s.values = map[string]string{}
+	}
+	if s.lastUpdates == nil {
+		s.lastUpdates = map[string]string{}
+	}
+	s.lastUpdates[key] = value
+	s.values[key] = value
+	return nil
 }
 
 func (s *settingHandlerRepoStub) GetMultiple(ctx context.Context, keys []string) (map[string]string, error) {
@@ -57,6 +71,11 @@ func (s *settingHandlerRepoStub) SetMultiple(ctx context.Context, settings map[s
 		}
 		s.values[key] = value
 	}
+	historyEntry := make(map[string]string, len(settings))
+	for key, value := range settings {
+		historyEntry[key] = value
+	}
+	s.history = append(s.history, historyEntry)
 	return nil
 }
 
@@ -82,6 +101,9 @@ func (s *failingAuthSourceSettingsRepoStub) Get(ctx context.Context, key string)
 }
 
 func (s *failingAuthSourceSettingsRepoStub) GetValue(ctx context.Context, key string) (string, error) {
+	if key == service.SettingKeyGatewayRuntimeSettings {
+		return "", service.ErrSettingNotFound
+	}
 	panic("unexpected GetValue call")
 }
 
@@ -137,7 +159,8 @@ func TestSettingHandler_GetSettings_InjectsAuthSourceDefaults(t *testing.T) {
 		},
 	}
 	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
-	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
+	paymentConfigService := service.NewPaymentConfigService(nil, repo, nil)
+	handler := NewSettingHandler(svc, nil, nil, nil, paymentConfigService, nil, nil)
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -206,6 +229,396 @@ func TestSettingHandler_UpdateSettings_PreservesOmittedAuthSourceDefaults(t *tes
 	require.Equal(t, true, data["force_email_on_third_party_signup"])
 }
 
+func TestSettingHandler_UpdateSettings_RoundTripsCyberAndClaudeOAuthFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{
+		values: map[string]string{
+			service.SettingKeyRegistrationEnabled:                    "false",
+			service.SettingKeyPromoCodeEnabled:                       "true",
+			service.SettingKeyRiskControlEnabled:                     "true",
+			service.SettingKeyCyberSessionBlockEnabled:               "false",
+			service.SettingKeyCyberSessionBlockTTLSeconds:            "3600",
+			service.SettingKeyEnableClaudeOAuthSystemPromptInjection: "false",
+			service.SettingKeyClaudeOAuthSystemPrompt:                "",
+			service.SettingKeyClaudeOAuthSystemPromptBlocks:          "[]",
+		},
+	}
+	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
+
+	body := map[string]any{
+		"registration_enabled":                        true,
+		"promo_code_enabled":                          true,
+		"risk_control_enabled":                        true,
+		"cyber_session_block_enabled":                 true,
+		"cyber_session_block_ttl_seconds":             7200,
+		"enable_claude_oauth_system_prompt_injection": true,
+		"claude_oauth_system_prompt":                  "You are a compliance assistant.",
+		"claude_oauth_system_prompt_blocks":           `[{"type":"text","text":"block-1","cache_control":true}]`,
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp response.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	data, ok := resp.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, true, data["cyber_session_block_enabled"])
+	require.Equal(t, float64(7200), data["cyber_session_block_ttl_seconds"])
+	require.Equal(t, true, data["enable_claude_oauth_system_prompt_injection"])
+	require.Equal(t, "You are a compliance assistant.", data["claude_oauth_system_prompt"])
+	require.Equal(t, `[{"type":"text","text":"block-1","cache_control":true}]`, data["claude_oauth_system_prompt_blocks"])
+
+	rec2 := httptest.NewRecorder()
+	c2, _ := gin.CreateTestContext(rec2)
+	c2.Request = httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings", nil)
+	handler.GetSettings(c2)
+
+	require.Equal(t, http.StatusOK, rec2.Code)
+	var resp2 response.Response
+	require.NoError(t, json.Unmarshal(rec2.Body.Bytes(), &resp2))
+	data2, ok := resp2.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, true, data2["cyber_session_block_enabled"])
+	require.Equal(t, float64(7200), data2["cyber_session_block_ttl_seconds"])
+	require.Equal(t, true, data2["enable_claude_oauth_system_prompt_injection"])
+	require.Equal(t, "You are a compliance assistant.", data2["claude_oauth_system_prompt"])
+	require.Equal(t, `[{"type":"text","text":"block-1","cache_control":true}]`, data2["claude_oauth_system_prompt_blocks"])
+}
+
+func TestPaymentConfigService_UpdatePaymentConfig_PersistsAlipayForceQRCode(t *testing.T) {
+	repo := &settingHandlerRepoStub{values: map[string]string{}}
+	svc := service.NewPaymentConfigService(nil, repo, nil)
+	enabled := true
+
+	err := svc.UpdatePaymentConfig(context.Background(), service.UpdatePaymentConfigRequest{
+		AlipayForceQRCode: &enabled,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "true", repo.values[service.SettingAlipayForceQRCode])
+}
+
+func TestSettingHandler_UpdateSettings_PersistsPaymentAlipayForceQRCode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{values: map[string]string{}}
+	settingSvc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+	paymentConfigSvc := service.NewPaymentConfigService(nil, repo, nil)
+	handler := NewSettingHandler(settingSvc, nil, nil, nil, paymentConfigSvc, nil, nil)
+
+	body := []byte(`{"payment_alipay_force_qrcode":true}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "true", repo.values[service.SettingAlipayForceQRCode])
+	var resp response.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	data, ok := resp.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, true, data["payment_alipay_force_qrcode"])
+}
+
+func TestSettingHandler_UpdateSettings_PreservesOmittedGitHubAndGoogleAuthSourceDefaults(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{
+		values: map[string]string{
+			service.SettingKeyRegistrationEnabled:                     "false",
+			service.SettingKeyPromoCodeEnabled:                        "true",
+			service.SettingKeyAuthSourceDefaultGitHubBalance:          "21.5",
+			service.SettingKeyAuthSourceDefaultGitHubConcurrency:      "11",
+			service.SettingKeyAuthSourceDefaultGitHubSubscriptions:    `[{"group_id":41,"validity_days":30}]`,
+			service.SettingKeyAuthSourceDefaultGitHubGrantOnSignup:    "true",
+			service.SettingKeyAuthSourceDefaultGitHubGrantOnFirstBind: "true",
+			service.SettingKeyAuthSourceDefaultGoogleBalance:          "31.5",
+			service.SettingKeyAuthSourceDefaultGoogleConcurrency:      "12",
+			service.SettingKeyAuthSourceDefaultGoogleSubscriptions:    `[{"group_id":42,"validity_days":45}]`,
+			service.SettingKeyAuthSourceDefaultGoogleGrantOnSignup:    "false",
+			service.SettingKeyAuthSourceDefaultGoogleGrantOnFirstBind: "true",
+		},
+	}
+	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
+
+	body := map[string]any{
+		"registration_enabled": true,
+		"promo_code_enabled":   true,
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "21.50000000", repo.values[service.SettingKeyAuthSourceDefaultGitHubBalance])
+	require.Equal(t, "11", repo.values[service.SettingKeyAuthSourceDefaultGitHubConcurrency])
+	require.Equal(t, `[{"group_id":41,"validity_days":30}]`, repo.values[service.SettingKeyAuthSourceDefaultGitHubSubscriptions])
+	require.Equal(t, "true", repo.values[service.SettingKeyAuthSourceDefaultGitHubGrantOnSignup])
+	require.Equal(t, "true", repo.values[service.SettingKeyAuthSourceDefaultGitHubGrantOnFirstBind])
+	require.Equal(t, "31.50000000", repo.values[service.SettingKeyAuthSourceDefaultGoogleBalance])
+	require.Equal(t, "12", repo.values[service.SettingKeyAuthSourceDefaultGoogleConcurrency])
+	require.Equal(t, `[{"group_id":42,"validity_days":45}]`, repo.values[service.SettingKeyAuthSourceDefaultGoogleSubscriptions])
+	require.Equal(t, "false", repo.values[service.SettingKeyAuthSourceDefaultGoogleGrantOnSignup])
+	require.Equal(t, "true", repo.values[service.SettingKeyAuthSourceDefaultGoogleGrantOnFirstBind])
+
+	var resp response.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	data, ok := resp.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, 21.5, data["auth_source_default_github_balance"])
+	require.Equal(t, float64(11), data["auth_source_default_github_concurrency"])
+	require.Equal(t, 31.5, data["auth_source_default_google_balance"])
+	require.Equal(t, float64(12), data["auth_source_default_google_concurrency"])
+}
+
+func TestSettingHandler_UpdateSettings_UpdatesGitHubAndGoogleAuthSourceDefaults(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{
+		values: map[string]string{
+			service.SettingKeyRegistrationEnabled:                     "false",
+			service.SettingKeyPromoCodeEnabled:                        "true",
+			service.SettingKeyAuthSourceDefaultGitHubBalance:          "21.5",
+			service.SettingKeyAuthSourceDefaultGitHubConcurrency:      "11",
+			service.SettingKeyAuthSourceDefaultGitHubSubscriptions:    `[{"group_id":41,"validity_days":30}]`,
+			service.SettingKeyAuthSourceDefaultGitHubGrantOnSignup:    "true",
+			service.SettingKeyAuthSourceDefaultGitHubGrantOnFirstBind: "true",
+			service.SettingKeyAuthSourceDefaultGoogleBalance:          "31.5",
+			service.SettingKeyAuthSourceDefaultGoogleConcurrency:      "12",
+			service.SettingKeyAuthSourceDefaultGoogleSubscriptions:    `[{"group_id":42,"validity_days":45}]`,
+			service.SettingKeyAuthSourceDefaultGoogleGrantOnSignup:    "false",
+			service.SettingKeyAuthSourceDefaultGoogleGrantOnFirstBind: "true",
+		},
+	}
+	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
+
+	body := map[string]any{
+		"registration_enabled":                           true,
+		"promo_code_enabled":                             true,
+		"auth_source_default_github_balance":             25.25,
+		"auth_source_default_github_concurrency":         15,
+		"auth_source_default_github_subscriptions":       []map[string]any{{"group_id": 51, "validity_days": 60}},
+		"auth_source_default_github_grant_on_signup":     false,
+		"auth_source_default_google_balance":             35.25,
+		"auth_source_default_google_concurrency":         16,
+		"auth_source_default_google_subscriptions":       []map[string]any{{"group_id": 52, "validity_days": 90}},
+		"auth_source_default_google_grant_on_first_bind": false,
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "25.25000000", repo.values[service.SettingKeyAuthSourceDefaultGitHubBalance])
+	require.Equal(t, "15", repo.values[service.SettingKeyAuthSourceDefaultGitHubConcurrency])
+	require.Equal(t, `[{"group_id":51,"validity_days":60}]`, repo.values[service.SettingKeyAuthSourceDefaultGitHubSubscriptions])
+	require.Equal(t, "false", repo.values[service.SettingKeyAuthSourceDefaultGitHubGrantOnSignup])
+	require.Equal(t, "true", repo.values[service.SettingKeyAuthSourceDefaultGitHubGrantOnFirstBind])
+	require.Equal(t, "35.25000000", repo.values[service.SettingKeyAuthSourceDefaultGoogleBalance])
+	require.Equal(t, "16", repo.values[service.SettingKeyAuthSourceDefaultGoogleConcurrency])
+	require.Equal(t, `[{"group_id":52,"validity_days":90}]`, repo.values[service.SettingKeyAuthSourceDefaultGoogleSubscriptions])
+	require.Equal(t, "false", repo.values[service.SettingKeyAuthSourceDefaultGoogleGrantOnSignup])
+	require.Equal(t, "false", repo.values[service.SettingKeyAuthSourceDefaultGoogleGrantOnFirstBind])
+}
+
+func TestSettingHandler_UpdateSettings_ClearsExplicitEmptyGitHubAndGoogleSubscriptions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{
+		values: map[string]string{
+			service.SettingKeyRegistrationEnabled:                  "false",
+			service.SettingKeyPromoCodeEnabled:                     "true",
+			service.SettingKeyAuthSourceDefaultGitHubSubscriptions: `[ {"group_id":41,"validity_days":30} ]`,
+			service.SettingKeyAuthSourceDefaultGoogleSubscriptions: `[ {"group_id":42,"validity_days":45} ]`,
+		},
+	}
+	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
+
+	body := map[string]any{
+		"registration_enabled":                     true,
+		"promo_code_enabled":                       true,
+		"auth_source_default_github_subscriptions": []map[string]any{},
+		"auth_source_default_google_subscriptions": []map[string]any{},
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, `[]`, repo.values[service.SettingKeyAuthSourceDefaultGitHubSubscriptions])
+	require.Equal(t, `[]`, repo.values[service.SettingKeyAuthSourceDefaultGoogleSubscriptions])
+}
+
+func TestSettingHandler_UpdateSettings_PreservesOmittedBackendModeFlags(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{
+		values: map[string]string{
+			service.SettingKeyPromoCodeEnabled:               "true",
+			service.SettingKeyAllowUngroupedKeyScheduling:    "true",
+			service.SettingKeyBackendModeEnabled:             "true",
+			service.SettingKeyRegistrationEnabled:            "false",
+			service.SettingKeyInvitationCodeEnabled:          "false",
+			service.SettingKeyPasswordResetEnabled:           "false",
+			service.SettingKeyEmailVerifyEnabled:             "false",
+			service.SettingKeyHideCcsImportButton:            "false",
+			service.SettingKeyPurchaseSubscriptionEnabled:    "false",
+			service.SettingKeyEnableModelFallback:            "false",
+			service.SettingKeyEnableIdentityPatch:            "true",
+			service.SettingKeyOpsMonitoringEnabled:           "true",
+			service.SettingKeyOpsRealtimeMonitoringEnabled:   "true",
+			service.SettingKeyAccountQuotaNotifyEnabled:      "false",
+			service.SettingKeyBalanceLowNotifyEnabled:        "false",
+			service.SettingPaymentVisibleMethodAlipayEnabled: "false",
+			service.SettingPaymentVisibleMethodWxpayEnabled:  "false",
+		},
+	}
+	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
+
+	body := map[string]any{
+		"promo_code_enabled": false,
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "true", repo.values[service.SettingKeyAllowUngroupedKeyScheduling])
+	require.Equal(t, "true", repo.values[service.SettingKeyBackendModeEnabled])
+
+	var resp response.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	data, ok := resp.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, true, data["allow_ungrouped_key_scheduling"])
+	require.Equal(t, true, data["backend_mode_enabled"])
+}
+
+func TestSettingHandler_UpdateSettings_PreservesOmittedLoginOAuthAndRiskSettings(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	loginDocs := `[{"id":"tos","title":"Terms","content_md":"# Terms"}]`
+	repo := &settingHandlerRepoStub{
+		values: map[string]string{
+			service.SettingKeyPromoCodeEnabled:                                     "true",
+			service.SettingKeyLoginAgreementEnabled:                                "true",
+			service.SettingKeyLoginAgreementMode:                                   "checkbox",
+			service.SettingKeyLoginAgreementUpdatedAt:                              "2026-05-01",
+			service.SettingKeyLoginAgreementDocuments:                              loginDocs,
+			service.SettingKeyGitHubOAuthEnabled:                                   "true",
+			service.SettingKeyGitHubOAuthClientID:                                  "github-client",
+			service.SettingKeyGitHubOAuthClientSecret:                              "github-secret",
+			service.SettingKeyGitHubOAuthRedirectURL:                               "https://example.com/api/oauth/github/callback",
+			service.SettingKeyGitHubOAuthFrontendRedirectURL:                       "/auth/oauth/callback",
+			service.SettingKeyGoogleOAuthEnabled:                                   "true",
+			service.SettingKeyGoogleOAuthClientID:                                  "google-client",
+			service.SettingKeyGoogleOAuthClientSecret:                              "google-secret",
+			service.SettingKeyGoogleOAuthRedirectURL:                               "https://example.com/api/oauth/google/callback",
+			service.SettingKeyGoogleOAuthFrontendRedirectURL:                       "/auth/oauth/callback",
+			service.SettingKeyRiskControlEnabled:                                   "true",
+			service.SettingKeyRegistrationEnabled:                                  "false",
+			service.SettingKeyInvitationCodeEnabled:                                "false",
+			service.SettingKeyPasswordResetEnabled:                                 "false",
+			service.SettingKeyEmailVerifyEnabled:                                   "false",
+			service.SettingKeyHideCcsImportButton:                                  "false",
+			service.SettingKeyPurchaseSubscriptionEnabled:                          "false",
+			service.SettingKeyEnableModelFallback:                                  "false",
+			service.SettingKeyEnableIdentityPatch:                                  "true",
+			service.SettingKeyOpsMonitoringEnabled:                                 "true",
+			service.SettingKeyOpsRealtimeMonitoringEnabled:                         "true",
+			service.SettingKeyOpsQueryModeDefault:                                  "fast",
+			service.SettingKeyOpsMetricsIntervalSeconds:                            "120",
+			service.SettingKeyAllowUngroupedKeyScheduling:                          "true",
+			service.SettingKeyBackendModeEnabled:                                   "true",
+			service.SettingKeyGatewayOpenAIWSSchedulerMode:                         "weighted",
+			service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold: "0.5",
+			service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyValue:     "10",
+			service.SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier: "2",
+			service.SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue:      "5",
+			service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds:  "60",
+			service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds:  "30",
+			service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeMaxFailures:      "3",
+			service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds:   "10",
+		},
+	}
+	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
+
+	body := map[string]any{
+		"registration_enabled": true,
+		"promo_code_enabled":   true,
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "true", repo.values[service.SettingKeyLoginAgreementEnabled])
+	require.Equal(t, "checkbox", repo.values[service.SettingKeyLoginAgreementMode])
+	require.Equal(t, "2026-05-01", repo.values[service.SettingKeyLoginAgreementUpdatedAt])
+	require.JSONEq(t, loginDocs, repo.values[service.SettingKeyLoginAgreementDocuments])
+	require.Equal(t, "true", repo.values[service.SettingKeyGitHubOAuthEnabled])
+	require.Equal(t, "github-client", repo.values[service.SettingKeyGitHubOAuthClientID])
+	require.Equal(t, "github-secret", repo.values[service.SettingKeyGitHubOAuthClientSecret])
+	require.Equal(t, "https://example.com/api/oauth/github/callback", repo.values[service.SettingKeyGitHubOAuthRedirectURL])
+	require.Equal(t, "/auth/oauth/callback", repo.values[service.SettingKeyGitHubOAuthFrontendRedirectURL])
+	require.Equal(t, "true", repo.values[service.SettingKeyGoogleOAuthEnabled])
+	require.Equal(t, "google-client", repo.values[service.SettingKeyGoogleOAuthClientID])
+	require.Equal(t, "google-secret", repo.values[service.SettingKeyGoogleOAuthClientSecret])
+	require.Equal(t, "https://example.com/api/oauth/google/callback", repo.values[service.SettingKeyGoogleOAuthRedirectURL])
+	require.Equal(t, "/auth/oauth/callback", repo.values[service.SettingKeyGoogleOAuthFrontendRedirectURL])
+	require.Equal(t, "true", repo.values[service.SettingKeyRiskControlEnabled])
+
+	var resp response.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	data, ok := resp.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, true, data["login_agreement_enabled"])
+	require.Equal(t, true, data["github_oauth_enabled"])
+	require.Equal(t, true, data["google_oauth_enabled"])
+	require.Equal(t, true, data["risk_control_enabled"])
+}
+
 func TestSettingHandler_UpdateSettings_PersistsPaymentVisibleMethodsAndAdvancedScheduler(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &settingHandlerRepoStub{
@@ -250,6 +663,338 @@ func TestSettingHandler_UpdateSettings_PersistsPaymentVisibleMethodsAndAdvancedS
 	require.Equal(t, true, data["payment_visible_method_alipay_enabled"])
 	require.Equal(t, false, data["payment_visible_method_wxpay_enabled"])
 	require.Equal(t, true, data["openai_advanced_scheduler_enabled"])
+}
+
+func TestSettingHandler_UpdateSettings_VisibleMethodOnlyDoesNotTouchPaymentConfig(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{
+		values: map[string]string{
+			service.SettingKeyPromoCodeEnabled:               "true",
+			service.SettingPaymentEnabled:                    "true",
+			service.SettingMinRechargeAmount:                 "12.00",
+			service.SettingMaxRechargeAmount:                 "500.00",
+			service.SettingEnabledPaymentTypes:               "alipay,wxpay",
+			service.SettingPaymentVisibleMethodAlipaySource:  service.VisibleMethodSourceEasyPayAlipay,
+			service.SettingPaymentVisibleMethodWxpaySource:   service.VisibleMethodSourceOfficialWechat,
+			service.SettingPaymentVisibleMethodAlipayEnabled: "true",
+			service.SettingPaymentVisibleMethodWxpayEnabled:  "false",
+		},
+	}
+	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
+
+	body := map[string]any{
+		"promo_code_enabled":                    true,
+		"payment_visible_method_alipay_source":  "alipay",
+		"payment_visible_method_wxpay_source":   "wxpay",
+		"payment_visible_method_alipay_enabled": false,
+		"payment_visible_method_wxpay_enabled":  true,
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "true", repo.values[service.SettingPaymentEnabled])
+	require.Equal(t, "12.00", repo.values[service.SettingMinRechargeAmount])
+	require.Equal(t, "500.00", repo.values[service.SettingMaxRechargeAmount])
+	require.Equal(t, "alipay,wxpay", repo.values[service.SettingEnabledPaymentTypes])
+	require.Equal(t, service.VisibleMethodSourceOfficialAlipay, repo.values[service.SettingPaymentVisibleMethodAlipaySource])
+	require.Equal(t, service.VisibleMethodSourceOfficialWechat, repo.values[service.SettingPaymentVisibleMethodWxpaySource])
+	require.Equal(t, "false", repo.values[service.SettingPaymentVisibleMethodAlipayEnabled])
+	require.Equal(t, "true", repo.values[service.SettingPaymentVisibleMethodWxpayEnabled])
+}
+
+func TestSettingHandler_UpdateSettings_AllowsWeightedSchedulerWithoutLayeredValues(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{
+		values: map[string]string{
+			service.SettingKeyPromoCodeEnabled: "true",
+		},
+	}
+	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
+
+	body := map[string]any{
+		"promo_code_enabled":               false,
+		"gateway_openai_ws_scheduler_mode": "weighted",
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "weighted", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerMode])
+	var resp response.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	data, ok := resp.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "weighted", data["gateway_openai_ws_scheduler_mode"])
+}
+
+func TestSettingHandler_UpdateSettings_PersistsStickyAndLayeredSchedulerSettings(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{values: map[string]string{service.SettingKeyPromoCodeEnabled: "true"}}
+	cfg := &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}}
+	svc := service.NewSettingService(repo, cfg)
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
+
+	body := map[string]any{
+		"promo_code_enabled":                                                   false,
+		"gateway_sticky_openai_enabled":                                        false,
+		"gateway_sticky_gemini_enabled":                                        true,
+		"gateway_sticky_anthropic_enabled":                                     false,
+		"gateway_openai_ws_scheduler_mode":                                     " Layered ",
+		"gateway_openai_ws_scheduler_layered_error_penalty_threshold":          0.6,
+		"gateway_openai_ws_scheduler_layered_error_penalty_value":              100,
+		"gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier":          12,
+		"gateway_openai_ws_scheduler_layered_ttft_penalty_value":               50,
+		"gateway_openai_ws_scheduler_layered_probe_cooldown_seconds":           20,
+		"gateway_openai_ws_scheduler_layered_probe_interval_seconds":           20,
+		"gateway_openai_ws_scheduler_layered_probe_max_failures":               3,
+		"gateway_openai_ws_scheduler_layered_probe_timeout_seconds":            15,
+		"gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds": 900,
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "false", repo.values[service.SettingKeyGatewayStickyOpenAIEnabled])
+	require.Equal(t, "true", repo.values[service.SettingKeyGatewayStickyGeminiEnabled])
+	require.Equal(t, "false", repo.values[service.SettingKeyGatewayStickyAnthropicEnabled])
+	require.Equal(t, "layered", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerMode])
+	require.Equal(t, "0.6", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold])
+	require.Equal(t, "100", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyValue])
+	require.Equal(t, "12", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier])
+	require.Equal(t, "50", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue])
+	require.Equal(t, "20", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds])
+	require.Equal(t, "20", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds])
+	require.Equal(t, "3", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeMaxFailures])
+	require.Equal(t, "15", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds])
+	require.Equal(t, "900", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds])
+	require.False(t, cfg.Gateway.Sticky.OpenAI.Enabled)
+	require.True(t, cfg.Gateway.Sticky.Gemini.Enabled)
+	require.False(t, cfg.Gateway.Sticky.Anthropic.Enabled)
+	require.Equal(t, "layered", cfg.Gateway.OpenAIWS.SchedulerMode)
+	require.Equal(t, 900, cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTempUnschedulableSeconds)
+}
+
+func TestSettingHandler_UpdateSettings_PersistsFastPolicyTogetherWithStickyAndLayeredSettings(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{values: map[string]string{service.SettingKeyPromoCodeEnabled: "true"}}
+	cfg := &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}}
+	svc := service.NewSettingService(repo, cfg)
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
+
+	body := map[string]any{
+		"promo_code_enabled":                                                   true,
+		"gateway_sticky_openai_enabled":                                        true,
+		"gateway_sticky_gemini_enabled":                                        false,
+		"gateway_sticky_anthropic_enabled":                                     true,
+		"gateway_openai_ws_scheduler_mode":                                     "layered",
+		"gateway_openai_ws_scheduler_layered_error_penalty_threshold":          0.55,
+		"gateway_openai_ws_scheduler_layered_error_penalty_value":              77,
+		"gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier":          6,
+		"gateway_openai_ws_scheduler_layered_ttft_penalty_value":               33,
+		"gateway_openai_ws_scheduler_layered_probe_cooldown_seconds":           44,
+		"gateway_openai_ws_scheduler_layered_probe_interval_seconds":           22,
+		"gateway_openai_ws_scheduler_layered_probe_max_failures":               5,
+		"gateway_openai_ws_scheduler_layered_probe_timeout_seconds":            11,
+		"gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds": 1200,
+		"openai_fast_policy_settings": map[string]any{
+			"rules": []map[string]any{{
+				"service_tier":           "priority",
+				"action":                 "filter",
+				"scope":                  "oauth",
+				"model_whitelist":        []string{"gpt-4.1", "gpt-4o"},
+				"fallback_action":        "block",
+				"fallback_error_message": "tier blocked",
+			}},
+		},
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "true", repo.values[service.SettingKeyGatewayStickyOpenAIEnabled])
+	require.Equal(t, "false", repo.values[service.SettingKeyGatewayStickyGeminiEnabled])
+	require.Equal(t, "true", repo.values[service.SettingKeyGatewayStickyAnthropicEnabled])
+	require.Equal(t, "layered", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerMode])
+	require.Equal(t, "0.55", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold])
+	require.Equal(t, "77", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyValue])
+	require.Equal(t, "6", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier])
+	require.Equal(t, "33", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue])
+	require.Equal(t, "44", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds])
+	require.Equal(t, "22", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds])
+	require.Equal(t, "5", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeMaxFailures])
+	require.Equal(t, "11", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds])
+	require.Equal(t, "1200", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds])
+	require.NotEmpty(t, repo.values[service.SettingKeyOpenAIFastPolicySettings])
+
+	var persistedFastPolicy map[string]any
+	require.NoError(t, json.Unmarshal([]byte(repo.values[service.SettingKeyOpenAIFastPolicySettings]), &persistedFastPolicy))
+	rules, ok := persistedFastPolicy["rules"].([]any)
+	require.True(t, ok)
+	require.Len(t, rules, 1)
+	persistedRule, ok := rules[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "priority", persistedRule["service_tier"])
+	require.Equal(t, "filter", persistedRule["action"])
+	require.Equal(t, "oauth", persistedRule["scope"])
+	require.Equal(t, "block", persistedRule["fallback_action"])
+	require.Equal(t, "tier blocked", persistedRule["fallback_error_message"])
+	persistedWhitelist, ok := persistedRule["model_whitelist"].([]any)
+	require.True(t, ok)
+	require.Len(t, persistedWhitelist, 2)
+	require.ElementsMatch(t, []any{"gpt-4.1", "gpt-4o"}, persistedWhitelist)
+
+	var resp response.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	data, ok := resp.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, true, data["gateway_sticky_openai_enabled"])
+	require.Equal(t, false, data["gateway_sticky_gemini_enabled"])
+	require.Equal(t, true, data["gateway_sticky_anthropic_enabled"])
+	require.Equal(t, "layered", data["gateway_openai_ws_scheduler_mode"])
+	require.Equal(t, 0.55, data["gateway_openai_ws_scheduler_layered_error_penalty_threshold"])
+	require.Equal(t, float64(77), data["gateway_openai_ws_scheduler_layered_error_penalty_value"])
+	require.Equal(t, float64(6), data["gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier"])
+	require.Equal(t, float64(33), data["gateway_openai_ws_scheduler_layered_ttft_penalty_value"])
+	require.Equal(t, float64(44), data["gateway_openai_ws_scheduler_layered_probe_cooldown_seconds"])
+	require.Equal(t, float64(22), data["gateway_openai_ws_scheduler_layered_probe_interval_seconds"])
+	require.Equal(t, float64(5), data["gateway_openai_ws_scheduler_layered_probe_max_failures"])
+	require.Equal(t, float64(11), data["gateway_openai_ws_scheduler_layered_probe_timeout_seconds"])
+	require.Equal(t, float64(1200), data["gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds"])
+
+	fastPolicyResp, ok := data["openai_fast_policy_settings"].(map[string]any)
+	require.True(t, ok)
+	respRules, ok := fastPolicyResp["rules"].([]any)
+	require.True(t, ok)
+	require.Len(t, respRules, 1)
+	respRule, ok := respRules[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "priority", respRule["service_tier"])
+	require.Equal(t, "filter", respRule["action"])
+	require.Equal(t, "oauth", respRule["scope"])
+	require.Equal(t, "block", respRule["fallback_action"])
+	require.Equal(t, "tier blocked", respRule["fallback_error_message"])
+	respWhitelist, ok := respRule["model_whitelist"].([]any)
+	require.True(t, ok)
+	require.Len(t, respWhitelist, 2)
+	require.ElementsMatch(t, []any{"gpt-4.1", "gpt-4o"}, respWhitelist)
+}
+
+func TestSettingHandler_UpdateSettings_FastPolicyWriteFailurePreservesEarlierSystemSettingsWrites(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{
+		values:    map[string]string{service.SettingKeyPromoCodeEnabled: "true"},
+		setErrKey: service.SettingKeyOpenAIFastPolicySettings,
+		setErr:    errors.New("write fast policy failed"),
+	}
+	cfg := &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}}
+	svc := service.NewSettingService(repo, cfg)
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
+
+	body := map[string]any{
+		"promo_code_enabled":                                          true,
+		"gateway_sticky_openai_enabled":                               true,
+		"gateway_sticky_gemini_enabled":                               false,
+		"gateway_sticky_anthropic_enabled":                            true,
+		"gateway_openai_ws_scheduler_mode":                            "layered",
+		"gateway_openai_ws_scheduler_layered_error_penalty_threshold": 0.55,
+		"gateway_openai_ws_scheduler_layered_error_penalty_value":     77,
+		"gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier": 6,
+		"gateway_openai_ws_scheduler_layered_ttft_penalty_value":      33,
+		"gateway_openai_ws_scheduler_layered_probe_cooldown_seconds":  44,
+		"gateway_openai_ws_scheduler_layered_probe_interval_seconds":  22,
+		"gateway_openai_ws_scheduler_layered_probe_max_failures":      5,
+		"gateway_openai_ws_scheduler_layered_probe_timeout_seconds":   11,
+		"openai_fast_policy_settings": map[string]any{
+			"rules": []map[string]any{{
+				"service_tier":           "priority",
+				"action":                 "filter",
+				"scope":                  "oauth",
+				"model_whitelist":        []string{"gpt-4.1", "gpt-4o"},
+				"fallback_action":        "block",
+				"fallback_error_message": "tier blocked",
+			}},
+		},
+	}
+	rawBody, err := json.Marshal(body)
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, "true", repo.values[service.SettingKeyGatewayStickyOpenAIEnabled])
+	require.Equal(t, "false", repo.values[service.SettingKeyGatewayStickyGeminiEnabled])
+	require.Equal(t, "true", repo.values[service.SettingKeyGatewayStickyAnthropicEnabled])
+	require.Equal(t, "layered", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerMode])
+	require.Equal(t, "0.55", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold])
+	_, exists := repo.values[service.SettingKeyOpenAIFastPolicySettings]
+	require.False(t, exists)
+}
+
+func TestSettingHandler_UpdateSettings_NormalizesConfiguredSchedulerModeWhenRequestOmitsMode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{values: map[string]string{service.SettingKeyPromoCodeEnabled: "true"}}
+	cfg := &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}}
+	cfg.Gateway.OpenAIWS.SchedulerMode = " Layered "
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold = 0.3
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyValue = 100
+	cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyMultiplier = 3
+	cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyValue = 50
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeCooldownSeconds = 60
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeIntervalSeconds = 30
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeMaxFailures = 3
+	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTimeoutSeconds = 15
+	svc := service.NewSettingService(repo, cfg)
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
+
+	rawBody, err := json.Marshal(map[string]any{"promo_code_enabled": false})
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	handler.UpdateSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "layered", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerMode])
+	require.Equal(t, "layered", cfg.Gateway.OpenAIWS.SchedulerMode)
 }
 
 func TestSettingHandler_UpdateSettings_PreservesLegacyBlankPaymentVisibleMethodSource(t *testing.T) {
@@ -505,4 +1250,55 @@ func TestDiffSettings_IncludesAuthSourceDefaultsAndForceEmail(t *testing.T) {
 	require.Contains(t, changed, "auth_source_default_email_grant_on_signup")
 	require.Contains(t, changed, "auth_source_default_email_grant_on_first_bind")
 	require.Contains(t, changed, "force_email_on_third_party_signup")
+}
+
+func TestDiffSettings_IncludesGitHubAndGoogleAuthSourceDefaults(t *testing.T) {
+	changed := diffSettings(
+		&service.SystemSettings{},
+		&service.SystemSettings{},
+		&service.AuthSourceDefaultSettings{
+			GitHub: service.ProviderDefaultGrantSettings{
+				Balance:          1,
+				Concurrency:      2,
+				Subscriptions:    []service.DefaultSubscriptionSetting{{GroupID: 11, ValidityDays: 15}},
+				GrantOnSignup:    true,
+				GrantOnFirstBind: false,
+			},
+			Google: service.ProviderDefaultGrantSettings{
+				Balance:          3,
+				Concurrency:      4,
+				Subscriptions:    []service.DefaultSubscriptionSetting{{GroupID: 12, ValidityDays: 30}},
+				GrantOnSignup:    false,
+				GrantOnFirstBind: true,
+			},
+		},
+		&service.AuthSourceDefaultSettings{
+			GitHub: service.ProviderDefaultGrantSettings{
+				Balance:          5,
+				Concurrency:      6,
+				Subscriptions:    []service.DefaultSubscriptionSetting{},
+				GrantOnSignup:    false,
+				GrantOnFirstBind: true,
+			},
+			Google: service.ProviderDefaultGrantSettings{
+				Balance:          7,
+				Concurrency:      8,
+				Subscriptions:    []service.DefaultSubscriptionSetting{},
+				GrantOnSignup:    true,
+				GrantOnFirstBind: false,
+			},
+		},
+		UpdateSettingsRequest{},
+	)
+
+	require.Contains(t, changed, "auth_source_default_github_balance")
+	require.Contains(t, changed, "auth_source_default_github_concurrency")
+	require.Contains(t, changed, "auth_source_default_github_subscriptions")
+	require.Contains(t, changed, "auth_source_default_github_grant_on_signup")
+	require.Contains(t, changed, "auth_source_default_github_grant_on_first_bind")
+	require.Contains(t, changed, "auth_source_default_google_balance")
+	require.Contains(t, changed, "auth_source_default_google_concurrency")
+	require.Contains(t, changed, "auth_source_default_google_subscriptions")
+	require.Contains(t, changed, "auth_source_default_google_grant_on_signup")
+	require.Contains(t, changed, "auth_source_default_google_grant_on_first_bind")
 }

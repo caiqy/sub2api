@@ -133,6 +133,32 @@ func (s *OpenAIGatewayService) ClearAccountSchedulingBlock(accountID int64) {
 		return
 	}
 	s.openaiAccountRuntimeBlockUntil.Delete(accountID)
+	// After clearing runtime block, have layered probe clean up its entry and EWMA
+	// so the next tick doesn't treat this account with stale penalty state.
+	// Manual recovery no longer sends a probe request.
+	s.dropProbeEntryAfterManualClear(accountID)
+}
+
+// dropProbeEntryAfterManualClear delegates to applyManualRecovery which:
+//   - Clears the probe entry from memory (entries.Delete)
+//   - Resets runtime EWMA stats
+//   - Clears DB TempUnschedulable flag (for ALL sources, not just layered_probe)
+//   - Writes info log
+//
+// The DB clear is intentional: ClearAccountSchedulingBlock is called by the admin
+// "clear error" path which should clear ALL recoverable states. The narrower
+// "only clear layered_probe source" semantics live in applyProbeToggleSideEffects.
+func (s *OpenAIGatewayService) dropProbeEntryAfterManualClear(accountID int64) {
+	if s == nil || accountID <= 0 {
+		return
+	}
+	s.openaiSchedulerMu.Lock()
+	scheduler, _ := s.openaiScheduler.(*layeredOpenAIAccountScheduler)
+	s.openaiSchedulerMu.Unlock()
+	if scheduler == nil || scheduler.probe == nil {
+		return
+	}
+	scheduler.probe.applyManualRecovery(accountID, nil)
 }
 
 func (s *OpenAIGatewayService) isOpenAIAccountRuntimeBlocked(account *Account) bool {

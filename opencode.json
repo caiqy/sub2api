@@ -1,0 +1,27 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "playwright": {
+      "enabled": false
+    }
+  },
+  "permission": {
+    "skill": {
+      "writing-skills": "deny",
+      "using-git-worktrees": "deny",
+      "installing-dotnet-framework-48-dev-environment": "deny",
+      "docx": "deny",
+      "pdf": "deny",
+      "pptx": "deny",
+      "xlsx": "deny",
+      "brainstorming": "allow",
+      "gpt-image-2": "allow",
+      "agent-browser-cli": "deny",
+      "chrome-devtools": "allow",
+      "customize-opencode": "deny"
+    }
+  },
+  "tools": {
+    "chrome-devtools_take_screenshot": false
+  }
+}

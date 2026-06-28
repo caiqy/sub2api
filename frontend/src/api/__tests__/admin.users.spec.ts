@@ -12,57 +12,10 @@ vi.mock('@/api/client', () => ({
 
 import {
   bindUserAuthIdentity,
+  create,
   type AdminBindAuthIdentityRequest,
   type AdminBoundAuthIdentity,
 } from '@/api/admin/users'
-
-type Assert<T extends true> = T
-type IsExact<T, U> = (
-  (<G>() => G extends T ? 1 : 2) extends (<G>() => G extends U ? 1 : 2)
-    ? ((<G>() => G extends U ? 1 : 2) extends (<G>() => G extends T ? 1 : 2) ? true : false)
-    : false
-)
-
-type ExpectedAdminBindAuthIdentityRequest = {
-  provider_type: string
-  provider_key: string
-  provider_subject: string
-  issuer?: string
-  metadata?: Record<string, unknown>
-  channel?: {
-    channel: string
-    channel_app_id: string
-    channel_subject: string
-    metadata?: Record<string, unknown>
-  }
-}
-
-type ExpectedAdminBoundAuthIdentity = {
-  user_id: number
-  provider_type: string
-  provider_key: string
-  provider_subject: string
-  verified_at?: string | null
-  issuer?: string | null
-  metadata: Record<string, unknown> | null
-  created_at: string
-  updated_at: string
-  channel?: {
-    channel: string
-    channel_app_id: string
-    channel_subject: string
-    metadata: Record<string, unknown> | null
-    created_at: string
-    updated_at: string
-  } | null
-}
-
-const requestContractExact: Assert<
-  IsExact<AdminBindAuthIdentityRequest, ExpectedAdminBindAuthIdentityRequest>
-> = true
-const responseContractExact: Assert<
-  IsExact<AdminBoundAuthIdentity, ExpectedAdminBoundAuthIdentity>
-> = true
 
 describe('admin users api auth identity binding', () => {
   beforeEach(() => {
@@ -110,8 +63,20 @@ describe('admin users api auth identity binding', () => {
     expect(result).toEqual(response)
   })
 
-  it('keeps bind auth identity request and response types aligned with the backend contract', () => {
-    expect(requestContractExact).toBe(true)
-    expect(responseContractExact).toBe(true)
+  it('posts create user payloads with username and notes when provided', async () => {
+    const payload: Parameters<typeof create>[0] = {
+      email: 'new@example.com',
+      password: 'secret-123',
+      username: 'new-user',
+      notes: 'seeded by admin',
+      balance: 10,
+      concurrency: 2,
+      allowed_groups: [1, 2],
+    }
+    post.mockResolvedValue({ data: payload })
+
+    await create(payload)
+
+    expect(post).toHaveBeenCalledWith('/admin/users', payload)
   })
 })

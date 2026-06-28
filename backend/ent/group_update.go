@@ -693,6 +693,41 @@ func (_u *GroupUpdate) SetNillableModelsListConfig(v *domain.GroupModelsListConf
 	return _u
 }
 
+// SetUserConcurrencyEnabled sets the "user_concurrency_enabled" field.
+func (_u *GroupUpdate) SetUserConcurrencyEnabled(v bool) *GroupUpdate {
+	_u.mutation.SetUserConcurrencyEnabled(v)
+	return _u
+}
+
+// SetNillableUserConcurrencyEnabled sets the "user_concurrency_enabled" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableUserConcurrencyEnabled(v *bool) *GroupUpdate {
+	if v != nil {
+		_u.SetUserConcurrencyEnabled(*v)
+	}
+	return _u
+}
+
+// SetUserConcurrencyLimit sets the "user_concurrency_limit" field.
+func (_u *GroupUpdate) SetUserConcurrencyLimit(v int) *GroupUpdate {
+	_u.mutation.ResetUserConcurrencyLimit()
+	_u.mutation.SetUserConcurrencyLimit(v)
+	return _u
+}
+
+// SetNillableUserConcurrencyLimit sets the "user_concurrency_limit" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableUserConcurrencyLimit(v *int) *GroupUpdate {
+	if v != nil {
+		_u.SetUserConcurrencyLimit(*v)
+	}
+	return _u
+}
+
+// AddUserConcurrencyLimit adds value to the "user_concurrency_limit" field.
+func (_u *GroupUpdate) AddUserConcurrencyLimit(v int) *GroupUpdate {
+	_u.mutation.AddUserConcurrencyLimit(v)
+	return _u
+}
+
 // SetRpmLimit sets the "rpm_limit" field.
 func (_u *GroupUpdate) SetRpmLimit(v int) *GroupUpdate {
 	_u.mutation.ResetRpmLimit()
@@ -1216,6 +1251,15 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.ModelsListConfig(); ok {
 		_spec.SetField(group.FieldModelsListConfig, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.UserConcurrencyEnabled(); ok {
+		_spec.SetField(group.FieldUserConcurrencyEnabled, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.UserConcurrencyLimit(); ok {
+		_spec.SetField(group.FieldUserConcurrencyLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedUserConcurrencyLimit(); ok {
+		_spec.AddField(group.FieldUserConcurrencyLimit, field.TypeInt, value)
 	}
 	if value, ok := _u.mutation.RpmLimit(); ok {
 		_spec.SetField(group.FieldRpmLimit, field.TypeInt, value)
@@ -2194,6 +2238,41 @@ func (_u *GroupUpdateOne) SetNillableModelsListConfig(v *domain.GroupModelsListC
 	return _u
 }
 
+// SetUserConcurrencyEnabled sets the "user_concurrency_enabled" field.
+func (_u *GroupUpdateOne) SetUserConcurrencyEnabled(v bool) *GroupUpdateOne {
+	_u.mutation.SetUserConcurrencyEnabled(v)
+	return _u
+}
+
+// SetNillableUserConcurrencyEnabled sets the "user_concurrency_enabled" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableUserConcurrencyEnabled(v *bool) *GroupUpdateOne {
+	if v != nil {
+		_u.SetUserConcurrencyEnabled(*v)
+	}
+	return _u
+}
+
+// SetUserConcurrencyLimit sets the "user_concurrency_limit" field.
+func (_u *GroupUpdateOne) SetUserConcurrencyLimit(v int) *GroupUpdateOne {
+	_u.mutation.ResetUserConcurrencyLimit()
+	_u.mutation.SetUserConcurrencyLimit(v)
+	return _u
+}
+
+// SetNillableUserConcurrencyLimit sets the "user_concurrency_limit" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableUserConcurrencyLimit(v *int) *GroupUpdateOne {
+	if v != nil {
+		_u.SetUserConcurrencyLimit(*v)
+	}
+	return _u
+}
+
+// AddUserConcurrencyLimit adds value to the "user_concurrency_limit" field.
+func (_u *GroupUpdateOne) AddUserConcurrencyLimit(v int) *GroupUpdateOne {
+	_u.mutation.AddUserConcurrencyLimit(v)
+	return _u
+}
+
 // SetRpmLimit sets the "rpm_limit" field.
 func (_u *GroupUpdateOne) SetRpmLimit(v int) *GroupUpdateOne {
 	_u.mutation.ResetRpmLimit()
@@ -2747,6 +2826,15 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.ModelsListConfig(); ok {
 		_spec.SetField(group.FieldModelsListConfig, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.UserConcurrencyEnabled(); ok {
+		_spec.SetField(group.FieldUserConcurrencyEnabled, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.UserConcurrencyLimit(); ok {
+		_spec.SetField(group.FieldUserConcurrencyLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedUserConcurrencyLimit(); ok {
+		_spec.AddField(group.FieldUserConcurrencyLimit, field.TypeInt, value)
 	}
 	if value, ok := _u.mutation.RpmLimit(); ok {
 		_spec.SetField(group.FieldRpmLimit, field.TypeInt, value)

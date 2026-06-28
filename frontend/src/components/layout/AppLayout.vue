@@ -15,7 +15,7 @@
       <AppHeader />
 
       <!-- Main Content -->
-      <main class="p-4 md:p-6 lg:p-8">
+      <main :class="mainClass">
         <slot />
       </main>
     </div>
@@ -43,6 +43,12 @@ const { replayTour } = useOnboardingTour({
 })
 
 const onboardingStore = useOnboardingStore()
+
+withDefaults(defineProps<{
+  mainClass?: string
+}>(), {
+  mainClass: 'p-4 md:p-6 lg:p-8'
+})
 
 onMounted(() => {
   onboardingStore.setReplayCallback(replayTour)

@@ -87,6 +87,166 @@ func (s *UsageLogRepoSuite) TestCreate() {
 	s.Require().NotZero(log.ID)
 }
 
+func (s *UsageLogRepoSuite) TestCreate_PersistsDetailSnapshotAndPrunesOldRows() {
+	resetUsageLogDetailRetentionLimitsForRepositoryTest(s.T())
+
+	user := mustCreateUser(s.T(), s.client, &service.User{Email: "create-detail-prune@test.com"})
+	apiKey := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: "sk-create-detail-prune", Name: "k"})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-create-detail-prune"})
+
+	base := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	var oldestUsageLogID int64
+	var imageUsageLogID int64
+	for i := 0; i < 500; i++ {
+		log := &service.UsageLog{
+			UserID:       user.ID,
+			APIKeyID:     apiKey.ID,
+			AccountID:    account.ID,
+			RequestID:    uuid.NewString(),
+			Model:        "claude-3",
+			InputTokens:  10,
+			OutputTokens: 20,
+			TotalCost:    0.5,
+			ActualCost:   0.5,
+			CreatedAt:    base.Add(time.Duration(i) * time.Second),
+		}
+		_, err := s.repo.Create(s.ctx, log)
+		s.Require().NoError(err)
+		if i == 0 {
+			oldestUsageLogID = log.ID
+		}
+		_, err = s.tx.ExecContext(s.ctx, `
+			INSERT INTO usage_log_details (
+				usage_log_id,
+				detail_type,
+				request_headers,
+				request_body,
+				upstream_request_headers,
+				upstream_request_body,
+				response_headers,
+				response_body,
+				created_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		`, log.ID, string(service.UsageLogDetailTypeNormal), "seed-h", fmt.Sprintf("seed-body-%d", i), "seed-upstream-h", fmt.Sprintf("seed-upstream-body-%d", i), "seed-rh", "seed-rb", log.CreatedAt)
+		s.Require().NoError(err)
+	}
+
+	imageLog := &service.UsageLog{
+		UserID:       user.ID,
+		APIKeyID:     apiKey.ID,
+		AccountID:    account.ID,
+		RequestID:    uuid.NewString(),
+		Model:        "gpt-image-1",
+		InputTokens:  10,
+		OutputTokens: 20,
+		TotalCost:    0.5,
+		ActualCost:   0.5,
+		ImageCount:   1,
+		CreatedAt:    base.Add(-time.Second),
+	}
+	_, err := s.repo.Create(s.ctx, imageLog)
+	s.Require().NoError(err)
+	imageUsageLogID = imageLog.ID
+	_, err = s.tx.ExecContext(s.ctx, `
+		INSERT INTO usage_log_details (
+			usage_log_id,
+			detail_type,
+			request_headers,
+			request_body,
+			upstream_request_headers,
+			upstream_request_body,
+			response_headers,
+			response_body,
+			created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	`, imageLog.ID, string(service.UsageLogDetailTypeImage), "image-seed-h", "image-seed-body", "image-seed-upstream-h", "image-seed-upstream-body", "image-seed-rh", "image-seed-rb", imageLog.CreatedAt)
+	s.Require().NoError(err)
+
+	log := &service.UsageLog{
+		UserID:       user.ID,
+		APIKeyID:     apiKey.ID,
+		AccountID:    account.ID,
+		RequestID:    uuid.NewString(),
+		Model:        "claude-3",
+		InputTokens:  11,
+		OutputTokens: 22,
+		TotalCost:    0.6,
+		ActualCost:   0.6,
+		CreatedAt:    base.Add(600 * time.Second),
+		DetailSnapshot: (&service.UsageLogDetailSnapshot{
+			RequestHeaders:         "Authorization: Bearer redacted",
+			RequestBody:            `{"hello":"world"}`,
+			UpstreamRequestHeaders: "X-Upstream-Auth: upstream-token",
+			UpstreamRequestBody:    `{"upstream":"world"}`,
+			ResponseHeaders:        "Content-Type: application/json",
+			ResponseBody:           `{"ok":true}`,
+		}).Normalize(),
+	}
+
+	inserted, err := s.repo.Create(s.ctx, log)
+	s.Require().NoError(err)
+	s.Require().True(inserted)
+
+	var total int
+	err = scanSingleRow(s.ctx, s.tx, "SELECT COUNT(*) FROM usage_log_details", nil, &total)
+	s.Require().NoError(err)
+	s.Require().Equal(service.UsageLogDetailRetentionLimitDefault+1, total)
+
+	var normalTotal int
+	err = scanSingleRow(s.ctx, s.tx, "SELECT COUNT(*) FROM usage_log_details WHERE detail_type = $1", []any{string(service.UsageLogDetailTypeNormal)}, &normalTotal)
+	s.Require().NoError(err)
+	s.Require().Equal(service.UsageLogDetailRetentionLimitDefault, normalTotal)
+
+	var imageTotal int
+	err = scanSingleRow(s.ctx, s.tx, "SELECT COUNT(*) FROM usage_log_details WHERE detail_type = $1", []any{string(service.UsageLogDetailTypeImage)}, &imageTotal)
+	s.Require().NoError(err)
+	s.Require().Equal(1, imageTotal)
+
+	var detail struct {
+		RequestHeaders         string
+		RequestBody            string
+		UpstreamRequestHeaders string
+		UpstreamRequestBody    string
+		ResponseHeaders        string
+		ResponseBody           string
+	}
+	err = scanSingleRow(s.ctx, s.tx, `
+		SELECT request_headers, request_body, upstream_request_headers, upstream_request_body, response_headers, response_body
+		FROM usage_log_details
+		WHERE usage_log_id = $1
+	`, []any{log.ID}, &detail.RequestHeaders, &detail.RequestBody, &detail.UpstreamRequestHeaders, &detail.UpstreamRequestBody, &detail.ResponseHeaders, &detail.ResponseBody)
+	s.Require().NoError(err)
+	s.Require().Equal("Authorization: Bearer redacted", detail.RequestHeaders)
+	s.Require().Equal(`{"hello":"world"}`, detail.RequestBody)
+	s.Require().Equal("X-Upstream-Auth: upstream-token", detail.UpstreamRequestHeaders)
+	s.Require().Equal(`{"upstream":"world"}`, detail.UpstreamRequestBody)
+	s.Require().Equal("Content-Type: application/json", detail.ResponseHeaders)
+	s.Require().Equal(`{"ok":true}`, detail.ResponseBody)
+
+	persistedDetail, err := newUsageLogDetailRepositoryWithSQL(s.tx).GetByUsageLogID(s.ctx, log.ID)
+	s.Require().NoError(err)
+	s.Require().Equal(service.UsageLogDetailTypeNormal, persistedDetail.DetailType)
+	s.Require().Equal("Authorization: Bearer redacted", persistedDetail.RequestHeaders)
+	s.Require().Equal(`{"hello":"world"}`, persistedDetail.RequestBody)
+	s.Require().Equal("X-Upstream-Auth: upstream-token", persistedDetail.UpstreamRequestHeaders)
+	s.Require().Equal(`{"upstream":"world"}`, persistedDetail.UpstreamRequestBody)
+	s.Require().Equal("Content-Type: application/json", persistedDetail.ResponseHeaders)
+	s.Require().Equal(`{"ok":true}`, persistedDetail.ResponseBody)
+
+	var oldestCount int
+	err = scanSingleRow(s.ctx, s.tx, "SELECT COUNT(*) FROM usage_log_details WHERE usage_log_id = $1", []any{oldestUsageLogID}, &oldestCount)
+	s.Require().NoError(err)
+	s.Require().Zero(oldestCount)
+	var newestCount int
+	err = scanSingleRow(s.ctx, s.tx, "SELECT COUNT(*) FROM usage_log_details WHERE usage_log_id = $1", []any{log.ID}, &newestCount)
+	s.Require().NoError(err)
+	s.Require().Equal(1, newestCount)
+	var imageCount int
+	err = scanSingleRow(s.ctx, s.tx, "SELECT COUNT(*) FROM usage_log_details WHERE usage_log_id = $1", []any{imageUsageLogID}, &imageCount)
+	s.Require().NoError(err)
+	s.Require().Equal(1, imageCount)
+}
+
 func TestUsageLogRepositoryCreate_BatchPathConcurrent(t *testing.T) {
 	ctx := context.Background()
 	client := testEntClient(t)
@@ -264,6 +424,12 @@ func TestUsageLogRepositoryCreateBestEffort_BatchPathDuplicateRequestID(t *testi
 		TotalCost:    0.5,
 		ActualCost:   0.5,
 		CreatedAt:    time.Now().UTC(),
+		DetailSnapshot: (&service.UsageLogDetailSnapshot{
+			RequestHeaders:  "X-Debug: first",
+			RequestBody:     `{"request":"first"}`,
+			ResponseHeaders: "Content-Type: application/json",
+			ResponseBody:    `{"ok":true}`,
+		}).Normalize(),
 	}
 	log2 := &service.UsageLog{
 		UserID:       user.ID,
@@ -276,6 +442,12 @@ func TestUsageLogRepositoryCreateBestEffort_BatchPathDuplicateRequestID(t *testi
 		TotalCost:    0.5,
 		ActualCost:   0.5,
 		CreatedAt:    time.Now().UTC(),
+		DetailSnapshot: (&service.UsageLogDetailSnapshot{
+			RequestHeaders:  "X-Debug: second",
+			RequestBody:     `{"request":"second"}`,
+			ResponseHeaders: "Content-Type: application/json",
+			ResponseBody:    `{"ok":true}`,
+		}).Normalize(),
 	}
 
 	require.NoError(t, repo.CreateBestEffort(ctx, log1))
@@ -286,6 +458,67 @@ func TestUsageLogRepositoryCreateBestEffort_BatchPathDuplicateRequestID(t *testi
 		err := integrationDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM usage_logs WHERE request_id = $1 AND api_key_id = $2", requestID, apiKey.ID).Scan(&count)
 		return err == nil && count == 1
 	}, 3*time.Second, 20*time.Millisecond)
+
+	var usageLogID int64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT id FROM usage_logs WHERE request_id = $1 AND api_key_id = $2", requestID, apiKey.ID).Scan(&usageLogID))
+
+	var detailCount int
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM usage_log_details WHERE usage_log_id = $1", usageLogID).Scan(&detailCount))
+	require.Equal(t, 1, detailCount)
+}
+
+func TestUsageLogRepositoryCreateBestEffort_PersistsDetailForInsertedRows(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := newUsageLogRepositoryWithSQL(client, integrationDB)
+
+	user := mustCreateUser(t, client, &service.User{Email: fmt.Sprintf("usage-best-effort-detail-%d@example.com", time.Now().UnixNano())})
+	apiKey := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: "sk-usage-best-effort-detail-" + uuid.NewString(), Name: "k"})
+	account := mustCreateAccount(t, client, &service.Account{Name: "acc-usage-best-effort-detail-" + uuid.NewString()})
+
+	requestID := uuid.NewString()
+	createdAt := time.Now().UTC()
+	log := &service.UsageLog{
+		UserID:       user.ID,
+		APIKeyID:     apiKey.ID,
+		AccountID:    account.ID,
+		RequestID:    requestID,
+		Model:        "claude-3",
+		InputTokens:  10,
+		OutputTokens: 20,
+		TotalCost:    0.5,
+		ActualCost:   0.5,
+		CreatedAt:    createdAt,
+		DetailSnapshot: (&service.UsageLogDetailSnapshot{
+			RequestHeaders:         "Authorization: Bearer best-effort",
+			RequestBody:            `{"request":"payload"}`,
+			UpstreamRequestHeaders: "X-Upstream: best-effort",
+			UpstreamRequestBody:    `{"upstream":"payload"}`,
+			ResponseHeaders:        "Content-Type: application/json",
+			ResponseBody:           `{"ok":true}`,
+		}).Normalize(),
+	}
+
+	require.NoError(t, repo.CreateBestEffort(ctx, log))
+
+	var usageLogID int64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT id FROM usage_logs WHERE request_id = $1 AND api_key_id = $2", requestID, apiKey.ID).Scan(&usageLogID))
+
+	detail, err := newUsageLogDetailRepositoryWithSQL(integrationDB).GetByUsageLogID(ctx, usageLogID)
+	require.NoError(t, err)
+	require.Equal(t, "Authorization: Bearer best-effort", detail.RequestHeaders)
+	require.Equal(t, `{"request":"payload"}`, detail.RequestBody)
+	require.Equal(t, "X-Upstream: best-effort", detail.UpstreamRequestHeaders)
+	require.Equal(t, `{"upstream":"payload"}`, detail.UpstreamRequestBody)
+	require.Equal(t, "Content-Type: application/json", detail.ResponseHeaders)
+	require.Equal(t, `{"ok":true}`, detail.ResponseBody)
+
+	logs, page, err := repo.ListWithFilters(ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, usagestats.UsageLogFilters{UserID: user.ID})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), page.Total)
+	require.Len(t, logs, 1)
+	require.Equal(t, usageLogID, logs[0].ID)
+	require.True(t, logs[0].HasDetail)
 }
 
 func TestUsageLogRepositoryCreateBestEffort_QueueFullReturnsDropped(t *testing.T) {
@@ -566,6 +799,39 @@ func (s *UsageLogRepoSuite) TestDelete() {
 	s.Require().Error(err, "expected error after delete")
 }
 
+func (s *UsageLogRepoSuite) TestDelete_RemovesDetail() {
+	user := mustCreateUser(s.T(), s.client, &service.User{Email: "delete-detail@test.com"})
+	apiKey := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: "sk-delete-detail", Name: "k"})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-delete-detail"})
+
+	log := &service.UsageLog{
+		UserID:       user.ID,
+		APIKeyID:     apiKey.ID,
+		AccountID:    account.ID,
+		RequestID:    uuid.NewString(),
+		Model:        "claude-3",
+		InputTokens:  10,
+		OutputTokens: 20,
+		TotalCost:    0.5,
+		ActualCost:   0.5,
+		CreatedAt:    time.Now().UTC(),
+		DetailSnapshot: (&service.UsageLogDetailSnapshot{
+			RequestBody: `{"delete":true}`,
+		}).Normalize(),
+	}
+
+	_, err := s.repo.Create(s.ctx, log)
+	s.Require().NoError(err)
+
+	err = s.repo.Delete(s.ctx, log.ID)
+	s.Require().NoError(err)
+
+	var count int
+	err = scanSingleRow(s.ctx, s.tx, "SELECT COUNT(*) FROM usage_log_details WHERE usage_log_id = $1", []any{log.ID}, &count)
+	s.Require().NoError(err)
+	s.Require().Zero(count)
+}
+
 // --- ListByUser ---
 
 func (s *UsageLogRepoSuite) TestListByUser() {
@@ -647,6 +913,85 @@ func (s *UsageLogRepoSuite) TestListWithFilters() {
 	s.Require().NoError(err, "ListWithFilters")
 	s.Require().Len(logs, 1)
 	s.Require().Equal(int64(1), page.Total)
+}
+
+func (s *UsageLogRepoSuite) TestListWithFilters_PopulatesHasDetail() {
+	user := mustCreateUser(s.T(), s.client, &service.User{Email: "filters-has-detail@test.com"})
+	apiKey := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: "sk-filters-has-detail", Name: "k"})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-filters-has-detail"})
+
+	withDetail := &service.UsageLog{
+		UserID:       user.ID,
+		APIKeyID:     apiKey.ID,
+		AccountID:    account.ID,
+		RequestID:    uuid.NewString(),
+		Model:        "claude-3",
+		InputTokens:  10,
+		OutputTokens: 20,
+		TotalCost:    0.5,
+		ActualCost:   0.5,
+		CreatedAt:    time.Now().UTC(),
+		DetailSnapshot: (&service.UsageLogDetailSnapshot{
+			RequestBody: `{"detail":true}`,
+		}).Normalize(),
+	}
+	_, err := s.repo.Create(s.ctx, withDetail)
+	s.Require().NoError(err)
+
+	withoutDetail := &service.UsageLog{
+		UserID:       user.ID,
+		APIKeyID:     apiKey.ID,
+		AccountID:    account.ID,
+		RequestID:    uuid.NewString(),
+		Model:        "claude-3",
+		InputTokens:  30,
+		OutputTokens: 40,
+		TotalCost:    0.7,
+		ActualCost:   0.7,
+		CreatedAt:    time.Now().UTC().Add(1 * time.Second),
+	}
+	_, err = s.repo.Create(s.ctx, withoutDetail)
+	s.Require().NoError(err)
+
+	filters := usagestats.UsageLogFilters{UserID: user.ID}
+	logs, page, err := s.repo.ListWithFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, filters)
+	s.Require().NoError(err)
+	s.Require().Len(logs, 2)
+	s.Require().Equal(int64(2), page.Total)
+	s.Require().Equal(withoutDetail.ID, logs[0].ID)
+	s.Require().False(logs[0].HasDetail)
+	s.Require().Equal(withDetail.ID, logs[1].ID)
+	s.Require().True(logs[1].HasDetail)
+}
+
+func (s *UsageLogRepoSuite) TestListWithFilters_DegradesWhenDetailTableMissing() {
+	user := mustCreateUser(s.T(), s.client, &service.User{Email: "filters-missing-detail-table@test.com"})
+	apiKey := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: user.ID, Key: "sk-filters-missing-detail-table", Name: "k"})
+	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-filters-missing-detail-table"})
+
+	older := s.createUsageLog(user, apiKey, account, 10, 20, 0.5, time.Now().UTC())
+	newer := s.createUsageLog(user, apiKey, account, 30, 40, 0.7, time.Now().UTC().Add(1*time.Second))
+
+	_, err := s.tx.ExecContext(s.ctx, "DROP TABLE usage_log_details")
+	s.Require().NoError(err)
+
+	var detailTableRegclass *string
+	err = scanSingleRow(s.ctx, s.tx, "SELECT to_regclass('public.usage_log_details')", nil, &detailTableRegclass)
+	s.Require().NoError(err)
+	s.Require().Nil(detailTableRegclass)
+
+	_, err = s.tx.QueryContext(s.ctx, "SELECT EXISTS (SELECT 1 FROM usage_log_details WHERE usage_log_id = $1)", older.ID)
+	s.Require().Error(err)
+
+	filters := usagestats.UsageLogFilters{UserID: user.ID}
+	logs, page, err := s.repo.ListWithFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, filters)
+	s.Require().NoError(err)
+	s.Require().Len(logs, 2)
+	s.Require().Equal(int64(2), page.Total)
+	s.Require().Equal(newer.ID, logs[0].ID)
+	s.Require().False(logs[0].HasDetail)
+	s.Require().Equal(older.ID, logs[1].ID)
+	s.Require().False(logs[1].HasDetail)
 }
 
 // --- GetDashboardStats ---

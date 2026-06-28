@@ -43,6 +43,7 @@ describe('GroupDistributionChart', () => {
       total_tokens: 1200,
       cost: 1.8,
       actual_cost: 0.1,
+      account_cost: 0.08,
     },
     {
       group_id: 2,
@@ -51,6 +52,7 @@ describe('GroupDistributionChart', () => {
       total_tokens: 600,
       cost: 0.7,
       actual_cost: 0.9,
+      account_cost: 0.75,
     },
   ]
 
@@ -129,5 +131,28 @@ describe('GroupDistributionChart', () => {
     expect(wrapper.text()).not.toContain('Account Cost')
     expect(wrapper.findAll('thead th')).toHaveLength(5)
     expect(wrapper.findAll('tbody tr')[0].findAll('td')).toHaveLength(5)
+  })
+
+  it('renders without crashing when group cost fields are missing', () => {
+    const wrapper = mount(GroupDistributionChart, {
+      props: {
+        groupStats: [
+          {
+            group_id: 1,
+            group_name: 'group-a',
+            requests: 9,
+            total_tokens: 1200,
+          },
+        ],
+      },
+      global: {
+        stubs: {
+          LoadingSpinner: true,
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('group-a')
+    expect(wrapper.text()).toContain('$0.0000')
   })
 })

@@ -177,6 +177,23 @@ type SystemSettings struct {
 	// Backend Mode
 	BackendModeEnabled bool `json:"backend_mode_enabled"`
 
+	// Gateway sticky platform switches
+	GatewayStickyOpenAIEnabled    bool `json:"gateway_sticky_openai_enabled"`
+	GatewayStickyGeminiEnabled    bool `json:"gateway_sticky_gemini_enabled"`
+	GatewayStickyAnthropicEnabled bool `json:"gateway_sticky_anthropic_enabled"`
+
+	// OpenAI WS scheduler settings
+	GatewayOpenAIWSSchedulerMode                                 string  `json:"gateway_openai_ws_scheduler_mode"`
+	GatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold         float64 `json:"gateway_openai_ws_scheduler_layered_error_penalty_threshold"`
+	GatewayOpenAIWSSchedulerLayeredErrorPenaltyValue             int     `json:"gateway_openai_ws_scheduler_layered_error_penalty_value"`
+	GatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier         float64 `json:"gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier"`
+	GatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue              int     `json:"gateway_openai_ws_scheduler_layered_ttft_penalty_value"`
+	GatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds          int     `json:"gateway_openai_ws_scheduler_layered_probe_cooldown_seconds"`
+	GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds          int     `json:"gateway_openai_ws_scheduler_layered_probe_interval_seconds"`
+	GatewayOpenAIWSSchedulerLayeredProbeMaxFailures              int     `json:"gateway_openai_ws_scheduler_layered_probe_max_failures"`
+	GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds           int     `json:"gateway_openai_ws_scheduler_layered_probe_timeout_seconds"`
+	GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds int     `json:"gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds"`
+
 	// Gateway forwarding behavior
 	EnableFingerprintUnification           bool   `json:"enable_fingerprint_unification"`
 	EnableMetadataPassthrough              bool   `json:"enable_metadata_passthrough"`
@@ -352,6 +369,14 @@ type LoginAgreementDocument struct {
 type OverloadCooldownSettings struct {
 	Enabled         bool `json:"enabled"`
 	CooldownMinutes int  `json:"cooldown_minutes"`
+}
+
+// GatewayRuntimeSettings 网关运行参数 DTO
+type GatewayRuntimeSettings struct {
+	ResponseHeaderTimeout             int `json:"response_header_timeout"`
+	StreamDataIntervalTimeout         int `json:"stream_data_interval_timeout"`
+	UsageLogDetailRetentionLimit      int `json:"usage_log_detail_retention_limit"`
+	ImageUsageLogDetailRetentionLimit int `json:"image_usage_log_detail_retention_limit"`
 }
 
 // RateLimit429CooldownSettings 429默认回避配置 DTO

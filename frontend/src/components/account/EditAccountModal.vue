@@ -34,15 +34,7 @@
             v-model="editBaseUrl"
             type="text"
             class="input"
-            :placeholder="
-              account.platform === 'openai'
-                ? 'https://api.openai.com'
-                : account.platform === 'gemini'
-                  ? 'https://generativelanguage.googleapis.com'
-                  : account.platform === 'antigravity'
-                    ? 'https://cloudcode-pa.googleapis.com'
-                    : 'https://api.anthropic.com'
-            "
+            :placeholder="defaultBaseUrl"
           />
           <p class="input-hint">{{ baseUrlHint }}</p>
         </div>
@@ -305,18 +297,6 @@
               }}
             </p>
           </div>
-          <div v-if="poolModeEnabled" class="mt-3">
-            <label class="input-label">{{ t('admin.accounts.poolModeRetryStatusCodes') }}</label>
-            <input
-              v-model="poolModeRetryStatusCodesInput"
-              type="text"
-              class="input"
-              :placeholder="DEFAULT_POOL_MODE_RETRY_STATUS_CODES.join(', ')"
-            />
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.poolModeRetryStatusCodesHint', { default: DEFAULT_POOL_MODE_RETRY_STATUS_CODES.join(', ') }) }}
-            </p>
-          </div>
         </div>
 
         <!-- Custom Error Codes Section -->
@@ -563,7 +543,7 @@
             v-model="editBaseUrl"
             type="text"
             class="input"
-            placeholder="https://cloudcode-pa.googleapis.com"
+            :placeholder="getDefaultBaseUrl('antigravity')"
           />
           <p class="input-hint">{{ t('admin.accounts.upstream.baseUrlHint') }}</p>
         </div>
@@ -985,18 +965,6 @@
               }}
             </p>
           </div>
-          <div v-if="poolModeEnabled" class="mt-3">
-            <label class="input-label">{{ t('admin.accounts.poolModeRetryStatusCodes') }}</label>
-            <input
-              v-model="poolModeRetryStatusCodesInput"
-              type="text"
-              class="input"
-              :placeholder="DEFAULT_POOL_MODE_RETRY_STATUS_CODES.join(', ')"
-            />
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.poolModeRetryStatusCodesHint', { default: DEFAULT_POOL_MODE_RETRY_STATUS_CODES.join(', ') }) }}
-            </p>
-          </div>
         </div>
       </div>
 
@@ -1115,6 +1083,18 @@
           </div>
         </div>
       </div>
+
+      <!-- Passthrough Field Rules (all account types) -->
+      <section
+        v-if="isPassthroughFieldSupportedAccount"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+        data-testid="passthrough-fields-section"
+      >
+        <PassthroughFieldRulesEditor
+          v-model:enabled="passthroughFieldsEnabled"
+          v-model:rules="passthroughFieldRules"
+        />
+      </section>
 
       <!-- Temp Unschedulable Rules -->
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4">
@@ -1454,7 +1434,7 @@
       <!-- OpenAI APIKey Responses API support mode -->
       <div
         v-if="account?.platform === 'openai' && account?.type === 'apikey'"
-        class="space-y-4 border-t border-gray-200 pt-4 dark:border-dark-600"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-3"
       >
         <div class="flex items-center justify-between gap-4">
           <div>
@@ -1472,19 +1452,13 @@
             />
           </div>
         </div>
-        <div
-          v-if="openAITextGenerationCapabilityEnabled"
-          class="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300"
-        >
-          <span class="font-medium">{{ t(openAIResponsesStatusKey) }}</span>
-        </div>
-        <div
-          v-else
+        <p
+          v-if="!openAITextGenerationCapabilityEnabled"
           class="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
           data-testid="openai-responses-mode-not-applicable"
         >
           {{ t('admin.accounts.openai.responsesModeTextDisabledHint') }}
-        </div>
+        </p>
         <div>
           <label class="input-label mb-2 block">{{ t('admin.accounts.openai.endpointCapabilities') }}</label>
           <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -1504,6 +1478,9 @@
             </label>
           </div>
           <p class="input-hint">{{ t('admin.accounts.openai.endpointCapabilitiesDesc') }}</p>
+        </div>
+        <div class="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300">
+          <span class="font-medium">{{ t(openAIResponsesStatusKey) }}</span>
         </div>
       </div>
 
@@ -1790,6 +1767,49 @@
             + {{ t('admin.accounts.addMapping') }}
           </button>
         </div>
+
+        <!-- 故障自动检查 + 自检模型 -->
+        <div class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4">
+          <div class="flex items-center justify-between gap-4">
+            <div class="flex-1">
+              <label class="input-label mb-0">{{ t('admin.accounts.openai.probeEnabled') }}</label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.accounts.openai.probeEnabledDesc') }}
+              </p>
+            </div>
+            <button
+              type="button"
+              @click="openAIProbeEnabled = !openAIProbeEnabled"
+              :class="[
+                'relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors',
+                openAIProbeEnabled ? 'bg-primary-600' : 'bg-gray-300 dark:bg-dark-500'
+              ]"
+            >
+              <span
+                :class="[
+                  'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
+                  openAIProbeEnabled ? 'translate-x-6' : 'translate-x-1'
+                ]"
+              />
+            </button>
+          </div>
+          <p
+            v-if="!openAIProbeEnabled"
+            class="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
+          >
+            {{ t('admin.accounts.openai.probeEnabledOffHint') }}
+          </p>
+          <div>
+            <label class="input-label">{{ t('admin.accounts.openai.probeModel') }}</label>
+            <input
+              v-model="openAIProbeModel"
+              type="text"
+              class="input"
+              :placeholder="t('admin.accounts.openai.probeModelPlaceholder')"
+            />
+            <p class="input-hint">{{ t('admin.accounts.openai.probeModelHint') }}</p>
+          </div>
+        </div>
       </div>
 
       <div>
@@ -1821,81 +1841,25 @@
       </div>
 
       <div
-        v-if="account?.platform === 'openai'"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
+        v-if="account?.platform === 'openai' && account?.type === 'apikey'"
+        class="grid grid-cols-1 gap-3 border-t border-gray-200 pt-4 dark:border-dark-600 sm:grid-cols-2"
       >
-        <div class="space-y-2">
-          <div class="flex items-center justify-between">
-            <label class="input-label mb-0">{{ t('admin.accounts.autoPause5hDisabled') }}</label>
-            <button
-              type="button"
-              @click="autoPause5hDisabled = !autoPause5hDisabled"
-              :class="[
-                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-                autoPause5hDisabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-              ]"
-              data-testid="auto-pause-5h-disabled"
-            >
-              <span
-                :class="[
-                  'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                  autoPause5hDisabled ? 'translate-x-5' : 'translate-x-0'
-                ]"
-              />
-            </button>
-          </div>
-          <p class="input-hint">{{ t('admin.accounts.autoPauseDisabledHint') }}</p>
-        </div>
-        <div>
-          <label class="input-label">{{ t('admin.accounts.autoPause5hThreshold') }}</label>
-          <input
-            v-model.number="autoPause5hThreshold"
-            type="number"
-            min="0"
-            max="100"
-            step="0.1"
-            class="input"
-            :disabled="autoPause5hDisabled"
-            data-testid="auto-pause-5h-threshold"
-          />
-          <p class="input-hint">{{ t('admin.accounts.autoPauseThresholdHint') }}</p>
-        </div>
-        <div class="space-y-2">
-          <div class="flex items-center justify-between">
-            <label class="input-label mb-0">{{ t('admin.accounts.autoPause7dDisabled') }}</label>
-            <button
-              type="button"
-              @click="autoPause7dDisabled = !autoPause7dDisabled"
-              :class="[
-                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-                autoPause7dDisabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-              ]"
-              data-testid="auto-pause-7d-disabled"
-            >
-              <span
-                :class="[
-                  'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                  autoPause7dDisabled ? 'translate-x-5' : 'translate-x-0'
-                ]"
-              />
-            </button>
-          </div>
-          <p class="input-hint">{{ t('admin.accounts.autoPauseDisabledHint') }}</p>
-        </div>
-        <div>
-          <label class="input-label">{{ t('admin.accounts.autoPause7dThreshold') }}</label>
-          <input
-            v-model.number="autoPause7dThreshold"
-            type="number"
-            min="0"
-            max="100"
-            step="0.1"
-            class="input"
-            :disabled="autoPause7dDisabled"
-            data-testid="auto-pause-7d-threshold"
-          />
-          <p class="input-hint">{{ t('admin.accounts.autoPauseThresholdHint') }}</p>
-        </div>
+        <label class="space-y-1 text-sm text-gray-700 dark:text-gray-300">
+          <span>{{ t('admin.accounts.openai.autoPause5hThreshold') }}</span>
+          <input v-model.number="autoPause5hThreshold" data-testid="auto-pause-5h-threshold" type="number" min="0" max="100" class="input" />
+          <span class="flex items-center gap-2 text-xs">
+            <input :checked="autoPause5hDisabled" data-testid="auto-pause-5h-disabled" type="checkbox" @click="autoPause5hDisabled = !autoPause5hDisabled" />
+            {{ t('admin.accounts.openai.autoPauseDisabled') }}
+          </span>
+        </label>
+        <label class="space-y-1 text-sm text-gray-700 dark:text-gray-300">
+          <span>{{ t('admin.accounts.openai.autoPause7dThreshold') }}</span>
+          <input v-model.number="autoPause7dThreshold" data-testid="auto-pause-7d-threshold" type="number" min="0" max="100" class="input" />
+          <span class="flex items-center gap-2 text-xs">
+            <input :checked="autoPause7dDisabled" data-testid="auto-pause-7d-disabled" type="checkbox" @click="autoPause7dDisabled = !autoPause7dDisabled" />
+            {{ t('admin.accounts.openai.autoPauseDisabled') }}
+          </span>
+        </label>
       </div>
 
       <!-- 配额控制 (Anthropic OAuth/SetupToken: 亲和 + 窗口费用 + 会话 + RPM 等) -->
@@ -2413,15 +2377,7 @@ import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
 import { useQuotaNotifyState } from '@/composables/useQuotaNotifyState'
-import type {
-  Account,
-  Proxy,
-  AdminGroup,
-  CheckMixedChannelResponse,
-  OpenAICompactMode,
-  OpenAIResponsesMode,
-  OpenAIEndpointCapability
-} from '@/types'
+import type { Account, Proxy, AdminGroup, CheckMixedChannelResponse, OpenAICompactMode, OpenAIEndpointCapability, OpenAIResponsesMode } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
@@ -2430,6 +2386,7 @@ import ProxySelector from '@/components/common/ProxySelector.vue'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
+import PassthroughFieldRulesEditor from '@/components/account/PassthroughFieldRulesEditor.vue'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
 import {
   applyAntigravityProjectID,
@@ -2455,6 +2412,13 @@ import {
   splitModelMappingObject,
   isValidWildcardPattern
 } from '@/composables/useModelWhitelist'
+import {
+  createPassthroughFieldRuleDraft,
+  normalizePassthroughFieldRule,
+  validatePassthroughFieldRules,
+  type PassthroughFieldRuleDraft
+} from './passthroughFieldRules'
+import { getDefaultBaseUrl, supportsPassthroughFields } from './passthroughFieldSupport'
 
 interface Props {
   show: boolean
@@ -2503,7 +2467,7 @@ interface TempUnschedRuleForm {
 
 // State
 const submitting = ref(false)
-const editBaseUrl = ref('https://api.anthropic.com')
+const editBaseUrl = ref(getDefaultBaseUrl('anthropic'))
 const editApiKey = ref('')
 // Bedrock credentials
 const editBedrockAccessKeyId = ref('')
@@ -2525,51 +2489,13 @@ const modelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
 const allowedModels = ref<string[]>([])
 const DEFAULT_POOL_MODE_RETRY_COUNT = 3
 const MAX_POOL_MODE_RETRY_COUNT = 10
-const DEFAULT_POOL_MODE_RETRY_STATUS_CODES = [401, 403, 429]
 const poolModeEnabled = ref(false)
 const poolModeRetryCount = ref(DEFAULT_POOL_MODE_RETRY_COUNT)
-const poolModeRetryStatusCodesInput = ref('')
-
-function parsePoolModeRetryStatusCodes(input: string): number[] {
-  if (!input || !input.trim()) return []
-  const seen = new Set<number>()
-  const out: number[] = []
-  for (const token of input.split(/[,\s]+/)) {
-    const trimmed = token.trim()
-    if (!trimmed) continue
-    const n = Number(trimmed)
-    if (!Number.isFinite(n) || !Number.isInteger(n)) continue
-    if (n < 100 || n > 599) continue
-    if (seen.has(n)) continue
-    seen.add(n)
-    out.push(n)
-  }
-  return out.sort((a, b) => a - b)
-}
-
-function formatPoolModeRetryStatusCodes(value: unknown): string {
-  if (!Array.isArray(value)) return ''
-  const out: number[] = []
-  const seen = new Set<number>()
-  for (const v of value) {
-    const n = typeof v === 'string' ? Number(v.trim()) : Number(v)
-    if (!Number.isFinite(n) || !Number.isInteger(n)) continue
-    if (n < 100 || n > 599) continue
-    if (seen.has(n)) continue
-    seen.add(n)
-    out.push(n)
-  }
-  return out.sort((a, b) => a - b).join(', ')
-}
 const customErrorCodesEnabled = ref(false)
 const selectedErrorCodes = ref<number[]>([])
 const customErrorCodeInput = ref<number | null>(null)
 const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(false)
-const autoPause5hThreshold = ref<number | null>(null)
-const autoPause7dThreshold = ref<number | null>(null)
-const autoPause5hDisabled = ref(false)
-const autoPause7dDisabled = ref(false)
 const mixedScheduling = ref(false) // For antigravity accounts: enable mixed scheduling
 const allowOverages = ref(false) // For antigravity accounts: enable AI Credits overages
 const antigravityProjectId = ref('')
@@ -2621,17 +2547,26 @@ const customBaseUrl = ref('')
 // OpenAI 自动透传开关（OAuth/API Key）
 const openaiPassthroughEnabled = ref(false)
 const openAICompactMode = ref<OpenAICompactMode>('auto')
+const openAIProbeEnabled = ref<boolean>(true)
+const openAIProbeModel = ref<string>('')
 const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>(['chat_completions', 'embeddings'])
 const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const codexCLIOnlyEnabled = ref(false)
+const codexCLIOnlyAllowClaudeCodeEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
+const autoPause5hThreshold = ref<number | null>(null)
+const autoPause7dThreshold = ref<number | null>(null)
+const autoPause5hDisabled = ref(false)
+const autoPause7dDisabled = ref(false)
 type CodexImageGenerationBridgeMode = 'inherit' | 'enabled' | 'disabled'
 const codexImageGenerationBridgeMode = ref<CodexImageGenerationBridgeMode>('inherit')
 type AnthropicAPIKeyAuthScheme = 'x_api_key' | 'authorization_bearer'
 const anthropicPassthroughEnabled = ref(false)
 const anthropicAPIKeyAuthScheme = ref<AnthropicAPIKeyAuthScheme>('x_api_key')
+const passthroughFieldsEnabled = ref(false)
+const passthroughFieldRules = ref<PassthroughFieldRuleDraft[]>([])
 const webSearchEmulationMode = ref('default')
 const webSearchGlobalEnabled = ref(false)
 const {
@@ -2643,7 +2578,6 @@ const {
   reset: resetQuotaNotify,
 } = useQuotaNotifyState()
 
-// Load global feature states once
 adminAPI.settings.getWebSearchEmulationConfig().then(cfg => {
   webSearchGlobalEnabled.value = cfg?.enabled === true && (cfg?.providers?.length ?? 0) > 0
 }).catch(() => { webSearchGlobalEnabled.value = false })
@@ -2682,6 +2616,10 @@ const openaiResponsesWebSocketV2Mode = computed({
 const openAIWSModeConcurrencyHintKey = computed(() =>
   resolveOpenAIWSModeConcurrencyHintKey(openaiResponsesWebSocketV2Mode.value)
 )
+const isPassthroughFieldSupportedAccount = computed(() => supportsPassthroughFields({
+  platform: props.account?.platform,
+  type: props.account?.type
+}))
 const codexImageGenerationBridgeOptions = computed<Array<{
   value: CodexImageGenerationBridgeMode
   label: string
@@ -2740,13 +2678,6 @@ const openAITextEndpointCapabilityLabel = computed(() => {
   if (openAIResponsesMode.value === 'force_chat_completions') {
     return t('admin.accounts.openai.capabilityChatCompletions')
   }
-  const extra = props.account?.extra as Record<string, unknown> | undefined
-  if (extra?.openai_responses_supported === true) {
-    return t('admin.accounts.openai.capabilityResponsesAuto')
-  }
-  if (extra?.openai_responses_supported === false) {
-    return t('admin.accounts.openai.capabilityChatCompletionsAuto')
-  }
   return t('admin.accounts.openai.capabilityTextAuto')
 })
 const openAIEndpointCapabilityOptions = computed<{ value: OpenAIEndpointCapability; label: string }[]>(() => [
@@ -2756,33 +2687,11 @@ const openAIEndpointCapabilityOptions = computed<{ value: OpenAIEndpointCapabili
 const openAITextGenerationCapabilityEnabled = computed(() =>
   openAIEndpointCapabilities.value.includes('chat_completions')
 )
-
 const normalizeOpenAIEndpointCapabilities = (values: OpenAIEndpointCapability[]) => {
   const allowed: OpenAIEndpointCapability[] = ['chat_completions', 'embeddings']
   const selected = allowed.filter((value) => values.includes(value))
   return selected.length > 0 ? selected : allowed
 }
-
-const readOpenAIEndpointCapabilities = (credentials?: Record<string, unknown>): OpenAIEndpointCapability[] => {
-  const raw = credentials?.openai_capabilities
-  if (Array.isArray(raw)) {
-    return normalizeOpenAIEndpointCapabilities(
-      raw.filter((value): value is OpenAIEndpointCapability =>
-        value === 'chat_completions' || value === 'embeddings'
-      )
-    )
-  }
-  if (raw !== null && typeof raw === 'object') {
-    const capabilityMap = raw as Record<string, unknown>
-    return normalizeOpenAIEndpointCapabilities(
-      openAIEndpointCapabilityOptions.value
-        .map((option) => option.value)
-        .filter((value) => capabilityMap[value] === true)
-    )
-  }
-  return ['chat_completions', 'embeddings']
-}
-
 const toggleOpenAIEndpointCapability = (capability: OpenAIEndpointCapability, event?: Event) => {
   if (openAIEndpointCapabilities.value.includes(capability)) {
     if (openAIEndpointCapabilities.value.length <= 1) {
@@ -2790,20 +2699,14 @@ const toggleOpenAIEndpointCapability = (capability: OpenAIEndpointCapability, ev
       if (input) input.checked = true
       return
     }
-    openAIEndpointCapabilities.value = openAIEndpointCapabilities.value.filter(
-      (value) => value !== capability
-    )
+    openAIEndpointCapabilities.value = openAIEndpointCapabilities.value.filter((value) => value !== capability)
     if (!openAITextGenerationCapabilityEnabled.value) {
       openAIResponsesMode.value = 'auto'
     }
     return
   }
-  openAIEndpointCapabilities.value = normalizeOpenAIEndpointCapabilities([
-    ...openAIEndpointCapabilities.value,
-    capability
-  ])
+  openAIEndpointCapabilities.value = normalizeOpenAIEndpointCapabilities([...openAIEndpointCapabilities.value, capability])
 }
-
 const applyOpenAIEndpointCapabilities = (credentials: Record<string, unknown>) => {
   const capabilities = normalizeOpenAIEndpointCapabilities(openAIEndpointCapabilities.value)
   if (capabilities.length === 2) {
@@ -2884,11 +2787,7 @@ const tempUnschedPresets = computed(() => [
 ])
 
 // Computed: default base URL based on platform
-const defaultBaseUrl = computed(() => {
-  if (props.account?.platform === 'openai') return 'https://api.openai.com'
-  if (props.account?.platform === 'gemini') return 'https://generativelanguage.googleapis.com'
-  return 'https://api.anthropic.com'
-})
+const defaultBaseUrl = computed(() => getDefaultBaseUrl(props.account?.platform))
 
 const mixedChannelWarningMessageText = computed(() => {
   if (mixedChannelWarningDetails.value) {
@@ -3017,17 +2916,21 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   // Load mixed scheduling setting (only for antigravity accounts)
   mixedScheduling.value = false
   allowOverages.value = false
-	const extra = newAccount.extra as Record<string, unknown> | undefined
-	mixedScheduling.value = extra?.mixed_scheduling === true
-	allowOverages.value = extra?.allow_overages === true
-	autoPause5hThreshold.value = typeof extra?.auto_pause_5h_threshold === 'number' ? extra.auto_pause_5h_threshold * 100 : null
-	autoPause7dThreshold.value = typeof extra?.auto_pause_7d_threshold === 'number' ? extra.auto_pause_7d_threshold * 100 : null
-	autoPause5hDisabled.value = extra?.auto_pause_5h_disabled === true
-	autoPause7dDisabled.value = extra?.auto_pause_7d_disabled === true
+  const extra = newAccount.extra as Record<string, unknown> | undefined
+  mixedScheduling.value = extra?.mixed_scheduling === true
+  allowOverages.value = extra?.allow_overages === true
+  passthroughFieldsEnabled.value = extra?.passthrough_fields_enabled === true
+  passthroughFieldRules.value = toDraftRules(extra?.passthrough_field_rules)
+  autoPause5hThreshold.value = typeof extra?.auto_pause_5h_threshold === 'number' ? extra.auto_pause_5h_threshold * 100 : null
+  autoPause7dThreshold.value = typeof extra?.auto_pause_7d_threshold === 'number' ? extra.auto_pause_7d_threshold * 100 : null
+  autoPause5hDisabled.value = extra?.auto_pause_5h_disabled === true
+  autoPause7dDisabled.value = extra?.auto_pause_7d_disabled === true
 
   // Load OpenAI passthrough toggle (OpenAI OAuth/SetupToken/API Key)
   openaiPassthroughEnabled.value = false
   openAICompactMode.value = 'auto'
+  openAIProbeEnabled.value = true
+  openAIProbeModel.value = ''
   openAIResponsesMode.value = 'auto'
   openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
   openAICompactModelMappings.value = []
@@ -3042,14 +2945,15 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   if (newAccount.platform === 'openai' && (newAccount.type === 'oauth' || newAccount.type === 'setup-token' || newAccount.type === 'apikey')) {
     openaiPassthroughEnabled.value = extra?.openai_passthrough === true || extra?.openai_oauth_passthrough === true
     openAICompactMode.value = (extra?.openai_compact_mode as OpenAICompactMode) || 'auto'
+    openAIProbeEnabled.value = extra?.openai_probe_enabled !== false
+    openAIProbeModel.value = typeof extra?.openai_probe_model === 'string' ? extra.openai_probe_model : ''
     if (newAccount.type === 'apikey') {
       openAIResponsesMode.value = normalizeOpenAIResponsesMode(extra?.openai_responses_mode)
-      openAIEndpointCapabilities.value = readOpenAIEndpointCapabilities(
-        newAccount.credentials as Record<string, unknown> | undefined
+      openAIEndpointCapabilities.value = normalizeOpenAIEndpointCapabilities(
+        Array.isArray(credentials?.openai_capabilities)
+          ? credentials.openai_capabilities as OpenAIEndpointCapability[]
+          : ['chat_completions', 'embeddings']
       )
-      if (!openAITextGenerationCapabilityEnabled.value) {
-        openAIResponsesMode.value = 'auto'
-      }
     }
     const codexImageGenerationBridgeValue = typeof extra?.codex_image_generation_bridge === 'boolean'
       ? extra.codex_image_generation_bridge
@@ -3076,7 +2980,6 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       codexCLIOnlyAppServerEnabled.value =
         extra?.codex_cli_only_allow_app_server === true
     }
-    const credentials = newAccount.credentials as Record<string, unknown> | undefined
     const compactMappings = credentials?.compact_model_mapping as Record<string, string> | undefined
     if (compactMappings && typeof compactMappings === 'object') {
       openAICompactModelMappings.value = Object.entries(compactMappings).map(([from, to]) => ({ from, to }))
@@ -3168,12 +3071,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   // Initialize API Key fields for apikey type
   if (newAccount.type === 'apikey' && newAccount.credentials) {
     const credentials = newAccount.credentials as Record<string, unknown>
-    const platformDefaultUrl =
-      newAccount.platform === 'openai'
-        ? 'https://api.openai.com'
-        : newAccount.platform === 'gemini'
-          ? 'https://generativelanguage.googleapis.com'
-          : 'https://api.anthropic.com'
+    const platformDefaultUrl = getDefaultBaseUrl(newAccount.platform)
     editBaseUrl.value = (credentials.base_url as string) || platformDefaultUrl
 
     // Load model mappings and detect mode
@@ -3184,7 +3082,6 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     poolModeRetryCount.value = normalizePoolModeRetryCount(
       Number(credentials.pool_mode_retry_count ?? DEFAULT_POOL_MODE_RETRY_COUNT)
     )
-    poolModeRetryStatusCodesInput.value = formatPoolModeRetryStatusCodes(credentials.pool_mode_retry_status_codes)
 
     // Load custom error codes
     customErrorCodesEnabled.value = credentials.custom_error_codes_enabled === true
@@ -3212,7 +3109,6 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     poolModeEnabled.value = bedrockCreds.pool_mode === true
     const retryCount = bedrockCreds.pool_mode_retry_count
     poolModeRetryCount.value = (typeof retryCount === 'number' && retryCount >= 0) ? retryCount : DEFAULT_POOL_MODE_RETRY_COUNT
-    poolModeRetryStatusCodesInput.value = formatPoolModeRetryStatusCodes(bedrockCreds.pool_mode_retry_status_codes)
 
     // Load quota limits for bedrock
     const bedrockExtra = (newAccount.extra as Record<string, unknown>) || {}
@@ -3222,11 +3118,10 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     // Load quota notify for bedrock
     loadQuotaNotifyFromExtra(bedrockExtra)
 
-    // Load model mappings for bedrock
     loadModelRestrictionFromMapping(bedrockCreds.model_mapping as Record<string, unknown> | undefined)
   } else if (newAccount.type === 'upstream' && newAccount.credentials) {
     const credentials = newAccount.credentials as Record<string, unknown>
-    editBaseUrl.value = (credentials.base_url as string) || ''
+    editBaseUrl.value = (credentials.base_url as string) || getDefaultBaseUrl(newAccount.platform)
   } else if ((newAccount.platform === 'gemini' || newAccount.platform === 'anthropic') && newAccount.type === 'service_account' && newAccount.credentials) {
     const credentials = newAccount.credentials as Record<string, unknown>
     editVertexProjectId.value = (credentials.project_id as string) || ''
@@ -3236,12 +3131,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     // Load model mappings for service_account
     loadModelRestrictionFromMapping(credentials.model_mapping as Record<string, unknown> | undefined)
   } else {
-    const platformDefaultUrl =
-      newAccount.platform === 'openai'
-        ? 'https://api.openai.com'
-        : newAccount.platform === 'gemini'
-          ? 'https://generativelanguage.googleapis.com'
-          : 'https://api.anthropic.com'
+    const platformDefaultUrl = getDefaultBaseUrl(newAccount.platform)
     editBaseUrl.value = platformDefaultUrl
 
     // Load model mappings for OpenAI OAuth accounts
@@ -3255,7 +3145,6 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     }
     poolModeEnabled.value = false
     poolModeRetryCount.value = DEFAULT_POOL_MODE_RETRY_COUNT
-    poolModeRetryStatusCodesInput.value = ''
     customErrorCodesEnabled.value = false
     selectedErrorCodes.value = []
   }
@@ -3278,6 +3167,14 @@ watch(
       return
     }
     if (!wasShow || newAccount !== previousAccount) {
+      if (
+        previousAccount &&
+        supportsPassthroughFieldExtra(previousAccount) &&
+        !supportsPassthroughFieldExtra(newAccount) &&
+        hasPassthroughFieldExtra(previousAccount.extra as Record<string, unknown> | undefined)
+      ) {
+        appStore.showInfo(PASSTHROUGH_FIELDS_REMOVAL_MESSAGE)
+      }
       syncFormFromAccount(newAccount)
       loadTLSProfiles()
     }
@@ -3700,6 +3597,357 @@ const ensureAntigravityMixedChannelConfirmed = async (onConfirm: () => Promise<v
 
 const formatDateTimeLocal = formatDateTimeLocalInput
 const parseDateTimeLocal = parseDateTimeLocalInput
+const PASSTHROUGH_FIELDS_REMOVAL_MESSAGE = '保存后将移除透传字段规则配置'
+
+function toDraftRules(value: unknown): PassthroughFieldRuleDraft[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.map((entry) => {
+    const rule = entry as Record<string, unknown>
+    const draft = createPassthroughFieldRuleDraft()
+
+    return {
+      ...draft,
+      target: rule.target === 'body' ? 'body' : 'header',
+      mode: rule.mode === 'inject'
+        ? 'inject'
+        : rule.mode === 'map'
+          ? 'map'
+          : rule.mode === 'delete'
+            ? 'delete'
+            : 'forward',
+      key: typeof rule.key === 'string' ? rule.key : '',
+      source_key: typeof rule.source_key === 'string' ? rule.source_key : '',
+      value: typeof rule.value === 'string' ? rule.value : ''
+    }
+  })
+}
+
+function hasPassthroughFieldExtra(extra?: Record<string, unknown>) {
+  return extra?.passthrough_fields_enabled === true ||
+    (Array.isArray(extra?.passthrough_field_rules) && extra.passthrough_field_rules.length > 0)
+}
+
+function supportsPassthroughFieldExtra(account?: Pick<Account, 'type' | 'platform'> | null) {
+  return supportsPassthroughFields(account || {})
+}
+
+function applyPassthroughFieldExtra(extra: Record<string, unknown>, _accountType: Account['type']) {
+  if (!isPassthroughFieldSupportedAccount.value) {
+    delete extra.passthrough_fields_enabled
+    delete extra.passthrough_field_rules
+    return
+  }
+
+  if (!passthroughFieldsEnabled.value) {
+    delete extra.passthrough_fields_enabled
+    delete extra.passthrough_field_rules
+    return
+  }
+
+  const normalizedRules = passthroughFieldRules.value
+    .map((rule) => normalizePassthroughFieldRule(rule))
+    .filter((rule) => rule.key)
+
+  if (normalizedRules.length === 0) {
+    delete extra.passthrough_fields_enabled
+    delete extra.passthrough_field_rules
+    return
+  }
+
+  extra.passthrough_fields_enabled = passthroughFieldsEnabled.value
+  extra.passthrough_field_rules = normalizedRules.map(({ target, mode, key, source_key, value }) => ({
+    target,
+    mode,
+    key: key.trim(),
+    ...(mode === 'map' ? { source_key } : {}),
+    ...(mode === 'inject' ? { value } : {})
+  }))
+}
+
+function applyAntigravityExtra(extra: Record<string, unknown>) {
+  if (props.account?.platform !== 'antigravity') {
+    return
+  }
+
+  if (mixedScheduling.value) {
+    extra.mixed_scheduling = true
+  } else {
+    delete extra.mixed_scheduling
+  }
+
+  if (allowOverages.value) {
+    extra.allow_overages = true
+  } else {
+    delete extra.allow_overages
+  }
+}
+
+function applyQuotaControlExtra(extra: Record<string, unknown>) {
+  if (props.account?.platform !== 'anthropic' || (props.account.type !== 'oauth' && props.account.type !== 'setup-token')) {
+    return
+  }
+
+  if (windowCostEnabled.value && windowCostLimit.value != null && windowCostLimit.value > 0) {
+    extra.window_cost_limit = windowCostLimit.value
+    extra.window_cost_sticky_reserve = windowCostStickyReserve.value ?? 10
+  } else {
+    delete extra.window_cost_limit
+    delete extra.window_cost_sticky_reserve
+  }
+
+  if (sessionLimitEnabled.value && maxSessions.value != null && maxSessions.value > 0) {
+    extra.max_sessions = maxSessions.value
+    extra.session_idle_timeout_minutes = sessionIdleTimeout.value ?? 5
+  } else {
+    delete extra.max_sessions
+    delete extra.session_idle_timeout_minutes
+  }
+
+  if (rpmLimitEnabled.value) {
+    const DEFAULT_BASE_RPM = 15
+    extra.base_rpm = (baseRpm.value != null && baseRpm.value > 0)
+      ? baseRpm.value
+      : DEFAULT_BASE_RPM
+    extra.rpm_strategy = rpmStrategy.value
+    if (rpmStickyBuffer.value != null && rpmStickyBuffer.value > 0) {
+      extra.rpm_sticky_buffer = rpmStickyBuffer.value
+    } else {
+      delete extra.rpm_sticky_buffer
+    }
+  } else {
+    delete extra.base_rpm
+    delete extra.rpm_strategy
+    delete extra.rpm_sticky_buffer
+  }
+
+  if (userMsgQueueMode.value) {
+    extra.user_msg_queue_mode = userMsgQueueMode.value
+  } else {
+    delete extra.user_msg_queue_mode
+  }
+  delete extra.user_msg_queue_enabled
+
+  if (tlsFingerprintEnabled.value) {
+    extra.enable_tls_fingerprint = true
+    if (tlsFingerprintProfileId.value) {
+      extra.tls_fingerprint_profile_id = tlsFingerprintProfileId.value
+    } else {
+      delete extra.tls_fingerprint_profile_id
+    }
+  } else {
+    delete extra.enable_tls_fingerprint
+    delete extra.tls_fingerprint_profile_id
+  }
+
+  if (sessionIdMaskingEnabled.value) {
+    extra.session_id_masking_enabled = true
+  } else {
+    delete extra.session_id_masking_enabled
+  }
+
+  if (cacheTTLOverrideEnabled.value) {
+    extra.cache_ttl_override_enabled = true
+    extra.cache_ttl_override_target = cacheTTLOverrideTarget.value
+  } else {
+    delete extra.cache_ttl_override_enabled
+    delete extra.cache_ttl_override_target
+  }
+
+  // Custom base URL relay setting
+  if (customBaseUrlEnabled.value && customBaseUrl.value.trim()) {
+    extra.custom_base_url_enabled = true
+    extra.custom_base_url = customBaseUrl.value.trim()
+  } else {
+    delete extra.custom_base_url_enabled
+    delete extra.custom_base_url
+  }
+}
+
+function applyAnthropicPassthroughExtra(extra: Record<string, unknown>) {
+  if (props.account?.platform !== 'anthropic' || props.account.type !== 'apikey') {
+    return
+  }
+
+  if (anthropicPassthroughEnabled.value) {
+    extra.anthropic_passthrough = true
+  } else {
+    delete extra.anthropic_passthrough
+  }
+
+  if (anthropicAPIKeyAuthScheme.value === 'authorization_bearer') {
+    extra.anthropic_apikey_auth_scheme = 'authorization_bearer'
+  } else {
+    delete extra.anthropic_apikey_auth_scheme
+  }
+
+  if (webSearchEmulationMode.value === 'default') {
+    delete extra.web_search_emulation
+  } else {
+    extra.web_search_emulation = webSearchEmulationMode.value
+  }
+}
+
+function applyOpenAIExtra(extra: Record<string, unknown>) {
+  if (props.account?.platform !== 'openai' || (props.account.type !== 'oauth' && props.account.type !== 'setup-token' && props.account.type !== 'apikey')) {
+    return
+  }
+
+  const hadCodexCLIOnlyEnabled = (props.account.extra as Record<string, unknown> | undefined)?.codex_cli_only === true
+
+  if (props.account.type === 'oauth' || props.account.type === 'setup-token') {
+    if (openaiOAuthResponsesWebSocketV2Mode.value === OPENAI_WS_MODE_OFF) {
+      delete extra.openai_oauth_responses_websockets_v2_mode
+      delete extra.openai_oauth_responses_websockets_v2_enabled
+    } else {
+      extra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
+      extra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)
+    }
+  } else {
+    if (openaiAPIKeyResponsesWebSocketV2Mode.value === OPENAI_WS_MODE_OFF) {
+      delete extra.openai_apikey_responses_websockets_v2_mode
+      delete extra.openai_apikey_responses_websockets_v2_enabled
+    } else {
+      extra.openai_apikey_responses_websockets_v2_mode = openaiAPIKeyResponsesWebSocketV2Mode.value
+      extra.openai_apikey_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiAPIKeyResponsesWebSocketV2Mode.value)
+    }
+  }
+
+  delete extra.responses_websockets_v2_enabled
+  delete extra.openai_ws_enabled
+
+  if (openaiPassthroughEnabled.value) {
+    extra.openai_passthrough = true
+  } else {
+    delete extra.openai_passthrough
+    delete extra.openai_oauth_passthrough
+  }
+
+  if (openAICompactMode.value === 'auto') {
+    delete extra.openai_compact_mode
+  } else {
+    extra.openai_compact_mode = openAICompactMode.value
+  }
+
+  if (props.account.type === 'apikey') {
+    if (openAIResponsesMode.value === 'auto' || !openAITextGenerationCapabilityEnabled.value) {
+      delete extra.openai_responses_mode
+    } else {
+      extra.openai_responses_mode = openAIResponsesMode.value
+    }
+  }
+
+  if (openAIProbeEnabled.value === false) {
+    extra.openai_probe_enabled = false
+  } else {
+    delete extra.openai_probe_enabled
+  }
+  const probeModel = openAIProbeModel.value.trim()
+  if (probeModel !== '') {
+    extra.openai_probe_model = probeModel
+  } else {
+    delete extra.openai_probe_model
+  }
+
+  if (autoPause5hThreshold.value != null && autoPause5hThreshold.value > 0) {
+    extra.auto_pause_5h_threshold = autoPause5hThreshold.value / 100
+  } else {
+    delete extra.auto_pause_5h_threshold
+  }
+  if (autoPause7dThreshold.value != null && autoPause7dThreshold.value > 0) {
+    extra.auto_pause_7d_threshold = autoPause7dThreshold.value / 100
+  } else {
+    delete extra.auto_pause_7d_threshold
+  }
+  if (autoPause5hDisabled.value) {
+    extra.auto_pause_5h_disabled = true
+  } else {
+    delete extra.auto_pause_5h_disabled
+  }
+  if (autoPause7dDisabled.value) {
+    extra.auto_pause_7d_disabled = true
+  } else {
+    delete extra.auto_pause_7d_disabled
+  }
+
+  delete extra.codex_image_generation_bridge_enabled
+  if (codexImageGenerationBridgeMode.value === 'inherit') {
+    delete extra.codex_image_generation_bridge
+  } else {
+    extra.codex_image_generation_bridge = codexImageGenerationBridgeMode.value === 'enabled'
+  }
+
+  if (props.account.type === 'oauth' || props.account.type === 'setup-token') {
+    if (codexCLIOnlyEnabled.value) {
+      extra.codex_cli_only = true
+    } else if (hadCodexCLIOnlyEnabled) {
+      extra.codex_cli_only = false
+    } else {
+      delete extra.codex_cli_only
+    }
+    if (codexCLIOnlyEnabled.value && codexCLIOnlyAllowClaudeCodeEnabled.value) {
+      extra.codex_cli_only_allowed_clients = ['claude_code']
+    } else {
+      delete extra.codex_cli_only_allowed_clients
+    }
+    if (codexCLIOnlyEnabled.value && codexCLIOnlyAppServerEnabled.value) {
+      extra.codex_cli_only_allow_app_server = true
+    } else {
+      delete extra.codex_cli_only_allow_app_server
+    }
+  }
+}
+
+function applyQuotaLimitExtra(extra: Record<string, unknown>) {
+  if (props.account?.type !== 'apikey' && props.account?.type !== 'bedrock') {
+    return
+  }
+
+  if (editQuotaLimit.value != null && editQuotaLimit.value > 0) {
+    extra.quota_limit = editQuotaLimit.value
+  } else {
+    delete extra.quota_limit
+  }
+  if (editQuotaDailyLimit.value != null && editQuotaDailyLimit.value > 0) {
+    extra.quota_daily_limit = editQuotaDailyLimit.value
+  } else {
+    delete extra.quota_daily_limit
+    delete extra.quota_daily_used
+    delete extra.quota_daily_start
+  }
+  if (editQuotaWeeklyLimit.value != null && editQuotaWeeklyLimit.value > 0) {
+    extra.quota_weekly_limit = editQuotaWeeklyLimit.value
+  } else {
+    delete extra.quota_weekly_limit
+    delete extra.quota_weekly_used
+    delete extra.quota_weekly_start
+  }
+  if (editDailyResetMode.value === 'fixed') {
+    extra.quota_daily_reset_mode = 'fixed'
+    extra.quota_daily_reset_hour = editDailyResetHour.value ?? 0
+  } else {
+    delete extra.quota_daily_reset_mode
+    delete extra.quota_daily_reset_hour
+  }
+  if (editWeeklyResetMode.value === 'fixed') {
+    extra.quota_weekly_reset_mode = 'fixed'
+    extra.quota_weekly_reset_day = editWeeklyResetDay.value ?? 1
+    extra.quota_weekly_reset_hour = editWeeklyResetHour.value ?? 0
+  } else {
+    delete extra.quota_weekly_reset_mode
+    delete extra.quota_weekly_reset_day
+    delete extra.quota_weekly_reset_hour
+  }
+  if (editDailyResetMode.value === 'fixed' || editWeeklyResetMode.value === 'fixed') {
+    extra.quota_reset_timezone = editResetTimezone.value || 'UTC'
+  } else {
+    delete extra.quota_reset_timezone
+  }
+
+  writeQuotaNotifyToExtra(extra, 'update')
+}
 
 // Methods
 const handleClose = () => {
@@ -3739,6 +3987,17 @@ const handleSubmit = async () => {
   if (form.status !== 'active' && form.status !== 'inactive' && form.status !== 'error') {
     appStore.showError(t('admin.accounts.pleaseSelectStatus'))
     return
+  }
+
+  if (isPassthroughFieldSupportedAccount.value) {
+    const hasPassthroughInput = passthroughFieldsEnabled.value || passthroughFieldRules.value.some((rule) => {
+      const normalizedRule = normalizePassthroughFieldRule(rule)
+      return Boolean(normalizedRule.key || normalizedRule.source_key || normalizedRule.value.trim())
+    })
+
+    if (hasPassthroughInput && !validatePassthroughFieldRules(passthroughFieldRules.value).ok) {
+      return
+    }
   }
 
   const updatePayload: Record<string, unknown> = { ...form }
@@ -3808,16 +4067,9 @@ const handleSubmit = async () => {
       if (poolModeEnabled.value) {
         newCredentials.pool_mode = true
         newCredentials.pool_mode_retry_count = normalizePoolModeRetryCount(poolModeRetryCount.value)
-        const parsedRetryStatusCodes = parsePoolModeRetryStatusCodes(poolModeRetryStatusCodesInput.value)
-        if (parsedRetryStatusCodes.length > 0) {
-          newCredentials.pool_mode_retry_status_codes = parsedRetryStatusCodes
-        } else {
-          delete newCredentials.pool_mode_retry_status_codes
-        }
       } else {
         delete newCredentials.pool_mode
         delete newCredentials.pool_mode_retry_count
-        delete newCredentials.pool_mode_retry_status_codes
       }
 
       // Add custom error codes if enabled
@@ -3840,7 +4092,7 @@ const handleSubmit = async () => {
       const currentCredentials = (props.account.credentials as Record<string, unknown>) || {}
       const newCredentials: Record<string, unknown> = { ...currentCredentials }
 
-      newCredentials.base_url = editBaseUrl.value.trim()
+      newCredentials.base_url = editBaseUrl.value.trim() || defaultBaseUrl.value
 
       if (editApiKey.value.trim()) {
         newCredentials.api_key = editApiKey.value.trim()
@@ -3933,16 +4185,9 @@ const handleSubmit = async () => {
       if (poolModeEnabled.value) {
         newCredentials.pool_mode = true
         newCredentials.pool_mode_retry_count = normalizePoolModeRetryCount(poolModeRetryCount.value)
-        const parsedRetryStatusCodes = parsePoolModeRetryStatusCodes(poolModeRetryStatusCodesInput.value)
-        if (parsedRetryStatusCodes.length > 0) {
-          newCredentials.pool_mode_retry_status_codes = parsedRetryStatusCodes
-        } else {
-          delete newCredentials.pool_mode_retry_status_codes
-        }
       } else {
         delete newCredentials.pool_mode
         delete newCredentials.pool_mode_retry_count
-        delete newCredentials.pool_mode_retry_status_codes
       }
 
       // Model mapping
@@ -4011,268 +4256,22 @@ const handleSubmit = async () => {
       updatePayload.credentials = newCredentials
     }
 
-    // For antigravity accounts, handle mixed_scheduling and allow_overages in extra
-    if (props.account.platform === 'antigravity') {
-      const currentExtra = (props.account.extra as Record<string, unknown>) || {}
-      const newExtra: Record<string, unknown> = { ...currentExtra }
-      if (mixedScheduling.value) {
-        newExtra.mixed_scheduling = true
-      } else {
-        delete newExtra.mixed_scheduling
-      }
-      if (allowOverages.value) {
-        newExtra.allow_overages = true
-      } else {
-        delete newExtra.allow_overages
-      }
-      updatePayload.extra = newExtra
+    const currentExtra = ((props.account.extra as Record<string, unknown>) || {})
+    const nextExtra: Record<string, unknown> = {
+      ...currentExtra
     }
-
-    // For Anthropic OAuth/SetupToken accounts, handle quota control settings in extra
-    if (props.account.platform === 'anthropic' && (props.account.type === 'oauth' || props.account.type === 'setup-token')) {
-      const currentExtra = (updatePayload.extra as Record<string, unknown>) || (props.account.extra as Record<string, unknown>) || {}
-      const newExtra: Record<string, unknown> = { ...currentExtra }
-
-      // Window cost limit settings
-      if (windowCostEnabled.value && windowCostLimit.value != null && windowCostLimit.value > 0) {
-        newExtra.window_cost_limit = windowCostLimit.value
-        newExtra.window_cost_sticky_reserve = windowCostStickyReserve.value ?? 10
-      } else {
-        delete newExtra.window_cost_limit
-        delete newExtra.window_cost_sticky_reserve
-      }
-
-      // Session limit settings
-      if (sessionLimitEnabled.value && maxSessions.value != null && maxSessions.value > 0) {
-        newExtra.max_sessions = maxSessions.value
-        newExtra.session_idle_timeout_minutes = sessionIdleTimeout.value ?? 5
-      } else {
-        delete newExtra.max_sessions
-        delete newExtra.session_idle_timeout_minutes
-      }
-
-      // RPM limit settings
-      if (rpmLimitEnabled.value) {
-        const DEFAULT_BASE_RPM = 15
-        newExtra.base_rpm = (baseRpm.value != null && baseRpm.value > 0)
-          ? baseRpm.value
-          : DEFAULT_BASE_RPM
-        newExtra.rpm_strategy = rpmStrategy.value
-        if (rpmStickyBuffer.value != null && rpmStickyBuffer.value > 0) {
-          newExtra.rpm_sticky_buffer = rpmStickyBuffer.value
-        } else {
-          delete newExtra.rpm_sticky_buffer
-        }
-      } else {
-        delete newExtra.base_rpm
-        delete newExtra.rpm_strategy
-        delete newExtra.rpm_sticky_buffer
-      }
-
-      // UMQ mode（独立于 RPM 保存）
-      if (userMsgQueueMode.value) {
-        newExtra.user_msg_queue_mode = userMsgQueueMode.value
-      } else {
-        delete newExtra.user_msg_queue_mode
-      }
-      delete newExtra.user_msg_queue_enabled  // 清理旧字段
-
-      // TLS fingerprint setting
-      if (tlsFingerprintEnabled.value) {
-        newExtra.enable_tls_fingerprint = true
-        if (tlsFingerprintProfileId.value) {
-          newExtra.tls_fingerprint_profile_id = tlsFingerprintProfileId.value
-        } else {
-          delete newExtra.tls_fingerprint_profile_id
-        }
-      } else {
-        delete newExtra.enable_tls_fingerprint
-        delete newExtra.tls_fingerprint_profile_id
-      }
-
-      // Session ID masking setting
-      if (sessionIdMaskingEnabled.value) {
-        newExtra.session_id_masking_enabled = true
-      } else {
-        delete newExtra.session_id_masking_enabled
-      }
-
-      // Cache TTL override setting
-      if (cacheTTLOverrideEnabled.value) {
-        newExtra.cache_ttl_override_enabled = true
-        newExtra.cache_ttl_override_target = cacheTTLOverrideTarget.value
-      } else {
-        delete newExtra.cache_ttl_override_enabled
-        delete newExtra.cache_ttl_override_target
-      }
-
-      // Custom base URL relay setting
-      if (customBaseUrlEnabled.value && customBaseUrl.value.trim()) {
-        newExtra.custom_base_url_enabled = true
-        newExtra.custom_base_url = customBaseUrl.value.trim()
-      } else {
-        delete newExtra.custom_base_url_enabled
-        delete newExtra.custom_base_url
-      }
-
-      updatePayload.extra = newExtra
-    }
-
-    // For Anthropic API Key accounts, handle passthrough mode + web search emulation in extra
-    if (props.account.platform === 'anthropic' && props.account.type === 'apikey') {
-      const currentExtra = (updatePayload.extra as Record<string, unknown>) || (props.account.extra as Record<string, unknown>) || {}
-      const newExtra: Record<string, unknown> = { ...currentExtra }
-      if (anthropicPassthroughEnabled.value) {
-        newExtra.anthropic_passthrough = true
-      } else {
-        delete newExtra.anthropic_passthrough
-      }
-      if (anthropicAPIKeyAuthScheme.value === 'authorization_bearer') {
-        newExtra.anthropic_apikey_auth_scheme = 'authorization_bearer'
-      } else {
-        delete newExtra.anthropic_apikey_auth_scheme
-      }
-      if (webSearchEmulationMode.value === 'default') {
-        delete newExtra.web_search_emulation
-      } else {
-        newExtra.web_search_emulation = webSearchEmulationMode.value
-      }
-      updatePayload.extra = newExtra
-    }
-
-    // For OpenAI OAuth/SetupToken/API Key accounts, handle passthrough mode in extra
-    if (props.account.platform === 'openai' && (props.account.type === 'oauth' || props.account.type === 'setup-token' || props.account.type === 'apikey')) {
-      const currentExtra = (props.account.extra as Record<string, unknown>) || {}
-      const newExtra: Record<string, unknown> = { ...currentExtra }
-      const hadCodexCLIOnlyEnabled = currentExtra.codex_cli_only === true
-      if (props.account.type === 'oauth' || props.account.type === 'setup-token') {
-        newExtra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
-        newExtra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)
-      } else if (props.account.type === 'apikey') {
-        newExtra.openai_apikey_responses_websockets_v2_mode = openaiAPIKeyResponsesWebSocketV2Mode.value
-        newExtra.openai_apikey_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiAPIKeyResponsesWebSocketV2Mode.value)
-      }
-      delete newExtra.responses_websockets_v2_enabled
-      delete newExtra.openai_ws_enabled
-      if (openaiPassthroughEnabled.value) {
-        newExtra.openai_passthrough = true
-      } else {
-        delete newExtra.openai_passthrough
-        delete newExtra.openai_oauth_passthrough
-      }
-      if (openAICompactMode.value === 'auto') {
-        delete newExtra.openai_compact_mode
-      } else {
-        newExtra.openai_compact_mode = openAICompactMode.value
-      }
-		if (props.account.type === 'apikey') {
-        if (!openAITextGenerationCapabilityEnabled.value || openAIResponsesMode.value === 'auto') {
-          delete newExtra.openai_responses_mode
-        } else {
-          newExtra.openai_responses_mode = openAIResponsesMode.value
-        }
-		}
-		if (autoPause5hThreshold.value != null && autoPause5hThreshold.value > 0) {
-			newExtra.auto_pause_5h_threshold = autoPause5hThreshold.value / 100
-		} else {
-			delete newExtra.auto_pause_5h_threshold
-		}
-		if (autoPause7dThreshold.value != null && autoPause7dThreshold.value > 0) {
-			newExtra.auto_pause_7d_threshold = autoPause7dThreshold.value / 100
-		} else {
-			delete newExtra.auto_pause_7d_threshold
-		}
-		if (autoPause5hDisabled.value) {
-			newExtra.auto_pause_5h_disabled = true
-		} else {
-			delete newExtra.auto_pause_5h_disabled
-		}
-		if (autoPause7dDisabled.value) {
-			newExtra.auto_pause_7d_disabled = true
-		} else {
-			delete newExtra.auto_pause_7d_disabled
-		}
-
-		delete newExtra.codex_image_generation_bridge_enabled
-      if (codexImageGenerationBridgeMode.value === 'inherit') {
-        delete newExtra.codex_image_generation_bridge
-      } else {
-        newExtra.codex_image_generation_bridge = codexImageGenerationBridgeMode.value === 'enabled'
-      }
-
-      if (props.account.type === 'oauth' || props.account.type === 'setup-token') {
-        if (codexCLIOnlyEnabled.value) {
-          newExtra.codex_cli_only = true
-        } else if (hadCodexCLIOnlyEnabled) {
-          // 关闭时显式写 false，避免 extra 为空被后端忽略导致旧值无法清除
-          newExtra.codex_cli_only = false
-        } else {
-          delete newExtra.codex_cli_only
-        }
-        // Claude Code 插件放行已迁移到全局 codex_cli_only_whitelist，编辑时清理废弃账号级快捷字段。
-        delete newExtra.codex_cli_only_allowed_clients
-        if (codexCLIOnlyEnabled.value && codexCLIOnlyAppServerEnabled.value) {
-          newExtra.codex_cli_only_allow_app_server = true
-        } else {
-          delete newExtra.codex_cli_only_allow_app_server
-        }
-      }
-
-      updatePayload.extra = newExtra
-    }
-
-    // For apikey/bedrock accounts, handle quota_limit in extra
-    if (props.account.type === 'apikey' || props.account.type === 'bedrock') {
-      const currentExtra = (updatePayload.extra as Record<string, unknown>) ||
-        (props.account.extra as Record<string, unknown>) || {}
-      const newExtra: Record<string, unknown> = { ...currentExtra }
-      // Total quota
-      if (editQuotaLimit.value != null && editQuotaLimit.value > 0) {
-        newExtra.quota_limit = editQuotaLimit.value
-      } else {
-        delete newExtra.quota_limit
-      }
-      // Daily quota
-      if (editQuotaDailyLimit.value != null && editQuotaDailyLimit.value > 0) {
-        newExtra.quota_daily_limit = editQuotaDailyLimit.value
-      } else {
-        delete newExtra.quota_daily_limit
-        delete newExtra.quota_daily_used
-        delete newExtra.quota_daily_start
-      }
-      // Weekly quota
-      if (editQuotaWeeklyLimit.value != null && editQuotaWeeklyLimit.value > 0) {
-        newExtra.quota_weekly_limit = editQuotaWeeklyLimit.value
-      } else {
-        delete newExtra.quota_weekly_limit
-        delete newExtra.quota_weekly_used
-        delete newExtra.quota_weekly_start
-      }
-      // Quota reset mode config
-      if (editDailyResetMode.value === 'fixed') {
-        newExtra.quota_daily_reset_mode = 'fixed'
-        newExtra.quota_daily_reset_hour = editDailyResetHour.value ?? 0
-      } else {
-        delete newExtra.quota_daily_reset_mode
-        delete newExtra.quota_daily_reset_hour
-      }
-      if (editWeeklyResetMode.value === 'fixed') {
-        newExtra.quota_weekly_reset_mode = 'fixed'
-        newExtra.quota_weekly_reset_day = editWeeklyResetDay.value ?? 1
-        newExtra.quota_weekly_reset_hour = editWeeklyResetHour.value ?? 0
-      } else {
-        delete newExtra.quota_weekly_reset_mode
-        delete newExtra.quota_weekly_reset_day
-        delete newExtra.quota_weekly_reset_hour
-      }
-      if (editDailyResetMode.value === 'fixed' || editWeeklyResetMode.value === 'fixed') {
-        newExtra.quota_reset_timezone = editResetTimezone.value || 'UTC'
-      } else {
-        delete newExtra.quota_reset_timezone
-      }
-      // Quota notify config
-      writeQuotaNotifyToExtra(newExtra, 'update')
-      updatePayload.extra = newExtra
+    applyAntigravityExtra(nextExtra)
+    applyQuotaControlExtra(nextExtra)
+    applyAnthropicPassthroughExtra(nextExtra)
+    applyOpenAIExtra(nextExtra)
+    applyQuotaLimitExtra(nextExtra)
+    applyPassthroughFieldExtra(nextExtra, props.account.type)
+    if (Object.keys(nextExtra).length > 0) {
+      updatePayload.extra = nextExtra
+    } else if (Object.keys(currentExtra).length > 0) {
+      updatePayload.extra = {}
+    } else {
+      delete updatePayload.extra
     }
 
     const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {

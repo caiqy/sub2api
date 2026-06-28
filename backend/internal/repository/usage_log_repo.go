@@ -31,6 +31,8 @@ import (
 )
 
 const usageLogSelectColumns = "id, user_id, api_key_id, account_id, request_id, model, requested_model, upstream_model, group_id, subscription_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_creation_5m_tokens, cache_creation_1h_tokens, image_output_tokens, image_output_cost, input_cost, output_cost, cache_creation_cost, cache_read_cost, total_cost, actual_cost, rate_multiplier, account_rate_multiplier, billing_type, request_type, stream, openai_ws_mode, duration_ms, first_token_ms, user_agent, ip_address, image_count, image_size, image_input_size, image_output_size, image_size_source, image_size_breakdown, service_tier, reasoning_effort, inbound_endpoint, upstream_endpoint, cache_ttl_overridden, channel_id, model_mapping_chain, billing_tier, billing_mode, account_stats_cost, created_at"
+const usageLogListSelectColumns = usageLogSelectColumns + ", EXISTS (SELECT 1 FROM usage_log_details WHERE usage_log_id = usage_logs.id) AS has_detail"
+const usageLogListSelectColumnsWithoutDetail = usageLogSelectColumns + ", FALSE AS has_detail"
 
 // usageLogInsertArgTypes must stay in the same order as:
 //  1. prepareUsageLogInsert().args
@@ -239,6 +241,7 @@ const (
 )
 
 type usageLogCreateRequest struct {
+	ctx      context.Context
 	log      *service.UsageLog
 	prepared usageLogInsertPrepared
 	shared   *usageLogCreateShared
@@ -253,6 +256,7 @@ type usageLogCreateResult struct {
 type usageLogBestEffortRequest struct {
 	prepared usageLogInsertPrepared
 	apiKeyID int64
+	log      *service.UsageLog
 	resultCh chan error
 }
 
@@ -302,6 +306,13 @@ func newUsageLogRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor) *usage
 	return repo
 }
 
+func (r *usageLogRepository) PruneToConfiguredLimits(ctx context.Context) error {
+	if r == nil || r.sql == nil {
+		return nil
+	}
+	return newUsageLogDetailRepositoryWithSQL(r.sql).PruneToConfiguredLimits(ctx)
+}
+
 // getPerformanceStats 获取 RPM 和 TPM（近5分钟平均值，可选按用户过滤）
 func (r *usageLogRepository) getPerformanceStats(ctx context.Context, userID int64) (rpm, tpm int64, err error) {
 	fiveMinutesAgo := time.Now().Add(-5 * time.Minute)
@@ -331,11 +342,11 @@ func (r *usageLogRepository) Create(ctx context.Context, log *service.UsageLog) 
 	}
 
 	if tx := dbent.TxFromContext(ctx); tx != nil {
-		return r.createSingle(ctx, tx.Client(), log)
+		return r.createSingle(ctx, tx.Client(), log, false)
 	}
 	requestID := strings.TrimSpace(log.RequestID)
 	if requestID == "" {
-		return r.createSingle(ctx, r.sql, log)
+		return r.createSingle(ctx, r.sql, log, true)
 	}
 	log.RequestID = requestID
 	return r.createBatched(ctx, log)
@@ -347,23 +358,24 @@ func (r *usageLogRepository) CreateBestEffort(ctx context.Context, log *service.
 	}
 
 	if tx := dbent.TxFromContext(ctx); tx != nil {
-		_, err := r.createSingle(ctx, tx.Client(), log)
+		_, err := r.createSingle(ctx, tx.Client(), log, false)
 		return err
 	}
 	if r.db == nil {
-		_, err := r.createSingle(ctx, r.sql, log)
+		_, err := r.createSingle(ctx, r.sql, log, true)
 		return err
 	}
 
 	r.ensureBestEffortBatcher()
 	if r.bestEffortBatchCh == nil {
-		_, err := r.createSingle(ctx, r.sql, log)
+		_, err := r.createSingle(ctx, r.sql, log, true)
 		return err
 	}
 
 	req := usageLogBestEffortRequest{
 		prepared: prepareUsageLogInsert(log),
 		apiKeyID: log.APIKeyID,
+		log:      log,
 		resultCh: make(chan error, 1),
 	}
 	if key, ok := r.bestEffortRecentKey(req.prepared.requestID, req.apiKeyID); ok {
@@ -388,7 +400,7 @@ func (r *usageLogRepository) CreateBestEffort(ctx context.Context, log *service.
 	}
 }
 
-func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor, log *service.UsageLog) (bool, error) {
+func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor, log *service.UsageLog, persistDetail bool) (bool, error) {
 	prepared := prepareUsageLogInsert(log)
 	if sqlq == nil {
 		sqlq = r.sql
@@ -474,19 +486,23 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 		}
 	}
 	log.RateMultiplier = prepared.rateMultiplier
+	if persistDetail {
+		r.persistUsageLogDetailBestEffort(ctx, sqlq, log)
+	}
 	return true, nil
 }
 
 func (r *usageLogRepository) createBatched(ctx context.Context, log *service.UsageLog) (bool, error) {
 	if r.db == nil {
-		return r.createSingle(ctx, r.sql, log)
+		return r.createSingle(ctx, r.sql, log, true)
 	}
 	r.ensureCreateBatcher()
 	if r.createBatchCh == nil {
-		return r.createSingle(ctx, r.sql, log)
+		return r.createSingle(ctx, r.sql, log, true)
 	}
 
 	req := usageLogCreateRequest{
+		ctx:      ctx,
 		log:      log,
 		prepared: prepareUsageLogInsert(log),
 		shared:   &usageLogCreateShared{},
@@ -664,6 +680,7 @@ func (r *usageLogRepository) flushCreateBatch(db *sql.DB, batch []usageLogCreate
 						}
 						switch {
 						case inserted && idx == 0:
+							r.persistUsageLogDetailBestEffort(req.ctx, db, req.log)
 							completeUsageLogCreateRequest(req, usageLogCreateResult{inserted: true, err: nil})
 						case inserted:
 							completeUsageLogCreateRequest(req, usageLogCreateResult{inserted: false, err: nil})
@@ -694,6 +711,9 @@ func (r *usageLogRepository) flushCreateBatch(db *sql.DB, batch []usageLogCreate
 					req.log.ID = state.ID
 					req.log.CreatedAt = state.CreatedAt
 					req.log.RateMultiplier = preparedByKey[key].rateMultiplier
+					if idx == 0 && insertedMap[key] {
+						r.persistUsageLogDetailBestEffort(req.ctx, db, req.log)
+					}
 					completeUsageLogCreateRequest(req, usageLogCreateResult{
 						inserted: idx == 0 && insertedMap[key],
 						err:      nil,
@@ -708,10 +728,36 @@ func (r *usageLogRepository) flushCreateBatch(db *sql.DB, batch []usageLogCreate
 	}
 
 	for _, req := range fallback {
-		fallbackCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		inserted, err := r.createSingle(fallbackCtx, db, req.log)
-		cancel()
+		inserted, err := r.createSingle(req.ctx, db, req.log, true)
 		completeUsageLogCreateRequest(req, usageLogCreateResult{inserted: inserted, err: err})
+	}
+}
+
+func (r *usageLogRepository) PersistDetailBestEffort(ctx context.Context, log *service.UsageLog) {
+	r.persistUsageLogDetailBestEffort(ctx, r.sql, log)
+}
+
+func (r *usageLogRepository) persistUsageLogDetailsBestEffort(ctx context.Context, sqlq sqlExecutor, logs []*service.UsageLog) {
+	if len(logs) == 0 {
+		return
+	}
+	details := make([]*service.UsageLogDetail, 0, len(logs))
+	for _, log := range logs {
+		if log == nil || log.ID <= 0 || log.DetailSnapshot == nil {
+			continue
+		}
+		detail := usageLogDetailFromSnapshot(log.ID, log.CreatedAt, service.UsageLogDetailTypeFromUsageLog(log), log.DetailSnapshot.Normalize())
+		if detail != nil {
+			details = append(details, detail)
+		}
+	}
+	if len(details) == 0 {
+		return
+	}
+	detailCtx, cancel := service.NewUsageLogDetailBestEffortContext(ctx)
+	defer cancel()
+	if err := newUsageLogDetailRepositoryWithSQL(sqlq).CreateBatch(detailCtx, details); err != nil {
+		logger.LegacyPrintf("repository.usage_log", "persist usage log detail batch failed: count=%d err=%v", len(details), err)
 	}
 }
 
@@ -729,14 +775,19 @@ func (r *usageLogRepository) flushBestEffortBatch(db *sql.DB, batch []usageLogBe
 
 	groupsByKey := make(map[string]*bestEffortGroup, len(batch))
 	groupOrder := make([]*bestEffortGroup, 0, len(batch))
-	preparedList := make([]usageLogInsertPrepared, 0, len(batch))
+	fallback := make([]usageLogBestEffortRequest, 0)
 
-	for idx, req := range batch {
-		prepared := req.prepared
-		key := fmt.Sprintf("__best_effort_%d", idx)
-		if prepared.requestID != "" {
-			key = usageLogBatchKey(prepared.requestID, req.apiKeyID)
+	for _, req := range batch {
+		if req.log == nil {
+			sendUsageLogBestEffortResult(req.resultCh, nil)
+			continue
 		}
+		prepared := req.prepared
+		if prepared.requestID == "" {
+			fallback = append(fallback, req)
+			continue
+		}
+		key := usageLogBatchKey(prepared.requestID, req.apiKeyID)
 		group, exists := groupsByKey[key]
 		if !exists {
 			group = &bestEffortGroup{
@@ -746,12 +797,11 @@ func (r *usageLogRepository) flushBestEffortBatch(db *sql.DB, batch []usageLogBe
 			}
 			groupsByKey[key] = group
 			groupOrder = append(groupOrder, group)
-			preparedList = append(preparedList, prepared)
 		}
 		group.reqs = append(group.reqs, req)
 	}
 
-	if len(preparedList) == 0 {
+	if len(groupOrder) == 0 && len(fallback) == 0 {
 		for _, req := range batch {
 			sendUsageLogBestEffortResult(req.resultCh, nil)
 		}
@@ -761,29 +811,99 @@ func (r *usageLogRepository) flushBestEffortBatch(db *sql.DB, batch []usageLogBe
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	query, args := buildUsageLogBestEffortInsertQuery(preparedList)
-	if _, err := db.ExecContext(ctx, query, args...); err != nil {
-		logger.LegacyPrintf("repository.usage_log", "best-effort batch insert failed: %v", err)
+	if len(groupOrder) > 0 {
+		keys := make([]string, 0, len(groupOrder))
+		preparedByKey := make(map[string]usageLogInsertPrepared, len(groupOrder))
 		for _, group := range groupOrder {
-			singleErr := execUsageLogInsertNoResult(ctx, db, group.prepared)
-			if singleErr != nil {
-				logger.LegacyPrintf("repository.usage_log", "best-effort single fallback insert failed: %v", singleErr)
-			} else if group.prepared.requestID != "" && r != nil && r.bestEffortRecent != nil {
-				r.bestEffortRecent.SetDefault(group.key, struct{}{})
-			}
-			for _, req := range group.reqs {
-				sendUsageLogBestEffortResult(req.resultCh, singleErr)
-			}
+			keys = append(keys, group.key)
+			preparedByKey[group.key] = group.prepared
 		}
-		return
+
+		insertedMap, stateMap, safeFallback, err := r.batchInsertUsageLogs(db, keys, preparedByKey)
+		if err != nil {
+			if safeFallback {
+				logger.LegacyPrintf("repository.usage_log", "best-effort batch insert failed: %v", err)
+				for _, group := range groupOrder {
+					fallback = append(fallback, group.reqs...)
+				}
+			} else {
+				detailLogs := make([]*service.UsageLog, 0, len(groupOrder))
+				for _, group := range groupOrder {
+					reqs := group.reqs
+					state, hasState := stateMap[group.key]
+					inserted := insertedMap[group.key]
+					if hasState && r != nil && r.bestEffortRecent != nil {
+						r.bestEffortRecent.SetDefault(group.key, struct{}{})
+					}
+					for idx, req := range reqs {
+						if req.log != nil {
+							req.log.RateMultiplier = group.prepared.rateMultiplier
+							if hasState {
+								req.log.ID = state.ID
+								req.log.CreatedAt = state.CreatedAt
+							}
+						}
+						switch {
+						case inserted && idx == 0:
+							if req.log != nil {
+								detailLogs = append(detailLogs, req.log)
+							}
+							sendUsageLogBestEffortResult(req.resultCh, nil)
+						case inserted:
+							sendUsageLogBestEffortResult(req.resultCh, nil)
+						case hasState:
+							sendUsageLogBestEffortResult(req.resultCh, nil)
+						case idx == 0:
+							sendUsageLogBestEffortResult(req.resultCh, err)
+						default:
+							sendUsageLogBestEffortResult(req.resultCh, nil)
+						}
+					}
+				}
+				r.persistUsageLogDetailsBestEffort(ctx, db, detailLogs)
+			}
+		} else {
+			detailLogs := make([]*service.UsageLog, 0, len(groupOrder))
+			for _, group := range groupOrder {
+				state, ok := stateMap[group.key]
+				if !ok {
+					missingErr := fmt.Errorf("usage log batch state missing for key=%s", group.key)
+					for _, req := range group.reqs {
+						sendUsageLogBestEffortResult(req.resultCh, missingErr)
+					}
+					continue
+				}
+				if r != nil && r.bestEffortRecent != nil {
+					r.bestEffortRecent.SetDefault(group.key, struct{}{})
+				}
+				for idx, req := range group.reqs {
+					if req.log != nil {
+						req.log.ID = state.ID
+						req.log.CreatedAt = state.CreatedAt
+						req.log.RateMultiplier = group.prepared.rateMultiplier
+					}
+					if idx == 0 && insertedMap[group.key] && req.log != nil {
+						detailLogs = append(detailLogs, req.log)
+					}
+					sendUsageLogBestEffortResult(req.resultCh, nil)
+				}
+			}
+			r.persistUsageLogDetailsBestEffort(ctx, db, detailLogs)
+		}
 	}
-	for _, group := range groupOrder {
-		if group.prepared.requestID != "" && r != nil && r.bestEffortRecent != nil {
-			r.bestEffortRecent.SetDefault(group.key, struct{}{})
-		}
-		for _, req := range group.reqs {
+
+	for _, req := range fallback {
+		if req.log == nil {
 			sendUsageLogBestEffortResult(req.resultCh, nil)
+			continue
 		}
+		_, err := r.createSingle(ctx, db, req.log, true)
+		if err != nil {
+			logger.LegacyPrintf("repository.usage_log", "best-effort single fallback insert failed: %v", err)
+		} else if req.prepared.requestID != "" && r != nil && r.bestEffortRecent != nil {
+			r.bestEffortRecent.SetDefault(usageLogBatchKey(req.prepared.requestID, req.apiKeyID), struct{}{})
+		}
+		sendUsageLogBestEffortResult(req.resultCh, err)
 	}
 }
 
@@ -1474,8 +1594,66 @@ func (r *usageLogRepository) GetByID(ctx context.Context, id int64) (log *servic
 	return log, nil
 }
 
+func (r *usageLogRepository) GetDetailByUsageLogID(ctx context.Context, usageLogID int64) (*service.UsageLogDetail, error) {
+	var exists int64
+	if err := scanSingleRow(ctx, r.sql, "SELECT id FROM usage_logs WHERE id = $1", []any{usageLogID}, &exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, service.ErrUsageLogNotFound
+		}
+		return nil, err
+	}
+	detail, err := newUsageLogDetailRepositoryWithSQL(r.sql).GetByUsageLogID(ctx, usageLogID)
+	if err != nil {
+		if isUsageLogDetailMissing(err) {
+			return nil, service.ErrUsageLogDetailNotFound
+		}
+		return nil, err
+	}
+	return detail, nil
+}
+
 func (r *usageLogRepository) ListByUser(ctx context.Context, userID int64, params pagination.PaginationParams) ([]service.UsageLog, *pagination.PaginationResult, error) {
 	return r.listUsageLogsWithPagination(ctx, "WHERE user_id = $1", []any{userID}, params)
+}
+
+func (r *usageLogRepository) ListImageHistoryByUser(ctx context.Context, userID int64, params pagination.PaginationParams, filters service.ImageHistoryListFilters) ([]service.UsageLog, *pagination.PaginationResult, error) {
+	conditions := []string{
+		fmt.Sprintf("user_id = $%d", 1),
+		"(COALESCE(inbound_endpoint, '') LIKE '%/images/generations%' OR COALESCE(inbound_endpoint, '') LIKE '%/images/edits%')",
+	}
+	args := []any{userID}
+
+	if filters.APIKeyID > 0 {
+		conditions = append(conditions, fmt.Sprintf("api_key_id = $%d", len(args)+1))
+		args = append(args, filters.APIKeyID)
+	}
+
+	switch strings.ToLower(strings.TrimSpace(filters.Mode)) {
+	case string(service.ImageHistoryModeGenerate):
+		conditions = append(conditions, fmt.Sprintf("COALESCE(inbound_endpoint, '') LIKE $%d", len(args)+1))
+		args = append(args, "%/images/generations%")
+	case string(service.ImageHistoryModeEdit):
+		conditions = append(conditions, fmt.Sprintf("COALESCE(inbound_endpoint, '') LIKE $%d", len(args)+1))
+		args = append(args, "%/images/edits%")
+	}
+
+	switch strings.ToLower(strings.TrimSpace(filters.Status)) {
+	case string(service.ImageHistoryStatusSuccess):
+		conditions = append(conditions, "image_count > 0")
+	case string(service.ImageHistoryStatusError):
+		conditions = append(conditions, "image_count <= 0")
+	}
+
+	logs, page, err := r.listUsageLogsWithPagination(ctx, "WHERE "+strings.Join(conditions, " AND "), args, params)
+	if err != nil {
+		return nil, nil, err
+	}
+	if r.client != nil {
+		if err := r.hydrateUsageLogAssociations(ctx, logs); err != nil {
+			return nil, nil, err
+		}
+	}
+	return logs, page, nil
 }
 
 func (r *usageLogRepository) ListByAPIKey(ctx context.Context, apiKeyID int64, params pagination.PaginationParams) ([]service.UsageLog, *pagination.PaginationResult, error) {
@@ -2104,6 +2282,9 @@ func (r *usageLogRepository) ListByModelAndTimeRange(ctx context.Context, modelN
 }
 
 func (r *usageLogRepository) Delete(ctx context.Context, id int64) error {
+	if _, err := r.sql.ExecContext(ctx, "DELETE FROM usage_log_details WHERE usage_log_id = $1", id); err != nil {
+		return err
+	}
 	_, err := r.sql.ExecContext(ctx, "DELETE FROM usage_logs WHERE id = $1", id)
 	return err
 }
@@ -2418,18 +2599,20 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 			SELECT
 				u.user_id,
 				COALESCE(us.email, '') as email,
+				COALESCE(us.username, '') as username,
 				COALESCE(SUM(u.actual_cost), 0) as actual_cost,
 				COUNT(*) as requests,
 				COALESCE(SUM(u.input_tokens + u.output_tokens + u.cache_creation_tokens + u.cache_read_tokens), 0) as tokens
 			FROM usage_logs u
 			LEFT JOIN users us ON u.user_id = us.id
 			WHERE u.created_at >= $1 AND u.created_at < $2
-			GROUP BY u.user_id, us.email
+			GROUP BY u.user_id, us.email, us.username
 		),
 		ranked AS (
 			SELECT
 				user_id,
 				email,
+				username,
 				actual_cost,
 				requests,
 				tokens,
@@ -2443,6 +2626,7 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 		SELECT
 			user_id,
 			email,
+			username,
 			actual_cost,
 			requests,
 			tokens,
@@ -2470,7 +2654,17 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 	totalTokens := int64(0)
 	for rows.Next() {
 		var row UserSpendingRankingItem
-		if err = rows.Scan(&row.UserID, &row.Email, &row.ActualCost, &row.Requests, &row.Tokens, &totalActualCost, &totalRequests, &totalTokens); err != nil {
+		if err = rows.Scan(
+			&row.UserID,
+			&row.Email,
+			&row.Username,
+			&row.ActualCost,
+			&row.Requests,
+			&row.Tokens,
+			&totalActualCost,
+			&totalRequests,
+			&totalTokens,
+		); err != nil {
 			return nil, err
 		}
 		ranking = append(ranking, row)
@@ -3360,6 +3554,7 @@ func (r *usageLogRepository) GetUserBreakdownStats(ctx context.Context, startTim
 		SELECT
 			COALESCE(ul.user_id, 0) as user_id,
 			COALESCE(u.email, '') as email,
+			COALESCE(u.username, '') as username,
 			COUNT(*) as requests,
 			COALESCE(SUM(ul.input_tokens + ul.output_tokens + ul.cache_creation_tokens + ul.cache_read_tokens), 0) as total_tokens,
 			COALESCE(SUM(ul.total_cost), 0) as cost,
@@ -3396,20 +3591,13 @@ func (r *usageLogRepository) GetUserBreakdownStats(ctx context.Context, startTim
 		query += fmt.Sprintf(" AND ul.account_id = $%d", len(args)+1)
 		args = append(args, dim.AccountID)
 	}
-	if dim.RequestType != nil {
-		query += fmt.Sprintf(" AND ul.request_type = $%d", len(args)+1)
-		args = append(args, *dim.RequestType)
-	}
-	if dim.Stream != nil {
-		query += fmt.Sprintf(" AND ul.stream = $%d", len(args)+1)
-		args = append(args, *dim.Stream)
-	}
+	query, args = appendRequestTypeOrStreamQueryFilter(query, args, dim.RequestType, dim.Stream)
 	if dim.BillingType != nil {
 		query += fmt.Sprintf(" AND ul.billing_type = $%d", len(args)+1)
 		args = append(args, *dim.BillingType)
 	}
 
-	query += " GROUP BY ul.user_id, u.email ORDER BY actual_cost DESC"
+	query += " GROUP BY ul.user_id, u.email, u.username ORDER BY actual_cost DESC"
 	if limit > 0 {
 		query += fmt.Sprintf(" LIMIT %d", limit)
 	}
@@ -3431,6 +3619,7 @@ func (r *usageLogRepository) GetUserBreakdownStats(ctx context.Context, startTim
 		if err := rows.Scan(
 			&row.UserID,
 			&row.Email,
+			&row.Username,
 			&row.Requests,
 			&row.TotalTokens,
 			&row.Cost,
@@ -4047,12 +4236,16 @@ func (r *usageLogRepository) listUsageLogsWithPagination(ctx context.Context, wh
 	if err := scanSingleRow(ctx, r.sql, countQuery, args, &total); err != nil {
 		return nil, nil, err
 	}
+	selectColumns, err := r.usageLogListSelectColumns(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	limitPos := len(args) + 1
 	offsetPos := len(args) + 2
 	listArgs := append(append([]any{}, args...), params.Limit(), params.Offset())
-	query := fmt.Sprintf("SELECT %s FROM usage_logs %s ORDER BY %s LIMIT $%d OFFSET $%d", usageLogSelectColumns, whereClause, usageLogOrderBy(params), limitPos, offsetPos)
-	logs, err := r.queryUsageLogs(ctx, query, listArgs...)
+	query := fmt.Sprintf("SELECT %s FROM usage_logs %s ORDER BY %s LIMIT $%d OFFSET $%d", selectColumns, whereClause, usageLogOrderBy(params), limitPos, offsetPos)
+	logs, err := r.queryUsageLogsWithHasDetail(ctx, query, listArgs...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -4062,13 +4255,17 @@ func (r *usageLogRepository) listUsageLogsWithPagination(ctx context.Context, wh
 func (r *usageLogRepository) listUsageLogsWithFastPagination(ctx context.Context, whereClause string, args []any, params pagination.PaginationParams) ([]service.UsageLog, *pagination.PaginationResult, error) {
 	limit := params.Limit()
 	offset := params.Offset()
+	selectColumns, err := r.usageLogListSelectColumns(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	limitPos := len(args) + 1
 	offsetPos := len(args) + 2
 	listArgs := append(append([]any{}, args...), limit+1, offset)
-	query := fmt.Sprintf("SELECT %s FROM usage_logs %s ORDER BY %s LIMIT $%d OFFSET $%d", usageLogSelectColumns, whereClause, usageLogOrderBy(params), limitPos, offsetPos)
+	query := fmt.Sprintf("SELECT %s FROM usage_logs %s ORDER BY %s LIMIT $%d OFFSET $%d", selectColumns, whereClause, usageLogOrderBy(params), limitPos, offsetPos)
 
-	logs, err := r.queryUsageLogs(ctx, query, listArgs...)
+	logs, err := r.queryUsageLogsWithHasDetail(ctx, query, listArgs...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -4086,6 +4283,25 @@ func (r *usageLogRepository) listUsageLogsWithFastPagination(ctx context.Context
 	}
 
 	return logs, paginationResultFromTotal(total, params), nil
+}
+
+func (r *usageLogRepository) usageLogListSelectColumns(ctx context.Context) (string, error) {
+	exists, err := r.usageLogDetailTableExists(ctx)
+	if err != nil {
+		return "", err
+	}
+	if exists {
+		return usageLogListSelectColumns, nil
+	}
+	return usageLogListSelectColumnsWithoutDetail, nil
+}
+
+func (r *usageLogRepository) usageLogDetailTableExists(ctx context.Context) (bool, error) {
+	var exists bool
+	if err := scanSingleRow(ctx, r.sql, "SELECT to_regclass('public.usage_log_details') IS NOT NULL", nil, &exists); err != nil {
+		return false, err
+	}
+	return exists, nil
 }
 
 func usageLogOrderBy(params pagination.PaginationParams) string {
@@ -4135,6 +4351,47 @@ func (r *usageLogRepository) queryUsageLogs(ctx context.Context, query string, a
 		return nil, err
 	}
 	return logs, nil
+}
+
+func (r *usageLogRepository) queryUsageLogsWithHasDetail(ctx context.Context, query string, args ...any) (logs []service.UsageLog, err error) {
+	rows, err := r.sql.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = closeErr
+			logs = nil
+		}
+	}()
+
+	logs = make([]service.UsageLog, 0)
+	for rows.Next() {
+		log, scanErr := scanUsageLogWithHasDetail(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		logs = append(logs, *log)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	return logs, nil
+}
+
+func (r *usageLogRepository) persistUsageLogDetailBestEffort(ctx context.Context, sqlq sqlExecutor, log *service.UsageLog) {
+	if log == nil || log.ID <= 0 || log.DetailSnapshot == nil {
+		return
+	}
+	detail := usageLogDetailFromSnapshot(log.ID, log.CreatedAt, service.UsageLogDetailTypeFromUsageLog(log), log.DetailSnapshot.Normalize())
+	if detail == nil {
+		return
+	}
+	detailCtx, cancel := service.NewUsageLogDetailBestEffortContext(ctx)
+	defer cancel()
+	if err := newUsageLogDetailRepositoryWithSQL(sqlq).Create(detailCtx, detail); err != nil {
+		logger.LegacyPrintf("repository.usage_log", "persist usage log detail failed: usage_log_id=%d err=%v", log.ID, err)
+	}
 }
 
 func (r *usageLogRepository) hydrateUsageLogAssociations(ctx context.Context, logs []service.UsageLog) error {
@@ -4444,6 +4701,227 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 		CreatedAt:             createdAt,
 	}
 	// 先回填 legacy 字段，再基于 legacy + request_type 计算最终请求类型，保证历史数据兼容。
+	log.Stream = stream
+	log.OpenAIWSMode = openaiWSMode
+	log.RequestType = log.EffectiveRequestType()
+	log.Stream, log.OpenAIWSMode = service.ApplyLegacyRequestFields(log.RequestType, stream, openaiWSMode)
+
+	if requestID.Valid {
+		log.RequestID = requestID.String
+	}
+	if groupID.Valid {
+		value := groupID.Int64
+		log.GroupID = &value
+	}
+	if subscriptionID.Valid {
+		value := subscriptionID.Int64
+		log.SubscriptionID = &value
+	}
+	if durationMs.Valid {
+		value := int(durationMs.Int64)
+		log.DurationMs = &value
+	}
+	if firstTokenMs.Valid {
+		value := int(firstTokenMs.Int64)
+		log.FirstTokenMs = &value
+	}
+	if userAgent.Valid {
+		log.UserAgent = &userAgent.String
+	}
+	if ipAddress.Valid {
+		log.IPAddress = &ipAddress.String
+	}
+	if imageSize.Valid {
+		log.ImageSize = &imageSize.String
+	}
+	if imageInputSize.Valid {
+		log.ImageInputSize = &imageInputSize.String
+	}
+	if imageOutputSize.Valid {
+		log.ImageOutputSize = &imageOutputSize.String
+	}
+	if imageSizeSource.Valid {
+		log.ImageSizeSource = &imageSizeSource.String
+	}
+	log.ImageSizeBreakdown = stringIntMapFromNullJSON(imageSizeBreakdown)
+	if serviceTier.Valid {
+		log.ServiceTier = &serviceTier.String
+	}
+	if reasoningEffort.Valid {
+		log.ReasoningEffort = &reasoningEffort.String
+	}
+	if inboundEndpoint.Valid {
+		log.InboundEndpoint = &inboundEndpoint.String
+	}
+	if upstreamEndpoint.Valid {
+		log.UpstreamEndpoint = &upstreamEndpoint.String
+	}
+	if upstreamModel.Valid {
+		log.UpstreamModel = &upstreamModel.String
+	}
+	if channelID.Valid {
+		value := channelID.Int64
+		log.ChannelID = &value
+	}
+	if modelMappingChain.Valid {
+		log.ModelMappingChain = &modelMappingChain.String
+	}
+	if billingTier.Valid {
+		log.BillingTier = &billingTier.String
+	}
+	if billingMode.Valid {
+		log.BillingMode = &billingMode.String
+	}
+	if accountStatsCost.Valid {
+		log.AccountStatsCost = &accountStatsCost.Float64
+	}
+
+	return log, nil
+}
+
+func scanUsageLogWithHasDetail(scanner interface{ Scan(...any) error }) (*service.UsageLog, error) {
+	var (
+		id                    int64
+		userID                int64
+		apiKeyID              int64
+		accountID             int64
+		requestID             sql.NullString
+		model                 string
+		requestedModel        sql.NullString
+		upstreamModel         sql.NullString
+		groupID               sql.NullInt64
+		subscriptionID        sql.NullInt64
+		inputTokens           int
+		outputTokens          int
+		cacheCreationTokens   int
+		cacheReadTokens       int
+		cacheCreation5m       int
+		cacheCreation1h       int
+		imageOutputTokens     int
+		imageOutputCost       float64
+		inputCost             float64
+		outputCost            float64
+		cacheCreationCost     float64
+		cacheReadCost         float64
+		totalCost             float64
+		actualCost            float64
+		rateMultiplier        float64
+		accountRateMultiplier sql.NullFloat64
+		billingType           int16
+		requestTypeRaw        int16
+		stream                bool
+		openaiWSMode          bool
+		durationMs            sql.NullInt64
+		firstTokenMs          sql.NullInt64
+		userAgent             sql.NullString
+		ipAddress             sql.NullString
+		imageCount            int
+		imageSize             sql.NullString
+		imageInputSize        sql.NullString
+		imageOutputSize       sql.NullString
+		imageSizeSource       sql.NullString
+		imageSizeBreakdown    sql.NullString
+		serviceTier           sql.NullString
+		reasoningEffort       sql.NullString
+		inboundEndpoint       sql.NullString
+		upstreamEndpoint      sql.NullString
+		cacheTTLOverridden    bool
+		channelID             sql.NullInt64
+		modelMappingChain     sql.NullString
+		billingTier           sql.NullString
+		billingMode           sql.NullString
+		accountStatsCost      sql.NullFloat64
+		createdAt             time.Time
+		hasDetail             bool
+	)
+
+	if err := scanner.Scan(
+		&id,
+		&userID,
+		&apiKeyID,
+		&accountID,
+		&requestID,
+		&model,
+		&requestedModel,
+		&upstreamModel,
+		&groupID,
+		&subscriptionID,
+		&inputTokens,
+		&outputTokens,
+		&cacheCreationTokens,
+		&cacheReadTokens,
+		&cacheCreation5m,
+		&cacheCreation1h,
+		&imageOutputTokens,
+		&imageOutputCost,
+		&inputCost,
+		&outputCost,
+		&cacheCreationCost,
+		&cacheReadCost,
+		&totalCost,
+		&actualCost,
+		&rateMultiplier,
+		&accountRateMultiplier,
+		&billingType,
+		&requestTypeRaw,
+		&stream,
+		&openaiWSMode,
+		&durationMs,
+		&firstTokenMs,
+		&userAgent,
+		&ipAddress,
+		&imageCount,
+		&imageSize,
+		&imageInputSize,
+		&imageOutputSize,
+		&imageSizeSource,
+		&imageSizeBreakdown,
+		&serviceTier,
+		&reasoningEffort,
+		&inboundEndpoint,
+		&upstreamEndpoint,
+		&cacheTTLOverridden,
+		&channelID,
+		&modelMappingChain,
+		&billingTier,
+		&billingMode,
+		&accountStatsCost,
+		&createdAt,
+		&hasDetail,
+	); err != nil {
+		return nil, err
+	}
+
+	log := &service.UsageLog{
+		ID:                    id,
+		UserID:                userID,
+		APIKeyID:              apiKeyID,
+		AccountID:             accountID,
+		Model:                 model,
+		RequestedModel:        coalesceTrimmedString(requestedModel, model),
+		InputTokens:           inputTokens,
+		OutputTokens:          outputTokens,
+		CacheCreationTokens:   cacheCreationTokens,
+		CacheReadTokens:       cacheReadTokens,
+		CacheCreation5mTokens: cacheCreation5m,
+		CacheCreation1hTokens: cacheCreation1h,
+		ImageOutputTokens:     imageOutputTokens,
+		ImageOutputCost:       imageOutputCost,
+		InputCost:             inputCost,
+		OutputCost:            outputCost,
+		CacheCreationCost:     cacheCreationCost,
+		CacheReadCost:         cacheReadCost,
+		TotalCost:             totalCost,
+		ActualCost:            actualCost,
+		RateMultiplier:        rateMultiplier,
+		AccountRateMultiplier: nullFloat64Ptr(accountRateMultiplier),
+		BillingType:           int8(billingType),
+		RequestType:           service.RequestTypeFromInt16(requestTypeRaw),
+		ImageCount:            imageCount,
+		HasDetail:             hasDetail,
+		CacheTTLOverridden:    cacheTTLOverridden,
+		CreatedAt:             createdAt,
+	}
 	log.Stream = stream
 	log.OpenAIWSMode = openaiWSMode
 	log.RequestType = log.EffectiveRequestType()

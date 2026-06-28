@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -152,14 +153,23 @@ const openAICodexUserAgentCacheTTL = 60 * time.Second
 const openAICodexUserAgentErrorTTL = 5 * time.Second
 const openAICodexUserAgentDBTimeout = 5 * time.Second
 
+// cachedOpenAIAllowCodexPlugin Codex 插件放行开关缓存（进程内缓存，60s TTL）。
+// IsOpenAIAllowClaudeCodeCodexPluginEnabled 在每个 codex_cli_only 账号的网关请求热路径上被调用，避免每次访问 DB。
+type cachedOpenAIAllowCodexPlugin struct {
+	value     bool
+	expiresAt int64 // unix nano
+}
+
+const openAIAllowCodexPluginCacheTTL = 60 * time.Second
+const openAIAllowCodexPluginErrorTTL = 5 * time.Second
+const openAIAllowCodexPluginDBTimeout = 5 * time.Second
+
 const codexRestrictionPolicyCacheTTL = 60 * time.Second
 const codexRestrictionPolicyDBTimeout = 5 * time.Second
 
-// cachedCodexRestrictionPolicy codex_cli_only 全局加固策略缓存（进程内，60s TTL）。
-// GetCodexRestrictionPolicy 在每个 codex_cli_only 账号的网关请求热路径上被调用，避免每次访问 DB。
 type cachedCodexRestrictionPolicy struct {
 	value     CodexRestrictionPolicy
-	expiresAt int64 // unix nano
+	expiresAt int64
 }
 
 // cachedCyberSessionBlockRuntime cyber 会话屏蔽开关+TTL 进程内缓存（60s TTL）。
@@ -185,25 +195,38 @@ type DefaultSubscriptionGroupReader interface {
 	GetByID(ctx context.Context, id int64) (*Group, error)
 }
 
+type gatewayRuntimeIdleInvalidator interface {
+	InvalidateIdleClients()
+}
+
+type UsageLogDetailPruner interface {
+	PruneToConfiguredLimits(ctx context.Context) error
+}
+
 // WebSearchManagerBuilder creates a websearch.Manager from config (injected by infra layer).
 // proxyURLs maps proxy ID to resolved URL for provider-level proxy support.
 type WebSearchManagerBuilder func(cfg *WebSearchEmulationConfig, proxyURLs map[int64]string)
 
 // SettingService 系统设置服务
 type SettingService struct {
-	settingRepo                 SettingRepository
-	defaultSubGroupReader       DefaultSubscriptionGroupReader
-	proxyRepo                   ProxyRepository // for resolving websearch provider proxy URLs
-	cfg                         *config.Config
-	onUpdate                    func() // Callback when settings are updated (for cache invalidation)
-	version                     string // Application version
-	webSearchManagerBuilder     WebSearchManagerBuilder
-	antigravityUAVersionCache   atomic.Value // *cachedAntigravityUserAgentVersion
-	antigravityUAVersionSF      singleflight.Group
-	openAICodexUACache          atomic.Value // *cachedOpenAICodexUserAgent
-	openAICodexUASF             singleflight.Group
-	codexRestrictionPolicyCache atomic.Value // *cachedCodexRestrictionPolicy
-	codexRestrictionPolicySF    singleflight.Group
+	settingRepo                   SettingRepository
+	defaultSubGroupReader         DefaultSubscriptionGroupReader
+	proxyRepo                     ProxyRepository // for resolving websearch provider proxy URLs
+	gatewayRuntimeIdleInvalidator gatewayRuntimeIdleInvalidator
+	usageLogDetailPruner          UsageLogDetailPruner
+	cfg                           *config.Config
+	onUpdateMu                    sync.RWMutex
+	onUpdateCallbacks             []func() // Callbacks when settings are updated (for cache invalidation)
+	version                       string   // Application version
+	webSearchManagerBuilder       WebSearchManagerBuilder
+	antigravityUAVersionCache     atomic.Value // *cachedAntigravityUserAgentVersion
+	antigravityUAVersionSF        singleflight.Group
+	openAICodexUACache            atomic.Value // *cachedOpenAICodexUserAgent
+	openAICodexUASF               singleflight.Group
+	openAIAllowCodexPluginCache   atomic.Value // *cachedOpenAIAllowCodexPlugin
+	openAIAllowCodexPluginSF      singleflight.Group
+	codexRestrictionPolicyCache   atomic.Value // *cachedCodexRestrictionPolicy
+	codexRestrictionPolicySF      singleflight.Group
 
 	cyberSessionBlockRuntimeCache atomic.Value // *cachedCyberSessionBlockRuntime
 	cyberSessionBlockRuntimeSF    singleflight.Group
@@ -660,15 +683,245 @@ func (s *SettingService) effectiveWeChatConnectOAuthConfig(settings map[string]s
 
 // NewSettingService 创建系统设置服务实例
 func NewSettingService(settingRepo SettingRepository, cfg *config.Config) *SettingService {
-	return &SettingService{
+	service := &SettingService{
 		settingRepo: settingRepo,
 		cfg:         cfg,
 	}
+	service.loadGatewayRuntimeSettingsFromDB(context.Background())
+	service.syncUsageLogDetailRetentionLimitsFromConfig()
+	return service
 }
 
 // SetDefaultSubscriptionGroupReader injects an optional group reader for default subscription validation.
 func (s *SettingService) SetDefaultSubscriptionGroupReader(reader DefaultSubscriptionGroupReader) {
 	s.defaultSubGroupReader = reader
+}
+
+// SetGatewayRuntimeIdleInvalidator injects an optional gateway idle client invalidator.
+func (s *SettingService) SetGatewayRuntimeIdleInvalidator(invalidator gatewayRuntimeIdleInvalidator) {
+	s.gatewayRuntimeIdleInvalidator = invalidator
+}
+
+// SetUsageLogDetailPruner injects an optional usage log detail pruner.
+func (s *SettingService) SetUsageLogDetailPruner(pruner UsageLogDetailPruner) {
+	s.usageLogDetailPruner = pruner
+}
+
+// GetGatewayRuntimeSettings returns the currently effective gateway runtime settings.
+func (s *SettingService) GetGatewayRuntimeSettings(ctx context.Context) (*GatewayRuntimeSettings, error) {
+	_ = ctx
+	settings := &GatewayRuntimeSettings{}
+	if s == nil || s.cfg == nil {
+		return settings, nil
+	}
+	settings.ResponseHeaderTimeout = s.cfg.Gateway.ResponseHeaderTimeout
+	settings.StreamDataIntervalTimeout = s.cfg.Gateway.StreamDataIntervalTimeout
+	settings.UsageLogDetailRetentionLimit = gatewayRuntimeRetentionLimitOrDefault(s.cfg.Gateway.UsageLogDetailRetentionLimit)
+	settings.ImageUsageLogDetailRetentionLimit = gatewayRuntimeRetentionLimitOrDefault(s.cfg.Gateway.ImageUsageLogDetailRetentionLimit)
+	return settings, nil
+}
+
+// SetGatewayRuntimeSettings persists and applies gateway runtime settings.
+func (s *SettingService) SetGatewayRuntimeSettings(ctx context.Context, settings *GatewayRuntimeSettings) error {
+	if settings == nil {
+		return infraerrors.BadRequest("INVALID_GATEWAY_RUNTIME_SETTINGS", "settings cannot be nil")
+	}
+	if settings.ResponseHeaderTimeout <= 0 {
+		return infraerrors.BadRequest("INVALID_GATEWAY_RUNTIME_SETTINGS", "response_header_timeout must be positive")
+	}
+	if settings.StreamDataIntervalTimeout != 0 &&
+		(settings.StreamDataIntervalTimeout < 30 || settings.StreamDataIntervalTimeout > 300) {
+		return infraerrors.BadRequest("INVALID_GATEWAY_RUNTIME_SETTINGS", "stream_data_interval_timeout must be 0 or between 30-300")
+	}
+	if settings.UsageLogDetailRetentionLimit < 0 {
+		return infraerrors.BadRequest("INVALID_GATEWAY_RUNTIME_SETTINGS", "usage_log_detail_retention_limit must be non-negative")
+	}
+	if settings.ImageUsageLogDetailRetentionLimit < 0 {
+		return infraerrors.BadRequest("INVALID_GATEWAY_RUNTIME_SETTINGS", "image_usage_log_detail_retention_limit must be non-negative")
+	}
+
+	data, err := json.Marshal(settings)
+	if err != nil {
+		return fmt.Errorf("marshal gateway runtime settings: %w", err)
+	}
+	if err := s.settingRepo.Set(ctx, SettingKeyGatewayRuntimeSettings, string(data)); err != nil {
+		return err
+	}
+
+	oldResponseHeaderTimeout := 0
+	if s != nil && s.cfg != nil {
+		oldResponseHeaderTimeout = s.cfg.Gateway.ResponseHeaderTimeout
+		s.cfg.Gateway.ResponseHeaderTimeout = settings.ResponseHeaderTimeout
+		s.cfg.Gateway.StreamDataIntervalTimeout = settings.StreamDataIntervalTimeout
+		s.cfg.Gateway.UsageLogDetailRetentionLimit = settings.UsageLogDetailRetentionLimit
+		s.cfg.Gateway.ImageUsageLogDetailRetentionLimit = settings.ImageUsageLogDetailRetentionLimit
+	}
+	SetUsageLogDetailRetentionLimits(settings.UsageLogDetailRetentionLimit, settings.ImageUsageLogDetailRetentionLimit)
+	if s.usageLogDetailPruner != nil {
+		if err := s.usageLogDetailPruner.PruneToConfiguredLimits(ctx); err != nil {
+			slog.Warn("failed to prune usage log details after gateway runtime settings update", "error", err)
+		}
+	}
+	if settings.ResponseHeaderTimeout != oldResponseHeaderTimeout && s.gatewayRuntimeIdleInvalidator != nil {
+		s.gatewayRuntimeIdleInvalidator.InvalidateIdleClients()
+	}
+
+	return nil
+}
+
+func (s *SettingService) loadGatewayRuntimeSettingsFromDB(ctx context.Context) {
+	if s == nil || s.settingRepo == nil || s.cfg == nil {
+		return
+	}
+
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyGatewayRuntimeSettings)
+	if err != nil || strings.TrimSpace(value) == "" {
+		return
+	}
+
+	var settings GatewayRuntimeSettings
+	if err := json.Unmarshal([]byte(value), &settings); err != nil {
+		return
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(value), &raw); err != nil {
+		return
+	}
+	if _, ok := raw["usage_log_detail_retention_limit"]; !ok {
+		settings.UsageLogDetailRetentionLimit = gatewayRuntimeRetentionLimitOrDefault(s.cfg.Gateway.UsageLogDetailRetentionLimit)
+	}
+	if _, ok := raw["image_usage_log_detail_retention_limit"]; !ok {
+		settings.ImageUsageLogDetailRetentionLimit = gatewayRuntimeRetentionLimitOrDefault(s.cfg.Gateway.ImageUsageLogDetailRetentionLimit)
+	}
+
+	if settings.ResponseHeaderTimeout > 0 {
+		s.cfg.Gateway.ResponseHeaderTimeout = settings.ResponseHeaderTimeout
+	}
+	if _, ok := raw["stream_data_interval_timeout"]; ok {
+		if settings.StreamDataIntervalTimeout == 0 ||
+			(settings.StreamDataIntervalTimeout >= 30 && settings.StreamDataIntervalTimeout <= 300) {
+			s.cfg.Gateway.StreamDataIntervalTimeout = settings.StreamDataIntervalTimeout
+		}
+	}
+	if settings.UsageLogDetailRetentionLimit >= 0 {
+		s.cfg.Gateway.UsageLogDetailRetentionLimit = settings.UsageLogDetailRetentionLimit
+	}
+	if settings.ImageUsageLogDetailRetentionLimit >= 0 {
+		s.cfg.Gateway.ImageUsageLogDetailRetentionLimit = settings.ImageUsageLogDetailRetentionLimit
+	}
+}
+
+func (s *SettingService) syncUsageLogDetailRetentionLimitsFromConfig() {
+	if s == nil || s.cfg == nil {
+		return
+	}
+	SetUsageLogDetailRetentionLimits(
+		gatewayRuntimeRetentionLimitOrDefault(s.cfg.Gateway.UsageLogDetailRetentionLimit),
+		gatewayRuntimeRetentionLimitOrDefault(s.cfg.Gateway.ImageUsageLogDetailRetentionLimit),
+	)
+}
+
+func gatewayRuntimeRetentionLimitOrDefault(value int) int {
+	if value < 0 {
+		return UsageLogDetailRetentionLimitDefault
+	}
+	return value
+}
+
+func (s *SettingService) loadGatewayControlSettingsFromDB(ctx context.Context) {
+	if s == nil || s.settingRepo == nil || s.cfg == nil {
+		return
+	}
+
+	if value, err := s.settingRepo.GetValue(ctx, SettingKeyGatewayStickyOpenAIEnabled); err == nil && strings.TrimSpace(value) != "" {
+		s.cfg.Gateway.Sticky.OpenAI.Enabled = value == "true"
+	}
+	if value, err := s.settingRepo.GetValue(ctx, SettingKeyGatewayStickyGeminiEnabled); err == nil && strings.TrimSpace(value) != "" {
+		s.cfg.Gateway.Sticky.Gemini.Enabled = value == "true"
+	}
+	if value, err := s.settingRepo.GetValue(ctx, SettingKeyGatewayStickyAnthropicEnabled); err == nil && strings.TrimSpace(value) != "" {
+		s.cfg.Gateway.Sticky.Anthropic.Enabled = value == "true"
+	}
+	if value, err := s.settingRepo.GetValue(ctx, SettingKeyGatewayOpenAIWSSchedulerMode); err == nil {
+		applyGatewayOpenAIWSSchedulerMode(&s.cfg.Gateway.OpenAIWS.SchedulerMode, value)
+	}
+	if value, err := s.settingRepo.GetValue(ctx, SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold); err == nil {
+		applyPositiveFloatSettingInRange(&s.cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold, value, 0, 1)
+	}
+	if value, err := s.settingRepo.GetValue(ctx, SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyValue); err == nil {
+		applyPositiveIntSetting(&s.cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyValue, value)
+	}
+	if value, err := s.settingRepo.GetValue(ctx, SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier); err == nil {
+		applyFloatSettingGreaterThan(&s.cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyMultiplier, value, 1)
+	}
+	if value, err := s.settingRepo.GetValue(ctx, SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue); err == nil {
+		applyPositiveIntSetting(&s.cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyValue, value)
+	}
+	if value, err := s.settingRepo.GetValue(ctx, SettingKeyGatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds); err == nil {
+		applyPositiveIntSetting(&s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeCooldownSeconds, value)
+	}
+	if value, err := s.settingRepo.GetValue(ctx, SettingKeyGatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds); err == nil {
+		applyPositiveIntSetting(&s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeIntervalSeconds, value)
+	}
+	if value, err := s.settingRepo.GetValue(ctx, SettingKeyGatewayOpenAIWSSchedulerLayeredProbeMaxFailures); err == nil {
+		applyPositiveIntSetting(&s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeMaxFailures, value)
+	}
+	if value, err := s.settingRepo.GetValue(ctx, SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds); err == nil {
+		applyPositiveIntSetting(&s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTimeoutSeconds, value)
+	}
+	if value, err := s.settingRepo.GetValue(ctx, SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds); err == nil {
+		applyPositiveIntSettingWithDefault(&s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTempUnschedulableSeconds, value, probeDefaultTempUnschedulableSeconds)
+	}
+}
+
+func applyGatewayOpenAIWSSchedulerMode(target *string, raw string) {
+	if target == nil {
+		return
+	}
+	mode := strings.ToLower(strings.TrimSpace(raw))
+	if mode == "weighted" || mode == "layered" {
+		*target = mode
+	}
+}
+
+func applyPositiveIntSetting(target *int, raw string) {
+	if target == nil {
+		return
+	}
+	if parsed, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && parsed > 0 {
+		*target = parsed
+	}
+}
+
+func applyPositiveIntSettingWithDefault(target *int, raw string, defaultValue int) {
+	if target == nil {
+		return
+	}
+	if parsed, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && parsed > 0 {
+		*target = parsed
+		return
+	}
+	if defaultValue > 0 {
+		*target = defaultValue
+	}
+}
+
+func applyPositiveFloatSettingInRange(target *float64, raw string, minExclusive, maxInclusive float64) {
+	if target == nil {
+		return
+	}
+	if parsed, err := strconv.ParseFloat(strings.TrimSpace(raw), 64); err == nil && parsed > minExclusive && parsed <= maxInclusive {
+		*target = parsed
+	}
+}
+
+func applyFloatSettingGreaterThan(target *float64, raw string, minExclusive float64) {
+	if target == nil {
+		return
+	}
+	if parsed, err := strconv.ParseFloat(strings.TrimSpace(raw), 64); err == nil && parsed > minExclusive {
+		*target = parsed
+	}
 }
 
 // SetProxyRepository injects a proxy repo for resolving websearch provider proxy URLs.
@@ -713,7 +966,7 @@ func (s *SettingService) GetFrontendURL(ctx context.Context) string {
 }
 
 // GetCyberSessionBlockRuntime 返回 (开关, TTL)，进程内缓存 ~60s，
-// 供网关热路径读取时避免 DB 往返。
+// 模式对齐 IsOpenAIAllowClaudeCodeCodexPluginEnabled（热路径零 DB 往返）。
 // 两个 setting key 在单次 singleflight 里一起读取，减少 DB 往返。
 // 默认值：开关 false，TTL 1h（与粘性会话对齐）。
 func (s *SettingService) GetCyberSessionBlockRuntime(ctx context.Context) (bool, time.Duration) {
@@ -1138,14 +1391,59 @@ func (s *SettingService) GetOpenAICodexUserAgent(ctx context.Context) string {
 	return fallback
 }
 
+// IsOpenAIAllowClaudeCodeCodexPluginEnabled 全局开关：是否额外放行 Claude Code 的 Codex 插件（默认关闭）。
+// 仅在调用方已确认账号 codex_cli_only 开启时读取，避免对非受限账号产生无谓查询。
+// 使用进程内 atomic.Value 缓存（60s TTL），避免在每个网关请求热路径上访问 DB。
+func (s *SettingService) IsOpenAIAllowClaudeCodeCodexPluginEnabled(ctx context.Context) bool {
+	if cached, ok := s.openAIAllowCodexPluginCache.Load().(*cachedOpenAIAllowCodexPlugin); ok && cached != nil {
+		if time.Now().UnixNano() < cached.expiresAt {
+			return cached.value
+		}
+	}
+	result, _, _ := s.openAIAllowCodexPluginSF.Do("openai_allow_codex_plugin_enabled", func() (any, error) {
+		if cached, ok := s.openAIAllowCodexPluginCache.Load().(*cachedOpenAIAllowCodexPlugin); ok && cached != nil {
+			if time.Now().UnixNano() < cached.expiresAt {
+				return cached.value, nil
+			}
+		}
+		dbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), openAIAllowCodexPluginDBTimeout)
+		defer cancel()
+		value, err := s.settingRepo.GetValue(dbCtx, SettingKeyOpenAIAllowClaudeCodeCodexPlugin)
+		if err != nil {
+			if errors.Is(err, ErrSettingNotFound) {
+				// 设置不存在 → 默认关闭，正常 TTL 缓存
+				s.openAIAllowCodexPluginCache.Store(&cachedOpenAIAllowCodexPlugin{
+					value:     false,
+					expiresAt: time.Now().Add(openAIAllowCodexPluginCacheTTL).UnixNano(),
+				})
+				return false, nil
+			}
+			slog.Warn("failed to get openai_allow_claude_code_codex_plugin setting", "error", err)
+			// DB 错误 → 安全默认关闭，短 TTL 快速重试
+			s.openAIAllowCodexPluginCache.Store(&cachedOpenAIAllowCodexPlugin{
+				value:     false,
+				expiresAt: time.Now().Add(openAIAllowCodexPluginErrorTTL).UnixNano(),
+			})
+			return false, nil
+		}
+		enabled := value == "true"
+		s.openAIAllowCodexPluginCache.Store(&cachedOpenAIAllowCodexPlugin{
+			value:     enabled,
+			expiresAt: time.Now().Add(openAIAllowCodexPluginCacheTTL).UnixNano(),
+		})
+		return enabled, nil
+	})
+	if val, ok := result.(bool); ok {
+		return val
+	}
+	return false
+}
+
 var legacyClaudeCodeCodexWhitelistEntry = openai.AllowedClientEntry{
 	Originator: "Claude Code",
 	UAContains: []string{"Claude Code/"},
 }
 
-// MigrateOpenAIAllowClaudeCodeCodexPluginSetting folds the deprecated global Claude Code
-// plugin allow switch into codex_cli_only_whitelist. The app-server identity model is the
-// same originator + UA marker pair, so runtime checks no longer need a separate flag.
 func (s *SettingService) MigrateOpenAIAllowClaudeCodeCodexPluginSetting(ctx context.Context) error {
 	if s == nil || s.settingRepo == nil {
 		return nil
@@ -1155,7 +1453,6 @@ func (s *SettingService) MigrateOpenAIAllowClaudeCodeCodexPluginSetting(ctx cont
 	}
 	dbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), codexRestrictionPolicyDBTimeout)
 	defer cancel()
-
 	legacyValue, err := s.settingRepo.GetValue(dbCtx, SettingKeyOpenAIAllowClaudeCodeCodexPlugin)
 	if err != nil {
 		if errors.Is(err, ErrSettingNotFound) {
@@ -1166,22 +1463,10 @@ func (s *SettingService) MigrateOpenAIAllowClaudeCodeCodexPluginSetting(ctx cont
 	if strings.TrimSpace(legacyValue) != "true" {
 		return nil
 	}
-
-	rawWhitelist, err := s.settingRepo.GetValue(dbCtx, SettingKeyCodexCLIOnlyWhitelist)
-	if err != nil && !errors.Is(err, ErrSettingNotFound) {
-		return fmt.Errorf("get %s setting: %w", SettingKeyCodexCLIOnlyWhitelist, err)
-	}
-
-	var entries []openai.AllowedClientEntry
-	if strings.TrimSpace(rawWhitelist) != "" {
-		if err := json.Unmarshal([]byte(rawWhitelist), &entries); err != nil {
-			return fmt.Errorf("parse %s setting: %w", SettingKeyCodexCLIOnlyWhitelist, err)
-		}
-	}
+	entries := s.loadCodexClientEntries(dbCtx, SettingKeyCodexCLIOnlyWhitelist)
 	if codexClientEntriesContain(entries, legacyClaudeCodeCodexWhitelistEntry) {
 		return nil
 	}
-
 	entries = append(entries, legacyClaudeCodeCodexWhitelistEntry)
 	encoded, err := json.Marshal(entries)
 	if err != nil {
@@ -1195,9 +1480,6 @@ func (s *SettingService) MigrateOpenAIAllowClaudeCodeCodexPluginSetting(ctx cont
 	return nil
 }
 
-// MigrateCodexBodyFingerprintToSignals 把已废弃的 codex_cli_only_allow_body_engine_fingerprint
-// 开关并入引擎指纹信号列表。幂等:信号键已存在(非空)则不动;缺失时写默认种子,
-// 并把 body 路径行的 Required 设为旧 body 开关的值(旧 true ⇒ 勾上 body 行)。
 func (s *SettingService) MigrateCodexBodyFingerprintToSignals(ctx context.Context) error {
 	if s == nil || s.settingRepo == nil {
 		return nil
@@ -1207,34 +1489,22 @@ func (s *SettingService) MigrateCodexBodyFingerprintToSignals(ctx context.Contex
 	}
 	dbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), codexRestrictionPolicyDBTimeout)
 	defer cancel()
-
 	if v, err := s.settingRepo.GetValue(dbCtx, SettingKeyCodexCLIOnlyEngineFingerprintSignals); err == nil && strings.TrimSpace(v) != "" {
-		return nil // 已配置/已迁移
+		return nil
 	} else if err != nil && !errors.Is(err, ErrSettingNotFound) {
 		return fmt.Errorf("get %s setting: %w", SettingKeyCodexCLIOnlyEngineFingerprintSignals, err)
 	}
-
-	bodyOn := false
-	if v, err := s.settingRepo.GetValue(dbCtx, SettingKeyCodexCLIOnlyAllowBodyEngineFingerprint); err == nil {
-		bodyOn = strings.TrimSpace(v) == "true"
-	} else if !errors.Is(err, ErrSettingNotFound) {
-		return fmt.Errorf("get deprecated %s setting: %w", SettingKeyCodexCLIOnlyAllowBodyEngineFingerprint, err)
-	}
-
-	seed := make([]openai.EngineFingerprintSignal, len(openai.DefaultEngineFingerprintSignals))
-	copy(seed, openai.DefaultEngineFingerprintSignals)
-	if bodyOn {
-		for i := range seed {
-			if seed[i].Type == openai.FingerprintSignalBodyPath {
-				seed[i].Required = true
+	signals := append([]openai.EngineFingerprintSignal(nil), openai.DefaultEngineFingerprintSignals...)
+	if legacy, err := s.settingRepo.GetValue(dbCtx, SettingKeyCodexCLIOnlyAllowBodyEngineFingerprint); err == nil && strings.TrimSpace(legacy) == "true" {
+		for i := range signals {
+			if signals[i].Type == openai.FingerprintSignalBodyPath {
+				signals[i].Required = true
 			}
 		}
 	}
-	encoded, err := json.Marshal(seed)
-	if err != nil {
-		return fmt.Errorf("marshal %s setting: %w", SettingKeyCodexCLIOnlyEngineFingerprintSignals, err)
-	}
-	if err := s.settingRepo.Set(dbCtx, SettingKeyCodexCLIOnlyEngineFingerprintSignals, string(encoded)); err != nil {
+	encodedBytes, _ := json.Marshal(signals)
+	encoded := string(encodedBytes)
+	if err := s.settingRepo.Set(dbCtx, SettingKeyCodexCLIOnlyEngineFingerprintSignals, encoded); err != nil {
 		return fmt.Errorf("set %s setting: %w", SettingKeyCodexCLIOnlyEngineFingerprintSignals, err)
 	}
 	s.codexRestrictionPolicySF.Forget("codex_restriction_policy")
@@ -1243,67 +1513,43 @@ func (s *SettingService) MigrateCodexBodyFingerprintToSignals(ctx context.Contex
 }
 
 func codexClientEntriesContain(entries []openai.AllowedClientEntry, want openai.AllowedClientEntry) bool {
-	wantOriginator := strings.TrimSpace(want.Originator)
-	if wantOriginator == "" {
-		return false
-	}
-	wantMarkers := normalizedCodexClientMarkers(want.UAContains)
-	if len(wantMarkers) == 0 {
-		return false
-	}
 	for _, entry := range entries {
-		if !strings.EqualFold(strings.TrimSpace(entry.Originator), wantOriginator) {
-			continue
-		}
-		gotMarkers := normalizedCodexClientMarkers(entry.UAContains)
-		if len(gotMarkers) != len(wantMarkers) {
-			continue
-		}
-		matched := true
-		for marker := range wantMarkers {
-			if _, ok := gotMarkers[marker]; !ok {
-				matched = false
-				break
-			}
-		}
-		if matched {
+		if strings.EqualFold(strings.TrimSpace(entry.Originator), strings.TrimSpace(want.Originator)) && stringSlicesEqual(entry.UAContains, want.UAContains) {
 			return true
 		}
 	}
 	return false
 }
 
-func normalizedCodexClientMarkers(markers []string) map[string]struct{} {
-	normalized := make(map[string]struct{}, len(markers))
-	for _, marker := range markers {
-		marker = strings.TrimSpace(marker)
-		if marker == "" {
-			continue
-		}
-		normalized[strings.ToLower(marker)] = struct{}{}
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
 	}
-	return normalized
+	for i := range a {
+		if strings.TrimSpace(a[i]) != strings.TrimSpace(b[i]) {
+			return false
+		}
+	}
+	return true
 }
 
-// GetCodexRestrictionPolicy 读取 codex_cli_only 全局加固策略（黑/白名单、最低版本、引擎指纹门）。
-// 仅在调用方已确认账号 codex_cli_only 开启时读取；进程内 atomic.Value 缓存（60s TTL）避免热路径访问 DB。
-// 任意键缺失/解析失败 → 安全默认：空名单、空版本、默认种子指纹信号。
 func (s *SettingService) GetCodexRestrictionPolicy(ctx context.Context) CodexRestrictionPolicy {
-	if cached, ok := s.codexRestrictionPolicyCache.Load().(*cachedCodexRestrictionPolicy); ok && cached != nil {
-		if time.Now().UnixNano() < cached.expiresAt {
-			return cached.value
-		}
+	if cached, ok := s.codexRestrictionPolicyCache.Load().(*cachedCodexRestrictionPolicy); ok && cached != nil && time.Now().UnixNano() < cached.expiresAt {
+		return cached.value
 	}
 	result, _, _ := s.codexRestrictionPolicySF.Do("codex_restriction_policy", func() (any, error) {
-		if cached, ok := s.codexRestrictionPolicyCache.Load().(*cachedCodexRestrictionPolicy); ok && cached != nil {
-			if time.Now().UnixNano() < cached.expiresAt {
-				return cached.value, nil
-			}
+		if cached, ok := s.codexRestrictionPolicyCache.Load().(*cachedCodexRestrictionPolicy); ok && cached != nil && time.Now().UnixNano() < cached.expiresAt {
+			return cached.value, nil
+		}
+		if ctx == nil {
+			ctx = context.Background()
 		}
 		dbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), codexRestrictionPolicyDBTimeout)
 		defer cancel()
-
-		pol := CodexRestrictionPolicy{EngineFingerprintSignals: openai.DefaultEngineFingerprintSignals} // 安全默认：默认种子指纹信号
+		pol := CodexRestrictionPolicy{EngineFingerprintSignals: openai.DefaultEngineFingerprintSignals}
+		if s == nil || s.settingRepo == nil {
+			return pol, nil
+		}
 		if v, err := s.settingRepo.GetValue(dbCtx, SettingKeyMinCodexVersion); err == nil {
 			pol.MinCodexVersion = strings.TrimSpace(v)
 		}
@@ -1311,16 +1557,12 @@ func (s *SettingService) GetCodexRestrictionPolicy(ctx context.Context) CodexRes
 			pol.MaxCodexVersion = strings.TrimSpace(v)
 		}
 		if v, err := s.settingRepo.GetValue(dbCtx, SettingKeyCodexCLIOnlyAllowAppServerClients); err == nil {
-			pol.AllowAppServerClients = strings.TrimSpace(v) == "true" // 仅显式 "true" 开启
+			pol.AllowAppServerClients = strings.TrimSpace(v) == "true"
 		}
 		pol.EngineFingerprintSignals = s.loadEngineFingerprintSignals(dbCtx)
 		pol.Whitelist = s.loadCodexClientEntries(dbCtx, SettingKeyCodexCLIOnlyWhitelist)
 		pol.Blacklist = s.loadCodexClientEntries(dbCtx, SettingKeyCodexCLIOnlyBlacklist)
-
-		s.codexRestrictionPolicyCache.Store(&cachedCodexRestrictionPolicy{
-			value:     pol,
-			expiresAt: time.Now().Add(codexRestrictionPolicyCacheTTL).UnixNano(),
-		})
+		s.codexRestrictionPolicyCache.Store(&cachedCodexRestrictionPolicy{value: pol, expiresAt: time.Now().Add(codexRestrictionPolicyCacheTTL).UnixNano()})
 		return pol, nil
 	})
 	if pol, ok := result.(CodexRestrictionPolicy); ok {
@@ -1329,77 +1571,82 @@ func (s *SettingService) GetCodexRestrictionPolicy(ctx context.Context) CodexRes
 	return CodexRestrictionPolicy{EngineFingerprintSignals: openai.DefaultEngineFingerprintSignals}
 }
 
-// loadCodexClientEntries 读取并解析 []openai.AllowedClientEntry JSON 设置；缺失/空/非法 → nil（安全忽略）。
 func (s *SettingService) loadCodexClientEntries(ctx context.Context, key string) []openai.AllowedClientEntry {
+	if s == nil || s.settingRepo == nil {
+		return nil
+	}
 	v, err := s.settingRepo.GetValue(ctx, key)
 	if err != nil || strings.TrimSpace(v) == "" {
 		return nil
 	}
 	var entries []openai.AllowedClientEntry
-	if json.Unmarshal([]byte(v), &entries) != nil {
+	if err := json.Unmarshal([]byte(v), &entries); err != nil {
 		return nil
 	}
 	return entries
 }
 
-// loadEngineFingerprintSignals 读取引擎指纹信号列表;缺失/空/非法 → 默认种子。
 func (s *SettingService) loadEngineFingerprintSignals(ctx context.Context) []openai.EngineFingerprintSignal {
+	if s == nil || s.settingRepo == nil {
+		return openai.DefaultEngineFingerprintSignals
+	}
 	v, err := s.settingRepo.GetValue(ctx, SettingKeyCodexCLIOnlyEngineFingerprintSignals)
 	if err != nil || strings.TrimSpace(v) == "" {
 		return openai.DefaultEngineFingerprintSignals
 	}
-	sigs, ok := openai.ParseEngineFingerprintSignals(v)
+	signals, ok := openai.ParseEngineFingerprintSignals(v)
 	if !ok {
 		return openai.DefaultEngineFingerprintSignals
 	}
-	return sigs
+	return signals
 }
 
-// ValidateCodexClientEntriesJSON 校验 codex_cli_only 名单 JSON 配置（黑名单语义）：
-// 空=合法（禁用）；非空须为 []AllowedClientEntry 的 JSON 数组。黑名单是 OR 宽 deny，
-// 允许 originator-only 条目，故不校验 ua_contains。白名单请用 ValidateCodexWhitelistEntriesJSON。
 func ValidateCodexClientEntriesJSON(raw string) error {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
+	if strings.TrimSpace(raw) == "" {
 		return nil
 	}
 	var entries []openai.AllowedClientEntry
-	if err := json.Unmarshal([]byte(trimmed), &entries); err != nil {
-		return fmt.Errorf("must be empty or a valid JSON array of {originator, ua_contains}")
+	if err := json.Unmarshal([]byte(raw), &entries); err != nil {
+		return err
 	}
 	return nil
 }
 
-// ValidateCodexWhitelistEntriesJSON 在 ValidateCodexClientEntriesJSON 的数组结构校验之上，额外要求
-// 每条白名单条目「有可能命中」（openai.AllowedClientEntry.IsWhitelistable）。白名单是双因子 AND：
-// originator-only、空或含空白 ua_contains 的条目会在运行时静默失效——这里让管理员在写入时即收到反馈，
-// 而非存入永不命中的死规则。黑名单（OR 宽 deny）仍用 ValidateCodexClientEntriesJSON。
 func ValidateCodexWhitelistEntriesJSON(raw string) error {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
+	if err := ValidateCodexClientEntriesJSON(raw); err != nil {
+		return err
+	}
+	if strings.TrimSpace(raw) == "" {
 		return nil
 	}
 	var entries []openai.AllowedClientEntry
-	if err := json.Unmarshal([]byte(trimmed), &entries); err != nil {
-		return fmt.Errorf("must be empty or a valid JSON array of {originator, ua_contains}")
+	if err := json.Unmarshal([]byte(raw), &entries); err != nil {
+		return err
 	}
-	for i, e := range entries {
-		if !e.IsWhitelistable() {
-			return fmt.Errorf("entry %d: whitelist requires a non-empty originator and at least one non-empty ua_contains (double-factor AND; otherwise the rule never matches)", i)
+	for _, entry := range entries {
+		if !entry.IsWhitelistable() {
+			return fmt.Errorf("entries must include non-empty originator and ua_contains")
 		}
 	}
 	return nil
 }
 
-// ValidateEngineFingerprintSignalsJSON 服务层包装,复用 openai 校验逻辑。
 func ValidateEngineFingerprintSignalsJSON(raw string) error {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
 	return openai.ValidateEngineFingerprintSignalsJSON(raw)
 }
 
 // SetOnUpdateCallback sets a callback function to be called when settings are updated
 // This is used for cache invalidation (e.g., HTML cache in frontend server)
 func (s *SettingService) SetOnUpdateCallback(callback func()) {
-	s.onUpdate = callback
+	if s == nil || callback == nil {
+		return
+	}
+	s.onUpdateMu.Lock()
+	defer s.onUpdateMu.Unlock()
+	s.onUpdateCallbacks = append(s.onUpdateCallbacks, callback)
 }
 
 // SetVersion sets the application version for injection into public settings
@@ -2201,6 +2448,19 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 
 	// Backend Mode
 	updates[SettingKeyBackendModeEnabled] = strconv.FormatBool(settings.BackendModeEnabled)
+	updates[SettingKeyGatewayStickyOpenAIEnabled] = strconv.FormatBool(settings.GatewayStickyOpenAIEnabled)
+	updates[SettingKeyGatewayStickyGeminiEnabled] = strconv.FormatBool(settings.GatewayStickyGeminiEnabled)
+	updates[SettingKeyGatewayStickyAnthropicEnabled] = strconv.FormatBool(settings.GatewayStickyAnthropicEnabled)
+	updates[SettingKeyGatewayOpenAIWSSchedulerMode] = strings.ToLower(strings.TrimSpace(settings.GatewayOpenAIWSSchedulerMode))
+	updates[SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold] = strconv.FormatFloat(settings.GatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold, 'f', -1, 64)
+	updates[SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyValue] = strconv.Itoa(settings.GatewayOpenAIWSSchedulerLayeredErrorPenaltyValue)
+	updates[SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier] = strconv.FormatFloat(settings.GatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier, 'f', -1, 64)
+	updates[SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue] = strconv.Itoa(settings.GatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue)
+	updates[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds] = strconv.Itoa(settings.GatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds)
+	updates[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds] = strconv.Itoa(settings.GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds)
+	updates[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeMaxFailures] = strconv.Itoa(settings.GatewayOpenAIWSSchedulerLayeredProbeMaxFailures)
+	updates[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds] = strconv.Itoa(settings.GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds)
+	updates[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds] = strconv.Itoa(settings.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds)
 
 	// Gateway forwarding behavior
 	updates[SettingKeyEnableFingerprintUnification] = strconv.FormatBool(settings.EnableFingerprintUnification)
@@ -2217,13 +2477,6 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyEnableClientDatelineNormalization] = strconv.FormatBool(settings.EnableClientDatelineNormalization)
 	updates[SettingKeyAntigravityUserAgentVersion] = antigravity.NormalizeUserAgentVersion(settings.AntigravityUserAgentVersion)
 	updates[SettingKeyOpenAICodexUserAgent] = strings.TrimSpace(settings.OpenAICodexUserAgent)
-	// codex_cli_only 加固
-	updates[SettingKeyMinCodexVersion] = strings.TrimSpace(settings.MinCodexVersion)
-	updates[SettingKeyMaxCodexVersion] = strings.TrimSpace(settings.MaxCodexVersion)
-	updates[SettingKeyCodexCLIOnlyBlacklist] = strings.TrimSpace(settings.CodexCLIOnlyBlacklist)
-	updates[SettingKeyCodexCLIOnlyWhitelist] = strings.TrimSpace(settings.CodexCLIOnlyWhitelist)
-	updates[SettingKeyCodexCLIOnlyAllowAppServerClients] = strconv.FormatBool(settings.CodexCLIOnlyAllowAppServerClients)
-	updates[SettingKeyCodexCLIOnlyEngineFingerprintSignals] = strings.TrimSpace(settings.CodexCLIOnlyEngineFingerprintSignals)
 	updates[SettingPaymentVisibleMethodAlipaySource] = settings.PaymentVisibleMethodAlipaySource
 	updates[SettingPaymentVisibleMethodWxpaySource] = settings.PaymentVisibleMethodWxpaySource
 	updates[SettingPaymentVisibleMethodAlipayEnabled] = strconv.FormatBool(settings.PaymentVisibleMethodAlipayEnabled)
@@ -2330,6 +2583,21 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	if settings == nil {
 		return
 	}
+	if s.cfg != nil {
+		s.cfg.Gateway.Sticky.OpenAI.Enabled = settings.GatewayStickyOpenAIEnabled
+		s.cfg.Gateway.Sticky.Gemini.Enabled = settings.GatewayStickyGeminiEnabled
+		s.cfg.Gateway.Sticky.Anthropic.Enabled = settings.GatewayStickyAnthropicEnabled
+		applyGatewayOpenAIWSSchedulerMode(&s.cfg.Gateway.OpenAIWS.SchedulerMode, settings.GatewayOpenAIWSSchedulerMode)
+		s.cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold = settings.GatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold
+		s.cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyValue = settings.GatewayOpenAIWSSchedulerLayeredErrorPenaltyValue
+		s.cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyMultiplier = settings.GatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier
+		s.cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyValue = settings.GatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue
+		s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeCooldownSeconds = settings.GatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds
+		s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeIntervalSeconds = settings.GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds
+		s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeMaxFailures = settings.GatewayOpenAIWSSchedulerLayeredProbeMaxFailures
+		s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTimeoutSeconds = settings.GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds
+		s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTempUnschedulableSeconds = settings.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds
+	}
 
 	// 先使 inflight singleflight 失效，再刷新缓存，缩小旧值覆盖新值的竞态窗口
 	versionBoundsSF.Forget("version_bounds")
@@ -2393,11 +2661,17 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	if s.cfg != nil {
 		s.cfg.SetTrustForwardedIPForAPIKeyACL(settings.APIKeyACLTrustForwardedIP)
 	}
-	// codex_cli_only 加固策略缓存：设置更新后强制下次重载（涉及 4 个键 + JSON 解析，直接置过期）。
+	s.openAIAllowCodexPluginSF.Forget("openai_allow_codex_plugin_enabled")
+	s.openAIAllowCodexPluginCache.Store(&cachedOpenAIAllowCodexPlugin{expiresAt: 0})
 	s.codexRestrictionPolicySF.Forget("codex_restriction_policy")
 	s.codexRestrictionPolicyCache.Store(&cachedCodexRestrictionPolicy{expiresAt: 0})
-	if s.onUpdate != nil {
-		s.onUpdate() // Invalidate cache after settings update
+	s.onUpdateMu.RLock()
+	callbacks := append([]func(){}, s.onUpdateCallbacks...)
+	s.onUpdateMu.RUnlock()
+	for _, callback := range callbacks {
+		if callback != nil {
+			callback()
+		}
 	}
 }
 
@@ -3187,14 +3461,6 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyMinClaudeCodeVersion: "",
 		SettingKeyMaxClaudeCodeVersion: "",
 
-		// codex_cli_only 加固（默认：版本不检查、名单空、默认种子指纹信号）
-		SettingKeyMinCodexVersion:                      "",
-		SettingKeyMaxCodexVersion:                      "",
-		SettingKeyCodexCLIOnlyBlacklist:                "",
-		SettingKeyCodexCLIOnlyWhitelist:                "",
-		SettingKeyCodexCLIOnlyAllowAppServerClients:    "false",
-		SettingKeyCodexCLIOnlyEngineFingerprintSignals: openai.DefaultEngineFingerprintSignalsJSON(),
-
 		// 分组隔离（默认不允许未分组 Key 调度）
 		SettingKeyAllowUngroupedKeyScheduling:        "false",
 		SettingKeyEnableAnthropicCacheTTL1hInjection: "false",
@@ -3264,6 +3530,110 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		CustomMenuItems:                  settings[SettingKeyCustomMenuItems],
 		CustomEndpoints:                  settings[SettingKeyCustomEndpoints],
 		BackendModeEnabled:               settings[SettingKeyBackendModeEnabled] == "true",
+		GatewayStickyOpenAIEnabled:       s.cfg != nil && s.cfg.Gateway.Sticky.OpenAI.Enabled,
+		GatewayStickyGeminiEnabled:       s.cfg != nil && s.cfg.Gateway.Sticky.Gemini.Enabled,
+		GatewayStickyAnthropicEnabled:    s.cfg != nil && s.cfg.Gateway.Sticky.Anthropic.Enabled,
+		GatewayOpenAIWSSchedulerMode: strings.ToLower(strings.TrimSpace(func() string {
+			if s != nil && s.cfg != nil {
+				return s.cfg.Gateway.OpenAIWS.SchedulerMode
+			}
+			return ""
+		}())),
+		GatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold: func() float64 {
+			if s != nil && s.cfg != nil {
+				return s.cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold
+			}
+			return 0
+		}(),
+		GatewayOpenAIWSSchedulerLayeredErrorPenaltyValue: func() int {
+			if s != nil && s.cfg != nil {
+				return s.cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyValue
+			}
+			return 0
+		}(),
+		GatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier: func() float64 {
+			if s != nil && s.cfg != nil {
+				return s.cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyMultiplier
+			}
+			return 0
+		}(),
+		GatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue: func() int {
+			if s != nil && s.cfg != nil {
+				return s.cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyValue
+			}
+			return 0
+		}(),
+		GatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds: func() int {
+			if s != nil && s.cfg != nil {
+				return s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeCooldownSeconds
+			}
+			return 0
+		}(),
+		GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds: func() int {
+			if s != nil && s.cfg != nil {
+				return s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeIntervalSeconds
+			}
+			return 0
+		}(),
+		GatewayOpenAIWSSchedulerLayeredProbeMaxFailures: func() int {
+			if s != nil && s.cfg != nil {
+				return s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeMaxFailures
+			}
+			return 0
+		}(),
+		GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds: func() int {
+			if s != nil && s.cfg != nil {
+				return s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTimeoutSeconds
+			}
+			return 0
+		}(),
+		GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds: func() int {
+			if s != nil && s.cfg != nil {
+				return s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTempUnschedulableSeconds
+			}
+			return 0
+		}(),
+	}
+	if raw, ok := settings[SettingKeyGatewayStickyOpenAIEnabled]; ok && strings.TrimSpace(raw) != "" {
+		result.GatewayStickyOpenAIEnabled = raw == "true"
+	}
+	if raw, ok := settings[SettingKeyGatewayStickyGeminiEnabled]; ok && strings.TrimSpace(raw) != "" {
+		result.GatewayStickyGeminiEnabled = raw == "true"
+	}
+	if raw, ok := settings[SettingKeyGatewayStickyAnthropicEnabled]; ok && strings.TrimSpace(raw) != "" {
+		result.GatewayStickyAnthropicEnabled = raw == "true"
+	}
+	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerMode]; ok {
+		applyGatewayOpenAIWSSchedulerMode(&result.GatewayOpenAIWSSchedulerMode, raw)
+	}
+	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold]; ok {
+		applyPositiveFloatSettingInRange(&result.GatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold, raw, 0, 1)
+	}
+	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyValue]; ok {
+		applyPositiveIntSetting(&result.GatewayOpenAIWSSchedulerLayeredErrorPenaltyValue, raw)
+	}
+	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier]; ok {
+		applyFloatSettingGreaterThan(&result.GatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier, raw, 1)
+	}
+	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue]; ok {
+		applyPositiveIntSetting(&result.GatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue, raw)
+	}
+	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds]; ok {
+		applyPositiveIntSetting(&result.GatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds, raw)
+	}
+	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds]; ok {
+		applyPositiveIntSetting(&result.GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds, raw)
+	}
+	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeMaxFailures]; ok {
+		applyPositiveIntSetting(&result.GatewayOpenAIWSSchedulerLayeredProbeMaxFailures, raw)
+	}
+	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds]; ok {
+		applyPositiveIntSetting(&result.GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds, raw)
+	}
+	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds]; ok {
+		applyPositiveIntSettingWithDefault(&result.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds, raw, probeDefaultTempUnschedulableSeconds)
+	} else if result.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds <= 0 {
+		result.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds = probeDefaultTempUnschedulableSeconds
 	}
 	result.TableDefaultPageSize, result.TablePageSizeOptions = parseTablePreferences(
 		settings[SettingKeyTableDefaultPageSize],
@@ -3745,17 +4115,6 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	}
 	result.AntigravityUserAgentVersion = antigravity.NormalizeUserAgentVersion(settings[SettingKeyAntigravityUserAgentVersion])
 	result.OpenAICodexUserAgent = strings.TrimSpace(settings[SettingKeyOpenAICodexUserAgent])
-	// codex_cli_only 加固
-	result.MinCodexVersion = settings[SettingKeyMinCodexVersion]
-	result.MaxCodexVersion = settings[SettingKeyMaxCodexVersion]
-	result.CodexCLIOnlyBlacklist = settings[SettingKeyCodexCLIOnlyBlacklist]
-	result.CodexCLIOnlyWhitelist = settings[SettingKeyCodexCLIOnlyWhitelist]
-	result.CodexCLIOnlyAllowAppServerClients = settings[SettingKeyCodexCLIOnlyAllowAppServerClients] == "true"
-	if raw := strings.TrimSpace(settings[SettingKeyCodexCLIOnlyEngineFingerprintSignals]); raw != "" {
-		result.CodexCLIOnlyEngineFingerprintSignals = raw
-	} else {
-		result.CodexCLIOnlyEngineFingerprintSignals = openai.DefaultEngineFingerprintSignalsJSON() // 缺失/空 → 展示默认种子
-	}
 
 	// Web search emulation: quick enabled check from the JSON config
 	if raw := settings[SettingKeyWebSearchEmulationConfig]; raw != "" {
@@ -4426,8 +4785,8 @@ func (s *SettingService) GetOverloadCooldownSettings(ctx context.Context) (*Over
 		return DefaultOverloadCooldownSettings(), nil
 	}
 
-	var settings OverloadCooldownSettings
-	if err := json.Unmarshal([]byte(value), &settings); err != nil {
+	settings := DefaultOverloadCooldownSettings()
+	if err := json.Unmarshal([]byte(value), settings); err != nil {
 		return DefaultOverloadCooldownSettings(), nil
 	}
 
@@ -4439,7 +4798,7 @@ func (s *SettingService) GetOverloadCooldownSettings(ctx context.Context) (*Over
 		settings.CooldownMinutes = 120
 	}
 
-	return &settings, nil
+	return settings, nil
 }
 
 // SetOverloadCooldownSettings 设置529过载冷却配置
@@ -4803,8 +5162,8 @@ func (s *SettingService) GetStreamTimeoutSettings(ctx context.Context) (*StreamT
 		return DefaultStreamTimeoutSettings(), nil
 	}
 
-	var settings StreamTimeoutSettings
-	if err := json.Unmarshal([]byte(value), &settings); err != nil {
+	settings := DefaultStreamTimeoutSettings()
+	if err := json.Unmarshal([]byte(value), settings); err != nil {
 		return DefaultStreamTimeoutSettings(), nil
 	}
 
@@ -4836,7 +5195,7 @@ func (s *SettingService) GetStreamTimeoutSettings(ctx context.Context) (*StreamT
 		settings.Action = StreamTimeoutActionTempUnsched
 	}
 
-	return &settings, nil
+	return settings, nil
 }
 
 // IsUngroupedKeySchedulingAllowed 查询是否允许未分组 Key 调度
@@ -5018,12 +5377,12 @@ func (s *SettingService) GetRectifierSettings(ctx context.Context) (*RectifierSe
 		return DefaultRectifierSettings(), nil
 	}
 
-	var settings RectifierSettings
-	if err := json.Unmarshal([]byte(value), &settings); err != nil {
+	settings := DefaultRectifierSettings()
+	if err := json.Unmarshal([]byte(value), settings); err != nil {
 		return DefaultRectifierSettings(), nil
 	}
 
-	return &settings, nil
+	return settings, nil
 }
 
 // SetRectifierSettings 设置请求整流器配置

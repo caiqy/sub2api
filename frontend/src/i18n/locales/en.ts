@@ -300,6 +300,7 @@ export default {
     available: 'Available',
     copiedToClipboard: 'Copied to clipboard',
     copied: 'Copied',
+    copy: 'Copy',
     copyFailed: 'Failed to copy',
     verifying: 'Verifying...',
     processing: 'Processing...',
@@ -324,7 +325,6 @@ export default {
     view: 'View',
     settings: 'Settings',
     chooseFile: 'Choose File',
-    copy: 'Copy',
     notAvailable: 'N/A',
     now: 'Now',
     today: 'Today',
@@ -344,6 +344,66 @@ export default {
         withSuffix: '{time} to lift'
       }
     }
+  },
+
+  conversation: {
+    empty: 'No conversation content found',
+    expand: 'Expand',
+    collapse: 'Collapse',
+    reasoning: 'Reasoning',
+    toolCall: 'Tool Call',
+    toolResult: 'Tool Result',
+    raw: 'Raw',
+    rawRequest: 'Raw Request',
+    rawResponse: 'Raw Response',
+    error: 'Error',
+    timelineLabel: 'Conversation timeline',
+    imageAlt: 'Conversation image',
+    tool: 'Tool',
+    toolInput: 'Input',
+    toolOutput: 'Output',
+    toolMetadata: 'Metadata',
+    role: {
+      you: 'You',
+      user: 'User',
+      assistant: 'Assistant',
+      system: 'System',
+      developer: 'Developer',
+    },
+    toolLabels: {
+      bash: 'Run Command',
+      read: 'Read',
+      write: 'Write',
+      edit: 'Edit',
+      multiedit: 'Multi Edit',
+      apply_patch: 'Patch',
+      list: 'List Directory',
+      glob: 'Path Match',
+      grep: 'Search Text',
+      webfetch: 'Fetch Webpage',
+      websearch: 'Web Search',
+      task: 'Delegate Task',
+      question: 'Question',
+      todoread: 'Read Todos',
+      todowrite: 'Update Todos',
+    },
+    systemPrompt: {
+      title: 'Developer instructions',
+      segments: '{n} segments',
+    },
+    injection: {
+      title: 'System injection',
+    },
+    reasoningMeta: {
+      segments: '{n} segments',
+      collapsedLabel: 'Reasoning',
+    },
+    toolMeta: {
+      error: 'error',
+      lines: '{n} lines',
+      sizeWithLines: '{lines} · {size}',
+      bytes: { b: 'B', kb: 'KB', mb: 'MB' },
+    },
   },
 
   adminCompliance: {
@@ -396,6 +456,7 @@ export default {
     dashboard: 'Dashboard',
     announcements: 'Announcements',
     apiKeys: 'API Keys',
+    aiImages: 'AI Images',
     usage: 'Usage',
     redeem: 'Redeem',
     affiliate: 'Affiliate Rebates',
@@ -1464,6 +1525,130 @@ export default {
     selectDateRange: 'Select date range'
   },
 
+  images: {
+    badge: 'AI Images',
+    title: 'AI Images',
+    description: 'Generate, edit, and review AI image work in one place.',
+    tabs: {
+      ariaLabel: 'AI image workspace tabs',
+      generate: 'Generate',
+      edit: 'Edit',
+      history: 'History'
+    },
+    keySelector: {
+      label: 'API Key',
+      loading: 'Loading API keys...',
+      placeholder: 'Select an API key',
+      empty: 'No API keys available yet',
+      count: '{count} API keys loaded on this page',
+      pageHint: 'Selection uses the first API key from the current page only.',
+      loadFailed: 'Failed to load API keys.',
+      retry: 'Retry'
+    },
+    panels: {
+      generate: {
+        title: 'Generate',
+        description: 'Create a fresh image from a prompt and standard gateway parameters.'
+      },
+      edit: {
+        title: 'Edit',
+        description: 'Upload a source image, optionally add a mask, and submit multipart edits.'
+      },
+      history: {
+        title: 'History',
+        description: 'Review past image requests and replay their parameters.'
+      }
+    },
+    forms: {
+      generate: {
+        prompt: 'Prompt',
+        promptPlaceholder: 'Describe the image you want to create',
+        model: 'Model',
+        size: 'Size',
+        sizeHint: 'Official popular presets are shown here. GPT Image 2 also supports auto and more custom sizes that satisfy OpenAI constraints.',
+        customSize: 'Custom size',
+        customSizePlaceholder: 'e.g. 2048x1152',
+        customSizeRequirements: 'Requirements: multiple of 16, max 3840, aspect ratio ≤ 3:1',
+        customSizeRequired: 'Custom size is required.',
+        customSizeFormat: 'Custom size must use the WIDTHxHEIGHT format, for example 2048x1152.',
+        customSizeMultipleOf16: 'Custom size width and height must both be multiples of 16.',
+        customSizeMaxEdge: 'Custom size cannot exceed 3840px on either edge.',
+        customSizeAspectRatio: 'Custom size aspect ratio cannot exceed 3:1.',
+        customSizePixelRange: 'Custom size pixel count must stay between 655360 and 8294400.',
+        transparentFormatAdjusted: 'Transparent background does not support JPEG, so the output format was changed to PNG.',
+        quality: 'Quality',
+        background: 'Background',
+        outputFormat: 'Output format',
+        moderation: 'Moderation',
+        n: 'Images',
+        submit: 'Generate image',
+        submitting: 'Generating...',
+        submittingWithSeconds: 'Generating... {seconds}s',
+        apiKeyRequired: 'Select an API key before submitting.',
+        promptRequired: 'Prompt is required.'
+      },
+      edit: {
+        sourceImage: 'Source image',
+        sourceImageHint: 'PNG, WEBP, or JPEG.',
+        sourceImageInvalid: 'Source image must be an image file.',
+        maskImage: 'Mask image',
+        maskImageHint: 'Transparent areas mark editable regions.',
+        sourceImageRequired: 'Source image is required.',
+        submit: 'Edit image',
+        submitting: 'Editing...',
+        submittingWithSeconds: 'Editing... {seconds}s'
+      }
+    },
+    results: {
+      title: 'Results',
+      description: 'Latest gateway response previews render here.',
+      loading: 'Loading latest result...',
+      empty: 'Submit a generate or edit request to see results.',
+      errorTitle: 'Request failed',
+      openPreview: 'Open preview',
+      download: 'Download',
+      previewTitle: 'Preview',
+      closePreview: 'Close preview',
+      revisedPrompt: 'Revised prompt',
+      duration: 'Duration'
+    },
+    history: {
+      listTitle: 'Recent requests',
+      empty: 'No image history yet.',
+      loading: 'Loading image history...',
+      loadFailed: 'Failed to load image history.',
+      retry: 'Retry',
+      detailTitle: 'History detail',
+      detailEmpty: 'Select a history record to inspect it.',
+      detailLoading: 'Loading history detail...',
+      detailLoadFailed: 'Failed to load history detail.',
+      prompt: 'Prompt',
+      noPrompt: 'No prompt',
+      parameters: 'Parameters',
+      images: 'Images',
+      status: 'Status',
+      apiKey: 'API key',
+      createdAt: 'Created at',
+      duration: 'Duration',
+      count: 'Images',
+      errorMessage: 'Error message',
+      replay: 'Replay with these settings',
+      booleanYes: 'Yes',
+      booleanNo: 'No',
+      hadSourceImage: 'Source image uploaded',
+      hadMask: 'Mask uploaded',
+      replayEditNotice: 'Replay restored the edit parameters. Re-upload the source image and optional mask before submitting again.',
+      modes: {
+        generate: 'Generate',
+        edit: 'Edit'
+      },
+      statuses: {
+        success: 'Success',
+        error: 'Error'
+      }
+    }
+  },
+
   // Admin
   admin: {
     // Dashboard
@@ -2297,6 +2482,11 @@ export default {
         finalPricePreview: 'Final per-image price preview',
         notConfigured: 'Not configured'
       },
+      userConcurrency: {
+        title: 'User Concurrency Limit',
+        description: 'When enabled, limits the max concurrent requests per user in this group',
+        limit: 'Max Concurrent Per User'
+      },
       peakRate: {
         enable: 'Enable peak rate multiplier',
         peakStart: 'Peak start',
@@ -2727,7 +2917,7 @@ export default {
       unbanFailed: 'Failed to unban user',
       inputDetailTitle: 'Input Summary Detail',
       inputDetailContent: 'Full Content',
-      matchedKeyword: 'Matched Keyword',
+      matchedKeyword: 'Matched keyword',
       queueDelay: 'Queued {ms} ms',
       allGroups: 'All Groups',
       allGroupsHint: 'Auditing all groups',
@@ -3358,6 +3548,35 @@ export default {
           unavailableDesc: 'Unavailable - pause 30 minutes'
         }
       },
+      passthroughFields: {
+        title: 'Passthrough Field Rules',
+        description: 'Applies to all account types and is independent from automatic passthrough',
+        disabledHint: 'Configured rules are preserved, but will not take effect right now',
+        addRule: 'Add Rule',
+        targetHeader: 'Header',
+        targetBody: 'Body',
+        modeForward: 'Forward',
+        modeInject: 'Inject Fixed Value',
+        modeMap: 'Map from Source',
+        modeDelete: 'Delete',
+        sourceKey: 'Source field or path',
+        targetKey: 'Target field or path',
+        headerHint: 'Header matching is case-insensitive',
+        bodyHint: 'Only xx.xx style object paths are supported',
+        injectHint: 'Fixed injection writes into the upstream request before forwarding',
+        mapHint: 'Map mode copies the source field to the target field without changing the original field',
+        deleteHint: 'Delete mode removes the specified field from the upstream request before forwarding',
+        hiddenRulesError: 'Rules are hidden. Re-enable passthrough fields to review errors',
+        errors: {
+          keyRequired: 'Field name or path is required',
+          sourceKeyRequired: 'Source field or path is required',
+          bodyPath: 'Body path must use dot notation and does not support array syntax',
+          valueRequired: 'Inject mode requires a value',
+          duplicateKey: 'Field name or path must be unique within the same target',
+          sameSourceAndTarget: 'Source and target fields must be different',
+          bodyPathPrefixConflict: 'Body path cannot be an ancestor or descendant of another rule\'s path'
+        }
+      },
       clearRateLimit: 'Clear Rate Limit',
       resetQuota: 'Reset Quota',
       quotaLimit: 'Quota Limit',
@@ -3586,6 +3805,15 @@ export default {
         testMode: 'Test mode',
         testModeDefault: 'Default request',
         testModeCompact: 'Compact probe',
+        probeEnabled: 'Auto health check',
+        probeEnabledDesc:
+          'When enabled, this account participates in the layered scheduler health check. Disable to stop automatic checks; existing probe-induced temp unschedulable state is cleared on save.',
+        probeEnabledOffHint:
+          'This account will not be enrolled in automatic health checks. If currently in a probe-induced temp unschedulable state, saving will restore scheduling immediately.',
+        probeModel: 'Probe model',
+        probeModelPlaceholder: 'Leave blank for default',
+        probeModelHint:
+          'When set, health checks use this model. For image-only upstreams, set to a model the upstream supports (e.g. gpt-image-2).',
         modelRestrictionDisabledByPassthrough: 'Automatic passthrough is enabled: model whitelist/mapping will not take effect.',
       },
       grok: {
@@ -4761,14 +4989,14 @@ export default {
       failedToUpdate: 'Failed to update promo code',
       failedToDelete: 'Failed to delete promo code',
       failedToLoadUsages: 'Failed to load usage records'
-    },
+  },
 
-    // Usage Records
-    usage: {
+  // Usage Records
+  usage: {
       title: 'Usage Records',
       description: 'View and manage all user usage records',
       userFilter: 'User',
-      searchUserPlaceholder: 'Search user by email...',
+      searchUserPlaceholder: 'Search by username or email...',
       searchApiKeyPlaceholder: 'Search API key by name...',
       searchAccountPlaceholder: 'Search account by name...',
       selectedUser: 'Selected',
@@ -4804,6 +5032,27 @@ export default {
       ipAddress: 'IP',
       clickToViewBalance: 'Click to view balance history',
       failedToLoadUser: 'Failed to load user info',
+      viewDetail: 'View detail',
+      failedToLoadDetail: 'Failed to load detail',
+      detailNotFound: 'Detail not found',
+      clientRequestHeaders: 'Client Request Headers',
+      clientRequestBody: 'Client Request Body',
+      upstreamRequestHeaders: 'Upstream Request Headers',
+      upstreamRequestBody: 'Upstream Request Body',
+      upstreamResponseHeaders: 'Upstream Response Headers',
+      upstreamResponseBody: 'Upstream Response Body',
+      responseHeaders: 'Response Headers',
+      responseBody: 'Response Body',
+      conversationFlow: 'Conversation Flow',
+      conversationFlowEmpty: 'No conversation content found',
+      conversationFlowRawRequest: 'Unrecognized request body',
+      conversationFlowRawResponse: 'Unrecognized response body',
+      imagePreview: 'Image Preview',
+      rawResponseBody: 'Raw Response JSON',
+      openImagePreview: 'Open image preview',
+      previewImageTitle: 'Image Preview Modal',
+      closeImagePreview: 'Close preview',
+      emptyDetailContent: 'No content',
       userDeletedBadge: 'Deleted',
       cleanup: {
         button: 'Cleanup',
@@ -6530,6 +6779,46 @@ export default {
           testSuccess: 'Google Drive storage test passed (upload, access, delete all OK)',
           testFailed: 'Google Drive storage test failed'
         }
+      },
+      gatewayRuntime: {
+        title: 'Gateway Runtime Parameters',
+        description: 'Configure runtime timeout parameters for gateway upstream connections. Changes only affect new requests after saving.',
+        loadFailed: 'Failed to load gateway runtime settings',
+        loadFailedInline: 'Gateway runtime settings failed to load. Saving is disabled until data loads successfully.',
+        responseHeaderTimeout: 'Upstream Response Header Timeout (seconds)',
+        responseHeaderTimeoutHint: 'Default: 600 seconds. Maximum wait time for upstream response headers and must be greater than 0.',
+        responseHeaderTimeoutWarning: 'Updating this will clear idle connection pools, and new requests will use the new configuration.',
+        streamDataIntervalTimeout: 'Stream Data Interval Timeout (seconds)',
+        streamDataIntervalTimeoutHint: 'Default: 180 seconds. Set to 0, or any value between 30 and 300 seconds.',
+        usageLogDetailRetentionLimit: 'Normal call detail retention limit',
+        usageLogDetailRetentionLimitHint: 'Default: 300. Set to 0 to stop retaining normal call details.',
+        imageUsageLogDetailRetentionLimit: 'Image call detail retention limit',
+        imageUsageLogDetailRetentionLimitHint: 'Default: 300. Set to 0 to stop retaining image call details.',
+        validationFailed: 'Gateway runtime settings contain invalid values. Check the fields and save again.',
+        saved: 'Gateway runtime settings saved',
+        saveFailed: 'Failed to save gateway runtime settings'
+      },
+      gatewaySticky: {
+        title: 'Platform Sticky Switches',
+        description: 'Control sticky session behavior separately for OpenAI, Gemini, and Anthropic.',
+        openaiHint: 'When disabled, OpenAI requests no longer use sticky session binding.',
+        geminiHint: 'When disabled, Gemini requests no longer use sticky session binding.',
+        anthropicHint: 'When disabled, Anthropic requests no longer use sticky session binding.'
+      },
+      openaiWsScheduler: {
+        title: 'OpenAI WS Scheduler',
+        description: 'Configure the OpenAI Responses WebSocket scheduler mode and layered scheduler parameters.',
+        mode: 'Scheduler Mode',
+        modeHint: 'weighted uses weighted scheduling; layered uses layered scheduling.',
+        errorPenaltyThreshold: 'Error Penalty Threshold',
+        errorPenaltyValue: 'Error Penalty Value',
+        ttftPenaltyMultiplier: 'TTFT Penalty Multiplier',
+        ttftPenaltyValue: 'TTFT Penalty Value',
+        probeCooldownSeconds: 'Probe Cooldown (seconds)',
+        probeIntervalSeconds: 'Probe Interval (seconds)',
+        probeMaxFailures: 'Probe Max Failures',
+        probeTimeoutSeconds: 'Probe Timeout (seconds)',
+        probeTempUnschedulableSeconds: 'Temp Unschedulable Cooldown (seconds)'
       },
       overloadCooldown: {
         title: '529 Overload Cooldown',

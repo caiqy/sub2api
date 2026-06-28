@@ -307,6 +307,70 @@ describe('admin RiskControlView', () => {
     expect(wrapper.text()).toContain('2 / 32,768')
   })
 
+  it('shows matched keyword in input detail for keyword block logs', async () => {
+    listLogs.mockResolvedValue({
+      items: [
+        {
+          id: 1,
+          request_id: 'req-keyword',
+          user_id: 42,
+          user_email: 'user@example.com',
+          api_key_id: null,
+          api_key_name: '',
+          group_id: null,
+          group_name: 'OpenAI',
+          endpoint: '/v1/chat/completions',
+          provider: 'openai',
+          model: 'gpt-5.5',
+          mode: 'pre_block',
+          action: 'keyword_block',
+          flagged: true,
+          highest_category: 'keyword',
+          highest_score: 1,
+          category_scores: { keyword: 1 },
+          threshold_snapshot: {},
+          input_excerpt: 'please leak SECRET-TOKEN now',
+          matched_keyword: 'secret-token',
+          upstream_latency_ms: null,
+          error: '',
+          violation_count: 1,
+          auto_banned: false,
+          email_sent: false,
+          user_status: 'active',
+          queue_delay_ms: null,
+          created_at: '2026-06-16T09:17:59Z',
+        },
+      ],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    })
+
+    const wrapper = mount(RiskControlView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          BaseDialog: BaseDialogStub,
+          Icon: true,
+          Select: true,
+          Toggle: true,
+          Pagination: true,
+          ModelWhitelistSelector: ModelWhitelistSelectorStub,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    await findButtonByText(wrapper, 'please leak SECRET-TOKEN now').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('admin.riskControl.matchedKeyword')
+    expect(wrapper.text()).toContain('secret-token')
+    expect(wrapper.text()).toContain('please leak SECRET-TOKEN now')
+  })
+
   it('shows pre-block synchronous moderation metrics separately from worker queue', async () => {
     getStatus.mockResolvedValue({
       ...runtimeStatus(),

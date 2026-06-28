@@ -1069,6 +1069,52 @@
           </div>
         </div>
 
+        <!-- 用户并发限制 -->
+        <div class="border-t pt-4">
+          <h4 class="text-sm font-medium text-white mb-3">
+            {{ t("admin.groups.userConcurrency.title") }}
+          </h4>
+          <p class="text-xs text-gray-400 mb-3">
+            {{ t("admin.groups.userConcurrency.description") }}
+          </p>
+          <div class="flex items-center gap-3 mb-3">
+            <button
+              type="button"
+              @click="createForm.user_concurrency_enabled = !createForm.user_concurrency_enabled"
+              :class="[
+                'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none',
+                createForm.user_concurrency_enabled
+                  ? 'bg-emerald-500'
+                  : 'bg-gray-600',
+              ]"
+            >
+              <span
+                :class="[
+                  'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                  createForm.user_concurrency_enabled
+                    ? 'translate-x-4'
+                    : 'translate-x-0',
+                ]"
+              />
+            </button>
+            <span class="text-sm text-gray-300">
+              {{ t("admin.groups.userConcurrency.title") }}
+            </span>
+          </div>
+          <div v-if="createForm.user_concurrency_enabled" class="mt-3">
+            <label class="block text-xs text-gray-400 mb-1">
+              {{ t("admin.groups.userConcurrency.limit") }}
+            </label>
+            <input
+              v-model.number="createForm.user_concurrency_limit"
+              type="number"
+              min="1"
+              step="1"
+              class="input w-32"
+            />
+          </div>
+        </div>
+
         <!-- Claude Code 客户端限制（仅 anthropic 平台） -->
         <div v-if="createForm.platform === 'anthropic'" class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
@@ -2408,6 +2454,52 @@
           </div>
         </div>
 
+        <!-- 用户并发限制 -->
+        <div class="border-t pt-4">
+          <h4 class="text-sm font-medium text-white mb-3">
+            {{ t("admin.groups.userConcurrency.title") }}
+          </h4>
+          <p class="text-xs text-gray-400 mb-3">
+            {{ t("admin.groups.userConcurrency.description") }}
+          </p>
+          <div class="flex items-center gap-3 mb-3">
+            <button
+              type="button"
+              @click="editForm.user_concurrency_enabled = !editForm.user_concurrency_enabled"
+              :class="[
+                'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none',
+                editForm.user_concurrency_enabled
+                  ? 'bg-emerald-500'
+                  : 'bg-gray-600',
+              ]"
+            >
+              <span
+                :class="[
+                  'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                  editForm.user_concurrency_enabled
+                    ? 'translate-x-4'
+                    : 'translate-x-0',
+                ]"
+              />
+            </button>
+            <span class="text-sm text-gray-300">
+              {{ t("admin.groups.userConcurrency.title") }}
+            </span>
+          </div>
+          <div v-if="editForm.user_concurrency_enabled" class="mt-3">
+            <label class="block text-xs text-gray-400 mb-1">
+              {{ t("admin.groups.userConcurrency.limit") }}
+            </label>
+            <input
+              v-model.number="editForm.user_concurrency_limit"
+              type="number"
+              min="1"
+              step="1"
+              class="input w-32"
+            />
+          </div>
+        </div>
+
         <!-- Claude Code 客户端限制（仅 anthropic 平台） -->
         <div v-if="editForm.platform === 'anthropic'" class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
@@ -3207,14 +3299,18 @@ import {
   type MessagesDispatchMappingRow,
 } from "./groupsMessagesDispatch";
 import {
-  buildModelsListConfig,
-  createModelsListState as createInitialModelsListState,
-  invertModelsListSelection,
-  moveModelsListItem,
-  selectAllModelsListItems,
-  setModelsListCandidates,
-} from "./groupsModelsList";
-import { createModelsListCandidatesTracker } from "./groupsModelsListCandidates";
+	  applyGroupUserConcurrencyToEditForm,
+	  resetGroupUserConcurrencyCreateForm,
+	} from "./groupsUserConcurrency";
+	import {
+	  buildModelsListConfig,
+	  createModelsListState as createInitialModelsListState,
+	  invertModelsListSelection,
+	  moveModelsListItem,
+	  selectAllModelsListItems,
+	  setModelsListCandidates,
+	} from "./groupsModelsList";
+	import { createModelsListCandidatesTracker } from "./groupsModelsListCandidates";
 import { normalizeSupportedModelScopesForPlatform } from "./groupsSupportedModelScopes";
 
 const { t } = useI18n();
@@ -3563,6 +3659,9 @@ const createForm = reactive({
   claude_code_only: false,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
+  // 分组级用户并发限制
+  user_concurrency_enabled: false,
+  user_concurrency_limit: 1,
   // OpenAI Messages 调度配置（仅 openai 平台使用）
   allow_messages_dispatch: false,
   opus_mapped_model: createMessagesDispatchDefaults.opus_mapped_model,
@@ -3899,6 +3998,9 @@ const editForm = reactive({
   claude_code_only: false,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
+  // 分组级用户并发限制
+  user_concurrency_enabled: false,
+  user_concurrency_limit: 1,
   // OpenAI Messages 调度配置（仅 openai 平台使用）
   allow_messages_dispatch: false,
   default_mapped_model: '',
@@ -4170,6 +4272,7 @@ const closeCreateModal = () => {
   createForm.claude_code_only = false;
   createForm.fallback_group_id = null;
   createForm.fallback_group_id_on_invalid_request = null;
+  resetGroupUserConcurrencyCreateForm(createForm);
   resetMessagesDispatchFormState(createForm);
   createForm.require_oauth_only = false;
   createForm.require_privacy_set = false;
@@ -4307,6 +4410,7 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.fallback_group_id = group.fallback_group_id;
   editForm.fallback_group_id_on_invalid_request =
     group.fallback_group_id_on_invalid_request;
+  applyGroupUserConcurrencyToEditForm(editForm, group);
   const messagesDispatchFormState = messagesDispatchConfigToFormState(
     group.messages_dispatch_model_config,
   );

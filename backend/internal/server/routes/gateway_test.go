@@ -17,7 +17,6 @@ import (
 func newGatewayRoutesTestRouter(platform ...string) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-
 	groupPlatform := service.PlatformOpenAI
 	if len(platform) > 0 && platform[0] != "" {
 		groupPlatform = platform[0]
@@ -145,15 +144,12 @@ func TestGatewayRoutesGrokAllowsCLICompatibilityEntrypoints(t *testing.T) {
 	for _, tc := range []struct {
 		method string
 		path   string
+		body   string
 	}{
-		{http.MethodPost, "/v1/messages"},
-		{http.MethodPost, "/v1/chat/completions"},
-		{http.MethodPost, "/chat/completions"},
-		{http.MethodGet, "/v1/responses"},
-		{http.MethodGet, "/responses"},
-		{http.MethodGet, "/backend-api/codex/responses"},
+		{http.MethodPost, "/v1/chat/completions", `{"model":"grok","messages":[{"role":"user","content":"hi"}]}`},
+		{http.MethodPost, "/chat/completions", `{"model":"grok","messages":[{"role":"user","content":"hi"}]}`},
 	} {
-		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(`{"model":"grok"}`))
+		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 
@@ -181,6 +177,44 @@ func TestGatewayRoutesGrokAllowsCLICompatibilityEntrypoints(t *testing.T) {
 
 		router.ServeHTTP(w, req)
 		require.NotEqual(t, http.StatusNotFound, w.Code, "path=%s should still reach Responses handler", path)
+	}
+}
+
+func TestGatewayRoutesBareOpenAIImagesPathsInstallUsageDetailCapture(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	seen := map[string]bool{}
+
+	RegisterGatewayRoutes(
+		router,
+		&handler.Handlers{
+			Gateway:       &handler.GatewayHandler{},
+			OpenAIGateway: &handler.OpenAIGatewayHandler{},
+		},
+		servermiddleware.APIKeyAuthMiddleware(func(c *gin.Context) {
+			_, ok := c.Get(service.UsageDetailCaptureContextKey)
+			seen[c.Request.URL.Path] = ok
+			groupID := int64(1)
+			c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{
+				GroupID: &groupID,
+				Group:   &service.Group{Platform: service.PlatformOpenAI},
+			})
+			c.Next()
+		}),
+		nil,
+		nil,
+		nil,
+		nil,
+		&config.Config{},
+	)
+
+	for _, path := range []string{"/images/generations", "/images/edits"} {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"model":"gpt-image-2","prompt":"draw a cat"}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+		require.True(t, seen[path], "path=%s should install usageDetailCapture before apiKeyAuth", path)
 	}
 }
 

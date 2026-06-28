@@ -40,22 +40,6 @@ func ProvideEmailQueueService(emailService *EmailService) *EmailQueueService {
 	return NewEmailQueueService(emailService, 3)
 }
 
-// ProvideOAuthRefreshAPI creates OAuthRefreshAPI with the default lock TTL.
-func ProvideOAuthRefreshAPI(accountRepo AccountRepository, tokenCache GeminiTokenCache) *OAuthRefreshAPI {
-	return NewOAuthRefreshAPI(accountRepo, tokenCache)
-}
-
-// ProvideOpenAIOAuthService creates OpenAIOAuthService with privacy/account enrichment support.
-func ProvideOpenAIOAuthService(
-	proxyRepo ProxyRepository,
-	oauthClient OpenAIOAuthClient,
-	privacyClientFactory PrivacyClientFactory,
-) *OpenAIOAuthService {
-	svc := NewOpenAIOAuthService(proxyRepo, oauthClient)
-	svc.SetPrivacyClientFactory(privacyClientFactory)
-	return svc
-}
-
 // ProvideTokenRefreshService creates and starts TokenRefreshService
 func ProvideTokenRefreshService(
 	accountRepo AccountRepository,
@@ -63,7 +47,6 @@ func ProvideTokenRefreshService(
 	openaiOAuthService *OpenAIOAuthService,
 	geminiOAuthService *GeminiOAuthService,
 	antigravityOAuthService *AntigravityOAuthService,
-	grokOAuthService *GrokOAuthService,
 	cacheInvalidator TokenCacheInvalidator,
 	schedulerCache SchedulerCache,
 	cfg *config.Config,
@@ -72,6 +55,7 @@ func ProvideTokenRefreshService(
 	proxyRepo ProxyRepository,
 	refreshAPI *OAuthRefreshAPI,
 	runtimeBlocker AccountRuntimeBlocker,
+	grokOAuthService *GrokOAuthService,
 ) *TokenRefreshService {
 	svc := NewTokenRefreshService(accountRepo, oauthService, openaiOAuthService, geminiOAuthService, antigravityOAuthService, cacheInvalidator, schedulerCache, cfg, tempUnschedCache, grokOAuthService)
 	// 注入 OpenAI privacy opt-out 依赖
@@ -125,15 +109,6 @@ func ProvideOpenAIQuotaService(
 	return NewOpenAIQuotaService(accountRepo, proxyRepo, tokenProvider, privacyClientFactory)
 }
 
-func ProvideGrokQuotaService(
-	accountRepo AccountRepository,
-	proxyRepo ProxyRepository,
-	tokenProvider *GrokTokenProvider,
-	httpUpstream HTTPUpstream,
-) *GrokQuotaService {
-	return NewGrokQuotaService(accountRepo, proxyRepo, tokenProvider, httpUpstream)
-}
-
 // ProvideGeminiTokenProvider creates GeminiTokenProvider with OAuthRefreshAPI injection
 func ProvideGeminiTokenProvider(
 	accountRepo AccountRepository,
@@ -164,7 +139,6 @@ func ProvideAntigravityTokenProvider(
 	return p
 }
 
-// ProvideGrokTokenProvider creates GrokTokenProvider with OAuthRefreshAPI injection.
 func ProvideGrokTokenProvider(
 	accountRepo AccountRepository,
 	tokenCache GeminiTokenCache,
@@ -173,17 +147,14 @@ func ProvideGrokTokenProvider(
 	tempUnschedCache TempUnschedCache,
 ) *GrokTokenProvider {
 	p := NewGrokTokenProvider(accountRepo, tokenCache)
-	executor := NewGrokTokenRefresher(grokOAuthService)
-	p.SetRefreshAPI(refreshAPI, executor)
-	p.SetRefreshPolicy(AntigravityProviderRefreshPolicy())
+	p.SetRefreshAPI(refreshAPI, NewGrokTokenRefresher(grokOAuthService))
 	p.SetTempUnschedCache(tempUnschedCache)
 	return p
 }
 
 // ProvideDashboardAggregationService 创建并启动仪表盘聚合服务
-func ProvideDashboardAggregationService(repo DashboardAggregationRepository, timingWheel *TimingWheelService, lockCache LeaderLockCache, db *sql.DB, cfg *config.Config) *DashboardAggregationService {
+func ProvideDashboardAggregationService(repo DashboardAggregationRepository, timingWheel *TimingWheelService, cfg *config.Config) *DashboardAggregationService {
 	svc := NewDashboardAggregationService(repo, timingWheel, cfg)
-	svc.SetLeaderLock(lockCache, db)
 	svc.Start()
 	return svc
 }
@@ -210,11 +181,10 @@ func ProvideProxyExpiryService(proxyRepo ProxyRepository) *ProxyExpiryService {
 }
 
 // ProvideSubscriptionExpiryService creates and starts SubscriptionExpiryService.
-func ProvideSubscriptionExpiryService(userSubRepo UserSubscriptionRepository, settingRepo SettingRepository, notificationEmailService *NotificationEmailService, lockCache LeaderLockCache, db *sql.DB) *SubscriptionExpiryService {
+func ProvideSubscriptionExpiryService(userSubRepo UserSubscriptionRepository, settingRepo SettingRepository, notificationEmailService *NotificationEmailService) *SubscriptionExpiryService {
 	svc := NewSubscriptionExpiryService(userSubRepo, time.Minute)
 	svc.SetSettingRepository(settingRepo)
 	svc.SetNotificationEmailService(notificationEmailService)
-	svc.SetLeaderLock(lockCache, db)
 	svc.Start()
 	return svc
 }
@@ -455,6 +425,22 @@ func ProvideBackupService(
 	return svc
 }
 
+// ProvideSettingService wires SettingService with non-Sora collaborators.
+func ProvideSettingService(settingRepo SettingRepository, groupRepo GroupRepository, proxyRepo ProxyRepository, cfg *config.Config, httpUpstream HTTPUpstream) *SettingService {
+	svc := NewSettingService(settingRepo, cfg)
+	svc.SetDefaultSubscriptionGroupReader(groupRepo)
+	svc.SetProxyRepository(proxyRepo)
+	svc.loadGatewayControlSettingsFromDB(context.Background())
+	if invalidator, ok := httpUpstream.(interface{ InvalidateIdleClients() }); ok {
+		svc.SetGatewayRuntimeIdleInvalidator(invalidator)
+	}
+	if err := svc.LoadAPIKeyACLTrustForwardedIPSetting(context.Background()); err != nil {
+		logger.LegacyPrintf("service.setting", "Warning: load api key acl forwarded ip setting failed: %v", err)
+	}
+	antigravity.SetUserAgentVersionResolver(svc.GetAntigravityUserAgentVersion)
+	return svc
+}
+
 // ProvideOpsService constructs OpsService and wires the SettingService-backed quota
 // auto-pause cache sink. Mirrors the SetCleanupReloader pattern: OpsService doesn't
 // hold a *SettingService reference, but wire injects a tiny callback so writes to
@@ -488,28 +474,74 @@ func ProvideOpsService(
 	)
 	if settingService != nil {
 		svc.SetOpenAIQuotaAutoPauseSettingsSink(settingService.SetOpenAIQuotaAutoPauseSettings)
-		// Optional warm-up so the first scheduled request after process start observes
-		// a populated cache rather than zero defaults. Best-effort, sync-bounded.
 		settingService.WarmOpenAIQuotaAutoPauseSettings(context.Background())
 	}
 	return svc
 }
 
-// ProvideSettingService wires SettingService with group reader and proxy repo.
-func ProvideSettingService(settingRepo SettingRepository, groupRepo GroupRepository, proxyRepo ProxyRepository, cfg *config.Config) *SettingService {
-	svc := NewSettingService(settingRepo, cfg)
-	svc.SetDefaultSubscriptionGroupReader(groupRepo)
-	svc.SetProxyRepository(proxyRepo)
-	if err := svc.LoadAPIKeyACLTrustForwardedIPSetting(context.Background()); err != nil {
-		logger.LegacyPrintf("service.setting", "Warning: load api key acl forwarded ip setting failed: %v", err)
+// ProvideSettingServiceWithUsageLogPruner wires SettingService with usage detail pruning when available.
+func ProvideSettingServiceWithUsageLogPruner(
+	settingRepo SettingRepository,
+	groupRepo GroupRepository,
+	proxyRepo ProxyRepository,
+	cfg *config.Config,
+	httpUpstream HTTPUpstream,
+	usageLogRepo UsageLogRepository,
+) *SettingService {
+	svc := ProvideSettingService(settingRepo, groupRepo, proxyRepo, cfg, httpUpstream)
+	if pruner, ok := usageLogRepo.(UsageLogDetailPruner); ok {
+		svc.SetUsageLogDetailPruner(pruner)
 	}
-	if err := svc.MigrateOpenAIAllowClaudeCodeCodexPluginSetting(context.Background()); err != nil {
-		logger.LegacyPrintf("service.setting", "Warning: migrate openai allow Claude Code Codex plugin setting failed: %v", err)
-	}
-	if err := svc.MigrateCodexBodyFingerprintToSignals(context.Background()); err != nil {
-		logger.LegacyPrintf("service.setting", "Warning: migrate codex body fingerprint to signals failed: %v", err)
-	}
-	antigravity.SetUserAgentVersionResolver(svc.GetAntigravityUserAgentVersion)
+	return svc
+}
+
+func ProvideOpenAIGatewayServiceWithStartupRecovery(
+	accountRepo AccountRepository,
+	usageLogRepo UsageLogRepository,
+	usageBillingRepo UsageBillingRepository,
+	userRepo UserRepository,
+	userSubRepo UserSubscriptionRepository,
+	userGroupRateRepo UserGroupRateRepository,
+	cache GatewayCache,
+	cfg *config.Config,
+	schedulerSnapshot *SchedulerSnapshotService,
+	concurrencyService *ConcurrencyService,
+	billingService *BillingService,
+	rateLimitService *RateLimitService,
+	billingCacheService *BillingCacheService,
+	httpUpstream HTTPUpstream,
+	deferredService *DeferredService,
+	openAITokenProvider *OpenAITokenProvider,
+	resolver *ModelPricingResolver,
+	channelService *ChannelService,
+	balanceNotifyService *BalanceNotifyService,
+	settingService *SettingService,
+	userPlatformQuotaRepo UserPlatformQuotaRepository,
+) *OpenAIGatewayService {
+	svc := NewOpenAIGatewayService(
+		accountRepo,
+		usageLogRepo,
+		usageBillingRepo,
+		userRepo,
+		userSubRepo,
+		userGroupRateRepo,
+		cache,
+		cfg,
+		schedulerSnapshot,
+		concurrencyService,
+		billingService,
+		rateLimitService,
+		billingCacheService,
+		httpUpstream,
+		deferredService,
+		openAITokenProvider,
+		resolver,
+		channelService,
+		balanceNotifyService,
+		settingService,
+		userPlatformQuotaRepo,
+	)
+	svc.StartOpenAIBackgroundRecovery()
 	return svc
 }
 
@@ -563,16 +595,17 @@ var ProviderSet = wire.NewSet(
 	NewAnnouncementService,
 	NewAdminService,
 	NewGatewayService,
-	NewOpenAIGatewayService,
+	ProvideOpenAIGatewayServiceWithStartupRecovery,
 	wire.Bind(new(AccountRuntimeBlocker), new(*OpenAIGatewayService)),
+	wire.Bind(new(OpenAIProbeController), new(*OpenAIGatewayService)),
 	NewOAuthService,
-	ProvideOpenAIOAuthService,
-	NewGrokOAuthService,
+	NewOpenAIOAuthService,
 	NewGeminiOAuthService,
 	NewGeminiQuotaService,
 	NewCompositeTokenCacheInvalidator,
 	wire.Bind(new(TokenCacheInvalidator), new(*CompositeTokenCacheInvalidator)),
 	NewAntigravityOAuthService,
+	NewGrokOAuthService,
 	ProvideOAuthRefreshAPI,
 	ProvideGeminiTokenProvider,
 	NewGeminiMessagesCompatService,
@@ -580,13 +613,13 @@ var ProviderSet = wire.NewSet(
 	ProvideGrokTokenProvider,
 	ProvideOpenAITokenProvider,
 	ProvideOpenAIQuotaService,
-	ProvideGrokQuotaService,
 	ProvideClaudeTokenProvider,
 	NewAntigravityGatewayService,
 	ProvideRateLimitService,
 	NewAccountUsageService,
 	NewAccountTestService,
-	ProvideSettingService,
+	NewImageHistoryService,
+	ProvideSettingServiceWithUsageLogPruner,
 	NewDataManagementService,
 	ProvideBackupService,
 	ProvideOpsSystemLogSink,
@@ -619,6 +652,7 @@ var ProviderSet = wire.NewSet(
 	ProvideDeferredService,
 	NewAntigravityQuotaFetcher,
 	NewGrokQuotaFetcher,
+	NewGrokQuotaService,
 	NewUserAttributeService,
 	NewUsageCache,
 	NewTotpService,
@@ -639,23 +673,21 @@ var ProviderSet = wire.NewSet(
 	ProvidePaymentService,
 	ProvidePaymentOrderExpiryService,
 	ProvideBalanceNotifyService,
+	NewUserPlatformQuotaUsageFlusher,
 	ProvideChannelMonitorService,
 	ProvideChannelMonitorRunner,
 	NewChannelMonitorRequestTemplateService,
-	ProvideUserPlatformQuotaUsageFlusher,
 )
-
-// ProvideUserPlatformQuotaUsageFlusher 创建并启动 UserPlatformQuotaUsageFlusher。
-func ProvideUserPlatformQuotaUsageFlusher(cfg *config.Config, cache BillingCache, quotaRepo UserPlatformQuotaRepository, tw *TimingWheelService) *UserPlatformQuotaUsageFlusher {
-	svc := NewUserPlatformQuotaUsageFlusher(cfg, cache, quotaRepo, tw)
-	svc.Start()
-	return svc
-}
 
 // ProvidePaymentConfigService wraps NewPaymentConfigService to accept the named
 // payment.EncryptionKey type instead of raw []byte, avoiding Wire ambiguity.
 func ProvidePaymentConfigService(entClient *dbent.Client, settingRepo SettingRepository, key payment.EncryptionKey) *PaymentConfigService {
 	return NewPaymentConfigService(entClient, settingRepo, []byte(key))
+}
+
+// ProvideOAuthRefreshAPI wraps NewOAuthRefreshAPI to avoid Wire resolving variadic []time.Duration.
+func ProvideOAuthRefreshAPI(accountRepo AccountRepository, tokenCache GeminiTokenCache) *OAuthRefreshAPI {
+	return NewOAuthRefreshAPI(accountRepo, tokenCache)
 }
 
 // ProvideBalanceNotifyService creates BalanceNotifyService
@@ -673,9 +705,8 @@ func ProvidePaymentService(entClient *dbent.Client, registry *payment.Registry, 
 }
 
 // ProvidePaymentOrderExpiryService creates and starts PaymentOrderExpiryService.
-func ProvidePaymentOrderExpiryService(paymentSvc *PaymentService, lockCache LeaderLockCache, db *sql.DB) *PaymentOrderExpiryService {
+func ProvidePaymentOrderExpiryService(paymentSvc *PaymentService) *PaymentOrderExpiryService {
 	svc := NewPaymentOrderExpiryService(paymentSvc, 60*time.Second)
-	svc.SetLeaderLock(lockCache, db)
 	svc.Start()
 	return svc
 }

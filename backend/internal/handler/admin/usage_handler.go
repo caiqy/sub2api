@@ -199,6 +199,24 @@ func (h *UsageHandler) List(c *gin.Context) {
 	response.Paginated(c, out, result.Total, page, pageSize)
 }
 
+// Detail handles getting usage detail by usage log ID.
+// GET /api/v1/admin/usage/:id/detail
+func (h *UsageHandler) Detail(c *gin.Context) {
+	id, err := strconv.ParseInt(strings.TrimSpace(c.Param("id")), 10, 64)
+	if err != nil || id <= 0 {
+		response.BadRequest(c, "Invalid usage id")
+		return
+	}
+
+	detail, err := h.usageService.GetDetailByUsageLogID(c.Request.Context(), id)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, dto.UsageLogDetailFromService(detail))
+}
+
 // Stats handles getting usage statistics with filters
 // GET /api/v1/admin/usage/stats
 func (h *UsageHandler) Stats(c *gin.Context) {
@@ -348,7 +366,7 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 	response.Success(c, stats)
 }
 
-// SearchUsers handles searching users by email keyword
+// SearchUsers handles searching users by keyword (matches email, username, notes, or API key)
 // GET /api/v1/admin/usage/search-users
 func (h *UsageHandler) SearchUsers(c *gin.Context) {
 	keyword := c.Query("q")
@@ -364,19 +382,21 @@ func (h *UsageHandler) SearchUsers(c *gin.Context) {
 		return
 	}
 
-	// Return simplified user list (only id, email and deleted flag)
+	// Return simplified user list (id, email, username and deleted flag)
 	type SimpleUser struct {
-		ID      int64  `json:"id"`
-		Email   string `json:"email"`
-		Deleted bool   `json:"deleted"`
+		ID       int64  `json:"id"`
+		Email    string `json:"email"`
+		Username string `json:"username"`
+		Deleted  bool   `json:"deleted"`
 	}
 
 	result := make([]SimpleUser, len(users))
 	for i, u := range users {
 		result[i] = SimpleUser{
-			ID:      u.ID,
-			Email:   u.Email,
-			Deleted: u.DeletedAt != nil,
+			ID:       u.ID,
+			Email:    u.Email,
+			Username: u.Username,
+			Deleted:  u.DeletedAt != nil,
 		}
 	}
 

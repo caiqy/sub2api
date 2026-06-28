@@ -35,7 +35,10 @@
               @click="selectUser(u)"
               class="w-full px-4 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-700"
             >
-              <span>{{ u.email }}<span v-if="u.deleted" class="ml-1 text-xs text-gray-400">（{{ t('admin.usage.userDeletedBadge') }}）</span></span>
+              <span>
+                {{ u.username || u.email }}
+                <span v-if="u.deleted" class="ml-1 text-xs text-gray-400">（{{ t('admin.usage.userDeletedBadge') }}）</span>
+              </span>
               <span class="ml-2 text-xs text-gray-400">#{{ u.id }}</span>
             </button>
           </div>
@@ -172,7 +175,7 @@ import { ref, onMounted, onUnmounted, toRef, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
-import type { SimpleApiKey, SimpleUser } from '@/api/admin/usage'
+import type { SimpleApiKey, SimpleUser } from '@/types'
 
 type ModelValue = Record<string, any>
 
@@ -283,7 +286,7 @@ const debounceApiKeySearch = () => {
 }
 
 const selectUser = async (u: SimpleUser) => {
-  userKeyword.value = u.email
+  userKeyword.value = u.username || u.email
   showUserDropdown.value = false
   filters.value.user_id = u.id
   clearApiKey()

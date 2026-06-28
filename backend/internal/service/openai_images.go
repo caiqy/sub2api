@@ -599,6 +599,11 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 	if err != nil {
 		return nil, err
 	}
+	usageUpstreamBody := string(forwardBody)
+	if parsed.Multipart {
+		usageUpstreamBody = "[multipart body omitted]"
+	}
+	SetUsageUpstreamRequest(c, upstreamReq, usageUpstreamBody)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -622,7 +627,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 		return nil, fmt.Errorf("upstream request failed: %s", safeErr)
 	}
 	if resp.StatusCode >= 400 {
-		respBody := s.readUpstreamErrorBody(resp)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 		_ = resp.Body.Close()
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
@@ -642,10 +647,11 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 			return nil, &UpstreamFailoverError{
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           respBody,
+				ResponseHeaders:        resp.Header.Clone(),
 				RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 			}
 		}
-		return s.handleOpenAIImagesErrorResponse(upstreamCtx, resp, c, account, upstreamModel)
+		return s.handleErrorResponse(upstreamCtx, resp, c, account, forwardBody)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -1276,22 +1282,26 @@ func resolveOpenAIImageBytes(
 	headers http.Header,
 	conversationID string,
 	pointer openAIImagePointerInfo,
-	errorBodyReadLimit int64,
+	errorBodyReadLimit ...int64,
 ) ([]byte, error) {
+	readLimit := openAIUpstreamErrorBodyReadLimit
+	if len(errorBodyReadLimit) > 0 && errorBodyReadLimit[0] > 0 {
+		readLimit = errorBodyReadLimit[0]
+	}
 	if normalized := normalizeOpenAIImageBase64(pointer.B64JSON); normalized != "" {
 		return base64.StdEncoding.DecodeString(normalized)
 	}
 	if downloadURL := strings.TrimSpace(pointer.DownloadURL); downloadURL != "" {
-		return downloadOpenAIImageBytes(ctx, client, headers, downloadURL, errorBodyReadLimit)
+		return downloadOpenAIImageBytes(ctx, client, headers, downloadURL, readLimit)
 	}
 	if strings.TrimSpace(pointer.Pointer) == "" {
 		return nil, fmt.Errorf("image asset is missing pointer, url, and base64 data")
 	}
-	downloadURL, err := fetchOpenAIImageDownloadURL(ctx, client, headers, conversationID, pointer.Pointer, errorBodyReadLimit)
+	downloadURL, err := fetchOpenAIImageDownloadURL(ctx, client, headers, conversationID, pointer.Pointer, readLimit)
 	if err != nil {
 		return nil, err
 	}
-	return downloadOpenAIImageBytes(ctx, client, headers, downloadURL, errorBodyReadLimit)
+	return downloadOpenAIImageBytes(ctx, client, headers, downloadURL, readLimit)
 }
 
 func normalizeOpenAIImageBase64(raw string) string {
@@ -1396,8 +1406,12 @@ func fetchOpenAIImageDownloadURL(
 	headers http.Header,
 	conversationID string,
 	pointer string,
-	errorBodyReadLimit int64,
+	errorBodyReadLimit ...int64,
 ) (string, error) {
+	readLimit := openAIUpstreamErrorBodyReadLimit
+	if len(errorBodyReadLimit) > 0 && errorBodyReadLimit[0] > 0 {
+		readLimit = errorBodyReadLimit[0]
+	}
 	url := ""
 	allowConversationRetry := false
 	switch {
@@ -1427,7 +1441,7 @@ func fetchOpenAIImageDownloadURL(
 		} else if resp.IsSuccessState() && strings.TrimSpace(result.DownloadURL) != "" {
 			return strings.TrimSpace(result.DownloadURL), nil
 		} else {
-			statusErr := newOpenAIImageStatusError(resp, "fetch image download url failed", errorBodyReadLimit)
+			statusErr := newOpenAIImageStatusError(resp, "fetch image download url failed", readLimit)
 			if !allowConversationRetry || !isOpenAIImageTransientConversationNotFoundError(statusErr) {
 				return "", statusErr
 			}
@@ -1452,7 +1466,11 @@ func fetchOpenAIImageDownloadURL(
 	return "", lastErr
 }
 
-func downloadOpenAIImageBytes(ctx context.Context, client *req.Client, headers http.Header, downloadURL string, errorBodyReadLimit int64) ([]byte, error) {
+func downloadOpenAIImageBytes(ctx context.Context, client *req.Client, headers http.Header, downloadURL string, errorBodyReadLimit ...int64) ([]byte, error) {
+	readLimit := openAIUpstreamErrorBodyReadLimit
+	if len(errorBodyReadLimit) > 0 && errorBodyReadLimit[0] > 0 {
+		readLimit = errorBodyReadLimit[0]
+	}
 	request := client.R().
 		SetContext(ctx).
 		DisableAutoReadResponse()
@@ -1480,7 +1498,7 @@ func downloadOpenAIImageBytes(ctx context.Context, client *req.Client, headers h
 		}
 	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, newOpenAIImageStatusError(resp, "download image bytes failed", errorBodyReadLimit)
+		return nil, newOpenAIImageStatusError(resp, "download image bytes failed", readLimit)
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, openAIImageMaxDownloadBytes))
 }
@@ -1492,6 +1510,13 @@ type openAIImageStatusError struct {
 	ResponseHeaders http.Header
 	RequestID       string
 	URL             string
+}
+
+type OpenAIImageUpstreamError interface {
+	error
+	OpenAIImageUpstreamStatusCode() int
+	OpenAIImageUpstreamResponseHeaders() http.Header
+	OpenAIImageUpstreamResponseBody() []byte
 }
 
 func (e *openAIImageStatusError) Error() string {
@@ -1507,7 +1532,28 @@ func (e *openAIImageStatusError) Error() string {
 	return "openai image backend request failed"
 }
 
-func newOpenAIImageStatusError(resp *req.Response, fallback string, errorBodyReadLimit int64) error {
+func (e *openAIImageStatusError) OpenAIImageUpstreamStatusCode() int {
+	if e == nil {
+		return 0
+	}
+	return e.StatusCode
+}
+
+func (e *openAIImageStatusError) OpenAIImageUpstreamResponseHeaders() http.Header {
+	if e == nil || e.ResponseHeaders == nil {
+		return nil
+	}
+	return e.ResponseHeaders.Clone()
+}
+
+func (e *openAIImageStatusError) OpenAIImageUpstreamResponseBody() []byte {
+	if e == nil || e.ResponseBody == nil {
+		return nil
+	}
+	return append([]byte(nil), e.ResponseBody...)
+}
+
+func newOpenAIImageStatusError(resp *req.Response, fallback string, errorBodyReadLimit ...int64) error {
 	if resp == nil {
 		if strings.TrimSpace(fallback) == "" {
 			fallback = "openai image backend request failed"
@@ -1520,6 +1566,10 @@ func newOpenAIImageStatusError(resp *req.Response, fallback string, errorBodyRea
 	requestID := ""
 	requestURL := ""
 	body := []byte(nil)
+	readLimit := int64(2 << 20)
+	if len(errorBodyReadLimit) > 0 && errorBodyReadLimit[0] > 0 {
+		readLimit = errorBodyReadLimit[0]
+	}
 
 	if resp.Response != nil {
 		headers = resp.Header.Clone()
@@ -1528,10 +1578,7 @@ func newOpenAIImageStatusError(resp *req.Response, fallback string, errorBodyRea
 			requestURL = resp.Request.URL.String()
 		}
 		if resp.Body != nil {
-			if errorBodyReadLimit <= 0 {
-				errorBodyReadLimit = openAIUpstreamErrorBodyReadLimit
-			}
-			body, _ = io.ReadAll(io.LimitReader(resp.Body, errorBodyReadLimit))
+			body, _ = io.ReadAll(io.LimitReader(resp.Body, readLimit))
 			_ = resp.Body.Close()
 		}
 	}

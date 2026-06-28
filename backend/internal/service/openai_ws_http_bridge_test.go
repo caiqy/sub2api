@@ -289,6 +289,64 @@ func TestProxyResponsesWebSocketFromClientForGrokUsesXAIHTTPBridge(t *testing.T)
 	require.False(t, gjson.GetBytes(upstream.lastBody, "prompt_cache_retention").Exists())
 }
 
+func TestOpenAIWSHTTPBridgeRequiresTerminalResponseEventBeforeSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	sseBody := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_bridge","model":"gpt-5"}}`,
+		"",
+		`data: {"type":"response.output_text.delta","response":{"id":"resp_bridge"},"delta":"ok"}`,
+		"",
+		`data: [DONE]`,
+		"",
+	}, "\n")
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(sseBody)),
+	}}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:          17,
+		Name:        "api-key",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Status:      StatusActive,
+	}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+
+	var downstream [][]byte
+	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
+		context.Background(),
+		c,
+		account,
+		"sk-test",
+		[]byte(`{"type":"response.create","generate":true,"model":"gpt-5","stream":true,"input":"hi"}`),
+		1,
+		"gpt-5",
+		"",
+		"",
+		"",
+		1,
+		func(message []byte) error {
+			downstream = append(downstream, append([]byte(nil), message...))
+			return nil
+		},
+	)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "ended before terminal event")
+	require.NotNil(t, result)
+	require.Equal(t, "resp_bridge", result.RequestID)
+	require.Len(t, downstream, 2)
+}
+
 func TestOpenAIWSHTTPBridgeAcceptsFirstFrameAboveLegacy16MiB(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

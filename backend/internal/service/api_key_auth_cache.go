@@ -89,6 +89,8 @@ type APIKeyAuthGroupSnapshot struct {
 	AllowMessagesDispatch       bool                              `json:"allow_messages_dispatch"`
 	DefaultMappedModel          string                            `json:"default_mapped_model,omitempty"`
 	MessagesDispatchModelConfig OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config,omitempty"`
+	UserConcurrencyEnabled      bool                              `json:"user_concurrency_enabled"`
+	UserConcurrencyLimit        int                               `json:"user_concurrency_limit"`
 	ModelsListConfig            GroupModelsListConfig             `json:"models_list_config,omitempty"`
 
 	// RPMLimit 分组级每分钟请求数上限（0 = 不限制）；用于 billing_cache_service.checkRPM 级联判断。

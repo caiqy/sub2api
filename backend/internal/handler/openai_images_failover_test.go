@@ -60,12 +60,16 @@ type openAIImagesFailoverHTTPUpstream struct {
 	service.HTTPUpstream
 	mu         sync.Mutex
 	accountIDs []int64
+	resp       *http.Response
 }
 
 func (u *openAIImagesFailoverHTTPUpstream) Do(_ *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
 	u.mu.Lock()
 	u.accountIDs = append(u.accountIDs, accountID)
 	u.mu.Unlock()
+	if u.resp != nil {
+		return u.resp, nil
+	}
 	return &http.Response{
 		StatusCode: http.StatusOK,
 		Header: http.Header{

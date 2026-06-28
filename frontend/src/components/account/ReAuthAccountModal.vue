@@ -196,6 +196,7 @@ import type { Account } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import OAuthAuthorizationFlow from './OAuthAuthorizationFlow.vue'
+import { buildOpenAIReauthUpdatePayload } from './openaiReauthUpdatePayload'
 
 // Type for exposed OAuthAuthorizationFlow component
 // Note: defineExpose automatically unwraps refs, so we use the unwrapped types
@@ -366,17 +367,16 @@ const handleExchangeCode = async () => {
     )
     if (!tokenInfo) return
 
-    // Build credentials and extra info
-    const credentials = oauthClient.buildCredentials(tokenInfo)
-    const extra = oauthClient.buildExtraInfo(tokenInfo)
+    const updatePayload = buildOpenAIReauthUpdatePayload(
+      props.account,
+      tokenInfo,
+      oauthClient.buildCredentials,
+      oauthClient.buildExtraInfo
+    )
 
     try {
       // Update account with new credentials
-      await adminAPI.accounts.update(props.account.id, {
-        type: 'oauth', // OpenAI OAuth is always 'oauth' type
-        credentials,
-        extra
-      })
+      await adminAPI.accounts.update(props.account.id, updatePayload)
 
       // Clear error status after successful re-authorization
       await adminAPI.accounts.clearError(props.account.id)

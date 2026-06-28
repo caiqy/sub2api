@@ -469,6 +469,34 @@ func TestRewriteSystemForNonClaudeCode(t *testing.T) {
 	}
 }
 
+func TestRewriteSystemForNonClaudeCode_DropsExistingBillingAttributionFromInjectedMessages(t *testing.T) {
+	body := []byte(`{"model":"claude-3","system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.63; cc_entrypoint=cli; cch=00000;"},{"type":"text","text":"Project instructions"}],"messages":[{"role":"user","content":"hello"}]}`)
+
+	result := rewriteSystemForNonClaudeCode(body, []any{
+		map[string]any{"type": "text", "text": "x-anthropic-billing-header: cc_version=2.1.63; cc_entrypoint=cli; cch=00000;"},
+		map[string]any{"type": "text", "text": "Project instructions"},
+	})
+
+	system := gjson.GetBytes(result, "system")
+	require.True(t, system.IsArray())
+	require.Len(t, system.Array(), 2)
+	require.Contains(t, system.Get("0.text").String(), "x-anthropic-billing-header:")
+	require.Equal(t, claudeCodeSystemPrompt, system.Get("1.text").String())
+
+	messagesRaw := gjson.GetBytes(result, "messages").Raw
+	require.NotContains(t, messagesRaw, "x-anthropic-billing-header")
+	require.Contains(t, messagesRaw, "Project instructions")
+}
+
+func TestRewriteSystemForNonClaudeCode_PreservesPlainTextMentioningBillingHeader(t *testing.T) {
+	body := []byte(`{"model":"claude-3","system":"Document the x-anthropic-billing-header behavior for users","messages":[{"role":"user","content":"hello"}]}`)
+
+	result := rewriteSystemForNonClaudeCode(body, "Document the x-anthropic-billing-header behavior for users")
+
+	messagesRaw := gjson.GetBytes(result, "messages").Raw
+	require.Contains(t, messagesRaw, "Document the x-anthropic-billing-header behavior for users")
+}
+
 func TestRewriteSystemForNonClaudeCodeWithPrompt_UsesCustomExpansionPrompt(t *testing.T) {
 	body := []byte(`{"model":"claude-3","system":"Project instructions","messages":[{"role":"user","content":"hello"}]}`)
 	customPrompt := "Custom Claude OAuth expansion prompt"

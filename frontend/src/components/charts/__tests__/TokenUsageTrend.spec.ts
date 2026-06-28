@@ -26,6 +26,34 @@ vi.mock('vue-chartjs', () => ({
 }))
 
 describe('TokenUsageTrend', () => {
+  it('formats missing cost fields as zero in tooltip footer', () => {
+    const wrapper = mount(TokenUsageTrend, {
+      props: {
+        trendData: [
+          {
+            date: '2026-04-17',
+            requests: 1,
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_creation_tokens: 10,
+            cache_read_tokens: 5,
+            total_tokens: 165,
+          },
+        ],
+      },
+      global: {
+        stubs: {
+          LoadingSpinner: true,
+        },
+      },
+    })
+
+    const options = (wrapper.vm as any).$?.setupState.lineOptions
+    const footer = options.plugins.tooltip.callbacks.footer([{ dataIndex: 0 }])
+
+    expect(footer).toBe('Actual: $0.0000 | Standard: $0.0000')
+  })
+
   it('calculates cache hit rate against all prompt tokens', () => {
     const wrapper = mount(TokenUsageTrend, {
       props: {

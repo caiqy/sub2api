@@ -66,6 +66,8 @@ docker-compose.override.yml
 .project
 .settings/
 .classpath
+.opencode
+.understand-anything
 
 # ===================
 # 操作系统
@@ -116,7 +118,6 @@ backend/.installed
 # 其他
 # ===================
 tests
-CLAUDE.md
 .claude
 scripts
 !backend/scripts/
@@ -137,6 +138,12 @@ docs/*
 !docs/legal/*.md
 .serena/
 .codex/
+.superpowers/
+.codegraph/
 frontend/coverage/
 aicodex
 output/
+.worktrees/
+input.txt
+result.txt
+knowledge-base/

@@ -195,7 +195,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 		upstreamReq, err = buildGrokResponsesRequest(upstreamCtx, c, account, body, token)
 	} else {
-		upstreamReq, err = s.buildUpstreamRequestOpenAIPassthrough(upstreamCtx, c, account, body, token)
+		upstreamReq, err = s.buildUpstreamRequestOpenAIPassthrough(upstreamCtx, c, account, payload, body, token)
 	}
 	releaseUpstreamCtx()
 	if err != nil {
@@ -241,7 +241,6 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	replayCollector := &openAIWSToolCallReplayCollector{}
 	firstEventType := ""
 	lastEventType := ""
-	sawDone := false
 	wroteDownstream := false
 	clientDisconnected := false
 	mappedModel := ""
@@ -304,7 +303,6 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			continue
 		}
 		if trimmedData == "[DONE]" {
-			sawDone = true
 			continue
 		}
 
@@ -401,9 +399,6 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	}
 	if err := scanner.Err(); err != nil {
 		return resultWithUsage(), fmt.Errorf("read upstream http bridge stream: %w", err)
-	}
-	if sawDone && eventCount > 0 {
-		return resultWithUsage(), nil
 	}
 	return resultWithUsage(), errors.New("upstream http bridge stream ended before terminal event")
 }

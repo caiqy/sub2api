@@ -22,10 +22,11 @@ import (
 )
 
 type anthropicHTTPUpstreamRecorder struct {
-	lastReq  *http.Request
-	lastBody []byte
-	resp     *http.Response
-	err      error
+	lastReq        *http.Request
+	lastBody       []byte
+	lastTLSProfile *tlsfingerprint.Profile
+	resp           *http.Response
+	err            error
 }
 
 func newAnthropicAPIKeyAccountForTest() *Account {
@@ -62,6 +63,7 @@ func (u *anthropicHTTPUpstreamRecorder) Do(req *http.Request, proxyURL string, a
 }
 
 func (u *anthropicHTTPUpstreamRecorder) DoWithTLS(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, profile *tlsfingerprint.Profile) (*http.Response, error) {
+	u.lastTLSProfile = profile
 	return u.Do(req, proxyURL, accountID, accountConcurrency)
 }
 
@@ -109,8 +111,10 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardStreamPreservesBodyAnd
 	c.Request.Header.Set("X-Goog-Api-Key", "inbound-goog-key")
 	c.Request.Header.Set("Cookie", "secret=1")
 	c.Request.Header.Set("Anthropic-Beta", "interleaved-thinking-2025-05-14")
+	c.Request.Header.Set("X-Trace-Id", "trace-123")
+	c.Request.Header.Set("X-Test", "keep")
 
-	body := []byte(`{"model":"claude-3-7-sonnet-20250219","stream":true,"system":[{"type":"text","text":"x-anthropic-billing-header keep"}],"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`)
+	body := []byte(`{"model":"claude-3-7-sonnet-20250219","stream":true,"system":[{"type":"text","text":"x-anthropic-billing-header keep"}],"metadata":{"client_trace":"trace-123"},"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`)
 	parsed := &ParsedRequest{
 		Body:   NewRequestBodyRef(body),
 		Model:  "claude-3-7-sonnet-20250219",
@@ -163,7 +167,14 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardStreamPreservesBodyAnd
 			"model_mapping": map[string]any{"claude-3-7-sonnet-20250219": "claude-3-haiku-20240307"},
 		},
 		Extra: map[string]any{
-			"anthropic_passthrough": true,
+			"anthropic_passthrough":      true,
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "header", Mode: "inject", Key: "X-Account-Tag", Value: "prod"},
+				{Target: "header", Mode: "forward", Key: "X-Trace-Id"},
+				{Target: "body", Mode: "inject", Key: "metadata.user_id", Value: "user-1"},
+				{Target: "body", Mode: "forward", Key: "metadata.client_trace"},
+			},
 		},
 		Status:      StatusActive,
 		Schedulable: true,
@@ -177,17 +188,197 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardStreamPreservesBodyAnd
 	require.Equal(t, "claude-3-haiku-20240307", gjson.GetBytes(upstream.lastBody, "model").String(), "透传模式应应用账号级模型映射")
 
 	require.Equal(t, "upstream-anthropic-key", getHeaderRaw(upstream.lastReq.Header, "x-api-key"))
+	require.Equal(t, "prod", getHeaderRaw(upstream.lastReq.Header, "X-Account-Tag"))
+	require.Equal(t, "trace-123", getHeaderRaw(upstream.lastReq.Header, "X-Trace-Id"))
 	require.Empty(t, getHeaderRaw(upstream.lastReq.Header, "authorization"))
 	require.Empty(t, getHeaderRaw(upstream.lastReq.Header, "x-goog-api-key"))
 	require.Empty(t, getHeaderRaw(upstream.lastReq.Header, "cookie"))
+	require.Empty(t, getHeaderRaw(upstream.lastReq.Header, "X-Test"))
 	require.Equal(t, "2023-06-01", getHeaderRaw(upstream.lastReq.Header, "anthropic-version"))
 	require.Equal(t, "interleaved-thinking-2025-05-14", getHeaderRaw(upstream.lastReq.Header, "anthropic-beta"))
 	require.Empty(t, getHeaderRaw(upstream.lastReq.Header, "x-stainless-lang"), "API Key 透传不应注入 OAuth 指纹头")
+	require.Equal(t, "user-1", gjson.GetBytes(upstream.lastBody, "metadata.user_id").String())
+	require.Equal(t, "trace-123", gjson.GetBytes(upstream.lastBody, "metadata.client_trace").String())
 
 	require.Contains(t, rec.Body.String(), `"cached_tokens":7`)
 	require.NotContains(t, rec.Body.String(), `"cache_read_input_tokens":7`, "透传输出不应被网关改写")
 	require.Equal(t, 7, result.Usage.CacheReadInputTokens, "计费 usage 解析应保留 cached_tokens 兼容")
 	require.Empty(t, rec.Header().Get("Set-Cookie"), "响应头应经过安全过滤")
+}
+
+func TestGatewayService_AnthropicAPIKeyPassthrough_DisabledLeavesConfiguredFieldsInactive(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	c.Request.Header.Set("X-Trace-Id", "trace-123")
+
+	body := []byte(`{"model":"claude-3-5-sonnet-latest","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`)
+	parsed := &ParsedRequest{Body: NewRequestBodyRef(body), Model: "claude-3-5-sonnet-latest"}
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"msg_1","type":"message","usage":{"input_tokens":5,"output_tokens":3}}`)),
+		},
+	}
+	svc := &GatewayService{cfg: &config.Config{}, httpUpstream: upstream, rateLimitService: &RateLimitService{}}
+	account := &Account{
+		ID:          103,
+		Name:        "anthropic-apikey-pass-disabled",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "upstream-anthropic-key", "base_url": "https://api.anthropic.com"},
+		Extra: map[string]any{
+			"anthropic_passthrough":      true,
+			"passthrough_fields_enabled": false,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "header", Mode: "inject", Key: "X-Account-Tag", Value: "prod"},
+				{Target: "header", Mode: "forward", Key: "X-Trace-Id"},
+				{Target: "body", Mode: "inject", Key: "metadata.user_id", Value: "user-1"},
+			},
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	_, err := svc.Forward(context.Background(), c, account, parsed)
+	require.NoError(t, err)
+	require.Equal(t, body, upstream.lastBody)
+	require.Empty(t, upstream.lastReq.Header.Get("X-Account-Tag"))
+	require.Empty(t, upstream.lastReq.Header.Get("X-Trace-Id"))
+}
+
+func TestGatewayService_AnthropicFieldsApplyWithoutAnthropicPassthrough(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	c.Request.Header.Set("X-Trace-Id", "trace-123")
+
+	body := []byte(`{"model":"claude-3-5-sonnet-latest","metadata":{"client_trace":"trace-123"},"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`)
+	parsed := &ParsedRequest{Body: NewRequestBodyRef(body), Model: "claude-3-5-sonnet-latest"}
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"msg_1","type":"message","usage":{"input_tokens":5,"output_tokens":3}}`)),
+		},
+	}
+	svc := &GatewayService{cfg: &config.Config{}, httpUpstream: upstream, rateLimitService: &RateLimitService{}}
+	account := &Account{
+		ID:          105,
+		Name:        "anthropic-apikey-decoupled",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "upstream-anthropic-key", "base_url": "https://api.anthropic.com"},
+		Extra: map[string]any{
+			"anthropic_passthrough":      false,
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "header", Mode: "inject", Key: "X-Account-Tag", Value: "prod"},
+				{Target: "header", Mode: "forward", Key: "X-Trace-Id"},
+				{Target: "body", Mode: "inject", Key: "metadata.user_id", Value: "user-1"},
+				{Target: "body", Mode: "forward", Key: "metadata.client_trace"},
+			},
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	_, err := svc.Forward(context.Background(), c, account, parsed)
+	require.NoError(t, err)
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, "prod", upstream.lastReq.Header.Get("X-Account-Tag"))
+	require.Equal(t, "trace-123", upstream.lastReq.Header.Get("X-Trace-Id"))
+	require.Equal(t, "user-1", gjson.GetBytes(upstream.lastBody, "metadata.user_id").String())
+	require.Equal(t, "trace-123", gjson.GetBytes(upstream.lastBody, "metadata.client_trace").String())
+}
+
+func TestPassthroughFieldsV2AnthropicAPIKeyPassthrough_BodyInjectAndMapDoNotChain(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	body := []byte(`{"model":"claude-3-5-sonnet-latest","metadata":{"client_trace":"trace-123"},"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`)
+	parsed := &ParsedRequest{Body: NewRequestBodyRef(body), Model: "claude-3-5-sonnet-latest"}
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"msg_1","type":"message","usage":{"input_tokens":5,"output_tokens":3}}`)),
+		},
+	}
+	svc := &GatewayService{cfg: &config.Config{}, httpUpstream: upstream, rateLimitService: &RateLimitService{}}
+	account := &Account{
+		ID:          106,
+		Name:        "anthropic-apikey-v2-map",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "upstream-anthropic-key", "base_url": "https://api.anthropic.com"},
+		Extra: map[string]any{
+			"anthropic_passthrough":      true,
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "body", Mode: "inject", Key: "metadata.user_id", Value: "user-1"},
+				{Target: "body", Mode: "map", Key: "metadata.copied_user_id", SourceKey: "metadata.user_id"},
+				{Target: "body", Mode: "map", Key: "metadata.client_trace_copy", SourceKey: "metadata.client_trace"},
+			},
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	_, err := svc.Forward(context.Background(), c, account, parsed)
+	require.NoError(t, err)
+	require.Equal(t, "user-1", gjson.GetBytes(upstream.lastBody, "metadata.user_id").String())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "metadata.copied_user_id").Exists())
+	require.Equal(t, "trace-123", gjson.GetBytes(upstream.lastBody, "metadata.client_trace_copy").String())
+}
+
+func TestGatewayService_AnthropicAPIKeyPassthrough_StructureConflictReturnsInvalidRequest(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	body := []byte(`{"model":"claude-3-5-sonnet-latest","metadata":"string","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`)
+	parsed := &ParsedRequest{Body: NewRequestBodyRef(body), Model: "claude-3-5-sonnet-latest"}
+	upstream := &anthropicHTTPUpstreamRecorder{}
+	svc := &GatewayService{cfg: &config.Config{}, httpUpstream: upstream, rateLimitService: &RateLimitService{}}
+	account := &Account{
+		ID:          104,
+		Name:        "anthropic-apikey-pass-conflict",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "upstream-anthropic-key", "base_url": "https://api.anthropic.com"},
+		Extra: map[string]any{
+			"anthropic_passthrough":      true,
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "body", Mode: "inject", Key: "metadata.user_id", Value: "user-1"},
+			},
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, parsed)
+	require.Error(t, err)
+	require.Nil(t, result)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), `"type":"invalid_request_error"`)
+	require.Contains(t, rec.Body.String(), "passthrough body path conflicts with non-object node: metadata")
+	require.Nil(t, upstream.lastReq)
 }
 
 func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardCountTokensPreservesBody(t *testing.T) {
@@ -243,7 +434,12 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardCountTokensPreservesBo
 			"model_mapping": map[string]any{"claude-3-5-sonnet-latest": "claude-3-opus-20240229"},
 		},
 		Extra: map[string]any{
-			"anthropic_passthrough": true,
+			"anthropic_passthrough":      true,
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "header", Mode: "inject", Key: "X-Trace-Id", Value: "trace-ct-1"},
+				{Target: "body", Mode: "inject", Key: "metadata.user_id", Value: "user-1"},
+			},
 		},
 		Status:      StatusActive,
 		Schedulable: true,
@@ -253,9 +449,20 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardCountTokensPreservesBo
 	require.NoError(t, err)
 
 	require.Equal(t, "claude-3-opus-20240229", gjson.GetBytes(upstream.lastBody, "model").String(), "count_tokens 透传模式应应用账号级模型映射")
+	require.Equal(t, "user-1", gjson.GetBytes(upstream.lastBody, "metadata.user_id").String())
 	require.Equal(t, "upstream-anthropic-key", getHeaderRaw(upstream.lastReq.Header, "x-api-key"))
+	require.Equal(t, "trace-ct-1", getHeaderRaw(upstream.lastReq.Header, "X-Trace-Id"))
 	require.Empty(t, getHeaderRaw(upstream.lastReq.Header, "authorization"))
 	require.Empty(t, getHeaderRaw(upstream.lastReq.Header, "cookie"))
+	_, hasRawAPIKey := upstream.lastReq.Header["x-api-key"] //nolint:staticcheck // intentionally verify raw upstream header key casing
+	require.True(t, hasRawAPIKey)
+	_, hasRawAnthropicVersion := upstream.lastReq.Header["anthropic-version"] //nolint:staticcheck // intentionally verify raw upstream header key casing
+	require.True(t, hasRawAnthropicVersion)
+	rawBody, ok := c.Get(OpsUpstreamRequestBodyKey)
+	require.True(t, ok)
+	bodyBytes, ok := rawBody.([]byte)
+	require.True(t, ok)
+	require.Equal(t, "user-1", gjson.GetBytes(bodyBytes, "metadata.user_id").String())
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.JSONEq(t, upstreamRespBody, rec.Body.String())
 	require.Empty(t, rec.Header().Get("Set-Cookie"))
@@ -763,7 +970,7 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_BuildRequestRejectsInvalidBas
 		},
 	}
 
-	_, _, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(context.Background(), c, account, []byte(`{}`), "k")
+	_, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(context.Background(), c, account, []byte(`{}`), []byte(`{}`), "k")
 	require.Error(t, err)
 }
 
@@ -868,16 +1075,13 @@ func TestGatewayService_AnthropicOAuth_ForwardPreservesBillingHeaderSystemBlock(
 			require.True(t, system.Exists())
 			require.True(t, system.IsArray(), "system should be an array")
 			arr := system.Array()
-			require.Len(t, arr, 3, "system array should have billing block + cc prompt block + expansion block")
+			require.Len(t, arr, 2, "system array should have billing block + cc prompt block")
 
 			require.Contains(t, arr[0].Get("text").String(), "x-anthropic-billing-header:")
 			require.Contains(t, arr[0].Get("text").String(), "cc_version=")
 
 			require.Equal(t, claudeCodeSystemPrompt, arr[1].Get("text").String())
-			require.False(t, arr[1].Get("cache_control").Exists(), "身份前缀 block 不应带 cache_control")
-
-			require.Equal(t, claudeCodeSystemPromptExpansion, arr[2].Get("text").String())
-			require.Equal(t, "ephemeral", arr[2].Get("cache_control.type").String())
+			require.Equal(t, "ephemeral", arr[1].Get("cache_control.type").String())
 
 			// 原始 system prompt 应迁移至 messages 中
 			messages := gjson.GetBytes(upstream.lastBody, "messages")
@@ -1531,4 +1735,62 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_StreamingUpstreamReadErrorAft
 	require.NotNil(t, result)
 	require.True(t, result.clientDisconnect)
 	require.Equal(t, 8, result.usage.InputTokens)
+}
+
+func TestGatewayService_AnthropicAPIKeyPassthrough_OpsBodyReflectsPassthroughInjection(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	inputBody := []byte(`{"model":"claude-3-5-sonnet-latest","messages":[{"role":"user","content":"hi"}]}`)
+	parsed := &ParsedRequest{Body: NewRequestBodyRef(inputBody), Model: "claude-3-5-sonnet-latest"}
+
+	upstream := &anthropicHTTPUpstreamRecorder{
+		resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"msg_1","type":"message","usage":{"input_tokens":5,"output_tokens":3}}`)),
+		},
+	}
+	svc := &GatewayService{
+		cfg: &config.Config{
+			Security: config.SecurityConfig{
+				URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+			},
+		},
+		httpUpstream:     upstream,
+		rateLimitService: &RateLimitService{},
+	}
+	account := &Account{
+		ID:          501,
+		Name:        "anthropic-apikey-ops-body-test",
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "upstream-anthropic-key",
+			"base_url": "https://api.anthropic.com",
+		},
+		Extra: map[string]any{
+			"anthropic_passthrough":      true,
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "body", Mode: "inject", Key: "metadata.ops_tag", Value: "injected-value"},
+			},
+		},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	_, err := svc.Forward(context.Background(), c, account, parsed)
+	require.NoError(t, err)
+
+	rawBody, ok := c.Get(OpsUpstreamRequestBodyKey)
+	require.True(t, ok)
+	bodyBytes, ok := rawBody.([]byte)
+	require.True(t, ok)
+	require.Equal(t, "injected-value", gjson.GetBytes(bodyBytes, "metadata.ops_tag").String(),
+		"ops upstream request body should reflect passthrough-injected fields")
 }

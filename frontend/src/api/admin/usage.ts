@@ -4,89 +4,18 @@
  */
 
 import { apiClient } from '../client'
-import type { AdminUsageLog, UsageQueryParams, PaginatedResponse, UsageRequestType } from '@/types'
-import type { EndpointStat } from '@/types'
-
-// ==================== Types ====================
-
-export interface AdminUsageStatsResponse {
-  total_requests: number
-  total_input_tokens: number
-  total_output_tokens: number
-  total_cache_tokens: number
-  total_cache_creation_tokens: number
-  total_cache_read_tokens: number
-  total_tokens: number
-  total_cost: number
-  total_actual_cost: number
-  total_account_cost: number
-  average_duration_ms: number
-  endpoints?: EndpointStat[]
-  upstream_endpoints?: EndpointStat[]
-  endpoint_paths?: EndpointStat[]
-}
-
-export interface SimpleUser {
-  id: number
-  email: string
-  deleted: boolean
-}
-
-export interface SimpleApiKey {
-  id: number
-  name: string
-  user_id: number
-}
-
-export interface UsageCleanupFilters {
-  start_time: string
-  end_time: string
-  user_id?: number
-  api_key_id?: number
-  account_id?: number
-  group_id?: number
-  model?: string | null
-  request_type?: UsageRequestType | null
-  stream?: boolean | null
-  billing_type?: number | null
-}
-
-export interface UsageCleanupTask {
-  id: number
-  status: string
-  filters: UsageCleanupFilters
-  created_by: number
-  deleted_rows: number
-  error_message?: string | null
-  canceled_by?: number | null
-  canceled_at?: string | null
-  started_at?: string | null
-  finished_at?: string | null
-  created_at: string
-  updated_at: string
-}
-
-export interface CreateUsageCleanupTaskRequest {
-  start_date: string
-  end_date: string
-  user_id?: number
-  api_key_id?: number
-  account_id?: number
-  group_id?: number
-  model?: string | null
-  request_type?: UsageRequestType | null
-  stream?: boolean | null
-  billing_type?: number | null
-  timezone?: string
-}
-
-export interface AdminUsageQueryParams extends UsageQueryParams {
-  user_id?: number
-  exact_total?: boolean
-  billing_mode?: string
-  sort_by?: string
-  sort_order?: 'asc' | 'desc'
-}
+import type {
+  AdminUsageDetail,
+  AdminUsageLog,
+  AdminUsageQueryParams,
+  AdminUsageStatsResponse,
+  CreateUsageCleanupTaskRequest,
+  PaginatedResponse,
+  SimpleApiKey,
+  SimpleUser,
+  UsageRequestType,
+  UsageCleanupTask
+} from '@/types'
 
 // ==================== API Functions ====================
 
@@ -123,11 +52,17 @@ export async function getStats(params: {
   start_date?: string
   end_date?: string
   timezone?: string
+  billing_mode?: string
   nocache?: number
 }): Promise<AdminUsageStatsResponse> {
   const { data } = await apiClient.get<AdminUsageStatsResponse>('/admin/usage/stats', {
     params
   })
+  return data
+}
+
+export async function getDetail(id: number): Promise<AdminUsageDetail> {
+  const { data } = await apiClient.get<AdminUsageDetail>(`/admin/usage/${id}/detail`)
   return data
 }
 
@@ -203,6 +138,7 @@ export async function cancelCleanupTask(taskId: number): Promise<{ id: number; s
 export const adminUsageAPI = {
   list,
   getStats,
+  getDetail,
   searchUsers,
   searchApiKeys,
   listCleanupTasks,

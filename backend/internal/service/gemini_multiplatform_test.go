@@ -144,6 +144,15 @@ func (m *mockAccountRepoForGemini) ListSchedulableUngroupedByPlatform(ctx contex
 func (m *mockAccountRepoForGemini) ListSchedulableUngroupedByPlatforms(ctx context.Context, platforms []string) ([]Account, error) {
 	return m.ListSchedulableByPlatforms(ctx, platforms)
 }
+func (m *mockAccountRepoForGemini) ListTempUnschedulableByPlatform(ctx context.Context, platform string, now time.Time) ([]Account, error) {
+	var result []Account
+	for _, acc := range m.accounts {
+		if acc.Platform == platform && acc.TempUnschedulableUntil != nil && acc.TempUnschedulableUntil.After(now) {
+			result = append(result, acc)
+		}
+	}
+	return result, nil
+}
 func (m *mockAccountRepoForGemini) SetRateLimited(ctx context.Context, id int64, resetAt time.Time) error {
 	return nil
 }

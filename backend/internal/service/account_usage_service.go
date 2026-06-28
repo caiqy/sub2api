@@ -28,10 +28,13 @@ type UsageLogRepository interface {
 	// Create creates a usage log and returns whether it was actually inserted.
 	// inserted is false when the insert was skipped due to conflict (idempotent retries).
 	Create(ctx context.Context, log *UsageLog) (inserted bool, err error)
+	PersistDetailBestEffort(ctx context.Context, log *UsageLog)
 	GetByID(ctx context.Context, id int64) (*UsageLog, error)
+	GetDetailByUsageLogID(ctx context.Context, usageLogID int64) (*UsageLogDetail, error)
 	Delete(ctx context.Context, id int64) error
 
 	ListByUser(ctx context.Context, userID int64, params pagination.PaginationParams) ([]UsageLog, *pagination.PaginationResult, error)
+	ListImageHistoryByUser(ctx context.Context, userID int64, params pagination.PaginationParams, filters ImageHistoryListFilters) ([]UsageLog, *pagination.PaginationResult, error)
 	ListByAPIKey(ctx context.Context, apiKeyID int64, params pagination.PaginationParams) ([]UsageLog, *pagination.PaginationResult, error)
 	ListByAccount(ctx context.Context, accountID int64, params pagination.PaginationParams) ([]UsageLog, *pagination.PaginationResult, error)
 
