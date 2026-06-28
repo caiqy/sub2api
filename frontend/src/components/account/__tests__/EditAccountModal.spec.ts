@@ -943,7 +943,7 @@ describe('EditAccountModal', () => {
 	  expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.auto_pause_7d_threshold).toBe(0.96)
 	})
 
-	it('submits OpenAI quota auto-pause disable flag in extra', async () => {
+  it('submits OpenAI quota auto-pause disable flag in extra', async () => {
 	  // Toggling the per-account disable flag must persist as auto_pause_5h_disabled
 	  // so an admin can exempt one account from auto-pause even when a global default
 	  // threshold is configured (otherwise leaving the threshold blank would silently
@@ -962,6 +962,14 @@ describe('EditAccountModal', () => {
 	  expect(updateAccountMock).toHaveBeenCalledTimes(1)
 	  expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.auto_pause_5h_disabled).toBe(true)
 	  expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.auto_pause_7d_disabled).toBeUndefined()
+	})
+
+	it('does not reference removed openai-scoped auto-pause i18n keys', () => {
+	  const source = readFileSync(resolve(process.cwd(), 'src/components/account/EditAccountModal.vue'), 'utf8')
+
+	  expect(source).not.toContain("admin.accounts.openai.autoPause5hThreshold")
+	  expect(source).not.toContain("admin.accounts.openai.autoPause7dThreshold")
+	  expect(source).not.toContain("admin.accounts.openai.autoPauseDisabled")
 	})
 
   it('keeps at least one OpenAI APIKey endpoint capability selected', async () => {
