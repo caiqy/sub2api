@@ -563,6 +563,41 @@ func TestLayered_PreviousResponseStickyClearsBindingWhenTransportIncompatible(t 
 	require.False(t, exists, "incompatible previous-response binding should be cleared")
 }
 
+func TestLayered_PreviousResponseStickyIgnoresNonOpenAIPlatform(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(920145)
+	openAISticky := Account{ID: 9201451, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0}
+	grokAccount := Account{ID: 9201452, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 10}
+	stateStore := &openAIWSStateStoreSpy{responseAccounts: map[string]int64{"resp_layered_non_openai": openAISticky.ID}}
+	cfg := &config.Config{}
+	cfg.Gateway.Sticky.OpenAI.Enabled = true
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{openAISticky, grokAccount}},
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+		openaiWSStateStore: stateStore,
+	}
+	selection, decision, err := svc.SelectAccountWithSchedulerForCapability(
+		ctx,
+		&groupID,
+		"resp_layered_non_openai",
+		"",
+		"grok-4.3",
+		nil,
+		OpenAIUpstreamTransportHTTPSSE,
+		OpenAIEndpointCapabilityChatCompletions,
+		false,
+		PlatformGrok,
+	)
+	require.Error(t, err)
+	require.Nil(t, selection)
+	require.False(t, decision.StickyPreviousHit)
+	require.Zero(t, stateStore.getResponseAccountCalls["resp_layered_non_openai"])
+	require.Zero(t, stateStore.deleteResponseCalls["resp_layered_non_openai"])
+}
+
 func TestLayered_PreviousResponseStickyClearsBindingWhenUpstreamRestricted(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(92015)
@@ -763,6 +798,68 @@ func TestLayered_SessionStickyDoesNotDeleteBindingWhenModelRequestIncompatible(t
 	if selection.ReleaseFunc != nil {
 		selection.ReleaseFunc()
 	}
+}
+
+func TestLayered_SessionStickyDBRecheckRejectsEndpointCapabilityChange(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(920177)
+	stickySnapshot := &Account{
+		ID:          9201771,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    0,
+		Credentials: map[string]any{"openai_capabilities": []any{"chat_completions", "embeddings"}},
+	}
+	stickyLatest := Account{
+		ID:          9201771,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    0,
+		Credentials: map[string]any{"openai_capabilities": []any{"chat_completions"}},
+	}
+	backup := Account{
+		ID:          9201772,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    50,
+		Credentials: map[string]any{"openai_capabilities": []any{"chat_completions", "embeddings"}},
+	}
+	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:session_hash_layered_capability_db": stickySnapshot.ID}}
+	snapshot := &openAISnapshotCacheStub{accountsByID: map[int64]*Account{stickySnapshot.ID: stickySnapshot, backup.ID: &backup}}
+	cfg := &config.Config{}
+	cfg.Gateway.Sticky.OpenAI.Enabled = true
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	schedulerSnapshot := NewSchedulerSnapshotService(snapshot, nil, schedulerTestOpenAIAccountRepo{accounts: []Account{stickyLatest, backup}}, schedulerTestGroupRepo{}, cfg)
+
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{stickyLatest, backup}},
+		cache:              cache,
+		schedulerSnapshot:  schedulerSnapshot,
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
+	}
+	scheduler := svc.getOpenAIAccountScheduler().(*layeredOpenAIAccountScheduler)
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	selection, reqAfter, err := scheduler.selectBySessionHash(ctx, OpenAIAccountScheduleRequest{
+		GroupID:            &groupID,
+		SessionHash:        "session_hash_layered_capability_db",
+		RequestedModel:     "text-embedding-3-small",
+		RequiredCapability: OpenAIEndpointCapabilityEmbeddings,
+	})
+	require.NoError(t, err)
+	require.Nil(t, selection)
+	require.True(t, reqAfter.SkipStickyBind)
+	require.Zero(t, cache.deletedSessions["openai:session_hash_layered_capability_db"])
 }
 
 func TestLayered_SessionStickyDoesNotDeleteBindingWhenDBRecheckModelMismatch(t *testing.T) {

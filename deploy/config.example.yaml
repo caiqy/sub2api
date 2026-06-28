@@ -331,6 +331,8 @@ gateway:
       queue: 0.7
       error_rate: 0.8
       ttft: 0.5
+      # use-it-or-lose-it：倾向「会话窗口最早重置」的账号，0 表示关闭。
+      reset: 0.0
     # 调度模式："weighted"（默认，加权随机） 或 "layered"（分层过滤，优先级决定性）
     scheduler_mode: "weighted"
     # 分层调度参数（仅 scheduler_mode=layered 时生效）
