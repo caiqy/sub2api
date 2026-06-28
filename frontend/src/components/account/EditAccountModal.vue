@@ -1845,19 +1845,19 @@
         class="grid grid-cols-1 gap-3 border-t border-gray-200 pt-4 dark:border-dark-600 sm:grid-cols-2"
       >
         <label class="space-y-1 text-sm text-gray-700 dark:text-gray-300">
-          <span>{{ t('admin.accounts.openai.autoPause5hThreshold') }}</span>
+          <span>{{ t('admin.accounts.autoPause5hThreshold') }}</span>
           <input v-model.number="autoPause5hThreshold" data-testid="auto-pause-5h-threshold" type="number" min="0" max="100" class="input" />
           <span class="flex items-center gap-2 text-xs">
             <input :checked="autoPause5hDisabled" data-testid="auto-pause-5h-disabled" type="checkbox" @click="autoPause5hDisabled = !autoPause5hDisabled" />
-            {{ t('admin.accounts.openai.autoPauseDisabled') }}
+            {{ t('admin.accounts.autoPause5hDisabled') }}
           </span>
         </label>
         <label class="space-y-1 text-sm text-gray-700 dark:text-gray-300">
-          <span>{{ t('admin.accounts.openai.autoPause7dThreshold') }}</span>
+          <span>{{ t('admin.accounts.autoPause7dThreshold') }}</span>
           <input v-model.number="autoPause7dThreshold" data-testid="auto-pause-7d-threshold" type="number" min="0" max="100" class="input" />
           <span class="flex items-center gap-2 text-xs">
             <input :checked="autoPause7dDisabled" data-testid="auto-pause-7d-disabled" type="checkbox" @click="autoPause7dDisabled = !autoPause7dDisabled" />
-            {{ t('admin.accounts.openai.autoPauseDisabled') }}
+            {{ t('admin.accounts.autoPause7dDisabled') }}
           </span>
         </label>
       </div>
