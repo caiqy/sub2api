@@ -3,6 +3,7 @@ package handler
 import (
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -186,4 +187,20 @@ func GetUpstreamEndpoint(c *gin.Context, platform string) string {
 		rawPath = c.Request.URL.Path
 	}
 	return DeriveUpstreamEndpoint(inbound, rawPath, platform)
+}
+
+// resolveOpenAIUpstreamEndpoint returns the actual upstream endpoint used by the
+// OpenAI-compatible gateway routes. Most requests follow GetUpstreamEndpoint,
+// but API key accounts explicitly marked as not supporting Responses are served
+// through the raw chat-completions fallback while the inbound route is still
+// /v1/responses.
+func resolveOpenAIUpstreamEndpoint(c *gin.Context, account *service.Account) string {
+	if account != nil && account.Platform == service.PlatformOpenAI && account.Type == service.AccountTypeAPIKey &&
+		!openai_compat.ShouldUseResponsesAPI(account.Extra) {
+		return EndpointChatCompletions
+	}
+	if account == nil {
+		return GetUpstreamEndpoint(c, service.PlatformOpenAI)
+	}
+	return GetUpstreamEndpoint(c, account.Platform)
 }

@@ -35,9 +35,24 @@ func (r *openAITokenProviderRefreshRepoStub) Update(context.Context, *Account) e
 
 func (r *openAITokenProviderRefreshRepoStub) UpdateCredentials(_ context.Context, _ int64, credentials map[string]any) error {
 	if r.account != nil {
-		r.account.Credentials = cloneCredentials(credentials)
+		r.account.Credentials = cloneRefreshCredentials(credentials)
 	}
 	return nil
+}
+
+func cloneRefreshCredentials(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	cloned := make(map[string]any, len(input))
+	for k, v := range input {
+		if nested, ok := v.(map[string]any); ok {
+			cloned[k] = cloneRefreshCredentials(nested)
+			continue
+		}
+		cloned[k] = v
+	}
+	return cloned
 }
 
 type openAITokenProviderRefreshCacheStub struct{}

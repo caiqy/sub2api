@@ -727,3 +727,63 @@ func TestApplyTokenOverrides_IntervalSetsImageOutputPriceExplicit(t *testing.T) 
 	require.True(t, pricing.ImageOutputPriceExplicit)
 	require.Equal(t, 0.0, pricing.ImageOutputPricePerToken)
 }
+
+func TestResolvedPricingAsTokenMode_PreservesTokenPricingAndImageOutputPrice(t *testing.T) {
+	r := newResolverWithChannel(t, []ChannelModelPricing{{
+		Platform:         "openai",
+		Models:           []string{"gpt-5.1"},
+		BillingMode:      BillingModeToken,
+		InputPrice:       testPtrFloat64(3e-6),
+		OutputPrice:      testPtrFloat64(15e-6),
+		ImageOutputPrice: testPtrFloat64(15e-6),
+		PerRequestPrice:  testPtrFloat64(0.2),
+	}})
+
+	resolved := r.Resolve(context.Background(), PricingInput{
+		Model:   "gpt-5.1",
+		GroupID: groupIDPtr(),
+	})
+	require.NotNil(t, resolved)
+	require.Equal(t, BillingModeToken, resolved.Mode)
+
+	tokenOnly := resolved.AsTokenMode()
+	require.NotNil(t, tokenOnly)
+	require.Equal(t, BillingModeToken, tokenOnly.Mode)
+	require.NotNil(t, tokenOnly.BasePricing)
+	require.InDelta(t, 3e-6, tokenOnly.BasePricing.InputPricePerToken, 1e-12)
+	require.InDelta(t, 15e-6, tokenOnly.BasePricing.OutputPricePerToken, 1e-12)
+	require.InDelta(t, 15e-6, tokenOnly.BasePricing.ImageOutputPricePerToken, 1e-12)
+	require.True(t, tokenOnly.BasePricing.ImageOutputPriceExplicit)
+	require.Nil(t, tokenOnly.RequestTiers)
+	require.Zero(t, tokenOnly.DefaultPerRequestPrice)
+}
+
+func TestResolvedPricingAsTokenMode_PreservesTokenPricingAndImageOutputPrice(t *testing.T) {
+	r := newResolverWithChannel(t, []ChannelModelPricing{{
+		Platform:         "openai",
+		Models:           []string{"gpt-5.1"},
+		BillingMode:      BillingModeToken,
+		InputPrice:       testPtrFloat64(3e-6),
+		OutputPrice:      testPtrFloat64(15e-6),
+		ImageOutputPrice: testPtrFloat64(15e-6),
+		PerRequestPrice:  testPtrFloat64(0.2),
+	}})
+
+	resolved := r.Resolve(context.Background(), PricingInput{
+		Model:   "gpt-5.1",
+		GroupID: groupIDPtr(),
+	})
+	require.NotNil(t, resolved)
+	require.Equal(t, BillingModeToken, resolved.Mode)
+
+	tokenOnly := resolved.AsTokenMode()
+	require.NotNil(t, tokenOnly)
+	require.Equal(t, BillingModeToken, tokenOnly.Mode)
+	require.NotNil(t, tokenOnly.BasePricing)
+	require.InDelta(t, 3e-6, tokenOnly.BasePricing.InputPricePerToken, 1e-12)
+	require.InDelta(t, 15e-6, tokenOnly.BasePricing.OutputPricePerToken, 1e-12)
+	require.InDelta(t, 15e-6, tokenOnly.BasePricing.ImageOutputPricePerToken, 1e-12)
+	require.True(t, tokenOnly.BasePricing.ImageOutputPriceExplicit)
+	require.Nil(t, tokenOnly.RequestTiers)
+	require.Zero(t, tokenOnly.DefaultPerRequestPrice)
+}

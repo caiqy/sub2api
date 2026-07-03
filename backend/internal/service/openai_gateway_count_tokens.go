@@ -39,6 +39,10 @@ type openAIInputTokensCountPrepared struct {
 	UpstreamModel   string
 }
 
+func marshalOpenAIUpstreamJSON(v any) ([]byte, error) {
+	return json.Marshal(v)
+}
+
 // ForwardCountTokensAsAnthropic bridges Anthropic /v1/messages/count_tokens to
 // OpenAI POST /v1/responses/input_tokens and returns Anthropic-compatible output.
 func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(

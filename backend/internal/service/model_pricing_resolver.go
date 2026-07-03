@@ -39,6 +39,21 @@ type ResolvedPricing struct {
 	channelPricing *ChannelModelPricing
 }
 
+// AsTokenMode returns a token-billing view of the resolved pricing.
+// Some channel configs may carry per-request helper fields while the declared
+// BillingMode is still token. RecordUsage token paths should ignore request-tier
+// metadata and rely only on token pricing plus image output token pricing.
+func (r *ResolvedPricing) AsTokenMode() *ResolvedPricing {
+	if r == nil {
+		return nil
+	}
+	cloned := *r
+	cloned.Mode = BillingModeToken
+	cloned.RequestTiers = nil
+	cloned.DefaultPerRequestPrice = 0
+	return &cloned
+}
+
 // ModelPricingResolver 统一模型定价解析器。
 // 解析链：Channel → LiteLLM → Fallback。
 type ModelPricingResolver struct {

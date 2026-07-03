@@ -146,7 +146,7 @@
 
       <template v-if="activeTab === 'usage'">
         <UsageTable
-          :data="usageLogs"
+          :data="usageTableRows"
           :loading="loading"
           :columns="visibleColumns"
           :server-side-sort="true"
@@ -207,6 +207,7 @@ import { formatReasoningEffort } from '@/utils/format'
 import { BILLING_MODE_IMAGE, getBillingModeLabel } from '@/utils/billingMode'
 import { resolveUsageRequestType, requestTypeToLegacyStream } from '@/utils/usageRequestType'
 import type {
+  AdminUsageLog,
   ApiKey,
   EndpointStat,
   Group,
@@ -228,6 +229,12 @@ type EndpointSource = 'inbound' | 'upstream' | 'path'
 
 const usageStats = ref<UsageStatsResponse | null>(null)
 const usageLogs = ref<UsageLog[]>([])
+const usageTableRows = computed<AdminUsageLog[]>(() =>
+  usageLogs.value.map((row) => ({
+    ...row,
+    has_detail: false,
+  }))
+)
 const trendData = ref<TrendDataPoint[]>([])
 const requestedModelStats = ref<ModelStat[]>([])
 const groupStats = ref<GroupStat[]>([])

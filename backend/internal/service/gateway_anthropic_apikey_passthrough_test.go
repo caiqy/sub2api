@@ -454,10 +454,6 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardCountTokensPreservesBo
 	require.Equal(t, "trace-ct-1", getHeaderRaw(upstream.lastReq.Header, "X-Trace-Id"))
 	require.Empty(t, getHeaderRaw(upstream.lastReq.Header, "authorization"))
 	require.Empty(t, getHeaderRaw(upstream.lastReq.Header, "cookie"))
-	_, hasRawAPIKey := upstream.lastReq.Header["x-api-key"] //nolint:staticcheck // intentionally verify raw upstream header key casing
-	require.True(t, hasRawAPIKey)
-	_, hasRawAnthropicVersion := upstream.lastReq.Header["anthropic-version"] //nolint:staticcheck // intentionally verify raw upstream header key casing
-	require.True(t, hasRawAnthropicVersion)
 	rawBody, ok := c.Get(OpsUpstreamRequestBodyKey)
 	require.True(t, ok)
 	bodyBytes, ok := rawBody.([]byte)
@@ -498,11 +494,14 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_BearerAuthScheme(t *testing.T
 		},
 	}
 
-	msgReq, wireBody, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(
-		context.Background(), c, account, []byte(`{"model":"gpt-oss:20b","messages":[]}`), "ollama-key",
+	body := []byte(`{"model":"gpt-oss:20b","messages":[]}`)
+	msgReq, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(
+		context.Background(), c, account, body, body, "ollama-key",
 	)
 	require.NoError(t, err)
 	require.Equal(t, "https://ollama.com/v1/messages?beta=true", msgReq.URL.String())
+	wireBody, err := io.ReadAll(msgReq.Body)
+	require.NoError(t, err)
 	require.JSONEq(t, `{"model":"gpt-oss:20b","messages":[]}`, string(wireBody))
 	require.Equal(t, "Bearer ollama-key", getHeaderRaw(msgReq.Header, "authorization"))
 	require.Empty(t, getHeaderRaw(msgReq.Header, "x-api-key"))

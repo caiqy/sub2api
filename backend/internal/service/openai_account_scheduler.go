@@ -1250,12 +1250,25 @@ func isOpenAIAccountRequestCompatible(ctx context.Context, service *OpenAIGatewa
 	if service != nil && service.isOpenAIAccountRuntimeBlocked(account) {
 		return false
 	}
+	parentLookup := func(id int64) *Account {
+		if service == nil {
+			return nil
+		}
+		if service.schedulerSnapshot != nil {
+			if parent, err := service.schedulerSnapshot.GetAccount(ctx, id); err == nil && parent != nil {
+				return parent
+			}
+		}
+		if service.accountRepo == nil {
+			return nil
+		}
+		parent, _ := service.accountRepo.GetByID(ctx, id)
+		return parent
+	}
 	// 母账号健康联动：影子账号的凭据来自母账号，母账号不可调度时影子也不应被选中。
 	// Parent-health gate: shadow borrows the parent's credentials; an unschedulable
 	// parent must block the shadow across all scheduler paths.
-	if !parentHealthyForShadow(account, func(id int64) *Account {
-		return s.lookupShadowParentAccount(ctx, id)
-	}) {
+	if !parentHealthyForShadow(account, parentLookup) {
 		return false
 	}
 	if req.RequestedModel != "" && !account.IsModelSupported(req.RequestedModel) {

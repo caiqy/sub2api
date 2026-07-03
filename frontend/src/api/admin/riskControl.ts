@@ -186,7 +186,6 @@ export interface ContentModerationLog {
   category_scores: Record<string, number>
   threshold_snapshot: Record<string, number>
   input_excerpt: string
-  matched_keyword: string
   upstream_latency_ms: number | null
   error: string
   violation_count: number
