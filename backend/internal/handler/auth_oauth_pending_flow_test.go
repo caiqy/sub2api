@@ -3186,6 +3186,14 @@ func (r *oauthPendingFlowUserRepo) RemoveGroupFromAllowedGroups(context.Context,
 	panic("unexpected RemoveGroupFromAllowedGroups call")
 }
 
+func (r *oauthPendingFlowUserRepo) GetBlockedGroups(context.Context, int64) ([]int64, error) {
+	return nil, nil
+}
+
+func (r *oauthPendingFlowUserRepo) SetBlockedGroups(context.Context, int64, []int64) error {
+	return nil
+}
+
 func (r *oauthPendingFlowUserRepo) AddGroupToAllowedGroups(context.Context, int64, int64) error {
 	panic("unexpected AddGroupToAllowedGroups call")
 }

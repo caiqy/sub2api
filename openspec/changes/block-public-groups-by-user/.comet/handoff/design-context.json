@@ -1,0 +1,14 @@
+{
+  "change": "block-public-groups-by-user",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "c437db1dbdbc1f151fd19e33e632b6f5c9c1718f65fb5e34c3b0502faed0694a",
+  "files": [
+    { "path": "openspec/changes/block-public-groups-by-user/proposal.md", "sha256": "c9c6af023ee16fcd0bf2bf5dcda2f49b99d6df9abdbc0032cacbe884593ff36c" },
+    { "path": "openspec/changes/block-public-groups-by-user/design.md", "sha256": "eb61d2e7350778bc3d19c37e8937626b11f6d1374385d4a39184a5f735c743be" },
+    { "path": "openspec/changes/block-public-groups-by-user/tasks.md", "sha256": "bc021a50dcc84b4eca3ab98e7e3410fcb9b9d5738311610e55461a80ff82b8ea" },
+    { "path": "openspec/changes/block-public-groups-by-user/specs/user-public-group-blocklist/spec.md", "sha256": "dd6b5e68c6349df2082410ffd00d1b0199fca9a412b249af55e0eb99b3bb0648" }
+  ]
+}
