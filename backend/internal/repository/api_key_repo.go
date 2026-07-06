@@ -13,6 +13,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/schema/mixins"
 	"github.com/Wei-Shaw/sub2api/ent/user"
+	"github.com/Wei-Shaw/sub2api/ent/userresourceoverride"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -82,7 +83,33 @@ func (r *apiKeyRepository) GetByID(ctx context.Context, id int64) (*service.APIK
 		}
 		return nil, err
 	}
-	return apiKeyEntityToService(m), nil
+	out := apiKeyEntityToService(m)
+	if out.User != nil {
+		blocked, err := r.loadAuthBlockedGroups(ctx, out.User.ID)
+		if err != nil {
+			return nil, err
+		}
+		out.User.BlockedGroups = blocked
+	}
+	return out, nil
+}
+
+func (r *apiKeyRepository) loadAuthBlockedGroups(ctx context.Context, userID int64) ([]int64, error) {
+	rows, err := r.client.UserResourceOverride.Query().
+		Where(
+			userresourceoverride.UserIDEQ(userID),
+			userresourceoverride.ResourceTypeEQ(userResourceTypeGroup),
+			userresourceoverride.EffectEQ(userResourceEffectDeny),
+		).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, row.ResourceID)
+	}
+	return out, nil
 }
 
 // GetKeyAndOwnerID 根据 API Key ID 获取其 key 与所有者（用户）ID。
@@ -120,7 +147,15 @@ func (r *apiKeyRepository) GetByKey(ctx context.Context, key string) (*service.A
 		}
 		return nil, err
 	}
-	return apiKeyEntityToService(m), nil
+	out := apiKeyEntityToService(m)
+	if out.User != nil {
+		blocked, err := r.loadAuthBlockedGroups(ctx, out.User.ID)
+		if err != nil {
+			return nil, err
+		}
+		out.User.BlockedGroups = blocked
+	}
+	return out, nil
 }
 
 func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*service.APIKey, error) {
@@ -196,6 +231,10 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 				group.FieldUserConcurrencyLimit,
 				group.FieldModelsListConfig,
 				group.FieldRpmLimit,
+				group.FieldPeakRateEnabled,
+				group.FieldPeakStart,
+				group.FieldPeakEnd,
+				group.FieldPeakRateMultiplier,
 			)
 		}).
 		Only(ctx)
@@ -205,7 +244,15 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 		}
 		return nil, err
 	}
-	return apiKeyEntityToService(m), nil
+	out := apiKeyEntityToService(m)
+	if out.User != nil {
+		blocked, err := r.loadAuthBlockedGroups(ctx, out.User.ID)
+		if err != nil {
+			return nil, err
+		}
+		out.User.BlockedGroups = blocked
+	}
+	return out, nil
 }
 
 func (r *apiKeyRepository) Update(ctx context.Context, key *service.APIKey) error {
@@ -818,6 +865,10 @@ func groupEntityToService(g *dbent.Group) *service.Group {
 		UserConcurrencyLimit:            g.UserConcurrencyLimit,
 		ModelsListConfig:                g.ModelsListConfig,
 		RPMLimit:                        g.RpmLimit,
+		PeakRateEnabled:                 g.PeakRateEnabled,
+		PeakStart:                       g.PeakStart,
+		PeakEnd:                         g.PeakEnd,
+		PeakRateMultiplier:              g.PeakRateMultiplier,
 		CreatedAt:                       g.CreatedAt,
 		UpdatedAt:                       g.UpdatedAt,
 	}

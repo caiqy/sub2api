@@ -1,0 +1,40 @@
+schema: spec-driven
+
+context: |
+  Comet/OpenSpec artifacts should keep the schema template headings and required
+  keywords exactly as provided (for example: Why, What Changes, ADDED
+  Requirements, Scenario, WHEN, THEN). Fill project-specific prose, summaries,
+  explanations, task descriptions, and scenario text in Chinese whenever possible.
+
+rules:
+  proposal:
+    - Keep the template section headings unchanged.
+    - Write filled-in content in Chinese whenever possible.
+  design:
+    - Keep the template section headings unchanged.
+    - Write filled-in content in Chinese whenever possible.
+  specs:
+    - Keep OpenSpec operation headings and normative keywords unchanged.
+    - Write requirement names, descriptions, and scenario content in Chinese whenever possible.
+  tasks:
+    - Keep checkbox syntax unchanged.
+    - Write task group names and task descriptions in Chinese whenever possible.
+
+# Project context (optional)
+# This is shown to AI when creating artifacts.
+# Add your tech stack, conventions, style guides, domain knowledge, etc.
+# Example:
+#   context: |
+#     Tech stack: TypeScript, React, Node.js
+#     We use conventional commits
+#     Domain: e-commerce platform
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always include a "Non-goals" section
+#     tasks:
+#       - Break tasks into chunks of max 2 hours

@@ -81,6 +81,12 @@ func (s *userRepoStubForGroupUpdate) ExistsByEmail(context.Context, string) (boo
 func (s *userRepoStubForGroupUpdate) RemoveGroupFromAllowedGroups(context.Context, int64) (int64, error) {
 	panic("unexpected")
 }
+func (s *userRepoStubForGroupUpdate) GetBlockedGroups(context.Context, int64) ([]int64, error) {
+	panic("unexpected")
+}
+func (s *userRepoStubForGroupUpdate) SetBlockedGroups(context.Context, int64, []int64) error {
+	panic("unexpected")
+}
 func (s *userRepoStubForGroupUpdate) UpdateTotpSecret(context.Context, int64, *string) error {
 	panic("unexpected")
 }

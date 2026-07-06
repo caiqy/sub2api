@@ -209,6 +209,14 @@ func (s *stubUserRepo) RemoveGroupFromAllowedGroups(ctx context.Context, groupID
 	panic("unexpected RemoveGroupFromAllowedGroups call")
 }
 
+func (s *stubUserRepo) GetBlockedGroups(ctx context.Context, userID int64) ([]int64, error) {
+	panic("unexpected GetBlockedGroups call")
+}
+
+func (s *stubUserRepo) SetBlockedGroups(ctx context.Context, userID int64, groupIDs []int64) error {
+	panic("unexpected SetBlockedGroups call")
+}
+
 func (s *stubUserRepo) RemoveGroupFromUserAllowedGroups(ctx context.Context, userID int64, groupID int64) error {
 	panic("unexpected RemoveGroupFromUserAllowedGroups call")
 }

@@ -104,16 +104,28 @@
             <div
               v-for="config in publicGroupConfigs"
               :key="config.groupId"
-              class="relative overflow-hidden rounded-xl border-2 border-green-200 bg-green-50/50 p-4 dark:border-green-800/50 dark:bg-green-900/10"
+              class="group relative overflow-hidden rounded-xl border-2 p-4 transition-all duration-200"
+              :class="config.isSelected
+                ? 'border-green-300 bg-green-50/50 dark:border-green-700 dark:bg-green-900/10'
+                : 'border-gray-200 bg-white hover:border-gray-300 dark:border-dark-600 dark:bg-dark-800 dark:hover:border-dark-500'"
+              :data-test="`group-toggle-${config.groupId}`"
             >
               <div class="flex items-center gap-4">
-                <!-- 复选框（禁用状态） -->
+                <!-- 复选框 -->
                 <div class="flex-shrink-0">
-                  <div class="flex h-5 w-5 items-center justify-center rounded-md border-2 border-green-400 bg-green-500 dark:border-green-600 dark:bg-green-600">
-                    <svg class="h-full w-full text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-                    </svg>
-                  </div>
+                  <label class="relative flex h-6 w-6 cursor-pointer items-center justify-center">
+                    <input
+                      type="checkbox"
+                      :checked="config.isSelected"
+                      @change="toggleGroup(config.groupId)"
+                      class="peer sr-only"
+                    />
+                    <div class="h-5 w-5 rounded-md border-2 border-gray-300 transition-all peer-checked:border-green-500 peer-checked:bg-green-500 dark:border-dark-500 peer-checked:dark:border-green-600">
+                      <svg v-if="config.isSelected" class="h-full w-full text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                    </div>
+                  </label>
                 </div>
 
                 <!-- 分组信息 -->
@@ -166,7 +178,7 @@
     <template #footer>
       <div class="flex justify-end gap-3">
         <button @click="$emit('close')" class="btn btn-secondary px-5">{{ t('common.cancel') }}</button>
-        <button @click="handleSave" :disabled="submitting" class="btn btn-primary px-6">
+        <button data-test="save-user-groups" @click="handleSave" :disabled="submitting" class="btn btn-primary px-6">
           <svg v-if="submitting" class="-ml-1 mr-2 h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
@@ -233,6 +245,7 @@ const load = async () => {
 
     // 初始化配置
     const userAllowedGroups = props.user?.allowed_groups || []
+    const userBlockedGroups = props.user?.blocked_groups || []
     const userGroupRates = props.user?.group_rates || {}
 
     // 保存原始专属倍率，用于检测删除操作
@@ -245,9 +258,8 @@ const load = async () => {
       isExclusive: g.is_exclusive,
       defaultRate: g.rate_multiplier,
       customRate: userGroupRates[g.id] ?? null,
-      // 专属分组：检查是否在 allowed_groups 中
-      // 公开分组：始终选中
-      isSelected: g.is_exclusive ? userAllowedGroups.includes(g.id) : true,
+      // 专属分组：检查是否在 allowed_groups 中；公开分组：未 blocked 即选中
+      isSelected: g.is_exclusive ? userAllowedGroups.includes(g.id) : !userBlockedGroups.includes(g.id),
     }))
   } catch (error) {
     console.error('Failed to load groups:', error)
@@ -257,8 +269,12 @@ const load = async () => {
 }
 
 const toggleExclusiveGroup = (groupId: number) => {
+  toggleGroup(groupId, true)
+}
+
+const toggleGroup = (groupId: number, exclusiveOnly = false) => {
   const config = groupConfigs.value.find((c) => c.groupId === groupId)
-  if (config && config.isExclusive) {
+  if (config && (!exclusiveOnly || config.isExclusive)) {
     config.isSelected = !config.isSelected
   }
 }
@@ -282,6 +298,7 @@ const handleSave = async () => {
   try {
     // 构建 allowed_groups（仅包含专属分组中被勾选的）
     const allowedGroups = groupConfigs.value.filter((c) => c.isExclusive && c.isSelected).map((c) => c.groupId)
+    const blockedGroups = groupConfigs.value.filter((c) => !c.isExclusive && !c.isSelected).map((c) => c.groupId)
 
     // 构建 group_rates
     // - 有新专属倍率: 设置为该值
@@ -301,6 +318,7 @@ const handleSave = async () => {
 
     await adminAPI.users.update(props.user.id, {
       allowed_groups: allowedGroups,
+      blocked_groups: blockedGroups,
       group_rates: Object.keys(groupRates).length > 0 ? groupRates : undefined,
     })
 

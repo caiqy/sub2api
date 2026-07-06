@@ -48,6 +48,10 @@ func (m *passthroughAdminAccountRepo) GetByIDs(ctx context.Context, ids []int64)
 	return result, nil
 }
 
+func (m *passthroughAdminAccountRepo) ListShadowsByParent(ctx context.Context, parentID int64) ([]*Account, error) {
+	return nil, nil
+}
+
 func (m *passthroughAdminAccountRepo) ExistsByID(ctx context.Context, id int64) (bool, error) {
 	_, ok := m.accountsByID[id]
 	return ok, nil

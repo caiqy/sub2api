@@ -50,6 +50,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/userattributedefinition"
 	"github.com/Wei-Shaw/sub2api/ent/userattributevalue"
 	"github.com/Wei-Shaw/sub2api/ent/userplatformquota"
+	"github.com/Wei-Shaw/sub2api/ent/userresourceoverride"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
 
 	stdsql "database/sql"
@@ -130,6 +131,8 @@ type Client struct {
 	UserAttributeValue *UserAttributeValueClient
 	// UserPlatformQuota is the client for interacting with the UserPlatformQuota builders.
 	UserPlatformQuota *UserPlatformQuotaClient
+	// UserResourceOverride is the client for interacting with the UserResourceOverride builders.
+	UserResourceOverride *UserResourceOverrideClient
 	// UserSubscription is the client for interacting with the UserSubscription builders.
 	UserSubscription *UserSubscriptionClient
 }
@@ -178,6 +181,7 @@ func (c *Client) init() {
 	c.UserAttributeDefinition = NewUserAttributeDefinitionClient(c.config)
 	c.UserAttributeValue = NewUserAttributeValueClient(c.config)
 	c.UserPlatformQuota = NewUserPlatformQuotaClient(c.config)
+	c.UserResourceOverride = NewUserResourceOverrideClient(c.config)
 	c.UserSubscription = NewUserSubscriptionClient(c.config)
 }
 
@@ -306,6 +310,7 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		UserAttributeDefinition:       NewUserAttributeDefinitionClient(cfg),
 		UserAttributeValue:            NewUserAttributeValueClient(cfg),
 		UserPlatformQuota:             NewUserPlatformQuotaClient(cfg),
+		UserResourceOverride:          NewUserResourceOverrideClient(cfg),
 		UserSubscription:              NewUserSubscriptionClient(cfg),
 	}, nil
 }
@@ -361,6 +366,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		UserAttributeDefinition:       NewUserAttributeDefinitionClient(cfg),
 		UserAttributeValue:            NewUserAttributeValueClient(cfg),
 		UserPlatformQuota:             NewUserPlatformQuotaClient(cfg),
+		UserResourceOverride:          NewUserResourceOverrideClient(cfg),
 		UserSubscription:              NewUserSubscriptionClient(cfg),
 	}, nil
 }
@@ -400,7 +406,8 @@ func (c *Client) Use(hooks ...Hook) {
 		c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting,
 		c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
 		c.UsageLogDetail, c.User, c.UserAllowedGroup, c.UserAttributeDefinition,
-		c.UserAttributeValue, c.UserPlatformQuota, c.UserSubscription,
+		c.UserAttributeValue, c.UserPlatformQuota, c.UserResourceOverride,
+		c.UserSubscription,
 	} {
 		n.Use(hooks...)
 	}
@@ -419,7 +426,8 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting,
 		c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
 		c.UsageLogDetail, c.User, c.UserAllowedGroup, c.UserAttributeDefinition,
-		c.UserAttributeValue, c.UserPlatformQuota, c.UserSubscription,
+		c.UserAttributeValue, c.UserPlatformQuota, c.UserResourceOverride,
+		c.UserSubscription,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -498,6 +506,8 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.UserAttributeValue.mutate(ctx, m)
 	case *UserPlatformQuotaMutation:
 		return c.UserPlatformQuota.mutate(ctx, m)
+	case *UserResourceOverrideMutation:
+		return c.UserResourceOverride.mutate(ctx, m)
 	case *UserSubscriptionMutation:
 		return c.UserSubscription.mutate(ctx, m)
 	default:
@@ -821,6 +831,38 @@ func (c *AccountClient) QueryProxy(_m *Account) *ProxyQuery {
 			sqlgraph.From(account.Table, account.FieldID, id),
 			sqlgraph.To(proxy.Table, proxy.FieldID),
 			sqlgraph.Edge(sqlgraph.M2O, false, account.ProxyTable, account.ProxyColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryParent queries the parent edge of a Account.
+func (c *AccountClient) QueryParent(_m *Account) *AccountQuery {
+	query := (&AccountClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(account.Table, account.FieldID, id),
+			sqlgraph.To(account.Table, account.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, account.ParentTable, account.ParentColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryChildren queries the children edge of a Account.
+func (c *AccountClient) QueryChildren(_m *Account) *AccountQuery {
+	query := (&AccountClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(account.Table, account.FieldID, id),
+			sqlgraph.To(account.Table, account.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, account.ChildrenTable, account.ChildrenColumn),
 		)
 		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
 		return fromV, nil
@@ -6180,6 +6222,155 @@ func (c *UserPlatformQuotaClient) mutate(ctx context.Context, m *UserPlatformQuo
 	}
 }
 
+// UserResourceOverrideClient is a client for the UserResourceOverride schema.
+type UserResourceOverrideClient struct {
+	config
+}
+
+// NewUserResourceOverrideClient returns a client for the UserResourceOverride from the given config.
+func NewUserResourceOverrideClient(c config) *UserResourceOverrideClient {
+	return &UserResourceOverrideClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `userresourceoverride.Hooks(f(g(h())))`.
+func (c *UserResourceOverrideClient) Use(hooks ...Hook) {
+	c.hooks.UserResourceOverride = append(c.hooks.UserResourceOverride, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `userresourceoverride.Intercept(f(g(h())))`.
+func (c *UserResourceOverrideClient) Intercept(interceptors ...Interceptor) {
+	c.inters.UserResourceOverride = append(c.inters.UserResourceOverride, interceptors...)
+}
+
+// Create returns a builder for creating a UserResourceOverride entity.
+func (c *UserResourceOverrideClient) Create() *UserResourceOverrideCreate {
+	mutation := newUserResourceOverrideMutation(c.config, OpCreate)
+	return &UserResourceOverrideCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of UserResourceOverride entities.
+func (c *UserResourceOverrideClient) CreateBulk(builders ...*UserResourceOverrideCreate) *UserResourceOverrideCreateBulk {
+	return &UserResourceOverrideCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *UserResourceOverrideClient) MapCreateBulk(slice any, setFunc func(*UserResourceOverrideCreate, int)) *UserResourceOverrideCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &UserResourceOverrideCreateBulk{err: fmt.Errorf("calling to UserResourceOverrideClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*UserResourceOverrideCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &UserResourceOverrideCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for UserResourceOverride.
+func (c *UserResourceOverrideClient) Update() *UserResourceOverrideUpdate {
+	mutation := newUserResourceOverrideMutation(c.config, OpUpdate)
+	return &UserResourceOverrideUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *UserResourceOverrideClient) UpdateOne(_m *UserResourceOverride) *UserResourceOverrideUpdateOne {
+	mutation := newUserResourceOverrideMutation(c.config, OpUpdateOne, withUserResourceOverride(_m))
+	return &UserResourceOverrideUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *UserResourceOverrideClient) UpdateOneID(id int64) *UserResourceOverrideUpdateOne {
+	mutation := newUserResourceOverrideMutation(c.config, OpUpdateOne, withUserResourceOverrideID(id))
+	return &UserResourceOverrideUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for UserResourceOverride.
+func (c *UserResourceOverrideClient) Delete() *UserResourceOverrideDelete {
+	mutation := newUserResourceOverrideMutation(c.config, OpDelete)
+	return &UserResourceOverrideDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *UserResourceOverrideClient) DeleteOne(_m *UserResourceOverride) *UserResourceOverrideDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *UserResourceOverrideClient) DeleteOneID(id int64) *UserResourceOverrideDeleteOne {
+	builder := c.Delete().Where(userresourceoverride.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &UserResourceOverrideDeleteOne{builder}
+}
+
+// Query returns a query builder for UserResourceOverride.
+func (c *UserResourceOverrideClient) Query() *UserResourceOverrideQuery {
+	return &UserResourceOverrideQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeUserResourceOverride},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a UserResourceOverride entity by its id.
+func (c *UserResourceOverrideClient) Get(ctx context.Context, id int64) (*UserResourceOverride, error) {
+	return c.Query().Where(userresourceoverride.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *UserResourceOverrideClient) GetX(ctx context.Context, id int64) *UserResourceOverride {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryUser queries the user edge of a UserResourceOverride.
+func (c *UserResourceOverrideClient) QueryUser(_m *UserResourceOverride) *UserQuery {
+	query := (&UserClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(userresourceoverride.Table, userresourceoverride.FieldID, id),
+			sqlgraph.To(user.Table, user.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, false, userresourceoverride.UserTable, userresourceoverride.UserColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *UserResourceOverrideClient) Hooks() []Hook {
+	return c.hooks.UserResourceOverride
+}
+
+// Interceptors returns the client interceptors.
+func (c *UserResourceOverrideClient) Interceptors() []Interceptor {
+	return c.inters.UserResourceOverride
+}
+
+func (c *UserResourceOverrideClient) mutate(ctx context.Context, m *UserResourceOverrideMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&UserResourceOverrideCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&UserResourceOverrideUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&UserResourceOverrideUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&UserResourceOverrideDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown UserResourceOverride mutation op: %q", m.Op())
+	}
+}
+
 // UserSubscriptionClient is a client for the UserSubscription schema.
 type UserSubscriptionClient struct {
 	config
@@ -6390,7 +6581,7 @@ type (
 		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
 		TLSFingerprintProfile, UsageCleanupTask, UsageLog, UsageLogDetail, User,
 		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
-		UserPlatformQuota, UserSubscription []ent.Hook
+		UserPlatformQuota, UserResourceOverride, UserSubscription []ent.Hook
 	}
 	inters struct {
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead, AuthIdentity,
@@ -6401,7 +6592,7 @@ type (
 		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
 		TLSFingerprintProfile, UsageCleanupTask, UsageLog, UsageLogDetail, User,
 		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
-		UserPlatformQuota, UserSubscription []ent.Interceptor
+		UserPlatformQuota, UserResourceOverride, UserSubscription []ent.Interceptor
 	}
 )
 

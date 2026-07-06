@@ -908,6 +908,113 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LayeredPreviousResponse
 	require.Zero(t, stateStore.deleteResponseCalls["resp_prev_layered_capability"])
 }
 
+func TestOpenAIGatewayService_SelectAccountWithScheduler_PrivacyRecheckRecordsAccountError(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	ctx := context.Background()
+	groupID := int64(101131)
+	stickySnapshot := &Account{
+		ID:          37131,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    0,
+		Extra:       map[string]any{"privacy_mode": PrivacyModeTrainingOff},
+	}
+	stickyLatest := Account{
+		ID:          37131,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    0,
+	}
+	backupAccount := Account{
+		ID:          37132,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    50,
+		Extra:       map[string]any{"privacy_mode": PrivacyModeTrainingOff},
+	}
+	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:session_hash_privacy_recheck": stickySnapshot.ID}}
+	repo := schedulerTestOpenAIAccountRepo{accounts: []Account{stickyLatest, backupAccount}, setErrors: map[int64]string{}}
+	snapshot := &openAISnapshotCacheStub{accountsByID: map[int64]*Account{stickySnapshot.ID: stickySnapshot, backupAccount.ID: &backupAccount}}
+	cfg := newOpenAIStickyEnabledTestConfig()
+	cfg.Gateway.Scheduling.LoadBatchEnabled = false
+	schedulerSnapshot := NewSchedulerSnapshotService(snapshot, nil, repo, schedulerTestGroupRepo{groups: map[int64]*Group{groupID: {ID: groupID, Name: "privacy-group", RequirePrivacySet: true}}}, cfg)
+	svc := &OpenAIGatewayService{
+		accountRepo:        repo,
+		cache:              cache,
+		schedulerSnapshot:  schedulerSnapshot,
+		cfg:                cfg,
+		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+	}
+
+	scheduler := &defaultOpenAIAccountScheduler{service: svc}
+	selection, reqAfter, err := scheduler.selectBySessionHash(ctx, OpenAIAccountScheduleRequest{
+		GroupID:            &groupID,
+		SessionHash:        "session_hash_privacy_recheck",
+		RequestedModel:     "gpt-5.1",
+		RequiredCapability: OpenAIEndpointCapabilityChatCompletions,
+	})
+	require.NoError(t, err)
+	require.Nil(t, selection)
+	require.False(t, reqAfter.SkipStickyBind)
+	require.Contains(t, repo.setErrors[stickySnapshot.ID], "Privacy not set")
+}
+
+func TestOpenAIGatewayService_SelectAccountWithSchedulerForImages_NativeFallbackKeepsBasicBridgeAccountDespiteModelMapping(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	ctx := context.Background()
+	groupID := int64(51001)
+	accounts := []Account{
+		{
+			ID:          510011,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeAPIKey,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Priority:    10,
+			Credentials: map[string]any{
+				"openai_capabilities": []any{"chat_completions"},
+				"model_mapping": map[string]any{"draw-alias": "gpt-image-2"},
+			},
+		},
+	}
+	cfg := newOpenAIStickyEnabledTestConfig()
+	cfg.Gateway.Scheduling.LoadBatchEnabled = false
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: accounts},
+		cache:              &schedulerTestGatewayCache{},
+		cfg:                cfg,
+		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+	}
+
+	selection, decision, err := svc.SelectAccountWithSchedulerForImages(
+		ctx,
+		&groupID,
+		"session_hash_images_bridge",
+		"gpt-image-2",
+		nil,
+		OpenAIImagesCapabilityNative,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, int64(510011), selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+}
+
 func TestOpenAIGatewayService_SelectAccountWithScheduler_AdvancedUpstreamRestrictionClearsPreviousResponseSticky(t *testing.T) {
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 
@@ -2748,6 +2855,7 @@ func TestDefaultOpenAIAccountScheduler_IsAccountTransportCompatible_Branches(t *
 	require.True(t, scheduler.isAccountTransportCompatible(nil, OpenAIUpstreamTransportAny))
 	require.True(t, scheduler.isAccountTransportCompatible(nil, OpenAIUpstreamTransportHTTPSSE))
 	require.False(t, scheduler.isAccountTransportCompatible(nil, OpenAIUpstreamTransportResponsesWebsocketV2))
+	require.False(t, scheduler.isAccountTransportCompatible(nil, OpenAIUpstreamTransportResponsesWebsocketV2Ingress))
 
 	cfg := newSchedulerTestOpenAIWSV2Config()
 	scheduler.service = &OpenAIGatewayService{cfg: cfg}
@@ -2763,6 +2871,15 @@ func TestDefaultOpenAIAccountScheduler_IsAccountTransportCompatible_Branches(t *
 		},
 	}
 	require.True(t, scheduler.isAccountTransportCompatible(account, OpenAIUpstreamTransportResponsesWebsocketV2))
+	require.True(t, scheduler.isAccountTransportCompatible(account, OpenAIUpstreamTransportResponsesWebsocketV2Ingress))
+
+	cfg.Gateway.OpenAIWS.ModeRouterV2Enabled = true
+	account.Extra["openai_apikey_responses_websockets_v2_mode"] = OpenAIWSIngressModeHTTPBridge
+	require.False(t, scheduler.isAccountTransportCompatible(account, OpenAIUpstreamTransportResponsesWebsocketV2))
+	require.True(t, scheduler.isAccountTransportCompatible(account, OpenAIUpstreamTransportResponsesWebsocketV2Ingress))
+
+	account.Extra["openai_apikey_responses_websockets_v2_mode"] = OpenAIWSIngressModeOff
+	require.False(t, scheduler.isAccountTransportCompatible(account, OpenAIUpstreamTransportResponsesWebsocketV2Ingress))
 }
 
 func int64PtrForTest(v int64) *int64 {

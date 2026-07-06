@@ -49,6 +49,9 @@ func (s *layeredOpenAIAccountScheduler) Select(
 	if s.service != nil && s.service.openAIStickyEnabled() {
 		// Layer 1: previous_response_id
 		previousResponseID := strings.TrimSpace(req.PreviousResponseID)
+		if normalizeOpenAICompatiblePlatform(req.Platform) != PlatformOpenAI {
+			previousResponseID = ""
+		}
 		if previousResponseID != "" {
 			selection, err := s.service.selectAccountByPreviousResponseIDForCapability(
 				ctx,
@@ -249,7 +252,7 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 	req OpenAIAccountScheduleRequest,
 ) (*AccountSelectionResult, int, float64, error) {
 	schedGroup := schedulerGroupForRequest(ctx, s.service, req.GroupID)
-	accounts, err := s.service.listSchedulableAccounts(ctx, req.GroupID)
+	accounts, err := s.service.listSchedulableAccounts(ctx, req.GroupID, req.Platform)
 	if err != nil {
 		return nil, 0, 0, err
 	}
@@ -571,6 +574,9 @@ func (s *layeredOpenAIAccountScheduler) classifySessionStickyAccount(
 		return nil, true
 	}
 	if req.RequestedModel != "" && !account.IsModelSupported(req.RequestedModel) {
+		return nil, false
+	}
+	if !account.SupportsOpenAIEndpointCapability(req.RequiredCapability) {
 		return nil, false
 	}
 	if !account.SupportsOpenAIImageCapability(req.RequiredImageCapability) {

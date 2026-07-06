@@ -182,10 +182,10 @@ export interface ContentModerationLog {
   flagged: boolean
   highest_category: string
   highest_score: number
+  matched_keyword: string
   category_scores: Record<string, number>
   threshold_snapshot: Record<string, number>
   input_excerpt: string
-  matched_keyword: string
   upstream_latency_ms: number | null
   error: string
   violation_count: number

@@ -19,6 +19,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/schema/mixins"
 	dbuser "github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/ent/userallowedgroup"
+	"github.com/Wei-Shaw/sub2api/ent/userresourceoverride"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -31,6 +32,11 @@ type userRepository struct {
 	client *dbent.Client
 	sql    sqlExecutor
 }
+
+const (
+	userResourceTypeGroup  = "group"
+	userResourceEffectDeny = "deny"
+)
 
 func NewUserRepository(client *dbent.Client, sqlDB *sql.DB) service.UserRepository {
 	return newUserRepositoryWithSQL(client, sqlDB)
@@ -131,6 +137,13 @@ func (r *userRepository) GetByID(ctx context.Context, id int64) (*service.User, 
 	if v, ok := groups[id]; ok {
 		out.AllowedGroups = v
 	}
+	blockedGroups, err := r.loadBlockedGroups(ctx, []int64{id})
+	if err != nil {
+		return nil, err
+	}
+	if v, ok := blockedGroups[id]; ok {
+		out.BlockedGroups = v
+	}
 	return out, nil
 }
 
@@ -147,6 +160,13 @@ func (r *userRepository) GetByIDIncludeDeleted(ctx context.Context, id int64) (*
 	}
 	if v, ok := groups[id]; ok {
 		out.AllowedGroups = v
+	}
+	blockedGroups, err := r.loadBlockedGroups(ctx, []int64{id})
+	if err != nil {
+		return nil, err
+	}
+	if v, ok := blockedGroups[id]; ok {
+		out.BlockedGroups = v
 	}
 	return out, nil
 }
@@ -175,6 +195,13 @@ func (r *userRepository) GetByEmail(ctx context.Context, email string) (*service
 	if v, ok := groups[m.ID]; ok {
 		out.AllowedGroups = v
 	}
+	blockedGroups, err := r.loadBlockedGroups(ctx, []int64{m.ID})
+	if err != nil {
+		return nil, err
+	}
+	if v, ok := blockedGroups[m.ID]; ok {
+		out.BlockedGroups = v
+	}
 	return out, nil
 }
 
@@ -183,25 +210,27 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User) error
 		return nil
 	}
 
-	// 使用 ent 事务包裹用户更新与 allowed_groups 同步，避免跨层事务不一致。
-	tx, err := r.client.Tx(ctx)
-	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
-		return err
-	}
-
 	var txClient *dbent.Client
 	txCtx := ctx
-	if err == nil {
-		defer func() { _ = tx.Rollback() }()
-		txClient = tx.Client()
-		txCtx = dbent.NewTxContext(ctx, tx)
+	var tx *dbent.Tx
+	if existingTx := dbent.TxFromContext(ctx); existingTx != nil {
+		txClient = existingTx.Client()
 	} else {
-		// 已处于外部事务中（ErrTxStarted），复用当前事务 client 并由调用方负责提交/回滚。
-		if existingTx := dbent.TxFromContext(ctx); existingTx != nil {
-			txClient = existingTx.Client()
-		} else {
-			txClient = r.client
+		var err error
+		// 使用 ent 事务包裹用户更新与 allowed_groups 同步，避免跨层事务不一致。
+		tx, err = r.client.Tx(ctx)
+		if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+			return err
 		}
+		if errors.Is(err, dbent.ErrTxStarted) {
+			txClient = r.client
+		} else {
+			txClient = tx.Client()
+			txCtx = dbent.NewTxContext(ctx, tx)
+		}
+	}
+	if tx != nil {
+		defer func() { _ = tx.Rollback() }()
 	}
 
 	releaseEmailLock, err := lockRepositoryScopedKeys(
@@ -550,6 +579,16 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 		}
 	}
 
+	blockedGroupsByUser, err := r.loadBlockedGroups(ctx, userIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	for id, u := range userMap {
+		if groups, ok := blockedGroupsByUser[id]; ok {
+			u.BlockedGroups = groups
+		}
+	}
+
 	return outUsers, paginationResultFromTotal(int64(total), params), nil
 }
 
@@ -757,6 +796,17 @@ func (r *userRepository) UpdateBalance(ctx context.Context, id int64, amount flo
 func (r *userRepository) DeductBalance(ctx context.Context, id int64, amount float64) error {
 	client := clientFromContext(ctx, r.client)
 	n, err := client.User.Update().
+		Where(dbuser.IDEQ(id), dbuser.BalanceGTE(amount)).
+		AddBalance(-amount).
+		Save(ctx)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+
+	n, err = client.User.Update().
 		Where(dbuser.IDEQ(id)).
 		AddBalance(-amount).
 		Save(ctx)
@@ -888,6 +938,77 @@ func (r *userRepository) RemoveGroupFromAllowedGroups(ctx context.Context, group
 	return int64(affected), nil
 }
 
+func (r *userRepository) GetBlockedGroups(ctx context.Context, userID int64) ([]int64, error) {
+	groups, err := r.loadBlockedGroups(ctx, []int64{userID})
+	if err != nil {
+		return nil, err
+	}
+	return groups[userID], nil
+}
+
+func (r *userRepository) SetBlockedGroups(ctx context.Context, userID int64, groupIDs []int64) error {
+	client := r.client
+	txCtx := ctx
+	var tx *dbent.Tx
+	if existingTx := dbent.TxFromContext(ctx); existingTx != nil {
+		client = existingTx.Client()
+	} else {
+		var err error
+		tx, err = r.client.Tx(ctx)
+		if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+			return err
+		}
+		if errors.Is(err, dbent.ErrTxStarted) {
+			client = r.client
+		} else {
+			client = tx.Client()
+			txCtx = dbent.NewTxContext(ctx, tx)
+		}
+	}
+	if tx != nil {
+		defer func() { _ = tx.Rollback() }()
+	}
+
+	if _, err := client.UserResourceOverride.Delete().
+		Where(
+			userresourceoverride.UserIDEQ(userID),
+			userresourceoverride.ResourceTypeEQ(userResourceTypeGroup),
+			userresourceoverride.EffectEQ(userResourceEffectDeny),
+		).
+		Exec(txCtx); err != nil {
+		return err
+	}
+
+	unique := make(map[int64]struct{}, len(groupIDs))
+	for _, id := range groupIDs {
+		if id > 0 {
+			unique[id] = struct{}{}
+		}
+	}
+	if len(unique) == 0 {
+		if tx != nil {
+			return tx.Commit()
+		}
+		return nil
+	}
+
+	creates := make([]*dbent.UserResourceOverrideCreate, 0, len(unique))
+	for groupID := range unique {
+		creates = append(creates, client.UserResourceOverride.Create().
+			SetUserID(userID).
+			SetResourceType(userResourceTypeGroup).
+			SetResourceID(groupID).
+			SetEffect(userResourceEffectDeny))
+	}
+	if err := client.UserResourceOverride.CreateBulk(creates...).Exec(txCtx); err != nil {
+		return err
+	}
+	if tx != nil {
+		return tx.Commit()
+	}
+	return nil
+}
+
 // RemoveGroupFromUserAllowedGroups 移除单个用户的指定分组权限
 func (r *userRepository) RemoveGroupFromUserAllowedGroups(ctx context.Context, userID int64, groupID int64) error {
 	client := clientFromContext(ctx, r.client)
@@ -917,6 +1038,13 @@ func (r *userRepository) GetFirstAdmin(ctx context.Context) (*service.User, erro
 	if v, ok := groups[m.ID]; ok {
 		out.AllowedGroups = v
 	}
+	blockedGroups, err := r.loadBlockedGroups(ctx, []int64{m.ID})
+	if err != nil {
+		return nil, err
+	}
+	if v, ok := blockedGroups[m.ID]; ok {
+		out.BlockedGroups = v
+	}
 	return out, nil
 }
 
@@ -941,6 +1069,32 @@ func (r *userRepository) loadAllowedGroups(ctx context.Context, userIDs []int64)
 		sort.Slice(out[userID], func(i, j int) bool { return out[userID][i] < out[userID][j] })
 	}
 
+	return out, nil
+}
+
+func (r *userRepository) loadBlockedGroups(ctx context.Context, userIDs []int64) (map[int64][]int64, error) {
+	out := make(map[int64][]int64, len(userIDs))
+	if len(userIDs) == 0 {
+		return out, nil
+	}
+
+	rows, err := r.client.UserResourceOverride.Query().
+		Where(
+			userresourceoverride.UserIDIn(userIDs...),
+			userresourceoverride.ResourceTypeEQ(userResourceTypeGroup),
+			userresourceoverride.EffectEQ(userResourceEffectDeny),
+		).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range rows {
+		out[rows[i].UserID] = append(out[rows[i].UserID], rows[i].ResourceID)
+	}
+	for userID := range out {
+		sort.Slice(out[userID], func(i, j int) bool { return out[userID][i] < out[userID][j] })
+	}
 	return out, nil
 }
 

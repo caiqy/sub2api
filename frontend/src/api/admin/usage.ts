@@ -13,16 +13,7 @@ import type {
   PaginatedResponse,
   SimpleApiKey,
   SimpleUser,
-  UsageCleanupTask,
-  UsageRequestType
-} from '@/types'
-
-export type {
-  AdminUsageQueryParams,
-  AdminUsageStatsResponse,
-  CreateUsageCleanupTaskRequest,
-  SimpleApiKey,
-  SimpleUser,
+  UsageRequestType,
   UsageCleanupTask
 } from '@/types'
 
@@ -57,11 +48,11 @@ export async function getStats(params: {
   model?: string
   request_type?: UsageRequestType
   stream?: boolean
-  billing_mode?: string
   period?: string
   start_date?: string
   end_date?: string
   timezone?: string
+  billing_mode?: string
   nocache?: number
 }): Promise<AdminUsageStatsResponse> {
   const { data } = await apiClient.get<AdminUsageStatsResponse>('/admin/usage/stats', {
@@ -70,11 +61,6 @@ export async function getStats(params: {
   return data
 }
 
-/**
- * Get usage detail by usage log ID (admin only)
- * @param id - Usage log ID
- * @returns Usage detail payload
- */
 export async function getDetail(id: number): Promise<AdminUsageDetail> {
   const { data } = await apiClient.get<AdminUsageDetail>(`/admin/usage/${id}/detail`)
   return data

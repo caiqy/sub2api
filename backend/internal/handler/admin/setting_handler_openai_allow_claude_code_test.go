@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSettingHandler_OpenAIAllowClaudeCodeCodexPlugin_PutGetRoundTrip(t *testing.T) {
+func TestSettingHandler_OpenAIAllowClaudeCodeCodexPlugin_DeprecatedPayloadIgnored(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &settingHandlerRepoStub{
 		values: map[string]string{
@@ -36,7 +36,7 @@ func TestSettingHandler_OpenAIAllowClaudeCodeCodexPlugin_PutGetRoundTrip(t *test
 	c.Request.Header.Set("Content-Type", "application/json")
 	handler.UpdateSettings(c)
 	require.Equal(t, http.StatusOK, rec.Code)
-	require.Equal(t, "true", repo.values[service.SettingKeyOpenAIAllowClaudeCodeCodexPlugin])
+	require.Empty(t, repo.values[service.SettingKeyOpenAIAllowClaudeCodeCodexPlugin])
 
 	rec2 := httptest.NewRecorder()
 	c2, _ := gin.CreateTestContext(rec2)
@@ -48,5 +48,5 @@ func TestSettingHandler_OpenAIAllowClaudeCodeCodexPlugin_PutGetRoundTrip(t *test
 	require.NoError(t, json.Unmarshal(rec2.Body.Bytes(), &resp))
 	data, ok := resp.Data.(map[string]any)
 	require.True(t, ok)
-	require.Equal(t, true, data["openai_allow_claude_code_codex_plugin"])
+	require.NotContains(t, data, "openai_allow_claude_code_codex_plugin")
 }
