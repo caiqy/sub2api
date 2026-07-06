@@ -3194,6 +3194,14 @@ func (r *oauthPendingFlowUserRepo) SetBlockedGroups(context.Context, int64, []in
 	return nil
 }
 
+func (r *oauthPendingFlowUserRepo) GetHiddenUIResources(context.Context, int64) (bool, []int64, error) {
+	return false, nil, nil
+}
+
+func (r *oauthPendingFlowUserRepo) SetHiddenUIResources(context.Context, int64, bool, []string) error {
+	return nil
+}
+
 func (r *oauthPendingFlowUserRepo) AddGroupToAllowedGroups(context.Context, int64, int64) error {
 	panic("unexpected AddGroupToAllowedGroups call")
 }

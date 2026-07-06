@@ -266,6 +266,14 @@ func (r *contentModerationTestUserRepo) SetBlockedGroups(ctx context.Context, us
 	panic("unexpected SetBlockedGroups call")
 }
 
+func (r *contentModerationTestUserRepo) GetHiddenUIResources(ctx context.Context, userID int64) (bool, []int64, error) {
+	panic("unexpected GetHiddenUIResources call")
+}
+
+func (r *contentModerationTestUserRepo) SetHiddenUIResources(ctx context.Context, userID int64, hidePurchase bool, customMenuIDs []string) error {
+	panic("unexpected SetHiddenUIResources call")
+}
+
 func (r *contentModerationTestUserRepo) AddGroupToAllowedGroups(ctx context.Context, userID int64, groupID int64) error {
 	panic("unexpected AddGroupToAllowedGroups call")
 }

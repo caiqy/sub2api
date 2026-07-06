@@ -75,12 +75,13 @@ export async function setLocale(locale: string): Promise<void> {
   const { useAppStore } = await import('@/stores/app')
   const { useAuthStore } = await import('@/stores/auth')
   const { useAdminSettingsStore } = await import('@/stores/adminSettings')
+  const { isCustomMenuHidden } = await import('@/utils/userUiVisibility')
   const route = router.currentRoute.value
   const appStore = useAppStore()
   const authStore = useAuthStore()
   const adminSettingsStore = useAdminSettingsStore()
   const customMenuItems = [
-    ...(appStore.cachedPublicSettings?.custom_menu_items ?? []),
+    ...(appStore.cachedPublicSettings?.custom_menu_items ?? []).filter((item) => authStore.isAdmin || !isCustomMenuHidden(item.id, authStore.user?.hidden_custom_menu_ids)),
     ...(authStore.isAdmin ? adminSettingsStore.customMenuItems : []),
   ]
   document.title = resolveRouteDocumentTitle(route, appStore.siteName, customMenuItems)

@@ -207,6 +207,12 @@ func (m *mockUserRepo) RemoveGroupFromAllowedGroups(context.Context, int64) (int
 }
 func (m *mockUserRepo) GetBlockedGroups(context.Context, int64) ([]int64, error) { return nil, nil }
 func (m *mockUserRepo) SetBlockedGroups(context.Context, int64, []int64) error   { return nil }
+func (m *mockUserRepo) GetHiddenUIResources(context.Context, int64) (bool, []int64, error) {
+	return false, nil, nil
+}
+func (m *mockUserRepo) SetHiddenUIResources(context.Context, int64, bool, []string) error {
+	return nil
+}
 
 func (m *mockUserRepo) BatchSetConcurrency(context.Context, []int64, int) (int, error) { return 0, nil }
 func (m *mockUserRepo) BatchAddConcurrency(context.Context, []int64, int) (int, error) { return 0, nil }

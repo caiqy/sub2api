@@ -97,6 +97,19 @@ func (s *userHandlerRepoStub) ExistsByEmail(context.Context, string) (bool, erro
 func (s *userHandlerRepoStub) RemoveGroupFromAllowedGroups(context.Context, int64) (int64, error) {
 	return 0, nil
 }
+func (s *userHandlerRepoStub) GetBlockedGroups(context.Context, int64) ([]int64, error) {
+	return nil, nil
+}
+func (s *userHandlerRepoStub) SetBlockedGroups(context.Context, int64, []int64) error { return nil }
+func (s *userHandlerRepoStub) GetHiddenUIResources(context.Context, int64) (bool, []int64, error) {
+	if s.user == nil {
+		return false, nil, nil
+	}
+	return s.user.HiddenPurchasePage, append([]int64(nil), s.user.HiddenCustomMenuResourceIDs...), nil
+}
+func (s *userHandlerRepoStub) SetHiddenUIResources(context.Context, int64, bool, []string) error {
+	return nil
+}
 func (s *userHandlerRepoStub) AddGroupToAllowedGroups(context.Context, int64, int64) error {
 	return nil
 }

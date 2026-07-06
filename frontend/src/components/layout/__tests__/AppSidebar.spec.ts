@@ -7,6 +7,7 @@ import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import AppSidebar from '../AppSidebar.vue'
+import { customMenuResourceID } from '@/utils/userUiVisibility'
 
 const {
   routeState,
@@ -19,7 +20,12 @@ const {
   routeState: { path: '/dashboard' },
   authState: {
     isAdmin: false,
-    isSimpleMode: false
+    isSimpleMode: false,
+    user: null as null | {
+      hidden_purchase_page?: boolean
+      hidden_custom_menu_resource_ids?: number[]
+      hidden_custom_menu_ids?: string[]
+    }
   },
   appState: {
     sidebarCollapsed: false,
@@ -132,6 +138,7 @@ function setScenario(options: {
   routeState.path = '/dashboard'
   authState.isAdmin = options.isAdmin
   authState.isSimpleMode = options.isSimpleMode
+  authState.user = null
   appState.backendModeEnabled = options.backendModeEnabled ?? false
   appState.sidebarCollapsed = false
   appState.mobileOpen = false
@@ -214,5 +221,46 @@ describe('AppSidebar images entry wiring', () => {
     expect(imagesLinks).toHaveLength(1)
     expect(imagesLinks[0].text()).toContain('nav.aiImages')
     expect(fetchMock).toHaveBeenCalled()
+  })
+
+  it('hides purchase and selected custom menu for a regular user', () => {
+    setScenario({ isAdmin: false, isSimpleMode: false })
+    authState.user = {
+      hidden_purchase_page: true,
+      hidden_custom_menu_resource_ids: [customMenuResourceID('docs')],
+      hidden_custom_menu_ids: ['docs']
+    }
+    appState.cachedPublicSettings = {
+      payment_enabled: true,
+      custom_menu_items: [
+        { id: 'docs', label: 'Docs', visibility: 'user', sort_order: 1 },
+        { id: 'status', label: 'Status', visibility: 'user', sort_order: 2 }
+      ]
+    }
+
+    const wrapper = mountSidebar()
+
+    expect(wrapper.findAll('[data-to="/purchase"]')).toHaveLength(0)
+    expect(wrapper.findAll('[data-to="/custom/docs"]')).toHaveLength(0)
+    expect(wrapper.findAll('[data-to="/custom/status"]')).toHaveLength(1)
+  })
+
+  it('does not apply hidden user UI flags to the admin personal menu', () => {
+    setScenario({ isAdmin: true, isSimpleMode: false })
+    authState.user = {
+      hidden_purchase_page: true,
+      hidden_custom_menu_ids: ['docs']
+    }
+    appState.cachedPublicSettings = {
+      payment_enabled: true,
+      custom_menu_items: [
+        { id: 'docs', label: 'Docs', visibility: 'user', sort_order: 1 }
+      ]
+    }
+
+    const wrapper = mountSidebar()
+
+    expect(wrapper.findAll('[data-to="/purchase"]')).toHaveLength(1)
+    expect(wrapper.findAll('[data-to="/custom/docs"]')).toHaveLength(1)
   })
 })

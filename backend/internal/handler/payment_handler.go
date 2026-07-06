@@ -22,6 +22,7 @@ type PaymentHandler struct {
 	channelService *service.ChannelService
 	paymentService *service.PaymentService
 	configService  *service.PaymentConfigService
+	userService    *service.UserService
 }
 
 // NewPaymentHandler creates a new PaymentHandler.
@@ -31,6 +32,10 @@ func NewPaymentHandler(paymentService *service.PaymentService, configService *se
 		paymentService: paymentService,
 		configService:  configService,
 	}
+}
+
+func (h *PaymentHandler) SetUserService(userService *service.UserService) {
+	h.userService = userService
 }
 
 // GetPaymentConfig returns the payment system configuration.
@@ -107,6 +112,9 @@ func (h *PaymentHandler) GetChannels(c *gin.Context) {
 // GET /api/v1/payment/checkout-info
 func (h *PaymentHandler) GetCheckoutInfo(c *gin.Context) {
 	ctx := c.Request.Context()
+	if h.rejectHiddenPurchasePage(c) {
+		return
+	}
 
 	// Fetch limits (methods + global range)
 	limitsResp, err := h.configService.GetAvailableMethodLimits(ctx)
@@ -247,6 +255,9 @@ func (h *PaymentHandler) CreateOrder(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if h.rejectHiddenPurchasePageForUser(c, subject.UserID) {
+		return
+	}
 
 	var req CreateOrderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -271,6 +282,7 @@ func (h *PaymentHandler) CreateOrder(c *gin.Context) {
 	}
 	result, err := h.paymentService.CreateOrder(c.Request.Context(), service.CreateOrderRequest{
 		UserID:          subject.UserID,
+		UserRole:        currentUserRole(c),
 		Amount:          req.Amount,
 		PaymentType:     req.PaymentType,
 		OpenID:          req.OpenID,
@@ -290,6 +302,38 @@ func (h *PaymentHandler) CreateOrder(c *gin.Context) {
 		return
 	}
 	response.Success(c, result)
+}
+
+func currentUserRole(c *gin.Context) string {
+	role, _ := middleware2.GetUserRoleFromContext(c)
+	return role
+}
+
+func (h *PaymentHandler) rejectHiddenPurchasePage(c *gin.Context) bool {
+	subject, ok := requireAuth(c)
+	if !ok {
+		return true
+	}
+	return h.rejectHiddenPurchasePageForUser(c, subject.UserID)
+}
+
+func (h *PaymentHandler) rejectHiddenPurchasePageForUser(c *gin.Context, userID int64) bool {
+	if role, ok := middleware2.GetUserRoleFromContext(c); ok && role == service.RoleAdmin {
+		return false
+	}
+	if h.userService == nil {
+		return false
+	}
+	user, err := h.userService.GetProfile(c.Request.Context(), userID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return true
+	}
+	if user.IsPurchasePageHidden() {
+		response.ErrorFrom(c, infraerrors.Forbidden("PURCHASE_PAGE_HIDDEN", "purchase page is hidden for this user"))
+		return true
+	}
+	return false
 }
 
 func applyWeChatPaymentResumeClaims(req *CreateOrderRequest, claims *service.WeChatPaymentResumeClaims) error {

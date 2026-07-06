@@ -34,8 +34,10 @@ type userRepository struct {
 }
 
 const (
-	userResourceTypeGroup  = "group"
-	userResourceEffectDeny = "deny"
+	userResourceTypeGroup            = "group"
+	userResourceTypeUI               = "ui"
+	userResourceEffectDeny           = "deny"
+	userResourceIDPurchasePage int64 = 1
 )
 
 func NewUserRepository(client *dbent.Client, sqlDB *sql.DB) service.UserRepository {
@@ -144,6 +146,11 @@ func (r *userRepository) GetByID(ctx context.Context, id int64) (*service.User, 
 	if v, ok := blockedGroups[id]; ok {
 		out.BlockedGroups = v
 	}
+	uiResources, err := r.loadHiddenUIResources(ctx, []int64{id})
+	if err != nil {
+		return nil, err
+	}
+	applyHiddenUIResources(out, uiResources[id])
 	return out, nil
 }
 
@@ -168,6 +175,11 @@ func (r *userRepository) GetByIDIncludeDeleted(ctx context.Context, id int64) (*
 	if v, ok := blockedGroups[id]; ok {
 		out.BlockedGroups = v
 	}
+	uiResources, err := r.loadHiddenUIResources(ctx, []int64{id})
+	if err != nil {
+		return nil, err
+	}
+	applyHiddenUIResources(out, uiResources[id])
 	return out, nil
 }
 
@@ -202,6 +214,11 @@ func (r *userRepository) GetByEmail(ctx context.Context, email string) (*service
 	if v, ok := blockedGroups[m.ID]; ok {
 		out.BlockedGroups = v
 	}
+	uiResources, err := r.loadHiddenUIResources(ctx, []int64{m.ID})
+	if err != nil {
+		return nil, err
+	}
+	applyHiddenUIResources(out, uiResources[m.ID])
 	return out, nil
 }
 
@@ -587,6 +604,14 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 		if groups, ok := blockedGroupsByUser[id]; ok {
 			u.BlockedGroups = groups
 		}
+	}
+
+	uiResourcesByUser, err := r.loadHiddenUIResources(ctx, userIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	for id, u := range userMap {
+		applyHiddenUIResources(u, uiResourcesByUser[id])
 	}
 
 	return outUsers, paginationResultFromTotal(int64(total), params), nil
@@ -1009,6 +1034,84 @@ func (r *userRepository) SetBlockedGroups(ctx context.Context, userID int64, gro
 	return nil
 }
 
+func (r *userRepository) GetHiddenUIResources(ctx context.Context, userID int64) (bool, []int64, error) {
+	resources, err := r.loadHiddenUIResources(ctx, []int64{userID})
+	if err != nil {
+		return false, nil, err
+	}
+	user := &service.User{}
+	applyHiddenUIResources(user, resources[userID])
+	return user.HiddenPurchasePage, user.HiddenCustomMenuResourceIDs, nil
+}
+
+func (r *userRepository) SetHiddenUIResources(ctx context.Context, userID int64, hidePurchase bool, customMenuIDs []string) error {
+	client := r.client
+	txCtx := ctx
+	var tx *dbent.Tx
+	if existingTx := dbent.TxFromContext(ctx); existingTx != nil {
+		client = existingTx.Client()
+	} else {
+		var err error
+		tx, err = r.client.Tx(ctx)
+		if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+			return err
+		}
+		if errors.Is(err, dbent.ErrTxStarted) {
+			client = r.client
+		} else {
+			client = tx.Client()
+			txCtx = dbent.NewTxContext(ctx, tx)
+		}
+	}
+	if tx != nil {
+		defer func() { _ = tx.Rollback() }()
+	}
+
+	if _, err := client.UserResourceOverride.Delete().
+		Where(
+			userresourceoverride.UserIDEQ(userID),
+			userresourceoverride.ResourceTypeEQ(userResourceTypeUI),
+			userresourceoverride.EffectEQ(userResourceEffectDeny),
+		).
+		Exec(txCtx); err != nil {
+		return err
+	}
+
+	unique := map[int64]struct{}{}
+	if hidePurchase {
+		unique[userResourceIDPurchasePage] = struct{}{}
+	}
+	for _, id := range customMenuIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		unique[service.CustomMenuResourceID(id)] = struct{}{}
+	}
+	if len(unique) == 0 {
+		if tx != nil {
+			return tx.Commit()
+		}
+		return nil
+	}
+
+	creates := make([]*dbent.UserResourceOverrideCreate, 0, len(unique))
+	for resourceID := range unique {
+		creates = append(creates, client.UserResourceOverride.Create().
+			SetUserID(userID).
+			SetResourceType(userResourceTypeUI).
+			SetResourceID(resourceID).
+			SetEffect(userResourceEffectDeny))
+	}
+	if err := client.UserResourceOverride.CreateBulk(creates...).Exec(txCtx); err != nil {
+		return err
+	}
+	if tx != nil {
+		return tx.Commit()
+	}
+	return nil
+}
+
 // RemoveGroupFromUserAllowedGroups 移除单个用户的指定分组权限
 func (r *userRepository) RemoveGroupFromUserAllowedGroups(ctx context.Context, userID int64, groupID int64) error {
 	client := clientFromContext(ctx, r.client)
@@ -1096,6 +1199,47 @@ func (r *userRepository) loadBlockedGroups(ctx context.Context, userIDs []int64)
 		sort.Slice(out[userID], func(i, j int) bool { return out[userID][i] < out[userID][j] })
 	}
 	return out, nil
+}
+
+func (r *userRepository) loadHiddenUIResources(ctx context.Context, userIDs []int64) (map[int64][]int64, error) {
+	out := make(map[int64][]int64, len(userIDs))
+	if len(userIDs) == 0 {
+		return out, nil
+	}
+
+	rows, err := r.client.UserResourceOverride.Query().
+		Where(
+			userresourceoverride.UserIDIn(userIDs...),
+			userresourceoverride.ResourceTypeEQ(userResourceTypeUI),
+			userresourceoverride.EffectEQ(userResourceEffectDeny),
+		).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range rows {
+		out[rows[i].UserID] = append(out[rows[i].UserID], rows[i].ResourceID)
+	}
+	for userID := range out {
+		sort.Slice(out[userID], func(i, j int) bool { return out[userID][i] < out[userID][j] })
+	}
+	return out, nil
+}
+
+func applyHiddenUIResources(user *service.User, resourceIDs []int64) {
+	if user == nil {
+		return
+	}
+	user.HiddenPurchasePage = false
+	user.HiddenCustomMenuResourceIDs = nil
+	for _, id := range resourceIDs {
+		if id == userResourceIDPurchasePage {
+			user.HiddenPurchasePage = true
+			continue
+		}
+		user.HiddenCustomMenuResourceIDs = append(user.HiddenCustomMenuResourceIDs, id)
+	}
 }
 
 // syncUserAllowedGroupsWithClient 在 ent client/事务内同步用户允许分组：

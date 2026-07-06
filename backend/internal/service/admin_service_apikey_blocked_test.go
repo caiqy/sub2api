@@ -207,6 +207,12 @@ func (r *adminAPIKeyBlockedUserRepo) GetBlockedGroups(context.Context, int64) ([
 func (r *adminAPIKeyBlockedUserRepo) SetBlockedGroups(context.Context, int64, []int64) error {
 	panic("unexpected")
 }
+func (r *adminAPIKeyBlockedUserRepo) GetHiddenUIResources(context.Context, int64) (bool, []int64, error) {
+	panic("unexpected")
+}
+func (r *adminAPIKeyBlockedUserRepo) SetHiddenUIResources(context.Context, int64, bool, []string) error {
+	panic("unexpected")
+}
 func (r *adminAPIKeyBlockedUserRepo) AddGroupToAllowedGroups(context.Context, int64, int64) error {
 	panic("unexpected")
 }

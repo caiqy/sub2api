@@ -111,6 +111,8 @@ type UserRepository interface {
 	RemoveGroupFromAllowedGroups(ctx context.Context, groupID int64) (int64, error)
 	GetBlockedGroups(ctx context.Context, userID int64) ([]int64, error)
 	SetBlockedGroups(ctx context.Context, userID int64, groupIDs []int64) error
+	GetHiddenUIResources(ctx context.Context, userID int64) (bool, []int64, error)
+	SetHiddenUIResources(ctx context.Context, userID int64, hidePurchase bool, customMenuIDs []string) error
 	// AddGroupToAllowedGroups 将指定分组增量添加到用户的 allowed_groups（幂等，冲突忽略）
 	AddGroupToAllowedGroups(ctx context.Context, userID int64, groupID int64) error
 	// RemoveGroupFromUserAllowedGroups 移除单个用户的指定分组权限
@@ -253,6 +255,10 @@ func (s *UserService) GetProfile(ctx context.Context, userID int64) (*User, erro
 	normalizeLoadedUserTokenVersion(user)
 	if err := s.hydrateUserAvatar(ctx, user); err != nil {
 		return nil, fmt.Errorf("get user avatar: %w", err)
+	}
+	if s.settingRepo != nil {
+		raw, _ := s.settingRepo.GetValue(ctx, SettingKeyCustomMenuItems)
+		user.HiddenCustomMenuIDs = ResolveHiddenCustomMenuIDs(raw, user.HiddenCustomMenuResourceIDs)
 	}
 	return user, nil
 }

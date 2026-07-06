@@ -2229,6 +2229,8 @@ export default {
       customRate: '专属倍率',
       useDefaultRate: '使用默认',
       customRatePlaceholder: '留空使用默认',
+      hiddenMenus: '隐藏用户菜单',
+      hidePurchasePage: '隐藏购买页',
       groupConfigUpdated: '分组配置更新成功',
       replaceGroup: '替换分组',
       clickToReplace: '点击替换分组',
