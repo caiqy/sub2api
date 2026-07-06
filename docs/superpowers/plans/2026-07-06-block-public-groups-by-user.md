@@ -2,6 +2,7 @@
 change: block-public-groups-by-user
 design-doc: docs/superpowers/specs/2026-07-06-block-public-groups-by-user-design.md
 base-ref: 3e322c60dc6395fd9610102a8c759cfd2227fe34
+archived-with: 2026-07-06-block-public-groups-by-user
 ---
 
 # Block Public Groups By User Implementation Plan
@@ -24,6 +25,7 @@ base-ref: 3e322c60dc6395fd9610102a8c759cfd2227fe34
 - 不实现通用策略引擎；表结构保留 `resource_type/effect` 复用点即可。
 - 不新增依赖。
 
+archived-with: 2026-07-06-block-public-groups-by-user
 ---
 
 ## File Structure
