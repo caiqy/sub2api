@@ -258,7 +258,7 @@ func (s *UserService) GetProfile(ctx context.Context, userID int64) (*User, erro
 	}
 	if s.settingRepo != nil {
 		raw, _ := s.settingRepo.GetValue(ctx, SettingKeyCustomMenuItems)
-		user.HiddenCustomMenuIDs = ResolveHiddenCustomMenuIDs(raw, user.HiddenCustomMenuResourceIDs)
+		hydrateHiddenCustomMenuIDs(user, raw)
 	}
 	return user, nil
 }
@@ -978,7 +978,18 @@ func (s *UserService) GetByID(ctx context.Context, id int64) (*User, error) {
 	if err := s.hydrateUserAvatar(ctx, user); err != nil {
 		return nil, fmt.Errorf("get user avatar: %w", err)
 	}
+	if s.settingRepo != nil {
+		raw, _ := s.settingRepo.GetValue(ctx, SettingKeyCustomMenuItems)
+		hydrateHiddenCustomMenuIDs(user, raw)
+	}
 	return user, nil
+}
+
+func hydrateHiddenCustomMenuIDs(user *User, customMenuItemsRaw string) {
+	if user == nil {
+		return
+	}
+	user.HiddenCustomMenuIDs = ResolveHiddenCustomMenuIDs(customMenuItemsRaw, user.HiddenCustomMenuResourceIDs)
 }
 
 func normalizeLoadedUserTokenVersion(user *User) {
