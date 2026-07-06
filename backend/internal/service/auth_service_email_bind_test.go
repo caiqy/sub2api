@@ -968,6 +968,14 @@ func (s *emailBindUserRepoStub) RemoveGroupFromAllowedGroups(context.Context, in
 	return 0, nil
 }
 
+func (s *emailBindUserRepoStub) GetBlockedGroups(context.Context, int64) ([]int64, error) {
+	return nil, nil
+}
+
+func (s *emailBindUserRepoStub) SetBlockedGroups(context.Context, int64, []int64) error {
+	return nil
+}
+
 func (s *emailBindUserRepoStub) AddGroupToAllowedGroups(context.Context, int64, int64) error {
 	return nil
 }

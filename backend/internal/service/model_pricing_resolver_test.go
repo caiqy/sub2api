@@ -728,7 +728,7 @@ func TestApplyTokenOverrides_IntervalSetsImageOutputPriceExplicit(t *testing.T) 
 	require.Equal(t, 0.0, pricing.ImageOutputPricePerToken)
 }
 
-func TestResolvedPricingAsTokenMode_PreservesTokenPricingAndImageOutputPrice(t *testing.T) {
+func TestResolvedPricingAsTokenMode_PreservesTokenPricingAndImageOutputPriceSecondCase(t *testing.T) {
 	r := newResolverWithChannel(t, []ChannelModelPricing{{
 		Platform:         "openai",
 		Models:           []string{"gpt-5.1"},

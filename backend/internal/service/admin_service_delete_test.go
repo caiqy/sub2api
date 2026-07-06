@@ -25,6 +25,7 @@ type userRepoStub struct {
 	deletedIDs    []int64
 	usersByEmail  map[string]*User
 	getByEmailErr error
+	blockedGroups map[int64][]int64
 }
 
 func (s *userRepoStub) Create(ctx context.Context, user *User) error {
@@ -143,6 +144,18 @@ func (s *userRepoStub) ExistsByEmail(ctx context.Context, email string) (bool, e
 
 func (s *userRepoStub) RemoveGroupFromAllowedGroups(ctx context.Context, groupID int64) (int64, error) {
 	panic("unexpected RemoveGroupFromAllowedGroups call")
+}
+
+func (s *userRepoStub) GetBlockedGroups(ctx context.Context, userID int64) ([]int64, error) {
+	return append([]int64(nil), s.blockedGroups[userID]...), nil
+}
+
+func (s *userRepoStub) SetBlockedGroups(ctx context.Context, userID int64, groupIDs []int64) error {
+	if s.blockedGroups == nil {
+		s.blockedGroups = make(map[int64][]int64)
+	}
+	s.blockedGroups[userID] = append([]int64(nil), groupIDs...)
+	return nil
 }
 
 func (s *userRepoStub) RemoveGroupFromUserAllowedGroups(ctx context.Context, userID int64, groupID int64) error {

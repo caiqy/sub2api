@@ -71,6 +71,7 @@ type UpdateUserRequest struct {
 	RPMLimit      *int     `json:"rpm_limit"`
 	Status        string   `json:"status" binding:"omitempty,oneof=active disabled"`
 	AllowedGroups *[]int64 `json:"allowed_groups"`
+	BlockedGroups *[]int64 `json:"blocked_groups"`
 	// GroupRates 用户专属分组倍率配置
 	// map[groupID]*rate，nil 表示删除该分组的专属倍率
 	GroupRates map[int64]*float64 `json:"group_rates"`
@@ -308,6 +309,7 @@ func (h *UserHandler) Update(c *gin.Context) {
 		RPMLimit:      req.RPMLimit,
 		Status:        req.Status,
 		AllowedGroups: req.AllowedGroups,
+		BlockedGroups: req.BlockedGroups,
 		GroupRates:    req.GroupRates,
 	})
 	if err != nil {

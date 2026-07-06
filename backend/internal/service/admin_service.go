@@ -155,6 +155,7 @@ type UpdateUserInput struct {
 	RPMLimit      *int     // 使用指针区分"未提供"和"设置为0"
 	Status        string
 	AllowedGroups *[]int64 // 使用指针区分"未提供"和"设置为空数组"
+	BlockedGroups *[]int64 // 使用指针区分"未提供"和"设置为空数组"
 	// GroupRates 用户专属分组倍率配置
 	// map[groupID]*rate，nil 表示删除该分组的专属倍率
 	GroupRates map[int64]*float64
@@ -803,6 +804,7 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	oldRole := user.Role
 	oldRPMLimit := user.RPMLimit
 	oldAllowedGroups := append([]int64(nil), user.AllowedGroups...)
+	oldBlockedGroups := append([]int64(nil), user.BlockedGroups...)
 
 	if input.Email != "" {
 		user.Email = input.Email
@@ -835,9 +837,20 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	if input.AllowedGroups != nil {
 		user.AllowedGroups = *input.AllowedGroups
 	}
+	if input.BlockedGroups != nil {
+		if err := s.validateBlockedGroups(ctx, *input.BlockedGroups); err != nil {
+			return nil, err
+		}
+		user.BlockedGroups = append([]int64(nil), (*input.BlockedGroups)...)
+	}
 
 	if err := s.userRepo.Update(ctx, user); err != nil {
 		return nil, err
+	}
+	if input.BlockedGroups != nil {
+		if err := s.userRepo.SetBlockedGroups(ctx, user.ID, *input.BlockedGroups); err != nil {
+			return nil, err
+		}
 	}
 
 	// 同步用户专属分组倍率
@@ -849,8 +862,8 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 
 	if s.authCacheInvalidator != nil {
 		// RPMLimit 直接参与 billing_cache_service.checkRPM 的三级级联，
-		// allowed_groups 参与 API Key 专属分组授权判断；不失效缓存会让修改在一个 L2 TTL 内失去效果。
-		if user.Concurrency != oldConcurrency || user.Status != oldStatus || user.Role != oldRole || user.RPMLimit != oldRPMLimit || !sameInt64Set(user.AllowedGroups, oldAllowedGroups) {
+		// allowed_groups / blocked_groups 参与 API Key 分组授权判断；不失效缓存会让修改在一个 L2 TTL 内失去效果。
+		if user.Concurrency != oldConcurrency || user.Status != oldStatus || user.Role != oldRole || user.RPMLimit != oldRPMLimit || !sameInt64Set(user.AllowedGroups, oldAllowedGroups) || !sameInt64Set(user.BlockedGroups, oldBlockedGroups) {
 			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, user.ID)
 		}
 	}
@@ -877,6 +890,19 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	}
 
 	return user, nil
+}
+
+func (s *adminServiceImpl) validateBlockedGroups(ctx context.Context, groupIDs []int64) error {
+	for _, groupID := range groupIDs {
+		group, err := s.groupRepo.GetByID(ctx, groupID)
+		if err != nil {
+			return fmt.Errorf("blocked_groups invalid group %d: %w", groupID, err)
+		}
+		if group.Status != StatusActive || group.IsExclusive || group.SubscriptionType != SubscriptionTypeStandard {
+			return fmt.Errorf("blocked_groups only supports active public standard groups (group_id=%d)", groupID)
+		}
+	}
+	return nil
 }
 
 func sameInt64Set(a, b []int64) bool {

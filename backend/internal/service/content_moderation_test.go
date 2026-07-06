@@ -258,6 +258,14 @@ func (r *contentModerationTestUserRepo) RemoveGroupFromAllowedGroups(ctx context
 	panic("unexpected RemoveGroupFromAllowedGroups call")
 }
 
+func (r *contentModerationTestUserRepo) GetBlockedGroups(ctx context.Context, userID int64) ([]int64, error) {
+	panic("unexpected GetBlockedGroups call")
+}
+
+func (r *contentModerationTestUserRepo) SetBlockedGroups(ctx context.Context, userID int64, groupIDs []int64) error {
+	panic("unexpected SetBlockedGroups call")
+}
+
 func (r *contentModerationTestUserRepo) AddGroupToAllowedGroups(ctx context.Context, userID int64, groupID int64) error {
 	panic("unexpected AddGroupToAllowedGroups call")
 }

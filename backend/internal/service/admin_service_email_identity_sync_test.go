@@ -113,6 +113,12 @@ func (s *emailSyncRepoStub) RemoveGroupFromAllowedGroups(context.Context, int64)
 	return 0, nil
 }
 
+func (s *emailSyncRepoStub) GetBlockedGroups(context.Context, int64) ([]int64, error) {
+	return nil, nil
+}
+
+func (s *emailSyncRepoStub) SetBlockedGroups(context.Context, int64, []int64) error { return nil }
+
 func (s *emailSyncRepoStub) BatchSetConcurrency(context.Context, []int64, int) (int, error) {
 	return 0, nil
 }
