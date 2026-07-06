@@ -1,5 +1,5 @@
 workflow: full
-phase: build
+phase: verify
 context_compression: off
 build_mode: executing-plans
 build_pause: null
@@ -7,7 +7,7 @@ subagent_dispatch: null
 tdd_mode: tdd
 review_mode: thorough
 isolation: branch
-verify_mode: null
+verify_mode: full
 auto_transition: true
 base_ref: 3e322c60dc6395fd9610102a8c759cfd2227fe34
 design_doc: docs/superpowers/specs/2026-07-06-block-public-groups-by-user-design.md
@@ -20,3 +20,4 @@ verified_at: null
 archived: false
 handoff_context: openspec/changes/block-public-groups-by-user/.comet/handoff/design-context.json
 handoff_hash: c437db1dbdbc1f151fd19e33e632b6f5c9c1718f65fb5e34c3b0502faed0694a
+build_command: bash openspec/changes/block-public-groups-by-user/.comet/build-check.sh
