@@ -43,7 +43,6 @@ OpenSpec remains the canonical capability spec. This handoff is a deterministic,
 - 前端管理员用户分组配置弹窗、用户类型和 i18n 文案。
 - 新用户资源覆盖关系的数据表和迁移；本次仅实现 group deny，后续菜单隐藏可复用。
 ```
-
 ## openspec/changes/block-public-groups-by-user/design.md
 
 - Source: openspec/changes/block-public-groups-by-user/design.md
@@ -189,4 +188,3 @@ The system SHALL deny requests from existing API Keys whose bound public standar
 - **WHEN** 其他用户没有该公开标准分组的禁用记录
 - **THEN** 该用户仍可默认绑定并使用该分组的 API Key
 ```
-
