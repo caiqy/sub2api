@@ -945,14 +945,27 @@ func (r *userRepository) GetBlockedGroups(ctx context.Context, userID int64) ([]
 }
 
 func (r *userRepository) SetBlockedGroups(ctx context.Context, userID int64, groupIDs []int64) error {
-	client := clientFromContext(ctx, r.client)
+	tx, err := r.client.Tx(ctx)
+	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+		return err
+	}
+	client := r.client
+	txCtx := ctx
+	if err == nil {
+		defer func() { _ = tx.Rollback() }()
+		client = tx.Client()
+		txCtx = dbent.NewTxContext(ctx, tx)
+	} else if existingTx := dbent.TxFromContext(ctx); existingTx != nil {
+		client = existingTx.Client()
+	}
+
 	if _, err := client.UserResourceOverride.Delete().
 		Where(
 			userresourceoverride.UserIDEQ(userID),
 			userresourceoverride.ResourceTypeEQ(userResourceTypeGroup),
 			userresourceoverride.EffectEQ(userResourceEffectDeny),
 		).
-		Exec(ctx); err != nil {
+		Exec(txCtx); err != nil {
 		return err
 	}
 
@@ -963,6 +976,9 @@ func (r *userRepository) SetBlockedGroups(ctx context.Context, userID int64, gro
 		}
 	}
 	if len(unique) == 0 {
+		if tx != nil {
+			return tx.Commit()
+		}
 		return nil
 	}
 
@@ -974,7 +990,13 @@ func (r *userRepository) SetBlockedGroups(ctx context.Context, userID int64, gro
 			SetResourceID(groupID).
 			SetEffect(userResourceEffectDeny))
 	}
-	return client.UserResourceOverride.CreateBulk(creates...).Exec(ctx)
+	if err := client.UserResourceOverride.CreateBulk(creates...).Exec(txCtx); err != nil {
+		return err
+	}
+	if tx != nil {
+		return tx.Commit()
+	}
+	return nil
 }
 
 // RemoveGroupFromUserAllowedGroups 移除单个用户的指定分组权限

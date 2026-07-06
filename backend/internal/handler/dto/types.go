@@ -17,7 +17,6 @@ type User struct {
 	Concurrency   int        `json:"concurrency"`
 	Status        string     `json:"status"`
 	AllowedGroups []int64    `json:"allowed_groups"`
-	BlockedGroups []int64    `json:"blocked_groups"`
 	LastActiveAt  *time.Time `json:"last_active_at,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
@@ -47,6 +46,8 @@ type AdminUser struct {
 	// GroupRates 用户专属分组倍率配置
 	// map[groupID]rateMultiplier
 	GroupRates map[int64]float64 `json:"group_rates,omitempty"`
+	// BlockedGroups 管理员配置的用户禁用公开分组，普通用户 DTO 不返回。
+	BlockedGroups []int64 `json:"blocked_groups"`
 }
 
 type APIKey struct {

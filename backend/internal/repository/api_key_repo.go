@@ -147,7 +147,15 @@ func (r *apiKeyRepository) GetByKey(ctx context.Context, key string) (*service.A
 		}
 		return nil, err
 	}
-	return apiKeyEntityToService(m), nil
+	out := apiKeyEntityToService(m)
+	if out.User != nil {
+		blocked, err := r.loadAuthBlockedGroups(ctx, out.User.ID)
+		if err != nil {
+			return nil, err
+		}
+		out.User.BlockedGroups = blocked
+	}
+	return out, nil
 }
 
 func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*service.APIKey, error) {
@@ -236,7 +244,15 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 		}
 		return nil, err
 	}
-	return apiKeyEntityToService(m), nil
+	out := apiKeyEntityToService(m)
+	if out.User != nil {
+		blocked, err := r.loadAuthBlockedGroups(ctx, out.User.ID)
+		if err != nil {
+			return nil, err
+		}
+		out.User.BlockedGroups = blocked
+	}
+	return out, nil
 }
 
 func (r *apiKeyRepository) Update(ctx context.Context, key *service.APIKey) error {
