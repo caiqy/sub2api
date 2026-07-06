@@ -1,5 +1,5 @@
 workflow: full
-phase: build
+phase: verify
 context_compression: off
 build_mode: executing-plans
 build_pause: null
@@ -12,7 +12,7 @@ auto_transition: true
 base_ref: 3e322c60dc6395fd9610102a8c759cfd2227fe34
 design_doc: docs/superpowers/specs/2026-07-06-block-public-groups-by-user-design.md
 plan: docs/superpowers/plans/2026-07-06-block-public-groups-by-user.md
-verify_result: fail
+verify_result: pending
 verification_report: null
 branch_status: pending
 created_at: 2026-07-06
