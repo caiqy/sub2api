@@ -160,6 +160,48 @@ func (s *UserRepoSuite) TestBlockedGroupsRoundTrip() {
 	s.Require().Empty(got)
 }
 
+func (s *UserRepoSuite) TestUpdateAndSetBlockedGroupsReuseOuterTransaction() {
+	user := s.mustCreateUser(&service.User{Email: "blocked-groups-tx@test.com", Username: "before"})
+	group := s.mustCreateGroup("blocked-public-standard-tx")
+
+	tx, err := s.client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	loaded, err := s.repo.GetByID(s.ctx, user.ID)
+	s.Require().NoError(err)
+	loaded.Username = "inside-tx"
+	s.Require().NoError(s.repo.Update(txCtx, loaded))
+	s.Require().NoError(s.repo.SetBlockedGroups(txCtx, user.ID, []int64{group.ID}))
+	s.Require().NoError(tx.Rollback())
+
+	reloaded, err := s.repo.GetByID(s.ctx, user.ID)
+	s.Require().NoError(err)
+	s.Require().Equal("before", reloaded.Username)
+	s.Require().Empty(reloaded.BlockedGroups)
+}
+
+func (s *UserRepoSuite) TestUpdateRollsBackWhenSetBlockedGroupsFailsInOuterTransaction() {
+	user := s.mustCreateUser(&service.User{Email: "blocked-groups-tx-fail@test.com", Username: "before"})
+	group := s.mustCreateGroup("blocked-public-standard-tx-fail")
+
+	tx, err := s.client.Tx(s.ctx)
+	s.Require().NoError(err)
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+
+	loaded, err := s.repo.GetByID(s.ctx, user.ID)
+	s.Require().NoError(err)
+	loaded.Username = "inside-tx"
+	s.Require().NoError(s.repo.Update(txCtx, loaded))
+	s.Require().Error(s.repo.SetBlockedGroups(txCtx, user.ID+999999, []int64{group.ID}))
+	s.Require().NoError(tx.Rollback())
+
+	reloaded, err := s.repo.GetByID(s.ctx, user.ID)
+	s.Require().NoError(err)
+	s.Require().Equal("before", reloaded.Username)
+	s.Require().Empty(reloaded.BlockedGroups)
+}
+
 func (s *UserRepoSuite) TestExistsByEmail_NormalizesSpacingAndCaseOnPostgres() {
 	s.mustCreateUser(&service.User{Email: " Legacy@Example.com "})
 
