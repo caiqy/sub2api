@@ -844,11 +844,28 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		user.BlockedGroups = append([]int64(nil), (*input.BlockedGroups)...)
 	}
 
-	if err := s.userRepo.Update(ctx, user); err != nil {
+	updateCtx := ctx
+	var tx *dbent.Tx
+	if input.BlockedGroups != nil && s.entClient != nil {
+		var txErr error
+		tx, txErr = s.entClient.Tx(ctx)
+		if txErr != nil {
+			return nil, txErr
+		}
+		defer func() { _ = tx.Rollback() }()
+		updateCtx = dbent.NewTxContext(ctx, tx)
+	}
+
+	if err := s.userRepo.Update(updateCtx, user); err != nil {
 		return nil, err
 	}
 	if input.BlockedGroups != nil {
-		if err := s.userRepo.SetBlockedGroups(ctx, user.ID, *input.BlockedGroups); err != nil {
+		if err := s.userRepo.SetBlockedGroups(updateCtx, user.ID, *input.BlockedGroups); err != nil {
+			return nil, err
+		}
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
 			return nil, err
 		}
 	}
@@ -2506,6 +2523,14 @@ func (s *adminServiceImpl) AdminUpdateAPIKeyGroupID(ctx context.Context, keyID i
 					return nil, infraerrors.BadRequest("SUBSCRIPTION_REQUIRED", "user does not have an active subscription for this group")
 				}
 				return nil, err
+			}
+		} else if !group.IsExclusive && s.userRepo != nil {
+			user, err := s.userRepo.GetByID(ctx, apiKey.UserID)
+			if err != nil {
+				return nil, err
+			}
+			if !user.CanBindGroup(group.ID, group.IsExclusive) {
+				return nil, infraerrors.BadRequest("GROUP_NOT_ALLOWED", "user is not allowed to bind this group")
 			}
 		}
 
