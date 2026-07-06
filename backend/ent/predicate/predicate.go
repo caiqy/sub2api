@@ -111,5 +111,8 @@ type UserAttributeValue func(*sql.Selector)
 // UserPlatformQuota is the predicate function for userplatformquota builders.
 type UserPlatformQuota func(*sql.Selector)
 
+// UserResourceOverride is the predicate function for userresourceoverride builders.
+type UserResourceOverride func(*sql.Selector)
+
 // UserSubscription is the predicate function for usersubscription builders.
 type UserSubscription func(*sql.Selector)

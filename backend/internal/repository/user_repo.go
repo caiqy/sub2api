@@ -19,6 +19,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/schema/mixins"
 	dbuser "github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/ent/userallowedgroup"
+	"github.com/Wei-Shaw/sub2api/ent/userresourceoverride"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -31,6 +32,11 @@ type userRepository struct {
 	client *dbent.Client
 	sql    sqlExecutor
 }
+
+const (
+	userResourceTypeGroup  = "group"
+	userResourceEffectDeny = "deny"
+)
 
 func NewUserRepository(client *dbent.Client, sqlDB *sql.DB) service.UserRepository {
 	return newUserRepositoryWithSQL(client, sqlDB)
@@ -131,6 +137,13 @@ func (r *userRepository) GetByID(ctx context.Context, id int64) (*service.User, 
 	if v, ok := groups[id]; ok {
 		out.AllowedGroups = v
 	}
+	blockedGroups, err := r.loadBlockedGroups(ctx, []int64{id})
+	if err != nil {
+		return nil, err
+	}
+	if v, ok := blockedGroups[id]; ok {
+		out.BlockedGroups = v
+	}
 	return out, nil
 }
 
@@ -147,6 +160,13 @@ func (r *userRepository) GetByIDIncludeDeleted(ctx context.Context, id int64) (*
 	}
 	if v, ok := groups[id]; ok {
 		out.AllowedGroups = v
+	}
+	blockedGroups, err := r.loadBlockedGroups(ctx, []int64{id})
+	if err != nil {
+		return nil, err
+	}
+	if v, ok := blockedGroups[id]; ok {
+		out.BlockedGroups = v
 	}
 	return out, nil
 }
@@ -174,6 +194,13 @@ func (r *userRepository) GetByEmail(ctx context.Context, email string) (*service
 	}
 	if v, ok := groups[m.ID]; ok {
 		out.AllowedGroups = v
+	}
+	blockedGroups, err := r.loadBlockedGroups(ctx, []int64{m.ID})
+	if err != nil {
+		return nil, err
+	}
+	if v, ok := blockedGroups[m.ID]; ok {
+		out.BlockedGroups = v
 	}
 	return out, nil
 }
@@ -550,6 +577,16 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 		}
 	}
 
+	blockedGroupsByUser, err := r.loadBlockedGroups(ctx, userIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	for id, u := range userMap {
+		if groups, ok := blockedGroupsByUser[id]; ok {
+			u.BlockedGroups = groups
+		}
+	}
+
 	return outUsers, paginationResultFromTotal(int64(total), params), nil
 }
 
@@ -899,6 +936,47 @@ func (r *userRepository) RemoveGroupFromAllowedGroups(ctx context.Context, group
 	return int64(affected), nil
 }
 
+func (r *userRepository) GetBlockedGroups(ctx context.Context, userID int64) ([]int64, error) {
+	groups, err := r.loadBlockedGroups(ctx, []int64{userID})
+	if err != nil {
+		return nil, err
+	}
+	return groups[userID], nil
+}
+
+func (r *userRepository) SetBlockedGroups(ctx context.Context, userID int64, groupIDs []int64) error {
+	client := clientFromContext(ctx, r.client)
+	if _, err := client.UserResourceOverride.Delete().
+		Where(
+			userresourceoverride.UserIDEQ(userID),
+			userresourceoverride.ResourceTypeEQ(userResourceTypeGroup),
+			userresourceoverride.EffectEQ(userResourceEffectDeny),
+		).
+		Exec(ctx); err != nil {
+		return err
+	}
+
+	unique := make(map[int64]struct{}, len(groupIDs))
+	for _, id := range groupIDs {
+		if id > 0 {
+			unique[id] = struct{}{}
+		}
+	}
+	if len(unique) == 0 {
+		return nil
+	}
+
+	creates := make([]*dbent.UserResourceOverrideCreate, 0, len(unique))
+	for groupID := range unique {
+		creates = append(creates, client.UserResourceOverride.Create().
+			SetUserID(userID).
+			SetResourceType(userResourceTypeGroup).
+			SetResourceID(groupID).
+			SetEffect(userResourceEffectDeny))
+	}
+	return client.UserResourceOverride.CreateBulk(creates...).Exec(ctx)
+}
+
 // RemoveGroupFromUserAllowedGroups 移除单个用户的指定分组权限
 func (r *userRepository) RemoveGroupFromUserAllowedGroups(ctx context.Context, userID int64, groupID int64) error {
 	client := clientFromContext(ctx, r.client)
@@ -928,6 +1006,13 @@ func (r *userRepository) GetFirstAdmin(ctx context.Context) (*service.User, erro
 	if v, ok := groups[m.ID]; ok {
 		out.AllowedGroups = v
 	}
+	blockedGroups, err := r.loadBlockedGroups(ctx, []int64{m.ID})
+	if err != nil {
+		return nil, err
+	}
+	if v, ok := blockedGroups[m.ID]; ok {
+		out.BlockedGroups = v
+	}
 	return out, nil
 }
 
@@ -952,6 +1037,32 @@ func (r *userRepository) loadAllowedGroups(ctx context.Context, userIDs []int64)
 		sort.Slice(out[userID], func(i, j int) bool { return out[userID][i] < out[userID][j] })
 	}
 
+	return out, nil
+}
+
+func (r *userRepository) loadBlockedGroups(ctx context.Context, userIDs []int64) (map[int64][]int64, error) {
+	out := make(map[int64][]int64, len(userIDs))
+	if len(userIDs) == 0 {
+		return out, nil
+	}
+
+	rows, err := r.client.UserResourceOverride.Query().
+		Where(
+			userresourceoverride.UserIDIn(userIDs...),
+			userresourceoverride.ResourceTypeEQ(userResourceTypeGroup),
+			userresourceoverride.EffectEQ(userResourceEffectDeny),
+		).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range rows {
+		out[rows[i].UserID] = append(out[rows[i].UserID], rows[i].ResourceID)
+	}
+	for userID := range out {
+		sort.Slice(out[userID], func(i, j int) bool { return out[userID][i] < out[userID][j] })
+	}
 	return out, nil
 }
 

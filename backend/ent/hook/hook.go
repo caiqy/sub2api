@@ -429,6 +429,18 @@ func (f UserPlatformQuotaFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.UserPlatformQuotaMutation", m)
 }
 
+// The UserResourceOverrideFunc type is an adapter to allow the use of ordinary
+// function as UserResourceOverride mutator.
+type UserResourceOverrideFunc func(context.Context, *ent.UserResourceOverrideMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f UserResourceOverrideFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.UserResourceOverrideMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.UserResourceOverrideMutation", m)
+}
+
 // The UserSubscriptionFunc type is an adapter to allow the use of ordinary
 // function as UserSubscription mutator.
 type UserSubscriptionFunc func(context.Context, *ent.UserSubscriptionMutation) (ent.Value, error)

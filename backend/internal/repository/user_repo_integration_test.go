@@ -139,6 +139,27 @@ func (s *UserRepoSuite) TestGetByEmail_NotFound() {
 	s.Require().Error(err, "expected error for non-existent email")
 }
 
+func (s *UserRepoSuite) TestBlockedGroupsRoundTrip() {
+	user := s.mustCreateUser(&service.User{Email: "blocked-groups@test.com"})
+	group := s.mustCreateGroup("blocked-public-standard")
+
+	s.Require().NoError(s.repo.SetBlockedGroups(s.ctx, user.ID, []int64{group.ID}))
+
+	got, err := s.repo.GetBlockedGroups(s.ctx, user.ID)
+	s.Require().NoError(err)
+	s.Require().Equal([]int64{group.ID}, got)
+
+	loaded, err := s.repo.GetByID(s.ctx, user.ID)
+	s.Require().NoError(err)
+	s.Require().Equal([]int64{group.ID}, loaded.BlockedGroups)
+
+	s.Require().NoError(s.repo.SetBlockedGroups(s.ctx, user.ID, nil))
+
+	got, err = s.repo.GetBlockedGroups(s.ctx, user.ID)
+	s.Require().NoError(err)
+	s.Require().Empty(got)
+}
+
 func (s *UserRepoSuite) TestExistsByEmail_NormalizesSpacingAndCaseOnPostgres() {
 	s.mustCreateUser(&service.User{Email: " Legacy@Example.com "})
 

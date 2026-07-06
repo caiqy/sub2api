@@ -41,6 +41,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/userattributedefinition"
 	"github.com/Wei-Shaw/sub2api/ent/userattributevalue"
 	"github.com/Wei-Shaw/sub2api/ent/userplatformquota"
+	"github.com/Wei-Shaw/sub2api/ent/userresourceoverride"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 )
@@ -2141,6 +2142,20 @@ func init() {
 	userplatformquotaDescMonthlyUsageUsd := userplatformquotaFields[7].Descriptor()
 	// userplatformquota.DefaultMonthlyUsageUsd holds the default value on creation for the monthly_usage_usd field.
 	userplatformquota.DefaultMonthlyUsageUsd = userplatformquotaDescMonthlyUsageUsd.Default.(float64)
+	userresourceoverrideFields := schema.UserResourceOverride{}.Fields()
+	_ = userresourceoverrideFields
+	// userresourceoverrideDescResourceType is the schema descriptor for resource_type field.
+	userresourceoverrideDescResourceType := userresourceoverrideFields[1].Descriptor()
+	// userresourceoverride.ResourceTypeValidator is a validator for the "resource_type" field. It is called by the builders before save.
+	userresourceoverride.ResourceTypeValidator = userresourceoverrideDescResourceType.Validators[0].(func(string) error)
+	// userresourceoverrideDescEffect is the schema descriptor for effect field.
+	userresourceoverrideDescEffect := userresourceoverrideFields[3].Descriptor()
+	// userresourceoverride.EffectValidator is a validator for the "effect" field. It is called by the builders before save.
+	userresourceoverride.EffectValidator = userresourceoverrideDescEffect.Validators[0].(func(string) error)
+	// userresourceoverrideDescCreatedAt is the schema descriptor for created_at field.
+	userresourceoverrideDescCreatedAt := userresourceoverrideFields[4].Descriptor()
+	// userresourceoverride.DefaultCreatedAt holds the default value on creation for the created_at field.
+	userresourceoverride.DefaultCreatedAt = userresourceoverrideDescCreatedAt.Default.(func() time.Time)
 	usersubscriptionMixin := schema.UserSubscription{}.Mixin()
 	usersubscriptionMixinHooks1 := usersubscriptionMixin[1].Hooks()
 	usersubscription.Hooks[0] = usersubscriptionMixinHooks1[0]

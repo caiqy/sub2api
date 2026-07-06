@@ -1744,6 +1744,41 @@ var (
 			},
 		},
 	}
+	// UserResourceOverridesColumns holds the columns for the "user_resource_overrides" table.
+	UserResourceOverridesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "resource_type", Type: field.TypeString, Size: 50},
+		{Name: "resource_id", Type: field.TypeInt64},
+		{Name: "effect", Type: field.TypeString, Size: 20},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "user_id", Type: field.TypeInt64},
+	}
+	// UserResourceOverridesTable holds the schema information for the "user_resource_overrides" table.
+	UserResourceOverridesTable = &schema.Table{
+		Name:       "user_resource_overrides",
+		Columns:    UserResourceOverridesColumns,
+		PrimaryKey: []*schema.Column{UserResourceOverridesColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "user_resource_overrides_users_user",
+				Columns:    []*schema.Column{UserResourceOverridesColumns[5]},
+				RefColumns: []*schema.Column{UsersColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "userresourceoverride_user_id_resource_type_resource_id_effect",
+				Unique:  true,
+				Columns: []*schema.Column{UserResourceOverridesColumns[5], UserResourceOverridesColumns[1], UserResourceOverridesColumns[2], UserResourceOverridesColumns[3]},
+			},
+			{
+				Name:    "userresourceoverride_user_id_resource_type_effect",
+				Unique:  false,
+				Columns: []*schema.Column{UserResourceOverridesColumns[5], UserResourceOverridesColumns[1], UserResourceOverridesColumns[3]},
+			},
+		},
+	}
 	// UserSubscriptionsColumns holds the columns for the "user_subscriptions" table.
 	UserSubscriptionsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -1870,6 +1905,7 @@ var (
 		UserAttributeDefinitionsTable,
 		UserAttributeValuesTable,
 		UserPlatformQuotasTable,
+		UserResourceOverridesTable,
 		UserSubscriptionsTable,
 	}
 )
@@ -2012,6 +2048,10 @@ func init() {
 	UserPlatformQuotasTable.ForeignKeys[0].RefTable = UsersTable
 	UserPlatformQuotasTable.Annotation = &entsql.Annotation{
 		Table: "user_platform_quotas",
+	}
+	UserResourceOverridesTable.ForeignKeys[0].RefTable = UsersTable
+	UserResourceOverridesTable.Annotation = &entsql.Annotation{
+		Table: "user_resource_overrides",
 	}
 	UserSubscriptionsTable.ForeignKeys[0].RefTable = GroupsTable
 	UserSubscriptionsTable.ForeignKeys[1].RefTable = UsersTable
