@@ -2,6 +2,7 @@
 change: hide-user-purchase-and-custom-menus
 design-doc: docs/superpowers/specs/2026-07-07-hide-user-purchase-and-custom-menus-design.md
 base-ref: b41f4fc166998198dfea8a704c01983fd5bb0884
+archived-with: 2026-07-07-hide-user-purchase-and-custom-menus
 ---
 
 # 隐藏用户购买页与自定义菜单实施计划

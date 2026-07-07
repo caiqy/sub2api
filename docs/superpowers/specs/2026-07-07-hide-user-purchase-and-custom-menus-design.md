@@ -2,6 +2,8 @@
 comet_change: hide-user-purchase-and-custom-menus
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-07-07-hide-user-purchase-and-custom-menus
+status: final
 ---
 
 # 用户购买页与自定义菜单隐藏设计
