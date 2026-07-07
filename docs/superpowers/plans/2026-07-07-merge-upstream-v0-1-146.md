@@ -275,7 +275,7 @@ Run from: `backend`
 
 Expected: exit 0；若失败属于历史问题，记录失败包、测试名和错误摘要，不扩大修复范围。
 
-### Task 6: 运行前端 typecheck 和 build
+### Task 6: 运行前端 typecheck、build 和单测
 
 **Files:**
 - Test: `frontend/src/**`
@@ -286,7 +286,7 @@ Expected: exit 0；若失败属于历史问题，记录失败包、测试名和�
 
 **Interfaces:**
 - Consumes: Task 4 复核后的前端工作区
-- Produces: 前端 typecheck/build 结果和必要修复
+- Produces: 前端 typecheck/build/test 结果和必要修复
 
 - [x] **Step 1: 运行 TypeScript 类型检查**
 
@@ -311,6 +311,18 @@ pnpm build
 Run from: `frontend`
 
 Expected: exit 0；构建 warning 可记录，但不能隐藏错误。
+
+- [x] **Step 3: 运行前端单测**
+
+Run:
+
+```bash
+pnpm test:run
+```
+
+Run from: `frontend`
+
+Expected: exit 0；warning 可记录，失败只修复 upstream 合并引入或暴露的问题。
 
 ### Task 7: 本地关键能力专项 review
 
@@ -429,6 +441,7 @@ Action:
 后端测试：go test ./... -> PASS / FAIL <摘要>
 前端 typecheck：pnpm typecheck -> PASS / FAIL <摘要>
 前端 build：pnpm build -> PASS / FAIL <摘要>
+前端单测：pnpm test:run -> PASS / FAIL <摘要>
 专项 review：scheduler/sticky/privacy/image/runtime setting/passthrough -> <逐项结论>
 遗留问题：<只列无关旧问题或 upstream 原生问题>
 ```
@@ -466,9 +479,9 @@ Expected: 本 change 的 build 阶段停在可审查、已提交的隔离分支�
 - 隔离分支：`feature/20260707/merge-upstream-v0-1-146`。
 - 冲突处理：已融合冲突文件，保留 upstream 更新和本地 scheduler、sticky、privacy、image capability、runtime setting、passthrough 定制；未遇到需要暂停确认的不可共存语义。
 - 版本/生成/配置/migration：`backend/cmd/server/VERSION` 对齐 upstream tag 内的 `0.1.145`；无 `go.mod/go.sum`、Ent、migration 差异；`wire_gen.go` 为构造依赖顺序调整；部署配置新增 `SETUP_MIGRATION_TIMEOUT_SECONDS` 并更新 URL allowlist 默认说明。
-- 后端测试：`go test ./internal/handler -run "TestOpenAIGatewayHandler_ResponsesRequiresChatCompletionsCapability"` PASS；`go test ./internal/service -run "TestLayered_StickyWeighted(SessionUsesLayeredSelection|PreviousCanMoveUsesLayeredSelection)"` PASS；`go test ./internal/handler ./internal/service` PASS；`go test ./...` PASS。
-- 前端验证：`pnpm typecheck` PASS；`pnpm build` PASS。构建仅输出 Vite chunk 和 Browserslist 数据过期警告。
-- 专项 review：scheduler/sticky/privacy/image capability/runtime setting 热更新/网关透传字段通过；代码审查发现的 HTTP Responses capability 过滤和 layered sticky-weighted 语义差异已修复并补测试。
+- 后端测试：`go test ./internal/handler -run "TestOpenAIGatewayHandler_Responses(RequiresChatCompletionsCapability|UsesGrokRequestPlatform)"` PASS；`go test ./internal/service -run "TestLayered_StickyWeighted(SessionPrefersStickyWithinTopK|PreviousCanMovePrefersStickyWithinTopK)"` PASS；`go test ./internal/handler ./internal/service` PASS；`go test ./...` PASS。
+- 前端验证：`pnpm typecheck` PASS；`pnpm build` PASS；`pnpm test:run` PASS（157 files / 1175 tests）。构建仅输出 Vite chunk 和 Browserslist 数据过期警告；单测保留既有 stderr warning/log 输出但无失败。
+- 专项 review：scheduler/sticky/privacy/image capability/runtime setting 热更新/网关透传字段通过；代码审查发现的 HTTP Responses capability 过滤、Grok `/v1/responses` platform 透传测试缺口和 layered sticky-weighted TopK 偏好语义差异已修复并补测试。
 - 遗留问题：未发现需要并入当前 change 的旧问题；Vite chunk/Browserslist 警告保持记录，不在本次 upstream merge 扩大处理。
 
 ## 自检

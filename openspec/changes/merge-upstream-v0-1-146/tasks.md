@@ -12,7 +12,7 @@
 ## 3. 验证与语义 review
 
 - [x] 3.1 运行 `go test ./...` 并修复合并引入的问题。
-- [x] 3.2 运行前端 typecheck 和 build，修复合并引入的问题。
+- [x] 3.2 运行前端 typecheck、build 和单测，修复合并引入的问题。
 - [x] 3.3 专项 review scheduler、sticky、privacy、image capability、runtime setting 热更新和网关透传字段。
 
 ## 4. 收尾决策
@@ -26,5 +26,5 @@
 - 隔离分支：`feature/20260707/merge-upstream-v0-1-146`。
 - 冲突处理：已融合 upstream 更新和本地 scheduler/sticky/privacy/image/runtime setting/passthrough 定制；未发现需要暂停确认的不可共存语义。
 - 版本/生成/配置/migration：`backend/cmd/server/VERSION` 保留 upstream tag 内的 `0.1.145`；无 `go.mod/go.sum`、Ent、migration 差异；`wire_gen.go` 与新构造依赖一致；部署配置保留 upstream 新增 setup timeout 和 URL allowlist 默认说明。
-- 验证：`go test ./...` PASS；`pnpm typecheck` PASS；`pnpm build` PASS（仅 Vite chunk/Browserslist 警告）。
-- 专项 review：scheduler/sticky/privacy/image capability/runtime setting 热更新/网关透传字段均通过；review 发现的 Responses capability 和 layered sticky-weighted 语义问题已修复并补回归测试。
+- 验证：`go test ./...` PASS；`pnpm typecheck` PASS；`pnpm build` PASS（仅 Vite chunk/Browserslist 警告）；`pnpm test:run` PASS（157 files / 1175 tests）。
+- 专项 review：scheduler/sticky/privacy/image capability/runtime setting 热更新/网关透传字段均通过；review 发现的 Responses capability、Grok `/v1/responses` platform 透传测试缺口和 layered sticky-weighted TopK 偏好语义问题已修复并补回归测试。

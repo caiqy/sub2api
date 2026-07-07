@@ -1279,7 +1279,7 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_oauth_responses_websockets_v2_enabled).toBe(true)
   })
 
-  it('rehydrates Codex image generation bridge inherit mode after save and reopen', async () => {
+  it('rehydrates legacy Codex image bridge as image tool inherit mode after save and reopen', async () => {
     const account = buildAccount({
       extra: {
         codex_image_generation_bridge: true
@@ -1294,9 +1294,9 @@ describe('EditAccountModal', () => {
 
     const wrapper = mountModal(account)
 
-    expect(wrapper.get('button[data-testid="codex-image-bridge-enabled"]').classes()).toContain('border-sky-300')
+    expect(wrapper.get('button[data-testid="codex-image-tool-enabled"]').classes()).toContain('border-emerald-300')
 
-    await wrapper.get('button[data-testid="codex-image-bridge-inherit"]').trigger('click')
+    await wrapper.get('button[data-testid="codex-image-tool-inherit"]').trigger('click')
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     await flushPromises()
 
@@ -1313,9 +1313,9 @@ describe('EditAccountModal', () => {
     })
     await flushPromises()
 
-    expect(wrapper.get('button[data-testid="codex-image-bridge-inherit"]').classes()).toContain('border-sky-300')
-    expect(wrapper.get('button[data-testid="codex-image-bridge-enabled"]').classes()).not.toContain('border-sky-300')
-    expect(wrapper.get('button[data-testid="codex-image-bridge-disabled"]').classes()).not.toContain('border-sky-300')
+    expect(wrapper.get('button[data-testid="codex-image-tool-inherit"]').classes()).toContain('border-sky-300')
+    expect(wrapper.get('button[data-testid="codex-image-tool-enabled"]').classes()).not.toContain('border-emerald-300')
+    expect(wrapper.get('button[data-testid="codex-image-tool-disabled"]').classes()).not.toContain('border-amber-300')
   })
 
   it('allows saving apikey account when backend redacted api_key but credentials_status reports it exists', async () => {

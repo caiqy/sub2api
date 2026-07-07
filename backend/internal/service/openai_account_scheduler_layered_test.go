@@ -599,7 +599,7 @@ func TestLayered_PreviousResponseStickyIgnoresNonOpenAIPlatform(t *testing.T) {
 	require.Zero(t, stateStore.deleteResponseCalls["resp_layered_non_openai"])
 }
 
-func TestLayered_StickyWeightedSessionUsesLayeredSelection(t *testing.T) {
+func TestLayered_StickyWeightedSessionPrefersStickyWithinTopK(t *testing.T) {
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 
 	ctx := context.Background()
@@ -608,6 +608,7 @@ func TestLayered_StickyWeightedSessionUsesLayeredSelection(t *testing.T) {
 	preferredAccount := Account{ID: 9201462, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, GroupIDs: []int64{groupID}}
 	cfg := newOpenAIStickyEnabledTestConfig()
 	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	cfg.Gateway.OpenAIWS.LBTopK = 2
 	svc := &OpenAIGatewayService{
 		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{stickyAccount, preferredAccount}},
 		cache:              &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:session_hash_layered_weighted": stickyAccount.ID}},
@@ -629,6 +630,45 @@ func TestLayered_StickyWeightedSessionUsesLayeredSelection(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, selection)
 	require.NotNil(t, selection.Account)
+	require.Equal(t, stickyAccount.ID, selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.True(t, decision.StickySessionHit)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func TestLayered_StickyWeightedSessionDoesNotPreferStickyOutsideTopK(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	ctx := context.Background()
+	groupID := int64(920148)
+	stickyAccount := Account{ID: 9201481, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 100, GroupIDs: []int64{groupID}}
+	preferredAccount := Account{ID: 9201482, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, GroupIDs: []int64{groupID}}
+	cfg := newOpenAIStickyEnabledTestConfig()
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	cfg.Gateway.OpenAIWS.LBTopK = 1
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{stickyAccount, preferredAccount}},
+		cache:              &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:session_hash_layered_outside_topk": stickyAccount.ID}},
+		cfg:                cfg,
+		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true", "true"),
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+	}
+
+	selection, decision, err := svc.SelectAccountWithScheduler(
+		ctx,
+		&groupID,
+		"",
+		"session_hash_layered_outside_topk",
+		"gpt-5.1",
+		nil,
+		OpenAIUpstreamTransportAny,
+		false,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
 	require.Equal(t, preferredAccount.ID, selection.Account.ID)
 	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
 	require.False(t, decision.StickySessionHit)
@@ -637,7 +677,52 @@ func TestLayered_StickyWeightedSessionUsesLayeredSelection(t *testing.T) {
 	}
 }
 
-func TestLayered_StickyWeightedPreviousCanMoveUsesLayeredSelection(t *testing.T) {
+func TestLayered_StickyWeightedSessionFallsBackWhenStickyAcquireFails(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	ctx := context.Background()
+	groupID := int64(920149)
+	stickyAccount := Account{ID: 9201491, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 100, GroupIDs: []int64{groupID}}
+	preferredAccount := Account{ID: 9201492, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, GroupIDs: []int64{groupID}}
+	cfg := newOpenAIStickyEnabledTestConfig()
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	cfg.Gateway.OpenAIWS.LBTopK = 2
+	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:session_hash_layered_acquire_fails": stickyAccount.ID}}
+	svc := &OpenAIGatewayService{
+		accountRepo:      schedulerTestOpenAIAccountRepo{accounts: []Account{stickyAccount, preferredAccount}},
+		cache:            cache,
+		cfg:              cfg,
+		rateLimitService: newOpenAIAdvancedSchedulerRateLimitService("true", "true"),
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{acquireResults: map[int64]bool{
+			stickyAccount.ID: false,
+		}}),
+	}
+
+	selection, decision, err := svc.SelectAccountWithScheduler(
+		ctx,
+		&groupID,
+		"",
+		"session_hash_layered_acquire_fails",
+		"gpt-5.1",
+		nil,
+		OpenAIUpstreamTransportAny,
+		false,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, preferredAccount.ID, selection.Account.ID)
+	require.True(t, selection.Acquired)
+	require.Nil(t, selection.WaitPlan)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.False(t, decision.StickySessionHit)
+	require.Equal(t, preferredAccount.ID, cache.sessionBindings["openai:session_hash_layered_acquire_fails"])
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func TestLayered_StickyWeightedPreviousCanMovePrefersStickyWithinTopK(t *testing.T) {
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 
 	ctx := context.Background()
@@ -646,6 +731,7 @@ func TestLayered_StickyWeightedPreviousCanMoveUsesLayeredSelection(t *testing.T)
 	preferredAccount := Account{ID: 9201472, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, GroupIDs: []int64{groupID}, Extra: map[string]any{"openai_apikey_responses_websockets_v2_enabled": true}}
 	cfg := newSchedulerTestOpenAIWSV2Config()
 	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	cfg.Gateway.OpenAIWS.LBTopK = 2
 	svc := &OpenAIGatewayService{
 		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{stickyAccount, preferredAccount}},
 		cache:              &schedulerTestGatewayCache{},
@@ -672,9 +758,9 @@ func TestLayered_StickyWeightedPreviousCanMoveUsesLayeredSelection(t *testing.T)
 	require.NoError(t, err)
 	require.NotNil(t, selection)
 	require.NotNil(t, selection.Account)
-	require.Equal(t, preferredAccount.ID, selection.Account.ID)
+	require.Equal(t, stickyAccount.ID, selection.Account.ID)
 	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
-	require.False(t, decision.StickyPreviousHit)
+	require.True(t, decision.StickyPreviousHit)
 	if selection.ReleaseFunc != nil {
 		selection.ReleaseFunc()
 	}

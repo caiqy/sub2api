@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -369,9 +370,12 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 
 	// 5. 循环选择
 	for len(available) > 0 {
+		selected := s.selectStickyWeightedTopKCandidate(ctx, available, req)
 		step1 := filterByMinPriority(available)
 		step2 := filterByMinLoadRate(step1)
-		selected := selectByLRU(step2, false)
+		if selected == nil {
+			selected = selectByLRU(step2, false)
+		}
 		if selected == nil {
 			break
 		}
@@ -436,6 +440,70 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 	}
 
 	return nil, len(candidates), loadSkew, ErrNoAvailableAccounts
+}
+
+func (s *layeredOpenAIAccountScheduler) selectStickyWeightedTopKCandidate(ctx context.Context, available []accountWithLoad, req OpenAIAccountScheduleRequest) *accountWithLoad {
+	if !req.StickyWeighted || len(available) == 0 || s == nil || s.service == nil {
+		return nil
+	}
+	stickyIDs := make([]int64, 0, 2)
+	if req.PreviousResponseCanMove && req.StickyPreviousAccountID > 0 {
+		stickyIDs = append(stickyIDs, req.StickyPreviousAccountID)
+	}
+	if req.StickyAccountID > 0 {
+		stickyIDs = append(stickyIDs, req.StickyAccountID)
+	}
+	if len(stickyIDs) == 0 {
+		return nil
+	}
+
+	ranked := append([]accountWithLoad(nil), available...)
+	sort.SliceStable(ranked, func(i, j int) bool {
+		return layeredAccountWithLoadLess(ranked[i], ranked[j])
+	})
+	topK := s.service.openAIWSLBTopKForRequest(ctx)
+	if topK <= 0 {
+		topK = 1
+	}
+	if topK > len(ranked) {
+		topK = len(ranked)
+	}
+	for _, stickyID := range stickyIDs {
+		for i := 0; i < topK; i++ {
+			if ranked[i].account != nil && ranked[i].account.ID == stickyID {
+				return &ranked[i]
+			}
+		}
+	}
+	return nil
+}
+
+func layeredAccountWithLoadLess(left, right accountWithLoad) bool {
+	if left.account == nil || right.account == nil {
+		return left.account != nil
+	}
+	if left.account.Priority != right.account.Priority {
+		return left.account.Priority < right.account.Priority
+	}
+	leftLoad, rightLoad := 0, 0
+	if left.loadInfo != nil {
+		leftLoad = left.loadInfo.LoadRate
+	}
+	if right.loadInfo != nil {
+		rightLoad = right.loadInfo.LoadRate
+	}
+	if leftLoad != rightLoad {
+		return leftLoad < rightLoad
+	}
+	switch {
+	case left.account.LastUsedAt == nil && right.account.LastUsedAt != nil:
+		return true
+	case left.account.LastUsedAt != nil && right.account.LastUsedAt == nil:
+		return false
+	case left.account.LastUsedAt != nil && right.account.LastUsedAt != nil && !left.account.LastUsedAt.Equal(*right.account.LastUsedAt):
+		return left.account.LastUsedAt.Before(*right.account.LastUsedAt)
+	}
+	return left.account.ID < right.account.ID
 }
 
 // layeredPenaltyEvaluation 封装一次运行时惩罚评估的结果。
