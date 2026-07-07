@@ -338,6 +338,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 	requireCompact := isOpenAIRemoteCompactPath(c)
+	requestPlatform := openAICompatibleRequestPlatform(apiKey)
 
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
@@ -350,7 +351,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	for {
 		// Select account supporting the requested model
 		reqLog.Debug("openai.account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
-		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithScheduler(
+		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForCapability(
 			c.Request.Context(),
 			apiKey.GroupID,
 			previousResponseID,
@@ -358,7 +359,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			reqModel,
 			failedAccountIDs,
 			service.OpenAIUpstreamTransportAny,
+			service.OpenAIEndpointCapabilityChatCompletions,
 			requireCompact,
+			false,
+			requestPlatform,
 		)
 		if err != nil {
 			reqLog.Warn("openai.account_select_failed",
@@ -781,6 +785,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	if h.rejectIfCyberSessionBlocked(c, apiKey, body, reqModel, cyberBlockFormatAnthropic) {
 		return
 	}
+	requestPlatform := openAICompatibleRequestPlatform(apiKey)
 
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
@@ -797,7 +802,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			currentRoutingModel = effectiveMappedModel
 		}
 		reqLog.Debug("openai_messages.account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
-		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithScheduler(
+		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForCapability(
 			c.Request.Context(),
 			apiKey.GroupID,
 			"", // no previous_response_id
@@ -805,7 +810,10 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			currentRoutingModel,
 			failedAccountIDs,
 			service.OpenAIUpstreamTransportAny,
+			service.OpenAIEndpointCapabilityChatCompletions,
 			false,
+			false,
+			requestPlatform,
 		)
 		if err != nil {
 			reqLog.Warn("openai_messages.account_select_failed",
@@ -1333,6 +1341,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "previous_response_id must be a response.id (resp_*), not a message id")
 		return
 	}
+	firstMessageToolCoverage := service.AnalyzeToolCallOutputContextCoverageBytes(firstMessage)
+	previousResponseCanMove := !firstMessageToolCoverage.HasFunctionCallOutput || firstMessageToolCoverage.ContextCoversAllCallIDs
 	reqLog = reqLog.With(
 		zap.Bool("ws_ingress", true),
 		zap.String("model", reqModel),
@@ -1387,7 +1397,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	// 必须尽早注册，确保任何 early return 都能释放已获取的并发槽位。
 	defer releaseTurnSlots()
 
-	userReleaseFunc, userAcquired, err := h.concurrencyHelper.TryAcquireUserSlot(ctx, subject.UserID, subject.Concurrency)
+	userReleaseFunc, userAcquired, err := h.concurrencyHelper.TryAcquireUserSlotForAPIKey(ctx, subject.UserID, subject.Concurrency, apiKey.ID)
 	if err != nil {
 		reqLog.Warn("openai.websocket_user_slot_acquire_failed", zap.Error(err))
 		closeOpenAIClientWS(wsConn, coderws.StatusInternalError, "failed to acquire user concurrency slot")
@@ -1413,6 +1423,24 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			return
 		}
 		currentUserGroupRelease = wrapReleaseOnDone(ctx, groupUserReleaseFunc)
+	}
+
+	ensureUserSlotHeld := func() bool {
+		if currentUserRelease != nil {
+			return true
+		}
+		userReleaseFunc, userAcquired, err := h.concurrencyHelper.TryAcquireUserSlotForAPIKey(ctx, subject.UserID, subject.Concurrency, apiKey.ID)
+		if err != nil {
+			reqLog.Warn("openai.websocket_user_slot_reacquire_failed", zap.Error(err))
+			closeOpenAIClientWS(wsConn, coderws.StatusInternalError, "failed to acquire user concurrency slot")
+			return false
+		}
+		if !userAcquired {
+			closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "too many concurrent requests, please retry later")
+			return false
+		}
+		currentUserRelease = wrapReleaseOnDone(ctx, userReleaseFunc)
+		return true
 	}
 
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
@@ -1449,6 +1477,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			requiredTransport,
 			service.OpenAIEndpointCapabilityChatCompletions,
 			false,
+			previousResponseCanMove,
+			requestPlatform,
 		)
 		if err != nil {
 			reqLog.Warn("openai.websocket_account_select_failed",
@@ -1551,7 +1581,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				// 防御式清理：避免异常路径下旧槽位覆盖导致泄漏。
 				releaseTurnSlots()
 				// 非首轮 turn 需要重新抢占并发槽位，避免长连接空闲占槽。
-				userReleaseFunc, userAcquired, err := h.concurrencyHelper.TryAcquireUserSlot(ctx, subject.UserID, subject.Concurrency)
+				userReleaseFunc, userAcquired, err := h.concurrencyHelper.TryAcquireUserSlotForAPIKey(ctx, subject.UserID, subject.Concurrency, apiKey.ID)
 				if err != nil {
 					return service.NewOpenAIWSClientCloseError(coderws.StatusInternalError, "failed to acquire user concurrency slot", err)
 				}
@@ -1672,8 +1702,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		// 说明该会话链不属于本次调度到的账号，原样转发会触发上游会话链鉴权失败（“鉴权失败，请检查 API Key”）。
 		// 故剥离首包里的 previous_response_id，改用首包内 input 重建上下文；带 function_call_output 的
 		// 工具续链无法重建，保持原样。仅作用于首轮首包，后续 turn 的续链由 WS 转发层既有逻辑处理。
-		if previousResponseID != "" && !scheduleDecision.StickyPreviousHit &&
-			!service.ValidateFunctionCallOutputContextBytes(wsFirstMessage).HasFunctionCallOutput {
+		if previousResponseID != "" && !scheduleDecision.StickyPreviousHit && previousResponseCanMove {
 			wsFirstMessage = service.RemovePreviousResponseIDFromBody(wsFirstMessage)
 			reqLog.Debug("openai.websocket_previous_response_id_stripped_cross_group",
 				zap.Int64("account_id", account.ID),
@@ -1710,8 +1739,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					zap.Int("switch_count", switchCount),
 					zap.Int("max_switches", maxAccountSwitches),
 				)
-				if currentUserRelease == nil {
-					closeOpenAIClientWS(wsConn, coderws.StatusInternalError, "user concurrency slot was released before failover")
+				if !ensureUserSlotHeld() {
 					return
 				}
 				continue

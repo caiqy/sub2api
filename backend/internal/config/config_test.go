@@ -1838,6 +1838,10 @@ func TestValidateConfig_OpenAIWSRules(t *testing.T) {
 				c.Gateway.OpenAIWS.SchedulerScoreWeights.Queue = 0
 				c.Gateway.OpenAIWS.SchedulerScoreWeights.ErrorRate = 0
 				c.Gateway.OpenAIWS.SchedulerScoreWeights.TTFT = 0
+				c.Gateway.OpenAIWS.SchedulerScoreWeights.Reset = 0
+				c.Gateway.OpenAIWS.SchedulerScoreWeights.QuotaHeadroom = 0
+				c.Gateway.OpenAIWS.SchedulerScoreWeights.PreviousResponse = 0
+				c.Gateway.OpenAIWS.SchedulerScoreWeights.SessionSticky = 0
 			},
 			wantErr: "gateway.openai_ws.scheduler_score_weights must not all be zero",
 		},
@@ -1991,8 +1995,8 @@ func TestLoad_DefaultGatewayUsageRecordConfig(t *testing.T) {
 	if cfg.Gateway.UsageRecord.TaskTimeoutSeconds != 5 {
 		t.Fatalf("task_timeout_seconds = %d, want 5", cfg.Gateway.UsageRecord.TaskTimeoutSeconds)
 	}
-	if cfg.Gateway.UsageRecord.OverflowPolicy != UsageRecordOverflowPolicySample {
-		t.Fatalf("overflow_policy = %s, want %s", cfg.Gateway.UsageRecord.OverflowPolicy, UsageRecordOverflowPolicySample)
+	if cfg.Gateway.UsageRecord.OverflowPolicy != UsageRecordOverflowPolicySync {
+		t.Fatalf("overflow_policy = %s, want %s", cfg.Gateway.UsageRecord.OverflowPolicy, UsageRecordOverflowPolicySync)
 	}
 	if cfg.Gateway.UsageRecord.OverflowSamplePercent != 10 {
 		t.Fatalf("overflow_sample_percent = %d, want 10", cfg.Gateway.UsageRecord.OverflowSamplePercent)

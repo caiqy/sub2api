@@ -136,6 +136,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 
 	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
 	promptCacheKey := h.gatewayService.ExtractSessionID(c, body)
+	requestPlatform := openAICompatibleRequestPlatform(apiKey)
 
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
@@ -157,6 +158,8 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			service.OpenAIUpstreamTransportAny,
 			service.OpenAIEndpointCapabilityChatCompletions,
 			false,
+			false,
+			requestPlatform,
 		)
 		if err != nil {
 			reqLog.Warn("openai_chat_completions.account_select_failed",

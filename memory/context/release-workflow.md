@@ -11,8 +11,10 @@
 3. 如果用户明确指定版本号，严格按用户给出的版本号发布，不自行改成别的主版本或序列。
 4. 如果用户只说“发布下一个版本”，先确定当前 `HEAD` 已包含的最高上游三段式 tag，再发布该基准下一个本地四段式 tag。
 5. 默认给当前目标提交打 tag，并执行 `git push origin <tag>` 推送到远端。
-6. 推送后校验远端 tag 已存在，确认 GitHub Release workflow 会由 tag push 自动触发。
-7. 发版后需要使用 `gh` 跟进 Release workflow，至少确认对应 workflow run 已启动，并继续检查到最终成功或失败结果。
+6. 推送后校验远端 tag 已存在。
+7. 后续发布下一个版本时，默认采用完整 Release 方式：记录当前 `SIMPLE_RELEASE` 仓库变量，临时执行 `gh variable set SIMPLE_RELEASE --body false --repo caiqy/sub2api`，再用 `gh workflow run release.yml --repo caiqy/sub2api --ref <tag> -f tag=<tag> -f simple_release=false` 触发目标 tag。
+8. 使用 `gh run view/watch` 跟进 Release workflow 到最终结果；成功后核验 release assets 至少包含对应平台二进制归档和 `checksums.txt`。
+9. 核验完成后恢复 `SIMPLE_RELEASE` 原值；如果原值是 `true`，执行 `gh variable set SIMPLE_RELEASE --body true --repo caiqy/sub2api`。
 
 ## 下一个本地版本号算法
 
@@ -31,7 +33,7 @@
 - 若 `git fetch upstream --tags` 出现 tag clobber/rejected，不能把本地 `upstream/main` 或本地 tag 视为最新事实；必须额外用 `git ls-remote upstream refs/heads/main refs/tags/v*` 或修复 fetch 后再判断。
 - 不要擅自为了发版加入 `[skip ci]` 或做无意义改动。
 - 如果用户要求“commit & push & 发布下一个版本”或要求刷新 `HEAD`，优先使用真实、最小、合理的改动，而不是空提交或伪改动。
-- 发版后要主动使用 `gh` 跟进 Release workflow 状态，并基于最终结果再决定是否继续后续部署动作。
+- 发版后要主动使用 `gh` 跟进 Release workflow 状态，并基于最终结果再决定是否继续后续部署动作；不要只依赖 tag push 触发的默认行为，因为 `SIMPLE_RELEASE=true` 会导致 release 缺少页面内更新所需的二进制 assets。
 
 ## 仓库行为
 
