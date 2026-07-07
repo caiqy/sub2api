@@ -52,7 +52,7 @@ func (s *layeredOpenAIAccountScheduler) Select(
 		if normalizeOpenAICompatiblePlatform(req.Platform) != PlatformOpenAI {
 			previousResponseID = ""
 		}
-		if previousResponseID != "" {
+		if previousResponseID != "" && (!req.StickyWeighted || !req.PreviousResponseCanMove) {
 			selection, err := s.service.selectAccountByPreviousResponseIDForCapability(
 				ctx,
 				req.GroupID,
@@ -98,17 +98,22 @@ func (s *layeredOpenAIAccountScheduler) Select(
 		}
 
 		// Layer 2: session_hash sticky
-		selection, updatedReq, err := s.selectBySessionHash(ctx, req)
-		req = updatedReq
-		if err != nil {
-			return nil, decision, err
-		}
-		if selection != nil && selection.Account != nil {
-			decision.Layer = openAIAccountScheduleLayerSessionSticky
-			decision.StickySessionHit = true
-			decision.SelectedAccountID = selection.Account.ID
-			decision.SelectedAccountType = selection.Account.Type
-			return selection, decision, nil
+		if !req.StickyWeighted {
+			selection, updatedReq, err := s.selectBySessionHash(ctx, req)
+			req = updatedReq
+			if err != nil {
+				return nil, decision, err
+			}
+			if selection != nil && selection.Account != nil {
+				decision.Layer = openAIAccountScheduleLayerSessionSticky
+				decision.StickySessionHit = true
+				decision.SelectedAccountID = selection.Account.ID
+				decision.SelectedAccountType = selection.Account.Type
+				return selection, decision, nil
+			}
+			if req.SkipStickyBind {
+				req.PreserveStickyBinding = true
+			}
 		}
 	}
 
@@ -123,6 +128,14 @@ func (s *layeredOpenAIAccountScheduler) Select(
 	if selection != nil && selection.Account != nil {
 		decision.SelectedAccountID = selection.Account.ID
 		decision.SelectedAccountType = selection.Account.Type
+		if req.StickyWeighted {
+			if req.StickyPreviousAccountID > 0 && selection.Account.ID == req.StickyPreviousAccountID {
+				decision.StickyPreviousHit = true
+			}
+			if req.StickyAccountID > 0 && selection.Account.ID == req.StickyAccountID {
+				decision.StickySessionHit = true
+			}
+		}
 	}
 	return selection, decision, nil
 }

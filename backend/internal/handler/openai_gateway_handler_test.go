@@ -1610,6 +1610,108 @@ func TestOpenAIGatewayHandler_ChatCompletionsPassesDetailSnapshotToRecordUsage(t
 	require.Contains(t, usageRepo.lastLog.DetailSnapshot.ResponseBody, "Hello")
 }
 
+func TestOpenAIGatewayHandler_ResponsesRequiresChatCompletionsCapability(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cfg := &config.Config{
+		RunMode: config.RunModeSimple,
+		Default: config.DefaultConfig{RateMultiplier: 1},
+		Gateway: config.GatewayConfig{
+			MaxAccountSwitches: 1,
+			Scheduling:         config.GatewaySchedulingConfig{LoadBatchEnabled: false},
+		},
+		Concurrency: config.ConcurrencyConfig{PingInterval: 0},
+	}
+
+	groupID := int64(1)
+	group := &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+	embeddingsOnly := &service.Account{
+		ID:          11,
+		Name:        "openai-embeddings-only",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeAPIKey,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    0,
+		Credentials: map[string]any{"api_key": "sk-embeddings", "openai_capabilities": []any{"embeddings"}},
+	}
+	chatCapable := &service.Account{
+		ID:          12,
+		Name:        "openai-chat-capable",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeAPIKey,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    10,
+		Credentials: map[string]any{"api_key": "sk-chat", "openai_capabilities": []any{"chat_completions"}},
+	}
+	accountRepo := &openAIRetryAccountRepoStub{accounts: []*service.Account{embeddingsOnly, chatCapable}}
+	usageRepo := &openAIChatCompletionsUsageLogRepoStub{}
+	httpUpstream := &openAIRetryTrackingHTTPUpstreamStub{responses: []*http.Response{{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body: io.NopCloser(strings.NewReader(
+			`{"id":"resp_123","object":"response","status":"completed","model":"gpt-5.1","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`,
+		)),
+	}}}
+	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+	deferredService := service.NewDeferredService(accountRepo, nil, 0)
+	billingService := service.NewBillingService(cfg, nil)
+	t.Cleanup(func() { billingCacheService.Stop() })
+
+	gatewayService := service.NewOpenAIGatewayService(
+		accountRepo,
+		usageRepo,
+		nil,
+		nil,
+		nil,
+		nil,
+		openAIChatCompletionsGatewayCacheStub{},
+		cfg,
+		nil,
+		concurrencyService,
+		billingService,
+		nil,
+		billingCacheService,
+		httpUpstream,
+		deferredService,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg)
+
+	apiKey := &service.APIKey{
+		ID:      101,
+		UserID:  202,
+		Status:  service.StatusActive,
+		GroupID: &groupID,
+		User:    &service.User{ID: 202, Status: service.StatusActive, Concurrency: 1},
+		Group:   group,
+	}
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.UserID, Concurrency: apiKey.User.Concurrency})
+		c.Next()
+	})
+	router.Use(middleware.UsageDetailCapture())
+	router.POST("/v1/responses", h.Responses)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.1","input":[{"role":"user","content":[{"type":"input_text","text":"hello"}]}],"stream":false}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, []int64{chatCapable.ID}, httpUpstream.accountIDs)
+}
+
 func TestOpenAIGatewayHandler_ChatCompletionsUsageTaskUsesCapturedEndpointAndSnapshot(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -2272,11 +2374,13 @@ func (s *openAIChatCompletionsHTTPUpstreamStub) DoWithTLS(req *http.Request, pro
 type openAIRetryTrackingHTTPUpstreamStub struct {
 	service.HTTPUpstream
 
-	responses []*http.Response
-	requests  []*http.Request
+	responses  []*http.Response
+	requests   []*http.Request
+	accountIDs []int64
 }
 
 func (s *openAIRetryTrackingHTTPUpstreamStub) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
+	s.accountIDs = append(s.accountIDs, accountID)
 	clonedReq := req.Clone(req.Context())
 	clonedReq.Header = req.Header.Clone()
 	if req.Body != nil {
@@ -2363,6 +2467,9 @@ func (openAIChatCompletionsConcurrencyCacheStub) ReleaseUserGroupSlot(context.Co
 	return nil
 }
 func (openAIChatCompletionsConcurrencyCacheStub) CleanupExpiredAccountSlots(context.Context, int64) error {
+	return nil
+}
+func (openAIChatCompletionsConcurrencyCacheStub) CleanupExpiredAccountSlotKeys(context.Context) error {
 	return nil
 }
 func (openAIChatCompletionsConcurrencyCacheStub) CleanupStaleProcessSlots(context.Context, string) error {
