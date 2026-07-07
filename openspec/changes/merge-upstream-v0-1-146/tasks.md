@@ -18,7 +18,7 @@
 ## 4. 收尾决策
 
 - [x] 4.1 汇总合并结果、冲突处理、验证输出和本地关键能力 review 结论。
-- [ ] 4.2 让用户确认是否合回 `main`、是否推送远端。
+- [x] 4.2 让用户确认是否合回 `main`、是否推送远端。
 
 ## 执行摘要
 
@@ -28,3 +28,4 @@
 - 版本/生成/配置/migration：`backend/cmd/server/VERSION` 保留 upstream tag 内的 `0.1.145`；无 `go.mod/go.sum`、Ent、migration 差异；`wire_gen.go` 与新构造依赖一致；部署配置保留 upstream 新增 setup timeout 和 URL allowlist 默认说明。
 - 验证：`go test ./...` PASS；`pnpm typecheck` PASS；`pnpm build` PASS（仅 Vite chunk/Browserslist 警告）；`pnpm test:run` PASS（157 files / 1175 tests）。
 - 专项 review：scheduler/sticky/privacy/image capability/runtime setting 热更新/网关透传字段均通过；review 发现的 Responses capability、Grok `/v1/responses` platform 透传测试缺口和 layered sticky-weighted TopK 偏好语义问题已修复并补回归测试。
+- 收尾：用户已确认合回 `main`；已提交 `docs: record full release workflow`，本地 `main` 已合并该分支并删除临时分支，`backend/cmd/server/VERSION` 保持 `0.1.146.1`。
