@@ -41,5 +41,5 @@ base-ref: b41f4fc166998198dfea8a704c01983fd5bb0884
 
 - [x] 4.1 运行后端相关测试：repository、admin service/handler、payment handler。
 - [x] 4.2 运行前端相关测试：AppSidebar、CustomPage/Router 相关测试、type-check。
-- [ ] 4.3 手动 smoke：隐藏购买页用户无购买入口、`/purchase` 被拦截、支付接口 forbidden；隐藏 custom menu 不出现在侧边栏且直达不加载；其他用户不受影响。
-- [ ] 4.4 勾选 `openspec/changes/hide-user-purchase-and-custom-menus/tasks.md` 对应任务并提交：`docs: mark hidden ui menu tasks complete`。
+- [x] 4.3 手动 smoke：隐藏购买页用户无购买入口、`/purchase` 被拦截、支付接口 forbidden；隐藏 custom menu 不出现在侧边栏且直达不加载；其他用户不受影响。
+- [x] 4.4 勾选 `openspec/changes/hide-user-purchase-and-custom-menus/tasks.md` 对应任务并提交：`docs: mark hidden ui menu tasks complete`。
