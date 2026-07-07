@@ -8,14 +8,14 @@ subagent_dispatch: null
 tdd_mode: direct
 review_mode: thorough
 isolation: branch
-verify_mode: null
+verify_mode: full
 auto_transition: true
 base_ref: e378b33f60f2202d80cbf9b1c11cee4e4ddb9dc3
 design_doc: docs/superpowers/specs/2026-07-07-merge-upstream-v0-1-146-design.md
 plan: docs/superpowers/plans/2026-07-07-merge-upstream-v0-1-146.md
 verify_result: pending
-verification_report: null
-branch_status: pending
+verification_report: docs/superpowers/reports/2026-07-07-merge-upstream-v0-1-146-verify.md
+branch_status: handled
 created_at: 2026-07-07
 verified_at: null
 archived: false

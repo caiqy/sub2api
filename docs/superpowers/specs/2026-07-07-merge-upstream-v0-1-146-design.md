@@ -70,3 +70,7 @@ build 阶段先获取 upstream refs/tags，确认 `v0.1.146` 可用，并再次�
 3. 后端测试、前端 typecheck/build 已执行并记录结果。
 4. 本地关键能力 review 已完成并记录结论。
 5. 是否合回 `main`、是否推送远端由用户在收尾阶段确认。
+
+## Implementation Divergence
+
+- 原设计将“直接合回 `main` 或推送远端”列为非目标，是为了避免 build 阶段默认污染主线。build 完成后，用户明确要求提交、合并到 `main` 并删除临时分支；该操作属于收尾分支处理决策，不改变本 change 的 capability 范围。
