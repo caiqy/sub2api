@@ -118,6 +118,12 @@ func (s *emailSyncRepoStub) GetBlockedGroups(context.Context, int64) ([]int64, e
 }
 
 func (s *emailSyncRepoStub) SetBlockedGroups(context.Context, int64, []int64) error { return nil }
+func (s *emailSyncRepoStub) GetHiddenUIResources(context.Context, int64) (bool, []int64, error) {
+	return false, nil, nil
+}
+func (s *emailSyncRepoStub) SetHiddenUIResources(context.Context, int64, bool, []string) error {
+	return nil
+}
 
 func (s *emailSyncRepoStub) BatchSetConcurrency(context.Context, []int64, int) (int, error) {
 	return 0, nil

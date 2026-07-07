@@ -222,6 +222,7 @@ import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import SubscriptionProgressMini from '@/components/common/SubscriptionProgressMini.vue'
 import AnnouncementBell from '@/components/common/AnnouncementBell.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { isCustomMenuHidden } from '@/utils/userUiVisibility'
 
 const router = useRouter()
 const route = useRoute()
@@ -266,7 +267,8 @@ const pageTitle = computed(() => {
   // For custom pages, use the menu item's label instead of generic "自定义页面"
   if (route.name === 'CustomPage') {
     const id = route.params.id as string
-    const publicItems = appStore.cachedPublicSettings?.custom_menu_items ?? []
+    const publicItems = (appStore.cachedPublicSettings?.custom_menu_items ?? [])
+      .filter((item) => authStore.isAdmin || !isCustomMenuHidden(item.id, authStore.user?.hidden_custom_menu_ids))
     const menuItem = publicItems.find((item) => item.id === id)
       ?? (authStore.isAdmin ? adminSettingsStore.customMenuItems.find((item) => item.id === id) : undefined)
     if (menuItem?.label) return menuItem.label

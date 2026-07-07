@@ -126,6 +126,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { buildApiUrl } from '@/api/client'
 import { buildEmbeddedUrl, detectTheme } from '@/utils/embedded-url'
+import { isCustomMenuHidden } from '@/utils/userUiVisibility'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
@@ -154,6 +155,7 @@ const menuItemId = computed(() => route.params.id as string)
 
 const menuItem = computed(() => {
   const id = menuItemId.value
+  if (!authStore.isAdmin && isCustomMenuHidden(id, authStore.user?.hidden_custom_menu_ids)) return null
   const publicItems = appStore.cachedPublicSettings?.custom_menu_items ?? []
   const found = publicItems.find((item) => item.id === id) ?? null
   if (found) return found

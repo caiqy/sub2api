@@ -12,6 +12,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/authidentitychannel"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -158,6 +159,38 @@ func (s *UserRepoSuite) TestBlockedGroupsRoundTrip() {
 	got, err = s.repo.GetBlockedGroups(s.ctx, user.ID)
 	s.Require().NoError(err)
 	s.Require().Empty(got)
+}
+
+func (s *UserRepoSuite) TestHiddenUIResourcesRoundTrip() {
+	user := s.mustCreateUser(&service.User{Email: "hidden-ui@test.com"})
+
+	s.Require().NoError(s.repo.SetHiddenUIResources(s.ctx, user.ID, true, []string{"docs", "billing-help", "docs", ""}))
+
+	hidePurchase, menuResourceIDs, err := s.repo.GetHiddenUIResources(s.ctx, user.ID)
+	s.Require().NoError(err)
+	s.Require().True(hidePurchase)
+	s.Require().Equal([]int64{service.CustomMenuResourceID("billing-help"), service.CustomMenuResourceID("docs")}, menuResourceIDs)
+
+	loaded, err := s.repo.GetByID(s.ctx, user.ID)
+	s.Require().NoError(err)
+	s.Require().True(loaded.HiddenPurchasePage)
+	s.Require().Equal([]int64{service.CustomMenuResourceID("billing-help"), service.CustomMenuResourceID("docs")}, loaded.HiddenCustomMenuResourceIDs)
+	s.Require().True(loaded.IsCustomMenuHidden("docs"))
+	s.Require().False(loaded.IsCustomMenuHidden("status"))
+
+	s.Require().NoError(s.repo.SetHiddenUIResources(s.ctx, user.ID, false, nil))
+
+	hidePurchase, menuResourceIDs, err = s.repo.GetHiddenUIResources(s.ctx, user.ID)
+	s.Require().NoError(err)
+	s.Require().False(hidePurchase)
+	s.Require().Empty(menuResourceIDs)
+}
+
+func TestCustomMenuResourceIDStable(t *testing.T) {
+	id := service.CustomMenuResourceID("docs")
+	require.Positive(t, id)
+	require.Equal(t, id, service.CustomMenuResourceID("docs"))
+	require.NotEqual(t, id, service.CustomMenuResourceID("billing-help"))
 }
 
 func (s *UserRepoSuite) TestUpdateAndSetBlockedGroupsReuseOuterTransaction() {

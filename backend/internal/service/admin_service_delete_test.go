@@ -13,19 +13,21 @@ import (
 )
 
 type userRepoStub struct {
-	user          *User
-	getErr        error
-	createErr     error
-	deleteErr     error
-	exists        bool
-	existsErr     error
-	nextID        int64
-	created       []*User
-	updated       []*User
-	deletedIDs    []int64
-	usersByEmail  map[string]*User
-	getByEmailErr error
-	blockedGroups map[int64][]int64
+	user                *User
+	getErr              error
+	createErr           error
+	deleteErr           error
+	exists              bool
+	existsErr           error
+	nextID              int64
+	created             []*User
+	updated             []*User
+	deletedIDs          []int64
+	usersByEmail        map[string]*User
+	getByEmailErr       error
+	blockedGroups       map[int64][]int64
+	hiddenPurchase      map[int64]bool
+	hiddenCustomMenuIDs map[int64][]string
 }
 
 func (s *userRepoStub) Create(ctx context.Context, user *User) error {
@@ -155,6 +157,22 @@ func (s *userRepoStub) SetBlockedGroups(ctx context.Context, userID int64, group
 		s.blockedGroups = make(map[int64][]int64)
 	}
 	s.blockedGroups[userID] = append([]int64(nil), groupIDs...)
+	return nil
+}
+
+func (s *userRepoStub) GetHiddenUIResources(ctx context.Context, userID int64) (bool, []int64, error) {
+	return s.hiddenPurchase[userID], customMenuIDsToResourceIDs(s.hiddenCustomMenuIDs[userID]), nil
+}
+
+func (s *userRepoStub) SetHiddenUIResources(ctx context.Context, userID int64, hidePurchase bool, customMenuIDs []string) error {
+	if s.hiddenPurchase == nil {
+		s.hiddenPurchase = make(map[int64]bool)
+	}
+	if s.hiddenCustomMenuIDs == nil {
+		s.hiddenCustomMenuIDs = make(map[int64][]string)
+	}
+	s.hiddenPurchase[userID] = hidePurchase
+	s.hiddenCustomMenuIDs[userID] = append([]string(nil), customMenuIDs...)
 	return nil
 }
 

@@ -1,29 +1,36 @@
 package service
 
 import (
+	"encoding/json"
+	"hash/fnv"
+	"sort"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
 
 type User struct {
-	ID             int64
-	Email          string
-	Username       string
-	Notes          string
-	AvatarURL      string
-	AvatarSource   string
-	AvatarMIME     string
-	AvatarByteSize int
-	AvatarSHA256   string
-	PasswordHash   string
-	Role           string
-	Balance        float64
-	Concurrency    int
-	Status         string
-	AllowedGroups  []int64
-	BlockedGroups  []int64
-	TokenVersion   int64 // Incremented on password change to invalidate existing tokens
+	ID                          int64
+	Email                       string
+	Username                    string
+	Notes                       string
+	AvatarURL                   string
+	AvatarSource                string
+	AvatarMIME                  string
+	AvatarByteSize              int
+	AvatarSHA256                string
+	PasswordHash                string
+	Role                        string
+	Balance                     float64
+	Concurrency                 int
+	Status                      string
+	AllowedGroups               []int64
+	BlockedGroups               []int64
+	HiddenPurchasePage          bool
+	HiddenCustomMenuResourceIDs []int64
+	HiddenCustomMenuIDs         []string
+	TokenVersion                int64 // Incremented on password change to invalidate existing tokens
 	// TokenVersionResolved indicates TokenVersion already contains the fingerprint-derived
 	// value expected in JWT claims and refresh-token state.
 	TokenVersionResolved bool
@@ -93,6 +100,67 @@ func (u *User) CanBindGroup(groupID int64, isExclusive bool) bool {
 		}
 	}
 	return false
+}
+
+func (u *User) IsPurchasePageHidden() bool {
+	return u != nil && u.HiddenPurchasePage
+}
+
+func (u *User) IsCustomMenuHidden(id string) bool {
+	if u == nil || id == "" {
+		return false
+	}
+	resourceID := CustomMenuResourceID(id)
+	for _, hiddenID := range u.HiddenCustomMenuResourceIDs {
+		if hiddenID == resourceID {
+			return true
+		}
+	}
+	return false
+}
+
+func CustomMenuResourceID(id string) int64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(id))
+	out := int64(h.Sum64() & ^uint64(1<<63))
+	if out <= 1 {
+		return 2
+	}
+	return out
+}
+
+func ResolveHiddenCustomMenuIDs(customMenuItemsRaw string, resourceIDs []int64) []string {
+	if len(resourceIDs) == 0 {
+		return nil
+	}
+	hidden := make(map[int64]struct{}, len(resourceIDs))
+	for _, id := range resourceIDs {
+		hidden[id] = struct{}{}
+	}
+	var items []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(customMenuItemsRaw)), &items); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(hidden))
+	seen := map[string]struct{}{}
+	for _, item := range items {
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			continue
+		}
+		if _, ok := hidden[CustomMenuResourceID(id)]; !ok {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (u *User) SetPassword(password string) error {

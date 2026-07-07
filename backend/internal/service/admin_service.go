@@ -146,16 +146,18 @@ type CreateUserInput struct {
 }
 
 type UpdateUserInput struct {
-	Email         string
-	Password      string
-	Username      *string
-	Notes         *string
-	Balance       *float64 // 使用指针区分"未提供"和"设置为0"
-	Concurrency   *int     // 使用指针区分"未提供"和"设置为0"
-	RPMLimit      *int     // 使用指针区分"未提供"和"设置为0"
-	Status        string
-	AllowedGroups *[]int64 // 使用指针区分"未提供"和"设置为空数组"
-	BlockedGroups *[]int64 // 使用指针区分"未提供"和"设置为空数组"
+	Email               string
+	Password            string
+	Username            *string
+	Notes               *string
+	Balance             *float64 // 使用指针区分"未提供"和"设置为0"
+	Concurrency         *int     // 使用指针区分"未提供"和"设置为0"
+	RPMLimit            *int     // 使用指针区分"未提供"和"设置为0"
+	Status              string
+	AllowedGroups       *[]int64 // 使用指针区分"未提供"和"设置为空数组"
+	BlockedGroups       *[]int64 // 使用指针区分"未提供"和"设置为空数组"
+	HiddenPurchasePage  *bool
+	HiddenCustomMenuIDs *[]string
 	// GroupRates 用户专属分组倍率配置
 	// map[groupID]*rate，nil 表示删除该分组的专属倍率
 	GroupRates map[int64]*float64
@@ -667,6 +669,7 @@ func (s *adminServiceImpl) ListUsers(ctx context.Context, page, pageSize int, fi
 			}
 		}
 	}
+	s.resolveHiddenCustomMenuIDs(ctx, users)
 	// 批量加载用户专属分组倍率
 	if s.userGroupRateRepo != nil && len(users) > 0 {
 		if batchRepo, ok := s.userGroupRateRepo.(userGroupRateBatchReader); ok {
@@ -690,6 +693,23 @@ func (s *adminServiceImpl) ListUsers(ctx context.Context, page, pageSize int, fi
 		}
 	}
 	return users, result.Total, nil
+}
+
+func (s *adminServiceImpl) resolveHiddenCustomMenuIDs(ctx context.Context, users []User) {
+	if s.settingService == nil || len(users) == 0 {
+		return
+	}
+	raw := s.settingService.GetCustomMenuItemsRaw(ctx)
+	for i := range users {
+		users[i].HiddenCustomMenuIDs = ResolveHiddenCustomMenuIDs(raw, users[i].HiddenCustomMenuResourceIDs)
+	}
+}
+
+func (s *adminServiceImpl) resolveHiddenCustomMenuIDsForUser(ctx context.Context, user *User) {
+	if s.settingService == nil || user == nil {
+		return
+	}
+	user.HiddenCustomMenuIDs = ResolveHiddenCustomMenuIDs(s.settingService.GetCustomMenuItemsRaw(ctx), user.HiddenCustomMenuResourceIDs)
 }
 
 func (s *adminServiceImpl) loadUserGroupRatesOneByOne(ctx context.Context, users []User) {
@@ -726,6 +746,7 @@ func (s *adminServiceImpl) GetUser(ctx context.Context, id int64) (*User, error)
 			user.GroupRates = rates
 		}
 	}
+	s.resolveHiddenCustomMenuIDsForUser(ctx, user)
 	return user, nil
 }
 
@@ -805,6 +826,8 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	oldRPMLimit := user.RPMLimit
 	oldAllowedGroups := append([]int64(nil), user.AllowedGroups...)
 	oldBlockedGroups := append([]int64(nil), user.BlockedGroups...)
+	oldHiddenPurchasePage := user.HiddenPurchasePage
+	oldHiddenCustomMenuResourceIDs := append([]int64(nil), user.HiddenCustomMenuResourceIDs...)
 
 	if input.Email != "" {
 		user.Email = input.Email
@@ -843,10 +866,16 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		}
 		user.BlockedGroups = append([]int64(nil), (*input.BlockedGroups)...)
 	}
+	if input.HiddenPurchasePage != nil {
+		user.HiddenPurchasePage = *input.HiddenPurchasePage
+	}
+	if input.HiddenCustomMenuIDs != nil {
+		user.HiddenCustomMenuResourceIDs = customMenuIDsToResourceIDs(*input.HiddenCustomMenuIDs)
+	}
 
 	updateCtx := ctx
 	var tx *dbent.Tx
-	if input.BlockedGroups != nil && s.entClient != nil {
+	if (input.BlockedGroups != nil || input.HiddenPurchasePage != nil || input.HiddenCustomMenuIDs != nil) && s.entClient != nil {
 		var txErr error
 		tx, txErr = s.entClient.Tx(ctx)
 		if txErr != nil {
@@ -861,6 +890,16 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	}
 	if input.BlockedGroups != nil {
 		if err := s.userRepo.SetBlockedGroups(updateCtx, user.ID, *input.BlockedGroups); err != nil {
+			return nil, err
+		}
+	}
+	if input.HiddenPurchasePage != nil || input.HiddenCustomMenuIDs != nil {
+		hidePurchase := user.HiddenPurchasePage
+		customMenuIDs := user.HiddenCustomMenuIDs
+		if input.HiddenCustomMenuIDs != nil {
+			customMenuIDs = *input.HiddenCustomMenuIDs
+		}
+		if err := s.userRepo.SetHiddenUIResources(updateCtx, user.ID, hidePurchase, customMenuIDs); err != nil {
 			return nil, err
 		}
 	}
@@ -880,10 +919,11 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	if s.authCacheInvalidator != nil {
 		// RPMLimit 直接参与 billing_cache_service.checkRPM 的三级级联，
 		// allowed_groups / blocked_groups 参与 API Key 分组授权判断；不失效缓存会让修改在一个 L2 TTL 内失去效果。
-		if user.Concurrency != oldConcurrency || user.Status != oldStatus || user.Role != oldRole || user.RPMLimit != oldRPMLimit || !sameInt64Set(user.AllowedGroups, oldAllowedGroups) || !sameInt64Set(user.BlockedGroups, oldBlockedGroups) {
+		if user.Concurrency != oldConcurrency || user.Status != oldStatus || user.Role != oldRole || user.RPMLimit != oldRPMLimit || !sameInt64Set(user.AllowedGroups, oldAllowedGroups) || !sameInt64Set(user.BlockedGroups, oldBlockedGroups) || user.HiddenPurchasePage != oldHiddenPurchasePage || !sameInt64Set(user.HiddenCustomMenuResourceIDs, oldHiddenCustomMenuResourceIDs) {
 			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, user.ID)
 		}
 	}
+	s.resolveHiddenCustomMenuIDsForUser(ctx, user)
 
 	concurrencyDiff := user.Concurrency - oldConcurrency
 	if concurrencyDiff != 0 {
@@ -907,6 +947,23 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	}
 
 	return user, nil
+}
+
+func customMenuIDsToResourceIDs(ids []string) []int64 {
+	unique := make(map[int64]struct{}, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		unique[CustomMenuResourceID(id)] = struct{}{}
+	}
+	out := make([]int64, 0, len(unique))
+	for id := range unique {
+		out = append(out, id)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
 }
 
 func (s *adminServiceImpl) validateBlockedGroups(ctx context.Context, groupIDs []int64) error {

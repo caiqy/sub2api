@@ -2169,6 +2169,8 @@ export default {
       customRate: 'Custom Rate',
       useDefaultRate: 'Use Default',
       customRatePlaceholder: 'Leave empty for default',
+      hiddenMenus: 'Hidden User Menus',
+      hidePurchasePage: 'Hide purchase page',
       groupConfigUpdated: 'Group configuration updated successfully',
       replaceGroup: 'Replace Group',
       clickToReplace: 'Click to replace',

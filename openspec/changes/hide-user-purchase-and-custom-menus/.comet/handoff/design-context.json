@@ -1,0 +1,14 @@
+{
+  "change": "hide-user-purchase-and-custom-menus",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "2bc089f3eb4b13f5f1e26caa42ef9d3aadbbadafa863f70e3813ab924680fd93",
+  "files": [
+    { "path": "openspec/changes/hide-user-purchase-and-custom-menus/proposal.md", "sha256": "009ddb4c7df91e923d520b8b0b2dab132c13aa8f0296f01b84540cde52f1fd34" },
+    { "path": "openspec/changes/hide-user-purchase-and-custom-menus/design.md", "sha256": "701504137bb67324f62af922d84ee7125e91321f87bc8ede970a5b0001b3a5bb" },
+    { "path": "openspec/changes/hide-user-purchase-and-custom-menus/tasks.md", "sha256": "4bae09503a4e138859dddff20134689f7a80bb9ff36ef5d7e3d7b2499d9adf65" },
+    { "path": "openspec/changes/hide-user-purchase-and-custom-menus/specs/user-ui-visibility-overrides/spec.md", "sha256": "74d14eddc8263a02341e44e3c8163d550d72dc53a57774185eb5997978ddf06b" }
+  ]
+}

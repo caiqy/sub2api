@@ -48,6 +48,9 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 	if user.Status != payment.EntityStatusActive {
 		return nil, infraerrors.Forbidden("USER_INACTIVE", "user account is disabled")
 	}
+	if shouldRejectHiddenPurchasePage(user, req.UserRole) {
+		return nil, infraerrors.Forbidden("PURCHASE_PAGE_HIDDEN", "purchase page is hidden for this user")
+	}
 	if s.notificationEmailService != nil {
 		s.notificationEmailService.RememberRecipientLocale(ctx, req.UserID, user.Email, req.Locale)
 	}
@@ -111,6 +114,10 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 		return nil, err
 	}
 	return resp, nil
+}
+
+func shouldRejectHiddenPurchasePage(user *User, userRole string) bool {
+	return userRole != RoleAdmin && user.IsPurchasePageHidden()
 }
 
 func (s *PaymentService) validateOrderInput(ctx context.Context, req CreateOrderRequest, cfg *PaymentConfig) (*dbent.SubscriptionPlan, error) {

@@ -60,8 +60,11 @@ func (m *mockUserSettingRepo) Get(context.Context, string) (*Setting, error) {
 	panic("unexpected Get call")
 }
 
-func (m *mockUserSettingRepo) GetValue(context.Context, string) (string, error) {
-	return "", nil
+func (m *mockUserSettingRepo) GetValue(_ context.Context, key string) (string, error) {
+	if m.values == nil {
+		return "", nil
+	}
+	return m.values[key], nil
 }
 
 func (m *mockUserSettingRepo) Set(context.Context, string, string) error {
@@ -207,6 +210,12 @@ func (m *mockUserRepo) RemoveGroupFromAllowedGroups(context.Context, int64) (int
 }
 func (m *mockUserRepo) GetBlockedGroups(context.Context, int64) ([]int64, error) { return nil, nil }
 func (m *mockUserRepo) SetBlockedGroups(context.Context, int64, []int64) error   { return nil }
+func (m *mockUserRepo) GetHiddenUIResources(context.Context, int64) (bool, []int64, error) {
+	return false, nil, nil
+}
+func (m *mockUserRepo) SetHiddenUIResources(context.Context, int64, bool, []string) error {
+	return nil
+}
 
 func (m *mockUserRepo) BatchSetConcurrency(context.Context, []int64, int) (int, error) { return 0, nil }
 func (m *mockUserRepo) BatchAddConcurrency(context.Context, []int64, int) (int, error) { return 0, nil }
@@ -890,4 +899,20 @@ func TestGetProfile_HydratesAvatarFromRepository(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "https://cdn.example.com/profile.png", user.AvatarURL)
 	require.Equal(t, "remote_url", user.AvatarSource)
+}
+
+func TestGetByIDResolvesHiddenCustomMenuIDs(t *testing.T) {
+	repo := &mockUserRepo{getByIDUser: &User{
+		ID:                          42,
+		HiddenCustomMenuResourceIDs: []int64{CustomMenuResourceID("88cdc7464b9f93ea")},
+	}}
+	settings := &mockUserSettingRepo{values: map[string]string{
+		SettingKeyCustomMenuItems: `[{"id":"88cdc7464b9f93ea","label":"充值兑换","visibility":"user"}]`,
+	}}
+	svc := NewUserService(repo, settings, nil, nil)
+
+	user, err := svc.GetByID(context.Background(), 42)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"88cdc7464b9f93ea"}, user.HiddenCustomMenuIDs)
 }

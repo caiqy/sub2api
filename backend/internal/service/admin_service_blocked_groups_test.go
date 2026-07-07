@@ -54,3 +54,28 @@ func TestAdminServiceUpdateUserBlockedGroupsRejectsNonPublicStandardGroup(t *tes
 	_, err := svc.UpdateUser(ctx, 42, &UpdateUserInput{BlockedGroups: &blocked})
 	require.ErrorContains(t, err, "blocked_groups")
 }
+
+func TestAdminServiceUpdateUserSavesHiddenUIResources(t *testing.T) {
+	ctx := context.Background()
+	repo := &userRepoStub{user: &User{ID: 42, Email: "u@example.com", Role: RoleUser, Status: StatusActive}}
+	invalidator := &authCacheInvalidatorStub{}
+	svc := &adminServiceImpl{
+		userRepo:             repo,
+		redeemCodeRepo:       &redeemRepoStub{},
+		authCacheInvalidator: invalidator,
+	}
+
+	hidePurchase := true
+	hiddenMenus := []string{"docs", "billing-help"}
+	updated, err := svc.UpdateUser(ctx, 42, &UpdateUserInput{
+		HiddenPurchasePage:  &hidePurchase,
+		HiddenCustomMenuIDs: &hiddenMenus,
+	})
+
+	require.NoError(t, err)
+	require.True(t, updated.HiddenPurchasePage)
+	require.Equal(t, []int64{CustomMenuResourceID("billing-help"), CustomMenuResourceID("docs")}, updated.HiddenCustomMenuResourceIDs)
+	require.True(t, repo.hiddenPurchase[42])
+	require.Equal(t, []string{"docs", "billing-help"}, repo.hiddenCustomMenuIDs[42])
+	require.Equal(t, []int64{42}, invalidator.userIDs)
+}

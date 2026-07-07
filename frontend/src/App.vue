@@ -8,6 +8,7 @@ import { resolveRouteDocumentTitle } from '@/router/title'
 import AnnouncementPopup from '@/components/common/AnnouncementPopup.vue'
 import { useAppStore, useAuthStore, useSubscriptionStore, useAnnouncementStore, useAdminComplianceStore, useAdminSettingsStore } from '@/stores'
 import { getSetupStatus } from '@/api/setup'
+import { isCustomMenuHidden } from '@/utils/userUiVisibility'
 
 const router = useRouter()
 const route = useRoute()
@@ -20,7 +21,7 @@ const adminSettingsStore = useAdminSettingsStore()
 
 function updateDocumentTitle() {
   const customMenuItems = [
-    ...(appStore.cachedPublicSettings?.custom_menu_items ?? []),
+    ...(appStore.cachedPublicSettings?.custom_menu_items ?? []).filter((item) => authStore.isAdmin || !isCustomMenuHidden(item.id, authStore.user?.hidden_custom_menu_ids)),
     ...(authStore.isAdmin ? adminSettingsStore.customMenuItems : []),
   ]
   document.title = resolveRouteDocumentTitle(route, appStore.siteName, customMenuItems)
@@ -61,6 +62,7 @@ watch(
     () => appStore.siteName,
     () => appStore.cachedPublicSettings?.custom_menu_items,
     () => authStore.isAdmin,
+    () => authStore.user?.hidden_custom_menu_ids,
     () => adminSettingsStore.customMenuItems,
   ],
   updateDocumentTitle,

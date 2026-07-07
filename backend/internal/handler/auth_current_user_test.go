@@ -21,30 +21,35 @@ func TestAuthHandlerGetCurrentUserReturnsProfileCompatibilityFields(t *testing.T
 	verifiedAt := time.Date(2026, 4, 20, 8, 30, 0, 0, time.UTC)
 	repo := &userHandlerRepoStub{
 		user: &service.User{
-			ID:           31,
-			Email:        "me@example.com",
-			Username:     "linuxdo-handle",
-			Role:         service.RoleUser,
-			Status:       service.StatusActive,
-			AvatarURL:    "https://cdn.example.com/linuxdo.png",
-			AvatarSource: "remote_url",
+			ID:                          31,
+			Email:                       "me@example.com",
+			Username:                    "linuxdo-handle",
+			Role:                        service.RoleUser,
+			Status:                      service.StatusActive,
+			HiddenPurchasePage:          true,
+			HiddenCustomMenuResourceIDs: []int64{service.CustomMenuResourceID("docs")},
+			AvatarURL:                   "https://cdn.example.com/linuxdo.png",
+			AvatarSource:                "remote_url",
 		},
-			identities: []service.UserAuthIdentityRecord{
-				{
-					ProviderType:    "linuxdo",
-					ProviderKey:     "linuxdo",
-					ProviderSubject: "linuxdo-subject-31",
-					VerifiedAt:      &verifiedAt,
-					Metadata: map[string]any{
-						"username":   "linuxdo-handle",
-						"avatar_url": "https://cdn.example.com/linuxdo.png",
-					},
+		identities: []service.UserAuthIdentityRecord{
+			{
+				ProviderType:    "linuxdo",
+				ProviderKey:     "linuxdo",
+				ProviderSubject: "linuxdo-subject-31",
+				VerifiedAt:      &verifiedAt,
+				Metadata: map[string]any{
+					"username":   "linuxdo-handle",
+					"avatar_url": "https://cdn.example.com/linuxdo.png",
 				},
 			},
-		}
+		},
+	}
 
+	settings := &pageSettingRepoStub{values: map[string]string{
+		service.SettingKeyCustomMenuItems: `[{"id":"docs","label":"Docs","url":"md:docs","visibility":"user"}]`,
+	}}
 	handler := &AuthHandler{
-		userService: service.NewUserService(repo, nil, nil, nil),
+		userService: service.NewUserService(repo, settings, nil, nil),
 	}
 
 	recorder := httptest.NewRecorder()
@@ -65,6 +70,9 @@ func TestAuthHandlerGetCurrentUserReturnsProfileCompatibilityFields(t *testing.T
 	require.Equal(t, true, resp.Data["email_bound"])
 	require.Equal(t, true, resp.Data["linuxdo_bound"])
 	require.Equal(t, "https://cdn.example.com/linuxdo.png", resp.Data["avatar_url"])
+	require.Equal(t, true, resp.Data["hidden_purchase_page"])
+	require.Equal(t, []any{float64(service.CustomMenuResourceID("docs"))}, resp.Data["hidden_custom_menu_resource_ids"])
+	require.Equal(t, []any{"docs"}, resp.Data["hidden_custom_menu_ids"])
 
 	authBindings, ok := resp.Data["auth_bindings"].(map[string]any)
 	require.True(t, ok)

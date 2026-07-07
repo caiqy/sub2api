@@ -87,6 +87,12 @@ func (s *userRepoStubForGroupUpdate) GetBlockedGroups(context.Context, int64) ([
 func (s *userRepoStubForGroupUpdate) SetBlockedGroups(context.Context, int64, []int64) error {
 	panic("unexpected")
 }
+func (s *userRepoStubForGroupUpdate) GetHiddenUIResources(context.Context, int64) (bool, []int64, error) {
+	panic("unexpected")
+}
+func (s *userRepoStubForGroupUpdate) SetHiddenUIResources(context.Context, int64, bool, []string) error {
+	panic("unexpected")
+}
 func (s *userRepoStubForGroupUpdate) UpdateTotpSecret(context.Context, int64, *string) error {
 	panic("unexpected")
 }

@@ -13,6 +13,7 @@ import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
 import { getSetupStatus } from '@/api/setup'
 import { resolveCompletedSetupRedirectPath } from './setupRedirect'
 import { resolveRouteDocumentTitle } from './title'
+import { isCustomMenuHidden } from '@/utils/userUiVisibility'
 
 /**
  * Route definitions with lazy loading
@@ -754,7 +755,7 @@ router.beforeEach(async (to, _from, next) => {
   const appStore = useAppStore()
   const adminSettingsStore = useAdminSettingsStore()
   const customMenuItems = [
-    ...(appStore.cachedPublicSettings?.custom_menu_items ?? []),
+    ...(appStore.cachedPublicSettings?.custom_menu_items ?? []).filter((item) => authStore.isAdmin || !isCustomMenuHidden(item.id, authStore.user?.hidden_custom_menu_ids)),
     ...(authStore.isAdmin ? adminSettingsStore.customMenuItems : []),
   ]
   document.title = resolveRouteDocumentTitle(to, appStore.siteName, customMenuItems)
@@ -814,6 +815,11 @@ router.beforeEach(async (to, _from, next) => {
   // Check admin requirement
   if (requiresAdmin && !authStore.isAdmin) {
     // User is authenticated but not admin, redirect to user dashboard
+    next('/dashboard')
+    return
+  }
+
+  if (!authStore.isAdmin && to.path === '/purchase' && authStore.user?.hidden_purchase_page === true) {
     next('/dashboard')
     return
   }

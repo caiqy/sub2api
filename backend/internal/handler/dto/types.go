@@ -9,18 +9,21 @@ import (
 )
 
 type User struct {
-	ID            int64      `json:"id"`
-	Email         string     `json:"email"`
-	Username      string     `json:"username"`
-	Role          string     `json:"role"`
-	Balance       float64    `json:"balance"`
-	Concurrency   int        `json:"concurrency"`
-	Status        string     `json:"status"`
-	AllowedGroups []int64    `json:"allowed_groups"`
-	LastActiveAt  *time.Time `json:"last_active_at,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
-	DeletedAt     *time.Time `json:"deleted_at,omitempty"`
+	ID                          int64      `json:"id"`
+	Email                       string     `json:"email"`
+	Username                    string     `json:"username"`
+	Role                        string     `json:"role"`
+	Balance                     float64    `json:"balance"`
+	Concurrency                 int        `json:"concurrency"`
+	Status                      string     `json:"status"`
+	AllowedGroups               []int64    `json:"allowed_groups"`
+	HiddenPurchasePage          bool       `json:"hidden_purchase_page"`
+	HiddenCustomMenuResourceIDs []int64    `json:"hidden_custom_menu_resource_ids"`
+	HiddenCustomMenuIDs         []string   `json:"hidden_custom_menu_ids"`
+	LastActiveAt                *time.Time `json:"last_active_at,omitempty"`
+	CreatedAt                   time.Time  `json:"created_at"`
+	UpdatedAt                   time.Time  `json:"updated_at"`
+	DeletedAt                   *time.Time `json:"deleted_at,omitempty"`
 
 	// 余额不足通知
 	BalanceNotifyEnabled       bool               `json:"balance_notify_enabled"`

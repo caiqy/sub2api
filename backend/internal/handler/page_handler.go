@@ -22,12 +22,13 @@ const maxPageFileSize = 1 << 20 // 1MB
 type PageHandler struct {
 	pagesDir       string
 	settingService *service.SettingService
+	userService    *service.UserService
 }
 
-func NewPageHandler(dataDir string, settingService *service.SettingService) *PageHandler {
+func NewPageHandler(dataDir string, settingService *service.SettingService, userService *service.UserService) *PageHandler {
 	pagesDir := filepath.Join(dataDir, "pages")
 	_ = os.MkdirAll(pagesDir, 0755)
-	return &PageHandler{pagesDir: pagesDir, settingService: settingService}
+	return &PageHandler{pagesDir: pagesDir, settingService: settingService, userService: userService}
 }
 
 // GetPageContent serves raw markdown content for a given slug.
@@ -96,7 +97,7 @@ func (h *PageHandler) ListPages(c *gin.Context) {
 
 // ServePageImage serves images from data/pages/{slug}/ directory.
 // GET /api/v1/pages/:slug/images/*filename
-// No JWT required (browser img tags can't carry tokens), but visibility is checked.
+// No JWT required (browser img tags can't carry tokens); only admin-only slugs are blocked here.
 func (h *PageHandler) ServePageImage(c *gin.Context) {
 	slug := c.Param("slug")
 	filename := c.Param("filename")
@@ -201,24 +202,25 @@ func isPathWithinBase(path, base string) bool {
 	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-// findSlugVisibility looks up the slug in custom_menu_items and returns (visibility, found).
-func (h *PageHandler) findSlugVisibility(c *gin.Context, slug string) (string, bool) {
+// findSlugMenu looks up the slug in custom_menu_items and returns (id, visibility, found).
+func (h *PageHandler) findSlugMenu(c *gin.Context, slug string) (string, string, bool) {
 	if h.settingService == nil {
-		return "", false
+		return "", "", false
 	}
 
 	raw := h.settingService.GetCustomMenuItemsRaw(c.Request.Context())
 	if raw == "" || raw == "[]" {
-		return "", false
+		return "", "", false
 	}
 
 	var items []struct {
+		ID         string `json:"id"`
 		URL        string `json:"url"`
 		PageSlug   string `json:"page_slug"`
 		Visibility string `json:"visibility"`
 	}
 	if err := json.Unmarshal([]byte(raw), &items); err != nil {
-		return "", false
+		return "", "", false
 	}
 
 	for _, item := range items {
@@ -227,16 +229,16 @@ func (h *PageHandler) findSlugVisibility(c *gin.Context, slug string) (string, b
 			itemSlug = strings.TrimPrefix(item.URL, "md:")
 		}
 		if itemSlug == slug {
-			return item.Visibility, true
+			return item.ID, item.Visibility, true
 		}
 	}
-	return "", false
+	return "", "", false
 }
 
 // checkSlugVisibility verifies the slug is configured in custom_menu_items
 // and the authenticated user has permission to view it.
 func (h *PageHandler) checkSlugVisibility(c *gin.Context, slug string) bool {
-	visibility, found := h.findSlugVisibility(c, slug)
+	menuID, visibility, found := h.findSlugMenu(c, slug)
 	if !found {
 		return false
 	}
@@ -244,13 +246,27 @@ func (h *PageHandler) checkSlugVisibility(c *gin.Context, slug string) bool {
 		role, _ := middleware2.GetUserRoleFromContext(c)
 		return role == "admin"
 	}
+	if h.userService != nil && strings.TrimSpace(menuID) != "" {
+		if role, ok := middleware2.GetUserRoleFromContext(c); ok && role == service.RoleAdmin {
+			return true
+		}
+		subject, ok := middleware2.GetAuthSubjectFromContext(c)
+		if !ok {
+			return false
+		}
+		user, err := h.userService.GetProfile(c.Request.Context(), subject.UserID)
+		if err != nil {
+			return false
+		}
+		return !user.IsCustomMenuHidden(menuID)
+	}
 	return true
 }
 
 // checkImageSlugVisibility checks visibility for image requests (no JWT available).
 // Only allows user-visible pages; admin-only pages are blocked.
 func (h *PageHandler) checkImageSlugVisibility(c *gin.Context, slug string) bool {
-	visibility, found := h.findSlugVisibility(c, slug)
+	_, visibility, found := h.findSlugMenu(c, slug)
 	if !found {
 		return false
 	}
@@ -258,8 +274,8 @@ func (h *PageHandler) checkImageSlugVisibility(c *gin.Context, slug string) bool
 }
 
 // RegisterPageRoutes registers page routes on a router group.
-func RegisterPageRoutes(v1 *gin.RouterGroup, dataDir string, jwtAuth gin.HandlerFunc, adminAuth gin.HandlerFunc, settingService *service.SettingService) {
-	h := NewPageHandler(dataDir, settingService)
+func RegisterPageRoutes(v1 *gin.RouterGroup, dataDir string, jwtAuth gin.HandlerFunc, adminAuth gin.HandlerFunc, settingService *service.SettingService, userService *service.UserService) {
+	h := NewPageHandler(dataDir, settingService, userService)
 
 	// Authenticated page content (JWT required + visibility check)
 	pages := v1.Group("/pages")

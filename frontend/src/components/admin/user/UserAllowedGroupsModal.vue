@@ -163,6 +163,32 @@
           </div>
         </div>
 
+        <div>
+          <div class="mb-3 flex items-center gap-2">
+            <div class="h-1.5 w-1.5 rounded-full bg-amber-500"></div>
+            <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-300">{{ t('admin.users.hiddenMenus') }}</h4>
+          </div>
+          <label class="mb-3 flex cursor-pointer items-center gap-3 rounded-xl border-2 p-4 transition-colors dark:border-dark-600 dark:bg-dark-800">
+            <input v-model="hiddenPurchasePage" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+            <span class="text-sm font-medium text-gray-800 dark:text-gray-200">{{ t('admin.users.hidePurchasePage') }}</span>
+          </label>
+          <div v-if="customMenuItems.length > 0" class="grid gap-3">
+            <label
+              v-for="item in customMenuItems"
+              :key="item.id"
+              class="flex cursor-pointer items-center gap-3 rounded-xl border-2 p-4 transition-colors dark:border-dark-600 dark:bg-dark-800"
+            >
+              <input
+                type="checkbox"
+                :checked="hiddenCustomMenuIds.includes(item.id)"
+                class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                @change="toggleCustomMenu(item.id)"
+              />
+              <span class="text-sm font-medium text-gray-800 dark:text-gray-200">{{ item.label }}</span>
+            </label>
+          </div>
+        </div>
+
         <!-- 无分组提示 -->
         <div v-if="groups.length === 0" class="flex flex-col items-center justify-center py-12 text-center">
           <div class="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 dark:bg-dark-700">
@@ -198,6 +224,7 @@ import { adminAPI } from '@/api/admin'
 import type { AdminUser, Group, GroupPlatform } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
+import { customMenuResourceID } from '@/utils/userUiVisibility'
 
 interface GroupRateConfig {
   groupId: number
@@ -217,12 +244,15 @@ const appStore = useAppStore()
 const groups = ref<Group[]>([])
 const groupConfigs = ref<GroupRateConfig[]>([])
 const originalGroupRates = ref<Record<number, number>>({}) // 记录原始专属倍率，用于检测删除
+const hiddenPurchasePage = ref(false)
+const hiddenCustomMenuIds = ref<string[]>([])
 const loading = ref(false)
 const submitting = ref(false)
 
 // 分离专属分组和公开分组
 const exclusiveGroups = computed(() => groups.value.filter((g) => g.is_exclusive))
 const publicGroups = computed(() => groups.value.filter((g) => !g.is_exclusive))
+const customMenuItems = computed(() => (appStore.cachedPublicSettings?.custom_menu_items ?? []).filter((item) => item.visibility === 'user'))
 
 const exclusiveGroupConfigs = computed(() => groupConfigs.value.filter((c) => c.isExclusive))
 const publicGroupConfigs = computed(() => groupConfigs.value.filter((c) => !c.isExclusive))
@@ -247,6 +277,13 @@ const load = async () => {
     const userAllowedGroups = props.user?.allowed_groups || []
     const userBlockedGroups = props.user?.blocked_groups || []
     const userGroupRates = props.user?.group_rates || {}
+    const hiddenResources = props.user?.hidden_custom_menu_resource_ids || []
+    hiddenPurchasePage.value = props.user?.hidden_purchase_page === true
+    hiddenCustomMenuIds.value = props.user?.hidden_custom_menu_ids
+      ? [...props.user.hidden_custom_menu_ids]
+      : customMenuItems.value
+        .filter((item) => hiddenResources.includes(customMenuResourceID(item.id)))
+        .map((item) => item.id)
 
     // 保存原始专属倍率，用于检测删除操作
     originalGroupRates.value = { ...userGroupRates }
@@ -266,6 +303,12 @@ const load = async () => {
   } finally {
     loading.value = false
   }
+}
+
+const toggleCustomMenu = (id: string) => {
+  hiddenCustomMenuIds.value = hiddenCustomMenuIds.value.includes(id)
+    ? hiddenCustomMenuIds.value.filter((item) => item !== id)
+    : [...hiddenCustomMenuIds.value, id]
 }
 
 const toggleExclusiveGroup = (groupId: number) => {
@@ -319,6 +362,8 @@ const handleSave = async () => {
     await adminAPI.users.update(props.user.id, {
       allowed_groups: allowedGroups,
       blocked_groups: blockedGroups,
+      hidden_purchase_page: hiddenPurchasePage.value,
+      hidden_custom_menu_ids: hiddenCustomMenuIds.value,
       group_rates: Object.keys(groupRates).length > 0 ? groupRates : undefined,
     })
 
