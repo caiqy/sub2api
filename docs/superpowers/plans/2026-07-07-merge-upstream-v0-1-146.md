@@ -461,7 +461,7 @@ git commit -m "merge: upstream v0.1.146"
 
 Expected: 提交只包含当前 change 的 OpenSpec/Comet 产物、Design Doc、计划、upstream merge 结果和必要修复；不包含无关旧问题修复。
 
-- [ ] **Step 4: 暂停等待用户确认下一步**
+- [x] **Step 4: 暂停等待用户确认下一步**
 
 Action:
 
@@ -483,6 +483,7 @@ Expected: 本 change 的 build 阶段停在可审查、已提交的隔离分支�
 - 前端验证：`pnpm typecheck` PASS；`pnpm build` PASS；`pnpm test:run` PASS（157 files / 1175 tests）。构建仅输出 Vite chunk 和 Browserslist 数据过期警告；单测保留既有 stderr warning/log 输出但无失败。
 - 专项 review：scheduler/sticky/privacy/image capability/runtime setting 热更新/网关透传字段通过；代码审查发现的 HTTP Responses capability 过滤、Grok `/v1/responses` platform 透传测试缺口和 layered sticky-weighted TopK 偏好语义差异已修复并补测试。
 - 遗留问题：未发现需要并入当前 change 的旧问题；Vite chunk/Browserslist 警告保持记录，不在本次 upstream merge 扩大处理。
+- 收尾：用户已确认提交并合并到 `main`，临时分支已删除；发版后 `backend/cmd/server/VERSION` 保持 `0.1.146.1`。
 
 ## 自检
 
