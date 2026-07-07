@@ -4,5 +4,6 @@
   "openspec_tasks": "openspec/changes/merge-upstream-v0-1-146/tasks.md",
   "openspec_delta_spec": "openspec/changes/merge-upstream-v0-1-146/specs/upstream-release-sync/spec.md",
   "handoff_context": "openspec/changes/merge-upstream-v0-1-146/.comet/handoff/design-context.json",
-  "handoff_markdown": "openspec/changes/merge-upstream-v0-1-146/.comet/handoff/design-context.md"
+  "handoff_markdown": "openspec/changes/merge-upstream-v0-1-146/.comet/handoff/design-context.md",
+  "archive_directory": "openspec/changes/archive/2026-07-07-merge-upstream-v0-1-146"
 }

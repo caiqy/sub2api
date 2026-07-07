@@ -20,6 +20,7 @@ backend/migrations/*.sql text eol=lf
 
 # Comet 快照按字节校验，必须固定 LF
 openspec/changes/*/.comet/skill-snapshots/** text eol=lf
+openspec/changes/archive/*/.comet/skill-snapshots/** text eol=lf
 
 # Dockerfile
 Dockerfile text eol=lf

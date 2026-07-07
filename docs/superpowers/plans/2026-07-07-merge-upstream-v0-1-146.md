@@ -2,6 +2,7 @@
 change: merge-upstream-v0-1-146
 design-doc: docs/superpowers/specs/2026-07-07-merge-upstream-v0-1-146-design.md
 base-ref: e378b33f60f2202d80cbf9b1c11cee4e4ddb9dc3
+archived-with: 2026-07-07-merge-upstream-v0-1-146
 ---
 
 # Merge Upstream v0.1.146 Implementation Plan
@@ -24,6 +25,7 @@ base-ref: e378b33f60f2202d80cbf9b1c11cee4e4ddb9dc3
 - 冲突处理优先保留 upstream 修复和本地定制；不可共存语义必须暂停让用户确认。
 - 可以按 Comet build 规则在隔离分支提交本 change 的计划、合并结果和必要修复；不合回 `main`，不推送远端。
 
+archived-with: 2026-07-07-merge-upstream-v0-1-146
 ---
 
 ## 文件结构与复核边界
@@ -490,3 +492,4 @@ Expected: 本 change 的 build 阶段停在可审查、已提交的隔离分支�
 - Spec coverage: 已覆盖获取 upstream refs/tags、确认 `v0.1.146`、确认隔离分支、合并、冲突/版本/生成文件复核、后端测试、前端 typecheck/build、本地关键能力专项 review、收尾汇总。
 - Placeholder scan: 未发现待填占位语句或未定义接口名。
 - Scope check: 计划不包含直接合回 `main`、推送、发版、无关重构、新 capability 或 schema 设计。
+
