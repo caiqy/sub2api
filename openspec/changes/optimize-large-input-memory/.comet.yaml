@@ -20,7 +20,7 @@ created_at: 2026-07-09
 verified_at: null
 archived: false
 direct_override: null
-build_command: cd backend && go test ./internal/service ./internal/handler -count=1
+build_command: go -C backend test ./internal/service ./internal/handler -count=1
 verify_command: null
 handoff_context: openspec/changes/optimize-large-input-memory/.comet/handoff/design-context.json
 handoff_hash: b6eb848787d2d1b0a90df9964c9c8246abd81fdaaebbb7660569caafe41100a8
