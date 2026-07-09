@@ -1672,9 +1672,17 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 				quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 				cyberBlocked := service.GetOpsCyberPolicy(c) != nil
-				h.submitOpenAIUsageRecordTask(ctx, result, func(taskCtx context.Context) {
+				usageResult := result.UsageRecordSnapshot()
+				usageUpstreamModel := ""
+				usageRequestID := ""
+				if usageResult != nil {
+					usageUpstreamModel = usageResult.UpstreamModel
+					usageRequestID = usageResult.RequestID
+				}
+				channelUsageFields := channelMappingWS.ToUsageFields(reqModel, usageUpstreamModel)
+				h.submitOpenAIUsageRecordTask(ctx, usageResult, func(taskCtx context.Context) {
 					if err := h.gatewayService.RecordUsage(taskCtx, &service.OpenAIRecordUsageInput{
-						Result:             result,
+						Result:             usageResult,
 						APIKey:             apiKey,
 						User:               apiKey.User,
 						Account:            account,
@@ -1686,12 +1694,12 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 						RequestPayloadHash: requestPayloadHash,
 						APIKeyService:      h.apiKeyService,
 						QuotaPlatform:      quotaPlatform,
-						ChannelUsageFields: channelMappingWS.ToUsageFields(reqModel, result.UpstreamModel),
+						ChannelUsageFields: channelUsageFields,
 						CyberBlocked:       cyberBlocked,
 					}); err != nil {
 						reqLog.Error("openai.websocket_record_usage_failed",
 							zap.Int64("account_id", account.ID),
-							zap.String("request_id", result.RequestID),
+							zap.String("request_id", usageRequestID),
 							zap.Error(err),
 						)
 					}
