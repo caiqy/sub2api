@@ -8,7 +8,7 @@ subagent_dispatch: null
 tdd_mode: tdd
 review_mode: thorough
 isolation: branch
-verify_mode: null
+verify_mode: full
 auto_transition: true
 base_ref: 40b807f114d1fe2e02ccc118fc4e6bd75417e4e5
 design_doc: docs/superpowers/specs/2026-07-09-large-input-memory-design.md
