@@ -81,6 +81,25 @@ type contentModerationTestRepo struct {
 	logs []ContentModerationLog
 }
 
+type contentModerationTestGroupRepo struct {
+	GroupRepository
+	groups map[int64]*Group
+	errBy  map[int64]error
+	calls  []int64
+}
+
+func (r *contentModerationTestGroupRepo) GetByIDLite(ctx context.Context, id int64) (*Group, error) {
+	r.calls = append(r.calls, id)
+	if err, ok := r.errBy[id]; ok {
+		return nil, err
+	}
+	if group, ok := r.groups[id]; ok {
+		clone := *group
+		return &clone, nil
+	}
+	return nil, ErrGroupNotFound
+}
+
 func (r *contentModerationTestRepo) CreateLog(ctx context.Context, log *ContentModerationLog) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -901,6 +920,60 @@ func TestContentModerationUpdateConfig_SavesCustomThresholds(t *testing.T) {
 	require.Equal(t, 0.72, saved.Thresholds["sexual"])
 	require.Equal(t, 1.0, saved.Thresholds["harassment"])
 	require.NotContains(t, saved.Thresholds, "unknown")
+}
+
+func TestContentModerationUpdateConfig_DropsDeletedGroupIDs(t *testing.T) {
+	cfg := defaultContentModerationConfig()
+	cfg.AllGroups = false
+	cfg.GroupIDs = []int64{10, 18, 30}
+	rawCfg, err := json.Marshal(cfg)
+	require.NoError(t, err)
+
+	repo := &contentModerationTestSettingRepo{values: map[string]string{
+		SettingKeyContentModerationConfig: string(rawCfg),
+	}}
+	groupRepo := &contentModerationTestGroupRepo{groups: map[int64]*Group{
+		10: {ID: 10},
+		30: {ID: 30},
+	}}
+	svc := NewContentModerationService(repo, nil, nil, groupRepo, nil, nil, nil)
+	sampleRate := 50
+
+	view, err := svc.UpdateConfig(context.Background(), UpdateContentModerationConfigInput{
+		SampleRate: &sampleRate,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, []int64{10, 30}, view.GroupIDs)
+	require.Equal(t, []int64{10, 18, 30}, groupRepo.calls)
+
+	var saved ContentModerationConfig
+	require.NoError(t, json.Unmarshal([]byte(repo.values[SettingKeyContentModerationConfig]), &saved))
+	require.Equal(t, []int64{10, 30}, saved.GroupIDs)
+}
+
+func TestContentModerationUpdateConfig_KeepsGroupLookupErrors(t *testing.T) {
+	cfg := defaultContentModerationConfig()
+	cfg.AllGroups = false
+	cfg.GroupIDs = []int64{10}
+	rawCfg, err := json.Marshal(cfg)
+	require.NoError(t, err)
+
+	repo := &contentModerationTestSettingRepo{values: map[string]string{
+		SettingKeyContentModerationConfig: string(rawCfg),
+	}}
+	groupRepo := &contentModerationTestGroupRepo{errBy: map[int64]error{
+		10: fmt.Errorf("db down"),
+	}}
+	svc := NewContentModerationService(repo, nil, nil, groupRepo, nil, nil, nil)
+	sampleRate := 50
+
+	_, err = svc.UpdateConfig(context.Background(), UpdateContentModerationConfigInput{
+		SampleRate: &sampleRate,
+	})
+
+	require.ErrorContains(t, err, "db down")
+	require.Equal(t, string(rawCfg), repo.values[SettingKeyContentModerationConfig])
 }
 
 func TestExtractContentModerationInput_AnthropicImageSourceOnlyParticipatesInMemory(t *testing.T) {

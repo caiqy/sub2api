@@ -1487,11 +1487,17 @@ func (s *ContentModerationService) validateConfig(ctx context.Context, cfg *Cont
 		return infraerrors.BadRequest("INVALID_CONTENT_MODERATION_MODEL_FILTER", "指定或排除模型时至少需要配置 1 个模型")
 	}
 	if !cfg.AllGroups && len(cfg.GroupIDs) > 0 && s.groupRepo != nil {
+		validGroupIDs := cfg.GroupIDs[:0]
 		for _, groupID := range cfg.GroupIDs {
 			if _, err := s.groupRepo.GetByIDLite(ctx, groupID); err != nil {
-				return infraerrors.BadRequest("INVALID_CONTENT_MODERATION_GROUP", fmt.Sprintf("审计分组不存在: %d", groupID))
+				if errors.Is(err, ErrGroupNotFound) {
+					continue
+				}
+				return fmt.Errorf("get content moderation group %d: %w", groupID, err)
 			}
+			validGroupIDs = append(validGroupIDs, groupID)
 		}
+		cfg.GroupIDs = validGroupIDs
 	}
 	return nil
 }
