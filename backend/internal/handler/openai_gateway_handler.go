@@ -543,9 +543,15 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 
 		// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 		cyberBlocked := service.GetOpsCyberPolicy(c) != nil
-		h.submitOpenAIUsageRecordTask(c.Request.Context(), result, func(ctx context.Context) {
+		usageResult := result.UsageRecordSnapshot()
+		usageUpstreamModel := ""
+		if usageResult != nil {
+			usageUpstreamModel = usageResult.UpstreamModel
+		}
+		channelUsageFields := channelMapping.ToUsageFields(reqModel, usageUpstreamModel)
+		h.submitOpenAIUsageRecordTask(c.Request.Context(), usageResult, func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
-				Result:             result,
+				Result:             usageResult,
 				APIKey:             apiKey,
 				User:               apiKey.User,
 				Account:            account,
@@ -558,7 +564,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				RequestPayloadHash: requestPayloadHash,
 				APIKeyService:      h.apiKeyService,
 				QuotaPlatform:      quotaPlatform,
-				ChannelUsageFields: channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
+				ChannelUsageFields: channelUsageFields,
 				CyberBlocked:       cyberBlocked,
 			}); err != nil {
 				logger.L().With(

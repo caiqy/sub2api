@@ -103,7 +103,7 @@ func TestOpenAIImagesRequestModerationBody_JSONEditIncludesInputImageURLs(t *tes
 	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIImages, parsed.ModerationBody())
 
 	require.Equal(t, "replace background", input.Text)
-	require.Equal(t, []string{"https://example.com/source.png", "https://example.com/mask.png"}, input.Images)
+	require.Equal(t, []string{"https://example.com/source.png"}, input.Images)
 }
 
 func TestOpenAIImagesRequestModerationBody_MultipartEditIncludesUploadsInMemory(t *testing.T) {
@@ -129,7 +129,6 @@ func TestOpenAIImagesRequestModerationBody_MultipartEditIncludesUploadsInMemory(
 	require.Equal(t, "replace background", input.Text)
 	require.Equal(t, []string{
 		"data:image/png;base64,ZmFrZS1pbWFnZS1ieXRlcw==",
-		"data:image/png;base64,ZmFrZS1tYXNrLWJ5dGVz",
 	}, input.Images)
 
 	log := (&ContentModerationService{}).buildLog(ContentModerationCheckInput{}, defaultContentModerationConfig(), ContentModerationActionAllow, false, "", 0, nil, input.ExcerptText(), "", nil, nil, "")

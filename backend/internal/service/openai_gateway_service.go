@@ -256,6 +256,36 @@ type OpenAIForwardResult struct {
 	wsReplayInputExists bool
 }
 
+func (r *OpenAIForwardResult) UsageRecordSnapshot() *OpenAIForwardResult {
+	if r == nil {
+		return nil
+	}
+	out := *r
+	out.ResponseHeaders = nil
+	out.wsReplayInput = nil
+	out.wsReplayInputExists = false
+	if r.ServiceTier != nil {
+		v := *r.ServiceTier
+		out.ServiceTier = &v
+	}
+	if r.ReasoningEffort != nil {
+		v := *r.ReasoningEffort
+		out.ReasoningEffort = &v
+	}
+	if r.FirstTokenMs != nil {
+		v := *r.FirstTokenMs
+		out.FirstTokenMs = &v
+	}
+	out.ImageOutputSizes = append([]string(nil), r.ImageOutputSizes...)
+	if len(r.ImageSizeBreakdown) > 0 {
+		out.ImageSizeBreakdown = make(map[string]int, len(r.ImageSizeBreakdown))
+		for k, v := range r.ImageSizeBreakdown {
+			out.ImageSizeBreakdown[k] = v
+		}
+	}
+	return &out
+}
+
 type openAIRequestView struct {
 	body               []byte
 	Model              string

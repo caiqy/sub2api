@@ -1,6 +1,8 @@
 package service
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -53,7 +55,7 @@ func TestExtractContentModerationInput_AnthropicMultiTurnExtractsAllAuditableCon
 
 	input := ExtractContentModerationInput(ContentModerationProtocolAnthropicMessages, body)
 
-	require.Equal(t, "Q1 A1 Q2 A2 A3 Q3 A4 Q4 A5 Q5 A6 Q6", input.Text)
+	require.Equal(t, "Q1 A1 Q2 A2 Q2 A3 Q3 A4 Q4 A5 Q5 A6 Q6", input.Text)
 }
 
 func TestExtractContentModerationInput_AnthropicStreamResendExtractsResend(t *testing.T) {
@@ -204,7 +206,7 @@ func TestExtractContentModerationInput_ResponsesAllAuditableContentExtracted(t *
 
 	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, body)
 
-	require.Equal(t, "first answer second third fourth fifth sixth", input.Text)
+	require.Equal(t, "first answer second answer third answer fourth answer fifth answer sixth", input.Text)
 }
 
 func TestExtractContentModerationInput_ResponsesUserAndAssistantBothExtracted(t *testing.T) {
@@ -397,4 +399,57 @@ func TestExtractContentModerationInput_ResponsesCodexSkipsInstructionsAndDevelop
 	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, body)
 
 	require.Equal(t, "用户真实问题", input.Text)
+}
+
+func TestExtractContentModerationInput_ResponsesLargeInputKeepsLatestText(t *testing.T) {
+	oldText := strings.Repeat("旧内容 ", maxModerationInputRunes+100)
+	latest := "最新风险片段"
+	body := []byte(fmt.Sprintf(`{
+		"input":[
+			{"type":"message","role":"user","content":[{"type":"input_text","text":%q}]},
+			{"type":"message","role":"user","content":[{"type":"input_text","text":%q}]}
+		]
+	}`, oldText, latest))
+
+	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, body)
+
+	require.LessOrEqual(t, len([]rune(input.Text)), maxModerationInputRunes)
+	require.Contains(t, input.Text, latest)
+}
+
+func TestExtractContentModerationInput_ResponsesInlineImagesLimitedDuringCollection(t *testing.T) {
+	first := strings.Repeat("a", 1024)
+	second := strings.Repeat("b", 1024)
+	body := []byte(fmt.Sprintf(`{
+		"input":[{"type":"message","role":"user","content":[
+			{"type":"input_image","mime_type":"image/png","data":%q},
+			{"type":"input_image","mime_type":"image/png","data":%q}
+		]}]
+	}`, first, second))
+
+	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, body)
+
+	require.Len(t, input.Images, maxContentModerationInputImages)
+	require.Equal(t, "data:image/png;base64,"+first, input.Images[0])
+	require.NotContains(t, strings.Join(input.Images, "\n"), second)
+}
+
+func TestExtractContentModerationInput_DuplicateTextMovesToLatestWindow(t *testing.T) {
+	risk := "重复风险片段"
+	filler := strings.Repeat("安", maxModerationInputRunes-len([]rune(risk))-10)
+	tail := strings.Repeat("尾", 30)
+	body := []byte(fmt.Sprintf(`{
+		"messages":[
+			{"role":"user","content":%q},
+			{"role":"assistant","content":%q},
+			{"role":"user","content":%q},
+			{"role":"user","content":%q}
+		]
+	}`, risk, filler, risk, tail))
+
+	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIChat, body)
+
+	require.LessOrEqual(t, len([]rune(input.Text)), maxModerationInputRunes)
+	require.Contains(t, input.Text, risk)
+	require.Contains(t, input.Text, tail)
 }

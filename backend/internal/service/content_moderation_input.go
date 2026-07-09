@@ -5,13 +5,92 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/tidwall/gjson"
 )
 
-type moderationInputCandidate struct {
-	parts  []string
-	images []string
+type contentModerationInputCollector struct {
+	textSegments []string
+	textRunes    int
+	images       []string
+	maxImages    int
+	seenImages   map[string]struct{}
+}
+
+func (c *contentModerationInputCollector) AddText(text string) {
+	text = strings.TrimSpace(text)
+	if text == "" || strings.Contains(text, "<system-reminder>") {
+		return
+	}
+	text = normalizeContentModerationText(trimLatestRunesNoAlloc(text, maxModerationInputRunes))
+	if text == "" {
+		return
+	}
+	c.textSegments = append(c.textSegments, text)
+	c.textRunes += len([]rune(text))
+	// ponytail: latest-window audit; stream parsing is the upgrade if body memory itself dominates.
+	for len(c.textSegments) > 0 && c.textRunes+len(c.textSegments)-1 > maxModerationInputRunes {
+		oldest := c.textSegments[0]
+		c.textSegments = c.textSegments[1:]
+		c.textRunes -= len([]rune(oldest))
+	}
+}
+
+func (c *contentModerationInputCollector) AddImageURL(image string) {
+	if c.imageLimitReached() {
+		return
+	}
+	image = strings.TrimSpace(image)
+	if image == "" {
+		return
+	}
+	if !strings.HasPrefix(image, "data:") && !strings.HasPrefix(image, "http://") && !strings.HasPrefix(image, "https://") {
+		return
+	}
+	if c.seenImages == nil {
+		c.seenImages = make(map[string]struct{})
+	}
+	if _, ok := c.seenImages[image]; ok {
+		return
+	}
+	c.seenImages[image] = struct{}{}
+	c.images = append(c.images, image)
+}
+
+func (c *contentModerationInputCollector) AddImageData(mimeType string, data string) {
+	if c.imageLimitReached() {
+		return
+	}
+	mimeType = strings.TrimSpace(mimeType)
+	data = strings.TrimSpace(data)
+	if mimeType == "" || data == "" {
+		return
+	}
+	c.AddImageURL(fmt.Sprintf("data:%s;base64,%s", mimeType, data))
+}
+
+func (c *contentModerationInputCollector) Result() ContentModerationInput {
+	return ContentModerationInput{Text: strings.Join(c.textSegments, " "), Images: normalizeModerationImages(c.images)}
+}
+
+func (c *contentModerationInputCollector) imageLimitReached() bool {
+	return c.maxImages > 0 && len(c.images) >= c.maxImages
+}
+
+func trimLatestRunesNoAlloc(text string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	start := len(text)
+	for count := 0; start > 0 && count < max; count++ {
+		_, size := utf8.DecodeLastRuneInString(text[:start])
+		if size <= 0 {
+			break
+		}
+		start -= size
+	}
+	return text[start:]
 }
 
 func ExtractContentModerationText(protocol string, body []byte) string {
@@ -22,46 +101,28 @@ func ExtractContentModerationInput(protocol string, body []byte) ContentModerati
 	if len(body) == 0 || !gjson.ValidBytes(body) {
 		return ContentModerationInput{}
 	}
-	var parts []string
-	var images []string
+	collector := contentModerationInputCollector{maxImages: maxContentModerationInputImages}
 	switch protocol {
 	case ContentModerationProtocolAnthropicMessages:
-		collectAllAnthropicMessages(gjson.GetBytes(body, "messages"), &parts, &images)
+		collectAllAnthropicMessages(gjson.GetBytes(body, "messages"), &collector)
 	case ContentModerationProtocolOpenAIChat:
-		collectAllOpenAIChatMessages(gjson.GetBytes(body, "messages"), &parts, &images)
+		collectAllOpenAIChatMessages(gjson.GetBytes(body, "messages"), &collector)
 	case ContentModerationProtocolOpenAIResponses:
-		collectAllResponsesInput(gjson.GetBytes(body, "input"), &parts, &images)
+		collectAllResponsesInput(gjson.GetBytes(body, "input"), &collector)
 	case ContentModerationProtocolGemini:
-		collectAllGeminiContents(gjson.GetBytes(body, "contents"), &parts, &images)
+		collectAllGeminiContents(gjson.GetBytes(body, "contents"), &collector)
 	case ContentModerationProtocolOpenAIImages:
-		addModerationText(&parts, gjson.GetBytes(body, "prompt").String())
-		collectContentValue(gjson.GetBytes(body, "images"), &parts, &images)
+		collector.AddText(gjson.GetBytes(body, "prompt").String())
+		collectContentValue(gjson.GetBytes(body, "images"), &collector)
 	default:
-		collectAllResponsesInput(gjson.GetBytes(body, "input"), &parts, &images)
-		collectAllOpenAIChatMessages(gjson.GetBytes(body, "messages"), &parts, &images)
-		collectAllGeminiContents(gjson.GetBytes(body, "contents"), &parts, &images)
+		collectAllResponsesInput(gjson.GetBytes(body, "input"), &collector)
+		collectAllOpenAIChatMessages(gjson.GetBytes(body, "messages"), &collector)
+		collectAllGeminiContents(gjson.GetBytes(body, "contents"), &collector)
 	}
-	out := ContentModerationInput{
-		Text:   normalizeContentModerationText(strings.Join(parts, "\n")),
-		Images: normalizeModerationImages(images),
-	}
-	return out
+	return collector.Result()
 }
 
-func appendUniqueModerationCandidates(parts *[]string, images *[]string, candidates []moderationInputCandidate) {
-	seen := make(map[string]struct{})
-	for _, c := range candidates {
-		key := normalizeContentModerationText(strings.Join(c.parts, "\n")) + "\x00" + strings.Join(c.images, "\n")
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		*parts = append(*parts, c.parts...)
-		*images = append(*images, c.images...)
-	}
-}
-
-func collectAllOpenAIChatMessages(messages gjson.Result, parts *[]string, images *[]string) {
+func collectAllOpenAIChatMessages(messages gjson.Result, collector *contentModerationInputCollector) {
 	if !messages.IsArray() {
 		return
 	}
@@ -69,7 +130,6 @@ func collectAllOpenAIChatMessages(messages gjson.Result, parts *[]string, images
 	if len(array) == 0 {
 		return
 	}
-	candidates := make([]moderationInputCandidate, 0, len(array))
 	for _, msg := range array {
 		role := strings.ToLower(strings.TrimSpace(msg.Get("role").String()))
 		switch role {
@@ -81,28 +141,21 @@ func collectAllOpenAIChatMessages(messages gjson.Result, parts *[]string, images
 		default:
 			continue
 		}
-		var candidate []string
-		var candidateImages []string
-		collectContentValue(msg.Get("content"), &candidate, &candidateImages)
-		if normalizeContentModerationText(strings.Join(candidate, "\n")) == "" && len(candidateImages) == 0 {
-			continue
-		}
-		candidates = append(candidates, moderationInputCandidate{parts: candidate, images: candidateImages})
+		collectContentValue(msg.Get("content"), collector)
 	}
-	appendUniqueModerationCandidates(parts, images, candidates)
 }
 
-func collectAnthropicUserContentValue(value gjson.Result, parts *[]string, images *[]string) {
+func collectAnthropicUserContentValue(value gjson.Result, collector *contentModerationInputCollector) {
 	switch {
 	case !value.Exists():
 		return
 	case value.Type == gjson.String:
 		if !isAnthropicSystemReminderText(value.String()) {
-			addModerationText(parts, value.String())
+			collector.AddText(value.String())
 		}
 	case value.IsArray():
 		value.ForEach(func(_, item gjson.Result) bool {
-			collectAnthropicUserContentValue(item, parts, images)
+			collectAnthropicUserContentValue(item, collector)
 			return true
 		})
 	case value.IsObject():
@@ -110,96 +163,79 @@ func collectAnthropicUserContentValue(value gjson.Result, parts *[]string, image
 		switch typ {
 		case "", "text", "input_text", "message":
 			if value.Get("text").Exists() && !isAnthropicSystemReminderText(value.Get("text").String()) {
-				addModerationText(parts, value.Get("text").String())
+				collector.AddText(value.Get("text").String())
 			}
 			if value.Get("content").Exists() {
-				collectAnthropicUserContentValue(value.Get("content"), parts, images)
+				collectAnthropicUserContentValue(value.Get("content"), collector)
 			}
 		case "image_url", "input_image", "image":
-			collectContentValue(value, parts, images)
+			collectContentValue(value, collector)
 		}
 	}
 }
 
-func collectAnthropicAssistantTextOnly(value gjson.Result, parts *[]string) {
+func collectAnthropicAssistantTextOnly(value gjson.Result, collector *contentModerationInputCollector) {
 	switch {
 	case !value.Exists():
 		return
 	case value.Type == gjson.String:
-		addModerationText(parts, value.String())
+		collector.AddText(value.String())
 	case value.IsArray():
 		value.ForEach(func(_, item gjson.Result) bool {
-			collectAnthropicAssistantTextOnly(item, parts)
+			collectAnthropicAssistantTextOnly(item, collector)
 			return true
 		})
 	case value.IsObject():
 		typ := strings.ToLower(strings.TrimSpace(value.Get("type").String()))
 		if typ == "" || typ == "text" || typ == "output_text" {
-			addModerationText(parts, value.Get("text").String())
+			collector.AddText(value.Get("text").String())
 		}
 	}
 }
 
-func collectAllAnthropicMessages(messages gjson.Result, parts *[]string, images *[]string) {
+func collectAllAnthropicMessages(messages gjson.Result, collector *contentModerationInputCollector) {
 	if !messages.IsArray() {
 		return
 	}
 	array := messages.Array()
-	candidates := make([]moderationInputCandidate, 0, len(array))
 	for _, msg := range array {
 		role := strings.ToLower(strings.TrimSpace(msg.Get("role").String()))
 		if role != "user" && role != "assistant" {
 			continue
 		}
-		var candidate []string
-		var candidateImages []string
 		if role == "user" {
-			collectAnthropicUserContentValue(msg.Get("content"), &candidate, &candidateImages)
+			collectAnthropicUserContentValue(msg.Get("content"), collector)
 		} else {
-			collectAnthropicAssistantTextOnly(msg.Get("content"), &candidate)
+			collectAnthropicAssistantTextOnly(msg.Get("content"), collector)
 		}
-		if normalizeContentModerationText(strings.Join(candidate, "\n")) == "" && len(candidateImages) == 0 {
-			continue
-		}
-		candidates = append(candidates, moderationInputCandidate{parts: candidate, images: candidateImages})
 	}
-	appendUniqueModerationCandidates(parts, images, candidates)
 }
 
 func isAnthropicSystemReminderText(text string) bool {
 	return strings.HasPrefix(strings.TrimSpace(text), "<system-reminder>")
 }
 
-func collectAllResponsesInput(input gjson.Result, parts *[]string, images *[]string) {
+func collectAllResponsesInput(input gjson.Result, collector *contentModerationInputCollector) {
 	switch {
 	case !input.Exists():
 		return
 	case input.Type == gjson.String:
-		addModerationText(parts, input.String())
+		collector.AddText(input.String())
 	case input.IsArray():
-		array := input.Array()
-		candidates := make([]moderationInputCandidate, 0, len(array))
-		for _, item := range array {
+		for _, item := range input.Array() {
 			if !isResponsesAuditableItem(item) {
 				continue
 			}
-			var candidate []string
-			var candidateImages []string
-			collectContentValue(item.Get("content"), &candidate, &candidateImages)
+			collectContentValue(item.Get("content"), collector)
 			if item.Get("type").String() == "input_text" || item.Get("text").Exists() {
-				collectContentValue(item, &candidate, &candidateImages)
+				collectContentValue(item, collector)
 			}
-			if normalizeContentModerationText(strings.Join(candidate, "\n")) == "" && len(candidateImages) == 0 {
-				continue
-			}
-			candidates = append(candidates, moderationInputCandidate{parts: candidate, images: candidateImages})
 		}
-		appendUniqueModerationCandidates(parts, images, candidates)
 	case input.IsObject():
 		if isResponsesAuditableItem(input) {
-			collectContentValue(input.Get("content"), parts, images)
+			collectContentValue(input.Get("content"), collector)
 			if input.Get("type").String() == "input_text" || input.Get("text").Exists() {
-				collectContentValue(input, parts, images)
+				collectContentValue(input, collector)
 			}
 		}
 	}
@@ -223,111 +259,75 @@ func isResponsesAuditableItem(item gjson.Result) bool {
 	return false
 }
 
-func collectAllGeminiContents(contents gjson.Result, parts *[]string, images *[]string) {
+func collectAllGeminiContents(contents gjson.Result, collector *contentModerationInputCollector) {
 	if !contents.IsArray() {
 		return
 	}
-	array := contents.Array()
-	candidates := make([]moderationInputCandidate, 0, len(array))
-	for _, content := range array {
+	for _, content := range contents.Array() {
 		role := strings.ToLower(strings.TrimSpace(content.Get("role").String()))
 		if role != "" && role != "user" && role != "model" {
 			continue
 		}
-		var candidate []string
-		var candidateImages []string
 		if arr := content.Get("parts"); arr.IsArray() {
 			arr.ForEach(func(_, part gjson.Result) bool {
 				if part.Get("functionCall").Exists() || part.Get("function_call").Exists() ||
 					part.Get("functionResponse").Exists() || part.Get("function_response").Exists() {
 					return true
 				}
-				addModerationText(&candidate, part.Get("text").String())
-				addGeminiModerationImage(&candidateImages, part)
+				collector.AddText(part.Get("text").String())
+				addGeminiModerationImage(collector, part)
 				return true
 			})
 		}
-		if normalizeContentModerationText(strings.Join(candidate, "\n")) == "" && len(candidateImages) == 0 {
-			continue
-		}
-		candidates = append(candidates, moderationInputCandidate{parts: candidate, images: candidateImages})
 	}
-	appendUniqueModerationCandidates(parts, images, candidates)
 }
 
-func collectContentValue(value gjson.Result, parts *[]string, images *[]string) {
+func collectContentValue(value gjson.Result, collector *contentModerationInputCollector) {
 	switch {
 	case !value.Exists():
 		return
 	case value.Type == gjson.String:
-		addModerationText(parts, value.String())
+		collector.AddText(value.String())
 	case value.IsArray():
 		value.ForEach(func(_, item gjson.Result) bool {
-			collectContentValue(item, parts, images)
+			collectContentValue(item, collector)
 			return true
 		})
 	case value.IsObject():
 		typ := strings.ToLower(strings.TrimSpace(value.Get("type").String()))
-		addModerationImage(images, value.Get("image_url.url").String())
-		addModerationImage(images, value.Get("image_url").String())
-		addModerationImage(images, value.Get("url").String())
-		addModerationImageData(images, value.Get("source.media_type").String(), value.Get("source.data").String())
-		addModerationImageData(images, value.Get("source.mediaType").String(), value.Get("source.data").String())
-		addModerationImageData(images, value.Get("media_type").String(), value.Get("data").String())
-		addModerationImageData(images, value.Get("mime_type").String(), value.Get("data").String())
-		addModerationImageData(images, value.Get("mimeType").String(), value.Get("data").String())
-		addModerationImage(images, value.Get("source.data").String())
-		addModerationImage(images, value.Get("data").String())
-		addModerationImage(images, value.Get("base64").String())
+		collector.AddImageURL(value.Get("image_url.url").String())
+		collector.AddImageURL(value.Get("image_url").String())
+		collector.AddImageURL(value.Get("url").String())
+		collector.AddImageData(value.Get("source.media_type").String(), value.Get("source.data").String())
+		collector.AddImageData(value.Get("source.mediaType").String(), value.Get("source.data").String())
+		collector.AddImageData(value.Get("media_type").String(), value.Get("data").String())
+		collector.AddImageData(value.Get("mime_type").String(), value.Get("data").String())
+		collector.AddImageData(value.Get("mimeType").String(), value.Get("data").String())
+		collector.AddImageURL(value.Get("source.data").String())
+		collector.AddImageURL(value.Get("data").String())
+		collector.AddImageURL(value.Get("base64").String())
 		switch typ {
 		case "", "text", "input_text", "output_text", "message":
 			if value.Get("text").Exists() {
-				addModerationText(parts, value.Get("text").String())
+				collector.AddText(value.Get("text").String())
 			}
 			if value.Get("content").Exists() {
-				collectContentValue(value.Get("content"), parts, images)
+				collectContentValue(value.Get("content"), collector)
 			}
 		case "image_url", "input_image", "image":
 		}
 	}
 }
 
-func addGeminiModerationImage(images *[]string, part gjson.Result) {
+func addGeminiModerationImage(collector *contentModerationInputCollector, part gjson.Result) {
 	if inlineData := part.Get("inline_data"); inlineData.IsObject() {
-		mimeType := strings.TrimSpace(inlineData.Get("mime_type").String())
-		data := strings.TrimSpace(inlineData.Get("data").String())
-		if mimeType != "" && data != "" {
-			addModerationImage(images, fmt.Sprintf("data:%s;base64,%s", mimeType, data))
-		}
+		collector.AddImageData(inlineData.Get("mime_type").String(), inlineData.Get("data").String())
 	}
 	if inlineData := part.Get("inlineData"); inlineData.IsObject() {
-		mimeType := strings.TrimSpace(inlineData.Get("mimeType").String())
-		data := strings.TrimSpace(inlineData.Get("data").String())
-		if mimeType != "" && data != "" {
-			addModerationImage(images, fmt.Sprintf("data:%s;base64,%s", mimeType, data))
-		}
+		collector.AddImageData(inlineData.Get("mimeType").String(), inlineData.Get("data").String())
 	}
-	addModerationImage(images, part.Get("file_data.file_uri").String())
-	addModerationImage(images, part.Get("fileData.fileUri").String())
-}
-
-func addModerationImageData(images *[]string, mimeType string, data string) {
-	mimeType = strings.TrimSpace(mimeType)
-	data = strings.TrimSpace(data)
-	if mimeType == "" || data == "" {
-		return
-	}
-	addModerationImage(images, fmt.Sprintf("data:%s;base64,%s", mimeType, data))
-}
-
-func addModerationImage(images *[]string, image string) {
-	image = strings.TrimSpace(image)
-	if image == "" {
-		return
-	}
-	if strings.HasPrefix(image, "data:") || strings.HasPrefix(image, "http://") || strings.HasPrefix(image, "https://") {
-		*images = append(*images, image)
-	}
+	collector.AddImageURL(part.Get("file_data.file_uri").String())
+	collector.AddImageURL(part.Get("fileData.fileUri").String())
 }
 
 func normalizeModerationImages(images []string) []string {
@@ -356,17 +356,6 @@ func limitContentModerationImages(images []string) []string {
 		return images[:maxContentModerationInputImages]
 	}
 	return []string{images[int(idx.Int64())]}
-}
-
-func addModerationText(parts *[]string, text string) {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return
-	}
-	if strings.Contains(text, "<system-reminder>") {
-		return
-	}
-	*parts = append(*parts, text)
 }
 
 func normalizeContentModerationText(text string) string {
