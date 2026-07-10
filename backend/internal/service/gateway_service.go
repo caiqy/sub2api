@@ -5187,25 +5187,29 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		}
 	}
 
-	// 重试间复用同一请求体，避免每次 string(body) 产生额外分配。
-	setOpsUpstreamRequestBody(c, body)
+	upstreamPreview := RequestBodyPreviewString(body)
+	SetOpsUpstreamRequestBodyPreview(c, upstreamPreview, int64(len(body)))
 	// 重试循环
 	var resp *http.Response
 	retryStart := time.Now()
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
 		// 构建上游请求（每次重试需要重新构建，因为请求体需要重新读取）
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
-		upstreamReq, _, err := s.buildUpstreamRequestWithSourceBody(upstreamCtx, c, account, sourceBody, body, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
+		upstreamReq, upstreamBody, err := s.buildUpstreamRequestWithSourceBody(upstreamCtx, c, account, sourceBody, body, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 		releaseUpstreamCtx()
 		if err != nil {
 			return nil, err
 		}
+		upstreamPreview = RequestBodyPreviewString(upstreamBody)
 
 		// 发送请求
-		SetUsageUpstreamRequest(c, upstreamReq, "")
-		setOpsUpstreamRequestBodyFromRequest(c, upstreamReq)
+		SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
+		SetOpsUpstreamAttempted(c, true)
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
 		if err != nil {
+			if upstreamReq.Body != nil {
+				_ = upstreamReq.Body.Close()
+			}
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
 			}
@@ -5279,11 +5283,12 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 
 					filteredBody := FilterThinkingBlocksForRetry(body, reqModel)
 					retryCtx, releaseRetryCtx := detachStreamUpstreamContext(ctx, reqStream)
-					retryReq, _, buildErr := s.buildUpstreamRequest(retryCtx, c, account, filteredBody, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
+					retryReq, retryBody, buildErr := s.buildUpstreamRequest(retryCtx, c, account, filteredBody, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 					releaseRetryCtx()
 					if buildErr == nil {
-						SetUsageUpstreamRequest(c, retryReq, "")
-						setOpsUpstreamRequestBodyFromRequest(c, retryReq)
+						retryPreview := RequestBodyPreviewString(retryBody)
+						SetUsageUpstreamRequest(c, retryReq, retryPreview)
+						SetOpsUpstreamAttempted(c, true)
 						retryResp, retryErr := s.httpUpstream.DoWithTLS(retryReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
 						if retryErr == nil {
 							if retryResp.StatusCode < 400 {
@@ -5316,11 +5321,12 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 									logger.LegacyPrintf("service.gateway", "Account %d: signature retry still failing and looks tool-related, retrying with tool blocks downgraded", account.ID)
 									filteredBody2 := FilterSignatureSensitiveBlocksForRetry(body, reqModel)
 									retryCtx2, releaseRetryCtx2 := detachStreamUpstreamContext(ctx, reqStream)
-									retryReq2, _, buildErr2 := s.buildUpstreamRequest(retryCtx2, c, account, filteredBody2, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
+									retryReq2, retryBody2, buildErr2 := s.buildUpstreamRequest(retryCtx2, c, account, filteredBody2, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 									releaseRetryCtx2()
 									if buildErr2 == nil {
-										SetUsageUpstreamRequest(c, retryReq2, "")
-										setOpsUpstreamRequestBodyFromRequest(c, retryReq2)
+										retryPreview2 := RequestBodyPreviewString(retryBody2)
+										SetUsageUpstreamRequest(c, retryReq2, retryPreview2)
+										SetOpsUpstreamAttempted(c, true)
 										retryResp2, retryErr2 := s.httpUpstream.DoWithTLS(retryReq2, proxyURL, account.ID, account.Concurrency, tlsProfile)
 										if retryErr2 == nil {
 											resp = retryResp2
@@ -5328,6 +5334,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 										}
 										if retryResp2 != nil && retryResp2.Body != nil {
 											_ = retryResp2.Body.Close()
+										}
+										if retryReq2.Body != nil {
+											_ = retryReq2.Body.Close()
 										}
 										appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 											Platform:           account.Platform,
@@ -5338,6 +5347,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 											Kind:               "signature_retry_tools_request_error",
 											Message:            sanitizeUpstreamErrorMessage(retryErr2.Error()),
 										})
+										SetUsageUpstreamRequest(c, retryReq, retryPreview)
 										logger.LegacyPrintf("service.gateway", "Account %d: tool-downgrade signature retry failed: %v", account.ID, retryErr2)
 									} else {
 										logger.LegacyPrintf("service.gateway", "Account %d: tool-downgrade signature retry build failed: %v", account.ID, buildErr2)
@@ -5356,6 +5366,19 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 						if retryResp != nil && retryResp.Body != nil {
 							_ = retryResp.Body.Close()
 						}
+						if retryReq.Body != nil {
+							_ = retryReq.Body.Close()
+						}
+						appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+							Platform:           account.Platform,
+							AccountID:          account.ID,
+							AccountName:        account.Name,
+							UpstreamStatusCode: 0,
+							UpstreamURL:        safeUpstreamURL(retryReq.URL.String()),
+							Kind:               "signature_retry_request_error",
+							Message:            sanitizeUpstreamErrorMessage(retryErr.Error()),
+						})
+						SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
 						logger.LegacyPrintf("service.gateway", "Account %d: signature error retry failed: %v", account.ID, retryErr)
 					} else {
 						logger.LegacyPrintf("service.gateway", "Account %d: signature error retry build request failed: %v", account.ID, buildErr)
@@ -5389,11 +5412,12 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					if applied && time.Since(retryStart) < maxRetryElapsed {
 						logger.LegacyPrintf("service.gateway", "Account %d: detected budget_tokens constraint error, retrying with rectified budget (budget_tokens=%d, max_tokens=%d)", account.ID, BudgetRectifyBudgetTokens, BudgetRectifyMaxTokens)
 						budgetRetryCtx, releaseBudgetRetryCtx := detachStreamUpstreamContext(ctx, reqStream)
-						budgetRetryReq, _, buildErr := s.buildUpstreamRequest(budgetRetryCtx, c, account, rectifiedBody, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
+						budgetRetryReq, budgetRetryBody, buildErr := s.buildUpstreamRequest(budgetRetryCtx, c, account, rectifiedBody, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 						releaseBudgetRetryCtx()
 						if buildErr == nil {
-							SetUsageUpstreamRequest(c, budgetRetryReq, "")
-							setOpsUpstreamRequestBodyFromRequest(c, budgetRetryReq)
+							budgetRetryPreview := RequestBodyPreviewString(budgetRetryBody)
+							SetUsageUpstreamRequest(c, budgetRetryReq, budgetRetryPreview)
+							SetOpsUpstreamAttempted(c, true)
 							budgetRetryResp, retryErr := s.httpUpstream.DoWithTLS(budgetRetryReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
 							if retryErr == nil {
 								resp = budgetRetryResp
@@ -5402,6 +5426,19 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 							if budgetRetryResp != nil && budgetRetryResp.Body != nil {
 								_ = budgetRetryResp.Body.Close()
 							}
+							if budgetRetryReq.Body != nil {
+								_ = budgetRetryReq.Body.Close()
+							}
+							appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+								Platform:           account.Platform,
+								AccountID:          account.ID,
+								AccountName:        account.Name,
+								UpstreamStatusCode: 0,
+								UpstreamURL:        safeUpstreamURL(budgetRetryReq.URL.String()),
+								Kind:               "budget_retry_request_error",
+								Message:            sanitizeUpstreamErrorMessage(retryErr.Error()),
+							})
+							SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
 							logger.LegacyPrintf("service.gateway", "Account %d: budget rectifier retry failed: %v", account.ID, retryErr)
 						} else {
 							logger.LegacyPrintf("service.gateway", "Account %d: budget rectifier retry build failed: %v", account.ID, buildErr)
@@ -5643,8 +5680,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				)
 
 				return nil, &UpstreamFailoverError{
-					StatusCode:   403,
-					ResponseBody: body,
+					StatusCode:      403,
+					ResponseBody:    body,
+					ResponseHeaders: resp.Header.Clone(),
 				}
 			}
 			return nil, err
@@ -5728,14 +5766,14 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	// Pre-filter: strip empty text blocks (including nested in tool_result) to prevent upstream 400.
 	input.Body = StripEmptyTextBlocks(input.Body)
 
-	// 重试间复用同一请求体，避免每次 string(body) 产生额外分配。
-	setOpsUpstreamRequestBody(c, input.Body)
+	upstreamPreview := RequestBodyPreviewString(input.Body)
+	SetOpsUpstreamRequestBodyPreview(c, upstreamPreview, int64(len(input.Body)))
 	tlsProfile := s.tlsFPProfileService.ResolveTLSProfile(account)
 	var resp *http.Response
 	retryStart := time.Now()
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, input.RequestStream)
-		upstreamReq, err := s.buildUpstreamRequestAnthropicAPIKeyPassthrough(upstreamCtx, c, account, input.SourceBody, input.Body, token)
+		upstreamReq, upstreamBody, err := s.buildUpstreamRequestAnthropicAPIKeyPassthrough(upstreamCtx, c, account, input.SourceBody, input.Body, token)
 		releaseUpstreamCtx()
 		if err != nil {
 			if strings.HasPrefix(err.Error(), "invalid_request_error:") {
@@ -5760,11 +5798,15 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 			}
 			return nil, err
 		}
+		upstreamPreview = RequestBodyPreviewString(upstreamBody)
 
-		SetUsageUpstreamRequest(c, upstreamReq, "")
-		setOpsUpstreamRequestBodyFromRequest(c, upstreamReq)
+		SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
+		SetOpsUpstreamAttempted(c, true)
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
 		if err != nil {
+			if upstreamReq.Body != nil {
+				_ = upstreamReq.Body.Close()
+			}
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
 			}
@@ -5872,6 +5914,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 			return nil, &UpstreamFailoverError{
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           respBody,
+				ResponseHeaders:        resp.Header.Clone(),
 				RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 			}
 		}
@@ -5906,6 +5949,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		return nil, &UpstreamFailoverError{
 			StatusCode:             resp.StatusCode,
 			ResponseBody:           respBody,
+			ResponseHeaders:        resp.Header.Clone(),
 			RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 		}
 	}
@@ -5954,7 +5998,7 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 	sourceBody []byte,
 	body []byte,
 	token string,
-) (*http.Request, error) {
+) (*http.Request, []byte, error) {
 	inboundHeader := http.Header{}
 	if c != nil && c.Request != nil {
 		inboundHeader = c.Request.Header
@@ -5964,7 +6008,7 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 	if baseURL != "" {
 		validatedURL, err := s.validateUpstreamBaseURL(baseURL)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		targetURL = validatedURL + "/v1/messages?beta=true"
 	}
@@ -6000,11 +6044,11 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 	var err error
 	body, err = applyAccountPassthroughFieldsWithContext(ctx, account, inboundHeader, sourceBody, body, outboundHeader)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	req.Header = outboundHeader
 
@@ -6025,7 +6069,7 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 	// 账号级请求头覆写（最终生效，覆盖上面所有来源的同名头）
 	account.ApplyHeaderOverrides(req.Header)
 
-	return req, nil
+	return req, body, nil
 }
 
 func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
@@ -6443,7 +6487,7 @@ func (s *GatewayService) invalidNonStreamingJSONFailoverError(
 	return &UpstreamFailoverError{
 		StatusCode:             statusCode,
 		ResponseBody:           body,
-		ResponseHeaders:        resp.Header,
+		ResponseHeaders:        resp.Header.Clone(),
 		RetryableOnSameAccount: retryableOnSameAccount,
 	}
 }
@@ -6676,9 +6720,14 @@ func (s *GatewayService) executeBedrockUpstream(
 			return nil, err
 		}
 
-		SetUsageUpstreamRequest(c, upstreamReq, "")
+		upstreamPreview := RequestBodyPreviewString(body)
+		SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
+		SetOpsUpstreamAttempted(c, true)
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, nil)
 		if err != nil {
+			if upstreamReq.Body != nil {
+				_ = upstreamReq.Body.Close()
+			}
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
 			}
@@ -6783,6 +6832,7 @@ func (s *GatewayService) handleBedrockUpstreamErrors(
 			return nil, &UpstreamFailoverError{
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           respBody,
+				ResponseHeaders:        resp.Header.Clone(),
 				RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 			}
 		}
@@ -6807,6 +6857,7 @@ func (s *GatewayService) handleBedrockUpstreamErrors(
 		return nil, &UpstreamFailoverError{
 			StatusCode:             resp.StatusCode,
 			ResponseBody:           respBody,
+			ResponseHeaders:        resp.Header.Clone(),
 			RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 		}
 	}
@@ -6898,8 +6949,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 
 func (s *GatewayService) buildUpstreamRequestWithSourceBody(ctx context.Context, c *gin.Context, account *Account, sourceBody []byte, body []byte, token, tokenType, modelID string, reqStream bool, mimicClaudeCode bool) (*http.Request, []byte, error) {
 	if account.Platform == PlatformAnthropic && account.Type == AccountTypeServiceAccount {
-		req, err := s.buildUpstreamRequestAnthropicVertex(ctx, c, account, body, token, modelID, reqStream)
-		return req, body, err
+		return s.buildUpstreamRequestAnthropicVertex(ctx, c, account, body, token, modelID, reqStream)
 	}
 
 	// 确定目标URL
@@ -7162,10 +7212,10 @@ func (s *GatewayService) buildUpstreamRequestAnthropicVertex(
 	token string,
 	modelID string,
 	reqStream bool,
-) (*http.Request, error) {
+) (*http.Request, []byte, error) {
 	vertexBody, err := buildVertexAnthropicRequestBody(body)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// 计算最终 outgoing anthropic-beta。Vertex AI 的 Anthropic 端点只接受一小撮
@@ -7181,7 +7231,7 @@ func (s *GatewayService) buildUpstreamRequestAnthropicVertex(
 	}
 	policy := s.evaluateBetaPolicy(ctx, clientBeta, account, modelID)
 	if policy.blockErr != nil {
-		return nil, policy.blockErr
+		return nil, nil, policy.blockErr
 	}
 	finalBeta := filterVertexBetaTokens(clientBeta, mergeDropSets(policy.filterSet))
 
@@ -7192,11 +7242,11 @@ func (s *GatewayService) buildUpstreamRequestAnthropicVertex(
 	}
 	fullURL, err := buildVertexAnthropicURL(account.VertexProjectID(), account.VertexLocation(modelID), modelID, reqStream)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(vertexBody))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if c != nil && c.Request != nil {
@@ -7234,7 +7284,7 @@ func (s *GatewayService) buildUpstreamRequestAnthropicVertex(
 		"stream":     strconv.FormatBool(reqStream),
 	})
 
-	return req, nil
+	return req, vertexBody, nil
 }
 
 // getBetaHeader 处理anthropic-beta header
@@ -8091,7 +8141,7 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 		}
 	}
 	if shouldDisable {
-		return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: body}
+		return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: body, ResponseHeaders: resp.Header.Clone()}
 	}
 
 	MarkResponseCommitted(c)
@@ -10312,7 +10362,8 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 			logger.LegacyPrintf("service.gateway", "CountTokens model mapping applied: %s -> %s (account: %s, source=%s)", parsed.Model, mappedModel, account.Name, mappingSource)
 		}
 	}
-	setOpsUpstreamRequestBody(c, body)
+	upstreamPreview := RequestBodyPreviewString(body)
+	SetOpsUpstreamRequestBodyPreview(c, upstreamPreview, int64(len(body)))
 
 	// 获取凭证
 	token, tokenType, err := s.GetAccessToken(ctx, account)
@@ -10322,11 +10373,12 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 	}
 
 	// 构建上游请求
-	upstreamReq, err := s.buildCountTokensRequest(ctx, c, account, body, token, tokenType, reqModel, shouldMimicClaudeCode)
+	upstreamReq, upstreamBody, err := s.buildCountTokensRequest(ctx, c, account, body, token, tokenType, reqModel, shouldMimicClaudeCode)
 	if err != nil {
 		s.countTokensError(c, http.StatusInternalServerError, "api_error", "Failed to build request")
 		return err
 	}
+	upstreamPreview = RequestBodyPreviewString(upstreamBody)
 
 	// 获取代理URL（自定义 base URL 模式下，proxy 通过 buildCustomRelayURL 作为查询参数传递）
 	proxyURL := ""
@@ -10337,10 +10389,13 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 	}
 
 	// 发送请求
-	SetUsageUpstreamRequest(c, upstreamReq, "")
-	setOpsUpstreamRequestBodyFromRequest(c, upstreamReq)
+	SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
+	SetOpsUpstreamAttempted(c, true)
 	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {
+		if upstreamReq.Body != nil {
+			_ = upstreamReq.Body.Close()
+		}
 		setOpsUpstreamError(c, 0, sanitizeUpstreamErrorMessage(err.Error()), "")
 		s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Request failed")
 		return fmt.Errorf("upstream request failed: %w", err)
@@ -10364,10 +10419,11 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 		logger.LegacyPrintf("service.gateway", "Account %d: detected thinking block signature error on count_tokens, retrying with filtered thinking blocks", account.ID)
 
 		filteredBody := FilterThinkingBlocksForRetry(body, reqModel)
-		retryReq, buildErr := s.buildCountTokensRequest(ctx, c, account, filteredBody, token, tokenType, reqModel, shouldMimicClaudeCode)
+		retryReq, retryBody, buildErr := s.buildCountTokensRequest(ctx, c, account, filteredBody, token, tokenType, reqModel, shouldMimicClaudeCode)
 		if buildErr == nil {
-			SetUsageUpstreamRequest(c, retryReq, "")
-			setOpsUpstreamRequestBodyFromRequest(c, retryReq)
+			retryPreview := RequestBodyPreviewString(retryBody)
+			SetUsageUpstreamRequest(c, retryReq, retryPreview)
+			SetOpsUpstreamAttempted(c, true)
 			retryResp, retryErr := s.httpUpstream.DoWithTLS(retryReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 			if retryErr == nil {
 				resp = retryResp
@@ -10379,6 +10435,9 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 					}
 					return err
 				}
+			}
+			if retryReq.Body != nil {
+				_ = retryReq.Body.Close()
 			}
 		}
 	}
@@ -10442,13 +10501,15 @@ func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx contex
 		s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Invalid account token type")
 		return fmt.Errorf("anthropic api key passthrough requires apikey token, got: %s", tokenType)
 	}
-	setOpsUpstreamRequestBody(c, body)
+	upstreamPreview := RequestBodyPreviewString(body)
+	SetOpsUpstreamRequestBodyPreview(c, upstreamPreview, int64(len(body)))
 
-	upstreamReq, err := s.buildCountTokensRequestAnthropicAPIKeyPassthrough(ctx, c, account, body, token)
+	upstreamReq, upstreamBody, err := s.buildCountTokensRequestAnthropicAPIKeyPassthrough(ctx, c, account, body, token)
 	if err != nil {
 		s.countTokensError(c, http.StatusInternalServerError, "api_error", "Failed to build request")
 		return err
 	}
+	upstreamPreview = RequestBodyPreviewString(upstreamBody)
 	if c != nil {
 		inboundHeader := http.Header{}
 		if c.Request != nil {
@@ -10470,7 +10531,7 @@ func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx contex
 			upstreamReq.GetBody = func() (io.ReadCloser, error) {
 				return io.NopCloser(bytes.NewReader(payload)), nil
 			}
-			setOpsUpstreamRequestBody(c, requestBody)
+			upstreamPreview = RequestBodyPreviewString(requestBody)
 		}
 	}
 
@@ -10479,10 +10540,13 @@ func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx contex
 		proxyURL = account.Proxy.URL()
 	}
 
-	SetUsageUpstreamRequest(c, upstreamReq, "")
-	setOpsUpstreamRequestBodyFromRequest(c, upstreamReq)
+	SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
+	SetOpsUpstreamAttempted(c, true)
 	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {
+		if upstreamReq.Body != nil {
+			_ = upstreamReq.Body.Close()
+		}
 		setOpsUpstreamError(c, 0, sanitizeUpstreamErrorMessage(err.Error()), "")
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 			Platform:           account.Platform,
@@ -10580,7 +10644,7 @@ func (s *GatewayService) buildCountTokensRequestAnthropicAPIKeyPassthrough(
 	account *Account,
 	body []byte,
 	token string,
-) (*http.Request, error) {
+) (*http.Request, []byte, error) {
 	inboundHeader := http.Header{}
 	if c != nil && c.Request != nil {
 		inboundHeader = c.Request.Header
@@ -10590,7 +10654,7 @@ func (s *GatewayService) buildCountTokensRequestAnthropicAPIKeyPassthrough(
 	if baseURL != "" {
 		validatedURL, err := s.validateUpstreamBaseURL(baseURL)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		targetURL = validatedURL + "/v1/messages/count_tokens?beta=true"
 	}
@@ -10625,12 +10689,12 @@ func (s *GatewayService) buildCountTokensRequestAnthropicAPIKeyPassthrough(
 	var err error
 	body, err = applyAccountPassthroughFieldsWithContext(ctx, account, inboundHeader, body, body, outboundHeader)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	req.Header = outboundHeader
 
@@ -10650,11 +10714,11 @@ func (s *GatewayService) buildCountTokensRequestAnthropicAPIKeyPassthrough(
 	// 账号级请求头覆写（最终生效，覆盖上面所有来源的同名头）
 	account.ApplyHeaderOverrides(req.Header)
 
-	return req, nil
+	return req, body, nil
 }
 
 // buildCountTokensRequest 构建 count_tokens 上游请求
-func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token, tokenType, modelID string, mimicClaudeCode bool) (*http.Request, error) {
+func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token, tokenType, modelID string, mimicClaudeCode bool) (*http.Request, []byte, error) {
 	// 确定目标 URL
 	targetURL := claudeAPICountTokensURL
 	if account.Type == AccountTypeAPIKey {
@@ -10662,18 +10726,18 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 		if baseURL != "" {
 			validatedURL, err := s.validateUpstreamBaseURL(baseURL)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			targetURL = validatedURL + "/v1/messages/count_tokens?beta=true"
 		}
 	} else if account.IsCustomBaseURLEnabled() {
 		customURL := account.GetCustomBaseURL()
 		if customURL == "" {
-			return nil, fmt.Errorf("custom_base_url is enabled but not configured for account %d", account.ID)
+			return nil, nil, fmt.Errorf("custom_base_url is enabled but not configured for account %d", account.ID)
 		}
 		validatedURL, err := s.validateUpstreamBaseURL(customURL)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		targetURL = s.buildCustomRelayURL(validatedURL, "/v1/messages/count_tokens", account)
 	}
@@ -10731,7 +10795,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 
 	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// 设置认证头（保持原始大小写）
@@ -10798,7 +10862,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 		logClaudeMimicDebug(req, body, account, tokenType, mimicClaudeCode)
 	}
 
-	return req, nil
+	return req, body, nil
 }
 
 func sanitizeCountTokensRequestBody(body []byte) []byte {

@@ -191,6 +191,9 @@ func (s *AntigravityGatewayService) attemptCreditsOveragesRetry(
 			p.prefix, modelKey, p.account.ID, err)
 		return &creditsOveragesRetryResult{handled: true}
 	}
+	preview := RequestBodyPreviewString(creditsBody)
+	SetUsageUpstreamRequest(p.c, creditsReq, preview)
+	SetOpsUpstreamAttempted(p.c, true)
 
 	creditsResp, err := p.httpUpstream.Do(creditsReq, p.proxyURL, p.account.ID, p.account.Concurrency)
 	if err == nil && creditsResp != nil && creditsResp.StatusCode < 400 {

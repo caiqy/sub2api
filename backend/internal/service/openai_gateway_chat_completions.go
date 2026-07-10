@@ -261,9 +261,10 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	if account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	SetUsageUpstreamRequest(c, upstreamReq, "")
-	setOpsUpstreamRequestBodyFromRequest(c, upstreamReq)
+	SetUsageUpstreamRequestHeaders(c, upstreamReq)
+	SetOpsUpstreamAttempted(c, true)
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+	closeOpenAIRequestBody(upstreamReq)
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}

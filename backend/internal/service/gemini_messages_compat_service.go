@@ -627,6 +627,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 	}
 
 	var requestIDHeader string
+	var upstreamPreview string
 	var buildReq func(ctx context.Context) (*http.Request, string, error)
 	useUpstreamStream := req.Stream
 	if account.Type == AccountTypeOAuth && !req.Stream && strings.TrimSpace(account.GetCredential("project_id")) != "" {
@@ -675,6 +676,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				}
 			}
 			upstreamReq.Header.Set("x-goog-api-key", apiKey)
+			upstreamPreview = RequestBodyPreviewString(restGeminiReq)
 			return upstreamReq, "x-request-id", nil
 		}
 		requestIDHeader = "x-request-id"
@@ -739,6 +741,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				}
 				upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
 				upstreamReq.Header.Set("User-Agent", geminicli.GeminiCLIUserAgent)
+				upstreamPreview = RequestBodyPreviewString(wrappedBytes)
 				return upstreamReq, "x-request-id", nil
 			} else {
 				// Mode 2: AI Studio API with OAuth (like API key mode, but using Bearer token)
@@ -765,6 +768,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 					}
 				}
 				upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
+				upstreamPreview = RequestBodyPreviewString(restGeminiReq)
 				return upstreamReq, "x-request-id", nil
 			}
 		}
@@ -796,6 +800,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 			}
 			upstreamReq.Header.Set("Content-Type", "application/json")
 			upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
+			upstreamPreview = RequestBodyPreviewString(restGeminiReq)
 			return upstreamReq, "x-request-id", nil
 		}
 		requestIDHeader = "x-request-id"
@@ -820,14 +825,14 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 		}
 		requestIDHeader = idHeader
 
-		// Capture upstream request body for ops retry of this attempt.
-		if c != nil {
-			setOpsUpstreamRequestBodyFromRequest(c, upstreamReq)
-		}
-		SetUsageUpstreamRequest(c, upstreamReq, "")
+		SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
 
+		SetOpsUpstreamAttempted(c, true)
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		if err != nil {
+			if upstreamReq.Body != nil {
+				_ = upstreamReq.Body.Close()
+			}
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,
@@ -1206,6 +1211,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	forceAIStudio := action == "countTokens"
 
 	var requestIDHeader string
+	var upstreamPreview string
 	var buildReq func(ctx context.Context) (*http.Request, string, error)
 
 	switch account.Type {
@@ -1233,6 +1239,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 			}
 			upstreamReq.Header.Set("Content-Type", "application/json")
 			upstreamReq.Header.Set("x-goog-api-key", apiKey)
+			upstreamPreview = RequestBodyPreviewString(body)
 			return upstreamReq, "x-request-id", nil
 		}
 		requestIDHeader = "x-request-id"
@@ -1281,6 +1288,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				upstreamReq.Header.Set("Content-Type", "application/json")
 				upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
 				upstreamReq.Header.Set("User-Agent", geminicli.GeminiCLIUserAgent)
+				upstreamPreview = RequestBodyPreviewString(wrappedBytes)
 				return upstreamReq, "x-request-id", nil
 			} else {
 				// Mode 2: AI Studio API with OAuth (like API key mode, but using Bearer token)
@@ -1301,6 +1309,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				}
 				upstreamReq.Header.Set("Content-Type", "application/json")
 				upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
+				upstreamPreview = RequestBodyPreviewString(body)
 				return upstreamReq, "x-request-id", nil
 			}
 		}
@@ -1327,6 +1336,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 			}
 			upstreamReq.Header.Set("Content-Type", "application/json")
 			upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
+			upstreamPreview = RequestBodyPreviewString(body)
 			return upstreamReq, "x-request-id", nil
 		}
 		requestIDHeader = "x-request-id"
@@ -1350,14 +1360,14 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		}
 		requestIDHeader = idHeader
 
-		// Capture upstream request body for ops retry of this attempt.
-		if c != nil {
-			setOpsUpstreamRequestBodyFromRequest(c, upstreamReq)
-		}
-		SetUsageUpstreamRequest(c, upstreamReq, "")
+		SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
 
+		SetOpsUpstreamAttempted(c, true)
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		if err != nil {
+			if upstreamReq.Body != nil {
+				_ = upstreamReq.Body.Close()
+			}
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,

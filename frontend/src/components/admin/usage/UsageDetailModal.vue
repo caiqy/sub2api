@@ -95,7 +95,7 @@ import ImagePreviewGallery from '@/components/user/images/ImagePreviewGallery.vu
 import { useClipboard } from '@/composables/useClipboard'
 import type { AdminUsageDetail, AdminUsageLog } from '@/types'
 import { formatConversationAsText } from '@/utils/conversation/format'
-import { parseConversationPayload } from '@/utils/conversation/parseConversationPayload'
+import { parseConversationPayload, unwrapPreviewSnapshotBody } from '@/utils/conversation/parseConversationPayload'
 
 type DetailTabKey =
   | 'client-request-headers'
@@ -201,8 +201,12 @@ const parseJsonRecord = (value: string | null | undefined): Record<string, unkno
   }
 }
 
+const previewBodyForDisplay = (value: string | null | undefined): string | null | undefined => {
+  return unwrapPreviewSnapshotBody(value)
+}
+
 const inferPreviewMimeType = (item: Record<string, unknown>, requestBody: string | null): string => {
-  const requestPayload = parseJsonRecord(requestBody)
+  const requestPayload = parseJsonRecord(unwrapPreviewSnapshotBody(requestBody))
   const candidateValues = [
     item.mime_type,
     item.mimeType,
@@ -306,9 +310,9 @@ const activeContent = computed(() => {
   if (!props.detail) return ''
   if (isConversationFlowTab.value) return formatConversationAsText(conversationFlow.value)
   if (activeTab.value === 'client-request-headers') return formatJsonLike(props.detail.request_headers)
-  if (activeTab.value === 'client-request-body') return formatJsonLike(props.detail.request_body)
+  if (activeTab.value === 'client-request-body') return formatJsonLike(previewBodyForDisplay(props.detail.request_body))
   if (activeTab.value === 'upstream-request-headers') return formatJsonLike(props.detail.upstream_request_headers)
-  if (activeTab.value === 'upstream-request-body') return formatJsonLike(props.detail.upstream_request_body)
+  if (activeTab.value === 'upstream-request-body') return formatJsonLike(previewBodyForDisplay(props.detail.upstream_request_body))
   if (activeTab.value === 'upstream-response-headers') return formatJsonLike(props.detail.upstream_response_headers)
   if (activeTab.value === 'upstream-response-body') return formatJsonLike(props.detail.upstream_response_body)
   if (activeTab.value === 'response-headers') return formatJsonLike(props.detail.response_headers)

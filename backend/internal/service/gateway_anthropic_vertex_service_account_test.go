@@ -35,7 +35,7 @@ func TestGatewayService_BuildAnthropicVertexServiceAccountRequest(t *testing.T) 
 	body := []byte(`{"model":"claude-sonnet-4-5","stream":false,"max_tokens":32,"messages":[{"role":"user","content":"hello"}]}`)
 
 	svc := &GatewayService{}
-	req, _, err := svc.buildUpstreamRequest(
+	req, returnedBody, err := svc.buildUpstreamRequest(
 		context.Background(),
 		c,
 		account,
@@ -54,6 +54,7 @@ func TestGatewayService_BuildAnthropicVertexServiceAccountRequest(t *testing.T) 
 	require.Equal(t, "interleaved-thinking-2025-05-14", getHeaderRaw(req.Header, "anthropic-beta"))
 
 	got := readRequestBodyForTest(t, req)
+	require.Equal(t, got, returnedBody)
 	require.Equal(t, "", gjson.GetBytes(got, "model").String())
 	require.Equal(t, vertexAnthropicVersion, gjson.GetBytes(got, "anthropic_version").String())
 	require.Equal(t, "hello", gjson.GetBytes(got, "messages.0.content").String())

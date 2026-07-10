@@ -75,6 +75,8 @@ func TestGeminiForwardAsChatCompletions_OAuthRoutesToGeminiAndReturnsChatFormat(
 	c, _ := gin.CreateTestContext(rec)
 	body := []byte(`{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"hi"}]}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	collector := &openAIUsageUpstreamRequestCollector{}
+	c.Set(UsageDetailCaptureContextKey, collector)
 
 	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body)
 	require.NoError(t, err)
@@ -116,6 +118,9 @@ func TestGeminiForwardAsChatCompletions_OAuthRoutesToGeminiAndReturnsChatFormat(
 	require.Equal(t, float64(7), usage["prompt_tokens"])
 	require.Equal(t, float64(3), usage["completion_tokens"])
 	require.Equal(t, float64(10), usage["total_tokens"])
+	require.Contains(t, collector.body, "project-1")
+	require.JSONEq(t, collector.body, requireOpsPreviewString(t, c, "project-1"))
+	require.True(t, HasOpsUpstreamAttempted(c))
 }
 
 func TestGeminiForwardAsChatCompletions_StreamsOpenAIChunksFromGeminiSSE(t *testing.T) {
@@ -1203,6 +1208,8 @@ func TestGeminiMessagesCompatService_Forward_APIKeyStoresFinalOpsUpstreamRequest
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(string(claudeBody)))
+	collector := &openAIUsageUpstreamRequestCollector{}
+	c.Set(UsageDetailCaptureContextKey, collector)
 
 	upstream := &anthropicHTTPUpstreamRecorder{
 		resp: &http.Response{
@@ -1245,13 +1252,10 @@ func TestGeminiMessagesCompatService_Forward_APIKeyStoresFinalOpsUpstreamRequest
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
-	rawBody, ok := c.Get(OpsUpstreamRequestBodyKey)
-	require.True(t, ok)
-	opsBodyBytes, ok := rawBody.([]byte)
-	require.True(t, ok)
-	opsBody := string(opsBodyBytes)
+	opsBody := requireOpsPreviewString(t, c, "candidateCount")
 	require.JSONEq(t, string(upstream.lastBody), opsBody)
 	require.Equal(t, "1", gjson.Get(opsBody, "generationConfig.candidateCount").String())
+	require.Contains(t, collector.body, "candidateCount")
 }
 
 func TestGeminiMessagesCompatService_Forward_OAuthProjectStoresWrappedOpsUpstreamRequestBody(t *testing.T) {
@@ -1266,6 +1270,8 @@ func TestGeminiMessagesCompatService_Forward_OAuthProjectStoresWrappedOpsUpstrea
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(string(claudeBody)))
+	collector := &openAIUsageUpstreamRequestCollector{}
+	c.Set(UsageDetailCaptureContextKey, collector)
 
 	upstream := &anthropicHTTPUpstreamRecorder{
 		resp: &http.Response{
@@ -1303,14 +1309,11 @@ func TestGeminiMessagesCompatService_Forward_OAuthProjectStoresWrappedOpsUpstrea
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
-	rawBody, ok := c.Get(OpsUpstreamRequestBodyKey)
-	require.True(t, ok)
-	opsBodyBytes, ok := rawBody.([]byte)
-	require.True(t, ok)
-	opsBody := string(opsBodyBytes)
+	opsBody := requireOpsPreviewString(t, c, "project-123")
 	require.JSONEq(t, string(upstream.lastBody), opsBody)
 	require.Equal(t, "project-123", gjson.Get(opsBody, "project").String())
 	require.True(t, gjson.Get(opsBody, "request").Exists())
+	require.Contains(t, collector.body, "project-123")
 }
 
 func TestGeminiMessagesCompatService_ForwardNative_OAuthProjectStoresWrappedOpsUpstreamRequestBody(t *testing.T) {
@@ -1324,6 +1327,8 @@ func TestGeminiMessagesCompatService_ForwardNative_OAuthProjectStoresWrappedOpsU
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash:generateContent", strings.NewReader(string(geminiBody)))
+	collector := &openAIUsageUpstreamRequestCollector{}
+	c.Set(UsageDetailCaptureContextKey, collector)
 
 	upstream := &anthropicHTTPUpstreamRecorder{
 		resp: &http.Response{
@@ -1361,14 +1366,11 @@ func TestGeminiMessagesCompatService_ForwardNative_OAuthProjectStoresWrappedOpsU
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
-	rawBody, ok := c.Get(OpsUpstreamRequestBodyKey)
-	require.True(t, ok)
-	opsBodyBytes, ok := rawBody.([]byte)
-	require.True(t, ok)
-	opsBody := string(opsBodyBytes)
+	opsBody := requireOpsPreviewString(t, c, "project-456")
 	require.JSONEq(t, string(upstream.lastBody), opsBody)
 	require.Equal(t, "project-456", gjson.Get(opsBody, "project").String())
 	require.True(t, gjson.Get(opsBody, "request").Exists())
+	require.Contains(t, collector.body, "project-456")
 }
 
 // TestGeminiMessagesHandleStreamingResponse_ClosesToolBlockBeforeText guards the

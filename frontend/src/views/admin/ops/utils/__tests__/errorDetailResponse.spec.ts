@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { OpsErrorDetail } from '@/api/admin/ops'
+import { REQUEST_BODY_PREVIEW_SNAPSHOT_KIND } from '@/utils/conversation/parseConversationPayload'
 import { resolvePrimaryResponseBody, resolveUpstreamPayload } from '../errorDetailResponse'
 
 function makeDetail(overrides: Partial<OpsErrorDetail>): OpsErrorDetail {
@@ -130,5 +131,34 @@ describe('errorDetailResponse', () => {
       upstream_errors: '',
       upstream_error_message: 'fallback message'
     }))).toBe('fallback message')
+  })
+
+  it('unwraps preview snapshot envelopes in upstream payload fields', () => {
+    expect(resolveUpstreamPayload(makeDetail({
+      upstream_error_detail: JSON.stringify({
+        kind: REQUEST_BODY_PREVIEW_SNAPSHOT_KIND,
+        preview: '{"provider_message":"real upstream detail"}',
+        truncated: false,
+        size: 34,
+        future_field: 'allowed',
+      }),
+      upstream_errors: '',
+      upstream_error_message: '',
+    }))).toBe('{"provider_message":"real upstream detail"}')
+  })
+
+  it('keeps ordinary upstream payloads that contain preview metadata intact', () => {
+    const payload = JSON.stringify({
+      preview: '{"provider_message":"preview text"}',
+      truncated: false,
+      size: 35,
+      provider_message: 'real upstream detail',
+    })
+
+    expect(resolveUpstreamPayload(makeDetail({
+      upstream_error_detail: payload,
+      upstream_errors: '',
+      upstream_error_message: '',
+    }))).toBe(payload)
   })
 })

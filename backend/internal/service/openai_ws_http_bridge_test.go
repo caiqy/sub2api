@@ -347,6 +347,61 @@ func TestOpenAIWSHTTPBridgeRequiresTerminalResponseEventBeforeSuccess(t *testing
 	require.Len(t, downstream, 2)
 }
 
+func TestOpenAIWSHTTPBridge429ReturnsFailoverErrorWithoutClientEvent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Header: http.Header{
+			"Content-Type": []string{"application/json"},
+			"X-Request-Id": []string{"req_bridge_429"},
+		},
+		Body: io.NopCloser(strings.NewReader(`{"error":{"type":"rate_limit_error","message":"bridge rate limited"}}`)),
+	}}
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+	account := &Account{
+		ID:          18,
+		Name:        "api-key",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Status:      StatusActive,
+	}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+
+	var downstream [][]byte
+	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
+		context.Background(),
+		c,
+		account,
+		"sk-test",
+		[]byte(`{"type":"response.create","model":"gpt-5","stream":true,"input":"hi"}`),
+		1,
+		"gpt-5",
+		"",
+		"",
+		"",
+		1,
+		func(message []byte) error {
+			downstream = append(downstream, append([]byte(nil), message...))
+			return nil
+		},
+	)
+
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusTooManyRequests, failoverErr.StatusCode)
+	require.Equal(t, "req_bridge_429", failoverErr.ResponseHeaders.Get("X-Request-Id"))
+	require.Contains(t, string(failoverErr.ResponseBody), "bridge rate limited")
+	require.Empty(t, downstream, "outer websocket failover owns the terminal client frame")
+}
+
 func TestOpenAIWSHTTPBridgeAcceptsFirstFrameAboveLegacy16MiB(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

@@ -38,8 +38,6 @@ func (f *fakeDiagnoser) DiagnoseModelAvailabilityForPlatform(
 	return f.resp
 }
 
-func ptrInt64(v int64) *int64 { return &v }
-
 // newTestGinContextWithRequest wraps the bare newTestGinContext helper
 // (defined in openai_gateway_cyber_test.go) by additionally attaching a stub
 // *http.Request so the classifier can extract c.Request.Context().

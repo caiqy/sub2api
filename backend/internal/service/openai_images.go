@@ -220,6 +220,11 @@ func (s *OpenAIGatewayService) ParseOpenAIImagesRequest(c *gin.Context, body []b
 	}
 	req.SizeTier = normalizeOpenAIImageSizeTier(req.Size)
 	req.RequiredCapability = classifyOpenAIImagesCapability(req)
+	if !req.Multipart {
+		if preview, omitted := openAIImagesJSONPreview(body); omitted {
+			SetUsageRequestBody(c, preview)
+		}
+	}
 	return req, nil
 }
 
@@ -304,6 +309,11 @@ func parseOpenAIImagesJSONRequest(body []byte, req *OpenAIImagesRequest) error {
 		return gjson.GetBytes(body, path).Exists()
 	})
 	return nil
+}
+
+func openAIImagesJSONPreview(body []byte) (string, bool) {
+	preview := RequestBodyPreviewString(body)
+	return preview, isOmittedRequestBodyPreview(preview)
 }
 
 func parseOpenAIImagesMultipartRequest(body []byte, contentType string, req *OpenAIImagesRequest) error {
@@ -599,7 +609,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 	if err != nil {
 		return nil, err
 	}
-	usageUpstreamBody := string(forwardBody)
+	usageUpstreamBody, _ := openAIImagesJSONPreview(forwardBody)
 	if parsed.Multipart {
 		usageUpstreamBody = "[multipart body omitted]"
 	}
@@ -610,6 +620,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 		proxyURL = account.Proxy.URL()
 	}
 	upstreamStart := time.Now()
+	SetOpsUpstreamAttempted(c, true)
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {

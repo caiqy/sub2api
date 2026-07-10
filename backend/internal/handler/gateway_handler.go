@@ -225,6 +225,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return
 	}
+	service.SetUsageRequestBody(c, openAIRequestBodyPreviewSnapshot(body))
 
 	setOpsRequestContext(c, "", false)
 
@@ -509,6 +510,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
 			writerSizeBeforeForward := c.Writer.Size()
 			forwardStartedAt := time.Now()
+			service.SetOpsUpstreamAttempted(c, false)
 			if account.Platform == service.PlatformAntigravity {
 				result, err = h.antigravityGatewayService.ForwardGemini(
 					requestCtx,
@@ -578,23 +580,25 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				clientIP := ip.GetClientIP(c)
 				inboundEndpoint := GetInboundEndpoint(c)
 				upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
-				detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
-				h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
-					service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), &service.FailedUsageLogInput{
-						APIKey:           apiKey,
-						User:             apiKey.User,
-						Account:          account,
-						Model:            reqModel,
-						ReasoningEffort:  service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort),
-						Stream:           reqStream,
-						InboundEndpoint:  inboundEndpoint,
-						UpstreamEndpoint: upstreamEndpoint,
-						UserAgent:        userAgent,
-						IPAddress:        clientIP,
-						DetailSnapshot:   detailSnapshot,
-						Duration:         forwardDuration,
-					}, "handler.gateway.messages")
-				})
+				if c.Request.Context().Err() == nil && service.HasOpsUpstreamAttempted(c) && !service.HasOpsClientBusinessLimited(c) {
+					detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
+					h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
+						service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), &service.FailedUsageLogInput{
+							APIKey:           apiKey,
+							User:             apiKey.User,
+							Account:          account,
+							Model:            reqModel,
+							ReasoningEffort:  service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort),
+							Stream:           reqStream,
+							InboundEndpoint:  inboundEndpoint,
+							UpstreamEndpoint: upstreamEndpoint,
+							UserAgent:        userAgent,
+							IPAddress:        clientIP,
+							DetailSnapshot:   detailSnapshot,
+							Duration:         forwardDuration,
+						}, "handler.gateway.messages")
+					})
+				}
 				reqLog.Error("gateway.forward_failed", forwardFailedFields...)
 				return
 			}
@@ -911,6 +915,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
 			writerSizeBeforeForward := c.Writer.Size()
 			forwardStartedAt := time.Now()
+			service.SetOpsUpstreamAttempted(c, false)
 			if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
 				result, err = h.antigravityGatewayService.Forward(requestCtx, c, account, attemptBody, hasBoundSession)
 			} else {
@@ -939,6 +944,17 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 				var promptTooLongErr *service.PromptTooLongError
 				if errors.As(err, &promptTooLongErr) {
+					submitPromptTooLongFailedUsage := func() {
+						responseHeaders := c.Writer.Header().Clone()
+						if responseHeaders.Get("X-Request-Id") == "" && promptTooLongErr.RequestID != "" {
+							responseHeaders.Set("X-Request-Id", promptTooLongErr.RequestID)
+						}
+						h.submitFailedUsageLogFromFailover(c, currentAPIKey, account, reqModel, parsedReq.Stream, &service.UpstreamFailoverError{
+							StatusCode:      promptTooLongErr.StatusCode,
+							ResponseHeaders: responseHeaders,
+							ResponseBody:    promptTooLongErr.Body,
+						}, forwardDuration, service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort), "handler.gateway.messages")
+					}
 					reqLog.Warn("gateway.prompt_too_long_from_antigravity",
 						zap.Any("current_group_id", currentAPIKey.GroupID),
 						zap.Any("fallback_group_id", fallbackGroupID),
@@ -948,6 +964,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						fallbackGroup, err := h.gatewayService.ResolveGroupByID(c.Request.Context(), *fallbackGroupID)
 						if err != nil {
 							reqLog.Warn("gateway.resolve_fallback_group_failed", zap.Int64("fallback_group_id", *fallbackGroupID), zap.Error(err))
+							submitPromptTooLongFailedUsage()
 							_ = h.antigravityGatewayService.WriteMappedClaudeError(c, account, promptTooLongErr.StatusCode, promptTooLongErr.RequestID, promptTooLongErr.Body)
 							return
 						}
@@ -959,6 +976,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 								zap.String("fallback_platform", fallbackGroup.Platform),
 								zap.String("fallback_subscription_type", fallbackGroup.SubscriptionType),
 							)
+							submitPromptTooLongFailedUsage()
 							_ = h.antigravityGatewayService.WriteMappedClaudeError(c, account, promptTooLongErr.StatusCode, promptTooLongErr.RequestID, promptTooLongErr.Body)
 							return
 						}
@@ -968,6 +986,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 							if retryAfter > 0 {
 								c.Header("Retry-After", strconv.Itoa(retryAfter))
 							}
+							submitPromptTooLongFailedUsage()
 							h.handleStreamingAwareError(c, status, code, message, streamStarted)
 							return
 						}
@@ -980,6 +999,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						retryWithFallback = true
 						break
 					}
+					submitPromptTooLongFailedUsage()
 					_ = h.antigravityGatewayService.WriteMappedClaudeError(c, account, promptTooLongErr.StatusCode, promptTooLongErr.RequestID, promptTooLongErr.Body)
 					return
 				}
@@ -1032,23 +1052,25 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				clientIP := ip.GetClientIP(c)
 				inboundEndpoint := GetInboundEndpoint(c)
 				upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
-				detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
-				h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
-					service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), &service.FailedUsageLogInput{
-						APIKey:           currentAPIKey,
-						User:             currentAPIKey.User,
-						Account:          account,
-						Model:            reqModel,
-						ReasoningEffort:  service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort),
-						Stream:           parsedReq.Stream,
-						InboundEndpoint:  inboundEndpoint,
-						UpstreamEndpoint: upstreamEndpoint,
-						UserAgent:        userAgent,
-						IPAddress:        clientIP,
-						DetailSnapshot:   detailSnapshot,
-						Duration:         forwardDuration,
-					}, "handler.gateway.messages")
-				})
+				if c.Request.Context().Err() == nil && service.HasOpsUpstreamAttempted(c) && !service.HasOpsClientBusinessLimited(c) {
+					detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
+					h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
+						service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), &service.FailedUsageLogInput{
+							APIKey:           currentAPIKey,
+							User:             currentAPIKey.User,
+							Account:          account,
+							Model:            reqModel,
+							ReasoningEffort:  service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort),
+							Stream:           parsedReq.Stream,
+							InboundEndpoint:  inboundEndpoint,
+							UpstreamEndpoint: upstreamEndpoint,
+							UserAgent:        userAgent,
+							IPAddress:        clientIP,
+							DetailSnapshot:   detailSnapshot,
+							Duration:         forwardDuration,
+						}, "handler.gateway.messages")
+					})
+				}
 				reqLog.Error("gateway.forward_failed", forwardFailedFields...)
 				return
 			}
@@ -1970,6 +1992,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return
 	}
+	service.SetUsageRequestBody(c, openAIRequestBodyPreviewSnapshot(body))
 
 	setOpsRequestContext(c, "", false)
 

@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -38,10 +40,40 @@ type openAIHTTPUpstreamRecorder struct {
 	err      error
 }
 
+type openAIErroringUpstreamNoClose struct {
+	lastReq *http.Request
+}
+
+type openAIUsageUpstreamRequestCollector struct {
+	headers string
+	body    string
+}
+
+func (u *openAIErroringUpstreamNoClose) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	u.lastReq = req
+	return nil, errors.New("dial failed")
+}
+
+func (u *openAIErroringUpstreamNoClose) DoWithTLS(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, proxyURL, accountID, accountConcurrency)
+}
+
+func (c *openAIUsageUpstreamRequestCollector) SetUsageUpstreamRequest(headers, body string) {
+	c.headers = headers
+	c.body = unwrapRequestBodyPreviewForTest(body)
+}
+
+func (c *openAIUsageUpstreamRequestCollector) SetUsageUpstreamRequestHeaders(headers string) {
+	c.headers = headers
+}
+
 func (u *openAIHTTPUpstreamRecorder) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
 	u.lastReq = req
 	if req != nil && req.Body != nil {
-		b, _ := io.ReadAll(req.Body)
+		b, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
 		u.lastBody = b
 		_ = req.Body.Close()
 		req.Body = io.NopCloser(bytes.NewReader(b))
@@ -2585,6 +2617,521 @@ func TestOpenAIBuildUpstreamRequestOpenAIPassthroughPreservesCompactPath(t *test
 	require.Equal(t, HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileFromContext(req.Context()))
 }
 
+func TestOpenAIBuildUpstreamRequestWithSourceBody_ReplaysLargeBodyFromGetBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5"}`)))
+
+	svc := &OpenAIGatewayService{cfg: &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}}}
+	account := &Account{Type: AccountTypeAPIKey, Platform: PlatformOpenAI, Credentials: map[string]any{"base_url": "https://example.com/v1"}}
+	body := []byte(strings.Repeat("x", 2048))
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1024, PreviewLimitBytes: 64, TempDir: t.TempDir(), FilePrefix: "sub2api-test-"})
+	require.NoError(t, err)
+	defer func() { _ = handle.Cleanup() }()
+
+	req, err := svc.buildUpstreamRequestWithSourceBody(c.Request.Context(), c, account, body, body, handle, "token", false, "", false)
+	require.NoError(t, err)
+	defer func() { _ = req.Body.Close() }()
+
+	first, err := io.ReadAll(req.Body)
+	require.NoError(t, err)
+	replay, err := req.GetBody()
+	require.NoError(t, err)
+	defer func() { _ = replay.Close() }()
+	second, err := io.ReadAll(replay)
+	require.NoError(t, err)
+	require.Equal(t, body, first)
+	require.Equal(t, body, second)
+}
+
+func TestOpenAIBuildUpstreamRequestOpenAIPassthrough_ReplaysLargeBodyFromGetBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader([]byte(`{"model":"gpt-5"}`)))
+
+	svc := &OpenAIGatewayService{cfg: &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}}}
+	account := &Account{Type: AccountTypeAPIKey, Platform: PlatformOpenAI, Credentials: map[string]any{"base_url": "https://example.com/v1"}}
+	body := []byte(strings.Repeat("x", 2048))
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1024, PreviewLimitBytes: 64, TempDir: t.TempDir(), FilePrefix: "sub2api-test-"})
+	require.NoError(t, err)
+	defer func() { _ = handle.Cleanup() }()
+
+	req, err := svc.buildUpstreamRequestOpenAIPassthrough(c.Request.Context(), c, account, body, body, handle, "token")
+	require.NoError(t, err)
+	defer func() { _ = req.Body.Close() }()
+
+	first, err := io.ReadAll(req.Body)
+	require.NoError(t, err)
+	replay, err := req.GetBody()
+	require.NoError(t, err)
+	defer func() { _ = replay.Close() }()
+	second, err := io.ReadAll(replay)
+	require.NoError(t, err)
+	require.Equal(t, body, first)
+	require.Equal(t, body, second)
+}
+
+func TestOpenAIOwnedRequestBody_CloseBeforeRedirectReplayKeepsFullBody(t *testing.T) {
+	body := []byte(strings.Repeat("r", 2048))
+	for _, status := range []int{http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			dir := t.TempDir()
+			handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{
+				SpoolThresholdBytes: 1024,
+				PreviewLimitBytes:   64,
+				TempDir:             dir,
+				FilePrefix:          "sub2api-test-",
+			})
+			require.NoError(t, err)
+			req, err := openAINewRequestWithBodyHandle(context.Background(), http.MethodPost, "https://example.com/v1/responses", handle, true)
+			require.NoError(t, err)
+			require.NoError(t, req.Body.Close()) // net/http closes the first body before replaying a 307/308.
+
+			replay, err := req.GetBody()
+			require.NoError(t, err)
+			got, err := io.ReadAll(replay)
+			require.NoError(t, err)
+			require.NoError(t, replay.Close())
+			require.Equal(t, body, got)
+
+			closeOpenAIRequestBody(req)
+			matches, err := filepath.Glob(filepath.Join(dir, "sub2api-test-*"))
+			require.NoError(t, err)
+			require.Empty(t, matches)
+		})
+	}
+}
+
+func TestOpenAIOwnedMemoryRequestBody_GetBodyFailsAfterRequestCleanup(t *testing.T) {
+	body := []byte(`{"model":"gpt-5"}`)
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{
+		SpoolThresholdBytes: 10 << 20,
+		PreviewLimitBytes:   64,
+		TempDir:             t.TempDir(),
+		FilePrefix:          "sub2api-test-",
+	})
+	require.NoError(t, err)
+	req, err := openAINewRequestWithBodyHandle(context.Background(), http.MethodPost, "https://example.com/v1/responses", handle, true)
+	require.NoError(t, err)
+	getBody := req.GetBody
+
+	closeOpenAIRequestBody(req)
+
+	replay, err := getBody()
+	require.ErrorContains(t, err, "cleaned up")
+	require.Nil(t, replay)
+	require.Nil(t, handle.memory)
+}
+
+func TestOpenAINewRequestWithOwnedBodyHandle_CleansUpOnBuilderError(t *testing.T) {
+	dir := t.TempDir()
+	handle, err := NewRequestBodyHandleFromBytes([]byte(strings.Repeat("b", 2048)), RequestBodyHandleOptions{
+		SpoolThresholdBytes: 1024,
+		PreviewLimitBytes:   64,
+		TempDir:             dir,
+		FilePrefix:          "sub2api-test-",
+	})
+	require.NoError(t, err)
+
+	req, err := openAINewRequestWithBodyHandle(context.Background(), "invalid method", "https://example.com/v1/responses", handle, true)
+	require.Error(t, err)
+	require.Nil(t, req)
+	matches, err := filepath.Glob(filepath.Join(dir, "sub2api-test-*"))
+	require.NoError(t, err)
+	require.Empty(t, matches)
+}
+
+func TestOpenAINewRequestWithOwnedBodyHandle_CleansUpWhenOpenFails(t *testing.T) {
+	dir := t.TempDir()
+	handle, err := NewRequestBodyHandleFromBytes([]byte(strings.Repeat("o", 2048)), RequestBodyHandleOptions{
+		SpoolThresholdBytes: 1024,
+		PreviewLimitBytes:   64,
+		TempDir:             dir,
+		FilePrefix:          "sub2api-test-",
+	})
+	require.NoError(t, err)
+	matches, err := filepath.Glob(filepath.Join(dir, "sub2api-test-*"))
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	require.NoError(t, os.Remove(matches[0]))
+
+	req, err := openAINewRequestWithBodyHandle(context.Background(), http.MethodPost, "https://example.com/v1/responses", handle, true)
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrRequestBodySpool)
+	require.Nil(t, req)
+
+	_, err = handle.Open()
+	require.ErrorContains(t, err, "cleaned up")
+	require.NoError(t, handle.Cleanup())
+}
+
+func TestOpenAINewRequestWithBodyHandle_SpoolReadFailureKeepsSentinel(t *testing.T) {
+	handle, err := NewRequestBodyHandleFromBytes([]byte(strings.Repeat("o", 2048)), RequestBodyHandleOptions{
+		SpoolThresholdBytes: 1024,
+		PreviewLimitBytes:   64,
+		TempDir:             t.TempDir(),
+		FilePrefix:          "sub2api-test-",
+	})
+	require.NoError(t, err)
+	require.NoError(t, os.Remove(handle.spoolPath))
+	require.NoError(t, os.Mkdir(handle.spoolPath, 0o700))
+
+	req, err := openAINewRequestWithBodyHandle(context.Background(), http.MethodPost, "https://example.com/v1/responses", handle, false)
+	require.NoError(t, err)
+	defer func() { _ = req.Body.Close() }()
+
+	_, err = io.ReadAll(req.Body)
+	require.ErrorIs(t, err, ErrRequestBodySpool)
+}
+
+func TestOpenAIForward_SpoolReadFailureDoesNotFailover(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"gpt-5","instructions":"ok","input":"` + strings.Repeat("x", 2048) + `"}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1024, PreviewLimitBytes: 64, TempDir: t.TempDir(), FilePrefix: "sub2api-test-"})
+	require.NoError(t, err)
+	require.NoError(t, os.Remove(handle.spoolPath))
+	require.NoError(t, os.Mkdir(handle.spoolPath, 0o700))
+	BindOpenAIRequestBodyHandle(c, handle)
+
+	upstream := &openAIHTTPUpstreamRecorder{}
+	svc := &OpenAIGatewayService{cfg: &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}}, httpUpstream: upstream}
+	account := &Account{ID: 1, Name: "openai-test", Type: AccountTypeAPIKey, Platform: PlatformOpenAI, Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://example.com/v1"}}
+
+	_, err = svc.Forward(c.Request.Context(), c, account, body)
+	require.ErrorIs(t, err, ErrRequestBodySpool)
+	var failoverErr *UpstreamFailoverError
+	require.False(t, errors.As(err, &failoverErr))
+	require.NotNil(t, upstream.lastReq)
+}
+
+func TestOpenAIRequestBuilderRejectsInvalidBodyHandleArgumentType(t *testing.T) {
+	_, _, _, _, _, err := parseOpenAIWithSourceBodyArgs(123, []any{"token", false, "", false})
+	require.Error(t, err)
+
+	_, _, err = parseOpenAIPassthroughBodyHandleArgs(123, []string{"token"})
+	require.Error(t, err)
+}
+
+func TestOpenAIForwardCleansRequestBodyHandleWhenHTTPDoErrors(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	padding := strings.Repeat("x", (10<<20)+1024)
+	body := []byte(`{"model":"gpt-5","instructions":"ok","input":"` + padding + `"}`)
+	startedAt := time.Now().Add(-time.Second)
+	upstream := &openAIErroringUpstreamNoClose{}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:          1,
+		Name:        "openai-test",
+		Type:        AccountTypeAPIKey,
+		Platform:    PlatformOpenAI,
+		Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://example.com/v1"},
+	}
+
+	_, err := svc.Forward(c.Request.Context(), c, account, body)
+	require.Error(t, err)
+	if upstream.lastReq != nil && upstream.lastReq.Body != nil {
+		defer func() { _ = upstream.lastReq.Body.Close() }()
+	}
+	requireNoFreshOpenAISpoolFiles(t, startedAt)
+}
+
+func TestOpenAIForwardReusesBoundRequestBodyHandle(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	body := []byte(`{"model":"gpt-5","instructions":"ok","input":"` + strings.Repeat("x", 2048) + `"}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	collector := &openAIUsageUpstreamRequestCollector{}
+	c.Set(UsageDetailCaptureContextKey, collector)
+
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 10 << 20, PreviewLimitBytes: 64, TempDir: t.TempDir(), FilePrefix: "sub2api-test-"})
+	require.NoError(t, err)
+	defer func() { _ = handle.Cleanup() }()
+	BindOpenAIRequestBodyHandle(c, handle)
+
+	upstream := &openAIErroringUpstreamNoClose{}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:          1,
+		Name:        "openai-test",
+		Type:        AccountTypeAPIKey,
+		Platform:    PlatformOpenAI,
+		Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://example.com/v1"},
+	}
+
+	_, err = svc.Forward(c.Request.Context(), c, account, body)
+	require.Error(t, err)
+	require.Equal(t, requestBodyPreviewOmittedMarker, collector.body)
+}
+
+func TestOpenAILegacyChatCompletionsCapturesUpstreamRequestPreview(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"preview me"}],"stream":false}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	collector := &openAIUsageUpstreamRequestCollector{}
+	c.Set(UsageDetailCaptureContextKey, collector)
+
+	upstream := &openAIErroringUpstreamNoClose{}
+	svc := &OpenAIGatewayService{httpUpstream: upstream}
+	account := openAITestOAuthAccount()
+	account.Extra = map[string]any{
+		"passthrough_fields_enabled": true,
+		"passthrough_field_rules": []PassthroughFieldRule{
+			{Target: "body", Mode: "inject", Key: "metadata.legacy_preview_marker", Value: "chat-final-body"},
+		},
+	}
+
+	_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "gpt-5.1")
+	require.Error(t, err)
+	require.Contains(t, collector.body, "preview me")
+	require.Equal(t, "chat-final-body", gjson.Get(collector.body, "metadata.legacy_preview_marker").String())
+	opsBody := requireOpsPreviewString(t, c, "preview me")
+	require.Equal(t, "chat-final-body", gjson.Get(opsBody, "metadata.legacy_preview_marker").String())
+}
+
+func TestOpenAIRawCompatCallersCaptureFinalPreviewAttemptAndFailoverHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name string
+		path string
+		body []byte
+		run  func(*OpenAIGatewayService, *gin.Context, *Account, []byte) error
+	}{
+		{
+			name: "raw_chat_completions",
+			path: "/v1/chat/completions",
+			body: []byte(`{"model":"client-model","messages":[{"role":"user","content":"raw preview"}],"stream":false}`),
+			run: func(s *OpenAIGatewayService, c *gin.Context, account *Account, body []byte) error {
+				_, err := s.forwardAsRawChatCompletions(context.Background(), c, account, body, "mapped-model")
+				return err
+			},
+		},
+		{
+			name: "responses_chat_fallback",
+			path: "/v1/responses",
+			body: []byte(`{"model":"client-model","input":"fallback preview","stream":false}`),
+			run: func(s *OpenAIGatewayService, c *gin.Context, account *Account, body []byte) error {
+				_, err := s.forwardResponsesViaRawChatCompletions(context.Background(), c, account, body)
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, tt.path, bytes.NewReader(tt.body))
+			collector := &openAIUsageUpstreamRequestCollector{}
+			c.Set(UsageDetailCaptureContextKey, collector)
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusTooManyRequests,
+				Header:     http.Header{"Content-Type": []string{"application/json"}, "X-Request-Id": []string{"req-openai-compat"}},
+				Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"rate limited"}}`)),
+			}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}}, httpUpstream: upstream}
+			account := &Account{ID: 902, Name: "openai-compat", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1, Credentials: map[string]any{
+				"api_key": "sk-test", "base_url": "https://openai-compat.example", "model_mapping": map[string]any{"client-model": "mapped-model"},
+			}}
+
+			err := tt.run(svc, c, account, tt.body)
+			var failoverErr *UpstreamFailoverError
+			require.ErrorAs(t, err, &failoverErr)
+			require.Equal(t, "req-openai-compat", failoverErr.ResponseHeaders.Get("X-Request-Id"))
+			require.JSONEq(t, string(upstream.lastBody), collector.body)
+			require.Equal(t, "mapped-model", gjson.Get(collector.body, "model").String())
+			require.JSONEq(t, collector.body, requireOpsPreviewString(t, c, "mapped-model"))
+			require.LessOrEqual(t, len(collector.body), int(defaultRequestBodyPreviewLimitBytes))
+			require.True(t, HasOpsUpstreamAttempted(c))
+		})
+	}
+}
+
+func TestOpenAILegacyMessagesCapturesUpstreamRequestPreview(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"preview me"}],"stream":true}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	collector := &openAIUsageUpstreamRequestCollector{}
+	c.Set(UsageDetailCaptureContextKey, collector)
+
+	upstream := &openAIErroringUpstreamNoClose{}
+	svc := &OpenAIGatewayService{httpUpstream: upstream}
+	account := openAITestOAuthAccount()
+	account.Extra = map[string]any{
+		"passthrough_fields_enabled": true,
+		"passthrough_field_rules": []PassthroughFieldRule{
+			{Target: "body", Mode: "inject", Key: "metadata.legacy_preview_marker", Value: "messages-final-body"},
+		},
+	}
+
+	_, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.1")
+	require.Error(t, err)
+	require.Contains(t, collector.body, "preview me")
+	require.Equal(t, "messages-final-body", gjson.Get(collector.body, "metadata.legacy_preview_marker").String())
+	opsBody := requireOpsPreviewString(t, c, "preview me")
+	require.Equal(t, "messages-final-body", gjson.Get(opsBody, "metadata.legacy_preview_marker").String())
+}
+
+func TestForwardAsAnthropic_CapturesFinalSessionAndTurnStateHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"snapshot headers"}],"stream":true}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	collector := &openAIUsageUpstreamRequestCollector{}
+	c.Set(UsageDetailCaptureContextKey, collector)
+
+	svc := &OpenAIGatewayService{httpUpstream: &openAIErroringUpstreamNoClose{}}
+	account := openAITestOAuthAccount()
+	const cacheKey = "snapshot-turn-state"
+	svc.bindOpenAICompatSessionTurnState(context.Background(), c, account, cacheKey, "turn-state-final")
+
+	_, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, cacheKey, "gpt-5.4")
+	require.Error(t, err)
+	require.Contains(t, collector.headers, "Session_id: "+generateSessionUUID(isolateOpenAISessionID(0, cacheKey)))
+	require.Contains(t, collector.headers, "X-Codex-Turn-State: turn-state-final")
+	require.True(t, HasOpsUpstreamAttempted(c))
+}
+
+func TestOpenAILegacyBuilderCallersCloseRequestBodyWhenHTTPDoErrors(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	padding := strings.Repeat("x", (10<<20)+1024)
+
+	tests := []struct {
+		name string
+		run  func(*OpenAIGatewayService, *gin.Context, *Account) error
+	}{
+		{
+			name: "chat_completions",
+			run: func(svc *OpenAIGatewayService, c *gin.Context, account *Account) error {
+				body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"` + padding + `"}],"stream":false}`)
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+				_, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "gpt-5.1")
+				return err
+			},
+		},
+		{
+			name: "messages",
+			run: func(svc *OpenAIGatewayService, c *gin.Context, account *Account) error {
+				body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"` + padding + `"}],"stream":true}`)
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+				_, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.1")
+				return err
+			},
+		},
+		{
+			name: "images_responses",
+			run: func(svc *OpenAIGatewayService, c *gin.Context, account *Account) error {
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+				parsed := &OpenAIImagesRequest{Endpoint: openAIImagesGenerationsEndpoint, Model: "gpt-image-2", Prompt: padding, Stream: true}
+				_, err := svc.forwardOpenAIImagesOAuth(context.Background(), c, account, parsed, "gpt-image-2")
+				return err
+			},
+		},
+		{
+			name: "ws_http_bridge",
+			run: func(svc *OpenAIGatewayService, c *gin.Context, account *Account) error {
+				payload := []byte(`{"type":"response.create","model":"gpt-5.1","input":"` + padding + `"}`)
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/realtime", nil)
+				_, err := svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "oauth-token", payload, len(payload), "gpt-5.1", "", "", "", 1, func([]byte) error { return nil })
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			upstream := &openAIErroringUpstreamNoClose{}
+			svc := &OpenAIGatewayService{httpUpstream: upstream}
+
+			err := tt.run(svc, c, openAITestOAuthAccount())
+			require.Error(t, err)
+			requireRequestBodyClosed(t, upstream.lastReq)
+		})
+	}
+}
+
+func openAITestOAuthAccount() *Account {
+	return &Account{
+		ID:          1,
+		Name:        "openai-oauth",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token":       "oauth-token",
+			"chatgpt_account_id": "chatgpt-acc",
+		},
+	}
+}
+
+func requireOpsPreviewString(t *testing.T, c *gin.Context, want string) string {
+	t.Helper()
+	raw, ok := c.Get(OpsUpstreamRequestBodyKey)
+	require.True(t, ok)
+	body, ok := raw.(string)
+	require.True(t, ok)
+	body = unwrapRequestBodyPreviewForTest(body)
+	require.Contains(t, body, want)
+	return body
+}
+
+func unwrapRequestBodyPreviewForTest(body string) string {
+	if gjson.Get(body, "kind").String() == requestBodyPreviewSnapshotKind {
+		return gjson.Get(body, "preview").String()
+	}
+	return body
+}
+
+func requireRequestBodyClosed(t *testing.T, req *http.Request) {
+	t.Helper()
+	require.NotNil(t, req)
+	require.NotNil(t, req.Body)
+	t.Cleanup(func() { _ = req.Body.Close() })
+	_, err := req.Body.Read(make([]byte, 1))
+	require.Error(t, err)
+}
+
+func requireNoFreshOpenAISpoolFiles(t *testing.T, since time.Time) {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(os.TempDir(), "sub2api-request-body-*"))
+	require.NoError(t, err)
+	for _, path := range matches {
+		info, err := os.Stat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		require.NoError(t, err)
+		if !info.ModTime().Before(since) {
+			_ = os.Remove(path)
+			require.Failf(t, "fresh request body spool file was not cleaned", "path=%s", path)
+		}
+	}
+}
+
 func TestOpenAIBuildUpstreamRequestCompactForcesJSONAcceptForOAuth(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
@@ -2806,10 +3353,11 @@ func TestPassthroughFieldsV2OpenAIForward_StoresFinalOpsUpstreamRequestBody(t *t
 
 	rawBody, ok := c.Get(OpsUpstreamRequestBodyKey)
 	require.True(t, ok)
-	opsBody, ok := rawBody.([]byte)
+	opsBody, ok := rawBody.(string)
 	require.True(t, ok)
-	require.JSONEq(t, string(upstream.lastBody), string(opsBody))
-	require.Equal(t, "default", gjson.GetBytes(opsBody, "service_tier").String())
+	opsBody = unwrapRequestBodyPreviewForTest(opsBody)
+	require.JSONEq(t, string(upstream.lastBody), opsBody)
+	require.Equal(t, "default", gjson.Get(opsBody, "service_tier").String())
 }
 
 func TestPassthroughFieldsV2OpenAIForward_BodyPathConflictReturnsError(t *testing.T) {

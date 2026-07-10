@@ -2,8 +2,6 @@ package service
 
 import (
 	"encoding/json"
-	"io"
-	"net/http"
 	"strings"
 	"time"
 
@@ -22,6 +20,7 @@ const (
 	// retry the specific upstream attempt (not just the client request).
 	// This value is sanitized+trimmed before being persisted.
 	OpsUpstreamRequestBodyKey = "ops_upstream_request_body"
+	OpsUpstreamAttemptedKey   = "ops_upstream_attempted"
 
 	// Optional stage latencies (milliseconds) for troubleshooting and alerting.
 	OpsAuthLatencyMsKey      = "ops_auth_latency_ms"
@@ -58,24 +57,31 @@ func setOpsUpstreamRequestBody(c *gin.Context, body []byte) {
 	if c == nil || len(body) == 0 {
 		return
 	}
-	// 热路径避免 string(body) 额外分配，按需在落库前再转换。
-	c.Set(OpsUpstreamRequestBodyKey, body)
+	SetOpsUpstreamRequestBodyPreview(c, RequestBodyPreviewString(body), int64(len(body)))
 }
 
-func setOpsUpstreamRequestBodyFromRequest(c *gin.Context, req *http.Request) {
-	if c == nil || req == nil || req.GetBody == nil {
+func SetOpsUpstreamRequestBodyPreview(c *gin.Context, body string, sizes ...int64) {
+	if c == nil || strings.TrimSpace(body) == "" {
 		return
 	}
-	clone, err := req.GetBody()
-	if err != nil || clone == nil {
-		return
+	size := int64(len(body))
+	if len(sizes) > 0 && sizes[0] >= 0 {
+		size = sizes[0]
 	}
-	defer func() { _ = clone.Close() }()
-	body, err := io.ReadAll(clone)
-	if err != nil {
-		return
+	c.Set(OpsUpstreamRequestBodyKey, RequestBodyPreviewSnapshot(body, size))
+}
+
+func SetOpsUpstreamAttempted(c *gin.Context, attempted bool) {
+	if c != nil {
+		c.Set(OpsUpstreamAttemptedKey, attempted)
 	}
-	setOpsUpstreamRequestBody(c, body)
+}
+
+func HasOpsUpstreamAttempted(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	return c.GetBool(OpsUpstreamAttemptedKey)
 }
 
 func MarkResponseCommitted(c *gin.Context) { c.Set(ResponseCommittedKey, true) }

@@ -17,7 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGatewayHandler_GeminiV1BetaModels_UpstreamErrorStillCreatesUsageLog(t *testing.T) {
+func TestGatewayHandler_GeminiV1BetaModels_ForwardErrorStillCreatesUsageLog(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	cfg := &config.Config{
@@ -138,7 +138,7 @@ func TestGatewayHandler_GeminiV1BetaModels_UpstreamErrorStillCreatesUsageLog(t *
 	require.Equal(t, 0.0, usageLogRepo.lastLog.TotalCost)
 	require.Equal(t, 0.0, usageLogRepo.lastLog.ActualCost)
 	require.NotNil(t, usageLogRepo.lastLog.DetailSnapshot)
-	require.JSONEq(t, reqBody, usageLogRepo.lastLog.DetailSnapshot.RequestBody)
+	requireRequestPreviewSnapshot(t, usageLogRepo.lastLog.DetailSnapshot.RequestBody, reqBody)
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, "gemini upstream rejected payload")
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "X-Goog-Api-Key: gemini-test-key")
 }
@@ -261,6 +261,7 @@ func TestGatewayHandler_GeminiV1BetaModels_FailoverExhaustedStillCreatesUsageLog
 	require.Equal(t, http.StatusTooManyRequests, rec.Code)
 	require.NotNil(t, usageLogRepo.lastLog)
 	require.NotNil(t, usageLogRepo.lastLog.DetailSnapshot)
+	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseHeaders, "X-Request-Id: gemini_failover_123")
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, `"RESOURCE_EXHAUSTED_RAW"`)
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, "gemini raw failover")
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "X-Goog-Api-Key: gemini-test-key")
@@ -384,6 +385,7 @@ func TestGatewayHandler_GeminiV1BetaModels_SelectionExhaustedAfterFailoverStillC
 	require.JSONEq(t, `{"error":{"code":429,"message":"Upstream rate limit exceeded, please retry later","status":"RESOURCE_EXHAUSTED"}}`, rec.Body.String())
 	require.NotNil(t, usageLogRepo.lastLog)
 	require.NotNil(t, usageLogRepo.lastLog.DetailSnapshot)
+	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseHeaders, "X-Request-Id: gemini_selection_exhausted_123")
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, `"RESOURCE_EXHAUSTED_RAW"`)
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, "gemini raw failover")
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "X-Goog-Api-Key: gemini-test-key")

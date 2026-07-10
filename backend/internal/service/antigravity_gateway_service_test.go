@@ -255,7 +255,7 @@ type antigravityUsageUpstreamRequestCollectorStub struct {
 
 func (s *antigravityUsageUpstreamRequestCollectorStub) SetUsageUpstreamRequest(headers, body string) {
 	s.headers = headers
-	s.body = body
+	s.body = unwrapRequestBodyPreviewForTest(body)
 }
 
 func (s *antigravitySettingRepoStub) Get(ctx context.Context, key string) (*Setting, error) {
@@ -385,6 +385,7 @@ func TestAntigravityGatewayService_ForwardGemini_UsesConfiguredProjectFallback(t
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Len(t, upstream.requestBodies, 1)
+	require.Equal(t, RequestBodyPreviewString(upstream.requestBodies[0]), requireOpsPreviewString(t, c, "configured-project"))
 
 	var wrapped map[string]any
 	require.NoError(t, json.Unmarshal(upstream.requestBodies[0], &wrapped))
@@ -614,6 +615,53 @@ func TestAntigravityGatewayService_ForwardGemini_ModelRateLimitTriggersFailover(
 	require.Equal(t, http.StatusServiceUnavailable, failoverErr.StatusCode)
 	// 非粘性会话请求，ForceCacheBilling 应为 false
 	require.False(t, failoverErr.ForceCacheBilling, "ForceCacheBilling should be false for non-sticky session")
+}
+
+func TestAntigravityGatewayService_LocalTokenErrorsAreNotFailoverErrors(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	account := &Account{
+		ID:          20,
+		Name:        "missing-local-token",
+		Platform:    PlatformAntigravity,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Concurrency: 1,
+		Credentials: map[string]any{"project_id": "project"},
+	}
+	upstream := &queuedHTTPUpstreamStub{}
+	svc := &AntigravityGatewayService{tokenProvider: &AntigravityTokenProvider{}, httpUpstream: upstream}
+
+	t.Run("messages", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		body := []byte(`{"model":"claude-opus-4-6","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+
+		result, err := svc.Forward(context.Background(), c, account, body, false)
+
+		require.Nil(t, result)
+		require.Error(t, err)
+		var failoverErr *UpstreamFailoverError
+		require.NotErrorAs(t, err, &failoverErr)
+		require.False(t, HasOpsUpstreamAttempted(c))
+		require.Zero(t, upstream.callCount)
+	})
+
+	t.Run("gemini", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		body := []byte(`{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash:generateContent", bytes.NewReader(body))
+
+		result, err := svc.ForwardGemini(context.Background(), c, account, "gemini-2.5-flash", "generateContent", false, body, false)
+
+		require.Nil(t, result)
+		require.Error(t, err)
+		var failoverErr *UpstreamFailoverError
+		require.NotErrorAs(t, err, &failoverErr)
+		require.False(t, HasOpsUpstreamAttempted(c))
+		require.Zero(t, upstream.callCount)
+	})
 }
 
 // TestAntigravityGatewayService_Forward_StickySessionForceCacheBilling
@@ -1451,6 +1499,9 @@ func TestAntigravityGatewayService_ForwardUpstream_CapturesUsageSnapshotBeforeSe
 		},
 	}
 
+	upstream.onCall = func(_ *http.Request, _ *queuedHTTPUpstreamStub) {
+		require.True(t, HasOpsUpstreamAttempted(c))
+	}
 	result, err := svc.ForwardUpstream(context.Background(), c, account, body)
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -1462,6 +1513,55 @@ func TestAntigravityGatewayService_ForwardUpstream_CapturesUsageSnapshotBeforeSe
 	require.Contains(t, collector.headers, "X-Api-Key: api-key-token")
 	require.Contains(t, collector.headers, "Anthropic-Version: 2023-06-01")
 	require.Contains(t, collector.headers, "Anthropic-Beta: tools-2024-04-04")
+}
+
+func TestAntigravityCreditsRetryCapturesEachAttemptSnapshot(t *testing.T) {
+	oldBaseURLs := append([]string(nil), antigravity.BaseURLs...)
+	oldAvailability := antigravity.DefaultURLAvailability
+	defer func() {
+		antigravity.BaseURLs = oldBaseURLs
+		antigravity.DefaultURLAvailability = oldAvailability
+	}()
+	antigravity.BaseURLs = []string{"https://ag-credits.test"}
+	antigravity.DefaultURLAvailability = antigravity.NewURLAvailability(time.Minute)
+
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	collector := &antigravityUsageUpstreamRequestCollectorStub{}
+	c.Set(UsageDetailCaptureContextKey, collector)
+	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{
+		{StatusCode: http.StatusTooManyRequests, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"status":"RESOURCE_EXHAUSTED","message":"QUOTA_EXHAUSTED"}}`))},
+		{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"ok":true}`))},
+	}}
+	var usageBodies, opsBodies []string
+	var attempts []bool
+	upstream.onCall = func(_ *http.Request, _ *queuedHTTPUpstreamStub) {
+		usageBodies = append(usageBodies, collector.body)
+		value, _ := c.Get(OpsUpstreamRequestBodyKey)
+		opsBodies = append(opsBodies, value.(string))
+		attempts = append(attempts, HasOpsUpstreamAttempted(c))
+		SetOpsUpstreamAttempted(c, false)
+	}
+	account := &Account{ID: 903, Name: "credits-snapshots", Type: AccountTypeOAuth, Platform: PlatformAntigravity, Concurrency: 1, Extra: map[string]any{"allow_overages": true}}
+	body := []byte(`{"model":"claude-sonnet-4-5","request":{"contents":[{"parts":[{"text":"hello"}]}]}}`)
+
+	resp, err := (&AntigravityGatewayService{}).antigravityRetryLoop(antigravityRetryLoopParams{
+		ctx: context.Background(), c: c, prefix: "[test]", account: account, accessToken: "token", action: "generateContent", body: body,
+		httpUpstream: upstream, requestedModel: "claude-sonnet-4-5",
+		handleError: func(context.Context, string, *Account, int, http.Header, []byte, string, int64, string, bool) *handleModelRateLimitResult {
+			return nil
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, []bool{true, true}, attempts)
+	require.Len(t, usageBodies, 2)
+	require.Len(t, opsBodies, 2)
+	require.NotContains(t, usageBodies[0], "enabledCreditTypes")
+	require.NotContains(t, opsBodies[0], "enabledCreditTypes")
+	require.Contains(t, usageBodies[1], "enabledCreditTypes")
+	require.Contains(t, opsBodies[1], "enabledCreditTypes")
 }
 
 // TestStreamUpstreamResponse_UsageAndFirstToken

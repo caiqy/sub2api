@@ -72,21 +72,21 @@ func decompressRequestBody(encoding string, raw []byte) ([]byte, error) {
 			return nil, err
 		}
 		defer dec.Close()
-		return io.ReadAll(io.LimitReader(dec, maxDecompressedBodySize))
+		return io.ReadAll(http.MaxBytesReader(nil, io.NopCloser(dec), maxDecompressedBodySize))
 	case "gzip", "x-gzip":
 		gr, err := gzip.NewReader(bytes.NewReader(raw))
 		if err != nil {
 			return nil, err
 		}
 		defer func() { _ = gr.Close() }()
-		return io.ReadAll(io.LimitReader(gr, maxDecompressedBodySize))
+		return io.ReadAll(http.MaxBytesReader(nil, gr, maxDecompressedBodySize))
 	case "deflate":
 		zr, err := zlib.NewReader(bytes.NewReader(raw))
 		if err != nil {
 			return nil, err
 		}
 		defer func() { _ = zr.Close() }()
-		return io.ReadAll(io.LimitReader(zr, maxDecompressedBodySize))
+		return io.ReadAll(http.MaxBytesReader(nil, zr, maxDecompressedBodySize))
 	default:
 		return nil, errors.New("unsupported Content-Encoding")
 	}

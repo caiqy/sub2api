@@ -121,13 +121,16 @@ func (s *GatewayService) ForwardAsResponses(
 	// (map/forward modes) read values from the original Responses body
 	// rather than the converted Anthropic body.
 	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
-	upstreamReq, _, err := s.buildUpstreamRequestWithSourceBody(upstreamCtx, c, account, body, anthropicBody, token, tokenType, mappedModel, reqStream, shouldMimicClaudeCode)
+	upstreamReq, upstreamBody, err := s.buildUpstreamRequestWithSourceBody(upstreamCtx, c, account, body, anthropicBody, token, tokenType, mappedModel, reqStream, shouldMimicClaudeCode)
 	releaseUpstreamCtx()
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
 
 	// 11. Send request
+	upstreamPreview := RequestBodyPreviewString(upstreamBody)
+	SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
+	SetOpsUpstreamAttempted(c, true)
 	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {
 		if resp != nil && resp.Body != nil {
@@ -171,8 +174,9 @@ func (s *GatewayService) ForwardAsResponses(
 				s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody, mappedModel)
 			}
 			return nil, &UpstreamFailoverError{
-				StatusCode:   resp.StatusCode,
-				ResponseBody: respBody,
+				StatusCode:      resp.StatusCode,
+				ResponseBody:    respBody,
+				ResponseHeaders: resp.Header.Clone(),
 			}
 		}
 
@@ -392,6 +396,7 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 	var usage ClaudeUsage
 	var firstTokenMs *int
 	firstChunk := true
+	completedWritten := false
 
 	scanner := bufio.NewScanner(resp.Body)
 	maxLineSize := defaultMaxLineSize
@@ -447,6 +452,9 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 					zap.String("request_id", requestID),
 				)
 				return true // client disconnected
+			}
+			if evt.Type == "response.completed" {
+				completedWritten = true
 			}
 		}
 		if len(events) > 0 {
@@ -504,12 +512,16 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 	}
 
 	if err := scanner.Err(); err != nil {
+		if completedWritten {
+			return resultWithUsage(), nil
+		}
 		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			logger.L().Warn("forward_as_responses stream: read error",
 				zap.Error(err),
 				zap.String("request_id", requestID),
 			)
 		}
+		return nil, fmt.Errorf("read upstream responses stream: %w", err)
 	}
 
 	return finalizeStream()

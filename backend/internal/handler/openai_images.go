@@ -62,6 +62,9 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return
 	}
+	if !isMultipartImagesContentType(c.GetHeader("Content-Type")) {
+		service.SetUsageRequestBody(c, openAIRequestBodyPreviewSnapshot(body))
+	}
 
 	if isMultipartImagesContentType(c.GetHeader("Content-Type")) {
 		setOpsRequestContext(c, "", false)
@@ -198,7 +201,12 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			if !cls.ModelNotFound {
 				message = "No available compatible accounts"
 			}
-			h.handleStreamingAwareError(c, cls.Status, cls.ErrType, message, streamStarted)
+			if lastFailoverErr != nil {
+				h.submitOpenAIImagesFailoverFailedUsageLog(c, apiKey, lastFailedAccount, parsed, lastFailoverErr, lastFailedDuration)
+				h.handleFailoverExhausted(c, lastFailoverErr, streamStarted)
+			} else {
+				h.handleStreamingAwareError(c, cls.Status, cls.ErrType, message, streamStarted)
+			}
 			return
 		}
 
@@ -225,6 +233,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		forwardStart := time.Now()
 		setOpenAIFailedUsageExactUpstreamModel(c, resolveOpenAIFailedUsageExactUpstreamModel(account, parsed.Model, channelMapping.MappedModel))
 		writerSizeBeforeForward := c.Writer.Size()
+		service.SetOpsUpstreamAttempted(c, false)
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
 				if accountReleaseFunc != nil {
@@ -260,9 +269,9 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			} else {
 				var imageUpstreamErr *service.OpenAIImagesUpstreamError
 				if errors.As(err, &imageUpstreamErr) {
+					h.submitOpenAIImagesFailedUsageLog(c, apiKey, account, parsed, err, forwardDuration)
 					if account.Type == service.AccountTypeOAuth {
 						h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
-						h.submitOpenAIImagesFailedUsageLog(c, apiKey, account, parsed, err, forwardDuration)
 						fields := []zap.Field{
 							zap.Int64("account_id", account.ID),
 							zap.Int("upstream_status", imageUpstreamErr.StatusCode),
@@ -296,6 +305,9 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 							zap.Int64("account_id", account.ID),
 							zap.Int("upstream_status", failoverErr.StatusCode),
 						)
+						if c.Request.Context().Err() == nil {
+							h.submitOpenAIImagesFailoverFailedUsageLog(c, apiKey, account, parsed, failoverErr, forwardDuration)
+						}
 						h.handleFailoverExhausted(c, failoverErr, true)
 						return
 					}
@@ -329,6 +341,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 					}
 					switchCount++
 					if h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount) {
+						h.submitOpenAIImagesFailoverFailedUsageLog(c, apiKey, account, parsed, failoverErr, forwardDuration)
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
@@ -343,7 +356,9 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			}
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
 			wroteFallback := ensureImagesForwardErrorResponse()
-			h.submitOpenAIImagesFailedUsageLog(c, apiKey, account, parsed, err, forwardDuration)
+			if c.Request.Context().Err() == nil && service.HasOpsUpstreamAttempted(c) && !service.HasOpsClientBusinessLimited(c) {
+				h.submitOpenAIImagesFailedUsageLog(c, apiKey, account, parsed, err, forwardDuration)
+			}
 			fields := []zap.Field{
 				zap.Int64("account_id", account.ID),
 				zap.Bool("fallback_error_response_written", wroteFallback),
@@ -421,12 +436,29 @@ func isMultipartImagesContentType(contentType string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "multipart/form-data")
 }
 
+const multipartMetadataPromptPreviewLimitBytes = 512 << 10
+
+func multipartMetadataPromptPreview(prompt string) string {
+	return truncateString(prompt, multipartMetadataPromptPreviewLimitBytes)
+}
+
+func requestBodySnapshotSize(req *http.Request, body []byte) int64 {
+	if req != nil && req.ContentLength > 0 {
+		return req.ContentLength
+	}
+	return int64(len(body))
+}
+
 func buildOpenAIImagesDetailSnapshot(c *gin.Context, parsed *service.OpenAIImagesRequest) *middleware2.UsageDetailSnapshot {
 	snapshot := middleware2.BuildUsageDetailSnapshot(c)
-	if snapshot == nil || parsed == nil || !parsed.Multipart {
+	if snapshot == nil || parsed == nil {
+		return snapshot
+	}
+	if !parsed.Multipart && service.RequestBodyPreviewString(parsed.Body) != "[inline binary payload omitted]" {
 		return snapshot
 	}
 
+	prompt := multipartMetadataPromptPreview(parsed.Prompt)
 	requestBody, err := json.Marshal(struct {
 		Model          string `json:"model"`
 		Prompt         string `json:"prompt"`
@@ -440,21 +472,22 @@ func buildOpenAIImagesDetailSnapshot(c *gin.Context, parsed *service.OpenAIImage
 		HadMask        bool   `json:"had_mask"`
 	}{
 		Model:          parsed.Model,
-		Prompt:         parsed.Prompt,
+		Prompt:         prompt,
 		Size:           parsed.Size,
 		Quality:        parsed.Quality,
 		Background:     parsed.Background,
 		OutputFormat:   parsed.OutputFormat,
 		Moderation:     parsed.Moderation,
 		N:              parsed.N,
-		HadSourceImage: len(parsed.Uploads) > 0,
-		HadMask:        parsed.HasMask,
+		HadSourceImage: len(parsed.Uploads) > 0 || len(parsed.InputImageURLs) > 0,
+		HadMask:        parsed.HasMask || strings.TrimSpace(parsed.MaskImageURL) != "",
 	})
 	if err != nil {
 		return snapshot
 	}
 
-	snapshot.RequestBody = string(requestBody)
+	size := requestBodySnapshotSize(c.Request, parsed.Body)
+	snapshot.RequestBody = service.RequestBodyPreviewSnapshot(string(requestBody), size, true)
 	return snapshot
 }
 

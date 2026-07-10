@@ -30,12 +30,6 @@ type usageDetailResponseWriter struct {
 	collector *usageDetailCollector
 }
 
-type replayRequestBody struct {
-	closer io.Closer
-	reader io.Reader
-	err    error
-}
-
 func (w *usageDetailResponseWriter) Write(data []byte) (int, error) {
 	if w.collector != nil && len(data) > 0 {
 		w.collector.captureResponseChunk(data)
@@ -68,16 +62,6 @@ func UsageDetailCapture() gin.HandlerFunc {
 		}
 		collector := &usageDetailCollector{
 			requestHeaders: requestHeaders,
-			requestBody:    "",
-		}
-		if c.Request != nil && c.Request.Body != nil {
-			body, replayData, err := captureRequestPrefix(c.Request.Body)
-			collector.requestBody = body
-			c.Request.Body = &replayRequestBody{
-				closer: c.Request.Body,
-				reader: bytes.NewReader(replayData),
-				err:    err,
-			}
 		}
 		c.Set(service.UsageDetailCaptureContextKey, collector)
 		c.Writer = &usageDetailResponseWriter{ResponseWriter: c.Writer, collector: collector}
@@ -128,42 +112,18 @@ func buildUsageDetailSnapshot(c *gin.Context) *UsageDetailSnapshot {
 		ResponseBody:            responseBody,
 	}).Normalize()
 }
-
-func (r *replayRequestBody) Read(p []byte) (int, error) {
-	if r == nil {
-		return 0, io.EOF
-	}
-	if r.reader != nil {
-		n, err := r.reader.Read(p)
-		if err == io.EOF {
-			r.reader = nil
-			if r.err != nil {
-				err = r.err
-				r.err = nil
-			}
-		}
-		return n, err
-	}
-	if r.err != nil {
-		err := r.err
-		r.err = nil
-		return 0, err
-	}
-	return 0, io.EOF
-}
-
-func (r *replayRequestBody) Close() error {
-	if r == nil || r.closer == nil {
-		return nil
-	}
-	return r.closer.Close()
-}
-
 func (c *usageDetailCollector) captureResponseChunk(data []byte) {
 	if c == nil || len(data) == 0 {
 		return
 	}
 	_, _ = c.responseBody.Write(data)
+}
+
+func (c *usageDetailCollector) SetUsageRequestBody(body string) {
+	if c == nil {
+		return
+	}
+	c.requestBody = body
 }
 
 func (c *usageDetailCollector) SetUsageUpstreamRequest(headers, body string) {
@@ -172,6 +132,12 @@ func (c *usageDetailCollector) SetUsageUpstreamRequest(headers, body string) {
 	}
 	c.upstreamHeaders = headers
 	c.upstreamBody = body
+}
+
+func (c *usageDetailCollector) SetUsageUpstreamRequestHeaders(headers string) {
+	if c != nil {
+		c.upstreamHeaders = headers
+	}
 }
 
 func (c *usageDetailCollector) SetUsageResponseSnapshot(headers, body string) {
@@ -225,12 +191,6 @@ func copyToResponseWriter(w *usageDetailResponseWriter, r io.Reader) (int64, err
 		}
 	}
 }
-
-func captureRequestPrefix(body io.Reader) (captured string, replayPrefix []byte, err error) {
-	payload, readErr := io.ReadAll(body)
-	return string(payload), payload, readErr
-}
-
 func SetUsageUpstreamRequest(c *gin.Context, req *http.Request, body string) {
 	service.SetUsageUpstreamRequest(c, req, body)
 }

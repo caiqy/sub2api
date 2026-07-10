@@ -133,7 +133,7 @@ func TestGatewayHandler_MessagesForwardErrorStillCreatesUsageLog(t *testing.T) {
 	require.NotNil(t, usageLogRepo.lastLog.ReasoningEffort)
 	require.Equal(t, "high", *usageLogRepo.lastLog.ReasoningEffort)
 	require.NotNil(t, usageLogRepo.lastLog.DetailSnapshot)
-	require.JSONEq(t, reqBody, usageLogRepo.lastLog.DetailSnapshot.RequestBody)
+	requireRequestPreviewSnapshot(t, usageLogRepo.lastLog.DetailSnapshot.RequestBody, reqBody)
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, "anthropic upstream rejected payload")
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "x-api-key: anthropic-test-key")
 }
@@ -475,5 +475,5 @@ func TestGatewayHandler_MessagesStreamingPartialWriteFailureStillCreatesUsageLog
 	require.Contains(t, rec.Body.String(), `"type":"error"`)
 	require.NotNil(t, usageLogRepo.lastLog)
 	require.NotNil(t, usageLogRepo.lastLog.DetailSnapshot)
-	require.JSONEq(t, reqBody, usageLogRepo.lastLog.DetailSnapshot.RequestBody)
+	requireRequestPreviewSnapshot(t, usageLogRepo.lastLog.DetailSnapshot.RequestBody, reqBody)
 }

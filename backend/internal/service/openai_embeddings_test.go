@@ -104,3 +104,37 @@ func TestForwardEmbeddings_APIKeyPassthroughRecordsUsageAndBatchInput(t *testing
 	require.Equal(t, "float", gjson.GetBytes(upstream.lastBody, "encoding_format").String())
 	require.Equal(t, int64(256), gjson.GetBytes(upstream.lastBody, "dimensions").Int())
 }
+
+func TestForwardEmbeddingsStoresBoundedUsageAndOpsUpstreamPreview(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const upstreamModel = "mapped-embedding-model"
+	input := strings.Repeat("x", int(defaultRequestBodyPreviewLimitBytes)+1024)
+	body := []byte(`{"model":"text-embedding-3-small","input":"` + input + `"}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/embeddings", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	collector := &usageUpstreamSnapshotCollector{}
+	c.Set(UsageDetailCaptureContextKey, collector)
+
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"invalid input"}}`)),
+	}}}
+	account := &Account{ID: 43, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{
+		"api_key": "sk-test",
+		"model_mapping": map[string]any{
+			"text-embedding-3-small": upstreamModel,
+		},
+	}}
+
+	_, err := svc.ForwardEmbeddings(context.Background(), c, account, body, "")
+
+	require.Error(t, err)
+	require.Contains(t, collector.headers, ":method: POST")
+	require.Contains(t, collector.headers, "/v1/embeddings")
+	require.LessOrEqual(t, len(collector.body), int(defaultRequestBodyPreviewLimitBytes))
+	require.Equal(t, requestBodyPreviewOmittedMarker, collector.body)
+	require.Equal(t, collector.body, requireOpsPreviewString(t, c, requestBodyPreviewOmittedMarker))
+}

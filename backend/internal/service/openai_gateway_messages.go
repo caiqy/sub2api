@@ -294,9 +294,10 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	if account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	SetUsageUpstreamRequest(c, upstreamReq, "")
-	setOpsUpstreamRequestBodyFromRequest(c, upstreamReq)
+	SetUsageUpstreamRequestHeaders(c, upstreamReq)
+	SetOpsUpstreamAttempted(c, true)
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+	closeOpenAIRequestBody(upstreamReq)
 	if err != nil {
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())
 		setOpsUpstreamError(c, 0, safeErr, "")

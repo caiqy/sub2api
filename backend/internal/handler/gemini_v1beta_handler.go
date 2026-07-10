@@ -184,6 +184,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		googleError(c, http.StatusBadRequest, "Request body is empty")
 		return
 	}
+	service.SetUsageRequestBody(c, openAIRequestBodyPreviewSnapshot(body))
 
 	setOpsRequestContext(c, modelName, stream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(stream, false)))
@@ -400,6 +401,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			requestCtx = service.WithAccountSwitchCount(requestCtx, fs.SwitchCount, h.metadataBridgeEnabled())
 		}
 		forwardStartedAt := time.Now()
+		service.SetOpsUpstreamAttempted(c, false)
 		if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
 			result, err = h.antigravityGatewayService.ForwardGemini(requestCtx, c, account, modelName, action, stream, body, hasBoundSession)
 		} else {
@@ -428,26 +430,35 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			}
 			// ForwardNative already wrote the response
 			reqLog.Error("gemini.forward_failed", zap.Int64("account_id", account.ID), zap.Error(err))
-			userAgent := c.GetHeader("User-Agent")
-			clientIP := ip.GetClientIP(c)
-			inboundEndpoint := GetInboundEndpoint(c)
-			upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
-			detailSnapshot := middleware.BuildUsageDetailSnapshot(c)
-			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
-				service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), &service.FailedUsageLogInput{
-					APIKey:           apiKey,
-					User:             apiKey.User,
-					Account:          account,
-					Model:            modelName,
-					Stream:           stream,
-					InboundEndpoint:  inboundEndpoint,
-					UpstreamEndpoint: upstreamEndpoint,
-					UserAgent:        userAgent,
-					IPAddress:        clientIP,
-					DetailSnapshot:   detailSnapshot,
-					Duration:         forwardDuration,
-				}, "handler.gemini_v1beta.models")
-			})
+			if c.Request.Context().Err() == nil && !c.Writer.Written() && !service.IsResponseCommitted(c) {
+				c.Writer.Header().Del("Content-Type")
+				c.Writer.Header().Del("Cache-Control")
+				c.Writer.Header().Del("Connection")
+				c.Writer.Header().Del("X-Accel-Buffering")
+				googleError(c, http.StatusBadGateway, "Upstream request failed")
+			}
+			if c.Request.Context().Err() == nil && service.HasOpsUpstreamAttempted(c) && !service.HasOpsClientBusinessLimited(c) {
+				userAgent := c.GetHeader("User-Agent")
+				clientIP := ip.GetClientIP(c)
+				inboundEndpoint := GetInboundEndpoint(c)
+				upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
+				detailSnapshot := middleware.BuildUsageDetailSnapshot(c)
+				h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
+					service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), &service.FailedUsageLogInput{
+						APIKey:           apiKey,
+						User:             apiKey.User,
+						Account:          account,
+						Model:            modelName,
+						Stream:           stream,
+						InboundEndpoint:  inboundEndpoint,
+						UpstreamEndpoint: upstreamEndpoint,
+						UserAgent:        userAgent,
+						IPAddress:        clientIP,
+						DetailSnapshot:   detailSnapshot,
+						Duration:         forwardDuration,
+					}, "handler.gemini_v1beta.models")
+				})
+			}
 			return
 		}
 

@@ -26,6 +26,21 @@ type failingOpenAIImageWriter struct {
 	writes    int
 }
 
+type openAIImagesSnapshotCollector struct {
+	requestBody string
+	headers     string
+	body        string
+}
+
+func (c *openAIImagesSnapshotCollector) SetUsageRequestBody(body string) {
+	c.requestBody = body
+}
+
+func (c *openAIImagesSnapshotCollector) SetUsageUpstreamRequest(headers, body string) {
+	c.headers = headers
+	c.body = unwrapRequestBodyPreviewForTest(body)
+}
+
 func (w *failingOpenAIImageWriter) Write(p []byte) (int, error) {
 	if w.writes >= w.failAfter {
 		return 0, errors.New("write failed: client disconnected")
@@ -980,6 +995,73 @@ func TestOpenAIGatewayServiceForwardImages_APIKeyGenerationUsesConfiguredV1BaseU
 	require.Equal(t, "aGVsbG8=", gjson.Get(rec.Body.String(), "data.0.b64_json").String())
 }
 
+func TestOpenAIGatewayServiceForwardImages_JSONInlineDataWithLargeExponentIsOmittedFromSnapshots(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const imageBase64 = "c2VjcmV0LWltYWdlLWJ5dGVz"
+	const maskBase64 = "c2VjcmV0LW1hc2stYnl0ZXM="
+	body := []byte(`{"model":"gpt-image-2","prompt":"replace background","weight":1e1000,"images":[{"image_url":"data:image/png;base64,` + imageBase64 + `"}],"mask":{"image_url":"data:image/png;base64,` + maskBase64 + `"}}`)
+
+	for _, accountType := range []string{AccountTypeAPIKey, AccountTypeOAuth} {
+		t.Run(string(accountType), func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body))
+			c.Request.Header.Set("Content-Type", "application/json")
+			collector := &openAIImagesSnapshotCollector{}
+			c.Set(UsageDetailCaptureContextKey, collector)
+
+			upstream := &httpUpstreamRecorder{err: errors.New("transport failed")}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			parsed, err := svc.ParseOpenAIImagesRequest(c, body)
+			require.NoError(t, err)
+			account := &Account{
+				ID:          77,
+				Name:        "openai-images-inline",
+				Platform:    PlatformOpenAI,
+				Type:        accountType,
+				Concurrency: 1,
+				Credentials: map[string]any{
+					"api_key":            "sk-test",
+					"access_token":       "oauth-test",
+					"chatgpt_account_id": "acct-test",
+					"base_url":           "https://image-upstream.example/v1",
+				},
+			}
+
+			_, err = svc.ForwardImages(context.Background(), c, account, body, parsed, "")
+			require.Error(t, err)
+			for _, preview := range []string{collector.requestBody, collector.body} {
+				require.NotEmpty(t, preview)
+				require.NotContains(t, preview, "data:")
+				require.NotContains(t, preview, imageBase64)
+				require.NotContains(t, preview, maskBase64)
+				require.LessOrEqual(t, len(preview), int(defaultRequestBodyPreviewLimitBytes))
+			}
+			opsPreview := requireOpsPreviewString(t, c, "omitted")
+			require.NotContains(t, opsPreview, "data:")
+			require.NotContains(t, opsPreview, imageBase64)
+			require.NotContains(t, opsPreview, maskBase64)
+			require.LessOrEqual(t, len(opsPreview), int(defaultRequestBodyPreviewLimitBytes))
+		})
+	}
+}
+
+func TestOpenAIImagesJSONPreviewKeepsBoundedOrdinaryJSON(t *testing.T) {
+	body := []byte(`{"model":"gpt-image-2","prompt":"` + strings.Repeat("x", int(defaultRequestBodyPreviewLimitBytes)+1024) + `"}`)
+	preview, omitted := openAIImagesJSONPreview(body)
+	require.True(t, omitted)
+	require.Equal(t, requestBodyPreviewOmittedMarker, preview)
+}
+
+func TestOpenAIImagesJSONPreviewDoesNotDecodePastBoundedPreview(t *testing.T) {
+	body := []byte(`{"prompt":"` + strings.Repeat("x", int(defaultRequestBodyPreviewLimitBytes)+1024))
+
+	preview, omitted := openAIImagesJSONPreview(body)
+
+	require.True(t, omitted)
+	require.Equal(t, requestBodyPreviewOmittedMarker, preview)
+}
+
 func TestOpenAIGatewayServiceForwardImages_APIKeyStreamJSONResponseBillsImage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"gpt-image-2","prompt":"draw a cat","stream":true,"response_format":"b64_json"}`)
@@ -1361,6 +1443,8 @@ func TestOpenAIGatewayServiceForwardImages_OAuthEditsMultipartUsesResponsesAPI(t
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = req
 	c.Set("api_key", &APIKey{ID: 100})
+	collector := &openAIUsageUpstreamRequestCollector{}
+	c.Set(UsageDetailCaptureContextKey, collector)
 
 	svc := &OpenAIGatewayService{}
 	parsed, err := svc.ParseOpenAIImagesRequest(c, body.Bytes())
@@ -1404,6 +1488,10 @@ func TestOpenAIGatewayServiceForwardImages_OAuthEditsMultipartUsesResponsesAPI(t
 	require.Equal(t, "replace background with aurora", gjson.GetBytes(upstream.lastBody, "input.0.content.0.text").String())
 	require.Equal(t, "ZWRpdGVk", gjson.Get(rec.Body.String(), "data.0.b64_json").String())
 	require.Equal(t, "replace background with aurora", gjson.Get(rec.Body.String(), "data.0.revised_prompt").String())
+	require.Equal(t, "[multipart body omitted]", collector.body)
+	require.NotContains(t, collector.body, "data:image/")
+	require.NotContains(t, collector.body, "png-image-content")
+	require.Equal(t, "[multipart body omitted]", requireOpsPreviewString(t, c, "omitted"))
 }
 
 func TestOpenAIGatewayServiceForwardImages_OAuthEditsStreamingTransformsEvents(t *testing.T) {

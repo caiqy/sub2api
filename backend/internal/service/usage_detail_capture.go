@@ -2,7 +2,6 @@ package service
 
 import (
 	"bytes"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,6 +13,14 @@ const UsageDetailCaptureContextKey = "usage_detail_capture"
 
 type usageDetailUpstreamRequestSetter interface {
 	SetUsageUpstreamRequest(headers, body string)
+}
+
+type usageDetailUpstreamRequestHeadersSetter interface {
+	SetUsageUpstreamRequestHeaders(headers string)
+}
+
+type usageDetailRequestBodySetter interface {
+	SetUsageRequestBody(body string)
 }
 
 type usageDetailResponseSnapshotSetter interface {
@@ -123,20 +130,31 @@ func firstNonEmptyHeaderValue(headers http.Header, key string) string {
 	return ""
 }
 
+func SetUsageRequestBody(c *gin.Context, body string) {
+	if c == nil {
+		return
+	}
+	v, ok := c.Get(UsageDetailCaptureContextKey)
+	if !ok {
+		return
+	}
+	collector, ok := v.(usageDetailRequestBodySetter)
+	if !ok || collector == nil {
+		return
+	}
+	collector.SetUsageRequestBody(body)
+}
+
 func SetUsageUpstreamRequest(c *gin.Context, req *http.Request, body string) {
 	if c == nil || req == nil {
 		return
 	}
-	if body == "" && req.GetBody != nil {
-		clone, err := req.GetBody()
-		if err == nil && clone != nil {
-			payload, readErr := io.ReadAll(clone)
-			_ = clone.Close()
-			if readErr == nil {
-				body = string(payload)
-			}
-		}
+	size := req.ContentLength
+	if size < 0 || size == 0 && body != "" {
+		size = int64(len(body))
 	}
+	snapshot := RequestBodyPreviewSnapshot(body, size)
+	c.Set(OpsUpstreamRequestBodyKey, snapshot)
 	v, ok := c.Get(UsageDetailCaptureContextKey)
 	if !ok {
 		return
@@ -145,7 +163,22 @@ func SetUsageUpstreamRequest(c *gin.Context, req *http.Request, body string) {
 	if !ok || collector == nil {
 		return
 	}
-	collector.SetUsageUpstreamRequest(FormatUsageDetailRequestHeadersText(req), body)
+	collector.SetUsageUpstreamRequest(FormatUsageDetailRequestHeadersText(req), snapshot)
+}
+
+func SetUsageUpstreamRequestHeaders(c *gin.Context, req *http.Request) {
+	if c == nil || req == nil {
+		return
+	}
+	v, ok := c.Get(UsageDetailCaptureContextKey)
+	if !ok {
+		return
+	}
+	collector, ok := v.(usageDetailUpstreamRequestHeadersSetter)
+	if !ok || collector == nil {
+		return
+	}
+	collector.SetUsageUpstreamRequestHeaders(FormatUsageDetailRequestHeadersText(req))
 }
 
 func SetUsageResponseSnapshot(c *gin.Context, headers, body string) {

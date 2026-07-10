@@ -332,8 +332,9 @@ func (s *AntigravityGatewayService) handleSmartRetry(p antigravityRetryLoopParam
 				}
 			}
 			applyAntigravityExtraHeaders(retryReq, p.extraHeaders)
-			SetUsageUpstreamRequest(p.c, retryReq, string(p.body))
-
+			preview := RequestBodyPreviewString(p.body)
+			SetUsageUpstreamRequest(p.c, retryReq, preview)
+			SetOpsUpstreamAttempted(p.c, true)
 			retryResp, retryErr := p.httpUpstream.Do(retryReq, p.proxyURL, p.account.ID, p.account.Concurrency)
 			if retryErr == nil && retryResp != nil && retryResp.StatusCode != http.StatusTooManyRequests && retryResp.StatusCode != http.StatusServiceUnavailable {
 				log.Printf("%s status=%d smart_retry_success attempt=%d/%d", p.prefix, retryResp.StatusCode, attempt, maxAttempts)
@@ -509,8 +510,9 @@ func (s *AntigravityGatewayService) handleSingleAccountRetryInPlace(
 			break
 		}
 		applyAntigravityExtraHeaders(retryReq, p.extraHeaders)
-		SetUsageUpstreamRequest(p.c, retryReq, string(p.body))
-
+		preview := RequestBodyPreviewString(p.body)
+		SetUsageUpstreamRequest(p.c, retryReq, preview)
+		SetOpsUpstreamAttempted(p.c, true)
 		retryResp, retryErr := p.httpUpstream.Do(retryReq, p.proxyURL, p.account.ID, p.account.Concurrency)
 		if retryErr == nil && retryResp != nil && retryResp.StatusCode != http.StatusTooManyRequests && retryResp.StatusCode != http.StatusServiceUnavailable {
 			logger.LegacyPrintf("service.antigravity_gateway", "%s status=%d single_account_503_retry_success attempt=%d/%d total_waited=%v",
@@ -649,8 +651,10 @@ urlFallbackLoop:
 				return nil, err
 			}
 			applyAntigravityExtraHeaders(upstreamReq, p.extraHeaders)
-			SetUsageUpstreamRequest(p.c, upstreamReq, string(p.body))
+			preview := RequestBodyPreviewString(p.body)
+			SetUsageUpstreamRequest(p.c, upstreamReq, preview)
 
+			SetOpsUpstreamAttempted(p.c, true)
 			resp, err = p.httpUpstream.Do(upstreamReq, p.proxyURL, p.account.ID, p.account.Concurrency)
 			if err == nil && resp == nil {
 				err = errors.New("upstream returned nil response")
@@ -1459,10 +1463,7 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 
 	accessToken, err := s.resolveAccessToken(ctx, account)
 	if err != nil {
-		return nil, &UpstreamFailoverError{
-			StatusCode:   http.StatusBadGateway,
-			ResponseBody: []byte(`{"error":{"type":"authentication_error","message":"Failed to get upstream access token"},"type":"error"}`),
-		}
+		return nil, fmt.Errorf("get upstream access token: %w", err)
 	}
 
 	projectID, err := resolveAntigravityForwardProjectID(account)
@@ -1796,7 +1797,7 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 						Message:            upstreamMsg,
 						Detail:             upstreamDetail,
 					})
-					return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, RetryableOnSameAccount: true}
+					return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, ResponseHeaders: resp.Header.Clone(), RetryableOnSameAccount: true}
 				}
 			}
 
@@ -1814,7 +1815,7 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 					Message:            upstreamMsg,
 					Detail:             upstreamDetail,
 				})
-				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
+				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, ResponseHeaders: resp.Header.Clone()}
 			}
 
 			return nil, s.writeMappedClaudeError(c, account, resp.StatusCode, resp.Header.Get("x-request-id"), respBody)
@@ -2259,10 +2260,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 
 	accessToken, err := s.resolveAccessToken(ctx, account)
 	if err != nil {
-		return nil, &UpstreamFailoverError{
-			StatusCode:   http.StatusBadGateway,
-			ResponseBody: []byte(`{"error":{"message":"Failed to get upstream access token","status":"UNAVAILABLE"}}`),
-		}
+		return nil, fmt.Errorf("get upstream access token: %w", err)
 	}
 
 	projectID, err := resolveAntigravityForwardProjectID(account)
@@ -2342,7 +2340,9 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 					fallbackReq, err := antigravity.NewAPIRequest(ctx, upstreamAction, accessToken, fallbackWrapped)
 					if err == nil {
 						applyAntigravityExtraHeaders(fallbackReq, outboundHeader)
-						SetUsageUpstreamRequest(c, fallbackReq, string(fallbackWrapped))
+						fallbackPreview := RequestBodyPreviewString(fallbackWrapped)
+						SetUsageUpstreamRequest(c, fallbackReq, fallbackPreview)
+						SetOpsUpstreamAttempted(c, true)
 						fallbackResp, err := s.httpUpstream.Do(fallbackReq, proxyURL, account.ID, account.Concurrency)
 						if err == nil && fallbackResp.StatusCode < 400 {
 							_ = resp.Body.Close()
@@ -2498,7 +2498,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 				Message:            upstreamMsg,
 				Detail:             upstreamDetail,
 			})
-			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: unwrappedForOps, RetryableOnSameAccount: true}
+			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: unwrappedForOps, ResponseHeaders: resp.Header.Clone(), RetryableOnSameAccount: true}
 		}
 
 		if s.shouldFailoverUpstreamError(resp.StatusCode) {
@@ -2512,7 +2512,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 				Message:            upstreamMsg,
 				Detail:             upstreamDetail,
 			})
-			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: unwrappedForOps}
+			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: unwrappedForOps, ResponseHeaders: resp.Header.Clone()}
 		}
 		if contentType == "" {
 			contentType = "application/json"
@@ -4398,7 +4398,8 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 	if v := clientBeta; v != "" {
 		req.Header.Set("anthropic-beta", v)
 	}
-	SetUsageUpstreamRequest(c, req, string(body))
+	preview := RequestBodyPreviewString(body)
+	SetUsageUpstreamRequest(c, req, preview)
 
 	// 代理 URL
 	proxyURL := ""
@@ -4407,6 +4408,7 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 	}
 
 	// 发送请求
+	SetOpsUpstreamAttempted(c, true)
 	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
 		logger.LegacyPrintf("service.antigravity_gateway", "%s upstream request failed: %v", prefix, err)
