@@ -2,6 +2,8 @@
 comet_change: optimize-request-body-retention
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-07-10-optimize-request-body-retention
+status: final
 ---
 
 # 请求体驻留优化技术设计
