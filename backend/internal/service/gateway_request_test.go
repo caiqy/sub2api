@@ -3,6 +3,7 @@
 package service
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -24,6 +25,20 @@ func TestParseGatewayRequest(t *testing.T) {
 	require.NotEmpty(t, parsed.SystemRaw())
 	require.NotEmpty(t, parsed.MessagesRaw())
 	require.False(t, parsed.ThinkingEnabled)
+}
+
+func TestParsedRequestCloneForBody_BorrowsRequestBodyHandle(t *testing.T) {
+	body := []byte(`{"model":"claude-3-7-sonnet","messages":[{"role":"user","content":"hi"}]}`)
+	handle, err := NewRequestBodyHandleFromReader(bytes.NewReader(body), RequestBodyHandleOptions{SpoolThresholdBytes: 1})
+	require.NoError(t, err)
+	defer CleanupRequestBodyHandle(handle)
+
+	parsed, err := ParseGatewayRequest(NewRequestBodyRefFromHandle(handle), "")
+	require.NoError(t, err)
+	clone, err := parsed.CloneForBody(handle)
+	require.NoError(t, err)
+	require.Same(t, handle, clone.Body.Handle())
+	require.Equal(t, parsed.MessagesRaw(), clone.MessagesRaw())
 }
 
 func TestParseGatewayRequest_ThinkingEnabled(t *testing.T) {

@@ -211,12 +211,28 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	defer h.maybeLogCompatibilityFallbackMetrics(reqLog)
 
 	// 读取请求体
-	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
+	coordinator, err := newJSONRequestBody(c.Request)
 	if err != nil {
+		if status, ok := requestBodyReadErrorStatus(err); ok {
+			if status == http.StatusRequestEntityTooLarge {
+				if maxErr, ok := extractMaxBytesError(err); ok {
+					h.errorResponse(c, status, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+					return
+				}
+			}
+			h.errorResponse(c, status, "api_error", "Failed to spool request body")
+			return
+		}
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 			return
 		}
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		return
+	}
+	defer coordinator.Cleanup()
+	body, err := coordinator.ReadRaw()
+	if err != nil {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 		return
 	}
@@ -225,11 +241,16 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return
 	}
-	service.SetUsageRequestBody(c, openAIRequestBodyPreviewSnapshot(body))
+	if err := coordinator.SetEffectiveBytes(body); err != nil {
+		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+		return
+	}
+	effectiveBody := coordinator.Effective()
+	service.SetUsageRequestBody(c, service.RequestBodyPreviewSnapshot(effectiveBody.PreviewString(), effectiveBody.Size()))
 
 	setOpsRequestContext(c, "", false)
 
-	bodyRef := service.NewRequestBodyRef(body)
+	bodyRef := service.NewRequestBodyRefFromHandle(effectiveBody)
 	parsedReq, err := service.ParseGatewayRequest(bodyRef, domain.PlatformAnthropic)
 	if err != nil {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
@@ -615,7 +636,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 捕获请求信息（用于异步记录，避免在 goroutine 中访问 gin.Context）
 			userAgent := c.GetHeader("User-Agent")
 			clientIP := ip.GetClientIP(c)
-			requestPayloadHash := service.HashUsageRequestPayload(body)
+			requestPayloadHash := effectiveBody.Hash()
 			inboundEndpoint := GetInboundEndpoint(c)
 			upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 			detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
@@ -692,7 +713,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		var lastFailedDuration time.Duration
 
 		for {
-			attemptParsedReq, err := parsedReq.CloneForBody(body)
+			attemptParsedReq, err := parsedReq.CloneForBody(effectiveBody)
 			if err != nil {
 				h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 				return

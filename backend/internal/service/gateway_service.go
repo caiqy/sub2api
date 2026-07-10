@@ -4961,7 +4961,19 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	if parsed == nil {
 		return nil, fmt.Errorf("parse request: empty request")
 	}
-	sourceBody := parsed.Body.Bytes()
+	sourceHandle := parsed.Body.Handle()
+	if sourceHandle == nil {
+		var err error
+		sourceHandle, err = NewRequestBodyHandleFromBytes(parsed.Body.Bytes(), RequestBodyHandleOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("create request body handle: %w", err)
+		}
+		defer func() { CleanupRequestBodyHandle(sourceHandle) }()
+	}
+	sourceBody, err := sourceHandle.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("read request body: %w", err)
+	}
 
 	// Web Search 模拟：纯 web_search 请求时，直接调用搜索 API 构造响应
 	if account != nil && s.shouldEmulateWebSearch(ctx, account, parsed.GroupID, sourceBody) {
@@ -5187,25 +5199,59 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		}
 	}
 
-	upstreamPreview := RequestBodyPreviewString(body)
-	SetOpsUpstreamRequestBodyPreview(c, upstreamPreview, int64(len(body)))
+	bodyHandle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("create effective request body: %w", err)
+	}
+	defer CleanupRequestBodyHandle(bodyHandle)
+	sourceBody = nil
+	body = nil
+	upstreamPreview := bodyHandle.PreviewString()
+	SetOpsUpstreamRequestBodyPreview(c, upstreamPreview, bodyHandle.Size())
 	// 重试循环
 	var resp *http.Response
 	retryStart := time.Now()
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
 		// 构建上游请求（每次重试需要重新构建，因为请求体需要重新读取）
+		sourceBody, err = sourceHandle.ReadAll()
+		if err != nil {
+			return nil, fmt.Errorf("read request body: %w", err)
+		}
+		body, err = bodyHandle.ReadAll()
+		if err != nil {
+			return nil, fmt.Errorf("read effective request body: %w", err)
+		}
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
 		upstreamReq, upstreamBody, err := s.buildUpstreamRequestWithSourceBody(upstreamCtx, c, account, sourceBody, body, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 		releaseUpstreamCtx()
+		sourceBody = nil
+		body = nil
 		if err != nil {
 			return nil, err
 		}
-		upstreamPreview = RequestBodyPreviewString(upstreamBody)
+		upstreamHandle, err := NewRequestBodyHandleFromBytes(upstreamBody, RequestBodyHandleOptions{})
+		upstreamBody = nil
+		if err != nil {
+			return nil, fmt.Errorf("create upstream request body: %w", err)
+		}
+		if upstreamReq.Body != nil {
+			_ = upstreamReq.Body.Close()
+		}
+		upstreamReq.Body, err = upstreamHandle.Open()
+		if err != nil {
+			CleanupRequestBodyHandle(upstreamHandle)
+			return nil, err
+		}
+		upstreamReq.GetBody = upstreamHandle.Open
+		upstreamReq.ContentLength = upstreamHandle.Size()
+		upstreamPreview = upstreamHandle.PreviewString()
 
 		// 发送请求
 		SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
 		SetOpsUpstreamAttempted(c, true)
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+		_ = upstreamReq.Body.Close()
+		CleanupRequestBodyHandle(upstreamHandle)
 		if err != nil {
 			if upstreamReq.Body != nil {
 				_ = upstreamReq.Body.Close()

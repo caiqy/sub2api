@@ -32,10 +32,28 @@ func (s *GatewayService) ForwardAsResponses(
 	ctx context.Context,
 	c *gin.Context,
 	account *Account,
-	body []byte,
+	bodyRef any,
 	parsed *ParsedRequest,
 ) (*ForwardResult, error) {
 	startTime := time.Now()
+	var bodyHandle *RequestBodyHandle
+	var err error
+	switch value := bodyRef.(type) {
+	case *RequestBodyHandle:
+		bodyHandle = value
+	case []byte:
+		bodyHandle, err = NewRequestBodyHandleFromBytes(value, RequestBodyHandleOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("create responses request body: %w", err)
+		}
+		defer CleanupRequestBodyHandle(bodyHandle)
+	default:
+		return nil, fmt.Errorf("read responses request body: unsupported body type %T", bodyRef)
+	}
+	body, err := bodyHandle.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("read responses request body: %w", err)
+	}
 
 	// 1. Parse Responses request
 	var responsesReq apicompat.ResponsesRequest
@@ -123,15 +141,34 @@ func (s *GatewayService) ForwardAsResponses(
 	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
 	upstreamReq, upstreamBody, err := s.buildUpstreamRequestWithSourceBody(upstreamCtx, c, account, body, anthropicBody, token, tokenType, mappedModel, reqStream, shouldMimicClaudeCode)
 	releaseUpstreamCtx()
+	body = nil
+	anthropicBody = nil
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
+	upstreamHandle, err := NewRequestBodyHandleFromBytes(upstreamBody, RequestBodyHandleOptions{})
+	upstreamBody = nil
+	if err != nil {
+		return nil, fmt.Errorf("create upstream request body: %w", err)
+	}
+	if upstreamReq.Body != nil {
+		_ = upstreamReq.Body.Close()
+	}
+	upstreamReq.Body, err = upstreamHandle.Open()
+	if err != nil {
+		CleanupRequestBodyHandle(upstreamHandle)
+		return nil, fmt.Errorf("open upstream request body: %w", err)
+	}
+	upstreamReq.GetBody = upstreamHandle.Open
+	upstreamReq.ContentLength = upstreamHandle.Size()
 
 	// 11. Send request
-	upstreamPreview := RequestBodyPreviewString(upstreamBody)
+	upstreamPreview := upstreamHandle.PreviewString()
 	SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
 	SetOpsUpstreamAttempted(c, true)
 	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+	_ = upstreamReq.Body.Close()
+	CleanupRequestBodyHandle(upstreamHandle)
 	if err != nil {
 		if resp != nil && resp.Body != nil {
 			_ = resp.Body.Close()

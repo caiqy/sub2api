@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"time"
 
-	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -45,12 +44,28 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 	)
 
 	// Read request body
-	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
+	coordinator, err := newJSONRequestBody(c.Request)
 	if err != nil {
+		if status, ok := requestBodyReadErrorStatus(err); ok {
+			if status == http.StatusRequestEntityTooLarge {
+				if maxErr, ok := extractMaxBytesError(err); ok {
+					h.responsesErrorResponse(c, status, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+					return
+				}
+			}
+			h.responsesErrorResponse(c, status, "server_error", "Failed to spool request body")
+			return
+		}
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			h.responsesErrorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 			return
 		}
+		h.responsesErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		return
+	}
+	defer coordinator.Cleanup()
+	body, err := coordinator.ReadRaw()
+	if err != nil {
 		h.responsesErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 		return
 	}
@@ -59,7 +74,12 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		h.responsesErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return
 	}
-	service.SetUsageRequestBody(c, openAIRequestBodyPreviewSnapshot(body))
+	if err := coordinator.SetEffectiveBytes(body); err != nil {
+		h.responsesErrorResponse(c, http.StatusServiceUnavailable, "server_error", "Failed to spool request body")
+		return
+	}
+	effectiveBody := coordinator.Effective()
+	service.SetUsageRequestBody(c, service.RequestBodyPreviewSnapshot(effectiveBody.PreviewString(), effectiveBody.Size()))
 
 	setOpsRequestContext(c, "", false)
 
@@ -92,6 +112,14 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 
 	// 解析渠道级模型映射
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(requestCtx, apiKey.GroupID, reqModel)
+	if channelMapping.Mapped {
+		body = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
+		if err := coordinator.SetEffectiveBytes(body); err != nil {
+			h.responsesErrorResponse(c, http.StatusServiceUnavailable, "server_error", "Failed to spool request body")
+			return
+		}
+		effectiveBody = coordinator.Effective()
+	}
 
 	// Claude Code only restriction:
 	// /v1/responses is never a Claude Code endpoint.
@@ -150,7 +178,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 	}
 
 	// Parse request for session hash
-	bodyRef := service.NewRequestBodyRef(body)
+	bodyRef := service.NewRequestBodyRefFromHandle(effectiveBody)
 	parsedReq, _ := service.ParseGatewayRequest(bodyRef, "responses")
 	if parsedReq == nil {
 		parsedReq = &service.ParsedRequest{Model: reqModel, Stream: reqStream, Body: bodyRef}
@@ -238,12 +266,8 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		// 5. Forward request
 		writerSizeBeforeForward := c.Writer.Size()
 		forwardStart := time.Now()
-		forwardBody := body
-		if channelMapping.Mapped {
-			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
-		}
 		service.SetOpsUpstreamAttempted(c, false)
-		result, err := h.gatewayService.ForwardAsResponses(requestCtx, c, account, forwardBody, parsedReq)
+		result, err := h.gatewayService.ForwardAsResponses(requestCtx, c, account, effectiveBody, parsedReq)
 		forwardDuration := time.Since(forwardStart)
 
 		if accountReleaseFunc != nil {
@@ -295,7 +319,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		// 6. Record usage
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
-		requestPayloadHash := service.HashUsageRequestPayload(body)
+		requestPayloadHash := effectiveBody.Hash()
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 		detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)

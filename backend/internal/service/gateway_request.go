@@ -58,23 +58,46 @@ type jsonRange struct {
 }
 
 type RequestBodyRef struct {
-	data []byte
+	data   []byte
+	handle *RequestBodyHandle
 }
 
 func NewRequestBodyRef(data []byte) *RequestBodyRef {
 	return &RequestBodyRef{data: data}
 }
 
+// NewRequestBodyRefFromHandle borrows a request-scoped handle; its owner cleans it up.
+func NewRequestBodyRefFromHandle(handle *RequestBodyHandle) *RequestBodyRef {
+	return &RequestBodyRef{handle: handle}
+}
+
 func (b *RequestBodyRef) Bytes() []byte {
 	if b == nil {
 		return nil
 	}
+	if b.handle != nil {
+		data, err := b.handle.ReadAll()
+		if err != nil {
+			return nil
+		}
+		return data
+	}
 	return b.data
+}
+
+func (b *RequestBodyRef) Handle() *RequestBodyHandle {
+	if b == nil {
+		return nil
+	}
+	return b.handle
 }
 
 func (b *RequestBodyRef) Len() int {
 	if b == nil {
 		return 0
+	}
+	if b.handle != nil {
+		return int(b.handle.Size())
 	}
 	return len(b.data)
 }
@@ -84,6 +107,7 @@ func (b *RequestBodyRef) Replace(data []byte) {
 		return
 	}
 	b.data = data
+	b.handle = nil
 }
 
 func missingJSONRange() jsonRange {
@@ -358,12 +382,19 @@ func (p *ParsedRequest) SystemValue() (any, bool) {
 }
 
 // CloneForBody 为单次账号尝试创建独立 body 视图，避免 failover 复用已改写的 ParsedRequest。
-func (p *ParsedRequest) CloneForBody(body []byte) (*ParsedRequest, error) {
+func (p *ParsedRequest) CloneForBody(body any) (*ParsedRequest, error) {
 	if p == nil {
 		return nil, fmt.Errorf("parse request: empty request")
 	}
 	clone := *p
-	clone.Body = NewRequestBodyRef(body)
+	switch value := body.(type) {
+	case []byte:
+		clone.Body = NewRequestBodyRef(value)
+	case *RequestBodyHandle:
+		clone.Body = NewRequestBodyRefFromHandle(value)
+	default:
+		return nil, fmt.Errorf("parse request: unsupported body type %T", body)
+	}
 	clone.OnUpstreamAccepted = nil
 	if err := refreshGatewayRequestRanges(&clone, clone.protocol); err != nil {
 		return nil, err
