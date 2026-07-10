@@ -3,10 +3,12 @@ package handler
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
 )
 
 func TestRequestBodyCoordinator_JSON(t *testing.T) {
@@ -142,6 +145,139 @@ func TestRequestBodyCoordinator_JSONEffective(t *testing.T) {
 	}
 	if coordinator.Effective() != coordinator.raw {
 		t.Fatal("matching effective reader did not reuse raw")
+	}
+}
+
+func TestRequestBodyCoordinator_Cleanup(t *testing.T) {
+	t.Run("raw and effective are cleaned once", func(t *testing.T) {
+		coordinator, dir := newSpoolingRequestBodyCoordinator(t)
+		coordinator.Cleanup()
+		coordinator.Cleanup()
+		requestBodyCoordinatorRequireEmptyDir(t, dir)
+	})
+
+	t.Run("replaced effective is cleaned", func(t *testing.T) {
+		coordinator, dir := newSpoolingRequestBodyCoordinator(t)
+		if err := coordinator.SetEffectiveBytes([]byte(strings.Repeat("effective", 64))); err != nil {
+			t.Fatalf("SetEffectiveBytes: %v", err)
+		}
+		coordinator.Cleanup()
+		requestBodyCoordinatorRequireEmptyDir(t, dir)
+	})
+
+	t.Run("each replaced effective is cleaned", func(t *testing.T) {
+		coordinator, dir := newSpoolingRequestBodyCoordinator(t)
+		for _, body := range [][]byte{[]byte(strings.Repeat("first", 64)), []byte(strings.Repeat("second", 64))} {
+			if err := coordinator.SetEffectiveBytes(body); err != nil {
+				t.Fatalf("SetEffectiveBytes: %v", err)
+			}
+		}
+		coordinator.Cleanup()
+		requestBodyCoordinatorRequireEmptyDir(t, dir)
+	})
+
+	t.Run("multipart form files are removed", func(t *testing.T) {
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		part, err := writer.CreateFormFile("file", "body.txt")
+		if err != nil {
+			t.Fatalf("CreateFormFile: %v", err)
+		}
+		if _, err := part.Write([]byte(strings.Repeat("file", 64))); err != nil {
+			t.Fatalf("write form file: %v", err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatalf("close multipart writer: %v", err)
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "/", &body)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		if err := req.ParseMultipartForm(1); err != nil {
+			t.Fatalf("ParseMultipartForm: %v", err)
+		}
+		coordinator := &requestBodyCoordinator{form: req.MultipartForm}
+		coordinator.Cleanup()
+		coordinator.Cleanup()
+		if _, err := req.MultipartForm.File["file"][0].Open(); err == nil {
+			t.Fatal("multipart temporary file remains after cleanup")
+		}
+	})
+}
+
+func TestRequestBodyCoordinator_CleanupGinTerminationPaths(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		status     int
+		cancel     bool
+		panicValue any
+	}{
+		{name: "success", status: http.StatusNoContent},
+		{name: "business rejection", status: http.StatusBadRequest},
+		{name: "cancellation", status: http.StatusRequestTimeout, cancel: true},
+		{name: "panic recovery", status: http.StatusInternalServerError, panicValue: "boom"},
+		{name: "upstream 4xx", status: http.StatusBadGateway},
+		{name: "upstream 5xx", status: http.StatusServiceUnavailable},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			oldOptions := jsonRequestBodyHandleOptions
+			jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: dir, FilePrefix: "sub2api-test-"}
+			t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+
+			router := gin.New()
+			router.Use(gin.Recovery())
+			router.POST("/", func(c *gin.Context) {
+				coordinator, err := newJSONRequestBody(c.Request)
+				if err != nil {
+					t.Fatalf("newJSONRequestBody: %v", err)
+				}
+				defer coordinator.Cleanup()
+				if tt.cancel {
+					<-c.Request.Context().Done()
+				}
+				if tt.panicValue != nil {
+					panic(tt.panicValue)
+				}
+				c.Status(tt.status)
+			})
+
+			req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader([]byte(strings.Repeat("request", 64))))
+			if tt.cancel {
+				ctx, cancel := context.WithCancel(req.Context())
+				cancel()
+				req = req.WithContext(ctx)
+			}
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, req)
+			if recorder.Code != tt.status {
+				t.Fatalf("status = %d, want %d", recorder.Code, tt.status)
+			}
+			requestBodyCoordinatorRequireEmptyDir(t, dir)
+		})
+	}
+}
+
+func newSpoolingRequestBodyCoordinator(t *testing.T) (*requestBodyCoordinator, string) {
+	t.Helper()
+	dir := t.TempDir()
+	oldOptions := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: dir, FilePrefix: "sub2api-test-"}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+	coordinator, err := newJSONRequestBody(httptest.NewRequest(http.MethodPost, "/", bytes.NewReader([]byte(strings.Repeat("raw", 64)))))
+	if err != nil {
+		t.Fatalf("newJSONRequestBody: %v", err)
+	}
+	return coordinator, dir
+}
+
+func requestBodyCoordinatorRequireEmptyDir(t *testing.T, dir string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("spool directory contains %d entries after cleanup", len(entries))
 	}
 }
 
