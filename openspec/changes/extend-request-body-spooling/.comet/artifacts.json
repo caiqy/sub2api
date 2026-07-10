@@ -1,0 +1,6 @@
+{
+  "openspec_proposal": "openspec/changes/extend-request-body-spooling/proposal.md",
+  "openspec_design": "openspec/changes/extend-request-body-spooling/design.md",
+  "openspec_tasks": "openspec/changes/extend-request-body-spooling/tasks.md",
+  "openspec_delta_spec": "openspec/changes/extend-request-body-spooling/specs/request-body-retention-control/spec.md"
+}
