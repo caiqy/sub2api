@@ -28,28 +28,15 @@ import (
 //
 // The method follows the same pattern as OpenAIGatewayService.ForwardAsAnthropic
 // but in reverse direction: Responses → Anthropic upstream → Responses.
-func (s *GatewayService) ForwardAsResponses(
+// ForwardAsResponsesHandle borrows bodyHandle from the request coordinator.
+func (s *GatewayService) ForwardAsResponsesHandle(
 	ctx context.Context,
 	c *gin.Context,
 	account *Account,
-	bodyRef any,
+	bodyHandle *RequestBodyHandle,
 	parsed *ParsedRequest,
 ) (*ForwardResult, error) {
 	startTime := time.Now()
-	var bodyHandle *RequestBodyHandle
-	var err error
-	switch value := bodyRef.(type) {
-	case *RequestBodyHandle:
-		bodyHandle = value
-	case []byte:
-		bodyHandle, err = NewRequestBodyHandleFromBytes(value, RequestBodyHandleOptions{})
-		if err != nil {
-			return nil, fmt.Errorf("create responses request body: %w", err)
-		}
-		defer CleanupRequestBodyHandle(bodyHandle)
-	default:
-		return nil, fmt.Errorf("read responses request body: unsupported body type %T", bodyRef)
-	}
 	body, err := bodyHandle.ReadAll()
 	if err != nil {
 		return nil, fmt.Errorf("read responses request body: %w", err)
@@ -232,6 +219,16 @@ func (s *GatewayService) ForwardAsResponses(
 	}
 
 	return result, handleErr
+}
+
+// ForwardAsResponses is the legacy byte-owned wrapper. New gateway paths use ForwardAsResponsesHandle.
+func (s *GatewayService) ForwardAsResponses(ctx context.Context, c *gin.Context, account *Account, body []byte, parsed *ParsedRequest) (*ForwardResult, error) {
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("create responses request body: %w", err)
+	}
+	defer CleanupRequestBodyHandle(handle)
+	return s.ForwardAsResponsesHandle(ctx, c, account, handle, parsed)
 }
 
 // ExtractResponsesReasoningEffortFromBody reads Responses API reasoning.effort

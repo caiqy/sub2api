@@ -66,6 +66,10 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 	defer coordinator.Cleanup()
 	body, err := coordinator.ReadRaw()
 	if err != nil {
+		if status, ok := requestBodyReadErrorStatus(err); ok {
+			h.responsesErrorResponse(c, status, "server_error", "Failed to spool request body")
+			return
+		}
 		h.responsesErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 		return
 	}
@@ -267,7 +271,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		writerSizeBeforeForward := c.Writer.Size()
 		forwardStart := time.Now()
 		service.SetOpsUpstreamAttempted(c, false)
-		result, err := h.gatewayService.ForwardAsResponses(requestCtx, c, account, effectiveBody, parsedReq)
+		result, err := h.gatewayService.ForwardAsResponsesHandle(requestCtx, c, account, effectiveBody, parsedReq)
 		forwardDuration := time.Since(forwardStart)
 
 		if accountReleaseFunc != nil {

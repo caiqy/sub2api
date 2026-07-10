@@ -5327,7 +5327,12 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					// 2) Only if upstream still errors AND error message points to tool/function signature issues:
 					//    also downgrade tool_use/tool_result blocks to text.
 
-					filteredBody := FilterThinkingBlocksForRetry(body, reqModel)
+					effectiveBody, readErr := bodyHandle.ReadAll()
+					if readErr != nil {
+						return nil, fmt.Errorf("read effective request body: %w", readErr)
+					}
+					filteredBody := FilterThinkingBlocksForRetry(effectiveBody, reqModel)
+					effectiveBody = nil
 					retryCtx, releaseRetryCtx := detachStreamUpstreamContext(ctx, reqStream)
 					retryReq, retryBody, buildErr := s.buildUpstreamRequest(retryCtx, c, account, filteredBody, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 					releaseRetryCtx()
@@ -5365,7 +5370,12 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 								msg2 := extractUpstreamErrorMessage(retryRespBody)
 								if looksLikeToolSignatureError(msg2) && time.Since(retryStart) < maxRetryElapsed {
 									logger.LegacyPrintf("service.gateway", "Account %d: signature retry still failing and looks tool-related, retrying with tool blocks downgraded", account.ID)
-									filteredBody2 := FilterSignatureSensitiveBlocksForRetry(body, reqModel)
+									effectiveBody2, readErr := bodyHandle.ReadAll()
+									if readErr != nil {
+										return nil, fmt.Errorf("read effective request body: %w", readErr)
+									}
+									filteredBody2 := FilterSignatureSensitiveBlocksForRetry(effectiveBody2, reqModel)
+									effectiveBody2 = nil
 									retryCtx2, releaseRetryCtx2 := detachStreamUpstreamContext(ctx, reqStream)
 									retryReq2, retryBody2, buildErr2 := s.buildUpstreamRequest(retryCtx2, c, account, filteredBody2, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 									releaseRetryCtx2()
@@ -5454,7 +5464,12 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 						}(),
 					})
 
-					rectifiedBody, applied := RectifyThinkingBudget(body)
+					effectiveBody, readErr := bodyHandle.ReadAll()
+					if readErr != nil {
+						return nil, fmt.Errorf("read effective request body: %w", readErr)
+					}
+					rectifiedBody, applied := RectifyThinkingBudget(effectiveBody)
+					effectiveBody = nil
 					if applied && time.Since(retryStart) < maxRetryElapsed {
 						logger.LegacyPrintf("service.gateway", "Account %d: detected budget_tokens constraint error, retrying with rectified budget (budget_tokens=%d, max_tokens=%d)", account.ID, BudgetRectifyBudgetTokens, BudgetRectifyMaxTokens)
 						budgetRetryCtx, releaseBudgetRetryCtx := detachStreamUpstreamContext(ctx, reqStream)

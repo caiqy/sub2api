@@ -35,7 +35,7 @@ func TestParsedRequestCloneForBody_BorrowsRequestBodyHandle(t *testing.T) {
 
 	parsed, err := ParseGatewayRequest(NewRequestBodyRefFromHandle(handle), "")
 	require.NoError(t, err)
-	clone, err := parsed.CloneForBody(handle)
+	clone, err := parsed.CloneForHandle(handle)
 	require.NoError(t, err)
 	require.Same(t, handle, clone.Body.Handle())
 	require.Equal(t, parsed.MessagesRaw(), clone.MessagesRaw())
