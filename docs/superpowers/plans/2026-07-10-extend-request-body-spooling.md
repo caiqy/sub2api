@@ -73,15 +73,15 @@ base-ref: 0f389fe7ed783ca4a8444fbe6d12acb9d3e19af6
 - 产生：`newJSONRequestBody(req *http.Request) (*requestBodyCoordinator, error)`、`(*requestBodyCoordinator).ReadRaw() ([]byte, error)`、`SetEffectiveBytes([]byte) error`、`SetEffectiveReader(io.Reader) error`、`Effective() *service.RequestBodyHandle`、`Cleanup()`。
 - 约束：各 handler 直接以 `errors.Is(err, service.ErrRequestBodySpool)` 返回其既有 503 格式，以现有 `extractMaxBytesError` 返回其既有 413 格式，其余读取错误继续返回既有 400 格式。
 
-- [ ] **步骤 1：写失败测试。** 在 `request_body_coordinator_test.go` 用临时目录构造 10MB 以下、恰好 10MB、10MB+1 的 identity 与 gzip JSON；断言 `raw.Size()`、`raw.Hash()`、5MB preview 截断、两次 `Open()` 内容一致，且大请求有 spool、小请求无 spool。令临时目录不存在，断言 `errors.Is(err, service.ErrRequestBodySpool)`；用 `httptest` handler 断言该错误在尚未写响应时为 503，而解压上限仍为 413。
+- [x] **步骤 1：写失败测试。** 在 `request_body_coordinator_test.go` 用临时目录构造 10MB 以下、恰好 10MB、10MB+1 的 identity 与 gzip JSON；断言 `raw.Size()`、`raw.Hash()`、5MB preview 截断、两次 `Open()` 内容一致，且大请求有 spool、小请求无 spool。令临时目录不存在，断言 `errors.Is(err, service.ErrRequestBodySpool)`；用 `httptest` handler 断言该错误在尚未写响应时为 503，而解压上限仍为 413。
 
-- [ ] **步骤 2：验证测试失败。** 运行：`go test ./internal/handler -run 'TestRequestBodyCoordinator_(JSON|Spool)' -count=1`（工作目录 `backend`）。预期：因 coordinator 未定义而失败。
+- [x] **步骤 2：验证测试失败。** 运行：`go test ./internal/handler -run 'TestRequestBodyCoordinator_(JSON|Spool)' -count=1`（工作目录 `backend`）。预期：因 coordinator 未定义而失败。
 
-- [ ] **步骤 3：最小实现。** 新增非导出的 `requestBodyCoordinator{raw, effective *service.RequestBodyHandle; form *multipart.Form}`。`newJSONRequestBody` 调用 `httputil.NewDecodedRequestBodyReader`，将 reader 直接交给 `service.NewRequestBodyHandleFromReader`，成功后再清除编码 metadata 并写入 raw 的有效 size；`ReadRaw` 只调用 `raw.ReadAll`；`SetEffectiveBytes`/`SetEffectiveReader` 创建 handle 并仅在 size 和 hash 都相等时保留 raw；`Effective` 返回 effective；错误分类 helper 只识别 spool 与 MaxBytes。
+- [x] **步骤 3：最小实现。** 新增非导出的 `requestBodyCoordinator{raw, effective *service.RequestBodyHandle; form *multipart.Form}`。`newJSONRequestBody` 调用 `httputil.NewDecodedRequestBodyReader`，将 reader 直接交给 `service.NewRequestBodyHandleFromReader`，成功后再清除编码 metadata 并写入 raw 的有效 size；`ReadRaw` 只调用 `raw.ReadAll`；`SetEffectiveBytes`/`SetEffectiveReader` 创建 handle 并仅在 size 和 hash 都相等时保留 raw；`Effective` 返回 effective；错误分类 helper 只识别 spool 与 MaxBytes。
 
-- [ ] **步骤 4：验证通过。** 运行：`go test ./internal/handler -run 'TestRequestBodyCoordinator_(JSON|Spool)' -count=1`（工作目录 `backend`）。预期：通过。
+- [x] **步骤 4：验证通过。** 运行：`go test ./internal/handler -run 'TestRequestBodyCoordinator_(JSON|Spool)' -count=1`（工作目录 `backend`）。预期：通过。
 
-- [ ] **步骤 5：提交。** `git add backend/internal/handler/request_body_coordinator.go backend/internal/handler/request_body_coordinator_test.go backend/internal/handler/request_body_limit.go && git commit -m "feat: add request body coordinator"`
+- [x] **步骤 5：提交。** `git add backend/internal/handler/request_body_coordinator.go backend/internal/handler/request_body_coordinator_test.go backend/internal/handler/request_body_limit.go && git commit -m "feat: add request body coordinator"`
 
 ### Task 3: coordinator ownership 与全终止路径
 
