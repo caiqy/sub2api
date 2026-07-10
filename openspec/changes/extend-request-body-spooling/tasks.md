@@ -2,7 +2,7 @@
 
 - [x] 1.1 为 identity、gzip 等压缩 JSON 编写阈值、64MB 解压上限、preview、hash、503 和 cleanup 的失败优先测试。
 - [x] 1.2 实现共享 coordinator，使解压流直接进入 `RequestBodyHandle`，并支持 raw/effective handle 复用与显式 ownership。
-- [ ] 1.3 增加成功、业务拒绝、客户端取消、panic recovery、handle 替换和 stale cleanup 生命周期测试。
+- [x] 1.3 增加成功、业务拒绝、客户端取消、panic recovery、handle 替换和 stale cleanup 生命周期测试。
 
 ## 2. Anthropic 与 OpenAI JSON 入口
 

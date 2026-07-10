@@ -95,15 +95,15 @@ base-ref: 0f389fe7ed783ca4a8444fbe6d12acb9d3e19af6
 **接口：**
 - 保持：`Cleanup()` 为幂等；raw/effective 相同仅清理一次；替换 coordinator 独占 effective 时清理旧 handle；登记的 `multipart.Form` 由 cleanup 调用 `RemoveAll()`。
 
-- [ ] **步骤 1：写失败测试。** 用专用 tempdir 和 `t.Cleanup` 创建 raw/effective 相同、内容变更的 effective、连续两次 effective 替换三种情况；断言每个应删除的 spool 文件在 `Cleanup()` 后不存在，第二次 `Cleanup()` 不报错。为成功、业务拒绝、`context.CancelFunc()`、panic recovery 和模拟上游 4xx/5xx 各建一个 `gin.New()` 路由，断言 handler 返回后目录为空；在 `request_body_handle_test.go` 保留并运行删除失败 retry/stale sweep 测试。
+- [x] **步骤 1：写失败测试。** 用专用 tempdir 和 `t.Cleanup` 创建 raw/effective 相同、内容变更的 effective、连续两次 effective 替换三种情况；断言每个应删除的 spool 文件在 `Cleanup()` 后不存在，第二次 `Cleanup()` 不报错。为成功、业务拒绝、`context.CancelFunc()`、panic recovery 和模拟上游 4xx/5xx 各建一个 `gin.New()` 路由，断言 handler 返回后目录为空；在 `request_body_handle_test.go` 保留并运行删除失败 retry/stale sweep 测试。
 
-- [ ] **步骤 2：验证测试失败。** 运行：`go test ./internal/handler ./internal/service -run 'Test(RequestBodyCoordinator_Cleanup|RequestBodyHandle_(Cleanup|Stale))' -count=1`（工作目录 `backend`）。预期：替换和 multipart 清理断言失败。
+- [x] **步骤 2：验证测试失败。** 运行：`go test ./internal/handler ./internal/service -run 'Test(RequestBodyCoordinator_Cleanup|RequestBodyHandle_(Cleanup|Stale))' -count=1`（工作目录 `backend`）。预期：替换和 multipart 清理断言失败。
 
-- [ ] **步骤 3：最小实现。** `Cleanup` 收集 raw、effective 的唯一非 nil 指针，以 `service.CleanupRequestBodyHandle` 清理；若存在 form，调用 `form.RemoveAll()`，仅记录错误且不写 response。`SetEffectiveBytes` 与 `SetEffectiveReader` 在替换前确认旧 effective 既非 raw、也未由 request owned context 接管，然后清理旧 handle；不增加引用计数或全局 registry。
+- [x] **步骤 3：最小实现。** `Cleanup` 收集 raw、effective 的唯一非 nil 指针，以 `service.CleanupRequestBodyHandle` 清理；若存在 form，调用 `form.RemoveAll()`，仅记录错误且不写 response。`SetEffectiveBytes` 与 `SetEffectiveReader` 在替换前确认旧 effective 既非 raw、也未由 request owned context 接管，然后清理旧 handle；不增加引用计数或全局 registry。
 
-- [ ] **步骤 4：验证通过。** 运行：`go test ./internal/handler ./internal/service -run 'Test(RequestBodyCoordinator_Cleanup|RequestBodyHandle_(Cleanup|Stale))' -count=1`（工作目录 `backend`）。预期：通过。
+- [x] **步骤 4：验证通过。** 运行：`go test ./internal/handler ./internal/service -run 'Test(RequestBodyCoordinator_Cleanup|RequestBodyHandle_(Cleanup|Stale))' -count=1`（工作目录 `backend`）。预期：通过。
 
-- [ ] **步骤 5：提交。** `git add backend/internal/handler/request_body_coordinator.go backend/internal/handler/request_body_coordinator_test.go backend/internal/service/request_body_handle_test.go && git commit -m "test: cover request body ownership cleanup"`
+- [x] **步骤 5：提交。** `git add backend/internal/handler/request_body_coordinator.go backend/internal/handler/request_body_coordinator_test.go backend/internal/service/request_body_handle_test.go && git commit -m "test: cover request body ownership cleanup"`
 
 ### Task 4: Anthropic Messages 与分组 Responses 接入
 
