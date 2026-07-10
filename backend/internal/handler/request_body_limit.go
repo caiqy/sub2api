@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+
+	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 func extractMaxBytesError(err error) (*http.MaxBytesError, bool) {
@@ -12,6 +14,16 @@ func extractMaxBytesError(err error) (*http.MaxBytesError, bool) {
 		return maxErr, true
 	}
 	return nil, false
+}
+
+func requestBodyReadErrorStatus(err error) (int, bool) {
+	if errors.Is(err, service.ErrRequestBodySpool) {
+		return http.StatusServiceUnavailable, true
+	}
+	if _, ok := extractMaxBytesError(err); ok {
+		return http.StatusRequestEntityTooLarge, true
+	}
+	return 0, false
 }
 
 func formatBodyLimit(limit int64) string {
