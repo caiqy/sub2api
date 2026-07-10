@@ -50,15 +50,15 @@ base-ref: 0f389fe7ed783ca4a8444fbe6d12acb9d3e19af6
 - 产生：`NewDecodedRequestBodyReader(req *http.Request) (io.ReadCloser, error)`；压缩编码成功时返回已施加 `http.MaxBytesReader(nil, ..., maxDecompressedBodySize)` 的 decoded reader，identity 原样返回现有受应用 body limit 保护的 reader。
 - 保持：`ReadRequestBodyWithPrealloc(req *http.Request) ([]byte, error)` 的调用方和错误类型不变。
 
-- [ ] **步骤 1：写失败测试。** 在 `body_test.go` 增加表驱动测试，使用 identity、`gzip`、`x-gzip`、`deflate`、`zstd` 读取同一 JSON，断言得到原始 JSON；对 `br` 与损坏 gzip/zstd 断言返回错误；对压缩内容解压后正好 `64 << 20` 与 `(64 << 20) + 1` 断言分别成功和 `errors.As(err, *http.MaxBytesError)`，并保留 identity 不受该解压上限影响的断言。
+- [x] **步骤 1：写失败测试。** 在 `body_test.go` 增加表驱动测试，使用 identity、`gzip`、`x-gzip`、`deflate`、`zstd` 读取同一 JSON，断言得到原始 JSON；对 `br` 与损坏 gzip/zstd 断言返回错误；对压缩内容解压后正好 `64 << 20` 与 `(64 << 20) + 1` 断言分别成功和 `errors.As(err, *http.MaxBytesError)`，并保留 identity 不受该解压上限影响的断言。
 
-- [ ] **步骤 2：验证测试失败。** 运行：`go test ./internal/pkg/httputil -run 'TestNewDecodedRequestBodyReader' -count=1`（工作目录 `backend`）。预期：因 `NewDecodedRequestBodyReader` 未定义而失败。
+- [x] **步骤 2：验证测试失败。** 运行：`go test ./internal/pkg/httputil -run 'TestNewDecodedRequestBodyReader' -count=1`（工作目录 `backend`）。预期：因 `NewDecodedRequestBodyReader` 未定义而失败。
 
-- [ ] **步骤 3：最小实现。** 在 `body.go` 从现有 `Content-Encoding` 分支提取 `NewDecodedRequestBodyReader`：identity 返回 `req.Body` 的不重复关闭包装；gzip/x-gzip、deflate、zstd 创建 decoder 并将 decoder 的关闭纳入返回 `io.ReadCloser`，仅压缩 decoder 外层使用 `http.MaxBytesReader(nil, ..., maxDecompressedBodySize)`。让 `ReadRequestBodyWithPrealloc` 调用该函数并 `io.ReadAll`，仅在读取成功后删除 `Content-Encoding`/`Content-Length`、写入 decoded `ContentLength`，从而保持失败时 request metadata 不变。
+- [x] **步骤 3：最小实现。** 在 `body.go` 从现有 `Content-Encoding` 分支提取 `NewDecodedRequestBodyReader`：identity 返回 `req.Body` 的不重复关闭包装；gzip/x-gzip、deflate、zstd 创建 decoder 并将 decoder 的关闭纳入返回 `io.ReadCloser`，仅压缩 decoder 外层使用 `http.MaxBytesReader(nil, ..., maxDecompressedBodySize)`。让 `ReadRequestBodyWithPrealloc` 调用该函数并 `io.ReadAll`，仅在读取成功后删除 `Content-Encoding`/`Content-Length`、写入 decoded `ContentLength`，从而保持失败时 request metadata 不变。
 
-- [ ] **步骤 4：验证通过。** 运行：`go test ./internal/pkg/httputil -count=1`（工作目录 `backend`）。预期：通过，旧 `ReadRequestBodyWithPrealloc` 测试仍覆盖兼容入口。
+- [x] **步骤 4：验证通过。** 运行：`go test ./internal/pkg/httputil -count=1`（工作目录 `backend`）。预期：通过，旧 `ReadRequestBodyWithPrealloc` 测试仍覆盖兼容入口。
 
-- [ ] **步骤 5：提交。** `git add backend/internal/pkg/httputil/body.go backend/internal/pkg/httputil/body_test.go && git commit -m "refactor: share request body decoder"`
+- [x] **步骤 5：提交。** `git add backend/internal/pkg/httputil/body.go backend/internal/pkg/httputil/body_test.go && git commit -m "refactor: share request body decoder"`
 
 ### Task 2: JSON coordinator 与 spool 错误映射
 
