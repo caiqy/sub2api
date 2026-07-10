@@ -41,6 +41,14 @@ func compressTestBody(t *testing.T, body []byte, encoding string) []byte {
 		if err := w.Close(); err != nil {
 			t.Fatalf("gzip close: %v", err)
 		}
+	case "deflate":
+		w := zlib.NewWriter(&buf)
+		if _, err := w.Write(body); err != nil {
+			t.Fatalf("zlib write: %v", err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatalf("zlib close: %v", err)
+		}
 	case "zstd":
 		w, err := zstd.NewWriter(&buf)
 		if err != nil {
@@ -209,6 +217,76 @@ func TestReadRequestBodyWithPrealloc_AllowsDecompressedBodyAtLimit(t *testing.T)
 	}
 	if len(got) != maxDecompressedBodySize {
 		t.Fatalf("body length = %d, want %d", len(got), maxDecompressedBodySize)
+	}
+}
+
+func TestReadRequestBodyWithPrealloc_DecompressedBodyLimit(t *testing.T) {
+	for _, encoding := range []string{"gzip", "x-gzip", "deflate", "zstd"} {
+		t.Run(encoding, func(t *testing.T) {
+			for _, tc := range []struct {
+				name string
+				size int
+			}{
+				{name: "at limit", size: maxDecompressedBodySize},
+				{name: "over limit", size: maxDecompressedBodySize + 1},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					size := tc.size
+					body := bytes.Repeat([]byte("a"), size)
+					req := newRequestWithBody(t, compressTestBody(t, body, strings.TrimPrefix(encoding, "x-")), encoding)
+
+					got, err := ReadRequestBodyWithPrealloc(req)
+					if size == maxDecompressedBodySize {
+						if err != nil {
+							t.Fatalf("ReadRequestBodyWithPrealloc: %v", err)
+						}
+						if len(got) != size {
+							t.Fatalf("body length = %d, want %d", len(got), size)
+						}
+						return
+					}
+
+					var maxErr *http.MaxBytesError
+					if !errors.As(err, &maxErr) {
+						t.Fatalf("expected *http.MaxBytesError, got %v", err)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestReadRequestBodyWithPrealloc_PreservesMetadataOnDecodeFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		body     []byte
+		encoding string
+	}{
+		{name: "corrupt gzip", body: []byte("not gzip"), encoding: "gzip"},
+		{name: "corrupt zstd", body: []byte("not zstd"), encoding: "zstd"},
+		{name: "decompressed body too large", body: compressTestBody(t, bytes.Repeat([]byte("a"), maxDecompressedBodySize+1), "gzip"), encoding: "gzip"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := newRequestWithBody(t, tc.body, tc.encoding)
+			req.Header.Set("Content-Length", "123")
+			wantEncoding := req.Header.Get("Content-Encoding")
+			wantHeaderLength := req.Header.Get("Content-Length")
+			wantContentLength := req.ContentLength
+
+			_, err := ReadRequestBodyWithPrealloc(req)
+			if err == nil {
+				t.Fatal("expected decode error")
+			}
+			if req.Header.Get("Content-Encoding") != wantEncoding {
+				t.Fatalf("Content-Encoding = %q, want %q", req.Header.Get("Content-Encoding"), wantEncoding)
+			}
+			if req.Header.Get("Content-Length") != wantHeaderLength {
+				t.Fatalf("Content-Length = %q, want %q", req.Header.Get("Content-Length"), wantHeaderLength)
+			}
+			if req.ContentLength != wantContentLength {
+				t.Fatalf("ContentLength = %d, want %d", req.ContentLength, wantContentLength)
+			}
+		})
 	}
 }
 
