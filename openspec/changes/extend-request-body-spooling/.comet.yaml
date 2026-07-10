@@ -22,8 +22,8 @@ archived: false
 direct_override: null
 build_command: null
 verify_command: null
-handoff_context: null
-handoff_hash: null
+handoff_context: openspec/changes/extend-request-body-spooling/.comet/handoff/design-context.json
+handoff_hash: f2f63222f5d48a82eed63062307adc59083d02e664f26074e2d15c5068fafa6d
 classic_profile: full
 classic_migration: 1
 run_id: f6686cb4-f324-414e-9c4a-456ef1949a64
