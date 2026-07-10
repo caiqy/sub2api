@@ -4,5 +4,6 @@
   "openspec_tasks": "openspec/changes/optimize-large-input-memory/tasks.md",
   "openspec_delta_spec": "openspec/changes/optimize-large-input-memory/specs/large-input-memory-control/spec.md",
   "handoff_context": "openspec/changes/optimize-large-input-memory/.comet/handoff/design-context.json",
-  "handoff_markdown": "openspec/changes/optimize-large-input-memory/.comet/handoff/design-context.md"
+  "handoff_markdown": "openspec/changes/optimize-large-input-memory/.comet/handoff/design-context.md",
+  "archive_directory": "openspec/changes/archive/2026-07-09-optimize-large-input-memory"
 }

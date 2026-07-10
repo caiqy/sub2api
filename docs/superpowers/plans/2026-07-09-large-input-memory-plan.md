@@ -2,6 +2,7 @@
 change: optimize-large-input-memory
 design-doc: docs/superpowers/specs/2026-07-09-large-input-memory-design.md
 base-ref: 40b807f114d1fe2e02ccc118fc4e6bd75417e4e5
+archived-with: 2026-07-09-optimize-large-input-memory
 ---
 
 # 大输入内存优化实施计划
@@ -32,6 +33,7 @@ base-ref: 40b807f114d1fe2e02ccc118fc4e6bd75417e4e5
 - Modify: `backend/internal/handler/openai_gateway_usage_context_test.go`：新增快照不保留原 `OpenAIForwardResult`/detail snapshot 指针的单测。
 - Modify: `backend/internal/service/openai_gateway_record_usage_test.go`：补一条 RecordUsage 回归，确认快照输入的计费、图片、渠道字段仍落库。
 
+archived-with: 2026-07-09-optimize-large-input-memory
 ---
 
 ### Task 1: 内容审计大输入测试

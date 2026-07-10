@@ -1,8 +1,5 @@
-# content-moderation-config Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change fix-content-moderation-deleted-groups. Update Purpose after archive.
-## Requirements
 ### Requirement: 保存时清理已删除审计分组
 内容审计配置保存时，系统 MUST 移除不存在的审计分组 ID，并保留仍存在的审计分组 ID。内容审计运行时处理大输入的优化不得改变该配置保存行为。
 
