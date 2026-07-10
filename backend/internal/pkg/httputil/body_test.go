@@ -15,6 +15,20 @@ import (
 
 const samplePayload = `{"model":"gpt-5.5","input":"hi","stream":false}`
 
+type delayedErrorReader struct {
+	data []byte
+	err  error
+}
+
+func (r *delayedErrorReader) Read(p []byte) (int, error) {
+	if len(r.data) == 0 {
+		return 0, r.err
+	}
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	return n, nil
+}
+
 func newRequestWithBody(t *testing.T, body []byte, encoding string) *http.Request {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
@@ -285,6 +299,77 @@ func TestReadRequestBodyWithPrealloc_PreservesMetadataOnDecodeFailure(t *testing
 			}
 			if req.ContentLength != wantContentLength {
 				t.Fatalf("ContentLength = %d, want %d", req.ContentLength, wantContentLength)
+			}
+		})
+	}
+}
+
+func TestReadRequestBodyWithPrealloc_WrapsCompressedReadErrors(t *testing.T) {
+	delayedErr := errors.New("delayed read error")
+	compressed := compressTestBody(t, []byte(samplePayload), "gzip")
+
+	for _, tc := range []struct {
+		name      string
+		encoding  string
+		body      io.Reader
+		wantCause error
+		wantMax   bool
+		wrapped   bool
+	}{
+		{
+			name:      "delayed gzip reader error",
+			encoding:  "gzip",
+			body:      &delayedErrorReader{data: compressed[:10], err: delayedErr},
+			wantCause: delayedErr,
+			wrapped:   true,
+		},
+		{
+			name:      "truncated gzip stream",
+			encoding:  "gzip",
+			body:      bytes.NewReader(compressed[:len(compressed)-4]),
+			wantCause: io.ErrUnexpectedEOF,
+			wrapped:   true,
+		},
+		{
+			name:     "gzip decompressed body too large",
+			encoding: "gzip",
+			body: bytes.NewReader(compressTestBody(t,
+				bytes.Repeat([]byte("a"), maxDecompressedBodySize+1), "gzip")),
+			wantMax: true,
+			wrapped: true,
+		},
+		{
+			name:      "identity reader error",
+			encoding:  "identity",
+			body:      &delayedErrorReader{err: delayedErr},
+			wantCause: delayedErr,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodPost, "/v1/responses", tc.body)
+			if err != nil {
+				t.Fatalf("NewRequest: %v", err)
+			}
+			req.Header.Set("Content-Encoding", tc.encoding)
+
+			_, err = ReadRequestBodyWithPrealloc(req)
+			if err == nil {
+				t.Fatal("expected read error")
+			}
+			if tc.wrapped && !strings.HasPrefix(err.Error(), `decode Content-Encoding "gzip": `) {
+				t.Fatalf("error = %q, want decode wrapper", err)
+			}
+			if !tc.wrapped && strings.Contains(err.Error(), "decode Content-Encoding") {
+				t.Fatalf("identity error unexpectedly wrapped: %v", err)
+			}
+			if tc.wantCause != nil && !errors.Is(err, tc.wantCause) {
+				t.Fatalf("errors.Is(%v, %v) = false", err, tc.wantCause)
+			}
+			if tc.wantMax {
+				var maxErr *http.MaxBytesError
+				if !errors.As(err, &maxErr) {
+					t.Fatalf("errors.As(*http.MaxBytesError) = false for %v", err)
+				}
 			}
 		})
 	}

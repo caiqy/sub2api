@@ -59,6 +59,9 @@ func ReadRequestBodyWithPrealloc(req *http.Request) ([]byte, error) {
 
 	buf := bytes.NewBuffer(make([]byte, 0, capHint))
 	if _, err := io.Copy(buf, r); err != nil {
+		if encoding != "" && encoding != "identity" {
+			return nil, fmt.Errorf("decode Content-Encoding %q: %w", encoding, err)
+		}
 		return nil, err
 	}
 	decoded := buf.Bytes()
