@@ -957,7 +957,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 				return
 			}
-			attemptParsedReq, err = parsedReq.CloneForHandle(attemptHandle)
+			attemptParsedReq, err = attemptParsedReq.CloneForHandle(attemptHandle)
 			if err != nil {
 				service.CleanupRequestBodyHandle(attemptHandle)
 				h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
@@ -976,8 +976,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			forwardStartedAt := time.Now()
 			service.SetOpsUpstreamAttempted(c, false)
 			if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
-				attemptBody, err := attemptParsedReq.Body.ReadAll()
-				if err != nil {
+				attemptBody, readErr := attemptParsedReq.Body.ReadAll()
+				if readErr != nil {
 					service.CleanupRequestBodyHandle(attemptHandle)
 					h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 					return

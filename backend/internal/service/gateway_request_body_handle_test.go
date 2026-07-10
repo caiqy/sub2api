@@ -32,3 +32,34 @@ func TestRequestBodyRefHandleReadErrorPropagates(t *testing.T) {
 		t.Fatalf("CloneForHandle error = %v, want ErrRequestBodySpool", err)
 	}
 }
+
+func TestParsedRequestCloneForHandlePreservesAttemptState(t *testing.T) {
+	handle, err := NewRequestBodyHandleFromBytes([]byte(`{"model":"mapped-model","messages":[]}`), RequestBodyHandleOptions{})
+	if err != nil {
+		t.Fatalf("create handle: %v", err)
+	}
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef([]byte(`{"model":"original-model","messages":[]}`)), "")
+	if err != nil {
+		t.Fatalf("parse request: %v", err)
+	}
+	accepted := false
+	parsed.Model = "mapped-model"
+	parsed.OnUpstreamAccepted = func() { accepted = true }
+
+	clone, err := parsed.CloneForHandle(handle)
+	if err != nil {
+		t.Fatalf("clone request: %v", err)
+	}
+	if clone.Model != "mapped-model" {
+		t.Fatalf("model = %q, want mapped-model", clone.Model)
+	}
+	if clone.OnUpstreamAccepted == nil {
+		t.Fatal("OnUpstreamAccepted was cleared during handle rebind")
+	}
+	clone.OnUpstreamAccepted()
+	if !accepted {
+		t.Fatal("OnUpstreamAccepted was not preserved during handle rebind")
+	}
+}

@@ -5336,11 +5336,32 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					retryCtx, releaseRetryCtx := detachStreamUpstreamContext(ctx, reqStream)
 					retryReq, retryBody, buildErr := s.buildUpstreamRequest(retryCtx, c, account, filteredBody, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 					releaseRetryCtx()
+					filteredBody = nil
 					if buildErr == nil {
-						retryPreview := RequestBodyPreviewString(retryBody)
+						retryHandle, handleErr := NewRequestBodyHandleFromBytes(retryBody, RequestBodyHandleOptions{})
+						retryBody = nil
+						if handleErr != nil {
+							if retryReq.Body != nil {
+								_ = retryReq.Body.Close()
+							}
+							return nil, fmt.Errorf("create signature retry request body: %w", handleErr)
+						}
+						if retryReq.Body != nil {
+							_ = retryReq.Body.Close()
+						}
+						retryReq.Body, handleErr = retryHandle.Open()
+						if handleErr != nil {
+							CleanupRequestBodyHandle(retryHandle)
+							return nil, handleErr
+						}
+						retryReq.GetBody = retryHandle.Open
+						retryReq.ContentLength = retryHandle.Size()
+						retryPreview := retryHandle.PreviewString()
 						SetUsageUpstreamRequest(c, retryReq, retryPreview)
 						SetOpsUpstreamAttempted(c, true)
 						retryResp, retryErr := s.httpUpstream.DoWithTLS(retryReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+						_ = retryReq.Body.Close()
+						CleanupRequestBodyHandle(retryHandle)
 						if retryErr == nil {
 							if retryResp.StatusCode < 400 {
 								logger.LegacyPrintf("service.gateway", "Account %d: thinking block retry succeeded (blocks downgraded)", account.ID)
@@ -5379,11 +5400,32 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 									retryCtx2, releaseRetryCtx2 := detachStreamUpstreamContext(ctx, reqStream)
 									retryReq2, retryBody2, buildErr2 := s.buildUpstreamRequest(retryCtx2, c, account, filteredBody2, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 									releaseRetryCtx2()
+									filteredBody2 = nil
 									if buildErr2 == nil {
-										retryPreview2 := RequestBodyPreviewString(retryBody2)
+										retryHandle2, handleErr2 := NewRequestBodyHandleFromBytes(retryBody2, RequestBodyHandleOptions{})
+										retryBody2 = nil
+										if handleErr2 != nil {
+											if retryReq2.Body != nil {
+												_ = retryReq2.Body.Close()
+											}
+											return nil, fmt.Errorf("create tool signature retry request body: %w", handleErr2)
+										}
+										if retryReq2.Body != nil {
+											_ = retryReq2.Body.Close()
+										}
+										retryReq2.Body, handleErr2 = retryHandle2.Open()
+										if handleErr2 != nil {
+											CleanupRequestBodyHandle(retryHandle2)
+											return nil, handleErr2
+										}
+										retryReq2.GetBody = retryHandle2.Open
+										retryReq2.ContentLength = retryHandle2.Size()
+										retryPreview2 := retryHandle2.PreviewString()
 										SetUsageUpstreamRequest(c, retryReq2, retryPreview2)
 										SetOpsUpstreamAttempted(c, true)
 										retryResp2, retryErr2 := s.httpUpstream.DoWithTLS(retryReq2, proxyURL, account.ID, account.Concurrency, tlsProfile)
+										_ = retryReq2.Body.Close()
+										CleanupRequestBodyHandle(retryHandle2)
 										if retryErr2 == nil {
 											resp = retryResp2
 											break
@@ -5475,11 +5517,32 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 						budgetRetryCtx, releaseBudgetRetryCtx := detachStreamUpstreamContext(ctx, reqStream)
 						budgetRetryReq, budgetRetryBody, buildErr := s.buildUpstreamRequest(budgetRetryCtx, c, account, rectifiedBody, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 						releaseBudgetRetryCtx()
+						rectifiedBody = nil
 						if buildErr == nil {
-							budgetRetryPreview := RequestBodyPreviewString(budgetRetryBody)
+							budgetRetryHandle, handleErr := NewRequestBodyHandleFromBytes(budgetRetryBody, RequestBodyHandleOptions{})
+							budgetRetryBody = nil
+							if handleErr != nil {
+								if budgetRetryReq.Body != nil {
+									_ = budgetRetryReq.Body.Close()
+								}
+								return nil, fmt.Errorf("create budget retry request body: %w", handleErr)
+							}
+							if budgetRetryReq.Body != nil {
+								_ = budgetRetryReq.Body.Close()
+							}
+							budgetRetryReq.Body, handleErr = budgetRetryHandle.Open()
+							if handleErr != nil {
+								CleanupRequestBodyHandle(budgetRetryHandle)
+								return nil, handleErr
+							}
+							budgetRetryReq.GetBody = budgetRetryHandle.Open
+							budgetRetryReq.ContentLength = budgetRetryHandle.Size()
+							budgetRetryPreview := budgetRetryHandle.PreviewString()
 							SetUsageUpstreamRequest(c, budgetRetryReq, budgetRetryPreview)
 							SetOpsUpstreamAttempted(c, true)
 							budgetRetryResp, retryErr := s.httpUpstream.DoWithTLS(budgetRetryReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+							_ = budgetRetryReq.Body.Close()
+							CleanupRequestBodyHandle(budgetRetryHandle)
 							if retryErr == nil {
 								resp = budgetRetryResp
 								break

@@ -406,7 +406,6 @@ func (p *ParsedRequest) CloneForHandle(handle *RequestBodyHandle) (*ParsedReques
 	}
 	clone := *p
 	clone.Body = NewRequestBodyRefFromHandle(handle)
-	clone.OnUpstreamAccepted = nil
 	if err := refreshGatewayRequestRanges(&clone, clone.protocol); err != nil {
 		return nil, err
 	}

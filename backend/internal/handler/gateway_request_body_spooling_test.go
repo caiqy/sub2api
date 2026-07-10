@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -47,6 +49,49 @@ func TestGatewayHandler_RequestBodySpoolOpenFailureMapsTo503(t *testing.T) {
 	}
 	if status, ok := requestBodyReadErrorStatus(err); !ok || status != http.StatusServiceUnavailable {
 		t.Fatalf("status = (%d, %t), want (503, true)", status, ok)
+	}
+}
+
+func TestGatewayHandler_MessagesContextKeepsHandleInsteadOfAttemptBytes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 44, Platform: service.PlatformAntigravity, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 144, Name: "antigravity", Platform: service.PlatformAntigravity, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"access_token": "token", "project_id": "project"}}
+	upstream := &openAIChatCompletionsHTTPUpstreamStub{response: &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{"Content-Type": []string{"application/json"}, "X-Request-Id": []string{"req_context_body"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"Prompt is too long"}}`)),
+	}}
+	env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+
+	var values map[string]any
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), env.apiKey)
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: env.apiKey.UserID, Concurrency: env.apiKey.User.Concurrency})
+		c.Next()
+		values = make(map[string]any, len(c.Keys))
+		for key, value := range c.Keys {
+			values[key] = value
+		}
+	})
+	router.Use(middleware.UsageDetailCapture())
+	router.POST("/v1/messages", env.handler.Messages)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-opus-4-6","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", recorder.Code)
+	}
+	for key, value := range values {
+		if body, ok := value.([]byte); ok && len(body) > 0 {
+			t.Fatalf("Gin context retained body bytes at %q", key)
+		}
+	}
+	parsed, ok := values["parsed_request"].(*service.ParsedRequest)
+	if !ok || parsed.Body.Handle() == nil {
+		t.Fatal("Gin context did not retain a handle-backed parsed request")
 	}
 }
 
