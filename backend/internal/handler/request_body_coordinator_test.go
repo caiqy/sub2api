@@ -204,19 +204,38 @@ func TestRequestBodyCoordinator_Cleanup(t *testing.T) {
 	})
 }
 
+func TestRequestBodyCoordinator_CleanupUsesUniqueHandles(t *testing.T) {
+	source, err := os.ReadFile("request_body_coordinator.go")
+	if err != nil {
+		t.Fatalf("read coordinator source: %v", err)
+	}
+	if !strings.Contains(string(source), "for _, handle := range uniqueRequestBodyHandles(c.raw, c.effective)") {
+		t.Fatal("Cleanup does not iterate its raw/effective handles through a shared unique-handle calculation")
+	}
+}
+
+func TestUniqueRequestBodyHandles_DeduplicatesPointers(t *testing.T) {
+	raw := &service.RequestBodyHandle{}
+	effective := &service.RequestBodyHandle{}
+
+	handles := uniqueRequestBodyHandles(raw, raw, nil, effective, effective)
+
+	if len(handles) != 2 || handles[0] != raw || handles[1] != effective {
+		t.Fatalf("unique handles = %v, want raw and effective once each", handles)
+	}
+}
+
 func TestRequestBodyCoordinator_CleanupGinTerminationPaths(t *testing.T) {
 	for _, tt := range []struct {
-		name       string
-		status     int
-		cancel     bool
-		panicValue any
+		name string
+		want int
 	}{
-		{name: "success", status: http.StatusNoContent},
-		{name: "business rejection", status: http.StatusBadRequest},
-		{name: "cancellation", status: http.StatusRequestTimeout, cancel: true},
-		{name: "panic recovery", status: http.StatusInternalServerError, panicValue: "boom"},
-		{name: "upstream 4xx", status: http.StatusBadGateway},
-		{name: "upstream 5xx", status: http.StatusServiceUnavailable},
+		{name: "success", want: http.StatusNoContent},
+		{name: "business rejection", want: http.StatusUnprocessableEntity},
+		{name: "cancellation", want: http.StatusRequestTimeout},
+		{name: "panic recovery", want: http.StatusInternalServerError},
+		{name: "upstream 4xx", want: http.StatusNotFound},
+		{name: "upstream 5xx", want: http.StatusServiceUnavailable},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -232,25 +251,52 @@ func TestRequestBodyCoordinator_CleanupGinTerminationPaths(t *testing.T) {
 					t.Fatalf("newJSONRequestBody: %v", err)
 				}
 				defer coordinator.Cleanup()
-				if tt.cancel {
+				switch tt.name {
+				case "success":
+					c.Status(http.StatusNoContent)
+				case "business rejection":
+					if c.GetHeader("X-Request-Valid") != "true" {
+						c.AbortWithStatus(http.StatusUnprocessableEntity)
+						return
+					}
+					c.Status(http.StatusNoContent)
+				case "cancellation":
 					<-c.Request.Context().Done()
+					c.Status(http.StatusRequestTimeout)
+				case "panic recovery":
+					panic("boom")
+				case "upstream 4xx", "upstream 5xx":
+					upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						if tt.name == "upstream 4xx" {
+							w.WriteHeader(http.StatusNotFound)
+							return
+						}
+						w.WriteHeader(http.StatusServiceUnavailable)
+					}))
+					defer upstream.Close()
+					response, err := upstream.Client().Get(upstream.URL)
+					if err != nil {
+						t.Fatalf("upstream request: %v", err)
+					}
+					defer response.Body.Close()
+					c.Header("X-Upstream-Status", response.Status)
+					c.Status(response.StatusCode)
 				}
-				if tt.panicValue != nil {
-					panic(tt.panicValue)
-				}
-				c.Status(tt.status)
 			})
 
 			req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader([]byte(strings.Repeat("request", 64))))
-			if tt.cancel {
+			if tt.name == "cancellation" {
 				ctx, cancel := context.WithCancel(req.Context())
 				cancel()
 				req = req.WithContext(ctx)
 			}
 			recorder := httptest.NewRecorder()
 			router.ServeHTTP(recorder, req)
-			if recorder.Code != tt.status {
-				t.Fatalf("status = %d, want %d", recorder.Code, tt.status)
+			if recorder.Code != tt.want {
+				t.Fatalf("status = %d, want %d", recorder.Code, tt.want)
+			}
+			if strings.HasPrefix(tt.name, "upstream") && recorder.Header().Get("X-Upstream-Status") == "" {
+				t.Fatal("upstream response was not observed")
 			}
 			requestBodyCoordinatorRequireEmptyDir(t, dir)
 		})

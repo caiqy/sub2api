@@ -83,6 +83,26 @@ func (c *requestBodyCoordinator) Effective() *service.RequestBodyHandle {
 	return c.effective
 }
 
+func uniqueRequestBodyHandles(handles ...*service.RequestBodyHandle) []*service.RequestBodyHandle {
+	unique := make([]*service.RequestBodyHandle, 0, len(handles))
+	for _, handle := range handles {
+		if handle == nil {
+			continue
+		}
+		alreadyIncluded := false
+		for _, previous := range unique {
+			if handle == previous {
+				alreadyIncluded = true
+				break
+			}
+		}
+		if !alreadyIncluded {
+			unique = append(unique, handle)
+		}
+	}
+	return unique
+}
+
 func (c *requestBodyCoordinator) Cleanup() {
 	if c == nil {
 		return
@@ -90,8 +110,7 @@ func (c *requestBodyCoordinator) Cleanup() {
 	if c.form != nil {
 		_ = c.form.RemoveAll()
 	}
-	service.CleanupRequestBodyHandle(c.raw)
-	if c.effective != c.raw {
-		service.CleanupRequestBodyHandle(c.effective)
+	for _, handle := range uniqueRequestBodyHandles(c.raw, c.effective) {
+		service.CleanupRequestBodyHandle(handle)
 	}
 }
