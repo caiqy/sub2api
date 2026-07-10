@@ -32,7 +32,7 @@ base-ref: 0f389fe7ed783ca4a8444fbe6d12acb9d3e19af6
 - 新建 `backend/internal/handler/request_body_coordinator_test.go`：coordinator 的阈值、hash、ownership、错误映射与终止路径测试。
 - 修改 `backend/internal/pkg/httputil/body.go`：提取 decoded reader 构造函数，保持 `ReadRequestBodyWithPrealloc` 的兼容调用方式。
 - 修改 `backend/internal/pkg/httputil/body_test.go`：覆盖四种编码、损坏输入、64MB 边界及 metadata 原子更新。
-- 修改 `backend/internal/handler/gateway_handler.go` 与 `backend/internal/handler/gateway_handler_responses.go`：迁移 Anthropic Messages 与分组 Responses。
+- 修改 `backend/internal/handler/gateway_handler.go`、`backend/internal/handler/gateway_handler_responses.go`、`backend/internal/service/gateway_request.go`、`backend/internal/service/gateway_service.go` 与 `backend/internal/service/gateway_forward_as_responses.go`：迁移 Anthropic Messages 与分组 Responses，并让内部 retry 从 handle 重开 body。
 - 修改 `backend/internal/handler/openai_chat_completions.go`、`openai_embeddings.go`、`openai_gateway_handler.go`、`openai_gateway_count_tokens.go` 与 `backend/internal/service/openai_gateway_service.go`：迁移 OpenAI JSON 入口及 attempt body ownership。
 - 修改 `backend/internal/handler/gemini_v1beta_handler.go`：迁移三种 Gemini action。
 - 修改 `backend/internal/handler/openai_images.go`、`grok_media.go` 及其现有 service multipart 构建 helper：迁移 OpenAI/Grok Images、Videos 与 multipart 管线。
@@ -112,23 +112,27 @@ base-ref: 0f389fe7ed783ca4a8444fbe6d12acb9d3e19af6
 **文件：**
 - 修改：`backend/internal/handler/gateway_handler.go` 的 `(*GatewayHandler).Messages`
 - 修改：`backend/internal/handler/gateway_handler_responses.go` 的 `(*GatewayHandler).Responses`
-- 修改：`backend/internal/service/openai_gateway_messages.go` 的 `ForwardAsAnthropic`
 - 修改：`backend/internal/service/gateway_forward_as_responses.go` 的 `ForwardAsResponses`
+- 修改：`backend/internal/service/gateway_request.go` 的 `RequestBodyRef` / `ParsedRequest.CloneForBody`
+- 修改：`backend/internal/service/gateway_service.go` 的 `GatewayService.Forward` 与 Anthropic upstream request builder
+- 修改：`backend/internal/service/gateway_request_test.go`
+- 新建：`backend/internal/service/gateway_request_body_handle_test.go`（不带 unit build tag，确保 handle 兼容测试可独立取得 GREEN）
+- 修改：`backend/internal/service/gateway_forward_as_responses_test.go`
 - 新建：`backend/internal/handler/gateway_request_body_spooling_test.go`
 
 **接口：**
 - 消费：`newJSONRequestBody`、`ReadRaw`、`SetEffectiveBytes`、`Effective`、`Cleanup`。
-- 产生：handler 在 `defer coordinator.Cleanup()` 后向 service 传递 effective handle 或每 attempt 新开的 reader；service 不保留 handler 的 `body []byte`。
+- 产生：handler 在 `defer coordinator.Cleanup()` 后向 service 传递 effective handle；`RequestBodyRef`/upstream builder 可从 handle 为每个 attempt 重开 reader，service 不让 handler 的 `body []byte` 跨越上游等待。
 
 - [ ] **步骤 1：写失败测试。** 给 Messages 与 Responses 各增加一个超过 10MB 的压缩请求和一个模型映射请求：模拟上游阻塞期间断言 raw spool 存在、usage snapshot 是 bounded preview、上游收到的 hash 等于 effective hash；释放上游后断言 spool 删除。Responses 测试必须断言 Responses-to-Messages 转换后 effective 内容被发送，Messages 测试必须断言内容审计、session 与计费 hash 未变。
 
 - [ ] **步骤 2：验证测试失败。** 运行：`go test ./internal/handler -run 'TestGatewayHandler_(Messages|Responses).*RequestBody' -count=1`（工作目录 `backend`）。预期：现有路径仍将完整 `body` 传入转发，生命周期断言失败。
 
-- [ ] **步骤 3：最小实现。** 两个 handler 在认证后创建 JSON coordinator 并立即 defer cleanup；使用 `ReadRaw` 在局部 helper 执行既有 JSON 校验、`ParseGatewayRequest`/`gjson`、审计、session、模型映射和转换，随后调用 `SetEffectiveBytes`。将跨账号循环的 `body`、`forwardBody` 替换为 `effective := coordinator.Effective()`；每次 forwarding 由 handle `Open()` 提供独立 reader。转换、解析后的对象不得放入 Gin context 或 usage async 数据。
+- [ ] **步骤 3：最小实现。** 两个 handler 在认证后创建 JSON coordinator 并立即 defer cleanup；使用 `ReadRaw` 在局部 helper 执行既有 JSON 校验、`ParseGatewayRequest`/`gjson`、审计、session、模型映射和转换，随后调用 `SetEffectiveBytes`。扩展 `RequestBodyRef`/`ParsedRequest` 以借用 effective handle，并让 `GatewayService.Forward`、`ForwardAsResponses` 及 Anthropic upstream builder 在每个 attempt 从 handle 重开 reader；账号级 body 改写只在短生命周期 helper 内 materialize，构造 request 后不得让完整 `[]byte` 跨越上游等待。转换、解析后的对象不得放入 Gin context 或 usage async 数据。
 
 - [ ] **步骤 4：验证通过。** 运行：`go test ./internal/handler -run 'TestGatewayHandler_(Messages|Responses)' -count=1`（工作目录 `backend`）。预期：通过，包含流式与错误透传既有测试。
 
-- [ ] **步骤 5：提交。** `git add backend/internal/handler/gateway_handler.go backend/internal/handler/gateway_handler_responses.go backend/internal/handler/gateway_request_body_spooling_test.go backend/internal/service/openai_gateway_messages.go backend/internal/service/gateway_forward_as_responses.go && git commit -m "feat: spool anthropic gateway request bodies"`
+- [ ] **步骤 5：提交。** `git add backend/internal/handler/gateway_handler.go backend/internal/handler/gateway_handler_responses.go backend/internal/handler/gateway_request_body_spooling_test.go backend/internal/service/gateway_request.go backend/internal/service/gateway_request_test.go backend/internal/service/gateway_request_body_handle_test.go backend/internal/service/gateway_service.go backend/internal/service/gateway_forward_as_responses.go backend/internal/service/gateway_forward_as_responses_test.go && git commit -m "feat: spool anthropic gateway request bodies"`
 
 ### Task 5: OpenAI Chat Completions 与 Embeddings 接入
 
