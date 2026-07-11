@@ -60,8 +60,12 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 	}
 	targetURL := buildOpenAIEmbeddingsURL(validatedURL)
 
+	bodyHandle, ownedBodyHandle, err := openAIRequestBodyHandleForContext(c, upstreamBody)
+	if err != nil {
+		return nil, fmt.Errorf("create upstream request body: %w", err)
+	}
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
-	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, http.MethodPost, targetURL, bytes.NewReader(upstreamBody))
+	upstreamReq, err := openAINewRequestWithBodyHandle(upstreamCtx, http.MethodPost, targetURL, bodyHandle, ownedBodyHandle)
 	releaseUpstreamCtx()
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
@@ -93,6 +97,7 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 	}
 	SetOpsUpstreamAttempted(c, true)
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+	closeOpenAIRequestBody(upstreamReq)
 	if err != nil {
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())
 		setOpsUpstreamError(c, 0, safeErr, "")
