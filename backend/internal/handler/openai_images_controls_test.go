@@ -6,8 +6,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -72,6 +74,77 @@ func (u *openAIImagesHandlerHTTPUpstream) calls() []int64 {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	return append([]int64(nil), u.accountIDs...)
+}
+
+type openAIImagesSpoolUpstream struct {
+	service.HTTPUpstream
+	body    []byte
+	started chan struct{}
+	release chan struct{}
+}
+
+func (u *openAIImagesSpoolUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	var err error
+	u.body, err = io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	_ = req.Body.Close()
+	close(u.started)
+	<-u.release
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"created":1,"data":[{"b64_json":"aGVsbG8="}]}`)),
+	}, nil
+}
+
+func TestOpenAIImages_InlineSpoolKeepsRawBodyAndOmitsSnapshots(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawDir := t.TempDir()
+	oldOptions := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 10 << 20, PreviewLimitBytes: 64, TempDir: rawDir, FilePrefix: "sub2api-test-"}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+
+	body := []byte(`{"model":"gpt-image-1","prompt":"inline-secret-` + strings.Repeat("x", 12<<20) + `","images":[{"image_url":"data:image/png;base64,aW5saW5lLXNlY3JldA=="}]}`)
+	upstream := &openAIImagesSpoolUpstream{started: make(chan struct{}), release: make(chan struct{})}
+	group := &service.Group{ID: 901, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
+	account := &service.Account{ID: 902, Name: "images", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test"}}
+	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
+
+	var requestContext *gin.Context
+	router := env.router("/v1/images/generations", func(c *gin.Context) {
+		requestContext = c
+		env.handler.Images(c)
+	})
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	done := make(chan struct{})
+	go func() { router.ServeHTTP(recorder, req); close(done) }()
+
+	select {
+	case <-upstream.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for images upstream")
+	}
+	require.Equal(t, body, upstream.body)
+	require.NotEmpty(t, readTestDir(t, rawDir), "raw body must spool while upstream is blocked")
+	detail := middleware2.GetUsageDetailSnapshot(requestContext)
+	ops, _ := requestContext.Get(service.OpsUpstreamRequestBodyKey)
+	for _, snapshot := range []string{detail.RequestBody, detail.UpstreamRequestBody, ops.(string)} {
+		require.NotContains(t, snapshot, "inline-secret-")
+		require.NotContains(t, snapshot, "aW5saW5lLXNlY3JldA==")
+	}
+
+	close(upstream.release)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for images handler")
+	}
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Empty(t, readTestDir(t, rawDir))
 }
 
 func TestOpenAIGatewayHandlerImages_OAuthBadRequestPassesThroughUpstreamImageError(t *testing.T) {

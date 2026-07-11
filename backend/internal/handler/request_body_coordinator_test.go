@@ -225,6 +225,58 @@ func TestRequestBodyCoordinator_Cleanup(t *testing.T) {
 	})
 }
 
+func TestRequestBodyCoordinator_CleanupRemovesRawEffectiveAndMultipartTemps(t *testing.T) {
+	rawDir, multipartDir := t.TempDir(), t.TempDir()
+	oldOptions := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: rawDir, FilePrefix: "sub2api-test-"}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+	t.Setenv("TMP", multipartDir)
+	t.Setenv("TEMP", multipartDir)
+
+	coordinator, err := newJSONRequestBody(httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"data":"raw"}`)))
+	if err != nil {
+		t.Fatalf("newJSONRequestBody: %v", err)
+	}
+	if err := coordinator.SetEffectiveBytes([]byte(`{"data":"effective"}`)); err != nil {
+		t.Fatalf("SetEffectiveBytes: %v", err)
+	}
+
+	var formBody bytes.Buffer
+	writer := multipart.NewWriter(&formBody)
+	part, err := writer.CreateFormFile("image", "source.png")
+	if err != nil {
+		t.Fatalf("CreateFormFile: %v", err)
+	}
+	if _, err := part.Write([]byte("multipart-temp")); err != nil {
+		t.Fatalf("write form file: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/", &formBody)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	if err := req.ParseMultipartForm(1); err != nil {
+		t.Fatalf("ParseMultipartForm: %v", err)
+	}
+	coordinator.form = req.MultipartForm
+
+	rawPaths, err := filepath.Glob(filepath.Join(rawDir, "*"))
+	if err != nil || len(rawPaths) != 2 {
+		t.Fatalf("raw/effective spool files = %v, err = %v", rawPaths, err)
+	}
+	multipartPaths, err := filepath.Glob(filepath.Join(multipartDir, "multipart-*"))
+	if err != nil || len(multipartPaths) == 0 {
+		t.Fatalf("multipart temp files = %v, err = %v", multipartPaths, err)
+	}
+
+	coordinator.Cleanup()
+	rawPaths, _ = filepath.Glob(filepath.Join(rawDir, "*"))
+	multipartPaths, _ = filepath.Glob(filepath.Join(multipartDir, "multipart-*"))
+	if len(rawPaths) != 0 || len(multipartPaths) != 0 {
+		t.Fatalf("remaining raw=%v multipart=%v", rawPaths, multipartPaths)
+	}
+}
+
 func TestRequestBodyCoordinator_CleanupUsesUniqueHandles(t *testing.T) {
 	source, err := os.ReadFile("request_body_coordinator.go")
 	if err != nil {
