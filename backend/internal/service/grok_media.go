@@ -120,6 +120,47 @@ func ParseGrokMediaRequest(contentType string, body []byte) GrokMediaRequestInfo
 	return info
 }
 
+func ParseGrokMediaMultipartForm(form *multipart.Form) GrokMediaRequestInfo {
+	info := GrokMediaRequestInfo{N: 1}
+	if form == nil {
+		return info
+	}
+	for name, values := range form.Value {
+		if len(values) == 0 {
+			continue
+		}
+		value := strings.TrimSpace(values[0])
+		switch name {
+		case "model":
+			info.Model = value
+		case "prompt":
+			info.Prompt = value
+		case "size":
+			info.Size = value
+		case "n":
+			if n, err := strconv.Atoi(value); err == nil && n > 0 {
+				info.N = n
+			}
+		}
+	}
+	for name, files := range form.File {
+		for _, file := range files {
+			if file == nil {
+				continue
+			}
+			upload := OpenAIImagesUpload{FieldName: name, FileName: file.Filename, ContentType: file.Header.Get("Content-Type"), File: file}
+			if name == "mask" {
+				info.MaskUpload = &upload
+			} else if name == "image" || strings.HasPrefix(name, "image[") {
+				info.Uploads = append(info.Uploads, upload)
+			}
+		}
+	}
+	info.Model, info.Prompt, info.Size = strings.TrimSpace(info.Model), strings.TrimSpace(info.Prompt), strings.TrimSpace(info.Size)
+	info.SizeTier = NormalizeImageBillingTierOrDefault(info.Size)
+	return info
+}
+
 func parseGrokMediaJSONRequest(body []byte, info *GrokMediaRequestInfo) {
 	if info == nil {
 		return
@@ -206,7 +247,6 @@ func parseGrokMediaMultipartRequest(contentType string, body []byte, info *GrokM
 				FieldName:   name,
 				FileName:    fileName,
 				ContentType: partContentType,
-				Data:        data,
 			}
 			if name == "mask" {
 				info.MaskUpload = &upload
@@ -295,7 +335,11 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	originalMediaType, _, _ := mime.ParseMediaType(strings.TrimSpace(contentType))
 	originalMultipart := strings.EqualFold(originalMediaType, "multipart/form-data")
 
-	body, contentType, err = prepareGrokMediaForwardBody(endpoint, body, contentType)
+	if endpoint == GrokMediaEndpointImagesEdits && originalMultipart && c != nil && c.Request != nil && c.Request.MultipartForm != nil {
+		body, contentType, err = prepareGrokMediaFormForwardBody(ParseGrokMediaMultipartForm(c.Request.MultipartForm))
+	} else {
+		body, contentType, err = prepareGrokMediaForwardBody(endpoint, body, contentType)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -372,6 +416,53 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 		ImageInputSize:   usage.ImageInputSize,
 		ImageOutputSizes: usage.ImageOutputSizes,
 	}, nil
+}
+
+func prepareGrokMediaFormForwardBody(info GrokMediaRequestInfo) ([]byte, string, error) {
+	payload := map[string]any{}
+	if info.Model != "" {
+		payload["model"] = info.Model
+	}
+	if info.Prompt != "" {
+		payload["prompt"] = info.Prompt
+	}
+	if info.N > 1 {
+		payload["n"] = info.N
+	}
+	if info.Size != "" {
+		payload["size"] = info.Size
+	}
+	images := make([]map[string]string, 0, len(info.InputImageURLs)+len(info.Uploads))
+	for _, imageURL := range info.InputImageURLs {
+		if imageURL = strings.TrimSpace(imageURL); imageURL != "" {
+			images = append(images, map[string]string{"image_url": imageURL})
+		}
+	}
+	for _, upload := range info.Uploads {
+		dataURL, err := openAIImageUploadToDataURL(upload)
+		if err != nil {
+			return nil, "", err
+		}
+		images = append(images, map[string]string{"image_url": dataURL})
+	}
+	if len(images) > 0 {
+		payload["image"] = images[0]
+		if len(images) > 1 {
+			payload["images"] = images
+		}
+	}
+	if info.MaskUpload != nil {
+		dataURL, err := openAIImageUploadToDataURL(*info.MaskUpload)
+		if err != nil {
+			return nil, "", err
+		}
+		payload["mask"] = map[string]string{"image_url": dataURL}
+	}
+	out, err := marshalOpenAIUpstreamJSON(payload)
+	if err != nil {
+		return nil, "", err
+	}
+	return out, "application/json", nil
 }
 
 func prepareGrokMediaForwardBody(endpoint GrokMediaEndpoint, body []byte, contentType string) ([]byte, string, error) {

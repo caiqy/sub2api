@@ -94,7 +94,9 @@ func TestOpenAIGatewayServiceParseOpenAIImagesRequest_MultipartEdit(t *testing.T
 	c.Request = req
 
 	svc := &OpenAIGatewayService{}
-	parsed, err := svc.ParseOpenAIImagesRequest(c, body.Bytes())
+	require.NoError(t, req.ParseMultipartForm(0))
+	t.Cleanup(func() { _ = req.MultipartForm.RemoveAll() })
+	parsed, err := svc.ParseOpenAIImagesMultipartForm(c, req.MultipartForm)
 	require.NoError(t, err)
 	require.NotNil(t, parsed)
 	require.Equal(t, "/v1/images/edits", parsed.Endpoint)
@@ -121,7 +123,23 @@ func TestOpenAIImagesRequestModerationBody_JSONEditIncludesInputImageURLs(t *tes
 	require.Equal(t, []string{"https://example.com/source.png"}, input.Images)
 }
 
-func TestOpenAIImagesRequestModerationBody_MultipartEditIncludesUploadsInMemory(t *testing.T) {
+func TestOpenAIImagesRequestModerationBody_MultipartEditIncludesUploadsFromForm(t *testing.T) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	image, err := writer.CreateFormFile("image", "source.png")
+	require.NoError(t, err)
+	_, err = image.Write([]byte("fake-image-bytes"))
+	require.NoError(t, err)
+	mask, err := writer.CreateFormFile("mask", "mask.png")
+	require.NoError(t, err)
+	_, err = mask.Write([]byte("fake-mask-bytes"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	req := httptest.NewRequest(http.MethodPost, "/", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	require.NoError(t, req.ParseMultipartForm(0))
+	t.Cleanup(func() { _ = req.MultipartForm.RemoveAll() })
+
 	parsed := &OpenAIImagesRequest{
 		Endpoint: openAIImagesEditsEndpoint,
 		Prompt:   "replace background",
@@ -129,13 +147,13 @@ func TestOpenAIImagesRequestModerationBody_MultipartEditIncludesUploadsInMemory(
 			FieldName:   "image",
 			FileName:    "source.png",
 			ContentType: "image/png",
-			Data:        []byte("fake-image-bytes"),
+			File:        req.MultipartForm.File["image"][0],
 		}},
 		MaskUpload: &OpenAIImagesUpload{
 			FieldName:   "mask",
 			FileName:    "mask.png",
 			ContentType: "image/png",
-			Data:        []byte("fake-mask-bytes"),
+			File:        req.MultipartForm.File["mask"][0],
 		},
 	}
 
@@ -282,7 +300,9 @@ func TestOpenAIGatewayServiceParseOpenAIImagesRequest_MultipartEditWithMaskAndNa
 	c.Request = req
 
 	svc := &OpenAIGatewayService{}
-	parsed, err := svc.ParseOpenAIImagesRequest(c, body.Bytes())
+	require.NoError(t, req.ParseMultipartForm(0))
+	t.Cleanup(func() { _ = req.MultipartForm.RemoveAll() })
+	parsed, err := svc.ParseOpenAIImagesMultipartForm(c, req.MultipartForm)
 	require.NoError(t, err)
 	require.NotNil(t, parsed)
 	require.Len(t, parsed.Uploads, 1)
@@ -1447,7 +1467,9 @@ func TestOpenAIGatewayServiceForwardImages_OAuthEditsMultipartUsesResponsesAPI(t
 	c.Set(UsageDetailCaptureContextKey, collector)
 
 	svc := &OpenAIGatewayService{}
-	parsed, err := svc.ParseOpenAIImagesRequest(c, body.Bytes())
+	require.NoError(t, req.ParseMultipartForm(0))
+	t.Cleanup(func() { _ = req.MultipartForm.RemoveAll() })
+	parsed, err := svc.ParseOpenAIImagesMultipartForm(c, req.MultipartForm)
 	require.NoError(t, err)
 
 	upstream := &httpUpstreamRecorder{

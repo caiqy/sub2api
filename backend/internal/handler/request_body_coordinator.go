@@ -15,6 +15,8 @@ import (
 // ponytail: package-local seam only; production uses the existing responses body settings.
 var jsonRequestBodyHandleOptions = openAIResponsesRequestBodyHandleOptions()
 
+const multipartUploadPartLimit = 20 << 20
+
 type requestBodyCoordinator struct {
 	raw       *service.RequestBodyHandle
 	effective *service.RequestBodyHandle
@@ -40,6 +42,41 @@ func newJSONRequestBody(req *http.Request) (*requestBodyCoordinator, error) {
 		req.ContentLength = raw.Size()
 	}
 	return &requestBodyCoordinator{raw: raw, effective: raw}, nil
+}
+
+func newMultipartRequestBody(req *http.Request) (*requestBodyCoordinator, error) {
+	if req == nil || req.Body == nil {
+		return nil, errors.New("multipart request body is required")
+	}
+	raw, err := service.NewRequestBodyHandleFromReader(req.Body, jsonRequestBodyHandleOptions)
+	if err != nil {
+		return nil, err
+	}
+	reader, err := raw.Open()
+	if err != nil {
+		service.CleanupRequestBodyHandle(raw)
+		return nil, err
+	}
+
+	parsed := req.Clone(req.Context())
+	parsed.Body = reader
+	parsed.ContentLength = raw.Size()
+	if err := parsed.ParseMultipartForm(0); err != nil {
+		_ = reader.Close()
+		service.CleanupRequestBodyHandle(raw)
+		return nil, err
+	}
+	_ = reader.Close()
+	for _, files := range parsed.MultipartForm.File {
+		for _, file := range files {
+			if file.Size > multipartUploadPartLimit {
+				_ = parsed.MultipartForm.RemoveAll()
+				service.CleanupRequestBodyHandle(raw)
+				return nil, &http.MaxBytesError{Limit: multipartUploadPartLimit}
+			}
+		}
+	}
+	return &requestBodyCoordinator{raw: raw, effective: raw, form: parsed.MultipartForm}, nil
 }
 
 func (c *requestBodyCoordinator) ReadRaw() ([]byte, error) {

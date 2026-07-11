@@ -116,6 +116,70 @@ func TestRequestBodyCoordinator_Spool(t *testing.T) {
 	}
 }
 
+func TestRequestBodyCoordinator_Multipart(t *testing.T) {
+	const maxUpload = 20 << 20
+	t.Setenv("TMP", "D:\\.tmp-go\\tmp")
+	t.Setenv("TEMP", "D:\\.tmp-go\\tmp")
+	oldOptions := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir(), FilePrefix: "sub2api-test-"}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+
+	t.Run("uses form owned files", func(t *testing.T) {
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		if err := writer.WriteField("model", "gpt-image-2"); err != nil {
+			t.Fatal(err)
+		}
+		part, err := writer.CreateFormFile("image", "source.png")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := part.Write([]byte("image bytes")); err != nil {
+			t.Fatal(err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "/", &body)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		coordinator, err := newMultipartRequestBody(req)
+		if err != nil {
+			t.Fatalf("newMultipartRequestBody: %v", err)
+		}
+		t.Cleanup(coordinator.Cleanup)
+		if coordinator.form == nil || len(coordinator.form.File["image"]) != 1 {
+			t.Fatal("multipart file was not retained by the coordinator form")
+		}
+		if coordinator.Effective() != coordinator.raw {
+			t.Fatal("multipart effective handle does not reuse raw handle")
+		}
+	})
+
+	t.Run("rejects a part over 20MB", func(t *testing.T) {
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		part, err := writer.CreateFormFile("image", "oversize.png")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := part.Write(bytes.Repeat([]byte("x"), maxUpload+1)); err != nil {
+			t.Fatal(err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "/", &body)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		_, err = newMultipartRequestBody(req)
+		var maxErr *http.MaxBytesError
+		if !errors.As(err, &maxErr) || maxErr.Limit != maxUpload {
+			t.Fatalf("newMultipartRequestBody error = %v, want 20MB MaxBytesError", err)
+		}
+	})
+}
+
 func TestRequestBodyCoordinator_JSONEffective(t *testing.T) {
 	oldOptions := jsonRequestBodyHandleOptions
 	jsonRequestBodyHandleOptions.TempDir = t.TempDir()

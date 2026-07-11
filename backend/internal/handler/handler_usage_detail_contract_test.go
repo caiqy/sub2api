@@ -125,7 +125,6 @@ func TestJSONInlineBinaryRequestSnapshotsKeepMetadata(t *testing.T) {
 				InputImageURLs: []string{"data:image/png;base64,c2VjcmV0"},
 				MaskImageURL:   "data:image/png;base64,bWFzaw==",
 				HasMask:        true,
-				Body:           imageBody,
 			}
 			service.SetUsageRequestBody(c, service.RequestBodyPreviewString(imageBody))
 			snapshot = buildOpenAIImagesDetailSnapshot(c, parsed)
@@ -201,7 +200,7 @@ func TestMultipartMetadataSnapshotsBoundLongPrompts(t *testing.T) {
 		r := gin.New()
 		r.Use(middleware2.UsageDetailCapture())
 		r.POST("/images", func(c *gin.Context) {
-			snapshot = buildOpenAIImagesDetailSnapshot(c, &service.OpenAIImagesRequest{Multipart: true, Prompt: prompt, Body: originalBody})
+			snapshot = buildOpenAIImagesDetailSnapshot(c, &service.OpenAIImagesRequest{Multipart: true, Prompt: prompt})
 			c.Status(http.StatusNoContent)
 		})
 		r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/images", bytes.NewReader(originalBody)))

@@ -108,6 +108,12 @@ func TestForwardOpenAIImagesAPIKeyOmitsMultipartBinaryFromUsageAndOpsPreview(t *
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body.Bytes()))
 	c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+	require.NoError(t, c.Request.ParseMultipartForm(0))
+	t.Cleanup(func() { _ = c.Request.MultipartForm.RemoveAll() })
+	c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+	require.NoError(t, c.Request.ParseMultipartForm(0))
+	t.Cleanup(func() { _ = c.Request.MultipartForm.RemoveAll() })
+	c.Request.Header.Set("Content-Type", writer.FormDataContentType())
 	collector := &usageUpstreamSnapshotCollector{}
 	c.Set(UsageDetailCaptureContextKey, collector)
 
@@ -180,6 +186,9 @@ func TestGrokMediaMultipartStoresOmittedPreview(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body.Bytes()))
+	c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+	require.NoError(t, c.Request.ParseMultipartForm(0))
+	t.Cleanup(func() { _ = c.Request.MultipartForm.RemoveAll() })
 	collector := &usageUpstreamSnapshotCollector{}
 	c.Set(UsageDetailCaptureContextKey, collector)
 	upstream := &httpUpstreamRecorder{resp: &http.Response{

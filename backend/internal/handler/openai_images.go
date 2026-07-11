@@ -48,7 +48,14 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		return
 	}
 
-	coordinator, err := newJSONRequestBody(c.Request)
+	multipartRequest := isMultipartImagesContentType(c.GetHeader("Content-Type"))
+	var coordinator *requestBodyCoordinator
+	var err error
+	if multipartRequest {
+		coordinator, err = newMultipartRequestBody(c.Request)
+	} else {
+		coordinator, err = newJSONRequestBody(c.Request)
+	}
 	if err != nil {
 		if errors.Is(err, service.ErrRequestBodySpool) {
 			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
@@ -62,7 +69,20 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		return
 	}
 	defer coordinator.Cleanup()
-	body, err := coordinator.ReadRaw()
+	var body []byte
+	var parsed *service.OpenAIImagesRequest
+	if multipartRequest {
+		parsed, err = h.gatewayService.ParseOpenAIImagesMultipartForm(c, coordinator.form)
+	} else {
+		body, err = coordinator.ReadRaw()
+		if err == nil && len(body) == 0 {
+			err = errors.New("request body is empty")
+		}
+		if err == nil {
+			service.SetUsageRequestBody(c, openAIRequestBodyPreviewSnapshot(body))
+			parsed, err = h.gatewayService.ParseOpenAIImagesRequest(c, body)
+		}
+	}
 	if err != nil {
 		if errors.Is(err, service.ErrRequestBodySpool) {
 			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
@@ -72,27 +92,14 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 			return
 		}
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
-	}
-	if len(body) == 0 {
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
-		return
-	}
-	if !isMultipartImagesContentType(c.GetHeader("Content-Type")) {
-		service.SetUsageRequestBody(c, openAIRequestBodyPreviewSnapshot(body))
 	}
 
 	if isMultipartImagesContentType(c.GetHeader("Content-Type")) {
 		setOpsRequestContext(c, "", false)
 	} else {
 		setOpsRequestContext(c, "", false)
-	}
-
-	parsed, err := h.gatewayService.ParseOpenAIImagesRequest(c, body)
-	if err != nil {
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
-		return
 	}
 
 	reqLog = reqLog.With(
@@ -164,7 +171,14 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		return
 	}
 
-	sessionHash := h.gatewayService.GenerateExplicitSessionHash(c, body)
+	sessionSeed := body
+	if parsed.Multipart {
+		sessionSeed = []byte(parsed.StickySessionSeed())
+	}
+	sessionHash := h.gatewayService.GenerateExplicitSessionHash(c, sessionSeed)
+	requestPayloadHash := service.HashUsageRequestPayload(sessionSeed)
+	service.BindOpenAIRequestBodyHandle(c, coordinator.Effective())
+	body = nil
 
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
@@ -257,7 +271,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 					accountReleaseFunc()
 				}
 			}()
-			return h.gatewayService.ForwardImages(c.Request.Context(), c, account, body, parsed, channelMapping.MappedModel)
+			return h.gatewayService.ForwardImages(c.Request.Context(), c, account, nil, parsed, channelMapping.MappedModel)
 		}()
 		forwardDuration := time.Since(forwardStart)
 		forwardDurationMs := forwardDuration.Milliseconds()
@@ -400,7 +414,6 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
-		requestPayloadHash := service.HashUsageRequestPayload(body)
 		detailSnapshot := buildOpenAIImagesDetailSnapshot(c, parsed)
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
@@ -459,11 +472,11 @@ func multipartMetadataPromptPreview(prompt string) string {
 	return truncateString(prompt, multipartMetadataPromptPreviewLimitBytes)
 }
 
-func requestBodySnapshotSize(req *http.Request, body []byte) int64 {
+func requestBodySnapshotSize(req *http.Request) int64 {
 	if req != nil && req.ContentLength > 0 {
 		return req.ContentLength
 	}
-	return int64(len(body))
+	return 0
 }
 
 func buildOpenAIImagesDetailSnapshot(c *gin.Context, parsed *service.OpenAIImagesRequest) *middleware2.UsageDetailSnapshot {
@@ -471,7 +484,7 @@ func buildOpenAIImagesDetailSnapshot(c *gin.Context, parsed *service.OpenAIImage
 	if snapshot == nil || parsed == nil {
 		return snapshot
 	}
-	if !parsed.Multipart && service.RequestBodyPreviewString(parsed.Body) != "[inline binary payload omitted]" {
+	if !parsed.Multipart && len(parsed.InputImageURLs) == 0 && strings.TrimSpace(parsed.MaskImageURL) == "" {
 		return snapshot
 	}
 
@@ -503,7 +516,7 @@ func buildOpenAIImagesDetailSnapshot(c *gin.Context, parsed *service.OpenAIImage
 		return snapshot
 	}
 
-	size := requestBodySnapshotSize(c.Request, parsed.Body)
+	size := requestBodySnapshotSize(c.Request)
 	snapshot.RequestBody = service.RequestBodyPreviewSnapshot(string(requestBody), size, true)
 	return snapshot
 }
