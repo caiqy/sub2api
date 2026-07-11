@@ -2,6 +2,8 @@ package handler
 
 import (
 	"bytes"
+	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -29,11 +31,16 @@ func TestOpenAIGatewayHandler_ChatAndEmbeddingsReplayMappedSpoolAcrossFailover(t
 		route        string
 		body         func(string) []byte
 		upstreamPath string
+		gzip         bool
 	}{
 		{"chat", "/v1/chat/completions", func(padding string) []byte {
 			return []byte(`{"model":"alias-model","messages":[{"role":"user","content":"` + padding + `"}],"stream":false}`)
-		}, "/v1/responses"},
-		{"embeddings", "/v1/embeddings", func(padding string) []byte { return []byte(`{"model":"alias-model","input":"` + padding + `"}`) }, "/v1/embeddings"},
+		}, "/v1/responses", false},
+		{"chat-compressed", "/v1/chat/completions", func(padding string) []byte {
+			return []byte(`{"model":"alias-model","messages":[{"role":"user","content":"` + padding + `"}],"stream":false}`)
+		}, "/v1/responses", true},
+		{"embeddings", "/v1/embeddings", func(padding string) []byte { return []byte(`{"model":"alias-model","input":"` + padding + `"}`) }, "/v1/embeddings", false},
+		{"embeddings-compressed", "/v1/embeddings", func(padding string) []byte { return []byte(`{"model":"alias-model","input":"` + padding + `"}`) }, "/v1/embeddings", true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			// Keep the handler path real; the transport is the only controlled boundary.
@@ -57,7 +64,7 @@ func TestOpenAIGatewayHandler_ChatAndEmbeddingsReplayMappedSpoolAcrossFailover(t
 			var requestContext *gin.Context
 			router := env.router(tt.route, func(c *gin.Context) {
 				requestContext = c
-				if tt.name == "chat" {
+				if tt.route == "/v1/chat/completions" {
 					env.handler.ChatCompletions(c)
 				} else {
 					env.handler.Embeddings(c)
@@ -69,8 +76,22 @@ func TestOpenAIGatewayHandler_ChatAndEmbeddingsReplayMappedSpoolAcrossFailover(t
 				return openAIReplaySnapshots{usageRequest: detail.RequestBody, usageUpstream: detail.UpstreamRequestBody, opsUpstream: ops.(string)}
 			}
 			rec := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodPost, tt.route, bytes.NewReader(body))
+			requestBody := body
+			if tt.gzip {
+				var compressed bytes.Buffer
+				zipper := gzip.NewWriter(&compressed)
+				require.NoError(t, func() error {
+					_, err := zipper.Write(body)
+					return err
+				}())
+				require.NoError(t, zipper.Close())
+				requestBody = compressed.Bytes()
+			}
+			req := httptest.NewRequest(http.MethodPost, tt.route, bytes.NewReader(requestBody))
 			req.Header.Set("Content-Type", "application/json")
+			if tt.gzip {
+				req.Header.Set("Content-Encoding", "gzip")
+			}
 			done := make(chan struct{})
 			go func() { router.ServeHTTP(rec, req); close(done) }()
 			waitOpenAIReplaySignal(t, upstream.started, "second upstream attempt")
@@ -143,6 +164,86 @@ func TestOpenAIGatewayHandler_ChatReplayRawSpoolAcrossFailoverWhenResponsesUnsup
 	require.Empty(t, readTestDir(t, upstreamDir))
 }
 
+func TestOpenAIGatewayHandler_ChatAndEmbeddingsUpstreamErrorsPreserveStatusAndMapping(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		route string
+		body  string
+	}{
+		{"chat", "/v1/chat/completions", `{"model":"alias-model","messages":[{"role":"user","content":"small"}],"stream":false}`},
+		{"embeddings", "/v1/embeddings", `{"model":"alias-model","input":"small"}`},
+	} {
+		for _, status := range []struct {
+			upstream int
+			want     int
+		}{{http.StatusBadRequest, http.StatusBadRequest}, {http.StatusInternalServerError, http.StatusBadGateway}} {
+			t.Run(tt.name+"-"+http.StatusText(status.upstream), func(t *testing.T) {
+				upstream := &openAIStatusSpoolUpstream{status: status.upstream}
+				group := &service.Group{ID: 3, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+				account := &service.Account{ID: 31, Name: "status", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "sk-status", "model_mapping": map[string]any{"alias-model": "mapped-model"}}}
+				env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
+				router := env.router(tt.route, func(c *gin.Context) {
+					if tt.route == "/v1/chat/completions" {
+						env.handler.ChatCompletions(c)
+						return
+					}
+					env.handler.Embeddings(c)
+				})
+				rec := httptest.NewRecorder()
+				req := httptest.NewRequest(http.MethodPost, tt.route, strings.NewReader(tt.body))
+				req.Header.Set("Content-Type", "application/json")
+				router.ServeHTTP(rec, req)
+
+				require.Equal(t, status.want, rec.Code, rec.Body.String())
+				require.NotEmpty(t, gjson.Get(rec.Body.String(), "error.message").String(), rec.Body.String())
+				require.Contains(t, string(upstream.body), `"model":"mapped-model"`)
+			})
+		}
+	}
+}
+
+func TestOpenAIGatewayHandler_ChatAndEmbeddingsCanceledRequestsCleanSpools(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		route string
+		body  func(string) []byte
+	}{
+		{"chat", "/v1/chat/completions", func(padding string) []byte {
+			return []byte(`{"model":"alias-model","messages":[{"role":"user","content":"` + padding + `"}]}`)
+		}},
+		{"embeddings", "/v1/embeddings", func(padding string) []byte { return []byte(`{"model":"alias-model","input":"` + padding + `"}`) }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			rawDir, upstreamDir := t.TempDir(), t.TempDir()
+			oldOptions := jsonRequestBodyHandleOptions
+			jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 10 << 20, TempDir: rawDir, FilePrefix: "sub2api-test-"}
+			t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+			t.Setenv("TMPDIR", upstreamDir)
+			t.Setenv("TMP", upstreamDir)
+			t.Setenv("TEMP", upstreamDir)
+
+			ctx, cancel := context.WithCancel(context.Background())
+			group := &service.Group{ID: 4, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+			account := &service.Account{ID: 41, Name: "canceled", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "sk-canceled", "model_mapping": map[string]any{"alias-model": "mapped-model"}}}
+			env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, cancelingTerminalHTTPUpstream{cancel: cancel})
+			router := env.router(tt.route, func(c *gin.Context) {
+				if tt.route == "/v1/chat/completions" {
+					env.handler.ChatCompletions(c)
+					return
+				}
+				env.handler.Embeddings(c)
+			})
+			req := httptest.NewRequest(http.MethodPost, tt.route, bytes.NewReader(tt.body(strings.Repeat("x", 12<<20)))).WithContext(ctx)
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(httptest.NewRecorder(), req)
+
+			require.ErrorIs(t, ctx.Err(), context.Canceled)
+			require.Empty(t, readTestDir(t, rawDir))
+			require.Empty(t, readTestDir(t, upstreamDir))
+		})
+	}
+}
+
 type openAIReplaySpoolUpstream struct {
 	service.HTTPUpstream
 	mu        sync.Mutex
@@ -154,6 +255,31 @@ type openAIReplaySpoolUpstream struct {
 	release   chan struct{}
 	snapshot  func() openAIReplaySnapshots
 	snapshots chan openAIReplaySnapshots
+}
+
+type openAIStatusSpoolUpstream struct {
+	service.HTTPUpstream
+
+	status int
+	body   []byte
+}
+
+func (u *openAIStatusSpoolUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	defer req.Body.Close()
+	var err error
+	u.body, err = io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	return &http.Response{
+		StatusCode: u.status,
+		Header:     http.Header{"Content-Type": {"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"upstream status"}}`)),
+	}, nil
+}
+
+func (u *openAIStatusSpoolUpstream) DoWithTLS(req *http.Request, proxy string, accountID int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, proxy, accountID, concurrency)
 }
 
 const openAIReplaySpoolWait = 5 * time.Second
