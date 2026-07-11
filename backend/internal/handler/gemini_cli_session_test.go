@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -119,6 +120,17 @@ func TestGeminiCLITmpDirRegex(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestExtractGeminiCLISessionHash_LargeBodyKeepsTrailingTmpDir(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("POST", "/v1beta/models/gemini-2.5-flash:generateContent", nil)
+	hash := "f7851b009ed314d1baee62e83115f486160283f4a55a582d89fdac8b9fe3b740"
+	body := []byte(`{"contents":[{"parts":[{"text":"` + strings.Repeat("x", 12<<20) + `/.gemini/tmp/` + hash + `"}]}]}`)
+
+	require.Equal(t, hash, extractGeminiCLISessionHash(c, body))
 }
 
 func TestSafeShortPrefix(t *testing.T) {

@@ -3,11 +3,14 @@
 package handler
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -16,6 +19,49 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestGeminiV1BetaModels_FailedUsageKeepsSpoolUntilUpstreamReturns(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawDir := t.TempDir()
+	old := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 10 << 20, TempDir: rawDir}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = old })
+	group := &service.Group{ID: 98, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 98, Name: "api-key", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "key"}}
+	upstream := &geminiBlockingBodyUpstream{
+		started:  make(chan *http.Request, 1),
+		release:  make(chan struct{}),
+		response: &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"gemini upstream rejected payload"}}`))},
+	}
+	env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+	rec := httptest.NewRecorder()
+	body := `{"contents":[{"role":"user","parts":[{"text":"` + strings.Repeat("x", 12<<20) + `"}]}]}`
+	done := make(chan struct{})
+	go func() {
+		req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash:generateContent", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		env.routerFor("/v1beta/models/*modelAction", env.handler.GeminiV1BetaModels).ServeHTTP(rec, req)
+		close(done)
+	}()
+	select {
+	case <-upstream.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Gemini handler did not reach upstream")
+	}
+	entries, err := os.ReadDir(rawDir)
+	require.NoError(t, err)
+	require.NotEmpty(t, entries)
+	close(upstream.release)
+	<-done
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "gemini upstream rejected payload")
+	log := waitForOpenAIFailedUsageLog(t, env.usageRepo)
+	require.Contains(t, log.DetailSnapshot.RequestBody, "[inline binary payload omitted]")
+	entries, err = os.ReadDir(rawDir)
+	require.NoError(t, err)
+	require.Empty(t, entries)
+}
 
 func TestGatewayHandler_GeminiV1BetaModels_ForwardErrorStillCreatesUsageLog(t *testing.T) {
 	gin.SetMode(gin.TestMode)

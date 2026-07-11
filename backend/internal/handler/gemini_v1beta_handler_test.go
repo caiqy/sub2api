@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -202,6 +205,195 @@ func TestGeminiV1BetaModels_ReleasesAcquiredAccountSlotWhenThoughtSignatureSpool
 	require.Equal(t, 1, cache.releaseCalls())
 }
 
+func TestGeminiV1BetaModels_RequestBodyLifecycleAcrossActions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	old := jsonRequestBodyHandleOptions
+	rawDir := t.TempDir()
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 10 << 20, TempDir: rawDir}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = old })
+
+	body := []byte(`{"contents":[{"role":"user","parts":[{"text":"` + strings.Repeat("x", 12<<20) + `"}]}]}`)
+	wantHash := service.HashUsageRequestPayload(body)
+	for _, action := range []string{"generateContent", "streamGenerateContent", "countTokens"} {
+		t.Run(action, func(t *testing.T) {
+			group := &service.Group{ID: 94, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
+			account := &service.Account{ID: 94, Name: "api-key", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "key"}}
+			upstream := &geminiBlockingBodyUpstream{started: make(chan *http.Request, 1), release: make(chan struct{})}
+			env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+			done := make(chan struct{})
+			go func() {
+				rec := httptest.NewRecorder()
+				req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash:"+action, bytes.NewReader(body))
+				req.Header.Set("Content-Type", "application/json")
+				env.routerFor("/v1beta/models/*modelAction", env.handler.GeminiV1BetaModels).ServeHTTP(rec, req)
+				close(done)
+			}()
+
+			select {
+			case <-upstream.started:
+			case <-time.After(5 * time.Second):
+				t.Fatal("Gemini handler did not reach upstream")
+			}
+			require.Equal(t, []string{wantHash}, upstream.requestHashes)
+			entries, err := os.ReadDir(rawDir)
+			require.NoError(t, err)
+			require.NotEmpty(t, entries, "large request must remain spooled while upstream waits")
+
+			close(upstream.release)
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("Gemini handler did not return")
+			}
+			entries, err = os.ReadDir(rawDir)
+			require.NoError(t, err)
+			require.Empty(t, entries, "spools must be removed after the handler returns")
+		})
+	}
+}
+
+func TestGeminiV1BetaModels_ModelPathAndContentAuditKeepGoogleErrors(t *testing.T) {
+	t.Run("model path", func(t *testing.T) {
+		model, action, err := parseGeminiModelAction("gemini-2.5-flash/streamGenerateContent")
+		require.NoError(t, err)
+		require.Equal(t, "gemini-2.5-flash", model)
+		require.Equal(t, "streamGenerateContent", action)
+	})
+
+	t.Run("content audit", func(t *testing.T) {
+		gin.SetMode(gin.TestMode)
+		rawDir := t.TempDir()
+		old := jsonRequestBodyHandleOptions
+		jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 10 << 20, TempDir: rawDir}
+		t.Cleanup(func() { jsonRequestBodyHandleOptions = old })
+		cfg := service.ContentModerationConfig{Enabled: true, Mode: service.ContentModerationModePreBlock, AllGroups: true, SampleRate: 100, APIKeys: []string{"test-key"}, BlockStatus: 451, BlockMessage: "blocked by audit", BlockedKeywords: []string{"forbidden-token"}}
+		rawCfg, err := json.Marshal(cfg)
+		require.NoError(t, err)
+		moderation := service.NewContentModerationService(&geminiModerationSettingRepo{values: map[string]string{
+			service.SettingKeyRiskControlEnabled:      "true",
+			service.SettingKeyContentModerationConfig: string(rawCfg),
+		}}, geminiModerationRepo{}, geminiModerationHashCache{}, nil, nil, nil, nil)
+		group := &service.Group{ID: 95, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
+		account := &service.Account{ID: 95, Name: "api-key", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "key"}}
+		env := newTerminalGatewayMessagesEnv(t, group, &openAIChatCompletionsHTTPUpstreamStub{err: fmt.Errorf("must not be called")}, account)
+		env.handler.contentModerationService = moderation
+		body := `{"contents":[{"role":"user","parts":[{"text":"` + strings.Repeat("x", 12<<20) + `forbidden-token"}]}]}`
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash:generateContent", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		env.routerFor("/v1beta/models/*modelAction", env.handler.GeminiV1BetaModels).ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusUnavailableForLegalReasons, rec.Code)
+		require.JSONEq(t, `{"error":{"code":451,"message":"blocked by audit","status":"UNKNOWN"}}`, rec.Body.String())
+		entries, err := os.ReadDir(rawDir)
+		require.NoError(t, err)
+		require.Empty(t, entries, "audit rejection must clean its spool")
+	})
+}
+
+func TestGeminiV1BetaModels_StreamTerminationCleansSpool(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawDir := t.TempDir()
+	old := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 10 << 20, TempDir: rawDir}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = old })
+	group := &service.Group{ID: 96, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 96, Name: "api-key", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "key"}}
+	upstream := &geminiBlockingBodyUpstream{started: make(chan *http.Request, 1), release: make(chan struct{}), response: &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: &terminalPartialReadErrorBody{data: []byte("data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"partial\"}]}}]}\n\n")}}}
+	env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+	rec := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		body := `{"contents":[{"role":"user","parts":[{"text":"` + strings.Repeat("x", 12<<20) + `"}]}]}`
+		req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash:streamGenerateContent", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		env.routerFor("/v1beta/models/*modelAction", env.handler.GeminiV1BetaModels).ServeHTTP(rec, req)
+		close(done)
+	}()
+	select {
+	case <-upstream.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Gemini handler did not reach upstream")
+	}
+	entries, err := os.ReadDir(rawDir)
+	require.NoError(t, err)
+	require.NotEmpty(t, entries)
+	close(upstream.release)
+	<-done
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "partial")
+	require.NotContains(t, rec.Body.String(), "Upstream request failed")
+	entries, err = os.ReadDir(rawDir)
+	require.NoError(t, err)
+	require.Empty(t, entries)
+}
+
+func TestGeminiV1BetaModels_AntigravityForcedRouteKeepsSpool(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawDir := t.TempDir()
+	old := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 10 << 20, TempDir: rawDir}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = old })
+	group := &service.Group{ID: 97, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 97, Name: "antigravity", Platform: service.PlatformAntigravity, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"access_token": "token", "project_id": "project"}}
+	upstream := &geminiBlockingBodyUpstream{started: make(chan *http.Request, 1), release: make(chan struct{})}
+	env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+	rec := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		body := `{"contents":[{"role":"user","parts":[{"text":"` + strings.Repeat("x", 12<<20) + `"}]}]}`
+		req := httptest.NewRequest(http.MethodPost, "/antigravity/v1beta/models/gemini-2.5-flash:generateContent", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		router := env.routerFor("/antigravity/v1beta/models/*modelAction", func(c *gin.Context) {
+			c.Set(string(middleware.ContextKeyForcePlatform), service.PlatformAntigravity)
+			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.ForcePlatform, service.PlatformAntigravity))
+			env.handler.GeminiV1BetaModels(c)
+		})
+		router.ServeHTTP(rec, req)
+		close(done)
+	}()
+	select {
+	case <-upstream.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("forced antigravity route did not reach upstream")
+	}
+	entries, err := os.ReadDir(rawDir)
+	require.NoError(t, err)
+	require.NotEmpty(t, entries)
+	close(upstream.release)
+	<-done
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	entries, err = os.ReadDir(rawDir)
+	require.NoError(t, err)
+	require.Empty(t, entries)
+}
+
+type geminiModerationSettingRepo struct {
+	service.SettingRepository
+	values map[string]string
+}
+
+func (r *geminiModerationSettingRepo) GetValue(_ context.Context, key string) (string, error) {
+	return r.values[key], nil
+}
+
+type geminiModerationRepo struct {
+	service.ContentModerationRepository
+}
+
+func (geminiModerationRepo) CreateLog(context.Context, *service.ContentModerationLog) error {
+	return nil
+}
+
+type geminiModerationHashCache struct {
+	service.ContentModerationHashCache
+}
+
+func (geminiModerationHashCache) RecordFlaggedInputHash(context.Context, string) error { return nil }
+func (geminiModerationHashCache) HasFlaggedInputHash(context.Context, string) (bool, error) {
+	return false, nil
+}
+
 type geminiSpoolReleaseConcurrencyCache struct {
 	openAIChatCompletionsConcurrencyCacheStub
 	acquired chan struct{}
@@ -231,13 +423,24 @@ func (c *geminiSpoolReleaseConcurrencyCache) releaseCalls() int {
 
 type geminiBlockingBodyUpstream struct {
 	service.HTTPUpstream
-	started chan *http.Request
-	release chan struct{}
+	started       chan *http.Request
+	release       chan struct{}
+	requestHashes []string
+	response      *http.Response
 }
 
 func (u *geminiBlockingBodyUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	if body, err := req.GetBody(); err == nil {
+		defer body.Close()
+		if payload, err := io.ReadAll(body); err == nil {
+			u.requestHashes = append(u.requestHashes, service.HashUsageRequestPayload(payload))
+		}
+	}
 	u.started <- req
 	<-u.release
+	if u.response != nil {
+		return u.response, nil
+	}
 	return &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
