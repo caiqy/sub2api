@@ -7,7 +7,7 @@
 ## 2. Anthropic 与 OpenAI JSON 入口
 
 - [x] 2.1 将 Anthropic 分组 `/v1/responses` 兼容转换和 `/v1/messages` 迁移到 coordinator，保持内容审计、转换、计费和流式语义。
-- [ ] 2.2 将 OpenAI `/v1/chat/completions` 与 Embeddings 迁移到 coordinator，使最终 outbound body 通过 effective handle 支持 retry/failover 重放。
+- [x] 2.2 将 OpenAI `/v1/chat/completions` 与 Embeddings 迁移到 coordinator，使最终 outbound body 通过 effective handle 支持 retry/failover 重放。
 - [ ] 2.3 为四类入口补充小请求、大请求、压缩请求、上游 4xx/5xx、取消、retry/failover 和 usage/ops snapshot 回归测试。
 
 ## 3. Gemini 原生入口

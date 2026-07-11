@@ -158,15 +158,15 @@ base-ref: 0f389fe7ed783ca4a8444fbe6d12acb9d3e19af6
 - 复用：`service.BindOpenAIRequestBodyHandle`、`openAIRequestBodyHandleForBytes`、`openAINewRequestWithBodyHandle`、`closeOpenAIRequestBody`。
 - 约束：借用 coordinator effective handle 时 `owned=false`；attempt 内模型转换创建的派生 handle 时 `owned=true`。
 
-- [ ] **步骤 1：写失败测试。** 为 Chat 与 Embeddings 建立可失败一次后成功的 `httpUpstream` stub；输入 12MB JSON 和模型映射，记录每个 attempt 的 bytes/hash，断言两次相同且 request 的 `GetBody` 可重开。另断言上游等待期间 usage/ops snapshot 不等于完整 body，并在请求完成后没有 spool 文件。
+- [x] **步骤 1：写失败测试。** 为 Chat 与 Embeddings 建立可失败一次后成功的 `httpUpstream` stub；输入 12MB JSON 和模型映射，记录每个 attempt 的 bytes/hash，断言两次相同且 request 的 `GetBody` 可重开。另断言上游等待期间 usage/ops snapshot 不等于完整 body，并在请求完成后没有 spool 文件。
 
-- [ ] **步骤 2：验证测试失败。** 运行：`go test ./internal/handler ./internal/service -run 'TestOpenAI(GatewayHandler|GatewayService).*(Chat|Embeddings).*RequestBody' -count=1`（工作目录 `backend`）。预期：现有 failover 循环捕获 `body`/`forwardBody`，重放与驻留断言失败。
+- [x] **步骤 2：验证测试失败。** 运行：`go test ./internal/handler ./internal/service -run 'TestOpenAI(GatewayHandler|GatewayService).*(Chat|Embeddings).*RequestBody' -count=1`（工作目录 `backend`）。预期：现有 failover 循环捕获 `body`/`forwardBody`，重放与驻留断言失败。
 
-- [ ] **步骤 3：最小实现。** handlers 用 coordinator 替代 `ReadRequestBodyWithPrealloc`，仅在同步校验、stream 解析、审计、session hash 与映射时持有 raw bytes；映射完成后 `SetEffectiveBytes`，循环只捕获 handle。service 扩展现有 OpenAI request helper 的适用调用点：每个 attempt 调用 `openAINewRequestWithBodyHandle`，设置 `GetBody`、`ContentLength`；按账号转换需要 bytes 时把 `ReadAll`、转换和 `openAIRequestBodyHandleForBytes` 放进 attempt helper，构造 request 后立即结束该局部作用域。
+- [x] **步骤 3：最小实现。** handlers 用 coordinator 替代 `ReadRequestBodyWithPrealloc`，仅在同步校验、stream 解析、审计、session hash 与映射时持有 raw bytes；映射完成后 `SetEffectiveBytes`，循环只捕获 handle。service 扩展现有 OpenAI request helper 的适用调用点：每个 attempt 调用 `openAINewRequestWithBodyHandle`，设置 `GetBody`、`ContentLength`；按账号转换需要 bytes 时把 `ReadAll`、转换和 `openAIRequestBodyHandleForBytes` 放进 attempt helper，构造 request 后立即结束该局部作用域。
 
-- [ ] **步骤 4：验证通过。** 运行：`go test ./internal/handler ./internal/service -run 'TestOpenAI(GatewayHandler|GatewayService).*(Chat|Embeddings)' -count=1`（工作目录 `backend`）。预期：通过。
+- [x] **步骤 4：验证通过。** 运行：`go test ./internal/handler ./internal/service -run 'TestOpenAI(GatewayHandler|GatewayService).*(Chat|Embeddings)' -count=1`（工作目录 `backend`）。预期：通过。
 
-- [ ] **步骤 5：提交。** `git add backend/internal/handler/openai_chat_completions.go backend/internal/handler/openai_embeddings.go backend/internal/handler/openai_request_body_spooling_test.go backend/internal/handler/openai_gateway_request_body_retention_test.go backend/internal/handler/request_body_coordinator.go backend/internal/handler/request_body_coordinator_test.go backend/internal/service/openai_gateway_service.go backend/internal/service/openai_gateway_chat_completions.go backend/internal/service/openai_gateway_chat_completions_raw.go backend/internal/service/openai_embeddings.go && git commit -m "feat: replay openai request bodies from handles"`
+- [x] **步骤 5：提交。** `git add backend/internal/handler/openai_chat_completions.go backend/internal/handler/openai_embeddings.go backend/internal/handler/openai_request_body_spooling_test.go backend/internal/handler/openai_gateway_request_body_retention_test.go backend/internal/handler/request_body_coordinator.go backend/internal/handler/request_body_coordinator_test.go backend/internal/service/openai_gateway_service.go backend/internal/service/openai_gateway_chat_completions.go backend/internal/service/openai_gateway_chat_completions_raw.go backend/internal/service/openai_embeddings.go && git commit -m "feat: replay openai request bodies from handles"`
 
 ### Task 6: Anthropic/OpenAI JSON 回归矩阵
 
