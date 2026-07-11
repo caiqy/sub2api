@@ -101,7 +101,7 @@ func TestOpenAIGatewayHandler_ChatReplayRawSpoolAcrossFailoverWhenResponsesUnsup
 	t.Setenv("TEMP", upstreamDir)
 
 	body := []byte(`{"model":"alias-model","messages":[{"role":"user","content":"` + strings.Repeat("x", 12<<20) + `"}],"stream":false}`)
-	upstream := &openAIReplaySpoolUpstream{started: make(chan struct{}), release: make(chan struct{})}
+	upstream := &openAIReplaySpoolUpstream{started: make(chan struct{}), release: make(chan struct{}), snapshots: make(chan openAIReplaySnapshots, 1)}
 	group := &service.Group{ID: 2, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
 	accounts := []*service.Account{
 		{ID: 21, Name: "first", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "sk-first", "model_mapping": map[string]any{"alias-model": "mapped-model"}}, Extra: map[string]any{openai_compat.ExtraKeyResponsesSupported: false}},
@@ -109,16 +109,30 @@ func TestOpenAIGatewayHandler_ChatReplayRawSpoolAcrossFailoverWhenResponsesUnsup
 	}
 	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: accounts}, upstream)
 	env.handler.maxAccountSwitches = 1
+	var requestContext *gin.Context
+	router := env.router("/v1/chat/completions", func(c *gin.Context) {
+		requestContext = c
+		env.handler.ChatCompletions(c)
+	})
+	upstream.snapshot = func() openAIReplaySnapshots {
+		detail := middleware.GetUsageDetailSnapshot(requestContext)
+		ops, _ := requestContext.Get(service.OpsUpstreamRequestBodyKey)
+		return openAIReplaySnapshots{usageRequest: detail.RequestBody, usageUpstream: detail.UpstreamRequestBody, opsUpstream: ops.(string)}
+	}
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	done := make(chan struct{})
 	go func() {
-		env.router("/v1/chat/completions", env.handler.ChatCompletions).ServeHTTP(rec, req)
+		router.ServeHTTP(rec, req)
 		close(done)
 	}()
 
 	waitOpenAIReplaySignal(t, upstream.started, "raw Chat second upstream attempt")
+	snapshot := waitOpenAIReplaySnapshot(t, upstream.snapshots)
+	assertBoundedOpenAIReplaySnapshot(t, "usage request", snapshot.usageRequest, body)
+	assertBoundedOpenAIReplaySnapshot(t, "usage upstream", snapshot.usageUpstream, upstream.latestBody())
+	assertBoundedOpenAIReplaySnapshot(t, "ops upstream", snapshot.opsUpstream, upstream.latestBody())
 	require.NotEmpty(t, readTestDir(t, rawDir), "raw spool must survive the blocked upstream attempt")
 	require.NotEmpty(t, readTestDir(t, upstreamDir), "mapped effective spool must survive the blocked upstream attempt")
 	close(upstream.release)
