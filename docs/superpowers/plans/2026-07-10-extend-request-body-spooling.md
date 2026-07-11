@@ -204,15 +204,15 @@ base-ref: 0f389fe7ed783ca4a8444fbe6d12acb9d3e19af6
 - 消费：JSON coordinator effective handle；`generateContent`、`streamGenerateContent`、`countTokens` 走同一入口。
 - 约束：模型 URL path 不计入 raw hash；thoughtSignature 清理后的最终发送 bytes 成为 effective。
 
-- [ ] **步骤 1：写失败测试。** 对三个 action 使用 12MB identity 与 gzip body，模拟 Gemini upstream 接收 hash；对 failover 断言每次从 effective handle 重开。构造 thoughtSignature 在账号切换时被清理的请求，断言 raw hash 未变化、effective body 是清理后版本且没有循环捕获 raw `[]byte`。
+- [x] **步骤 1：写失败测试。** 对三个 action 使用 12MB identity 与 gzip body，模拟 Gemini upstream 接收 hash；对 failover 断言每次从 effective handle 重开。构造 thoughtSignature 在账号切换时被清理的请求，断言 raw hash 未变化、effective body 是清理后版本且没有循环捕获 raw `[]byte`。
 
-- [ ] **步骤 2：验证测试失败。** 运行：`go test ./internal/handler -run 'TestGeminiV1Beta.*(GenerateContent|StreamGenerateContent|CountTokens).*RequestBody' -count=1`（工作目录 `backend`）。预期：现有 `body` 在 failover 循环内重写，effective ownership 断言失败。
+- [x] **步骤 2：验证测试失败。** 运行：`go test ./internal/handler -run 'TestGeminiV1Beta.*(GenerateContent|StreamGenerateContent|CountTokens).*RequestBody' -count=1`（工作目录 `backend`）。预期：现有 `body` 在 failover 循环内重写，effective ownership 断言失败。
 
-- [ ] **步骤 3：最小实现。** 在完成 action 和模型路径解析后创建 coordinator 并 defer cleanup；在局部同步作用域读取 raw bytes，保留现有内容审计、sticky session 计算和 failed usage 输入。每次 thoughtSignature 清理后调用 `SetEffectiveBytes`，并将 upstream forwarding 改为从 `Effective().Open()` 读取；不将路径模型拼入 body hash。
+- [x] **步骤 3：最小实现。** 在完成 action 和模型路径解析后创建 coordinator 并 defer cleanup；在局部同步作用域读取 raw bytes，保留现有内容审计、sticky session 计算和 failed usage 输入。每次 thoughtSignature 清理后调用 `SetEffectiveBytes`，并将 upstream forwarding 改为从 `Effective().Open()` 读取；不将路径模型拼入 body hash。
 
-- [ ] **步骤 4：验证通过。** 运行：`go test ./internal/handler -run 'TestGeminiV1Beta' -count=1`（工作目录 `backend`）。预期：通过。
+- [x] **步骤 4：验证通过。** 运行：`go test ./internal/handler -run 'TestGeminiV1Beta' -count=1`（工作目录 `backend`）。预期：通过。
 
-- [ ] **步骤 5：提交。** `git add backend/internal/handler/gemini_v1beta_handler.go backend/internal/handler/gemini_v1beta_handler_test.go backend/internal/handler/gemini_v1beta_failed_usage_unit_test.go backend/internal/handler/gateway_handler.go backend/internal/service/gemini_messages_compat_service.go backend/internal/service/antigravity_gateway_service.go && git commit -m "feat: spool gemini native request bodies"`
+- [x] **步骤 5：提交。** `git add backend/internal/handler/gemini_v1beta_handler.go backend/internal/handler/gemini_v1beta_handler_test.go backend/internal/handler/gemini_v1beta_failed_usage_unit_test.go backend/internal/handler/gateway_handler.go backend/internal/service/gemini_messages_compat_service.go backend/internal/service/antigravity_gateway_service.go && git commit -m "feat: spool gemini native request bodies"`
 
 ### Task 8: Gemini 语义回归
 
