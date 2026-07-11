@@ -178,15 +178,15 @@ base-ref: 0f389fe7ed783ca4a8444fbe6d12acb9d3e19af6
 - 修改：`backend/internal/handler/openai_gateway_usage_context_test.go`
 - 修改：`backend/internal/handler/openai_gateway_request_body_retention_test.go`
 
-- [ ] **步骤 1：写失败测试。** 对 Messages、Responses、Chat、Embeddings 分别覆盖小请求、大请求、gzip、上游 4xx、上游 5xx、请求 context 取消、retry/failover；每例断言旧 HTTP status/错误格式、model mapping、usage 指纹与流式语义不变。至少一例在模拟上游等待时检查 `UsageDetailCapture` 与 ops context 中没有完整 12MB 字符串。
+- [x] **步骤 1：写失败测试。** 对 Messages、Responses、Chat、Embeddings 分别覆盖小请求、大请求、gzip、上游 4xx、上游 5xx、请求 context 取消、retry/failover；每例断言旧 HTTP status/错误格式、model mapping、usage 指纹与流式语义不变。至少一例在模拟上游等待时检查 `UsageDetailCapture` 与 ops context 中没有完整 12MB 字符串。
 
-- [ ] **步骤 2：验证测试失败。** 运行：`go test ./internal/handler -run 'Test(GatewayHandler|OpenAIGatewayHandler).*(Messages|Responses|Chat|Embeddings).*(Compressed|Failover|Canceled|Upstream)' -count=1`（工作目录 `backend`）。预期：新增生命周期或 snapshot 断言失败。
+- [x] **步骤 2：验证测试失败。** 运行：`go test ./internal/handler -run 'Test(GatewayHandler|OpenAIGatewayHandler).*(Messages|Responses|Chat|Embeddings).*(Compressed|Failover|Canceled|Upstream)' -count=1`（工作目录 `backend`）。预期：新增生命周期或 snapshot 断言失败。
 
-- [ ] **步骤 3：补齐最小回归 fixture。** 复用现有 account、billing、usage 与 HTTP upstream stubs；只新增能记录 body hash、阻塞/释放发送及列出 tempdir 文件的字段。不要建立通用 mock 框架或测试专用配置。
+- [x] **步骤 3：补齐最小回归 fixture。** 复用现有 account、billing、usage 与 HTTP upstream stubs；只新增能记录 body hash、阻塞/释放发送及列出 tempdir 文件的字段。不要建立通用 mock 框架或测试专用配置。
 
-- [ ] **步骤 4：验证通过。** 运行：`go test ./internal/handler -run 'Test(GatewayHandler|OpenAIGatewayHandler).*(Messages|Responses|Chat|Embeddings)' -count=1`（工作目录 `backend`）。预期：通过。
+- [x] **步骤 4：验证通过。** 运行：`go test ./internal/handler -run 'Test(GatewayHandler|OpenAIGatewayHandler).*(Messages|Responses|Chat|Embeddings)' -count=1`（工作目录 `backend`）。预期：通过。
 
-- [ ] **步骤 5：提交。** `git add backend/internal/handler/gateway_request_body_spooling_test.go backend/internal/handler/openai_request_body_spooling_test.go backend/internal/handler/openai_gateway_usage_context_test.go backend/internal/handler/openai_gateway_request_body_retention_test.go && git commit -m "test: cover json request body spooling"`
+- [x] **步骤 5：提交。** `git add backend/internal/handler/gateway_request_body_spooling_test.go backend/internal/handler/openai_request_body_spooling_test.go backend/internal/handler/openai_gateway_usage_context_test.go backend/internal/handler/openai_gateway_request_body_retention_test.go && git commit -m "test: cover json request body spooling"`
 
 ### Task 7: Gemini 三种 action 接入
 
