@@ -116,10 +116,12 @@ base-ref: 0f389fe7ed783ca4a8444fbe6d12acb9d3e19af6
 - 修改：`backend/internal/service/gateway_request.go` 的 `RequestBodyRef` / `ParsedRequest.CloneForBody`
 - 修改：`backend/internal/service/gateway_service.go` 的 `GatewayService.Forward` 与 Anthropic upstream request builder
 - 修改：`backend/internal/service/antigravity_gateway_service.go` 的 Messages forwarding 边界，使其借用 handle 并在网络等待前释放 materialized bytes
+- 修改：`backend/internal/service/antigravity_credits_overages.go` 的 credits retry payload replacement ownership
 - 修改：`backend/internal/service/antigravity_gateway_service_test.go`
 - 修改：`backend/internal/service/gateway_request_test.go`
 - 新建：`backend/internal/service/gateway_request_body_handle_test.go`（不带 unit build tag，确保 handle 兼容测试可独立取得 GREEN）
 - 修改：`backend/internal/service/gateway_forward_as_responses_test.go`
+- 修改：`backend/internal/service/gateway_anthropic_apikey_passthrough_test.go`
 - 修改：`backend/internal/service/ops_upstream_context_test.go`（移除被本任务触发的脆弱源码字面量计数，改为行为契约）
 - 新建：`backend/internal/handler/gateway_request_body_spooling_test.go`
 - 修改：`backend/internal/handler/terminal_failed_usage_test.go`（仅在生产 handler 生命周期 fixture 需要复用时）
@@ -136,7 +138,7 @@ base-ref: 0f389fe7ed783ca4a8444fbe6d12acb9d3e19af6
 
 - [ ] **步骤 4：验证通过。** 运行：`go test ./internal/handler -run 'TestGatewayHandler_(Messages|Responses)' -count=1`（工作目录 `backend`）。预期：通过，包含流式与错误透传既有测试。
 
-- [ ] **步骤 5：提交。** `git add backend/internal/handler/gateway_handler.go backend/internal/handler/gateway_handler_responses.go backend/internal/handler/gateway_request_body_spooling_test.go backend/internal/handler/terminal_failed_usage_test.go backend/internal/service/gateway_request.go backend/internal/service/gateway_request_test.go backend/internal/service/gateway_request_body_handle_test.go backend/internal/service/gateway_service.go backend/internal/service/gateway_forward_as_responses.go backend/internal/service/gateway_forward_as_responses_test.go backend/internal/service/antigravity_gateway_service.go backend/internal/service/antigravity_gateway_service_test.go backend/internal/service/ops_upstream_context_test.go && git commit -m "feat: spool anthropic gateway request bodies"`
+- [ ] **步骤 5：提交。** `git add backend/internal/handler/gateway_handler.go backend/internal/handler/gateway_handler_responses.go backend/internal/handler/gateway_request_body_spooling_test.go backend/internal/handler/terminal_failed_usage_test.go backend/internal/service/gateway_request.go backend/internal/service/gateway_request_test.go backend/internal/service/gateway_request_body_handle_test.go backend/internal/service/gateway_service.go backend/internal/service/gateway_forward_as_responses.go backend/internal/service/gateway_forward_as_responses_test.go backend/internal/service/gateway_anthropic_apikey_passthrough_test.go backend/internal/service/antigravity_gateway_service.go backend/internal/service/antigravity_credits_overages.go backend/internal/service/antigravity_gateway_service_test.go backend/internal/service/ops_upstream_context_test.go && git commit -m "feat: spool anthropic gateway request bodies"`
 
 ### Task 5: OpenAI Chat Completions 与 Embeddings 接入
 
