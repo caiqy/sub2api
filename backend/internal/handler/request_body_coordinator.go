@@ -18,9 +18,10 @@ var jsonRequestBodyHandleOptions = openAIResponsesRequestBodyHandleOptions()
 const multipartUploadPartLimit = 20 << 20
 
 type requestBodyCoordinator struct {
-	raw       *service.RequestBodyHandle
-	effective *service.RequestBodyHandle
-	form      *multipart.Form
+	raw            *service.RequestBodyHandle
+	effective      *service.RequestBodyHandle
+	form           *multipart.Form
+	multipartModel string
 }
 
 func newJSONRequestBody(req *http.Request) (*requestBodyCoordinator, error) {
@@ -44,7 +45,7 @@ func newJSONRequestBody(req *http.Request) (*requestBodyCoordinator, error) {
 	return &requestBodyCoordinator{raw: raw, effective: raw}, nil
 }
 
-func newMultipartRequestBody(req *http.Request) (*requestBodyCoordinator, error) {
+func newMultipartRequestBody(req *http.Request, maxMemory int64) (*requestBodyCoordinator, error) {
 	if req == nil || req.Body == nil {
 		return nil, errors.New("multipart request body is required")
 	}
@@ -61,7 +62,7 @@ func newMultipartRequestBody(req *http.Request) (*requestBodyCoordinator, error)
 	parsed := req.Clone(req.Context())
 	parsed.Body = reader
 	parsed.ContentLength = raw.Size()
-	if err := parsed.ParseMultipartForm(0); err != nil {
+	if err := parsed.ParseMultipartForm(maxMemory); err != nil {
 		_ = reader.Close()
 		service.CleanupRequestBodyHandle(raw)
 		return nil, err
@@ -109,6 +110,39 @@ func (c *requestBodyCoordinator) SetEffectiveReader(reader io.Reader) error {
 	}
 	c.setEffective(handle)
 	return nil
+}
+
+func (c *requestBodyCoordinator) SetEffectiveMultipart(write func(*multipart.Writer) error) (string, error) {
+	if c == nil || write == nil {
+		return "", errors.New("multipart writer is required")
+	}
+	reader, pipe := io.Pipe()
+	writer := multipart.NewWriter(pipe)
+	done := make(chan error, 1)
+	go func() {
+		if err := write(writer); err != nil {
+			_ = pipe.CloseWithError(err)
+			done <- err
+			return
+		}
+		if err := writer.Close(); err != nil {
+			_ = pipe.CloseWithError(err)
+			done <- err
+			return
+		}
+		done <- pipe.Close()
+	}()
+
+	err := c.SetEffectiveReader(reader)
+	_ = reader.Close()
+	producerErr := <-done
+	if err != nil {
+		return "", err
+	}
+	if producerErr != nil {
+		return "", producerErr
+	}
+	return writer.FormDataContentType(), nil
 }
 
 func (c *requestBodyCoordinator) setEffective(handle *service.RequestBodyHandle) {

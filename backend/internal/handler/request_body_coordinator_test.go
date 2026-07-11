@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -144,7 +145,7 @@ func TestRequestBodyCoordinator_Multipart(t *testing.T) {
 
 		req := httptest.NewRequest(http.MethodPost, "/", &body)
 		req.Header.Set("Content-Type", writer.FormDataContentType())
-		coordinator, err := newMultipartRequestBody(req)
+		coordinator, err := newMultipartRequestBody(req, 0)
 		if err != nil {
 			t.Fatalf("newMultipartRequestBody: %v", err)
 		}
@@ -173,12 +174,93 @@ func TestRequestBodyCoordinator_Multipart(t *testing.T) {
 
 		req := httptest.NewRequest(http.MethodPost, "/", &body)
 		req.Header.Set("Content-Type", writer.FormDataContentType())
-		_, err = newMultipartRequestBody(req)
+		_, err = newMultipartRequestBody(req, 0)
 		var maxErr *http.MaxBytesError
 		if !errors.As(err, &maxErr) || maxErr.Limit != maxUpload {
 			t.Fatalf("newMultipartRequestBody error = %v, want 20MB MaxBytesError", err)
 		}
 	})
+}
+
+func TestRequestBodyCoordinator_MultipartPipe(t *testing.T) {
+	oldOptions := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir(), FilePrefix: "sub2api-test-"}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("model", "gpt-image-2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	coordinator, err := newMultipartRequestBody(req, 0)
+	if err != nil {
+		t.Fatalf("newMultipartRequestBody: %v", err)
+	}
+	t.Cleanup(coordinator.Cleanup)
+
+	producerErr := errors.New("multipart producer failed")
+	_, err = coordinator.SetEffectiveMultipart(func(writer *multipart.Writer) error {
+		if err := writer.WriteField("model", "mapped-model"); err != nil {
+			return err
+		}
+		return producerErr
+	})
+	if !errors.Is(err, producerErr) {
+		t.Fatalf("pipe consumer error = %v, want producer error", err)
+	}
+	if coordinator.Effective() != coordinator.raw {
+		t.Fatal("failed producer replaced the effective handle")
+	}
+
+	contentType, err := coordinator.SetEffectiveMultipart(func(writer *multipart.Writer) error {
+		if err := writer.WriteField("model", "mapped-model"); err != nil {
+			return err
+		}
+		part, err := writer.CreateFormFile("image", "source.png")
+		if err != nil {
+			return err
+		}
+		_, err = part.Write([]byte("image bytes"))
+		return err
+	})
+	if err != nil {
+		t.Fatalf("SetEffectiveMultipart: %v", err)
+	}
+	mediaType, params, err := mime.ParseMediaType(contentType)
+	if err != nil || mediaType != "multipart/form-data" || params["boundary"] == "" {
+		t.Fatalf("content type = %q, err = %v", contentType, err)
+	}
+	effective := coordinator.Effective()
+	if effective == coordinator.raw || effective.Size() == 0 {
+		t.Fatal("successful producer did not create an effective multipart handle")
+	}
+	for retry := 0; retry < 2; retry++ {
+		reader, err := effective.Open()
+		if err != nil {
+			t.Fatalf("effective open %d: %v", retry, err)
+		}
+		payload, readErr := io.ReadAll(reader)
+		_ = reader.Close()
+		if readErr != nil {
+			t.Fatalf("effective read %d: %v", retry, readErr)
+		}
+		if int64(len(payload)) != effective.Size() {
+			t.Fatalf("effective content length = %d, want %d", len(payload), effective.Size())
+		}
+		form, err := multipart.NewReader(bytes.NewReader(payload), params["boundary"]).ReadForm(0)
+		if err != nil {
+			t.Fatalf("effective multipart %d: %v", retry, err)
+		}
+		if form.Value["model"][0] != "mapped-model" || len(form.File["image"]) != 1 {
+			t.Fatalf("effective multipart %d = %#v", retry, form)
+		}
+		_ = form.RemoveAll()
+	}
 }
 
 func TestRequestBodyCoordinator_JSONEffective(t *testing.T) {

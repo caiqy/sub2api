@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"mime/multipart"
 	"net/http"
 	"strconv"
 	"strings"
@@ -52,7 +53,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	var coordinator *requestBodyCoordinator
 	var err error
 	if multipartRequest {
-		coordinator, err = newMultipartRequestBody(c.Request)
+		coordinator, err = newMultipartRequestBody(c.Request, 0)
 	} else {
 		coordinator, err = newJSONRequestBody(c.Request)
 	}
@@ -271,6 +272,24 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 					accountReleaseFunc()
 				}
 			}()
+			if parsed.Multipart {
+				mappedModel := parsed.Model
+				if channelMapping.Mapped {
+					mappedModel = channelMapping.MappedModel
+				}
+				upstreamModel := account.GetMappedModel(mappedModel)
+				if coordinator.multipartModel != upstreamModel {
+					contentType, err := coordinator.SetEffectiveMultipart(func(writer *multipart.Writer) error {
+						return service.WriteOpenAIImagesMultipartForm(writer, coordinator.form, upstreamModel)
+					})
+					if err != nil {
+						return nil, err
+					}
+					parsed.ContentType = contentType
+					coordinator.multipartModel = upstreamModel
+				}
+				service.BindOpenAIRequestBodyHandle(c, coordinator.Effective())
+			}
 			return h.gatewayService.ForwardImages(c.Request.Context(), c, account, nil, parsed, channelMapping.MappedModel)
 		}()
 		forwardDuration := time.Since(forwardStart)

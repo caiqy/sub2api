@@ -336,7 +336,7 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	}
 
 	if endpoint == GrokMediaEndpointImagesEdits && originalMultipart && c != nil && c.Request != nil && c.Request.MultipartForm != nil {
-		body, contentType, err = prepareGrokMediaFormForwardBody(ParseGrokMediaMultipartForm(c.Request.MultipartForm))
+		body, contentType, err = PrepareGrokMediaFormForwardBody(ParseGrokMediaMultipartForm(c.Request.MultipartForm))
 	} else {
 		body, contentType, err = prepareGrokMediaForwardBody(endpoint, body, contentType)
 	}
@@ -429,7 +429,7 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	}, nil
 }
 
-func prepareGrokMediaFormForwardBody(info GrokMediaRequestInfo) ([]byte, string, error) {
+func PrepareGrokMediaFormForwardBody(info GrokMediaRequestInfo) ([]byte, string, error) {
 	payload := map[string]any{}
 	if info.Model != "" {
 		payload["model"] = info.Model

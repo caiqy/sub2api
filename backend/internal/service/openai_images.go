@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -694,15 +695,20 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 		parsed.Endpoint,
 		account.Type,
 	)
-	forwardBody, forwardContentType, err := rewriteOpenAIImagesModel(body, parsed.ContentType, upstreamModel)
-	body = nil
-	if err != nil {
-		return nil, err
-	}
-	forwardHandle, ownedHandle, err := openAIRequestBodyHandleForContext(c, forwardBody)
-	forwardBody = nil
-	if err != nil {
-		return nil, err
+	forwardContentType := parsed.ContentType
+	forwardHandle := getOpenAIRequestBodyHandle(c)
+	ownedHandle := false
+	if !parsed.Multipart || forwardHandle == nil {
+		forwardBody, contentType, err := rewriteOpenAIImagesModel(body, parsed.ContentType, upstreamModel)
+		body = nil
+		if err != nil {
+			return nil, err
+		}
+		forwardContentType = contentType
+		forwardHandle, ownedHandle, err = openAIRequestBodyHandleForContext(c, forwardBody)
+		if err != nil {
+			return nil, err
+		}
 	}
 	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, parsed.Stream)
 	defer releaseUpstreamCtx()
@@ -972,6 +978,47 @@ func rewriteOpenAIImagesMultipartModel(body []byte, contentType string, model st
 		return nil, "", fmt.Errorf("finalize multipart body: %w", err)
 	}
 	return buffer.Bytes(), writer.FormDataContentType(), nil
+}
+
+// WriteOpenAIImagesMultipartForm writes a model-mapped multipart body without materializing it.
+func WriteOpenAIImagesMultipartForm(writer *multipart.Writer, form *multipart.Form, model string) error {
+	if writer == nil || form == nil {
+		return errors.New("multipart form is required")
+	}
+	modelWritten := false
+	for name, values := range form.Value {
+		for _, value := range values {
+			if name == "model" {
+				value = model
+				modelWritten = true
+			}
+			if err := writer.WriteField(name, value); err != nil {
+				return err
+			}
+		}
+	}
+	if !modelWritten {
+		if err := writer.WriteField("model", model); err != nil {
+			return err
+		}
+	}
+	for _, files := range form.File {
+		for _, file := range files {
+			source, err := file.Open()
+			if err != nil {
+				return err
+			}
+			target, err := writer.CreatePart(cloneMultipartHeader(file.Header))
+			if err == nil {
+				_, err = io.Copy(target, source)
+			}
+			_ = source.Close()
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func cloneMultipartHeader(src textproto.MIMEHeader) textproto.MIMEHeader {

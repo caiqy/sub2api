@@ -70,7 +70,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 	if endpoint.RequiresRequestBody() {
 		var err error
 		if isMultipartImagesContentType(c.GetHeader("Content-Type")) {
-			coordinator, err = newMultipartRequestBody(c.Request)
+			coordinator, err = newMultipartRequestBody(c.Request, 0)
 		} else {
 			coordinator, err = newJSONRequestBody(c.Request)
 		}
@@ -111,6 +111,18 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 	contentType := c.GetHeader("Content-Type")
 	if endpoint.RequiresRequestBody() {
 		service.SetUsageRequestBody(c, grokMediaRequestBodyPreviewWithSize(contentType, body, requestInfo, coordinator.Effective().Size()))
+	}
+	if coordinator != nil && coordinator.form != nil && endpoint == service.GrokMediaEndpointImagesEdits {
+		forwardBody, forwardContentType, prepareErr := service.PrepareGrokMediaFormForwardBody(requestInfo)
+		if prepareErr == nil {
+			prepareErr = coordinator.SetEffectiveBytes(forwardBody)
+		}
+		if prepareErr != nil {
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to prepare request body")
+			return
+		}
+		contentType = forwardContentType
+		body = nil
 	}
 	requestModel := requestInfo.Model
 	if endpoint.IsGenerationRequest() && strings.TrimSpace(requestModel) == "" {
