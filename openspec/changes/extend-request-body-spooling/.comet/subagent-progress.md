@@ -2,15 +2,15 @@
 
 - Change: extend-request-body-spooling
 - Review mode: thorough
-- Current task: Task 6: Anthropic/OpenAI JSON 回归矩阵
-- OpenSpec mapping: 2.3 为四类入口补充小请求、大请求、压缩请求、上游 4xx/5xx、取消、retry/failover 和 usage/ops snapshot 回归测试。
-- Stage: done
-- Base commit: 933c7fca49d5efd13b46e29644dd3d92e1d4a4a5
-- Implementation commit: 62f4af23, 32255184
-- Changed files: backend/internal/handler/gateway_request_body_spooling_test.go; backend/internal/handler/openai_request_body_spooling_test.go
-- RED evidence: initial 12MB gzip cases exposed stale 10MB hashes and incorrect Chat fixture dispatch; corrected fixtures then exercised intended behavior.
-- GREEN evidence: four-entry directed matrix plus Messages/Responses identity+gzip two-attempt replay, Messages cancel, bounded ops, Responses SSE terminal, and full handler package pass; mutation RED restored to GREEN.
-- Risk signals: test-only cumulative diff exceeds 400 lines; external protocol/error/lifecycle assertions.
-- Review round: 1/2
-- Review status: approved
-- Unresolved findings: none
+- Current task: Task 7: Gemini 三种 action 接入
+- OpenSpec mapping: 3.1 将 Gemini `/v1beta/models/*` 的 generateContent、streamGenerateContent 与 countTokens 请求迁移到 coordinator。
+- Stage: blocked
+- Base commit: d0990d3844afe050a8d4d3495175cb65606f04be
+- Implementation commit: 3a786c4d, a6d40e6a
+- Changed files: backend/internal/handler/gemini_v1beta_handler.go; backend/internal/handler/gemini_v1beta_handler_test.go; backend/internal/service/antigravity_gateway_service.go; backend/internal/service/gemini_messages_compat_service.go
+- RED evidence: report does not include explicit RED output; reviewer must assess TDD evidence from diff/tests.
+- GREEN evidence: Gemini 12MB three-action, error/failover, retry replay, and full untagged handler/service packages pass using temporary D-drive build cache; cache removed after verification. Unit service remains blocked only by pre-existing Grok drift.
+- Risk signals: cross-module external-input change; compatibility byte service entries remain only for other callers; disk-full environment was isolated via temporary D-drive cache.
+- Review round: 2/2
+- Review status: blocked after 2/2 fix rounds
+- Unresolved findings: preserved uncommitted implementation moves hash/sticky and image billing extraction before waits, clears body before concurrency waits, and migrates production GatewayHandler Antigravity call to effective handle; focused and full untagged packages pass. Remaining work is the exhaustive real-handler Gemini semantic matrix (all three actions, Google errors, failed usage, stream, Antigravity, retry/failover, 503/413/400), which overlaps Task 8 by design. User must choose explicit deferral to Task 8 or continue expanding Task 7; preserved source changes must not be discarded.

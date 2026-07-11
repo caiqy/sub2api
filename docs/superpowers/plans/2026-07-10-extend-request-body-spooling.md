@@ -196,6 +196,7 @@ base-ref: 0f389fe7ed783ca4a8444fbe6d12acb9d3e19af6
 - 修改：`backend/internal/handler/gemini_v1beta_handler.go` 的 `GeminiV1BetaModels`
 - 修改：`backend/internal/service/gemini_messages_compat_service.go` 的 `ForwardNative`
 - 修改：`backend/internal/service/antigravity_gateway_service.go` 的 `ForwardGemini`
+- 修改：`backend/internal/handler/gateway_handler.go`（迁移仍调用 `ForwardGemini([]byte)` 的生产兼容路径）
 - 修改：`backend/internal/handler/gemini_v1beta_handler_test.go`
 - 修改：`backend/internal/handler/gemini_v1beta_failed_usage_unit_test.go`
 
@@ -211,7 +212,7 @@ base-ref: 0f389fe7ed783ca4a8444fbe6d12acb9d3e19af6
 
 - [ ] **步骤 4：验证通过。** 运行：`go test ./internal/handler -run 'TestGeminiV1Beta' -count=1`（工作目录 `backend`）。预期：通过。
 
-- [ ] **步骤 5：提交。** `git add backend/internal/handler/gemini_v1beta_handler.go backend/internal/handler/gemini_v1beta_handler_test.go backend/internal/handler/gemini_v1beta_failed_usage_unit_test.go backend/internal/service/gemini_messages_compat_service.go backend/internal/service/antigravity_gateway_service.go && git commit -m "feat: spool gemini native request bodies"`
+- [ ] **步骤 5：提交。** `git add backend/internal/handler/gemini_v1beta_handler.go backend/internal/handler/gemini_v1beta_handler_test.go backend/internal/handler/gemini_v1beta_failed_usage_unit_test.go backend/internal/handler/gateway_handler.go backend/internal/service/gemini_messages_compat_service.go backend/internal/service/antigravity_gateway_service.go && git commit -m "feat: spool gemini native request bodies"`
 
 ### Task 8: Gemini 语义回归
 
