@@ -289,6 +289,9 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		ctx := service.WithPrefetchedStickySession(c.Request.Context(), sessionBoundAccountID, prefetchedGroupID, h.metadataBridgeEnabled())
 		c.Request = c.Request.WithContext(ctx)
 	}
+	requestPayloadHash := service.HashUsageRequestPayload(body)
+	hasThoughtSignature := bytes.Contains(body, []byte(`"thoughtSignature"`))
+	body = nil
 
 	// 判断是否真的绑定了粘性会话：有 sessionKey 且已经绑定到某个账号
 	hasBoundSession := selectionSessionKey != "" && sessionBoundAccountID > 0
@@ -347,19 +350,33 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				zap.Int64("to_account_id", account.ID),
 				zap.Bool("clean_thought_signature", true),
 			)
-			if err := coordinator.SetEffectiveBytes(service.CleanGeminiNativeThoughtSignatures(body)); err != nil {
+			rawBody, readErr := coordinator.ReadRaw()
+			if readErr != nil {
+				googleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+				return
+			}
+			cleanedBody := service.CleanGeminiNativeThoughtSignatures(rawBody)
+			rawBody = nil
+			if err := coordinator.SetEffectiveBytes(cleanedBody); err != nil {
 				googleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
 				return
 			}
 			effectiveBody = coordinator.Effective()
 			sessionBoundAccountID = account.ID
-		} else if selectionSessionKey != "" && sessionBoundAccountID == 0 && !cleanedForUnknownBinding && bytes.Contains(body, []byte(`"thoughtSignature"`)) {
+		} else if selectionSessionKey != "" && sessionBoundAccountID == 0 && !cleanedForUnknownBinding && hasThoughtSignature {
 			// 无缓存绑定但请求里已有 thoughtSignature：常见于缓存丢失/TTL 过期后，客户端继续携带旧签名。
 			// 为避免第一次转发就 400，这里做一次确定性清理，让新账号重新生成签名链路。
 			reqLog.Info("gemini.sticky_session_binding_missing",
 				zap.Bool("clean_thought_signature", true),
 			)
-			if err := coordinator.SetEffectiveBytes(service.CleanGeminiNativeThoughtSignatures(body)); err != nil {
+			rawBody, readErr := coordinator.ReadRaw()
+			if readErr != nil {
+				googleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+				return
+			}
+			cleanedBody := service.CleanGeminiNativeThoughtSignatures(rawBody)
+			rawBody = nil
+			if err := coordinator.SetEffectiveBytes(cleanedBody); err != nil {
 				googleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
 				return
 			}
@@ -514,7 +531,6 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		}
 
 		// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
-		requestPayloadHash := service.HashUsageRequestPayload(body)
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 		detailSnapshot := middleware.BuildUsageDetailSnapshot(c)

@@ -2411,6 +2411,13 @@ func (s *AntigravityGatewayService) ForwardGeminiHandle(ctx context.Context, c *
 	if err != nil {
 		return nil, s.writeGoogleError(c, http.StatusBadRequest, err.Error())
 	}
+	injectedHandle, err := newOwnedAntigravityPayloadHandle(injectedBody)
+	injectedBody = nil
+	body = nil
+	if err != nil {
+		return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+	}
+	defer CleanupRequestBodyHandle(injectedHandle)
 
 	accessToken, err := s.resolveAccessToken(ctx, account)
 	if err != nil {
@@ -2424,7 +2431,12 @@ func (s *AntigravityGatewayService) ForwardGeminiHandle(ctx context.Context, c *
 	}
 
 	// 包装请求
+	injectedBody, err = injectedHandle.ReadAll()
+	if err != nil {
+		return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+	}
 	wrappedBody, err := s.wrapV1InternalRequest(projectID, mappedModel, injectedBody)
+	injectedBody = nil
 	if err != nil {
 		return nil, s.writeGoogleError(c, http.StatusInternalServerError, "Failed to build upstream request")
 	}
@@ -2437,7 +2449,7 @@ func (s *AntigravityGatewayService) ForwardGeminiHandle(ctx context.Context, c *
 	payloadHandle, err := newOwnedAntigravityPayloadHandle(wrappedBody)
 	wrappedBody = nil
 	if err != nil {
-		return nil, fmt.Errorf("create antigravity wrapped payload: %w", err)
+		return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
 	}
 	result, err := s.antigravityRetryLoop(antigravityRetryLoopParams{
 		ctx:             ctx,
@@ -2460,6 +2472,9 @@ func (s *AntigravityGatewayService) ForwardGeminiHandle(ctx context.Context, c *
 		extraHeaders:    outboundHeader,
 	})
 	if err != nil {
+		if errors.Is(err, ErrRequestBodySpool) {
+			return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+		}
 		// 检查是否是账号切换信号，转换为 UpstreamFailoverError 让 Handler 切换账号
 		if switchErr, ok := IsAntigravityAccountSwitchError(err); ok {
 			return nil, &UpstreamFailoverError{
@@ -2495,15 +2510,34 @@ func (s *AntigravityGatewayService) ForwardGeminiHandle(ctx context.Context, c *
 			if fallbackModel != "" && fallbackModel != mappedModel {
 				logger.LegacyPrintf("service.antigravity_gateway", "[Antigravity] Model not found (%s), retrying with fallback model %s (account: %s)", mappedModel, fallbackModel, account.Name)
 
-				fallbackWrapped, err := s.wrapV1InternalRequest(projectID, fallbackModel, injectedBody)
+				fallbackInjected, readErr := injectedHandle.ReadAll()
+				if readErr != nil {
+					return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+				}
+				fallbackWrapped, err := s.wrapV1InternalRequest(projectID, fallbackModel, fallbackInjected)
+				fallbackInjected = nil
 				if err == nil {
-					fallbackReq, err := antigravity.NewAPIRequest(ctx, upstreamAction, accessToken, fallbackWrapped)
+					fallbackHandle, handleErr := newOwnedAntigravityPayloadHandle(fallbackWrapped)
+					fallbackWrapped = nil
+					if handleErr != nil {
+						return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+					}
+					fallbackReq, err := antigravity.NewAPIRequest(ctx, upstreamAction, accessToken, nil)
 					if err == nil {
+						fallbackBody, openErr := fallbackHandle.Open()
+						if openErr != nil {
+							CleanupRequestBodyHandle(fallbackHandle)
+							return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+						}
+						fallbackReq.Body = fallbackBody
+						fallbackReq.ContentLength = fallbackHandle.Size()
+						fallbackReq.GetBody = func() (io.ReadCloser, error) { return fallbackHandle.Open() }
 						applyAntigravityExtraHeaders(fallbackReq, outboundHeader)
-						fallbackPreview := RequestBodyPreviewString(fallbackWrapped)
+						fallbackPreview := fallbackHandle.PreviewString()
 						SetUsageUpstreamRequest(c, fallbackReq, fallbackPreview)
 						SetOpsUpstreamAttempted(c, true)
 						fallbackResp, err := s.httpUpstream.Do(fallbackReq, proxyURL, account.ID, account.Concurrency)
+						CleanupRequestBodyHandle(fallbackHandle)
 						if err == nil && fallbackResp.StatusCode < 400 {
 							_ = resp.Body.Close()
 							resp = fallbackResp
@@ -2520,6 +2554,10 @@ func (s *AntigravityGatewayService) ForwardGeminiHandle(ctx context.Context, c *
 		signatureCheckBody := respBody
 		if unwrapped, unwrapErr := s.unwrapV1InternalResponse(respBody); unwrapErr == nil && len(unwrapped) > 0 {
 			signatureCheckBody = unwrapped
+		}
+		injectedBody, readErr := injectedHandle.ReadAll()
+		if readErr != nil {
+			return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
 		}
 		if resp.StatusCode == http.StatusBadRequest &&
 			s.settingService != nil &&
@@ -2542,12 +2580,14 @@ func (s *AntigravityGatewayService) ForwardGeminiHandle(ctx context.Context, c *
 			logger.LegacyPrintf("service.antigravity_gateway", "Antigravity Gemini account %d: detected signature-related 400, retrying with cleaned thought signatures", account.ID)
 
 			cleanedInjectedBody := CleanGeminiNativeThoughtSignatures(injectedBody)
+			injectedBody = nil
 			retryWrappedBody, wrapErr := s.wrapV1InternalRequest(projectID, mappedModel, cleanedInjectedBody)
+			cleanedInjectedBody = nil
 			if wrapErr == nil {
 				retryPayloadHandle, handleErr := newOwnedAntigravityPayloadHandle(retryWrappedBody)
 				retryWrappedBody = nil
 				if handleErr != nil {
-					return nil, handleErr
+					return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
 				}
 				retryResult, retryErr := s.antigravityRetryLoop(antigravityRetryLoopParams{
 					ctx:             ctx,
@@ -2627,6 +2667,7 @@ func (s *AntigravityGatewayService) ForwardGeminiHandle(ctx context.Context, c *
 				logger.LegacyPrintf("service.antigravity_gateway", "Antigravity Gemini account %d: signature retry wrap failed: %v", account.ID, wrapErr)
 			}
 		}
+		injectedBody = nil
 
 		// fallback 成功：继续按正常响应处理
 		if resp.StatusCode < 400 {

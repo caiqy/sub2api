@@ -8,11 +8,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -72,6 +75,81 @@ func TestGeminiV1BetaGenerateContentRequestBody_EffectiveHandleReopensLargeIdent
 			require.NoError(t, reopened.Close())
 		})
 	}
+}
+
+func TestGeminiV1BetaGenerateContentRequestBody_OAuthWrappedBodyStaysHandleBacked(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawDir := t.TempDir()
+	old := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 10 << 20, TempDir: rawDir}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = old })
+
+	body := []byte(`{"contents":[{"role":"user","parts":[{"text":"/.gemini/tmp/` + strings.Repeat("a", 64) + strings.Repeat("x", 12<<20) + `","thoughtSignature":"old-account"}]}]}`)
+	upstream := &geminiBlockingBodyUpstream{started: make(chan *http.Request, 1), release: make(chan struct{})}
+	group := &service.Group{ID: 91, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{
+		ID: 91, Name: "oauth", Platform: service.PlatformGemini, Type: service.AccountTypeOAuth,
+		Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1,
+		Credentials: map[string]any{"access_token": "token", "project_id": "project"},
+	}
+	env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+	env.handler.cfg.Gateway.Sticky.Gemini.Enabled = true
+	env.handler.geminiCompatService = service.NewGeminiMessagesCompatService(
+		nil, nil, nil, nil, service.NewGeminiTokenProvider(nil, nil, nil), nil, upstream, nil, env.handler.cfg,
+	)
+	router := env.routerFor("/v1beta/models/*modelAction", env.handler.GeminiV1BetaModels)
+	done := make(chan struct{})
+	go func() {
+		req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash:generateContent", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(httptest.NewRecorder(), req)
+		close(done)
+	}()
+
+	var request *http.Request
+	select {
+	case request = <-upstream.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Gemini handler did not reach upstream")
+	}
+	reopened, err := request.GetBody()
+	require.NoError(t, err)
+	replayed, err := io.ReadAll(reopened)
+	require.NoError(t, err)
+	require.NoError(t, reopened.Close())
+	require.Contains(t, string(replayed), `"project":"project"`)
+	require.NotContains(t, string(replayed), "old-account")
+	require.Contains(t, fmt.Sprintf("%T", request.Body), "requestBodySpoolReadCloser")
+	entries, err := os.ReadDir(rawDir)
+	require.NoError(t, err)
+	require.NotEmpty(t, entries)
+
+	close(upstream.release)
+	<-done
+	entries, err = os.ReadDir(rawDir)
+	require.NoError(t, err)
+	require.Empty(t, entries, "spools must be removed after the handler returns")
+	_, err = request.Body.Read(make([]byte, 1))
+	require.Error(t, err, "upstream request body must be closed before owned spools are cleaned up")
+}
+
+type geminiBlockingBodyUpstream struct {
+	service.HTTPUpstream
+	started chan *http.Request
+	release chan struct{}
+}
+
+func (u *geminiBlockingBodyUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	u.started <- req
+	<-u.release
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(
+			`data: {"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}` + "\n\n" +
+				"data: [DONE]\n\n",
+		)),
+	}, nil
 }
 
 // TestGeminiV1BetaHandler_PlatformRoutingInvariant 文档化并验证 Handler 层的平台路由逻辑不变量
