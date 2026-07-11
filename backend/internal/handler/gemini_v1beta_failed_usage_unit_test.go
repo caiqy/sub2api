@@ -4,6 +4,7 @@ package handler
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -28,11 +29,7 @@ func TestGeminiV1BetaModels_FailedUsageKeepsSpoolUntilUpstreamReturns(t *testing
 	t.Cleanup(func() { jsonRequestBodyHandleOptions = old })
 	group := &service.Group{ID: 98, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
 	account := &service.Account{ID: 98, Name: "api-key", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "key"}}
-	upstream := &geminiBlockingBodyUpstream{
-		started:  make(chan *http.Request, 1),
-		release:  make(chan struct{}),
-		response: &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"gemini upstream rejected payload"}}`))},
-	}
+	upstream := newGeminiBlockingBodyUpstream(t, &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"gemini upstream rejected payload"}}`))})
 	env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
 	rec := httptest.NewRecorder()
 	body := `{"contents":[{"role":"user","parts":[{"text":"` + strings.Repeat("x", 12<<20) + `"}]}]}`
@@ -51,13 +48,23 @@ func TestGeminiV1BetaModels_FailedUsageKeepsSpoolUntilUpstreamReturns(t *testing
 	entries, err := os.ReadDir(rawDir)
 	require.NoError(t, err)
 	require.NotEmpty(t, entries)
-	close(upstream.release)
-	<-done
+	upstream.Release()
+	requireGeminiHandlerDone(t, done)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Contains(t, rec.Body.String(), "gemini upstream rejected payload")
 	log := waitForOpenAIFailedUsageLog(t, env.usageRepo)
-	require.Contains(t, log.DetailSnapshot.RequestBody, "[inline binary payload omitted]")
+	var snapshot struct {
+		Preview   string `json:"preview"`
+		Truncated bool   `json:"truncated"`
+		Size      int64  `json:"size"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(log.DetailSnapshot.RequestBody), &snapshot))
+	require.True(t, snapshot.Truncated)
+	require.Equal(t, int64(len(body)), snapshot.Size)
+	require.Equal(t, "[inline binary payload omitted]", snapshot.Preview)
+	previewLimit := len(service.RequestBodyPreviewSnapshot(strings.Repeat("x", len(body)), int64(len(body))))
+	require.LessOrEqual(t, len(log.DetailSnapshot.RequestBody), previewLimit)
 	entries, err = os.ReadDir(rawDir)
 	require.NoError(t, err)
 	require.Empty(t, entries)

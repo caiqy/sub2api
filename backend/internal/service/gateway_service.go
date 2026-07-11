@@ -1625,6 +1625,10 @@ func (s *GatewayService) SelectAccountForModel(ctx context.Context, groupID *int
 
 // SelectAccountForModelWithExclusions selects an account supporting the requested model while excluding specified accounts.
 func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*Account, error) {
+	return s.selectAccountForModelWithExclusions(ctx, groupID, sessionHash, requestedModel, excludedIDs, 0)
+}
+
+func (s *GatewayService) selectAccountForModelWithExclusions(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, stickyAccountID int64) (*Account, error) {
 	// 优先检查 context 中的强制平台（/antigravity 路由）
 	var platform string
 	forcePlatform, hasForcePlatform := ctx.Value(ctxkey.ForcePlatform).(string)
@@ -1655,7 +1659,7 @@ func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context
 	// anthropic/gemini 分组支持混合调度（包含启用了 mixed_scheduling 的 antigravity 账户）
 	// 注意：强制平台模式不走混合调度
 	if (platform == PlatformAnthropic || platform == PlatformGemini) && !hasForcePlatform {
-		account, err := s.selectAccountWithMixedScheduling(ctx, groupID, sessionHash, requestedModel, excludedIDs, platform)
+		account, err := s.selectAccountWithMixedSchedulingWithSticky(ctx, groupID, sessionHash, requestedModel, excludedIDs, platform, stickyAccountID)
 		if err != nil {
 			return nil, err
 		}
@@ -1664,7 +1668,7 @@ func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context
 
 	// antigravity 分组、强制平台模式或无分组使用单平台选择
 	// 注意：强制平台模式也必须遵守分组限制，不再回退到全平台查询
-	account, err := s.selectAccountForModelWithPlatform(ctx, groupID, sessionHash, requestedModel, excludedIDs, platform)
+	account, err := s.selectAccountForModelWithPlatformWithSticky(ctx, groupID, sessionHash, requestedModel, excludedIDs, platform, stickyAccountID)
 	if err != nil {
 		return nil, err
 	}
@@ -1755,7 +1759,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		}
 
 		for {
-			account, err := s.SelectAccountForModelWithExclusions(ctx, groupID, sessionHash, requestedModel, localExcluded)
+			account, err := s.selectAccountForModelWithExclusions(ctx, groupID, sessionHash, requestedModel, localExcluded, stickyAccountID)
 			if err != nil {
 				return nil, err
 			}
@@ -3312,6 +3316,10 @@ func shuffleWithinPriority(accounts []*Account) {
 
 // selectAccountForModelWithPlatform 选择单平台账户（完全隔离）
 func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, platform string) (*Account, error) {
+	return s.selectAccountForModelWithPlatformWithSticky(ctx, groupID, sessionHash, requestedModel, excludedIDs, platform, 0)
+}
+
+func (s *GatewayService) selectAccountForModelWithPlatformWithSticky(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, platform string, stickyAccountID int64) (*Account, error) {
 	preferOAuth := platform == PlatformGemini
 	routingAccountIDs := s.routingAccountIDsForRequest(ctx, groupID, requestedModel, platform)
 	stickyEnabled := s.stickyEnabledForPlatform(platform)
@@ -3338,8 +3346,11 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 		}
 		// 1) Sticky session only applies if the bound account is within the routing set.
 		if stickyEnabled && sessionHash != "" {
-			accountID, err := s.getCachedSessionAccountIDForPlatform(ctx, groupID, sessionHash, platform, "gateway_legacy_single")
-			if err == nil && accountID > 0 && containsInt64(routingAccountIDs, accountID) {
+			accountID := stickyAccountID
+			if accountID <= 0 {
+				accountID, _ = s.getCachedSessionAccountIDForPlatform(ctx, groupID, sessionHash, platform, "gateway_legacy_single")
+			}
+			if accountID > 0 && containsInt64(routingAccountIDs, accountID) {
 				if _, excluded := excludedIDs[accountID]; !excluded {
 					account, err := s.getSchedulableAccount(ctx, accountID)
 					// 检查账号分组归属和平台匹配（确保粘性会话不会跨分组或跨平台）
@@ -3455,8 +3466,11 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 
 	// 1. 查询粘性会话
 	if stickyEnabled && sessionHash != "" {
-		accountID, err := s.getCachedSessionAccountIDForPlatform(ctx, groupID, sessionHash, platform, "gateway_legacy_single")
-		if err == nil && accountID > 0 {
+		accountID := stickyAccountID
+		if accountID <= 0 {
+			accountID, _ = s.getCachedSessionAccountIDForPlatform(ctx, groupID, sessionHash, platform, "gateway_legacy_single")
+		}
+		if accountID > 0 {
 			if _, excluded := excludedIDs[accountID]; !excluded {
 				account, err := s.getSchedulableAccount(ctx, accountID)
 				// 检查账号分组归属和平台匹配（确保粘性会话不会跨分组或跨平台）
@@ -3572,6 +3586,10 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 // selectAccountWithMixedScheduling 选择账户（支持混合调度）
 // 查询原生平台账户 + 启用 mixed_scheduling 的 antigravity 账户
 func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, nativePlatform string) (*Account, error) {
+	return s.selectAccountWithMixedSchedulingWithSticky(ctx, groupID, sessionHash, requestedModel, excludedIDs, nativePlatform, 0)
+}
+
+func (s *GatewayService) selectAccountWithMixedSchedulingWithSticky(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, nativePlatform string, stickyAccountID int64) (*Account, error) {
 	preferOAuth := nativePlatform == PlatformGemini
 	routingAccountIDs := s.routingAccountIDsForRequest(ctx, groupID, requestedModel, nativePlatform)
 	stickyEnabled := s.stickyEnabledForPlatform(nativePlatform)
@@ -3596,8 +3614,11 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 		}
 		// 1) Sticky session only applies if the bound account is within the routing set.
 		if stickyEnabled && sessionHash != "" {
-			accountID, err := s.getCachedSessionAccountIDForPlatform(ctx, groupID, sessionHash, nativePlatform, "gateway_legacy_mixed")
-			if err == nil && accountID > 0 && containsInt64(routingAccountIDs, accountID) {
+			accountID := stickyAccountID
+			if accountID <= 0 {
+				accountID, _ = s.getCachedSessionAccountIDForPlatform(ctx, groupID, sessionHash, nativePlatform, "gateway_legacy_mixed")
+			}
+			if accountID > 0 && containsInt64(routingAccountIDs, accountID) {
 				if _, excluded := excludedIDs[accountID]; !excluded {
 					account, err := s.getSchedulableAccount(ctx, accountID)
 					// 检查账号分组归属和有效性：原生平台直接匹配，antigravity 需要启用混合调度
@@ -3715,8 +3736,11 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 
 	// 1. 查询粘性会话
 	if stickyEnabled && sessionHash != "" {
-		accountID, err := s.getCachedSessionAccountIDForPlatform(ctx, groupID, sessionHash, nativePlatform, "gateway_legacy_mixed")
-		if err == nil && accountID > 0 {
+		accountID := stickyAccountID
+		if accountID <= 0 {
+			accountID, _ = s.getCachedSessionAccountIDForPlatform(ctx, groupID, sessionHash, nativePlatform, "gateway_legacy_mixed")
+		}
+		if accountID > 0 {
 			if _, excluded := excludedIDs[accountID]; !excluded {
 				account, err := s.getSchedulableAccount(ctx, accountID)
 				// 检查账号分组归属和有效性：原生平台直接匹配，antigravity 需要启用混合调度

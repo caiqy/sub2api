@@ -575,10 +575,14 @@ func (r *terminalGatewayAccountRepo) listByPlatforms(platforms []string) []servi
 }
 
 func newTerminalGatewayMessagesEnv(t *testing.T, group *service.Group, upstream service.HTTPUpstream, accounts ...*service.Account) *terminalGatewayMessagesEnv {
-	return newTerminalGatewayMessagesEnvWithConcurrencyCache(t, group, upstream, openAIChatCompletionsConcurrencyCacheStub{}, accounts...)
+	return newTerminalGatewayMessagesEnvWithGatewayCache(t, group, upstream, openAIChatCompletionsConcurrencyCacheStub{}, openAIChatCompletionsGatewayCacheStub{}, accounts...)
 }
 
 func newTerminalGatewayMessagesEnvWithConcurrencyCache(t *testing.T, group *service.Group, upstream service.HTTPUpstream, concurrencyCache service.ConcurrencyCache, accounts ...*service.Account) *terminalGatewayMessagesEnv {
+	return newTerminalGatewayMessagesEnvWithGatewayCache(t, group, upstream, concurrencyCache, openAIChatCompletionsGatewayCacheStub{}, accounts...)
+}
+
+func newTerminalGatewayMessagesEnvWithGatewayCache(t *testing.T, group *service.Group, upstream service.HTTPUpstream, concurrencyCache service.ConcurrencyCache, cache service.GatewayCache, accounts ...*service.Account) *terminalGatewayMessagesEnv {
 	t.Helper()
 	cfg := &config.Config{
 		RunMode:     config.RunModeSimple,
@@ -593,7 +597,6 @@ func newTerminalGatewayMessagesEnvWithConcurrencyCache(t *testing.T, group *serv
 	t.Cleanup(func() { billingCacheService.Stop() })
 	settingService := service.NewSettingService(terminalUsageSettingRepo{}, cfg)
 	groupRepo := terminalUsageGroupRepo{group: group}
-	cache := openAIChatCompletionsGatewayCacheStub{}
 	gatewayService := service.NewGatewayService(
 		accountRepo,
 		groupRepo,

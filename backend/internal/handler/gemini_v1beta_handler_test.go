@@ -90,7 +90,7 @@ func TestGeminiV1BetaGenerateContentRequestBody_OAuthWrappedBodyStaysHandleBacke
 	t.Cleanup(func() { jsonRequestBodyHandleOptions = old })
 
 	body := []byte(`{"contents":[{"role":"user","parts":[{"text":"/.gemini/tmp/` + strings.Repeat("a", 64) + strings.Repeat("x", 12<<20) + `","thoughtSignature":"old-account"}]}]}`)
-	upstream := &geminiBlockingBodyUpstream{started: make(chan *http.Request, 1), release: make(chan struct{})}
+	upstream := newGeminiBlockingBodyUpstream(t, nil)
 	group := &service.Group{ID: 91, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
 	account := &service.Account{
 		ID: 91, Name: "oauth", Platform: service.PlatformGemini, Type: service.AccountTypeOAuth,
@@ -129,8 +129,8 @@ func TestGeminiV1BetaGenerateContentRequestBody_OAuthWrappedBodyStaysHandleBacke
 	require.NoError(t, err)
 	require.NotEmpty(t, entries)
 
-	close(upstream.release)
-	<-done
+	upstream.Release()
+	requireGeminiHandlerDone(t, done)
 	entries, err = os.ReadDir(rawDir)
 	require.NoError(t, err)
 	require.Empty(t, entries, "spools must be removed after the handler returns")
@@ -218,7 +218,7 @@ func TestGeminiV1BetaModels_RequestBodyLifecycleAcrossActions(t *testing.T) {
 		t.Run(action, func(t *testing.T) {
 			group := &service.Group{ID: 94, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
 			account := &service.Account{ID: 94, Name: "api-key", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "key"}}
-			upstream := &geminiBlockingBodyUpstream{started: make(chan *http.Request, 1), release: make(chan struct{})}
+			upstream := newGeminiBlockingBodyUpstream(t, nil)
 			env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
 			done := make(chan struct{})
 			go func() {
@@ -239,17 +239,59 @@ func TestGeminiV1BetaModels_RequestBodyLifecycleAcrossActions(t *testing.T) {
 			require.NoError(t, err)
 			require.NotEmpty(t, entries, "large request must remain spooled while upstream waits")
 
-			close(upstream.release)
-			select {
-			case <-done:
-			case <-time.After(5 * time.Second):
-				t.Fatal("Gemini handler did not return")
-			}
+			upstream.Release()
+			requireGeminiHandlerDone(t, done)
 			entries, err = os.ReadDir(rawDir)
 			require.NoError(t, err)
 			require.Empty(t, entries, "spools must be removed after the handler returns")
 		})
 	}
+}
+
+func TestGeminiV1BetaModels_CLILargeBodyUsesStickyAccountWhileSpooling(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawDir := t.TempDir()
+	old := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 10 << 20, TempDir: rawDir}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = old })
+
+	group := &service.Group{ID: 99, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
+	primary := &service.Account{ID: 99, Name: "primary", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, AccountGroups: []service.AccountGroup{{GroupID: group.ID}}, Credentials: map[string]any{"api_key": "primary-key"}}
+	sticky := &service.Account{ID: 100, Name: "sticky", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, AccountGroups: []service.AccountGroup{{GroupID: group.ID}}, Credentials: map[string]any{"api_key": "sticky-key"}}
+	cliSession := strings.Repeat("a", 64)
+	cache := &geminiStickyGatewayCacheStub{sessionBindings: map[string]int64{"gemini:" + cliSession: sticky.ID}}
+	upstream := newGeminiBlockingBodyUpstream(t, nil)
+	env := newTerminalGatewayMessagesEnvWithGatewayCache(t, group, upstream, openAIChatCompletionsConcurrencyCacheStub{}, cache, primary, sticky)
+	env.handler.cfg.Gateway.Sticky.Gemini.Enabled = true
+	body := []byte(`{"contents":[{"role":"user","parts":[{"text":"` + strings.Repeat("x", 12<<20) + `/.gemini/tmp/` + cliSession + `"}]}]}`)
+	wantHash := service.HashUsageRequestPayload(body)
+	done := make(chan struct{})
+	go func() {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash:generateContent", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		env.routerFor("/v1beta/models/*modelAction", env.handler.GeminiV1BetaModels).ServeHTTP(rec, req)
+		close(done)
+	}()
+
+	var request *http.Request
+	select {
+	case request = <-upstream.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Gemini handler did not reach upstream")
+	}
+	require.NotZero(t, cache.getCalls["gemini:"+cliSession])
+	require.Equal(t, "sticky-key", request.Header.Get("X-Goog-Api-Key"))
+	require.Equal(t, []string{wantHash}, upstream.requestHashes)
+	entries, err := os.ReadDir(rawDir)
+	require.NoError(t, err)
+	require.NotEmpty(t, entries, "large request must remain spooled while upstream waits")
+
+	upstream.Release()
+	requireGeminiHandlerDone(t, done)
+	entries, err = os.ReadDir(rawDir)
+	require.NoError(t, err)
+	require.Empty(t, entries, "spools must be removed after the handler returns")
 }
 
 func TestGeminiV1BetaModels_ModelPathAndContentAuditKeepGoogleErrors(t *testing.T) {
@@ -299,7 +341,7 @@ func TestGeminiV1BetaModels_StreamTerminationCleansSpool(t *testing.T) {
 	t.Cleanup(func() { jsonRequestBodyHandleOptions = old })
 	group := &service.Group{ID: 96, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
 	account := &service.Account{ID: 96, Name: "api-key", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "key"}}
-	upstream := &geminiBlockingBodyUpstream{started: make(chan *http.Request, 1), release: make(chan struct{}), response: &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: &terminalPartialReadErrorBody{data: []byte("data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"partial\"}]}}]}\n\n")}}}
+	upstream := newGeminiBlockingBodyUpstream(t, &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: &terminalPartialReadErrorBody{data: []byte("data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"partial\"}]}}]}\n\n")}})
 	env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
 	rec := httptest.NewRecorder()
 	done := make(chan struct{})
@@ -318,8 +360,8 @@ func TestGeminiV1BetaModels_StreamTerminationCleansSpool(t *testing.T) {
 	entries, err := os.ReadDir(rawDir)
 	require.NoError(t, err)
 	require.NotEmpty(t, entries)
-	close(upstream.release)
-	<-done
+	upstream.Release()
+	requireGeminiHandlerDone(t, done)
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), "partial")
 	require.NotContains(t, rec.Body.String(), "Upstream request failed")
@@ -336,7 +378,7 @@ func TestGeminiV1BetaModels_AntigravityForcedRouteKeepsSpool(t *testing.T) {
 	t.Cleanup(func() { jsonRequestBodyHandleOptions = old })
 	group := &service.Group{ID: 97, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
 	account := &service.Account{ID: 97, Name: "antigravity", Platform: service.PlatformAntigravity, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"access_token": "token", "project_id": "project"}}
-	upstream := &geminiBlockingBodyUpstream{started: make(chan *http.Request, 1), release: make(chan struct{})}
+	upstream := newGeminiBlockingBodyUpstream(t, nil)
 	env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
 	rec := httptest.NewRecorder()
 	done := make(chan struct{})
@@ -360,8 +402,8 @@ func TestGeminiV1BetaModels_AntigravityForcedRouteKeepsSpool(t *testing.T) {
 	entries, err := os.ReadDir(rawDir)
 	require.NoError(t, err)
 	require.NotEmpty(t, entries)
-	close(upstream.release)
-	<-done
+	upstream.Release()
+	requireGeminiHandlerDone(t, done)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	entries, err = os.ReadDir(rawDir)
 	require.NoError(t, err)
@@ -425,8 +467,29 @@ type geminiBlockingBodyUpstream struct {
 	service.HTTPUpstream
 	started       chan *http.Request
 	release       chan struct{}
+	releaseOnce   sync.Once
 	requestHashes []string
 	response      *http.Response
+}
+
+func newGeminiBlockingBodyUpstream(t *testing.T, response *http.Response) *geminiBlockingBodyUpstream {
+	t.Helper()
+	u := &geminiBlockingBodyUpstream{started: make(chan *http.Request, 1), release: make(chan struct{}), response: response}
+	t.Cleanup(u.Release)
+	return u
+}
+
+func (u *geminiBlockingBodyUpstream) Release() {
+	u.releaseOnce.Do(func() { close(u.release) })
+}
+
+func requireGeminiHandlerDone(t *testing.T, done <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Gemini handler did not return")
+	}
 }
 
 func (u *geminiBlockingBodyUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
