@@ -13,7 +13,7 @@
 ## 3. Gemini 原生入口
 
 - [x] 3.1 将 Gemini `/v1beta/models/*` 的 generateContent、streamGenerateContent 与 countTokens 请求迁移到 coordinator。
-- [ ] 3.2 验证 Gemini 模型路径解析、内容审计、Google 错误格式、流式终止、failed usage 和 Antigravity 强制平台路由保持不变。
+- [x] 3.2 验证 Gemini 模型路径解析、内容审计、Google 错误格式、流式终止、failed usage 和 Antigravity 强制平台路由保持不变。
 
 ## 4. OpenAI/Grok 媒体入口
 

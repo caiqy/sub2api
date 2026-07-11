@@ -223,15 +223,15 @@ base-ref: 0f389fe7ed783ca4a8444fbe6d12acb9d3e19af6
 - 修改：`backend/internal/handler/gemini_v1beta_failed_usage_unit_test.go`
 - 修改：`backend/internal/handler/gemini_cli_session_test.go`
 
-- [ ] **步骤 1：写失败测试。** 对 model path 解析、内容审计拒绝、Google JSON 错误格式、已启动 SSE 的终止、failed usage 写入、`/antigravity` 强制平台各保留一例；每例在大 body 进入上游等待时断言 spool 生命周期正确且原先状态码/消息不变。
+- [x] **步骤 1：写失败测试。** 对 model path 解析、内容审计拒绝、Google JSON 错误格式、已启动 SSE 的终止、failed usage 写入、`/antigravity` 强制平台各保留一例；每例在大 body 进入上游等待时断言 spool 生命周期正确且原先状态码/消息不变。
 
-- [ ] **步骤 2：验证测试失败。** 运行：`go test ./internal/handler -run 'TestGemini(V1Beta|CLI).*(Error|FailedUsage|Antigravity|Stream|Model)' -count=1`（工作目录 `backend`）。预期：新增 spool 生命周期断言失败。
+- [x] **步骤 2：验证测试失败。** 运行：`go test ./internal/handler -run 'TestGemini(V1Beta|CLI).*(Error|FailedUsage|Antigravity|Stream|Model)' -count=1`（工作目录 `backend`）。预期：新增 spool 生命周期断言失败。
 
-- [ ] **步骤 3：补齐定向 fixture。** 在现有 Gemini test stubs 中增加可阻塞 upstream 与 body-hash 捕获；复用既有 Google error assertion，禁止为测试创建第二套响应格式化函数。
+- [x] **步骤 3：补齐定向 fixture。** 在现有 Gemini test stubs 中增加可阻塞 upstream 与 body-hash 捕获；复用既有 Google error assertion，禁止为测试创建第二套响应格式化函数。
 
-- [ ] **步骤 4：验证通过。** 运行：`go test ./internal/handler -run 'TestGemini(V1Beta|CLI)' -count=1`（工作目录 `backend`）。预期：通过。
+- [x] **步骤 4：验证通过。** 运行：`go test ./internal/handler -run 'TestGemini(V1Beta|CLI)' -count=1`（工作目录 `backend`）。预期：通过。
 
-- [ ] **步骤 5：提交。** `git add backend/internal/handler/gemini_v1beta_handler_test.go backend/internal/handler/gemini_v1beta_failed_usage_unit_test.go backend/internal/handler/gemini_cli_session_test.go && git commit -m "test: preserve gemini request body semantics"`
+- [x] **步骤 5：提交。** `git add backend/internal/handler/gemini_v1beta_handler_test.go backend/internal/handler/gemini_v1beta_failed_usage_unit_test.go backend/internal/handler/gemini_cli_session_test.go && git commit -m "test: preserve gemini request body semantics"`
 
 ### Task 9: 媒体 JSON、multipart 与脱敏测试
 

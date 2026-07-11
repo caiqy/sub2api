@@ -2,8 +2,8 @@
 
 - Change: extend-request-body-spooling
 - Review mode: thorough
-- Current task: Task 8: Gemini 语义回归
-- OpenSpec mapping: 3.2 验证 Gemini 模型路径解析、内容审计、Google 错误格式、流式终止、failed usage 和 Antigravity 强制平台路由保持不变。
+- Current task: Task 9: 媒体 JSON、multipart 与脱敏测试
+- OpenSpec mapping: 4.1 将 OpenAI Images generate/edit、Grok Images 与 Grok Videos create 迁移到 coordinator，并为 multipart 构造脱敏 preview。
 - Stage: pending
 - Base commit: d0990d3844afe050a8d4d3495175cb65606f04be
 - Implementation commit: pending
@@ -13,5 +13,5 @@
 - Risk signals: cross-module external-input change; compatibility byte service entries remain only for other callers; disk-full environment was isolated via temporary D-drive cache.
 - Review round: 0/2
 - Review status: pending
-- Unresolved findings: none; Task 7 completed in 3a786c4d, a6d40e6a, eb956825, and 13d98033, with final focused review approved. Task 8 owns the exhaustive model-path/Google-error/failed-usage/stream/Antigravity lifecycle matrix approved by the user.
-- Task 7 verification: `go test ./internal/handler -run Gemini -count=1` and `go test ./internal/handler ./internal/service -count=1` passed on 2026-07-11 with isolated D-drive GOCACHE/TEMP/TMP; temporary cache removed. `git diff --check` passed before commit.
+- Unresolved findings: none; Task 8 completed in 8843c329, 7dd86770, and 9cb0f402, with final review approved. Unit-tagged service remains blocked only by pre-existing Grok test drift.
+- Task 8 verification: Gemini targeted tests, handler unit-tagged full package, and untagged handler/service full packages passed with isolated D-drive Go caches; temporary cache removed.
