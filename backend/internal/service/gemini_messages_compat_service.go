@@ -1163,6 +1163,15 @@ func isGeminiSignatureRelatedError(respBody []byte) bool {
 }
 
 func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte) (*ForwardResult, error) {
+	bodyHandle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+	if err != nil {
+		return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+	}
+	defer CleanupRequestBodyHandle(bodyHandle)
+	return s.ForwardNativeHandle(ctx, c, account, originalModel, action, stream, bodyHandle)
+}
+
+func (s *GeminiMessagesCompatService) ForwardNativeHandle(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, bodyHandle *RequestBodyHandle) (*ForwardResult, error) {
 	startTime := time.Now()
 
 	if strings.TrimSpace(originalModel) == "" {
@@ -1171,9 +1180,21 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	if strings.TrimSpace(action) == "" {
 		return nil, s.writeGoogleError(c, http.StatusBadRequest, "Missing action in URL")
 	}
-	if len(body) == 0 {
+	if bodyHandle == nil || bodyHandle.Size() == 0 {
 		return nil, s.writeGoogleError(c, http.StatusBadRequest, "Request body is empty")
 	}
+	body, err := bodyHandle.ReadAll()
+	if err != nil {
+		return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+	}
+	originalBody := body
+	forwardHandle := bodyHandle
+	ownedForwardHandle := false
+	defer func() {
+		if ownedForwardHandle {
+			CleanupRequestBodyHandle(forwardHandle)
+		}
+	}()
 
 	// 过滤掉 parts 为空的消息（Gemini API 不接受空 parts）
 	if filteredBody, err := filterEmptyPartsFromGeminiRequest(body); err == nil {
@@ -1190,6 +1211,13 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	// Some Gemini upstreams validate tool call parts strictly; ensure any `functionCall` part includes a
 	// `thoughtSignature` to avoid frequent INVALID_ARGUMENT 400s.
 	body = ensureGeminiFunctionCallThoughtSignatures(body)
+	if !bytes.Equal(body, originalBody) {
+		forwardHandle, err = NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+		if err != nil {
+			return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+		}
+		ownedForwardHandle = true
+	}
 
 	mappedModel := originalModel
 	if account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount {
@@ -1212,6 +1240,20 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 
 	var requestIDHeader string
 	var upstreamPreview string
+	newRequestWithHandle := func(ctx context.Context, url string) (*http.Request, error) {
+		reader, err := forwardHandle.Open()
+		if err != nil {
+			return nil, err
+		}
+		upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, reader)
+		if err != nil {
+			_ = reader.Close()
+			return nil, err
+		}
+		upstreamReq.ContentLength = forwardHandle.Size()
+		upstreamReq.GetBody = func() (io.ReadCloser, error) { return forwardHandle.Open() }
+		return upstreamReq, nil
+	}
 	var buildReq func(ctx context.Context) (*http.Request, string, error)
 
 	switch account.Type {
@@ -1233,13 +1275,13 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				fullURL += "?alt=sse"
 			}
 
-			upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(body))
+			upstreamReq, err := newRequestWithHandle(ctx, fullURL)
 			if err != nil {
 				return nil, "", err
 			}
 			upstreamReq.Header.Set("Content-Type", "application/json")
 			upstreamReq.Header.Set("x-goog-api-key", apiKey)
-			upstreamPreview = RequestBodyPreviewString(body)
+			upstreamPreview = RequestBodyPreviewSnapshot(forwardHandle.PreviewString(), forwardHandle.Size())
 			return upstreamReq, "x-request-id", nil
 		}
 		requestIDHeader = "x-request-id"
@@ -1303,13 +1345,13 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 					fullURL += "?alt=sse"
 				}
 
-				upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(body))
+				upstreamReq, err := newRequestWithHandle(ctx, fullURL)
 				if err != nil {
 					return nil, "", err
 				}
 				upstreamReq.Header.Set("Content-Type", "application/json")
 				upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
-				upstreamPreview = RequestBodyPreviewString(body)
+				upstreamPreview = RequestBodyPreviewSnapshot(forwardHandle.PreviewString(), forwardHandle.Size())
 				return upstreamReq, "x-request-id", nil
 			}
 		}
@@ -1330,13 +1372,13 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				return nil, "", err
 			}
 
-			upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(body))
+			upstreamReq, err := newRequestWithHandle(ctx, fullURL)
 			if err != nil {
 				return nil, "", err
 			}
 			upstreamReq.Header.Set("Content-Type", "application/json")
 			upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
-			upstreamPreview = RequestBodyPreviewString(body)
+			upstreamPreview = RequestBodyPreviewSnapshot(forwardHandle.PreviewString(), forwardHandle.Size())
 			return upstreamReq, "x-request-id", nil
 		}
 		requestIDHeader = "x-request-id"

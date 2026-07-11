@@ -17,7 +17,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/gemini"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/googleapi"
-	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -171,10 +170,30 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 	stream := action == "streamGenerateContent"
 	reqLog = reqLog.With(zap.String("model", modelName), zap.String("action", action), zap.Bool("stream", stream))
 
-	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
+	coordinator, err := newJSONRequestBody(c.Request)
 	if err != nil {
+		if status, ok := requestBodyReadErrorStatus(err); ok {
+			if status == http.StatusRequestEntityTooLarge {
+				if maxErr, ok := extractMaxBytesError(err); ok {
+					googleError(c, status, buildBodyTooLargeMessage(maxErr.Limit))
+					return
+				}
+			}
+			googleError(c, status, "Failed to spool request body")
+			return
+		}
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			googleError(c, http.StatusRequestEntityTooLarge, buildBodyTooLargeMessage(maxErr.Limit))
+			return
+		}
+		googleError(c, http.StatusBadRequest, "Failed to read request body")
+		return
+	}
+	defer coordinator.Cleanup()
+	body, err := coordinator.ReadRaw()
+	if err != nil {
+		if status, ok := requestBodyReadErrorStatus(err); ok {
+			googleError(c, status, "Failed to spool request body")
 			return
 		}
 		googleError(c, http.StatusBadRequest, "Failed to read request body")
@@ -184,7 +203,12 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		googleError(c, http.StatusBadRequest, "Request body is empty")
 		return
 	}
-	service.SetUsageRequestBody(c, openAIRequestBodyPreviewSnapshot(body))
+	if err := coordinator.SetEffectiveBytes(body); err != nil {
+		googleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+		return
+	}
+	effectiveBody := coordinator.Effective()
+	service.SetUsageRequestBody(c, service.RequestBodyPreviewSnapshot(effectiveBody.PreviewString(), effectiveBody.Size()))
 
 	setOpsRequestContext(c, modelName, stream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(stream, false)))
@@ -323,7 +347,11 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				zap.Int64("to_account_id", account.ID),
 				zap.Bool("clean_thought_signature", true),
 			)
-			body = service.CleanGeminiNativeThoughtSignatures(body)
+			if err := coordinator.SetEffectiveBytes(service.CleanGeminiNativeThoughtSignatures(body)); err != nil {
+				googleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+				return
+			}
+			effectiveBody = coordinator.Effective()
 			sessionBoundAccountID = account.ID
 		} else if selectionSessionKey != "" && sessionBoundAccountID == 0 && !cleanedForUnknownBinding && bytes.Contains(body, []byte(`"thoughtSignature"`)) {
 			// 无缓存绑定但请求里已有 thoughtSignature：常见于缓存丢失/TTL 过期后，客户端继续携带旧签名。
@@ -331,7 +359,11 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			reqLog.Info("gemini.sticky_session_binding_missing",
 				zap.Bool("clean_thought_signature", true),
 			)
-			body = service.CleanGeminiNativeThoughtSignatures(body)
+			if err := coordinator.SetEffectiveBytes(service.CleanGeminiNativeThoughtSignatures(body)); err != nil {
+				googleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+				return
+			}
+			effectiveBody = coordinator.Effective()
 			cleanedForUnknownBinding = true
 			sessionBoundAccountID = account.ID
 		} else if sessionBoundAccountID == 0 {
@@ -403,9 +435,9 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		forwardStartedAt := time.Now()
 		service.SetOpsUpstreamAttempted(c, false)
 		if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
-			result, err = h.antigravityGatewayService.ForwardGemini(requestCtx, c, account, modelName, action, stream, body, hasBoundSession)
+			result, err = h.antigravityGatewayService.ForwardGeminiHandle(requestCtx, c, account, modelName, action, stream, effectiveBody, hasBoundSession)
 		} else {
-			result, err = h.geminiCompatService.ForwardNative(requestCtx, c, account, modelName, action, stream, body)
+			result, err = h.geminiCompatService.ForwardNativeHandle(requestCtx, c, account, modelName, action, stream, effectiveBody)
 		}
 		forwardDuration := time.Since(forwardStartedAt)
 		if accountReleaseFunc != nil {

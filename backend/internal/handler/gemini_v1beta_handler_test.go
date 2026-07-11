@@ -3,12 +3,76 @@
 package handler
 
 import (
+	"bytes"
+	"compress/gzip"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"io"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+// Native Gemini forwarding must retain the replayable body handle through retries.
+var _ func(*service.GeminiMessagesCompatService, context.Context, *gin.Context, *service.Account, string, string, bool, *service.RequestBodyHandle) (*service.ForwardResult, error) = (*service.GeminiMessagesCompatService).ForwardNativeHandle
+
+func TestGeminiV1BetaGenerateContentRequestBody_EffectiveHandleReopensLargeIdentityAndGzipBodies(t *testing.T) {
+	old := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 10 << 20, TempDir: t.TempDir()}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = old })
+
+	raw := []byte(`{"contents":[{"role":"model","parts":[{"text":"` + strings.Repeat("x", 12<<20) + `","thoughtSignature":"old-account"}]}]}`)
+	rawHash := sha256.Sum256(raw)
+	for _, tt := range []struct {
+		name   string
+		action string
+		gzip   bool
+	}{
+		{"GenerateContentIdentity", "generateContent", false},
+		{"StreamGenerateContentGzip", "streamGenerateContent", true},
+		{"CountTokensIdentity", "countTokens", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			requestBody := raw
+			if tt.gzip {
+				var compressed bytes.Buffer
+				writer := gzip.NewWriter(&compressed)
+				require.NoError(t, func() error { _, err := writer.Write(raw); return err }())
+				require.NoError(t, writer.Close())
+				requestBody = compressed.Bytes()
+			}
+			req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash:"+tt.action, bytes.NewReader(requestBody))
+			if tt.gzip {
+				req.Header.Set("Content-Encoding", "gzip")
+			}
+			coordinator, err := newJSONRequestBody(req)
+			require.NoError(t, err)
+			defer coordinator.Cleanup()
+
+			readRaw, err := coordinator.ReadRaw()
+			require.NoError(t, err)
+			require.Equal(t, hex.EncodeToString(rawHash[:]), service.HashUsageRequestPayload(readRaw))
+			require.NoError(t, coordinator.SetEffectiveBytes(service.CleanGeminiNativeThoughtSignatures(readRaw)))
+			require.Equal(t, hex.EncodeToString(rawHash[:]), coordinator.raw.Hash())
+
+			reader, err := coordinator.Effective().Open()
+			require.NoError(t, err)
+			effective, err := io.ReadAll(reader)
+			require.NoError(t, err)
+			require.NoError(t, reader.Close())
+			require.NotContains(t, string(effective), "old-account")
+			reopened, err := coordinator.Effective().Open()
+			require.NoError(t, err)
+			require.NoError(t, reopened.Close())
+		})
+	}
+}
 
 // TestGeminiV1BetaHandler_PlatformRoutingInvariant 文档化并验证 Handler 层的平台路由逻辑不变量
 // 该测试确保 gemini 和 antigravity 平台的路由逻辑符合预期

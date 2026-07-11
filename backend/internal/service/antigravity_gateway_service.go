@@ -2324,6 +2324,15 @@ func WithForwardGeminiSession(groupID int64, sessionHash string) ForwardGeminiOp
 }
 
 func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte, isStickySession bool, options ...ForwardGeminiOption) (*ForwardResult, error) {
+	bodyHandle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+	if err != nil {
+		return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+	}
+	defer CleanupRequestBodyHandle(bodyHandle)
+	return s.ForwardGeminiHandle(ctx, c, account, originalModel, action, stream, bodyHandle, isStickySession, options...)
+}
+
+func (s *AntigravityGatewayService) ForwardGeminiHandle(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, bodyHandle *RequestBodyHandle, isStickySession bool, options ...ForwardGeminiOption) (*ForwardResult, error) {
 	startTime := time.Now()
 	forwardOpts := forwardGeminiOptions{}
 	for _, apply := range options {
@@ -2341,8 +2350,12 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 	if strings.TrimSpace(action) == "" {
 		return nil, s.writeGoogleError(c, http.StatusBadRequest, "Missing action in URL")
 	}
-	if len(body) == 0 {
+	if bodyHandle == nil || bodyHandle.Size() == 0 {
 		return nil, s.writeGoogleError(c, http.StatusBadRequest, "Request body is empty")
+	}
+	body, err := bodyHandle.ReadAll()
+	if err != nil {
+		return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
 	}
 
 	// 解析请求以获取 image_size（用于图片计费）
