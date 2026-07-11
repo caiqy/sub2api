@@ -171,6 +171,7 @@ func TestGeminiV1BetaModels_ReleasesAcquiredAccountSlotWhenThoughtSignatureSpool
 	t.Cleanup(func() { jsonRequestBodyHandleOptions = old })
 
 	cache := &geminiSpoolReleaseConcurrencyCache{acquired: make(chan struct{}), proceed: make(chan struct{})}
+	t.Cleanup(cache.Release)
 	group := &service.Group{ID: 93, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
 	account := &service.Account{ID: 93, Name: "api-key", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "key"}}
 	env := newTerminalGatewayMessagesEnvWithConcurrencyCache(t, group, &openAIChatCompletionsHTTPUpstreamStub{}, cache, account)
@@ -194,7 +195,7 @@ func TestGeminiV1BetaModels_ReleasesAcquiredAccountSlotWhenThoughtSignatureSpool
 	require.NoError(t, err)
 	require.Len(t, entries, 1)
 	require.NoError(t, os.Remove(filepath.Join(rawDir, entries[0].Name())))
-	close(cache.proceed)
+	cache.Release()
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
@@ -440,6 +441,7 @@ type geminiSpoolReleaseConcurrencyCache struct {
 	openAIChatCompletionsConcurrencyCacheStub
 	acquired chan struct{}
 	proceed  chan struct{}
+	releaseOnce sync.Once
 	mu       sync.Mutex
 	releases int
 }
@@ -448,6 +450,10 @@ func (c *geminiSpoolReleaseConcurrencyCache) AcquireAccountSlot(context.Context,
 	c.acquired <- struct{}{}
 	<-c.proceed
 	return true, nil
+}
+
+func (c *geminiSpoolReleaseConcurrencyCache) Release() {
+	c.releaseOnce.Do(func() { close(c.proceed) })
 }
 
 func (c *geminiSpoolReleaseConcurrencyCache) ReleaseAccountSlot(context.Context, int64, string) error {
