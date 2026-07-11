@@ -115,6 +115,19 @@ effective handle 表示当前 attempt 最终发送给上游的完整 body：
 
 JSON parser 产生的对象可能仍短时持有字符串和数组。实现不得把这些对象写入 Gin context、usage snapshot 或异步任务；进入上游等待前只保留路由、计费和转发必需的小字段。仅执行 `body = nil` 不作为释放保证；长生命周期循环不得再捕获该切片，materialize 与转换应放在返回 handle 的短生命周期 helper 中。
 
+### Antigravity 协议桥接
+
+Anthropic Messages 可能被调度到 Antigravity，并在 service 内转换为 Gemini payload。该转换会产生第二层 effective body，不能把 handler handle 化后又在 Antigravity retry loop 中恢复为长期 `[]byte`。
+
+1. handler 将 Claude effective handle 作为 borrowed handle 传入 Antigravity；handler/coordinator 保持其 ownership。
+2. Antigravity 在短生命周期 helper 中读取 Claude body、完成 Gemini 转换，并立即创建 service-owned Gemini payload handle。
+3. 转换 helper 返回 handle 与 retry 所需的小型 metadata，不返回会被 retry loop 保存的完整 bytes。
+4. `antigravityRetryLoop` 每个 HTTP attempt 从当前 Gemini handle `Open()`，同时设置 `GetBody` 和 `ContentLength`。
+5. retry 若改写 Gemini payload，先创建 replacement handle；旧 request 完全关闭后清理旧 owned handle，再切换当前 handle。
+6. service 返回前清理全部 owned Gemini handles；不得清理 borrowed Claude handle。
+
+因此允许的瞬时峰值止于 Claude→Gemini 同步转换，网络等待、same-account retry 和 account failover 阶段均不得保留完整 Gemini payload `[]byte`。
+
 ### multipart 媒体入口
 
 适用于 OpenAI/Grok Images 与 Videos：
@@ -143,6 +156,7 @@ coordinator 是 handler 生命周期内 raw handle 和基础 effective handle �
 - effective 替换时，仅清理 coordinator 独占且未转交给当前 request 的旧 handle。
 - 上游 request body reader 由 HTTP transport 或调用方关闭；handle 只在该 attempt 完全结束后清理。
 - request context 标记的 owned handle 由 request close helper 清理；借用 coordinator handle 的 request 不执行 handle cleanup。
+- 协议桥接 service 对转换后 payload handle 负责：borrowed inbound handle 不清理，service-owned transformed/replacement handle 在最后一个使用它的 attempt 结束后清理。
 - multipart form 在 raw/effective handle 之前或之后清理均可，但必须在 handler 返回前执行 `RemoveAll()`。
 - `CleanupRequestBodyHandle` 保持幂等并继续使用 stale sweep 作为异常退出兜底；stale sweep 不能替代正常 cleanup。
 - panic recovery、客户端取消、业务拒绝、路由失败、上游 4xx/5xx 和流式结束均经过同一个 defer。
@@ -155,6 +169,7 @@ coordinator 是 handler 生命周期内 raw handle 和基础 effective handle �
 
 - `/v1/messages`：raw bytes 继续供现有 Anthropic 校验、内容审计、session 与模型解析；最终 Anthropic body 绑定 effective handle。
 - Anthropic 分组 `/v1/responses`：raw Responses body 完成兼容转换后，以转换出的 Messages body 创建 effective handle；计费与 usage 指纹沿用当前兼容路径定义。
+- Messages 调度到 Antigravity 时，转换后的 Gemini payload 是独立 effective body，必须由 Antigravity service-owned handle 承载；内部 retry 不得回退到 byte-backed request。
 
 ### OpenAI
 
@@ -217,6 +232,7 @@ coordinator 是 handler 生命周期内 raw handle 和基础 effective handle �
 ### 协议回归矩阵
 
 - Anthropic Responses/Messages：小、大、压缩、转换、流式、内容审计与 failover。
+- Antigravity Messages 桥接：真实生产 handler 的 gzip 10MB+ 阻塞上游、Claude→Gemini effective hash、same-account retry replacement、account failover、usage/billing/session 语义、503 与两层 handle cleanup。
 - OpenAI Chat/Embeddings：模型映射、stream 字段、retry/failover、usage 指纹和错误透传。
 - Gemini：三个目标 action、模型路径、Google 错误、failed usage 与 Antigravity 路由。
 - OpenAI/Grok Images/Videos：JSON、multipart、源图、遮罩、inline binary、生成/编辑/创建及上游失败。
