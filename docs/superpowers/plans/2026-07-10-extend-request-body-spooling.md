@@ -244,15 +244,15 @@ base-ref: 0f389fe7ed783ca4a8444fbe6d12acb9d3e19af6
 - 修改：`backend/internal/handler/grok_media_test.go`
 - 修改：`backend/internal/handler/request_body_coordinator_test.go`
 
-- [ ] **步骤 1：写失败测试。** 覆盖 Images generate/edit、Grok Images、Grok Videos create 的 JSON、multipart、inline base64/data URL、源图与 mask：断言 raw 超过 10MB 时 spool、multipart preview 从 usage/ops 省略正文并只含模型/prompt/尺寸/文件数/源图或遮罩标记、上游完整接收所有文本与文件 bytes。对 multipart parser 的临时文件、raw spool、effective spool 分别断言 request 返回后删除。
+- [x] **步骤 1：写失败测试。** 覆盖 Images generate/edit、Grok Images、Grok Videos create 的 JSON、multipart、inline base64/data URL、源图与 mask：断言 raw 超过 10MB 时 spool、multipart preview 从 usage/ops 省略正文并只含模型/prompt/尺寸/文件数/源图或遮罩标记、上游完整接收所有文本与文件 bytes。对 multipart parser 的临时文件、raw spool、effective spool 分别断言 request 返回后删除。
 
-- [ ] **步骤 2：验证测试失败。** 运行：`go test ./internal/handler -run 'Test(OpenAIImages|GrokMedia).*(Multipart|Inline|Mask|Source|Spool)' -count=1`（工作目录 `backend`）。预期：当前入口预读完整 `[]byte` 或写入通用 preview，断言失败。
+- [x] **步骤 2：验证测试失败。** 运行：`go test ./internal/handler -run 'Test(OpenAIImages|GrokMedia).*(Multipart|Inline|Mask|Source|Spool)' -count=1`（工作目录 `backend`）。预期：当前入口预读完整 `[]byte` 或写入通用 preview，断言失败。
 
-- [ ] **步骤 3：补齐 fixture。** 用标准库 `multipart.Writer` 构造请求与服务端接收断言；使用专用 tempdir，记录 `filepath.Glob` 结果。数据 URL 与 base64 用非敏感短前缀加重复内容构造，断言 snapshot 仅是 omission/metadata，不匹配任何正文片段。
+- [x] **步骤 3：补齐 fixture。** 用标准库 `multipart.Writer` 构造请求与服务端接收断言；使用专用 tempdir，记录 `filepath.Glob` 结果。数据 URL 与 base64 用非敏感短前缀加重复内容构造，断言 snapshot 仅是 omission/metadata，不匹配任何正文片段。
 
-- [ ] **步骤 4：验证通过。** 运行：`go test ./internal/handler -run 'Test(OpenAIImages|GrokMedia)' -count=1`（工作目录 `backend`）。预期：通过。
+- [x] **步骤 4：验证通过。** 运行：`go test ./internal/handler -run 'Test(OpenAIImages|GrokMedia)' -count=1`（工作目录 `backend`）。预期：通过。
 
-- [ ] **步骤 5：提交。** `git add backend/internal/handler/openai_images_*_test.go backend/internal/handler/grok_media_test.go backend/internal/handler/request_body_coordinator_test.go && git commit -m "test: cover media body spooling"`
+- [x] **步骤 5：提交。** `git add backend/internal/handler/openai_images_*_test.go backend/internal/handler/grok_media_test.go backend/internal/handler/request_body_coordinator_test.go && git commit -m "test: cover media body spooling"`
 
 ### Task 10: OpenAI/Grok 媒体入口与 pipe 重建
 
