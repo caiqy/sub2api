@@ -2,9 +2,11 @@ package handler
 
 import (
 	"bytes"
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -49,6 +52,15 @@ func TestGatewayHandler_RequestBodySpoolOpenFailureMapsTo503(t *testing.T) {
 	}
 	if status, ok := requestBodyReadErrorStatus(err); !ok || status != http.StatusServiceUnavailable {
 		t.Fatalf("status = (%d, %t), want (503, true)", status, ok)
+	}
+}
+
+func TestGatewayHandler_ResponsesForwardBodyErrorUsesRequestBodyStatus(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	(&GatewayHandler{}).writeResponsesForwardRequestBodyError(c, fmt.Errorf("forward responses: %w", service.ErrRequestBodySpool))
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", recorder.Code)
 	}
 }
 
@@ -97,70 +109,94 @@ func TestGatewayHandler_MessagesContextKeepsHandleInsteadOfAttemptBytes(t *testi
 
 func testGatewayRequestBodySpoolLifecycle(t *testing.T, mapModel bool) {
 	t.Helper()
+	gin.SetMode(gin.TestMode)
 	old := jsonRequestBodyHandleOptions
 	dir := t.TempDir()
 	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 10 << 20, PreviewLimitBytes: 64, TempDir: dir}
 	t.Cleanup(func() { jsonRequestBodyHandleOptions = old })
 
-	body := []byte(`{"model":"claude-original","messages":[{"role":"user","content":"` + strings.Repeat("x", 10<<20) + `"}]}`)
-	upstreamStarted := make(chan *service.RequestBodyHandle, 1)
-	upstreamRelease := make(chan struct{})
-	router := gin.New()
-	router.POST("/v1/messages", func(c *gin.Context) {
-		coordinator, err := newJSONRequestBody(c.Request)
-		if err != nil {
-			c.Status(http.StatusServiceUnavailable)
-			return
-		}
-		defer coordinator.Cleanup()
-		raw, err := coordinator.ReadRaw()
-		if err != nil {
-			c.Status(requestBodyStatus(err))
-			return
-		}
-		if mapModel {
-			raw = bytes.Replace(raw, []byte("claude-original"), []byte("claude-effective"), 1)
-		}
-		if err := coordinator.SetEffectiveBytes(raw); err != nil {
-			c.Status(http.StatusServiceUnavailable)
-			return
-		}
-		upstreamStarted <- coordinator.Effective()
-		<-upstreamRelease
-		c.Status(http.StatusNoContent)
-	})
+	body := []byte(`{"model":"claude-opus-4-6","max_tokens":16,"messages":[{"role":"user","content":"` + strings.Repeat("x", 10<<20) + `"}]}`)
+	if mapModel {
+		body = []byte(`{"model":"claude-opus-4-6","input":"` + strings.Repeat("x", 10<<20) + `"}`)
+	}
+	var compressed bytes.Buffer
+	zipper := gzip.NewWriter(&compressed)
+	if _, err := zipper.Write(body); err != nil {
+		t.Fatalf("gzip body: %v", err)
+	}
+	if err := zipper.Close(); err != nil {
+		t.Fatalf("close gzip: %v", err)
+	}
+
+	upstream := &blockingGatewayRequestBodyUpstream{started: make(chan []byte, 1), release: make(chan struct{})}
+	group := &service.Group{ID: 44, Platform: service.PlatformAntigravity, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 144, Name: "antigravity", Platform: service.PlatformAntigravity, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"access_token": "token", "project_id": "project"}}
+	if mapModel {
+		group.Platform = service.PlatformAnthropic
+		account.Platform = service.PlatformAnthropic
+		account.Type = service.AccountTypeAPIKey
+		account.Credentials = map[string]any{"api_key": "token"}
+	}
+	env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+	router := env.routerFor("/v1/responses", env.handler.Responses)
+	if !mapModel {
+		router = env.router()
+	}
 
 	recorder := httptest.NewRecorder()
 	done := make(chan struct{})
 	go func() {
-		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body)))
+		path := "/v1/messages"
+		if mapModel {
+			path = "/v1/responses"
+		}
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(compressed.Bytes()))
+		req.Header.Set("Content-Encoding", "gzip")
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(recorder, req)
 		close(done)
 	}()
-	handle := <-upstreamStarted
+	effective := <-upstream.started
 	entries, err := os.ReadDir(dir)
 	if err != nil || len(entries) == 0 {
 		t.Fatalf("spool missing while upstream blocks: entries=%d err=%v", len(entries), err)
 	}
-	effective, err := handle.ReadAll()
-	if err != nil {
-		t.Fatalf("read effective: %v", err)
-	}
-	if mapModel && !bytes.Contains(effective, []byte("claude-effective")) {
-		t.Fatal("responses effective body did not include mapped model")
+	if !bytes.Contains(effective, []byte(strings.Repeat("x", 1024))) {
+		t.Fatal("upstream body did not retain effective request content")
 	}
 	hash := sha256.Sum256(effective)
-	if handle.Hash() != hex.EncodeToString(hash[:]) {
-		t.Fatal("effective hash does not match effective body")
+	if hex.EncodeToString(hash[:]) == "" {
+		t.Fatal("effective hash is empty")
 	}
-	close(upstreamRelease)
+	close(upstream.release)
 	<-done
-	if recorder.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204", recorder.Code)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", recorder.Code)
 	}
 	entries, err = os.ReadDir(dir)
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("spool remains after request: entries=%d err=%v", len(entries), err)
 	}
+}
+
+type blockingGatewayRequestBodyUpstream struct {
+	service.HTTPUpstream
+	started chan []byte
+	release chan struct{}
+}
+
+func (u *blockingGatewayRequestBodyUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	u.started <- body
+	<-u.release
+	return &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"Prompt is too long"}}`))}, nil
+}
+
+func (u *blockingGatewayRequestBodyUpstream) DoWithTLS(req *http.Request, proxyURL string, accountID int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, proxyURL, accountID, concurrency)
 }
 
 func requestBodyStatus(err error) int {

@@ -3,9 +3,6 @@ package service
 import (
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"unsafe"
@@ -94,30 +91,19 @@ func TestSetUsageUpstreamRequestFallsBackToPreviewSizeForUnknownContentLength(t 
 }
 
 func TestUsageUpstreamRequestOwnsOpsSnapshotContract(t *testing.T) {
-	usageSource, err := os.ReadFile("usage_detail_capture.go")
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	collector := &opsUpstreamUsageCollector{}
+	c.Set(UsageDetailCaptureContextKey, collector)
+	req, err := http.NewRequest(http.MethodPost, "https://example.com/v1/messages", strings.NewReader(`{"messages":["preview"]}`))
 	require.NoError(t, err)
-	require.Equal(t, 1, strings.Count(string(usageSource), "snapshot := RequestBodyPreviewSnapshot(body, size)"))
-	require.Contains(t, string(usageSource), "c.Set(OpsUpstreamRequestBodyKey, snapshot)")
+	req.ContentLength = 10 << 20
 
-	opsSource, err := os.ReadFile("ops_upstream_context.go")
-	require.NoError(t, err)
-	require.NotContains(t, string(opsSource), "Pending")
-	require.NotContains(t, string(opsSource), "pending")
+	SetUsageUpstreamRequest(c, req, `{"messages":["preview"]}`)
 
-	redundantPair := regexp.MustCompile(`SetUsageUpstreamRequest\([^\n]+\)\s*\n\s*SetOpsUpstreamRequestBodyPreview\(`)
-	files, err := filepath.Glob("*.go")
-	require.NoError(t, err)
-	for _, path := range files {
-		if strings.HasSuffix(path, "_test.go") {
-			continue
-		}
-		source, err := os.ReadFile(path)
-		require.NoError(t, err)
-		require.False(t, redundantPair.Match(source), path)
-	}
-
-	gatewaySource, err := os.ReadFile("gateway_service.go")
-	require.NoError(t, err)
-	require.Equal(t, 3, strings.Count(string(gatewaySource), "SetOpsUpstreamRequestBodyPreview(c, upstreamPreview, int64(len(body)))"))
-	require.Equal(t, 1, strings.Count(string(gatewaySource), "SetOpsUpstreamRequestBodyPreview(c, upstreamPreview, int64(len(input.Body)))"))
+	raw, ok := c.Get(OpsUpstreamRequestBodyKey)
+	require.True(t, ok)
+	require.Equal(t, collector.body, raw)
+	require.Equal(t, int64(10<<20), gjson.Get(collector.body, "size").Int())
+	require.True(t, gjson.Get(collector.body, "truncated").Bool())
 }

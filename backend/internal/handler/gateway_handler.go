@@ -976,13 +976,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			forwardStartedAt := time.Now()
 			service.SetOpsUpstreamAttempted(c, false)
 			if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
-				attemptBody, readErr := attemptParsedReq.Body.ReadAll()
-				if readErr != nil {
-					service.CleanupRequestBodyHandle(attemptHandle)
-					h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
-					return
-				}
-				result, err = h.antigravityGatewayService.Forward(requestCtx, c, account, attemptBody, hasBoundSession)
+				result, err = h.antigravityGatewayService.ForwardHandle(requestCtx, c, account, attemptHandle, hasBoundSession)
 			} else {
 				result, err = h.gatewayService.Forward(requestCtx, c, account, attemptParsedReq)
 			}
@@ -1000,6 +994,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				accountReleaseFunc()
 			}
 			if err != nil {
+				if status, ok := requestBodyReadErrorStatus(err); ok {
+					h.errorResponse(c, status, "api_error", "Failed to spool request body")
+					return
+				}
 				// Beta policy block: return 400 immediately, no failover
 				var betaBlockedErr *service.BetaBlockedError
 				if errors.As(err, &betaBlockedErr) {
@@ -1164,7 +1162,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 捕获请求信息（用于异步记录，避免在 goroutine 中访问 gin.Context）
 			userAgent := c.GetHeader("User-Agent")
 			clientIP := ip.GetClientIP(c)
-			// Forward 内部可能继续改写 body，usage 去重指纹必须使用最终上游接受的当前 body。
+			// attempt handle is the final request body before the upstream call.
 			requestPayloadHash := attemptParsedReq.Body.Handle().Hash()
 			inboundEndpoint := GetInboundEndpoint(c)
 			upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)

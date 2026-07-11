@@ -279,6 +279,9 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		}
 
 		if err != nil {
+			if h.writeResponsesForwardRequestBodyError(c, err) {
+				return
+			}
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
 				// Can't failover if streaming content already sent
@@ -354,6 +357,25 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		})
 		return
 	}
+}
+
+func (h *GatewayHandler) writeResponsesForwardRequestBodyError(c *gin.Context, err error) bool {
+	status, ok := requestBodyReadErrorStatus(err)
+	if !ok {
+		return false
+	}
+	if status == http.StatusRequestEntityTooLarge {
+		if maxErr, ok := extractMaxBytesError(err); ok {
+			h.responsesErrorResponse(c, status, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+			return true
+		}
+	}
+	if status == http.StatusServiceUnavailable {
+		h.responsesErrorResponse(c, status, "server_error", "Failed to spool request body")
+		return true
+	}
+	h.responsesErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+	return true
 }
 
 // responsesErrorResponse writes an error in OpenAI Responses API format.

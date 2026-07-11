@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 )
 
@@ -177,25 +176,36 @@ func (s *AntigravityGatewayService) attemptCreditsOveragesRetry(
 	originalStatusCode int,
 	respBody []byte,
 ) *creditsOveragesRetryResult {
-	creditsBody := injectEnabledCreditTypes(p.body)
+	payload, err := p.payloadHandle.ReadAll()
+	if err != nil {
+		return &creditsOveragesRetryResult{handled: true}
+	}
+	creditsBody := injectEnabledCreditTypes(payload)
 	if creditsBody == nil {
 		return &creditsOveragesRetryResult{handled: false}
 	}
+	// This retry may fall through to the outer loop, which still owns its payload.
+	p.ownedPayload = false
+	if err := p.replacePayload(creditsBody); err != nil {
+		return &creditsOveragesRetryResult{handled: true}
+	}
+	defer p.cleanupOwnedPayload()
 	modelKey := resolveCreditsOveragesModelKey(p.ctx, p.account, modelName, p.requestedModel)
 	logger.LegacyPrintf("service.antigravity_gateway", "%s status=429 credit_overages_retry model=%s account=%d (injecting enabledCreditTypes)",
 		p.prefix, modelKey, p.account.ID)
 
-	creditsReq, err := antigravity.NewAPIRequestWithURL(p.ctx, baseURL, p.action, p.accessToken, creditsBody)
+	creditsReq, err := newAntigravityPayloadRequest(&p, baseURL)
 	if err != nil {
 		logger.LegacyPrintf("service.antigravity_gateway", "%s credit_overages_failed model=%s account=%d build_request_err=%v",
 			p.prefix, modelKey, p.account.ID, err)
 		return &creditsOveragesRetryResult{handled: true}
 	}
-	preview := RequestBodyPreviewString(creditsBody)
+	preview := antigravityPayloadPreview(&p)
 	SetUsageUpstreamRequest(p.c, creditsReq, preview)
 	SetOpsUpstreamAttempted(p.c, true)
 
 	creditsResp, err := p.httpUpstream.Do(creditsReq, p.proxyURL, p.account.ID, p.account.Concurrency)
+	_ = creditsReq.Body.Close()
 	if err == nil && creditsResp != nil && creditsResp.StatusCode < 400 {
 		s.clearCreditsExhausted(p.ctx, p.account)
 		logger.LegacyPrintf("service.antigravity_gateway", "%s status=%d credit_overages_success model=%s account=%d",
