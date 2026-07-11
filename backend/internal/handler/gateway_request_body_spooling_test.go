@@ -108,6 +108,43 @@ func TestGatewayHandler_MessagesContextKeepsHandleInsteadOfAttemptBytes(t *testi
 	}
 }
 
+func TestGatewayHandler_MessagesCleansDerivedAttemptHandleAfterForwardPanic(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	old := jsonRequestBodyHandleOptions
+	rawDir := t.TempDir()
+	effectiveDir := t.TempDir()
+	t.Setenv("TMPDIR", effectiveDir)
+	t.Setenv("TMP", effectiveDir)
+	t.Setenv("TEMP", effectiveDir)
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: rawDir}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = old })
+
+	group := &service.Group{ID: 45, Platform: service.PlatformAntigravity, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 145, Name: "antigravity", Platform: service.PlatformAntigravity, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"access_token": "token", "project_id": "project"}}
+	env := newTerminalGatewayMessagesEnv(t, group, panicGatewayRequestBodyUpstream{}, account)
+
+	func() {
+		defer func() { _ = recover() }()
+		recorder := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-opus-4-6","max_tokens":16,"messages":[{"role":"user","content":"`+strings.Repeat("x", 10<<20)+`"}]}`))
+		env.router().ServeHTTP(recorder, req)
+	}()
+	for _, dir := range []string{rawDir, effectiveDir} {
+		entries, err := os.ReadDir(dir)
+		if err != nil || len(entries) != 0 {
+			t.Fatalf("spool remains after Forward panic in %s: entries=%d err=%v", dir, len(entries), err)
+		}
+	}
+}
+
+type panicGatewayRequestBodyUpstream struct{ service.HTTPUpstream }
+
+func (panicGatewayRequestBodyUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	// The upstream owns the active request reader; this test isolates handler-owned attempt cleanup.
+	_ = req.Body.Close()
+	panic("forward panic")
+}
+
 func testGatewayRequestBodySpoolLifecycle(t *testing.T, mapModel bool) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)

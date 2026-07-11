@@ -1502,7 +1502,10 @@ func TestAntigravityGatewayService_ForwardUpstream_CapturesUsageSnapshotBeforeSe
 	upstream.onCall = func(_ *http.Request, _ *queuedHTTPUpstreamStub) {
 		require.True(t, HasOpsUpstreamAttempted(c))
 	}
-	result, err := svc.ForwardUpstream(context.Background(), c, account, body)
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+	require.NoError(t, err)
+	defer CleanupRequestBodyHandle(handle)
+	result, err := svc.ForwardUpstream(context.Background(), c, account, handle)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Len(t, upstream.requestBodies, 1)
@@ -1513,6 +1516,79 @@ func TestAntigravityGatewayService_ForwardUpstream_CapturesUsageSnapshotBeforeSe
 	require.Contains(t, collector.headers, "X-Api-Key: api-key-token")
 	require.Contains(t, collector.headers, "Anthropic-Version: 2023-06-01")
 	require.Contains(t, collector.headers, "Anthropic-Beta: tools-2024-04-04")
+}
+
+func TestAntigravityGatewayService_ForwardUpstreamKeepsLargeBodyFileBackedWhileBlocked(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	writer := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(writer)
+
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"` + strings.Repeat("x", 10<<20) + `"}]}`)
+	handle, err := NewRequestBodyHandleFromReader(bytes.NewReader(body), RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	upstream := &blockingUpstreamHandleHTTPStub{started: make(chan *http.Request, 1), release: make(chan struct{})}
+	svc := &AntigravityGatewayService{
+		settingService: NewSettingService(&antigravitySettingRepoStub{}, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
+		httpUpstream:   upstream,
+	}
+	account := &Account{ID: 77, Name: "upstream", Platform: PlatformAntigravity, Type: AccountTypeUpstream, Concurrency: 1, Credentials: map[string]any{"base_url": "https://example.com", "api_key": "token"}}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc.ForwardHandle(context.Background(), c, account, handle, false)
+		done <- err
+	}()
+	req := <-upstream.started
+	if _, ok := req.Body.(requestBodySpoolReadCloser); !ok {
+		t.Fatalf("upstream request body = %T, want requestBodySpoolReadCloser", req.Body)
+	}
+	reopened, err := req.GetBody()
+	require.NoError(t, err)
+	reopenedBody, err := io.ReadAll(reopened)
+	require.NoError(t, err)
+	require.NoError(t, reopened.Close())
+	require.Equal(t, body, reopenedBody)
+	require.Equal(t, int64(len(body)), req.ContentLength)
+	close(upstream.release)
+	require.NoError(t, <-done)
+}
+
+func TestAntigravityGatewayService_ForwardEnabledThinkingRetriesInvalidBudget(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	writer := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(writer)
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"thinking":{"type":"enabled","budget_tokens":1024},"messages":[{"role":"user","content":"hello"}]}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+
+	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{
+		{StatusCode: http.StatusBadRequest, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"thinking budget_tokens must be >= 1024"}}`))},
+		{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"response":{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}}`))},
+	}}
+	svc := &AntigravityGatewayService{
+		settingService: NewSettingService(&antigravitySettingRepoStub{}, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
+		tokenProvider:  &AntigravityTokenProvider{},
+		httpUpstream:   upstream,
+	}
+	account := &Account{ID: 78, Name: "budget", Platform: PlatformAntigravity, Type: AccountTypeOAuth, Concurrency: 1, Credentials: map[string]any{"access_token": "token", "project_id": "project"}}
+
+	_, _ = svc.Forward(context.Background(), c, account, body, false)
+	require.Len(t, upstream.requestBodies, 2)
+	require.Equal(t, int64(BudgetRectifyBudgetTokens), gjson.GetBytes(upstream.requestBodies[1], "request.generationConfig.thinkingConfig.thinkingBudget").Int())
+}
+
+type blockingUpstreamHandleHTTPStub struct {
+	HTTPUpstream
+	started chan *http.Request
+	release chan struct{}
+}
+
+func (u *blockingUpstreamHandleHTTPStub) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	u.started <- req
+	<-u.release
+	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"id":"msg_1","usage":{"input_tokens":1,"output_tokens":1}}`))}, nil
 }
 
 func TestAntigravityCreditsRetryCapturesEachAttemptSnapshot(t *testing.T) {

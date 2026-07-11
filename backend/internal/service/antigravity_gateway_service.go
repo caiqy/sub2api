@@ -1568,11 +1568,7 @@ func (s *AntigravityGatewayService) newAntigravityRetryPayload(claudeHandle *Req
 func (s *AntigravityGatewayService) forward(ctx context.Context, c *gin.Context, account *Account, claudeHandle *RequestBodyHandle, isStickySession bool) (*ForwardResult, error) {
 	// 上游透传账号直接转发，不走 OAuth token 刷新
 	if account.Type == AccountTypeUpstream {
-		body, err := claudeHandle.ReadAll()
-		if err != nil {
-			return nil, fmt.Errorf("read antigravity request body: %w", err)
-		}
-		return s.ForwardUpstream(ctx, c, account, body)
+		return s.ForwardUpstream(ctx, c, account, claudeHandle)
 	}
 
 	startTime := time.Now()
@@ -1839,8 +1835,8 @@ func (s *AntigravityGatewayService) forward(ctx context.Context, c *gin.Context,
 					Detail:             s.getUpstreamErrorDetail(respBody),
 				})
 
-				// 修正 claudeReq 的 thinking 参数（adaptive 模式不修正）
-				if !thinkingEnabled {
+				// 修正所有 non-adaptive thinking 参数；adaptive 模式不修正。
+				if claudeReq.Thinking == nil || claudeReq.Thinking.Type != "adaptive" {
 					retryPayloadHandle, _, txErr := s.newAntigravityRetryPayload(claudeHandle, projectID, mappedModel, transformOpts, func(retryClaudeReq *antigravity.ClaudeRequest) (bool, error) {
 						retryClaudeReq.Thinking = &antigravity.ThinkingConfig{Type: "enabled", BudgetTokens: BudgetRectifyBudgetTokens}
 						if retryClaudeReq.MaxTokens < BudgetRectifyMinMaxTokens {
@@ -4502,8 +4498,9 @@ func filterEmptyPartsFromGeminiRequest(body []byte) ([]byte, error) {
 	return json.Marshal(payload)
 }
 
-// ForwardUpstream 使用 base_url + /v1/messages + 双 header 认证透传上游 Claude 请求
-func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.Context, account *Account, body []byte) (*ForwardResult, error) {
+// ForwardUpstream 使用 base_url + /v1/messages + 双 header 认证透传上游 Claude 请求。
+// bodyHandle is borrowed from the handler and remains valid through the upstream wait.
+func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.Context, account *Account, bodyHandle *RequestBodyHandle) (*ForwardResult, error) {
 	startTime := time.Now()
 	sessionID := getSessionID(c)
 	prefix := logPrefix(sessionID, account.Name)
@@ -4516,7 +4513,11 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 	}
 	baseURL = strings.TrimSuffix(baseURL, "/")
 
-	// 解析请求获取模型信息
+	// Read only for synchronous validation and beta sanitization; do not retain it across the upstream wait.
+	body, err := bodyHandle.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("read upstream request body: %w", err)
+	}
 	var claudeReq antigravity.ClaudeRequest
 	if err := json.Unmarshal(body, &claudeReq); err != nil {
 		return nil, fmt.Errorf("parse claude request: %w", err)
@@ -4525,6 +4526,7 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 		return nil, fmt.Errorf("missing model")
 	}
 	originalModel := claudeReq.Model
+	reqStream := claudeReq.Stream
 
 	// 构建上游请求 URL
 	upstreamURL := baseURL + "/v1/messages"
@@ -4534,14 +4536,28 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 	// context_management 时 strip，与 Anthropic 直连 / Bedrock / Vertex 路径保持一致。
 	clientBeta := c.GetHeader("anthropic-beta")
 	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(body, clientBeta); changed {
-		body = sanitized
+		bodyHandle, err = NewRequestBodyHandleFromBytes(sanitized, RequestBodyHandleOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("create sanitized upstream request body: %w", err)
+		}
+		defer CleanupRequestBodyHandle(bodyHandle)
 	}
+	body = nil
+	claudeReq = antigravity.ClaudeRequest{}
 
 	// 创建请求
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, bytes.NewReader(body))
+	requestBody, err := bodyHandle.Open()
 	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, requestBody)
+	if err != nil {
+		_ = requestBody.Close()
 		return nil, fmt.Errorf("create upstream request: %w", err)
 	}
+	defer func() { _ = req.Body.Close() }()
+	req.GetBody = bodyHandle.Open
+	req.ContentLength = bodyHandle.Size()
 
 	// 设置请求头
 	req.Header.Set("Content-Type", "application/json")
@@ -4555,7 +4571,7 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 	if v := clientBeta; v != "" {
 		req.Header.Set("anthropic-beta", v)
 	}
-	preview := RequestBodyPreviewString(body)
+	preview := bodyHandle.PreviewString()
 	SetUsageUpstreamRequest(c, req, preview)
 
 	// 代理 URL
@@ -4597,7 +4613,7 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 	var firstTokenMs *int
 	var clientDisconnect bool
 
-	if claudeReq.Stream {
+	if reqStream {
 		// 流式响应：透传
 		c.Header("Content-Type", "text/event-stream")
 		c.Header("Cache-Control", "no-cache")
@@ -4630,7 +4646,7 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 
 	return &ForwardResult{
 		Model:            originalModel,
-		Stream:           claudeReq.Stream,
+		Stream:           reqStream,
 		Duration:         duration,
 		FirstTokenMs:     firstTokenMs,
 		ClientDisconnect: clientDisconnect,

@@ -957,9 +957,14 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 				return
 			}
+			attemptHandleOwned := true
+			defer func() {
+				if attemptHandleOwned {
+					service.CleanupRequestBodyHandle(attemptHandle)
+				}
+			}()
 			attemptParsedReq, err = attemptParsedReq.CloneForHandle(attemptHandle)
 			if err != nil {
-				service.CleanupRequestBodyHandle(attemptHandle)
 				h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 				return
 			}
@@ -981,6 +986,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				result, err = h.gatewayService.Forward(requestCtx, c, account, attemptParsedReq)
 			}
 			service.CleanupRequestBodyHandle(attemptHandle)
+			attemptHandleOwned = false
 			forwardDuration := time.Since(forwardStartedAt)
 
 			// 兜底释放串行锁（正常情况已通过回调提前释放）
