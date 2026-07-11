@@ -166,6 +166,7 @@ func TestGrokMediaJSONStoresFinalOutboundPreview(t *testing.T) {
 	_, err := svc.ForwardGrokMedia(context.Background(), c, account, GrokMediaEndpointImagesGenerations, "", body, "application/json")
 	require.NoError(t, err)
 	require.Equal(t, "grok-imagine-image-quality", gjson.GetBytes(upstream.lastBody, "model").String())
+	require.Equal(t, upstream.lastBody, upstream.replays[0])
 	require.Equal(t, RequestBodyPreviewString(upstream.lastBody), collector.body)
 	require.Equal(t, collector.body, requireOpsPreviewString(t, c, "grok-imagine-image-quality"))
 }
@@ -210,6 +211,7 @@ func TestGrokMediaMultipartStoresOmittedPreview(t *testing.T) {
 	_, err = svc.ForwardGrokMedia(context.Background(), c, account, GrokMediaEndpointImagesEdits, "", body.Bytes(), writer.FormDataContentType())
 	require.NoError(t, err)
 	require.Contains(t, string(upstream.lastBody), "data:application/octet-stream;base64,")
+	require.Equal(t, upstream.lastBody, upstream.replays[0])
 	require.Equal(t, "[multipart body omitted]", collector.body)
 	require.NotContains(t, collector.body, "data:image/")
 	require.NotContains(t, collector.body, "private-image-bytes")

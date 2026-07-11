@@ -118,8 +118,9 @@ func TestRequestBodyCoordinator_Spool(t *testing.T) {
 
 func TestRequestBodyCoordinator_Multipart(t *testing.T) {
 	const maxUpload = 20 << 20
-	t.Setenv("TMP", "D:\\.tmp-go\\tmp")
-	t.Setenv("TEMP", "D:\\.tmp-go\\tmp")
+	multipartDir := t.TempDir()
+	t.Setenv("TMP", multipartDir)
+	t.Setenv("TEMP", multipartDir)
 	oldOptions := jsonRequestBodyHandleOptions
 	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir(), FilePrefix: "sub2api-test-"}
 	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
