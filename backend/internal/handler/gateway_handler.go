@@ -537,14 +537,14 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			forwardStartedAt := time.Now()
 			service.SetOpsUpstreamAttempted(c, false)
 			if account.Platform == service.PlatformAntigravity {
-				result, err = h.antigravityGatewayService.ForwardGemini(
+				result, err = h.antigravityGatewayService.ForwardGeminiHandle(
 					requestCtx,
 					c,
 					account,
 					reqModel,
 					"generateContent",
 					reqStream,
-					body,
+					effectiveBody,
 					hasBoundSession,
 					service.WithForwardGeminiSession(derefGroupID(apiKey.GroupID), sessionKey),
 				)

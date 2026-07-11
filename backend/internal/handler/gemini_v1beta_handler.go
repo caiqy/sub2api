@@ -225,6 +225,32 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		modelName = channelMapping.MappedModel
 	}
 
+	// Complete all body-derived work before any concurrency wait retains this request.
+	stickyState := h.prepareGeminiStickySelectionFromRequest(c, apiKey, authSubject, modelName, body)
+	selectionSessionKey := stickyState.SelectionSessionKey
+	sessionBoundAccountID := stickyState.SessionBoundAccountID
+	useDigestFallback := stickyState.UseDigestFallback
+	geminiSessionUUID := stickyState.GeminiSessionUUID
+	matchedDigestChain := stickyState.MatchedDigestChain
+	if useDigestFallback && matchedDigestChain != "" && sessionBoundAccountID > 0 {
+		reqLog.Info("gemini.digest_fallback_matched",
+			zap.String("session_uuid_prefix", safeShortPrefix(geminiSessionUUID, 8)),
+			zap.Int64("account_id", sessionBoundAccountID),
+			zap.String("digest_chain", truncateDigestChain(stickyState.GeminiDigestChain)),
+		)
+	}
+	if sessionBoundAccountID > 0 {
+		prefetchedGroupID := int64(0)
+		if apiKey.GroupID != nil {
+			prefetchedGroupID = *apiKey.GroupID
+		}
+		ctx := service.WithPrefetchedStickySession(c.Request.Context(), sessionBoundAccountID, prefetchedGroupID, h.metadataBridgeEnabled())
+		c.Request = c.Request.WithContext(ctx)
+	}
+	requestPayloadHash := service.HashUsageRequestPayload(body)
+	hasThoughtSignature := bytes.Contains(body, []byte(`"thoughtSignature"`))
+	body = nil
+
 	// Get subscription (may be nil)
 	subscription, _ := middleware.GetSubscriptionFromContext(c)
 
@@ -266,32 +292,6 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		googleError(c, status, message)
 		return
 	}
-
-	// 3) select account (sticky session based on request body)
-	stickyState := h.prepareGeminiStickySelectionFromRequest(c, apiKey, authSubject, modelName, body)
-	selectionSessionKey := stickyState.SelectionSessionKey
-	sessionBoundAccountID := stickyState.SessionBoundAccountID
-	useDigestFallback := stickyState.UseDigestFallback
-	geminiSessionUUID := stickyState.GeminiSessionUUID
-	matchedDigestChain := stickyState.MatchedDigestChain
-	if useDigestFallback && matchedDigestChain != "" && sessionBoundAccountID > 0 {
-		reqLog.Info("gemini.digest_fallback_matched",
-			zap.String("session_uuid_prefix", safeShortPrefix(geminiSessionUUID, 8)),
-			zap.Int64("account_id", sessionBoundAccountID),
-			zap.String("digest_chain", truncateDigestChain(stickyState.GeminiDigestChain)),
-		)
-	}
-	if sessionBoundAccountID > 0 {
-		prefetchedGroupID := int64(0)
-		if apiKey.GroupID != nil {
-			prefetchedGroupID = *apiKey.GroupID
-		}
-		ctx := service.WithPrefetchedStickySession(c.Request.Context(), sessionBoundAccountID, prefetchedGroupID, h.metadataBridgeEnabled())
-		c.Request = c.Request.WithContext(ctx)
-	}
-	requestPayloadHash := service.HashUsageRequestPayload(body)
-	hasThoughtSignature := bytes.Contains(body, []byte(`"thoughtSignature"`))
-	body = nil
 
 	// 判断是否真的绑定了粘性会话：有 sessionKey 且已经绑定到某个账号
 	hasBoundSession := selectionSessionKey != "" && sessionBoundAccountID > 0

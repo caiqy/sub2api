@@ -1214,6 +1214,8 @@ func (s *GeminiMessagesCompatService) ForwardNativeHandle(ctx context.Context, c
 		ownedForwardHandle = true
 	}
 	countTokensEstimate := estimateGeminiCountTokens(body)
+	imageInputSize := s.extractImageInputSize(body)
+	imageSize := normalizeOpenAIImageSizeTier(imageInputSize)
 
 	mappedModel := originalModel
 	if account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount {
@@ -1728,8 +1730,6 @@ func (s *GeminiMessagesCompatService) ForwardNativeHandle(ctx context.Context, c
 
 	// 图片生成计费
 	imageCount := 0
-	imageInputSize := s.extractImageInputSize(body)
-	imageSize := normalizeOpenAIImageSizeTier(imageInputSize)
 	if isImageGenerationModel(originalModel) {
 		imageCount = 1
 	}

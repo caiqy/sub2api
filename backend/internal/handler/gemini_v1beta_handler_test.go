@@ -133,6 +133,31 @@ func TestGeminiV1BetaGenerateContentRequestBody_OAuthWrappedBodyStaysHandleBacke
 	require.Error(t, err, "upstream request body must be closed before owned spools are cleaned up")
 }
 
+func TestGeminiV1BetaGenerateContentRequestBody_PreservesImageInputSize(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 92, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{
+		ID: 92, Name: "api-key", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey,
+		Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1,
+		Credentials: map[string]any{"api_key": "key"},
+	}
+	upstream := directTerminalHTTPUpstream{response: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}`)),
+	}}
+	env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash-image:generateContent", strings.NewReader(`{"contents":[{"role":"user","parts":[{"text":"draw"}]}],"generationConfig":{"imageConfig":{"imageSize":"2K"}}}`))
+	req.Header.Set("Content-Type", "application/json")
+	env.routerFor("/v1beta/models/*modelAction", env.handler.GeminiV1BetaModels).ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, env.usageRepo.lastLog)
+	require.NotNil(t, env.usageRepo.lastLog.ImageInputSize)
+	require.Equal(t, "2K", *env.usageRepo.lastLog.ImageInputSize)
+}
+
 type geminiBlockingBodyUpstream struct {
 	service.HTTPUpstream
 	started chan *http.Request
