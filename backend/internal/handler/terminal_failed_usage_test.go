@@ -575,6 +575,10 @@ func (r *terminalGatewayAccountRepo) listByPlatforms(platforms []string) []servi
 }
 
 func newTerminalGatewayMessagesEnv(t *testing.T, group *service.Group, upstream service.HTTPUpstream, accounts ...*service.Account) *terminalGatewayMessagesEnv {
+	return newTerminalGatewayMessagesEnvWithConcurrencyCache(t, group, upstream, openAIChatCompletionsConcurrencyCacheStub{}, accounts...)
+}
+
+func newTerminalGatewayMessagesEnvWithConcurrencyCache(t *testing.T, group *service.Group, upstream service.HTTPUpstream, concurrencyCache service.ConcurrencyCache, accounts ...*service.Account) *terminalGatewayMessagesEnv {
 	t.Helper()
 	cfg := &config.Config{
 		RunMode:     config.RunModeSimple,
@@ -584,7 +588,7 @@ func newTerminalGatewayMessagesEnv(t *testing.T, group *service.Group, upstream 
 	}
 	accountRepo := &terminalGatewayAccountRepo{openAIRetryAccountRepoStub{accounts: accounts}}
 	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 2)}
-	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
+	concurrencyService := service.NewConcurrencyService(concurrencyCache)
 	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
 	t.Cleanup(func() { billingCacheService.Stop() })
 	settingService := service.NewSettingService(terminalUsageSettingRepo{}, cfg)

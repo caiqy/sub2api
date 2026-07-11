@@ -13,7 +13,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -156,6 +158,75 @@ func TestGeminiV1BetaGenerateContentRequestBody_PreservesImageInputSize(t *testi
 	require.NotNil(t, env.usageRepo.lastLog)
 	require.NotNil(t, env.usageRepo.lastLog.ImageInputSize)
 	require.Equal(t, "2K", *env.usageRepo.lastLog.ImageInputSize)
+}
+
+func TestGeminiV1BetaModels_ReleasesAcquiredAccountSlotWhenThoughtSignatureSpoolReadFails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	old := jsonRequestBodyHandleOptions
+	rawDir := t.TempDir()
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: rawDir}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = old })
+
+	cache := &geminiSpoolReleaseConcurrencyCache{acquired: make(chan struct{}), proceed: make(chan struct{})}
+	group := &service.Group{ID: 93, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 93, Name: "api-key", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "key"}}
+	env := newTerminalGatewayMessagesEnvWithConcurrencyCache(t, group, &openAIChatCompletionsHTTPUpstreamStub{}, cache, account)
+	env.handler.cfg.Gateway.Sticky.Gemini.Enabled = true
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash:generateContent", strings.NewReader(`{"contents":[{"role":"user","parts":[{"text":"/.gemini/tmp/`+strings.Repeat("a", 64)+`","thoughtSignature":"old-account"}]}]}`))
+	request.Header.Set("Content-Type", "application/json")
+	done := make(chan struct{})
+	go func() {
+		env.routerFor("/v1beta/models/*modelAction", env.handler.GeminiV1BetaModels).ServeHTTP(recorder, request)
+		close(done)
+	}()
+
+	select {
+	case <-cache.acquired:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Gemini handler did not acquire the account slot")
+	}
+	entries, err := os.ReadDir(rawDir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.NoError(t, os.Remove(filepath.Join(rawDir, entries[0].Name())))
+	close(cache.proceed)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Gemini handler did not return after spool read failure")
+	}
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.Equal(t, 1, cache.releaseCalls())
+}
+
+type geminiSpoolReleaseConcurrencyCache struct {
+	openAIChatCompletionsConcurrencyCacheStub
+	acquired chan struct{}
+	proceed  chan struct{}
+	mu       sync.Mutex
+	releases int
+}
+
+func (c *geminiSpoolReleaseConcurrencyCache) AcquireAccountSlot(context.Context, int64, int, string) (bool, error) {
+	c.acquired <- struct{}{}
+	<-c.proceed
+	return true, nil
+}
+
+func (c *geminiSpoolReleaseConcurrencyCache) ReleaseAccountSlot(context.Context, int64, string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.releases++
+	return nil
+}
+
+func (c *geminiSpoolReleaseConcurrencyCache) releaseCalls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.releases
 }
 
 type geminiBlockingBodyUpstream struct {

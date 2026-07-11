@@ -340,6 +340,12 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			}
 		}
 		account := selection.Account
+		accountReleaseFunc := selection.ReleaseFunc
+		defer func() {
+			if accountReleaseFunc != nil {
+				accountReleaseFunc()
+			}
+		}()
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
 		// 检测账号切换：如果粘性会话绑定的账号与当前选择的账号不同，清除 thoughtSignature
@@ -389,7 +395,6 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		}
 
 		// 4) account concurrency slot
-		accountReleaseFunc := selection.ReleaseFunc
 		if !selection.Acquired {
 			if selection.WaitPlan == nil {
 				markOpsRoutingCapacityLimited(c)
@@ -459,6 +464,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		forwardDuration := time.Since(forwardStartedAt)
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
+			accountReleaseFunc = nil
 		}
 		if err != nil {
 			var failoverErr *service.UpstreamFailoverError
