@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -41,32 +42,132 @@ func TestGatewayHandler_MessagesAndResponsesUpstream5xxPreserveErrorContract(t *
 	})
 }
 
-func TestGatewayHandler_ResponsesCanceledRequestCleansSpools(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	rawDir, effectiveDir := t.TempDir(), t.TempDir()
-	oldOptions := jsonRequestBodyHandleOptions
-	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 10 << 20, TempDir: rawDir}
-	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
-	t.Setenv("TMPDIR", effectiveDir)
-	t.Setenv("TMP", effectiveDir)
-	t.Setenv("TEMP", effectiveDir)
+func TestGatewayHandler_MessagesAndResponsesCanceledRequestsCleanSpools(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		route string
+		body  string
+	}{
+		{"messages", "/v1/messages", `{"model":"claude-opus-4-6","max_tokens":16,"messages":[{"role":"user","content":"` + strings.Repeat("x", 12<<20) + `"}]}`},
+		{"responses", "/v1/responses", `{"model":"claude-opus-4-6","input":"` + strings.Repeat("x", 12<<20) + `"}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			rawDir, effectiveDir := t.TempDir(), t.TempDir()
+			oldOptions := jsonRequestBodyHandleOptions
+			jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 10 << 20, TempDir: rawDir}
+			t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+			t.Setenv("TMPDIR", effectiveDir)
+			t.Setenv("TMP", effectiveDir)
+			t.Setenv("TEMP", effectiveDir)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	group := &service.Group{ID: 46, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
-	account := &service.Account{ID: 146, Name: "anthropic-canceled", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "token"}}
-	env := newTerminalGatewayMessagesEnv(t, group, cancelingGatewayRequestBodyUpstream{cancelingTerminalHTTPUpstream{cancel: cancel}}, account)
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"claude-opus-4-6","input":"`+strings.Repeat("x", 12<<20)+`"}`)).WithContext(ctx)
-	req.Header.Set("Content-Type", "application/json")
-	env.routerFor("/v1/responses", env.handler.Responses).ServeHTTP(httptest.NewRecorder(), req)
+			ctx, cancel := context.WithCancel(context.Background())
+			group := &service.Group{ID: 46, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+			account := &service.Account{ID: 146, Name: "anthropic-canceled", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "token"}}
+			env := newTerminalGatewayMessagesEnv(t, group, cancelingGatewayRequestBodyUpstream{cancelingTerminalHTTPUpstream{cancel: cancel}}, account)
+			req := httptest.NewRequest(http.MethodPost, tt.route, strings.NewReader(tt.body)).WithContext(ctx)
+			req.Header.Set("Content-Type", "application/json")
+			router := env.routerFor(tt.route, env.handler.Messages)
+			if tt.route == "/v1/responses" {
+				router = env.routerFor(tt.route, env.handler.Responses)
+			}
+			router.ServeHTTP(httptest.NewRecorder(), req)
 
-	if !errors.Is(ctx.Err(), context.Canceled) {
-		t.Fatalf("context error = %v, want canceled", ctx.Err())
+			if !errors.Is(ctx.Err(), context.Canceled) {
+				t.Fatalf("context error = %v, want canceled", ctx.Err())
+			}
+			assertGatewaySpoolDirsEmpty(t, rawDir, effectiveDir)
+		})
 	}
-	for _, dir := range []string{rawDir, effectiveDir} {
-		entries, err := os.ReadDir(dir)
-		if err != nil || len(entries) != 0 {
-			t.Fatalf("spool remains after canceled Responses request in %s: entries=%d err=%v", dir, len(entries), err)
-		}
+}
+
+func TestGatewayHandler_MessagesAndResponsesReplayLargeBodiesAcrossFailover(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		route     string
+		gzip      bool
+		responses bool
+	}{
+		{"messages-identity", "/v1/messages", false, false},
+		{"messages-gzip", "/v1/messages", true, false},
+		{"responses-identity", "/v1/responses", false, true},
+		{"responses-gzip", "/v1/responses", true, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			rawDir, effectiveDir := t.TempDir(), t.TempDir()
+			oldOptions := jsonRequestBodyHandleOptions
+			jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 10 << 20, PreviewLimitBytes: 64, TempDir: rawDir}
+			t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+			t.Setenv("TMPDIR", effectiveDir)
+			t.Setenv("TMP", effectiveDir)
+			t.Setenv("TEMP", effectiveDir)
+
+			body := []byte(`{"model":"claude-opus-4-6","max_tokens":16,"messages":[{"role":"user","content":"` + strings.Repeat("x", 12<<20) + `"}]}`)
+			expected := body
+			if tt.responses {
+				body = []byte(`{"model":"claude-opus-4-6","input":"` + strings.Repeat("x", 12<<20) + `","stream":true}`)
+				expected = []byte(`{"model":"claude-opus-4-6","max_tokens":8192,"messages":[{"role":"user","content":"` + strings.Repeat("x", 12<<20) + `"}],"stream":true}`)
+			}
+			requestBody := body
+			if tt.gzip {
+				var compressed bytes.Buffer
+				zipper := gzip.NewWriter(&compressed)
+				if _, err := zipper.Write(body); err != nil {
+					t.Fatalf("gzip body: %v", err)
+				}
+				if err := zipper.Close(); err != nil {
+					t.Fatalf("close gzip: %v", err)
+				}
+				requestBody = compressed.Bytes()
+			}
+
+			upstream := &gatewayReplaySpoolUpstream{started: make(chan struct{}), release: make(chan struct{}), snapshots: make(chan gatewayReplaySnapshots, 1), responses: tt.responses}
+			group := &service.Group{ID: 47, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+			accounts := []*service.Account{
+				{ID: 147, Name: "first", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "first"}},
+				{ID: 148, Name: "second", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 2, Credentials: map[string]any{"api_key": "second"}},
+			}
+			env := newTerminalGatewayMessagesEnv(t, group, upstream, accounts...)
+			var requestContext *gin.Context
+			router := env.routerFor(tt.route, func(c *gin.Context) {
+				requestContext = c
+				if tt.responses {
+					env.handler.Responses(c)
+					return
+				}
+				env.handler.Messages(c)
+			})
+			upstream.snapshot = func() gatewayReplaySnapshots {
+				detail := middleware.GetUsageDetailSnapshot(requestContext)
+				ops, _ := requestContext.Get(service.OpsUpstreamRequestBodyKey)
+				return gatewayReplaySnapshots{usageRequest: detail.RequestBody, usageUpstream: detail.UpstreamRequestBody, opsUpstream: ops.(string)}
+			}
+			recorder := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, tt.route, bytes.NewReader(requestBody))
+			req.Header.Set("Content-Type", "application/json")
+			if tt.gzip {
+				req.Header.Set("Content-Encoding", "gzip")
+			}
+			done := make(chan struct{})
+			go func() { router.ServeHTTP(recorder, req); close(done) }()
+			waitGatewayReplaySignal(t, upstream.started, "second upstream attempt")
+			snapshot := waitGatewayReplaySnapshot(t, upstream.snapshots)
+			assertBoundedBodySnapshot(t, "usage request", snapshot.usageRequest, int64(len(body)))
+			assertBoundedBodySnapshot(t, "usage upstream", snapshot.usageUpstream, int64(len(expected)))
+			assertBoundedBodySnapshot(t, "ops upstream", snapshot.opsUpstream, int64(len(expected)))
+			assertGatewaySpoolDirsPresent(t, rawDir, effectiveDir)
+			close(upstream.release)
+			waitGatewayReplaySignal(t, done, "handler completion")
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+			}
+			if tt.responses && !strings.Contains(recorder.Body.String(), "response.completed") {
+				t.Fatalf("Responses stream did not emit response.completed: %s", recorder.Body.String())
+			}
+			upstream.assert(t, expected, accounts[0].ID, accounts[1].ID)
+			assertGatewaySpoolDirsEmpty(t, rawDir, effectiveDir)
+		})
 	}
 }
 
@@ -367,6 +468,149 @@ func (u *blockingGatewayRequestBodyUpstream) Do(req *http.Request, _ string, _ i
 
 func (u *blockingGatewayRequestBodyUpstream) DoWithTLS(req *http.Request, proxyURL string, accountID int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
 	return u.Do(req, proxyURL, accountID, concurrency)
+}
+
+type gatewayReplaySnapshots struct {
+	usageRequest  string
+	usageUpstream string
+	opsUpstream   string
+}
+
+type gatewayReplaySpoolUpstream struct {
+	service.HTTPUpstream
+	mu        sync.Mutex
+	bodies    [][]byte
+	hashes    []string
+	lengths   []int64
+	accounts  []int64
+	started   chan struct{}
+	release   chan struct{}
+	snapshot  func() gatewayReplaySnapshots
+	snapshots chan gatewayReplaySnapshots
+	responses bool
+}
+
+func (u *gatewayReplaySpoolUpstream) Do(req *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	if err := req.Body.Close(); err != nil {
+		return nil, err
+	}
+	getBody, err := req.GetBody()
+	if err != nil {
+		return nil, err
+	}
+	reopened, err := io.ReadAll(getBody)
+	if closeErr := getBody.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(body, reopened) {
+		return nil, io.ErrUnexpectedEOF
+	}
+	sum := sha256.Sum256(body)
+	u.mu.Lock()
+	u.bodies = append(u.bodies, body)
+	u.hashes = append(u.hashes, hex.EncodeToString(sum[:]))
+	u.lengths = append(u.lengths, req.ContentLength)
+	u.accounts = append(u.accounts, accountID)
+	attempt := len(u.bodies)
+	u.mu.Unlock()
+	if attempt == 1 {
+		return &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"retry"}}`))}, nil
+	}
+	if u.snapshot != nil {
+		select {
+		case u.snapshots <- u.snapshot():
+		case <-time.After(5 * time.Second):
+			return nil, errors.New("timed out publishing gateway replay snapshots")
+		}
+	}
+	close(u.started)
+	select {
+	case <-u.release:
+	case <-time.After(5 * time.Second):
+		return nil, errors.New("timed out waiting for gateway replay test release")
+	}
+	if u.responses {
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(gatewayReplayResponsesSSE))}, nil
+	}
+	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"id":"msg_123","type":"message","role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))}, nil
+}
+
+func (u *gatewayReplaySpoolUpstream) DoWithTLS(req *http.Request, proxyURL string, accountID int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, proxyURL, accountID, concurrency)
+}
+
+func (u *gatewayReplaySpoolUpstream) assert(t *testing.T, want []byte, firstAccount, secondAccount int64) {
+	t.Helper()
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if len(u.bodies) != 2 {
+		t.Fatalf("upstream attempts = %d, want 2", len(u.bodies))
+	}
+	if u.accounts[0] != firstAccount || u.accounts[1] != secondAccount {
+		t.Fatalf("upstream accounts = %v, want [%d %d]", u.accounts, firstAccount, secondAccount)
+	}
+	wantHash := sha256.Sum256(want)
+	wantHashString := hex.EncodeToString(wantHash[:])
+	for i, body := range u.bodies {
+		if !bytes.Equal(body, want) {
+			t.Fatalf("attempt %d body differs: got hash=%s want hash=%s", i+1, u.hashes[i], wantHashString)
+		}
+		if u.lengths[i] != int64(len(want)) {
+			t.Fatalf("attempt %d content length = %d, want %d", i+1, u.lengths[i], len(want))
+		}
+		if u.hashes[i] != wantHashString {
+			t.Fatalf("attempt %d body hash = %s, want %s", i+1, u.hashes[i], wantHashString)
+		}
+	}
+}
+
+const gatewayReplayResponsesSSE = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_123\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-opus-4-6\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"ok\"}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+
+func waitGatewayReplaySignal(t *testing.T, signal <-chan struct{}, name string) {
+	t.Helper()
+	select {
+	case <-signal:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for %s", name)
+	}
+}
+
+func waitGatewayReplaySnapshot(t *testing.T, snapshots <-chan gatewayReplaySnapshots) gatewayReplaySnapshots {
+	t.Helper()
+	select {
+	case snapshot := <-snapshots:
+		return snapshot
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for gateway replay snapshots")
+		return gatewayReplaySnapshots{}
+	}
+}
+
+func assertGatewaySpoolDirsPresent(t *testing.T, dirs ...string) {
+	t.Helper()
+	for _, dir := range dirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil || len(entries) == 0 {
+			t.Fatalf("spool missing while upstream blocks in %s: entries=%d err=%v", dir, len(entries), err)
+		}
+	}
+}
+
+func assertGatewaySpoolDirsEmpty(t *testing.T, dirs ...string) {
+	t.Helper()
+	for _, dir := range dirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil || len(entries) != 0 {
+			t.Fatalf("spool remains in %s: entries=%d err=%v", dir, len(entries), err)
+		}
+	}
 }
 
 func requestBodyStatus(err error) int {
