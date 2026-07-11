@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"mime/multipart"
@@ -48,6 +50,13 @@ func (c *requestBodyCoordinator) ReadRaw() ([]byte, error) {
 }
 
 func (c *requestBodyCoordinator) SetEffectiveBytes(body []byte) error {
+	if c.raw != nil && c.raw.Size() == int64(len(body)) {
+		sum := sha256.Sum256(body)
+		if c.raw.Hash() == hex.EncodeToString(sum[:]) {
+			c.setEffective(c.raw)
+			return nil
+		}
+	}
 	handle, err := service.NewRequestBodyHandleFromBytes(body, jsonRequestBodyHandleOptions)
 	if err != nil {
 		return err
@@ -66,6 +75,13 @@ func (c *requestBodyCoordinator) SetEffectiveReader(reader io.Reader) error {
 }
 
 func (c *requestBodyCoordinator) setEffective(handle *service.RequestBodyHandle) {
+	if handle == c.raw {
+		if c.effective != nil && c.effective != c.raw {
+			service.CleanupRequestBodyHandle(c.effective)
+		}
+		c.effective = c.raw
+		return
+	}
 	if c.raw != nil && c.raw.Size() == handle.Size() && c.raw.Hash() == handle.Hash() {
 		service.CleanupRequestBodyHandle(handle)
 		handle = c.raw

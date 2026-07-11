@@ -148,6 +148,27 @@ func TestRequestBodyCoordinator_JSONEffective(t *testing.T) {
 	}
 }
 
+func TestRequestBodyCoordinator_SetEffectiveBytesReusesRawBeforeSpooling(t *testing.T) {
+	oldOptions := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+
+	body := []byte(`{"data":"raw"}`)
+	coordinator, err := newJSONRequestBody(httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body)))
+	if err != nil {
+		t.Fatalf("newJSONRequestBody: %v", err)
+	}
+	t.Cleanup(coordinator.Cleanup)
+
+	jsonRequestBodyHandleOptions.TempDir = filepath.Join(t.TempDir(), "missing")
+	if err := coordinator.SetEffectiveBytes(append([]byte(nil), body...)); err != nil {
+		t.Fatalf("SetEffectiveBytes matching raw: %v", err)
+	}
+	if coordinator.Effective() != coordinator.raw {
+		t.Fatal("matching effective bytes did not reuse raw")
+	}
+}
+
 func TestRequestBodyCoordinator_Cleanup(t *testing.T) {
 	t.Run("raw and effective are cleaned once", func(t *testing.T) {
 		coordinator, dir := newSpoolingRequestBodyCoordinator(t)

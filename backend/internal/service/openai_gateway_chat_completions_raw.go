@@ -66,6 +66,10 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
 	startTime := time.Now()
+	body, err := openAIRequestBodyBytes(c, body)
+	if err != nil {
+		return nil, fmt.Errorf("read request body: %w", err)
+	}
 
 	// 1. Parse minimal fields needed for routing/billing
 	originalModel := gjson.GetBytes(body, "model").String()
@@ -135,8 +139,12 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 		return nil, err
 	}
 
+	upstreamHandle, ownedUpstreamHandle, err := openAIRequestBodyHandleForContext(c, upstreamBody)
+	if err != nil {
+		return nil, fmt.Errorf("create upstream request body: %w", err)
+	}
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
-	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, http.MethodPost, targetURL, bytes.NewReader(upstreamBody))
+	upstreamReq, err := openAINewRequestWithBodyHandle(upstreamCtx, http.MethodPost, targetURL, upstreamHandle, ownedUpstreamHandle)
 	releaseUpstreamCtx()
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
@@ -176,8 +184,12 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	}
 	upstreamPreview := RequestBodyPreviewString(upstreamBody)
 	SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
+	bodyLength := len(body)
+	body = nil
+	upstreamBody = nil
 	SetOpsUpstreamAttempted(c, true)
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+	closeOpenAIRequestBody(upstreamReq)
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
@@ -251,7 +263,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 
 	// 8. Forward response
 	if clientStream {
-		return s.streamRawChatCompletions(c, resp, account, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime, len(body))
+		return s.streamRawChatCompletions(c, resp, account, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime, bodyLength)
 	}
 	return s.bufferRawChatCompletions(c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
 }

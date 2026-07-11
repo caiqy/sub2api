@@ -25,6 +25,10 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
 	startTime := time.Now()
+	body, err := openAIRequestBodyBytes(c, body)
+	if err != nil {
+		return nil, fmt.Errorf("read request body: %w", err)
+	}
 
 	originalModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
 	if originalModel == "" {
@@ -90,6 +94,8 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 	account.ApplyHeaderOverrides(upstreamReq.Header)
 	upstreamPreview := RequestBodyPreviewString(upstreamBody)
 	SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
+	body = nil
+	upstreamBody = nil
 
 	proxyURL := ""
 	if account.Proxy != nil {

@@ -4023,6 +4023,17 @@ func openAIRequestBodyHandleForContext(c *gin.Context, body []byte) (*RequestBod
 	return openAIRequestBodyHandleForBytes(getOpenAIRequestBodyHandle(c), body)
 }
 
+func openAIRequestBodyBytes(c *gin.Context, body []byte) ([]byte, error) {
+	if len(body) != 0 {
+		return body, nil
+	}
+	handle := getOpenAIRequestBodyHandle(c)
+	if handle == nil {
+		return nil, errors.New("openai request body handle is missing")
+	}
+	return handle.ReadAll()
+}
+
 type openAIOwnedBodyHandleContextKey struct{}
 
 func closeOpenAIRequestBody(req *http.Request) {

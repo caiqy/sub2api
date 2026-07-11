@@ -61,6 +61,14 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 	defer coordinator.Cleanup()
 	body, err := coordinator.ReadRaw()
 	if err != nil {
+		if errors.Is(err, service.ErrRequestBodySpool) {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
+		if maxErr, ok := extractMaxBytesError(err); ok {
+			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+			return
+		}
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 		return
 	}
@@ -91,12 +99,15 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 	if err := coordinator.SetEffectiveBytes(body); err != nil {
 		if errors.Is(err, service.ErrRequestBodySpool) {
 			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+		} else if maxErr, ok := extractMaxBytesError(err); ok {
+			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 		} else {
 			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 		}
 		return
 	}
 	service.BindOpenAIRequestBodyHandle(c, coordinator.Effective())
+	body = nil
 
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
