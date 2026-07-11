@@ -64,9 +64,16 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		return
 	}
 
+	var coordinator *requestBodyCoordinator
 	var body []byte
+	var requestInfo service.GrokMediaRequestInfo
 	if endpoint.RequiresRequestBody() {
-		coordinator, err := newJSONRequestBody(c.Request)
+		var err error
+		if isMultipartImagesContentType(c.GetHeader("Content-Type")) {
+			coordinator, err = newMultipartRequestBody(c.Request)
+		} else {
+			coordinator, err = newJSONRequestBody(c.Request)
+		}
 		if err != nil {
 			if errors.Is(err, service.ErrRequestBodySpool) {
 				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
@@ -80,29 +87,30 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			return
 		}
 		defer coordinator.Cleanup()
-		body, err = coordinator.ReadRaw()
-		if err != nil {
-			if errors.Is(err, service.ErrRequestBodySpool) {
-				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+		if coordinator.form != nil {
+			c.Request.MultipartForm = coordinator.form
+			requestInfo = service.ParseGrokMediaMultipartForm(coordinator.form)
+		} else {
+			body, err = coordinator.ReadRaw()
+			if err != nil {
+				if errors.Is(err, service.ErrRequestBodySpool) {
+					h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+					return
+				}
+				h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 				return
 			}
-			if maxErr, ok := extractMaxBytesError(err); ok {
-				h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+			if len(body) == 0 {
+				h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 				return
 			}
-			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
-			return
-		}
-		if len(body) == 0 {
-			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
-			return
+			requestInfo = service.ParseGrokMediaRequest(c.GetHeader("Content-Type"), body)
 		}
 	}
 
 	contentType := c.GetHeader("Content-Type")
-	requestInfo := service.ParseGrokMediaRequest(contentType, body)
 	if endpoint.RequiresRequestBody() {
-		service.SetUsageRequestBody(c, grokMediaRequestBodyPreview(contentType, body, requestInfo))
+		service.SetUsageRequestBody(c, grokMediaRequestBodyPreviewWithSize(contentType, body, requestInfo, coordinator.Effective().Size()))
 	}
 	requestModel := requestInfo.Model
 	if endpoint.IsGenerationRequest() && strings.TrimSpace(requestModel) == "" {
@@ -169,6 +177,12 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		sessionSeed = []byte(requestID)
 	}
 	sessionHash := h.gatewayService.GenerateExplicitSessionHash(c, sessionSeed)
+	requestPayloadHash := ""
+	if coordinator != nil {
+		service.BindOpenAIRequestBodyHandle(c, coordinator.Effective())
+		requestPayloadHash = coordinator.Effective().Hash()
+	}
+	body = nil
 	if endpoint == service.GrokMediaEndpointVideoStatus {
 		sessionHash = service.GrokMediaVideoRequestSessionHash(requestID)
 	}
@@ -262,7 +276,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 					accountReleaseFunc()
 				}
 			}()
-			return h.gatewayService.ForwardGrokMedia(requestCtx, c, account, endpoint, requestID, body, contentType)
+			return h.gatewayService.ForwardGrokMedia(requestCtx, c, account, endpoint, requestID, nil, contentType)
 		}()
 
 		forwardDuration := time.Since(forwardStart)
@@ -275,6 +289,10 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		service.SetOpsLatencyMs(c, service.OpsResponseLatencyMsKey, responseLatencyMs)
 
 		if err != nil {
+			if errors.Is(err, service.ErrRequestBodySpool) {
+				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+				return
+			}
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
 				h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
@@ -347,7 +365,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			}
 		}
 		if shouldRecordGrokMediaUsage(endpoint, requestModel) {
-			recordGrokMediaUsage(c, h, reqLog, apiKey, subject, subscription, account, result, requestModel, body, requestID)
+			recordGrokMediaUsage(c, h, reqLog, apiKey, subject, subscription, account, result, requestModel, requestPayloadHash, requestID)
 		}
 		reqLog.Debug("grok_media.request_completed",
 			zap.Int64("account_id", account.ID),
@@ -358,9 +376,13 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 }
 
 func grokMediaRequestBodyPreview(contentType string, body []byte, requestInfo service.GrokMediaRequestInfo) string {
+	return grokMediaRequestBodyPreviewWithSize(contentType, body, requestInfo, int64(len(body)))
+}
+
+func grokMediaRequestBodyPreviewWithSize(contentType string, body []byte, requestInfo service.GrokMediaRequestInfo, size int64) string {
 	requestPreview := service.RequestBodyPreviewString(body)
 	if !isMultipartImagesContentType(contentType) && requestPreview != "[inline binary payload omitted]" {
-		return service.RequestBodyPreviewSnapshot(requestPreview, int64(len(body)))
+		return service.RequestBodyPreviewSnapshot(requestPreview, size)
 	}
 	prompt := multipartMetadataPromptPreview(requestInfo.Prompt)
 	preview, err := json.Marshal(struct {
@@ -381,7 +403,7 @@ func grokMediaRequestBodyPreview(contentType string, body []byte, requestInfo se
 	if err != nil {
 		return "[multipart body omitted]"
 	}
-	return service.RequestBodyPreviewSnapshot(string(preview), int64(len(body)), true)
+	return service.RequestBodyPreviewSnapshot(string(preview), size, true)
 }
 
 func shouldRecordGrokMediaUsage(endpoint service.GrokMediaEndpoint, requestModel string) bool {
@@ -398,14 +420,13 @@ func recordGrokMediaUsage(
 	account *service.Account,
 	result *service.OpenAIForwardResult,
 	requestModel string,
-	body []byte,
+	requestPayloadHash string,
 	requestID string,
 ) {
 	userAgent := c.GetHeader("User-Agent")
 	clientIP := ip.GetClientIP(c)
-	payloadForHash := body
-	if len(payloadForHash) == 0 && strings.TrimSpace(requestID) != "" {
-		payloadForHash = []byte(requestID)
+	if requestPayloadHash == "" && strings.TrimSpace(requestID) != "" {
+		requestPayloadHash = service.HashUsageRequestPayload([]byte(requestID))
 	}
 	inboundEndpoint := GetInboundEndpoint(c)
 	upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
@@ -426,7 +447,7 @@ func recordGrokMediaUsage(
 			UpstreamEndpoint:   upstreamEndpoint,
 			UserAgent:          userAgent,
 			IPAddress:          clientIP,
-			RequestPayloadHash: service.HashUsageRequestPayload(payloadForHash),
+			RequestPayloadHash: requestPayloadHash,
 			APIKeyService:      h.apiKeyService,
 			QuotaPlatform:      quotaPlatform,
 			ChannelUsageFields: channelUsageFields,

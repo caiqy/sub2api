@@ -334,6 +334,12 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	}
 	originalMediaType, _, _ := mime.ParseMediaType(strings.TrimSpace(contentType))
 	originalMultipart := strings.EqualFold(originalMediaType, "multipart/form-data")
+	if endpoint.RequiresRequestBody() && len(body) == 0 && !(endpoint == GrokMediaEndpointImagesEdits && originalMultipart && c != nil && c.Request != nil && c.Request.MultipartForm != nil) {
+		body, err = openAIRequestBodyBytes(c, nil)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	if endpoint == GrokMediaEndpointImagesEdits && originalMultipart && c != nil && c.Request != nil && c.Request.MultipartForm != nil {
 		body, contentType, err = prepareGrokMediaFormForwardBody(ParseGrokMediaMultipartForm(c.Request.MultipartForm))
@@ -348,16 +354,28 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 		return nil, err
 	}
 
-	var bodyReader io.Reader
+	requestInfo := ParseGrokMediaRequest(contentType, body)
+	var bodyHandle *RequestBodyHandle
+	ownedBodyHandle := false
 	if endpoint.RequiresRequestBody() {
-		bodyReader = bytes.NewReader(body)
+		bodyHandle, ownedBodyHandle, err = openAIRequestBodyHandleForContext(c, body)
+		body = nil
+		if err != nil {
+			return nil, err
+		}
 	}
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	defer releaseUpstreamCtx()
-	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, endpoint.httpMethod(), targetURL, bodyReader)
+	var upstreamReq *http.Request
+	if bodyHandle != nil {
+		upstreamReq, err = openAINewRequestWithBodyHandle(upstreamCtx, endpoint.httpMethod(), targetURL, bodyHandle, ownedBodyHandle)
+	} else {
+		upstreamReq, err = http.NewRequestWithContext(upstreamCtx, endpoint.httpMethod(), targetURL, nil)
+	}
 	if err != nil {
 		return nil, err
 	}
+	defer closeOpenAIRequestBody(upstreamReq)
 	upstreamReq.Header.Set("Authorization", "Bearer "+token)
 	upstreamReq.Header.Set("Accept", "application/json")
 	upstreamReq.Header.Set("User-Agent", "sub2api-grok/1.0")
@@ -368,7 +386,7 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 		}
 		upstreamReq.Header.Set("Content-Type", contentType)
 	}
-	upstreamPreview := RequestBodyPreviewString(body)
+	upstreamPreview := bodyHandle.PreviewString()
 	if originalMultipart {
 		upstreamPreview = "[multipart body omitted]"
 	}
@@ -388,7 +406,6 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	defer func() { _ = resp.Body.Close() }()
 
 	requestIDHeader := firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("xai-request-id"))
-	requestInfo := ParseGrokMediaRequest(contentType, body)
 	requestModel := requestInfo.Model
 	if resp.StatusCode >= 400 {
 		s.updateGrokUsageSnapshot(ctx, account.ID, xai.ParseQuotaHeaders(resp.Header, resp.StatusCode))
