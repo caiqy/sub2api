@@ -115,10 +115,14 @@ base-ref: 0f389fe7ed783ca4a8444fbe6d12acb9d3e19af6
 - 修改：`backend/internal/service/gateway_forward_as_responses.go` 的 `ForwardAsResponses`
 - 修改：`backend/internal/service/gateway_request.go` 的 `RequestBodyRef` / `ParsedRequest.CloneForBody`
 - 修改：`backend/internal/service/gateway_service.go` 的 `GatewayService.Forward` 与 Anthropic upstream request builder
+- 修改：`backend/internal/service/antigravity_gateway_service.go` 的 Messages forwarding 边界，使其借用 handle 并在网络等待前释放 materialized bytes
+- 修改：`backend/internal/service/antigravity_gateway_service_test.go`
 - 修改：`backend/internal/service/gateway_request_test.go`
 - 新建：`backend/internal/service/gateway_request_body_handle_test.go`（不带 unit build tag，确保 handle 兼容测试可独立取得 GREEN）
 - 修改：`backend/internal/service/gateway_forward_as_responses_test.go`
+- 修改：`backend/internal/service/ops_upstream_context_test.go`（移除被本任务触发的脆弱源码字面量计数，改为行为契约）
 - 新建：`backend/internal/handler/gateway_request_body_spooling_test.go`
+- 修改：`backend/internal/handler/terminal_failed_usage_test.go`（仅在生产 handler 生命周期 fixture 需要复用时）
 
 **接口：**
 - 消费：`newJSONRequestBody`、`ReadRaw`、`SetEffectiveBytes`、`Effective`、`Cleanup`。
@@ -128,11 +132,11 @@ base-ref: 0f389fe7ed783ca4a8444fbe6d12acb9d3e19af6
 
 - [ ] **步骤 2：验证测试失败。** 运行：`go test ./internal/handler -run 'TestGatewayHandler_(Messages|Responses).*RequestBody' -count=1`（工作目录 `backend`）。预期：现有路径仍将完整 `body` 传入转发，生命周期断言失败。
 
-- [ ] **步骤 3：最小实现。** 两个 handler 在认证后创建 JSON coordinator 并立即 defer cleanup；使用 `ReadRaw` 在局部 helper 执行既有 JSON 校验、`ParseGatewayRequest`/`gjson`、审计、session、模型映射和转换，随后调用 `SetEffectiveBytes`。扩展 `RequestBodyRef`/`ParsedRequest` 以借用 effective handle，并让 `GatewayService.Forward`、`ForwardAsResponses` 及 Anthropic upstream builder 在每个 attempt 从 handle 重开 reader；账号级 body 改写只在短生命周期 helper 内 materialize，构造 request 后不得让完整 `[]byte` 跨越上游等待。转换、解析后的对象不得放入 Gin context 或 usage async 数据。
+- [ ] **步骤 3：最小实现。** 两个 handler 在认证后创建 JSON coordinator 并立即 defer cleanup；使用 `ReadRaw` 在局部 helper 执行既有 JSON 校验、`ParseGatewayRequest`/`gjson`、审计、session、模型映射和转换，随后调用 `SetEffectiveBytes`。扩展 `RequestBodyRef`/`ParsedRequest` 以借用 effective handle，并让 `GatewayService.Forward`、`ForwardAsResponses`、Antigravity Messages forwarding 及 Anthropic upstream builder 在每个 attempt 从 handle 重开 reader；账号级 body 改写只在短生命周期 helper 内 materialize，构造 request 后不得让完整 `[]byte` 跨越上游等待。转换、解析后的对象不得以完整 bytes 形式放入 Gin context 或 usage async 数据。所有 Forward 阶段的 wrapped spool error 必须回到 handler 的 503 分类。
 
 - [ ] **步骤 4：验证通过。** 运行：`go test ./internal/handler -run 'TestGatewayHandler_(Messages|Responses)' -count=1`（工作目录 `backend`）。预期：通过，包含流式与错误透传既有测试。
 
-- [ ] **步骤 5：提交。** `git add backend/internal/handler/gateway_handler.go backend/internal/handler/gateway_handler_responses.go backend/internal/handler/gateway_request_body_spooling_test.go backend/internal/service/gateway_request.go backend/internal/service/gateway_request_test.go backend/internal/service/gateway_request_body_handle_test.go backend/internal/service/gateway_service.go backend/internal/service/gateway_forward_as_responses.go backend/internal/service/gateway_forward_as_responses_test.go && git commit -m "feat: spool anthropic gateway request bodies"`
+- [ ] **步骤 5：提交。** `git add backend/internal/handler/gateway_handler.go backend/internal/handler/gateway_handler_responses.go backend/internal/handler/gateway_request_body_spooling_test.go backend/internal/handler/terminal_failed_usage_test.go backend/internal/service/gateway_request.go backend/internal/service/gateway_request_test.go backend/internal/service/gateway_request_body_handle_test.go backend/internal/service/gateway_service.go backend/internal/service/gateway_forward_as_responses.go backend/internal/service/gateway_forward_as_responses_test.go backend/internal/service/antigravity_gateway_service.go backend/internal/service/antigravity_gateway_service_test.go backend/internal/service/ops_upstream_context_test.go && git commit -m "feat: spool anthropic gateway request bodies"`
 
 ### Task 5: OpenAI Chat Completions 与 Embeddings 接入
 
