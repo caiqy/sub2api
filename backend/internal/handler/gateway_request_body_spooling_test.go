@@ -19,6 +19,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 func TestGatewayHandler_MessagesRequestBodySpoolsUntilBlockedUpstreamCompletes(t *testing.T) {
@@ -111,8 +112,12 @@ func testGatewayRequestBodySpoolLifecycle(t *testing.T, mapModel bool) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	old := jsonRequestBodyHandleOptions
-	dir := t.TempDir()
-	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 10 << 20, PreviewLimitBytes: 64, TempDir: dir}
+	rawDir := t.TempDir()
+	effectiveDir := t.TempDir()
+	t.Setenv("TMPDIR", effectiveDir)
+	t.Setenv("TMP", effectiveDir)
+	t.Setenv("TEMP", effectiveDir)
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 10 << 20, PreviewLimitBytes: 64, TempDir: rawDir}
 	t.Cleanup(func() { jsonRequestBodyHandleOptions = old })
 
 	body := []byte(`{"model":"claude-opus-4-6","max_tokens":16,"messages":[{"role":"user","content":"` + strings.Repeat("x", 10<<20) + `"}]}`)
@@ -157,26 +162,103 @@ func testGatewayRequestBodySpoolLifecycle(t *testing.T, mapModel bool) {
 		close(done)
 	}()
 	effective := <-upstream.started
-	entries, err := os.ReadDir(dir)
+	entries, err := os.ReadDir(rawDir)
 	if err != nil || len(entries) == 0 {
 		t.Fatalf("spool missing while upstream blocks: entries=%d err=%v", len(entries), err)
 	}
-	if !bytes.Contains(effective, []byte(strings.Repeat("x", 1024))) {
-		t.Fatal("upstream body did not retain effective request content")
+	effectiveEntries, err := os.ReadDir(effectiveDir)
+	if err != nil || len(effectiveEntries) == 0 {
+		t.Fatalf("effective spool missing while upstream blocks: entries=%d err=%v", len(effectiveEntries), err)
 	}
-	hash := sha256.Sum256(effective)
-	if hex.EncodeToString(hash[:]) == "" {
-		t.Fatal("effective hash is empty")
+	if mapModel {
+		expected := []byte(`{"model":"claude-opus-4-6","max_tokens":8192,"messages":[{"role":"user","content":"` + strings.Repeat("x", 10<<20) + `"}],"stream":true}`)
+		if !bytes.Equal(effective, expected) {
+			t.Fatalf("Responses upstream body differs: got prefix=%q suffix=%q, want prefix=%q suffix=%q", effective[:smallestInt(256, len(effective))], effective[largestInt(0, len(effective)-256):], expected[:smallestInt(256, len(expected))], expected[largestInt(0, len(expected)-256):])
+		}
+		hash := sha256.Sum256(effective)
+		if got := hex.EncodeToString(hash[:]); got != "77465f2990e4987320bd9ee57a834a621cf567fca8400dca32263313f7b898e6" {
+			t.Fatalf("Responses upstream SHA-256 = %s", got)
+		}
+	} else {
+		normalized, ok := normalizeAntigravityRequestID(effective)
+		if !ok {
+			t.Fatalf("Messages Gemini body did not contain an agent requestId: %q", effective[:smallestInt(256, len(effective))])
+		}
+		hash := sha256.Sum256(normalized)
+		if got := hex.EncodeToString(hash[:]); got != "231845e14394954b1ee053b56d57ab36d37c16f7149649715b5a4ceb1fc09ecd" {
+			t.Fatalf("Messages normalized Gemini SHA-256 = %s", got)
+		}
+		if got := gjson.GetBytes(effective, "model").String(); got != "claude-opus-4-6-thinking" {
+			t.Fatalf("Messages Gemini model = %q", got)
+		}
 	}
 	close(upstream.release)
 	<-done
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", recorder.Code)
 	}
-	entries, err = os.ReadDir(dir)
+	if env.usageRepo.lastLog == nil || env.usageRepo.lastLog.DetailSnapshot == nil {
+		t.Fatal("blocked request did not submit its usage detail")
+	}
+	assertBoundedBodySnapshot(t, "request", env.usageRepo.lastLog.DetailSnapshot.RequestBody, int64(len(body)))
+	assertBoundedBodySnapshot(t, "upstream", env.usageRepo.lastLog.DetailSnapshot.UpstreamRequestBody, int64(len(effective)))
+	entries, err = os.ReadDir(rawDir)
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("spool remains after request: entries=%d err=%v", len(entries), err)
 	}
+	effectiveEntries, err = os.ReadDir(effectiveDir)
+	if err != nil || len(effectiveEntries) != 0 {
+		t.Fatalf("effective spool remains after request: entries=%d err=%v", len(effectiveEntries), err)
+	}
+}
+
+func assertBoundedBodySnapshot(t *testing.T, name, snapshot string, wantSize int64) {
+	t.Helper()
+	if !gjson.Valid(snapshot) {
+		t.Fatalf("%s snapshot is not JSON: %q", name, snapshot)
+	}
+	if got := gjson.Get(snapshot, "kind").String(); got != "request_body_preview" {
+		t.Fatalf("%s snapshot kind = %q", name, got)
+	}
+	if got := gjson.Get(snapshot, "size").Int(); got != wantSize {
+		t.Fatalf("%s snapshot size = %d, want %d", name, got, wantSize)
+	}
+	if !gjson.Get(snapshot, "truncated").Bool() {
+		t.Fatalf("%s snapshot was not truncated", name)
+	}
+	if len(snapshot) >= 10<<20 {
+		t.Fatalf("%s snapshot retained the complete large body: %d bytes", name, len(snapshot))
+	}
+}
+
+func smallestInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func largestInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func normalizeAntigravityRequestID(body []byte) ([]byte, bool) {
+	const prefix = `"requestId":"agent-`
+	start := bytes.Index(body, []byte(prefix))
+	if start < 0 {
+		return nil, false
+	}
+	start += len(prefix)
+	end := bytes.IndexByte(body[start:], '"')
+	if end != 36 {
+		return nil, false
+	}
+	normalized := append([]byte(nil), body...)
+	copy(normalized[start:start+end], "00000000-0000-0000-0000-000000000000")
+	return normalized, true
 }
 
 type blockingGatewayRequestBodyUpstream struct {
@@ -186,6 +268,7 @@ type blockingGatewayRequestBodyUpstream struct {
 }
 
 func (u *blockingGatewayRequestBodyUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	defer req.Body.Close()
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
 		return nil, err

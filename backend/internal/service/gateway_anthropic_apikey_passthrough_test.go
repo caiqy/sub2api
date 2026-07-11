@@ -29,6 +29,75 @@ type anthropicHTTPUpstreamRecorder struct {
 	err            error
 }
 
+func TestGatewayService_AnthropicAPIKeyPassthroughRetriesFromBodyHandles(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"claude-test","messages":[{"role":"user","content":"retry"}]}`)
+	source, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("create source handle: %v", err)
+	}
+	t.Cleanup(func() { CleanupRequestBodyHandle(source) })
+	effective, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("create effective handle: %v", err)
+	}
+	t.Cleanup(func() { CleanupRequestBodyHandle(effective) })
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	upstream := &anthropicRetryHandleUpstream{statuses: []int{http.StatusInternalServerError, http.StatusOK}}
+	svc := &GatewayService{
+		cfg:                 &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+		httpUpstream:        upstream,
+		tlsFPProfileService: &TLSFingerprintProfileService{},
+	}
+	account := newAnthropicAPIKeyAccountForTest()
+	account.Credentials["custom_error_codes_enabled"] = true
+	account.Credentials["custom_error_codes"] = []any{float64(http.StatusBadRequest)}
+	_, err = svc.forwardAnthropicAPIKeyPassthroughWithInput(context.Background(), c, account, anthropicPassthroughForwardInput{
+		SourceHandle:  source,
+		BodyHandle:    effective,
+		RequestModel:  "claude-test",
+		OriginalModel: "claude-test",
+		StartTime:     time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("passthrough: %v", err)
+	}
+	if len(upstream.bodies) != 2 {
+		t.Fatalf("attempts = %d, want 2", len(upstream.bodies))
+	}
+	for i, got := range upstream.bodies {
+		if !bytes.Equal(got, body) {
+			t.Fatalf("attempt %d body = %q, want %q", i+1, got, body)
+		}
+	}
+}
+
+type anthropicRetryHandleUpstream struct {
+	statuses []int
+	bodies   [][]byte
+}
+
+func (u *anthropicRetryHandleUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	return nil, errors.New("Do must not be used")
+}
+
+func (u *anthropicRetryHandleUpstream) DoWithTLS(req *http.Request, _ string, _ int64, _ int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	if req.GetBody == nil || req.ContentLength <= 0 {
+		return nil, errors.New("request is not handle-backed")
+	}
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	_ = req.Body.Close()
+	u.bodies = append(u.bodies, body)
+	status := u.statuses[len(u.bodies)-1]
+	responseBody := []byte(`{"id":"msg_test","model":"claude-test","usage":{"input_tokens":1,"output_tokens":1}}`)
+	return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(bytes.NewReader(responseBody))}, nil
+}
+
 type upstreamPreviewSettingRepo struct{ SettingRepository }
 
 func (upstreamPreviewSettingRepo) GetValue(context.Context, string) (string, error) {

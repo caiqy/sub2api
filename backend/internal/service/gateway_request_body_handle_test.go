@@ -85,6 +85,29 @@ func TestAntigravityRetryLoopReopensGeminiPayloadHandleForRetry(t *testing.T) {
 	}
 }
 
+func TestAntigravityCreditsRetryReturnsPayloadReadError(t *testing.T) {
+	handle, err := NewRequestBodyHandleFromReader(bytes.NewReader([]byte(`{"request":{"contents":[]}}`)), RequestBodyHandleOptions{
+		SpoolThresholdBytes: 1,
+		TempDir:             t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("create payload handle: %v", err)
+	}
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+	if err := os.Remove(handle.spoolPath); err != nil {
+		t.Fatalf("remove payload spool: %v", err)
+	}
+
+	result := (&AntigravityGatewayService{}).attemptCreditsOveragesRetry(antigravityRetryLoopParams{
+		ctx:           context.Background(),
+		account:       &Account{ID: 1, Platform: PlatformAntigravity},
+		payloadHandle: handle,
+	}, "https://ag.test", "gemini-test", 0, http.StatusTooManyRequests, nil)
+	if result.err == nil || !errors.Is(result.err, ErrRequestBodySpool) {
+		t.Fatalf("credits retry error = %v, want wrapped ErrRequestBodySpool", result.err)
+	}
+}
+
 type retryPayloadHandleUpstream struct {
 	responses []int
 	bodies    [][]byte

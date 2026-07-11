@@ -4990,9 +4990,15 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				passthroughModel = mappedModel
 			}
 		}
+		passthroughHandle, err := NewRequestBodyHandleFromBytes(passthroughBody, RequestBodyHandleOptions{})
+		passthroughBody = nil
+		if err != nil {
+			return nil, fmt.Errorf("create anthropic passthrough body handle: %w", err)
+		}
 		return s.forwardAnthropicAPIKeyPassthroughWithInput(ctx, c, account, anthropicPassthroughForwardInput{
-			SourceBody:    sourceBody,
-			Body:          passthroughBody,
+			SourceHandle:  sourceHandle,
+			BodyHandle:    passthroughHandle,
+			OwnBodyHandle: passthroughHandle != sourceHandle,
 			RequestModel:  passthroughModel,
 			OriginalModel: parsed.Model,
 			RequestStream: parsed.Stream,
@@ -5834,8 +5840,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 }
 
 type anthropicPassthroughForwardInput struct {
-	SourceBody    []byte
-	Body          []byte
+	SourceHandle  *RequestBodyHandle
+	BodyHandle    *RequestBodyHandle
+	OwnBodyHandle bool
 	RequestModel  string
 	OriginalModel string
 	RequestStream bool
@@ -5852,9 +5859,14 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthrough(
 	reqStream bool,
 	startTime time.Time,
 ) (*ForwardResult, error) {
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("create anthropic passthrough body handle: %w", err)
+	}
+	defer CleanupRequestBodyHandle(handle)
 	return s.forwardAnthropicAPIKeyPassthroughWithInput(ctx, c, account, anthropicPassthroughForwardInput{
-		SourceBody:    body,
-		Body:          body,
+		SourceHandle:  handle,
+		BodyHandle:    handle,
 		RequestModel:  reqModel,
 		OriginalModel: originalModel,
 		RequestStream: reqStream,
@@ -5868,6 +5880,12 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	account *Account,
 	input anthropicPassthroughForwardInput,
 ) (*ForwardResult, error) {
+	if input.SourceHandle == nil || input.BodyHandle == nil {
+		return nil, errors.New("anthropic passthrough requires source and effective body handles")
+	}
+	if input.OwnBodyHandle && input.BodyHandle != input.SourceHandle {
+		defer func() { CleanupRequestBodyHandle(input.BodyHandle) }()
+	}
 	token, tokenType, err := s.GetAccessToken(ctx, account)
 	if err != nil {
 		return nil, err
@@ -5888,17 +5906,45 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		c.Set("anthropic_passthrough", true)
 	}
 	// Pre-filter: strip empty text blocks (including nested in tool_result) to prevent upstream 400.
-	input.Body = StripEmptyTextBlocks(input.Body)
+	body, err := input.BodyHandle.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("read anthropic passthrough effective body: %w", err)
+	}
+	filteredBody := StripEmptyTextBlocks(body)
+	changed := !bytes.Equal(filteredBody, body)
+	body = nil
+	if changed {
+		filteredHandle, handleErr := NewRequestBodyHandleFromBytes(filteredBody, RequestBodyHandleOptions{})
+		filteredBody = nil
+		if handleErr != nil {
+			return nil, fmt.Errorf("create anthropic passthrough filtered handle: %w", handleErr)
+		}
+		if input.OwnBodyHandle && input.BodyHandle != input.SourceHandle {
+			CleanupRequestBodyHandle(input.BodyHandle)
+		}
+		input.BodyHandle = filteredHandle
+		input.OwnBodyHandle = true
+	}
 
-	upstreamPreview := RequestBodyPreviewString(input.Body)
-	SetOpsUpstreamRequestBodyPreview(c, upstreamPreview, int64(len(input.Body)))
+	upstreamPreview := input.BodyHandle.PreviewString()
+	SetOpsUpstreamRequestBodyPreview(c, upstreamPreview, input.BodyHandle.Size())
 	tlsProfile := s.tlsFPProfileService.ResolveTLSProfile(account)
 	var resp *http.Response
 	retryStart := time.Now()
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
+		sourceBody, err := input.SourceHandle.ReadAll()
+		if err != nil {
+			return nil, fmt.Errorf("read anthropic passthrough source body: %w", err)
+		}
+		body, err := input.BodyHandle.ReadAll()
+		if err != nil {
+			return nil, fmt.Errorf("read anthropic passthrough effective body: %w", err)
+		}
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, input.RequestStream)
-		upstreamReq, upstreamBody, err := s.buildUpstreamRequestAnthropicAPIKeyPassthrough(upstreamCtx, c, account, input.SourceBody, input.Body, token)
+		upstreamReq, upstreamBody, err := s.buildUpstreamRequestAnthropicAPIKeyPassthrough(upstreamCtx, c, account, sourceBody, body, token)
 		releaseUpstreamCtx()
+		sourceBody = nil
+		body = nil
 		if err != nil {
 			if strings.HasPrefix(err.Error(), "invalid_request_error:") {
 				msg := strings.TrimSpace(strings.TrimPrefix(err.Error(), "invalid_request_error:"))
@@ -5922,11 +5968,28 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 			}
 			return nil, err
 		}
-		upstreamPreview = RequestBodyPreviewString(upstreamBody)
+		upstreamHandle, err := NewRequestBodyHandleFromBytes(upstreamBody, RequestBodyHandleOptions{})
+		upstreamBody = nil
+		if err != nil {
+			return nil, fmt.Errorf("create anthropic passthrough upstream handle: %w", err)
+		}
+		if upstreamReq.Body != nil {
+			_ = upstreamReq.Body.Close()
+		}
+		upstreamReq.Body, err = upstreamHandle.Open()
+		if err != nil {
+			CleanupRequestBodyHandle(upstreamHandle)
+			return nil, fmt.Errorf("open anthropic passthrough upstream handle: %w", err)
+		}
+		upstreamReq.GetBody = upstreamHandle.Open
+		upstreamReq.ContentLength = upstreamHandle.Size()
+		upstreamPreview = upstreamHandle.PreviewString()
 
 		SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
 		SetOpsUpstreamAttempted(c, true)
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+		_ = upstreamReq.Body.Close()
+		CleanupRequestBodyHandle(upstreamHandle)
 		if err != nil {
 			if upstreamReq.Body != nil {
 				_ = upstreamReq.Body.Close()
