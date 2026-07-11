@@ -148,7 +148,9 @@ base-ref: 0f389fe7ed783ca4a8444fbe6d12acb9d3e19af6
 - 修改：`backend/internal/handler/openai_chat_completions.go` 的 `ChatCompletions`
 - 修改：`backend/internal/handler/openai_embeddings.go` 的 `Embeddings`
 - 修改：`backend/internal/service/openai_gateway_service.go` 的 `Forward` 及 request-body helpers
+- 修改：`backend/internal/service/openai_gateway_chat_completions.go` 与 `openai_gateway_chat_completions_raw.go` 的 Chat upstream request 构建/发送
 - 修改：`backend/internal/service/openai_embeddings.go` 的 `ForwardEmbeddings`
+- 修改：`backend/internal/handler/request_body_coordinator.go` 与 `request_body_coordinator_test.go`（相同 raw/effective bytes 在创建新 handle 前按 size/hash 复用）
 - 新建：`backend/internal/handler/openai_request_body_spooling_test.go`
 - 修改：`backend/internal/handler/openai_gateway_request_body_retention_test.go`
 
@@ -164,7 +166,7 @@ base-ref: 0f389fe7ed783ca4a8444fbe6d12acb9d3e19af6
 
 - [ ] **步骤 4：验证通过。** 运行：`go test ./internal/handler ./internal/service -run 'TestOpenAI(GatewayHandler|GatewayService).*(Chat|Embeddings)' -count=1`（工作目录 `backend`）。预期：通过。
 
-- [ ] **步骤 5：提交。** `git add backend/internal/handler/openai_chat_completions.go backend/internal/handler/openai_embeddings.go backend/internal/handler/openai_request_body_spooling_test.go backend/internal/handler/openai_gateway_request_body_retention_test.go backend/internal/service/openai_gateway_service.go backend/internal/service/openai_embeddings.go && git commit -m "feat: replay openai request bodies from handles"`
+- [ ] **步骤 5：提交。** `git add backend/internal/handler/openai_chat_completions.go backend/internal/handler/openai_embeddings.go backend/internal/handler/openai_request_body_spooling_test.go backend/internal/handler/openai_gateway_request_body_retention_test.go backend/internal/handler/request_body_coordinator.go backend/internal/handler/request_body_coordinator_test.go backend/internal/service/openai_gateway_service.go backend/internal/service/openai_gateway_chat_completions.go backend/internal/service/openai_gateway_chat_completions_raw.go backend/internal/service/openai_embeddings.go && git commit -m "feat: replay openai request bodies from handles"`
 
 ### Task 6: Anthropic/OpenAI JSON 回归矩阵
 
