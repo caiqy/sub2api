@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
+	"os"
 	"strings"
 	"testing"
 
@@ -1371,6 +1372,36 @@ func TestOpenAIGatewayServiceForwardImages_OAuthStreamingTransformsEvents(t *tes
 	require.Equal(t, "auto", gjson.Get(completed.Data, "background").String())
 	require.JSONEq(t, `{"images":1}`, gjson.Get(completed.Data, "usage").Raw)
 	require.False(t, gjson.Get(completed.Data, "revised_prompt").Exists())
+}
+
+func TestOpenAIGatewayServiceForwardImages_OAuthDoesNotReadBoundBodyHandle(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-image-2","prompt":"draw a cat"}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir(), FilePrefix: "sub2api-test-"})
+	require.NoError(t, err)
+	require.NoError(t, os.Remove(handle.spoolPath))
+	BindOpenAIRequestBodyHandle(c, handle)
+	t.Cleanup(func() { _ = handle.Cleanup() })
+
+	svc := &OpenAIGatewayService{httpUpstream: &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"type\":\"response.completed\",\"response\":{\"created_at\":1710000001,\"tool_usage\":{\"image_gen\":{\"images\":1}},\"output\":[{\"type\":\"image_generation_call\",\"result\":\"ZmluYWw=\",\"output_format\":\"png\"}]}}\n\n" +
+				"data: [DONE]\n\n",
+		)),
+	}}}
+	parsed, err := svc.ParseOpenAIImagesRequest(c, body)
+	require.NoError(t, err)
+
+	result, err := svc.ForwardImages(context.Background(), c, &Account{ID: 12, Name: "openai-oauth", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "token-123"}}, nil, parsed, "")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 1, result.ImageCount)
 }
 
 func TestOpenAIGatewayServiceForwardImages_APIKeyStreamingDrainsAfterClientDisconnect(t *testing.T) {

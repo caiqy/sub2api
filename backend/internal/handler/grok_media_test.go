@@ -13,6 +13,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestShouldRecordGrokMediaUsage(t *testing.T) {
@@ -122,4 +123,53 @@ func TestGrokMedia_MultipartSpoolPreservesFilesAndOmitsSnapshots(t *testing.T) {
 	}
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 	require.Empty(t, readTestDir(t, rawDir))
+}
+
+func TestGrokMedia_MultipartEditTextSourcesRebuildUpstreamJSON(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tt := range []struct {
+		name, sourceField, source, maskField, mask string
+	}{
+		{"legacy aliases", "image", "https://example.com/source.png", "mask", "data:image/png;base64,bWFzaw=="},
+		{"url aliases", "image_url", "data:image/png;base64,c291cmNl", "mask_image_url", "https://example.com/mask.png"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var body bytes.Buffer
+			writer := multipart.NewWriter(&body)
+			require.NoError(t, writer.WriteField("model", "grok-imagine"))
+			require.NoError(t, writer.WriteField("prompt", "replace background"))
+			require.NoError(t, writer.WriteField(tt.sourceField, tt.source))
+			require.NoError(t, writer.WriteField(tt.maskField, tt.mask))
+			require.NoError(t, writer.Close())
+
+			upstream := &openAIImagesSpoolUpstream{started: make(chan struct{}), release: make(chan struct{})}
+			group := &service.Group{ID: 913, Platform: service.PlatformGrok, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
+			parentID := int64(915)
+			account := &service.Account{ID: 914, Name: "grok-media", Platform: service.PlatformGrok, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, ParentAccountID: &parentID, Credentials: map[string]any{"base_url": "https://api.x.ai/v1"}}
+			parent := &service.Account{ID: parentID, Name: "grok-parent", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Credentials: map[string]any{"access_token": "grok-token"}}
+			env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &terminalUsageGrokAccountRepo{openAIRetryAccountRepoStub{accounts: []*service.Account{account, parent}}}, upstream)
+
+			recorder := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body.Bytes()))
+			req.Header.Set("Content-Type", writer.FormDataContentType())
+			done := make(chan struct{})
+			go func() { env.router("/v1/images/edits", env.handler.GrokImages).ServeHTTP(recorder, req); close(done) }()
+
+			select {
+			case <-upstream.started:
+			case <-time.After(5 * time.Second):
+				t.Fatal("timed out waiting for grok media upstream")
+			}
+			require.Equal(t, tt.source, gjson.GetBytes(upstream.body, "image.image_url").String())
+			require.Equal(t, tt.mask, gjson.GetBytes(upstream.body, "mask.image_url").String())
+
+			close(upstream.release)
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("timed out waiting for grok media handler")
+			}
+			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+		})
+	}
 }

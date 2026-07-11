@@ -126,21 +126,8 @@ func ParseGrokMediaMultipartForm(form *multipart.Form) GrokMediaRequestInfo {
 		return info
 	}
 	for name, values := range form.Value {
-		if len(values) == 0 {
-			continue
-		}
-		value := strings.TrimSpace(values[0])
-		switch name {
-		case "model":
-			info.Model = value
-		case "prompt":
-			info.Prompt = value
-		case "size":
-			info.Size = value
-		case "n":
-			if n, err := strconv.Atoi(value); err == nil && n > 0 {
-				info.N = n
-			}
+		for _, value := range values {
+			applyGrokMediaMultipartTextField(&info, name, value)
 		}
 	}
 	for name, files := range form.File {
@@ -159,6 +146,31 @@ func ParseGrokMediaMultipartForm(form *multipart.Form) GrokMediaRequestInfo {
 	info.Model, info.Prompt, info.Size = strings.TrimSpace(info.Model), strings.TrimSpace(info.Prompt), strings.TrimSpace(info.Size)
 	info.SizeTier = NormalizeImageBillingTierOrDefault(info.Size)
 	return info
+}
+
+func applyGrokMediaMultipartTextField(info *GrokMediaRequestInfo, name, value string) {
+	if info == nil {
+		return
+	}
+	value = strings.TrimSpace(value)
+	switch name {
+	case "model":
+		info.Model = value
+	case "prompt":
+		info.Prompt = value
+	case "size":
+		info.Size = value
+	case "n":
+		if n, err := strconv.Atoi(value); err == nil {
+			info.N = n
+		}
+	case "image", "image_url":
+		if value != "" {
+			info.InputImageURLs = append(info.InputImageURLs, value)
+		}
+	case "mask", "mask_image_url":
+		info.MaskImageURL = value
+	}
 }
 
 func parseGrokMediaJSONRequest(body []byte, info *GrokMediaRequestInfo) {
@@ -258,25 +270,7 @@ func parseGrokMediaMultipartRequest(contentType string, body []byte, info *GrokM
 			continue
 		}
 
-		value := strings.TrimSpace(string(data))
-		switch name {
-		case "model":
-			info.Model = value
-		case "prompt":
-			info.Prompt = value
-		case "size":
-			info.Size = value
-		case "n":
-			if n, err := strconv.Atoi(value); err == nil {
-				info.N = n
-			}
-		case "image", "image_url":
-			if value != "" {
-				info.InputImageURLs = append(info.InputImageURLs, value)
-			}
-		case "mask", "mask_image_url":
-			info.MaskImageURL = value
-		}
+		applyGrokMediaMultipartTextField(info, name, string(data))
 	}
 }
 
@@ -468,12 +462,16 @@ func prepareGrokMediaFormForwardBody(info GrokMediaRequestInfo) ([]byte, string,
 			payload["images"] = images
 		}
 	}
+	maskImageURL := strings.TrimSpace(info.MaskImageURL)
 	if info.MaskUpload != nil {
 		dataURL, err := openAIImageUploadToDataURL(*info.MaskUpload)
 		if err != nil {
 			return nil, "", err
 		}
-		payload["mask"] = map[string]string{"image_url": dataURL}
+		maskImageURL = dataURL
+	}
+	if maskImageURL != "" {
+		payload["mask"] = map[string]string{"image_url": maskImageURL}
 	}
 	out, err := marshalOpenAIUpstreamJSON(payload)
 	if err != nil {
