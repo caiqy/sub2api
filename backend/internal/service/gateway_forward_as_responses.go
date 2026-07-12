@@ -160,6 +160,9 @@ func (s *GatewayService) ForwardAsResponsesHandle(
 		if resp != nil && resp.Body != nil {
 			_ = resp.Body.Close()
 		}
+		if errors.Is(err, ErrRequestBodySpool) {
+			return nil, fmt.Errorf("send responses upstream request: %w", err)
+		}
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())
 		setOpsUpstreamError(c, 0, safeErr, "")
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{

@@ -142,6 +142,20 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 
+	// Parse and hash before queueing so waits retain only the replayable handle.
+	bodyRef := service.NewRequestBodyRefFromHandle(effectiveBody)
+	parsedReq, _ := service.ParseGatewayRequest(bodyRef, "responses")
+	if parsedReq == nil {
+		parsedReq = &service.ParsedRequest{Model: reqModel, Stream: reqStream, Body: bodyRef}
+	}
+	parsedReq.SessionContext = &service.SessionContext{
+		ClientIP:  ip.GetClientIP(c),
+		UserAgent: c.GetHeader("User-Agent"),
+		APIKeyID:  apiKey.ID,
+	}
+	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
+	body = nil
+
 	// Error passthrough binding
 	if h.errorPassthroughService != nil {
 		service.BindErrorPassthroughService(c, h.errorPassthroughService)
@@ -180,20 +194,6 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		h.responsesErrorResponse(c, status, code, message)
 		return
 	}
-
-	// Parse request for session hash
-	bodyRef := service.NewRequestBodyRefFromHandle(effectiveBody)
-	parsedReq, _ := service.ParseGatewayRequest(bodyRef, "responses")
-	if parsedReq == nil {
-		parsedReq = &service.ParsedRequest{Model: reqModel, Stream: reqStream, Body: bodyRef}
-	}
-	parsedReq.SessionContext = &service.SessionContext{
-		ClientIP:  ip.GetClientIP(c),
-		UserAgent: c.GetHeader("User-Agent"),
-		APIKeyID:  apiKey.ID,
-	}
-	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
-	body = nil
 
 	// 3. Account selection + failover loop
 	fs := NewFailoverState(h.maxAccountSwitches, false)
@@ -364,6 +364,9 @@ func (h *GatewayHandler) writeResponsesForwardRequestBodyError(c *gin.Context, e
 	status, ok := requestBodyReadErrorStatus(err)
 	if !ok {
 		return false
+	}
+	if c.Writer.Written() {
+		return true
 	}
 	if status == http.StatusRequestEntityTooLarge {
 		if maxErr, ok := extractMaxBytesError(err); ok {

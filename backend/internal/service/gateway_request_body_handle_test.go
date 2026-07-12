@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/gin-gonic/gin"
 )
@@ -108,9 +111,46 @@ func TestAntigravityCreditsRetryReturnsPayloadReadError(t *testing.T) {
 	}
 }
 
+func TestForwardAsResponsesHandle_SpoolTransportErrorPreservesSentinel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	handle, err := NewRequestBodyHandleFromBytes([]byte(`{"model":"claude-opus-4-6","input":"hello"}`), RequestBodyHandleOptions{})
+	if err != nil {
+		t.Fatalf("create handle: %v", err)
+	}
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+
+	svc := &GatewayService{
+		cfg: &config.Config{
+			Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}},
+			Gateway:  config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
+		},
+		httpUpstream:        responsesSpoolTransportUpstream{},
+		rateLimitService:    &RateLimitService{},
+		tlsFPProfileService: &TLSFingerprintProfileService{},
+	}
+	account := &Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "token", "base_url": "https://api.anthropic.com"}}
+
+	_, err = svc.ForwardAsResponsesHandle(context.Background(), c, account, handle, nil)
+	if !errors.Is(err, ErrRequestBodySpool) {
+		t.Fatalf("ForwardAsResponsesHandle error = %v, want ErrRequestBodySpool", err)
+	}
+	if c.Writer.Written() {
+		t.Fatalf("transport spool failure wrote response: %s", recorder.Body.String())
+	}
+}
+
 type retryPayloadHandleUpstream struct {
 	responses []int
 	bodies    [][]byte
+}
+
+type responsesSpoolTransportUpstream struct{ HTTPUpstream }
+
+func (responsesSpoolTransportUpstream) DoWithTLS(*http.Request, string, int64, int, *tlsfingerprint.Profile) (*http.Response, error) {
+	return nil, fmt.Errorf("read request body: %w", ErrRequestBodySpool)
 }
 
 func (u *retryPayloadHandleUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {

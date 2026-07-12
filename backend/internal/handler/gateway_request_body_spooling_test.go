@@ -206,6 +206,86 @@ func TestGatewayHandler_ResponsesForwardBodyErrorUsesRequestBodyStatus(t *testin
 	}
 }
 
+func TestGatewayHandler_ResponsesSpoolTransportFailureReturns503WithoutUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 48, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 149, Name: "anthropic-spool", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "token"}}
+	upstream := &responsesSpoolTransportUpstream{}
+	env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"claude-opus-4-6","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	env.routerFor("/v1/responses", env.handler.Responses).ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body = %s", recorder.Code, recorder.Body.String())
+	}
+	if got := gjson.Get(recorder.Body.String(), "error.code").String(); got != "server_error" {
+		t.Fatalf("error.code = %q, want server_error", got)
+	}
+	if upstream.calls != 1 {
+		t.Fatalf("upstream calls = %d, want 1", upstream.calls)
+	}
+	if env.usageRepo.lastLog != nil {
+		t.Fatalf("spool transport failure recorded usage: %#v", env.usageRepo.lastLog)
+	}
+}
+
+func TestGatewayHandler_ResponsesForwardBodyErrorDoesNotAppendAfterResponseCommit(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Writer.WriteHeader(http.StatusOK)
+	if _, err := c.Writer.WriteString("data: existing\n\n"); err != nil {
+		t.Fatalf("write committed response: %v", err)
+	}
+
+	if !(&GatewayHandler{}).writeResponsesForwardRequestBodyError(c, fmt.Errorf("forward responses: %w", service.ErrRequestBodySpool)) {
+		t.Fatal("spool error was not handled")
+	}
+	if got, want := recorder.Body.String(), "data: existing\n\n"; got != want {
+		t.Fatalf("body = %q, want %q", got, want)
+	}
+}
+
+func TestGatewayHandler_ResponsesLargeBodyWaitsWithReplayHandle(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawDir, effectiveDir := t.TempDir(), t.TempDir()
+	oldOptions := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 10 << 20, PreviewLimitBytes: 64, TempDir: rawDir}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+	t.Setenv("TMPDIR", effectiveDir)
+	t.Setenv("TMP", effectiveDir)
+	t.Setenv("TEMP", effectiveDir)
+
+	cache := &blockingResponsesUserSlotCache{waiting: make(chan struct{}), release: make(chan struct{})}
+	group := &service.Group{ID: 49, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 150, Name: "anthropic-wait", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "token"}}
+	env := newTerminalGatewayMessagesEnvWithConcurrencyCache(t, group, &openAIStatusSpoolUpstream{status: http.StatusBadRequest}, cache, account)
+
+	done := make(chan struct{})
+	go func() {
+		recorder := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"claude-opus-4-6","input":"`+strings.Repeat("x", 12<<20)+`"}`))
+		req.Header.Set("Content-Type", "application/json")
+		env.routerFor("/v1/responses", env.handler.Responses).ServeHTTP(recorder, req)
+		close(done)
+	}()
+
+	waitGatewayReplaySignal(t, cache.waiting, "user slot wait")
+	entries, err := os.ReadDir(rawDir)
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("raw spool missing during user wait: entries=%d err=%v", len(entries), err)
+	}
+	entries, err = os.ReadDir(effectiveDir)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("derived spool exists before forwarding: entries=%d err=%v", len(entries), err)
+	}
+	close(cache.release)
+	waitGatewayReplaySignal(t, done, "handler completion")
+	assertGatewaySpoolDirsEmpty(t, rawDir, effectiveDir)
+}
+
 func TestGatewayHandler_MessagesContextKeepsHandleInsteadOfAttemptBytes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	group := &service.Group{ID: 44, Platform: service.PlatformAntigravity, Status: service.StatusActive, Hydrated: true}
@@ -279,6 +359,37 @@ func TestGatewayHandler_MessagesCleansDerivedAttemptHandleAfterForwardPanic(t *t
 }
 
 type panicGatewayRequestBodyUpstream struct{ service.HTTPUpstream }
+
+type responsesSpoolTransportUpstream struct {
+	service.HTTPUpstream
+	calls int
+}
+
+type blockingResponsesUserSlotCache struct {
+	openAIChatCompletionsConcurrencyCacheStub
+	waiting chan struct{}
+	release chan struct{}
+	calls   int
+}
+
+func (c *blockingResponsesUserSlotCache) AcquireUserSlot(ctx context.Context, _ int64, _ int, _ string) (bool, error) {
+	c.calls++
+	if c.calls == 1 {
+		return false, nil
+	}
+	close(c.waiting)
+	select {
+	case <-c.release:
+		return true, nil
+	case <-ctx.Done():
+		return false, ctx.Err()
+	}
+}
+
+func (u *responsesSpoolTransportUpstream) DoWithTLS(req *http.Request, proxyURL string, accountID int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	u.calls++
+	return nil, fmt.Errorf("read request body: %w", service.ErrRequestBodySpool)
+}
 
 type cancelingGatewayRequestBodyUpstream struct{ cancelingTerminalHTTPUpstream }
 

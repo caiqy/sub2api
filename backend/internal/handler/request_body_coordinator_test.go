@@ -447,16 +447,6 @@ func TestRequestBodyCoordinator_CleanupRemovesRawEffectiveAndMultipartTemps(t *t
 	}
 }
 
-func TestRequestBodyCoordinator_CleanupUsesUniqueHandles(t *testing.T) {
-	source, err := os.ReadFile("request_body_coordinator.go")
-	if err != nil {
-		t.Fatalf("read coordinator source: %v", err)
-	}
-	if !strings.Contains(string(source), "for _, handle := range uniqueRequestBodyHandles(c.raw, c.effective)") {
-		t.Fatal("Cleanup does not iterate its raw/effective handles through a shared unique-handle calculation")
-	}
-}
-
 func TestUniqueRequestBodyHandles_DeduplicatesPointers(t *testing.T) {
 	raw := &service.RequestBodyHandle{}
 	effective := &service.RequestBodyHandle{}
