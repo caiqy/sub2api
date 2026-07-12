@@ -22,6 +22,20 @@ type usageUpstreamSnapshotCollector struct {
 	body    string
 }
 
+func TestGrokMediaRequestInfo_ReleaseText(t *testing.T) {
+	request := GrokMediaRequestInfo{
+		Prompt:         "large prompt",
+		InputImageURLs: []string{"https://example.com/image.png"},
+		MaskImageURL:   "https://example.com/mask.png",
+	}
+
+	request.ReleaseText()
+
+	require.Empty(t, request.Prompt)
+	require.Nil(t, request.InputImageURLs)
+	require.Empty(t, request.MaskImageURL)
+}
+
 type grokPreviewAccountRepo struct {
 	AccountRepository
 	parent *Account

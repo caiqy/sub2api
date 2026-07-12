@@ -143,6 +143,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 	reqLog = reqLog.With(zap.String("model", requestModel))
 	setOpsRequestContext(c, requestModel, false)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeSync))
+	var sessionHash, requestPayloadHash string
 
 	if endpoint.IsGenerationRequest() {
 		if !service.GroupAllowsImageGeneration(apiKey.Group) {
@@ -156,6 +157,21 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 				return
 			}
 		}
+		sessionSeed := body
+		if len(sessionSeed) == 0 && strings.TrimSpace(requestID) != "" {
+			sessionSeed = []byte(requestID)
+		}
+		sessionHash = h.gatewayService.GenerateExplicitSessionHash(c, sessionSeed)
+		if coordinator != nil {
+			service.BindOpenAIRequestBodyHandle(c, coordinator.Effective())
+			requestPayloadHash = coordinator.Effective().Hash()
+			coordinator.ReleaseMultipartValues()
+		}
+		body = nil
+		requestInfo.ReleaseText()
+		if endpoint == service.GrokMediaEndpointVideoStatus {
+			sessionHash = service.GrokMediaVideoRequestSessionHash(requestID)
+		}
 		imageReleaseFunc, acquired := h.acquireImageGenerationSlot(c, streamStarted)
 		if !acquired {
 			return
@@ -163,6 +179,14 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		if imageReleaseFunc != nil {
 			defer imageReleaseFunc()
 		}
+	}
+
+	if !endpoint.IsGenerationRequest() {
+		if strings.TrimSpace(requestID) != "" {
+			sessionHash = service.GrokMediaVideoRequestSessionHash(requestID)
+			requestPayloadHash = service.HashUsageRequestPayload([]byte(requestID))
+		}
+		requestInfo.ReleaseText()
 	}
 
 	if h.errorPassthroughService != nil {
@@ -190,20 +214,6 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		return
 	}
 
-	sessionSeed := body
-	if len(sessionSeed) == 0 && strings.TrimSpace(requestID) != "" {
-		sessionSeed = []byte(requestID)
-	}
-	sessionHash := h.gatewayService.GenerateExplicitSessionHash(c, sessionSeed)
-	requestPayloadHash := ""
-	if coordinator != nil {
-		service.BindOpenAIRequestBodyHandle(c, coordinator.Effective())
-		requestPayloadHash = coordinator.Effective().Hash()
-	}
-	body = nil
-	if endpoint == service.GrokMediaEndpointVideoStatus {
-		sessionHash = service.GrokMediaVideoRequestSessionHash(requestID)
-	}
 	requestCtx := c.Request.Context()
 	failedAccountIDs := make(map[int64]struct{})
 	sameAccountRetryCount := make(map[int64]int)
@@ -403,6 +413,9 @@ func grokMediaRequestBodyPreviewWithSize(contentType string, body []byte, reques
 		return service.RequestBodyPreviewSnapshot(requestPreview, size)
 	}
 	prompt := multipartMetadataPromptPreview(requestInfo.Prompt)
+	if isMultipartImagesContentType(contentType) {
+		prompt = ""
+	}
 	preview, err := json.Marshal(struct {
 		Model          string `json:"model"`
 		Prompt         string `json:"prompt"`

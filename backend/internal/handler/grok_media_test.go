@@ -456,7 +456,8 @@ func TestGrokMedia_MultipartTextPartLimit(t *testing.T) {
 			t.Setenv("TMP", formDir)
 			t.Setenv("TEMP", formDir)
 
-			text := []byte(strings.Repeat("x", size-len("multipart-text-secret-")) + "multipart-text-secret-")
+			const textStart, textMiddle = "multipart-text-secret-start-", "multipart-text-secret-middle-"
+			text := []byte(textStart + strings.Repeat("x", size-len(textStart)-len(textMiddle)) + textMiddle)
 			var body bytes.Buffer
 			writer := multipart.NewWriter(&body)
 			require.NoError(t, writer.WriteField("model", "grok-imagine"))
@@ -496,11 +497,15 @@ func TestGrokMedia_MultipartTextPartLimit(t *testing.T) {
 					t.Fatal("timed out waiting for grok media upstream")
 				}
 				requireMultipartTextPart(t, upstream.body, upstream.contentType, "prompt", text)
+				require.Empty(t, requestContext.Request.MultipartForm.Value)
 				detail := middleware.GetUsageDetailSnapshot(requestContext)
 				ops, _ := requestContext.Get(service.OpsUpstreamRequestBodyKey)
 				for _, snapshot := range []string{detail.RequestBody, detail.UpstreamRequestBody, ops.(string)} {
-					require.NotContains(t, snapshot, "multipart-text-secret-")
+					require.NotContains(t, snapshot, textStart)
+					require.NotContains(t, snapshot, textMiddle)
 				}
+				assertMatrixRequestBodySnapshot(t, "multipart text usage upstream snapshot", detail.UpstreamRequestBody, upstream.body, "")
+				assertMatrixRequestBodySnapshot(t, "multipart text ops upstream snapshot", ops.(string), upstream.body, "")
 				close(upstream.release)
 				select {
 				case <-done:

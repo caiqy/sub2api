@@ -182,6 +182,40 @@ func TestRequestBodyCoordinator_Multipart(t *testing.T) {
 	})
 }
 
+func TestRequestBodyCoordinator_ReleaseMultipartValuesKeepsFiles(t *testing.T) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("prompt", "release this text"); err != nil {
+		t.Fatal(err)
+	}
+	file, err := writer.CreateFormFile("image", "source.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.Write([]byte("image bytes")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	coordinator, err := newMultipartRequestBody(req, 0)
+	if err != nil {
+		t.Fatalf("newMultipartRequestBody: %v", err)
+	}
+	t.Cleanup(coordinator.Cleanup)
+
+	coordinator.ReleaseMultipartValues()
+	if len(coordinator.form.Value) != 0 {
+		t.Fatalf("multipart values retained: %#v", coordinator.form.Value)
+	}
+	if len(coordinator.form.File["image"]) != 1 {
+		t.Fatal("multipart files were released with values")
+	}
+}
+
 func TestRequestBodyCoordinator_MultipartPipe(t *testing.T) {
 	oldOptions := jsonRequestBodyHandleOptions
 	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir(), FilePrefix: "sub2api-test-"}

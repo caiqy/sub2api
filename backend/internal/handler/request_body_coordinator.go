@@ -24,6 +24,7 @@ const multipartParseMemoryBudget = (10 << 20) + (1 << 20)
 type requestBodyCoordinator struct {
 	raw            *service.RequestBodyHandle
 	effective      *service.RequestBodyHandle
+	oauth          *service.RequestBodyHandle
 	form           *multipart.Form
 	multipartModel string
 }
@@ -204,6 +205,47 @@ func (c *requestBodyCoordinator) Effective() *service.RequestBodyHandle {
 	return c.effective
 }
 
+func (c *requestBodyCoordinator) SetOAuthBytes(body []byte) error {
+	handle, err := service.NewRequestBodyHandleFromBytes(body, jsonRequestBodyHandleOptions)
+	if err != nil {
+		return err
+	}
+	if c.oauth != nil && c.oauth != handle {
+		service.CleanupRequestBodyHandle(c.oauth)
+	}
+	c.oauth = handle
+	return nil
+}
+
+func (c *requestBodyCoordinator) OAuth() *service.RequestBodyHandle {
+	if c == nil {
+		return nil
+	}
+	return c.oauth
+}
+
+func (c *requestBodyCoordinator) ReleaseMultipartValues() {
+	if c != nil && c.form != nil {
+		c.form.Value = nil
+	}
+}
+
+func (c *requestBodyCoordinator) CheckMultipartFiles() error {
+	if c == nil || c.form == nil {
+		return nil
+	}
+	for _, files := range c.form.File {
+		for _, file := range files {
+			source, err := file.Open()
+			if err != nil {
+				return fmt.Errorf("%w: open multipart source: %v", service.ErrRequestBodySpool, err)
+			}
+			_ = source.Close()
+		}
+	}
+	return nil
+}
+
 func uniqueRequestBodyHandles(handles ...*service.RequestBodyHandle) []*service.RequestBodyHandle {
 	unique := make([]*service.RequestBodyHandle, 0, len(handles))
 	for _, handle := range handles {
@@ -231,7 +273,7 @@ func (c *requestBodyCoordinator) Cleanup() {
 	if c.form != nil {
 		_ = c.form.RemoveAll()
 	}
-	for _, handle := range uniqueRequestBodyHandles(c.raw, c.effective) {
+	for _, handle := range uniqueRequestBodyHandles(c.raw, c.effective, c.oauth) {
 		service.CleanupRequestBodyHandle(handle)
 	}
 }

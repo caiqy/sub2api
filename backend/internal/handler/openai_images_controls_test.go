@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -114,6 +115,52 @@ type openAIImagesSpoolUpstream struct {
 	contentType string
 	started     chan struct{}
 	release     chan struct{}
+}
+
+type openAIImagesHashingUpstream struct {
+	service.HTTPUpstream
+	size    int64
+	hash    [sha256.Size]byte
+	started chan struct{}
+	release chan struct{}
+}
+
+func (u *openAIImagesHashingUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	hasher := sha256.New()
+	size, err := io.Copy(hasher, req.Body)
+	if err != nil {
+		return nil, err
+	}
+	_ = req.Body.Close()
+	u.size = size
+	copy(u.hash[:], hasher.Sum(nil))
+	close(u.started)
+	<-u.release
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"created":1,"data":[{"b64_json":"aGVsbG8="}]}`)),
+	}, nil
+}
+
+type releaseAfterEOFBody struct {
+	data []byte
+	off  int
+}
+
+func (r *releaseAfterEOFBody) Read(p []byte) (int, error) {
+	if r.off >= len(r.data) {
+		r.data = nil
+		return 0, io.EOF
+	}
+	n := copy(p, r.data[r.off:])
+	r.off += n
+	return n, nil
+}
+
+func (r *releaseAfterEOFBody) Close() error {
+	r.data = nil
+	return nil
 }
 
 type openAIImagesReplayUpstream struct {
@@ -280,7 +327,8 @@ func TestOpenAIImages_MultipartTextPartLimit(t *testing.T) {
 			t.Setenv("TMP", formDir)
 			t.Setenv("TEMP", formDir)
 
-			text := []byte(strings.Repeat("x", size-len("multipart-text-secret-")) + "multipart-text-secret-")
+			const textStart, textMiddle = "multipart-text-secret-start-", "multipart-text-secret-middle-"
+			text := []byte(textStart + strings.Repeat("x", size-len(textStart)-len(textMiddle)) + textMiddle)
 			var body bytes.Buffer
 			writer := multipart.NewWriter(&body)
 			require.NoError(t, writer.WriteField("prompt", string(text)))
@@ -317,11 +365,15 @@ func TestOpenAIImages_MultipartTextPartLimit(t *testing.T) {
 					t.Fatal("timed out waiting for images upstream")
 				}
 				requireMultipartTextPart(t, upstream.body, upstream.contentType, "prompt", text)
+				require.Empty(t, requestContext.Request.MultipartForm.Value)
 				detail := middleware2.GetUsageDetailSnapshot(requestContext)
 				ops, _ := requestContext.Get(service.OpsUpstreamRequestBodyKey)
 				for _, snapshot := range []string{detail.RequestBody, detail.UpstreamRequestBody, ops.(string)} {
-					require.NotContains(t, snapshot, "multipart-text-secret-")
+					require.NotContains(t, snapshot, textStart)
+					require.NotContains(t, snapshot, textMiddle)
 				}
+				assertMatrixRequestBodySnapshot(t, "multipart text usage upstream snapshot", detail.UpstreamRequestBody, upstream.body, "")
+				assertMatrixRequestBodySnapshot(t, "multipart text ops upstream snapshot", ops.(string), upstream.body, "")
 				close(upstream.release)
 				select {
 				case <-done:
@@ -334,6 +386,71 @@ func TestOpenAIImages_MultipartTextPartLimit(t *testing.T) {
 			require.Empty(t, readTestDir(t, formDir))
 		})
 	}
+}
+
+func TestOpenAIImages_MultipartTextIsReleasedBeforeBlockedUpstream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawDir := t.TempDir()
+	oldOptions := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: rawDir, FilePrefix: "sub2api-test-"}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+
+	runtime.GC()
+	var before runtime.MemStats
+	runtime.ReadMemStats(&before)
+
+	const textStart, textMiddle = "multipart-gc-secret-start-", "multipart-gc-secret-middle-"
+	var payload bytes.Buffer
+	writer := multipart.NewWriter(&payload)
+	require.NoError(t, writer.WriteField("prompt", textStart+strings.Repeat("x", (20<<20)-len(textStart)-len(textMiddle))+textMiddle))
+	require.NoError(t, writer.Close())
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", &releaseAfterEOFBody{data: append([]byte(nil), payload.Bytes()...)})
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	payload.Reset()
+
+	upstream := &openAIImagesHashingUpstream{started: make(chan struct{}), release: make(chan struct{})}
+	group := &service.Group{ID: 950, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
+	account := &service.Account{ID: 951, Name: "images", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test"}}
+	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
+	var requestContext *gin.Context
+	router := env.router("/v1/images/generations", func(c *gin.Context) {
+		requestContext = c
+		env.handler.Images(c)
+	})
+	recorder := httptest.NewRecorder()
+	done := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(upstream.release) }) }
+	t.Cleanup(func() {
+		release()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("timed out waiting for images handler cleanup")
+		}
+	})
+	go func() { router.ServeHTTP(recorder, req); close(done) }()
+
+	select {
+	case <-upstream.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for images upstream")
+	}
+	require.Empty(t, requestContext.Request.MultipartForm.Value)
+	require.Positive(t, upstream.size)
+	runtime.GC()
+	var after runtime.MemStats
+	runtime.ReadMemStats(&after)
+	require.LessOrEqual(t, after.HeapAlloc, before.HeapAlloc+uint64(12<<20), "blocked request retained multipart text")
+
+	release()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for images handler")
+	}
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Empty(t, readTestDir(t, rawDir))
 }
 
 func TestOpenAIGatewayHandlerImages_MultipartEffectiveSpoolFailureReturns503(t *testing.T) {

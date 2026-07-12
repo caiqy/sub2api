@@ -1571,9 +1571,12 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		return nil, err
 	}
 
-	responsesBody, err := buildOpenAIImagesResponsesRequest(parsed, requestModel)
-	if err != nil {
-		return nil, err
+	responsesBody, err := openAIRequestBodyBytes(c, nil)
+	if err != nil || len(responsesBody) == 0 {
+		responsesBody, err = buildOpenAIImagesResponsesRequest(parsed, requestModel)
+		if err != nil {
+			return nil, err
+		}
 	}
 	upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, responsesBody, token, true, parsed.StickySessionSeed(), false)
 	if err != nil {

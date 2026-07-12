@@ -184,6 +184,15 @@ func (r *OpenAIImagesRequest) StickySessionSeed() string {
 	return seed
 }
 
+func (r *OpenAIImagesRequest) ReleaseText() {
+	if r == nil {
+		return
+	}
+	r.Prompt = ""
+	r.InputImageURLs = nil
+	r.MaskImageURL = ""
+}
+
 func (s *OpenAIGatewayService) ParseOpenAIImagesRequest(c *gin.Context, body []byte) (*OpenAIImagesRequest, error) {
 	if c == nil || c.Request == nil {
 		return nil, fmt.Errorf("missing request context")
@@ -667,6 +676,20 @@ func (s *OpenAIGatewayService) ForwardImages(
 	}
 }
 
+func (s *OpenAIGatewayService) PrepareOpenAIImagesOAuthBody(parsed *OpenAIImagesRequest, channelMappedModel string) ([]byte, error) {
+	requestModel := strings.TrimSpace(parsed.Model)
+	if mapped := strings.TrimSpace(channelMappedModel); mapped != "" {
+		requestModel = mapped
+	}
+	if requestModel == "" {
+		requestModel = "gpt-image-2"
+	}
+	if err := validateOpenAIImagesModel(requestModel); err != nil {
+		return nil, err
+	}
+	return buildOpenAIImagesResponsesRequest(parsed, requestModel)
+}
+
 func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 	ctx context.Context,
 	c *gin.Context,
@@ -1021,6 +1044,52 @@ func WriteOpenAIImagesMultipartForm(writer *multipart.Writer, form *multipart.Fo
 				return fmt.Errorf("%w: close multipart source: %v", ErrRequestBodySpool, err)
 			}
 		}
+	}
+	return nil
+}
+
+func WriteOpenAIImagesMultipartModel(writer *multipart.Writer, reader io.Reader, contentType, model string) error {
+	if writer == nil || reader == nil {
+		return errors.New("multipart writer and reader are required")
+	}
+	_, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return fmt.Errorf("parse multipart content-type: %w", err)
+	}
+	boundary := strings.TrimSpace(params["boundary"])
+	if boundary == "" {
+		return errors.New("multipart boundary is required")
+	}
+
+	multipartReader := multipart.NewReader(reader, boundary)
+	modelWritten := false
+	for {
+		part, err := multipartReader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("read multipart body: %w", err)
+		}
+		name := strings.TrimSpace(part.FormName())
+		target, err := writer.CreatePart(cloneMultipartHeader(part.Header))
+		if err != nil {
+			_ = part.Close()
+			return err
+		}
+		if name == "model" && part.FileName() == "" {
+			_, err = io.WriteString(target, model)
+			modelWritten = err == nil
+		} else {
+			_, err = io.Copy(target, part)
+		}
+		_ = part.Close()
+		if err != nil {
+			return err
+		}
+	}
+	if !modelWritten {
+		return writer.WriteField("model", model)
 	}
 	return nil
 }

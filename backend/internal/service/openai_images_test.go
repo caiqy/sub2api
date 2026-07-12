@@ -133,6 +133,20 @@ func TestWriteOpenAIImagesMultipartForm_SourceOpenFailureIsSpoolError(t *testing
 	require.ErrorIs(t, err, ErrRequestBodySpool)
 }
 
+func TestOpenAIImagesRequest_ReleaseText(t *testing.T) {
+	request := &OpenAIImagesRequest{
+		Prompt:         "large prompt",
+		InputImageURLs: []string{"https://example.com/image.png"},
+		MaskImageURL:   "https://example.com/mask.png",
+	}
+
+	request.ReleaseText()
+
+	require.Empty(t, request.Prompt)
+	require.Nil(t, request.InputImageURLs)
+	require.Empty(t, request.MaskImageURL)
+}
+
 func TestOpenAIImagesRequestModerationBody_JSONEditIncludesInputImageURLs(t *testing.T) {
 	parsed := &OpenAIImagesRequest{
 		Endpoint:       openAIImagesEditsEndpoint,

@@ -96,6 +96,36 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
 	}
+	if parsed.Multipart {
+		c.Request.MultipartForm = coordinator.form
+	}
+
+	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, parsed.Model)
+	sessionSeed := body
+	if parsed.Multipart {
+		sessionSeed = []byte(parsed.StickySessionSeed())
+	}
+	sessionHash := h.gatewayService.GenerateExplicitSessionHash(c, sessionSeed)
+	requestPayloadHash := service.HashUsageRequestPayload(sessionSeed)
+	service.BindOpenAIRequestBodyHandle(c, coordinator.Effective())
+	body = nil
+	if parsed.Prompt != "" {
+		oauthBody, prepareErr := h.gatewayService.PrepareOpenAIImagesOAuthBody(parsed, channelMapping.MappedModel)
+		if prepareErr != nil {
+			if errors.Is(prepareErr, service.ErrRequestBodySpool) {
+				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+				return
+			}
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", prepareErr.Error())
+			return
+		}
+		if err := coordinator.SetOAuthBytes(oauthBody); err != nil {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
+	}
+	coordinator.ReleaseMultipartValues()
+	parsed.ReleaseText()
 
 	if isMultipartImagesContentType(c.GetHeader("Content-Type")) {
 		setOpsRequestContext(c, "", false)
@@ -133,8 +163,6 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	}
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(parsed.Stream, false)))
 
-	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, parsed.Model)
-
 	if h.errorPassthroughService != nil {
 		service.BindErrorPassthroughService(c, h.errorPassthroughService)
 	}
@@ -171,15 +199,6 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		h.handleStreamingAwareError(c, status, code, message, streamStarted)
 		return
 	}
-
-	sessionSeed := body
-	if parsed.Multipart {
-		sessionSeed = []byte(parsed.StickySessionSeed())
-	}
-	sessionHash := h.gatewayService.GenerateExplicitSessionHash(c, sessionSeed)
-	requestPayloadHash := service.HashUsageRequestPayload(sessionSeed)
-	service.BindOpenAIRequestBodyHandle(c, coordinator.Effective())
-	body = nil
 
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
@@ -280,7 +299,15 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 				upstreamModel := account.GetMappedModel(mappedModel)
 				if coordinator.multipartModel != upstreamModel {
 					contentType, err := coordinator.SetEffectiveMultipart(func(writer *multipart.Writer) error {
-						return service.WriteOpenAIImagesMultipartForm(writer, coordinator.form, upstreamModel)
+						if err := coordinator.CheckMultipartFiles(); err != nil {
+							return err
+						}
+						source, err := coordinator.Effective().Open()
+						if err != nil {
+							return err
+						}
+						defer func() { _ = source.Close() }()
+						return service.WriteOpenAIImagesMultipartModel(writer, source, parsed.ContentType, upstreamModel)
 					})
 					if err != nil {
 						return nil, err
@@ -289,6 +316,9 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 					coordinator.multipartModel = upstreamModel
 				}
 				service.BindOpenAIRequestBodyHandle(c, coordinator.Effective())
+			}
+			if account.Type == service.AccountTypeOAuth {
+				service.BindOpenAIRequestBodyHandle(c, coordinator.OAuth())
 			}
 			return h.gatewayService.ForwardImages(c.Request.Context(), c, account, nil, parsed, channelMapping.MappedModel)
 		}()
@@ -440,9 +470,6 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		detailSnapshot := buildOpenAIImagesDetailSnapshot(c, parsed)
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
-		if parsed.Multipart {
-			requestPayloadHash = service.HashUsageRequestPayload([]byte(parsed.StickySessionSeed()))
-		}
 		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 
 		upstreamModel := ""
@@ -512,6 +539,9 @@ func buildOpenAIImagesDetailSnapshot(c *gin.Context, parsed *service.OpenAIImage
 	}
 
 	prompt := multipartMetadataPromptPreview(parsed.Prompt)
+	if parsed.Multipart {
+		prompt = ""
+	}
 	requestBody, err := json.Marshal(struct {
 		Model          string `json:"model"`
 		Prompt         string `json:"prompt"`

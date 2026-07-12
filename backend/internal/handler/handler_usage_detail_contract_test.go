@@ -174,7 +174,7 @@ func TestGrokMediaRequestBodyPreviewOmitsMultipartBinary(t *testing.T) {
 
 	require.NotContains(t, preview, "raw-grok-image-bytes")
 	require.Equal(t, "grok-imagine-1.0", gjson.Get(metadata, "model").String())
-	require.Equal(t, "replace background", gjson.Get(metadata, "prompt").String())
+	require.Empty(t, gjson.Get(metadata, "prompt").String())
 	require.True(t, gjson.Get(metadata, "had_source_image").Bool())
 }
 
@@ -190,8 +190,7 @@ func TestMultipartMetadataSnapshotsBoundLongPrompts(t *testing.T) {
 		require.Equal(t, int64(len(originalBody)), gjson.Get(preview, "size").Int())
 		metadata := gjson.Get(preview, "preview").String()
 		require.True(t, gjson.Valid(metadata))
-		require.NotEmpty(t, gjson.Get(metadata, "prompt").String())
-		require.Less(t, len(gjson.Get(metadata, "prompt").String()), len(prompt))
+		require.Empty(t, gjson.Get(metadata, "prompt").String())
 	})
 
 	t.Run("openai images", func(t *testing.T) {
@@ -212,8 +211,7 @@ func TestMultipartMetadataSnapshotsBoundLongPrompts(t *testing.T) {
 		require.Equal(t, int64(len(originalBody)), gjson.Get(snapshot.RequestBody, "size").Int())
 		metadata := gjson.Get(snapshot.RequestBody, "preview").String()
 		require.True(t, gjson.Valid(metadata))
-		require.NotEmpty(t, gjson.Get(metadata, "prompt").String())
-		require.Less(t, len(gjson.Get(metadata, "prompt").String()), len(prompt))
+		require.Empty(t, gjson.Get(metadata, "prompt").String())
 	})
 }
 

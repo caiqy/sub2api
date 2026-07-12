@@ -54,6 +54,15 @@ type GrokMediaRequestInfo struct {
 	MaskUpload     *OpenAIImagesUpload
 }
 
+func (r *GrokMediaRequestInfo) ReleaseText() {
+	if r == nil {
+		return
+	}
+	r.Prompt = ""
+	r.InputImageURLs = nil
+	r.MaskImageURL = ""
+}
+
 func (r GrokMediaRequestInfo) ModerationBody() []byte {
 	payload := map[string]any{}
 	if prompt := strings.TrimSpace(r.Prompt); prompt != "" {
@@ -385,6 +394,7 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 		upstreamPreview = "[multipart body omitted]"
 	}
 	SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
+	requestInfo.ReleaseText()
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
