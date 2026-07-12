@@ -18,6 +18,9 @@ var jsonRequestBodyHandleOptions = openAIResponsesRequestBodyHandleOptions()
 
 const multipartUploadPartLimit = 20 << 20
 
+// ParseMultipartForm adds 10MB for non-file values; leave metadata room so a 20MB text part reaches the explicit limit.
+const multipartParseMemoryBudget = (10 << 20) + (1 << 20)
+
 type requestBodyCoordinator struct {
 	raw            *service.RequestBodyHandle
 	effective      *service.RequestBodyHandle
@@ -54,24 +57,41 @@ func newMultipartRequestBody(req *http.Request, maxMemory int64) (*requestBodyCo
 	if err != nil {
 		return nil, err
 	}
-	reader, err := raw.Open()
+	parse := func(memory int64) (*http.Request, error) {
+		reader, err := raw.Open()
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = reader.Close() }()
+
+		parsed := req.Clone(req.Context())
+		parsed.Body = reader
+		parsed.ContentLength = raw.Size()
+		if err := parsed.ParseMultipartForm(memory); err != nil {
+			return nil, err
+		}
+		return parsed, nil
+	}
+	parsed, err := parse(maxMemory)
+	if errors.Is(err, multipart.ErrMessageTooLarge) && maxMemory == 0 {
+		parsed, err = parse(multipartParseMemoryBudget)
+	}
 	if err != nil {
 		service.CleanupRequestBodyHandle(raw)
 		return nil, err
 	}
-
-	parsed := req.Clone(req.Context())
-	parsed.Body = reader
-	parsed.ContentLength = raw.Size()
-	if err := parsed.ParseMultipartForm(maxMemory); err != nil {
-		_ = reader.Close()
-		service.CleanupRequestBodyHandle(raw)
-		return nil, err
-	}
-	_ = reader.Close()
 	for _, files := range parsed.MultipartForm.File {
 		for _, file := range files {
 			if file.Size > multipartUploadPartLimit {
+				_ = parsed.MultipartForm.RemoveAll()
+				service.CleanupRequestBodyHandle(raw)
+				return nil, &http.MaxBytesError{Limit: multipartUploadPartLimit}
+			}
+		}
+	}
+	for _, values := range parsed.MultipartForm.Value {
+		for _, value := range values {
+			if len(value) > multipartUploadPartLimit {
 				_ = parsed.MultipartForm.RemoveAll()
 				service.CleanupRequestBodyHandle(raw)
 				return nil, &http.MaxBytesError{Limit: multipartUploadPartLimit}

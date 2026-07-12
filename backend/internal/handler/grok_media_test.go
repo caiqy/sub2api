@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -442,6 +443,76 @@ func TestGrokMedia_MultipartSpoolPreservesFilesAndOmitsSnapshots(t *testing.T) {
 	}
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 	require.Empty(t, readTestDir(t, rawDir))
+}
+
+func TestGrokMedia_MultipartTextPartLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, size := range []int{10 << 20, 20 << 20, (20 << 20) + 1} {
+		t.Run(strconv.Itoa(size), func(t *testing.T) {
+			rawDir, formDir := t.TempDir(), t.TempDir()
+			oldOptions := jsonRequestBodyHandleOptions
+			jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: rawDir, FilePrefix: "sub2api-test-"}
+			t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+			t.Setenv("TMP", formDir)
+			t.Setenv("TEMP", formDir)
+
+			text := []byte(strings.Repeat("x", size-len("multipart-text-secret-")) + "multipart-text-secret-")
+			var body bytes.Buffer
+			writer := multipart.NewWriter(&body)
+			require.NoError(t, writer.WriteField("model", "grok-imagine"))
+			require.NoError(t, writer.WriteField("prompt", string(text)))
+			require.NoError(t, writer.Close())
+
+			upstream := &openAIImagesSpoolUpstream{started: make(chan struct{}), release: make(chan struct{})}
+			group := &service.Group{ID: 932, Platform: service.PlatformGrok, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
+			parentID := int64(934)
+			account := &service.Account{ID: 933, Name: "grok-media", Platform: service.PlatformGrok, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, ParentAccountID: &parentID, Credentials: map[string]any{"base_url": "https://api.x.ai/v1"}}
+			parent := &service.Account{ID: parentID, Name: "grok-parent", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Credentials: map[string]any{"access_token": "grok-token"}}
+			env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &terminalUsageGrokAccountRepo{openAIRetryAccountRepoStub{accounts: []*service.Account{account, parent}}}, upstream)
+
+			var requestContext *gin.Context
+			router := env.router("/v1/images/generations", func(c *gin.Context) {
+				requestContext = c
+				env.handler.GrokImages(c)
+			})
+			recorder := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body.Bytes()))
+			req.Header.Set("Content-Type", writer.FormDataContentType())
+
+			if size > 20<<20 {
+				router.ServeHTTP(recorder, req)
+				require.Equal(t, http.StatusRequestEntityTooLarge, recorder.Code, recorder.Body.String())
+				select {
+				case <-upstream.started:
+					t.Fatal("oversized multipart text part reached upstream")
+				default:
+				}
+			} else {
+				done := make(chan struct{})
+				go func() { router.ServeHTTP(recorder, req); close(done) }()
+				select {
+				case <-upstream.started:
+				case <-time.After(5 * time.Second):
+					t.Fatal("timed out waiting for grok media upstream")
+				}
+				requireMultipartTextPart(t, upstream.body, upstream.contentType, "prompt", text)
+				detail := middleware.GetUsageDetailSnapshot(requestContext)
+				ops, _ := requestContext.Get(service.OpsUpstreamRequestBodyKey)
+				for _, snapshot := range []string{detail.RequestBody, detail.UpstreamRequestBody, ops.(string)} {
+					require.NotContains(t, snapshot, "multipart-text-secret-")
+				}
+				close(upstream.release)
+				select {
+				case <-done:
+				case <-time.After(5 * time.Second):
+					t.Fatal("timed out waiting for grok media handler")
+				}
+				require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+			}
+			require.Empty(t, readTestDir(t, rawDir))
+			require.Empty(t, readTestDir(t, formDir))
+		})
+	}
 }
 
 func TestGrokMedia_MultipartEditTextSourcesRebuildUpstreamJSON(t *testing.T) {

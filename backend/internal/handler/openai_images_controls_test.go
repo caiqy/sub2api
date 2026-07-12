@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -10,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -108,9 +110,10 @@ func (u *openAIImagesHandlerHTTPUpstream) contentType() string {
 
 type openAIImagesSpoolUpstream struct {
 	service.HTTPUpstream
-	body    []byte
-	started chan struct{}
-	release chan struct{}
+	body        []byte
+	contentType string
+	started     chan struct{}
+	release     chan struct{}
 }
 
 type openAIImagesReplayUpstream struct {
@@ -185,6 +188,7 @@ func (u *openAIImagesSpoolUpstream) Do(req *http.Request, _ string, _ int64, _ i
 	if err != nil {
 		return nil, err
 	}
+	u.contentType = req.Header.Get("Content-Type")
 	_ = req.Body.Close()
 	close(u.started)
 	<-u.release
@@ -193,6 +197,28 @@ func (u *openAIImagesSpoolUpstream) Do(req *http.Request, _ string, _ int64, _ i
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
 		Body:       io.NopCloser(strings.NewReader(`{"created":1,"data":[{"b64_json":"aGVsbG8="}]}`)),
 	}, nil
+}
+
+func requireMultipartTextPart(t *testing.T, body []byte, contentType, field string, want []byte) {
+	t.Helper()
+	_, params, err := mime.ParseMediaType(contentType)
+	require.NoError(t, err)
+	reader := multipart.NewReader(bytes.NewReader(body), params["boundary"])
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			t.Fatalf("multipart field %q not found", field)
+		}
+		require.NoError(t, err)
+		if part.FormName() != field || part.FileName() != "" {
+			continue
+		}
+		got, err := io.ReadAll(part)
+		require.NoError(t, err)
+		require.Equal(t, len(want), len(got))
+		require.Equal(t, sha256.Sum256(want), sha256.Sum256(got))
+		return
+	}
 }
 
 func TestOpenAIImages_InlineSpoolKeepsRawBodyAndOmitsSnapshots(t *testing.T) {
@@ -241,6 +267,73 @@ func TestOpenAIImages_InlineSpoolKeepsRawBodyAndOmitsSnapshots(t *testing.T) {
 	}
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 	require.Empty(t, readTestDir(t, rawDir))
+}
+
+func TestOpenAIImages_MultipartTextPartLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, size := range []int{10 << 20, 20 << 20, (20 << 20) + 1} {
+		t.Run(strconv.Itoa(size), func(t *testing.T) {
+			rawDir, formDir := t.TempDir(), t.TempDir()
+			oldOptions := jsonRequestBodyHandleOptions
+			jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: rawDir, FilePrefix: "sub2api-test-"}
+			t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+			t.Setenv("TMP", formDir)
+			t.Setenv("TEMP", formDir)
+
+			text := []byte(strings.Repeat("x", size-len("multipart-text-secret-")) + "multipart-text-secret-")
+			var body bytes.Buffer
+			writer := multipart.NewWriter(&body)
+			require.NoError(t, writer.WriteField("prompt", string(text)))
+			require.NoError(t, writer.Close())
+
+			upstream := &openAIImagesSpoolUpstream{started: make(chan struct{}), release: make(chan struct{})}
+			group := &service.Group{ID: 930, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
+			account := &service.Account{ID: 931, Name: "images", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test"}}
+			env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
+
+			var requestContext *gin.Context
+			router := env.router("/v1/images/generations", func(c *gin.Context) {
+				requestContext = c
+				env.handler.Images(c)
+			})
+			recorder := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body.Bytes()))
+			req.Header.Set("Content-Type", writer.FormDataContentType())
+
+			if size > 20<<20 {
+				router.ServeHTTP(recorder, req)
+				require.Equal(t, http.StatusRequestEntityTooLarge, recorder.Code, recorder.Body.String())
+				select {
+				case <-upstream.started:
+					t.Fatal("oversized multipart text part reached upstream")
+				default:
+				}
+			} else {
+				done := make(chan struct{})
+				go func() { router.ServeHTTP(recorder, req); close(done) }()
+				select {
+				case <-upstream.started:
+				case <-time.After(5 * time.Second):
+					t.Fatal("timed out waiting for images upstream")
+				}
+				requireMultipartTextPart(t, upstream.body, upstream.contentType, "prompt", text)
+				detail := middleware2.GetUsageDetailSnapshot(requestContext)
+				ops, _ := requestContext.Get(service.OpsUpstreamRequestBodyKey)
+				for _, snapshot := range []string{detail.RequestBody, detail.UpstreamRequestBody, ops.(string)} {
+					require.NotContains(t, snapshot, "multipart-text-secret-")
+				}
+				close(upstream.release)
+				select {
+				case <-done:
+				case <-time.After(5 * time.Second):
+					t.Fatal("timed out waiting for images handler")
+				}
+				require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+			}
+			require.Empty(t, readTestDir(t, rawDir))
+			require.Empty(t, readTestDir(t, formDir))
+		})
+	}
 }
 
 func TestOpenAIGatewayHandlerImages_MultipartEffectiveSpoolFailureReturns503(t *testing.T) {
