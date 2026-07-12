@@ -269,15 +269,15 @@ base-ref: 0f389fe7ed783ca4a8444fbe6d12acb9d3e19af6
 - 产生：`newMultipartRequestBody(req *http.Request, maxMemory int64) (*requestBodyCoordinator, error)`，raw 读取原始请求流；从 `raw.Open()` 创建解析 request，记录其 `MultipartForm`。
 - 约束：effective multipart 由 `io.Pipe` + `multipart.Writer` 写入，并由 `NewRequestBodyHandleFromReader` 同步消费；写端失败必须 `CloseWithError(err)`。
 
-- [ ] **步骤 1：写失败测试。** 对一次 multipart edit 建立 producer 中途返回错误的 service stub，断言 pipe consumer 返回原始错误、没有发送半截上游请求且所有临时文件删除；成功 case 断言 effective `Content-Type` 含 writer boundary、`ContentLength` 等于 effective handle size、每次 retry 得到完整相同 multipart。
+- [x] **步骤 1：写失败测试。** 对一次 multipart edit 建立 producer 中途返回错误的 service stub，断言 pipe consumer 返回原始错误、没有发送半截上游请求且所有临时文件删除；成功 case 断言 effective `Content-Type` 含 writer boundary、`ContentLength` 等于 effective handle size、每次 retry 得到完整相同 multipart。
 
-- [ ] **步骤 2：验证测试失败。** 运行：`go test ./internal/handler ./internal/service -run 'Test(OpenAIImages|GrokMedia|OpenAIGatewayService).*(Multipart|Pipe|Retry)' -count=1`（工作目录 `backend`）。预期：尚无 pipe 生成/handle ownership，测试失败。
+- [x] **步骤 2：验证测试失败。** 运行：`go test ./internal/handler ./internal/service -run 'Test(OpenAIImages|GrokMedia|OpenAIGatewayService).*(Multipart|Pipe|Retry)' -count=1`（工作目录 `backend`）。预期：尚无 pipe 生成/handle ownership，测试失败。
 
-- [ ] **步骤 3：最小实现。** Images/Grok 的有 body 路由按 Content-Type 选择 JSON 或 multipart coordinator；状态查询路由不创建 handle。multipart coordinator 从 raw handle open 的 reader 使用现有 `ParseMultipartForm(maxMemory)`，登记 form。需要重建上游 body 时启动 producer goroutine，`multipart.Writer` 写入 `io.PipeWriter`，消费端用 `SetEffectiveReader(pipeReader)` 完成后等待 producer；producer 以 `CloseWithError` 传递错误。仅将最终 content type 与 effective handle 交给 service；不创建完整 multipart `[]byte`。
+- [x] **步骤 3：最小实现。** Images/Grok 的有 body 路由按 Content-Type 选择 JSON 或 multipart coordinator；状态查询路由不创建 handle。multipart coordinator 从 raw handle open 的 reader 使用现有 `ParseMultipartForm(maxMemory)`，登记 form。需要重建上游 body 时启动 producer goroutine，`multipart.Writer` 写入 `io.PipeWriter`，消费端用 `SetEffectiveReader(pipeReader)` 完成后等待 producer；producer 以 `CloseWithError` 传递错误。仅将最终 content type 与 effective handle 交给 service；不创建完整 multipart `[]byte`。
 
-- [ ] **步骤 4：验证通过。** 运行：`go test ./internal/handler ./internal/service -run 'Test(OpenAIImages|GrokMedia|OpenAIGatewayService).*(Multipart|Pipe|Retry)' -count=1`（工作目录 `backend`）。预期：通过。
+- [x] **步骤 4：验证通过。** 运行：`go test ./internal/handler ./internal/service -run 'Test(OpenAIImages|GrokMedia|OpenAIGatewayService).*(Multipart|Pipe|Retry)' -count=1`（工作目录 `backend`）。预期：通过。
 
-- [ ] **步骤 5：提交。** `git add backend/internal/handler/openai_images.go backend/internal/handler/grok_media.go backend/internal/handler/request_body_coordinator.go backend/internal/service/openai_images.go backend/internal/service/grok_media.go && git commit -m "feat: spool media multipart request bodies"`
+- [x] **步骤 5：提交。** `git add backend/internal/handler/openai_images.go backend/internal/handler/grok_media.go backend/internal/handler/request_body_coordinator.go backend/internal/service/openai_images.go backend/internal/service/grok_media.go && git commit -m "feat: spool media multipart request bodies"`
 
 ### Task 11: 媒体业务与资源回归
 

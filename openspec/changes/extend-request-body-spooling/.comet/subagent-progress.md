@@ -2,8 +2,8 @@
 
 - Change: extend-request-body-spooling
 - Review mode: thorough
-- Current task: Task 10: OpenAI/Grok 媒体入口与 pipe 重建
-- OpenSpec mapping: 4.2 将 OpenAI/Grok Images 与 Videos 的 raw multipart 和 effective outbound multipart 接入 coordinator，并统一 RemoveAll 与 handle cleanup。
+- Current task: Task 11: 媒体业务与资源回归
+- OpenSpec mapping: 4.3 验证生成、编辑、视频创建、视频状态、业务拒绝、上游错误和重试路径不泄露二进制正文且不残留临时文件。
 - Stage: pending
 - Base commit: d0990d3844afe050a8d4d3495175cb65606f04be
 - Implementation commit: pending
@@ -13,5 +13,5 @@
 - Risk signals: cross-module external-input change; compatibility byte service entries remain only for other callers; disk-full environment was isolated via temporary D-drive cache.
 - Review round: 0/2
 - Review status: pending
-- Unresolved findings: none; Task 9 completed in 2c0d4665, ccebd4cda, e652f57ca, 8ef0328cd, and 9eb6fa322 after the user-approved focused fix round; final review approved.
-- Task 9 verification: untagged handler/service full packages and handler unit-tagged full package passed. Unit-tagged service remains blocked only by pre-existing Grok test drift.
+- Unresolved findings: none; Task 10 completed in 1a0821cf3, 03390b659, and de3222b8d; final review approved.
+- Task 10 verification: targeted media pipe tests, untagged handler/service full packages, and handler unit-tagged full package passed. Unit-tagged service remains blocked only by pre-existing Grok test drift.
