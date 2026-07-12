@@ -197,6 +197,15 @@ func TestGrokMedia_GenerateEditVideoRejectUpstreamFailoverPreserveRequestSemanti
 			}, wantStatus: http.StatusOK, wantAccounts: []int64{1002},
 		},
 		{
+			name: "video create success", route: "/v1/videos/generations", handler: func(c *gin.Context) { c.MustGet("handler").(*OpenAIGatewayHandler).GrokVideoGeneration(c) },
+			body: func(t *testing.T) ([]byte, string) {
+				return []byte(`{"model":"grok-imagine-video-1.5","prompt":"metadata","image_url":"data:image/png;base64,bWVkaWEtc2VjcmV0"}`), "application/json"
+			},
+			accounts: func(parentID int64) []*service.Account {
+				return []*service.Account{{ID: 1003, Name: "grok", Platform: service.PlatformGrok, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, ParentAccountID: &parentID, Credentials: map[string]any{"base_url": "https://api.x.ai/v1"}}}
+			}, wantStatus: http.StatusOK, wantAccounts: []int64{1003},
+		},
+		{
 			name: "video status has no body", route: "/videos/:request_id", handler: func(c *gin.Context) { c.MustGet("handler").(*OpenAIGatewayHandler).GrokVideoStatus(c) },
 			body: func(t *testing.T) ([]byte, string) { return nil, "" },
 			accounts: func(parentID int64) []*service.Account {
