@@ -341,15 +341,15 @@ base-ref: 0f389fe7ed783ca4a8444fbe6d12acb9d3e19af6
 **文件：**
 - 不修改代码；保存受控环境的命令输出、hash 对照与 RSS 采样到变更验证记录，不更新 OpenSpec tasks。
 
-- [ ] **步骤 1：准备延迟上游采样。** 将受控测试上游设置为在读取请求后阻塞，分别发起 12MB identity、gzip 与 multipart 请求；在阻塞窗口记录容器 RSS、spool 文件数量和每个文件大小。
+- [x] **步骤 1：准备延迟上游采样。** 将受控测试上游设置为在读取请求后阻塞，分别发起 12MB identity、gzip 与 multipart 请求；在阻塞窗口记录容器 RSS、spool 文件数量和每个文件大小。
 
-- [ ] **步骤 2：验证长期引用释放。** 在同步解析完成且上游仍阻塞时检查 Go heap profile 或容器 RSS 变化，并检查 usage detail/ops：完整请求体只能出现在 spool，不得出现在 usage/ops 字段；允许同步解析阶段短暂峰值，不将其作为失败。
+- [x] **步骤 2：验证长期引用释放。** 在同步解析完成且上游仍阻塞时检查 Go heap profile 或容器 RSS 变化，并检查 usage detail/ops：完整请求体只能出现在 spool，不得出现在 usage/ops 字段；允许同步解析阶段短暂峰值，不将其作为失败。
 
-- [ ] **步骤 3：释放上游并检查清理。** 放行上游成功、4xx、5xx、取消与流式中断五种结局；逐例等待 handler 返回和 cleanup retry，断言目录无本请求 spool，multipart `RemoveAll` 的文件也不存在，响应及计费/usage 指纹与基线一致。
+- [x] **步骤 3：释放上游并检查清理。** 放行上游成功、4xx、5xx、取消与流式中断五种结局；逐例等待 handler 返回和 cleanup retry，断言目录无本请求 spool，multipart `RemoveAll` 的文件也不存在，响应及计费/usage 指纹与基线一致。
 
-- [ ] **步骤 4：最终验证。** 再次运行：`go test ./... -count=1`（工作目录 `backend`）以及 `pnpm test:run && pnpm typecheck`（工作目录 `frontend`）。预期：全部通过。
+- [x] **步骤 4：最终验证。** 再次运行：`go test ./... -count=1`（工作目录 `backend`）以及 `pnpm test:run && pnpm typecheck`（工作目录 `frontend`）。预期：全部通过。
 
-- [ ] **步骤 5：提交。** 本任务只产生验证证据，不提交代码；如 Task 13 后仍有修正，回到对应最小任务补充测试与单独提交，禁止将验收结果包装为代码提交。
+- [x] **步骤 5：提交。** 本任务只产生验证证据，不提交代码；如 Task 13 后仍有修正，回到对应最小任务补充测试与单独提交，禁止将验收结果包装为代码提交。
 
 ## 覆盖核对
 

@@ -25,4 +25,4 @@
 
 - [x] 5.1 增加跨协议契约测试，确认所有目标入口使用共享 coordinator，usage/ops 不回读完整 body，spool I/O 失败统一返回 503。
 - [x] 5.2 运行后端全量测试、前端全量测试与类型检查，并执行 5MB/10MB/12MB identity、gzip、multipart 受控端侧矩阵。
-- [ ] 5.3 对照容器 RSS、spool 生命周期、usage detail 和 ops 数据，确认进入上游等待后无长期大 `[]byte` 引用且业务语义无回归。
+- [x] 5.3 对照容器 RSS、spool 生命周期、usage detail 和 ops 数据，确认进入上游等待后无长期大 `[]byte` 引用且业务语义无回归。
