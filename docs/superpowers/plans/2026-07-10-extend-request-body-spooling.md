@@ -288,15 +288,15 @@ base-ref: 0f389fe7ed783ca4a8444fbe6d12acb9d3e19af6
 - 修改：`backend/internal/handler/grok_media_test.go`
 - 修改：`backend/internal/handler/openai_gateway_usage_context_test.go`
 
-- [ ] **步骤 1：写失败测试。** 为 generate、edit、video create、video status、权限或模型校验拒绝、上游 4xx/5xx、same-account retry、account failover 各保留一例。断言 video status 无 request body 时不创建 spool；所有媒体 case 的 usage/ops 不含原始 multipart、base64、data URL 或文件正文；所有失败路径均清除 raw/effective/form 文件。
+- [x] **步骤 1：写失败测试。** 为 generate、edit、video create、video status、权限或模型校验拒绝、上游 4xx/5xx、same-account retry、account failover 各保留一例。断言 video status 无 request body 时不创建 spool；所有媒体 case 的 usage/ops 不含原始 multipart、base64、data URL 或文件正文；所有失败路径均清除 raw/effective/form 文件。
 
-- [ ] **步骤 2：验证测试失败。** 运行：`go test ./internal/handler -run 'Test(OpenAIImages|GrokMedia).*(Generate|Edit|Video|Reject|Upstream|Failover)' -count=1`（工作目录 `backend`）。预期：新增不泄露正文或无残留断言失败。
+- [x] **步骤 2：验证测试失败。** 运行：`go test ./internal/handler -run 'Test(OpenAIImages|GrokMedia).*(Generate|Edit|Video|Reject|Upstream|Failover)' -count=1`（工作目录 `backend`）。预期：新增不泄露正文或无残留断言失败。
 
-- [ ] **步骤 3：最小测试调整。** 为现有媒体 upstream recorder 增加 request hash、content type 和阻塞开关；复用 `service.grokMediaRequestBodyPreview`/现有脱敏 helper，不新增另一套 redactor。
+- [x] **步骤 3：最小测试调整。** 为现有媒体 upstream recorder 增加 request hash、content type 和阻塞开关；复用 `service.grokMediaRequestBodyPreview`/现有脱敏 helper，不新增另一套 redactor。
 
-- [ ] **步骤 4：验证通过。** 运行：`go test ./internal/handler -run 'Test(OpenAIImages|GrokMedia)' -count=1`（工作目录 `backend`）。预期：通过。
+- [x] **步骤 4：验证通过。** 运行：`go test ./internal/handler -run 'Test(OpenAIImages|GrokMedia)' -count=1`（工作目录 `backend`）。预期：通过。
 
-- [ ] **步骤 5：提交。** `git add backend/internal/handler/openai_images_failover_test.go backend/internal/handler/grok_media_test.go backend/internal/handler/openai_gateway_usage_context_test.go && git commit -m "test: verify media request cleanup"`
+- [x] **步骤 5：提交。** `git add backend/internal/handler/openai_images_failover_test.go backend/internal/handler/grok_media_test.go backend/internal/handler/openai_gateway_usage_context_test.go && git commit -m "test: verify media request cleanup"`
 
 ### Task 12: 跨协议 coordinator 与 503 契约
 
