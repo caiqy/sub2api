@@ -110,7 +110,9 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 
 	contentType := c.GetHeader("Content-Type")
 	if endpoint.RequiresRequestBody() {
-		service.SetUsageRequestBody(c, grokMediaRequestBodyPreviewWithSize(contentType, body, requestInfo, coordinator.Effective().Size()))
+		preview := grokMediaRequestBodyPreviewWithSize(contentType, body, requestInfo, coordinator.Effective().Size())
+		service.SetUsageRequestBody(c, preview)
+		service.SetOpsUpstreamRequestBodyPreview(c, preview, coordinator.Effective().Size())
 	}
 	if coordinator != nil && coordinator.form != nil && endpoint == service.GrokMediaEndpointImagesEdits {
 		forwardBody, forwardContentType, prepareErr := service.PrepareGrokMediaFormForwardBody(requestInfo)
