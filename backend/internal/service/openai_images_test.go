@@ -147,6 +147,25 @@ func TestOpenAIImagesRequest_ReleaseText(t *testing.T) {
 	require.Empty(t, request.MaskImageURL)
 }
 
+func TestOpenAIImagesRequest_FreezeStickySessionSeedSurvivesRelease(t *testing.T) {
+
+	request := &OpenAIImagesRequest{
+		Endpoint:       openAIImagesEditsEndpoint,
+		Model:          "gpt-image-2",
+		Size:           "1024x1024",
+		Prompt:         "replace background",
+		InputImageURLs: []string{"https://example.com/source.png"},
+	}
+
+	seed := request.FreezeStickySessionSeed()
+	request.ReleaseText()
+
+	require.Equal(t, seed, request.StickySessionSeed())
+	require.NotEmpty(t, seed)
+	require.NotContains(t, request.StickySessionSeed(), "replace background")
+	require.NotEqual(t, seed, (&OpenAIImagesRequest{Endpoint: openAIImagesEditsEndpoint, Model: "gpt-image-2", Size: "1024x1024", Prompt: "different prompt"}).FreezeStickySessionSeed())
+}
+
 func TestOpenAIImagesRequestModerationBody_JSONEditIncludesInputImageURLs(t *testing.T) {
 	parsed := &OpenAIImagesRequest{
 		Endpoint:       openAIImagesEditsEndpoint,

@@ -88,6 +88,8 @@ type OpenAIImagesRequest struct {
 	Uploads            []OpenAIImagesUpload
 	MaskUpload         *OpenAIImagesUpload
 	bodyHash           string
+	stickySessionSeed  string
+	textReleased       bool
 }
 
 func (r *OpenAIImagesRequest) ModerationBody() []byte {
@@ -170,6 +172,9 @@ func (r *OpenAIImagesRequest) StickySessionSeed() string {
 	if r == nil {
 		return ""
 	}
+	if r.stickySessionSeed != "" {
+		return r.stickySessionSeed
+	}
 	parts := []string{
 		"openai-images",
 		strings.TrimSpace(r.Endpoint),
@@ -184,6 +189,18 @@ func (r *OpenAIImagesRequest) StickySessionSeed() string {
 	return seed
 }
 
+// FreezeStickySessionSeed keeps only an opaque request-stable value after parsed text is released.
+func (r *OpenAIImagesRequest) FreezeStickySessionSeed() string {
+	if r == nil {
+		return ""
+	}
+	if r.stickySessionSeed == "" {
+		sum := sha256.Sum256([]byte(r.StickySessionSeed()))
+		r.stickySessionSeed = hex.EncodeToString(sum[:])
+	}
+	return r.stickySessionSeed
+}
+
 func (r *OpenAIImagesRequest) ReleaseText() {
 	if r == nil {
 		return
@@ -191,6 +208,7 @@ func (r *OpenAIImagesRequest) ReleaseText() {
 	r.Prompt = ""
 	r.InputImageURLs = nil
 	r.MaskImageURL = ""
+	r.textReleased = true
 }
 
 func (s *OpenAIGatewayService) ParseOpenAIImagesRequest(c *gin.Context, body []byte) (*OpenAIImagesRequest, error) {

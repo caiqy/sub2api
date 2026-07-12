@@ -101,9 +101,11 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	}
 
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, parsed.Model)
+	moderationBody := parsed.ModerationBody()
+	stickySessionSeed := parsed.FreezeStickySessionSeed()
 	sessionSeed := body
 	if parsed.Multipart {
-		sessionSeed = []byte(parsed.StickySessionSeed())
+		sessionSeed = []byte(stickySessionSeed)
 	}
 	sessionHash := h.gatewayService.GenerateExplicitSessionHash(c, sessionSeed)
 	requestPayloadHash := service.HashUsageRequestPayload(sessionSeed)
@@ -124,9 +126,6 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			return
 		}
 	}
-	coordinator.ReleaseMultipartValues()
-	parsed.ReleaseText()
-
 	if isMultipartImagesContentType(c.GetHeader("Content-Type")) {
 		setOpsRequestContext(c, "", false)
 	} else {
@@ -144,10 +143,14 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		h.errorResponse(c, http.StatusForbidden, "permission_error", service.ImageGenerationPermissionMessage())
 		return
 	}
-	if decision := h.checkContentModeration(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIImages, parsed.Model, parsed.ModerationBody()); decision != nil && decision.Blocked {
+	if decision := h.checkContentModeration(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIImages, parsed.Model, moderationBody); decision != nil && decision.Blocked {
+		moderationBody = nil
 		h.errorResponse(c, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message)
 		return
 	}
+	moderationBody = nil
+	coordinator.ReleaseMultipartValues()
+	parsed.ReleaseText()
 	imageReleaseFunc, acquired := h.acquireImageGenerationSlot(c, streamStarted)
 	if !acquired {
 		return

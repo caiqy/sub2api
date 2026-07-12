@@ -60,12 +60,14 @@ type openAIImagesFailoverHTTPUpstream struct {
 	service.HTTPUpstream
 	mu         sync.Mutex
 	accountIDs []int64
+	sessionIDs []string
 	resp       *http.Response
 }
 
-func (u *openAIImagesFailoverHTTPUpstream) Do(_ *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
+func (u *openAIImagesFailoverHTTPUpstream) Do(req *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
 	u.mu.Lock()
 	u.accountIDs = append(u.accountIDs, accountID)
+	u.sessionIDs = append(u.sessionIDs, req.Header.Get("session_id"))
 	u.mu.Unlock()
 	if u.resp != nil {
 		return u.resp, nil
@@ -88,8 +90,18 @@ func (u *openAIImagesFailoverHTTPUpstream) calls() []int64 {
 	return append([]int64(nil), u.accountIDs...)
 }
 
+func (u *openAIImagesFailoverHTTPUpstream) sessions() []string {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return append([]string(nil), u.sessionIDs...)
+}
+
 func TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhenExhausted(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	rawDir := t.TempDir()
+	oldOptions := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: rawDir, FilePrefix: "sub2api-test-"}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
 	groupID := int64(3130)
 	accounts := []service.Account{
 		{
@@ -178,6 +190,10 @@ func TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhen
 	handler.Images(c)
 
 	require.Equal(t, []int64{1, 2}, upstream.calls())
+	sessions := upstream.sessions()
+	require.Len(t, sessions, 2)
+	require.Equal(t, sessions[0], sessions[1])
+	require.NotEmpty(t, sessions[0])
 	require.Equal(t, http.StatusBadGateway, rec.Code)
 	require.Equal(t, "upstream_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
 	require.Equal(t, "Upstream service temporarily unavailable", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
@@ -189,4 +205,5 @@ func TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhen
 	require.Len(t, events, 2)
 	require.Equal(t, "failover", events[0].Kind)
 	require.Equal(t, "failover", events[1].Kind)
+	require.Empty(t, readTestDir(t, rawDir), "OAuth retries must clean the effective body handle")
 }

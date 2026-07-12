@@ -1573,6 +1573,12 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 
 	responsesBody, err := openAIRequestBodyBytes(c, nil)
 	if err != nil || len(responsesBody) == 0 {
+		if parsed.textReleased {
+			if err != nil {
+				return nil, err
+			}
+			return nil, fmt.Errorf("oauth images request body is required")
+		}
 		responsesBody, err = buildOpenAIImagesResponsesRequest(parsed, requestModel)
 		if err != nil {
 			return nil, err

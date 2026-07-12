@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -29,6 +30,34 @@ import (
 type openAIImagesHandlerAccountRepo struct {
 	service.AccountRepository
 	accounts []service.Account
+}
+
+type openAIImagesModerationSettings struct {
+	service.SettingRepository
+	values map[string]string
+}
+
+func (r *openAIImagesModerationSettings) GetValue(_ context.Context, key string) (string, error) {
+	return r.values[key], nil
+}
+
+type openAIImagesModerationRepo struct {
+	service.ContentModerationRepository
+}
+
+func (openAIImagesModerationRepo) CreateLog(context.Context, *service.ContentModerationLog) error {
+	return nil
+}
+
+type openAIImagesModerationHashCache struct {
+	service.ContentModerationHashCache
+}
+
+func (openAIImagesModerationHashCache) RecordFlaggedInputHash(context.Context, string) error {
+	return nil
+}
+func (openAIImagesModerationHashCache) HasFlaggedInputHash(context.Context, string) (bool, error) {
+	return false, nil
 }
 
 type openAIImagesSpoolSwitchRepo struct {
@@ -123,6 +152,22 @@ type openAIImagesHashingUpstream struct {
 	hash    [sha256.Size]byte
 	started chan struct{}
 	release chan struct{}
+}
+
+type openAIImagesOAuthHashingUpstream struct{ openAIImagesHashingUpstream }
+
+func (u *openAIImagesOAuthHashingUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	hasher := sha256.New()
+	size, err := io.Copy(hasher, req.Body)
+	if err != nil {
+		return nil, err
+	}
+	_ = req.Body.Close()
+	u.size = size
+	copy(u.hash[:], hasher.Sum(nil))
+	close(u.started)
+	<-u.release
+	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"usage\":{},\"tool_usage\":{\"image_gen\":{\"images\":1}},\"output\":[]}}\n\n"))}, nil
 }
 
 func (u *openAIImagesHashingUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
@@ -451,6 +496,84 @@ func TestOpenAIImages_MultipartTextIsReleasedBeforeBlockedUpstream(t *testing.T)
 	}
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 	require.Empty(t, readTestDir(t, rawDir))
+}
+
+func TestOpenAIImages_OAuthTextIsReleasedBeforeBlockedUpstream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawDir := t.TempDir()
+	oldOptions := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: rawDir, FilePrefix: "sub2api-test-"}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+
+	runtime.GC()
+	var before runtime.MemStats
+	runtime.ReadMemStats(&before)
+	requestBody := []byte(`{"model":"gpt-image-2","prompt":"` + strings.Repeat("x", 20<<20) + `"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", &releaseAfterEOFBody{data: requestBody})
+	requestBody = nil
+	req.Header.Set("Content-Type", "application/json")
+
+	upstream := &openAIImagesOAuthHashingUpstream{openAIImagesHashingUpstream: openAIImagesHashingUpstream{started: make(chan struct{}), release: make(chan struct{})}}
+	group := &service.Group{ID: 954, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
+	account := &service.Account{ID: 955, Name: "oauth", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Credentials: map[string]any{"access_token": "token"}}
+	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
+	recorder := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() { env.router("/v1/images/generations", env.handler.Images).ServeHTTP(recorder, req); close(done) }()
+
+	select {
+	case <-upstream.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for OAuth images upstream")
+	}
+	require.Positive(t, upstream.size)
+	runtime.GC()
+	var after runtime.MemStats
+	runtime.ReadMemStats(&after)
+	require.LessOrEqual(t, after.HeapAlloc, before.HeapAlloc+uint64(12<<20), "blocked OAuth request retained 20MB text")
+
+	close(upstream.release)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for OAuth images handler")
+	}
+	require.Empty(t, readTestDir(t, rawDir))
+}
+
+func TestOpenAIImages_ContentModerationUsesFrozenPayloadBeforeRelease(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawDir := t.TempDir()
+	oldOptions := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: rawDir, FilePrefix: "sub2api-test-"}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+
+	cfg := service.ContentModerationConfig{
+		Enabled: true, Mode: service.ContentModerationModePreBlock, AllGroups: true, SampleRate: 100,
+		APIKeys: []string{"test-key"}, BlockStatus: http.StatusUnavailableForLegalReasons,
+		BlockMessage: "blocked by audit", BlockedKeywords: []string{"forbidden-token"},
+	}
+	rawCfg, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	moderation := service.NewContentModerationService(&openAIImagesModerationSettings{values: map[string]string{
+		service.SettingKeyRiskControlEnabled:      "true",
+		service.SettingKeyContentModerationConfig: string(rawCfg),
+	}}, openAIImagesModerationRepo{}, openAIImagesModerationHashCache{}, nil, nil, nil, nil)
+
+	group := &service.Group{ID: 952, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
+	account := &service.Account{ID: 953, Name: "oauth", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Credentials: map[string]any{"access_token": "token"}}
+	upstream := &openAIImagesHandlerHTTPUpstream{resp: &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{}`))}}
+	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
+	env.handler.contentModerationService = moderation
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", strings.NewReader(`{"model":"gpt-image-2","prompt":"forbidden-token","images":[{"image_url":"https://example.com/source.png"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	env.router("/v1/images/edits", env.handler.Images).ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusUnavailableForLegalReasons, rec.Code, rec.Body.String())
+	require.Empty(t, upstream.calls(), "moderation rejection must not reach upstream")
+	require.Empty(t, readTestDir(t, rawDir), "moderation rejection must clean its spool")
 }
 
 func TestOpenAIGatewayHandlerImages_MultipartEffectiveSpoolFailureReturns503(t *testing.T) {

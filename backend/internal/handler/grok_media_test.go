@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -443,6 +444,78 @@ func TestGrokMedia_MultipartSpoolPreservesFilesAndOmitsSnapshots(t *testing.T) {
 	}
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 	require.Empty(t, readTestDir(t, rawDir))
+}
+
+func TestGrokMedia_TextIsReleasedBeforeBlockedUpstream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tt := range []struct {
+		name, route string
+		handler     gin.HandlerFunc
+		body        func() ([]byte, string)
+	}{
+		{"generate", "/v1/images/generations", func(c *gin.Context) { c.MustGet("handler").(*OpenAIGatewayHandler).GrokImages(c) }, func() ([]byte, string) {
+			return []byte(`{"model":"grok-imagine","prompt":"` + strings.Repeat("x", 20<<20) + `"}`), "application/json"
+		}},
+		{"edit", "/v1/images/edits", func(c *gin.Context) { c.MustGet("handler").(*OpenAIGatewayHandler).GrokImages(c) }, func() ([]byte, string) {
+			var b bytes.Buffer
+			w := multipart.NewWriter(&b)
+			require.NoError(t, w.WriteField("model", "grok-imagine"))
+			require.NoError(t, w.WriteField("prompt", strings.Repeat("x", 20<<20)))
+			require.NoError(t, w.WriteField("image_url", "https://example.com/source.png"))
+			require.NoError(t, w.Close())
+			return b.Bytes(), w.FormDataContentType()
+		}},
+		{"video", "/v1/videos/generations", func(c *gin.Context) { c.MustGet("handler").(*OpenAIGatewayHandler).GrokVideoGeneration(c) }, func() ([]byte, string) {
+			return []byte(`{"model":"grok-imagine-video-1.5","prompt":"` + strings.Repeat("x", 20<<20) + `"}`), "application/json"
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			rawDir := t.TempDir()
+			oldOptions := jsonRequestBodyHandleOptions
+			jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: rawDir, FilePrefix: "sub2api-test-"}
+			t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+			runtime.GC()
+			var before runtime.MemStats
+			runtime.ReadMemStats(&before)
+			body, contentType := tt.body()
+			req := httptest.NewRequest(http.MethodPost, tt.route, &releaseAfterEOFBody{data: body})
+			body = nil
+			req.Header.Set("Content-Type", contentType)
+			upstream := &openAIImagesHashingUpstream{started: make(chan struct{}), release: make(chan struct{})}
+			group := &service.Group{ID: 960, Platform: service.PlatformGrok, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
+			parentID := int64(962)
+			account := &service.Account{ID: 961, Name: "grok", Platform: service.PlatformGrok, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, ParentAccountID: &parentID, Credentials: map[string]any{"api_key": "key", "base_url": "https://api.x.ai/v1"}}
+			parent := &service.Account{ID: parentID, Name: "parent", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Credentials: map[string]any{"access_token": "token"}}
+			env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &terminalUsageGrokAccountRepo{openAIRetryAccountRepoStub{accounts: []*service.Account{account, parent}}}, upstream)
+			router := gin.New()
+			router.Use(func(c *gin.Context) {
+				c.Set("handler", env.handler)
+				c.Set(string(middleware.ContextKeyAPIKey), env.apiKey)
+				c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: env.apiKey.UserID, Concurrency: env.apiKey.User.Concurrency})
+			})
+			router.POST(tt.route, tt.handler)
+			recorder := httptest.NewRecorder()
+			done := make(chan struct{})
+			go func() { router.ServeHTTP(recorder, req); close(done) }()
+			select {
+			case <-upstream.started:
+			case <-time.After(5 * time.Second):
+				t.Fatal("timed out waiting for Grok upstream")
+			}
+			require.Positive(t, upstream.size)
+			runtime.GC()
+			var after runtime.MemStats
+			runtime.ReadMemStats(&after)
+			require.LessOrEqual(t, after.HeapAlloc, before.HeapAlloc+uint64(12<<20), "blocked Grok request retained 20MB text")
+			close(upstream.release)
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("timed out waiting for Grok handler")
+			}
+			require.Empty(t, readTestDir(t, rawDir))
+		})
+	}
 }
 
 func TestGrokMedia_MultipartTextPartLimit(t *testing.T) {
