@@ -2,8 +2,8 @@
 
 - Change: extend-request-body-spooling
 - Review mode: thorough
-- Current task: Task 12: 跨协议 coordinator 与 503 契约
-- OpenSpec mapping: 5.1 建立全入口 coordinator、bounded preview 与 spool I/O 503 契约回归。
+- Current task: Task 13: 全量自动化验证
+- OpenSpec mapping: 5.2 执行定向、全量、竞态与前端自动化验证。
 - Stage: pending
 - Base commit: d0990d3844afe050a8d4d3495175cb65606f04be
 - Implementation commit: pending
@@ -13,5 +13,5 @@
 - Risk signals: cross-module external-input change; compatibility byte service entries remain only for other callers; disk-full environment was isolated via temporary D-drive cache.
 - Review round: 0/2
 - Review status: pending
-- Unresolved findings: none; Task 11 completed in be634951b, d224ee1f1, and 9ed5842f4; final review approved.
-- Task 11 verification: targeted media lifecycle tests, untagged handler/service full packages, and handler unit-tagged full package passed. Unit-tagged service remains blocked only by pre-existing Grok test drift.
+- Unresolved findings: none; Task 12 completed in 914719c58, a08495821, and 56247ad2f; final review approved.
+- Task 12 verification: cross-protocol targeted tests, untagged handler/service full packages, and handler unit-tagged full package passed. Unit-tagged service remains blocked only by pre-existing Grok test drift.

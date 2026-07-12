@@ -307,15 +307,15 @@ base-ref: 0f389fe7ed783ca4a8444fbe6d12acb9d3e19af6
 - 修改：`backend/internal/handler/handler_usage_detail_contract_test.go`
 - 修改：`backend/internal/handler/openai_gateway_request_body_retention_test.go`
 
-- [ ] **步骤 1：写失败测试。** 建立表驱动契约，列出 Anthropic Messages/Responses、OpenAI Chat/Embeddings/Images、Grok Images/Videos、Gemini 三个 action；每项断言进入 shared coordinator、usage/ops 只读取 preview/metadata、模拟 effective `Open` spool 错误返回 503。流式响应已开始的 case 断言继续使用既有流式终止，不写第二个 HTTP 错误。
+- [x] **步骤 1：写失败测试。** 建立表驱动契约，列出 Anthropic Messages/Responses、OpenAI Chat/Embeddings/Images、Grok Images/Videos、Gemini 三个 action；每项断言进入 shared coordinator、usage/ops 只读取 preview/metadata、模拟 effective `Open` spool 错误返回 503。流式响应已开始的 case 断言继续使用既有流式终止，不写第二个 HTTP 错误。
 
-- [ ] **步骤 2：验证测试失败。** 运行：`go test ./internal/handler -run 'TestRequestBodySpoolingCrossProtocolContract' -count=1`（工作目录 `backend`）。预期：某个尚未覆盖的入口或错误映射断言失败。
+- [x] **步骤 2：验证测试失败。** 运行：`go test ./internal/handler -run 'TestRequestBodySpoolingCrossProtocolContract' -count=1`（工作目录 `backend`）。预期：某个尚未覆盖的入口或错误映射断言失败。
 
-- [ ] **步骤 3：最小实现修正。** 根据失败入口，仅接入现有 coordinator/error helper，不新增协议分支或 per-protocol ownership 机制；确保所有 handler 在写响应前识别 `errors.Is(err, service.ErrRequestBodySpool)` 并返回该协议既有 503 格式。
+- [x] **步骤 3：最小实现修正。** 根据失败入口，仅接入现有 coordinator/error helper，不新增协议分支或 per-protocol ownership 机制；确保所有 handler 在写响应前识别 `errors.Is(err, service.ErrRequestBodySpool)` 并返回该协议既有 503 格式。
 
-- [ ] **步骤 4：验证通过。** 运行：`go test ./internal/handler -run 'TestRequestBodySpoolingCrossProtocolContract|TestHandlerUsageDetailContract' -count=1`（工作目录 `backend`）。预期：通过。
+- [x] **步骤 4：验证通过。** 运行：`go test ./internal/handler -run 'TestRequestBodySpoolingCrossProtocolContract|TestHandlerUsageDetailContract' -count=1`（工作目录 `backend`）。预期：通过。
 
-- [ ] **步骤 5：提交。** `git add backend/internal/handler/request_body_coordinator_test.go backend/internal/handler/handler_usage_detail_contract_test.go backend/internal/handler/openai_gateway_request_body_retention_test.go backend/internal/handler/gateway_handler.go backend/internal/handler/gateway_handler_responses.go backend/internal/handler/openai_chat_completions.go backend/internal/handler/openai_embeddings.go backend/internal/handler/openai_images.go backend/internal/handler/grok_media.go backend/internal/handler/gemini_v1beta_handler.go && git commit -m "test: enforce request body spool contract"`
+- [x] **步骤 5：提交。** `git add backend/internal/handler/request_body_coordinator_test.go backend/internal/handler/handler_usage_detail_contract_test.go backend/internal/handler/openai_gateway_request_body_retention_test.go backend/internal/handler/gateway_handler.go backend/internal/handler/gateway_handler_responses.go backend/internal/handler/openai_chat_completions.go backend/internal/handler/openai_embeddings.go backend/internal/handler/openai_images.go backend/internal/handler/grok_media.go backend/internal/handler/gemini_v1beta_handler.go && git commit -m "test: enforce request body spool contract"`
 
 ### Task 13: 全量自动化验证
 
