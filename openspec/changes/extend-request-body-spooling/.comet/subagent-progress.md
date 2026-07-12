@@ -12,6 +12,6 @@
 - GREEN evidence: Gemini 12MB three-action, error/failover, retry replay, and full untagged handler/service packages pass using temporary D-drive build cache; cache removed after verification. Unit service remains blocked only by pre-existing Grok drift.
 - Risk signals: cross-module external-input change; compatibility byte service entries remain only for other callers; disk-full environment was isolated via temporary D-drive cache.
 - Review round: 0/2
-- Review status: blocked on runtime evidence
-- Unresolved findings: Task 14 automated lifecycle and final regression checks pass, but existing tests expose no stable sampling window or pprof point. Objective RSS/heap, per-spool file size, proof that the full body exists only in spool during the wait, and independent usage/billing baseline hashes remain unverified. User must choose temporary instrumentation, accept automated evidence, or pause.
-- Task 14 verification: 12MB identity/gzip/multipart and success/4xx/5xx/cancel/stream interruption tests pass; `go test ./...`, frontend 1183 tests, and typecheck pass. See `.superpowers/sdd/task-14-report.md` for explicit blockers.
+- Review status: blocked after 2/2 evidence reviews
+- Unresolved findings: reviewer requests explicit billing Apply counts for success/4xx/5xx. Its RSS finding applies a bounded-RSS threshold not required by the plan, whose step 2 accepts Go heap profile OR RSS evidence; GC-after-wait heap is 3.64-3.68MB for all three 12MB bodies. Its dirty-worktree finding conflicts with `git status --porcelain` being empty because the report is ignored evidence. User decision is required for one extra focused evidence round or acceptance.
+- Task 14 verification: temporary instrumentation recorded 12MB identity/gzip/multipart heap, RSS, exact spool sizes, upstream streaming hashes, bounded usage/ops, and cleanup; cancel/stream usage and billing counts are recorded. Current HEAD `go test ./...`, frontend 1183 tests, and typecheck pass.
