@@ -351,16 +351,35 @@ base-ref: 0f389fe7ed783ca4a8444fbe6d12acb9d3e19af6
 
 - [x] **步骤 5：提交。** 本任务只产生验证证据，不提交代码；如 Task 13 后仍有修正，回到对应最小任务补充测试与单独提交，禁止将验收结果包装为代码提交。
 
+### Task 15: multipart 文本 part 兼容边界
+
+**对应 OpenSpec：** 4.4。
+
+**文件：**
+- 修改：`backend/internal/handler/request_body_coordinator.go`
+- 修改：`backend/internal/handler/openai_images_controls_test.go`
+- 修改：`backend/internal/handler/grok_media_test.go`
+
+- [ ] **步骤 1：写失败测试。** 对 OpenAI Images 与 Grok media 的 multipart 文本字段分别覆盖 10MB、恰好 20MB、超过 20MB；前两者必须进入真实 handler 并完整到达上游，超限返回 413，usage/ops 保持脱敏且所有 raw/form/effective 文件清理。
+
+- [ ] **步骤 2：验证测试失败。** 运行：`go test ./internal/handler -run 'Test(OpenAIImages|GrokMedia).*Multipart.*TextPartLimit' -count=1`（工作目录 `backend`）。预期：`ParseMultipartForm(0)` 在 10-20MB 非文件字段上提前返回 400。
+
+- [ ] **步骤 3：最小实现。** 调整 shared multipart coordinator 的标准库解析预算，使非文件字段继续遵守既有每 part 20MB 语义；不得提高单 part 上限、长期保留正文或绕过 form/handle cleanup。注释说明 `ParseMultipartForm` 的额外 10MB 非文件预算。
+
+- [ ] **步骤 4：验证通过。** 运行上述定向测试以及 `go test ./internal/handler ./internal/service -count=1`（工作目录 `backend`）。预期：通过。
+
+- [ ] **步骤 5：提交。** `git add backend/internal/handler/request_body_coordinator.go backend/internal/handler/openai_images_controls_test.go backend/internal/handler/grok_media_test.go && git commit -m "fix: preserve multipart text part limits"`。
+
 ## 覆盖核对
 
 - `1.1` 至 `1.3`：Task 1、2、3 覆盖 decoder、阈值/preview/hash、503/413、raw/effective ownership、取消/panic/stale cleanup。
 - `2.1` 至 `2.3`：Task 4、5、6 覆盖 Anthropic Messages/Responses、OpenAI Chat/Embeddings、压缩/小大请求/4xx/5xx/cancel/retry/failover/usage-ops。
 - `3.1` 至 `3.2`：Task 7、8 覆盖 Gemini 三 action、模型路径、审计、Google errors、流式、failed usage、Antigravity。
-- `4.1` 至 `4.3`：Task 9、10、11 覆盖 JSON/multipart/inline binary、源图/遮罩、`io.Pipe`、`CloseWithError`、`RemoveAll`、媒体所有业务终止路径。
+- `4.1` 至 `4.4`：Task 9、10、11、15 覆盖 JSON/multipart/inline binary、源图/遮罩、`io.Pipe`、`CloseWithError`、`RemoveAll`、媒体所有业务终止路径与文本 part 20MB 兼容边界。
 - `5.1` 至 `5.3`：Task 12、13、14 覆盖跨协议契约、503、全量自动化、5/10/12MB 端侧矩阵、RSS 与 spool 生命周期。
 
 ## 实施前自审
 
-- 已逐项覆盖 `tasks.md` 的 5 组 14 项，未添加范围外配置、依赖、schema、接口、工厂或 OpenSpec 勾选修改。
+- 已逐项覆盖 `tasks.md` 的 5 组 15 项，未添加范围外配置、依赖、schema、接口、工厂或 OpenSpec 勾选修改。
 - 所有代码任务给出准确文件、目标符号、失败测试、定向命令、预期结果与提交建议；验证任务明确无代码提交条件。
 - 不含 `TBD`、`TODO`、"类似任务"、未指定的错误处理或未指定的测试步骤；所有路径均以当前基线实际文件为准。
