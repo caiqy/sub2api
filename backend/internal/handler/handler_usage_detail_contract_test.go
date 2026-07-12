@@ -274,6 +274,25 @@ func parseHandlerFunc(t *testing.T, name, funcName string) *ast.FuncDecl {
 	return nil
 }
 
+func readHandlerFunctionSource(t *testing.T, name, funcName string) string {
+	t.Helper()
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, filepath.Join(".", name), nil, 0)
+	require.NoError(t, err)
+	source, err := os.ReadFile(filepath.Join(".", name))
+	require.NoError(t, err)
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && fn.Name.Name == funcName {
+			start := fset.Position(fn.Pos()).Offset
+			end := fset.Position(fn.End()).Offset
+			return string(source[start:end])
+		}
+	}
+	t.Fatalf("function %s not found in %s", funcName, name)
+	return ""
+}
+
 func funcBodyContainsCall(fn *ast.FuncDecl, pkg, name string) bool {
 	found := false
 	ast.Inspect(fn.Body, func(node ast.Node) bool {

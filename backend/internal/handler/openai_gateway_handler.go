@@ -59,7 +59,11 @@ func openAIResponsesRequestBodyPreviewSnapshot(h *service.RequestBodyHandle) str
 	if h == nil {
 		return ""
 	}
-	return marshalOpenAIRequestBodyPreviewSnapshot(h.PreviewString(), h.Size())
+	preview := h.PreviewString()
+	if limit := openAIResponsesRequestBodyPreviewLimitBytes; limit > 0 && int64(len(preview)) > limit {
+		preview = preview[:limit]
+	}
+	return marshalOpenAIRequestBodyPreviewSnapshot(preview, h.Size())
 }
 
 func marshalOpenAIRequestBodyPreviewSnapshot(preview string, size int64) string {
@@ -220,32 +224,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 
-	requestBodyHandleOpts := openAIResponsesRequestBodyHandleOptions()
-	var rawHandle *service.RequestBodyHandle
-	var body []byte
-	var err error
-	contentEncoding := strings.ToLower(strings.TrimSpace(c.GetHeader("Content-Encoding")))
-	if contentEncoding != "" && contentEncoding != "identity" {
-		body, err = pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
-		if err != nil {
-			if maxErr, ok := extractMaxBytesError(err); ok {
-				h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
-				return
-			}
-			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
-			return
-		}
-		rawHandle, err = service.NewRequestBodyHandleFromBytes(body, requestBodyHandleOpts)
-	} else {
-		rawHandle, err = service.NewRequestBodyHandleFromReader(c.Request.Body, requestBodyHandleOpts)
-		if err == nil {
-			body, err = rawHandle.ReadAll()
-		}
-	}
+	coordinator, err := newJSONRequestBody(c.Request)
 	if err != nil {
-		if rawHandle != nil {
-			service.CleanupRequestBodyHandle(rawHandle)
-		}
 		if errors.Is(err, service.ErrRequestBodySpool) {
 			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 			return
@@ -257,8 +237,21 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 		return
 	}
-	defer func() { service.CleanupRequestBodyHandle(rawHandle) }()
-	service.SetUsageRequestBody(c, openAIResponsesRequestBodyPreviewSnapshot(rawHandle))
+	defer coordinator.Cleanup()
+	body, err := coordinator.ReadRaw()
+	if err != nil {
+		if errors.Is(err, service.ErrRequestBodySpool) {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
+		if maxErr, ok := extractMaxBytesError(err); ok {
+			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+			return
+		}
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		return
+	}
+	service.SetUsageRequestBody(c, openAIResponsesRequestBodyPreviewSnapshot(coordinator.raw))
 
 	if len(body) == 0 {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
@@ -267,7 +260,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 
 	setOpsRequestContext(c, "", false)
 	sessionHashBody := body
-	effectiveHandle := rawHandle
 	if service.IsOpenAIResponsesCompactPathForTest(c) {
 		if compactSeed := strings.TrimSpace(gjson.GetBytes(body, "prompt_cache_key").String()); compactSeed != "" {
 			c.Set(service.OpenAICompactSessionSeedKeyForTest(), compactSeed)
@@ -279,8 +271,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		}
 		if normalizedCompact {
 			body = normalizedCompactBody
-			effectiveHandle, err = service.NewRequestBodyHandleFromBytes(body, requestBodyHandleOpts)
-			if err != nil {
+			if err := coordinator.SetEffectiveBytes(body); err != nil {
 				if errors.Is(err, service.ErrRequestBodySpool) {
 					h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 				} else {
@@ -288,9 +279,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				}
 				return
 			}
-			defer func() { service.CleanupRequestBodyHandle(effectiveHandle) }()
 		}
 	}
+	effectiveHandle := coordinator.Effective()
 	requestPayloadHash := effectiveHandle.Hash()
 	service.BindOpenAIRequestBodyHandle(c, effectiveHandle)
 
