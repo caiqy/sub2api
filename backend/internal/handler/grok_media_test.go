@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -60,6 +61,23 @@ func TestShouldRecordGrokMediaUsage(t *testing.T) {
 			require.Equal(t, tt.want, shouldRecordGrokMediaUsage(tt.endpoint, tt.model))
 		})
 	}
+}
+
+func TestGrokVideoStatus_UsesNoRequestBodyHandle(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 906, Platform: service.PlatformGrok, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
+	parentID := int64(908)
+	account := &service.Account{ID: 907, Name: "grok", Platform: service.PlatformGrok, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, ParentAccountID: &parentID, Credentials: map[string]any{"base_url": "https://api.x.ai/v1"}}
+	parent := &service.Account{ID: parentID, Name: "parent", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Credentials: map[string]any{"access_token": "token"}}
+	upstream := &openAIImagesHandlerHTTPUpstream{resp: &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"id":"req_123","status":"completed"}`))}}
+	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &terminalUsageGrokAccountRepo{openAIRetryAccountRepoStub{accounts: []*service.Account{account, parent}}}, upstream)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/videos/req_123", nil)
+
+	env.router("/videos/:request_id", env.handler.GrokVideoStatus).ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, []int64{account.ID}, upstream.calls())
 }
 
 func TestGrokMedia_MultipartSpoolPreservesFilesAndOmitsSnapshots(t *testing.T) {

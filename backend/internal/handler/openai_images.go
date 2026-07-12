@@ -272,7 +272,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 					accountReleaseFunc()
 				}
 			}()
-			if parsed.Multipart {
+			if parsed.Multipart && account.Type == service.AccountTypeAPIKey {
 				mappedModel := parsed.Model
 				if channelMapping.Mapped {
 					mappedModel = channelMapping.MappedModel
@@ -310,6 +310,10 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			return h.ensureForwardErrorResponse(c, streamStarted)
 		}
 		if err != nil {
+			if errors.Is(err, service.ErrRequestBodySpool) {
+				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+				return
+			}
 			if result != nil && result.ImageCount > 0 {
 				reqLog.Warn("openai.images.forward_partial_error_with_image_result",
 					zap.Int64("account_id", account.ID),

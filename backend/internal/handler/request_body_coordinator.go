@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -120,6 +121,19 @@ func (c *requestBodyCoordinator) SetEffectiveMultipart(write func(*multipart.Wri
 	writer := multipart.NewWriter(pipe)
 	done := make(chan error, 1)
 	go func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				err, ok := recovered.(error)
+				if ok {
+					err = fmt.Errorf("multipart producer panic: %w", err)
+				} else {
+					err = fmt.Errorf("multipart producer panic: %v", recovered)
+				}
+				// Close first so the consumer cannot wait for the producer's result.
+				_ = pipe.CloseWithError(err)
+				done <- err
+			}
+		}()
 		if err := write(writer); err != nil {
 			_ = pipe.CloseWithError(err)
 			done <- err

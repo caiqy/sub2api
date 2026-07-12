@@ -263,6 +263,29 @@ func TestRequestBodyCoordinator_MultipartPipe(t *testing.T) {
 	}
 }
 
+func TestRequestBodyCoordinator_MultipartPipeRecoversProducerPanic(t *testing.T) {
+	oldOptions := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir(), FilePrefix: "sub2api-test-"}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+
+	coordinator, err := newJSONRequestBody(httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"raw":true}`)))
+	if err != nil {
+		t.Fatalf("newJSONRequestBody: %v", err)
+	}
+	t.Cleanup(coordinator.Cleanup)
+
+	producerErr := errors.New("producer exploded")
+	_, err = coordinator.SetEffectiveMultipart(func(*multipart.Writer) error {
+		panic(producerErr)
+	})
+	if err == nil || !errors.Is(err, producerErr) || !strings.Contains(err.Error(), "producer exploded") {
+		t.Fatalf("SetEffectiveMultipart error = %v, want recovered producer panic", err)
+	}
+	if coordinator.Effective() != coordinator.raw {
+		t.Fatal("panicking producer replaced the effective handle")
+	}
+}
+
 func TestRequestBodyCoordinator_JSONEffective(t *testing.T) {
 	oldOptions := jsonRequestBodyHandleOptions
 	jsonRequestBodyHandleOptions.TempDir = t.TempDir()
