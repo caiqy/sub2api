@@ -46,6 +46,7 @@ func TestHandleResponsesStreamingResponse_ReturnsScannerErrorWithoutCompleting(t
 	require.ErrorContains(t, err, "upstream stream read failed")
 	require.Nil(t, result)
 	require.NotContains(t, rec.Body.String(), "response.completed")
+	require.NotContains(t, rec.Body.String(), `{"error":`)
 }
 
 func TestHandleResponsesStreamingResponse_IgnoresScannerErrorAfterCompletedTerminal(t *testing.T) {
@@ -79,4 +80,20 @@ func TestHandleResponsesStreamingResponse_IgnoresScannerErrorAfterCompletedTermi
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, 1, strings.Count(rec.Body.String(), "event: response.completed\n"), rec.Body.String())
+}
+
+func TestWriteResponsesError_DoesNotAppendJSONAfterCommittedStream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.WriteHeader(http.StatusOK)
+	_, err := c.Writer.WriteString("event: response.created\n\n")
+	require.NoError(t, err)
+
+	writeResponsesError(c, http.StatusServiceUnavailable, "server_error", "Failed to spool request body")
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "event: response.created\n\n", rec.Body.String())
 }

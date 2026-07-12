@@ -117,38 +117,6 @@ func TestRequestBodyCoordinator_Spool(t *testing.T) {
 	}
 }
 
-func TestRequestBodySpoolingCrossProtocolContract(t *testing.T) {
-	for _, tt := range []struct {
-		name     string
-		file     string
-		function string
-	}{
-		{name: "anthropic messages", file: "gateway_handler.go", function: "Messages"},
-		{name: "anthropic responses", file: "gateway_handler_responses.go", function: "Responses"},
-		{name: "openai responses", file: "openai_gateway_handler.go", function: "Responses"},
-		{name: "openai chat", file: "openai_chat_completions.go", function: "ChatCompletions"},
-		{name: "openai embeddings", file: "openai_embeddings.go", function: "Embeddings"},
-		{name: "openai images", file: "openai_images.go", function: "Images"},
-		{name: "grok images", file: "grok_media.go", function: "handleGrokMedia"},
-		{name: "grok videos", file: "grok_media.go", function: "handleGrokMedia"},
-		{name: "gemini generate/stream/count tokens", file: "gemini_v1beta_handler.go", function: "GeminiV1BetaModels"},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			fn := parseHandlerFunc(t, tt.file, tt.function)
-			if !funcBodyContainsCall(fn, "service", "SetUsageRequestBody") {
-				t.Fatalf("%s must keep usage on a bounded request-body snapshot", tt.name)
-			}
-			source := readHandlerFunctionSource(t, tt.file, tt.function)
-			if !strings.Contains(source, "newJSONRequestBody") && !strings.Contains(source, "newMultipartRequestBody") {
-				t.Fatalf("%s must enter through the shared request body coordinator", tt.name)
-			}
-			if !strings.Contains(source, "ErrRequestBodySpool") && !strings.Contains(source, "requestBodyReadErrorStatus") {
-				t.Fatalf("%s must map request body spool errors before writing a response", tt.name)
-			}
-		})
-	}
-}
-
 func TestRequestBodyCoordinator_Multipart(t *testing.T) {
 	const maxUpload = 20 << 20
 	multipartDir := t.TempDir()

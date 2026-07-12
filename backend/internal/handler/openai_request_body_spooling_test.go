@@ -7,10 +7,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -202,6 +204,74 @@ func TestOpenAIGatewayHandler_ChatAndEmbeddingsUpstreamErrorsPreserveStatusAndMa
 	}
 }
 
+func TestOpenAIGatewayHandler_ChatAndEmbeddingsSpoolFailuresReturn503WithoutUsage(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		route string
+		body  string
+	}{
+		{"chat", "/v1/chat/completions", `{"model":"alias-model","messages":[{"role":"user","content":"hello"}]}`},
+		{"embeddings", "/v1/embeddings", `{"model":"alias-model","input":"hello"}`},
+	} {
+		t.Run(tt.name+"/raw-read", func(t *testing.T) {
+			group := &service.Group{ID: 5, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+			account := &service.Account{ID: 51, Name: "spool", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "sk-spool"}}
+			env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, &openAIStatusSpoolUpstream{})
+			router := env.router(tt.route, func(c *gin.Context) {
+				if tt.route == "/v1/chat/completions" {
+					env.handler.ChatCompletions(c)
+					return
+				}
+				env.handler.Embeddings(c)
+			})
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, tt.route, nil)
+			req.Body = io.NopCloser(requestBodyErrorReader{err: service.ErrRequestBodySpool})
+			router.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
+			require.Equal(t, "api_error", gjson.Get(rec.Body.String(), "error.type").String())
+			require.Nil(t, env.usageRepo.lastLog)
+		})
+
+		if tt.name != "chat" {
+			continue
+		}
+		t.Run(tt.name+"/effective-open", func(t *testing.T) {
+			rawDir, effectiveDir := t.TempDir(), t.TempDir()
+			oldOptions := jsonRequestBodyHandleOptions
+			jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: rawDir}
+			t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+			t.Setenv("TMPDIR", effectiveDir)
+			t.Setenv("TMP", effectiveDir)
+			t.Setenv("TEMP", effectiveDir)
+
+			group := &service.Group{ID: 6, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+			account := &service.Account{ID: 61, Name: "spool", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "sk-spool"}}
+			upstream := &openAISpoolDeletingUpstream{dirs: []string{rawDir, effectiveDir}}
+			env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
+			router := env.router(tt.route, func(c *gin.Context) {
+				if tt.route == "/v1/chat/completions" {
+					env.handler.ChatCompletions(c)
+					return
+				}
+				env.handler.Embeddings(c)
+			})
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, tt.route, strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
+			require.Equal(t, "api_error", gjson.Get(rec.Body.String(), "error.type").String())
+			require.Nil(t, env.usageRepo.lastLog)
+			require.Len(t, upstream.accountIDs, 1)
+			require.Empty(t, readTestDir(t, rawDir))
+			require.Empty(t, readTestDir(t, effectiveDir))
+		})
+	}
+}
+
 func TestOpenAIGatewayHandler_ChatAndEmbeddingsCanceledRequestsCleanSpools(t *testing.T) {
 	for _, tt := range []struct {
 		name  string
@@ -262,6 +332,34 @@ type openAIStatusSpoolUpstream struct {
 
 	status int
 	body   []byte
+}
+
+type openAISpoolDeletingUpstream struct {
+	service.HTTPUpstream
+
+	dirs       []string
+	accountIDs []int64
+}
+
+func (u *openAISpoolDeletingUpstream) Do(req *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
+	u.accountIDs = append(u.accountIDs, accountID)
+	defer req.Body.Close()
+	for _, dir := range u.dirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return nil, err
+		}
+		for _, entry := range entries {
+			if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return nil, fmt.Errorf("read request body: %w", service.ErrRequestBodySpool)
+}
+
+func (u *openAISpoolDeletingUpstream) DoWithTLS(req *http.Request, proxyURL string, accountID int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, proxyURL, accountID, concurrency)
 }
 
 func (u *openAIStatusSpoolUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
