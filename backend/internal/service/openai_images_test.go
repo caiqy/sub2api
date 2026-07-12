@@ -110,6 +110,29 @@ func TestOpenAIGatewayServiceParseOpenAIImagesRequest_MultipartEdit(t *testing.T
 	require.Equal(t, OpenAIImagesCapabilityNative, parsed.RequiredCapability)
 }
 
+func TestWriteOpenAIImagesMultipartForm_SourceOpenFailureIsSpoolError(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("TMP", tempDir)
+	t.Setenv("TEMP", tempDir)
+
+	var body bytes.Buffer
+	input := multipart.NewWriter(&body)
+	file, err := input.CreateFormFile("image", "source.png")
+	require.NoError(t, err)
+	_, err = file.Write([]byte("image"))
+	require.NoError(t, err)
+	require.NoError(t, input.Close())
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body.Bytes()))
+	req.Header.Set("Content-Type", input.FormDataContentType())
+	require.NoError(t, req.ParseMultipartForm(0))
+	require.NoError(t, req.MultipartForm.RemoveAll())
+
+	output := multipart.NewWriter(io.Discard)
+	err = WriteOpenAIImagesMultipartForm(output, req.MultipartForm, "gpt-image-2")
+	require.ErrorIs(t, err, ErrRequestBodySpool)
+}
+
 func TestOpenAIImagesRequestModerationBody_JSONEditIncludesInputImageURLs(t *testing.T) {
 	parsed := &OpenAIImagesRequest{
 		Endpoint:       openAIImagesEditsEndpoint,

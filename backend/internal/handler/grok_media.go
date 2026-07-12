@@ -118,6 +118,10 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			prepareErr = coordinator.SetEffectiveBytes(forwardBody)
 		}
 		if prepareErr != nil {
+			if errors.Is(prepareErr, service.ErrRequestBodySpool) {
+				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+				return
+			}
 			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to prepare request body")
 			return
 		}

@@ -6,6 +6,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,22 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+type grokMediaSpoolSwitchReadCloser struct {
+	io.Reader
+	onEOF func()
+}
+
+func (r *grokMediaSpoolSwitchReadCloser) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	if err == io.EOF && r.onEOF != nil {
+		r.onEOF()
+		r.onEOF = nil
+	}
+	return n, err
+}
+
+func (r *grokMediaSpoolSwitchReadCloser) Close() error { return nil }
 
 func TestShouldRecordGrokMediaUsage(t *testing.T) {
 	tests := []struct {
@@ -190,4 +207,39 @@ func TestGrokMedia_MultipartEditTextSourcesRebuildUpstreamJSON(t *testing.T) {
 			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 		})
 	}
+}
+
+func TestGrokMedia_MultipartEffectiveSpoolFailureReturns503(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	oldOptions := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 10 << 20, TempDir: t.TempDir(), FilePrefix: "sub2api-test-"}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	require.NoError(t, writer.WriteField("model", "grok-imagine"))
+	require.NoError(t, writer.WriteField("image_url", "https://example.com/source.png"))
+	require.NoError(t, writer.Close())
+
+	group := &service.Group{ID: 916, Platform: service.PlatformGrok, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
+	parentID := int64(918)
+	account := &service.Account{ID: 917, Name: "grok", Platform: service.PlatformGrok, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, ParentAccountID: &parentID, Credentials: map[string]any{"base_url": "https://api.x.ai/v1"}}
+	parent := &service.Account{ID: parentID, Name: "parent", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Credentials: map[string]any{"access_token": "token"}}
+	upstream := &openAIImagesHandlerHTTPUpstream{}
+	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &terminalUsageGrokAccountRepo{openAIRetryAccountRepoStub{accounts: []*service.Account{account, parent}}}, upstream)
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", nil)
+	req.Body = &grokMediaSpoolSwitchReadCloser{
+		Reader: bytes.NewReader(body.Bytes()),
+		onEOF: func() {
+			jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: filepath.Join(t.TempDir(), "missing"), FilePrefix: "sub2api-test-"}
+		},
+	}
+	req.ContentLength = int64(body.Len())
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rec := httptest.NewRecorder()
+
+	env.router("/v1/images/edits", env.handler.GrokImages).ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
+	require.Empty(t, upstream.calls())
 }

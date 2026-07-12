@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -273,6 +274,48 @@ func TestOpenAIGatewayHandlerImages_MultipartEffectiveSpoolFailureReturns503(t *
 
 	require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
 	require.Empty(t, upstream.calls(), "effective spool failure must not send an upstream request")
+}
+
+func TestOpenAIGatewayHandlerImages_MultipartSourceOpenFailureReturns503WithoutMarkingAccount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	formTempDir := t.TempDir()
+	t.Setenv("TMP", formTempDir)
+	t.Setenv("TEMP", formTempDir)
+	oldOptions := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir(), FilePrefix: "sub2api-test-"}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	require.NoError(t, writer.WriteField("model", "gpt-image-2"))
+	image, err := writer.CreateFormFile("image", "source.png")
+	require.NoError(t, err)
+	_, err = image.Write([]byte("image"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	group := &service.Group{ID: 914, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
+	account := &service.Account{ID: 915, Name: "api-key", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test"}}
+	upstream := &openAIImagesHandlerHTTPUpstream{}
+	repo := openAIImagesSpoolSwitchRepo{
+		openAIRetryAccountRepoStub: &openAIRetryAccountRepoStub{accounts: []*service.Account{account}},
+		onList: func() {
+			entries, readErr := os.ReadDir(formTempDir)
+			require.NoError(t, readErr)
+			for _, entry := range entries {
+				require.NoError(t, os.Remove(filepath.Join(formTempDir, entry.Name())))
+			}
+		},
+	}
+	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, repo, upstream)
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body.Bytes()))
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rec := httptest.NewRecorder()
+
+	env.router("/v1/images/edits", env.handler.Images).ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
+	require.Empty(t, upstream.calls(), "source spool failure must not reach upstream or mark the account")
 }
 
 func TestOpenAIGatewayHandlerImages_OAuthMultipartSkipsEffectiveSpool(t *testing.T) {

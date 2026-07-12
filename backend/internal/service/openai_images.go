@@ -1006,15 +1006,19 @@ func WriteOpenAIImagesMultipartForm(writer *multipart.Writer, form *multipart.Fo
 		for _, file := range files {
 			source, err := file.Open()
 			if err != nil {
-				return err
+				return fmt.Errorf("%w: open multipart source: %v", ErrRequestBodySpool, err)
 			}
 			target, err := writer.CreatePart(cloneMultipartHeader(file.Header))
-			if err == nil {
-				_, err = io.Copy(target, source)
-			}
-			_ = source.Close()
 			if err != nil {
+				_ = source.Close()
 				return err
+			}
+			if _, err = io.Copy(target, source); err != nil {
+				_ = source.Close()
+				return fmt.Errorf("%w: copy multipart source: %v", ErrRequestBodySpool, err)
+			}
+			if err := source.Close(); err != nil {
+				return fmt.Errorf("%w: close multipart source: %v", ErrRequestBodySpool, err)
 			}
 		}
 	}
