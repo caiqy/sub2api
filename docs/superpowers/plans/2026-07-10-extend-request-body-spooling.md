@@ -324,15 +324,15 @@ base-ref: 0f389fe7ed783ca4a8444fbe6d12acb9d3e19af6
 **文件：**
 - 修改：仅修复 Task 1-12 定向测试发现的现有实现或测试文件；不得新增功能范围。
 
-- [ ] **步骤 1：运行后端全量测试。** 运行：`go test ./... -count=1`（工作目录 `backend`）。预期：全部通过。
+- [x] **步骤 1：运行后端全量测试。** 运行：`go test ./... -count=1`（工作目录 `backend`）。预期：全部通过。
 
-- [ ] **步骤 2：运行前端契约验证。** 运行：`pnpm test:run`（工作目录 `frontend`），随后运行 `pnpm typecheck`（工作目录 `frontend`）。预期：全部通过，usage detail 展示契约未变。
+- [x] **步骤 2：运行前端契约验证。** 运行：`pnpm test:run`（工作目录 `frontend`），随后运行 `pnpm typecheck`（工作目录 `frontend`）。预期：全部通过，usage detail 展示契约未变。
 
-- [ ] **步骤 3：执行受控端侧矩阵。** 在测试环境分别发送 `5MB`、`10MB`、`12MB` 的 identity JSON、gzip JSON、multipart；对每个请求记录客户端 SHA-256、模拟上游 SHA-256、usage detail、ops snapshot 和 `sub2api-request-body-*` 文件列表。断言 5MB/10MB 不创建 spool、12MB 创建并在 response 后删除，客户端 hash 与上游 hash 相同，gzip 以解压后大小判定。
+- [x] **步骤 3：执行受控端侧矩阵。** 在测试环境分别发送 `5MB`、`10MB`、`12MB` 的 identity JSON、gzip JSON、multipart；对每个请求记录客户端 SHA-256、模拟上游 SHA-256、usage detail、ops snapshot 和 `sub2api-request-body-*` 文件列表。断言 5MB/10MB 不创建 spool、12MB 创建并在 response 后删除，客户端 hash 与上游 hash 相同，gzip 以解压后大小判定。
 
-- [ ] **步骤 4：复跑受影响测试。** 运行：`go test ./internal/pkg/httputil ./internal/handler ./internal/service -count=1`（工作目录 `backend`）。预期：通过。
+- [x] **步骤 4：复跑受影响测试。** 运行：`go test ./internal/pkg/httputil ./internal/handler ./internal/service -count=1`（工作目录 `backend`）。预期：通过。
 
-- [ ] **步骤 5：提交。** 若步骤 1-4 没有修正，不创建空提交；若修正了测试，执行 `git add backend/internal/pkg/httputil/body_test.go backend/internal/handler/request_body_coordinator_test.go backend/internal/handler/gateway_request_body_spooling_test.go backend/internal/handler/openai_request_body_spooling_test.go backend/internal/handler/openai_gateway_usage_context_test.go backend/internal/handler/gemini_v1beta_handler_test.go backend/internal/handler/grok_media_test.go && git commit -m "test: stabilize request body spooling coverage"`。
+- [x] **步骤 5：提交。** 若步骤 1-4 没有修正，不创建空提交；若修正了测试，执行 `git add backend/internal/pkg/httputil/body_test.go backend/internal/handler/request_body_coordinator_test.go backend/internal/handler/gateway_request_body_spooling_test.go backend/internal/handler/openai_request_body_spooling_test.go backend/internal/handler/openai_gateway_usage_context_test.go backend/internal/handler/gemini_v1beta_handler_test.go backend/internal/handler/grok_media_test.go && git commit -m "test: stabilize request body spooling coverage"`。
 
 ### Task 14: RSS、生命周期与业务语义端侧验收
 

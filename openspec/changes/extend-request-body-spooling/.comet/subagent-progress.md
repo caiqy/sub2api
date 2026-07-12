@@ -2,8 +2,8 @@
 
 - Change: extend-request-body-spooling
 - Review mode: thorough
-- Current task: Task 13: 全量自动化验证
-- OpenSpec mapping: 5.2 执行定向、全量、竞态与前端自动化验证。
+- Current task: Task 14: RSS、生命周期与业务语义端侧验收
+- OpenSpec mapping: 5.3 在受控延迟上游环境验证 RSS、长期引用释放、清理与业务语义。
 - Stage: pending
 - Base commit: d0990d3844afe050a8d4d3495175cb65606f04be
 - Implementation commit: pending
@@ -13,5 +13,5 @@
 - Risk signals: cross-module external-input change; compatibility byte service entries remain only for other callers; disk-full environment was isolated via temporary D-drive cache.
 - Review round: 0/2
 - Review status: pending
-- Unresolved findings: none; Task 12 completed in 914719c58, a08495821, and 56247ad2f; final review approved.
-- Task 12 verification: cross-protocol targeted tests, untagged handler/service full packages, and handler unit-tagged full package passed. Unit-tagged service remains blocked only by pre-existing Grok test drift.
+- Unresolved findings: none; Task 13 completed in 179ce52ea and 3dd893d75; final review approved.
+- Task 13 verification: controlled 9-case size matrix, `go test ./...`, frontend 1183 tests, typecheck, and build passed. Unit-tagged service remains blocked by pre-existing Grok/Codex drift; race is unavailable because CGO and a C compiler are absent.
