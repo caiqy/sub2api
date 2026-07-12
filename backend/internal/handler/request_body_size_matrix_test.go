@@ -5,12 +5,14 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -69,6 +71,8 @@ func testRequestBodySizeMatrixJSON(t *testing.T, size int, compressed bool) {
 	}
 
 	upstream := &matrixBlockedUpstream{started: make(chan struct{}), release: make(chan struct{})}
+	done := make(chan struct{})
+	release := cleanupMatrixBlockedHandler(t, upstream.release, done)
 	group := &service.Group{ID: 1301, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
 	account := &service.Account{ID: 1301, Name: "matrix", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-matrix"}}
 	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
@@ -83,7 +87,6 @@ func testRequestBodySizeMatrixJSON(t *testing.T, size int, compressed bool) {
 	if compressed {
 		req.Header.Set("Content-Encoding", "gzip")
 	}
-	done := make(chan struct{})
 	go func() { router.ServeHTTP(recorder, req); close(done) }()
 	waitMatrixSignal(t, upstream.started, "JSON upstream")
 
@@ -96,15 +99,17 @@ func testRequestBodySizeMatrixJSON(t *testing.T, size int, compressed bool) {
 	require.NotNil(t, detail)
 	ops, ok := requestContext.Get(service.OpsUpstreamRequestBodyKey)
 	require.True(t, ok)
-	assertBoundedOpenAIReplaySnapshot(t, "usage request", detail.RequestBody, clientBody)
-	assertBoundedOpenAIReplaySnapshot(t, "usage upstream", detail.UpstreamRequestBody, upstreamBody)
-	assertBoundedOpenAIReplaySnapshot(t, "ops upstream", ops.(string), upstreamBody)
-	assertMatrixRequestBodyFiles(t, size > 10<<20, rawDir, effectiveDir)
+	assertMatrixRequestBodySnapshot(t, "usage request", detail.RequestBody, clientBody, "")
+	assertMatrixRequestBodySnapshot(t, "usage upstream", detail.UpstreamRequestBody, upstreamBody, "")
+	assertMatrixRequestBodySnapshot(t, "ops upstream", ops.(string), upstreamBody, "")
+	assertMatrixTempFiles(t, rawDir, "sub2api-request-body-", size > 10<<20)
+	assertMatrixTempFiles(t, effectiveDir, "sub2api-request-body-", false)
 
-	close(upstream.release)
+	release()
 	waitMatrixSignal(t, done, "JSON handler completion")
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
-	assertMatrixRequestBodyFiles(t, false, rawDir, effectiveDir)
+	assertMatrixTempFiles(t, rawDir, "sub2api-request-body-", false)
+	assertMatrixTempFiles(t, effectiveDir, "sub2api-request-body-", false)
 }
 
 func testRequestBodySizeMatrixMultipart(t *testing.T, size int) {
@@ -120,6 +125,8 @@ func testRequestBodySizeMatrixMultipart(t *testing.T, size int) {
 
 	clientBody, contentType := matrixMultipartBody(t, size)
 	upstream := &openAIImagesSpoolUpstream{started: make(chan struct{}), release: make(chan struct{})}
+	done := make(chan struct{})
+	release := cleanupMatrixBlockedHandler(t, upstream.release, done)
 	group := &service.Group{ID: 1302, Platform: service.PlatformGrok, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
 	parentID := int64(1303)
 	account := &service.Account{ID: 1302, Name: "matrix", Platform: service.PlatformGrok, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, ParentAccountID: &parentID, Credentials: map[string]any{"base_url": "https://api.x.ai/v1"}}
@@ -133,7 +140,6 @@ func testRequestBodySizeMatrixMultipart(t *testing.T, size int) {
 	recorder := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(clientBody))
 	req.Header.Set("Content-Type", contentType)
-	done := make(chan struct{})
 	go func() { router.ServeHTTP(recorder, req); close(done) }()
 	waitMatrixSignal(t, upstream.started, "multipart upstream")
 
@@ -147,15 +153,16 @@ func testRequestBodySizeMatrixMultipart(t *testing.T, size int) {
 	ops, ok := requestContext.Get(service.OpsUpstreamRequestBodyKey)
 	require.True(t, ok)
 	for _, snapshot := range []string{detail.RequestBody, detail.UpstreamRequestBody, ops.(string)} {
-		require.NotEmpty(t, snapshot)
-		require.NotContains(t, snapshot, "matrix-file-")
+		assertMatrixRequestBodySnapshot(t, "multipart snapshot", snapshot, clientBody, "matrix-file-")
 	}
-	assertMatrixRequestBodyFiles(t, size > 10<<20, rawDir)
+	assertMatrixTempFiles(t, rawDir, "sub2api-request-body-", size > 10<<20)
+	assertMatrixTempFiles(t, formDir, "multipart-", true)
 
-	close(upstream.release)
+	release()
 	waitMatrixSignal(t, done, "multipart handler completion")
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
-	assertMatrixRequestBodyFiles(t, false, rawDir)
+	assertMatrixTempFiles(t, rawDir, "sub2api-request-body-", false)
+	assertMatrixTempFiles(t, formDir, "multipart-", false)
 }
 
 func matrixJSONBody(t *testing.T, size int) []byte {
@@ -192,19 +199,57 @@ func matrixMultipartBody(t *testing.T, size int) ([]byte, string) {
 	return body.Bytes(), contentType
 }
 
-func assertMatrixRequestBodyFiles(t *testing.T, want bool, dirs ...string) {
+type matrixRequestBodyPreview struct {
+	Kind      string `json:"kind"`
+	Preview   string `json:"preview"`
+	Truncated bool   `json:"truncated"`
+	Size      int64  `json:"size"`
+}
+
+func assertMatrixRequestBodySnapshot(t *testing.T, name, raw string, body []byte, omitted string) {
 	t.Helper()
-	found := false
-	for _, dir := range dirs {
-		entries, err := os.ReadDir(dir)
-		require.NoError(t, err)
-		for _, entry := range entries {
-			if strings.HasPrefix(entry.Name(), "sub2api-request-body-") {
-				found = true
-			}
+	var snapshot matrixRequestBodyPreview
+	require.NoErrorf(t, json.Unmarshal([]byte(raw), &snapshot), "%s must be a request body snapshot", name)
+	require.Equalf(t, "request_body_preview", snapshot.Kind, "%s snapshot kind", name)
+	require.Equalf(t, int64(len(body)), snapshot.Size, "%s snapshot size", name)
+	require.Truef(t, snapshot.Truncated, "%s snapshot must be truncated", name)
+	require.NotEmptyf(t, snapshot.Preview, "%s snapshot preview", name)
+	require.LessOrEqualf(t, len(snapshot.Preview), int(openAIResponsesRequestBodyPreviewLimitBytes), "%s preview exceeds the production limit", name)
+	if omitted != "" {
+		require.NotContainsf(t, snapshot.Preview, omitted, "%s must omit multipart file content", name)
+		require.NotContainsf(t, raw, omitted, "%s wrapper must omit multipart file content", name)
+	}
+}
+
+func assertMatrixTempFiles(t *testing.T, dir, prefix string, want bool) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	if !want {
+		require.Emptyf(t, entries, "expected %s to be empty", dir)
+		return
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), prefix) {
+			return
 		}
 	}
-	require.Equal(t, want, found)
+	t.Fatalf("expected %s files in %s", prefix, dir)
+}
+
+func cleanupMatrixBlockedHandler(t *testing.T, releaseChan chan struct{}, done <-chan struct{}) func() {
+	t.Helper()
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseChan) }) }
+	t.Cleanup(func() {
+		release()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("timed out waiting for blocked matrix handler cleanup")
+		}
+	})
+	return release
 }
 
 type matrixBlockedUpstream struct {
