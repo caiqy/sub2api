@@ -125,7 +125,21 @@ openspec/changes/merge-upstream-v0-1-151/tasks.md
 
 - passthrough 在 `httpUpstream.Do` 前记录 owned final body 的 usage/ops 快照并标记 upstream attempted；非 failover HTTP 400 现在也会触发 failed-usage gating。
 - `ForwardAsChatCompletions` 的 unsupported Responses fallback 已有 replay 路径：`openAIRequestBodyBytes(c, nil)` 从 `BindOpenAIRequestBodyHandle` 读取原始 CC body，覆盖 spooled handle；注释已明确这一所有权边界。
-- 普通 `Forward` 的 reviewer 快照问题经绑定 spooled handle 且仅 account rule 改 body 的回归验证为误报：`openAIUpstreamRequestBodyPreview` 优先读取实际 request owned handle，collector 与 ops preview 均等于 wire body。
+- 普通 `Forward` 的 final preview 曾被旧入站 handle 覆盖；现在仅当最终 request 不拥有 body handle 时才回退入站 preview。绑定 spooled handle、显式 `instructions` 且仅 account rule 改 body 的回归测试证明 collector 与 ops preview 等于 wire body。
 - 受冲突前端文件 `UsageView.vue` 补回 `closeUsageDetailModal` 缺失的闭合；其测试补齐 fake timer 与 `listErrorLogs` mock，`CreateUserRequest` contract 补齐既有 `role` 字段。
 - 验证通过：`go test ./internal/service -count=1`、`go test ./cmd/server -run '^$'`、`go generate ./ent` 后 `git diff --exit-code -- ent`、`pnpm test:run src/views/admin/__tests__/UsageView.spec.ts src/i18n/__tests__/localesNoKeyCollision.spec.ts`、`pnpm typecheck`。
-- Wire 一致性未通过：`go run -mod=mod github.com/google/wire/cmd/wire` 报 `GatewayService` 与 `BatchImageWorkerRuntime` provider 缺失；未产生 `wire_gen.go` diff，超出本次 compatibility fix 范围。
+- Wire 首次生成暴露 `GatewayService` 与 `BatchImageWorkerRuntime` provider 缺失；补齐既有 provider 后又发现 quota flusher 误用不启动后台任务的 `NewUserPlatformQuotaUsageFlusher`。最终 `ProviderSet` 改用 `ProvideUserPlatformQuotaUsageFlusher`，生成代码同步调用该 provider。
+
+## Task 3 Review Fix（第 2/2 轮）
+
+- quota flusher provider 恢复 `Start()` 启动语义；`TestProvideUserPlatformQuotaUsageFlusher_EnabledStartsFlush` 验证启用配置会实际消费并落库 quota snapshot。
+- `adminServiceImpl` 恢复 `OpenAIProbeController`，`UpdateAccount` 在 probe 从开到关时删除 probe entry；仅 `layered_probe` 来源会清理临时不可调度状态和 runtime block。
+- 新增 handler 级 passthrough HTTP 400 failed-usage 回归，验证真实上游错误会写入 usage detail，而不是因 attempted marker 缺失被跳过。
+- 修复 unit-tag 测试桩的仓储接口漂移后，probe toggle 与 BatchImage worker runtime 聚焦测试实际执行通过。
+- `go test ./internal/service -run '^(TestProvideUserPlatformQuotaUsageFlusher_EnabledStartsFlush|TestOpenAIForwardBoundInboundHandleSnapshotsFinalWireBody|TestOpenAIPassthroughCapturesAttemptBeforeNonFailoverHTTPError)$' -count=1`：PASS。
+- `go test ./internal/handler -run '^(TestOpenAIGatewayHandler_PassthroughHTTP400CreatesFailedUsage|TestOpenAIGatewayHandler_UsageDetailStoresInjectedUpstreamRequestBody)$' -count=1`：PASS。
+- `go test -tags unit ./internal/service -run '^(TestAdminService_.*ProbeToggle.*|TestBatchImageWorkerRuntime_.*)$' -count=1`：PASS。
+- `go generate ./cmd/server` 连续两次生成的 `wire_gen.go` SHA-256 均为 `48F0188F1CEE9CD50BDD34910517834B1977FD90A447B29637E4A3EC7334E4EB`。
+- `go test ./cmd/server -run '^$' -count=1`、`go test ./internal/service -count=1`：PASS。
+- `pnpm test:run -- src/views/admin/__tests__/UsageView.spec.ts src/i18n/__tests__/localesNoKeyCollision.spec.ts`：2 files / 17 tests PASS。
+- `pnpm typecheck`：PASS。

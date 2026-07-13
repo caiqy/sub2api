@@ -2354,7 +2354,7 @@ func TestOpenAIGatewayHandler_UsageDetailStoresInjectedUpstreamRequestBody(t *te
 	router.Use(middleware.UsageDetailCapture())
 	router.POST("/v1/responses", h.Responses)
 
-	reqBody := `{"model":"gpt-5.4","stream":false,"input":"hello","service_tier":"auto"}`
+	reqBody := `{"model":"gpt-5.4","stream":false,"instructions":"keep-this","input":"hello","service_tier":"auto"}`
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
@@ -2370,6 +2370,7 @@ func TestOpenAIGatewayHandler_UsageDetailStoresInjectedUpstreamRequestBody(t *te
 	requireRequestPreviewSnapshot(t, usageRepo.lastLog.DetailSnapshot.RequestBody, reqBody)
 	require.Equal(t, "auto", gjson.Get(gjson.Get(usageRepo.lastLog.DetailSnapshot.RequestBody, "preview").String(), "service_tier").String())
 	require.Equal(t, "default", gjson.Get(gjson.Get(usageRepo.lastLog.DetailSnapshot.UpstreamRequestBody, "preview").String(), "service_tier").String())
+	require.JSONEq(t, string(upstreamBody), gjson.Get(usageRepo.lastLog.DetailSnapshot.UpstreamRequestBody, "preview").String())
 }
 
 func requireRequestPreviewSnapshot(t *testing.T, snapshot string, wantPreview string) {

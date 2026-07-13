@@ -303,6 +303,26 @@ func TestOpenAIGatewayHandler_NativeResponsesFailedIsNotDuplicated(t *testing.T)
 	require.Len(t, env.usageRepo.created, 1)
 }
 
+func TestOpenAIGatewayHandler_PassthroughHTTP400CreatesFailedUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 132, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 232, Name: "passthrough-400", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "sk-test"}, Extra: map[string]any{"openai_passthrough": true}}
+	upstreamBody := `{"error":{"type":"invalid_request_error","message":"passthrough rejected payload"}}`
+	env := newTerminalUsageOpenAIEnv(t, group, &openAIChatCompletionsAccountRepoStub{account: account}, &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(upstreamBody))})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.4","instructions":"keep-this","input":"hello","stream":false}`))
+	req.Header.Set("Content-Type", "application/json")
+	env.router("/v1/responses", env.handler.Responses).ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "passthrough rejected payload")
+	log := waitForOpenAIFailedUsageLog(t, env.usageRepo)
+	require.NotNil(t, log)
+	require.NotNil(t, log.DetailSnapshot)
+	require.Contains(t, log.DetailSnapshot.ResponseBody, "passthrough rejected payload")
+}
+
 func TestOpenAIGatewayHandler_NativeNonPassthroughResponsesFailedIsNotDuplicated(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	group := &service.Group{ID: 33, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}

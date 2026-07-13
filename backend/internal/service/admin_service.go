@@ -595,6 +595,7 @@ type adminServiceImpl struct {
 	userSubRepo          UserSubscriptionRepository
 	privacyClientFactory PrivacyClientFactory
 	runtimeBlocker       AccountRuntimeBlocker
+	openaiProbeControl   OpenAIProbeController
 }
 
 type userGroupRateBatchReader interface {
@@ -625,7 +626,7 @@ func NewAdminService(
 	userSubRepo UserSubscriptionRepository,
 	privacyClientFactory PrivacyClientFactory,
 	runtimeBlocker AccountRuntimeBlocker,
-	_ OpenAIProbeController,
+	openaiProbeControl OpenAIProbeController,
 ) AdminService {
 	return &adminServiceImpl{
 		userRepo:             userRepo,
@@ -646,5 +647,6 @@ func NewAdminService(
 		userSubRepo:          userSubRepo,
 		privacyClientFactory: privacyClientFactory,
 		runtimeBlocker:       runtimeBlocker,
+		openaiProbeControl:   openaiProbeControl,
 	}
 }

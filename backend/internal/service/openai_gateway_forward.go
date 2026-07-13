@@ -698,8 +698,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			return nil, err
 		}
 		upstreamPreview := openAIUpstreamRequestBodyPreview(upstreamReq, body)
-		if bodyHandle := getOpenAIRequestBodyHandle(c); openAIRequestBodyHandleMatchesBytes(bodyHandle, body) {
-			upstreamPreview = bodyHandle.PreviewString()
+		if _, ownsFinalBody := upstreamReq.Context().Value(openAIOwnedBodyHandleContextKey{}).(*RequestBodyHandle); !ownsFinalBody {
+			if bodyHandle := getOpenAIRequestBodyHandle(c); openAIRequestBodyHandleMatchesBytes(bodyHandle, body) {
+				upstreamPreview = bodyHandle.PreviewString()
+			}
 		}
 		SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
 		SetOpsUpstreamAttempted(c, true)

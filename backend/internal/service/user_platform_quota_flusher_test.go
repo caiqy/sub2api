@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/zeromicro/go-zero/core/collection"
 )
 
 // ---------------------------------------------------------------------------
@@ -61,6 +62,32 @@ type mockQuotaSnapshotWriter struct {
 func (m *mockQuotaSnapshotWriter) BatchSnapshotUsage(_ context.Context, snaps []UserPlatformQuotaSnapshot, _ time.Time) error {
 	m.receivedSnaps = append(m.receivedSnaps, snaps...)
 	return m.returnErr
+}
+
+type flusherBillingCacheStub struct {
+	BillingCache
+	*mockQuotaDirtyCache
+}
+
+func (s *flusherBillingCacheStub) PopDirtyUserPlatformQuotaKeys(ctx context.Context, batchSize int) ([]UserPlatformQuotaKey, error) {
+	return s.mockQuotaDirtyCache.PopDirtyUserPlatformQuotaKeys(ctx, batchSize)
+}
+
+func (s *flusherBillingCacheStub) ReaddDirtyUserPlatformQuotaKeys(ctx context.Context, keys []UserPlatformQuotaKey) error {
+	return s.mockQuotaDirtyCache.ReaddDirtyUserPlatformQuotaKeys(ctx, keys)
+}
+
+func (s *flusherBillingCacheStub) BatchGetUserPlatformQuotaCache(ctx context.Context, keys []UserPlatformQuotaKey) ([]*UserPlatformQuotaCacheEntry, error) {
+	return s.mockQuotaDirtyCache.BatchGetUserPlatformQuotaCache(ctx, keys)
+}
+
+type flusherQuotaRepositoryStub struct {
+	UserPlatformQuotaRepository
+	*mockQuotaSnapshotWriter
+}
+
+func (s *flusherQuotaRepositoryStub) BatchSnapshotUsage(ctx context.Context, snaps []UserPlatformQuotaSnapshot, now time.Time) error {
+	return s.mockQuotaSnapshotWriter.BatchSnapshotUsage(ctx, snaps, now)
 }
 
 // ---------------------------------------------------------------------------
@@ -359,6 +386,38 @@ func TestNewUserPlatformQuotaUsageFlusher_EnabledField(t *testing.T) {
 		if f.enabled != enabled {
 			t.Errorf("enabled = %v, want %v", f.enabled, enabled)
 		}
+	}
+}
+
+func TestProvideUserPlatformQuotaUsageFlusher_EnabledStartsFlush(t *testing.T) {
+	original := newTimingWheel
+	t.Cleanup(func() { newTimingWheel = original })
+	newTimingWheel = func(_ time.Duration, _ int, execute collection.Execute) (*collection.TimingWheel, error) {
+		return original(time.Millisecond, 128, execute)
+	}
+
+	tw, err := NewTimingWheelService()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tw.Stop()
+	cache := &mockQuotaDirtyCache{
+		popSequence: [][]UserPlatformQuotaKey{{{UserID: 1, Platform: "openai"}}},
+		getEntries:  []*UserPlatformQuotaCacheEntry{makeEntry(1, 1, 1)},
+	}
+	writer := &mockQuotaSnapshotWriter{}
+	cfg := &config.Config{}
+	cfg.Database.UserPlatformQuotaFlusherEnabled = true
+	cfg.Database.UserPlatformQuotaFlushIntervalMs = 5
+	flusher := ProvideUserPlatformQuotaUsageFlusher(cfg, &flusherBillingCacheStub{mockQuotaDirtyCache: cache}, &flusherQuotaRepositoryStub{mockQuotaSnapshotWriter: writer}, tw)
+	t.Cleanup(flusher.Stop)
+
+	deadline := time.Now().Add(time.Second)
+	for len(writer.receivedSnaps) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(writer.receivedSnaps) != 1 {
+		t.Fatalf("enabled provider did not start flusher, received %d snapshots", len(writer.receivedSnaps))
 	}
 }
 

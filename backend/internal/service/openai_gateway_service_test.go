@@ -3510,7 +3510,7 @@ func TestOpenAIForwardBoundInboundHandleSnapshotsFinalWireBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	body := []byte(`{"model":"gpt-5","input":"hello"}`)
+	body := []byte(`{"model":"gpt-5","instructions":"keep-this","input":"hello"}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
 	collector := &openAIUsageUpstreamRequestCollector{}
 	c.Set(UsageDetailCaptureContextKey, collector)

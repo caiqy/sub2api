@@ -976,6 +976,14 @@ func (s *emailBindUserRepoStub) SetBlockedGroups(context.Context, int64, []int64
 	return nil
 }
 
+func (s *emailBindUserRepoStub) GetHiddenUIResources(context.Context, int64) (bool, []int64, error) {
+	return false, nil, nil
+}
+
+func (s *emailBindUserRepoStub) SetHiddenUIResources(context.Context, int64, bool, []string) error {
+	return nil
+}
+
 func (s *emailBindUserRepoStub) AddGroupToAllowedGroups(context.Context, int64, int64) error {
 	return nil
 }

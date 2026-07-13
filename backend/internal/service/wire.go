@@ -718,7 +718,7 @@ var ProviderSet = wire.NewSet(
 	ProvidePaymentService,
 	ProvidePaymentOrderExpiryService,
 	ProvideBalanceNotifyService,
-	NewUserPlatformQuotaUsageFlusher,
+	ProvideUserPlatformQuotaUsageFlusher,
 	ProvideChannelMonitorService,
 	ProvideChannelMonitorRunner,
 	NewChannelMonitorRequestTemplateService,
