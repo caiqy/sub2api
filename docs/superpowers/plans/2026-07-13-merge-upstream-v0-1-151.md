@@ -361,6 +361,6 @@ Append `## Merge` with the actual branch, merge commit, tag-ancestor result, eac
 
 Expected: 所有 `pass` 只在实际命令退出码为 `0` 后填写；失败或未执行项目必须如实保留为失败或未执行。
 
-- [ ] **Step 2: 停止在用户处置门槛**
+- [x] **Step 2: 停止在用户处置门槛**
 
 Report branch name、merge commit、验证报告路径、失败/警告和残余风险。请求用户选择以下其中一项：保留隔离分支、合回 `main`、或推送；不得自行执行其中任何操作，也不得发布或部署。

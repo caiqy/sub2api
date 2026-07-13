@@ -209,3 +209,10 @@ openspec/changes/merge-upstream-v0-1-151/tasks.md
 - 探索性 `go test -tags unit ./internal/service -count=1` 仍会触发多项既有 unit-only 测试失败；它不属于本计划强制门槛，本文不声称全量 unit-tag suite 通过。计划指定的 unit 聚焦测试已通过。
 - v17 auth snapshot 本次尚未发布，不存在旧 v17 Redis 条目兼容问题；若先单独部署过中间构建，应清理 auth cache 或再次提升版本。
 - 工作树中的 `.comet/**`、`.superpowers/sdd/task-3-wire-report.md` 和无关 `openspec/changes/add-openai-first-token-timeouts/` 保持原状，不纳入业务提交。
+
+## 分支处置
+
+- 用户选择本地合并到 `main`。
+- `main` 与 `origin/main` 在合并前均为 `46d92f1d75f9835539f2a86d92849604a79d2f44`，因此未执行远端拉取。
+- `main` fast-forward 到 `6803b6bf1c8bdecff979692a2e724b3440e9f6a0`；合并后的 `backend/: go test ./... -count=1` PASS。
+- 临时 main worktree 已移除，feature 分支已删除；未推送、未发布、未部署。
