@@ -6,9 +6,9 @@
 
 ## 2. 共享分类、事件判定与超时错误
 
-- [ ] 2.1 以表驱动测试定义严格请求分类：仅 `tool_choice.type=image_generation` 使用图片档，常驻图片工具仍使用文本档
-- [ ] 2.2 实现共享 Responses 事件判定，区分前导、首业务和终态事件，并覆盖图片 `output_item.added`、文本及工具输出
-- [ ] 2.3 增加专用首 Token 超时错误、watchdog 与结构化阶段信息，验证并发竞争只产生一个终态且错误不可 failover
+- [x] 2.1 以表驱动测试定义严格请求分类：仅 `tool_choice.type=image_generation` 使用图片档，常驻图片工具仍使用文本档
+- [x] 2.2 实现共享 Responses 事件判定，区分前导、首业务和终态事件，并覆盖图片 `output_item.added`、文本及工具输出
+- [x] 2.3 增加专用首 Token 超时错误、watchdog 与结构化阶段信息，验证并发竞争只产生一个终态且错误不可 failover
 
 ## 3. HTTP SSE 首 Token 超时
 
