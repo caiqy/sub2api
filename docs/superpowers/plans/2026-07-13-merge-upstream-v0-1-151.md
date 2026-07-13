@@ -229,7 +229,7 @@ Expected: 每项版本、锁文件和默认值变更都有来源与兼容性结�
 **Consumes:** Task 4 的一致元数据和生成代码。
 **Produces:** 能力矩阵逐项具备“保持/回归/修复后保持”结论与定向验证证据。
 
-- [ ] **Step 1: 审查 scheduler、sticky、fallback 与 DB recheck**
+- [x] **Step 1: 审查 scheduler、sticky、fallback 与 DB recheck**
 
 Run:
 ```powershell
@@ -241,7 +241,7 @@ Working directory: `backend/`.
 
 Expected: 覆盖常规调度、previous response 粘性、fallback、等待计划与重试/终止边界；任何失败先归因到 merge 差异。
 
-- [ ] **Step 2: 审查协议转换与流式终止 usage**
+- [x] **Step 2: 审查协议转换与流式终止 usage**
 
 Run:
 ```powershell
@@ -253,7 +253,7 @@ Working directory: `backend/`.
 
 Expected: Messages、Responses、Chat、stream/non-stream、透传字段和终止 usage 均无回归。
 
-- [ ] **Step 3: 审查 privacy、图像能力和运行时设置更新**
+- [x] **Step 3: 审查 privacy、图像能力和运行时设置更新**
 
 Run:
 ```powershell

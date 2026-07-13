@@ -11,7 +11,7 @@
 
 ## 3. 本地关键能力审查
 
-- [ ] 3.1 审查 scheduler、sticky/fallback、privacy、image capability、runtime setting 热更新和网关透传语义。
+- [x] 3.1 审查 scheduler、sticky/fallback、privacy、image capability、runtime setting 热更新和网关透传语义。
 - [ ] 3.2 审查大输入请求体保留、磁盘落盘、重放、清理和内存释放语义。
 - [ ] 3.3 为审查发现的行为回归先补失败测试，再实施最小修复。
 
