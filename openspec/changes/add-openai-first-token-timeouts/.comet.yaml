@@ -1,6 +1,6 @@
 workflow: full
 language: zh-CN
-phase: build
+phase: archive
 context_compression: off
 build_mode: executing-plans
 build_pause: null
@@ -13,12 +13,12 @@ auto_transition: true
 base_ref: 9df2caf1122f3a9e1d471965b5398249a8b0491c
 design_doc: docs/superpowers/specs/2026-07-13-openai-first-token-timeout-design.md
 plan: docs/superpowers/plans/2026-07-13-openai-first-token-timeout.md
-verify_result: fail
+verify_result: pass
 verification_report: docs/superpowers/reports/2026-07-14-add-openai-first-token-timeouts-verify.md
 branch_status: handled
 created_at: 2026-07-13
-verified_at: null
-archive_confirmation: null
+verified_at: 2026-07-13
+archive_confirmation: pending
 archived: false
 direct_override: null
 handoff_context: openspec/changes/add-openai-first-token-timeouts/.comet/handoff/design-context.json

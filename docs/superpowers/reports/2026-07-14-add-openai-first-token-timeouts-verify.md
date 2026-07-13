@@ -4,7 +4,7 @@
 
 | 维度 | 结果 |
 |---|---|
-| 完整性 | PASS：21/21 tasks，6/6 requirements |
+| 完整性 | PASS：21/21 tasks，7/7 requirements |
 | 正确性 | PASS：26/26 scenarios 有实现与测试证据 |
 | 一致性 | PASS：实现遵循 OpenSpec design 与 Superpowers Design Doc |
 | 代码审查 | PASS：Thorough 最终审查无 Critical/Important |
