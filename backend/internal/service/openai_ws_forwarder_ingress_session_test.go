@@ -35,12 +35,16 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossT
 	cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 3
 	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
 	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
+	cfg.Gateway.OpenAITextFirstTokenTimeout = 1
 
 	captureConn := &openAIWSCaptureConn{
 		events: [][]byte{
 			[]byte(`{"type":"response.completed","response":{"id":"resp_ingress_turn_1","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
 			[]byte(`{"type":"response.completed","response":{"id":"resp_ingress_turn_2","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
+			[]byte(`{"type":"response.created","response":{"id":"resp_ingress_turn_3","model":"gpt-5.1"}}`),
 		},
+		waitWhenEmpty: true,
+		cancelEvent:   []byte(`{"type":"response.canceled","response":{"id":"resp_ingress_turn_3"}}`),
 	}
 	captureDialer := &openAIWSCaptureDialer{conn: captureConn}
 	pool := newOpenAIWSConnPool(cfg)
@@ -149,11 +153,19 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossT
 	require.True(t, <-turnWSModeCh, "首轮 turn 应标记为 WS 模式")
 	require.True(t, <-turnWSModeCh, "第二轮 turn 应标记为 WS 模式")
 
+	writeMessage(`{"type":"response.create","model":"gpt-5.1","stream":true}`)
+	createdEvent := readMessage()
+	require.Equal(t, "response.created", gjson.GetBytes(createdEvent, "type").String())
+	timeoutEvent := readMessage()
+	require.Equal(t, "first_token_timeout", gjson.GetBytes(timeoutEvent, "error.type").String())
+
 	_ = clientConn.Close(coderws.StatusNormalClosure, "done")
 
 	select {
 	case serverErr := <-serverErrCh:
-		require.NoError(t, serverErr)
+		var timeoutErr *OpenAIFirstTokenTimeoutError
+		require.ErrorAs(t, serverErr, &timeoutErr)
+		require.True(t, timeoutErr.ConnectionReusable)
 	case <-time.After(5 * time.Second):
 		t.Fatal("等待 ingress websocket 结束超时")
 	}
@@ -161,7 +173,8 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossT
 	metrics := svc.SnapshotOpenAIWSPoolMetrics()
 	require.Equal(t, int64(1), metrics.AcquireTotal, "同一 ingress 会话多 turn 应只获取一次上游 lease")
 	require.Equal(t, 1, captureDialer.DialCount(), "同一 ingress 会话应保持同一上游连接")
-	require.Len(t, captureConn.writes, 2, "应向同一上游连接发送两轮 response.create")
+	require.Len(t, captureConn.writes, 4, "应向同一上游连接发送三轮 response.create 和一次 response.cancel")
+	require.Equal(t, "response.cancel", captureConn.writes[3]["type"])
 }
 
 func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_FollowupCreateCanOmitModel(t *testing.T) {

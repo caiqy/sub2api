@@ -20,14 +20,21 @@ var errOpenAIFirstTokenTimeout = errors.New("OpenAI first token timeout")
 
 type openAIFirstTokenWatchdogContextKey struct{}
 
+type openAIWSFirstTokenLease interface {
+	WriteJSONWithContextTimeout(context.Context, any, time.Duration) error
+	ReadMessageWithContextTimeout(context.Context, time.Duration) ([]byte, error)
+	MarkBroken()
+}
+
 type OpenAIFirstTokenTimeoutError struct {
-	Class             openaiutil.FirstTokenClass
-	Timeout           time.Duration
-	Elapsed           time.Duration
-	Transport         string
-	HeadersReceived   bool
-	CreatedReceived   bool
-	UpstreamRequestID string
+	Class              openaiutil.FirstTokenClass
+	Timeout            time.Duration
+	Elapsed            time.Duration
+	Transport          string
+	HeadersReceived    bool
+	CreatedReceived    bool
+	UpstreamRequestID  string
+	ConnectionReusable bool
 }
 
 func (e *OpenAIFirstTokenTimeoutError) Error() string {
@@ -112,6 +119,18 @@ func (s *OpenAIGatewayService) withOpenAIFirstTokenClass(
 		}
 	}
 	return newOpenAIFirstTokenWatchdog(ctx, class, time.Duration(seconds)*time.Second, transport)
+}
+
+func (s *OpenAIGatewayService) openAIFirstTokenTimeout(payload []byte) (openaiutil.FirstTokenClass, time.Duration) {
+	class := openaiutil.ResponsesFirstTokenClass(payload)
+	seconds := 0
+	if s != nil && s.cfg != nil {
+		seconds = s.cfg.Gateway.OpenAITextFirstTokenTimeout
+		if class == openaiutil.FirstTokenClassImage {
+			seconds = s.cfg.Gateway.OpenAIImageFirstTokenTimeout
+		}
+	}
+	return class, time.Duration(seconds) * time.Second
 }
 
 func openAIFirstTokenClassFromRequest(req *http.Request, fallback []byte) openaiutil.FirstTokenClass {
@@ -244,4 +263,31 @@ func recordOpenAIFirstTokenTimeout(ctx context.Context, c *gin.Context, account 
 		zap.Bool("created_received", timeoutErr.CreatedReceived),
 		zap.String("upstream_request_id", timeoutErr.UpstreamRequestID),
 	)
+}
+
+func cancelAndDrainOpenAIWSFirstToken(
+	ctx context.Context,
+	lease openAIWSFirstTokenLease,
+	writeTimeout time.Duration,
+	drainTimeout time.Duration,
+) bool {
+	if lease == nil || lease.WriteJSONWithContextTimeout(ctx, map[string]any{"type": "response.cancel"}, writeTimeout) != nil {
+		if lease != nil {
+			lease.MarkBroken()
+		}
+		return false
+	}
+	deadline := time.Now().Add(drainTimeout)
+	for time.Now().Before(deadline) {
+		message, err := lease.ReadMessageWithContextTimeout(ctx, time.Until(deadline))
+		if err != nil {
+			break
+		}
+		eventType, _, _ := parseOpenAIWSEventEnvelope(message)
+		if isOpenAIWSTerminalEvent(eventType) {
+			return true
+		}
+	}
+	lease.MarkBroken()
+	return false
 }

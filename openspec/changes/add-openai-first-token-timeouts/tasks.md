@@ -18,9 +18,9 @@
 
 ## 4. 池化 Responses WebSocket ingress 超时
 
-- [ ] 4.1 补充 per-response timeout 测试，覆盖前导事件、业务事件、cancel/drain 成功复用和清理失败废弃连接
-- [ ] 4.2 为每个已发送的 `response.create` 接入独立 deadline，超时时发送 `response.cancel` 和一次下游 error
-- [ ] 4.3 实现有限 drain 与连接复用判定，并验证 timeout 不触发账号 failover 或健康惩罚
+- [x] 4.1 补充 per-response timeout 测试，覆盖前导事件、业务事件、cancel/drain 成功复用和清理失败废弃连接
+- [x] 4.2 为每个已发送的 `response.create` 接入独立 deadline，超时时发送 `response.cancel` 和一次下游 error
+- [x] 4.3 实现有限 drain 与连接复用判定，并验证 timeout 不触发账号 failover 或健康惩罚
 
 ## 5. Responses WebSocket V2 relay 超时
 

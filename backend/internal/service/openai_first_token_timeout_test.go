@@ -11,6 +11,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type openAIWSFirstTokenLeaseStub struct {
+	writeErr error
+	readErr  error
+	events   [][]byte
+	broken   bool
+}
+
+func (s *openAIWSFirstTokenLeaseStub) WriteJSONWithContextTimeout(context.Context, any, time.Duration) error {
+	return s.writeErr
+}
+
+func (s *openAIWSFirstTokenLeaseStub) ReadMessageWithContextTimeout(context.Context, time.Duration) ([]byte, error) {
+	if s.readErr != nil {
+		return nil, s.readErr
+	}
+	if len(s.events) == 0 {
+		return nil, context.DeadlineExceeded
+	}
+	event := s.events[0]
+	s.events = s.events[1:]
+	return event, nil
+}
+
+func (s *openAIWSFirstTokenLeaseStub) MarkBroken() { s.broken = true }
+
 func TestOpenAIFirstTokenTimeoutWatchdogTimesOutWithDiagnostics(t *testing.T) {
 	ctx, watchdog := newOpenAIFirstTokenWatchdog(
 		context.Background(),
@@ -88,4 +113,24 @@ func TestWithOpenAIFirstTokenTimeoutSelectsImageDuration(t *testing.T) {
 
 	require.Equal(t, openaiutil.FirstTokenClassImage, watchdog.class)
 	require.Equal(t, 600*time.Second, watchdog.timeout)
+}
+
+func TestCancelAndDrainOpenAIWSFirstToken(t *testing.T) {
+	t.Run("terminal event keeps connection reusable", func(t *testing.T) {
+		lease := &openAIWSFirstTokenLeaseStub{events: [][]byte{[]byte(`{"type":"response.canceled"}`)}}
+		require.True(t, cancelAndDrainOpenAIWSFirstToken(context.Background(), lease, time.Second, time.Second))
+		require.False(t, lease.broken)
+	})
+
+	t.Run("cancel write failure marks connection broken", func(t *testing.T) {
+		lease := &openAIWSFirstTokenLeaseStub{writeErr: errors.New("write failed")}
+		require.False(t, cancelAndDrainOpenAIWSFirstToken(context.Background(), lease, time.Second, time.Millisecond))
+		require.True(t, lease.broken)
+	})
+
+	t.Run("drain failure marks connection broken", func(t *testing.T) {
+		lease := &openAIWSFirstTokenLeaseStub{readErr: context.DeadlineExceeded}
+		require.False(t, cancelAndDrainOpenAIWSFirstToken(context.Background(), lease, time.Second, time.Millisecond))
+		require.True(t, lease.broken)
+	})
 }

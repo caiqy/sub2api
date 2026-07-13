@@ -1584,12 +1584,15 @@ func (d *openAIWSCaptureDialer) DialCount() int {
 }
 
 type openAIWSCaptureConn struct {
-	mu         sync.Mutex
-	readDelays []time.Duration
-	events     [][]byte
-	lastWrite  map[string]any
-	writes     []map[string]any
-	closed     bool
+	mu            sync.Mutex
+	readDelays    []time.Duration
+	events        [][]byte
+	waitWhenEmpty bool
+	cancelEvent   []byte
+	eventCh       chan []byte
+	lastWrite     map[string]any
+	writes        []map[string]any
+	closed        bool
 }
 
 func (c *openAIWSCaptureConn) WriteJSON(ctx context.Context, value any) error {
@@ -1599,22 +1602,32 @@ func (c *openAIWSCaptureConn) WriteJSON(ctx context.Context, value any) error {
 	if c.closed {
 		return errOpenAIWSConnClosed
 	}
+	var parsedType string
 	switch payload := value.(type) {
 	case map[string]any:
 		c.lastWrite = cloneMapStringAny(payload)
 		c.writes = append(c.writes, cloneMapStringAny(payload))
+		parsedType, _ = payload["type"].(string)
 	case json.RawMessage:
 		var parsed map[string]any
 		if err := json.Unmarshal(payload, &parsed); err == nil {
 			c.lastWrite = cloneMapStringAny(parsed)
 			c.writes = append(c.writes, cloneMapStringAny(parsed))
+			parsedType, _ = parsed["type"].(string)
 		}
 	case []byte:
 		var parsed map[string]any
 		if err := json.Unmarshal(payload, &parsed); err == nil {
 			c.lastWrite = cloneMapStringAny(parsed)
 			c.writes = append(c.writes, cloneMapStringAny(parsed))
+			parsedType, _ = parsed["type"].(string)
 		}
+	}
+	if parsedType == "response.cancel" && len(c.cancelEvent) > 0 {
+		if c.eventCh == nil {
+			c.eventCh = make(chan []byte, 1)
+		}
+		c.eventCh <- append([]byte(nil), c.cancelEvent...)
 	}
 	return nil
 }
@@ -1629,6 +1642,19 @@ func (c *openAIWSCaptureConn) ReadMessage(ctx context.Context) ([]byte, error) {
 		return nil, errOpenAIWSConnClosed
 	}
 	if len(c.events) == 0 {
+		if c.waitWhenEmpty {
+			if c.eventCh == nil {
+				c.eventCh = make(chan []byte, 1)
+			}
+			eventCh := c.eventCh
+			c.mu.Unlock()
+			select {
+			case event := <-eventCh:
+				return event, nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
 		c.mu.Unlock()
 		return nil, io.EOF
 	}

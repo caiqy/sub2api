@@ -127,3 +127,12 @@ func TestIsOpenAIWSTokenEvent_DisjointWithTerminal(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenAIWSMessageRecordsFirstToken(t *testing.T) {
+	require.True(t, openAIWSMessageRecordsFirstToken([]byte(`{"type":"response.output_item.added","item":{"type":"image_generation_call"}}`)))
+	require.True(t, openAIWSMessageRecordsFirstToken([]byte(`{"type":"response.output_item.added","item":{"type":"function_call"}}`)))
+	require.False(t, openAIWSMessageRecordsFirstToken([]byte(`{"type":"response.created"}`)))
+	require.False(t, openAIWSMessageRecordsFirstToken([]byte(`{"type":"response.in_progress"}`)))
+	require.False(t, openAIWSMessageRecordsFirstToken([]byte(`{"type":"response.completed"}`)))
+	require.False(t, openAIWSMessageRecordsFirstToken([]byte(`{"type":"response.failed"}`)))
+}
