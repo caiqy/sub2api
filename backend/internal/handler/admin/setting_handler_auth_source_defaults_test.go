@@ -182,6 +182,50 @@ func TestSettingHandler_GetSettings_InjectsAuthSourceDefaults(t *testing.T) {
 	require.Len(t, subscriptions, 1)
 }
 
+func TestSettingHandler_GetSettings_IncludesStickyAndWSSchedulerSettings(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &settingHandlerRepoStub{values: map[string]string{
+		service.SettingKeyGatewayStickyOpenAIEnabled:                                   "true",
+		service.SettingKeyGatewayStickyGeminiEnabled:                                   "false",
+		service.SettingKeyGatewayStickyAnthropicEnabled:                                "true",
+		service.SettingKeyGatewayOpenAIWSSchedulerMode:                                 "layered",
+		service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold:         "0.6",
+		service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyValue:             "100",
+		service.SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier:         "12",
+		service.SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue:              "50",
+		service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds:          "20",
+		service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds:          "21",
+		service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeMaxFailures:              "3",
+		service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds:           "15",
+		service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds: "900",
+	}}
+	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings", nil)
+
+	handler.GetSettings(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp response.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	data := resp.Data.(map[string]any)
+	require.Equal(t, true, data["gateway_sticky_openai_enabled"])
+	require.Equal(t, false, data["gateway_sticky_gemini_enabled"])
+	require.Equal(t, true, data["gateway_sticky_anthropic_enabled"])
+	require.Equal(t, "layered", data["gateway_openai_ws_scheduler_mode"])
+	require.Equal(t, 0.6, data["gateway_openai_ws_scheduler_layered_error_penalty_threshold"])
+	require.Equal(t, float64(100), data["gateway_openai_ws_scheduler_layered_error_penalty_value"])
+	require.Equal(t, float64(12), data["gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier"])
+	require.Equal(t, float64(50), data["gateway_openai_ws_scheduler_layered_ttft_penalty_value"])
+	require.Equal(t, float64(20), data["gateway_openai_ws_scheduler_layered_probe_cooldown_seconds"])
+	require.Equal(t, float64(21), data["gateway_openai_ws_scheduler_layered_probe_interval_seconds"])
+	require.Equal(t, float64(3), data["gateway_openai_ws_scheduler_layered_probe_max_failures"])
+	require.Equal(t, float64(15), data["gateway_openai_ws_scheduler_layered_probe_timeout_seconds"])
+	require.Equal(t, float64(900), data["gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds"])
+}
+
 func TestSettingHandler_UpdateSettings_PreservesOmittedAuthSourceDefaults(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &settingHandlerRepoStub{

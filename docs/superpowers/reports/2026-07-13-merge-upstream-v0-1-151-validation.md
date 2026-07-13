@@ -149,7 +149,7 @@ openspec/changes/merge-upstream-v0-1-151/tasks.md
 - `backend/cmd/server/VERSION` 为 `0.1.150`，与 `git show 'v0.1.151^{}:backend/cmd/server/VERSION'` 完全一致；未擅自改写为 tag 名。
 - `backend/go.mod` 将 Go toolchain 从 1.26.4 更新到 1.26.5，并更新 AWS SDK 小版本；`go.mod`/`go.sum` 均来自目标 release 与 Wire 工具的可复现依赖解析，未升级无关依赖。前端 `package.json` 与锁文件无额外合并差异。
 - `go generate ./ent` 与 `go generate ./cmd/server` 完成后没有产生未提交生成差异；Wire 连续生成哈希稳定。
-- 新增 migrations `159` 至 `173` 均来自目标 release。`160_add_user_frozen_balance.sql` 与 `160_batch_image_provider_refs.sql` 虽共享数字前缀，但 migration runner 使用完整 `filename` 作为主键，按完整文件名排序执行，因此两者会独立应用；两个 SQL 均使用 `ADD COLUMN IF NOT EXISTS`。
+- 新增 migrations `159` 至 `173` 均来自目标 release。`159_batch_image_foundation.sql` 与既有 `159_user_resource_overrides.sql`、`160_add_user_frozen_balance.sql` 与 `160_batch_image_provider_refs.sql` 分别共享数字前缀；migration runner 使用完整 `filename` 作为主键，按完整文件名排序执行，因此同号文件都会独立应用。新增同号 SQL 使用幂等 DDL。
 
 ## 关键能力专项审查
 
@@ -168,3 +168,9 @@ openspec/changes/merge-upstream-v0-1-151/tasks.md
 - 根因与修复：拆分后的 `GatewayService.handleFailoverSideEffects` 未沿用同文件其他错误路径的 nil guard。服务未注入时直接跳过 rate-limit 副作用，不改变 body handle、重放、所有权或清理。
 - GREEN：上述 handler 命令通过；`go test ./internal/service -run 'Test.*(RequestBody|CachedBody|BodyOrder)' -count=1` 通过。
 - 结论：内存到磁盘切换、同字节重放、fallback/重试与成功/失败清理语义保持。
+
+### Task 4-6 批次审查修复
+
+- RED：`TestSettingHandler_GetSettings_IncludesStickyAndWSSchedulerSettings` 首个 sticky 字段期望 `true`、实际为 `false`，确认 GET 响应遗漏 3 个 sticky 和 10 个 WS scheduler 字段。
+- 修复：补齐 `GetSettings` 的 DTO 映射；不改变存储、默认值或热更新逻辑。
+- GREEN：该 GET 契约测试及 `go test ./internal/handler/admin -run 'TestSettingHandler_.*Settings' -count=1` 通过。
