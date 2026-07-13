@@ -1,8 +1,8 @@
 package service
 
 // 本文件由 openai_gateway_service.go 纯移动拆分而来：/v1/responses 直通
-// （passthrough）转发路径及其流式/非流式响应处理与错误处理。仅做代码搬迁，
-// 无任何行为变更。
+// （passthrough）转发路径及其流式/非流式响应处理与错误处理。
+// 发送前必须记录最终 wire request，供 usage、ops 和失败请求记账使用。
 
 import (
 	"bufio"
@@ -178,6 +178,8 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		c.Set("openai_passthrough", true)
 	}
 
+	SetUsageUpstreamRequest(c, upstreamReq, openAIUpstreamRequestBodyPreview(upstreamReq, body))
+	SetOpsUpstreamAttempted(c, true)
 	upstreamStart := time.Now()
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())

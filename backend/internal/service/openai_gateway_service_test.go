@@ -3506,6 +3506,87 @@ func TestPassthroughFieldsV2OpenAIForward_StoresFinalOpsUpstreamRequestBody(t *t
 	require.Equal(t, "default", gjson.Get(opsBody, "service_tier").String())
 }
 
+func TestOpenAIForwardBoundInboundHandleSnapshotsFinalWireBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"gpt-5","input":"hello"}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	collector := &openAIUsageUpstreamRequestCollector{}
+	c.Set(UsageDetailCaptureContextKey, collector)
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+	BindOpenAIRequestBodyHandle(c, handle)
+
+	upstream := &openAIHTTPUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"id":"resp_final_body","object":"response","model":"gpt-5","usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`)),
+	}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}}, httpUpstream: upstream}
+	account := &Account{
+		ID:          404,
+		Name:        "openai-final-wire-body",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "upstream-openai-key", "base_url": "https://example.com/v1"},
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "body", Mode: "inject", Key: "metadata.final_wire", Value: "yes"},
+			},
+		},
+	}
+
+	_, err = svc.Forward(context.Background(), c, account, body)
+	require.NoError(t, err)
+	require.JSONEq(t, string(upstream.lastBody), collector.body)
+	require.JSONEq(t, string(upstream.lastBody), requireOpsPreviewString(t, c, "final_wire"))
+}
+
+func TestOpenAIPassthroughCapturesAttemptBeforeNonFailoverHTTPError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"gpt-5","input":"hello"}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	c.Request.Header.Set("X-Trace", "trace-1")
+	collector := &openAIUsageUpstreamRequestCollector{}
+	c.Set(UsageDetailCaptureContextKey, collector)
+
+	upstream := &openAIHTTPUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{"Content-Type": []string{"application/json"}, "X-Request-Id": []string{"req-passthrough"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"bad request"}}`)),
+	}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}}, httpUpstream: upstream}
+	account := &Account{
+		ID:          405,
+		Name:        "openai-passthrough-attempt",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "upstream-openai-key", "base_url": "https://example.com/v1"},
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "body", Mode: "inject", Key: "metadata.passthrough", Value: "final"},
+				{Target: "header", Mode: "inject", Key: "X-Final", Value: "yes"},
+			},
+		},
+	}
+
+	_, err := svc.forwardOpenAIPassthrough(context.Background(), c, account, body, "gpt-5", nil, false, time.Now())
+	require.EqualError(t, err, "upstream error: 400 message=bad request")
+	require.JSONEq(t, string(upstream.lastBody), collector.body)
+	require.Contains(t, collector.headers, "X-Final: yes")
+	require.JSONEq(t, string(upstream.lastBody), requireOpsPreviewString(t, c, "passthrough"))
+	require.True(t, HasOpsUpstreamAttempted(c))
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
 func TestPassthroughFieldsV2OpenAIForward_BodyPathConflictReturnsError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()

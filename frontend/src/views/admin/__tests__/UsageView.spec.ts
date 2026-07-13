@@ -15,7 +15,7 @@ const createDeferred = <T>() => {
   return { promise, resolve, reject }
 }
 
-const { list, getStats, getDetail, getSnapshotV2, getModelStats, getById, showError } = vi.hoisted(() => {
+const { list, getStats, getDetail, getSnapshotV2, getModelStats, getById, listErrorLogs, showError } = vi.hoisted(() => {
   vi.stubGlobal('localStorage', {
     getItem: vi.fn(() => null),
     setItem: vi.fn(),
@@ -29,6 +29,7 @@ const { list, getStats, getDetail, getSnapshotV2, getModelStats, getById, showEr
     getSnapshotV2: vi.fn(),
     getModelStats: vi.fn(),
     getById: vi.fn(),
+    listErrorLogs: vi.fn(),
     showError: vi.fn(),
   }
 })
@@ -75,6 +76,8 @@ vi.mock('@/api/admin/usage', () => ({
     getDetail: vi.fn(),
   },
 }))
+
+vi.mock('@/api/admin/ops', () => ({ listErrorLogs }))
 
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
@@ -421,6 +424,7 @@ describe('admin UsageView detail modal', () => {
     })
     getSnapshotV2.mockResolvedValue({ trend: [], models: [], groups: [] })
     getModelStats.mockResolvedValue([])
+    listErrorLogs.mockResolvedValue({ items: [], total: 0 })
   })
 
   afterEach(() => {
@@ -428,6 +432,7 @@ describe('admin UsageView detail modal', () => {
   })
 
   it('forwards model/account_id/group_id to listErrorLogs on the errors tab', async () => {
+    vi.useFakeTimers()
     const wrapper = mount(UsageView, {
       global: { stubs: {
         AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,

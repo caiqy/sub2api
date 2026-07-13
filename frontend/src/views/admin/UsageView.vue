@@ -325,6 +325,7 @@ const closeUsageDetailModal = () => {
   usageDetail.value = null
   usageDetailLoading.value = false
   usageDetailError.value = ''
+}
 
 // Drill down from the per-user token ranking: scope the whole usage view to
 // that user and jump to the usage-detail tab so the drill-down is visible.

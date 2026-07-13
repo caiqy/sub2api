@@ -263,8 +263,8 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	}
 	SetUsageUpstreamRequest(c, upstreamReq, openAIUpstreamRequestBodyPreview(upstreamReq, responsesBody))
 	SetOpsUpstreamAttempted(c, true)
-	// The request now owns its final upstream body handle. Do not retain either
-	// converted or inbound bytes while the upstream call can block.
+	// The request now owns its final Responses body handle. Clear converted bytes;
+	// unsupported Responses fallback replays the original CC body from the bound handle.
 	responsesBody = nil
 	body = nil
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)

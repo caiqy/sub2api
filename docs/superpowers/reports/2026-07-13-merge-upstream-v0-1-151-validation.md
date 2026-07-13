@@ -35,7 +35,7 @@ openspec/changes/merge-upstream-v0-1-151/tasks.md
 - 实际分支：`feature/20260713/merge-upstream-v0-1-151`。
 - merge commit：`2e3e92457b435d91d3c3a93cc120cecc8aa81cd4`。
 - 第一父：`cd9166900b8817bf52c2a407737393d7e9f17786`；这是用户明确接受的例外。它相对 `base-ref` 仅含本 change 的协调文档，不含业务代码。
-- 实际第二父：`deff3123ded1d14e51df1fd1286e3d43ed9ec9bd`，即 annotated tag `v0.1.151` 的 peel commit。尽管 merge 前 `MERGE_HEAD` 解析为 `c463d0c84338548f3924ec25532c8575e16fc344`，Git 对 annotated-tag merge 写入了 peel commit 作为父；因此未满足指定第二父约束，且未按要求 amend 或 retry。
+- 实际第二父：`deff3123ded1d14e51df1fd1286e3d43ed9ec9bd`，即 annotated tag `v0.1.151` 的正确 peel commit。`c463d0c84338548f3924ec25532c8575e16fc344` 是 annotated tag object，Git commit parent 不能指向 tag object；无需 amend 或 retry。
 
 ## 44 个冲突决策
 
@@ -120,3 +120,12 @@ openspec/changes/merge-upstream-v0-1-151/tasks.md
 
 - 本 Task 3 收口仅重跑服务测试和 handler/repository 编译检查；计划所列完整后端、前端和全仓验证尚未在本次收口执行。
 - 工作树保留用户/协调流程的未暂存 `docs/superpowers/plans/**`、`openspec/**`、`.comet/**` 和 scratch 报告；它们不属于 merge commit。
+
+## Task 3 Review Fix（第 1/2 轮）
+
+- passthrough 在 `httpUpstream.Do` 前记录 owned final body 的 usage/ops 快照并标记 upstream attempted；非 failover HTTP 400 现在也会触发 failed-usage gating。
+- `ForwardAsChatCompletions` 的 unsupported Responses fallback 已有 replay 路径：`openAIRequestBodyBytes(c, nil)` 从 `BindOpenAIRequestBodyHandle` 读取原始 CC body，覆盖 spooled handle；注释已明确这一所有权边界。
+- 普通 `Forward` 的 reviewer 快照问题经绑定 spooled handle 且仅 account rule 改 body 的回归验证为误报：`openAIUpstreamRequestBodyPreview` 优先读取实际 request owned handle，collector 与 ops preview 均等于 wire body。
+- 受冲突前端文件 `UsageView.vue` 补回 `closeUsageDetailModal` 缺失的闭合；其测试补齐 fake timer 与 `listErrorLogs` mock，`CreateUserRequest` contract 补齐既有 `role` 字段。
+- 验证通过：`go test ./internal/service -count=1`、`go test ./cmd/server -run '^$'`、`go generate ./ent` 后 `git diff --exit-code -- ent`、`pnpm test:run src/views/admin/__tests__/UsageView.spec.ts src/i18n/__tests__/localesNoKeyCollision.spec.ts`、`pnpm typecheck`。
+- Wire 一致性未通过：`go run -mod=mod github.com/google/wire/cmd/wire` 报 `GatewayService` 与 `BatchImageWorkerRuntime` provider 缺失；未产生 `wire_gen.go` diff，超出本次 compatibility fix 范围。

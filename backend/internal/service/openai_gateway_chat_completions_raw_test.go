@@ -575,6 +575,10 @@ func TestForwardAsChatCompletions_UnknownResponsesSupportFallbackUsesVersionedCh
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+	BindOpenAIRequestBodyHandle(c, handle)
 
 	upstream := &httpUpstreamRecorder{responses: []*http.Response{
 		{
@@ -598,7 +602,7 @@ func TestForwardAsChatCompletions_UnknownResponsesSupportFallbackUsesVersionedCh
 	account := rawChatCompletionsTestAccount()
 	account.Credentials["base_url"] = "https://open.bigmodel.cn/api/paas/v4"
 
-	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "")
+	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, nil, "", "")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, 1, result.Usage.InputTokens)
@@ -606,6 +610,7 @@ func TestForwardAsChatCompletions_UnknownResponsesSupportFallbackUsesVersionedCh
 	require.Len(t, upstream.requests, 2)
 	require.Equal(t, "https://open.bigmodel.cn/api/paas/v4/responses", upstream.requests[0].URL.String())
 	require.Equal(t, "https://open.bigmodel.cn/api/paas/v4/chat/completions", upstream.requests[1].URL.String())
+	require.JSONEq(t, string(body), string(upstream.bodies[1]))
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), `"content":"ok"`)
 }
