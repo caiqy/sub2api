@@ -2,13 +2,13 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
-	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -64,11 +64,21 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		return
 	}
 
+	var coordinator *requestBodyCoordinator
 	var body []byte
-	var err error
+	var requestInfo service.GrokMediaRequestInfo
 	if endpoint.RequiresRequestBody() {
-		body, err = pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
+		var err error
+		if isMultipartImagesContentType(c.GetHeader("Content-Type")) {
+			coordinator, err = newMultipartRequestBody(c.Request, 0)
+		} else {
+			coordinator, err = newJSONRequestBody(c.Request)
+		}
 		if err != nil {
+			if errors.Is(err, service.ErrRequestBodySpool) {
+				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+				return
+			}
 			if maxErr, ok := extractMaxBytesError(err); ok {
 				h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 				return
@@ -76,14 +86,50 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 			return
 		}
-		if len(body) == 0 {
-			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
-			return
+		defer coordinator.Cleanup()
+		if coordinator.form != nil {
+			c.Request.MultipartForm = coordinator.form
+			requestInfo = service.ParseGrokMediaMultipartForm(coordinator.form)
+		} else {
+			body, err = coordinator.ReadRaw()
+			if err != nil {
+				if errors.Is(err, service.ErrRequestBodySpool) {
+					h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+					return
+				}
+				h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+				return
+			}
+			if len(body) == 0 {
+				h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
+				return
+			}
+			requestInfo = service.ParseGrokMediaRequest(c.GetHeader("Content-Type"), body)
 		}
 	}
 
 	contentType := c.GetHeader("Content-Type")
-	requestInfo := service.ParseGrokMediaRequest(contentType, body)
+	if endpoint.RequiresRequestBody() {
+		preview := grokMediaRequestBodyPreviewWithSize(contentType, body, requestInfo, coordinator.Effective().Size())
+		service.SetUsageRequestBody(c, preview)
+		service.SetOpsUpstreamRequestBodyPreview(c, preview, coordinator.Effective().Size())
+	}
+	if coordinator != nil && coordinator.form != nil && endpoint == service.GrokMediaEndpointImagesEdits {
+		forwardBody, forwardContentType, prepareErr := service.PrepareGrokMediaFormForwardBody(requestInfo)
+		if prepareErr == nil {
+			prepareErr = coordinator.SetEffectiveBytes(forwardBody)
+		}
+		if prepareErr != nil {
+			if errors.Is(prepareErr, service.ErrRequestBodySpool) {
+				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+				return
+			}
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to prepare request body")
+			return
+		}
+		contentType = forwardContentType
+		body = nil
+	}
 	requestModel := requestInfo.Model
 	if endpoint.IsGenerationRequest() && strings.TrimSpace(requestModel) == "" {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "model is required")
@@ -97,6 +143,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 	reqLog = reqLog.With(zap.String("model", requestModel))
 	setOpsRequestContext(c, requestModel, false)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeSync))
+	var sessionHash, requestPayloadHash string
 
 	if endpoint.IsGenerationRequest() {
 		if !service.GroupAllowsImageGeneration(apiKey.Group) {
@@ -110,6 +157,28 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 				return
 			}
 		}
+		fallbackSessionSeed := ""
+		if coordinator != nil && coordinator.form != nil {
+			fallbackSessionSeed = coordinator.Effective().Hash()
+		}
+		sessionSeed := body
+		if len(sessionSeed) == 0 && strings.TrimSpace(requestID) != "" {
+			sessionSeed = []byte(requestID)
+		}
+		sessionHash = h.gatewayService.GenerateSessionHash(c, sessionSeed)
+		if coordinator != nil && coordinator.form != nil {
+			sessionHash = h.gatewayService.GenerateSessionHashWithFallback(c, sessionSeed, fallbackSessionSeed)
+		}
+		if coordinator != nil {
+			service.BindOpenAIRequestBodyHandle(c, coordinator.Effective())
+			requestPayloadHash = coordinator.Effective().Hash()
+			coordinator.ReleaseMultipartValues()
+		}
+		body = nil
+		requestInfo.ReleaseText()
+		if endpoint == service.GrokMediaEndpointVideoStatus {
+			sessionHash = service.GrokMediaVideoRequestSessionHash(requestID)
+		}
 		imageReleaseFunc, acquired := h.acquireImageGenerationSlot(c, streamStarted)
 		if !acquired {
 			return
@@ -117,6 +186,14 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		if imageReleaseFunc != nil {
 			defer imageReleaseFunc()
 		}
+	}
+
+	if !endpoint.IsGenerationRequest() {
+		if strings.TrimSpace(requestID) != "" {
+			sessionHash = service.GrokMediaVideoRequestSessionHash(requestID)
+			requestPayloadHash = service.HashUsageRequestPayload([]byte(requestID))
+		}
+		requestInfo.ReleaseText()
 	}
 
 	if h.errorPassthroughService != nil {
@@ -144,18 +221,12 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		return
 	}
 
-	sessionSeed := body
-	if len(sessionSeed) == 0 && strings.TrimSpace(requestID) != "" {
-		sessionSeed = []byte(requestID)
-	}
-	sessionHash := h.gatewayService.GenerateExplicitSessionHash(c, sessionSeed)
-	if endpoint == service.GrokMediaEndpointVideoStatus {
-		sessionHash = service.GrokMediaVideoRequestSessionHash(requestID)
-	}
 	requestCtx := c.Request.Context()
 	failedAccountIDs := make(map[int64]struct{})
 	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
+	var lastFailedAccount *service.Account
+	var lastFailedDuration time.Duration
 	switchCount := 0
 	maxAccountSwitches := h.maxAccountSwitches
 	if maxAccountSwitches <= 0 {
@@ -191,6 +262,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 				return
 			}
 			if lastFailoverErr != nil {
+				h.submitFailoverFailedUsageLog(c, apiKey, lastFailedAccount, requestModel, false, lastFailoverErr, lastFailedDuration, nil, "handler.openai_gateway.grok_media")
 				h.handleFailoverExhausted(c, lastFailoverErr, false)
 			} else {
 				h.errorResponse(c, http.StatusBadGateway, "api_error", "Upstream request failed")
@@ -202,7 +274,12 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			if !cls.ModelNotFound {
 				markOpsRoutingCapacityLimited(c)
 			}
-			h.errorResponse(c, cls.Status, cls.ErrType, cls.Message)
+			if lastFailoverErr != nil {
+				h.submitFailoverFailedUsageLog(c, apiKey, lastFailedAccount, requestModel, false, lastFailoverErr, lastFailedDuration, nil, "handler.openai_gateway.grok_media")
+				h.handleFailoverExhausted(c, lastFailoverErr, false)
+			} else {
+				h.errorResponse(c, cls.Status, cls.ErrType, cls.Message)
+			}
 			return
 		}
 
@@ -227,16 +304,18 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
 		writerSizeBeforeForward := c.Writer.Size()
+		service.SetOpsUpstreamAttempted(c, false)
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()
 				}
 			}()
-			return h.gatewayService.ForwardGrokMedia(requestCtx, c, account, endpoint, requestID, body, contentType)
+			return h.gatewayService.ForwardGrokMedia(requestCtx, c, account, endpoint, requestID, nil, contentType)
 		}()
 
-		forwardDurationMs := time.Since(forwardStart).Milliseconds()
+		forwardDuration := time.Since(forwardStart)
+		forwardDurationMs := forwardDuration.Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
 		responseLatencyMs := forwardDurationMs
 		if upstreamLatencyMs > 0 && forwardDurationMs > upstreamLatencyMs {
@@ -245,10 +324,17 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		service.SetOpsLatencyMs(c, service.OpsResponseLatencyMsKey, responseLatencyMs)
 
 		if err != nil {
+			if errors.Is(err, service.ErrRequestBodySpool) {
+				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+				return
+			}
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
 				h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
 				if c.Writer.Size() != writerSizeBeforeForward {
+					if requestCtx.Err() == nil {
+						h.submitFailoverFailedUsageLog(c, apiKey, account, requestModel, false, failoverErr, forwardDuration, nil, "handler.openai_gateway.grok_media")
+					}
 					h.handleFailoverExhausted(c, failoverErr, true)
 					return
 				}
@@ -273,7 +359,10 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 				h.gatewayService.RecordOpenAIAccountSwitch()
 				failedAccountIDs[account.ID] = struct{}{}
 				lastFailoverErr = failoverErr
+				lastFailedAccount = account
+				lastFailedDuration = forwardDuration
 				if switchCount >= maxAccountSwitches {
+					h.submitFailoverFailedUsageLog(c, apiKey, account, requestModel, false, failoverErr, forwardDuration, nil, "handler.openai_gateway.grok_media")
 					h.handleFailoverExhausted(c, failoverErr, false)
 					return
 				}
@@ -287,6 +376,9 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 				continue
 			}
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
+			if requestCtx.Err() == nil && service.HasOpsUpstreamAttempted(c) && !service.HasOpsClientBusinessLimited(c) {
+				h.submitFailedUsageLog(c, apiKey, account, requestModel, false, 0, nil, nil, forwardDuration, nil, "handler.openai_gateway.grok_media")
+			}
 			if c.Writer.Size() == writerSizeBeforeForward {
 				h.errorResponse(c, http.StatusBadGateway, "upstream_error", "Upstream request failed")
 			}
@@ -308,7 +400,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			}
 		}
 		if shouldRecordGrokMediaUsage(endpoint, requestModel) {
-			recordGrokMediaUsage(c, h, reqLog, apiKey, subject, subscription, account, result, requestModel, body, requestID)
+			recordGrokMediaUsage(c, h, reqLog, apiKey, subject, subscription, account, result, requestModel, requestPayloadHash, requestID)
 		}
 		reqLog.Debug("grok_media.request_completed",
 			zap.Int64("account_id", account.ID),
@@ -316,6 +408,40 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		)
 		return
 	}
+}
+
+func grokMediaRequestBodyPreview(contentType string, body []byte, requestInfo service.GrokMediaRequestInfo) string {
+	return grokMediaRequestBodyPreviewWithSize(contentType, body, requestInfo, int64(len(body)))
+}
+
+func grokMediaRequestBodyPreviewWithSize(contentType string, body []byte, requestInfo service.GrokMediaRequestInfo, size int64) string {
+	requestPreview := service.RequestBodyPreviewString(body)
+	if !isMultipartImagesContentType(contentType) && requestPreview != "[inline binary payload omitted]" {
+		return service.RequestBodyPreviewSnapshot(requestPreview, size)
+	}
+	prompt := multipartMetadataPromptPreview(requestInfo.Prompt)
+	if isMultipartImagesContentType(contentType) {
+		prompt = ""
+	}
+	preview, err := json.Marshal(struct {
+		Model          string `json:"model"`
+		Prompt         string `json:"prompt"`
+		Size           string `json:"size"`
+		N              int    `json:"n"`
+		HadSourceImage bool   `json:"had_source_image"`
+		HadMask        bool   `json:"had_mask"`
+	}{
+		Model:          requestInfo.Model,
+		Prompt:         prompt,
+		Size:           requestInfo.Size,
+		N:              requestInfo.N,
+		HadSourceImage: len(requestInfo.Uploads) > 0 || len(requestInfo.InputImageURLs) > 0,
+		HadMask:        requestInfo.MaskUpload != nil || strings.TrimSpace(requestInfo.MaskImageURL) != "",
+	})
+	if err != nil {
+		return "[multipart body omitted]"
+	}
+	return service.RequestBodyPreviewSnapshot(string(preview), size, true)
 }
 
 func shouldRecordGrokMediaUsage(endpoint service.GrokMediaEndpoint, requestModel string) bool {
@@ -332,17 +458,17 @@ func recordGrokMediaUsage(
 	account *service.Account,
 	result *service.OpenAIForwardResult,
 	requestModel string,
-	body []byte,
+	requestPayloadHash string,
 	requestID string,
 ) {
 	userAgent := c.GetHeader("User-Agent")
 	clientIP := ip.GetClientIP(c)
-	payloadForHash := body
-	if len(payloadForHash) == 0 && strings.TrimSpace(requestID) != "" {
-		payloadForHash = []byte(requestID)
+	if requestPayloadHash == "" && strings.TrimSpace(requestID) != "" {
+		requestPayloadHash = service.HashUsageRequestPayload([]byte(requestID))
 	}
 	inboundEndpoint := GetInboundEndpoint(c)
 	upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
+	detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
 	quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 	channelUsageFields := service.ChannelUsageFields{
 		OriginalModel:      requestModel,
@@ -359,10 +485,11 @@ func recordGrokMediaUsage(
 			UpstreamEndpoint:   upstreamEndpoint,
 			UserAgent:          userAgent,
 			IPAddress:          clientIP,
-			RequestPayloadHash: service.HashUsageRequestPayload(payloadForHash),
+			RequestPayloadHash: requestPayloadHash,
 			APIKeyService:      h.apiKeyService,
 			QuotaPlatform:      quotaPlatform,
 			ChannelUsageFields: channelUsageFields,
+			DetailSnapshot:     detailSnapshot,
 		}); err != nil {
 			logger.L().With(
 				zap.String("component", "handler.openai_gateway.grok_media"),

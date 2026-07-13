@@ -2,10 +2,38 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestGatewayServiceNewSelectionResult_ReleasesAcquiredSlotWhenHydrationFails(t *testing.T) {
+	svc := &GatewayService{
+		schedulerSnapshot: &SchedulerSnapshotService{accountRepo: selectionResultHydrationErrorRepo{}},
+	}
+	releases := 0
+
+	result, err := svc.newSelectionResult(context.Background(), &Account{ID: 1}, true, func() { releases++ }, nil)
+
+	if !errors.Is(err, errSelectionResultHydration) {
+		t.Fatalf("err=%v want hydration error", err)
+	}
+	if result != nil {
+		t.Fatal("result must be nil")
+	}
+	if releases != 1 {
+		t.Fatalf("releases=%d want=1", releases)
+	}
+}
+
+var errSelectionResultHydration = errors.New("hydrate account")
+
+type selectionResultHydrationErrorRepo struct{ AccountRepository }
+
+func (selectionResultHydrationErrorRepo) GetByID(context.Context, int64) (*Account, error) {
+	return nil, errSelectionResultHydration
+}
 
 func TestCollectSelectionFailureStats(t *testing.T) {
 	svc := &GatewayService{}

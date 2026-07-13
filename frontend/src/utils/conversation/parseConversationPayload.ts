@@ -20,6 +20,7 @@ type JsonParseResult = {
 }
 
 export const INJECTION_TAG_WHITELIST = ['EXTREMELY_IMPORTANT', 'EXTREMELY-IMPORTANT', 'SUBAGENT-STOP', 'system-reminder', 'reminder', 'important']
+export const REQUEST_BODY_PREVIEW_SNAPSHOT_KIND = 'request_body_preview'
 
 type SplitInjectionPart = { type: 'text' | 'injection'; text: string; tag?: string }
 type UserContentPart = ConversationContentPart | Omit<ConversationInjectionPart, 'id'>
@@ -154,6 +155,20 @@ const attachToolOutputSize = (part: ConversationToolPart): void => {
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+export const unwrapPreviewSnapshotBody = (body: string | null | undefined): string | null | undefined => {
+  if (typeof body !== 'string') return body
+
+  const value = parseJsonValue(body)
+  if (!isRecord(value)) return body
+  if (typeof value.preview !== 'string' || typeof value.truncated !== 'boolean' || typeof value.size !== 'number') return body
+  if (value.kind === REQUEST_BODY_PREVIEW_SNAPSHOT_KIND) return value.preview
+
+  const keys = Object.keys(value)
+  if (keys.length !== 3 || !keys.every((key) => key === 'preview' || key === 'truncated' || key === 'size')) return body
+
+  return value.preview
 }
 
 const isMessageRole = (value: unknown): value is ConversationMessageRole => {
@@ -411,26 +426,27 @@ const parseSSEBody = (body: string): unknown | null => {
 }
 
 const parseBody = (body: string | null | undefined): JsonParseResult => {
-  const hasBody = typeof body === 'string' && body.trim().length > 0
+  const unwrappedBody = unwrapPreviewSnapshotBody(body)
+  const hasBody = typeof unwrappedBody === 'string' && unwrappedBody.trim().length > 0
   if (!hasBody) return { value: null, raw: null, hasBody: false, invalid: false }
 
   // Try direct JSON parse first
-  const value = parseJsonValue(body)
+  const value = parseJsonValue(unwrappedBody)
   if (value !== null) {
-    return { value, raw: body, hasBody: true, invalid: false }
+    return { value, raw: unwrappedBody, hasBody: true, invalid: false }
   }
 
   // Try SSE streaming format
-  const sseValue = parseSSEBody(body!)
+  const sseValue = parseSSEBody(unwrappedBody!)
   if (sseValue !== null) {
-    return { value: sseValue, raw: body, hasBody: true, invalid: false }
+    return { value: sseValue, raw: unwrappedBody, hasBody: true, invalid: false }
   }
 
   return {
     value: null,
-    raw: body,
+    raw: unwrappedBody,
     hasBody: true,
-    invalid: body!.trim() !== 'null',
+    invalid: unwrappedBody!.trim() !== 'null',
   }
 }
 

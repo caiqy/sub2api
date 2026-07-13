@@ -11,6 +11,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestUsageDetailCapture_SetUsageUpstreamRequest_PreservesHeaderTextAndBody(t *testing.T) {
@@ -20,13 +21,14 @@ func TestUsageDetailCapture_SetUsageUpstreamRequest_PreservesHeaderTextAndBody(t
 	r := gin.New()
 	r.Use(UsageDetailCapture())
 	r.POST("/capture", func(c *gin.Context) {
-		upstreamReq, err := http.NewRequest(http.MethodPost, "https://example.com/v1/messages", strings.NewReader("ignored"))
+		rawBody := "  {\"raw\":true}\n"
+		upstreamReq, err := http.NewRequest(http.MethodPost, "https://example.com/v1/messages", strings.NewReader(rawBody))
 		require.NoError(t, err)
 		upstreamReq.Header.Add("X-Multi", "a")
 		upstreamReq.Header.Add("X-Multi", "b")
 		upstreamReq.Header.Set("Authorization", "Bearer secret-token")
 
-		SetUsageUpstreamRequest(c, upstreamReq, "  {\"raw\":true}\n")
+		SetUsageUpstreamRequest(c, upstreamReq, rawBody)
 		snapshot = BuildUsageDetailSnapshot(c)
 		c.Status(http.StatusNoContent)
 	})
@@ -42,22 +44,124 @@ func TestUsageDetailCapture_SetUsageUpstreamRequest_PreservesHeaderTextAndBody(t
 	require.Contains(t, snapshot.UpstreamRequestHeaders, "Authorization: Bearer secret-token")
 	require.Contains(t, snapshot.UpstreamRequestHeaders, "X-Multi: a")
 	require.Contains(t, snapshot.UpstreamRequestHeaders, "X-Multi: b")
-	require.Equal(t, "  {\"raw\":true}\n", snapshot.UpstreamRequestBody)
+	require.Equal(t, "request_body_preview", gjson.Get(snapshot.UpstreamRequestBody, "kind").String())
+	require.Equal(t, "  {\"raw\":true}\n", gjson.Get(snapshot.UpstreamRequestBody, "preview").String())
+	require.False(t, gjson.Get(snapshot.UpstreamRequestBody, "truncated").Bool())
+	require.Equal(t, int64(len("  {\"raw\":true}\n")), gjson.Get(snapshot.UpstreamRequestBody, "size").Int())
+}
+
+func TestUsageDetailCapture_SetUsageUpstreamRequest_WrapperSizeAndTruncation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name      string
+		body      string
+		size      int64
+		truncated bool
+		omitted   bool
+	}{
+		{name: "small", body: `{"input":"hello"}`, size: int64(len(`{"input":"hello"}`))},
+		{name: "large", body: `{"input":"preview"}`, size: 10 << 20, truncated: true},
+		{name: "inline binary", body: `{"image_url":"data:image/png;base64,c2VjcmV0"}`, size: int64(len(`{"image_url":"data:image/png;base64,c2VjcmV0"}`)), truncated: true, omitted: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var snapshot *UsageDetailSnapshot
+			r := gin.New()
+			r.Use(UsageDetailCapture())
+			r.POST("/capture", func(c *gin.Context) {
+				upstreamReq, err := http.NewRequest(http.MethodPost, "https://example.com/v1/responses", strings.NewReader(tt.body))
+				require.NoError(t, err)
+				upstreamReq.ContentLength = tt.size
+				SetUsageUpstreamRequest(c, upstreamReq, tt.body)
+				snapshot = BuildUsageDetailSnapshot(c)
+				c.Status(http.StatusNoContent)
+			})
+
+			r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/capture", nil))
+			require.NotNil(t, snapshot)
+			require.Equal(t, "request_body_preview", gjson.Get(snapshot.UpstreamRequestBody, "kind").String())
+			require.Equal(t, tt.size, gjson.Get(snapshot.UpstreamRequestBody, "size").Int())
+			require.Equal(t, tt.truncated, gjson.Get(snapshot.UpstreamRequestBody, "truncated").Bool())
+			if tt.omitted {
+				require.Contains(t, gjson.Get(snapshot.UpstreamRequestBody, "preview").String(), "omitted")
+				require.NotContains(t, snapshot.UpstreamRequestBody, "c2VjcmV0")
+			}
+		})
+	}
+}
+
+func TestUsageDetailCaptureMiddleware_DownstreamStillReadsFullBodyWithoutPreread(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var (
+		downstream string
+		snapshot   *UsageDetailSnapshot
+	)
+
+	r := gin.New()
+	r.Use(UsageDetailCapture())
+	r.POST("/capture", func(c *gin.Context) {
+		raw, err := io.ReadAll(c.Request.Body)
+		require.NoError(t, err)
+		downstream = string(raw)
+		snapshot = BuildUsageDetailSnapshot(c)
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/capture", strings.NewReader(`{"message":"hi"}`))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, `{"message":"hi"}`, downstream)
+	require.NotNil(t, snapshot)
+	require.Equal(t, "", snapshot.RequestBody)
+}
+
+func TestSetUsageUpstreamRequest_DoesNotFallbackToGetBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var snapshot *UsageDetailSnapshot
+	r := gin.New()
+	r.Use(UsageDetailCapture())
+	r.POST("/capture", func(c *gin.Context) {
+		req, err := http.NewRequest(http.MethodPost, "https://example.com/v1/responses", strings.NewReader("ignored"))
+		require.NoError(t, err)
+		called := 0
+		req.GetBody = func() (io.ReadCloser, error) {
+			called++
+			return io.NopCloser(strings.NewReader("should-not-be-read")), nil
+		}
+
+		service.SetUsageUpstreamRequest(c, req, "")
+		snapshot = BuildUsageDetailSnapshot(c)
+		require.Equal(t, 0, called)
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/capture", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.NotNil(t, snapshot)
+	require.Equal(t, "request_body_preview", gjson.Get(snapshot.UpstreamRequestBody, "kind").String())
+	require.Equal(t, "", gjson.Get(snapshot.UpstreamRequestBody, "preview").String())
+	require.True(t, gjson.Get(snapshot.UpstreamRequestBody, "truncated").Bool())
+	require.Equal(t, int64(len("ignored")), gjson.Get(snapshot.UpstreamRequestBody, "size").Int())
 }
 
 func TestUsageDetailCaptureMiddleware_CapturesRequestAndResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	var snapshotRequest *UsageDetailSnapshot
+	var downstreamRequestBody string
 	r := gin.New()
 	r.Use(UsageDetailCapture())
 	r.POST("/capture", func(c *gin.Context) {
-		firstRead, err := io.ReadAll(c.Request.Body)
+		raw, err := io.ReadAll(c.Request.Body)
 		require.NoError(t, err)
-		c.Request.Body = io.NopCloser(strings.NewReader(string(firstRead)))
-		secondRead, err := io.ReadAll(c.Request.Body)
-		require.NoError(t, err)
-		require.Equal(t, string(firstRead), string(secondRead))
+		downstreamRequestBody = string(raw)
+		service.SetUsageRequestBody(c, "request-preview")
 
 		c.Header("X-Trace", "abc")
 		_, err = c.Writer.Write([]byte("hello "))
@@ -79,7 +183,8 @@ func TestUsageDetailCaptureMiddleware_CapturesRequestAndResponse(t *testing.T) {
 	require.NotNil(t, snapshotRequest)
 	require.Contains(t, snapshotRequest.RequestHeaders, "Content-Type: application/json")
 	require.Contains(t, snapshotRequest.RequestHeaders, "X-Test: 1")
-	require.Equal(t, `{"message":"hi"}`, snapshotRequest.RequestBody)
+	require.Equal(t, `{"message":"hi"}`, downstreamRequestBody)
+	require.Equal(t, "request-preview", snapshotRequest.RequestBody)
 	require.Contains(t, snapshotRequest.ResponseHeaders, "X-Trace: abc")
 	require.Equal(t, "hello world", snapshotRequest.ResponseBody)
 }
@@ -209,7 +314,7 @@ func TestUsageDetailCaptureMiddleware_RestoresPartialBodyAndErrorToDownstream(t 
 	require.ErrorIs(t, downstreamErr, expectedErr)
 	require.Equal(t, []byte("partial"), downstreamBody)
 	require.NotNil(t, snapshot)
-	require.Equal(t, "partial", snapshot.RequestBody)
+	require.Equal(t, "", snapshot.RequestBody)
 }
 
 func TestUsageDetailCaptureMiddleware_CapturesResponseViaReadFromPath(t *testing.T) {
@@ -271,7 +376,7 @@ func TestUsageDetailCaptureMiddleware_CapturesFullRequestAndResponseBodies(t *te
 	require.Equal(t, http.StatusOK, w.Code)
 	require.NotNil(t, snapshot)
 	require.Equal(t, oversizedRequest, downstreamRequestBody)
-	require.Equal(t, oversizedRequest, snapshot.RequestBody)
+	require.Equal(t, "", snapshot.RequestBody)
 	require.Equal(t, oversizedResponse, snapshot.ResponseBody)
 }
 

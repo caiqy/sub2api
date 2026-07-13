@@ -3,11 +3,15 @@
 package handler
 
 import (
+	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -17,7 +21,56 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGatewayHandler_GeminiV1BetaModels_UpstreamErrorStillCreatesUsageLog(t *testing.T) {
+func TestGeminiV1BetaModels_FailedUsageKeepsSpoolUntilUpstreamReturns(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawDir := t.TempDir()
+	old := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 10 << 20, TempDir: rawDir}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = old })
+	group := &service.Group{ID: 98, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 98, Name: "api-key", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "key"}}
+	upstream := newGeminiBlockingBodyUpstream(t, &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"gemini upstream rejected payload"}}`))})
+	env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+	rec := httptest.NewRecorder()
+	body := `{"contents":[{"role":"user","parts":[{"text":"` + strings.Repeat("x", 12<<20) + `"}]}]}`
+	done := make(chan struct{})
+	go func() {
+		req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash:generateContent", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		env.routerFor("/v1beta/models/*modelAction", env.handler.GeminiV1BetaModels).ServeHTTP(rec, req)
+		close(done)
+	}()
+	select {
+	case <-upstream.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Gemini handler did not reach upstream")
+	}
+	entries, err := os.ReadDir(rawDir)
+	require.NoError(t, err)
+	require.NotEmpty(t, entries)
+	upstream.Release()
+	requireGeminiHandlerDone(t, done)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "gemini upstream rejected payload")
+	log := waitForOpenAIFailedUsageLog(t, env.usageRepo)
+	var snapshot struct {
+		Preview   string `json:"preview"`
+		Truncated bool   `json:"truncated"`
+		Size      int64  `json:"size"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(log.DetailSnapshot.RequestBody), &snapshot))
+	require.True(t, snapshot.Truncated)
+	require.Equal(t, int64(len(body)), snapshot.Size)
+	require.Equal(t, "[inline binary payload omitted]", snapshot.Preview)
+	previewLimit := len(service.RequestBodyPreviewSnapshot(strings.Repeat("x", len(body)), int64(len(body))))
+	require.LessOrEqual(t, len(log.DetailSnapshot.RequestBody), previewLimit)
+	entries, err = os.ReadDir(rawDir)
+	require.NoError(t, err)
+	require.Empty(t, entries)
+}
+
+func TestGatewayHandler_GeminiV1BetaModels_ForwardErrorStillCreatesUsageLog(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	cfg := &config.Config{
@@ -138,7 +191,7 @@ func TestGatewayHandler_GeminiV1BetaModels_UpstreamErrorStillCreatesUsageLog(t *
 	require.Equal(t, 0.0, usageLogRepo.lastLog.TotalCost)
 	require.Equal(t, 0.0, usageLogRepo.lastLog.ActualCost)
 	require.NotNil(t, usageLogRepo.lastLog.DetailSnapshot)
-	require.JSONEq(t, reqBody, usageLogRepo.lastLog.DetailSnapshot.RequestBody)
+	requireRequestPreviewSnapshot(t, usageLogRepo.lastLog.DetailSnapshot.RequestBody, reqBody)
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, "gemini upstream rejected payload")
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "X-Goog-Api-Key: gemini-test-key")
 }
@@ -261,6 +314,7 @@ func TestGatewayHandler_GeminiV1BetaModels_FailoverExhaustedStillCreatesUsageLog
 	require.Equal(t, http.StatusTooManyRequests, rec.Code)
 	require.NotNil(t, usageLogRepo.lastLog)
 	require.NotNil(t, usageLogRepo.lastLog.DetailSnapshot)
+	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseHeaders, "X-Request-Id: gemini_failover_123")
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, `"RESOURCE_EXHAUSTED_RAW"`)
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, "gemini raw failover")
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "X-Goog-Api-Key: gemini-test-key")
@@ -384,6 +438,7 @@ func TestGatewayHandler_GeminiV1BetaModels_SelectionExhaustedAfterFailoverStillC
 	require.JSONEq(t, `{"error":{"code":429,"message":"Upstream rate limit exceeded, please retry later","status":"RESOURCE_EXHAUSTED"}}`, rec.Body.String())
 	require.NotNil(t, usageLogRepo.lastLog)
 	require.NotNil(t, usageLogRepo.lastLog.DetailSnapshot)
+	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseHeaders, "X-Request-Id: gemini_selection_exhausted_123")
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, `"RESOURCE_EXHAUSTED_RAW"`)
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, "gemini raw failover")
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "X-Goog-Api-Key: gemini-test-key")

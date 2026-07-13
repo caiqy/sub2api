@@ -61,6 +61,10 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
+	body, err := openAIRequestBodyBytes(c, body)
+	if err != nil {
+		return nil, fmt.Errorf("read request body: %w", err)
+	}
 	restrictionResult := s.detectCodexClientRestriction(c, account, body)
 	logCodexCLIOnlyDetection(ctx, c, account, getAPIKeyIDFromContext(c), restrictionResult, body)
 	if restrictionResult.Enabled && !restrictionResult.Matched {
@@ -93,6 +97,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	}
 	originalModel := chatReq.Model
 	clientStream := chatReq.Stream
+	bodyLength := len(body)
 
 	// 2. Resolve model mapping early so compat prompt_cache_key injection can
 	// derive a stable seed from the final upstream model family.
@@ -123,7 +128,6 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	var (
 		responsesReq  *apicompat.ResponsesRequest
 		responsesBody []byte
-		err           error
 	)
 	if isResponsesShape {
 		responsesBody, err = sjson.SetBytes(body, "model", upstreamModel)
@@ -250,6 +254,10 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
+	// The request now owns its final upstream body handle. Do not retain either
+	// converted or inbound bytes while the upstream call can block.
+	responsesBody = nil
+	body = nil
 
 	if promptCacheKey != "" {
 		apiKeyID := getAPIKeyIDFromContext(c)
@@ -261,9 +269,10 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	if account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	SetUsageUpstreamRequest(c, upstreamReq, "")
-	setOpsUpstreamRequestBodyFromRequest(c, upstreamReq)
+	SetUsageUpstreamRequestHeaders(c, upstreamReq)
+	SetOpsUpstreamAttempted(c, true)
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+	closeOpenAIRequestBody(upstreamReq)
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
@@ -285,7 +294,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 				zap.Int("upstream_status", resp.StatusCode),
 				zap.String("upstream_message", upstreamMsg),
 			)
-			return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
+			return s.forwardAsRawChatCompletions(ctx, c, account, nil, defaultMappedModel)
 		}
 		if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
 			upstreamDetail := ""
@@ -321,7 +330,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	var result *OpenAIForwardResult
 	var handleErr error
 	if clientStream {
-		result, handleErr = s.handleChatStreamingResponse(resp, c, account, originalModel, billingModel, upstreamModel, startTime, len(body))
+		result, handleErr = s.handleChatStreamingResponse(resp, c, account, originalModel, billingModel, upstreamModel, startTime, bodyLength)
 	} else {
 		result, handleErr = s.handleChatBufferedStreamingResponse(resp, c, account, originalModel, billingModel, upstreamModel, startTime)
 	}

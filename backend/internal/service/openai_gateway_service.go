@@ -52,8 +52,6 @@ const (
 	// codex_cli_only 拒绝时单个请求头日志长度上限（字符）
 	codexCLIOnlyHeaderValueMaxBytes = 256
 
-	// OpenAIParsedRequestBodyKey 缓存 handler 侧已解析的请求体，避免重复解析。
-	OpenAIParsedRequestBodyKey = "openai_parsed_request_body"
 	// OpenAI WS Mode 失败后的重连次数上限（不含首次尝试）。
 	// 与 Codex 客户端保持一致：失败后最多重连 5 次。
 	openAIWSReconnectRetryLimit = 5
@@ -66,7 +64,25 @@ const (
 	codexCLIVersion                          = "0.125.0"
 	// Codex 限额快照仅用于后台展示/诊断，不需要每个成功请求都立即落库。
 	openAICodexSnapshotPersistMinInterval = 30 * time.Second
+	openAIRequestBodyHandleContextKey     = "openai_request_body_handle"
 )
+
+func BindOpenAIRequestBodyHandle(c *gin.Context, handle *RequestBodyHandle) {
+	if c != nil && handle != nil {
+		c.Set(openAIRequestBodyHandleContextKey, handle)
+	}
+}
+
+func getOpenAIRequestBodyHandle(c *gin.Context) *RequestBodyHandle {
+	if c == nil {
+		return nil
+	}
+	handle, _ := c.Get(openAIRequestBodyHandleContextKey)
+	if h, ok := handle.(*RequestBodyHandle); ok {
+		return h
+	}
+	return nil
+}
 
 // OpenAI allowed headers whitelist (for non-passthrough).
 var openaiAllowedHeaders = map[string]bool{
@@ -254,6 +270,53 @@ type OpenAIForwardResult struct {
 	ImageSizeBreakdown  map[string]int
 	wsReplayInput       []json.RawMessage
 	wsReplayInputExists bool
+}
+
+const openAIResponseTerminalWrittenKey = "openai_response_terminal_written"
+
+func MarkOpenAIResponseTerminalWritten(c *gin.Context) {
+	if c != nil {
+		c.Set(openAIResponseTerminalWrittenKey, true)
+	}
+}
+
+func HasOpenAIResponseTerminalWritten(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	written, _ := c.Get(openAIResponseTerminalWrittenKey)
+	value, _ := written.(bool)
+	return value
+}
+
+func (r *OpenAIForwardResult) UsageRecordSnapshot() *OpenAIForwardResult {
+	if r == nil {
+		return nil
+	}
+	out := *r
+	out.ResponseHeaders = nil
+	out.wsReplayInput = nil
+	out.wsReplayInputExists = false
+	if r.ServiceTier != nil {
+		v := *r.ServiceTier
+		out.ServiceTier = &v
+	}
+	if r.ReasoningEffort != nil {
+		v := *r.ReasoningEffort
+		out.ReasoningEffort = &v
+	}
+	if r.FirstTokenMs != nil {
+		v := *r.FirstTokenMs
+		out.FirstTokenMs = &v
+	}
+	out.ImageOutputSizes = append([]string(nil), r.ImageOutputSizes...)
+	if len(r.ImageSizeBreakdown) > 0 {
+		out.ImageSizeBreakdown = make(map[string]int, len(r.ImageSizeBreakdown))
+		for k, v := range r.ImageSizeBreakdown {
+			out.ImageSizeBreakdown[k] = v
+		}
+	}
+	return &out
 }
 
 type openAIRequestView struct {
@@ -1470,9 +1533,8 @@ func explicitOpenAISessionID(c *gin.Context, body []byte) string {
 	return sessionID
 }
 
-// GenerateExplicitSessionHash generates a sticky-session hash only from explicit
-// client session signals. It intentionally skips content-derived fallback and is
-// used by stateless endpoints such as /v1/images.
+// GenerateExplicitSessionHash 仅根据客户端显式会话信号生成粘性会话哈希，
+// 不使用内容派生回退。当前生产 Images 路径未依赖此方法。
 func (s *OpenAIGatewayService) GenerateExplicitSessionHash(c *gin.Context, body []byte) string {
 	sessionID := explicitOpenAISessionID(c, body)
 	if sessionID == "" {
@@ -1509,9 +1571,9 @@ func (s *OpenAIGatewayService) GenerateSessionHash(c *gin.Context, body []byte) 
 	return currentHash
 }
 
-// GenerateSessionHashWithFallback 先按常规信号生成会话哈希；
+// GenerateSessionHashWithFallback 仅按显式会话信号生成哈希；
 // 当未携带 session_id/conversation_id/prompt_cache_key 时，使用 fallbackSeed 生成稳定哈希。
-// 该方法用于 WS ingress，避免会话信号缺失时发生跨账号漂移。
+// 它不执行内容派生，供 multipart/WS ingress 等已冻结 fallback seed 的调用方使用。
 func (s *OpenAIGatewayService) GenerateSessionHashWithFallback(c *gin.Context, body []byte, fallbackSeed string) string {
 	if sessionID := explicitOpenAISessionID(c, body); sessionID != "" {
 		currentHash, legacyHash := deriveOpenAISessionHashes(sessionID)
@@ -3476,14 +3538,24 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 
 	httpInvalidEncryptedContentRetryTried := false
+	bodyHandle, ownedBodyHandle, err := openAIRequestBodyHandleForContext(c, body)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if ownedBodyHandle {
+			CleanupRequestBodyHandle(bodyHandle)
+		}
+	}()
 	for {
 		// Build upstream request
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
-		upstreamReq, err := s.buildUpstreamRequestWithSourceBody(upstreamCtx, c, account, originalBody, body, token, reqStream, promptCacheKey, isCodexCLI)
+		upstreamReq, err := s.buildUpstreamRequestWithSourceBody(upstreamCtx, c, account, originalBody, body, bodyHandle, token, reqStream, promptCacheKey, isCodexCLI)
 		releaseUpstreamCtx()
 		if err != nil {
 			return nil, err
 		}
+		defer closeOpenAIRequestBody(upstreamReq)
 
 		// Get proxy URL
 		proxyURL := ""
@@ -3493,8 +3565,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 		// Send request
 		upstreamStart := time.Now()
-		setOpsUpstreamRequestBodyFromRequest(c, upstreamReq)
-		SetUsageUpstreamRequest(c, upstreamReq, "")
+		SetOpsUpstreamAttempted(c, true)
 		resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		if err != nil {
@@ -3519,6 +3590,14 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					if err != nil {
 						return nil, fmt.Errorf("serialize invalid_encrypted_content retry body: %w", err)
 					}
+					if ownedBodyHandle {
+						CleanupRequestBodyHandle(bodyHandle)
+					}
+					bodyHandle, err = NewRequestBodyHandleFromBytes(body, openAIRequestBodyHandleOptions())
+					if err != nil {
+						return nil, err
+					}
+					ownedBodyHandle = true
 					httpInvalidEncryptedContentRetryTried = true
 					logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Retrying non-WSv2 request once after invalid_encrypted_content (account: %s)", account.Name)
 					continue
@@ -3760,7 +3839,17 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	}
 
 	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
-	upstreamReq, err := s.buildUpstreamRequestOpenAIPassthrough(upstreamCtx, c, account, sourceBody, body, token)
+	bodyHandle, ownedBodyHandle, err := openAIRequestBodyHandleForContext(c, body)
+	if err != nil {
+		releaseUpstreamCtx()
+		return nil, err
+	}
+	defer func() {
+		if ownedBodyHandle {
+			CleanupRequestBodyHandle(bodyHandle)
+		}
+	}()
+	upstreamReq, err := s.buildUpstreamRequestOpenAIPassthrough(upstreamCtx, c, account, sourceBody, body, bodyHandle, token)
 	releaseUpstreamCtx()
 	if err != nil {
 		if strings.HasPrefix(err.Error(), "invalid_request_error:") {
@@ -3784,19 +3873,19 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		}
 		return nil, err
 	}
+	defer closeOpenAIRequestBody(upstreamReq)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
 
-	setOpsUpstreamRequestBodyFromRequest(c, upstreamReq)
 	if c != nil {
 		c.Set("openai_passthrough", true)
 	}
 
 	upstreamStart := time.Now()
-	SetUsageUpstreamRequest(c, upstreamReq, "")
+	SetOpsUpstreamAttempted(c, true)
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
@@ -3905,14 +3994,113 @@ func logOpenAIPassthroughInstructionsRejected(
 	logger.FromContext(ctx).With(fields...).Warn("OpenAI passthrough 本地拦截：Codex 请求缺少有效 instructions")
 }
 
+func openAIRequestBodyHandleOptions() RequestBodyHandleOptions {
+	return RequestBodyHandleOptions{
+		SpoolThresholdBytes: 10 << 20,
+		PreviewLimitBytes:   5 << 20,
+		FilePrefix:          "sub2api-request-body-",
+	}
+}
+
+func openAIRequestBodyHandleMatchesBytes(handle *RequestBodyHandle, body []byte) bool {
+	if handle == nil || handle.Size() != int64(len(body)) {
+		return false
+	}
+	sum := sha256.Sum256(body)
+	return handle.Hash() == hex.EncodeToString(sum[:])
+}
+
+func openAIRequestBodyHandleForBytes(handle *RequestBodyHandle, body []byte) (*RequestBodyHandle, bool, error) {
+	if openAIRequestBodyHandleMatchesBytes(handle, body) {
+		return handle, false, nil
+	}
+	h, err := NewRequestBodyHandleFromBytes(body, openAIRequestBodyHandleOptions())
+	return h, true, err
+}
+
+func openAIRequestBodyHandleForContext(c *gin.Context, body []byte) (*RequestBodyHandle, bool, error) {
+	return openAIRequestBodyHandleForBytes(getOpenAIRequestBodyHandle(c), body)
+}
+
+func openAIRequestBodyBytes(c *gin.Context, body []byte) ([]byte, error) {
+	if len(body) != 0 {
+		return body, nil
+	}
+	handle := getOpenAIRequestBodyHandle(c)
+	if handle == nil {
+		return nil, errors.New("openai request body handle is missing")
+	}
+	return handle.ReadAll()
+}
+
+type openAIOwnedBodyHandleContextKey struct{}
+
+func closeOpenAIRequestBody(req *http.Request) {
+	if req == nil {
+		return
+	}
+	if req.Body != nil {
+		_ = req.Body.Close()
+	}
+	if handle, ok := req.Context().Value(openAIOwnedBodyHandleContextKey{}).(*RequestBodyHandle); ok {
+		CleanupRequestBodyHandle(handle)
+	}
+}
+
+func openAINewRequestWithBodyHandle(ctx context.Context, method, targetURL string, bodyHandle *RequestBodyHandle, owned bool) (*http.Request, error) {
+	reader, err := bodyHandle.Open()
+	if err != nil {
+		if owned {
+			CleanupRequestBodyHandle(bodyHandle)
+		}
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, method, targetURL, reader)
+	if err != nil {
+		_ = reader.Close()
+		if owned {
+			CleanupRequestBodyHandle(bodyHandle)
+		}
+		return nil, err
+	}
+	req.GetBody = bodyHandle.Open
+	req.ContentLength = bodyHandle.Size()
+	if owned {
+		req = req.WithContext(context.WithValue(req.Context(), openAIOwnedBodyHandleContextKey{}, bodyHandle))
+	}
+	return req, nil
+}
+
+func parseOpenAIPassthroughBodyHandleArgs(bodyHandleOrToken any, tokenArgs []string) (*RequestBodyHandle, string, error) {
+	if token, ok := bodyHandleOrToken.(string); ok {
+		if len(tokenArgs) != 0 {
+			return nil, "", fmt.Errorf("invalid OpenAI passthrough request builder arguments")
+		}
+		return nil, token, nil
+	}
+	bodyHandle, ok := bodyHandleOrToken.(*RequestBodyHandle)
+	if !ok {
+		return nil, "", fmt.Errorf("invalid OpenAI passthrough request builder arguments")
+	}
+	if len(tokenArgs) != 1 {
+		return nil, "", fmt.Errorf("invalid OpenAI passthrough request builder arguments")
+	}
+	return bodyHandle, tokenArgs[0], nil
+}
+
 func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	ctx context.Context,
 	c *gin.Context,
 	account *Account,
 	sourceBody []byte,
 	body []byte,
-	token string,
+	bodyHandleOrToken any,
+	tokenArgs ...string,
 ) (*http.Request, error) {
+	bodyHandle, token, err := parseOpenAIPassthroughBodyHandleArgs(bodyHandleOrToken, tokenArgs)
+	if err != nil {
+		return nil, err
+	}
 	inboundHeader := http.Header{}
 	if c != nil && c.Request != nil {
 		inboundHeader = c.Request.Header
@@ -3947,15 +4135,24 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 			}
 		}
 	}
-	var err error
 	body, err = applyAccountPassthroughFieldsWithContext(ctx, account, inboundHeader, sourceBody, body, outboundHeader)
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
+	bodyHandle, ownedBodyHandle, err := openAIRequestBodyHandleForBytes(bodyHandle, body)
 	if err != nil {
 		return nil, err
 	}
+	req, err := openAINewRequestWithBodyHandle(ctx, http.MethodPost, targetURL, bodyHandle, ownedBodyHandle)
+	if err != nil {
+		return nil, err
+	}
+	cleanupOnError := true
+	defer func() {
+		if cleanupOnError {
+			closeOpenAIRequestBody(req)
+		}
+	}()
 	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
 	req.Header = outboundHeader
 
@@ -4031,7 +4228,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）
 	account.ApplyHeaderOverrides(req.Header)
+	SetUsageUpstreamRequest(c, req, bodyHandle.PreviewString())
 
+	cleanupOnError = false
 	return req, nil
 }
 
@@ -4427,6 +4626,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		line := scanner.Text()
 		lineStartsClientOutput := false
 		forceFlushFailedEvent := false
+		responseFailedEvent := false
 		if data, ok := extractOpenAISSEDataLine(line); ok {
 			dataBytes := []byte(data)
 			trimmedData := strings.TrimSpace(data)
@@ -4477,6 +4677,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				}
 			}
 			if eventType == "response.failed" {
+				responseFailedEvent = true
 				failedMessage = extractOpenAISSEErrorMessage(dataBytes)
 				// response.failed 自带上游已消耗的 usage（input token 通常已扣）；必须先解析
 				// 再打 cyber 标记，否则 mark 记到的是解析前的 0，导致流式 cyber 按 0 token 计费
@@ -4533,6 +4734,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI passthrough] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
 			} else {
 				clientOutputStarted = true
+				if responseFailedEvent {
+					MarkOpenAIResponseTerminalWritten(c)
+				}
 				flusher.Flush()
 			}
 		}
@@ -4755,7 +4959,57 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	return s.buildUpstreamRequestWithSourceBody(ctx, c, account, body, body, token, isStream, promptCacheKey, isCodexCLI)
 }
 
-func (s *OpenAIGatewayService) buildUpstreamRequestWithSourceBody(ctx context.Context, c *gin.Context, account *Account, sourceBody []byte, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, error) {
+func parseOpenAIWithSourceBodyArgs(bodyHandleOrToken any, args []any) (*RequestBodyHandle, string, bool, string, bool, error) {
+	if token, ok := bodyHandleOrToken.(string); ok {
+		if len(args) != 3 {
+			return nil, "", false, "", false, fmt.Errorf("invalid OpenAI request builder arguments")
+		}
+		isStream, ok := args[0].(bool)
+		if !ok {
+			return nil, "", false, "", false, fmt.Errorf("invalid OpenAI request builder arguments")
+		}
+		promptCacheKey, ok := args[1].(string)
+		if !ok {
+			return nil, "", false, "", false, fmt.Errorf("invalid OpenAI request builder arguments")
+		}
+		isCodexCLI, ok := args[2].(bool)
+		if !ok {
+			return nil, "", false, "", false, fmt.Errorf("invalid OpenAI request builder arguments")
+		}
+		return nil, token, isStream, promptCacheKey, isCodexCLI, nil
+	}
+	bodyHandle, ok := bodyHandleOrToken.(*RequestBodyHandle)
+	if !ok {
+		return nil, "", false, "", false, fmt.Errorf("invalid OpenAI request builder arguments")
+	}
+	if len(args) != 4 {
+		return nil, "", false, "", false, fmt.Errorf("invalid OpenAI request builder arguments")
+	}
+	token, ok := args[0].(string)
+	if !ok {
+		return nil, "", false, "", false, fmt.Errorf("invalid OpenAI request builder arguments")
+	}
+	isStream, ok := args[1].(bool)
+	if !ok {
+		return nil, "", false, "", false, fmt.Errorf("invalid OpenAI request builder arguments")
+	}
+	promptCacheKey, ok := args[2].(string)
+	if !ok {
+		return nil, "", false, "", false, fmt.Errorf("invalid OpenAI request builder arguments")
+	}
+	isCodexCLI, ok := args[3].(bool)
+	if !ok {
+		return nil, "", false, "", false, fmt.Errorf("invalid OpenAI request builder arguments")
+	}
+	return bodyHandle, token, isStream, promptCacheKey, isCodexCLI, nil
+}
+
+func (s *OpenAIGatewayService) buildUpstreamRequestWithSourceBody(ctx context.Context, c *gin.Context, account *Account, sourceBody []byte, body []byte, bodyHandleOrToken any, args ...any) (*http.Request, error) {
+	bodyHandle, token, isStream, promptCacheKey, isCodexCLI, err := parseOpenAIWithSourceBodyArgs(bodyHandleOrToken, args)
+	if err != nil {
+		return nil, err
+	}
+	_ = isStream
 	// Determine target URL based on account type
 	var targetURL string
 	switch account.Type {
@@ -4798,11 +5052,21 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithSourceBody(ctx context.Co
 	if passthroughErr != nil {
 		return nil, passthroughErr
 	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(body))
+	bodyHandle, ownedBodyHandle, err := openAIRequestBodyHandleForBytes(bodyHandle, body)
 	if err != nil {
 		return nil, err
 	}
+
+	req, err := openAINewRequestWithBodyHandle(ctx, "POST", targetURL, bodyHandle, ownedBodyHandle)
+	if err != nil {
+		return nil, err
+	}
+	cleanupOnError := true
+	defer func() {
+		if cleanupOnError {
+			closeOpenAIRequestBody(req)
+		}
+	}()
 	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
 	req.Header = outboundHeader
 
@@ -4882,7 +5146,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithSourceBody(ctx context.Co
 
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）
 	account.ApplyHeaderOverrides(req.Header)
+	SetUsageUpstreamRequest(c, req, bodyHandle.PreviewString())
 
+	cleanupOnError = false
 	return req, nil
 }
 
@@ -5283,9 +5549,14 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 		return nil, errors.New("streaming not supported")
 	}
 	bufferedWriter := bufio.NewWriterSize(w, 4*1024)
+	pendingTerminalFailed := false
 	flushBuffered := func() error {
 		if err := bufferedWriter.Flush(); err != nil {
 			return err
+		}
+		if pendingTerminalFailed {
+			MarkOpenAIResponseTerminalWritten(c)
+			pendingTerminalFailed = false
 		}
 		flusher.Flush()
 		return nil
@@ -5454,12 +5725,14 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 
 			// Replace model in response if needed.
 			dataBytes := []byte(data)
+			responseFailedEvent := false
 			if openAIStreamEventIsTerminal(data) {
 				sawTerminalEvent = true
 			}
 			eventType := strings.TrimSpace(gjson.GetBytes(dataBytes, "type").String())
 			forceFlushFailedEvent := false
 			if eventType == "response.failed" {
+				responseFailedEvent = true
 				failedMessage = extractOpenAISSEErrorMessage(dataBytes)
 				// response.failed 自带上游已消耗的 usage（input token 通常已扣）；必须先解析
 				// 再打 cyber 标记，否则 mark 记到的是解析前的 0，导致流式 cyber 按 0 token 计费
@@ -5532,13 +5805,18 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 				} else if _, err := bufferedWriter.WriteString("\n"); err != nil {
 					clientDisconnected = true
 					logger.LegacyPrintf("service.openai_gateway", "Client disconnected during streaming, continuing to drain upstream for billing")
-				} else if shouldFlush {
-					if err := flushBuffered(); err != nil {
-						clientDisconnected = true
-						logger.LegacyPrintf("service.openai_gateway", "Client disconnected during streaming flush, continuing to drain upstream for billing")
-					} else {
-						clientOutputStarted = true
-						lastDownstreamWriteAt = time.Now()
+				} else {
+					if responseFailedEvent {
+						pendingTerminalFailed = true
+					}
+					if shouldFlush {
+						if err := flushBuffered(); err != nil {
+							clientDisconnected = true
+							logger.LegacyPrintf("service.openai_gateway", "Client disconnected during streaming flush, continuing to drain upstream for billing")
+						} else {
+							clientOutputStarted = true
+							lastDownstreamWriteAt = time.Now()
+						}
 					}
 				}
 			}

@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"time"
 
-	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
@@ -49,8 +48,26 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		return
 	}
 
-	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
+	coordinator, err := newJSONRequestBody(c.Request)
 	if err != nil {
+		if errors.Is(err, service.ErrRequestBodySpool) {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
+		if maxErr, ok := extractMaxBytesError(err); ok {
+			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+			return
+		}
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		return
+	}
+	defer coordinator.Cleanup()
+	body, err := coordinator.ReadRaw()
+	if err != nil {
+		if errors.Is(err, service.ErrRequestBodySpool) {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 			return
@@ -62,6 +79,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return
 	}
+	service.SetUsageRequestBody(c, openAIRequestBodyPreviewSnapshot(body))
 
 	if !gjson.ValidBytes(body) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
@@ -95,6 +113,21 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 
 	// 解析渠道级模型映射
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
+	rawBody := body
+	if channelMapping.Mapped {
+		body = h.gatewayService.ReplaceModelInBody(rawBody, channelMapping.MappedModel)
+	}
+	if err := coordinator.SetEffectiveBytes(body); err != nil {
+		if errors.Is(err, service.ErrRequestBodySpool) {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+		} else if maxErr, ok := extractMaxBytesError(err); ok {
+			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+		} else {
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		}
+		return
+	}
+	service.BindOpenAIRequestBodyHandle(c, coordinator.Effective())
 
 	if h.errorPassthroughService != nil {
 		service.BindErrorPassthroughService(c, h.errorPassthroughService)
@@ -134,8 +167,13 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		return
 	}
 
-	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
-	promptCacheKey := h.gatewayService.ExtractSessionID(c, body)
+	sessionHash := h.gatewayService.GenerateSessionHash(c, rawBody)
+	promptCacheKey := h.gatewayService.ExtractSessionID(c, rawBody)
+	reasoningEffort := service.ExtractOpenAIReasoningEffortFromBody(rawBody, reqModel)
+	cyberBlockKeyChat := service.CyberSessionBlockKey(apiKey.ID, c, rawBody)
+	requestPayloadHash := service.HashUsageRequestPayload(rawBody)
+	rawBody = nil
+	body = nil
 	requestPlatform := openAICompatibleRequestPlatform(apiKey)
 
 	maxAccountSwitches := h.maxAccountSwitches
@@ -173,7 +211,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			} else {
 				if lastFailoverErr != nil {
 					h.handleFailoverExhausted(c, lastFailoverErr, streamStarted)
-					h.submitFailoverFailedUsageLog(c, apiKey, lastFailedAccount, reqModel, reqStream, lastFailoverErr, lastFailedDuration, service.ExtractOpenAIReasoningEffortFromBody(body, reqModel), "handler.openai_gateway.chat_completions")
+					h.submitFailoverFailedUsageLog(c, apiKey, lastFailedAccount, reqModel, reqStream, lastFailoverErr, lastFailedDuration, reasoningEffort, "handler.openai_gateway.chat_completions")
 				} else {
 					h.handleStreamingAwareError(c, http.StatusBadGateway, "api_error", "Upstream request failed", streamStarted)
 				}
@@ -182,7 +220,12 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 		if selection == nil || selection.Account == nil {
 			markOpsRoutingCapacityLimited(c)
-			h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts", streamStarted)
+			if lastFailoverErr != nil {
+				h.submitFailoverFailedUsageLog(c, apiKey, lastFailedAccount, reqModel, reqStream, lastFailoverErr, lastFailedDuration, reasoningEffort, "handler.openai_gateway.chat_completions")
+				h.handleFailoverExhausted(c, lastFailoverErr, streamStarted)
+			} else {
+				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts", streamStarted)
+			}
 			return
 		}
 		account := selection.Account
@@ -190,6 +233,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		reqLog.Debug("openai_chat_completions.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 		_ = scheduleDecision
 		setOpsSelectedAccount(c, account.ID, account.Platform)
+		service.SetOpsUpstreamAttempted(c, false)
 
 		accountReleaseFunc, acquired := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, reqStream, &streamStarted, reqLog)
 		if !acquired {
@@ -200,10 +244,6 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		forwardStart := time.Now()
 		defaultMappedModel := resolveOpenAIForwardDefaultMappedModel(apiKey, c.GetString("openai_chat_completions_fallback_model"))
 		setOpenAIFailedUsageExactUpstreamModel(c, resolveOpenAIFailedUsageExactUpstreamModel(account, reqModel, defaultMappedModel))
-		forwardBody := body
-		if channelMapping.Mapped {
-			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
-		}
 		writerSizeBeforeForward := c.Writer.Size()
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
@@ -211,13 +251,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 					accountReleaseFunc()
 				}
 			}()
-			return h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, promptCacheKey, "")
+			return h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, body, promptCacheKey, "")
 		}()
-		cyberBlockKeyChat := ""
-		if service.GetOpsCyberPolicy(c) != nil {
-			cyberBlockKeyChat = service.CyberSessionBlockKey(apiKey.ID, c, body)
-		}
-		h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, err != nil, cyberBlockKeyChat, channelMapping.ToUsageFields(reqModel, ""), service.HashUsageRequestPayload(body))
+		h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, err != nil, cyberBlockKeyChat, channelMapping.ToUsageFields(reqModel, ""), requestPayloadHash)
 
 		forwardDuration := time.Since(forwardStart)
 		forwardDurationMs := forwardDuration.Milliseconds()
@@ -231,6 +267,10 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			service.SetOpsLatencyMs(c, service.OpsTimeToFirstTokenMsKey, int64(*result.FirstTokenMs))
 		}
 		if err != nil {
+			if errors.Is(err, service.ErrRequestBodySpool) {
+				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+				return
+			}
 			if result != nil && result.ImageCount > 0 {
 				reqLog.Warn("openai_chat_completions.forward_partial_error_with_image_result",
 					zap.Int64("account_id", account.ID),
@@ -241,6 +281,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
 					if c.Writer.Size() != writerSizeBeforeForward {
+						if c.Request.Context().Err() == nil {
+							h.submitFailoverFailedUsageLog(c, apiKey, account, reqModel, reqStream, failoverErr, forwardDuration, reasoningEffort, "handler.openai_gateway.chat_completions")
+						}
 						h.handleFailoverExhausted(c, failoverErr, true)
 						return
 					}
@@ -271,12 +314,13 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 					lastFailedDuration = forwardDuration
 					if switchCount >= maxAccountSwitches {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
-						h.submitFailoverFailedUsageLog(c, apiKey, account, reqModel, reqStream, failoverErr, forwardDuration, service.ExtractOpenAIReasoningEffortFromBody(body, reqModel), "handler.openai_gateway.chat_completions")
+						h.submitFailoverFailedUsageLog(c, apiKey, account, reqModel, reqStream, failoverErr, forwardDuration, reasoningEffort, "handler.openai_gateway.chat_completions")
 						return
 					}
 					switchCount++
 					if h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount) {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
+						h.submitFailoverFailedUsageLog(c, apiKey, account, reqModel, reqStream, failoverErr, forwardDuration, reasoningEffort, "handler.openai_gateway.chat_completions")
 						return
 					}
 					reqLog.Warn("openai_chat_completions.upstream_failover_switching",
@@ -289,8 +333,8 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 				}
 				h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
 				wroteFallback := h.ensureForwardErrorResponse(c, streamStarted)
-				if service.GetOpsCyberPolicy(c) == nil {
-					h.submitFailedUsageLog(c, apiKey, account, reqModel, reqStream, 0, nil, nil, forwardDuration, service.ExtractOpenAIReasoningEffortFromBody(body, reqModel), "handler.openai_gateway.chat_completions")
+				if c.Request.Context().Err() == nil && service.HasOpsUpstreamAttempted(c) && !service.HasOpsClientBusinessLimited(c) && service.GetOpsCyberPolicy(c) == nil {
+					h.submitFailedUsageLog(c, apiKey, account, reqModel, reqStream, 0, nil, nil, forwardDuration, reasoningEffort, "handler.openai_gateway.chat_completions")
 				}
 				reqLog.Warn("openai_chat_completions.forward_failed",
 					zap.Int64("account_id", account.ID),

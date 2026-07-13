@@ -1,0 +1,14 @@
+{
+  "change": "extend-request-body-spooling",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "f2f63222f5d48a82eed63062307adc59083d02e664f26074e2d15c5068fafa6d",
+  "files": [
+    { "path": "openspec/changes/extend-request-body-spooling/proposal.md", "sha256": "83a17f9717df462780456e5f38a95ff193a734cd896efb09ebbdfd2c74d0fc92" },
+    { "path": "openspec/changes/extend-request-body-spooling/design.md", "sha256": "d60b1314c5954626a0b4791e05d7cace3513a683cee0a38d47590a735c9b5747" },
+    { "path": "openspec/changes/extend-request-body-spooling/tasks.md", "sha256": "7224a088e5e59ffcf471c7f0d56a7306173c7b7a227db7e4d27572fdd5cb5759" },
+    { "path": "openspec/changes/extend-request-body-spooling/specs/request-body-retention-control/spec.md", "sha256": "fc89bb3ecf756e7656bb41d877fd9b35abb8271d0fb06724f1c5c9d23d3fe9bb" }
+  ]
+}

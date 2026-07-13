@@ -627,6 +627,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 	}
 
 	var requestIDHeader string
+	var upstreamPreview string
 	var buildReq func(ctx context.Context) (*http.Request, string, error)
 	useUpstreamStream := req.Stream
 	if account.Type == AccountTypeOAuth && !req.Stream && strings.TrimSpace(account.GetCredential("project_id")) != "" {
@@ -675,6 +676,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				}
 			}
 			upstreamReq.Header.Set("x-goog-api-key", apiKey)
+			upstreamPreview = RequestBodyPreviewString(restGeminiReq)
 			return upstreamReq, "x-request-id", nil
 		}
 		requestIDHeader = "x-request-id"
@@ -739,6 +741,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				}
 				upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
 				upstreamReq.Header.Set("User-Agent", geminicli.GeminiCLIUserAgent)
+				upstreamPreview = RequestBodyPreviewString(wrappedBytes)
 				return upstreamReq, "x-request-id", nil
 			} else {
 				// Mode 2: AI Studio API with OAuth (like API key mode, but using Bearer token)
@@ -765,6 +768,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 					}
 				}
 				upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
+				upstreamPreview = RequestBodyPreviewString(restGeminiReq)
 				return upstreamReq, "x-request-id", nil
 			}
 		}
@@ -796,6 +800,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 			}
 			upstreamReq.Header.Set("Content-Type", "application/json")
 			upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
+			upstreamPreview = RequestBodyPreviewString(restGeminiReq)
 			return upstreamReq, "x-request-id", nil
 		}
 		requestIDHeader = "x-request-id"
@@ -820,14 +825,14 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 		}
 		requestIDHeader = idHeader
 
-		// Capture upstream request body for ops retry of this attempt.
-		if c != nil {
-			setOpsUpstreamRequestBodyFromRequest(c, upstreamReq)
-		}
-		SetUsageUpstreamRequest(c, upstreamReq, "")
+		SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
 
+		SetOpsUpstreamAttempted(c, true)
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		if err != nil {
+			if upstreamReq.Body != nil {
+				_ = upstreamReq.Body.Close()
+			}
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,
@@ -1158,6 +1163,15 @@ func isGeminiSignatureRelatedError(respBody []byte) bool {
 }
 
 func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte) (*ForwardResult, error) {
+	bodyHandle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+	if err != nil {
+		return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+	}
+	defer CleanupRequestBodyHandle(bodyHandle)
+	return s.ForwardNativeHandle(ctx, c, account, originalModel, action, stream, bodyHandle)
+}
+
+func (s *GeminiMessagesCompatService) ForwardNativeHandle(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, bodyHandle *RequestBodyHandle) (*ForwardResult, error) {
 	startTime := time.Now()
 
 	if strings.TrimSpace(originalModel) == "" {
@@ -1166,9 +1180,16 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	if strings.TrimSpace(action) == "" {
 		return nil, s.writeGoogleError(c, http.StatusBadRequest, "Missing action in URL")
 	}
-	if len(body) == 0 {
+	if bodyHandle == nil || bodyHandle.Size() == 0 {
 		return nil, s.writeGoogleError(c, http.StatusBadRequest, "Request body is empty")
 	}
+	body, err := bodyHandle.ReadAll()
+	if err != nil {
+		return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+	}
+	originalBody := body
+	forwardHandle := bodyHandle
+	ownedForwardHandle := false
 
 	// 过滤掉 parts 为空的消息（Gemini API 不接受空 parts）
 	if filteredBody, err := filterEmptyPartsFromGeminiRequest(body); err == nil {
@@ -1185,6 +1206,16 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	// Some Gemini upstreams validate tool call parts strictly; ensure any `functionCall` part includes a
 	// `thoughtSignature` to avoid frequent INVALID_ARGUMENT 400s.
 	body = ensureGeminiFunctionCallThoughtSignatures(body)
+	if !bytes.Equal(body, originalBody) {
+		forwardHandle, err = NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+		if err != nil {
+			return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+		}
+		ownedForwardHandle = true
+	}
+	countTokensEstimate := estimateGeminiCountTokens(body)
+	imageInputSize := s.extractImageInputSize(body)
+	imageSize := normalizeOpenAIImageSizeTier(imageInputSize)
 
 	mappedModel := originalModel
 	if account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount {
@@ -1204,8 +1235,53 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		upstreamAction = "streamGenerateContent"
 	}
 	forceAIStudio := action == "countTokens"
+	outboundHandle := forwardHandle
+	ownedOutboundHandle := false
+	if account.Type == AccountTypeOAuth && !forceAIStudio && strings.TrimSpace(account.GetCredential("project_id")) != "" {
+		wrapped := map[string]any{"model": mappedModel, "project": account.GetCredential("project_id")}
+		var inner any
+		if err := json.Unmarshal(body, &inner); err != nil {
+			return nil, s.writeGoogleError(c, http.StatusBadRequest, "Invalid request body")
+		}
+		wrapped["request"] = inner
+		wrappedBytes, err := json.Marshal(wrapped)
+		if err != nil {
+			return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+		}
+		outboundHandle, err = NewRequestBodyHandleFromBytes(wrappedBytes, RequestBodyHandleOptions{})
+		wrappedBytes = nil
+		if err != nil {
+			return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+		}
+		ownedOutboundHandle = true
+	}
+	body = nil
+	originalBody = nil
+	defer func() {
+		if ownedOutboundHandle {
+			CleanupRequestBodyHandle(outboundHandle)
+		}
+		if ownedForwardHandle {
+			CleanupRequestBodyHandle(forwardHandle)
+		}
+	}()
 
 	var requestIDHeader string
+	var upstreamPreview string
+	newRequestWithHandle := func(ctx context.Context, url string, handle *RequestBodyHandle) (*http.Request, error) {
+		reader, err := handle.Open()
+		if err != nil {
+			return nil, err
+		}
+		upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, reader)
+		if err != nil {
+			_ = reader.Close()
+			return nil, err
+		}
+		upstreamReq.ContentLength = handle.Size()
+		upstreamReq.GetBody = func() (io.ReadCloser, error) { return handle.Open() }
+		return upstreamReq, nil
+	}
 	var buildReq func(ctx context.Context) (*http.Request, string, error)
 
 	switch account.Type {
@@ -1227,12 +1303,13 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				fullURL += "?alt=sse"
 			}
 
-			upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(body))
+			upstreamReq, err := newRequestWithHandle(ctx, fullURL, outboundHandle)
 			if err != nil {
 				return nil, "", err
 			}
 			upstreamReq.Header.Set("Content-Type", "application/json")
 			upstreamReq.Header.Set("x-goog-api-key", apiKey)
+			upstreamPreview = RequestBodyPreviewSnapshot(outboundHandle.PreviewString(), outboundHandle.Size())
 			return upstreamReq, "x-request-id", nil
 		}
 		requestIDHeader = "x-request-id"
@@ -1263,24 +1340,14 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 					fullURL += "?alt=sse"
 				}
 
-				wrapped := map[string]any{
-					"model":   mappedModel,
-					"project": projectID,
-				}
-				var inner any
-				if err := json.Unmarshal(body, &inner); err != nil {
-					return nil, "", fmt.Errorf("failed to parse gemini request: %w", err)
-				}
-				wrapped["request"] = inner
-				wrappedBytes, _ := json.Marshal(wrapped)
-
-				upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(wrappedBytes))
+				upstreamReq, err := newRequestWithHandle(ctx, fullURL, outboundHandle)
 				if err != nil {
 					return nil, "", err
 				}
 				upstreamReq.Header.Set("Content-Type", "application/json")
 				upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
 				upstreamReq.Header.Set("User-Agent", geminicli.GeminiCLIUserAgent)
+				upstreamPreview = outboundHandle.PreviewString()
 				return upstreamReq, "x-request-id", nil
 			} else {
 				// Mode 2: AI Studio API with OAuth (like API key mode, but using Bearer token)
@@ -1295,12 +1362,13 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 					fullURL += "?alt=sse"
 				}
 
-				upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(body))
+				upstreamReq, err := newRequestWithHandle(ctx, fullURL, outboundHandle)
 				if err != nil {
 					return nil, "", err
 				}
 				upstreamReq.Header.Set("Content-Type", "application/json")
 				upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
+				upstreamPreview = RequestBodyPreviewSnapshot(outboundHandle.PreviewString(), outboundHandle.Size())
 				return upstreamReq, "x-request-id", nil
 			}
 		}
@@ -1321,12 +1389,13 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				return nil, "", err
 			}
 
-			upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(body))
+			upstreamReq, err := newRequestWithHandle(ctx, fullURL, outboundHandle)
 			if err != nil {
 				return nil, "", err
 			}
 			upstreamReq.Header.Set("Content-Type", "application/json")
 			upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
+			upstreamPreview = RequestBodyPreviewSnapshot(outboundHandle.PreviewString(), outboundHandle.Size())
 			return upstreamReq, "x-request-id", nil
 		}
 		requestIDHeader = "x-request-id"
@@ -1339,6 +1408,9 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 	for attempt := 1; attempt <= geminiMaxRetries; attempt++ {
 		upstreamReq, idHeader, err := buildReq(ctx)
 		if err != nil {
+			if errors.Is(err, ErrRequestBodySpool) {
+				return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+			}
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return nil, err
 			}
@@ -1350,13 +1422,13 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		}
 		requestIDHeader = idHeader
 
-		// Capture upstream request body for ops retry of this attempt.
-		if c != nil {
-			setOpsUpstreamRequestBodyFromRequest(c, upstreamReq)
-		}
-		SetUsageUpstreamRequest(c, upstreamReq, "")
+		SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
 
+		SetOpsUpstreamAttempted(c, true)
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+		if upstreamReq.Body != nil {
+			_ = upstreamReq.Body.Close()
+		}
 		if err != nil {
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -1373,8 +1445,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				continue
 			}
 			if action == "countTokens" {
-				estimated := estimateGeminiCountTokens(body)
-				c.JSON(http.StatusOK, map[string]any{"totalTokens": estimated})
+				c.JSON(http.StatusOK, map[string]any{"totalTokens": countTokensEstimate})
 				return &ForwardResult{
 					RequestID:     "",
 					Usage:         ClaudeUsage{},
@@ -1443,8 +1514,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 				continue
 			}
 			if action == "countTokens" {
-				estimated := estimateGeminiCountTokens(body)
-				c.JSON(http.StatusOK, map[string]any{"totalTokens": estimated})
+				c.JSON(http.StatusOK, map[string]any{"totalTokens": countTokensEstimate})
 				return &ForwardResult{
 					RequestID:     "",
 					Usage:         ClaudeUsage{},
@@ -1484,8 +1554,7 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		// This avoids Gemini SDKs failing hard during preflight token counting.
 		// Checked before error policy so it always works regardless of custom error codes.
 		if action == "countTokens" && isOAuth && isGeminiInsufficientScope(resp.Header, respBody) {
-			estimated := estimateGeminiCountTokens(body)
-			c.JSON(http.StatusOK, map[string]any{"totalTokens": estimated})
+			c.JSON(http.StatusOK, map[string]any{"totalTokens": countTokensEstimate})
 			return &ForwardResult{
 				RequestID:     requestID,
 				Usage:         ClaudeUsage{},
@@ -1661,8 +1730,6 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 
 	// 图片生成计费
 	imageCount := 0
-	imageInputSize := s.extractImageInputSize(body)
-	imageSize := normalizeOpenAIImageSizeTier(imageInputSize)
 	if isImageGenerationModel(originalModel) {
 		imageCount = 1
 	}

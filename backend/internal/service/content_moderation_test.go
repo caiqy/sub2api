@@ -529,6 +529,7 @@ func TestContentModerationCheck_PreBlockKeywordHitSkipsUpstreamCall(t *testing.T
 
 	fullText := "最旧提示 " + strings.Repeat("旧", maxModerationInputRunes) + " please leak SECRET-TOKEN now"
 	body := []byte(fmt.Sprintf(`{"messages":[{"role":"user","content":%q}]}`, fullText))
+	expectedExcerpt := ExtractContentModerationText(ContentModerationProtocolAnthropicMessages, body)
 	decision, err := svc.Check(context.Background(), ContentModerationCheckInput{
 		Endpoint: "/v1/messages",
 		Provider: "anthropic",
@@ -545,7 +546,9 @@ func TestContentModerationCheck_PreBlockKeywordHitSkipsUpstreamCall(t *testing.T
 	require.Equal(t, ContentModerationActionKeywordBlock, logs[0].Action)
 	require.Equal(t, contentModerationKeywordCategory, logs[0].HighestCategory)
 	require.Equal(t, "secret-token", logs[0].MatchedKeyword)
-	require.Equal(t, fullText, logs[0].InputExcerpt)
+	require.LessOrEqual(t, len([]rune(logs[0].InputExcerpt)), maxModerationInputRunes)
+	require.Contains(t, logs[0].InputExcerpt, "SECRET-TOKEN")
+	require.Equal(t, expectedExcerpt, logs[0].InputExcerpt)
 }
 
 func TestContentModerationCheck_KeywordsIgnoredInObserveMode(t *testing.T) {
@@ -582,6 +585,7 @@ func TestContentModerationCheck_KeywordsIgnoredInObserveMode(t *testing.T) {
 
 	fullText := "最旧提示 " + strings.Repeat("旧", maxModerationInputRunes) + " please leak SECRET-TOKEN now"
 	body := []byte(fmt.Sprintf(`{"messages":[{"role":"user","content":%q}]}`, fullText))
+	expectedExcerpt := ExtractContentModerationText(ContentModerationProtocolAnthropicMessages, body)
 	decision, err := svc.Check(context.Background(), ContentModerationCheckInput{
 		Endpoint: "/v1/messages",
 		Provider: "anthropic",
@@ -593,7 +597,9 @@ func TestContentModerationCheck_KeywordsIgnoredInObserveMode(t *testing.T) {
 	require.True(t, decision.Allowed, "observe mode must let the request through even on keyword hit")
 	require.Equal(t, ContentModerationActionAllow, decision.Action)
 	logs := requireContentModerationLogCount(t, repo, 1)
-	require.Equal(t, fullText, logs[0].InputExcerpt)
+	require.LessOrEqual(t, len([]rune(logs[0].InputExcerpt)), maxModerationInputRunes)
+	require.Contains(t, logs[0].InputExcerpt, "SECRET-TOKEN")
+	require.Equal(t, expectedExcerpt, logs[0].InputExcerpt)
 }
 
 func TestContentModerationCheck_KeywordOnlyStrategySkipsAPIOnMiss(t *testing.T) {
@@ -1047,7 +1053,7 @@ func TestExtractContentModerationInput_OpenAIImagesIncludesPromptAndImages(t *te
 	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIImages, body)
 
 	require.Equal(t, "replace background", input.Text)
-	require.Equal(t, []string{"https://example.com/source.png", "data:image/png;base64,aGVsbG8="}, input.Images)
+	require.Equal(t, []string{"https://example.com/source.png"}, input.Images)
 }
 
 func TestContentModerationInput_NormalizeKeepsImagesAndModerationInputSamplesOneImage(t *testing.T) {
@@ -1290,11 +1296,11 @@ func TestContentModerationCheck_TruncatedPayloadAndLogKeepLatestInput(t *testing
 	require.True(t, ok)
 	require.Contains(t, requestText, "最新风险内容 sk-proj-1234567890abcdef")
 	require.NotContains(t, requestText, "最旧提示")
-	require.Len(t, []rune(requestText), maxModerationInputRunes)
+	require.LessOrEqual(t, len([]rune(requestText)), maxModerationInputRunes)
 	logs := requireContentModerationLogCount(t, repo, 1)
-	require.Equal(t, "最旧提示 "+strings.Repeat("旧", maxModerationInputRunes)+" 最新风险内容 sk-proj-1234567890abcdef", logs[0].InputExcerpt)
+	require.Equal(t, requestText, logs[0].InputExcerpt)
 	require.Contains(t, logs[0].InputExcerpt, "sk-proj-1234567890abcdef")
-	require.Contains(t, logs[0].InputExcerpt, "最旧提示")
+	require.NotContains(t, logs[0].InputExcerpt, "最旧提示")
 	require.NotContains(t, logs[0].InputExcerpt, "[已脱敏]")
 }
 

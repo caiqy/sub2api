@@ -135,7 +135,9 @@ type antigravityRetryLoopParams struct {
 	proxyURL        string
 	accessToken     string
 	action          string
-	body            []byte
+	body            []byte // legacy test input; production uses payloadHandle.
+	payloadHandle   *RequestBodyHandle
+	ownedPayload    bool
 	c               *gin.Context
 	httpUpstream    HTTPUpstream
 	settingService  *SettingService
@@ -146,6 +148,76 @@ type antigravityRetryLoopParams struct {
 	groupID         int64  // 用于模型级限流时清除粘性会话
 	sessionHash     string // 用于模型级限流时清除粘性会话
 	extraHeaders    http.Header
+}
+
+func (p *antigravityRetryLoopParams) payload() (*RequestBodyHandle, error) {
+	if p.payloadHandle != nil {
+		return p.payloadHandle, nil
+	}
+	handle, err := NewRequestBodyHandleFromBytes(p.body, RequestBodyHandleOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("create antigravity payload handle: %w", err)
+	}
+	p.body = nil
+	p.payloadHandle = handle
+	p.ownedPayload = true
+	return handle, nil
+}
+
+func (p *antigravityRetryLoopParams) replacePayload(body []byte) error {
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+	if err != nil {
+		return fmt.Errorf("create replacement antigravity payload handle: %w", err)
+	}
+	if p.ownedPayload {
+		CleanupRequestBodyHandle(p.payloadHandle)
+	}
+	p.body = nil
+	p.payloadHandle = handle
+	p.ownedPayload = true
+	return nil
+}
+
+func (p *antigravityRetryLoopParams) cleanupOwnedPayload() {
+	if p.ownedPayload {
+		CleanupRequestBodyHandle(p.payloadHandle)
+	}
+}
+
+func newOwnedAntigravityPayloadHandle(body []byte) (*RequestBodyHandle, error) {
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("create antigravity payload handle: %w", err)
+	}
+	return handle, nil
+}
+
+func newAntigravityPayloadRequest(p *antigravityRetryLoopParams, baseURL string) (*http.Request, error) {
+	handle, err := p.payload()
+	if err != nil {
+		return nil, err
+	}
+	body, err := handle.Open()
+	if err != nil {
+		return nil, fmt.Errorf("open antigravity payload handle: %w", err)
+	}
+	req, err := antigravity.NewAPIRequestWithURL(p.ctx, baseURL, p.action, p.accessToken, nil)
+	if err != nil {
+		_ = body.Close()
+		return nil, err
+	}
+	req.Body = body
+	req.ContentLength = handle.Size()
+	req.GetBody = func() (io.ReadCloser, error) { return handle.Open() }
+	return req, nil
+}
+
+func antigravityPayloadPreview(p *antigravityRetryLoopParams) string {
+	handle, err := p.payload()
+	if err != nil {
+		return ""
+	}
+	return handle.PreviewString()
 }
 
 func (s *AntigravityGatewayService) resolveAccessToken(ctx context.Context, account *Account) (string, error) {
@@ -231,6 +303,9 @@ func (s *AntigravityGatewayService) handleSmartRetry(p antigravityRetryLoopParam
 		p.account.IsOveragesEnabled() &&
 		!p.account.isCreditsExhausted() {
 		result := s.attemptCreditsOveragesRetry(p, baseURL, modelName, waitDuration, resp.StatusCode, respBody)
+		if result.err != nil {
+			return &smartRetryResult{action: smartRetryActionBreakWithResp, err: result.err}
+		}
 		if result.handled && result.resp != nil {
 			return &smartRetryResult{
 				action: smartRetryActionBreakWithResp,
@@ -318,7 +393,7 @@ func (s *AntigravityGatewayService) handleSmartRetry(p antigravityRetryLoopParam
 			}
 
 			// 智能重试：创建新请求
-			retryReq, err := antigravity.NewAPIRequestWithURL(p.ctx, baseURL, p.action, p.accessToken, p.body)
+			retryReq, err := newAntigravityPayloadRequest(&p, baseURL)
 			if err != nil {
 				logger.LegacyPrintf("service.antigravity_gateway", "%s status=smart_retry_request_build_failed error=%v", p.prefix, err)
 				p.handleError(p.ctx, p.prefix, p.account, resp.StatusCode, resp.Header, respBody, p.requestedModel, p.groupID, p.sessionHash, p.isStickySession)
@@ -332,9 +407,11 @@ func (s *AntigravityGatewayService) handleSmartRetry(p antigravityRetryLoopParam
 				}
 			}
 			applyAntigravityExtraHeaders(retryReq, p.extraHeaders)
-			SetUsageUpstreamRequest(p.c, retryReq, string(p.body))
-
+			preview := antigravityPayloadPreview(&p)
+			SetUsageUpstreamRequest(p.c, retryReq, preview)
+			SetOpsUpstreamAttempted(p.c, true)
 			retryResp, retryErr := p.httpUpstream.Do(retryReq, p.proxyURL, p.account.ID, p.account.Concurrency)
+			_ = retryReq.Body.Close()
 			if retryErr == nil && retryResp != nil && retryResp.StatusCode != http.StatusTooManyRequests && retryResp.StatusCode != http.StatusServiceUnavailable {
 				log.Printf("%s status=%d smart_retry_success attempt=%d/%d", p.prefix, retryResp.StatusCode, attempt, maxAttempts)
 				// 重试成功，清除 MODEL_CAPACITY_EXHAUSTED cooldown
@@ -503,15 +580,17 @@ func (s *AntigravityGatewayService) handleSingleAccountRetryInPlace(
 		totalWaited += waitDuration
 
 		// 创建新请求
-		retryReq, err := antigravity.NewAPIRequestWithURL(p.ctx, baseURL, p.action, p.accessToken, p.body)
+		retryReq, err := newAntigravityPayloadRequest(&p, baseURL)
 		if err != nil {
 			logger.LegacyPrintf("service.antigravity_gateway", "%s single_account_503_retry: request_build_failed error=%v", p.prefix, err)
 			break
 		}
 		applyAntigravityExtraHeaders(retryReq, p.extraHeaders)
-		SetUsageUpstreamRequest(p.c, retryReq, string(p.body))
-
+		preview := antigravityPayloadPreview(&p)
+		SetUsageUpstreamRequest(p.c, retryReq, preview)
+		SetOpsUpstreamAttempted(p.c, true)
 		retryResp, retryErr := p.httpUpstream.Do(retryReq, p.proxyURL, p.account.ID, p.account.Concurrency)
+		_ = retryReq.Body.Close()
 		if retryErr == nil && retryResp != nil && retryResp.StatusCode != http.StatusTooManyRequests && retryResp.StatusCode != http.StatusServiceUnavailable {
 			logger.LegacyPrintf("service.antigravity_gateway", "%s status=%d single_account_503_retry_success attempt=%d/%d total_waited=%v",
 				p.prefix, retryResp.StatusCode, attempt, antigravitySingleAccountSmartRetryMaxAttempts, totalWaited)
@@ -573,13 +652,24 @@ func (s *AntigravityGatewayService) handleSingleAccountRetryInPlace(
 
 // antigravityRetryLoop 执行带 URL fallback 的重试循环
 func (s *AntigravityGatewayService) antigravityRetryLoop(p antigravityRetryLoopParams) (*antigravityRetryLoopResult, error) {
+	_, err := p.payload()
+	if err != nil {
+		return nil, err
+	}
+	defer p.cleanupOwnedPayload()
 	// 预检查：模型限流 + overages 启用 + 积分未耗尽 → 直接注入 AI Credits
 	overagesInjected := false
 	if p.requestedModel != "" && p.account.Platform == PlatformAntigravity &&
 		p.account.IsOveragesEnabled() && !p.account.isCreditsExhausted() &&
 		p.account.isModelRateLimitedWithContext(p.ctx, p.requestedModel) {
-		if creditsBody := injectEnabledCreditTypes(p.body); creditsBody != nil {
-			p.body = creditsBody
+		payload, readErr := p.payloadHandle.ReadAll()
+		if readErr != nil {
+			return nil, fmt.Errorf("read antigravity payload handle: %w", readErr)
+		}
+		if creditsBody := injectEnabledCreditTypes(payload); creditsBody != nil {
+			if err := p.replacePayload(creditsBody); err != nil {
+				return nil, err
+			}
 			overagesInjected = true
 			logger.LegacyPrintf("service.antigravity_gateway", "%s pre_check: model_rate_limited_credits_inject model=%s account=%d (injecting enabledCreditTypes)",
 				p.prefix, p.requestedModel, p.account.ID)
@@ -644,14 +734,17 @@ urlFallbackLoop:
 			default:
 			}
 
-			upstreamReq, err := antigravity.NewAPIRequestWithURL(p.ctx, baseURL, p.action, p.accessToken, p.body)
+			upstreamReq, err := newAntigravityPayloadRequest(&p, baseURL)
 			if err != nil {
 				return nil, err
 			}
 			applyAntigravityExtraHeaders(upstreamReq, p.extraHeaders)
-			SetUsageUpstreamRequest(p.c, upstreamReq, string(p.body))
+			preview := antigravityPayloadPreview(&p)
+			SetUsageUpstreamRequest(p.c, upstreamReq, preview)
 
+			SetOpsUpstreamAttempted(p.c, true)
 			resp, err = p.httpUpstream.Do(upstreamReq, p.proxyURL, p.account.ID, p.account.Concurrency)
+			_ = upstreamReq.Body.Close()
 			if err == nil && resp == nil {
 				err = errors.New("upstream returned nil response")
 			}
@@ -1159,6 +1252,11 @@ func (s *AntigravityGatewayService) TestConnection(ctx context.Context, account 
 
 	// 复用 antigravityRetryLoop：完整的重试 / credits overages / 智能重试
 	prefix := fmt.Sprintf("[antigravity-Test] account=%d(%s)", account.ID, account.Name)
+	payloadHandle, err := newOwnedAntigravityPayloadHandle(requestBody)
+	requestBody = nil
+	if err != nil {
+		return nil, err
+	}
 	p := antigravityRetryLoopParams{
 		ctx:            ctx,
 		prefix:         prefix,
@@ -1166,7 +1264,8 @@ func (s *AntigravityGatewayService) TestConnection(ctx context.Context, account 
 		proxyURL:       proxyURL,
 		accessToken:    accessToken,
 		action:         "streamGenerateContent",
-		body:           requestBody,
+		payloadHandle:  payloadHandle,
+		ownedPayload:   true,
 		c:              nil, // 无 gin.Context → 跳过 ops 追踪
 		httpUpstream:   s.httpUpstream,
 		settingService: s.settingService,
@@ -1427,9 +1526,49 @@ func (s *AntigravityGatewayService) unwrapV1InternalResponse(body []byte) ([]byt
 //	          ├─ 成功 → 正常返回
 //	          └─ 失败 → 设置模型限流 + 清除粘性绑定 → 切换账号
 func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte, isStickySession bool) (*ForwardResult, error) {
+	handle, err := newOwnedAntigravityPayloadHandle(body)
+	body = nil
+	if err != nil {
+		return nil, err
+	}
+	defer CleanupRequestBodyHandle(handle)
+	return s.forward(ctx, c, account, handle, isStickySession)
+}
+
+// ForwardHandle borrows a request-scoped handle and only materializes it while parsing.
+func (s *AntigravityGatewayService) ForwardHandle(ctx context.Context, c *gin.Context, account *Account, bodyHandle *RequestBodyHandle, isStickySession bool) (*ForwardResult, error) {
+	return s.forward(ctx, c, account, bodyHandle, isStickySession)
+}
+
+// newAntigravityRetryPayload reopens the borrowed Claude handle only while transforming a retry.
+func (s *AntigravityGatewayService) newAntigravityRetryPayload(claudeHandle *RequestBodyHandle, projectID, mappedModel string, options antigravity.TransformOptions, mutate func(*antigravity.ClaudeRequest) (bool, error)) (*RequestBodyHandle, bool, error) {
+	body, err := claudeHandle.ReadAll()
+	if err != nil {
+		return nil, false, fmt.Errorf("read antigravity retry request: %w", err)
+	}
+	var request antigravity.ClaudeRequest
+	if err := json.Unmarshal(body, &request); err != nil {
+		return nil, false, err
+	}
+	changed, err := mutate(&request)
+	if err != nil || !changed {
+		return nil, changed, err
+	}
+	payload, err := antigravity.TransformClaudeToGeminiWithOptions(&request, projectID, mappedModel, options)
+	if err != nil {
+		return nil, false, err
+	}
+	handle, err := newOwnedAntigravityPayloadHandle(payload)
+	if err != nil {
+		return nil, false, err
+	}
+	return handle, true, nil
+}
+
+func (s *AntigravityGatewayService) forward(ctx context.Context, c *gin.Context, account *Account, claudeHandle *RequestBodyHandle, isStickySession bool) (*ForwardResult, error) {
 	// 上游透传账号直接转发，不走 OAuth token 刷新
 	if account.Type == AccountTypeUpstream {
-		return s.ForwardUpstream(ctx, c, account, body)
+		return s.ForwardUpstream(ctx, c, account, claudeHandle)
 	}
 
 	startTime := time.Now()
@@ -1437,7 +1576,11 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 	sessionID := getSessionID(c)
 	prefix := logPrefix(sessionID, account.Name)
 
-	// 解析 Claude 请求
+	// ponytail: Claude bytes exist only during this synchronous conversion window.
+	body, err := claudeHandle.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("read antigravity request body: %w", err)
+	}
 	var claudeReq antigravity.ClaudeRequest
 	if err := json.Unmarshal(body, &claudeReq); err != nil {
 		return nil, s.writeClaudeError(c, http.StatusBadRequest, "invalid_request_error", "Invalid request body")
@@ -1447,6 +1590,7 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 	}
 
 	originalModel := claudeReq.Model
+	reqStream := claudeReq.Stream
 	mappedModel := s.getMappedModel(account, claudeReq.Model)
 	if mappedModel == "" {
 		MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalFeatureGate)
@@ -1459,10 +1603,7 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 
 	accessToken, err := s.resolveAccessToken(ctx, account)
 	if err != nil {
-		return nil, &UpstreamFailoverError{
-			StatusCode:   http.StatusBadGateway,
-			ResponseBody: []byte(`{"error":{"type":"authentication_error","message":"Failed to get upstream access token"},"type":"error"}`),
-		}
+		return nil, fmt.Errorf("get upstream access token: %w", err)
 	}
 
 	projectID, err := resolveAntigravityForwardProjectID(account)
@@ -1489,8 +1630,15 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 	}
 	outboundHeader := http.Header{}
 	geminiBody, err = applyAccountPassthroughFieldsWithContext(ctx, account, c.Request.Header, body, geminiBody, outboundHeader)
+	body = nil
 	if err != nil {
 		return nil, s.writeClaudeError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+	}
+	payloadHandle, err := newOwnedAntigravityPayloadHandle(geminiBody)
+	geminiBody = nil
+	claudeReq = antigravity.ClaudeRequest{}
+	if err != nil {
+		return nil, fmt.Errorf("create antigravity payload handle: %w", err)
 	}
 
 	// Antigravity 上游只支持流式请求，统一使用 streamGenerateContent
@@ -1505,7 +1653,8 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 		proxyURL:        proxyURL,
 		accessToken:     accessToken,
 		action:          action,
-		body:            geminiBody,
+		payloadHandle:   payloadHandle,
+		ownedPayload:    true,
 		c:               c,
 		httpUpstream:    s.httpUpstream,
 		settingService:  s.settingService,
@@ -1518,6 +1667,9 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 		extraHeaders:    outboundHeader,
 	})
 	if err != nil {
+		if errors.Is(err, ErrRequestBodySpool) {
+			return nil, fmt.Errorf("forward antigravity payload: %w", err)
+		}
 		// 检查是否是账号切换信号，转换为 UpstreamFailoverError 让 Handler 切换账号
 		if switchErr, ok := IsAntigravityAccountSwitchError(err); ok {
 			return nil, &UpstreamFailoverError{
@@ -1569,20 +1721,13 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 			}
 
 			for _, stage := range retryStages {
-				retryClaudeReq := claudeReq
-				retryClaudeReq.Messages = append([]antigravity.ClaudeMessage(nil), claudeReq.Messages...)
-
-				stripped, stripErr := stage.strip(&retryClaudeReq)
-				if stripErr != nil || !stripped {
+				retryPayloadHandle, stripped, txErr := s.newAntigravityRetryPayload(claudeHandle, projectID, mappedModel, s.getClaudeTransformOptions(ctx), stage.strip)
+				if txErr != nil || !stripped {
 					continue
 				}
 
 				logger.LegacyPrintf("service.antigravity_gateway", "Antigravity account %d: detected signature-related 400, retrying once (%s)", account.ID, stage.name)
 
-				retryGeminiBody, txErr := antigravity.TransformClaudeToGeminiWithOptions(&retryClaudeReq, projectID, mappedModel, s.getClaudeTransformOptions(ctx))
-				if txErr != nil {
-					continue
-				}
 				retryResult, retryErr := s.antigravityRetryLoop(antigravityRetryLoopParams{
 					ctx:             ctx,
 					prefix:          prefix,
@@ -1590,7 +1735,8 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 					proxyURL:        proxyURL,
 					accessToken:     accessToken,
 					action:          action,
-					body:            retryGeminiBody,
+					payloadHandle:   retryPayloadHandle,
+					ownedPayload:    true,
 					c:               c,
 					httpUpstream:    s.httpUpstream,
 					settingService:  s.settingService,
@@ -1689,22 +1835,17 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 					Detail:             s.getUpstreamErrorDetail(respBody),
 				})
 
-				// 修正 claudeReq 的 thinking 参数（adaptive 模式不修正）
+				// 修正所有 non-adaptive thinking 参数；adaptive 模式不修正。
 				if claudeReq.Thinking == nil || claudeReq.Thinking.Type != "adaptive" {
-					retryClaudeReq := claudeReq
-					retryClaudeReq.Messages = append([]antigravity.ClaudeMessage(nil), claudeReq.Messages...)
-					// 创建新的 ThinkingConfig 避免修改原始 claudeReq.Thinking 指针
-					retryClaudeReq.Thinking = &antigravity.ThinkingConfig{
-						Type:         "enabled",
-						BudgetTokens: BudgetRectifyBudgetTokens,
-					}
-					if retryClaudeReq.MaxTokens < BudgetRectifyMinMaxTokens {
-						retryClaudeReq.MaxTokens = BudgetRectifyMaxTokens
-					}
-
+					retryPayloadHandle, _, txErr := s.newAntigravityRetryPayload(claudeHandle, projectID, mappedModel, transformOpts, func(retryClaudeReq *antigravity.ClaudeRequest) (bool, error) {
+						retryClaudeReq.Thinking = &antigravity.ThinkingConfig{Type: "enabled", BudgetTokens: BudgetRectifyBudgetTokens}
+						if retryClaudeReq.MaxTokens < BudgetRectifyMinMaxTokens {
+							retryClaudeReq.MaxTokens = BudgetRectifyMaxTokens
+						}
+						return true, nil
+					})
 					logger.LegacyPrintf("service.antigravity_gateway", "Antigravity account %d: detected budget_tokens constraint error, retrying with rectified budget (budget_tokens=%d, max_tokens=%d)", account.ID, BudgetRectifyBudgetTokens, BudgetRectifyMaxTokens)
 
-					retryGeminiBody, txErr := antigravity.TransformClaudeToGeminiWithOptions(&retryClaudeReq, projectID, mappedModel, transformOpts)
 					if txErr == nil {
 						retryResult, retryErr := s.antigravityRetryLoop(antigravityRetryLoopParams{
 							ctx:             ctx,
@@ -1713,7 +1854,8 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 							proxyURL:        proxyURL,
 							accessToken:     accessToken,
 							action:          action,
-							body:            retryGeminiBody,
+							payloadHandle:   retryPayloadHandle,
+							ownedPayload:    true,
 							c:               c,
 							httpUpstream:    s.httpUpstream,
 							settingService:  s.settingService,
@@ -1796,7 +1938,7 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 						Message:            upstreamMsg,
 						Detail:             upstreamDetail,
 					})
-					return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, RetryableOnSameAccount: true}
+					return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, ResponseHeaders: resp.Header.Clone(), RetryableOnSameAccount: true}
 				}
 			}
 
@@ -1814,7 +1956,7 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 					Message:            upstreamMsg,
 					Detail:             upstreamDetail,
 				})
-				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody}
+				return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, ResponseHeaders: resp.Header.Clone()}
 			}
 
 			return nil, s.writeMappedClaudeError(c, account, resp.StatusCode, resp.Header.Get("x-request-id"), respBody)
@@ -1829,7 +1971,7 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 	var usage *ClaudeUsage
 	var firstTokenMs *int
 	var clientDisconnect bool
-	if claudeReq.Stream {
+	if reqStream {
 		// 客户端要求流式，直接透传转换
 		streamRes, err := s.handleClaudeStreamingResponse(c, resp, startTime, originalModel)
 		if err != nil {
@@ -1855,7 +1997,7 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 		Usage:            *usage,
 		Model:            originalModel,
 		UpstreamModel:    billingModel,
-		Stream:           claudeReq.Stream,
+		Stream:           reqStream,
 		Duration:         time.Since(startTime),
 		FirstTokenMs:     firstTokenMs,
 		ClientDisconnect: clientDisconnect,
@@ -2182,6 +2324,15 @@ func WithForwardGeminiSession(groupID int64, sessionHash string) ForwardGeminiOp
 }
 
 func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte, isStickySession bool, options ...ForwardGeminiOption) (*ForwardResult, error) {
+	bodyHandle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+	if err != nil {
+		return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+	}
+	defer CleanupRequestBodyHandle(bodyHandle)
+	return s.ForwardGeminiHandle(ctx, c, account, originalModel, action, stream, bodyHandle, isStickySession, options...)
+}
+
+func (s *AntigravityGatewayService) ForwardGeminiHandle(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, bodyHandle *RequestBodyHandle, isStickySession bool, options ...ForwardGeminiOption) (*ForwardResult, error) {
 	startTime := time.Now()
 	forwardOpts := forwardGeminiOptions{}
 	for _, apply := range options {
@@ -2199,8 +2350,12 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 	if strings.TrimSpace(action) == "" {
 		return nil, s.writeGoogleError(c, http.StatusBadRequest, "Missing action in URL")
 	}
-	if len(body) == 0 {
+	if bodyHandle == nil || bodyHandle.Size() == 0 {
 		return nil, s.writeGoogleError(c, http.StatusBadRequest, "Request body is empty")
+	}
+	body, err := bodyHandle.ReadAll()
+	if err != nil {
+		return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
 	}
 
 	// 解析请求以获取 image_size（用于图片计费）
@@ -2256,13 +2411,17 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 	if err != nil {
 		return nil, s.writeGoogleError(c, http.StatusBadRequest, err.Error())
 	}
+	injectedHandle, err := newOwnedAntigravityPayloadHandle(injectedBody)
+	injectedBody = nil
+	body = nil
+	if err != nil {
+		return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+	}
+	defer CleanupRequestBodyHandle(injectedHandle)
 
 	accessToken, err := s.resolveAccessToken(ctx, account)
 	if err != nil {
-		return nil, &UpstreamFailoverError{
-			StatusCode:   http.StatusBadGateway,
-			ResponseBody: []byte(`{"error":{"message":"Failed to get upstream access token","status":"UNAVAILABLE"}}`),
-		}
+		return nil, fmt.Errorf("get upstream access token: %w", err)
 	}
 
 	projectID, err := resolveAntigravityForwardProjectID(account)
@@ -2272,7 +2431,12 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 	}
 
 	// 包装请求
+	injectedBody, err = injectedHandle.ReadAll()
+	if err != nil {
+		return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+	}
 	wrappedBody, err := s.wrapV1InternalRequest(projectID, mappedModel, injectedBody)
+	injectedBody = nil
 	if err != nil {
 		return nil, s.writeGoogleError(c, http.StatusInternalServerError, "Failed to build upstream request")
 	}
@@ -2282,6 +2446,11 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 	upstreamAction := "streamGenerateContent"
 
 	// 执行带重试的请求
+	payloadHandle, err := newOwnedAntigravityPayloadHandle(wrappedBody)
+	wrappedBody = nil
+	if err != nil {
+		return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+	}
 	result, err := s.antigravityRetryLoop(antigravityRetryLoopParams{
 		ctx:             ctx,
 		prefix:          prefix,
@@ -2289,7 +2458,8 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 		proxyURL:        proxyURL,
 		accessToken:     accessToken,
 		action:          upstreamAction,
-		body:            wrappedBody,
+		payloadHandle:   payloadHandle,
+		ownedPayload:    true,
 		c:               c,
 		httpUpstream:    s.httpUpstream,
 		settingService:  s.settingService,
@@ -2302,6 +2472,9 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 		extraHeaders:    outboundHeader,
 	})
 	if err != nil {
+		if errors.Is(err, ErrRequestBodySpool) {
+			return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+		}
 		// 检查是否是账号切换信号，转换为 UpstreamFailoverError 让 Handler 切换账号
 		if switchErr, ok := IsAntigravityAccountSwitchError(err); ok {
 			return nil, &UpstreamFailoverError{
@@ -2337,13 +2510,34 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 			if fallbackModel != "" && fallbackModel != mappedModel {
 				logger.LegacyPrintf("service.antigravity_gateway", "[Antigravity] Model not found (%s), retrying with fallback model %s (account: %s)", mappedModel, fallbackModel, account.Name)
 
-				fallbackWrapped, err := s.wrapV1InternalRequest(projectID, fallbackModel, injectedBody)
+				fallbackInjected, readErr := injectedHandle.ReadAll()
+				if readErr != nil {
+					return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+				}
+				fallbackWrapped, err := s.wrapV1InternalRequest(projectID, fallbackModel, fallbackInjected)
+				fallbackInjected = nil
 				if err == nil {
-					fallbackReq, err := antigravity.NewAPIRequest(ctx, upstreamAction, accessToken, fallbackWrapped)
+					fallbackHandle, handleErr := newOwnedAntigravityPayloadHandle(fallbackWrapped)
+					fallbackWrapped = nil
+					if handleErr != nil {
+						return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+					}
+					fallbackReq, err := antigravity.NewAPIRequest(ctx, upstreamAction, accessToken, nil)
 					if err == nil {
+						fallbackBody, openErr := fallbackHandle.Open()
+						if openErr != nil {
+							CleanupRequestBodyHandle(fallbackHandle)
+							return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+						}
+						fallbackReq.Body = fallbackBody
+						fallbackReq.ContentLength = fallbackHandle.Size()
+						fallbackReq.GetBody = func() (io.ReadCloser, error) { return fallbackHandle.Open() }
 						applyAntigravityExtraHeaders(fallbackReq, outboundHeader)
-						SetUsageUpstreamRequest(c, fallbackReq, string(fallbackWrapped))
+						fallbackPreview := fallbackHandle.PreviewString()
+						SetUsageUpstreamRequest(c, fallbackReq, fallbackPreview)
+						SetOpsUpstreamAttempted(c, true)
 						fallbackResp, err := s.httpUpstream.Do(fallbackReq, proxyURL, account.ID, account.Concurrency)
+						CleanupRequestBodyHandle(fallbackHandle)
 						if err == nil && fallbackResp.StatusCode < 400 {
 							_ = resp.Body.Close()
 							resp = fallbackResp
@@ -2360,6 +2554,10 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 		signatureCheckBody := respBody
 		if unwrapped, unwrapErr := s.unwrapV1InternalResponse(respBody); unwrapErr == nil && len(unwrapped) > 0 {
 			signatureCheckBody = unwrapped
+		}
+		injectedBody, readErr := injectedHandle.ReadAll()
+		if readErr != nil {
+			return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
 		}
 		if resp.StatusCode == http.StatusBadRequest &&
 			s.settingService != nil &&
@@ -2382,8 +2580,15 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 			logger.LegacyPrintf("service.antigravity_gateway", "Antigravity Gemini account %d: detected signature-related 400, retrying with cleaned thought signatures", account.ID)
 
 			cleanedInjectedBody := CleanGeminiNativeThoughtSignatures(injectedBody)
+			injectedBody = nil
 			retryWrappedBody, wrapErr := s.wrapV1InternalRequest(projectID, mappedModel, cleanedInjectedBody)
+			cleanedInjectedBody = nil
 			if wrapErr == nil {
+				retryPayloadHandle, handleErr := newOwnedAntigravityPayloadHandle(retryWrappedBody)
+				retryWrappedBody = nil
+				if handleErr != nil {
+					return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+				}
 				retryResult, retryErr := s.antigravityRetryLoop(antigravityRetryLoopParams{
 					ctx:             ctx,
 					prefix:          prefix,
@@ -2391,7 +2596,8 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 					proxyURL:        proxyURL,
 					accessToken:     accessToken,
 					action:          upstreamAction,
-					body:            retryWrappedBody,
+					payloadHandle:   retryPayloadHandle,
+					ownedPayload:    true,
 					c:               c,
 					httpUpstream:    s.httpUpstream,
 					settingService:  s.settingService,
@@ -2461,6 +2667,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 				logger.LegacyPrintf("service.antigravity_gateway", "Antigravity Gemini account %d: signature retry wrap failed: %v", account.ID, wrapErr)
 			}
 		}
+		injectedBody = nil
 
 		// fallback 成功：继续按正常响应处理
 		if resp.StatusCode < 400 {
@@ -2498,7 +2705,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 				Message:            upstreamMsg,
 				Detail:             upstreamDetail,
 			})
-			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: unwrappedForOps, RetryableOnSameAccount: true}
+			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: unwrappedForOps, ResponseHeaders: resp.Header.Clone(), RetryableOnSameAccount: true}
 		}
 
 		if s.shouldFailoverUpstreamError(resp.StatusCode) {
@@ -2512,7 +2719,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 				Message:            upstreamMsg,
 				Detail:             upstreamDetail,
 			})
-			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: unwrappedForOps}
+			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: unwrappedForOps, ResponseHeaders: resp.Header.Clone()}
 		}
 		if contentType == "" {
 			contentType = "application/json"
@@ -4345,8 +4552,9 @@ func filterEmptyPartsFromGeminiRequest(body []byte) ([]byte, error) {
 	return json.Marshal(payload)
 }
 
-// ForwardUpstream 使用 base_url + /v1/messages + 双 header 认证透传上游 Claude 请求
-func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.Context, account *Account, body []byte) (*ForwardResult, error) {
+// ForwardUpstream 使用 base_url + /v1/messages + 双 header 认证透传上游 Claude 请求。
+// bodyHandle is borrowed from the handler and remains valid through the upstream wait.
+func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.Context, account *Account, bodyHandle *RequestBodyHandle) (*ForwardResult, error) {
 	startTime := time.Now()
 	sessionID := getSessionID(c)
 	prefix := logPrefix(sessionID, account.Name)
@@ -4359,7 +4567,11 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 	}
 	baseURL = strings.TrimSuffix(baseURL, "/")
 
-	// 解析请求获取模型信息
+	// Read only for synchronous validation and beta sanitization; do not retain it across the upstream wait.
+	body, err := bodyHandle.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("read upstream request body: %w", err)
+	}
 	var claudeReq antigravity.ClaudeRequest
 	if err := json.Unmarshal(body, &claudeReq); err != nil {
 		return nil, fmt.Errorf("parse claude request: %w", err)
@@ -4368,6 +4580,7 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 		return nil, fmt.Errorf("missing model")
 	}
 	originalModel := claudeReq.Model
+	reqStream := claudeReq.Stream
 
 	// 构建上游请求 URL
 	upstreamURL := baseURL + "/v1/messages"
@@ -4377,14 +4590,28 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 	// context_management 时 strip，与 Anthropic 直连 / Bedrock / Vertex 路径保持一致。
 	clientBeta := c.GetHeader("anthropic-beta")
 	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(body, clientBeta); changed {
-		body = sanitized
+		bodyHandle, err = NewRequestBodyHandleFromBytes(sanitized, RequestBodyHandleOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("create sanitized upstream request body: %w", err)
+		}
+		defer CleanupRequestBodyHandle(bodyHandle)
 	}
+	body = nil
+	claudeReq = antigravity.ClaudeRequest{}
 
 	// 创建请求
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, bytes.NewReader(body))
+	requestBody, err := bodyHandle.Open()
 	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, requestBody)
+	if err != nil {
+		_ = requestBody.Close()
 		return nil, fmt.Errorf("create upstream request: %w", err)
 	}
+	defer func() { _ = req.Body.Close() }()
+	req.GetBody = bodyHandle.Open
+	req.ContentLength = bodyHandle.Size()
 
 	// 设置请求头
 	req.Header.Set("Content-Type", "application/json")
@@ -4398,7 +4625,8 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 	if v := clientBeta; v != "" {
 		req.Header.Set("anthropic-beta", v)
 	}
-	SetUsageUpstreamRequest(c, req, string(body))
+	preview := bodyHandle.PreviewString()
+	SetUsageUpstreamRequest(c, req, preview)
 
 	// 代理 URL
 	proxyURL := ""
@@ -4407,6 +4635,7 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 	}
 
 	// 发送请求
+	SetOpsUpstreamAttempted(c, true)
 	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
 		logger.LegacyPrintf("service.antigravity_gateway", "%s upstream request failed: %v", prefix, err)
@@ -4438,7 +4667,7 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 	var firstTokenMs *int
 	var clientDisconnect bool
 
-	if claudeReq.Stream {
+	if reqStream {
 		// 流式响应：透传
 		c.Header("Content-Type", "text/event-stream")
 		c.Header("Cache-Control", "no-cache")
@@ -4471,7 +4700,7 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 
 	return &ForwardResult{
 		Model:            originalModel,
-		Stream:           claudeReq.Stream,
+		Stream:           reqStream,
 		Duration:         duration,
 		FirstTokenMs:     firstTokenMs,
 		ClientDisconnect: clientDisconnect,

@@ -790,6 +790,45 @@ func TestSelectAccountWithLoadAwareness_StickyReadReuse(t *testing.T) {
 	})
 }
 
+func TestSelectAccountWithLoadAwareness_LoadBatchDisabledUsesPrefetchedGeminiStickyAccount(t *testing.T) {
+	primary := Account{
+		ID:          99,
+		Platform:    PlatformGemini,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    1,
+	}
+	sticky := Account{
+		ID:          100,
+		Platform:    PlatformGemini,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    2,
+	}
+	cache := &stickyGatewayCacheHotpathStub{stickyID: primary.ID}
+	svc := &GatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{primary, sticky}},
+		cache:              cache,
+		cfg:                &config.Config{RunMode: config.RunModeStandard, Gateway: config.GatewayConfig{Sticky: config.GatewayStickyConfig{Gemini: config.GatewayStickyPlatformConfig{Enabled: true}}, Scheduling: config.GatewaySchedulingConfig{LoadBatchEnabled: false}}},
+		userGroupRateCache: gocache.New(time.Minute, time.Minute),
+		modelsListCache:    gocache.New(time.Minute, time.Minute),
+		modelsListCacheTTL: time.Minute,
+	}
+	ctx := context.WithValue(context.Background(), ctxkey.ForcePlatform, PlatformGemini)
+	ctx = context.WithValue(ctx, ctxkey.PrefetchedStickyAccountID, sticky.ID)
+	ctx = context.WithValue(ctx, ctxkey.PrefetchedStickyGroupID, int64(0))
+
+	result, err := svc.SelectAccountWithLoadAwareness(ctx, nil, "gemini-cli-session", "gemini-2.5-flash", nil, "", 0)
+
+	require.NoError(t, err)
+	require.Equal(t, sticky.ID, result.Account.ID)
+	require.Zero(t, cache.getCalls.Load())
+}
+
 func TestSelectAccountWithLoadAwareness_StickyDisabledBypassesPrefetchAndCacheRead(t *testing.T) {
 	stickyLastUsed := time.Now()
 	fallbackLastUsed := time.Now().Add(-time.Minute)

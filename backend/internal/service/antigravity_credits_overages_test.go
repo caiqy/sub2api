@@ -7,13 +7,23 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+type antigravityAttemptSnapshotCollector struct {
+	body string
+}
+
+func (c *antigravityAttemptSnapshotCollector) SetUsageUpstreamRequest(_ string, body string) {
+	c.body = unwrapRequestBodyPreviewForTest(body)
+}
 
 func TestClassifyAntigravity429(t *testing.T) {
 	t.Run("明确配额耗尽", func(t *testing.T) {
@@ -144,6 +154,56 @@ func TestHandleSmartRetry_QuotaExhausted_UsesCreditsAndStoresIndependentState(t 
 	require.Len(t, upstream.requestBodies, 1)
 	require.Contains(t, string(upstream.requestBodies[0]), "enabledCreditTypes")
 	require.Empty(t, repo.modelRateLimitCalls, "overages 成功后不应写入普通 model_rate_limits")
+}
+
+func TestAntigravityRetryLoop_CreditsRetryOverwritesAttemptSnapshots(t *testing.T) {
+	oldBaseURLs := append([]string(nil), antigravity.BaseURLs...)
+	oldAvailability := antigravity.DefaultURLAvailability
+	defer func() {
+		antigravity.BaseURLs = oldBaseURLs
+		antigravity.DefaultURLAvailability = oldAvailability
+	}()
+	antigravity.BaseURLs = []string{"https://ag-credits.test"}
+	antigravity.DefaultURLAvailability = antigravity.NewURLAvailability(time.Minute)
+
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	collector := &antigravityAttemptSnapshotCollector{}
+	c.Set(UsageDetailCaptureContextKey, collector)
+
+	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{
+		{StatusCode: http.StatusTooManyRequests, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"status":"RESOURCE_EXHAUSTED","message":"QUOTA_EXHAUSTED"}}`))},
+		{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"ok":true}`))},
+	}}
+	var usageBodies, opsBodies []string
+	var attempted []bool
+	upstream.onCall = func(_ *http.Request, _ *queuedHTTPUpstreamStub) {
+		usageBodies = append(usageBodies, collector.body)
+		value, _ := c.Get(OpsUpstreamRequestBodyKey)
+		opsBodies = append(opsBodies, value.(string))
+		attempted = append(attempted, HasOpsUpstreamAttempted(c))
+		SetOpsUpstreamAttempted(c, false)
+	}
+	account := &Account{ID: 105, Name: "credits-snapshots", Type: AccountTypeOAuth, Platform: PlatformAntigravity, Concurrency: 1, Extra: map[string]any{"allow_overages": true}}
+	body := []byte(`{"model":"claude-sonnet-4-5","request":{"contents":[{"parts":[{"text":"hello"}]}]}}`)
+
+	resp, err := (&AntigravityGatewayService{}).antigravityRetryLoop(antigravityRetryLoopParams{
+		ctx: context.Background(), c: c, prefix: "[test]", account: account, accessToken: "token", action: "generateContent", body: body,
+		httpUpstream: upstream, requestedModel: "claude-sonnet-4-5",
+		handleError: func(context.Context, string, *Account, int, http.Header, []byte, string, int64, string, bool) *handleModelRateLimitResult {
+			return nil
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, []bool{true, true}, attempted)
+	require.Len(t, usageBodies, 2)
+	require.Len(t, opsBodies, 2)
+	require.NotContains(t, usageBodies[0], "enabledCreditTypes")
+	require.NotContains(t, opsBodies[0], "enabledCreditTypes")
+	require.Contains(t, usageBodies[1], "enabledCreditTypes")
+	require.Contains(t, opsBodies[1], "enabledCreditTypes")
 }
 
 func TestHandleSmartRetry_RateLimited_DoesNotUseCredits(t *testing.T) {

@@ -1,0 +1,1272 @@
+package handler
+
+import (
+	"context"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
+	"github.com/Wei-Shaw/sub2api/internal/service"
+	coderws "github.com/coder/websocket"
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
+)
+
+type terminalUsageOpenAIEnv struct {
+	handler   *OpenAIGatewayHandler
+	apiKey    *service.APIKey
+	usageRepo *openAIChatCompletionsUsageLogRepoStub
+}
+
+type terminalUsageGrokAccountRepo struct{ openAIRetryAccountRepoStub }
+
+func (terminalUsageGrokAccountRepo) SetTempUnschedulable(context.Context, int64, time.Time, string) error {
+	return nil
+}
+
+type partialWriteTransportHTTPUpstream struct {
+	service.HTTPUpstream
+	writePartial func()
+	response     *http.Response
+}
+
+func (u *partialWriteTransportHTTPUpstream) Do(*http.Request, string, int64, int) (*http.Response, error) {
+	u.writePartial()
+	if u.response != nil {
+		return u.response, nil
+	}
+	return nil, errors.New("transport failed after partial response")
+}
+
+func (u *partialWriteTransportHTTPUpstream) DoWithTLS(req *http.Request, proxyURL string, accountID int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, proxyURL, accountID, concurrency)
+}
+
+type terminalReadErrorBody struct {
+	cancel context.CancelFunc
+}
+
+func (b terminalReadErrorBody) Read([]byte) (int, error) {
+	if b.cancel != nil {
+		b.cancel()
+	}
+	return 0, errors.New("upstream body read failed")
+}
+
+func (terminalReadErrorBody) Close() error { return nil }
+
+type terminalPartialReadErrorBody struct {
+	data []byte
+	sent bool
+}
+
+func (b *terminalPartialReadErrorBody) Read(p []byte) (int, error) {
+	if b.sent {
+		return 0, errors.New("upstream body read failed after partial response")
+	}
+	b.sent = true
+	return copy(p, b.data), nil
+}
+
+func (*terminalPartialReadErrorBody) Close() error { return nil }
+
+type directTerminalHTTPUpstream struct {
+	service.HTTPUpstream
+	response *http.Response
+}
+
+func (u directTerminalHTTPUpstream) Do(*http.Request, string, int64, int) (*http.Response, error) {
+	return u.response, nil
+}
+
+type markingTerminalHTTPUpstream struct {
+	service.HTTPUpstream
+	mark       func()
+	accountIDs []int64
+}
+
+func (u *markingTerminalHTTPUpstream) Do(_ *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
+	u.accountIDs = append(u.accountIDs, accountID)
+	u.mark()
+	return nil, errors.New("dial failed")
+}
+
+func newTerminalUsageOpenAIEnv(t *testing.T, group *service.Group, accountRepo service.AccountRepository, response *http.Response) *terminalUsageOpenAIEnv {
+	return newTerminalUsageOpenAIEnvWithUpstream(t, group, accountRepo, &openAIChatCompletionsHTTPUpstreamStub{response: response})
+}
+
+func newTerminalUsageOpenAIEnvWithUpstream(t *testing.T, group *service.Group, accountRepo service.AccountRepository, upstream service.HTTPUpstream) *terminalUsageOpenAIEnv {
+	t.Helper()
+	cfg := &config.Config{
+		RunMode:     config.RunModeSimple,
+		Default:     config.DefaultConfig{RateMultiplier: 1},
+		Gateway:     config.GatewayConfig{MaxAccountSwitches: 1, Scheduling: config.GatewaySchedulingConfig{LoadBatchEnabled: false}},
+		Concurrency: config.ConcurrencyConfig{PingInterval: 0},
+	}
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.HTTPBridgeEnabled = true
+	cfg.Gateway.OpenAIWS.HTTPBridgeThresholdBytes = 1
+	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
+	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(func() { billingCacheService.Stop() })
+	gatewayService := service.NewOpenAIGatewayService(
+		accountRepo,
+		usageRepo,
+		nil,
+		nil,
+		nil,
+		nil,
+		openAIChatCompletionsGatewayCacheStub{},
+		cfg,
+		nil,
+		concurrencyService,
+		service.NewBillingService(cfg, nil),
+		nil,
+		billingCacheService,
+		upstream,
+		service.NewDeferredService(accountRepo, nil, 0),
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg)
+	h.maxAccountSwitches = 0
+	return &terminalUsageOpenAIEnv{
+		handler: h,
+		apiKey: &service.APIKey{
+			ID:      101,
+			UserID:  202,
+			Status:  service.StatusActive,
+			GroupID: &group.ID,
+			User:    &service.User{ID: 202, Status: service.StatusActive, Concurrency: 1},
+			Group:   group,
+		},
+		usageRepo: usageRepo,
+	}
+}
+
+func (e *terminalUsageOpenAIEnv) router(route string, handler gin.HandlerFunc) *gin.Engine {
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), e.apiKey)
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: e.apiKey.UserID, Concurrency: e.apiKey.User.Concurrency})
+		c.Next()
+	})
+	router.Use(middleware.UsageDetailCapture())
+	router.POST(route, handler)
+	return router
+}
+
+func TestOpenAIGatewayHandler_EmbeddingsFailoverExhaustedCreatesFailedUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 1, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 11, Name: "embeddings", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "sk-test"}}
+	env := newTerminalUsageOpenAIEnv(t, group, &openAIChatCompletionsAccountRepoStub{account: account}, &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Header:     http.Header{"Content-Type": []string{"application/json"}, "X-Request-Id": []string{"req_embeddings_429"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"rate_limit_error","message":"embeddings overloaded"}}`)),
+	})
+
+	reqBody := `{"model":"text-embedding-3-small","input":"hello"}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	env.router("/v1/embeddings", env.handler.Embeddings).ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusTooManyRequests, rec.Code, rec.Body.String())
+	log := waitForOpenAIFailedUsageLog(t, env.usageRepo)
+	require.NotNil(t, log)
+	require.NotNil(t, log.DetailSnapshot)
+	requireRequestPreviewSnapshot(t, log.DetailSnapshot.RequestBody, reqBody)
+	require.Contains(t, log.DetailSnapshot.ResponseHeaders, "X-Request-Id: req_embeddings_429")
+	require.Contains(t, log.DetailSnapshot.ResponseBody, "embeddings overloaded")
+}
+
+func TestOpenAIGatewayHandler_GrokMediaFailoverExhaustedCreatesFailedUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 2, Platform: service.PlatformGrok, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
+	parentID := int64(120)
+	account := &service.Account{ID: 12, Name: "grok", Platform: service.PlatformGrok, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, ParentAccountID: &parentID, Credentials: map[string]any{"base_url": "https://api.x.ai/v1"}}
+	parent := &service.Account{ID: parentID, Name: "grok-credential-parent", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Credentials: map[string]any{"access_token": "grok-token"}}
+	env := newTerminalUsageOpenAIEnv(t, group, &terminalUsageGrokAccountRepo{openAIRetryAccountRepoStub{accounts: []*service.Account{account, parent}}}, &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Header:     http.Header{"Content-Type": []string{"application/json"}, "X-Request-Id": []string{"req_grok_429"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"rate_limit_error","message":"grok media overloaded"}}`)),
+	})
+
+	reqBody := `{"model":"grok-imagine","prompt":"draw a lighthouse"}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	env.router("/v1/images/generations", env.handler.GrokImages).ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusTooManyRequests, rec.Code, rec.Body.String())
+	log := waitForOpenAIFailedUsageLog(t, env.usageRepo)
+	require.NotNil(t, log)
+	require.NotNil(t, log.DetailSnapshot)
+	requireRequestPreviewSnapshot(t, log.DetailSnapshot.RequestBody, reqBody)
+	require.Contains(t, log.DetailSnapshot.ResponseHeaders, "X-Request-Id: req_grok_429")
+	require.Contains(t, log.DetailSnapshot.ResponseBody, "grok media overloaded")
+}
+
+func TestOpenAIGatewayHandler_ChatCompletionsPartialFailoverCreatesFailedUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 3, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 13, Name: "chat", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "sk-test"}}
+	upstreamBody := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hello\"}\n\n" +
+		"data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_partial\",\"status\":\"failed\",\"error\":{\"type\":\"server_error\",\"code\":\"server_error\",\"message\":\"partial chat failover\"}}}\n\n"
+	env := newTerminalUsageOpenAIEnv(t, group, &openAIChatCompletionsAccountRepoStub{account: account}, &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "X-Request-Id": []string{"req_chat_partial"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+	})
+
+	reqBody := `{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":true}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	env.router("/v1/chat/completions", env.handler.ChatCompletions).ServeHTTP(rec, req)
+
+	require.Contains(t, rec.Body.String(), "Hello", "test must exercise the post-write failover branch")
+	log := waitForOpenAIFailedUsageLog(t, env.usageRepo)
+	require.NotNil(t, log)
+	require.NotNil(t, log.DetailSnapshot)
+	requireRequestPreviewSnapshot(t, log.DetailSnapshot.RequestBody, reqBody)
+	require.Contains(t, log.DetailSnapshot.ResponseBody, "partial chat failover")
+}
+
+func TestOpenAIGatewayHandler_ResponsesPartialFailoverCreatesExactlyOneFailedUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 31, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 131, Name: "responses", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "sk-test"}}
+	var requestContext *gin.Context
+	upstream := &partialWriteTransportHTTPUpstream{}
+	upstream.writePartial = func() {
+		requestContext.Header("Content-Type", "text/event-stream")
+		_, _ = requestContext.Writer.WriteString("data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hello\"}\n\n")
+		requestContext.Writer.Flush()
+	}
+	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIChatCompletionsAccountRepoStub{account: account}, upstream)
+	env.usageRepo.created = make(chan *service.UsageLog, 2)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		requestContext = c
+		c.Set(string(middleware.ContextKeyAPIKey), env.apiKey)
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: env.apiKey.UserID, Concurrency: env.apiKey.User.Concurrency})
+		c.Next()
+	})
+	router.Use(middleware.UsageDetailCapture())
+	router.POST("/v1/responses", env.handler.Responses)
+
+	reqBody := `{"model":"gpt-5.4","input":"hello","stream":true}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Contains(t, rec.Body.String(), "Hello", "test must exercise the post-write failover branch")
+	require.NotNil(t, env.usageRepo.lastLog)
+	require.Len(t, env.usageRepo.created, 1)
+	require.Contains(t, env.usageRepo.lastLog.DetailSnapshot.ResponseBody, "Upstream request failed")
+}
+
+func TestOpenAIGatewayHandler_NativeResponsesFailedIsNotDuplicated(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 32, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 132, Name: "native-responses", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "sk-test"}, Extra: map[string]any{"openai_passthrough": true, "use_responses_api": true}}
+	upstreamBody := "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_native_failed\",\"status\":\"failed\",\"error\":{\"code\":\"invalid_request\",\"message\":\"native upstream failure\"}}}\n\n"
+	env := newTerminalUsageOpenAIEnv(t, group, &openAIChatCompletionsAccountRepoStub{account: account}, &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.4","input":"hello","stream":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	env.router("/v1/responses", env.handler.Responses).ServeHTTP(rec, req)
+
+	require.Equal(t, 1, strings.Count(rec.Body.String(), "event: response.failed\n"), rec.Body.String())
+	require.NotNil(t, env.usageRepo.lastLog)
+	require.Len(t, env.usageRepo.created, 1)
+}
+
+func TestOpenAIGatewayHandler_NativeNonPassthroughResponsesFailedIsNotDuplicated(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 33, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 133, Name: "native-responses", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "sk-test"}, Extra: map[string]any{"use_responses_api": true}}
+	upstreamBody := "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_native_failed\",\"status\":\"failed\",\"error\":{\"code\":\"invalid_request\",\"message\":\"native upstream failure\"}}}\n\n"
+	env := newTerminalUsageOpenAIEnv(t, group, &openAIChatCompletionsAccountRepoStub{account: account}, &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.4","input":"hello","stream":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	env.router("/v1/responses", env.handler.Responses).ServeHTTP(rec, req)
+
+	require.Equal(t, 1, strings.Count(rec.Body.String(), "event: response.failed\n"), rec.Body.String())
+	require.NotNil(t, env.usageRepo.lastLog)
+	require.Len(t, env.usageRepo.created, 1)
+}
+
+func TestOpenAIGatewayHandler_NativeNonPassthroughBufferedResponsesFailedIsNotDuplicated(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 34, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 134, Name: "native-responses", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "sk-test"}, Extra: map[string]any{"use_responses_api": true}}
+	upstreamBody := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n" +
+		"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_native_failed\",\"status\":\"failed\",\"error\":{\"code\":\"invalid_request\",\"message\":\"native upstream failure\"}}}\n\n"
+	env := newTerminalUsageOpenAIEnv(t, group, &openAIChatCompletionsAccountRepoStub{account: account}, &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+	})
+	env.handler.cfg.Gateway.StreamKeepaliveInterval = 1
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.4","input":"hello","stream":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	env.router("/v1/responses", env.handler.Responses).ServeHTTP(rec, req)
+
+	require.Equal(t, 1, strings.Count(rec.Body.String(), "event: response.failed\n"), rec.Body.String())
+	require.NotNil(t, env.usageRepo.lastLog)
+	require.Len(t, env.usageRepo.created, 1)
+}
+
+func TestOpenAIGatewayHandler_OrdinaryErrorsRequireUpstreamAttempt(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("chat local credential error does not create failed usage", func(t *testing.T) {
+		group := &service.Group{ID: 400, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+		account := &service.Account{ID: 1400, Name: "chat-local", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{}}
+		env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIChatCompletionsAccountRepoStub{account: account}, &openAIChatCompletionsHTTPUpstreamStub{err: errors.New("must not be called")})
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}]}`))
+		req.Header.Set("Content-Type", "application/json")
+		env.router("/v1/chat/completions", env.handler.ChatCompletions).ServeHTTP(rec, req)
+
+		require.Nil(t, env.usageRepo.lastLog)
+	})
+
+	t.Run("chat transport error creates failed usage", func(t *testing.T) {
+		group := &service.Group{ID: 401, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+		account := &service.Account{ID: 1401, Name: "chat-transport", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test"}}
+		repo := &terminalUsageGrokAccountRepo{openAIRetryAccountRepoStub{accounts: []*service.Account{account}}}
+		env := newTerminalUsageOpenAIEnvWithUpstream(t, group, repo, &openAIChatCompletionsHTTPUpstreamStub{err: errors.New("dial failed")})
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}]}`))
+		req.Header.Set("Content-Type", "application/json")
+		env.router("/v1/chat/completions", env.handler.ChatCompletions).ServeHTTP(rec, req)
+
+		require.NotNil(t, env.usageRepo.lastLog)
+	})
+
+	t.Run("messages local credential error does not create failed usage", func(t *testing.T) {
+		group := &service.Group{ID: 402, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowMessagesDispatch: true}
+		account := &service.Account{ID: 1402, Name: "messages-local", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{}}
+		env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIChatCompletionsAccountRepoStub{account: account}, &openAIChatCompletionsHTTPUpstreamStub{err: errors.New("must not be called")})
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`))
+		req.Header.Set("Content-Type", "application/json")
+		env.router("/v1/messages", env.handler.Messages).ServeHTTP(rec, req)
+
+		require.Nil(t, env.usageRepo.lastLog)
+	})
+
+	t.Run("messages transport error creates failed usage", func(t *testing.T) {
+		group := &service.Group{ID: 403, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowMessagesDispatch: true}
+		account := &service.Account{ID: 1403, Name: "messages-transport", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test"}}
+		env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIChatCompletionsAccountRepoStub{account: account}, &openAIChatCompletionsHTTPUpstreamStub{err: errors.New("dial failed")})
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gpt-5.4","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`))
+		req.Header.Set("Content-Type", "application/json")
+		env.router("/v1/messages", env.handler.Messages).ServeHTTP(rec, req)
+
+		require.NotNil(t, env.usageRepo.lastLog)
+	})
+
+	t.Run("embeddings local credential error does not create failed usage", func(t *testing.T) {
+		group := &service.Group{ID: 41, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+		account := &service.Account{ID: 141, Name: "embeddings-local", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{}}
+		env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIChatCompletionsAccountRepoStub{account: account}, &openAIChatCompletionsHTTPUpstreamStub{err: errors.New("must not be called")})
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(`{"model":"text-embedding-3-small","input":"hello"}`))
+		req.Header.Set("Content-Type", "application/json")
+		env.router("/v1/embeddings", env.handler.Embeddings).ServeHTTP(rec, req)
+
+		require.Nil(t, env.usageRepo.lastLog)
+	})
+
+	t.Run("embeddings transport error creates failed usage", func(t *testing.T) {
+		group := &service.Group{ID: 42, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+		account := &service.Account{ID: 142, Name: "embeddings-transport", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test"}}
+		env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIChatCompletionsAccountRepoStub{account: account}, &openAIChatCompletionsHTTPUpstreamStub{err: errors.New("dial failed")})
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(`{"model":"text-embedding-3-small","input":"hello"}`))
+		req.Header.Set("Content-Type", "application/json")
+		env.router("/v1/embeddings", env.handler.Embeddings).ServeHTTP(rec, req)
+
+		require.NotNil(t, env.usageRepo.lastLog)
+	})
+
+	t.Run("images local credential error does not create failed usage", func(t *testing.T) {
+		group := &service.Group{ID: 43, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
+		account := &service.Account{ID: 143, Name: "images-local", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{}}
+		env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIChatCompletionsAccountRepoStub{account: account}, &openAIChatCompletionsHTTPUpstreamStub{err: errors.New("must not be called")})
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"gpt-image-2","prompt":"hello"}`))
+		req.Header.Set("Content-Type", "application/json")
+		env.router("/v1/images/generations", env.handler.Images).ServeHTTP(rec, req)
+
+		require.Nil(t, env.usageRepo.lastLog)
+	})
+
+	t.Run("images transport error creates failed usage", func(t *testing.T) {
+		group := &service.Group{ID: 44, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
+		account := &service.Account{ID: 144, Name: "images-transport", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test"}}
+		env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIChatCompletionsAccountRepoStub{account: account}, &openAIChatCompletionsHTTPUpstreamStub{err: errors.New("dial failed")})
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"gpt-image-2","prompt":"hello"}`))
+		req.Header.Set("Content-Type", "application/json")
+		env.router("/v1/images/generations", env.handler.Images).ServeHTTP(rec, req)
+
+		require.NotNil(t, env.usageRepo.lastLog)
+	})
+
+	t.Run("grok local credential error does not create failed usage", func(t *testing.T) {
+		group := &service.Group{ID: 45, Platform: service.PlatformGrok, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
+		account := &service.Account{ID: 145, Name: "grok-local", Platform: service.PlatformGrok, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"base_url": "https://api.x.ai/v1"}}
+		env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIChatCompletionsAccountRepoStub{account: account}, &openAIChatCompletionsHTTPUpstreamStub{err: errors.New("must not be called")})
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"grok-imagine","prompt":"hello"}`))
+		req.Header.Set("Content-Type", "application/json")
+		env.router("/v1/images/generations", env.handler.GrokImages).ServeHTTP(rec, req)
+
+		require.Nil(t, env.usageRepo.lastLog)
+	})
+
+	t.Run("grok transport error creates failed usage", func(t *testing.T) {
+		group := &service.Group{ID: 46, Platform: service.PlatformGrok, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
+		parentID := int64(1460)
+		account := &service.Account{ID: 146, Name: "grok-transport", Platform: service.PlatformGrok, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, ParentAccountID: &parentID, Credentials: map[string]any{"base_url": "https://api.x.ai/v1"}}
+		parent := &service.Account{ID: parentID, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Credentials: map[string]any{"access_token": "grok-token"}}
+		repo := &terminalUsageGrokAccountRepo{openAIRetryAccountRepoStub{accounts: []*service.Account{account, parent}}}
+		env := newTerminalUsageOpenAIEnvWithUpstream(t, group, repo, &openAIChatCompletionsHTTPUpstreamStub{err: errors.New("dial failed")})
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"grok-imagine","prompt":"hello"}`))
+		req.Header.Set("Content-Type", "application/json")
+		env.router("/v1/images/generations", env.handler.GrokImages).ServeHTTP(rec, req)
+
+		require.NotNil(t, env.usageRepo.lastLog)
+	})
+}
+
+func TestOpenAIGatewayHandler_UpstreamAttemptSignalResetsAcrossAccounts(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 404, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+	accountA := &service.Account{ID: 1404, Name: "attempted", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "sk-test"}}
+	accountB := &service.Account{ID: 1405, Name: "local-error", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 2, Credentials: map[string]any{}}
+	var requestContext *gin.Context
+	upstream := &markingTerminalHTTPUpstream{mark: func() { service.SetOpsUpstreamAttempted(requestContext, true) }}
+	repo := &terminalUsageGrokAccountRepo{openAIRetryAccountRepoStub{accounts: []*service.Account{accountA, accountB}}}
+	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, repo, upstream)
+	env.handler.maxAccountSwitches = 1
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	env.router("/v1/chat/completions", func(c *gin.Context) {
+		requestContext = c
+		env.handler.ChatCompletions(c)
+	}).ServeHTTP(rec, req)
+
+	require.Equal(t, []int64{accountA.ID}, upstream.accountIDs)
+	require.False(t, service.HasOpsUpstreamAttempted(requestContext))
+	require.Nil(t, env.usageRepo.lastLog)
+}
+
+type terminalUsageGroupRepo struct {
+	service.GroupRepository
+	group *service.Group
+}
+
+func (r terminalUsageGroupRepo) GetByID(_ context.Context, id int64) (*service.Group, error) {
+	if r.group != nil && r.group.ID == id {
+		return r.group, nil
+	}
+	if r.group != nil && r.group.FallbackGroupIDOnInvalidRequest != nil && *r.group.FallbackGroupIDOnInvalidRequest == id {
+		return &service.Group{ID: id, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}, nil
+	}
+	return nil, service.ErrGroupNotFound
+}
+
+func (r terminalUsageGroupRepo) GetByIDLite(ctx context.Context, id int64) (*service.Group, error) {
+	return r.GetByID(ctx, id)
+}
+
+type terminalUsageSettingRepo struct{ service.SettingRepository }
+
+func (terminalUsageSettingRepo) Get(context.Context, string) (*service.Setting, error) {
+	return nil, service.ErrSettingNotFound
+}
+
+func (terminalUsageSettingRepo) GetValue(context.Context, string) (string, error) {
+	return "", service.ErrSettingNotFound
+}
+
+func (terminalUsageSettingRepo) GetMultiple(context.Context, []string) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
+type terminalGatewayMessagesEnv struct {
+	handler   *GatewayHandler
+	apiKey    *service.APIKey
+	usageRepo *openAIChatCompletionsUsageLogRepoStub
+}
+
+type terminalGatewayAccountRepo struct{ openAIRetryAccountRepoStub }
+
+func (r *terminalGatewayAccountRepo) ListSchedulableByGroupIDAndPlatforms(_ context.Context, _ int64, platforms []string) ([]service.Account, error) {
+	return r.listByPlatforms(platforms), nil
+}
+
+func (r *terminalGatewayAccountRepo) ListSchedulableByPlatforms(_ context.Context, platforms []string) ([]service.Account, error) {
+	return r.listByPlatforms(platforms), nil
+}
+
+func (r *terminalGatewayAccountRepo) listByPlatforms(platforms []string) []service.Account {
+	allowed := make(map[string]struct{}, len(platforms))
+	for _, platform := range platforms {
+		allowed[platform] = struct{}{}
+	}
+	accounts := make([]service.Account, 0, len(r.accounts))
+	for _, account := range r.accounts {
+		if account != nil {
+			if _, ok := allowed[account.Platform]; ok {
+				accounts = append(accounts, *account)
+			}
+		}
+	}
+	return accounts
+}
+
+func newTerminalGatewayMessagesEnv(t *testing.T, group *service.Group, upstream service.HTTPUpstream, accounts ...*service.Account) *terminalGatewayMessagesEnv {
+	return newTerminalGatewayMessagesEnvWithGatewayCache(t, group, upstream, openAIChatCompletionsConcurrencyCacheStub{}, openAIChatCompletionsGatewayCacheStub{}, accounts...)
+}
+
+func newTerminalGatewayMessagesEnvWithConcurrencyCache(t *testing.T, group *service.Group, upstream service.HTTPUpstream, concurrencyCache service.ConcurrencyCache, accounts ...*service.Account) *terminalGatewayMessagesEnv {
+	return newTerminalGatewayMessagesEnvWithGatewayCache(t, group, upstream, concurrencyCache, openAIChatCompletionsGatewayCacheStub{}, accounts...)
+}
+
+func newTerminalGatewayMessagesEnvWithGatewayCache(t *testing.T, group *service.Group, upstream service.HTTPUpstream, concurrencyCache service.ConcurrencyCache, cache service.GatewayCache, accounts ...*service.Account) *terminalGatewayMessagesEnv {
+	t.Helper()
+	cfg := &config.Config{
+		RunMode:     config.RunModeSimple,
+		Default:     config.DefaultConfig{RateMultiplier: 1},
+		Gateway:     config.GatewayConfig{MaxAccountSwitches: 1, Scheduling: config.GatewaySchedulingConfig{LoadBatchEnabled: false}},
+		Concurrency: config.ConcurrencyConfig{PingInterval: 0},
+	}
+	accountRepo := &terminalGatewayAccountRepo{openAIRetryAccountRepoStub{accounts: accounts}}
+	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 2)}
+	concurrencyService := service.NewConcurrencyService(concurrencyCache)
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(func() { billingCacheService.Stop() })
+	settingService := service.NewSettingService(terminalUsageSettingRepo{}, cfg)
+	groupRepo := terminalUsageGroupRepo{group: group}
+	gatewayService := service.NewGatewayService(
+		accountRepo,
+		groupRepo,
+		usageRepo,
+		nil,
+		nil,
+		nil,
+		nil,
+		cache,
+		cfg,
+		nil,
+		concurrencyService,
+		service.NewBillingService(cfg, nil),
+		nil,
+		billingCacheService,
+		nil,
+		upstream,
+		service.NewDeferredService(accountRepo, nil, 0),
+		nil,
+		nil,
+		nil,
+		nil,
+		settingService,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+	tokenProvider := service.NewAntigravityTokenProvider(accountRepo, nil, nil)
+	antigravityService := service.NewAntigravityGatewayService(accountRepo, cache, nil, tokenProvider, nil, upstream, settingService, nil)
+	geminiCompatService := service.NewGeminiMessagesCompatService(accountRepo, groupRepo, cache, nil, nil, nil, upstream, antigravityService, cfg)
+	return &terminalGatewayMessagesEnv{
+		handler:   NewGatewayHandler(gatewayService, geminiCompatService, antigravityService, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil),
+		apiKey:    &service.APIKey{ID: 101, UserID: 202, Status: service.StatusActive, GroupID: &group.ID, User: &service.User{ID: 202, Status: service.StatusActive, Concurrency: 1}, Group: group},
+		usageRepo: usageRepo,
+	}
+}
+
+func (e *terminalGatewayMessagesEnv) router() *gin.Engine {
+	return e.routerFor("/v1/messages", e.handler.Messages)
+}
+
+func (e *terminalGatewayMessagesEnv) routerFor(route string, handler gin.HandlerFunc) *gin.Engine {
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), e.apiKey)
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: e.apiKey.UserID, Concurrency: e.apiKey.User.Concurrency})
+		c.Next()
+	})
+	router.Use(middleware.UsageDetailCapture())
+	router.POST(route, handler)
+	return router
+}
+
+type cancelingTerminalHTTPUpstream struct {
+	service.HTTPUpstream
+	cancel context.CancelFunc
+}
+
+type promptTooLongFallbackBillingCache struct {
+	service.BillingCache
+	calls int
+}
+
+func (c *promptTooLongFallbackBillingCache) GetUserBalance(context.Context, int64) (float64, error) {
+	c.calls++
+	if c.calls == 1 {
+		return 100, nil
+	}
+	return 0, nil
+}
+
+func (u cancelingTerminalHTTPUpstream) Do(*http.Request, string, int64, int) (*http.Response, error) {
+	u.cancel()
+	return nil, context.Canceled
+}
+
+func TestGatewayHandler_MessagesPromptTooLongWithoutFallbackCreatesFailedUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 4, Platform: service.PlatformAntigravity, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 14, Name: "antigravity", Platform: service.PlatformAntigravity, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"access_token": "token", "project_id": "project"}}
+	upstream := &openAIChatCompletionsHTTPUpstreamStub{response: &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{"Content-Type": []string{"application/json"}, "X-Request-Id": []string{"req_prompt_too_long"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"Prompt is too long"}}`)),
+	}}
+	env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+
+	reqBody := `{"model":"claude-opus-4-6","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	env.router().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	log := waitForOpenAIFailedUsageLog(t, env.usageRepo)
+	require.NotNil(t, log)
+	require.NotNil(t, log.DetailSnapshot)
+	requireRequestPreviewSnapshot(t, log.DetailSnapshot.RequestBody, reqBody)
+	require.Contains(t, log.DetailSnapshot.ResponseBody, "Prompt is too long")
+	require.Contains(t, log.DetailSnapshot.ResponseHeaders, "X-Request-Id: req_prompt_too_long")
+}
+
+func TestGatewayHandler_MessagesPromptTooLongFallbackBillingRejectionCreatesOriginalFailedUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	fallbackGroupID := int64(41)
+	group := &service.Group{ID: 40, Platform: service.PlatformAntigravity, Status: service.StatusActive, Hydrated: true, FallbackGroupIDOnInvalidRequest: &fallbackGroupID}
+	account := &service.Account{ID: 140, Name: "antigravity", Platform: service.PlatformAntigravity, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"access_token": "token", "project_id": "project"}}
+	upstream := &openAIChatCompletionsHTTPUpstreamStub{response: &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{"Content-Type": []string{"application/json"}, "X-Request-Id": []string{"req_prompt_too_long_fallback"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"Prompt is too long"}}`)),
+	}}
+	env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+	billingCache := &promptTooLongFallbackBillingCache{}
+	billingCacheService := service.NewBillingCacheService(billingCache, nil, nil, nil, nil, nil, &config.Config{Default: config.DefaultConfig{RateMultiplier: 1}}, nil)
+	t.Cleanup(func() { billingCacheService.Stop() })
+	env.handler.billingCacheService = billingCacheService
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-opus-4-6","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	env.router().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	log := waitForOpenAIFailedUsageLog(t, env.usageRepo)
+	require.NotNil(t, log)
+	require.Len(t, env.usageRepo.created, 1)
+	require.Contains(t, log.DetailSnapshot.ResponseHeaders, "X-Request-Id: req_prompt_too_long_fallback")
+	require.Contains(t, log.DetailSnapshot.ResponseBody, "Prompt is too long")
+	require.NotContains(t, log.DetailSnapshot.ResponseBody, "insufficient balance")
+}
+
+func TestGatewayHandler_MessagesLocalErrorDoesNotCreateFailedUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, platform := range []string{service.PlatformGemini, service.PlatformAntigravity} {
+		t.Run(platform, func(t *testing.T) {
+			group := &service.Group{ID: 50, Platform: platform, Status: service.StatusActive, Hydrated: true}
+			account := &service.Account{ID: 150, Name: "local", Platform: platform, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{}}
+			if platform == service.PlatformAntigravity {
+				account.Type = service.AccountTypeOAuth
+				account.Credentials = map[string]any{"project_id": "project"}
+			}
+			env := newTerminalGatewayMessagesEnv(t, group, &openAIChatCompletionsHTTPUpstreamStub{err: errors.New("must not be called")}, account)
+
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-opus-4-6","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`))
+			req.Header.Set("Content-Type", "application/json")
+			env.router().ServeHTTP(rec, req)
+
+			require.Nil(t, env.usageRepo.lastLog)
+		})
+	}
+}
+
+func TestGatewayHandler_MessagesCanceledTransportErrorDoesNotCreateFailedUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 51, Platform: service.PlatformAntigravity, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 151, Name: "antigravity-canceled", Platform: service.PlatformAntigravity, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"access_token": "token", "project_id": "project"}}
+	ctx, cancel := context.WithCancel(context.Background())
+	env := newTerminalGatewayMessagesEnv(t, group, cancelingTerminalHTTPUpstream{cancel: cancel}, account)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-opus-4-6","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`)).WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+	env.router().ServeHTTP(rec, req)
+
+	require.ErrorIs(t, ctx.Err(), context.Canceled)
+	require.Nil(t, env.usageRepo.lastLog)
+}
+
+func TestGatewayHandler_MessagesTransportErrorCreatesFailedUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 52, Platform: service.PlatformAntigravity, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 152, Name: "antigravity-transport", Platform: service.PlatformAntigravity, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"access_token": "token", "project_id": "project"}}
+	env := newTerminalGatewayMessagesEnv(t, group, &openAIChatCompletionsHTTPUpstreamStub{err: errors.New("dial failed")}, account)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-opus-4-6","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	env.router().ServeHTTP(rec, req)
+
+	require.NotNil(t, env.usageRepo.lastLog)
+}
+
+func TestGatewayHandler_CompatibilityChatOrdinaryErrorsRequireUpstreamAttempt(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("local credential error does not create failed usage", func(t *testing.T) {
+		group := &service.Group{ID: 60, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+		account := &service.Account{ID: 160, Name: "compat-chat-local", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{}}
+		env := newTerminalGatewayMessagesEnv(t, group, &openAIChatCompletionsHTTPUpstreamStub{err: errors.New("must not be called")}, account)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"claude-opus-4-6","messages":[{"role":"user","content":"hello"}]}`))
+		req.Header.Set("Content-Type", "application/json")
+		env.routerFor("/v1/chat/completions", env.handler.ChatCompletions).ServeHTTP(rec, req)
+
+		require.Nil(t, env.usageRepo.lastLog)
+	})
+
+	t.Run("transport error creates failed usage", func(t *testing.T) {
+		group := &service.Group{ID: 61, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+		account := &service.Account{ID: 161, Name: "compat-chat-transport", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test"}}
+		env := newTerminalGatewayMessagesEnv(t, group, &openAIChatCompletionsHTTPUpstreamStub{err: errors.New("dial failed")}, account)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"claude-opus-4-6","messages":[{"role":"user","content":"hello"}]}`))
+		req.Header.Set("Content-Type", "application/json")
+		env.routerFor("/v1/chat/completions", env.handler.ChatCompletions).ServeHTTP(rec, req)
+
+		require.NotNil(t, env.usageRepo.lastLog)
+	})
+}
+
+func TestGatewayHandler_CompatibilityResponsesTerminalUsageSemantics(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	requestBody := `{"model":"claude-opus-4-6","input":"hello","stream":true}`
+
+	t.Run("local credential error does not create failed usage", func(t *testing.T) {
+		group := &service.Group{ID: 70, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+		account := &service.Account{ID: 170, Name: "responses-local", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{}}
+		env := newTerminalGatewayMessagesEnv(t, group, &openAIChatCompletionsHTTPUpstreamStub{err: errors.New("must not be called")}, account)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(requestBody))
+		req.Header.Set("Content-Type", "application/json")
+		env.routerFor("/v1/responses", env.handler.Responses).ServeHTTP(rec, req)
+
+		require.Nil(t, env.usageRepo.lastLog)
+	})
+
+	t.Run("transport error creates failed usage", func(t *testing.T) {
+		group := &service.Group{ID: 71, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+		account := &service.Account{ID: 171, Name: "responses-transport", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test"}}
+		env := newTerminalGatewayMessagesEnv(t, group, &openAIChatCompletionsHTTPUpstreamStub{err: errors.New("dial failed")}, account)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(requestBody))
+		req.Header.Set("Content-Type", "application/json")
+		env.routerFor("/v1/responses", env.handler.Responses).ServeHTTP(rec, req)
+
+		require.NotNil(t, env.usageRepo.lastLog)
+	})
+
+	t.Run("scanner error after partial stream appends one failed terminal and failed usage", func(t *testing.T) {
+		group := &service.Group{ID: 711, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+		account := &service.Account{ID: 1711, Name: "responses-scanner", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test"}}
+		var requestContext *gin.Context
+		upstream := &partialWriteTransportHTTPUpstream{response: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       terminalReadErrorBody{},
+		}}
+		upstream.writePartial = func() {
+			requestContext.Header("Content-Type", "text/event-stream")
+			_, _ = requestContext.Writer.WriteString("event: response.created\ndata: {\"type\":\"response.created\"}\n\n")
+			requestContext.Writer.Flush()
+		}
+		env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(requestBody))
+		req.Header.Set("Content-Type", "application/json")
+		env.routerFor("/v1/responses", func(c *gin.Context) {
+			requestContext = c
+			env.handler.Responses(c)
+		}).ServeHTTP(rec, req)
+
+		responseBody := rec.Body.String()
+		require.Equal(t, 1, strings.Count(responseBody, "event: response.failed\n"), responseBody)
+		require.NotContains(t, responseBody, "response.completed")
+		require.NotNil(t, env.usageRepo.lastLog)
+		require.Len(t, env.usageRepo.created, 1)
+	})
+
+	t.Run("partial typed failover creates exactly one failed usage with diagnostic headers", func(t *testing.T) {
+		group := &service.Group{ID: 72, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+		account := &service.Account{ID: 172, Name: "responses-partial", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test"}}
+		var requestContext *gin.Context
+		upstream := &partialWriteTransportHTTPUpstream{response: &http.Response{
+			StatusCode: http.StatusUnauthorized,
+			Header:     http.Header{"Content-Type": []string{"application/json"}, "X-Request-Id": []string{"compat_responses_partial"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"expired upstream credential"}}`)),
+		}}
+		upstream.writePartial = func() {
+			requestContext.Header("Content-Type", "text/event-stream")
+			_, _ = requestContext.Writer.WriteString("data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hello\"}\n\n")
+			requestContext.Writer.Flush()
+		}
+		env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+		router := env.routerFor("/v1/responses", func(c *gin.Context) {
+			requestContext = c
+			env.handler.Responses(c)
+		})
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(requestBody))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(rec, req)
+
+		responseBody := rec.Body.String()
+		require.Equal(t, http.StatusOK, rec.Code, responseBody)
+		require.Contains(t, responseBody, "Hello")
+		require.Equal(t, 1, strings.Count(responseBody, "event: response.failed\n"))
+		require.Equal(t, 1, strings.Count(responseBody, `"type":"response.failed"`))
+		failedData := strings.SplitN(strings.SplitN(responseBody, "event: response.failed\ndata: ", 2)[1], "\n\n", 2)[0]
+		require.True(t, gjson.Valid(failedData), failedData)
+		require.Equal(t, "response.failed", gjson.Get(failedData, "type").String())
+		require.Equal(t, "failed", gjson.Get(failedData, "response.status").String())
+		require.NotNil(t, env.usageRepo.lastLog)
+		require.Len(t, env.usageRepo.created, 1)
+		require.Contains(t, env.usageRepo.lastLog.DetailSnapshot.ResponseHeaders, "X-Request-Id: compat_responses_partial")
+	})
+
+	t.Run("selection exhaustion after failover creates one failed usage", func(t *testing.T) {
+		group := &service.Group{ID: 73, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+		account := &service.Account{ID: 173, Name: "responses-selection", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test"}}
+		upstream := &openAIRetryTrackingHTTPUpstreamStub{responses: []*http.Response{{
+			StatusCode: http.StatusUnauthorized,
+			Header:     http.Header{"Content-Type": []string{"application/json"}, "X-Request-Id": []string{"compat_responses_selection"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"expired upstream credential"}}`)),
+		}}}
+		env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+		env.handler.maxAccountSwitches = 1
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(requestBody))
+		req.Header.Set("Content-Type", "application/json")
+		env.routerFor("/v1/responses", env.handler.Responses).ServeHTTP(rec, req)
+
+		require.Equal(t, []int64{account.ID}, upstream.accountIDs)
+		require.NotNil(t, env.usageRepo.lastLog)
+		require.Len(t, env.usageRepo.created, 1)
+		require.Contains(t, env.usageRepo.lastLog.DetailSnapshot.ResponseHeaders, "X-Request-Id: compat_responses_selection")
+	})
+
+	t.Run("zero max switches stops after first failover", func(t *testing.T) {
+		group := &service.Group{ID: 74, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+		account := &service.Account{ID: 174, Name: "responses-max-switch", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test"}}
+		upstream := &openAIRetryTrackingHTTPUpstreamStub{responses: []*http.Response{{StatusCode: http.StatusUnauthorized, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"expired"}}`))}}}
+		env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+		env.handler.maxAccountSwitches = 0
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(requestBody))
+		req.Header.Set("Content-Type", "application/json")
+		env.routerFor("/v1/responses", env.handler.Responses).ServeHTTP(rec, req)
+
+		require.Equal(t, []int64{account.ID}, upstream.accountIDs)
+		require.Len(t, env.usageRepo.created, 1)
+	})
+}
+
+func TestOpenAIGatewayHandler_WSHTTPBridgeOrdinaryErrorUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name           string
+		account        *service.Account
+		upstream       service.HTTPUpstream
+		wantUsage      bool
+		wantErrorEvent bool
+		wantImageUsage bool
+	}{
+		{
+			name: "transport error creates one failed usage",
+			account: &service.Account{
+				ID: 201, Name: "ws-transport", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+				Status: service.StatusActive, Schedulable: true, Concurrency: 1,
+				Credentials: map[string]any{"api_key": "sk-test"}, Extra: map[string]any{"responses_websockets_v2_enabled": true},
+			},
+			upstream:  &openAIChatCompletionsHTTPUpstreamStub{err: errors.New("dial failed")},
+			wantUsage: true,
+		},
+		{
+			name: "non-failover HTTP error creates one failed usage",
+			account: &service.Account{
+				ID: 202, Name: "ws-http-400", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+				Status: service.StatusActive, Schedulable: true, Concurrency: 1,
+				Credentials: map[string]any{"api_key": "sk-test"}, Extra: map[string]any{"responses_websockets_v2_enabled": true},
+			},
+			upstream: &openAIChatCompletionsHTTPUpstreamStub{response: &http.Response{
+				StatusCode: http.StatusBadRequest,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"bad bridge request"}}`)),
+			}},
+			wantUsage: true,
+		},
+		{
+			name: "local token error creates no failed usage",
+			account: &service.Account{
+				ID: 203, Name: "ws-local", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+				Status: service.StatusActive, Schedulable: true, Concurrency: 1,
+				Credentials: map[string]any{}, Extra: map[string]any{"responses_websockets_v2_enabled": true},
+			},
+			upstream: &openAIChatCompletionsHTTPUpstreamStub{err: errors.New("must not be called")},
+		},
+		{
+			name: "typed error event creates one failed usage",
+			account: &service.Account{
+				ID: 204, Name: "ws-typed-error", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+				Status: service.StatusActive, Schedulable: true, Concurrency: 1,
+				Credentials: map[string]any{"api_key": "sk-test"}, Extra: map[string]any{"responses_websockets_v2_enabled": true},
+			},
+			upstream: &openAIChatCompletionsHTTPUpstreamStub{response: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body:       io.NopCloser(strings.NewReader("data: {\"type\":\"error\",\"error\":{\"message\":\"typed bridge error\"}}\n\n")),
+			}},
+			wantUsage:      true,
+			wantErrorEvent: true,
+		},
+		{
+			name: "image result followed by error records normal usage once",
+			account: &service.Account{
+				ID: 205, Name: "ws-image-error", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+				Status: service.StatusActive, Schedulable: true, Concurrency: 1,
+				Credentials: map[string]any{"api_key": "sk-test"}, Extra: map[string]any{"responses_websockets_v2_enabled": true},
+			},
+			upstream: &openAIChatCompletionsHTTPUpstreamStub{response: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body: io.NopCloser(strings.NewReader(
+					"data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"ig_1\",\"type\":\"image_generation_call\",\"result\":\"image-data\"}}\n\n" +
+						"data: {\"type\":\"error\",\"error\":{\"message\":\"error after image\"}}\n\n",
+				)),
+			}},
+			wantUsage:      true,
+			wantErrorEvent: true,
+			wantImageUsage: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			group := &service.Group{ID: 200, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+			env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIChatCompletionsAccountRepoStub{account: tt.account}, tt.upstream)
+			env.usageRepo.created = make(chan *service.UsageLog, 2)
+			done := make(chan struct{})
+			router := gin.New()
+			router.Use(func(c *gin.Context) {
+				c.Set(string(middleware.ContextKeyAPIKey), env.apiKey)
+				c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: env.apiKey.UserID, Concurrency: env.apiKey.User.Concurrency})
+				c.Next()
+			})
+			router.Use(middleware.UsageDetailCapture())
+			router.GET("/v1/responses", func(c *gin.Context) {
+				defer close(done)
+				env.handler.ResponsesWebSocket(c)
+			})
+			server := httptest.NewServer(router)
+			defer server.Close()
+
+			dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
+			conn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(server.URL, "http")+"/v1/responses", nil)
+			cancelDial()
+			require.NoError(t, err)
+			defer func() { _ = conn.CloseNow() }()
+
+			writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
+			err = conn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.4","stream":true,"input":"hello"}`))
+			cancelWrite()
+			require.NoError(t, err)
+
+			readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
+			_, message, err := conn.Read(readCtx)
+			cancelRead()
+			if tt.wantImageUsage {
+				require.NoError(t, err)
+				require.Equal(t, "response.output_item.done", gjson.GetBytes(message, "type").String())
+				readCtx, cancelRead = context.WithTimeout(context.Background(), 3*time.Second)
+				_, message, err = conn.Read(readCtx)
+				cancelRead()
+			}
+			if tt.wantErrorEvent {
+				require.NoError(t, err)
+				require.Equal(t, "error", gjson.GetBytes(message, "type").String())
+				readCtx, cancelRead = context.WithTimeout(context.Background(), 3*time.Second)
+				_, _, err = conn.Read(readCtx)
+				cancelRead()
+			}
+			var closeErr coderws.CloseError
+			require.ErrorAs(t, err, &closeErr, "ordinary bridge failure should produce one close frame, not a client error event followed by close")
+			require.Equal(t, coderws.StatusInternalError, closeErr.Code)
+			select {
+			case <-done:
+			case <-time.After(3 * time.Second):
+				t.Fatal("websocket handler did not return")
+			}
+
+			if tt.wantUsage {
+				require.NotNil(t, env.usageRepo.lastLog)
+				require.Len(t, env.usageRepo.created, 1)
+				require.Equal(t, tt.account.ID, env.usageRepo.lastLog.AccountID)
+				if tt.wantImageUsage {
+					require.Equal(t, 1, env.usageRepo.lastLog.ImageCount)
+				}
+			} else {
+				require.Nil(t, env.usageRepo.lastLog)
+				require.Empty(t, env.usageRepo.created)
+			}
+		})
+	}
+}
+
+func TestGatewayHandler_GeminiNativeOrdinaryErrorUsageSemantics(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	requestBody := `{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`
+	route := "/v1beta/models/gemini-2.5-flash:generateContent"
+
+	run := func(t *testing.T, groupID, accountID int64, account *service.Account, upstream service.HTTPUpstream, requestContext context.Context) (*terminalGatewayMessagesEnv, *httptest.ResponseRecorder) {
+		t.Helper()
+		group := &service.Group{ID: groupID, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
+		account.ID = accountID
+		if account.Platform == "" {
+			account.Platform = service.PlatformGemini
+		}
+		account.Status = service.StatusActive
+		account.Schedulable = true
+		account.Concurrency = 1
+		env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, route, strings.NewReader(requestBody)).WithContext(requestContext)
+		req.Header.Set("Content-Type", "application/json")
+		env.routerFor("/v1beta/models/*modelAction", env.handler.GeminiV1BetaModels).ServeHTTP(rec, req)
+		return env, rec
+	}
+
+	t.Run("service-written local credential error is not duplicated", func(t *testing.T) {
+		env, rec := run(t, 80, 180, &service.Account{Name: "gemini-local", Type: service.AccountTypeAPIKey, Credentials: map[string]any{}}, &openAIChatCompletionsHTTPUpstreamStub{err: errors.New("must not be called")}, context.Background())
+		require.Equal(t, http.StatusBadGateway, rec.Code)
+		require.Contains(t, rec.Body.String(), "gemini api_key not configured")
+		require.NotContains(t, rec.Body.String(), "Upstream request failed")
+		require.Nil(t, env.usageRepo.lastLog)
+	})
+
+	t.Run("antigravity local token error gets generic non-2xx without failed usage", func(t *testing.T) {
+		account := &service.Account{
+			Name:        "antigravity-local-token",
+			Platform:    service.PlatformAntigravity,
+			Type:        service.AccountTypeOAuth,
+			Credentials: map[string]any{"project_id": "project"},
+			Extra:       map[string]any{"mixed_scheduling": true},
+		}
+		env, rec := run(t, 85, 185, account, &openAIChatCompletionsHTTPUpstreamStub{err: errors.New("must not be called")}, context.Background())
+		require.Equal(t, http.StatusBadGateway, rec.Code)
+		require.JSONEq(t, `{"error":{"code":502,"message":"Upstream request failed","status":"INTERNAL"}}`, rec.Body.String())
+		require.Nil(t, env.usageRepo.lastLog)
+	})
+
+	t.Run("local request build error does not create failed usage", func(t *testing.T) {
+		env, rec := run(t, 81, 181, &service.Account{Name: "gemini-build", Type: service.AccountTypeAPIKey, Credentials: map[string]any{"api_key": "key", "base_url": "://invalid"}}, &openAIChatCompletionsHTTPUpstreamStub{err: errors.New("must not be called")}, context.Background())
+		require.Equal(t, http.StatusBadGateway, rec.Code)
+		require.Contains(t, rec.Body.String(), "invalid base_url")
+		require.NotContains(t, rec.Body.String(), "Upstream request failed")
+		require.Nil(t, env.usageRepo.lastLog)
+	})
+
+	t.Run("canceled response read does not create failed usage", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		upstream := directTerminalHTTPUpstream{response: &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: terminalReadErrorBody{cancel: cancel}}}
+		env, _ := run(t, 82, 182, &service.Account{Name: "gemini-cancel", Type: service.AccountTypeAPIKey, Credentials: map[string]any{"api_key": "key"}}, upstream, ctx)
+		require.ErrorIs(t, ctx.Err(), context.Canceled)
+		require.Nil(t, env.usageRepo.lastLog)
+	})
+
+	t.Run("transport response read error gets generic non-2xx and creates failed usage", func(t *testing.T) {
+		upstream := directTerminalHTTPUpstream{response: &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: terminalReadErrorBody{}}}
+		env, rec := run(t, 83, 183, &service.Account{Name: "gemini-transport", Type: service.AccountTypeAPIKey, Credentials: map[string]any{"api_key": "key"}}, upstream, context.Background())
+		require.Equal(t, http.StatusBadGateway, rec.Code)
+		require.JSONEq(t, `{"error":{"code":502,"message":"Upstream request failed","status":"INTERNAL"}}`, rec.Body.String())
+		require.NotNil(t, env.usageRepo.lastLog)
+	})
+
+	t.Run("zero-byte stream read error replaces stale SSE content type", func(t *testing.T) {
+		group := &service.Group{ID: 87, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
+		account := &service.Account{ID: 187, Name: "gemini-empty-stream", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "key"}}
+		upstream := directTerminalHTTPUpstream{response: &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: terminalReadErrorBody{}}}
+		env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash:streamGenerateContent", strings.NewReader(requestBody))
+		req.Header.Set("Content-Type", "application/json")
+		env.routerFor("/v1beta/models/*modelAction", env.handler.GeminiV1BetaModels).ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusBadGateway, rec.Code)
+		require.Contains(t, rec.Header().Get("Content-Type"), "application/json")
+		require.NotContains(t, rec.Header().Get("Content-Type"), "text/event-stream")
+		require.JSONEq(t, `{"error":{"code":502,"message":"Upstream request failed","status":"INTERNAL"}}`, rec.Body.String())
+		require.NotNil(t, env.usageRepo.lastLog)
+	})
+
+	t.Run("partial streaming response is not followed by generic error", func(t *testing.T) {
+		group := &service.Group{ID: 86, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
+		account := &service.Account{ID: 186, Name: "gemini-partial", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "key"}}
+		body := &terminalPartialReadErrorBody{data: []byte("data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"partial\"}]}}]}\n\n")}
+		upstream := directTerminalHTTPUpstream{response: &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: body}}
+		env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash:streamGenerateContent", strings.NewReader(requestBody))
+		req.Header.Set("Content-Type", "application/json")
+		env.routerFor("/v1beta/models/*modelAction", env.handler.GeminiV1BetaModels).ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Contains(t, rec.Header().Get("Content-Type"), "text/event-stream")
+		require.Contains(t, rec.Body.String(), "partial")
+		require.NotContains(t, rec.Body.String(), "Upstream request failed")
+		require.NotNil(t, env.usageRepo.lastLog)
+	})
+}
+
+func TestGatewayHandler_GeminiNativeAttemptSignalResetsAcrossAccounts(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 84, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
+	accountA := &service.Account{ID: 184, Name: "gemini-attempted", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "key"}}
+	accountB := &service.Account{ID: 185, Name: "gemini-local", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 2, Credentials: map[string]any{}}
+	upstream := &openAIRetryTrackingHTTPUpstreamStub{responses: []*http.Response{{
+		StatusCode: http.StatusUnauthorized,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"expired"}}`)),
+	}}}
+	env := newTerminalGatewayMessagesEnv(t, group, upstream, accountA, accountB)
+	env.handler.maxAccountSwitchesGemini = 1
+	var requestContext *gin.Context
+	router := env.routerFor("/v1beta/models/*modelAction", func(c *gin.Context) {
+		requestContext = c
+		env.handler.GeminiV1BetaModels(c)
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash:generateContent", strings.NewReader(`{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, []int64{accountA.ID}, upstream.accountIDs)
+	require.False(t, service.HasOpsUpstreamAttempted(requestContext))
+	require.Nil(t, env.usageRepo.lastLog)
+}
+
+func TestGatewayHandler_CompatibilityChatGeminiBranchUsageSemantics(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	requestBody := `{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"hello"}]}`
+
+	t.Run("local credential error does not create failed usage", func(t *testing.T) {
+		group := &service.Group{ID: 90, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
+		account := &service.Account{ID: 190, Name: "gemini-chat-local", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{}}
+		env := newTerminalGatewayMessagesEnv(t, group, &openAIChatCompletionsHTTPUpstreamStub{err: errors.New("must not be called")}, account)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(requestBody))
+		req.Header.Set("Content-Type", "application/json")
+		env.routerFor("/v1/chat/completions", env.handler.ChatCompletions).ServeHTTP(rec, req)
+
+		require.Nil(t, env.usageRepo.lastLog)
+	})
+
+	t.Run("transport response read error creates failed usage", func(t *testing.T) {
+		group := &service.Group{ID: 91, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
+		account := &service.Account{ID: 191, Name: "gemini-chat-transport", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "key"}}
+		upstream := directTerminalHTTPUpstream{response: &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: terminalReadErrorBody{}}}
+		env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(requestBody))
+		req.Header.Set("Content-Type", "application/json")
+		env.routerFor("/v1/chat/completions", env.handler.ChatCompletions).ServeHTTP(rec, req)
+
+		require.NotNil(t, env.usageRepo.lastLog)
+	})
+}

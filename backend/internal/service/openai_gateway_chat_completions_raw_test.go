@@ -87,6 +87,8 @@ func TestForwardAsRawChatCompletions_ForcesStreamUsageUpstreamAndPassesUsageDown
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
+	collector := &openAIUsageUpstreamRequestCollector{}
+	c.Set(UsageDetailCaptureContextKey, collector)
 
 	upstreamBody := strings.Join([]string{
 		`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","model":"gpt-5.4","choices":[{"index":0,"delta":{"content":"ok"}}]}`,
@@ -120,6 +122,10 @@ func TestForwardAsRawChatCompletions_ForcesStreamUsageUpstreamAndPassesUsageDown
 	require.True(t, gjson.GetBytes(upstream.lastBody, "stream_options.include_usage").Bool())
 	require.Contains(t, rec.Body.String(), `"usage"`)
 	require.Contains(t, rec.Body.String(), "data: [DONE]")
+	require.JSONEq(t, string(upstream.lastBody), collector.body)
+	require.True(t, gjson.Get(collector.body, "stream_options.include_usage").Bool())
+	require.JSONEq(t, collector.body, requireOpsPreviewString(t, c, "include_usage"))
+	require.True(t, HasOpsUpstreamAttempted(c))
 }
 
 func TestForwardAsRawChatCompletions_PreservesDeepSeekReasoningContentNonStreaming(t *testing.T) {
@@ -284,6 +290,7 @@ func TestForwardAsRawChatCompletions_SilentRefusalTriggersFailover(t *testing.T)
 	var failoverErr *UpstreamFailoverError
 	require.True(t, errors.As(err, &failoverErr))
 	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
+	require.Equal(t, "rid_silent", failoverErr.ResponseHeaders.Get("x-request-id"))
 	require.True(t, IsOpenAISilentRefusalErrorBody(failoverErr.ResponseBody))
 	require.False(t, c.Writer.Written(), "silent refusal must not commit a 200 response before failover")
 	require.Empty(t, rec.Body.String())

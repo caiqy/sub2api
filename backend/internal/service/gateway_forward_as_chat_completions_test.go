@@ -143,6 +143,8 @@ func TestGatewayService_ForwardAsChatCompletions_PassthroughBodyMapCopiesFromOri
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	collector := &openAIUsageUpstreamRequestCollector{}
+	c.Set(UsageDetailCaptureContextKey, collector)
 
 	// Original Chat Completions body with an OpenAI-specific "user" field.
 	ccBody := []byte(`{
@@ -151,7 +153,7 @@ func TestGatewayService_ForwardAsChatCompletions_PassthroughBodyMapCopiesFromOri
 		"user": "cc-user-42"
 	}`)
 
-	parsed := &ParsedRequest{Body: ccBody, Model: "claude-sonnet-4-20250514", Stream: false}
+	parsed := &ParsedRequest{Body: NewRequestBodyRef(ccBody), Model: "claude-sonnet-4-20250514", Stream: false}
 
 	upstreamSSE := strings.Join([]string{
 		`event: message_start`,
@@ -229,6 +231,10 @@ func TestGatewayService_ForwardAsChatCompletions_PassthroughBodyMapCopiesFromOri
 
 	// Auth header should be replaced.
 	require.Equal(t, "upstream-key-cc", getHeaderRaw(upstream.lastReq.Header, "x-api-key"))
+	require.JSONEq(t, string(upstream.lastBody), collector.body)
+	require.Equal(t, "cc-user-42", gjson.Get(collector.body, "metadata.end_user").String())
+	require.JSONEq(t, collector.body, requireOpsPreviewString(t, c, "cc-user-42"))
+	require.True(t, HasOpsUpstreamAttempted(c))
 }
 
 // TestGatewayService_ForwardAsChatCompletions_PassthroughDisabledLeavesRulesInactive
@@ -246,7 +252,7 @@ func TestGatewayService_ForwardAsChatCompletions_PassthroughDisabledLeavesRulesI
 		"user": "should-not-appear"
 	}`)
 
-	parsed := &ParsedRequest{Body: ccBody, Model: "claude-sonnet-4-20250514", Stream: false}
+	parsed := &ParsedRequest{Body: NewRequestBodyRef(ccBody), Model: "claude-sonnet-4-20250514", Stream: false}
 
 	upstreamSSE := strings.Join([]string{
 		`event: message_start`,
@@ -340,7 +346,7 @@ func TestGatewayService_ForwardAsChatCompletions_PassthroughBodyForwardCopiesFro
 		"user": "cc-forward-user-99"
 	}`)
 
-	parsed := &ParsedRequest{Body: ccBody, Model: "claude-sonnet-4-20250514", Stream: false}
+	parsed := &ParsedRequest{Body: NewRequestBodyRef(ccBody), Model: "claude-sonnet-4-20250514", Stream: false}
 
 	upstreamSSE := strings.Join([]string{
 		`event: message_start`,
@@ -425,7 +431,7 @@ func TestGatewayService_ForwardAsChatCompletions_PassthroughHeaderForwardCopiesF
 		"messages": [{"role": "user", "content": "hello"}]
 	}`)
 
-	parsed := &ParsedRequest{Body: ccBody, Model: "claude-sonnet-4-20250514", Stream: false}
+	parsed := &ParsedRequest{Body: NewRequestBodyRef(ccBody), Model: "claude-sonnet-4-20250514", Stream: false}
 
 	upstreamSSE := strings.Join([]string{
 		`event: message_start`,

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -243,7 +244,7 @@ func TestOpenAIGatewayHandler_MessagesUpstreamErrorStillCreatesUsageLog(t *testi
 	require.NotNil(t, log.ReasoningEffort)
 	require.Equal(t, "high", *log.ReasoningEffort)
 	require.NotNil(t, log.DetailSnapshot)
-	require.JSONEq(t, reqBody, log.DetailSnapshot.RequestBody)
+	requireRequestPreviewSnapshot(t, log.DetailSnapshot.RequestBody, reqBody)
 	require.Contains(t, log.DetailSnapshot.ResponseBody, "messages upstream rejected payload")
 	require.Contains(t, log.DetailSnapshot.UpstreamRequestHeaders, "Authorization: Bearer sk-test")
 }
@@ -379,11 +380,11 @@ func TestOpenAIGatewayHandler_ImagesForwardFailedUsageLogCreated(t *testing.T) {
 	require.NotNil(t, log, "failed usage log should be created for non-failover image errors")
 	require.NotNil(t, log.DurationMs)
 	require.NotNil(t, log.DetailSnapshot)
-	require.JSONEq(t, reqBody, log.DetailSnapshot.RequestBody)
+	requireRequestPreviewSnapshot(t, log.DetailSnapshot.RequestBody, reqBody)
 	require.Contains(t, log.DetailSnapshot.UpstreamRequestHeaders, ":method: POST")
 	require.Contains(t, log.DetailSnapshot.UpstreamRequestHeaders, "/v1/images/generations")
 	require.Contains(t, log.DetailSnapshot.UpstreamRequestHeaders, "Authorization: Bearer sk-test")
-	require.JSONEq(t, reqBody, log.DetailSnapshot.UpstreamRequestBody)
+	require.JSONEq(t, reqBody, gjson.Get(log.DetailSnapshot.UpstreamRequestBody, "preview").String())
 	require.Contains(t, log.DetailSnapshot.ResponseBody, "images upstream rejected payload")
 	require.NotNil(t, log.InboundEndpoint)
 	require.Equal(t, "/v1/images/generations", *log.InboundEndpoint)
@@ -436,16 +437,17 @@ func TestOpenAIGatewayHandler_ImagesEditMultipartForwardFailedUsageLogUsesMetada
 	require.NotNil(t, log.DetailSnapshot)
 	require.NotContains(t, log.DetailSnapshot.RequestBody, "raw-source-image-bytes")
 	require.NotContains(t, log.DetailSnapshot.RequestBody, "raw-mask-bytes")
-	require.Equal(t, "gpt-image-2", gjson.Get(log.DetailSnapshot.RequestBody, "model").String())
-	require.Equal(t, "replace background", gjson.Get(log.DetailSnapshot.RequestBody, "prompt").String())
-	require.Equal(t, "1536x1024", gjson.Get(log.DetailSnapshot.RequestBody, "size").String())
-	require.Equal(t, "high", gjson.Get(log.DetailSnapshot.RequestBody, "quality").String())
-	require.Equal(t, "transparent", gjson.Get(log.DetailSnapshot.RequestBody, "background").String())
-	require.Equal(t, "webp", gjson.Get(log.DetailSnapshot.RequestBody, "output_format").String())
-	require.Equal(t, "low", gjson.Get(log.DetailSnapshot.RequestBody, "moderation").String())
-	require.Equal(t, int64(2), gjson.Get(log.DetailSnapshot.RequestBody, "n").Int())
-	require.True(t, gjson.Get(log.DetailSnapshot.RequestBody, "had_source_image").Bool())
-	require.True(t, gjson.Get(log.DetailSnapshot.RequestBody, "had_mask").Bool())
+	requestMetadata := gjson.Get(log.DetailSnapshot.RequestBody, "preview").String()
+	require.Equal(t, "gpt-image-2", gjson.Get(requestMetadata, "model").String())
+	require.Empty(t, gjson.Get(requestMetadata, "prompt").String())
+	require.Equal(t, "1536x1024", gjson.Get(requestMetadata, "size").String())
+	require.Equal(t, "high", gjson.Get(requestMetadata, "quality").String())
+	require.Equal(t, "transparent", gjson.Get(requestMetadata, "background").String())
+	require.Equal(t, "webp", gjson.Get(requestMetadata, "output_format").String())
+	require.Equal(t, "low", gjson.Get(requestMetadata, "moderation").String())
+	require.Equal(t, int64(2), gjson.Get(requestMetadata, "n").Int())
+	require.True(t, gjson.Get(requestMetadata, "had_source_image").Bool())
+	require.True(t, gjson.Get(requestMetadata, "had_mask").Bool())
 	require.Contains(t, log.DetailSnapshot.ResponseBody, "images edit upstream rejected payload")
 }
 
@@ -552,7 +554,7 @@ func TestOpenAIGatewayHandler_ImagesOAuthForwardFailedUsagePreservesUpstreamSnap
 	log := waitForOpenAIFailedUsageLog(t, usageRepo)
 	require.NotNil(t, log)
 	require.NotNil(t, log.DetailSnapshot)
-	require.JSONEq(t, reqBody, log.DetailSnapshot.RequestBody)
+	requireRequestPreviewSnapshot(t, log.DetailSnapshot.RequestBody, reqBody)
 	require.Contains(t, log.DetailSnapshot.ResponseHeaders, ":status: 400")
 	require.NotContains(t, log.DetailSnapshot.ResponseHeaders, ":status: 502")
 	require.Contains(t, log.DetailSnapshot.ResponseHeaders, "Content-Type: application/json")
@@ -673,7 +675,7 @@ func TestOpenAIGatewayHandler_ImagesFailoverExhaustedFailedUsageLogCreated(t *te
 	require.NotNil(t, log, "failed usage log should be created when image failover is exhausted")
 	require.NotNil(t, log.DurationMs)
 	require.NotNil(t, log.DetailSnapshot)
-	require.JSONEq(t, reqBody, log.DetailSnapshot.RequestBody)
+	requireRequestPreviewSnapshot(t, log.DetailSnapshot.RequestBody, reqBody)
 	require.Contains(t, log.DetailSnapshot.ResponseHeaders, ":status: 429")
 	require.Contains(t, log.DetailSnapshot.ResponseHeaders, "Content-Type: application/json")
 	require.Contains(t, log.DetailSnapshot.ResponseHeaders, "X-Request-Id: req_image_failover_123")
@@ -982,7 +984,7 @@ func TestOpenAIGatewayHandler_UpstreamErrorStillCreatesUsageLog(t *testing.T) {
 	require.NotNil(t, usageRepo.lastLog.ReasoningEffort)
 	require.Equal(t, "high", *usageRepo.lastLog.ReasoningEffort)
 	require.NotNil(t, usageRepo.lastLog.DetailSnapshot)
-	require.JSONEq(t, reqBody, usageRepo.lastLog.DetailSnapshot.RequestBody)
+	requireRequestPreviewSnapshot(t, usageRepo.lastLog.DetailSnapshot.RequestBody, reqBody)
 	require.Contains(t, usageRepo.lastLog.DetailSnapshot.ResponseBody, "upstream rejected payload")
 	require.Contains(t, usageRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "Authorization: Bearer sk-test")
 }
@@ -1085,7 +1087,7 @@ func TestOpenAIGatewayHandler_ChatCompletionsUpstreamErrorStillCreatesUsageLog(t
 	require.Equal(t, 0.0, usageRepo.lastLog.TotalCost)
 	require.Equal(t, 0.0, usageRepo.lastLog.ActualCost)
 	require.NotNil(t, usageRepo.lastLog.DetailSnapshot)
-	require.JSONEq(t, reqBody, usageRepo.lastLog.DetailSnapshot.RequestBody)
+	requireRequestPreviewSnapshot(t, usageRepo.lastLog.DetailSnapshot.RequestBody, reqBody)
 	require.Contains(t, usageRepo.lastLog.DetailSnapshot.ResponseBody, "chat upstream rejected payload")
 	require.Contains(t, usageRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "Authorization: Bearer sk-test")
 }
@@ -1305,6 +1307,276 @@ func TestOpenAIGatewayHandler_FailoverExhaustedStillCreatesUsageLog(t *testing.T
 	require.Contains(t, usageRepo.lastLog.DetailSnapshot.ResponseHeaders, "X-Request-Id: req_failover_123")
 	require.Contains(t, usageRepo.lastLog.DetailSnapshot.ResponseBody, `"openai_rate_limited_raw"`)
 	require.Contains(t, usageRepo.lastLog.DetailSnapshot.ResponseBody, "openai raw failover")
+}
+
+func TestOpenAIGatewayHandler_ResponsesSelectionExhaustedUsesAttemptBodyReasoningEffort(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cfg := &config.Config{
+		RunMode: config.RunModeSimple,
+		Default: config.DefaultConfig{RateMultiplier: 1},
+		Gateway: config.GatewayConfig{
+			MaxAccountSwitches: 1,
+			Scheduling:         config.GatewaySchedulingConfig{LoadBatchEnabled: false},
+		},
+		Concurrency: config.ConcurrencyConfig{PingInterval: 0},
+	}
+
+	groupID := int64(1)
+	group := &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{
+		ID:          11,
+		Name:        "openai-test-account",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeAPIKey,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    1,
+		Credentials: map[string]any{"api_key": "sk-test"},
+	}
+	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
+	httpUpstream := &openAIChatCompletionsHTTPUpstreamStub{
+		response: &http.Response{
+			StatusCode: http.StatusTooManyRequests,
+			Header:     http.Header{"Content-Type": []string{"application/json"}, "X-Request-Id": []string{"req_responses_attempt_effort_123"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"rate_limit_error","code":"openai_rate_limited_raw","message":"openai raw failover"}}`)),
+		},
+	}
+	accountRepo := &openAIChatCompletionsAccountRepoStub{account: account}
+	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg)
+	deferredService := service.NewDeferredService(accountRepo, nil, 0)
+	billingService := service.NewBillingService(cfg, nil)
+	t.Cleanup(func() { billingCacheService.Stop() })
+	channelService := service.NewChannelService(openAIFailedUsageChannelRepoStub{
+		channel: service.Channel{
+			ID:       21,
+			Status:   service.StatusActive,
+			GroupIDs: []int64{groupID},
+			ModelMapping: map[string]map[string]string{
+				service.PlatformOpenAI: {"gpt-5.4": "gpt-5.4-high"},
+			},
+		},
+		groupPlatforms: map[int64]string{groupID: service.PlatformOpenAI},
+	}, nil, nil, nil)
+
+	gatewayService := service.NewOpenAIGatewayService(
+		accountRepo,
+		usageRepo,
+		nil,
+		nil,
+		nil,
+		nil,
+		openAIChatCompletionsGatewayCacheStub{},
+		cfg,
+		nil,
+		concurrencyService,
+		billingService,
+		nil,
+		billingCacheService,
+		httpUpstream,
+		deferredService,
+		nil,
+		nil,
+		channelService,
+		nil,
+	)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg)
+
+	apiKey := &service.APIKey{ID: 101, UserID: 202, Status: service.StatusActive, GroupID: &groupID, User: &service.User{ID: 202, Status: service.StatusActive, Concurrency: 1}, Group: group}
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.UserID, Concurrency: apiKey.User.Concurrency})
+		c.Next()
+	})
+	router.Use(middleware.UsageDetailCapture())
+	router.POST("/v1/responses", h.Responses)
+
+	reqBody := `{"model":"gpt-5.4","stream":false,"input":"hello"}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusTooManyRequests, rec.Code)
+	log := waitForOpenAIFailedUsageLog(t, usageRepo)
+	require.NotNil(t, log)
+	require.NotNil(t, log.ReasoningEffort)
+	require.Equal(t, "high", *log.ReasoningEffort)
+}
+
+func TestOpenAIGatewayHandler_Responses429FastStopCreatesUsageLog(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cfg := &config.Config{
+		RunMode: config.RunModeSimple,
+		Default: config.DefaultConfig{RateMultiplier: 1},
+		Gateway: config.GatewayConfig{
+			MaxAccountSwitches: 3,
+			Scheduling:         config.GatewaySchedulingConfig{LoadBatchEnabled: false},
+		},
+		Concurrency: config.ConcurrencyConfig{PingInterval: 0},
+	}
+
+	groupID := int64(1)
+	group := &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{
+		ID:          11,
+		Name:        "openai-oauth-test-account",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeOAuth,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    1,
+		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "acct_test"},
+		Extra:       map[string]any{"openai_device_id": "device_test", "openai_session_id": "session_test"},
+	}
+	usageRepo := &openAIChatCompletionsUsageLogRepoStub{}
+	httpUpstream := &openAIChatCompletionsHTTPUpstreamStub{response: &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Header:     http.Header{"Content-Type": []string{"application/json"}, "X-Request-Id": []string{"req_responses_fast_stop_429"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"rate_limit_error","code":"fast_stop_429","message":"openai oauth fast stop"}}`)),
+	}}
+	accountRepo := &openAIChatCompletionsAccountRepoStub{account: account}
+	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg)
+	deferredService := service.NewDeferredService(accountRepo, nil, 0)
+	billingService := service.NewBillingService(cfg, nil)
+	t.Cleanup(func() { billingCacheService.Stop() })
+	channelService := service.NewChannelService(openAIFailedUsageChannelRepoStub{
+		channel: service.Channel{
+			ID:       21,
+			Status:   service.StatusActive,
+			GroupIDs: []int64{groupID},
+			ModelMapping: map[string]map[string]string{
+				service.PlatformOpenAI: {"gpt-5.4": "gpt-5.4-high"},
+			},
+		},
+		groupPlatforms: map[int64]string{groupID: service.PlatformOpenAI},
+	}, nil, nil, nil)
+
+	gatewayService := service.NewOpenAIGatewayService(
+		accountRepo,
+		usageRepo,
+		nil,
+		nil,
+		nil,
+		nil,
+		openAIChatCompletionsGatewayCacheStub{},
+		cfg,
+		nil,
+		concurrencyService,
+		billingService,
+		nil,
+		billingCacheService,
+		httpUpstream,
+		deferredService,
+		nil,
+		nil,
+		channelService,
+		nil,
+	)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg)
+
+	apiKey := &service.APIKey{ID: 101, UserID: 202, Status: service.StatusActive, GroupID: &groupID, User: &service.User{ID: 202, Status: service.StatusActive, Concurrency: 1}, Group: group}
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.UserID, Concurrency: apiKey.User.Concurrency})
+		c.Next()
+	})
+	router.Use(middleware.UsageDetailCapture())
+	router.POST("/v1/responses", h.Responses)
+
+	for range 20 {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.4","stream":false,"input":"warm storm"}`))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(rec, req)
+		gatewayService.ClearAccountSchedulingBlock(account.ID)
+	}
+	usageRepo.created = make(chan *service.UsageLog, 1)
+	usageRepo.lastLog = nil
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.4","stream":false,"input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusTooManyRequests, rec.Code)
+	log := waitForOpenAIFailedUsageLog(t, usageRepo)
+	require.NotNil(t, log, "failed usage log should be created when OAuth 429 failover fast-stops")
+	require.NotNil(t, log.ReasoningEffort)
+	require.Equal(t, "high", *log.ReasoningEffort)
+	require.NotNil(t, log.DetailSnapshot)
+	require.Contains(t, log.DetailSnapshot.ResponseBody, "fast_stop_429")
+}
+
+type openAIFailedUsageChannelRepoStub struct {
+	service.ChannelRepository
+
+	channel        service.Channel
+	groupPlatforms map[int64]string
+}
+
+func (s openAIFailedUsageChannelRepoStub) Create(context.Context, *service.Channel) error {
+	panic("unused")
+}
+func (s openAIFailedUsageChannelRepoStub) GetByID(context.Context, int64) (*service.Channel, error) {
+	panic("unused")
+}
+func (s openAIFailedUsageChannelRepoStub) Update(context.Context, *service.Channel) error {
+	panic("unused")
+}
+func (s openAIFailedUsageChannelRepoStub) Delete(context.Context, int64) error { panic("unused") }
+func (s openAIFailedUsageChannelRepoStub) List(context.Context, pagination.PaginationParams, string, string) ([]service.Channel, *pagination.PaginationResult, error) {
+	panic("unused")
+}
+func (s openAIFailedUsageChannelRepoStub) ListAll(context.Context) ([]service.Channel, error) {
+	return []service.Channel{s.channel}, nil
+}
+func (s openAIFailedUsageChannelRepoStub) ExistsByName(context.Context, string) (bool, error) {
+	panic("unused")
+}
+func (s openAIFailedUsageChannelRepoStub) ExistsByNameExcluding(context.Context, string, int64) (bool, error) {
+	panic("unused")
+}
+func (s openAIFailedUsageChannelRepoStub) GetGroupIDs(context.Context, int64) ([]int64, error) {
+	panic("unused")
+}
+func (s openAIFailedUsageChannelRepoStub) SetGroupIDs(context.Context, int64, []int64) error {
+	panic("unused")
+}
+func (s openAIFailedUsageChannelRepoStub) GetChannelIDByGroupID(context.Context, int64) (int64, error) {
+	panic("unused")
+}
+func (s openAIFailedUsageChannelRepoStub) GetGroupsInOtherChannels(context.Context, int64, []int64) ([]int64, error) {
+	panic("unused")
+}
+func (s openAIFailedUsageChannelRepoStub) GetGroupPlatforms(_ context.Context, groupIDs []int64) (map[int64]string, error) {
+	out := make(map[int64]string, len(groupIDs))
+	for _, id := range groupIDs {
+		out[id] = s.groupPlatforms[id]
+	}
+	return out, nil
+}
+func (s openAIFailedUsageChannelRepoStub) ListModelPricing(context.Context, int64) ([]service.ChannelModelPricing, error) {
+	panic("unused")
+}
+func (s openAIFailedUsageChannelRepoStub) CreateModelPricing(context.Context, *service.ChannelModelPricing) error {
+	panic("unused")
+}
+func (s openAIFailedUsageChannelRepoStub) UpdateModelPricing(context.Context, *service.ChannelModelPricing) error {
+	panic("unused")
+}
+func (s openAIFailedUsageChannelRepoStub) DeleteModelPricing(context.Context, int64) error {
+	panic("unused")
+}
+func (s openAIFailedUsageChannelRepoStub) ReplaceModelPricing(context.Context, int64, []service.ChannelModelPricing) error {
+	panic("unused")
 }
 
 func TestOpenAIGatewayHandler_ChatCompletionsFailoverExhaustedStillCreatesUsageLog(t *testing.T) {

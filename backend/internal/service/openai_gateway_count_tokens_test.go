@@ -45,6 +45,8 @@ func TestOpenAIGatewayService_ForwardCountTokensAsAnthropic_APIKeyUsesResponsesI
 	body := []byte(`{"model":"claude-sonnet-4-5","system":"You are helpful.","messages":[{"role":"user","content":"hello"}],"tools":[{"name":"lookup","input_schema":{"type":"object"}}]}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
+	collector := &openAIUsageUpstreamRequestCollector{}
+	c.Set(UsageDetailCaptureContextKey, collector)
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
@@ -83,6 +85,10 @@ func TestOpenAIGatewayService_ForwardCountTokensAsAnthropic_APIKeyUsesResponsesI
 	require.Equal(t, "gpt-5.3-codex", gjson.GetBytes(upstream.lastBody, "model").String())
 	require.True(t, gjson.GetBytes(upstream.lastBody, "input").Exists())
 	require.False(t, gjson.GetBytes(upstream.lastBody, "messages").Exists())
+	require.JSONEq(t, string(upstream.lastBody), collector.body)
+	require.Equal(t, "gpt-5.3-codex", gjson.Get(collector.body, "model").String())
+	require.JSONEq(t, collector.body, requireOpsPreviewString(t, c, "gpt-5.3-codex"))
+	require.True(t, HasOpsUpstreamAttempted(c))
 }
 
 func TestOpenAIGatewayService_ForwardCountTokensAsAnthropic_OAuthFallsBackWhenPlatformEndpointUnsupported(t *testing.T) {

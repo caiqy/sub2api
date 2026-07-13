@@ -60,6 +60,7 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return
 	}
+	service.SetUsageRequestBody(c, openAIRequestBodyPreviewSnapshot(body))
 
 	bodyRef := service.NewRequestBodyRef(body)
 	parsedReq, err := service.ParseGatewayRequest(bodyRef, domain.PlatformAnthropic)

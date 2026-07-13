@@ -42,6 +42,10 @@ func deriveOpenAIContentSessionSeed(body []byte) string {
 		_, _ = b.WriteString("|instructions=")
 		_, _ = b.WriteString(instr)
 	}
+	if prompt := gjson.GetBytes(body, "prompt").String(); prompt != "" {
+		_, _ = b.WriteString("|prompt=")
+		_, _ = b.WriteString(prompt)
+	}
 
 	firstUserCaptured := false
 

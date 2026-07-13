@@ -1,0 +1,279 @@
+package handler
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"net/http"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
+	"github.com/Wei-Shaw/sub2api/internal/service"
+)
+
+// ponytail: package-local seam only; production uses the existing responses body settings.
+var jsonRequestBodyHandleOptions = openAIResponsesRequestBodyHandleOptions()
+
+const multipartUploadPartLimit = 20 << 20
+
+// ParseMultipartForm adds 10MB for non-file values; leave metadata room so a 20MB text part reaches the explicit limit.
+const multipartParseMemoryBudget = (10 << 20) + (1 << 20)
+
+type requestBodyCoordinator struct {
+	raw            *service.RequestBodyHandle
+	effective      *service.RequestBodyHandle
+	oauth          *service.RequestBodyHandle
+	form           *multipart.Form
+	multipartModel string
+}
+
+func newJSONRequestBody(req *http.Request) (*requestBodyCoordinator, error) {
+	reader, err := httputil.NewDecodedRequestBodyReader(req)
+	if err != nil {
+		return nil, err
+	}
+	if reader != nil {
+		defer func() { _ = reader.Close() }()
+	}
+
+	raw, err := service.NewRequestBodyHandleFromReader(reader, jsonRequestBodyHandleOptions)
+	if err != nil {
+		return nil, err
+	}
+	if req != nil {
+		req.Header.Del("Content-Encoding")
+		req.Header.Del("Content-Length")
+		req.ContentLength = raw.Size()
+	}
+	return &requestBodyCoordinator{raw: raw, effective: raw}, nil
+}
+
+func newMultipartRequestBody(req *http.Request, maxMemory int64) (*requestBodyCoordinator, error) {
+	if req == nil || req.Body == nil {
+		return nil, errors.New("multipart request body is required")
+	}
+	raw, err := service.NewRequestBodyHandleFromReader(req.Body, jsonRequestBodyHandleOptions)
+	if err != nil {
+		return nil, err
+	}
+	parse := func(memory int64) (*http.Request, error) {
+		reader, err := raw.Open()
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = reader.Close() }()
+
+		parsed := req.Clone(req.Context())
+		parsed.Body = reader
+		parsed.ContentLength = raw.Size()
+		if err := parsed.ParseMultipartForm(memory); err != nil {
+			return nil, err
+		}
+		return parsed, nil
+	}
+	parsed, err := parse(maxMemory)
+	if errors.Is(err, multipart.ErrMessageTooLarge) && maxMemory == 0 {
+		parsed, err = parse(multipartParseMemoryBudget)
+	}
+	if err != nil {
+		service.CleanupRequestBodyHandle(raw)
+		return nil, err
+	}
+	for _, files := range parsed.MultipartForm.File {
+		for _, file := range files {
+			if file.Size > multipartUploadPartLimit {
+				_ = parsed.MultipartForm.RemoveAll()
+				service.CleanupRequestBodyHandle(raw)
+				return nil, &http.MaxBytesError{Limit: multipartUploadPartLimit}
+			}
+		}
+	}
+	for _, values := range parsed.MultipartForm.Value {
+		for _, value := range values {
+			if len(value) > multipartUploadPartLimit {
+				_ = parsed.MultipartForm.RemoveAll()
+				service.CleanupRequestBodyHandle(raw)
+				return nil, &http.MaxBytesError{Limit: multipartUploadPartLimit}
+			}
+		}
+	}
+	return &requestBodyCoordinator{raw: raw, effective: raw, form: parsed.MultipartForm}, nil
+}
+
+func (c *requestBodyCoordinator) ReadRaw() ([]byte, error) {
+	if c == nil {
+		return nil, errors.New("request body coordinator is nil")
+	}
+	return c.raw.ReadAll()
+}
+
+func (c *requestBodyCoordinator) SetEffectiveBytes(body []byte) error {
+	if c.raw != nil && c.raw.Size() == int64(len(body)) {
+		sum := sha256.Sum256(body)
+		if c.raw.Hash() == hex.EncodeToString(sum[:]) {
+			c.setEffective(c.raw)
+			return nil
+		}
+	}
+	handle, err := service.NewRequestBodyHandleFromBytes(body, jsonRequestBodyHandleOptions)
+	if err != nil {
+		return err
+	}
+	c.setEffective(handle)
+	return nil
+}
+
+func (c *requestBodyCoordinator) SetEffectiveReader(reader io.Reader) error {
+	handle, err := service.NewRequestBodyHandleFromReader(reader, jsonRequestBodyHandleOptions)
+	if err != nil {
+		return err
+	}
+	c.setEffective(handle)
+	return nil
+}
+
+func (c *requestBodyCoordinator) SetEffectiveMultipart(write func(*multipart.Writer) error) (string, error) {
+	if c == nil || write == nil {
+		return "", errors.New("multipart writer is required")
+	}
+	reader, pipe := io.Pipe()
+	writer := multipart.NewWriter(pipe)
+	done := make(chan error, 1)
+	go func() {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				err, ok := recovered.(error)
+				if ok {
+					err = fmt.Errorf("multipart producer panic: %w", err)
+				} else {
+					err = fmt.Errorf("multipart producer panic: %v", recovered)
+				}
+				// Close first so the consumer cannot wait for the producer's result.
+				_ = pipe.CloseWithError(err)
+				done <- err
+			}
+		}()
+		if err := write(writer); err != nil {
+			_ = pipe.CloseWithError(err)
+			done <- err
+			return
+		}
+		if err := writer.Close(); err != nil {
+			_ = pipe.CloseWithError(err)
+			done <- err
+			return
+		}
+		done <- pipe.Close()
+	}()
+
+	err := c.SetEffectiveReader(reader)
+	_ = reader.Close()
+	producerErr := <-done
+	if err != nil {
+		return "", err
+	}
+	if producerErr != nil {
+		return "", producerErr
+	}
+	return writer.FormDataContentType(), nil
+}
+
+func (c *requestBodyCoordinator) setEffective(handle *service.RequestBodyHandle) {
+	if handle == c.raw {
+		if c.effective != nil && c.effective != c.raw {
+			service.CleanupRequestBodyHandle(c.effective)
+		}
+		c.effective = c.raw
+		return
+	}
+	if c.raw != nil && c.raw.Size() == handle.Size() && c.raw.Hash() == handle.Hash() {
+		service.CleanupRequestBodyHandle(handle)
+		handle = c.raw
+	}
+	if c.effective != nil && c.effective != c.raw && c.effective != handle {
+		service.CleanupRequestBodyHandle(c.effective)
+	}
+	c.effective = handle
+}
+
+func (c *requestBodyCoordinator) Effective() *service.RequestBodyHandle {
+	if c == nil {
+		return nil
+	}
+	return c.effective
+}
+
+func (c *requestBodyCoordinator) SetOAuthBytes(body []byte) error {
+	handle, err := service.NewRequestBodyHandleFromBytes(body, jsonRequestBodyHandleOptions)
+	if err != nil {
+		return err
+	}
+	if c.oauth != nil && c.oauth != handle {
+		service.CleanupRequestBodyHandle(c.oauth)
+	}
+	c.oauth = handle
+	return nil
+}
+
+func (c *requestBodyCoordinator) OAuth() *service.RequestBodyHandle {
+	if c == nil {
+		return nil
+	}
+	return c.oauth
+}
+
+func (c *requestBodyCoordinator) ReleaseMultipartValues() {
+	if c != nil && c.form != nil {
+		c.form.Value = nil
+	}
+}
+
+func (c *requestBodyCoordinator) CheckMultipartFiles() error {
+	if c == nil || c.form == nil {
+		return nil
+	}
+	for _, files := range c.form.File {
+		for _, file := range files {
+			source, err := file.Open()
+			if err != nil {
+				return fmt.Errorf("%w: open multipart source: %v", service.ErrRequestBodySpool, err)
+			}
+			_ = source.Close()
+		}
+	}
+	return nil
+}
+
+func uniqueRequestBodyHandles(handles ...*service.RequestBodyHandle) []*service.RequestBodyHandle {
+	unique := make([]*service.RequestBodyHandle, 0, len(handles))
+	for _, handle := range handles {
+		if handle == nil {
+			continue
+		}
+		alreadyIncluded := false
+		for _, previous := range unique {
+			if handle == previous {
+				alreadyIncluded = true
+				break
+			}
+		}
+		if !alreadyIncluded {
+			unique = append(unique, handle)
+		}
+	}
+	return unique
+}
+
+func (c *requestBodyCoordinator) Cleanup() {
+	if c == nil {
+		return
+	}
+	if c.form != nil {
+		_ = c.form.RemoveAll()
+	}
+	for _, handle := range uniqueRequestBodyHandles(c.raw, c.effective, c.oauth) {
+		service.CleanupRequestBodyHandle(handle)
+	}
+}

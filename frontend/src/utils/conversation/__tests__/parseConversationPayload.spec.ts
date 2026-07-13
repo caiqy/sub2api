@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { formatConversationAsText, formatRawValue, parseJsonValue, summarizeText } from '../format'
-import { parseConversationPayload } from '../parseConversationPayload'
+import { parseConversationPayload, REQUEST_BODY_PREVIEW_SNAPSHOT_KIND } from '../parseConversationPayload'
 import { getToolDisplayName, getToolLabel } from '../toolDisplay'
 import type { ConversationPart, ConversationToolPart } from '../types'
 
@@ -101,6 +101,75 @@ describe('conversation format helpers', () => {
 })
 
 describe('parseConversationPayload', () => {
+  it('does not unwrap ordinary request bodies that include preview metadata', () => {
+    const flow = parseConversationPayload({
+      requestBody: JSON.stringify({
+        preview: JSON.stringify({
+          messages: [{ role: 'user', content: 'Wrong preview message' }],
+        }),
+        truncated: false,
+        size: 64,
+        messages: [{ role: 'user', content: 'Original message' }],
+      }),
+      responseBody: null,
+    })
+
+    expect(flow.format).toBe('openai-chat')
+    expect(flow.messages?.[0].parts).toMatchObject([{ type: 'text', text: 'Original message' }])
+  })
+
+  it('unwraps preview snapshot request bodies before detecting conversation format', () => {
+    const flow = parseConversationPayload({
+      requestBody: JSON.stringify({
+        kind: REQUEST_BODY_PREVIEW_SNAPSHOT_KIND,
+        preview: JSON.stringify({
+          messages: [{ role: 'user', content: 'Hello from preview' }],
+        }),
+        truncated: false,
+        size: 64,
+        future_field: 'allowed',
+      }),
+      responseBody: null,
+    })
+
+    expect(flow.format).toBe('openai-chat')
+    expect(flow.messages?.[0].parts).toMatchObject([{ type: 'text', text: 'Hello from preview' }])
+  })
+
+  it('does not unwrap preview bodies with the wrong kind', () => {
+    const flow = parseConversationPayload({
+      requestBody: JSON.stringify({
+        kind: 'response_body_preview',
+        preview: JSON.stringify({
+          messages: [{ role: 'user', content: 'Wrong kind preview' }],
+        }),
+        truncated: false,
+        size: 64,
+        messages: [{ role: 'user', content: 'Original wrong-kind body' }],
+      }),
+      responseBody: null,
+    })
+
+    expect(flow.format).toBe('openai-chat')
+    expect(flow.messages?.[0].parts).toMatchObject([{ type: 'text', text: 'Original wrong-kind body' }])
+  })
+
+  it('keeps backward compatibility for legacy preview snapshot bodies without kind', () => {
+    const flow = parseConversationPayload({
+      requestBody: JSON.stringify({
+        preview: JSON.stringify({
+          messages: [{ role: 'user', content: 'Legacy preview' }],
+        }),
+        truncated: false,
+        size: 64,
+      }),
+      responseBody: null,
+    })
+
+    expect(flow.format).toBe('openai-chat')
+    expect(flow.messages?.[0].parts).toMatchObject([{ type: 'text', text: 'Legacy preview' }])
+  })
+
   it('splits user EXTREMELY_IMPORTANT block into injection part and trailing text', () => {
     const input = {
       requestBody: JSON.stringify({

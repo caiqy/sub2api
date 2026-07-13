@@ -1,4 +1,5 @@
 import type { OpsErrorDetail } from '@/api/admin/ops'
+import { unwrapPreviewSnapshotBody } from '@/utils/conversation/parseConversationPayload'
 
 const GENERIC_UPSTREAM_MESSAGES = new Set([
   'upstream request failed',
@@ -31,6 +32,12 @@ function parseGatewayErrorBody(raw: string): ParsedGatewayError | null {
   }
 }
 
+function normalizePreviewPayload(raw: unknown): string {
+  const text = String(raw || '').trim()
+  if (!text) return ''
+  return String(unwrapPreviewSnapshotBody(text) || '').trim()
+}
+
 function isGenericGatewayUpstreamError(raw: string): boolean {
   const parsed = parseGatewayErrorBody(raw)
   if (!parsed) return false
@@ -50,7 +57,7 @@ export function resolveUpstreamPayload(
   ]
 
   for (const candidate of candidates) {
-    const payload = String(candidate || '').trim()
+    const payload = normalizePreviewPayload(candidate)
     if (!payload) continue
 
     // Normalize common "empty but present" JSON placeholders.
@@ -71,7 +78,7 @@ export function resolvePrimaryResponseBody(
   if (!detail) return ''
 
   const upstreamPayload = resolveUpstreamPayload(detail)
-  const errorBody = String(detail.error_body || '').trim()
+  const errorBody = normalizePreviewPayload(detail.error_body)
 
   if (errorType === 'upstream') {
     return upstreamPayload || errorBody

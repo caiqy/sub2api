@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent, onMounted, onUnmounted } from 'vue'
 
 import UsageDetailModal from '../UsageDetailModal.vue'
+import { REQUEST_BODY_PREVIEW_SNAPSHOT_KIND } from '@/utils/conversation/parseConversationPayload'
 
 const messages: Record<string, string> = {
   'common.copy': 'Copy',
@@ -313,6 +314,69 @@ x-upstream-trace-id: trace-upstream`)
     expect(wrapper.text()).not.toContain('call_1')
   })
 
+  it('unwraps preview snapshot bodies in request body tabs and copy', async () => {
+    const wrapper = mount(UsageDetailModal, {
+      props: {
+        show: true,
+        usageLog: {
+          request_id: 'req-preview-wrap',
+          user: { email: 'preview@example.com' },
+          model: 'gpt-4.1',
+          created_at: '2026-03-20T10:00:00Z',
+        },
+        detail: {
+          usage_log_id: 15,
+          request_headers: null,
+          request_body: JSON.stringify({
+            kind: REQUEST_BODY_PREVIEW_SNAPSHOT_KIND,
+            preview: JSON.stringify({ foo: 1 }),
+            truncated: false,
+            size: 9,
+            future_field: 'allowed',
+          }),
+          upstream_request_headers: null,
+          upstream_request_body: JSON.stringify({
+            kind: REQUEST_BODY_PREVIEW_SNAPSHOT_KIND,
+            preview: JSON.stringify({ bar: 2 }),
+            truncated: false,
+            size: 9,
+            future_field: 'allowed',
+          }),
+          upstream_response_headers: null,
+          upstream_response_body: null,
+          response_headers: null,
+          response_body: null,
+          created_at: '2026-03-20T10:00:00Z',
+        },
+        loading: false,
+        error: '',
+      },
+      global: {
+        stubs: {
+          BaseDialog: {
+            props: ['show', 'title'],
+            template: '<div v-if="show"><slot /></div>',
+          },
+        },
+      },
+    })
+
+    await wrapper.find('[data-test="tab-client-request-body"]').trigger('click')
+    expect(wrapper.text()).toContain(`{
+  "foo": 1
+}`)
+
+    await wrapper.find('[data-test="copy-current-tab"]').trigger('click')
+    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(`{
+  "foo": 1
+}`)
+
+    await wrapper.find('[data-test="tab-upstream-request-body"]').trigger('click')
+    expect(wrapper.text()).toContain(`{
+  "bar": 2
+}`)
+  })
+
   it('在非安全上下文复制当前详情标签页时使用 fallback', async () => {
     Object.defineProperty(window, 'isSecureContext', { value: false, writable: true })
     const execCommand = vi.fn().mockReturnValue(true)
@@ -448,6 +512,51 @@ x-upstream-trace-id: trace-upstream`)
     expect(wrapper.text()).toContain('draw a neon fox')
     expect(wrapper.text()).toContain('Raw Response JSON')
     expect(wrapper.text()).toContain('"b64_json": "QUJD"')
+  })
+
+  it('infers response image mime type from preview snapshot request body', async () => {
+    const wrapper = mount(UsageDetailModal, {
+      props: {
+        show: true,
+        usageLog: {
+          request_id: 'req-image-preview-snapshot',
+          user: { email: 'image@example.com' },
+          model: 'gpt-image-2',
+          created_at: '2026-03-20T10:00:00Z',
+        },
+        detail: {
+          usage_log_id: 14,
+          request_headers: null,
+          request_body: JSON.stringify({
+            kind: REQUEST_BODY_PREVIEW_SNAPSHOT_KIND,
+            preview: JSON.stringify({ model: 'gpt-image-2', output_format: 'webp' }),
+            truncated: false,
+            size: 48,
+          }),
+          upstream_request_headers: null,
+          upstream_request_body: null,
+          upstream_response_headers: null,
+          upstream_response_body: null,
+          response_headers: ':status: 200\nContent-Type: application/json',
+          response_body: '{"created":1776989094,"data":[{"b64_json":"U05BUA=="}]}',
+          created_at: '2026-03-20T10:00:00Z',
+        },
+        loading: false,
+        error: '',
+      },
+      global: {
+        stubs: {
+          BaseDialog: {
+            props: ['show', 'title'],
+            template: '<div v-if="show"><slot /></div>',
+          },
+        },
+      },
+    })
+
+    await wrapper.find('[data-test="tab-response-body"]').trigger('click')
+
+    expect(wrapper.get('[data-testid="usage-detail-image-preview-0"]').attributes('src')).toBe('data:image/webp;base64,U05BUA==')
   })
 
   it('opens the shared fullscreen gallery preview and exposes download', async () => {

@@ -58,23 +58,55 @@ type jsonRange struct {
 }
 
 type RequestBodyRef struct {
-	data []byte
+	data   []byte
+	handle *RequestBodyHandle
 }
 
 func NewRequestBodyRef(data []byte) *RequestBodyRef {
 	return &RequestBodyRef{data: data}
 }
 
+// NewRequestBodyRefFromHandle borrows a request-scoped handle; its owner cleans it up.
+func NewRequestBodyRefFromHandle(handle *RequestBodyHandle) *RequestBodyRef {
+	return &RequestBodyRef{handle: handle}
+}
+
+// ReadAll materializes a borrowed handle only for synchronous parsing or rewriting.
+func (b *RequestBodyRef) ReadAll() ([]byte, error) {
+	if b == nil {
+		return nil, fmt.Errorf("request body is nil")
+	}
+	if b.handle != nil {
+		return b.handle.ReadAll()
+	}
+	return b.data, nil
+}
+
+// Bytes preserves legacy synchronous parsers. Forwarding paths must use ReadAll.
 func (b *RequestBodyRef) Bytes() []byte {
 	if b == nil {
 		return nil
 	}
+	if b.handle != nil {
+		data, _ := b.handle.ReadAll()
+		return data
+	}
 	return b.data
+}
+
+func (b *RequestBodyRef) Handle() *RequestBodyHandle {
+	if b == nil {
+		return nil
+	}
+	return b.handle
 }
 
 func (b *RequestBodyRef) Len() int {
 	if b == nil {
 		return 0
+	}
+	if b.handle != nil {
+		return int(b.handle.Size())
 	}
 	return len(b.data)
 }
@@ -84,6 +116,7 @@ func (b *RequestBodyRef) Replace(data []byte) {
 		return
 	}
 	b.data = data
+	b.handle = nil
 }
 
 func missingJSONRange() jsonRange {
@@ -166,7 +199,10 @@ func parseGatewayRequestCurrentBody(parsed *ParsedRequest, protocol string) erro
 		return fmt.Errorf("empty request body")
 	}
 
-	bodyBytes := parsed.Body.Bytes()
+	bodyBytes, err := parsed.Body.ReadAll()
+	if err != nil {
+		return fmt.Errorf("read request body: %w", err)
+	}
 	if !gjson.ValidBytes(bodyBytes) {
 		return fmt.Errorf("invalid json")
 	}
@@ -310,7 +346,10 @@ func (p *ParsedRequest) raw(r jsonRange) []byte {
 	if p == nil || p.Body == nil || !r.exists() {
 		return nil
 	}
-	body := p.Body.Bytes()
+	body, err := p.Body.ReadAll()
+	if err != nil {
+		return nil
+	}
 	if r.end > len(body) {
 		return nil
 	}
@@ -357,8 +396,24 @@ func (p *ParsedRequest) SystemValue() (any, bool) {
 	return system, true
 }
 
-// CloneForBody 为单次账号尝试创建独立 body 视图，避免 failover 复用已改写的 ParsedRequest。
-func (p *ParsedRequest) CloneForBody(body []byte) (*ParsedRequest, error) {
+// CloneForHandle borrows a request-scoped handle for a single account attempt.
+func (p *ParsedRequest) CloneForHandle(handle *RequestBodyHandle) (*ParsedRequest, error) {
+	if p == nil {
+		return nil, fmt.Errorf("parse request: empty request")
+	}
+	if _, err := NewRequestBodyRefFromHandle(handle).ReadAll(); err != nil {
+		return nil, fmt.Errorf("read request body: %w", err)
+	}
+	clone := *p
+	clone.Body = NewRequestBodyRefFromHandle(handle)
+	if err := refreshGatewayRequestRanges(&clone, clone.protocol); err != nil {
+		return nil, err
+	}
+	return &clone, nil
+}
+
+// CloneForBytes keeps byte-owned callers explicit while migrations use CloneForHandle.
+func (p *ParsedRequest) CloneForBytes(body []byte) (*ParsedRequest, error) {
 	if p == nil {
 		return nil, fmt.Errorf("parse request: empty request")
 	}

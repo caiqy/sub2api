@@ -1,0 +1,13 @@
+{
+  "openspec_proposal": "openspec/changes/optimize-request-body-retention/proposal.md",
+  "openspec_design": "openspec/changes/optimize-request-body-retention/design.md",
+  "openspec_tasks": "openspec/changes/optimize-request-body-retention/tasks.md",
+  "openspec_delta_spec": "openspec/changes/optimize-request-body-retention/specs/request-body-retention-control/spec.md",
+  "design_document": "docs/superpowers/specs/2026-07-09-request-body-retention-design.md",
+  "build_plan": "docs/superpowers/plans/2026-07-09-request-body-retention-plan.md",
+  "build_tasks_complete": "openspec/changes/optimize-request-body-retention/tasks.md",
+  "verification_report": ".superpowers/sdd/progress.md",
+  "handoff_context": "openspec/changes/optimize-request-body-retention/.comet/handoff/design-context.json",
+  "handoff_markdown": "openspec/changes/optimize-request-body-retention/.comet/handoff/design-context.md",
+  "archive_directory": "openspec/changes/archive/2026-07-10-optimize-request-body-retention"
+}

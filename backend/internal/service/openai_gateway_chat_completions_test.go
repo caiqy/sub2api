@@ -185,9 +185,9 @@ func TestForwardAsChatCompletions_APIKeyPropagatesPromptCacheKeyInResponsesBody(
 	c.Set("api_key", &APIKey{ID: 99})
 
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
-		StatusCode: http.StatusBadRequest,
-		Header:     http.Header{"Content-Type": []string{"application/json"}, "x-request-id": []string{"rid_chat_prompt_cache"}},
-		Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_request_error","message":"stop before response parsing"}}`)),
+		StatusCode: http.StatusTooManyRequests,
+		Header:     http.Header{"Content-Type": []string{"application/json"}, "X-Request-Id": []string{"rid_chat_prompt_cache"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"rate_limit_error","message":"rate limited"}}`)),
 	}}
 
 	svc := &OpenAIGatewayService{
@@ -207,15 +207,24 @@ func TestForwardAsChatCompletions_APIKeyPropagatesPromptCacheKeyInResponsesBody(
 			"openai_responses_supported": true,
 		},
 	}
+	collector := &openAIUsageUpstreamRequestCollector{}
+	c.Set(UsageDetailCaptureContextKey, collector)
 
 	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "cache-key-123", "gpt-5.4")
 	require.Error(t, err)
 	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, "rid_chat_prompt_cache", failoverErr.ResponseHeaders.Get("x-request-id"))
+	upstream.resp.Header.Set("x-request-id", "mutated")
+	require.Equal(t, "rid_chat_prompt_cache", failoverErr.ResponseHeaders.Get("x-request-id"))
 	require.Equal(t, "cache-key-123", gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String())
 	require.Equal(t, "gpt-5.4", gjson.GetBytes(upstream.lastBody, "model").String())
 	require.Equal(t, "https://api.openai.com/v1/responses", upstream.lastReq.URL.String())
 	require.Equal(t, "Bearer sk-compatible", upstream.lastReq.Header.Get("Authorization"))
 	require.Equal(t, generateSessionUUID(isolateOpenAISessionID(99, "cache-key-123")), upstream.lastReq.Header.Get("session_id"))
+	require.Contains(t, collector.headers, "Session_id: "+generateSessionUUID(isolateOpenAISessionID(99, "cache-key-123")))
+	require.True(t, HasOpsUpstreamAttempted(c))
 }
 
 func TestForwardAsChatCompletions_OAuthDoesNotInjectDefaultInstructions(t *testing.T) {

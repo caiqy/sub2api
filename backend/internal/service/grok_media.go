@@ -54,6 +54,15 @@ type GrokMediaRequestInfo struct {
 	MaskUpload     *OpenAIImagesUpload
 }
 
+func (r *GrokMediaRequestInfo) ReleaseText() {
+	if r == nil {
+		return
+	}
+	r.Prompt = ""
+	r.InputImageURLs = nil
+	r.MaskImageURL = ""
+}
+
 func (r GrokMediaRequestInfo) ModerationBody() []byte {
 	payload := map[string]any{}
 	if prompt := strings.TrimSpace(r.Prompt); prompt != "" {
@@ -118,6 +127,59 @@ func ParseGrokMediaRequest(contentType string, body []byte) GrokMediaRequestInfo
 		info.N = 1
 	}
 	return info
+}
+
+func ParseGrokMediaMultipartForm(form *multipart.Form) GrokMediaRequestInfo {
+	info := GrokMediaRequestInfo{N: 1}
+	if form == nil {
+		return info
+	}
+	for name, values := range form.Value {
+		for _, value := range values {
+			applyGrokMediaMultipartTextField(&info, name, value)
+		}
+	}
+	for name, files := range form.File {
+		for _, file := range files {
+			if file == nil {
+				continue
+			}
+			upload := OpenAIImagesUpload{FieldName: name, FileName: file.Filename, ContentType: file.Header.Get("Content-Type"), File: file}
+			if name == "mask" {
+				info.MaskUpload = &upload
+			} else if name == "image" || strings.HasPrefix(name, "image[") {
+				info.Uploads = append(info.Uploads, upload)
+			}
+		}
+	}
+	info.Model, info.Prompt, info.Size = strings.TrimSpace(info.Model), strings.TrimSpace(info.Prompt), strings.TrimSpace(info.Size)
+	info.SizeTier = NormalizeImageBillingTierOrDefault(info.Size)
+	return info
+}
+
+func applyGrokMediaMultipartTextField(info *GrokMediaRequestInfo, name, value string) {
+	if info == nil {
+		return
+	}
+	value = strings.TrimSpace(value)
+	switch name {
+	case "model":
+		info.Model = value
+	case "prompt":
+		info.Prompt = value
+	case "size":
+		info.Size = value
+	case "n":
+		if n, err := strconv.Atoi(value); err == nil {
+			info.N = n
+		}
+	case "image", "image_url":
+		if value != "" {
+			info.InputImageURLs = append(info.InputImageURLs, value)
+		}
+	case "mask", "mask_image_url":
+		info.MaskImageURL = value
+	}
 }
 
 func parseGrokMediaJSONRequest(body []byte, info *GrokMediaRequestInfo) {
@@ -206,7 +268,6 @@ func parseGrokMediaMultipartRequest(contentType string, body []byte, info *GrokM
 				FieldName:   name,
 				FileName:    fileName,
 				ContentType: partContentType,
-				Data:        data,
 			}
 			if name == "mask" {
 				info.MaskUpload = &upload
@@ -218,25 +279,7 @@ func parseGrokMediaMultipartRequest(contentType string, body []byte, info *GrokM
 			continue
 		}
 
-		value := strings.TrimSpace(string(data))
-		switch name {
-		case "model":
-			info.Model = value
-		case "prompt":
-			info.Prompt = value
-		case "size":
-			info.Size = value
-		case "n":
-			if n, err := strconv.Atoi(value); err == nil {
-				info.N = n
-			}
-		case "image", "image_url":
-			if value != "" {
-				info.InputImageURLs = append(info.InputImageURLs, value)
-			}
-		case "mask", "mask_image_url":
-			info.MaskImageURL = value
-		}
+		applyGrokMediaMultipartTextField(info, name, string(data))
 	}
 }
 
@@ -292,8 +335,20 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	if err != nil {
 		return nil, err
 	}
+	originalMediaType, _, _ := mime.ParseMediaType(strings.TrimSpace(contentType))
+	originalMultipart := strings.EqualFold(originalMediaType, "multipart/form-data")
+	if endpoint.RequiresRequestBody() && len(body) == 0 && !(endpoint == GrokMediaEndpointImagesEdits && originalMultipart && c != nil && c.Request != nil && c.Request.MultipartForm != nil) {
+		body, err = openAIRequestBodyBytes(c, nil)
+		if err != nil {
+			return nil, err
+		}
+	}
 
-	body, contentType, err = prepareGrokMediaForwardBody(endpoint, body, contentType)
+	if endpoint == GrokMediaEndpointImagesEdits && originalMultipart && c != nil && c.Request != nil && c.Request.MultipartForm != nil {
+		body, contentType, err = PrepareGrokMediaFormForwardBody(ParseGrokMediaMultipartForm(c.Request.MultipartForm))
+	} else {
+		body, contentType, err = prepareGrokMediaForwardBody(endpoint, body, contentType)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -302,16 +357,28 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 		return nil, err
 	}
 
-	var bodyReader io.Reader
+	requestInfo := ParseGrokMediaRequest(contentType, body)
+	var bodyHandle *RequestBodyHandle
+	ownedBodyHandle := false
 	if endpoint.RequiresRequestBody() {
-		bodyReader = bytes.NewReader(body)
+		bodyHandle, ownedBodyHandle, err = openAIRequestBodyHandleForContext(c, body)
+		body = nil
+		if err != nil {
+			return nil, err
+		}
 	}
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	defer releaseUpstreamCtx()
-	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, endpoint.httpMethod(), targetURL, bodyReader)
+	var upstreamReq *http.Request
+	if bodyHandle != nil {
+		upstreamReq, err = openAINewRequestWithBodyHandle(upstreamCtx, endpoint.httpMethod(), targetURL, bodyHandle, ownedBodyHandle)
+	} else {
+		upstreamReq, err = http.NewRequestWithContext(upstreamCtx, endpoint.httpMethod(), targetURL, nil)
+	}
 	if err != nil {
 		return nil, err
 	}
+	defer closeOpenAIRequestBody(upstreamReq)
 	upstreamReq.Header.Set("Authorization", "Bearer "+token)
 	upstreamReq.Header.Set("Accept", "application/json")
 	upstreamReq.Header.Set("User-Agent", "sub2api-grok/1.0")
@@ -322,12 +389,19 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 		}
 		upstreamReq.Header.Set("Content-Type", contentType)
 	}
+	upstreamPreview := bodyHandle.PreviewString()
+	if originalMultipart {
+		upstreamPreview = "[multipart body omitted]"
+	}
+	SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
+	requestInfo.ReleaseText()
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
 	upstreamStart := time.Now()
+	SetOpsUpstreamAttempted(c, true)
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
@@ -336,7 +410,6 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	defer func() { _ = resp.Body.Close() }()
 
 	requestIDHeader := firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("xai-request-id"))
-	requestInfo := ParseGrokMediaRequest(contentType, body)
 	requestModel := requestInfo.Model
 	if resp.StatusCode >= 400 {
 		s.updateGrokUsageSnapshot(ctx, account.ID, xai.ParseQuotaHeaders(resp.Header, resp.StatusCode))
@@ -364,6 +437,57 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 		ImageInputSize:   usage.ImageInputSize,
 		ImageOutputSizes: usage.ImageOutputSizes,
 	}, nil
+}
+
+func PrepareGrokMediaFormForwardBody(info GrokMediaRequestInfo) ([]byte, string, error) {
+	payload := map[string]any{}
+	if info.Model != "" {
+		payload["model"] = info.Model
+	}
+	if info.Prompt != "" {
+		payload["prompt"] = info.Prompt
+	}
+	if info.N > 1 {
+		payload["n"] = info.N
+	}
+	if info.Size != "" {
+		payload["size"] = info.Size
+	}
+	images := make([]map[string]string, 0, len(info.InputImageURLs)+len(info.Uploads))
+	for _, imageURL := range info.InputImageURLs {
+		if imageURL = strings.TrimSpace(imageURL); imageURL != "" {
+			images = append(images, map[string]string{"image_url": imageURL})
+		}
+	}
+	for _, upload := range info.Uploads {
+		dataURL, err := openAIImageUploadToDataURL(upload)
+		if err != nil {
+			return nil, "", err
+		}
+		images = append(images, map[string]string{"image_url": dataURL})
+	}
+	if len(images) > 0 {
+		payload["image"] = images[0]
+		if len(images) > 1 {
+			payload["images"] = images
+		}
+	}
+	maskImageURL := strings.TrimSpace(info.MaskImageURL)
+	if info.MaskUpload != nil {
+		dataURL, err := openAIImageUploadToDataURL(*info.MaskUpload)
+		if err != nil {
+			return nil, "", err
+		}
+		maskImageURL = dataURL
+	}
+	if maskImageURL != "" {
+		payload["mask"] = map[string]string{"image_url": maskImageURL}
+	}
+	out, err := marshalOpenAIUpstreamJSON(payload)
+	if err != nil {
+		return nil, "", err
+	}
+	return out, "application/json", nil
 }
 
 func prepareGrokMediaForwardBody(endpoint GrokMediaEndpoint, body []byte, contentType string) ([]byte, string, error) {
@@ -576,6 +700,7 @@ func (s *OpenAIGatewayService) handleGrokMediaErrorResponse(
 		return nil, &UpstreamFailoverError{
 			StatusCode:             resp.StatusCode,
 			ResponseBody:           body,
+			ResponseHeaders:        resp.Header.Clone(),
 			RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 		}
 	}

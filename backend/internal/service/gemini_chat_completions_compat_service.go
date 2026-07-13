@@ -114,7 +114,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 
 	var resp *http.Response
 	for attempt := 1; attempt <= geminiMaxRetries; attempt++ {
-		upstreamReq, idHeader, err := buildReq(ctx)
+		upstreamReq, idHeader, upstreamBody, err := buildReq(ctx)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return nil, err
@@ -122,6 +122,9 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 			return nil, s.writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", err.Error())
 		}
 		requestIDHeader = idHeader
+		upstreamPreview := RequestBodyPreviewString(upstreamBody)
+		SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
+		SetOpsUpstreamAttempted(c, true)
 
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		if err != nil {
@@ -225,7 +228,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 				Kind:               "failover",
 				Message:            upstreamMsg,
 			})
-			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: evBody}
+			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: evBody, ResponseHeaders: resp.Header.Clone()}
 		}
 
 		return nil, s.writeGeminiChatCompletionsMappedError(c, account, resp.StatusCode, requestID, evBody)
@@ -293,19 +296,19 @@ func (s *GeminiMessagesCompatService) buildGeminiChatCompletionsUpstreamRequestF
 	geminiReq []byte,
 	clientStream bool,
 	useUpstreamStream bool,
-) (func(context.Context) (*http.Request, string, error), string) {
+) (func(context.Context) (*http.Request, string, []byte, error), string) {
 	switch account.Type {
 	case AccountTypeAPIKey:
-		return func(ctx context.Context) (*http.Request, string, error) {
+		return func(ctx context.Context) (*http.Request, string, []byte, error) {
 			apiKey := account.GetCredential("api_key")
 			if strings.TrimSpace(apiKey) == "" {
-				return nil, "", errors.New("gemini api_key not configured")
+				return nil, "", nil, errors.New("gemini api_key not configured")
 			}
 
 			baseURL := account.GetGeminiBaseURL(geminicli.AIStudioBaseURL)
 			normalizedBaseURL, err := s.validateUpstreamBaseURL(baseURL)
 			if err != nil {
-				return nil, "", err
+				return nil, "", nil, err
 			}
 
 			action := "generateContent"
@@ -320,21 +323,21 @@ func (s *GeminiMessagesCompatService) buildGeminiChatCompletionsUpstreamRequestF
 			restGeminiReq := normalizeGeminiRequestForAIStudio(geminiReq)
 			upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(restGeminiReq))
 			if err != nil {
-				return nil, "", err
+				return nil, "", nil, err
 			}
 			upstreamReq.Header.Set("Content-Type", "application/json")
 			upstreamReq.Header.Set("x-goog-api-key", apiKey)
-			return upstreamReq, "x-request-id", nil
+			return upstreamReq, "x-request-id", restGeminiReq, nil
 		}, "x-request-id"
 
 	case AccountTypeOAuth:
-		return func(ctx context.Context) (*http.Request, string, error) {
+		return func(ctx context.Context) (*http.Request, string, []byte, error) {
 			if s.tokenProvider == nil {
-				return nil, "", errors.New("gemini token provider not configured")
+				return nil, "", nil, errors.New("gemini token provider not configured")
 			}
 			accessToken, err := s.tokenProvider.GetAccessToken(ctx, account)
 			if err != nil {
-				return nil, "", err
+				return nil, "", nil, err
 			}
 
 			projectID := strings.TrimSpace(account.GetCredential("project_id"))
@@ -346,7 +349,7 @@ func (s *GeminiMessagesCompatService) buildGeminiChatCompletionsUpstreamRequestF
 			if projectID != "" {
 				baseURL, err := s.validateUpstreamBaseURL(geminicli.GeminiCliBaseURL)
 				if err != nil {
-					return nil, "", err
+					return nil, "", nil, err
 				}
 				fullURL := fmt.Sprintf("%s/v1internal:%s", strings.TrimRight(baseURL, "/"), action)
 				if useUpstreamStream {
@@ -355,7 +358,7 @@ func (s *GeminiMessagesCompatService) buildGeminiChatCompletionsUpstreamRequestF
 
 				var inner any
 				if err := json.Unmarshal(geminiReq, &inner); err != nil {
-					return nil, "", fmt.Errorf("failed to parse gemini request: %w", err)
+					return nil, "", nil, fmt.Errorf("failed to parse gemini request: %w", err)
 				}
 				wrappedBytes, _ := json.Marshal(map[string]any{
 					"model":   mappedModel,
@@ -365,18 +368,18 @@ func (s *GeminiMessagesCompatService) buildGeminiChatCompletionsUpstreamRequestF
 
 				upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(wrappedBytes))
 				if err != nil {
-					return nil, "", err
+					return nil, "", nil, err
 				}
 				upstreamReq.Header.Set("Content-Type", "application/json")
 				upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
 				upstreamReq.Header.Set("User-Agent", geminicli.GeminiCLIUserAgent)
-				return upstreamReq, "x-request-id", nil
+				return upstreamReq, "x-request-id", wrappedBytes, nil
 			}
 
 			baseURL := account.GetGeminiBaseURL(geminicli.AIStudioBaseURL)
 			normalizedBaseURL, err := s.validateUpstreamBaseURL(baseURL)
 			if err != nil {
-				return nil, "", err
+				return nil, "", nil, err
 			}
 
 			fullURL := fmt.Sprintf("%s/v1beta/models/%s:%s", strings.TrimRight(normalizedBaseURL, "/"), mappedModel, action)
@@ -387,21 +390,21 @@ func (s *GeminiMessagesCompatService) buildGeminiChatCompletionsUpstreamRequestF
 			restGeminiReq := normalizeGeminiRequestForAIStudio(geminiReq)
 			upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(restGeminiReq))
 			if err != nil {
-				return nil, "", err
+				return nil, "", nil, err
 			}
 			upstreamReq.Header.Set("Content-Type", "application/json")
 			upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
-			return upstreamReq, "x-request-id", nil
+			return upstreamReq, "x-request-id", restGeminiReq, nil
 		}, "x-request-id"
 
 	case AccountTypeServiceAccount:
-		return func(ctx context.Context) (*http.Request, string, error) {
+		return func(ctx context.Context) (*http.Request, string, []byte, error) {
 			if s.tokenProvider == nil {
-				return nil, "", errors.New("gemini token provider not configured")
+				return nil, "", nil, errors.New("gemini token provider not configured")
 			}
 			accessToken, err := s.tokenProvider.GetAccessToken(ctx, account)
 			if err != nil {
-				return nil, "", err
+				return nil, "", nil, err
 			}
 
 			action := "generateContent"
@@ -410,22 +413,22 @@ func (s *GeminiMessagesCompatService) buildGeminiChatCompletionsUpstreamRequestF
 			}
 			fullURL, err := buildVertexGeminiURL(account.VertexProjectID(), account.VertexLocation(mappedModel), mappedModel, action, clientStream)
 			if err != nil {
-				return nil, "", err
+				return nil, "", nil, err
 			}
 
 			restGeminiReq := normalizeGeminiRequestForAIStudio(geminiReq)
 			upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(restGeminiReq))
 			if err != nil {
-				return nil, "", err
+				return nil, "", nil, err
 			}
 			upstreamReq.Header.Set("Content-Type", "application/json")
 			upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
-			return upstreamReq, "x-request-id", nil
+			return upstreamReq, "x-request-id", restGeminiReq, nil
 		}, "x-request-id"
 
 	default:
-		return func(context.Context) (*http.Request, string, error) {
-			return nil, "", fmt.Errorf("unsupported account type: %s", account.Type)
+		return func(context.Context) (*http.Request, string, []byte, error) {
+			return nil, "", nil, fmt.Errorf("unsupported account type: %s", account.Type)
 		}, "x-request-id"
 	}
 }

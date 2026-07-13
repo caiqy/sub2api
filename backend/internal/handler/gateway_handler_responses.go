@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"time"
 
-	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -45,10 +44,30 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 	)
 
 	// Read request body
-	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
+	coordinator, err := newJSONRequestBody(c.Request)
 	if err != nil {
+		if status, ok := requestBodyReadErrorStatus(err); ok {
+			if status == http.StatusRequestEntityTooLarge {
+				if maxErr, ok := extractMaxBytesError(err); ok {
+					h.responsesErrorResponse(c, status, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+					return
+				}
+			}
+			h.responsesErrorResponse(c, status, "server_error", "Failed to spool request body")
+			return
+		}
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			h.responsesErrorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+			return
+		}
+		h.responsesErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		return
+	}
+	defer coordinator.Cleanup()
+	body, err := coordinator.ReadRaw()
+	if err != nil {
+		if status, ok := requestBodyReadErrorStatus(err); ok {
+			h.responsesErrorResponse(c, status, "server_error", "Failed to spool request body")
 			return
 		}
 		h.responsesErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
@@ -59,6 +78,12 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		h.responsesErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return
 	}
+	if err := coordinator.SetEffectiveBytes(body); err != nil {
+		h.responsesErrorResponse(c, http.StatusServiceUnavailable, "server_error", "Failed to spool request body")
+		return
+	}
+	effectiveBody := coordinator.Effective()
+	service.SetUsageRequestBody(c, service.RequestBodyPreviewSnapshot(effectiveBody.PreviewString(), effectiveBody.Size()))
 
 	setOpsRequestContext(c, "", false)
 
@@ -91,6 +116,14 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 
 	// 解析渠道级模型映射
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(requestCtx, apiKey.GroupID, reqModel)
+	if channelMapping.Mapped {
+		body = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
+		if err := coordinator.SetEffectiveBytes(body); err != nil {
+			h.responsesErrorResponse(c, http.StatusServiceUnavailable, "server_error", "Failed to spool request body")
+			return
+		}
+		effectiveBody = coordinator.Effective()
+	}
 
 	// Claude Code only restriction:
 	// /v1/responses is never a Claude Code endpoint.
@@ -108,6 +141,20 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		h.responsesErrorResponse(c, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message)
 		return
 	}
+
+	// Parse and hash before queueing so waits retain only the replayable handle.
+	bodyRef := service.NewRequestBodyRefFromHandle(effectiveBody)
+	parsedReq, _ := service.ParseGatewayRequest(bodyRef, "responses")
+	if parsedReq == nil {
+		parsedReq = &service.ParsedRequest{Model: reqModel, Stream: reqStream, Body: bodyRef}
+	}
+	parsedReq.SessionContext = &service.SessionContext{
+		ClientIP:  ip.GetClientIP(c),
+		UserAgent: c.GetHeader("User-Agent"),
+		APIKeyID:  apiKey.ID,
+	}
+	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
+	body = nil
 
 	// Error passthrough binding
 	if h.errorPassthroughService != nil {
@@ -148,21 +195,10 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 
-	// Parse request for session hash
-	bodyRef := service.NewRequestBodyRef(body)
-	parsedReq, _ := service.ParseGatewayRequest(bodyRef, "responses")
-	if parsedReq == nil {
-		parsedReq = &service.ParsedRequest{Model: reqModel, Stream: reqStream, Body: bodyRef}
-	}
-	parsedReq.SessionContext = &service.SessionContext{
-		ClientIP:  ip.GetClientIP(c),
-		UserAgent: c.GetHeader("User-Agent"),
-		APIKeyID:  apiKey.ID,
-	}
-	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
-
 	// 3. Account selection + failover loop
 	fs := NewFailoverState(h.maxAccountSwitches, false)
+	var lastFailedAccount *service.Account
+	var lastFailedDuration time.Duration
 
 	for {
 		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(requestCtx, apiKey.GroupID, sessionHash, reqModel, fs.FailedAccountIDs, "", int64(0))
@@ -187,12 +223,23 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 				return
 			default:
 				if fs.LastFailoverErr != nil {
+					h.submitFailedUsageLogFromFailover(c, apiKey, lastFailedAccount, reqModel, reqStream, fs.LastFailoverErr, lastFailedDuration, nil, "handler.gateway.responses")
 					h.handleResponsesFailoverExhausted(c, fs.LastFailoverErr, streamStarted)
 				} else {
 					h.responsesErrorResponse(c, http.StatusBadGateway, "server_error", "All available accounts exhausted")
 				}
 				return
 			}
+		}
+		if selection == nil || selection.Account == nil {
+			markOpsRoutingCapacityLimited(c)
+			if fs.LastFailoverErr != nil {
+				h.submitFailedUsageLogFromFailover(c, apiKey, lastFailedAccount, reqModel, reqStream, fs.LastFailoverErr, lastFailedDuration, nil, "handler.gateway.responses")
+				h.handleResponsesFailoverExhausted(c, fs.LastFailoverErr, streamStarted)
+			} else {
+				h.responsesErrorResponse(c, http.StatusServiceUnavailable, "api_error", "No available accounts")
+			}
+			return
 		}
 		account := selection.Account
 		setOpsSelectedAccount(c, account.ID, account.Platform)
@@ -223,29 +270,37 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 
 		// 5. Forward request
 		writerSizeBeforeForward := c.Writer.Size()
-		forwardBody := body
-		if channelMapping.Mapped {
-			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
-		}
-		result, err := h.gatewayService.ForwardAsResponses(requestCtx, c, account, forwardBody, parsedReq)
+		forwardStart := time.Now()
+		service.SetOpsUpstreamAttempted(c, false)
+		result, err := h.gatewayService.ForwardAsResponsesHandle(requestCtx, c, account, effectiveBody, parsedReq)
+		forwardDuration := time.Since(forwardStart)
 
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
 		}
 
 		if err != nil {
+			if h.writeResponsesForwardRequestBodyError(c, err) {
+				return
+			}
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
 				// Can't failover if streaming content already sent
 				if c.Writer.Size() != writerSizeBeforeForward {
+					if c.Request.Context().Err() == nil {
+						h.submitFailedUsageLogFromFailover(c, apiKey, account, reqModel, reqStream, failoverErr, forwardDuration, nil, "handler.gateway.responses")
+					}
 					h.handleResponsesFailoverExhausted(c, failoverErr, true)
 					return
 				}
 				action := fs.HandleFailoverError(requestCtx, h.gatewayService, account.ID, account.Platform, failoverErr)
+				lastFailedAccount = account
+				lastFailedDuration = forwardDuration
 				switch action {
 				case FailoverContinue:
 					continue
 				case FailoverExhausted:
+					h.submitFailedUsageLogFromFailover(c, apiKey, account, reqModel, reqStream, fs.LastFailoverErr, forwardDuration, nil, "handler.gateway.responses")
 					h.handleResponsesFailoverExhausted(c, fs.LastFailoverErr, streamStarted)
 					return
 				case FailoverCanceled:
@@ -256,6 +311,9 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 			wroteFallback := false
 			if !upstreamErrorAlreadyCommunicated {
 				wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
+			}
+			if c.Request.Context().Err() == nil && service.HasOpsUpstreamAttempted(c) && !service.HasOpsClientBusinessLimited(c) {
+				h.submitFailedUsageLogFromFailover(c, apiKey, account, reqModel, reqStream, nil, forwardDuration, nil, "handler.gateway.responses")
 			}
 			reqLog.Error("gateway.responses.forward_failed",
 				zap.Int64("account_id", account.ID),
@@ -269,9 +327,10 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		// 6. Record usage
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
-		requestPayloadHash := service.HashUsageRequestPayload(body)
+		requestPayloadHash := effectiveBody.Hash()
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
+		detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
 
 		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 		h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
@@ -289,6 +348,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 				RequestPayloadHash: requestPayloadHash,
 				APIKeyService:      h.apiKeyService,
 				ChannelUsageFields: channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
+				DetailSnapshot:     detailSnapshot,
 			}); err != nil {
 				reqLog.Error("gateway.responses.record_usage_failed",
 					zap.Int64("account_id", account.ID),
@@ -298,6 +358,28 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		})
 		return
 	}
+}
+
+func (h *GatewayHandler) writeResponsesForwardRequestBodyError(c *gin.Context, err error) bool {
+	status, ok := requestBodyReadErrorStatus(err)
+	if !ok {
+		return false
+	}
+	if c.Writer.Written() {
+		return true
+	}
+	if status == http.StatusRequestEntityTooLarge {
+		if maxErr, ok := extractMaxBytesError(err); ok {
+			h.responsesErrorResponse(c, status, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+			return true
+		}
+	}
+	if status == http.StatusServiceUnavailable {
+		h.responsesErrorResponse(c, status, "server_error", "Failed to spool request body")
+		return true
+	}
+	h.responsesErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+	return true
 }
 
 // responsesErrorResponse writes an error in OpenAI Responses API format.
@@ -313,7 +395,8 @@ func (h *GatewayHandler) responsesErrorResponse(c *gin.Context, status int, code
 // handleResponsesFailoverExhausted writes a failover-exhausted error in Responses format.
 func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastErr *service.UpstreamFailoverError, streamStarted bool) {
 	if streamStarted {
-		return // Can't write error after stream started
+		h.handleFailoverExhausted(c, lastErr, service.PlatformAnthropic, true)
+		return
 	}
 	statusCode := http.StatusBadGateway
 	if lastErr != nil && lastErr.StatusCode > 0 {

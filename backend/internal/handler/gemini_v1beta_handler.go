@@ -17,7 +17,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/gemini"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/googleapi"
-	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -171,10 +170,30 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 	stream := action == "streamGenerateContent"
 	reqLog = reqLog.With(zap.String("model", modelName), zap.String("action", action), zap.Bool("stream", stream))
 
-	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
+	coordinator, err := newJSONRequestBody(c.Request)
 	if err != nil {
+		if status, ok := requestBodyReadErrorStatus(err); ok {
+			if status == http.StatusRequestEntityTooLarge {
+				if maxErr, ok := extractMaxBytesError(err); ok {
+					googleError(c, status, buildBodyTooLargeMessage(maxErr.Limit))
+					return
+				}
+			}
+			googleError(c, status, "Failed to spool request body")
+			return
+		}
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			googleError(c, http.StatusRequestEntityTooLarge, buildBodyTooLargeMessage(maxErr.Limit))
+			return
+		}
+		googleError(c, http.StatusBadRequest, "Failed to read request body")
+		return
+	}
+	defer coordinator.Cleanup()
+	body, err := coordinator.ReadRaw()
+	if err != nil {
+		if status, ok := requestBodyReadErrorStatus(err); ok {
+			googleError(c, status, "Failed to spool request body")
 			return
 		}
 		googleError(c, http.StatusBadRequest, "Failed to read request body")
@@ -184,6 +203,12 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		googleError(c, http.StatusBadRequest, "Request body is empty")
 		return
 	}
+	if err := coordinator.SetEffectiveBytes(body); err != nil {
+		googleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+		return
+	}
+	effectiveBody := coordinator.Effective()
+	service.SetUsageRequestBody(c, service.RequestBodyPreviewSnapshot(effectiveBody.PreviewString(), effectiveBody.Size()))
 
 	setOpsRequestContext(c, modelName, stream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(stream, false)))
@@ -199,6 +224,32 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 	if channelMapping.Mapped {
 		modelName = channelMapping.MappedModel
 	}
+
+	// Complete all body-derived work before any concurrency wait retains this request.
+	stickyState := h.prepareGeminiStickySelectionFromRequest(c, apiKey, authSubject, modelName, body)
+	selectionSessionKey := stickyState.SelectionSessionKey
+	sessionBoundAccountID := stickyState.SessionBoundAccountID
+	useDigestFallback := stickyState.UseDigestFallback
+	geminiSessionUUID := stickyState.GeminiSessionUUID
+	matchedDigestChain := stickyState.MatchedDigestChain
+	if useDigestFallback && matchedDigestChain != "" && sessionBoundAccountID > 0 {
+		reqLog.Info("gemini.digest_fallback_matched",
+			zap.String("session_uuid_prefix", safeShortPrefix(geminiSessionUUID, 8)),
+			zap.Int64("account_id", sessionBoundAccountID),
+			zap.String("digest_chain", truncateDigestChain(stickyState.GeminiDigestChain)),
+		)
+	}
+	if sessionBoundAccountID > 0 {
+		prefetchedGroupID := int64(0)
+		if apiKey.GroupID != nil {
+			prefetchedGroupID = *apiKey.GroupID
+		}
+		ctx := service.WithPrefetchedStickySession(c.Request.Context(), sessionBoundAccountID, prefetchedGroupID, h.metadataBridgeEnabled())
+		c.Request = c.Request.WithContext(ctx)
+	}
+	requestPayloadHash := service.HashUsageRequestPayload(body)
+	hasThoughtSignature := bytes.Contains(body, []byte(`"thoughtSignature"`))
+	body = nil
 
 	// Get subscription (may be nil)
 	subscription, _ := middleware.GetSubscriptionFromContext(c)
@@ -240,29 +291,6 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		}
 		googleError(c, status, message)
 		return
-	}
-
-	// 3) select account (sticky session based on request body)
-	stickyState := h.prepareGeminiStickySelectionFromRequest(c, apiKey, authSubject, modelName, body)
-	selectionSessionKey := stickyState.SelectionSessionKey
-	sessionBoundAccountID := stickyState.SessionBoundAccountID
-	useDigestFallback := stickyState.UseDigestFallback
-	geminiSessionUUID := stickyState.GeminiSessionUUID
-	matchedDigestChain := stickyState.MatchedDigestChain
-	if useDigestFallback && matchedDigestChain != "" && sessionBoundAccountID > 0 {
-		reqLog.Info("gemini.digest_fallback_matched",
-			zap.String("session_uuid_prefix", safeShortPrefix(geminiSessionUUID, 8)),
-			zap.Int64("account_id", sessionBoundAccountID),
-			zap.String("digest_chain", truncateDigestChain(stickyState.GeminiDigestChain)),
-		)
-	}
-	if sessionBoundAccountID > 0 {
-		prefetchedGroupID := int64(0)
-		if apiKey.GroupID != nil {
-			prefetchedGroupID = *apiKey.GroupID
-		}
-		ctx := service.WithPrefetchedStickySession(c.Request.Context(), sessionBoundAccountID, prefetchedGroupID, h.metadataBridgeEnabled())
-		c.Request = c.Request.WithContext(ctx)
 	}
 
 	// 判断是否真的绑定了粘性会话：有 sessionKey 且已经绑定到某个账号
@@ -312,6 +340,12 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			}
 		}
 		account := selection.Account
+		accountReleaseFunc := selection.ReleaseFunc
+		defer func() {
+			if accountReleaseFunc != nil {
+				accountReleaseFunc()
+			}
+		}()
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
 		// 检测账号切换：如果粘性会话绑定的账号与当前选择的账号不同，清除 thoughtSignature
@@ -322,15 +356,37 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				zap.Int64("to_account_id", account.ID),
 				zap.Bool("clean_thought_signature", true),
 			)
-			body = service.CleanGeminiNativeThoughtSignatures(body)
+			rawBody, readErr := coordinator.ReadRaw()
+			if readErr != nil {
+				googleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+				return
+			}
+			cleanedBody := service.CleanGeminiNativeThoughtSignatures(rawBody)
+			rawBody = nil
+			if err := coordinator.SetEffectiveBytes(cleanedBody); err != nil {
+				googleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+				return
+			}
+			effectiveBody = coordinator.Effective()
 			sessionBoundAccountID = account.ID
-		} else if selectionSessionKey != "" && sessionBoundAccountID == 0 && !cleanedForUnknownBinding && bytes.Contains(body, []byte(`"thoughtSignature"`)) {
+		} else if selectionSessionKey != "" && sessionBoundAccountID == 0 && !cleanedForUnknownBinding && hasThoughtSignature {
 			// 无缓存绑定但请求里已有 thoughtSignature：常见于缓存丢失/TTL 过期后，客户端继续携带旧签名。
 			// 为避免第一次转发就 400，这里做一次确定性清理，让新账号重新生成签名链路。
 			reqLog.Info("gemini.sticky_session_binding_missing",
 				zap.Bool("clean_thought_signature", true),
 			)
-			body = service.CleanGeminiNativeThoughtSignatures(body)
+			rawBody, readErr := coordinator.ReadRaw()
+			if readErr != nil {
+				googleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+				return
+			}
+			cleanedBody := service.CleanGeminiNativeThoughtSignatures(rawBody)
+			rawBody = nil
+			if err := coordinator.SetEffectiveBytes(cleanedBody); err != nil {
+				googleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+				return
+			}
+			effectiveBody = coordinator.Effective()
 			cleanedForUnknownBinding = true
 			sessionBoundAccountID = account.ID
 		} else if sessionBoundAccountID == 0 {
@@ -339,7 +395,6 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		}
 
 		// 4) account concurrency slot
-		accountReleaseFunc := selection.ReleaseFunc
 		if !selection.Acquired {
 			if selection.WaitPlan == nil {
 				markOpsRoutingCapacityLimited(c)
@@ -400,14 +455,16 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			requestCtx = service.WithAccountSwitchCount(requestCtx, fs.SwitchCount, h.metadataBridgeEnabled())
 		}
 		forwardStartedAt := time.Now()
+		service.SetOpsUpstreamAttempted(c, false)
 		if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
-			result, err = h.antigravityGatewayService.ForwardGemini(requestCtx, c, account, modelName, action, stream, body, hasBoundSession)
+			result, err = h.antigravityGatewayService.ForwardGeminiHandle(requestCtx, c, account, modelName, action, stream, effectiveBody, hasBoundSession)
 		} else {
-			result, err = h.geminiCompatService.ForwardNative(requestCtx, c, account, modelName, action, stream, body)
+			result, err = h.geminiCompatService.ForwardNativeHandle(requestCtx, c, account, modelName, action, stream, effectiveBody)
 		}
 		forwardDuration := time.Since(forwardStartedAt)
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
+			accountReleaseFunc = nil
 		}
 		if err != nil {
 			var failoverErr *service.UpstreamFailoverError
@@ -428,26 +485,35 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			}
 			// ForwardNative already wrote the response
 			reqLog.Error("gemini.forward_failed", zap.Int64("account_id", account.ID), zap.Error(err))
-			userAgent := c.GetHeader("User-Agent")
-			clientIP := ip.GetClientIP(c)
-			inboundEndpoint := GetInboundEndpoint(c)
-			upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
-			detailSnapshot := middleware.BuildUsageDetailSnapshot(c)
-			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
-				service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), &service.FailedUsageLogInput{
-					APIKey:           apiKey,
-					User:             apiKey.User,
-					Account:          account,
-					Model:            modelName,
-					Stream:           stream,
-					InboundEndpoint:  inboundEndpoint,
-					UpstreamEndpoint: upstreamEndpoint,
-					UserAgent:        userAgent,
-					IPAddress:        clientIP,
-					DetailSnapshot:   detailSnapshot,
-					Duration:         forwardDuration,
-				}, "handler.gemini_v1beta.models")
-			})
+			if c.Request.Context().Err() == nil && !c.Writer.Written() && !service.IsResponseCommitted(c) {
+				c.Writer.Header().Del("Content-Type")
+				c.Writer.Header().Del("Cache-Control")
+				c.Writer.Header().Del("Connection")
+				c.Writer.Header().Del("X-Accel-Buffering")
+				googleError(c, http.StatusBadGateway, "Upstream request failed")
+			}
+			if c.Request.Context().Err() == nil && service.HasOpsUpstreamAttempted(c) && !service.HasOpsClientBusinessLimited(c) {
+				userAgent := c.GetHeader("User-Agent")
+				clientIP := ip.GetClientIP(c)
+				inboundEndpoint := GetInboundEndpoint(c)
+				upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
+				detailSnapshot := middleware.BuildUsageDetailSnapshot(c)
+				h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
+					service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), &service.FailedUsageLogInput{
+						APIKey:           apiKey,
+						User:             apiKey.User,
+						Account:          account,
+						Model:            modelName,
+						Stream:           stream,
+						InboundEndpoint:  inboundEndpoint,
+						UpstreamEndpoint: upstreamEndpoint,
+						UserAgent:        userAgent,
+						IPAddress:        clientIP,
+						DetailSnapshot:   detailSnapshot,
+						Duration:         forwardDuration,
+					}, "handler.gemini_v1beta.models")
+				})
+			}
 			return
 		}
 
@@ -471,7 +537,6 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		}
 
 		// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
-		requestPayloadHash := service.HashUsageRequestPayload(body)
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 		detailSnapshot := middleware.BuildUsageDetailSnapshot(c)

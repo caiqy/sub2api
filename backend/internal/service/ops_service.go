@@ -307,6 +307,8 @@ func sanitizeOpsUpstreamErrors(entry *OpsInsertErrorLogInput) error {
 		} else {
 			out.Detail = ""
 		}
+		out.UpstreamRequestBody, _ = sanitizeRequestBodyForStorage(out.UpstreamRequestBody, opsMaxStoredErrorBodyBytes)
+		out.UpstreamResponseBody, _ = sanitizeErrorBodyForStorage(out.UpstreamResponseBody, opsMaxStoredErrorBodyBytes)
 
 		// Drop fully-empty events (can happen if only status code was known).
 		if out.UpstreamStatusCode == 0 && out.Message == "" && out.Detail == "" {
@@ -759,9 +761,14 @@ func shallowCopyMap(m map[string]any) map[string]any {
 }
 
 func sanitizeErrorBodyForStorage(raw string, maxBytes int) (sanitized string, truncated bool) {
-	raw = strings.TrimSpace(raw)
+	raw = strings.TrimSpace(strings.TrimPrefix(raw, "\ufeff"))
 	if raw == "" {
 		return "", false
+	}
+	sensitive, complete := scanPreviewJSONTokens(raw, true)
+	looksLikeJSON := raw[0] == '{' || raw[0] == '['
+	if sensitive || !complete && (looksLikeJSON || containsNonEmptyDataURL(raw)) {
+		return requestBodyPreviewOmittedMarker, true
 	}
 
 	// Prefer JSON-safe sanitization when possible.
@@ -774,4 +781,20 @@ func sanitizeErrorBodyForStorage(raw string, maxBytes int) (sanitized string, tr
 		return truncateString(raw, maxBytes), true
 	}
 	return raw, false
+}
+
+func sanitizeRequestBodyForStorage(raw string, maxBytes int) (sanitized string, truncated bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", false
+	}
+	if snapshot, ok := parseRequestBodyPreviewSnapshot(raw, maxBytes); ok {
+		stored := marshalRequestBodyPreviewSnapshot(snapshot.Preview, snapshot.Size, snapshot.Truncated, maxBytes)
+		storedSnapshot, _ := parseRequestBodyPreviewSnapshot(stored)
+		return stored, snapshot.Truncated || storedSnapshot.Truncated || stored != raw
+	}
+	if preview := sanitizeRequestBodyPreview(raw, false); preview == requestBodyPreviewOmittedMarker {
+		return preview, true
+	}
+	return sanitizeErrorBodyForStorage(raw, maxBytes)
 }

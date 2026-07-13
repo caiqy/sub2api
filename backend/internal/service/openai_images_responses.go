@@ -341,14 +341,26 @@ func openAIImageOutputMIMEType(outputFormat string) string {
 }
 
 func openAIImageUploadToDataURL(upload OpenAIImagesUpload) (string, error) {
-	if len(upload.Data) == 0 {
+	if upload.File == nil {
 		return "", fmt.Errorf("upload %q is empty", strings.TrimSpace(upload.FileName))
+	}
+	file, err := upload.File.Open()
+	if err != nil {
+		return "", fmt.Errorf("open upload %q: %w", strings.TrimSpace(upload.FileName), err)
+	}
+	defer func() { _ = file.Close() }()
+	data, err := io.ReadAll(io.LimitReader(file, openAIImageMaxUploadPartSize+1))
+	if err != nil {
+		return "", fmt.Errorf("read upload %q: %w", strings.TrimSpace(upload.FileName), err)
+	}
+	if len(data) == 0 || len(data) > openAIImageMaxUploadPartSize {
+		return "", fmt.Errorf("upload %q exceeds 20MB", strings.TrimSpace(upload.FileName))
 	}
 	contentType := strings.TrimSpace(upload.ContentType)
 	if contentType == "" {
-		contentType = http.DetectContentType(upload.Data)
+		contentType = http.DetectContentType(data)
 	}
-	return "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(upload.Data), nil
+	return "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(data), nil
 }
 
 func buildOpenAIImagesResponsesRequest(parsed *OpenAIImagesRequest, toolModel string) ([]byte, error) {
@@ -947,6 +959,7 @@ func (s *OpenAIGatewayService) handleOpenAIImagesErrorResponse(
 		return nil, &UpstreamFailoverError{
 			StatusCode:             resp.StatusCode,
 			ResponseBody:           body,
+			ResponseHeaders:        resp.Header.Clone(),
 			RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 		}
 	}
@@ -1154,6 +1167,7 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthNonStreamingResponse(
 		return OpenAIUsage{}, 0, nil, &UpstreamFailoverError{
 			StatusCode:             http.StatusBadGateway,
 			ResponseBody:           body,
+			ResponseHeaders:        resp.Header.Clone(),
 			RetryableOnSameAccount: true,
 		}
 	}
@@ -1557,9 +1571,18 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		return nil, err
 	}
 
-	responsesBody, err := buildOpenAIImagesResponsesRequest(parsed, requestModel)
-	if err != nil {
-		return nil, err
+	responsesBody, err := openAIRequestBodyBytes(c, nil)
+	if err != nil || len(responsesBody) == 0 {
+		if parsed.textReleased {
+			if err != nil {
+				return nil, err
+			}
+			return nil, fmt.Errorf("oauth images request body is required")
+		}
+		responsesBody, err = buildOpenAIImagesResponsesRequest(parsed, requestModel)
+		if err != nil {
+			return nil, err
+		}
 	}
 	upstreamReq, err := s.buildUpstreamRequest(upstreamCtx, c, account, responsesBody, token, true, parsed.StickySessionSeed(), false)
 	if err != nil {
@@ -1567,14 +1590,20 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	}
 	upstreamReq.Header.Set("Content-Type", "application/json")
 	upstreamReq.Header.Set("Accept", "text/event-stream")
-	SetUsageUpstreamRequest(c, upstreamReq, string(responsesBody))
+	upstreamPreview, _ := openAIImagesJSONPreview(responsesBody)
+	if parsed.Multipart {
+		upstreamPreview = "[multipart body omitted]"
+	}
+	SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
 	upstreamStart := time.Now()
+	SetOpsUpstreamAttempted(c, true)
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+	closeOpenAIRequestBody(upstreamReq)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())

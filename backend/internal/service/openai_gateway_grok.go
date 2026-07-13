@@ -56,6 +56,7 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 	}
 
 	upstreamStart := time.Now()
+	SetOpsUpstreamAttempted(c, true)
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
@@ -85,6 +86,7 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 			return nil, &UpstreamFailoverError{
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           respBody,
+				ResponseHeaders:        resp.Header.Clone(),
 				RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 			}
 		}
@@ -327,6 +329,8 @@ func buildGrokResponsesRequest(ctx context.Context, c *gin.Context, account *Acc
 			req.Header.Set("OpenAI-Beta", v)
 		}
 	}
+	preview := RequestBodyPreviewString(body)
+	SetUsageUpstreamRequest(c, req, preview)
 	return req, nil
 }
 
@@ -344,6 +348,9 @@ func (s *OpenAIGatewayService) updateGrokUsageSnapshot(ctx context.Context, acco
 
 func (s *OpenAIGatewayService) handleGrokAccountUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte) {
 	if s == nil || account == nil {
+		return
+	}
+	if account.IsPoolMode() && account.IsPoolModeRetryableStatus(statusCode) {
 		return
 	}
 	switch statusCode {

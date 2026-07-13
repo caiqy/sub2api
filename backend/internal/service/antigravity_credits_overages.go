@@ -3,12 +3,12 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 )
 
@@ -166,6 +166,7 @@ func shouldMarkCreditsExhausted(resp *http.Response, respBody []byte, reqErr err
 type creditsOveragesRetryResult struct {
 	handled bool
 	resp    *http.Response
+	err     error
 }
 
 // attemptCreditsOveragesRetry 在确认免费配额耗尽后，尝试注入 AI Credits 继续请求。
@@ -177,22 +178,36 @@ func (s *AntigravityGatewayService) attemptCreditsOveragesRetry(
 	originalStatusCode int,
 	respBody []byte,
 ) *creditsOveragesRetryResult {
-	creditsBody := injectEnabledCreditTypes(p.body)
+	payload, err := p.payloadHandle.ReadAll()
+	if err != nil {
+		return &creditsOveragesRetryResult{err: fmt.Errorf("read credits retry payload: %w", err)}
+	}
+	creditsBody := injectEnabledCreditTypes(payload)
 	if creditsBody == nil {
 		return &creditsOveragesRetryResult{handled: false}
 	}
+	// This retry may fall through to the outer loop, which still owns its payload.
+	p.ownedPayload = false
+	if err := p.replacePayload(creditsBody); err != nil {
+		return &creditsOveragesRetryResult{err: fmt.Errorf("replace credits retry payload: %w", err)}
+	}
+	defer p.cleanupOwnedPayload()
 	modelKey := resolveCreditsOveragesModelKey(p.ctx, p.account, modelName, p.requestedModel)
 	logger.LegacyPrintf("service.antigravity_gateway", "%s status=429 credit_overages_retry model=%s account=%d (injecting enabledCreditTypes)",
 		p.prefix, modelKey, p.account.ID)
 
-	creditsReq, err := antigravity.NewAPIRequestWithURL(p.ctx, baseURL, p.action, p.accessToken, creditsBody)
+	creditsReq, err := newAntigravityPayloadRequest(&p, baseURL)
 	if err != nil {
 		logger.LegacyPrintf("service.antigravity_gateway", "%s credit_overages_failed model=%s account=%d build_request_err=%v",
 			p.prefix, modelKey, p.account.ID, err)
-		return &creditsOveragesRetryResult{handled: true}
+		return &creditsOveragesRetryResult{err: fmt.Errorf("build credits retry request: %w", err)}
 	}
+	preview := antigravityPayloadPreview(&p)
+	SetUsageUpstreamRequest(p.c, creditsReq, preview)
+	SetOpsUpstreamAttempted(p.c, true)
 
 	creditsResp, err := p.httpUpstream.Do(creditsReq, p.proxyURL, p.account.ID, p.account.Concurrency)
+	_ = creditsReq.Body.Close()
 	if err == nil && creditsResp != nil && creditsResp.StatusCode < 400 {
 		s.clearCreditsExhausted(p.ctx, p.account)
 		logger.LegacyPrintf("service.antigravity_gateway", "%s status=%d credit_overages_success model=%s account=%d",

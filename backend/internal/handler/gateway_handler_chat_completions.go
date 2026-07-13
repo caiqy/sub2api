@@ -59,6 +59,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		h.chatCompletionsErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return
 	}
+	service.SetUsageRequestBody(c, openAIRequestBodyPreviewSnapshot(body))
 
 	setOpsRequestContext(c, "", false)
 
@@ -165,6 +166,8 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 	if groupPlatform == service.PlatformGemini {
 		fs = NewFailoverState(h.maxAccountSwitchesGemini, false)
 	}
+	var lastFailedAccount *service.Account
+	var lastFailedDuration time.Duration
 
 	for {
 		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, selectionSessionHash, reqModel, fs.FailedAccountIDs, "", int64(0))
@@ -189,6 +192,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				return
 			default:
 				if fs.LastFailoverErr != nil {
+					h.submitFailedUsageLogFromFailover(c, apiKey, lastFailedAccount, reqModel, reqStream, fs.LastFailoverErr, lastFailedDuration, nil, "handler.gateway.chat_completions")
 					h.handleCCFailoverExhausted(c, fs.LastFailoverErr, streamStarted)
 				} else {
 					h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "server_error", "All available accounts exhausted")
@@ -198,6 +202,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 		account := selection.Account
 		setOpsSelectedAccount(c, account.ID, account.Platform)
+		service.SetOpsUpstreamAttempted(c, false)
 
 		// 4. Acquire account concurrency slot
 		accountReleaseFunc := selection.ReleaseFunc
@@ -233,6 +238,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 
 		// 5. Forward request
 		writerSizeBeforeForward := c.Writer.Size()
+		forwardStart := time.Now()
 		forwardBody := body
 		if channelMapping.Mapped {
 			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
@@ -250,6 +256,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		} else {
 			result, err = h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, parsedReq)
 		}
+		forwardDuration := time.Since(forwardStart)
 
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
@@ -259,14 +266,20 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
 				if c.Writer.Size() != writerSizeBeforeForward {
+					if c.Request.Context().Err() == nil {
+						h.submitFailedUsageLogFromFailover(c, apiKey, account, reqModel, reqStream, failoverErr, forwardDuration, nil, "handler.gateway.chat_completions")
+					}
 					h.handleCCFailoverExhausted(c, failoverErr, true)
 					return
 				}
 				action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, failoverErr)
+				lastFailedAccount = account
+				lastFailedDuration = forwardDuration
 				switch action {
 				case FailoverContinue:
 					continue
 				case FailoverExhausted:
+					h.submitFailedUsageLogFromFailover(c, apiKey, account, reqModel, reqStream, fs.LastFailoverErr, forwardDuration, nil, "handler.gateway.chat_completions")
 					h.handleCCFailoverExhausted(c, fs.LastFailoverErr, streamStarted)
 					return
 				case FailoverCanceled:
@@ -277,6 +290,9 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 			wroteFallback := false
 			if !upstreamErrorAlreadyCommunicated {
 				wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
+			}
+			if c.Request.Context().Err() == nil && service.HasOpsUpstreamAttempted(c) && !service.HasOpsClientBusinessLimited(c) {
+				h.submitFailedUsageLogFromFailover(c, apiKey, account, reqModel, reqStream, nil, forwardDuration, nil, "handler.gateway.chat_completions")
 			}
 			reqLog.Error("gateway.cc.forward_failed",
 				zap.Int64("account_id", account.ID),
@@ -293,6 +309,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		requestPayloadHash := service.HashUsageRequestPayload(body)
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
+		detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
 
 		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 		h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
@@ -310,6 +327,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				RequestPayloadHash: requestPayloadHash,
 				APIKeyService:      h.apiKeyService,
 				ChannelUsageFields: channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
+				DetailSnapshot:     detailSnapshot,
 			}); err != nil {
 				reqLog.Error("gateway.cc.record_usage_failed",
 					zap.Int64("account_id", account.ID),

@@ -28,14 +28,19 @@ import (
 //
 // The method follows the same pattern as OpenAIGatewayService.ForwardAsAnthropic
 // but in reverse direction: Responses → Anthropic upstream → Responses.
-func (s *GatewayService) ForwardAsResponses(
+// ForwardAsResponsesHandle borrows bodyHandle from the request coordinator.
+func (s *GatewayService) ForwardAsResponsesHandle(
 	ctx context.Context,
 	c *gin.Context,
 	account *Account,
-	body []byte,
+	bodyHandle *RequestBodyHandle,
 	parsed *ParsedRequest,
 ) (*ForwardResult, error) {
 	startTime := time.Now()
+	body, err := bodyHandle.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("read responses request body: %w", err)
+	}
 
 	// 1. Parse Responses request
 	var responsesReq apicompat.ResponsesRequest
@@ -121,17 +126,42 @@ func (s *GatewayService) ForwardAsResponses(
 	// (map/forward modes) read values from the original Responses body
 	// rather than the converted Anthropic body.
 	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
-	upstreamReq, _, err := s.buildUpstreamRequestWithSourceBody(upstreamCtx, c, account, body, anthropicBody, token, tokenType, mappedModel, reqStream, shouldMimicClaudeCode)
+	upstreamReq, upstreamBody, err := s.buildUpstreamRequestWithSourceBody(upstreamCtx, c, account, body, anthropicBody, token, tokenType, mappedModel, reqStream, shouldMimicClaudeCode)
 	releaseUpstreamCtx()
+	body = nil
+	anthropicBody = nil
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
+	upstreamHandle, err := NewRequestBodyHandleFromBytes(upstreamBody, RequestBodyHandleOptions{})
+	upstreamBody = nil
+	if err != nil {
+		return nil, fmt.Errorf("create upstream request body: %w", err)
+	}
+	if upstreamReq.Body != nil {
+		_ = upstreamReq.Body.Close()
+	}
+	upstreamReq.Body, err = upstreamHandle.Open()
+	if err != nil {
+		CleanupRequestBodyHandle(upstreamHandle)
+		return nil, fmt.Errorf("open upstream request body: %w", err)
+	}
+	upstreamReq.GetBody = upstreamHandle.Open
+	upstreamReq.ContentLength = upstreamHandle.Size()
 
 	// 11. Send request
+	upstreamPreview := upstreamHandle.PreviewString()
+	SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
+	SetOpsUpstreamAttempted(c, true)
 	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+	_ = upstreamReq.Body.Close()
+	CleanupRequestBodyHandle(upstreamHandle)
 	if err != nil {
 		if resp != nil && resp.Body != nil {
 			_ = resp.Body.Close()
+		}
+		if errors.Is(err, ErrRequestBodySpool) {
+			return nil, fmt.Errorf("send responses upstream request: %w", err)
 		}
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())
 		setOpsUpstreamError(c, 0, safeErr, "")
@@ -171,8 +201,9 @@ func (s *GatewayService) ForwardAsResponses(
 				s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody, mappedModel)
 			}
 			return nil, &UpstreamFailoverError{
-				StatusCode:   resp.StatusCode,
-				ResponseBody: respBody,
+				StatusCode:      resp.StatusCode,
+				ResponseBody:    respBody,
+				ResponseHeaders: resp.Header.Clone(),
 			}
 		}
 
@@ -191,6 +222,16 @@ func (s *GatewayService) ForwardAsResponses(
 	}
 
 	return result, handleErr
+}
+
+// ForwardAsResponses is the legacy byte-owned wrapper. New gateway paths use ForwardAsResponsesHandle.
+func (s *GatewayService) ForwardAsResponses(ctx context.Context, c *gin.Context, account *Account, body []byte, parsed *ParsedRequest) (*ForwardResult, error) {
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("create responses request body: %w", err)
+	}
+	defer CleanupRequestBodyHandle(handle)
+	return s.ForwardAsResponsesHandle(ctx, c, account, handle, parsed)
 }
 
 // ExtractResponsesReasoningEffortFromBody reads Responses API reasoning.effort
@@ -392,6 +433,7 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 	var usage ClaudeUsage
 	var firstTokenMs *int
 	firstChunk := true
+	completedWritten := false
 
 	scanner := bufio.NewScanner(resp.Body)
 	maxLineSize := defaultMaxLineSize
@@ -447,6 +489,9 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 					zap.String("request_id", requestID),
 				)
 				return true // client disconnected
+			}
+			if evt.Type == "response.completed" {
+				completedWritten = true
 			}
 		}
 		if len(events) > 0 {
@@ -504,12 +549,16 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 	}
 
 	if err := scanner.Err(); err != nil {
+		if completedWritten {
+			return resultWithUsage(), nil
+		}
 		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			logger.L().Warn("forward_as_responses stream: read error",
 				zap.Error(err),
 				zap.String("request_id", requestID),
 			)
 		}
+		return nil, fmt.Errorf("read upstream responses stream: %w", err)
 	}
 
 	return finalizeStream()
@@ -525,6 +574,9 @@ func appendRawJSON(existing json.RawMessage, fragment string) json.RawMessage {
 
 // writeResponsesError writes an error response in OpenAI Responses API format.
 func writeResponsesError(c *gin.Context, statusCode int, code, message string) {
+	if c.Writer.Written() {
+		return
+	}
 	MarkResponseCommitted(c)
 	c.JSON(statusCode, gin.H{
 		"error": gin.H{

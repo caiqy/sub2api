@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -743,25 +745,34 @@ func TestOpenAIResponses_ToolOutputHTTPValidationCoversObjectInputAndAllOutputTy
 	}
 }
 
-func TestReplaceOpenAIForwardModelAndSyncParsedCache_UpdatesCachedModel(t *testing.T) {
+func TestOpenAIResponses_FunctionCallOutputValidationDoesNotRetainParsedBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	cached := map[string]any{
-		"model":  "gpt-5.5",
-		"stream": false,
-		"input": []any{
-			map[string]any{"type": "function_call_output", "call_id": "call_1", "output": "{}"},
-		},
-	}
-	c.Set(service.OpenAIParsedRequestBodyKey, cached)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(
+		`{"model":"gpt-5.1","stream":false,"input":[{"type":"function_call_output","call_id":"call_1","output":"{}"}]}`,
+	))
+	c.Request.Header.Set("Content-Type", "application/json")
 
-	body := []byte(`{"model":"gpt-5.5","stream":false,"input":[{"type":"function_call_output","call_id":"call_1","output":"{}"}]}`)
-	updated := replaceOpenAIForwardModelAndSyncParsedCache(c, body, "gpt-5.4")
+	groupID := int64(2)
+	c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{
+		ID:      101,
+		GroupID: &groupID,
+		User:    &service.User{ID: 1},
+	})
+	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{
+		UserID:      1,
+		Concurrency: 1,
+	})
 
-	require.Equal(t, "gpt-5.4", gjson.GetBytes(updated, "model").String())
-	require.Equal(t, "gpt-5.4", cached["model"])
+	h := newOpenAIHandlerForPreviousResponseIDValidation(t, nil)
+	h.Responses(c)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "Responses WebSocket v2")
+	_, retained := c.Get("openai_parsed_request_body")
+	require.False(t, retained)
 }
 
 func TestOpenAIResponsesWebSocket_SetsClientTransportWSWhenUpgradeValid(t *testing.T) {
@@ -1605,7 +1616,7 @@ func TestOpenAIGatewayHandler_ChatCompletionsPassesDetailSnapshotToRecordUsage(t
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.NotNil(t, usageRepo.lastLog)
 	require.NotNil(t, usageRepo.lastLog.DetailSnapshot)
-	require.JSONEq(t, reqBody, usageRepo.lastLog.DetailSnapshot.RequestBody)
+	requireRequestPreviewSnapshot(t, usageRepo.lastLog.DetailSnapshot.RequestBody, reqBody)
 	require.Contains(t, usageRepo.lastLog.DetailSnapshot.ResponseBody, "chat.completion")
 	require.Contains(t, usageRepo.lastLog.DetailSnapshot.ResponseBody, "Hello")
 }
@@ -1814,6 +1825,92 @@ func TestOpenAIGatewayHandler_ResponsesUsesGrokRequestPlatform(t *testing.T) {
 	require.Equal(t, []string{service.PlatformGrok}, accountRepo.platforms)
 }
 
+func TestOpenAIGatewayHandler_ResponsesDecodesGzipRequestBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router, usageRepo, httpUpstream, cleanup := newOpenAIResponsesRequestBodyTestRouter(t)
+	defer cleanup()
+
+	reqBody := `{"model":"gpt-5.4","stream":false,"input":"hello gzip"}`
+	var compressed bytes.Buffer
+	zw := gzip.NewWriter(&compressed)
+	_, err := zw.Write([]byte(reqBody))
+	require.NoError(t, err)
+	require.NoError(t, zw.Close())
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(compressed.Bytes()))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Len(t, httpUpstream.requests, 1)
+	upstreamBody, err := io.ReadAll(httpUpstream.requests[0].Body)
+	require.NoError(t, err)
+	require.Equal(t, "gpt-5.4", gjson.GetBytes(upstreamBody, "model").String())
+	require.Equal(t, "hello gzip", gjson.GetBytes(upstreamBody, "input").String())
+	require.NotNil(t, usageRepo.lastLog)
+	require.NotNil(t, usageRepo.lastLog.DetailSnapshot)
+	requireRequestPreviewSnapshot(t, usageRepo.lastLog.DetailSnapshot.RequestBody, reqBody)
+}
+
+func TestOpenAIGatewayHandler_ResponsesSpoolCreateFailureReturns503(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router, _, httpUpstream, cleanup := newOpenAIResponsesRequestBodyTestRouter(t)
+	defer cleanup()
+	missingTempDir := filepath.Join(t.TempDir(), "missing")
+	t.Setenv("TMPDIR", missingTempDir)
+	t.Setenv("TMP", missingTempDir)
+	t.Setenv("TEMP", missingTempDir)
+
+	reqBody := `{"model":"gpt-5.4","stream":false,"input":"` + strings.Repeat("x", int(openAIResponsesRequestBodySpoolThresholdBytes)) + `"}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
+	require.Equal(t, "api_error", gjson.Get(rec.Body.String(), "error.type").String())
+	require.Empty(t, httpUpstream.requests)
+}
+
+func TestOpenAIGatewayHandler_ResponsesSpoolTransportFailureReturns503(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router, usageRepo, httpUpstream, cleanup := newOpenAIResponsesRequestBodyTestRouter(t)
+	defer cleanup()
+	httpUpstream.err = fmt.Errorf("read spool request body: %w", service.ErrRequestBodySpool)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.4","stream":false,"input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
+	require.Equal(t, "api_error", gjson.Get(rec.Body.String(), "error.type").String())
+	require.Len(t, httpUpstream.requests, 1)
+	require.Nil(t, usageRepo.lastLog)
+}
+
+func TestOpenAIGatewayHandler_ResponsesClientReadFailureReturns400(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router, _, httpUpstream, cleanup := newOpenAIResponsesRequestBodyTestRouter(t)
+	defer cleanup()
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	req.Body = io.NopCloser(requestBodyErrorReader{err: errors.New("client read failed")})
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	require.Empty(t, httpUpstream.requests)
+}
+
+type requestBodyErrorReader struct{ err error }
+
+func (r requestBodyErrorReader) Read([]byte) (int, error) { return 0, r.err }
+
 func TestOpenAIGatewayHandler_ChatCompletionsUsageTaskUsesCapturedEndpointAndSnapshot(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -1956,7 +2053,7 @@ func TestOpenAIGatewayHandler_ChatCompletionsUsageTaskUsesCapturedEndpointAndSna
 		require.NotNil(t, log.UpstreamEndpoint)
 		require.Equal(t, "/v1/responses", *log.UpstreamEndpoint)
 		require.NotNil(t, log.DetailSnapshot)
-		require.JSONEq(t, firstBody, log.DetailSnapshot.RequestBody)
+		requireRequestPreviewSnapshot(t, log.DetailSnapshot.RequestBody, firstBody)
 	case <-time.After(2 * time.Second):
 		t.Fatal("usage record not created")
 	}
@@ -1984,7 +2081,7 @@ func TestOpenAIGatewayHandler_ImagesGenerateDetailSnapshotIncludesRequestAndResp
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.NotNil(t, usageRepo.lastLog)
 	require.NotNil(t, usageRepo.lastLog.DetailSnapshot)
-	require.JSONEq(t, reqBody, usageRepo.lastLog.DetailSnapshot.RequestBody)
+	requireRequestPreviewSnapshot(t, usageRepo.lastLog.DetailSnapshot.RequestBody, reqBody)
 	require.Contains(t, usageRepo.lastLog.DetailSnapshot.ResponseBody, `"b64_json":"QUJD"`)
 	require.Contains(t, usageRepo.lastLog.DetailSnapshot.ResponseBody, "draw a lantern at dusk")
 }
@@ -2032,16 +2129,17 @@ func TestOpenAIGatewayHandler_ImagesEditDetailSnapshotSanitizesMultipartMetadata
 	require.NotNil(t, usageRepo.lastLog.DetailSnapshot)
 	require.NotContains(t, usageRepo.lastLog.DetailSnapshot.RequestBody, "raw-source-image-bytes")
 	require.NotContains(t, usageRepo.lastLog.DetailSnapshot.RequestBody, "raw-mask-bytes")
-	require.Equal(t, "gpt-image-2", gjson.Get(usageRepo.lastLog.DetailSnapshot.RequestBody, "model").String())
-	require.Equal(t, "replace background", gjson.Get(usageRepo.lastLog.DetailSnapshot.RequestBody, "prompt").String())
-	require.Equal(t, "1536x1024", gjson.Get(usageRepo.lastLog.DetailSnapshot.RequestBody, "size").String())
-	require.Equal(t, "high", gjson.Get(usageRepo.lastLog.DetailSnapshot.RequestBody, "quality").String())
-	require.Equal(t, "transparent", gjson.Get(usageRepo.lastLog.DetailSnapshot.RequestBody, "background").String())
-	require.Equal(t, "webp", gjson.Get(usageRepo.lastLog.DetailSnapshot.RequestBody, "output_format").String())
-	require.Equal(t, "low", gjson.Get(usageRepo.lastLog.DetailSnapshot.RequestBody, "moderation").String())
-	require.Equal(t, int64(2), gjson.Get(usageRepo.lastLog.DetailSnapshot.RequestBody, "n").Int())
-	require.True(t, gjson.Get(usageRepo.lastLog.DetailSnapshot.RequestBody, "had_source_image").Bool())
-	require.True(t, gjson.Get(usageRepo.lastLog.DetailSnapshot.RequestBody, "had_mask").Bool())
+	requestMetadata := gjson.Get(usageRepo.lastLog.DetailSnapshot.RequestBody, "preview").String()
+	require.Equal(t, "gpt-image-2", gjson.Get(requestMetadata, "model").String())
+	require.Empty(t, gjson.Get(requestMetadata, "prompt").String())
+	require.Equal(t, "1536x1024", gjson.Get(requestMetadata, "size").String())
+	require.Equal(t, "high", gjson.Get(requestMetadata, "quality").String())
+	require.Equal(t, "transparent", gjson.Get(requestMetadata, "background").String())
+	require.Equal(t, "webp", gjson.Get(requestMetadata, "output_format").String())
+	require.Equal(t, "low", gjson.Get(requestMetadata, "moderation").String())
+	require.Equal(t, int64(2), gjson.Get(requestMetadata, "n").Int())
+	require.True(t, gjson.Get(requestMetadata, "had_source_image").Bool())
+	require.True(t, gjson.Get(requestMetadata, "had_mask").Bool())
 	require.Contains(t, usageRepo.lastLog.DetailSnapshot.ResponseBody, `"b64_json":"RURJVA=="`)
 }
 
@@ -2159,8 +2257,9 @@ func TestOpenAIGatewayHandler_RetryPathStoresLastOutboundRequestOnly(t *testing.
 	require.NotNil(t, usageRepo.lastLog)
 	require.NotNil(t, usageRepo.lastLog.DetailSnapshot)
 	require.Contains(t, usageRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "Authorization: Bearer sk-test")
-	require.NotContains(t, usageRepo.lastLog.DetailSnapshot.UpstreamRequestBody, `"encrypted_content":"secret"`)
-	require.Contains(t, usageRepo.lastLog.DetailSnapshot.UpstreamRequestBody, `"type":"input_text"`)
+	upstreamPreview := gjson.Get(usageRepo.lastLog.DetailSnapshot.UpstreamRequestBody, "preview").String()
+	require.NotContains(t, upstreamPreview, `"encrypted_content":"secret"`)
+	require.Contains(t, upstreamPreview, `"type":"input_text"`)
 }
 
 func TestOpenAIGatewayHandler_UsageDetailStoresInjectedUpstreamRequestBody(t *testing.T) {
@@ -2268,8 +2367,96 @@ func TestOpenAIGatewayHandler_UsageDetailStoresInjectedUpstreamRequestBody(t *te
 	require.Equal(t, "default", gjson.GetBytes(upstreamBody, "service_tier").String())
 	require.NotNil(t, usageRepo.lastLog)
 	require.NotNil(t, usageRepo.lastLog.DetailSnapshot)
-	require.Equal(t, "auto", gjson.Get(usageRepo.lastLog.DetailSnapshot.RequestBody, "service_tier").String())
-	require.Equal(t, "default", gjson.Get(usageRepo.lastLog.DetailSnapshot.UpstreamRequestBody, "service_tier").String())
+	requireRequestPreviewSnapshot(t, usageRepo.lastLog.DetailSnapshot.RequestBody, reqBody)
+	require.Equal(t, "auto", gjson.Get(gjson.Get(usageRepo.lastLog.DetailSnapshot.RequestBody, "preview").String(), "service_tier").String())
+	require.Equal(t, "default", gjson.Get(gjson.Get(usageRepo.lastLog.DetailSnapshot.UpstreamRequestBody, "preview").String(), "service_tier").String())
+}
+
+func requireRequestPreviewSnapshot(t *testing.T, snapshot string, wantPreview string) {
+	t.Helper()
+	require.True(t, gjson.Valid(snapshot), "request snapshot must be JSON")
+	require.Equal(t, requestBodyPreviewSnapshotKind, gjson.Get(snapshot, "kind").String())
+	require.Equal(t, wantPreview, gjson.Get(snapshot, "preview").String())
+	require.False(t, gjson.Get(snapshot, "truncated").Bool())
+	require.Equal(t, int64(len(wantPreview)), gjson.Get(snapshot, "size").Int())
+}
+
+func newOpenAIResponsesRequestBodyTestRouter(t *testing.T) (*gin.Engine, *openAIChatCompletionsUsageLogRepoStub, *openAIRetryTrackingHTTPUpstreamStub, func()) {
+	t.Helper()
+
+	cfg := &config.Config{
+		RunMode: config.RunModeSimple,
+		Default: config.DefaultConfig{RateMultiplier: 1},
+		Gateway: config.GatewayConfig{
+			MaxAccountSwitches: 1,
+			Scheduling:         config.GatewaySchedulingConfig{LoadBatchEnabled: false},
+		},
+		Concurrency: config.ConcurrencyConfig{PingInterval: 0},
+	}
+	groupID := int64(1)
+	group := &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{
+		ID:          11,
+		Name:        "openai-test-account",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeAPIKey,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    1,
+		Credentials: map[string]any{"api_key": "sk-test"},
+	}
+	usageRepo := &openAIChatCompletionsUsageLogRepoStub{}
+	httpUpstream := &openAIRetryTrackingHTTPUpstreamStub{responses: []*http.Response{{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"id":"resp_123","object":"response","status":"completed","model":"gpt-5.4","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)),
+	}}}
+	accountRepo := &openAIChatCompletionsAccountRepoStub{account: account}
+	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+	deferredService := service.NewDeferredService(accountRepo, nil, 0)
+	billingService := service.NewBillingService(cfg, nil)
+	gatewayService := service.NewOpenAIGatewayService(
+		accountRepo,
+		usageRepo,
+		nil,
+		nil,
+		nil,
+		nil,
+		openAIChatCompletionsGatewayCacheStub{},
+		cfg,
+		nil,
+		concurrencyService,
+		billingService,
+		nil,
+		billingCacheService,
+		httpUpstream,
+		deferredService,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg)
+	apiKey := &service.APIKey{
+		ID:      101,
+		UserID:  202,
+		Status:  service.StatusActive,
+		GroupID: &groupID,
+		User:    &service.User{ID: 202, Status: service.StatusActive, Concurrency: 1},
+		Group:   group,
+	}
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.UserID, Concurrency: apiKey.User.Concurrency})
+		c.Next()
+	})
+	router.Use(middleware.UsageDetailCapture())
+	router.POST("/v1/responses", h.Responses)
+
+	return router, usageRepo, httpUpstream, func() { billingCacheService.Stop() }
 }
 
 type openAIChatCompletionsAccountRepoStub struct {
@@ -2481,6 +2668,7 @@ type openAIRetryTrackingHTTPUpstreamStub struct {
 	responses  []*http.Response
 	requests   []*http.Request
 	accountIDs []int64
+	err        error
 }
 
 func (s *openAIRetryTrackingHTTPUpstreamStub) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
@@ -2496,6 +2684,9 @@ func (s *openAIRetryTrackingHTTPUpstreamStub) Do(req *http.Request, proxyURL str
 		clonedReq.Body = io.NopCloser(bytes.NewReader(body))
 	}
 	s.requests = append(s.requests, clonedReq)
+	if s.err != nil {
+		return nil, s.err
+	}
 
 	if len(s.responses) == 0 {
 		return nil, nil

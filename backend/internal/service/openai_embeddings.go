@@ -25,6 +25,10 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
 	startTime := time.Now()
+	body, err := openAIRequestBodyBytes(c, body)
+	if err != nil {
+		return nil, fmt.Errorf("read request body: %w", err)
+	}
 
 	originalModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
 	if originalModel == "" {
@@ -60,8 +64,12 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 	}
 	targetURL := buildOpenAIEmbeddingsURL(validatedURL)
 
+	bodyHandle, ownedBodyHandle, err := openAIRequestBodyHandleForContext(c, upstreamBody)
+	if err != nil {
+		return nil, fmt.Errorf("create upstream request body: %w", err)
+	}
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
-	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, http.MethodPost, targetURL, bytes.NewReader(upstreamBody))
+	upstreamReq, err := openAINewRequestWithBodyHandle(upstreamCtx, http.MethodPost, targetURL, bodyHandle, ownedBodyHandle)
 	releaseUpstreamCtx()
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
@@ -84,13 +92,22 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效）
 	account.ApplyHeaderOverrides(upstreamReq.Header)
+	upstreamPreview := RequestBodyPreviewString(upstreamBody)
+	SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
+	body = nil
+	upstreamBody = nil
 
 	proxyURL := ""
 	if account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
+	SetOpsUpstreamAttempted(c, true)
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+	closeOpenAIRequestBody(upstreamReq)
 	if err != nil {
+		if errors.Is(err, ErrRequestBodySpool) {
+			return nil, fmt.Errorf("send embeddings request: %w", err)
+		}
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())
 		setOpsUpstreamError(c, 0, safeErr, "")
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -136,6 +153,7 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 			return nil, &UpstreamFailoverError{
 				StatusCode:             resp.StatusCode,
 				ResponseBody:           respBody,
+				ResponseHeaders:        resp.Header.Clone(),
 				RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 			}
 		}

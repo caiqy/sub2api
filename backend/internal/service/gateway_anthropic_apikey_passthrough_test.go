@@ -29,6 +29,85 @@ type anthropicHTTPUpstreamRecorder struct {
 	err            error
 }
 
+func TestGatewayService_AnthropicAPIKeyPassthroughRetriesFromBodyHandles(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"claude-test","messages":[{"role":"user","content":"retry"}]}`)
+	source, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("create source handle: %v", err)
+	}
+	t.Cleanup(func() { CleanupRequestBodyHandle(source) })
+	effective, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("create effective handle: %v", err)
+	}
+	t.Cleanup(func() { CleanupRequestBodyHandle(effective) })
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	upstream := &anthropicRetryHandleUpstream{statuses: []int{http.StatusInternalServerError, http.StatusOK}}
+	svc := &GatewayService{
+		cfg:                 &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+		httpUpstream:        upstream,
+		tlsFPProfileService: &TLSFingerprintProfileService{},
+	}
+	account := newAnthropicAPIKeyAccountForTest()
+	account.Credentials["custom_error_codes_enabled"] = true
+	account.Credentials["custom_error_codes"] = []any{float64(http.StatusBadRequest)}
+	_, err = svc.forwardAnthropicAPIKeyPassthroughWithInput(context.Background(), c, account, anthropicPassthroughForwardInput{
+		SourceHandle:  source,
+		BodyHandle:    effective,
+		RequestModel:  "claude-test",
+		OriginalModel: "claude-test",
+		StartTime:     time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("passthrough: %v", err)
+	}
+	if len(upstream.bodies) != 2 {
+		t.Fatalf("attempts = %d, want 2", len(upstream.bodies))
+	}
+	for i, got := range upstream.bodies {
+		if !bytes.Equal(got, body) {
+			t.Fatalf("attempt %d body = %q, want %q", i+1, got, body)
+		}
+	}
+}
+
+type anthropicRetryHandleUpstream struct {
+	statuses []int
+	bodies   [][]byte
+}
+
+func (u *anthropicRetryHandleUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	return nil, errors.New("Do must not be used")
+}
+
+func (u *anthropicRetryHandleUpstream) DoWithTLS(req *http.Request, _ string, _ int64, _ int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	if req.GetBody == nil || req.ContentLength <= 0 {
+		return nil, errors.New("request is not handle-backed")
+	}
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	_ = req.Body.Close()
+	u.bodies = append(u.bodies, body)
+	status := u.statuses[len(u.bodies)-1]
+	responseBody := []byte(`{"id":"msg_test","model":"claude-test","usage":{"input_tokens":1,"output_tokens":1}}`)
+	return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(bytes.NewReader(responseBody))}, nil
+}
+
+type upstreamPreviewSettingRepo struct{ SettingRepository }
+
+func (upstreamPreviewSettingRepo) GetValue(context.Context, string) (string, error) {
+	return "", ErrSettingNotFound
+}
+
+func (upstreamPreviewSettingRepo) GetMultiple(context.Context, []string) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
 func newAnthropicAPIKeyAccountForTest() *Account {
 	return &Account{
 		ID:          201,
@@ -46,6 +125,122 @@ func newAnthropicAPIKeyAccountForTest() *Account {
 		Status:      StatusActive,
 		Schedulable: true,
 	}
+}
+
+func TestGatewayCompatCallersCaptureFinalPreviewAttemptAndFailoverHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name string
+		path string
+		body []byte
+		run  func(*GatewayService, *gin.Context, *Account, []byte, *ParsedRequest) error
+	}{
+		{
+			name: "chat_completions",
+			path: "/v1/chat/completions",
+			body: []byte(`{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hello"}]}`),
+			run: func(s *GatewayService, c *gin.Context, account *Account, body []byte, parsed *ParsedRequest) error {
+				_, err := s.ForwardAsChatCompletions(context.Background(), c, account, body, parsed)
+				return err
+			},
+		},
+		{
+			name: "responses",
+			path: "/v1/responses",
+			body: []byte(`{"model":"claude-sonnet-4-20250514","input":"hello"}`),
+			run: func(s *GatewayService, c *gin.Context, account *Account, body []byte, parsed *ParsedRequest) error {
+				_, err := s.ForwardAsResponses(context.Background(), c, account, body, parsed)
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, tt.path, bytes.NewReader(tt.body))
+			collector := &openAIUsageUpstreamRequestCollector{}
+			c.Set(UsageDetailCaptureContextKey, collector)
+			upstream := &anthropicHTTPUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusTooManyRequests,
+				Header:     http.Header{"Content-Type": []string{"application/json"}, "X-Request-Id": []string{"req-compat-final"}},
+				Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"rate limited"}}`)),
+			}}
+			svc := &GatewayService{
+				cfg:                 &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+				httpUpstream:        upstream,
+				tlsFPProfileService: &TLSFingerprintProfileService{},
+			}
+			account := newAnthropicAPIKeyAccountForTest()
+			account.Extra = map[string]any{
+				"passthrough_fields_enabled": true,
+				"passthrough_field_rules":    []PassthroughFieldRule{{Target: "body", Mode: "inject", Key: "metadata.final_preview", Value: tt.name}},
+			}
+			parsed := &ParsedRequest{Body: NewRequestBodyRef(tt.body), Model: "claude-sonnet-4-20250514"}
+
+			err := tt.run(svc, c, account, tt.body, parsed)
+			var failoverErr *UpstreamFailoverError
+			require.ErrorAs(t, err, &failoverErr)
+			require.Equal(t, "req-compat-final", failoverErr.ResponseHeaders.Get("X-Request-Id"))
+			require.JSONEq(t, string(upstream.lastBody), collector.body)
+			require.Equal(t, tt.name, gjson.Get(collector.body, "metadata.final_preview").String())
+			require.JSONEq(t, collector.body, requireOpsPreviewString(t, c, tt.name))
+			require.LessOrEqual(t, len(collector.body), int(defaultRequestBodyPreviewLimitBytes))
+			require.True(t, HasOpsUpstreamAttempted(c))
+		})
+	}
+}
+
+func TestExecuteBedrockUpstreamCapturesCurrentPreviewAndAttempt(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	collector := &openAIUsageUpstreamRequestCollector{}
+	c.Set(UsageDetailCaptureContextKey, collector)
+	body := []byte(`{"anthropic_version":"bedrock-2023-05-31","messages":[{"role":"user","content":"hello bedrock"}],"max_tokens":16}`)
+	upstream := &anthropicHTTPUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"ok":true}`))}}
+	svc := &GatewayService{httpUpstream: upstream}
+	account := &Account{ID: 901, Name: "bedrock-apikey", Platform: PlatformAnthropic, Type: AccountTypeBedrock, Concurrency: 1, Credentials: map[string]any{"auth_mode": "apikey"}}
+
+	resp, err := svc.executeBedrockUpstream(context.Background(), c, account, body, "anthropic.claude-sonnet-4-5-v1:0", "us-east-1", false, nil, "bedrock-key", "")
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	defer func() { _ = resp.Body.Close() }()
+	require.JSONEq(t, string(body), collector.body)
+	require.JSONEq(t, collector.body, requireOpsPreviewString(t, c, "hello bedrock"))
+	require.True(t, HasOpsUpstreamAttempted(c))
+}
+
+func TestHandleBedrockUpstreamErrors_Secondary400FailoverClonesResponseHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	repo := &countTokensRuntimeStateRepo{}
+	svc := &GatewayService{rateLimitService: &RateLimitService{accountRepo: repo, cfg: &config.Config{}}}
+	account := &Account{ID: 902, Name: "bedrock-disabled", Platform: PlatformAnthropic, Type: AccountTypeBedrock, Status: StatusActive}
+	resp := &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header: http.Header{
+			"Content-Type":     []string{"application/json"},
+			"X-Amzn-Requestid": []string{"bedrock-request-400"},
+			"X-Amzn-Errortype": []string{"ValidationException"},
+		},
+		Body: io.NopCloser(strings.NewReader(`{"message":"organization has been disabled"}`)),
+	}
+
+	result, err := svc.handleBedrockUpstreamErrors(context.Background(), resp, c, account)
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, "bedrock-request-400", failoverErr.ResponseHeaders.Get("x-amzn-requestid"))
+	require.Equal(t, "ValidationException", failoverErr.ResponseHeaders.Get("x-amzn-errortype"))
+	require.Equal(t, "application/json", failoverErr.ResponseHeaders.Get("content-type"))
+	require.Equal(t, 1, repo.setErrorCalls)
+
+	resp.Header.Set("X-Amzn-Requestid", "mutated")
+	require.Equal(t, "bedrock-request-400", failoverErr.ResponseHeaders.Get("x-amzn-requestid"))
 }
 
 func (u *anthropicHTTPUpstreamRecorder) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
@@ -299,6 +494,36 @@ func TestGatewayService_AnthropicFieldsApplyWithoutAnthropicPassthrough(t *testi
 	require.Equal(t, "trace-123", gjson.GetBytes(upstream.lastBody, "metadata.client_trace").String())
 }
 
+func TestGatewayService_AnthropicPassthroughBuildFailureKeepsOriginalOpsBodySize(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	payload := strings.Repeat("x", int(defaultRequestBodyPreviewLimitBytes)+1024)
+	body := []byte(`{"model":"claude-3-5-sonnet-latest","image_url":"data:image/png;base64,c2VjcmV0","padding":"` + payload + `"}`)
+	parsed := &ParsedRequest{Body: NewRequestBodyRef(body), Model: "claude-3-5-sonnet-latest"}
+	svc := &GatewayService{cfg: &config.Config{}, rateLimitService: &RateLimitService{}}
+	account := &Account{
+		ID:       106,
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"api_key":  "upstream-anthropic-key",
+			"base_url": "://invalid",
+		},
+		Extra: map[string]any{"anthropic_passthrough": true},
+	}
+
+	_, err := svc.Forward(context.Background(), c, account, parsed)
+	require.Error(t, err)
+	raw, ok := c.Get(OpsUpstreamRequestBodyKey)
+	require.True(t, ok)
+	snapshot, ok := parseRequestBodyPreviewSnapshot(raw.(string))
+	require.True(t, ok)
+	require.Equal(t, int64(len(body)), snapshot.Size)
+	require.True(t, snapshot.Truncated)
+	require.Equal(t, requestBodyPreviewOmittedMarker, snapshot.Preview)
+}
+
 func TestPassthroughFieldsV2AnthropicAPIKeyPassthrough_BodyInjectAndMapDoNotChain(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -390,6 +615,8 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardCountTokensPreservesBo
 	c.Request.Header.Set("Authorization", "Bearer inbound-token")
 	c.Request.Header.Set("X-Api-Key", "inbound-api-key")
 	c.Request.Header.Set("Cookie", "secret=1")
+	collector := &openAIUsageUpstreamRequestCollector{}
+	c.Set(UsageDetailCaptureContextKey, collector)
 
 	body := []byte(`{"model":"claude-3-5-sonnet-latest","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}],"thinking":{"type":"enabled"}}`)
 	parsed := &ParsedRequest{
@@ -454,11 +681,10 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardCountTokensPreservesBo
 	require.Equal(t, "trace-ct-1", getHeaderRaw(upstream.lastReq.Header, "X-Trace-Id"))
 	require.Empty(t, getHeaderRaw(upstream.lastReq.Header, "authorization"))
 	require.Empty(t, getHeaderRaw(upstream.lastReq.Header, "cookie"))
-	rawBody, ok := c.Get(OpsUpstreamRequestBodyKey)
-	require.True(t, ok)
-	bodyBytes, ok := rawBody.([]byte)
-	require.True(t, ok)
+	bodyPreview := requireOpsPreviewString(t, c, "user-1")
+	bodyBytes := []byte(bodyPreview)
 	require.Equal(t, "user-1", gjson.GetBytes(bodyBytes, "metadata.user_id").String())
+	require.Contains(t, collector.body, "user-1")
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.JSONEq(t, upstreamRespBody, rec.Body.String())
 	require.Empty(t, rec.Header().Get("Set-Cookie"))
@@ -470,6 +696,8 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_BearerAuthScheme(t *testing.T
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	collector := &openAIUsageUpstreamRequestCollector{}
+	c.Set(UsageDetailCaptureContextKey, collector)
 	c.Request.Header.Set("Authorization", "Bearer inbound-token")
 	c.Request.Header.Set("X-Api-Key", "inbound-api-key")
 	c.Request.Header.Set("Cookie", "secret=1")
@@ -495,7 +723,7 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_BearerAuthScheme(t *testing.T
 	}
 
 	body := []byte(`{"model":"gpt-oss:20b","messages":[]}`)
-	msgReq, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(
+	msgReq, _, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(
 		context.Background(), c, account, body, body, "ollama-key",
 	)
 	require.NoError(t, err)
@@ -507,7 +735,7 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_BearerAuthScheme(t *testing.T
 	require.Empty(t, getHeaderRaw(msgReq.Header, "x-api-key"))
 	require.Empty(t, getHeaderRaw(msgReq.Header, "cookie"))
 
-	countReq, err := svc.buildCountTokensRequestAnthropicAPIKeyPassthrough(
+	countReq, _, err := svc.buildCountTokensRequestAnthropicAPIKeyPassthrough(
 		context.Background(), c, account, []byte(`{"model":"gpt-oss:20b","messages":[]}`), "ollama-key",
 	)
 	require.NoError(t, err)
@@ -969,7 +1197,7 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_BuildRequestRejectsInvalidBas
 		},
 	}
 
-	_, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(context.Background(), c, account, []byte(`{}`), []byte(`{}`), "k")
+	_, _, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(context.Background(), c, account, []byte(`{}`), []byte(`{}`), "k")
 	require.Error(t, err)
 }
 
@@ -1742,6 +1970,8 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_OpsBodyReflectsPassthroughInj
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	collector := &openAIUsageUpstreamRequestCollector{}
+	c.Set(UsageDetailCaptureContextKey, collector)
 
 	inputBody := []byte(`{"model":"claude-3-5-sonnet-latest","messages":[{"role":"user","content":"hi"}]}`)
 	parsed := &ParsedRequest{Body: NewRequestBodyRef(inputBody), Model: "claude-3-5-sonnet-latest"}
@@ -1786,10 +2016,192 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_OpsBodyReflectsPassthroughInj
 	_, err := svc.Forward(context.Background(), c, account, parsed)
 	require.NoError(t, err)
 
-	rawBody, ok := c.Get(OpsUpstreamRequestBodyKey)
-	require.True(t, ok)
-	bodyBytes, ok := rawBody.([]byte)
-	require.True(t, ok)
+	bodyPreview := requireOpsPreviewString(t, c, "injected-value")
+	bodyBytes := []byte(bodyPreview)
 	require.Equal(t, "injected-value", gjson.GetBytes(bodyBytes, "metadata.ops_tag").String(),
 		"ops upstream request body should reflect passthrough-injected fields")
+	require.Contains(t, collector.body, "injected-value")
+}
+
+func TestGatewayService_RetryPreviewUsesFinalBuilderBody(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      string
+		responses []string
+	}{
+		{
+			name: "two-stage signature retry",
+			body: `{"model":"claude-sonnet-4-5","max_tokens":1024,"thinking":{"type":"enabled","budget_tokens":1024},"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"work","signature":"stale"},{"type":"tool_use","id":"toolu_1","name":"lookup","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"ok"}]}]}`,
+			responses: []string{
+				`{"type":"error","error":{"type":"invalid_request_error","message":"Invalid signature in thinking block"}}`,
+				`{"type":"error","error":{"type":"invalid_request_error","message":"Invalid signature in tool_use block"}}`,
+				`{"id":"msg_retry","type":"message","content":[],"usage":{"input_tokens":1,"output_tokens":1}}`,
+			},
+		},
+		{
+			name: "budget retry",
+			body: `{"model":"claude-sonnet-4-5","max_tokens":512,"thinking":{"type":"enabled","budget_tokens":512},"messages":[{"role":"user","content":"hello"}]}`,
+			responses: []string{
+				`{"type":"error","error":{"type":"invalid_request_error","message":"thinking budget_tokens input should be greater than or equal to 1024"}}`,
+				`{"id":"msg_budget","type":"message","content":[],"usage":{"input_tokens":1,"output_tokens":1}}`,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			body := []byte(tt.body)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+			collector := &openAIUsageUpstreamRequestCollector{}
+			c.Set(UsageDetailCaptureContextKey, collector)
+
+			responses := make([]*http.Response, 0, len(tt.responses))
+			for i, responseBody := range tt.responses {
+				status := http.StatusBadRequest
+				if i == len(tt.responses)-1 {
+					status = http.StatusOK
+				}
+				responses = append(responses, &http.Response{
+					StatusCode: status,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(responseBody)),
+				})
+			}
+			upstream := &queuedHTTPUpstreamStub{responses: responses}
+			cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+			svc := &GatewayService{
+				cfg:              cfg,
+				httpUpstream:     upstream,
+				rateLimitService: &RateLimitService{},
+				settingService:   NewSettingService(upstreamPreviewSettingRepo{}, cfg),
+			}
+			account := &Account{
+				ID:          502,
+				Name:        "retry-preview",
+				Platform:    PlatformAnthropic,
+				Type:        AccountTypeAPIKey,
+				Concurrency: 1,
+				Credentials: map[string]any{"api_key": "upstream-key"},
+				Extra: map[string]any{
+					"passthrough_fields_enabled": true,
+					"passthrough_field_rules": []PassthroughFieldRule{
+						{Target: "body", Mode: "inject", Key: "metadata.retry_preview_marker", Value: tt.name},
+					},
+				},
+			}
+
+			_, err := svc.Forward(context.Background(), c, account, &ParsedRequest{
+				Body:  NewRequestBodyRef(body),
+				Model: "claude-sonnet-4-5",
+			})
+			require.NoError(t, err)
+			require.Len(t, upstream.requestBodies, len(tt.responses))
+			finalBody := string(upstream.requestBodies[len(upstream.requestBodies)-1])
+			require.Equal(t, tt.name, gjson.Get(finalBody, "metadata.retry_preview_marker").String())
+			require.Equal(t, finalBody, collector.body)
+			require.Equal(t, finalBody, requireOpsPreviewString(t, c, tt.name))
+		})
+	}
+}
+
+func TestGatewayService_SignatureRetryTransportErrorKeepsAttemptBodiesAligned(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":1024,"thinking":{"type":"enabled","budget_tokens":1024},"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"work","signature":"stale"}]},{"role":"user","content":"continue"}]}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	collector := &openAIUsageUpstreamRequestCollector{}
+	c.Set(UsageDetailCaptureContextKey, collector)
+
+	upstream := &queuedHTTPUpstreamStub{
+		responses: []*http.Response{{
+			StatusCode: http.StatusBadRequest,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"type":"error","error":{"type":"invalid_request_error","message":"Invalid signature in thinking block"}}`)),
+		}, nil},
+		errors: []error{nil, errors.New("retry transport failed")},
+	}
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	svc := &GatewayService{
+		cfg:              cfg,
+		httpUpstream:     upstream,
+		rateLimitService: &RateLimitService{},
+		settingService:   NewSettingService(upstreamPreviewSettingRepo{}, cfg),
+	}
+	account := &Account{
+		ID: 503, Name: "retry-transport-preview", Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Concurrency: 1,
+		Credentials: map[string]any{"api_key": "upstream-key"},
+	}
+
+	_, err := svc.Forward(context.Background(), c, account, &ParsedRequest{Body: NewRequestBodyRef(body), Model: "claude-sonnet-4-5"})
+
+	require.Error(t, err)
+	require.Len(t, upstream.requestBodies, 2)
+	originalAttempt := string(upstream.requestBodies[0])
+	retryAttempt := string(upstream.requestBodies[1])
+	require.NotEqual(t, originalAttempt, retryAttempt)
+	require.Equal(t, originalAttempt, collector.body)
+	require.Equal(t, originalAttempt, requireOpsPreviewString(t, c, "claude-sonnet-4-5"))
+
+	rawEvents, ok := c.Get(OpsUpstreamErrorsKey)
+	require.True(t, ok)
+	events, ok := rawEvents.([]*OpsUpstreamErrorEvent)
+	require.True(t, ok)
+	requestBodies := map[string]string{}
+	for _, event := range events {
+		requestBodies[event.Kind] = unwrapRequestBodyPreviewForTest(event.UpstreamRequestBody)
+	}
+	require.Equal(t, originalAttempt, requestBodies["signature_error"])
+	require.Equal(t, retryAttempt, requestBodies["signature_retry_request_error"])
+}
+
+func TestGatewayService_BudgetRetryTransportErrorKeepsAttemptBodiesAligned(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":512,"thinking":{"type":"enabled","budget_tokens":512},"messages":[{"role":"user","content":"hello"}]}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	collector := &openAIUsageUpstreamRequestCollector{}
+	c.Set(UsageDetailCaptureContextKey, collector)
+
+	upstream := &queuedHTTPUpstreamStub{
+		responses: []*http.Response{{
+			StatusCode: http.StatusBadRequest,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"type":"error","error":{"type":"invalid_request_error","message":"thinking budget_tokens input should be greater than or equal to 1024"}}`)),
+		}, nil},
+		errors: []error{nil, errors.New("budget retry transport failed")},
+	}
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	svc := &GatewayService{
+		cfg:              cfg,
+		httpUpstream:     upstream,
+		rateLimitService: &RateLimitService{},
+		settingService:   NewSettingService(upstreamPreviewSettingRepo{}, cfg),
+	}
+	account := &Account{ID: 504, Name: "budget-retry-preview", Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Concurrency: 1, Credentials: map[string]any{"api_key": "upstream-key"}}
+
+	_, err := svc.Forward(context.Background(), c, account, &ParsedRequest{Body: NewRequestBodyRef(body), Model: "claude-sonnet-4-5"})
+
+	require.Error(t, err)
+	require.Len(t, upstream.requestBodies, 2)
+	originalAttempt := string(upstream.requestBodies[0])
+	retryAttempt := string(upstream.requestBodies[1])
+	require.NotEqual(t, originalAttempt, retryAttempt)
+	require.Equal(t, originalAttempt, collector.body)
+	require.Equal(t, originalAttempt, requireOpsPreviewString(t, c, "claude-sonnet-4-5"))
+
+	rawEvents, ok := c.Get(OpsUpstreamErrorsKey)
+	require.True(t, ok)
+	events, ok := rawEvents.([]*OpsUpstreamErrorEvent)
+	require.True(t, ok)
+	requestBodies := map[string]string{}
+	for _, event := range events {
+		requestBodies[event.Kind] = unwrapRequestBodyPreviewForTest(event.UpstreamRequestBody)
+	}
+	require.Equal(t, originalAttempt, requestBodies["budget_constraint_error"])
+	require.Equal(t, retryAttempt, requestBodies["budget_retry_request_error"])
 }

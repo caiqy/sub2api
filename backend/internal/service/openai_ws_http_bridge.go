@@ -121,29 +121,6 @@ func (c *openAIWSToolCallReplayCollector) addItem(item gjson.Result) {
 	c.items = append(c.items, json.RawMessage(raw))
 }
 
-func buildOpenAIWSHTTPBridgeErrorEvent(statusCode int, message string) []byte {
-	message = strings.TrimSpace(message)
-	if message == "" {
-		message = http.StatusText(statusCode)
-	}
-	if message == "" {
-		message = "upstream request failed"
-	}
-	event := map[string]any{
-		"type":   "error",
-		"status": statusCode,
-		"error": map[string]any{
-			"type":    "upstream_error",
-			"message": message,
-		},
-	}
-	body, err := json.Marshal(event)
-	if err != nil {
-		return []byte(`{"type":"error","error":{"type":"upstream_error","message":"upstream request failed"}}`)
-	}
-	return body
-}
-
 func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	ctx context.Context,
 	c *gin.Context,
@@ -212,10 +189,11 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	}
 
 	turnStart := time.Now()
+	SetOpsUpstreamAttempted(c, true)
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+	closeOpenAIRequestBody(upstreamReq)
 	if err != nil {
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())
-		_ = writeClientMessage(buildOpenAIWSHTTPBridgeErrorEvent(http.StatusBadGateway, "Upstream request failed"))
 		return nil, fmt.Errorf("upstream http bridge request failed: %s", safeErr)
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -226,7 +204,20 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if upstreamMsg == "" {
 			upstreamMsg = http.StatusText(resp.StatusCode)
 		}
-		_ = writeClientMessage(buildOpenAIWSHTTPBridgeErrorEvent(resp.StatusCode, upstreamMsg))
+		if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
+			upstreamModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
+			if account.Platform == PlatformGrok {
+				s.handleGrokAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
+			} else {
+				s.handleFailoverSideEffects(ctx, resp, account, respBody, upstreamModel)
+			}
+			return nil, &UpstreamFailoverError{
+				StatusCode:             resp.StatusCode,
+				ResponseBody:           respBody,
+				ResponseHeaders:        resp.Header.Clone(),
+				RetryableOnSameAccount: account.IsPoolMode() && (account.IsPoolModeRetryableStatus(resp.StatusCode) || isOpenAITransientProcessingError(resp.StatusCode, upstreamMsg, respBody)),
+			}
+		}
 		return nil, fmt.Errorf("upstream http bridge error: status=%d message=%s", resp.StatusCode, upstreamMsg)
 	}
 

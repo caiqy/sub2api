@@ -12,7 +12,9 @@ import (
 
 type handlerSettingRepoStub struct{}
 
-func (s *handlerSettingRepoStub) Get(context.Context, string) (*service.Setting, error) { return nil, service.ErrSettingNotFound }
+func (s *handlerSettingRepoStub) Get(context.Context, string) (*service.Setting, error) {
+	return nil, service.ErrSettingNotFound
+}
 
 func (s *handlerSettingRepoStub) GetValue(_ context.Context, key string) (string, error) {
 	if key == service.SettingKeyGatewayRuntimeSettings {
@@ -29,7 +31,9 @@ func (s *handlerSettingRepoStub) GetMultiple(context.Context, []string) (map[str
 
 func (s *handlerSettingRepoStub) SetMultiple(context.Context, map[string]string) error { return nil }
 
-func (s *handlerSettingRepoStub) GetAll(context.Context) (map[string]string, error) { return map[string]string{}, nil }
+func (s *handlerSettingRepoStub) GetAll(context.Context) (map[string]string, error) {
+	return map[string]string{}, nil
+}
 
 func (s *handlerSettingRepoStub) Delete(context.Context, string) error { return nil }
 
@@ -100,11 +104,13 @@ func (s *stubAccountRepo) ListTempUnschedulableByPlatform(_ context.Context, pla
 
 func (s *stubAccountRepo) UpdateLastUsed(_ context.Context, _ int64) error { return nil }
 
-func (s *stubAccountRepo) BatchUpdateLastUsed(_ context.Context, _ map[int64]time.Time) error { return nil }
+func (s *stubAccountRepo) BatchUpdateLastUsed(_ context.Context, _ map[int64]time.Time) error {
+	return nil
+}
 
 func (s *stubAccountRepo) SetRateLimited(_ context.Context, _ int64, _ time.Time) error { return nil }
 
-func (s *stubAccountRepo) SetModelRateLimit(_ context.Context, _ int64, _ string, _ time.Time) error {
+func (s *stubAccountRepo) SetModelRateLimit(_ context.Context, _ int64, _ string, _ time.Time, _ ...string) error {
 	return nil
 }
 

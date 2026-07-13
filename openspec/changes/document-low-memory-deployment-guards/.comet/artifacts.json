@@ -1,0 +1,6 @@
+{
+  "openspec_proposal": "openspec/changes/document-low-memory-deployment-guards/proposal.md",
+  "openspec_design": "openspec/changes/document-low-memory-deployment-guards/design.md",
+  "openspec_tasks": "openspec/changes/document-low-memory-deployment-guards/tasks.md",
+  "openspec_delta_spec": "openspec/changes/document-low-memory-deployment-guards/specs/low-memory-deployment-guards/spec.md"
+}

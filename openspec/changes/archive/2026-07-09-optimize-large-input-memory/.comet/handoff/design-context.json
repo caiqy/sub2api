@@ -1,0 +1,14 @@
+{
+  "change": "optimize-large-input-memory",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "b6eb848787d2d1b0a90df9964c9c8246abd81fdaaebbb7660569caafe41100a8",
+  "files": [
+    { "path": "openspec/changes/optimize-large-input-memory/proposal.md", "sha256": "9ac26bb195d7c9350dc6de0be815676f72ee9990ade127ec0d243be695ac6cbc" },
+    { "path": "openspec/changes/optimize-large-input-memory/design.md", "sha256": "0b9ef4cb9f87247a9055dd07977db34fa2025972ca3b7d5be70f3c1a0bb12476" },
+    { "path": "openspec/changes/optimize-large-input-memory/tasks.md", "sha256": "e5f2c72249ad6746e607f9c40aeed4f1bbdfdbc9a47803d617a1c008034389e1" },
+    { "path": "openspec/changes/optimize-large-input-memory/specs/large-input-memory-control/spec.md", "sha256": "dc33fbafeaa27a4d61684ec69db781e118d6ab8cb09bad949bd0d4a52837b8c1" }
+  ]
+}

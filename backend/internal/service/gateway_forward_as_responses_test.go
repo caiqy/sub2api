@@ -126,6 +126,8 @@ func TestGatewayService_ForwardAsResponses_PassthroughBodyMapCopiesFromOriginalR
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	collector := &openAIUsageUpstreamRequestCollector{}
+	c.Set(UsageDetailCaptureContextKey, collector)
 
 	// Original Responses API body with "instructions" (OpenAI Responses-specific field).
 	responsesBody := []byte(`{
@@ -134,7 +136,7 @@ func TestGatewayService_ForwardAsResponses_PassthroughBodyMapCopiesFromOriginalR
 		"instructions": "be concise"
 	}`)
 
-	parsed := &ParsedRequest{Body: responsesBody, Model: "claude-sonnet-4-20250514", Stream: false}
+	parsed := &ParsedRequest{Body: NewRequestBodyRef(responsesBody), Model: "claude-sonnet-4-20250514", Stream: false}
 
 	upstreamSSE := strings.Join([]string{
 		`event: message_start`,
@@ -210,6 +212,10 @@ func TestGatewayService_ForwardAsResponses_PassthroughBodyMapCopiesFromOriginalR
 
 	// Auth header should be replaced.
 	require.Equal(t, "upstream-key-resp", getHeaderRaw(upstream.lastReq.Header, "x-api-key"))
+	require.JSONEq(t, string(upstream.lastBody), collector.body)
+	require.Equal(t, "be concise", gjson.Get(collector.body, "metadata.client_instructions").String())
+	require.JSONEq(t, collector.body, requireOpsPreviewString(t, c, "be concise"))
+	require.True(t, HasOpsUpstreamAttempted(c))
 }
 
 // TestGatewayService_ForwardAsResponses_PassthroughDisabledLeavesRulesInactive
@@ -227,7 +233,7 @@ func TestGatewayService_ForwardAsResponses_PassthroughDisabledLeavesRulesInactiv
 		"instructions": "should-not-appear"
 	}`)
 
-	parsed := &ParsedRequest{Body: responsesBody, Model: "claude-sonnet-4-20250514", Stream: false}
+	parsed := &ParsedRequest{Body: NewRequestBodyRef(responsesBody), Model: "claude-sonnet-4-20250514", Stream: false}
 
 	upstreamSSE := strings.Join([]string{
 		`event: message_start`,
@@ -320,7 +326,7 @@ func TestGatewayService_ForwardAsResponses_PassthroughBodyForwardCopiesFromOrigi
 		"instructions": "be verbose"
 	}`)
 
-	parsed := &ParsedRequest{Body: responsesBody, Model: "claude-sonnet-4-20250514", Stream: false}
+	parsed := &ParsedRequest{Body: NewRequestBodyRef(responsesBody), Model: "claude-sonnet-4-20250514", Stream: false}
 
 	upstreamSSE := strings.Join([]string{
 		`event: message_start`,
@@ -405,7 +411,7 @@ func TestGatewayService_ForwardAsResponses_PassthroughHeaderForwardCopiesFromCli
 		"input": "hello"
 	}`)
 
-	parsed := &ParsedRequest{Body: responsesBody, Model: "claude-sonnet-4-20250514", Stream: false}
+	parsed := &ParsedRequest{Body: NewRequestBodyRef(responsesBody), Model: "claude-sonnet-4-20250514", Stream: false}
 
 	upstreamSSE := strings.Join([]string{
 		`event: message_start`,
