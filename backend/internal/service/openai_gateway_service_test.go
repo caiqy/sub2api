@@ -511,7 +511,7 @@ func TestOpenAIGatewayService_GenerateExplicitSessionHash_SkipsContentFallback(t
 	svc := &OpenAIGatewayService{}
 	body := []byte(`{"model":"gpt-image-2","prompt":"draw a cat"}`)
 
-	t.Run("stateless image body stays unstuck", func(t *testing.T) {
+	t.Run("无显式会话信号时不生成哈希", func(t *testing.T) {
 		rec := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(rec)
 		c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)

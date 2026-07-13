@@ -1533,9 +1533,8 @@ func explicitOpenAISessionID(c *gin.Context, body []byte) string {
 	return sessionID
 }
 
-// GenerateExplicitSessionHash generates a sticky-session hash only from explicit
-// client session signals. It intentionally skips content-derived fallback and is
-// used by stateless endpoints such as /v1/images.
+// GenerateExplicitSessionHash 仅根据客户端显式会话信号生成粘性会话哈希，
+// 不使用内容派生回退。当前生产 Images 路径未依赖此方法。
 func (s *OpenAIGatewayService) GenerateExplicitSessionHash(c *gin.Context, body []byte) string {
 	sessionID := explicitOpenAISessionID(c, body)
 	if sessionID == "" {
