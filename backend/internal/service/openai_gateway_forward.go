@@ -687,10 +687,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	for {
 		// Build upstream request
 		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
-		var firstTokenWatchdog *openAIFirstTokenWatchdog
-		if reqStream {
-			upstreamCtx, firstTokenWatchdog = s.withOpenAIFirstTokenTimeout(upstreamCtx, body, "sse")
-		}
 		var upstreamReq *http.Request
 		if bodyHandle := getOpenAIRequestBodyHandle(c); bodyHandle != nil {
 			upstreamReq, err = s.buildUpstreamRequestWithSourceBody(upstreamCtx, c, account, originalBody, body, bodyHandle, token, reqStream, promptCacheKey, isCodexCLI)
@@ -699,8 +695,14 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		releaseUpstreamCtx()
 		if err != nil {
-			firstTokenWatchdog.Stop()
 			return nil, err
+		}
+		var firstTokenWatchdog *openAIFirstTokenWatchdog
+		if reqStream {
+			class := openAIFirstTokenClassFromRequest(upstreamReq, body)
+			var timedCtx context.Context
+			timedCtx, firstTokenWatchdog = s.withOpenAIFirstTokenClass(upstreamReq.Context(), class, "sse")
+			upstreamReq = upstreamReq.WithContext(timedCtx)
 		}
 		upstreamPreview := openAIUpstreamRequestBodyPreview(upstreamReq, body)
 		if _, ownsFinalBody := upstreamReq.Context().Value(openAIOwnedBodyHandleContextKey{}).(*RequestBodyHandle); !ownsFinalBody {
@@ -736,11 +738,21 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			// unschedule the account on durable faults (e.g. rejected proxy credentials).
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 		}
-		firstTokenWatchdog.MarkHeaders(resp.Header.Get("x-request-id"))
+		if !firstTokenWatchdog.MarkHeaders(resp.Header.Get("x-request-id")) {
+			_ = resp.Body.Close()
+			timeoutErr := firstTokenWatchdog.TimeoutError()
+			recordOpenAIFirstTokenTimeout(ctx, c, account, timeoutErr)
+			return nil, timeoutErr
+		}
 
 		// Handle error response
 		if resp.StatusCode >= 400 {
-			firstTokenWatchdog.Stop()
+			if !firstTokenWatchdog.Stop() {
+				_ = resp.Body.Close()
+				timeoutErr := firstTokenWatchdog.TimeoutError()
+				recordOpenAIFirstTokenTimeout(ctx, c, account, timeoutErr)
+				return nil, timeoutErr
+			}
 			respBody := s.readUpstreamErrorBody(resp)
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))

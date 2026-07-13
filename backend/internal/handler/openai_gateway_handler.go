@@ -507,16 +507,13 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			var firstTokenTimeout *service.OpenAIFirstTokenTimeoutError
 			if errors.As(err, &firstTokenTimeout) {
 				h.submitFailedUsageLog(c, apiKey, account, reqModel, reqStream, 0, nil, nil, forwardDuration, attemptReasoningEffort, "handler.openai_gateway.responses")
-				reqLog.Warn("gateway.openai_first_token_timeout",
-					zap.Int64("account_id", account.ID),
-					zap.String("class", string(firstTokenTimeout.Class)),
-					zap.Duration("timeout", firstTokenTimeout.Timeout),
-					zap.Duration("elapsed", firstTokenTimeout.Elapsed),
-					zap.String("transport", firstTokenTimeout.Transport),
-					zap.Bool("headers_received", firstTokenTimeout.HeadersReceived),
-					zap.Bool("created_received", firstTokenTimeout.CreatedReceived),
-					zap.String("upstream_request_id", firstTokenTimeout.UpstreamRequestID),
-				)
+				headers := c.Writer.Header()
+				headers.Del("Content-Type")
+				headers.Del("Content-Length")
+				headers.Del("Content-Encoding")
+				headers.Del("Transfer-Encoding")
+				headers.Del("Connection")
+				headers.Del("X-Accel-Buffering")
 				h.handleStreamingAwareError(c, http.StatusGatewayTimeout, "first_token_timeout", "Upstream timed out before the first response event", false)
 				return
 			}

@@ -38,6 +38,9 @@ func TestOpenAIFirstTokenTimeoutWatchdogTimesOutWithDiagnostics(t *testing.T) {
 	require.True(t, timeoutErr.CreatedReceived)
 	require.Equal(t, "req_123", timeoutErr.UpstreamRequestID)
 	require.GreaterOrEqual(t, timeoutErr.Elapsed, 20*time.Millisecond)
+	require.False(t, watchdog.Observe([]byte(`{"type":"response.output_text.delta","delta":"late"}`)))
+	require.False(t, watchdog.MarkHeaders("req_late"))
+	require.False(t, watchdog.Stop())
 
 	var failoverErr *UpstreamFailoverError
 	require.False(t, errors.As(timeoutErr, &failoverErr))
@@ -81,7 +84,7 @@ func TestWithOpenAIFirstTokenTimeoutSelectsImageDuration(t *testing.T) {
 		[]byte(`{"tool_choice":{"type":"image_generation"}}`),
 		"websocket",
 	)
-	t.Cleanup(watchdog.Stop)
+	t.Cleanup(func() { watchdog.Stop() })
 
 	require.Equal(t, openaiutil.FirstTokenClassImage, watchdog.class)
 	require.Equal(t, 600*time.Second, watchdog.timeout)

@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -34,6 +35,23 @@ func TestResponsesFirstTokenClass(t *testing.T) {
 			require.Equal(t, tt.want, ResponsesFirstTokenClass([]byte(tt.body)))
 		})
 	}
+}
+
+func TestResponsesFirstTokenClassReaderUsesFinalPayload(t *testing.T) {
+	body := `{"input":{"nested":[{"text":"hello"},{"more":[1,2,3]}]},"tool_choice":{"type":"image_generation"}}`
+	require.Equal(t, FirstTokenClassImage, ResponsesFirstTokenClassReader(strings.NewReader(body)))
+}
+
+func TestResponsesFirstTokenClassReaderKeepsLargeSkippedStringAllocationBounded(t *testing.T) {
+	payload := `{"input":"` + strings.Repeat("a", 1<<20) + `","tool_choice":{"type":"image_generation"}}`
+	result := testing.Benchmark(func(b *testing.B) {
+		for range b.N {
+			if got := ResponsesFirstTokenClassReader(strings.NewReader(payload)); got != FirstTokenClassImage {
+				b.Fatalf("class = %s", got)
+			}
+		}
+	})
+	require.Less(t, result.AllocedBytesPerOp(), int64(128<<10))
 }
 
 func TestResponsesFirstTokenEventClassification(t *testing.T) {

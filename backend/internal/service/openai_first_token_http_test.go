@@ -146,3 +146,99 @@ func TestOpenAIFirstTokenImageOutputItemStopsWatchdog(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, context.Cause(ctx))
 }
+
+func TestOpenAIFirstTokenClassUsesFinalWirePayload(t *testing.T) {
+	c, _ := newFirstTokenSSEGinContext()
+	body := []byte(`{"model":"gpt-5","stream":true,"input":"hello"}`)
+	svc := &OpenAIGatewayService{
+		cfg: &config.Config{
+			Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}},
+			Gateway: config.GatewayConfig{
+				OpenAITextFirstTokenTimeout:  1,
+				OpenAIImageFirstTokenTimeout: 0,
+			},
+		},
+		httpUpstream: firstTokenBlockingUpstream{},
+	}
+	account := &Account{
+		ID:          2,
+		Name:        "wire-class-account",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "test-key", "base_url": "https://example.com/v1"},
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "body", Mode: "inject", Key: "tool_choice.type", Value: "image_generation"},
+			},
+		},
+	}
+	started := time.Now()
+
+	_, err := svc.forwardOpenAIPassthrough(context.Background(), c, account, body, "gpt-5", nil, true, started)
+
+	var timeoutErr *OpenAIFirstTokenTimeoutError
+	require.False(t, errors.As(err, &timeoutErr))
+	require.GreaterOrEqual(t, time.Since(started), 1400*time.Millisecond)
+}
+
+func TestOpenAIFirstTokenTerminalDoesNotRecordFirstToken(t *testing.T) {
+	c, _ := newFirstTokenSSEGinContext()
+	ctx, watchdog := newOpenAIFirstTokenWatchdog(context.Background(), openaiutil.FirstTokenClassText, time.Second, "sse")
+	defer watchdog.Stop()
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{},
+		Body:       io.NopCloser(bytes.NewBufferString("data: {\"type\":\"response.completed\"}\n\n")),
+	}
+
+	result, err := (&OpenAIGatewayService{}).handleStreamingResponsePassthrough(ctx, resp, c, &Account{ID: 1}, time.Now(), "", "")
+
+	require.NoError(t, err)
+	require.Nil(t, result.firstTokenMs)
+}
+
+func TestOpenAIFirstTokenTimeoutResponsesChatFallbackBeforeHeaders(t *testing.T) {
+	c, _ := newFirstTokenSSEGinContext()
+	body := []byte(`{"model":"gpt-5","stream":true,"input":"hello"}`)
+	svc := &OpenAIGatewayService{
+		cfg: &config.Config{
+			Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}},
+			Gateway:  config.GatewayConfig{OpenAITextFirstTokenTimeout: 1},
+		},
+		httpUpstream: firstTokenBlockingUpstream{},
+	}
+	account := &Account{
+		ID:          3,
+		Name:        "chat-fallback-account",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "test-key", "base_url": "https://example.com/v1"},
+		Extra:       map[string]any{"openai_responses_supported": false},
+	}
+
+	_, err := svc.Forward(context.Background(), c, account, body)
+
+	var timeoutErr *OpenAIFirstTokenTimeoutError
+	require.ErrorAs(t, err, &timeoutErr)
+}
+
+func TestOpenAIFirstTokenTimeoutWinsBeforeChatFallbackFinalize(t *testing.T) {
+	c, recorder := newFirstTokenSSEGinContext()
+	ctx, watchdog := newOpenAIFirstTokenWatchdog(context.Background(), openaiutil.FirstTokenClassText, time.Millisecond, "sse")
+	defer watchdog.Stop()
+	time.Sleep(5 * time.Millisecond)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{},
+		Body:       io.NopCloser(bytes.NewBufferString("data: [DONE]\n\n")),
+	}
+
+	_, err := (&OpenAIGatewayService{}).streamChatCompletionsAsResponses(ctx, c, resp, "gpt-5", "gpt-5", "gpt-5", nil, nil, time.Now())
+
+	var timeoutErr *OpenAIFirstTokenTimeoutError
+	require.ErrorAs(t, err, &timeoutErr)
+	require.Empty(t, recorder.Body.String())
+}

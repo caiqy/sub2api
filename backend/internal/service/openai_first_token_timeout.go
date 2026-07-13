@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"sync"
 	"time"
@@ -95,6 +96,14 @@ func (s *OpenAIGatewayService) withOpenAIFirstTokenTimeout(
 	transport string,
 ) (context.Context, *openAIFirstTokenWatchdog) {
 	class := openaiutil.ResponsesFirstTokenClass(payload)
+	return s.withOpenAIFirstTokenClass(ctx, class, transport)
+}
+
+func (s *OpenAIGatewayService) withOpenAIFirstTokenClass(
+	ctx context.Context,
+	class openaiutil.FirstTokenClass,
+	transport string,
+) (context.Context, *openAIFirstTokenWatchdog) {
 	seconds := 0
 	if s != nil && s.cfg != nil {
 		seconds = s.cfg.Gateway.OpenAITextFirstTokenTimeout
@@ -105,41 +114,77 @@ func (s *OpenAIGatewayService) withOpenAIFirstTokenTimeout(
 	return newOpenAIFirstTokenWatchdog(ctx, class, time.Duration(seconds)*time.Second, transport)
 }
 
-func (w *openAIFirstTokenWatchdog) MarkHeaders(requestID string) {
+func openAIFirstTokenClassFromRequest(req *http.Request, fallback []byte) openaiutil.FirstTokenClass {
+	if req != nil && req.GetBody != nil {
+		body, err := req.GetBody()
+		if err == nil {
+			defer body.Close()
+			return openaiutil.ResponsesFirstTokenClassReader(body)
+		}
+	}
+	return openaiutil.ResponsesFirstTokenClass(fallback)
+}
+
+func (w *openAIFirstTokenWatchdog) MarkHeaders(requestID string) bool {
 	if w == nil {
-		return
+		return true
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.timedOut {
+		return false
+	}
 	w.headersReceived = true
 	w.upstreamRequestID = requestID
+	return true
 }
 
-func (w *openAIFirstTokenWatchdog) Observe(payload []byte) {
+// Observe atomically claims the first-event race. Callers may process or write
+// the event only when it returns true.
+func (w *openAIFirstTokenWatchdog) Observe(payload []byte) bool {
 	if w == nil {
-		return
-	}
-	if gjson.GetBytes(payload, "type").String() == "response.created" {
-		w.mu.Lock()
-		w.createdReceived = true
-		w.mu.Unlock()
-	}
-	if openaiutil.ResponsesEventEndsFirstTokenWait(payload) {
-		w.Stop()
-	}
-}
-
-func (w *openAIFirstTokenWatchdog) Stop() {
-	if w == nil {
-		return
+		return true
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.stopped {
-		return
+	if w.timedOut {
+		return false
+	}
+	if gjson.GetBytes(payload, "type").String() == "response.created" {
+		w.createdReceived = true
+	}
+	if !openaiutil.ResponsesEventEndsFirstTokenWait(payload) || w.stopped {
+		return true
 	}
 	w.stopped = true
 	w.timer.Stop()
+	return true
+}
+
+func (w *openAIFirstTokenWatchdog) Stop() bool {
+	if w == nil {
+		return true
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.timedOut {
+		return false
+	}
+	if w.stopped {
+		return true
+	}
+	w.stopped = true
+	w.timer.Stop()
+	return true
+}
+
+func (w *openAIFirstTokenWatchdog) CanWriteClient() bool {
+	if w == nil {
+		return true
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.stopped && !w.timedOut
 }
 
 func (w *openAIFirstTokenWatchdog) TimeoutError() *OpenAIFirstTokenTimeoutError {

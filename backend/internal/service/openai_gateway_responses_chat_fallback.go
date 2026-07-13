@@ -85,13 +85,34 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	if err != nil {
 		return nil, err
 	}
-	resp, err := s.sendCCUpstreamRequest(ctx, c, account, targetURL, chatBody, clientStream, apiKey, account.GetOpenAIUserAgent())
+	upstreamCtx := ctx
+	var firstTokenWatchdog *openAIFirstTokenWatchdog
+	if clientStream {
+		upstreamBaseCtx, _ := detachUpstreamContext(ctx)
+		upstreamCtx, firstTokenWatchdog = s.withOpenAIFirstTokenTimeout(upstreamBaseCtx, body, "sse")
+		defer firstTokenWatchdog.Stop()
+	}
+	resp, err := s.sendCCUpstreamRequest(upstreamCtx, c, account, targetURL, chatBody, clientStream, apiKey, account.GetOpenAIUserAgent())
 	if err != nil {
+		if timeoutErr := firstTokenWatchdog.TimeoutError(); timeoutErr != nil {
+			recordOpenAIFirstTokenTimeout(ctx, c, account, timeoutErr)
+			return nil, timeoutErr
+		}
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if !firstTokenWatchdog.MarkHeaders(resp.Header.Get("x-request-id")) {
+		timeoutErr := firstTokenWatchdog.TimeoutError()
+		recordOpenAIFirstTokenTimeout(ctx, c, account, timeoutErr)
+		return nil, timeoutErr
+	}
 
 	if resp.StatusCode >= 400 {
+		if !firstTokenWatchdog.Stop() {
+			timeoutErr := firstTokenWatchdog.TimeoutError()
+			recordOpenAIFirstTokenTimeout(ctx, c, account, timeoutErr)
+			return nil, timeoutErr
+		}
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
 		if foErr := s.failoverOpenAIUpstreamHTTPError(ctx, c, account, resp, respBody, upstreamMsg, upstreamModel); foErr != nil {
 			return nil, foErr
@@ -100,7 +121,12 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	}
 
 	if clientStream {
-		return s.streamChatCompletionsAsResponses(c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+		result, streamErr := s.streamChatCompletionsAsResponses(upstreamCtx, c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+		if timeoutErr := firstTokenWatchdog.TimeoutError(); timeoutErr != nil {
+			recordOpenAIFirstTokenTimeout(ctx, c, account, timeoutErr)
+			return result, timeoutErr
+		}
+		return result, streamErr
 	}
 	return s.bufferChatCompletionsAsResponses(c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
 }
@@ -141,6 +167,7 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 }
 
 func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
+	ctx context.Context,
 	c *gin.Context,
 	resp *http.Response,
 	originalModel string,
@@ -155,13 +182,30 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 
 	state := apicompat.NewChatCompletionsToResponsesStreamState(originalModel)
 	clientDisconnected := false
+	var streamEarlyErr error
+	pendingEvents := make([]apicompat.ResponsesStreamEvent, 0, 4)
 
 	writeEvents := func(events []apicompat.ResponsesStreamEvent) {
-		if clientDisconnected || len(events) == 0 {
+		if clientDisconnected || streamEarlyErr != nil || len(events) == 0 {
+			return
+		}
+		for _, event := range events {
+			payload, err := json.Marshal(event)
+			if err != nil {
+				continue
+			}
+			watchdog := firstTokenWatchdogFromContext(ctx)
+			if !watchdog.Observe(payload) {
+				streamEarlyErr = watchdog.TimeoutError()
+				return
+			}
+			pendingEvents = append(pendingEvents, event)
+		}
+		if !firstTokenWatchdogFromContext(ctx).CanWriteClient() {
 			return
 		}
 		writeStreamHeaders()
-		for _, event := range events {
+		for _, event := range pendingEvents {
 			sse, err := apicompat.ResponsesEventToSSE(event)
 			if err != nil {
 				logger.L().Warn("openai responses chat fallback: failed to marshal stream event",
@@ -179,14 +223,21 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 				return
 			}
 		}
+		pendingEvents = pendingEvents[:0]
 		c.Writer.Flush()
 	}
 
 	scan := s.scanCCStream(resp, "openai responses chat fallback", requestID, startTime, func(chunk *apicompat.ChatCompletionsChunk) {
 		writeEvents(apicompat.ChatCompletionsChunkToResponsesEvents(chunk, state))
 	})
+	if streamEarlyErr != nil {
+		return &OpenAIForwardResult{RequestID: requestID, Usage: scan.Usage, Stream: true, Duration: time.Since(startTime)}, streamEarlyErr
+	}
 
 	if scan.Err != nil {
+		if timeoutErr := firstTokenWatchdogFromContext(ctx).TimeoutError(); timeoutErr != nil {
+			return &OpenAIForwardResult{RequestID: requestID, Usage: scan.Usage, Stream: true, Duration: time.Since(startTime)}, timeoutErr
+		}
 		return &OpenAIForwardResult{
 			RequestID:       requestID,
 			Usage:           scan.Usage,
@@ -202,6 +253,9 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	}
 
 	writeEvents(apicompat.FinalizeChatCompletionsResponsesStream(state))
+	if streamEarlyErr != nil {
+		return &OpenAIForwardResult{RequestID: requestID, Usage: scan.Usage, Stream: true, Duration: time.Since(startTime)}, streamEarlyErr
+	}
 	if !clientDisconnected {
 		writeStreamHeaders()
 		if _, err := fmt.Fprint(c.Writer, "data: [DONE]\n\n"); err != nil {
