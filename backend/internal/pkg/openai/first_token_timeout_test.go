@@ -42,6 +42,12 @@ func TestResponsesFirstTokenClassReaderUsesFinalPayload(t *testing.T) {
 	require.Equal(t, FirstTokenClassImage, ResponsesFirstTokenClassReader(strings.NewReader(body)))
 }
 
+func TestResponsesFirstTokenRequestReaderUsesFinalStreamAndDecodesEscapes(t *testing.T) {
+	class, stream := ResponsesFirstTokenRequestReader(strings.NewReader(`{"stream":false,"tool_choice":{"type":"image_gener\u0061tion"}}`))
+	require.Equal(t, FirstTokenClassImage, class)
+	require.False(t, stream)
+}
+
 func TestResponsesFirstTokenClassReaderKeepsLargeSkippedStringAllocationBounded(t *testing.T) {
 	payload := `{"input":"` + strings.Repeat("a", 1<<20) + `","tool_choice":{"type":"image_generation"}}`
 	result := testing.Benchmark(func(b *testing.B) {

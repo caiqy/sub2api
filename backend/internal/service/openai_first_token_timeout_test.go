@@ -117,20 +117,26 @@ func TestWithOpenAIFirstTokenTimeoutSelectsImageDuration(t *testing.T) {
 
 func TestCancelAndDrainOpenAIWSFirstToken(t *testing.T) {
 	t.Run("terminal event keeps connection reusable", func(t *testing.T) {
-		lease := &openAIWSFirstTokenLeaseStub{events: [][]byte{[]byte(`{"type":"response.canceled"}`)}}
-		require.True(t, cancelAndDrainOpenAIWSFirstToken(context.Background(), lease, time.Second, time.Second))
+		lease := &openAIWSFirstTokenLeaseStub{events: [][]byte{[]byte(`{"type":"response.canceled","response":{"id":"resp_1"}}`)}}
+		require.True(t, cancelAndDrainOpenAIWSFirstToken(context.Background(), lease, "resp_1", time.Second, time.Second))
 		require.False(t, lease.broken)
+	})
+
+	t.Run("terminal event for another response breaks connection", func(t *testing.T) {
+		lease := &openAIWSFirstTokenLeaseStub{events: [][]byte{[]byte(`{"type":"response.canceled","response":{"id":"resp_other"}}`)}}
+		require.False(t, cancelAndDrainOpenAIWSFirstToken(context.Background(), lease, "resp_1", time.Second, time.Millisecond))
+		require.True(t, lease.broken)
 	})
 
 	t.Run("cancel write failure marks connection broken", func(t *testing.T) {
 		lease := &openAIWSFirstTokenLeaseStub{writeErr: errors.New("write failed")}
-		require.False(t, cancelAndDrainOpenAIWSFirstToken(context.Background(), lease, time.Second, time.Millisecond))
+		require.False(t, cancelAndDrainOpenAIWSFirstToken(context.Background(), lease, "resp_1", time.Second, time.Millisecond))
 		require.True(t, lease.broken)
 	})
 
 	t.Run("drain failure marks connection broken", func(t *testing.T) {
 		lease := &openAIWSFirstTokenLeaseStub{readErr: context.DeadlineExceeded}
-		require.False(t, cancelAndDrainOpenAIWSFirstToken(context.Background(), lease, time.Second, time.Millisecond))
+		require.False(t, cancelAndDrainOpenAIWSFirstToken(context.Background(), lease, "resp_1", time.Second, time.Millisecond))
 		require.True(t, lease.broken)
 	})
 }

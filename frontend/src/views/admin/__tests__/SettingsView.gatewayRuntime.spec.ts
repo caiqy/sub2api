@@ -205,12 +205,16 @@ describe('admin SettingsView gateway runtime card', () => {
     getBetaPolicySettings.mockResolvedValue({ rules: [] })
     getGatewayRuntimeSettings.mockResolvedValue({
       response_header_timeout: 120,
+      openai_text_first_token_timeout: 30,
+      openai_image_first_token_timeout: 600,
       stream_data_interval_timeout: 45,
       usage_log_detail_retention_limit: 320,
       image_usage_log_detail_retention_limit: 80
     })
     updateGatewayRuntimeSettings.mockResolvedValue({
       response_header_timeout: 240,
+      openai_text_first_token_timeout: 45,
+      openai_image_first_token_timeout: 720,
       stream_data_interval_timeout: 90,
       usage_log_detail_retention_limit: 500,
       image_usage_log_detail_retention_limit: 120
@@ -242,6 +246,8 @@ describe('admin SettingsView gateway runtime card', () => {
 
     expect(getGatewayRuntimeSettings).toHaveBeenCalledTimes(1)
     expect(findGatewayRuntimeField(wrapper, 'gateway-runtime-response-header-timeout').exists()).toBe(true)
+    expect(findGatewayRuntimeField(wrapper, 'gateway-runtime-openai-text-first-token-timeout').exists()).toBe(true)
+    expect(findGatewayRuntimeField(wrapper, 'gateway-runtime-openai-image-first-token-timeout').exists()).toBe(true)
     expect(findGatewayRuntimeField(wrapper, 'gateway-runtime-stream-interval-timeout').exists()).toBe(true)
     expect(findGatewayRuntimeField(wrapper, 'gateway-runtime-usage-log-detail-retention-limit').exists()).toBe(true)
     expect(findGatewayRuntimeField(wrapper, 'gateway-runtime-image-usage-log-detail-retention-limit').exists()).toBe(true)
@@ -252,6 +258,18 @@ describe('admin SettingsView gateway runtime card', () => {
           .element as HTMLInputElement
       ).value
     ).toBe('120')
+    expect(
+      (
+        findGatewayRuntimeField(wrapper, 'gateway-runtime-openai-text-first-token-timeout')
+          .element as HTMLInputElement
+      ).value
+    ).toBe('30')
+    expect(
+      (
+        findGatewayRuntimeField(wrapper, 'gateway-runtime-openai-image-first-token-timeout')
+          .element as HTMLInputElement
+      ).value
+    ).toBe('600')
     expect(
       (
         findGatewayRuntimeField(wrapper, 'gateway-runtime-stream-interval-timeout')
@@ -472,6 +490,10 @@ describe('admin SettingsView gateway runtime card', () => {
 
     await findGatewayRuntimeField(wrapper, 'gateway-runtime-response-header-timeout')
       .setValue('240')
+    await findGatewayRuntimeField(wrapper, 'gateway-runtime-openai-text-first-token-timeout')
+      .setValue('45')
+    await findGatewayRuntimeField(wrapper, 'gateway-runtime-openai-image-first-token-timeout')
+      .setValue('720')
     await findGatewayRuntimeField(wrapper, 'gateway-runtime-stream-interval-timeout')
       .setValue('90')
     await findGatewayRuntimeField(wrapper, 'gateway-runtime-usage-log-detail-retention-limit')
@@ -483,6 +505,8 @@ describe('admin SettingsView gateway runtime card', () => {
 
     expect(updateGatewayRuntimeSettings).toHaveBeenCalledWith({
       response_header_timeout: 240,
+      openai_text_first_token_timeout: 45,
+      openai_image_first_token_timeout: 720,
       stream_data_interval_timeout: 90,
       usage_log_detail_retention_limit: 500,
       image_usage_log_detail_retention_limit: 120
@@ -495,6 +519,16 @@ describe('admin SettingsView gateway runtime card', () => {
       name: 'empty response header timeout',
       testId: 'gateway-runtime-response-header-timeout',
       value: ''
+    },
+    {
+      name: 'negative OpenAI text first token timeout',
+      testId: 'gateway-runtime-openai-text-first-token-timeout',
+      value: '-1'
+    },
+    {
+      name: 'negative OpenAI image first token timeout',
+      testId: 'gateway-runtime-openai-image-first-token-timeout',
+      value: '-1'
     },
     {
       name: 'stream interval outside the allowed non-zero range',
@@ -522,6 +556,26 @@ describe('admin SettingsView gateway runtime card', () => {
 
     expect(updateGatewayRuntimeSettings).not.toHaveBeenCalled()
     expect(showError).toHaveBeenCalledWith('Gateway runtime settings contain invalid values')
+  })
+
+  it('allows zero to disable both OpenAI first token timeouts', async () => {
+    const wrapper = createWrapper()
+
+    await flushPromises()
+
+    await findGatewayRuntimeField(wrapper, 'gateway-runtime-openai-text-first-token-timeout')
+      .setValue('0')
+    await findGatewayRuntimeField(wrapper, 'gateway-runtime-openai-image-first-token-timeout')
+      .setValue('0')
+    await findGatewayRuntimeSaveButton(wrapper).trigger('click')
+    await flushPromises()
+
+    expect(updateGatewayRuntimeSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        openai_text_first_token_timeout: 0,
+        openai_image_first_token_timeout: 0
+      })
+    )
   })
 
   it('shows error feedback when saving gateway runtime settings fails', async () => {

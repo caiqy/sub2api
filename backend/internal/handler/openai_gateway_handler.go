@@ -1795,7 +1795,15 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					var failoverErr *service.UpstreamFailoverError
 					if result == nil || result.ImageCount <= 0 {
 						if !errors.As(turnErr, &failoverErr) && ctx.Err() == nil && service.HasOpsUpstreamAttempted(c) && !service.HasOpsClientBusinessLimited(c) && service.GetOpsCyberPolicy(c) == nil {
-							h.submitFailedUsageLog(c, apiKey, account, reqModel, true, 0, nil, nil, 0, service.ExtractOpenAIReasoningEffortFromBody(firstMessage, reqModel), "handler.openai_gateway.responses_ws")
+							failedModel := reqModel
+							failedDuration := time.Duration(0)
+							if result != nil {
+								if strings.TrimSpace(result.Model) != "" {
+									failedModel = result.Model
+								}
+								failedDuration = result.Duration
+							}
+							h.submitFailedUsageLog(c, apiKey, account, failedModel, true, 0, nil, nil, failedDuration, service.ExtractOpenAIReasoningEffortFromBody(firstMessage, failedModel), "handler.openai_gateway.responses_ws")
 						}
 						return
 					}

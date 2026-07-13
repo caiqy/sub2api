@@ -102,10 +102,16 @@ func (c *passthroughTestFrameConn) Writes() []passthroughTestFrame {
 
 func TestRelayFirstTokenTimeoutCancelsDrainsAndCompletesTurn(t *testing.T) {
 	clientConn := newPassthroughTestFrameConn(nil, false)
-	upstreamConn := newPassthroughTestFrameConn([]passthroughTestFrame{{
-		msgType: coderws.MessageText,
-		payload: []byte(`{"type":"response.created","response":{"id":"resp_timeout"}}`),
-	}}, false)
+	upstreamConn := newPassthroughTestFrameConn([]passthroughTestFrame{
+		{
+			msgType: coderws.MessageText,
+			payload: []byte(`{"type":"response.created","response":{"id":"resp_timeout"}}`),
+		},
+		{
+			msgType: coderws.MessageText,
+			payload: []byte(`{"type":"response.output_text.delta","response_id":"resp_other","delta":"late"}`),
+		},
+	}, false)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	turnCh := make(chan RelayTurnResult, 1)
@@ -129,6 +135,18 @@ func TestRelayFirstTokenTimeoutCancelsDrainsAndCompletesTurn(t *testing.T) {
 		}
 		return false
 	}, time.Second, 5*time.Millisecond)
+	clientConn.readCh <- passthroughTestFrame{msgType: coderws.MessageText, payload: []byte(`{"type":"response.create","model":"gpt-5-mini"}`)}
+	time.Sleep(30 * time.Millisecond)
+	for _, frame := range upstreamConn.Writes() {
+		require.NotContains(t, string(frame.payload), "gpt-5-mini", "next turn must wait until timeout drain completes")
+	}
+	upstreamConn.readCh <- passthroughTestFrame{msgType: coderws.MessageText, payload: []byte(`{"type":"response.canceled","response":{"id":"resp_other"}}`)}
+	time.Sleep(30 * time.Millisecond)
+	select {
+	case <-turnCh:
+		t.Fatal("terminal event for another response must not complete the timed-out turn")
+	default:
+	}
 	upstreamConn.readCh <- passthroughTestFrame{msgType: coderws.MessageText, payload: []byte(`{"type":"response.canceled","response":{"id":"resp_timeout"}}`)}
 
 	select {
@@ -138,6 +156,14 @@ func TestRelayFirstTokenTimeoutCancelsDrainsAndCompletesTurn(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("未收到 timeout turn callback")
 	}
+	require.Eventually(t, func() bool {
+		for _, frame := range upstreamConn.Writes() {
+			if strings.Contains(string(frame.payload), "gpt-5-mini") {
+				return true
+			}
+		}
+		return false
+	}, time.Second, 5*time.Millisecond)
 	require.Eventually(t, func() bool {
 		for _, frame := range clientConn.Writes() {
 			if strings.Contains(string(frame.payload), `"first_token_timeout"`) {
@@ -168,15 +194,79 @@ func TestRelayFirstTokenTimeoutCancelFailureExitsRelay(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
+	turnCh := make(chan RelayTurnResult, 1)
 	_, relayExit := Relay(ctx, clientConn, upstreamConn, []byte(`{"type":"response.create","model":"gpt-5"}`), RelayOptions{
 		WriteTimeout:          time.Second,
 		TextFirstTokenTimeout: 20 * time.Millisecond,
+		OnTurnComplete:        func(turn RelayTurnResult) { turnCh <- turn },
 	})
 
 	require.NotNil(t, relayExit)
 	require.Equal(t, "first_token_timeout", relayExit.Stage)
 	var timeoutErr *FirstTokenTimeoutError
 	require.ErrorAs(t, relayExit.Err, &timeoutErr)
+	select {
+	case turn := <-turnCh:
+		require.ErrorAs(t, turn.TurnError, &timeoutErr)
+	case <-time.After(time.Second):
+		t.Fatal("cleanup failure must still complete the timeout turn")
+	}
+}
+
+func TestRelayStreamFalseDoesNotArmFirstTokenTimeout(t *testing.T) {
+	clientConn := newPassthroughTestFrameConn(nil, false)
+	upstreamConn := newPassthroughTestFrameConn(nil, false)
+	ctx, cancel := context.WithCancel(context.Background())
+	exitCh := make(chan *RelayExit, 1)
+
+	go func() {
+		_, relayExit := Relay(ctx, clientConn, upstreamConn, []byte(`{"type":"response.create","stream":false}`), RelayOptions{
+			TextFirstTokenTimeout: 20 * time.Millisecond,
+		})
+		exitCh <- relayExit
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	for _, frame := range upstreamConn.Writes() {
+		require.NotEqual(t, `{"type":"response.cancel"}`, string(frame.payload))
+	}
+	cancel()
+	<-exitCh
+}
+
+func TestRelayMismatchedTerminalDoesNotCompleteActiveTurn(t *testing.T) {
+	clientConn := newPassthroughTestFrameConn(nil, false)
+	upstreamConn := newPassthroughTestFrameConn([]passthroughTestFrame{{
+		msgType: coderws.MessageText,
+		payload: []byte(`{"type":"response.created","response":{"id":"resp_active"}}`),
+	}}, false)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	turnCh := make(chan RelayTurnResult, 2)
+
+	go Relay(ctx, clientConn, upstreamConn, []byte(`{"type":"response.create","model":"gpt-5"}`), RelayOptions{
+		OnTurnComplete: func(turn RelayTurnResult) { turnCh <- turn },
+	})
+
+	clientConn.readCh <- passthroughTestFrame{msgType: coderws.MessageText, payload: []byte(`{"type":"response.create","model":"gpt-5-mini"}`)}
+	upstreamConn.readCh <- passthroughTestFrame{msgType: coderws.MessageText, payload: []byte(`{"type":"response.completed","response":{"id":"resp_other","usage":{"input_tokens":1,"output_tokens":1}}}`)}
+	time.Sleep(30 * time.Millisecond)
+	select {
+	case <-turnCh:
+		t.Fatal("terminal event for another response must not complete the active turn")
+	default:
+	}
+	for _, frame := range upstreamConn.Writes() {
+		require.NotContains(t, string(frame.payload), "gpt-5-mini")
+	}
+
+	upstreamConn.readCh <- passthroughTestFrame{msgType: coderws.MessageText, payload: []byte(`{"type":"response.completed","response":{"id":"resp_active","usage":{"input_tokens":1,"output_tokens":1}}}`)}
+	select {
+	case turn := <-turnCh:
+		require.Equal(t, "resp_active", turn.RequestID)
+	case <-time.After(time.Second):
+		t.Fatal("matching terminal event did not complete active turn")
+	}
 }
 
 func (c *delayedReadFrameConn) ReadFrame(ctx context.Context) (coderws.MessageType, []byte, error) {
@@ -498,7 +588,7 @@ func TestRelay_MultipleUpstreamMessages(t *testing.T) {
 	require.Len(t, clientWrites, 3)
 }
 
-func TestRelay_OnTurnComplete_PerTerminalEvent(t *testing.T) {
+func TestRelay_OnTurnComplete_IgnoresTerminalForUnknownResponse(t *testing.T) {
 	t.Parallel()
 
 	clientConn := newPassthroughTestFrameConn(nil, false)
@@ -524,15 +614,11 @@ func TestRelay_OnTurnComplete_PerTerminalEvent(t *testing.T) {
 		},
 	})
 	require.Nil(t, relayExit)
-	require.Len(t, turns, 2)
+	require.Len(t, turns, 1)
 	require.Equal(t, "resp_turn_1", turns[0].RequestID)
 	require.Equal(t, "response.completed", turns[0].TerminalEventType)
 	require.Equal(t, 2, turns[0].Usage.InputTokens)
 	require.Equal(t, 1, turns[0].Usage.OutputTokens)
-	require.Equal(t, "resp_turn_2", turns[1].RequestID)
-	require.Equal(t, "response.failed", turns[1].TerminalEventType)
-	require.Equal(t, 3, turns[1].Usage.InputTokens)
-	require.Equal(t, 4, turns[1].Usage.OutputTokens)
 	require.Equal(t, 5, result.Usage.InputTokens)
 	require.Equal(t, 5, result.Usage.OutputTokens)
 }

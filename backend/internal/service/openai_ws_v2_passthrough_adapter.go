@@ -508,10 +508,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		UpstreamConn:       upstreamFrameConn,
 		FirstClientMessage: firstClientMessage,
 		Options: openaiwsv2.RelayOptions{
-			WriteTimeout:           s.openAIWSWriteTimeout(),
-			IdleTimeout:            s.openAIWSPassthroughIdleTimeout(),
-			TextFirstTokenTimeout:  time.Duration(s.cfg.Gateway.OpenAITextFirstTokenTimeout) * time.Second,
-			ImageFirstTokenTimeout: time.Duration(s.cfg.Gateway.OpenAIImageFirstTokenTimeout) * time.Second,
+			WriteTimeout: s.openAIWSWriteTimeout(),
+			IdleTimeout:  s.openAIWSPassthroughIdleTimeout(),
 			ResolveFirstTokenTimeout: func(payload []byte) time.Duration {
 				_, timeout := s.openAIFirstTokenTimeout(payload)
 				return timeout
@@ -562,14 +560,18 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				turnErr := turn.TurnError
 				var relayTimeout *openaiwsv2.FirstTokenTimeoutError
 				if errors.As(turnErr, &relayTimeout) {
-					turnErr = &OpenAIFirstTokenTimeoutError{
+					timeoutErr := &OpenAIFirstTokenTimeoutError{
 						Class:              relayTimeout.Class,
 						Timeout:            relayTimeout.Timeout,
 						Elapsed:            relayTimeout.Elapsed,
 						Transport:          "websocket_v2",
 						HeadersReceived:    true,
-						ConnectionReusable: true,
+						UpstreamRequestID:  turn.RequestID,
+						RequestModel:       turn.RequestModel,
+						ConnectionReusable: turn.ConnectionReusable,
 					}
+					turnErr = timeoutErr
+					recordOpenAIFirstTokenTimeout(ctx, c, account, timeoutErr)
 				}
 				if hooks != nil && hooks.AfterTurn != nil {
 					hooks.AfterTurn(turnNo, turnResult, turnErr)
@@ -677,6 +679,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				Elapsed:         timeoutErr.Elapsed,
 				Transport:       "websocket_v2",
 				HeadersReceived: true,
+				RequestModel:    result.Model,
 			}
 		}
 	}

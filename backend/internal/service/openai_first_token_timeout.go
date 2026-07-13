@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,6 +35,7 @@ type OpenAIFirstTokenTimeoutError struct {
 	HeadersReceived    bool
 	CreatedReceived    bool
 	UpstreamRequestID  string
+	RequestModel       string
 	ConnectionReusable bool
 }
 
@@ -111,37 +113,55 @@ func (s *OpenAIGatewayService) withOpenAIFirstTokenClass(
 	class openaiutil.FirstTokenClass,
 	transport string,
 ) (context.Context, *openAIFirstTokenWatchdog) {
-	seconds := 0
-	if s != nil && s.cfg != nil {
-		seconds = s.cfg.Gateway.OpenAITextFirstTokenTimeout
-		if class == openaiutil.FirstTokenClassImage {
-			seconds = s.cfg.Gateway.OpenAIImageFirstTokenTimeout
-		}
+	textSeconds, imageSeconds := s.openAIFirstTokenTimeoutSeconds()
+	seconds := textSeconds
+	if class == openaiutil.FirstTokenClassImage {
+		seconds = imageSeconds
 	}
 	return newOpenAIFirstTokenWatchdog(ctx, class, time.Duration(seconds)*time.Second, transport)
 }
 
 func (s *OpenAIGatewayService) openAIFirstTokenTimeout(payload []byte) (openaiutil.FirstTokenClass, time.Duration) {
 	class := openaiutil.ResponsesFirstTokenClass(payload)
-	seconds := 0
-	if s != nil && s.cfg != nil {
-		seconds = s.cfg.Gateway.OpenAITextFirstTokenTimeout
-		if class == openaiutil.FirstTokenClassImage {
-			seconds = s.cfg.Gateway.OpenAIImageFirstTokenTimeout
-		}
+	streamResult := gjson.GetBytes(payload, "stream")
+	if streamResult.Exists() && !streamResult.Bool() {
+		return class, 0
+	}
+	textSeconds, imageSeconds := s.openAIFirstTokenTimeoutSeconds()
+	seconds := textSeconds
+	if class == openaiutil.FirstTokenClassImage {
+		seconds = imageSeconds
 	}
 	return class, time.Duration(seconds) * time.Second
 }
 
+func (s *OpenAIGatewayService) openAIFirstTokenTimeoutSeconds() (int, int) {
+	if s == nil {
+		return 0, 0
+	}
+	if s.settingService != nil {
+		return s.settingService.gatewayOpenAIFirstTokenTimeouts()
+	}
+	if s.cfg != nil {
+		return s.cfg.Gateway.OpenAITextFirstTokenTimeout, s.cfg.Gateway.OpenAIImageFirstTokenTimeout
+	}
+	return 0, 0
+}
+
 func openAIFirstTokenClassFromRequest(req *http.Request, fallback []byte) openaiutil.FirstTokenClass {
+	class, _ := openAIFirstTokenRequestFromRequest(req, fallback)
+	return class
+}
+
+func openAIFirstTokenRequestFromRequest(req *http.Request, fallback []byte) (openaiutil.FirstTokenClass, bool) {
 	if req != nil && req.GetBody != nil {
 		body, err := req.GetBody()
 		if err == nil {
 			defer body.Close()
-			return openaiutil.ResponsesFirstTokenClassReader(body)
+			return openaiutil.ResponsesFirstTokenRequestReader(body)
 		}
 	}
-	return openaiutil.ResponsesFirstTokenClass(fallback)
+	return openaiutil.ResponsesFirstTokenClass(fallback), gjson.GetBytes(fallback, "stream").Bool()
 }
 
 func (w *openAIFirstTokenWatchdog) MarkHeaders(requestID string) bool {
@@ -243,7 +263,8 @@ func recordOpenAIFirstTokenTimeout(ctx context.Context, c *gin.Context, account 
 		" elapsed_ms=" + strconv.FormatInt(timeoutErr.Elapsed.Milliseconds(), 10) +
 		" transport=" + timeoutErr.Transport +
 		" headers_received=" + strconv.FormatBool(timeoutErr.HeadersReceived) +
-		" created_received=" + strconv.FormatBool(timeoutErr.CreatedReceived)
+		" created_received=" + strconv.FormatBool(timeoutErr.CreatedReceived) +
+		" request_model=" + timeoutErr.RequestModel
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 		Platform:          platform,
 		AccountID:         accountID,
@@ -262,16 +283,18 @@ func recordOpenAIFirstTokenTimeout(ctx context.Context, c *gin.Context, account 
 		zap.Bool("headers_received", timeoutErr.HeadersReceived),
 		zap.Bool("created_received", timeoutErr.CreatedReceived),
 		zap.String("upstream_request_id", timeoutErr.UpstreamRequestID),
+		zap.String("request_model", timeoutErr.RequestModel),
 	)
 }
 
 func cancelAndDrainOpenAIWSFirstToken(
 	ctx context.Context,
 	lease openAIWSFirstTokenLease,
+	responseID string,
 	writeTimeout time.Duration,
 	drainTimeout time.Duration,
 ) bool {
-	if lease == nil || lease.WriteJSONWithContextTimeout(ctx, map[string]any{"type": "response.cancel"}, writeTimeout) != nil {
+	if lease == nil || strings.TrimSpace(responseID) == "" || lease.WriteJSONWithContextTimeout(ctx, map[string]any{"type": "response.cancel"}, writeTimeout) != nil {
 		if lease != nil {
 			lease.MarkBroken()
 		}
@@ -283,8 +306,8 @@ func cancelAndDrainOpenAIWSFirstToken(
 		if err != nil {
 			break
 		}
-		eventType, _, _ := parseOpenAIWSEventEnvelope(message)
-		if isOpenAIWSTerminalEvent(eventType) {
+		eventType, eventResponseID, _ := parseOpenAIWSEventEnvelope(message)
+		if isOpenAIWSTerminalEvent(eventType) && eventResponseID == responseID {
 			return true
 		}
 	}

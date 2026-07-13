@@ -129,6 +129,35 @@ const openAIQuotaAutoPauseSettingsDBTimeout = 5 * time.Second
 
 const openAIQuotaAutoPauseSettingsRefreshKey = "openai_quota_auto_pause_settings"
 
+type openAIFirstTokenTimeoutSettings struct {
+	text  int
+	image int
+}
+
+func (s *SettingService) storeOpenAIFirstTokenTimeouts(text, image int) {
+	if s != nil {
+		s.openAIFirstTokenTimeouts.Store(openAIFirstTokenTimeoutSettings{text: text, image: image})
+	}
+}
+
+func (s *SettingService) storeOpenAIFirstTokenTimeoutsFromConfig() {
+	if s != nil && s.cfg != nil {
+		s.storeOpenAIFirstTokenTimeouts(s.cfg.Gateway.OpenAITextFirstTokenTimeout, s.cfg.Gateway.OpenAIImageFirstTokenTimeout)
+	}
+}
+
+func (s *SettingService) gatewayOpenAIFirstTokenTimeouts() (int, int) {
+	if s != nil {
+		if cached, ok := s.openAIFirstTokenTimeouts.Load().(openAIFirstTokenTimeoutSettings); ok {
+			return cached.text, cached.image
+		}
+		if s.cfg != nil {
+			return s.cfg.Gateway.OpenAITextFirstTokenTimeout, s.cfg.Gateway.OpenAIImageFirstTokenTimeout
+		}
+	}
+	return 0, 0
+}
+
 func (s *SettingService) GetGatewayRuntimeSettings(ctx context.Context) (*GatewayRuntimeSettings, error) {
 	_ = ctx
 	settings := &GatewayRuntimeSettings{}
@@ -137,8 +166,7 @@ func (s *SettingService) GetGatewayRuntimeSettings(ctx context.Context) (*Gatewa
 	}
 	settings.ResponseHeaderTimeout = s.cfg.Gateway.ResponseHeaderTimeout
 	settings.StreamDataIntervalTimeout = s.cfg.Gateway.StreamDataIntervalTimeout
-	settings.OpenAITextFirstTokenTimeout = s.cfg.Gateway.OpenAITextFirstTokenTimeout
-	settings.OpenAIImageFirstTokenTimeout = s.cfg.Gateway.OpenAIImageFirstTokenTimeout
+	settings.OpenAITextFirstTokenTimeout, settings.OpenAIImageFirstTokenTimeout = s.gatewayOpenAIFirstTokenTimeouts()
 	settings.UsageLogDetailRetentionLimit = gatewayRuntimeRetentionLimitOrDefault(s.cfg.Gateway.UsageLogDetailRetentionLimit)
 	settings.ImageUsageLogDetailRetentionLimit = gatewayRuntimeRetentionLimitOrDefault(s.cfg.Gateway.ImageUsageLogDetailRetentionLimit)
 	return settings, nil
@@ -183,6 +211,7 @@ func (s *SettingService) SetGatewayRuntimeSettings(ctx context.Context, settings
 		s.cfg.Gateway.UsageLogDetailRetentionLimit = settings.UsageLogDetailRetentionLimit
 		s.cfg.Gateway.ImageUsageLogDetailRetentionLimit = settings.ImageUsageLogDetailRetentionLimit
 	}
+	s.storeOpenAIFirstTokenTimeouts(settings.OpenAITextFirstTokenTimeout, settings.OpenAIImageFirstTokenTimeout)
 	SetUsageLogDetailRetentionLimits(settings.UsageLogDetailRetentionLimit, settings.ImageUsageLogDetailRetentionLimit)
 	if s.usageLogDetailPruner != nil {
 		if err := s.usageLogDetailPruner.PruneToConfiguredLimits(ctx); err != nil {
@@ -232,6 +261,7 @@ func (s *SettingService) loadGatewayRuntimeSettingsFromDB(ctx context.Context) {
 	if settings.ImageUsageLogDetailRetentionLimit >= 0 {
 		s.cfg.Gateway.ImageUsageLogDetailRetentionLimit = settings.ImageUsageLogDetailRetentionLimit
 	}
+	s.storeOpenAIFirstTokenTimeoutsFromConfig()
 }
 
 func (s *SettingService) syncUsageLogDetailRetentionLimitsFromConfig() {

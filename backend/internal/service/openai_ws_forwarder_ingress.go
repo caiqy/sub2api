@@ -742,7 +742,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				CreatedReceived:   createdReceived,
 				UpstreamRequestID: responseID,
 			}
-			reusable := cancelAndDrainOpenAIWSFirstToken(ctx, lease, s.openAIWSWriteTimeout(), 2*time.Second)
+			reusable := cancelAndDrainOpenAIWSFirstToken(ctx, lease, responseID, s.openAIWSWriteTimeout(), 2*time.Second)
 			timeoutErr.ConnectionReusable = reusable
 			errorPayload := []byte(`{"type":"error","error":{"type":"first_token_timeout","code":"first_token_timeout","message":"Upstream timed out before the first response event"}}`)
 			if err := writeClientMessage(errorPayload); err != nil {

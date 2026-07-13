@@ -3,6 +3,7 @@ package openai
 import (
 	"bufio"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/tidwall/gjson"
@@ -23,50 +24,66 @@ func ResponsesFirstTokenClass(payload []byte) FirstTokenClass {
 }
 
 func ResponsesFirstTokenClassReader(reader io.Reader) FirstTokenClass {
+	class, _ := ResponsesFirstTokenRequestReader(reader)
+	return class
+}
+
+func ResponsesFirstTokenRequestReader(reader io.Reader) (FirstTokenClass, bool) {
 	if reader == nil {
-		return FirstTokenClassText
+		return FirstTokenClassText, false
 	}
 	input := bufio.NewReader(reader)
 	start, err := readJSONNonSpace(input)
 	if err != nil || start != '{' {
-		return FirstTokenClassText
+		return FirstTokenClassText, false
 	}
+	class := FirstTokenClassText
+	stream := false
 	for {
 		next, err := readJSONNonSpace(input)
 		if err != nil || next == '}' {
-			return FirstTokenClassText
+			return class, stream
 		}
 		if next != '"' {
-			return FirstTokenClassText
+			return class, stream
 		}
 		key, err := readJSONString(input, true)
 		if err != nil {
-			return FirstTokenClassText
+			return class, stream
 		}
 		colon, err := readJSONNonSpace(input)
 		if err != nil || colon != ':' {
-			return FirstTokenClassText
+			return class, stream
 		}
-		if key == "tool_choice" {
-			return readToolChoiceClass(input)
-		}
-		if skipJSONValue(input) != nil {
-			return FirstTokenClassText
+		switch key {
+		case "tool_choice":
+			class = readToolChoiceClass(input)
+		case "stream":
+			valueStart, valueErr := readJSONNonSpace(input)
+			if valueErr != nil {
+				return class, stream
+			}
+			stream = readJSONBool(input, valueStart)
+		default:
+			if skipJSONValue(input) != nil {
+				return class, stream
+			}
 		}
 		separator, err := readJSONNonSpace(input)
 		if err != nil || separator == '}' {
-			return FirstTokenClassText
+			return class, stream
 		}
 		if separator != ',' {
-			return FirstTokenClassText
+			return class, stream
 		}
 	}
 }
 
 func readToolChoiceClass(input *bufio.Reader) FirstTokenClass {
+	class := FirstTokenClassText
 	start, err := readJSONNonSpace(input)
 	if err != nil {
-		return FirstTokenClassText
+		return class
 	}
 	if start != '{' {
 		_ = skipJSONValueFromFirst(input, start)
@@ -75,39 +92,58 @@ func readToolChoiceClass(input *bufio.Reader) FirstTokenClass {
 	for {
 		next, err := readJSONNonSpace(input)
 		if err != nil || next == '}' {
-			return FirstTokenClassText
+			return class
 		}
 		if next != '"' {
-			return FirstTokenClassText
+			return class
 		}
 		key, err := readJSONString(input, true)
 		if err != nil {
-			return FirstTokenClassText
+			return class
 		}
 		colon, err := readJSONNonSpace(input)
 		if err != nil || colon != ':' {
-			return FirstTokenClassText
+			return class
 		}
 		valueStart, err := readJSONNonSpace(input)
 		if err != nil {
-			return FirstTokenClassText
+			return class
 		}
 		if key == "type" && valueStart == '"' {
 			value, err := readJSONString(input, true)
 			if err == nil && strings.EqualFold(strings.TrimSpace(value), "image_generation") {
-				return FirstTokenClassImage
+				class = FirstTokenClassImage
 			}
 		} else if skipJSONValueFromFirst(input, valueStart) != nil {
-			return FirstTokenClassText
+			return class
 		}
 		separator, err := readJSONNonSpace(input)
 		if err != nil || separator == '}' {
-			return FirstTokenClassText
+			return class
 		}
 		if separator != ',' {
-			return FirstTokenClassText
+			return class
 		}
 	}
+}
+
+func readJSONBool(input *bufio.Reader, first byte) bool {
+	want := ""
+	if first == 't' {
+		want = "rue"
+	} else if first == 'f' {
+		want = "alse"
+	} else {
+		_ = skipJSONValueFromFirst(input, first)
+		return false
+	}
+	for i := range len(want) {
+		current, err := input.ReadByte()
+		if err != nil || current != want[i] {
+			return false
+		}
+	}
+	return first == 't'
 }
 
 func readJSONNonSpace(input *bufio.Reader) (byte, error) {
@@ -136,10 +172,16 @@ func readJSONString(input *bufio.Reader, capture bool) (string, error) {
 		}
 		if current == '\\' {
 			escaped = true
+			if capture {
+				value.WriteByte(current)
+			}
 			continue
 		}
 		if current == '"' {
-			return value.String(), nil
+			if !capture {
+				return "", nil
+			}
+			return strconv.Unquote(`"` + value.String() + `"`)
 		}
 		if capture {
 			value.WriteByte(current)
