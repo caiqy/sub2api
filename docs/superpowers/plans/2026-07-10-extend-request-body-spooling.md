@@ -2,6 +2,7 @@
 change: extend-request-body-spooling
 design-doc: docs/superpowers/specs/2026-07-10-extend-request-body-spooling-design.md
 base-ref: 0f389fe7ed783ca4a8444fbe6d12acb9d3e19af6
+archived-with: 2026-07-13-extend-request-body-spooling
 ---
 
 # 扩展请求体文件化实施计划

@@ -18,11 +18,11 @@ verification_report: docs/superpowers/reports/2026-07-13-extend-request-body-spo
 branch_status: handled
 created_at: 2026-07-10
 verified_at: 2026-07-13
-archived: false
+archived: true
 direct_override: null
 handoff_context: openspec/changes/extend-request-body-spooling/.comet/handoff/design-context.json
 handoff_hash: f2f63222f5d48a82eed63062307adc59083d02e664f26074e2d15c5068fafa6d
 classic_profile: full
 classic_migration: 1
 run_id: f6686cb4-f324-414e-9c4a-456ef1949a64
-archive_confirmation: pending
+archive_confirmation: confirmed

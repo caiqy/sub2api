@@ -2,6 +2,8 @@
 comet_change: extend-request-body-spooling
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-07-13-extend-request-body-spooling
+status: final
 ---
 
 # 扩展请求体文件化技术设计

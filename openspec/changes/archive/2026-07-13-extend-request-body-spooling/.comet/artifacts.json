@@ -4,5 +4,6 @@
   "openspec_tasks": "openspec/changes/extend-request-body-spooling/tasks.md",
   "openspec_delta_spec": "openspec/changes/extend-request-body-spooling/specs/request-body-retention-control/spec.md",
   "handoff_context": "openspec/changes/extend-request-body-spooling/.comet/handoff/design-context.json",
-  "handoff_markdown": "openspec/changes/extend-request-body-spooling/.comet/handoff/design-context.md"
+  "handoff_markdown": "openspec/changes/extend-request-body-spooling/.comet/handoff/design-context.md",
+  "archive_directory": "openspec/changes/archive/2026-07-13-extend-request-body-spooling"
 }
