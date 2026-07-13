@@ -20,7 +20,7 @@
 - [x] 4.1 为 JSON、multipart、inline binary 和源图/遮罩上传编写 spool、脱敏 metadata、完整上游请求和 cleanup 测试。
 - [x] 4.2 将 OpenAI/Grok Images 与 Videos 的 raw multipart 和 effective outbound multipart 接入 coordinator，并统一 `RemoveAll` 与 handle cleanup。
 - [x] 4.3 验证生成、编辑、视频创建、视频状态、业务拒绝、上游错误和重试路径不泄露二进制正文且不残留临时文件。
-- [ ] 4.4 保持 multipart 非文件文本 part 的既有 20MB 单 part 兼容边界，并验证 OpenAI/Grok 的 10MB、20MB 与超限行为。
+- [x] 4.4 保持 multipart 非文件文本 part 的既有 20MB 单 part 兼容边界，并验证 OpenAI/Grok 的 10MB、20MB 与超限行为。
 
 ## 5. 全链路验证
 

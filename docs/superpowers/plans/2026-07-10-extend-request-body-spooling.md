@@ -360,15 +360,15 @@ base-ref: 0f389fe7ed783ca4a8444fbe6d12acb9d3e19af6
 - 修改：`backend/internal/handler/openai_images_controls_test.go`
 - 修改：`backend/internal/handler/grok_media_test.go`
 
-- [ ] **步骤 1：写失败测试。** 对 OpenAI Images 与 Grok media 的 multipart 文本字段分别覆盖 10MB、恰好 20MB、超过 20MB；前两者必须进入真实 handler 并完整到达上游，超限返回 413，usage/ops 保持脱敏且所有 raw/form/effective 文件清理。
+- [x] **步骤 1：写失败测试。** 对 OpenAI Images 与 Grok media 的 multipart 文本字段分别覆盖 10MB、恰好 20MB、超过 20MB；前两者必须进入真实 handler 并完整到达上游，超限返回 413，usage/ops 保持脱敏且所有 raw/form/effective 文件清理。
 
-- [ ] **步骤 2：验证测试失败。** 运行：`go test ./internal/handler -run 'Test(OpenAIImages|GrokMedia).*Multipart.*TextPartLimit' -count=1`（工作目录 `backend`）。预期：`ParseMultipartForm(0)` 在 10-20MB 非文件字段上提前返回 400。
+- [x] **步骤 2：验证测试失败。** 运行：`go test ./internal/handler -run 'Test(OpenAIImages|GrokMedia).*Multipart.*TextPartLimit' -count=1`（工作目录 `backend`）。预期：`ParseMultipartForm(0)` 在 10-20MB 非文件字段上提前返回 400。
 
-- [ ] **步骤 3：最小实现。** 调整 shared multipart coordinator 的标准库解析预算，使非文件字段继续遵守既有每 part 20MB 语义；不得提高单 part 上限、长期保留正文或绕过 form/handle cleanup。注释说明 `ParseMultipartForm` 的额外 10MB 非文件预算。
+- [x] **步骤 3：最小实现。** 调整 shared multipart coordinator 的标准库解析预算，使非文件字段继续遵守既有每 part 20MB 语义；不得提高单 part 上限、长期保留正文或绕过 form/handle cleanup。注释说明 `ParseMultipartForm` 的额外 10MB 非文件预算。
 
-- [ ] **步骤 4：验证通过。** 运行上述定向测试以及 `go test ./internal/handler ./internal/service -count=1`（工作目录 `backend`）。预期：通过。
+- [x] **步骤 4：验证通过。** 运行上述定向测试以及 `go test ./internal/handler ./internal/service -count=1`（工作目录 `backend`）。预期：通过。
 
-- [ ] **步骤 5：提交。** `git add backend/internal/handler/request_body_coordinator.go backend/internal/handler/openai_images_controls_test.go backend/internal/handler/grok_media_test.go && git commit -m "fix: preserve multipart text part limits"`。
+- [x] **步骤 5：提交。** `git add backend/internal/handler/request_body_coordinator.go backend/internal/handler/openai_images_controls_test.go backend/internal/handler/grok_media_test.go && git commit -m "fix: preserve multipart text part limits"`。
 
 ## 覆盖核对
 
