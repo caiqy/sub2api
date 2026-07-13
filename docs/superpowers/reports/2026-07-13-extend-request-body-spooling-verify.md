@@ -39,6 +39,14 @@
 
 Build guard 已记录组合命令并通过。前端 build 仅有既有 chunk/dynamic-import 警告，无构建错误。
 
+## 重新验证
+
+- 用户在首次归档确认时选择重新执行完整 Verify。
+- 四个重型命令并行执行时，后端一个 5 秒 failover 测试因资源竞争超时并暂时占用 spool 文件；该用例隔离运行约 6.3 秒通过，随后后端全量独占运行通过。
+- 重新执行的前端 build、157 files / 1183 tests 与 typecheck 均通过。
+- 最终 OpenSpec 完整审查无 CRITICAL、IMPORTANT 或 WARNING，结论为 ready for archive。
+- 计划文件中的 `base-ref` 是实施计划创建时的代码基线；Comet `base_ref` 是 change 生命周期基线，两者用途不同，提交区间评估使用 Comet 基线。
+
 ## 已知非阻断项
 
 - `-tags unit` 的 service 全包仍受变更前 Grok/Codex 测试漂移阻断；默认标签全量通过。
