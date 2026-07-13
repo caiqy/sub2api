@@ -186,7 +186,7 @@ func TestSettingHandler_GetSettings_IncludesStickyAndWSSchedulerSettings(t *test
 	gin.SetMode(gin.TestMode)
 	repo := &settingHandlerRepoStub{values: map[string]string{
 		service.SettingKeyGatewayStickyOpenAIEnabled:                                   "true",
-		service.SettingKeyGatewayStickyGeminiEnabled:                                   "false",
+		service.SettingKeyGatewayStickyGeminiEnabled:                                   "true",
 		service.SettingKeyGatewayStickyAnthropicEnabled:                                "true",
 		service.SettingKeyGatewayOpenAIWSSchedulerMode:                                 "layered",
 		service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold:         "0.6",
@@ -212,7 +212,7 @@ func TestSettingHandler_GetSettings_IncludesStickyAndWSSchedulerSettings(t *test
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	data := resp.Data.(map[string]any)
 	require.Equal(t, true, data["gateway_sticky_openai_enabled"])
-	require.Equal(t, false, data["gateway_sticky_gemini_enabled"])
+	require.Equal(t, true, data["gateway_sticky_gemini_enabled"])
 	require.Equal(t, true, data["gateway_sticky_anthropic_enabled"])
 	require.Equal(t, "layered", data["gateway_openai_ws_scheduler_mode"])
 	require.Equal(t, 0.6, data["gateway_openai_ws_scheduler_layered_error_penalty_threshold"])
