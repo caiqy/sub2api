@@ -6,10 +6,12 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -62,6 +64,37 @@ type openAIImagesFailoverHTTPUpstream struct {
 	accountIDs []int64
 	sessionIDs []string
 	resp       *http.Response
+}
+
+type openAIImagesSchedulerCache struct {
+	service.GatewayCache
+	mu       sync.Mutex
+	sessions []string
+}
+
+func (c *openAIImagesSchedulerCache) GetSessionAccountID(_ context.Context, _ int64, session string) (int64, error) {
+	c.mu.Lock()
+	c.sessions = append(c.sessions, session)
+	c.mu.Unlock()
+	return 0, nil
+}
+
+func (c *openAIImagesSchedulerCache) SetSessionAccountID(context.Context, int64, string, int64, time.Duration) error {
+	return nil
+}
+
+func (c *openAIImagesSchedulerCache) RefreshSessionTTL(context.Context, int64, string, time.Duration) error {
+	return nil
+}
+
+func (c *openAIImagesSchedulerCache) DeleteSessionAccountID(context.Context, int64, string) error {
+	return nil
+}
+
+func (c *openAIImagesSchedulerCache) schedulerSessions() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.sessions...)
 }
 
 func (u *openAIImagesFailoverHTTPUpstream) Do(req *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
@@ -129,7 +162,11 @@ func TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhen
 	}
 	accountRepo := openAIImagesFailoverAccountRepo{accounts: accounts}
 	upstream := &openAIImagesFailoverHTTPUpstream{}
-	cfg := &config.Config{RunMode: config.RunModeSimple}
+	cache := &openAIImagesSchedulerCache{}
+	cfg := &config.Config{RunMode: config.RunModeSimple, Gateway: config.GatewayConfig{
+		OpenAIWS: config.GatewayOpenAIWSConfig{SchedulerMode: "weighted"},
+		Sticky:   config.GatewayStickyConfig{OpenAI: config.GatewayStickyPlatformConfig{Enabled: true}},
+	}}
 	gatewayService := service.NewOpenAIGatewayService(
 		accountRepo,
 		nil,
@@ -137,7 +174,7 @@ func TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhen
 		nil,
 		nil,
 		nil,
-		nil,
+		cache,
 		cfg,
 		nil,
 		nil,
@@ -170,9 +207,13 @@ func TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhen
 	)
 	handler.maxAccountSwitches = 10
 
-	body := []byte(`{"model":"gpt-image-2","prompt":"draw a cat"}`)
-	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	require.NoError(t, form.WriteField("model", "gpt-image-2"))
+	require.NoError(t, form.WriteField("prompt", "draw a cat"))
+	require.NoError(t, form.Close())
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body.Bytes()))
+	req.Header.Set("Content-Type", form.FormDataContentType())
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = req
@@ -189,11 +230,17 @@ func TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhen
 
 	handler.Images(c)
 
-	require.Equal(t, []int64{1, 2}, upstream.calls())
+	require.ElementsMatch(t, []int64{1, 2}, upstream.calls())
 	sessions := upstream.sessions()
 	require.Len(t, sessions, 2)
 	require.Equal(t, sessions[0], sessions[1])
 	require.NotEmpty(t, sessions[0])
+	schedulerSessions := cache.schedulerSessions()
+	require.NotEmpty(t, schedulerSessions)
+	for _, session := range schedulerSessions {
+		require.NotEmpty(t, session)
+		require.Equal(t, schedulerSessions[0], session)
+	}
 	require.Equal(t, http.StatusBadGateway, rec.Code)
 	require.Equal(t, "upstream_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
 	require.Equal(t, "Upstream service temporarily unavailable", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
@@ -206,4 +253,26 @@ func TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhen
 	require.Equal(t, "failover", events[0].Kind)
 	require.Equal(t, "failover", events[1].Kind)
 	require.Empty(t, readTestDir(t, rawDir), "OAuth retries must clean the effective body handle")
+
+	var otherBody bytes.Buffer
+	otherForm := multipart.NewWriter(&otherBody)
+	require.NoError(t, otherForm.WriteField("model", "gpt-image-2"))
+	require.NoError(t, otherForm.WriteField("prompt", "draw a dog"))
+	require.NoError(t, otherForm.Close())
+	otherReq := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(otherBody.Bytes()))
+	otherReq.Header.Set("Content-Type", otherForm.FormDataContentType())
+	otherRec := httptest.NewRecorder()
+	otherCtx, _ := gin.CreateTestContext(otherRec)
+	otherCtx.Request = otherReq
+	otherCtx.Set(string(middleware2.ContextKeyAPIKey), c.MustGet(string(middleware2.ContextKeyAPIKey)))
+	otherCtx.Set(string(middleware2.ContextKeyUser), c.MustGet(string(middleware2.ContextKeyUser)))
+	handler.Images(otherCtx)
+
+	otherSchedulerSessions := cache.schedulerSessions()[len(schedulerSessions):]
+	require.NotEmpty(t, otherSchedulerSessions)
+	for _, session := range otherSchedulerSessions {
+		require.NotEmpty(t, session)
+		require.Equal(t, otherSchedulerSessions[0], session)
+	}
+	require.NotEqual(t, schedulerSessions[0], otherSchedulerSessions[0])
 }

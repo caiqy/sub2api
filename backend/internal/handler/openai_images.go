@@ -103,11 +103,15 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, parsed.Model)
 	moderationBody := parsed.ModerationBody()
 	stickySessionSeed := parsed.FreezeStickySessionSeed()
+	fallbackSessionSeed := ""
+	if parsed.Multipart {
+		fallbackSessionSeed = stickySessionSeed
+	}
+	sessionHash := h.gatewayService.GenerateSessionHashWithFallback(c, body, fallbackSessionSeed)
 	sessionSeed := body
 	if parsed.Multipart {
 		sessionSeed = []byte(stickySessionSeed)
 	}
-	sessionHash := h.gatewayService.GenerateExplicitSessionHash(c, sessionSeed)
 	requestPayloadHash := service.HashUsageRequestPayload(sessionSeed)
 	service.BindOpenAIRequestBodyHandle(c, coordinator.Effective())
 	body = nil
