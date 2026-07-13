@@ -29,7 +29,11 @@ func (s *gatewayControlSettingRepoStub) GetValue(ctx context.Context, key string
 }
 
 func (s *gatewayControlSettingRepoStub) Set(ctx context.Context, key, value string) error {
-	panic("unexpected Set call")
+	if s.values == nil {
+		s.values = map[string]string{}
+	}
+	s.values[key] = value
+	return nil
 }
 
 func (s *gatewayControlSettingRepoStub) GetMultiple(ctx context.Context, keys []string) (map[string]string, error) {

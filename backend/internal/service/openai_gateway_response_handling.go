@@ -335,7 +335,7 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 			// 写入客户端（客户端断开后继续 drain 上游）
 			if !clientDisconnected {
 				shouldFlush := queueDrained && (clientOutputStarted || startsClientOutput)
-				if firstTokenMs == nil && startsClientOutput {
+				if forceFlushFailedEvent || firstTokenMs == nil && startsClientOutput {
 					// 保证首个 token 事件尽快出站，避免影响 TTFT。
 					shouldFlush = true
 				}
@@ -345,13 +345,24 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 				} else if _, err := bufferedWriter.WriteString("\n"); err != nil {
 					clientDisconnected = true
 					logger.LegacyPrintf("service.openai_gateway", "Client disconnected during streaming, continuing to drain upstream for billing")
-				} else if shouldFlush {
-					if err := flushBuffered(); err != nil {
-						clientDisconnected = true
-						logger.LegacyPrintf("service.openai_gateway", "Client disconnected during streaming flush, continuing to drain upstream for billing")
-					} else {
-						clientOutputStarted = true
-						lastDownstreamWriteAt = time.Now()
+				} else {
+					if forceFlushFailedEvent {
+						if _, err := bufferedWriter.WriteString("\n"); err != nil {
+							clientDisconnected = true
+							logger.LegacyPrintf("service.openai_gateway", "Client disconnected during streaming, continuing to drain upstream for billing")
+						}
+					}
+					if shouldFlush && !clientDisconnected {
+						if err := flushBuffered(); err != nil {
+							clientDisconnected = true
+							logger.LegacyPrintf("service.openai_gateway", "Client disconnected during streaming flush, continuing to drain upstream for billing")
+						} else {
+							clientOutputStarted = true
+							lastDownstreamWriteAt = time.Now()
+							if forceFlushFailedEvent {
+								MarkResponseCommitted(c)
+							}
+						}
 					}
 				}
 			}

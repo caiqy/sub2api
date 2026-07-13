@@ -65,7 +65,7 @@ openspec/changes/merge-upstream-v0-1-151/tasks.md
 | `backend/internal/server/middleware/api_key_auth_google.go` | API Key 鉴权 | 本地鉴权缓存/资源限制 | 上游 Google 鉴权 | 合并鉴权字段和缓存读取 | 服务测试 |
 | `backend/internal/service/admin_service.go` | 管理服务 | 本地管理能力 | 上游按领域拆分 | 保留拆分文件及本地能力 | 服务测试 |
 | `backend/internal/service/antigravity_gateway_service.go` | Antigravity 网关 | 本地请求语义 | 上游按流水线拆分 | 保留拆分入口和本地转发语义 | 服务测试 |
-| `backend/internal/service/api_key_auth_cache_impl.go` | 认证缓存 | blocked groups 快照 | Batch Image/视频定价快照 | 缓存版本升至 16，保留双方字段 | 服务测试 |
+| `backend/internal/service/api_key_auth_cache_impl.go` | 认证缓存 | blocked groups 快照 | Batch Image/视频定价快照 | 缓存版本升至 17，保留双方字段及独占组标记 | 服务测试 |
 | `backend/internal/service/gateway_service.go` | 通用网关 | 本地网关能力 | 上游按职责拆分 | 保留拆分后的协作入口和本地行为 | 服务测试 |
 | `backend/internal/service/grok_media.go` | Grok 媒体 | 本地图像/视频计费 | 上游媒体控制 | 合并媒体意图和计费参数 | 服务测试 |
 | `backend/internal/service/image_generation_intent.go` | 图像意图 | 本地来源/模型判断 | 上游图像控制 | 合并意图解析和兼容字段 | 服务测试 |
@@ -174,3 +174,38 @@ openspec/changes/merge-upstream-v0-1-151/tasks.md
 - RED：`TestSettingHandler_GetSettings_IncludesStickyAndWSSchedulerSettings` 首个 sticky 字段期望 `true`、实际为 `false`，确认 GET 响应遗漏 3 个 sticky 和 10 个 WS scheduler 字段。
 - 修复：补齐 `GetSettings` 的 DTO 映射；不改变存储、默认值或热更新逻辑。
 - GREEN：该 GET 契约测试及 `go test ./internal/handler/admin -run 'TestSettingHandler_.*Settings' -count=1` 通过。
+
+## 完整验证收口
+
+### 全量命令
+
+- `backend/: go test ./... -count=1`：PASS。
+- `frontend/: pnpm test:run`：166 files / 1241 tests PASS。
+- `frontend/: pnpm typecheck`：PASS。
+- `frontend/: pnpm build`：PASS。
+- `git diff --check`：PASS。
+- 冲突标记扫描：无残留。
+- `deff3123ded1d14e51df1fd1286e3d43ed9ec9bd` 是当前 `HEAD` 祖先：PASS。
+- merge commit `2e3e92457b435d91d3c3a93cc120cecc8aa81cd4` 双父为 `cd9166900b8817bf52c2a407737393d7e9f17786` 与 `deff3123ded1d14e51df1fd1286e3d43ed9ec9bd`：PASS。
+
+### 全量测试发现并修复的回归
+
+- Grok JSON 顶层 `image_url`/`mask_image_url` 恢复解析；multipart alias 使用固定优先级，避免 map 遍历导致 source/mask 随机变化。
+- failed usage detail 保留原始上游 body/header，但仅在最终非 failover 或 failover 耗尽时落快照；失败账号后重试成功不会复用旧错误快照。
+- 原生 Responses 已输出 `response.failed` 时不再追加第二个终止事件；主动补齐 SSE 空行并在 flush 成功后标记 committed，覆盖上游在空行前 EOF 的情况。
+- sticky/WS scheduler runtime config 改为整组受锁读写，避免热更新与请求并发读取产生数据竞争；Gemini handler 同样走统一 getter。
+- auth snapshot v17 补齐 batch image 两个倍率及 `IsExclusive` 双向映射，认证查询同步 select 对应字段。
+- unit-tag 测试桩补齐 provider 启动迁移和公开组 blocked-groups 校验所需行为。
+
+### 审查结果
+
+- thorough review 共执行三轮；最终结论为 ready，无 Critical/High/Medium finding。
+- 既定 unit 聚焦命令与 Task 3 runtime provider 用例均 PASS。
+
+## 最终警告与残余风险
+
+- 前端构建仅有既有 Browserslist 数据过期、动态/静态 import 重叠和大 chunk 警告。
+- 当前 Windows 环境 `CGO_ENABLED=0`，`go test -race` 无法执行；并发结论由受锁 API、生产访问点审计和并发 getter/setter 测试支撑。
+- 探索性 `go test -tags unit ./internal/service -count=1` 仍会触发多项既有 unit-only 测试失败；它不属于本计划强制门槛，本文不声称全量 unit-tag suite 通过。计划指定的 unit 聚焦测试已通过。
+- v17 auth snapshot 本次尚未发布，不存在旧 v17 Redis 条目兼容问题；若先单独部署过中间构建，应清理 auth cache 或再次提升版本。
+- 工作树中的 `.comet/**`、`.superpowers/sdd/task-3-wire-report.md` 和无关 `openspec/changes/add-openai-first-token-timeouts/` 保持原状，不纳入业务提交。

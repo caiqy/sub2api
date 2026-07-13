@@ -311,7 +311,7 @@ Expected: 新测试先失败且能稳定复现；实施最小修复后通过，�
 **Consumes:** 已完成的 merge 和任何独立兼容修复。
 **Produces:** 可重复执行的全量验证结果。
 
-- [ ] **Step 1: 执行后端全量测试**
+- [x] **Step 1: 执行后端全量测试**
 
 Run:
 ```powershell
@@ -322,7 +322,7 @@ Working directory: `backend/`.
 
 Expected: 退出码为 `0`；既有非阻塞警告须记录，新增失败必须修复或阻塞并升级给用户。
 
-- [ ] **Step 2: 执行前端全量验证**
+- [x] **Step 2: 执行前端全量验证**
 
 Run:
 ```powershell
@@ -335,7 +335,7 @@ Working directory: `frontend/`.
 
 Expected: 三条命令均退出码为 `0`，构建产物不纳入提交范围，除非仓库既有规则要求。
 
-- [ ] **Step 3: 验证 merge 祖先关系、差异和冲突残留**
+- [x] **Step 3: 验证 merge 祖先关系、差异和冲突残留**
 
 Run:
 ```powershell
@@ -355,7 +355,7 @@ Expected: 前三项退出码为 `0` 且无冲突/空白输出；最后一项仅�
 **Consumes:** Task 1-7 的命令输出、冲突决策和能力审查结论。
 **Produces:** 合并结果的审计记录，以及明确等待用户的后续操作。
 
-- [ ] **Step 1: 填写验证报告的结果表**
+- [x] **Step 1: 填写验证报告的结果表**
 
 Append `## Merge` with the actual branch, merge commit, tag-ancestor result, each conflict decision, and every post-merge compatibility-fix path. Append `## Capability Review` with one row each for scheduler/sticky/fallback, gateway conversion/terminal usage, privacy/image capability, runtime setting/cache reload, and large request-body lifecycle; each row must state the actual result and command evidence. Append `## Full Verification` with the actual results and warnings for all four mandatory commands and Git integrity checks. Finish with `## Residual Risks`, listing concrete risks or `None identified`.
 

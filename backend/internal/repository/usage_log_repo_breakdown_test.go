@@ -65,7 +65,7 @@ func TestGetUserBreakdownStatsRequestTypeIncludesLegacyFallback(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(legacyFilter)).
 		WithArgs(start, end, requestType).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"user_id", "email", "requests", "input_tokens", "output_tokens",
+			"user_id", "email", "username", "requests", "input_tokens", "output_tokens",
 			"cache_tokens", "total_tokens", "cost", "actual_cost", "account_cost",
 		}))
 

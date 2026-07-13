@@ -622,7 +622,7 @@ func (h *GatewayHandler) geminiStickyEnabled() bool {
 	if h == nil || h.cfg == nil {
 		return true
 	}
-	return h.cfg.Gateway.Sticky.Gemini.Enabled
+	return h.cfg.GatewayControlRuntime().StickyGeminiEnabled
 }
 
 func (h *GatewayHandler) prepareGeminiStickySelection(ctx context.Context, input geminiStickySelectionInput) geminiStickySelectionState {

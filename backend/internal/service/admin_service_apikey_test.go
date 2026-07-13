@@ -23,6 +23,7 @@ type userRepoStubForGroupUpdate struct {
 	addGroupCalled bool
 	addedUserID    int64
 	addedGroupID   int64
+	user           *User
 }
 
 func (s *userRepoStubForGroupUpdate) AddGroupToAllowedGroups(_ context.Context, userID int64, groupID int64) error {
@@ -34,6 +35,9 @@ func (s *userRepoStubForGroupUpdate) AddGroupToAllowedGroups(_ context.Context, 
 
 func (s *userRepoStubForGroupUpdate) Create(context.Context, *User) error { panic("unexpected") }
 func (s *userRepoStubForGroupUpdate) GetByID(context.Context, int64) (*User, error) {
+	if s.user != nil {
+		return s.user, nil
+	}
 	panic("unexpected")
 }
 func (s *userRepoStubForGroupUpdate) GetByEmail(context.Context, string) (*User, error) {
@@ -467,7 +471,7 @@ func TestAdminService_AdminUpdateAPIKeyGroupID_NonExclusiveGroup_NoAllowedGroupU
 	existing := &APIKey{ID: 1, UserID: 42, Key: "sk-test", GroupID: nil}
 	apiKeyRepo := &apiKeyRepoStubForGroupUpdate{key: existing}
 	groupRepo := &groupRepoStubForGroupUpdate{group: &Group{ID: 10, Name: "Public", Status: StatusActive, IsExclusive: false, SubscriptionType: SubscriptionTypeStandard}}
-	userRepo := &userRepoStubForGroupUpdate{}
+	userRepo := &userRepoStubForGroupUpdate{user: &User{ID: 42}}
 	cache := &authCacheInvalidatorStub{}
 	svc := &adminServiceImpl{apiKeyRepo: apiKeyRepo, groupRepo: groupRepo, userRepo: userRepo, authCacheInvalidator: cache}
 

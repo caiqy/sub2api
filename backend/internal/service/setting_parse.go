@@ -285,19 +285,20 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		BackendModeEnabled:               settings[SettingKeyBackendModeEnabled] == "true",
 	}
 	if s != nil && s.cfg != nil {
-		result.GatewayStickyOpenAIEnabled = s.cfg.Gateway.Sticky.OpenAI.Enabled
-		result.GatewayStickyGeminiEnabled = s.cfg.Gateway.Sticky.Gemini.Enabled
-		result.GatewayStickyAnthropicEnabled = s.cfg.Gateway.Sticky.Anthropic.Enabled
-		result.GatewayOpenAIWSSchedulerMode = s.cfg.Gateway.OpenAIWS.SchedulerMode
-		result.GatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold = s.cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold
-		result.GatewayOpenAIWSSchedulerLayeredErrorPenaltyValue = s.cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyValue
-		result.GatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier = s.cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyMultiplier
-		result.GatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue = s.cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyValue
-		result.GatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds = s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeCooldownSeconds
-		result.GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds = s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeIntervalSeconds
-		result.GatewayOpenAIWSSchedulerLayeredProbeMaxFailures = s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeMaxFailures
-		result.GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds = s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTimeoutSeconds
-		result.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds = s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTempUnschedulableSeconds
+		runtime := s.cfg.GatewayControlRuntime()
+		result.GatewayStickyOpenAIEnabled = runtime.StickyOpenAIEnabled
+		result.GatewayStickyGeminiEnabled = runtime.StickyGeminiEnabled
+		result.GatewayStickyAnthropicEnabled = runtime.StickyAnthropicEnabled
+		result.GatewayOpenAIWSSchedulerMode = runtime.OpenAIWSSchedulerMode
+		result.GatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold = runtime.OpenAIWSSchedulerLayered.ErrorPenaltyThreshold
+		result.GatewayOpenAIWSSchedulerLayeredErrorPenaltyValue = runtime.OpenAIWSSchedulerLayered.ErrorPenaltyValue
+		result.GatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier = runtime.OpenAIWSSchedulerLayered.TTFTPenaltyMultiplier
+		result.GatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue = runtime.OpenAIWSSchedulerLayered.TTFTPenaltyValue
+		result.GatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds = runtime.OpenAIWSSchedulerLayered.ProbeCooldownSeconds
+		result.GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds = runtime.OpenAIWSSchedulerLayered.ProbeIntervalSeconds
+		result.GatewayOpenAIWSSchedulerLayeredProbeMaxFailures = runtime.OpenAIWSSchedulerLayered.ProbeMaxFailures
+		result.GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds = runtime.OpenAIWSSchedulerLayered.ProbeTimeoutSeconds
+		result.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds = runtime.OpenAIWSSchedulerLayered.ProbeTempUnschedulableSeconds
 	}
 	if raw, ok := settings[SettingKeyGatewayStickyOpenAIEnabled]; ok && strings.TrimSpace(raw) != "" {
 		result.GatewayStickyOpenAIEnabled = raw == "true"

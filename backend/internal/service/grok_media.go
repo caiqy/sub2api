@@ -138,7 +138,8 @@ func ParseGrokMediaMultipartForm(form *multipart.Form) GrokMediaRequestInfo {
 	if form == nil {
 		return info
 	}
-	for name, values := range form.Value {
+	for _, name := range []string{"model", "prompt", "size", "resolution", "duration", "n", "image", "image_url", "mask", "mask_image_url"} {
+		values := form.Value[name]
 		for _, value := range values {
 			applyGrokMediaMultipartTextField(&info, name, value)
 		}
@@ -241,7 +242,11 @@ func parseGrokMediaJSONRequest(body []byte, info *GrokMediaRequestInfo) {
 	}
 	appendJSONImageURLs(gjson.GetBytes(body, "image"))
 	appendJSONImageURLs(gjson.GetBytes(body, "images"))
+	appendJSONImageURLs(gjson.GetBytes(body, "image_url"))
 	info.MaskImageURL = strings.TrimSpace(gjson.GetBytes(body, "mask.image_url").String())
+	if info.MaskImageURL == "" {
+		info.MaskImageURL = strings.TrimSpace(gjson.GetBytes(body, "mask_image_url").String())
+	}
 }
 
 func parseGrokMediaMultipartRequest(contentType string, body []byte, info *GrokMediaRequestInfo) {

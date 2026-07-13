@@ -17,11 +17,11 @@
 
 ## 4. 完整验证
 
-- [ ] 4.1 在 `backend/` 运行 `go test ./... -count=1`。
-- [ ] 4.2 在 `frontend/` 运行 `pnpm test:run`、`pnpm typecheck` 和 `pnpm build`。
-- [ ] 4.3 检查工作树、冲突标记和最终 diff，汇总警告、已知限制与剩余风险。
+- [x] 4.1 在 `backend/` 运行 `go test ./... -count=1`。
+- [x] 4.2 在 `frontend/` 运行 `pnpm test:run`、`pnpm typecheck` 和 `pnpm build`。
+- [x] 4.3 检查工作树、冲突标记和最终 diff，汇总警告、已知限制与剩余风险。
 
 ## 5. 收尾
 
-- [ ] 5.1 记录目标 tag、合并提交、冲突决策、修复内容、验证结果和专项审查结论。
+- [x] 5.1 记录目标 tag、合并提交、冲突决策、修复内容、验证结果和专项审查结论。
 - [ ] 5.2 由用户决定 merge 分支的合回、推送或保留方式；本 change 不执行发布或部署。

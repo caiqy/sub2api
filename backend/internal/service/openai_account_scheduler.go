@@ -1654,7 +1654,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerModeRequested() bool {
 	if s == nil || s.cfg == nil {
 		return false
 	}
-	mode := strings.ToLower(strings.TrimSpace(s.cfg.Gateway.OpenAIWS.SchedulerMode))
+	mode := strings.ToLower(strings.TrimSpace(s.cfg.GatewayControlRuntime().OpenAIWSSchedulerMode))
 	return mode == "weighted" || mode == "layered"
 }
 
@@ -1841,7 +1841,11 @@ func (s *OpenAIGatewayService) getOpenAIAccountSchedulerWithContext(ctx context.
 		return nil
 	}
 	desiredMode := "weighted"
-	if s.cfg != nil && strings.EqualFold(strings.TrimSpace(s.cfg.Gateway.OpenAIWS.SchedulerMode), "layered") {
+	schedulerMode := ""
+	if s.cfg != nil {
+		schedulerMode = s.cfg.GatewayControlRuntime().OpenAIWSSchedulerMode
+	}
+	if strings.EqualFold(strings.TrimSpace(schedulerMode), "layered") {
 		desiredMode = "layered"
 	}
 	if s.openaiScheduler != nil {
@@ -1859,9 +1863,9 @@ func (s *OpenAIGatewayService) getOpenAIAccountSchedulerWithContext(ctx context.
 			if desiredMode == "layered" {
 				s.openaiScheduler = newLayeredOpenAIAccountScheduler(s, s.openaiAccountStats)
 			} else {
-				if s.cfg != nil && s.cfg.Gateway.OpenAIWS.SchedulerMode != "" && !strings.EqualFold(strings.TrimSpace(s.cfg.Gateway.OpenAIWS.SchedulerMode), "weighted") {
+				if schedulerMode != "" && !strings.EqualFold(strings.TrimSpace(schedulerMode), "weighted") {
 					slog.Warn("openai_scheduler.unknown_mode_fallback_to_weighted",
-						"configured_mode", s.cfg.Gateway.OpenAIWS.SchedulerMode)
+						"configured_mode", schedulerMode)
 				}
 				s.openaiScheduler = newDefaultOpenAIAccountScheduler(s, s.openaiAccountStats)
 			}
@@ -2468,16 +2472,17 @@ func openAIQuotaWindowResetAny(extra map[string]any, now time.Time, windows ...s
 
 func (s *OpenAIGatewayService) openAIWSSchedulerLayeredConfig() GatewayOpenAIWSSchedulerLayeredConfig {
 	if s != nil && s.cfg != nil {
+		layered := s.cfg.GatewayControlRuntime().OpenAIWSSchedulerLayered
 		return GatewayOpenAIWSSchedulerLayeredConfig{
-			ErrorPenaltyThreshold:         s.cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold,
-			ErrorPenaltyValue:             s.cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyValue,
-			TTFTPenaltyMultiplier:         s.cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyMultiplier,
-			TTFTPenaltyValue:              s.cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyValue,
-			ProbeCooldownSeconds:          s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeCooldownSeconds,
-			ProbeIntervalSeconds:          s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeIntervalSeconds,
-			ProbeMaxFailures:              s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeMaxFailures,
-			ProbeTimeoutSeconds:           s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTimeoutSeconds,
-			ProbeTempUnschedulableSeconds: s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTempUnschedulableSeconds,
+			ErrorPenaltyThreshold:         layered.ErrorPenaltyThreshold,
+			ErrorPenaltyValue:             layered.ErrorPenaltyValue,
+			TTFTPenaltyMultiplier:         layered.TTFTPenaltyMultiplier,
+			TTFTPenaltyValue:              layered.TTFTPenaltyValue,
+			ProbeCooldownSeconds:          layered.ProbeCooldownSeconds,
+			ProbeIntervalSeconds:          layered.ProbeIntervalSeconds,
+			ProbeMaxFailures:              layered.ProbeMaxFailures,
+			ProbeTimeoutSeconds:           layered.ProbeTimeoutSeconds,
+			ProbeTempUnschedulableSeconds: layered.ProbeTempUnschedulableSeconds,
 		}
 	}
 	return GatewayOpenAIWSSchedulerLayeredConfig{

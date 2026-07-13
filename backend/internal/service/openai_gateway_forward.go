@@ -776,10 +776,17 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				return nil, &UpstreamFailoverError{
 					StatusCode:             resp.StatusCode,
 					ResponseBody:           respBody,
+					ResponseHeaders:        resp.Header.Clone(),
 					RetryableOnSameAccount: account.IsPoolMode() && (account.IsPoolModeRetryableStatus(resp.StatusCode) || isOpenAITransientProcessingError(resp.StatusCode, upstreamMsg, respBody)),
 				}
 			}
-			return s.handleErrorResponse(ctx, resp, c, account, body, billingModel)
+			result, err := s.handleErrorResponse(ctx, resp, c, account, body, billingModel)
+			var failoverErr *UpstreamFailoverError
+			if !errors.As(err, &failoverErr) {
+				SetUsageResponseSnapshot(c, FormatUsageDetailResponseHeadersText(resp.StatusCode, resp.Header), string(respBody))
+				SetUsageUpstreamResponse(c, resp.StatusCode, resp.Header, string(respBody))
+			}
+			return result, err
 		}
 		defer func() { _ = resp.Body.Close() }()
 

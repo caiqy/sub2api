@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 
 import { defineComponent, h } from 'vue'
 import { mount } from '@vue/test-utils'
+import { createPinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import AppSidebar from '../AppSidebar.vue'
@@ -119,6 +120,7 @@ const RouterLinkStub = defineComponent({
 function mountSidebar() {
   return mount(AppSidebar, {
     global: {
+      plugins: [createPinia()],
       stubs: {
         VersionBadge: {
           template: '<div data-testid="version-badge" />'

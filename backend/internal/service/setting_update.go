@@ -582,19 +582,21 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		})
 	}
 	if s.cfg != nil {
-		s.cfg.Gateway.Sticky.OpenAI.Enabled = settings.GatewayStickyOpenAIEnabled
-		s.cfg.Gateway.Sticky.Gemini.Enabled = settings.GatewayStickyGeminiEnabled
-		s.cfg.Gateway.Sticky.Anthropic.Enabled = settings.GatewayStickyAnthropicEnabled
-		applyGatewayOpenAIWSSchedulerMode(&s.cfg.Gateway.OpenAIWS.SchedulerMode, settings.GatewayOpenAIWSSchedulerMode)
-		s.cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold = settings.GatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold
-		s.cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyValue = settings.GatewayOpenAIWSSchedulerLayeredErrorPenaltyValue
-		s.cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyMultiplier = settings.GatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier
-		s.cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyValue = settings.GatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue
-		s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeCooldownSeconds = settings.GatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds
-		s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeIntervalSeconds = settings.GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds
-		s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeMaxFailures = settings.GatewayOpenAIWSSchedulerLayeredProbeMaxFailures
-		s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTimeoutSeconds = settings.GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds
-		s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTempUnschedulableSeconds = settings.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds
+		runtime := s.cfg.GatewayControlRuntime()
+		runtime.StickyOpenAIEnabled = settings.GatewayStickyOpenAIEnabled
+		runtime.StickyGeminiEnabled = settings.GatewayStickyGeminiEnabled
+		runtime.StickyAnthropicEnabled = settings.GatewayStickyAnthropicEnabled
+		applyGatewayOpenAIWSSchedulerMode(&runtime.OpenAIWSSchedulerMode, settings.GatewayOpenAIWSSchedulerMode)
+		runtime.OpenAIWSSchedulerLayered.ErrorPenaltyThreshold = settings.GatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold
+		runtime.OpenAIWSSchedulerLayered.ErrorPenaltyValue = settings.GatewayOpenAIWSSchedulerLayeredErrorPenaltyValue
+		runtime.OpenAIWSSchedulerLayered.TTFTPenaltyMultiplier = settings.GatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier
+		runtime.OpenAIWSSchedulerLayered.TTFTPenaltyValue = settings.GatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue
+		runtime.OpenAIWSSchedulerLayered.ProbeCooldownSeconds = settings.GatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds
+		runtime.OpenAIWSSchedulerLayered.ProbeIntervalSeconds = settings.GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds
+		runtime.OpenAIWSSchedulerLayered.ProbeMaxFailures = settings.GatewayOpenAIWSSchedulerLayeredProbeMaxFailures
+		runtime.OpenAIWSSchedulerLayered.ProbeTimeoutSeconds = settings.GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds
+		runtime.OpenAIWSSchedulerLayered.ProbeTempUnschedulableSeconds = settings.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds
+		s.cfg.SetGatewayControlRuntime(runtime)
 		s.cfg.SetTrustForwardedIPForAPIKeyACL(settings.APIKeyACLTrustForwardedIP)
 	}
 	// codex_cli_only 加固策略缓存：设置更新后强制下次重载（涉及 4 个键 + JSON 解析，直接置过期）。

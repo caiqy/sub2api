@@ -828,7 +828,13 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 				RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 			}
 		}
-		return s.handleErrorResponse(upstreamCtx, resp, c, account, errorBody)
+		result, err := s.handleErrorResponse(upstreamCtx, resp, c, account, errorBody)
+		var failoverErr *UpstreamFailoverError
+		if !errors.As(err, &failoverErr) {
+			SetUsageResponseSnapshot(c, FormatUsageDetailResponseHeadersText(resp.StatusCode, resp.Header), string(respBody))
+			SetUsageUpstreamResponse(c, resp.StatusCode, resp.Header, string(respBody))
+		}
+		return result, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 

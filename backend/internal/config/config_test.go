@@ -4,12 +4,45 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
 )
+
+func TestGatewayControlRuntimeConcurrentAccess(t *testing.T) {
+	cfg := &Config{}
+	want := GatewayControlRuntimeConfig{
+		StickyOpenAIEnabled:    true,
+		StickyGeminiEnabled:    true,
+		StickyAnthropicEnabled: true,
+		OpenAIWSSchedulerMode:  "layered",
+		OpenAIWSSchedulerLayered: GatewayOpenAIWSSchedulerLayeredConfig{
+			ErrorPenaltyThreshold: 0.3,
+			ProbeTimeoutSeconds:   15,
+		},
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for range 1000 {
+			cfg.SetGatewayControlRuntime(want)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range 1000 {
+			_ = cfg.GatewayControlRuntime()
+		}
+	}()
+	wg.Wait()
+
+	require.Equal(t, want, cfg.GatewayControlRuntime())
+}
 
 func resetViperWithJWTSecret(t *testing.T) {
 	t.Helper()

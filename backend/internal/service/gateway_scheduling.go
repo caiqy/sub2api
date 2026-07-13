@@ -119,7 +119,11 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	} else if group != nil {
 		stickyPlatform = group.Platform
 	}
-	stickyEnabled := s.cfg == nil || (stickyPlatform != PlatformGemini && s.cfg.Gateway.Sticky.Anthropic.Enabled) || (stickyPlatform == PlatformGemini && s.cfg.Gateway.Sticky.Gemini.Enabled)
+	stickyEnabled := true
+	if s.cfg != nil {
+		runtime := s.cfg.GatewayControlRuntime()
+		stickyEnabled = stickyPlatform != PlatformGemini && runtime.StickyAnthropicEnabled || stickyPlatform == PlatformGemini && runtime.StickyGeminiEnabled
+	}
 	if prefetch := prefetchedStickyAccountIDFromContext(ctx, groupID); stickyEnabled && prefetch > 0 {
 		stickyAccountID = prefetch
 		stickySource = "prefetch"

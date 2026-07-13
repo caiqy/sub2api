@@ -1,6 +1,9 @@
 package service
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestAPIKeyService_RejectsV10AuthSnapshotWithoutModelsListConfig(t *testing.T) {
 	groupID := int64(9)
@@ -39,5 +42,30 @@ func TestAPIKeyService_RejectsV10AuthSnapshotWithoutModelsListConfig(t *testing.
 	}
 	if apiKey != nil {
 		t.Fatalf("expected no API key from stale snapshot, got %#v", apiKey)
+	}
+}
+
+func TestAPIKeyAuthSnapshotPreservesBatchImageMultipliers(t *testing.T) {
+	groupID := int64(9)
+	svc := &APIKeyService{}
+	snapshot := svc.snapshotFromAPIKey(context.Background(), &APIKey{
+		ID: 1, UserID: 2, GroupID: &groupID, Status: StatusActive,
+		User: &User{ID: 2, Status: StatusActive},
+		Group: &Group{
+			ID: groupID, Status: StatusActive, IsExclusive: true,
+			BatchImageDiscountMultiplier: 0.8,
+			BatchImageHoldMultiplier:     0.9,
+		},
+	})
+
+	apiKey := svc.snapshotToAPIKey("key", snapshot)
+	if !apiKey.Group.IsExclusive {
+		t.Fatal("exclusive group flag was not preserved")
+	}
+	if apiKey.Group.BatchImageDiscountMultiplier != 0.8 {
+		t.Fatalf("discount multiplier = %v, want 0.8", apiKey.Group.BatchImageDiscountMultiplier)
+	}
+	if apiKey.Group.BatchImageHoldMultiplier != 0.9 {
+		t.Fatalf("hold multiplier = %v, want 0.9", apiKey.Group.BatchImageHoldMultiplier)
 	}
 }

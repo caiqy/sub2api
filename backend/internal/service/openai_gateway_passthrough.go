@@ -1035,6 +1035,13 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI passthrough] Client disconnected during streaming, continue draining upstream for usage: account=%d", account.ID)
 			} else {
 				clientOutputStarted = true
+				if forceFlushFailedEvent {
+					if _, err := fmt.Fprintln(w); err != nil {
+						clientDisconnected = true
+					} else {
+						MarkResponseCommitted(c)
+					}
+				}
 				flusher.Flush()
 			}
 		}

@@ -412,7 +412,7 @@ func (s *OpenAIGatewayService) UsageLogRepository() UsageLogRepository {
 }
 
 func (s *OpenAIGatewayService) openAIStickyEnabled() bool {
-	return s == nil || s.cfg == nil || s.cfg.Gateway.Sticky.OpenAI.Enabled
+	return s == nil || s.cfg == nil || s.cfg.GatewayControlRuntime().StickyOpenAIEnabled
 }
 
 // NewOpenAIGatewayService creates a new OpenAIGatewayService

@@ -286,7 +286,7 @@ func TestOpenAIGatewayHandler_NativeResponsesFailedIsNotDuplicated(t *testing.T)
 	gin.SetMode(gin.TestMode)
 	group := &service.Group{ID: 32, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
 	account := &service.Account{ID: 132, Name: "native-responses", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "sk-test"}, Extra: map[string]any{"openai_passthrough": true, "use_responses_api": true}}
-	upstreamBody := "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_native_failed\",\"status\":\"failed\",\"error\":{\"code\":\"invalid_request\",\"message\":\"native upstream failure\"}}}\n\n"
+	upstreamBody := "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_native_failed\",\"status\":\"failed\",\"error\":{\"code\":\"invalid_request\",\"message\":\"native upstream failure\"}}}\n"
 	env := newTerminalUsageOpenAIEnv(t, group, &openAIChatCompletionsAccountRepoStub{account: account}, &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
@@ -299,6 +299,7 @@ func TestOpenAIGatewayHandler_NativeResponsesFailedIsNotDuplicated(t *testing.T)
 	env.router("/v1/responses", env.handler.Responses).ServeHTTP(rec, req)
 
 	require.Equal(t, 1, strings.Count(rec.Body.String(), "event: response.failed\n"), rec.Body.String())
+	require.True(t, strings.HasSuffix(rec.Body.String(), "\n\n"), rec.Body.String())
 	require.NotNil(t, env.usageRepo.lastLog)
 	require.Len(t, env.usageRepo.created, 1)
 }
@@ -349,7 +350,7 @@ func TestOpenAIGatewayHandler_NativeNonPassthroughBufferedResponsesFailedIsNotDu
 	group := &service.Group{ID: 34, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
 	account := &service.Account{ID: 134, Name: "native-responses", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "sk-test"}, Extra: map[string]any{"use_responses_api": true}}
 	upstreamBody := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n" +
-		"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_native_failed\",\"status\":\"failed\",\"error\":{\"code\":\"invalid_request\",\"message\":\"native upstream failure\"}}}\n\n"
+		"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_native_failed\",\"status\":\"failed\",\"error\":{\"code\":\"invalid_request\",\"message\":\"native upstream failure\"}}}\n"
 	env := newTerminalUsageOpenAIEnv(t, group, &openAIChatCompletionsAccountRepoStub{account: account}, &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
@@ -363,6 +364,7 @@ func TestOpenAIGatewayHandler_NativeNonPassthroughBufferedResponsesFailedIsNotDu
 	env.router("/v1/responses", env.handler.Responses).ServeHTTP(rec, req)
 
 	require.Equal(t, 1, strings.Count(rec.Body.String(), "event: response.failed\n"), rec.Body.String())
+	require.True(t, strings.HasSuffix(rec.Body.String(), "\n\n"), rec.Body.String())
 	require.NotNil(t, env.usageRepo.lastLog)
 	require.Len(t, env.usageRepo.created, 1)
 }

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -87,6 +88,7 @@ type Config struct {
 	DashboardAgg            DashboardAggregationConfig    `mapstructure:"dashboard_aggregation"`
 	UsageCleanup            UsageCleanupConfig            `mapstructure:"usage_cleanup"`
 	Concurrency             ConcurrencyConfig             `mapstructure:"concurrency"`
+	gatewayControlRuntimeMu sync.RWMutex                  `mapstructure:"-"`
 	TokenRefresh            TokenRefreshConfig            `mapstructure:"token_refresh"`
 	RunMode                 string                        `mapstructure:"run_mode" yaml:"run_mode"`
 	Timezone                string                        `mapstructure:"timezone"` // e.g. "Asia/Shanghai", "UTC"
@@ -94,6 +96,42 @@ type Config struct {
 	Update                  UpdateConfig                  `mapstructure:"update"`
 	Idempotency             IdempotencyConfig             `mapstructure:"idempotency"`
 	BatchImage              BatchImageConfig              `mapstructure:"batch_image"`
+}
+
+type GatewayControlRuntimeConfig struct {
+	StickyOpenAIEnabled      bool
+	StickyGeminiEnabled      bool
+	StickyAnthropicEnabled   bool
+	OpenAIWSSchedulerMode    string
+	OpenAIWSSchedulerLayered GatewayOpenAIWSSchedulerLayeredConfig
+}
+
+func (c *Config) GatewayControlRuntime() GatewayControlRuntimeConfig {
+	if c == nil {
+		return GatewayControlRuntimeConfig{}
+	}
+	c.gatewayControlRuntimeMu.RLock()
+	defer c.gatewayControlRuntimeMu.RUnlock()
+	return GatewayControlRuntimeConfig{
+		StickyOpenAIEnabled:      c.Gateway.Sticky.OpenAI.Enabled,
+		StickyGeminiEnabled:      c.Gateway.Sticky.Gemini.Enabled,
+		StickyAnthropicEnabled:   c.Gateway.Sticky.Anthropic.Enabled,
+		OpenAIWSSchedulerMode:    c.Gateway.OpenAIWS.SchedulerMode,
+		OpenAIWSSchedulerLayered: c.Gateway.OpenAIWS.SchedulerLayered,
+	}
+}
+
+func (c *Config) SetGatewayControlRuntime(runtime GatewayControlRuntimeConfig) {
+	if c == nil {
+		return
+	}
+	c.gatewayControlRuntimeMu.Lock()
+	defer c.gatewayControlRuntimeMu.Unlock()
+	c.Gateway.Sticky.OpenAI.Enabled = runtime.StickyOpenAIEnabled
+	c.Gateway.Sticky.Gemini.Enabled = runtime.StickyGeminiEnabled
+	c.Gateway.Sticky.Anthropic.Enabled = runtime.StickyAnthropicEnabled
+	c.Gateway.OpenAIWS.SchedulerMode = runtime.OpenAIWSSchedulerMode
+	c.Gateway.OpenAIWS.SchedulerLayered = runtime.OpenAIWSSchedulerLayered
 }
 
 type LogConfig struct {

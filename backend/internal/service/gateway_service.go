@@ -644,14 +644,14 @@ func (s *GatewayService) UsageLogRepository() UsageLogRepository {
 }
 
 func (s *GatewayService) BindGeminiStickySession(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
-	if s != nil && s.cfg != nil && !s.cfg.Gateway.Sticky.Gemini.Enabled {
+	if s != nil && s.cfg != nil && !s.cfg.GatewayControlRuntime().StickyGeminiEnabled {
 		return nil
 	}
 	return s.BindStickySession(ctx, groupID, sessionHash, accountID)
 }
 
 func (s *GatewayService) GetGeminiCachedSessionAccountID(ctx context.Context, groupID *int64, sessionHash string) (int64, error) {
-	if s != nil && s.cfg != nil && !s.cfg.Gateway.Sticky.Gemini.Enabled {
+	if s != nil && s.cfg != nil && !s.cfg.GatewayControlRuntime().StickyGeminiEnabled {
 		return 0, nil
 	}
 	return s.GetCachedSessionAccountID(ctx, groupID, sessionHash)

@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"regexp"
 	"testing"
@@ -100,6 +99,9 @@ func TestUsageLogRepositoryCreateSingle_SkipsDetailPersistenceWhenDisabled(t *te
 			image_output_size,
 			image_size_source,
 			image_size_breakdown,
+			video_count,
+			video_resolution,
+			video_duration_seconds,
 			service_tier,
 			reasoning_effort,
 			inbound_endpoint,
@@ -117,7 +119,7 @@ func TestUsageLogRepositoryCreateSingle_SkipsDetailPersistenceWhenDisabled(t *te
 			$10, $11, $12, $13,
 			$14, $15, $16, $17,
 			$18, $19, $20, $21, $22, $23,
-			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50
+			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 		RETURNING id, created_at
@@ -235,17 +237,8 @@ func TestUsageLogRepositoryFlushBestEffortBatch_PersistsDetailForInsertedRows(t 
 			ResponseBody:           `{"ok":true}`,
 		}).Normalize(),
 	}
-	payload, err := json.Marshal([]usageLogBatchRow{{
-		RequestID: log.RequestID,
-		APIKeyID:  log.APIKeyID,
-		ID:        123,
-		CreatedAt: createdAt,
-		Inserted:  true,
-	}})
-	require.NoError(t, err)
-
-	mock.ExpectQuery(`WITH input \(.*'\[\]'::json`).
-		WillReturnRows(sqlmock.NewRows([]string{"payload"}).AddRow(payload))
+	mock.ExpectQuery(`INSERT INTO usage_logs`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(123), createdAt))
 	mock.ExpectExec(`INSERT INTO usage_log_details`).
 		WithArgs(
 			int64(123),
@@ -302,17 +295,11 @@ func TestUsageLogRepositoryFlushBestEffortBatch_DoesNotPersistDetailForDuplicate
 			RequestBody: `{"request":"payload"}`,
 		}).Normalize(),
 	}
-	payload, err := json.Marshal([]usageLogBatchRow{{
-		RequestID: log.RequestID,
-		APIKeyID:  log.APIKeyID,
-		ID:        456,
-		CreatedAt: createdAt,
-		Inserted:  false,
-	}})
-	require.NoError(t, err)
-
-	mock.ExpectQuery(`WITH input \(.*'\[\]'::json`).
-		WillReturnRows(sqlmock.NewRows([]string{"payload"}).AddRow(payload))
+	mock.ExpectQuery(`INSERT INTO usage_logs`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}))
+	mock.ExpectQuery(`SELECT id, created_at FROM usage_logs`).
+		WithArgs(log.RequestID, log.APIKeyID).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(456), createdAt))
 
 	req := usageLogBestEffortRequest{
 		prepared: prepareUsageLogInsert(log),

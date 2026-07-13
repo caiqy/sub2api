@@ -724,10 +724,10 @@ func TestUsageLogRepositoryGetUserBreakdownStatsRequestTypeLegacyFallbackAndUser
 	end := start.Add(24 * time.Hour)
 	requestType := int16(service.RequestTypeStream)
 
-	rows := sqlmock.NewRows([]string{"user_id", "email", "username", "requests", "total_tokens", "cost", "actual_cost", "account_cost"}).
-		AddRow(int64(7), "rank@example.com", "Rank User", int64(3), int64(300), 1.5, 1.2, 1.1)
+	rows := sqlmock.NewRows([]string{"user_id", "email", "username", "requests", "input_tokens", "output_tokens", "cache_tokens", "total_tokens", "cost", "actual_cost", "account_cost"}).
+		AddRow(int64(7), "rank@example.com", "Rank User", int64(3), int64(100), int64(150), int64(50), int64(300), 1.5, 1.2, 1.1)
 
-	mock.ExpectQuery("AND \\(request_type = \\$3 OR \\(request_type = 0 AND stream = TRUE AND openai_ws_mode = FALSE\\)\\)").
+	mock.ExpectQuery("AND \\(ul\\.request_type = \\$3 OR \\(ul\\.request_type = 0 AND ul\\.stream = TRUE AND ul\\.openai_ws_mode = FALSE\\)\\)").
 		WithArgs(start, end, requestType).
 		WillReturnRows(rows)
 
@@ -736,7 +736,7 @@ func TestUsageLogRepositoryGetUserBreakdownStatsRequestTypeLegacyFallbackAndUser
 	}, 50)
 	require.NoError(t, err)
 	require.Equal(t, []usagestats.UserBreakdownItem{
-		{UserID: 7, Email: "rank@example.com", Username: "Rank User", Requests: 3, TotalTokens: 300, Cost: 1.5, ActualCost: 1.2, AccountCost: 1.1},
+		{UserID: 7, Email: "rank@example.com", Username: "Rank User", Requests: 3, InputTokens: 100, OutputTokens: 150, CacheTokens: 50, TotalTokens: 300, Cost: 1.5, ActualCost: 1.2, AccountCost: 1.1},
 	}, got)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
