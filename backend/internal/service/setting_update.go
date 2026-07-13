@@ -353,6 +353,19 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 
 	// Backend Mode
 	updates[SettingKeyBackendModeEnabled] = strconv.FormatBool(settings.BackendModeEnabled)
+	updates[SettingKeyGatewayStickyOpenAIEnabled] = strconv.FormatBool(settings.GatewayStickyOpenAIEnabled)
+	updates[SettingKeyGatewayStickyGeminiEnabled] = strconv.FormatBool(settings.GatewayStickyGeminiEnabled)
+	updates[SettingKeyGatewayStickyAnthropicEnabled] = strconv.FormatBool(settings.GatewayStickyAnthropicEnabled)
+	updates[SettingKeyGatewayOpenAIWSSchedulerMode] = strings.ToLower(strings.TrimSpace(settings.GatewayOpenAIWSSchedulerMode))
+	updates[SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold] = strconv.FormatFloat(settings.GatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold, 'f', -1, 64)
+	updates[SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyValue] = strconv.Itoa(settings.GatewayOpenAIWSSchedulerLayeredErrorPenaltyValue)
+	updates[SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier] = strconv.FormatFloat(settings.GatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier, 'f', -1, 64)
+	updates[SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue] = strconv.Itoa(settings.GatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue)
+	updates[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds] = strconv.Itoa(settings.GatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds)
+	updates[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds] = strconv.Itoa(settings.GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds)
+	updates[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeMaxFailures] = strconv.Itoa(settings.GatewayOpenAIWSSchedulerLayeredProbeMaxFailures)
+	updates[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds] = strconv.Itoa(settings.GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds)
+	updates[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds] = strconv.Itoa(settings.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds)
 
 	// Gateway forwarding behavior
 	updates[SettingKeyEnableFingerprintUnification] = strconv.FormatBool(settings.EnableFingerprintUnification)
@@ -569,7 +582,19 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		})
 	}
 	if s.cfg != nil {
+		s.cfg.Gateway.Sticky.OpenAI.Enabled = settings.GatewayStickyOpenAIEnabled
+		s.cfg.Gateway.Sticky.Gemini.Enabled = settings.GatewayStickyGeminiEnabled
+		s.cfg.Gateway.Sticky.Anthropic.Enabled = settings.GatewayStickyAnthropicEnabled
 		applyGatewayOpenAIWSSchedulerMode(&s.cfg.Gateway.OpenAIWS.SchedulerMode, settings.GatewayOpenAIWSSchedulerMode)
+		s.cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold = settings.GatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold
+		s.cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyValue = settings.GatewayOpenAIWSSchedulerLayeredErrorPenaltyValue
+		s.cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyMultiplier = settings.GatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier
+		s.cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyValue = settings.GatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue
+		s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeCooldownSeconds = settings.GatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds
+		s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeIntervalSeconds = settings.GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds
+		s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeMaxFailures = settings.GatewayOpenAIWSSchedulerLayeredProbeMaxFailures
+		s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTimeoutSeconds = settings.GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds
+		s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTempUnschedulableSeconds = settings.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds
 		s.cfg.SetTrustForwardedIPForAPIKeyACL(settings.APIKeyACLTrustForwardedIP)
 	}
 	// codex_cli_only 加固策略缓存：设置更新后强制下次重载（涉及 4 个键 + JSON 解析，直接置过期）。

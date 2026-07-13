@@ -284,6 +284,64 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		CustomEndpoints:                  settings[SettingKeyCustomEndpoints],
 		BackendModeEnabled:               settings[SettingKeyBackendModeEnabled] == "true",
 	}
+	if s != nil && s.cfg != nil {
+		result.GatewayStickyOpenAIEnabled = s.cfg.Gateway.Sticky.OpenAI.Enabled
+		result.GatewayStickyGeminiEnabled = s.cfg.Gateway.Sticky.Gemini.Enabled
+		result.GatewayStickyAnthropicEnabled = s.cfg.Gateway.Sticky.Anthropic.Enabled
+		result.GatewayOpenAIWSSchedulerMode = s.cfg.Gateway.OpenAIWS.SchedulerMode
+		result.GatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold = s.cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold
+		result.GatewayOpenAIWSSchedulerLayeredErrorPenaltyValue = s.cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyValue
+		result.GatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier = s.cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyMultiplier
+		result.GatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue = s.cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyValue
+		result.GatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds = s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeCooldownSeconds
+		result.GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds = s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeIntervalSeconds
+		result.GatewayOpenAIWSSchedulerLayeredProbeMaxFailures = s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeMaxFailures
+		result.GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds = s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTimeoutSeconds
+		result.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds = s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTempUnschedulableSeconds
+	}
+	if raw, ok := settings[SettingKeyGatewayStickyOpenAIEnabled]; ok && strings.TrimSpace(raw) != "" {
+		result.GatewayStickyOpenAIEnabled = raw == "true"
+	}
+	if raw, ok := settings[SettingKeyGatewayStickyGeminiEnabled]; ok && strings.TrimSpace(raw) != "" {
+		result.GatewayStickyGeminiEnabled = raw == "true"
+	}
+	if raw, ok := settings[SettingKeyGatewayStickyAnthropicEnabled]; ok && strings.TrimSpace(raw) != "" {
+		result.GatewayStickyAnthropicEnabled = raw == "true"
+	}
+	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerMode]; ok {
+		applyGatewayOpenAIWSSchedulerMode(&result.GatewayOpenAIWSSchedulerMode, raw)
+	} else {
+		applyGatewayOpenAIWSSchedulerMode(&result.GatewayOpenAIWSSchedulerMode, result.GatewayOpenAIWSSchedulerMode)
+	}
+	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold]; ok {
+		applyPositiveFloatSettingInRange(&result.GatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold, raw, 0, 1)
+	}
+	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyValue]; ok {
+		applyPositiveIntSetting(&result.GatewayOpenAIWSSchedulerLayeredErrorPenaltyValue, raw)
+	}
+	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier]; ok {
+		applyFloatSettingGreaterThan(&result.GatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier, raw, 1)
+	}
+	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue]; ok {
+		applyPositiveIntSetting(&result.GatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue, raw)
+	}
+	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds]; ok {
+		applyPositiveIntSetting(&result.GatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds, raw)
+	}
+	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds]; ok {
+		applyPositiveIntSetting(&result.GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds, raw)
+	}
+	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeMaxFailures]; ok {
+		applyPositiveIntSetting(&result.GatewayOpenAIWSSchedulerLayeredProbeMaxFailures, raw)
+	}
+	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds]; ok {
+		applyPositiveIntSetting(&result.GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds, raw)
+	}
+	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds]; ok {
+		applyPositiveIntSettingWithDefault(&result.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds, raw, probeDefaultTempUnschedulableSeconds)
+	} else if result.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds <= 0 {
+		result.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds = probeDefaultTempUnschedulableSeconds
+	}
 	result.TableDefaultPageSize, result.TablePageSizeOptions = parseTablePreferences(
 		settings[SettingKeyTableDefaultPageSize],
 		settings[SettingKeyTablePageSizeOptions],

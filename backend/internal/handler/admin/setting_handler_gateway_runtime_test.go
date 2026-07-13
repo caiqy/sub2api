@@ -107,7 +107,10 @@ func newGatewayRuntimeTestRouter(t *testing.T, repo *gatewayRuntimeHandlerRepoSt
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
-	settingService := service.ProvideSettingService(repo, nil, nil, cfg, httpUpstream)
+	settingService := service.NewSettingService(repo, cfg)
+	if invalidator, ok := httpUpstream.(interface{ InvalidateIdleClients() }); ok {
+		settingService.SetGatewayRuntimeIdleInvalidator(invalidator)
+	}
 	handler := NewSettingHandler(settingService, nil, nil, nil, nil, nil, nil)
 
 	router := gin.New()

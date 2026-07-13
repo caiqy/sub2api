@@ -150,3 +150,14 @@ openspec/changes/merge-upstream-v0-1-151/tasks.md
 - `backend/go.mod` 将 Go toolchain 从 1.26.4 更新到 1.26.5，并更新 AWS SDK 小版本；`go.mod`/`go.sum` 均来自目标 release 与 Wire 工具的可复现依赖解析，未升级无关依赖。前端 `package.json` 与锁文件无额外合并差异。
 - `go generate ./ent` 与 `go generate ./cmd/server` 完成后没有产生未提交生成差异；Wire 连续生成哈希稳定。
 - 新增 migrations `159` 至 `173` 均来自目标 release。`160_add_user_frozen_balance.sql` 与 `160_batch_image_provider_refs.sql` 虽共享数字前缀，但 migration runner 使用完整 `filename` 作为主键，按完整文件名排序执行，因此两者会独立应用；两个 SQL 均使用 `ADD COLUMN IF NOT EXISTS`。
+
+## 关键能力专项审查
+
+### Scheduler、Sticky 与 Runtime Settings 回归
+
+- RED：Gemini route sticky lookup/bind 在 `Gemini.Enabled=false`、`Anthropic.Enabled=true` 时仍访问缓存；admin setting 聚焦测试显示 omitted login/OAuth/risk/backend 字段被清空，sticky/WS scheduler 字段没有持久化、回读或热更新。
+- 根因：上游 service/handler 拆分时，`GetGeminiCachedSessionAccountID`/`BindGeminiStickySession` 退化为无平台开关的通用 alias；本地 `UpdateSettingsRequest` pointer 字段、`SystemSettings` 映射、`buildSystemSettingsUpdates`、`parseSettings` 和 `refreshCachedSettings` 的 sticky/WS 逻辑未完整迁移。
+- 修复：Gemini wrapper 恢复独立开关；设置请求恢复 omitted=保留语义；sticky/WS scheduler 字段重新接入验证、持久化、回读、响应和运行时 config 热更新。gateway-runtime handler 单测改用无启动迁移副作用的 service constructor，避免把 provider 启动迁移计入 handler 写入断言。
+- GREEN：`go test ./internal/handler -run 'TestGatewayHandler_GeminiRouteSticky(Lookup|Bind)UsesGeminiToggleNotAnthropicToggle' -count=1`、admin setting 聚焦测试和 Task 5 三组能力矩阵全部通过。
+- `go test ./internal/pkg/apicompat -count=1`：PASS。
+- scheduler/sticky/fallback、gateway Responses/Chat/Messages/terminal usage、privacy/image/settings/reload/cache 聚焦命令：PASS。
