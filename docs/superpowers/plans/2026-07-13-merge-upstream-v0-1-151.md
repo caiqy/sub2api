@@ -10,7 +10,7 @@ base-ref: 46d92f1d75f9835539f2a86d92849604a79d2f44
 
 **Goal:** 在独立分支以一次非快进合并引入 upstream `v0.1.151`，保留本地关键能力，并留下可复核的验证记录。
 
-**Architecture:** 以本文档 `base-ref` 为唯一本地起点，先确认远端 tag 的固定对象，再在隔离分支执行一次 `--no-ff` merge。冲突按设计文档第 3 节按语义处理；任何不可共存的业务语义必须停在用户决策门槛，不能由实施者自行选择。合并后的兼容修复与上游 merge 保持为不同提交。
+**Architecture:** 以本文档 `base-ref` 为业务代码基线，先确认远端 tag 的固定对象，再在隔离分支执行一次 `--no-ff` merge。merge 第一父允许在 `base-ref` 之上包含本 change 的纯文档和 Comet 进度提交，但不得包含其他业务代码。冲突按设计文档第 3 节按语义处理；任何不可共存的业务语义必须停在用户决策门槛，不能由实施者自行选择。合并后的兼容修复与上游 merge 保持为不同提交。
 
 **Tech Stack:** Git、Go 1.25、Gin、Ent、Wire、Vue 3、Vite、Tailwind、pnpm。
 
@@ -96,7 +96,7 @@ Expected: 记录可追溯本次合并的固定输入，尚不声称验证通过�
 **Consumes:** Task 1 确认的 `base-ref` 和 tag peel commit。
 **Produces:** 一个包含一次 `--no-ff` 上游 merge 的隔离分支，或一个明确的冲突清单。
 
-- [ ] **Step 1: 创建带基线的隔离分支**
+- [x] **Step 1: 创建带基线的隔离分支**
 
 Run:
 ```powershell
@@ -105,9 +105,9 @@ git rev-parse HEAD
 git status --short --branch
 ```
 
-Expected: 分支为 `feature/20260713/merge-upstream-v0-1-151`，`HEAD` 仍为 base ref，工作树仅包含本 change 的 OpenSpec、Comet、计划和报告文件。
+Expected: 分支为 `feature/20260713/merge-upstream-v0-1-151`，`base-ref` 是 `HEAD` 的祖先，`base-ref..HEAD` 仅包含本 change 的纯文档和 Comet 进度提交，工作树仅包含本 change 的 OpenSpec、Comet、计划和报告文件。
 
-- [ ] **Step 2: 发起一次非快进 merge**
+- [x] **Step 2: 发起一次非快进 merge**
 
 Run:
 ```powershell
@@ -118,7 +118,7 @@ git diff --name-only --diff-filter=U
 
 Expected: 要么产生一个 merge commit，要么最后一条命令列出全部未解决冲突文件。不得改用 cherry-pick、逐 tag 合并、`upstream/main`、`-s ours` 或 `-X ours/theirs`。
 
-- [ ] **Step 3: 记录上游变更范围**
+- [x] **Step 3: 记录上游变更范围**
 
 Run:
 ```powershell
@@ -137,7 +137,7 @@ Expected: 验证记录列出变更范围、冲突文件及初始归类，供 Tas
 **Consumes:** Task 2 的未解决冲突清单。
 **Produces:** 无冲突标记的 merge 结果，或等待用户选择的阻塞说明。
 
-- [ ] **Step 1: 为每个冲突建立决策表**
+- [x] **Step 1: 为每个冲突建立决策表**
 
 For each path, run:
 ```powershell
@@ -148,7 +148,7 @@ git log -1 --format='%H %s' v0.1.151 -- "<path>"
 
 Expected: 验证记录对每个文件包含类别、上游行为、本地行为、融合结果和对应测试命令。
 
-- [ ] **Step 2: 处理语义可共存冲突**
+- [x] **Step 2: 处理语义可共存冲突**
 
 Resolve by retaining both independently required behaviors and only the smallest shared glue. Then run:
 ```powershell
@@ -158,7 +158,7 @@ git diff --cached --check
 
 Expected: 路径已暂存且无空白错误；不通过全文采用 `ours` 或 `theirs` 丢弃任一侧功能。
 
-- [ ] **Step 3: 在不可共存语义处停止并请求用户决定**
+- [x] **Step 3: 在不可共存语义处停止并请求用户决定**
 
 Pause before staging the path when either choice changes externally observable gateway, scheduling, privacy, billing, request-body ownership, schema/migration, or configuration-default behavior and both cannot coexist. 向用户提供：
 ```markdown
@@ -172,7 +172,7 @@ Pause before staging the path when either choice changes externally observable g
 
 Expected: 未收到明确选择前，不编辑该冲突为最终解、不执行 `git merge --continue`，也不进入后续任务。
 
-- [ ] **Step 4: 完成 merge 状态检查**
+- [x] **Step 4: 完成 merge 状态检查**
 
 Run:
 ```powershell
