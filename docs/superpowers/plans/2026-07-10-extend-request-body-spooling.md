@@ -379,15 +379,15 @@ base-ref: 0f389fe7ed783ca4a8444fbe6d12acb9d3e19af6
 - 修改：`backend/internal/handler/grok_media.go`
 - 修改：相关 handler scheduler 回归测试
 
-- [ ] **步骤 1：写失败测试。** 从真实 OpenAI Images、Grok Images 与 Grok Videos JSON handler 观察 scheduler session hash：prompt-only 请求必须非空且内容不同则 hash 不同；同请求 retry 保持一致；显式 `session_id` 或 `prompt_cache_key` 优先。
+- [x] **步骤 1：写失败测试。** 从真实 OpenAI Images、Grok Images 与 Grok Videos JSON handler 观察 scheduler session hash：prompt-only 请求必须非空且内容不同则 hash 不同；同请求 retry 保持一致；显式 `session_id` 或 `prompt_cache_key` 优先。
 
-- [ ] **步骤 2：验证测试失败。** 运行媒体 JSON scheduler 定向测试，预期当前 fallback 为空时 hash 为空。
+- [x] **步骤 2：验证测试失败。** 运行媒体 JSON scheduler 定向测试，预期当前 fallback 为空时 hash 为空。
 
-- [ ] **步骤 3：最小实现。** JSON 路径继续使用现有内容派生 `GenerateSessionHash`；仅 multipart 路径使用释放前冻结的 fallback seed。更新 helper 注释，明确其不执行内容派生。
+- [x] **步骤 3：最小实现。** JSON 路径继续使用现有内容派生 `GenerateSessionHash`；仅 multipart 路径使用释放前冻结的 fallback seed。更新 helper 注释，明确其不执行内容派生。
 
-- [ ] **步骤 4：验证通过。** 运行定向测试与 `go test ./internal/handler ./internal/service -count=1`。
+- [x] **步骤 4：验证通过。** 运行定向测试与 `go test ./internal/handler ./internal/service -count=1`。
 
-- [ ] **步骤 5：提交。** 提交消息：`fix: preserve json media session affinity`。
+- [x] **步骤 5：提交。** 提交消息：`fix: preserve json media session affinity`。
 
 ## 覆盖核对
 
