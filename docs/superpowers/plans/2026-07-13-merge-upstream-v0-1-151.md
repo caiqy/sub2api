@@ -2,6 +2,7 @@
 change: merge-upstream-v0-1-151
 design-doc: docs/superpowers/specs/2026-07-13-merge-upstream-v0-1-151-design.md
 base-ref: 46d92f1d75f9835539f2a86d92849604a79d2f44
+archived-with: 2026-07-13-merge-upstream-v0-1-151
 ---
 
 # 合并上游 v0.1.151 实施计划

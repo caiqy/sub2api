@@ -1,0 +1,14 @@
+{
+  "change": "merge-upstream-v0-1-151",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "458b0ed8c70da26dfff42937e764019079fb0d6122c77f22ce1ce9be937effd2",
+  "files": [
+    { "path": "openspec/changes/merge-upstream-v0-1-151/proposal.md", "sha256": "56cd73a9e86bd96ceef25381f3ada885642987996589731c9df3f9fa7f29d3cc" },
+    { "path": "openspec/changes/merge-upstream-v0-1-151/design.md", "sha256": "b7a5a3a13d06bc3987e7564d3b1e7fd4d98ad262a4c62d930a4e811857be202d" },
+    { "path": "openspec/changes/merge-upstream-v0-1-151/tasks.md", "sha256": "e3217cd688f387380015cfdc90e87c549553d3e8372c5c15e0aae8a21c33cb7e" },
+    { "path": "openspec/changes/merge-upstream-v0-1-151/specs/upstream-release-sync/spec.md", "sha256": "02b335b0c8e8b761cf105aef9316f3bfcf25d6758080a0f221e213ea8aa2c6e0" }
+  ]
+}
