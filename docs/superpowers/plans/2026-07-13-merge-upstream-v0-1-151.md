@@ -192,7 +192,7 @@ Expected: 前两条没有输出；merge 已完成且工作树仅包含本次预�
 **Consumes:** 已无冲突标记的 merge 结果。
 **Produces:** 运行时和发布元数据与 merge 结果一致，所有额外修复与 merge commit 分离。
 
-- [ ] **Step 1: 枚举高风险元数据差异**
+- [x] **Step 1: 枚举高风险元数据差异**
 
 Run:
 ```powershell
@@ -202,7 +202,7 @@ git diff --check
 
 Expected: 每个变更文件在验证记录中有“保留上游”、“保留本地”或“融合”结论；`git diff --check` 无输出。
 
-- [ ] **Step 2: 按项目既有生成方式校验生成产物**
+- [x] **Step 2: 按项目既有生成方式校验生成产物**
 
 Run:
 ```powershell
@@ -211,7 +211,7 @@ rg -n "wire gen|ent generate|go generate" Makefile backend frontend .github --gl
 
 Expected: 使用仓库已定义的命令重新生成受影响的 Wire/Ent 产物；生成后仅出现与源定义一致的变更。若生成命令会改动 schema 或 migration，先记录 diff 并在不可逆变更处请求用户确认。
 
-- [ ] **Step 3: 验证依赖锁与配置默认值**
+- [x] **Step 3: 验证依赖锁与配置默认值**
 
 Run:
 ```powershell
