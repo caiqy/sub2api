@@ -457,6 +457,9 @@ export default {
       leaveEmptyToKeep: 'Leave empty to keep current password',
       generatePassword: 'Generate random password',
       copyPassword: 'Copy password',
+      passwordCopied: 'Password copied',
+      hiddenMenus: 'Hidden User Menus',
+      hidePurchasePage: 'Hide purchase page',
       creating: 'Creating...',
       updating: 'Updating...',
       form: {
@@ -739,6 +742,11 @@ export default {
     groups: {
       title: 'Group Management',
       description: 'Manage API key groups and rate multipliers',
+      userConcurrency: {
+        title: 'User Concurrency Limit',
+        description: 'When enabled, limits the max concurrent requests per user in this group',
+        limit: 'Max Concurrent Per User'
+      },
       searchGroups: 'Search groups...',
       createGroup: 'Create Group',
       editGroup: 'Edit Group',

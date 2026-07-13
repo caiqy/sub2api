@@ -984,6 +984,28 @@ export default {
         saved: '整流器设置保存成功',
         saveFailed: '保存整流器设置失败'
       },
+      gatewaySticky: {
+        title: 'Sticky 分平台开关',
+        description: '分别控制 OpenAI、Gemini、Anthropic 的 sticky 会话能力。',
+        openaiHint: '关闭后，OpenAI 不再使用 sticky 会话绑定。',
+        geminiHint: '关闭后，Gemini 不再使用 sticky 会话绑定。',
+        anthropicHint: '关闭后，Anthropic 不再使用 sticky 会话绑定。'
+      },
+      openaiWsScheduler: {
+        title: 'OpenAI WS 调度器',
+        description: '配置 OpenAI Responses WebSocket 调度模式，以及 layered 模式下的分层参数。',
+        mode: '调度模式',
+        modeHint: 'weighted 为加权调度；layered 为分层调度。',
+        errorPenaltyThreshold: '错误率惩罚阈值',
+        errorPenaltyValue: '错误率惩罚值',
+        probeCooldownSeconds: '探测冷却（秒）',
+        probeIntervalSeconds: '探测间隔（秒）',
+        probeMaxFailures: '探测最大失败次数',
+        probeTempUnschedulableSeconds: '临时不可调度冷却（秒）',
+        probeTimeoutSeconds: '探测超时（秒）',
+        ttftPenaltyMultiplier: 'TTFT 惩罚倍数',
+        ttftPenaltyValue: 'TTFT 惩罚值'
+      },
       betaPolicy: {
         title: 'Beta 策略',
         description: '配置转发 Anthropic API 请求时如何处理 Beta 特性。仅适用于 /v1/messages 接口。',
@@ -1041,6 +1063,11 @@ export default {
         scopeOAuth: '仅 OAuth 账号',
         scopeAPIKey: '仅 API Key 账号',
         scopeBedrock: '仅 Bedrock 账号',
+        userIds: '指定用户 ID',
+        userIdsHint: '留空表示对全部 Sub2API 用户生效。指定后仅匹配这些用户的 API Key 请求，且优先于全局规则。',
+        userIdPlaceholder: '例如: 1001',
+        addUserId: '添加用户 ID',
+        removeUserId: '移除用户 ID',
         errorMessage: '错误消息',
         errorMessagePlaceholder: '拦截时返回的自定义错误消息',
         errorMessageHint: '留空则使用默认错误消息。',

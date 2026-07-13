@@ -2,6 +2,8 @@ export default {
   common: {
     loading: '加载中...',
     submitting: '提交中...',
+    creating: '创建中...',
+    sending: '发送中...',
     justNow: '刚刚',
     peakRateTooltip: '高峰倍率：{window}',
     peakRateImageNote: '；token 计费的图片 token 同样适用，图片按次计费不受高峰影响',
@@ -15,6 +17,8 @@ export default {
     update: '更新',
     confirm: '确认',
     reset: '重置',
+    clear: '清除',
+    apply: '应用',
     search: '搜索',
     filter: '筛选',
     export: '导出',
@@ -59,6 +63,9 @@ export default {
     processing: '处理中...',
     contactSupport: '联系客服',
     add: '添加',
+    required: '必填',
+    retry: '重试',
+    tryAgain: '重试',
     invalidEmail: '请输入有效的邮箱地址',
     optional: '可选',
     selectOption: '请选择',
@@ -98,6 +105,27 @@ export default {
         withSuffix: '{time} 后解除'
       }
     }
+  },
+
+  conversation: {
+    collapse: '收起',
+    empty: '未找到可展示的对话内容',
+    error: '错误',
+    expand: '展开',
+    imageAlt: '对话图片',
+    raw: '原始内容',
+    rawRequest: '原始请求',
+    rawResponse: '原始响应',
+    reasoning: '推理',
+    reasoningMeta: { collapsedLabel: '思考内容', segments: '{n} 段' },
+    role: { you: '你' },
+    systemPrompt: { segments: '{n} 段', title: '系统提示' },
+    timelineLabel: '对话时间轴',
+    toolCall: '工具调用',
+    toolInput: '输入',
+    toolMeta: { error: '错误', lines: '{n} 行', sizeWithLines: '{lines} · {size}' },
+    toolOutput: '输出',
+    toolResult: '工具结果'
   },
 
   adminCompliance: {
@@ -150,6 +178,7 @@ export default {
     dashboard: '仪表盘',
     announcements: '公告',
     apiKeys: 'API 密钥',
+    aiImages: 'AI生图',
     batchImage: '批量生图',
     usage: '使用记录',
     redeem: '兑换',

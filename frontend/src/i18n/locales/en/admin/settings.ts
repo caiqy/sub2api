@@ -989,6 +989,28 @@ export default {
         saved: 'Rectifier settings saved',
         saveFailed: 'Failed to save rectifier settings'
       },
+      gatewaySticky: {
+        title: 'Platform Sticky Switches',
+        description: 'Control sticky session behavior separately for OpenAI, Gemini, and Anthropic.',
+        openaiHint: 'When disabled, OpenAI requests no longer use sticky session binding.',
+        geminiHint: 'When disabled, Gemini requests no longer use sticky session binding.',
+        anthropicHint: 'When disabled, Anthropic requests no longer use sticky session binding.'
+      },
+      openaiWsScheduler: {
+        title: 'OpenAI WS Scheduler',
+        description: 'Configure the OpenAI Responses WebSocket scheduler mode and layered scheduler parameters.',
+        mode: 'Scheduler Mode',
+        modeHint: 'weighted uses weighted scheduling; layered uses layered scheduling.',
+        errorPenaltyThreshold: 'Error Penalty Threshold',
+        errorPenaltyValue: 'Error Penalty Value',
+        probeCooldownSeconds: 'Probe Cooldown (seconds)',
+        probeIntervalSeconds: 'Probe Interval (seconds)',
+        probeMaxFailures: 'Probe Max Failures',
+        probeTempUnschedulableSeconds: 'Temp Unschedulable Cooldown (seconds)',
+        probeTimeoutSeconds: 'Probe Timeout (seconds)',
+        ttftPenaltyMultiplier: 'TTFT Penalty Multiplier',
+        ttftPenaltyValue: 'TTFT Penalty Value'
+      },
       betaPolicy: {
         title: 'Beta Policy',
         description: 'How to handle Beta features when configuring the forwarding of Anthropic API requests. Applicable only to the /v1/messages endpoint.',
@@ -1046,6 +1068,11 @@ export default {
         scopeOAuth: 'OAuth only',
         scopeAPIKey: 'API Key only',
         scopeBedrock: 'Bedrock only',
+        userIds: 'Specific user IDs',
+        userIdsHint: 'Leave empty to apply to all Sub2API users. Specified users match requests from their API keys and take precedence over global rules.',
+        userIdPlaceholder: 'e.g., 1001',
+        addUserId: 'Add user ID',
+        removeUserId: 'Remove user ID',
         errorMessage: 'Error message',
         errorMessagePlaceholder: 'Custom error message when blocked',
         errorMessageHint: 'Leave empty for the default message.',

@@ -399,6 +399,12 @@ export default {
       openai: {
         baseUrlHint: 'Leave default for official OpenAI API',
         apiKeyHint: 'Your OpenAI API Key',
+        probeEnabled: 'Auto health check',
+        probeEnabledDesc: 'When enabled, this account participates in the layered scheduler health check. Disable to stop automatic checks; existing probe-induced temp unschedulable state is cleared on save.',
+        probeEnabledOffHint: 'This account will not be enrolled in automatic health checks. If currently in a probe-induced temp unschedulable state, saving will restore scheduling immediately.',
+        probeModel: 'Probe model',
+        probeModelHint: 'When set, health checks use this model. For image-only upstreams, set to a model the upstream supports (e.g. gpt-image-2).',
+        probeModelPlaceholder: 'Leave blank for default',
         oauthPassthrough: 'Auto passthrough (auth only)',
         oauthPassthroughDesc:
           'When enabled, this OpenAI account uses automatic passthrough: the gateway forwards request/response as-is and only swaps auth, while keeping billing/concurrency/audit and necessary safety filtering.',
@@ -508,6 +514,8 @@ export default {
       modelRestriction: 'Model Restriction (Optional)',
       modelWhitelist: 'Model Whitelist',
       modelMapping: 'Model Mapping',
+      fromModel: 'From model',
+      toModel: 'To model',
       selectAllowedModels: 'Select allowed models. Leave empty to support all models.',
       mapRequestModels:
         'Map request models to actual models. Left is the requested model, right is the actual model sent to API.',
@@ -725,6 +733,7 @@ export default {
       creating: 'Creating...',
       updating: 'Updating...',
       accountCreated: 'Account created successfully',
+      messages: { accountCreated: 'Account created successfully' },
       accountUpdated: 'Account updated successfully',
       failedToCreate: 'Failed to create account',
       failedToUpdate: 'Failed to update account',
@@ -841,6 +850,8 @@ export default {
               'No proxy is configured and this server could not reach OpenAI directly, so the OpenAI OAuth request failed. Select a proxy that can access OpenAI and retry; if the authorization code has expired, regenerate the authorization URL.'
           },
           // Refresh Token auth
+          accessTokenAuth: 'Access Token',
+          mobileRefreshTokenAuth: 'Mobile Refresh Token',
           refreshTokenAuth: 'Manual RT Input',
           refreshTokenDesc: 'Enter your existing OpenAI Refresh Token(s). Supports batch input (one per line). The system will automatically validate and create accounts.',
           refreshTokenPlaceholder: 'Paste your OpenAI Refresh Token...\nSupports multiple, one per line',

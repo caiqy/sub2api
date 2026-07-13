@@ -451,6 +451,9 @@ export default {
       leaveEmptyToKeep: '留空则保持原密码不变',
       generatePassword: '生成随机密码',
       copyPassword: '复制密码',
+      passwordCopied: '密码已复制',
+      hiddenMenus: '隐藏用户菜单',
+      hidePurchasePage: '隐藏购买页',
       creating: '创建中...',
       updating: '更新中...',
       columns: {
@@ -730,6 +733,11 @@ export default {
     groups: {
       title: '分组管理',
       description: '管理 API 密钥分组和费率配置',
+      userConcurrency: {
+        title: '用户并发限制',
+        description: '启用后，限制每个用户在此分组的最大并发请求数',
+        limit: '每用户最大并发数'
+      },
       searchGroups: '搜索分组...',
       createGroup: '创建分组',
       editGroup: '编辑分组',

@@ -2,6 +2,8 @@ export default {
   common: {
     loading: 'Loading...',
     submitting: 'Submitting...',
+    creating: 'Creating...',
+    sending: 'Sending...',
     justNow: 'just now',
     peakRateTooltip: 'Peak rate: {window}',
     peakRateImageNote: '; image tokens billed as tokens are also affected, per-image billing is unaffected',
@@ -15,6 +17,8 @@ export default {
     update: 'Update',
     confirm: 'Confirm',
     reset: 'Reset',
+    clear: 'Clear',
+    apply: 'Apply',
     search: 'Search',
     filter: 'Filter',
     export: 'Export',
@@ -59,6 +63,9 @@ export default {
     processing: 'Processing...',
     contactSupport: 'Contact Support',
     add: 'Add',
+    required: 'Required',
+    retry: 'Retry',
+    tryAgain: 'Try again',
     invalidEmail: 'Please enter a valid email address',
     optional: 'optional',
     selectOption: 'Select an option',
@@ -98,6 +105,27 @@ export default {
         withSuffix: '{time} to lift'
       }
     }
+  },
+
+  conversation: {
+    collapse: 'Collapse',
+    empty: 'No conversation content found',
+    error: 'Error',
+    expand: 'Expand',
+    imageAlt: 'Conversation image',
+    raw: 'Raw',
+    rawRequest: 'Raw Request',
+    rawResponse: 'Raw Response',
+    reasoning: 'Reasoning',
+    reasoningMeta: { collapsedLabel: 'Reasoning', segments: '{n} segments' },
+    role: { you: 'You' },
+    systemPrompt: { segments: '{n} segments', title: 'Developer instructions' },
+    timelineLabel: 'Conversation timeline',
+    toolCall: 'Tool Call',
+    toolInput: 'Input',
+    toolMeta: { error: 'error', lines: '{n} lines', sizeWithLines: '{lines} · {size}' },
+    toolOutput: 'Output',
+    toolResult: 'Tool Result'
   },
 
   adminCompliance: {
@@ -150,6 +178,7 @@ export default {
     dashboard: 'Dashboard',
     announcements: 'Announcements',
     apiKeys: 'API Keys',
+    aiImages: 'AI Images',
     batchImage: 'Batch Images',
     usage: 'Usage',
     redeem: 'Redeem',
