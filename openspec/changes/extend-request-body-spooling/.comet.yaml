@@ -1,6 +1,6 @@
 workflow: full
 language: zh-CN
-phase: archive
+phase: verify
 context_compression: off
 build_mode: subagent-driven-development
 build_pause: null
@@ -13,11 +13,11 @@ auto_transition: true
 base_ref: cd652db85a8d6bc0a7e9619cc9984c0ec2350bb0
 design_doc: docs/superpowers/specs/2026-07-10-extend-request-body-spooling-design.md
 plan: docs/superpowers/plans/2026-07-10-extend-request-body-spooling.md
-verify_result: pass
+verify_result: pending
 verification_report: docs/superpowers/reports/2026-07-13-extend-request-body-spooling-verify.md
 branch_status: handled
 created_at: 2026-07-10
-verified_at: 2026-07-13
+verified_at: null
 archived: false
 direct_override: null
 handoff_context: openspec/changes/extend-request-body-spooling/.comet/handoff/design-context.json
@@ -25,4 +25,4 @@ handoff_hash: f2f63222f5d48a82eed63062307adc59083d02e664f26074e2d15c5068fafa6d
 classic_profile: full
 classic_migration: 1
 run_id: f6686cb4-f324-414e-9c4a-456ef1949a64
-archive_confirmation: pending
+archive_confirmation: null
