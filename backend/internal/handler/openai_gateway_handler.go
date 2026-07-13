@@ -504,6 +504,22 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body", streamStarted || c.Writer.Size() != writerSizeBeforeForward)
 				return
 			}
+			var firstTokenTimeout *service.OpenAIFirstTokenTimeoutError
+			if errors.As(err, &firstTokenTimeout) {
+				h.submitFailedUsageLog(c, apiKey, account, reqModel, reqStream, 0, nil, nil, forwardDuration, attemptReasoningEffort, "handler.openai_gateway.responses")
+				reqLog.Warn("gateway.openai_first_token_timeout",
+					zap.Int64("account_id", account.ID),
+					zap.String("class", string(firstTokenTimeout.Class)),
+					zap.Duration("timeout", firstTokenTimeout.Timeout),
+					zap.Duration("elapsed", firstTokenTimeout.Elapsed),
+					zap.String("transport", firstTokenTimeout.Transport),
+					zap.Bool("headers_received", firstTokenTimeout.HeadersReceived),
+					zap.Bool("created_received", firstTokenTimeout.CreatedReceived),
+					zap.String("upstream_request_id", firstTokenTimeout.UpstreamRequestID),
+				)
+				h.handleStreamingAwareError(c, http.StatusGatewayTimeout, "first_token_timeout", "Upstream timed out before the first response event", false)
+				return
+			}
 			if result != nil && result.ImageCount > 0 {
 				reqLog.Warn("openai.forward_partial_error_with_image_result",
 					zap.Int64("account_id", account.ID),

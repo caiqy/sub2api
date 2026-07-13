@@ -12,9 +12,9 @@
 
 ## 3. HTTP SSE 首 Token 超时
 
-- [ ] 3.1 为 passthrough 与协议转换 SSE 路径补充响应头前超时、前导事件后超时、业务事件停止计时和零值关闭测试
-- [ ] 3.2 在上游请求 context 中接入共享 watchdog，缓冲前导事件，并在超时时返回 HTTP 504 `first_token_timeout`
-- [ ] 3.3 验证超时写入失败 usage、Ops 错误和阶段日志，且不重试、不换号、不封禁账号
+- [x] 3.1 为 passthrough 与协议转换 SSE 路径补充响应头前超时、前导事件后超时、业务事件停止计时和零值关闭测试
+- [x] 3.2 在上游请求 context 中接入共享 watchdog，缓冲前导事件，并在超时时返回 HTTP 504 `first_token_timeout`
+- [x] 3.3 验证超时写入失败 usage、Ops 错误和阶段日志，且不重试、不换号、不封禁账号
 
 ## 4. 池化 Responses WebSocket ingress 超时
 

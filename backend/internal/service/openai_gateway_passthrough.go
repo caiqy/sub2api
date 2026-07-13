@@ -161,6 +161,11 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	}
 
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
+	var firstTokenWatchdog *openAIFirstTokenWatchdog
+	if reqStream {
+		upstreamCtx, firstTokenWatchdog = s.withOpenAIFirstTokenTimeout(upstreamCtx, body, "sse")
+		defer firstTokenWatchdog.Stop()
+	}
 	upstreamReq, err := s.buildUpstreamRequestOpenAIPassthrough(upstreamCtx, c, account, body, body, token)
 	releaseUpstreamCtx()
 	if err != nil {
@@ -184,14 +189,20 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
+		if timeoutErr := firstTokenWatchdog.TimeoutError(); timeoutErr != nil {
+			recordOpenAIFirstTokenTimeout(ctx, c, account, timeoutErr)
+			return nil, timeoutErr
+		}
 		// Transport-level failure (proxy/DNS/TCP/TLS — no HTTP response). Convert to
 		// a failover so the handler switches to a healthy account, and temporarily
 		// unschedule the account on durable faults (e.g. rejected proxy credentials).
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	firstTokenWatchdog.MarkHeaders(resp.Header.Get("x-request-id"))
 
 	if resp.StatusCode >= 400 {
+		firstTokenWatchdog.Stop()
 		// 透传模式默认保持原样代理；但 429/529 属于网关必须兜底的
 		// 上游容量类错误，应先触发多账号 failover 以维持基础 SLA。
 		if shouldFailoverOpenAIPassthroughResponse(resp.StatusCode) {
@@ -208,8 +219,12 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	imageCount := 0
 	var imageOutputSizes []string
 	if reqStream {
-		result, err := s.handleStreamingResponsePassthrough(ctx, resp, c, account, startTime, reqModel, upstreamPassthroughModel)
+		result, err := s.handleStreamingResponsePassthrough(upstreamReq.Context(), resp, c, account, startTime, reqModel, upstreamPassthroughModel)
 		if err != nil {
+			if timeoutErr := firstTokenWatchdog.TimeoutError(); timeoutErr != nil {
+				recordOpenAIFirstTokenTimeout(ctx, c, account, timeoutErr)
+				return nil, timeoutErr
+			}
 			return nil, err
 		}
 		usage = result.usage
@@ -940,6 +955,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		forceFlushFailedEvent := false
 		if data, ok := extractOpenAISSEDataLine(line); ok {
 			dataBytes := []byte(data)
+			firstTokenWatchdogFromContext(ctx).Observe(dataBytes)
 			trimmedData := strings.TrimSpace(data)
 			if needModelReplace && strings.Contains(data, mappedModel) {
 				line = s.replaceModelInSSELine(line, mappedModel, originalModel)
@@ -1047,6 +1063,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		}
 	}
 	if err := scanner.Err(); err != nil {
+		if timeoutErr := firstTokenWatchdogFromContext(ctx).TimeoutError(); timeoutErr != nil {
+			return resultWithUsage(), timeoutErr
+		}
 		if sawTerminalEvent && !sawFailedEvent {
 			return resultWithUsage(), nil
 		}

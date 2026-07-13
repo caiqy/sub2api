@@ -687,6 +687,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	for {
 		// Build upstream request
 		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
+		var firstTokenWatchdog *openAIFirstTokenWatchdog
+		if reqStream {
+			upstreamCtx, firstTokenWatchdog = s.withOpenAIFirstTokenTimeout(upstreamCtx, body, "sse")
+		}
 		var upstreamReq *http.Request
 		if bodyHandle := getOpenAIRequestBodyHandle(c); bodyHandle != nil {
 			upstreamReq, err = s.buildUpstreamRequestWithSourceBody(upstreamCtx, c, account, originalBody, body, bodyHandle, token, reqStream, promptCacheKey, isCodexCLI)
@@ -695,6 +699,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		releaseUpstreamCtx()
 		if err != nil {
+			firstTokenWatchdog.Stop()
 			return nil, err
 		}
 		upstreamPreview := openAIUpstreamRequestBodyPreview(upstreamReq, body)
@@ -718,6 +723,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		closeOpenAIRequestBody(upstreamReq)
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		if err != nil {
+			if timeoutErr := firstTokenWatchdog.TimeoutError(); timeoutErr != nil {
+				recordOpenAIFirstTokenTimeout(ctx, c, account, timeoutErr)
+				return nil, timeoutErr
+			}
+			firstTokenWatchdog.Stop()
 			if errors.Is(err, ErrRequestBodySpool) {
 				return nil, err
 			}
@@ -726,9 +736,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			// unschedule the account on durable faults (e.g. rejected proxy credentials).
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 		}
+		firstTokenWatchdog.MarkHeaders(resp.Header.Get("x-request-id"))
 
 		// Handle error response
 		if resp.StatusCode >= 400 {
+			firstTokenWatchdog.Stop()
 			respBody := s.readUpstreamErrorBody(resp)
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
@@ -805,16 +817,22 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		imageCount := 0
 		var imageOutputSizes []string
 		if reqStream {
-			streamResult, err := s.handleStreamingResponse(ctx, resp, c, account, startTime, originalModel, upstreamModel)
+			streamResult, err := s.handleStreamingResponse(upstreamReq.Context(), resp, c, account, startTime, originalModel, upstreamModel)
 			if err != nil {
+				if timeoutErr := firstTokenWatchdog.TimeoutError(); timeoutErr != nil {
+					recordOpenAIFirstTokenTimeout(ctx, c, account, timeoutErr)
+					return nil, timeoutErr
+				}
 				return nil, err
 			}
+			firstTokenWatchdog.Stop()
 			usage = streamResult.usage
 			firstTokenMs = streamResult.firstTokenMs
 			responseID = strings.TrimSpace(streamResult.responseID)
 			imageCount = streamResult.imageCount
 			imageOutputSizes = streamResult.imageOutputSizes
 		} else {
+			firstTokenWatchdog.Stop()
 			nonStreamResult, err := s.handleNonStreamingResponse(ctx, resp, c, account, originalModel, upstreamModel)
 			if err != nil {
 				return nil, err

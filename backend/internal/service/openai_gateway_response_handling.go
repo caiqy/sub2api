@@ -204,6 +204,9 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 		if scanErr == nil {
 			return nil, nil, false
 		}
+		if timeoutErr := firstTokenWatchdogFromContext(ctx).TimeoutError(); timeoutErr != nil {
+			return resultWithUsage(), timeoutErr, true
+		}
 		if sawTerminalEvent && !sawFailedEvent {
 			logger.LegacyPrintf("service.openai_gateway", "Upstream scan ended after terminal event: %v", scanErr)
 			return resultWithUsage(), nil, true
@@ -242,6 +245,7 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 		// Extract data from SSE line (supports both "data: " and "data:" formats)
 		if data, ok := extractOpenAISSEDataLine(line); ok {
 			dataBytes := []byte(data)
+			firstTokenWatchdogFromContext(ctx).Observe(dataBytes)
 			if openAIStreamEventIsTerminal(data) {
 				sawTerminalEvent = true
 			}
