@@ -7,9 +7,11 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
+	openaiutil "github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	coderws "github.com/coder/websocket"
 	"github.com/tidwall/gjson"
 )
@@ -47,6 +49,7 @@ type RelayTurnResult struct {
 	TerminalEventType string
 	Duration          time.Duration
 	FirstTokenMs      *int
+	TurnError         error
 }
 
 type RelayExit struct {
@@ -57,6 +60,9 @@ type RelayExit struct {
 
 type RelayOptions struct {
 	WriteTimeout                    time.Duration
+	TextFirstTokenTimeout           time.Duration
+	ImageFirstTokenTimeout          time.Duration
+	ResolveFirstTokenTimeout        func(payload []byte) time.Duration
 	IdleTimeout                     time.Duration
 	UpstreamDrainTimeout            time.Duration
 	FirstMessageType                coderws.MessageType
@@ -107,8 +113,35 @@ type observedUpstreamEvent struct {
 }
 
 type relayTurnTiming struct {
-	startAt      time.Time
-	firstTokenMs *int
+	startAt            time.Time
+	firstTokenMs       *int
+	firstTokenClass    openaiutil.FirstTokenClass
+	firstTokenDueAt    time.Time
+	firstTokenDone     bool
+	firstTokenTimedOut bool
+}
+
+type FirstTokenTimeoutError struct {
+	Class   openaiutil.FirstTokenClass
+	Timeout time.Duration
+	Elapsed time.Duration
+}
+
+func (e *FirstTokenTimeoutError) Error() string {
+	return "OpenAI " + string(e.Class) + " websocket timed out before first output after " + e.Timeout.String()
+}
+
+type relayTurnStart struct {
+	payload []byte
+	startAt time.Time
+}
+
+type relayFirstTokenRuntime struct {
+	writeUpstream  func(coderws.MessageType, []byte) error
+	turnStartCh    <-chan relayTurnStart
+	textTimeout    time.Duration
+	imageTimeout   time.Duration
+	resolveTimeout func([]byte) time.Duration
 }
 
 func Relay(
@@ -155,7 +188,10 @@ func Relay(
 		lastActivity.Store(nowFn().UnixNano())
 	}
 
+	var upstreamWriteMu sync.Mutex
 	writeUpstream := func(msgType coderws.MessageType, payload []byte) error {
+		upstreamWriteMu.Lock()
+		defer upstreamWriteMu.Unlock()
 		writeCtx, cancel := context.WithTimeout(relayCtx, writeTimeout)
 		defer cancel()
 		return upstreamConn.WriteFrame(writeCtx, msgType, payload)
@@ -164,6 +200,13 @@ func Relay(
 		writeCtx, cancel := context.WithTimeout(relayCtx, writeTimeout)
 		defer cancel()
 		return clientConn.WriteFrame(writeCtx, msgType, payload)
+	}
+	turnStartCh := make(chan relayTurnStart, 8)
+	armTurn := func(payload []byte) {
+		if strings.TrimSpace(gjson.GetBytes(payload, "type").String()) != "response.create" {
+			return
+		}
+		turnStartCh <- relayTurnStart{payload: append([]byte(nil), payload...), startAt: nowFn()}
 	}
 
 	clientToUpstreamFrames := &atomic.Int64{}
@@ -203,6 +246,7 @@ func Relay(
 	}
 	clientToUpstreamFrames.Add(1)
 	markActivity()
+	armTurn(firstClientMessage)
 
 	exitCh := make(chan relayExitSignal, 3)
 	dropDownstreamWrites := atomic.Bool{}
@@ -211,7 +255,7 @@ func Relay(
 		if !clientReaderStarted.CompareAndSwap(false, true) {
 			return
 		}
-		go runClientToUpstream(relayCtx, clientConn, options.ReadClientFrame, writeUpstream, markActivity, clientToUpstreamFrames, onTrace, exitCh)
+		go runClientToUpstream(relayCtx, clientConn, options.ReadClientFrame, writeUpstream, markActivity, clientToUpstreamFrames, onTrace, exitCh, armTurn)
 	}
 	if !options.StartClientAfterFirstDownstream {
 		startClientReader()
@@ -237,6 +281,7 @@ func Relay(
 		markActivity,
 		onTrace,
 		exitCh,
+		relayFirstTokenRuntime{writeUpstream: writeUpstream, turnStartCh: turnStartCh, textTimeout: options.TextFirstTokenTimeout, imageTimeout: options.ImageFirstTokenTimeout, resolveTimeout: options.ResolveFirstTokenTimeout},
 	)
 	go runIdleWatchdog(relayCtx, nowFn, options.IdleTimeout, &lastActivity, onTrace, exitCh)
 
@@ -375,7 +420,12 @@ func runClientToUpstream(
 	forwardedFrames *atomic.Int64,
 	onTrace func(event RelayTraceEvent),
 	exitCh chan<- relayExitSignal,
+	onForwardCallbacks ...func(payload []byte),
 ) {
+	var onForward func([]byte)
+	if len(onForwardCallbacks) > 0 {
+		onForward = onForwardCallbacks[0]
+	}
 	if readClientFrame == nil {
 		readClientFrame = func(ctx context.Context, conn FrameConn) (coderws.MessageType, []byte, error) {
 			return conn.ReadFrame(ctx)
@@ -408,6 +458,9 @@ func runClientToUpstream(
 		if forwardedFrames != nil {
 			forwardedFrames.Add(1)
 		}
+		if onForward != nil {
+			onForward(payload)
+		}
 		markActivity()
 	}
 }
@@ -429,10 +482,76 @@ func runUpstreamToClient(
 	markActivity func(),
 	onTrace func(event RelayTraceEvent),
 	exitCh chan<- relayExitSignal,
+	firstTokenRuntime ...relayFirstTokenRuntime,
 ) {
+	var firstToken relayFirstTokenRuntime
+	if len(firstTokenRuntime) > 0 {
+		firstToken = firstTokenRuntime[0]
+	}
 	wroteDownstream := false
+	armPendingTurn := func() {
+		select {
+		case turn := <-firstToken.turnStartCh:
+			class := openaiutil.ResponsesFirstTokenClass(turn.payload)
+			timeout := firstToken.textTimeout
+			if class == openaiutil.FirstTokenClassImage {
+				timeout = firstToken.imageTimeout
+			}
+			if firstToken.resolveTimeout != nil {
+				timeout = firstToken.resolveTimeout(turn.payload)
+			}
+			state.activeTurn = &relayTurnTiming{startAt: turn.startAt, firstTokenClass: class, firstTokenDone: timeout <= 0}
+			if timeout > 0 {
+				state.activeTurn.firstTokenDueAt = turn.startAt.Add(timeout)
+			}
+		default:
+		}
+	}
 	for {
-		msgType, payload, err := upstreamConn.ReadFrame(ctx)
+		armPendingTurn()
+		readCtx := ctx
+		var cancel context.CancelFunc
+		if state.activeTurn != nil && !state.activeTurn.firstTokenDone && !state.activeTurn.firstTokenDueAt.IsZero() {
+			readCtx, cancel = context.WithDeadline(ctx, state.activeTurn.firstTokenDueAt)
+		}
+		msgType, payload, err := upstreamConn.ReadFrame(readCtx)
+		if cancel != nil {
+			cancel()
+		}
+		if err != nil && state.activeTurn != nil && !state.activeTurn.firstTokenDone && !nowFn().Before(state.activeTurn.firstTokenDueAt) {
+			timing := state.activeTurn
+			timing.firstTokenTimedOut = true
+			timeout := timing.firstTokenDueAt.Sub(timing.startAt)
+			timeoutErr := &FirstTokenTimeoutError{Class: timing.firstTokenClass, Timeout: timeout, Elapsed: nowFn().Sub(timing.startAt)}
+			if firstToken.writeUpstream == nil || firstToken.writeUpstream(coderws.MessageText, []byte(`{"type":"response.cancel"}`)) != nil {
+				exitCh <- relayExitSignal{stage: "first_token_timeout", err: timeoutErr, wroteDownstream: wroteDownstream}
+				return
+			}
+			if writeClient(coderws.MessageText, []byte(`{"type":"error","error":{"type":"first_token_timeout","code":"first_token_timeout","message":"Upstream timed out before the first response event"}}`)) != nil {
+				exitCh <- relayExitSignal{stage: "first_token_timeout", err: timeoutErr, wroteDownstream: wroteDownstream}
+				return
+			}
+			wroteDownstream = true
+			drainCtx, drainCancel := context.WithTimeout(ctx, 2*time.Second)
+			drained := false
+			for !drained {
+				_, drainPayload, drainErr := upstreamConn.ReadFrame(drainCtx)
+				if drainErr != nil {
+					break
+				}
+				drained = isTerminalEvent(strings.TrimSpace(gjson.GetBytes(drainPayload, "type").String()))
+			}
+			drainCancel()
+			if !drained {
+				exitCh <- relayExitSignal{stage: "first_token_timeout", err: timeoutErr, wroteDownstream: wroteDownstream}
+				return
+			}
+			if onTurnComplete != nil {
+				onTurnComplete(RelayTurnResult{RequestModel: state.requestModel, Duration: timeoutErr.Elapsed, TurnError: timeoutErr})
+			}
+			state.activeTurn = nil
+			continue
+		}
 		if err != nil {
 			emitRelayTrace(onTrace, RelayTraceEvent{
 				Stage:           "read_upstream_failed",
@@ -450,6 +569,10 @@ func runUpstreamToClient(
 			return
 		}
 		markActivity()
+		armPendingTurn()
+		if state.activeTurn != nil && !state.activeTurn.firstTokenDone && openaiutil.ResponsesEventEndsFirstTokenWait(payload) {
+			state.activeTurn.firstTokenDone = true
+		}
 		if beforeWriteClient != nil {
 			if err := beforeWriteClient(msgType, payload, wroteDownstream); err != nil {
 				emitRelayTrace(onTrace, RelayTraceEvent{
@@ -622,7 +745,8 @@ func observeUpstreamMessage(
 	}
 	now := nowFn()
 
-	if state.firstTokenMs == nil && isTokenEvent(eventType) {
+	recordsFirstToken := openaiutil.ResponsesEventRecordsFirstToken(message)
+	if state.firstTokenMs == nil && recordsFirstToken {
 		ms := int(now.Sub(startAt).Milliseconds())
 		if ms >= 0 {
 			state.firstTokenMs = &ms
@@ -642,7 +766,7 @@ func observeUpstreamMessage(
 	}
 	if responseID != "" {
 		turnTiming := openAIWSRelayGetOrInitTurnTiming(state, responseID, now)
-		if turnTiming != nil && turnTiming.firstTokenMs == nil && isTokenEvent(eventType) {
+		if turnTiming != nil && turnTiming.firstTokenMs == nil && recordsFirstToken {
 			ms := int(now.Sub(turnTiming.startAt).Milliseconds())
 			if ms >= 0 {
 				turnTiming.firstTokenMs = &ms
@@ -703,7 +827,10 @@ func openAIWSRelayGetOrInitTurnTiming(state *relayState, responseID string, now 
 	}
 	timing, ok := state.turnTimingByID[responseID]
 	if !ok || timing == nil || timing.startAt.IsZero() {
-		timing = &relayTurnTiming{startAt: now}
+		timing = state.activeTurn
+		if timing == nil || timing.startAt.IsZero() {
+			timing = &relayTurnTiming{startAt: now, firstTokenDone: true}
+		}
 		state.turnTimingByID[responseID] = timing
 		state.activeTurn = timing
 		return timing

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -19,10 +20,11 @@ type passthroughTestFrame struct {
 }
 
 type passthroughTestFrameConn struct {
-	mu     sync.Mutex
-	writes []passthroughTestFrame
-	readCh chan passthroughTestFrame
-	once   sync.Once
+	mu               sync.Mutex
+	writes           []passthroughTestFrame
+	readCh           chan passthroughTestFrame
+	once             sync.Once
+	failWritePayload string
 }
 
 type delayedReadFrameConn struct {
@@ -73,6 +75,9 @@ func (c *passthroughTestFrameConn) WriteFrame(ctx context.Context, msgType coder
 		return ctx.Err()
 	default:
 	}
+	if c.failWritePayload != "" && string(payload) == c.failWritePayload {
+		return errors.New("injected write failure")
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.writes = append(c.writes, passthroughTestFrame{msgType: msgType, payload: append([]byte(nil), payload...)})
@@ -93,6 +98,85 @@ func (c *passthroughTestFrameConn) Writes() []passthroughTestFrame {
 	out := make([]passthroughTestFrame, len(c.writes))
 	copy(out, c.writes)
 	return out
+}
+
+func TestRelayFirstTokenTimeoutCancelsDrainsAndCompletesTurn(t *testing.T) {
+	clientConn := newPassthroughTestFrameConn(nil, false)
+	upstreamConn := newPassthroughTestFrameConn([]passthroughTestFrame{{
+		msgType: coderws.MessageText,
+		payload: []byte(`{"type":"response.created","response":{"id":"resp_timeout"}}`),
+	}}, false)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	turnCh := make(chan RelayTurnResult, 1)
+	exitCh := make(chan *RelayExit, 1)
+
+	go func() {
+		_, relayExit := Relay(ctx, clientConn, upstreamConn, []byte(`{"type":"response.create","model":"gpt-5"}`), RelayOptions{
+			WriteTimeout:           time.Second,
+			TextFirstTokenTimeout:  20 * time.Millisecond,
+			ImageFirstTokenTimeout: time.Second,
+			OnTurnComplete:         func(turn RelayTurnResult) { turnCh <- turn },
+		})
+		exitCh <- relayExit
+	}()
+
+	require.Eventually(t, func() bool {
+		for _, frame := range upstreamConn.Writes() {
+			if string(frame.payload) == `{"type":"response.cancel"}` {
+				return true
+			}
+		}
+		return false
+	}, time.Second, 5*time.Millisecond)
+	upstreamConn.readCh <- passthroughTestFrame{msgType: coderws.MessageText, payload: []byte(`{"type":"response.canceled","response":{"id":"resp_timeout"}}`)}
+
+	select {
+	case turn := <-turnCh:
+		var timeoutErr *FirstTokenTimeoutError
+		require.ErrorAs(t, turn.TurnError, &timeoutErr)
+	case <-time.After(time.Second):
+		t.Fatal("未收到 timeout turn callback")
+	}
+	require.Eventually(t, func() bool {
+		for _, frame := range clientConn.Writes() {
+			if strings.Contains(string(frame.payload), `"first_token_timeout"`) {
+				return true
+			}
+		}
+		return false
+	}, time.Second, 5*time.Millisecond)
+
+	cancel()
+	select {
+	case relayExit := <-exitCh:
+		if relayExit != nil {
+			require.NotEqual(t, "first_token_timeout", relayExit.Stage)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("relay 未退出")
+	}
+}
+
+func TestRelayFirstTokenTimeoutCancelFailureExitsRelay(t *testing.T) {
+	clientConn := newPassthroughTestFrameConn(nil, false)
+	upstreamConn := newPassthroughTestFrameConn([]passthroughTestFrame{{
+		msgType: coderws.MessageText,
+		payload: []byte(`{"type":"response.created","response":{"id":"resp_timeout"}}`),
+	}}, false)
+	upstreamConn.failWritePayload = `{"type":"response.cancel"}`
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	_, relayExit := Relay(ctx, clientConn, upstreamConn, []byte(`{"type":"response.create","model":"gpt-5"}`), RelayOptions{
+		WriteTimeout:          time.Second,
+		TextFirstTokenTimeout: 20 * time.Millisecond,
+	})
+
+	require.NotNil(t, relayExit)
+	require.Equal(t, "first_token_timeout", relayExit.Stage)
+	var timeoutErr *FirstTokenTimeoutError
+	require.ErrorAs(t, relayExit.Err, &timeoutErr)
 }
 
 func (c *delayedReadFrameConn) ReadFrame(ctx context.Context) (coderws.MessageType, []byte, error) {
@@ -183,7 +267,7 @@ func TestRelay_BasicRelayAndUsage(t *testing.T) {
 	require.Equal(t, 7, result.Usage.InputTokens)
 	require.Equal(t, 3, result.Usage.OutputTokens)
 	require.Equal(t, 2, result.Usage.CacheReadInputTokens)
-	require.NotNil(t, result.FirstTokenMs)
+	require.Nil(t, result.FirstTokenMs)
 	require.Equal(t, int64(1), result.ClientToUpstreamFrames)
 	require.Equal(t, int64(1), result.UpstreamToClientFrames)
 	require.Equal(t, int64(0), result.DroppedDownstreamFrames)

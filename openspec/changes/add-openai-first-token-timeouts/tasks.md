@@ -24,9 +24,9 @@
 
 ## 5. Responses WebSocket V2 relay 超时
 
-- [ ] 5.1 补充多 turn relay 测试，覆盖首个 turn 超时后成功继续、终态不明时退出及新 turn 使用最新运行时配置
-- [ ] 5.2 在 V2 passthrough relay 中维护 per-turn watchdog，并复用共享事件分类与 `response.cancel`/drain 语义
-- [ ] 5.3 记录 V2 timeout 的失败 usage、Ops 错误和结构化日志，确保单个 turn 只产生一次错误
+- [x] 5.1 补充多 turn relay 测试，覆盖首个 turn 超时后成功继续、终态不明时退出及新 turn 使用最新运行时配置
+- [x] 5.2 在 V2 passthrough relay 中维护 per-turn watchdog，并复用共享事件分类与 `response.cancel`/drain 语义
+- [x] 5.3 记录 V2 timeout 的失败 usage、Ops 错误和结构化日志，确保单个 turn 只产生一次错误
 
 ## 6. 管理端配置与全量验证
 

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
@@ -507,8 +508,14 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		UpstreamConn:       upstreamFrameConn,
 		FirstClientMessage: firstClientMessage,
 		Options: openaiwsv2.RelayOptions{
-			WriteTimeout:                    s.openAIWSWriteTimeout(),
-			IdleTimeout:                     s.openAIWSPassthroughIdleTimeout(),
+			WriteTimeout:           s.openAIWSWriteTimeout(),
+			IdleTimeout:            s.openAIWSPassthroughIdleTimeout(),
+			TextFirstTokenTimeout:  time.Duration(s.cfg.Gateway.OpenAITextFirstTokenTimeout) * time.Second,
+			ImageFirstTokenTimeout: time.Duration(s.cfg.Gateway.OpenAIImageFirstTokenTimeout) * time.Second,
+			ResolveFirstTokenTimeout: func(payload []byte) time.Duration {
+				_, timeout := s.openAIFirstTokenTimeout(payload)
+				return timeout
+			},
 			FirstMessageType:                coderws.MessageText,
 			FirstMessageSent:                upstreamFirstMessageSent,
 			StartClientAfterFirstDownstream: true,
@@ -552,8 +559,20 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					turnResult.Usage.OutputTokens,
 					turnResult.Usage.CacheReadInputTokens,
 				)
+				turnErr := turn.TurnError
+				var relayTimeout *openaiwsv2.FirstTokenTimeoutError
+				if errors.As(turnErr, &relayTimeout) {
+					turnErr = &OpenAIFirstTokenTimeoutError{
+						Class:              relayTimeout.Class,
+						Timeout:            relayTimeout.Timeout,
+						Elapsed:            relayTimeout.Elapsed,
+						Transport:          "websocket_v2",
+						HeadersReceived:    true,
+						ConnectionReusable: true,
+					}
+				}
 				if hooks != nil && hooks.AfterTurn != nil {
-					hooks.AfterTurn(turnNo, turnResult, nil)
+					hooks.AfterTurn(turnNo, turnResult, turnErr)
 				}
 			},
 			BeforeWriteClient: func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) error {
@@ -649,6 +668,18 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	)
 
 	relayErr := relayExit.Err
+	if relayExit.Stage == "first_token_timeout" {
+		var timeoutErr *openaiwsv2.FirstTokenTimeoutError
+		if errors.As(relayErr, &timeoutErr) {
+			return &OpenAIFirstTokenTimeoutError{
+				Class:           timeoutErr.Class,
+				Timeout:         timeoutErr.Timeout,
+				Elapsed:         timeoutErr.Elapsed,
+				Transport:       "websocket_v2",
+				HeadersReceived: true,
+			}
+		}
+	}
 	if relayExit.Stage == "idle_timeout" {
 		relayErr = NewOpenAIWSClientCloseError(
 			coderws.StatusPolicyViolation,
