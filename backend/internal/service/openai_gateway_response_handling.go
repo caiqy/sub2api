@@ -467,6 +467,9 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 			}
 
 		case <-intervalCh:
+			if !firstTokenWatchdogFromContext(ctx).CanWriteClient() {
+				continue
+			}
 			lastRead := time.Unix(0, atomic.LoadInt64(&lastReadAt))
 			if time.Since(lastRead) < streamInterval {
 				continue
@@ -480,7 +483,7 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 				s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
 			}
 			sendErrorEvent("stream_timeout")
-			return resultWithUsage(), fmt.Errorf("stream data interval timeout")
+			return resultWithUsage(), errOpenAIStreamDataIntervalTimeout
 
 		case <-keepaliveCh:
 			if clientDisconnected {

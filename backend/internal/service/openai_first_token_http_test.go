@@ -7,10 +7,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	openaiutil "github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/gin-gonic/gin"
@@ -73,6 +75,31 @@ func (b *firstTokenContextBody) Read(p []byte) (int, error) {
 
 func (*firstTokenContextBody) Close() error { return nil }
 
+type firstTokenClosableBody struct {
+	prefix  []byte
+	emitted bool
+	closed  chan struct{}
+	once    sync.Once
+}
+
+func newFirstTokenClosableBody(prefix string) *firstTokenClosableBody {
+	return &firstTokenClosableBody{prefix: []byte(prefix), closed: make(chan struct{})}
+}
+
+func (b *firstTokenClosableBody) Read(p []byte) (int, error) {
+	if !b.emitted {
+		b.emitted = true
+		return copy(p, b.prefix), nil
+	}
+	<-b.closed
+	return 0, io.ErrClosedPipe
+}
+
+func (b *firstTokenClosableBody) Close() error {
+	b.once.Do(func() { close(b.closed) })
+	return nil
+}
+
 func newFirstTokenSSEGinContext() (*gin.Context, *httptest.ResponseRecorder) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
@@ -106,6 +133,49 @@ func TestOpenAIFirstTokenTimeoutBeforeResponseHeaders(t *testing.T) {
 	require.ErrorAs(t, err, &timeoutErr)
 	require.Equal(t, openaiutil.FirstTokenClassText, timeoutErr.Class)
 	require.False(t, timeoutErr.HeadersReceived)
+	require.Equal(t, "gpt-5", timeoutErr.RequestModel)
+}
+
+func TestOpenAIFirstTokenWaitPrecedesStreamDataIntervalTimeout(t *testing.T) {
+	c, _ := newFirstTokenSSEGinContext()
+	ctx, watchdog := newOpenAIFirstTokenWatchdog(context.Background(), openaiutil.FirstTokenClassImage, 1500*time.Millisecond, "sse")
+	defer watchdog.Stop()
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{},
+		Body:       &firstTokenContextBody{ctx: ctx, prefix: []byte("data: {\"type\":\"response.created\"}\n\n")},
+	}
+	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{StreamDataIntervalTimeout: 1}}}
+
+	_, err := svc.handleStreamingResponse(ctx, resp, c, &Account{ID: 1}, time.Now(), "gpt-5", "gpt-5")
+
+	var timeoutErr *OpenAIFirstTokenTimeoutError
+	require.ErrorAs(t, err, &timeoutErr)
+}
+
+func TestOpenAIOAuthPassthroughAppliesStreamDataIntervalAfterFirstOutput(t *testing.T) {
+	c, _ := newFirstTokenSSEGinContext()
+	body := newFirstTokenClosableBody("data: {\"type\":\"response.output_text.delta\",\"delta\":\"x\"}\n\n")
+	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: body}
+	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{StreamDataIntervalTimeout: 1}}}
+	started := time.Now()
+
+	_, err := svc.handleStreamingResponsePassthrough(context.Background(), resp, c, &Account{ID: 2, Type: AccountTypeOAuth}, started, "gpt-5", "gpt-5")
+
+	require.ErrorIs(t, err, errOpenAIStreamDataIntervalTimeout)
+	require.Less(t, time.Since(started), 2*time.Second)
+}
+
+func TestResponsesChatFallbackAppliesStreamDataIntervalAfterFirstOutput(t *testing.T) {
+	body := newFirstTokenClosableBody("data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}\n\n")
+	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: body}
+	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{StreamDataIntervalTimeout: 1}}}
+	started := time.Now()
+
+	state := svc.scanCCStream(resp, "test", "req_1", started, func(*apicompat.ChatCompletionsChunk) {})
+
+	require.ErrorIs(t, state.Err, errOpenAIStreamDataIntervalTimeout)
+	require.Less(t, time.Since(started), 2*time.Second)
 }
 
 func TestOpenAIFirstTokenTimeoutAfterCreatedEvent(t *testing.T) {

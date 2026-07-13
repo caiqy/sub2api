@@ -12,6 +12,7 @@ import (
 
 	coderws "github.com/coder/websocket"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 type passthroughTestFrame struct {
@@ -147,12 +148,15 @@ func TestRelayFirstTokenTimeoutCancelsDrainsAndCompletesTurn(t *testing.T) {
 		t.Fatal("terminal event for another response must not complete the timed-out turn")
 	default:
 	}
-	upstreamConn.readCh <- passthroughTestFrame{msgType: coderws.MessageText, payload: []byte(`{"type":"response.canceled","response":{"id":"resp_timeout"}}`)}
+	upstreamConn.readCh <- passthroughTestFrame{msgType: coderws.MessageText, payload: []byte(`{"type":"response.canceled","response":{"id":"resp_timeout","usage":{"input_tokens":7,"output_tokens":2}}}`)}
 
 	select {
 	case turn := <-turnCh:
 		var timeoutErr *FirstTokenTimeoutError
 		require.ErrorAs(t, turn.TurnError, &timeoutErr)
+		require.True(t, timeoutErr.CreatedReceived)
+		require.Equal(t, 7, turn.Usage.InputTokens)
+		require.Equal(t, 2, turn.Usage.OutputTokens)
 	case <-time.After(time.Second):
 		t.Fatal("未收到 timeout turn callback")
 	}
@@ -184,6 +188,133 @@ func TestRelayFirstTokenTimeoutCancelsDrainsAndCompletesTurn(t *testing.T) {
 	}
 }
 
+func TestRelaySecondTurnTimeoutWakesBlockedUpstreamReader(t *testing.T) {
+	clientConn := newPassthroughTestFrameConn(nil, false)
+	upstreamConn := newPassthroughTestFrameConn([]passthroughTestFrame{
+		{msgType: coderws.MessageText, payload: []byte(`{"type":"response.created","response":{"id":"resp_first"}}`)},
+		{msgType: coderws.MessageText, payload: []byte(`{"type":"response.output_text.delta","response_id":"resp_first","delta":"ok"}`)},
+		{msgType: coderws.MessageText, payload: []byte(`{"type":"response.completed","response":{"id":"resp_first","usage":{"input_tokens":1,"output_tokens":1}}}`)},
+	}, false)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	turnCh := make(chan RelayTurnResult, 2)
+	exitCh := make(chan *RelayExit, 1)
+
+	go func() {
+		_, relayExit := Relay(ctx, clientConn, upstreamConn, []byte(`{"type":"response.create","model":"gpt-5"}`), RelayOptions{
+			TextFirstTokenTimeout: 40 * time.Millisecond,
+			OnTurnComplete:        func(turn RelayTurnResult) { turnCh <- turn },
+		})
+		exitCh <- relayExit
+	}()
+
+	select {
+	case <-turnCh:
+	case <-time.After(time.Second):
+		t.Fatal("first turn did not complete")
+	}
+	// Let the upstream loop enter its next blocking read before publishing turn two.
+	time.Sleep(20 * time.Millisecond)
+	clientConn.readCh <- passthroughTestFrame{msgType: coderws.MessageText, payload: []byte(`{"type":"response.create","model":"gpt-5-mini"}`)}
+
+	require.Eventually(t, func() bool {
+		for _, frame := range upstreamConn.Writes() {
+			if string(frame.payload) == `{"type":"response.cancel"}` {
+				return true
+			}
+		}
+		return false
+	}, 300*time.Millisecond, 5*time.Millisecond)
+	select {
+	case relayExit := <-exitCh:
+		require.NotNil(t, relayExit)
+		require.Equal(t, "first_token_timeout", relayExit.Stage)
+	case <-time.After(time.Second):
+		t.Fatal("second turn timeout did not exit after unowned drain")
+	}
+}
+
+func TestObserveUpstreamMessageDoesNotBindForeignResponseBeforeCreated(t *testing.T) {
+	start := time.Now()
+	active := &relayTurnTiming{startAt: start, firstTokenDueAt: start.Add(time.Second)}
+	state := &relayState{activeTurn: active}
+
+	observed := observeUpstreamMessage(state, []byte(`{"type":"response.output_text.delta","response_id":"resp_foreign","delta":"late"}`), start, time.Now, nil)
+
+	require.Equal(t, "resp_foreign", observed.responseID)
+	require.Empty(t, active.responseID)
+	require.False(t, active.firstTokenDone)
+	require.Nil(t, active.firstTokenMs)
+	require.NotContains(t, state.turnTimingByID, "resp_foreign")
+}
+
+func TestObserveUpstreamMessageDoesNotStopOnUnownedTerminal(t *testing.T) {
+	start := time.Now()
+	active := &relayTurnTiming{startAt: start, responseID: "resp_active", firstTokenDueAt: start.Add(time.Second)}
+	state := &relayState{activeTurn: active, turnTimingByID: map[string]*relayTurnTiming{"resp_active": active}}
+
+	observed := observeUpstreamMessage(state, []byte(`{"type":"response.completed"}`), start, time.Now, nil)
+
+	require.True(t, observed.terminal)
+	require.False(t, observed.completedActiveTurn)
+	require.False(t, active.firstTokenDone)
+	require.Same(t, active, state.activeTurn)
+}
+
+func TestRelayContextCancelBeforeFirstDownstreamReturns(t *testing.T) {
+	clientConn := newPassthroughTestFrameConn(nil, false)
+	upstreamConn := newPassthroughTestFrameConn(nil, false)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		Relay(ctx, clientConn, upstreamConn, []byte(`{"type":"response.create"}`), RelayOptions{StartClientAfterFirstDownstream: true})
+	}()
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("relay did not return after context cancellation")
+	}
+}
+
+func TestRelayBeforeWriteUpstreamWaitsForTurnPermit(t *testing.T) {
+	clientConn := newPassthroughTestFrameConn(nil, false)
+	upstreamConn := newPassthroughTestFrameConn([]passthroughTestFrame{{
+		msgType: coderws.MessageText,
+		payload: []byte(`{"type":"response.created","response":{"id":"resp_first"}}`),
+	}}, false)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	beforeWriteCh := make(chan string, 1)
+
+	go Relay(ctx, clientConn, upstreamConn, []byte(`{"type":"response.create","model":"gpt-5"}`), RelayOptions{
+		FirstMessageSent: true,
+		BeforeWriteUpstream: func(_ coderws.MessageType, payload []byte) error {
+			beforeWriteCh <- gjson.GetBytes(payload, "model").String()
+			return nil
+		},
+	})
+	clientConn.readCh <- passthroughTestFrame{msgType: coderws.MessageText, payload: []byte(`{"type":"response.create","model":"gpt-5-mini"}`)}
+	time.Sleep(30 * time.Millisecond)
+	select {
+	case <-beforeWriteCh:
+		t.Fatal("next turn callback ran before the active turn completed")
+	default:
+	}
+
+	upstreamConn.readCh <- passthroughTestFrame{msgType: coderws.MessageText, payload: []byte(`{"type":"response.completed","response":{"id":"resp_first","usage":{"input_tokens":1,"output_tokens":1}}}`)}
+	select {
+	case model := <-beforeWriteCh:
+		require.Equal(t, "gpt-5-mini", model)
+	case <-time.After(time.Second):
+		t.Fatal("next turn callback did not run after permit release")
+	}
+}
+
 func TestRelayFirstTokenTimeoutCancelFailureExitsRelay(t *testing.T) {
 	clientConn := newPassthroughTestFrameConn(nil, false)
 	upstreamConn := newPassthroughTestFrameConn([]passthroughTestFrame{{
@@ -211,6 +342,23 @@ func TestRelayFirstTokenTimeoutCancelFailureExitsRelay(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("cleanup failure must still complete the timeout turn")
 	}
+	timeoutErrors := 0
+	for _, frame := range clientConn.Writes() {
+		if strings.Contains(string(frame.payload), `"first_token_timeout"`) {
+			timeoutErrors++
+		}
+	}
+	require.Equal(t, 1, timeoutErrors, "cancel failure must still send one timeout error downstream")
+}
+
+func TestClearRelayTimedOutTurnDeletesTimingMapEntry(t *testing.T) {
+	timing := &relayTurnTiming{responseID: "resp_timeout"}
+	state := &relayState{activeTurn: timing, turnTimingByID: map[string]*relayTurnTiming{"resp_timeout": timing}}
+
+	clearRelayTimedOutTurn(state, timing)
+
+	require.Nil(t, state.activeTurn)
+	require.NotContains(t, state.turnTimingByID, "resp_timeout")
 }
 
 func TestRelayStreamFalseDoesNotArmFirstTokenTimeout(t *testing.T) {

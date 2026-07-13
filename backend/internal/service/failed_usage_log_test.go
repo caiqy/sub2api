@@ -42,17 +42,21 @@ func TestWriteFailedUsageLogBestEffort_CreatesZeroCostUsageLog(t *testing.T) {
 	ctx := context.WithValue(context.Background(), ctxkey.ClientRequestID, "failed-client-req")
 
 	WriteFailedUsageLogBestEffort(ctx, repo, &FailedUsageLogInput{
-		APIKey:           &APIKey{ID: 101, GroupID: &groupID},
-		User:             &User{ID: 202},
-		Account:          &Account{ID: 303},
-		Model:            "gpt-5.4",
-		Stream:           false,
-		InboundEndpoint:  "/v1/responses",
-		UpstreamEndpoint: "/v1/responses",
-		UserAgent:        "curl/8.0",
-		IPAddress:        "127.0.0.1",
-		DetailSnapshot:   detail,
-		Duration:         time.Second,
+		APIKey:              &APIKey{ID: 101, GroupID: &groupID},
+		User:                &User{ID: 202},
+		Account:             &Account{ID: 303},
+		Model:               "gpt-5.4",
+		Stream:              false,
+		InboundEndpoint:     "/v1/responses",
+		UpstreamEndpoint:    "/v1/responses",
+		UserAgent:           "curl/8.0",
+		IPAddress:           "127.0.0.1",
+		DetailSnapshot:      detail,
+		Duration:            time.Second,
+		InputTokens:         7,
+		OutputTokens:        2,
+		CacheCreationTokens: 3,
+		OpenAIWSMode:        true,
 	}, "service.test")
 
 	require.Equal(t, 1, repo.createBestCalls)
@@ -62,8 +66,10 @@ func TestWriteFailedUsageLogBestEffort_CreatesZeroCostUsageLog(t *testing.T) {
 	require.Equal(t, int64(303), repo.lastLog.AccountID)
 	require.Equal(t, "client:failed-client-req", repo.lastLog.RequestID)
 	require.Equal(t, "gpt-5.4", repo.lastLog.Model)
-	require.Equal(t, 0, repo.lastLog.InputTokens)
-	require.Equal(t, 0, repo.lastLog.OutputTokens)
+	require.Equal(t, 7, repo.lastLog.InputTokens)
+	require.Equal(t, 2, repo.lastLog.OutputTokens)
+	require.Equal(t, 3, repo.lastLog.CacheCreationTokens)
+	require.True(t, repo.lastLog.OpenAIWSMode)
 	require.Equal(t, 0.0, repo.lastLog.TotalCost)
 	require.Equal(t, 0.0, repo.lastLog.ActualCost)
 	require.NotNil(t, repo.lastLog.InboundEndpoint)

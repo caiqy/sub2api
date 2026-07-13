@@ -702,6 +702,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			class := openAIFirstTokenClassFromRequest(upstreamReq, body)
 			var timedCtx context.Context
 			timedCtx, firstTokenWatchdog = s.withOpenAIFirstTokenClass(upstreamReq.Context(), class, "sse")
+			if firstTokenWatchdog != nil {
+				firstTokenWatchdog.requestModel = originalModel
+			}
 			upstreamReq = upstreamReq.WithContext(timedCtx)
 		}
 		upstreamPreview := openAIUpstreamRequestBodyPreview(upstreamReq, body)

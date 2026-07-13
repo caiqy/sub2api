@@ -58,7 +58,7 @@ OpenAI/Codex Responses API 偶发在返回首个有效业务事件前停滞数�
 - `response.created`
 - `response.in_progress`
 
-第一个非前导、非终止标记的有效 Responses 事件视为首个业务事件，包括：
+仅已知输出事件视为首个业务事件；`session.updated`、`rate_limits.updated`、`response.queued` 和未知 control 事件不结束等待。业务事件包括：
 
 - 文本或 reasoning delta
 - 函数、工具和其他输出项
@@ -79,7 +79,7 @@ response.output_item.done
 response.completed
 ```
 
-`response.output_item.added` 到达后首 Token 保护立即结束。后续 50–300 秒的图片生成时间由现有流间隔超时负责，不受图片首 Token 超时限制。
+`response.output_item.added` 到达后首 Token 保护立即结束。现有 `stream_data_interval_timeout` 从该业务事件起开始计时，覆盖协议转换、OAuth passthrough 和 Responses→Chat fallback；不得在首 Token 等待阶段抢先结束请求或惩罚账号。
 
 ## 配置
 
@@ -137,6 +137,8 @@ WebSocket 超时后：
 
 连接清理不触发账号 failover 或封禁。
 
+V2 relay 使用单 active turn permit。后续 turn 的 `BeforeRequest`、`BeforeTurn`、metadata 切换、watchdog arm 和上游写入都在 permit 内按顺序执行；首轮完成或 timeout drain 成功后才释放 permit，避免并发槽绕过和跨 turn 元数据污染。
+
 ## 可观测性
 
 超时写入失败 usage log 和 Ops 上游错误事件，并至少记录：
@@ -148,7 +150,7 @@ WebSocket 超时后：
 - 是否已收到 `response.created`
 - 上游 request ID（如有）
 
-新增结构化日志事件 `gateway.openai_first_token_timeout`。无需新增数据库字段；首 Token 保持为空，阶段信息写入现有错误详情和结构化日志。
+新增结构化日志事件 `gateway.openai_first_token_timeout`。无需新增数据库字段；首 Token 保持为空，阶段信息写入现有错误详情和结构化日志。drain 获得终态 usage 时，失败审计保留真实 token 但保持零成本；无法取得 usage 时在详情中明确标记 `usage_state=unknown`。
 
 取消本地请求不能保证 OpenAI 停止计算或不计费，日志和运维说明不得将超时等同于上游零消耗。
 
@@ -166,7 +168,9 @@ WebSocket 超时后：
 8. 运行时设置保存后对新请求生效。
 9. WebSocket cancel 成功时连接可复用；无法确认终态时连接被丢弃。
 10. 超时与首业务事件竞争时只产生一个终态，不重复写响应。
-11. 现有流间隔超时和长时间图片生成行为不变。
+11. 流间隔超时只在首业务事件后启动，并覆盖 OAuth passthrough 与 Responses→Chat fallback。
+12. V2 后续 turn 静默时仍能唤醒 timeout，且 hooks/metadata 不会越过 active turn permit。
+13. timeout drain 保留已知 usage，未知 usage 不伪装为上游零消耗。
 
 ## 参考
 

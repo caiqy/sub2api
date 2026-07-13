@@ -741,16 +741,25 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				HeadersReceived:   true,
 				CreatedReceived:   createdReceived,
 				UpstreamRequestID: responseID,
+				RequestModel:      originalModel,
 			}
-			reusable := cancelAndDrainOpenAIWSFirstToken(ctx, lease, responseID, s.openAIWSWriteTimeout(), 2*time.Second)
+			reusable, drainedUsage, usageKnown := cancelAndDrainOpenAIWSFirstTokenWithUsage(ctx, lease, responseID, s.openAIWSWriteTimeout(), 2*time.Second)
+			usage = drainedUsage
 			timeoutErr.ConnectionReusable = reusable
+			timeoutErr.UsageKnown = usageKnown
 			errorPayload := []byte(`{"type":"error","error":{"type":"first_token_timeout","code":"first_token_timeout","message":"Upstream timed out before the first response event"}}`)
 			if err := writeClientMessage(errorPayload); err != nil {
 				lease.MarkBroken()
 				timeoutErr.ConnectionReusable = false
 			}
 			recordOpenAIFirstTokenTimeout(ctx, c, account, timeoutErr)
-			return nil, timeoutErr
+			return &OpenAIForwardResult{
+				Usage:        usage,
+				Model:        originalModel,
+				Stream:       reqStream,
+				OpenAIWSMode: true,
+				Duration:     time.Since(turnStart),
+			}, timeoutErr
 		}
 		mappedModel := ""
 		var mappedModelBytes []byte
@@ -789,11 +798,13 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 
 			eventType, eventResponseID, _ := parseOpenAIWSEventEnvelope(upstreamMessage)
-			if eventType == "response.created" {
+			eventOwned, bindResponseID := openAIWSIngressTurnEventOwnership(responseID, eventType, eventResponseID, upstreamMessage, firstTokenTimeout > 0)
+			if bindResponseID != "" {
+				responseID = bindResponseID
 				createdReceived = true
 			}
-			if responseID == "" && eventResponseID != "" {
-				responseID = eventResponseID
+			if eventResponseID != "" && !eventOwned {
+				continue
 			}
 			if eventType != "" {
 				eventCount++
@@ -871,14 +882,14 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					}
 				}
 			}
-			if !firstTokenDone && openai.ResponsesEventEndsFirstTokenWait(upstreamMessage) {
+			if eventOwned && !firstTokenDone && openai.ResponsesEventEndsFirstTokenWait(upstreamMessage) {
 				firstTokenDone = true
 			}
-			isTokenEvent := openAIWSMessageRecordsFirstToken(upstreamMessage)
+			isTokenEvent := eventOwned && openAIWSMessageRecordsFirstToken(upstreamMessage)
 			if isTokenEvent {
 				tokenEventCount++
 			}
-			isTerminalEvent := isOpenAIWSTerminalEvent(eventType)
+			isTerminalEvent := eventOwned && isOpenAIWSTerminalEvent(eventType)
 			if isTerminalEvent {
 				terminalEventCount++
 			}
@@ -886,10 +897,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				ms := int(time.Since(turnStart).Milliseconds())
 				firstTokenMs = &ms
 			}
-			if openAIWSEventShouldParseUsage(eventType) {
+			if eventOwned && openAIWSEventShouldParseUsage(eventType) {
 				parseOpenAIWSResponseUsageFromCompletedEvent(upstreamMessage, &usage)
 			}
-			imageCounter.AddSSEData(upstreamMessage)
+			if eventOwned {
+				imageCounter.AddSSEData(upstreamMessage)
+			}
 
 			if eventType == "response.failed" {
 				if hit, code, msg := detectOpenAICyberPolicy(upstreamMessage); hit {
@@ -1500,7 +1513,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				finalErr = unwrapped
 			}
 			if hooks != nil && hooks.AfterTurn != nil {
-				hooks.AfterTurn(turn, nil, finalErr)
+				hooks.AfterTurn(turn, result, finalErr)
 			}
 			var firstTokenTimeoutErr *OpenAIFirstTokenTimeoutError
 			if errors.As(finalErr, &firstTokenTimeoutErr) && firstTokenTimeoutErr.ConnectionReusable {

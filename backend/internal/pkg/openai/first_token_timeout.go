@@ -251,18 +251,40 @@ func skipJSONValueFromFirst(input *bufio.Reader, first byte) error {
 
 func ResponsesEventEndsFirstTokenWait(payload []byte) bool {
 	eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
-	return eventType != "" && eventType != "response.created" && eventType != "response.in_progress"
+	return responsesEventIsTerminal(eventType) || ResponsesEventRecordsFirstToken(payload)
 }
 
 func ResponsesEventRecordsFirstToken(payload []byte) bool {
 	eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
-	if eventType == "" || eventType == "error" ||
-		strings.HasPrefix(eventType, "response.completed") ||
-		strings.HasPrefix(eventType, "response.done") ||
-		strings.HasPrefix(eventType, "response.failed") ||
-		strings.HasPrefix(eventType, "response.incomplete") ||
-		strings.HasPrefix(eventType, "response.cancel") {
+	if eventType == "" || responsesEventIsTerminal(eventType) {
 		return false
 	}
-	return eventType != "response.created" && eventType != "response.in_progress"
+	if strings.HasSuffix(eventType, ".delta") {
+		return strings.HasPrefix(eventType, "response.")
+	}
+	for _, prefix := range []string{
+		"response.output_",
+		"response.content_part.",
+		"response.reasoning_",
+		"response.function_call_arguments.",
+		"response.image_generation_call.",
+		"response.code_interpreter_call.",
+		"response.file_search_call.",
+		"response.web_search_call.",
+		"response.mcp_call.",
+	} {
+		if strings.HasPrefix(eventType, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func responsesEventIsTerminal(eventType string) bool {
+	switch strings.TrimSpace(eventType) {
+	case "error", "response.completed", "response.done", "response.failed", "response.incomplete", "response.canceled", "response.cancelled":
+		return true
+	default:
+		return false
+	}
 }

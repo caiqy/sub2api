@@ -71,6 +71,7 @@ type RelayOptions struct {
 	StartClientAfterFirstDownstream bool
 	OnUsageParseFailure             func(eventType string, usageRaw string)
 	OnTurnComplete                  func(turn RelayTurnResult)
+	BeforeWriteUpstream             func(msgType coderws.MessageType, payload []byte) error
 	BeforeWriteClient               func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) error
 	ReadClientFrame                 func(ctx context.Context, clientConn FrameConn) (coderws.MessageType, []byte, error)
 	OnTrace                         func(event RelayTraceEvent)
@@ -119,6 +120,7 @@ type relayTurnTiming struct {
 	startAt            time.Time
 	requestModel       string
 	responseID         string
+	createdReceived    bool
 	firstTokenMs       *int
 	firstTokenClass    openaiutil.FirstTokenClass
 	firstTokenDueAt    time.Time
@@ -127,9 +129,11 @@ type relayTurnTiming struct {
 }
 
 type FirstTokenTimeoutError struct {
-	Class   openaiutil.FirstTokenClass
-	Timeout time.Duration
-	Elapsed time.Duration
+	Class           openaiutil.FirstTokenClass
+	Timeout         time.Duration
+	Elapsed         time.Duration
+	CreatedReceived bool
+	UsageKnown      bool
 }
 
 func (e *FirstTokenTimeoutError) Error() string {
@@ -148,6 +152,12 @@ type relayFirstTokenRuntime struct {
 	imageTimeout   time.Duration
 	resolveTimeout func([]byte) time.Duration
 	releaseTurn    func()
+}
+
+type relayUpstreamFrame struct {
+	msgType coderws.MessageType
+	payload []byte
+	err     error
 }
 
 func Relay(
@@ -239,6 +249,12 @@ func Relay(
 			return err
 		}
 		if held {
+			if options.BeforeWriteUpstream != nil {
+				if err := options.BeforeWriteUpstream(msgType, payload); err != nil {
+					releaseTurn()
+					return err
+				}
+			}
 			publishTurn(payload)
 		}
 		if err := writeUpstream(msgType, payload); err != nil {
@@ -536,69 +552,126 @@ func runUpstreamToClient(
 		firstToken = firstTokenRuntime[0]
 	}
 	wroteDownstream := false
-	armPendingTurn := func() {
-		select {
-		case turn := <-firstToken.turnStartCh:
-			class := openaiutil.ResponsesFirstTokenClass(turn.payload)
-			requestModel := strings.TrimSpace(gjson.GetBytes(turn.payload, "model").String())
-			timeout := firstToken.textTimeout
-			if class == openaiutil.FirstTokenClassImage {
-				timeout = firstToken.imageTimeout
-			}
-			if firstToken.resolveTimeout != nil {
-				timeout = firstToken.resolveTimeout(turn.payload)
-			}
-			stream := true
-			if streamResult := gjson.GetBytes(turn.payload, "stream"); streamResult.Exists() {
-				stream = streamResult.Bool()
-			}
-			if !stream {
-				timeout = 0
-			}
-			state.activeTurn = &relayTurnTiming{startAt: turn.startAt, requestModel: requestModel, firstTokenClass: class, firstTokenDone: timeout <= 0}
-			if timeout > 0 {
-				state.activeTurn.firstTokenDueAt = turn.startAt.Add(timeout)
-			}
-		default:
+	armTurn := func(turn relayTurnStart) {
+		class := openaiutil.ResponsesFirstTokenClass(turn.payload)
+		requestModel := strings.TrimSpace(gjson.GetBytes(turn.payload, "model").String())
+		timeout := firstToken.textTimeout
+		if class == openaiutil.FirstTokenClassImage {
+			timeout = firstToken.imageTimeout
+		}
+		if firstToken.resolveTimeout != nil {
+			timeout = firstToken.resolveTimeout(turn.payload)
+		}
+		stream := true
+		if streamResult := gjson.GetBytes(turn.payload, "stream"); streamResult.Exists() {
+			stream = streamResult.Bool()
+		}
+		if !stream {
+			timeout = 0
+		}
+		state.activeTurn = &relayTurnTiming{startAt: turn.startAt, requestModel: requestModel, firstTokenClass: class, firstTokenDone: timeout <= 0}
+		if timeout > 0 {
+			state.activeTurn.firstTokenDueAt = turn.startAt.Add(timeout)
 		}
 	}
+	upstreamFrames := make(chan relayUpstreamFrame, 1)
+	go func() {
+		defer close(upstreamFrames)
+		for {
+			msgType, payload, err := upstreamConn.ReadFrame(ctx)
+			select {
+			case upstreamFrames <- relayUpstreamFrame{msgType: msgType, payload: payload, err: err}:
+			case <-ctx.Done():
+				return
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
 	for {
-		armPendingTurn()
-		readCtx := ctx
-		var cancel context.CancelFunc
+		var timeoutCh <-chan time.Time
+		var timeoutTimer *time.Timer
 		if state.activeTurn != nil && !state.activeTurn.firstTokenDone && !state.activeTurn.firstTokenDueAt.IsZero() {
-			readCtx, cancel = context.WithDeadline(ctx, state.activeTurn.firstTokenDueAt)
+			delay := time.Until(state.activeTurn.firstTokenDueAt)
+			if delay < 0 {
+				delay = 0
+			}
+			timeoutTimer = time.NewTimer(delay)
+			timeoutCh = timeoutTimer.C
 		}
-		msgType, payload, err := upstreamConn.ReadFrame(readCtx)
-		if cancel != nil {
-			cancel()
+		var frame relayUpstreamFrame
+		select {
+		case turn := <-firstToken.turnStartCh:
+			if timeoutTimer != nil {
+				timeoutTimer.Stop()
+			}
+			armTurn(turn)
+			continue
+		case next, ok := <-upstreamFrames:
+			if timeoutTimer != nil {
+				timeoutTimer.Stop()
+			}
+			if !ok {
+				err := ctx.Err()
+				if err == nil {
+					err = io.EOF
+				}
+				exitCh <- relayExitSignal{stage: "read_upstream", err: err, graceful: isDisconnectError(err), wroteDownstream: wroteDownstream}
+				return
+			}
+			frame = next
+		case <-timeoutCh:
+			frame.err = context.DeadlineExceeded
+		case <-ctx.Done():
+			if timeoutTimer != nil {
+				timeoutTimer.Stop()
+			}
+			exitCh <- relayExitSignal{stage: "read_upstream", err: ctx.Err(), graceful: isDisconnectError(ctx.Err()), wroteDownstream: wroteDownstream}
+			return
 		}
-		if err != nil && state.activeTurn != nil && !state.activeTurn.firstTokenDone && !nowFn().Before(state.activeTurn.firstTokenDueAt) {
+		msgType, payload, err := frame.msgType, frame.payload, frame.err
+		if errors.Is(err, context.DeadlineExceeded) && state.activeTurn != nil && !state.activeTurn.firstTokenDone && !nowFn().Before(state.activeTurn.firstTokenDueAt) {
 			timing := state.activeTurn
 			timing.firstTokenTimedOut = true
 			timeout := timing.firstTokenDueAt.Sub(timing.startAt)
-			timeoutErr := &FirstTokenTimeoutError{Class: timing.firstTokenClass, Timeout: timeout, Elapsed: nowFn().Sub(timing.startAt)}
-			completeTimeoutTurn := func(reusable bool) {
+			timeoutErr := &FirstTokenTimeoutError{Class: timing.firstTokenClass, Timeout: timeout, Elapsed: nowFn().Sub(timing.startAt), CreatedReceived: timing.createdReceived}
+			completeTimeoutTurn := func(reusable bool, usage Usage) {
 				if onTurnComplete != nil {
-					onTurnComplete(RelayTurnResult{RequestModel: timing.requestModel, RequestID: timing.responseID, Duration: timeoutErr.Elapsed, TurnError: timeoutErr, ConnectionReusable: reusable})
+					onTurnComplete(RelayTurnResult{RequestModel: timing.requestModel, Usage: usage, RequestID: timing.responseID, Duration: timeoutErr.Elapsed, TurnError: timeoutErr, ConnectionReusable: reusable})
 				}
 			}
+			clientWriteErr := writeClient(coderws.MessageText, []byte(`{"type":"error","error":{"type":"first_token_timeout","code":"first_token_timeout","message":"Upstream timed out before the first response event"}}`))
+			if clientWriteErr == nil {
+				wroteDownstream = true
+			}
 			if firstToken.writeUpstream == nil || firstToken.writeUpstream(coderws.MessageText, []byte(`{"type":"response.cancel"}`)) != nil {
-				completeTimeoutTurn(false)
+				completeTimeoutTurn(false, Usage{})
 				exitCh <- relayExitSignal{stage: "first_token_timeout", err: timeoutErr, wroteDownstream: wroteDownstream}
 				return
 			}
-			if writeClient(coderws.MessageText, []byte(`{"type":"error","error":{"type":"first_token_timeout","code":"first_token_timeout","message":"Upstream timed out before the first response event"}}`)) != nil {
-				completeTimeoutTurn(false)
+			if clientWriteErr != nil {
+				completeTimeoutTurn(false, Usage{})
 				exitCh <- relayExitSignal{stage: "first_token_timeout", err: timeoutErr, wroteDownstream: wroteDownstream}
 				return
 			}
-			wroteDownstream = true
 			drainCtx, drainCancel := context.WithTimeout(ctx, 2*time.Second)
 			drained := false
+			drainedUsage := Usage{}
 			for timing.responseID != "" && !drained {
-				_, drainPayload, drainErr := upstreamConn.ReadFrame(drainCtx)
-				if drainErr != nil {
+				var drainPayload []byte
+				select {
+				case drainFrame, ok := <-upstreamFrames:
+					if !ok || drainFrame.err != nil {
+						drained = false
+						break
+					}
+					drainPayload = drainFrame.payload
+				case <-drainCtx.Done():
+					drained = false
+					break
+				}
+				if len(drainPayload) == 0 {
 					break
 				}
 				values := gjson.GetManyBytes(drainPayload, "type", "response.id", "response_id")
@@ -608,15 +681,19 @@ func runUpstreamToClient(
 					eventResponseID = strings.TrimSpace(values[2].String())
 				}
 				drained = isTerminalEvent(eventType) && eventResponseID == timing.responseID
+				if drained {
+					drainedUsage = parseUsageAndAccumulate(state, drainPayload, eventType, onUsageParseFailure)
+					timeoutErr.UsageKnown = gjson.GetBytes(drainPayload, "response.usage").IsObject()
+				}
 			}
 			drainCancel()
 			if !drained {
-				completeTimeoutTurn(false)
+				completeTimeoutTurn(false, Usage{})
 				exitCh <- relayExitSignal{stage: "first_token_timeout", err: timeoutErr, wroteDownstream: wroteDownstream}
 				return
 			}
-			completeTimeoutTurn(true)
-			state.activeTurn = nil
+			completeTimeoutTurn(true, drainedUsage)
+			clearRelayTimedOutTurn(state, timing)
 			if firstToken.releaseTurn != nil {
 				firstToken.releaseTurn()
 			}
@@ -639,7 +716,6 @@ func runUpstreamToClient(
 			return
 		}
 		markActivity()
-		armPendingTurn()
 		if beforeWriteClient != nil {
 			if err := beforeWriteClient(msgType, payload, wroteDownstream); err != nil {
 				emitRelayTrace(onTrace, RelayTraceEvent{
@@ -711,6 +787,19 @@ func runUpstreamToClient(
 			forwardedFrames.Add(1)
 		}
 		markActivity()
+	}
+}
+
+func clearRelayTimedOutTurn(state *relayState, timing *relayTurnTiming) {
+	if state == nil || timing == nil {
+		return
+	}
+	if timing.responseID != "" {
+		_, _ = openAIWSRelayDeleteTurnTiming(state, timing.responseID)
+		return
+	}
+	if state.activeTurn == timing {
+		state.activeTurn = nil
 	}
 }
 
@@ -818,9 +907,13 @@ func observeUpstreamMessage(
 	recordsFirstToken := openaiutil.ResponsesEventRecordsFirstToken(message)
 	var turnTiming *relayTurnTiming
 	if responseID != "" {
-		turnTiming = openAIWSRelayGetOrInitTurnTiming(state, responseID, now)
+		allowActiveBinding := eventType == "response.created" || state.activeTurn != nil && state.activeTurn.firstTokenDone
+		turnTiming = openAIWSRelayGetOrInitTurnTiming(state, responseID, now, allowActiveBinding)
 	}
-	activeMatches := state.activeTurn != nil && (responseID == "" || turnTiming == state.activeTurn)
+	activeMatches := state.activeTurn != nil && (turnTiming == state.activeTurn || responseID == "" && recordsFirstToken && (state.activeTurn.responseID != "" || state.activeTurn.firstTokenDone))
+	if activeMatches && eventType == "response.created" {
+		state.activeTurn.createdReceived = true
+	}
 	if activeMatches && !state.activeTurn.firstTokenDone && openaiutil.ResponsesEventEndsFirstTokenWait(message) {
 		state.activeTurn.firstTokenDone = true
 	}
@@ -836,7 +929,10 @@ func observeUpstreamMessage(
 			}
 		}
 	}
-	parsedUsage := parseUsageAndAccumulate(state, message, eventType, onUsageParseFailure)
+	parsedUsage := Usage{}
+	if state.activeTurn == nil || activeMatches {
+		parsedUsage = parseUsageAndAccumulate(state, message, eventType, onUsageParseFailure)
+	}
 	observed := observedUpstreamEvent{
 		eventType:  eventType,
 		responseID: responseID,
@@ -894,7 +990,7 @@ func emitTurnComplete(
 	})
 }
 
-func openAIWSRelayGetOrInitTurnTiming(state *relayState, responseID string, now time.Time) *relayTurnTiming {
+func openAIWSRelayGetOrInitTurnTiming(state *relayState, responseID string, now time.Time, bindActive ...bool) *relayTurnTiming {
 	if state == nil {
 		return nil
 	}
@@ -904,7 +1000,11 @@ func openAIWSRelayGetOrInitTurnTiming(state *relayState, responseID string, now 
 	timing, ok := state.turnTimingByID[responseID]
 	if !ok || timing == nil || timing.startAt.IsZero() {
 		active := state.activeTurn
-		if active != nil && !active.startAt.IsZero() && (active.responseID == "" || active.responseID == responseID) {
+		allowActiveBinding := len(bindActive) > 0 && bindActive[0]
+		if active != nil && (active.responseID != "" && active.responseID != responseID || active.responseID == "" && !allowActiveBinding) {
+			return nil
+		}
+		if active != nil && !active.startAt.IsZero() && (active.responseID == responseID || allowActiveBinding && active.responseID == "") {
 			timing = active
 			timing.responseID = responseID
 		} else {

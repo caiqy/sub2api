@@ -35,3 +35,9 @@
   <!-- race detector 已尝试；本机缺少 gcc，runtime/cgo 无法构建。普通 Go 测试、前端 Vitest 与 typecheck 均通过。 -->
 - [x] 6.3 按 spec 复核 SSE、两套 WebSocket、运行时配置、可观测性和账号调度隔离场景，并记录验证结果
   <!-- Thorough 最终审查通过；补充修复了 WS response ID 隔离、V2 单 active turn、运行时配置原子快照及 cleanup 失败可观测性。 -->
+
+## 7. 复审缺陷修复
+
+- [x] 7.1 以失败测试覆盖 V2 后续 turn 唤醒、严格 response ID 归属及 control/未知事件分类，并修复 relay 状态机
+- [x] 7.2 以失败测试覆盖首业务事件前禁用通用流间隔超时，并补齐 OAuth passthrough 与 Responses→Chat fallback 的 `stream_data_interval_timeout`
+- [x] 7.3 保留 timeout drain 的真实 usage/未知消耗语义，补齐请求模型和 created 阶段诊断，并重新运行完整验证和 Thorough 审查

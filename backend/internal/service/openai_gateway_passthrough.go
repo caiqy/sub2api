@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -194,6 +195,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
 		if timeoutErr := firstTokenWatchdog.TimeoutError(); timeoutErr != nil {
+			timeoutErr.RequestModel = reqModel
 			recordOpenAIFirstTokenTimeout(ctx, c, account, timeoutErr)
 			return nil, timeoutErr
 		}
@@ -206,6 +208,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	if !firstTokenWatchdog.MarkHeaders(resp.Header.Get("x-request-id")) {
 		_ = resp.Body.Close()
 		timeoutErr := firstTokenWatchdog.TimeoutError()
+		timeoutErr.RequestModel = reqModel
 		recordOpenAIFirstTokenTimeout(ctx, c, account, timeoutErr)
 		return nil, timeoutErr
 	}
@@ -214,6 +217,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		if !firstTokenWatchdog.Stop() {
 			_ = resp.Body.Close()
 			timeoutErr := firstTokenWatchdog.TimeoutError()
+			timeoutErr.RequestModel = reqModel
 			recordOpenAIFirstTokenTimeout(ctx, c, account, timeoutErr)
 			return nil, timeoutErr
 		}
@@ -236,6 +240,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		result, err := s.handleStreamingResponsePassthrough(upstreamReq.Context(), resp, c, account, startTime, reqModel, upstreamPassthroughModel)
 		if err != nil {
 			if timeoutErr := firstTokenWatchdog.TimeoutError(); timeoutErr != nil {
+				timeoutErr.RequestModel = reqModel
 				recordOpenAIFirstTokenTimeout(ctx, c, account, timeoutErr)
 				return nil, timeoutErr
 			}
@@ -962,6 +967,35 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			imageOutputSizes: imageCounter.Sizes(),
 		}
 	}
+	streamInterval := time.Duration(0)
+	if s != nil && s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
+		streamInterval = time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
+	}
+	var streamTimedOut atomic.Bool
+	var streamGeneration atomic.Uint64
+	var streamTimer *time.Timer
+	resetStreamTimer := func(start bool) {
+		if streamInterval <= 0 || (!start && streamTimer == nil) {
+			return
+		}
+		generation := streamGeneration.Add(1)
+		if streamTimer != nil {
+			streamTimer.Stop()
+		}
+		// A stopped AfterFunc callback may already be runnable; generation makes it stale.
+		streamTimer = time.AfterFunc(streamInterval, func() {
+			if streamGeneration.CompareAndSwap(generation, generation+1) {
+				streamTimedOut.Store(true)
+				_ = resp.Body.Close()
+			}
+		})
+	}
+	defer func() {
+		streamGeneration.Add(1)
+		if streamTimer != nil {
+			streamTimer.Stop()
+		}
+	}()
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -1046,6 +1080,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				line = "data: " + string(sanitizedData)
 			}
 			lineStartsClientOutput = forceFlushFailedEvent || openAIStreamDataStartsClientOutput(trimmedData, eventType)
+			resetStreamTimer(openaiutil.ResponsesEventRecordsFirstToken(dataBytes))
 			if firstTokenMs == nil && lineStartsClientOutput && openaiutil.ResponsesEventRecordsFirstToken(dataBytes) {
 				ms := int(time.Since(startTime).Milliseconds())
 				firstTokenMs = &ms
@@ -1078,6 +1113,12 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				flusher.Flush()
 			}
 		}
+	}
+	if streamTimedOut.Load() {
+		if s.rateLimitService != nil {
+			s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
+		}
+		return resultWithUsage(), errOpenAIStreamDataIntervalTimeout
 	}
 	if err := scanner.Err(); err != nil {
 		if timeoutErr := firstTokenWatchdogFromContext(ctx).TimeoutError(); timeoutErr != nil {

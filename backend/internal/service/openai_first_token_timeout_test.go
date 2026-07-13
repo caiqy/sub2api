@@ -16,9 +16,11 @@ type openAIWSFirstTokenLeaseStub struct {
 	readErr  error
 	events   [][]byte
 	broken   bool
+	writes   int
 }
 
 func (s *openAIWSFirstTokenLeaseStub) WriteJSONWithContextTimeout(context.Context, any, time.Duration) error {
+	s.writes++
 	return s.writeErr
 }
 
@@ -106,19 +108,24 @@ func TestWithOpenAIFirstTokenTimeoutSelectsImageDuration(t *testing.T) {
 
 	_, watchdog := svc.withOpenAIFirstTokenTimeout(
 		context.Background(),
-		[]byte(`{"tool_choice":{"type":"image_generation"}}`),
+		[]byte(`{"model":"gpt-5","tool_choice":{"type":"image_generation"}}`),
 		"websocket",
 	)
 	t.Cleanup(func() { watchdog.Stop() })
 
 	require.Equal(t, openaiutil.FirstTokenClassImage, watchdog.class)
 	require.Equal(t, 600*time.Second, watchdog.timeout)
+	require.Equal(t, "gpt-5", watchdog.requestModel)
 }
 
 func TestCancelAndDrainOpenAIWSFirstToken(t *testing.T) {
 	t.Run("terminal event keeps connection reusable", func(t *testing.T) {
-		lease := &openAIWSFirstTokenLeaseStub{events: [][]byte{[]byte(`{"type":"response.canceled","response":{"id":"resp_1"}}`)}}
-		require.True(t, cancelAndDrainOpenAIWSFirstToken(context.Background(), lease, "resp_1", time.Second, time.Second))
+		lease := &openAIWSFirstTokenLeaseStub{events: [][]byte{[]byte(`{"type":"response.canceled","response":{"id":"resp_1","usage":{"input_tokens":7,"output_tokens":2}}}`)}}
+		reusable, usage, known := cancelAndDrainOpenAIWSFirstTokenWithUsage(context.Background(), lease, "resp_1", time.Second, time.Second)
+		require.True(t, reusable)
+		require.True(t, known)
+		require.Equal(t, 7, usage.InputTokens)
+		require.Equal(t, 2, usage.OutputTokens)
 		require.False(t, lease.broken)
 	})
 
@@ -134,9 +141,47 @@ func TestCancelAndDrainOpenAIWSFirstToken(t *testing.T) {
 		require.True(t, lease.broken)
 	})
 
+	t.Run("missing response id still sends cancel and breaks connection", func(t *testing.T) {
+		lease := &openAIWSFirstTokenLeaseStub{}
+		reusable, _, known := cancelAndDrainOpenAIWSFirstTokenWithUsage(context.Background(), lease, "", time.Second, time.Millisecond)
+		require.False(t, reusable)
+		require.False(t, known)
+		require.Equal(t, 1, lease.writes)
+		require.True(t, lease.broken)
+	})
+
 	t.Run("drain failure marks connection broken", func(t *testing.T) {
 		lease := &openAIWSFirstTokenLeaseStub{readErr: context.DeadlineExceeded}
 		require.False(t, cancelAndDrainOpenAIWSFirstToken(context.Background(), lease, "resp_1", time.Second, time.Millisecond))
 		require.True(t, lease.broken)
 	})
+}
+
+func TestOpenAIWSIngressTurnEventOwnership(t *testing.T) {
+	tests := []struct {
+		name       string
+		currentID  string
+		eventType  string
+		eventID    string
+		payload    string
+		timeoutOn  bool
+		wantOwned  bool
+		wantBindID string
+	}{
+		{name: "created binds", eventType: "response.created", eventID: "resp_1", timeoutOn: true, wantOwned: true, wantBindID: "resp_1"},
+		{name: "foreign delta before created rejected", eventType: "response.output_text.delta", eventID: "resp_old", payload: `{"type":"response.output_text.delta"}`, timeoutOn: true},
+		{name: "idless delta after created belongs", currentID: "resp_1", eventType: "response.output_text.delta", payload: `{"type":"response.output_text.delta"}`, timeoutOn: true, wantOwned: true},
+		{name: "idless terminal rejected", currentID: "resp_1", eventType: "response.completed", payload: `{"type":"response.completed"}`, timeoutOn: true},
+		{name: "foreign delta rejected", currentID: "resp_1", eventType: "response.output_text.delta", eventID: "resp_2", payload: `{"type":"response.output_text.delta"}`, timeoutOn: true},
+		{name: "control event not owned", currentID: "resp_1", eventType: "session.updated", payload: `{"type":"session.updated"}`, timeoutOn: true},
+		{name: "generic error belongs", currentID: "resp_1", eventType: "error", payload: `{"type":"error"}`, timeoutOn: true, wantOwned: true},
+		{name: "timeout disabled keeps legacy binding", eventType: "response.completed", eventID: "resp_legacy", payload: `{"type":"response.completed"}`, wantOwned: true, wantBindID: "resp_legacy"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			owned, bindID := openAIWSIngressTurnEventOwnership(tt.currentID, tt.eventType, tt.eventID, []byte(tt.payload), tt.timeoutOn)
+			require.Equal(t, tt.wantOwned, owned)
+			require.Equal(t, tt.wantBindID, bindID)
+		})
+	}
 }

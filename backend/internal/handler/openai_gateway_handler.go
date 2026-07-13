@@ -506,7 +506,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			}
 			var firstTokenTimeout *service.OpenAIFirstTokenTimeoutError
 			if errors.As(err, &firstTokenTimeout) {
-				h.submitFailedUsageLog(c, apiKey, account, reqModel, reqStream, 0, nil, nil, forwardDuration, attemptReasoningEffort, "handler.openai_gateway.responses")
+				h.submitFailedUsageLog(c, apiKey, account, reqModel, reqStream, 0, nil, []byte(`{"error":{"type":"first_token_timeout"},"usage_state":"unknown"}`), forwardDuration, attemptReasoningEffort, "handler.openai_gateway.responses")
 				headers := c.Writer.Header()
 				headers.Del("Content-Type")
 				headers.Del("Content-Length")
@@ -1803,7 +1803,17 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 								}
 								failedDuration = result.Duration
 							}
-							h.submitFailedUsageLog(c, apiKey, account, failedModel, true, 0, nil, nil, failedDuration, service.ExtractOpenAIReasoningEffortFromBody(firstMessage, failedModel), "handler.openai_gateway.responses_ws")
+							responseBody := []byte(nil)
+							var failedUsage *service.OpenAIUsage
+							var firstTokenTimeout *service.OpenAIFirstTokenTimeoutError
+							if errors.As(turnErr, &firstTokenTimeout) {
+								if firstTokenTimeout.UsageKnown && result != nil {
+									failedUsage = &result.Usage
+								} else {
+									responseBody = []byte(`{"error":{"type":"first_token_timeout"},"usage_state":"unknown"}`)
+								}
+							}
+							h.submitFailedUsageLog(c, apiKey, account, failedModel, true, 0, nil, responseBody, failedDuration, service.ExtractOpenAIReasoningEffortFromBody(firstMessage, failedModel), "handler.openai_gateway.responses_ws", failedUsage)
 						}
 						return
 					}
@@ -2076,7 +2086,7 @@ func (h *OpenAIGatewayHandler) submitUsageRecordTask(parent context.Context, tas
 	task(ctx)
 }
 
-func (h *OpenAIGatewayHandler) submitFailedUsageLog(c *gin.Context, apiKey *service.APIKey, account *service.Account, model string, stream bool, upstreamStatusCode int, responseHeaders http.Header, responseBody []byte, duration time.Duration, reasoningEffort *string, logKey string) {
+func (h *OpenAIGatewayHandler) submitFailedUsageLog(c *gin.Context, apiKey *service.APIKey, account *service.Account, model string, stream bool, upstreamStatusCode int, responseHeaders http.Header, responseBody []byte, duration time.Duration, reasoningEffort *string, logKey string, usages ...*service.OpenAIUsage) {
 	if c == nil || apiKey == nil || apiKey.User == nil || account == nil {
 		return
 	}
@@ -2091,8 +2101,12 @@ func (h *OpenAIGatewayHandler) submitFailedUsageLog(c *gin.Context, apiKey *serv
 	inboundEndpoint := GetInboundEndpoint(c)
 	upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 	upstreamModel := resolveOpenAIFailedUsageUpstreamModel(c, account, model)
+	var usage *service.OpenAIUsage
+	if len(usages) > 0 {
+		usage = usages[0]
+	}
 	h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
-		service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), &service.FailedUsageLogInput{
+		input := &service.FailedUsageLogInput{
 			APIKey:           apiKey,
 			User:             apiKey.User,
 			Account:          account,
@@ -2100,13 +2114,22 @@ func (h *OpenAIGatewayHandler) submitFailedUsageLog(c *gin.Context, apiKey *serv
 			UpstreamModel:    upstreamModel,
 			ReasoningEffort:  reasoningEffort,
 			Stream:           stream,
+			OpenAIWSMode:     strings.Contains(logKey, "responses_ws"),
 			InboundEndpoint:  inboundEndpoint,
 			UpstreamEndpoint: upstreamEndpoint,
 			UserAgent:        userAgent,
 			IPAddress:        clientIP,
 			DetailSnapshot:   detailSnapshot,
 			Duration:         duration,
-		}, logKey)
+		}
+		if usage != nil {
+			input.InputTokens = usage.InputTokens
+			input.OutputTokens = usage.OutputTokens
+			input.CacheCreationTokens = usage.CacheCreationInputTokens
+			input.CacheReadTokens = usage.CacheReadInputTokens
+			input.ImageOutputTokens = usage.ImageOutputTokens
+		}
+		service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), input, logKey)
 	})
 }
 

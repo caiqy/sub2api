@@ -34,6 +34,14 @@
 - **WHEN** 上游在业务输出前发送 failed、completed、incomplete 或 canceled 终态
 - **THEN** 系统 MUST 停止 watchdog，但 MUST NOT 将该终态记录为首 Token
 
+#### Scenario: Control 或未知事件不结束等待
+- **WHEN** 上游在业务输出前发送 `session.updated`、`rate_limits.updated` 或未知 control 事件
+- **THEN** 系统 MUST 继续首 Token 计时，且 MUST NOT 记录首 Token 延迟
+
+#### Scenario: 通用流间隔超时在首业务事件后启动
+- **WHEN** 首 Token watchdog 仍在等待，包括 OAuth passthrough 或 Responses→Chat fallback 路径
+- **THEN** `stream_data_interval_timeout` MUST NOT 抢先结束请求或惩罚账号；首业务事件到达后 MUST 从该时刻开始执行流间隔保护
+
 ### Requirement: 首 Token 超时可运行时配置
 系统 MUST 提供 `openai_text_first_token_timeout` 和 `openai_image_first_token_timeout` 两个秒级 Gateway 运行时设置，默认值 MUST 分别为 30 和 600；值为 `0` MUST 关闭对应超时，负数 MUST 被拒绝。
 
@@ -83,6 +91,14 @@
 - **WHEN** V2 passthrough relay 的一个 turn 首 Token 超时且 cancel/drain 成功
 - **THEN** relay MUST 清除该 turn 的 watchdog 状态，并 MUST 能处理下一条 `response.create`
 
+#### Scenario: 后续 turn 静默时仍能超时
+- **WHEN** V2 passthrough relay 已完成一个 turn，随后发送新的 `response.create` 且上游不再发送任何事件
+- **THEN** 新 turn 的首 Token deadline MUST 唤醒 relay 并执行 cancel，不得因 reader 已阻塞而失效
+
+#### Scenario: 异 response 事件不得归属当前 turn
+- **WHEN** 当前 turn 尚未收到自己的 `response.created`，但收到携带其他 response ID 的迟到事件
+- **THEN** relay MUST NOT 将该 ID 绑定到当前 turn、停止当前 watchdog或释放下一 turn
+
 ### Requirement: 首 Token 超时不影响账号调度状态
 系统 MUST 将首 Token 超时作为不可 failover 的请求级错误处理，不得同账号重试、切换账号、临时封禁账号或提交账号调度失败结果。
 
@@ -104,3 +120,7 @@
 #### Scenario: 超时用量不伪造首 Token
 - **WHEN** 系统记录首 Token 超时失败 usage
 - **THEN** 首 Token 字段 MUST 保持为空，且记录 MUST NOT 声明上游零消耗
+
+#### Scenario: 超时日志包含可用模型和阶段
+- **WHEN** HTTP 或 WebSocket 已知请求模型，或 V2 已收到 `response.created` 后超时
+- **THEN** 结构化日志 MUST 记录请求模型，并正确标记 `created_received`

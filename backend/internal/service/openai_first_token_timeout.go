@@ -37,6 +37,7 @@ type OpenAIFirstTokenTimeoutError struct {
 	UpstreamRequestID  string
 	RequestModel       string
 	ConnectionReusable bool
+	UsageKnown         bool
 }
 
 func (e *OpenAIFirstTokenTimeoutError) Error() string {
@@ -57,6 +58,7 @@ type openAIFirstTokenWatchdog struct {
 	headersReceived   bool
 	createdReceived   bool
 	upstreamRequestID string
+	requestModel      string
 }
 
 func newOpenAIFirstTokenWatchdog(
@@ -105,7 +107,11 @@ func (s *OpenAIGatewayService) withOpenAIFirstTokenTimeout(
 	transport string,
 ) (context.Context, *openAIFirstTokenWatchdog) {
 	class := openaiutil.ResponsesFirstTokenClass(payload)
-	return s.withOpenAIFirstTokenClass(ctx, class, transport)
+	timedCtx, watchdog := s.withOpenAIFirstTokenClass(ctx, class, transport)
+	if watchdog != nil {
+		watchdog.requestModel = strings.TrimSpace(gjson.GetBytes(payload, "model").String())
+	}
+	return timedCtx, watchdog
 }
 
 func (s *OpenAIGatewayService) withOpenAIFirstTokenClass(
@@ -243,6 +249,7 @@ func (w *openAIFirstTokenWatchdog) TimeoutError() *OpenAIFirstTokenTimeoutError 
 		HeadersReceived:   w.headersReceived,
 		CreatedReceived:   w.createdReceived,
 		UpstreamRequestID: w.upstreamRequestID,
+		RequestModel:      w.requestModel,
 	}
 }
 
@@ -294,11 +301,27 @@ func cancelAndDrainOpenAIWSFirstToken(
 	writeTimeout time.Duration,
 	drainTimeout time.Duration,
 ) bool {
-	if lease == nil || strings.TrimSpace(responseID) == "" || lease.WriteJSONWithContextTimeout(ctx, map[string]any{"type": "response.cancel"}, writeTimeout) != nil {
+	reusable, _, _ := cancelAndDrainOpenAIWSFirstTokenWithUsage(ctx, lease, responseID, writeTimeout, drainTimeout)
+	return reusable
+}
+
+func cancelAndDrainOpenAIWSFirstTokenWithUsage(
+	ctx context.Context,
+	lease openAIWSFirstTokenLease,
+	responseID string,
+	writeTimeout time.Duration,
+	drainTimeout time.Duration,
+) (bool, OpenAIUsage, bool) {
+	usage := OpenAIUsage{}
+	if lease == nil || lease.WriteJSONWithContextTimeout(ctx, map[string]any{"type": "response.cancel"}, writeTimeout) != nil {
 		if lease != nil {
 			lease.MarkBroken()
 		}
-		return false
+		return false, usage, false
+	}
+	if strings.TrimSpace(responseID) == "" {
+		lease.MarkBroken()
+		return false, usage, false
 	}
 	deadline := time.Now().Add(drainTimeout)
 	for time.Now().Before(deadline) {
@@ -308,9 +331,34 @@ func cancelAndDrainOpenAIWSFirstToken(
 		}
 		eventType, eventResponseID, _ := parseOpenAIWSEventEnvelope(message)
 		if isOpenAIWSTerminalEvent(eventType) && eventResponseID == responseID {
-			return true
+			parseOpenAIWSResponseUsageFromCompletedEvent(message, &usage)
+			return true, usage, gjson.GetBytes(message, "response.usage").IsObject()
 		}
 	}
 	lease.MarkBroken()
-	return false
+	return false, usage, false
+}
+
+func openAIWSIngressTurnEventOwnership(currentID, eventType, eventID string, payload []byte, timeoutEnabled bool) (bool, string) {
+	currentID = strings.TrimSpace(currentID)
+	eventID = strings.TrimSpace(eventID)
+	if !timeoutEnabled {
+		if currentID == "" && eventID != "" {
+			return true, eventID
+		}
+		return eventID == "" || eventID == currentID, ""
+	}
+	if currentID == "" {
+		if eventType == "response.created" && eventID != "" {
+			return true, eventID
+		}
+		return eventType == "error", ""
+	}
+	if eventID != "" {
+		return eventID == currentID, ""
+	}
+	if eventType == "error" {
+		return true, ""
+	}
+	return openaiutil.ResponsesEventRecordsFirstToken(payload), ""
 }

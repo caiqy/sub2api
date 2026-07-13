@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
@@ -18,6 +19,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
+
+var errOpenAIStreamDataIntervalTimeout = errors.New("stream data interval timeout")
 
 // 本文件收敛三个 CC（Chat Completions）forwarder 之间重复的 HTTP 管线与 SSE
 // 循环骨架（PR #3802 遗留项）：
@@ -243,6 +246,35 @@ func (s *OpenAIGatewayService) scanCCStream(
 	emit func(*apicompat.ChatCompletionsChunk),
 ) ccStreamScanState {
 	var st ccStreamScanState
+	streamInterval := time.Duration(0)
+	if s != nil && s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
+		streamInterval = time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
+	}
+	var streamTimedOut atomic.Bool
+	var streamGeneration atomic.Uint64
+	var streamTimer *time.Timer
+	resetStreamTimer := func(start bool) {
+		if streamInterval <= 0 || (!start && streamTimer == nil) {
+			return
+		}
+		generation := streamGeneration.Add(1)
+		if streamTimer != nil {
+			streamTimer.Stop()
+		}
+		// A stopped AfterFunc callback may already be runnable; generation makes it stale.
+		streamTimer = time.AfterFunc(streamInterval, func() {
+			if streamGeneration.CompareAndSwap(generation, generation+1) {
+				streamTimedOut.Store(true)
+				_ = resp.Body.Close()
+			}
+		})
+	}
+	defer func() {
+		streamGeneration.Add(1)
+		if streamTimer != nil {
+			streamTimer.Stop()
+		}
+	}()
 
 	scanner := s.newUpstreamSSEScanner(resp.Body)
 	for scanner.Scan() {
@@ -272,13 +304,19 @@ func (s *OpenAIGatewayService) scanCCStream(
 			)
 			continue
 		}
-		if st.FirstTokenMs == nil && !isOpenAIChatUsageOnlyStreamChunk(payload) && chatChunkStartsResponsesOutput(&chunk) {
+		startsOutput := !isOpenAIChatUsageOnlyStreamChunk(payload) && chatChunkStartsResponsesOutput(&chunk)
+		if st.FirstTokenMs == nil && startsOutput {
 			ms := int(time.Since(startTime).Milliseconds())
 			st.FirstTokenMs = &ms
 		}
+		resetStreamTimer(startsOutput)
 		emit(&chunk)
 	}
 
+	if streamTimedOut.Load() {
+		st.Err = errOpenAIStreamDataIntervalTimeout
+		return st
+	}
 	if err := scanner.Err(); err != nil {
 		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			logger.L().Warn(logPrefix+": stream read error",

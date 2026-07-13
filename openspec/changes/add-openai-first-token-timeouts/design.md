@@ -38,9 +38,9 @@ HTTP 入口仅在 `stream=true` 时启动 watchdog；Responses WebSocket 天然�
 
 ### 3. 前导事件不结束等待，首个业务事件结束等待
 
-`response.created` 与 `response.in_progress` 只记录阶段，不停止 watchdog。第一个非前导事件结束等待；首 Token 指标仅由非终态业务输出填写，`response.failed/completed/canceled` 等终态只停止 watchdog，不伪造首 Token。
+`response.created` 与 `response.in_progress` 只记录阶段，不停止 watchdog。已知业务输出事件结束等待；`session.updated`、`rate_limits.updated` 和未知 control 事件不得结束等待。首 Token 指标仅由非终态业务输出填写，`response.failed/completed/canceled` 等终态只停止 watchdog，不伪造首 Token。
 
-图片 `response.output_item.added` 是明确的业务输出和生图确认事件。到达后立即停止 watchdog，后续图片耗时继续由现有 `stream_data_interval_timeout` 管理。
+图片 `response.output_item.added` 是明确的业务输出和生图确认事件。到达后立即停止 watchdog，随后才启动现有 `stream_data_interval_timeout`。该时序同时适用于协议转换、OAuth passthrough 和 Responses→Chat fallback，避免通用 idle timeout 抢先生图首 Token timeout。
 
 ### 4. HTTP 使用可取消上游 context
 
@@ -59,7 +59,7 @@ V2 passthrough relay 在同一 relay 内维护 per-turn watchdog。成功 cancel
 
 ### 6. 超时与账号健康解耦
 
-首 Token 超时直接结束当前请求/turn，不同账号重试、不换号、不临时封禁，也不调用账号调度失败上报。失败 usage 和 Ops 仍需记录，以便运营识别上游卡顿，但不得把该错误用于账号健康惩罚。
+首 Token 超时直接结束当前请求/turn，不同账号重试、不换号、不临时封禁，也不调用账号调度失败上报。失败 usage 和 Ops 仍需记录，以便运营识别上游卡顿，但不得把该错误用于账号健康惩罚。drain 获得终态 usage 时保留真实值；无法获得时记录未知状态，不得伪造零消耗。
 
 ### 7. 运行时配置向后兼容
 

@@ -252,6 +252,8 @@ func TestOpenAIGatewayHandler_FirstTokenTimeoutReturns504AndCreatesOneFailedUsag
 	select {
 	case log := <-env.usageRepo.created:
 		require.NotNil(t, log)
+		require.NotNil(t, log.DetailSnapshot)
+		require.Contains(t, log.DetailSnapshot.UpstreamResponseBody, `"usage_state":"unknown"`)
 	case <-time.After(2 * time.Second):
 		t.Fatal("首 Token 超时应提交失败 usage")
 	}
