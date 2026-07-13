@@ -273,7 +273,7 @@ Expected: privacy 和内容审计、image capability/模型过滤、setting 热�
 **Consumes:** Task 4 的最终请求处理与依赖状态。
 **Produces:** 内存到磁盘切换、重放、所有权转移和成功/失败清理的专项结论。
 
-- [ ] **Step 1: 运行现有请求体生命周期测试**
+- [x] **Step 1: 运行现有请求体生命周期测试**
 
 Run:
 ```powershell
@@ -285,7 +285,7 @@ Working directory: `backend/`.
 
 Expected: 大输入落盘、重放、fallback/重试、取消或终止错误、panic/失败清理与内存释放均通过。
 
-- [ ] **Step 2: 对发现的回归执行测试优先修复**
+- [x] **Step 2: 对发现的回归执行测试优先修复**
 
 Create a focused regression test next to the affected implementation before changing production code. The test must assert the exact retained behavior, for example:
 ```go
