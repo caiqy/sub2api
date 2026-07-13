@@ -165,7 +165,10 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		if len(sessionSeed) == 0 && strings.TrimSpace(requestID) != "" {
 			sessionSeed = []byte(requestID)
 		}
-		sessionHash = h.gatewayService.GenerateSessionHashWithFallback(c, sessionSeed, fallbackSessionSeed)
+		sessionHash = h.gatewayService.GenerateSessionHash(c, sessionSeed)
+		if coordinator != nil && coordinator.form != nil {
+			sessionHash = h.gatewayService.GenerateSessionHashWithFallback(c, sessionSeed, fallbackSessionSeed)
+		}
 		if coordinator != nil {
 			service.BindOpenAIRequestBodyHandle(c, coordinator.Effective())
 			requestPayloadHash = coordinator.Effective().Hash()

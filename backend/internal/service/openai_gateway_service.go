@@ -1572,9 +1572,9 @@ func (s *OpenAIGatewayService) GenerateSessionHash(c *gin.Context, body []byte) 
 	return currentHash
 }
 
-// GenerateSessionHashWithFallback 先按常规信号生成会话哈希；
+// GenerateSessionHashWithFallback 仅按显式会话信号生成哈希；
 // 当未携带 session_id/conversation_id/prompt_cache_key 时，使用 fallbackSeed 生成稳定哈希。
-// 该方法用于 WS ingress，避免会话信号缺失时发生跨账号漂移。
+// 它不执行内容派生，供 multipart/WS ingress 等已冻结 fallback seed 的调用方使用。
 func (s *OpenAIGatewayService) GenerateSessionHashWithFallback(c *gin.Context, body []byte, fallbackSeed string) string {
 	if sessionID := explicitOpenAISessionID(c, body); sessionID != "" {
 		currentHash, legacyHash := deriveOpenAISessionHashes(sessionID)

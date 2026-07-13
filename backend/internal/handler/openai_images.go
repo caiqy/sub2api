@@ -107,7 +107,10 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	if parsed.Multipart {
 		fallbackSessionSeed = stickySessionSeed
 	}
-	sessionHash := h.gatewayService.GenerateSessionHashWithFallback(c, body, fallbackSessionSeed)
+	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
+	if parsed.Multipart {
+		sessionHash = h.gatewayService.GenerateSessionHashWithFallback(c, body, fallbackSessionSeed)
+	}
 	sessionSeed := body
 	if parsed.Multipart {
 		sessionSeed = []byte(stickySessionSeed)
