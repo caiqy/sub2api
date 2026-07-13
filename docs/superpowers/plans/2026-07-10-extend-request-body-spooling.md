@@ -370,16 +370,35 @@ base-ref: 0f389fe7ed783ca4a8444fbe6d12acb9d3e19af6
 
 - [x] **步骤 5：提交。** `git add backend/internal/handler/request_body_coordinator.go backend/internal/handler/openai_images_controls_test.go backend/internal/handler/grok_media_test.go && git commit -m "fix: preserve multipart text part limits"`。
 
+### Task 16: JSON 媒体 sticky hash 兼容
+
+**对应 OpenSpec：** 4.5。
+
+**文件：**
+- 修改：`backend/internal/handler/openai_images.go`
+- 修改：`backend/internal/handler/grok_media.go`
+- 修改：相关 handler scheduler 回归测试
+
+- [ ] **步骤 1：写失败测试。** 从真实 OpenAI Images、Grok Images 与 Grok Videos JSON handler 观察 scheduler session hash：prompt-only 请求必须非空且内容不同则 hash 不同；同请求 retry 保持一致；显式 `session_id` 或 `prompt_cache_key` 优先。
+
+- [ ] **步骤 2：验证测试失败。** 运行媒体 JSON scheduler 定向测试，预期当前 fallback 为空时 hash 为空。
+
+- [ ] **步骤 3：最小实现。** JSON 路径继续使用现有内容派生 `GenerateSessionHash`；仅 multipart 路径使用释放前冻结的 fallback seed。更新 helper 注释，明确其不执行内容派生。
+
+- [ ] **步骤 4：验证通过。** 运行定向测试与 `go test ./internal/handler ./internal/service -count=1`。
+
+- [ ] **步骤 5：提交。** 提交消息：`fix: preserve json media session affinity`。
+
 ## 覆盖核对
 
 - `1.1` 至 `1.3`：Task 1、2、3 覆盖 decoder、阈值/preview/hash、503/413、raw/effective ownership、取消/panic/stale cleanup。
 - `2.1` 至 `2.3`：Task 4、5、6 覆盖 Anthropic Messages/Responses、OpenAI Chat/Embeddings、压缩/小大请求/4xx/5xx/cancel/retry/failover/usage-ops。
 - `3.1` 至 `3.2`：Task 7、8 覆盖 Gemini 三 action、模型路径、审计、Google errors、流式、failed usage、Antigravity。
-- `4.1` 至 `4.4`：Task 9、10、11、15 覆盖 JSON/multipart/inline binary、源图/遮罩、`io.Pipe`、`CloseWithError`、`RemoveAll`、媒体所有业务终止路径与文本 part 20MB 兼容边界。
+- `4.1` 至 `4.5`：Task 9、10、11、15、16 覆盖 JSON/multipart/inline binary、源图/遮罩、媒体生命周期、文本 part 20MB 边界与 JSON sticky hash 兼容。
 - `5.1` 至 `5.3`：Task 12、13、14 覆盖跨协议契约、503、全量自动化、5/10/12MB 端侧矩阵、RSS 与 spool 生命周期。
 
 ## 实施前自审
 
-- 已逐项覆盖 `tasks.md` 的 5 组 15 项，未添加范围外配置、依赖、schema、接口、工厂或 OpenSpec 勾选修改。
+- 已逐项覆盖 `tasks.md` 的 5 组 16 项，未添加范围外配置、依赖、schema、接口、工厂或 OpenSpec 勾选修改。
 - 所有代码任务给出准确文件、目标符号、失败测试、定向命令、预期结果与提交建议；验证任务明确无代码提交条件。
 - 不含 `TBD`、`TODO`、"类似任务"、未指定的错误处理或未指定的测试步骤；所有路径均以当前基线实际文件为准。

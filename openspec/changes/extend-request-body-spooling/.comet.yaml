@@ -1,6 +1,6 @@
 workflow: full
 language: zh-CN
-phase: verify
+phase: build
 context_compression: off
 build_mode: subagent-driven-development
 build_pause: null
@@ -13,7 +13,7 @@ auto_transition: true
 base_ref: cd652db85a8d6bc0a7e9619cc9984c0ec2350bb0
 design_doc: docs/superpowers/specs/2026-07-10-extend-request-body-spooling-design.md
 plan: docs/superpowers/plans/2026-07-10-extend-request-body-spooling.md
-verify_result: pending
+verify_result: fail
 verification_report: null
 branch_status: pending
 created_at: 2026-07-10
