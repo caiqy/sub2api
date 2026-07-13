@@ -161,3 +161,10 @@ openspec/changes/merge-upstream-v0-1-151/tasks.md
 - GREEN：`go test ./internal/handler -run 'TestGatewayHandler_GeminiRouteSticky(Lookup|Bind)UsesGeminiToggleNotAnthropicToggle' -count=1`、admin setting 聚焦测试和 Task 5 三组能力矩阵全部通过。
 - `go test ./internal/pkg/apicompat -count=1`：PASS。
 - scheduler/sticky/fallback、gateway Responses/Chat/Messages/terminal usage、privacy/image/settings/reload/cache 聚焦命令：PASS。
+
+### 大输入请求体生命周期
+
+- RED：`go test ./internal/handler -run 'Test.*(RequestBody|BodySpool|BodyRetention|Replay|Cleanup)' -count=1` 在 12 MiB body 首次账号返回 429 后 panic；堆栈显示请求体已成功重放到 failover 路径，panic 位于可选 `RateLimitService` 副作用的 nil 调用。
+- 根因与修复：拆分后的 `GatewayService.handleFailoverSideEffects` 未沿用同文件其他错误路径的 nil guard。服务未注入时直接跳过 rate-limit 副作用，不改变 body handle、重放、所有权或清理。
+- GREEN：上述 handler 命令通过；`go test ./internal/service -run 'Test.*(RequestBody|CachedBody|BodyOrder)' -count=1` 通过。
+- 结论：内存到磁盘切换、同字节重放、fallback/重试与成功/失败清理语义保持。
