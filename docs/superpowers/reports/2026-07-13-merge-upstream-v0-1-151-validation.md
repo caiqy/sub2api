@@ -216,3 +216,17 @@ openspec/changes/merge-upstream-v0-1-151/tasks.md
 - `main` 与 `origin/main` 在合并前均为 `46d92f1d75f9835539f2a86d92849604a79d2f44`，因此未执行远端拉取。
 - `main` fast-forward 到 `6803b6bf1c8bdecff979692a2e724b3440e9f6a0`；合并后的 `backend/: go test ./... -count=1` PASS。
 - 临时 main worktree 已移除，feature 分支已删除；未推送、未发布、未部署。
+
+## OpenSpec 完整验证
+
+| 维度 | 结果 |
+| --- | --- |
+| Completeness | 13/13 tasks 完成；1/1 requirement 已实现 |
+| Correctness | 2/2 scenarios 有自动测试、能力审查与报告证据 |
+| Coherence | 实现遵循 OpenSpec design 与 Superpowers Design Doc，无漂移 |
+
+- `openspec validate merge-upstream-v0-1-151 --strict`：PASS。
+- CRITICAL：无。
+- WARNING：无。
+- SUGGESTION：无。
+- 最终评估：All checks passed，ready for archive。
