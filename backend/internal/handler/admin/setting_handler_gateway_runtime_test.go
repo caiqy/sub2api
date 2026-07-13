@@ -88,6 +88,8 @@ type gatewayRuntimeEnvelope struct {
 type gatewayRuntimePayload struct {
 	ResponseHeaderTimeout             int `json:"response_header_timeout"`
 	StreamDataIntervalTimeout         int `json:"stream_data_interval_timeout"`
+	OpenAITextFirstTokenTimeout       int `json:"openai_text_first_token_timeout"`
+	OpenAIImageFirstTokenTimeout      int `json:"openai_image_first_token_timeout"`
 	UsageLogDetailRetentionLimit      int `json:"usage_log_detail_retention_limit"`
 	ImageUsageLogDetailRetentionLimit int `json:"image_usage_log_detail_retention_limit"`
 }
@@ -97,6 +99,8 @@ func newGatewayRuntimeHandlerTestConfig(responseHeaderTimeout, streamDataInterva
 		Gateway: config.GatewayConfig{
 			ResponseHeaderTimeout:             responseHeaderTimeout,
 			StreamDataIntervalTimeout:         streamDataIntervalTimeout,
+			OpenAITextFirstTokenTimeout:       30,
+			OpenAIImageFirstTokenTimeout:      600,
 			UsageLogDetailRetentionLimit:      service.UsageLogDetailRetentionLimitDefault,
 			ImageUsageLogDetailRetentionLimit: service.ImageUsageLogDetailRetentionLimitDefault,
 		},
@@ -146,6 +150,8 @@ func TestSettingHandler_GetGatewayRuntimeSettings_FallsBackToCurrentConfig(t *te
 	require.Equal(t, gatewayRuntimePayload{
 		ResponseHeaderTimeout:             120,
 		StreamDataIntervalTimeout:         60,
+		OpenAITextFirstTokenTimeout:       30,
+		OpenAIImageFirstTokenTimeout:      600,
 		UsageLogDetailRetentionLimit:      service.UsageLogDetailRetentionLimitDefault,
 		ImageUsageLogDetailRetentionLimit: service.ImageUsageLogDetailRetentionLimitDefault,
 	}, payload)
@@ -159,7 +165,7 @@ func TestSettingHandler_UpdateGatewayRuntimeSettings_UpdatesConfigAndInvalidates
 	httpUpstream := &gatewayRuntimeHTTPUpstreamStub{}
 	router, _ := newGatewayRuntimeTestRouter(t, repo, cfg, httpUpstream)
 
-	body := bytes.NewBufferString(`{"response_header_timeout":180,"stream_data_interval_timeout":0,"usage_log_detail_retention_limit":9,"image_usage_log_detail_retention_limit":0}`)
+	body := bytes.NewBufferString(`{"response_header_timeout":180,"stream_data_interval_timeout":0,"openai_text_first_token_timeout":45,"openai_image_first_token_timeout":720,"usage_log_detail_retention_limit":9,"image_usage_log_detail_retention_limit":0}`)
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/gateway-runtime", body)
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -175,11 +181,15 @@ func TestSettingHandler_UpdateGatewayRuntimeSettings_UpdatesConfigAndInvalidates
 	require.Equal(t, gatewayRuntimePayload{
 		ResponseHeaderTimeout:             180,
 		StreamDataIntervalTimeout:         0,
+		OpenAITextFirstTokenTimeout:       45,
+		OpenAIImageFirstTokenTimeout:      720,
 		UsageLogDetailRetentionLimit:      9,
 		ImageUsageLogDetailRetentionLimit: 0,
 	}, payload)
 	require.Equal(t, 180, cfg.Gateway.ResponseHeaderTimeout)
 	require.Equal(t, 0, cfg.Gateway.StreamDataIntervalTimeout)
+	require.Equal(t, 45, cfg.Gateway.OpenAITextFirstTokenTimeout)
+	require.Equal(t, 720, cfg.Gateway.OpenAIImageFirstTokenTimeout)
 	require.Equal(t, 9, cfg.Gateway.UsageLogDetailRetentionLimit)
 	require.Equal(t, 0, cfg.Gateway.ImageUsageLogDetailRetentionLimit)
 	require.Len(t, repo.setCalls, 1)
@@ -211,11 +221,15 @@ func TestSettingHandler_UpdateGatewayRuntimeSettings_PreservesOmittedOptionalRun
 	require.Equal(t, gatewayRuntimePayload{
 		ResponseHeaderTimeout:             180,
 		StreamDataIntervalTimeout:         60,
+		OpenAITextFirstTokenTimeout:       30,
+		OpenAIImageFirstTokenTimeout:      600,
 		UsageLogDetailRetentionLimit:      11,
 		ImageUsageLogDetailRetentionLimit: 22,
 	}, payload)
 	require.Equal(t, 180, cfg.Gateway.ResponseHeaderTimeout)
 	require.Equal(t, 60, cfg.Gateway.StreamDataIntervalTimeout)
+	require.Equal(t, 30, cfg.Gateway.OpenAITextFirstTokenTimeout)
+	require.Equal(t, 600, cfg.Gateway.OpenAIImageFirstTokenTimeout)
 	require.Equal(t, 11, cfg.Gateway.UsageLogDetailRetentionLimit)
 	require.Equal(t, 22, cfg.Gateway.ImageUsageLogDetailRetentionLimit)
 }
@@ -241,6 +255,24 @@ func TestSettingHandler_UpdateGatewayRuntimeSettings_ReturnsBadRequestForInvalid
 	require.Equal(t, 120, cfg.Gateway.ResponseHeaderTimeout)
 	require.Equal(t, 60, cfg.Gateway.StreamDataIntervalTimeout)
 	require.Zero(t, httpUpstream.invalidateCalls)
+}
+
+func TestSettingHandler_UpdateGatewayRuntimeSettings_ReturnsBadRequestForNegativeFirstTokenTimeout(t *testing.T) {
+	repo := &gatewayRuntimeHandlerRepoStub{}
+	cfg := newGatewayRuntimeHandlerTestConfig(120, 60)
+	router, _ := newGatewayRuntimeTestRouter(t, repo, cfg, &gatewayRuntimeHTTPUpstreamStub{})
+
+	body := bytes.NewBufferString(`{"response_header_timeout":120,"openai_text_first_token_timeout":-1}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/gateway-runtime", body)
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, req)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	resp := decodeGatewayRuntimeResponse(t, recorder)
+	require.Equal(t, "openai_text_first_token_timeout must be non-negative", resp.Message)
+	require.Empty(t, repo.setCalls)
 }
 
 func TestSettingHandler_UpdateGatewayRuntimeSettings_ReturnsInternalErrorWhenPersistFails(t *testing.T) {

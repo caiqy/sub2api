@@ -786,6 +786,10 @@ type GatewayConfig struct {
 	// OpenAIResponseHeaderTimeout: OpenAI/Codex 上游等待响应头的超时时间（秒），0表示无超时
 	// OpenAI/Codex 请求可能在上游排队较久；默认不使用通用响应头超时截断。
 	OpenAIResponseHeaderTimeout int `mapstructure:"openai_response_header_timeout"`
+	// OpenAITextFirstTokenTimeout 普通 Responses 流式请求等待首个业务事件的秒数，0 表示关闭。
+	OpenAITextFirstTokenTimeout int `mapstructure:"openai_text_first_token_timeout"`
+	// OpenAIImageFirstTokenTimeout 明确生图 Responses 流式请求等待首个业务事件的秒数，0 表示关闭。
+	OpenAIImageFirstTokenTimeout int `mapstructure:"openai_image_first_token_timeout"`
 	// 请求体最大字节数，用于网关请求体大小限制
 	MaxBodySize int64 `mapstructure:"max_body_size"`
 	// 非流式上游响应体读取上限（字节），用于防止无界读取导致内存放大
@@ -1987,6 +1991,8 @@ func setDefaults() {
 	viper.SetDefault("gateway.usage_log_detail_retention_limit", 300)
 	viper.SetDefault("gateway.image_usage_log_detail_retention_limit", 300)
 	viper.SetDefault("gateway.openai_response_header_timeout", 0)
+	viper.SetDefault("gateway.openai_text_first_token_timeout", 30)
+	viper.SetDefault("gateway.openai_image_first_token_timeout", 600)
 	viper.SetDefault("gateway.log_upstream_error_body", true)
 	viper.SetDefault("gateway.log_upstream_error_body_max_bytes", 2048)
 	viper.SetDefault("gateway.inject_beta_for_apikey", false)
@@ -2705,6 +2711,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.OpenAIResponseHeaderTimeout < 0 {
 		return fmt.Errorf("gateway.openai_response_header_timeout must be non-negative")
+	}
+	if c.Gateway.OpenAITextFirstTokenTimeout < 0 {
+		return fmt.Errorf("gateway.openai_text_first_token_timeout must be non-negative")
+	}
+	if c.Gateway.OpenAIImageFirstTokenTimeout < 0 {
+		return fmt.Errorf("gateway.openai_image_first_token_timeout must be non-negative")
 	}
 	if strings.TrimSpace(c.Gateway.ConnectionPoolIsolation) != "" {
 		switch c.Gateway.ConnectionPoolIsolation {

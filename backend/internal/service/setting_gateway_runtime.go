@@ -137,6 +137,8 @@ func (s *SettingService) GetGatewayRuntimeSettings(ctx context.Context) (*Gatewa
 	}
 	settings.ResponseHeaderTimeout = s.cfg.Gateway.ResponseHeaderTimeout
 	settings.StreamDataIntervalTimeout = s.cfg.Gateway.StreamDataIntervalTimeout
+	settings.OpenAITextFirstTokenTimeout = s.cfg.Gateway.OpenAITextFirstTokenTimeout
+	settings.OpenAIImageFirstTokenTimeout = s.cfg.Gateway.OpenAIImageFirstTokenTimeout
 	settings.UsageLogDetailRetentionLimit = gatewayRuntimeRetentionLimitOrDefault(s.cfg.Gateway.UsageLogDetailRetentionLimit)
 	settings.ImageUsageLogDetailRetentionLimit = gatewayRuntimeRetentionLimitOrDefault(s.cfg.Gateway.ImageUsageLogDetailRetentionLimit)
 	return settings, nil
@@ -151,6 +153,12 @@ func (s *SettingService) SetGatewayRuntimeSettings(ctx context.Context, settings
 	}
 	if settings.StreamDataIntervalTimeout != 0 && (settings.StreamDataIntervalTimeout < 30 || settings.StreamDataIntervalTimeout > 300) {
 		return infraerrors.BadRequest("INVALID_GATEWAY_RUNTIME_SETTINGS", "stream_data_interval_timeout must be 0 or between 30-300")
+	}
+	if settings.OpenAITextFirstTokenTimeout < 0 {
+		return infraerrors.BadRequest("INVALID_GATEWAY_RUNTIME_SETTINGS", "openai_text_first_token_timeout must be non-negative")
+	}
+	if settings.OpenAIImageFirstTokenTimeout < 0 {
+		return infraerrors.BadRequest("INVALID_GATEWAY_RUNTIME_SETTINGS", "openai_image_first_token_timeout must be non-negative")
 	}
 	if settings.UsageLogDetailRetentionLimit < 0 {
 		return infraerrors.BadRequest("INVALID_GATEWAY_RUNTIME_SETTINGS", "usage_log_detail_retention_limit must be non-negative")
@@ -170,6 +178,8 @@ func (s *SettingService) SetGatewayRuntimeSettings(ctx context.Context, settings
 		oldResponseHeaderTimeout = s.cfg.Gateway.ResponseHeaderTimeout
 		s.cfg.Gateway.ResponseHeaderTimeout = settings.ResponseHeaderTimeout
 		s.cfg.Gateway.StreamDataIntervalTimeout = settings.StreamDataIntervalTimeout
+		s.cfg.Gateway.OpenAITextFirstTokenTimeout = settings.OpenAITextFirstTokenTimeout
+		s.cfg.Gateway.OpenAIImageFirstTokenTimeout = settings.OpenAIImageFirstTokenTimeout
 		s.cfg.Gateway.UsageLogDetailRetentionLimit = settings.UsageLogDetailRetentionLimit
 		s.cfg.Gateway.ImageUsageLogDetailRetentionLimit = settings.ImageUsageLogDetailRetentionLimit
 	}
@@ -209,6 +219,12 @@ func (s *SettingService) loadGatewayRuntimeSettingsFromDB(ctx context.Context) {
 	}
 	if _, ok := raw["stream_data_interval_timeout"]; ok && (settings.StreamDataIntervalTimeout == 0 || (settings.StreamDataIntervalTimeout >= 30 && settings.StreamDataIntervalTimeout <= 300)) {
 		s.cfg.Gateway.StreamDataIntervalTimeout = settings.StreamDataIntervalTimeout
+	}
+	if _, ok := raw["openai_text_first_token_timeout"]; ok && settings.OpenAITextFirstTokenTimeout >= 0 {
+		s.cfg.Gateway.OpenAITextFirstTokenTimeout = settings.OpenAITextFirstTokenTimeout
+	}
+	if _, ok := raw["openai_image_first_token_timeout"]; ok && settings.OpenAIImageFirstTokenTimeout >= 0 {
+		s.cfg.Gateway.OpenAIImageFirstTokenTimeout = settings.OpenAIImageFirstTokenTimeout
 	}
 	if settings.UsageLogDetailRetentionLimit >= 0 {
 		s.cfg.Gateway.UsageLogDetailRetentionLimit = settings.UsageLogDetailRetentionLimit

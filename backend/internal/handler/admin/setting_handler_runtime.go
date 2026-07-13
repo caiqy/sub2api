@@ -19,6 +19,8 @@ func (h *SettingHandler) GetGatewayRuntimeSettings(c *gin.Context) {
 	response.Success(c, dto.GatewayRuntimeSettings{
 		ResponseHeaderTimeout:             settings.ResponseHeaderTimeout,
 		StreamDataIntervalTimeout:         settings.StreamDataIntervalTimeout,
+		OpenAITextFirstTokenTimeout:       settings.OpenAITextFirstTokenTimeout,
+		OpenAIImageFirstTokenTimeout:      settings.OpenAIImageFirstTokenTimeout,
 		UsageLogDetailRetentionLimit:      settings.UsageLogDetailRetentionLimit,
 		ImageUsageLogDetailRetentionLimit: settings.ImageUsageLogDetailRetentionLimit,
 	})
@@ -27,6 +29,8 @@ func (h *SettingHandler) GetGatewayRuntimeSettings(c *gin.Context) {
 type UpdateGatewayRuntimeSettingsRequest struct {
 	ResponseHeaderTimeout             int  `json:"response_header_timeout"`
 	StreamDataIntervalTimeout         *int `json:"stream_data_interval_timeout"`
+	OpenAITextFirstTokenTimeout       *int `json:"openai_text_first_token_timeout"`
+	OpenAIImageFirstTokenTimeout      *int `json:"openai_image_first_token_timeout"`
 	UsageLogDetailRetentionLimit      *int `json:"usage_log_detail_retention_limit"`
 	ImageUsageLogDetailRetentionLimit *int `json:"image_usage_log_detail_retention_limit"`
 }
@@ -45,11 +49,19 @@ func (h *SettingHandler) UpdateGatewayRuntimeSettings(c *gin.Context) {
 	settings := &service.GatewayRuntimeSettings{
 		ResponseHeaderTimeout:             req.ResponseHeaderTimeout,
 		StreamDataIntervalTimeout:         current.StreamDataIntervalTimeout,
+		OpenAITextFirstTokenTimeout:       current.OpenAITextFirstTokenTimeout,
+		OpenAIImageFirstTokenTimeout:      current.OpenAIImageFirstTokenTimeout,
 		UsageLogDetailRetentionLimit:      current.UsageLogDetailRetentionLimit,
 		ImageUsageLogDetailRetentionLimit: current.ImageUsageLogDetailRetentionLimit,
 	}
 	if req.StreamDataIntervalTimeout != nil {
 		settings.StreamDataIntervalTimeout = *req.StreamDataIntervalTimeout
+	}
+	if req.OpenAITextFirstTokenTimeout != nil {
+		settings.OpenAITextFirstTokenTimeout = *req.OpenAITextFirstTokenTimeout
+	}
+	if req.OpenAIImageFirstTokenTimeout != nil {
+		settings.OpenAIImageFirstTokenTimeout = *req.OpenAIImageFirstTokenTimeout
 	}
 	if req.UsageLogDetailRetentionLimit != nil {
 		settings.UsageLogDetailRetentionLimit = *req.UsageLogDetailRetentionLimit

@@ -88,6 +88,8 @@ func newGatewayRuntimeTestConfig(responseHeaderTimeout, streamDataIntervalTimeou
 		Gateway: config.GatewayConfig{
 			ResponseHeaderTimeout:             responseHeaderTimeout,
 			StreamDataIntervalTimeout:         streamDataIntervalTimeout,
+			OpenAITextFirstTokenTimeout:       30,
+			OpenAIImageFirstTokenTimeout:      600,
 			UsageLogDetailRetentionLimit:      UsageLogDetailRetentionLimitDefault,
 			ImageUsageLogDetailRetentionLimit: ImageUsageLogDetailRetentionLimitDefault,
 		},
@@ -106,6 +108,8 @@ func TestSettingService_GetGatewayRuntimeSettings_FallsBackToConfigWhenDBValueMi
 	require.Equal(t, &GatewayRuntimeSettings{
 		ResponseHeaderTimeout:             120,
 		StreamDataIntervalTimeout:         60,
+		OpenAITextFirstTokenTimeout:       30,
+		OpenAIImageFirstTokenTimeout:      600,
 		UsageLogDetailRetentionLimit:      UsageLogDetailRetentionLimitDefault,
 		ImageUsageLogDetailRetentionLimit: ImageUsageLogDetailRetentionLimitDefault,
 	}, got)
@@ -118,7 +122,7 @@ func TestNewSettingService_LoadsGatewayRuntimeSettingsFromDB(t *testing.T) {
 	resetGatewayRuntimeRetentionLimitsForTest(t)
 	repo := &gatewayRuntimeSettingRepoStub{
 		getValueByKey: map[string]string{
-			SettingKeyGatewayRuntimeSettings: `{"response_header_timeout":45,"stream_data_interval_timeout":90,"usage_log_detail_retention_limit":8,"image_usage_log_detail_retention_limit":0}`,
+			SettingKeyGatewayRuntimeSettings: `{"response_header_timeout":45,"stream_data_interval_timeout":90,"openai_text_first_token_timeout":50,"openai_image_first_token_timeout":700,"usage_log_detail_retention_limit":8,"image_usage_log_detail_retention_limit":0}`,
 		},
 	}
 	cfg := newGatewayRuntimeTestConfig(120, 60)
@@ -130,11 +134,15 @@ func TestNewSettingService_LoadsGatewayRuntimeSettingsFromDB(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 45, cfg.Gateway.ResponseHeaderTimeout)
 	require.Equal(t, 90, cfg.Gateway.StreamDataIntervalTimeout)
+	require.Equal(t, 50, cfg.Gateway.OpenAITextFirstTokenTimeout)
+	require.Equal(t, 700, cfg.Gateway.OpenAIImageFirstTokenTimeout)
 	require.Equal(t, 8, cfg.Gateway.UsageLogDetailRetentionLimit)
 	require.Equal(t, 0, cfg.Gateway.ImageUsageLogDetailRetentionLimit)
 	require.Equal(t, &GatewayRuntimeSettings{
 		ResponseHeaderTimeout:             45,
 		StreamDataIntervalTimeout:         90,
+		OpenAITextFirstTokenTimeout:       50,
+		OpenAIImageFirstTokenTimeout:      700,
 		UsageLogDetailRetentionLimit:      8,
 		ImageUsageLogDetailRetentionLimit: 0,
 	}, got)
@@ -155,6 +163,8 @@ func TestSettingService_SetGatewayRuntimeSettings_PersistsUpdatesCfgAndInvalidat
 	err := svc.SetGatewayRuntimeSettings(context.Background(), &GatewayRuntimeSettings{
 		ResponseHeaderTimeout:             180,
 		StreamDataIntervalTimeout:         0,
+		OpenAITextFirstTokenTimeout:       0,
+		OpenAIImageFirstTokenTimeout:      0,
 		UsageLogDetailRetentionLimit:      9,
 		ImageUsageLogDetailRetentionLimit: 0,
 	})
@@ -168,11 +178,15 @@ func TestSettingService_SetGatewayRuntimeSettings_PersistsUpdatesCfgAndInvalidat
 	require.Equal(t, GatewayRuntimeSettings{
 		ResponseHeaderTimeout:             180,
 		StreamDataIntervalTimeout:         0,
+		OpenAITextFirstTokenTimeout:       0,
+		OpenAIImageFirstTokenTimeout:      0,
 		UsageLogDetailRetentionLimit:      9,
 		ImageUsageLogDetailRetentionLimit: 0,
 	}, persisted)
 	require.Equal(t, 180, cfg.Gateway.ResponseHeaderTimeout)
 	require.Equal(t, 0, cfg.Gateway.StreamDataIntervalTimeout)
+	require.Equal(t, 0, cfg.Gateway.OpenAITextFirstTokenTimeout)
+	require.Equal(t, 0, cfg.Gateway.OpenAIImageFirstTokenTimeout)
 	require.Equal(t, 9, cfg.Gateway.UsageLogDetailRetentionLimit)
 	require.Equal(t, 0, cfg.Gateway.ImageUsageLogDetailRetentionLimit)
 	require.Equal(t, 1, invalidator.calls)
@@ -242,6 +256,44 @@ func TestSettingServiceGatewayRuntimeSettings_RejectsNegativeRetentionLimits(t *
 	}
 }
 
+func TestSettingServiceGatewayRuntimeSettings_RejectsNegativeFirstTokenTimeouts(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*GatewayRuntimeSettings)
+		wantErr string
+	}{
+		{
+			name:    "text first token timeout negative",
+			mutate:  func(settings *GatewayRuntimeSettings) { settings.OpenAITextFirstTokenTimeout = -1 },
+			wantErr: "openai_text_first_token_timeout must be non-negative",
+		},
+		{
+			name:    "image first token timeout negative",
+			mutate:  func(settings *GatewayRuntimeSettings) { settings.OpenAIImageFirstTokenTimeout = -1 },
+			wantErr: "openai_image_first_token_timeout must be non-negative",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings := &GatewayRuntimeSettings{
+				ResponseHeaderTimeout:        120,
+				StreamDataIntervalTimeout:    60,
+				OpenAITextFirstTokenTimeout:  30,
+				OpenAIImageFirstTokenTimeout: 600,
+			}
+			tt.mutate(settings)
+			svc := NewSettingService(&gatewayRuntimeSettingRepoStub{}, newGatewayRuntimeTestConfig(120, 60))
+
+			err := svc.SetGatewayRuntimeSettings(context.Background(), settings)
+
+			require.Error(t, err)
+			require.Equal(t, 400, infraerrors.Code(err))
+			require.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
 func TestNewSettingService_LoadsGatewayRuntimeSettingsFromLegacyJSONPreservesConfiguredRetentionLimits(t *testing.T) {
 	resetGatewayRuntimeRetentionLimitsForTest(t)
 	repo := &gatewayRuntimeSettingRepoStub{
@@ -260,6 +312,20 @@ func TestNewSettingService_LoadsGatewayRuntimeSettingsFromLegacyJSONPreservesCon
 	normal, image := GetUsageLogDetailRetentionLimits()
 	require.Equal(t, 17, normal)
 	require.Equal(t, 0, image)
+}
+
+func TestNewSettingService_LoadsGatewayRuntimeSettingsFromLegacyJSONPreservesFirstTokenTimeouts(t *testing.T) {
+	repo := &gatewayRuntimeSettingRepoStub{
+		getValueByKey: map[string]string{
+			SettingKeyGatewayRuntimeSettings: `{"response_header_timeout":45,"stream_data_interval_timeout":90}`,
+		},
+	}
+	cfg := newGatewayRuntimeTestConfig(120, 60)
+
+	NewSettingService(repo, cfg)
+
+	require.Equal(t, 30, cfg.Gateway.OpenAITextFirstTokenTimeout)
+	require.Equal(t, 600, cfg.Gateway.OpenAIImageFirstTokenTimeout)
 }
 
 func TestNewSettingService_LoadsGatewayRuntimeSettingsFromLegacyJSONDefaultsNegativeConfiguredRetentionLimits(t *testing.T) {

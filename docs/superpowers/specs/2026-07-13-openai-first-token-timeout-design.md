@@ -1,3 +1,9 @@
+---
+comet_change: add-openai-first-token-timeouts
+role: technical-design
+canonical_spec: openspec
+---
+
 # OpenAI 流式请求首 Token 超时设计
 
 ## 背景
