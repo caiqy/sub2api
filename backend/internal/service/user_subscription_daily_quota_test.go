@@ -16,7 +16,7 @@ type dailyResetTrackingUserSubRepo struct {
 	resetDailyCalled bool
 }
 
-func (r *dailyResetTrackingUserSubRepo) ResetDailyUsage(context.Context, int64, time.Time) error {
+func (r *dailyResetTrackingUserSubRepo) ResetDailyUsage(context.Context, int64, *time.Time, time.Time) error {
 	r.resetDailyCalled = true
 	return nil
 }
@@ -306,13 +306,13 @@ type windowResetTrackingUserSubRepo struct {
 	resetMonthlyErr    error
 }
 
-func (r *windowResetTrackingUserSubRepo) ResetDailyUsage(_ context.Context, _ int64, start time.Time) error {
+func (r *windowResetTrackingUserSubRepo) ResetDailyUsage(_ context.Context, _ int64, _ *time.Time, start time.Time) error {
 	r.resetDailyCalled = true
 	r.resetDailyStart = start
 	return nil
 }
 
-func (r *windowResetTrackingUserSubRepo) ResetWeeklyUsage(_ context.Context, _ int64, start time.Time) error {
+func (r *windowResetTrackingUserSubRepo) ResetWeeklyUsage(_ context.Context, _ int64, _ *time.Time, start time.Time) error {
 	r.resetWeeklyCalled = true
 	r.resetWeeklyStart = start
 	if r.resetWeeklyErr != nil {
@@ -321,7 +321,7 @@ func (r *windowResetTrackingUserSubRepo) ResetWeeklyUsage(_ context.Context, _ i
 	return nil
 }
 
-func (r *windowResetTrackingUserSubRepo) ResetMonthlyUsage(_ context.Context, _ int64, start time.Time) error {
+func (r *windowResetTrackingUserSubRepo) ResetMonthlyUsage(_ context.Context, _ int64, _ *time.Time, start time.Time) error {
 	r.resetMonthlyCalled = true
 	r.resetMonthlyStart = start
 	if r.resetMonthlyErr != nil {
