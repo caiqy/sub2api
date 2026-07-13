@@ -2,6 +2,7 @@
 change: add-openai-first-token-timeouts
 design-doc: docs/superpowers/specs/2026-07-13-openai-first-token-timeout-design.md
 base-ref: ec6f6e25f20be8c16864a81cbfa7689a25b69871
+archived-with: 2026-07-13-add-openai-first-token-timeouts
 ---
 
 # OpenAI 流式请求首 Token 超时实施计划

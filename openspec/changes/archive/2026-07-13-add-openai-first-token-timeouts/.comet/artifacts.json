@@ -4,5 +4,6 @@
   "openspec_tasks": "openspec/changes/add-openai-first-token-timeouts/tasks.md",
   "openspec_delta_spec": "openspec/changes/add-openai-first-token-timeouts/specs/openai-first-token-timeout/spec.md",
   "handoff_context": "openspec/changes/add-openai-first-token-timeouts/.comet/handoff/design-context.json",
-  "handoff_markdown": "openspec/changes/add-openai-first-token-timeouts/.comet/handoff/design-context.md"
+  "handoff_markdown": "openspec/changes/add-openai-first-token-timeouts/.comet/handoff/design-context.md",
+  "archive_directory": "openspec/changes/archive/2026-07-13-add-openai-first-token-timeouts"
 }

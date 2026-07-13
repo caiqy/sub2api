@@ -2,6 +2,8 @@
 comet_change: add-openai-first-token-timeouts
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-07-13-add-openai-first-token-timeouts
+status: final
 ---
 
 # OpenAI 流式请求首 Token 超时设计
