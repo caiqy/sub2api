@@ -1420,6 +1420,7 @@ func TestOpenAIGatewayService_Forward_WSv2StoreFalseSessionConnIsolation(t *test
 	defer wsServer.Close()
 
 	cfg := &config.Config{}
+	cfg.Gateway.Sticky.OpenAI.Enabled = true
 	cfg.Security.URLAllowlist.Enabled = false
 	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 	cfg.Gateway.OpenAIWS.Enabled = true
