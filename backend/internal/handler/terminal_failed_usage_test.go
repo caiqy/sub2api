@@ -695,6 +695,10 @@ type terminalGatewayMessagesEnv struct {
 
 type terminalGatewayAccountRepo struct{ openAIRetryAccountRepoStub }
 
+func (*terminalGatewayAccountRepo) SetModelRateLimit(context.Context, int64, string, time.Time, ...string) error {
+	return nil
+}
+
 func (r *terminalGatewayAccountRepo) ListSchedulableByGroupIDAndPlatforms(_ context.Context, _ int64, platforms []string) ([]service.Account, error) {
 	return r.listByPlatforms(platforms), nil
 }

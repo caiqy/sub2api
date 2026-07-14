@@ -173,6 +173,50 @@ func TestGatewayHandlerMessages_ClaudeCodeFallbackSuccessBindsResolvedGeminiStic
 	}
 }
 
+func TestGatewayHandlerMessages_ClaudeCodeFallbackMixedAntigravitySmartRetryClearsResolvedGeminiStickySession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	originalID, fallbackID := int64(1), int64(2)
+	originalGroup := &service.Group{ID: originalID, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true, ClaudeCodeOnly: true, FallbackGroupID: &fallbackID}
+	fallbackGroup := &service.Group{ID: fallbackID, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{
+		ID: 303, Name: "fallback-antigravity", Platform: service.PlatformAntigravity, Type: service.AccountTypeOAuth,
+		Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1,
+		AccountGroups: []service.AccountGroup{{GroupID: fallbackID}},
+		Credentials:   map[string]any{"access_token": "token", "project_id": "project"},
+		Extra:         map[string]any{"mixed_scheduling": true},
+	}
+	cache := &geminiStickyGatewayCacheStub{}
+	upstream := &openAIChatCompletionsHTTPUpstreamStub{response: &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body: io.NopCloser(strings.NewReader(`{
+			"error": {
+				"status": "RESOURCE_EXHAUSTED",
+				"details": [
+					{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "metadata": {"model": "gemini-3-flash"}, "reason": "RATE_LIMIT_EXCEEDED"},
+					{"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "15s"}
+				]
+			}
+		}`)),
+	}}
+	env := newTerminalGatewayMessagesEnvWithGatewayCacheAndGroups(t, fallbackGroup, map[int64]*service.Group{originalID: originalGroup, fallbackID: fallbackGroup}, upstream, openAIChatCompletionsConcurrencyCacheStub{}, cache, account)
+	env.apiKey.GroupID = &originalID
+	env.apiKey.Group = originalGroup
+	env.handler.cfg.Gateway.Sticky.Gemini.Enabled = true
+	env.handler.cfg.Gateway.Sticky.Anthropic.Enabled = true
+	env.handler.maxAccountSwitchesGemini = 0
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gemini-3-flash-preview","max_tokens":16,"metadata":{"user_id":"{\"device_id\":\"sticky-device\",\"session_id\":\"sticky-fallback-runtime\"}"},"messages":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	env.router().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+	require.Len(t, cache.deleteCalls, 1)
+	require.Equal(t, fallbackID, cache.deleteCalls[0].groupID)
+	require.Equal(t, "gemini:sticky-fallback-runtime", cache.deleteCalls[0].sessionKey)
+}
+
 func TestGatewayHandlerResolveStickyRoute_PreservesClaudeCodeRestrictionErrors(t *testing.T) {
 	cfg := &config.Config{}
 	groupTwoID, groupThreeID := int64(2), int64(3)

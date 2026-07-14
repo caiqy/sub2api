@@ -156,6 +156,12 @@ type geminiStickyGatewayCacheStub struct {
 	refreshCalls     map[string]int
 	getGroupIDs      []int64
 	setGroupIDs      []int64
+	deleteCalls      []geminiStickyDeleteCall
+}
+
+type geminiStickyDeleteCall struct {
+	groupID    int64
+	sessionKey string
 }
 
 func (c *geminiStickyGatewayCacheStub) GetSessionAccountID(_ context.Context, groupID int64, sessionHash string) (int64, error) {
@@ -194,7 +200,8 @@ func (c *geminiStickyGatewayCacheStub) RefreshSessionTTL(_ context.Context, _ in
 	return nil
 }
 
-func (c *geminiStickyGatewayCacheStub) DeleteSessionAccountID(_ context.Context, _ int64, sessionHash string) error {
+func (c *geminiStickyGatewayCacheStub) DeleteSessionAccountID(_ context.Context, groupID int64, sessionHash string) error {
+	c.deleteCalls = append(c.deleteCalls, geminiStickyDeleteCall{groupID: groupID, sessionKey: sessionHash})
 	delete(c.sessionBindings, sessionHash)
 	return nil
 }
