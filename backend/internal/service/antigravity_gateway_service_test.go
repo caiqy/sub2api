@@ -1579,6 +1579,37 @@ func TestAntigravityGatewayService_ForwardEnabledThinkingRetriesInvalidBudget(t 
 	require.Equal(t, int64(BudgetRectifyBudgetTokens), gjson.GetBytes(upstream.requestBodies[1], "request.generationConfig.thinkingConfig.thinkingBudget").Int())
 }
 
+func TestAntigravityGatewayService_ForwardBudgetRectifierClearsProvidedStickySession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	writer := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(writer)
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"thinking":{"type":"enabled","budget_tokens":1024},"messages":[{"role":"user","content":"hello"}]}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+
+	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{
+		{StatusCode: http.StatusBadRequest, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"thinking budget_tokens must be >= 1024"}}`))},
+		{StatusCode: http.StatusTooManyRequests, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","metadata":{"model":"gemini-3-flash"},"reason":"RATE_LIMIT_EXCEEDED"},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"15s"}]}}`))},
+	}}
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	cfg.Gateway.Sticky.Anthropic.Enabled = true
+	cache := &stubSmartRetryCache{}
+	svc := &AntigravityGatewayService{
+		accountRepo:    &stubAntigravityAccountRepo{},
+		cache:          cache,
+		settingService: NewSettingService(&antigravitySettingRepoStub{}, cfg),
+		tokenProvider:  &AntigravityTokenProvider{},
+		httpUpstream:   upstream,
+	}
+	account := &Account{ID: 79, Name: "budget-cleanup", Platform: PlatformAntigravity, Type: AccountTypeOAuth, Concurrency: 1, Credentials: map[string]any{"access_token": "token", "project_id": "project"}}
+
+	_, _ = svc.Forward(context.Background(), c, account, body, false, WithForwardGeminiSession(79, "gemini:budget-rectifier"))
+
+	require.Len(t, upstream.requestBodies, 2)
+	require.Len(t, cache.deleteCalls, 1)
+	require.Equal(t, int64(79), cache.deleteCalls[0].groupID)
+	require.Equal(t, "gemini:budget-rectifier", cache.deleteCalls[0].sessionHash)
+}
+
 type blockingUpstreamHandleHTTPStub struct {
 	HTTPUpstream
 	started chan *http.Request
