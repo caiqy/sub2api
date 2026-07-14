@@ -380,7 +380,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	}
 
 	turnState := strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader))
-	stateStore := s.getOpenAIWSStateStore()
+	stateStore := s.openAIStickyStateStore()
+	if !s.openAIStickyEnabled() {
+		logOpenAIWSModeInfo("sticky_state_bypass path=ingress_ws account_id=%d", account.ID)
+	}
 	groupID := getOpenAIGroupIDFromContext(c)
 	storeDisabledConnMode := s.openAIWSStoreDisabledConnMode()
 	sessionHash := ""

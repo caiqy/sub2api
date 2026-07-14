@@ -106,7 +106,10 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		)
 	}
 
-	stateStore := s.getOpenAIWSStateStore()
+	stateStore := s.openAIStickyStateStore()
+	if !s.openAIStickyEnabled() {
+		logOpenAIWSModeInfo("sticky_state_bypass path=forward_ws_v2 account_id=%d", account.ID)
+	}
 	groupID := getOpenAIGroupIDFromContext(c)
 	sessionHash := s.GenerateSessionHash(c, nil)
 	if sessionHash == "" {
@@ -699,6 +702,13 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		Duration:         time.Since(startTime),
 		FirstTokenMs:     firstTokenMs,
 	}, nil
+}
+
+func (s *OpenAIGatewayService) openAIStickyStateStore() OpenAIWSStateStore {
+	if !s.openAIStickyEnabled() {
+		return nil
+	}
+	return s.getOpenAIWSStateStore()
 }
 
 // ProxyResponsesWebSocketFromClient 处理客户端入站 WebSocket（OpenAI Responses WS Mode）并转发到上游。

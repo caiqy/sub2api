@@ -16,9 +16,18 @@ import (
 
 type openAIWSStateStoreSpy struct {
 	responseAccounts        map[string]int64
+	responseConnections     map[string]string
+	sessionTurnStates       map[string]string
+	sessionConnections      map[string]string
 	getResponseAccountCalls map[string]int
 	bindResponseCalls       map[string]int
 	deleteResponseCalls     map[string]int
+	bindResponseConnCalls   map[string]int
+	getResponseConnCalls    map[string]int
+	bindTurnStateCalls      map[string]int
+	getTurnStateCalls       map[string]int
+	bindSessionConnCalls    map[string]int
+	getSessionConnCalls     map[string]int
 }
 
 func (s *openAIWSStateStoreSpy) BindResponseAccount(ctx context.Context, groupID int64, responseID string, accountID int64, ttl time.Duration) error {
@@ -55,21 +64,77 @@ func (s *openAIWSStateStoreSpy) DeleteResponseAccount(ctx context.Context, group
 	return nil
 }
 
-func (s *openAIWSStateStoreSpy) BindResponseConn(responseID, connID string, ttl time.Duration) {}
-func (s *openAIWSStateStoreSpy) GetResponseConn(responseID string) (string, bool)              { return "", false }
-func (s *openAIWSStateStoreSpy) DeleteResponseConn(responseID string)                          {}
+func (s *openAIWSStateStoreSpy) BindResponseConn(responseID, connID string, ttl time.Duration) {
+	if s.bindResponseConnCalls == nil {
+		s.bindResponseConnCalls = make(map[string]int)
+	}
+	s.bindResponseConnCalls[responseID]++
+	if s.responseConnections == nil {
+		s.responseConnections = make(map[string]string)
+	}
+	s.responseConnections[responseID] = connID
+}
+
+func (s *openAIWSStateStoreSpy) GetResponseConn(responseID string) (string, bool) {
+	if s.getResponseConnCalls == nil {
+		s.getResponseConnCalls = make(map[string]int)
+	}
+	s.getResponseConnCalls[responseID]++
+	connID, ok := s.responseConnections[responseID]
+	return connID, ok
+}
+
+func (s *openAIWSStateStoreSpy) DeleteResponseConn(responseID string) {
+	delete(s.responseConnections, responseID)
+}
+
 func (s *openAIWSStateStoreSpy) BindSessionTurnState(groupID int64, sessionHash, turnState string, ttl time.Duration) {
+	if s.bindTurnStateCalls == nil {
+		s.bindTurnStateCalls = make(map[string]int)
+	}
+	s.bindTurnStateCalls[sessionHash]++
+	if s.sessionTurnStates == nil {
+		s.sessionTurnStates = make(map[string]string)
+	}
+	s.sessionTurnStates[sessionHash] = turnState
 }
+
 func (s *openAIWSStateStoreSpy) GetSessionTurnState(groupID int64, sessionHash string) (string, bool) {
-	return "", false
+	if s.getTurnStateCalls == nil {
+		s.getTurnStateCalls = make(map[string]int)
+	}
+	s.getTurnStateCalls[sessionHash]++
+	turnState, ok := s.sessionTurnStates[sessionHash]
+	return turnState, ok
 }
-func (s *openAIWSStateStoreSpy) DeleteSessionTurnState(groupID int64, sessionHash string) {}
+
+func (s *openAIWSStateStoreSpy) DeleteSessionTurnState(groupID int64, sessionHash string) {
+	delete(s.sessionTurnStates, sessionHash)
+}
+
 func (s *openAIWSStateStoreSpy) BindSessionConn(groupID int64, sessionHash, connID string, ttl time.Duration) {
+	if s.bindSessionConnCalls == nil {
+		s.bindSessionConnCalls = make(map[string]int)
+	}
+	s.bindSessionConnCalls[sessionHash]++
+	if s.sessionConnections == nil {
+		s.sessionConnections = make(map[string]string)
+	}
+	s.sessionConnections[sessionHash] = connID
 }
+
 func (s *openAIWSStateStoreSpy) GetSessionConn(groupID int64, sessionHash string) (string, bool) {
-	return "", false
+	if s.getSessionConnCalls == nil {
+		s.getSessionConnCalls = make(map[string]int)
+	}
+	s.getSessionConnCalls[sessionHash]++
+	connID, ok := s.sessionConnections[sessionHash]
+	return connID, ok
 }
-func (s *openAIWSStateStoreSpy) DeleteSessionConn(groupID int64, sessionHash string) {}
+
+func (s *openAIWSStateStoreSpy) DeleteSessionConn(groupID int64, sessionHash string) {
+	delete(s.sessionConnections, sessionHash)
+}
 
 func newOpenAIStickyEnabledTestConfig() *config.Config {
 	cfg := &config.Config{}

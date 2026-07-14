@@ -177,6 +177,76 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossT
 	require.Equal(t, "response.cancel", captureConn.writes[3]["type"])
 }
 
+func TestOpenAIGatewayService_StickyDisabledIngressSkipsStateStore(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{}
+	cfg.Gateway.Sticky.OpenAI.Enabled = false
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
+
+	captureConn := &openAIWSCaptureConn{events: [][]byte{[]byte(`{"type":"response.completed","response":{"id":"resp_new_1","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`)}}
+	pool := newOpenAIWSConnPool(cfg)
+	pool.setClientDialerForTest(&openAIWSCaptureDialer{conn: captureConn})
+	account := &Account{ID: 116, Name: "openai-ingress-disabled", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test"}, Extra: map[string]any{"responses_websockets_v2_enabled": true}}
+	store := &openAIWSStateStoreSpy{
+		responseAccounts:    map[string]int64{"resp_prev_1": account.ID},
+		responseConnections: map[string]string{"resp_prev_1": "conn_prev"},
+		sessionTurnStates:   map[string]string{"sticky-disabled-ingress": "turn_state_prev"},
+		sessionConnections:  map[string]string{"sticky-disabled-ingress": "conn_session"},
+	}
+	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: &httpUpstreamRecorder{}, cache: &stubGatewayCache{}, openaiWSResolver: NewOpenAIWSProtocolResolver(cfg), toolCorrector: NewCodexToolCorrector(), openaiWSPool: pool, openaiWSStateStore: store}
+
+	serverErrCh := make(chan error, 1)
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := coderws.Accept(w, r, nil)
+		if err != nil {
+			serverErrCh <- err
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		rec := httptest.NewRecorder()
+		ginCtx, _ := gin.CreateTestContext(rec)
+		ginCtx.Request = r.Clone(r.Context())
+		ginCtx.Request.Header.Set("session_id", "sticky-disabled-ingress")
+		_, firstMessage, err := conn.Read(r.Context())
+		if err != nil {
+			serverErrCh <- err
+			return
+		}
+		serverErrCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "sk-test", firstMessage, nil)
+	}))
+	defer wsServer.Close()
+
+	dialCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(wsServer.URL, "http"), nil)
+	cancel()
+	require.NoError(t, err)
+	defer func() { _ = clientConn.CloseNow() }()
+	writeCtx, writeCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	require.NoError(t, clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","stream":false,"previous_response_id":"resp_prev_1"}`)))
+	writeCancel()
+	readCtx, readCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	_, _, err = clientConn.Read(readCtx)
+	readCancel()
+	require.NoError(t, err)
+	require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
+	require.NoError(t, <-serverErrCh)
+
+	require.Zero(t, store.bindResponseCalls["resp_new_1"])
+	require.Zero(t, store.bindResponseConnCalls["resp_new_1"])
+	require.Zero(t, store.getResponseConnCalls["resp_prev_1"])
+	require.Zero(t, store.bindTurnStateCalls["sticky-disabled-ingress"])
+	require.Zero(t, store.getTurnStateCalls["sticky-disabled-ingress"])
+	require.Zero(t, store.bindSessionConnCalls["sticky-disabled-ingress"])
+	require.Zero(t, store.getSessionConnCalls["sticky-disabled-ingress"])
+}
+
 func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_FollowupCreateCanOmitModel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
