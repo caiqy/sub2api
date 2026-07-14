@@ -652,10 +652,14 @@ func TestOpenAIGatewayHandler_UpstreamAttemptSignalResetsAcrossAccounts(t *testi
 
 type terminalUsageGroupRepo struct {
 	service.GroupRepository
-	group *service.Group
+	group  *service.Group
+	groups map[int64]*service.Group
 }
 
 func (r terminalUsageGroupRepo) GetByID(_ context.Context, id int64) (*service.Group, error) {
+	if group, ok := r.groups[id]; ok {
+		return group, nil
+	}
 	if r.group != nil && r.group.ID == id {
 		return r.group, nil
 	}
@@ -724,6 +728,10 @@ func newTerminalGatewayMessagesEnvWithConcurrencyCache(t *testing.T, group *serv
 }
 
 func newTerminalGatewayMessagesEnvWithGatewayCache(t *testing.T, group *service.Group, upstream service.HTTPUpstream, concurrencyCache service.ConcurrencyCache, cache service.GatewayCache, accounts ...*service.Account) *terminalGatewayMessagesEnv {
+	return newTerminalGatewayMessagesEnvWithGatewayCacheAndGroups(t, group, nil, upstream, concurrencyCache, cache, accounts...)
+}
+
+func newTerminalGatewayMessagesEnvWithGatewayCacheAndGroups(t *testing.T, group *service.Group, groups map[int64]*service.Group, upstream service.HTTPUpstream, concurrencyCache service.ConcurrencyCache, cache service.GatewayCache, accounts ...*service.Account) *terminalGatewayMessagesEnv {
 	t.Helper()
 	cfg := &config.Config{
 		RunMode:     config.RunModeSimple,
@@ -737,7 +745,7 @@ func newTerminalGatewayMessagesEnvWithGatewayCache(t *testing.T, group *service.
 	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
 	t.Cleanup(func() { billingCacheService.Stop() })
 	settingService := service.NewSettingService(terminalUsageSettingRepo{}, cfg)
-	groupRepo := terminalUsageGroupRepo{group: group}
+	groupRepo := terminalUsageGroupRepo{group: group, groups: groups}
 	gatewayService := service.NewGatewayService(
 		accountRepo,
 		groupRepo,

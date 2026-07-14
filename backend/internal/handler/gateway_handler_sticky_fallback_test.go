@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -114,6 +115,59 @@ func TestGatewayHandlerMessages_ClaudeCodeFallbackUsesResolvedGeminiStickyBounda
 			}
 			for key := range cache.getCalls {
 				require.True(t, strings.HasPrefix(key, "gemini:"))
+			}
+		})
+	}
+}
+
+func TestGatewayHandlerMessages_ClaudeCodeFallbackSuccessBindsResolvedGeminiStickySession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	originalID, fallbackID := int64(1), int64(2)
+	originalGroup := &service.Group{ID: originalID, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true, ClaudeCodeOnly: true, FallbackGroupID: &fallbackID}
+	fallbackGroup := &service.Group{ID: fallbackID, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 303, Name: "fallback-gemini", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, AccountGroups: []service.AccountGroup{{GroupID: fallbackID}}, Credentials: map[string]any{"api_key": "test-key"}}
+
+	for _, tt := range []struct {
+		name          string
+		geminiEnabled bool
+		wantCacheIO   bool
+	}{
+		{name: "Gemini enabled binds fallback session", geminiEnabled: true, wantCacheIO: true},
+		{name: "Gemini disabled bypasses cache despite Anthropic enabled"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cache := &geminiStickyGatewayCacheStub{}
+			upstream := &openAIChatCompletionsHTTPUpstreamStub{response: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}`)),
+			}}
+			env := newTerminalGatewayMessagesEnvWithGatewayCacheAndGroups(t, fallbackGroup, map[int64]*service.Group{originalID: originalGroup, fallbackID: fallbackGroup}, upstream, openAIChatCompletionsConcurrencyCacheStub{}, cache, account)
+			env.apiKey.GroupID = &originalID
+			env.apiKey.Group = originalGroup
+			env.handler.cfg.Gateway.Sticky.Gemini.Enabled = tt.geminiEnabled
+			env.handler.cfg.Gateway.Sticky.Anthropic.Enabled = true
+
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gemini-2.5-flash","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`))
+			req.Header.Set("Content-Type", "application/json")
+			env.router().ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusOK, rec.Code)
+			if !tt.wantCacheIO {
+				require.Empty(t, cache.getCalls)
+				require.Empty(t, cache.setCalls)
+				require.Empty(t, cache.getGroupIDs)
+				require.Empty(t, cache.setGroupIDs)
+				return
+			}
+
+			require.Len(t, cache.setCalls, 1)
+			require.Equal(t, []int64{fallbackID}, cache.setGroupIDs)
+			for sessionKey, calls := range cache.setCalls {
+				require.True(t, strings.HasPrefix(sessionKey, "gemini:"))
+				require.Equal(t, 1, calls)
+				require.Equal(t, account.ID, cache.sessionBindings[sessionKey])
 			}
 		})
 	}
