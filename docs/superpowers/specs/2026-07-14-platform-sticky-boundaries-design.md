@@ -2,6 +2,8 @@
 comet_change: restore-platform-sticky-routing
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-07-14-restore-platform-sticky-routing
+status: final
 ---
 
 # 平台 Sticky 跨管线状态边界设计
