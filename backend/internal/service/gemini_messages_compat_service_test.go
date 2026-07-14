@@ -110,7 +110,8 @@ func TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_StickyD
 			name:     "gemini",
 			platform: PlatformGemini,
 			cfg: &config.Config{Gateway: config.GatewayConfig{Sticky: config.GatewayStickyConfig{
-				Gemini: config.GatewayStickyPlatformConfig{Enabled: false},
+				Gemini:    config.GatewayStickyPlatformConfig{Enabled: false},
+				Anthropic: config.GatewayStickyPlatformConfig{Enabled: true},
 			}}},
 		},
 		{
@@ -183,6 +184,15 @@ func TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_StickyD
 	require.NoError(t, err)
 	require.Equal(t, int64(2), account.ID)
 	require.Equal(t, 1, cache.setCalls["gemini:miss"])
+}
+
+func TestGeminiMessagesCompatServiceStickyEnabledForPlatform_UnknownPlatformDefaultsEnabled(t *testing.T) {
+	svc := &GeminiMessagesCompatService{cfg: &config.Config{Gateway: config.GatewayConfig{Sticky: config.GatewayStickyConfig{
+		Gemini:    config.GatewayStickyPlatformConfig{Enabled: false},
+		Anthropic: config.GatewayStickyPlatformConfig{Enabled: false},
+	}}}}
+
+	require.True(t, svc.stickyEnabledForPlatform("unknown"))
 }
 
 func (s *geminiCompatHTTPUpstreamStub) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {

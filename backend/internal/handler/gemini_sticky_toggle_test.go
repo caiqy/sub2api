@@ -307,6 +307,43 @@ func TestGatewayHandler_GeminiRouteStickyBindUsesGeminiToggleNotAnthropicToggle(
 	})
 }
 
+func TestGatewayHandler_OpenAIRouteStickyUsesOpenAIToggleNotAnthropicToggle(t *testing.T) {
+	t.Run("openai disabled bypasses messages lookup and bind even when anthropic enabled", func(t *testing.T) {
+		cache := &geminiStickyGatewayCacheStub{sessionBindings: map[string]int64{"openai:messages-disabled": 1101}}
+		cfg := &config.Config{}
+		cfg.Gateway.Sticky.OpenAI.Enabled = false
+		cfg.Gateway.Sticky.Anthropic.Enabled = true
+		gatewayService := service.NewGatewayService(nil, nil, nil, nil, nil, nil, nil, cache, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+		h := &GatewayHandler{gatewayService: gatewayService, cfg: cfg}
+
+		accountID := h.getCachedSessionAccountIDForPlatform(context.Background(), service.PlatformOpenAI, nil, "openai:messages-disabled")
+		err := h.bindStickySessionForPlatform(context.Background(), service.PlatformOpenAI, nil, "openai:messages-disabled", 1102)
+
+		require.NoError(t, err)
+		require.Zero(t, accountID)
+		require.Zero(t, cache.getCalls["openai:messages-disabled"])
+		require.Zero(t, cache.setCalls["openai:messages-disabled"])
+	})
+
+	t.Run("openai enabled reads and binds messages session even when anthropic disabled", func(t *testing.T) {
+		cache := &geminiStickyGatewayCacheStub{sessionBindings: map[string]int64{"openai:messages-enabled": 1201}}
+		cfg := &config.Config{}
+		cfg.Gateway.Sticky.OpenAI.Enabled = true
+		cfg.Gateway.Sticky.Anthropic.Enabled = false
+		gatewayService := service.NewGatewayService(nil, nil, nil, nil, nil, nil, nil, cache, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+		h := &GatewayHandler{gatewayService: gatewayService, cfg: cfg}
+
+		accountID := h.getCachedSessionAccountIDForPlatform(context.Background(), service.PlatformOpenAI, nil, "openai:messages-enabled")
+		err := h.bindStickySessionForPlatform(context.Background(), service.PlatformOpenAI, nil, "openai:messages-enabled", 1202)
+
+		require.NoError(t, err)
+		require.Equal(t, int64(1201), accountID)
+		require.Equal(t, 1, cache.getCalls["openai:messages-enabled"])
+		require.Equal(t, 1, cache.setCalls["openai:messages-enabled"])
+		require.Equal(t, int64(1202), cache.sessionBindings["openai:messages-enabled"])
+	})
+}
+
 func TestGeminiStickyEnabled_DigestSession(t *testing.T) {
 	t.Run("enabled keeps digest fallback behavior", func(t *testing.T) {
 		digestStore := service.NewDigestSessionStore()

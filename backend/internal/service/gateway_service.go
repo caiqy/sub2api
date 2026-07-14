@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/cespare/xxhash/v2"
@@ -858,13 +859,20 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 
 // BindStickySession sets session -> account binding with standard TTL.
 func (s *GatewayService) BindStickySession(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
-	return s.bindStickySessionForPlatform(ctx, groupID, sessionHash, accountID, PlatformAnthropic, "gateway_helper")
+	return s.bindStickySessionForPlatform(ctx, groupID, sessionHash, accountID, s.stickyPlatformFromContext(ctx), "gateway_helper")
 }
 
 // GetCachedSessionAccountID retrieves the account ID bound to a sticky session.
 // Returns 0 if no binding exists or on error.
 func (s *GatewayService) GetCachedSessionAccountID(ctx context.Context, groupID *int64, sessionHash string) (int64, error) {
-	return s.getCachedSessionAccountIDForPlatform(ctx, groupID, sessionHash, PlatformAnthropic, "gateway_helper")
+	return s.getCachedSessionAccountIDForPlatform(ctx, groupID, sessionHash, s.stickyPlatformFromContext(ctx), "gateway_helper")
+}
+
+func (s *GatewayService) stickyPlatformFromContext(ctx context.Context) string {
+	if platform, ok := ctx.Value(ctxkey.ForcePlatform).(string); ok && platform != "" {
+		return platform
+	}
+	return PlatformAnthropic
 }
 
 // FindGeminiSession 查找 Gemini 会话（基于内容摘要链的 Fallback 匹配）

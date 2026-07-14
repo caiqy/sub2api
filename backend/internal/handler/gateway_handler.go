@@ -116,10 +116,7 @@ func (h *GatewayHandler) getCachedSessionAccountIDForPlatform(ctx context.Contex
 	if h == nil || h.gatewayService == nil || sessionKey == "" {
 		return 0
 	}
-	if platform == service.PlatformGemini {
-		accountID, _ := h.gatewayService.GetGeminiCachedSessionAccountID(ctx, groupID, sessionKey)
-		return accountID
-	}
+	ctx = context.WithValue(ctx, ctxkey.ForcePlatform, platform)
 	accountID, _ := h.gatewayService.GetCachedSessionAccountID(ctx, groupID, sessionKey)
 	return accountID
 }
@@ -128,9 +125,7 @@ func (h *GatewayHandler) bindStickySessionForPlatform(ctx context.Context, platf
 	if h == nil || h.gatewayService == nil || sessionKey == "" {
 		return nil
 	}
-	if platform == service.PlatformGemini {
-		return h.gatewayService.BindGeminiStickySession(ctx, groupID, sessionKey, accountID)
-	}
+	ctx = context.WithValue(ctx, ctxkey.ForcePlatform, platform)
 	return h.gatewayService.BindStickySession(ctx, groupID, sessionKey, accountID)
 }
 
@@ -1160,7 +1155,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// - 粘性账号因负载/RPM 被跳过、选中了其他账号：不覆盖原绑定，
 			//   下次请求粘性账号恢复后仍可命中
 			if sessionKey != "" && (sessionBoundAccountID == 0 || sessionBoundAccountID == account.ID) {
-				if err := h.gatewayService.BindStickySession(c.Request.Context(), currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
+				if err := h.bindStickySessionForPlatform(c.Request.Context(), platform, currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
