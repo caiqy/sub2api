@@ -43,7 +43,7 @@ func TestRequestBodyRefHandleReadErrorPropagates(t *testing.T) {
 }
 
 func TestAntigravityForwardHandleAcceptsReopenableRequestBodyHandle(t *testing.T) {
-	var _ func(*AntigravityGatewayService, context.Context, *gin.Context, *Account, *RequestBodyHandle, bool) (*ForwardResult, error) = (*AntigravityGatewayService).ForwardHandle
+	var _ func(*AntigravityGatewayService, context.Context, *gin.Context, *Account, *RequestBodyHandle, bool, ...ForwardGeminiOption) (*ForwardResult, error) = (*AntigravityGatewayService).ForwardHandle
 }
 
 func TestAntigravityRetryLoopReopensGeminiPayloadHandleForRetry(t *testing.T) {

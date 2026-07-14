@@ -27,7 +27,14 @@ import (
 //	      └─ retryDelay <  7s → 等待后重试 1 次
 //	          ├─ 成功 → 正常返回
 //	          └─ 失败 → 设置模型限流 + 清除粘性绑定 → 切换账号
-func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte, isStickySession bool) (*ForwardResult, error) {
+func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte, isStickySession bool, options ...ForwardGeminiOption) (*ForwardResult, error) {
+	forwardOpts := forwardGeminiOptions{}
+	for _, apply := range options {
+		if apply != nil {
+			apply(&forwardOpts)
+		}
+	}
+
 	// 上游透传账号直接转发，不走 OAuth token 刷新
 	if account.Type == AccountTypeUpstream {
 		handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
@@ -114,8 +121,8 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 		handleError:     s.handleUpstreamError,
 		requestedModel:  originalModel,
 		isStickySession: isStickySession, // Forward 由上层判断粘性会话
-		groupID:         0,               // Forward 方法没有 groupID，由上层处理粘性会话清除
-		sessionHash:     "",              // Forward 方法没有 sessionHash，由上层处理粘性会话清除
+		groupID:         forwardOpts.groupID,
+		sessionHash:     forwardOpts.sessionHash,
 		extraHeaders:    extraHeaders,
 	})
 	if err != nil {
@@ -463,7 +470,7 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 
 // ForwardHandle borrows the handler-owned spool and materializes it only for
 // the synchronous Claude-to-Gemini transform. The gateway handler owns cleanup.
-func (s *AntigravityGatewayService) ForwardHandle(ctx context.Context, c *gin.Context, account *Account, bodyHandle *RequestBodyHandle, isStickySession bool) (*ForwardResult, error) {
+func (s *AntigravityGatewayService) ForwardHandle(ctx context.Context, c *gin.Context, account *Account, bodyHandle *RequestBodyHandle, isStickySession bool, options ...ForwardGeminiOption) (*ForwardResult, error) {
 	if bodyHandle == nil {
 		return nil, fmt.Errorf("antigravity request body handle is nil")
 	}
@@ -471,7 +478,7 @@ func (s *AntigravityGatewayService) ForwardHandle(ctx context.Context, c *gin.Co
 	if err != nil {
 		return nil, fmt.Errorf("read antigravity request body: %w", err)
 	}
-	return s.Forward(ctx, c, account, body, isStickySession)
+	return s.Forward(ctx, c, account, body, isStickySession, options...)
 }
 
 func isSignatureRelatedError(respBody []byte) bool {

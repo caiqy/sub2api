@@ -997,7 +997,14 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			forwardStartedAt := time.Now()
 			service.SetOpsUpstreamAttempted(c, false)
 			if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
-				result, err = h.antigravityGatewayService.ForwardHandle(requestCtx, c, account, attemptHandle, hasBoundSession)
+				result, err = h.antigravityGatewayService.ForwardHandle(
+					requestCtx,
+					c,
+					account,
+					attemptHandle,
+					hasBoundSession,
+					service.WithForwardGeminiSession(derefGroupID(currentStickyGroupID), sessionKey),
+				)
 			} else if account.Platform == service.PlatformGemini {
 				geminiBody, readErr := attemptParsedReq.Body.ReadAll()
 				if readErr != nil {

@@ -979,6 +979,75 @@ func TestGatewayHandler_MessagesPromptTooLongFallbackResolvesClaudeCodeOnlyGroup
 	})
 }
 
+func TestGatewayHandler_MessagesPromptTooLongFallbackMixedAntigravity429ClearsResolvedGeminiStickySession(t *testing.T) {
+	testPromptTooLongFallbackMixedAntigravityStickyCleanup(t, http.StatusTooManyRequests, `{
+		"error": {
+			"status": "RESOURCE_EXHAUSTED",
+			"details": [
+				{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "metadata": {"model": "gemini-3-flash"}, "reason": "RATE_LIMIT_EXCEEDED"},
+				{"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "15s"}
+			]
+		}
+	}`)
+}
+
+func TestGatewayHandler_MessagesPromptTooLongFallbackMixedAntigravity503ClearsResolvedGeminiStickySession(t *testing.T) {
+	testPromptTooLongFallbackMixedAntigravityStickyCleanup(t, http.StatusServiceUnavailable, `{
+		"error": {
+			"status": "RESOURCE_EXHAUSTED",
+			"details": [
+				{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "metadata": {"model": "gemini-3-flash"}, "reason": "RATE_LIMIT_EXCEEDED"},
+				{"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "15s"}
+			]
+		}
+	}`)
+}
+
+func testPromptTooLongFallbackMixedAntigravityStickyCleanup(t *testing.T, retryStatus int, retryBody string) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	initialID, intermediateID, finalID := int64(60), int64(61), int64(62)
+	initialGroup := &service.Group{ID: initialID, Platform: service.PlatformAntigravity, Status: service.StatusActive, Hydrated: true, FallbackGroupIDOnInvalidRequest: &intermediateID}
+	intermediateGroup := &service.Group{ID: intermediateID, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true, ClaudeCodeOnly: true, FallbackGroupID: &finalID}
+	finalGroup := &service.Group{ID: finalID, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
+	initialAccount := &service.Account{ID: 160, Name: "initial-antigravity", Platform: service.PlatformAntigravity, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, AccountGroups: []service.AccountGroup{{GroupID: initialID}}, Credentials: map[string]any{"access_token": "token", "project_id": "project"}}
+	finalAccount := &service.Account{ID: 162, Name: "mixed-antigravity", Platform: service.PlatformAntigravity, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, AccountGroups: []service.AccountGroup{{GroupID: finalID}}, Credentials: map[string]any{"access_token": "token", "project_id": "project"}, Extra: map[string]any{"mixed_scheduling": true}}
+
+	for _, tt := range []struct {
+		name             string
+		anthropicSticky  bool
+		wantSessionClear bool
+	}{
+		{name: "Anthropic Sticky enabled clears resolved Gemini session", anthropicSticky: true, wantSessionClear: true},
+		{name: "Anthropic Sticky disabled skips cleanup"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cache := &geminiStickyGatewayCacheStub{}
+			upstream := &openAIRetryTrackingHTTPUpstreamStub{responses: []*http.Response{
+				{StatusCode: http.StatusBadRequest, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"Prompt is too long"}}`))},
+				{StatusCode: retryStatus, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(retryBody))},
+			}}
+			env := newTerminalGatewayMessagesEnvWithGatewayCacheAndGroups(t, initialGroup, map[int64]*service.Group{initialID: initialGroup, intermediateID: intermediateGroup, finalID: finalGroup}, upstream, openAIChatCompletionsConcurrencyCacheStub{}, cache, initialAccount, finalAccount)
+			env.handler.cfg.Gateway.Sticky.Gemini.Enabled = true
+			env.handler.cfg.Gateway.Sticky.Anthropic.Enabled = tt.anthropicSticky
+			env.handler.maxAccountSwitches = 0
+
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-opus-4-6","max_tokens":16,"metadata":{"user_id":"{\"device_id\":\"sticky-device\",\"session_id\":\"invalid-fallback-session\"}"},"messages":[{"role":"user","content":"hello"}]}`))
+			req.Header.Set("Content-Type", "application/json")
+			env.router().ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusBadGateway, rec.Code)
+			require.Equal(t, []int64{initialAccount.ID, finalAccount.ID}, upstream.accountIDs)
+			if !tt.wantSessionClear {
+				require.Empty(t, cache.deleteCalls)
+				return
+			}
+			require.Equal(t, []geminiStickyDeleteCall{{groupID: finalID, sessionKey: "gemini:invalid-fallback-session"}}, cache.deleteCalls)
+		})
+	}
+}
+
 func TestGatewayHandler_MessagesLocalErrorDoesNotCreateFailedUsage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, platform := range []string{service.PlatformGemini, service.PlatformAntigravity} {
