@@ -19,3 +19,9 @@ The attempt-local branch preserves Antigravity handling and sends all selected G
 - `go test ./internal/service -run '^TestGeminiMessagesCompatServiceForward_' -count=1`
 - `go build ./...`
 - `git diff --check`
+
+## Final Review
+
+- Final review reported no remaining Critical, Important, or Minor findings.
+- Changing Antigravity cleanup to the Gemini toggle was rejected because the approved design explicitly uses the Anthropic runtime toggle.
+- Recomputing channel mapping, `ParsedRequest.GroupID`, and Bedrock policy was classified as existing behavior outside this change; the approved scope makes the resolved group and platform authoritative only for session keys, scheduling, smart-retry cleanup, and bindings.
