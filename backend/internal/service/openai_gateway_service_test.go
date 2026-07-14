@@ -507,6 +507,24 @@ func TestOpenAIGatewayService_BindHTTPResponseAccount(t *testing.T) {
 	require.Equal(t, account.ID, got)
 }
 
+func TestOpenAIGatewayService_BindHTTPResponseAccountSkipsDisabledSticky(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+	groupID := int64(4202)
+	c.Set("api_key", &APIKey{ID: 502, GroupID: &groupID})
+
+	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{Sticky: config.GatewayStickyConfig{
+		OpenAI: config.GatewayStickyPlatformConfig{Enabled: false},
+	}}}}
+	svc.bindHTTPResponseAccount(context.Background(), c, &Account{ID: 37002, Platform: PlatformOpenAI}, "resp_http_disabled")
+
+	accountID, err := svc.getOpenAIWSStateStore().GetResponseAccount(context.Background(), groupID, "resp_http_disabled")
+	require.NoError(t, err)
+	require.Zero(t, accountID)
+}
+
 func TestOpenAIGatewayService_GenerateExplicitSessionHash_SkipsContentFallback(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	svc := &OpenAIGatewayService{}

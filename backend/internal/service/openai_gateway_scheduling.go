@@ -1301,11 +1301,7 @@ func (s *OpenAIGatewayService) newSelectionResult(ctx context.Context, account *
 }
 
 func (s *OpenAIGatewayService) newAcquiredSelectionResult(ctx context.Context, account *Account, release func()) (*AccountSelectionResult, error) {
-	selection, err := s.newSelectionResult(ctx, account, true, release, nil)
-	if err != nil && release != nil {
-		release()
-	}
-	return selection, err
+	return s.newSelectionResult(ctx, account, true, release, nil)
 }
 
 func (s *OpenAIGatewayService) schedulingConfig() config.GatewaySchedulingConfig {

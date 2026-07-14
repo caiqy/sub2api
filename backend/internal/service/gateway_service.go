@@ -643,18 +643,69 @@ func (s *GatewayService) UsageLogRepository() UsageLogRepository {
 	return s.usageLogRepo
 }
 
-func (s *GatewayService) BindGeminiStickySession(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
-	if s != nil && s.cfg != nil && !s.cfg.GatewayControlRuntime().StickyGeminiEnabled {
+func (s *GatewayService) stickyEnabledForPlatform(platform string) bool {
+	if s == nil || s.cfg == nil {
+		return true
+	}
+
+	runtime := s.cfg.GatewayControlRuntime()
+	switch platform {
+	case PlatformGemini:
+		return runtime.StickyGeminiEnabled
+	case PlatformOpenAI:
+		return runtime.StickyOpenAIEnabled
+	case PlatformAnthropic, PlatformAntigravity:
+		return runtime.StickyAnthropicEnabled
+	default:
+		return true
+	}
+}
+
+func (s *GatewayService) logStickyDisabledBypass(platform, stickyLayer, action string, groupID *int64, sessionHash string) {
+	if sessionHash == "" {
+		return
+	}
+
+	slog.Info("sticky disabled: bypassing sticky path",
+		"platform", platform,
+		"sticky_enabled", false,
+		"sticky_layer", stickyLayer,
+		"action", action,
+		"group_id", derefGroupID(groupID),
+		"session_hash_present", true,
+	)
+}
+
+func (s *GatewayService) getCachedSessionAccountIDForPlatform(ctx context.Context, groupID *int64, sessionHash, platform, stickyLayer string) (int64, error) {
+	if !s.stickyEnabledForPlatform(platform) {
+		s.logStickyDisabledBypass(platform, stickyLayer, "lookup", groupID, sessionHash)
+		return 0, nil
+	}
+	if sessionHash == "" || s.cache == nil {
+		return 0, nil
+	}
+	return s.cache.GetSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
+}
+
+func (s *GatewayService) bindStickySessionForPlatform(ctx context.Context, groupID *int64, sessionHash string, accountID int64, platform, stickyLayer string) error {
+	if !s.stickyEnabledForPlatform(platform) {
+		if accountID > 0 {
+			s.logStickyDisabledBypass(platform, stickyLayer, "bind", groupID, sessionHash)
+		}
 		return nil
 	}
-	return s.BindStickySession(ctx, groupID, sessionHash, accountID)
+	if sessionHash == "" || accountID <= 0 || s.cache == nil {
+		return nil
+	}
+	return s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, accountID, stickySessionTTL)
+}
+
+func (s *GatewayService) BindGeminiStickySession(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
+	return s.bindStickySessionForPlatform(ctx, groupID, sessionHash, accountID, PlatformGemini, "gateway_helper")
 }
 
 func (s *GatewayService) GetGeminiCachedSessionAccountID(ctx context.Context, groupID *int64, sessionHash string) (int64, error) {
-	if s != nil && s.cfg != nil && !s.cfg.GatewayControlRuntime().StickyGeminiEnabled {
-		return 0, nil
-	}
-	return s.GetCachedSessionAccountID(ctx, groupID, sessionHash)
+	return s.getCachedSessionAccountIDForPlatform(ctx, groupID, sessionHash, PlatformGemini, "gateway_helper")
 }
 
 // NewGatewayService creates a new GatewayService
@@ -807,23 +858,13 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 
 // BindStickySession sets session -> account binding with standard TTL.
 func (s *GatewayService) BindStickySession(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
-	if sessionHash == "" || accountID <= 0 || s.cache == nil {
-		return nil
-	}
-	return s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, accountID, stickySessionTTL)
+	return s.bindStickySessionForPlatform(ctx, groupID, sessionHash, accountID, PlatformAnthropic, "gateway_helper")
 }
 
 // GetCachedSessionAccountID retrieves the account ID bound to a sticky session.
 // Returns 0 if no binding exists or on error.
 func (s *GatewayService) GetCachedSessionAccountID(ctx context.Context, groupID *int64, sessionHash string) (int64, error) {
-	if sessionHash == "" || s.cache == nil {
-		return 0, nil
-	}
-	accountID, err := s.cache.GetSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
-	if err != nil {
-		return 0, err
-	}
-	return accountID, nil
+	return s.getCachedSessionAccountIDForPlatform(ctx, groupID, sessionHash, PlatformAnthropic, "gateway_helper")
 }
 
 // FindGeminiSession 查找 Gemini 会话（基于内容摘要链的 Fallback 匹配）

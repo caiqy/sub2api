@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -772,11 +773,22 @@ func (s *OpenAIGatewayService) bindHTTPResponseAccount(ctx context.Context, c *g
 	if responseID == "" {
 		return
 	}
+	groupID := getOpenAIGroupIDFromContext(c)
+	if !s.openAIStickyEnabled() {
+		slog.Info("sticky disabled: bypassing sticky path",
+			"platform", PlatformOpenAI,
+			"sticky_enabled", false,
+			"sticky_layer", "openai_response",
+			"action", "bind",
+			"group_id", groupID,
+			"session_hash_present", true,
+		)
+		return
+	}
 	store := s.getOpenAIWSStateStore()
 	if store == nil {
 		return
 	}
-	groupID := getOpenAIGroupIDFromContext(c)
 	ttl := s.openAIWSResponseStickyTTL()
 	logOpenAIWSBindResponseAccountWarn(groupID, account.ID, responseID, store.BindResponseAccount(ctx, groupID, responseID, account.ID, ttl))
 }

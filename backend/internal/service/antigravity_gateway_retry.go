@@ -897,6 +897,9 @@ func (s *AntigravityGatewayService) clearStickySession(ctx context.Context, grou
 	if s == nil || s.cache == nil || strings.TrimSpace(sessionHash) == "" {
 		return
 	}
+	if s.settingService != nil && s.settingService.cfg != nil && !s.settingService.cfg.GatewayControlRuntime().StickyAnthropicEnabled {
+		return
+	}
 	if err := s.cache.DeleteSessionAccountID(ctx, groupID, sessionHash); err != nil {
 		logger.LegacyPrintf("service.antigravity_gateway", "[antigravity-Forward] sticky_session_clear_failed group_id=%d session=%s err=%v", groupID, shortSessionHash(sessionHash), err)
 	}
@@ -1085,7 +1088,6 @@ type handleModelRateLimitParams struct {
 	account         *Account
 	statusCode      int
 	body            []byte
-	cache           GatewayCache
 	groupID         int64
 	sessionHash     string
 	isStickySession bool
@@ -1157,9 +1159,7 @@ func (s *AntigravityGatewayService) setModelRateLimitAndClearSession(p *handleMo
 	s.setAntigravityModelRateLimits(p.ctx, s.accountRepo, p.account, info.ModelName, p.prefix, p.statusCode, resetAt, false)
 
 	// 清除粘性会话绑定
-	if p.cache != nil && p.sessionHash != "" {
-		_ = p.cache.DeleteSessionAccountID(p.ctx, p.groupID, p.sessionHash)
-	}
+	s.clearStickySession(p.ctx, p.groupID, p.sessionHash)
 }
 
 // updateAccountModelRateLimitInCache 立即更新 Redis 中账号的模型限流状态
@@ -1207,7 +1207,6 @@ func (s *AntigravityGatewayService) handleUpstreamError(
 		account:         account,
 		statusCode:      statusCode,
 		body:            body,
-		cache:           s.cache,
 		groupID:         groupID,
 		sessionHash:     sessionHash,
 		isStickySession: isStickySession,

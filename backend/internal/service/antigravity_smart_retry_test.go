@@ -5,6 +5,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/stretchr/testify/require"
 	"io"
@@ -28,6 +29,20 @@ type deleteSessionCall struct {
 func (c *stubSmartRetryCache) DeleteSessionAccountID(_ context.Context, groupID int64, sessionHash string) error {
 	c.deleteCalls = append(c.deleteCalls, deleteSessionCall{groupID: groupID, sessionHash: sessionHash})
 	return nil
+}
+
+func TestAntigravityGatewayServiceClearStickySessionSkipsDisabledSticky(t *testing.T) {
+	cache := &stubSmartRetryCache{}
+	svc := &AntigravityGatewayService{
+		cache: cache,
+		settingService: &SettingService{cfg: &config.Config{Gateway: config.GatewayConfig{Sticky: config.GatewayStickyConfig{
+			Anthropic: config.GatewayStickyPlatformConfig{Enabled: false},
+		}}}},
+	}
+
+	svc.clearStickySession(context.Background(), 42, "sticky-disabled")
+
+	require.Empty(t, cache.deleteCalls)
 }
 
 // mockSmartRetryUpstream 用于 handleSmartRetry 测试的 mock upstream
