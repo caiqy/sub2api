@@ -37,6 +37,14 @@ TBD - created by archiving change optimize-request-body-retention. Update Purpos
 - **WHEN** 上游失败导致同一有效 body 需要再次发送
 - **THEN** 系统 MUST 从 effective outbound handle 重新打开完整 reader，并保持发送内容一致
 
+#### Scenario: OpenAI Responses fallback 到 raw chat
+- **WHEN** Responses 上游不受支持且 raw chat fallback 需要重新发送原始 Chat Completions 请求
+- **THEN** 系统 MUST 从 bound request body handle 恢复完整 body，并保持模型、URL 与发送内容一致
+
+#### Scenario: Grok raw multipart 转换
+- **WHEN** Grok moderation 或 images edit 从 raw multipart body 构造 JSON 上游请求
+- **THEN** 系统 MUST 保留上传文件 bytes，并生成内容一致的 data URL
+
 #### Scenario: 文件化失败
 - **WHEN** 超过 `spool threshold` 的请求无法创建、写入、关闭、打开或读取临时文件
 - **THEN** 系统 MUST 返回 503，并不得静默回退到继续持有完整 body 的高内存路径
