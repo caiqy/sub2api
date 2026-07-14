@@ -341,17 +341,20 @@ func openAIImageOutputMIMEType(outputFormat string) string {
 }
 
 func openAIImageUploadToDataURL(upload OpenAIImagesUpload) (string, error) {
-	if upload.File == nil {
+	data := upload.Data
+	if upload.File == nil && len(data) == 0 {
 		return "", fmt.Errorf("upload %q is empty", strings.TrimSpace(upload.FileName))
 	}
-	file, err := upload.File.Open()
-	if err != nil {
-		return "", fmt.Errorf("open upload %q: %w", strings.TrimSpace(upload.FileName), err)
-	}
-	defer func() { _ = file.Close() }()
-	data, err := io.ReadAll(io.LimitReader(file, openAIImageMaxUploadPartSize+1))
-	if err != nil {
-		return "", fmt.Errorf("read upload %q: %w", strings.TrimSpace(upload.FileName), err)
+	if upload.File != nil {
+		file, err := upload.File.Open()
+		if err != nil {
+			return "", fmt.Errorf("open upload %q: %w", strings.TrimSpace(upload.FileName), err)
+		}
+		defer func() { _ = file.Close() }()
+		data, err = io.ReadAll(io.LimitReader(file, openAIImageMaxUploadPartSize+1))
+		if err != nil {
+			return "", fmt.Errorf("read upload %q: %w", strings.TrimSpace(upload.FileName), err)
+		}
 	}
 	if len(data) == 0 || len(data) > openAIImageMaxUploadPartSize {
 		return "", fmt.Errorf("upload %q exceeds 20MB", strings.TrimSpace(upload.FileName))

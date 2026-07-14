@@ -287,6 +287,7 @@ func parseGrokMediaMultipartRequest(contentType string, body []byte, info *GrokM
 				FieldName:   name,
 				FileName:    fileName,
 				ContentType: partContentType,
+				Data:        data,
 			}
 			if name == "mask" {
 				info.MaskUpload = &upload

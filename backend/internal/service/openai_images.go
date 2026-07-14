@@ -55,6 +55,7 @@ type OpenAIImagesUpload struct {
 	FileName    string
 	ContentType string
 	File        *multipart.FileHeader
+	Data        []byte
 	Width       int
 	Height      int
 }
@@ -142,16 +143,19 @@ func (r *OpenAIImagesRequest) moderationImages() []map[string]string {
 }
 
 func (u OpenAIImagesUpload) ModerationDataURL() string {
-	if u.File == nil {
-		return ""
+	data := u.Data
+	if u.File != nil {
+		file, err := u.File.Open()
+		if err != nil {
+			return ""
+		}
+		defer func() { _ = file.Close() }()
+		data, err = io.ReadAll(io.LimitReader(file, openAIImageMaxUploadPartSize+1))
+		if err != nil {
+			return ""
+		}
 	}
-	file, err := u.File.Open()
-	if err != nil {
-		return ""
-	}
-	defer func() { _ = file.Close() }()
-	data, err := io.ReadAll(io.LimitReader(file, openAIImageMaxUploadPartSize+1))
-	if err != nil || len(data) == 0 || len(data) > openAIImageMaxUploadPartSize {
+	if len(data) == 0 || len(data) > openAIImageMaxUploadPartSize {
 		return ""
 	}
 	contentType := strings.TrimSpace(u.ContentType)
