@@ -688,19 +688,24 @@ func (terminalUsageSettingRepo) GetMultiple(context.Context, []string) (map[stri
 }
 
 type terminalGatewayMessagesEnv struct {
-	handler   *GatewayHandler
-	apiKey    *service.APIKey
-	usageRepo *openAIChatCompletionsUsageLogRepoStub
+	handler     *GatewayHandler
+	apiKey      *service.APIKey
+	usageRepo   *openAIChatCompletionsUsageLogRepoStub
+	accountRepo *terminalGatewayAccountRepo
 }
 
-type terminalGatewayAccountRepo struct{ openAIRetryAccountRepoStub }
+type terminalGatewayAccountRepo struct {
+	openAIRetryAccountRepoStub
+	groupIDs []int64
+}
 
 func (*terminalGatewayAccountRepo) SetModelRateLimit(context.Context, int64, string, time.Time, ...string) error {
 	return nil
 }
 
-func (r *terminalGatewayAccountRepo) ListSchedulableByGroupIDAndPlatforms(_ context.Context, _ int64, platforms []string) ([]service.Account, error) {
-	return r.listByPlatforms(platforms), nil
+func (r *terminalGatewayAccountRepo) ListSchedulableByGroupIDAndPlatforms(_ context.Context, groupID int64, platforms []string) ([]service.Account, error) {
+	r.groupIDs = append(r.groupIDs, groupID)
+	return r.listByGroupAndPlatforms(groupID, platforms), nil
 }
 
 func (r *terminalGatewayAccountRepo) ListSchedulableByPlatforms(_ context.Context, platforms []string) ([]service.Account, error) {
@@ -723,6 +728,24 @@ func (r *terminalGatewayAccountRepo) listByPlatforms(platforms []string) []servi
 	return accounts
 }
 
+func (r *terminalGatewayAccountRepo) listByGroupAndPlatforms(groupID int64, platforms []string) []service.Account {
+	accounts := r.listByPlatforms(platforms)
+	filtered := make([]service.Account, 0, len(accounts))
+	for _, account := range accounts {
+		if len(account.AccountGroups) == 0 {
+			filtered = append(filtered, account)
+			continue
+		}
+		for _, accountGroup := range account.AccountGroups {
+			if accountGroup.GroupID == groupID {
+				filtered = append(filtered, account)
+				break
+			}
+		}
+	}
+	return filtered
+}
+
 func newTerminalGatewayMessagesEnv(t *testing.T, group *service.Group, upstream service.HTTPUpstream, accounts ...*service.Account) *terminalGatewayMessagesEnv {
 	return newTerminalGatewayMessagesEnvWithGatewayCache(t, group, upstream, openAIChatCompletionsConcurrencyCacheStub{}, openAIChatCompletionsGatewayCacheStub{}, accounts...)
 }
@@ -743,7 +766,7 @@ func newTerminalGatewayMessagesEnvWithGatewayCacheAndGroups(t *testing.T, group 
 		Gateway:     config.GatewayConfig{MaxAccountSwitches: 1, Scheduling: config.GatewaySchedulingConfig{LoadBatchEnabled: false}},
 		Concurrency: config.ConcurrencyConfig{PingInterval: 0},
 	}
-	accountRepo := &terminalGatewayAccountRepo{openAIRetryAccountRepoStub{accounts: accounts}}
+	accountRepo := &terminalGatewayAccountRepo{openAIRetryAccountRepoStub: openAIRetryAccountRepoStub{accounts: accounts}}
 	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 2)}
 	concurrencyService := service.NewConcurrencyService(concurrencyCache)
 	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
@@ -783,9 +806,10 @@ func newTerminalGatewayMessagesEnvWithGatewayCacheAndGroups(t *testing.T, group 
 	antigravityService := service.NewAntigravityGatewayService(accountRepo, cache, nil, tokenProvider, nil, upstream, settingService, nil)
 	geminiCompatService := service.NewGeminiMessagesCompatService(accountRepo, groupRepo, cache, nil, nil, nil, upstream, antigravityService, cfg)
 	return &terminalGatewayMessagesEnv{
-		handler:   NewGatewayHandler(gatewayService, geminiCompatService, antigravityService, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil),
-		apiKey:    &service.APIKey{ID: 101, UserID: 202, Status: service.StatusActive, GroupID: &group.ID, User: &service.User{ID: 202, Status: service.StatusActive, Concurrency: 1}, Group: group},
-		usageRepo: usageRepo,
+		handler:     NewGatewayHandler(gatewayService, geminiCompatService, antigravityService, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, settingService),
+		apiKey:      &service.APIKey{ID: 101, UserID: 202, Status: service.StatusActive, GroupID: &group.ID, User: &service.User{ID: 202, Status: service.StatusActive, Concurrency: 1}, Group: group},
+		usageRepo:   usageRepo,
+		accountRepo: accountRepo,
 	}
 }
 
@@ -882,6 +906,70 @@ func TestGatewayHandler_MessagesPromptTooLongFallbackBillingRejectionCreatesOrig
 	require.Contains(t, log.DetailSnapshot.ResponseHeaders, "X-Request-Id: req_prompt_too_long_fallback")
 	require.Contains(t, log.DetailSnapshot.ResponseBody, "Prompt is too long")
 	require.NotContains(t, log.DetailSnapshot.ResponseBody, "insufficient balance")
+}
+
+func TestGatewayHandler_MessagesPromptTooLongFallbackResolvesClaudeCodeOnlyGroup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	initialID, intermediateID, finalID := int64(50), int64(51), int64(52)
+	initialGroup := &service.Group{ID: initialID, Platform: service.PlatformAntigravity, Status: service.StatusActive, Hydrated: true, FallbackGroupIDOnInvalidRequest: &intermediateID}
+	intermediateGroup := &service.Group{ID: intermediateID, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true, ClaudeCodeOnly: true, FallbackGroupID: &finalID}
+	finalGroup := &service.Group{ID: finalID, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
+	initialAccount := &service.Account{ID: 150, Name: "initial-antigravity", Platform: service.PlatformAntigravity, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, AccountGroups: []service.AccountGroup{{GroupID: initialID}}, Credentials: map[string]any{"access_token": "token", "project_id": "project"}}
+	finalAccount := &service.Account{ID: 152, Name: "final-gemini", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, AccountGroups: []service.AccountGroup{{GroupID: finalID}}, Credentials: map[string]any{"api_key": "key"}}
+
+	t.Run("non Claude Code skips intermediate group and binds final Gemini session", func(t *testing.T) {
+		cache := &geminiStickyGatewayCacheStub{}
+		upstream := &openAIRetryTrackingHTTPUpstreamStub{responses: []*http.Response{
+			{StatusCode: http.StatusBadRequest, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"Prompt is too long"}}`))},
+			{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}`))},
+		}}
+		env := newTerminalGatewayMessagesEnvWithGatewayCacheAndGroups(t, initialGroup, map[int64]*service.Group{initialID: initialGroup, intermediateID: intermediateGroup, finalID: finalGroup}, upstream, openAIChatCompletionsConcurrencyCacheStub{}, cache, initialAccount, finalAccount)
+		env.handler.cfg.Gateway.Sticky.Gemini.Enabled = true
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-opus-4-6","max_tokens":16,"metadata":{"user_id":"fallback-session"},"messages":[{"role":"user","content":"hello"}]}`))
+		req.Header.Set("Content-Type", "application/json")
+		env.router().ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Equal(t, []int64{initialAccount.ID, finalAccount.ID}, upstream.accountIDs)
+		require.Contains(t, env.accountRepo.groupIDs, finalID)
+		require.NotEmpty(t, cache.getGroupIDs)
+		for _, groupID := range cache.getGroupIDs {
+			require.Equal(t, finalID, groupID)
+		}
+		require.NotEmpty(t, cache.setGroupIDs)
+		for _, groupID := range cache.setGroupIDs {
+			require.Equal(t, finalID, groupID)
+		}
+		require.Len(t, cache.setCalls, 1)
+		for sessionKey, accountID := range cache.sessionBindings {
+			require.True(t, strings.HasPrefix(sessionKey, "gemini:"))
+			require.Equal(t, finalAccount.ID, accountID)
+		}
+	})
+
+	t.Run("Claude Code keeps intermediate group", func(t *testing.T) {
+		upstream := &openAIRetryTrackingHTTPUpstreamStub{responses: []*http.Response{
+			{StatusCode: http.StatusBadRequest, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"Prompt is too long"}}`))},
+			{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"text","text":"ok"}],"model":"claude-opus-4-6","usage":{"input_tokens":1,"output_tokens":1}}`))},
+		}}
+		env := newTerminalGatewayMessagesEnvWithGatewayCacheAndGroups(t, initialGroup, map[int64]*service.Group{initialID: initialGroup, intermediateID: intermediateGroup, finalID: finalGroup}, upstream, openAIChatCompletionsConcurrencyCacheStub{}, &geminiStickyGatewayCacheStub{}, initialAccount, &service.Account{ID: 151, Name: "intermediate-anthropic", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, AccountGroups: []service.AccountGroup{{GroupID: intermediateID}}, Credentials: map[string]any{"api_key": "key"}})
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-opus-4-6","max_tokens":16,"system":[{"text":"You are Claude Code, Anthropic's official CLI for Claude."}],"metadata":{"user_id":"user_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_account__session_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"},"messages":[{"role":"user","content":"hello"}]}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", "claude-cli/2.1.81")
+		req.Header.Set("X-App", "claude-code")
+		req.Header.Set("anthropic-beta", "message-batches-2024-09-24")
+		req.Header.Set("anthropic-version", "2023-06-01")
+		env.router().ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Equal(t, []int64{initialAccount.ID, 151}, upstream.accountIDs)
+		require.Contains(t, env.accountRepo.groupIDs, intermediateID)
+		require.NotContains(t, env.accountRepo.groupIDs, finalID)
+	})
 }
 
 func TestGatewayHandler_MessagesLocalErrorDoesNotCreateFailedUsage(t *testing.T) {
