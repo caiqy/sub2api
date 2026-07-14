@@ -124,13 +124,16 @@ func (s *GeminiMessagesCompatService) SelectAccountForModelWithExclusions(ctx co
 	if err != nil {
 		return nil, err
 	}
+	stickyEnabled := s.stickyEnabledForPlatform(platform)
 
 	cacheKey := "gemini:" + sessionHash
 
 	// 2. 尝试粘性会话命中
 	// Try sticky session hit
-	if account := s.tryStickySessionHit(ctx, groupID, sessionHash, cacheKey, requestedModel, excludedIDs, platform, useMixedScheduling); account != nil {
-		return account, nil
+	if stickyEnabled {
+		if account := s.tryStickySessionHit(ctx, groupID, sessionHash, cacheKey, requestedModel, excludedIDs, platform, useMixedScheduling); account != nil {
+			return account, nil
+		}
 	}
 
 	// 3. 查询可调度账户（强制平台模式：优先按分组查找，找不到再查全部）
@@ -160,11 +163,26 @@ func (s *GeminiMessagesCompatService) SelectAccountForModelWithExclusions(ctx co
 
 	// 5. 设置粘性会话绑定
 	// Set sticky session binding
-	if sessionHash != "" {
+	if stickyEnabled && sessionHash != "" {
 		_ = s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), cacheKey, selected.ID, geminiStickySessionTTL)
 	}
 
 	return s.hydrateSelectedAccount(ctx, selected)
+}
+
+func (s *GeminiMessagesCompatService) stickyEnabledForPlatform(platform string) bool {
+	if s == nil || s.cfg == nil {
+		return true
+	}
+	runtime := s.cfg.GatewayControlRuntime()
+	switch platform {
+	case PlatformGemini:
+		return runtime.StickyGeminiEnabled
+	case PlatformAnthropic, PlatformAntigravity:
+		return runtime.StickyAnthropicEnabled
+	default:
+		return true
+	}
 }
 
 // resolvePlatformAndSchedulingMode 解析目标平台和调度模式。

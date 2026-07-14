@@ -26,6 +26,165 @@ type geminiCompatHTTPUpstreamStub struct {
 	lastReq  *http.Request
 }
 
+type geminiCompatStickyAccountRepo struct {
+	AccountRepository
+	accounts     []Account
+	accountsByID map[int64]*Account
+}
+
+func (r *geminiCompatStickyAccountRepo) GetByID(_ context.Context, id int64) (*Account, error) {
+	return r.accountsByID[id], nil
+}
+
+func (r *geminiCompatStickyAccountRepo) ListSchedulableByGroupIDAndPlatforms(_ context.Context, _ int64, platforms []string) ([]Account, error) {
+	allowed := make(map[string]struct{}, len(platforms))
+	for _, platform := range platforms {
+		allowed[platform] = struct{}{}
+	}
+	var accounts []Account
+	for _, account := range r.accounts {
+		if _, ok := allowed[account.Platform]; ok && account.IsSchedulable() {
+			accounts = append(accounts, account)
+		}
+	}
+	return accounts, nil
+}
+
+type geminiCompatStickyGroupRepo struct {
+	GroupRepository
+	groups map[int64]*Group
+}
+
+func (r *geminiCompatStickyGroupRepo) GetByIDLite(_ context.Context, id int64) (*Group, error) {
+	return r.groups[id], nil
+}
+
+type geminiCompatCountingCache struct {
+	GatewayCache
+	bindings     map[string]int64
+	getCalls     map[string]int
+	setCalls     map[string]int
+	deleteCalls  map[string]int
+	refreshCalls map[string]int
+}
+
+func (c *geminiCompatCountingCache) GetSessionAccountID(_ context.Context, _ int64, key string) (int64, error) {
+	if c.getCalls == nil {
+		c.getCalls = make(map[string]int)
+	}
+	c.getCalls[key]++
+	return c.bindings[key], nil
+}
+
+func (c *geminiCompatCountingCache) SetSessionAccountID(_ context.Context, _ int64, key string, accountID int64, _ time.Duration) error {
+	if c.setCalls == nil {
+		c.setCalls = make(map[string]int)
+	}
+	c.setCalls[key]++
+	return nil
+}
+
+func (c *geminiCompatCountingCache) DeleteSessionAccountID(_ context.Context, _ int64, key string) error {
+	if c.deleteCalls == nil {
+		c.deleteCalls = make(map[string]int)
+	}
+	c.deleteCalls[key]++
+	return nil
+}
+
+func (c *geminiCompatCountingCache) RefreshSessionTTL(_ context.Context, _ int64, key string, _ time.Duration) error {
+	if c.refreshCalls == nil {
+		c.refreshCalls = make(map[string]int)
+	}
+	c.refreshCalls[key]++
+	return nil
+}
+
+func TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_StickyDisabled(t *testing.T) {
+	tests := []struct {
+		name     string
+		platform string
+		cfg      *config.Config
+	}{
+		{
+			name:     "gemini",
+			platform: PlatformGemini,
+			cfg: &config.Config{Gateway: config.GatewayConfig{Sticky: config.GatewayStickyConfig{
+				Gemini: config.GatewayStickyPlatformConfig{Enabled: false},
+			}}},
+		},
+		{
+			name:     "anthropic",
+			platform: PlatformAnthropic,
+			cfg: &config.Config{Gateway: config.GatewayConfig{Sticky: config.GatewayStickyConfig{
+				Gemini:    config.GatewayStickyPlatformConfig{Enabled: true},
+				Anthropic: config.GatewayStickyPlatformConfig{Enabled: false},
+			}}},
+		},
+		{
+			name:     "antigravity",
+			platform: PlatformAntigravity,
+			cfg: &config.Config{Gateway: config.GatewayConfig{Sticky: config.GatewayStickyConfig{
+				Gemini:    config.GatewayStickyPlatformConfig{Enabled: true},
+				Anthropic: config.GatewayStickyPlatformConfig{Enabled: false},
+			}}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			groupID := int64(1)
+			accounts := []Account{
+				{ID: 1, Platform: tt.platform, Priority: 2, Status: StatusActive, Schedulable: true},
+				{ID: 2, Platform: tt.platform, Priority: 1, Status: StatusActive, Schedulable: true},
+			}
+			repo := &geminiCompatStickyAccountRepo{accounts: accounts, accountsByID: map[int64]*Account{1: &accounts[0], 2: &accounts[1]}}
+			cache := &geminiCompatCountingCache{bindings: map[string]int64{"gemini:session": 1}}
+			svc := &GeminiMessagesCompatService{
+				accountRepo: repo,
+				groupRepo:   &geminiCompatStickyGroupRepo{groups: map[int64]*Group{groupID: {ID: groupID, Platform: tt.platform}}},
+				cache:       cache,
+				cfg:         tt.cfg,
+			}
+
+			account, err := svc.SelectAccountForModelWithExclusions(context.Background(), &groupID, "session", "gemini-2.5-flash", nil)
+			require.NoError(t, err)
+			require.NotNil(t, account)
+			require.Equal(t, int64(2), account.ID)
+			require.Empty(t, cache.getCalls)
+			require.Empty(t, cache.setCalls)
+			require.Empty(t, cache.deleteCalls)
+			require.Empty(t, cache.refreshCalls)
+		})
+	}
+}
+
+func TestGeminiMessagesCompatService_SelectAccountForModelWithExclusions_StickyDefaultEnabled(t *testing.T) {
+	groupID := int64(1)
+	accounts := []Account{
+		{ID: 1, Platform: PlatformGemini, Priority: 2, Status: StatusActive, Schedulable: true},
+		{ID: 2, Platform: PlatformGemini, Priority: 1, Status: StatusActive, Schedulable: true},
+	}
+	repo := &geminiCompatStickyAccountRepo{accounts: accounts, accountsByID: map[int64]*Account{1: &accounts[0], 2: &accounts[1]}}
+	cache := &geminiCompatCountingCache{bindings: map[string]int64{"gemini:hit": 1}}
+	svc := &GeminiMessagesCompatService{
+		accountRepo: repo,
+		groupRepo:   &geminiCompatStickyGroupRepo{groups: map[int64]*Group{groupID: {ID: groupID, Platform: PlatformGemini}}},
+		cache:       cache,
+	}
+
+	account, err := svc.SelectAccountForModelWithExclusions(context.Background(), &groupID, "hit", "gemini-2.5-flash", nil)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), account.ID)
+	require.Equal(t, 1, cache.getCalls["gemini:hit"])
+	require.Equal(t, 1, cache.refreshCalls["gemini:hit"])
+
+	account, err = svc.SelectAccountForModelWithExclusions(context.Background(), &groupID, "miss", "gemini-2.5-flash", nil)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), account.ID)
+	require.Equal(t, 1, cache.setCalls["gemini:miss"])
+}
+
 func (s *geminiCompatHTTPUpstreamStub) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
 	s.calls++
 	s.lastReq = req
