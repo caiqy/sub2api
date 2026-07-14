@@ -1,6 +1,6 @@
 workflow: hotfix
 language: zh-CN
-phase: verify
+phase: archive
 context_compression: off
 build_mode: direct
 build_pause: null
@@ -13,13 +13,13 @@ auto_transition: true
 base_ref: b65b338e7c10cf1813cc0a9d70f57686f6c7c434
 design_doc: null
 plan: null
-verify_result: pending
+verify_result: pass
 verification_report: docs/superpowers/reports/2026-07-14-restore-admin-user-resource-controls-verify.md
-branch_status: pending
+branch_status: handled
 created_at: 2026-07-14
-verified_at: null
-archive_confirmation: null
-archived: false
+verified_at: 2026-07-14
+archive_confirmation: confirmed
+archived: true
 direct_override: null
 handoff_context: null
 handoff_hash: null
