@@ -205,7 +205,9 @@ func TestOpenAIGatewayService_StickyDisabledIngressSkipsStateStore(t *testing.T)
 
 	captureConn := &openAIWSCaptureConn{events: [][]byte{[]byte(`{"type":"response.completed","response":{"id":"resp_new_1","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`)}}
 	pool := newOpenAIWSConnPool(cfg)
-	pool.setClientDialerForTest(&openAIWSCaptureDialer{conn: captureConn})
+	handshake := make(http.Header)
+	handshake.Set(openAIWSTurnStateHeader, "turn_state_disabled")
+	pool.setClientDialerForTest(&openAIWSCaptureDialer{conn: captureConn, handshake: handshake})
 	account := &Account{ID: 116, Name: "openai-ingress-disabled", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test"}, Extra: map[string]any{"responses_websockets_v2_enabled": true}}
 	store := &openAIWSStateStoreSpy{
 		responseAccounts:    map[string]int64{"resp_prev_1": account.ID},
@@ -242,7 +244,7 @@ func TestOpenAIGatewayService_StickyDisabledIngressSkipsStateStore(t *testing.T)
 	require.NoError(t, err)
 	defer func() { _ = clientConn.CloseNow() }()
 	writeCtx, writeCancel := context.WithTimeout(context.Background(), 3*time.Second)
-	require.NoError(t, clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","stream":false,"previous_response_id":"resp_prev_1"}`)))
+	require.NoError(t, clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","stream":false,"store":false}`)))
 	writeCancel()
 	readCtx, readCancel := context.WithTimeout(context.Background(), 3*time.Second)
 	_, _, err = clientConn.Read(readCtx)
