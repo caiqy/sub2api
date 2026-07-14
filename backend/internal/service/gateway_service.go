@@ -869,6 +869,7 @@ func (s *GatewayService) GetCachedSessionAccountID(ctx context.Context, groupID 
 }
 
 func (s *GatewayService) stickyPlatformFromContext(ctx context.Context) string {
+	// ForcePlatform also carries the final platform for compatibility sticky helpers; empty retains Anthropic default.
 	if platform, ok := ctx.Value(ctxkey.ForcePlatform).(string); ok && platform != "" {
 		return platform
 	}

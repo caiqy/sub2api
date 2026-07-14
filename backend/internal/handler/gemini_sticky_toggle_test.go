@@ -149,28 +149,36 @@ func TestGeminiStickyMainFlow_EnabledNonStickyPathPreserved(t *testing.T) {
 }
 
 type geminiStickyGatewayCacheStub struct {
-	sessionBindings map[string]int64
-	getCalls        map[string]int
-	setCalls        map[string]int
-	refreshCalls    map[string]int
+	sessionBindings  map[string]int64
+	defaultAccountID int64
+	getCalls         map[string]int
+	setCalls         map[string]int
+	refreshCalls     map[string]int
+	getGroupIDs      []int64
+	setGroupIDs      []int64
 }
 
-func (c *geminiStickyGatewayCacheStub) GetSessionAccountID(_ context.Context, _ int64, sessionHash string) (int64, error) {
+func (c *geminiStickyGatewayCacheStub) GetSessionAccountID(_ context.Context, groupID int64, sessionHash string) (int64, error) {
 	if c.getCalls == nil {
 		c.getCalls = make(map[string]int)
 	}
 	c.getCalls[sessionHash]++
+	c.getGroupIDs = append(c.getGroupIDs, groupID)
 	if accountID, ok := c.sessionBindings[sessionHash]; ok {
 		return accountID, nil
+	}
+	if c.defaultAccountID > 0 {
+		return c.defaultAccountID, nil
 	}
 	return 0, errors.New("not found")
 }
 
-func (c *geminiStickyGatewayCacheStub) SetSessionAccountID(_ context.Context, _ int64, sessionHash string, accountID int64, _ time.Duration) error {
+func (c *geminiStickyGatewayCacheStub) SetSessionAccountID(_ context.Context, groupID int64, sessionHash string, accountID int64, _ time.Duration) error {
 	if c.setCalls == nil {
 		c.setCalls = make(map[string]int)
 	}
 	c.setCalls[sessionHash]++
+	c.setGroupIDs = append(c.setGroupIDs, groupID)
 	if c.sessionBindings == nil {
 		c.sessionBindings = make(map[string]int64)
 	}

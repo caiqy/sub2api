@@ -1,0 +1,148 @@
+package handler
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
+	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
+)
+
+type stickyFallbackGroupRepo struct {
+	service.GroupRepository
+	groups map[int64]*service.Group
+}
+
+func (r *stickyFallbackGroupRepo) GetByID(_ context.Context, id int64) (*service.Group, error) {
+	return r.groups[id], nil
+}
+
+func (r *stickyFallbackGroupRepo) GetByIDLite(ctx context.Context, id int64) (*service.Group, error) {
+	return r.GetByID(ctx, id)
+}
+
+type stickyFallbackAccountRepo struct {
+	service.AccountRepository
+	groupIDs []int64
+}
+
+func (*stickyFallbackAccountRepo) GetByID(context.Context, int64) (*service.Account, error) {
+	return nil, errors.New("account not found")
+}
+
+func (r *stickyFallbackAccountRepo) ListSchedulableByGroupIDAndPlatforms(_ context.Context, groupID int64, _ []string) ([]service.Account, error) {
+	r.groupIDs = append(r.groupIDs, groupID)
+	return nil, nil
+}
+
+func (*stickyFallbackAccountRepo) ListSchedulableByPlatform(context.Context, string) ([]service.Account, error) {
+	return nil, nil
+}
+
+func newStickyFallbackMessagesHandler(t *testing.T, cfg *config.Config, groups map[int64]*service.Group, cache service.GatewayCache, accountRepo *stickyFallbackAccountRepo) (*GatewayHandler, *service.APIKey) {
+	t.Helper()
+	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(billingCacheService.Stop)
+	groupRepo := &stickyFallbackGroupRepo{groups: groups}
+	gatewayService := service.NewGatewayService(accountRepo, groupRepo, nil, nil, nil, nil, nil, cache, cfg, nil, concurrencyService, service.NewBillingService(cfg, nil), nil, billingCacheService, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	originalGroup := groups[1]
+	apiKey := &service.APIKey{ID: 101, UserID: 202, Status: service.StatusActive, GroupID: &originalGroup.ID, User: &service.User{ID: 202, Status: service.StatusActive, Concurrency: 1}, Group: originalGroup}
+	return NewGatewayHandler(gatewayService, nil, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil), apiKey
+}
+
+func TestGatewayHandlerMessages_ClaudeCodeFallbackUsesResolvedGeminiStickyBoundary(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	originalID, fallbackID := int64(1), int64(2)
+	groups := map[int64]*service.Group{
+		originalID: {ID: originalID, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true, ClaudeCodeOnly: true, FallbackGroupID: &fallbackID},
+		fallbackID: {ID: fallbackID, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true},
+	}
+
+	tests := []struct {
+		name              string
+		geminiEnabled     bool
+		anthropic         bool
+		wantCacheActivity bool
+	}{
+		{name: "gemini disabled bypasses fallback cache", geminiEnabled: false, anthropic: true},
+		{name: "gemini enabled reads fallback cache key", geminiEnabled: true, anthropic: false, wantCacheActivity: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{RunMode: config.RunModeSimple, Default: config.DefaultConfig{RateMultiplier: 1}, Gateway: config.GatewayConfig{Scheduling: config.GatewaySchedulingConfig{LoadBatchEnabled: false}}, Concurrency: config.ConcurrencyConfig{PingInterval: 0}}
+			cfg.Gateway.Sticky.Gemini.Enabled = tt.geminiEnabled
+			cfg.Gateway.Sticky.Anthropic.Enabled = tt.anthropic
+			cache := &geminiStickyGatewayCacheStub{}
+			if tt.wantCacheActivity {
+				cache.defaultAccountID = 999
+			}
+			accountRepo := &stickyFallbackAccountRepo{}
+			h, apiKey := newStickyFallbackMessagesHandler(t, cfg, groups, cache, accountRepo)
+			router := gin.New()
+			router.Use(func(c *gin.Context) {
+				c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+				c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.UserID, Concurrency: apiKey.User.Concurrency})
+				c.Next()
+			})
+			router.POST("/v1/messages", h.Messages)
+
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gemini-2.5-flash","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+			if !tt.wantCacheActivity {
+				require.Empty(t, cache.getGroupIDs)
+			} else {
+				require.NotEmpty(t, cache.getGroupIDs)
+			}
+			require.Empty(t, cache.setGroupIDs)
+			require.Contains(t, accountRepo.groupIDs, fallbackID)
+			for _, groupID := range cache.getGroupIDs {
+				require.Equal(t, fallbackID, groupID)
+			}
+			for key := range cache.getCalls {
+				require.True(t, strings.HasPrefix(key, "gemini:"))
+			}
+		})
+	}
+}
+
+func TestGatewayHandlerResolveStickyRoute_PreservesClaudeCodeRestrictionErrors(t *testing.T) {
+	cfg := &config.Config{}
+	groupTwoID, groupThreeID := int64(2), int64(3)
+	groups := map[int64]*service.Group{
+		1: {ID: 1, Platform: service.PlatformAnthropic, ClaudeCodeOnly: true},
+		2: {ID: groupTwoID, Platform: service.PlatformGemini, ClaudeCodeOnly: true},
+		3: {ID: groupThreeID, Platform: service.PlatformAnthropic, ClaudeCodeOnly: true},
+	}
+	groups[2].FallbackGroupID = &groupThreeID
+	groups[3].FallbackGroupID = &groupTwoID
+	accountRepo := &stickyFallbackAccountRepo{}
+	h, apiKey := newStickyFallbackMessagesHandler(t, cfg, groups, &geminiStickyGatewayCacheStub{}, accountRepo)
+
+	_, _, _, err := h.resolveStickyRoute(context.Background(), apiKey)
+	require.ErrorIs(t, err, service.ErrClaudeCodeOnly)
+
+	apiKey.GroupID = &groups[2].ID
+	apiKey.Group = groups[2]
+	_, _, _, err = h.resolveStickyRoute(context.Background(), apiKey)
+	require.ErrorContains(t, err, "fallback group cycle detected")
+
+	group, groupID, platform, err := h.resolveStickyRoute(context.WithValue(context.Background(), ctxkey.ForcePlatform, service.PlatformAntigravity), apiKey)
+	require.NoError(t, err)
+	require.Nil(t, group)
+	require.Equal(t, groups[2].ID, *groupID)
+	require.Equal(t, service.PlatformAntigravity, platform)
+}

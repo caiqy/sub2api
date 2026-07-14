@@ -129,6 +129,37 @@ func (h *GatewayHandler) bindStickySessionForPlatform(ctx context.Context, platf
 	return h.gatewayService.BindStickySession(ctx, groupID, sessionKey, accountID)
 }
 
+func (h *GatewayHandler) resolveStickyRoute(ctx context.Context, apiKey *service.APIKey) (*service.Group, *int64, string, error) {
+	groupID := apiKey.GroupID
+	if platform, ok := ctx.Value(ctxkey.ForcePlatform).(string); ok && platform != "" {
+		return nil, groupID, platform, nil
+	}
+	if groupID == nil {
+		return nil, nil, service.PlatformAnthropic, nil
+	}
+
+	currentID := *groupID
+	visited := map[int64]struct{}{}
+	for {
+		if _, seen := visited[currentID]; seen {
+			return nil, nil, "", fmt.Errorf("fallback group cycle detected")
+		}
+		visited[currentID] = struct{}{}
+
+		group, err := h.gatewayService.ResolveGroupByID(ctx, currentID)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		if !group.ClaudeCodeOnly || service.IsClaudeCodeClient(ctx) {
+			return group, &currentID, group.Platform, nil
+		}
+		if group.FallbackGroupID == nil {
+			return nil, nil, "", service.ErrClaudeCodeOnly
+		}
+		currentID = *group.FallbackGroupID
+	}
+}
+
 func (h *GatewayHandler) acquireUserGroupSlot(
 	c *gin.Context,
 	helper *ConcurrencyHelper,
@@ -278,6 +309,15 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		return
 	}
 
+	resolvedGroup, stickyGroupID, platform, err := h.resolveStickyRoute(c.Request.Context(), apiKey)
+	if err != nil {
+		h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error(), false)
+		return
+	}
+	if resolvedGroup != nil {
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, resolvedGroup))
+	}
+
 	// 在请求上下文中记录 thinking 状态，供 Antigravity 最终模型 key 推导/模型维度限流使用
 	c.Request = c.Request.WithContext(service.WithThinkingEnabled(c.Request.Context(), parsedReq.ThinkingEnabled, h.metadataBridgeEnabled()))
 
@@ -355,13 +395,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		zap.String("metadata_user_id_raw", parsedReq.MetadataUserID),
 	)
 
-	// 获取平台：优先使用强制平台（/antigravity 路由，中间件已设置 request.Context），否则使用分组平台
-	platform := ""
-	if forcePlatform, ok := middleware2.GetForcePlatformFromContext(c); ok {
-		platform = forcePlatform
-	} else if apiKey.Group != nil {
-		platform = apiKey.Group.Platform
-	}
 	sessionKey := sessionHash
 	if platform == service.PlatformGemini && sessionHash != "" {
 		sessionKey = "gemini:" + sessionHash
@@ -370,7 +403,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	// 查询粘性会话绑定的账号 ID
 	var sessionBoundAccountID int64
 	if sessionKey != "" {
-		sessionBoundAccountID = h.getCachedSessionAccountIDForPlatform(c.Request.Context(), platform, apiKey.GroupID, sessionKey)
+		sessionBoundAccountID = h.getCachedSessionAccountIDForPlatform(c.Request.Context(), platform, stickyGroupID, sessionKey)
 		// [DEBUG-STICKY] 打印粘性会话查询结果
 		reqLog.Info("sticky.cache_lookup",
 			zap.String("session_key", sessionKey),
@@ -378,8 +411,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		)
 		if sessionBoundAccountID > 0 {
 			prefetchedGroupID := int64(0)
-			if apiKey.GroupID != nil {
-				prefetchedGroupID = *apiKey.GroupID
+			if stickyGroupID != nil {
+				prefetchedGroupID = *stickyGroupID
 			}
 			ctx := service.WithPrefetchedStickySession(c.Request.Context(), sessionBoundAccountID, prefetchedGroupID, h.metadataBridgeEnabled())
 			c.Request = c.Request.WithContext(ctx)
@@ -397,13 +430,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 		// 单账号分组提前设置 SingleAccountRetry 标记，让 Service 层首次 503 就不设模型限流标记。
 		// 避免单账号分组收到 503 (MODEL_CAPACITY_EXHAUSTED) 时设 29s 限流，导致后续请求连续快速失败。
-		if h.gatewayService.IsSingleAntigravityAccountGroup(c.Request.Context(), apiKey.GroupID) {
+		if h.gatewayService.IsSingleAntigravityAccountGroup(c.Request.Context(), stickyGroupID) {
 			ctx := service.WithSingleAccountRetry(c.Request.Context(), true, h.metadataBridgeEnabled())
 			c.Request = c.Request.WithContext(ctx)
 		}
 
 		for {
-			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), apiKey.GroupID, sessionKey, reqModel, fs.FailedAccountIDs, "", int64(0)) // Gemini 不使用会话限制
+			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), stickyGroupID, sessionKey, reqModel, fs.FailedAccountIDs, "", int64(0)) // Gemini 不使用会话限制
 			if err != nil {
 				if len(fs.FailedAccountIDs) == 0 {
 					cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, service.PlatformGemini)
@@ -514,7 +547,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 				// Slot acquired: no longer waiting in queue.
 				releaseWait()
-				if err := h.bindStickySessionForPlatform(c.Request.Context(), platform, apiKey.GroupID, sessionKey, account.ID); err != nil {
+				if err := h.bindStickySessionForPlatform(c.Request.Context(), platform, stickyGroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
@@ -695,6 +728,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	}
 
 	currentAPIKey := apiKey
+	currentStickyGroupID := stickyGroupID
 	currentSubscription := subscription
 	var fallbackGroupID *int64
 	if apiKey.Group != nil {
@@ -704,7 +738,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 	// 单账号分组提前设置 SingleAccountRetry 标记，让 Service 层首次 503 就不设模型限流标记。
 	// 避免单账号分组收到 503 (MODEL_CAPACITY_EXHAUSTED) 时设 29s 限流，导致后续请求连续快速失败。
-	if h.gatewayService.IsSingleAntigravityAccountGroup(c.Request.Context(), currentAPIKey.GroupID) {
+	if h.gatewayService.IsSingleAntigravityAccountGroup(c.Request.Context(), currentStickyGroupID) {
 		ctx := service.WithSingleAccountRetry(c.Request.Context(), true, h.metadataBridgeEnabled())
 		c.Request = c.Request.WithContext(ctx)
 	}
@@ -735,7 +769,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				zap.Bool("has_bound_session", hasBoundSession),
 				zap.Int("failed_account_count", len(fs.FailedAccountIDs)),
 			)
-			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), currentAPIKey.GroupID, sessionKey, reqModel, fs.FailedAccountIDs, parsedReq.MetadataUserID, subject.UserID)
+			selection, err := h.gatewayService.SelectAccountWithLoadAwareness(c.Request.Context(), currentStickyGroupID, sessionKey, reqModel, fs.FailedAccountIDs, parsedReq.MetadataUserID, subject.UserID)
 			if err != nil {
 				if len(fs.FailedAccountIDs) == 0 {
 					cls := classifyNoAccountErrorFromGin(c, h.gatewayService, currentAPIKey, reqModel, reqModel, platform)
@@ -870,7 +904,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					zap.String("session_key", sessionKey),
 					zap.Int64("account_id", account.ID),
 				)
-				if err := h.bindStickySessionForPlatform(c.Request.Context(), platform, currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
+				if err := h.bindStickySessionForPlatform(c.Request.Context(), platform, currentStickyGroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
@@ -1059,6 +1093,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						ctx := context.WithValue(c.Request.Context(), ctxkey.ForcePlatform, "")
 						c.Request = c.Request.WithContext(ctx)
 						currentAPIKey = fallbackAPIKey
+						currentStickyGroupID = fallbackAPIKey.GroupID
 						currentSubscription = nil
 						fallbackUsed = true
 						retryWithFallback = true
@@ -1155,7 +1190,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// - 粘性账号因负载/RPM 被跳过、选中了其他账号：不覆盖原绑定，
 			//   下次请求粘性账号恢复后仍可命中
 			if sessionKey != "" && (sessionBoundAccountID == 0 || sessionBoundAccountID == account.ID) {
-				if err := h.bindStickySessionForPlatform(c.Request.Context(), platform, currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
+				if err := h.bindStickySessionForPlatform(c.Request.Context(), platform, currentStickyGroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
 			}
