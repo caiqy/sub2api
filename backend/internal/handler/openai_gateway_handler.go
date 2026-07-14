@@ -2761,7 +2761,7 @@ func (h *OpenAIGatewayHandler) enqueueCyberSessionBlockedOpsEntry(c *gin.Context
 }
 
 // recordCyberPolicyIfMarked 在 gateway forward 返回后检查 cyber 标记，异步写风控日志/邮件，
-// 并在 forward 返回错误时写一条 tokens=0 用量行。标记由 gateway 服务层在透传 cyber 后设置；
+// 并在 forward 返回错误时按上游报告的真实 token 写用量行。标记由 gateway 服务层在透传 cyber 后设置；
 // 当前请求已发给用户，本方法只做事后记录，不影响响应。forwardErrored 为 true 时才写用量行，
 // 避免与正常 RecordUsage(forward 成功路径)重复。每请求至多记录一次。
 func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey *service.APIKey, account *service.Account, subscription *service.UserSubscription, model string, forwardErrored bool, cyberBlockKey string, channelFields service.ChannelUsageFields, requestPayloadHash string) {
@@ -2812,11 +2812,14 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 		requestPath = c.Request.URL.Path
 	}
 	platform := resolveOpsPlatform(apiKey, guessPlatformFromPath(requestPath))
+	detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
 	var clientRequestID, userAgent, clientIPStr string
+	quotaPlatform := ""
 	if c.Request != nil {
 		clientRequestID, _ = c.Request.Context().Value(ctxkey.ClientRequestID).(string)
 		userAgent = c.GetHeader("User-Agent")
 		clientIPStr = strings.TrimSpace(ip.GetClientIP(c))
+		quotaPlatform = service.QuotaPlatform(c.Request.Context(), apiKey)
 	}
 	apiKeyPrefix := ""
 	if apiKey != nil {
@@ -2876,6 +2879,8 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 				IPAddress:          clientIPStr,
 				RequestPayloadHash: requestPayloadHash,
 				APIKeyService:      apiKeySvc,
+				QuotaPlatform:      quotaPlatform,
+				DetailSnapshot:     detailSnapshot,
 				ChannelUsageFields: channelFields,
 			})
 		}

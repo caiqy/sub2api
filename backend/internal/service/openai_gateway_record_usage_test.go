@@ -39,6 +39,16 @@ type openAIRecordUsageBillingRepoStub struct {
 	lastCtxErr error
 }
 
+type cyberQuotaPlatformRepo struct {
+	UserPlatformQuotaRepository
+	platforms chan string
+}
+
+func (r *cyberQuotaPlatformRepo) IncrementUsageWithReset(_ context.Context, _ int64, platform string, _ float64, _ time.Time) error {
+	r.platforms <- platform
+	return nil
+}
+
 func (s *openAIRecordUsageBillingRepoStub) Apply(ctx context.Context, cmd *UsageBillingCommand) (*UsageBillingApplyResult, error) {
 	s.calls++
 	s.lastCmd = cmd
@@ -90,6 +100,53 @@ func TestRecordCyberPolicyUsageLog_BillsRealUpstreamTokens(t *testing.T) {
 	require.InDelta(t, expected.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)
 	require.Equal(t, 1, userRepo.deductCalls, "按真实 token 扣费，与 WS/正常请求一致")
 	require.InDelta(t, expected.ActualCost, userRepo.lastAmount, 1e-12)
+}
+
+func TestRecordCyberPolicyUsageLog_PreservesForcedQuotaPlatform(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(
+		usageRepo,
+		billingRepo,
+		&openAIRecordUsageUserRepoStub{},
+		&openAIRecordUsageSubRepoStub{},
+		nil,
+	)
+	quotaRepo := &cyberQuotaPlatformRepo{platforms: make(chan string, 1)}
+	svc.userPlatformQuotaRepo = quotaRepo
+	svc.billingCacheService.cfg = svc.cfg
+	groupID := int64(7)
+	apiKey := &APIKey{
+		ID:      2,
+		User:    &User{ID: 1},
+		GroupID: &groupID,
+		Group:   &Group{ID: groupID, Platform: PlatformOpenAI, RateMultiplier: 1},
+	}
+	ctx := context.Background()
+	detailSnapshot := &UsageLogDetailSnapshot{RequestBody: `{"model":"gpt-5.1"}`}
+
+	svc.RecordCyberPolicyUsageLog(ctx, CyberPolicyUsageInput{
+		APIKey:         apiKey,
+		Account:        &Account{ID: 3},
+		RequestID:      "rid-cyber-platform",
+		Model:          "gpt-5.1",
+		InputTokens:    1000,
+		OutputTokens:   100,
+		QuotaPlatform:  PlatformAntigravity,
+		DetailSnapshot: detailSnapshot,
+	})
+	require.Equal(t, 1, billingRepo.calls)
+	require.NotNil(t, usageRepo.lastLog)
+	require.Greater(t, usageRepo.lastLog.ActualCost, 0.0)
+	require.Equal(t, detailSnapshot.RequestBody, usageRepo.lastLog.DetailSnapshot.RequestBody)
+	require.Same(t, quotaRepo, svc.billingDeps().userPlatformQuotaRepo)
+
+	select {
+	case platform := <-quotaRepo.platforms:
+		require.Equal(t, PlatformAntigravity, platform)
+	case <-time.After(time.Second):
+		t.Fatal("等待 cyber platform quota 持久化超时")
+	}
 }
 
 func TestRecordCyberPolicyUsageLog_NonStreamZeroTokensZeroCost(t *testing.T) {

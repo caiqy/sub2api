@@ -49,7 +49,7 @@ func compatCyberUpstreamRecorder() *httpUpstreamRecorder {
 }
 
 // C-1: chat completions 非流式客户端（buffered 路径）cyber 命中——不 failover、标记已设、
-// 以 chat 错误格式回写、丢弃 result（使 handler 落入 tokens=0 免费用量行而非 RecordUsage 扣费）。
+// 以 chat 错误格式回写、丢弃 result（使 handler 走专用 cyber usage，而非正常 RecordUsage 重复扣费）。
 func TestForwardAsChatCompletions_BufferedCyberPolicyNoFailover(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
@@ -62,7 +62,7 @@ func TestForwardAsChatCompletions_BufferedCyberPolicyNoFailover(t *testing.T) {
 
 	result, err := svc.ForwardAsChatCompletions(context.Background(), c, compatCyberOAuthAccount(), body, "", "gpt-5.5")
 	require.Error(t, err)
-	require.Nil(t, result, "cyber must drop result so handler writes tokens=0 free row, not RecordUsage")
+	require.Nil(t, result, "cyber must drop result so handler records dedicated cyber usage, not normal RecordUsage")
 	var failoverErr *UpstreamFailoverError
 	require.False(t, errors.As(err, &failoverErr), "cyber must NOT trigger failover")
 	mark := GetOpsCyberPolicy(c)
@@ -72,7 +72,7 @@ func TestForwardAsChatCompletions_BufferedCyberPolicyNoFailover(t *testing.T) {
 }
 
 // I-1: chat completions 流式客户端 cyber 命中——result 必须被丢弃（返回 nil），
-// 使 handler forwardErrored 分支走 tokens=0 免费行，而非 RecordUsage(CyberBlocked) 扣费。
+// 使 handler forwardErrored 分支走专用 cyber usage，而非 RecordUsage(CyberBlocked) 重复扣费。
 func TestForwardAsChatCompletions_StreamCyberPolicyDropsResult(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
@@ -105,7 +105,7 @@ func TestForwardAsAnthropic_BufferedCyberPolicyNoFailover(t *testing.T) {
 
 	result, err := svc.ForwardAsAnthropic(context.Background(), c, compatCyberOAuthAccount(), body, "", "gpt-5.5")
 	require.Error(t, err)
-	require.Nil(t, result, "cyber must drop result so handler writes tokens=0 free row")
+	require.Nil(t, result, "cyber must drop result so handler records dedicated cyber usage")
 	var failoverErr *UpstreamFailoverError
 	require.False(t, errors.As(err, &failoverErr), "cyber must NOT trigger failover")
 	mark := GetOpsCyberPolicy(c)

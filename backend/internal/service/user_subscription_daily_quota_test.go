@@ -3,12 +3,136 @@ package service
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/dgraph-io/ristretto"
 	"github.com/stretchr/testify/require"
 )
+
+type inFlightSubscriptionLoadRepo struct {
+	userSubRepoNoop
+	started chan struct{}
+	release chan struct{}
+	calls   atomic.Int32
+}
+
+func (r *inFlightSubscriptionLoadRepo) GetActiveByUserIDAndGroupID(context.Context, int64, int64) (*UserSubscription, error) {
+	if r.calls.Add(1) == 1 {
+		close(r.started)
+		<-r.release
+	}
+	return &UserSubscription{
+		ID:        1,
+		UserID:    10,
+		GroupID:   20,
+		Status:    SubscriptionStatusActive,
+		ExpiresAt: time.Now().Add(time.Hour),
+	}, nil
+}
+
+func TestGetActiveSubscription_InvalidationFencesInFlightLoad(t *testing.T) {
+	repo := &inFlightSubscriptionLoadRepo{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	svc := NewSubscriptionService(groupRepoNoop{}, repo, nil, nil, nil)
+	cache, err := ristretto.NewCache(&ristretto.Config{NumCounters: 1e4, MaxCost: 1e3, BufferItems: 64})
+	require.NoError(t, err)
+	svc.subCacheL1 = cache
+	svc.subCacheTTL = time.Minute
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = svc.GetActiveSubscription(context.Background(), 10, 20)
+		close(done)
+	}()
+
+	<-repo.started
+	svc.InvalidateSubCacheSync(10, 20)
+	close(repo.release)
+	<-done
+	cache.Wait()
+
+	_, err = svc.GetActiveSubscription(context.Background(), 10, 20)
+	require.NoError(t, err)
+	require.Equal(t, int32(2), repo.calls.Load(), "失效前启动的旧查询不能在失效后重新写入 L1")
+}
+
+type blockingSubscriptionCache struct {
+	mu         sync.Mutex
+	value      any
+	setStarted chan struct{}
+	releaseSet chan struct{}
+	delCalled  chan struct{}
+	setOnce    sync.Once
+	delOnce    sync.Once
+}
+
+func (c *blockingSubscriptionCache) Get(any) (any, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.value, c.value != nil
+}
+
+func (c *blockingSubscriptionCache) SetWithTTL(_ any, value any, _ int64, _ time.Duration) bool {
+	c.setOnce.Do(func() { close(c.setStarted) })
+	<-c.releaseSet
+	c.mu.Lock()
+	c.value = value
+	c.mu.Unlock()
+	return true
+}
+
+func (c *blockingSubscriptionCache) Del(any) {
+	c.delOnce.Do(func() { close(c.delCalled) })
+	c.mu.Lock()
+	c.value = nil
+	c.mu.Unlock()
+}
+
+func (c *blockingSubscriptionCache) Wait() {}
+
+func TestGetActiveSubscription_InvalidationWinsAgainstSetInProgress(t *testing.T) {
+	repo := &inFlightSubscriptionLoadRepo{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	close(repo.release)
+	cache := &blockingSubscriptionCache{
+		setStarted: make(chan struct{}),
+		releaseSet: make(chan struct{}),
+		delCalled:  make(chan struct{}),
+	}
+	svc := NewSubscriptionService(groupRepoNoop{}, repo, nil, nil, nil)
+	svc.subCacheL1 = cache
+	svc.subCacheTTL = time.Minute
+
+	loadDone := make(chan struct{})
+	go func() {
+		_, _ = svc.GetActiveSubscription(context.Background(), 10, 20)
+		close(loadDone)
+	}()
+	<-cache.setStarted
+
+	invalidateDone := make(chan struct{})
+	go func() {
+		svc.InvalidateSubCacheSync(10, 20)
+		close(invalidateDone)
+	}()
+	select {
+	case <-cache.delCalled:
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(cache.releaseSet)
+	<-loadDone
+	<-invalidateDone
+
+	_, ok := cache.Get(subCacheKey(10, 20))
+	require.False(t, ok, "失效必须排在已经通过 generation 检查的旧缓存写入之后")
+}
 
 type dailyResetTrackingUserSubRepo struct {
 	userSubRepoNoop

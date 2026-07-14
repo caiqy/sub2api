@@ -1,7 +1,6 @@
 package service
 
-// 本文件由 openai_gateway_service.go 纯移动拆分而来：用量记录、计费成本计算与
-// Codex 用量快照。仅做代码搬迁，无任何行为变更。
+// 本文件承载 OpenAI 用量记录、计费成本计算与 Codex 用量快照。
 
 import (
 	"context"
@@ -58,6 +57,8 @@ type CyberPolicyUsageInput struct {
 	IPAddress          string
 	RequestPayloadHash string
 	APIKeyService      APIKeyQuotaUpdater
+	QuotaPlatform      string
+	DetailSnapshot     *UsageLogDetailSnapshot
 	ChannelUsageFields
 }
 
@@ -80,6 +81,10 @@ func (s *OpenAIGatewayService) RecordCyberPolicyUsageLog(ctx context.Context, in
 			OutputTokens: in.OutputTokens,
 		},
 	}
+	quotaPlatform := in.QuotaPlatform
+	if quotaPlatform == "" {
+		quotaPlatform = QuotaPlatform(ctx, in.APIKey)
+	}
 	if err := s.RecordUsage(ctx, &OpenAIRecordUsageInput{
 		Result:             result,
 		APIKey:             in.APIKey,
@@ -92,6 +97,8 @@ func (s *OpenAIGatewayService) RecordCyberPolicyUsageLog(ctx context.Context, in
 		IPAddress:          in.IPAddress,
 		RequestPayloadHash: in.RequestPayloadHash,
 		APIKeyService:      in.APIKeyService,
+		QuotaPlatform:      quotaPlatform,
+		DetailSnapshot:     in.DetailSnapshot,
 		ChannelUsageFields: in.ChannelUsageFields,
 		CyberBlocked:       true,
 	}); err != nil {

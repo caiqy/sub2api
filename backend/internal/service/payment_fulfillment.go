@@ -565,7 +565,8 @@ func (s *PaymentService) ensurePaymentSubscriptionAssigned(ctx context.Context, 
 				_ = tx.Rollback()
 				claimed, checkErr := hasPaymentSubscriptionAssignmentAudit(ctx, s.entClient, o.ID)
 				if checkErr == nil && claimed {
-					return s.subscriptionSvc.invalidateSubscriptionCaches(o.UserID, groupID)
+					s.subscriptionSvc.invalidateSubscriptionCachesBestEffort(o.UserID, groupID)
+					return nil
 				}
 			}
 			return fmt.Errorf("record subscription assignment audit: %w", err)
@@ -579,9 +580,7 @@ func (s *PaymentService) ensurePaymentSubscriptionAssigned(ctx context.Context, 
 	}
 	// Assignment cache invalidation is deferred while this transaction is open,
 	// then performed synchronously against the committed subscription.
-	if err := s.subscriptionSvc.invalidateSubscriptionCaches(o.UserID, groupID); err != nil {
-		return fmt.Errorf("invalidate subscription cache after fulfillment: %w", err)
-	}
+	s.subscriptionSvc.invalidateSubscriptionCachesBestEffort(o.UserID, groupID)
 	return nil
 }
 
