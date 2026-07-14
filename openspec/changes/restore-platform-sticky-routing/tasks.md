@@ -7,6 +7,7 @@
 
 - [x] 2.1 删除 OpenAI hydration wrapper 的重复 release，保留通用选择结果的单一所有权。
 - [x] 2.2 运行聚焦服务测试和受影响 package 测试，确认 Sticky 默认启用、平台隔离、模型路由与单次 release。
+- [ ] 2.3 共享有效分组解析器，并覆盖初始、invalid-request 与 smart-retry 的跨平台 fallback Sticky 边界。
 
 ## 3. 提交
 

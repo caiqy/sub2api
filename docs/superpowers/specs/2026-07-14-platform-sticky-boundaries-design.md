@@ -30,7 +30,7 @@ canonical_spec: openspec
 
 ### Gateway 调度
 
-保留 `GatewayService` 的平台 helper，所有通用会话缓存读写和调度绑定均通过它执行。无 `ConcurrencyService` 时，先以模型路由集合约束 Sticky 账号；不在集合内时回退现有 legacy 选择，使模型路由优先于旧会话绑定。
+保留 `GatewayService` 的平台 helper，所有通用会话缓存读写和调度绑定均通过它执行。`GatewayService.ResolveGatewayGroup` 作为 internal 包共享的有效分组解析入口，由 scheduler 与 handler 共同使用，统一处理 Claude Code fallback、循环检测和强制平台绕过。handler 在初始请求及 invalid-request fallback 后重新解析，并让 resolved group ID/platform 驱动 session key、预读、调度、smart-retry 清理和所有绑定。无 `ConcurrencyService` 时，先以模型路由集合约束 Sticky 账号；不在集合内时回退现有 legacy 选择，使模型路由优先于旧会话绑定。
 
 ### OpenAI HTTP 与 WebSocket
 
@@ -51,10 +51,12 @@ WS V2 和 ingress 在每次请求的状态初始化处取得受控 state-store�
 - OpenAI WS 关闭 Sticky 时不再复用跨请求连接与 turn state，符合确认的完整 bypass 语义。
 - 状态存储还可能被未来功能用于非 Sticky 数据；本次只在已识别的请求路径使用受控 accessor，避免全局修改 store 的语义。
 - compat 服务的最终平台可能为 Antigravity，统一使用 Anthropic 开关以匹配 Gateway 平台映射。
+- 有效分组解析只保留一份实现，避免 handler 与 scheduler 在多级 fallback 或 invalid-request fallback 时发生平台漂移。
 
 ## 测试与验证
 
 - HTTP response-id、WS V2、WS ingress 分别验证关闭时 state store 零读写，开启时保留原行为。
 - Compat 在 Gemini、Anthropic、Antigravity 三个平台关闭时验证会话缓存零读写，并验证正常候选选择仍可用。
 - 保留并运行现有平台隔离、模型路由、默认开启、Antigravity 清理和 hydration 单次 release 回归测试。
+- 使用真实 Messages 路径覆盖跨平台 Claude Code fallback 的 lookup、成功 bind、smart-retry 清理及 invalid-request 二次 fallback。
 - 运行受影响服务 package、`go build ./...`；在后续 body replay 和测试夹具批次完成后运行完整 unit/integration 门禁。

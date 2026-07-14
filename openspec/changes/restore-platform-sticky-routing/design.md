@@ -19,6 +19,8 @@
 
 添加最小平台判断 helper：nil service/config 与未知平台保持默认启用；Gemini、OpenAI、Anthropic/Antigravity 分别读取各自配置。所有已拆分的 Sticky 缓存读取、绑定、prefetch 和负载感知入口复用该判断；关闭时记录既有结构化 bypass 日志。
 
+Scheduler 与 handler 共享同一个有效分组解析入口，统一处理 Claude Code fallback、循环检测和强制平台绕过。初始请求与 invalid-request fallback 后均重新解析，resolved group ID/platform 驱动 session key、调度、smart-retry 清理和全部绑定。
+
 ### 2. 保持模型路由候选集合
 
 当 `ConcurrencyService` 不可用时，从当前已筛选的 routing account 集合选择，而不是退回全量账号列表。该路径不引入新的调度策略。

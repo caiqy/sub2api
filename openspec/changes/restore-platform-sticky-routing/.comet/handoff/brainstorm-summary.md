@@ -10,6 +10,7 @@
 - `GeminiMessagesCompatService` 按最终解析的平台（Gemini、Anthropic、Antigravity）遵守对应 Sticky 开关，关闭时不读取、写入或刷新会话缓存。
 - 采用各 service 的最小平台守卫：Gateway 保持现有 helper；OpenAI WS 通过受控 sticky state-store accessor；compat 在解析平台后一次确定 Sticky 是否启用。不新增共享服务、依赖或公共接口。
 - 架构已确认：HTTP、WS V2、WS ingress、调度、compat 与 Antigravity 清理分别在入口处受对应平台开关控制；默认开启语义和现有状态存储实现保持不变。
+- 实施中确认 scheduler 与 handler 必须共享有效分组解析器；初始请求和 invalid-request fallback 后都重新解析，并使用 resolved group ID/platform 处理 session key、调度、smart-retry 清理和所有绑定。
 
 ## 关键取舍与风险
 
