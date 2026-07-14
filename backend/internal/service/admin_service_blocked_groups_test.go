@@ -74,7 +74,7 @@ func TestAdminServiceUpdateUserSavesHiddenUIResources(t *testing.T) {
 
 	require.NoError(t, err)
 	require.True(t, updated.HiddenPurchasePage)
-	require.Equal(t, []int64{CustomMenuResourceID("billing-help"), CustomMenuResourceID("docs")}, updated.HiddenCustomMenuResourceIDs)
+	require.ElementsMatch(t, []int64{CustomMenuResourceID("billing-help"), CustomMenuResourceID("docs")}, updated.HiddenCustomMenuResourceIDs)
 	require.True(t, repo.hiddenPurchase[42])
 	require.Equal(t, []string{"docs", "billing-help"}, repo.hiddenCustomMenuIDs[42])
 	require.Equal(t, []int64{42}, invalidator.userIDs)

@@ -164,14 +164,6 @@ func (s *userRepoStub) GetHiddenUIResources(ctx context.Context, userID int64) (
 	return s.hiddenPurchase[userID], customMenuIDsToResourceIDs(s.hiddenCustomMenuIDs[userID]), nil
 }
 
-func customMenuIDsToResourceIDs(ids []string) []int64 {
-	resourceIDs := make([]int64, 0, len(ids))
-	for _, id := range ids {
-		resourceIDs = append(resourceIDs, CustomMenuResourceID(id))
-	}
-	return resourceIDs
-}
-
 func (s *userRepoStub) SetHiddenUIResources(ctx context.Context, userID int64, hidePurchase bool, customMenuIDs []string) error {
 	if s.hiddenPurchase == nil {
 		s.hiddenPurchase = make(map[int64]bool)
