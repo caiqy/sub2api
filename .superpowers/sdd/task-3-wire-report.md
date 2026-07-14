@@ -27,8 +27,8 @@
 - A second generation produced the same `wire_gen.go` blob hash: `9a8199f88b7c06b2df1c71ccdd7c753eac842f79`.
 - `cd backend && go test ./cmd/server -run '^$'` passed.
 - `cd backend && go test ./internal/service -run '^TestGatewayService_'` passed.
-- `cd backend && go test -tags unit ./internal/service -run '^TestBatchImageWorkerRuntime_'` could not build unrelated existing unit tests: missing `customMenuIDsToResourceIDs`, `adminServiceImpl.openaiProbeControl`, and `adminServiceImpl.applyProbeToggleSideEffects`.
+- unit-tag 测试桩接口与 probe toggle side effects 修复后，`go test -tags unit ./internal/service -run '^(TestAdminService_.*ProbeToggle.*|TestBatchImageWorkerRuntime_.*)$' -count=1` 通过。
 
 ## Generated Diff
 
-- `wire_gen.go` was not manually edited. Its generated diff restores the Batch Image worker construction, moves Batch Image construction nearer to its handler use, and updates the stale `ProvideUserPlatformQuotaUsageFlusher` call to the current `NewUserPlatformQuotaUsageFlusher` declaration already present in `service.ProviderSet`.
+- `wire_gen.go` 未手工编辑。生成结果恢复 Batch Image worker 图，并调用 `ProvideUserPlatformQuotaUsageFlusher`，保留其 `Start()` 启动语义。连续两次生成 SHA-256 均为 `48F0188F1CEE9CD50BDD34910517834B1977FD90A447B29637E4A3EC7334E4EB`。
