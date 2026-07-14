@@ -27,6 +27,8 @@ func TestGrokMediaRequestInfo_ReleaseText(t *testing.T) {
 		Prompt:         "large prompt",
 		InputImageURLs: []string{"https://example.com/image.png"},
 		MaskImageURL:   "https://example.com/mask.png",
+		Uploads:        []OpenAIImagesUpload{{FileName: "image.png", Data: []byte("image")}},
+		MaskUpload:     &OpenAIImagesUpload{FileName: "mask.png", Data: []byte("mask")},
 	}
 
 	request.ReleaseText()
@@ -34,6 +36,8 @@ func TestGrokMediaRequestInfo_ReleaseText(t *testing.T) {
 	require.Empty(t, request.Prompt)
 	require.Nil(t, request.InputImageURLs)
 	require.Empty(t, request.MaskImageURL)
+	require.Nil(t, request.Uploads[0].Data)
+	require.Nil(t, request.MaskUpload.Data)
 }
 
 type grokPreviewAccountRepo struct {

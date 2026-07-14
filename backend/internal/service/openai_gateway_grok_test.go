@@ -5,6 +5,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"mime/multipart"
@@ -233,6 +234,7 @@ func TestExtractGrokMediaModelSupportsJSONAndMultipart(t *testing.T) {
 }
 
 func TestParseGrokMediaRequestBuildsMultipartModerationBody(t *testing.T) {
+	pngData := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 	require.NoError(t, writer.WriteField("prompt", "edit this private image"))
@@ -242,7 +244,7 @@ func TestParseGrokMediaRequestBuildsMultipartModerationBody(t *testing.T) {
 	partHeader.Set("Content-Type", "image/png")
 	part, err := writer.CreatePart(partHeader)
 	require.NoError(t, err)
-	_, err = part.Write([]byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a})
+	_, err = part.Write(pngData)
 	require.NoError(t, err)
 	require.NoError(t, writer.Close())
 
@@ -253,7 +255,11 @@ func TestParseGrokMediaRequestBuildsMultipartModerationBody(t *testing.T) {
 	moderationBody := info.ModerationBody()
 	require.NotEmpty(t, moderationBody)
 	require.Equal(t, "edit this private image", gjson.GetBytes(moderationBody, "prompt").String())
-	require.True(t, strings.HasPrefix(gjson.GetBytes(moderationBody, "images.0.image_url").String(), "data:image/"))
+	imageURL := gjson.GetBytes(moderationBody, "images.0.image_url").String()
+	encoded := strings.TrimPrefix(imageURL, "data:image/png;base64,")
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	require.NoError(t, err)
+	require.Equal(t, pngData, decoded)
 }
 
 func TestParseGrokMediaVideoRequestResolution(t *testing.T) {
@@ -374,6 +380,7 @@ func TestForwardGrokMediaImagesGenerationStripsUnsupportedSize(t *testing.T) {
 func TestForwardGrokMediaImagesEditMultipartConvertsToJSON(t *testing.T) {
 	t.Setenv(xai.EnvAllowUnsafeURLOverrides, "true")
 	gin.SetMode(gin.TestMode)
+	pngData := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}
 
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
@@ -384,7 +391,7 @@ func TestForwardGrokMediaImagesEditMultipartConvertsToJSON(t *testing.T) {
 	partHeader.Set("Content-Type", "image/png")
 	part, err := writer.CreatePart(partHeader)
 	require.NoError(t, err)
-	_, err = part.Write([]byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a})
+	_, err = part.Write(pngData)
 	require.NoError(t, err)
 	require.NoError(t, writer.Close())
 
@@ -420,7 +427,26 @@ func TestForwardGrokMediaImagesEditMultipartConvertsToJSON(t *testing.T) {
 	require.True(t, json.Valid(upstream.lastBody))
 	require.Equal(t, "grok-imagine-edit", gjson.GetBytes(upstream.lastBody, "model").String())
 	require.Equal(t, "edit this private image", gjson.GetBytes(upstream.lastBody, "prompt").String())
-	require.True(t, strings.HasPrefix(gjson.GetBytes(upstream.lastBody, "image.image_url").String(), "data:image/png;base64,"))
+	imageURL := gjson.GetBytes(upstream.lastBody, "image.image_url").String()
+	encoded := strings.TrimPrefix(imageURL, "data:image/png;base64,")
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	require.NoError(t, err)
+	require.Equal(t, pngData, decoded)
+}
+
+func TestPrepareGrokMediaForwardBodyRejectsOversizedMultipartUpload(t *testing.T) {
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	part, err := writer.CreateFormFile("image", "oversized.png")
+	require.NoError(t, err)
+	_, err = part.Write(bytes.Repeat([]byte{'x'}, openAIImageMaxUploadPartSize+1))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	_, _, err = prepareGrokMediaForwardBody(GrokMediaEndpointImagesEdits, buf.Bytes(), writer.FormDataContentType())
+	var maxBytesErr *http.MaxBytesError
+	require.ErrorAs(t, err, &maxBytesErr)
+	require.Equal(t, int64(openAIImageMaxUploadPartSize), maxBytesErr.Limit)
 }
 
 func TestForwardGrokMediaVideoGenerationReturnsUsageAndResponseID(t *testing.T) {

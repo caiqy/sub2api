@@ -17,6 +17,7 @@
 
 - raw chat 入口在解析 model 前复用现有 `openAIRequestBodyBytes`；相比修改 fallback 调用方，该入口同时覆盖所有传空 body、依赖 bound handle 的调用。
 - Grok raw parser把已读取 bytes保存在现有上传值中，data URL helper优先沿用 `FileHeader`，缺失时回退 raw bytes；相比构造伪 `FileHeader`，该方案不需要临时文件或新所有权。
+- raw parser 读取 `20MB+1` 字节并显式拒绝超限 part；请求 metadata 提取完成后清除 `Data`，避免二进制副本跨越上游等待阶段。
 - silent-refusal 仅修正测试 fixture 的 canonical header key，不修改生产代码。
 
 ## Risks / Trade-offs
