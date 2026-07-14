@@ -22,6 +22,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossT
 	gin.SetMode(gin.TestMode)
 
 	cfg := &config.Config{}
+	cfg.Gateway.Sticky.OpenAI.Enabled = true
 	cfg.Security.URLAllowlist.Enabled = false
 	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 	cfg.Gateway.OpenAIWS.Enabled = true
@@ -46,17 +47,21 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossT
 		waitWhenEmpty: true,
 		cancelEvent:   []byte(`{"type":"response.canceled","response":{"id":"resp_ingress_turn_3"}}`),
 	}
-	captureDialer := &openAIWSCaptureDialer{conn: captureConn}
+	handshake := make(http.Header)
+	handshake.Set(openAIWSTurnStateHeader, "turn_state_ingress")
+	captureDialer := &openAIWSCaptureDialer{conn: captureConn, handshake: handshake}
 	pool := newOpenAIWSConnPool(cfg)
 	pool.setClientDialerForTest(captureDialer)
+	store := &openAIWSStateStoreSpy{}
 
 	svc := &OpenAIGatewayService{
-		cfg:              cfg,
-		httpUpstream:     &httpUpstreamRecorder{},
-		cache:            &stubGatewayCache{},
-		openaiWSResolver: NewOpenAIWSProtocolResolver(cfg),
-		toolCorrector:    NewCodexToolCorrector(),
-		openaiWSPool:     pool,
+		cfg:                cfg,
+		httpUpstream:       &httpUpstreamRecorder{},
+		cache:              &stubGatewayCache{},
+		openaiWSResolver:   NewOpenAIWSProtocolResolver(cfg),
+		toolCorrector:      NewCodexToolCorrector(),
+		openaiWSPool:       pool,
+		openaiWSStateStore: store,
 	}
 
 	account := &Account{
@@ -101,6 +106,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossT
 		req := r.Clone(r.Context())
 		req.Header = req.Header.Clone()
 		req.Header.Set("User-Agent", "unit-test-agent/1.0")
+		req.Header.Set("session_id", "ingress-state-enabled")
 		ginCtx.Request = req
 
 		readCtx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
@@ -141,19 +147,19 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossT
 		return message
 	}
 
-	writeMessage(`{"type":"response.create","model":"gpt-5.1","stream":false}`)
+	writeMessage(`{"type":"response.create","model":"gpt-5.1","stream":false,"store":false}`)
 	firstTurnEvent := readMessage()
 	require.Equal(t, "response.completed", gjson.GetBytes(firstTurnEvent, "type").String())
 	require.Equal(t, "resp_ingress_turn_1", gjson.GetBytes(firstTurnEvent, "response.id").String())
 
-	writeMessage(`{"type":"response.create","model":"gpt-5.1","stream":false,"previous_response_id":"resp_ingress_turn_1"}`)
+	writeMessage(`{"type":"response.create","model":"gpt-5.1","stream":false,"store":false,"previous_response_id":"resp_ingress_turn_1"}`)
 	secondTurnEvent := readMessage()
 	require.Equal(t, "response.completed", gjson.GetBytes(secondTurnEvent, "type").String())
 	require.Equal(t, "resp_ingress_turn_2", gjson.GetBytes(secondTurnEvent, "response.id").String())
 	require.True(t, <-turnWSModeCh, "首轮 turn 应标记为 WS 模式")
 	require.True(t, <-turnWSModeCh, "第二轮 turn 应标记为 WS 模式")
 
-	writeMessage(`{"type":"response.create","model":"gpt-5.1","stream":true}`)
+	writeMessage(`{"type":"response.create","model":"gpt-5.1","stream":true,"store":false}`)
 	createdEvent := readMessage()
 	require.Equal(t, "response.created", gjson.GetBytes(createdEvent, "type").String())
 	timeoutEvent := readMessage()
@@ -175,6 +181,13 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossT
 	require.Equal(t, 1, captureDialer.DialCount(), "同一 ingress 会话应保持同一上游连接")
 	require.Len(t, captureConn.writes, 4, "应向同一上游连接发送三轮 response.create 和一次 response.cancel")
 	require.Equal(t, "response.cancel", captureConn.writes[3]["type"])
+	require.NotEmpty(t, store.getResponseConnCalls)
+	require.NotEmpty(t, store.bindResponseCalls)
+	require.NotEmpty(t, store.bindResponseConnCalls)
+	require.NotEmpty(t, store.getTurnStateCalls)
+	require.NotEmpty(t, store.bindTurnStateCalls)
+	require.NotEmpty(t, store.getSessionConnCalls)
+	require.NotEmpty(t, store.bindSessionConnCalls)
 }
 
 func TestOpenAIGatewayService_StickyDisabledIngressSkipsStateStore(t *testing.T) {
@@ -238,13 +251,13 @@ func TestOpenAIGatewayService_StickyDisabledIngressSkipsStateStore(t *testing.T)
 	require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
 	require.NoError(t, <-serverErrCh)
 
-	require.Zero(t, store.bindResponseCalls["resp_new_1"])
-	require.Zero(t, store.bindResponseConnCalls["resp_new_1"])
-	require.Zero(t, store.getResponseConnCalls["resp_prev_1"])
-	require.Zero(t, store.bindTurnStateCalls["sticky-disabled-ingress"])
-	require.Zero(t, store.getTurnStateCalls["sticky-disabled-ingress"])
-	require.Zero(t, store.bindSessionConnCalls["sticky-disabled-ingress"])
-	require.Zero(t, store.getSessionConnCalls["sticky-disabled-ingress"])
+	require.Empty(t, store.bindResponseCalls)
+	require.Empty(t, store.bindResponseConnCalls)
+	require.Empty(t, store.getResponseConnCalls)
+	require.Empty(t, store.bindTurnStateCalls)
+	require.Empty(t, store.getTurnStateCalls)
+	require.Empty(t, store.bindSessionConnCalls)
+	require.Empty(t, store.getSessionConnCalls)
 }
 
 func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_FollowupCreateCanOmitModel(t *testing.T) {

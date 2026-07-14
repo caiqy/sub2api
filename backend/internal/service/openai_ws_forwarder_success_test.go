@@ -221,13 +221,64 @@ func TestOpenAIGatewayService_StickyDisabledWSv2SkipsStateStore(t *testing.T) {
 	result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5.1","stream":false,"store":false,"previous_response_id":"resp_prev_1","input":[{"type":"input_text","text":"hello"}]}`))
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	require.Zero(t, store.bindResponseCalls["resp_new_1"])
-	require.Zero(t, store.bindResponseConnCalls["resp_new_1"])
-	require.Zero(t, store.getResponseConnCalls["resp_prev_1"])
-	require.Zero(t, store.bindTurnStateCalls["sticky-disabled-wsv2"])
-	require.Zero(t, store.getTurnStateCalls["sticky-disabled-wsv2"])
-	require.Zero(t, store.bindSessionConnCalls["sticky-disabled-wsv2"])
-	require.Zero(t, store.getSessionConnCalls["sticky-disabled-wsv2"])
+	require.Empty(t, store.bindResponseCalls)
+	require.Empty(t, store.bindResponseConnCalls)
+	require.Empty(t, store.getResponseConnCalls)
+	require.Empty(t, store.bindTurnStateCalls)
+	require.Empty(t, store.getTurnStateCalls)
+	require.Empty(t, store.bindSessionConnCalls)
+	require.Empty(t, store.getSessionConnCalls)
+}
+
+func TestOpenAIGatewayService_StickyDisabledWSv2SkipsSessionConnStateStore(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade websocket failed: %v", err)
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		var request map[string]any
+		if err := conn.ReadJSON(&request); err != nil {
+			t.Errorf("read ws request failed: %v", err)
+			return
+		}
+		require.NoError(t, conn.WriteJSON(map[string]any{"type": "response.completed", "response": map[string]any{"id": "resp_session_1", "model": "gpt-5.1", "usage": map[string]any{"input_tokens": 1, "output_tokens": 1}}}))
+	}))
+	defer wsServer.Close()
+
+	cfg := &config.Config{}
+	cfg.Gateway.Sticky.OpenAI.Enabled = false
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+	c.Request.Header.Set("session_id", "sticky-disabled-session-conn")
+	account := &Account{ID: 11, Name: "openai-ws-session-disabled", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test", "base_url": wsServer.URL}, Extra: map[string]any{"responses_websockets_v2_enabled": true}}
+	store := &openAIWSStateStoreSpy{sessionConnections: map[string]string{"unused": "conn_session"}}
+	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: &httpUpstreamRecorder{}, cache: &stubGatewayCache{}, openaiWSResolver: NewOpenAIWSProtocolResolver(cfg), toolCorrector: NewCodexToolCorrector(), openaiWSStateStore: store}
+
+	result, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5.1","stream":false,"store":false,"input":[{"type":"input_text","text":"hello"}]}`))
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Empty(t, store.bindResponseCalls)
+	require.Empty(t, store.bindResponseConnCalls)
+	require.Empty(t, store.getResponseConnCalls)
+	require.Empty(t, store.bindTurnStateCalls)
+	require.Empty(t, store.getTurnStateCalls)
+	require.Empty(t, store.bindSessionConnCalls)
+	require.Empty(t, store.getSessionConnCalls)
 }
 
 func TestOpenAIGatewayService_Forward_WSv2_UsesPatchedBodyAfterValidationDecode(t *testing.T) {
@@ -1052,6 +1103,7 @@ func TestOpenAIGatewayService_Forward_WSv2_TurnStateAndMetadataReplayOnReconnect
 	defer wsServer.Close()
 
 	cfg := &config.Config{}
+	cfg.Gateway.Sticky.OpenAI.Enabled = true
 	cfg.Security.URLAllowlist.Enabled = false
 	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 	cfg.Gateway.OpenAIWS.Enabled = true
