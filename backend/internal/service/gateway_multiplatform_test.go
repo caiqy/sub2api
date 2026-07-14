@@ -3797,7 +3797,7 @@ func TestGatewayService_ResolveGatewayGroup_DetectsFallbackCycle(t *testing.T) {
 		groupRepo: groupRepo,
 	}
 
-	gotGroup, gotID, err := svc.resolveGatewayGroup(ctx, &groupID)
+	gotGroup, gotID, err := svc.ResolveGatewayGroup(ctx, &groupID)
 	require.Error(t, err)
 	require.Nil(t, gotGroup)
 	require.Nil(t, gotID)
