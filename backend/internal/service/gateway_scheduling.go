@@ -37,7 +37,7 @@ func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context
 	if hasForcePlatform && forcePlatform != "" {
 		platform = forcePlatform
 	} else if groupID != nil {
-		group, resolvedGroupID, err := s.resolveGatewayGroup(ctx, groupID)
+		group, resolvedGroupID, err := s.ResolveGatewayGroup(ctx, groupID)
 		if err != nil {
 			return nil, err
 		}
@@ -842,9 +842,13 @@ func (s *GatewayService) routingAccountIDsForRequest(ctx context.Context, groupI
 	return ids
 }
 
-func (s *GatewayService) resolveGatewayGroup(ctx context.Context, groupID *int64) (*Group, *int64, error) {
+// ResolveGatewayGroup is the single authority for handler and scheduler effective-group resolution.
+func (s *GatewayService) ResolveGatewayGroup(ctx context.Context, groupID *int64) (*Group, *int64, error) {
 	if groupID == nil {
 		return nil, nil, nil
+	}
+	if forcePlatform, ok := ctx.Value(ctxkey.ForcePlatform).(string); ok && forcePlatform != "" {
+		return nil, groupID, nil
 	}
 
 	currentID := *groupID
@@ -880,12 +884,7 @@ func (s *GatewayService) checkClaudeCodeRestriction(ctx context.Context, groupID
 		return nil, groupID, nil
 	}
 
-	// 强制平台模式不检查 Claude Code 限制
-	if forcePlatform, hasForcePlatform := ctx.Value(ctxkey.ForcePlatform).(string); hasForcePlatform && forcePlatform != "" {
-		return nil, groupID, nil
-	}
-
-	group, resolvedID, err := s.resolveGatewayGroup(ctx, groupID)
+	group, resolvedID, err := s.ResolveGatewayGroup(ctx, groupID)
 	if err != nil {
 		return nil, nil, err
 	}

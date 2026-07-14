@@ -130,34 +130,24 @@ func (h *GatewayHandler) bindStickySessionForPlatform(ctx context.Context, platf
 }
 
 func (h *GatewayHandler) resolveStickyRoute(ctx context.Context, apiKey *service.APIKey) (*service.Group, *int64, string, error) {
-	groupID := apiKey.GroupID
+	group, groupID, err := h.gatewayService.ResolveGatewayGroup(ctx, apiKey.GroupID)
+	if err != nil {
+		return nil, nil, "", err
+	}
 	if platform, ok := ctx.Value(ctxkey.ForcePlatform).(string); ok && platform != "" {
 		return nil, groupID, platform, nil
 	}
-	if groupID == nil {
-		return nil, nil, service.PlatformAnthropic, nil
+	if group != nil {
+		return group, groupID, group.Platform, nil
 	}
+	return nil, groupID, service.PlatformAnthropic, nil
+}
 
-	currentID := *groupID
-	visited := map[int64]struct{}{}
-	for {
-		if _, seen := visited[currentID]; seen {
-			return nil, nil, "", fmt.Errorf("fallback group cycle detected")
-		}
-		visited[currentID] = struct{}{}
-
-		group, err := h.gatewayService.ResolveGroupByID(ctx, currentID)
-		if err != nil {
-			return nil, nil, "", err
-		}
-		if !group.ClaudeCodeOnly || service.IsClaudeCodeClient(ctx) {
-			return group, &currentID, group.Platform, nil
-		}
-		if group.FallbackGroupID == nil {
-			return nil, nil, "", service.ErrClaudeCodeOnly
-		}
-		currentID = *group.FallbackGroupID
+func stickySessionKeyForPlatform(platform, sessionHash string) string {
+	if platform == service.PlatformGemini && sessionHash != "" {
+		return "gemini:" + sessionHash
 	}
+	return sessionHash
 }
 
 func (h *GatewayHandler) acquireUserGroupSlot(
@@ -395,10 +385,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		zap.String("metadata_user_id_raw", parsedReq.MetadataUserID),
 	)
 
-	sessionKey := sessionHash
-	if platform == service.PlatformGemini && sessionHash != "" {
-		sessionKey = "gemini:" + sessionHash
-	}
+	sessionKey := stickySessionKeyForPlatform(platform, sessionHash)
 
 	// 查询粘性会话绑定的账号 ID
 	var sessionBoundAccountID int64
@@ -574,7 +561,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					reqStream,
 					effectiveBody,
 					hasBoundSession,
-					service.WithForwardGeminiSession(derefGroupID(apiKey.GroupID), sessionKey),
+					service.WithForwardGeminiSession(derefGroupID(stickyGroupID), sessionKey),
 				)
 			} else {
 				result, err = h.geminiCompatService.Forward(requestCtx, c, account, body)
@@ -1093,7 +1080,18 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						ctx := context.WithValue(c.Request.Context(), ctxkey.ForcePlatform, "")
 						c.Request = c.Request.WithContext(ctx)
 						currentAPIKey = fallbackAPIKey
-						currentStickyGroupID = fallbackAPIKey.GroupID
+						_, currentStickyGroupID, platform, err = h.resolveStickyRoute(c.Request.Context(), fallbackAPIKey)
+						if err != nil {
+							h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error(), streamStarted)
+							return
+						}
+						sessionKey = stickySessionKeyForPlatform(platform, sessionHash)
+						sessionBoundAccountID = h.getCachedSessionAccountIDForPlatform(c.Request.Context(), platform, currentStickyGroupID, sessionKey)
+						hasBoundSession = sessionKey != "" && sessionBoundAccountID > 0
+						if hasBoundSession {
+							ctx := service.WithPrefetchedStickySession(c.Request.Context(), sessionBoundAccountID, derefGroupID(currentStickyGroupID), h.metadataBridgeEnabled())
+							c.Request = c.Request.WithContext(ctx)
+						}
 						currentSubscription = nil
 						fallbackUsed = true
 						retryWithFallback = true
