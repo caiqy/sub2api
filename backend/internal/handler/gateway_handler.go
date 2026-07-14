@@ -998,6 +998,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			service.SetOpsUpstreamAttempted(c, false)
 			if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
 				result, err = h.antigravityGatewayService.ForwardHandle(requestCtx, c, account, attemptHandle, hasBoundSession)
+			} else if account.Platform == service.PlatformGemini {
+				geminiBody, readErr := attemptParsedReq.Body.ReadAll()
+				if readErr != nil {
+					err = readErr
+				} else {
+					result, err = h.geminiCompatService.Forward(requestCtx, c, account, geminiBody)
+				}
 			} else {
 				result, err = h.gatewayService.Forward(requestCtx, c, account, attemptParsedReq)
 			}

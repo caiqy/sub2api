@@ -933,6 +933,13 @@ func TestGatewayHandler_MessagesPromptTooLongFallbackResolvesClaudeCodeOnlyGroup
 
 		require.Equal(t, http.StatusOK, rec.Code)
 		require.Equal(t, []int64{initialAccount.ID, finalAccount.ID}, upstream.accountIDs)
+		require.Len(t, upstream.requests, 2)
+		require.Equal(t, "/v1beta/models/claude-opus-4-6:generateContent", upstream.requests[1].URL.Path)
+		fallbackBody, err := io.ReadAll(upstream.requests[1].Body)
+		require.NoError(t, err)
+		require.True(t, gjson.GetBytes(fallbackBody, "contents").Exists())
+		require.False(t, gjson.GetBytes(fallbackBody, "messages").Exists())
+		require.Equal(t, "message", gjson.Get(rec.Body.String(), "type").String())
 		require.Contains(t, env.accountRepo.groupIDs, finalID)
 		require.NotEmpty(t, cache.getGroupIDs)
 		for _, groupID := range cache.getGroupIDs {
