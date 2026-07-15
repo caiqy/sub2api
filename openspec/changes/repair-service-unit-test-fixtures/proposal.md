@@ -21,5 +21,5 @@
 
 ## Impact
 
-- 仅修改 `backend/internal/service` 下 4 个测试文件。
+- 仅修改 `backend/internal/service` 下 5 个测试文件。
 - 不修改生产代码、公开 API、配置、数据库 schema、依赖或产品 spec。

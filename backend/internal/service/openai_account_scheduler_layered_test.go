@@ -579,6 +579,7 @@ func TestLayered_PreviousResponseStickyIgnoresNonOpenAIPlatform(t *testing.T) {
 		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
 		openaiWSStateStore: stateStore,
 	}
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
 	selection, decision, err := svc.SelectAccountWithSchedulerForCapability(
 		ctx,
 		&groupID,

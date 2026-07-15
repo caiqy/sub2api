@@ -1666,6 +1666,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LayeredRequirePrivacySe
 			},
 		}}, snapshotCfg),
 	}
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
 
 	selection, _, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "", "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
 	require.NoError(t, err)
