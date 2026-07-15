@@ -496,6 +496,16 @@ func TestGrokMedia_TextIsReleasedBeforeBlockedUpstream(t *testing.T) {
 			router.POST(tt.route, tt.handler)
 			recorder := httptest.NewRecorder()
 			done := make(chan struct{})
+			var releaseOnce sync.Once
+			release := func() { releaseOnce.Do(func() { close(upstream.release) }) }
+			t.Cleanup(func() {
+				release()
+				select {
+				case <-done:
+				case <-time.After(5 * time.Second):
+					t.Error("timed out waiting for Grok handler cleanup")
+				}
+			})
 			go func() { router.ServeHTTP(recorder, req); close(done) }()
 			select {
 			case <-upstream.started:
@@ -507,7 +517,7 @@ func TestGrokMedia_TextIsReleasedBeforeBlockedUpstream(t *testing.T) {
 			var after runtime.MemStats
 			runtime.ReadMemStats(&after)
 			require.LessOrEqual(t, after.HeapAlloc, before.HeapAlloc+uint64(12<<20), "blocked Grok request retained 20MB text")
-			close(upstream.release)
+			release()
 			select {
 			case <-done:
 			case <-time.After(5 * time.Second):
