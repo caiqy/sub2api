@@ -2,14 +2,15 @@
 
 - Change: `restore-local-test-gates`
 - Review mode: `standard`
-- Current plan task: `Task 3: 补齐 server 与 middleware 的 UserRepository test stub`
-- OpenSpec task: `1.3 让 server 与 middleware 测试 fixture 实现当前 UserRepository 接口，并运行两个 package 的 unit 测试。`
-- Stage: `done`
-- Base commit: `1bce5bd8d`
+- Current plan task: `Task 9: 隔离 admin usage stats 测试缓存`
+- OpenSpec task: `2.3 隔离 admin usage stats 测试的进程级缓存，并验证重复运行。`
+- Stage: `implementing`
+- Base commit: `84ee2fe04`
 - Review/fix rounds: `0`
-- Implementation commits: `f2c370d2f test: complete user repository stubs`; `55dba4275 test: update server package contracts`
-- Changed files: `backend/internal/server/api_contract_test.go`; `backend/internal/server/middleware/admin_auth_test.go`
-- Risk signals: `跨 package 测试 fixture；standard 任务级审查已通过一轮修复与复审。`
-- RED/GREEN evidence: `stub 缺失编译 RED；编译通过后暴露两个过期契约断言；更新测试期望后，完整 server 与 middleware unit 命令 GREEN。详见 .superpowers/sdd/task-3-report.md。`
-- Review: `初审 Important 已由一轮修复解决；复审 Approved。`
+- Risk signals: `临时文件资源生命周期；审查发现绑定 handle 的跨 failover 所有权回归。`
+- RED/GREEN evidence: `定向矩阵通过，但任务级审查发现生产 cleanup 缩短了 handler coordinator 的跨重试生命周期。`
+- Implementation commits: `df5aae61a fix: clean bound openai request body handles`; `fc752398c fix: preserve bound openai request bodies across retries`
+- Review findings: `生命周期与同一 handle 证据已通过；全仓矩阵仍有 Important：admin 进程级 usageStatsCache 污染与 Grok HeapAlloc 阈值波动的根因未完成验证，最终报告仍须收敛。`
+- User decision: `2026-07-15 用户明确授权继续修复，允许 standard 审查预算外的一轮 Task 4 修复与复审。`
+- Follow-up investigation: `用户确认继续；并行定位 admin usageStatsCache 与 Grok HeapAlloc 全套矩阵失败根因。`
 - Review/fix rounds: `1 / 1`

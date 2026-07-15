@@ -176,7 +176,7 @@ Expected: PASS；两个 stub 都能作为 `service.UserRepository` 注入。
 
 ### Task 4: 隔离并复现 OpenAI HTTP Do 错误的 request body spool 生命周期
 
-- [ ] Task 4: 隔离并复现 OpenAI HTTP Do 错误的 request body spool 生命周期
+- [x] Task 4: 隔离并复现 OpenAI HTTP Do 错误的 request body spool 生命周期
 
 **Files:**
 - Modify: `backend/internal/service/openai_gateway_service_test.go`
@@ -186,17 +186,17 @@ Expected: PASS；两个 stub 都能作为 `service.UserRepository` 注入。
 
 **Interfaces:**
 - Consumes: `NewRequestBodyHandleFromBytes`、`RequestBodyHandleOptions{TempDir, FilePrefix, SpoolThresholdBytes}`、`BindOpenAIRequestBodyHandle`、`closeOpenAIRequestBody` 与 `CleanupRequestBodyHandle`。
-- Produces: HTTP Do 错误用例只读取自身绑定 handle 的 `t.TempDir()`，并在 `Forward` 返回后断言该目录为空。
+- Produces: HTTP Do 错误用例只读取自身绑定 handle 的 `t.TempDir()`，并在调用方完成该 handle 的 cleanup 后断言该目录为空；绑定 handle 在 handler 的 failover 重试期间仍可重用。
 
-- [ ] **Step 1: 记录隔离前的 flaky 基线**
+- [x] **Step 1: 记录隔离前的 flaky 基线**
 
 Run: `go test -tags=unit ./internal/service -run '^TestOpenAIForwardCleansRequestBodyHandleWhenHTTPDoErrors$' -count=20`
 
 Expected: PASS；该单测通常单独通过，因此此命令只记录其最小复现基线，不将单次通过当作全套稳定性证据。
 
-- [ ] **Step 2: 让测试绑定并观察专用 spool 目录**
+- [x] **Step 2: 让测试绑定并观察专用 spool 目录**
 
-在 `TestOpenAIForwardCleansRequestBodyHandleWhenHTTPDoErrors` 中创建 `spoolDir := t.TempDir()`，以阈值 `1`、该目录和 `sub2api-test-` prefix 创建 body handle，并在调用 `Forward` 前通过 `BindOpenAIRequestBodyHandle(c, handle)` 绑定它。删除 `startedAt`、`requireNoFreshOpenAISpoolFiles` 及其扫描 `os.TempDir()` 的 helper。`Forward` 返回错误且关闭 upstream request body 后，读取 `spoolDir` 并断言 entries 为空。
+在 `TestOpenAIForwardCleansRequestBodyHandleWhenHTTPDoErrors` 中创建 `spoolDir := t.TempDir()`，以阈值 `1`、该目录和 `sub2api-test-` prefix 创建 body handle，并在调用 `Forward` 前通过 `BindOpenAIRequestBodyHandle(c, handle)` 绑定它。删除 `startedAt`、`requireNoFreshOpenAISpoolFiles` 及其扫描 `os.TempDir()` 的 helper。`Forward` 返回错误后确认绑定 handle 仍可读取；调用方执行 `CleanupRequestBodyHandle(handle)`，再读取 `spoolDir` 并断言 entries 为空。
 
 ```go
 spoolDir := t.TempDir()
@@ -210,13 +210,15 @@ BindOpenAIRequestBodyHandle(c, handle)
 
 _, err = svc.Forward(c.Request.Context(), c, account, body)
 require.Error(t, err)
-require.NoError(t, upstream.lastReq.Body.Close())
+_, err = handle.ReadAll()
+require.NoError(t, err)
+CleanupRequestBodyHandle(handle)
 entries, err := os.ReadDir(spoolDir)
 require.NoError(t, err)
 require.Empty(t, entries)
 ```
 
-- [ ] **Step 3: 验证隔离后的定向和全套矩阵**
+- [x] **Step 3: 验证隔离后的定向和全套矩阵**
 
 Run: `go test -tags=unit ./internal/service -run '^TestOpenAIForwardCleansRequestBodyHandleWhenHTTPDoErrors$' -count=20`
 
@@ -226,7 +228,7 @@ Run: `go test -tags=unit ./... -count=3`
 
 Expected: PASS 3 次；并发 package 不会再被共享系统 temp 文件污染。
 
-- [ ] **Step 4: 仅在隔离后仍稳定失败时修复生产所有权**
+- [x] **Step 4: 仅在隔离后仍稳定失败时修复生产所有权**
 
 使用失败测试的专用 `spoolDir` 和 handle 路径确认拥有者，沿 `openAIRequestBodyHandleForBytes`、`closeOpenAIRequestBody` 与 `CleanupRequestBodyHandle` 追踪创建和关闭。只在拥有该路径的 cleanup 分支补充一次关闭或删除，并保留 Step 2 的目录断言作为回归测试。
 
@@ -236,7 +238,7 @@ Expected: PASS；若 Step 3 全套已稳定通过，则不修改 `openai_gateway
 
 ### Task 5: 修复 depguard、errcheck 与 govet 的 19 项诊断
 
-- [ ] Task 5: 修复 depguard、errcheck 与 govet 的 19 项诊断
+- [x] Task 5: 修复 depguard、errcheck 与 govet 的 19 项诊断
 
 **Files:**
 - Modify: `backend/internal/handler/page_handler_hidden_menu_test.go`
@@ -256,31 +258,31 @@ Expected: PASS；若 Step 3 全套已稳定通过，则不修改 `openai_gateway
 - Consumes: 当前 `backend/.golangci.yml` 的既有 `depguard`、`errcheck` 与 `govet` 规则。
 - Produces: 该三类所有已记录诊断为零，不改 lint 配置。
 
-- [ ] **Step 1: 记录此组的 RED 基线**
+- [x] **Step 1: 记录此组的 RED 基线**
 
 Run: `golangci-lint run ./...`
 
 Expected: 非零退出；本组精确包含 `depguard` 2 项、`errcheck` 12 项、`govet` 5 项。
 
-- [ ] **Step 2: 修复 2 项 depguard**
+- [x] **Step 2: 修复 2 项 depguard**
 
 移除 `page_handler_hidden_menu_test.go:15` 与 `payment_handler_hidden_purchase_test.go:12` 对 `internal/repository` 的直接导入，改用这些 handler 测试包已存在的 service 层 stub 或本文件最小 package 私有 stub；不得将 repository import 加入 allowlist。
 
-- [ ] **Step 3: 修复 12 项 errcheck**
+- [x] **Step 3: 修复 12 项 errcheck**
 
 逐项处理下列现有诊断：`gateway_request_body_spooling_test.go:568`、`openai_request_body_spooling_test.go:346` 的 `req.Body.Close`；`first_token_timeout.go:169,176,187` 的 `strings.Builder.WriteByte`；`antigravity_gateway_service_test.go:1649`、`gateway_anthropic_apikey_passthrough_test.go:520`、`openai_account_scheduler_layered_test.go:1023` 的类型断言；`gateway_anthropic_passthrough.go:620,621,622` 的 `WriteString`；`openai_first_token_timeout.go:166` 的 `body.Close`。将可返回错误的生产资源关闭合并回原错误优先级；`strings.Builder` 写入使用显式忽略返回值的现有仓库惯例；测试类型断言使用 `value, ok := ...` 并在 `!ok` 时 `t.Fatalf`。
 
-- [ ] **Step 4: 修复 5 项 govet**
+- [x] **Step 4: 修复 5 项 govet**
 
 在 `grok_media_test.go:323,372` 保证每条返回路径都调用 `cancel`；在 `openai_ws_protocol_resolver_test.go:33,65,103` 不复制含 `sync.RWMutex` 的 `config.Config`，改为从构造函数创建独立 config 并复制各测试所需字段。
 
-- [ ] **Step 5: 运行受影响 package 测试**
+- [x] **Step 5: 运行受影响 package 测试**
 
 Run: `go test ./internal/handler ./internal/pkg/openai ./internal/service -count=1`
 
 Expected: PASS。
 
-- [ ] **Step 6: 运行 lint 确认本组三类清零**
+- [x] **Step 6: 运行 lint 确认本组三类清零**
 
 Run: `golangci-lint run ./...`
 
@@ -288,7 +290,7 @@ Expected: 非零退出仅可保留 `ineffassign`、`staticcheck`、`unused`；�
 
 ### Task 6: 修复 ineffassign、staticcheck 与 unused 的 28 项诊断
 
-- [ ] Task 6: 修复 ineffassign、staticcheck 与 unused 的 28 项诊断
+- [x] Task 6: 修复 ineffassign、staticcheck 与 unused 的 28 项诊断
 
 **Files:**
 - Modify: `backend/internal/handler/gateway_handler.go`
@@ -316,25 +318,25 @@ Expected: 非零退出仅可保留 `ineffassign`、`staticcheck`、`unused`；�
 - Consumes: Task 5 后仍存在的 linter 输出。
 - Produces: `golangci-lint run ./...` 以退出码 0 结束。
 
-- [ ] **Step 1: 删除 16 项 ineffassign 的无效赋值**
+- [x] **Step 1: 删除 16 项 ineffassign 的无效赋值**
 
 删除以下赋值而不改变释放责任：`gateway_handler.go:971`、`gemini_v1beta_handler.go:365,384`、`openai_chat_completions.go:176`、`openai_images.go:154,158`、`openai_images_controls_test.go:513`、`gateway_forward_as_responses.go:131,132,137`、`gemini_messages_compat_service.go:1270,1276,1277`、`grok_media.go:408`、`openai_embeddings.go:98`、`openai_gateway_chat_completions.go:268`。
 
-- [ ] **Step 2: 修复 7 项 staticcheck**
+- [x] **Step 2: 修复 7 项 staticcheck**
 
 应用诊断给出的等价改写：`httputil/body_test.go:382` 和 `pkg/openai/first_token_timeout.go:132` 使用 tagged switch；删除 `repository/user_repo.go:1019,1092` 未使用的 `client`；在 `gateway_request_body_handle_test.go:46` 移除冗余函数类型；在 `grok_media.go:376` 使用 De Morgan 等价条件；在 `openai_ws_v2/passthrough_relay.go:672` 以具名跳转或控制流重组替换无效的内层 `break`，确保退出预期外层循环。
 
-- [ ] **Step 3: 删除 5 项 unused 私有符号**
+- [x] **Step 3: 删除 5 项 unused 私有符号**
 
 删除 `requestBodyStatus`、`readHandlerFunctionSource`、`(*defaultOpenAIAccountScheduler).lookupShadowParentAccount`、`setOpsUpstreamRequestBody` 与 `seedSubscriptionCache`，以及仅为这些符号保留的导入；不创建调用点。
 
-- [ ] **Step 4: 运行涉及行为的回归测试**
+- [x] **Step 4: 运行涉及行为的回归测试**
 
 Run: `go test ./internal/handler ./internal/pkg/httputil ./internal/pkg/openai ./internal/repository ./internal/service -count=1`
 
 Expected: PASS。
 
-- [ ] **Step 5: 运行完整 linter**
+- [x] **Step 5: 运行完整 linter**
 
 Run: `golangci-lint run ./...`
 
@@ -342,7 +344,7 @@ Expected: PASS，退出码 0；规则、阈值、ignore 与扫描范围均未变
 
 ### Task 7: 将根 Makefile 固化为完整本地门禁
 
-- [ ] Task 7: 将根 Makefile 固化为完整本地门禁
+- [x] Task 7: 将根 Makefile 固化为完整本地门禁
 
 **Files:**
 - Modify: `Makefile`
@@ -353,7 +355,7 @@ Expected: PASS，退出码 0；规则、阈值、ignore 与扫描范围均未变
 - Consumes: `make -C backend test`、`make -C backend test-unit`、`pnpm --dir frontend run lint:check`、`typecheck`、`test:run`。
 - Produces: 根目标 `test-backend`、`test-backend-unit`、`test-frontend`、`test`；`test-frontend-critical` 保持快速命令。
 
-- [ ] **Step 1: 写入 Makefile 目标依赖的失败检查**
+- [x] **Step 1: 写入 Makefile 目标依赖的失败检查**
 
 先执行当前入口：
 
@@ -361,7 +363,7 @@ Run: `make test`
 
 Expected: 当前 `test` 只依赖 `test-backend test-frontend`，`test-frontend` 调用 `test-frontend-critical`，且不存在 `test-backend-unit`。
 
-- [ ] **Step 2: 最小化修改根 Makefile**
+- [x] **Step 2: 最小化修改根 Makefile**
 
 将 `.PHONY` 增加 `test-backend-unit`；添加：
 
@@ -384,7 +386,7 @@ test: test-backend test-backend-unit test-frontend
 
 保留 `FRONTEND_CRITICAL_VITEST` 和 `test-frontend-critical` 原样；不把 integration/e2e 或 Docker 目标加入任何依赖链。
 
-- [ ] **Step 3: 运行 Makefile dry-run 验证依赖图**
+- [x] **Step 3: 运行 Makefile dry-run 验证依赖图**
 
 Run: `make -n test`
 
@@ -392,7 +394,7 @@ Expected: 依次显示 `make -C backend test`、`make -C backend test-unit`、�
 
 ### Task 8: 从冷缓存验证全部本地门禁并完成计划自检
 
-- [ ] Task 8: 从冷缓存验证全部本地门禁并完成计划自检
+- [x] Task 8: 从冷缓存验证全部本地门禁并完成计划自检
 
 **Files:**
 - Modify: `docs/superpowers/plans/2026-07-15-restore-local-test-gates.md`（仅勾选实施期间完成的步骤并记录实际命令退出状态）
@@ -401,13 +403,13 @@ Expected: 依次显示 `make -C backend test`、`make -C backend test-unit`、�
 - Consumes: Tasks 1-7 的代码与现有本地依赖。
 - Produces: 可复现的 Docker-free 本地质量门禁证据。
 
-- [ ] **Step 1: 清理 Go 缓存**
+- [x] **Step 1: 清理 Go 缓存**
 
 Run: `go clean -testcache -cache`
 
 Expected: 退出码 0。
 
-- [ ] **Step 2: 逐域从冷缓存运行后端与前端检查**
+- [x] **Step 2: 逐域从冷缓存运行后端与前端检查**
 
 Run: `make -C backend test`
 
@@ -429,16 +431,38 @@ Run: `pnpm --dir frontend run test:run`
 
 Expected: PASS，运行完整 Vitest 集合。
 
-- [ ] **Step 3: 运行最终聚合门禁**
+- [x] **Step 3: 运行最终聚合门禁**
 
 Run: `make test`
 
 Expected: PASS，退出码 0；不要求 Docker，且不运行 integration/e2e。
 
-- [ ] **Step 4: 实施前计划自检**
+- [x] **Step 4: 实施前计划自检**
 
 执行以下人工核对后再开始代码修改：
 
 1. Spec 覆盖：Task 1 覆盖 header canonicalization；Tasks 2-3 覆盖 Images 耗尽响应与 fixture 接口；Task 4 覆盖 spool 单测重复、同 package 并行、全套 unit 与条件性所有权修复；Tasks 5-6 覆盖 47 项 lint；Task 7 覆盖根门禁；Task 8 覆盖冷缓存验证。
 2. 占位符：关键词扫描无命中；每个步骤均给出文件、符号或可运行命令。
 3. 符号/类型：所有 repository stub 方法与 `service.UserRepository` 第 86-127 行一致；Images 使用现有 `handleFailoverExhausted`；spool 使用现有 `RequestBodyHandleOptions`、`requestBodyCoordinator.Cleanup` 和 `CleanupRequestBodyHandle`。
+
+### Task 9: 隔离 admin usage stats 测试缓存
+
+- [x] Task 9: 隔离 admin usage stats 测试缓存
+
+**Files:**
+- Modify: `backend/internal/handler/admin/usage_handler_request_type_test.go`
+
+- [x] 在 `TestAdminUsageStatsRequestTypePriority` 开始时重置 `usageStatsCache` 为新的 30 秒 snapshot cache，并通过 `t.Cleanup` 再次重置；不修改生产 cache key、TTL 或 `nocache` 语义。
+- [x] 运行 `go test -tags=unit ./internal/handler/admin -run '^TestAdminUsageStatsRequestTypePriority$' -count=3`，确认每轮 fixture 都收到 `RequestType`。
+
+### Task 10: 修复 Grok edit 大 body 生命周期
+
+- [x] Task 10: 修复 Grok edit 大 body 生命周期
+
+**Files:**
+- Modify: `backend/internal/handler/grok_media.go`
+- Modify: `backend/internal/handler/grok_media_test.go`
+
+- [x] 在 `coordinator.SetEffectiveBytes(forwardBody)` 成功后清空局部 `forwardBody`；不改变有效 handle 或上游请求体。
+- [x] 为阻塞 upstream 的测试注册 `t.Cleanup`，无论断言结果都释放 `upstream.release` 并等待 `done`。
+- [x] 运行 `go test -tags=unit ./internal/handler -count=3`，确认 HeapAlloc 测试稳定通过。

@@ -8,13 +8,13 @@ subagent_dispatch: confirmed
 tdd_mode: tdd
 review_mode: standard
 isolation: branch
-verify_mode: null
+verify_mode: full
 auto_transition: true
 base_ref: 0c1c4bc14d282ad4b65ee41c053bf222a532bfdd
 design_doc: docs/superpowers/specs/2026-07-15-restore-local-test-gates-design.md
 plan: docs/superpowers/plans/2026-07-15-restore-local-test-gates.md
-verify_result: pending
-verification_report: null
+verify_result: fail
+verification_report: docs/superpowers/reports/2026-07-15-restore-local-test-gates-verify.md
 branch_status: pending
 created_at: 2026-07-15
 verified_at: null

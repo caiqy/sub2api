@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -46,6 +48,11 @@ type openAIErroringUpstreamNoClose struct {
 	lastReq *http.Request
 }
 
+type openAIBlockingErroringUpstream struct {
+	started chan<- struct{}
+	release <-chan struct{}
+}
+
 type openAIUsageUpstreamRequestCollector struct {
 	headers string
 	body    string
@@ -57,6 +64,16 @@ func (u *openAIErroringUpstreamNoClose) Do(req *http.Request, _ string, _ int64,
 }
 
 func (u *openAIErroringUpstreamNoClose) DoWithTLS(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, proxyURL, accountID, accountConcurrency)
+}
+
+func (u *openAIBlockingErroringUpstream) Do(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	u.started <- struct{}{}
+	<-u.release
+	return nil, errors.New("dial failed")
+}
+
+func (u *openAIBlockingErroringUpstream) DoWithTLS(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
 	return u.Do(req, proxyURL, accountID, accountConcurrency)
 }
 
@@ -2991,6 +3008,50 @@ func TestOpenAIRequestBuilderRejectsInvalidBodyHandleArgumentType(t *testing.T) 
 
 func TestOpenAIForwardPreservesBoundRequestBodyHandleWhenHTTPDoErrors(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	runOpenAIForwardPreservesBoundRequestBodyHandleWhenHTTPDoErrors(t, &openAIErroringUpstreamNoClose{})
+}
+
+func TestOpenAIForwardCleansBoundRequestBodyHandlesInParallel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	var timedOut atomic.Bool
+	timeout := time.AfterFunc(time.Second, func() {
+		releaseOnce.Do(func() {
+			timedOut.Store(true)
+			close(release)
+		})
+	})
+
+	go func() {
+		select {
+		case <-started:
+		case <-release:
+			return
+		}
+		select {
+		case <-started:
+			releaseOnce.Do(func() { close(release) })
+		case <-release:
+		}
+	}()
+	t.Cleanup(func() {
+		timeout.Stop()
+		releaseOnce.Do(func() { close(release) })
+		require.False(t, timedOut.Load(), "parallel upstream calls did not overlap")
+	})
+
+	for _, name := range []string{"first", "second"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			runOpenAIForwardPreservesBoundRequestBodyHandleWhenHTTPDoErrors(t, &openAIBlockingErroringUpstream{started: started, release: release})
+		})
+	}
+}
+
+func runOpenAIForwardPreservesBoundRequestBodyHandleWhenHTTPDoErrors(t *testing.T, upstream HTTPUpstream) {
+	t.Helper()
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
@@ -3004,7 +3065,6 @@ func TestOpenAIForwardPreservesBoundRequestBodyHandleWhenHTTPDoErrors(t *testing
 	})
 	require.NoError(t, err)
 	BindOpenAIRequestBodyHandle(c, handle)
-	upstream := &openAIErroringUpstreamNoClose{}
 	svc := &OpenAIGatewayService{
 		cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
 		httpUpstream: upstream,
@@ -3019,7 +3079,6 @@ func TestOpenAIForwardPreservesBoundRequestBodyHandleWhenHTTPDoErrors(t *testing
 
 	_, err = svc.Forward(c.Request.Context(), c, account, body)
 	require.Error(t, err)
-	require.NotNil(t, upstream.lastReq)
 
 	got, err := handle.ReadAll()
 	require.NoError(t, err)

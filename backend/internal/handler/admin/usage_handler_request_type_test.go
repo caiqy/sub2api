@@ -143,6 +143,7 @@ func TestAdminUsageListInvalidExactTotal(t *testing.T) {
 }
 
 func TestAdminUsageStatsRequestTypePriority(t *testing.T) {
+	// usageStatsCache is package-global and replaced here, so this test must not use t.Parallel.
 	usageStatsCache = newSnapshotCache(30 * time.Second)
 	t.Cleanup(func() {
 		usageStatsCache = newSnapshotCache(30 * time.Second)
