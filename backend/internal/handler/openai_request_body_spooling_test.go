@@ -75,7 +75,8 @@ func TestOpenAIGatewayHandler_ChatAndEmbeddingsReplayMappedSpoolAcrossFailover(t
 			upstream.snapshot = func() openAIReplaySnapshots {
 				detail := middleware.GetUsageDetailSnapshot(requestContext)
 				ops, _ := requestContext.Get(service.OpsUpstreamRequestBodyKey)
-				return openAIReplaySnapshots{usageRequest: detail.RequestBody, usageUpstream: detail.UpstreamRequestBody, opsUpstream: ops.(string)}
+				opsBody, _ := ops.(string)
+				return openAIReplaySnapshots{usageRequest: detail.RequestBody, usageUpstream: detail.UpstreamRequestBody, opsUpstream: opsBody}
 			}
 			rec := httptest.NewRecorder()
 			requestBody := body
@@ -140,7 +141,8 @@ func TestOpenAIGatewayHandler_ChatReplayRawSpoolAcrossFailoverWhenResponsesUnsup
 	upstream.snapshot = func() openAIReplaySnapshots {
 		detail := middleware.GetUsageDetailSnapshot(requestContext)
 		ops, _ := requestContext.Get(service.OpsUpstreamRequestBodyKey)
-		return openAIReplaySnapshots{usageRequest: detail.RequestBody, usageUpstream: detail.UpstreamRequestBody, opsUpstream: ops.(string)}
+		opsBody, _ := ops.(string)
+		return openAIReplaySnapshots{usageRequest: detail.RequestBody, usageUpstream: detail.UpstreamRequestBody, opsUpstream: opsBody}
 	}
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))

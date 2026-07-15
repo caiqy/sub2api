@@ -178,6 +178,11 @@ func TestGrokVideoStatus_UsesNoRequestBodyHandle(t *testing.T) {
 
 func TestGrokMedia_GenerateEditVideoRejectUpstreamFailoverPreserveRequestSemantics(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	grokHandler := func(c *gin.Context) *OpenAIGatewayHandler {
+		handler, ok := c.MustGet("handler").(*OpenAIGatewayHandler)
+		require.True(t, ok)
+		return handler
+	}
 	for _, tt := range []struct {
 		name         string
 		route        string
@@ -229,7 +234,7 @@ func TestGrokMedia_GenerateEditVideoRejectUpstreamFailoverPreserveRequestSemanti
 			}, wantStatus: http.StatusOK, wantAccounts: []int64{1002}, wantMethod: http.MethodPost, wantPath: "/v1/images/edits", wantType: "application/json", wantBody: []byte(`{"image":{"image_url":"data:application/octet-stream;base64,bWVkaWEtc2VjcmV0LWZpbGU="},"model":"grok-imagine-image-quality"}`),
 		},
 		{
-			name: "video create success", route: "/v1/videos/generations", handler: func(c *gin.Context) { c.MustGet("handler").(*OpenAIGatewayHandler).GrokVideoGeneration(c) },
+			name: "video create success", route: "/v1/videos/generations", handler: func(c *gin.Context) { grokHandler(c).GrokVideoGeneration(c) },
 			body: func(t *testing.T) ([]byte, string) {
 				return []byte(`{"model":"grok-imagine-video-1.5","prompt":"metadata","image_url":"data:image/png;base64,bWVkaWEtc2VjcmV0"}`), "application/json"
 			},
@@ -238,7 +243,7 @@ func TestGrokMedia_GenerateEditVideoRejectUpstreamFailoverPreserveRequestSemanti
 			}, wantStatus: http.StatusOK, wantAccounts: []int64{1003}, wantMethod: http.MethodPost, wantPath: "/v1/videos/generations", wantType: "application/json", wantBody: []byte(`{"model":"grok-imagine-video-1.5","prompt":"metadata","image_url":"data:image/png;base64,bWVkaWEtc2VjcmV0"}`),
 		},
 		{
-			name: "edit upstream 4xx", route: "/v1/images/edits", handler: func(c *gin.Context) { c.MustGet("handler").(*OpenAIGatewayHandler).GrokImages(c) },
+			name: "edit upstream 4xx", route: "/v1/images/edits", handler: func(c *gin.Context) { grokHandler(c).GrokImages(c) },
 			body: func(t *testing.T) ([]byte, string) {
 				var body bytes.Buffer
 				writer := multipart.NewWriter(&body)
@@ -255,7 +260,7 @@ func TestGrokMedia_GenerateEditVideoRejectUpstreamFailoverPreserveRequestSemanti
 			}, statuses: []int{http.StatusBadRequest}, wantStatus: http.StatusBadRequest, wantAccounts: []int64{10021}, wantMethod: http.MethodPost, wantPath: "/v1/images/edits", wantType: "application/json", wantBody: []byte(`{"image":{"image_url":"data:application/octet-stream;base64,bWVkaWEtc2VjcmV0LWZpbGU="},"model":"grok-imagine-image-quality"}`),
 		},
 		{
-			name: "video create canceled", route: "/v1/videos/generations", handler: func(c *gin.Context) { c.MustGet("handler").(*OpenAIGatewayHandler).GrokVideoGeneration(c) },
+			name: "video create canceled", route: "/v1/videos/generations", handler: func(c *gin.Context) { grokHandler(c).GrokVideoGeneration(c) },
 			body: func(t *testing.T) ([]byte, string) {
 				return []byte(`{"model":"grok-imagine-video-1.5","prompt":"metadata","image_url":"data:image/png;base64,bWVkaWEtc2VjcmV0"}`), "application/json"
 			},
@@ -264,14 +269,14 @@ func TestGrokMedia_GenerateEditVideoRejectUpstreamFailoverPreserveRequestSemanti
 			}, cancel: true, wantAccounts: []int64{10031}, wantMethod: http.MethodPost, wantPath: "/v1/videos/generations", wantType: "application/json", wantBody: []byte(`{"model":"grok-imagine-video-1.5","prompt":"metadata","image_url":"data:image/png;base64,bWVkaWEtc2VjcmV0"}`),
 		},
 		{
-			name: "video status has no body", route: "/videos/:request_id", handler: func(c *gin.Context) { c.MustGet("handler").(*OpenAIGatewayHandler).GrokVideoStatus(c) },
+			name: "video status has no body", route: "/videos/:request_id", handler: func(c *gin.Context) { grokHandler(c).GrokVideoStatus(c) },
 			body: func(t *testing.T) ([]byte, string) { return nil, "" },
 			accounts: func(parentID int64) []*service.Account {
 				return []*service.Account{{ID: 1004, Name: "grok", Platform: service.PlatformGrok, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, ParentAccountID: &parentID, Credentials: map[string]any{"base_url": "https://api.x.ai/v1"}}}
 			}, wantStatus: http.StatusOK, wantAccounts: []int64{1004}, wantMethod: http.MethodGet, wantPath: "/v1/videos/req_123", wantType: "", wantBody: nil,
 		},
 		{
-			name: "permission reject", route: "/v1/images/generations", handler: func(c *gin.Context) { c.MustGet("handler").(*OpenAIGatewayHandler).GrokImages(c) },
+			name: "permission reject", route: "/v1/images/generations", handler: func(c *gin.Context) { grokHandler(c).GrokImages(c) },
 			body: func(t *testing.T) ([]byte, string) {
 				return []byte(`{"model":"grok-imagine","prompt":"metadata","image_url":"data:image/png;base64,bWVkaWEtc2VjcmV0"}`), "application/json"
 			},
@@ -280,7 +285,7 @@ func TestGrokMedia_GenerateEditVideoRejectUpstreamFailoverPreserveRequestSemanti
 			}, reject: true, wantStatus: http.StatusForbidden, wantMethod: http.MethodPost,
 		},
 		{
-			name: "upstream 4xx", route: "/v1/images/generations", handler: func(c *gin.Context) { c.MustGet("handler").(*OpenAIGatewayHandler).GrokImages(c) },
+			name: "upstream 4xx", route: "/v1/images/generations", handler: func(c *gin.Context) { grokHandler(c).GrokImages(c) },
 			body: func(t *testing.T) ([]byte, string) {
 				return []byte(`{"model":"grok-imagine","prompt":"metadata","image_url":"data:image/png;base64,bWVkaWEtc2VjcmV0"}`), "application/json"
 			},
@@ -289,7 +294,7 @@ func TestGrokMedia_GenerateEditVideoRejectUpstreamFailoverPreserveRequestSemanti
 			}, statuses: []int{http.StatusBadRequest}, wantStatus: http.StatusBadRequest, wantAccounts: []int64{1006}, wantMethod: http.MethodPost, wantPath: "/v1/images/generations", wantType: "application/json", wantBody: []byte(`{"model":"grok-imagine-image-quality","prompt":"metadata","image_url":"data:image/png;base64,bWVkaWEtc2VjcmV0"}`),
 		},
 		{
-			name: "same account retry", route: "/v1/images/generations", handler: func(c *gin.Context) { c.MustGet("handler").(*OpenAIGatewayHandler).GrokImages(c) },
+			name: "same account retry", route: "/v1/images/generations", handler: func(c *gin.Context) { grokHandler(c).GrokImages(c) },
 			body: func(t *testing.T) ([]byte, string) {
 				return []byte(`{"model":"grok-imagine","prompt":"metadata","image_url":"data:image/png;base64,bWVkaWEtc2VjcmV0"}`), "application/json"
 			},
@@ -298,7 +303,7 @@ func TestGrokMedia_GenerateEditVideoRejectUpstreamFailoverPreserveRequestSemanti
 			}, statuses: []int{http.StatusTooManyRequests, http.StatusOK}, wantStatus: http.StatusOK, wantAccounts: []int64{10061, 10061}, wantMethod: http.MethodPost, wantPath: "/v1/images/generations", wantType: "application/json", wantBody: []byte(`{"model":"grok-imagine-image-quality","prompt":"metadata","image_url":"data:image/png;base64,bWVkaWEtc2VjcmV0"}`),
 		},
 		{
-			name: "upstream 5xx fails over", route: "/v1/images/generations", handler: func(c *gin.Context) { c.MustGet("handler").(*OpenAIGatewayHandler).GrokImages(c) },
+			name: "upstream 5xx fails over", route: "/v1/images/generations", handler: func(c *gin.Context) { grokHandler(c).GrokImages(c) },
 			body: func(t *testing.T) ([]byte, string) {
 				return []byte(`{"model":"grok-imagine","prompt":"metadata","image_url":"data:image/png;base64,bWVkaWEtc2VjcmV0"}`), "application/json"
 			},
@@ -307,7 +312,7 @@ func TestGrokMedia_GenerateEditVideoRejectUpstreamFailoverPreserveRequestSemanti
 			}, statuses: []int{http.StatusInternalServerError, http.StatusOK}, wantStatus: http.StatusOK, wantAccounts: []int64{1007, 1008}, wantMethod: http.MethodPost, wantPath: "/v1/images/generations", wantType: "application/json", wantBody: []byte(`{"model":"grok-imagine-image-quality","prompt":"metadata","image_url":"data:image/png;base64,bWVkaWEtc2VjcmV0"}`),
 		},
 		{
-			name: "canceled request", route: "/v1/images/generations", handler: func(c *gin.Context) { c.MustGet("handler").(*OpenAIGatewayHandler).GrokImages(c) },
+			name: "canceled request", route: "/v1/images/generations", handler: func(c *gin.Context) { grokHandler(c).GrokImages(c) },
 			body: func(t *testing.T) ([]byte, string) {
 				return []byte(`{"model":"grok-imagine","prompt":"metadata","image_url":"data:image/png;base64,bWVkaWEtc2VjcmV0"}`), "application/json"
 			},
@@ -439,8 +444,11 @@ func TestGrokMedia_MultipartSpoolPreservesFilesAndOmitsSnapshots(t *testing.T) {
 	require.Equal(t, body.Bytes(), upstream.body)
 	require.NotEmpty(t, readTestDir(t, rawDir), "raw body must spool while upstream is blocked")
 	detail := middleware.GetUsageDetailSnapshot(requestContext)
-	ops, _ := requestContext.Get(service.OpsUpstreamRequestBodyKey)
-	for _, snapshot := range []string{detail.RequestBody, detail.UpstreamRequestBody, ops.(string)} {
+	ops, ok := requestContext.Get(service.OpsUpstreamRequestBodyKey)
+	require.True(t, ok)
+	opsBody, ok := ops.(string)
+	require.True(t, ok)
+	for _, snapshot := range []string{detail.RequestBody, detail.UpstreamRequestBody, opsBody} {
 		require.NotContains(t, snapshot, "source-secret-")
 		require.NotContains(t, snapshot, "mask-secret")
 	}
@@ -457,15 +465,20 @@ func TestGrokMedia_MultipartSpoolPreservesFilesAndOmitsSnapshots(t *testing.T) {
 
 func TestGrokMedia_TextIsReleasedBeforeBlockedUpstream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	grokHandler := func(c *gin.Context) *OpenAIGatewayHandler {
+		handler, ok := c.MustGet("handler").(*OpenAIGatewayHandler)
+		require.True(t, ok)
+		return handler
+	}
 	for _, tt := range []struct {
 		name, route string
 		handler     gin.HandlerFunc
 		body        func() ([]byte, string)
 	}{
-		{"generate", "/v1/images/generations", func(c *gin.Context) { c.MustGet("handler").(*OpenAIGatewayHandler).GrokImages(c) }, func() ([]byte, string) {
+		{"generate", "/v1/images/generations", func(c *gin.Context) { grokHandler(c).GrokImages(c) }, func() ([]byte, string) {
 			return []byte(`{"model":"grok-imagine","prompt":"` + strings.Repeat("x", 20<<20) + `"}`), "application/json"
 		}},
-		{"edit", "/v1/images/edits", func(c *gin.Context) { c.MustGet("handler").(*OpenAIGatewayHandler).GrokImages(c) }, func() ([]byte, string) {
+		{"edit", "/v1/images/edits", func(c *gin.Context) { grokHandler(c).GrokImages(c) }, func() ([]byte, string) {
 			var b bytes.Buffer
 			w := multipart.NewWriter(&b)
 			require.NoError(t, w.WriteField("model", "grok-imagine"))
@@ -474,7 +487,7 @@ func TestGrokMedia_TextIsReleasedBeforeBlockedUpstream(t *testing.T) {
 			require.NoError(t, w.Close())
 			return b.Bytes(), w.FormDataContentType()
 		}},
-		{"video", "/v1/videos/generations", func(c *gin.Context) { c.MustGet("handler").(*OpenAIGatewayHandler).GrokVideoGeneration(c) }, func() ([]byte, string) {
+		{"video", "/v1/videos/generations", func(c *gin.Context) { grokHandler(c).GrokVideoGeneration(c) }, func() ([]byte, string) {
 			return []byte(`{"model":"grok-imagine-video-1.5","prompt":"` + strings.Repeat("x", 20<<20) + `"}`), "application/json"
 		}},
 	} {
@@ -488,7 +501,6 @@ func TestGrokMedia_TextIsReleasedBeforeBlockedUpstream(t *testing.T) {
 			runtime.ReadMemStats(&before)
 			body, contentType := tt.body()
 			req := httptest.NewRequest(http.MethodPost, tt.route, &releaseAfterEOFBody{data: body})
-			body = nil
 			req.Header.Set("Content-Type", contentType)
 			upstream := &openAIImagesHashingUpstream{started: make(chan struct{}), release: make(chan struct{})}
 			group := &service.Group{ID: 960, Platform: service.PlatformGrok, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
@@ -592,13 +604,16 @@ func TestGrokMedia_MultipartTextPartLimit(t *testing.T) {
 				requireMultipartTextPart(t, upstream.body, upstream.contentType, "prompt", text)
 				require.Empty(t, requestContext.Request.MultipartForm.Value)
 				detail := middleware.GetUsageDetailSnapshot(requestContext)
-				ops, _ := requestContext.Get(service.OpsUpstreamRequestBodyKey)
-				for _, snapshot := range []string{detail.RequestBody, detail.UpstreamRequestBody, ops.(string)} {
+				ops, ok := requestContext.Get(service.OpsUpstreamRequestBodyKey)
+				require.True(t, ok)
+				opsBody, ok := ops.(string)
+				require.True(t, ok)
+				for _, snapshot := range []string{detail.RequestBody, detail.UpstreamRequestBody, opsBody} {
 					require.NotContains(t, snapshot, textStart)
 					require.NotContains(t, snapshot, textMiddle)
 				}
 				assertMatrixRequestBodySnapshot(t, "multipart text usage upstream snapshot", detail.UpstreamRequestBody, upstream.body, "")
-				assertMatrixRequestBodySnapshot(t, "multipart text ops upstream snapshot", ops.(string), upstream.body, "")
+				assertMatrixRequestBodySnapshot(t, "multipart text ops upstream snapshot", opsBody, upstream.body, "")
 				close(upstream.release)
 				select {
 				case <-done:

@@ -94,8 +94,6 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 	account.ApplyHeaderOverrides(upstreamReq.Header)
 	upstreamPreview := RequestBodyPreviewString(upstreamBody)
 	SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
-	body = nil
-	upstreamBody = nil
 
 	proxyURL := ""
 	if account.Proxy != nil {

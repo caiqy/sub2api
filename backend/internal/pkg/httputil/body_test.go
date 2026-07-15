@@ -379,9 +379,10 @@ func TestNewDecodedRequestBodyReader(t *testing.T) {
 	for _, encoding := range []string{"", "identity", "gzip", "x-gzip", "deflate", "zstd"} {
 		t.Run(encoding, func(t *testing.T) {
 			body := []byte(samplePayload)
-			if encoding == "gzip" || encoding == "x-gzip" || encoding == "zstd" {
+			switch encoding {
+			case "gzip", "x-gzip", "zstd":
 				body = compressTestBody(t, body, strings.TrimPrefix(encoding, "x-"))
-			} else if encoding == "deflate" {
+			case "deflate":
 				var buf bytes.Buffer
 				zw := zlib.NewWriter(&buf)
 				if _, err := zw.Write(body); err != nil {

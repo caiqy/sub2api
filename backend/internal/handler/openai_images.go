@@ -117,7 +117,6 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	}
 	requestPayloadHash := service.HashUsageRequestPayload(sessionSeed)
 	service.BindOpenAIRequestBodyHandle(c, coordinator.Effective())
-	body = nil
 	if parsed.Prompt != "" {
 		oauthBody, prepareErr := h.gatewayService.PrepareOpenAIImagesOAuthBody(parsed, channelMapping.MappedModel)
 		if prepareErr != nil {
@@ -151,11 +150,9 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		return
 	}
 	if decision := h.checkContentModeration(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIImages, parsed.Model, moderationBody); decision != nil && decision.Blocked {
-		moderationBody = nil
 		h.errorResponse(c, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message)
 		return
 	}
-	moderationBody = nil
 	coordinator.ReleaseMultipartValues()
 	parsed.ReleaseText()
 	imageReleaseFunc, acquired := h.acquireImageGenerationSlot(c, streamStarted)

@@ -727,10 +727,3 @@ func assertGatewaySpoolDirsEmpty(t *testing.T, dirs ...string) {
 		}
 	}
 }
-
-func requestBodyStatus(err error) int {
-	if status, ok := requestBodyReadErrorStatus(err); ok {
-		return status
-	}
-	return http.StatusBadRequest
-}

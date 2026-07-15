@@ -545,7 +545,7 @@ func TestRequestBodyCoordinator_CleanupGinTerminationPaths(t *testing.T) {
 					if err != nil {
 						t.Fatalf("upstream request: %v", err)
 					}
-					defer response.Body.Close()
+					defer func() { _ = response.Body.Close() }()
 					c.Header("X-Upstream-Status", response.Status)
 					c.Status(response.StatusCode)
 				}

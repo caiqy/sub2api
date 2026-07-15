@@ -753,7 +753,6 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 	ownedHandle := false
 	if !parsed.Multipart || forwardHandle == nil {
 		forwardBody, contentType, err := rewriteOpenAIImagesModel(body, parsed.ContentType, upstreamModel)
-		body = nil
 		if err != nil {
 			return nil, err
 		}

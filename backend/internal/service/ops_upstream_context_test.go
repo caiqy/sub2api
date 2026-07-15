@@ -71,7 +71,9 @@ func TestSetUsageUpstreamRequestWritesOpsWithoutUsageCollector(t *testing.T) {
 
 	raw, ok := c.Get(OpsUpstreamRequestBodyKey)
 	require.True(t, ok)
-	require.Equal(t, body, gjson.Get(raw.(string), "preview").String())
+	rawBody, ok := raw.(string)
+	require.True(t, ok)
+	require.Equal(t, body, gjson.Get(rawBody, "preview").String())
 }
 
 func TestSetUsageUpstreamRequestFallsBackToPreviewSizeForUnknownContentLength(t *testing.T) {

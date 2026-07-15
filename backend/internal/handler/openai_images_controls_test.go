@@ -345,8 +345,11 @@ func TestOpenAIImages_InlineSpoolKeepsRawBodyAndOmitsSnapshots(t *testing.T) {
 	require.Equal(t, body, upstream.body)
 	require.NotEmpty(t, readTestDir(t, rawDir), "raw body must spool while upstream is blocked")
 	detail := middleware2.GetUsageDetailSnapshot(requestContext)
-	ops, _ := requestContext.Get(service.OpsUpstreamRequestBodyKey)
-	for _, snapshot := range []string{detail.RequestBody, detail.UpstreamRequestBody, ops.(string)} {
+	ops, ok := requestContext.Get(service.OpsUpstreamRequestBodyKey)
+	require.True(t, ok)
+	opsBody, ok := ops.(string)
+	require.True(t, ok)
+	for _, snapshot := range []string{detail.RequestBody, detail.UpstreamRequestBody, opsBody} {
 		require.NotContains(t, snapshot, "inline-secret-")
 		require.NotContains(t, snapshot, "aW5saW5lLXNlY3JldA==")
 	}
@@ -412,13 +415,16 @@ func TestOpenAIImages_MultipartTextPartLimit(t *testing.T) {
 				requireMultipartTextPart(t, upstream.body, upstream.contentType, "prompt", text)
 				require.Empty(t, requestContext.Request.MultipartForm.Value)
 				detail := middleware2.GetUsageDetailSnapshot(requestContext)
-				ops, _ := requestContext.Get(service.OpsUpstreamRequestBodyKey)
-				for _, snapshot := range []string{detail.RequestBody, detail.UpstreamRequestBody, ops.(string)} {
+				ops, ok := requestContext.Get(service.OpsUpstreamRequestBodyKey)
+				require.True(t, ok)
+				opsBody, ok := ops.(string)
+				require.True(t, ok)
+				for _, snapshot := range []string{detail.RequestBody, detail.UpstreamRequestBody, opsBody} {
 					require.NotContains(t, snapshot, textStart)
 					require.NotContains(t, snapshot, textMiddle)
 				}
 				assertMatrixRequestBodySnapshot(t, "multipart text usage upstream snapshot", detail.UpstreamRequestBody, upstream.body, "")
-				assertMatrixRequestBodySnapshot(t, "multipart text ops upstream snapshot", ops.(string), upstream.body, "")
+				assertMatrixRequestBodySnapshot(t, "multipart text ops upstream snapshot", opsBody, upstream.body, "")
 				close(upstream.release)
 				select {
 				case <-done:
@@ -510,7 +516,6 @@ func TestOpenAIImages_OAuthTextIsReleasedBeforeBlockedUpstream(t *testing.T) {
 	runtime.ReadMemStats(&before)
 	requestBody := []byte(`{"model":"gpt-image-2","prompt":"` + strings.Repeat("x", 20<<20) + `"}`)
 	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", &releaseAfterEOFBody{data: requestBody})
-	requestBody = nil
 	req.Header.Set("Content-Type", "application/json")
 
 	upstream := &openAIImagesOAuthHashingUpstream{openAIImagesHashingUpstream: openAIImagesHashingUpstream{started: make(chan struct{}), release: make(chan struct{})}}

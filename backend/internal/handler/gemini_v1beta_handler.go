@@ -249,7 +249,6 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 	}
 	requestPayloadHash := service.HashUsageRequestPayload(body)
 	hasThoughtSignature := bytes.Contains(body, []byte(`"thoughtSignature"`))
-	body = nil
 
 	// Get subscription (may be nil)
 	subscription, _ := middleware.GetSubscriptionFromContext(c)
@@ -362,7 +361,6 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				return
 			}
 			cleanedBody := service.CleanGeminiNativeThoughtSignatures(rawBody)
-			rawBody = nil
 			if err := coordinator.SetEffectiveBytes(cleanedBody); err != nil {
 				googleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
 				return
@@ -381,7 +379,6 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				return
 			}
 			cleanedBody := service.CleanGeminiNativeThoughtSignatures(rawBody)
-			rawBody = nil
 			if err := coordinator.SetEffectiveBytes(cleanedBody); err != nil {
 				googleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
 				return

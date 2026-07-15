@@ -173,7 +173,6 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	reasoningEffort := service.ExtractOpenAIReasoningEffortFromBody(rawBody, reqModel)
 	cyberBlockKeyChat := service.CyberSessionBlockKey(apiKey.ID, c, rawBody)
 	requestPayloadHash := service.HashUsageRequestPayload(rawBody)
-	rawBody = nil
 	body = nil
 	requestPlatform := openAICompatibleRequestPlatform(apiKey)
 

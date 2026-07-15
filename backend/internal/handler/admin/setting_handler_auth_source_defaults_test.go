@@ -210,7 +210,8 @@ func TestSettingHandler_GetSettings_IncludesStickyAndWSSchedulerSettings(t *test
 	require.Equal(t, http.StatusOK, rec.Code)
 	var resp response.Response
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	data := resp.Data.(map[string]any)
+	data, ok := resp.Data.(map[string]any)
+	require.True(t, ok)
 	require.Equal(t, true, data["gateway_sticky_openai_enabled"])
 	require.Equal(t, true, data["gateway_sticky_gemini_enabled"])
 	require.Equal(t, true, data["gateway_sticky_anthropic_enabled"])

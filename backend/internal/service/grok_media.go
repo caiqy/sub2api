@@ -373,7 +373,7 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	}
 	originalMediaType, _, _ := mime.ParseMediaType(strings.TrimSpace(contentType))
 	originalMultipart := strings.EqualFold(originalMediaType, "multipart/form-data")
-	if endpoint.RequiresRequestBody() && len(body) == 0 && !(endpoint == GrokMediaEndpointImagesEdits && originalMultipart && c != nil && c.Request != nil && c.Request.MultipartForm != nil) {
+	if endpoint.RequiresRequestBody() && len(body) == 0 && (endpoint != GrokMediaEndpointImagesEdits || !originalMultipart || c == nil || c.Request == nil || c.Request.MultipartForm == nil) {
 		body, err = openAIRequestBodyBytes(c, nil)
 		if err != nil {
 			return nil, err
@@ -405,7 +405,6 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	ownedBodyHandle := false
 	if endpoint.RequiresRequestBody() {
 		bodyHandle, ownedBodyHandle, err = openAIRequestBodyHandleForContext(c, body)
-		body = nil
 		if err != nil {
 			return nil, err
 		}

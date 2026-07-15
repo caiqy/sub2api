@@ -129,11 +129,12 @@ func readToolChoiceClass(input *bufio.Reader) FirstTokenClass {
 
 func readJSONBool(input *bufio.Reader, first byte) bool {
 	want := ""
-	if first == 't' {
+	switch first {
+	case 't':
 		want = "rue"
-	} else if first == 'f' {
+	case 'f':
 		want = "alse"
-	} else {
+	default:
 		_ = skipJSONValueFromFirst(input, first)
 		return false
 	}

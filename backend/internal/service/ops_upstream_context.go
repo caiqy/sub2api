@@ -59,13 +59,6 @@ const (
 	OpsClientBusinessLimitedReasonLocalPolicyDenied      = "local_policy_denied"
 )
 
-func setOpsUpstreamRequestBody(c *gin.Context, body []byte) {
-	if c == nil || len(body) == 0 {
-		return
-	}
-	SetOpsUpstreamRequestBodyPreview(c, RequestBodyPreviewString(body), int64(len(body)))
-}
-
 func SetOpsUpstreamRequestBodyPreview(c *gin.Context, body string, sizes ...int64) {
 	if c == nil || strings.TrimSpace(body) == "" {
 		return

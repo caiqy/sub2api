@@ -99,9 +99,11 @@ func testRequestBodySizeMatrixJSON(t *testing.T, size int, compressed bool) {
 	require.NotNil(t, detail)
 	ops, ok := requestContext.Get(service.OpsUpstreamRequestBodyKey)
 	require.True(t, ok)
+	opsBody, ok := ops.(string)
+	require.True(t, ok)
 	assertMatrixRequestBodySnapshot(t, "usage request", detail.RequestBody, clientBody, "")
 	assertMatrixRequestBodySnapshot(t, "usage upstream", detail.UpstreamRequestBody, upstreamBody, "")
-	assertMatrixRequestBodySnapshot(t, "ops upstream", ops.(string), upstreamBody, "")
+	assertMatrixRequestBodySnapshot(t, "ops upstream", opsBody, upstreamBody, "")
 	assertMatrixTempFiles(t, rawDir, "sub2api-request-body-", size > 10<<20)
 	assertMatrixTempFiles(t, effectiveDir, "sub2api-request-body-", false)
 
@@ -152,7 +154,9 @@ func testRequestBodySizeMatrixMultipart(t *testing.T, size int) {
 	require.NotNil(t, detail)
 	ops, ok := requestContext.Get(service.OpsUpstreamRequestBodyKey)
 	require.True(t, ok)
-	for _, snapshot := range []string{detail.RequestBody, detail.UpstreamRequestBody, ops.(string)} {
+	opsBody, ok := ops.(string)
+	require.True(t, ok)
+	for _, snapshot := range []string{detail.RequestBody, detail.UpstreamRequestBody, opsBody} {
 		assertMatrixRequestBodySnapshot(t, "multipart snapshot", snapshot, clientBody, "matrix-file-")
 	}
 	assertMatrixTempFiles(t, rawDir, "sub2api-request-body-", size > 10<<20)
@@ -270,7 +274,7 @@ func (u *matrixBlockedUpstream) Do(req *http.Request, _ string, _ int64, _ int) 
 	if err != nil {
 		return nil, err
 	}
-	defer reopened.Close()
+	defer func() { _ = reopened.Close() }()
 	if replay, err := io.ReadAll(reopened); err != nil || !bytes.Equal(body, replay) {
 		return nil, io.ErrUnexpectedEOF
 	}

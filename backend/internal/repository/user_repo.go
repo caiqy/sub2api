@@ -1016,7 +1016,7 @@ func (r *userRepository) GetBlockedGroups(ctx context.Context, userID int64) ([]
 }
 
 func (r *userRepository) SetBlockedGroups(ctx context.Context, userID int64, groupIDs []int64) error {
-	client := r.client
+	var client *dbent.Client
 	txCtx := ctx
 	var tx *dbent.Tx
 	if existingTx := dbent.TxFromContext(ctx); existingTx != nil {
@@ -1089,7 +1089,7 @@ func (r *userRepository) GetHiddenUIResources(ctx context.Context, userID int64)
 }
 
 func (r *userRepository) SetHiddenUIResources(ctx context.Context, userID int64, hidePurchase bool, customMenuIDs []string) error {
-	client := r.client
+	var client *dbent.Client
 	txCtx := ctx
 	var tx *dbent.Tx
 	if existingTx := dbent.TxFromContext(ctx); existingTx != nil {

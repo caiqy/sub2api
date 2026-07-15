@@ -128,13 +128,10 @@ func (s *GatewayService) ForwardAsResponsesHandle(
 	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
 	upstreamReq, upstreamBody, err := s.buildUpstreamRequestWithSourceBody(upstreamCtx, c, account, body, anthropicBody, token, tokenType, mappedModel, reqStream, shouldMimicClaudeCode)
 	releaseUpstreamCtx()
-	body = nil
-	anthropicBody = nil
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
 	upstreamHandle, err := NewRequestBodyHandleFromBytes(upstreamBody, RequestBodyHandleOptions{})
-	upstreamBody = nil
 	if err != nil {
 		return nil, fmt.Errorf("create upstream request body: %w", err)
 	}

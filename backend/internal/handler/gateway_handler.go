@@ -729,9 +729,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		ctx := service.WithSingleAccountRetry(c.Request.Context(), true, h.metadataBridgeEnabled())
 		c.Request = c.Request.WithContext(ctx)
 	}
-	// The parsed request borrows effectiveBody; raw bytes are no longer needed while slots/upstream wait.
-	body = nil
-
 	for {
 		fs := NewFailoverState(h.maxAccountSwitches, hasBoundSession)
 		retryWithFallback := false
@@ -968,7 +965,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// Bedrock CC 兼容：清理 body 专有字段 + 过滤 anthropic-beta header，适用于所有转发路径
 			attemptBody = h.gatewayService.ApplyBedrockCCCompat(c, attemptBody, attemptParsedReq.Model, account, apiKey.GroupID)
 			attemptHandle, err := service.NewRequestBodyHandleFromBytes(attemptBody, service.RequestBodyHandleOptions{})
-			attemptBody = nil
 			if err != nil {
 				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 				return

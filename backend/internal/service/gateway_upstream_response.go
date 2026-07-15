@@ -850,7 +850,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			if delta, ok := event["delta"].(map[string]any); ok {
 				for _, key := range []string{"text", "thinking", "partial_json"} {
 					if value, ok := delta[key].(string); ok {
-						outputText.WriteString(value)
+						_, _ = outputText.WriteString(value)
 					}
 				}
 			}

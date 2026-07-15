@@ -658,18 +658,19 @@ func runUpstreamToClient(
 			drainCtx, drainCancel := context.WithTimeout(ctx, 2*time.Second)
 			drained := false
 			drainedUsage := Usage{}
+		drainLoop:
 			for timing.responseID != "" && !drained {
 				var drainPayload []byte
 				select {
 				case drainFrame, ok := <-upstreamFrames:
 					if !ok || drainFrame.err != nil {
 						drained = false
-						break
+						break drainLoop
 					}
 					drainPayload = drainFrame.payload
 				case <-drainCtx.Done():
 					drained = false
-					break
+					break drainLoop
 				}
 				if len(drainPayload) == 0 {
 					break

@@ -115,10 +115,14 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		service.SetOpsUpstreamRequestBodyPreview(c, preview, coordinator.Effective().Size())
 	}
 	if coordinator != nil && coordinator.form != nil && endpoint == service.GrokMediaEndpointImagesEdits {
-		forwardBody, forwardContentType, prepareErr := service.PrepareGrokMediaFormForwardBody(requestInfo)
-		if prepareErr == nil {
-			prepareErr = coordinator.SetEffectiveBytes(forwardBody)
-		}
+		forwardContentType, prepareErr := func() (string, error) {
+			// Scope the temporary multipart payload after ownership moves to the effective handle.
+			forwardBody, forwardContentType, err := service.PrepareGrokMediaFormForwardBody(requestInfo)
+			if err != nil {
+				return "", err
+			}
+			return forwardContentType, coordinator.SetEffectiveBytes(forwardBody)
+		}()
 		if prepareErr != nil {
 			if errors.Is(prepareErr, service.ErrRequestBodySpool) {
 				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
@@ -127,8 +131,6 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to prepare request body")
 			return
 		}
-		// The effective handle owns the bytes; drop the temporary body for GC.
-		forwardBody = nil
 		contentType = forwardContentType
 		body = nil
 	}
@@ -176,7 +178,6 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			requestPayloadHash = coordinator.Effective().Hash()
 			coordinator.ReleaseMultipartValues()
 		}
-		body = nil
 		requestInfo.ReleaseText()
 		if endpoint == service.GrokMediaEndpointVideoStatus {
 			sessionHash = service.GrokMediaVideoRequestSessionHash(requestID)

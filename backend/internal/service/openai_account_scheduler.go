@@ -1467,22 +1467,6 @@ func (s *defaultOpenAIAccountScheduler) isAccountTransportCompatible(account *Ac
 	return s.service.isOpenAIAccountTransportCompatible(account, requiredTransport)
 }
 
-func (s *defaultOpenAIAccountScheduler) lookupShadowParentAccount(ctx context.Context, id int64) *Account {
-	if s == nil || s.service == nil {
-		return nil
-	}
-	if s.service.schedulerSnapshot != nil {
-		if account, err := s.service.schedulerSnapshot.GetAccount(ctx, id); err == nil && account != nil {
-			return account
-		}
-	}
-	if s.service.accountRepo == nil {
-		return nil
-	}
-	account, _ := s.service.accountRepo.GetByID(ctx, id)
-	return account
-}
-
 func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatible(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest) bool {
 	var service *OpenAIGatewayService
 	if s != nil {

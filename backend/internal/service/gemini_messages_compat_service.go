@@ -1267,14 +1267,11 @@ func (s *GeminiMessagesCompatService) ForwardNativeHandle(ctx context.Context, c
 			return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
 		}
 		outboundHandle, err = NewRequestBodyHandleFromBytes(wrappedBytes, RequestBodyHandleOptions{})
-		wrappedBytes = nil
 		if err != nil {
 			return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
 		}
 		ownedOutboundHandle = true
 	}
-	body = nil
-	originalBody = nil
 	defer func() {
 		if ownedOutboundHandle {
 			CleanupRequestBodyHandle(outboundHandle)

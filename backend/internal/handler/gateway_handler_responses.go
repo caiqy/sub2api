@@ -155,7 +155,6 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		APIKeyID:  apiKey.ID,
 	}
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
-	body = nil
 
 	// Error passthrough binding
 	if h.errorPassthroughService != nil {

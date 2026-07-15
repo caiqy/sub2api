@@ -1572,21 +1572,6 @@ func (r *revokeSubscriptionRepoStub) Delete(_ context.Context, id int64) error {
 	return nil
 }
 
-func seedSubscriptionCache(t *testing.T, svc *SubscriptionService, userID, groupID int64) (*ristretto.Cache, string) {
-	t.Helper()
-	cache, err := ristretto.NewCache(&ristretto.Config{NumCounters: 1e4, MaxCost: 1e3, BufferItems: 64})
-	require.NoError(t, err)
-	svc.subCacheL1 = cache
-	key := subCacheKey(userID, groupID)
-	cache.Set(key, "old_value", 1)
-	cache.Wait()
-	time.Sleep(10 * time.Millisecond)
-	if _, ok := cache.Get(key); !ok {
-		t.Skip("ristretto admission skipped Set; cannot verify Wait semantics")
-	}
-	return cache, key
-}
-
 type trackingSubCache struct {
 	deletedKeys []string
 	waitCalls   int
@@ -1594,7 +1579,10 @@ type trackingSubCache struct {
 }
 
 func (c *trackingSubCache) Del(key any) {
-	keyString := key.(string)
+	keyString, ok := key.(string)
+	if !ok {
+		return
+	}
 	c.deletedKeys = append(c.deletedKeys, keyString)
 	c.operations = append(c.operations, "del:"+keyString)
 }
