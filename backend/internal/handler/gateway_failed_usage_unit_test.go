@@ -135,7 +135,9 @@ func TestGatewayHandler_MessagesForwardErrorStillCreatesUsageLog(t *testing.T) {
 	require.NotNil(t, usageLogRepo.lastLog.DetailSnapshot)
 	requireRequestPreviewSnapshot(t, usageLogRepo.lastLog.DetailSnapshot.RequestBody, reqBody)
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, "anthropic upstream rejected payload")
-	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "x-api-key: anthropic-test-key")
+	requireSerializedHeader(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "X-Api-Key", "anthropic-test-key")
+	requireSerializedHeader(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "anthropic-version", "2023-06-01")
+	requireSerializedHeader(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "Content-Type", "application/json")
 }
 
 func TestGatewayHandler_MessagesFailoverExhaustedStillCreatesUsageLog(t *testing.T) {
@@ -245,11 +247,12 @@ func TestGatewayHandler_MessagesFailoverExhaustedStillCreatesUsageLog(t *testing
 	require.Equal(t, http.StatusTooManyRequests, rec.Code)
 	require.NotNil(t, usageLogRepo.lastLog)
 	require.NotNil(t, usageLogRepo.lastLog.DetailSnapshot)
-	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseHeaders, "Content-Type: application/json")
-	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseHeaders, "X-Request-Id: gateway_failover_123")
+	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseHeaders, ":status: 429")
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, `"anthropic_rate_limited_raw"`)
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, "anthropic raw failover")
-	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "x-api-key: anthropic-test-key")
+	requireSerializedHeader(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "X-Api-Key", "anthropic-test-key")
+	requireSerializedHeader(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "anthropic-version", "2023-06-01")
+	requireSerializedHeader(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "Content-Type", "application/json")
 }
 
 func TestGatewayHandler_MessagesSelectionExhaustedAfterFailoverStillCreatesUsageLog(t *testing.T) {
@@ -361,7 +364,21 @@ func TestGatewayHandler_MessagesSelectionExhaustedAfterFailoverStillCreatesUsage
 	require.NotNil(t, usageLogRepo.lastLog.DetailSnapshot)
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, `"anthropic_rate_limited_raw"`)
 	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, "anthropic raw failover")
-	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "x-api-key: anthropic-test-key")
+	requireSerializedHeader(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "X-Api-Key", "anthropic-test-key")
+	requireSerializedHeader(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "anthropic-version", "2023-06-01")
+	requireSerializedHeader(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "Content-Type", "application/json")
+}
+
+func requireSerializedHeader(t *testing.T, raw, name, want string) {
+	t.Helper()
+	for _, line := range strings.Split(raw, "\n") {
+		key, value, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if ok && strings.EqualFold(strings.TrimSpace(key), name) {
+			require.Equal(t, want, strings.TrimSpace(value))
+			return
+		}
+	}
+	t.Fatalf("header %q not found in %q", name, raw)
 }
 
 func TestGatewayHandler_MessagesStreamingPartialWriteFailureStillCreatesUsageLog(t *testing.T) {
