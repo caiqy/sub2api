@@ -490,17 +490,13 @@ func TestCheckAndResetWindows_InvalidatesCacheAfterPartialResetFailure(t *testin
 	require.False(t, ok, "部分 reset 成功后即使后续失败，也必须失效 L1 缓存")
 }
 
-func TestAdminResetQuota_InvalidatesCacheAfterPartialResetFailure(t *testing.T) {
+func TestAdminResetQuota_KeepsCacheAfterAtomicResetFailure(t *testing.T) {
 	now := time.Now().UTC()
 	repo := &windowResetTrackingUserSubRepo{resetWeeklyErr: errors.New("weekly reset failed")}
 	repo.userSubRepoNoop = userSubRepoNoop{}
 	svc := NewSubscriptionService(groupRepoNoop{}, repo, nil, nil, nil)
-	cache, err := ristretto.NewCache(&ristretto.Config{NumCounters: 10, MaxCost: 10, BufferItems: 64})
-	require.NoError(t, err)
+	cache := &trackingSubCache{}
 	svc.subCacheL1 = cache
-	cacheKey := subCacheKey(10, 20)
-	cache.Set(cacheKey, &UserSubscription{ID: 999}, 1)
-	cache.Wait()
 	repoWithSub := &adminResetPartialFailureRepo{windowResetTrackingUserSubRepo: repo, sub: &UserSubscription{
 		ID:        1,
 		UserID:    10,
@@ -510,18 +506,19 @@ func TestAdminResetQuota_InvalidatesCacheAfterPartialResetFailure(t *testing.T) 
 	}}
 	svc.userSubRepo = repoWithSub
 
-	_, err = svc.AdminResetQuota(context.Background(), 1, true, true, false)
+	_, err := svc.AdminResetQuota(context.Background(), 1, true, true, false)
 
 	require.Error(t, err)
+	require.True(t, repoWithSub.resetUsageWindowsCalled)
 	require.True(t, repo.resetDailyCalled)
 	require.True(t, repo.resetWeeklyCalled)
-	_, ok := cache.Get(cacheKey)
-	require.False(t, ok, "AdminResetQuota 部分 reset 成功后即使后续失败，也必须失效 L1 缓存")
+	require.Empty(t, cache.deletedKeys, "原子 reset 失败时数据库未变化，不应失效 L1 缓存")
 }
 
 type adminResetPartialFailureRepo struct {
 	*windowResetTrackingUserSubRepo
-	sub *UserSubscription
+	sub                     *UserSubscription
+	resetUsageWindowsCalled bool
 }
 
 func (r *adminResetPartialFailureRepo) GetByID(_ context.Context, id int64) (*UserSubscription, error) {
@@ -530,6 +527,14 @@ func (r *adminResetPartialFailureRepo) GetByID(_ context.Context, id int64) (*Us
 	}
 	cp := *r.sub
 	return &cp, nil
+}
+
+func (r *adminResetPartialFailureRepo) ResetUsageWindows(_ context.Context, _ int64, resetDaily, resetWeekly, resetMonthly bool, _ time.Time) error {
+	r.resetUsageWindowsCalled = true
+	r.resetDailyCalled = resetDaily
+	r.resetWeeklyCalled = resetWeekly
+	r.resetMonthlyCalled = resetMonthly
+	return r.resetWeeklyErr
 }
 
 func TestSevenDayCardDoesNotReceiveSecondWeeklyQuotaBeforeExpiry(t *testing.T) {
