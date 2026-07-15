@@ -127,6 +127,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to prepare request body")
 			return
 		}
+		// The effective handle owns the bytes; drop the temporary body for GC.
 		forwardBody = nil
 		contentType = forwardContentType
 		body = nil

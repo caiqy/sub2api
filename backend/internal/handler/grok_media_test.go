@@ -514,6 +514,7 @@ func TestGrokMedia_TextIsReleasedBeforeBlockedUpstream(t *testing.T) {
 			}
 			require.Positive(t, upstream.size)
 			runtime.GC()
+			runtime.GC()
 			var after runtime.MemStats
 			runtime.ReadMemStats(&after)
 			require.LessOrEqual(t, after.HeapAlloc, before.HeapAlloc+uint64(12<<20), "blocked Grok request retained 20MB text")
