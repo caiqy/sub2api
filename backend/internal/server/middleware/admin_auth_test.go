@@ -127,6 +127,8 @@ type stubUserRepo struct {
 	getByID func(ctx context.Context, id int64) (*service.User, error)
 }
 
+var _ service.UserRepository = (*stubUserRepo)(nil)
+
 func (s *stubUserRepo) Create(ctx context.Context, user *service.User) error {
 	panic("unexpected Create call")
 }
@@ -215,6 +217,14 @@ func (s *stubUserRepo) GetBlockedGroups(ctx context.Context, userID int64) ([]in
 
 func (s *stubUserRepo) SetBlockedGroups(ctx context.Context, userID int64, groupIDs []int64) error {
 	panic("unexpected SetBlockedGroups call")
+}
+
+func (s *stubUserRepo) GetHiddenUIResources(context.Context, int64) (bool, []int64, error) {
+	return false, []int64{}, nil
+}
+
+func (s *stubUserRepo) SetHiddenUIResources(context.Context, int64, bool, []string) error {
+	return nil
 }
 
 func (s *stubUserRepo) RemoveGroupFromUserAllowedGroups(ctx context.Context, userID int64, groupID int64) error {

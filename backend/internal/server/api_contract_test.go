@@ -1580,6 +1580,22 @@ func (r *stubUserRepo) RemoveGroupFromAllowedGroups(ctx context.Context, groupID
 	return 0, errors.New("not implemented")
 }
 
+func (r *stubUserRepo) GetBlockedGroups(context.Context, int64) ([]int64, error) {
+	return []int64{}, nil
+}
+
+func (r *stubUserRepo) SetBlockedGroups(context.Context, int64, []int64) error {
+	return nil
+}
+
+func (r *stubUserRepo) GetHiddenUIResources(context.Context, int64) (bool, []int64, error) {
+	return false, []int64{}, nil
+}
+
+func (r *stubUserRepo) SetHiddenUIResources(context.Context, int64, bool, []string) error {
+	return nil
+}
+
 func (r *stubUserRepo) RemoveGroupFromUserAllowedGroups(ctx context.Context, userID int64, groupID int64) error {
 	return errors.New("not implemented")
 }
