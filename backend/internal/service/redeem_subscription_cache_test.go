@@ -74,6 +74,26 @@ func (r *redeemSubscriptionRepoStub) ResetDailyUsage(_ context.Context, id int64
 	return nil
 }
 
+func (r *redeemSubscriptionRepoStub) ResetUsageWindows(_ context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, start time.Time) error {
+	sub := r.byID[id]
+	if sub == nil {
+		return ErrSubscriptionNotFound
+	}
+	if resetDaily {
+		sub.DailyUsageUSD = 0
+		sub.DailyWindowStart = &start
+	}
+	if resetWeekly {
+		sub.WeeklyUsageUSD = 0
+		sub.WeeklyWindowStart = &start
+	}
+	if resetMonthly {
+		sub.MonthlyUsageUSD = 0
+		sub.MonthlyWindowStart = &start
+	}
+	return nil
+}
+
 func (r *redeemSubscriptionRepoStub) IncrementUsage(_ context.Context, id int64, cost float64) error {
 	sub := r.byID[id]
 	if sub == nil {
