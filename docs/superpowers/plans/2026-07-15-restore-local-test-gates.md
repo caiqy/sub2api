@@ -39,6 +39,8 @@ base-ref: ddefbbffa13569f973aee4bb2802eb2414c7d70f
 
 ### Task 1: 将 failed-usage header 断言改为协议语义
 
+- [x] Task 1: 将 failed-usage header 断言改为协议语义
+
 **Files:**
 - Modify: `backend/internal/handler/gateway_failed_usage_unit_test.go`
 - Test: `backend/internal/handler/gateway_failed_usage_unit_test.go`
@@ -47,7 +49,7 @@ base-ref: ddefbbffa13569f973aee4bb2802eb2414c7d70f
 - Consumes: `middleware.UsageDetailSnapshot.UpstreamRequestHeaders string`。
 - Produces: 测试本地 helper `requireSerializedHeader(t *testing.T, raw, name, want string)`；以 `strings.EqualFold` 匹配 header 名称并精确匹配值。
 
-- [ ] **Step 1: 写入失败的语义断言**
+- [x] **Step 1: 写入失败的语义断言**
 
 在同一测试文件新增下列 helper，并将第 138、252、364 行的文本包含断言替换为三个语义断言：`X-Api-Key: anthropic-test-key`、`anthropic-version: 2023-06-01`、`Content-Type: application/json`。第 248、249 行改为断言已记录的 `:status: 429` 与响应体错误码，不要求快照包含未被当前捕获器保存的上游响应 header。
 
@@ -65,23 +67,25 @@ func requireSerializedHeader(t *testing.T, raw, name, want string) {
 }
 ```
 
-- [ ] **Step 2: 运行测试确认当前基线失败**
+- [x] **Step 2: 运行测试确认当前基线失败**
 
 Run: `go test -tags=unit ./internal/handler -run 'TestGatewayHandler_Messages(ForwardErrorStillCreatesUsageLog|FailoverExhaustedStillCreatesUsageLog|SelectionExhaustedAfterFailoverStillCreatesUsageLog)' -count=1 -v`
 
 Expected: FAIL；当前快照将 `x-api-key` 序列化为 `X-Api-Key`，并且 `ResponseHeaders` 仅包含 `:status: 429`。
 
-- [ ] **Step 3: 实施最小测试修复**
+- [x] **Step 3: 实施最小测试修复**
 
 保留现有请求、上游 stub 和 usage-log 断言；只引入 Step 1 的 helper 并替换四处字符串格式断言。不要修改 `gateway_handler.go`、上游 header 写入或快照生产逻辑。
 
-- [ ] **Step 4: 运行聚焦测试确认通过**
+- [x] **Step 4: 运行聚焦测试确认通过**
 
 Run: `go test -tags=unit ./internal/handler -run 'TestGatewayHandler_Messages(ForwardErrorStillCreatesUsageLog|FailoverExhaustedStillCreatesUsageLog|SelectionExhaustedAfterFailoverStillCreatesUsageLog)' -count=1`
 
 Expected: PASS；每个用例仍验证 API key、Anthropic 版本、content type、状态/错误体和 failed usage 快照。
 
 ### Task 2: 修复 Images failover 耗尽的最终响应
+
+- [ ] Task 2: 修复 Images failover 耗尽的最终响应
 
 **Files:**
 - Modify: `backend/internal/handler/openai_images_failover_test.go`
@@ -119,6 +123,8 @@ Run: `go test -tags=unit ./internal/handler -count=1`
 Expected: PASS；不改变其他 Images 成功、部分输出或已提交响应分支。
 
 ### Task 3: 补齐 server 与 middleware 的 UserRepository test stub
+
+- [ ] Task 3: 补齐 server 与 middleware 的 UserRepository test stub
 
 **Files:**
 - Modify: `backend/internal/server/api_contract_test.go`
@@ -169,6 +175,8 @@ Run: `go test -tags=unit ./internal/server ./internal/server/middleware -count=1
 Expected: PASS；两个 stub 都能作为 `service.UserRepository` 注入。
 
 ### Task 4: 隔离并复现 OpenAI HTTP Do 错误的 request body spool 生命周期
+
+- [ ] Task 4: 隔离并复现 OpenAI HTTP Do 错误的 request body spool 生命周期
 
 **Files:**
 - Modify: `backend/internal/service/openai_gateway_service_test.go`
@@ -228,6 +236,8 @@ Expected: PASS；若 Step 3 全套已稳定通过，则不修改 `openai_gateway
 
 ### Task 5: 修复 depguard、errcheck 与 govet 的 19 项诊断
 
+- [ ] Task 5: 修复 depguard、errcheck 与 govet 的 19 项诊断
+
 **Files:**
 - Modify: `backend/internal/handler/page_handler_hidden_menu_test.go`
 - Modify: `backend/internal/handler/payment_handler_hidden_purchase_test.go`
@@ -277,6 +287,8 @@ Run: `golangci-lint run ./...`
 Expected: 非零退出仅可保留 `ineffassign`、`staticcheck`、`unused`；不得出现 `depguard`、`errcheck` 或 `govet`。
 
 ### Task 6: 修复 ineffassign、staticcheck 与 unused 的 28 项诊断
+
+- [ ] Task 6: 修复 ineffassign、staticcheck 与 unused 的 28 项诊断
 
 **Files:**
 - Modify: `backend/internal/handler/gateway_handler.go`
@@ -330,6 +342,8 @@ Expected: PASS，退出码 0；规则、阈值、ignore 与扫描范围均未变
 
 ### Task 7: 将根 Makefile 固化为完整本地门禁
 
+- [ ] Task 7: 将根 Makefile 固化为完整本地门禁
+
 **Files:**
 - Modify: `Makefile`
 - Read-only reference: `backend/Makefile`
@@ -377,6 +391,8 @@ Run: `make -n test`
 Expected: 依次显示 `make -C backend test`、`make -C backend test-unit`、前端 `lint:check`、`typecheck`、`test:run`；不显示 `test-integration`、`test-e2e`、`docker`。
 
 ### Task 8: 从冷缓存验证全部本地门禁并完成计划自检
+
+- [ ] Task 8: 从冷缓存验证全部本地门禁并完成计划自检
 
 **Files:**
 - Modify: `docs/superpowers/plans/2026-07-15-restore-local-test-gates.md`（仅勾选实施期间完成的步骤并记录实际命令退出状态）
