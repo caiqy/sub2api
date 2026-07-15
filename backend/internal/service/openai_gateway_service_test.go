@@ -35,10 +35,11 @@ type stubOpenAIAccountRepo struct {
 }
 
 type openAIHTTPUpstreamRecorder struct {
-	lastReq  *http.Request
-	lastBody []byte
-	resp     *http.Response
-	err      error
+	lastReq        *http.Request
+	lastBody       []byte
+	lastBodySource string
+	resp           *http.Response
+	err            error
 }
 
 type openAIErroringUpstreamNoClose struct {
@@ -71,6 +72,12 @@ func (c *openAIUsageUpstreamRequestCollector) SetUsageUpstreamRequestHeaders(hea
 func (u *openAIHTTPUpstreamRecorder) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
 	u.lastReq = req
 	if req != nil && req.Body != nil {
+		if spool, ok := req.Body.(requestBodySpoolReadCloser); ok {
+			file, ok := spool.ReadCloser.(*os.File)
+			if ok {
+				u.lastBodySource = file.Name()
+			}
+		}
 		b, err := io.ReadAll(req.Body)
 		if err != nil {
 			return nil, err
@@ -3023,6 +3030,7 @@ func TestOpenAIForwardPreservesBoundRequestBodyHandleWhenHTTPDoErrors(t *testing
 	_, err = svc.Forward(c.Request.Context(), c, account, body)
 	require.Error(t, err)
 	require.Equal(t, body, secondUpstream.lastBody)
+	require.Equal(t, handle.spoolPath, secondUpstream.lastBodySource)
 
 	CleanupRequestBodyHandle(handle)
 	entries, err := os.ReadDir(spoolDir)
