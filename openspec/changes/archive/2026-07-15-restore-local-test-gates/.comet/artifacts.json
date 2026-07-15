@@ -4,5 +4,6 @@
   "openspec_tasks": "openspec/changes/restore-local-test-gates/tasks.md",
   "openspec_delta_spec": "openspec/changes/restore-local-test-gates/specs/local-test-gates/spec.md",
   "handoff_context": "openspec/changes/restore-local-test-gates/.comet/handoff/design-context.json",
-  "handoff_markdown": "openspec/changes/restore-local-test-gates/.comet/handoff/design-context.md"
+  "handoff_markdown": "openspec/changes/restore-local-test-gates/.comet/handoff/design-context.md",
+  "archive_directory": "openspec/changes/archive/2026-07-15-restore-local-test-gates"
 }

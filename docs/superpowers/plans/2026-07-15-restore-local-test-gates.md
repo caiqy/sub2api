@@ -2,6 +2,7 @@
 change: restore-local-test-gates
 design-doc: docs/superpowers/specs/2026-07-15-restore-local-test-gates-design.md
 base-ref: ddefbbffa13569f973aee4bb2802eb2414c7d70f
+archived-with: 2026-07-15-restore-local-test-gates
 ---
 
 # 恢复本地测试门禁实施计划

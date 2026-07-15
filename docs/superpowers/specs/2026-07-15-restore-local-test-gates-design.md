@@ -2,6 +2,8 @@
 comet_change: restore-local-test-gates
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-07-15-restore-local-test-gates
+status: final
 ---
 
 # 恢复本地测试门禁设计
