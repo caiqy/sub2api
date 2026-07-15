@@ -4,7 +4,7 @@
 
 ## 2. Pricing fixture
 
-- [ ] 2.1 对齐 channel/group 平台并删除重复 image output pricing 用例，运行定价聚焦测试。
+- [x] 2.1 对齐 channel/group 平台并删除重复 image output pricing 用例，运行定价聚焦测试。
 
 ## 3. Settings fixture
 
