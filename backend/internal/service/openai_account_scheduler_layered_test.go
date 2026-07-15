@@ -1336,6 +1336,7 @@ func TestLayered_SessionStickyRecheckHonorsImageCapability(t *testing.T) {
 			},
 		}, nil, repo, nil, snapshotCfg),
 	}
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
 
 	selection, decision, err := svc.SelectAccountWithSchedulerForImages(ctx, &groupID, "session_hash_layered_images", "gpt-image-1", nil, OpenAIImagesCapabilityNative)
 	require.NoError(t, err)
