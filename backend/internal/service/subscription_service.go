@@ -887,30 +887,10 @@ func (s *SubscriptionService) AdminResetQuota(ctx context.Context, subscriptionI
 		return nil, err
 	}
 	windowStart := startOfDay(time.Now())
-	resetSucceeded := false
-	defer func() {
-		if resetSucceeded {
-			s.invalidateSubscriptionCachesBestEffort(sub.UserID, sub.GroupID)
-		}
-	}()
-	if resetDaily {
-		if err := s.userSubRepo.ResetDailyUsage(ctx, sub.ID, sub.DailyWindowStart, windowStart); err != nil {
-			return nil, err
-		}
-		resetSucceeded = true
+	if err := s.userSubRepo.ResetUsageWindows(ctx, sub.ID, resetDaily, resetWeekly, resetMonthly, windowStart); err != nil {
+		return nil, err
 	}
-	if resetWeekly {
-		if err := s.userSubRepo.ResetWeeklyUsage(ctx, sub.ID, sub.WeeklyWindowStart, windowStart); err != nil {
-			return nil, err
-		}
-		resetSucceeded = true
-	}
-	if resetMonthly {
-		if err := s.userSubRepo.ResetMonthlyUsage(ctx, sub.ID, sub.MonthlyWindowStart, windowStart); err != nil {
-			return nil, err
-		}
-		resetSucceeded = true
-	}
+	s.invalidateSubscriptionCachesBestEffort(sub.UserID, sub.GroupID)
 	// Return the refreshed subscription from DB
 	return s.userSubRepo.GetByID(ctx, subscriptionID)
 }
