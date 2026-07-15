@@ -129,13 +129,16 @@ func TestHandleSmartRetry_QuotaExhausted_UsesCreditsAndStoresIndependentState(t 
 		Header:     http.Header{},
 		Body:       io.NopCloser(bytes.NewReader(respBody)),
 	}
+	payloadHandle, err := NewRequestBodyHandleFromBytes([]byte(`{"model":"claude-opus-4-6","request":{}}`), RequestBodyHandleOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(payloadHandle) })
 	params := antigravityRetryLoopParams{
 		ctx:            context.Background(),
 		prefix:         "[test]",
 		account:        account,
 		accessToken:    "token",
 		action:         "generateContent",
-		body:           []byte(`{"model":"claude-opus-4-6","request":{}}`),
+		payloadHandle:  payloadHandle,
 		httpUpstream:   upstream,
 		accountRepo:    repo,
 		requestedModel: "claude-opus-4-6",

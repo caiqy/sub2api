@@ -579,6 +579,7 @@ func TestLayered_PreviousResponseStickyIgnoresNonOpenAIPlatform(t *testing.T) {
 		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
 		openaiWSStateStore: stateStore,
 	}
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
 	selection, decision, err := svc.SelectAccountWithSchedulerForCapability(
 		ctx,
 		&groupID,
@@ -616,6 +617,7 @@ func TestLayered_StickyWeightedSessionPrefersStickyWithinTopK(t *testing.T) {
 		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true", "true"),
 		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
 	}
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
 
 	selection, decision, err := svc.SelectAccountWithScheduler(
 		ctx,
@@ -655,6 +657,7 @@ func TestLayered_StickyWeightedSessionDoesNotPreferStickyOutsideTopK(t *testing.
 		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true", "true"),
 		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
 	}
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
 
 	selection, decision, err := svc.SelectAccountWithScheduler(
 		ctx,
@@ -697,6 +700,7 @@ func TestLayered_StickyWeightedSessionFallsBackWhenStickyAcquireFails(t *testing
 			stickyAccount.ID: false,
 		}}),
 	}
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
 
 	selection, decision, err := svc.SelectAccountWithScheduler(
 		ctx,
@@ -739,6 +743,7 @@ func TestLayered_StickyWeightedPreviousCanMovePrefersStickyWithinTopK(t *testing
 		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true", "true"),
 		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
 	}
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
 	store := svc.getOpenAIWSStateStore()
 	require.NoError(t, store.BindResponseAccount(ctx, groupID, "resp_layered_weighted_movable", stickyAccount.ID, time.Hour))
 
@@ -1332,6 +1337,7 @@ func TestLayered_SessionStickyRecheckHonorsImageCapability(t *testing.T) {
 			},
 		}, nil, repo, nil, snapshotCfg),
 	}
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
 
 	selection, decision, err := svc.SelectAccountWithSchedulerForImages(ctx, &groupID, "session_hash_layered_images", "gpt-image-1", nil, OpenAIImagesCapabilityNative)
 	require.NoError(t, err)
