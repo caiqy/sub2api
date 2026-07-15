@@ -195,7 +195,11 @@ func TestGrokMedia_GenerateEditVideoRejectUpstreamFailoverPreserveRequestSemanti
 		wantBody     []byte
 	}{
 		{
-			name: "generate success", route: "/v1/images/generations", handler: func(c *gin.Context) { c.MustGet("handler").(*OpenAIGatewayHandler).GrokImages(c) },
+			name: "generate success", route: "/v1/images/generations", handler: func(c *gin.Context) {
+				handler, ok := c.MustGet("handler").(*OpenAIGatewayHandler)
+				require.True(t, ok)
+				handler.GrokImages(c)
+			},
 			body: func(t *testing.T) ([]byte, string) {
 				return []byte(`{"model":"grok-imagine","prompt":"metadata","image_url":"data:image/png;base64,bWVkaWEtc2VjcmV0"}`), "application/json"
 			},
@@ -204,7 +208,11 @@ func TestGrokMedia_GenerateEditVideoRejectUpstreamFailoverPreserveRequestSemanti
 			}, wantStatus: http.StatusOK, wantAccounts: []int64{1001}, wantMethod: http.MethodPost, wantPath: "/v1/images/generations", wantType: "application/json", wantBody: []byte(`{"model":"grok-imagine-image-quality","prompt":"metadata","image_url":"data:image/png;base64,bWVkaWEtc2VjcmV0"}`),
 		},
 		{
-			name: "edit success", route: "/v1/images/edits", handler: func(c *gin.Context) { c.MustGet("handler").(*OpenAIGatewayHandler).GrokImages(c) },
+			name: "edit success", route: "/v1/images/edits", handler: func(c *gin.Context) {
+				handler, ok := c.MustGet("handler").(*OpenAIGatewayHandler)
+				require.True(t, ok)
+				handler.GrokImages(c)
+			},
 			body: func(t *testing.T) ([]byte, string) {
 				var body bytes.Buffer
 				writer := multipart.NewWriter(&body)
@@ -321,6 +329,7 @@ func TestGrokMedia_GenerateEditVideoRejectUpstreamFailoverPreserveRequestSemanti
 			parent := &service.Account{ID: parentID, Name: "parent", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Credentials: map[string]any{"access_token": "token"}}
 			recorder := &grokMediaRequestRecorder{statuses: tt.statuses}
 			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
 			if tt.cancel {
 				recorder.cancel = cancel
 			}

@@ -166,14 +166,14 @@ func readJSONString(input *bufio.Reader, capture bool) (string, error) {
 		if escaped {
 			escaped = false
 			if capture {
-				value.WriteByte(current)
+				_ = value.WriteByte(current)
 			}
 			continue
 		}
 		if current == '\\' {
 			escaped = true
 			if capture {
-				value.WriteByte(current)
+				_ = value.WriteByte(current)
 			}
 			continue
 		}
@@ -184,7 +184,7 @@ func readJSONString(input *bufio.Reader, capture bool) (string, error) {
 			return strconv.Unquote(`"` + value.String() + `"`)
 		}
 		if capture {
-			value.WriteByte(current)
+			_ = value.WriteByte(current)
 		}
 	}
 }

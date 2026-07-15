@@ -141,7 +141,11 @@ func TestGatewayHandler_MessagesAndResponsesReplayLargeBodiesAcrossFailover(t *t
 			upstream.snapshot = func() gatewayReplaySnapshots {
 				detail := middleware.GetUsageDetailSnapshot(requestContext)
 				ops, _ := requestContext.Get(service.OpsUpstreamRequestBodyKey)
-				return gatewayReplaySnapshots{usageRequest: detail.RequestBody, usageUpstream: detail.UpstreamRequestBody, opsUpstream: ops.(string)}
+				opsUpstream, ok := ops.(string)
+				if !ok {
+					t.Fatalf("ops upstream body type = %T, want string", ops)
+				}
+				return gatewayReplaySnapshots{usageRequest: detail.RequestBody, usageUpstream: detail.UpstreamRequestBody, opsUpstream: opsUpstream}
 			}
 			recorder := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodPost, tt.route, bytes.NewReader(requestBody))
@@ -565,7 +569,7 @@ type blockingGatewayRequestBodyUpstream struct {
 }
 
 func (u *blockingGatewayRequestBodyUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
-	defer req.Body.Close()
+	defer func() { _ = req.Body.Close() }()
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
 		return nil, err

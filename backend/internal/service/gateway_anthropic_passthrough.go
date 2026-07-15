@@ -617,9 +617,9 @@ func (s *GatewayService) handleStreamingResponseAnthropicAPIKeyPassthrough(
 					firstTokenMs = &ms
 				}
 				s.parseSSEUsagePassthrough(data, usage)
-				outputText.WriteString(gjson.Get(data, "delta.text").String())
-				outputText.WriteString(gjson.Get(data, "delta.thinking").String())
-				outputText.WriteString(gjson.Get(data, "delta.partial_json").String())
+				_, _ = outputText.WriteString(gjson.Get(data, "delta.text").String())
+				_, _ = outputText.WriteString(gjson.Get(data, "delta.thinking").String())
+				_, _ = outputText.WriteString(gjson.Get(data, "delta.partial_json").String())
 			} else {
 				trimmed := strings.TrimSpace(line)
 				if strings.HasPrefix(trimmed, "event:") && anthropicStreamEventIsTerminal(strings.TrimSpace(strings.TrimPrefix(trimmed, "event:")), "") {

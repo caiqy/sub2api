@@ -1646,7 +1646,9 @@ func TestAntigravityCreditsRetryCapturesEachAttemptSnapshot(t *testing.T) {
 	upstream.onCall = func(_ *http.Request, _ *queuedHTTPUpstreamStub) {
 		usageBodies = append(usageBodies, collector.body)
 		value, _ := c.Get(OpsUpstreamRequestBodyKey)
-		opsBodies = append(opsBodies, value.(string))
+		opsBody, ok := value.(string)
+		require.True(t, ok)
+		opsBodies = append(opsBodies, opsBody)
 		attempts = append(attempts, HasOpsUpstreamAttempted(c))
 		SetOpsUpstreamAttempted(c, false)
 	}

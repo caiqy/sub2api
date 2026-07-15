@@ -343,7 +343,7 @@ type openAISpoolDeletingUpstream struct {
 
 func (u *openAISpoolDeletingUpstream) Do(req *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
 	u.accountIDs = append(u.accountIDs, accountID)
-	defer req.Body.Close()
+	defer func() { _ = req.Body.Close() }()
 	for _, dir := range u.dirs {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -363,7 +363,7 @@ func (u *openAISpoolDeletingUpstream) DoWithTLS(req *http.Request, proxyURL stri
 }
 
 func (u *openAIStatusSpoolUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
-	defer req.Body.Close()
+	defer func() { _ = req.Body.Close() }()
 	var err error
 	u.body, err = io.ReadAll(req.Body)
 	if err != nil {

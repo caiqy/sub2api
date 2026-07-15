@@ -163,7 +163,7 @@ func openAIFirstTokenRequestFromRequest(req *http.Request, fallback []byte) (ope
 	if req != nil && req.GetBody != nil {
 		body, err := req.GetBody()
 		if err == nil {
-			defer body.Close()
+			defer func() { _ = body.Close() }()
 			return openaiutil.ResponsesFirstTokenRequestReader(body)
 		}
 	}

@@ -1020,7 +1020,8 @@ func TestLayered_SessionStickyDBRecheckRejectsEndpointCapabilityChange(t *testin
 		cfg:                cfg,
 		concurrencyService: NewConcurrencyService(stubConcurrencyCache{}),
 	}
-	scheduler := svc.getOpenAIAccountScheduler().(*layeredOpenAIAccountScheduler)
+	scheduler, ok := svc.getOpenAIAccountScheduler().(*layeredOpenAIAccountScheduler)
+	require.True(t, ok)
 	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
 
 	selection, reqAfter, err := scheduler.selectBySessionHash(ctx, OpenAIAccountScheduleRequest{
