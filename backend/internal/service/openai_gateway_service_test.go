@@ -2982,14 +2982,13 @@ func TestOpenAIRequestBuilderRejectsInvalidBodyHandleArgumentType(t *testing.T) 
 	require.Error(t, err)
 }
 
-func TestOpenAIForwardCleansRequestBodyHandleWhenHTTPDoErrors(t *testing.T) {
+func TestOpenAIForwardPreservesBoundRequestBodyHandleWhenHTTPDoErrors(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 
-	padding := strings.Repeat("x", (10<<20)+1024)
-	body := []byte(`{"model":"gpt-5","instructions":"ok","input":"` + padding + `"}`)
+	body := []byte(`{"model":"gpt-5","instructions":"ok","input":"retry"}`)
 	spoolDir := t.TempDir()
 	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{
 		SpoolThresholdBytes: 1,
@@ -3014,7 +3013,18 @@ func TestOpenAIForwardCleansRequestBodyHandleWhenHTTPDoErrors(t *testing.T) {
 	_, err = svc.Forward(c.Request.Context(), c, account, body)
 	require.Error(t, err)
 	require.NotNil(t, upstream.lastReq)
-	_ = upstream.lastReq.Body.Close()
+
+	got, err := handle.ReadAll()
+	require.NoError(t, err)
+	require.Equal(t, body, got)
+
+	secondUpstream := &openAIHTTPUpstreamRecorder{err: errors.New("dial failed")}
+	svc.httpUpstream = secondUpstream
+	_, err = svc.Forward(c.Request.Context(), c, account, body)
+	require.Error(t, err)
+	require.Equal(t, body, secondUpstream.lastBody)
+
+	CleanupRequestBodyHandle(handle)
 	entries, err := os.ReadDir(spoolDir)
 	require.NoError(t, err)
 	require.Empty(t, entries)

@@ -53,7 +53,7 @@ func openAIRequestBodyHandleMatchesBytes(handle *RequestBodyHandle, body []byte)
 
 func openAIRequestBodyHandleForBytes(handle *RequestBodyHandle, body []byte) (*RequestBodyHandle, bool, error) {
 	if openAIRequestBodyHandleMatchesBytes(handle, body) {
-		return handle, true, nil
+		return handle, false, nil
 	}
 	h, err := NewRequestBodyHandleFromBytes(body, openAIRequestBodyHandleOptions())
 	return h, true, err
