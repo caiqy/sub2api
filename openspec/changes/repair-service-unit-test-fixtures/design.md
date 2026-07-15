@@ -16,6 +16,7 @@
 
 - 每个失败只在其现有测试文件内修复 fixture；重复 pricing case 直接删除。
 - settings 测试显式还原构造期间同步的全局值，避免测试顺序污染。
+- scheduler 测试复用生产 stop 入口清理后台 probe；不在 repo stub 添加 no-op 方法掩盖生命周期泄漏。
 
 ## Risks / Trade-offs
 

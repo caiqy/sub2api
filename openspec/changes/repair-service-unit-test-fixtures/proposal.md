@@ -7,6 +7,7 @@
 - credits overages direct-call fixture 使用当前 `payloadHandle` 契约。
 - pricing fixture 对齐 channel/group 平台并删除重复用例。
 - settings repository stub 实现生产一致的 `GetValue` 缺失语义并恢复测试全局状态。
+- layered scheduler 测试停止后台 account probe，避免测试结束后 goroutine 泄漏与异步 panic。
 
 ## Capabilities
 
@@ -20,5 +21,5 @@
 
 ## Impact
 
-- 仅修改 `backend/internal/service` 下 3 个测试文件。
+- 仅修改 `backend/internal/service` 下 4 个测试文件。
 - 不修改生产代码、公开 API、配置、数据库 schema、依赖或产品 spec。
