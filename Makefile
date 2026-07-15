@@ -1,4 +1,4 @@
-.PHONY: build build-backend build-frontend test test-backend test-frontend test-frontend-critical
+.PHONY: build build-backend build-frontend test test-backend test-backend-unit test-frontend test-frontend-critical
 
 FRONTEND_CRITICAL_VITEST := \
 	src/views/auth/__tests__/LinuxDoCallbackView.spec.ts \
@@ -19,16 +19,19 @@ build-backend:
 build-frontend:
 	@pnpm --dir frontend run build
 
-# 运行测试（后端 + 前端）
-test: test-backend test-frontend
+# 运行测试（后端默认 + unit，前端完整检查）
+test: test-backend test-backend-unit test-frontend
 
 test-backend:
 	@$(MAKE) -C backend test
 
+test-backend-unit:
+	@$(MAKE) -C backend test-unit
+
 test-frontend:
 	@pnpm --dir frontend run lint:check
 	@pnpm --dir frontend run typecheck
-	@$(MAKE) test-frontend-critical
+	@pnpm --dir frontend run test:run
 
 test-frontend-critical:
 	@pnpm --dir frontend exec vitest run $(FRONTEND_CRITICAL_VITEST)
