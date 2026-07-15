@@ -410,7 +410,7 @@ func TestAPIKeyAuthGoogleRejectsBlockedPublicGroup(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusForbidden, w.Code)
-	require.Contains(t, w.Body.String(), "not allowed")
+	require.Contains(t, w.Body.String(), "API Key 所属专属分组不再允许当前用户使用")
 }
 
 func TestAPIKeyAuthOverwritesInvalidContextGroup(t *testing.T) {
