@@ -2,13 +2,14 @@
 
 - Change: `restore-local-test-gates`
 - Review mode: `standard`
-- Current plan task: `Task 2: 修复 Images failover 耗尽的最终响应`
-- OpenSpec task: `1.2 修复 Images failover 耗尽时的错误响应契约，并运行对应 handler 测试。`
+- Current plan task: `Task 3: 补齐 server 与 middleware 的 UserRepository test stub`
+- OpenSpec task: `1.3 让 server 与 middleware 测试 fixture 实现当前 UserRepository 接口，并运行两个 package 的 unit 测试。`
 - Stage: `done`
-- Base commit: `dc2bad551`
+- Base commit: `1bce5bd8d`
 - Review/fix rounds: `0`
-- Implementation commit: `23bd1b4da test: focus images failover exhaustion`
-- Changed files: `backend/internal/handler/openai_images_failover_test.go`
-- Risk signals: `无；单文件测试收敛，未修改生产代码，未触发 standard 任务级审查。`
-- RED/GREEN evidence: `原测试在未提供 session_id 时错误断言非空 sticky session 而失败；删除无效断言后，聚焦 failover 测试和 handler unit package 通过。详见 .superpowers/sdd/task-2-report.md。`
-- Review: `standard 非风险任务，未派发任务级 reviewer。`
+- Implementation commits: `f2c370d2f test: complete user repository stubs`; `55dba4275 test: update server package contracts`
+- Changed files: `backend/internal/server/api_contract_test.go`; `backend/internal/server/middleware/admin_auth_test.go`
+- Risk signals: `跨 package 测试 fixture；standard 任务级审查已通过一轮修复与复审。`
+- RED/GREEN evidence: `stub 缺失编译 RED；编译通过后暴露两个过期契约断言；更新测试期望后，完整 server 与 middleware unit 命令 GREEN。详见 .superpowers/sdd/task-3-report.md。`
+- Review: `初审 Important 已由一轮修复解决；复审 Approved。`
+- Review/fix rounds: `1 / 1`

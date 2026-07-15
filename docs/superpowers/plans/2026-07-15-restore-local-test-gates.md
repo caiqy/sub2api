@@ -124,7 +124,7 @@ Expected: PASS；不改变其他 Images 成功、部分输出或已提交响应�
 
 ### Task 3: 补齐 server 与 middleware 的 UserRepository test stub
 
-- [ ] Task 3: 补齐 server 与 middleware 的 UserRepository test stub
+- [x] Task 3: 补齐 server 与 middleware 的 UserRepository test stub
 
 **Files:**
 - Modify: `backend/internal/server/api_contract_test.go`
@@ -136,13 +136,13 @@ Expected: PASS；不改变其他 Images 成功、部分输出或已提交响应�
 - Consumes: `service.UserRepository` 的 `GetBlockedGroups(context.Context, int64) ([]int64, error)`、`SetBlockedGroups(context.Context, int64, []int64) error`、`GetHiddenUIResources(context.Context, int64) (bool, []int64, error)`、`SetHiddenUIResources(context.Context, int64, bool, []string) error`。
 - Produces: 两个 package 私有 `stubUserRepo` 均满足 `service.UserRepository`；默认空状态返回不带 error。
 
-- [ ] **Step 1: 运行两个 package 确认编译失败**
+- [x] **Step 1: 运行两个 package 确认编译失败**
 
 Run: `go test -tags=unit ./internal/server ./internal/server/middleware -count=1`
 
 Expected: FAIL；`internal/server/api_contract_test.go` 缺 `GetBlockedGroups`，`internal/server/middleware/admin_auth_test.go` 缺 `GetHiddenUIResources`。
 
-- [ ] **Step 2: 先写出接口符合性测试约束**
+- [x] **Step 2: 先写出接口符合性测试约束**
 
 在两处 `stubUserRepo` 声明附近加入下列编译期检查；`api_contract_test.go` 已有接口检查组时，将其保留在该组中。
 
@@ -150,7 +150,7 @@ Expected: FAIL；`internal/server/api_contract_test.go` 缺 `GetBlockedGroups`�
 var _ service.UserRepository = (*stubUserRepo)(nil)
 ```
 
-- [ ] **Step 3: 实施受控的空值 stub 方法**
+- [x] **Step 3: 实施受控的空值 stub 方法**
 
 在 `api_contract_test.go` 的 `stubUserRepo` 补齐四个当前缺失的方法：`GetBlockedGroups` 返回 `[]int64{}, nil`，`SetBlockedGroups` 返回 `nil`，`GetHiddenUIResources` 返回 `false, []int64{}, nil`，`SetHiddenUIResources` 返回 `nil`。在 `admin_auth_test.go` 只补齐缺失的 `GetHiddenUIResources` 与 `SetHiddenUIResources`；已有的 `GetBlockedGroups` 与 `SetBlockedGroups` 保持“unexpected call”语义。不得改变生产 `service.UserRepository`。
 
@@ -168,7 +168,7 @@ func (r *stubUserRepo) SetHiddenUIResources(context.Context, int64, bool, []stri
 }
 ```
 
-- [ ] **Step 4: 运行两个 package 确认通过**
+- [x] **Step 4: 运行两个 package 确认通过**
 
 Run: `go test -tags=unit ./internal/server ./internal/server/middleware -count=1`
 
