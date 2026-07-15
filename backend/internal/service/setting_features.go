@@ -478,8 +478,8 @@ func (s *SettingService) GetOverloadCooldownSettings(ctx context.Context) (*Over
 		return DefaultOverloadCooldownSettings(), nil
 	}
 
-	var settings OverloadCooldownSettings
-	if err := json.Unmarshal([]byte(value), &settings); err != nil {
+	settings := DefaultOverloadCooldownSettings()
+	if err := json.Unmarshal([]byte(value), settings); err != nil {
 		return DefaultOverloadCooldownSettings(), nil
 	}
 
@@ -491,7 +491,7 @@ func (s *SettingService) GetOverloadCooldownSettings(ctx context.Context) (*Over
 		settings.CooldownMinutes = 120
 	}
 
-	return &settings, nil
+	return settings, nil
 }
 
 // SetOverloadCooldownSettings 设置529过载冷却配置
@@ -578,8 +578,8 @@ func (s *SettingService) GetStreamTimeoutSettings(ctx context.Context) (*StreamT
 		return DefaultStreamTimeoutSettings(), nil
 	}
 
-	var settings StreamTimeoutSettings
-	if err := json.Unmarshal([]byte(value), &settings); err != nil {
+	settings := DefaultStreamTimeoutSettings()
+	if err := json.Unmarshal([]byte(value), settings); err != nil {
 		return DefaultStreamTimeoutSettings(), nil
 	}
 
@@ -611,7 +611,7 @@ func (s *SettingService) GetStreamTimeoutSettings(ctx context.Context) (*StreamT
 		settings.Action = StreamTimeoutActionTempUnsched
 	}
 
-	return &settings, nil
+	return settings, nil
 }
 
 // IsUngroupedKeySchedulingAllowed 查询是否允许未分组 Key 调度
@@ -636,12 +636,12 @@ func (s *SettingService) GetRectifierSettings(ctx context.Context) (*RectifierSe
 		return DefaultRectifierSettings(), nil
 	}
 
-	var settings RectifierSettings
-	if err := json.Unmarshal([]byte(value), &settings); err != nil {
+	settings := DefaultRectifierSettings()
+	if err := json.Unmarshal([]byte(value), settings); err != nil {
 		return DefaultRectifierSettings(), nil
 	}
 
-	return &settings, nil
+	return settings, nil
 }
 
 // SetRectifierSettings 设置请求整流器配置
