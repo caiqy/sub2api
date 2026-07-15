@@ -2990,7 +2990,14 @@ func TestOpenAIForwardCleansRequestBodyHandleWhenHTTPDoErrors(t *testing.T) {
 
 	padding := strings.Repeat("x", (10<<20)+1024)
 	body := []byte(`{"model":"gpt-5","instructions":"ok","input":"` + padding + `"}`)
-	startedAt := time.Now().Add(-time.Second)
+	spoolDir := t.TempDir()
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{
+		SpoolThresholdBytes: 1,
+		TempDir:             spoolDir,
+		FilePrefix:          "sub2api-test-",
+	})
+	require.NoError(t, err)
+	BindOpenAIRequestBodyHandle(c, handle)
 	upstream := &openAIErroringUpstreamNoClose{}
 	svc := &OpenAIGatewayService{
 		cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
@@ -3004,12 +3011,13 @@ func TestOpenAIForwardCleansRequestBodyHandleWhenHTTPDoErrors(t *testing.T) {
 		Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://example.com/v1"},
 	}
 
-	_, err := svc.Forward(c.Request.Context(), c, account, body)
+	_, err = svc.Forward(c.Request.Context(), c, account, body)
 	require.Error(t, err)
-	if upstream.lastReq != nil && upstream.lastReq.Body != nil {
-		defer func() { _ = upstream.lastReq.Body.Close() }()
-	}
-	requireNoFreshOpenAISpoolFiles(t, startedAt)
+	require.NotNil(t, upstream.lastReq)
+	_ = upstream.lastReq.Body.Close()
+	entries, err := os.ReadDir(spoolDir)
+	require.NoError(t, err)
+	require.Empty(t, entries)
 }
 
 func TestOpenAIForwardReusesBoundRequestBodyHandle(t *testing.T) {
@@ -3277,23 +3285,6 @@ func requireRequestBodyClosed(t *testing.T, req *http.Request) {
 	t.Cleanup(func() { _ = req.Body.Close() })
 	_, err := req.Body.Read(make([]byte, 1))
 	require.Error(t, err)
-}
-
-func requireNoFreshOpenAISpoolFiles(t *testing.T, since time.Time) {
-	t.Helper()
-	matches, err := filepath.Glob(filepath.Join(os.TempDir(), "sub2api-request-body-*"))
-	require.NoError(t, err)
-	for _, path := range matches {
-		info, err := os.Stat(path)
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		require.NoError(t, err)
-		if !info.ModTime().Before(since) {
-			_ = os.Remove(path)
-			require.Failf(t, "fresh request body spool file was not cleaned", "path=%s", path)
-		}
-	}
 }
 
 func TestOpenAIBuildUpstreamRequestCompactForcesJSONAcceptForOAuth(t *testing.T) {
