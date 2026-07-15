@@ -8,4 +8,4 @@
 
 ## 3. Settings fixture
 
-- [ ] 3.1 让 settings repo stub 实现 `GetValue` 缺失语义并恢复全局状态，运行 settings 聚焦测试。
+- [x] 3.1 让 settings repo stub 实现 `GetValue` 缺失语义并恢复全局状态，运行 settings 聚焦测试。

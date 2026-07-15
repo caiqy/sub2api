@@ -61,7 +61,11 @@ func (s *settingGetAllRepoStub) Get(ctx context.Context, key string) (*Setting, 
 }
 
 func (s *settingGetAllRepoStub) GetValue(ctx context.Context, key string) (string, error) {
-	panic("unexpected GetValue call")
+	value, ok := s.values[key]
+	if !ok {
+		return "", ErrSettingNotFound
+	}
+	return value, nil
 }
 
 func (s *settingGetAllRepoStub) Set(ctx context.Context, key, value string) error {
@@ -346,6 +350,7 @@ func TestSettingService_UpdateSettings_PaymentVisibleMethodsAndAdvancedScheduler
 }
 
 func TestSettingService_GetAllSettings_OpenAIAdvancedSchedulerEffectiveValuesUseConfig(t *testing.T) {
+	resetGatewayRuntimeRetentionLimitsForTest(t)
 	cfg := &config.Config{}
 	cfg.Gateway.OpenAIWS.LBTopK = 13
 	cfg.Gateway.OpenAIWS.SchedulerScoreWeights = config.GatewayOpenAIWSSchedulerScoreWeights{
