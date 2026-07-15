@@ -1,7 +1,7 @@
 ## 1. 恢复稳定 unit 测试
 
 - [x] 1.1 将 Anthropic failed-usage 测试改为按 HTTP header 语义断言，并运行对应 handler 测试。
-- [ ] 1.2 修复 Images failover 耗尽时的错误响应契约，并运行对应 handler 测试。
+- [x] 1.2 修复 Images failover 耗尽时的错误响应契约，并运行对应 handler 测试。
 - [ ] 1.3 让 server 与 middleware 测试 fixture 实现当前 `UserRepository` 接口，并运行两个 package 的 unit 测试。
 
 ## 2. 确认 request body spool 生命周期

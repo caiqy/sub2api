@@ -30,7 +30,7 @@ base-ref: ddefbbffa13569f973aee4bb2802eb2414c7d70f
 | --- | --- |
 | `backend/internal/handler/gateway_failed_usage_unit_test.go` | 以大小写无关的 header 语义断言验证 Anthropic failed-usage 快照。 |
 | `backend/internal/handler/openai_images_failover_test.go` | 固化 Images 两账号 failover 耗尽后的状态、错误体和尝试次数。 |
-| `backend/internal/handler/openai_images.go` | 在 Images 候选账号耗尽时使用已有最终错误写入路径。 |
+| `backend/internal/handler/openai_images.go` | 作为 Images 候选账号耗尽时已有最终错误写入路径的只读参考。 |
 | `backend/internal/server/api_contract_test.go` | 补全 server package 私有 `stubUserRepo` 的当前接口实现。 |
 | `backend/internal/server/middleware/admin_auth_test.go` | 补全 middleware package 私有 `stubUserRepo` 的当前接口实现。 |
 | `backend/internal/service/openai_gateway_service_test.go` | 将 OpenAI HTTP Do 错误的 spool 清理断言限制到该测试绑定的 `t.TempDir()`。 |
@@ -85,38 +85,38 @@ Expected: PASS；每个用例仍验证 API key、Anthropic 版本、content type
 
 ### Task 2: 修复 Images failover 耗尽的最终响应
 
-- [ ] Task 2: 修复 Images failover 耗尽的最终响应
+- [x] Task 2: 修复 Images failover 耗尽的最终响应
 
 **Files:**
 - Modify: `backend/internal/handler/openai_images_failover_test.go`
-- Modify: `backend/internal/handler/openai_images.go`
+- Read-only reference: `backend/internal/handler/openai_images.go`
 - Test: `backend/internal/handler/openai_images_failover_test.go`
 
 **Interfaces:**
 - Consumes: `(*OpenAIGatewayHandler).Images(*gin.Context)`、`(*OpenAIGatewayHandler).handleFailoverExhausted(*gin.Context, *service.UpstreamFailoverError, bool)`、`service.UpstreamFailoverError`。
-- Produces: 当 `SelectAccountWithSchedulerForImages` 在至少一次 `UpstreamFailoverError` 后无候选账号时，writer 写入已有网关错误 JSON，且 handler 返回。
+- Produces: 当 `SelectAccountWithSchedulerForImages` 在至少一次 `UpstreamFailoverError` 后无候选账号时，测试验证既有 handler 已向 writer 写入网关错误 JSON 并返回。
 
-- [ ] **Step 1: 收紧耗尽情形的失败测试**
+- [x] **Step 1: 收紧耗尽情形的失败测试**
 
-在 `TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhenExhausted` 中，在现有两账号断言后保留并明确检查：`upstream.calls()` 恰有账号 `1`、`2` 各一次，`rec.Code == http.StatusBadGateway`，`error.type == "upstream_error"`，`error.message == "Upstream service temporarily unavailable"`，并且 `rec.Body` 非空。保留同一测试已有的第二次请求和 session 断言；它们覆盖独立的粘性会话行为，不为本次错误响应修复而删除。
+在 `TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhenExhausted` 中，保留并明确检查：`upstream.calls()` 恰有账号 `1`、`2` 各一次，`rec.Code == http.StatusBadGateway`，`error.type == "upstream_error"`，`error.message == "Upstream service temporarily unavailable"`，并且 `rec.Body` 非空。删除该测试的 `session_id`、scheduler session 和第二次请求断言：其输入未提供 `session_id`，这些断言不属于 failover 耗尽响应契约，也不能验证 sticky 行为。
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `go test -tags=unit ./internal/handler -run '^TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhenExhausted$' -count=1 -v`
 
-Expected: FAIL；当前 `openai_images.go` 的 OAuth 上游失败分支在没有写入响应时直接 `return`，导致 recorder body 为空。
+Expected: FAIL；当前 fixture 未提供 `session_id`，但测试错误断言非空 upstream/scheduler sticky session，失败发生在错误响应断言之前。
 
-- [ ] **Step 3: 在最终分支写入已有网关错误**
+- [x] **Step 3: 验证已有最终错误写入路径**
 
-在 `backend/internal/handler/openai_images.go` 的 `Images` 方法中，保留账号选择、`failedAccountIDs`、`switchCount`、usage 记录和 `handleFailoverExhausted` 的现有调用。仅将 OAuth `OpenAIImagesUpstreamError` 的无响应直接返回路径改为：若没有上游响应已写入，则归入现有 `UpstreamFailoverError` 耗尽处理，写入已有 `handleFailoverExhausted` 的错误响应并返回；响应已写入时保持现有行为。不得新增响应类型或修改 `handleFailoverExhausted` 的消息映射。
+删除无输入支撑的 session/scheduler 及第二次请求断言后，运行现有 `Images` 路径。若测试确认两次候选尝试后已返回非空的 502 `upstream_error` JSON，则不修改 `openai_images.go`；只有响应断言失败时，才在不改变选择、切换、计费或已写响应路径的前提下修复最终错误写入。
 
-- [ ] **Step 4: 运行聚焦测试确认通过**
+- [x] **Step 4: 运行聚焦测试确认通过**
 
 Run: `go test -tags=unit ./internal/handler -run '^TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhenExhausted$' -count=1`
 
 Expected: PASS；两次候选尝试后返回非空的 502 `upstream_error` JSON。
 
-- [ ] **Step 5: 运行 handler unit package**
+- [x] **Step 5: 运行 handler unit package**
 
 Run: `go test -tags=unit ./internal/handler -count=1`
 
