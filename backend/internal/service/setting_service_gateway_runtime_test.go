@@ -143,6 +143,24 @@ func TestNewSettingService_LoadsGatewayRuntimeSettingsFromDB(t *testing.T) {
 	require.Equal(t, 0, image)
 }
 
+func TestNewSettingService_LoadsPersistedGatewayControlSettings(t *testing.T) {
+	repo := &gatewayRuntimeSettingRepoStub{
+		getValueByKey: map[string]string{
+			SettingKeyGatewayRuntimeSettings:       `{"response_header_timeout":45,"stream_data_interval_timeout":90}`,
+			SettingKeyGatewayStickyOpenAIEnabled:   "true",
+			SettingKeyGatewayOpenAIWSSchedulerMode: "layered",
+		},
+	}
+	cfg := newGatewayRuntimeTestConfig(120, 60)
+
+	NewSettingService(repo, cfg)
+
+	require.Equal(t, 45, cfg.Gateway.ResponseHeaderTimeout)
+	require.Equal(t, 90, cfg.Gateway.StreamDataIntervalTimeout)
+	require.True(t, cfg.Gateway.Sticky.OpenAI.Enabled)
+	require.Equal(t, "layered", cfg.Gateway.OpenAIWS.SchedulerMode)
+}
+
 func TestSettingService_SetGatewayRuntimeSettings_PersistsUpdatesCfgAndInvalidatesOnResponseHeaderTimeoutChange(t *testing.T) {
 	repo := &gatewayRuntimeSettingRepoStub{}
 	cfg := newGatewayRuntimeTestConfig(120, 60)

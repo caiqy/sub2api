@@ -215,6 +215,7 @@ func NewSettingService(settingRepo SettingRepository, cfg *config.Config) *Setti
 		cfg:         cfg,
 	}
 	service.loadGatewayRuntimeSettingsFromDB(context.Background())
+	service.loadGatewayControlSettingsFromDB(context.Background())
 	service.syncUsageLogDetailRetentionLimitsFromConfig()
 	return service
 }
