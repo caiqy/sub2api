@@ -107,7 +107,7 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchRequest(ctx context.Context
 	if c != nil {
 		clientBeta = c.GetHeader("OpenAI-Beta")
 	}
-	req, err := s.buildUpstreamRequestOpenAIPassthrough(ctx, c, account, body, token)
+	req, err := s.buildUpstreamRequestOpenAIPassthrough(ctx, c, account, body, body, token)
 	if err != nil {
 		return nil, err
 	}

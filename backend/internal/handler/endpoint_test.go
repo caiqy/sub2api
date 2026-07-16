@@ -410,5 +410,5 @@ func TestResolveOpenAIUpstreamEndpoint_RawChatFallback(t *testing.T) {
 		},
 	}
 
-	require.Equal(t, "/v1/chat/completions", resolveOpenAIUpstreamEndpoint(c, account))
+	require.Equal(t, "/v1/chat/completions", resolveOpenAIUpstreamEndpoint(c, account, nil))
 }

@@ -306,7 +306,7 @@ func TestOpenAIFirstTokenTimeoutWinsBeforeChatFallbackFinalize(t *testing.T) {
 		Body:       io.NopCloser(bytes.NewBufferString("data: [DONE]\n\n")),
 	}
 
-	_, err := (&OpenAIGatewayService{}).streamChatCompletionsAsResponses(ctx, c, resp, "gpt-5", "gpt-5", "gpt-5", nil, nil, time.Now())
+	_, err := (&OpenAIGatewayService{}).streamChatCompletionsAsResponses(ctx, c, resp, "gpt-5", nil, false, nil, "gpt-5", "gpt-5", nil, nil, time.Now())
 
 	var timeoutErr *OpenAIFirstTokenTimeoutError
 	require.ErrorAs(t, err, &timeoutErr)

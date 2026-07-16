@@ -3303,7 +3303,7 @@ func TestOpenAILegacyBuilderCallersCloseRequestBodyWhenHTTPDoErrors(t *testing.T
 			run: func(svc *OpenAIGatewayService, c *gin.Context, account *Account) error {
 				payload := []byte(`{"type":"response.create","model":"gpt-5.1","input":"` + padding + `"}`)
 				c.Request = httptest.NewRequest(http.MethodPost, "/v1/realtime", nil)
-				_, err := svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "oauth-token", payload, len(payload), "gpt-5.1", "", "", "", 1, func([]byte) error { return nil })
+				_, err := svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "oauth-token", payload, len(payload), "gpt-5.1", "", "", "", "", 1, func([]byte) error { return nil })
 				return err
 			},
 		},

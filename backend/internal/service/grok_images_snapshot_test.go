@@ -67,7 +67,7 @@ func TestBuildGrokResponsesRequestStoresUsageAndOpsUpstreamPreview(t *testing.T)
 	body := []byte(`{"model":"grok-4.3","input":"hello"}`)
 	account := &Account{Credentials: map[string]any{"base_url": "https://xai.test/v1/"}}
 
-	_, err := buildGrokResponsesRequest(context.Background(), c, account, body, "access-token")
+	_, err := buildGrokResponsesRequest(context.Background(), c, account, body, "access-token", "")
 
 	require.NoError(t, err)
 	require.Contains(t, collector.headers, ":method: POST")

@@ -390,6 +390,7 @@ func TestOpenAIWSHTTPBridgeRequiresTerminalResponseEventBeforeSuccess(t *testing
 		"",
 		"",
 		"",
+		"",
 		1,
 		func(message []byte) error {
 			downstream = append(downstream, append([]byte(nil), message...))
@@ -440,6 +441,7 @@ func TestOpenAIWSHTTPBridge429ReturnsFailoverErrorWithoutClientEvent(t *testing.
 		[]byte(`{"type":"response.create","model":"gpt-5","stream":true,"input":"hi"}`),
 		1,
 		"gpt-5",
+		"",
 		"",
 		"",
 		"",
