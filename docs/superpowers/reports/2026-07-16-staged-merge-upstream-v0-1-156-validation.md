@@ -2424,3 +2424,59 @@ go -C backend test -v -tags unit ./internal/handler -run '^TestGatewayHandlerMes
 - Boundary: no source, test, generated, plan, OpenSpec, Comet progress, current-change, merge, push, release, or deploy changes were made. Only this canonical report is to be committed with `docs: close v0.1.153 stage gate`.
 - Review follow-up: reviewer 指出原报告将无匹配的 `git grep` 退出码误记为 `0`；已按原命令重跑并记录真实退出码 `1`。后端 `make build` 不在 Task 10 既定门禁内；计划步骤 1 明确要求 `make test`、`pnpm --dir frontend run build`、受影响测试和冲突验证，以上均已执行。
 - Decision: corrected static-scan evidence remains PASS. Task 11 is released. No Task 10 blocker remains.
+
+## Task 11 / v0.1.155 Merge Ledger (OpenSpec 4.1)
+
+### Status And Topology
+
+- Result: `DONE` for the required v0.1.155 merge and conflict fusion. The merge commit is not rewritten; the remaining builder-call compatibility work is explicitly deferred to Task 12.
+- Merge commit: `347ad61301c989a6ea53ba2539022513879aceab` `merge: upstream v0.1.155`.
+- First parent: `2ec17fce2f923d237336b9ebb56793553d5cf5d8`; second parent: `41cec0db059ffb82d0efdcfcf07a24ab51fbfe97`.
+- Target verification before merge: annotated `v0.1.155` object `ec4a37da4f023fbaa4d46d2ee46a6e7f22e313d4`; `v0.1.155^{}` exactly `41cec0db059ffb82d0efdcfcf07a24ab51fbfe97`. The peel is a result ancestor; `upstream/main` is not.
+- `git diff --name-only HEAD^1 HEAD` reports `234` changed files. This includes gateway, scheduler, account settings, frontend, Ent/Wire, migrations, monitoring and upstream tests; it is the merge tree, not a post-merge compatibility commit.
+
+### Conflict Ledger
+
+| Path | Ours | Theirs | Merge conclusion |
+| --- | --- | --- | --- |
+| `backend/cmd/server/VERSION` | Approved four-part local version. | Upstream release version. | Retained `0.1.151.2`; release reconciliation remains final-stage work. |
+| `backend/cmd/server/wire_gen.go` | Local dependency injections. | Grok quota injection. | Regenerated from the merged provider graph. |
+| `backend/ent/mutation.go` | Usage-detail generated API. | Long-context generated API. | Regenerated from merged schema; both API sets exist. |
+| `backend/internal/config/config_test.go` | First Token defaults/negative validation. | Image JSON keepalive environment assertion. | Both test groups retained. |
+| `backend/internal/handler/openai_images.go` | Exact failed-usage endpoint/write tracking. | Non-stream JSON keepalive. | Both behaviors retained. |
+| `backend/internal/repository/usage_log_repo_query.go` | Usage-detail list projection. | Long-context billing projection. | Both select columns and scan values retained. |
+| `backend/internal/service/admin_account.go` | Shadow/type invariants and passthrough normalization. | Long-context flag validation/defaulting. | Both normalizers and invariants retained. |
+| `backend/internal/service/openai_gateway_chat_completions_test.go` | OAuth session isolation and model mapping assertion. | Unknown model without Messages dispatch assertion. | Local broad test body retained; upstream production dispatch remains merged. |
+| `backend/internal/service/openai_gateway_record_usage_test.go` | Cyber quota test stub. | Account repository test stub. | Both stubs retained. |
+| `backend/internal/service/openai_oauth_passthrough_test.go` | Existing passthrough regression body. | Namespace imports for upstream additions. | Compiling local body retained; namespace production path remains merged. |
+| `backend/internal/service/scheduler_snapshot_service.go` | OpenAI account-change callback. | Coalesced full rebuild. | Both retained; startup and periodic rebuilds use the coalescer. |
+| `backend/internal/service/wire.go` | Existing providers. | Usage-log-aware Grok quota provider. | Provider added and duplicate direct constructor removed. |
+| `frontend/src/components/account/EditAccountModal.vue` | Aggregated local extra writers/probe controls. | Long-context billing toggle. | Both retained; Spark shadow neither renders nor submits the flag. |
+| `frontend/src/components/account/__tests__/CreateAccountModal.spec.ts` | Broad local create-modal suite. | Codex import/long-context fixture. | Local suite retained; upstream Create modal production behavior remains merged. |
+
+### Focused Review
+
+- Gateway: Images keeps exact failed-usage accounting while enabling JSON keepalive; passthrough namespace restoration retains the required `bytes` comparison.
+- Scheduler: local OpenAI account-change propagation coexists with upstream full-rebuild coalescing and its state mutexes.
+- Settings: OpenAI account long-context flag now validates as boolean, defaults to false for OpenAI, preserves an omitted current value on update, and leaves non-OpenAI extra unchanged.
+- Frontend: Edit modal restores/saves the same flag for OAuth, SetupToken and API-key accounts; shadow accounts are excluded. The inherited local create/edit test suites pass.
+- Generated artifacts: Ent regeneration combines UsageLog detail and long-context fields; Wire regeneration combines local services with the usage-log-aware Grok quota provider.
+- First Token: protected. `backend/internal/service/openai_first_token_timeout.go` is unchanged in `HEAD^1..HEAD`; text/image defaults and negative-value validation remain in `config.go` and its focused tests.
+
+### Commands And Results
+
+| Command | Exit | Result |
+| --- | ---: | --- |
+| `make -C backend generate` | 0 | Ent and Wire generation completed after schema/provider fusion. |
+| Config first-Token/keepalive exact tests | 0 | 4 named tests PASS. |
+| `pnpm exec vitest run ...CreateAccountModal.spec.ts ...EditAccountModal.spec.ts` | 0 | 2 files, 69 tests PASS. |
+| `git diff --cached --check` before merge commit | 0 | No whitespace errors. |
+| `git diff --check HEAD^1 HEAD` / `git show --check HEAD` | 0 | No whitespace errors. |
+| unmerged path/index scan and marker scan | 0 / expected grep 1 | Empty output; no unresolved path or marker. |
+| focused service/handler/repository packages | 1 | Blocked by the Task 12 compatibility item below. |
+
+### Boundary And Warning
+
+- Task 12 handoff: `backend/internal/service/openai_image_generation_controls_test.go:150` calls `buildUpstreamRequestOpenAIPassthrough` with the old five-argument contract, while v0.1.155 now requires original/effective body and metadata arguments. No argument mapping was guessed or repaired in this merge-only task.
+- Browser test output still warns that `caniuse-lite` is stale. No v0.1.156 or `upstream/main` merge, push, release, or deploy occurred.
+- The detailed ignored scratch ledger is `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-11-report.md`; this canonical section fully records its topology, conflict, category, verification, first-Token, and boundary evidence.
