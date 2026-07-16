@@ -634,6 +634,8 @@ cd backend && go test -v -tags unit ./internal/service ./internal/handler ./inte
 
 - 本轮只修改本报告；未修改或暂存测试、业务代码、生成源码、plan、OpenSpec task、Comet progress、`opencode.json`、`.comet/current-change.json`、`.superpowers/`、`backend` 或 `frontend`。
 - 暂存前后将核验 `git diff --cached --check` 与暂存文件清单；提交仅含本报告，message 为 `docs: close stage zero protection gate`。该报告的最终提交 SHA 以提交后 Git 记录为准，避免将自引用 SHA 写入提交内容而改变对象。
+- 阶段 0 门禁提交：`8294bf1f827698b1b9b696d0e46a66a0d439b8a7`（`docs: close stage zero protection gate`）。
+- 证据链接修复提交：`f324b7016dc22a4bf0d8000f7d93954af199652c`（`docs: link stage zero protection evidence`）。
 - 所有阶段 0 门禁退出 `0`、生成 diff 为空，允许进入 Task 5；本任务未执行 merge、push、release、deploy 或 main 合并，未勾选任务。
 
 ### 风险与顾虑
