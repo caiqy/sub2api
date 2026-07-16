@@ -451,6 +451,15 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   在提交前，按报告关联的精确修复/测试路径逐个执行 `git add -- 路径`，再暂存验证报告。预期：merge 节点与修复节点清晰可区分；无修复时仅更新报告。
 
+- [ ] **步骤 4：独立提交 v0.1.153 能力审查结论**
+
+  正式报告记录 changed-files/矩阵交集、调用链、Task 9 early work、新回归 RED/GREEN、修复提交、manual 结论和残余风险；只提交报告：
+  ```bash
+  git add -f docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md
+  git commit -m "docs: record v0.1.153 capability review"
+  ```
+  无未解释回归后才允许 Task 10 阶段门禁。
+
 ### Task 10：执行 v0.1.153 阶段门禁（OpenSpec 3.3）
 
 **文件：**

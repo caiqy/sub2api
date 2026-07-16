@@ -1,20 +1,20 @@
 # Subagent Progress
 
 - Change: `staged-merge-upstream-v0-1-156`
-- Plan task: `Task 8：合入 v0.1.153 并复核已有融合（OpenSpec 3.1）`
-- OpenSpec task: `3.1 使用 --no-ff 合入 v0.1.153，更新冲突台账并复核上一阶段已确认的融合决策`
-- Phase: `done`
+- Plan task: `Task 9：审查 v0.1.153 受影响能力并修复回归（OpenSpec 3.2）`
+- OpenSpec task: `3.2 审查 v0.1.152..v0.1.153 触及的本地能力，对回归先保留失败测试再做最小兼容修复`
+- Phase: `implementing`
 - Review mode: `thorough`
-- Review/fix round: `1/2`
-- Implementer status: `DONE_WITH_CONCERNS（台账路径已修复）`
-- Implementation commit: `Task 8 merge 9219483d7/ledger 11732cee9；Task 9 early 07eba46c6/94c2c3fb7`
-- Changed files: `v0.1.153 merge tree；正式报告；Task 9 early stale import fix`
-- Evidence: `9 冲突/拓扑正确；stale import RED/移除后诊断消失；NewPaymentHandler blockers 交 Task 9`
-- TDD: `exempt-by-user-decision`（tag merge/必要冲突融合不伪造 RED/GREEN）
-- Task reviewer: `Approved（Critical/Important/Minor 均无）`
-- Unresolved findings: `none；3 个 NewPaymentHandler 编译 blocker 已交 Task 9`
-- Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-8-brief.md`
-- Report: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-8-report.md`
+- Review/fix round: `0/2`
+- Implementer status: `dispatched`
+- Implementation commit: `early 07eba46c6/94c2c3fb7；其余 pending`
+- Changed files: `pending`
+- Evidence: `pending`
+- TDD: `tdd（行为回归必须 RED/GREEN；编译 fixture 使用真实 compile RED/GREEN）`
+- Task reviewer: `pending`
+- Unresolved findings: `3 个 NewPaymentHandler fixture 参数 blocker 待处理`
+- Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-9-brief.md`
+- Report: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-9-report.md`
 - Blocker fix: `OpenAIFastPolicyUserSelector.vue` 的 `SimpleUser` type-only import 已从未导出的 `@/api/admin/usage` 改为共享 `@/types`；没有行为变更或伪造行为 RED。
 - RED: `pnpm --dir frontend run build` 已记录为失败；本代理复现 `pnpm --dir frontend run typecheck`，失败为 TS2614 和由该未解析类型引发的 3 个 TS7006。
 - Follow-up RED: 改正 import 后，`typecheck` 暴露 hydration 映射遗漏共享类型必填的 `username`；`adminAPI.users.getById` 的 `AdminUser` 已提供该字段。
