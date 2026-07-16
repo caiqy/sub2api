@@ -384,7 +384,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 - 修改：Git merge 涉及的实际文件
 - 修改：`docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md`
 
-- [ ] **步骤 1：确认第 1 阶段闭合并合入 tag**
+- [x] **步骤 1：确认第 1 阶段闭合并合入 tag**
 
   执行：
   ```bash
@@ -394,7 +394,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：仅在任务 7 门禁闭合后执行；tag peel SHA 为 `a2bc1337474b68b62391116835e5698ebb5526bd`。
 
-- [ ] **步骤 2：更新冲突台账并复核已确认融合**
+- [x] **步骤 2：更新冲突台账并复核已确认融合**
 
   执行：
   ```bash
@@ -404,7 +404,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：重复冲突只可复用已验证的业务决策；必须重新检查当前 tag 的调用方和最终语义，禁止机械采用上次的 ours/theirs。
 
-- [ ] **步骤 3：完成 v0.1.153 merge commit**
+- [x] **步骤 3：完成 v0.1.153 merge commit**
 
   执行：
   ```bash
@@ -414,7 +414,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   在提交前，根据本段发现的精确冲突路径逐个执行 `git add -- 路径`，不得暂存验证报告。预期：第二父为 `a2bc1337474b68b62391116835e5698ebb5526bd`，merge commit 只含上游树与必要冲突融合。
 
-- [ ] **步骤 4：独立提交 v0.1.153 冲突台账**
+- [x] **步骤 4：独立提交 v0.1.153 冲突台账**
 
   merge 完成后，将 merge SHA/父节点、精确冲突路径（无则“无”）、双方语义、融合结论、复用或调整上一阶段决策的原因和 Task 9 验证方式写入正式报告；只提交报告：
   ```bash
@@ -436,7 +436,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   git diff --name-only v0.1.152..v0.1.153
   git diff --check HEAD^1..HEAD
   ```
-  对矩阵中被触及的能力执行 CodeGraph 调用链/影响分析，特别检查 scheduler、各平台 Sticky、fallback/WaitPlan、DB recheck、协议转换、runtime settings、body replay/cleanup 和用户资源控制。
+  先接收 Task 8 review 已完成的 stale `sync` import 修复 `07eba46c6`/`94c2c3fb7`，并处理其编译复现继续暴露的 3 个 `NewPaymentHandler` 参数不匹配；这些均归入 Task 9 early work，不重复前者。再对矩阵中被触及的能力执行 CodeGraph 调用链/影响分析，特别检查 scheduler、各平台 Sticky、fallback/WaitPlan、DB recheck、协议转换、runtime settings、body replay/cleanup 和用户资源控制。
 
 - [ ] **步骤 2：保留失败证据后完成最小兼容修复**
 
