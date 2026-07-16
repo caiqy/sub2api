@@ -2,7 +2,7 @@
 
 ## 固定对象与工作区
 
-- 隔离方式：Comet 预先创建的 feature worktree；本任务未创建、切换或合并分支。
+- 隔离方式：当前仓库中的 feature 分支；本任务未创建、切换或合并分支。
 - 隔离分支：`feature/20260716/staged-merge-upstream-v0-1-156`。
 - 开始 `HEAD`：`d5f8192d32d9840d63477c24d4a567abb8cb4a90`。
 - `HEAD` 父提交：`d1cc02502271f54b3b7f0593a18db4f2aaab63ea`。
@@ -50,7 +50,7 @@
 
 ## 提交与自审
 
-- 首次协调提交 SHA：`faf5c18725e5f6bdc8d013b27ee5c0517554eb60`，message 为 `docs: add staged upstream merge plan`。本报告补入该提交证据后以相同 message 更新该文档提交。
+- 首次协调提交 SHA：`3877dc247ea58ef2194051399db3e67974d68473`，message 为 `docs: add staged upstream merge plan`。本报告更正后另行创建普通文档提交，不在本次提交中记录其自身 SHA。
 - 变更文件：3 个 `docs/superpowers/{specs,plans,reports}/2026-07-16-staged-merge-upstream-v0-1-156*` 文档，以及 `openspec/changes/staged-merge-upstream-v0-1-156/` 下 19 个协调文件，共 22 个新增文件。
 - 暂存自审：`git diff --cached --check` 退出 0；`git diff --cached --name-only -- .comet/current-change.json .superpowers` 无输出。
 - 提交自审：首次提交的 `git show --name-status --format=fuller` 仅列出上述 22 个允许路径；根目录 `.comet/current-change.json` 保持未跟踪，未提交 `.superpowers/` 或业务代码。
