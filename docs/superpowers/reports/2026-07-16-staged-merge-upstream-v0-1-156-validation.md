@@ -721,6 +721,77 @@ cd backend && go test -v -tags unit ./internal/service ./internal/handler ./inte
 - 目标范围仍覆盖网关、协议、Ent/Wire、配置与 UI；`gap=0` 仅说明当前本地独有高风险能力已有直接断言或明确人工/生成证据，不替代各 target tag 合并后的阶段验证。
 - 首 Token 完整移除及无兼容别名只能在 `v0.1.156` 合并后的最终树复核；前三段不得提前删除保护。
 
+## Task 6 / v0.1.152 能力审查（OpenSpec 2.2）
+
+### 范围与交集
+
+- 审查基准：merge commit `4ffe039a4399f8cbac1f83df32b709afda777ffe`，release diff `v0.1.151..v0.1.152` 为完整的 `128` 个路径；merge 相对第一父的最终树差异为 `126` 路径，系融合后树口径。`git diff --check 4ffe039a^ 4ffe039a`、当前 `git diff --check`、未解决路径和冲突标记扫描均为退出码 `0`/空输出。
+- 与 Task 3 的 16 行矩阵直接交集为 `13` 行：M-01、M-02、M-04、M-05、M-06、M-07、M-09、M-10、M-11、M-12、M-13、M-14、M-15。M-03、M-08 未由 152 触及；M-16 虽在矩阵登记为 156 的 approved-removal，但 152 冲突融合实际触及 fallback watchdog，且本地首 Token 在前三段继续 protected，故作为第 `14` 项复核。
+- 交集覆盖 scheduler/Sticky/WaitPlan、DB recheck、apicompat 与 usage、image capability、runtime/body cleanup、用户资源与前端、版本、Ent/Wire/migration 和首 Token；其余 changed files 依路径归入 account/Grok quota、API key cache、group web-search pricing、route/DTO、前端 account/settings/i18n 功能逐项人工复核。
+
+### CodeGraph 与调用链
+
+- 执行 `context`（first Token、scheduler、Sticky、WaitPlan、recheck、body、Create/Edit）和一次 `explore`（firstTokenTimeout、scheduler、sticky、WaitPlan、body replay、Group、Create/Edit、passthrough）；另执行 `impact(supportsPassthroughFields)`、`impact(ValidatePeakRateConfig)`、`impact(getDefaultBaseUrl)`、`impact(WebSearchPricePerCall)`、`impact(resolveOpenAIUpstreamEndpoint)`，以及 CreateGroup、OpenAIGatewayService、CreateAccountModal 的按需 trace。
+- `CreateGroup -> ValidatePeakRateConfig -> parseMinutes` 保持单一校验入口。`WebSearchPricePerCall` 影响 Ent create/update、repository create/update、service Group、DTO 和 GroupsView；schema、migration `174`、Create/Edit 归一化及前端 null/default 往返均存在。
+- OpenAI service/component trace 在动态 dispatch 处停止；源码复核确认 `Forward/handler -> SelectAccountWithScheduler -> recheck/sticky store`、route -> ForwardAsChatCompletions/Responses -> apicompat、以及 Create/Edit -> `getDefaultBaseUrl` 的静态边界。Grok helper 返回 `https://api.x.ai/v1`，Create 切换平台和 Edit 默认值均依赖该 helper。
+
+### 能力结论
+
+| M-ID | 状态 | 结论 |
+| --- | --- | --- |
+| M-01 Scheduler | PASS | WaitPlan 与受限候选过滤仍在上游前完成。 |
+| M-02 OpenAI Sticky | PASS | disabled 时 HTTP/WS/ingress 均不读写状态。 |
+| M-03 Gemini/Anthropic Sticky | N/A | 152 无直接 changed-file 交集。 |
+| M-04 fallback/WaitPlan | PASS | SSE 已写入保护及 fallback 路径通过。 |
+| M-05 DB recheck | PASS | stale sticky/cache 在调度后、上游前复核。 |
+| M-06 协议转换/透传 | PASS | 原始 body map 与工具转换通过；原矩阵命令漏 unit tag，已补跑。 |
+| M-07 终止 usage | PASS | terminal/failed/partial failover 不重复记账。 |
+| M-08 内容审计 | N/A | 152 无直接 changed-file 交集。 |
+| M-09 image capability | PASS | image intent/capability/rate-limit 过滤保持。 |
+| M-10 运行时设置 | PASS | 后端持久化校验和 SettingsView 14 项断言通过。 |
+| M-11 body replay/cleanup | PASS | raw/effective handle 的 failover 与 cleanup 通过。 |
+| M-12 用户资源控制 | PASS/manual | 管理写入、支付/页面拒绝、管理员豁免及路由/visibility helper 已联检。 |
+| M-13 前端本地功能 | PASS/manual | 路由 guard、hidden menu helper、runtime card 联检通过。 |
+| M-14 版本/依赖 | PASS/manual | tag 为 `0.1.151`，merge 保留获批准本地四段 `0.1.151.2`；Go `1.26.5` 与 `golang.org/x/mod v0.35.0` 一致。 |
+| M-15 Ent/Wire/migrations | PASS/manual | schema -> generated client -> idempotent SQL 174 -> Create/Edit/UI 链路完整；生成无 diff。 |
+| M-16 首 Token | PASS/protected | HTTP 504/单次 failed usage、WS cancel-drain-turn 均通过；未提前执行 156 的移除。 |
+
+### 命令记录
+
+| 范围 | 命令结果 | 退出码 |
+| --- | --- | ---: |
+| M-01 | `go test ./internal/service -run WaitPlan targets -count=1` | 0 |
+| M-02 | `go test -tags unit ./internal/service -run OpenAI Sticky targets -count=1` | 0 |
+| M-04 | `go test ./internal/handler -run failover/SSE-written targets -count=1` | 0 |
+| M-05 | `go test ./internal/service -run DB recheck targets -count=1` | 0 |
+| M-06 | 原矩阵 `go test ./internal/pkg/apicompat ./internal/service -run conversion/passthrough targets -count=1` | 0 |
+| M-06 补充 | `go test -tags unit ./internal/service -run ForwardAs(ChatCompletions|Responses)_PassthroughBodyMapCopies -count=1` | 0 |
+| M-07 | `go test ./internal/pkg/apicompat ./internal/handler -run terminal usage targets -count=1` | 0 |
+| M-09 | `go test ./internal/service -run image capability targets -count=1` | 0 |
+| M-10 | backend runtime setting targets；`pnpm --dir frontend test:run SettingsView.gatewayRuntime.spec.ts`（14/14） | 0 / 0 |
+| M-11 | `go test ./internal/handler ./internal/service -run body replay/cleanup targets -count=1` | 0 |
+| M-12 | 原矩阵 service/handler 命令；补充 `go test -tags unit ./internal/service ./internal/handler -run hidden-resource targets -count=1` | 0 / 0 |
+| M-13 | `pnpm --dir frontend test:run feature-access userUiVisibility SettingsView.gatewayRuntime`（21/21） | 0 |
+| M-14 | `go test ./cmd/server -run '^$' -count=1` | 0 |
+| M-15 | migration targets；`make -C backend generate`；`git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` | 0 / 0 / 0 |
+| M-16 | `go test -v -tags unit ./internal/service ./internal/handler ./internal/service/openai_ws_v2 -run StickyAndFirstTokenTargets -count=1`（10 顶层目标） | 0 |
+| Task 5 冲突入口 | Alpha search route/service、endpoint/no-account/usage、API-key cache/Grok quota、OAuth passthrough、Create/Edit Grok、FastPolicy locale/selector | 全部 0 |
+| 扫描/人工 | merge/current `git diff --check`、conflict marker scan、`git ls-files -u`、tag/version/dependency 对照 | 全部 0/空 |
+
+### RED/GREEN 与修复
+
+- 已有 Task 6 early work 已核对：`b19c03d01` 在 `getDefaultBaseUrl('grok')` 从错误的 Anthropic 回退修复为 xAI URL；真实 RED/同命令 GREEN 为 `pnpm --dir frontend test:run src/components/account/__tests__/passthroughFieldSupport.spec.ts`。`2026265cb` 为该 RED/GREEN 证据提交，Create/Edit 表单依赖已由本轮 56/56 前端聚焦测试确认。
+- 本轮真实 RED：所有受影响 service/handler 命令先稳定报错。根因一是 152 新增 alpha search 与本地 body-handle/Grok/fallback/WS 签名演进未同步；根因二是上游两参 `resolveOpenAIUpstreamEndpoint` 与本地 result-aware 三参实现同时保留。GREEN：对应 alpha-search、Grok preview、first-token fallback、WS bridge、endpoint/usage、M-04/M-07/M-11/M-16 全部通过。
+- 新增普通提交 `03c45833e` `fix: restore v0.1.152 gateway call contracts`：最小同步调用、保留 result-aware endpoint 优先级，并合并 nil-account fallback。未 amend/rewrite `4ffe039a`。
+- 本轮前端 RED：Create Grok source test 仍要求内联 xAI literal；运行时已正确集中在 early-work helper。GREEN：改为断言 Create 依赖 helper，`d81633a6e` `test: align Grok account modal helper contract`，56/56 通过。
+
+### 人工审查、风险与顾虑
+
+- manual：15 项 Task 5 冲突逐一覆盖 VERSION、Ent descriptors、route/endpoint usage、API key cache、Grok pool/quota、fallback watchdog、usage snapshot、OAuth passthrough、Create/Edit、locale/selector；未发现不可共存语义。首 Token 保持 protected，未触及 156 removal。
+- 风险信号：Task 3 原 M-06/M-12 的不带 `-tags unit` 命令对 service 目标显示 `no tests to run`；本轮原命令与显式 unit-tag 补充命令均记录为 0，应在后续矩阵维护时修正原命令。
+- 顾虑：annotated tag 本机仍无签名材料，只能依据固定 peel SHA；VERSION 有意不同于 tag，最终发布阶段仍须复核。前端命令持续输出既有 Browserslist 数据陈旧警告，未阻断断言。
+- Task 6 结论：`DONE`。除上述已修复的两项后合并回归和已归类 Grok early work 外，没有未解释的 v0.1.152 行为回归；未运行 Task 7 完整阶段门禁，未修改 plan、OpenSpec task、Comet progress、`.comet/current-change.json` 或 `.superpowers`。
+
 ## 正式证据附录（五份原始 stdout）
 
 以下代码块逐行保存指定命令的 stdout；行数以命令输出的非空记录数计。附录 A 的 534 个 Git 输出记录含 8 个历史 subject 内嵌回车，因而持久化为 542 个物理行；其余附录的记录数与物理行数一致。
