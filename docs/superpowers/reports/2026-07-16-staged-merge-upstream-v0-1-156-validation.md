@@ -2481,3 +2481,58 @@ go -C backend test -v -tags unit ./internal/handler -run '^TestGatewayHandlerMes
 - Review follow-up: the 14 conflict rows now record their concrete caller or execution entry. Task 12 will link the builder compatibility repair and focused backend results back to this ledger.
 - Browser test output still warns that `caniuse-lite` is stale. No v0.1.156 or `upstream/main` merge, push, release, or deploy occurred.
 - The detailed ignored scratch ledger is `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-11-report.md`; this canonical section fully records its topology, conflict, category, verification, first-Token, and boundary evidence.
+
+## Task 12 / v0.1.155 Capability Review (OpenSpec 4.2)
+
+### Scope, Handoff, And Counts
+
+- Task 11 handoff resolved: `openai_image_generation_controls_test.go:150` used the obsolete five-argument `buildUpstreamRequestOpenAIPassthrough` call. The new signature requires source body, effective body and body-handle/token arguments. The fixture has no transformation, so source/effective body are the same bytes.
+- `git diff --name-only v0.1.153..v0.1.155` lists `238` release-diff paths. The Task 11 merge-tree comparison `347ad613^1..347ad613` has `234` changed paths. Both counts are retained because the 234 value is not the release-diff cardinality.
+- Matrix intersection: `affected=13` (M-01, M-02, M-04, M-05, M-06, M-07, M-08, M-09, M-10, M-11, M-13, M-14, M-15); `manual/protected N/A=3` (M-03, M-12, M-16). A `0 tests to run` result is compile/manual evidence only and never test coverage.
+
+### RED/GREEN And Compatibility Repairs
+
+| Finding | RED | GREEN | Commit |
+| --- | --- | --- | --- |
+| Task 11 builder fixture | `go -C backend test ./internal/service -run '^$' -count=1` failed: old five arguments, new signature needs source/effective body plus token/handle. | Same compile command passed; `TestOpenAIBuildUpstreamRequestOpenAIPassthroughForwardsResponsesLiteHeader` passed. | `1716639f8` `fix: preserve local behavior after v0.1.155` |
+| Images JSON keepalive | Handler package failed because `openAIImagesJSONKeepaliveInterval` was called but absent after merge. | Restored the existing second-parent config-to-duration helper; 0/positive interval contract and keepalive suite passed. | `305f7ad55` `fix: restore image keepalive interval` |
+| Chat model fixture | Unknown-model test expected `gpt6`, but supplied a Messages-only default mapping and produced `gpt-5.4`. | Fixture now supplies no Messages dispatch mapping; named target passed. | `4e4e7e583` `test: align chat model mapping fixture` |
+| Long-context fixture | Test expected long-context multipliers while omitting v0.1.155's explicit opt-in account flag. | Fixture explicitly enables the OpenAI flag; named target passed. | `fd02f8bbf` `test: enable long-context billing fixture` |
+| Usage-log SQL mock | Local mock expected 53 placeholders while merged insert has `long_context_billing_applied` and 54. | Mock includes the new column and `$54`; named target and repository package passed. | `3e3c6e71e` `test: align usage log insert mock` |
+| Scheduler outbox lag | Consumed old event still triggered a lag rebuild; `FirstCreatedAtAfter` test failed. | Query only pending events after watermark and reset failures when absent; scheduler targets passed. | `806df474d` `fix: preserve scheduler outbox lag semantics` |
+
+### M-ID Results
+
+| M-ID | Result | Actual evidence |
+| --- | --- | --- |
+| M-01 Scheduler | PASS | 2 WaitPlan targets and 6 snapshot coalescer/outbox targets. |
+| M-02 OpenAI Sticky | PASS | 4 `unit` tagged HTTP/WS/ingress sticky targets. |
+| M-03 Gemini/Anthropic Sticky | manual N/A | No Gemini/Anthropic sticky changed-file intersection. |
+| M-04 fallback / WaitPlan | PASS | 2 handler failover/SSE-written targets. |
+| M-05 DB recheck | PASS | 3 scheduler DB-recheck targets. |
+| M-06 protocol conversion | PASS | 2 apicompat targets plus 2 `unit` source-body passthrough targets. |
+| M-07 terminal usage | PASS | 4 terminal/failed usage targets. |
+| M-08 content moderation | PASS | 4 moderation targets. |
+| M-09 image capability | PASS | 3 untagged image-intent/capability targets plus 1 `unit` rate-limit target. |
+| M-10 runtime settings | PASS | 2 backend targets and SettingsView `14/14`. |
+| M-11 request-body replay | PASS | 5 raw/effective handle replay and cleanup targets. |
+| M-12 user resource control | manual N/A | No direct user-resource-control changed-file intersection. |
+| M-13 frontend local features | PASS | 9 changed-file suites, `136/136` tests. |
+| M-14 version/dependencies | PASS/manual | Result and first parent are `0.1.151.2`; tag parent is `0.1.153`, matching the approved local four-part version decision. Its compile-only zero-test result was excluded. |
+| M-15 Ent/Wire/migrations | PASS/manual | 3 v0.1.155 migration targets passed; `make -C backend generate` and restricted generated diff are clean. |
+| M-16 first Token | protected N/A | Source remains unchanged; supplemental tagged rerun passed all 10 sticky/first-Token targets, including HTTP 504/single failed usage and WS cancel-drain-turn. |
+
+### Focused Verification And Manual Review
+
+- Gateway/handler/service/repository: `go -C backend test ./internal/service ./internal/handler ./internal/repository -count=1` passed after all repairs.
+- Settings/long-context/Ent/Wire/migration: account flag validation/default/preservation, admin boundary validation, usage-log projection/insert, migration 175/176 assertions, and generated graph were reviewed. The only local SQL mock not updated by the merge is repaired above.
+- Scheduler: OpenAI account-change callback and coalesced rebuild coexist; lag logic now checks only pending outbox rows after a successful watermark.
+- Frontend: account, usage, Grok/monitor, ops and runtime-settings entry suites passed (`136/136`); Spark shadow remains excluded from the long-context control path.
+- Named test executions: `232` total (`187` M-ID matrix executions plus `45` builder/conflict/first-Token supplemental executions). This counts intentional reruns as executions, not unique test definitions.
+- Static checks passed: `git diff --check`, cached whitespace check, unmerged-path scan and `git ls-files -u` were empty. Marker `git grep` returned expected no-match exit `1`.
+
+### Boundary, Warning, And Task 13 Entry
+
+- Existing non-blocking warning: Browserslist/caniuse-lite data is stale. Expected test-path logging remains non-failing.
+- No merge commit was rewritten. No v0.1.156 or `upstream/main` merge, push, release, deploy, plan, OpenSpec, Comet, or current-change modification occurred.
+- **Task 13 entry:** run `go test ./... -count=1` from `backend`, frontend `pnpm test:run` and `pnpm typecheck`, then its controlled 5/10/12 MB request-body matrix and affected-package rerun.
