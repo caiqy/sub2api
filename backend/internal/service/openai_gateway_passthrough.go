@@ -31,7 +31,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	c *gin.Context,
 	account *Account,
 	body []byte,
+	canonicalImageIntentBody []byte,
 	reqModel string,
+	attemptImageIntentInvalidated bool,
 	reasoningEffort *string,
 	reqStream bool,
 	startTime time.Time,
@@ -46,6 +48,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			}
 			body = nextBody
 			upstreamPassthroughModel = compactMappedModel
+			attemptImageIntentInvalidated = true
 		}
 	}
 
@@ -102,7 +105,16 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	body = updatedBody
 
 	apiKey := getAPIKeyFromContext(c)
-	if IsImageGenerationIntent(openAIResponsesEndpoint, reqModel, body) && !GroupAllowsImageGeneration(apiKeyGroup(apiKey)) {
+	imageIntent := resolveOpenAIPassthroughImageIntent(
+		c,
+		reqModel,
+		canonicalImageIntentBody,
+		policyModel,
+		body,
+		attemptImageIntentInvalidated,
+		IsImageGenerationIntent,
+	)
+	if imageIntent && !GroupAllowsImageGeneration(apiKeyGroup(apiKey)) {
 		MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalFeatureGate)
 		c.JSON(http.StatusForbidden, gin.H{
 			"error": gin.H{
@@ -115,7 +127,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	imageBillingModel := ""
 	imageSizeTier := ""
 	imageInputSize := ""
-	if IsImageGenerationIntent(openAIResponsesEndpoint, reqModel, body) {
+	if imageIntent {
 		var imageCfgErr error
 		imageCfg, imageCfgErr := resolveOpenAIResponsesImageBillingConfigDetailedFromBody(body, reqModel)
 		if imageCfgErr != nil {

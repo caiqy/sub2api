@@ -127,7 +127,7 @@ func TestOpenAIFirstTokenTimeoutBeforeResponseHeaders(t *testing.T) {
 		Credentials: map[string]any{"api_key": "test-key", "base_url": "https://example.com/v1"},
 	}
 
-	_, err := svc.forwardOpenAIPassthrough(context.Background(), c, account, body, "gpt-5", nil, true, time.Now())
+	_, err := svc.forwardOpenAIPassthrough(context.Background(), c, account, body, body, "gpt-5", false, nil, true, time.Now())
 
 	var timeoutErr *OpenAIFirstTokenTimeoutError
 	require.ErrorAs(t, err, &timeoutErr)
@@ -246,7 +246,7 @@ func TestOpenAIFirstTokenClassUsesFinalWirePayload(t *testing.T) {
 	}
 	started := time.Now()
 
-	_, err := svc.forwardOpenAIPassthrough(context.Background(), c, account, body, "gpt-5", nil, true, started)
+	_, err := svc.forwardOpenAIPassthrough(context.Background(), c, account, body, body, "gpt-5", false, nil, true, started)
 
 	var timeoutErr *OpenAIFirstTokenTimeoutError
 	require.False(t, errors.As(err, &timeoutErr))

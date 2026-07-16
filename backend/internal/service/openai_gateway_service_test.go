@@ -3664,7 +3664,7 @@ func TestOpenAIPassthroughCapturesAttemptBeforeNonFailoverHTTPError(t *testing.T
 		},
 	}
 
-	_, err := svc.forwardOpenAIPassthrough(context.Background(), c, account, body, "gpt-5", nil, false, time.Now())
+	_, err := svc.forwardOpenAIPassthrough(context.Background(), c, account, body, body, "gpt-5", false, nil, false, time.Now())
 	require.EqualError(t, err, "upstream error: 400 message=bad request")
 	require.JSONEq(t, string(upstream.lastBody), collector.body)
 	require.Contains(t, collector.headers, "X-Final: yes")
