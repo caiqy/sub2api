@@ -732,14 +732,10 @@ func TestOpenAIGatewayHandler_SubmitOpenAIImagesFailedUsageLog_UsesErrorSnapshot
 	router := gin.New()
 	router.Use(middleware.UsageDetailCapture())
 	router.POST("/test", func(c *gin.Context) {
-		h.submitOpenAIImagesFailedUsageLog(c, apiKey, account, parsed, fakeOpenAIImagesOAuthUpstreamError{
-			statusCode: 418,
-			responseHeaders: http.Header{
-				"Content-Type": []string{"application/json"},
-				"X-Request-Id": []string{"req_err_snapshot_123"},
-			},
-			responseBody: []byte(`{"error":{"message":"err-carried image snapshot"}}`),
-		}, time.Second)
+		h.submitFailedUsageLog(c, apiKey, account, parsed.Model, parsed.Stream, http.StatusTeapot, http.Header{
+			"Content-Type": []string{"application/json"},
+			"X-Request-Id": []string{"req_err_snapshot_123"},
+		}, []byte(`{"error":{"message":"err-carried image snapshot"}}`), time.Second, nil, "handler.openai_gateway.images")
 		c.Status(http.StatusTeapot)
 	})
 

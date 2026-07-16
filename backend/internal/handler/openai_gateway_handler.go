@@ -40,7 +40,10 @@ type OpenAIGatewayHandler struct {
 	cfg                      *config.Config
 }
 
-const openAIResponsesRequestBodySpoolThresholdBytes int64 = 10 << 20
+const (
+	openAIResponsesRequestBodySpoolThresholdBytes int64 = 10 << 20
+	maxOpenAIFirstOutputTimeoutSwitches                 = 1
+)
 
 var openAIResponsesRequestBodyPreviewLimitBytes int64 = 5 << 20
 
@@ -2176,6 +2179,34 @@ func isSafeRetryAfter(value string) bool {
 		return false
 	}
 	return !retryAt.After(time.Now().Add(7 * 24 * time.Hour))
+}
+
+func openAIForwardMayFailover(c *gin.Context, writerSizeBeforeForward int, failoverErr *service.UpstreamFailoverError) bool {
+	if c == nil || c.Writer == nil {
+		return false
+	}
+	if service.OpenAICompactKeepaliveAdjustedWrittenSize(c) == writerSizeBeforeForward {
+		return true
+	}
+	return failoverErr != nil && failoverErr.SafeToFailoverAfterWrite
+}
+
+func openAIRequestAllowsFailoverReplay(c *gin.Context) bool {
+	if c == nil || c.Request == nil {
+		return false
+	}
+	return !failoverClientGone(c)
+}
+
+func openAIFirstOutputFailoverExhausted(failoverErr *service.UpstreamFailoverError, switchCount *int) bool {
+	if failoverErr == nil || !failoverErr.SafeToFailoverAfterWrite || switchCount == nil {
+		return false
+	}
+	if *switchCount >= maxOpenAIFirstOutputTimeoutSwitches {
+		return true
+	}
+	*switchCount++
+	return false
 }
 
 func (h *OpenAIGatewayHandler) submitUsageRecordTask(parent context.Context, task service.UsageRecordTask) {
