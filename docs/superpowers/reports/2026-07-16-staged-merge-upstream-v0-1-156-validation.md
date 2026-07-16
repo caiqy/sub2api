@@ -744,7 +744,7 @@ cd backend && go test -v -tags unit ./internal/service ./internal/handler ./inte
 | M-03 Gemini/Anthropic Sticky | N/A | 152 无直接 changed-file 交集。 |
 | M-04 fallback/WaitPlan | PASS | SSE 已写入保护及 fallback 路径通过。 |
 | M-05 DB recheck | PASS | stale sticky/cache 在调度后、上游前复核。 |
-| M-06 协议转换/透传 | PASS | 原始 body map 与工具转换通过；原矩阵命令漏 unit tag，已补跑。 |
+| M-06 协议转换/透传 | PASS | 原始 source body 与 effective mapped body 分离后，body map 和工具转换均通过；原矩阵命令漏 unit tag，已补跑。 |
 | M-07 终止 usage | PASS | terminal/failed/partial failover 不重复记账。 |
 | M-08 内容审计 | N/A | 152 无直接 changed-file 交集。 |
 | M-09 image capability | PASS | image intent/capability/rate-limit 过滤保持。 |
@@ -776,6 +776,7 @@ cd backend && go test -v -tags unit ./internal/service ./internal/handler ./inte
 | M-15 | migration targets；`make -C backend generate`；`git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` | 0 / 0 / 0 |
 | M-16 | `go test -v -tags unit ./internal/service ./internal/handler ./internal/service/openai_ws_v2 -run StickyAndFirstTokenTargets -count=1`（10 顶层目标） | 0 |
 | Task 5 冲突入口 | Alpha search route/service、endpoint/no-account/usage、API-key cache/Grok quota、OAuth passthrough、Create/Edit Grok、FastPolicy locale/selector | 全部 0 |
+| Task 6 alpha-search reviewer fix | `go test ./internal/service -run '^TestForwardAlphaSearchAPIKeyMapsModelAndPassesThroughError$' -count=1`（RED 1，GREEN 0）；`-run '^TestForwardAlphaSearch'`、`-run '^TestApplyAccountPassthroughFields'`、`-run '^(TestOpenAIOAuthPassthrough|TestForwardOpenAIPassthrough|TestOpenAIForward.*Passthrough)'` | GREEN 均 0 |
 | 扫描/人工 | merge/current `git diff --check`、conflict marker scan、`git ls-files -u`、tag/version/dependency 对照 | 全部 0/空 |
 
 ### RED/GREEN 与修复
@@ -783,6 +784,9 @@ cd backend && go test -v -tags unit ./internal/service ./internal/handler ./inte
 - 已有 Task 6 early work 已核对：`b19c03d01` 在 `getDefaultBaseUrl('grok')` 从错误的 Anthropic 回退修复为 xAI URL；真实 RED/同命令 GREEN 为 `pnpm --dir frontend test:run src/components/account/__tests__/passthroughFieldSupport.spec.ts`。`2026265cb` 为该 RED/GREEN 证据提交，Create/Edit 表单依赖已由本轮 56/56 前端聚焦测试确认。
 - 本轮真实 RED：所有受影响 service/handler 命令先稳定报错。根因一是 152 新增 alpha search 与本地 body-handle/Grok/fallback/WS 签名演进未同步；根因二是上游两参 `resolveOpenAIUpstreamEndpoint` 与本地 result-aware 三参实现同时保留。GREEN：对应 alpha-search、Grok preview、first-token fallback、WS bridge、endpoint/usage、M-04/M-07/M-11/M-16 全部通过。
 - 新增普通提交 `03c45833e` `fix: restore v0.1.152 gateway call contracts`：最小同步调用、保留 result-aware endpoint 优先级，并合并 nil-account fallback。未 amend/rewrite `4ffe039a`。
+- reviewer finding：`03c45833e` 中“alpha-search 将未改写 body 同时作为 source/effective body 传递”的结论错误。`ForwardAlphaSearch` 先映射 `model`，随后把映射后的 body 两次传给 passthrough builder；账号 body map/forward 因而只能读取上游 model，无法读取客户端原始字段。
+- 真实 RED：`go test ./internal/service -run '^TestForwardAlphaSearchAPIKeyMapsModelAndPassesThroughError$' -count=1` 退出 `1`，期望 `client_model=gpt-5.6-sol`，实际为 `upstream-5.6`。真实 GREEN：同一命令退出 `0`；`go test ./internal/service -run '^TestForwardAlphaSearch' -count=1`、`go test ./internal/service -run '^TestApplyAccountPassthroughFields' -count=1` 和 `go test ./internal/service -run '^(TestOpenAIOAuthPassthrough|TestForwardOpenAIPassthrough|TestOpenAIForward.*Passthrough)' -count=1` 均退出 `0`。
+- `874843826` `fix: preserve alpha search passthrough source body` 在模型映射前保留 `sourceBody`，仅 alpha-search 私有请求构造函数分别传入 source/effective body；通用 passthrough builder contract 与其他路径不变。
 - 本轮前端 RED：Create Grok source test 仍要求内联 xAI literal；运行时已正确集中在 early-work helper。GREEN：改为断言 Create 依赖 helper，`d81633a6e` `test: align Grok account modal helper contract`，56/56 通过。
 
 ### 人工审查、风险与顾虑
@@ -790,7 +794,7 @@ cd backend && go test -v -tags unit ./internal/service ./internal/handler ./inte
 - manual：15 项 Task 5 冲突逐一覆盖 VERSION、Ent descriptors、route/endpoint usage、API key cache、Grok pool/quota、fallback watchdog、usage snapshot、OAuth passthrough、Create/Edit、locale/selector；未发现不可共存语义。首 Token 保持 protected，未触及 156 removal。
 - 风险信号：Task 3 原 M-06/M-12 的不带 `-tags unit` 命令对 service 目标显示 `no tests to run`；本轮原命令与显式 unit-tag 补充命令均记录为 0，应在后续矩阵维护时修正原命令。
 - 顾虑：annotated tag 本机仍无签名材料，只能依据固定 peel SHA；VERSION 有意不同于 tag，最终发布阶段仍须复核。前端命令持续输出既有 Browserslist 数据陈旧警告，未阻断断言。
-- Task 6 结论：`DONE`。除上述已修复的两项后合并回归和已归类 Grok early work 外，没有未解释的 v0.1.152 行为回归；未运行 Task 7 完整阶段门禁，未修改 plan、OpenSpec task、Comet progress、`.comet/current-change.json` 或 `.superpowers`。
+- Task 6 结论：`DONE`。除上述已修复的三项后合并回归和已归类 Grok early work 外，没有未解释的 v0.1.152 行为回归；未运行 Task 7 完整阶段门禁，未修改 plan、OpenSpec task、Comet progress、`.comet/current-change.json` 或 `.superpowers`。
 
 ## 正式证据附录（五份原始 stdout）
 
