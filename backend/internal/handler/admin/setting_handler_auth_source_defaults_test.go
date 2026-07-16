@@ -101,10 +101,10 @@ func (s *failingAuthSourceSettingsRepoStub) Get(ctx context.Context, key string)
 }
 
 func (s *failingAuthSourceSettingsRepoStub) GetValue(ctx context.Context, key string) (string, error) {
-	if key == service.SettingKeyGatewayRuntimeSettings {
-		return "", service.ErrSettingNotFound
+	if value, ok := s.values[key]; ok {
+		return value, nil
 	}
-	panic("unexpected GetValue call")
+	return "", service.ErrSettingNotFound
 }
 
 func (s *failingAuthSourceSettingsRepoStub) Set(ctx context.Context, key, value string) error {
