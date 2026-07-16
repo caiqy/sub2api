@@ -230,6 +230,15 @@ func isOpenAIWSTokenEvent(eventType string) bool {
 
 func openAIWSMessageRecordsFirstToken(message []byte) bool {
 	eventType, _, _ := parseOpenAIWSEventEnvelope(message)
+	if isOpenAIWSTerminalEvent(eventType) {
+		return false
+	}
+	if eventType == "response.output_item.added" {
+		switch gjson.GetBytes(message, "item.type").String() {
+		case "image_generation_call", "function_call":
+			return true
+		}
+	}
 	return isOpenAIWSTokenEvent(eventType)
 }
 
