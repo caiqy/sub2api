@@ -221,17 +221,17 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 
 **接口：** 消费矩阵中状态为 `gap` 的行及其已记录的入口、契约和目标 tag；产出可直接运行的测试命令和状态变更为 `protected` 的矩阵行。
 
-- [ ] **步骤 1：逐个 gap 写出基线行为断言**
+- [x] **步骤 1：逐个 gap 写出基线行为断言**
 
   对每个 `gap`，将测试放在矩阵已记录的被测包/组件的既有测试目录；测试必须只断言该行已写明的本地行为，不扩展功能。报告为每行写入准确的既有 Go package 与测试名，或准确的 Vitest 文件路径；后端使用该行的 `go test` 聚焦命令，前端使用该行的 `pnpm --dir frontend exec vitest run` 聚焦命令。
 
   预期：报告列出每个准确测试文件、测试名、首个失败输出和它保护的能力；映射为零个 `gap` 时记录“无符合三条件的补测”，不创建无目的测试。
 
-- [ ] **步骤 2：运行每个新增测试，确认它保护当前本地基线**
+- [x] **步骤 2：运行每个新增测试，确认它保护当前本地基线**
 
   执行每条由矩阵生成的聚焦命令。预期：新增 characterization test 在当前基线通过，并在后续 tag 首次破坏该行为时提供失败证据；若当前基线失败，先诊断为既有阻塞，不得开始 merge。后续回归修复是否强制 Red-Green-Refactor 由用户在 Comet build 决策点选择的 `tdd_mode` 决定。
 
-- [ ] **步骤 3：重跑新增测试与阶段 0 门禁**
+- [x] **步骤 3：重跑新增测试与阶段 0 门禁**
 
   执行：
   ```bash
@@ -242,7 +242,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：所有新增测试及阶段 0 门禁通过，矩阵行改为 `protected` 并链接命令输出；仍有 `gap`、失败或未解释生成 diff 时停止，禁止执行任务 5。
 
-- [ ] **步骤 4：提交阶段 0 测试与能力映射**
+- [x] **步骤 4：提交阶段 0 测试与能力映射**
 
   执行：
   ```bash
@@ -250,7 +250,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   git add -f docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md
   git commit -m "test: protect local behavior before upstream merge"
   ```
-  预期：提交只包含任务 3-4 的矩阵、报告和必要测试/最小修复；报告记录提交 SHA。
+  若矩阵为零个 `gap`，不得暂存 `backend`/`frontend`，只暂存验证报告并使用 `git commit -m "docs: close stage zero protection gate"`。预期：提交只包含报告和实际必要的测试/最小修复；报告记录提交 SHA。
 
 ### Task 5：合入 v0.1.152 并记录冲突融合（OpenSpec 2.1）
 
