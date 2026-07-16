@@ -472,6 +472,14 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err := NormalizeHeaderOverrideCredentials(input.Credentials); err != nil {
 		return nil, err
 	}
+	accountExtra, err = NormalizeAccountPassthroughFields(NormalizePassthroughFieldsInput{
+		RequestedType:             input.Type,
+		Extra:                     accountExtra,
+		ExplicitlySubmittedConfig: hasPassthroughConfigKeys(input.Extra),
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	account, err := buildAccountForCreate(input, accountExtra)
 	if err != nil {
@@ -598,6 +606,15 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		if account.Platform == PlatformAntigravity && !wasOveragesEnabled && account.IsOveragesEnabled() {
 			delete(account.Extra, modelRateLimitsKey)
 			delete(account.Extra, "antigravity_credits_overages") // 清理旧版 overages 运行态
+		}
+		account.Extra, err = NormalizeAccountPassthroughFields(NormalizePassthroughFieldsInput{
+			ExistingType:              account.Type,
+			RequestedType:             input.Type,
+			Extra:                     account.Extra,
+			ExplicitlySubmittedConfig: hasPassthroughConfigKeys(input.Extra),
+		})
+		if err != nil {
+			return nil, err
 		}
 		// 校验并预计算固定时间重置的下次重置时间
 		if err := ValidateQuotaResetConfig(account.Extra); err != nil {
@@ -763,6 +780,9 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		if err := s.validateGroupIDsExist(ctx, *input.GroupIDs); err != nil {
 			return nil, err
 		}
+	}
+	if hasPassthroughConfigKeys(input.Extra) {
+		return nil, errors.New("bulk update does not support passthrough config; use single-account update instead")
 	}
 
 	needMixedChannelCheck := input.GroupIDs != nil && !input.SkipMixedChannelCheck
