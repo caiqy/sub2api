@@ -32,6 +32,15 @@ func (terminalUsageGrokAccountRepo) SetTempUnschedulable(context.Context, int64,
 	return nil
 }
 
+// ponytail: fixture only needs successful Grok quota snapshot and rate-limit persistence.
+func (terminalUsageGrokAccountRepo) UpdateExtra(context.Context, int64, map[string]any) error {
+	return nil
+}
+
+func (terminalUsageGrokAccountRepo) SetRateLimited(context.Context, int64, time.Time) error {
+	return nil
+}
+
 type partialWriteTransportHTTPUpstream struct {
 	service.HTTPUpstream
 	writePartial func()
