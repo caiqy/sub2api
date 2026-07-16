@@ -501,8 +501,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		imageInputSize = imageCfg.InputSize
 	}
 
-	// Get access token
-	token, _, err := s.GetAccessToken(ctx, account)
+	// Apply Grok OAuth credential failover policy before opening upstream transport.
+	token, _, err := s.GetRequestCredential(ctx, c, account)
 	if err != nil {
 		return nil, err
 	}
