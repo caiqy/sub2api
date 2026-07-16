@@ -582,7 +582,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 - 修改：Git merge 涉及的实际文件
 - 修改：`docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md`
 
-- [ ] **步骤 1：创建最终 tag merge 节点**
+- [x] **步骤 1：创建最终 tag merge 节点**
 
   执行：
   ```bash
@@ -592,7 +592,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：tag peel SHA 为 `12f991dde8a58e183d4bd16a87ef6fd0df714757`；不得 merge `upstream/main`。
 
-- [ ] **步骤 2：融合冲突并核实上游 HTTP/客户端 WebSocket 首输出语义**
+- [x] **步骤 2：融合冲突并核实上游 HTTP/客户端 WebSocket 首输出语义**
 
   执行：
   ```bash
@@ -601,7 +601,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：台账记录 native HTTP Responses 的默认关闭、高 reasoning effort 覆盖、`first_output_timeout`、failover 与 `HandleStreamTimeout`，以及客户端 WebSocket 首消息超时；不得把已批准移除的“上游 WebSocket 首输出 watchdog”作为缺失回归。
 
-- [ ] **步骤 3：完成 v0.1.156 merge commit**
+- [x] **步骤 3：完成 v0.1.156 merge commit**
 
   执行：
   ```bash

@@ -3,16 +3,16 @@
 - Change: `staged-merge-upstream-v0-1-156`
 - Plan task: `Task 14：合入 v0.1.156 并审查上游超时语义（OpenSpec 5.1）`
 - OpenSpec task: `5.1 使用独立 --no-ff merge 合入 v0.1.156，融合冲突并核实上游 HTTP/客户端 WebSocket 首输出超时语义`
-- Phase: `implementing`
+- Phase: `done`
 - Review mode: `thorough`
-- Review/fix round: `0/2`
-- Implementer status: `dispatched`
-- Implementation commit: `pending`
-- Changed files: `pending`
-- Evidence: `pending`
+- Review/fix round: `2/2`
+- Implementer status: `DONE`
+- Implementation commit: `94a681bbd merge；3d0c8eb24..0502b26d1 early fixes；8e81e3b15 docs`
+- Changed files: `250 merge paths；Task17 early compile/failover/passthrough/fixture/WS fixes；canonical ledger`
+- Evidence: `service+handler compile PASS；focused scheduler/passthrough/first-token/agent identity/first-output failover PASS；WS 1s RED/GREEN；static PASS`
 - TDD: `exempt-by-user-decision`（Git merge；first-token 删除留 Task 15）
-- Task reviewer: `pending`
-- Unresolved findings: `none；Task14 仍未放行，等待完整门禁`
+- Task reviewer: `Approved（0502b26d1/8e81e3b15 后最终复审）`
+- Unresolved findings: `none；VERSION 明确交 Task19，EOF warning 留普通后续`
 - Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-14-brief.md`
 - Report: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-14-report.md`
 - Blocker fix: `OpenAIFastPolicyUserSelector.vue` 的 `SimpleUser` type-only import 已从未导出的 `@/api/admin/usage` 改为共享 `@/types`；没有行为变更或伪造行为 RED。
