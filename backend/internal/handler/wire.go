@@ -91,7 +91,7 @@ func ProvideSettingHandler(settingService *service.SettingService, buildInfo Bui
 }
 
 func ProvidePaymentHandler(paymentService *service.PaymentService, configService *service.PaymentConfigService, channelService *service.ChannelService, userService *service.UserService) *PaymentHandler {
-	h := NewPaymentHandler(paymentService, configService, channelService)
+	h := NewPaymentHandler(paymentService, configService)
 	h.SetUserService(userService)
 	return h
 }

@@ -16,7 +16,7 @@ func TestPaymentHandlerGetCheckoutInfoRejectsHiddenPurchasePage(t *testing.T) {
 
 	user := &service.User{ID: 1, HiddenPurchasePage: true}
 	userSvc := service.NewUserService(&hiddenUIUserRepo{oauthPendingFlowUserRepo: &oauthPendingFlowUserRepo{}, user: user}, nil, nil, nil)
-	h := NewPaymentHandler(nil, nil, nil)
+	h := NewPaymentHandler(nil, nil)
 	h.SetUserService(userSvc)
 
 	recorder := httptest.NewRecorder()
@@ -33,7 +33,7 @@ func TestPaymentHandlerGetCheckoutInfoRejectsHiddenPurchasePage(t *testing.T) {
 func TestPaymentHandlerHiddenPurchasePageAllowsAdmin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	h := NewPaymentHandler(nil, nil, nil)
+	h := NewPaymentHandler(nil, nil)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/v1/payment/checkout-info", nil)
