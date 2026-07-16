@@ -185,9 +185,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 		if clientDisconnected || streamEarlyErr != nil || len(events) == 0 {
 			return
 		}
-		for _, event := range events {
-			pendingEvents = append(pendingEvents, event)
-		}
+		pendingEvents = append(pendingEvents, events...)
 		writeStreamHeaders()
 		for _, event := range pendingEvents {
 			sse, err := apicompat.ResponsesEventToSSE(event)

@@ -175,7 +175,6 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			requestPayloadHash = coordinator.Effective().Hash()
 			coordinator.ReleaseMultipartValues()
 		}
-		body = nil
 		requestInfo.ReleaseText()
 		imageReleaseFunc, acquired := h.acquireImageGenerationSlot(c, streamStarted)
 		if !acquired {
@@ -441,10 +440,6 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		)
 		return
 	}
-}
-
-func grokMediaRequestBodyPreview(contentType string, body []byte, requestInfo service.GrokMediaRequestInfo) string {
-	return grokMediaRequestBodyPreviewWithSize(contentType, body, requestInfo, int64(len(body)))
 }
 
 func grokMediaRequestBodyPreviewWithSize(contentType string, body []byte, requestInfo service.GrokMediaRequestInfo, size int64) string {

@@ -753,28 +753,6 @@ func TestOpenAIGatewayHandler_SubmitOpenAIImagesFailedUsageLog_UsesErrorSnapshot
 	require.Contains(t, log.DetailSnapshot.ResponseBody, "err-carried image snapshot")
 }
 
-type fakeOpenAIImagesOAuthUpstreamError struct {
-	statusCode      int
-	responseHeaders http.Header
-	responseBody    []byte
-}
-
-func (e fakeOpenAIImagesOAuthUpstreamError) Error() string {
-	return "fake openai images oauth upstream error"
-}
-
-func (e fakeOpenAIImagesOAuthUpstreamError) OpenAIImageUpstreamStatusCode() int {
-	return e.statusCode
-}
-
-func (e fakeOpenAIImagesOAuthUpstreamError) OpenAIImageUpstreamResponseHeaders() http.Header {
-	return e.responseHeaders.Clone()
-}
-
-func (e fakeOpenAIImagesOAuthUpstreamError) OpenAIImageUpstreamResponseBody() []byte {
-	return append([]byte(nil), e.responseBody...)
-}
-
 func TestOpenAIGatewayHandler_MessagesSelectionExhaustedAfterFailoverStillCreatesUsageLog(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

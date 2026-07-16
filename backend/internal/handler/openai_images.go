@@ -150,7 +150,6 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	}
 	coordinator.ReleaseMultipartValues()
 	parsed.ReleaseText()
-	body = nil
 	imageReleaseFunc, acquired := h.acquireImageGenerationSlot(c, streamStarted)
 	if !acquired {
 		return
