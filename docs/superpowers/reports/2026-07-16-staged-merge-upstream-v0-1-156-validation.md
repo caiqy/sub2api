@@ -595,6 +595,42 @@ cd backend && go test -v -tags unit ./internal/service ./internal/handler ./inte
 - 矩阵统计不变：`protected=11`、`manual=4`、`approved-removal=1`、`gap=0`、合计 16；本轮是纯文档证据修复，依用户裁决豁免 TDD。
 - 风险信号与顾虑：前端命令仍输出既有非阻塞 Browserslist 数据陈旧警告；本次仅证明当前根目录命令与生成稳定性，后续各 tag 合并阶段仍须执行对应原始验证。
 
+## 阶段 0 最小行为保护门禁（OpenSpec 1.4）
+
+### 零 gap 与测试结论
+
+- Task 3 的 16 行矩阵及 M-01 至 M-16、final review 已复核：`protected=11`、`manual=4`、`approved-removal=1`、`gap=0`。
+- 没有任何能力同时满足“本地独有、目标 release 触及、缺少行为断言”三项条件，因此无符合条件的补测；新增 characterization test 文件数为 `0`，新增测试数为 `0`，无新增聚焦命令。
+- 本轮无行为修改，按用户裁决豁免 TDD；未执行或伪造 RED/GREEN。Task 3 已真实运行的 M-16（10 个顶层测试）及 M-10/M-15 仅为既有证据，未替代下列完整阶段 0 门禁。
+
+### 完整门禁记录
+
+| 命令 | 退出码 | 摘要 |
+| --- | ---: | --- |
+| `make test` | 0 | 后端默认测试、`golangci-lint`（`0 issues`）、unit-tag 测试、前端 ESLint 与 `vue-tsc --noEmit` 通过；Vitest 为 `167` 个文件、`1246` 个测试通过。 |
+| `pnpm --dir frontend run build` | 0 | `vue-tsc -b` 与 Vite 生产构建通过；转换 `966` 个模块，`built in 36.71s`。 |
+| `make -C backend generate` | 0 | `go generate ./ent` 与 `go generate ./cmd/server` 完成；Wire 写入 `backend/cmd/server/wire_gen.go`。 |
+| `git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` | 0 | stdout 为空；生成 diff 为空。 |
+| `git diff --check` | 0 | 无空白错误。 |
+
+### 警告与工作树
+
+- `make test`：Browserslist 数据已 7 个月未更新；Vitest 有已覆盖错误路径日志、`router-link` 解析警告及 intlify message compiler 警告，全部断言仍通过。
+- 前端构建：重复 Browserslist 提示；动态/静态 import 混用提示；`AccountsView` 压缩后 `635.06 kB`，超过 `500 kB` chunk 警戒线。均不阻塞本阶段。
+- `git diff --check`：仅提示用户既有 `docs/superpowers/plans/2026-07-16-staged-merge-upstream-v0-1-156.md` 与 `openspec/changes/staged-merge-upstream-v0-1-156/.comet/subagent-progress.md` 下次 Git 写入会发生 LF/CRLF 转换。
+- 门禁开始时工作树已有 `.superpowers/sdd/task-4-report.md` 删除、上述 plan 与 Comet progress 修改、`.comet/current-change.json` 未跟踪；均未触碰。`opencode.json` 保持用户保留的未提交状态，未暂存或提交。生成后未出现 `backend/ent`、`backend/cmd/server/wire_gen.go` 或其他生成物差异。
+
+### 自审与放行
+
+- 本轮只修改本报告；未修改或暂存测试、业务代码、生成源码、plan、OpenSpec task、Comet progress、`opencode.json`、`.comet/current-change.json`、`.superpowers/`、`backend` 或 `frontend`。
+- 暂存前后将核验 `git diff --cached --check` 与暂存文件清单；提交仅含本报告，message 为 `docs: close stage zero protection gate`。该报告的最终提交 SHA 以提交后 Git 记录为准，避免将自引用 SHA 写入提交内容而改变对象。
+- 所有阶段 0 门禁退出 `0`、生成 diff 为空，允许进入 Task 5；本任务未执行 merge、push、release、deploy 或 main 合并，未勾选任务。
+
+### 风险与顾虑
+
+- 目标范围仍覆盖网关、协议、Ent/Wire、配置与 UI；`gap=0` 仅说明当前本地独有高风险能力已有直接断言或明确人工/生成证据，不替代各 target tag 合并后的阶段验证。
+- 首 Token 完整移除及无兼容别名只能在 `v0.1.156` 合并后的最终树复核；前三段不得提前删除保护。
+
 ## 正式证据附录（五份原始 stdout）
 
 以下代码块逐行保存指定命令的 stdout；行数以命令输出的非空记录数计。附录 A 的 534 个 Git 输出记录含 8 个历史 subject 内嵌回车，因而持久化为 542 个物理行；其余附录的记录数与物理行数一致。
