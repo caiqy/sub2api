@@ -610,7 +610,11 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
 				}
 				if c.Request.Context().Err() == nil && service.HasOpsUpstreamAttempted(c) && !service.HasOpsClientBusinessLimited(c) && service.GetOpsCyberPolicy(c) == nil {
-					h.submitFailedUsageLog(c, apiKey, account, reqModel, reqStream, 0, nil, nil, forwardDuration, attemptReasoningEffort, "handler.openai_gateway.responses")
+					if result != nil {
+						h.submitFailedUsageLog(c, apiKey, account, reqModel, reqStream, 0, nil, nil, forwardDuration, attemptReasoningEffort, "handler.openai_gateway.responses", &result.Usage)
+					} else {
+						h.submitFailedUsageLog(c, apiKey, account, reqModel, reqStream, 0, nil, nil, forwardDuration, attemptReasoningEffort, "handler.openai_gateway.responses")
+					}
 				}
 				fields := []zap.Field{
 					zap.Int64("account_id", account.ID),

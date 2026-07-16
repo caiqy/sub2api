@@ -417,7 +417,7 @@ func TestOpenAIGatewayHandler_NativeNonPassthroughResponsesFailedIsNotDuplicated
 	gin.SetMode(gin.TestMode)
 	group := &service.Group{ID: 33, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
 	account := &service.Account{ID: 133, Name: "native-responses", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "sk-test"}, Extra: map[string]any{"use_responses_api": true}}
-	upstreamBody := "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_native_failed\",\"status\":\"failed\",\"error\":{\"code\":\"invalid_request\",\"message\":\"native upstream failure\"}}}\n\n"
+	upstreamBody := "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_native_failed\",\"status\":\"failed\",\"error\":{\"code\":\"invalid_request\",\"message\":\"native upstream failure\"},\"usage\":{\"input_tokens\":17,\"output_tokens\":3}}}\n\n"
 	env := newTerminalUsageOpenAIEnv(t, group, &openAIChatCompletionsAccountRepoStub{account: account}, &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
@@ -430,7 +430,10 @@ func TestOpenAIGatewayHandler_NativeNonPassthroughResponsesFailedIsNotDuplicated
 	env.router("/v1/responses", env.handler.Responses).ServeHTTP(rec, req)
 
 	require.Equal(t, 1, strings.Count(rec.Body.String(), "event: response.failed\n"), rec.Body.String())
-	require.NotNil(t, env.usageRepo.lastLog)
+	log := waitForOpenAIFailedUsageLog(t, env.usageRepo)
+	require.NotNil(t, log)
+	require.Equal(t, 17, log.InputTokens)
+	require.Equal(t, 3, log.OutputTokens)
 	require.Len(t, env.usageRepo.created, 1)
 }
 

@@ -227,6 +227,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	clientOutputStarted := false
 	upstreamRequestID := strings.TrimSpace(resp.Header.Get("x-request-id"))
 	var streamEarlyErr error
+	// Forward returns this terminal error for accounting; mark it only after its frame flushes so the handler does not append a duplicate fallback.
 	failedTerminalPending := false
 	markFailedTerminalWritten := func() {
 		if !failedTerminalPending {

@@ -771,7 +771,6 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	if enabled, ok := input.Extra["openai_probe_enabled"].(bool); ok {
 		probeToggleOff = !enabled
 	}
-	probeWasEnabledBefore := map[int64]bool{}
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
@@ -781,13 +780,6 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 			return nil, err
 		}
 		cachedTargets = loaded
-		if probeToggleOff {
-			for _, account := range cachedTargets {
-				if account != nil {
-					probeWasEnabledBefore[account.ID] = account.IsOpenAIProbeEnabled()
-				}
-			}
-		}
 	}
 	if hasLongContextBillingUpdate {
 		for _, account := range cachedTargets {
@@ -898,14 +890,18 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	if _, err := s.accountRepo.BulkUpdate(ctx, input.AccountIDs, repoUpdates); err != nil {
 		return nil, err
 	}
-	if len(probeWasEnabledBefore) > 0 {
-		updatedAccounts, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
-		if err == nil {
-			for _, account := range updatedAccounts {
-				if account != nil {
-					s.applyProbeToggleSideEffects(ctx, account, probeWasEnabledBefore[account.ID])
-				}
+	if probeToggleOff {
+		for _, account := range cachedTargets {
+			if account == nil {
+				continue
 			}
+			updated := *account
+			updated.Extra = maps.Clone(account.Extra)
+			if updated.Extra == nil {
+				updated.Extra = make(map[string]any, 1)
+			}
+			updated.Extra["openai_probe_enabled"] = false
+			s.applyProbeToggleSideEffects(ctx, &updated, account.IsOpenAIProbeEnabled())
 		}
 	}
 

@@ -4518,3 +4518,41 @@ func TestHandleCompatErrorResponseCyberPolicyEarlyReturn(t *testing.T) {
 	require.NotContains(t, gotMsg, "Upstream request failed")
 	require.NotNil(t, GetOpsCyberPolicy(c))
 }
+
+func TestOpenAIForwardStreamingResponseFailedReturnsUsageWithError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-5.4","input":"hello","stream":true}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+
+	upstream := &openAIHTTPUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "X-Request-Id": []string{"req_failed_usage"}},
+		Body: io.NopCloser(strings.NewReader(
+			"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_failed_usage\",\"status\":\"failed\",\"error\":{\"code\":\"invalid_request\",\"message\":\"native upstream failure\"},\"usage\":{\"input_tokens\":17,\"output_tokens\":3}}}\n\n",
+		)),
+	}}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:          501,
+		Name:        "openai-native-failed-usage",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://example.com/v1"},
+		Extra:       map[string]any{"use_responses_api": true},
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, body)
+
+	require.Error(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 17, result.Usage.InputTokens)
+	require.Equal(t, 3, result.Usage.OutputTokens)
+	require.Equal(t, "resp_failed_usage", result.ResponseID)
+	require.Equal(t, "req_failed_usage", result.RequestID)
+}

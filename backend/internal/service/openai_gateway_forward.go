@@ -898,9 +898,39 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		responseID := ""
 		imageCount := 0
 		var imageOutputSizes []string
+		buildForwardResult := func(usage *OpenAIUsage, firstTokenMs *int, responseID string, imageCount int, imageOutputSizes []string) *OpenAIForwardResult {
+			if usage == nil {
+				usage = &OpenAIUsage{}
+			}
+			forwardResult := &OpenAIForwardResult{
+				RequestID:       resp.Header.Get("x-request-id"),
+				ResponseID:      strings.TrimSpace(responseID),
+				Usage:           *usage,
+				Model:           originalModel,
+				BillingModel:    billingModel,
+				UpstreamModel:   upstreamModel,
+				ServiceTier:     serviceTier,
+				ReasoningEffort: reasoningEffort,
+				Stream:          reqStream,
+				OpenAIWSMode:    false,
+				Duration:        time.Since(startTime),
+				FirstTokenMs:    firstTokenMs,
+			}
+			if imageCount > 0 {
+				forwardResult.ImageCount = imageCount
+				forwardResult.ImageSize = imageSizeTier
+				forwardResult.ImageInputSize = imageInputSize
+				forwardResult.ImageOutputSizes = imageOutputSizes
+				forwardResult.BillingModel = imageBillingModel
+			}
+			return forwardResult
+		}
 		if reqStream {
 			streamResult, err := s.handleStreamingResponseWithReasoning(upstreamReq.Context(), resp, c, account, startTime, originalModel, upstreamModel, reasoningEffortValue)
 			if err != nil {
+				if streamResult != nil {
+					return buildForwardResult(streamResult.usage, streamResult.firstTokenMs, streamResult.responseID, streamResult.imageCount, streamResult.imageOutputSizes), err
+				}
 				return nil, err
 			}
 			usage = streamResult.usage
@@ -928,32 +958,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 		}
 
-		if usage == nil {
-			usage = &OpenAIUsage{}
-		}
-
-		forwardResult := &OpenAIForwardResult{
-			RequestID:       resp.Header.Get("x-request-id"),
-			ResponseID:      responseID,
-			Usage:           *usage,
-			Model:           originalModel,
-			BillingModel:    billingModel,
-			UpstreamModel:   upstreamModel,
-			ServiceTier:     serviceTier,
-			ReasoningEffort: reasoningEffort,
-			Stream:          reqStream,
-			OpenAIWSMode:    false,
-			Duration:        time.Since(startTime),
-			FirstTokenMs:    firstTokenMs,
-		}
-		if imageCount > 0 {
-			forwardResult.ImageCount = imageCount
-			forwardResult.ImageSize = imageSizeTier
-			forwardResult.ImageInputSize = imageInputSize
-			forwardResult.ImageOutputSizes = imageOutputSizes
-			forwardResult.BillingModel = imageBillingModel
-		}
-		return forwardResult, nil
+		return buildForwardResult(usage, firstTokenMs, responseID, imageCount, imageOutputSizes), nil
 	}
 }
 
