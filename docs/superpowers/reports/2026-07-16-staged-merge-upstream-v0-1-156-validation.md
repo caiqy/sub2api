@@ -2092,3 +2092,78 @@ frontend/src/views/admin/ops/components/OpsErrorLogTable.vue
 frontend/src/views/user/KeysView.vue
 frontend/src/views/user/__tests__/KeysView.spec.ts
 ```
+
+## Task 7 / v0.1.152 阶段门禁（OpenSpec 2.3）
+
+### 前两次 BLOCKED 与修复闭环
+
+- 第一次完整重跑为 **BLOCKED**：`make test` 退出 `1`，Grok 429 failed-usage fixture 因未实现 `UpdateExtra`/`SetRateLimited` 持久化契约而将预期 `429` 转为 `502`；`pnpm --dir frontend run build` 退出 `1`，`OpenAIFastPolicyUserSelector.vue` 从未导出的模块导入 `SimpleUser`，产生 `TS2614` 和三个 `TS7006`。
+- `4b697fa0a` `test: support Grok quota persistence in failed usage fixture`：RED 为 `TestOpenAIGatewayHandler_GrokMediaFailoverExhaustedCreatesFailedUsage`，期望 `429`、实际 `502`；GREEN 为同一目标及相邻 failed-usage 组通过。仅修改测试 fixture。
+- `3ede52fc0` `fix: import SimpleUser from shared types`：RED 为前端 build/typecheck 的 `TS2614` 与三个 `TS7006`，修正后暴露 hydration 缺少必填 `username`；GREEN 为 `pnpm --dir frontend run typecheck` 和 selector Vitest `1` 文件、`3/3` 通过。仅修改该 Vue type-only import/hydration 映射。
+- 第二次完整重跑为 **BLOCKED**：首条 `make test` 退出 `2`，unit service 中 `TestOpenAIWSHTTPBridgeGrok429PersistsRateLimit` 期望一次 rate-limit 持久化、实际两次；后续门禁按规则未执行。
+- `2c639fa8b` `fix: persist Grok WS rate limits once`：RED 为该目标退出 `1`、`rateLimitedCalls` 期望 `1` 实际 `2`；GREEN 为同一目标及 WS bridge/Grok 相邻 `3/3`、Grok quota 服务组 `3/3` 通过。仅移除 failover 分支的重复 Grok 处理，保留首次持久化和 failover 返回语义。
+
+### 第三次完整重跑（2026-07-16）
+
+**结论：PASS。** 当前 `HEAD` 包含 `4b697fa0a`、`3ede52fc0`、`2c639fa8b`；本次没有修改业务代码、测试或生成物，没有 merge、push、release、deploy 或 main 合并，也没有勾选任何计划、OpenSpec task 或 Comet progress。
+
+| 全量门禁命令 | 退出码 | 测试/结果 |
+| --- | ---: | --- |
+| `make test` | 0 | 后端 default、lint、unit，以及前端 ESLint/typecheck/Vitest 均完成；Vitest `171` 文件、`1265/1265` 测试通过。 |
+| `pnpm --dir frontend run build` | 0 | `vue-tsc -b` 与 Vite 生产构建完成，转换 `968` modules，`built in 33.47s`。 |
+| `make -C backend generate` | 0 | Ent 和 Wire 完成，Wire 两次写入 `backend/cmd/server/wire_gen.go`。 |
+| `git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` | 0 | stdout 为空，受限生成 diff 为空。 |
+
+### 受影响 M-ID 稳定命令
+
+| M-ID | 根目录命令 | 退出码 | 测试/结论 |
+| --- | --- | ---: | --- |
+| M-01 | `go -C backend test ./internal/service -run '^(TestLayered_WaitPlanFallbackSkipsUpstreamRestrictedAccount|TestOpenAISelectAccountWithLoadAwareness_AllFullWaitPlan)$' -count=1` | 0 | 2 个命名目标通过。 |
+| M-02 | `go -C backend test -tags unit ./internal/service -run '^(TestOpenAIGatewayService_SelectAccountWithScheduler_PreviousResponseStickyDisabledBypassesStickyLookupAndBind|TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyDisabledBypassesLookupBindAndRefresh|TestOpenAIGatewayService_StickyDisabledWSv2SkipsStateStore|TestOpenAIGatewayService_StickyDisabledIngressSkipsStateStore)$' -count=1` | 0 | 4 个命名目标通过。 |
+| M-04 | `go -C backend test ./internal/handler -run '^(TestHandleFailoverError_IntegrationScenario|TestStreamWrittenGuard_MessagesPath_AbortFailoverOnSSEContentWritten)$' -count=1` | 0 | 2 个命名目标通过。 |
+| M-05 | `go -C backend test ./internal/service -run '^(TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyDBRuntimeRecheckSkipsStaleCachedAccount|TestLayered_SessionStickyRecheckHonorsImageCapability|TestOpenAIGatewayService_SelectAccountByPreviousResponseID_DBRuntimeRecheckRateLimitedMiss)$' -count=1` | 0 | 3 个命名目标通过。 |
+| M-06 矩阵 | `go -C backend test ./internal/pkg/apicompat ./internal/service -run '^(TestChatCompletionsToResponses_ToolCalls|TestResponsesToAnthropic_CustomToolPreservesSchemaParameters|TestGatewayService_ForwardAsChatCompletions_PassthroughBodyMapCopiesFromOriginalCCBody|TestGatewayService_ForwardAsResponses_PassthroughBodyMapCopiesFromOriginalResponsesBody)$' -count=1` | 0 | apicompat 2 个目标通过；service 为 `no tests to run`。 |
+| M-06 实际补充 | `go -C backend test -tags unit ./internal/service -run '^(TestGatewayService_ForwardAsChatCompletions_PassthroughBodyMapCopiesFromOriginalCCBody|TestGatewayService_ForwardAsResponses_PassthroughBodyMapCopiesFromOriginalResponsesBody)$' -count=1` | 0 | 2 个 service unit 目标通过。 |
+| M-07 | `go -C backend test ./internal/pkg/apicompat ./internal/handler -run '^(TestResponsesEventToChatChunks_TopLevelTerminalUsage|TestResponsesEventToAnthropicEvents_TopLevelTerminalUsage|TestOpenAIGatewayHandler_NativeNonPassthroughResponsesFailedIsNotDuplicated|TestOpenAIGatewayHandler_ResponsesPartialFailoverCreatesExactlyOneFailedUsage)$' -count=1` | 0 | 4 个命名目标通过。 |
+| M-09 | `go -C backend test ./internal/service -run '^(TestLayered_RequiredImageCapabilityFiltersUnsupportedAccounts|TestLayered_SessionStickyRecheckHonorsImageCapability|TestOpenAIGatewayServiceForward_RejectsDisabledImageGenerationIntents|TestOpenAIGatewayServiceForwardImages_ImageRateLimitReturnsFailoverAndCoolsCapability)$' -count=1` | 0 | 4 个命名目标通过。 |
+| M-10 后端 | `go -C backend test ./internal/service -run '^(TestSettingService_SetGatewayRuntimeSettings_PersistsUpdatesCfgAndInvalidatesOnResponseHeaderTimeoutChange|TestSettingServiceGatewayRuntimeSettings_RejectsNegativeFirstTokenTimeouts)$' -count=1` | 0 | 2 个命名目标通过。 |
+| M-10 前端 | `pnpm --dir frontend test:run src/views/admin/__tests__/SettingsView.gatewayRuntime.spec.ts` | 0 | 1 个文件、`14/14` 通过。 |
+| M-11 | `go -C backend test ./internal/handler ./internal/service -run '^(TestGatewayHandler_MessagesAndResponsesReplayLargeBodiesAcrossFailover|TestOpenAIGatewayHandler_ChatReplayRawSpoolAcrossFailoverWhenResponsesUnsupported|TestRequestBodyCoordinator_CleanupRemovesRawEffectiveAndMultipartTemps|TestOpenAIForwardCleansBoundRequestBodyHandlesInParallel|TestRequestBodyHandle_CleanupRemovesSpoolFile)$' -count=1` | 0 | 5 个命名目标通过。 |
+| M-12 矩阵 | `go -C backend test ./internal/service ./internal/handler -run '^(TestAdminServiceUpdateUserSavesHiddenUIResources|TestPaymentHandlerGetCheckoutInfoRejectsHiddenPurchasePage|TestPageHandlerGetPageContentRejectsHiddenCustomMenu)$' -count=1` | 0 | handler 2 个目标通过；service 为 `no tests to run`。 |
+| M-12 实际补充 | `go -C backend test -tags unit ./internal/service ./internal/handler -run '^(TestAdminServiceUpdateUserSavesHiddenUIResources|TestPaymentHandlerGetCheckoutInfoRejectsHiddenPurchasePage|TestPageHandlerGetPageContentRejectsHiddenCustomMenu)$' -count=1` | 0 | 3 个命名目标通过。 |
+| M-13 | `pnpm --dir frontend test:run src/router/__tests__/feature-access.spec.ts src/utils/__tests__/userUiVisibility.spec.ts src/views/admin/__tests__/SettingsView.gatewayRuntime.spec.ts` | 0 | 3 个文件、`21/21` 通过。 |
+| M-14 | `go -C backend test ./cmd/server -run '^$' -count=1` | 0 | 编译门禁，0 测试。 |
+| M-15 migration | `go -C backend test ./migrations -run '^(TestMigration173AllowsCyberBlockedUsageRequestType|TestMigration158BackfillsGrokMediaGenerationGroups)$' -count=1` | 0 | 2 个命名目标通过。 |
+| M-16 | `go -C backend test -v -tags unit ./internal/service ./internal/handler ./internal/service/openai_ws_v2 -run '^(TestOpenAIGatewayService_SelectAccountWithScheduler_PreviousResponseStickyDisabledBypassesStickyLookupAndBind|TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyDisabledBypassesLookupBindAndRefresh|TestOpenAIGatewayService_StickyDisabledWSv2SkipsStateStore|TestOpenAIGatewayService_StickyDisabledIngressSkipsStateStore|TestGatewayHandler_GeminiRouteStickyLookupUsesGeminiToggleNotAnthropicToggle|TestGatewayHandler_GeminiRouteStickyBindUsesGeminiToggleNotAnthropicToggle|TestGatewayHandler_OpenAIRouteStickyUsesOpenAIToggleNotAnthropicToggle|TestAntigravityGatewayServiceClearStickySessionSkipsDisabledSticky|TestOpenAIGatewayHandler_FirstTokenTimeoutReturns504AndCreatesOneFailedUsage|TestRelayFirstTokenTimeoutCancelsDrainsAndCompletesTurn)$' -count=1` | 0 | 10 个顶层目标、6 个子测试均 RUN/PASS。 |
+
+- M-03、M-08 按 Task 6 的 v0.1.152 changed-file 交集结论为 N/A，未记为通过项；其余 `14` 个受影响 M-ID 均有上述稳定命令和 PASS 证据。
+
+### 15 项冲突入口与 alpha-search
+
+| 冲突项 | 验证入口 | 退出码 | 测试/结论 |
+| --- | --- | ---: | --- |
+| 1 VERSION | M-14 编译门禁与 Task 6 tag/version 人工对照 | 0 | 本地 `0.1.151.2` 保留裁决未变。 |
+| 2-3 Ent mutation/runtime | M-15 生成及受限 diff | 0 | 生成稳定，无 diff。 |
+| 4-5 Chat/handler endpoint | `go -C backend test ./internal/handler -run '^(TestResolveOpenAIUpstreamEndpointPrefersForwardResult|TestOpenAIGatewayHandler_ChatCompletionsUsageTaskUsesCapturedEndpointAndSnapshot|TestClassifyNoAccountError_ModelNotSupported_Returns404|TestClassifyOpenAICompatibleNoAccountError_GrokUsesGrokPlatform)$' -count=1` | 0 | 4 个命名目标通过。 |
+| 6 routes | `go -C backend test ./internal/server/routes -run '^(TestGatewayRoutesOpenAIAlphaSearchPathsAreRegistered|TestGatewayRoutesAlphaSearchRejectsNonOpenAIGroup)$' -count=1` | 0 | 2 个命名目标通过。 |
+| 7-8 API-key cache/Grok | 无标签原命令同一 5-target 正则 | 0 | service 为 `no tests to run`，不作为实际覆盖。 |
+| 7-8 API-key cache/Grok 实际补充 | `go -C backend test -tags unit ./internal/service -run '^(TestAPIKeyService_GetByKey_UsesL2Cache|TestAPIKeyService_GetByKey_CacheHitPreservesGroupUserConcurrencyFields|TestAccountTestService_Grok429PersistsRateLimitReset|TestAccountTestService_Grok429WithoutQuotaHeadersUsesFallback|TestGrokQuotaServiceProbeUsageStoresHeaders)$' -count=1` | 0 | 5 个 unit 目标通过。 |
+| 9 fallback | M-06 与 M-16 | 0 | 协议 2 个实际 unit 目标和首 Token/Sticky 10 顶层目标通过。 |
+| 10 gateway service | endpoint/usage 4-target handler 入口 | 0 | usage snapshot 与 endpoint 分类通过。 |
+| 11 OAuth passthrough | `go -C backend test ./internal/service -run '^(TestOpenAIOAuthPassthrough|TestForwardOpenAIPassthrough|TestOpenAIForward.*Passthrough)' -count=1` | 0 | 命名 passthrough 组通过。 |
+| 12-15 Create/Edit/locales | `pnpm --dir frontend test:run src/components/account/__tests__/passthroughFieldSupport.spec.ts src/components/account/__tests__/CreateAccountModal.grok.spec.ts src/components/account/__tests__/EditAccountModal.spec.ts src/i18n/__tests__/openaiFastPolicyLocales.spec.ts src/views/admin/settings/__tests__/OpenAIFastPolicyUserSelector.spec.ts` | 0 | 5 个文件、`56/56` 通过。 |
+| alpha-search 补充 | `go -C backend test ./internal/service -run '^(TestForwardAlphaSearchOAuthPreservesWire|TestForwardAlphaSearchAPIKeyMapsModelAndPassesThroughError|TestForwardAlphaSearchReturnsFailoverBeforeWriting)$' -count=1` | 0 | 3 个命名目标通过。 |
+
+### 静态、人工结论与放行
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `git diff --check` | 0 | 无 whitespace 错误；仅用户既有 Comet progress 的 LF/CRLF 警告。 |
+| `git diff --name-only --diff-filter=U` | 0 | 无输出。 |
+| `rg -n '^(<<<<<<<|=======|>>>>>>>)' backend frontend docs README.md` | 0（未匹配归一化） | 无冲突标记。 |
+| `git ls-files -u` | 0 | 无输出。 |
+
+- 人工矩阵结论：14 个受影响 M-ID 均 PASS，M-03/M-08 N/A；15 项冲突融合及 alpha-search 没有未解释回归。Ent/Wire/migration、版本/依赖、用户资源/前端跨层契约沿用 Task 6 的人工结论并由本次命令复验。
+- 非阻塞警告：Browserslist/caniuse-lite 数据已 7 个月过期；Vite 报告动态/静态 import 混用和 `AccountsView` chunk 超过 500 kB。Vitest 的预期错误路径日志、`router-link` 和 intlify 警告不影响全部断言通过。
+- 工作树保留用户既有 `openspec/changes/staged-merge-upstream-v0-1-156/.comet/subagent-progress.md` 修改和未跟踪 `.comet/current-change.json`；未暂存它们。本报告为唯一提交文件。
+- **Task 8：允许。** v0.1.152 阶段门禁已关闭；本结论不授权 merge `v0.1.153` 之外的 tag、`upstream/main`，也不授权 push/release/deploy。
