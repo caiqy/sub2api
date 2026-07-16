@@ -196,7 +196,7 @@ func newTerminalUsageOpenAIEnvWithUpstream(t *testing.T, group *service.Group, a
 		upstream,
 		service.NewDeferredService(accountRepo, nil, 0),
 		nil,
-		nil,
+		service.NewGrokTokenProvider(accountRepo, nil),
 		nil,
 		nil,
 	)
