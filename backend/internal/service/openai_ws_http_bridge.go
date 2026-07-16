@@ -209,9 +209,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 		if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
 			upstreamModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
-			if account.Platform == PlatformGrok {
-				s.handleGrokAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
-			} else {
+			if account.Platform != PlatformGrok {
 				s.handleFailoverSideEffects(ctx, resp, account, respBody, upstreamModel)
 			}
 			return nil, &UpstreamFailoverError{
