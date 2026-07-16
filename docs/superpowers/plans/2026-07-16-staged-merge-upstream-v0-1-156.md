@@ -685,7 +685,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 - 修改：由 `git diff --name-only v0.1.155..v0.1.156` 与矩阵交集确定的实际文件，排除已批准删除的首 Token 本地能力
 - 修改：`docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md`
 
-- [ ] **步骤 1：区分已批准移除与必须保留的受影响能力**
+- [x] **步骤 1：区分已批准移除与必须保留的受影响能力**
 
   执行：
   ```bash
@@ -694,11 +694,11 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：能力矩阵中只有本地首 Token 超时可标为 `approved-removal`；其余每个 changed-file 交集必须保持 `protected` 或 `manual` 并具备证据。
 
-- [ ] **步骤 2：先保留失败证据，再作最小兼容修复**
+- [x] **步骤 2：先保留失败证据，再作最小兼容修复**
 
   运行受影响能力的保护测试和调用链审查。任何 scheduler、Sticky、fallback、DB recheck、转换/透传、privacy、image、热更新、body 生命周期、用户资源控制或前端本地功能回归都须先失败后修复；不可共存时停止等待用户。
 
-- [ ] **步骤 3：提交本段非超时语义修复（仅在需要时）**
+- [x] **步骤 3：提交本段非超时语义修复（仅在需要时）**
 
   执行：
   ```bash
@@ -707,7 +707,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   在提交前，按报告关联的精确修复/测试路径逐个执行 `git add -- 路径`，再暂存验证报告。预期：与任务 15 的删除提交分离；无修复时不创建空提交。
 
-- [ ] **步骤 4：独立提交 v0.1.156 其余能力审查结论**
+- [x] **步骤 4：独立提交 v0.1.156 其余能力审查结论**
 
   canonical 报告记录 changed-files/矩阵交集、Task 17 early work、RED/GREEN、manual 结论和残余风险；只提交报告 `docs: record v0.1.156 capability review`。无未解释回归不得开始 Task 18。
 
