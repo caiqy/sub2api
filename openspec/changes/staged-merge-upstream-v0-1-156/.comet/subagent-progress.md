@@ -1,20 +1,20 @@
 # Subagent Progress
 
 - Change: `staged-merge-upstream-v0-1-156`
-- Plan task: `Task 13：执行 v0.1.155 阶段门禁（OpenSpec 4.3）`
-- OpenSpec task: `4.3 运行全部本地保护测试和本阶段受影响能力测试，记录通过证据后再进入下一 tag`
-- Phase: `done`
+- Plan task: `Task 14：合入 v0.1.156 并审查上游超时语义（OpenSpec 5.1）`
+- OpenSpec task: `5.1 使用独立 --no-ff merge 合入 v0.1.156，融合冲突并核实上游 HTTP/客户端 WebSocket 首输出超时语义`
+- Phase: `implementing`
 - Review mode: `thorough`
 - Review/fix round: `0/2`
-- Implementer status: `DONE after three full-gate attempts`
-- Implementation commit: `1138be1d9/3fdedb4d1/a7515cbb0 fixes；53648e7e0 docs`
-- Changed files: `3 test/source remediation paths + canonical report`
-- Evidence: `make test/Vitest 179 files 1337 tests；13 M-ID；14 conflicts；9 matrix；generate/static PASS`
-- TDD: `exempt-by-user-decision`（只运行既有门禁）
-- Task reviewer: `Approved（f33ad07bb/dc40b21f7 后第四次 fresh gate）`
+- Implementer status: `dispatched`
+- Implementation commit: `pending`
+- Changed files: `pending`
+- Evidence: `pending`
+- TDD: `exempt-by-user-decision`（Git merge；first-token 删除留 Task 15）
+- Task reviewer: `pending`
 - Unresolved findings: `none；Task14 仍未放行，等待完整门禁`
-- Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-13-brief.md`
-- Report: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-13-report.md`
+- Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-14-brief.md`
+- Report: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-14-report.md`
 - Blocker fix: `OpenAIFastPolicyUserSelector.vue` 的 `SimpleUser` type-only import 已从未导出的 `@/api/admin/usage` 改为共享 `@/types`；没有行为变更或伪造行为 RED。
 - RED: `pnpm --dir frontend run build` 已记录为失败；本代理复现 `pnpm --dir frontend run typecheck`，失败为 TS2614 和由该未解析类型引发的 3 个 TS7006。
 - Follow-up RED: 改正 import 后，`typecheck` 暴露 hydration 映射遗漏共享类型必填的 `username`；`adminAPI.users.getById` 的 `AdminUser` 已提供该字段。
