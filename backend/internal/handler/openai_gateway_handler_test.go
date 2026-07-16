@@ -834,6 +834,28 @@ func TestOpenAIResponsesWebSocket_IngressCapacityRejected(t *testing.T) {
 	require.Equal(t, coderws.StatusTryAgainLater, closeErr.Code)
 }
 
+func TestOpenAIResponsesWebSocket_UsesConfiguredFirstMessageTimeout(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := newOpenAIHandlerForPreviousResponseIDValidation(t, nil)
+	h.cfg = &config.Config{}
+	h.cfg.Gateway.OpenAIWS.ClientFirstMessageTimeoutSeconds = 1
+	wsServer := newOpenAIWSHandlerTestServer(t, h, middleware.AuthSubject{UserID: 1, Concurrency: 1})
+	defer wsServer.Close()
+
+	dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
+	clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(wsServer.URL, "http")+"/openai/v1/responses", nil)
+	cancelDial()
+	require.NoError(t, err)
+	defer func() { _ = clientConn.CloseNow() }()
+
+	started := time.Now()
+	readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
+	_, _, err = clientConn.Read(readCtx)
+	cancelRead()
+	require.Error(t, err)
+	require.Less(t, time.Since(started), 2*time.Second)
+}
+
 func TestOpenAIResponsesWebSocket_IngressLeaseReleasedOnEarlyReturn(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cache := &concurrencyCacheMock{
