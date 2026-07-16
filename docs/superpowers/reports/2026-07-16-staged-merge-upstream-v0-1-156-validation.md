@@ -2565,3 +2565,33 @@ The original Task 12 total counts final named command results, not unique test d
 - `901523953` adds `TestSchedulerSnapshotServicePollOutboxRebuildsForPendingLagAfterWatermark` and a one-line source reason comment. With 401 old events, first poll commits watermark `200` and records one lag failure for pending event `201`; second poll commits `400`, sees pending `401`, reaches threshold `2`, and enters exactly one full rebuild.
 - Exact reviewer command: `go -C backend test -v ./internal/service -run '^(TestSchedulerSnapshotServicePollOutboxCleansConsumedRowsAfterWatermark|TestSchedulerSnapshotServicePollOutboxDoesNotUseConsumedEventForLag|TestSchedulerSnapshotServicePollOutboxRebuildsForPendingLagAfterWatermark)$' -count=1`; exit `0`, 3 named executions.
 - These are command executions, not new unique definitions: the first two were already in the 45-row scheduler accounting and are rerun deliberately with the new third target. Reviewer cumulative execution count is therefore `232 + 3 = 235`.
+
+## Task 13 / v0.1.155 Stage Gate (OpenSpec 4.3)
+
+### Three Attempts And Repairs
+
+- Attempt one stopped at `golangci-lint`: `347ad613` had retained `openAIRecordUsageAccountRepoStub` while omitting its only v0.1.155 consumer. `1138be1d9 test: restore shadow parent billing coverage` restored that upstream parent opt-out/opt-in test; the named test and service lint passed.
+- Attempt two exposed unit-only merge omissions. `3fdedb4d1 test: align usage list query mock` synchronized the 56-column usage scan SQL mock. `a7515cbb0 fix: restore long-context account validation` restores key-present-only `UpdateAccountExtra` validation, target-aware bulk validation, and parent-effective (`false` when missing) spark-shadow persistence. Their named repository, service, non-OpenAI allowance and shadow subtests passed.
+- This section records only the third, fresh full run after those three commits. Earlier partial-gate outcomes are not used as final evidence.
+
+### Full Gate
+
+| Command | Exit | Result |
+| --- | ---: | --- |
+| `make test` | `0` | Backend default, lint and unit tests plus frontend ESLint/typecheck/Vitest passed. Vitest: `179` files, `1337` tests. |
+| `pnpm --dir frontend run build` | `0` | `vue-tsc -b` and Vite production build passed; `970` modules, `built in 33.34s`. |
+| `make -C backend generate` (two runs) | `0` / `0` | Ent and Wire generation completed twice. |
+| `git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` | `0` | Empty restricted diff after each generation run. |
+
+### Affected Capabilities And Conflicts
+
+- Task12's 13 affected M-IDs all pass: M-01 `2`, M-02 `4`, M-04 `2`, M-05 `3`, M-06 `4`, M-07 `4`, M-08 `4`, M-09 `4`, M-10 `16`, M-11 `5`, M-13 stable suite `21` plus the complete Vitest gate, M-14 compile/manual (zero tests excluded), and M-15 `3` named targets. The untagged M-06 service half reported `0 tests to run` and is excluded; its two unit targets supplied the counted coverage.
+- The 14 Task11 conflict entries pass through VERSION/manual comparison (`347ad613` and its first parent retain `0.1.151.2`; tag parent is `0.1.153`), Ent/Wire regeneration, endpoint/usage `4`, alpha routes `2`, API-key/Grok `5`, fallback/M-16, OAuth passthrough `14`, Create/Edit/locales `61`, and alpha-search `3` actual named targets. The historical OAuth regex reported zero tests in the current tree and was not counted; current `TestOpenAIGatewayService_OAuthPassthrough_*` targets provided the evidence.
+- Request-body command: `go -C backend test -v ./internal/handler -run '^TestRequestBodySizeMatrix$' -count=1`, exit `0`. All `9` identity/gzip/multipart × `5/10/12MB` cases passed with matching client/upstream SHA-256, bounded snapshots, threshold spool assertions and cleanup.
+- Follow-up commands passed: builder `1`; image JSON interval/keepalive `1 + 8`; scheduler outbox `3`; shadow-parent billing `1` top-level plus `2` subtests; usage-list mock `2`; long-context entrypoints `6` top-level plus `2` subtests.
+
+### Static, Manual, And Release Decision
+
+- `git diff --check`, `git diff --cached --check`, `git diff --name-only --diff-filter=U`, and `git ls-files -u` were clean. Exact marker scan `git grep -n -E '^(<<<<<<< |=======$|>>>>>>> )' -- backend frontend docs README.md` returned its expected no-match exit `1`. A broader pattern's only match was a pre-existing MCP text separator in `backend/internal/pkg/antigravity/request_transformer.go`, not a conflict marker.
+- Non-blocking warnings remain: Browserslist/caniuse-lite staleness; Vite dynamic/static import notices and `AccountsView` `649.25 kB`; expected Vitest error-path, router-link and intlify logs.
+- No plan, OpenSpec, Comet/current-change, merge, push, release, or deploy operation occurred. **Task 14 is authorized.**
