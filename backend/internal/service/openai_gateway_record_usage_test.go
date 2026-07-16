@@ -1131,7 +1131,7 @@ func TestOpenAIGatewayServiceRecordUsage_Gpt54LongContextBillsWholeSession(t *te
 		},
 		APIKey:  &APIKey{ID: 1014},
 		User:    &User{ID: 2014},
-		Account: &Account{ID: 3014},
+		Account: &Account{ID: 3014, Platform: PlatformOpenAI, Extra: map[string]any{openAILongContextBillingEnabledKey: true}},
 	})
 
 	require.NoError(t, err)
