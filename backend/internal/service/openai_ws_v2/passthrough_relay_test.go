@@ -300,6 +300,7 @@ func TestRelay_FunctionCallOutputBytesPreserved(t *testing.T) {
 
 	clientConn := newPassthroughTestFrameConn(nil, false)
 	upstreamConn := newPassthroughTestFrameConn([]passthroughTestFrame{
+		{msgType: coderws.MessageText, payload: []byte(`{"type":"response.created","response":{"id":"resp_func"}}`)},
 		{
 			msgType: coderws.MessageText,
 			payload: []byte(`{"type":"response.completed","response":{"id":"resp_func","usage":{"input_tokens":1,"output_tokens":1}}}`),
@@ -317,6 +318,7 @@ func TestRelay_FunctionCallOutputBytesPreserved(t *testing.T) {
 	require.Len(t, upstreamWrites, 1)
 	require.Equal(t, coderws.MessageText, upstreamWrites[0].msgType)
 	require.Equal(t, firstPayload, upstreamWrites[0].payload)
+	require.Len(t, clientConn.Writes(), 2)
 }
 
 func TestRelay_UpstreamDisconnect(t *testing.T) {
@@ -763,6 +765,7 @@ func TestRelay_TraceEvents_ContainsLifecycleStages(t *testing.T) {
 
 	clientConn := newPassthroughTestFrameConn(nil, false)
 	upstreamConn := newPassthroughTestFrameConn([]passthroughTestFrame{
+		{msgType: coderws.MessageText, payload: []byte(`{"type":"response.created","response":{"id":"resp_trace"}}`)},
 		{
 			msgType: coderws.MessageText,
 			payload: []byte(`{"type":"response.completed","response":{"id":"resp_trace","usage":{"input_tokens":1,"output_tokens":1}}}`),
@@ -790,6 +793,7 @@ func TestRelay_TraceEvents_ContainsLifecycleStages(t *testing.T) {
 	require.Contains(t, capturedStages, "write_first_message_ok")
 	require.Contains(t, capturedStages, "first_exit")
 	require.Contains(t, capturedStages, "relay_complete")
+	require.Len(t, clientConn.Writes(), 2)
 }
 
 func TestRelay_TraceEvents_IdleTimeout(t *testing.T) {
