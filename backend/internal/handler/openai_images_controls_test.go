@@ -41,6 +41,14 @@ func (r *openAIImagesModerationSettings) GetValue(_ context.Context, key string)
 	return r.values[key], nil
 }
 
+func (r *openAIImagesModerationSettings) GetMultiple(_ context.Context, keys []string) (map[string]string, error) {
+	values := make(map[string]string, len(keys))
+	for _, key := range keys {
+		values[key] = r.values[key]
+	}
+	return values, nil
+}
+
 type openAIImagesModerationRepo struct {
 	service.ContentModerationRepository
 }

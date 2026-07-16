@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"mime/multipart"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
-	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -49,8 +49,19 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		return
 	}
 
-	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
+	multipartRequest := isMultipartImagesContentType(c.GetHeader("Content-Type"))
+	var coordinator *requestBodyCoordinator
+	var err error
+	if multipartRequest {
+		coordinator, err = newMultipartRequestBody(c.Request, 0)
+	} else {
+		coordinator, err = newJSONRequestBody(c.Request)
+	}
 	if err != nil {
+		if errors.Is(err, service.ErrRequestBodySpool) {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 			return
@@ -58,11 +69,61 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 		return
 	}
-	if len(body) == 0 {
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
+	defer coordinator.Cleanup()
+	var body []byte
+	var parsed *service.OpenAIImagesRequest
+	if multipartRequest {
+		parsed, err = h.gatewayService.ParseOpenAIImagesMultipartForm(c, coordinator.form)
+	} else {
+		body, err = coordinator.ReadRaw()
+		if err == nil && len(body) == 0 {
+			err = errors.New("request body is empty")
+		}
+		if err == nil {
+			service.SetUsageRequestBody(c, openAIRequestBodyPreviewSnapshot(body))
+			parsed, err = h.gatewayService.ParseOpenAIImagesRequest(c, body)
+		}
+	}
+	if err != nil {
+		if errors.Is(err, service.ErrRequestBodySpool) {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
+		if maxErr, ok := extractMaxBytesError(err); ok {
+			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+			return
+		}
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
 	}
-	service.SetUsageRequestBody(c, openAIRequestBodyPreviewSnapshot(body))
+	if parsed.Multipart {
+		c.Request.MultipartForm = coordinator.form
+	}
+
+	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, parsed.Model)
+	moderationBody := parsed.ModerationBody()
+	stickySessionSeed := parsed.FreezeStickySessionSeed()
+	sessionHash := h.gatewayService.GenerateExplicitSessionHash(c, body)
+	requestPayloadHash := service.HashUsageRequestPayload(body)
+	if parsed.Multipart {
+		requestPayloadHash = service.HashUsageRequestPayload([]byte(stickySessionSeed))
+	}
+	service.BindOpenAIRequestBodyHandle(c, coordinator.Effective())
+	if parsed.Prompt != "" {
+		oauthBody, prepareErr := h.gatewayService.PrepareOpenAIImagesOAuthBody(parsed, channelMapping.MappedModel)
+		if prepareErr != nil {
+			if errors.Is(prepareErr, service.ErrRequestBodySpool) {
+				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+				return
+			}
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", prepareErr.Error())
+			return
+		}
+		if err := coordinator.SetOAuthBytes(oauthBody); err != nil {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
+	}
 
 	if isMultipartImagesContentType(c.GetHeader("Content-Type")) {
 		setOpsRequestContext(c, "", false)
@@ -70,11 +131,6 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		setOpsRequestContext(c, "", false)
 	}
 
-	parsed, err := h.gatewayService.ParseOpenAIImagesRequest(c, body)
-	if err != nil {
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
-		return
-	}
 	requestModel := parsed.Model
 
 	reqLog = reqLog.With(
@@ -88,10 +144,13 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		h.errorResponse(c, http.StatusForbidden, "permission_error", service.ImageGenerationPermissionMessage())
 		return
 	}
-	if decision := h.checkContentModeration(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIImages, requestModel, parsed.ModerationBody()); decision != nil && decision.Blocked {
+	if decision := h.checkContentModeration(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIImages, requestModel, moderationBody); decision != nil && decision.Blocked {
 		h.errorResponse(c, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message)
 		return
 	}
+	coordinator.ReleaseMultipartValues()
+	parsed.ReleaseText()
+	body = nil
 	imageReleaseFunc, acquired := h.acquireImageGenerationSlot(c, streamStarted)
 	if !acquired {
 		return
@@ -106,8 +165,6 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		setOpsRequestContext(c, requestModel, parsed.Stream)
 	}
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(parsed.Stream, false)))
-
-	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, requestModel)
 
 	if h.errorPassthroughService != nil {
 		service.BindErrorPassthroughService(c, h.errorPassthroughService)
@@ -136,7 +193,6 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		return
 	}
 
-	sessionHash := h.gatewayService.GenerateExplicitSessionHash(c, body)
 	requestCtx := service.WithOpenAIImageGenerationIntent(c.Request.Context())
 
 	maxAccountSwitches := h.maxAccountSwitches
@@ -236,7 +292,36 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 					accountReleaseFunc()
 				}
 			}()
-			return h.gatewayService.ForwardImages(requestCtx, c, account, body, parsed, channelMapping.MappedModel)
+			if parsed.Multipart && account.Type == service.AccountTypeAPIKey {
+				mappedModel := parsed.Model
+				if channelMapping.Mapped {
+					mappedModel = channelMapping.MappedModel
+				}
+				upstreamModel := account.GetMappedModel(mappedModel)
+				if coordinator.multipartModel != upstreamModel {
+					contentType, err := coordinator.SetEffectiveMultipart(func(writer *multipart.Writer) error {
+						if err := coordinator.CheckMultipartFiles(); err != nil {
+							return err
+						}
+						source, err := coordinator.Effective().Open()
+						if err != nil {
+							return err
+						}
+						defer func() { _ = source.Close() }()
+						return service.WriteOpenAIImagesMultipartModel(writer, source, parsed.ContentType, upstreamModel)
+					})
+					if err != nil {
+						return nil, err
+					}
+					parsed.ContentType = contentType
+					coordinator.multipartModel = upstreamModel
+				}
+				service.BindOpenAIRequestBodyHandle(c, coordinator.Effective())
+			}
+			if account.Type == service.AccountTypeOAuth {
+				service.BindOpenAIRequestBodyHandle(c, coordinator.OAuth())
+			}
+			return h.gatewayService.ForwardImages(requestCtx, c, account, nil, parsed, channelMapping.MappedModel)
 		}()
 		forwardDuration := time.Since(forwardStart)
 		forwardDurationMs := forwardDuration.Milliseconds()
@@ -250,6 +335,10 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			service.SetOpsLatencyMs(c, service.OpsTimeToFirstTokenMsKey, int64(*result.FirstTokenMs))
 		}
 		if err != nil {
+			if errors.Is(err, service.ErrRequestBodySpool) {
+				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+				return
+			}
 			if result != nil && result.ImageCount > 0 {
 				reqLog.Warn("openai.images.forward_partial_error_with_image_result",
 					zap.Int64("account_id", account.ID),
@@ -372,10 +461,6 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
 		detailSnapshot := buildOpenAIImagesDetailSnapshot(c, parsed)
-		requestPayloadHash := service.HashUsageRequestPayload(body)
-		if parsed.Multipart {
-			requestPayloadHash = service.HashUsageRequestPayload([]byte(parsed.StickySessionSeed()))
-		}
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
