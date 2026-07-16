@@ -112,6 +112,8 @@ type SchedulerSnapshotService struct {
 	outboxRepo                   SchedulerOutboxRepository
 	accountRepo                  AccountRepository
 	groupRepo                    GroupRepository
+	openAIAccountChangeHandlerMu sync.RWMutex
+	openAIAccountChangeHandler   func(context.Context, int64)
 	cfg                          *config.Config
 	stopCh                       chan struct{}
 	stopOnce                     sync.Once
@@ -132,6 +134,27 @@ type SchedulerSnapshotService struct {
 	fullRebuildRequested uint64
 	fullRebuildCompleted uint64
 	fullRebuildLastErr   error
+}
+
+func (s *SchedulerSnapshotService) SetOpenAIAccountChangeHandler(handler func(context.Context, int64)) {
+	if s == nil {
+		return
+	}
+	s.openAIAccountChangeHandlerMu.Lock()
+	defer s.openAIAccountChangeHandlerMu.Unlock()
+	s.openAIAccountChangeHandler = handler
+}
+
+func (s *SchedulerSnapshotService) invokeOpenAIAccountChangeHandler(ctx context.Context, accountID int64) {
+	if s == nil || accountID <= 0 {
+		return
+	}
+	s.openAIAccountChangeHandlerMu.RLock()
+	handler := s.openAIAccountChangeHandler
+	s.openAIAccountChangeHandlerMu.RUnlock()
+	if handler != nil {
+		handler(ctx, accountID)
+	}
 }
 
 func NewSchedulerSnapshotService(
@@ -580,7 +603,13 @@ func (s *SchedulerSnapshotService) handleAccountEvent(ctx context.Context, accou
 	if len(groupIDs) == 0 {
 		groupIDs = account.GroupIDs
 	}
-	return s.rebuildByAccount(ctx, account, groupIDs, "account_change", seen)
+	if err := s.rebuildByAccount(ctx, account, groupIDs, "account_change", seen); err != nil {
+		return err
+	}
+	if account.IsOpenAI() {
+		s.invokeOpenAIAccountChangeHandler(ctx, account.ID)
+	}
+	return nil
 }
 
 func (s *SchedulerSnapshotService) handleGroupEvent(ctx context.Context, groupID *int64, seen map[batchSeenKey]struct{}) error {
