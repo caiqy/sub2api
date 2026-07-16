@@ -390,6 +390,7 @@ frontend/src/views/admin/GroupsView.vue
 frontend/src/views/user/KeysView.vue
 ```
 
+<a id="task-3-capability-matrix"></a>
 ### 能力矩阵
 
 | 能力 | 行为契约 | 入口/调用链 | 关键文件 | 受影响 tag | 矩阵命令/证据 ID | 人工审查点 | 状态 | 阶段结果 | 证据位置 |
@@ -411,6 +412,7 @@ frontend/src/views/user/KeysView.vue
 | Ent/Wire/migrations | schema、生成 client/Wire 及 SQL migration 顺序和幂等性必须一致。 | Ent schema -> generate -> wire providers；migration runner 按文件名执行。 | `ent/schema/*.go`、`cmd/server/wire_gen.go`、`migrations/*.sql`。 | 152, 153, 155, 156 | [M-15](#m-15-ent-wire-migrations) | 新增 174/175/175a/176 与同号前缀、Wire provider 图及生成稳定性必须逐段复核。 | manual | 阶段 0 两轮生成稳定；四段合并后复跑。 | M-15；阶段 0 85-88；v0.1.151 报告 147-152。 |
 | OpenAI 首 Token 超时 | 仅流式 Responses 按明确 image intent 选择 watchdog；HTTP 超时返回 504 `first_token_timeout` 且不得 failover；WS 超时 cancel、drain、完成并清理当前 turn，不处罚账号。 | OpenAI handler -> `openai_first_output_timeout` -> SSE/WS forwarder。 | `openai_first_output_timeout.go`、`terminal_failed_usage_test.go`、`openai_ws_v2/passthrough_relay_test.go`。 | 156 | [M-16](#m-16-sticky-and-first-token-rerun) | v0.1.156 合并后必须完整移除本地实现，且不得保留兼容别名；前三段保持本地实现与保护。复核 HTTP 不选择下一账号，WS cancel/drain 后才释放下一 turn。 | approved-removal | 本轮 M-16 覆盖 2/2 直接断言（exit 0）；v0.1.152-v0.1.155 protected；仅 v0.1.156 合并后可完整移除。 | `openai-first-token-timeout` 67-114；`terminal_failed_usage_test.go:223`；`passthrough_relay_test.go:104`；M-16。 |
 
+<a id="task-3-matrix-command-definitions"></a>
 ### 可直接执行的矩阵聚焦命令
 
 矩阵的 16 行各有一个稳定命令 ID。表格只引用 ID；以下 fenced code blocks 是唯一可直接执行的命令文本。`M-10` 和 `M-15` 各含同一能力行所需的多条命令。
@@ -595,15 +597,23 @@ cd backend && go test -v -tags unit ./internal/service ./internal/handler ./inte
 - 矩阵统计不变：`protected=11`、`manual=4`、`approved-removal=1`、`gap=0`、合计 16；本轮是纯文档证据修复，依用户裁决豁免 TDD。
 - 风险信号与顾虑：前端命令仍输出既有非阻塞 Browserslist 数据陈旧警告；本次仅证明当前根目录命令与生成稳定性，后续各 tag 合并阶段仍须执行对应原始验证。
 
+<a id="task-3-review-conclusion"></a>
+### Task 3 审查结论
+
+- final review 结论：`Approved`；`Critical`、`Important`、`Minor` 均无。
+- 最终实现提交：`abc694a4d6cb1ec7c6c8ba76a49ac28c056f6e00`（`docs: fix matrix command working directories`）。
+
 ## 阶段 0 最小行为保护门禁（OpenSpec 1.4）
 
 ### 零 gap 与测试结论
 
-- Task 3 的 16 行矩阵及 M-01 至 M-16、final review 已复核：`protected=11`、`manual=4`、`approved-removal=1`、`gap=0`。
+- 零 gap 判定参照 [Task 3 的 16 行能力矩阵](#task-3-capability-matrix)、[M-01 至 M-16 命令定义](#task-3-matrix-command-definitions) 与 [Task 3 审查结论](#task-3-review-conclusion)：`protected=11`、`manual=4`、`approved-removal=1`、`gap=0`。
 - 没有任何能力同时满足“本地独有、目标 release 触及、缺少行为断言”三项条件，因此无符合条件的补测；新增 characterization test 文件数为 `0`，新增测试数为 `0`，无新增聚焦命令。
 - 本轮无行为修改，按用户裁决豁免 TDD；未执行或伪造 RED/GREEN。Task 3 已真实运行的 M-16（10 个顶层测试）及 M-10/M-15 仅为既有证据，未替代下列完整阶段 0 门禁。
 
 ### 完整门禁记录
+
+- 下表五条门禁命令均从仓库根目录 `D:\Caiqy\Projects\Github\sub2api` 执行；`--dir frontend` 与 `-C backend` 仅由该根目录命令指定子目录。本次文档修复未重跑门禁，也未补写原始 stdout。
 
 | 命令 | 退出码 | 摘要 |
 | --- | ---: | --- |
