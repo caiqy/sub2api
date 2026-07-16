@@ -392,26 +392,173 @@ frontend/src/views/user/KeysView.vue
 
 ### 能力矩阵
 
-| 能力 | 行为契约 | 入口/调用链 | 关键文件 | 受影响 tag | 准确现有自动测试命令 | 人工审查点 | 状态 | 阶段结果 | 证据位置 |
+| 能力 | 行为契约 | 入口/调用链 | 关键文件 | 受影响 tag | 矩阵命令/证据 ID | 人工审查点 | 状态 | 阶段结果 | 证据位置 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Scheduler | 按能力、负载、privacy、sticky 与 WaitPlan 选可调度账号，不把不可用候选发往上游。 | `OpenAIGatewayService.SelectAccountWithScheduler -> layered/default scheduler -> AccountRepository`。 | `openai_gateway_scheduling.go`、`openai_account_scheduler_layered_test.go`。 | 152, 153, 155, 156 | `cd backend && go test ./internal/service -run '^(TestLayered_WaitPlanFallbackSkipsUpstreamRestrictedAccount\|TestOpenAISelectAccountWithLoadAwareness_AllFullWaitPlan)$' -count=1` | 合并逐段确认 scheduler 模式、候选过滤和 WaitPlan 回退仍同时存在。 | protected | 阶段 0 PASS；四段均待合并前保护。 | 本节命令；OpenSpec `upstream-release-sync`。 |
-| OpenAI previous-response/session Sticky | OpenAI 开关关闭时不读写 response/session/WS 状态；开启时保持绑定、权重与清理语义。 | `OpenAIGatewayService.Forward -> SelectAccountWithScheduler -> sticky store`。 | `openai_account_scheduler*.go`、`openai_ws_*`。 | 152, 153, 155, 156 | `cd backend && go test -tags unit ./internal/service -run '^(TestOpenAIGatewayService_SelectAccountWithScheduler_PreviousResponseStickyDisabledBypassesStickyLookupAndBind\|TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyDisabledBypassesLookupBindAndRefresh\|TestOpenAIGatewayService_StickyDisabledWSv2SkipsStateStore\|TestOpenAIGatewayService_StickyDisabledIngressSkipsStateStore)$' -count=1` | HTTP、WS V2、ingress 均须在禁用时跳过 response-account、response-connection、turn state 和 session-connection 的读写。 | protected | 阶段 0 PASS；本轮 4/4 直接断言通过（exit 0）；四段均 protected。 | `platform-sticky-boundaries` 10-14；本轮聚焦命令与结果。 |
-| Gemini/Anthropic Sticky | 按最终平台而非 Anthropic alias 判定开关；禁用时不读写或清理会话。 | `GatewayService.stickyEnabledForPlatform -> get/bindStickySessionForPlatform -> Gemini handler/compat`。 | `gateway_service.go`、`gateway_helper.go`、`gemini_sticky_toggle_test.go`、`antigravity_smart_retry_test.go`。 | 153, 156 | `cd backend && go test -tags unit ./internal/handler ./internal/service -run '^(TestGatewayHandler_GeminiRouteStickyLookupUsesGeminiToggleNotAnthropicToggle\|TestGatewayHandler_GeminiRouteStickyBindUsesGeminiToggleNotAnthropicToggle\|TestGatewayHandler_OpenAIRouteStickyUsesOpenAIToggleNotAnthropicToggle\|TestAntigravityGatewayServiceClearStickySessionSkipsDisabledSticky)$' -count=1` | Gemini 路由按 Gemini 开关选择；Antigravity retry/模型限流 cleanup 必须在 Anthropic 开关禁用时跳过删除。 | protected | 阶段 0 PASS；本轮 4/4 直接断言通过（exit 0）；153、156 protected；152、155 未直接触及该调用链。 | `platform-sticky-boundaries` 16-20、27-30；附录 C（152..153）、E（155..156）；本轮聚焦命令与结果。 |
-| fallback / WaitPlan | 首选无法取得 slot 时可等待或回退；已经写出 SSE 后不再 failover。 | handler failover loop -> service selection/`WaitPlan` -> upstream error path。 | `failover_loop.go`、`openai_gateway_service.go`、`gateway_handler_stream_failover_test.go`。 | 152, 153, 155, 156 | `cd backend && go test ./internal/handler -run '^(TestHandleFailoverError_IntegrationScenario\|TestStreamWrittenGuard_MessagesPath_AbortFailoverOnSSEContentWritten)$' -count=1` | Responses->Chat fallback 不得覆盖首 Token 或已提交响应。 | protected | 阶段 0 PASS；四段均 protected。 | `upstream-release-sync`；附录 B-E。 |
-| DB recheck | stale cache sticky 候选必须在 DB 状态、模型端点、privacy/image capability 后复核；不错误删除仍可恢复的绑定。 | `SelectAccountWithScheduler -> scheduler recheck -> AccountRepository`。 | `openai_account_scheduler*.go`、`account_repo.go`。 | 152, 155, 156 | `cd backend && go test ./internal/service -run '^(TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyDBRuntimeRecheckSkipsStaleCachedAccount\|TestLayered_SessionStickyDBRecheckRejectsEndpointCapabilityChange\|TestOpenAIGatewayService_SelectAccountByPreviousResponseID_DBRuntimeRecheckRateLimitedMiss)$' -count=1` | 复核 DB recheck 发生在 cache 命中后、上游前。 | protected | 阶段 0 PASS；152-156 protected。 | 本节命令；`platform-sticky-boundaries`。 |
-| Messages/Responses/Chat 转换与透传 | 保留 Chat->Responses->Anthropic 映射、工具/usage 字段和原始客户端 body 的 passthrough source。 | route -> `ForwardAsChatCompletions`/`ForwardAsResponses` -> apicompat -> upstream builder。 | `gateway_forward_as_*.go`、`chatcompletions_*bridge.go`、`responses_to_anthropic.go`。 | 152, 153, 155, 156 | `cd backend && go test ./internal/pkg/apicompat ./internal/service -run '^(TestChatCompletionsToResponses_ToolCalls\|TestResponsesToAnthropic_CustomToolPreservesSchemaParameters\|TestGatewayService_ForwardAsChatCompletions_PassthroughBodyMapCopiesFromOriginalCCBody\|TestGatewayService_ForwardAsResponses_PassthroughBodyMapCopiesFromOriginalResponsesBody)$' -count=1` | 从转换后 body 取 passthrough source 会静默丢客户端字段。 | protected | 阶段 0 PASS；四段均 protected。 | CodeGraph explore；`upstream-release-sync`。 |
-| 终止 usage | 顶层 terminal usage 只记录一次；failed、partial failover 与 passthrough 保持失败 usage。 | protocol stream -> response handling -> handler usage submission。 | `responses_stream_event_wire.go`、`openai_gateway_response_handling.go`、`terminal_failed_usage_test.go`。 | 152, 153, 155, 156 | `cd backend && go test ./internal/pkg/apicompat ./internal/handler -run '^(TestResponsesEventToChatChunks_TopLevelTerminalUsage\|TestResponsesEventToAnthropicEvents_TopLevelTerminalUsage\|TestOpenAIGatewayHandler_NativeNonPassthroughResponsesFailedIsNotDuplicated\|TestOpenAIGatewayHandler_ResponsesPartialFailoverCreatesExactlyOneFailedUsage)$' -count=1` | 流式 terminal、client disconnect 与 fallback 都不能重复提交。 | protected | 阶段 0 PASS；四段均 protected。 | 本节命令；v0.1.151 验证报告 191-196。 |
-| privacy/内容审计 | 审计只抽取可审计内容，受限大输入仍保留最新窗口；删除分组保存时剔除且查询错误不吞掉。 | handler -> `ContentModerationService` -> audit/setting store。 | `content_moderation.go`、`content_moderation_input_test.go`。 | 155, 156 | `cd backend && go test ./internal/service -run '^(TestExtractContentModerationInput_ResponsesLargeInputKeepsLatestText\|TestExtractContentModerationInput_ResponsesInlineImagesLimitedDuringCollection\|TestContentModerationUpdateConfig_DropsDeletedGroupIDs\|TestContentModerationUpdateConfig_KeepsGroupLookupErrors)$' -count=1` | 审计副本限制不能改变 pre-block、模型过滤或上游 body。 | protected | 阶段 0 PASS；152-153 不触及，155-156 protected。 | `content-moderation-config`、`large-input-memory-control`。 |
-| image capability | 明确 image intent 才要求 image capability；sticky DB recheck 与 image rate limit 不误伤文本账号。 | Responses/image handler -> `IsImageGenerationIntent` -> scheduler capability filter。 | `image_generation_intent.go`、`openai_images.go`、`ratelimit_service_openai_image_test.go`。 | 152, 155, 156 | `cd backend && go test ./internal/service -run '^(TestLayered_RequiredImageCapabilityFiltersUnsupportedAccounts\|TestLayered_SessionStickyRecheckHonorsImageCapability\|TestOpenAIGatewayServiceForward_RejectsDisabledImageGenerationIntents\|TestOpenAIGatewayServiceForwardImages_ImageRateLimitReturnsFailoverAndCoolsCapability)$' -count=1` | raw Images、Responses tool 与 Codex bridge 的 intent 必须一致。 | protected | 阶段 0 PASS；152/155/156 protected。 | `upstream-release-sync`；CodeGraph context。 |
-| 运行时设置热更新 | 持久化的 gateway 控制项可回读、校验、原子更新并立即影响新请求。 | Settings handler -> `SettingService` -> config runtime getter -> gateway service。 | `config.go`、`setting_service_gateway_runtime_test.go`、`SettingsView.gatewayRuntime.spec.ts`。 | 152, 153, 155, 156 | `cd backend && go test ./internal/service -run '^(TestSettingService_SetGatewayRuntimeSettings_PersistsUpdatesCfgAndInvalidatesOnResponseHeaderTimeoutChange\|TestSettingServiceGatewayRuntimeSettings_RejectsNegativeFirstTokenTimeouts)$' -count=1`；`cd frontend && pnpm test:run src/views/admin/__tests__/SettingsView.gatewayRuntime.spec.ts` | omitted 字段、Sticky/WS scheduler 和前端保存 payload 均要保留。 | protected | 阶段 0 PASS；四段均 protected。 | `openai-first-token-timeout`；v0.1.151 报告 154-163。 |
-| 请求体重放与清理 | 受支持入口大 body 采用可重开 handle；failover 保持有效 body，成功/错误/提前返回均清理 owned spool。 | handler coordinator -> parsed/effective handle -> forward/failover -> cleanup。 | `request_body_coordinator*.go`、`openai_gateway_request_body.go`、`request_body_handle_test.go`。 | 152, 153, 155, 156 | `cd backend && go test ./internal/handler ./internal/service -run '^(TestGatewayHandler_MessagesAndResponsesReplayLargeBodiesAcrossFailover\|TestOpenAIGatewayHandler_ChatReplayRawSpoolAcrossFailoverWhenResponsesUnsupported\|TestRequestBodyCoordinator_CleanupRemovesRawEffectiveAndMultipartTemps\|TestOpenAIForwardCleansBoundRequestBodyHandlesInParallel\|TestRequestBodyHandle_CleanupRemovesSpoolFile)$' -count=1` | raw inbound 与 effective outbound 的 owner 不能重复关闭或泄漏。 | protected | 阶段 0 PASS；四段均 protected。 | `request-body-retention-control`；CodeGraph explore。 |
-| 用户资源控制 | 用户级隐藏购买/自定义菜单与 blocked public group 需同时由管理写入、服务鉴权和前端路由生效。 | admin user update -> user resources -> payment/page/API-key checks -> UI visibility helpers。 | `admin_service_blocked_groups_test.go`、`payment_handler_hidden_purchase_test.go`、`page_handler_hidden_menu_test.go`。 | 152, 156 | `cd backend && go test ./internal/service ./internal/handler -run '^(TestAdminServiceUpdateUserSavesHiddenUIResources\|TestPaymentHandlerGetCheckoutInfoRejectsHiddenPurchasePage\|TestPageHandlerGetPageContentRejectsHiddenCustomMenu)$' -count=1` | 审查 API-key bind/已有 key 鉴权、管理员豁免与前端隐藏的跨层一致性。 | manual | 阶段 0 PASS；152/156 需合并后结构复核。 | `user-ui-visibility-overrides`、`user-public-group-blocklist`。 |
-| 前端本地功能 | 用户不可见购买/菜单不能经导航或直达绕过；设置页保留本地 runtime 控制项。 | router guard/App UI -> visibility helper -> page navigation。 | `frontend/src/router/__tests__/feature-access.spec.ts`、`utils/userUiVisibility.spec.ts`、`SettingsView.gatewayRuntime.spec.ts`。 | 152, 153, 155, 156 | `cd frontend && pnpm test:run src/router/__tests__/feature-access.spec.ts src/utils/__tests__/userUiVisibility.spec.ts src/views/admin/__tests__/SettingsView.gatewayRuntime.spec.ts` | route guard 与后端支付/页面拒绝不是同一断言，需联合验收。 | manual | 阶段 0 PASS；四段 UI 变更待合并后人工联检。 | `user-ui-visibility-overrides`；阶段 0 命令。 |
-| 版本/依赖 | VERSION、Go toolchain/依赖与 release 元数据应来自目标 tag，不夹带本地版本漂移。 | release metadata/config -> build tooling。 | `backend/cmd/server/VERSION`、`backend/go.mod`、`backend/go.sum`。 | 152, 153, 155, 156 | `cd backend && go test ./cmd/server -run '^$' -count=1` | 对每段 target tag 做 `git show <tag>^{}:backend/cmd/server/VERSION` 和 `go.mod` diff，不将编译视为版本正确性。 | manual | 阶段 0 PASS；四段均需 tag 对照。 | 本节 changed-files；上游合并工作流 34-35。 |
-| Ent/Wire/migrations | schema、生成 client/Wire 及 SQL migration 顺序和幂等性必须一致。 | Ent schema -> generate -> wire providers；migration runner 按文件名执行。 | `ent/schema/*.go`、`cmd/server/wire_gen.go`、`migrations/*.sql`。 | 152, 153, 155, 156 | `cd backend && go test ./migrations -run '^(TestMigration173AllowsCyberBlockedUsageRequestType\|TestMigration158BackfillsGrokMediaGenerationGroups)$' -count=1`；`make -C backend generate`；`git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` | 新增 174/175/175a/176 与同号前缀、Wire provider 图及生成稳定性必须逐段复核。 | manual | 阶段 0 两轮生成稳定；四段合并后复跑。 | 阶段 0 85-88；v0.1.151 报告 147-152。 |
-| OpenAI 首 Token 超时 | 仅流式 Responses 按明确 image intent 选择 watchdog；HTTP 超时返回 504 `first_token_timeout` 且不得 failover；WS 超时 cancel、drain、完成并清理当前 turn，不处罚账号。 | OpenAI handler -> `openai_first_output_timeout` -> SSE/WS forwarder。 | `openai_first_output_timeout.go`、`terminal_failed_usage_test.go`、`openai_ws_v2/passthrough_relay_test.go`。 | 156 | `cd backend && go test -tags unit ./internal/handler ./internal/service/openai_ws_v2 -run '^(TestOpenAIGatewayHandler_FirstTokenTimeoutReturns504AndCreatesOneFailedUsage\|TestRelayFirstTokenTimeoutCancelsDrainsAndCompletesTurn)$' -count=1` | v0.1.156 合并后必须完整移除本地实现，且不得保留兼容别名；前三段保持本地实现与保护。复核 HTTP 不选择下一账号，WS cancel/drain 后才释放下一 turn。 | approved-removal | 本轮 2/2 直接断言通过（exit 0）；v0.1.152-v0.1.155 protected；仅 v0.1.156 合并后可完整移除。 | `openai-first-token-timeout` 67-114；`terminal_failed_usage_test.go:223`；`passthrough_relay_test.go:104`；本轮聚焦命令与结果。 |
+| Scheduler | 按能力、负载、privacy、sticky 与 WaitPlan 选可调度账号，不把不可用候选发往上游。 | `OpenAIGatewayService.SelectAccountWithScheduler -> layered/default scheduler -> AccountRepository`。 | `openai_gateway_scheduling.go`、`openai_account_scheduler_layered_test.go`。 | 152, 153, 155, 156 | [M-01](#m-01-scheduler) | 合并逐段确认 scheduler 模式、候选过滤和 WaitPlan 回退仍同时存在。 | protected | 阶段 0 PASS；四段均待合并前保护。 | M-01；OpenSpec `upstream-release-sync`。 |
+| OpenAI previous-response/session Sticky | OpenAI 开关关闭时不读写 response/session/WS 状态；开启时保持绑定、权重与清理语义。 | `OpenAIGatewayService.Forward -> SelectAccountWithScheduler -> sticky store`。 | `openai_account_scheduler*.go`、`openai_ws_*`。 | 152, 153, 155, 156 | [M-02](#m-02-openai-sticky) | HTTP、WS V2、ingress 均须在禁用时跳过 response-account、response-connection、turn state 和 session-connection 的读写。 | protected | 阶段 0 PASS；本轮 M-16 覆盖 4/4 直接断言（exit 0）；四段均 protected。 | `platform-sticky-boundaries` 10-14；M-02、M-16。 |
+| Gemini/Anthropic Sticky | 按最终平台而非 Anthropic alias 判定开关；禁用时不读写或清理会话。 | `GatewayService.stickyEnabledForPlatform -> get/bindStickySessionForPlatform -> Gemini handler/compat`。 | `gateway_service.go`、`gateway_helper.go`、`gemini_sticky_toggle_test.go`、`antigravity_smart_retry_test.go`。 | 153, 156 | [M-03](#m-03-gemini-anthropic-sticky) | Gemini 路由按 Gemini 开关选择；Antigravity retry/模型限流 cleanup 必须在 Anthropic 开关禁用时跳过删除。 | protected | 阶段 0 PASS；本轮 M-16 覆盖 4/4 直接断言（exit 0）；153、156 protected；152、155 未直接触及该调用链。 | `platform-sticky-boundaries` 16-20、27-30；附录 C、E；M-03、M-16。 |
+| fallback / WaitPlan | 首选无法取得 slot 时可等待或回退；已经写出 SSE 后不再 failover。 | handler failover loop -> service selection/`WaitPlan` -> upstream error path。 | `failover_loop.go`、`openai_gateway_service.go`、`gateway_handler_stream_failover_test.go`。 | 152, 153, 155, 156 | [M-04](#m-04-fallback-waitplan) | Responses->Chat fallback 不得覆盖首 Token 或已提交响应。 | protected | 阶段 0 PASS；四段均 protected。 | M-04；`upstream-release-sync`；附录 B-E。 |
+| DB recheck | stale cache sticky 候选必须在 DB 状态、模型端点、privacy/image capability 后复核；不错误删除仍可恢复的绑定。 | `SelectAccountWithScheduler -> scheduler recheck -> AccountRepository`。 | `openai_account_scheduler*.go`、`account_repo.go`。 | 152, 155, 156 | [M-05](#m-05-db-recheck) | 复核 DB recheck 发生在 cache 命中后、上游前。 | protected | 阶段 0 PASS；152-156 protected。 | M-05；`platform-sticky-boundaries`。 |
+| Messages/Responses/Chat 转换与透传 | 保留 Chat->Responses->Anthropic 映射、工具/usage 字段和原始客户端 body 的 passthrough source。 | route -> `ForwardAsChatCompletions`/`ForwardAsResponses` -> apicompat -> upstream builder。 | `gateway_forward_as_*.go`、`chatcompletions_*bridge.go`、`responses_to_anthropic.go`。 | 152, 153, 155, 156 | [M-06](#m-06-protocol-conversion) | 从转换后 body 取 passthrough source 会静默丢客户端字段。 | protected | 阶段 0 PASS；四段均 protected。 | M-06；CodeGraph explore；`upstream-release-sync`。 |
+| 终止 usage | 顶层 terminal usage 只记录一次；failed、partial failover 与 passthrough 保持失败 usage。 | protocol stream -> response handling -> handler usage submission。 | `responses_stream_event_wire.go`、`openai_gateway_response_handling.go`、`terminal_failed_usage_test.go`。 | 152, 153, 155, 156 | [M-07](#m-07-terminal-usage) | 流式 terminal、client disconnect 与 fallback 都不能重复提交。 | protected | 阶段 0 PASS；四段均 protected。 | M-07；v0.1.151 验证报告 191-196。 |
+| privacy/内容审计 | 审计只抽取可审计内容，受限大输入仍保留最新窗口；删除分组保存时剔除且查询错误不吞掉。 | handler -> `ContentModerationService` -> audit/setting store。 | `content_moderation.go`、`content_moderation_input_test.go`。 | 155, 156 | [M-08](#m-08-content-moderation) | 审计副本限制不能改变 pre-block、模型过滤或上游 body。 | protected | 阶段 0 PASS；152-153 不触及，155-156 protected。 | M-08；`content-moderation-config`、`large-input-memory-control`。 |
+| image capability | 明确 image intent 才要求 image capability；sticky DB recheck 与 image rate limit 不误伤文本账号。 | Responses/image handler -> `IsImageGenerationIntent` -> scheduler capability filter。 | `image_generation_intent.go`、`openai_images.go`、`ratelimit_service_openai_image_test.go`。 | 152, 155, 156 | [M-09](#m-09-image-capability) | raw Images、Responses tool 与 Codex bridge 的 intent 必须一致。 | protected | 阶段 0 PASS；152/155/156 protected。 | M-09；`upstream-release-sync`；CodeGraph context。 |
+| 运行时设置热更新 | 持久化的 gateway 控制项可回读、校验、原子更新并立即影响新请求。 | Settings handler -> `SettingService` -> config runtime getter -> gateway service。 | `config.go`、`setting_service_gateway_runtime_test.go`、`SettingsView.gatewayRuntime.spec.ts`。 | 152, 153, 155, 156 | [M-10](#m-10-runtime-settings) | omitted 字段、Sticky/WS scheduler 和前端保存 payload 均要保留。 | protected | 阶段 0 PASS；四段均 protected。 | M-10；`openai-first-token-timeout`；v0.1.151 报告 154-163。 |
+| 请求体重放与清理 | 受支持入口大 body 采用可重开 handle；failover 保持有效 body，成功/错误/提前返回均清理 owned spool。 | handler coordinator -> parsed/effective handle -> forward/failover -> cleanup。 | `request_body_coordinator*.go`、`openai_gateway_request_body.go`、`request_body_handle_test.go`。 | 152, 153, 155, 156 | [M-11](#m-11-request-body) | raw inbound 与 effective outbound 的 owner 不能重复关闭或泄漏。 | protected | 阶段 0 PASS；四段均 protected。 | M-11；`request-body-retention-control`；CodeGraph explore。 |
+| 用户资源控制 | 用户级隐藏购买/自定义菜单与 blocked public group 需同时由管理写入、服务鉴权和前端路由生效。 | admin user update -> user resources -> payment/page/API-key checks -> UI visibility helpers。 | `admin_service_blocked_groups_test.go`、`payment_handler_hidden_purchase_test.go`、`page_handler_hidden_menu_test.go`。 | 152, 156 | [M-12](#m-12-user-resource-control) | 审查 API-key bind/已有 key 鉴权、管理员豁免与前端隐藏的跨层一致性。 | manual | 阶段 0 PASS；152/156 需合并后结构复核。 | M-12；`user-ui-visibility-overrides`、`user-public-group-blocklist`。 |
+| 前端本地功能 | 用户不可见购买/菜单不能经导航或直达绕过；设置页保留本地 runtime 控制项。 | router guard/App UI -> visibility helper -> page navigation。 | `frontend/src/router/__tests__/feature-access.spec.ts`、`utils/userUiVisibility.spec.ts`、`SettingsView.gatewayRuntime.spec.ts`。 | 152, 153, 155, 156 | [M-13](#m-13-frontend-local-features) | route guard 与后端支付/页面拒绝不是同一断言，需联合验收。 | manual | 阶段 0 PASS；四段 UI 变更待合并后人工联检。 | M-13；`user-ui-visibility-overrides`；阶段 0 命令。 |
+| 版本/依赖 | VERSION、Go toolchain/依赖与 release 元数据应来自目标 tag，不夹带本地版本漂移。 | release metadata/config -> build tooling。 | `backend/cmd/server/VERSION`、`backend/go.mod`、`backend/go.sum`。 | 152, 153, 155, 156 | [M-14](#m-14-version-dependencies) | 对每段 target tag 做 `git show <tag>^{}:backend/cmd/server/VERSION` 和 `go.mod` diff，不将编译视为版本正确性。 | manual | 阶段 0 PASS；四段均需 tag 对照。 | M-14；本节 changed-files；上游合并工作流 34-35。 |
+| Ent/Wire/migrations | schema、生成 client/Wire 及 SQL migration 顺序和幂等性必须一致。 | Ent schema -> generate -> wire providers；migration runner 按文件名执行。 | `ent/schema/*.go`、`cmd/server/wire_gen.go`、`migrations/*.sql`。 | 152, 153, 155, 156 | [M-15](#m-15-ent-wire-migrations) | 新增 174/175/175a/176 与同号前缀、Wire provider 图及生成稳定性必须逐段复核。 | manual | 阶段 0 两轮生成稳定；四段合并后复跑。 | M-15；阶段 0 85-88；v0.1.151 报告 147-152。 |
+| OpenAI 首 Token 超时 | 仅流式 Responses 按明确 image intent 选择 watchdog；HTTP 超时返回 504 `first_token_timeout` 且不得 failover；WS 超时 cancel、drain、完成并清理当前 turn，不处罚账号。 | OpenAI handler -> `openai_first_output_timeout` -> SSE/WS forwarder。 | `openai_first_output_timeout.go`、`terminal_failed_usage_test.go`、`openai_ws_v2/passthrough_relay_test.go`。 | 156 | [M-16](#m-16-sticky-and-first-token-rerun) | v0.1.156 合并后必须完整移除本地实现，且不得保留兼容别名；前三段保持本地实现与保护。复核 HTTP 不选择下一账号，WS cancel/drain 后才释放下一 turn。 | approved-removal | 本轮 M-16 覆盖 2/2 直接断言（exit 0）；v0.1.152-v0.1.155 protected；仅 v0.1.156 合并后可完整移除。 | `openai-first-token-timeout` 67-114；`terminal_failed_usage_test.go:223`；`passthrough_relay_test.go:104`；M-16。 |
+
+### 可直接执行的矩阵聚焦命令
+
+矩阵的 16 行各有一个稳定命令 ID。表格只引用 ID；以下 fenced code blocks 是唯一可直接执行的命令文本。`M-10` 和 `M-15` 各含同一能力行所需的多条命令。
+
+#### M-01 Scheduler
+
+```bash
+cd backend && go test ./internal/service -run '^(TestLayered_WaitPlanFallbackSkipsUpstreamRestrictedAccount|TestOpenAISelectAccountWithLoadAwareness_AllFullWaitPlan)$' -count=1
+```
+
+#### M-02 OpenAI Sticky
+
+```bash
+cd backend && go test -tags unit ./internal/service -run '^(TestOpenAIGatewayService_SelectAccountWithScheduler_PreviousResponseStickyDisabledBypassesStickyLookupAndBind|TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyDisabledBypassesLookupBindAndRefresh|TestOpenAIGatewayService_StickyDisabledWSv2SkipsStateStore|TestOpenAIGatewayService_StickyDisabledIngressSkipsStateStore)$' -count=1
+```
+
+#### M-03 Gemini/Anthropic Sticky
+
+```bash
+cd backend && go test -tags unit ./internal/handler ./internal/service -run '^(TestGatewayHandler_GeminiRouteStickyLookupUsesGeminiToggleNotAnthropicToggle|TestGatewayHandler_GeminiRouteStickyBindUsesGeminiToggleNotAnthropicToggle|TestGatewayHandler_OpenAIRouteStickyUsesOpenAIToggleNotAnthropicToggle|TestAntigravityGatewayServiceClearStickySessionSkipsDisabledSticky)$' -count=1
+```
+
+#### M-04 fallback / WaitPlan
+
+```bash
+cd backend && go test ./internal/handler -run '^(TestHandleFailoverError_IntegrationScenario|TestStreamWrittenGuard_MessagesPath_AbortFailoverOnSSEContentWritten)$' -count=1
+```
+
+#### M-05 DB recheck
+
+```bash
+cd backend && go test ./internal/service -run '^(TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyDBRuntimeRecheckSkipsStaleCachedAccount|TestLayered_SessionStickyDBRecheckRejectsEndpointCapabilityChange|TestOpenAIGatewayService_SelectAccountByPreviousResponseID_DBRuntimeRecheckRateLimitedMiss)$' -count=1
+```
+
+#### M-06 协议转换与透传
+
+```bash
+cd backend && go test ./internal/pkg/apicompat ./internal/service -run '^(TestChatCompletionsToResponses_ToolCalls|TestResponsesToAnthropic_CustomToolPreservesSchemaParameters|TestGatewayService_ForwardAsChatCompletions_PassthroughBodyMapCopiesFromOriginalCCBody|TestGatewayService_ForwardAsResponses_PassthroughBodyMapCopiesFromOriginalResponsesBody)$' -count=1
+```
+
+#### M-07 终止 usage
+
+```bash
+cd backend && go test ./internal/pkg/apicompat ./internal/handler -run '^(TestResponsesEventToChatChunks_TopLevelTerminalUsage|TestResponsesEventToAnthropicEvents_TopLevelTerminalUsage|TestOpenAIGatewayHandler_NativeNonPassthroughResponsesFailedIsNotDuplicated|TestOpenAIGatewayHandler_ResponsesPartialFailoverCreatesExactlyOneFailedUsage)$' -count=1
+```
+
+#### M-08 内容审计
+
+```bash
+cd backend && go test ./internal/service -run '^(TestExtractContentModerationInput_ResponsesLargeInputKeepsLatestText|TestExtractContentModerationInput_ResponsesInlineImagesLimitedDuringCollection|TestContentModerationUpdateConfig_DropsDeletedGroupIDs|TestContentModerationUpdateConfig_KeepsGroupLookupErrors)$' -count=1
+```
+
+#### M-09 image capability
+
+```bash
+cd backend && go test ./internal/service -run '^(TestLayered_RequiredImageCapabilityFiltersUnsupportedAccounts|TestLayered_SessionStickyRecheckHonorsImageCapability|TestOpenAIGatewayServiceForward_RejectsDisabledImageGenerationIntents|TestOpenAIGatewayServiceForwardImages_ImageRateLimitReturnsFailoverAndCoolsCapability)$' -count=1
+```
+
+#### M-10 运行时设置热更新
+
+```bash
+cd backend && go test ./internal/service -run '^(TestSettingService_SetGatewayRuntimeSettings_PersistsUpdatesCfgAndInvalidatesOnResponseHeaderTimeoutChange|TestSettingServiceGatewayRuntimeSettings_RejectsNegativeFirstTokenTimeouts)$' -count=1
+cd frontend && pnpm test:run src/views/admin/__tests__/SettingsView.gatewayRuntime.spec.ts
+```
+
+#### M-11 请求体重放与清理
+
+```bash
+cd backend && go test ./internal/handler ./internal/service -run '^(TestGatewayHandler_MessagesAndResponsesReplayLargeBodiesAcrossFailover|TestOpenAIGatewayHandler_ChatReplayRawSpoolAcrossFailoverWhenResponsesUnsupported|TestRequestBodyCoordinator_CleanupRemovesRawEffectiveAndMultipartTemps|TestOpenAIForwardCleansBoundRequestBodyHandlesInParallel|TestRequestBodyHandle_CleanupRemovesSpoolFile)$' -count=1
+```
+
+#### M-12 用户资源控制
+
+```bash
+cd backend && go test ./internal/service ./internal/handler -run '^(TestAdminServiceUpdateUserSavesHiddenUIResources|TestPaymentHandlerGetCheckoutInfoRejectsHiddenPurchasePage|TestPageHandlerGetPageContentRejectsHiddenCustomMenu)$' -count=1
+```
+
+#### M-13 前端本地功能
+
+```bash
+cd frontend && pnpm test:run src/router/__tests__/feature-access.spec.ts src/utils/__tests__/userUiVisibility.spec.ts src/views/admin/__tests__/SettingsView.gatewayRuntime.spec.ts
+```
+
+#### M-14 版本/依赖
+
+```bash
+cd backend && go test ./cmd/server -run '^$' -count=1
+```
+
+#### M-15 Ent/Wire/migrations
+
+```bash
+cd backend && go test ./migrations -run '^(TestMigration173AllowsCyberBlockedUsageRequestType|TestMigration158BackfillsGrokMediaGenerationGroups)$' -count=1
+make -C backend generate
+git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
+```
+
+#### M-16 Sticky and first Token rerun
+
+```bash
+cd backend && go test -v -tags unit ./internal/service ./internal/handler ./internal/service/openai_ws_v2 -run '^(TestOpenAIGatewayService_SelectAccountWithScheduler_PreviousResponseStickyDisabledBypassesStickyLookupAndBind|TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyDisabledBypassesLookupBindAndRefresh|TestOpenAIGatewayService_StickyDisabledWSv2SkipsStateStore|TestOpenAIGatewayService_StickyDisabledIngressSkipsStateStore|TestGatewayHandler_GeminiRouteStickyLookupUsesGeminiToggleNotAnthropicToggle|TestGatewayHandler_GeminiRouteStickyBindUsesGeminiToggleNotAnthropicToggle|TestGatewayHandler_OpenAIRouteStickyUsesOpenAIToggleNotAnthropicToggle|TestAntigravityGatewayServiceClearStickySessionSkipsDisabledSticky|TestOpenAIGatewayHandler_FirstTokenTimeoutReturns504AndCreatesOneFailedUsage|TestRelayFirstTokenTimeoutCancelsDrainsAndCompletesTurn)$' -count=1
+```
+
+### 本轮 M-16 执行证据
+
+- 执行目录：`backend`；退出码：`0`。M-16 的正则以未转义 `|` 连接 10 个目标顶层测试名。
+- 顶层目标总数：10；实际 `=== RUN` 目标数：10；实际顶层 `--- PASS` 数：10。Gemini/OpenAI 路由测试还输出 6 个子测试 RUN/PASS，以下完整列出全部 16 个命名 RUN/PASS 条目。
+
+```text
+=== RUN   TestAntigravityGatewayServiceClearStickySessionSkipsDisabledSticky
+--- PASS: TestAntigravityGatewayServiceClearStickySessionSkipsDisabledSticky
+=== RUN   TestOpenAIGatewayService_SelectAccountWithScheduler_PreviousResponseStickyDisabledBypassesStickyLookupAndBind
+--- PASS: TestOpenAIGatewayService_SelectAccountWithScheduler_PreviousResponseStickyDisabledBypassesStickyLookupAndBind
+=== RUN   TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyDisabledBypassesLookupBindAndRefresh
+--- PASS: TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyDisabledBypassesLookupBindAndRefresh
+=== RUN   TestOpenAIGatewayService_StickyDisabledIngressSkipsStateStore
+--- PASS: TestOpenAIGatewayService_StickyDisabledIngressSkipsStateStore
+=== RUN   TestOpenAIGatewayService_StickyDisabledWSv2SkipsStateStore
+--- PASS: TestOpenAIGatewayService_StickyDisabledWSv2SkipsStateStore
+=== RUN   TestGatewayHandler_GeminiRouteStickyLookupUsesGeminiToggleNotAnthropicToggle
+=== RUN   TestGatewayHandler_GeminiRouteStickyLookupUsesGeminiToggleNotAnthropicToggle/gemini_disabled_bypasses_lookup_even_when_anthropic_enabled
+=== RUN   TestGatewayHandler_GeminiRouteStickyLookupUsesGeminiToggleNotAnthropicToggle/gemini_enabled_performs_lookup_even_when_anthropic_disabled
+--- PASS: TestGatewayHandler_GeminiRouteStickyLookupUsesGeminiToggleNotAnthropicToggle
+--- PASS: TestGatewayHandler_GeminiRouteStickyLookupUsesGeminiToggleNotAnthropicToggle/gemini_disabled_bypasses_lookup_even_when_anthropic_enabled
+--- PASS: TestGatewayHandler_GeminiRouteStickyLookupUsesGeminiToggleNotAnthropicToggle/gemini_enabled_performs_lookup_even_when_anthropic_disabled
+=== RUN   TestGatewayHandler_GeminiRouteStickyBindUsesGeminiToggleNotAnthropicToggle
+=== RUN   TestGatewayHandler_GeminiRouteStickyBindUsesGeminiToggleNotAnthropicToggle/gemini_disabled_bypasses_bind_even_when_anthropic_enabled
+=== RUN   TestGatewayHandler_GeminiRouteStickyBindUsesGeminiToggleNotAnthropicToggle/gemini_enabled_writes_bind_even_when_anthropic_disabled
+--- PASS: TestGatewayHandler_GeminiRouteStickyBindUsesGeminiToggleNotAnthropicToggle
+--- PASS: TestGatewayHandler_GeminiRouteStickyBindUsesGeminiToggleNotAnthropicToggle/gemini_disabled_bypasses_bind_even_when_anthropic_enabled
+--- PASS: TestGatewayHandler_GeminiRouteStickyBindUsesGeminiToggleNotAnthropicToggle/gemini_enabled_writes_bind_even_when_anthropic_disabled
+=== RUN   TestGatewayHandler_OpenAIRouteStickyUsesOpenAIToggleNotAnthropicToggle
+=== RUN   TestGatewayHandler_OpenAIRouteStickyUsesOpenAIToggleNotAnthropicToggle/openai_disabled_bypasses_messages_lookup_and_bind_even_when_anthropic_enabled
+=== RUN   TestGatewayHandler_OpenAIRouteStickyUsesOpenAIToggleNotAnthropicToggle/openai_enabled_reads_and_binds_messages_session_even_when_anthropic_disabled
+--- PASS: TestGatewayHandler_OpenAIRouteStickyUsesOpenAIToggleNotAnthropicToggle
+--- PASS: TestGatewayHandler_OpenAIRouteStickyUsesOpenAIToggleNotAnthropicToggle/openai_disabled_bypasses_messages_lookup_and_bind_even_when_anthropic_enabled
+--- PASS: TestGatewayHandler_OpenAIRouteStickyUsesOpenAIToggleNotAnthropicToggle/openai_enabled_reads_and_binds_messages_session_even_when_anthropic_disabled
+=== RUN   TestOpenAIGatewayHandler_FirstTokenTimeoutReturns504AndCreatesOneFailedUsage
+--- PASS: TestOpenAIGatewayHandler_FirstTokenTimeoutReturns504AndCreatesOneFailedUsage
+=== RUN   TestRelayFirstTokenTimeoutCancelsDrainsAndCompletesTurn
+--- PASS: TestRelayFirstTokenTimeoutCancelsDrainsAndCompletesTurn
+```
+
+- package 结果：`internal/service` 2.269s、`internal/handler` 3.235s、`internal/service/openai_ws_v2` 0.375s，均为 `ok`。
 
 ### 矩阵统计
+
+- 命令 ID：`M-01` 至 `M-16` 共 16 个，对应全部 16 行；code blocks 共 19 条可执行 shell 命令，其中 15 条含 Go `-run`。
 
 | 状态 | 数量 | 结论 |
 | --- | ---: | --- |
@@ -428,16 +575,16 @@ frontend/src/views/user/KeysView.vue
 - 顾虑：四段清单的非高风险文件需在各阶段 merge 时仍执行原始命令复核；本报告不声称尚未合并代码已通过目标 release 测试，也不替代后续实际阶段验证。
 - 阻塞结论：解除。五份原始 stdout 已完整附录，所有矩阵行字段完整且状态唯一；`gap=0` 不降低后续逐阶段验证标准。
 
-### Task 3 reviewer evidence repair（本轮）
+### Task 3 reviewer evidence repair（本轮命令修复）
 
-- 范围：只修复验证证据；未修改或暂存源码、测试、生成物、plan、OpenSpec task、Comet progress、`.comet/current-change.json` 或 `.superpowers/`。此前五份原始清单和 16 行矩阵统计保留不变。
-- 聚焦命令：`cd backend && go test -tags unit ./internal/service ./internal/handler ./internal/service/openai_ws_v2 -run '^(TestOpenAIGatewayService_SelectAccountWithScheduler_PreviousResponseStickyDisabledBypassesStickyLookupAndBind\|TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyDisabledBypassesLookupBindAndRefresh\|TestOpenAIGatewayService_StickyDisabledWSv2SkipsStateStore\|TestOpenAIGatewayService_StickyDisabledIngressSkipsStateStore\|TestGatewayHandler_GeminiRouteStickyLookupUsesGeminiToggleNotAnthropicToggle\|TestGatewayHandler_GeminiRouteStickyBindUsesGeminiToggleNotAnthropicToggle\|TestGatewayHandler_OpenAIRouteStickyUsesOpenAIToggleNotAnthropicToggle\|TestAntigravityGatewayServiceClearStickySessionSkipsDisabledSticky\|TestOpenAIGatewayHandler_FirstTokenTimeoutReturns504AndCreatesOneFailedUsage\|TestRelayFirstTokenTimeoutCancelsDrainsAndCompletesTurn)$' -count=1`。
-- 结果：退出码 `0`；`internal/service` 2.580s、`internal/handler` 3.905s、`internal/service/openai_ws_v2` 1.050s；10 个命名直接断言全部通过。
-- 修复点：OpenAI Sticky 补 ingress state-store bypass；Gemini/Anthropic Sticky 补 Antigravity 禁用 cleanup；首 Token 补 HTTP 504/单次上游尝试和 WS cancel-drain-turn cleanup；Gemini/Anthropic 证据附录修正为 C（152..153）和 E（155..156）；首 Token 明确 v0.1.156 后完整移除且无兼容别名、前三段仍 protected。
-- 矩阵复评：`protected=11`、`manual=4`、`approved-removal=1`、`gap=0`、合计 16。上述缺口均已有直接测试；`gap=0` 仅表示当前本地能力的关键断言齐全，不表示目标 tag 已合并或验证完成。
-- 提交：本报告由本轮普通文档提交承载，message 为 `docs: complete capability protection evidence`；提交后 SHA 在本轮交付状态中确认，不 amend。
-- 自审：三条受影响矩阵行均更新了准确命令、人工审查点、阶段结果和证据位置；命令使用从既有测试文件确认的函数名，未伪造 RED/GREEN。
-- 风险信号与顾虑：目标范围仍为 503 文件，且阶段 0 的 Browserslist、动态/静态 import 与 chunk 大小警告仍存在；首次 Token 的完整移除仅可在 v0.1.156 合并后检查上游最终树，当前基线不得提前删除保护。
+- 范围：只修复验证证据；本轮仅修改本报告。源码、测试、生成物、plan、OpenSpec task、Comet progress、`opencode.json`、`.comet/current-change.json` 与 `.superpowers/` 均未修改、暂存或提交。五份原始清单、16 行矩阵和前两次文档提交信息保留。
+- 命令修复：矩阵的“矩阵命令/证据 ID”列只保存 M-01 至 M-16 的稳定锚点；16 个完整命令均在“可直接执行的矩阵聚焦命令”以 fenced code block 保存。所有 Go `-run` alternation 都使用原始 `|`，不使用反斜杠竖线；M-10、M-15 的非单测/生成证据也在对应 ID 中完整列出。
+- 真实重跑：M-16 使用 `-v`，退出码 `0`。10 个目标顶层测试各出现一次 RUN 和 PASS；6 个路由子测试亦全部 RUN/PASS。完整命令、测试名及 package 结果见 M-16 执行证据，不能再以仅 package PASS 代替命名测试证明。
+- 既有 reviewer 闭环保留：OpenAI Sticky 覆盖 ingress state-store bypass；Gemini/Anthropic Sticky 覆盖 Antigravity 禁用 cleanup；首 Token 覆盖 HTTP 504/单次上游尝试和 WS cancel-drain-turn cleanup；Gemini/Anthropic 的附录为 C、E；首 Token 仅在 v0.1.156 后完整移除且无兼容别名，前三段仍 protected。
+- 矩阵复评：`protected=11`、`manual=4`、`approved-removal=1`、`gap=0`、合计 16。`gap=0` 的依据是每个能力均有矩阵命令或明确人工/生成证据，且 protected 行有直接行为断言；它不声称本轮执行了全部 M-01 至 M-15，也不表示目标 tag 已合并或验证完成。
+- 提交：本报告由普通文档提交 `docs: fix capability test commands` 承载；不 amend、merge、push、release 或 deploy。
+- 自审：表格没有可执行正则；所有 `-run` fenced 命令逐项扫描，均不含反斜杠竖线。文档证据修复依用户裁决豁免 TDD，未执行或伪造 RED/GREEN。
+- 风险信号与顾虑：目标范围仍为 503 文件，且阶段 0 的 Browserslist、动态/静态 import 与 chunk 大小警告仍存在；首 Token 的完整移除仅可在 v0.1.156 合并后检查上游最终树，当前基线不得提前删除保护。
 
 ## 正式证据附录（五份原始 stdout）
 
