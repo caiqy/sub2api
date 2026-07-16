@@ -297,7 +297,16 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   git commit
   git show -s --format='%H%n%P%n%s' HEAD
   ```
-  在 `git commit` 前，根据前一步 `git diff --name-only --diff-filter=U` 写入报告的精确冲突路径，并逐个执行 `git add -- 路径`。预期：merge commit 的第二父为 `b73d8c3efe01a290eaaa9326b6e40ece02c67a0e`；冲突解决仅在此节点内，台账记录每项融合结论和直接验证方式。
+  在 `git commit` 前，根据前一步 `git diff --name-only --diff-filter=U` 的精确冲突路径逐个执行 `git add -- 路径`，但不得暂存验证报告。预期：merge commit 的第二父为 `b73d8c3efe01a290eaaa9326b6e40ece02c67a0e`；该节点只包含上游树和必要冲突融合，不包含后续语义修复或台账文档。
+
+- [ ] **步骤 5：提交 v0.1.152 冲突台账与父节点证据**
+
+  在 merge commit 完成后，将精确冲突路径（无冲突则明确写“无”）、类别、ours/theirs 行为、融合结论、验证方式、merge SHA 与两个父节点写入验证报告，然后执行：
+  ```bash
+  git add -f docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md
+  git commit -m "docs: record v0.1.152 merge decisions"
+  ```
+  预期：文档提交紧随 merge commit，且不包含业务代码；merge 后语义回归仍留给 Task 6 的独立普通修复提交。
 
 ### Task 6：审查 v0.1.152 受影响能力并修复回归（OpenSpec 2.2）
 
