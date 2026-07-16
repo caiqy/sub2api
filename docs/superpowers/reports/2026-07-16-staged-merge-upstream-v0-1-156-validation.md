@@ -2437,22 +2437,22 @@ go -C backend test -v -tags unit ./internal/handler -run '^TestGatewayHandlerMes
 
 ### Conflict Ledger
 
-| Path | Ours | Theirs | Merge conclusion |
-| --- | --- | --- | --- |
-| `backend/cmd/server/VERSION` | Approved four-part local version. | Upstream release version. | Retained `0.1.151.2`; release reconciliation remains final-stage work. |
-| `backend/cmd/server/wire_gen.go` | Local dependency injections. | Grok quota injection. | Regenerated from the merged provider graph. |
-| `backend/ent/mutation.go` | Usage-detail generated API. | Long-context generated API. | Regenerated from merged schema; both API sets exist. |
-| `backend/internal/config/config_test.go` | First Token defaults/negative validation. | Image JSON keepalive environment assertion. | Both test groups retained. |
-| `backend/internal/handler/openai_images.go` | Exact failed-usage endpoint/write tracking. | Non-stream JSON keepalive. | Both behaviors retained. |
-| `backend/internal/repository/usage_log_repo_query.go` | Usage-detail list projection. | Long-context billing projection. | Both select columns and scan values retained. |
-| `backend/internal/service/admin_account.go` | Shadow/type invariants and passthrough normalization. | Long-context flag validation/defaulting. | Both normalizers and invariants retained. |
-| `backend/internal/service/openai_gateway_chat_completions_test.go` | OAuth session isolation and model mapping assertion. | Unknown model without Messages dispatch assertion. | Local broad test body retained; upstream production dispatch remains merged. |
-| `backend/internal/service/openai_gateway_record_usage_test.go` | Cyber quota test stub. | Account repository test stub. | Both stubs retained. |
-| `backend/internal/service/openai_oauth_passthrough_test.go` | Existing passthrough regression body. | Namespace imports for upstream additions. | Compiling local body retained; namespace production path remains merged. |
-| `backend/internal/service/scheduler_snapshot_service.go` | OpenAI account-change callback. | Coalesced full rebuild. | Both retained; startup and periodic rebuilds use the coalescer. |
-| `backend/internal/service/wire.go` | Existing providers. | Usage-log-aware Grok quota provider. | Provider added and duplicate direct constructor removed. |
-| `frontend/src/components/account/EditAccountModal.vue` | Aggregated local extra writers/probe controls. | Long-context billing toggle. | Both retained; Spark shadow neither renders nor submits the flag. |
-| `frontend/src/components/account/__tests__/CreateAccountModal.spec.ts` | Broad local create-modal suite. | Codex import/long-context fixture. | Local suite retained; upstream Create modal production behavior remains merged. |
+| Path | Ours | Theirs | Caller / entry | Merge conclusion |
+| --- | --- | --- | --- | --- |
+| `backend/cmd/server/VERSION` | Approved four-part local version. | Upstream release version. | Server build/version embedding and release packaging read this file. | Retained `0.1.151.2`; release reconciliation remains final-stage work. |
+| `backend/cmd/server/wire_gen.go` | Local dependency injections. | Grok quota injection. | `cmd/server` bootstrap invokes the generated `initializeApplication` graph. | Regenerated from the merged provider graph. |
+| `backend/ent/mutation.go` | Usage-detail generated API. | Long-context generated API. | Ent update/create builders call these generated mutation setters. | Regenerated from merged schema; both API sets exist. |
+| `backend/internal/config/config_test.go` | First Token defaults/negative validation. | Image JSON keepalive environment assertion. | `go test ./internal/config` enters config environment loading/default validation. | Both test groups retained. |
+| `backend/internal/handler/openai_images.go` | Exact failed-usage endpoint/write tracking. | Non-stream JSON keepalive. | OpenAI image generation/edit route handlers call this forwarding path. | Both behaviors retained. |
+| `backend/internal/repository/usage_log_repo_query.go` | Usage-detail list projection. | Long-context billing projection. | Admin/user usage-log list services call repository paged/detail query methods. | Both select columns and scan values retained. |
+| `backend/internal/service/admin_account.go` | Shadow/type invariants and passthrough normalization. | Long-context flag validation/defaulting. | Admin account create/update service paths normalize and validate `extra`. | Both normalizers and invariants retained. |
+| `backend/internal/service/openai_gateway_chat_completions_test.go` | OAuth session isolation and model mapping assertion. | Unknown model without Messages dispatch assertion. | `go test ./internal/service` exercises chat-completions gateway dispatch. | Local broad test body retained; upstream production dispatch remains merged. |
+| `backend/internal/service/openai_gateway_record_usage_test.go` | Cyber quota test stub. | Account repository test stub. | `go test ./internal/service` constructs usage-recording gateway fixtures. | Both stubs retained. |
+| `backend/internal/service/openai_oauth_passthrough_test.go` | Existing passthrough regression body. | Namespace imports for upstream additions. | `go test ./internal/service` exercises OAuth passthrough request construction. | Compiling local body retained; namespace production path remains merged. |
+| `backend/internal/service/scheduler_snapshot_service.go` | OpenAI account-change callback. | Coalesced full rebuild. | Startup/periodic rebuilds and account-change notifications enter snapshot rebuild scheduling. | Both retained; startup and periodic rebuilds use the coalescer. |
+| `backend/internal/service/wire.go` | Existing providers. | Usage-log-aware Grok quota provider. | Wire's `service.ProviderSet` feeds the server bootstrap dependency graph. | Provider added and duplicate direct constructor removed. |
+| `frontend/src/components/account/EditAccountModal.vue` | Aggregated local extra writers/probe controls. | Long-context billing toggle. | Admin account list opens this modal; submit emits normalized account update payload. | Both retained; Spark shadow neither renders nor submits the flag. |
+| `frontend/src/components/account/__tests__/CreateAccountModal.spec.ts` | Broad local create-modal suite. | Codex import/long-context fixture. | Vitest mounts CreateAccountModal and drives create/import interactions. | Local suite retained; upstream Create modal production behavior remains merged. |
 
 ### Focused Review
 
@@ -2478,5 +2478,6 @@ go -C backend test -v -tags unit ./internal/handler -run '^TestGatewayHandlerMes
 ### Boundary And Warning
 
 - Task 12 handoff: `backend/internal/service/openai_image_generation_controls_test.go:150` calls `buildUpstreamRequestOpenAIPassthrough` with the old five-argument contract, while v0.1.155 now requires original/effective body and metadata arguments. No argument mapping was guessed or repaired in this merge-only task.
+- Review follow-up: the 14 conflict rows now record their concrete caller or execution entry. Task 12 will link the builder compatibility repair and focused backend results back to this ledger.
 - Browser test output still warns that `caniuse-lite` is stale. No v0.1.156 or `upstream/main` merge, push, release, or deploy occurred.
 - The detailed ignored scratch ledger is `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-11-report.md`; this canonical section fully records its topology, conflict, category, verification, first-Token, and boundary evidence.
