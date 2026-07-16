@@ -472,8 +472,8 @@ cd backend && go test ./internal/service -run '^(TestLayered_RequiredImageCapabi
 #### M-10 运行时设置热更新
 
 ```bash
-cd backend && go test ./internal/service -run '^(TestSettingService_SetGatewayRuntimeSettings_PersistsUpdatesCfgAndInvalidatesOnResponseHeaderTimeoutChange|TestSettingServiceGatewayRuntimeSettings_RejectsNegativeFirstTokenTimeouts)$' -count=1
-cd frontend && pnpm test:run src/views/admin/__tests__/SettingsView.gatewayRuntime.spec.ts
+go -C backend test ./internal/service -run '^(TestSettingService_SetGatewayRuntimeSettings_PersistsUpdatesCfgAndInvalidatesOnResponseHeaderTimeoutChange|TestSettingServiceGatewayRuntimeSettings_RejectsNegativeFirstTokenTimeouts)$' -count=1
+pnpm --dir frontend test:run src/views/admin/__tests__/SettingsView.gatewayRuntime.spec.ts
 ```
 
 #### M-11 请求体重放与清理
@@ -503,7 +503,7 @@ cd backend && go test ./cmd/server -run '^$' -count=1
 #### M-15 Ent/Wire/migrations
 
 ```bash
-cd backend && go test ./migrations -run '^(TestMigration173AllowsCyberBlockedUsageRequestType|TestMigration158BackfillsGrokMediaGenerationGroups)$' -count=1
+go -C backend test ./migrations -run '^(TestMigration173AllowsCyberBlockedUsageRequestType|TestMigration158BackfillsGrokMediaGenerationGroups)$' -count=1
 make -C backend generate
 git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
 ```
@@ -585,6 +585,15 @@ cd backend && go test -v -tags unit ./internal/service ./internal/handler ./inte
 - 提交：本报告由普通文档提交 `docs: fix capability test commands` 承载；不 amend、merge、push、release 或 deploy。
 - 自审：表格没有可执行正则；所有 `-run` fenced 命令逐项扫描，均不含反斜杠竖线。文档证据修复依用户裁决豁免 TDD，未执行或伪造 RED/GREEN。
 - 风险信号与顾虑：目标范围仍为 503 文件，且阶段 0 的 Browserslist、动态/静态 import 与 chunk 大小警告仍存在；首 Token 的完整移除仅可在 v0.1.156 合并后检查上游最终树，当前基线不得提前删除保护。
+
+### Task 3 reviewer evidence repair（第四轮工作目录语义）
+
+- 第四个提交：`docs: fix matrix command working directories`。本轮只修改本报告；plan、OpenSpec task、Comet progress、`opencode.json`、`.comet/current-change.json`、`.superpowers/`、源码、测试和生成物均未修改、暂存或提交。
+- M-10 从仓库根目录依次执行：`go -C backend test ./internal/service -run '^(TestSettingService_SetGatewayRuntimeSettings_PersistsUpdatesCfgAndInvalidatesOnResponseHeaderTimeoutChange|TestSettingServiceGatewayRuntimeSettings_RejectsNegativeFirstTokenTimeouts)$' -count=1` 退出码 `0`，两个命名目标所在的 `internal/service` package `ok`（1.503s）；`pnpm --dir frontend test:run src/views/admin/__tests__/SettingsView.gatewayRuntime.spec.ts` 退出码 `0`，1 个测试文件、14/14 测试通过（测试 1.211s，总计 28.62s）。
+- M-15 从仓库根目录依次执行：`go -C backend test ./migrations -run '^(TestMigration173AllowsCyberBlockedUsageRequestType|TestMigration158BackfillsGrokMediaGenerationGroups)$' -count=1` 退出码 `0`，两个命名目标所在的 `migrations` package `ok`（0.461s）；`make -C backend generate` 退出码 `0`，完成 Ent 与 Wire 生成；`git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` 退出码 `0`、stdout 为空，生成 diff 为空。
+- 审查闭环：M-10 和 M-15 的唯一可执行命令定义均可从仓库根目录逐行或整块执行，使用 `go -C backend`、`pnpm --dir frontend`、`make -C backend` 或根目录 `git diff`，不持续改变调用 shell 的 cwd。对两个命令 block 的 `cd` 扫描为零。
+- 矩阵统计不变：`protected=11`、`manual=4`、`approved-removal=1`、`gap=0`、合计 16；本轮是纯文档证据修复，依用户裁决豁免 TDD。
+- 风险信号与顾虑：前端命令仍输出既有非阻塞 Browserslist 数据陈旧警告；本次仅证明当前根目录命令与生成稳定性，后续各 tag 合并阶段仍须执行对应原始验证。
 
 ## 正式证据附录（五份原始 stdout）
 
