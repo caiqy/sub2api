@@ -83,7 +83,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { adminAPI } from "@/api/admin";
-import type { SimpleUser } from "@/api/admin/usage";
+import type { SimpleUser } from "@/types";
 import Icon from "@/components/icons/Icon.vue";
 
 const props = defineProps<{
@@ -186,6 +186,7 @@ async function hydrateSelectedUsers(userIds: number[]): Promise<void> {
         return {
           id: user.id,
           email: user.email,
+          username: user.username,
           deleted: Boolean(user.deleted_at),
         } satisfies SimpleUser;
       } catch {
