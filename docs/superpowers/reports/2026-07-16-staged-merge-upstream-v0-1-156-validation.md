@@ -443,17 +443,26 @@ frontend/src/views/user/KeysView.vue
 | `backend/internal/service/openai_gateway_responses_chat_fallback.go` | 首 Token 保护/协议桥 | SSE 首 Token watchdog、超时记录和客户端写入保护。 | custom/tool_search/namespace 工具往返还原。 | 两者共存；watchdog 仍覆盖 fallback 串流，工具元数据完整传入转换器。 | 首 Token fallback 超时、custom/tool_search/namespace 流式与非流式测试。 |
 | `backend/internal/service/openai_gateway_service.go` | usage/接口演进 | 异步 usage 的深拷贝快照。 | 实际上游 endpoint context 和网页搜索计数字段。 | 保留快照函数，同时加入 endpoint context API 和 `WebSearchCalls`。 | usage 异步快照与实际 endpoint 记录测试。 |
 | `backend/internal/service/openai_oauth_passthrough_test.go` | 测试融合 | 断言账户注入 header、转发 header 和 body 字段。 | 断言 `x-codex-beta-features=remote_compaction_v2`。 | 同一用例保留全部三类断言。 | 运行该文件的 passthrough 回归测试。 |
-| `frontend/src/components/account/CreateAccountModal.vue` | 前端本地定制 | `getDefaultBaseUrl` 统一覆盖平台默认 URL。 | Grok API Key 默认 xAI URL。 | 保留 helper，已覆盖 Grok 且避免手写分支遗漏其他本地平台。 | CreateAccountModal Grok/API Key 测试。 |
-| `frontend/src/components/account/EditAccountModal.vue` | 前端本地定制 | `getDefaultBaseUrl` 统一覆盖 OpenAI、Grok、Antigravity 等。 | Grok API Key 默认 xAI URL。 | 保留 helper，维持完整平台覆盖。 | EditAccountModal Grok/API Key 测试。 |
+| `frontend/src/components/account/CreateAccountModal.vue` | 前端本地定制 | `getDefaultBaseUrl` 统一提供平台默认 URL。 | Grok API Key 默认 xAI URL。 | 原“已覆盖 Grok”结论错误：helper 漏掉 `grok`，会回退 Anthropic URL；已由 `b19c03d01` 以最小分支修复。 | Task 6 仍须覆盖 CreateAccountModal Grok/API Key 表单。 |
+| `frontend/src/components/account/EditAccountModal.vue` | 前端本地定制 | `getDefaultBaseUrl` 统一提供平台默认 URL。 | Grok API Key 默认 xAI URL。 | 原“完整平台覆盖”结论错误：同一 helper 漏掉 `grok`，会回退 Anthropic URL；已由 `b19c03d01` 以最小分支修复。 | Task 6 仍须覆盖 EditAccountModal Grok/API Key 表单。 |
 | `frontend/src/i18n/locales/en/admin/settings.ts` | 前端接口演进 | 手工用户 ID 输入文案。 | 邮箱模糊搜索 selector 文案。 | 采用上游 selector 键；底层仍选择同一用户 ID，配合已合入 selector 组件。 | Fast/Flex 用户 selector locale 测试。 |
 | `frontend/src/i18n/locales/zh/admin/settings.ts` | 前端接口演进 | 手工用户 ID 输入中文文案。 | 邮箱模糊搜索 selector 中文文案。 | 采用上游 selector 键，与英文 locale 和组件契约一致。 | Fast/Flex 用户 selector locale 测试。 |
+
+### Merge 后 reviewer 语义修复
+
+- reviewer 发现：`getDefaultBaseUrl('grok')` 实际回退 `https://api.anthropic.com`，因此 Create/Edit 依赖 helper 时未保留 Grok API Key 的默认 URL；本台账原“已融合”结论已更正。
+- 精确默认值：`v0.1.152` 的 `CreateAccountModal.grok.spec.ts` 与 `EditAccountModal.spec.ts` 均断言官方 xAI API Key URL 为 `https://api.x.ai/v1`。
+- RED：`pnpm --dir frontend test:run src/components/account/__tests__/passthroughFieldSupport.spec.ts`，1 个测试失败，实际 `https://api.anthropic.com`、期望 `https://api.x.ai/v1`。
+- GREEN：同一命令，1 个测试通过。
+- 修复提交：`b19c03d01` `fix: preserve Grok API key default URL after v0.1.152`；仅修改 `passthroughFieldSupport.ts` 和其相邻的最小单测。
+- 后续：Task 6 仍须运行并覆盖 CreateAccountModal 与 EditAccountModal 的 Grok API Key 表单行为；本次未运行完整前端 suite。
 
 ### 自审与风险
 
 - merge commit 不含验证报告、OpenSpec task、Comet progress、`.comet/current-change.json` 或其他 `.superpowers/` 文件；本台账由 merge 后独立文档提交承载。
 - 本阶段未运行行为回归、完整后端测试或前端 build，未新增测试、未做无冲突能力审查或 merge 后语义修复；这些均由 Task 6 按 TDD 和阶段测试矩阵执行。
 - 本地首 Token 超时仍受保护：其 watchdog 及 fallback 覆盖路径保留；未提前进行仅获批准于 v0.1.156 的移除。
-- 风险信号：本 tag 触及网关、协议转换、Ent schema/生成物、Grok 配额、API Key cache、计费与前端设置；生成物和无文本冲突行为仍需 Task 6 复核。
+- 风险信号：本 tag 触及网关、协议转换、Ent schema/生成物、Grok 配额、API Key cache、计费与前端设置；除 helper 回归外，生成物、无文本冲突行为和 Create/Edit Grok API Key 表单仍需 Task 6 复核。
 - 顾虑：本机无法验证 annotated tag 签名；已使用对象类型与固定 peel SHA 作为合并身份依据。`VERSION` 选择保留本地四段版本，需在最终发布阶段再次复核。
 
 <a id="task-3-capability-matrix"></a>
