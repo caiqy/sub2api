@@ -3,15 +3,15 @@
 - Change: `staged-merge-upstream-v0-1-156`
 - Plan task: `Task 15：完整移除本地首 Token 超时并保留上游替代语义（OpenSpec 5.2）`
 - OpenSpec task: `5.2 完整删除本地首 Token 超时的后端逻辑、配置、运行时 API、管理端 UI、专用测试和兼容文档，保留且验证上游原生语义`
-- Phase: `implementing`
+- Phase: `done`
 - Review mode: `thorough`
 - Review/fix round: `2/2`
-- Implementer status: `dispatched`
-- Implementation commit: `pending`
-- Changed files: `pending`
-- Evidence: `pending`
+- Implementer status: `DONE`
+- Implementation commit: `a9a95d5d7 removal；0e3ca7787/5306a1042/790376d50 fixes；6906dbc28/6f8e4770a fixtures；f800cc8da docs`
+- Changed files: `33 removal paths + bounded WS/stream follow-ups`
+- Evidence: `legacy scan 0；first-output/WS client timeout PASS；WS v2 package PASS`
 - TDD: `approved-removal（先记录现有保护，再删契约并验证上游替代）`
-- Task reviewer: `pending`
+- Task reviewer: `Approved`
 - Unresolved findings: `none；VERSION 明确交 Task19，EOF warning 留普通后续`
 - Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-15-brief.md`
 - Report: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-15-report.md`

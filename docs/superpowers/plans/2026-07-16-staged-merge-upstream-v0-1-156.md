@@ -619,7 +619,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 - 审查：`backend/internal/service/openai_first_output_timeout.go`、`backend/internal/handler/openai_gateway_first_output_timeout_test.go`、`backend/internal/service/openai_first_output_timeout_test.go`
 - 修改：`docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md`
 
-- [ ] **步骤 1：建立删除清单与上游保留清单**
+- [x] **步骤 1：建立删除清单与上游保留清单**
 
   执行：
   ```bash
@@ -628,7 +628,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：报告分别列出待删本地符号与必须保留/验证的上游符号，二者不得混淆。
 
-- [ ] **步骤 2：先运行上游首输出测试并记录当前本地 watchdog 保护测试**
+- [x] **步骤 2：先运行上游首输出测试并记录当前本地 watchdog 保护测试**
 
   执行：
   ```bash
@@ -637,11 +637,11 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：上游 `first_output` 覆盖能独立运行；本地 `first_token` 测试被登记为即将删除的 `approved-removal`，不能在前三阶段删除。
 
-- [ ] **步骤 3：删除本地实现与全部暴露面**
+- [x] **步骤 3：删除本地实现与全部暴露面**
 
   删除 HTTP SSE 与 WebSocket 上游首输出 watchdog、文本 30 秒/明确生图 600 秒分档、两项本地 runtime setting、持久化/DTO/API/UI、`first_token_timeout` 错误、失败 usage、Ops/结构化日志、本地专用测试及已失效文档。保留上游 native HTTP 首输出超时、failover/账号超时处理、客户端 WebSocket 首消息超时和既有读写超时。
 
-- [ ] **步骤 4：提交完整移除作为独立普通提交**
+- [x] **步骤 4：提交完整移除作为独立普通提交**
 
   执行：
   ```bash
