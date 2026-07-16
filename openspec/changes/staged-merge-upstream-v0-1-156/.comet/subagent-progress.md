@@ -1,20 +1,20 @@
 # Subagent Progress
 
 - Change: `staged-merge-upstream-v0-1-156`
-- Plan task: `Task 7：执行 v0.1.152 阶段门禁（OpenSpec 2.3）`
-- OpenSpec task: `2.3 运行全部本地保护测试和本阶段受影响能力测试，记录通过证据后再进入下一 tag`
-- Phase: `done`
+- Plan task: `Task 8：合入 v0.1.153 并复核已有融合（OpenSpec 3.1）`
+- OpenSpec task: `3.1 使用 --no-ff 合入 v0.1.153，更新冲突台账并复核上一阶段已确认的融合决策`
+- Phase: `implementing`
 - Review mode: `thorough`
 - Review/fix round: `0/2`
-- Implementer status: `DONE（第三次完整重跑通过）`
-- Implementation commit: `4b697fa0a；3ede52fc0；2c639fa8b；docs fcda3cd90`
-- Changed files: `terminal failed fixture；FastPolicy selector type；openai_ws_http_bridge.go`
-- Evidence: `make test/Vitest 171 files 1265 tests、frontend build、14 M-ID、15 冲突入口、alpha-search、generate/static 全部 PASS`
-- TDD: `backend existing RED/GREEN；frontend type-only build RED/GREEN（按用户范围不伪造行为测试）`
-- Task reviewer: `Approved（spec compliant，Critical/Important/Minor 均无）`
-- Unresolved findings: `none；第三次门禁原始终端不可从 diff 重建，按 implementer report 与正式报告证据契约接受`
-- Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-7-brief.md`
-- Report: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-7-report.md`
+- Implementer status: `dispatched`
+- Implementation commit: `pending`
+- Changed files: `pending`
+- Evidence: `pending`
+- TDD: `exempt-by-user-decision`（tag merge/必要冲突融合不伪造 RED/GREEN）
+- Task reviewer: `pending`
+- Unresolved findings: `none`
+- Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-8-brief.md`
+- Report: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-8-report.md`
 - Blocker fix: `OpenAIFastPolicyUserSelector.vue` 的 `SimpleUser` type-only import 已从未导出的 `@/api/admin/usage` 改为共享 `@/types`；没有行为变更或伪造行为 RED。
 - RED: `pnpm --dir frontend run build` 已记录为失败；本代理复现 `pnpm --dir frontend run typecheck`，失败为 TS2614 和由该未解析类型引发的 3 个 TS7006。
 - Follow-up RED: 改正 import 后，`typecheck` 暴露 hydration 映射遗漏共享类型必填的 `username`；`adminAPI.users.getById` 的 `AdminUser` 已提供该字段。

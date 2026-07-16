@@ -412,7 +412,16 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   git commit
   git show -s --format='%H%n%P%n%s' HEAD
   ```
-  在提交前，根据本段冲突台账中已发现的精确路径逐个执行 `git add -- 路径`。预期：第二父为 `a2bc1337474b68b62391116835e5698ebb5526bd`，且台账完整记录本段冲突与证据。
+  在提交前，根据本段发现的精确冲突路径逐个执行 `git add -- 路径`，不得暂存验证报告。预期：第二父为 `a2bc1337474b68b62391116835e5698ebb5526bd`，merge commit 只含上游树与必要冲突融合。
+
+- [ ] **步骤 4：独立提交 v0.1.153 冲突台账**
+
+  merge 完成后，将 merge SHA/父节点、精确冲突路径（无则“无”）、双方语义、融合结论、复用或调整上一阶段决策的原因和 Task 9 验证方式写入正式报告；只提交报告：
+  ```bash
+  git add -f docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md
+  git commit -m "docs: record v0.1.153 merge decisions"
+  ```
+  语义回归使用 Task 9 的独立普通提交，不改写 merge commit。
 
 ### Task 9：审查 v0.1.153 受影响能力并修复回归（OpenSpec 3.2）
 
