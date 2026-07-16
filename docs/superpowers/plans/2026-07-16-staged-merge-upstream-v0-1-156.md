@@ -74,7 +74,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 
 **产物：** 报告的“固定对象与工作区”章节，记录隔离分支名、开始 `HEAD`、四个 tag object/peel SHA、`upstream/main` 相对 `v0.1.156^{}` 的 release 后范围，以及初始工作树状态。
 
-- [ ] **步骤 1：在用户确认的隔离 worktree/feature 分支中验证起点与工作树**
+- [x] **步骤 1：在用户确认的隔离 worktree/feature 分支中验证起点与工作树**
 
   执行：
   ```bash
@@ -85,7 +85,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：`HEAD` 为 `d5f8192d32d9840d63477c24d4a567abb8cb4a90`，或其后仅有本 change 的计划/报告/OpenSpec 协调提交；`d1cc02502..d5f8192d3` 仅有已确认的测试基础设施提交。出现其他业务文件或未授权改动时停止并由用户决定，不开始 merge。
 
-- [ ] **步骤 2：获取引用并固定 annotated tag 的 peel commit**
+- [x] **步骤 2：获取引用并固定 annotated tag 的 peel commit**
 
   执行：
   ```bash
@@ -98,7 +98,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：四个 peel SHA 分别等于全局表中的固定值；最后一条命令可列出 release 后提交，但这些提交只记录为排除范围，绝不作为 merge 目标。
 
-- [ ] **步骤 3：验证 Comet 已创建的隔离工作区并记录不可变证据**
+- [x] **步骤 3：验证 Comet 已创建的隔离工作区并记录不可变证据**
 
   执行：
   ```bash
@@ -109,7 +109,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：当前分支或 worktree 已由 Comet 按用户选择创建并重新绑定 change，起点为 implementation base；报告记录隔离方式、分支名、命令输出、tag object 与 peel SHA。本任务不创建或切换分支。
 
-- [ ] **步骤 4：提交当前 change 的设计、计划与文档性起点记录**
+- [x] **步骤 4：提交当前 change 的设计、计划与文档性起点记录**
 
   执行：
   ```bash

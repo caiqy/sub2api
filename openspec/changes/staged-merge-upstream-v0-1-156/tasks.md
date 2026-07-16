@@ -1,6 +1,6 @@
 ## 1. 固定基线与建立合并前门禁
 
-- [ ] 1.1 在用户确认的隔离工作区固定本地 base、四个 tag peel SHA、`upstream/main` release 后范围和干净工作树证据
+- [x] 1.1 在用户确认的隔离工作区固定本地 base、四个 tag peel SHA、`upstream/main` release 后范围和干净工作树证据
 - [ ] 1.2 在任何 merge 前运行当前 `HEAD` 的 `make test`、前端 build 及既定生成代码检查，记录稳定基线或阻塞失败
 - [ ] 1.3 根据本地独有提交、目标 tag changed files 和既有规格建立本地能力到行为测试的映射矩阵
 - [ ] 1.4 为上游会触及且缺少行为断言的高风险本地能力添加最小失败测试，并重跑阶段 0 门禁至通过
