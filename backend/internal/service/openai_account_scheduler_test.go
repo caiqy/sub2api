@@ -2200,16 +2200,14 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyDisabledBy
 	}
 }
 
-func TestOpenAIGatewayService_BindOpenAIResponseAccount_DisabledSkipsStateStoreBind(t *testing.T) {
+func TestOpenAIGatewayService_BindHTTPResponseAccountUsesStateStore(t *testing.T) {
 	store := &openAIWSStateStoreSpy{}
 	svc := &OpenAIGatewayService{
-		cfg:                &config.Config{Gateway: config.GatewayConfig{Sticky: config.GatewayStickyConfig{}}},
 		openaiWSStateStore: store,
 	}
 
-	err := svc.bindOpenAIResponseAccount(context.Background(), 1, "resp_bind_disabled", 7, time.Hour)
-	require.NoError(t, err)
-	require.Zero(t, store.bindResponseCalls["resp_bind_disabled"])
+	svc.bindHTTPResponseAccount(context.Background(), nil, &Account{ID: 7}, "resp_bind_http")
+	require.Equal(t, 1, store.bindResponseCalls["resp_bind_http"])
 }
 
 func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyBusyKeepsSticky(t *testing.T) {

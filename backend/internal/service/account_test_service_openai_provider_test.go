@@ -1,42 +1,16 @@
 package service
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/gin-gonic/gin"
 )
-
-type accountTestTokenCacheStub struct {
-	token string
-}
-
-func (c *accountTestTokenCacheStub) GetAccessToken(context.Context, string) (string, error) {
-	return c.token, nil
-}
-
-func (c *accountTestTokenCacheStub) SetAccessToken(context.Context, string, string, time.Duration) error {
-	return nil
-}
-
-func (c *accountTestTokenCacheStub) DeleteAccessToken(context.Context, string) error {
-	return nil
-}
-
-func (c *accountTestTokenCacheStub) AcquireRefreshLock(context.Context, string, time.Duration) (bool, error) {
-	return true, nil
-}
-
-func (c *accountTestTokenCacheStub) ReleaseRefreshLock(context.Context, string) error {
-	return nil
-}
 
 type accountTestHTTPUpstreamRecorder struct {
 	request *http.Request
@@ -63,12 +37,10 @@ func newAccountTestGinContext() *gin.Context {
 	return c
 }
 
-func TestAccountTestServiceOpenAIOAuthUsesTokenProvider(t *testing.T) {
+func TestAccountTestServiceOpenAIOAuthUsesStoredAccessToken(t *testing.T) {
 	upstream := &accountTestHTTPUpstreamRecorder{}
-	tokenProvider := NewOpenAITokenProvider(nil, &accountTestTokenCacheStub{token: "provider-token"}, nil)
 	svc := &AccountTestService{
-		httpUpstream:        upstream,
-		openAITokenProvider: tokenProvider,
+		httpUpstream: upstream,
 	}
 	account := &Account{
 		ID:          90,
@@ -76,8 +48,7 @@ func TestAccountTestServiceOpenAIOAuthUsesTokenProvider(t *testing.T) {
 		Type:        AccountTypeOAuth,
 		Concurrency: 1,
 		Credentials: map[string]any{
-			"refresh_token": "refresh-token",
-			"expires_at":    time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+			"access_token": "stored-token",
 		},
 	}
 
@@ -89,7 +60,7 @@ func TestAccountTestServiceOpenAIOAuthUsesTokenProvider(t *testing.T) {
 	if upstream.request == nil {
 		t.Fatalf("expected upstream request")
 	}
-	if got := upstream.request.Header.Get("Authorization"); got != "Bearer provider-token" {
-		t.Fatalf("Authorization header = %q, want %q", got, "Bearer provider-token")
+	if got := upstream.request.Header.Get("Authorization"); got != "Bearer stored-token" {
+		t.Fatalf("Authorization header = %q, want %q", got, "Bearer stored-token")
 	}
 }

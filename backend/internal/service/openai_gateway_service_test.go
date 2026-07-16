@@ -270,7 +270,7 @@ func TestOpenAIGatewayService_ReattachesLayeredProbeTempUnschedAccountOnRuntimeA
 	}}}
 	cfg := &config.Config{}
 	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
-	snapshot := &SchedulerSnapshotService{}
+	snapshot := NewSchedulerSnapshotService(&outboxCleanupCache{}, nil, repo, nil, cfg)
 	svc := &OpenAIGatewayService{accountRepo: repo, cfg: cfg, schedulerSnapshot: snapshot}
 
 	svc.StartOpenAIBackgroundRecovery()
@@ -281,7 +281,7 @@ func TestOpenAIGatewayService_ReattachesLayeredProbeTempUnschedAccountOnRuntimeA
 	require.False(t, presentBefore, "startup should skip non-schedulable layered-probe temp account")
 
 	repo.tempUnschedAccounts[0].Schedulable = true
-	require.NoError(t, snapshot.handleAccountEvent(context.Background(), ptrInt64(52), nil))
+	require.NoError(t, snapshot.handleAccountEvent(context.Background(), ptrInt64(52), nil, nil))
 
 	_, presentAfter := layered.probe.entries.Load(int64(52))
 	require.True(t, presentAfter, "runtime account change should reattach layered-probe temp account when it becomes schedulable")
@@ -305,7 +305,7 @@ func TestOpenAIGatewayService_RuntimeAccountChange_DoesNotRebootstrapAlreadyAtta
 	}}}
 	cfg := &config.Config{}
 	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
-	snapshot := &SchedulerSnapshotService{}
+	snapshot := NewSchedulerSnapshotService(&outboxCleanupCache{}, nil, repo, nil, cfg)
 	svc := &OpenAIGatewayService{accountRepo: repo, cfg: cfg, schedulerSnapshot: snapshot}
 
 	svc.StartOpenAIBackgroundRecovery()
@@ -314,7 +314,7 @@ func TestOpenAIGatewayService_RuntimeAccountChange_DoesNotRebootstrapAlreadyAtta
 	require.True(t, ok)
 
 	repo.tempUnschedAccounts[0].Schedulable = true
-	require.NoError(t, snapshot.handleAccountEvent(context.Background(), ptrInt64(53), nil))
+	require.NoError(t, snapshot.handleAccountEvent(context.Background(), ptrInt64(53), nil, nil))
 
 	value, present := layered.probe.entries.Load(int64(53))
 	require.True(t, present)
@@ -322,7 +322,7 @@ func TestOpenAIGatewayService_RuntimeAccountChange_DoesNotRebootstrapAlreadyAtta
 	require.True(t, ok)
 	entry.consecutiveFail.Store(9)
 
-	require.NoError(t, snapshot.handleAccountEvent(context.Background(), ptrInt64(53), nil))
+	require.NoError(t, snapshot.handleAccountEvent(context.Background(), ptrInt64(53), nil, nil))
 
 	require.EqualValues(t, 9, entry.consecutiveFail.Load(), "runtime reattach should only happen for accounts that newly become eligible, not already-attached entries")
 	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
@@ -352,7 +352,7 @@ func TestOpenAIGatewayService_StopOpenAIAccountScheduler_UnregistersRuntimeReatt
 	svc.StopOpenAIAccountScheduler()
 
 	repo.tempUnschedAccounts[0].Schedulable = true
-	require.NoError(t, snapshot.handleAccountEvent(context.Background(), ptrInt64(54), nil))
+	require.NoError(t, snapshot.handleAccountEvent(context.Background(), ptrInt64(54), nil, nil))
 
 	require.Equal(t, 0, repo.getByIDCalls, "stopping the scheduler should unregister runtime reattach handler")
 }
@@ -4351,7 +4351,7 @@ func TestOpenAIGatewayService_ReattachSkipsProbeDisabledAccount(t *testing.T) {
 	require.True(t, ok)
 
 	// Startup should skip (Task 3.2's guard). Now trigger runtime reattach to verify this guard too.
-	require.NoError(t, snapshot.handleAccountEvent(context.Background(), ptrInt64(201), nil))
+	require.NoError(t, snapshot.handleAccountEvent(context.Background(), ptrInt64(201), nil, nil))
 
 	_, present := layered.probe.entries.Load(int64(201))
 	require.False(t, present, "ReattachLayeredProbeTempUnschedAccount must skip probe-disabled accounts")
