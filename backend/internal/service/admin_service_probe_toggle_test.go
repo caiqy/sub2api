@@ -39,9 +39,32 @@ func (r *probeToggleRepoStub) GetByID(_ context.Context, id int64) (*Account, er
 	return nil, ErrAccountNotFound
 }
 
+func (r *probeToggleRepoStub) GetByIDs(ctx context.Context, ids []int64) ([]*Account, error) {
+	accounts := make([]*Account, 0, len(ids))
+	for _, id := range ids {
+		account, err := r.GetByID(ctx, id)
+		if err == nil {
+			accounts = append(accounts, account)
+		}
+	}
+	return accounts, nil
+}
+
 func (r *probeToggleRepoStub) Update(_ context.Context, account *Account) error {
 	r.account = account
 	return nil
+}
+
+func (r *probeToggleRepoStub) BulkUpdate(_ context.Context, ids []int64, updates AccountBulkUpdate) (int64, error) {
+	for _, id := range ids {
+		if r.account == nil || r.account.ID != id {
+			continue
+		}
+		for key, value := range updates.Extra {
+			r.account.Extra[key] = value
+		}
+	}
+	return int64(len(ids)), nil
 }
 
 func (r *probeToggleRepoStub) ClearTempUnschedulable(_ context.Context, _ int64) error {
@@ -221,12 +244,11 @@ func TestAdminService_BulkUpdateAccounts_ProbeToggleOff_DropsProbeEntry(t *testi
 		openaiProbeControl: probeCtrl,
 	}
 
-	// Simulate what BulkUpdateAccounts does: apply extra with probe_enabled=false
-	account := repo.account
-	wasProbeEnabledBefore := account.IsOpenAIProbeEnabled()
-	account.Extra = map[string]any{"openai_probe_enabled": false}
-
-	svc.applyProbeToggleSideEffects(context.Background(), account, wasProbeEnabledBefore)
+	_, err = svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs: []int64{601},
+		Extra:      map[string]any{"openai_probe_enabled": false},
+	})
+	require.NoError(t, err)
 
 	require.Equal(t, []int64{601}, probeCtrl.droppedIDs, "bulk: Layer 1 DropProbeEntry called")
 	require.Equal(t, 1, repo.clearTempUnschedCalls, "bulk: Layer 2 ClearTempUnschedulable called")

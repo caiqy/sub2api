@@ -49,8 +49,26 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		return
 	}
 
-	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
+	coordinator, err := newJSONRequestBody(c.Request)
 	if err != nil {
+		if errors.Is(err, service.ErrRequestBodySpool) {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
+		if maxErr, ok := extractMaxBytesError(err); ok {
+			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+			return
+		}
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		return
+	}
+	defer coordinator.Cleanup()
+	body, err := coordinator.ReadRaw()
+	if err != nil {
+		if errors.Is(err, service.ErrRequestBodySpool) {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 			return
@@ -62,6 +80,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return
 	}
+	service.SetUsageRequestBody(c, openAIRequestBodyPreviewSnapshot(body))
 
 	if !gjson.ValidBytes(body) {
 		logRequestBodyParseFailure(reqLog, body, nil)
@@ -96,6 +115,21 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 
 	// 解析渠道级模型映射
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
+	effectiveBody := body
+	if channelMapping.Mapped {
+		effectiveBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
+	}
+	if err := coordinator.SetEffectiveBytes(effectiveBody); err != nil {
+		if errors.Is(err, service.ErrRequestBodySpool) {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+		} else if maxErr, ok := extractMaxBytesError(err); ok {
+			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+		} else {
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		}
+		return
+	}
+	service.BindOpenAIRequestBodyHandle(c, coordinator.Effective())
 
 	if h.errorPassthroughService != nil {
 		service.BindErrorPassthroughService(c, h.errorPassthroughService)
@@ -200,10 +234,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
 
-		forwardBody := body
-		if channelMapping.Mapped {
-			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
-		}
+		forwardBody := effectiveBody
 		writerSizeBeforeForward := c.Writer.Size()
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {

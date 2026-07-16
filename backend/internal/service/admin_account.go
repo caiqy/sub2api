@@ -556,6 +556,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 	}
 	wasOveragesEnabled := account.IsOveragesEnabled()
+	wasProbeEnabledBefore := account.IsOpenAIProbeEnabled()
 
 	if input.Name != "" {
 		account.Name = input.Name
@@ -671,6 +672,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if err := s.accountRepo.Update(ctx, account); err != nil {
 		return nil, err
 	}
+	s.applyProbeToggleSideEffects(ctx, account, wasProbeEnabledBefore)
 
 	// 将 proxy 变更传播到 spark 影子账号（同步；Update 内部已触发调度快照）。
 	// 影子自身 proxy 不可独立编辑(见上),故对影子的更新不触发传播。
@@ -693,6 +695,30 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		return nil, err
 	}
 	return updated, nil
+}
+
+// applyProbeToggleSideEffects clears runtime probe state when a probe is disabled.
+func (s *adminServiceImpl) applyProbeToggleSideEffects(ctx context.Context, account *Account, wasEnabledBefore bool) {
+	if account == nil || account.Platform != PlatformOpenAI || !wasEnabledBefore || account.IsOpenAIProbeEnabled() {
+		return
+	}
+	if s.openaiProbeControl != nil {
+		s.openaiProbeControl.DropProbeEntry(account.ID)
+	}
+	if account.TempUnschedulableUntil == nil {
+		return
+	}
+	parsed, ok := parseTempUnschedReason(account.TempUnschedulableReason)
+	if !ok || parsed.Source != "layered_probe" {
+		return
+	}
+	if err := s.accountRepo.ClearTempUnschedulable(ctx, account.ID); err != nil {
+		slog.Warn("admin: probe toggle off failed to clear temp unschedulable", "account_id", account.ID, "error", err)
+		return
+	}
+	if s.runtimeBlocker != nil {
+		s.runtimeBlocker.ClearAccountSchedulingBlock(account.ID)
+	}
 }
 
 // UpdateAccountExtra 仅对 Extra JSONB 做 key 级合并，避免覆盖其它运行态键
@@ -741,15 +767,27 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	needMixedChannelCheck := input.GroupIDs != nil && !input.SkipMixedChannelCheck
 	_, hasLongContextBillingUpdate := input.Extra[openAILongContextBillingEnabledKey]
+	probeToggleOff := false
+	if enabled, ok := input.Extra["openai_probe_enabled"].(bool); ok {
+		probeToggleOff = !enabled
+	}
+	probeWasEnabledBefore := map[int64]bool{}
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || hasLongContextBillingUpdate {
+	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || hasLongContextBillingUpdate || probeToggleOff {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
 		}
 		cachedTargets = loaded
+		if probeToggleOff {
+			for _, account := range cachedTargets {
+				if account != nil {
+					probeWasEnabledBefore[account.ID] = account.IsOpenAIProbeEnabled()
+				}
+			}
+		}
 	}
 	if hasLongContextBillingUpdate {
 		for _, account := range cachedTargets {
@@ -859,6 +897,16 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	// Run bulk update for column/jsonb fields first.
 	if _, err := s.accountRepo.BulkUpdate(ctx, input.AccountIDs, repoUpdates); err != nil {
 		return nil, err
+	}
+	if len(probeWasEnabledBefore) > 0 {
+		updatedAccounts, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
+		if err == nil {
+			for _, account := range updatedAccounts {
+				if account != nil {
+					s.applyProbeToggleSideEffects(ctx, account, probeWasEnabledBefore[account.ID])
+				}
+			}
+		}
 	}
 
 	// 将 proxy 变更传播到每个目标账号的 spark 影子账号

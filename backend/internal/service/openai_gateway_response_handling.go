@@ -227,6 +227,15 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	clientOutputStarted := false
 	upstreamRequestID := strings.TrimSpace(resp.Header.Get("x-request-id"))
 	var streamEarlyErr error
+	failedTerminalPending := false
+	markFailedTerminalWritten := func() {
+		if !failedTerminalPending {
+			return
+		}
+		c.Set(openAIResponseTerminalWrittenKey, true)
+		MarkResponseCommitted(c)
+		failedTerminalPending = false
+	}
 	eventInProgress := false
 	eventStartsClientOutput := false
 	eventShouldFlush := false
@@ -261,6 +270,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				} else {
 					clientOutputStarted = true
 					lastDownstreamWriteAt = time.Now()
+					markFailedTerminalWritten()
 				}
 			}
 		}
@@ -293,6 +303,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		}
 		clientOutputStarted = true
 		lastDownstreamWriteAt = time.Now()
+		markFailedTerminalWritten()
 	}
 
 	needModelReplace := originalModel != mappedModel
@@ -456,6 +467,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				}
 				forceFlushFailedEvent = true
 				sawFailedEvent = true
+				failedTerminalPending = true
 			}
 			if normalizedData, normalized := normalizeCompletedImageGenerationStatus(dataBytes); normalized {
 				dataBytes = normalizedData
@@ -576,6 +588,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 					} else {
 						clientOutputStarted = true
 						lastDownstreamWriteAt = time.Now()
+						markFailedTerminalWritten()
 					}
 				}
 			}
