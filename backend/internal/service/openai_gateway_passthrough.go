@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -989,7 +990,37 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			imageOutputSizes: imageCounter.Sizes(),
 		}
 	}
+	streamInterval := time.Duration(0)
+	if s != nil && s.cfg != nil && s.cfg.Gateway.StreamDataIntervalTimeout > 0 {
+		streamInterval = time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
+	}
+	var streamTimedOut atomic.Bool
+	var streamGeneration atomic.Uint64
+	var streamTimer *time.Timer
+	resetStreamTimer := func() {
+		if streamInterval <= 0 {
+			return
+		}
+		generation := streamGeneration.Add(1)
+		if streamTimer != nil {
+			streamTimer.Stop()
+		}
+		streamTimer = time.AfterFunc(streamInterval, func() {
+			if streamGeneration.CompareAndSwap(generation, generation+1) {
+				streamTimedOut.Store(true)
+				_ = resp.Body.Close()
+			}
+		})
+	}
+	resetStreamTimer()
+	defer func() {
+		streamGeneration.Add(1)
+		if streamTimer != nil {
+			streamTimer.Stop()
+		}
+	}()
 	for scanner.Scan() {
+		resetStreamTimer()
 		line := scanner.Text()
 		lineStartsClientOutput := false
 		forceFlushFailedEvent := false
@@ -1116,6 +1147,12 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				flusher.Flush()
 			}
 		}
+	}
+	if streamTimedOut.Load() {
+		if s.rateLimitService != nil {
+			s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
+		}
+		return resultWithUsage(), errOpenAIStreamDataIntervalTimeout
 	}
 	if err := scanner.Err(); err != nil {
 		if sawTerminalEvent && !sawFailedEvent {
