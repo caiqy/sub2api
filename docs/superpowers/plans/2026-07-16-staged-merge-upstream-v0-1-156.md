@@ -339,6 +339,15 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   在提交前，按报告中失败证据关联的精确修复/测试路径逐个执行 `git add -- 路径`，再暂存验证报告。预期：报告关联失败命令、修复测试和普通提交 SHA；无回归时不创建空提交。
 
+- [ ] **步骤 4：独立提交 v0.1.152 能力审查结论**
+
+  将 changed-files 与矩阵交集、调用链结论、Task 6 提前执行的 Grok 修复、全部聚焦命令/结果、修复提交和残余风险写入正式验证报告，然后执行：
+  ```bash
+  git add -f docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md
+  git commit -m "docs: record v0.1.152 capability review"
+  ```
+  预期：文档提交不含业务代码；所有回归修复已在前置独立普通提交中完成，无未解释能力变化。
+
 ### Task 7：执行 v0.1.152 阶段门禁（OpenSpec 2.3）
 
 **文件：**
