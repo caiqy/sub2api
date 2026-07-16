@@ -2339,3 +2339,87 @@ The untagged no-account classification invocation initially matched no tagged te
 - This task found no incompatible coexistence semantics requiring a user decision.
 - Frontend test commands emitted the existing non-blocking Browserslist/caniuse-lite staleness warning.
 - This task did not run the Task 10 full gate and did not merge v0.1.155, `upstream/main`, push, release, or deploy.
+
+## Task 10 / v0.1.153 Stage Gate (OpenSpec 3.3)
+
+### Status
+
+- Result: `PASS`; all v0.1.153 gate commands and required manual conclusions passed. Task 11 is released.
+- Scope: re-ran the full root gate, frontend production build, Ent/Wire generation with restricted diff, all 11 affected Task 9 M-ID commands with their required tags, the PaymentHandler early-fix checks, nine conflict entries, and static scans.
+- `git diff --name-only v0.1.152..v0.1.153` exited `0` and listed `97` paths. The review set remains `affected=11`, `manual N/A=4`, and `protected/N/A=1`.
+
+### Full Gate And Generation
+
+| Command | Exit | Result |
+| --- | ---: | --- |
+| `make test` | 0 | Backend default and `unit` tests, `golangci-lint`, frontend ESLint/typecheck and Vitest all passed; Vitest: `173` files, `1288` tests. |
+| `pnpm --dir frontend run build` | 0 | `vue-tsc -b` and Vite production build passed; `968` modules, `33.84s`. |
+| `make -C backend generate` | 0 | Ent and Wire generation completed. |
+| `git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` | 0 | stdout empty; no generated diff. |
+
+### Task 9 Affected M-ID Evidence
+
+All named automatic targets below were observed as RUN/PASS. A `0 tests to run` compile result is recorded as manual evidence only and is not counted as coverage.
+
+| M-ID | Command result | Actual coverage/manual conclusion |
+| --- | --- | --- |
+| M-01 | service scheduler regex, exit `0` | 2 named tests PASS. |
+| M-02 | `-tags unit` service sticky regex, exit `0` | 4 named tests PASS. |
+| M-03 | `-tags unit` handler/service sticky regex, exit `0` | 4 named tests PASS. |
+| M-04 | handler failover regex, exit `0` | 2 named tests PASS. |
+| M-06 | untagged apicompat/service plus `-tags unit` service supplement, exit `0`/`0` | 2 apicompat plus 2 tagged service tests PASS; untagged service package had `no tests to run` and was excluded from coverage. |
+| M-07 | apicompat/handler usage regex, exit `0` | 4 named tests PASS. |
+| M-10 | service runtime-settings regex, exit `0` | 2 named tests PASS. |
+| M-11 | handler/service request-body regex, exit `0` | 5 named tests PASS. |
+| M-13 | frontend matrix and changed-file supplements, exit `0`/`0` | `21 + 58 = 79` tests PASS. |
+| M-14 | `go -C backend test ./cmd/server -run '^$' -count=1`, exit `0` | Compile-only `no tests to run`; version remains manual. |
+| M-15 | migration regex, generate, restricted diff, all exit `0` | 3 named migration tests PASS; Ent/Wire generation stable. |
+
+Literal commands executed for the 11 affected M-IDs:
+
+```text
+go -C backend test -v ./internal/service -run '^(TestLayered_WaitPlanFallbackSkipsUpstreamRestrictedAccount|TestOpenAISelectAccountWithLoadAwareness_AllFullWaitPlan)$' -count=1
+go -C backend test -v -tags unit ./internal/service -run '^(TestOpenAIGatewayService_SelectAccountWithScheduler_PreviousResponseStickyDisabledBypassesStickyLookupAndBind|TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyDisabledBypassesLookupBindAndRefresh|TestOpenAIGatewayService_StickyDisabledWSv2SkipsStateStore|TestOpenAIGatewayService_StickyDisabledIngressSkipsStateStore)$' -count=1
+go -C backend test -v -tags unit ./internal/handler ./internal/service -run '^(TestGatewayHandler_GeminiRouteStickyLookupUsesGeminiToggleNotAnthropicToggle|TestGatewayHandler_GeminiRouteStickyBindUsesGeminiToggleNotAnthropicToggle|TestGatewayHandler_OpenAIRouteStickyUsesOpenAIToggleNotAnthropicToggle|TestAntigravityGatewayServiceClearStickySessionSkipsDisabledSticky)$' -count=1
+go -C backend test -v ./internal/handler -run '^(TestHandleFailoverError_IntegrationScenario|TestStreamWrittenGuard_MessagesPath_AbortFailoverOnSSEContentWritten)$' -count=1
+go -C backend test -v ./internal/pkg/apicompat ./internal/service -run '^(TestChatCompletionsToResponses_ToolCalls|TestResponsesToAnthropic_CustomToolPreservesSchemaParameters|TestGatewayService_ForwardAsChatCompletions_PassthroughBodyMapCopiesFromOriginalCCBody|TestGatewayService_ForwardAsResponses_PassthroughBodyMapCopiesFromOriginalResponsesBody)$' -count=1
+go -C backend test -v -tags unit ./internal/service -run '^(TestGatewayService_ForwardAsChatCompletions_PassthroughBodyMapCopiesFromOriginalCCBody|TestGatewayService_ForwardAsResponses_PassthroughBodyMapCopiesFromOriginalResponsesBody)$' -count=1
+go -C backend test -v ./internal/pkg/apicompat ./internal/handler -run '^(TestResponsesEventToChatChunks_TopLevelTerminalUsage|TestResponsesEventToAnthropicEvents_TopLevelTerminalUsage|TestOpenAIGatewayHandler_NativeNonPassthroughResponsesFailedIsNotDuplicated|TestOpenAIGatewayHandler_ResponsesPartialFailoverCreatesExactlyOneFailedUsage)$' -count=1
+go -C backend test -v ./internal/service -run '^(TestSettingService_SetGatewayRuntimeSettings_PersistsUpdatesCfgAndInvalidatesOnResponseHeaderTimeoutChange|TestSettingServiceGatewayRuntimeSettings_RejectsNegativeFirstTokenTimeouts)$' -count=1
+go -C backend test -v ./internal/handler ./internal/service -run '^(TestGatewayHandler_MessagesAndResponsesReplayLargeBodiesAcrossFailover|TestOpenAIGatewayHandler_ChatReplayRawSpoolAcrossFailoverWhenResponsesUnsupported|TestRequestBodyCoordinator_CleanupRemovesRawEffectiveAndMultipartTemps|TestOpenAIForwardCleansBoundRequestBodyHandlesInParallel|TestRequestBodyHandle_CleanupRemovesSpoolFile)$' -count=1
+pnpm --dir frontend test:run src/router/__tests__/feature-access.spec.ts src/utils/__tests__/userUiVisibility.spec.ts src/views/admin/__tests__/SettingsView.gatewayRuntime.spec.ts
+go -C backend test ./cmd/server -run '^$' -count=1
+go -C backend test -v ./migrations -run '^(TestMigration173AllowsCyberBlockedUsageRequestType|TestMigration158BackfillsGrokMediaGenerationGroups|TestLatestAPIKeyIPIndexMigration)$' -count=1
+pnpm --dir frontend test:run src/components/account/__tests__/credentialsBuilder.spec.ts src/components/common/__tests__/DataTable.spec.ts src/composables/__tests__/useSwipeSelect.spec.ts src/utils/__tests__/formatDateLocalInput.spec.ts src/views/__tests__/KeyUsageView.spec.ts
+make -C backend generate
+git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
+```
+
+### PaymentHandler And Conflict Entries
+
+- PaymentHandler early fix: `go -C backend test ./internal/handler -run '^$' -count=1` exited `0`; the compile-only result is not coverage. `go -C backend test -v ./internal/handler -run '^(TestPaymentHandlerGetCheckoutInfoRejectsHiddenPurchasePage|TestPaymentHandlerHiddenPurchasePageAllowsAdmin)$' -count=1` exited `0` with 2 named tests PASS.
+- Nine entries: 2 manual and 7 automatic all PASS. Manual `.gitignore` retains `!deploy/tests/` and `!deploy/tests/**`; `CLAUDE.md` remains tracked. Manual VERSION check showed first parent `0.1.151.2`, tag second parent `0.1.152`, and merge result `0.1.151.2`, preserving the approved local four-part version.
+- Automatic entry commands all exited `0`: OpenAI error handling 3 named tests, alpha-search routes 2, fastpath/endpoint/usage 4, tagged no-account classification 2, and tagged Gemini fallback/retry 1. `wire_gen.go` is covered by the PaymentHandler compile GREEN plus M-15 generation/diff; `gateway_handler_responses.go` is covered by M-07's 4 named usage tests.
+
+```text
+go -C backend test -v ./internal/handler -run '^(TestOpenAIHandleStreamingAwareError_JSONEscaping|TestOpenAIHandleStreamingAwareError_NonStreaming|TestOpenAIEnsureForwardErrorResponse_WritesFallbackWhenNotWritten)$' -count=1
+go -C backend test -v ./internal/server/routes -run '^(TestGatewayRoutesOpenAIAlphaSearchPathsAreRegistered|TestGatewayRoutesAlphaSearchRejectsNonOpenAIGroup)$' -count=1
+go -C backend test -v ./internal/handler -run '^(TestConcurrencyHelper_TryAcquireUserSlot|TestConcurrencyHelper_TryAcquireAccountSlot_NotAcquired|TestResolveOpenAIUpstreamEndpointPrefersForwardResult|TestOpenAIGatewayHandler_ChatCompletionsUsageTaskUsesCapturedEndpointAndSnapshot)$' -count=1
+go -C backend test -v -tags unit ./internal/handler -run '^(TestClassifyNoAccountError_ModelNotSupported_Returns404|TestClassifyOpenAICompatibleNoAccountError_GrokUsesGrokPlatform)$' -count=1
+go -C backend test -v -tags unit ./internal/handler -run '^TestGatewayHandlerMessages_ClaudeCodeFallbackMixedAntigravitySmartRetryClearsResolvedGeminiStickySession$' -count=1
+```
+
+### Static And Release Decision
+
+| Command | Exit | Result |
+| --- | ---: | --- |
+| `git diff --check` | 0 | stdout empty. |
+| `git diff --cached --check` | 0 | stdout empty. |
+| `git diff --name-only --diff-filter=U` | 0 | stdout empty. |
+| `git ls-files -u` | 0 | stdout empty. |
+| `git grep -n -E '^(<<<<<<< |>>>>>>> |=======$)' -- backend frontend` | 0 | stdout empty. |
+| `git status --short` | 0 | only pre-existing untracked `.comet/current-change.json`. |
+
+- Warnings: Browserslist/caniuse-lite is 7 months stale; Vitest retains expected error-path logs plus `router-link` and intlify warnings; Vite reports dynamic/static import mixing and an `AccountsView` chunk of `638.19 kB` over the `500 kB` warning threshold. All are non-blocking and pre-existing.
+- Boundary: no source, test, generated, plan, OpenSpec, Comet progress, current-change, merge, push, release, or deploy changes were made. Only this canonical report is to be committed with `docs: close v0.1.153 stage gate`.
+- Decision: Task 11 is released. No Task 10 blocker remains.
