@@ -997,6 +997,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	sawDone := false
 	sawTerminalEvent := false
 	sawFailedEvent := false
+	failedTerminalPending := false
 	failedMessage := ""
 	clientOutputStarted := false
 	upstreamRequestID := strings.TrimSpace(resp.Header.Get("x-request-id"))
@@ -1191,18 +1192,28 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				clientOutputStarted = true
 				pendingClientFlush = true
 				if forceFlushFailedEvent {
-					if _, err := fmt.Fprintln(w); err != nil {
-						clientDisconnected = true
-					} else {
-						c.Set(openAIResponseTerminalWrittenKey, true)
-						MarkResponseCommitted(c)
-					}
+					failedTerminalPending = true
 				}
 				if line == "" {
 					flusher.Flush()
 					pendingClientFlush = false
+					if failedTerminalPending {
+						c.Set(openAIResponseTerminalWrittenKey, true)
+						MarkResponseCommitted(c)
+						failedTerminalPending = false
+					}
 				}
 			}
+		}
+	}
+	if failedTerminalPending && !clientDisconnected {
+		if _, err := fmt.Fprintln(w); err != nil {
+			clientDisconnected = true
+		} else {
+			pendingClientFlush = true
+			flushPendingClientOutput()
+			c.Set(openAIResponseTerminalWrittenKey, true)
+			MarkResponseCommitted(c)
 		}
 	}
 	flushPendingClientOutput()
