@@ -3,16 +3,16 @@
 - Change: `staged-merge-upstream-v0-1-156`
 - Plan task: `Task 13：执行 v0.1.155 阶段门禁（OpenSpec 4.3）`
 - OpenSpec task: `4.3 运行全部本地保护测试和本阶段受影响能力测试，记录通过证据后再进入下一 tag`
-- Phase: `implementing`
+- Phase: `done`
 - Review mode: `thorough`
 - Review/fix round: `0/2`
-- Implementer status: `dispatched`
-- Implementation commit: `pending`
-- Changed files: `pending`
-- Evidence: `pending`
+- Implementer status: `DONE after three full-gate attempts`
+- Implementation commit: `1138be1d9/3fdedb4d1/a7515cbb0 fixes；53648e7e0 docs`
+- Changed files: `3 test/source remediation paths + canonical report`
+- Evidence: `make test/Vitest 179 files 1337 tests；13 M-ID；14 conflicts；9 matrix；generate/static PASS`
 - TDD: `exempt-by-user-decision`（只运行既有门禁）
-- Task reviewer: `pending`
-- Unresolved findings: `none`
+- Task reviewer: `Approved（f33ad07bb/dc40b21f7 后第四次 fresh gate）`
+- Unresolved findings: `none；Task14 仍未放行，等待完整门禁`
 - Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-13-brief.md`
 - Report: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-13-report.md`
 - Blocker fix: `OpenAIFastPolicyUserSelector.vue` 的 `SimpleUser` type-only import 已从未导出的 `@/api/admin/usage` 改为共享 `@/types`；没有行为变更或伪造行为 RED。
