@@ -59,6 +59,7 @@ func SetupRouter(
 		}
 		return nil
 	}))
+	r.Use(middleware2.ServerTiming(cfg.Server.EnableServerTiming))
 
 	configureEmbeddedFrontend(r, settingService, refreshFrameOrigins)
 

@@ -44,6 +44,17 @@ type cyberQuotaPlatformRepo struct {
 	platforms chan string
 }
 
+type openAIRecordUsageAccountRepoStub struct {
+	AccountRepository
+	account *Account
+	calls   int
+}
+
+func (s *openAIRecordUsageAccountRepoStub) GetByID(_ context.Context, _ int64) (*Account, error) {
+	s.calls++
+	return s.account, nil
+}
+
 func (r *cyberQuotaPlatformRepo) IncrementUsageWithReset(_ context.Context, _ int64, platform string, _ float64, _ time.Time) error {
 	r.platforms <- platform
 	return nil
