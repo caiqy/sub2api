@@ -38,6 +38,17 @@ type openaiNonStreamingResult struct {
 	imageOutputSizes []string
 }
 
+const openAIResponseTerminalWrittenKey = "openai_response_terminal_written"
+
+func HasOpenAIResponseTerminalWritten(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	written, _ := c.Get(openAIResponseTerminalWrittenKey)
+	value, _ := written.(bool)
+	return value
+}
+
 func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel string) (*openaiStreamingResult, error) {
 	return s.handleStreamingResponseWithReasoning(ctx, resp, c, account, startTime, originalModel, mappedModel, "")
 }
