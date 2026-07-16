@@ -2536,3 +2536,32 @@ go -C backend test -v -tags unit ./internal/handler -run '^TestGatewayHandlerMes
 - Existing non-blocking warning: Browserslist/caniuse-lite data is stale. Expected test-path logging remains non-failing.
 - No merge commit was rewritten. No v0.1.156 or `upstream/main` merge, push, release, deploy, plan, OpenSpec, Comet, or current-change modification occurred.
 - **Task 13 entry:** run `go test ./... -count=1` from `backend`, frontend `pnpm test:run` and `pnpm typecheck`, then its controlled 5/10/12 MB request-body matrix and affected-package rerun.
+
+### Reviewer Follow-Up: Reproducible Evidence Ledger
+
+- Historical RED below is evidence observed during the original Task 12 run. It is not recreated after a repair, so its command, exit and observed count are recorded rather than represented as a fresh failure.
+
+| Repair | Historical RED command and observation | GREEN command, exit and named count | v0.1.153..v0.1.155 upstream source |
+| --- | --- | --- | --- |
+| Builder fixture | `go -C backend test ./internal/service -run '^$' -count=1`; exit `1`, compile failed before test execution on the five-argument call. | Same compile command exit `0` (0 tests, excluded); `go -C backend test -v ./internal/service -run '^TestOpenAIBuildUpstreamRequestOpenAIPassthroughForwardsResponsesLiteHeader$' -count=1`, exit `0`, 1. | `252ef8b73` `backend/internal/service/openai_gateway_passthrough.go`; `2f715baf0` `backend/internal/service/openai_image_generation_controls_test.go`. |
+| Images keepalive helper | `go -C backend test -v ./internal/handler -run '^TestOpenAIImagesJSONKeepaliveInterval$' -count=1`; exit `1`, missing helper at handler and new contract call sites. | Same command exit `0`, 1; `go -C backend test -v ./internal/service -run '^TestOpenAIImagesJSONKeepalive' -count=1`, exit `0`, 8. | `002c0b9fd` `config.go`, `openai_images.go`, `openai_images_json_keepalive.go` and tests. |
+| Chat mapping fixture | Combined command `go -C backend test -v ./internal/service -run '^(TestForwardAsChatCompletions_OAuthPromptCacheKeyKeepsAPIKeyIsolatedSessionID|TestForwardAsChatCompletions_UnknownModelDoesNotUseDefaultMappedModel|TestOpenAIGatewayServiceRecordUsage_Gpt54LongContextBillsWholeSession|TestOpenAIGatewayService_OAuthPassthrough_StreamKeepsToolNameAndBodyNormalized)$' -count=1`; exit `1`, 4 named targets ran, Chat and long-context targets failed. | `go -C backend test -v ./internal/service -run '^TestForwardAsChatCompletions_UnknownModelDoesNotUseDefaultMappedModel$' -count=1`, exit `0`, 1. | `40ec74b9f` `openai_gateway_chat_completions_test.go`, `openai_model_mapping.go`. |
+| Long-context fixture | Same combined historical command; exit `1`, the long-context target lacked the new account opt-in. | `go -C backend test -v ./internal/service -run '^TestOpenAIGatewayServiceRecordUsage_Gpt54LongContextBillsWholeSession$' -count=1`, exit `0`, 1. | `e9fb5983c` account default-off behavior and fixture; `92dcfb5eb` `account.go`, `openai_gateway_usage.go`, `openai_gateway_record_usage_test.go`. |
+| Usage-log SQL mock | `go -C backend test ./internal/service ./internal/handler ./internal/repository -count=1`; exit `1`, named mock `TestUsageLogRepositoryCreateSingle_SkipsDetailPersistenceWhenDisabled` expected 53 rather than 54 placeholders. Package command was not verbose, so it has no named-count claim. | `go -C backend test -v ./internal/repository -run '^TestUsageLogRepositoryCreateSingle_SkipsDetailPersistenceWhenDisabled$' -count=1`, exit `0`, 1. | `92dcfb5eb` `usage_log_repo_insert.go`, `usage_log_repo_query.go` and generated UsageLog fields. |
+| Scheduler lag | `go -C backend test -v ./internal/service -run '^TestSchedulerSnapshotServicePollOutboxDoesNotUseConsumedEventForLag$' -count=1`; exit `1`, 1 target used the consumed event and did not query after watermark. | Same command exit `0`, 1. Reviewer positive command below adds the pending-event threshold case. | `a0778e9a4` `scheduler_outbox.go`, `scheduler_snapshot_service.go`, `scheduler_snapshot_outbox_cleanup_test.go`, `scheduler_outbox_repo.go`. |
+
+#### Original 232 Execution Ledger
+
+The original Task 12 total counts final named command results, not unique test definitions. Compile-only zero-test commands are excluded. A target intentionally re-run by a later command is counted again as an execution only in that later command's row.
+
+| Command group | Named executions |
+| --- | ---: |
+| M-01, M-02, M-04, M-05, M-06, M-07, M-08, M-09, M-10, M-11, M-13, M-15 | `2 + 4 + 2 + 3 + 4 + 4 + 4 + 4 + 16 + 5 + 136 + 3 = 187` |
+| Builder header; image interval/keepalive; config; long-context service/admin; scheduler regression/coalescer/outbox; SQL mock; chat/usage/OAuth; M-16 | `1 + 9 + 4 + 9 + 7 + 1 + 4 + 10 = 45` |
+| Original Task 12 ledger | `187 + 45 = 232` |
+
+#### Pending-Lag Positive Test
+
+- `901523953` adds `TestSchedulerSnapshotServicePollOutboxRebuildsForPendingLagAfterWatermark` and a one-line source reason comment. With 401 old events, first poll commits watermark `200` and records one lag failure for pending event `201`; second poll commits `400`, sees pending `401`, reaches threshold `2`, and enters exactly one full rebuild.
+- Exact reviewer command: `go -C backend test -v ./internal/service -run '^(TestSchedulerSnapshotServicePollOutboxCleansConsumedRowsAfterWatermark|TestSchedulerSnapshotServicePollOutboxDoesNotUseConsumedEventForLag|TestSchedulerSnapshotServicePollOutboxRebuildsForPendingLagAfterWatermark)$' -count=1`; exit `0`, 3 named executions.
+- These are command executions, not new unique definitions: the first two were already in the 45-row scheduler accounting and are rerun deliberately with the new third target. Reviewer cumulative execution count is therefore `232 + 3 = 235`.
