@@ -240,6 +240,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 
 		forwardBody := effectiveBody
 		writerSizeBeforeForward := c.Writer.Size()
+		service.SetOpsUpstreamAttempted(c, false)
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
 				if accountReleaseFunc != nil {

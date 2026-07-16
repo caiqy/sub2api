@@ -223,6 +223,8 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 	failedAccountIDs := make(map[int64]struct{})
 	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
+	var lastFailedAccount *service.Account
+	var lastFailedDuration time.Duration
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
 	switchCount := 0
 	maxAccountSwitches := h.maxAccountSwitches
@@ -266,6 +268,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 				return
 			}
 			if lastFailoverErr != nil {
+				h.submitFailoverFailedUsageLog(c, apiKey, lastFailedAccount, requestModel, false, lastFailoverErr, lastFailedDuration, nil, "handler.openai_gateway.grok_media")
 				h.handleFailoverExhausted(c, lastFailoverErr, false)
 			} else {
 				h.errorResponse(c, http.StatusBadGateway, "api_error", "Upstream request failed")
@@ -277,7 +280,12 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			if !cls.ModelNotFound {
 				markOpsRoutingCapacityLimited(c)
 			}
-			h.errorResponse(c, cls.Status, cls.ErrType, cls.Message)
+			if lastFailoverErr != nil {
+				h.submitFailoverFailedUsageLog(c, apiKey, lastFailedAccount, requestModel, false, lastFailoverErr, lastFailedDuration, nil, "handler.openai_gateway.grok_media")
+				h.handleFailoverExhausted(c, lastFailoverErr, false)
+			} else {
+				h.errorResponse(c, cls.Status, cls.ErrType, cls.Message)
+			}
 			return
 		}
 
@@ -302,6 +310,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
 		writerSizeBeforeForward := c.Writer.Size()
+		service.SetOpsUpstreamAttempted(c, false)
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
 				if accountReleaseFunc != nil {
@@ -311,7 +320,8 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			return h.gatewayService.ForwardGrokMedia(requestCtx, c, account, endpoint, requestID, nil, contentType)
 		}()
 
-		forwardDurationMs := time.Since(forwardStart).Milliseconds()
+		forwardDuration := time.Since(forwardStart)
+		forwardDurationMs := forwardDuration.Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
 		responseLatencyMs := forwardDurationMs
 		if upstreamLatencyMs > 0 && forwardDurationMs > upstreamLatencyMs {
@@ -333,10 +343,14 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 					h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
 				}
 				if c.Writer.Size() != writerSizeBeforeForward {
+					if requestCtx.Err() == nil {
+						h.submitFailoverFailedUsageLog(c, apiKey, account, requestModel, false, failoverErr, forwardDuration, nil, "handler.openai_gateway.grok_media")
+					}
 					h.handleFailoverExhausted(c, failoverErr, true)
 					return
 				}
 				if !failoverErr.ShouldRetryNextAccount() {
+					h.submitFailoverFailedUsageLog(c, apiKey, account, requestModel, false, failoverErr, forwardDuration, nil, "handler.openai_gateway.grok_media")
 					h.handleFailoverExhausted(c, failoverErr, false)
 					return
 				}
@@ -361,12 +375,16 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 				h.gatewayService.RecordOpenAIAccountSwitch()
 				failedAccountIDs[account.ID] = struct{}{}
 				lastFailoverErr = failoverErr
+				lastFailedAccount = account
+				lastFailedDuration = forwardDuration
 				if switchCount >= maxAccountSwitches {
+					h.submitFailoverFailedUsageLog(c, apiKey, account, requestModel, false, failoverErr, forwardDuration, nil, "handler.openai_gateway.grok_media")
 					h.handleFailoverExhausted(c, failoverErr, false)
 					return
 				}
 				switchCount++
 				if h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount, &oauth429FailoverState) {
+					h.submitFailoverFailedUsageLog(c, apiKey, account, requestModel, false, failoverErr, forwardDuration, nil, "handler.openai_gateway.grok_media")
 					h.handleFailoverExhausted(c, failoverErr, false)
 					return
 				}
@@ -379,6 +397,9 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 				continue
 			}
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
+			if requestCtx.Err() == nil && service.HasOpsUpstreamAttempted(c) && !service.HasOpsClientBusinessLimited(c) {
+				h.submitFailedUsageLog(c, apiKey, account, requestModel, false, 0, nil, nil, forwardDuration, nil, "handler.openai_gateway.grok_media")
+			}
 			if c.Writer.Size() == writerSizeBeforeForward {
 				h.errorResponse(c, http.StatusBadGateway, "upstream_error", "Upstream request failed")
 			}
