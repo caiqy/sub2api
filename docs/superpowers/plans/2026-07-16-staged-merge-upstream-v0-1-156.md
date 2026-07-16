@@ -429,7 +429,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 - 修改：由 `git diff --name-only v0.1.152..v0.1.153` 与矩阵交集确定的实际文件
 - 修改：`docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md`
 
-- [ ] **步骤 1：审查 changed files、入口和下游调用方**
+- [x] **步骤 1：审查 changed files、入口和下游调用方**
 
   执行：
   ```bash
@@ -438,11 +438,11 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   先接收 Task 8 review 已完成的 stale `sync` import 修复 `07eba46c6`/`94c2c3fb7`，并处理其编译复现继续暴露的 3 个 `NewPaymentHandler` 参数不匹配；这些均归入 Task 9 early work，不重复前者。再对矩阵中被触及的能力执行 CodeGraph 调用链/影响分析，特别检查 scheduler、各平台 Sticky、fallback/WaitPlan、DB recheck、协议转换、runtime settings、body replay/cleanup 和用户资源控制。
 
-- [ ] **步骤 2：保留失败证据后完成最小兼容修复**
+- [x] **步骤 2：保留失败证据后完成最小兼容修复**
 
   预期：回归先由现有保护测试或最小新增测试复现；普通修复提交不得夹带未被失败证据支持的重构。语义无法共存时停止并请求用户选择。
 
-- [ ] **步骤 3：提交本段语义修复（仅在需要时）**
+- [x] **步骤 3：提交本段语义修复（仅在需要时）**
 
   执行：
   ```bash
@@ -451,7 +451,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   在提交前，按报告关联的精确修复/测试路径逐个执行 `git add -- 路径`，再暂存验证报告。预期：merge 节点与修复节点清晰可区分；无修复时仅更新报告。
 
-- [ ] **步骤 4：独立提交 v0.1.153 能力审查结论**
+- [x] **步骤 4：独立提交 v0.1.153 能力审查结论**
 
   正式报告记录 changed-files/矩阵交集、调用链、Task 9 early work、新回归 RED/GREEN、修复提交、manual 结论和残余风险；只提交报告：
   ```bash

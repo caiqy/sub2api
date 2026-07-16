@@ -3,16 +3,16 @@
 - Change: `staged-merge-upstream-v0-1-156`
 - Plan task: `Task 9：审查 v0.1.153 受影响能力并修复回归（OpenSpec 3.2）`
 - OpenSpec task: `3.2 审查 v0.1.152..v0.1.153 触及的本地能力，对回归先保留失败测试再做最小兼容修复`
-- Phase: `implementing`
+- Phase: `done`
 - Review mode: `thorough`
 - Review/fix round: `0/2`
-- Implementer status: `dispatched`
-- Implementation commit: `early 07eba46c6/94c2c3fb7；其余 pending`
-- Changed files: `pending`
-- Evidence: `pending`
+- Implementer status: `DONE（报告收口完成）`
+- Implementation commit: `early 07eba46c6/94c2c3fb7；fix de17e7a67；docs 83fb1299a/f4dba13cb`
+- Changed files: `PaymentHandler provider/fixtures；canonical 验证报告；独立临时报告净删除`
+- Evidence: `97 files；11 affected + 4 manual N/A + M-16 protected/N/A；123 named tests；generate/static PASS`
 - TDD: `tdd（行为回归必须 RED/GREEN；编译 fixture 使用真实 compile RED/GREEN）`
-- Task reviewer: `pending`
-- Unresolved findings: `3 个 NewPaymentHandler fixture 参数 blocker 待处理`
+- Task reviewer: `Approved（Critical/Important/Minor 均无）`
+- Unresolved findings: `none；测试未由 reviewer 重跑，按报告证据契约接受`
 - Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-9-brief.md`
 - Report: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-9-report.md`
 - Blocker fix: `OpenAIFastPolicyUserSelector.vue` 的 `SimpleUser` type-only import 已从未导出的 `@/api/admin/usage` 改为共享 `@/types`；没有行为变更或伪造行为 RED。
