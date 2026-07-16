@@ -22,12 +22,12 @@ func (s *bmRepoStub) Get(ctx context.Context, key string) (*Setting, error) {
 }
 
 func (s *bmRepoStub) GetValue(ctx context.Context, key string) (string, error) {
-	if key == SettingKeyGatewayRuntimeSettings {
+	if key != SettingKeyBackendModeEnabled {
 		return "", ErrSettingNotFound
 	}
 	s.calls++
 	if s.getValueFn == nil {
-		panic("unexpected GetValue call")
+		return "", ErrSettingNotFound
 	}
 	return s.getValueFn(ctx, key)
 }
@@ -62,11 +62,11 @@ func (s *bmUpdateRepoStub) Get(ctx context.Context, key string) (*Setting, error
 }
 
 func (s *bmUpdateRepoStub) GetValue(ctx context.Context, key string) (string, error) {
-	if key == SettingKeyGatewayRuntimeSettings {
+	if key != SettingKeyBackendModeEnabled {
 		return "", ErrSettingNotFound
 	}
 	if s.getValueFn == nil {
-		panic("unexpected GetValue call")
+		return "", ErrSettingNotFound
 	}
 	return s.getValueFn(ctx, key)
 }

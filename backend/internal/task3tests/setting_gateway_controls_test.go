@@ -186,7 +186,7 @@ func TestProvideSettingService_LoadsGatewayControlsFromDBIntoConfig(t *testing.T
 	}}
 	cfg := newGatewayControlTestConfig()
 
-	service.ProvideSettingService(repo, nil, nil, cfg, nil)
+	service.ProvideSettingService(repo, nil, nil, cfg)
 
 	require.False(t, cfg.Gateway.Sticky.OpenAI.Enabled)
 	require.True(t, cfg.Gateway.Sticky.Gemini.Enabled)
