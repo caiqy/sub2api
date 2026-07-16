@@ -2652,3 +2652,26 @@ The original Task 12 total counts final named command results, not unique test d
 - Retained-timeout verification: `go -C backend test ./internal/service -run 'FirstOutputTimeout|HandleStreamTimeout' -count=1` passed (7.950s); `go -C backend test ./internal/handler -run 'FirstOutputTimeout|HandleStreamTimeout|UsesConfiguredFirstMessageTimeout' -count=1` passed (4.708s); `go -C backend test ./internal/service/openai_ws_v2 -count=1` passed (2.366s).
 - Contract and compile verification: `pnpm --dir frontend run typecheck` passed; `go -C backend test ./internal/service ./internal/service/openai_ws_v2 ./internal/handler -run '^$' -count=1` passed for all three target packages.
 - Result: no Task 15 deletion residue required a RED/GREEN repair, so no code commit was created. The inherited whole-repository Wire/Admin signature drift remains outside first-token scope and is handed to Task 17; Task 16 did not rerun or repair it.
+
+## Task 17 Capability Review Completion
+
+- Scope: reviewed the `v0.1.155..v0.1.156` changed-file intersection for M-01 through M-15, excluding the approved first-token removal. `94a681bbd` remains immutable; Task19 retains ownership of `backend/cmd/server/VERSION`. No merge rewrite, OpenSpec/Comet edit, push, release, deploy, or Task18 full gate occurred.
+- Early work: `3d0c8eb24..0502b26d1` was traced to current checks: config validation and WebSocket first-message timeout to M-10; scheduler hook to M-01; passthrough contract and fixtures to M-06; handler failover and first-output replay to M-04/M-07. `d29db280e` is the range's documentation-only commit.
+- Initial compile RED: `go test ./... -run '^$'` exposed the missing Wire/Admin compatibility graph. `baa9bf698 fix: restore v0.1.156 server wiring` regenerated the graph and aligned the stale Admin fixture; the full compile gate then passed.
+- Probe-toggle RED/GREEN: the unit-tag test referenced a helper removed by the merge, and the real single/bulk update paths no longer dropped probe state. The test was changed to exercise `BulkUpdateAccounts`; it failed with no dropped IDs. `fed8873b8 fix: restore v0.1.156 compatibility paths` restores the pre-update probe state capture, layered-probe cleanup, and both single/bulk call sites. `go test -tags unit ./internal/service -run '^TestAdminService_(UpdateAccount|BulkUpdateAccounts).*Probe' -count=1` passed.
+- Responses-terminal RED/GREEN: `TestOpenAIGatewayHandler_NativeNonPassthroughResponsesFailedIsNotDuplicated` emitted the forwarded native `response.failed` plus the generic fallback. The fix marks the native failed terminal only after its downstream flush; the named native terminal tests passed.
+- Request-body RED/GREEN: `TestOpenAIGatewayHandler_ChatReplayRawSpoolAcrossFailoverWhenResponsesUnsupported` first lacked the usage request preview, then showed that Chat bypassed the raw/effective coordinator handles. The fix restores the bounded snapshot plus coordinator-owned raw/effective replay handles without changing the current scheduler/failover flow. The M-11 replay and cleanup targets passed.
+
+| Evidence | Command | Exit | Result |
+| --- | --- | ---: | --- |
+| M-01/M-02/M-03/M-04/M-05 | Targeted scheduler, OpenAI sticky, Gemini/Anthropic sticky, failover, and DB recheck regexes | 0 | `2 + 4 + 4 + 2 + 3` named targets passed. |
+| M-06/M-07 | Protocol conversion/passthrough and terminal usage regexes | 0 | Four conversion targets and four terminal targets passed; the two service passthrough assertions were rerun with `-tags unit` because the untagged package had zero matching tests. |
+| M-08/M-09 | Moderation and image-capability regexes | 0 | Four named targets per capability passed. |
+| M-10 | `go test ./internal/config -run '^(TestLoadDefaultOpenAIFirstOutputTimeoutsDisabled|TestLoadOpenAIFirstOutputTimeoutsFromEnv|TestValidateOpenAIFirstOutputTimeoutMinimum|TestLoadOpenAIWSClientFirstMessageTimeoutFromEnv)$' -count=1` | 0 | Retained first-output and client-first-message configuration contract passed; no first-token setting was restored. |
+| M-11/M-12 | Request-body replay/cleanup regex and tagged user-resource targets | 0 | Five body targets and three user-resource targets passed. |
+| M-13 | `pnpm test:run src/router/__tests__/feature-access.spec.ts src/utils/__tests__/userUiVisibility.spec.ts src/views/admin/__tests__/SettingsView.gatewayRuntime.spec.ts` | 0 | Three files, 18 tests passed. |
+| M-14 | `go test ./cmd/server -run '^$' -count=1`; tag `VERSION` and Go module diff review | 0 | Compile-only/manual. Both current and `v0.1.156` `VERSION` are `0.1.155`; `go.mod`/`go.sum` target diff is empty. Task19 decision untouched. |
+| M-15 | Migration regex; `make -C backend generate`; restricted Ent/Wire diff | 0 | Two migration targets passed; generation completed and `git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` was empty. |
+| Final static gate | `go test ./... -run '^$'`; `git diff --check`; unmerged-path checks | 0 | Full compile passed; whitespace and unmerged-path checks were clean. |
+
+- Result: all affected M-ID checks have direct passing evidence or the stated M-14 manual review. The only remaining untracked path is `.comet/current-change.json`, left untouched. Task18 may consume this review but has not been run here.
