@@ -1,5 +1,13 @@
 # 上游 v0.1.156 分段合并验证记录
 
+## Task 15 审查修复（2026-07-16）
+
+- `0e3ca7787 fix: bind ingress response before ownership check`：先绑定首个 `response.id`，再判断 pooled ingress 事件归属，确保 terminal-first 流能转发并完成。
+- `5306a1042 fix: bind relay turns on response created`：WS V2 仅由首个 `response.created` 绑定空 turn；带 response ID 的外来 delta/terminal 不再计入 usage、完成 turn 或释放 permit。
+- `790376d50 fix: restore passthrough stream interval timeout`：恢复独立的 `gateway.stream_data_interval_timeout` SSE 空闲计时器，超时关闭上游 body、调用 `HandleStreamTimeout` 并返回 `errOpenAIStreamDataIntervalTimeout`；未恢复任何 first-token 控制。
+- RED/GREEN 证据：`TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossTurns` 在修复前 3 秒读超时、修复后通过；`TestObserveUpstreamMessage_BindsOnlyResponseCreated` 在修复前把 `resp_foreign` 绑定为 active、修复后通过；`TestOpenAIStreamingPassthroughTimeout` 在修复前超过 120 秒未返回、修复后 1 秒通过。
+- 约束：保留 `a9a95d5d7`，未改动 `.comet/current-change.json`，未恢复已批准移除的本地 first-token watchdog/config/logging/API/UI 代码。
+
 ## 固定对象与工作区
 
 - 隔离方式：当前仓库中的 feature 分支；本任务未创建、切换或合并分支。
