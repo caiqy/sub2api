@@ -503,7 +503,7 @@ frontend/src/views/user/KeysView.vue
 | `backend/internal/handler/gateway_handler_responses.go` | failover/usage | 失败账号与耗时用于失败用量。 | 账号级 pool retry limit。 | 同时记录失败信息，并传入 `account.GetPoolModeRetryCount()`。 |
 | `backend/internal/handler/gateway_helper_fastpath_test.go` | 测试融合 | 用户组并发 mock。 | OpenAI WebSocket ingress lease mock。 | 合并字段和接口方法。 |
 | `backend/internal/handler/gemini_v1beta_handler.go` | failover/usage | Gemini 失败用量。 | 账号级 retry limit。 | 同时保留两侧语义。 |
-| `backend/internal/handler/openai_gateway_handler_test.go` | 测试 import | 请求体/用量测试 import。 | WebSocket 并发测试所需 `sync`。 | 保留全部 import。 |
+| `backend/internal/handler/openai_gateway_handler_test.go` | 测试 import | 请求体/用量测试 import。 | WebSocket 并发测试所需 `sync`。 | merge 时保留 import；review 后确认该文件无 `sync` 引用，作为 Task 9 early work 删除 stale import。 |
 | `backend/internal/server/routes/gateway.go` | 路由与鉴权 | usage detail capture。 | Grok video edit/extension。 | 所有端点保留 capture、认证与分组中间件，并加入 edit/extension。未分组 Key 仍由 `RequireGroupAssignment` 标记受限、写入 403 并 `Abort`，不会进入 handler。 |
 
 ### 自审、Task 9 入口与风险
@@ -514,6 +514,15 @@ frontend/src/views/user/KeysView.vue
 - 本机缺少 `v0.1.153` 的签名验证材料；已核验 annotated object 与指定 peel。
 - Task 8 仅执行冲突与拓扑静态核验，未运行 merge 后完整测试或 build，按 Task 9 边界留待后续阶段。
 - 未 push、release、deploy 或合并 main。
+
+### Review finding: stale OpenAI handler test import（Task 9 early work）
+
+- reviewer finding：`backend/internal/handler/openai_gateway_handler_test.go` 导入 `sync`，但文件没有 `sync` 标识符引用；`sync/atomic` 仍被使用。
+- RED：`go -C backend test ./internal/handler -run '^$' -count=1` 退出 1，包含 `openai_gateway_handler_test.go:16:2: "sync" imported and not used`；同次还报告 3 个既存 `NewPaymentHandler` 三参调用与当前两参签名不匹配。
+- GREEN（目标诊断）：删除唯一的 `sync` import 后重跑同一命令，`sync` unused 诊断消失；命令仍退出 1，仅保留上述 3 个 `NewPaymentHandler` 编译错误。没有将无关 PaymentHandler 修复混入本次提交。
+- OpenAI 聚焦复验：`go -C backend test ./internal/handler -run '^(TestOpenAIHandleStreamingAwareError_JSONEscaping|TestOpenAIHandleStreamingAwareError_NonStreaming|TestOpenAIEnsureForwardErrorResponse_WritesFallbackWhenNotWritten)$' -count=1` 同样不再报告 `sync`，但受相同 3 个既存 PaymentHandler 编译错误阻断，目标测试未能执行。
+- 修复提交：`07eba46c6edeaff011574b6be4c12d79b7317877` `fix: remove stale OpenAI handler test import`；仅含该测试文件的一行删除。
+- 归属：这是 Task 9 early work。Task 8 的 merge、九项冲突台账和 OpenSpec 3.1 边界不变；本报告的本次记录以独立文档提交保存。
 
 <a id="task-3-capability-matrix"></a>
 ### 能力矩阵
