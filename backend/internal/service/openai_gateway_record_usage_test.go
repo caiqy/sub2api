@@ -1146,6 +1146,61 @@ func TestOpenAIGatewayServiceRecordUsage_Gpt54LongContextBillsWholeSession(t *te
 	require.Equal(t, 1, userRepo.deductCalls)
 }
 
+func TestOpenAIGatewayServiceRecordUsage_SparkShadowUsesCurrentParentBillingSetting(t *testing.T) {
+	tests := []struct {
+		name          string
+		parentEnabled bool
+	}{
+		{name: "parent opt out overrides stale enabled shadow", parentEnabled: false},
+		{name: "parent opt in overrides stale disabled shadow", parentEnabled: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+			accountRepo := &openAIRecordUsageAccountRepoStub{account: &Account{
+				ID:       4016,
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeOAuth,
+				Extra:    map[string]any{openAILongContextBillingEnabledKey: tt.parentEnabled},
+			}}
+			svc := newOpenAIRecordUsageServiceForTest(
+				usageRepo,
+				&openAIRecordUsageUserRepoStub{},
+				&openAIRecordUsageSubRepoStub{},
+				nil,
+			)
+			svc.accountRepo = accountRepo
+			parentID := int64(4016)
+
+			err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+				Result: &OpenAIForwardResult{
+					RequestID: "resp_gpt54_shadow_parent_setting",
+					Usage:     OpenAIUsage{InputTokens: 300000, OutputTokens: 2000},
+					Model:     "gpt-5.4-2026-03-05",
+					Duration:  time.Second,
+				},
+				APIKey: &APIKey{ID: 1016},
+				User:   &User{ID: 2016},
+				Account: &Account{
+					ID:              3016,
+					Platform:        PlatformOpenAI,
+					Type:            AccountTypeOAuth,
+					ParentAccountID: &parentID,
+					QuotaDimension:  QuotaDimensionSpark,
+					Extra: map[string]any{
+						openAILongContextBillingEnabledKey: !tt.parentEnabled,
+					},
+				},
+			})
+
+			require.NoError(t, err)
+			require.Equal(t, 1, accountRepo.calls)
+			require.Equal(t, tt.parentEnabled, usageRepo.lastLog.LongContextBillingApplied)
+		})
+	}
+}
+
 func TestOpenAIGatewayServiceRecordUsage_ServiceTierPriorityUsesFastPricing(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	userRepo := &openAIRecordUsageUserRepoStub{}
