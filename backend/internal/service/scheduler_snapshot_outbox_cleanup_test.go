@@ -293,6 +293,40 @@ func TestSchedulerSnapshotServicePollOutboxDoesNotUseConsumedEventForLag(t *test
 	}
 }
 
+func TestSchedulerSnapshotServicePollOutboxRebuildsForPendingLagAfterWatermark(t *testing.T) {
+	createdAt := time.Now().Add(-time.Hour)
+	events := make([]SchedulerOutboxEvent, 0, 401)
+	for id := range 401 {
+		events = append(events, SchedulerOutboxEvent{
+			ID:        int64(id + 1),
+			EventType: SchedulerOutboxEventAccountLastUsed,
+			CreatedAt: createdAt,
+		})
+	}
+
+	cache := &outboxCleanupCache{}
+	repo := &outboxCleanupRepo{events: events}
+	svc := NewSchedulerSnapshotService(cache, repo, nil, nil, &config.Config{
+		Gateway: config.GatewayConfig{Scheduling: config.GatewaySchedulingConfig{
+			OutboxLagRebuildSeconds:  1,
+			OutboxLagRebuildFailures: 2,
+		}},
+	})
+
+	svc.pollOutbox()
+	if svc.lagFailures != 1 || cache.listBucketCalls != 0 {
+		t.Fatalf("first pending lag check failures=%d rebuilds=%d, want 1 and 0", svc.lagFailures, cache.listBucketCalls)
+	}
+
+	svc.pollOutbox()
+	if !reflect.DeepEqual(repo.firstCreatedAfterID, []int64{200, 400}) {
+		t.Fatalf("unexpected pending lag watermarks: %#v", repo.firstCreatedAfterID)
+	}
+	if svc.lagFailures != 0 || cache.listBucketCalls != 1 {
+		t.Fatalf("second pending lag check failures=%d rebuilds=%d, want 0 and 1", svc.lagFailures, cache.listBucketCalls)
+	}
+}
+
 func TestSchedulerSnapshotServiceCleanupSkipsNonPositiveWatermark(t *testing.T) {
 	repo := &outboxCleanupRepo{
 		rows:         []int64{1, 2, 3},

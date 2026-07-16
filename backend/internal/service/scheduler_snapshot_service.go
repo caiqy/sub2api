@@ -318,6 +318,7 @@ func (s *SchedulerSnapshotService) pollOutbox() {
 	s.cleanupConsumedOutbox(lastID)
 
 	lagCtx, lagCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// 只检查 watermark 后仍待消费的事件，避免已消费批次触发重建。
 	s.checkOutboxLag(lagCtx, lastID)
 	lagCancel()
 }
