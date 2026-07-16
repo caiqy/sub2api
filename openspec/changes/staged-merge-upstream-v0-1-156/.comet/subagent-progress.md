@@ -1,20 +1,20 @@
 # Subagent Progress
 
 - Change: `staged-merge-upstream-v0-1-156`
-- Plan task: `Task 9：审查 v0.1.153 受影响能力并修复回归（OpenSpec 3.2）`
-- OpenSpec task: `3.2 审查 v0.1.152..v0.1.153 触及的本地能力，对回归先保留失败测试再做最小兼容修复`
-- Phase: `done`
+- Plan task: `Task 10：执行 v0.1.153 阶段门禁（OpenSpec 3.3）`
+- OpenSpec task: `3.3 运行全部本地保护测试和本阶段受影响能力测试，记录通过证据后再进入下一 tag`
+- Phase: `implementing`
 - Review mode: `thorough`
 - Review/fix round: `0/2`
-- Implementer status: `DONE（报告收口完成）`
-- Implementation commit: `early 07eba46c6/94c2c3fb7；fix de17e7a67；docs 83fb1299a/f4dba13cb`
-- Changed files: `PaymentHandler provider/fixtures；canonical 验证报告；独立临时报告净删除`
-- Evidence: `97 files；11 affected + 4 manual N/A + M-16 protected/N/A；123 named tests；generate/static PASS`
-- TDD: `tdd（行为回归必须 RED/GREEN；编译 fixture 使用真实 compile RED/GREEN）`
-- Task reviewer: `Approved（Critical/Important/Minor 均无）`
-- Unresolved findings: `none；测试未由 reviewer 重跑，按报告证据契约接受`
-- Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-9-brief.md`
-- Report: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-9-report.md`
+- Implementer status: `dispatched`
+- Implementation commit: `pending`
+- Changed files: `pending`
+- Evidence: `pending`
+- TDD: `exempt-by-user-decision`（只运行既有门禁）
+- Task reviewer: `pending`
+- Unresolved findings: `none`
+- Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-10-brief.md`
+- Report: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-10-report.md`
 - Blocker fix: `OpenAIFastPolicyUserSelector.vue` 的 `SimpleUser` type-only import 已从未导出的 `@/api/admin/usage` 改为共享 `@/types`；没有行为变更或伪造行为 RED。
 - RED: `pnpm --dir frontend run build` 已记录为失败；本代理复现 `pnpm --dir frontend run typecheck`，失败为 TS2614 和由该未解析类型引发的 3 个 TS7006。
 - Follow-up RED: 改正 import 后，`typecheck` 暴露 hydration 映射遗漏共享类型必填的 `username`；`adminAPI.users.getById` 的 `AdminUser` 已提供该字段。
