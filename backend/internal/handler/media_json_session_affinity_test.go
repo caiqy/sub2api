@@ -118,7 +118,7 @@ func runMediaJSONSessionAffinity(t *testing.T, route, kind, body string, headers
 	}
 	gateway := service.NewOpenAIGatewayService(
 		accountRepo, nil, nil, nil, nil, nil, cache, cfg,
-		nil, concurrency, nil, nil, billing, upstream, nil, nil, nil, nil, nil,
+		nil, concurrency, nil, nil, billing, upstream, nil, nil, service.NewGrokTokenProvider(accountRepo, nil), nil, nil,
 	)
 	h := NewOpenAIGatewayHandler(gateway, concurrency, billing, &service.APIKeyService{}, nil, nil, nil, nil, cfg)
 	h.maxAccountSwitches = 1
