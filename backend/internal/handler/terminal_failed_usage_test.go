@@ -573,12 +573,17 @@ func TestOpenAIGatewayHandler_OrdinaryErrorsRequireUpstreamAttempt(t *testing.T)
 		group := &service.Group{ID: 45, Platform: service.PlatformGrok, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
 		account := &service.Account{ID: 145, Name: "grok-local", Platform: service.PlatformGrok, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"base_url": "https://api.x.ai/v1"}}
 		env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIChatCompletionsAccountRepoStub{account: account}, &openAIChatCompletionsHTTPUpstreamStub{err: errors.New("must not be called")})
+		var requestContext *gin.Context
 
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"grok-imagine","prompt":"hello"}`))
 		req.Header.Set("Content-Type", "application/json")
-		env.router("/v1/images/generations", env.handler.GrokImages).ServeHTTP(rec, req)
+		env.router("/v1/images/generations", func(c *gin.Context) {
+			requestContext = c
+			env.handler.GrokImages(c)
+		}).ServeHTTP(rec, req)
 
+		require.False(t, service.HasOpsUpstreamAttempted(requestContext))
 		require.Nil(t, env.usageRepo.lastLog)
 	})
 
