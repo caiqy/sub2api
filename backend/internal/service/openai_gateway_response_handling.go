@@ -331,8 +331,16 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		}
 		clientOutputStarted = true
 		lastDownstreamWriteAt = time.Now()
+		markFailedTerminalWritten()
 	}
 	finalizeStream := func() (*openaiStreamingResult, error) {
+		// An upstream EOF may omit the final SSE blank line. Complete a forwarded
+		// response.failed frame before marking it terminal for the handler.
+		if failedTerminalPending && eventInProgress && !clientDisconnected {
+			if _, err := writePendingString("\n"); err != nil {
+				handlePendingWriteError(err)
+			}
+		}
 		if guardFirstOutput && eventInProgress {
 			// EOF dispatches the final SSE event even without a trailing blank line.
 			completeGuardedEvent(true)

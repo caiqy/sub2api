@@ -623,6 +623,8 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 		upstreamDetail = truncateString(string(body), maxBytes)
 	}
 	setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, upstreamDetail)
+	SetUsageResponseSnapshot(c, FormatUsageDetailResponseHeadersText(resp.StatusCode, resp.Header), string(body))
+	SetUsageUpstreamResponse(c, resp.StatusCode, resp.Header, string(body))
 	logOpenAIInstructionsRequiredDebug(ctx, c, account, resp.StatusCode, upstreamMsg, requestBody, body)
 	// 透传模式保留原始上游错误响应，但运行态账号状态仍需更新，
 	// 避免粘性路由继续复用刚被限流的账号。cyber 例外：不冷却账号。
@@ -1189,7 +1191,12 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				clientOutputStarted = true
 				pendingClientFlush = true
 				if forceFlushFailedEvent {
-					MarkResponseCommitted(c)
+					if _, err := fmt.Fprintln(w); err != nil {
+						clientDisconnected = true
+					} else {
+						c.Set(openAIResponseTerminalWrittenKey, true)
+						MarkResponseCommitted(c)
+					}
 				}
 				if line == "" {
 					flusher.Flush()

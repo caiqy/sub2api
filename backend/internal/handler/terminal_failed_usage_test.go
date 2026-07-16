@@ -406,7 +406,7 @@ func TestOpenAIGatewayHandler_PassthroughHTTP400CreatesFailedUsage(t *testing.T)
 	env.router("/v1/responses", env.handler.Responses).ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
-	require.Contains(t, rec.Body.String(), "passthrough rejected payload")
+	require.Contains(t, rec.Body.String(), "Upstream request failed")
 	log := waitForOpenAIFailedUsageLog(t, env.usageRepo)
 	require.NotNil(t, log)
 	require.NotNil(t, log.DetailSnapshot)
