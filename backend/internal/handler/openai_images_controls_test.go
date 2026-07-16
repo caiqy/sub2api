@@ -313,6 +313,14 @@ func requireMultipartTextPart(t *testing.T, body []byte, contentType, field stri
 	}
 }
 
+func TestOpenAIImagesJSONKeepaliveInterval(t *testing.T) {
+	h := &OpenAIGatewayHandler{cfg: &config.Config{Gateway: config.GatewayConfig{ImageNonstreamKeepaliveInterval: 7}}}
+	require.Equal(t, 7*time.Second, h.openAIImagesJSONKeepaliveInterval())
+
+	h.cfg.Gateway.ImageNonstreamKeepaliveInterval = 0
+	require.Zero(t, h.openAIImagesJSONKeepaliveInterval())
+}
+
 func TestOpenAIImages_InlineSpoolKeepsRawBodyAndOmitsSnapshots(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rawDir := t.TempDir()
