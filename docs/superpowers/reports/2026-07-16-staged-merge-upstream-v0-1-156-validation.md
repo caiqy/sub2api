@@ -2675,3 +2675,12 @@ The original Task 12 total counts final named command results, not unique test d
 | Final static gate | `go test ./... -run '^$'`; `git diff --check`; unmerged-path checks | 0 | Full compile passed; whitespace and unmerged-path checks were clean. |
 
 - Result: all affected M-ID checks have direct passing evidence or the stated M-14 manual review. The only remaining untracked path is `.comet/current-change.json`, left untouched. Task18 may consume this review but has not been run here.
+
+## Task 17 Follow-up Review
+
+- `764566330 fix: preserve failed response usage` retains `OpenAIForwardResult` when a native streaming `response.failed` returns an error, so the existing Responses handler writes exactly one failed usage record with parsed upstream token counts. It preserves the error path and does not emit a second terminal event.
+- RED: `TestOpenAIForwardStreamingResponseFailedReturnsUsageWithError` received a nil result; `TestOpenAIGatewayHandler_NativeNonPassthroughResponsesFailedIsNotDuplicated` received `0/0` rather than `17/3` tokens; the bulk probe test observed a second `GetByIDs` call after `BulkUpdate`.
+- GREEN: direct service result, native handler usage/terminal, and bulk probe tests pass. `go test ./internal/service ./internal/handler -run '^$' -count=1` also passes.
+- Bulk probe disable now derives a shallow account copy with a cloned `Extra` map from the pre-update `cachedTargets`, applies `openai_probe_enabled=false` only to that copy, and invokes the existing side effects after a successful bulk update. It performs no post-update read and does not turn a completed database update into a later API error.
+- The response-handling pending marker now explains why it is committed only after the native terminal frame flushes: handler fallback would otherwise append a duplicate `response.failed`.
+- Boundary: no first-token, VERSION, OpenSpec/Comet/current-change, Task18, release, or deployment work was performed.
