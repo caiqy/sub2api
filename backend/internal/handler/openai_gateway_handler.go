@@ -400,6 +400,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	var lastFailedDuration time.Duration
 	var lastFailedReasoningEffort *string
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
+	firstOutputTimeoutSwitchCount := 0
 
 	for {
 		// Select account supporting the requested model
@@ -545,14 +546,33 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			} else {
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
-					if service.OpenAICompactKeepaliveAdjustedWrittenSize(c) != writerSizeBeforeForward {
+					if !openAIRequestAllowsFailoverReplay(c) {
+						failoverClientGone(c)
+						return
+					}
+					if !openAIForwardMayFailover(c, writerSizeBeforeForward, failoverErr) {
 						if c.Request.Context().Err() == nil {
 							h.submitFailoverFailedUsageLog(c, apiKey, account, reqModel, reqStream, failoverErr, forwardDuration, attemptReasoningEffort, "handler.openai_gateway.responses")
 						}
 						h.handleFailoverExhausted(c, failoverErr, true)
 						return
 					}
+					if failoverErr.SafeToFailoverAfterWrite && c.Writer.Written() {
+						streamStarted = true
+						headers := c.Writer.Header()
+						headers.Del("Content-Type")
+						headers.Del("Content-Length")
+						headers.Del("Content-Encoding")
+						headers.Del("Transfer-Encoding")
+						headers.Del("Connection")
+						headers.Del("X-Accel-Buffering")
+					}
 					h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)
+					if openAIFirstOutputFailoverExhausted(failoverErr, &firstOutputTimeoutSwitchCount) {
+						h.submitFailoverFailedUsageLog(c, apiKey, account, reqModel, reqStream, failoverErr, forwardDuration, attemptReasoningEffort, "handler.openai_gateway.responses")
+						h.handleFailoverExhausted(c, failoverErr, streamStarted)
+						return
+					}
 					// 池模式：同账号重试
 					if failoverErr.RetryableOnSameAccount {
 						retryLimit := account.GetPoolModeRetryCount()

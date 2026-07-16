@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -114,6 +115,55 @@ type firstTokenCreatedHTTPUpstream struct {
 type firstTokenCreatedBody struct {
 	ctx     context.Context
 	emitted bool
+}
+
+type firstOutputFailoverCloseTrackingBody struct {
+	io.ReadCloser
+	closed chan struct{}
+	once   sync.Once
+}
+
+func (b *firstOutputFailoverCloseTrackingBody) Close() error {
+	b.once.Do(func() { close(b.closed) })
+	return b.ReadCloser.Close()
+}
+
+type firstOutputFailoverHTTPUpstream struct {
+	service.HTTPUpstream
+	accountIDs      []int64
+	firstWriterDone chan struct{}
+}
+
+func (u *firstOutputFailoverHTTPUpstream) Do(_ *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
+	u.accountIDs = append(u.accountIDs, accountID)
+	if accountID != 1 {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body: io.NopCloser(strings.NewReader(
+				"data: {\"type\":\"response.output_text.delta\",\"delta\":\"replayed\"}\n\n" +
+					"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_replayed\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"replayed\"}]}],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+			)),
+		}, nil
+	}
+
+	firstBody, firstWriter := io.Pipe()
+	trackedBody := &firstOutputFailoverCloseTrackingBody{ReadCloser: firstBody, closed: make(chan struct{})}
+	go func() {
+		defer close(u.firstWriterDone)
+		defer func() { _ = firstWriter.Close() }()
+		_, _ = firstWriter.Write([]byte("data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_first\"}}\n\n"))
+		<-trackedBody.closed
+	}()
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       trackedBody,
+	}, nil
+}
+
+func (u *firstOutputFailoverHTTPUpstream) DoWithTLS(req *http.Request, proxyURL string, accountID int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, proxyURL, accountID, concurrency)
 }
 
 func (b *firstTokenCreatedBody) Read(p []byte) (int, error) {
@@ -295,6 +345,36 @@ func TestOpenAIGatewayHandler_FirstTokenTimeoutSuppressesPreOutputKeepalive(t *t
 	require.Equal(t, http.StatusGatewayTimeout, recorder.Code, recorder.Body.String())
 	require.Equal(t, "first_token_timeout", gjson.Get(recorder.Body.String(), "error.type").String())
 	require.Contains(t, recorder.Header().Get("Content-Type"), "application/json")
+}
+
+func TestOpenAIGatewayHandler_ResponsesFirstOutputTimeoutFailsOverAfterKeepalive(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 12, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+	accounts := []*service.Account{
+		{ID: 1, Name: "first-output-timeout", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, Credentials: map[string]any{"api_key": "sk-first"}},
+		{ID: 2, Name: "replayed", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "sk-second"}},
+	}
+	upstream := &firstOutputFailoverHTTPUpstream{firstWriterDone: make(chan struct{})}
+	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: accounts}, upstream)
+	env.handler.cfg.Gateway.OpenAIWS.Enabled = false
+	env.handler.cfg.Gateway.OpenAIFirstOutputTimeoutSeconds = 2
+	env.handler.cfg.Gateway.StreamKeepaliveInterval = 1
+	env.handler.maxAccountSwitches = 1
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.4","input":"hello","stream":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	env.router("/v1/responses", env.handler.Responses).ServeHTTP(recorder, req)
+
+	require.Equal(t, []int64{1, 2}, upstream.accountIDs)
+	require.Contains(t, recorder.Body.String(), ":\n\n")
+	require.NotContains(t, recorder.Body.String(), "resp_first")
+	require.Contains(t, recorder.Body.String(), "resp_replayed")
+	select {
+	case <-upstream.firstWriterDone:
+	case <-time.After(time.Second):
+		t.Fatal("first upstream body did not close after first-output timeout")
+	}
 }
 
 func TestOpenAIGatewayHandler_EmbeddingsFailoverExhaustedCreatesFailedUsage(t *testing.T) {
