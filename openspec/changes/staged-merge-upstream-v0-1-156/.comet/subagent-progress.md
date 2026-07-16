@@ -3,16 +3,16 @@
 - Change: `staged-merge-upstream-v0-1-156`
 - Plan task: `Task 11：合入 v0.1.155 并专项复核高风险区域（OpenSpec 4.1）`
 - OpenSpec task: `4.1 使用独立 --no-ff merge 合入 v0.1.155，逐项融合网关、调度、设置、前端和生成物冲突`
-- Phase: `implementing`
+- Phase: `done`
 - Review mode: `thorough`
 - Review/fix round: `0/2`
-- Implementer status: `dispatched`
-- Implementation commit: `pending`
-- Changed files: `pending`
-- Evidence: `pending`
+- Implementer status: `DONE`
+- Implementation commit: `347ad613 merge: upstream v0.1.155；4ac71153 docs ledger`
+- Changed files: `234 relative to first parent；14 conflicts`
+- Evidence: `peel/parents PASS；generate、config 4 tests、frontend 69 tests、static PASS；5-arg builder 交 Task 12`
 - TDD: `exempt-by-user-decision`（Git merge；真实行为修复留 Task 12）
-- Task reviewer: `pending`
-- Unresolved findings: `none`
+- Task reviewer: `Approved（4f2060f7b 补齐 14 项 caller/entry）`
+- Unresolved findings: `none；5 参数 builder 阻断按边界交 Task 12`
 - Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-11-brief.md`
 - Report: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-11-report.md`
 - Blocker fix: `OpenAIFastPolicyUserSelector.vue` 的 `SimpleUser` type-only import 已从未导出的 `@/api/admin/usage` 改为共享 `@/types`；没有行为变更或伪造行为 RED。

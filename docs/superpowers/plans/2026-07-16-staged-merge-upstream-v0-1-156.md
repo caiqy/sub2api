@@ -490,7 +490,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 - 修改：Git merge 涉及的实际文件
 - 修改：`docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md`
 
-- [ ] **步骤 1：合入 tag 并发现冲突**
+- [x] **步骤 1：合入 tag 并发现冲突**
 
   执行：
   ```bash
@@ -500,7 +500,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：tag peel SHA 为 `41cec0db059ffb82d0efdcfcf07a24ab51fbfe97`；任何冲突保持在此 merge 中等待逐文件融合。
 
-- [ ] **步骤 2：融合冲突并专项检查网关、调度、设置、前端、生成物**
+- [x] **步骤 2：融合冲突并专项检查网关、调度、设置、前端、生成物**
 
   执行：
   ```bash
@@ -509,7 +509,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   对上述五类区域逐项记录 ours/theirs 的行为、可共存结论、调用方、生成源或 migration runner。不可共存的未批准能力必须暂停；不以“编译通过”替代语义结论。
 
-- [ ] **步骤 3：完成 v0.1.155 merge commit**
+- [x] **步骤 3：完成 v0.1.155 merge commit**
 
   执行：
   ```bash
