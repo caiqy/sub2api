@@ -707,6 +707,10 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   在提交前，按报告关联的精确修复/测试路径逐个执行 `git add -- 路径`，再暂存验证报告。预期：与任务 15 的删除提交分离；无修复时不创建空提交。
 
+- [ ] **步骤 4：独立提交 v0.1.156 其余能力审查结论**
+
+  canonical 报告记录 changed-files/矩阵交集、Task 17 early work、RED/GREEN、manual 结论和残余风险；只提交报告 `docs: record v0.1.156 capability review`。无未解释回归不得开始 Task 18。
+
 ### Task 18：执行 v0.1.156 阶段门禁（OpenSpec 5.5）
 
 **文件：**
