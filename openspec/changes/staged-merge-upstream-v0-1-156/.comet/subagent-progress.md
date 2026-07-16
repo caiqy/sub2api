@@ -1,23 +1,17 @@
 # Subagent Progress
 
 - Change: `staged-merge-upstream-v0-1-156`
-- Plan task: `Task 15：完整移除本地首 Token 超时并保留上游替代语义（OpenSpec 5.2）`
-- OpenSpec task: `5.2 完整删除本地首 Token 超时的后端逻辑、配置、运行时 API、管理端 UI、专用测试和兼容文档，保留且验证上游原生语义`
-- Phase: `done`
+- Plan task: `Task 16：扫描旧首 Token 符号并消除依赖残骸（OpenSpec 5.3）`
+- OpenSpec task: `5.3 扫描本地旧配置键、错误类型、结构化日志和 watchdog 符号，修复删除后的编译或契约依赖且不保留兼容别名`
+- Phase: `implementing`
 - Review mode: `thorough`
-- Review/fix round: `2/2`
-- Implementer status: `DONE`
-- Implementation commit: `a9a95d5d7 removal；0e3ca7787/5306a1042/790376d50 fixes；6906dbc28/6f8e4770a fixtures；f800cc8da docs`
-- Changed files: `33 removal paths + bounded WS/stream follow-ups`
-- Evidence: `legacy scan 0；first-output/WS client timeout PASS；WS v2 package PASS`
-- TDD: `approved-removal（先记录现有保护，再删契约并验证上游替代）`
-- Task reviewer: `Approved`
-- Unresolved findings: `none；VERSION 明确交 Task19，EOF warning 留普通后续`
-- Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-15-brief.md`
-- Report: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-15-report.md`
-- Blocker fix: `OpenAIFastPolicyUserSelector.vue` 的 `SimpleUser` type-only import 已从未导出的 `@/api/admin/usage` 改为共享 `@/types`；没有行为变更或伪造行为 RED。
-- RED: `pnpm --dir frontend run build` 已记录为失败；本代理复现 `pnpm --dir frontend run typecheck`，失败为 TS2614 和由该未解析类型引发的 3 个 TS7006。
-- Follow-up RED: 改正 import 后，`typecheck` 暴露 hydration 映射遗漏共享类型必填的 `username`；`adminAPI.users.getById` 的 `AdminUser` 已提供该字段。
-- GREEN: `pnpm --dir frontend run typecheck` 通过；`pnpm --dir frontend exec vitest run src/views/admin/settings/__tests__/OpenAIFastPolicyUserSelector.spec.ts` 通过（1 file、3 tests）。
-- Commit: `3ede52fc0 fix: import SimpleUser from shared types`（仅含 Vue 文件）。
-- Gate status: 两个 blocker 均已修复；完整 Task 7 门禁仍需由重跑代理从头执行。scratch 不提交。
+- Review/fix round: `0/2`
+- Implementer status: `dispatched`
+- Implementation commit: `pending`
+- Changed files: `pending`
+- Evidence: `pending`
+- TDD: `仅真实残骸修复需要 RED/GREEN；纯扫描豁免`
+- Task reviewer: `pending`
+- Unresolved findings: `none`
+- Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-16-brief.md`
+- Report: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-16-report.md`
