@@ -525,7 +525,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 - 修改：由 `git diff --name-only v0.1.153..v0.1.155` 与矩阵交集确定的实际文件
 - 修改：`docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md`
 
-- [ ] **步骤 1：执行无冲突语义审查和保护测试**
+- [x] **步骤 1：执行无冲突语义审查和保护测试**
 
   执行：
   ```bash
@@ -534,11 +534,11 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：每个 changed-file 与矩阵关键文件交集都有结论，尤其核查 gateway routes/handlers、scheduler/cache、settings DTO/cache、Vue 管理入口、Ent schema/provider 和 migration。
 
-- [ ] **步骤 2：先失败后修复，并隔离普通提交**
+- [x] **步骤 2：先失败后修复，并隔离普通提交**
 
   使用矩阵现有聚焦命令复现；无直接断言时新增最小行为测试。修复只处理这一段首次出现的回归，并记录修复前/后输出。
 
-- [ ] **步骤 3：提交 v0.1.155 兼容修复（仅在需要时）**
+- [x] **步骤 3：提交 v0.1.155 兼容修复（仅在需要时）**
 
   执行：
   ```bash
@@ -547,7 +547,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   在提交前，按报告关联的精确修复/测试路径逐个执行 `git add -- 路径`，再暂存验证报告。预期：没有回归时不制造空提交；报告仍完成该段审查结论。
 
-- [ ] **步骤 4：独立提交 v0.1.155 能力审查结论**
+- [x] **步骤 4：独立提交 v0.1.155 能力审查结论**
 
   正式报告记录 changed-files/矩阵交集、调用链、Task 11 builder handoff、新回归 RED/GREEN、修复提交和残余风险；只提交报告 `docs: record v0.1.155 capability review`。无未解释回归不得开始 Task 13。
 
