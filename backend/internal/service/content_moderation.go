@@ -1487,7 +1487,8 @@ func (s *ContentModerationService) loadRuntimeSnapshot(ctx context.Context) (*co
 	}
 	now := time.Now()
 	if snapshot := s.runtimeSnapshot.Load(); snapshot != nil {
-		if now.Sub(snapshot.loadedAt) < s.runtimeSnapshotTTL() {
+		ttl := s.runtimeSnapshotTTL()
+		if ttl > time.Nanosecond && now.Sub(snapshot.loadedAt) < ttl {
 			return snapshot, nil
 		}
 		s.triggerRuntimeSnapshotRefresh()
