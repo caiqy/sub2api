@@ -129,7 +129,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 
 **产物：** 报告的“阶段 0 基线”章节，按命令记录退出码、失败测试名或通过摘要、环境限制和生成 diff。
 
-- [ ] **步骤 1：执行当前本地质量门禁**
+- [x] **步骤 1：执行当前本地质量门禁**
 
   执行：
   ```bash
@@ -138,7 +138,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：两条命令均退出码 0。`make test` 覆盖 `go test ./...`、`golangci-lint run ./...`、`go test -tags=unit ./...`、前端 lint/typecheck/Vitest；build 单独覆盖前端嵌入产物。
 
-- [ ] **步骤 2：执行 Ent 与 Wire 两轮生成稳定性检查**
+- [x] **步骤 2：执行 Ent 与 Wire 两轮生成稳定性检查**
 
   执行：
   ```bash
@@ -149,7 +149,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：两次检查均无 diff；若生成变更来自当前基线，先回到 schema/provider 源确定并提交可复现结果，再从步骤 1 重跑。
 
-- [ ] **步骤 3：处理阶段 0 阻塞**
+- [x] **步骤 3：处理阶段 0 阻塞**
 
   执行：
   ```bash
@@ -157,6 +157,15 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   git diff --check
   ```
   预期：报告精确记录全部失败命令和复现命令。任一基线测试、构建或生成检查失败时停止，禁止执行任务 5 的 merge；不得将既有失败归因于上游。
+
+- [x] **步骤 4：提交阶段 0 基线证据**
+
+  执行：
+  ```bash
+  git add -f docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md
+  git commit -m "docs: record stage zero baseline"
+  ```
+  预期：仅提交验证报告；测试、构建或生成检查失败时仍可提交准确的阻塞证据，但任务保持未完成并停止后续 tag merge。
 
 ### Task 3：建立本地能力至验证证据的映射（OpenSpec 1.3）
 
