@@ -547,6 +547,10 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   在提交前，按报告关联的精确修复/测试路径逐个执行 `git add -- 路径`，再暂存验证报告。预期：没有回归时不制造空提交；报告仍完成该段审查结论。
 
+- [ ] **步骤 4：独立提交 v0.1.155 能力审查结论**
+
+  正式报告记录 changed-files/矩阵交集、调用链、Task 11 builder handoff、新回归 RED/GREEN、修复提交和残余风险；只提交报告 `docs: record v0.1.155 capability review`。无未解释回归不得开始 Task 13。
+
 ### Task 13：执行 v0.1.155 阶段门禁（OpenSpec 4.3）
 
 **文件：**

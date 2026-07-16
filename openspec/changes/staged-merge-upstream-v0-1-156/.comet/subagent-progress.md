@@ -1,20 +1,20 @@
 # Subagent Progress
 
 - Change: `staged-merge-upstream-v0-1-156`
-- Plan task: `Task 11：合入 v0.1.155 并专项复核高风险区域（OpenSpec 4.1）`
-- OpenSpec task: `4.1 使用独立 --no-ff merge 合入 v0.1.155，逐项融合网关、调度、设置、前端和生成物冲突`
-- Phase: `done`
+- Plan task: `Task 12：审查 v0.1.155 受影响能力并修复回归（OpenSpec 4.2）`
+- OpenSpec task: `4.2 审查 v0.1.153..v0.1.155 触及的本地能力，对回归先保留失败测试再做最小兼容修复`
+- Phase: `implementing`
 - Review mode: `thorough`
 - Review/fix round: `0/2`
-- Implementer status: `DONE`
-- Implementation commit: `347ad613 merge: upstream v0.1.155；4ac71153 docs ledger`
-- Changed files: `234 relative to first parent；14 conflicts`
-- Evidence: `peel/parents PASS；generate、config 4 tests、frontend 69 tests、static PASS；5-arg builder 交 Task 12`
-- TDD: `exempt-by-user-decision`（Git merge；真实行为修复留 Task 12）
-- Task reviewer: `Approved（4f2060f7b 补齐 14 项 caller/entry）`
-- Unresolved findings: `none；5 参数 builder 阻断按边界交 Task 12`
-- Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-11-brief.md`
-- Report: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-11-report.md`
+- Implementer status: `dispatched`
+- Implementation commit: `pending`
+- Changed files: `pending`
+- Evidence: `pending`
+- TDD: `tdd（已知 builder compile RED；其他真实回归须 RED/GREEN）`
+- Task reviewer: `pending`
+- Unresolved findings: `none`
+- Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-12-brief.md`
+- Report: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-12-report.md`
 - Blocker fix: `OpenAIFastPolicyUserSelector.vue` 的 `SimpleUser` type-only import 已从未导出的 `@/api/admin/usage` 改为共享 `@/types`；没有行为变更或伪造行为 RED。
 - RED: `pnpm --dir frontend run build` 已记录为失败；本代理复现 `pnpm --dir frontend run typecheck`，失败为 TS2614 和由该未解析类型引发的 3 个 TS7006。
 - Follow-up RED: 改正 import 后，`typecheck` 暴露 hydration 映射遗漏共享类型必填的 `username`；`adminAPI.users.getById` 的 `AdminUser` 已提供该字段。
