@@ -8,6 +8,7 @@
 - RED/GREEN 证据：`TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossTurns` 在修复前 3 秒读超时、修复后通过；`TestObserveUpstreamMessage_BindsOnlyResponseCreated` 在修复前把 `resp_foreign` 绑定为 active、修复后通过；`TestOpenAIStreamingPassthroughTimeout` 在修复前超过 120 秒未返回、修复后 1 秒通过。
 - 约束：保留 `a9a95d5d7`，未改动 `.comet/current-change.json`，未恢复已批准移除的本地 first-token watchdog/config/logging/API/UI 代码。
 - WS V2 fixture follow-up: `6906dbc28 test: align websocket v2 lifecycle fixtures` 为旧 terminal-first fixtures 在首个 response 数据前显式加入同 ID `response.created`；unknown terminal 序列为 `created(resp_turn_1)` 后的 `completed(resp_turn_1)` 与外来 `failed(resp_turn_2)`，总 usage 仅为 2/1。`go test ./internal/service/openai_ws_v2 -count=1` 通过。
+- 更正：`6f8e4770a test: complete websocket v2 lifecycle fixtures` 补齐当时遗漏的 function-call-output 与 trace 正常 `response.create` 流 fixture；两者均在同 ID terminal 前发送 `response.created`，下游帧数为 2。再次运行 `go test ./internal/service/openai_ws_v2 -count=1` 通过。
 
 ## 固定对象与工作区
 
