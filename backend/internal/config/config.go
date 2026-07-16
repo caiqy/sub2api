@@ -2765,6 +2765,7 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.OpenAIImageFirstTokenTimeout < 0 {
 		return fmt.Errorf("gateway.openai_image_first_token_timeout must be non-negative")
+	}
 	if c.Gateway.OpenAIFirstOutputTimeoutSeconds < 0 || c.Gateway.OpenAIFirstOutputTimeoutSeconds > 600 ||
 		(c.Gateway.OpenAIFirstOutputTimeoutSeconds > 0 && c.Gateway.OpenAIFirstOutputTimeoutSeconds < 30) {
 		return fmt.Errorf("gateway.openai_first_output_timeout_seconds must be 0 or between 30-600 seconds")
