@@ -670,7 +670,11 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 	if !writeOpenAICompactSSEBridge(c, statusCode, responseBody) {
 		c.Data(statusCode, "application/json; charset=utf-8", responseBody)
 	}
-	return fmt.Errorf("upstream error: %d message=%s", resp.StatusCode, errMsg)
+	internalErrMsg := errMsg
+	if strings.EqualFold(upstreamMsg, http.StatusText(resp.StatusCode)) {
+		internalErrMsg = strings.ToLower(upstreamMsg)
+	}
+	return fmt.Errorf("upstream error: %d message=%s", resp.StatusCode, internalErrMsg)
 }
 
 func isOpenAIPassthroughAllowedRequestHeader(lowerKey string, allowTimeoutHeaders bool) bool {
