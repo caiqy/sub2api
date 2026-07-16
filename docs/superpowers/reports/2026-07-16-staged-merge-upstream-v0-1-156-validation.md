@@ -2417,9 +2417,10 @@ go -C backend test -v -tags unit ./internal/handler -run '^TestGatewayHandlerMes
 | `git diff --cached --check` | 0 | stdout empty. |
 | `git diff --name-only --diff-filter=U` | 0 | stdout empty. |
 | `git ls-files -u` | 0 | stdout empty. |
-| `git grep -n -E '^(<<<<<<< |>>>>>>> |=======$)' -- backend frontend` | 0 | stdout empty. |
+| `git grep -n -E '^(<<<<<<< |>>>>>>> |=======$)' -- backend frontend` | 1 | stdout empty；`git grep` 以 `1` 表示无匹配，这是本检查的预期 PASS 结果。review follow-up 于同一 HEAD 重跑并打印 `GIT_GREP_EXIT=1`。 |
 | `git status --short` | 0 | only pre-existing untracked `.comet/current-change.json`. |
 
 - Warnings: Browserslist/caniuse-lite is 7 months stale; Vitest retains expected error-path logs plus `router-link` and intlify warnings; Vite reports dynamic/static import mixing and an `AccountsView` chunk of `638.19 kB` over the `500 kB` warning threshold. All are non-blocking and pre-existing.
 - Boundary: no source, test, generated, plan, OpenSpec, Comet progress, current-change, merge, push, release, or deploy changes were made. Only this canonical report is to be committed with `docs: close v0.1.153 stage gate`.
-- Decision: Task 11 is released. No Task 10 blocker remains.
+- Review follow-up: reviewer 指出原报告将无匹配的 `git grep` 退出码误记为 `0`；已按原命令重跑并记录真实退出码 `1`。后端 `make build` 不在 Task 10 既定门禁内；计划步骤 1 明确要求 `make test`、`pnpm --dir frontend run build`、受影响测试和冲突验证，以上均已执行。
+- Decision: corrected static-scan evidence remains PASS. Task 11 is released. No Task 10 blocker remains.
