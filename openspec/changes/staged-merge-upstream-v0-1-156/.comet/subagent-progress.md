@@ -1,20 +1,20 @@
 # Subagent Progress
 
 - Change: `staged-merge-upstream-v0-1-156`
-- Plan task: `Task 14：合入 v0.1.156 并审查上游超时语义（OpenSpec 5.1）`
-- OpenSpec task: `5.1 使用独立 --no-ff merge 合入 v0.1.156，融合冲突并核实上游 HTTP/客户端 WebSocket 首输出超时语义`
-- Phase: `done`
+- Plan task: `Task 15：完整移除本地首 Token 超时并保留上游替代语义（OpenSpec 5.2）`
+- OpenSpec task: `5.2 完整删除本地首 Token 超时的后端逻辑、配置、运行时 API、管理端 UI、专用测试和兼容文档，保留且验证上游原生语义`
+- Phase: `implementing`
 - Review mode: `thorough`
 - Review/fix round: `2/2`
-- Implementer status: `DONE`
-- Implementation commit: `94a681bbd merge；3d0c8eb24..0502b26d1 early fixes；8e81e3b15 docs`
-- Changed files: `250 merge paths；Task17 early compile/failover/passthrough/fixture/WS fixes；canonical ledger`
-- Evidence: `service+handler compile PASS；focused scheduler/passthrough/first-token/agent identity/first-output failover PASS；WS 1s RED/GREEN；static PASS`
-- TDD: `exempt-by-user-decision`（Git merge；first-token 删除留 Task 15）
-- Task reviewer: `Approved（0502b26d1/8e81e3b15 后最终复审）`
+- Implementer status: `dispatched`
+- Implementation commit: `pending`
+- Changed files: `pending`
+- Evidence: `pending`
+- TDD: `approved-removal（先记录现有保护，再删契约并验证上游替代）`
+- Task reviewer: `pending`
 - Unresolved findings: `none；VERSION 明确交 Task19，EOF warning 留普通后续`
-- Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-14-brief.md`
-- Report: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-14-report.md`
+- Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-15-brief.md`
+- Report: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-15-report.md`
 - Blocker fix: `OpenAIFastPolicyUserSelector.vue` 的 `SimpleUser` type-only import 已从未导出的 `@/api/admin/usage` 改为共享 `@/types`；没有行为变更或伪造行为 RED。
 - RED: `pnpm --dir frontend run build` 已记录为失败；本代理复现 `pnpm --dir frontend run typecheck`，失败为 TS2614 和由该未解析类型引发的 3 个 TS7006。
 - Follow-up RED: 改正 import 后，`typecheck` 暴露 hydration 映射遗漏共享类型必填的 `username`；`adminAPI.users.getById` 的 `AdminUser` 已提供该字段。
