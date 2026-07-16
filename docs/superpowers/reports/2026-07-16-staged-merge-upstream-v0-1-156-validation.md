@@ -62,3 +62,42 @@
 - 本任务依用户裁决只核验 Git/工作树证据，不运行或伪造 RED/GREEN 测试。
 - 协调产物为 22 文件、2300 行，超过 200 行风险阈值；均为本次既有设计、计划、OpenSpec/Comet 协调内容。
 - 暂存时 Git 提示这些文档的工作副本下次被 Git 触及时可能发生 LF/CRLF 工作树转换；本次 `git diff --cached --check` 通过。
+
+## 阶段 0 基线（OpenSpec 1.2）
+
+**结论：PASS。** 本阶段未执行任何 tag merge、业务代码修改、测试补齐、push、release、deploy 或 main 合并；不勾选 plan/OpenSpec task。
+
+### 执行环境与范围
+
+- 工作目录：`D:\Caiqy\Projects\Github\sub2api`（Windows）。
+- 质量门禁定义：根目录 `Makefile` 的 `test` 依次运行后端默认测试（含 `golangci-lint`）、后端 `unit` tag 测试、前端 ESLint、`vue-tsc --noEmit` 与 Vitest。
+- 前端构建定义：`frontend/package.json` 的 `build` 为 `vue-tsc -b && vite build`，产物写入 `backend/internal/web/dist`。
+- 生成定义：`backend/Makefile` 的 `generate` 依次执行 `go generate ./ent` 与 `go generate ./cmd/server`；检查范围严格限制为 `backend/ent` 和 `backend/cmd/server/wire_gen.go`。
+
+### 命令与结果
+
+| 阶段 | 命令 | 退出码 | 摘要 |
+| --- | --- | --- | --- |
+| 初始工作树 | `git status --short` | 0 | `docs/superpowers/plans/2026-07-16-staged-merge-upstream-v0-1-156.md`、`openspec/changes/staged-merge-upstream-v0-1-156/.comet/subagent-progress.md` 为修改；`.comet/current-change.json` 未跟踪。均为主会话协调状态，未触碰。 |
+| 初始静态检查 | `git diff --check` | 0 | 无空白错误；对上述两份既有协调文件提示下次 Git 写入会将 LF 转为 CRLF。 |
+| 质量门禁 | `make test` | 0 | 后端默认测试、`unit` tag 测试与 `golangci-lint` 通过；前端 ESLint、类型检查通过；Vitest 为 167 个文件、1246 个测试通过。 |
+| 前端嵌入构建 | `pnpm --dir frontend run build` | 0 | `vue-tsc -b` 与 Vite 生产构建通过，966 个模块完成转换，构建耗时 40.52 秒。 |
+| 第 1 轮生成 | `make -C backend generate` | 0 | Ent 与 Wire 生成完成；Wire 写入 `backend/cmd/server/wire_gen.go`。 |
+| 第 1 轮生成稳定性 | `git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` | 0 | 无输出；生成目标相对当前基线无 diff。 |
+| 第 2 轮生成 | `make -C backend generate` | 0 | Ent 与 Wire 再次生成完成。 |
+| 第 2 轮生成稳定性 | `git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` | 0 | 无输出；两轮生成稳定。 |
+| 最终工作树 | `git status --short` | 0 | 与初始工作树相同，未出现生成目标或业务代码变更。 |
+| 最终静态检查 | `git diff --check` | 0 | 无空白错误；仅重复既有协调文件的 LF/CRLF 警告。 |
+
+### 警告与风险信号
+
+- `make test` 的 Vitest 输出有预期错误路径日志、`router-link` 解析警告与 `intlify` message compiler 警告；所有断言通过，命令退出 0。
+- 测试和构建均提示 `caniuse-lite` 浏览器数据已 7 个月未更新；这是依赖数据维护信号，未阻塞本阶段。
+- Vite 报告多个动态/静态混用导入，且 `AccountsView` 压缩后为 635.06 kB，超过 500 kB chunk 警戒线；构建成功，但后续性能工作应单独处理，不能归因于本阶段。
+- 生成检查仅覆盖 brief 规定的 Ent 与 Wire 目标；构建产物由 Git 忽略，最终 `git status --short` 未显示其变更。
+
+### 自审与提交
+
+- 自审：未改动业务代码、测试、生成源码或主会话的 plan/`.comet/subagent-progress.md`；两轮受限 diff 均为空，所有基线命令退出 0，因此没有触发阻塞或根因调查流程。
+- 仅暂存本报告：`git add -f docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md`。
+- 提交命令：`git commit -m "docs: record stage zero baseline"`；提交内容只允许为本报告。`.comet/current-change.json`、`.superpowers/` 以及主会话协调文件必须保持未暂存、未提交。
