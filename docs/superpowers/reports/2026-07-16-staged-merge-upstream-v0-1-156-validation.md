@@ -468,6 +468,53 @@ frontend/src/views/user/KeysView.vue
 - 风险信号：本 tag 触及网关、协议转换、Ent schema/生成物、Grok 配额、API Key cache、计费与前端设置；除 Task 6 提前执行的 helper 修复外，生成物、无文本冲突行为和 Create/Edit Grok API Key 表单仍需 Task 6 复核。
 - 顾虑：本机无法验证 annotated tag 签名；已使用对象类型与固定 peel SHA 作为合并身份依据。`VERSION` 选择保留本地四段版本，需在最终发布阶段再次复核。
 
+## Task 8 / v0.1.153 merge 决策（OpenSpec 3.1）
+
+### 状态与拓扑
+
+- 结果：`PASS`，仅完成 OpenSpec 3.1 的 `v0.1.153` merge；未合入 `v0.1.155` 或 `upstream/main`。
+- annotated tag object：`53717a125583e3916b751c2a5340901c4bfa2bb3`；唯一允许的 peel：`a2bc1337474b68b62391116835e5698ebb5526bd`。
+- merge commit：`9219483d7c34606e7c2cb530c00a46b764096414` `merge: upstream v0.1.153`。
+- 第一父：`4e4ed09887bfbe9e8072ea60b137b85f704da185`；第二父：`a2bc1337474b68b62391116835e5698ebb5526bd`。
+- `git merge-base --is-ancestor upstream/main HEAD` 返回 `not-ancestor`。原 scratch 台账曾被错误提交；本专章为完整正式记录，scratch 保留为 ignored 工作区报告。
+
+### 命令与静态核验
+
+| 命令 | 结果 |
+| --- | --- |
+| `git status --porcelain=v1` | merge 前后仅有既有未跟踪 `.comet/current-change.json`。 |
+| `git tag -v v0.1.153`; `git rev-parse v0.1.153`; `git rev-parse "v0.1.153^{}"` | tag 为 annotated；object 和 peel 如上。本机没有 tag 签名材料。 |
+| `git merge --no-ff v0.1.153 -m "merge: upstream v0.1.153"` | 产生 9 个内容冲突，逐项融合。 |
+| `make -C backend generate` | Ent/Wire 完成；Wire 两次写入 `backend/cmd/server/wire_gen.go`。 |
+| `git diff --name-only --diff-filter=U`; `git ls-files -u`; `git grep --cached -n -E "^(<<<<<<< |>>>>>>> |=======$)"` | 均无输出。 |
+| `git diff --cached --check`; `git diff --check "HEAD^1" HEAD` | 均无输出；删除上游测试文件末尾空白行以满足检查。 |
+| `git diff --cached --name-only -- .superpowers openspec .comet` | merge commit 前无受限路径被暂存。 |
+
+### 冲突台账
+
+共 `9` 个文本冲突；无其他未合并路径。
+
+| 路径 | 分类 | 第一父本地语义 | tag 上游语义 | 融合结论 |
+| --- | --- | --- | --- | --- |
+| `.gitignore` | 忽略规则 | 忽略本地开发工具。 | 放行 `deploy/tests` 并保留 `CLAUDE.md`。 | 合并两侧规则。 |
+| `backend/cmd/server/VERSION` | 版本裁决 | `0.1.151.2`。 | `0.1.152`。 | 保留已验证的本地四段版本裁决。 |
+| `backend/cmd/server/wire_gen.go` | Wire 生成物 | `ProvidePaymentHandler` 的 channel/user 注入。 | 两参构造器。 | 按当前 `wire.go` 的四参 provider 生成。 |
+| `backend/internal/handler/gateway_handler_chat_completions.go` | failover/usage | 失败账号与耗时用于失败用量。 | 账号级 pool retry limit。 | 同时记录失败信息，并传入 `account.GetPoolModeRetryCount()`。 |
+| `backend/internal/handler/gateway_handler_responses.go` | failover/usage | 失败账号与耗时用于失败用量。 | 账号级 pool retry limit。 | 同时记录失败信息，并传入 `account.GetPoolModeRetryCount()`。 |
+| `backend/internal/handler/gateway_helper_fastpath_test.go` | 测试融合 | 用户组并发 mock。 | OpenAI WebSocket ingress lease mock。 | 合并字段和接口方法。 |
+| `backend/internal/handler/gemini_v1beta_handler.go` | failover/usage | Gemini 失败用量。 | 账号级 retry limit。 | 同时保留两侧语义。 |
+| `backend/internal/handler/openai_gateway_handler_test.go` | 测试 import | 请求体/用量测试 import。 | WebSocket 并发测试所需 `sync`。 | 保留全部 import。 |
+| `backend/internal/server/routes/gateway.go` | 路由与鉴权 | usage detail capture。 | Grok video edit/extension。 | 所有端点保留 capture、认证与分组中间件，并加入 edit/extension。未分组 Key 仍由 `RequireGroupAssignment` 标记受限、写入 403 并 `Abort`，不会进入 handler。 |
+
+### 自审、Task 9 入口与风险
+
+- CodeGraph 复核 `HandleFailoverError` 的账号级 retry limit 调用方、`ProvidePaymentHandler` 的四参签名及 `RequireGroupAssignment` 的 `Abort` 路径；没有机械选择 ours/theirs。
+- `backend/internal/service/openai_first_token_timeout.go` 在 `HEAD^1..HEAD` 无变化，本地首 Token 保护仍在。
+- **Task 9 入口：**审查 `v0.1.152..v0.1.153` 的无冲突能力，运行 merge 后行为/回归验证，并处理由此发现的语义修复；Task 8 不执行这些工作。
+- 本机缺少 `v0.1.153` 的签名验证材料；已核验 annotated object 与指定 peel。
+- Task 8 仅执行冲突与拓扑静态核验，未运行 merge 后完整测试或 build，按 Task 9 边界留待后续阶段。
+- 未 push、release、deploy 或合并 main。
+
 <a id="task-3-capability-matrix"></a>
 ### 能力矩阵
 
