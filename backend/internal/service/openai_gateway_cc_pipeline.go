@@ -175,9 +175,6 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 		return nil, fmt.Errorf("create upstream request body: %w", err)
 	}
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
-	if firstTokenWatchdogFromContext(ctx) != nil {
-		upstreamCtx = ctx
-	}
 	upstreamReq, err := openAINewRequestWithBodyHandle(upstreamCtx, http.MethodPost, targetURL, upstreamHandle, ownedUpstreamHandle)
 	releaseUpstreamCtx()
 	if err != nil {
@@ -223,9 +220,6 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	closeOpenAIRequestBody(upstreamReq)
 	if err != nil {
-		if watchdog := firstTokenWatchdogFromContext(ctx); watchdog != nil && watchdog.TimeoutError() != nil {
-			return nil, err
-		}
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
 	return resp, nil

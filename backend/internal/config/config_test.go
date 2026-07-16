@@ -407,40 +407,6 @@ func TestLoadOpenAIResponseHeaderTimeoutFromEnv(t *testing.T) {
 	require.Equal(t, 1800, cfg.Gateway.OpenAIResponseHeaderTimeout)
 }
 
-func TestLoadOpenAIFirstTokenTimeoutDefaults(t *testing.T) {
-	resetViperWithJWTSecret(t)
-
-	cfg, err := Load()
-	require.NoError(t, err)
-	require.Equal(t, 30, cfg.Gateway.OpenAITextFirstTokenTimeout)
-	require.Equal(t, 600, cfg.Gateway.OpenAIImageFirstTokenTimeout)
-}
-
-func TestLoadOpenAIFirstTokenTimeoutsFromEnv(t *testing.T) {
-	resetViperWithJWTSecret(t)
-	t.Setenv("GATEWAY_OPENAI_TEXT_FIRST_TOKEN_TIMEOUT", "45")
-	t.Setenv("GATEWAY_OPENAI_IMAGE_FIRST_TOKEN_TIMEOUT", "720")
-
-	cfg, err := Load()
-	require.NoError(t, err)
-	require.Equal(t, 45, cfg.Gateway.OpenAITextFirstTokenTimeout)
-	require.Equal(t, 720, cfg.Gateway.OpenAIImageFirstTokenTimeout)
-}
-
-func TestConfigValidateRejectsNegativeOpenAIFirstTokenTimeouts(t *testing.T) {
-	resetViperWithJWTSecret(t)
-
-	cfg, err := Load()
-	require.NoError(t, err)
-
-	cfg.Gateway.OpenAITextFirstTokenTimeout = -1
-	require.ErrorContains(t, cfg.Validate(), "gateway.openai_text_first_token_timeout must be non-negative")
-
-	cfg.Gateway.OpenAITextFirstTokenTimeout = 30
-	cfg.Gateway.OpenAIImageFirstTokenTimeout = -1
-	require.ErrorContains(t, cfg.Validate(), "gateway.openai_image_first_token_timeout must be non-negative")
-}
-
 func TestLoadImageNonstreamKeepaliveFromEnv(t *testing.T) {
 	resetViperWithJWTSecret(t)
 	t.Setenv("GATEWAY_IMAGE_NONSTREAM_KEEPALIVE_INTERVAL", "15")

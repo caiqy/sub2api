@@ -790,42 +790,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		lastEventType := ""
 		needModelReplace := false
 		clientDisconnected := false
-		firstTokenClass, firstTokenTimeout := s.openAIFirstTokenTimeout(payload)
-		firstTokenDeadline := time.Time{}
-		if firstTokenTimeout > 0 {
-			firstTokenDeadline = turnStart.Add(firstTokenTimeout)
-		}
-		firstTokenDone := firstTokenTimeout <= 0
-		createdReceived := false
-		handleFirstTokenTimeout := func() (*OpenAIForwardResult, error) {
-			timeoutErr := &OpenAIFirstTokenTimeoutError{
-				Class:             firstTokenClass,
-				Timeout:           firstTokenTimeout,
-				Elapsed:           time.Since(turnStart),
-				Transport:         "websocket",
-				HeadersReceived:   true,
-				CreatedReceived:   createdReceived,
-				UpstreamRequestID: responseID,
-				RequestModel:      originalModel,
-			}
-			reusable, drainedUsage, usageKnown := cancelAndDrainOpenAIWSFirstTokenWithUsage(ctx, lease, responseID, s.openAIWSWriteTimeout(), 2*time.Second)
-			usage = drainedUsage
-			timeoutErr.ConnectionReusable = reusable
-			timeoutErr.UsageKnown = usageKnown
-			errorPayload := []byte(`{"type":"error","error":{"type":"first_token_timeout","code":"first_token_timeout","message":"Upstream timed out before the first response event"}}`)
-			if err := writeClientMessage(errorPayload); err != nil {
-				lease.MarkBroken()
-				timeoutErr.ConnectionReusable = false
-			}
-			recordOpenAIFirstTokenTimeout(ctx, c, account, timeoutErr)
-			return &OpenAIForwardResult{
-				Usage:        usage,
-				Model:        originalModel,
-				Stream:       reqStream,
-				OpenAIWSMode: true,
-				Duration:     time.Since(turnStart),
-			}, timeoutErr
-		}
 		mappedModel := ""
 		var mappedModelBytes []byte
 		if originalModel != "" {
@@ -836,21 +800,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 		}
 		for {
-			readTimeout := s.openAIWSReadTimeout()
-			if !firstTokenDone && !firstTokenDeadline.IsZero() {
-				remaining := time.Until(firstTokenDeadline)
-				if remaining <= 0 {
-					return handleFirstTokenTimeout()
-				}
-				if readTimeout <= 0 || remaining < readTimeout {
-					readTimeout = remaining
-				}
-			}
-			upstreamMessage, readErr := lease.ReadMessageWithContextTimeout(ctx, readTimeout)
+			upstreamMessage, readErr := lease.ReadMessageWithContextTimeout(ctx, s.openAIWSReadTimeout())
 			if readErr != nil {
-				if !firstTokenDone && !firstTokenDeadline.IsZero() && !time.Now().Before(firstTokenDeadline) {
-					return handleFirstTokenTimeout()
-				}
 				lease.MarkBroken()
 				return nil, wrapOpenAIWSIngressTurnError(
 					"read_upstream",
@@ -858,15 +809,14 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					wroteDownstream,
 				)
 			}
-			if !firstTokenDone && !firstTokenDeadline.IsZero() && !time.Now().Before(firstTokenDeadline) {
-				return handleFirstTokenTimeout()
-			}
-
 			eventType, eventResponseID, _ := parseOpenAIWSEventEnvelope(upstreamMessage)
-			eventOwned, bindResponseID := openAIWSIngressTurnEventOwnership(responseID, eventType, eventResponseID, upstreamMessage, firstTokenTimeout > 0)
+			eventOwned := eventResponseID == "" || eventResponseID == responseID
+			bindResponseID := ""
+			if responseID == "" && eventResponseID != "" {
+				bindResponseID = eventResponseID
+			}
 			if bindResponseID != "" {
 				responseID = bindResponseID
-				createdReceived = true
 			}
 			if eventResponseID != "" && !eventOwned {
 				continue
@@ -946,9 +896,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 						ResponseHeaders: cloneHeader(lease.HandshakeHeaders()),
 					}
 				}
-			}
-			if eventOwned && !firstTokenDone && openai.ResponsesEventEndsFirstTokenWait(upstreamMessage) {
-				firstTokenDone = true
 			}
 			isTokenEvent := eventOwned && openAIWSMessageRecordsFirstToken(upstreamMessage)
 			if isTokenEvent {
@@ -1580,12 +1527,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if hooks != nil && hooks.AfterTurn != nil {
 				hooks.AfterTurn(turn, result, finalErr)
 			}
-			var firstTokenTimeoutErr *OpenAIFirstTokenTimeoutError
-			if errors.As(finalErr, &firstTokenTimeoutErr) && firstTokenTimeoutErr.ConnectionReusable {
-				lastTurnClean = true
-			} else {
-				sessionLease.MarkBroken()
-			}
+			sessionLease.MarkBroken()
 			return finalErr
 		}
 		turnRetry = 0

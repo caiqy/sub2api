@@ -103,20 +103,6 @@ type markingTerminalHTTPUpstream struct {
 	accountIDs []int64
 }
 
-type firstTokenTimeoutHTTPUpstream struct {
-	service.HTTPUpstream
-	calls int
-}
-
-type firstTokenCreatedHTTPUpstream struct {
-	service.HTTPUpstream
-}
-
-type firstTokenCreatedBody struct {
-	ctx     context.Context
-	emitted bool
-}
-
 type firstOutputFailoverCloseTrackingBody struct {
 	io.ReadCloser
 	closed chan struct{}
@@ -163,43 +149,6 @@ func (u *firstOutputFailoverHTTPUpstream) Do(_ *http.Request, _ string, accountI
 }
 
 func (u *firstOutputFailoverHTTPUpstream) DoWithTLS(req *http.Request, proxyURL string, accountID int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
-	return u.Do(req, proxyURL, accountID, concurrency)
-}
-
-func (b *firstTokenCreatedBody) Read(p []byte) (int, error) {
-	if !b.emitted {
-		b.emitted = true
-		return copy(p, "data: {\"type\":\"response.created\"}\n\n"), nil
-	}
-	<-b.ctx.Done()
-	return 0, b.ctx.Err()
-}
-
-func (*firstTokenCreatedBody) Close() error { return nil }
-
-func (u firstTokenCreatedHTTPUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
-	return &http.Response{
-		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-		Body:       &firstTokenCreatedBody{ctx: req.Context()},
-	}, nil
-}
-
-func (u firstTokenCreatedHTTPUpstream) DoWithTLS(req *http.Request, proxyURL string, accountID int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
-	return u.Do(req, proxyURL, accountID, concurrency)
-}
-
-func (u *firstTokenTimeoutHTTPUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
-	u.calls++
-	select {
-	case <-req.Context().Done():
-		return nil, req.Context().Err()
-	case <-time.After(1500 * time.Millisecond):
-		return nil, errors.New("test upstream fallback timeout")
-	}
-}
-
-func (u *firstTokenTimeoutHTTPUpstream) DoWithTLS(req *http.Request, proxyURL string, accountID int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
 	return u.Do(req, proxyURL, accountID, concurrency)
 }
 
@@ -277,74 +226,6 @@ func (e *terminalUsageOpenAIEnv) router(route string, handler gin.HandlerFunc) *
 	router.Use(middleware.UsageDetailCapture())
 	router.POST(route, handler)
 	return router
-}
-
-func TestOpenAIGatewayHandler_FirstTokenTimeoutReturns504AndCreatesOneFailedUsage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	group := &service.Group{ID: 10, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
-	account := &service.Account{
-		ID:          110,
-		Name:        "first-token-timeout",
-		Platform:    service.PlatformOpenAI,
-		Type:        service.AccountTypeAPIKey,
-		Status:      service.StatusActive,
-		Schedulable: true,
-		Concurrency: 1,
-		Priority:    1,
-		Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://example.com/v1"},
-	}
-	upstream := &firstTokenTimeoutHTTPUpstream{}
-	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIChatCompletionsAccountRepoStub{account: account}, upstream)
-	env.handler.cfg.Gateway.OpenAIWS.Enabled = false
-	env.handler.cfg.Gateway.OpenAITextFirstTokenTimeout = 1
-
-	reqBody := `{"model":"gpt-5.4","input":"hello","stream":true}`
-	recorder := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	env.router("/v1/responses", env.handler.Responses).ServeHTTP(recorder, req)
-
-	require.Equal(t, http.StatusGatewayTimeout, recorder.Code, recorder.Body.String())
-	require.Equal(t, "first_token_timeout", gjson.Get(recorder.Body.String(), "error.type").String())
-	require.Contains(t, recorder.Header().Get("Content-Type"), "application/json")
-	require.Equal(t, 1, upstream.calls)
-	select {
-	case log := <-env.usageRepo.created:
-		require.NotNil(t, log)
-		require.NotNil(t, log.DetailSnapshot)
-		require.Contains(t, log.DetailSnapshot.UpstreamResponseBody, `"usage_state":"unknown"`)
-	case <-time.After(2 * time.Second):
-		t.Fatal("首 Token 超时应提交失败 usage")
-	}
-	select {
-	case duplicate := <-env.usageRepo.created:
-		t.Fatalf("首 Token 超时不应重复提交失败 usage: %+v", duplicate)
-	case <-time.After(50 * time.Millisecond):
-	}
-}
-
-func TestOpenAIGatewayHandler_FirstTokenTimeoutSuppressesPreOutputKeepalive(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	group := &service.Group{ID: 11, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
-	account := &service.Account{
-		ID: 111, Name: "first-token-keepalive", Platform: service.PlatformOpenAI,
-		Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true,
-		Concurrency: 1, Priority: 1,
-		Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://example.com/v1"},
-	}
-	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIChatCompletionsAccountRepoStub{account: account}, firstTokenCreatedHTTPUpstream{})
-	env.handler.cfg.Gateway.OpenAIWS.Enabled = false
-	env.handler.cfg.Gateway.OpenAITextFirstTokenTimeout = 2
-	env.handler.cfg.Gateway.StreamKeepaliveInterval = 1
-
-	recorder := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.4","input":"hello","stream":true}`))
-	req.Header.Set("Content-Type", "application/json")
-	env.router("/v1/responses", env.handler.Responses).ServeHTTP(recorder, req)
-
-	require.Equal(t, http.StatusGatewayTimeout, recorder.Code, recorder.Body.String())
-	require.Equal(t, "first_token_timeout", gjson.Get(recorder.Body.String(), "error.type").String())
-	require.Contains(t, recorder.Header().Get("Content-Type"), "application/json")
 }
 
 func TestOpenAIGatewayHandler_ResponsesFirstOutputTimeoutFailsOverAfterKeepalive(t *testing.T) {

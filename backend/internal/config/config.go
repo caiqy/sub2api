@@ -799,10 +799,6 @@ type GatewayConfig struct {
 	// OpenAIResponseHeaderTimeout: OpenAI/Codex 上游等待响应头的超时时间（秒），0表示无超时
 	// OpenAI/Codex 请求可能在上游排队较久；默认不使用通用响应头超时截断。
 	OpenAIResponseHeaderTimeout int `mapstructure:"openai_response_header_timeout"`
-	// OpenAITextFirstTokenTimeout 普通 Responses 流式请求等待首个业务事件的秒数，0 表示关闭。
-	OpenAITextFirstTokenTimeout int `mapstructure:"openai_text_first_token_timeout"`
-	// OpenAIImageFirstTokenTimeout 明确生图 Responses 流式请求等待首个业务事件的秒数，0 表示关闭。
-	OpenAIImageFirstTokenTimeout int `mapstructure:"openai_image_first_token_timeout"`
 	// OpenAIFirstOutputTimeoutSeconds: native HTTP Responses 首个语义输出超时（秒），0表示禁用。
 	OpenAIFirstOutputTimeoutSeconds int `mapstructure:"openai_first_output_timeout_seconds"`
 	// OpenAIHighEffortFirstOutputTimeoutSeconds: high/xhigh/max 推理的首个语义输出超时（秒）。
@@ -2027,8 +2023,6 @@ func setDefaults() {
 	viper.SetDefault("gateway.usage_log_detail_retention_limit", 300)
 	viper.SetDefault("gateway.image_usage_log_detail_retention_limit", 300)
 	viper.SetDefault("gateway.openai_response_header_timeout", 0)
-	viper.SetDefault("gateway.openai_text_first_token_timeout", 30)
-	viper.SetDefault("gateway.openai_image_first_token_timeout", 600)
 	viper.SetDefault("gateway.openai_first_output_timeout_seconds", 0)
 	viper.SetDefault("gateway.openai_high_effort_first_output_timeout_seconds", 0)
 	viper.SetDefault("gateway.log_upstream_error_body", true)
@@ -2759,12 +2753,6 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.OpenAIResponseHeaderTimeout < 0 {
 		return fmt.Errorf("gateway.openai_response_header_timeout must be non-negative")
-	}
-	if c.Gateway.OpenAITextFirstTokenTimeout < 0 {
-		return fmt.Errorf("gateway.openai_text_first_token_timeout must be non-negative")
-	}
-	if c.Gateway.OpenAIImageFirstTokenTimeout < 0 {
-		return fmt.Errorf("gateway.openai_image_first_token_timeout must be non-negative")
 	}
 	if c.Gateway.OpenAIFirstOutputTimeoutSeconds < 0 || c.Gateway.OpenAIFirstOutputTimeoutSeconds > 600 ||
 		(c.Gateway.OpenAIFirstOutputTimeoutSeconds > 0 && c.Gateway.OpenAIFirstOutputTimeoutSeconds < 30) {

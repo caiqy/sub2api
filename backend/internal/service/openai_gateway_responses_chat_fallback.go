@@ -98,33 +98,12 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 		return nil, err
 	}
 	upstreamCtx := ctx
-	var firstTokenWatchdog *openAIFirstTokenWatchdog
-	if clientStream {
-		upstreamBaseCtx, _ := detachUpstreamContext(ctx)
-		upstreamCtx, firstTokenWatchdog = s.withOpenAIFirstTokenTimeout(upstreamBaseCtx, body, "sse")
-		defer firstTokenWatchdog.Stop()
-	}
 	resp, err := s.sendCCUpstreamRequest(upstreamCtx, c, account, targetURL, chatBody, clientStream, apiKey, account.GetOpenAIUserAgent(), "")
 	if err != nil {
-		if timeoutErr := firstTokenWatchdog.TimeoutError(); timeoutErr != nil {
-			recordOpenAIFirstTokenTimeout(ctx, c, account, timeoutErr)
-			return nil, timeoutErr
-		}
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if !firstTokenWatchdog.MarkHeaders(resp.Header.Get("x-request-id")) {
-		timeoutErr := firstTokenWatchdog.TimeoutError()
-		recordOpenAIFirstTokenTimeout(ctx, c, account, timeoutErr)
-		return nil, timeoutErr
-	}
-
 	if resp.StatusCode >= 400 {
-		if !firstTokenWatchdog.Stop() {
-			timeoutErr := firstTokenWatchdog.TimeoutError()
-			recordOpenAIFirstTokenTimeout(ctx, c, account, timeoutErr)
-			return nil, timeoutErr
-		}
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
 		if foErr := s.failoverOpenAIUpstreamHTTPError(ctx, c, account, resp, respBody, upstreamMsg, upstreamModel); foErr != nil {
 			return nil, foErr
@@ -134,10 +113,6 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 
 	if clientStream {
 		result, streamErr := s.streamChatCompletionsAsResponses(upstreamCtx, c, resp, originalModel, customTools, toolSearch, namespaceTools, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
-		if timeoutErr := firstTokenWatchdog.TimeoutError(); timeoutErr != nil {
-			recordOpenAIFirstTokenTimeout(ctx, c, account, timeoutErr)
-			return result, timeoutErr
-		}
 		return result, streamErr
 	}
 	return s.bufferChatCompletionsAsResponses(c, resp, originalModel, customTools, toolSearch, namespaceTools, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
@@ -211,19 +186,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 			return
 		}
 		for _, event := range events {
-			payload, err := json.Marshal(event)
-			if err != nil {
-				continue
-			}
-			watchdog := firstTokenWatchdogFromContext(ctx)
-			if !watchdog.Observe(payload) {
-				streamEarlyErr = watchdog.TimeoutError()
-				return
-			}
 			pendingEvents = append(pendingEvents, event)
-		}
-		if !firstTokenWatchdogFromContext(ctx).CanWriteClient() {
-			return
 		}
 		writeStreamHeaders()
 		for _, event := range pendingEvents {
@@ -256,9 +219,6 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	}
 
 	if scan.Err != nil {
-		if timeoutErr := firstTokenWatchdogFromContext(ctx).TimeoutError(); timeoutErr != nil {
-			return &OpenAIForwardResult{RequestID: requestID, Usage: scan.Usage, Stream: true, Duration: time.Since(startTime)}, timeoutErr
-		}
 		return &OpenAIForwardResult{
 			RequestID:       requestID,
 			Usage:           scan.Usage,

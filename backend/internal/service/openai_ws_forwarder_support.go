@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	openaiutil "github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -230,7 +229,8 @@ func isOpenAIWSTokenEvent(eventType string) bool {
 }
 
 func openAIWSMessageRecordsFirstToken(message []byte) bool {
-	return openaiutil.ResponsesEventRecordsFirstToken(message)
+	eventType, _, _ := parseOpenAIWSEventEnvelope(message)
+	return isOpenAIWSTokenEvent(eventType)
 }
 
 func replaceOpenAIWSMessageModel(message []byte, fromModel, toModel string) []byte {

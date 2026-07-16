@@ -508,8 +508,6 @@ type OverloadCooldownSettings struct {
 type GatewayRuntimeSettings struct {
 	ResponseHeaderTimeout             int `json:"response_header_timeout"`
 	StreamDataIntervalTimeout         int `json:"stream_data_interval_timeout"`
-	OpenAITextFirstTokenTimeout       int `json:"openai_text_first_token_timeout"`
-	OpenAIImageFirstTokenTimeout      int `json:"openai_image_first_token_timeout"`
 	UsageLogDetailRetentionLimit      int `json:"usage_log_detail_retention_limit"`
 	ImageUsageLogDetailRetentionLimit int `json:"image_usage_log_detail_retention_limit"`
 }

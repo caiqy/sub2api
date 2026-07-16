@@ -274,52 +274,6 @@
                 <div class="space-y-2 border-t border-gray-100 pt-4 dark:border-dark-700">
                   <div class="flex flex-wrap items-center gap-2">
                     <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
-                      {{ t("admin.settings.gatewayRuntime.openAITextFirstTokenTimeout") }}
-                    </label>
-                    <code
-                      class="select-all break-all rounded bg-gray-50 px-2 py-1 font-mono text-xs text-gray-600 dark:bg-dark-800 dark:text-gray-300"
-                    >
-                      gateway.openai_text_first_token_timeout
-                    </code>
-                  </div>
-                  <input
-                    v-model.number="gatewayRuntimeForm.openai_text_first_token_timeout"
-                    data-testid="gateway-runtime-openai-text-first-token-timeout"
-                    type="number"
-                    min="0"
-                    class="input w-40"
-                  />
-                  <p class="text-xs text-gray-500 dark:text-gray-400">
-                    {{ t("admin.settings.gatewayRuntime.openAITextFirstTokenTimeoutHint") }}
-                  </p>
-                </div>
-
-                <div class="space-y-2 border-t border-gray-100 pt-4 dark:border-dark-700">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
-                      {{ t("admin.settings.gatewayRuntime.openAIImageFirstTokenTimeout") }}
-                    </label>
-                    <code
-                      class="select-all break-all rounded bg-gray-50 px-2 py-1 font-mono text-xs text-gray-600 dark:bg-dark-800 dark:text-gray-300"
-                    >
-                      gateway.openai_image_first_token_timeout
-                    </code>
-                  </div>
-                  <input
-                    v-model.number="gatewayRuntimeForm.openai_image_first_token_timeout"
-                    data-testid="gateway-runtime-openai-image-first-token-timeout"
-                    type="number"
-                    min="0"
-                    class="input w-40"
-                  />
-                  <p class="text-xs text-gray-500 dark:text-gray-400">
-                    {{ t("admin.settings.gatewayRuntime.openAIImageFirstTokenTimeoutHint") }}
-                  </p>
-                </div>
-
-                <div class="space-y-2 border-t border-gray-100 pt-4 dark:border-dark-700">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
                       {{ t("admin.settings.gatewayRuntime.streamDataIntervalTimeout") }}
                     </label>
                     <code
@@ -7851,8 +7805,6 @@ const gatewayRuntimeSaving = ref(false);
 const gatewayRuntimeLoadFailed = ref(false);
 const gatewayRuntimeForm = reactive<GatewayRuntimeSettings>({
   response_header_timeout: 600,
-  openai_text_first_token_timeout: 30,
-  openai_image_first_token_timeout: 600,
   stream_data_interval_timeout: 180,
   usage_log_detail_retention_limit: 300,
   image_usage_log_detail_retention_limit: 300,
@@ -10304,12 +10256,6 @@ function buildGatewayRuntimePayload(): GatewayRuntimeSettings | null {
   const responseHeaderTimeout = normalizeGatewayRuntimeNumber(
     gatewayRuntimeForm.response_header_timeout,
   );
-  const openAITextFirstTokenTimeout = normalizeGatewayRuntimeNumber(
-    gatewayRuntimeForm.openai_text_first_token_timeout,
-  );
-  const openAIImageFirstTokenTimeout = normalizeGatewayRuntimeNumber(
-    gatewayRuntimeForm.openai_image_first_token_timeout,
-  );
   const streamDataIntervalTimeout = normalizeGatewayRuntimeNumber(
     gatewayRuntimeForm.stream_data_interval_timeout,
   );
@@ -10323,12 +10269,6 @@ function buildGatewayRuntimePayload(): GatewayRuntimeSettings | null {
   if (
     responseHeaderTimeout === null ||
     responseHeaderTimeout < 1 ||
-    openAITextFirstTokenTimeout === null ||
-    !Number.isInteger(openAITextFirstTokenTimeout) ||
-    openAITextFirstTokenTimeout < 0 ||
-    openAIImageFirstTokenTimeout === null ||
-    !Number.isInteger(openAIImageFirstTokenTimeout) ||
-    openAIImageFirstTokenTimeout < 0 ||
     streamDataIntervalTimeout === null ||
     !(
       streamDataIntervalTimeout === 0 ||
@@ -10344,8 +10284,6 @@ function buildGatewayRuntimePayload(): GatewayRuntimeSettings | null {
 
   return {
     response_header_timeout: responseHeaderTimeout,
-    openai_text_first_token_timeout: openAITextFirstTokenTimeout,
-    openai_image_first_token_timeout: openAIImageFirstTokenTimeout,
     stream_data_interval_timeout: streamDataIntervalTimeout,
     usage_log_detail_retention_limit: usageLogDetailRetentionLimit,
     image_usage_log_detail_retention_limit: imageUsageLogDetailRetentionLimit,

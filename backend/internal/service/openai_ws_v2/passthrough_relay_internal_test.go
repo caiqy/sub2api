@@ -51,6 +51,8 @@ func TestRunClientToUpstream_ErrorPaths(t *testing.T) {
 			nil,
 			nil,
 			exitCh,
+			nil,
+			nil,
 		)
 		sig := <-exitCh
 		require.Equal(t, "read_client", sig.stage)
@@ -72,6 +74,14 @@ func TestRunClientToUpstream_ErrorPaths(t *testing.T) {
 			nil,
 			nil,
 			exitCh,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
 		)
 		sig := <-exitCh
 		require.Equal(t, "write_upstream", sig.stage)
@@ -131,6 +141,8 @@ func TestRunUpstreamToClient_ErrorAndDropPaths(t *testing.T) {
 			func() {},
 			nil,
 			exitCh,
+			nil,
+			nil,
 		)
 		sig := <-exitCh
 		require.Equal(t, "read_upstream", sig.stage)
@@ -162,6 +174,8 @@ func TestRunUpstreamToClient_ErrorAndDropPaths(t *testing.T) {
 			func() {},
 			nil,
 			exitCh,
+			nil,
+			nil,
 		)
 		sig := <-exitCh
 		require.Equal(t, "write_client", sig.stage)
@@ -196,6 +210,8 @@ func TestRunUpstreamToClient_ErrorAndDropPaths(t *testing.T) {
 			func() {},
 			nil,
 			exitCh,
+			nil,
+			nil,
 		)
 		sig := <-exitCh
 		require.Equal(t, "drain_terminal", sig.stage)

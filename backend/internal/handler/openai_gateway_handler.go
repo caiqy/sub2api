@@ -524,19 +524,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body", streamStarted || c.Writer.Size() != writerSizeBeforeForward)
 				return
 			}
-			var firstTokenTimeout *service.OpenAIFirstTokenTimeoutError
-			if errors.As(err, &firstTokenTimeout) {
-				h.submitFailedUsageLog(c, apiKey, account, reqModel, reqStream, 0, nil, []byte(`{"error":{"type":"first_token_timeout"},"usage_state":"unknown"}`), forwardDuration, attemptReasoningEffort, "handler.openai_gateway.responses")
-				headers := c.Writer.Header()
-				headers.Del("Content-Type")
-				headers.Del("Content-Length")
-				headers.Del("Content-Encoding")
-				headers.Del("Transfer-Encoding")
-				headers.Del("Connection")
-				headers.Del("X-Accel-Buffering")
-				h.handleStreamingAwareError(c, http.StatusGatewayTimeout, "first_token_timeout", "Upstream timed out before the first response event", false)
-				return
-			}
 			if result != nil && result.ImageCount > 0 {
 				reqLog.Warn("openai.forward_partial_error_with_image_result",
 					zap.Int64("account_id", account.ID),
@@ -1892,14 +1879,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 							}
 							responseBody := []byte(nil)
 							var failedUsage *service.OpenAIUsage
-							var firstTokenTimeout *service.OpenAIFirstTokenTimeoutError
-							if errors.As(turnErr, &firstTokenTimeout) {
-								if firstTokenTimeout.UsageKnown && result != nil {
-									failedUsage = &result.Usage
-								} else {
-									responseBody = []byte(`{"error":{"type":"first_token_timeout"},"usage_state":"unknown"}`)
-								}
-							}
 							h.submitFailedUsageLog(c, apiKey, account, failedModel, true, 0, nil, responseBody, failedDuration, service.ExtractOpenAIReasoningEffortFromBody(firstMessage, failedModel), "handler.openai_gateway.responses_ws", failedUsage)
 						}
 						return
@@ -1985,10 +1964,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		requestPayloadHash = service.HashUsageRequestPayload(wsFirstMessage)
 
 		if err := h.gatewayService.ProxyResponsesWebSocketFromClient(ctx, c, wsConn, account, token, wsFirstMessage, hooks); err != nil {
-			var firstTokenTimeout *service.OpenAIFirstTokenTimeoutError
-			if errors.As(err, &firstTokenTimeout) {
-				return
-			}
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
 				h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, false, nil)

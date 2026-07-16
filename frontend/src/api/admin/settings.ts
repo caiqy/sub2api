@@ -1087,8 +1087,6 @@ export async function deleteAdminApiKey(): Promise<{ message: string }> {
 
 export interface GatewayRuntimeSettings {
   response_header_timeout: number;
-  openai_text_first_token_timeout: number;
-  openai_image_first_token_timeout: number;
   stream_data_interval_timeout: number;
   usage_log_detail_retention_limit: number;
   image_usage_log_detail_retention_limit: number;
