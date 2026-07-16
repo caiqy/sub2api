@@ -468,7 +468,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			if errors.As(err, &failoverErr) {
 				lastFailedAccount = account
 				lastFailedDuration = forwardDuration
-				failoverAction := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, failoverErr)
+				failoverAction := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, account.GetPoolModeRetryCount(), failoverErr)
 				switch failoverAction {
 				case FailoverContinue:
 					continue
