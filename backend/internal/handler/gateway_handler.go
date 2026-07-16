@@ -451,6 +451,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					c.Request = c.Request.WithContext(ctx)
 					continue
 				case FailoverCanceled:
+					failoverClientGone(c)
 					return
 				default: // FailoverExhausted
 					if fs.LastFailoverErr != nil {
@@ -590,6 +591,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						h.submitFailedUsageLogFromFailover(c, apiKey, account, reqModel, reqStream, fs.LastFailoverErr, forwardDuration, service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort), "handler.gateway.messages")
 						return
 					case FailoverCanceled:
+						failoverClientGone(c)
 						return
 					}
 				}
@@ -782,6 +784,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					c.Request = c.Request.WithContext(ctx)
 					continue
 				case FailoverCanceled:
+					failoverClientGone(c)
 					return
 				default: // FailoverExhausted
 					if fs.LastFailoverErr != nil {
@@ -1130,6 +1133,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						h.submitFailedUsageLogFromFailover(c, currentAPIKey, account, reqModel, parsedReq.Stream, fs.LastFailoverErr, forwardDuration, service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort), "handler.gateway.messages")
 						return
 					case FailoverCanceled:
+						failoverClientGone(c)
 						return
 					}
 				}
