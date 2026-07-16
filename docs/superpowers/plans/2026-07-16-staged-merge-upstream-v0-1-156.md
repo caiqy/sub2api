@@ -369,6 +369,15 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 
   预期：所有保护测试、受影响能力测试和人工审查均有通过证据；`--diff-filter=U` 与冲突标记扫描无输出。失败时停留在 `v0.1.152`，修复后从本任务重跑，不得开始任务 8。
 
+- [ ] **步骤 3：独立提交 v0.1.152 阶段门禁证据**
+
+  将完整门禁、矩阵聚焦命令、冲突验证、生成检查、静态扫描和放行结论写入正式验证报告，然后执行：
+  ```bash
+  git add -f docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md
+  git commit -m "docs: close v0.1.152 stage gate"
+  ```
+  预期：只提交验证报告；无失败、未执行或未解释人工结论后才能开始 Task 8。
+
 ### Task 8：合入 v0.1.153 并复核已有融合（OpenSpec 3.1）
 
 **文件：**
