@@ -89,6 +89,12 @@ func TestForwardAlphaSearchAPIKeyMapsModelAndPassesThroughError(t *testing.T) {
 		ID:       7,
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeAPIKey,
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []PassthroughFieldRule{
+				{Target: "body", Mode: "map", Key: "client_model", SourceKey: "model"},
+			},
+		},
 		Credentials: map[string]any{
 			"api_key":  "sk-test",
 			"base_url": "https://compat.example/v4",
@@ -108,6 +114,7 @@ func TestForwardAlphaSearchAPIKeyMapsModelAndPassesThroughError(t *testing.T) {
 	require.Equal(t, "https://compat.example/v4/alpha/search", upstream.lastReq.URL.String())
 	require.Equal(t, "Bearer sk-test", upstream.lastReq.Header.Get("Authorization"))
 	require.Equal(t, "upstream-5.6", gjson.GetBytes(upstream.lastBody, "model").String())
+	require.Equal(t, "gpt-5.6-sol", gjson.GetBytes(upstream.lastBody, "client_model").String())
 	require.True(t, gjson.GetBytes(upstream.lastBody, "commands.search_query").IsArray())
 }
 

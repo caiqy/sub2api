@@ -29,6 +29,7 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	if s == nil || c == nil || account == nil {
 		return nil, fmt.Errorf("service, context, and account are required")
 	}
+	sourceBody := body
 	modelResult := gjson.GetBytes(body, "model")
 	requestedModel := strings.TrimSpace(modelResult.String())
 	if modelResult.Type != gjson.String || requestedModel == "" {
@@ -45,7 +46,7 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 		return nil, err
 	}
 
-	req, err := s.buildOpenAIAlphaSearchRequest(ctx, c, account, body, token)
+	req, err := s.buildOpenAIAlphaSearchRequest(ctx, c, account, sourceBody, body, token)
 	if err != nil {
 		return nil, err
 	}
@@ -102,12 +103,12 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	}, nil
 }
 
-func (s *OpenAIGatewayService) buildOpenAIAlphaSearchRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string) (*http.Request, error) {
+func (s *OpenAIGatewayService) buildOpenAIAlphaSearchRequest(ctx context.Context, c *gin.Context, account *Account, sourceBody []byte, body []byte, token string) (*http.Request, error) {
 	clientBeta := ""
 	if c != nil {
 		clientBeta = c.GetHeader("OpenAI-Beta")
 	}
-	req, err := s.buildUpstreamRequestOpenAIPassthrough(ctx, c, account, body, body, token)
+	req, err := s.buildUpstreamRequestOpenAIPassthrough(ctx, c, account, sourceBody, body, token)
 	if err != nil {
 		return nil, err
 	}
