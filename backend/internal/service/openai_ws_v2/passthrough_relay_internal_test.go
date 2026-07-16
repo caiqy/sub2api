@@ -19,6 +19,7 @@ func TestRunEntry_DelegatesRelay(t *testing.T) {
 
 	clientConn := newPassthroughTestFrameConn(nil, false)
 	upstreamConn := newPassthroughTestFrameConn([]passthroughTestFrame{
+		{msgType: coderws.MessageText, payload: []byte(`{"type":"response.created","response":{"id":"resp_entry"}}`)},
 		{
 			msgType: coderws.MessageText,
 			payload: []byte(`{"type":"response.completed","response":{"id":"resp_entry","usage":{"input_tokens":1,"output_tokens":1}}}`),
@@ -191,6 +192,7 @@ func TestRunUpstreamToClient_ErrorAndDropPaths(t *testing.T) {
 		runUpstreamToClient(
 			context.Background(),
 			newPassthroughTestFrameConn([]passthroughTestFrame{
+				{msgType: coderws.MessageText, payload: []byte(`{"type":"response.created","response":{"id":"resp_drop"}}`)},
 				{
 					msgType: coderws.MessageText,
 					payload: []byte(`{"type":"response.completed","response":{"id":"resp_drop","usage":{"input_tokens":1,"output_tokens":1}}}`),
@@ -199,7 +201,7 @@ func TestRunUpstreamToClient_ErrorAndDropPaths(t *testing.T) {
 			func(_ coderws.MessageType, _ []byte) error { return nil },
 			time.Now(),
 			time.Now,
-			&relayState{},
+			&relayState{activeTurn: &relayTurnTiming{startAt: time.Now()}},
 			nil,
 			nil,
 			nil,
@@ -216,7 +218,7 @@ func TestRunUpstreamToClient_ErrorAndDropPaths(t *testing.T) {
 		sig := <-exitCh
 		require.Equal(t, "drain_terminal", sig.stage)
 		require.True(t, sig.graceful)
-		require.Equal(t, int64(1), dropped.Load())
+		require.Equal(t, int64(2), dropped.Load())
 	})
 }
 
@@ -496,8 +498,8 @@ func TestObserveUpstreamMessage_BindsOnlyResponseCreated(t *testing.T) {
 func TestObserveUpstreamMessage_ResponseIDFallbackPolicy(t *testing.T) {
 	t.Parallel()
 
-	state := &relayState{requestModel: "gpt-5"}
 	startAt := time.Unix(0, 0)
+	state := &relayState{requestModel: "gpt-5", activeTurn: &relayTurnTiming{startAt: startAt}}
 	now := startAt
 	nowFn := func() time.Time {
 		now = now.Add(5 * time.Millisecond)
@@ -514,6 +516,15 @@ func TestObserveUpstreamMessage_ResponseIDFallbackPolicy(t *testing.T) {
 	)
 	require.False(t, observed.terminal)
 	require.Equal(t, "", observed.responseID)
+
+	observed = observeUpstreamMessage(
+		state,
+		[]byte(`{"type":"response.created","response":{"id":"resp_fallback"}}`),
+		startAt,
+		nowFn,
+		nil,
+	)
+	require.Equal(t, "resp_fallback", observed.responseID)
 
 	// terminal：允许兜底用顶层 id（用于兼容少数字段变体）。
 	observed = observeUpstreamMessage(

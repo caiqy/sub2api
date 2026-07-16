@@ -259,6 +259,7 @@ func TestRelay_BasicRelayAndUsage(t *testing.T) {
 
 	clientConn := newPassthroughTestFrameConn(nil, false)
 	upstreamConn := newPassthroughTestFrameConn([]passthroughTestFrame{
+		{msgType: coderws.MessageText, payload: []byte(`{"type":"response.created","response":{"id":"resp_123"}}`)},
 		{
 			msgType: coderws.MessageText,
 			payload: []byte(`{"type":"response.completed","response":{"id":"resp_123","usage":{"input_tokens":7,"output_tokens":3,"input_tokens_details":{"cached_tokens":2}}}}`),
@@ -279,7 +280,7 @@ func TestRelay_BasicRelayAndUsage(t *testing.T) {
 	require.Equal(t, 2, result.Usage.CacheReadInputTokens)
 	require.Nil(t, result.FirstTokenMs)
 	require.Equal(t, int64(1), result.ClientToUpstreamFrames)
-	require.Equal(t, int64(1), result.UpstreamToClientFrames)
+	require.Equal(t, int64(2), result.UpstreamToClientFrames)
 	require.Equal(t, int64(0), result.DroppedDownstreamFrames)
 
 	upstreamWrites := upstreamConn.Writes()
@@ -288,9 +289,10 @@ func TestRelay_BasicRelayAndUsage(t *testing.T) {
 	require.JSONEq(t, string(firstPayload), string(upstreamWrites[0].payload))
 
 	clientWrites := clientConn.Writes()
-	require.Len(t, clientWrites, 1)
+	require.Len(t, clientWrites, 2)
 	require.Equal(t, coderws.MessageText, clientWrites[0].msgType)
-	require.JSONEq(t, `{"type":"response.completed","response":{"id":"resp_123","usage":{"input_tokens":7,"output_tokens":3,"input_tokens_details":{"cached_tokens":2}}}}`, string(clientWrites[0].payload))
+	require.JSONEq(t, `{"type":"response.created","response":{"id":"resp_123"}}`, string(clientWrites[0].payload))
+	require.JSONEq(t, `{"type":"response.completed","response":{"id":"resp_123","usage":{"input_tokens":7,"output_tokens":3,"input_tokens_details":{"cached_tokens":2}}}}`, string(clientWrites[1].payload))
 }
 
 func TestRelay_FunctionCallOutputBytesPreserved(t *testing.T) {
@@ -356,6 +358,7 @@ func TestRelay_ClientDisconnect_DrainCapturesLateUsage(t *testing.T) {
 
 	clientConn := newPassthroughTestFrameConn(nil, true)
 	upstreamBase := newPassthroughTestFrameConn([]passthroughTestFrame{
+		{msgType: coderws.MessageText, payload: []byte(`{"type":"response.created","response":{"id":"resp_drain"}}`)},
 		{
 			msgType: coderws.MessageText,
 			payload: []byte(`{"type":"response.completed","response":{"id":"resp_drain","usage":{"input_tokens":6,"output_tokens":4,"input_tokens_details":{"cached_tokens":1}}}}`),
@@ -382,7 +385,7 @@ func TestRelay_ClientDisconnect_DrainCapturesLateUsage(t *testing.T) {
 	require.Equal(t, 1, result.Usage.CacheReadInputTokens)
 	require.Equal(t, int64(1), result.ClientToUpstreamFrames)
 	require.Equal(t, int64(0), result.UpstreamToClientFrames)
-	require.Equal(t, int64(1), result.DroppedDownstreamFrames)
+	require.Equal(t, int64(2), result.DroppedDownstreamFrames)
 }
 
 func TestRelay_IdleTimeout(t *testing.T) {
@@ -476,6 +479,7 @@ func TestRelay_MultipleUpstreamMessages(t *testing.T) {
 	// 上游发送多个事件（delta + completed），验证多帧中继和 usage 聚合
 	clientConn := newPassthroughTestFrameConn(nil, false)
 	upstreamConn := newPassthroughTestFrameConn([]passthroughTestFrame{
+		{msgType: coderws.MessageText, payload: []byte(`{"type":"response.created","response":{"id":"resp_multi"}}`)},
 		{
 			msgType: coderws.MessageText,
 			payload: []byte(`{"type":"response.output_text.delta","delta":"Hello"}`),
@@ -503,9 +507,9 @@ func TestRelay_MultipleUpstreamMessages(t *testing.T) {
 	require.Equal(t, 3, result.Usage.CacheReadInputTokens)
 	require.NotNil(t, result.FirstTokenMs)
 
-	// 验证所有 3 个上游帧都转发给了客户端
+	// 验证所有 4 个上游帧都转发给了客户端
 	clientWrites := clientConn.Writes()
-	require.Len(t, clientWrites, 3)
+	require.Len(t, clientWrites, 4)
 }
 
 func TestRelay_OnTurnComplete_IgnoresTerminalForUnknownResponse(t *testing.T) {
@@ -513,6 +517,7 @@ func TestRelay_OnTurnComplete_IgnoresTerminalForUnknownResponse(t *testing.T) {
 
 	clientConn := newPassthroughTestFrameConn(nil, false)
 	upstreamConn := newPassthroughTestFrameConn([]passthroughTestFrame{
+		{msgType: coderws.MessageText, payload: []byte(`{"type":"response.created","response":{"id":"resp_turn_1"}}`)},
 		{
 			msgType: coderws.MessageText,
 			payload: []byte(`{"type":"response.completed","response":{"id":"resp_turn_1","usage":{"input_tokens":2,"output_tokens":1}}}`),
@@ -539,8 +544,8 @@ func TestRelay_OnTurnComplete_IgnoresTerminalForUnknownResponse(t *testing.T) {
 	require.Equal(t, "response.completed", turns[0].TerminalEventType)
 	require.Equal(t, 2, turns[0].Usage.InputTokens)
 	require.Equal(t, 1, turns[0].Usage.OutputTokens)
-	require.Equal(t, 5, result.Usage.InputTokens)
-	require.Equal(t, 5, result.Usage.OutputTokens)
+	require.Equal(t, 2, result.Usage.InputTokens)
+	require.Equal(t, 1, result.Usage.OutputTokens)
 }
 
 func TestRelay_OnTurnComplete_ProvidesTurnMetrics(t *testing.T) {
@@ -548,6 +553,7 @@ func TestRelay_OnTurnComplete_ProvidesTurnMetrics(t *testing.T) {
 
 	clientConn := newPassthroughTestFrameConn(nil, false)
 	upstreamConn := newPassthroughTestFrameConn([]passthroughTestFrame{
+		{msgType: coderws.MessageText, payload: []byte(`{"type":"response.created","response":{"id":"resp_metric"}}`)},
 		{
 			msgType: coderws.MessageText,
 			payload: []byte(`{"type":"response.output_text.delta","response_id":"resp_metric","delta":"hi"}`),
@@ -692,6 +698,7 @@ func TestRelay_UsageParseFailureDoesNotBlockRelay(t *testing.T) {
 	// 上游发送无效 JSON（非 usage 格式），不应影响透传
 	clientConn := newPassthroughTestFrameConn(nil, false)
 	upstreamConn := newPassthroughTestFrameConn([]passthroughTestFrame{
+		{msgType: coderws.MessageText, payload: []byte(`{"type":"response.created","response":{"id":"resp_bad"}}`)},
 		{
 			msgType: coderws.MessageText,
 			payload: []byte(`{"type":"response.completed","response":{"id":"resp_bad","usage":"not_an_object"}}`),
@@ -710,7 +717,7 @@ func TestRelay_UsageParseFailureDoesNotBlockRelay(t *testing.T) {
 
 	// 帧仍然被转发
 	clientWrites := clientConn.Writes()
-	require.Len(t, clientWrites, 1)
+	require.Len(t, clientWrites, 2)
 	require.GreaterOrEqual(t, SnapshotMetrics().UsageParseFailureTotal, baseline+1)
 }
 
