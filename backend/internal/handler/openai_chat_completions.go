@@ -167,6 +167,8 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	failedAccountIDs := make(map[int64]struct{})
 	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
+	var lastFailedAccount *service.Account
+	var lastFailedDuration time.Duration
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
 
 	for {
@@ -205,6 +207,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 				return
 			} else {
 				if lastFailoverErr != nil {
+					h.submitFailoverFailedUsageLog(c, apiKey, lastFailedAccount, reqModel, reqStream, lastFailoverErr, lastFailedDuration, nil, "handler.openai_gateway.chat_completions")
 					h.handleFailoverExhausted(c, lastFailoverErr, streamStarted)
 				} else {
 					h.handleStreamingAwareError(c, http.StatusBadGateway, "api_error", "Upstream request failed", streamStarted)
@@ -233,6 +236,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
+		setOpenAIFailedUsageExactUpstreamModel(c, resolveOpenAIFailedUsageExactUpstreamModel(account, reqModel, channelMapping.MappedModel))
 
 		forwardBody := effectiveBody
 		writerSizeBeforeForward := c.Writer.Size()
@@ -250,7 +254,8 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 		h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, err != nil, cyberBlockKeyChat, channelMapping.ToUsageFields(reqModel, ""), service.HashUsageRequestPayload(body))
 
-		forwardDurationMs := time.Since(forwardStart).Milliseconds()
+		forwardDuration := time.Since(forwardStart)
+		forwardDurationMs := forwardDuration.Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
 		responseLatencyMs := forwardDurationMs
 		if upstreamLatencyMs > 0 && forwardDurationMs > upstreamLatencyMs {
@@ -278,6 +283,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 						return
 					}
 					if c.Writer.Size() != writerSizeBeforeForward {
+						if !service.HasOpenAIResponseTerminalWritten(c) {
+							h.submitFailoverFailedUsageLog(c, apiKey, account, reqModel, reqStream, failoverErr, forwardDuration, nil, "handler.openai_gateway.chat_completions")
+						}
 						h.handleFailoverExhausted(c, failoverErr, true)
 						return
 					}
@@ -310,12 +318,16 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 					h.gatewayService.RecordOpenAIAccountSwitch()
 					failedAccountIDs[account.ID] = struct{}{}
 					lastFailoverErr = failoverErr
+					lastFailedAccount = account
+					lastFailedDuration = forwardDuration
 					if switchCount >= maxAccountSwitches {
+						h.submitFailoverFailedUsageLog(c, apiKey, account, reqModel, reqStream, failoverErr, forwardDuration, nil, "handler.openai_gateway.chat_completions")
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
 					switchCount++
 					if h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount, &oauth429FailoverState) {
+						h.submitFailoverFailedUsageLog(c, apiKey, account, reqModel, reqStream, failoverErr, forwardDuration, nil, "handler.openai_gateway.chat_completions")
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
@@ -332,6 +344,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 				wroteFallback := false
 				if !upstreamErrorAlreadyCommunicated {
 					wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
+				}
+				if c.Request.Context().Err() == nil && service.HasOpsUpstreamAttempted(c) && !service.HasOpsClientBusinessLimited(c) && service.GetOpsCyberPolicy(c) == nil && !service.HasOpenAIResponseTerminalWritten(c) {
+					h.submitFailedUsageLog(c, apiKey, account, reqModel, reqStream, 0, nil, nil, forwardDuration, nil, "handler.openai_gateway.chat_completions")
 				}
 				reqLog.Warn("openai_chat_completions.forward_failed",
 					zap.Int64("account_id", account.ID),
@@ -352,6 +367,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		clientIP := ip.GetClientIP(c)
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account, result)
+		detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
 		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 
 		cyberBlocked := service.GetOpsCyberPolicy(c) != nil
@@ -362,6 +378,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 				User:               apiKey.User,
 				Account:            account,
 				Subscription:       subscription,
+				DetailSnapshot:     detailSnapshot,
 				InboundEndpoint:    inboundEndpoint,
 				UpstreamEndpoint:   upstreamEndpoint,
 				UserAgent:          userAgent,

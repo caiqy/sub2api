@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -61,6 +62,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return
 	}
+	service.SetUsageRequestBody(c, openAIRequestBodyPreviewSnapshot(body))
 
 	if isMultipartImagesContentType(c.GetHeader("Content-Type")) {
 		setOpsRequestContext(c, "", false)
@@ -142,6 +144,8 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	failedAccountIDs := make(map[int64]struct{})
 	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
+	var lastFailedAccount *service.Account
+	var lastFailedDuration time.Duration
 	stopJSONKeepalive := func() {}
 	jsonKeepaliveStarted := false
 	defer func() { stopJSONKeepalive() }()
@@ -179,6 +183,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 				return
 			}
 			if lastFailoverErr != nil {
+				h.submitOpenAIImagesFailoverFailedUsageLog(c, apiKey, lastFailedAccount, parsed, lastFailoverErr, lastFailedDuration)
 				h.handleFailoverExhausted(c, lastFailoverErr, streamStarted)
 			} else {
 				h.handleFailoverExhaustedSimple(c, 502, streamStarted)
@@ -223,6 +228,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			jsonKeepaliveStarted = true
 		}
 		forwardStart := time.Now()
+		setOpenAIFailedUsageExactUpstreamModel(c, resolveOpenAIFailedUsageExactUpstreamModel(account, parsed.Model, channelMapping.MappedModel))
 		writerSizeBeforeForward := service.OpenAIImagesJSONKeepaliveAdjustedWrittenSize(c)
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
@@ -232,7 +238,8 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			}()
 			return h.gatewayService.ForwardImages(requestCtx, c, account, body, parsed, channelMapping.MappedModel)
 		}()
-		forwardDurationMs := time.Since(forwardStart).Milliseconds()
+		forwardDuration := time.Since(forwardStart)
+		forwardDurationMs := forwardDuration.Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
 		responseLatencyMs := forwardDurationMs
 		if upstreamLatencyMs > 0 && forwardDurationMs > upstreamLatencyMs {
@@ -252,6 +259,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			} else {
 				var imageUpstreamErr *service.OpenAIImagesUpstreamError
 				if errors.As(err, &imageUpstreamErr) {
+					h.submitOpenAIImagesFailedUsageLog(c, apiKey, account, parsed, err, forwardDuration)
 					retryableServerError := service.IsOpenAIImagesRetryableUpstreamError(imageUpstreamErr)
 					h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, !retryableServerError, nil)
 					logEvent := "openai.images.upstream_user_error"
@@ -275,6 +283,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 							zap.Int64("account_id", account.ID),
 							zap.Int("upstream_status", failoverErr.StatusCode),
 						)
+						h.submitOpenAIImagesFailoverFailedUsageLog(c, apiKey, account, parsed, failoverErr, forwardDuration)
 						h.handleFailoverExhausted(c, failoverErr, true)
 						return
 					}
@@ -306,12 +315,16 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 					h.gatewayService.RecordOpenAIAccountSwitch()
 					failedAccountIDs[account.ID] = struct{}{}
 					lastFailoverErr = failoverErr
+					lastFailedAccount = account
+					lastFailedDuration = forwardDuration
 					if switchCount >= maxAccountSwitches {
+						h.submitOpenAIImagesFailoverFailedUsageLog(c, apiKey, account, parsed, failoverErr, forwardDuration)
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
 					switchCount++
 					if h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount, &oauth429FailoverState) {
+						h.submitOpenAIImagesFailoverFailedUsageLog(c, apiKey, account, parsed, failoverErr, forwardDuration)
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
@@ -328,6 +341,9 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 				wroteFallback := false
 				if !upstreamErrorAlreadyCommunicated {
 					wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
+				}
+				if c.Request.Context().Err() == nil && service.HasOpsUpstreamAttempted(c) && !service.HasOpsClientBusinessLimited(c) && !service.HasOpenAIResponseTerminalWritten(c) {
+					h.submitOpenAIImagesFailedUsageLog(c, apiKey, account, parsed, err, forwardDuration)
 				}
 				fields := []zap.Field{
 					zap.Int64("account_id", account.ID),
@@ -355,6 +371,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
+		detailSnapshot := buildOpenAIImagesDetailSnapshot(c, parsed)
 		requestPayloadHash := service.HashUsageRequestPayload(body)
 		if parsed.Multipart {
 			requestPayloadHash = service.HashUsageRequestPayload([]byte(parsed.StickySessionSeed()))
@@ -374,6 +391,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 				User:               apiKey.User,
 				Account:            account,
 				Subscription:       subscription,
+				DetailSnapshot:     detailSnapshot,
 				InboundEndpoint:    inboundEndpoint,
 				UpstreamEndpoint:   upstreamEndpoint,
 				UserAgent:          userAgent,
@@ -407,6 +425,99 @@ func (h *OpenAIGatewayHandler) openAIImagesJSONKeepaliveInterval() time.Duration
 		return 0
 	}
 	return time.Duration(h.cfg.Gateway.ImageNonstreamKeepaliveInterval) * time.Second
+}
+
+const multipartMetadataPromptPreviewLimitBytes = 512 << 10
+
+func buildOpenAIImagesDetailSnapshot(c *gin.Context, parsed *service.OpenAIImagesRequest) *middleware2.UsageDetailSnapshot {
+	snapshot := middleware2.BuildUsageDetailSnapshot(c)
+	if snapshot == nil || parsed == nil {
+		return snapshot
+	}
+	if !parsed.Multipart && len(parsed.InputImageURLs) == 0 && strings.TrimSpace(parsed.MaskImageURL) == "" {
+		return snapshot
+	}
+	prompt := truncateString(parsed.Prompt, multipartMetadataPromptPreviewLimitBytes)
+	if parsed.Multipart {
+		prompt = ""
+	}
+	requestBody, err := json.Marshal(struct {
+		Model          string `json:"model"`
+		Prompt         string `json:"prompt"`
+		Size           string `json:"size"`
+		Quality        string `json:"quality"`
+		Background     string `json:"background"`
+		OutputFormat   string `json:"output_format"`
+		Moderation     string `json:"moderation"`
+		N              int    `json:"n"`
+		HadSourceImage bool   `json:"had_source_image"`
+		HadMask        bool   `json:"had_mask"`
+	}{
+		Model:          parsed.Model,
+		Prompt:         prompt,
+		Size:           parsed.Size,
+		Quality:        parsed.Quality,
+		Background:     parsed.Background,
+		OutputFormat:   parsed.OutputFormat,
+		Moderation:     parsed.Moderation,
+		N:              parsed.N,
+		HadSourceImage: len(parsed.Uploads) > 0 || len(parsed.InputImageURLs) > 0,
+		HadMask:        parsed.HasMask || strings.TrimSpace(parsed.MaskImageURL) != "",
+	})
+	if err != nil {
+		return snapshot
+	}
+	size := int64(0)
+	if c != nil && c.Request != nil && c.Request.ContentLength > 0 {
+		size = c.Request.ContentLength
+	}
+	snapshot.RequestBody = service.RequestBodyPreviewSnapshot(string(requestBody), size, true)
+	return snapshot
+}
+
+func (h *OpenAIGatewayHandler) submitOpenAIImagesFailedUsageLog(c *gin.Context, apiKey *service.APIKey, account *service.Account, parsed *service.OpenAIImagesRequest, err error, duration time.Duration) {
+	var upstreamErr service.OpenAIImageUpstreamError
+	if errors.As(err, &upstreamErr) && upstreamErr != nil {
+		h.submitOpenAIImagesFailedUsageLogWithResponse(c, apiKey, account, parsed, upstreamErr.OpenAIImageUpstreamStatusCode(), upstreamErr.OpenAIImageUpstreamResponseHeaders(), upstreamErr.OpenAIImageUpstreamResponseBody(), duration)
+		return
+	}
+	h.submitOpenAIImagesFailedUsageLogWithResponse(c, apiKey, account, parsed, 0, nil, nil, duration)
+}
+
+func (h *OpenAIGatewayHandler) submitOpenAIImagesFailoverFailedUsageLog(c *gin.Context, apiKey *service.APIKey, account *service.Account, parsed *service.OpenAIImagesRequest, failoverErr *service.UpstreamFailoverError, duration time.Duration) {
+	if failoverErr == nil {
+		h.submitOpenAIImagesFailedUsageLogWithResponse(c, apiKey, account, parsed, 0, nil, nil, duration)
+		return
+	}
+	h.submitOpenAIImagesFailedUsageLogWithResponse(c, apiKey, account, parsed, failoverErr.StatusCode, failoverErr.ResponseHeaders, failoverErr.ResponseBody, duration)
+}
+
+func (h *OpenAIGatewayHandler) submitOpenAIImagesFailedUsageLogWithResponse(c *gin.Context, apiKey *service.APIKey, account *service.Account, parsed *service.OpenAIImagesRequest, upstreamStatusCode int, responseHeaders http.Header, responseBody []byte, duration time.Duration) {
+	if c == nil || apiKey == nil || apiKey.User == nil || account == nil || parsed == nil {
+		return
+	}
+	if responseHeaders != nil || responseBody != nil {
+		headersText := service.FormatUsageDetailResponseHeadersText(upstreamStatusCode, responseHeaders)
+		service.SetUsageResponseSnapshot(c, headersText, string(responseBody))
+		service.SetUsageUpstreamResponse(c, upstreamStatusCode, responseHeaders, string(responseBody))
+	}
+	detailSnapshot := buildOpenAIImagesDetailSnapshot(c, parsed)
+	h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
+		service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), &service.FailedUsageLogInput{
+			APIKey:           apiKey,
+			User:             apiKey.User,
+			Account:          account,
+			Model:            parsed.Model,
+			UpstreamModel:    resolveOpenAIFailedUsageUpstreamModel(c, account, parsed.Model),
+			Stream:           parsed.Stream,
+			InboundEndpoint:  GetInboundEndpoint(c),
+			UpstreamEndpoint: GetUpstreamEndpoint(c, account.Platform),
+			UserAgent:        c.GetHeader("User-Agent"),
+			IPAddress:        ip.GetClientIP(c),
+			DetailSnapshot:   detailSnapshot,
+			Duration:         duration,
+		}, "handler.openai_gateway.images")
+	})
 }
 
 func isMultipartImagesContentType(contentType string) bool {
