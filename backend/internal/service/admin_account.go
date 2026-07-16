@@ -463,6 +463,15 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 	if len(updates) == 0 {
 		return nil
 	}
+	if _, exists := updates[openAILongContextBillingEnabledKey]; exists {
+		account, err := s.accountRepo.GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if err := ValidateOpenAILongContextBillingExtra(account.Platform, updates); err != nil {
+			return err
+		}
+	}
 	return s.accountRepo.UpdateExtra(ctx, id, updates)
 }
 
@@ -494,14 +503,24 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	needMixedChannelCheck := input.GroupIDs != nil && !input.SkipMixedChannelCheck
 
+	_, needsLongContextValidation := input.Extra[openAILongContextBillingEnabledKey]
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck {
+	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || needsLongContextValidation {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
 		}
 		cachedTargets = loaded
+	}
+	if needsLongContextValidation {
+		for _, account := range cachedTargets {
+			if account != nil && account.Platform == PlatformOpenAI {
+				if err := ValidateOpenAILongContextBillingExtra(account.Platform, input.Extra); err != nil {
+					return nil, err
+				}
+			}
+		}
 	}
 
 	// 影子账号绝不持有凭据:批量更新携带凭据时,目标中不得含影子(外审 G5,与单账号
@@ -855,6 +874,9 @@ func (s *adminServiceImpl) CreateShadow(ctx context.Context, parentID int64, opt
 		Priority:        priority,
 		Concurrency:     concurrency,
 		Schedulable:     true,
+		Extra: map[string]any{
+			openAILongContextBillingEnabledKey: parent.IsOpenAILongContextBillingEnabled(),
+		},
 	}
 
 	// 5. 持久化（Create 填充 shadow.ID）。并发竞态:预查(步骤2)放行后另一请求抢先建成,本次会撞
