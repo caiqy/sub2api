@@ -468,6 +468,31 @@ func TestRelayTurnTimingHelpersCoverage(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestObserveUpstreamMessage_BindsOnlyResponseCreated(t *testing.T) {
+	now := time.Unix(100, 0)
+	state := &relayState{activeTurn: &relayTurnTiming{startAt: now}}
+	nowFn := func() time.Time { return now.Add(time.Second) }
+
+	foreignDelta := observeUpstreamMessage(state, []byte(`{"type":"response.output_text.delta","response":{"id":"resp_foreign"},"delta":"no"}`), now, nowFn, nil)
+	require.Empty(t, foreignDelta.responseID)
+	require.Empty(t, state.activeTurn.responseID)
+
+	foreignTerminal := observeUpstreamMessage(state, []byte(`{"type":"response.completed","response":{"id":"resp_foreign","usage":{"input_tokens":9,"output_tokens":8}}}`), now, nowFn, nil)
+	require.False(t, foreignTerminal.terminal)
+	require.Equal(t, Usage{}, state.usage)
+	require.NotNil(t, state.activeTurn)
+
+	created := observeUpstreamMessage(state, []byte(`{"type":"response.created","response":{"id":"resp_real"}}`), now, nowFn, nil)
+	require.Equal(t, "resp_real", created.responseID)
+	require.Equal(t, "resp_real", state.activeTurn.responseID)
+
+	completed := observeUpstreamMessage(state, []byte(`{"type":"response.completed","response":{"id":"resp_real","usage":{"input_tokens":2,"output_tokens":1}}}`), now, nowFn, nil)
+	require.True(t, completed.terminal)
+	require.True(t, completed.completedActiveTurn)
+	require.Equal(t, 2, state.usage.InputTokens)
+	require.Equal(t, 1, state.usage.OutputTokens)
+}
+
 func TestObserveUpstreamMessage_ResponseIDFallbackPolicy(t *testing.T) {
 	t.Parallel()
 
