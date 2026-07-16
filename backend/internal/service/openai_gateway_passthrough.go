@@ -206,6 +206,17 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
+		if !agentIdentityTaskRecoveryWasTried(ctx) && s.isAgentIdentityAccount(ctx, account) {
+			respBody := s.readUpstreamErrorBody(resp)
+			_ = resp.Body.Close()
+			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+			if isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
+				if err := s.recoverAgentIdentityTask(ctx, account, account.GetCredential("task_id")); err != nil {
+					return nil, fmt.Errorf("agent identity task recovery failed: %w", err)
+				}
+				return s.forwardOpenAIPassthrough(markAgentIdentityTaskRecoveryTried(ctx), c, account, body, canonicalImageIntentBody, reqModel, attemptImageIntentInvalidated, reasoningEffort, reqStream, startTime)
+			}
+		}
 		// 透传模式默认保持原样代理；但 429/529 属于网关必须兜底的
 		// 上游容量类错误，应先触发多账号 failover 以维持基础 SLA。
 		shouldFailover := shouldFailoverOpenAIPassthroughResponse(resp.StatusCode)

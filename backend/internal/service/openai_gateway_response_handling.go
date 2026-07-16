@@ -1009,6 +1009,9 @@ func (s *OpenAIGatewayService) bindHTTPResponseAccount(ctx context.Context, c *g
 	if s == nil || account == nil || account.ID <= 0 {
 		return
 	}
+	if !s.openAIStickyEnabled() {
+		return
+	}
 	responseID = strings.TrimSpace(responseID)
 	if responseID == "" {
 		return
