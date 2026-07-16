@@ -260,7 +260,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 
 **产物：** 第 1 阶段冲突台账，逐行包含路径、类别、ours 行为/调用链、theirs 行为、融合语义和验证命令。
 
-- [ ] **步骤 1：再次确认阶段 0 保护条件**
+- [x] **步骤 1：再次确认阶段 0 保护条件**
 
   执行：
   ```bash
@@ -270,7 +270,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：工作树除本 change 预期文档外干净，阶段 0 全部通过且 tag peel SHA 为 `b73d8c3efe01a290eaaa9326b6e40ece02c67a0e`。
 
-- [ ] **步骤 2：创建第一个独立 merge 节点**
+- [x] **步骤 2：创建第一个独立 merge 节点**
 
   执行：
   ```bash
@@ -278,7 +278,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：无冲突时直接创建 merge commit；有冲突时停留在 merge 状态，只能进入下一步骤，不得执行 `git merge --abort` 后改用 squash/cherry-pick。
 
-- [ ] **步骤 3：发现、分类并融合每个冲突**
+- [x] **步骤 3：发现、分类并融合每个冲突**
 
   执行：
   ```bash
@@ -288,7 +288,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   对每个未合并文件，分别阅读 merge 前第一父与 `v0.1.152^{}` 的行为和调用方，分类为上游修复、本地定制、接口/配置演进、版本依赖、生成代码或 migration；可共存时作最小融合。不可共存且不是首 Token 例外时停止并请求用户选择。
 
-- [ ] **步骤 4：完成 merge commit 并验证父节点**
+- [x] **步骤 4：完成 merge commit 并验证父节点**
 
   执行：
   ```bash
@@ -299,7 +299,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   在 `git commit` 前，根据前一步 `git diff --name-only --diff-filter=U` 的精确冲突路径逐个执行 `git add -- 路径`，但不得暂存验证报告。预期：merge commit 的第二父为 `b73d8c3efe01a290eaaa9326b6e40ece02c67a0e`；该节点只包含上游树和必要冲突融合，不包含后续语义修复或台账文档。
 
-- [ ] **步骤 5：提交 v0.1.152 冲突台账与父节点证据**
+- [x] **步骤 5：提交 v0.1.152 冲突台账与父节点证据**
 
   在 merge commit 完成后，将精确冲突路径（无冲突则明确写“无”）、类别、ours/theirs 行为、融合结论、验证方式、merge SHA 与两个父节点写入验证报告，然后执行：
   ```bash
@@ -307,6 +307,8 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   git commit -m "docs: record v0.1.152 merge decisions"
   ```
   预期：文档提交紧随 merge commit，且不包含业务代码；merge 后语义回归仍留给 Task 6 的独立普通修复提交。
+
+  若 Task 5 reviewer 在 merge 完成后发现语义回归，不改写 merge commit；将失败证据、TDD 修复和普通提交明确归入 Task 6。用户已确认 `b19c03d01` 与 `2026265cb` 的 Grok 默认 URL 修复按此规则作为 Task 6 提前执行项。
 
 ### Task 6：审查 v0.1.152 受影响能力并修复回归（OpenSpec 2.2）
 
@@ -326,7 +328,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 
 - [ ] **步骤 2：对首次回归采用失败测试驱动最小修复**
 
-  先运行对应 `protected` 测试以保留失败输出；缺少直接断言时按任务 4 的规则新增一个最小测试。仅修复当前 release 区间破坏的语义，不在 merge commit 内追加修复。
+  先接收 Task 5 review 已发现并完成的 Grok 默认 URL TDD 修复（`b19c03d01`、`2026265cb`），核对其 RED/GREEN 与表单依赖，不重复实现。再运行对应 `protected` 测试以保留其他失败输出；缺少直接断言时按任务 4 的规则新增一个最小测试。仅修复当前 release 区间破坏的语义，不在 merge commit 内追加修复。
 
 - [ ] **步骤 3：创建独立兼容修复提交（仅在存在修复时）**
 
