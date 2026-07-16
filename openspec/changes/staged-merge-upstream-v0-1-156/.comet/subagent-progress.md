@@ -1,17 +1,17 @@
 # Subagent Progress
 
 - Change: `staged-merge-upstream-v0-1-156`
-- Plan task: `Task 2：运行阶段 0 基线与生成检查（OpenSpec 1.2）`
-- OpenSpec task: `1.2 在任何 merge 前运行当前 HEAD 的 make test、前端 build 及既定生成代码检查，记录稳定基线或阻塞失败`
+- Plan task: `Task 3：建立本地能力至验证证据的映射（OpenSpec 1.3）`
+- OpenSpec task: `1.3 根据本地独有提交、目标 tag changed files 和既有规格建立本地能力到行为测试的映射矩阵`
 - Phase: `done`
 - Review mode: `thorough`
-- Review/fix round: `0/2`
-- Implementer status: `DONE（代理原始状态 PASS，规范化为 DONE）`
-- Implementation commit: `6b4f1aa5787b7a6cdac773bd5d4e289a5d4a4972`
+- Review/fix round: `4/4（用户再次明确授权 M-10/M-15 定向修复）`
+- Implementer status: `DONE_WITH_CONCERNS（阻塞已通过定向修复解除）`
+- Implementation commit: `b3f3b0ee51d1b1cec203e1a5d0ba33125f6e8b71..abc694a4d6cb1ec7c6c8ba76a49ac28c056f6e00`
 - Changed files: `docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md`
-- Evidence: `make test、frontend build、两轮 Ent/Wire generate/diff、git diff --check 均退出 0`
-- TDD: `exempt-by-user-decision`（既有基线与生成检查不修改行为，不伪造 RED/GREEN）
-- Task reviewer: `Approved（spec compliant，Critical/Important/Minor 均无）`
-- Unresolved findings: `none；完整长日志不属于计划产物，命令/退出码/关键摘要已由 implementer report 持久化`
-- Brief: `.superpowers/sdd/task-2-brief.md`
-- Report: `.superpowers/sdd/task-2-report.md`
+- Evidence: `五份清单、16 个命令 ID、M-16 10/10；M-10 Go/Vitest 与 M-15 migration/generate/diff 均从根目录退出 0`
+- TDD: `exempt-by-user-decision`（调查与文档记录不修改行为，不伪造 RED/GREEN）
+- Task reviewer: `Approved（最终复审 spec compliant，Critical/Important/Minor 均无）`
+- Unresolved findings: `none；测试运行环境不可从 diff 独立重建，但命令、退出码、RUN/PASS 与 implementer report 证据契约完整`
+- Brief: `.superpowers/sdd/task-3-brief.md`
+- Report: `.superpowers/sdd/task-3-report.md`

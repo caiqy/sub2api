@@ -175,11 +175,11 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 
 **产物：** 报告的“能力矩阵”，每一行具备能力名称、本地行为契约、入口与调用链、关键文件、受影响 tag、现有自动测试、人工审查点、状态、阶段结果和证据链接。
 
-- [ ] **步骤 1：导出本地独有提交和四段上游变更清单**
+- [x] **步骤 1：导出本地独有提交和四段上游变更清单**
 
   执行：
   ```bash
-  git log --format='%H %s' v0.1.151^{}..d1cc02502271f54b3b7f0593a18db4f2aaab63ea
+  git log --format='%H %s' v0.1.151^{}..d5f8192d32d9840d63477c24d4a567abb8cb4a90
   git diff --name-only v0.1.151..v0.1.152
   git diff --name-only v0.1.152..v0.1.153
   git diff --name-only v0.1.153..v0.1.155
@@ -187,7 +187,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：将每段输出原样附到报告的对应阶段 changed-files 小节；这是后续查找无文本冲突语义变化的唯一输入清单。
 
-- [ ] **步骤 2：用能力矩阵覆盖高风险本地行为**
+- [x] **步骤 2：用能力矩阵覆盖高风险本地行为**
 
   逐项记录以下能力，且为每项写出当前入口、调用链和现有测试命令：scheduler、OpenAI/Gemini/Anthropic Sticky、previous-response/session Sticky、fallback/WaitPlan、DB recheck、Messages/Responses/Chat 转换与透传字段、终止 usage、privacy/内容审计、image capability、运行时设置热更新、请求体重放与清理、用户资源控制、前端本地功能、版本/依赖、Ent/Wire 与 migrations。
 
@@ -198,11 +198,20 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   并对变更入口使用 CodeGraph `context`、`impact` 或 `trace` 记录调用链；不以文件名匹配代替调用链审查。
 
-- [ ] **步骤 3：为每行分配唯一状态**
+- [x] **步骤 3：为每行分配唯一状态**
 
   判定：直接行为测试且阶段 0 通过为 `protected`；目标 release 触及但缺少关键行为断言为 `gap`；生成物、migration、版本依赖或跨层契约需结构审查为 `manual`；仅本地首 Token 超时预登记为 `approved-removal`，且阶段结果标为“仅 v0.1.156 后可执行”。
 
   预期：没有空状态或未归类高风险能力；`gap` 行成为任务 4 的唯一补测输入。
+
+- [x] **步骤 4：提交能力矩阵与 changed-files 证据**
+
+  执行：
+  ```bash
+  git add -f docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md
+  git commit -m "docs: map local capability coverage"
+  ```
+  预期：仅提交验证报告；矩阵每行字段完整、状态唯一，所有 `gap` 均可直接作为 Task 4 输入。
 
 ### Task 4：补齐阶段 0 的最小行为保护测试（OpenSpec 1.4）
 
