@@ -249,6 +249,14 @@ PASS (3 files, 13 tests)
 - Task 34/full gate 未执行；本项复审不能替代完整 Go lint、前端 typecheck/build 或全量 Vitest 门禁。
 - 前端定向测试保留既有 Browserslist data 过期警告，无失败断言。
 
+### Task 34 v0.1.159 阶段门禁
+- 起始提交：`80750db5de771eebf3cb6f1a8b2438f21adfbed9`。仅关闭 v0.1.159 阶段门禁；未开始 Task 35 版本规范化，未提交 `.comet/current-change.json`，未合并 `upstream/main`、tag 后提交，未 push、release 或 deploy。
+- `make test` 退出 0：后端 Go 测试和 `golangci-lint` 通过；前端 lint/typecheck 通过；Vitest 为 194 个测试文件、1493 个测试通过。输出中的 `router-link`、预期错误路径、intlify、jsdom XHR 和 Browserslist 提示均无失败断言。
+- `pnpm --dir frontend run build` 退出 0：`vue-tsc -b` 和 Vite production build 通过，完成 987 个模块（35.18 秒）。保留既有 Browserslist 数据过期、动态导入 chunk 与大于 500 kB chunk 警告。
+- `make -C backend generate` 退出 0；随后 `git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` 无输出，Ent/Wire 无生成 diff。
+- `git diff --check` 和 `git diff --name-only --diff-filter=U` 均无输出；冲突标记扫描无真实匹配。旧本地首 Token 超时符号扫描无匹配，未恢复已批准删除的 watchdog。
+- 能力矩阵无 `gap`，既有 `protected` 证据保持有效；目标 tag 新入口继续保留为合并后 `manual` 验收。残余 PostgreSQL integration manual：live PostgreSQL 未运行，`TestCreateGroupFromSourceRollsBackWhenOutboxInsertFails`、`TestUserRepoSuite` 的 batch-limit cases 和 `TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate` 仍受 `integration` tag/数据库环境约束，需在具备 PostgreSQL 的环境执行。
+
 ### Task 31 v0.1.158 阶段门禁
 - 起始提交：`1f51f4a382afb2422beae1ef4ad2bd7b5df488ee`；仅关闭 v0.1.158 阶段门禁，未合并 v0.1.159，未 push、release 或 deploy。
 - `make test` 退出 0：后端 Go 测试与 lint 通过；前端 lint/typecheck 通过；Vitest 为 193 个测试文件、1488 个测试通过。
