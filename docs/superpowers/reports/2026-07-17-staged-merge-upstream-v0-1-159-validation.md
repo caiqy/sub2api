@@ -40,7 +40,7 @@
 | step-up 2FA / 157 | `StepUp` middleware <- protected user/admin routes; `TotpHandler` -> TOTP service -> audit action。 | `server/middleware/{step_up,wire}.go`、`handler/totp_handler.go`、`service/{totp_service,totp_verification_method}.go`。 | tag tests: `step_up_test.go`、`totp_verification_method_test.go`; 合并后 `go -C backend test ./internal/server/middleware ./internal/service -run 'StepUp|Totp' -count=1`。 | scope、过期/失败、审计 action。 | manual |
 | OpenAI Responses 和 WebSocket / 157,158,159 | `Responses`/`ResponsesWebSocket` <- gateway routes; -> handler concurrency/failover/usage -> WS ingress/HTTP bridge。 | 157: `handler/{gateway_handler_responses,openai_gateway_handler}.go`、`service/openai_gateway_usage.go`; 158-159: `service/openai_ws_{forwarder_ingress,forwarder_v2,http_bridge}.go`。 | 当前：`openai_gateway_service_test.go`、`openai_ws_forwarder_ingress_session_test.go`、`openai_ws_forwarder_success_test.go`、`openai_ws_http_bridge_test.go`; baseline command `go -C backend test ./internal/service ./internal/handler/... ./internal/repository ./internal/server/... -count=1` (0)。 | compact、WS V2 binding、terminal usage、lease release。 | protected |
 | Grok endpoint / 157,158,159 | Grok gateway/media forwarders <- gateway routes; -> account `GetGrokBaseURL`/media URL resolution。 | 157: `service/{grok_media,grok_upstream_url}.go`; 158: `handler/admin/grok_oauth_handler.go`; 159: `service/openai_gateway_grok.go`。 | 当前：`grok_upstream_url_test.go`、`account_base_url_test.go`; 已执行 `go -C backend test ./internal/service -run '^(TestGetGrokBaseURL|TestOpenAIGatewayService_SelectAccountWithScheduler_DefaultDisabledUsesLegacyLoadAwareness|TestOpenAIAlphaSearch)' -count=1` (0)。 | OAuth/API-key endpoint、media endpoint、scheduler platform route。 | protected |
-| Grok prompt cache / 159 | `resolveGrokCacheIdentity` <- `openai_gateway_grok.go`, Messages/Chat bridge and `openai_ws_http_bridge.go`; -> Responses body/header cache routing。 | `service/{openai_gateway_grok,openai_gateway_grok_cache,openai_ws_http_bridge}.go`。 | 当前直接 unit tests：`openai_gateway_grok_cache_test.go`; 已执行 `go -C backend test -tags unit ./internal/service -run '^TestResolveGrokCacheIdentity' -count=1` (0)。 | API-key/model isolation、compact exclusion、Free-tier tools、WS/HTTP 一致性。 | protected |
+| Grok prompt cache / 159 | `resolveGrokCacheIdentity` <- `openai_gateway_grok.go`, Messages/Chat bridge and `openai_ws_http_bridge.go`; -> Responses body/header cache routing。 | `service/{openai_gateway_grok,openai_gateway_grok_cache,openai_ws_http_bridge}.go`。 | 当前直接 unit tests：`openai_gateway_grok_cache_test.go`; 已执行 `go -C backend test -tags unit ./internal/service -run '^(TestResolveGrokCacheIdentity.*|TestApplyGrokCacheIdentity.*|TestGrokFreeMessagesFunctionToolCacheRoute.*|TestGrokCompactRequestSkipsCacheIdentityAndNativeTools)$' -count=1` (0，19 tests)。 | unit 已覆盖 API-key/model isolation、Responses body/header、Free-tier tools 与 compact exclusion；WS/HTTP 跨入口集成在 tag 合并后按调用方逐段人工复核。 | protected (unit); manual (WS/HTTP integration) |
 | 分组复制 / 158 | `GroupHandler.Duplicate` <- admin route; -> `DuplicateGroup` -> group repo/outbox transaction。 | `handler/admin/group_handler.go`、`service/admin_group_duplicate.go`、`repository/group_repo.go`、migration `181`。 | tag tests: `admin_group_duplicate_test.go`、`group_repo_duplicate_integration_test.go`、`admin.groups.duplicate.spec.ts`; 合并后 `go -C backend test ./internal/handler/admin ./internal/service ./internal/repository -run 'DuplicateGroup' -count=1`。 | inactive copy、deep copy、priority、idempotency、name collision。 | manual |
 | 用户批量限额 / 158 | `UserHandler.BatchUpdateConcurrency` <- admin route; -> `AdminUser.BatchUpdateConcurrency` -> user repo。 | `handler/admin/user_handler.go`、`service/admin_user.go`、`repository/user_repo.go`。 | tag tests: `user_handler_batch_limits_test.go`、`admin_service_batch_limits_test.go`、`BulkEditUserModal.spec.ts`; 合并后 `go -C backend test ./internal/handler/admin ./internal/service -run 'BatchUpdateConcurrency|BatchLimits' -count=1`。 | mode、partial failure、UI payload。 | manual |
 | 客户端 IP 解析 / 159 | `GetClientIP`/`GetTrustedClientIP` <- audit/session/ACL middleware。 | `pkg/ip/ip.go`、`server/{router,middleware/api_key_auth,middleware/audit_log,middleware/session_binding}.go`。 | tag tests: `ip_test.go`、`session_binding_test.go`; 合并后 `go -C backend test ./internal/pkg/ip ./internal/server/middleware -run 'IP|SessionBinding' -count=1`。 | proxy trust、port、XFF、private range order。 | manual |
@@ -53,7 +53,7 @@
 ### 本轮保护结论
 - 本轮复审前的 gap：`BillingRateMultiplier` 仅有 accessor 单测，没有 `RecordUsage -> applyUsageBilling` 的直接断言；`openai_account_scheduler_upstream_cost_test.go` 只存在于目标 v0.1.157，不存在于当前基线，不能作为当前证据。
 - 关闭：在现有 `openai_gateway_record_usage_test.go` 添加 `TestOpenAIGatewayServiceRecordUsage_AccountRateMultiplierFeedsUsageBilling`。当前基线执行通过，断言 usage log snapshot 与 `UsageBillingCommand.AccountQuotaCost == TotalCost * account multiplier`；该行现为 `protected`。
-- Grok cache 是当前基线 `protected`，不是新入口。`go -C backend test -tags unit ./internal/service -run '^TestResolveGrokCacheIdentity' -count=1` 已实际执行并退出 0；不带 tag 的默认命令显示 `no tests to run`，不作为证据。
+- Grok cache 是当前基线的 helper-unit `protected`，不是新入口。已实际执行 19-test 正则：`go -C backend test -tags unit ./internal/service -run '^(TestResolveGrokCacheIdentity.*|TestApplyGrokCacheIdentity.*|TestGrokFreeMessagesFunctionToolCacheRoute.*|TestGrokCompactRequestSkipsCacheIdentityAndNativeTools)$' -count=1`，退出 0；WS/HTTP 跨入口集成仍为合并后的 `manual` 审查。不带 tag 的默认命令显示 `no tests to run`，不作为证据。
 - 现有扩展基线：`go -C backend test ./internal/service ./internal/handler/... ./internal/repository ./internal/server/... -count=1` 退出 0；`pnpm --dir frontend exec vitest run` 退出 0（181 files, 1405 tests）。Vitest 保留既有 router-link、预期错误路径和 intlify 警告，未出现失败。
 
 ## v0.1.157
@@ -67,7 +67,7 @@
 
 ## 最终验证
 - 扩展前完整基线全部退出码为 0。
-- 本次提交只包含本报告；首轮 v0.1.156 验证报告保持只读。
+- 首轮 v0.1.156 验证报告保持只读；Task 25 的报告和 characterization test 提交见下文。
 
 ## 完整命令与结果摘要
 ### 工作区、分支和首轮结果
@@ -127,14 +127,16 @@ git diff --check
 - 未提交：`.comet/current-change.json`（忽略的本地选择文件）。
 
 ## 提交
-- 提交命令：`git add -f docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md`，随后执行 `git commit -m "docs: record v0.1.159 extension baseline"`。
-- 提交范围：仅本报告。
+- Task 24 baseline：`b1bd6028e docs: record v0.1.159 extension baseline`，仅活动报告。
+- Task 25 matrix：`fe4037449 docs: extend capability matrix to v0.1.159`，仅活动报告。
+- Task 25 gap closure：`bdeb1d1af test: protect local behavior before v0.1.157`，包含活动报告及 `backend/internal/service/openai_gateway_record_usage_test.go` 的 characterization test。
+- 本次二轮 review 的 Grok cache 验证和报告修正另行提交；不修改首轮报告。
 
 ## 自审
 - 固定对象、提交计数、变更文件计数和最终边界与任务 brief 一致。
 - 未合并 v0.1.157、v0.1.158 或 v0.1.159；未 push、release 或 deploy。
 - 首轮 v0.1.156 验证报告未修改；`.comet/current-change.json` 未加入提交。
-- 已复核首轮报告无 diff；暂存区和提交后将复核仅包含本报告，工作区仅保留忽略的 `.comet/current-change.json`。
+- 已复核首轮报告无 diff；Task 25 已有两个提交，其中第二个含最小 characterization test。提交后继续复核本次文档修正不含 `.comet/current-change.json`，工作区仅保留忽略的该文件。
 
 ## 残余风险与未执行事项
 - 本任务仅固定 refs 和建立扩展前基线；v0.1.157、v0.1.158、v0.1.159 的合并和能力验证均未执行。
