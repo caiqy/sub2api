@@ -347,6 +347,7 @@ git diff --check
 ## Task 35 版本规范化、生成物与 migration 复核
 - 起始提交：`4f97cdf44d6052c2b8e43e38f72ac3e10f1816de`。仅执行本节所列版本、生成物、依赖/配置和 migration 复核；未开始 Task 36 full capability matrix，未提交 `.comet/current-change.json`，未合并 `upstream/main` 或 tag 后提交，未 push、release 或 deploy。
 - `backend/cmd/server/VERSION` 是嵌入到 server 二进制的 runtime 版本源，已精确规范为 `0.1.159.1`；`go -C backend test ./cmd/server -count=1` 退出 0。版本提交为 `fa03e00a5 chore: set version to 0.1.159.1`。
+- 索引证据：`git ls-files -- .comet/current-change.json` 和 `git ls-files -- .superpowers/sdd/task-35-report.md` 均返回空，两个 scratch/current-change 路径均无 Git index 条目；同次 `git status --short` 将 current-change 显示为 `??`。
 
 ### 生成物
 - 连续两次 `make -C backend generate` 均退出 0；每次后 `git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` 均退出 0。Ent 和 Wire 生成物无漂移，未手工修改生成输出。
