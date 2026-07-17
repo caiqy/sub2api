@@ -1,17 +1,17 @@
 # Subagent Progress
 
 - Change: `staged-merge-upstream-v0-1-156`
-- Plan task: `Task 21：执行最终自动验证与工作树静态检查（OpenSpec 6.3）`
-- OpenSpec task: `6.3 运行 make test、前端 build、必要的生成代码复验、git diff --check 和冲突标记扫描`
-- Phase: `done`
+- Plan task: `Task 22：验证 Git 拓扑、阶段顺序和最终审查边界（OpenSpec 6.4）`
+- OpenSpec task: `6.4 审查 git log --first-parent、目标 tag 祖先关系、每段 merge second parent 和最终 diff 边界`
+- Phase: `implementing`
 - Review mode: `thorough`
 - Review/fix round: `0/2`
-- Implementer status: `DONE`
-- Implementation commit: `c3fd2b110 docs: record final automated verification`
-- Changed files: `canonical report only`
-- Evidence: `make test 181/1405；frontend build 970 modules；generate x2 stable；static/scans clean；Docker integration not run`
-- TDD: `exempt（只运行既有最终门禁）`
-- Task reviewer: `Approved（ecd80ae18 修正 no-match exit 语义后复审）`
+- Implementer status: `dispatched`
+- Implementation commit: `pending`
+- Changed files: `pending`
+- Evidence: `pending`
+- TDD: `exempt（只读 Git 拓扑审查）`
+- Task reviewer: `pending`
 - Unresolved findings: `none`
-- Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-21-brief.md`
-- Report: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-21-report.md`
+- Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-22-brief.md`
+- Report: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-22-report.md`

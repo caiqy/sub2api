@@ -854,6 +854,10 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：每段 merge 与其后普通兼容修复可区分，未发生 rebase、squash 或机械策略覆盖；不进行 merge-to-main、push、release、deploy 决策。
 
+- [ ] **步骤 4：提交最终拓扑与边界证据**
+
+  全部拓扑核验通过后只提交 canonical `docs: record final topology verification`；保留 Task 23 最终报告/OpenSpec 收口边界。
+
 ### Task 23：完成验证报告与 OpenSpec 任务收口（OpenSpec 6.5）
 
 **文件：**
