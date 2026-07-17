@@ -35,6 +35,6 @@
 
 - [x] 6.1 复核 `VERSION`、Go 与前端依赖、配置默认值、Wire/Ent 生成结果和 migrations，确认生成稳定且无本地 schema/provider 丢失
 - [x] 6.2 逐项完成 scheduler、Sticky、fallback/WaitPlan、DB recheck、网关转换与透传、privacy、image capability、运行时热更新、请求体生命周期、用户资源控制和前端本地功能能力矩阵
-- [ ] 6.3 运行 `make test`、前端 build、必要的生成代码复验、`git diff --check` 和冲突标记扫描
+- [x] 6.3 运行 `make test`、前端 build、必要的生成代码复验、`git diff --check` 和冲突标记扫描
 - [ ] 6.4 验证四个目标 tag 均为结果祖先、merge 节点顺序正确、工作树仅含预期变更，并完成 thorough review
 - [ ] 6.5 更新验证报告，记录每阶段冲突、修复、测试结果、明确移除项、残余风险和未执行的发布部署事项

@@ -793,7 +793,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 **文件：**
 - 修改：`docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md`
 
-- [ ] **步骤 1：运行完整门禁和生成复验**
+- [x] **步骤 1：运行完整门禁和生成复验**
 
   执行：
   ```bash
@@ -804,7 +804,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：后端默认/unit/lint、前端 lint/typecheck/Vitest/build 与生成复验全部通过。
 
-- [ ] **步骤 2：检查 diff、未合并文件和冲突标记**
+- [x] **步骤 2：检查 diff、未合并文件和冲突标记**
 
   执行：
   ```bash
@@ -815,7 +815,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：无 whitespace 错误、无 unmerged、无真实冲突标记；工作树只保留报告和本 change 任务允许的预期文档变更。环境限制必须逐条记录为未执行，不得标记通过。
 
-- [ ] **步骤 3：提交最终自动验证证据**
+- [x] **步骤 3：提交最终自动验证证据**
 
   全部既定门禁通过后只提交 canonical `docs: record final automated verification`；Docker integration 明确保持未执行，不影响本地非 Docker 门禁结论。
 
