@@ -77,7 +77,8 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 
 	if resp.StatusCode >= http.StatusBadRequest {
 		upstreamMessage := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
-		if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMessage, respBody) {
+		if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMessage, respBody) ||
+			isOpenAIAlphaSearchEndpointUnsupported(account, resp.StatusCode) {
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
 			if shouldApplyOpenAIAlphaSearchAccountErrorSideEffects(resp.StatusCode) {
 				s.handleFailoverSideEffects(ctx, resp, account, respBody, upstreamModel)
@@ -297,6 +298,31 @@ func (s *OpenAIGatewayService) ensureOpenAIAlphaSearchAuthMetadata(ctx context.C
 	return nil
 }
 
+// isOpenAIAlphaSearchEndpointUnsupported 识别「API key 上游没有实现
+// /v1/alpha/search 端点」的响应。404/405 不在通用 failover 状态集里（模型
+// 调用中的 404 通常是用户请求问题），但对这个独立工具端点而言，它几乎只
+// 意味着所选上游（官方平台或第三方中转）不提供该端点——应换号重试，而
+// 不是把 404 透传给客户端，否则混合分组里 OAuth 账号明明可以承接搜索，
+// 请求却可能死在先被选中的 API key 账号上。
+func isOpenAIAlphaSearchEndpointUnsupported(account *Account, statusCode int) bool {
+	if account == nil || account.Type != AccountTypeAPIKey {
+		return false
+	}
+	return statusCode == http.StatusNotFound || statusCode == http.StatusMethodNotAllowed
+}
+
+func shouldApplyOpenAIAlphaSearchAccountErrorSideEffects(statusCode int) bool {
+	switch statusCode {
+	case http.StatusUnauthorized, http.StatusNotFound, http.StatusMethodNotAllowed:
+		// 401：工具端点的 access enforcement 不代表凭据全局失效；
+		// 404/405：端点不存在只说明该上游不支持独立搜索，账号本身健康。
+		// 两类都只换号，不写账号错误状态。
+		return false
+	default:
+		return true
+	}
+}
+
 func openAIAlphaSearchResponseFromResponsesSSE(body []byte) ([]byte, error) {
 	output, results := parseOpenAIResponsesSSEForAlphaSearch(body)
 	response := map[string]any{"output": output}
@@ -363,10 +389,6 @@ func collectOpenAIAlphaSearchURLCitations(value any, results *[]any, seen map[st
 			collectOpenAIAlphaSearchURLCitations(child, results, seen)
 		}
 	}
-}
-
-func shouldApplyOpenAIAlphaSearchAccountErrorSideEffects(statusCode int) bool {
-	return statusCode != http.StatusUnauthorized
 }
 
 func (s *OpenAIGatewayService) buildOpenAIAlphaSearchRequest(ctx context.Context, c *gin.Context, account *Account, sourceBody []byte, body []byte, token string) (*http.Request, error) {

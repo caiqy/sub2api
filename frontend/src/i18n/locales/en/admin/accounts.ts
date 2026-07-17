@@ -904,11 +904,11 @@ export default {
               'No proxy is configured and this server could not reach OpenAI directly, so the OpenAI OAuth request failed. Select a proxy that can access OpenAI and retry; if the authorization code has expired, regenerate the authorization URL.'
           },
           // Refresh Token auth
-          accessTokenAuth: 'Access Token',
-          mobileRefreshTokenAuth: 'Mobile Refresh Token',
           refreshTokenAuth: 'Manual RT Input',
           refreshTokenDesc: 'Enter your existing OpenAI Refresh Token(s). Supports batch input (one per line). The system will automatically validate and create accounts.',
           refreshTokenPlaceholder: 'Paste your OpenAI Refresh Token...\nSupports multiple, one per line',
+          mobileRefreshTokenAuth: 'Manual Mobile RT Input',
+          accessTokenAuth: 'Manual AT Input',
           codexSessionAuth: 'Codex auth.json / AT Import',
           codexSessionDesc: 'Paste a Codex auth.json (OAuth or Agent Identity) or an accessToken. Accounts use the step 1 settings.',
           codexSessionInputLabel: 'Codex auth.json or accessToken',
