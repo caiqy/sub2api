@@ -1,6 +1,6 @@
 ---
 change: staged-merge-upstream-v0-1-156
-design-doc: docs/superpowers/specs/2026-07-16-staged-merge-upstream-v0-1-156-design.md
+design-doc: docs/superpowers/specs/2026-07-17-staged-merge-upstream-v0-1-159-design.md
 base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 ---
 
