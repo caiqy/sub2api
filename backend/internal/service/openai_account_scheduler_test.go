@@ -1812,6 +1812,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LayeredRequirePrivacySe
 				Schedulable: true,
 				Concurrency: 1,
 				Priority:    0,
+				GroupIDs:    []int64{groupID},
 				Extra:       map[string]any{},
 			},
 			{
@@ -1822,6 +1823,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LayeredRequirePrivacySe
 				Schedulable: true,
 				Concurrency: 1,
 				Priority:    5,
+				GroupIDs:    []int64{groupID},
 				Extra: map[string]any{
 					"privacy_mode": PrivacyModeTrainingOff,
 				},
