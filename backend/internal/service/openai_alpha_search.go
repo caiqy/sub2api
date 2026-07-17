@@ -103,6 +103,10 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	}, nil
 }
 
+func shouldApplyOpenAIAlphaSearchAccountErrorSideEffects(statusCode int) bool {
+	return statusCode != http.StatusUnauthorized
+}
+
 func (s *OpenAIGatewayService) buildOpenAIAlphaSearchRequest(ctx context.Context, c *gin.Context, account *Account, sourceBody []byte, body []byte, token string) (*http.Request, error) {
 	clientBeta := ""
 	if c != nil {

@@ -784,7 +784,7 @@ func newTerminalGatewayMessagesEnvWithGatewayCacheAndGroups(t *testing.T, group 
 	antigravityService := service.NewAntigravityGatewayService(accountRepo, cache, nil, tokenProvider, nil, upstream, settingService, nil)
 	geminiCompatService := service.NewGeminiMessagesCompatService(accountRepo, groupRepo, cache, nil, nil, nil, upstream, antigravityService, cfg)
 	return &terminalGatewayMessagesEnv{
-		handler:     NewGatewayHandler(gatewayService, geminiCompatService, antigravityService, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, settingService),
+		handler:     NewGatewayHandler(gatewayService, nil, geminiCompatService, antigravityService, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, settingService),
 		apiKey:      &service.APIKey{ID: 101, UserID: 202, Status: service.StatusActive, GroupID: &group.ID, User: &service.User{ID: 202, Status: service.StatusActive, Concurrency: 1}, Group: group},
 		usageRepo:   usageRepo,
 		accountRepo: accountRepo,

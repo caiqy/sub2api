@@ -199,9 +199,10 @@ func ProvideGrokQuotaService(
 	proxyRepo ProxyRepository,
 	tokenProvider *GrokTokenProvider,
 	httpUpstream HTTPUpstream,
+	cfg *config.Config,
 	usageLogRepo UsageLogRepository,
 ) *GrokQuotaService {
-	return NewGrokQuotaService(accountRepo, proxyRepo, tokenProvider, httpUpstream, usageLogRepo)
+	return NewGrokQuotaService(accountRepo, proxyRepo, tokenProvider, httpUpstream, cfg, usageLogRepo)
 }
 
 // ProvideGeminiTokenProvider creates GeminiTokenProvider with OAuthRefreshAPI injection
@@ -432,6 +433,12 @@ func ProvideOpsSystemLogSink(opsRepo OpsRepository) *OpsSystemLogSink {
 	return sink
 }
 
+func ProvideAuditLogService(repo AuditLogRepository, settingService *SettingService) *AuditLogService {
+	svc := NewAuditLogService(repo, settingService)
+	svc.Start()
+	return svc
+}
+
 func buildIdempotencyConfig(cfg *config.Config) IdempotencyConfig {
 	idempotencyCfg := DefaultIdempotencyConfig()
 	if cfg != nil {
@@ -510,6 +517,14 @@ func ProvideAPIKeyAuthCacheInvalidator(apiKeyService *APIKeyService) APIKeyAuthC
 	// Start Pub/Sub subscriber for L1 cache invalidation across instances
 	apiKeyService.StartAuthCacheInvalidationSubscriber(context.Background())
 	return apiKeyService
+}
+
+func ProvideImageTaskService(store ImageTaskStore, storage ImageStorage, cfg *config.Config) *ImageTaskService {
+	if cfg == nil || !cfg.ImageStorage.Active() {
+		return NewImageTaskService(store)
+	}
+	uploader := NewImageResultUploader(storage, cfg.ImageStorage.Prefix, cfg.ImageStorage.MaxDownloadByte, nil)
+	return NewImageTaskServiceWithUploader(store, uploader, defaultImageTaskTTL, defaultImageTaskExecutionTimeout)
 }
 
 // ProvideBackupService creates and starts BackupService
@@ -688,6 +703,7 @@ var ProviderSet = wire.NewSet(
 	NewAdminService,
 	NewGatewayService,
 	ProvideOpenAIGatewayServiceWithStartupRecovery,
+	ProvideImageTaskService,
 	ProvideBatchImageModelPricingResolver,
 	NewBatchImagePublicService,
 	NewBatchImageDownloadService,
@@ -718,11 +734,13 @@ var ProviderSet = wire.NewSet(
 	ProvideAccountUsageService,
 	ProvideAccountTestService,
 	NewImageHistoryService,
+	ProvideUpstreamBillingProbeService,
 	ProvideSettingService,
 	NewDataManagementService,
 	ProvideBackupService,
 	ProvideOpsSystemLogSink,
 	ProvideOpsService,
+	ProvideAuditLogService,
 	ProvideOpsMetricsCollector,
 	ProvideOpsAggregationService,
 	ProvideOpsAlertEvaluatorService,

@@ -1177,7 +1177,27 @@ func (s *OpenAIGatewayService) parentAccountLookup(ctx context.Context) func(int
 	}
 }
 
-func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDB(ctx context.Context, account *Account, platform string, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) *Account {
+func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDB(ctx context.Context, account *Account, args ...any) *Account {
+	platform, requestedModel := PlatformOpenAI, ""
+	requireCompact := false
+	var requiredCapability OpenAIEndpointCapability
+	// ponytail: merge bridge for the tag's group-aware recheck signature and first-parent callers.
+	if len(args) == 4 {
+		platform, _ = args[0].(string)
+		requestedModel, _ = args[1].(string)
+		requireCompact, _ = args[2].(bool)
+		requiredCapability, _ = args[3].(OpenAIEndpointCapability)
+	} else if len(args) == 5 {
+		platform, _ = args[1].(string)
+		requestedModel, _ = args[2].(string)
+		requireCompact, _ = args[3].(bool)
+		switch value := args[4].(type) {
+		case OpenAIEndpointCapability:
+			requiredCapability = value
+		case string:
+			requiredCapability = OpenAIEndpointCapability(value)
+		}
+	}
 	if account == nil {
 		return nil
 	}

@@ -57,7 +57,7 @@ func newStickyFallbackMessagesHandler(t *testing.T, cfg *config.Config, groups m
 	gatewayService := service.NewGatewayService(accountRepo, groupRepo, nil, nil, nil, nil, nil, cache, cfg, nil, concurrencyService, service.NewBillingService(cfg, nil), nil, billingCacheService, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	originalGroup := groups[1]
 	apiKey := &service.APIKey{ID: 101, UserID: 202, Status: service.StatusActive, GroupID: &originalGroup.ID, User: &service.User{ID: 202, Status: service.StatusActive, Concurrency: 1}, Group: originalGroup}
-	return NewGatewayHandler(gatewayService, nil, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil), apiKey
+	return NewGatewayHandler(gatewayService, nil, nil, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil), apiKey
 }
 
 func TestGatewayHandlerMessages_ClaudeCodeFallbackUsesResolvedGeminiStickyBoundary(t *testing.T) {

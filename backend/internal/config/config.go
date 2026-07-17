@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/url"
 	"os"
 	"strings"
@@ -96,6 +97,7 @@ type Config struct {
 	Update                  UpdateConfig                  `mapstructure:"update"`
 	Idempotency             IdempotencyConfig             `mapstructure:"idempotency"`
 	BatchImage              BatchImageConfig              `mapstructure:"batch_image"`
+	ImageStorage            ImageStorageConfig            `mapstructure:"image_storage"`
 }
 
 type GatewayControlRuntimeConfig struct {
@@ -262,6 +264,28 @@ type BatchImageConfig struct {
 	VertexOutputRetentionHours   int    `mapstructure:"vertex_output_retention_hours"`
 	VertexBatchPredictionBaseURL string `mapstructure:"vertex_batch_prediction_base_url"`
 	VertexGCSBaseURL             string `mapstructure:"vertex_gcs_base_url"`
+}
+
+type ImageStorageConfig struct {
+	Enabled         bool   `mapstructure:"enabled"`
+	Endpoint        string `mapstructure:"endpoint"`
+	Region          string `mapstructure:"region"`
+	Bucket          string `mapstructure:"bucket"`
+	AccessKeyID     string `mapstructure:"access_key_id"`
+	SecretAccessKey string `mapstructure:"secret_access_key"`
+	Prefix          string `mapstructure:"prefix"`
+	ForcePathStyle  bool   `mapstructure:"force_path_style"`
+	PublicBaseURL   string `mapstructure:"public_base_url"`
+	PresignExpiry   int    `mapstructure:"presign_expiry_hours"`
+	MaxDownloadByte int64  `mapstructure:"max_download_bytes"`
+}
+
+func (c *ImageStorageConfig) IsConfigured() bool {
+	return c.Bucket != "" && c.AccessKeyID != "" && c.SecretAccessKey != ""
+}
+
+func (c *ImageStorageConfig) Active() bool {
+	return c.Enabled && c.IsConfigured()
 }
 
 type LinuxDoConnectConfig struct {
@@ -1107,9 +1131,29 @@ type GatewayOpenAIWSSchedulerScoreWeights struct {
 	Reset float64 `mapstructure:"reset"`
 	// QuotaHeadroom 倾向 7d 剩余额度更健康的账号；默认 0（关闭，不改变原有行为）。
 	QuotaHeadroom float64 `mapstructure:"quota_headroom"`
+	// UpstreamCost 倾向上游声明倍率更低的账号；默认 0（关闭，不改变原有行为）。
+	UpstreamCost float64 `mapstructure:"upstream_cost"`
 	// PreviousResponse/SessionSticky 仅在开启 OpenAI 高级调度的粘性加权时生效。
 	PreviousResponse float64 `mapstructure:"previous_response"`
 	SessionSticky    float64 `mapstructure:"session_sticky"`
+}
+
+func (w GatewayOpenAIWSSchedulerScoreWeights) BaseWeightSum() float64 {
+	return w.Priority + w.Load + w.Queue + w.ErrorRate + w.TTFT + w.Reset + w.QuotaHeadroom + w.UpstreamCost
+}
+
+func (w GatewayOpenAIWSSchedulerScoreWeights) TotalWeightSum() float64 {
+	return w.BaseWeightSum() + w.PreviousResponse + w.SessionSticky
+}
+
+func (w GatewayOpenAIWSSchedulerScoreWeights) IsValid() bool {
+	for _, weight := range []float64{w.Priority, w.Load, w.Queue, w.ErrorRate, w.TTFT, w.Reset, w.QuotaHeadroom, w.UpstreamCost, w.PreviousResponse, w.SessionSticky} {
+		if weight < 0 || math.IsNaN(weight) || math.IsInf(weight, 0) {
+			return false
+		}
+	}
+	base := w.BaseWeightSum()
+	return base > 0 && !math.IsNaN(base) && !math.IsInf(base, 0) && !math.IsNaN(w.TotalWeightSum()) && !math.IsInf(w.TotalWeightSum(), 0)
 }
 
 // GatewayOpenAIWSSchedulerLayeredConfig 分层调度器配置。

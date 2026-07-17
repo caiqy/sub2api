@@ -24,6 +24,8 @@ func SetupRouter(
 	jwtAuth middleware2.JWTAuthMiddleware,
 	adminAuth middleware2.AdminAuthMiddleware,
 	apiKeyAuth middleware2.APIKeyAuthMiddleware,
+	auditLog middleware2.AuditLogMiddleware,
+	stepUpAuth middleware2.StepUpAuthMiddleware,
 	apiKeyService *service.APIKeyService,
 	subscriptionService *service.SubscriptionService,
 	opsService *service.OpsService,
@@ -51,6 +53,7 @@ func SetupRouter(
 
 	// 应用中间件
 	r.Use(middleware2.RequestLogger())
+	r.Use(middleware2.SessionBindingContext())
 	r.Use(middleware2.Logger())
 	r.Use(middleware2.CORS(cfg.CORS))
 	r.Use(middleware2.SecurityHeaders(cfg.Security.CSP, func() []string {
@@ -64,7 +67,7 @@ func SetupRouter(
 	configureEmbeddedFrontend(r, settingService, refreshFrameOrigins)
 
 	// 注册路由
-	registerRoutes(r, handlers, jwtAuth, adminAuth, apiKeyAuth, apiKeyService, subscriptionService, opsService, userService, settingService, cfg, redisClient)
+	registerRoutes(r, handlers, jwtAuth, adminAuth, apiKeyAuth, auditLog, stepUpAuth, apiKeyService, subscriptionService, opsService, userService, settingService, cfg, redisClient)
 
 	return r
 }
@@ -76,6 +79,8 @@ func registerRoutes(
 	jwtAuth middleware2.JWTAuthMiddleware,
 	adminAuth middleware2.AdminAuthMiddleware,
 	apiKeyAuth middleware2.APIKeyAuthMiddleware,
+	auditLog middleware2.AuditLogMiddleware,
+	stepUpAuth middleware2.StepUpAuthMiddleware,
 	apiKeyService *service.APIKeyService,
 	subscriptionService *service.SubscriptionService,
 	opsService *service.OpsService,
@@ -91,11 +96,11 @@ func registerRoutes(
 	v1 := r.Group("/api/v1")
 
 	// 注册各模块路由
-	routes.RegisterAuthRoutes(v1, h, jwtAuth, redisClient, settingService)
-	routes.RegisterUserRoutes(v1, h, jwtAuth, settingService)
-	routes.RegisterAdminRoutes(v1, h, adminAuth, settingService)
+	routes.RegisterAuthRoutes(v1, h, jwtAuth, auditLog, redisClient, settingService)
+	routes.RegisterUserRoutes(v1, h, jwtAuth, auditLog, settingService)
+	routes.RegisterAdminRoutes(v1, h, adminAuth, auditLog, stepUpAuth, settingService)
 	routes.RegisterGatewayRoutes(r, h, apiKeyAuth, apiKeyService, subscriptionService, opsService, settingService, cfg)
-	routes.RegisterPaymentRoutes(v1, h.Payment, h.PaymentWebhook, h.Admin.Payment, jwtAuth, adminAuth, settingService)
+	routes.RegisterPaymentRoutes(v1, h.Payment, h.PaymentWebhook, h.Admin.Payment, jwtAuth, adminAuth, auditLog, settingService)
 
 	handler.RegisterPageRoutes(v1, cfg.Pricing.DataDir, gin.HandlerFunc(jwtAuth), gin.HandlerFunc(adminAuth), settingService, userService)
 }

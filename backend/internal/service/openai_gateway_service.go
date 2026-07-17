@@ -257,6 +257,7 @@ type OpenAIForwardResult struct {
 	// WebSearchCalls 是 Codex alpha/search 网页搜索调用次数（每次成功请求为 1）。
 	// 上游不返回 usage 字段，>0 时走按次计费（分组单价 × 次数 × 倍率）。
 	WebSearchCalls int
+	UpstreamTerminalEvent string
 
 	wsReplayInput       []json.RawMessage
 	wsReplayInputExists bool
@@ -290,6 +291,13 @@ func (r *OpenAIForwardResult) UsageRecordSnapshot() *OpenAIForwardResult {
 		}
 	}
 	return &out
+}
+
+func (r *OpenAIForwardResult) SucceededForScheduling() bool {
+	if r == nil || !r.OpenAIWSMode || r.UpstreamTerminalEvent == "" {
+		return true
+	}
+	return r.UpstreamTerminalEvent == "response.completed" || r.UpstreamTerminalEvent == "response.done"
 }
 
 // SetActualOpenAIUpstreamEndpoint records the endpoint selected by the current
@@ -423,11 +431,13 @@ type OpenAIGatewayService struct {
 	openaiWSStateStoreOnce        sync.Once
 	openaiSchedulerOnce           sync.Once
 	openaiSchedulerMu             sync.Mutex
+	openaiModelTransientOnce      sync.Once
 	openaiWSPassthroughDialerOnce sync.Once
 	agentIdentityTaskMu           sync.Mutex
 	openaiWSPool                  *openAIWSConnPool
 	openaiWSStateStore            OpenAIWSStateStore
 	openaiScheduler               OpenAIAccountScheduler
+	openaiModelTransient          *openAIAccountModelTransientState
 	openaiWSPassthroughDialer     openAIWSClientDialer
 	openaiAccountStats            *openAIAccountRuntimeStats
 
