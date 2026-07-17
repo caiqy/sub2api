@@ -201,7 +201,26 @@
 - 无业务代码修复提交。Task 29 的 `make test` 结果未作为本项能力审查证据。
 
 ## v0.1.159
-未开始合并。
+### Task 32 merge
+- 起始提交：`436e1f1cd14e650d460f6b1ceb431b055d467d5a`。
+- merge commit：`00517cf860cbb328ecaaae0d56bb59f1848d13ec`，第一父为起始提交，第二父为固定 peeled tag commit `2a75d7d2387587d86ca3c5e5cd8ca96cf3d104c6`。
+- 仅执行 `git merge --no-ff v0.1.159 -m "merge: upstream v0.1.159"`；未合并 `upstream/main` 或 tag 后提交，未 push、release 或 deploy。
+- 4 个文本冲突均逐项核对第一父、tag 和调用方后融合；原生 HTTP first-output 实现保留，旧本地 first-token watchdog 未恢复。
+
+### v0.1.159 冲突台账
+
+| 路径 | ours 语义 | tag 语义 | 最终融合 | 调用方/验证 |
+| --- | --- | --- | --- | --- |
+| `backend/internal/server/router.go` | 会话绑定上下文已在全局中间件链安装，并保留本地 embedded frontend 与 user service 路由依赖。 | `SessionBindingContext` 需要配置以读取可信反代 IP 开关。 | 以 `SessionBindingContext(cfg)` 安装，保留其余第一父路由装配。 | `SetupRouter`；`go -C backend test -tags unit ./internal/pkg/ip ./internal/server/middleware -run 'IP|SessionBinding' -count=1`。 |
+| `backend/internal/service/openai_alpha_search.go` | 保留原请求体供 passthrough/header 兼容，以及既有 PAT fallback。 | API-key 上游的 `404/405` 作为 alpha/search 不支持而换号，且 `401/404/405` 不写账号错误状态。 | 保留 `sourceBody` 调用契约，加入 endpoint-unavailable 判定及 tag 的无副作用状态集。 | `ForwardAlphaSearch` gateway 调度入口；`go -C backend test ./internal/service -run 'AlphaSearch|Grok.*Cache|WSHTTPBridge' -count=1`。 |
+| `frontend/src/i18n/locales/en/admin/accounts.ts` | Codex 导入文案覆盖 OAuth 与 Agent Identity，并解释动态签名。 | 新增 Mobile RT/AT 的手动输入标签。 | 保留 Agent Identity 文案，采用 tag 的两项手动输入标签，移除重复键。 | `OAuthAuthorizationFlow.vue`；前端 typecheck 与完整 Vitest。 |
+| `frontend/src/i18n/locales/zh/admin/accounts.ts` | 同英文 locale 的 Agent Identity 文案与提示。 | 同英文 locale 的 Mobile RT/AT 手动输入标签。 | 同英文 locale 的融合，移除重复键。 | `OAuthAuthorizationFlow.vue`；前端 typecheck 与完整 Vitest。 |
+
+### v0.1.159 验证
+- `git diff --name-only --diff-filter=U`、`git diff --check` 均无输出；merge 二父为 `2a75d7d2387587d86ca3c5e5cd8ca96cf3d104c6`。
+- `git diff --name-only v0.1.156^{}..HEAD -- backend/internal/service/openai_first_output_timeout.go` 无输出；未恢复旧本地 first-token watchdog。
+- `make test` 退出 0：后端测试与 lint、前端 lint/typecheck、Vitest 194 files / 1493 tests 通过。
+- `pnpm --dir frontend run build` 退出 0，987 个模块完成构建。保留既有 Browserslist、dynamic import 与大 chunk 警告。
 
 ### Task 31 v0.1.158 阶段门禁
 - 起始提交：`1f51f4a382afb2422beae1ef4ad2bd7b5df488ee`；仅关闭 v0.1.158 阶段门禁，未合并 v0.1.159，未 push、release 或 deploy。
