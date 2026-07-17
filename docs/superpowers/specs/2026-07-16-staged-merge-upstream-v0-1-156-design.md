@@ -4,15 +4,15 @@ role: technical-design
 canonical_spec: openspec
 ---
 
-# 分段合并上游 v0.1.156 技术设计
+# 分段合并上游 v0.1.159 技术设计
 
 ## 1. 背景与约束
 
-本地基线为 `main@d1cc02502`，与 `origin/main` 同步。上游最终目标 `v0.1.156` peel commit 为 `12f991dde8a58e183d4bd16a87ef6fd0df714757`；相对共同基线，本地与上游分别有 541 和 300 个独有提交，上游 release 区间涉及 503 个文件。高风险变化集中在网关、调度、运行时设置、前端管理功能、Wire/Ent 和 migrations，与本地定制高度重叠。
+本地原始基线为 `main@d1cc02502`，与 `origin/main` 同步。首轮已将 `v0.1.152`、`v0.1.153`、`v0.1.155`、`v0.1.156` 分段合入，在 `HEAD@315617bde` 完成 full verify 并发布本地版本 `v0.1.156.1`。本次扩展从该已验证结果继续，新增目标为 `v0.1.157`、`v0.1.158`、`v0.1.159`，最终上游边界固定为 `v0.1.159^{}` 即 `2a75d7d2387587d86ca3c5e5cd8ca96cf3d104c6`。
 
 Git 文本冲突只能发现同一文本区域的竞争修改，无法发现拆文件后的字段漏迁、新入口绕过旧条件、缓存结构不完整或生成 provider 丢失。设计目标不是宣称“可以全面检测所有回归”，而是先建立本地行为基线，再把首次回归压缩到单个 release 区间，并要求每项本地能力有自动或人工证据。
 
-本次不包含 `v0.1.156` 后的 `upstream/main` 提交，不推送、不发布、不部署，不重写本地历史，也不新增通用 merge 或测试框架。
+本次不包含 `v0.1.159` 后当前已观察到的 8 个 `upstream/main` 未发布提交，不推送、不发布、不部署，不重写本地历史，也不新增通用 merge 或测试框架。
 
 ## 2. Git 拓扑与提交边界
 
@@ -26,12 +26,27 @@ Git 文本冲突只能发现同一文本区域的竞争修改，无法发现拆�
 | 2 | `v0.1.152..v0.1.153` | 41 | 97 |
 | 3 | `v0.1.153..v0.1.155` | 71 | 238 |
 | 4 | `v0.1.155..v0.1.156` | 132 | 253 |
+| 5 | `v0.1.156..v0.1.157` | 82 | 331 |
+| 6 | `v0.1.157..v0.1.158` | 20 | 105 |
+| 7 | `v0.1.158..v0.1.159` | 12 | 30 |
 
-每个 tag 使用独立 `--no-ff` merge 节点。tag merge commit 包含该 tag 的上游树与必要冲突解决；merge 后由测试或能力审查发现的语义回归使用后续普通提交修复。阶段 0 的测试补齐也在第一个 merge 节点之前形成普通提交。
+每个 tag 使用独立 `--no-ff` merge 节点。tag merge commit 包含该 tag 的上游树与必要冲突解决；merge 后由测试或能力审查发现的语义回归使用后续普通提交修复。首轮四个节点及其证据保持不变，本次只追加三个节点。
 
 该边界使审查者可以区分上游引入、冲突融合和本地兼容修复。相邻 tag 即使重复冲突，也不得机械复用 ours/theirs；只复用已验证的业务决策。
 
-### 2.2 阶段状态机
+### 2.2 扩展阶段风险面
+
+- `v0.1.157`：重点审查异步生图任务与对象存储、图片输入 token 计费、上游计费倍率探测与调度、操作审计、会话 IP/UA 绑定、敏感操作 step-up 2FA、Grok/Agent Identity、OpenAI Responses/WS 和 migrations 177-180。
+- `v0.1.158`：重点审查分组复制、用户批量限额、Grok 上游端点与 Responses WebSocket v2、Codex 生图完成态、模型能力发现、DataTable 与 migration 181。
+- `v0.1.159`：重点审查审计与会话绑定的客户端 IP 解析、alpha/search 的 API Key 账号调度、Grok Responses function tool cache、账号上游链接和 Stripe 懒加载。
+
+三段 changed-files 分别为 331、105、30 个。能力矩阵在既有 16 行基础上按实际交集补充新能力或扩展证据，不因上游新增功能而默认接受本地回归。
+
+### 2.3 扩展阶段基线
+
+`HEAD@315617bde` 的既有 23 项任务、冲突台账、能力矩阵和 `v0.1.156` full verify 作为历史证据保留，但不代表新增范围已验证。执行 `v0.1.157` merge 前重新运行 `make test`、前端 build、Ent/Wire 生成稳定性和工作树检查；失败时停在新 merge 之前。既有 `verify_result=pass` 在扩展范围确认后失效，重新进入 build/verify 流程。
+
+### 2.4 阶段状态机
 
 ```text
 固定 tag peel SHA
@@ -101,11 +116,11 @@ backend:  Ent 与 Wire 生成结果一致性检查
 
 对每段 `git diff <前一 tag>..<当前 tag>` 的 changed files，与能力矩阵关键文件求交集。若上游修改入口、条件、DTO、配置解析、运行时缓存、provider、schema 或生成结果，即使 Git 没有报告冲突，也必须检查相关调用方和影响范围；结构追踪优先使用 CodeGraph context、impact 或 trace，具体行为由现有或新增测试验证。
 
-重点能力包括 scheduler、各平台 Sticky、fallback/WaitPlan、DB recheck、Messages/Responses/Chat 转换、透传字段、终止 usage、privacy 与内容审计、image capability、运行时设置热更新、请求体重放与清理、用户资源控制、前端本地功能和本地测试门禁。
+重点能力包括 scheduler、各平台 Sticky、fallback/WaitPlan、DB recheck、Messages/Responses/Chat 转换、透传字段、终止 usage、privacy 与内容审计、image capability、异步图片任务与对象存储、图片输入计费、上游计费倍率、会话绑定与 step-up 安全、运行时设置热更新、请求体重放与清理、用户资源控制、分组复制、前端本地功能和本地测试门禁。
 
 ## 5. 首 Token 超时替换
 
-本地首 Token 超时在前三个 tag 阶段仍为 `protected`，只在 `v0.1.156` merge 后切换为 `approved-removal`。最终必须删除：
+本地首 Token 超时在前三个 tag 阶段仍为 `protected`，并已在 `v0.1.156` merge 后切换为 `approved-removal`。首轮已删除以下内容，本次扩展必须保持删除状态：
 
 - HTTP SSE 与 WebSocket 上游首输出 watchdog；
 - 文本 30 秒与明确生图 600 秒分档；
@@ -113,7 +128,7 @@ backend:  Ent 与 Wire 生成结果一致性检查
 - `first_token_timeout` 专用错误、日志、失败 usage 与 Ops 逻辑；
 - 本地专用测试和不再成立的兼容文档。
 
-结果完全采用上游 `v0.1.156`：native HTTP Responses 的 `openai_first_output_timeout_seconds`、高 reasoning effort 覆盖、默认关闭、`first_output_timeout`、failover 与 `HandleStreamTimeout` 行为，以及客户端 WebSocket 首消息超时。上游没有等价的 WebSocket 上游首输出 watchdog，这是用户知情批准的能力移除，不得在兼容修复中恢复。
+结果完全采用上游 `v0.1.156` 及后续 release 对该实现的演进：native HTTP Responses 的 `openai_first_output_timeout_seconds`、高 reasoning effort 覆盖、默认关闭、`first_output_timeout`、failover 与 `HandleStreamTimeout` 行为，以及客户端 WebSocket 首消息超时。上游没有等价的 WebSocket 上游首输出 watchdog，这是用户知情批准的能力移除，不得在兼容修复中恢复。
 
 删除后扫描旧配置键、错误类型、结构化日志事件、watchdog 与本地文件符号；业务代码不得残留兼容别名。上游配置、实现和测试必须保留并通过。
 
@@ -137,12 +152,14 @@ backend:  Ent 与 Wire 生成结果一致性检查
 - migration 文件、编号冲突、幂等性和 runner 顺序复核；
 - `VERSION`、Go/前端依赖、配置默认值和发布元数据复核；
 - `git diff --check`、冲突标记扫描和干净工作树检查；
-- `git merge-base --is-ancestor` 验证四个 tag 均为结果祖先；
+- `git merge-base --is-ancestor` 验证七个 tag 均为结果祖先；
 - 完整能力矩阵和 thorough review。
+
+最终元数据以结果已包含的最高三段式上游 tag `v0.1.159` 为基准，将本地版本规范为 `0.1.159.1`。该版本变更不等于执行 push、release 或 deploy。
 
 ## 7. 错误处理与回退
 
-- 阶段 0 基线失败：停在首次 merge 前。
+- 扩展阶段基线失败：停在 `v0.1.157` merge 前。
 - 文本冲突可融合：完成最小融合并添加直接证据。
 - 未授权语义不可共存：暂停等待用户决定。
 - 阶段测试失败：停在当前 tag，修复并重跑该阶段门禁。
@@ -153,4 +170,4 @@ backend:  Ent 与 Wire 生成结果一致性检查
 
 ## 8. 完成条件
 
-四个 tag 按顺序成为结果祖先；23 项 OpenSpec 任务完成；首 Token 本地能力按批准范围完整退场；其余能力矩阵无未解释回归；冲突、生成物、migration、版本依赖和全量门禁均有可复现证据；验证报告明确记录未执行项与残余风险。
+七个 tag 按顺序成为结果祖先；原 23 项历史任务与本次新增任务均完成；首 Token 本地能力继续按批准范围保持退场；新增上游能力与其余本地能力矩阵无未解释回归；冲突、生成物、migration、版本依赖和全量门禁均有可复现证据；新的 full verify 报告明确记录未执行项与残余风险。
