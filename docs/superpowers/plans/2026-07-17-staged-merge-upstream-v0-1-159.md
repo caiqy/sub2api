@@ -8,29 +8,30 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**目标：** 从固定本地基线按顺序将上游 `v0.1.152`、`v0.1.153`、`v0.1.155`、`v0.1.156` 建立为四个独立的 `--no-ff` merge 节点，并用阶段 0 能力保护和逐段审查保留本地定制，唯一批准移除为最终阶段的本地首 Token 超时。
+**目标：** 保留已完成的 `v0.1.152` 至 `v0.1.156` 四段结果，并依次追加 `v0.1.157`、`v0.1.158`、`v0.1.159` 三个独立 `--no-ff` merge 节点，最终形成经过 full verify 的本地 `0.1.159.1` 结果。
 
-**架构：** 在隔离分支上先建立能力矩阵、冲突台账和可复现验证报告，再将每个正式 tag 合入。merge commit 只包含该 tag 的上游树和必要冲突融合；任何由测试或能力审查发现的语义修复均作为后续普通提交。每段完成保护测试、受影响能力测试和矩阵结论后才允许开始下一段。
+**架构：** 既有 `v0.1.156` validation/verify 报告保持只读，新建 `v0.1.159` 扩展报告承载新基线、三段冲突台账和能力矩阵增量。每个新 merge commit 只包含对应 tag 的上游树和必要冲突融合；语义回归通过后续普通提交修复，每段门禁关闭后才进入下一 tag。
 
 **技术栈：** Git annotated tags、Go 1.25、Ent、Wire、Gin、Vue 3、Vite、pnpm、Vitest、golangci-lint。
 
 ## 全局约束
 
-- Comet 原始起点为 `d1cc02502271f54b3b7f0593a18db4f2aaab63ea`；实施前实际基线为 `d5f8192d32d9840d63477c24d4a567abb8cb4a90`，两者之间仅包含已确认的本地测试临时目录隔离提交。最终上游祖先只能到 `v0.1.156^{}` 即 `12f991dde8a58e183d4bd16a87ef6fd0df714757`，绝不合入其后的 `upstream/main`。
-- merge 顺序严格为 `v0.1.152`、`v0.1.153`、`v0.1.155`、`v0.1.156`；每个 tag 必须创建独立 `git merge --no-ff` 节点。
-- 阶段 0 的基线、能力映射和所有必要补测未通过前，不得执行 `v0.1.152` merge；任何阶段门禁不通过，不得进入下一 tag。
+- Comet 原始起点为 `d1cc02502271f54b3b7f0593a18db4f2aaab63ea`；首轮已验证结果为 `315617bdec0e21fe8aeb119a986bde960c4864b3`。最终上游祖先只能到 `v0.1.159^{}` 即 `2a75d7d2387587d86ca3c5e5cd8ca96cf3d104c6`，绝不合入其后的 `upstream/main`。
+- merge 顺序严格为 `v0.1.152`、`v0.1.153`、`v0.1.155`、`v0.1.156`、`v0.1.157`、`v0.1.158`、`v0.1.159`；前四个节点已经完成，本计划只执行后三个节点。
+- 扩展基线、能力映射和所有必要补测未通过前，不得执行 `v0.1.157` merge；任何新增阶段门禁不通过，不得进入下一 tag。
 - 冲突解决只进入对应 merge commit；merge 后发现的语义回归必须先保留失败证据，再用独立普通提交作最小修复。禁止机械 `--ours`、`--theirs` 或整文件覆盖。
 - 除本地首 Token 超时外，本地能力不得静默丢失。无法与上游共存且未获批准时，停止在当前阶段并请求用户决定，不创建下一 merge 节点。
-- 本地首 Token 超时在 `v0.1.152`、`v0.1.153`、`v0.1.155` 均为 `protected`；仅在 `v0.1.156` 后完整删除，不保留配置、错误、日志、watchdog、测试、文档或兼容别名。
+- 本地首 Token 超时已在 `v0.1.156` 后完整删除；后三段不得恢复配置、错误、日志、watchdog、测试、文档或兼容别名。
 - 不 push、release、deploy，不决定是否合回 `main`，不改写历史，不新增通用 merge 工具、测试框架或无关抽象。
 - `tdd_mode=tdd` 仅约束真实行为修改：补测后需要生产代码修复、merge 后语义回归修复及超时能力移除等任务必须提供 RED/GREEN；纯文档、基线检查、能力映射和无行为修改的 tag merge 不伪造 RED，以对应命令证据代替。
-- 执行中的证据统一写入 `docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md`；该报告必须明确标出未执行命令，不能将未执行记为通过。
+- 首轮证据 `docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md` 保持只读；扩展证据统一写入 `docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md`，并明确标出未执行命令，不能将未执行记为通过。
 
 ## 文件与证据结构
 
 | 路径 | 执行时责任 |
 | --- | --- |
-| `docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md` | 固定 SHA、阶段 0 基线、能力矩阵、各段 changed-files 清单、冲突台账、失败证据、修复提交、门禁输出摘要、残余风险和未执行事项的唯一验证记录。 |
+| `docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md` | 首轮四段 merge、能力矩阵和 `v0.1.156` 门禁的只读历史证据。 |
+| `docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md` | 扩展起点、三个新 tag、能力矩阵增量、冲突台账、失败/修复证据、阶段门禁和最终验证的唯一活动记录。 |
 | `backend/ent/schema/`、`backend/ent/` | 仅当阶段 diff 或冲突触及 Ent 时，以 schema 为源执行生成并验证无丢失/稳定。 |
 | `backend/cmd/server/wire.go`、`backend/cmd/server/wire_gen.go`、`backend/internal/**/wire.go` | 仅当阶段 diff 或冲突触及注入图时，以 Wire 声明为源执行生成并验证稳定，禁止手改 `wire_gen.go`。 |
 | `backend/migrations/` | 仅当阶段 diff 或冲突触及 migration 时，复核文件名排序、同号文件、幂等 DDL 和 runner 语义。 |
@@ -45,7 +46,10 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 | `v0.1.152^{}` | `b73d8c3efe01a290eaaa9326b6e40ece02c67a0e` | 作为第一个 merge commit 的第二父。 |
 | `v0.1.153^{}` | `a2bc1337474b68b62391116835e5698ebb5526bd` | 作为第二个 merge commit 的第二父。 |
 | `v0.1.155^{}` | `41cec0db059ffb82d0efdcfcf07a24ab51fbfe97` | 作为第三个 merge commit 的第二父。 |
-| `v0.1.156^{}` | `12f991dde8a58e183d4bd16a87ef6fd0df714757` | 作为第四个 merge commit 的第二父和最终上游边界。 |
+| `v0.1.156^{}` | `12f991dde8a58e183d4bd16a87ef6fd0df714757` | 已完成第四个 merge commit 的第二父。 |
+| `v0.1.157` / `^{}` | `a44e63f9fab426ec181bafcf4e4c1a002bbcb8e0` / `a2779cd5f30d6d3904a9d59088aed09507678dfe` | 第五个 merge commit 的 tag object 与第二父。 |
+| `v0.1.158` / `^{}` | `c6ece7d092843c19a2d14d1264669c6416969f6d` / `26abd19a2812edba02bbef93c3e2a620141cc257` | 第六个 merge commit 的 tag object 与第二父。 |
+| `v0.1.159` / `^{}` | `2a2b58263cdf20adf049f3ad8f9e23b4401698c9` / `2a75d7d2387587d86ca3c5e5cd8ca96cf3d104c6` | 第七个 merge commit 的 tag object、第二父和最终上游边界。 |
 | 后端/前端保护门禁 | `make test` | 根 `Makefile` 依次执行后端默认测试、unit-tag 测试、golangci-lint、前端 ESLint、typecheck、Vitest。 |
 | 前端构建 | `pnpm --dir frontend run build` | `vue-tsc -b` 与 Vite build 退出码为 0。 |
 | Ent/Wire 可复现性 | `make -C backend generate` 后重跑同一命令 | 第一次生成后无非预期 diff；第二次生成不再改变 `backend/ent/` 或 `backend/cmd/server/wire_gen.go`。 |
@@ -63,6 +67,11 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 | 4.1-4.3 | 11-13 |
 | 5.1-5.5 | 14-18 |
 | 6.1-6.5 | 19-23 |
+| 7.1-7.2 | 24-25 |
+| 8.1-8.3 | 26-28 |
+| 9.1-9.3 | 29-31 |
+| 10.1-10.3 | 32-34 |
+| 11.1-11.3 | 35-37 |
 
 ---
 
@@ -883,10 +892,547 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：最终文档提交与业务 merge/修复节点分离；不执行 `git push`、release、deploy 或合入 `main`。
 
+### Task 24：固定 v0.1.159 扩展范围并重跑基线（OpenSpec 7.1）
+
+**文件：**
+- 创建：`docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md`
+- 审查：`docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md`
+- 审查：`.git/` refs 与当前 feature 分支
+
+**产物：** 新报告的“扩展起点与固定对象”及“扩展基线”章节；首轮报告保持不变。
+
+- [ ] **步骤 1：确认工作区、分支和首轮结果**
+
+  执行：
+  ```bash
+  git branch --show-current
+  git status --short
+  git rev-parse HEAD
+  git merge-base --is-ancestor 12f991dde8a58e183d4bd16a87ef6fd0df714757 HEAD
+  git merge-base --is-ancestor a2779cd5f30d6d3904a9d59088aed09507678dfe HEAD
+  ```
+  预期：分支为 `feature/20260717/staged-merge-upstream-v0-1-159`；`v0.1.156^{}` 祖先检查退出码为 0；`v0.1.157^{}` 检查退出码为非零；除忽略的 `.comet/current-change.json` 外无未提交文件。
+
+- [ ] **步骤 2：重新获取并固定三个 annotated tag**
+
+  执行：
+  ```bash
+  git fetch upstream --tags --prune
+  git rev-parse v0.1.157 "v0.1.157^{}"
+  git rev-parse v0.1.158 "v0.1.158^{}"
+  git rev-parse v0.1.159 "v0.1.159^{}"
+  git rev-list --count "v0.1.156^{}..v0.1.157^{}"
+  git rev-list --count "v0.1.157^{}..v0.1.158^{}"
+  git rev-list --count "v0.1.158^{}..v0.1.159^{}"
+  git diff --name-only "v0.1.156^{}..v0.1.157^{}"
+  git diff --name-only "v0.1.157^{}..v0.1.158^{}"
+  git diff --name-only "v0.1.158^{}..v0.1.159^{}"
+  git log --oneline "v0.1.159^{}"..upstream/main
+  ```
+  预期：tag object/peel SHA 与全局表完全一致；提交数依次为 82、20、12，changed-files 数依次为 331、105、30；最后一条仅记录 tag 后排除范围。
+
+- [ ] **步骤 3：创建扩展验证报告骨架**
+
+  写入：
+  ```markdown
+  # 分段合并上游 v0.1.159 验证记录
+
+  ## 扩展起点与固定对象
+  - 首轮已验证提交：`315617bdec0e21fe8aeb119a986bde960c4864b3`
+  - 扩展实施分支：`feature/20260717/staged-merge-upstream-v0-1-159`
+  - 最终边界：`v0.1.159^{}` (`2a75d7d2387587d86ca3c5e5cd8ca96cf3d104c6`)
+  - 排除范围：`v0.1.159^{}` 之后的 `upstream/main`
+
+  ## 扩展基线
+  ## 能力矩阵增量
+  ## v0.1.157
+  ## v0.1.158
+  ## v0.1.159
+  ## 最终验证
+  ## 残余风险与未执行事项
+  ```
+
+- [ ] **步骤 4：运行扩展前完整基线**
+
+  执行：
+  ```bash
+  make test
+  pnpm --dir frontend run build
+  make -C backend generate
+  git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
+  make -C backend generate
+  git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
+  git diff --check
+  ```
+  预期：所有命令退出码为 0，连续两次生成不产生 diff。任一失败都写入报告并停止，不执行 Task 26。
+
+- [ ] **步骤 5：提交扩展范围和基线证据**
+
+  执行：
+  ```bash
+  git add -f docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md
+  git commit -m "docs: record v0.1.159 extension baseline"
+  ```
+  预期：提交只包含新报告，不修改首轮验证报告。
+
+### Task 25：扩展能力矩阵并关闭保护缺口（OpenSpec 7.2）
+
+**文件：**
+- 修改：`docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md`
+- 测试：仅使用能力矩阵确认存在 gap 的既有 `backend/**/*_test.go` 或 `frontend/**/*.spec.ts`
+
+**产物：** 新报告中每个新增风险面具备 tag、入口、现有测试、人工审查点和 `protected`/`manual`/`approved-removal` 状态。
+
+- [ ] **步骤 1：建立三段能力交集**
+
+  将三个 changed-files 清单与首轮矩阵交叉，至少登记：异步图片任务/对象存储、图片输入 token/费用、上游计费倍率与 scheduler、操作审计、会话 IP/UA 绑定、step-up 2FA、OpenAI Responses/WS、Grok 端点与 cache、分组复制、用户批量限额、客户端 IP 解析、alpha/search API Key 调度、账号上游链接、Stripe 懒加载、Wire/Ent 和 migrations 177-181。
+
+- [ ] **步骤 2：结构化追踪共享入口**
+
+  对 scheduler、image intent、billing、session binding、audit、Grok/Responses/WS 和 group/user 管理入口使用 CodeGraph `context`/`impact`；报告记录入口符号、调用方、被新 tag 修改的文件和验证命令。不得仅用文件名相交判定无影响。
+
+- [ ] **步骤 3：执行已有保护测试**
+
+  执行：
+  ```bash
+  go -C backend test ./internal/service ./internal/handler/... ./internal/repository ./internal/server/... -count=1
+  pnpm --dir frontend exec vitest run
+  ```
+  预期：当前扩展基线通过。若矩阵出现没有直接断言的本地独有行为，将该行标为 `gap`，在对应既有测试文件添加一个最小 characterization test，先确认当前基线通过，再把状态改为 `protected`；存在未关闭 gap 时禁止 Task 26。
+
+- [ ] **步骤 4：提交矩阵与必要保护测试**
+
+  有新增测试时执行：
+  ```bash
+  git add backend frontend
+  git add -f docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md
+  git commit -m "test: protect local behavior before v0.1.157"
+  ```
+  没有 gap 时只提交报告：
+  ```bash
+  git add -f docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md
+  git commit -m "docs: extend capability matrix to v0.1.159"
+  ```
+
+### Task 26：合入 v0.1.157 并记录冲突融合（OpenSpec 8.1）
+
+**文件：**
+- 修改：`git merge --no-ff v0.1.157` 实际产生的文件
+- 修改：`docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md`
+
+- [ ] **步骤 1：验证阶段入口**
+
+  执行：
+  ```bash
+  git status --short
+  git rev-parse "v0.1.157^{}"
+  git log -1 --format='%H %s'
+  ```
+  预期：工作树除忽略文件外干净；peel SHA 为 `a2779cd5f30d6d3904a9d59088aed09507678dfe`；Task 24-25 的报告提交位于 HEAD 历史。
+
+- [ ] **步骤 2：创建第五个 merge 节点**
+
+  执行：
+  ```bash
+  git merge --no-ff v0.1.157 -m "merge: upstream v0.1.157"
+  ```
+  预期：无冲突则直接生成 merge commit；有冲突则停留在 merge 状态，不改用 squash、rebase 或 cherry-pick。
+
+- [ ] **步骤 3：逐文件融合冲突**
+
+  执行：
+  ```bash
+  git diff --name-only --diff-filter=U
+  git diff --name-only "v0.1.156^{}..v0.1.157^{}"
+  git diff --cached --check
+  ```
+  对每个冲突读取第一父、`v0.1.157^{}` 和调用方，记录 ours、theirs、最终语义、类别和验证命令。唯一既有批准移除项仍是本地首 Token 超时；其他不可共存语义暂停等待用户。
+
+- [ ] **步骤 4：完成 merge 并验证父节点**
+
+  暂存每个已解决冲突文件后执行：
+  ```bash
+  git commit
+  git show -s --format='%H%n%P%n%s' HEAD
+  ```
+  预期：第二父为 `a2779cd5f30d6d3904a9d59088aed09507678dfe`；merge commit 不包含验证报告或 merge 后语义修复。
+
+- [ ] **步骤 5：提交冲突台账**
+
+  执行：
+  ```bash
+  git add -f docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md
+  git commit -m "docs: record v0.1.157 merge decisions"
+  ```
+
+### Task 27：审查并修复 v0.1.157 能力回归（OpenSpec 8.2）
+
+**文件：**
+- 修改：由失败测试和能力矩阵确定的实际业务/测试文件
+- 修改：`docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md`
+
+- [ ] **步骤 1：运行 v0.1.157 高风险定向测试**
+
+  执行：
+  ```bash
+  go -C backend test ./internal/service -run 'Image|Billing|Scheduler|Audit|StepUp|Session|FirstOutput|WebSocket' -count=1
+  go -C backend test ./internal/handler/... -run 'Image|Billing|Audit|StepUp|Account|Setting' -count=1
+  go -C backend test ./internal/repository -run 'Image|Billing|Scheduler|Audit|Probe|ChannelMonitor' -count=1
+  go -C backend test ./internal/server/... -run 'Audit|Session|StepUp|APIKey|ImageTask' -count=1
+  pnpm --dir frontend exec vitest run src/components/account/__tests__/UpstreamBillingRateCell.spec.ts src/views/admin/__tests__/SettingsView.spec.ts src/views/admin/__tests__/ChannelMonitorView.duplicate.spec.ts src/i18n/__tests__/localesMessageCompile.spec.ts
+  ```
+  预期：上游新增行为和首轮本地保护均通过；失败输出原样写入报告。
+
+- [ ] **步骤 2：审查无冲突语义变化**
+
+  重点核对异步图片任务路由/鉴权/对象存储、图片 input token 计费、倍率探测与 scheduler snapshot、审计脱敏、session binding/step-up、Responses image intent、首输出超时保持删除状态、Grok/Agent Identity、Wire provider 和 migrations 177-180。
+
+- [ ] **步骤 3：使用 TDD 完成最小兼容修复**
+
+  每个回归先运行或添加一个直接失败测试，再只修改导致回归的最小业务路径，重跑同一测试至通过。禁止在本任务加入无失败证据的重构或新功能。
+
+- [ ] **步骤 4：提交修复和能力结论**
+
+  存在修复时执行：
+  ```bash
+  git add -- backend frontend
+  git commit -m "fix: preserve local behavior after v0.1.157"
+  ```
+  随后只提交报告：
+  ```bash
+  git add -f docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md
+  git commit -m "docs: record v0.1.157 capability review"
+  ```
+  无回归时不创建空修复提交。
+
+### Task 28：关闭 v0.1.157 阶段门禁（OpenSpec 8.3）
+
+**文件：**
+- 修改：`docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md`
+
+- [ ] **步骤 1：运行完整阶段门禁**
+
+  执行：
+  ```bash
+  make test
+  pnpm --dir frontend run build
+  make -C backend generate
+  git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
+  git diff --check
+  git diff --name-only --diff-filter=U
+  git grep -n -E '^(<<<<<<< .+|=======|>>>>>>> .+)$' -- . ':!docs/superpowers/reports/**'
+  ```
+  预期：测试、build、生成和静态检查通过，无 unmerged 文件或真实冲突标记。
+
+- [ ] **步骤 2：提交阶段门禁证据**
+
+  执行：
+  ```bash
+  git add -f docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md
+  git commit -m "docs: close v0.1.157 stage gate"
+  ```
+  预期：能力矩阵无 gap，报告明确允许 Task 29。
+
+### Task 29：合入 v0.1.158 并记录冲突融合（OpenSpec 9.1）
+
+**文件：**
+- 修改：`git merge --no-ff v0.1.158` 实际产生的文件
+- 修改：`docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md`
+
+- [ ] **步骤 1：创建第六个 merge 节点**
+
+  执行：
+  ```bash
+  git status --short
+  git rev-parse "v0.1.158^{}"
+  git merge --no-ff v0.1.158 -m "merge: upstream v0.1.158"
+  ```
+  预期：工作树干净且 peel SHA 为 `26abd19a2812edba02bbef93c3e2a620141cc257`；有冲突时保持 merge 状态。
+
+- [ ] **步骤 2：融合冲突并完成 merge**
+
+  执行：
+  ```bash
+  git diff --name-only --diff-filter=U
+  git diff --name-only "v0.1.157^{}..v0.1.158^{}"
+  git diff --cached --check
+  ```
+  逐文件记录两侧语义并最小融合，暂存全部已解决路径后 `git commit`。`git show -s --format='%H%n%P%n%s' HEAD` 的第二父必须是 `26abd19a2812edba02bbef93c3e2a620141cc257`。
+
+- [ ] **步骤 3：提交冲突台账**
+
+  执行：
+  ```bash
+  git add -f docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md
+  git commit -m "docs: record v0.1.158 merge decisions"
+  ```
+
+### Task 30：审查并修复 v0.1.158 能力回归（OpenSpec 9.2）
+
+**文件：**
+- 修改：由失败测试和能力矩阵确定的实际业务/测试文件
+- 修改：`docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md`
+
+- [ ] **步骤 1：运行 v0.1.158 高风险定向测试**
+
+  执行：
+  ```bash
+  go -C backend test ./internal/service -run 'GroupDuplicate|BatchLimits|Grok|CodexModels|ImageGeneration|WebSocket' -count=1
+  go -C backend test ./internal/handler/... -run 'GroupDuplicate|BatchLimits|Grok|Models' -count=1
+  go -C backend test ./internal/repository -run 'GroupDuplicate|User|HTTPUpstream' -count=1
+  pnpm --dir frontend exec vitest run src/api/__tests__/admin.groups.duplicate.spec.ts src/api/__tests__/admin.users.spec.ts src/components/account/__tests__/EditAccountModal.grokUpstream.spec.ts src/components/admin/user/__tests__/BulkEditUserModal.spec.ts src/components/common/__tests__/DataTable.spec.ts src/views/admin/__tests__/GroupsView.duplicate.spec.ts src/views/admin/__tests__/UsersView.spec.ts
+  ```
+
+- [ ] **步骤 2：审查无冲突语义变化**
+
+  重点核对 group duplicate operation ID 的 schema/migration 181、用户批量限额事务边界、Grok OAuth 自定义端点、Responses WebSocket v2、Codex 生图完成态、模型能力发现和 DataTable 分页/选择状态。
+
+- [ ] **步骤 3：TDD 修复并提交**
+
+  对每个回归保留失败测试后作最小修复。存在修复时提交 `fix: preserve local behavior after v0.1.158`；随后只提交报告 `docs: record v0.1.158 capability review`。无回归时只创建报告提交。
+
+### Task 31：关闭 v0.1.158 阶段门禁（OpenSpec 9.3）
+
+**文件：**
+- 修改：`docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md`
+
+- [ ] **步骤 1：运行完整阶段门禁**
+
+  执行：
+  ```bash
+  make test
+  pnpm --dir frontend run build
+  make -C backend generate
+  git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
+  git diff --check
+  git diff --name-only --diff-filter=U
+  ```
+  预期：全部通过且能力矩阵无未解释变化。
+
+- [ ] **步骤 2：提交阶段门禁证据**
+
+  执行：
+  ```bash
+  git add -f docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md
+  git commit -m "docs: close v0.1.158 stage gate"
+  ```
+
+### Task 32：合入 v0.1.159 并记录冲突融合（OpenSpec 10.1）
+
+**文件：**
+- 修改：`git merge --no-ff v0.1.159` 实际产生的文件
+- 修改：`docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md`
+
+- [ ] **步骤 1：创建第七个 merge 节点**
+
+  执行：
+  ```bash
+  git status --short
+  git rev-parse "v0.1.159^{}"
+  git merge --no-ff v0.1.159 -m "merge: upstream v0.1.159"
+  ```
+  预期：工作树干净且 peel SHA 为 `2a75d7d2387587d86ca3c5e5cd8ca96cf3d104c6`。
+
+- [ ] **步骤 2：融合冲突并完成 merge**
+
+  执行：
+  ```bash
+  git diff --name-only --diff-filter=U
+  git diff --name-only "v0.1.158^{}..v0.1.159^{}"
+  git diff --cached --check
+  ```
+  完成逐文件语义融合后提交 merge；第二父必须为 `2a75d7d2387587d86ca3c5e5cd8ca96cf3d104c6`，不得 merge `upstream/main`。
+
+- [ ] **步骤 3：提交冲突台账**
+
+  执行：
+  ```bash
+  git add -f docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md
+  git commit -m "docs: record v0.1.159 merge decisions"
+  ```
+
+### Task 33：审查并修复 v0.1.159 能力回归（OpenSpec 10.2）
+
+**文件：**
+- 修改：由失败测试和能力矩阵确定的实际业务/测试文件
+- 修改：`docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md`
+
+- [ ] **步骤 1：运行 v0.1.159 高风险定向测试**
+
+  执行：
+  ```bash
+  go -C backend test ./internal/pkg/ip ./internal/server/middleware -count=1
+  go -C backend test ./internal/service -run 'AlphaSearch|Scheduler|Grok|Image|Account' -count=1
+  pnpm --dir frontend exec vitest run src/views/admin/__tests__/AccountsView.sparkShadow.spec.ts src/views/user/__tests__/StripePaymentView.spec.ts src/views/user/__tests__/stripeLazyLoading.spec.ts
+  ```
+
+- [ ] **步骤 2：审查无冲突语义变化**
+
+  重点核对 audit/session binding 与 API Key ACL 的可信代理开关一致性、alpha/search API Key 账号可调度性、Grok Responses function tool 免费缓存、图片测试兼容、账号上游链接和 Stripe 动态 import chunk。
+
+- [ ] **步骤 3：TDD 修复并提交**
+
+  对每个回归保留失败测试后作最小修复。存在修复时提交 `fix: preserve local behavior after v0.1.159`；随后只提交报告 `docs: record v0.1.159 capability review`。无回归时只创建报告提交。
+
+### Task 34：关闭 v0.1.159 阶段门禁（OpenSpec 10.3）
+
+**文件：**
+- 修改：`docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md`
+
+- [ ] **步骤 1：运行完整阶段门禁**
+
+  执行：
+  ```bash
+  make test
+  pnpm --dir frontend run build
+  make -C backend generate
+  git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
+  git diff --check
+  git diff --name-only --diff-filter=U
+  git grep -n -E '^(<<<<<<< .+|=======|>>>>>>> .+)$' -- . ':!docs/superpowers/reports/**'
+  git grep -n -E 'openai_text_first_token_timeout|openai_image_first_token_timeout|first_token_timeout|OpenAIFirstTokenTimeout|openAIFirstTokenWatchdog' -- backend frontend deploy
+  ```
+  预期：测试、build、生成和静态检查通过；两条 grep 均无真实匹配，旧首 Token 符号扫描为空，能力矩阵无 gap。
+
+- [ ] **步骤 2：提交阶段门禁证据**
+
+  执行：
+  ```bash
+  git add -f docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md
+  git commit -m "docs: close v0.1.159 stage gate"
+  ```
+
+### Task 35：规范版本并复核生成物与 migrations（OpenSpec 11.1）
+
+**文件：**
+- 修改：`backend/cmd/server/VERSION`
+- 审查：`backend/go.mod`、`backend/go.sum`、`frontend/package.json`、`pnpm-lock.yaml`、`deploy/config.example.yaml`
+- 审查：`backend/ent/schema/`、`backend/ent/`、`backend/cmd/server/wire.go`、`backend/cmd/server/wire_gen.go`
+- 审查：`backend/migrations/177_*.sql` 至 `backend/migrations/181_*.sql`
+- 修改：`docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md`
+
+- [ ] **步骤 1：设置本地四段式版本**
+
+  将 `backend/cmd/server/VERSION` 精确设置为：
+  ```text
+  0.1.159.1
+  ```
+  执行 `go -C backend test ./cmd/server -count=1`，预期通过；单独提交：
+  ```bash
+  git add backend/cmd/server/VERSION
+  git commit -m "chore: set version to 0.1.159.1"
+  ```
+
+- [ ] **步骤 2：验证 Ent/Wire 可复现性**
+
+  执行：
+  ```bash
+  make -C backend generate
+  git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
+  make -C backend generate
+  git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
+  ```
+  预期：两次生成均稳定；差异必须从 schema/provider 源修复，不手工维护生成输出。
+
+- [ ] **步骤 3：复核依赖、配置和 migrations 177-181**
+
+  执行：
+  ```bash
+  git diff --name-status "v0.1.156^{}..HEAD" -- backend/go.mod backend/go.sum frontend/package.json pnpm-lock.yaml deploy/config.example.yaml backend/migrations
+  git ls-tree -r --name-only HEAD backend/migrations
+  git diff --check -- backend/migrations deploy/config.example.yaml
+  ```
+  报告逐项记录 migration 文件名唯一性、完整文件名排序、幂等 DDL、runner 顺序、配置默认值及依赖来源；Docker-backed migration integration 未运行时明确标为未执行。
+
+- [ ] **步骤 4：提交元数据审查证据**
+
+  执行：
+  ```bash
+  git add -f docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md
+  git commit -m "docs: record v0.1.159 metadata review"
+  ```
+
+### Task 36：完成能力矩阵与最终自动验证（OpenSpec 11.2）
+
+**文件：**
+- 修改：`docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md`
+
+- [ ] **步骤 1：逐项关闭能力矩阵**
+
+  对首轮矩阵全部项目和 Task 25 新增项目逐项确认入口可达、边界语义、测试证据、manual 结论与三段结果。唯一 `approved-removal` 仍是本地首 Token 超时；不得出现 `gap`、空状态或“默认接受”。
+
+- [ ] **步骤 2：运行最终完整门禁**
+
+  执行：
+  ```bash
+  make test
+  pnpm --dir frontend run build
+  make -C backend generate
+  git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
+  git diff --check
+  git diff --name-only --diff-filter=U
+  git grep -n -E '^(<<<<<<< .+|=======|>>>>>>> .+)$' -- . ':!docs/superpowers/reports/**'
+  ```
+  预期：全部退出码为 0 或按约定无输出；报告记录后端、lint、unit、前端 lint/typecheck/Vitest/build、生成和静态检查摘要。
+
+- [ ] **步骤 3：提交最终自动验证证据**
+
+  执行：
+  ```bash
+  git add -f docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md
+  git commit -m "docs: record v0.1.159 automated verification"
+  ```
+
+### Task 37：验证拓扑并完成扩展收口（OpenSpec 11.3）
+
+**文件：**
+- 修改：`docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md`
+- 修改：`openspec/changes/staged-merge-upstream-v0-1-159/tasks.md`
+
+- [ ] **步骤 1：验证七个 tag 和 first-parent 顺序**
+
+  执行：
+  ```bash
+  git merge-base --is-ancestor b73d8c3efe01a290eaaa9326b6e40ece02c67a0e HEAD
+  git merge-base --is-ancestor a2bc1337474b68b62391116835e5698ebb5526bd HEAD
+  git merge-base --is-ancestor 41cec0db059ffb82d0efdcfcf07a24ab51fbfe97 HEAD
+  git merge-base --is-ancestor 12f991dde8a58e183d4bd16a87ef6fd0df714757 HEAD
+  git merge-base --is-ancestor a2779cd5f30d6d3904a9d59088aed09507678dfe HEAD
+  git merge-base --is-ancestor 26abd19a2812edba02bbef93c3e2a620141cc257 HEAD
+  git merge-base --is-ancestor 2a75d7d2387587d86ca3c5e5cd8ca96cf3d104c6 HEAD
+  git log --first-parent --merges --format='%H %P %s' d1cc02502271f54b3b7f0593a18db4f2aaab63ea..HEAD
+  ```
+  预期：七条祖先检查退出码均为 0；first-parent merge 顺序与七个 tag 一致，每个新节点第二父为固定 peel SHA。
+
+- [ ] **步骤 2：验证最终边界与 thorough review**
+
+  执行：
+  ```bash
+  git merge-base --is-ancestor upstream/main HEAD
+  git log --oneline "v0.1.159^{}"..upstream/main
+  git status --short
+  ```
+  预期：第一条退出码非零，证明完整 `upstream/main` 未合入；第二条仅列出排除提交；review 确认三个新 merge、后续修复和报告提交边界清晰。
+
+- [ ] **步骤 3：完成报告与 OpenSpec 任务**
+
+  仅在所有证据齐全后，将 `tasks.md` 的 7.1 至 11.3 共 14 项勾选完成。报告记录 merge SHA、冲突台账、修复提交、三段门禁、最终矩阵、版本 `0.1.159.1`、未执行的 Docker migration integration，以及未执行 push/release/deploy。
+
+- [ ] **步骤 4：提交扩展收口文档**
+
+  执行：
+  ```bash
+  git add openspec/changes/staged-merge-upstream-v0-1-159/tasks.md
+  git add -f docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md
+  git commit -m "docs: verify staged upstream merge v0.1.159"
+  git status --short
+  ```
+  预期：最终文档提交不包含 `.comet/current-change.json`，不执行 push、release、deploy 或合回 `main`。
+
 ## 实施前后复核
 
-- 阶段 0 是硬门禁：任何 `make test`、`pnpm --dir frontend run build`、Ent/Wire 稳定性或能力矩阵状态失败都阻止首次 merge。
-- 对 merge 后才出现的冲突，使用 `git diff --name-only --diff-filter=U` 发现并写入固定验证报告；计划不预设冲突文件，也不允许省略类别、双方语义、融合结论和验证证据。
+- 阶段 0 与扩展基线都是硬门禁：任何 `make test`、`pnpm --dir frontend run build`、Ent/Wire 稳定性或能力矩阵状态失败都阻止对应范围的首次 merge。
+- 对 merge 后才出现的冲突，使用 `git diff --name-only --diff-filter=U` 发现并写入当前范围的验证报告；计划不预设冲突文件，也不允许省略类别、双方语义、融合结论和验证证据。
 - 对无冲突变化，使用每段前一 tag 到当前 tag 的 `git diff --name-only` 输出与能力矩阵关键文件的交集，加上 CodeGraph 调用链审查；无交集不能替代对共享入口/配置/生成物的人工检查。
 - 所有后续普通提交必须引用当前 tag 阶段的失败证据；没有回归则不创建空的兼容修复提交。
-- 最终只在任务 23 更新 OpenSpec 完成状态；该任务不归档 change、不执行发布或部署。
+- 首轮任务 1-23 保持已完成；扩展任务只在 Task 37 更新为完成。Task 37 不归档 change、不执行发布或部署。

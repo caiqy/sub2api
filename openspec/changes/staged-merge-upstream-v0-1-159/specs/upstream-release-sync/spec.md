@@ -15,8 +15,12 @@
 维护流程 SHALL 允许将一个最终上游 release 目标拆为具有严格祖先顺序的多个正式 tag 阶段。每个阶段 MUST 完成冲突处理、能力审查和阶段验证后，才能进入下一阶段。
 
 #### Scenario: 顺序合入多个 tag
-- **WHEN** 用户选择按 `v0.1.152`、`v0.1.153`、`v0.1.155`、`v0.1.156` 分段集成
+- **WHEN** 用户选择按 `v0.1.152`、`v0.1.153`、`v0.1.155`、`v0.1.156`、`v0.1.157`、`v0.1.158`、`v0.1.159` 分段集成
 - **THEN** 维护流程 MUST 按该顺序建立独立 merge 节点，且不得跳过尚未完成验证的前置阶段
+
+#### Scenario: 从已验证但未归档的中间 release 继续扩展
+- **WHEN** 一个分段合并 change 已通过中间 release 的最终验证但尚未归档，且用户将目标扩展到后续正式 tag
+- **THEN** 维护流程 MUST 保留已完成任务和验证报告作为历史证据，使旧验证结果对新增范围失效，并在追加 merge 前重新运行基线与能力映射门禁
 
 #### Scenario: 某阶段首次出现本地能力回归
 - **WHEN** 阶段验证发现阶段 0 已保护的本地能力不再成立
@@ -52,4 +56,4 @@
 
 #### Scenario: 本地关键能力专项 review
 - **WHEN** 最终自动验证完成
-- **THEN** 维护流程 MUST 逐项复核 scheduler、各平台 sticky、fallback/WaitPlan、DB recheck、privacy、image capability、runtime setting 热更新、网关透传字段、请求体重放与清理、用户资源控制、前端本地功能、版本依赖、生成代码和 migrations，并记录每项证据
+- **THEN** 维护流程 MUST 逐项复核 scheduler、各平台 sticky、fallback/WaitPlan、DB recheck、privacy、image capability、异步图片任务与对象存储、图片输入计费、上游计费倍率、会话绑定与 step-up、runtime setting 热更新、网关透传字段、请求体重放与清理、用户资源控制、分组复制、用户批量限额、前端本地功能、版本依赖、生成代码和 migrations，并记录每项证据
