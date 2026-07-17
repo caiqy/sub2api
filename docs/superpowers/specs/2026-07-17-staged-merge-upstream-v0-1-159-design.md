@@ -1,5 +1,5 @@
 ---
-comet_change: staged-merge-upstream-v0-1-156
+comet_change: staged-merge-upstream-v0-1-159
 role: technical-design
 canonical_spec: openspec
 ---

@@ -1,10 +1,10 @@
 ---
-change: staged-merge-upstream-v0-1-156
+change: staged-merge-upstream-v0-1-159
 design-doc: docs/superpowers/specs/2026-07-17-staged-merge-upstream-v0-1-159-design.md
 base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 ---
 
-# 分段合并上游 v0.1.156 实施计划
+# 分段合并上游 v0.1.159 实施计划
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -113,13 +113,13 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 
   执行：
   ```bash
-  git add openspec/changes/staged-merge-upstream-v0-1-156
-  git add -f docs/superpowers/specs/2026-07-16-staged-merge-upstream-v0-1-156-design.md
-  git add -f docs/superpowers/plans/2026-07-16-staged-merge-upstream-v0-1-156.md
+  git add openspec/changes/staged-merge-upstream-v0-1-159
+  git add -f docs/superpowers/specs/2026-07-17-staged-merge-upstream-v0-1-159-design.md
+  git add -f docs/superpowers/plans/2026-07-17-staged-merge-upstream-v0-1-159.md
   git add -f docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md
   git commit -m "docs: add staged upstream merge plan"
   ```
-  预期：仅 Design Doc、实施计划、验证报告和 `openspec/changes/staged-merge-upstream-v0-1-156/` 协调文件进入此普通提交；不得包含 `.comet/current-change.json` 或业务代码。
+  预期：仅 Design Doc、实施计划、验证报告和 `openspec/changes/staged-merge-upstream-v0-1-159/` 协调文件进入此普通提交；不得包含 `.comet/current-change.json` 或业务代码。
 
 ### Task 2：运行阶段 0 基线与生成检查（OpenSpec 1.2）
 
@@ -862,7 +862,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 
 **文件：**
 - 修改：`docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md`
-- 修改：`openspec/changes/staged-merge-upstream-v0-1-156/tasks.md`
+- 修改：`openspec/changes/staged-merge-upstream-v0-1-159/tasks.md`
 
 - [x] **步骤 1：完成验证报告的可追溯记录**
 
@@ -876,7 +876,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 
   执行：
   ```bash
-  git add openspec/changes/staged-merge-upstream-v0-1-156/tasks.md
+  git add openspec/changes/staged-merge-upstream-v0-1-159/tasks.md
   git add -f docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md
   git commit -m "docs: verify staged upstream merge v0.1.156"
   git status --short
