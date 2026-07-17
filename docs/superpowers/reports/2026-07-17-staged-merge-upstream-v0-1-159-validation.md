@@ -167,7 +167,30 @@
 - 能力矩阵无 `gap`：当前行为已由 `protected` 断言覆盖，目标 tag 新入口仍按既定 `manual` 合并后验收，已批准移除项维持 `approved-removal`。Task 29 获准开始 v0.1.158 阶段。
 
 ## v0.1.158
-未开始合并。
+- Merge commit：`be00309dd72cb42c2c1ab1769dd949a35c625f29`，第一父 `0cb9e52bdbfb9045dd0aacc77028ad04aed12a78`，第二父 `26abd19a2812edba02bbef93c3e2a620141cc257`。
+- 未合并 `upstream/main`、v0.1.159；未 push、release 或 deploy。`.comet/current-change.json` 保持未跟踪，未加入 merge 或本文档提交。
+- merge 前的 9 个文本冲突均核对第一父、tag 和相关调用路径后最小融合；无 BLOCKED 项。原生 HTTP `first-output` 实现继续保留，旧本地 first-token watchdog 未重新引入。
+
+### v0.1.158 冲突台账
+
+| 路径 | 类别 | ours 语义 | theirs 语义 | 最终融合 | 验证 |
+| --- | --- | --- | --- | --- | --- |
+| `backend/cmd/server/VERSION` | version | 本地四段开发号 | tag 版本号 | 使用 tag `0.1.157` | `git diff --cached --check` |
+| `backend/cmd/server/wire_gen.go` | generated Wire | 现有 runtime/probe 依赖 | `AdminGroupRepository` 注入 | 以 `wire.go` 声明重生，保留两类依赖 | 连续两次 `make -C backend generate` |
+| `backend/ent/mutation.go` | generated Ent | 用户并发字段容量 | group duplicate operation ID 字段 | 以合并 schema 重生，容量 51 | 连续两次 `make -C backend generate` |
+| `backend/ent/runtime/runtime.go` | generated Ent | 用户并发字段索引 | duplicate operation ID 插入字段索引 | 以合并 schema 重生，全部后续索引右移 | 连续两次 `make -C backend generate` |
+| `backend/internal/service/grok_media.go` | Grok media forward | multipart edit body 转 JSON | 仅 CLI proxy target 追加 Grok CLI headers | 两者保留；非 CLI upstream 不注入 CLI headers | service 定向测试、`make test` |
+| `backend/internal/service/openai_ws_forwarder_ingress.go` | Responses WS ingress | 首个 response ID 绑定并过滤非归属事件 | 图片生成 completed status 归一化 | 在事件 envelope 解析前归一化，并保留 response 归属过滤 | WS 定向测试、`make test` |
+| `backend/internal/service/openai_ws_forwarder_ingress_session_test.go` | WS regression | `store:false` 与创建事件断言 | image-generation terminal status 断言 | 同时保留 create/store 语义和 normalized completed image 断言 | service 定向测试、`make test` |
+| `frontend/src/api/__tests__/admin.users.spec.ts` | admin users API tests | 用户创建 username/notes 请求断言 | bind identity/批量限额类型与请求断言 | 三组契约测试并存 | 定向 Vitest、`make test` |
+| `frontend/src/components/account/EditAccountModal.vue` | account editor | local passthrough、quota、header editor 和默认 URL | Grok OAuth custom upstream URL/header overrides | 保留 local 编辑能力；Grok OAuth 控件置于 API-key 容器外，复用 header editor | Grok editor 定向 Vitest、typecheck、build、`make test` |
+
+### v0.1.158 验证
+- `go -C backend test ./internal/service ./internal/handler/admin ./internal/repository -run 'DuplicateGroup|BatchUpdateConcurrency|BatchLimits|Grok|ProxyResponses' -count=1` 通过。
+- `pnpm --dir frontend exec vitest run src/api/__tests__/admin.users.spec.ts src/components/account/__tests__/EditAccountModal.grokUpstream.spec.ts src/components/account/__tests__/EditAccountModal.spec.ts src/components/admin/user/__tests__/BulkEditUserModal.spec.ts` 通过：4 files / 70 tests。
+- `go -C backend test ./internal/... -run '^$'`、`pnpm --dir frontend run typecheck`、`pnpm --dir frontend run build` 和 `make test` 全部通过；`make test` 为 193 个 Vitest 文件 / 1488 个测试。
+- `make -C backend generate` 连续两次成功，第二次后 `git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` 通过；`git diff --cached --check` 和未合并路径检查均无输出。
+- 上游新增 `BatchUpdateLimits` 接口后，第一父的 `adminAPIKeyBlockedUserRepo` fake 缺少该方法，补入仅 panic 的 stub 以恢复接口编译；这不是 Task 30 行为修复。
 
 ## v0.1.159
 未开始合并。
