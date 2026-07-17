@@ -864,15 +864,15 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 - 修改：`docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md`
 - 修改：`openspec/changes/staged-merge-upstream-v0-1-156/tasks.md`
 
-- [ ] **步骤 1：完成验证报告的可追溯记录**
+- [x] **步骤 1：完成验证报告的可追溯记录**
 
   报告必须包含：固定 base/tag SHA、每段 changed-files、冲突台账、每个 merge/普通修复提交 SHA、阶段 0 与四段门禁命令/结果、能力矩阵、首 Token 的明确移除范围、上游保留语义、未执行事项和残余风险。不得将发布、部署、推送或合回 main 写成已完成。
 
-- [ ] **步骤 2：逐项勾选 OpenSpec 的 23 项任务**
+- [x] **步骤 2：逐项勾选 OpenSpec 的 23 项任务**
 
   仅当报告已链接对应证据时，将 `tasks.md` 的 1.1 至 6.5 全部标记完成。预期：任务数量为 23，任一缺证据条目保持未完成并回到对应任务处理。
 
-- [ ] **步骤 3：提交最终验证文档，不进入发布流程**
+- [x] **步骤 3：提交最终验证文档，不进入发布流程**
 
   执行：
   ```bash
