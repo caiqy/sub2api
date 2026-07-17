@@ -365,3 +365,61 @@ git diff --check
 ### 前端与残余手工项
 - `pnpm --dir frontend run typecheck` 退出 0；`pnpm --dir frontend run build` 退出 0，完成 987 个模块。构建只保留既有 Browserslist 数据过期、动态导入和大于 500 kB chunk 警告。
 - Docker-backed PostgreSQL migration integration 未运行，保持 manual；尤其 `TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate` 及带 `integration` tag 的 repository migration/transaction 测试需要具备 live PostgreSQL 的环境后执行，不能由本节 unit 结果替代。
+
+## Task 36 最终能力矩阵与自动验证
+- 起始提交：`c19bbe438d12737abe98a30da235f9193896d66a`。本节只关闭能力矩阵和记录自动验证；未开始 Task 37，未修改 `tasks.md`，未提交 `.comet/current-change.json` 或 `.superpowers/sdd/` scratch，未合并 `upstream/main` 或 tag 后提交，未 push、release 或 deploy。
+- 首轮矩阵的 `M-01` 至 `M-16` 定向命令均已从仓库根目录重新执行。`M-01` 至 `M-11` 为 protected 且命名行为测试通过；`M-12` 至 `M-15` 保持 manual，但已有自动证据与既定结构结论均成立；`M-16` 是唯一 approved-removal。原矩阵命令的 M-06 service、M-12 service 未带 `unit` tag 而显示 `no tests to run`，已按矩阵既有补充命令重跑 `-tags unit` 目标并通过，未将空运行当作行为证据。
+
+### 首轮能力矩阵最终结果
+
+| ID | 能力 | 入口与边界 | 自动证据 | 最终状态 / 三段结果 |
+| --- | --- | --- | --- | --- |
+| M-01 | Scheduler | `SelectAccountWithScheduler` 的 WaitPlan、受限候选过滤和上游前选择。 | 2 个命名 service 测试通过。 | protected；157/158/159 PASS。 |
+| M-02 | OpenAI Sticky | 开关关闭时 HTTP、WS V2、ingress 不读写 sticky state。 | 4 个 unit service 测试通过。 | protected；157/158/159 PASS。 |
+| M-03 | Gemini/Anthropic Sticky | 以最终平台开关控制 lookup、bind 与 cleanup。 | 4 个 unit handler/service 测试通过。 | protected；157/158/159 PASS。 |
+| M-04 | fallback / WaitPlan | 已写 SSE 不 failover，未提交响应可按 WaitPlan 回退。 | 2 个 handler 测试通过。 | protected；157/158/159 PASS。 |
+| M-05 | DB recheck | sticky/cache 候选在上游调用前按 DB 状态和 capability 重检。 | 3 个 service 测试通过。 | protected；157/158/159 PASS。 |
+| M-06 | 协议转换与透传 | 原始请求 body 与转换后的 upstream body 分离，保留 tool/usage 字段。 | 2 个 apicompat 测试和 2 个 unit service 测试通过。 | protected；157/158/159 PASS。 |
+| M-07 | 终止 usage | terminal、failed 与 partial failover usage 只提交一次。 | 4 个 apicompat/handler 测试通过。 | protected；157/158/159 PASS。 |
+| M-08 | 内容审计 | 大输入保留最新窗口，删除分组不保留，查询错误不吞掉。 | 4 个 service 测试通过。 | protected；157/158/159 PASS。 |
+| M-09 | image capability | 仅明确图片 intent 触发 capability/rate-limit 过滤。 | 4 个 service 测试通过。 | protected；157/158/159 PASS。 |
+| M-10 | 运行时设置热更新 | 设置持久化、校验、运行时生效和 SettingsView payload 一致。 | 2 个 service 测试和前端 1 file / 11 tests 通过。 | protected；157/158/159 PASS。 |
+| M-11 | 请求体重放与清理 | raw/effective handle 在 failover 和所有退出路径按 owner 清理。 | 5 个 handler/service 测试通过。 | protected；157/158/159 PASS。 |
+| M-12 | 用户资源控制 | 管理写入、支付/页面拒绝与隐藏资源跨层一致。 | 3 个 unit service/handler 测试通过。 | manual；157/158/159 自动证据 PASS，生产 API-key/前端联检仍 manual。 |
+| M-13 | 前端本地功能 | route guard、visibility helper 与 runtime 设置 UI 不可绕过。 | 3 files / 18 tests 通过。 | manual；157/158/159 自动证据 PASS，浏览器联检仍 manual。 |
+| M-14 | 版本/依赖 | `VERSION` 与构建元数据可编译且 Task 35 的 tag/依赖审查成立。 | `go -C backend test ./cmd/server -run '^$' -count=1` 通过。 | manual；157/158/159 PASS，tag/version provenance 已由 Task 35 记录。 |
+| M-15 | Ent/Wire/migrations | schema/provider -> generated outputs，migration runner 排序与幂等 DDL。 | migration 定向测试通过；生成后受限 diff 为空。 | manual；157/158/159 PASS，live PostgreSQL integration 未运行。 |
+| M-16 | 本地首 Token 超时 | 已批准删除的 watchdog 不得重新引入；独立 stream-data-interval 不受影响。 | 历史 10-target 命令中保留的 8 个 sticky 目标通过；旧 watchdog 符号扫描无输出。 | approved-removal；157/158/159 PASS。 |
+
+### Task 25 增量矩阵最终结果
+
+| 风险面 | 入口与边界 / 证据 | 最终状态 / 三段结果 |
+| --- | --- | --- |
+| 异步图片任务与对象存储 | API-key/group route -> `ImageTaskHandler` -> task/store/S3；完整门禁通过。 | manual；157 PASS，158/159 N/A；worker、对象存储和清理需运行环境验收。 |
+| 图片输入 token 与费用 | gateway billing -> `RecordUsage` -> usage repository；完整门禁通过。 | manual；157 PASS，158/159 N/A；真实 token、price 和 usage detail 同步需验收。 |
+| 上游倍率、scheduler 与 image intent | `RecordUsage -> BillingRateMultiplier -> applyUsageBilling`，并有 scheduler/image 定向测试。 | protected；157/158/159 PASS。 |
+| 操作审计 | route middleware -> `AuditLogService.Record` -> audit repository；完整门禁通过。 | manual；157/159 PASS，158 N/A；脱敏、body 回填和 refresh 例外需验收。 |
+| 会话 IP/UA 绑定 | `SessionBindingContext` -> JWT binding -> family revoke/audit；完整门禁通过。 | manual；157/159 PASS，158 N/A；trusted-proxy 与旧 claim 行为需验收。 |
+| step-up 2FA | protected route middleware -> TOTP verification -> audit；完整门禁通过。 | manual；157 PASS，158/159 N/A；scope、失效和 fail-closed 需验收。 |
+| Responses 与 WebSocket | routes -> concurrency/failover/usage -> WS ingress/HTTP bridge；M-06/M-07/M-11 与完整门禁通过。 | protected；157/158/159 PASS。 |
+| Grok endpoint 与 cache helper | Grok/Responses builders -> cache identity/header/body helpers；helper unit 及完整门禁通过。 | protected；157/158/159 PASS。 |
+| Grok WS/HTTP cross-entry | Messages/Chat/Responses/WS bridge 共享 cache helper；完整门禁通过。 | manual；159 PASS；真实上游 transport/cache 命中需验收。 |
+| 分组复制 | admin route -> `DuplicateGroup` -> repository/outbox；完整门禁通过。 | manual；158 PASS；PostgreSQL 事务、idempotency 和 deep copy 需验收。 |
+| 用户批量限额 | admin route -> batch service -> repository；完整门禁通过。 | manual；158 PASS；partial failure、cache invalidation 和 UI payload 需验收。 |
+| 客户端 IP 解析 | `GetClientIP`/`GetTrustedClientIP` 由 audit/session/ACL 共用；完整门禁通过。 | manual；159 PASS；生产反代/XFF/private-range 顺序需验收。 |
+| alpha/search API-key 调度 | route -> `ForwardAlphaSearch` -> usage；完整门禁通过。 | protected；157/159 PASS，158 N/A。 |
+| 账号上游链接与账单探测 | admin handler -> probe -> CAS repository -> UI；完整门禁通过。 | manual；157/158 PASS，159 N/A；真实 upstream/CAS 需验收。 |
+| Stripe 惰性加载 | Stripe views/popup -> dynamic pure import -> vendor-stripe chunk；完整门禁通过。 | manual；159 PASS；真实支付页加载与失败 UI 需验收。 |
+| Wire、Ent 与 migrations 177-181 | generate -> no generated diff；Task 35 migration runner tests通过。 | manual；157/158 PASS，159 N/A；live PostgreSQL migration integration 未运行。 |
+| 本地首 Token 超时 | approved removal；旧符号扫描无输出。 | approved-removal；157/158/159 PASS。 |
+
+### 最终自动门禁
+- `make test` 退出 0：后端 Go 测试与 `golangci-lint`、前端 lint/typecheck 均通过；Vitest 为 194 files / 1493 tests。
+- `pnpm --dir frontend run build` 退出 0：`vue-tsc -b` 与 Vite production build 通过，完成 987 modules。保留既有 Browserslist 数据过期、dynamic import 与超过 500 kB chunk 警告。
+- `make -C backend generate` 退出 0；`git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` 无输出，Ent/Wire 无生成漂移。
+- `git diff --check`、`git diff --name-only --diff-filter=U` 均无输出；冲突标记扫描无匹配输出。旧本地 first-token watchdog 符号扫描无输出。
+- 矩阵总计无 `gap`、无空状态、无默认接受：首轮为 protected 11、manual 4、approved-removal 1；Task 25 增量的 protected/manual/approved-removal 结论如上。唯一 approved-removal 是本地首 Token 超时。
+
+### 残余 manual 项
+- 需要运行环境验收：异步图片 worker/S3、图片计费字段、audit 脱敏和 body 回填、trusted proxy/session binding、step-up、Grok 实际 cache/transport、账号 upstream billing probe 和 Stripe 支付页失败路径。
+- 需要 live PostgreSQL：`TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate`、group duplicate rollback、batch-limit repository 与 migration transaction integration 测试。
