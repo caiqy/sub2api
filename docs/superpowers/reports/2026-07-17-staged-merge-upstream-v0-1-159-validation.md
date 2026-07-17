@@ -3,7 +3,7 @@
 ## 执行内容
 - 固定 v0.1.157、v0.1.158、v0.1.159 的 annotated tag refs 和 peeled commits。
 - 在尚未合并 v0.1.157 前运行扩展前完整基线。
-- 未合并任何新 tag，未 push、release 或 deploy。
+- 扩展基线阶段尚未合并任何新 tag；最终已按顺序合入 `v0.1.157`、`v0.1.158` 和 `v0.1.159`，未 push、release 或 deploy。
 
 ## 扩展起点与固定对象
 - 首轮已验证提交：`315617bdec0e21fe8aeb119a986bde960c4864b3`
@@ -431,3 +431,5 @@ git diff --check
 - `git merge-base --is-ancestor upstream/main HEAD` 退出 1，证明完整 `upstream/main` 不是 HEAD 祖先；`git log --oneline v0.1.159^{}..upstream/main` 列出 8 个排除提交（从 `c2c19a7c` 到 `bc50c9d0`），未进入本分支。
 - `openspec validate staged-merge-upstream-v0-1-159 --strict` 通过。`comet state check staged-merge-upstream-v0-1-159 build` 通过，随后以 build guard 收口任务状态；`.comet/current-change.json` 保持未跟踪且未提交。
 - 三段门禁、最终能力矩阵和自动验证结论保持本报告既有记录：版本为 `0.1.159.1`，无 `gap`；Docker-backed PostgreSQL migration integration 及所有既有 manual 运行环境验收仍未执行，不得由自动测试替代。
+- change rename provenance：本 change 从 `staged-merge-upstream-v0-1-156` 原地改名并扩展至 v0.1.159。`.comet/context.md` 中的旧 handoff、旧 source 路径和既有 hash 是扩展起点的历史快照；`state-events.jsonl` 前六条属于改名前，line 7 的 `build-complete` 以及当前 `.comet.yaml` 属于 v0.1.159。未改写历史事件或伪造 handoff hash。
+- 最终 `git status --short` 仅输出 `?? .comet/current-change.json`。`git ls-files -- .comet/current-change.json .superpowers/sdd/task-37-report.md` 无输出；current-change 与 Task37 scratch 均未进入 Git index。

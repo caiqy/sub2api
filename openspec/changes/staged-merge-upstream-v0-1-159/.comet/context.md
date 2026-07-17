@@ -1,3 +1,7 @@
+# Change Rename Provenance
+
+`staged-merge-upstream-v0-1-156` was renamed and extended in place as `staged-merge-upstream-v0-1-159`. This handoff, including its v0.1.156 source paths and context hash, is the immutable extension-start snapshot. The pre-rename events remain in `state-events.jsonl`; the current v0.1.159 state begins with its line 7 `build-complete` event and `.comet.yaml`. Do not rewrite the historical sources or hash.
+
 # Comet Design Handoff
 
 - Change: staged-merge-upstream-v0-1-156
