@@ -143,6 +143,23 @@ func TestListImageHistoryByUser_AppliesImageFilters(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+type usageLogDestinationCounter struct {
+	count int
+}
+
+func (s *usageLogDestinationCounter) Scan(dest ...any) error {
+	s.count = len(dest)
+	return nil
+}
+
+func TestScanUsageLog_SelectColumnsMatchScanDestinations(t *testing.T) {
+	scanner := &usageLogDestinationCounter{}
+	_, err := scanUsageLog(scanner)
+
+	require.NoError(t, err)
+	require.Equal(t, len(strings.Split(usageLogSelectColumns, ", ")), scanner.count)
+}
+
 func usageLogListRowColumns() []string {
 	return []string{
 		"id", "user_id", "api_key_id", "account_id", "request_id", "model", "requested_model", "upstream_model", "group_id", "subscription_id",
