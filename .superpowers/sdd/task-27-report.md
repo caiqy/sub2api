@@ -34,3 +34,20 @@
 
 - v0.1.158 and v0.1.159 remain unmerged.
 - Existing Vitest `router-link`, jsdom XHR, and Browserslist warnings remain non-failing test-environment warnings and were not changed.
+
+## Follow-Up Repair
+
+- `15e5ff41b fix: preserve local behavior after v0.1.157` restores the admin settings DTO fields dropped by the merge: session binding, audit retention, OpenAI scheduler rate controls, and upstream-cost scheduler values.
+- The same commit restores the OpenAI API-key upstream billing auto-probe control and its persisted `extra` value. An absent false default stays absent, so unrelated account saves do not create a new setting.
+- It also restores the referenced English and Chinese account locale keys for upstream billing, Grok custom URL, header JSON import, and Agent Identity flows.
+
+## Follow-Up RED/GREEN
+
+- RED: `go test -tags=unit ./internal/server -run '^TestAPIContract' -count=1` reported zero-valued session/audit/scheduler fields because `SettingHandler.GetSettings` omitted DTO assignments. GREEN: the same command exits 0 after restoring the six-field mapping.
+- RED: full frontend Vitest reported 36 missing account locale keys and the absent `[data-testid="upstream-billing-auto-probe"]` control. GREEN: `pnpm exec vitest run src/i18n/__tests__/localeKeysExist.spec.ts src/components/account/__tests__/EditAccountModal.spec.ts` exits 0 with 57 tests.
+
+## Final Validation And Self-Review
+
+- `make test` exits 0: backend tests and lint, frontend lint/typecheck, and 189 Vitest files / 1454 tests pass.
+- `pnpm --dir frontend run typecheck` exits 0.
+- No v0.1.158/v0.1.159 commits were merged; no push, release, or deploy was performed. `.comet/current-change.json` was removed before completion and excluded from commits.

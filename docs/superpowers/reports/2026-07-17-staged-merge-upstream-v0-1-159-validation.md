@@ -141,6 +141,12 @@
 - Fresh `pnpm --dir frontend exec vitest run src/components/account/__tests__/UpstreamBillingRateCell.spec.ts src/views/admin/__tests__/SettingsView.spec.ts src/views/admin/__tests__/ChannelMonitorView.duplicate.spec.ts src/i18n/__tests__/localesMessageCompile.spec.ts` 退出 0，4 files / 33 tests 通过。
 - Fresh `pnpm --dir frontend run typecheck` 退出 0。
 
+#### Task 27 final repair and validation
+- `15e5ff41b fix: preserve local behavior after v0.1.157` 恢复 admin settings DTO 中被 merge 遗漏的 session binding、audit retention、OpenAI scheduler rate 和 upstream-cost 字段；`go test -tags=unit ./internal/server -run '^TestAPIContract' -count=1` 由 RED 转 GREEN。
+- 同一提交恢复 OpenAI API Key 上游倍率自动探测开关、持久化和中英文 locale keys；未配置的 false 默认值不会在无关账号保存时新增 `extra` 字段。`localeKeysExist.spec.ts` 与 `EditAccountModal.spec.ts` 共 57 个测试由 RED 转 GREEN。
+- 最终 `make test` 退出 0：后端测试和 lint、前端 lint/typecheck，以及 189 个 Vitest 文件 / 1454 个测试全部通过；`pnpm --dir frontend run typecheck` 退出 0。
+- 未合并 v0.1.158/v0.1.159，未 push、release 或 deploy；`.comet/current-change.json` 已在收尾前删除且未提交。
+
 ## v0.1.158
 未开始合并。
 
