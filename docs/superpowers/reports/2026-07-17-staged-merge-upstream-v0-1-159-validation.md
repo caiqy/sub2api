@@ -192,6 +192,12 @@
 - `make -C backend generate` 连续两次成功，第二次后 `git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` 通过；`git diff --cached --check` 和未合并路径检查均无输出。
 - 上游新增 `BatchUpdateLimits` 接口后，第一父的 `adminAPIKeyBlockedUserRepo` fake 缺少该方法，补入仅 panic 的 stub 以恢复接口编译；这不是 Task 30 行为修复。
 
+### Task 30 v0.1.158 能力复审
+- 起始提交和复审 HEAD 均为 `cce846c5e7f7782e8f019b84ccab6baa2691f2ce`。未合并 v0.1.159，未 push、release 或 deploy；未跟踪的 `.comet/current-change.json` 未修改、未提交。
+- brief 所列 service、handler、repository 和七文件 Vitest 定向命令均通过；七文件 Vitest 为 7 files / 38 tests。补充 `-tags unit` 的 group duplicate、batch limits、Codex models、WS ingress 和 image terminal 测试，以及 migration/repository、Grok/Codex/WS 和四文件前端专项，均通过。
+- 无冲突语义审查：migration `181` 的 nullable operation ID 与 partial unique index 同 Ent schema 一致；复制操作按 actor/source/idempotency key 隔离，并在单一 Ent 事务中写入 group、bindings 和 outbox。批量限额以单条参数化 `UPDATE` 原子更新已列出的活跃用户，成功后才失效认证缓存。Grok OAuth 保留官方凭据生命周期端点、使用配置的转发端点，并保证 CLI/cache/header override 顺序。WS v2/ingress/HTTP bridge/passthrough 均在解析、计费和下发前仅把带结果的终态 image item 归一化为 `completed`。Codex manifest 的账号切换、上游校验、ETag 和原样模型能力发现未受影响。DataTable 保留跨页受控选择、可见行 select-all 和换页缓存清理。
+- 无业务回归，未产生修复提交。Task 29 的 `make test` 结果未作为本项能力审查证据。
+
 ## v0.1.159
 未开始合并。
 
