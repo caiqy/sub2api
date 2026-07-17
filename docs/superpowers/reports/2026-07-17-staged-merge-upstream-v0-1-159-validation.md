@@ -336,12 +336,12 @@ git diff --check
 
 ## 自审
 - 固定对象、提交计数、变更文件计数和最终边界与任务 brief 一致。
-- 未合并 v0.1.157、v0.1.158 或 v0.1.159；未 push、release 或 deploy。
+- Task 24 自审时尚未合并 v0.1.157、v0.1.158 或 v0.1.159；后续三段合并已完成，仍未 push、release 或 deploy。
 - 首轮 v0.1.156 验证报告未修改；`.comet/current-change.json` 未加入提交。
 - 已复核首轮报告无 diff；已知 Task 25 提交为 `fe4037449`、`bdeb1d1af`、`668997d77`，其中 `bdeb1d1af` 含最小 characterization test。后续文档收敛以指定 Git range 核验，不含 `.comet/current-change.json`。
 
 ## 残余风险与未执行事项
-- Task 24 当时仅固定 refs 和建立扩展前基线；后续已完成 v0.1.157、v0.1.158、v0.1.159 合并与分段验证。Task 33 已关闭 v0.1.159 能力复审，Task 34/full gate 仍未执行。
+- Task 24 当时仅固定 refs 和建立扩展前基线；后续已完成 v0.1.157、v0.1.158、v0.1.159 合并与分段验证。Task 33 已关闭 v0.1.159 能力复审，Task 34/full gate 已在后续阶段完成。
 - 构建保留现有 Browserslist 数据过期、动态导入与 chunk 大小告警；本次命令均成功，未将其作为本任务范围内的修复项。
 
 ## Task 35 版本规范化、生成物与 migration 复核
