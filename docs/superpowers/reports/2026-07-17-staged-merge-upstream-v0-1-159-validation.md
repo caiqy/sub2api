@@ -131,7 +131,15 @@
 - `go -C backend test ./internal/server/... -run 'Audit|Session|StepUp|APIKey|ImageTask' -count=1` 退出 0。
 - `pnpm --dir frontend exec vitest run src/components/account/__tests__/UpstreamBillingRateCell.spec.ts src/views/admin/__tests__/SettingsView.spec.ts src/views/admin/__tests__/ChannelMonitorView.duplicate.spec.ts src/i18n/__tests__/localesMessageCompile.spec.ts` 退出 0，4 files / 33 tests 通过。
 - 前端测试仍输出既有 `router-link` stub、jsdom XHR 和 Browserslist data 过期警告；无失败断言，未扩大本任务范围修复测试基建告警。
-- 附加 `pnpm --dir frontend run typecheck` 仍退出 2：`@/types` 缺少 upstream billing probe 类型、credentialsBuilder 缺少 header override exports、UsageLog 缺少图片输入字段，以及本任务前已存在的 SettingsView `session_binding_enabled` / `audit_log_retention_days` form 缺口。上述路径不在 Task 27 diff 或指定高风险命令内，未在本任务扩展修复；必须在后续前端类型契约任务单独收敛。
+- 前端类型契约补充：`pnpm --dir frontend run typecheck` 曾退出 2。`git diff d77bea9c9..a2779cd5f` 证明 upstream billing probe、图片输入 usage 和 session/audit settings 是 v0.1.157 引入的契约；`d77bea9c9` 则保留 EditAccountModal 仍调用的 header override platform/template helpers。当前 merge 将两侧契约遗漏，故不是 pre-existing failure。恢复 probe/image types、local helpers/templates 以及 session/audit UI/default/payload 后，`pnpm --dir frontend run typecheck` 退出 0；`UpstreamBillingRateCell.spec.ts` 与 `SettingsView.spec.ts` 共 26 tests 通过。
+
+#### Task 27 follow-up validation
+- Fresh `go -C backend test ./internal/service -run 'Image|Billing|Scheduler|Audit|StepUp|Session|FirstOutput|WebSocket' -count=1` 退出 0。
+- Fresh `go -C backend test ./internal/handler/... -run 'Image|Billing|Audit|StepUp|Account|Setting' -count=1` 退出 0。
+- Fresh `go -C backend test ./internal/repository -run 'Image|Billing|Scheduler|Audit|Probe|ChannelMonitor' -count=1` 退出 0。
+- Fresh `go -C backend test ./internal/server/... -run 'Audit|Session|StepUp|APIKey|ImageTask' -count=1` 退出 0；`internal/server` 无测试文件，`internal/server/routes` 无匹配测试。
+- Fresh `pnpm --dir frontend exec vitest run src/components/account/__tests__/UpstreamBillingRateCell.spec.ts src/views/admin/__tests__/SettingsView.spec.ts src/views/admin/__tests__/ChannelMonitorView.duplicate.spec.ts src/i18n/__tests__/localesMessageCompile.spec.ts` 退出 0，4 files / 33 tests 通过。
+- Fresh `pnpm --dir frontend run typecheck` 退出 0。
 
 ## v0.1.158
 未开始合并。
