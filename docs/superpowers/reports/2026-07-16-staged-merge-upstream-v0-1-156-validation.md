@@ -2764,3 +2764,15 @@ The original Task 12 total counts final named command results, not unique test d
 - Task19 closes M-14/M-15: final `VERSION` is `0.1.156.1` (`75726cf46`); Go uses direct `golang.org/x/mod v0.35.0`; frontend locks `vue-eslint-parser@9.4.3`; deploy timeout defaults remain explicit and disabled where `0`/`false`.
 - Ent/Wire generation was stable twice. Migrations have `226` SQL files, `41` intentional duplicate numeric prefixes, no duplicate full filename, lexical full-filename execution, and checksum fail-closed semantics. `3b7db2664` makes direct partial-schema migration 108 converge and accepts only the released/current checksum pair.
 - Docker-backed migration integration is **pending verification** because Docker is unavailable. It is not a capability conflict: migration unit and runner/compatibility tests passed, and no integration PASS is claimed. No other `unexplained`, `default accepted`, or pending matrix conclusion exists.
+
+## Task 21 Final Automated Verification And Static Checks
+
+- Scope: fresh local non-Docker gates ran from `dcb7380da589d384021e0888e6f10fe5083f061a` before this documentation commit. No business code, tests, generated source, `VERSION`, plan, OpenSpec, Comet state, release, deployment, or push was changed.
+- `make test` exited `0`: backend default and `unit` suites, `golangci-lint`, frontend ESLint/typecheck, and Vitest all completed. Vitest reported `181` passing files and `1405` passing tests. Go output includes expected packages with `[no test files]`; those zero-test packages do not substitute for, or weaken, the complete gate.
+- `pnpm --dir frontend run build` exited `0`: `vue-tsc -b` and Vite completed, transforming `970` modules in `34.72s`.
+- Generation round 1 and round 2 each ran `make -C backend generate`; each following `git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` exited `0` with no output. Ent/Wire generation is stable.
+- Static checks all exited `0` with no findings: `git diff --check`; `git diff --cached --check`; clean cached index; `git diff --name-only --diff-filter=U`; `git ls-files -u`; exact worktree and cached conflict-marker scans; and the old first-token business-symbol scan over `backend`, `frontend`, and `deploy` (`0` matches).
+- Final pre-documentation `git status --short --branch` showed only the pre-existing untracked `.comet/current-change.json`; no generated or business-file diff was introduced.
+- Warnings recorded without gate failure: `caniuse-lite` data is seven months old; Vite reports dynamic/static import chunking notices and a `650.23 kB` minified `AccountsView` chunk; Vitest emitted expected error-path, `router-link`, and `intlify` warnings. Root `make build` was not run because it is not a fixed gate.
+- Docker migration integration was **not executed**. Task19 records that Docker is unavailable and its integration harness requires Docker; this remains pending verification and is not reported as PASS.
+- Result: Task21 local non-Docker verification is `PASS`. Task22 remains pending for Git topology, stage order, release-range, and final review-boundary checks.
