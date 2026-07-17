@@ -343,3 +343,24 @@ git diff --check
 ## 残余风险与未执行事项
 - Task 24 当时仅固定 refs 和建立扩展前基线；后续已完成 v0.1.157、v0.1.158、v0.1.159 合并与分段验证。Task 33 已关闭 v0.1.159 能力复审，Task 34/full gate 仍未执行。
 - 构建保留现有 Browserslist 数据过期、动态导入与 chunk 大小告警；本次命令均成功，未将其作为本任务范围内的修复项。
+
+## Task 35 版本规范化、生成物与 migration 复核
+- 起始提交：`4f97cdf44d6052c2b8e43e38f72ac3e10f1816de`。仅执行本节所列版本、生成物、依赖/配置和 migration 复核；未开始 Task 36 full capability matrix，未提交 `.comet/current-change.json`，未合并 `upstream/main` 或 tag 后提交，未 push、release 或 deploy。
+- `backend/cmd/server/VERSION` 是嵌入到 server 二进制的 runtime 版本源，已精确规范为 `0.1.159.1`；`go -C backend test ./cmd/server -count=1` 退出 0。版本提交为 `fa03e00a5 chore: set version to 0.1.159.1`。
+
+### 生成物
+- 连续两次 `make -C backend generate` 均退出 0；每次后 `git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` 均退出 0。Ent 和 Wire 生成物无漂移，未手工修改生成输出。
+
+### 依赖与配置
+- 相对 `v0.1.156^{}` 的审查范围中，`backend/go.mod` 和 `pnpm-lock.yaml` 无变更；`backend/go.sum` 仅新增既有间接解析的 `github.com/google/subcommands v1.2.0` 与 `github.com/inconshreveable/mousetrap v1.1.0` 校验和。
+- `frontend/package.json` 直接声明 `@intlify/message-compiler@9.14.5`（与 `vue-i18n@^9.14.5` 对齐）和 `vue-eslint-parser@^9.4.3`；lockfile 的现有解析已覆盖前者，故没有 lockfile 差异。
+- `deploy/config.example.yaml` 的可见默认值经过复核：非流式上游响应读取上限为 128 MiB；各平台 sticky 默认启用；weighted scheduler 和 reset/quota-headroom 默认保持关闭；layered 参数有确定默认值；旧 `prefer_soonest_reset` 与 billing minimum reserve 示例项被移除。`git diff --check -- backend/migrations deploy/config.example.yaml` 退出 0。
+
+### Migrations 177-181
+- `git ls-tree -r --name-only HEAD backend/migrations` 列出 231 个 SQL 文件，完整文件名无重复；最后五个按字典序为 `177_add_subscription_plan_currency.sql`、`178_channel_image_input_price.sql`、`179_usage_log_image_input_tokens.sql`、`180_audit_logs.sql`、`181_group_duplicate_operation_id.sql`。`migrations.FS` 嵌入 `*.sql`，runner 对完整文件名 `sort.Strings` 后执行，并用 SHA-256 checksum 保护已应用文件。
+- 五个 DDL 文件均使用 `IF NOT EXISTS`，均为事务迁移且不含 `CONCURRENTLY`：177 与 `SubscriptionPlan.currency`（`VARCHAR(3)`、默认空字符串）一致；178 由 channel pricing raw-SQL repository 的 `image_input_price` 读写承载；179 由 usage-log raw-SQL repository/DTO 的图片输入 token 和 cost 字段承载；180 由 append-only `auditLogRepository` 的 `audit_logs` 列集承载；181 与 Ent `Group.duplicate_operation_id`（`VARCHAR(64)`、nullable）及同名 partial unique index/predicate 一致。
+- `go -C backend test ./migrations -count=1` 退出 0。`go -C backend test -v ./internal/repository -run '^(TestLatestMigrationBaseline|TestValidateMigrationExecutionMode|TestApplyMigrations_NilDB|TestApplyMigrations_DelegatesToApplyMigrationsFS|TestApplyMigrationsFS_(NonTransactionalMigration|TransactionalMigration))$' -count=1` 退出 0（6 个顶层测试、9 个命名子测试）。该 runner 单测覆盖排序基线、执行模式、nil DB、事务/非事务分支，但不连接 live PostgreSQL。
+
+### 前端与残余手工项
+- `pnpm --dir frontend run typecheck` 退出 0；`pnpm --dir frontend run build` 退出 0，完成 987 个模块。构建只保留既有 Browserslist 数据过期、动态导入和大于 500 kB chunk 警告。
+- Docker-backed PostgreSQL migration integration 未运行，保持 manual；尤其 `TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate` 及带 `integration` tag 的 repository migration/transaction 测试需要具备 live PostgreSQL 的环境后执行，不能由本节 unit 结果替代。
