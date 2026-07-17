@@ -64,6 +64,47 @@
 - 生成：两次 `make -C backend generate` 成功；第二次生成后 `git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` 成功。
 - 编译：`go -C backend test ./internal/... -run '^$'` 成功。Wire 缺失 provider 经 `service/wire.go` 的 `ProvideImageTaskService`、`ProvideUpstreamBillingProbeService`、`ProvideAuditLogService` 声明修复，未手改生成结果。
 
+### v0.1.157 冲突台账
+
+| 路径 | 类别 | ours 语义 | theirs 语义 | 最终融合 | 验证命令 |
+| --- | --- | --- | --- | --- | --- |
+| `backend/cmd/server/VERSION` | version | 本地四段开发号 | tag 版本号 | tag 版本号 | `git diff --check` |
+| `backend/cmd/server/wire_gen.go` | generated Wire | startup recovery、image history | audit、probe、async image 注入 | 由 Wire 声明重新生成 | `make -C backend generate` |
+| `backend/internal/config/config.go` | config | layered scheduler | upstream cost、image storage | 两套配置和校验并存 | `go -C backend test ./internal/config` |
+| `backend/internal/handler/admin/setting_handler.go` | settings read | tri-state agreement、sticky/layered | session binding、audit、cost settings | DTO 返回两侧字段 | `go -C backend test ./internal/handler/admin` |
+| `backend/internal/handler/admin/setting_handler_update.go` | settings write | tri-state agreement、runtime controls | session/audit/cost 更新 | 保留两侧写入语义 | `go -C backend test ./internal/handler/admin` |
+| `backend/internal/handler/grok_media.go` | Grok handler | usage request detail | account header overrides | 记录并覆写最终请求 | `go -C backend test ./internal/handler` |
+| `backend/internal/handler/openai_embeddings.go` | scheduler caller | platform-aware selection | model-scoped selection result | 两种调度参数兼容 | `go -C backend test ./internal/handler` |
+| `backend/internal/handler/openai_gateway_handler.go` | gateway handler | usage snapshot、local guards | model terminal scheduling | 两侧结果记录 | `go -C backend test ./internal/handler` |
+| `backend/internal/handler/openai_gateway_handler_test.go` | handler tests | local Responses/WS assertions | upstream async/lease assertions | 保留测试覆盖 | `go -C backend test ./internal/handler` |
+| `backend/internal/repository/usage_log_repo_query.go` | usage query | detail-presence columns | image input token columns | select 列并集 | `go -C backend test ./internal/repository` |
+| `backend/internal/server/http.go` | router DI | user service | audit/step-up middleware | 注入全部依赖 | `go -C backend test ./internal/server` |
+| `backend/internal/server/router.go` | route middleware | embedded frontend/user pages | session binding/audit/step-up | 中间件与路由调用并集 | `go -C backend test ./internal/server` |
+| `backend/internal/server/routes/gateway.go` | gateway routes | usage-detail chain | async image endpoints | merge 时保留同步链；review 后补 async routes | `go -C backend test ./internal/server/routes -run '^TestGatewayRoutesAsyncImagesPathsAreRegistered$' -count=1` |
+| `backend/internal/service/admin_service.go` | admin DI | runtime blocker/probe control | affiliate accrual | 构造函数保留两侧依赖 | `go -C backend test ./internal/service` |
+| `backend/internal/service/grok_media.go` | Grok forward | multipart usage snapshot | account header overrides | 两侧请求处理顺序 | `go -C backend test ./internal/service` |
+| `backend/internal/service/openai_account_scheduler.go` | scheduler | layered/privacy/sticky recovery | upstream-cost/model transient | 选择、重检和 cost 支撑并集 | `go -C backend test ./internal/service` |
+| `backend/internal/service/openai_alpha_search.go` | alpha search | request snapshots | PAT Responses fallback | 构建与 fallback 并存 | `go -C backend test ./internal/service` |
+| `backend/internal/service/openai_gateway_forward.go` | forward errors | response snapshots | normalized failover error | 保留 failover 与 detail | `go -C backend test ./internal/service` |
+| `backend/internal/service/openai_gateway_grok.go` | Grok request | usage snapshot | final header overrides | 两者均执行 | `go -C backend test ./internal/service` |
+| `backend/internal/service/openai_gateway_passthrough.go` | passthrough error | request-builder compatibility | body-too-large/model transient | 两侧 error policy | `go -C backend test ./internal/service` |
+| `backend/internal/service/openai_gateway_scheduling.go` | scheduling support | layered recovery hooks | group-aware recheck | 两侧 account recheck | `go -C backend test ./internal/service` |
+| `backend/internal/service/openai_gateway_service.go` | result/service state | usage snapshot cloning | WS terminal/model state | result fields并集 | `go -C backend test ./internal/service` |
+| `backend/internal/service/openai_ws_http_bridge.go` | WS bridge | bridge detail handling | terminal event tracking | 两侧 terminal state | `go -C backend test ./internal/service` |
+| `backend/internal/service/wire.go` | provider declarations | startup recovery/probe bind | image/audit/probe providers | 声明后生成 Wire | `make -C backend generate` |
+| `deploy/config.example.yaml` | sample config | layered scheduler | upstream cost | 配置示例并集 | `git diff --check` |
+| `frontend/src/components/account/EditAccountModal.vue` | account edit | passthrough/quota extras | upstream billing probe extras | 合并 extra 写入 | `pnpm --dir frontend run build` |
+| `frontend/src/components/account/__tests__/CreateAccountModal.spec.ts` | frontend tests | passthrough cases | OAuth/import cases | 两侧测试 helpers/cases | `pnpm --dir frontend exec vitest run src/components/account/__tests__/CreateAccountModal.spec.ts` |
+| `frontend/src/i18n/locales/en/admin/accounts.ts` | i18n | passthrough labels | custom Grok URL labels | message keys并集 | `pnpm --dir frontend run build` |
+| `frontend/src/i18n/locales/zh/admin/accounts.ts` | i18n | passthrough labels | custom Grok URL labels | message keys并集 | `pnpm --dir frontend run build` |
+| `frontend/src/types/index.ts` | frontend types | passthrough/quota extras | upstream billing probe types | Account extra 类型并集 | `pnpm --dir frontend run build` |
+| `frontend/src/views/admin/SettingsView.vue` | settings UI | sticky/layered settings | upstream rate settings | form defaults并集 | `pnpm --dir frontend run build` |
+
+### Review remediation
+- `e3b0c15b1 fix: register async image gateway routes` restores the six required `/v1` and alias async image/task routes with the same `bodyLimit`, request ID, usage detail, ops, endpoint, API-key, and group middleware chain as synchronous Images routes.
+- RED: `go -C backend test ./internal/server/routes -run 'AsyncImage|ImageTask|images.*async' -count=1` failed because `POST /v1/images/generations/async` was absent.
+- GREEN: `go -C backend test ./internal/server/routes -run '^TestGatewayRoutesAsyncImagesPathsAreRegistered$' -count=1` and `go -C backend test ./internal/handler -run '^TestAsyncImageHandler' -count=1` passed.
+
 ## v0.1.158
 未开始合并。
 
