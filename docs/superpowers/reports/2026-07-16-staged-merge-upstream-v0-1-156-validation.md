@@ -2618,8 +2618,23 @@ The original Task 12 total counts final named command results, not unique test d
 ## Task 14 v0.1.156 Merge Ledger
 
 - Immutable merge: `94a681bbdad61f2d0bef089e14ed214c83f411da` `merge: upstream v0.1.156`; parents `d4820cd1b8952bd1ff61d61110055c614b680eba` and `12f991dde8a58e183d4bd16a87ef6fd0df714757` (`v0.1.156^{}`). The only merge command was `git merge --no-ff v0.1.156 -m "merge: upstream v0.1.156"`; `upstream/main` was not merged.
-- Conflict ledger: VERSION/Wire/generated graph, Agent Identity account flows, account runtime block, WS v2 relay and scheduler lifecycle used tag-side resolution. Local handler and regression test retained first-token behavior. Config and forwarder coexist: local `openai_*_first_token_timeout` plus upstream `openai_*_first_output_timeout_seconds`, high-effort override, header/semantic first-output guard, failover, and `HandleStreamTimeout`.
-- Callers: `Config.Load`/`Validate`; `OpenAIGatewayService.Forward` and `handleStreamingResponseWithReasoning`; `Responses`/`ResponsesWebSocket`; passthrough relay; scheduler outbox. The detailed ours/theirs/caller ledger is retained in ignored Task14 scratch evidence.
+
+| Path | ours | theirs | caller / entry | conclusion |
+| --- | --- | --- | --- | --- |
+| `backend/cmd/server/VERSION` | local `0.1.151.2` | tag `0.1.155` | server build info | theirs |
+| `backend/cmd/server/wire_gen.go` | local providers | tag provider graph | `initializeApplication` | theirs generated graph |
+| `backend/internal/config/{config.go,config_test.go}` | first-token fields/defaults/tests | first-output/high-effort fields/defaults/tests and WS first-message default | `Config.Load` / `Validate` | coexist |
+| `backend/internal/handler/{grok_media.go,openai_chat_completions.go,openai_images.go}` | local failed-usage state | OAuth 429/cancel-aware failover | OpenAI gateway handlers | theirs |
+| `backend/internal/handler/openai_gateway_handler.go` | first-token HTTP/WS handling | first-output failover helpers | `Responses` / `ResponsesWebSocket` | ours; first-output is supplied by forwarder/stream handling |
+| `backend/internal/handler/openai_gateway_handler_test.go` | local first-token regressions | tag HTTP/WS failover tests | handler tests | ours |
+| `backend/internal/service/{account_test_service.go,admin_account.go,openai_account_runtime_block_fastpath.go}` | local account/probe paths | Agent Identity, create builder, per-account block locks | account/admin services | theirs |
+| `backend/internal/service/openai_gateway_forward.go` | request-body handle and first-token watchdog | native first-output header/semantic timeout and high-effort selection | `Forward` | coexist |
+| `backend/internal/service/openai_gateway_passthrough.go` | first-token watchdog and stream interval timeout | Agent Identity recovery and passthrough 5xx handling | `forwardOpenAIPassthrough` | ours; later compatibility belongs to Task17 |
+| `backend/internal/service/openai_gateway_response_handling.go` | watchdog context | native first-output staging/timer | `handleStreamingResponseWithReasoning` | theirs |
+| `backend/internal/service/openai_ws_v2_passthrough_adapter.go` | existing policy flow | Responses Lite and per-turn hook | WS v2 relay | theirs |
+| `backend/internal/service/{scheduler_snapshot_outbox_cleanup_test.go,scheduler_snapshot_service.go,wire.go}` | local callbacks/tests/providers | tag lifecycle/fencing/outbox and Wire graph | scheduler / DI | theirs |
+
+- This canonical table persists the complete Task 14 path/ours/theirs/caller/conclusion ledger. VERSION/Wire/generated graph, Agent Identity account flows, account runtime block, WS v2 relay, and scheduler lifecycle used tag-side resolution; local handler and regression tests retained first-token behavior; config and forwarder coexist.
 - First-token remains in backend settings, DTO/API/UI, watchdog, HTTP/WS paths, and tests: exact `backend frontend deploy` scan found `138` matches. It is not deleted in this merge; Task15 alone owns deletion.
 - First-output remains default-disabled with high-effort override, `first_output_timeout`, failover and `HandleStreamTimeout`: exact `backend deploy frontend` scan found `22` matches. Client WebSocket first-message timeout remains present. The approved upstream WebSocket first-output watchdog removal is not treated as a regression.
 - Verification: merge subject/parents correct; `git diff --name-only --diff-filter=U` and `git ls-files -u` empty; exact marker scan empty; merge changed `250` paths. `git diff --check HEAD^1..HEAD` reports one inherited tag warning: `backend/internal/service/openai_gateway_grok_test.go:2159: new blank line at EOF`. No Task15 deletion or follow-up compatibility repair was made.
