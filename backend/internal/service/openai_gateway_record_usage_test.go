@@ -381,6 +381,44 @@ func TestOpenAIGatewayServiceRecordUsage_ZeroUsageStillWritesUsageLog(t *testing
 	require.Zero(t, billingRepo.lastCmd.AccountQuotaCost)
 }
 
+func TestOpenAIGatewayServiceRecordUsage_AccountRateMultiplierFeedsUsageBilling(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(
+		usageRepo,
+		billingRepo,
+		&openAIRecordUsageUserRepoStub{},
+		&openAIRecordUsageSubRepoStub{},
+		nil,
+	)
+	accountRateMultiplier := 0.5
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID: "resp_account_rate",
+			Usage:     OpenAIUsage{InputTokens: 1000, OutputTokens: 100},
+			Model:     "gpt-5.1",
+			Duration:  time.Second,
+		},
+		APIKey: &APIKey{ID: 1003, Group: &Group{RateMultiplier: 1}},
+		User:   &User{ID: 2003},
+		Account: &Account{
+			ID:             3003,
+			Type:           AccountTypeAPIKey,
+			RateMultiplier: &accountRateMultiplier,
+			Extra:          map[string]any{"quota_limit": 10},
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.NotNil(t, usageRepo.lastLog.AccountRateMultiplier)
+	require.InDelta(t, accountRateMultiplier, *usageRepo.lastLog.AccountRateMultiplier, 1e-12)
+	require.Greater(t, usageRepo.lastLog.TotalCost, 0.0)
+	require.NotNil(t, billingRepo.lastCmd)
+	require.InDelta(t, usageRepo.lastLog.TotalCost*accountRateMultiplier, billingRepo.lastCmd.AccountQuotaCost, 1e-12)
+}
+
 func TestOpenAIGatewayServiceRecordUsage_MissingPricingRecordsZeroCostUsageLog(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
