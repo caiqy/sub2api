@@ -741,7 +741,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 - 审查：`backend/cmd/server/VERSION`、`backend/go.mod`、`backend/go.sum`、`frontend/package.json`、`pnpm-lock.yaml`、`deploy/config.example.yaml`、`backend/ent/schema/`、`backend/cmd/server/wire.go`、`backend/migrations/`
 - 修改：`docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md`
 
-- [ ] **步骤 1：验证生成源与输出稳定**
+- [x] **步骤 1：验证生成源与输出稳定**
 
   执行：
   ```bash
@@ -752,7 +752,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：两轮无非预期 diff。若有差异，回到 schema/provider/Wire 声明修复，绝不手工编辑生成物。
 
-- [ ] **步骤 2：审查版本、依赖、默认配置和 migration runner**
+- [x] **步骤 2：审查版本、依赖、默认配置和 migration runner**
 
   执行：
   ```bash
@@ -762,7 +762,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：报告逐项说明版本和依赖来自目标 release 或必要兼容修复；migration 以完整文件名排序/去重，所有同号文件、幂等性和 runner 顺序都有人工结论。
 
-- [ ] **步骤 3：规范本地版本并提交元数据审查证据**
+- [x] **步骤 3：规范本地版本并提交元数据审查证据**
 
   当前结果已包含最高上游三段式 tag `v0.1.156`，因此 `backend/cmd/server/VERSION` 设为 `0.1.156.1`；版本提交与 canonical 审查证据分离，后者提交 `docs: record final metadata review`。
 
