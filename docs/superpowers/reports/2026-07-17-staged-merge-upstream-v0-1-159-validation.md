@@ -147,6 +147,11 @@
 - 最终 `make test` 退出 0：后端测试和 lint、前端 lint/typecheck，以及 189 个 Vitest 文件 / 1454 个测试全部通过；`pnpm --dir frontend run typecheck` 退出 0。
 - 未合并 v0.1.158/v0.1.159，未 push、release 或 deploy；`.comet/current-change.json` 已在收尾前删除且未提交。
 
+#### Task 27 OAuth scheduler zero follow-up
+- `5e5afd7f6 fix: preserve zero OAuth scheduler rate` 将 SettingsView 的 OAuth scheduler reference multiplier 序列化从 truthy fallback 改为有限数值检查：合法 `0` 原样提交，仅 `NaN` 或无穷值回退为 `1`。
+- RED：输入 `0` 后，`pnpm exec vitest run src/views/admin/__tests__/SettingsView.spec.ts -t "preserves a zero OAuth scheduling reference multiplier"` 观察到 payload 错误提交 `1`。GREEN：同一命令通过；完整 `SettingsView.spec.ts` 为 23/23，`pnpm run typecheck` 退出 0。
+- 本次两文件 follow-up 未重新运行 `make test`；此前 Task 27 full gate 为 `make test` 退出 0（189 个 Vitest 文件 / 1454 个测试）。自审确认未扩大功能范围、未合并 v0.1.158/v0.1.159，`.comet/current-change.json` 未提交。
+
 ## v0.1.158
 未开始合并。
 

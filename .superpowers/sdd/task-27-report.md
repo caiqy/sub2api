@@ -51,3 +51,11 @@
 - `make test` exits 0: backend tests and lint, frontend lint/typecheck, and 189 Vitest files / 1454 tests pass.
 - `pnpm --dir frontend run typecheck` exits 0.
 - No v0.1.158/v0.1.159 commits were merged; no push, release, or deploy was performed. `.comet/current-change.json` was removed before completion and excluded from commits.
+
+## OAuth Scheduler Zero Follow-Up
+
+- `5e5afd7f6 fix: preserve zero OAuth scheduler rate` changes the SettingsView payload serializer to retain finite values, including `0`, and to fall back to `1` only for `NaN` or infinite values.
+- RED: `pnpm exec vitest run src/views/admin/__tests__/SettingsView.spec.ts -t "preserves a zero OAuth scheduling reference multiplier"` submitted `openai_oauth_scheduling_rate_multiplier: 1` after entering `0`.
+- GREEN: the same command passes after the finite-value check. `pnpm exec vitest run src/views/admin/__tests__/SettingsView.spec.ts` passes 23/23 and `pnpm run typecheck` exits 0.
+- This two-file follow-up did not rerun `make test`; the preceding Task 27 full gate remains `make test` exit 0 with 189 Vitest files / 1454 tests. The change is limited to one serializer expression and one regression test.
+- Self-review: no unrelated feature changes, no v0.1.158/v0.1.159 merge, and `.comet/current-change.json` is excluded from commits.
