@@ -203,6 +203,15 @@
 ## v0.1.159
 未开始合并。
 
+### Task 31 v0.1.158 阶段门禁
+- 起始提交：`1f51f4a382afb2422beae1ef4ad2bd7b5df488ee`；仅关闭 v0.1.158 阶段门禁，未合并 v0.1.159，未 push、release 或 deploy。
+- `make test` 退出 0：后端 Go 测试与 lint 通过；前端 lint/typecheck 通过；Vitest 为 193 个测试文件、1488 个测试通过。
+- `pnpm --dir frontend run build` 退出 0：987 个模块完成生产构建。保留既有 Browserslist 数据过期、动态导入 chunk 和大于 500 kB chunk 警告，无构建失败。
+- `make -C backend generate` 退出 0；`git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` 无输出、退出 0，Ent/Wire 无生成 diff。
+- `git diff --check` 和 `git diff --name-only --diff-filter=U` 均无输出、退出 0；未发现空白错误或未合并路径。
+- 能力矩阵无 `gap`：既有 `protected` 覆盖保持有效，目标 tag 的新增入口继续保留为 `manual` 合并后验收，已批准移除项保持 `approved-removal`。Task 32 获准开始 v0.1.159 阶段。
+- `.comet/current-change.json` 保持未跟踪、未修改、未提交；本次仅提交本活动报告。
+
 ## 最终验证
 - 扩展前完整基线全部退出码为 0。
 - 首轮 v0.1.156 验证报告保持只读；Task 25 的报告和 characterization test 提交见下文。
