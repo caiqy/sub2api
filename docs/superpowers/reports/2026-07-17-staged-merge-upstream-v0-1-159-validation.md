@@ -152,6 +152,12 @@
 - RED：输入 `0` 后，`pnpm exec vitest run src/views/admin/__tests__/SettingsView.spec.ts -t "preserves a zero OAuth scheduling reference multiplier"` 观察到 payload 错误提交 `1`。GREEN：同一命令通过；完整 `SettingsView.spec.ts` 为 23/23，`pnpm run typecheck` 退出 0。
 - 本次两文件 follow-up 未重新运行 `make test`；此前 Task 27 full gate 为 `make test` 退出 0（189 个 Vitest 文件 / 1454 个测试）。自审确认未扩大功能范围、未合并 v0.1.158/v0.1.159，`.comet/current-change.json` 未提交。
 
+#### Task 27 OAuth scheduler empty-value follow-up
+- `c2b6a9c05 fix: default empty OAuth scheduler rate` 将序列化收紧为仅保留有限的 `number`。因此合法 `0` 保持不变，而 `v-model.number` 清空输入产生的 `""`、`NaN` 和无穷值均回退为 `1`。
+- RED：`pnpm exec vitest run src/views/admin/__tests__/SettingsView.spec.ts -t "defaults an empty OAuth scheduling reference multiplier"` 在清空输入后观察到 payload 错误提交 `0`。GREEN：`pnpm exec vitest run src/views/admin/__tests__/SettingsView.spec.ts -t "OAuth scheduling reference multiplier"` 同时通过零值和空值两项；完整 `SettingsView.spec.ts` 为 24/24，`pnpm run typecheck` 退出 0。
+- 本次两文件 follow-up 未重新运行 `make test`；此前 Task 27 full gate 仍为 `make test` 退出 0（189 个 Vitest 文件 / 1454 个测试）。未合并 v0.1.158/v0.1.159，未 push、release 或 deploy。
+- 自审：`.comet/current-change.json` 当前为未跟踪文件，按最新用户指令保留；未加入任何提交。
+
 ## v0.1.158
 未开始合并。
 

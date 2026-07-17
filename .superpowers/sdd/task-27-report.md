@@ -59,3 +59,11 @@
 - GREEN: the same command passes after the finite-value check. `pnpm exec vitest run src/views/admin/__tests__/SettingsView.spec.ts` passes 23/23 and `pnpm run typecheck` exits 0.
 - This two-file follow-up did not rerun `make test`; the preceding Task 27 full gate remains `make test` exit 0 with 189 Vitest files / 1454 tests. The change is limited to one serializer expression and one regression test.
 - Self-review: no unrelated feature changes, no v0.1.158/v0.1.159 merge, and `.comet/current-change.json` is excluded from commits.
+
+## OAuth Scheduler Empty-Value Follow-Up
+
+- `c2b6a9c05 fix: default empty OAuth scheduler rate` narrows the serializer to finite values that are already numbers. This keeps `0`, while the empty string produced by `v-model.number`, `NaN`, and infinite values fall back to `1`.
+- RED: `pnpm exec vitest run src/views/admin/__tests__/SettingsView.spec.ts -t "defaults an empty OAuth scheduling reference multiplier"` submitted `openai_oauth_scheduling_rate_multiplier: 0` after clearing the input.
+- GREEN: `pnpm exec vitest run src/views/admin/__tests__/SettingsView.spec.ts -t "OAuth scheduling reference multiplier"` passes both zero and empty-input cases. The complete `SettingsView.spec.ts` passes 24/24, and `pnpm run typecheck` exits 0.
+- This two-file follow-up did not rerun `make test`; the preceding Task 27 full gate remains `make test` exit 0 with 189 Vitest files / 1454 tests. No v0.1.158/v0.1.159 commits were merged and no push, release, or deploy was performed.
+- Self-review: `.comet/current-change.json` is currently untracked and intentionally retained under the latest user instruction; it remains excluded from every commit.
