@@ -824,7 +824,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 **文件：**
 - 修改：`docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md`
 
-- [ ] **步骤 1：验证四个 target tag 均为结果祖先**
+- [x] **步骤 1：验证四个 target tag 均为结果祖先**
 
   执行：
   ```bash
@@ -836,7 +836,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：四条祖先检查均退出码 0；first-parent merge 历史依次显示 `v0.1.152`、`v0.1.153`、`v0.1.155`、`v0.1.156`，每个节点的第二父为对应固定 peel SHA。
 
-- [ ] **步骤 2：确认最终范围没有 release 后上游提交**
+- [x] **步骤 2：确认最终范围没有 release 后上游提交**
 
   执行：
   ```bash
@@ -845,7 +845,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：第一条只列出 v0.1.156 merge 节点及之后的本地兼容/报告提交；第二条退出码必须为非零，确认完整 `upstream/main` 不是结果祖先，并将该预期非零结果作为范围证据记录，而不是测试失败。
 
-- [ ] **步骤 3：完成 thorough review 的提交边界核对**
+- [x] **步骤 3：完成 thorough review 的提交边界核对**
 
   执行：
   ```bash
@@ -854,7 +854,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：每段 merge 与其后普通兼容修复可区分，未发生 rebase、squash 或机械策略覆盖；不进行 merge-to-main、push、release、deploy 决策。
 
-- [ ] **步骤 4：提交最终拓扑与边界证据**
+- [x] **步骤 4：提交最终拓扑与边界证据**
 
   全部拓扑核验通过后只提交 canonical `docs: record final topology verification`；保留 Task 23 最终报告/OpenSpec 收口边界。
 
