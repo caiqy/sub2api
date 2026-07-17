@@ -63,6 +63,7 @@
 - 原生 HTTP Responses `openai_first_output_timeout.go` 及 `openai_first_output_timeout_seconds` 保留。它不是已批准删除的旧本地 first-token watchdog；后者的 `openai_text_first_token_timeout`、`openai_image_first_token_timeout`、`first_token_timeout` 错误/日志和本地 HTTP/WS watchdog 均未重新引入。
 - 生成：两次 `make -C backend generate` 成功；第二次生成后 `git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` 成功。
 - 编译：`go -C backend test ./internal/... -run '^$'` 成功。Wire 缺失 provider 经 `service/wire.go` 的 `ProvideImageTaskService`、`ProvideUpstreamBillingProbeService`、`ProvideAuditLogService` 声明修复，未手改生成结果。
+- Task 26 边界仅包括上述 merge topology、31-entry 冲突融合台账以及编译/生成检查；不将 merge 后行为修复计入该任务。
 
 ### v0.1.157 冲突台账
 
@@ -80,7 +81,7 @@
 | `backend/internal/repository/usage_log_repo_query.go` | usage query | detail-presence columns | image input token columns | select 列并集 | `go -C backend test ./internal/repository` |
 | `backend/internal/server/http.go` | router DI | user service | audit/step-up middleware | 注入全部依赖 | `go -C backend test ./internal/server` |
 | `backend/internal/server/router.go` | route middleware | embedded frontend/user pages | session binding/audit/step-up | 中间件与路由调用并集 | `go -C backend test ./internal/server` |
-| `backend/internal/server/routes/gateway.go` | gateway routes | usage-detail chain | async image endpoints | merge 时保留同步链；review 后补 async routes | `go -C backend test ./internal/server/routes -run '^TestGatewayRoutesAsyncImagesPathsAreRegistered$' -count=1` |
+| `backend/internal/server/routes/gateway.go` | gateway routes | usage-detail chain | async image endpoint 代码路径 | merge 融合保留公共同步路由链；遗漏的公共 async route 注册移交 Task 27 early | `go -C backend test ./internal/server/routes -run '^TestGatewayRoutesAsyncImagesPathsAreRegistered$' -count=1` |
 | `backend/internal/service/admin_service.go` | admin DI | runtime blocker/probe control | affiliate accrual | 构造函数保留两侧依赖 | `go -C backend test ./internal/service` |
 | `backend/internal/service/grok_media.go` | Grok forward | multipart usage snapshot | account header overrides | 两侧请求处理顺序 | `go -C backend test ./internal/service` |
 | `backend/internal/service/openai_account_scheduler.go` | scheduler | layered/privacy/sticky recovery | upstream-cost/model transient | 选择、重检和 cost 支撑并集 | `go -C backend test ./internal/service` |
@@ -100,8 +101,10 @@
 | `frontend/src/types/index.ts` | frontend types | passthrough/quota extras | upstream billing probe types | Account extra 类型并集 | `pnpm --dir frontend run build` |
 | `frontend/src/views/admin/SettingsView.vue` | settings UI | sticky/layered settings | upstream rate settings | form defaults并集 | `pnpm --dir frontend run build` |
 
-### Review remediation
-- `e3b0c15b1 fix: register async image gateway routes` restores the six required `/v1` and alias async image/task routes with the same `bodyLimit`, request ID, usage detail, ops, endpoint, API-key, and group middleware chain as synchronous Images routes.
+### Task 27 early work
+- 用户明确保留未推送历史、不重建 `fa656646d` merge。review 在 merge 后发现失败的 async route 测试，故按全局设计采用独立普通修复提交，而非改写 merge 历史。
+- `e3b0c15b1 fix: register async image gateway routes` 是用户授权的 Task 27 early merge-after semantic fix，不属于 Task 26 merge 或台账提交。
+- 它恢复六条 `/v1` 和 alias async image/task routes，并沿用同步 Images 的 `bodyLimit`、request ID、usage detail、ops、endpoint、API-key 和 group middleware chain。
 - RED: `go -C backend test ./internal/server/routes -run 'AsyncImage|ImageTask|images.*async' -count=1` failed because `POST /v1/images/generations/async` was absent.
 - GREEN: `go -C backend test ./internal/server/routes -run '^TestGatewayRoutesAsyncImagesPathsAreRegistered$' -count=1` and `go -C backend test ./internal/handler -run '^TestAsyncImageHandler' -count=1` passed.
 
