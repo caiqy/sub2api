@@ -423,3 +423,11 @@ git diff --check
 ### 残余 manual 项
 - 需要运行环境验收：异步图片 worker/S3、图片计费字段、audit 脱敏和 body 回填、trusted proxy/session binding、step-up、Grok 实际 cache/transport、账号 upstream billing probe 和 Stripe 支付页失败路径。
 - 需要 live PostgreSQL：`TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate`、group duplicate rollback、batch-limit repository 与 migration transaction integration 测试。
+
+## Task 37 拓扑验证与扩展收口
+- 起始提交：`3bc34446abe6e6b84cfda6c6dcca85b2d4906c2e`。本节只完成扩展任务收口和 Comet build 状态推进；未归档 change，未合并 `main`、`upstream/main` 或 tag 后提交，未 push、release 或 deploy。
+- 七个 `git merge-base --is-ancestor <peeled-tag> HEAD` 检查均退出 0：`v0.1.152` `b73d8c3efe01a290eaaa9326b6e40ece02c67a0e`、`v0.1.153` `a2bc1337474b68b62391116835e5698ebb5526bd`、`v0.1.155` `41cec0db059ffb82d0efdcfcf07a24ab51fbfe97`、`v0.1.156` `12f991dde8a58e183d4bd16a87ef6fd0df714757`、`v0.1.157` `a2779cd5f30d6d3904a9d59088aed09507678dfe`、`v0.1.158` `26abd19a2812edba02bbef93c3e2a620141cc257`、`v0.1.159` `2a75d7d2387587d86ca3c5e5cd8ca96cf3d104c6`。
+- `git log --first-parent --merges d1cc025..HEAD` 恰有七个上游 merge，按顺序为 `4ffe039a`/`b73d8c3e`、`9219483d`/`a2bc1337`、`347ad613`/`41cec0db`、`94a681bb`/`12f991dd`、`fa656646`/`a2779cd5`、`be00309d`/`26abd19a`、`00517cf8`/`2a75d7d2`；每个条目分别为 merge SHA/第二父 peel SHA。first-parent 完整范围审查确认三个扩展 merge 后仅有对应修复、测试、版本与报告提交，无额外 merge。
+- `git merge-base --is-ancestor upstream/main HEAD` 退出 1，证明完整 `upstream/main` 不是 HEAD 祖先；`git log --oneline v0.1.159^{}..upstream/main` 列出 8 个排除提交（从 `c2c19a7c` 到 `bc50c9d0`），未进入本分支。
+- `openspec validate staged-merge-upstream-v0-1-159 --strict` 通过。`comet state check staged-merge-upstream-v0-1-159 build` 通过，随后以 build guard 收口任务状态；`.comet/current-change.json` 保持未跟踪且未提交。
+- 三段门禁、最终能力矩阵和自动验证结论保持本报告既有记录：版本为 `0.1.159.1`，无 `gap`；Docker-backed PostgreSQL migration integration 及所有既有 manual 运行环境验收仍未执行，不得由自动测试替代。

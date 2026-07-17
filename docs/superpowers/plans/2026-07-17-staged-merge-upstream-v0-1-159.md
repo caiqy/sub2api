@@ -901,7 +901,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 
 **产物：** 新报告的“扩展起点与固定对象”及“扩展基线”章节；首轮报告保持不变。
 
-- [ ] **步骤 1：确认工作区、分支和首轮结果**
+- [x] **步骤 1：确认工作区、分支和首轮结果**
 
   执行：
   ```bash
@@ -913,7 +913,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：分支为 `feature/20260717/staged-merge-upstream-v0-1-159`；`v0.1.156^{}` 祖先检查退出码为 0；`v0.1.157^{}` 检查退出码为非零；除忽略的 `.comet/current-change.json` 外无未提交文件。
 
-- [ ] **步骤 2：重新获取并固定三个 annotated tag**
+- [x] **步骤 2：重新获取并固定三个 annotated tag**
 
   执行：
   ```bash
@@ -931,7 +931,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：tag object/peel SHA 与全局表完全一致；提交数依次为 82、20、12，changed-files 数依次为 331、105、30；最后一条仅记录 tag 后排除范围。
 
-- [ ] **步骤 3：创建扩展验证报告骨架**
+- [x] **步骤 3：创建扩展验证报告骨架**
 
   写入：
   ```markdown
@@ -952,7 +952,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ## 残余风险与未执行事项
   ```
 
-- [ ] **步骤 4：运行扩展前完整基线**
+- [x] **步骤 4：运行扩展前完整基线**
 
   执行：
   ```bash
@@ -966,7 +966,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：所有命令退出码为 0，连续两次生成不产生 diff。任一失败都写入报告并停止，不执行 Task 26。
 
-- [ ] **步骤 5：提交扩展范围和基线证据**
+- [x] **步骤 5：提交扩展范围和基线证据**
 
   执行：
   ```bash
@@ -983,15 +983,15 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 
 **产物：** 新报告中每个新增风险面具备 tag、入口、现有测试、人工审查点和 `protected`/`manual`/`approved-removal` 状态。
 
-- [ ] **步骤 1：建立三段能力交集**
+- [x] **步骤 1：建立三段能力交集**
 
   将三个 changed-files 清单与首轮矩阵交叉，至少登记：异步图片任务/对象存储、图片输入 token/费用、上游计费倍率与 scheduler、操作审计、会话 IP/UA 绑定、step-up 2FA、OpenAI Responses/WS、Grok 端点与 cache、分组复制、用户批量限额、客户端 IP 解析、alpha/search API Key 调度、账号上游链接、Stripe 懒加载、Wire/Ent 和 migrations 177-181。
 
-- [ ] **步骤 2：结构化追踪共享入口**
+- [x] **步骤 2：结构化追踪共享入口**
 
   对 scheduler、image intent、billing、session binding、audit、Grok/Responses/WS 和 group/user 管理入口使用 CodeGraph `context`/`impact`；报告记录入口符号、调用方、被新 tag 修改的文件和验证命令。不得仅用文件名相交判定无影响。
 
-- [ ] **步骤 3：执行已有保护测试**
+- [x] **步骤 3：执行已有保护测试**
 
   执行：
   ```bash
@@ -1000,7 +1000,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：当前扩展基线通过。若矩阵出现没有直接断言的本地独有行为，将该行标为 `gap`，在对应既有测试文件添加一个最小 characterization test，先确认当前基线通过，再把状态改为 `protected`；存在未关闭 gap 时禁止 Task 26。
 
-- [ ] **步骤 4：提交矩阵与必要保护测试**
+- [x] **步骤 4：提交矩阵与必要保护测试**
 
   有新增测试时执行：
   ```bash
@@ -1020,7 +1020,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 - 修改：`git merge --no-ff v0.1.157` 实际产生的文件
 - 修改：`docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md`
 
-- [ ] **步骤 1：验证阶段入口**
+- [x] **步骤 1：验证阶段入口**
 
   执行：
   ```bash
@@ -1030,7 +1030,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：工作树除忽略文件外干净；peel SHA 为 `a2779cd5f30d6d3904a9d59088aed09507678dfe`；Task 24-25 的报告提交位于 HEAD 历史。
 
-- [ ] **步骤 2：创建第五个 merge 节点**
+- [x] **步骤 2：创建第五个 merge 节点**
 
   执行：
   ```bash
@@ -1038,7 +1038,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：无冲突则直接生成 merge commit；有冲突则停留在 merge 状态，不改用 squash、rebase 或 cherry-pick。
 
-- [ ] **步骤 3：逐文件融合冲突**
+- [x] **步骤 3：逐文件融合冲突**
 
   执行：
   ```bash
@@ -1048,7 +1048,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   对每个冲突读取第一父、`v0.1.157^{}` 和调用方，记录 ours、theirs、最终语义、类别和验证命令。唯一既有批准移除项仍是本地首 Token 超时；其他不可共存语义暂停等待用户。
 
-- [ ] **步骤 4：完成 merge 并验证父节点**
+- [x] **步骤 4：完成 merge 并验证父节点**
 
   暂存每个已解决冲突文件后执行：
   ```bash
@@ -1057,7 +1057,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：第二父为 `a2779cd5f30d6d3904a9d59088aed09507678dfe`；merge commit 不包含验证报告或 merge 后语义修复。
 
-- [ ] **步骤 5：提交冲突台账**
+- [x] **步骤 5：提交冲突台账**
 
   执行：
   ```bash
@@ -1071,7 +1071,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 - 修改：由失败测试和能力矩阵确定的实际业务/测试文件
 - 修改：`docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md`
 
-- [ ] **步骤 1：运行 v0.1.157 高风险定向测试**
+- [x] **步骤 1：运行 v0.1.157 高风险定向测试**
 
   执行：
   ```bash
@@ -1083,15 +1083,15 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：上游新增行为和首轮本地保护均通过；失败输出原样写入报告。
 
-- [ ] **步骤 2：审查无冲突语义变化**
+- [x] **步骤 2：审查无冲突语义变化**
 
   重点核对异步图片任务路由/鉴权/对象存储、图片 input token 计费、倍率探测与 scheduler snapshot、审计脱敏、session binding/step-up、Responses image intent、首输出超时保持删除状态、Grok/Agent Identity、Wire provider 和 migrations 177-180。
 
-- [ ] **步骤 3：使用 TDD 完成最小兼容修复**
+- [x] **步骤 3：使用 TDD 完成最小兼容修复**
 
   每个回归先运行或添加一个直接失败测试，再只修改导致回归的最小业务路径，重跑同一测试至通过。禁止在本任务加入无失败证据的重构或新功能。
 
-- [ ] **步骤 4：提交修复和能力结论**
+- [x] **步骤 4：提交修复和能力结论**
 
   存在修复时执行：
   ```bash
@@ -1110,7 +1110,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 **文件：**
 - 修改：`docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md`
 
-- [ ] **步骤 1：运行完整阶段门禁**
+- [x] **步骤 1：运行完整阶段门禁**
 
   执行：
   ```bash
@@ -1124,7 +1124,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：测试、build、生成和静态检查通过，无 unmerged 文件或真实冲突标记。
 
-- [ ] **步骤 2：提交阶段门禁证据**
+- [x] **步骤 2：提交阶段门禁证据**
 
   执行：
   ```bash
@@ -1139,7 +1139,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 - 修改：`git merge --no-ff v0.1.158` 实际产生的文件
 - 修改：`docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md`
 
-- [ ] **步骤 1：创建第六个 merge 节点**
+- [x] **步骤 1：创建第六个 merge 节点**
 
   执行：
   ```bash
@@ -1149,7 +1149,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：工作树干净且 peel SHA 为 `26abd19a2812edba02bbef93c3e2a620141cc257`；有冲突时保持 merge 状态。
 
-- [ ] **步骤 2：融合冲突并完成 merge**
+- [x] **步骤 2：融合冲突并完成 merge**
 
   执行：
   ```bash
@@ -1159,7 +1159,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   逐文件记录两侧语义并最小融合，暂存全部已解决路径后 `git commit`。`git show -s --format='%H%n%P%n%s' HEAD` 的第二父必须是 `26abd19a2812edba02bbef93c3e2a620141cc257`。
 
-- [ ] **步骤 3：提交冲突台账**
+- [x] **步骤 3：提交冲突台账**
 
   执行：
   ```bash
@@ -1173,7 +1173,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 - 修改：由失败测试和能力矩阵确定的实际业务/测试文件
 - 修改：`docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md`
 
-- [ ] **步骤 1：运行 v0.1.158 高风险定向测试**
+- [x] **步骤 1：运行 v0.1.158 高风险定向测试**
 
   执行：
   ```bash
@@ -1183,11 +1183,11 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   pnpm --dir frontend exec vitest run src/api/__tests__/admin.groups.duplicate.spec.ts src/api/__tests__/admin.users.spec.ts src/components/account/__tests__/EditAccountModal.grokUpstream.spec.ts src/components/admin/user/__tests__/BulkEditUserModal.spec.ts src/components/common/__tests__/DataTable.spec.ts src/views/admin/__tests__/GroupsView.duplicate.spec.ts src/views/admin/__tests__/UsersView.spec.ts
   ```
 
-- [ ] **步骤 2：审查无冲突语义变化**
+- [x] **步骤 2：审查无冲突语义变化**
 
   重点核对 group duplicate operation ID 的 schema/migration 181、用户批量限额事务边界、Grok OAuth 自定义端点、Responses WebSocket v2、Codex 生图完成态、模型能力发现和 DataTable 分页/选择状态。
 
-- [ ] **步骤 3：TDD 修复并提交**
+- [x] **步骤 3：TDD 修复并提交**
 
   对每个回归保留失败测试后作最小修复。存在修复时提交 `fix: preserve local behavior after v0.1.158`；随后只提交报告 `docs: record v0.1.158 capability review`。无回归时只创建报告提交。
 
@@ -1196,7 +1196,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 **文件：**
 - 修改：`docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md`
 
-- [ ] **步骤 1：运行完整阶段门禁**
+- [x] **步骤 1：运行完整阶段门禁**
 
   执行：
   ```bash
@@ -1209,7 +1209,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：全部通过且能力矩阵无未解释变化。
 
-- [ ] **步骤 2：提交阶段门禁证据**
+- [x] **步骤 2：提交阶段门禁证据**
 
   执行：
   ```bash
@@ -1223,7 +1223,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 - 修改：`git merge --no-ff v0.1.159` 实际产生的文件
 - 修改：`docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md`
 
-- [ ] **步骤 1：创建第七个 merge 节点**
+- [x] **步骤 1：创建第七个 merge 节点**
 
   执行：
   ```bash
@@ -1233,7 +1233,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：工作树干净且 peel SHA 为 `2a75d7d2387587d86ca3c5e5cd8ca96cf3d104c6`。
 
-- [ ] **步骤 2：融合冲突并完成 merge**
+- [x] **步骤 2：融合冲突并完成 merge**
 
   执行：
   ```bash
@@ -1243,7 +1243,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   完成逐文件语义融合后提交 merge；第二父必须为 `2a75d7d2387587d86ca3c5e5cd8ca96cf3d104c6`，不得 merge `upstream/main`。
 
-- [ ] **步骤 3：提交冲突台账**
+- [x] **步骤 3：提交冲突台账**
 
   执行：
   ```bash
@@ -1257,7 +1257,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 - 修改：由失败测试和能力矩阵确定的实际业务/测试文件
 - 修改：`docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md`
 
-- [ ] **步骤 1：运行 v0.1.159 高风险定向测试**
+- [x] **步骤 1：运行 v0.1.159 高风险定向测试**
 
   执行：
   ```bash
@@ -1266,11 +1266,11 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   pnpm --dir frontend exec vitest run src/views/admin/__tests__/AccountsView.sparkShadow.spec.ts src/views/user/__tests__/StripePaymentView.spec.ts src/views/user/__tests__/stripeLazyLoading.spec.ts
   ```
 
-- [ ] **步骤 2：审查无冲突语义变化**
+- [x] **步骤 2：审查无冲突语义变化**
 
   重点核对 audit/session binding 与 API Key ACL 的可信代理开关一致性、alpha/search API Key 账号可调度性、Grok Responses function tool 免费缓存、图片测试兼容、账号上游链接和 Stripe 动态 import chunk。
 
-- [ ] **步骤 3：TDD 修复并提交**
+- [x] **步骤 3：TDD 修复并提交**
 
   对每个回归保留失败测试后作最小修复。存在修复时提交 `fix: preserve local behavior after v0.1.159`；随后只提交报告 `docs: record v0.1.159 capability review`。无回归时只创建报告提交。
 
@@ -1279,7 +1279,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 **文件：**
 - 修改：`docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md`
 
-- [ ] **步骤 1：运行完整阶段门禁**
+- [x] **步骤 1：运行完整阶段门禁**
 
   执行：
   ```bash
@@ -1294,7 +1294,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：测试、build、生成和静态检查通过；两条 grep 均无真实匹配，旧首 Token 符号扫描为空，能力矩阵无 gap。
 
-- [ ] **步骤 2：提交阶段门禁证据**
+- [x] **步骤 2：提交阶段门禁证据**
 
   执行：
   ```bash
@@ -1311,7 +1311,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 - 审查：`backend/migrations/177_*.sql` 至 `backend/migrations/181_*.sql`
 - 修改：`docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md`
 
-- [ ] **步骤 1：设置本地四段式版本**
+- [x] **步骤 1：设置本地四段式版本**
 
   将 `backend/cmd/server/VERSION` 精确设置为：
   ```text
@@ -1323,7 +1323,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   git commit -m "chore: set version to 0.1.159.1"
   ```
 
-- [ ] **步骤 2：验证 Ent/Wire 可复现性**
+- [x] **步骤 2：验证 Ent/Wire 可复现性**
 
   执行：
   ```bash
@@ -1334,7 +1334,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：两次生成均稳定；差异必须从 schema/provider 源修复，不手工维护生成输出。
 
-- [ ] **步骤 3：复核依赖、配置和 migrations 177-181**
+- [x] **步骤 3：复核依赖、配置和 migrations 177-181**
 
   执行：
   ```bash
@@ -1344,7 +1344,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   报告逐项记录 migration 文件名唯一性、完整文件名排序、幂等 DDL、runner 顺序、配置默认值及依赖来源；Docker-backed migration integration 未运行时明确标为未执行。
 
-- [ ] **步骤 4：提交元数据审查证据**
+- [x] **步骤 4：提交元数据审查证据**
 
   执行：
   ```bash
@@ -1357,11 +1357,11 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 **文件：**
 - 修改：`docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md`
 
-- [ ] **步骤 1：逐项关闭能力矩阵**
+- [x] **步骤 1：逐项关闭能力矩阵**
 
   对首轮矩阵全部项目和 Task 25 新增项目逐项确认入口可达、边界语义、测试证据、manual 结论与三段结果。唯一 `approved-removal` 仍是本地首 Token 超时；不得出现 `gap`、空状态或“默认接受”。
 
-- [ ] **步骤 2：运行最终完整门禁**
+- [x] **步骤 2：运行最终完整门禁**
 
   执行：
   ```bash
@@ -1375,7 +1375,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：全部退出码为 0 或按约定无输出；报告记录后端、lint、unit、前端 lint/typecheck/Vitest/build、生成和静态检查摘要。
 
-- [ ] **步骤 3：提交最终自动验证证据**
+- [x] **步骤 3：提交最终自动验证证据**
 
   执行：
   ```bash
@@ -1389,7 +1389,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 - 修改：`docs/superpowers/reports/2026-07-17-staged-merge-upstream-v0-1-159-validation.md`
 - 修改：`openspec/changes/staged-merge-upstream-v0-1-159/tasks.md`
 
-- [ ] **步骤 1：验证七个 tag 和 first-parent 顺序**
+- [x] **步骤 1：验证七个 tag 和 first-parent 顺序**
 
   执行：
   ```bash
@@ -1404,7 +1404,7 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：七条祖先检查退出码均为 0；first-parent merge 顺序与七个 tag 一致，每个新节点第二父为固定 peel SHA。
 
-- [ ] **步骤 2：验证最终边界与 thorough review**
+- [x] **步骤 2：验证最终边界与 thorough review**
 
   执行：
   ```bash
@@ -1414,11 +1414,11 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：第一条退出码非零，证明完整 `upstream/main` 未合入；第二条仅列出排除提交；review 确认三个新 merge、后续修复和报告提交边界清晰。
 
-- [ ] **步骤 3：完成报告与 OpenSpec 任务**
+- [x] **步骤 3：完成报告与 OpenSpec 任务**
 
   仅在所有证据齐全后，将 `tasks.md` 的 7.1 至 11.3 共 14 项勾选完成。报告记录 merge SHA、冲突台账、修复提交、三段门禁、最终矩阵、版本 `0.1.159.1`、未执行的 Docker migration integration，以及未执行 push/release/deploy。
 
-- [ ] **步骤 4：提交扩展收口文档**
+- [x] **步骤 4：提交扩展收口文档**
 
   执行：
   ```bash
