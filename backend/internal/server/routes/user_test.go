@@ -24,7 +24,9 @@ func TestRegisterUserRoutesRegistersImageHistoryEndpoints(t *testing.T) {
 		servermiddleware.JWTAuthMiddleware(func(c *gin.Context) {
 			c.Next()
 		}),
-		nil,
+		servermiddleware.AuditLogMiddleware(func(c *gin.Context) {
+			c.Next()
+		}),
 		nil,
 	)
 

@@ -4193,6 +4193,41 @@
                 <Toggle v-model="form.allow_ungrouped_key_scheduling" />
               </div>
 
+              <div
+                v-if="!form.openai_advanced_scheduler_enabled"
+                class="flex items-center justify-between border-t border-gray-100 pt-5 dark:border-dark-700"
+              >
+                <div>
+                  <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ localText("低倍率优先", "Lower upstream rate first") }}
+                  </label>
+                </div>
+                <Toggle
+                  v-model="form.openai_low_upstream_rate_priority_enabled"
+                  data-testid="openai-low-rate-priority-toggle"
+                />
+              </div>
+
+              <div
+                v-if="!form.openai_advanced_scheduler_enabled && form.openai_low_upstream_rate_priority_enabled"
+                class="border-t border-gray-100 pt-5 dark:border-dark-700"
+              >
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ localText("OAuth 调度参考倍率", "OAuth scheduling reference rate") }}
+                </label>
+                <input
+                  v-model.number="form.openai_oauth_scheduling_rate_multiplier"
+                  data-testid="openai-oauth-scheduling-rate-multiplier"
+                  class="input mt-2 w-40"
+                  min="0"
+                  step="0.01"
+                  type="number"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  {{ localText("同一分组同时包含 API Key 和 OAuth 账号时，OAuth 账号按此倍率与已探测的 API Key 计费倍率一起排序。", "When a group contains both API key and OAuth accounts, OAuth accounts are ranked using this rate alongside probed API key billing rates.") }}
+                </p>
+              </div>
+
               <div class="flex items-center justify-between">
                 <div>
                   <label
@@ -4206,7 +4241,10 @@
                     }}
                   </p>
                 </div>
-                <Toggle v-model="form.openai_advanced_scheduler_enabled" />
+                <Toggle
+                  v-model="form.openai_advanced_scheduler_enabled"
+                  data-testid="openai-advanced-scheduler-toggle"
+                />
               </div>
 
               <div
@@ -4245,6 +4283,26 @@
                   </p>
                 </div>
                 <Toggle v-model="form.openai_advanced_scheduler_subscription_priority_enabled" />
+              </div>
+
+              <div
+                v-if="form.openai_advanced_scheduler_enabled"
+                class="border-t border-gray-100 pt-5 dark:border-dark-700"
+              >
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ localText("OAuth 调度参考倍率", "OAuth scheduling reference rate") }}
+                </label>
+                <input
+                  v-model.number="form.openai_oauth_scheduling_rate_multiplier"
+                  data-testid="openai-oauth-scheduling-rate-multiplier"
+                  class="input mt-2 w-40"
+                  min="0"
+                  step="0.01"
+                  type="number"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  {{ localText("同一分组同时包含 API Key 和 OAuth 账号时，计算“计费倍率”得分时，OAuth 账号按此倍率参与计算。", "When a group contains both API key and OAuth accounts, this rate is used for OAuth accounts when calculating the billing-rate score.") }}
+                </p>
               </div>
 
               <div
@@ -8322,6 +8380,8 @@ type SettingsForm = Omit<
   google_oauth_client_secret: string;
   force_email_on_third_party_signup: boolean;
   openai_advanced_scheduler_enabled: boolean;
+  openai_low_upstream_rate_priority_enabled: boolean;
+  openai_oauth_scheduling_rate_multiplier: number;
   openai_advanced_scheduler_sticky_weighted_enabled: boolean;
   openai_advanced_scheduler_subscription_priority_enabled: boolean;
   openai_advanced_scheduler_lb_top_k: string;
@@ -8332,6 +8392,7 @@ type SettingsForm = Omit<
   openai_advanced_scheduler_weight_ttft: string;
   openai_advanced_scheduler_weight_reset: string;
   openai_advanced_scheduler_weight_quota_headroom: string;
+  openai_advanced_scheduler_weight_upstream_cost: string;
   openai_advanced_scheduler_weight_previous_response: string;
   openai_advanced_scheduler_weight_session_sticky: string;
   // 系统全局平台限额 map；form 内始终归一化为全 4 平台对象（模板非空绑定依赖此不变量）
@@ -8357,6 +8418,7 @@ const form = reactive<SettingsForm>({
   affiliate_rebate_freeze_hours: 0,
   affiliate_rebate_duration_days: 0,
   affiliate_rebate_per_invitee_cap: 0,
+  affiliate_admin_recharge_enabled: false,
   default_concurrency: 1,
   default_subscriptions: [],
   force_email_on_third_party_signup: false,
@@ -8541,6 +8603,8 @@ const form = reactive<SettingsForm>({
   gateway_openai_ws_scheduler_layered_probe_timeout_seconds: 15,
   gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds: 1800,
   openai_advanced_scheduler_enabled: false,
+  openai_low_upstream_rate_priority_enabled: false,
+  openai_oauth_scheduling_rate_multiplier: 1,
   openai_advanced_scheduler_sticky_weighted_enabled: false,
   openai_advanced_scheduler_subscription_priority_enabled: false,
   openai_advanced_scheduler_lb_top_k: "",
@@ -8551,6 +8615,7 @@ const form = reactive<SettingsForm>({
   openai_advanced_scheduler_weight_ttft: "",
   openai_advanced_scheduler_weight_reset: "",
   openai_advanced_scheduler_weight_quota_headroom: "",
+  openai_advanced_scheduler_weight_upstream_cost: "",
   openai_advanced_scheduler_weight_previous_response: "",
   openai_advanced_scheduler_weight_session_sticky: "",
   // Gateway forwarding behavior
@@ -8599,6 +8664,7 @@ type OpenAIAdvancedSchedulerOverrideKey =
   | "openai_advanced_scheduler_weight_ttft"
   | "openai_advanced_scheduler_weight_reset"
   | "openai_advanced_scheduler_weight_quota_headroom"
+  | "openai_advanced_scheduler_weight_upstream_cost"
   | "openai_advanced_scheduler_weight_previous_response"
   | "openai_advanced_scheduler_weight_session_sticky";
 
@@ -8611,6 +8677,7 @@ type OpenAIAdvancedSchedulerEffectiveKey =
   | "openai_advanced_scheduler_effective_weight_ttft"
   | "openai_advanced_scheduler_effective_weight_reset"
   | "openai_advanced_scheduler_effective_weight_quota_headroom"
+  | "openai_advanced_scheduler_effective_weight_upstream_cost"
   | "openai_advanced_scheduler_effective_weight_previous_response"
   | "openai_advanced_scheduler_effective_weight_session_sticky";
 
@@ -8673,6 +8740,11 @@ const openAIAdvancedSchedulerWeightFields = computed<
       key: "openai_advanced_scheduler_weight_quota_headroom",
       label: t("admin.settings.openaiExperimentalScheduler.quotaHeadroomWeight"),
       placeholder: placeholder("openai_advanced_scheduler_effective_weight_quota_headroom", "0"),
+    },
+    {
+      key: "openai_advanced_scheduler_weight_upstream_cost",
+      label: localText("计费倍率", "Billing rate"),
+      placeholder: placeholder("openai_advanced_scheduler_effective_weight_upstream_cost", "0"),
     },
     {
       key: "openai_advanced_scheduler_weight_previous_response",
@@ -9940,6 +10012,10 @@ async function saveSettings() {
         form.payment_cancel_rate_limit_window_mode,
       payment_alipay_force_qrcode: form.payment_alipay_force_qrcode,
       openai_advanced_scheduler_enabled: form.openai_advanced_scheduler_enabled,
+      openai_low_upstream_rate_priority_enabled:
+        form.openai_low_upstream_rate_priority_enabled,
+      openai_oauth_scheduling_rate_multiplier:
+        Number(form.openai_oauth_scheduling_rate_multiplier) || 1,
       openai_advanced_scheduler_sticky_weighted_enabled:
         form.openai_advanced_scheduler_sticky_weighted_enabled,
       openai_advanced_scheduler_subscription_priority_enabled:
@@ -9960,6 +10036,8 @@ async function saveSettings() {
         form.openai_advanced_scheduler_weight_reset.trim(),
       openai_advanced_scheduler_weight_quota_headroom:
         form.openai_advanced_scheduler_weight_quota_headroom.trim(),
+      openai_advanced_scheduler_weight_upstream_cost:
+        form.openai_advanced_scheduler_weight_upstream_cost.trim(),
       openai_advanced_scheduler_weight_previous_response:
         form.openai_advanced_scheduler_weight_previous_response.trim(),
       openai_advanced_scheduler_weight_session_sticky:
@@ -9984,6 +10062,7 @@ async function saveSettings() {
       available_channels_enabled: form.available_channels_enabled,
       // Affiliate (邀请返利) feature switch
       affiliate_enabled: form.affiliate_enabled,
+      affiliate_admin_recharge_enabled: form.affiliate_admin_recharge_enabled,
       allow_user_view_error_requests: form.allow_user_view_error_requests,
     };
 

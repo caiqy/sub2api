@@ -860,17 +860,14 @@ func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expa
 
 	// 1. 提取原始 system prompt 文本
 	var originalSystemText string
-	hadBillingAttribution := false
 	switch v := system.(type) {
 	case string:
 		originalSystemText = strings.TrimSpace(v)
-		hadBillingAttribution = strings.Contains(originalSystemText, claudeCodeBillingHeaderPrefix)
 	case []any:
 		var parts []string
 		for _, item := range v {
 			if m, ok := item.(map[string]any); ok {
 				if text, ok := m["text"].(string); ok && strings.TrimSpace(text) != "" {
-					hadBillingAttribution = hadBillingAttribution || strings.HasPrefix(strings.TrimSpace(text), claudeCodeBillingHeaderPrefix)
 					if strings.HasPrefix(strings.TrimSpace(text), "x-anthropic-billing-header:") {
 						continue
 					}
@@ -902,7 +899,7 @@ func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expa
 		logger.LegacyPrintf("service.gateway", "Warning: failed to build default Claude OAuth system blocks: %v", blockErr)
 		return body
 	}
-	if hadBillingAttribution && strings.TrimSpace(blocksConfig) == "" && len(systemBlocks) == 3 {
+	if strings.TrimSpace(blocksConfig) == "" && len(systemBlocks) == 3 {
 		identity, err := marshalAnthropicSystemTextBlock(claudeCodeSystemPrompt, true)
 		if err != nil {
 			return body
