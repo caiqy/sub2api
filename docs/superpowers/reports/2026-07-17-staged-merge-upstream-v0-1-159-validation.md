@@ -59,7 +59,7 @@
 
 ## v0.1.157
 - Merge commit：`fa656646d09ce0a6207a21f9bf1149cb3bafac73`，第一父 `d77bea9c93a77f662c6218c3a83aaab05092c7f0`，第二父 `a2779cd5f30d6d3904a9d59088aed09507678dfe`。
-- 31 个文本冲突均按第一父、tag 与调用方核对后融合：版本/生成物；配置与 settings；审计、step-up、session binding 路由；异步图片与对象存储；usage detail；Grok 请求头；OpenAI scheduler、alpha/search、forward、WS bridge；以及账户编辑 UI、类型、i18n 与 settings UI。
+- 31 个文本冲突均已按第一父、tag 与调用方核对后消除并记录。30 个冲突完成两侧融合；`backend/internal/server/routes/gateway.go` 的同步路由链与 handler 注入已在 merge 中融合，但 async 公共 route 注册遗漏已转交用户授权的 Task 27 early work。
 - 原生 HTTP Responses `openai_first_output_timeout.go` 及 `openai_first_output_timeout_seconds` 保留。它不是已批准删除的旧本地 first-token watchdog；后者的 `openai_text_first_token_timeout`、`openai_image_first_token_timeout`、`first_token_timeout` 错误/日志和本地 HTTP/WS watchdog 均未重新引入。
 - 生成：两次 `make -C backend generate` 成功；第二次生成后 `git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` 成功。
 - 编译：`go -C backend test ./internal/... -run '^$'` 成功。Wire 缺失 provider 经 `service/wire.go` 的 `ProvideImageTaskService`、`ProvideUpstreamBillingProbeService`、`ProvideAuditLogService` 声明修复，未手改生成结果。
