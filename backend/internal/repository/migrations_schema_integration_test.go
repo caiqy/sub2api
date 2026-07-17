@@ -174,6 +174,13 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 
 func newIsolatedMigrationDB(t *testing.T) *sql.DB {
 	t.Helper()
+	db := newEmptyIsolatedMigrationDB(t)
+	require.NoError(t, ApplyMigrations(context.Background(), db))
+	return db
+}
+
+func newEmptyIsolatedMigrationDB(t *testing.T) *sql.DB {
+	t.Helper()
 	require.NotEmpty(t, integrationDSN, "expected integration dsn to be initialized")
 
 	adminDSN, dbName := isolatedPostgresDSNs(t)
@@ -196,7 +203,6 @@ func newIsolatedMigrationDB(t *testing.T) *sql.DB {
 		_ = db.Close()
 	})
 
-	require.NoError(t, ApplyMigrations(context.Background(), db))
 	return db
 }
 

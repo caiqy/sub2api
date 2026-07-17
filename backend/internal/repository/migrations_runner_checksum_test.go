@@ -3,6 +3,7 @@ package repository
 import (
 	"testing"
 
+	dbmigrations "github.com/Wei-Shaw/sub2api/migrations"
 	"github.com/stretchr/testify/require"
 )
 
@@ -41,6 +42,27 @@ func TestIsMigrationChecksumCompatible(t *testing.T) {
 			"66207e7aa5dd0429c2e2c0fabdaf79783ff157fa0af2e81adff2ee03790ec65c",
 		)
 		require.True(t, ok)
+	})
+
+	t.Run("108仅兼容已发布和当前checksum", func(t *testing.T) {
+		const (
+			name = "108_add_group_user_concurrency.sql"
+			old  = "4782d26e6ced99a1221ee2fa20471dc412d4e3cfa9aaad4830940077a4c40163"
+			new  = "64fbcb154429bd550b5bdfb2ad4fe18b4162bbc292dd017b98d46548461e3cc4"
+		)
+
+		content, err := dbmigrations.FS.ReadFile(name)
+		require.NoError(t, err)
+		require.Equal(t, new, migrationChecksum(string(content)))
+
+		rule, ok := migrationChecksumCompatibilityRules[name]
+		require.True(t, ok)
+		require.Equal(t, new, rule.fileChecksum)
+		require.Equal(t, map[string]struct{}{old: {}}, rule.acceptedDBChecksum)
+		require.Equal(t, map[string]struct{}{old: {}, new: {}}, rule.acceptedChecksums)
+		require.True(t, isMigrationChecksumCompatible(name, old, new))
+		require.True(t, isMigrationChecksumCompatible(name, new, new))
+		require.False(t, isMigrationChecksumCompatible(name, old, "0000000000000000000000000000000000000000000000000000000000000000"))
 	})
 
 	t.Run("非白名单迁移不兼容", func(t *testing.T) {
