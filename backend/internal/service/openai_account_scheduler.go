@@ -671,14 +671,13 @@ type openAIAccountCandidateScore struct {
 }
 
 type openAISelectionProbeBudget struct {
-	acquires  int
-	rechecks  int
-	attempted map[int64]struct{}
-	limited   bool
+	acquires int
+	rechecks int
+	limited  bool
 }
 
 func newOpenAISelectionProbeBudget() *openAISelectionProbeBudget {
-	return &openAISelectionProbeBudget{attempted: make(map[int64]struct{})}
+	return &openAISelectionProbeBudget{}
 }
 
 func (b *openAISelectionProbeBudget) enableLimit() {
@@ -697,7 +696,6 @@ func (b *openAISelectionProbeBudget) recordAcquire(accountID int64) bool {
 		return false
 	}
 	b.acquires++
-	b.attempted[accountID] = struct{}{}
 	return true
 }
 func (b *openAISelectionProbeBudget) recordRecheck() bool {
@@ -715,13 +713,6 @@ func (b *openAISelectionProbeBudget) recordRecheck() bool {
 }
 func (b *openAISelectionProbeBudget) acquireExhausted() bool {
 	return b != nil && b.limited && b.acquires >= openAIAccountSelectionProbeLimit
-}
-func (b *openAISelectionProbeBudget) wasAttempted(accountID int64) bool {
-	if b == nil {
-		return false
-	}
-	_, ok := b.attempted[accountID]
-	return ok
 }
 
 type openAIAccountCandidateHeap []openAIAccountCandidateScore
@@ -1237,7 +1228,7 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 			release(result)
 			break
 		}
-		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, PlatformOpenAI, req.RequestedModel, false, req.RequiredCapability)
+		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.GroupID, PlatformOpenAI, req.RequestedModel, false, req.RequiredCapability)
 		if fresh == nil || (fresh.GroupIDs != nil && !openAIStickyAccountMatchesGroup(fresh, req.GroupID)) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
 			release(result)
 			continue
@@ -1303,7 +1294,7 @@ func (s *defaultOpenAIAccountScheduler) tryFallbackToWeightedSticky(
 		if !s.isAccountRequestCompatible(ctx, account, req) || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
 			continue
 		}
-		account = s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, PlatformOpenAI, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
+		account = s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.GroupID, PlatformOpenAI, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
 		if account == nil || !s.isAccountRequestCompatible(ctx, account, req) || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
 			continue
 		}
@@ -1595,7 +1586,7 @@ func (s *defaultOpenAIAccountScheduler) finishLoadBalanceSelectionFallback(
 		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
 			continue
 		}
-		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, PlatformOpenAI, req.RequestedModel, false, req.RequiredCapability)
+		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.GroupID, PlatformOpenAI, req.RequestedModel, false, req.RequiredCapability)
 		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
 			continue
 		}
@@ -1653,37 +1644,63 @@ func openAIFreshUpstreamBillingRate(account *Account, now time.Time) (float64, b
 const openAIUpstreamCostNeutralFactor = 0.5
 
 func openAIUpstreamCostFactors(accounts []*Account, now time.Time, oauthRate float64) map[int64]float64 {
-	factors := make(map[int64]float64, len(accounts))
-	for _, account := range accounts {
-		if account != nil {
-			factors[account.ID] = openAIUpstreamCostNeutralFactor
-		}
+	type rateSample struct {
+		accountID int64
+		rate      float64
 	}
-	var minRate, maxRate float64
-	haveRate := false
-	rates := make(map[int64]float64)
+
+	factors := make(map[int64]float64, len(accounts))
+	samples := make([]rateSample, 0, len(accounts))
+	eligibleCount := 0
 	for _, account := range accounts {
 		if account == nil {
 			continue
 		}
-		rate, ok := openAISchedulingRate(account, now, oauthRate)
-		if !ok {
+		factors[account.ID] = openAIUpstreamCostNeutralFactor
+		if !account.IsOpenAIApiKey() && !account.IsOpenAIOAuth() {
 			continue
 		}
-		rates[account.ID] = rate
-		if !haveRate || rate < minRate {
-			minRate = rate
+		eligibleCount++
+		if rate, ok := openAISchedulingRate(account, now, oauthRate); ok {
+			samples = append(samples, rateSample{accountID: account.ID, rate: rate})
 		}
-		if !haveRate || rate > maxRate {
-			maxRate = rate
-		}
-		haveRate = true
 	}
-	if !haveRate || minRate == maxRate {
+	if len(samples) < 2 || eligibleCount == 0 {
 		return factors
 	}
-	for id, rate := range rates {
-		factors[id] = 1 - (rate-minRate)/(maxRate-minRate)
+
+	allEqual := true
+	positiveLogs := make([]float64, 0, len(samples))
+	for i, sample := range samples {
+		if i > 0 && sample.rate != samples[0].rate {
+			allEqual = false
+		}
+		if sample.rate > 0 {
+			positiveLogs = append(positiveLogs, math.Log(sample.rate))
+		}
+	}
+	if allEqual || len(positiveLogs) == 0 {
+		return factors
+	}
+
+	sort.Float64s(positiveLogs)
+	middle := len(positiveLogs) / 2
+	medianLog := positiveLogs[middle]
+	if len(positiveLogs)%2 == 0 {
+		medianLog = (positiveLogs[middle-1] + positiveLogs[middle]) / 2
+	}
+	center := math.Exp(medianLog)
+	if center <= 0 || math.IsNaN(center) || math.IsInf(center, 0) {
+		return factors
+	}
+
+	coverage := float64(len(samples)) / float64(eligibleCount)
+	for _, sample := range samples {
+		rawFactor := 1.0
+		if sample.rate > 0 {
+			rawFactor = 1 / (1 + sample.rate/center)
+		}
+		factors[sample.accountID] = clamp01(openAIUpstreamCostNeutralFactor + coverage*(rawFactor-openAIUpstreamCostNeutralFactor))
 	}
 	return factors
 }
@@ -1803,13 +1820,6 @@ func normalizeOpenAICompatiblePlatform(platform string) string {
 		return PlatformGrok
 	}
 	return PlatformOpenAI
-}
-
-func openAICompatiblePlatformFromArgs(platform ...string) string {
-	if len(platform) == 0 {
-		return PlatformOpenAI
-	}
-	return normalizeOpenAICompatiblePlatform(platform[0])
 }
 
 func isOpenAIAccountUpstreamRestrictedByChannel(ctx context.Context, service *OpenAIGatewayService, account *Account, req OpenAIAccountScheduleRequest) bool {

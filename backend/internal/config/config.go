@@ -3020,28 +3020,25 @@ func (c *Config) Validate() error {
 	if c.Gateway.OpenAIHTTP2.FallbackTTLSeconds < 0 {
 		return fmt.Errorf("gateway.openai_http2.fallback_ttl_seconds must be non-negative")
 	}
-	if c.Gateway.OpenAIWS.SchedulerScoreWeights.Priority < 0 ||
-		c.Gateway.OpenAIWS.SchedulerScoreWeights.Load < 0 ||
-		c.Gateway.OpenAIWS.SchedulerScoreWeights.Queue < 0 ||
-		c.Gateway.OpenAIWS.SchedulerScoreWeights.ErrorRate < 0 ||
-		c.Gateway.OpenAIWS.SchedulerScoreWeights.TTFT < 0 ||
-		c.Gateway.OpenAIWS.SchedulerScoreWeights.Reset < 0 ||
-		c.Gateway.OpenAIWS.SchedulerScoreWeights.QuotaHeadroom < 0 ||
-		c.Gateway.OpenAIWS.SchedulerScoreWeights.PreviousResponse < 0 ||
-		c.Gateway.OpenAIWS.SchedulerScoreWeights.SessionSticky < 0 {
-		return fmt.Errorf("gateway.openai_ws.scheduler_score_weights.* must be non-negative")
+	weights := c.Gateway.OpenAIWS.SchedulerScoreWeights
+	for _, weight := range []float64{
+		weights.Priority, weights.Load, weights.Queue, weights.ErrorRate, weights.TTFT,
+		weights.Reset, weights.QuotaHeadroom, weights.UpstreamCost,
+		weights.PreviousResponse, weights.SessionSticky,
+	} {
+		if weight < 0 || math.IsNaN(weight) || math.IsInf(weight, 0) {
+			return fmt.Errorf("gateway.openai_ws.scheduler_score_weights.* must be non-negative and finite")
+		}
 	}
-	weightSum := c.Gateway.OpenAIWS.SchedulerScoreWeights.Priority +
-		c.Gateway.OpenAIWS.SchedulerScoreWeights.Load +
-		c.Gateway.OpenAIWS.SchedulerScoreWeights.Queue +
-		c.Gateway.OpenAIWS.SchedulerScoreWeights.ErrorRate +
-		c.Gateway.OpenAIWS.SchedulerScoreWeights.TTFT +
-		c.Gateway.OpenAIWS.SchedulerScoreWeights.Reset +
-		c.Gateway.OpenAIWS.SchedulerScoreWeights.QuotaHeadroom +
-		c.Gateway.OpenAIWS.SchedulerScoreWeights.PreviousResponse +
-		c.Gateway.OpenAIWS.SchedulerScoreWeights.SessionSticky
+	weightSum := weights.BaseWeightSum()
 	if weightSum <= 0 {
 		return fmt.Errorf("gateway.openai_ws.scheduler_score_weights must not all be zero")
+	}
+	if math.IsNaN(weightSum) || math.IsInf(weightSum, 0) {
+		return fmt.Errorf("gateway.openai_ws.scheduler_score_weights base-weight sum must be finite")
+	}
+	if totalWeightSum := weights.TotalWeightSum(); math.IsNaN(totalWeightSum) || math.IsInf(totalWeightSum, 0) {
+		return fmt.Errorf("gateway.openai_ws.scheduler_score_weights total-weight sum must be finite")
 	}
 	schedulerMode := strings.ToLower(strings.TrimSpace(c.Gateway.OpenAIWS.SchedulerMode))
 	switch schedulerMode {

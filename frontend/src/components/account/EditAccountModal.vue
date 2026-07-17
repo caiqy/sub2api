@@ -1590,6 +1590,23 @@
         </div>
       </div>
 
+      <div
+        v-if="account?.platform === 'openai' && account?.type === 'apikey'"
+        class="flex items-center justify-between gap-4 border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div>
+          <label class="input-label mb-0">{{ t('admin.accounts.upstreamBilling.autoProbe') }}</label>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.upstreamBilling.autoProbeHint') }}
+          </p>
+        </div>
+        <Toggle
+          v-model="upstreamBillingAutoProbeEnabled"
+          data-testid="upstream-billing-auto-probe"
+          :aria-label="t('admin.accounts.upstreamBilling.autoProbe')"
+        />
+      </div>
+
       <!-- Anthropic API Key 自动透传开关 -->
       <div
         v-if="account?.platform === 'anthropic' && account?.type === 'apikey'"
@@ -2537,6 +2554,7 @@ import type { Account, Proxy, AdminGroup, CheckMixedChannelResponse, OpenAICompa
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
+import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
@@ -2755,6 +2773,7 @@ const autoPause5hThreshold = ref<number | null>(null)
 const autoPause7dThreshold = ref<number | null>(null)
 const autoPause5hDisabled = ref(false)
 const autoPause7dDisabled = ref(false)
+const upstreamBillingAutoProbeEnabled = ref(false)
 type CodexImageToolMode = 'inherit' | 'enabled' | 'disabled' | 'block'
 const codexImageToolMode = ref<CodexImageToolMode>('inherit')
 type AnthropicAPIKeyAuthScheme = 'x_api_key' | 'authorization_bearer'
@@ -3143,6 +3162,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   autoPause7dThreshold.value = typeof extra?.auto_pause_7d_threshold === 'number' ? extra.auto_pause_7d_threshold * 100 : null
   autoPause5hDisabled.value = extra?.auto_pause_5h_disabled === true
   autoPause7dDisabled.value = extra?.auto_pause_7d_disabled === true
+  upstreamBillingAutoProbeEnabled.value = extra?.upstream_billing_probe_enabled === true
 
   // Load OpenAI passthrough toggle (OpenAI OAuth/SetupToken/API Key)
   openaiPassthroughEnabled.value = false
@@ -4081,6 +4101,9 @@ function applyOpenAIExtra(extra: Record<string, unknown>) {
       delete extra.openai_responses_mode
     } else {
       extra.openai_responses_mode = openAIResponsesMode.value
+    }
+    if (upstreamBillingAutoProbeEnabled.value || 'upstream_billing_probe_enabled' in extra) {
+      extra.upstream_billing_probe_enabled = upstreamBillingAutoProbeEnabled.value
     }
   }
 

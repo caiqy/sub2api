@@ -2452,13 +2452,26 @@ func (h *OpenAIGatewayHandler) handleConcurrencyError(c *gin.Context, err error,
 }
 
 func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError, streamStarted bool) {
-	if failoverErr != nil && failoverErr.IsCredentialFailure() {
+	if failoverErr == nil {
+		h.handleFailoverExhaustedSimple(c, http.StatusBadGateway, streamStarted)
+		return
+	}
+	if failoverErr.IsOpenAIRequestBodyTooLarge() {
+		service.SetOpsUpstreamError(c, http.StatusRequestEntityTooLarge, service.OpenAIRequestBodyTooLargeClientMessage, "")
+		h.handleStreamingAwareError(
+			c,
+			http.StatusRequestEntityTooLarge,
+			"invalid_request_error",
+			service.OpenAIRequestBodyTooLargeClientMessage,
+			streamStarted,
+		)
+		return
+	}
+	copyFailoverRetryAfter(c, failoverErr.ResponseHeaders)
+	if failoverErr.IsCredentialFailure() {
 		status, message := credentialFailoverClientResponse(failoverErr)
 		h.handleStreamingAwareError(c, status, "upstream_error", message, streamStarted)
 		return
-	}
-	if failoverErr != nil {
-		copyFailoverRetryAfter(c, failoverErr.ResponseHeaders)
 	}
 	statusCode := failoverErr.StatusCode
 	responseBody := failoverErr.ResponseBody

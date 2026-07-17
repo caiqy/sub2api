@@ -186,7 +186,10 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		systemRaw, _ := parsed.SystemValue()
 		systemPromptInjectionEnabled, systemPrompt, systemPromptBlocks := s.claudeOAuthSystemPromptInjectionSettings(ctx)
 		if systemPromptInjectionEnabled {
-			if err := replaceBody(rewriteSystemForNonClaudeCodeWithPromptBlocks(body, systemRaw, systemPrompt, systemPromptBlocks)); err != nil {
+			if strings.Contains(strings.ToLower(parsed.Model), "haiku") && strings.TrimSpace(systemPromptBlocks) == "" {
+				systemPromptBlocks = `[{"type":"text","text":"{billing_header}"},{"type":"text","text":"{claude_code_system_prompt}","cache_control":true}]`
+			}
+			if err := replaceBody(rewriteSystemForNonClaudeCodeWithPromptBlocks(body, systemRaw, systemPrompt, systemPromptBlocks, true)); err != nil {
 				return nil, err
 			}
 			systemRewritten = true

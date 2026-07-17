@@ -391,7 +391,7 @@ func (s *GatewayService) applyClaudeCodeOAuthMimicryToBody(
 	systemPromptInjectionEnabled, systemPrompt, systemPromptBlocks := s.claudeOAuthSystemPromptInjectionSettings(ctx)
 	systemRewritten := false
 	if systemPromptInjectionEnabled {
-		body = rewriteSystemForNonClaudeCodeWithPromptBlocks(body, normalizeSystemParam(systemRaw), systemPrompt, systemPromptBlocks)
+		body = rewriteSystemForNonClaudeCodeWithPromptBlocks(body, normalizeSystemParam(systemRaw), systemPrompt, systemPromptBlocks, false)
 		systemRewritten = true
 	}
 
@@ -680,11 +680,11 @@ func injectClaudeCodePrompt(body []byte, system any) []byte {
 // 无法通过检测，因为后续内容仍为非 Claude Code 格式。
 // 策略：将原始 system prompt 提取并注入为 user/assistant 消息对，system 仅保留 Claude Code 标识。
 func rewriteSystemForNonClaudeCode(body []byte, system any) []byte {
-	return rewriteSystemForNonClaudeCodeWithPromptBlocks(body, system, "", "")
+	return rewriteSystemForNonClaudeCodeWithPromptBlocks(body, system, "", "", false)
 }
 
 func rewriteSystemForNonClaudeCodeWithPrompt(body []byte, system any, expansionPrompt string) []byte {
-	return rewriteSystemForNonClaudeCodeWithPromptBlocks(body, system, expansionPrompt, "")
+	return rewriteSystemForNonClaudeCodeWithPromptBlocks(body, system, expansionPrompt, "", false)
 }
 
 type claudeOAuthSystemPromptBlockConfig struct {
@@ -854,21 +854,25 @@ func ValidateClaudeOAuthSystemPromptBlocksConfig(raw string) error {
 	return nil
 }
 
-func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expansionPrompt string, blocksConfig string) []byte {
+func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expansionPrompt string, blocksConfig string, preserveBillingInstruction bool) []byte {
 	system = normalizeSystemParam(system)
 	expansionPrompt = defaultClaudeOAuthExpansionPrompt(expansionPrompt)
 
 	// 1. 提取原始 system prompt 文本
 	var originalSystemText string
+	hadBillingAttribution := false
 	switch v := system.(type) {
 	case string:
 		originalSystemText = strings.TrimSpace(v)
+		hadBillingAttribution = strings.Contains(originalSystemText, claudeCodeBillingHeaderPrefix)
 	case []any:
 		var parts []string
 		for _, item := range v {
 			if m, ok := item.(map[string]any); ok {
 				if text, ok := m["text"].(string); ok && strings.TrimSpace(text) != "" {
-					if strings.HasPrefix(strings.TrimSpace(text), "x-anthropic-billing-header:") {
+					isBillingAttribution := strings.HasPrefix(strings.TrimSpace(text), "x-anthropic-billing-header")
+					hadBillingAttribution = hadBillingAttribution || isBillingAttribution
+					if isBillingAttribution && !preserveBillingInstruction {
 						continue
 					}
 					parts = append(parts, text)
@@ -899,7 +903,7 @@ func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expa
 		logger.LegacyPrintf("service.gateway", "Warning: failed to build default Claude OAuth system blocks: %v", blockErr)
 		return body
 	}
-	if strings.TrimSpace(blocksConfig) == "" && len(systemBlocks) == 3 {
+	if hadBillingAttribution && strings.TrimSpace(blocksConfig) == "" && len(systemBlocks) == 3 {
 		identity, err := marshalAnthropicSystemTextBlock(claudeCodeSystemPrompt, true)
 		if err != nil {
 			return body
