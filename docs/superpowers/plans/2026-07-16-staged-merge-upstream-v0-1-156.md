@@ -772,19 +772,19 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
 - 修改：`docs/superpowers/reports/2026-07-16-staged-merge-upstream-v0-1-156-validation.md`
 - 审查：任务 3 中每个能力行记录的实际入口、调用链和测试文件
 
-- [ ] **步骤 1：完成关键能力的最终结论**
+- [x] **步骤 1：完成关键能力的最终结论**
 
   对 scheduler、各平台 Sticky、fallback/WaitPlan、DB recheck、网关转换与透传、终止 usage、privacy、image capability、运行时热更新、请求体重放/清理、用户资源控制和前端本地功能，逐项核验：入口仍可到达、边界条件仍成立、自动或人工证据可复现、每个 release 阶段结果明确。
 
-- [ ] **步骤 2：完成生成与发布相关结论**
+- [x] **步骤 2：完成生成与发布相关结论**
 
   对版本、Go/前端依赖、配置默认值、Ent、Wire、migration 逐项链接任务 19 的命令和人工审查。将本地首 Token 超时写为唯一 `approved-removal`，写明上游 HTTP/客户端 WebSocket 替代行为和已批准不保留的上游 WebSocket 首输出 watchdog。
 
-- [ ] **步骤 3：处理未批准的能力冲突**
+- [x] **步骤 3：处理未批准的能力冲突**
 
   预期：没有“未解释”或“默认接受”结论。发现不可共存的未批准语义时，停止并向用户提交行为差异和可选保留策略；不得以完成最终审查为由继续。
 
-- [ ] **步骤 4：提交最终能力矩阵结论**
+- [x] **步骤 4：提交最终能力矩阵结论**
 
   canonical 报告逐项链接入口、调用链、阶段证据和 Task 19 元数据结论；只提交报告 `docs: finalize capability matrix review`。
 
