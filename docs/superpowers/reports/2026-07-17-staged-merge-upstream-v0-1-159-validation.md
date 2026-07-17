@@ -158,6 +158,14 @@
 - 本次两文件 follow-up 未重新运行 `make test`；此前 Task 27 full gate 仍为 `make test` 退出 0（189 个 Vitest 文件 / 1454 个测试）。未合并 v0.1.158/v0.1.159，未 push、release 或 deploy。
 - 自审：`.comet/current-change.json` 当前为未跟踪文件，按最新用户指令保留；未加入任何提交。
 
+### Task 28 v0.1.157 阶段门禁
+- 起始提交 `e41ae036f21cde0fff0ec4086da4ddd2c1b49849`；仅关闭 v0.1.157 门禁，未开始 v0.1.158/v0.1.159 合并，未 push、release 或 deploy。
+- `make test` 退出 0：后端 Go 测试与 `golangci-lint` 通过；前端 lint/typecheck 通过；Vitest 为 189 个测试文件、1456 个测试通过。测试输出保留既有 `router-link`、预期错误路径、intlify 和 Browserslist 数据过期警告，无失败断言。
+- `pnpm --dir frontend run build` 退出 0：983 个模块完成生产构建（32.74 秒）。保留既有 Browserslist 数据过期、动态导入 chunk 和大于 500 kB chunk 告警。
+- `make -C backend generate` 退出 0；`git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` 无输出、退出 0，Ent/Wire 无生成 diff。
+- `git diff --check` 和 `git diff --name-only --diff-filter=U` 均无输出、退出 0；冲突标记 `git grep` 无匹配输出（无匹配时 `git grep` 返回 1），未发现未合并文件或真实冲突标记。
+- 能力矩阵无 `gap`：当前行为已由 `protected` 断言覆盖，目标 tag 新入口仍按既定 `manual` 合并后验收，已批准移除项维持 `approved-removal`。Task 29 获准开始 v0.1.158 阶段。
+
 ## v0.1.158
 未开始合并。
 
