@@ -1,17 +1,17 @@
 # Subagent Progress
 
 - Change: `staged-merge-upstream-v0-1-156`
-- Plan task: `Task 20：逐项完成完整能力矩阵审查（OpenSpec 6.2）`
-- OpenSpec task: `6.2 逐项完成 scheduler、Sticky、fallback/WaitPlan、DB recheck、网关转换与透传、privacy、image capability、运行时热更新、请求体生命周期、用户资源控制和前端本地功能能力矩阵`
-- Phase: `done`
+- Plan task: `Task 21：执行最终自动验证与工作树静态检查（OpenSpec 6.3）`
+- OpenSpec task: `6.3 运行 make test、前端 build、必要的生成代码复验、git diff --check 和冲突标记扫描`
+- Phase: `implementing`
 - Review mode: `thorough`
 - Review/fix round: `0/2`
-- Implementer status: `DONE`
-- Implementation commit: `549174380 docs: finalize capability matrix review`
-- Changed files: `canonical report only`
-- Evidence: `protected 11；manual 4；approved-removal 1；gap/unexplained 0`
-- TDD: `exempt（只读能力与文档审查）`
-- Task reviewer: `Approved（09a3e3f4e traceability follow-up 后复审）`
+- Implementer status: `dispatched`
+- Implementation commit: `pending`
+- Changed files: `pending`
+- Evidence: `pending`
+- TDD: `exempt（只运行既有最终门禁）`
+- Task reviewer: `pending`
 - Unresolved findings: `none`
-- Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-20-brief.md`
-- Report: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-20-report.md`
+- Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-21-brief.md`
+- Report: `.superpowers/sdd/staged-merge-upstream-v0-1-156-task-21-report.md`

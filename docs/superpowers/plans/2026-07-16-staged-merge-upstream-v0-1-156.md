@@ -815,6 +815,10 @@ base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
   ```
   预期：无 whitespace 错误、无 unmerged、无真实冲突标记；工作树只保留报告和本 change 任务允许的预期文档变更。环境限制必须逐条记录为未执行，不得标记通过。
 
+- [ ] **步骤 3：提交最终自动验证证据**
+
+  全部既定门禁通过后只提交 canonical `docs: record final automated verification`；Docker integration 明确保持未执行，不影响本地非 Docker 门禁结论。
+
 ### Task 22：验证 Git 拓扑、阶段顺序和最终审查边界（OpenSpec 6.4）
 
 **文件：**
