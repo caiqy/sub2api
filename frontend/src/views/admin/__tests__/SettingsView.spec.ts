@@ -928,6 +928,26 @@ describe("admin SettingsView payment visible method controls", () => {
     );
   });
 
+  it("defaults an empty OAuth scheduling reference multiplier", async () => {
+    const wrapper = mountView();
+
+    await flushPromises();
+    await wrapper
+      .get('[data-testid="openai-low-rate-priority-toggle"]')
+      .setValue(true);
+    await wrapper
+      .get('[data-testid="openai-oauth-scheduling-rate-multiplier"]')
+      .setValue("");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        openai_oauth_scheduling_rate_multiplier: 1,
+      }),
+    );
+  });
+
   it("passes translated upload and remove labels to the payment help image uploader", async () => {
     const wrapper = mountView();
 

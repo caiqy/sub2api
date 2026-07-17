@@ -10054,8 +10054,9 @@ async function saveSettings() {
       openai_low_upstream_rate_priority_enabled:
         form.openai_low_upstream_rate_priority_enabled,
       openai_oauth_scheduling_rate_multiplier:
-        Number.isFinite(Number(form.openai_oauth_scheduling_rate_multiplier))
-          ? Number(form.openai_oauth_scheduling_rate_multiplier)
+        typeof form.openai_oauth_scheduling_rate_multiplier === "number" &&
+        Number.isFinite(form.openai_oauth_scheduling_rate_multiplier)
+          ? form.openai_oauth_scheduling_rate_multiplier
           : 1,
       openai_advanced_scheduler_sticky_weighted_enabled:
         form.openai_advanced_scheduler_sticky_weighted_enabled,
