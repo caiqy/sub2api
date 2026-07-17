@@ -108,6 +108,31 @@
 - RED: `go -C backend test ./internal/server/routes -run 'AsyncImage|ImageTask|images.*async' -count=1` failed because `POST /v1/images/generations/async` was absent.
 - GREEN: `go -C backend test ./internal/server/routes -run '^TestGatewayRoutesAsyncImagesPathsAreRegistered$' -count=1` and `go -C backend test ./internal/handler -run '^TestAsyncImageHandler' -count=1` passed.
 
+### Task 27 regression review and repair
+- 比较 `fa656646d^1`、`fa656646d^2` 与当前分支后，确认以下失败来自 merge 后本地融合路径，而非 v0.1.157 tag 基线：Anthropic OAuth mimic 默认 system block、OpenAI scheduler top-K/已满溢出、Grok Responses image declaration gate、key billing route、settings 读写和 SettingsView 绑定。
+- 最小修复保留默认 OAuth mimic 的 billing + Claude Code 两块 system 形态；scheduler 在 DB recheck 未加载 `GroupIDs` 时不把关系未知误判为组外，同时继续拒绝已加载但不匹配的关系；Grok 仅把明确图片请求送入图片权限门；恢复 `/v1/sub2api/billing`；补齐 scheduler setting 的 handler DTO/持久化和 SettingsView payload/控件。
+- `localesMessageCompile.spec.ts` 原始失败为 `Failed to resolve import "@intlify/message-compiler"`。该包已由 `vue-i18n` 锁定为 transitive `9.14.5`，现作为相同版本的直接 dev dependency 声明，供 pnpm isolated layout 下的测试解析。
+
+#### Task 27 定向 RED/GREEN
+- RED 后 GREEN：`go -C backend test ./internal/service -run '^(TestGatewayService_AnthropicOAuthMimic_RewritesSystemWithBillingBlock|TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceTopKFallback|TestAdvancedCostSchedulerUsesTopKOverflowWhenPreferredAccountIsKnownFull|TestAdvancedCostSchedulerKeepsCompactSupportedOverflowAheadOfUnknown)$' -count=1` 退出 0。
+- RED 后 GREEN：`pnpm --dir frontend exec vitest run src/views/admin/__tests__/SettingsView.spec.ts -t 'submits the admin recharge affiliate rebate setting|places and explains rate controls for both scheduling modes'` 退出 0。
+
+#### Task 27 结构审查
+- 异步图片：route 位于 API-key/group middleware 之后；`AsyncImageHandler` 以 `UserID + APIKeyID` 限制任务 owner，并以对象存储启用作为总开关，避免 base64 写入 Redis。Wire 生成物注册 Redis task store、image storage、task service 和 handler。
+- 图片计费：migration `178` 增加 `channel_model_pricing.image_input_price`（缺省回退文本输入价），`179` 增加 usage log 图片 token/cost 字段；billing、usage DTO 和 repository 高风险测试通过。
+- 安全路径：audit middleware 捕获受限大小 body 后脱敏并回填；router 安装 session binding context；admin JWT 在权限判断前执行 session binding；step-up 对管理员 API key、未启用 TOTP、授权查询错误均 fail-closed。
+- Responses/Grok/Agent Identity：Responses HTTP/WS 统一使用 platform-aware image intent；Grok 的 namespace/Responses Lite declarations 本身不再触发图片权限，明确图片 model/native tool/choice 仍触发。first-output spool 先 unlink，再在 cleanup 失败时不把已提交流改为失败。Wire providers 将 Agent Identity websocket service 注入 quota、usage 和 account-test service。
+- migrations `177` 至 `180` 均存在且顺序连续，覆盖 subscription currency、图片输入定价、图片 usage 账单和 append-only audit logs。
+
+#### Task 27 高风险回归命令
+- `go -C backend test ./internal/service -run 'Image|Billing|Scheduler|Audit|StepUp|Session|FirstOutput|WebSocket' -count=1` 退出 0。
+- `go -C backend test ./internal/handler/... -run 'Image|Billing|Audit|StepUp|Account|Setting' -count=1` 退出 0。
+- `go -C backend test ./internal/repository -run 'Image|Billing|Scheduler|Audit|Probe|ChannelMonitor' -count=1` 退出 0。
+- `go -C backend test ./internal/server/... -run 'Audit|Session|StepUp|APIKey|ImageTask' -count=1` 退出 0。
+- `pnpm --dir frontend exec vitest run src/components/account/__tests__/UpstreamBillingRateCell.spec.ts src/views/admin/__tests__/SettingsView.spec.ts src/views/admin/__tests__/ChannelMonitorView.duplicate.spec.ts src/i18n/__tests__/localesMessageCompile.spec.ts` 退出 0，4 files / 33 tests 通过。
+- 前端测试仍输出既有 `router-link` stub、jsdom XHR 和 Browserslist data 过期警告；无失败断言，未扩大本任务范围修复测试基建告警。
+- 附加 `pnpm --dir frontend run typecheck` 仍退出 2：`@/types` 缺少 upstream billing probe 类型、credentialsBuilder 缺少 header override exports、UsageLog 缺少图片输入字段，以及本任务前已存在的 SettingsView `session_binding_enabled` / `audit_log_retention_days` form 缺口。上述路径不在 Task 27 diff 或指定高风险命令内，未在本任务扩展修复；必须在后续前端类型契约任务单独收敛。
+
 ## v0.1.158
 未开始合并。
 
