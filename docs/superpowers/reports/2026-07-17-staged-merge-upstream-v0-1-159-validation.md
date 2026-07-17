@@ -222,6 +222,33 @@
 - `make test` 退出 0：后端测试与 lint、前端 lint/typecheck、Vitest 194 files / 1493 tests 通过。
 - `pnpm --dir frontend run build` 退出 0，987 个模块完成构建。保留既有 Browserslist、dynamic import 与大 chunk 警告。
 
+### Task 33 v0.1.159 能力复审
+- 起始提交：`9d2d4a8e4`。仅审查 v0.1.159 合并后的高风险能力；未修改业务或测试代码，未开始 Task 34/full gate，未合并 `upstream/main` 或 tag 后提交，未 push、release 或 deploy。
+- trusted proxy/IP：`GetSecurityClientIP` 以 `TrustForwardedIPForAPIKeyACL` 为唯一开关；`SessionBindingContext(cfg)` 注入的结果供会话哈希、session mismatch 审计、常规 audit 和 API-key ACL 共用。关闭开关时使用 Gin `trusted_proxies` 链，开启时使用转发头；缺失注入时保持历史 trusted-proxies 回退。
+- alpha/search：OpenAI API-key 账号可参与 `alpha_search` 调度，显式 `chat_completions` 能力同样允许；Grok 仍排除。API-key 上游 404/405 触发 failover 且不写账号错误状态，OAuth 404 保持透传；仅 2xx 返回 `WebSearchCalls: 1`，非 2xx 不计费。
+- Grok/图片/前端：Responses 对已知 Free OAuth 的合格 function tools 在 tenant/model 隔离 cache identity 后补全 `web_search`/`x_search`；非合格工具、付费/未知/API-key 不变。图片意图、API-key `base_url` 的安全 origin 链接、三个 Stripe `@stripe/stripe-js/pure` 动态 import 和 `vendor-stripe` chunk 均保持预期行为。
+- 结论：未发现能力回归，无业务修复提交。
+
+#### Task 33 精确测试
+
+```text
+go -C backend test ./internal/pkg/ip ./internal/server/middleware -count=1
+PASS (ip package has no default-tag tests; middleware passed)
+
+go -C backend test ./internal/service -run 'AlphaSearch|Scheduler|Grok|Image|Account' -count=1
+PASS
+
+pnpm --dir frontend exec vitest run src/views/admin/__tests__/AccountsView.sparkShadow.spec.ts src/views/user/__tests__/StripePaymentView.spec.ts src/views/user/__tests__/stripeLazyLoading.spec.ts
+PASS (3 files, 13 tests)
+```
+
+- 补充 `-tags unit` IP/session/API-key/audit、alpha/search side-effect、Grok cache identity/function-tool 和图片定向测试均通过。
+
+#### Task 33 manual/残余项
+- 生产反代拓扑下的可信代理配置、第三方 API-key relay 对 alpha/search 404/405 的实际行为，以及 Grok Free OAuth 的真实上游 cache 命中仍需运行环境人工验收。
+- Task 34/full gate 未执行；本项复审不能替代完整 Go lint、前端 typecheck/build 或全量 Vitest 门禁。
+- 前端定向测试保留既有 Browserslist data 过期警告，无失败断言。
+
 ### Task 31 v0.1.158 阶段门禁
 - 起始提交：`1f51f4a382afb2422beae1ef4ad2bd7b5df488ee`；仅关闭 v0.1.158 阶段门禁，未合并 v0.1.159，未 push、release 或 deploy。
 - `make test` 退出 0：后端 Go 测试与 lint 通过；前端 lint/typecheck 通过；Vitest 为 193 个测试文件、1488 个测试通过。
@@ -306,5 +333,5 @@ git diff --check
 - 已复核首轮报告无 diff；已知 Task 25 提交为 `fe4037449`、`bdeb1d1af`、`668997d77`，其中 `bdeb1d1af` 含最小 characterization test。后续文档收敛以指定 Git range 核验，不含 `.comet/current-change.json`。
 
 ## 残余风险与未执行事项
-- 本任务仅固定 refs 和建立扩展前基线；v0.1.157、v0.1.158、v0.1.159 的合并和能力验证均未执行。
+- Task 24 当时仅固定 refs 和建立扩展前基线；后续已完成 v0.1.157、v0.1.158、v0.1.159 合并与分段验证。Task 33 已关闭 v0.1.159 能力复审，Task 34/full gate 仍未执行。
 - 构建保留现有 Browserslist 数据过期、动态导入与 chunk 大小告警；本次命令均成功，未将其作为本任务范围内的修复项。
