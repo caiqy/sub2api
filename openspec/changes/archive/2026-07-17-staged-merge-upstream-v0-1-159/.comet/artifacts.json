@@ -4,5 +4,6 @@
   "openspec_tasks": "openspec/changes/staged-merge-upstream-v0-1-159/tasks.md",
   "openspec_delta_spec": "openspec/changes/staged-merge-upstream-v0-1-159/specs/openai-first-token-timeout/spec.md",
   "handoff_context": "openspec/changes/staged-merge-upstream-v0-1-159/.comet/handoff/design-context.json",
-  "handoff_markdown": "openspec/changes/staged-merge-upstream-v0-1-159/.comet/handoff/design-context.md"
+  "handoff_markdown": "openspec/changes/staged-merge-upstream-v0-1-159/.comet/handoff/design-context.md",
+  "archive_directory": "openspec/changes/archive/2026-07-17-staged-merge-upstream-v0-1-159"
 }

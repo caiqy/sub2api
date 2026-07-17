@@ -2,6 +2,7 @@
 change: staged-merge-upstream-v0-1-159
 design-doc: docs/superpowers/specs/2026-07-17-staged-merge-upstream-v0-1-159-design.md
 base-ref: d5f8192d32d9840d63477c24d4a567abb8cb4a90
+archived-with: 2026-07-17-staged-merge-upstream-v0-1-159
 ---
 
 # 分段合并上游 v0.1.159 实施计划
