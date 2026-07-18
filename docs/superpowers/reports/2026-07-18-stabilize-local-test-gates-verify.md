@@ -22,6 +22,8 @@
 - `pnpm test:run` 通过：194 个测试文件、1493 个测试；`pnpm lint:check` 与 `pnpm typecheck` 通过。
 - `go build ./...` 与 `pnpm build` 通过。
 - `openspec validate --all --strict` 通过：12/12；`git diff --check 48e4e66acdad975b4b36fdc6f393c98909bb8fcc...HEAD` 通过。
+- 已本地合并到 `main`，合并提交为 `54c680df7`；唯一冲突保留 `origin/main` 已发布的 `VERSION=0.1.159.4`，未回退到 feature 中的 `0.1.159.1`。
+- 合并后在 `main` 重新执行两套 Go 全量测试、Go lint/build、前端 194 文件 1493 测试、前端 lint/typecheck/build、OpenSpec strict 12/12 和 `git diff --check`，均通过。
 
 ## Issues
 
@@ -33,4 +35,4 @@
 
 ## Final Assessment
 
-所有检查均已通过，可以进入分支处理。
+所有检查均已通过，分支已本地合并，可以进入归档。
