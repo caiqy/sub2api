@@ -2440,19 +2440,7 @@ func (s *OpenAIGatewayService) isOpenAIAccountTransportCompatible(account *Accou
 	return s.getOpenAIWSProtocolResolver().Resolve(account).Transport == requiredTransport
 }
 
-func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(accountID int64, args ...any) {
-	model := ""
-	success := false
-	var firstTokenMs *int
-	// ponytail: merge bridge for legacy (success, firstTokenMs) and tag (model, success, firstTokenMs) callers.
-	if len(args) == 2 {
-		success, _ = args[0].(bool)
-		firstTokenMs, _ = args[1].(*int)
-	} else if len(args) == 3 {
-		model, _ = args[0].(string)
-		success, _ = args[1].(bool)
-		firstTokenMs, _ = args[2].(*int)
-	}
+func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(accountID int64, model string, success bool, firstTokenMs *int) {
 	if success {
 		s.clearOpenAIAccountModelTransientState(accountID, normalizeOpenAIAccountModelTransientModel(model))
 	}

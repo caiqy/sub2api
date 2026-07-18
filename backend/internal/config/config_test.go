@@ -64,6 +64,28 @@ func TestLoadForBootstrapAllowsMissingJWTSecret(t *testing.T) {
 	}
 }
 
+func TestLoadImageStorage_Defaults(t *testing.T) {
+	resetViperWithJWTSecret(t)
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.False(t, cfg.ImageStorage.Enabled)
+	require.Equal(t, "auto", cfg.ImageStorage.Region)
+	require.Equal(t, "images/", cfg.ImageStorage.Prefix)
+	require.False(t, cfg.ImageStorage.ForcePathStyle)
+	require.Equal(t, 24, cfg.ImageStorage.PresignExpiry)
+	require.Equal(t, int64(33554432), cfg.ImageStorage.MaxDownloadByte)
+}
+
+func TestLoadImageStorage_EnabledEnvOverride(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("IMAGE_STORAGE_ENABLED", "true")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.True(t, cfg.ImageStorage.Enabled)
+}
+
 func TestNormalizeRunMode(t *testing.T) {
 	tests := []struct {
 		input    string

@@ -1,0 +1,6 @@
+{
+  "openspec_proposal": "openspec/changes/fix-staged-merge-runtime-regressions/proposal.md",
+  "openspec_design": "openspec/changes/fix-staged-merge-runtime-regressions/design.md",
+  "openspec_tasks": "openspec/changes/fix-staged-merge-runtime-regressions/tasks.md",
+  "openspec_delta_spec": "openspec/changes/fix-staged-merge-runtime-regressions/specs/image-storage-configuration/spec.md"
+}

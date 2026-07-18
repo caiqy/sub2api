@@ -100,6 +100,28 @@ func TestOpenAIHandleStreamingAwareError_JSONEscaping(t *testing.T) {
 	}
 }
 
+func TestOpenAIForwardSucceededForScheduling_UsesUpstreamTerminalEvent(t *testing.T) {
+	tests := []struct {
+		name   string
+		result *service.OpenAIForwardResult
+		want   bool
+	}{
+		{name: "nil result", want: true},
+		{name: "http result", result: &service.OpenAIForwardResult{}, want: true},
+		{name: "completed", result: &service.OpenAIForwardResult{OpenAIWSMode: true, UpstreamTerminalEvent: "response.completed"}, want: true},
+		{name: "done", result: &service.OpenAIForwardResult{OpenAIWSMode: true, UpstreamTerminalEvent: "response.done"}, want: true},
+		{name: "failed", result: &service.OpenAIForwardResult{OpenAIWSMode: true, UpstreamTerminalEvent: "response.failed"}},
+		{name: "incomplete", result: &service.OpenAIForwardResult{OpenAIWSMode: true, UpstreamTerminalEvent: "response.incomplete"}},
+		{name: "cancelled", result: &service.OpenAIForwardResult{OpenAIWSMode: true, UpstreamTerminalEvent: "response.cancelled"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, openAIForwardSucceededForScheduling(tt.result))
+		})
+	}
+}
+
 func TestOpenAIHandleStreamingAwareError_NonStreaming(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
