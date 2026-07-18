@@ -49,18 +49,28 @@ type RequestBodyHandleOptions struct {
 }
 
 type RequestBodyHandle struct {
-	mu          sync.Mutex
-	size        int64
-	hash        string
-	preview     string
-	memory      []byte
-	spoolPath   string
-	spoolActive bool
-	cleaned     bool
-	retrying    bool
+	mu           sync.Mutex
+	size         int64
+	hash         string
+	preview      string
+	memory       []byte
+	spoolPath    string
+	spoolActive  bool
+	spoolReaders int
+	cleaned      bool
+	retrying     bool
 }
 
-type requestBodySpoolReadCloser struct{ io.ReadCloser }
+type requestBodySpoolReadCloser struct {
+	io.ReadCloser
+	state *requestBodySpoolReadCloserState
+}
+
+type requestBodySpoolReadCloserState struct {
+	onClose  func() error
+	once     sync.Once
+	closeErr error
+}
 
 func (r requestBodySpoolReadCloser) Read(p []byte) (int, error) {
 	n, err := r.ReadCloser.Read(p)
@@ -68,6 +78,16 @@ func (r requestBodySpoolReadCloser) Read(p []byte) (int, error) {
 		return n, fmt.Errorf("%w: read spool file: %v", ErrRequestBodySpool, err)
 	}
 	return n, err
+}
+
+func (r requestBodySpoolReadCloser) Close() error {
+	r.state.once.Do(func() {
+		r.state.closeErr = r.ReadCloser.Close()
+		if err := r.state.onClose(); r.state.closeErr == nil {
+			r.state.closeErr = err
+		}
+	})
+	return r.state.closeErr
 }
 
 func NewRequestBodyHandleFromReader(r io.Reader, opts RequestBodyHandleOptions) (*RequestBodyHandle, error) {
@@ -508,7 +528,11 @@ func (h *RequestBodyHandle) Open() (io.ReadCloser, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%w: open spool file: %v", ErrRequestBodySpool, err)
 		}
-		return requestBodySpoolReadCloser{ReadCloser: file}, nil
+		h.spoolReaders++
+		return requestBodySpoolReadCloser{
+			ReadCloser: file,
+			state:      &requestBodySpoolReadCloserState{onClose: h.releaseSpoolReader},
+		}, nil
 	}
 	return io.NopCloser(bytes.NewReader(h.memory)), nil
 }
@@ -566,10 +590,15 @@ func (h *RequestBodyHandle) cleanup(remove func(string) error) error {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.cleaned {
+	if h.cleaned && (!h.spoolActive || h.spoolReaders > 0) {
 		return nil
 	}
 	if h.spoolActive {
+		if h.spoolReaders > 0 {
+			h.memory = nil
+			h.cleaned = true
+			return nil
+		}
 		if err := remove(h.spoolPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
@@ -577,6 +606,24 @@ func (h *RequestBodyHandle) cleanup(remove func(string) error) error {
 	h.memory = nil
 	h.spoolActive = false
 	h.cleaned = true
+	return nil
+}
+
+func (h *RequestBodyHandle) releaseSpoolReader() error {
+	h.mu.Lock()
+	if h.spoolReaders > 0 {
+		h.spoolReaders--
+	}
+	shouldCleanup := h.cleaned && h.spoolActive && h.spoolReaders == 0
+	h.mu.Unlock()
+	if !shouldCleanup {
+		return nil
+	}
+	if err := h.Cleanup(); err != nil {
+		logger.LegacyPrintf("service.request_body_handle", "[RequestBodyHandle] cleanup after reader close failed path=%q err=%v", h.spoolPath, err)
+		h.scheduleCleanupRetry()
+		return err
+	}
 	return nil
 }
 
@@ -593,7 +640,7 @@ func CleanupRequestBodyHandle(h *RequestBodyHandle) {
 
 func (h *RequestBodyHandle) scheduleCleanupRetry() {
 	h.mu.Lock()
-	if h.cleaned || h.retrying {
+	if !h.spoolActive || h.retrying {
 		h.mu.Unlock()
 		return
 	}

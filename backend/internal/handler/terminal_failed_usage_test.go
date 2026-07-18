@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,6 +30,15 @@ type terminalUsageOpenAIEnv struct {
 type terminalUsageGrokAccountRepo struct{ openAIRetryAccountRepoStub }
 
 func (terminalUsageGrokAccountRepo) SetTempUnschedulable(context.Context, int64, time.Time, string) error {
+	return nil
+}
+
+// ponytail: fixture only needs successful Grok quota snapshot and rate-limit persistence.
+func (terminalUsageGrokAccountRepo) UpdateExtra(context.Context, int64, map[string]any) error {
+	return nil
+}
+
+func (terminalUsageGrokAccountRepo) SetRateLimited(context.Context, int64, time.Time) error {
 	return nil
 }
 
@@ -93,54 +103,52 @@ type markingTerminalHTTPUpstream struct {
 	accountIDs []int64
 }
 
-type firstTokenTimeoutHTTPUpstream struct {
+type firstOutputFailoverCloseTrackingBody struct {
+	io.ReadCloser
+	closed chan struct{}
+	once   sync.Once
+}
+
+func (b *firstOutputFailoverCloseTrackingBody) Close() error {
+	b.once.Do(func() { close(b.closed) })
+	return b.ReadCloser.Close()
+}
+
+type firstOutputFailoverHTTPUpstream struct {
 	service.HTTPUpstream
-	calls int
+	accountIDs      []int64
+	firstWriterDone chan struct{}
 }
 
-type firstTokenCreatedHTTPUpstream struct {
-	service.HTTPUpstream
-}
-
-type firstTokenCreatedBody struct {
-	ctx     context.Context
-	emitted bool
-}
-
-func (b *firstTokenCreatedBody) Read(p []byte) (int, error) {
-	if !b.emitted {
-		b.emitted = true
-		return copy(p, "data: {\"type\":\"response.created\"}\n\n"), nil
+func (u *firstOutputFailoverHTTPUpstream) Do(_ *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
+	u.accountIDs = append(u.accountIDs, accountID)
+	if accountID != 1 {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body: io.NopCloser(strings.NewReader(
+				"data: {\"type\":\"response.output_text.delta\",\"delta\":\"replayed\"}\n\n" +
+					"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_replayed\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"replayed\"}]}],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+			)),
+		}, nil
 	}
-	<-b.ctx.Done()
-	return 0, b.ctx.Err()
-}
 
-func (*firstTokenCreatedBody) Close() error { return nil }
-
-func (u firstTokenCreatedHTTPUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	firstBody, firstWriter := io.Pipe()
+	trackedBody := &firstOutputFailoverCloseTrackingBody{ReadCloser: firstBody, closed: make(chan struct{})}
+	go func() {
+		defer close(u.firstWriterDone)
+		defer func() { _ = firstWriter.Close() }()
+		_, _ = firstWriter.Write([]byte("data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_first\"}}\n\n"))
+		<-trackedBody.closed
+	}()
 	return &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-		Body:       &firstTokenCreatedBody{ctx: req.Context()},
+		Body:       trackedBody,
 	}, nil
 }
 
-func (u firstTokenCreatedHTTPUpstream) DoWithTLS(req *http.Request, proxyURL string, accountID int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
-	return u.Do(req, proxyURL, accountID, concurrency)
-}
-
-func (u *firstTokenTimeoutHTTPUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
-	u.calls++
-	select {
-	case <-req.Context().Done():
-		return nil, req.Context().Err()
-	case <-time.After(1500 * time.Millisecond):
-		return nil, errors.New("test upstream fallback timeout")
-	}
-}
-
-func (u *firstTokenTimeoutHTTPUpstream) DoWithTLS(req *http.Request, proxyURL string, accountID int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+func (u *firstOutputFailoverHTTPUpstream) DoWithTLS(req *http.Request, proxyURL string, accountID int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
 	return u.Do(req, proxyURL, accountID, concurrency)
 }
 
@@ -188,7 +196,7 @@ func newTerminalUsageOpenAIEnvWithUpstream(t *testing.T, group *service.Group, a
 		upstream,
 		service.NewDeferredService(accountRepo, nil, 0),
 		nil,
-		nil,
+		service.NewGrokTokenProvider(accountRepo, nil),
 		nil,
 		nil,
 	)
@@ -220,72 +228,34 @@ func (e *terminalUsageOpenAIEnv) router(route string, handler gin.HandlerFunc) *
 	return router
 }
 
-func TestOpenAIGatewayHandler_FirstTokenTimeoutReturns504AndCreatesOneFailedUsage(t *testing.T) {
+func TestOpenAIGatewayHandler_ResponsesFirstOutputTimeoutFailsOverAfterKeepalive(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	group := &service.Group{ID: 10, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
-	account := &service.Account{
-		ID:          110,
-		Name:        "first-token-timeout",
-		Platform:    service.PlatformOpenAI,
-		Type:        service.AccountTypeAPIKey,
-		Status:      service.StatusActive,
-		Schedulable: true,
-		Concurrency: 1,
-		Priority:    1,
-		Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://example.com/v1"},
+	group := &service.Group{ID: 12, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+	accounts := []*service.Account{
+		{ID: 1, Name: "first-output-timeout", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, Credentials: map[string]any{"api_key": "sk-first"}},
+		{ID: 2, Name: "replayed", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "sk-second"}},
 	}
-	upstream := &firstTokenTimeoutHTTPUpstream{}
-	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIChatCompletionsAccountRepoStub{account: account}, upstream)
+	upstream := &firstOutputFailoverHTTPUpstream{firstWriterDone: make(chan struct{})}
+	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: accounts}, upstream)
 	env.handler.cfg.Gateway.OpenAIWS.Enabled = false
-	env.handler.cfg.Gateway.OpenAITextFirstTokenTimeout = 1
-
-	reqBody := `{"model":"gpt-5.4","input":"hello","stream":true}`
-	recorder := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	env.router("/v1/responses", env.handler.Responses).ServeHTTP(recorder, req)
-
-	require.Equal(t, http.StatusGatewayTimeout, recorder.Code, recorder.Body.String())
-	require.Equal(t, "first_token_timeout", gjson.Get(recorder.Body.String(), "error.type").String())
-	require.Contains(t, recorder.Header().Get("Content-Type"), "application/json")
-	require.Equal(t, 1, upstream.calls)
-	select {
-	case log := <-env.usageRepo.created:
-		require.NotNil(t, log)
-		require.NotNil(t, log.DetailSnapshot)
-		require.Contains(t, log.DetailSnapshot.UpstreamResponseBody, `"usage_state":"unknown"`)
-	case <-time.After(2 * time.Second):
-		t.Fatal("首 Token 超时应提交失败 usage")
-	}
-	select {
-	case duplicate := <-env.usageRepo.created:
-		t.Fatalf("首 Token 超时不应重复提交失败 usage: %+v", duplicate)
-	case <-time.After(50 * time.Millisecond):
-	}
-}
-
-func TestOpenAIGatewayHandler_FirstTokenTimeoutSuppressesPreOutputKeepalive(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	group := &service.Group{ID: 11, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
-	account := &service.Account{
-		ID: 111, Name: "first-token-keepalive", Platform: service.PlatformOpenAI,
-		Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true,
-		Concurrency: 1, Priority: 1,
-		Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://example.com/v1"},
-	}
-	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIChatCompletionsAccountRepoStub{account: account}, firstTokenCreatedHTTPUpstream{})
-	env.handler.cfg.Gateway.OpenAIWS.Enabled = false
-	env.handler.cfg.Gateway.OpenAITextFirstTokenTimeout = 2
+	env.handler.cfg.Gateway.OpenAIFirstOutputTimeoutSeconds = 2
 	env.handler.cfg.Gateway.StreamKeepaliveInterval = 1
+	env.handler.maxAccountSwitches = 1
 
 	recorder := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.4","input":"hello","stream":true}`))
 	req.Header.Set("Content-Type", "application/json")
 	env.router("/v1/responses", env.handler.Responses).ServeHTTP(recorder, req)
 
-	require.Equal(t, http.StatusGatewayTimeout, recorder.Code, recorder.Body.String())
-	require.Equal(t, "first_token_timeout", gjson.Get(recorder.Body.String(), "error.type").String())
-	require.Contains(t, recorder.Header().Get("Content-Type"), "application/json")
+	require.Equal(t, []int64{1, 2}, upstream.accountIDs)
+	require.Contains(t, recorder.Body.String(), ":\n\n")
+	require.NotContains(t, recorder.Body.String(), "resp_first")
+	require.Contains(t, recorder.Body.String(), "resp_replayed")
+	select {
+	case <-upstream.firstWriterDone:
+	case <-time.After(time.Second):
+		t.Fatal("first upstream body did not close after first-output timeout")
+	}
 }
 
 func TestOpenAIGatewayHandler_EmbeddingsFailoverExhaustedCreatesFailedUsage(t *testing.T) {
@@ -436,7 +406,7 @@ func TestOpenAIGatewayHandler_PassthroughHTTP400CreatesFailedUsage(t *testing.T)
 	env.router("/v1/responses", env.handler.Responses).ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
-	require.Contains(t, rec.Body.String(), "passthrough rejected payload")
+	require.Contains(t, rec.Body.String(), "Upstream request failed")
 	log := waitForOpenAIFailedUsageLog(t, env.usageRepo)
 	require.NotNil(t, log)
 	require.NotNil(t, log.DetailSnapshot)
@@ -447,7 +417,7 @@ func TestOpenAIGatewayHandler_NativeNonPassthroughResponsesFailedIsNotDuplicated
 	gin.SetMode(gin.TestMode)
 	group := &service.Group{ID: 33, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
 	account := &service.Account{ID: 133, Name: "native-responses", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "sk-test"}, Extra: map[string]any{"use_responses_api": true}}
-	upstreamBody := "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_native_failed\",\"status\":\"failed\",\"error\":{\"code\":\"invalid_request\",\"message\":\"native upstream failure\"}}}\n\n"
+	upstreamBody := "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_native_failed\",\"status\":\"failed\",\"error\":{\"code\":\"invalid_request\",\"message\":\"native upstream failure\"},\"usage\":{\"input_tokens\":17,\"output_tokens\":3}}}\n\n"
 	env := newTerminalUsageOpenAIEnv(t, group, &openAIChatCompletionsAccountRepoStub{account: account}, &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
@@ -460,7 +430,10 @@ func TestOpenAIGatewayHandler_NativeNonPassthroughResponsesFailedIsNotDuplicated
 	env.router("/v1/responses", env.handler.Responses).ServeHTTP(rec, req)
 
 	require.Equal(t, 1, strings.Count(rec.Body.String(), "event: response.failed\n"), rec.Body.String())
-	require.NotNil(t, env.usageRepo.lastLog)
+	log := waitForOpenAIFailedUsageLog(t, env.usageRepo)
+	require.NotNil(t, log)
+	require.Equal(t, 17, log.InputTokens)
+	require.Equal(t, 3, log.OutputTokens)
 	require.Len(t, env.usageRepo.created, 1)
 }
 
@@ -600,12 +573,17 @@ func TestOpenAIGatewayHandler_OrdinaryErrorsRequireUpstreamAttempt(t *testing.T)
 		group := &service.Group{ID: 45, Platform: service.PlatformGrok, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
 		account := &service.Account{ID: 145, Name: "grok-local", Platform: service.PlatformGrok, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"base_url": "https://api.x.ai/v1"}}
 		env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIChatCompletionsAccountRepoStub{account: account}, &openAIChatCompletionsHTTPUpstreamStub{err: errors.New("must not be called")})
+		var requestContext *gin.Context
 
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"grok-imagine","prompt":"hello"}`))
 		req.Header.Set("Content-Type", "application/json")
-		env.router("/v1/images/generations", env.handler.GrokImages).ServeHTTP(rec, req)
+		env.router("/v1/images/generations", func(c *gin.Context) {
+			requestContext = c
+			env.handler.GrokImages(c)
+		}).ServeHTTP(rec, req)
 
+		require.False(t, service.HasOpsUpstreamAttempted(requestContext))
 		require.Nil(t, env.usageRepo.lastLog)
 	})
 
@@ -806,7 +784,7 @@ func newTerminalGatewayMessagesEnvWithGatewayCacheAndGroups(t *testing.T, group 
 	antigravityService := service.NewAntigravityGatewayService(accountRepo, cache, nil, tokenProvider, nil, upstream, settingService, nil)
 	geminiCompatService := service.NewGeminiMessagesCompatService(accountRepo, groupRepo, cache, nil, nil, nil, upstream, antigravityService, cfg)
 	return &terminalGatewayMessagesEnv{
-		handler:     NewGatewayHandler(gatewayService, geminiCompatService, antigravityService, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, settingService),
+		handler:     NewGatewayHandler(gatewayService, nil, geminiCompatService, antigravityService, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, settingService),
 		apiKey:      &service.APIKey{ID: 101, UserID: 202, Status: service.StatusActive, GroupID: &group.ID, User: &service.User{ID: 202, Status: service.StatusActive, Concurrency: 1}, Group: group},
 		usageRepo:   usageRepo,
 		accountRepo: accountRepo,

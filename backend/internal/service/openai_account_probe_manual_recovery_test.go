@@ -17,7 +17,27 @@ func (c *manualRecoverySnapshotCacheStub) GetSnapshot(context.Context, Scheduler
 	return nil, false, nil
 }
 
-func (c *manualRecoverySnapshotCacheStub) SetSnapshot(context.Context, SchedulerBucket, []Account) error {
+func (c *manualRecoverySnapshotCacheStub) CaptureBucketWriteToken(_ context.Context, bucket SchedulerBucket) (SchedulerBucketWriteToken, error) {
+	return SchedulerBucketWriteToken{Bucket: bucket, Epoch: 1}, nil
+}
+
+func (c *manualRecoverySnapshotCacheStub) SetSnapshot(context.Context, SchedulerBucket, SchedulerBucketWriteToken, []Account) error {
+	return nil
+}
+
+func (c *manualRecoverySnapshotCacheStub) RetireBucket(context.Context, SchedulerBucket) error {
+	return nil
+}
+
+func (c *manualRecoverySnapshotCacheStub) ReopenBucket(_ context.Context, bucket SchedulerBucket) (SchedulerBucketWriteToken, error) {
+	return SchedulerBucketWriteToken{Bucket: bucket, Epoch: 1}, nil
+}
+
+func (c *manualRecoverySnapshotCacheStub) TryAcquireGroupLifecycleLease(context.Context, int64, time.Duration) (SchedulerGroupLifecycleLease, bool, error) {
+	return SchedulerGroupLifecycleLease{}, false, nil
+}
+
+func (c *manualRecoverySnapshotCacheStub) ReleaseGroupLifecycleLease(context.Context, SchedulerGroupLifecycleLease) error {
 	return nil
 }
 

@@ -158,7 +158,7 @@ func TestGatewayHandler_GeminiV1BetaModels_ForwardErrorStillCreatesUsageLog(t *t
 		nil,
 		cfg,
 	)
-	h := NewGatewayHandler(gatewayService, geminiCompatService, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
+	h := NewGatewayHandler(gatewayService, nil, geminiCompatService, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 
 	apiKey := &service.APIKey{
 		ID:      101,
@@ -284,7 +284,7 @@ func TestGatewayHandler_GeminiV1BetaModels_FailoverExhaustedStillCreatesUsageLog
 		nil,
 		cfg,
 	)
-	h := NewGatewayHandler(gatewayService, geminiCompatService, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
+	h := NewGatewayHandler(gatewayService, nil, geminiCompatService, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 	h.maxAccountSwitchesGemini = 0
 
 	apiKey := &service.APIKey{
@@ -408,7 +408,7 @@ func TestGatewayHandler_GeminiV1BetaModels_SelectionExhaustedAfterFailoverStillC
 		nil,
 		cfg,
 	)
-	h := NewGatewayHandler(gatewayService, geminiCompatService, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
+	h := NewGatewayHandler(gatewayService, nil, geminiCompatService, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 
 	apiKey := &service.APIKey{
 		ID:      101,

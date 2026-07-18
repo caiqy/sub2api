@@ -386,7 +386,7 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 			available = removeFromAvailable(available, selected.account.ID)
 			continue
 		}
-		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, PlatformOpenAI, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
+		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.GroupID, PlatformOpenAI, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
 		if fresh == nil || !s.isAccountRequestCompatible(ctx, fresh, req) || !accountSatisfiesPrivacyRequirement(fresh, schedGroup) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
 			recordPrivacyRequirementError(ctx, s.service, fresh, schedGroup)
 			available = removeFromAvailable(available, selected.account.ID)
@@ -419,7 +419,7 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 			recordPrivacyRequirementError(ctx, s.service, fresh, schedGroup)
 			continue
 		}
-		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, PlatformOpenAI, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
+		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.GroupID, PlatformOpenAI, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
 		if fresh == nil || !s.isAccountRequestCompatible(ctx, fresh, req) || !accountSatisfiesPrivacyRequirement(fresh, schedGroup) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
 			recordPrivacyRequirementError(ctx, s.service, fresh, schedGroup)
 			continue
@@ -619,7 +619,7 @@ func (s *layeredOpenAIAccountScheduler) recheckSessionStickyAccountFromDB(
 		return nil, true
 	}
 	if s.service.schedulerSnapshot == nil || s.service.accountRepo == nil {
-		fresh := s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, PlatformOpenAI, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
+		fresh := s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.GroupID, PlatformOpenAI, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
 		if fresh == nil {
 			return nil, false
 		}

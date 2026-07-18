@@ -335,9 +335,9 @@ func TestLayered_TTFTPenalty_SharedEvaluatorUsesConsistentGroupBaseline(t *testi
 func TestLayered_TTFTPenaltyUsesGroupLevelBaselineEvenWhenFastestAccountIsRequestIneligible(t *testing.T) {
 	groupID := int64(93001)
 	repo := schedulerTestOpenAIAccountRepo{accounts: []Account{
-		{ID: 21, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, Extra: map[string]any{}},
-		{ID: 22, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, Extra: map[string]any{"privacy_mode": PrivacyModeTrainingOff}},
-		{ID: 23, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 10, Extra: map[string]any{"privacy_mode": PrivacyModeTrainingOff}},
+		{ID: 21, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, GroupIDs: []int64{groupID}, Extra: map[string]any{}},
+		{ID: 22, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, GroupIDs: []int64{groupID}, Extra: map[string]any{"privacy_mode": PrivacyModeTrainingOff}},
+		{ID: 23, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 10, GroupIDs: []int64{groupID}, Extra: map[string]any{"privacy_mode": PrivacyModeTrainingOff}},
 	}}
 	svc := newLayeredTestService(repo.accounts)
 	snapshotCfg := &config.Config{}
@@ -371,6 +371,26 @@ func TestLayered_TTFTPenaltyUsesGroupLevelBaselineEvenWhenFastestAccountIsReques
 	if result.ReleaseFunc != nil {
 		result.ReleaseFunc()
 	}
+}
+
+func TestLayered_GroupedAccountPassesDBFreshRecheck(t *testing.T) {
+	groupID := int64(93002)
+	account := Account{ID: 24, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{groupID}}
+	repo := schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{account}}}
+	svc := newLayeredTestService(repo.accounts)
+	snapshotCfg := &config.Config{}
+	snapshotCfg.Gateway.Scheduling.DbFallbackEnabled = true
+	svc.accountRepo = repo
+	svc.schedulerSnapshot = NewSchedulerSnapshotService(nil, nil, repo, schedulerTestGroupRepo{groups: map[int64]*Group{
+		groupID: {ID: groupID, Name: "grouped-account-recheck"},
+	}}, snapshotCfg)
+	scheduler := svc.getOpenAIAccountScheduler()
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	result, _, err := scheduler.Select(context.Background(), OpenAIAccountScheduleRequest{GroupID: &groupID, RequestedModel: "gpt-5.1"})
+	require.NoError(t, err)
+	require.Equal(t, account.ID, result.Account.ID)
+	result.ReleaseFunc()
 }
 
 func TestLayered_NoAvailableRequestedModelReturnsModelSpecificError(t *testing.T) {
@@ -1047,6 +1067,7 @@ func TestLayered_SessionStickyDoesNotDeleteBindingWhenDBRecheckModelMismatch(t *
 		Schedulable: true,
 		Concurrency: 1,
 		Priority:    0,
+		GroupIDs:    []int64{groupID},
 		Credentials: map[string]any{"model_mapping": map[string]any{"gpt-requested": "gpt-requested"}},
 	}
 	stickyDBAccount := stickySnapshotAccount
@@ -1059,6 +1080,7 @@ func TestLayered_SessionStickyDoesNotDeleteBindingWhenDBRecheckModelMismatch(t *
 		Schedulable: true,
 		Concurrency: 1,
 		Priority:    50,
+		GroupIDs:    []int64{groupID},
 		Credentials: map[string]any{"model_mapping": map[string]any{"gpt-requested": "gpt-requested"}},
 	}
 	repo := schedulerTestOpenAIAccountRepo{accounts: []Account{stickyDBAccount, backupAccount}}
@@ -1115,6 +1137,7 @@ func TestLayered_Layer3RecheckSkipsUpstreamRestrictedAccount(t *testing.T) {
 		Schedulable: true,
 		Concurrency: 1,
 		Priority:    0,
+		GroupIDs:    []int64{groupID},
 		Credentials: map[string]any{"model_mapping": map[string]any{"gpt-5.1": "allowed-upstream"}},
 	}
 	staleDBAccount := staleSnapshotAccount
@@ -1127,6 +1150,7 @@ func TestLayered_Layer3RecheckSkipsUpstreamRestrictedAccount(t *testing.T) {
 		Schedulable: true,
 		Concurrency: 1,
 		Priority:    50,
+		GroupIDs:    []int64{groupID},
 		Credentials: map[string]any{"model_mapping": map[string]any{"gpt-5.1": "allowed-upstream"}},
 	}
 	channelSvc := newSchedulerTestChannelService(Channel{
@@ -1187,6 +1211,7 @@ func TestLayered_WaitPlanFallbackSkipsUpstreamRestrictedAccount(t *testing.T) {
 		Schedulable: true,
 		Concurrency: 1,
 		Priority:    0,
+		GroupIDs:    []int64{groupID},
 		Credentials: map[string]any{"model_mapping": map[string]any{"gpt-5.1": "allowed-upstream"}},
 	}
 	staleDBAccount := staleSnapshotAccount
@@ -1199,6 +1224,7 @@ func TestLayered_WaitPlanFallbackSkipsUpstreamRestrictedAccount(t *testing.T) {
 		Schedulable: true,
 		Concurrency: 1,
 		Priority:    50,
+		GroupIDs:    []int64{groupID},
 		Credentials: map[string]any{"model_mapping": map[string]any{"gpt-5.1": "allowed-upstream"}},
 	}
 	channelSvc := newSchedulerTestChannelService(Channel{
@@ -1256,8 +1282,8 @@ func TestLayered_WaitPlanFallbackSkipsUpstreamRestrictedAccount(t *testing.T) {
 func TestLayered_PreviousResponseStickyHonorsRequirePrivacySet(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(92011)
-	stickyAccount := Account{ID: 920111, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 9, Extra: map[string]any{"openai_apikey_responses_websockets_v2_enabled": true}}
-	backupAccount := Account{ID: 920112, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, Extra: map[string]any{"privacy_mode": PrivacyModeTrainingOff, "openai_apikey_responses_websockets_v2_enabled": true}}
+	stickyAccount := Account{ID: 920111, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 9, GroupIDs: []int64{groupID}, Extra: map[string]any{"openai_apikey_responses_websockets_v2_enabled": true}}
+	backupAccount := Account{ID: 920112, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, GroupIDs: []int64{groupID}, Extra: map[string]any{"privacy_mode": PrivacyModeTrainingOff, "openai_apikey_responses_websockets_v2_enabled": true}}
 	repo := schedulerTestOpenAIAccountRepo{accounts: []Account{stickyAccount, backupAccount}, setErrors: map[int64]string{}}
 	cache := &schedulerTestGatewayCache{}
 	stateStore := &openAIWSStateStoreSpy{responseAccounts: map[string]int64{"resp_layered_privacy_required": stickyAccount.ID}}
@@ -1310,10 +1336,10 @@ func TestLayered_PreviousResponseStickyHonorsRequirePrivacySet(t *testing.T) {
 func TestLayered_SessionStickyRecheckHonorsImageCapability(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(92012)
-	stickySnapshotAccount := Account{ID: 920121, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 9, Extra: map[string]any{"openai_apikey_responses_websockets_v2_enabled": true}}
+	stickySnapshotAccount := Account{ID: 920121, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 9, GroupIDs: []int64{groupID}, Extra: map[string]any{"openai_apikey_responses_websockets_v2_enabled": true}}
 	stickyDBAccount := stickySnapshotAccount
 	stickyDBAccount.Type = AccountTypeUpstream
-	backupAccount := Account{ID: 920122, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0}
+	backupAccount := Account{ID: 920122, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, GroupIDs: []int64{groupID}}
 	repo := schedulerTestOpenAIAccountRepo{accounts: []Account{stickyDBAccount, backupAccount}}
 	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:session_hash_layered_images": stickySnapshotAccount.ID}}
 	snapshotCfg := &config.Config{}
@@ -1354,10 +1380,10 @@ func TestLayered_SessionStickyRecheckHonorsImageCapability(t *testing.T) {
 func TestLayered_FallbackWaitPlanRechecksPrivacyRequirementAgainstDB(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(92013)
-	staleSnapshotAccount := Account{ID: 920131, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, Extra: map[string]any{"privacy_mode": PrivacyModeTrainingOff}}
+	staleSnapshotAccount := Account{ID: 920131, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, GroupIDs: []int64{groupID}, Extra: map[string]any{"privacy_mode": PrivacyModeTrainingOff}}
 	staleDBAccount := staleSnapshotAccount
 	staleDBAccount.Extra = map[string]any{}
-	backupAccount := Account{ID: 920132, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 5, Extra: map[string]any{"privacy_mode": PrivacyModeTrainingOff}}
+	backupAccount := Account{ID: 920132, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 5, GroupIDs: []int64{groupID}, Extra: map[string]any{"privacy_mode": PrivacyModeTrainingOff}}
 	repo := schedulerTestOpenAIAccountRepo{accounts: []Account{staleDBAccount, backupAccount}, setErrors: map[int64]string{}}
 	snapshotCfg := &config.Config{}
 	snapshotCfg.Gateway.Scheduling.DbFallbackEnabled = true

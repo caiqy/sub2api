@@ -12,12 +12,12 @@ func TestProvideTokenRefreshServiceInjectsGrokOAuthService(t *testing.T) {
 	cfg := &config.Config{}
 	grokOAuth := NewGrokOAuthService(nil, nil)
 
-	svc := ProvideTokenRefreshService(nil, nil, nil, nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil, grokOAuth)
+	svc := ProvideTokenRefreshService(nil, nil, nil, nil, nil, grokOAuth, nil, nil, cfg, nil, nil, nil, nil, nil)
 	svc.Stop()
 
 	var grokRefresher *GrokTokenRefresher
-	for _, refresher := range svc.refreshers {
-		if r, ok := refresher.(*GrokTokenRefresher); ok {
+	for _, registration := range svc.registrations {
+		if r, ok := registration.refresher.(*GrokTokenRefresher); ok {
 			grokRefresher = r
 			break
 		}

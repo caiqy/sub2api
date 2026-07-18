@@ -270,7 +270,7 @@ func TestOpenAIGatewayService_ReattachesLayeredProbeTempUnschedAccountOnRuntimeA
 	}}}
 	cfg := &config.Config{}
 	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
-	snapshot := &SchedulerSnapshotService{}
+	snapshot := NewSchedulerSnapshotService(&outboxCleanupCache{}, nil, repo, nil, cfg)
 	svc := &OpenAIGatewayService{accountRepo: repo, cfg: cfg, schedulerSnapshot: snapshot}
 
 	svc.StartOpenAIBackgroundRecovery()
@@ -281,7 +281,7 @@ func TestOpenAIGatewayService_ReattachesLayeredProbeTempUnschedAccountOnRuntimeA
 	require.False(t, presentBefore, "startup should skip non-schedulable layered-probe temp account")
 
 	repo.tempUnschedAccounts[0].Schedulable = true
-	require.NoError(t, snapshot.handleAccountEvent(context.Background(), ptrInt64(52), nil))
+	require.NoError(t, snapshot.handleAccountEvent(context.Background(), ptrInt64(52), nil, nil))
 
 	_, presentAfter := layered.probe.entries.Load(int64(52))
 	require.True(t, presentAfter, "runtime account change should reattach layered-probe temp account when it becomes schedulable")
@@ -305,7 +305,7 @@ func TestOpenAIGatewayService_RuntimeAccountChange_DoesNotRebootstrapAlreadyAtta
 	}}}
 	cfg := &config.Config{}
 	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
-	snapshot := &SchedulerSnapshotService{}
+	snapshot := NewSchedulerSnapshotService(&outboxCleanupCache{}, nil, repo, nil, cfg)
 	svc := &OpenAIGatewayService{accountRepo: repo, cfg: cfg, schedulerSnapshot: snapshot}
 
 	svc.StartOpenAIBackgroundRecovery()
@@ -314,7 +314,7 @@ func TestOpenAIGatewayService_RuntimeAccountChange_DoesNotRebootstrapAlreadyAtta
 	require.True(t, ok)
 
 	repo.tempUnschedAccounts[0].Schedulable = true
-	require.NoError(t, snapshot.handleAccountEvent(context.Background(), ptrInt64(53), nil))
+	require.NoError(t, snapshot.handleAccountEvent(context.Background(), ptrInt64(53), nil, nil))
 
 	value, present := layered.probe.entries.Load(int64(53))
 	require.True(t, present)
@@ -322,7 +322,7 @@ func TestOpenAIGatewayService_RuntimeAccountChange_DoesNotRebootstrapAlreadyAtta
 	require.True(t, ok)
 	entry.consecutiveFail.Store(9)
 
-	require.NoError(t, snapshot.handleAccountEvent(context.Background(), ptrInt64(53), nil))
+	require.NoError(t, snapshot.handleAccountEvent(context.Background(), ptrInt64(53), nil, nil))
 
 	require.EqualValues(t, 9, entry.consecutiveFail.Load(), "runtime reattach should only happen for accounts that newly become eligible, not already-attached entries")
 	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
@@ -352,7 +352,7 @@ func TestOpenAIGatewayService_StopOpenAIAccountScheduler_UnregistersRuntimeReatt
 	svc.StopOpenAIAccountScheduler()
 
 	repo.tempUnschedAccounts[0].Schedulable = true
-	require.NoError(t, snapshot.handleAccountEvent(context.Background(), ptrInt64(54), nil))
+	require.NoError(t, snapshot.handleAccountEvent(context.Background(), ptrInt64(54), nil, nil))
 
 	require.Equal(t, 0, repo.getByIDCalls, "stopping the scheduler should unregister runtime reattach handler")
 }
@@ -512,6 +512,31 @@ func TestExtractOpenAIResponseIDFromJSONBytes(t *testing.T) {
 	require.Equal(t, "resp_sse", extractOpenAIResponseIDFromJSONBytes([]byte(`{"type":"response.completed","response":{"id":"resp_sse"}}`)))
 	require.Empty(t, extractOpenAIResponseIDFromJSONBytes([]byte(`{"response":{}}`)))
 	require.Empty(t, extractOpenAIResponseIDFromJSONBytes([]byte(`not-json`)))
+}
+
+// 复现 #4386：gpt-image-2 /v1/images/edits 的 usage 携带 input_tokens_details.image_tokens，
+// 提取器须将图片输入 token 单独填入 ImageInputTokens（此前被丢弃并入 InputTokens 按文本价计费）。
+func TestExtractOpenAIUsage_CapturesImageInputTokens(t *testing.T) {
+	body := []byte(`{"usage":{"input_tokens":371,"input_tokens_details":{"image_tokens":352,"text_tokens":19},"output_tokens":439,"output_tokens_details":{"image_tokens":439,"text_tokens":0},"total_tokens":810}}`)
+	usage, ok := extractOpenAIUsageFromJSONBytes(body)
+	require.True(t, ok)
+	require.Equal(t, 371, usage.InputTokens)
+	require.Equal(t, 352, usage.ImageInputTokens)
+	require.Equal(t, 439, usage.OutputTokens)
+	require.Equal(t, 439, usage.ImageOutputTokens)
+
+	// prompt_tokens_details 回退路径（部分上游用 prompt_tokens 口径）。
+	promptStyle := []byte(`{"usage":{"prompt_tokens":100,"prompt_tokens_details":{"image_tokens":80}}}`)
+	pu, ok := extractOpenAIUsageFromJSONBytes(promptStyle)
+	require.True(t, ok)
+	require.Equal(t, 100, pu.InputTokens)
+	require.Equal(t, 80, pu.ImageInputTokens)
+
+	// 纯文本请求：无 image_tokens 时 ImageInputTokens 为 0，行为不变。
+	textOnly := []byte(`{"usage":{"input_tokens":50,"output_tokens":10}}`)
+	tu, ok := extractOpenAIUsageFromJSONBytes(textOnly)
+	require.True(t, ok)
+	require.Zero(t, tu.ImageInputTokens)
 }
 
 func TestOpenAIGatewayService_BindHTTPResponseAccount(t *testing.T) {
@@ -1577,6 +1602,21 @@ func TestOpenAIStreamingTimeout(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "\"type\":\"error\"") || !strings.Contains(rec.Body.String(), "stream_timeout") {
 		t.Fatalf("expected OpenAI-compatible error SSE event, got %q", rec.Body.String())
 	}
+}
+
+func TestOpenAIStreamingPassthroughTimeout(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{StreamDataIntervalTimeout: 1}}}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+	pr, pw := io.Pipe()
+	resp := &http.Response{StatusCode: http.StatusOK, Body: pr, Header: http.Header{}}
+
+	_, err := svc.handleStreamingResponsePassthrough(c.Request.Context(), resp, c, &Account{ID: 1}, time.Now(), "model", "model")
+	_ = pw.Close()
+
+	require.ErrorIs(t, err, errOpenAIStreamDataIntervalTimeout)
 }
 
 func TestOpenAIStreamingContextCanceledReturnsIncompleteErrorWithoutInjectingErrorEvent(t *testing.T) {
@@ -3303,7 +3343,7 @@ func TestOpenAILegacyBuilderCallersCloseRequestBodyWhenHTTPDoErrors(t *testing.T
 			run: func(svc *OpenAIGatewayService, c *gin.Context, account *Account) error {
 				payload := []byte(`{"type":"response.create","model":"gpt-5.1","input":"` + padding + `"}`)
 				c.Request = httptest.NewRequest(http.MethodPost, "/v1/realtime", nil)
-				_, err := svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "oauth-token", payload, len(payload), "gpt-5.1", "", "", "", 1, func([]byte) error { return nil })
+				_, err := svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "oauth-token", payload, len(payload), "gpt-5.1", "", "", "", "", 1, func([]byte) error { return nil })
 				return err
 			},
 		},
@@ -3664,7 +3704,7 @@ func TestOpenAIPassthroughCapturesAttemptBeforeNonFailoverHTTPError(t *testing.T
 		},
 	}
 
-	_, err := svc.forwardOpenAIPassthrough(context.Background(), c, account, body, "gpt-5", nil, false, time.Now())
+	_, err := svc.forwardOpenAIPassthrough(context.Background(), c, account, body, body, "gpt-5", false, nil, false, time.Now())
 	require.EqualError(t, err, "upstream error: 400 message=bad request")
 	require.JSONEq(t, string(upstream.lastBody), collector.body)
 	require.Contains(t, collector.headers, "X-Final: yes")
@@ -4232,7 +4272,7 @@ func TestHandleSSEToJSON_ReconstructsImageGenerationOutputItemDone(t *testing.T)
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
 	}
 	body := []byte(strings.Join([]string{
-		`data: {"type":"response.output_item.done","item":{"id":"ig_123","type":"image_generation_call","result":"aGVsbG8=","revised_prompt":"draw a cat","output_format":"png"}}`,
+		`data: {"type":"response.output_item.done","item":{"id":"ig_123","type":"image_generation_call","status":"generating","result":"aGVsbG8=","revised_prompt":"draw a cat","output_format":"png"}}`,
 		`data: {"type":"response.completed","response":{"id":"resp_img","model":"gpt-5.4","output":[],"usage":{"input_tokens":7,"output_tokens":9,"output_tokens_details":{"image_tokens":4}}}}`,
 		`data: [DONE]`,
 	}, "\n"))
@@ -4243,6 +4283,7 @@ func TestHandleSSEToJSON_ReconstructsImageGenerationOutputItemDone(t *testing.T)
 	require.Equal(t, 4, usage.ImageOutputTokens)
 	require.NotContains(t, rec.Body.String(), "data:")
 	require.Equal(t, "image_generation_call", gjson.Get(rec.Body.String(), "output.0.type").String())
+	require.Equal(t, "completed", gjson.Get(rec.Body.String(), "output.0.status").String())
 	require.Equal(t, "aGVsbG8=", gjson.Get(rec.Body.String(), "output.0.result").String())
 	require.Equal(t, "draw a cat", gjson.Get(rec.Body.String(), "output.0.revised_prompt").String())
 }
@@ -4350,7 +4391,7 @@ func TestOpenAIGatewayService_ReattachSkipsProbeDisabledAccount(t *testing.T) {
 	require.True(t, ok)
 
 	// Startup should skip (Task 3.2's guard). Now trigger runtime reattach to verify this guard too.
-	require.NoError(t, snapshot.handleAccountEvent(context.Background(), ptrInt64(201), nil))
+	require.NoError(t, snapshot.handleAccountEvent(context.Background(), ptrInt64(201), nil, nil))
 
 	_, present := layered.probe.entries.Load(int64(201))
 	require.False(t, present, "ReattachLayeredProbeTempUnschedAccount must skip probe-disabled accounts")
@@ -4501,4 +4542,42 @@ func TestHandleCompatErrorResponseCyberPolicyEarlyReturn(t *testing.T) {
 	require.Contains(t, gotMsg, "flagged for cyber policy")
 	require.NotContains(t, gotMsg, "Upstream request failed")
 	require.NotNil(t, GetOpsCyberPolicy(c))
+}
+
+func TestOpenAIForwardStreamingResponseFailedReturnsUsageWithError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-5.4","input":"hello","stream":true}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+
+	upstream := &openAIHTTPUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "X-Request-Id": []string{"req_failed_usage"}},
+		Body: io.NopCloser(strings.NewReader(
+			"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_failed_usage\",\"status\":\"failed\",\"error\":{\"code\":\"invalid_request\",\"message\":\"native upstream failure\"},\"usage\":{\"input_tokens\":17,\"output_tokens\":3}}}\n\n",
+		)),
+	}}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:          501,
+		Name:        "openai-native-failed-usage",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://example.com/v1"},
+		Extra:       map[string]any{"use_responses_api": true},
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, body)
+
+	require.Error(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 17, result.Usage.InputTokens)
+	require.Equal(t, 3, result.Usage.OutputTokens)
+	require.Equal(t, "resp_failed_usage", result.ResponseID)
+	require.Equal(t, "req_failed_usage", result.RequestID)
 }

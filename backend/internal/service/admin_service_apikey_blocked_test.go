@@ -195,6 +195,10 @@ func (r *adminAPIKeyBlockedUserRepo) BatchSetConcurrency(context.Context, []int6
 func (r *adminAPIKeyBlockedUserRepo) BatchAddConcurrency(context.Context, []int64, int) (int, error) {
 	panic("unexpected")
 }
+
+func (r *adminAPIKeyBlockedUserRepo) BatchUpdateLimits(context.Context, []int64, *int, *int) (int, error) {
+	panic("unexpected")
+}
 func (r *adminAPIKeyBlockedUserRepo) ExistsByEmail(context.Context, string) (bool, error) {
 	panic("unexpected")
 }

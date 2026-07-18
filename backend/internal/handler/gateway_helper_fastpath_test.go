@@ -14,9 +14,12 @@ type concurrencyCacheMock struct {
 	acquireUserSlotFn      func(ctx context.Context, userID int64, maxConcurrency int, requestID string) (bool, error)
 	acquireUserGroupSlotFn func(ctx context.Context, userID, groupID int64, maxConcurrency int, requestID string) (bool, error)
 	acquireAccountSlotFn   func(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error)
+	acquireIngressLeaseFn  func(ctx context.Context, apiKeyID int64, maxConnections int, leaseID string) (bool, error)
+	releaseIngressLeaseFn  func(ctx context.Context, apiKeyID int64, leaseID string) error
 	releaseUserCalled      int32
 	releaseUserGroupCalled int32
 	releaseAccountCalled   int32
+	releaseIngressCalled   int32
 }
 
 func (m *concurrencyCacheMock) AcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
@@ -108,6 +111,25 @@ func (m *concurrencyCacheMock) AcquireUserGroupSlot(ctx context.Context, userID,
 
 func (m *concurrencyCacheMock) ReleaseUserGroupSlot(ctx context.Context, userID, groupID int64, requestID string) error {
 	atomic.AddInt32(&m.releaseUserGroupCalled, 1)
+	return nil
+}
+
+func (m *concurrencyCacheMock) AcquireOpenAIWSIngressLease(ctx context.Context, apiKeyID int64, maxConnections int, leaseID string) (bool, error) {
+	if m.acquireIngressLeaseFn != nil {
+		return m.acquireIngressLeaseFn(ctx, apiKeyID, maxConnections, leaseID)
+	}
+	return false, nil
+}
+
+func (m *concurrencyCacheMock) RefreshOpenAIWSIngressLease(context.Context, int64, string) (bool, error) {
+	return true, nil
+}
+
+func (m *concurrencyCacheMock) ReleaseOpenAIWSIngressLease(ctx context.Context, apiKeyID int64, leaseID string) error {
+	atomic.AddInt32(&m.releaseIngressCalled, 1)
+	if m.releaseIngressLeaseFn != nil {
+		return m.releaseIngressLeaseFn(ctx, apiKeyID, leaseID)
+	}
 	return nil
 }
 

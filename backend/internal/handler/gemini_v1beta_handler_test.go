@@ -420,6 +420,14 @@ func (r *geminiModerationSettingRepo) GetValue(_ context.Context, key string) (s
 	return r.values[key], nil
 }
 
+func (r *geminiModerationSettingRepo) GetMultiple(_ context.Context, keys []string) (map[string]string, error) {
+	values := make(map[string]string, len(keys))
+	for _, key := range keys {
+		values[key] = r.values[key]
+	}
+	return values, nil
+}
+
 type geminiModerationRepo struct {
 	service.ContentModerationRepository
 }
@@ -439,11 +447,11 @@ func (geminiModerationHashCache) HasFlaggedInputHash(context.Context, string) (b
 
 type geminiSpoolReleaseConcurrencyCache struct {
 	openAIChatCompletionsConcurrencyCacheStub
-	acquired chan struct{}
-	proceed  chan struct{}
+	acquired    chan struct{}
+	proceed     chan struct{}
 	releaseOnce sync.Once
-	mu       sync.Mutex
-	releases int
+	mu          sync.Mutex
+	releases    int
 }
 
 func (c *geminiSpoolReleaseConcurrencyCache) AcquireAccountSlot(context.Context, int64, int, string) (bool, error) {

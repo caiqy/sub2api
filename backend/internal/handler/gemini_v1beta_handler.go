@@ -329,6 +329,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				c.Request = c.Request.WithContext(ctx)
 				continue
 			case FailoverCanceled:
+				failoverClientGone(c)
 				return
 			default: // FailoverExhausted
 				h.handleGeminiFailoverExhausted(c, fs.LastFailoverErr)
@@ -468,7 +469,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			if errors.As(err, &failoverErr) {
 				lastFailedAccount = account
 				lastFailedDuration = forwardDuration
-				failoverAction := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, failoverErr)
+				failoverAction := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, account.GetPoolModeRetryCount(), failoverErr)
 				switch failoverAction {
 				case FailoverContinue:
 					continue
@@ -477,6 +478,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 					h.submitFailedUsageLogFromFailover(c, apiKey, account, modelName, stream, fs.LastFailoverErr, forwardDuration, nil, "handler.gemini_v1beta.models")
 					return
 				case FailoverCanceled:
+					failoverClientGone(c)
 					return
 				}
 			}

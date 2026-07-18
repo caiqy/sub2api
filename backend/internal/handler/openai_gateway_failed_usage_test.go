@@ -732,14 +732,10 @@ func TestOpenAIGatewayHandler_SubmitOpenAIImagesFailedUsageLog_UsesErrorSnapshot
 	router := gin.New()
 	router.Use(middleware.UsageDetailCapture())
 	router.POST("/test", func(c *gin.Context) {
-		h.submitOpenAIImagesFailedUsageLog(c, apiKey, account, parsed, fakeOpenAIImagesOAuthUpstreamError{
-			statusCode: 418,
-			responseHeaders: http.Header{
-				"Content-Type": []string{"application/json"},
-				"X-Request-Id": []string{"req_err_snapshot_123"},
-			},
-			responseBody: []byte(`{"error":{"message":"err-carried image snapshot"}}`),
-		}, time.Second)
+		h.submitFailedUsageLog(c, apiKey, account, parsed.Model, parsed.Stream, http.StatusTeapot, http.Header{
+			"Content-Type": []string{"application/json"},
+			"X-Request-Id": []string{"req_err_snapshot_123"},
+		}, []byte(`{"error":{"message":"err-carried image snapshot"}}`), time.Second, nil, "handler.openai_gateway.images")
 		c.Status(http.StatusTeapot)
 	})
 
@@ -755,28 +751,6 @@ func TestOpenAIGatewayHandler_SubmitOpenAIImagesFailedUsageLog_UsesErrorSnapshot
 	require.Contains(t, log.DetailSnapshot.ResponseHeaders, "Content-Type: application/json")
 	require.Contains(t, log.DetailSnapshot.ResponseHeaders, "X-Request-Id: req_err_snapshot_123")
 	require.Contains(t, log.DetailSnapshot.ResponseBody, "err-carried image snapshot")
-}
-
-type fakeOpenAIImagesOAuthUpstreamError struct {
-	statusCode      int
-	responseHeaders http.Header
-	responseBody    []byte
-}
-
-func (e fakeOpenAIImagesOAuthUpstreamError) Error() string {
-	return "fake openai images oauth upstream error"
-}
-
-func (e fakeOpenAIImagesOAuthUpstreamError) OpenAIImageUpstreamStatusCode() int {
-	return e.statusCode
-}
-
-func (e fakeOpenAIImagesOAuthUpstreamError) OpenAIImageUpstreamResponseHeaders() http.Header {
-	return e.responseHeaders.Clone()
-}
-
-func (e fakeOpenAIImagesOAuthUpstreamError) OpenAIImageUpstreamResponseBody() []byte {
-	return append([]byte(nil), e.responseBody...)
 }
 
 func TestOpenAIGatewayHandler_MessagesSelectionExhaustedAfterFailoverStillCreatesUsageLog(t *testing.T) {

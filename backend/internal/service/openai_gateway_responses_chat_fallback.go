@@ -39,6 +39,18 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 
 	clientStream := responsesReq.Stream
 	serviceTier := extractOpenAIServiceTierFromBody(body)
+	// custom 工具（如 codex 的 exec）降级为 function 工具转发，回程需按名字还原为
+	// custom_tool_call 项，先记下名字集合；tool_search 工具同理，回程还原为
+	// tool_search_call 项；namespace 子工具（如 MCP 工具）摊平转发，回程按映射还原
+	// 为带 namespace 字段的 function_call 项。
+	effectiveTools, err := apicompat.EffectiveResponsesTools(&responsesReq)
+	if err != nil {
+		writeOpenAIResponsesFallbackError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return nil, fmt.Errorf("resolve responses tools: %w", err)
+	}
+	customTools := apicompat.CustomToolNames(effectiveTools)
+	toolSearch := apicompat.HasToolSearchTool(effectiveTools)
+	namespaceTools := apicompat.NamespaceToolNames(effectiveTools)
 
 	chatReq, err := apicompat.ResponsesToChatCompletionsRequest(&responsesReq)
 	if err != nil {
@@ -86,33 +98,12 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 		return nil, err
 	}
 	upstreamCtx := ctx
-	var firstTokenWatchdog *openAIFirstTokenWatchdog
-	if clientStream {
-		upstreamBaseCtx, _ := detachUpstreamContext(ctx)
-		upstreamCtx, firstTokenWatchdog = s.withOpenAIFirstTokenTimeout(upstreamBaseCtx, body, "sse")
-		defer firstTokenWatchdog.Stop()
-	}
-	resp, err := s.sendCCUpstreamRequest(upstreamCtx, c, account, targetURL, chatBody, clientStream, apiKey, account.GetOpenAIUserAgent())
+	resp, err := s.sendCCUpstreamRequest(upstreamCtx, c, account, targetURL, chatBody, clientStream, apiKey, account.GetOpenAIUserAgent(), "")
 	if err != nil {
-		if timeoutErr := firstTokenWatchdog.TimeoutError(); timeoutErr != nil {
-			recordOpenAIFirstTokenTimeout(ctx, c, account, timeoutErr)
-			return nil, timeoutErr
-		}
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if !firstTokenWatchdog.MarkHeaders(resp.Header.Get("x-request-id")) {
-		timeoutErr := firstTokenWatchdog.TimeoutError()
-		recordOpenAIFirstTokenTimeout(ctx, c, account, timeoutErr)
-		return nil, timeoutErr
-	}
-
 	if resp.StatusCode >= 400 {
-		if !firstTokenWatchdog.Stop() {
-			timeoutErr := firstTokenWatchdog.TimeoutError()
-			recordOpenAIFirstTokenTimeout(ctx, c, account, timeoutErr)
-			return nil, timeoutErr
-		}
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
 		if foErr := s.failoverOpenAIUpstreamHTTPError(ctx, c, account, resp, respBody, upstreamMsg, upstreamModel); foErr != nil {
 			return nil, foErr
@@ -121,20 +112,19 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	}
 
 	if clientStream {
-		result, streamErr := s.streamChatCompletionsAsResponses(upstreamCtx, c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
-		if timeoutErr := firstTokenWatchdog.TimeoutError(); timeoutErr != nil {
-			recordOpenAIFirstTokenTimeout(ctx, c, account, timeoutErr)
-			return result, timeoutErr
-		}
+		result, streamErr := s.streamChatCompletionsAsResponses(upstreamCtx, c, resp, originalModel, customTools, toolSearch, namespaceTools, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
 		return result, streamErr
 	}
-	return s.bufferChatCompletionsAsResponses(c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+	return s.bufferChatCompletionsAsResponses(c, resp, originalModel, customTools, toolSearch, namespaceTools, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
 }
 
 func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 	c *gin.Context,
 	resp *http.Response,
 	originalModel string,
+	customTools map[string]bool,
+	toolSearch bool,
+	namespaceTools map[string]apicompat.NamespacedToolName,
 	billingModel string,
 	upstreamModel string,
 	reasoningEffort *string,
@@ -146,7 +136,7 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 	if err != nil {
 		return nil, err
 	}
-	responsesResp := apicompat.ChatCompletionsResponseToResponses(ccResp, originalModel)
+	responsesResp := apicompat.ChatCompletionsResponseToResponses(ccResp, originalModel, customTools, toolSearch, namespaceTools)
 
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
@@ -171,6 +161,9 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	c *gin.Context,
 	resp *http.Response,
 	originalModel string,
+	customTools map[string]bool,
+	toolSearch bool,
+	namespaceTools map[string]apicompat.NamespacedToolName,
 	billingModel string,
 	upstreamModel string,
 	reasoningEffort *string,
@@ -181,6 +174,9 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
 
 	state := apicompat.NewChatCompletionsToResponsesStreamState(originalModel)
+	state.CustomTools = customTools
+	state.ToolSearchDeclared = toolSearch
+	state.NamespaceTools = namespaceTools
 	clientDisconnected := false
 	var streamEarlyErr error
 	pendingEvents := make([]apicompat.ResponsesStreamEvent, 0, 4)
@@ -189,21 +185,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 		if clientDisconnected || streamEarlyErr != nil || len(events) == 0 {
 			return
 		}
-		for _, event := range events {
-			payload, err := json.Marshal(event)
-			if err != nil {
-				continue
-			}
-			watchdog := firstTokenWatchdogFromContext(ctx)
-			if !watchdog.Observe(payload) {
-				streamEarlyErr = watchdog.TimeoutError()
-				return
-			}
-			pendingEvents = append(pendingEvents, event)
-		}
-		if !firstTokenWatchdogFromContext(ctx).CanWriteClient() {
-			return
-		}
+		pendingEvents = append(pendingEvents, events...)
 		writeStreamHeaders()
 		for _, event := range pendingEvents {
 			sse, err := apicompat.ResponsesEventToSSE(event)
@@ -235,9 +217,6 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	}
 
 	if scan.Err != nil {
-		if timeoutErr := firstTokenWatchdogFromContext(ctx).TimeoutError(); timeoutErr != nil {
-			return &OpenAIForwardResult{RequestID: requestID, Usage: scan.Usage, Stream: true, Duration: time.Since(startTime)}, timeoutErr
-		}
 		return &OpenAIForwardResult{
 			RequestID:       requestID,
 			Usage:           scan.Usage,

@@ -22,6 +22,10 @@ type probeToggleRepoStub struct {
 	mockAccountRepoForGemini
 	account               *Account
 	clearTempUnschedCalls int
+	getByIDsCalls         int
+	failPostBulkRead      bool
+	returnOriginalOnRead  bool
+	preserveExtraOnBulk   bool
 }
 
 func (r *probeToggleRepoStub) GetByID(_ context.Context, id int64) (*Account, error) {
@@ -39,9 +43,43 @@ func (r *probeToggleRepoStub) GetByID(_ context.Context, id int64) (*Account, er
 	return nil, ErrAccountNotFound
 }
 
+func (r *probeToggleRepoStub) GetByIDs(ctx context.Context, ids []int64) ([]*Account, error) {
+	r.getByIDsCalls++
+	if r.failPostBulkRead && r.getByIDsCalls > 1 {
+		return nil, ErrAccountNotFound
+	}
+	accounts := make([]*Account, 0, len(ids))
+	for _, id := range ids {
+		if r.returnOriginalOnRead && r.account != nil && r.account.ID == id {
+			accounts = append(accounts, r.account)
+			continue
+		}
+		account, err := r.GetByID(ctx, id)
+		if err == nil {
+			accounts = append(accounts, account)
+		}
+	}
+	return accounts, nil
+}
+
 func (r *probeToggleRepoStub) Update(_ context.Context, account *Account) error {
 	r.account = account
 	return nil
+}
+
+func (r *probeToggleRepoStub) BulkUpdate(_ context.Context, ids []int64, updates AccountBulkUpdate) (int64, error) {
+	for _, id := range ids {
+		if r.account == nil || r.account.ID != id {
+			continue
+		}
+		if r.preserveExtraOnBulk {
+			continue
+		}
+		for key, value := range updates.Extra {
+			r.account.Extra[key] = value
+		}
+	}
+	return int64(len(ids)), nil
 }
 
 func (r *probeToggleRepoStub) ClearTempUnschedulable(_ context.Context, _ int64) error {
@@ -203,6 +241,9 @@ func TestAdminService_BulkUpdateAccounts_ProbeToggleOff_DropsProbeEntry(t *testi
 	require.NoError(t, err)
 
 	repo := &probeToggleRepoStub{
+		failPostBulkRead:     true,
+		returnOriginalOnRead: true,
+		preserveExtraOnBulk:  true,
 		account: &Account{
 			ID:                      601,
 			Platform:                PlatformOpenAI,
@@ -221,14 +262,15 @@ func TestAdminService_BulkUpdateAccounts_ProbeToggleOff_DropsProbeEntry(t *testi
 		openaiProbeControl: probeCtrl,
 	}
 
-	// Simulate what BulkUpdateAccounts does: apply extra with probe_enabled=false
-	account := repo.account
-	wasProbeEnabledBefore := account.IsOpenAIProbeEnabled()
-	account.Extra = map[string]any{"openai_probe_enabled": false}
-
-	svc.applyProbeToggleSideEffects(context.Background(), account, wasProbeEnabledBefore)
+	_, err = svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs: []int64{601},
+		Extra:      map[string]any{"openai_probe_enabled": false},
+	})
+	require.NoError(t, err)
 
 	require.Equal(t, []int64{601}, probeCtrl.droppedIDs, "bulk: Layer 1 DropProbeEntry called")
 	require.Equal(t, 1, repo.clearTempUnschedCalls, "bulk: Layer 2 ClearTempUnschedulable called")
 	require.Equal(t, []int64{601}, blocker.clearedIDs, "bulk: Layer 2 ClearAccountSchedulingBlock called")
+	require.Equal(t, 1, repo.getByIDsCalls, "bulk probe disable must not read after updating")
+	require.Equal(t, true, repo.account.Extra["openai_probe_enabled"], "side effects must not mutate the prefetched repository map")
 }

@@ -274,52 +274,6 @@
                 <div class="space-y-2 border-t border-gray-100 pt-4 dark:border-dark-700">
                   <div class="flex flex-wrap items-center gap-2">
                     <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
-                      {{ t("admin.settings.gatewayRuntime.openAITextFirstTokenTimeout") }}
-                    </label>
-                    <code
-                      class="select-all break-all rounded bg-gray-50 px-2 py-1 font-mono text-xs text-gray-600 dark:bg-dark-800 dark:text-gray-300"
-                    >
-                      gateway.openai_text_first_token_timeout
-                    </code>
-                  </div>
-                  <input
-                    v-model.number="gatewayRuntimeForm.openai_text_first_token_timeout"
-                    data-testid="gateway-runtime-openai-text-first-token-timeout"
-                    type="number"
-                    min="0"
-                    class="input w-40"
-                  />
-                  <p class="text-xs text-gray-500 dark:text-gray-400">
-                    {{ t("admin.settings.gatewayRuntime.openAITextFirstTokenTimeoutHint") }}
-                  </p>
-                </div>
-
-                <div class="space-y-2 border-t border-gray-100 pt-4 dark:border-dark-700">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
-                      {{ t("admin.settings.gatewayRuntime.openAIImageFirstTokenTimeout") }}
-                    </label>
-                    <code
-                      class="select-all break-all rounded bg-gray-50 px-2 py-1 font-mono text-xs text-gray-600 dark:bg-dark-800 dark:text-gray-300"
-                    >
-                      gateway.openai_image_first_token_timeout
-                    </code>
-                  </div>
-                  <input
-                    v-model.number="gatewayRuntimeForm.openai_image_first_token_timeout"
-                    data-testid="gateway-runtime-openai-image-first-token-timeout"
-                    type="number"
-                    min="0"
-                    class="input w-40"
-                  />
-                  <p class="text-xs text-gray-500 dark:text-gray-400">
-                    {{ t("admin.settings.gatewayRuntime.openAIImageFirstTokenTimeoutHint") }}
-                  </p>
-                </div>
-
-                <div class="space-y-2 border-t border-gray-100 pt-4 dark:border-dark-700">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
                       {{ t("admin.settings.gatewayRuntime.streamDataIntervalTimeout") }}
                     </label>
                     <code
@@ -1418,60 +1372,10 @@
                   <p class="mb-2 text-xs text-gray-400 dark:text-gray-500">
                     {{ t("admin.settings.openaiFastPolicy.userIdsHint") }}
                   </p>
-                  <div
-                    v-for="(_, userIDIndex) in rule.user_ids || []"
-                    :key="userIDIndex"
-                    class="mb-1.5 flex items-center gap-2"
-                  >
-                    <input
-                      v-model.number="rule.user_ids![userIDIndex]"
-                      type="number"
-                      min="1"
-                      step="1"
-                      class="input input-sm flex-1"
-                      :placeholder="t('admin.settings.openaiFastPolicy.userIdPlaceholder')"
-                    />
-                    <button
-                      type="button"
-                      @click="removeOpenAIFastPolicyUserID(rule, userIDIndex)"
-                      class="shrink-0 rounded p-1 text-red-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
-                      :title="t('admin.settings.openaiFastPolicy.removeUserId')"
-                    >
-                      <svg
-                        class="h-4 w-4"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        stroke-width="2"
-                      >
-                        <path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          d="M6 18L18 6M6 6l12 12"
-                        />
-                      </svg>
-                    </button>
-                  </div>
-                  <button
-                    type="button"
-                    @click="addOpenAIFastPolicyUserID(rule)"
-                    class="mb-2 inline-flex items-center gap-1 text-xs text-primary-600 transition-colors hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
-                  >
-                    <svg
-                      class="h-3.5 w-3.5"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      stroke-width="2"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        d="M12 4v16m8-8H4"
-                      />
-                    </svg>
-                    {{ t("admin.settings.openaiFastPolicy.addUserId") }}
-                  </button>
+                  <OpenAIFastPolicyUserSelector
+                    :model-value="rule.user_ids || []"
+                    @update:model-value="rule.user_ids = $event"
+                  />
                 </div>
 
                 <!-- Error Message (only when action=block) -->
@@ -1844,6 +1748,39 @@
                 <Toggle
                   v-model="form.totp_enabled"
                   :disabled="!form.totp_encryption_key_configured"
+                />
+              </div>
+
+              <div
+                class="flex items-center justify-between border-t border-gray-100 pt-4 dark:border-dark-700"
+              >
+                <div>
+                  <label class="font-medium text-gray-900 dark:text-white">{{
+                    t("admin.settings.security.sessionBinding")
+                  }}</label>
+                  <p class="text-sm text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.security.sessionBindingHint") }}
+                  </p>
+                </div>
+                <Toggle v-model="form.session_binding_enabled" />
+              </div>
+
+              <div
+                class="flex items-center justify-between border-t border-gray-100 pt-4 dark:border-dark-700"
+              >
+                <div>
+                  <label class="font-medium text-gray-900 dark:text-white">{{
+                    t("admin.settings.security.auditRetention")
+                  }}</label>
+                  <p class="text-sm text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.security.auditRetentionHint") }}
+                  </p>
+                </div>
+                <input
+                  v-model.number="form.audit_log_retention_days"
+                  type="number"
+                  min="0"
+                  class="input w-28 text-right"
                 />
               </div>
             </div>
@@ -4289,6 +4226,41 @@
                 <Toggle v-model="form.allow_ungrouped_key_scheduling" />
               </div>
 
+              <div
+                v-if="!form.openai_advanced_scheduler_enabled"
+                class="flex items-center justify-between border-t border-gray-100 pt-5 dark:border-dark-700"
+              >
+                <div>
+                  <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ localText("低倍率优先", "Lower upstream rate first") }}
+                  </label>
+                </div>
+                <Toggle
+                  v-model="form.openai_low_upstream_rate_priority_enabled"
+                  data-testid="openai-low-rate-priority-toggle"
+                />
+              </div>
+
+              <div
+                v-if="!form.openai_advanced_scheduler_enabled && form.openai_low_upstream_rate_priority_enabled"
+                class="border-t border-gray-100 pt-5 dark:border-dark-700"
+              >
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ localText("OAuth 调度参考倍率", "OAuth scheduling reference rate") }}
+                </label>
+                <input
+                  v-model.number="form.openai_oauth_scheduling_rate_multiplier"
+                  data-testid="openai-oauth-scheduling-rate-multiplier"
+                  class="input mt-2 w-40"
+                  min="0"
+                  step="0.01"
+                  type="number"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  {{ localText("同一分组同时包含 API Key 和 OAuth 账号时，OAuth 账号按此倍率与已探测的 API Key 计费倍率一起排序。", "When a group contains both API key and OAuth accounts, OAuth accounts are ranked using this rate alongside probed API key billing rates.") }}
+                </p>
+              </div>
+
               <div class="flex items-center justify-between">
                 <div>
                   <label
@@ -4302,7 +4274,10 @@
                     }}
                   </p>
                 </div>
-                <Toggle v-model="form.openai_advanced_scheduler_enabled" />
+                <Toggle
+                  v-model="form.openai_advanced_scheduler_enabled"
+                  data-testid="openai-advanced-scheduler-toggle"
+                />
               </div>
 
               <div
@@ -4341,6 +4316,26 @@
                   </p>
                 </div>
                 <Toggle v-model="form.openai_advanced_scheduler_subscription_priority_enabled" />
+              </div>
+
+              <div
+                v-if="form.openai_advanced_scheduler_enabled"
+                class="border-t border-gray-100 pt-5 dark:border-dark-700"
+              >
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ localText("OAuth 调度参考倍率", "OAuth scheduling reference rate") }}
+                </label>
+                <input
+                  v-model.number="form.openai_oauth_scheduling_rate_multiplier"
+                  data-testid="openai-oauth-scheduling-rate-multiplier"
+                  class="input mt-2 w-40"
+                  min="0"
+                  step="0.01"
+                  type="number"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  {{ localText("同一分组同时包含 API Key 和 OAuth 账号时，计算“计费倍率”得分时，OAuth 账号按此倍率参与计算。", "When a group contains both API key and OAuth accounts, this rate is used for OAuth accounts when calculating the billing-rate score.") }}
+                </p>
               </div>
 
               <div
@@ -7760,6 +7755,7 @@ import ProxySelector from "@/components/common/ProxySelector.vue";
 import ImageUpload from "@/components/common/ImageUpload.vue";
 import BackupSettings from "@/views/admin/BackupView.vue";
 import EmailTemplateEditor from "@/views/admin/settings/EmailTemplateEditor.vue";
+import OpenAIFastPolicyUserSelector from "@/views/admin/settings/OpenAIFastPolicyUserSelector.vue";
 import { useClipboard } from "@/composables/useClipboard";
 import { affiliatesAPI, type AffiliateAdminEntry, type SimpleUser as AffiliateSimpleUser } from "@/api/admin/affiliates";
 import { extractApiErrorMessage, extractI18nErrorMessage } from "@/utils/apiError";
@@ -7900,8 +7896,6 @@ const gatewayRuntimeSaving = ref(false);
 const gatewayRuntimeLoadFailed = ref(false);
 const gatewayRuntimeForm = reactive<GatewayRuntimeSettings>({
   response_header_timeout: 600,
-  openai_text_first_token_timeout: 30,
-  openai_image_first_token_timeout: 600,
   stream_data_interval_timeout: 180,
   usage_log_detail_retention_limit: 300,
   image_usage_log_detail_retention_limit: 300,
@@ -8419,6 +8413,8 @@ type SettingsForm = Omit<
   google_oauth_client_secret: string;
   force_email_on_third_party_signup: boolean;
   openai_advanced_scheduler_enabled: boolean;
+  openai_low_upstream_rate_priority_enabled: boolean;
+  openai_oauth_scheduling_rate_multiplier: number;
   openai_advanced_scheduler_sticky_weighted_enabled: boolean;
   openai_advanced_scheduler_subscription_priority_enabled: boolean;
   openai_advanced_scheduler_lb_top_k: string;
@@ -8429,6 +8425,7 @@ type SettingsForm = Omit<
   openai_advanced_scheduler_weight_ttft: string;
   openai_advanced_scheduler_weight_reset: string;
   openai_advanced_scheduler_weight_quota_headroom: string;
+  openai_advanced_scheduler_weight_upstream_cost: string;
   openai_advanced_scheduler_weight_previous_response: string;
   openai_advanced_scheduler_weight_session_sticky: string;
   // 系统全局平台限额 map；form 内始终归一化为全 4 平台对象（模板非空绑定依赖此不变量）
@@ -8444,6 +8441,8 @@ const form = reactive<SettingsForm>({
   password_reset_enabled: false,
   totp_enabled: false,
   totp_encryption_key_configured: false,
+  session_binding_enabled: true,
+  audit_log_retention_days: 180,
   login_agreement_enabled: false,
   login_agreement_mode: "modal",
   login_agreement_updated_at: "2026-03-31",
@@ -8454,6 +8453,7 @@ const form = reactive<SettingsForm>({
   affiliate_rebate_freeze_hours: 0,
   affiliate_rebate_duration_days: 0,
   affiliate_rebate_per_invitee_cap: 0,
+  affiliate_admin_recharge_enabled: false,
   default_concurrency: 1,
   default_subscriptions: [],
   force_email_on_third_party_signup: false,
@@ -8638,6 +8638,8 @@ const form = reactive<SettingsForm>({
   gateway_openai_ws_scheduler_layered_probe_timeout_seconds: 15,
   gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds: 1800,
   openai_advanced_scheduler_enabled: false,
+  openai_low_upstream_rate_priority_enabled: false,
+  openai_oauth_scheduling_rate_multiplier: 1,
   openai_advanced_scheduler_sticky_weighted_enabled: false,
   openai_advanced_scheduler_subscription_priority_enabled: false,
   openai_advanced_scheduler_lb_top_k: "",
@@ -8648,6 +8650,7 @@ const form = reactive<SettingsForm>({
   openai_advanced_scheduler_weight_ttft: "",
   openai_advanced_scheduler_weight_reset: "",
   openai_advanced_scheduler_weight_quota_headroom: "",
+  openai_advanced_scheduler_weight_upstream_cost: "",
   openai_advanced_scheduler_weight_previous_response: "",
   openai_advanced_scheduler_weight_session_sticky: "",
   // Gateway forwarding behavior
@@ -8696,6 +8699,7 @@ type OpenAIAdvancedSchedulerOverrideKey =
   | "openai_advanced_scheduler_weight_ttft"
   | "openai_advanced_scheduler_weight_reset"
   | "openai_advanced_scheduler_weight_quota_headroom"
+  | "openai_advanced_scheduler_weight_upstream_cost"
   | "openai_advanced_scheduler_weight_previous_response"
   | "openai_advanced_scheduler_weight_session_sticky";
 
@@ -8708,6 +8712,7 @@ type OpenAIAdvancedSchedulerEffectiveKey =
   | "openai_advanced_scheduler_effective_weight_ttft"
   | "openai_advanced_scheduler_effective_weight_reset"
   | "openai_advanced_scheduler_effective_weight_quota_headroom"
+  | "openai_advanced_scheduler_effective_weight_upstream_cost"
   | "openai_advanced_scheduler_effective_weight_previous_response"
   | "openai_advanced_scheduler_effective_weight_session_sticky";
 
@@ -8770,6 +8775,11 @@ const openAIAdvancedSchedulerWeightFields = computed<
       key: "openai_advanced_scheduler_weight_quota_headroom",
       label: t("admin.settings.openaiExperimentalScheduler.quotaHeadroomWeight"),
       placeholder: placeholder("openai_advanced_scheduler_effective_weight_quota_headroom", "0"),
+    },
+    {
+      key: "openai_advanced_scheduler_weight_upstream_cost",
+      label: localText("计费倍率", "Billing rate"),
+      placeholder: placeholder("openai_advanced_scheduler_effective_weight_upstream_cost", "0"),
     },
     {
       key: "openai_advanced_scheduler_weight_previous_response",
@@ -9812,6 +9822,10 @@ async function saveSettings() {
       invitation_code_enabled: form.invitation_code_enabled,
       password_reset_enabled: form.password_reset_enabled,
       totp_enabled: form.totp_enabled,
+      session_binding_enabled: form.session_binding_enabled,
+      audit_log_retention_days: Number.isFinite(form.audit_log_retention_days)
+        ? form.audit_log_retention_days
+        : 180,
       login_agreement_enabled: form.login_agreement_enabled,
       login_agreement_mode: form.login_agreement_mode,
       login_agreement_updated_at: form.login_agreement_updated_at,
@@ -10037,6 +10051,13 @@ async function saveSettings() {
         form.payment_cancel_rate_limit_window_mode,
       payment_alipay_force_qrcode: form.payment_alipay_force_qrcode,
       openai_advanced_scheduler_enabled: form.openai_advanced_scheduler_enabled,
+      openai_low_upstream_rate_priority_enabled:
+        form.openai_low_upstream_rate_priority_enabled,
+      openai_oauth_scheduling_rate_multiplier:
+        typeof form.openai_oauth_scheduling_rate_multiplier === "number" &&
+        Number.isFinite(form.openai_oauth_scheduling_rate_multiplier)
+          ? form.openai_oauth_scheduling_rate_multiplier
+          : 1,
       openai_advanced_scheduler_sticky_weighted_enabled:
         form.openai_advanced_scheduler_sticky_weighted_enabled,
       openai_advanced_scheduler_subscription_priority_enabled:
@@ -10057,6 +10078,8 @@ async function saveSettings() {
         form.openai_advanced_scheduler_weight_reset.trim(),
       openai_advanced_scheduler_weight_quota_headroom:
         form.openai_advanced_scheduler_weight_quota_headroom.trim(),
+      openai_advanced_scheduler_weight_upstream_cost:
+        form.openai_advanced_scheduler_weight_upstream_cost.trim(),
       openai_advanced_scheduler_weight_previous_response:
         form.openai_advanced_scheduler_weight_previous_response.trim(),
       openai_advanced_scheduler_weight_session_sticky:
@@ -10081,6 +10104,7 @@ async function saveSettings() {
       available_channels_enabled: form.available_channels_enabled,
       // Affiliate (邀请返利) feature switch
       affiliate_enabled: form.affiliate_enabled,
+      affiliate_admin_recharge_enabled: form.affiliate_admin_recharge_enabled,
       allow_user_view_error_requests: form.allow_user_view_error_requests,
     };
 
@@ -10353,12 +10377,6 @@ function buildGatewayRuntimePayload(): GatewayRuntimeSettings | null {
   const responseHeaderTimeout = normalizeGatewayRuntimeNumber(
     gatewayRuntimeForm.response_header_timeout,
   );
-  const openAITextFirstTokenTimeout = normalizeGatewayRuntimeNumber(
-    gatewayRuntimeForm.openai_text_first_token_timeout,
-  );
-  const openAIImageFirstTokenTimeout = normalizeGatewayRuntimeNumber(
-    gatewayRuntimeForm.openai_image_first_token_timeout,
-  );
   const streamDataIntervalTimeout = normalizeGatewayRuntimeNumber(
     gatewayRuntimeForm.stream_data_interval_timeout,
   );
@@ -10372,12 +10390,6 @@ function buildGatewayRuntimePayload(): GatewayRuntimeSettings | null {
   if (
     responseHeaderTimeout === null ||
     responseHeaderTimeout < 1 ||
-    openAITextFirstTokenTimeout === null ||
-    !Number.isInteger(openAITextFirstTokenTimeout) ||
-    openAITextFirstTokenTimeout < 0 ||
-    openAIImageFirstTokenTimeout === null ||
-    !Number.isInteger(openAIImageFirstTokenTimeout) ||
-    openAIImageFirstTokenTimeout < 0 ||
     streamDataIntervalTimeout === null ||
     !(
       streamDataIntervalTimeout === 0 ||
@@ -10393,8 +10405,6 @@ function buildGatewayRuntimePayload(): GatewayRuntimeSettings | null {
 
   return {
     response_header_timeout: responseHeaderTimeout,
-    openai_text_first_token_timeout: openAITextFirstTokenTimeout,
-    openai_image_first_token_timeout: openAIImageFirstTokenTimeout,
     stream_data_interval_timeout: streamDataIntervalTimeout,
     usage_log_detail_retention_limit: usageLogDetailRetentionLimit,
     image_usage_log_detail_retention_limit: imageUsageLogDetailRetentionLimit,
@@ -10710,18 +10720,6 @@ function addOpenAIFastPolicyRule() {
 
 function removeOpenAIFastPolicyRule(index: number) {
   openaiFastPolicyForm.rules.splice(index, 1);
-}
-
-function addOpenAIFastPolicyUserID(rule: OpenAIFastPolicyRule) {
-  if (!rule.user_ids) rule.user_ids = [];
-  rule.user_ids.push(0);
-}
-
-function removeOpenAIFastPolicyUserID(
-  rule: OpenAIFastPolicyRule,
-  idx: number,
-) {
-  rule.user_ids?.splice(idx, 1);
 }
 
 function addOpenAIFastPolicyModelPattern(rule: OpenAIFastPolicyRule) {

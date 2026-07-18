@@ -19,10 +19,11 @@ func (s *settingPublicRepoStub) Get(ctx context.Context, key string) (*Setting, 
 }
 
 func (s *settingPublicRepoStub) GetValue(ctx context.Context, key string) (string, error) {
-	if key == SettingKeyGatewayRuntimeSettings {
+	value, ok := s.values[key]
+	if !ok {
 		return "", ErrSettingNotFound
 	}
-	panic("unexpected GetValue call")
+	return value, nil
 }
 
 func (s *settingPublicRepoStub) Set(ctx context.Context, key, value string) error {

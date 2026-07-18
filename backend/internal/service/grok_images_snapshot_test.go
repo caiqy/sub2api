@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
@@ -65,9 +66,9 @@ func TestBuildGrokResponsesRequestStoresUsageAndOpsUpstreamPreview(t *testing.T)
 	c.Set(UsageDetailCaptureContextKey, collector)
 
 	body := []byte(`{"model":"grok-4.3","input":"hello"}`)
-	account := &Account{Credentials: map[string]any{"base_url": "https://xai.test/v1/"}}
+	account := &Account{Platform: PlatformGrok, Type: AccountTypeAPIKey, Credentials: map[string]any{"base_url": "https://xai.test/v1/"}}
 
-	_, err := buildGrokResponsesRequest(context.Background(), c, account, body, "access-token")
+	_, err := buildGrokResponsesRequest(context.Background(), c, account, body, "access-token", "", nil)
 
 	require.NoError(t, err)
 	require.Contains(t, collector.headers, ":method: POST")
@@ -172,13 +173,14 @@ func TestGrokMediaJSONStoresFinalOutboundPreview(t *testing.T) {
 	}}
 	parentID := int64(100)
 	svc := &OpenAIGatewayService{
-		cfg:          &config.Config{},
-		httpUpstream: upstream,
-		accountRepo:  grokPreviewAccountRepo{parent: &Account{ID: parentID, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "xai-key"}}},
+		cfg:               &config.Config{},
+		httpUpstream:      upstream,
+		accountRepo:       grokPreviewAccountRepo{parent: &Account{ID: parentID, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "xai-key"}}},
+		grokTokenProvider: NewGrokTokenProvider(nil, nil),
 	}
 	account := &Account{
 		ID: 10, Platform: PlatformGrok, Type: AccountTypeOAuth, Concurrency: 1, ParentAccountID: &parentID,
-		Credentials: map[string]any{"base_url": "https://xai.test/v1"},
+		Credentials: map[string]any{"base_url": "https://xai.test/v1", "access_token": "xai-key", "refresh_token": "xai-refresh", "expires_at": time.Now().Add(time.Hour)},
 	}
 
 	_, err := svc.ForwardGrokMedia(context.Background(), c, account, GrokMediaEndpointImagesGenerations, "", body, "application/json")
@@ -217,13 +219,14 @@ func TestGrokMediaMultipartStoresOmittedPreview(t *testing.T) {
 	}}
 	parentID := int64(101)
 	svc := &OpenAIGatewayService{
-		cfg:          &config.Config{},
-		httpUpstream: upstream,
-		accountRepo:  grokPreviewAccountRepo{parent: &Account{ID: parentID, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "xai-key"}}},
+		cfg:               &config.Config{},
+		httpUpstream:      upstream,
+		accountRepo:       grokPreviewAccountRepo{parent: &Account{ID: parentID, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "xai-key"}}},
+		grokTokenProvider: NewGrokTokenProvider(nil, nil),
 	}
 	account := &Account{
 		ID: 11, Platform: PlatformGrok, Type: AccountTypeOAuth, Concurrency: 1, ParentAccountID: &parentID,
-		Credentials: map[string]any{"base_url": "https://xai.test/v1"},
+		Credentials: map[string]any{"base_url": "https://xai.test/v1", "access_token": "xai-key", "refresh_token": "xai-refresh", "expires_at": time.Now().Add(time.Hour)},
 	}
 
 	_, err = svc.ForwardGrokMedia(context.Background(), c, account, GrokMediaEndpointImagesEdits, "", body.Bytes(), writer.FormDataContentType())
