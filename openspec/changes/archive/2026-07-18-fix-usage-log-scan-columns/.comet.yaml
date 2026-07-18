@@ -1,6 +1,6 @@
 workflow: hotfix
 language: zh-CN
-phase: build
+phase: archive
 context_compression: off
 build_mode: direct
 build_pause: null
@@ -13,13 +13,13 @@ auto_transition: true
 base_ref: d0edf64a18891f5f2dee1b191711e4b7f25f8b70
 design_doc: null
 plan: null
-verify_result: pending
-verification_report: null
-branch_status: pending
+verify_result: pass
+verification_report: docs/superpowers/reports/2026-07-18-fix-usage-log-scan-columns-verify.md
+branch_status: handled
 created_at: 2026-07-17
-verified_at: null
-archive_confirmation: null
-archived: false
+verified_at: 2026-07-18
+archive_confirmation: confirmed
+archived: true
 direct_override: null
 handoff_context: null
 handoff_hash: null
