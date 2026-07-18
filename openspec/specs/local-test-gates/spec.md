@@ -1,7 +1,7 @@
 # local-test-gates Specification
 
 ## Purpose
-定义无需 Docker 的本地代码质量门禁及相关测试稳定性要求。
+定义无需 Docker 的本地代码质量门禁、重复与并发测试稳定性及跨平台资源清理要求，确保开发工作站在合并前获得一致且可复现的验证结果。
 ## Requirements
 ### Requirement: 本地代码质量门禁
 仓库 MUST 使以下本地验证命令在不依赖 Docker 的开发环境中通过：后端默认测试、后端 unit 测试、后端 `golangci-lint`、前端 ESLint、前端 TypeScript 检查和前端全量 Vitest。integration/e2e 不属于本地代码质量门禁。

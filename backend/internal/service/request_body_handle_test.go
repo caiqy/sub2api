@@ -80,6 +80,37 @@ func TestRequestBodyHandle_CleanupRemovesSpoolFile(t *testing.T) {
 	require.Empty(t, matches)
 }
 
+func TestRequestBodyHandle_CleanupDefersSpoolRemovalUntilOpenReaderCloses(t *testing.T) {
+	body := []byte(strings.Repeat("z", 2048))
+	h, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{
+		SpoolThresholdBytes: 1024,
+		PreviewLimitBytes:   128,
+		TempDir:             t.TempDir(),
+		FilePrefix:          "sub2api-test-",
+	})
+	require.NoError(t, err)
+
+	spoolPath := h.spoolPath
+	r, err := h.Open()
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = r.Close()
+		_ = h.Cleanup()
+	})
+
+	require.NoError(t, h.Cleanup())
+	require.FileExists(t, spoolPath)
+	reopened, err := h.Open()
+	require.ErrorContains(t, err, "cleaned up")
+	require.Nil(t, reopened)
+
+	got, err := io.ReadAll(r)
+	require.NoError(t, err)
+	require.Equal(t, body, got)
+	require.NoError(t, r.Close())
+	require.NoFileExists(t, spoolPath)
+}
+
 func TestRequestBodyHandle_OpenAfterFileCleanupReturnsError(t *testing.T) {
 	h, err := NewRequestBodyHandleFromBytes([]byte(strings.Repeat("z", 2048)), RequestBodyHandleOptions{
 		SpoolThresholdBytes: 1024,
