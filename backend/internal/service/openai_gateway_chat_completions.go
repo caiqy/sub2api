@@ -110,11 +110,18 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	// derive a stable seed from the final upstream model family.
 	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
 	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+	isResponsesShape := !gjson.GetBytes(body, "messages").Exists() && gjson.GetBytes(body, "input").Exists()
 
 	promptCacheKey = strings.TrimSpace(promptCacheKey)
 	compatPromptCacheInjected := false
-	if promptCacheKey == "" && account.Type == AccountTypeOAuth && shouldAutoInjectPromptCacheKeyForCompat(upstreamModel) {
-		promptCacheKey = deriveCompatPromptCacheKey(&chatReq, upstreamModel)
+	if promptCacheKey == "" {
+		if isResponsesShape {
+			promptCacheKey = deriveAutoOpenAICompatPromptCacheKey(body, upstreamModel)
+		} else if account.Type == AccountTypeOAuth && shouldAutoInjectPromptCacheKeyForCompat(upstreamModel) {
+			promptCacheKey = deriveCompatPromptCacheKey(&chatReq, upstreamModel)
+		} else {
+			promptCacheKey = deriveAutoOpenAICompatPromptCacheKey(body, upstreamModel)
+		}
 		compatPromptCacheInjected = promptCacheKey != ""
 	}
 
@@ -127,11 +134,8 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	// and produce `input: null`, which Codex upstreams reject with
 	// "Invalid type for 'input': expected a string, but got an object".
 	//
-	// Detect that shape and forward the raw body as-is, only rewriting `model`
-	// to the resolved upstream model. The downstream codex OAuth transform will
-	// still normalize store/stream/instructions/etc.
-	isResponsesShape := !gjson.GetBytes(body, "messages").Exists() && gjson.GetBytes(body, "input").Exists()
-
+	// Detect that shape and preserve it while applying supported normalization.
+	// The downstream codex OAuth transform still normalizes store/stream/instructions/etc.
 	var (
 		responsesReq  *apicompat.ResponsesRequest
 		responsesBody []byte
@@ -220,17 +224,13 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		}
 	}
 
-	if account.Type == AccountTypeAPIKey {
+	if account.Type != AccountTypeOAuth {
 		if trimmedKey := strings.TrimSpace(promptCacheKey); trimmedKey != "" {
-			var reqBody map[string]any
-			if err := json.Unmarshal(responsesBody, &reqBody); err != nil {
-				return nil, fmt.Errorf("unmarshal for prompt cache key injection: %w", err)
-			}
-			if existing, ok := reqBody["prompt_cache_key"].(string); !ok || strings.TrimSpace(existing) == "" {
-				reqBody["prompt_cache_key"] = trimmedKey
-				responsesBody, err = json.Marshal(reqBody)
+			existing := gjson.GetBytes(responsesBody, "prompt_cache_key")
+			if !existing.Exists() || existing.Type != gjson.String || strings.TrimSpace(existing.String()) == "" {
+				responsesBody, err = sjson.SetBytes(responsesBody, "prompt_cache_key", trimmedKey)
 				if err != nil {
-					return nil, fmt.Errorf("remarshal after prompt cache key injection: %w", err)
+					return nil, fmt.Errorf("inject prompt cache key: %w", err)
 				}
 			}
 		}

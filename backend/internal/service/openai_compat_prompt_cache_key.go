@@ -1,12 +1,14 @@
 package service
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
+	"github.com/tidwall/gjson"
 )
 
 const compatPromptCacheKeyPrefix = "compat_cc_"
@@ -67,6 +69,89 @@ func deriveCompatPromptCacheKey(req *apicompat.ChatCompletionsRequest, mappedMod
 	}
 
 	return compatPromptCacheKeyPrefix + hashSensitiveValueForLog(strings.Join(seedParts, "|"))
+}
+
+// deriveAutoOpenAICompatPromptCacheKey is limited to the expanded Chat→Responses path;
+// legacy OAuth, Grok, and generic session derivation keep their existing keys.
+func deriveAutoOpenAICompatPromptCacheKey(body []byte, mappedModel string) string {
+	model := strings.TrimSpace(mappedModel)
+	if model == "" {
+		model = strings.TrimSpace(gjson.GetBytes(body, "model").String())
+	}
+	if shouldAutoInjectPromptCacheKeyForCompat(model) {
+		model = normalizeCodexModel(model)
+	}
+	seedParts := []string{"model=" + model}
+	appendJSON := func(label string, value gjson.Result) {
+		if value.Exists() {
+			seedParts = append(seedParts, label+"="+normalizeAutoPromptCacheSeedJSON(json.RawMessage(value.Raw)))
+		}
+	}
+	appendJSON("tool_choice", gjson.GetBytes(body, "tool_choice"))
+	appendJSON("tools", gjson.GetBytes(body, "tools"))
+	appendJSON("functions", gjson.GetBytes(body, "functions"))
+	effort := strings.TrimSpace(gjson.GetBytes(body, "reasoning_effort").String())
+	if effort == "" {
+		effort = strings.TrimSpace(gjson.GetBytes(body, "reasoning.effort").String())
+	}
+	if effort != "" {
+		seedParts = append(seedParts, "reasoning_effort="+effort)
+	}
+	if instructions := gjson.GetBytes(body, "instructions"); strings.TrimSpace(instructions.String()) != "" {
+		appendJSON("instructions", instructions)
+	}
+
+	items := gjson.GetBytes(body, "messages")
+	if !items.Exists() {
+		items = gjson.GetBytes(body, "input")
+	}
+	if items.Type == gjson.String && strings.TrimSpace(items.String()) != "" {
+		appendJSON("first_user", items)
+		return compatPromptCacheKeyPrefix + hashSensitiveValueForLog(strings.Join(seedParts, "|"))
+	}
+	if !items.IsArray() {
+		return ""
+	}
+	anchored := false
+	items.ForEach(func(_, item gjson.Result) bool {
+		switch strings.TrimSpace(item.Get("role").String()) {
+		case "system", "developer":
+			appendJSON(item.Get("role").String(), item.Get("content"))
+		case "user":
+			if hasMeaningfulOpenAIContent(item.Get("content")) {
+				appendJSON("first_user", item.Get("content"))
+				anchored = true
+				return false
+			}
+		}
+		if item.Get("type").String() == "input_text" && strings.TrimSpace(item.Get("text").String()) != "" {
+			appendJSON("first_user", item.Get("text"))
+			anchored = true
+			return false
+		}
+		return true
+	})
+	if !anchored {
+		return ""
+	}
+	return compatPromptCacheKeyPrefix + hashSensitiveValueForLog(strings.Join(seedParts, "|"))
+}
+
+func normalizeAutoPromptCacheSeedJSON(v json.RawMessage) string {
+	if len(v) == 0 {
+		return ""
+	}
+	var tmp any
+	decoder := json.NewDecoder(bytes.NewReader(v))
+	decoder.UseNumber()
+	if err := decoder.Decode(&tmp); err != nil || len(bytes.TrimSpace(v[decoder.InputOffset():])) != 0 {
+		return string(v)
+	}
+	out, err := json.Marshal(tmp)
+	if err != nil {
+		return string(v)
+	}
+	return string(out)
 }
 
 func deriveAnthropicCompatPromptCacheKey(req *apicompat.AnthropicRequest, mappedModel string) string {

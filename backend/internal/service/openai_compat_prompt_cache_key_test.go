@@ -69,6 +69,28 @@ func TestDeriveCompatPromptCacheKey_DiffersAcrossSessions(t *testing.T) {
 	require.NotEqual(t, k1, k2, "different first user messages should yield different keys")
 }
 
+func TestDeriveAutoOpenAICompatPromptCacheKey_DistinguishesLargeIntegerAnchors(t *testing.T) {
+	body1 := []byte(`{"model":"gpt-4o","messages":[{"role":"user","content":{"value":9007199254740992}}]}`)
+	body2 := []byte(`{"model":"gpt-4o","messages":[{"role":"user","content":{"value":9007199254740993}}]}`)
+
+	require.NotEqual(t,
+		deriveAutoOpenAICompatPromptCacheKey(body1, "gpt-4o"),
+		deriveAutoOpenAICompatPromptCacheKey(body2, "gpt-4o"),
+	)
+}
+
+func TestDeriveAutoCompatPromptCacheKey_SkipsEmptyAnchors(t *testing.T) {
+	chatBody := []byte(`{"model":"gpt-4o","messages":[{"role":"user","content":""},{"role":"user","content":"question"}]}`)
+	chatBodyWithoutEmpty := []byte(`{"model":"gpt-4o","messages":[{"role":"user","content":"question"}]}`)
+	require.Equal(t,
+		deriveAutoOpenAICompatPromptCacheKey(chatBodyWithoutEmpty, "gpt-4o"),
+		deriveAutoOpenAICompatPromptCacheKey(chatBody, "gpt-4o"),
+	)
+
+	responsesBody := []byte(`{"model":"gpt-4o","input":[{"role":"user","content":""},{"type":"input_text","text":"question"}]}`)
+	require.NotEmpty(t, deriveAutoOpenAICompatPromptCacheKey(responsesBody, "gpt-4o"))
+}
+
 func TestDeriveCompatPromptCacheKey_UsesResolvedSparkFamily(t *testing.T) {
 	req := &apicompat.ChatCompletionsRequest{
 		Model: "gpt-5.3-codex-spark",
