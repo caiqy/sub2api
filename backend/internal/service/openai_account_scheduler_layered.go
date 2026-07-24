@@ -285,7 +285,7 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 				continue
 			}
 		}
-		if !account.IsSchedulable() || !account.IsOpenAI() {
+		if !account.IsSchedulable() || account.Platform != normalizeOpenAICompatiblePlatform(req.Platform) {
 			continue
 		}
 		if schedGroup != nil && schedGroup.RequirePrivacySet && !account.IsPrivacySet() {
@@ -340,10 +340,10 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 	}
 
 	// 4. 应用运行时惩罚（使用 group-level 共享评估）并过滤满载候选
-	groupMinTTFT, hasGroupMin, groupMinErr := s.computeGroupMinTTFT(ctx, req.GroupID)
-	if groupMinErr != nil {
-		groupMinTTFT = 0
-		hasGroupMin = false
+	var groupMinTTFT float64
+	var hasGroupMin bool
+	if normalizeOpenAICompatiblePlatform(req.Platform) == PlatformOpenAI {
+		groupMinTTFT, hasGroupMin, _ = s.computeGroupMinTTFT(ctx, req.GroupID)
 	}
 	available := make([]accountWithLoad, 0, len(candidates))
 	loadRateSum := 0.0
@@ -380,13 +380,13 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 			break
 		}
 
-		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, selected.account, PlatformOpenAI, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
+		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, selected.account, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
 		if fresh == nil || !s.isAccountRequestCompatible(ctx, fresh, req) || !accountSatisfiesPrivacyRequirement(fresh, schedGroup) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
 			recordPrivacyRequirementError(ctx, s.service, fresh, schedGroup)
 			available = removeFromAvailable(available, selected.account.ID)
 			continue
 		}
-		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.GroupID, PlatformOpenAI, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
+		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
 		if fresh == nil || !s.isAccountRequestCompatible(ctx, fresh, req) || !accountSatisfiesPrivacyRequirement(fresh, schedGroup) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
 			recordPrivacyRequirementError(ctx, s.service, fresh, schedGroup)
 			available = removeFromAvailable(available, selected.account.ID)
@@ -414,12 +414,12 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 	cfg := s.service.schedulingConfig()
 	fallbackAccounts := make([]*Account, 0, len(filtered))
 	for _, account := range filtered {
-		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, account, PlatformOpenAI, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
+		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, account, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
 		if fresh == nil || !s.isAccountRequestCompatible(ctx, fresh, req) || !accountSatisfiesPrivacyRequirement(fresh, schedGroup) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
 			recordPrivacyRequirementError(ctx, s.service, fresh, schedGroup)
 			continue
 		}
-		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.GroupID, PlatformOpenAI, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
+		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
 		if fresh == nil || !s.isAccountRequestCompatible(ctx, fresh, req) || !accountSatisfiesPrivacyRequirement(fresh, schedGroup) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
 			recordPrivacyRequirementError(ctx, s.service, fresh, schedGroup)
 			continue

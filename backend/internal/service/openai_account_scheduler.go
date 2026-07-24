@@ -1219,7 +1219,7 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 		if result == nil || !result.Acquired {
 			continue
 		}
-		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, PlatformOpenAI, req.RequestedModel, false, req.RequiredCapability)
+		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, req.Platform, req.RequestedModel, false, req.RequiredCapability)
 		if fresh == nil || (fresh.GroupIDs != nil && !openAIStickyAccountMatchesGroup(fresh, req.GroupID)) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
 			release(result)
 			continue
@@ -1228,7 +1228,7 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 			release(result)
 			break
 		}
-		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.GroupID, PlatformOpenAI, req.RequestedModel, false, req.RequiredCapability)
+		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.GroupID, req.Platform, req.RequestedModel, false, req.RequiredCapability)
 		if fresh == nil || (fresh.GroupIDs != nil && !openAIStickyAccountMatchesGroup(fresh, req.GroupID)) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
 			release(result)
 			continue
@@ -1366,7 +1366,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 				continue
 			}
 		}
-		if !account.IsSchedulable() || !account.IsOpenAI() {
+		if !account.IsSchedulable() || account.Platform != normalizeOpenAICompatiblePlatform(req.Platform) {
 			continue
 		}
 		if s.service.isOpenAIAccountRuntimeBlocked(account) {
@@ -1582,11 +1582,11 @@ func (s *defaultOpenAIAccountScheduler) finishLoadBalanceSelectionFallback(
 	compactBlocked := attempt.compactBlocked
 	// WaitPlan.MaxConcurrency 使用 Concurrency（非 EffectiveLoadFactor），因为 WaitPlan 控制的是 Redis 实际并发槽位等待。
 	for _, candidate := range attempt.selectionOrder {
-		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, PlatformOpenAI, req.RequestedModel, false, req.RequiredCapability)
+		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, req.Platform, req.RequestedModel, false, req.RequiredCapability)
 		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
 			continue
 		}
-		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.GroupID, PlatformOpenAI, req.RequestedModel, false, req.RequiredCapability)
+		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.GroupID, req.Platform, req.RequestedModel, false, req.RequiredCapability)
 		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
 			continue
 		}

@@ -298,6 +298,36 @@ func TestLayered_TTFTPenalty_UsesGroupLevelBaseline(t *testing.T) {
 	}
 }
 
+func TestLayered_TTFTPenalty_DoesNotUseOpenAIBaselineForGrok(t *testing.T) {
+	accounts := []Account{
+		{ID: 91001, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1},
+		{ID: 91002, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0},
+		{ID: 91003, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 10},
+	}
+	svc := newLayeredTestService(accounts)
+	svc.cfg.RunMode = config.RunModeSimple
+	scheduler := svc.getOpenAIAccountScheduler()
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	for i := 0; i < 5; i++ {
+		openAIFast := 10
+		grokSlow := 100
+		grokFast := 20
+		scheduler.ReportResult(91001, true, &openAIFast)
+		scheduler.ReportResult(91002, true, &grokSlow)
+		scheduler.ReportResult(91003, true, &grokFast)
+	}
+
+	result, _, err := scheduler.Select(context.Background(), OpenAIAccountScheduleRequest{Platform: PlatformGrok})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Account)
+	require.Equal(t, int64(91002), result.Account.ID)
+	if result.ReleaseFunc != nil {
+		result.ReleaseFunc()
+	}
+}
+
 // TestLayered_TTFTPenalty_SharedEvaluatorUsesConsistentGroupBaseline verifies
 // that the shared evaluator helpers compute and apply the same group-level TTFT
 // baseline regardless of which account is being evaluated. This covers helper
@@ -613,8 +643,11 @@ func TestLayered_PreviousResponseStickyIgnoresNonOpenAIPlatform(t *testing.T) {
 		false,
 		PlatformGrok,
 	)
-	require.Error(t, err)
-	require.Nil(t, selection)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, grokAccount.ID, selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
 	require.False(t, decision.StickyPreviousHit)
 	require.Zero(t, stateStore.getResponseAccountCalls["resp_layered_non_openai"])
 	require.Zero(t, stateStore.deleteResponseCalls["resp_layered_non_openai"])

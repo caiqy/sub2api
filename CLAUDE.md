@@ -75,6 +75,7 @@ Sub2API — AI API 网关平台，用平台签发的 API Key 让 Claude Code/Cod
 - 发布本地版本时，只能基于当前 `HEAD` 已包含的最高上游三段式 tag 递增四段式版本；不要基于尚未合入的上游 tag 发 `.1`。
 - 发版后需要使用 `gh` 跟进 Release workflow 结果，不要只校验远端 tag。
 - 后续发布下一个版本时，采用完整 Release 方式：临时将仓库变量 `SIMPLE_RELEASE=false`，用 `workflow_dispatch` 触发目标 tag，核验二进制 assets 和 `checksums.txt` 后再恢复原变量。
+- 镜像只能通过 GitHub Actions 构建；禁止在 dmit-serv-ai 等生产服务器上执行镜像构建，服务器仅拉取并运行 CI 发布的镜像。
 - Comet/OpenSpec 文档沿用模板标题和必需关键字；业务填充内容尽量使用中文。该约束同步写入 `openspec/config.yaml`。
 - 前端调试预览 → `memory/context/frontend-debug-preview.md`
 - 发版流程 → `memory/context/release-workflow.md`
