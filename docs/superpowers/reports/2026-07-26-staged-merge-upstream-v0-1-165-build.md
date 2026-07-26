@@ -1750,11 +1750,63 @@ frontend/src/i18n/locales/en/admin/resources.ts
 - 固定输入：开始及归档 HEAD 均为 `d32256d4fc557f20b87a1c802e2d54c938f5226d`，分支为 `feature/20260726/staged-merge-upstream-v0-1-165`。开始和提交前暂存区均为空；协调者的 plan、OpenSpec `tasks.md`/progress，以及根 `.comet/current-change.json`、`paseo.json` 未触碰。
 - Task 6 reviewer Approved 矩阵为 28 行：`protected=26`、`manual=1`、`gap=0`、`approved-removal=1`。因此没有 `gap` 行需要 RED/GREEN 或新增测试；TDD N/A，不伪造失败或通过测试。唯一 `approved-removal` 是明确许可的 `openai-first-token-timeout`，不构成补测输入。
 - 本地 full gate：在当前 PowerShell 进程以 `$env:PATH = "C:\Program Files\Git\bin;C:\Program Files\Git\usr\bin;" + $env:PATH` 运行 `make test` 和 `make build`，均退出 `0`。`make test` 的 Vitest 摘要为 `194 passed` 文件、`1493 passed` 用例；`make build` 构建 backend `0.1.159.6`，Vite 为 `987 modules transformed`。Browserslist、Vue/i18n 测试 stderr、动态 import/chunk-size 信息均为已有 advisory，命令没有失败。
-- 本地静态 gate：`git diff --name-only 'v0.1.159^{}..HEAD'` 退出 `0`；`git diff --name-only --diff-filter=U` 无输出；`git diff --check` 退出 `0`（仅协调者既有文件的 CRLF 提示）；`git grep -n -I -E '^(<<<<<<< |=======$|>>>>>>> )' HEAD` 无命中。初版宽松扫描曾命中 `request_transformer.go` 的 MCP 协议等号横线，精确规则只匹配完整冲突行，故不是冲突标记。`backend/cmd/server/VERSION` 为 `0.1.159.6`，根 `VERSION` 不存在。
+- 本地静态 gate：`git diff --name-only 'v0.1.159^{}..HEAD'` 退出 `0`；`git diff --name-only --diff-filter=U` 无输出；`git diff --check` 退出 `0`（仅协调者既有文件的 CRLF 提示）。精确冲突扫描实际命令为 `git grep -n -I -E '^(<<<<<<< |=======$|>>>>>>> )' HEAD; if ($LASTEXITCODE -eq 1) { exit 0 }; exit $LASTEXITCODE`：无输出时内层 `git grep` 的预期退出码为 `1`，wrapper 整体退出 `0`。初版宽松扫描曾命中 `request_transformer.go` 的 MCP 协议等号横线，精确规则只匹配完整冲突行，故不是冲突标记。`backend/cmd/server/VERSION` 为 `0.1.159.6`，根 `VERSION` 不存在。
 - 远程 Task 4 重跑：从当前已提交 HEAD 执行 `git archive --format=tar HEAD`，唯一 tar 是 `C:/Users/caiqy/AppData/Local/Temp/sub2api-stage-0-58619bc639bb414e947be37a6ea56b59.tar`，大小 `49827840` bytes，SHA-256 `37DD9EED379D633FFE6ED69551B962B595AB049F3DDBED2874D667C0FFA74D16`。只经 `ssh-skill` Python 脚本创建、上传、运行和清理唯一远端目录 `/tmp/sub2api-stage-0-58619bc639bb414e947be37a6ea56b59`；所有实际远端 JSON 均为 `success=true, exit_code=0`。
 - 远程预检严格确认 `go version go1.26.5 linux/amd64` 与 `Docker ServerVersion=29.2.1`。没有安装 Make/PowerShell、构建镜像、部署、访问服务或生产数据。首次含 PowerShell `$()` 的本地 `ssh_execute.py` 参数在调用端被 argparse 拒绝，未建立 SSH 或执行远端预检；已改为不含 shell substitution 的精确等价命令，结果如上。
 - 远程 full integration 在 archive 的 `backend` 重建 `.test-tmp`，以同一绝对路径设置 `TMPDIR`/`TMP`/`TEMP` 后运行 `CI=true GOFLAGS='-v' go test -tags=integration ./...`，JSON 为 `success=true, exit_code=0`。完整日志保存于 `C:/Users/caiqy/AppData/Local/Temp/sub2api-stage-0-58619bc639bb414e947be37a6ea56b59-integration.log`；其中 `TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate` 明确 `PASS (4.20s)`，无 `FAIL`。
 - 远程 skip 共 7 项，均为既有非目标风险：DingTalk disabled sentinel；未设 `TLSFINGERPRINT_CAPTURE_URL`；外部 `tls.peet.ws` 证书问题导致 JA3 和两个 profile 子例；已知 CI concurrency TODO；未设 `OPENAI_API_KEY`。日志下载 JSON 为 `success=true, exit_code=0`。远端清理以 `rm -rf ... && test ! -e ...` 返回 `success=true, exit_code=0`；本地 tar 已删除并确认不存在，完整日志按要求保留。
+
+### Task 7 ssh-skill 调用审计
+
+以下是原始会话中实际运行的调用，不含凭据。相应 tool record ID 依次为 `prt_fa046bdae001E2vY9V2N5ZkW8r`、`prt_fa046e161001YmXB3kUV4niA3f`、`prt_fa04700d9001wQ9zPM0tHbdwi4`、`prt_fa047587a001VQ7nB63to2dWPt`、`prt_fa047a31a0015a1DByzrCeRPgC`、`prt_fa04bbbf8001jdh0uCd33zA9bi`、`prt_fa04da039001DBwi0IvyjKM65q`、`prt_fa052bf4f00169weJlM4axitTh`。
+
+```powershell
+python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "umask 077 && mkdir -p '/tmp/sub2api-stage-0-58619bc639bb414e947be37a6ea56b59/src'"
+```
+
+create：JSON `success=true, exit_code=0`。
+
+```powershell
+$env:MSYS_NO_PATHCONV = '1'; python ~/.claude/skills/ssh-skill/scripts/ssh_upload.py local-serv-ai "C:/Users/caiqy/AppData/Local/Temp/sub2api-stage-0-58619bc639bb414e947be37a6ea56b59.tar" "/tmp/sub2api-stage-0-58619bc639bb414e947be37a6ea56b59/source.tar" --no-progress
+```
+
+upload：JSON `success=true, exit_code=0`。
+
+```powershell
+python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu; go version; test \"$(go version | sed -n 's/^go version go\\([0-9.]*\\).*/\\1/p')\" = '1.26.5'; docker info --format 'ServerVersion={{.ServerVersion}}'"
+```
+
+首次 precheck：本地 `ssh_execute.py` argparse 拒绝，错误为 `unrecognized arguments: \ = '1.26.5'; docker info --format 'ServerVersion={{.ServerVersion}}'`；PowerShell 展开 `$()` 后命令没有建立 SSH、没有执行远端预检。
+
+```powershell
+python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu; go version | grep -Fx 'go version go1.26.5 linux/amd64'; docker info --format 'ServerVersion={{.ServerVersion}}'"
+```
+
+成功 precheck：JSON `success=true, exit_code=0`；stdout 为 `go version go1.26.5 linux/amd64` 和 `ServerVersion=29.2.1`。
+
+```powershell
+python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu; test -f '/tmp/sub2api-stage-0-58619bc639bb414e947be37a6ea56b59/source.tar'; tar -xf '/tmp/sub2api-stage-0-58619bc639bb414e947be37a6ea56b59/source.tar' -C '/tmp/sub2api-stage-0-58619bc639bb414e947be37a6ea56b59/src'; cd '/tmp/sub2api-stage-0-58619bc639bb414e947be37a6ea56b59/src/backend'; rm -rf .test-tmp; mkdir .test-tmp; CI=true GOFLAGS='-v' TMPDIR='/tmp/sub2api-stage-0-58619bc639bb414e947be37a6ea56b59/src/backend/.test-tmp' TMP='/tmp/sub2api-stage-0-58619bc639bb414e947be37a6ea56b59/src/backend/.test-tmp' TEMP='/tmp/sub2api-stage-0-58619bc639bb414e947be37a6ea56b59/src/backend/.test-tmp' go test -tags=integration ./... > '/tmp/sub2api-stage-0-58619bc639bb414e947be37a6ea56b59/integration.log' 2>&1" --timeout 1200
+```
+
+integration：JSON `success=true, exit_code=0`。
+
+```powershell
+$env:MSYS_NO_PATHCONV = '1'; python ~/.claude/skills/ssh-skill/scripts/ssh_download.py local-serv-ai "/tmp/sub2api-stage-0-58619bc639bb414e947be37a6ea56b59/integration.log" "C:/Users/caiqy/AppData/Local/Temp/sub2api-stage-0-58619bc639bb414e947be37a6ea56b59-integration.log" --no-progress
+```
+
+download：JSON `success=true, exit_code=0`。
+
+```powershell
+python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "rm -rf '/tmp/sub2api-stage-0-58619bc639bb414e947be37a6ea56b59' && test ! -e '/tmp/sub2api-stage-0-58619bc639bb414e947be37a6ea56b59'"
+```
+
+cleanup：JSON `success=true, exit_code=0`。
+
+```powershell
+python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "test ! -e '/tmp/sub2api-stage-0-58619bc639bb414e947be37a6ea56b59'"
+```
+
+final absence check：JSON `success=true, exit_code=0`。
 - Task 5 重跑：在 `C:/Users/caiqy/AppData/Local/Temp/opencode/wf09b22` 以 `git -c core.longpaths=true worktree add --detach <path> HEAD` 建立短路径 detached worktree。两轮均按顺序运行 `make -C backend generate`、`git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go`、`git status --short`；六项退出 `0`，每轮 diff/status 均无输出。`git -c core.longpaths=true worktree remove <path>` 退出 `0`，路径和 `git worktree list --porcelain` 注册均无残留。
 - 主工作区最终静态复核：generated path diff 退出 `0`；`git ls-tree -r --name-only HEAD backend/migrations` 为 238 路径，其中 231 SQL、7 支持文件。只有 `172_video_per_second_billing_metadata.sql` 与 `181_group_duplicate_operation_id.sql`，没有 `186*`。指定 runner `git grep` 退出 `0`：`fs.Glob` 后 `sort.Strings` 按完整 filename，`schema_migrations.filename` 是主键并保存 SHA-256 checksum，`*_notx.sql` 逐语句非事务执行且限制幂等的 `CREATE/DROP INDEX CONCURRENTLY`。
 - 当前残余风险：Windows 受监视主工作区的历史 user-mapped section 问题未定因；本轮仅以 reviewer 接受的 detached worktree 双轮证明当前 committed HEAD 的生成稳定。远程的七项 skip 仍是外部环境/已知 CI 风险。阶段 0 已关闭；没有开始 tag merge、push、tag、release 或 deploy。
