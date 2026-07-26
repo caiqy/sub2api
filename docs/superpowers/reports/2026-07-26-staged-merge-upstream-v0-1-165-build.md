@@ -130,8 +130,6 @@
 
 ## 阻塞与残余风险
 
-- 当前无隔离或工作树范围阻塞。
-- 阶段 0 本地 full 门禁已通过，但远程 integration 被 `local-serv-ai` 预检阻塞：首个阻塞为 GNU make 缺失；同次 stdout 显示 Go `1.26.1` 低于 `backend/go.mod` 的 `1.26.5`。后续只读发现已确认 Docker Server `29.2.1` 可用，不是当前阻塞；但还发现 `powershell.exe` 和 `pwsh` 均不存在，不能满足 Makefile 的 integration 入口。当前授权只覆盖 Make 和 Go，必须先由用户或管理员提供 PowerShell 入口，再提供 PATH 可见的 GNU Make 和 Go `>=1.26.5`，然后以新的唯一临时目录完整重跑；不得据此放行 `v0.1.160` 或任一后续 tag。
-- 当前规范已改为 Linux 原生门禁，Make/PowerShell 历史前置条件不再适用；vfox Go `1.26.5` 与 Docker `29.2.1` 已满足当前预检。新的首个未解决阻塞是原生 integration 整套退出 `1`：handler body spool/panic 断言、repository usage-detail transaction/retention 断言和 hidden UI resource ordering 均需独立诊断与修复后，以新 nonce 完整重跑。不得据此放行 `v0.1.160` 或任一后续 tag。
-- 阶段 0 的本地与远程门禁现均通过，工具链/PowerShell 历史阻塞和首次 integration RED 已由后续规范、测试修复与 HEAD `99cb81de306cb0e8ea811387e362e4d601f6f4b0` 的新 nonce GREEN 解决。残余风险仅为七项非目标基线 skip；它们已分类且没有掩盖迁移或 repository target。Task 5-7（生成/migration 静态稳定性、能力矩阵与保护断言）尚未完成，因此仍不得开始或放行 `v0.1.160`。
-- 六个 tag merge、changed-files/能力矩阵，以及各 tag 后续本地/远程门禁仍待执行；本次没有将任何 tag 远程门禁记为通过。
+- 历史阻塞（已解决，归档 HEAD `c8e0110a9a2354453753db9c4acae0ed7570458d`）：原 Make/PowerShell/Go 预检依次暴露 GNU Make 缺失、Go `1.26.1` 低于 directive、PowerShell 入口缺失；后续规范已改为 Linux 原生 gate，vfox Go `1.26.5` 和 Docker `29.2.1` 已在新 nonce 中验证。
+- 历史阻塞（已解决，规范 HEAD `849f956992178e25ab2074e1e4cc596d29f8834f`）：首次原生 full RED 暴露 handler body spool/panic、repository usage-detail transaction/retention 与 hidden UI resource ordering 断言；后续测试修复及 HEAD `99cb81de306cb0e8ea811387e362e4d601f6f4b0` 的新 nonce focused/full GREEN 已解决。
+- 当前状态：阶段 0 本地与远程门禁通过；七项非 migration/repository target skip 是已分类的基线风险。Task 5-7（生成/migration 静态稳定性、能力矩阵与保护断言）及六个 tag merge 仍未完成，因此仍不得开始或放行 `v0.1.160`。
