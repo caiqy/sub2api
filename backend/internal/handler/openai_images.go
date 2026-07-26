@@ -148,6 +148,10 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		h.errorResponse(c, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message)
 		return
 	}
+	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIImages, requestModel, parsed.ModerationBody()); decision != nil && !decision.AllowNextStage {
+		h.openAISecurityAuditError(c, decision)
+		return
+	}
 	coordinator.ReleaseMultipartValues()
 	parsed.ReleaseText()
 	imageReleaseFunc, acquired := h.acquireImageGenerationSlot(c, streamStarted)

@@ -231,7 +231,7 @@ func TestGrokMedia_GenerateEditVideoRejectUpstreamFailoverPreserveRequestSemanti
 			},
 			accounts: func(parentID int64) []*service.Account {
 				return []*service.Account{{ID: 1002, Name: "grok", Platform: service.PlatformGrok, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, ParentAccountID: &parentID, Credentials: map[string]any{"base_url": "https://api.x.ai/v1"}}}
-			}, wantStatus: http.StatusOK, wantAccounts: []int64{1002}, wantMethod: http.MethodPost, wantPath: "/v1/images/edits", wantType: "application/json", wantBody: []byte(`{"image":{"image_url":"data:application/octet-stream;base64,bWVkaWEtc2VjcmV0LWZpbGU="},"model":"grok-imagine-image-quality"}`),
+			}, wantStatus: http.StatusOK, wantAccounts: []int64{1002}, wantMethod: http.MethodPost, wantPath: "/v1/images/edits", wantType: "application/json", wantBody: []byte(`{"image":{"url":"data:application/octet-stream;base64,bWVkaWEtc2VjcmV0LWZpbGU="},"model":"grok-imagine-image-quality"}`),
 		},
 		{
 			name: "video create success", route: "/v1/videos/generations", handler: func(c *gin.Context) { grokHandler(c).GrokVideoGeneration(c) },
@@ -257,7 +257,7 @@ func TestGrokMedia_GenerateEditVideoRejectUpstreamFailoverPreserveRequestSemanti
 			},
 			accounts: func(parentID int64) []*service.Account {
 				return []*service.Account{{ID: 10021, Name: "grok", Platform: service.PlatformGrok, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, ParentAccountID: &parentID, Credentials: map[string]any{"base_url": "https://api.x.ai/v1"}}}
-			}, statuses: []int{http.StatusBadRequest}, wantStatus: http.StatusBadRequest, wantAccounts: []int64{10021}, wantMethod: http.MethodPost, wantPath: "/v1/images/edits", wantType: "application/json", wantBody: []byte(`{"image":{"image_url":"data:application/octet-stream;base64,bWVkaWEtc2VjcmV0LWZpbGU="},"model":"grok-imagine-image-quality"}`),
+			}, statuses: []int{http.StatusBadRequest}, wantStatus: http.StatusBadRequest, wantAccounts: []int64{10021}, wantMethod: http.MethodPost, wantPath: "/v1/images/edits", wantType: "application/json", wantBody: []byte(`{"image":{"url":"data:application/octet-stream;base64,bWVkaWEtc2VjcmV0LWZpbGU="},"model":"grok-imagine-image-quality"}`),
 		},
 		{
 			name: "video create canceled", route: "/v1/videos/generations", handler: func(c *gin.Context) { grokHandler(c).GrokVideoGeneration(c) },
@@ -673,8 +673,8 @@ func TestGrokMedia_MultipartEditTextSourcesRebuildUpstreamJSON(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("timed out waiting for grok media upstream")
 			}
-			require.Equal(t, tt.source, gjson.GetBytes(upstream.body, "image.image_url").String())
-			require.Equal(t, tt.mask, gjson.GetBytes(upstream.body, "mask.image_url").String())
+			require.Equal(t, tt.source, gjson.GetBytes(upstream.body, "image.url").String())
+			require.Equal(t, tt.mask, gjson.GetBytes(upstream.body, "mask.url").String())
 
 			release()
 			select {
@@ -720,4 +720,24 @@ func TestGrokMedia_MultipartEffectiveSpoolFailureReturns503(t *testing.T) {
 
 	require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
 	require.Empty(t, upstream.calls())
+}
+func TestGrokMediaRequiredCapability(t *testing.T) {
+	tests := []struct {
+		name     string
+		endpoint service.GrokMediaEndpoint
+		want     service.OpenAIEndpointCapability
+	}{
+		{name: "image generation", endpoint: service.GrokMediaEndpointImagesGenerations, want: service.OpenAIEndpointCapabilityGrokMediaGeneration},
+		{name: "image edit", endpoint: service.GrokMediaEndpointImagesEdits, want: service.OpenAIEndpointCapabilityGrokMediaGeneration},
+		{name: "video generation", endpoint: service.GrokMediaEndpointVideosGenerations, want: service.OpenAIEndpointCapabilityGrokMediaGeneration},
+		{name: "video edit", endpoint: service.GrokMediaEndpointVideosEdits, want: service.OpenAIEndpointCapabilityGrokMediaGeneration},
+		{name: "video extension", endpoint: service.GrokMediaEndpointVideosExtensions, want: service.OpenAIEndpointCapabilityGrokMediaGeneration},
+		{name: "video status preserves lookup", endpoint: service.GrokMediaEndpointVideoStatus, want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, grokMediaRequiredCapability(tt.endpoint))
+		})
+	}
 }

@@ -22,5 +22,8 @@ backend/migrations/*.sql text eol=lf
 openspec/changes/*/.comet/skill-snapshots/** text eol=lf
 openspec/changes/archive/*/.comet/skill-snapshots/** text eol=lf
 
+# Source-freeze patch content includes literal diff whitespace.
+openspec/changes/add-openai-compatible-prompt-audit/source-freeze/aicodex-prompt-audit-tracked.patch -whitespace
+
 # Dockerfile
 Dockerfile text eol=lf

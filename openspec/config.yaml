@@ -19,7 +19,6 @@ rules:
   tasks:
     - Keep checkbox syntax unchanged.
     - Write task group names and task descriptions in Chinese whenever possible.
-
 # Project context (optional)
 # This is shown to AI when creating artifacts.
 # Add your tech stack, conventions, style guides, domain knowledge, etc.

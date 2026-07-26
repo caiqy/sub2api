@@ -15,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -33,6 +34,7 @@ type OpenAIGatewayHandler struct {
 	usageRecordWorkerPool    *service.UsageRecordWorkerPool
 	errorPassthroughService  *service.ErrorPassthroughService
 	contentModerationService *service.ContentModerationService
+	securityAuditCoordinator *securityaudit.Coordinator
 	opsService               *service.OpsService
 	concurrencyHelper        *ConcurrencyHelper
 	imageLimiter             *imageConcurrencyLimiter
@@ -40,10 +42,7 @@ type OpenAIGatewayHandler struct {
 	cfg                      *config.Config
 }
 
-const (
-	openAIResponsesRequestBodySpoolThresholdBytes int64 = 10 << 20
-	maxOpenAIFirstOutputTimeoutSwitches                 = 1
-)
+const openAIResponsesRequestBodySpoolThresholdBytes int64 = 10 << 20
 
 func openAIForwardSucceededForScheduling(result *service.OpenAIForwardResult) bool {
 	return result.SucceededForScheduling()
@@ -314,12 +313,15 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	setOpsRequestContext(c, reqModel, reqStream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
 
-	if decision := h.checkContentModeration(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, reqModel, body); decision != nil && decision.Blocked {
-		h.errorResponse(c, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message)
+	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, reqModel, body); decision != nil && !decision.AllowNextStage {
+		h.openAISecurityAuditError(c, decision)
 		return
 	}
 
-	imageIntent := service.IsImageGenerationIntentForPlatform("/v1/responses", reqModel, body, openAICompatibleRequestPlatform(apiKey))
+	// 使用 IsExplicitImageGenerationIntent 排除被动 image_gen namespace 声明。
+	// Codex 在所有请求中被动声明 image_gen namespace，宽泛检测会导致禁了生图的
+	// 分组中所有 Codex 请求被 403（#4447），并误占生图并发槽位。
+	imageIntent := service.IsExplicitImageGenerationIntent("/v1/responses", reqModel, body)
 	if imageIntent && !service.GroupAllowsImageGeneration(apiKey.Group) {
 		h.errorResponse(c, http.StatusForbidden, "permission_error", service.ImageGenerationPermissionMessage())
 		return
@@ -404,7 +406,16 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	var lastFailedDuration time.Duration
 	var lastFailedReasoningEffort *string
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
-	firstOutputTimeoutSwitchCount := 0
+
+	// 生图意图的 /v1/responses 请求必须调度到确实支持 Responses API 的账号，否则
+	// 会在 forward 阶段被静默降级为无法生图的 Chat Completions 直转（#4417）。
+	// 仅对 OpenAI 平台生效：Grok 生图走独立的 forwardGrokResponses 路径，不应被过滤。
+	// 使用 IsExplicitImageGenerationIntent 排除被动 image_gen namespace 声明，
+	// 避免 Codex 的被动工具目录使 CC-only 账号被误过滤（#4476）。
+	requiredCapability := service.OpenAIEndpointCapabilityChatCompletions
+	if service.IsExplicitImageGenerationIntent("/v1/responses", reqModel, body) && requestPlatform == service.PlatformOpenAI {
+		requiredCapability = service.OpenAIEndpointCapabilityResponses
+	}
 
 	for {
 		if failoverClientGone(c) {
@@ -420,7 +431,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			reqModel,
 			failedAccountIDs,
 			service.OpenAIUpstreamTransportAny,
-			service.OpenAIEndpointCapabilityChatCompletions,
+			requiredCapability,
 			requireCompact,
 			false,
 			requestPlatform,
@@ -566,11 +577,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 						headers.Del("X-Accel-Buffering")
 					}
 					h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(reqModel), false, nil)
-					if openAIFirstOutputFailoverExhausted(failoverErr, &firstOutputTimeoutSwitchCount) {
-						h.submitFailoverFailedUsageLog(c, apiKey, account, reqModel, reqStream, failoverErr, forwardDuration, attemptReasoningEffort, "handler.openai_gateway.responses")
-						h.handleFailoverExhausted(c, failoverErr, streamStarted)
-						return
-					}
 					// 池模式：同账号重试
 					if failoverErr.RetryableOnSameAccount {
 						retryLimit := account.GetPoolModeRetryCount()
@@ -923,8 +929,8 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	setOpsRequestContext(c, reqModel, reqStream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
 
-	if decision := h.checkContentModeration(c, reqLog, apiKey, subject, service.ContentModerationProtocolAnthropicMessages, reqModel, body); decision != nil && decision.Blocked {
-		h.anthropicErrorResponse(c, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message)
+	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolAnthropicMessages, reqModel, body); decision != nil && !decision.AllowNextStage {
+		h.anthropicSecurityAuditError(c, decision)
 		return
 	}
 
@@ -1601,9 +1607,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	setOpsRequestContext(c, reqModel, true)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeWSV2))
 
-	if decision := h.checkContentModeration(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, reqModel, firstMessage); decision != nil && decision.Blocked {
-		writeContentModerationWSError(ctx, wsConn, decision)
-		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, decision.Message)
+	if decision := h.checkSecurityAuditStage(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, reqModel, firstMessage, "first_turn"); decision != nil && !decision.AllowNextStage {
+		writeSecurityAuditWSError(ctx, wsConn, decision)
+		closeOpenAIClientWS(wsConn, securityAuditWSCloseStatus(decision), securityAuditWSCloseReason(decision))
 		return
 	}
 
@@ -1717,6 +1723,52 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	var lastFailedDuration time.Duration
 	var lastFailedReasoningEffort *string
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
+	handleWSFailover := func(account *service.Account, failoverErr *service.UpstreamFailoverError) bool {
+		if ctx.Err() != nil {
+			return false
+		}
+		if failoverErr.ShouldReportAccountScheduleFailure() {
+			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(reqModel), false, nil)
+		}
+		releaseAccountSlot()
+		if !failoverErr.ShouldRetryNextAccount() {
+			closeOpenAIWSFailoverExhausted(wsConn, failoverErr)
+			return false
+		}
+		if ctx.Err() != nil {
+			return false
+		}
+		h.gatewayService.RecordOpenAIAccountSwitch()
+		failedAccountIDs[account.ID] = struct{}{}
+		lastFailoverErr = failoverErr
+		if switchCount >= maxAccountSwitches {
+			closeOpenAIWSFailoverExhausted(wsConn, failoverErr)
+			return false
+		}
+		switchCount++
+		if h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount, &oauth429FailoverState) {
+			closeOpenAIWSFailoverExhausted(wsConn, failoverErr)
+			return false
+		}
+		reqLog.Warn("openai.websocket_upstream_failover_switching",
+			zap.Int64("account_id", account.ID),
+			zap.Int("upstream_status", failoverErr.StatusCode),
+			zap.Int("switch_count", switchCount),
+			zap.Int("max_switches", maxAccountSwitches),
+		)
+		if ctx.Err() != nil {
+			return false
+		}
+		return ensureUserSlotHeld()
+	}
+
+	// 与 HTTP Responses 路径保持一致：生图意图请求要求账号支持 Responses API（#4417）。
+	// WSv2 传输本身已隐含 Responses 支持，此处为防御性对齐。
+	// 使用 IsExplicitImageGenerationIntent 排除被动 namespace 声明（#4476）。
+	requiredCapability := service.OpenAIEndpointCapabilityChatCompletions
+	if service.IsExplicitImageGenerationIntent("/v1/responses", reqModel, firstMessage) && requestPlatform == service.PlatformOpenAI {
+		requiredCapability = service.OpenAIEndpointCapabilityResponses
+	}
 
 	for {
 		reqLog.Debug("openai.websocket_account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
@@ -1728,7 +1780,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			reqModel,
 			failedAccountIDs,
 			requiredTransport,
-			service.OpenAIEndpointCapabilityChatCompletions,
+			requiredCapability,
 			false,
 			previousResponseCanMove,
 			requestPlatform,
@@ -1842,9 +1894,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if model == "" {
 					model = reqModel
 				}
-				if decision := h.checkContentModeration(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, model, payload); decision != nil && decision.Blocked {
-					writeContentModerationWSError(ctx, wsConn, decision)
-					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, decision.Message, nil)
+				if decision := h.checkSecurityAuditStage(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, model, payload, "subsequent_turn"); decision != nil && !decision.AllowNextStage {
+					writeSecurityAuditWSError(ctx, wsConn, decision)
+					return service.NewOpenAIWSClientCloseError(securityAuditWSCloseStatus(decision), securityAuditWSCloseReason(decision), nil)
 				}
 				return nil
 			},
@@ -2244,17 +2296,6 @@ func openAIRequestAllowsFailoverReplay(c *gin.Context) bool {
 		return false
 	}
 	return !failoverClientGone(c)
-}
-
-func openAIFirstOutputFailoverExhausted(failoverErr *service.UpstreamFailoverError, switchCount *int) bool {
-	if failoverErr == nil || !failoverErr.SafeToFailoverAfterWrite || switchCount == nil {
-		return false
-	}
-	if *switchCount >= maxOpenAIFirstOutputTimeoutSwitches {
-		return true
-	}
-	*switchCount++
-	return false
 }
 
 func (h *OpenAIGatewayHandler) submitUsageRecordTask(parent context.Context, task service.UsageRecordTask) {
