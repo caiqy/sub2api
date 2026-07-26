@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -181,6 +182,7 @@ func TestMigrationsRunner_UpgradesLocalV01596AcrossUpstreamStages(t *testing.T) 
 		localGroupMigration = "181_group_duplicate_operation_id.sql"
 	)
 	upstreamMigrations := []string{
+		"172_composite_model_routes.sql",
 		"181_prompt_audit.sql",
 		"182_prompt_audit_full_prompt.sql",
 		"183_ops_ingress_reject_aggregates.sql",
@@ -193,8 +195,19 @@ func TestMigrationsRunner_UpgradesLocalV01596AcrossUpstreamStages(t *testing.T) 
 		"189_add_group_allow_live.sql",
 		"190_add_users_email_alias_dedup_index_notx.sql",
 	}
-	// These twelve filenames cover local 181 plus all upstream 181-190 stages.
+	require.Len(t, upstreamMigrations, 12, "expected the complete upstream migration set")
+	// These filenames cover local 181 plus all upstream migrations added through v0.1.165.
 	stageMigrations := append([]string{localGroupMigration}, upstreamMigrations...)
+	releaseSnapshots := []struct {
+		release    string
+		migrations []string
+	}{
+		{"v0.1.160", upstreamMigrations[1:3]},
+		{"v0.1.161-v0.1.162", upstreamMigrations[1:5]},
+		{"v0.1.163", upstreamMigrations[1:6]},
+		{"v0.1.164", append([]string{upstreamMigrations[0]}, upstreamMigrations[1:8]...)},
+		{"v0.1.165", upstreamMigrations},
+	}
 
 	currentUpstream := make(map[string]struct{})
 	for _, name := range upstreamMigrations {
@@ -204,10 +217,24 @@ func TestMigrationsRunner_UpgradesLocalV01596AcrossUpstreamStages(t *testing.T) 
 			require.ErrorIs(t, err, fs.ErrNotExist)
 		}
 	}
-	require.Equal(t, map[string]struct{}{
-		"181_prompt_audit.sql":             {},
-		"182_prompt_audit_full_prompt.sql": {},
-	}, currentUpstream, "v0.1.160 must include exactly its 181/182 upstream migrations")
+	currentRelease := ""
+	for _, snapshot := range releaseSnapshots {
+		expected := make(map[string]struct{}, len(snapshot.migrations))
+		for _, name := range snapshot.migrations {
+			expected[name] = struct{}{}
+		}
+		if reflect.DeepEqual(expected, currentUpstream) {
+			currentRelease = snapshot.release
+			break
+		}
+	}
+	require.NotEmpty(t, currentRelease, "current upstream migrations must match one complete release snapshot")
+	if currentRelease == "v0.1.160" {
+		require.Equal(t, map[string]struct{}{
+			"181_prompt_audit.sql":             {},
+			"182_prompt_audit_full_prompt.sql": {},
+		}, currentUpstream, "v0.1.160 must include exactly its 181/182 upstream migrations")
+	}
 
 	withoutCurrentUpstream := fstest.MapFS{}
 	files, err := fs.Glob(dbmigrations.FS, "*.sql")
@@ -224,31 +251,28 @@ func TestMigrationsRunner_UpgradesLocalV01596AcrossUpstreamStages(t *testing.T) 
 	db := newEmptyIsolatedMigrationDB(t)
 	ctx := context.Background()
 	require.NoError(t, applyMigrationsFS(ctx, db, withoutCurrentUpstream))
+	tx, err := db.BeginTx(ctx, nil)
+	require.NoError(t, err)
 	for _, name := range []string{localVideoMigration, localGroupMigration} {
-		requireMigrationAppliedInDB(t, db, name)
+		requireMigrationApplied(t, tx, name)
 	}
+	require.NoError(t, tx.Rollback())
 
 	require.NoError(t, applyMigrationsFS(ctx, db, dbmigrations.FS))
+	tx, err = db.BeginTx(ctx, nil)
+	require.NoError(t, err)
 	for _, name := range append([]string{localVideoMigration}, stageMigrations...) {
 		if _, current := currentUpstream[name]; current || name == localVideoMigration || name == localGroupMigration {
-			requireMigrationAppliedInDB(t, db, name)
+			requireMigrationApplied(t, tx, name)
 		}
 	}
+	require.NoError(t, tx.Rollback())
 
 	checksums, count := migrationChecksumsAndCount(t, db, append([]string{localVideoMigration}, stageMigrations...))
 	require.NoError(t, applyMigrationsFS(ctx, db, dbmigrations.FS))
 	actualChecksums, actualCount := migrationChecksumsAndCount(t, db, append([]string{localVideoMigration}, stageMigrations...))
 	require.Equal(t, count, actualCount, "re-applying migrations must not add records")
 	require.Equal(t, checksums, actualChecksums, "re-applying migrations must preserve checksums")
-}
-
-func requireMigrationAppliedInDB(t *testing.T, db *sql.DB, filename string) {
-	t.Helper()
-
-	var exists bool
-	err := db.QueryRowContext(context.Background(), "SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE filename = $1)", filename).Scan(&exists)
-	require.NoError(t, err)
-	require.True(t, exists, "expected migration %s to be applied", filename)
 }
 
 func migrationChecksumsAndCount(t *testing.T, db *sql.DB, filenames []string) (map[string]string, int) {

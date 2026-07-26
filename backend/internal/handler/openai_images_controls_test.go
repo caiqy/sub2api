@@ -51,10 +51,19 @@ func (r *openAIImagesModerationSettings) GetMultiple(_ context.Context, keys []s
 
 type openAIImagesModerationRepo struct {
 	service.ContentModerationRepository
+	persisted     chan struct{}
+	persistedOnce sync.Once
 }
 
-func (openAIImagesModerationRepo) CreateLog(context.Context, *service.ContentModerationLog) error {
+func (r *openAIImagesModerationRepo) CreateLog(context.Context, *service.ContentModerationLog) error {
+	if r.persisted != nil {
+		r.persistedOnce.Do(func() { close(r.persisted) })
+	}
 	return nil
+}
+
+func (*openAIImagesModerationRepo) CountFlaggedByUserSince(context.Context, int64, time.Time, bool) (int, error) {
+	return 0, nil
 }
 
 type openAIImagesModerationHashCache struct {
@@ -576,10 +585,11 @@ func TestOpenAIImages_ContentModerationUsesFrozenPayloadBeforeRelease(t *testing
 	}
 	rawCfg, err := json.Marshal(cfg)
 	require.NoError(t, err)
+	repo := &openAIImagesModerationRepo{persisted: make(chan struct{})}
 	moderation := service.NewContentModerationService(&openAIImagesModerationSettings{values: map[string]string{
 		service.SettingKeyRiskControlEnabled:      "true",
 		service.SettingKeyContentModerationConfig: string(rawCfg),
-	}}, openAIImagesModerationRepo{}, openAIImagesModerationHashCache{}, nil, nil, nil, nil)
+	}}, repo, openAIImagesModerationHashCache{}, nil, nil, nil, nil)
 
 	group := &service.Group{ID: 952, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
 	account := &service.Account{ID: 953, Name: "oauth", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Credentials: map[string]any{"access_token": "token"}}
@@ -595,6 +605,11 @@ func TestOpenAIImages_ContentModerationUsesFrozenPayloadBeforeRelease(t *testing
 	require.Equal(t, http.StatusUnavailableForLegalReasons, rec.Code, rec.Body.String())
 	require.Empty(t, upstream.calls(), "moderation rejection must not reach upstream")
 	require.Empty(t, readTestDir(t, rawDir), "moderation rejection must clean its spool")
+	select {
+	case <-repo.persisted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for asynchronous moderation record")
+	}
 }
 
 func TestOpenAIGatewayHandlerImages_MultipartEffectiveSpoolFailureReturns503(t *testing.T) {
