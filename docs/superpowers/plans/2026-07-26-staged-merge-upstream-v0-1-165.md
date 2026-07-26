@@ -266,7 +266,7 @@ finally {
 - 修改：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
 - 下载到临时目录：`$env:TEMP/sub2api-stage-0-*-integration.log`
 
-- [ ] **步骤 1：仅使用通用远程门禁脚本运行 baseline integration**
+- [x] **步骤 1：仅使用通用远程门禁脚本运行 baseline integration**
 
   将通用脚本的 `$stage` 设为 `stage-0`。归档只能来自 `git archive HEAD`，上传、预检、测试、下载和清理只能通过列出的 `ssh-skill` Python 脚本。
 
@@ -278,7 +278,7 @@ finally {
 - 修改：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
 - 审查：`backend/ent/schema/`、`backend/cmd/server/wire.go`、`backend/migrations/`、`backend/internal/repository/migrations_runner.go`
 
-- [ ] **步骤 1：记录两次生成和当前 migration runner 契约**
+- [x] **步骤 1：记录两次生成和当前 migration runner 契约**
 
   执行：
   ```powershell
@@ -298,7 +298,7 @@ finally {
 - 修改：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
 - 审查：`openspec/specs/`、`memory/context/upstream-merge-workflow.md`、`knowledge-base/reference/capabilities-index.md`
 
-- [ ] **步骤 1：固定每个上游区间的 changed-files 输入**
+- [x] **步骤 1：固定每个上游区间的 changed-files 输入**
 
   执行：
   ```powershell
@@ -312,7 +312,7 @@ finally {
 
   预期：ledger 保存六段实际文件清单和每段与本地关键文件的交集，不以设计风险表替代真实 diff。
 
-- [ ] **步骤 2：填充能力矩阵并对核心入口记录调用链**
+- [x] **步骤 2：填充能力矩阵并对核心入口记录调用链**
 
   矩阵至少覆盖 advanced/layered scheduler、fallback/WaitPlan、DB recheck、Grok/platform Sticky、privacy、image capability、异步图片/对象存储、图片和视频计费、上游倍率、session/step-up、runtime 热更新、网关透传、prompt cache、body replay/spooling、失败 usage、用户资源控制、公开分组屏蔽、菜单隐藏、前端翻译、quota 原子重置、settings backfill、Ent/Wire、依赖、migration、local test gates 和 `openai-first-token-timeout`。
 
@@ -324,15 +324,15 @@ finally {
 - 修改：能力矩阵确定的现有 `backend/**/*_test.go` 或 `frontend/**/*.spec.ts`
 - 修改：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
 
-- [ ] **步骤 1：只对 `gap` 行先写最小失败测试**
+- [x] **步骤 1：只对 `gap` 行先写最小失败测试**
 
   每个 `gap` 必须先在矩阵所列包或组件中添加一个直接断言本地行为的测试，并在 ledger 中写入含真实包名、测试名或 Vitest 文件路径的完整命令后执行，确认 RED。不得把示意占位符复制为命令。没有 `gap` 时，在 ledger 写明零项和判断依据，不创建无目的测试。
 
-- [ ] **步骤 2：令保护测试在当前基线通过并重跑阶段 0 全门禁**
+- [x] **步骤 2：令保护测试在当前基线通过并重跑阶段 0 全门禁**
 
   执行每条新增聚焦命令，再依次完成 Task 3、Task 4、Task 5 的全部命令。预期：所有 `gap` 转为 `protected` 或有可复现 `manual` 证据；无 `gap`、无静态冲突、远程 integration 通过后才可进入 Task 8。
 
-- [ ] **步骤 3：提交阶段 0 测试与证据并封闭阶段**
+- [x] **步骤 3：提交阶段 0 测试与证据并封闭阶段**
 
   执行：
   ```powershell
@@ -350,7 +350,7 @@ finally {
 - 修改：本次 Git merge 实际触及文件
 - 修改：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
 
-- [ ] **步骤 1：确认上一段闭合并启动唯一允许的 merge 形式**
+- [x] **步骤 1：确认上一段闭合并启动唯一允许的 merge 形式**
 
   执行：
   ```powershell
@@ -363,7 +363,7 @@ finally {
 
   预期：tag peeled SHA 为 `8bfbc5ca99bf2c0ac96e0f29ffd35eb6aca27e62`；merge 停在可检查状态。绝不改用 squash、cherry-pick 或机械 ours/theirs。
 
-- [ ] **步骤 2：逐文件融合并提交仅含上游树的 merge 节点**
+- [x] **步骤 2：逐文件融合并提交仅含上游树的 merge 节点**
 
   对冲突及无文本冲突的 security-audit full prompt/privacy、Grok media 隔离、`image_gen` 权限、`181_prompt_audit.sql`、`182_prompt_audit_full_prompt.sql`、本地 `181_group_duplicate_operation_id.sql` 逐项记录冲突台账和能力矩阵交集。确认完整文件名均保留。然后执行：
   ```powershell
