@@ -225,7 +225,7 @@ finally {
   git show -s --format='%H%n%P%n%s' HEAD
   ```
 
-  预期：当前工作区不是 `main` 的直接实施位置，初始提交为 base ref，除了文档性 change 文件和已知未跟踪 `paseo.json` 没有无关改动。把分支名、worktree 路径、初始 `HEAD` 和排除文件写入 ledger。
+  预期：当前工作区不是 `main` 的直接实施位置；分支由固定 base ref 创建，Task 2 开始 HEAD 允许仅包含已审查通过的 Task 1 文档提交，不得含业务或无关提交。除了文档性 change 文件和已知未跟踪 `paseo.json` 没有无关改动。把分支名、worktree 路径、Task 2 开始 HEAD 和排除文件写入 ledger。
 
 - [ ] **步骤 2：建立 ledger 的固定章节**
 

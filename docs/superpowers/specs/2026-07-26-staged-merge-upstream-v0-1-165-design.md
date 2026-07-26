@@ -172,7 +172,7 @@ git diff --check
 
 ### 8.2 local-serv-ai Integration 门禁
 
-当前工作站没有 Docker。每段在 merge 和兼容修复均已提交、本地门禁通过后：
+本 change 的 Docker integration 固定在 `local-serv-ai` 执行，不依赖协调工作站是否可用 Docker。每段在 merge 和兼容修复均已提交、本地门禁通过后：
 
 1. 用 `git archive HEAD` 生成仅包含已提交源码的临时归档；
 2. 通过 `ssh-skill` 上传到 `local-serv-ai` 的唯一临时目录；

@@ -3,13 +3,14 @@
 ## 固定对象与范围
 
 - 分支：`feature/20260726/staged-merge-upstream-v0-1-165`。
-- 分支创建基线：`075abc07399d6154130d2a2695fb24c785acd69c`。
+- 固定分支创建 base：`075abc07399d6154130d2a2695fb24c785acd69c`。
 - `backend/cmd/server/VERSION`：`0.1.159.6`。
-- 当前工作区：`D:/Caiqy/Projects/Github/sub2api`；它是主工作树，隔离形式为独立 feature 分支，而非额外 linked worktree。`git worktree list --porcelain` 还列出两个与本 change 无关的 detached 临时工作树：`C:/Users/caiqy/AppData/Local/Temp/opencode/sub2api-task27-pre157` 和 `C:/Users/caiqy/AppData/Local/Temp/opencode/sub2api-task27-v0157`。
-- 当前文档 HEAD：`f1ad4a6da432e005d904f1deb1f1ab9bd339df63`，不是 base ref。文档提交链为：
+- 当前工作区：`D:/Caiqy/Projects/Github/sub2api`；它是主工作树，隔离形式为独立 feature 分支，而非额外 linked worktree。另有两个与本 change 无关的 detached worktree，未触碰。
+- Task 2 开始 HEAD：`f1ad4a6da432e005d904f1deb1f1ab9bd339df63`，不是 base ref。此前的 Task 1 文档提交链为：
   - `f5656d5ef6b8dd4d93b10b7779f044e14ca8f43f docs: record staged merge baseline`（父提交：`075abc07399d6154130d2a2695fb24c785acd69c`）
   - `6e18ca4270109b098940223c4a9b317f41aa4292 docs: localize staged merge baseline report`（父提交：`f5656d5ef6b8dd4d93b10b7779f044e14ca8f43f`）
   - `f1ad4a6da432e005d904f1deb1f1ab9bd339df63 docs: translate task 1 ledger title`（父提交：`6e18ca4270109b098940223c4a9b317f41aa4292`）
+- Task 2 主规划提交 HEAD：`53fbd1f83dee72ddfb459b96c964508ca732a962`。
 
 | Tag | Tag 对象 | Peeled SHA |
 | --- | --- | --- |
@@ -30,7 +31,7 @@
 ## 阶段 0
 
 - Task 1 的固定基线、tag 链、release 上界和排除提交证据已记录在本台账的“固定对象与范围”。
-- Task 2 隔离检查结果：当前不在 `main`，当前分支和主工作树状态符合分支级隔离；工作树仅含根 `.comet/current-change.json`、本 change 的 OpenSpec 规划工件和 `paseo.json` 三类未跟踪项。
+- Task 2 提交前快照：不在 `main`，分支和主工作树状态符合分支级隔离；工作树仅含根 `.comet/current-change.json`、本 change 的 OpenSpec 规划工件和 `paseo.json` 三类未跟踪项。
 - 本任务仅初始化规划证据，不执行业务 TDD、本地门禁或远程 integration；这些项由后续 OpenSpec task 真实执行。
 
 ## 能力矩阵

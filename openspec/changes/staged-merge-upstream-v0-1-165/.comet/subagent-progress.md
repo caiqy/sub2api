@@ -1,18 +1,18 @@
-# Subagent Progress
+# 子代理进度
 
-- Current task: 2 of 29
-- Status: ready for Task 2 implementer
-- Invalid implementer agent: `8471da89-8cfc-4dcf-927c-d0fe75fb3691` (manual Luna override; no task changes produced)
-- Brief: `.superpowers/sdd/task-2-brief.md`
-- Report: `.superpowers/sdd/task-2-v0-1-165-report.md`
-- Base SHA: `075abc07399d6154130d2a2695fb24c785acd69c`
-- Last reviewed SHA: `f1ad4a6da432e005d904f1deb1f1ab9bd339df63`
-- Completed tasks: 1
+- 当前任务：29 项中的第 2 项
+- 状态：等待任务 2 实施者
+- 无效的实施者代理：`8471da89-8cfc-4dcf-927c-d0fe75fb3691`（手工 Luna 覆盖；未产生任务变更）
+- 简报：`.superpowers/sdd/task-2-brief.md`
+- 报告：`.superpowers/sdd/task-2-v0-1-165-report.md`
+- 基线 SHA：`075abc07399d6154130d2a2695fb24c785acd69c`
+- 最后审查 SHA：`f1ad4a6da432e005d904f1deb1f1ab9bd339df63`
+- 已完成任务数：1
 
-## Constraints
+## 约束
 
-- Preserve the user-owned untracked `paseo.json`.
-- Do not push, tag, release, deploy, or merge to `main`.
-- Remote work requires `ssh-skill`; never invoke raw SSH or SCP.
-- Use OpenCode role routing: `general` for implementers and `reviewer` for reviewers.
-- Quote each complete Git revision range as one PowerShell argument.
+- 保留用户所有的未跟踪 `paseo.json`。
+- 不得 push、tag、release、deploy 或 merge 到 `main`。
+- 远程工作必须使用 `ssh-skill`；不得调用原生 SSH 或 SCP。
+- 使用 OpenCode 角色路由：实施者使用 `general`，审查者使用 `reviewer`。
+- 将每个完整 Git 修订范围作为一个 PowerShell 参数引用。
