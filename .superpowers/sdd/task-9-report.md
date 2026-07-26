@@ -59,3 +59,36 @@
 - `TestOpenAIImages_ContentModerationUsesFrozenPayloadBeforeRelease` 通过时输出 worker panic recovery 日志；未造成断言失败，但应单独调查其测试/worker 生命周期。
 - Browserslist 数据过期、Vite 动态 import/chunk-size advisory（最大 AccountsView `670.83 kB`）仍存在；均未阻断 build。
 - 历史 Windows `user-mapped section` 风险本次未重现；因此无需短路径 detached worktree，但根因仍未有新证据。
+
+## Review Fix Round 1
+
+### 提交边界
+
+- 受门禁代码/archive HEAD 是 `31b132689f858f4b6e657c653829c80d2fc09738`；原 docs ledger HEAD 是其后的 docs-only `516e998b07d8e81a6d1e18f7acc0c0425d6b083f`，不是 `31b132689`。
+- 本轮新增 `fd909c5be test: harden staged migration coverage`，只修改 `backend/internal/repository/migrations_schema_integration_test.go` 与 `backend/internal/handler/openai_images_controls_test.go`。未 amend 或重写此前四个提交，未 push、tag、release 或 deploy。
+
+### Reviewer Findings 修复
+
+1. Critical 1：`upstreamMigrations` 补齐 `172_composite_model_routes.sql`，固定集合为 12 个完整上游 filename；本地 `172_video_per_second_billing_metadata.sql` 和 `181_group_duplicate_operation_id.sql` 继续独立处理。
+2. Critical 2：删除永久精确等于 181/182 的全局约束，改为严格匹配累计 release 快照：`v0.1.160`=181/182、`v0.1.161-v0.1.162`=再加 183/184、`v0.1.163`=再加 185、`v0.1.164`=再加上游 172 和两个 186、`v0.1.165`=再加 187-190。当前 HEAD 仍要求恰为 v0.1.160；任意缺失、中间子集或额外组合均失败。完整 embedded FS 第二次应用继续核验 filename、checksum 和记录数；当 190 出现时，它会作为当前快照成员由同一 `applyMigrationsFS` 调用真实走 `_notx` 分支。
+3. Minor：删除重复的 `requireMigrationAppliedInDB`，升级路径改复用既有 `requireMigrationApplied`。
+4. Important 1：worker panic 可稳定复现。panic 值为 `runtime error: invalid memory address or nil pointer dereference`；临时 stack 证据定位到测试 mock 的 nil 嵌入接口调用：`openAIImagesModerationRepo.CountFlaggedByUserSince` -> `applyFlaggedAccountSideEffects` -> `persistContentModerationLog` -> `worker`。请求在 keyword pre-block 后同步返回并异步 `enqueueRecord`；旧测试未等待 worker，且 mock 只实现 `CreateLog`。本轮 mock 补齐计数方法，并以 `CreateLog` channel 等待异步 record drain；不改生产代码。该服务生产仓库实现完整接口，故此为测试 fixture/lifecycle 观察缺口，不是生产 worker 回归。
+
+### RED / GREEN
+
+- migration RED（local-serv-ai，Docker 已连接、无 SKIP）：从 `fd909c5be` archive 临时删除固定集合中的上游 172 后运行 `CI=true TMPDIR=/tmp/sub2api-task-9-red-fd909c5be/backend/.test-tmp TMP=/tmp/sub2api-task-9-red-fd909c5be/backend/.test-tmp TEMP=/tmp/sub2api-task-9-red-fd909c5be/backend/.test-tmp go test -tags=integration ./internal/repository -run TestMigrationsRunner_UpgradesLocalV01596AcrossUpstreamStages -count=1 -v`，退出 1，失败摘要：`should have 12 item(s), but has 11`。
+- migration GREEN（已提交 `fd909c5be` archive）：同一测试命令在 `/tmp/sub2api-task-9-review-fd909c5be` 退出 0，目标 `TestMigrationsRunner_UpgradesLocalV01596AcrossUpstreamStages` PASS（4.31s），无 SKIP。
+- worker 调查 RED：`go -C backend test -tags=unit ./internal/handler -run '^TestOpenAIImages_ContentModerationUsesFrozenPayloadBeforeRelease$' -count=1 -v` 在加入 drain assertion后退出 1，等待异步 record 超时并输出同一 panic。栈通过临时 recovery instrumentation 获取后已还原，未进入提交。
+- worker GREEN：同一命令本机 `-count=3` PASS；已提交 archive 的 `go test -tags=unit ./internal/handler -run TestOpenAIImages_ContentModerationUsesFrozenPayloadBeforeRelease -count=3 -v` 亦 PASS 三次，输出无 `content_moderation.worker_panic`。
+- 本机 migration 命令因 Docker 不可用而 skip，仅作编译检查，未记为 GREEN。
+
+### 远端与清理
+
+- 全部远端操作仅用 `ssh-skill` 的 Python 脚本，目标 `local-serv-ai`；只运行 Testcontainers 测试，未构建 Sub2API 镜像、未部署、未访问生产数据。
+- GREEN archive：`fd909c5be`，`C:/Users/caiqy/AppData/Local/Temp/sub2api-task-9-review-fd909c5be.tar`，`50,862,080` bytes，SHA-256 `9B0DEC5D21D3413C00577DB6A8BDDC1198D4EE745E8AE229B26483980C0202FF`；远端目录 `/tmp/sub2api-task-9-review-fd909c5be` 已 `rm -rf` 后确认不存在。
+- RED replay archive 和目录 `/tmp/sub2api-task-9-red-fd909c5be` 同样已删除；两个本地 tar 均确认不存在。
+
+### 剩余顾虑
+
+- 当前 v0.1.160 未包含 183-190，故无法声称 190 已在当前 embedded FS 的 live DB 执行；测试已将其限定为 v0.1.165 完整快照成员，届时会实际执行 `_notx` runner 路径。
+- 远端 Testcontainers 出现既有 Ryuk handshake advisory，但目标 migration 测试完整执行并 PASS，未跳过。
