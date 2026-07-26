@@ -1,9 +1,9 @@
 ## 1. 阶段 0：基线与能力保护门禁
 
 - [x] 1.1 记录 base ref `075abc073` 与 `backend/cmd/server/VERSION=0.1.159.6`，重新 fetch upstream tags，确认六个目标 tag 的祖先链且 `v0.1.165` 仍为最新正式 release；若出现更新 tag，暂停更新范围
-- [ ] 1.2 按 build 阶段确认的隔离方式创建工作分支/工作区，归属 Comet 规划产物且不夹带 `paseo.json` 等无关改动
-- [ ] 1.3 在当前本地 HEAD 上运行本地 full 门禁基线：根目录 `make test` 与 `make build`；失败项记录为阻塞
-- [ ] 1.4 通过 `ssh-skill` 将已提交 HEAD 的 `git archive` 上传到 `local-serv-ai` 临时目录，检查 Go 工具链与 Docker，运行 `CI=true GOFLAGS='-v' make -C backend test-integration`；全套命令和目标 migration/repository test 未真实通过均阻塞
+- [x] 1.2 按 build 阶段确认的隔离方式创建工作分支/工作区，归属 Comet 规划产物且不夹带 `paseo.json` 等无关改动
+- [x] 1.3 在当前本地 HEAD 上运行本地 full 门禁基线：根目录 `make test` 与 `make build`；失败项记录为阻塞
+- [ ] 1.4 通过 `ssh-skill` 将已提交 HEAD 的 `git archive` 上传到 `local-serv-ai` 临时目录，检查 Go 工具链与 Docker；在 Linux 上按 `backend/scripts/test.ps1` 等价语义重建 `backend/.test-tmp`、设置 `TMP`/`TEMP`，并运行 `CI=true GOFLAGS='-v' go test -tags=integration ./...`；全套命令和目标 migration/repository test 未真实通过均阻塞
 - [ ] 1.5 运行两次 `make -C backend generate` 并核对 Ent/Wire 第二次无新增 diff，记录生成稳定性基线
 - [ ] 1.6 建立能力映射矩阵：以主 spec 专项 review 清单和本地保护能力为行、6 个 tag changed files 为列，标记高风险交叉点
 - [ ] 1.7 核对被上游触及且缺少行为断言的本地能力，必要时先补最小失败测试

@@ -20,7 +20,7 @@
 
 #### Scenario: 分段 full 门禁通过
 - **WHEN** 一个目标 tag 的 merge、冲突处理和兼容修复完成
-- **THEN** 维护流程 MUST 运行根目录 `make test` 与 `make build`、在 Docker 可用且跳过路径会失败的环境中运行 `make -C backend test-integration`、Ent/Wire 两次生成稳定性检查、migration 新库与已有本地记录升级路径、冲突标记检查，并完成该 tag 触及能力的映射审查，全部通过后才能进入下一阶段
+- **THEN** 维护流程 MUST 运行根目录 `make test` 与 `make build`；在 Linux Docker 环境中按 `backend/scripts/test.ps1` 的等价语义重建 `backend/.test-tmp`、设置 `TMP`/`TEMP` 并运行 `CI=true GOFLAGS='-v' go test -tags=integration ./...`；同时完成 Ent/Wire 两次生成稳定性检查、migration 新库与已有本地记录升级路径、冲突标记检查，以及该 tag 触及能力的映射审查，全部通过后才能进入下一阶段
 
 #### Scenario: 最终自动验证通过
 - **WHEN** 最终目标 tag 合并完成且无冲突残留

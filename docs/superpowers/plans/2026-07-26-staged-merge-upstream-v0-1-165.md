@@ -26,7 +26,7 @@ base-ref: 075abc07399d6154130d2a2695fb24c785acd69c
 - 能力矩阵每行记录行为契约、入口/调用链、关键文件、受影响 tag、自动测试、人工审查点、阶段结论、证据，并只使用 `protected`、`gap`、`manual`、`approved-removal`。进入下一阶段前不得遗留 `gap`。
 - Ent 只从 `backend/ent/schema/` 生成，Wire 只从 provider 声明和 `wire.go` 生成；不得手改生成结果。依赖只经对应 package manifest 和 Go module 工具融合，不手拼 lockfile 或 checksum。
 - 每个阶段的本地门禁必须依次包含：受影响的聚焦测试、`make test`、`make build`、两次 `make -C backend generate`、生成 diff 检查、`git diff --check`、未合并文件检查与真实冲突标记扫描。任一失败、跳过或未解释 diff 都阻塞下一 tag。
-- 每个阶段的远程门禁必须使用已提交 `HEAD` 的 `git archive`、`local-serv-ai` 的唯一 `/tmp` 临时目录和 `CI=true GOFLAGS='-v' make -C backend test-integration`。负责该门禁的 agent 必须先使用 Skill 工具加载 `ssh-skill`；只能通过其 `ssh_execute.py`、`ssh_upload.py`、`ssh_download.py` 操作，不得使用原生 SSH 或 SCP。
+- 每个阶段的远程门禁必须使用已提交 `HEAD` 的 `git archive` 和 `local-serv-ai` 的唯一 `/tmp` 临时目录；在 Linux 上按 `backend/scripts/test.ps1` 的等价语义重建 `backend/.test-tmp`、设置 `TMP`/`TEMP`，并运行 `CI=true GOFLAGS='-v' go test -tags=integration ./...`。负责该门禁的 agent 必须先使用 Skill 工具加载 `ssh-skill`；只能通过其 `ssh_execute.py`、`ssh_upload.py`、`ssh_download.py` 操作，不得使用原生 SSH 或 SCP。
 - 远程主机只允许 Testcontainers 拉取现有 PostgreSQL/Redis 测试镜像。禁止构建 Sub2API 镜像、禁止部署、禁止访问或写入 Sub2API 服务运行目录、禁止使用生产 PostgreSQL/Redis。
 - 仅创建 `docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md` 和 `docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-verify.md` 两份实施证据，不创建逐任务报告。计划文件和现有 OpenSpec 工件不作为运行证据的替代物。
 - 当前未跟踪的 `paseo.json` 是用户文件：不得 `git add`、覆盖、删除、移动或写入；所有 `git add` 必须使用明确路径，所有工作树检查都将它记录为排除项。
@@ -103,13 +103,13 @@ try {
     $uploaded = python ~/.claude/skills/ssh-skill/scripts/ssh_upload.py local-serv-ai "$archive" "$remote/source.tar" --no-progress | ConvertFrom-Json
     Assert-SshResult $uploaded 'upload source archive'
 
-    $preflight = python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "go version && make --version && docker info" | ConvertFrom-Json
+    $preflight = python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "go version && docker info" | ConvertFrom-Json
     Assert-SshResult $preflight 'remote preflight'
     $requiredGo = [version]((Get-Content backend/go.mod | Where-Object { $_ -match '^go\s+' } | Select-Object -First 1) -split '\s+')[1]
     if ($preflight.stdout -notmatch 'go(?<version>\d+\.\d+(?:\.\d+)?)') { throw 'cannot parse remote Go version' }
     if ([version]$Matches.version -lt $requiredGo) { throw "remote Go $($Matches.version) is older than $requiredGo" }
 
-    $integration = python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu; test -f '$remote/source.tar'; tar -xf '$remote/source.tar' -C '$remote/src'; cd '$remote/src'; CI=true GOFLAGS='-v' make -C backend test-integration > '$remote/integration.log' 2>&1" --timeout 1800 | ConvertFrom-Json
+    $integration = python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu; test -f '$remote/source.tar'; tar -xf '$remote/source.tar' -C '$remote/src'; cd '$remote/src/backend'; rm -rf .test-tmp; mkdir .test-tmp; CI=true GOFLAGS='-v' TMP='$remote/src/backend/.test-tmp' TEMP='$remote/src/backend/.test-tmp' go test -tags=integration ./... > '$remote/integration.log' 2>&1" --timeout 1800 | ConvertFrom-Json
     $downloaded = python ~/.claude/skills/ssh-skill/scripts/ssh_download.py local-serv-ai "$remote/integration.log" "$log" --no-progress | ConvertFrom-Json
     Assert-SshResult $downloaded 'download integration log'
     Assert-SshResult $integration 'remote integration'
@@ -127,7 +127,7 @@ finally {
 }
 ```
 
-预期：先把远程 `go version` 与当期 `backend/go.mod` 比较并记录，版本必须满足 go directive；`make --version` 和 `docker info` 成功，`CI=true GOFLAGS='-v' make -C backend test-integration` 退出码 `0`，且日志包含当前 `$requiredIntegrationTest` 的 PASS。其他 `--- SKIP:` 逐项写入 ledger；仅当命中本 change 的受影响能力时阻塞。任何预检失败、Testcontainers 无法启动、目标测试未 PASS、日志下载失败或清理失败均为阶段阻塞；即使测试失败也必须下载日志并通过同一 Python 脚本清理。远程命令只处理 `$remote`，不得调用 Docker build 或接触服务运行目录。
+预期：先把远程 `go version` 与当期 `backend/go.mod` 比较并记录，版本必须满足 go directive；`docker info` 成功。Linux 原生 integration 命令必须先重建 `backend/.test-tmp` 并将 `TMP`/`TEMP` 指向该目录，再以 `CI=true GOFLAGS='-v' go test -tags=integration ./...` 退出码 `0` 结束，且日志包含当前 `$requiredIntegrationTest` 的 PASS；这与当前 `backend/scripts/test.ps1` 的行为等价，不要求远程安装 Make 或 PowerShell。其他 `--- SKIP:` 逐项写入 ledger；仅当命中本 change 的受影响能力时阻塞。任何预检失败、Testcontainers 无法启动、目标测试未 PASS、日志下载失败或清理失败均为阶段阻塞；即使测试失败也必须下载日志并通过同一 Python 脚本清理。远程命令只处理 `$remote`，不得调用 Docker build 或接触服务运行目录。
 
 ## OpenSpec 任务映射
 
@@ -215,7 +215,7 @@ finally {
 - 修改：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
 - 审查：Comet 创建的工作分支/工作区、`.git/worktrees/`
 
-- [ ] **步骤 1：确认隔离分支或工作区由实施环境创建**
+- [x] **步骤 1：确认隔离分支或工作区由实施环境创建**
 
   执行：
   ```powershell
@@ -227,11 +227,11 @@ finally {
 
   预期：当前工作区不是 `main` 的直接实施位置；分支由固定 base ref 创建，Task 2 开始 HEAD 允许仅包含已审查通过的 Task 1 文档提交，不得含业务或无关提交。除了文档性 change 文件和已知未跟踪 `paseo.json` 没有无关改动。把分支名、worktree 路径、Task 2 开始 HEAD 和排除文件写入 ledger。
 
-- [ ] **步骤 2：建立 ledger 的固定章节**
+- [x] **步骤 2：建立 ledger 的固定章节**
 
   写入以下章节：`固定对象与范围`、`阶段 0`、`能力矩阵`、`v0.1.160` 至 `v0.1.165`、`远程 integration 记录`、`阻塞与残余风险`。每个 tag 章节预置 `changed-files`、`冲突台账`、`能力矩阵交集`、`聚焦测试`、`本地门禁`、`远程门禁`、`放行结论` 字段；没有冲突必须明确写“无”，不能留空。
 
-- [ ] **步骤 3：提交仅限规划证据的起点提交**
+- [x] **步骤 3：提交仅限规划证据的起点提交**
 
   执行：
   ```powershell
@@ -250,7 +250,7 @@ finally {
 - 修改：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
 - 审查：`Makefile`、`backend/Makefile`、`frontend/package.json`
 
-- [ ] **步骤 1：运行本地测试、构建、生成和静态冲突检查**
+- [x] **步骤 1：运行本地测试、构建、生成和静态冲突检查**
 
   执行“通用阶段门禁脚本”中的本地命令，并额外执行：
   ```powershell
@@ -270,7 +270,7 @@ finally {
 
   将通用脚本的 `$stage` 设为 `stage-0`。归档只能来自 `git archive HEAD`，上传、预检、测试、下载和清理只能通过列出的 `ssh-skill` Python 脚本。
 
-  预期：远程日志证明 `CI=true GOFLAGS='-v' make -C backend test-integration` 真正执行并通过，且 `TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate` 明确 PASS；其他 skip 已分类记录，远程目录已清理。任何必要条件不满足都在 ledger 中标为阻塞，禁止 `v0.1.160` merge。
+  预期：远程日志证明 Linux 原生等价命令 `CI=true GOFLAGS='-v' go test -tags=integration ./...` 在重建 `backend/.test-tmp` 并设置 `TMP`/`TEMP` 后真正执行并通过，且 `TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate` 明确 PASS；其他 skip 已分类记录，远程目录已清理。任何必要条件不满足都在 ledger 中标为阻塞，禁止 `v0.1.160` merge。
 
 ### Task 5：记录阶段 0 生成、migration 与静态稳定性（OpenSpec 1.5）
 
@@ -840,7 +840,7 @@ finally {
 
 - [ ] **步骤 2：重跑最终 local-serv-ai integration**
 
-  用 `$stage = 'final-verify'` 执行通用远程门禁脚本。预期：提交后的最终 `HEAD` 被 `git archive` 打包，远程预检和 `CI=true GOFLAGS='-v' make -C backend test-integration` 成功，`TestMigrationsRunner_UpgradesLocalV01596AcrossUpstreamStages` 明确 PASS 并验证最终 12/12；其他 skip 已分类记录，日志下载且远程临时目录已删除。
+  用 `$stage = 'final-verify'` 执行通用远程门禁脚本。预期：提交后的最终 `HEAD` 被 `git archive` 打包，远程预检和 Linux 原生等价命令 `CI=true GOFLAGS='-v' go test -tags=integration ./...` 成功，`TestMigrationsRunner_UpgradesLocalV01596AcrossUpstreamStages` 明确 PASS 并验证最终 12/12；其他 skip 已分类记录，日志下载且远程临时目录已删除。
 
 - [ ] **步骤 3：记录最终自动验证结果**
 

@@ -18,17 +18,17 @@
 - 每段 full 门禁耗时高，但可把首次回归定位到单一 release 区间。
 - Git 无文本冲突不代表本地语义安全，必须按能力矩阵检查调用链与边界路径。
 - migration 172/181 同号及上游两个 186 由完整文件名区分，但仍需验证实际执行顺序和 `_notx` 路径。
-- 当前工作站没有 Docker；远程 integration 依赖 `local-serv-ai` 的 Go 工具链和 Docker。每段须先显式检查，使用 `CI=true` 令整套 Docker 缺失路径失败，并从 verbose 日志确认目标 migration/repository test 真实 PASS；无关环境型 skip 单独记录。
+- 本 change 的 Docker integration 固定在 `local-serv-ai` 执行，依赖其 Go 工具链和 Docker。每段须先显式检查；在 Linux 上按 `backend/scripts/test.ps1` 等价语义重建 `backend/.test-tmp`、设置 `TMP`/`TEMP`，并使用 `CI=true GOFLAGS='-v' go test -tags=integration ./...` 令整套 Docker 缺失路径失败，再从 verbose 日志确认目标 migration/repository test 真实 PASS；无关环境型 skip 单独记录。
 - 远程包必须来自已提交 HEAD；未提交修复不会进入 `git archive`，因此远程 integration 只能在 merge/修复提交完成后运行。
 
 ## 测试策略
 
-- 阶段 0 与每个 tag 均执行 `make test`、`make build`、`CI=true make -C backend test-integration`、Ent/Wire 两次生成稳定性、静态冲突扫描和 migration 新库/升级库验证。
+- 阶段 0 与每个 tag 均执行 `make test`、`make build`、Linux 原生等价 integration 命令 `CI=true GOFLAGS='-v' go test -tags=integration ./...`、Ent/Wire 两次生成稳定性、静态冲突扫描和 migration 新库/升级库验证。
 - migration integration 先用过滤后的 embedded FS 模拟 `0.1.159.6` 本地数据库，再使用完整 FS 升级并重复执行，验证同号文件、checksum、幂等性和 190 notx 路径。
 - 复杂 scheduler、sticky、fallback、runtime config 回归先保留失败测试，再做最小修复。
 - 最终重新执行全部门禁、Git 拓扑检查、前端浏览器烟测和 thorough 能力级 review。
 
 ## Spec Patch
 
-- 已在“分段 full 门禁通过”中加入 `make -C backend test-integration` 和 Docker 可用性前置检查。
+- 已在“分段 full 门禁通过”中加入 Linux 原生等价 integration 命令和 Docker 可用性前置检查；远端无需安装 Make 或 PowerShell。
 - 已增加场景：Docker/Testcontainers 不可用或目标 migration/repository integration test 未真实执行并通过时，当前阶段 MUST 阻塞且不得记为通过。

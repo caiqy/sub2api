@@ -176,8 +176,8 @@ git diff --check
 
 1. 用 `git archive HEAD` 生成仅包含已提交源码的临时归档；
 2. 通过 `ssh-skill` 上传到 `local-serv-ai` 的唯一临时目录；
-3. 预检远程 Go 版本满足当前 `backend/go.mod`、`make` 可用、`docker info` 成功；
-4. 使用 `CI=true make -C backend test-integration`，使 Docker 不可用时的跳过路径转为失败；
+3. 预检远程 Go 版本满足当前 `backend/go.mod`，且 `docker info` 成功；
+4. 在 Linux 上按 `backend/scripts/test.ps1` 的等价语义重建 `backend/.test-tmp`、设置 `TMP`/`TEMP`，再运行 `CI=true GOFLAGS='-v' go test -tags=integration ./...`，使 Docker 不可用时的跳过路径转为失败；远程不要求安装 Make 或 PowerShell；
 5. 保存退出码和 verbose 日志；阶段 0 确认既有 migration schema integration test PASS，v0.1.160 起确认渐进式 upgrade test PASS；无关环境型 skip 记录但不自动判定失败；
 6. 通过 `ssh-skill` 清理临时源码、归档和残留测试容器。
 
