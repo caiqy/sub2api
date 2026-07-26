@@ -33,6 +33,15 @@
 - Task 1 的固定基线、tag 链、release 上界和排除提交证据已记录在本台账的“固定对象与范围”。
 - Task 2 提交前快照：不在 `main`，分支和主工作树状态符合分支级隔离；工作树仅含根 `.comet/current-change.json`、本 change 的 OpenSpec 规划工件和 `paseo.json` 三类未跟踪项。
 - 本任务仅初始化规划证据，不执行业务 TDD、本地门禁或远程 integration；这些项由后续 OpenSpec task 真实执行。
+- 首次本地 full 门禁（Task 3）历史失败：`make test` 退出码 `2`。后端默认 `go test ./...`、`golangci-lint run ./...`（`0 issues.`）及 `go test -tags=unit ./...` 均完成；前端 `pnpm --dir frontend run lint:check` 在启动前失败，错误为 `process_begin: CreateProcess(NULL, pnpm --dir frontend run lint:check, ...) failed.` 和 `make (e=2): 系统找不到指定的文件。`，未产生失败测试名。
+- 首次失败前置条件恢复：执行 `corepack enable pnpm` 后，自检 `Get-Command pnpm` 解析到 `C:\Users\caiqy\.version-fox\sdks\nodejs\pnpm.ps1`，`pnpm --version` 输出 `11.17.0`；未改变仓库文件。
+- 完整重跑本地 full 门禁：再次执行 `make test`，退出码 `2`。后端默认测试、`golangci-lint run ./...`（`0 issues.`）和 unit 测试均通过；前端 `pnpm --dir frontend run lint:check` 触发依赖状态检查，因无 TTY 拒绝清理 modules 目录，报 `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`，内部 `pnpm install` 退出码 `1`，最终 `make: *** [test-frontend] Error 1`。这是新的首个未解决阻塞，未产生失败测试名。
+- 第二次失败前置条件恢复：执行 `corepack install --global pnpm@9.15.9` 后，自检 `pnpm --version` 输出 `9.15.9`，`frontend/node_modules/.modules.yaml` 的 `packageManager: pnpm@9.15.9` 与其一致；未删除 `node_modules`，未修改仓库或 lockfile。
+- 再次完整重跑：`make test` 退出码 `0`。后端默认测试、`golangci-lint run ./...`（`0 issues.`）、unit 测试、前端 lint 与 typecheck 均通过；前端 Vitest 为 `194 passed` 测试文件、`1493 passed` 用例。随后 `make build` 退出码 `2`：backend build 的 `./scripts/resolve-version.sh` 调用无法创建 `sh D:\Caiqy\Projects\Github\sub2api\backend\scripts\resolve-version.sh` 进程，继而 `CGO_ENABLED` 未被识别，最终 `make: *** [build-backend] Error 2`。这是新的首个未解决阻塞。
+- 第三次失败前置条件恢复：每条门禁 PowerShell 进程均在执行前设置 `$env:PATH = "C:\Program Files\Git\bin;C:\Program Files\Git\usr\bin;" + $env:PATH`。自检 `Get-Command sh` 为 `C:\Program Files\Git\bin\sh.exe`、`sh --version` 为 GNU bash `5.2.37`，且 `sh backend/scripts/resolve-version.sh backend/cmd/server/VERSION` 输出 `0.1.159.6`、退出码 `0`；未修改系统 PATH 或仓库。
+- 阶段 0 本地 full 门禁最终完整重跑（当前 HEAD：`aca233e82c08778e221a049d99a69aa02febaf87`）：`make test` 退出码 `0`，后端默认测试、`golangci-lint run ./...`（`0 issues.`）、unit 测试、前端 lint/typecheck 均通过，Vitest 为 `194 passed` 测试文件、`1493 passed` 用例；`make build` 退出码 `0`，后端按 `0.1.159.6` 构建，前端 Vite 处理 `987` 个模块并完成 production build；两次 `make -C backend generate` 均退出 `0`，每次后的 `git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` 均退出 `0`、无输出，生成稳定。
+- 静态和范围检查均通过：`git diff --check` 退出 `0`（仅 CRLF 自动转换提示，无空白错误）；两次 `git diff --name-only --diff-filter=U` 均退出 `0`、未合并文件集合为空；真实冲突标记扫描退出 `0`、集合为空；`git diff --name-only 'v0.1.159^{}..HEAD'` 退出 `0` 并列出本分支历史变更文件；最终 `backend/cmd/server/VERSION` 为 `0.1.159.6`。最终 `git status --short` 仅显示协调者既有 plan、OpenSpec `tasks.md`、`.comet/subagent-progress.md` 改动、本任务 ledger，以及未跟踪 `.comet/current-change.json`、`paseo.json`；后两者未触碰。
+- 远程 integration：待执行（Task 4），本地门禁通过不构成远程放行。
 
 ## 能力矩阵
 
