@@ -32,7 +32,7 @@
 
 - Task 1 的固定基线、tag 链、release 上界和排除提交证据已记录在本台账的“固定对象与范围”。
 - Task 2 提交前快照：不在 `main`，分支和主工作树状态符合分支级隔离；工作树仅含根 `.comet/current-change.json`、本 change 的 OpenSpec 规划工件和 `paseo.json` 三类未跟踪项。
-- 本任务仅初始化规划证据，不执行业务 TDD、本地门禁或远程 integration；这些项由后续 OpenSpec task 真实执行。
+- Task 2 历史状态：本任务仅初始化规划证据，不执行业务 TDD、本地门禁或远程 integration；这些项由后续 OpenSpec task 真实执行。
 - 首次本地 full 门禁（Task 3）历史失败：`make test` 退出码 `2`。后端默认 `go test ./...`、`golangci-lint run ./...`（`0 issues.`）及 `go test -tags=unit ./...` 均完成；前端 `pnpm --dir frontend run lint:check` 在启动前失败，错误为 `process_begin: CreateProcess(NULL, pnpm --dir frontend run lint:check, ...) failed.` 和 `make (e=2): 系统找不到指定的文件。`，未产生失败测试名。
 - 首次失败前置条件恢复：执行 `corepack enable pnpm` 后，自检 `Get-Command pnpm` 解析到 `C:\Users\caiqy\.version-fox\sdks\nodejs\pnpm.ps1`，`pnpm --version` 输出 `11.17.0`；未改变仓库文件。
 - 完整重跑本地 full 门禁：再次执行 `make test`，退出码 `2`。后端默认测试、`golangci-lint run ./...`（`0 issues.`）和 unit 测试均通过；前端 `pnpm --dir frontend run lint:check` 触发依赖状态检查，因无 TTY 拒绝清理 modules 目录，报 `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`，内部 `pnpm install` 退出码 `1`，最终 `make: *** [test-frontend] Error 1`。这是新的首个未解决阻塞，未产生失败测试名。
@@ -42,6 +42,10 @@
 - 阶段 0 本地 full 门禁最终完整重跑（当前 HEAD：`aca233e82c08778e221a049d99a69aa02febaf87`）：`make test` 退出码 `0`，后端默认测试、`golangci-lint run ./...`（`0 issues.`）、unit 测试、前端 lint/typecheck 均通过，Vitest 为 `194 passed` 测试文件、`1493 passed` 用例；`make build` 退出码 `0`，后端按 `0.1.159.6` 构建，前端 Vite 处理 `987` 个模块并完成 production build；两次 `make -C backend generate` 均退出 `0`，每次后的 `git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` 均退出 `0`、无输出，生成稳定。
 - 静态和范围检查均通过：`git diff --check` 退出 `0`（仅 CRLF 自动转换提示，无空白错误）；两次 `git diff --name-only --diff-filter=U` 均退出 `0`、未合并文件集合为空；真实冲突标记扫描退出 `0`、集合为空；`git diff --name-only 'v0.1.159^{}..HEAD'` 退出 `0` 并列出本分支历史变更文件；最终 `backend/cmd/server/VERSION` 为 `0.1.159.6`。最终 `git status --short` 仅显示协调者既有 plan、OpenSpec `tasks.md`、`.comet/subagent-progress.md` 改动、本任务 ledger，以及未跟踪 `.comet/current-change.json`、`paseo.json`；后两者未触碰。
 - 远程 integration：待执行（Task 4），本地门禁通过不构成远程放行。
+- 固定门禁 HEAD range 分类：重新执行 `git diff --name-only 'v0.1.159^{}..aca233e82c08778e221a049d99a69aa02febaf87'`，退出 `0`，共 `963` 个路径。非重叠分类为 `backend/` 393、`frontend/` 139、`docs/superpowers/` 49、其他 `docs/` 1、`openspec/` 345、`deploy/` 1、`memory/` 10、`.superpowers/` 12、`.comet/` 1、`.github/` 2、根目录 10；只包含该固定 HEAD 中从 `v0.1.159` 起的既有本地提交和 Task 1/2 规划证据，未纳入 Task 3 后续提交。
+- range 排除核对：`paseo.json`、根 `.comet/current-change.json`、`bin/`、`dist/` 和 `node_modules/` 均为 `0`；唯一的 `backend/cmd/server/wire_gen.go` 是固定 HEAD 中已跟踪的历史生成源码，不是本门禁残留，且两次生成后的受检 diff 均为空。
+- warning/noise 分类（完整原文见 `.superpowers/sdd/task-3-v0-1-165-{make-test,make-build,git-diff-check}.log`）：Vitest 的 `src/views/admin/__tests__/SettingsView.spec.ts` 输出 `[Vue warn]: Failed to resolve component: router-link`，网络负路径输出如 `src/stores/__tests__/subscriptions.spec.ts` 的 `Failed to fetch active subscriptions: Error: Network error` 和 `src/composables/__tests__/useTableLoader.spec.ts` 的 `Table load error: Error: Server error`，均为测试刻意覆盖的 stderr/console 输出；`SubscriptionPlanCard.spec.ts` 的 `[intlify] The message format compilation is not supported in this build` 为测试运行时 i18n advisory。`make test` 仍以 `194 passed` 文件、`1493 passed` 用例和退出 `0` 结束，故无吞错迹象。
+- 工具 advisory：Browserslist 输出 `browsers data (caniuse-lite) is 7 months old`，Vite 输出 `Some chunks are larger than 500 kB after minification`（`AccountsView` 为 `670.83 kB`），分别是数据时效和 bundle size 建议；`make build` 退出 `0`。Git CRLF 提示为 `LF will be replaced by CRLF the next time Git touches it`，`git diff --check` 退出 `0`，故不是空白错误。
 
 ## 能力矩阵
 
@@ -122,4 +126,4 @@
 ## 阻塞与残余风险
 
 - 当前无隔离或工作树范围阻塞。
-- 尚未执行任何 tag merge、changed-files 审查、能力矩阵填充、本地门禁或 `local-serv-ai` integration；在对应证据完成前不得进入下一阶段。
+- 阶段 0 本地 full 门禁已通过；远程 integration、六个 tag merge、changed-files/能力矩阵，以及各 tag 后续本地/远程门禁仍待执行。阶段 0 尚未具备完整放行条件。
