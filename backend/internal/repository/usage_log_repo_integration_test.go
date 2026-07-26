@@ -864,10 +864,14 @@ func (s *UsageLogRepoSuite) TestDelete_RemovesDetail() {
 	s.Require().NoError(err)
 	s.repo.PersistDetailBestEffort(s.ctx, log)
 
+	var count int
+	err = scanSingleRow(s.ctx, s.tx, "SELECT COUNT(*) FROM usage_log_details WHERE usage_log_id = $1", []any{log.ID}, &count)
+	s.Require().NoError(err)
+	s.Require().Equal(1, count)
+
 	err = s.repo.Delete(s.ctx, log.ID)
 	s.Require().NoError(err)
 
-	var count int
 	err = scanSingleRow(s.ctx, s.tx, "SELECT COUNT(*) FROM usage_log_details WHERE usage_log_id = $1", []any{log.ID}, &count)
 	s.Require().NoError(err)
 	s.Require().Zero(count)

@@ -34,7 +34,7 @@ func TestOpenAIGatewayHandler_ChatAndEmbeddingsReplayMappedSpoolAcrossFailover(t
 		body         func(string) []byte
 		upstreamPath string
 		gzip         bool
-		wait         time.Duration
+		upstreamWait time.Duration
 	}{
 		{"chat", "/v1/chat/completions", func(padding string) []byte {
 			return []byte(`{"model":"alias-model","messages":[{"role":"user","content":"` + padding + `"}],"stream":false}`)
@@ -96,21 +96,25 @@ func TestOpenAIGatewayHandler_ChatAndEmbeddingsReplayMappedSpoolAcrossFailover(t
 			if tt.gzip {
 				req.Header.Set("Content-Encoding", "gzip")
 			}
-			wait := tt.wait
-			if wait == 0 {
-				wait = openAIReplaySpoolWait
-			}
 			done := make(chan struct{})
 			go func() { router.ServeHTTP(rec, req); close(done) }()
-			waitOpenAIReplaySignal(t, upstream.started, "second upstream attempt", wait)
-			snapshot := waitOpenAIReplaySnapshot(t, upstream.snapshots, wait)
+			if tt.upstreamWait > 0 {
+				select {
+				case <-upstream.started:
+				case <-time.After(tt.upstreamWait):
+					t.Fatal("timed out waiting for second upstream attempt")
+				}
+			} else {
+				waitOpenAIReplaySignal(t, upstream.started, "second upstream attempt")
+			}
+			snapshot := waitOpenAIReplaySnapshot(t, upstream.snapshots)
 			assertBoundedOpenAIReplaySnapshot(t, "usage request", snapshot.usageRequest, body)
 			assertBoundedOpenAIReplaySnapshot(t, "usage upstream", snapshot.usageUpstream, upstream.latestBody())
 			assertBoundedOpenAIReplaySnapshot(t, "ops upstream", snapshot.opsUpstream, upstream.latestBody())
 			require.NotEmpty(t, readTestDir(t, rawDir), "raw spool must survive the blocked upstream attempt")
 			require.NotEmpty(t, readTestDir(t, upstreamDir), "mapped effective spool must survive the blocked upstream attempt")
 			close(upstream.release)
-			waitOpenAIReplaySignal(t, done, "handler completion", wait)
+			waitOpenAIReplaySignal(t, done, "handler completion")
 			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 			upstream.assert(t, body, tt.upstreamPath)
 			require.Empty(t, readTestDir(t, rawDir))
@@ -158,15 +162,15 @@ func TestOpenAIGatewayHandler_ChatReplayRawSpoolAcrossFailoverWhenResponsesUnsup
 		close(done)
 	}()
 
-	waitOpenAIReplaySignal(t, upstream.started, "raw Chat second upstream attempt", openAIReplaySpoolWait)
-	snapshot := waitOpenAIReplaySnapshot(t, upstream.snapshots, openAIReplaySpoolWait)
+	waitOpenAIReplaySignal(t, upstream.started, "raw Chat second upstream attempt")
+	snapshot := waitOpenAIReplaySnapshot(t, upstream.snapshots)
 	assertBoundedOpenAIReplaySnapshot(t, "usage request", snapshot.usageRequest, body)
 	assertBoundedOpenAIReplaySnapshot(t, "usage upstream", snapshot.usageUpstream, upstream.latestBody())
 	assertBoundedOpenAIReplaySnapshot(t, "ops upstream", snapshot.opsUpstream, upstream.latestBody())
 	require.NotEmpty(t, readTestDir(t, rawDir), "raw spool must survive the blocked upstream attempt")
 	require.NotEmpty(t, readTestDir(t, upstreamDir), "mapped effective spool must survive the blocked upstream attempt")
 	close(upstream.release)
-	waitOpenAIReplaySignal(t, done, "raw Chat handler completion", openAIReplaySpoolWait)
+	waitOpenAIReplaySignal(t, done, "raw Chat handler completion")
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	upstream.assert(t, body, "/v1/chat/completions")
 	require.Empty(t, readTestDir(t, rawDir))
@@ -475,21 +479,21 @@ func openAIReplayResponse(status int, path ...string) *http.Response {
 	return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"id":"ok","model":"mapped-model","choices":[{"message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2},"data":[{"embedding":[0.1],"index":0}],"object":"list"}`))}
 }
 
-func waitOpenAIReplaySignal(t *testing.T, signal <-chan struct{}, name string, timeout time.Duration) {
+func waitOpenAIReplaySignal(t *testing.T, signal <-chan struct{}, name string) {
 	t.Helper()
 	select {
 	case <-signal:
-	case <-time.After(timeout):
+	case <-time.After(openAIReplaySpoolWait):
 		t.Fatalf("timed out waiting for %s", name)
 	}
 }
 
-func waitOpenAIReplaySnapshot(t *testing.T, snapshots <-chan openAIReplaySnapshots, timeout time.Duration) openAIReplaySnapshots {
+func waitOpenAIReplaySnapshot(t *testing.T, snapshots <-chan openAIReplaySnapshots) openAIReplaySnapshots {
 	t.Helper()
 	select {
 	case snapshot := <-snapshots:
 		return snapshot
-	case <-time.After(timeout):
+	case <-time.After(openAIReplaySpoolWait):
 		t.Fatal("timed out waiting for blocked upstream usage and ops snapshots")
 		return openAIReplaySnapshots{}
 	}
