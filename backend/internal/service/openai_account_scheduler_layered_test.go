@@ -328,6 +328,34 @@ func TestLayered_TTFTPenalty_DoesNotUseOpenAIBaselineForGrok(t *testing.T) {
 	}
 }
 
+func TestLayered_ErrorPenaltyDoesNotApplyToGrokWithoutProbeSupport(t *testing.T) {
+	accounts := []Account{
+		{ID: 91004, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 10},
+		{ID: 91005, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 50},
+	}
+	svc := newLayeredTestService(accounts)
+	svc.cfg.RunMode = config.RunModeSimple
+	scheduler := svc.getOpenAIAccountScheduler()
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+	layered, ok := scheduler.(*layeredOpenAIAccountScheduler)
+	require.True(t, ok)
+
+	for i := 0; i < 5; i++ {
+		scheduler.ReportResult(accounts[0].ID, false, nil)
+	}
+
+	result, _, err := scheduler.Select(context.Background(), OpenAIAccountScheduleRequest{Platform: PlatformGrok})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Account)
+	require.Equal(t, accounts[0].ID, result.Account.ID)
+	_, registered := layered.probe.entries.Load(accounts[0].ID)
+	require.False(t, registered)
+	if result.ReleaseFunc != nil {
+		result.ReleaseFunc()
+	}
+}
+
 // TestLayered_TTFTPenalty_SharedEvaluatorUsesConsistentGroupBaseline verifies
 // that the shared evaluator helpers compute and apply the same group-level TTFT
 // baseline regardless of which account is being evaluated. This covers helper
@@ -651,6 +679,50 @@ func TestLayered_PreviousResponseStickyIgnoresNonOpenAIPlatform(t *testing.T) {
 	require.False(t, decision.StickyPreviousHit)
 	require.Zero(t, stateStore.getResponseAccountCalls["resp_layered_non_openai"])
 	require.Zero(t, stateStore.deleteResponseCalls["resp_layered_non_openai"])
+}
+
+func TestLayered_SessionStickyPreservesGrokBinding(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	ctx := context.Background()
+	groupID := int64(920150)
+	stickyAccount := Account{ID: 9201501, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 100, GroupIDs: []int64{groupID}}
+	preferredAccount := Account{ID: 9201502, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, GroupIDs: []int64{groupID}}
+	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:session_hash_grok_layered": stickyAccount.ID}}
+	cfg := newOpenAIStickyEnabledTestConfig()
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{stickyAccount, preferredAccount}},
+		cache:              cache,
+		cfg:                cfg,
+		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+	}
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	selection, decision, err := svc.SelectAccountWithSchedulerForCapability(
+		ctx,
+		&groupID,
+		"",
+		"session_hash_grok_layered",
+		"grok-4.5",
+		nil,
+		OpenAIUpstreamTransportAny,
+		OpenAIEndpointCapabilityChatCompletions,
+		false,
+		false,
+		PlatformGrok,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, stickyAccount.ID, selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerSessionSticky, decision.Layer)
+	require.True(t, decision.StickySessionHit)
+	require.Zero(t, cache.deletedSessions["openai:session_hash_grok_layered"])
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
 }
 
 func TestLayered_StickyWeightedSessionPrefersStickyWithinTopK(t *testing.T) {

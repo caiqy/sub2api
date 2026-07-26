@@ -1042,6 +1042,50 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_Weighted_AllowsGrokChat
 	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
 }
 
+func TestOpenAIGatewayService_SelectAccountWithScheduler_Weighted_PreservesGrokSessionSticky(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	ctx := context.Background()
+	groupID := int64(10127)
+	stickyAccount := Account{ID: 38003, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 100, GroupIDs: []int64{groupID}}
+	preferredAccount := Account{ID: 38004, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, GroupIDs: []int64{groupID}}
+	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:session_hash_grok_weighted": stickyAccount.ID}}
+	cfg := newOpenAIStickyEnabledTestConfig()
+	cfg.Gateway.OpenAIWS.SchedulerMode = "weighted"
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{stickyAccount, preferredAccount}},
+		cache:              cache,
+		cfg:                cfg,
+		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+	}
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	selection, decision, err := svc.SelectAccountWithSchedulerForCapability(
+		ctx,
+		&groupID,
+		"",
+		"session_hash_grok_weighted",
+		"grok-4.5",
+		nil,
+		OpenAIUpstreamTransportAny,
+		OpenAIEndpointCapabilityChatCompletions,
+		false,
+		false,
+		PlatformGrok,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, stickyAccount.ID, selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerSessionSticky, decision.Layer)
+	require.True(t, decision.StickySessionHit)
+	require.Zero(t, cache.deletedSessions["openai:session_hash_grok_weighted"])
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
 func TestOpenAIGatewayService_SelectAccountWithScheduler_EnabledUsesAdvancedPreviousResponseRouting(t *testing.T) {
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 
@@ -3997,6 +4041,37 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_StickyWeightedFallbackS
 	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
 	// 失效的粘连绑定应被清理，避免后续请求反复走同一条泄漏路径。
 	require.Positive(t, cache.deletedSessions["openai:session_weighted_out_of_group"])
+}
+
+func TestDefaultOpenAIAccountScheduler_WeightedStickyFallbackAllowsGrok(t *testing.T) {
+	groupID := int64(101083)
+	account := Account{
+		ID:          38003,
+		Platform:    PlatformGrok,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		GroupIDs:    []int64{groupID},
+	}
+	svc := &OpenAIGatewayService{accountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{account}}}
+	scheduler := &defaultOpenAIAccountScheduler{service: svc, stats: newOpenAIAccountRuntimeStats()}
+
+	selection, err := scheduler.tryFallbackToWeightedSticky(context.Background(), OpenAIAccountScheduleRequest{
+		GroupID:           &groupID,
+		Platform:          PlatformGrok,
+		StickyWeighted:    true,
+		StickyAccountID:   account.ID,
+		RequiredTransport: OpenAIUpstreamTransportAny,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, account.ID, selection.Account.ID)
+	require.True(t, selection.Acquired)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
 }
 
 func TestOpenAIGatewayService_SelectAccountWithScheduler_SubscriptionPriorityWaitsOnBusySubscriptionWhenRegularUnusable(t *testing.T) {

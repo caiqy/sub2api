@@ -178,7 +178,7 @@ func (s *layeredOpenAIAccountScheduler) selectBySessionHash(
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		return nil, req, nil
 	}
-	if shouldClearStickySession(account, req.RequestedModel) || !account.IsOpenAI() || !account.IsSchedulable() {
+	if shouldClearStickySession(account, req.RequestedModel) || account.Platform != normalizeOpenAICompatiblePlatform(req.Platform) || !account.IsSchedulable() {
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		return nil, req, nil
 	}
@@ -350,10 +350,13 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 	loadRateSumSquares := 0.0
 
 	for _, c := range candidates {
-		eval := s.evaluateRuntimePenalty(c.account.ID, groupMinTTFT, hasGroupMin)
+		eval := layeredPenaltyEvaluation{}
+		// ponytail: Grok has no compatible probe recovery path; enable its layered penalties only when one exists.
+		if c.account.IsOpenAI() {
+			eval = s.evaluateRuntimePenalty(c.account.ID, groupMinTTFT, hasGroupMin)
+			s.applyProbeRegistration(c.account, eval.ErrorPenalized, eval.TTFTPenalized, req.GroupID)
+		}
 		acc := s.applyPenaltyToAccount(c.account, eval)
-
-		s.applyProbeRegistration(c.account, eval.ErrorPenalized, eval.TTFTPenalized, req.GroupID)
 
 		// 过滤 loadRate >= 100%
 		if c.loadInfo.LoadRate >= 100 {
@@ -619,7 +622,7 @@ func (s *layeredOpenAIAccountScheduler) recheckSessionStickyAccountFromDB(
 		return nil, true
 	}
 	if s.service.schedulerSnapshot == nil || s.service.accountRepo == nil {
-		fresh := s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.GroupID, PlatformOpenAI, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
+		fresh := s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
 		if fresh == nil {
 			return nil, false
 		}
@@ -642,7 +645,7 @@ func (s *layeredOpenAIAccountScheduler) classifySessionStickyAccount(
 	if account == nil {
 		return nil, true
 	}
-	if shouldClearStickySession(account, req.RequestedModel) || !account.IsOpenAI() || !account.IsSchedulable() {
+	if shouldClearStickySession(account, req.RequestedModel) || account.Platform != normalizeOpenAICompatiblePlatform(req.Platform) || !account.IsSchedulable() {
 		return nil, true
 	}
 	if !accountSatisfiesPrivacyRequirement(account, schedGroup) {
