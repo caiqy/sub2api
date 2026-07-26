@@ -529,42 +529,20 @@ openspec/changes/add-openai-compatible-prompt-audit/verification.md
 openspec/config.yaml
 ```
 <!-- TASK6:v0.1.160:raw:end -->
-- Local key-file intersection (path-name match against the capability catalog; matrix cells below assign each path to a capability):
+- Local key-file intersection (matrix-derived exact local core paths):
 ```text
-backend/cmd/server/wire.go
 backend/cmd/server/wire_gen.go
-backend/cmd/server/wire_gen_test.go
 backend/internal/handler/batch_image_handler.go
 backend/internal/handler/content_moderation_helper.go
-backend/internal/handler/grok_media.go
-backend/internal/handler/grok_media_test.go
-backend/internal/handler/image_task_handler.go
-backend/internal/handler/openai_grok_image_intent_gate_test.go
 backend/internal/handler/openai_images.go
-backend/internal/handler/wire.go
 backend/internal/pkg/xai/billing.go
 backend/internal/repository/scheduler_cache.go
-backend/internal/repository/scheduler_cache_unit_test.go
-backend/internal/service/account_grok_media_eligibility_test.go
 backend/internal/service/admin_account_upstream_billing_probe_test.go
 backend/internal/service/grok_media.go
-backend/internal/service/grok_quota_service.go
-backend/internal/service/grok_quota_service_test.go
-backend/internal/service/image_generation_intent.go
-backend/internal/service/image_generation_intent_explicit_test.go
-backend/internal/service/openai_account_scheduler_test.go
-backend/internal/service/openai_gateway_grok_test.go
+backend/internal/service/openai_gateway_scheduling.go
 backend/migrations/181_prompt_audit.sql
-backend/migrations/182_prompt_audit_full_prompt.sql
-deploy/build_image.sh
 frontend/package.json
-frontend/pnpm-lock.yaml
-frontend/src/i18n/locales/en/admin/index.ts
-frontend/src/i18n/locales/en/admin/promptAudit.ts
 frontend/src/i18n/locales/en/common.ts
-frontend/src/i18n/locales/zh/admin/index.ts
-frontend/src/i18n/locales/zh/admin/promptAudit.ts
-frontend/src/i18n/locales/zh/common.ts
 ```
 
 ### v0.1.161
@@ -832,93 +810,29 @@ frontend/src/views/public/LegalDocumentView.vue
 frontend/vite.config.ts
 ```
 <!-- TASK6:v0.1.161:raw:end -->
-- Local key-file intersection (path-name match against the capability catalog; matrix cells below assign each path to a capability):
+- Local key-file intersection (matrix-derived exact local core paths):
 ```text
-backend/cmd/server/wire.go
 backend/cmd/server/wire_gen.go
-backend/cmd/server/wire_gen_test.go
-backend/internal/handler/admin/grok_import_probe.go
-backend/internal/handler/admin/grok_import_probe_test.go
-backend/internal/handler/admin/grok_oauth_handler.go
-backend/internal/handler/admin/grok_oauth_handler_test.go
-backend/internal/handler/admin/setting_handler.go
-backend/internal/handler/admin/setting_handler_audit.go
-backend/internal/handler/admin/setting_handler_stepup_switch_test.go
-backend/internal/handler/admin/setting_handler_update.go
-backend/internal/handler/admin/user_handler.go
-backend/internal/handler/admin/user_handler_activity_test.go
 backend/internal/handler/admin/user_handler_batch_limits_test.go
-backend/internal/handler/admin/user_handler_get_deleted_test.go
 backend/internal/handler/admin/user_handler_list_apikey_group_test.go
-backend/internal/handler/admin/user_handler_role_stepup_test.go
-backend/internal/handler/dto/settings.go
-backend/internal/handler/grok_media.go
-backend/internal/handler/grok_media_test.go
-backend/internal/handler/wire.go
-backend/internal/repository/account_repo_upstream_billing_probe_update_test.go
-backend/internal/repository/migrations_runner.go
-backend/internal/repository/migrations_runner_notx_test.go
-backend/internal/repository/migrations_schema_integration_test.go
 backend/internal/repository/user_repo.go
-backend/internal/repository/user_repo_delete_atomicity_integration_test.go
-backend/internal/repository/wire.go
 backend/internal/server/middleware/session_binding.go
-backend/internal/server/middleware/session_binding_test.go
 backend/internal/server/middleware/step_up.go
-backend/internal/server/middleware/step_up_test.go
-backend/internal/service/account_grok_media_eligibility_test.go
-backend/internal/service/account_test_service_grok_test.go
-backend/internal/service/admin_account_upstream_billing_probe_test.go
 backend/internal/service/channel_monitor_checker_body_test.go
-backend/internal/service/grok_media.go
-backend/internal/service/grok_media_content_test.go
-backend/internal/service/grok_quota_fetcher.go
-backend/internal/service/grok_quota_fetcher_test.go
-backend/internal/service/grok_quota_service.go
-backend/internal/service/grok_quota_service_test.go
-backend/internal/service/grok_upstream_url.go
-backend/internal/service/grok_upstream_url_test.go
-backend/internal/service/openai_gateway_grok.go
 backend/internal/service/openai_gateway_grok_cache.go
-backend/internal/service/openai_gateway_grok_cache_test.go
-backend/internal/service/openai_gateway_grok_cache_tool_test.go
-backend/internal/service/openai_gateway_grok_test.go
 backend/internal/service/openai_gateway_passthrough.go
-backend/internal/service/openai_images.go
 backend/internal/service/openai_images_responses.go
-backend/internal/service/openai_ws_v2/passthrough_relay.go
-backend/internal/service/openai_ws_v2/passthrough_relay_internal_test.go
-backend/internal/service/openai_ws_v2/passthrough_relay_test.go
-backend/internal/service/openai_ws_v2_passthrough_adapter.go
-backend/internal/service/openai_ws_v2_passthrough_lifecycle_test.go
+backend/internal/service/openai_images.go
 backend/internal/service/ops_service_user_error_test.go
-backend/internal/service/ops_settings.go
-backend/internal/service/ops_settings_advanced_test.go
-backend/internal/service/ops_settings_models.go
-backend/internal/service/ratelimit_session_window_test.go
 backend/internal/service/scheduler_snapshot_batch_query_test.go
 backend/internal/service/scheduler_snapshot_full_rebuild_lifecycle_test.go
-backend/internal/service/setting_features.go
 backend/internal/service/setting_parse.go
 backend/internal/service/setting_update.go
-backend/internal/service/settings_view.go
+backend/internal/service/subscription_service.go
 backend/internal/service/upstream_billing_probe.go
-backend/internal/service/upstream_billing_probe_test.go
 backend/internal/service/user_subscription_daily_quota_test.go
-backend/internal/service/wire.go
 backend/migrations/183_ops_ingress_reject_aggregates.sql
-backend/migrations/184_auth_cache_invalidation_outbox.sql
-frontend/src/api/admin/settings.ts
-frontend/src/i18n/__tests__/wsModeLocaleDesc.spec.ts
-frontend/src/i18n/locales/en/admin/accounts.ts
-frontend/src/i18n/locales/en/admin/ops.ts
 frontend/src/i18n/locales/en/admin/settings.ts
-frontend/src/i18n/locales/en/misc.ts
-frontend/src/i18n/locales/zh/admin/accounts.ts
-frontend/src/i18n/locales/zh/admin/ops.ts
-frontend/src/i18n/locales/zh/admin/settings.ts
-frontend/src/i18n/locales/zh/misc.ts
-frontend/src/views/admin/__tests__/AccountsView.usageWindowsHint.spec.ts
 frontend/vite.config.ts
 ```
 
@@ -1120,65 +1034,19 @@ frontend/src/views/user/CustomPageView.vue
 frontend/src/views/user/SubscriptionsView.vue
 ```
 <!-- TASK6:v0.1.162:raw:end -->
-- Local key-file intersection (path-name match against the capability catalog; matrix cells below assign each path to a capability):
+- Local key-file intersection (matrix-derived exact local core paths):
 ```text
 backend/cmd/server/wire_gen.go
-backend/internal/config/image_storage_env_test.go
-backend/internal/handler/admin/setting_handler.go
-backend/internal/handler/admin/setting_handler_audit.go
-backend/internal/handler/admin/setting_handler_stepup_switch_test.go
-backend/internal/handler/admin/setting_handler_update.go
-backend/internal/handler/dto/settings.go
-backend/internal/handler/image_task_admin_toggle_test.go
-backend/internal/handler/image_task_handler.go
 backend/internal/handler/openai_responses_image_intent_benchmark_test.go
-backend/internal/pkg/xai/quota.go
-backend/internal/pkg/xai/quota_test.go
-backend/internal/repository/wire.go
 backend/internal/server/middleware/session_binding.go
-backend/internal/server/middleware/session_binding_test.go
 backend/internal/service/account_usage_service.go
-backend/internal/service/grok_media.go
-backend/internal/service/grok_media_content_test.go
-backend/internal/service/grok_quota_fetcher.go
-backend/internal/service/grok_quota_fetcher_test.go
-backend/internal/service/grok_quota_service.go
-backend/internal/service/grok_quota_service_test.go
-backend/internal/service/grok_token_provider.go
-backend/internal/service/grok_token_provider_test.go
-backend/internal/service/image_storage_settings.go
-backend/internal/service/image_storage_settings_test.go
 backend/internal/service/image_task.go
-backend/internal/service/openai_gateway_grok.go
 backend/internal/service/openai_gateway_grok_cache.go
-backend/internal/service/openai_gateway_grok_cache_test.go
-backend/internal/service/openai_gateway_grok_chat_bridge.go
-backend/internal/service/openai_gateway_grok_chat_bridge_test.go
-backend/internal/service/openai_gateway_grok_test.go
 backend/internal/service/setting_parse.go
-backend/internal/service/setting_service.go
-backend/internal/service/setting_service_update_test.go
 backend/internal/service/setting_update.go
-backend/internal/service/settings_view.go
 backend/internal/service/user_subscription.go
-backend/internal/service/user_subscription_days_remaining_test.go
-backend/internal/service/wire.go
-frontend/src/api/admin/settings.ts
-frontend/src/components/account/__tests__/EditAccountModal.grokUpstream.spec.ts
-frontend/src/components/admin/usage/UsageFilters.vue
-frontend/src/i18n/locales/en/admin/accounts.ts
-frontend/src/i18n/locales/en/admin/overview.ts
-frontend/src/i18n/locales/en/admin/settings.ts
 frontend/src/i18n/locales/en/batchImage.ts
-frontend/src/i18n/locales/en/common.ts
-frontend/src/i18n/locales/en/index.ts
-frontend/src/i18n/locales/zh/admin/accounts.ts
-frontend/src/i18n/locales/zh/admin/overview.ts
-frontend/src/i18n/locales/zh/admin/settings.ts
-frontend/src/i18n/locales/zh/batchImage.ts
-frontend/src/i18n/locales/zh/common.ts
-frontend/src/i18n/locales/zh/index.ts
-frontend/src/views/admin/settings/EmailTemplateEditor.vue
+frontend/src/views/admin/__tests__/SettingsView.spec.ts
 ```
 
 ### v0.1.163
@@ -1360,69 +1228,24 @@ frontend/src/views/user/KeysView.vue
 frontend/src/views/user/PaymentView.vue
 ```
 <!-- TASK6:v0.1.163:raw:end -->
-- Local key-file intersection (path-name match against the capability catalog; matrix cells below assign each path to a capability):
+- Local key-file intersection (matrix-derived exact local core paths):
 ```text
-backend/ent/group.go
-backend/ent/group/group.go
-backend/ent/group/where.go
-backend/ent/group_create.go
-backend/ent/group_update.go
 backend/ent/schema/group.go
 backend/go.mod
-backend/go.sum
-backend/internal/handler/admin/group_handler.go
-backend/internal/handler/admin/group_handler_reasoning_effort_test.go
-backend/internal/handler/admin/usage_handler.go
-backend/internal/handler/admin/usage_handler_request_type_test.go
-backend/internal/repository/group_repo.go
-backend/internal/repository/scheduler_cache.go
-backend/internal/repository/scheduler_cache_last_used_unit_test.go
-backend/internal/repository/scheduler_cache_unit_test.go
-backend/internal/service/admin_group.go
-backend/internal/service/admin_group_duplicate.go
 backend/internal/service/admin_group_duplicate_test.go
-backend/internal/service/admin_service_group_test.go
+backend/internal/service/admin_group_duplicate.go
+backend/internal/service/admin_group.go
+backend/internal/service/admin_service.go
 backend/internal/service/gateway_anthropic_passthrough.go
-backend/internal/service/grok_media.go
-backend/internal/service/grok_upstream_errors.go
-backend/internal/service/grok_upstream_errors_test.go
-backend/internal/service/group.go
-backend/internal/service/openai_account_scheduler.go
-backend/internal/service/openai_account_scheduler_compact_test.go
-backend/internal/service/openai_account_scheduler_test.go
 backend/internal/service/openai_account_scheduler_upstream_cost_test.go
-backend/internal/service/openai_gateway_grok.go
+backend/internal/service/openai_account_scheduler.go
 backend/internal/service/openai_gateway_grok_cache.go
-backend/internal/service/openai_gateway_grok_cache_test.go
-backend/internal/service/openai_gateway_grok_chat_bridge.go
-backend/internal/service/openai_gateway_grok_chat_bridge_test.go
-backend/internal/service/openai_gateway_grok_compact.go
-backend/internal/service/openai_gateway_grok_test.go
-backend/internal/service/openai_gateway_grok_tool_protocol.go
-backend/internal/service/openai_gateway_grok_tool_protocol_test.go
 backend/internal/service/openai_gateway_response_handling_image_usage_test.go
-backend/internal/service/openai_oauth_passthrough_test.go
-backend/internal/service/openai_ws_v2_passthrough_adapter.go
+backend/internal/service/openai_gateway_scheduling.go
 backend/internal/service/scheduler_snapshot_service.go
 backend/migrations/185_group_reasoning_effort_policy.sql
-frontend/package.json
 frontend/pnpm-lock.yaml
-frontend/src/components/admin/group/GroupRPMOverridesModal.vue
-frontend/src/components/admin/group/GroupRateMultipliersModal.vue
-frontend/src/components/admin/group/ReasoningEffortPolicyFields.vue
-frontend/src/components/admin/usage/UsageFilters.vue
-frontend/src/components/admin/usage/__tests__/UsageFilters.spec.ts
-frontend/src/i18n/locales/en/admin/ops.ts
 frontend/src/i18n/locales/en/admin/overview.ts
-frontend/src/i18n/locales/en/landing.ts
-frontend/src/i18n/locales/en/misc.ts
-frontend/src/i18n/locales/zh/admin/accounts.ts
-frontend/src/i18n/locales/zh/admin/ops.ts
-frontend/src/i18n/locales/zh/admin/overview.ts
-frontend/src/i18n/locales/zh/landing.ts
-frontend/src/i18n/locales/zh/misc.ts
-frontend/src/views/admin/__tests__/groupsReasoningEffort.spec.ts
-frontend/src/views/admin/groupsReasoningEffort.ts
 ```
 
 ### v0.1.164
@@ -1635,65 +1458,24 @@ frontend/src/views/admin/orders/__tests__/PlanEditDialog.spec.ts
 frontend/src/views/user/PaymentView.vue
 ```
 <!-- TASK6:v0.1.164:raw:end -->
-- Local key-file intersection (path-name match against the capability catalog; matrix cells below assign each path to a capability):
+- Local key-file intersection (matrix-derived exact local core paths):
 ```text
-backend/cmd/server/wire.go
 backend/cmd/server/wire_gen.go
-backend/cmd/server/wire_gen_test.go
-backend/internal/handler/admin/account_ollama_cloud_usage.go
-backend/internal/handler/admin/account_ollama_cloud_usage_test.go
-backend/internal/handler/admin/group_handler.go
-backend/internal/handler/admin/setting_handler.go
 backend/internal/handler/admin/setting_handler_update.go
+backend/internal/handler/admin/setting_handler.go
 backend/internal/handler/content_moderation_helper.go
-backend/internal/handler/dto/settings.go
-backend/internal/handler/gateway_key_billing_test.go
-backend/internal/handler/grok_media.go
 backend/internal/handler/openai_images.go
-backend/internal/handler/wire.go
-backend/internal/repository/account_repo_ollama_cloud_usage.go
-backend/internal/repository/account_repo_ollama_cloud_usage_integration_test.go
-backend/internal/repository/account_repo_ollama_cloud_usage_test.go
 backend/internal/repository/account_repo_upstream_billing_probe_update_test.go
 backend/internal/repository/group_repo.go
-backend/internal/repository/proxy_repo_upstream_billing_probe_test.go
-backend/internal/repository/simple_mode_default_groups.go
-backend/internal/repository/simple_mode_default_groups_integration_test.go
-backend/internal/repository/usage_log_effective_platform_test.go
 backend/internal/repository/usage_log_repo.go
-backend/internal/repository/wire.go
-backend/internal/server/routes/gateway_key_billing_test.go
-backend/internal/service/admin_group.go
-backend/internal/service/admin_service_composite_group_test.go
-backend/internal/service/admin_service_group_test.go
-backend/internal/service/gateway_record_usage_test.go
 backend/internal/service/gateway_usage_billing.go
-backend/internal/service/gateway_usage_billing_fallback_test.go
-backend/internal/service/ollama_cloud_usage.go
-backend/internal/service/ollama_cloud_usage_parser.go
-backend/internal/service/ollama_cloud_usage_test.go
 backend/internal/service/openai_account_scheduler.go
-backend/internal/service/openai_account_scheduler_test.go
 backend/internal/service/openai_gateway_grok.go
-backend/internal/service/openai_gateway_grok_test.go
 backend/internal/service/openai_gateway_passthrough.go
 backend/internal/service/openai_gateway_request_body.go
-backend/internal/service/openai_passthrough_normalization_test.go
-backend/internal/service/testdata/ollama_settings_usage.html
-backend/internal/service/wire.go
-backend/migrations/172_composite_model_routes.sql
-backend/migrations/186_alipay_mobile_precreate_deep_link.sql
+backend/internal/service/openai_gateway_scheduling.go
 backend/migrations/186_group_auth_cache_image_generation.sql
-frontend/src/api/admin/groups.ts
-frontend/src/api/admin/settings.ts
-frontend/src/i18n/locales/en/admin/accounts.ts
-frontend/src/i18n/locales/en/admin/overview.ts
 frontend/src/i18n/locales/en/admin/settings.ts
-frontend/src/i18n/locales/en/misc.ts
-frontend/src/i18n/locales/zh/admin/accounts.ts
-frontend/src/i18n/locales/zh/admin/overview.ts
-frontend/src/i18n/locales/zh/admin/settings.ts
-frontend/src/i18n/locales/zh/misc.ts
 frontend/src/views/admin/__tests__/AccountsView.usageWindowsHint.spec.ts
 ```
 
@@ -1873,80 +1655,28 @@ frontend/src/views/user/UsageView.vue
 frontend/src/views/user/__tests__/AffiliateView.spec.ts
 ```
 <!-- TASK6:v0.1.165:raw:end -->
-- Local key-file intersection (path-name match against the capability catalog; matrix cells below assign each path to a capability):
+- Local key-file intersection (matrix-derived exact local core paths):
 ```text
-backend/ent/group.go
-backend/ent/group/group.go
-backend/ent/group/where.go
-backend/ent/group_create.go
-backend/ent/group_update.go
 backend/ent/schema/group.go
-backend/internal/handler/admin/account_ollama_cloud_usage_test.go
-backend/internal/handler/admin/group_handler.go
-backend/internal/handler/batch_image_handler.go
-backend/internal/handler/grok_media.go
 backend/internal/handler/openai_images.go
-backend/internal/handler/openai_images_failover_test.go
-backend/internal/handler/user_handler_test.go
-backend/internal/repository/account_repo_ollama_cloud_usage.go
-backend/internal/repository/account_repo_ollama_cloud_usage_integration_test.go
-backend/internal/repository/account_repo_ollama_cloud_usage_test.go
-backend/internal/repository/batch_image_repo.go
 backend/internal/repository/group_repo.go
-backend/internal/repository/migrations_schema_integration_test.go
-backend/internal/repository/usage_log_repo_insert.go
-backend/internal/repository/usage_log_repo_query.go
-backend/internal/repository/usage_log_repo_request_type_test.go
-backend/internal/repository/usage_log_session_id_integration_test.go
-backend/internal/repository/usage_log_session_id_unit_test.go
 backend/internal/repository/user_repo.go
-backend/internal/repository/user_repo_email_alias_test.go
-backend/internal/service/admin_group.go
-backend/internal/service/admin_group_duplicate.go
 backend/internal/service/admin_group_duplicate_test.go
-backend/internal/service/admin_service_group_test.go
-backend/internal/service/batch_image.go
-backend/internal/service/batch_image_processor_test.go
-backend/internal/service/batch_image_public.go
-backend/internal/service/batch_image_public_test.go
+backend/internal/service/admin_group_duplicate.go
 backend/internal/service/batch_image_settlement.go
-backend/internal/service/batch_image_settlement_test.go
+backend/internal/service/batch_image.go
 backend/internal/service/billing_service.go
 backend/internal/service/content_moderation_test.go
 backend/internal/service/gateway_anthropic_apikey_passthrough_test.go
 backend/internal/service/gateway_anthropic_passthrough.go
-backend/internal/service/gateway_usage_billing.go
-backend/internal/service/group.go
-backend/internal/service/ollama_cloud_usage.go
-backend/internal/service/ollama_cloud_usage_test.go
-backend/internal/service/openai_gateway_grok.go
 backend/internal/service/openai_gateway_grok_cache.go
-backend/internal/service/openai_gateway_grok_test.go
-backend/internal/service/openai_gateway_usage.go
-backend/internal/service/openai_oauth_passthrough_test.go
+backend/internal/service/openai_gateway_scheduling.go
 backend/internal/service/session_id.go
-backend/internal/service/session_id_test.go
 backend/internal/service/usage_log.go
-backend/internal/service/user_service.go
-backend/internal/service/user_service_test.go
 backend/migrations/187_add_usage_log_session_id.sql
-backend/migrations/188_allow_live_usage_request_type.sql
-backend/migrations/189_add_group_allow_live.sql
-backend/migrations/190_add_users_email_alias_dedup_index_notx.sql
 frontend/package.json
 frontend/pnpm-lock.yaml
-frontend/src/api/admin/groups.ts
-frontend/src/components/admin/usage/UsageFilters.vue
-frontend/src/components/admin/usage/UsageTable.vue
-frontend/src/i18n/locales/en/admin/overview.ts
 frontend/src/i18n/locales/en/admin/resources.ts
-frontend/src/i18n/locales/en/admin/settings.ts
-frontend/src/i18n/locales/en/dashboard.ts
-frontend/src/i18n/locales/zh/admin/overview.ts
-frontend/src/i18n/locales/zh/admin/resources.ts
-frontend/src/i18n/locales/zh/admin/settings.ts
-frontend/src/i18n/locales/zh/dashboard.ts
-frontend/src/utils/usageRequestType.ts
 ```
 
 ## Task 6 能力矩阵
@@ -1955,31 +1685,33 @@ frontend/src/utils/usageRequestType.ts
 
 | 能力 | 160 | 161 | 162 | 163 | 164 | 165 | 基线保护状态与证据 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| advanced/layered scheduler | `backend/internal/repository/scheduler_cache.go` | `backend/internal/service/scheduler_snapshot_full_rebuild_lifecycle_test.go` | -- | `backend/internal/service/openai_account_scheduler.go` | `backend/internal/service/openai_account_scheduler.go` | -- | `protected`: `go -C backend test ./internal/service -run '^TestLayered_PriorityDeterminism$'` |
-| fallback/WaitPlan | -- | -- | -- | `backend/internal/service/openai_account_scheduler.go` | `backend/internal/service/openai_account_scheduler.go` | -- | `protected`: `go -C backend test ./internal/service -run '^TestLayered_WaitPlanFallbackSkipsUpstreamRestrictedAccount$'` |
-| DB recheck | `backend/internal/repository/scheduler_cache.go` | `backend/internal/service/scheduler_snapshot_batch_query_test.go` | -- | `backend/internal/service/openai_account_scheduler.go` | `backend/internal/service/openai_account_scheduler.go` | -- | `protected`: `go -C backend test ./internal/service -run '^TestLayered_GroupedAccountPassesDBFreshRecheck$'` |
-| Grok/platform Sticky | `backend/internal/service/grok_media.go` | `backend/internal/server/middleware/session_binding.go` | `backend/internal/server/middleware/session_binding.go` | `backend/internal/service/openai_account_scheduler.go` | `backend/internal/service/openai_gateway_grok.go` | `backend/internal/service/session_id.go` | `protected`: `go -C backend test ./internal/service -run '^TestLayered_SessionStickyPreservesGrokBinding$'` |
-| privacy | `backend/internal/handler/content_moderation_helper.go` | -- | -- | -- | `backend/internal/handler/content_moderation_helper.go` | `backend/internal/service/content_moderation_test.go` | `protected`: `go -C backend test ./internal/service -run '^TestLayered_PreviousResponseStickyHonorsRequirePrivacySet$'` |
-| image capability | `backend/internal/handler/openai_images.go` | `backend/internal/service/openai_images.go` | `backend/internal/handler/openai_responses_image_intent_benchmark_test.go` | `backend/internal/service/openai_gateway_response_handling_image_usage_test.go` | `backend/internal/handler/openai_images.go` | `backend/internal/handler/openai_images.go` | `protected`: `go -C backend test ./internal/service -run '^TestLayered_RequiredImageCapabilityFiltersUnsupportedAccounts$'` |
-| async images/object storage | `backend/internal/handler/batch_image_handler.go` | `backend/internal/service/openai_images_responses.go` | `backend/internal/service/image_task.go` | -- | -- | `backend/internal/service/batch_image.go` | `protected`: `go -C backend test ./internal/service -run '^TestImageTaskServiceCompleteOffloadsToStorage$'` |
-| image and video billing | `backend/internal/pkg/xai/billing.go` | `backend/internal/service/upstream_billing_probe.go` | `backend/internal/service/account_usage_service.go` | `backend/internal/service/openai_gateway_response_handling_image_usage_test.go` | `backend/internal/service/gateway_usage_billing.go` | `backend/internal/service/batch_image_settlement.go` | `protected`: `go -C backend test ./internal/service -run '^TestBatchImageSettlementService_SettlesAndChargesSuccessfulImagesOnly$'` |
-| upstream multiplier | `backend/internal/service/admin_account_upstream_billing_probe_test.go` | `backend/internal/service/upstream_billing_probe.go` | -- | `backend/internal/service/openai_account_scheduler_upstream_cost_test.go` | `backend/internal/repository/account_repo_upstream_billing_probe_update_test.go` | -- | `protected`: `go -C backend test ./internal/service -run '^TestOpenAIFreshUpstreamBillingRateRecomputesPeakAtSelectionTime$'` |
-| session/step-up | -- | `backend/internal/server/middleware/step_up.go` | `backend/internal/server/middleware/step_up.go` | -- | -- | `backend/internal/service/session_id.go` | `protected`: `go -C backend test ./internal/server/middleware -run '^TestEnforceStepUpPassesWithGrant$'` |
-| runtime hot update | -- | `backend/internal/service/setting_update.go` | `backend/internal/service/setting_update.go` | `backend/internal/service/scheduler_snapshot_service.go` | `backend/internal/handler/admin/setting_handler_update.go` | -- | `gap`: CodeGraph shows `handleOpenAISchedulerSettingsUpdate` reaches the scheduler factory, but no changed focused assertion proves all setting update/rebuild semantics. |
-| gateway passthrough | -- | `backend/internal/service/openai_gateway_passthrough.go` | `backend/internal/service/openai_ws_v2_passthrough_adapter.go` | `backend/internal/service/gateway_anthropic_passthrough.go` | `backend/internal/service/openai_gateway_passthrough.go` | `backend/internal/service/gateway_anthropic_apikey_passthrough.go` | `protected`: `go -C backend test ./internal/service -run '^TestPassthroughFieldsV2OpenAIForward_APIKeyBodyMapCopiesFromOriginalInboundRequest$'` |
-| prompt cache | -- | `backend/internal/service/openai_gateway_grok_cache.go` | `backend/internal/service/openai_gateway_grok_cache.go` | `backend/internal/service/openai_gateway_grok_cache.go` | -- | `backend/internal/service/openai_gateway_grok_cache.go` | `protected`: `go -C backend test ./internal/service -run '^TestForwardAsAnthropic_InjectsPromptCacheKeyForAPIKeyMessagesDispatch$'` |
-| body replay/spooling | -- | `backend/internal/service/channel_monitor_checker_body_test.go` | -- | -- | `backend/internal/service/openai_gateway_request_body.go` | `backend/internal/service/gateway_anthropic_apikey_passthrough_test.go` | `protected`: `go -C backend test ./internal/service -run '^TestOpenAIForwardReusesBoundRequestBodyHandle$'` |
-| failed usage | -- | `backend/internal/service/ops_service_user_error_test.go` | -- | `backend/internal/service/gateway_usage_billing_fallback_test.go` | `backend/internal/repository/usage_log_repo.go` | `backend/internal/service/usage_log.go` | `protected`: `go -C backend test ./internal/service -run '^TestOpenAIForwardStreamingResponseFailedReturnsUsageWithError$'` |
-| user resource control | -- | `backend/internal/handler/admin/user_handler_batch_limits_test.go` | `backend/internal/service/account_usage_service.go` | -- | -- | `backend/internal/service/user_service.go` | `gap`: changed limit/account-usage paths exist, but no focused assertion for the local per-user resource-override behavior was located. |
-| public group blocking | -- | `backend/internal/handler/admin/user_handler_list_apikey_group_test.go` | -- | `backend/internal/service/admin_group.go` | `backend/internal/repository/group_repo.go` | `backend/internal/repository/group_repo.go` | `protected`: `go -C backend test ./internal/service -run '^TestUserCanBindGroupRejectsBlockedPublicGroup$'` |
-| menu hiding | -- | `backend/internal/repository/user_repo.go` | -- | -- | -- | `backend/internal/repository/user_repo.go` | `protected`: `go -C backend test ./internal/repository -run '^TestHiddenUIResourcesRoundTrip$'` |
-| frontend translations | `frontend/src/i18n/locales/en/common.ts` | `frontend/src/i18n/locales/en/admin/settings.ts` | `frontend/src/i18n/locales/en/batchImage.ts` | `frontend/src/i18n/locales/en/admin/overview.ts` | `frontend/src/i18n/locales/en/admin/settings.ts` | `frontend/src/i18n/locales/en/admin/resources.ts` | `protected`: `pnpm --dir frontend exec vitest run src/i18n/__tests__/wsModeLocaleDesc.spec.ts` |
-| quota atomic reset | `backend/internal/service/grok_quota_service.go` | `backend/internal/service/grok_quota_service.go` | `backend/internal/pkg/xai/quota.go` | -- | -- | -- | `protected`: `go -C backend test ./internal/service -run '^TestResetCreditShadowRejected$'` |
-| settings backfill | -- | `backend/internal/service/setting_parse.go` | `backend/internal/service/setting_parse.go` | -- | `backend/internal/handler/admin/setting_handler.go` | -- | `protected`: `go -C backend test ./internal/service -run '^TestSettingService_GetOverloadCooldownSettings_BackfillsLegacyEmptyPayloadWithDefaults$'` |
+| advanced/layered scheduler | `backend/internal/repository/scheduler_cache.go`<br>`backend/internal/service/openai_gateway_scheduling.go` | `backend/internal/service/scheduler_snapshot_full_rebuild_lifecycle_test.go` | -- | `backend/internal/service/openai_account_scheduler.go`<br>`backend/internal/service/openai_gateway_scheduling.go` | `backend/internal/service/openai_account_scheduler.go`<br>`backend/internal/service/openai_gateway_scheduling.go` | `backend/internal/service/openai_gateway_scheduling.go` | `protected`: `go -C backend test -tags=unit ./internal/service -run '^TestLayered_PriorityDeterminism$'` |
+| fallback/WaitPlan | `backend/internal/service/openai_gateway_scheduling.go` | -- | -- | `backend/internal/service/openai_account_scheduler.go`<br>`backend/internal/service/openai_gateway_scheduling.go` | `backend/internal/service/openai_account_scheduler.go`<br>`backend/internal/service/openai_gateway_scheduling.go` | `backend/internal/service/openai_gateway_scheduling.go` | `protected`: `go -C backend test -tags=unit ./internal/service -run '^TestLayered_WaitPlanFallbackSkipsUpstreamRestrictedAccount$'` |
+| DB recheck | `backend/internal/repository/scheduler_cache.go` | `backend/internal/service/scheduler_snapshot_batch_query_test.go` | -- | `backend/internal/service/openai_account_scheduler.go` | `backend/internal/service/openai_account_scheduler.go` | -- | `protected`: `go -C backend test -tags=unit ./internal/service -run '^TestLayered_GroupedAccountPassesDBFreshRecheck$'` |
+| Grok/platform Sticky | `backend/internal/service/grok_media.go` | `backend/internal/server/middleware/session_binding.go` | `backend/internal/server/middleware/session_binding.go` | `backend/internal/service/openai_account_scheduler.go` | `backend/internal/service/openai_gateway_grok.go` | `backend/internal/service/session_id.go` | `protected`: Grok binding `go -C backend test -tags=unit ./internal/service -run '^TestLayered_SessionStickyPreservesGrokBinding$'`; platform toggle `go -C backend test -tags=unit ./internal/service -run '^TestGatewayService_SelectAccountForModelWithPlatform_StickyDisabledBypassesStickyReadAndWrite$'` |
+| privacy | `backend/internal/handler/content_moderation_helper.go` | -- | -- | -- | `backend/internal/handler/content_moderation_helper.go` | `backend/internal/service/content_moderation_test.go` | `protected`: `go -C backend test -tags=unit ./internal/service -run '^TestLayered_PreviousResponseStickyHonorsRequirePrivacySet$'` |
+| image capability | `backend/internal/handler/openai_images.go` | `backend/internal/service/openai_images.go` | `backend/internal/handler/openai_responses_image_intent_benchmark_test.go` | `backend/internal/service/openai_gateway_response_handling_image_usage_test.go` | `backend/internal/handler/openai_images.go` | `backend/internal/handler/openai_images.go` | `protected`: `go -C backend test -tags=unit ./internal/service -run '^TestLayered_RequiredImageCapabilityFiltersUnsupportedAccounts$'` |
+| async images/object storage | `backend/internal/handler/batch_image_handler.go` | `backend/internal/service/openai_images_responses.go` | `backend/internal/service/image_task.go` | -- | -- | `backend/internal/service/batch_image.go` | `protected`: `go -C backend test -tags=unit ./internal/service -run '^TestImageTaskServiceCompleteOffloadsToStorage$'` |
+| image and video billing | `backend/internal/pkg/xai/billing.go` | `backend/internal/service/upstream_billing_probe.go` | `backend/internal/service/account_usage_service.go` | `backend/internal/service/openai_gateway_response_handling_image_usage_test.go` | `backend/internal/service/gateway_usage_billing.go` | `backend/internal/service/batch_image_settlement.go`<br>`backend/internal/service/billing_service.go` | `protected`: image `go -C backend test -tags=unit ./internal/service -run '^TestCalculateImageCost$'`; video `go -C backend test -tags=unit ./internal/service -run '^TestCalculateVideoCostUsesSeparateConfig$'` |
+| upstream multiplier | `backend/internal/service/admin_account_upstream_billing_probe_test.go` | `backend/internal/service/upstream_billing_probe.go` | -- | `backend/internal/service/openai_account_scheduler_upstream_cost_test.go` | `backend/internal/repository/account_repo_upstream_billing_probe_update_test.go` | -- | `protected`: `go -C backend test -tags=unit ./internal/service -run '^TestOpenAIFreshUpstreamBillingRateRecomputesPeakAtSelectionTime$'` |
+| session/step-up | -- | `backend/internal/server/middleware/session_binding.go`<br>`backend/internal/server/middleware/step_up.go` | `backend/internal/server/middleware/session_binding.go` | -- | -- | `backend/internal/service/session_id.go` | `protected`: session `go -C backend test -tags=unit ./internal/service -run '^TestGatewayService_SelectAccountForModelWithPlatform_StickySession$'`; step-up `go -C backend test ./internal/server/middleware -run '^TestEnforceStepUpPassesWithGrant$'` |
+| runtime hot update | -- | `backend/internal/service/setting_update.go` | `backend/internal/service/setting_update.go` | `backend/internal/service/scheduler_snapshot_service.go` | `backend/internal/handler/admin/setting_handler_update.go` | -- | `protected`: `go -C backend test -tags=unit ./internal/task3tests -run '^TestSettingService_UpdateSettings_PersistsAndHotUpdatesGatewayControls$'` |
+| gateway passthrough | -- | `backend/internal/service/openai_gateway_passthrough.go` | -- | `backend/internal/service/gateway_anthropic_passthrough.go` | `backend/internal/service/openai_gateway_passthrough.go` | `backend/internal/service/gateway_anthropic_passthrough.go` | `protected`: `go -C backend test -tags=unit ./internal/service -run '^TestPassthroughFieldsV2OpenAIForward_APIKeyBodyMapCopiesFromOriginalInboundRequest$'` |
+| prompt cache | -- | `backend/internal/service/openai_gateway_grok_cache.go` | `backend/internal/service/openai_gateway_grok_cache.go` | `backend/internal/service/openai_gateway_grok_cache.go` | -- | `backend/internal/service/openai_gateway_grok_cache.go` | `protected`: `go -C backend test -tags=unit ./internal/service -run '^TestForwardAsAnthropic_InjectsPromptCacheKeyForAPIKeyMessagesDispatch$'` |
+| body replay/spooling | -- | `backend/internal/service/channel_monitor_checker_body_test.go` | -- | -- | `backend/internal/service/openai_gateway_request_body.go` | `backend/internal/service/gateway_anthropic_apikey_passthrough_test.go` | `protected`: `go -C backend test -tags=unit ./internal/service -run '^TestOpenAIForwardReusesBoundRequestBodyHandle$'` |
+| failed usage | -- | `backend/internal/service/ops_service_user_error_test.go` | -- | -- | `backend/internal/repository/usage_log_repo.go` | `backend/internal/service/usage_log.go` | `protected`: `go -C backend test -tags=unit ./internal/service -run '^TestOpenAIForwardStreamingResponseFailedReturnsUsageWithError$'` |
+| user resource control | -- | `backend/internal/repository/user_repo.go` | -- | `backend/internal/service/admin_service.go` | -- | `backend/internal/repository/user_repo.go` | `protected`: `go -C backend test -tags=unit ./internal/service -run '^TestAdminServiceUpdateUserBlockedGroups$'` |
+| user bulk limits | -- | `backend/internal/handler/admin/user_handler_batch_limits_test.go` | -- | -- | -- | -- | `protected`: `go -C backend test ./internal/handler/admin -run '^TestUserHandlerBatchUpdateLimitsAcceptsPartialAndZeroValues$'` |
+| public group blocking | -- | `backend/internal/handler/admin/user_handler_list_apikey_group_test.go` | -- | `backend/internal/service/admin_group.go` | `backend/internal/repository/group_repo.go` | `backend/internal/repository/group_repo.go` | `protected`: `go -C backend test -tags=unit ./internal/service -run '^TestUserCanBindGroupRejectsBlockedPublicGroup$'` |
+| menu hiding | -- | `backend/internal/repository/user_repo.go` | -- | -- | -- | `backend/internal/repository/user_repo.go` | `protected`: `go -C backend test -tags=integration ./internal/repository -run '^TestUserRepoSuite$/TestHiddenUIResourcesRoundTrip$'` |
+| frontend translations | `frontend/src/i18n/locales/en/common.ts` | `frontend/src/i18n/locales/en/admin/settings.ts` | `frontend/src/i18n/locales/en/batchImage.ts` | `frontend/src/i18n/locales/en/admin/overview.ts` | `frontend/src/i18n/locales/en/admin/settings.ts` | `frontend/src/i18n/locales/en/admin/resources.ts` | `protected`: `pnpm --dir frontend run test:run -- src/i18n/__tests__/localeKeysExist.spec.ts` |
+| subscription quota atomic reset | -- | `backend/internal/service/subscription_service.go`<br>`backend/internal/service/user_subscription_daily_quota_test.go` | `backend/internal/service/user_subscription.go` | -- | -- | -- | `protected`: `go -C backend test -tags=unit ./internal/service -run '^TestAdminResetQuota_ResetBoth$'`; current test name replaces the reviewer-suggested nonexistent name and asserts `ResetUsageWindows` atomic window selection. |
+| settings backfill | -- | `backend/internal/service/setting_parse.go` | `backend/internal/service/setting_parse.go` | -- | `backend/internal/handler/admin/setting_handler.go` | -- | `protected`: `go -C backend test -tags=unit ./internal/task3tests -run '^TestSettingService_GetAllSettings_BackfillsGatewayControlsFromConfigAndDB$'` |
+| group duplication | -- | -- | -- | `backend/internal/service/admin_group_duplicate.go`<br>`backend/internal/service/admin_group_duplicate_test.go` | -- | `backend/internal/service/admin_group_duplicate.go`<br>`backend/internal/service/admin_group_duplicate_test.go` | `protected`: `go -C backend test -tags=unit ./internal/service -run '^TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState$'` |
 | Ent/Wire | `backend/cmd/server/wire_gen.go` | `backend/cmd/server/wire_gen.go` | `backend/cmd/server/wire_gen.go` | `backend/ent/schema/group.go` | `backend/cmd/server/wire_gen.go` | `backend/ent/schema/group.go` | `protected`: `go -C backend test ./cmd/server` |
-| dependencies | `frontend/package.json` | `frontend/vite.config.ts` | `frontend/package.json` | `backend/go.mod` | -- | `frontend/package.json` | `manual`: run `go -C backend mod verify` and `pnpm --dir frontend install --frozen-lockfile`; these validate declared dependency graphs without a behavior-specific assertion. |
-| migration | `backend/migrations/181_prompt_audit.sql` | `backend/migrations/183_ops_ingress_reject_aggregates.sql` | -- | `backend/migrations/185_group_reasoning_effort_policy.sql` | `backend/migrations/186_group_auth_cache_image_generation.sql` | `backend/migrations/187_add_usage_log_session_id.sql` | `protected`: `go -C backend test ./migrations -run '^TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate$'` |
-| local test gates | `frontend/package.json` | `frontend/vite.config.ts` | `frontend/package.json` | `frontend/pnpm-lock.yaml` | `frontend/src/views/admin/__tests__/AccountsView.usageWindowsHint.spec.ts` | `frontend/pnpm-lock.yaml` | `protected`: `make test` |
+| dependencies | `frontend/package.json` | `frontend/vite.config.ts` | -- | `backend/go.mod` | -- | `frontend/package.json` | `manual`: run `go -C backend mod verify` and `pnpm --dir frontend install --frozen-lockfile`; these validate declared dependency graphs without a behavior-specific assertion. |
+| migration | `backend/migrations/181_prompt_audit.sql` | `backend/migrations/183_ops_ingress_reject_aggregates.sql` | -- | `backend/migrations/185_group_reasoning_effort_policy.sql` | `backend/migrations/186_group_auth_cache_image_generation.sql` | `backend/migrations/187_add_usage_log_session_id.sql` | `protected`: `go -C backend test -tags=integration ./internal/repository -run '^TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate$'` |
+| local test gates | `frontend/package.json` | `frontend/vite.config.ts` | `frontend/src/views/admin/__tests__/SettingsView.spec.ts` | `frontend/pnpm-lock.yaml` | `frontend/src/views/admin/__tests__/AccountsView.usageWindowsHint.spec.ts` | `frontend/pnpm-lock.yaml` | `protected`: `make test` |
 | openai-first-token-timeout | -- | -- | -- | -- | -- | -- | `approved-removal`: Task brief explicitly permits this row alone; no changed local timeout entry was found in any of the six ranges. |
 
 ### CodeGraph 影响证据
@@ -1998,12 +1730,17 @@ frontend/src/utils/usageRequestType.ts
 - `impact 'upstreamBillingRateAt' --json`: `upstream_billing_probe.go:760` 到 `openAIFreshUpstreamBillingRate`、`openAISchedulingRate` 和 peak-rate/DST tests。
 - `impact 'TotpHandler::StepUp' --json` 与 `impact 'stepUpAuth' --json`: `totp_handler.go:206` 到 `POST /step-up` 路由，及 `step_up.go:46` 到 `NewStepUpAuthMiddleware`。
 - `impact 'userRepository::SetHiddenUIResources' --json`: `user_repo.go:1124` 到 `TestHiddenUIResourcesRoundTrip`。
-- `impact 'OpenAIQuotaService::ResetCredit' --json`: `openai_quota_service.go:244` 到 admin `ResetQuota` route and reset-credit tests.
-- `query 'validateAPIKeyGroupAllowed' --json`: 精确定位 `server/middleware/api_key_auth.go:337`，作为公开分组阻断的网关入口；对应行为由 `TestUserCanBindGroupRejectsBlockedPublicGroup` 覆盖。
+- `impact 'adminServiceImpl::DuplicateGroup' --json`: `admin_group_duplicate.go:162` 到 deep-copy、idempotent recover、name and atomic-create-failure tests；该路径补齐主 OpenSpec 的分组复制能力。
+- `impact 'UserHandler::BatchUpdateLimits' --json`: `handler/admin/user_handler.go:624` 是批量 concurrency/RPM 路由入口；其服务和 repository `BatchUpdateLimits` 的精确实现符号已由 `query 'BatchUpdateLimits' --json` 定位。
+- `impact 'SubscriptionService::AdminResetQuota' --json`: `subscription_service.go:881` 到 `ResetUsageWindows` 单次窗口重置和 `TestAdminResetQuota_*` tests；此项替代错误的 OpenAI/Grok account quota 映射。
+- `impact 'BillingService::CalculateVideoCost' --json`: `billing_service.go:1448` 到 `calculateOpenAIVideoCost` 与分辨率/每秒计费测试，补齐图片和视频双计费证据。
+- `impact 'SettingService::GetAllSettings' --json`: `setting_service.go:259` 到 gateway-control backfill test 及 admin `UpdateSettings`/`GetSettings` handlers，补齐 settings backfill。
+- `impact 'validateAPIKeyGroupAllowed' --json`: `server/middleware/api_key_auth.go:337` 经 `abortIfAPIKeyGroupNotAllowed` 到 API-key subscription middleware 与 Google variant；这是公开分组阻断的真实调用链，而非 definition-only query。
 - `query 'openAIFirstOutputTimeout' --json`: 精确定位 `service/openai_first_output_timeout.go:232` 和现有 timeout 测试；本行按 brief 的唯一批准例外登记。
 
 ### Task 6 自审
 
-- 矩阵有且只有 brief 列出的 26 行；每行均有六段命中 path 或 `--`，以及一个状态和可运行测试命令或可复现 manual 证据。
-- 状态汇总：`protected=22`、`manual=1`、`gap=2`、`approved-removal=1`。`gap` 为 runtime hot update、user resource control，交由 Task 7 决定最小保护测试。
+- 矩阵有 28 行：brief 的 26 行加主 OpenSpec 明确要求、此前遗漏的 `group duplication` 与独立 `user bulk limits`。`user resource control` 保持独立，避免将两种用户管理边界混淆。
+- 状态汇总：`protected=26`、`manual=1`、`gap=0`、`approved-removal=1`。Task 7 没有由本矩阵产生的补测输入。
+- 所有矩阵 Go regex 都按目标文件 build tag 修正；`-list` 已实际列出 runtime hot update、user bulk limits、user resource control、group duplication、subscription quota reset、image/video billing。integration repository runner 在 Docker 缺失时列举前跳过，因此 menu/migration 的准确 suite/test name 另由带 `integration` build tag 的源码位置核验，未声称已执行 integration test。
 - 原始清单的 machine check 在本次提交前逐段重取 `git diff --name-only`，抽取本 ledger `TASK6:*:raw` block，以 `Compare-Object` 比较，且同时断言计数 `133/257/190/171/202/168`。
