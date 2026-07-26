@@ -18,7 +18,7 @@
 - 每段 full 门禁耗时高，但可把首次回归定位到单一 release 区间。
 - Git 无文本冲突不代表本地语义安全，必须按能力矩阵检查调用链与边界路径。
 - migration 172/181 同号及上游两个 186 由完整文件名区分，但仍需验证实际执行顺序和 `_notx` 路径。
-- 本 change 的 Docker integration 固定在 `local-serv-ai` 执行，依赖其 Go 工具链和 Docker。每段须先显式检查；在 Linux 上按 `backend/scripts/test.ps1` 等价语义重建 `backend/.test-tmp`、设置 `TMP`/`TEMP`，并使用 `CI=true GOFLAGS='-v' go test -tags=integration ./...` 令整套 Docker 缺失路径失败，再从 verbose 日志确认目标 migration/repository test 真实 PASS；无关环境型 skip 单独记录。
+- 本 change 的 Docker integration 固定在 `local-serv-ai` 执行，依赖其 Go 工具链和 Docker。每段须先显式检查；在 Linux 上按 `backend/scripts/test.ps1` 等价语义重建 `backend/.test-tmp`、设置 `TMPDIR`/`TMP`/`TEMP`，并使用 `CI=true GOFLAGS='-v' go test -tags=integration ./...` 令整套 Docker 缺失路径失败，再从 verbose 日志确认目标 migration/repository test 真实 PASS；无关环境型 skip 单独记录。
 - 远程包必须来自已提交 HEAD；未提交修复不会进入 `git archive`，因此远程 integration 只能在 merge/修复提交完成后运行。
 
 ## 测试策略

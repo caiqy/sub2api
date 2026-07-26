@@ -31,7 +31,7 @@
 6. **复杂行为问题走失败测试驱动**：涉及 scheduler、sticky、fallback、runtime config 的回归先补失败测试再最小修复，不直接猜改。
 7. **保留同号不同名 migration**：迁移执行器按完整文件名记录并按文件名排序，因此默认同时保留本地和上游 172/181 以及两个上游 186 文件，不擅自重命名已发布 migration；通过新库和已有本地 migration 记录的升级库测试验证依赖顺序，失败时再做最小兼容修复。
 8. **保持单 change**：六个 tag 是严格线性依赖，任一阶段失败都必须阻塞后续阶段，且共享同一能力矩阵与最终版本；拆成多个 change 只会复制门禁和上下文，不能独立交付或归档。
-9. **Integration 使用 local-serv-ai**：本 change 的 Docker integration 固定在 `local-serv-ai` 执行，不依赖协调工作站是否可用 Docker；每段把已提交 HEAD 通过 `git archive` 打包，并由 `ssh-skill` 上传到 `local-serv-ai` 临时目录。在 Linux 上按 `backend/scripts/test.ps1` 的等价语义重建 `backend/.test-tmp`、设置 `TMP`/`TEMP`，再运行 `CI=true GOFLAGS='-v' go test -tags=integration ./...`，不要求远程安装 Make 或 PowerShell。全套命令必须成功且目标 migration/repository test 必须出现真实 PASS；无关环境型 skip 单独记录。只拉取 PostgreSQL/Redis Testcontainers 镜像，不构建 Sub2API 镜像、不部署、不触碰服务运行目录。
+9. **Integration 使用 local-serv-ai**：本 change 的 Docker integration 固定在 `local-serv-ai` 执行，不依赖协调工作站是否可用 Docker；每段把已提交 HEAD 通过 `git archive` 打包，并由 `ssh-skill` 上传到 `local-serv-ai` 临时目录。在 Linux 上按 `backend/scripts/test.ps1` 的等价语义重建 `backend/.test-tmp`、设置 `TMPDIR`/`TMP`/`TEMP`，再运行 `CI=true GOFLAGS='-v' go test -tags=integration ./...`，不要求远程安装 Make 或 PowerShell。全套命令必须成功且目标 migration/repository test 必须出现真实 PASS；无关环境型 skip 单独记录。只拉取 PostgreSQL/Redis Testcontainers 镜像，不构建 Sub2API 镜像、不部署、不触碰服务运行目录。
 
 ## Risks / Trade-offs
 

@@ -15,5 +15,5 @@
 - 远程工作必须使用 `ssh-skill`；不得调用原生 SSH 或 SCP。
 - 使用 OpenCode 角色路由：实施者使用 `general`，审查者使用 `reviewer`。
 - 将每个完整 Git 修订范围作为一个 PowerShell 参数引用。
-- 用户在任务 4 阻塞后批准 Linux 原生等价 integration 门禁：重建 `backend/.test-tmp`、设置 `TMP`/`TEMP`，运行 `CI=true GOFLAGS='-v' go test -tags=integration ./...`；远端不再要求 Make 或 PowerShell。
+- 用户在任务 4 阻塞后批准 Linux 原生等价 integration 门禁：重建 `backend/.test-tmp`、设置 `TMPDIR`/`TMP`/`TEMP`，运行 `CI=true GOFLAGS='-v' go test -tags=integration ./...`；远端不再要求 Make 或 PowerShell。
 - canonical OpenSpec、Design Doc 与 plan 已同步。Comet design handoff 是 design 阶段快照；`phase: build` 下官方刷新命令拒绝执行，因此不得手改其生成内容或 hash。
