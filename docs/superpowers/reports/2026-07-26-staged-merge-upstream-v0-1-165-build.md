@@ -1810,3 +1810,22 @@ final absence check：JSON `success=true, exit_code=0`。
 - Task 5 重跑：在 `C:/Users/caiqy/AppData/Local/Temp/opencode/wf09b22` 以 `git -c core.longpaths=true worktree add --detach <path> HEAD` 建立短路径 detached worktree。两轮均按顺序运行 `make -C backend generate`、`git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go`、`git status --short`；六项退出 `0`，每轮 diff/status 均无输出。`git -c core.longpaths=true worktree remove <path>` 退出 `0`，路径和 `git worktree list --porcelain` 注册均无残留。
 - 主工作区最终静态复核：generated path diff 退出 `0`；`git ls-tree -r --name-only HEAD backend/migrations` 为 238 路径，其中 231 SQL、7 支持文件。只有 `172_video_per_second_billing_metadata.sql` 与 `181_group_duplicate_operation_id.sql`，没有 `186*`。指定 runner `git grep` 退出 `0`：`fs.Glob` 后 `sort.Strings` 按完整 filename，`schema_migrations.filename` 是主键并保存 SHA-256 checksum，`*_notx.sql` 逐语句非事务执行且限制幂等的 `CREATE/DROP INDEX CONCURRENTLY`。
 - 当前残余风险：Windows 受监视主工作区的历史 user-mapped section 问题未定因；本轮仅以 reviewer 接受的 detached worktree 双轮证明当前 committed HEAD 的生成稳定。远程的七项 skip 仍是外部环境/已知 CI 风险。阶段 0 已关闭；没有开始 tag merge、push、tag、release 或 deploy。
+
+## Task 8: v0.1.160 合入与记账
+
+- 合并提交：`e04cb1aa2c2554a04bec55f9b4393d3efd2eb693 merge: upstream v0.1.160`。
+- 父关系：第一父 `d3e0c596ebff2298d07a3f4f336c16aa653cb840`，第二父（`v0.1.160^{}`）`8bfbc5ca99bf2c0ac96e0f29ffd35eb6aca27e62`；tag peeled SHA 已在 merge 前复核。
+- 9 个文本冲突及决议：
+  - `backend/cmd/server/VERSION`：保留本地中间版本 `0.1.159.6`，未接受 tag 内的 `0.1.159`。
+  - `backend/internal/handler/grok_media.go`、`grok_media_test.go`：保留本地 multipart 快照脱敏、spool 和 sticky 覆盖，同时加入上游 Grok media capability 过滤及测试。
+  - `backend/internal/handler/openai_gateway_handler.go`：HTTP/WS Responses 使用上游显式 image-generation capability；保留本地 group permission 检查；删除已移除的 `openai-first-token-timeout` 分支、常量和测试。
+  - `backend/internal/handler/openai_images.go`：先运行本地 content moderation，再运行上游 security audit；两者均通过后才释放 multipart/text。
+  - `backend/internal/service/grok_media.go`、`openai_gateway_grok_test.go`：同时接受本地 `image_url`/`mask_image_url` 输入兼容和上游 `reference_images`/官方 `url` 出站规范；保留 multipart 上限测试。
+  - `backend/internal/service/openai_account_scheduler_test.go`：同时保留本地 Grok chat/session sticky 与上游 media eligibility 过滤覆盖。
+  - `openspec/config.yaml`：保留本地中文 OpenSpec 规则并保留上游模板注释。
+- 无文本冲突审查：security audit 的 `181_prompt_audit.sql` 与 `182_prompt_audit_full_prompt.sql` 均保留；`FullPromptFromScanText` 仅将完整提示词写入 audit event，`RequirePrivacySet` 仍独立约束上游账号调度，未被改写。完整提示词审计是数据留存边界，Task 9 必须纳入安全/回归审查，不得据此放行下一 tag。
+- `image_gen`：账号 capability 仅对显式 image-generation intent 提高到 Responses；本地平台级 group permission 检查仍覆盖 HTTP/WS 请求。Grok media 继续隔离到 generation capability，并保留本地请求/usage snapshot 脱敏。
+- migration：完整 filename 均存在，`181_group_duplicate_operation_id.sql`、`181_prompt_audit.sql`、`182_prompt_audit_full_prompt.sql` 的字典序和依赖正确，后者只 ALTER 前者创建的 event 表。
+- 能力矩阵交集已审查：`wire_gen`、batch image、content moderation、OpenAI images、xAI billing、scheduler cache、upstream billing probe、Grok media、OpenAI scheduling、`181_prompt_audit.sql`、frontend package/i18n；`openai-first-token-timeout` 仍为唯一 approved-removal。
+- 静态事实：根 `VERSION` 不存在，服务器 VERSION 为 `0.1.159.6`，无 conflict marker/未合并路径；`git diff --cached --check` 在提交前为 0。上游 source-freeze patch 含 literal diff whitespace，`.gitattributes` 对该单一路径设 `-whitespace`，以保持其内容原样。
+- Task 9 full gate、回归修复和任何下一 tag 合入均尚未运行，当前不得放行 `v0.1.161`。
