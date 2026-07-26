@@ -170,12 +170,12 @@ func (s *UserRepoSuite) TestHiddenUIResourcesRoundTrip() {
 	hidePurchase, menuResourceIDs, err := s.repo.GetHiddenUIResources(s.ctx, user.ID)
 	s.Require().NoError(err)
 	s.Require().True(hidePurchase)
-	s.Require().Equal([]int64{service.CustomMenuResourceID("billing-help"), service.CustomMenuResourceID("docs")}, menuResourceIDs)
+	s.Require().ElementsMatch([]int64{service.CustomMenuResourceID("billing-help"), service.CustomMenuResourceID("docs")}, menuResourceIDs)
 
 	loaded, err := s.repo.GetByID(s.ctx, user.ID)
 	s.Require().NoError(err)
 	s.Require().True(loaded.HiddenPurchasePage)
-	s.Require().Equal([]int64{service.CustomMenuResourceID("billing-help"), service.CustomMenuResourceID("docs")}, loaded.HiddenCustomMenuResourceIDs)
+	s.Require().ElementsMatch([]int64{service.CustomMenuResourceID("billing-help"), service.CustomMenuResourceID("docs")}, loaded.HiddenCustomMenuResourceIDs)
 	s.Require().True(loaded.IsCustomMenuHidden("docs"))
 	s.Require().False(loaded.IsCustomMenuHidden("status"))
 

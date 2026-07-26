@@ -633,6 +633,7 @@ func TestOpenAIGatewayHandlerImages_MultipartEffectiveSpoolFailureReturns503(t *
 func TestOpenAIGatewayHandlerImages_MultipartSourceOpenFailureReturns503WithoutMarkingAccount(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	formTempDir := t.TempDir()
+	t.Setenv("TMPDIR", formTempDir)
 	t.Setenv("TMP", formTempDir)
 	t.Setenv("TEMP", formTempDir)
 	oldOptions := jsonRequestBodyHandleOptions

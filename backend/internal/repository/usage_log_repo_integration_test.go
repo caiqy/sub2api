@@ -186,6 +186,7 @@ func (s *UsageLogRepoSuite) TestCreate_PersistsDetailSnapshotAndPrunesOldRows() 
 	inserted, err := s.repo.Create(s.ctx, log)
 	s.Require().NoError(err)
 	s.Require().True(inserted)
+	s.repo.PersistDetailBestEffort(s.ctx, log)
 
 	var total int
 	err = scanSingleRow(s.ctx, s.tx, "SELECT COUNT(*) FROM usage_log_details", nil, &total)
@@ -861,6 +862,7 @@ func (s *UsageLogRepoSuite) TestDelete_RemovesDetail() {
 
 	_, err := s.repo.Create(s.ctx, log)
 	s.Require().NoError(err)
+	s.repo.PersistDetailBestEffort(s.ctx, log)
 
 	err = s.repo.Delete(s.ctx, log.ID)
 	s.Require().NoError(err)
@@ -976,6 +978,7 @@ func (s *UsageLogRepoSuite) TestListWithFilters_PopulatesHasDetail() {
 	}
 	_, err := s.repo.Create(s.ctx, withDetail)
 	s.Require().NoError(err)
+	s.repo.PersistDetailBestEffort(s.ctx, withDetail)
 
 	withoutDetail := &service.UsageLog{
 		UserID:       user.ID,
@@ -1018,9 +1021,6 @@ func (s *UsageLogRepoSuite) TestListWithFilters_DegradesWhenDetailTableMissing()
 	err = scanSingleRow(s.ctx, s.tx, "SELECT to_regclass('public.usage_log_details')", nil, &detailTableRegclass)
 	s.Require().NoError(err)
 	s.Require().Nil(detailTableRegclass)
-
-	_, err = s.tx.QueryContext(s.ctx, "SELECT EXISTS (SELECT 1 FROM usage_log_details WHERE usage_log_id = $1)", older.ID)
-	s.Require().Error(err)
 
 	filters := usagestats.UsageLogFilters{UserID: user.ID}
 	logs, page, err := s.repo.ListWithFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, filters)

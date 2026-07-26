@@ -434,6 +434,7 @@ func TestRequestBodyCoordinator_CleanupRemovesRawEffectiveAndMultipartTemps(t *t
 	oldOptions := jsonRequestBodyHandleOptions
 	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: rawDir, FilePrefix: "sub2api-test-"}
 	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+	t.Setenv("TMPDIR", multipartDir)
 	t.Setenv("TMP", multipartDir)
 	t.Setenv("TEMP", multipartDir)
 
