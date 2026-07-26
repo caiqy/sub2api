@@ -1723,44 +1723,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	var lastFailedDuration time.Duration
 	var lastFailedReasoningEffort *string
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
-	handleWSFailover := func(account *service.Account, failoverErr *service.UpstreamFailoverError) bool {
-		if ctx.Err() != nil {
-			return false
-		}
-		if failoverErr.ShouldReportAccountScheduleFailure() {
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(reqModel), false, nil)
-		}
-		releaseAccountSlot()
-		if !failoverErr.ShouldRetryNextAccount() {
-			closeOpenAIWSFailoverExhausted(wsConn, failoverErr)
-			return false
-		}
-		if ctx.Err() != nil {
-			return false
-		}
-		h.gatewayService.RecordOpenAIAccountSwitch()
-		failedAccountIDs[account.ID] = struct{}{}
-		lastFailoverErr = failoverErr
-		if switchCount >= maxAccountSwitches {
-			closeOpenAIWSFailoverExhausted(wsConn, failoverErr)
-			return false
-		}
-		switchCount++
-		if h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount, &oauth429FailoverState) {
-			closeOpenAIWSFailoverExhausted(wsConn, failoverErr)
-			return false
-		}
-		reqLog.Warn("openai.websocket_upstream_failover_switching",
-			zap.Int64("account_id", account.ID),
-			zap.Int("upstream_status", failoverErr.StatusCode),
-			zap.Int("switch_count", switchCount),
-			zap.Int("max_switches", maxAccountSwitches),
-		)
-		if ctx.Err() != nil {
-			return false
-		}
-		return ensureUserSlotHeld()
-	}
 
 	// 与 HTTP Responses 路径保持一致：生图意图请求要求账号支持 Responses API（#4417）。
 	// WSv2 传输本身已隐含 Responses 支持，此处为防御性对齐。
