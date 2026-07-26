@@ -6,11 +6,14 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
+	dbmigrations "github.com/Wei-Shaw/sub2api/migrations"
 	"github.com/stretchr/testify/require"
 )
 
@@ -170,6 +173,101 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 
 	// user_allowed_groups: created_at should be timestamptz
 	requireColumn(t, tx, "user_allowed_groups", "created_at", "timestamp with time zone", 0, false)
+}
+
+func TestMigrationsRunner_UpgradesLocalV01596AcrossUpstreamStages(t *testing.T) {
+	const (
+		localVideoMigration = "172_video_per_second_billing_metadata.sql"
+		localGroupMigration = "181_group_duplicate_operation_id.sql"
+	)
+	upstreamMigrations := []string{
+		"181_prompt_audit.sql",
+		"182_prompt_audit_full_prompt.sql",
+		"183_ops_ingress_reject_aggregates.sql",
+		"184_auth_cache_invalidation_outbox.sql",
+		"185_group_reasoning_effort_policy.sql",
+		"186_alipay_mobile_precreate_deep_link.sql",
+		"186_group_auth_cache_image_generation.sql",
+		"187_add_usage_log_session_id.sql",
+		"188_allow_live_usage_request_type.sql",
+		"189_add_group_allow_live.sql",
+		"190_add_users_email_alias_dedup_index_notx.sql",
+	}
+	// These twelve filenames cover local 181 plus all upstream 181-190 stages.
+	stageMigrations := append([]string{localGroupMigration}, upstreamMigrations...)
+
+	currentUpstream := make(map[string]struct{})
+	for _, name := range upstreamMigrations {
+		if _, err := fs.Stat(dbmigrations.FS, name); err == nil {
+			currentUpstream[name] = struct{}{}
+		} else {
+			require.ErrorIs(t, err, fs.ErrNotExist)
+		}
+	}
+	require.Equal(t, map[string]struct{}{
+		"181_prompt_audit.sql":             {},
+		"182_prompt_audit_full_prompt.sql": {},
+	}, currentUpstream, "v0.1.160 must include exactly its 181/182 upstream migrations")
+
+	withoutCurrentUpstream := fstest.MapFS{}
+	files, err := fs.Glob(dbmigrations.FS, "*.sql")
+	require.NoError(t, err)
+	for _, name := range files {
+		if _, excluded := currentUpstream[name]; excluded {
+			continue
+		}
+		content, err := dbmigrations.FS.ReadFile(name)
+		require.NoError(t, err)
+		withoutCurrentUpstream[name] = &fstest.MapFile{Data: content}
+	}
+
+	db := newEmptyIsolatedMigrationDB(t)
+	ctx := context.Background()
+	require.NoError(t, applyMigrationsFS(ctx, db, withoutCurrentUpstream))
+	for _, name := range []string{localVideoMigration, localGroupMigration} {
+		requireMigrationAppliedInDB(t, db, name)
+	}
+
+	require.NoError(t, applyMigrationsFS(ctx, db, dbmigrations.FS))
+	for _, name := range append([]string{localVideoMigration}, stageMigrations...) {
+		if _, current := currentUpstream[name]; current || name == localVideoMigration || name == localGroupMigration {
+			requireMigrationAppliedInDB(t, db, name)
+		}
+	}
+
+	checksums, count := migrationChecksumsAndCount(t, db, append([]string{localVideoMigration}, stageMigrations...))
+	require.NoError(t, applyMigrationsFS(ctx, db, dbmigrations.FS))
+	actualChecksums, actualCount := migrationChecksumsAndCount(t, db, append([]string{localVideoMigration}, stageMigrations...))
+	require.Equal(t, count, actualCount, "re-applying migrations must not add records")
+	require.Equal(t, checksums, actualChecksums, "re-applying migrations must preserve checksums")
+}
+
+func requireMigrationAppliedInDB(t *testing.T, db *sql.DB, filename string) {
+	t.Helper()
+
+	var exists bool
+	err := db.QueryRowContext(context.Background(), "SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE filename = $1)", filename).Scan(&exists)
+	require.NoError(t, err)
+	require.True(t, exists, "expected migration %s to be applied", filename)
+}
+
+func migrationChecksumsAndCount(t *testing.T, db *sql.DB, filenames []string) (map[string]string, int) {
+	t.Helper()
+
+	checksums := make(map[string]string, len(filenames))
+	for _, filename := range filenames {
+		var checksum string
+		err := db.QueryRowContext(context.Background(), "SELECT checksum FROM schema_migrations WHERE filename = $1", filename).Scan(&checksum)
+		if err == nil {
+			checksums[filename] = checksum
+			continue
+		}
+		require.ErrorIs(t, err, sql.ErrNoRows)
+	}
+
+	var count int
+	require.NoError(t, db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM schema_migrations").Scan(&count))
+	return checksums, count
 }
 
 func newIsolatedMigrationDB(t *testing.T) *sql.DB {
