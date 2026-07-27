@@ -1882,3 +1882,14 @@ final absence check：JSON `success=true, exit_code=0`。
 - worker panic：根因是测试 mock 的 nil 嵌入接口在异步 `enqueueRecord -> worker -> persistContentModerationLog -> applyFlaggedAccountSideEffects -> CountFlaggedByUserSince` 调用链触发；生产 repository 实现完整接口。review-fix 补齐 mock 计数方法并等待 `CreateLog` drain，不改生产代码。修复后本机及已提交 archive 的 `TestOpenAIImages_ContentModerationUsesFrozenPayloadBeforeRelease -count=3 -v` 均 PASS，输出无 `content_moderation.worker_panic`；第 1843 行的旧 panic 顾虑由本条替代。
 - Gate 复核：Task 9 本地 `make test`、`make build`、两轮 generate/generated diff 和静态门禁均 GREEN；远程 archive `31b132689` 的 full integration GREEN。远程日志为 `C:/Users/caiqy/AppData/Local/Temp/sub2api-task-9-d70a45257d0f46c0911f6e17747ab6aa-integration.log`；remote `/tmp/sub2api-task-9-d70a45257d0f46c0911f6e17747ab6aa` 已删除并确认不存在，本地 tar 已删除。环境型 skip 仅为 DingTalk、TLS/JA3 外部条件、Prompt Audit Redis/PostgreSQL 条件和无 OpenAI key；已分类，目标 migration 未 skip。
 - Task 11 状态：证据已补齐，等待独立复审。能力交集 `gap=0`、目标 migration 未 skip、VERSION 不变；残余风险为既有环境型 skip、Browserslist/Vite advisory、Ryuk handshake advisory，以及 Windows `user-mapped section` 历史根因未定。
+
+## Task 11：v0.1.161 合入与记账（2026-07-27）
+
+- 合并提交：`f2158292c7ff3de4caa7ec22f9b7148400948f08 merge: upstream v0.1.161`。第一父为 `3fc60752acc459ecc37cd50b40df4a1f84ce3b62`，第二父及 `v0.1.161^{}` 为 `19149ca196eeae4a4482e5299dc6fa4ba0b06c8c`。
+- `backend/cmd/server/VERSION` 保持本地中间版本 `0.1.159.6`；后端和前端 runtime 路径未恢复已审批移除的 `openai-first-token-timeout`。
+- step-up/session：设置 DTO、handler、Wire 和 SettingsView 同时保留会话绑定、本地 scheduler 设置与上游 step-up 开关、审计保留及管理员充值返利字段；`SetStepUpDeps` 保持注入路径。
+- scheduler：`AccountRepository` 同时具有本地临时不可调度读取和上游 model availability 查询；测试桩补齐新接口。OpenAI failover 在 canonical model 下处理冷却，images/embeddings 保留响应头并只在不永久禁用时允许同账号 pool retry。
+- Grok：媒体 handler 同时保留本地 multipart spool、快照脱敏、usage 记录和上游 generation eligibility、视频 owner binding/content proxy；服务层同时保留 multipart 转换、映射模型和官方视频 URL/redirect 约束。Responses 保留一次 invalid encrypted-content 清理重试及 upstream-attempt 记录。
+- gateway/frontend：Responses、images 和 video 路由保留 usage detail capture 与 Grok WebSocket 拒绝，同时纳入 text body limit 和视频 content 代理；账号创建表单纳入上游 billing probe/expiry 字段，App 同时保留自定义菜单可见性与 favicon 更新。
+- migration：本地 `172_video_per_second_billing_metadata.sql`、`181_group_duplicate_operation_id.sql` 与上游 181/182 快照继续存在，并纳入 `183_ops_ingress_reject_aggregates.sql`、`184_auth_cache_invalidation_outbox.sql`；staged upgrade 和并发 migration runner 覆盖均保留。
+- 静态检查：精确 conflict marker 扫描和 `git ls-files -u` 均为空，提交前 `git diff --cached --check` 通过。`go test -run '^$' ./cmd/server ./internal/handler/admin ./internal/handler ./internal/service ./internal/server/routes` 通过；`pnpm exec vue-tsc --noEmit` 通过。未运行 Task 12 的 full test/build/generate/integration gates。
