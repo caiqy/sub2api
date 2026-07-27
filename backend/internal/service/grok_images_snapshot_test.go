@@ -169,7 +169,7 @@ func TestGrokMediaJSONStoresFinalOutboundPreview(t *testing.T) {
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
-		Body:       io.NopCloser(strings.NewReader(`{"data":[]}`)),
+		Body:       io.NopCloser(strings.NewReader(`{"data":[{"url":"https://images.test/preview.png"}]}`)),
 	}}
 	parentID := int64(100)
 	svc := &OpenAIGatewayService{
@@ -215,7 +215,7 @@ func TestGrokMediaMultipartStoresOmittedPreview(t *testing.T) {
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
-		Body:       io.NopCloser(strings.NewReader(`{"data":[]}`)),
+		Body:       io.NopCloser(strings.NewReader(`{"data":[{"url":"https://images.test/preview.png"}]}`)),
 	}}
 	parentID := int64(101)
 	svc := &OpenAIGatewayService{

@@ -794,7 +794,7 @@ func observeUpstreamMessage(
 
 	recordsFirstToken := isTokenEvent(eventType) && !isTerminalEvent(eventType)
 	var turnTiming *relayTurnTiming
-	if responseID != "" && state.activeTurn != nil && (state.activeTurn.responseID != "" || eventType == "response.created") {
+	if responseID != "" && state.activeTurn != nil && (state.activeTurn.responseID != "" || eventType == "response.created" || isTerminalEvent(eventType)) {
 		turnTiming = openAIWSRelayGetOrInitTurnTiming(state, responseID, now)
 	}
 	eventOwned := responseID == "" || turnTiming != nil

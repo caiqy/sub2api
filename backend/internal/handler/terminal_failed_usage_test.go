@@ -205,6 +205,7 @@ func newTerminalUsageOpenAIEnvWithUpstreamAndGatewayCache(t *testing.T, group *s
 		nil,
 	)
 	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg)
+	h.grokMediaEligibilityProber = &grokMediaEligibilityProberStub{eligible: true, reason: "eligible"}
 	h.maxAccountSwitches = 0
 	return &terminalUsageOpenAIEnv{
 		handler: h,

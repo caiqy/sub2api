@@ -48,6 +48,10 @@ func (*stickyFallbackAccountRepo) ListSchedulableByPlatform(context.Context, str
 	return nil, nil
 }
 
+func (*stickyFallbackAccountRepo) ListModelAvailabilityCandidates(context.Context, *int64, []string, bool) ([]service.Account, error) {
+	return nil, nil
+}
+
 func newStickyFallbackMessagesHandler(t *testing.T, cfg *config.Config, groups map[int64]*service.Group, cache service.GatewayCache, accountRepo *stickyFallbackAccountRepo) (*GatewayHandler, *service.APIKey) {
 	t.Helper()
 	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})

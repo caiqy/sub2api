@@ -228,7 +228,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 	if len(sessionSeed) == 0 && strings.TrimSpace(requestID) != "" {
 		sessionSeed = []byte(requestID)
 	}
-	sessionHash = h.gatewayService.GenerateExplicitSessionHash(c, sessionSeed)
+	sessionHash = h.gatewayService.GenerateSessionHash(c, sessionSeed)
 	boundLookupAccountID := int64(0)
 	var err error
 	if endpoint.IsVideoLookupRequest() {

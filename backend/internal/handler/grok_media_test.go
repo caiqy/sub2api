@@ -83,7 +83,11 @@ func (u *grokMediaRequestRecorder) Do(req *http.Request, _ string, accountID int
 		u.cancel()
 		return nil, errors.New("request canceled")
 	}
-	return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"id":"req_123","status":"completed"}`))}, nil
+	responseBody := `{"id":"req_123","status":"completed"}`
+	if strings.Contains(req.URL.Path, "/images/") {
+		responseBody = `{"data":[{"url":"https://images.test/result.png"}]}`
+	}
+	return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(responseBody))}, nil
 }
 
 func (u *grokMediaRequestRecorder) assert(t *testing.T, wantAccounts []int64, wantMethod, wantPath, wantContentType string, wantBody []byte) {
@@ -414,7 +418,11 @@ func TestGrokMedia_GenerateEditVideoRejectUpstreamFailoverPreserveRequestSemanti
 				recorder.cancel = cancel
 			}
 			group := &service.Group{ID: 999, Platform: service.PlatformGrok, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: !tt.reject}
-			env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &terminalUsageGrokAccountRepo{openAIRetryAccountRepoStub{accounts: append(accounts, parent)}}, recorder)
+			cache := service.GatewayCache(openAIChatCompletionsGatewayCacheStub{})
+			if tt.wantMethod == http.MethodGet {
+				cache = &grokVideoOwnerBindingCache{ownerID: accounts[0].ID}
+			}
+			env := newTerminalUsageOpenAIEnvWithUpstreamAndGatewayCache(t, group, &terminalUsageGrokAccountRepo{openAIRetryAccountRepoStub{accounts: append(accounts, parent)}}, recorder, cache)
 			body, contentType := tt.body(t)
 			var requestContext *gin.Context
 			router := gin.New()
