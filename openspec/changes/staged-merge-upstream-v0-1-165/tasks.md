@@ -22,7 +22,7 @@
 
 ## 4. 合入 v0.1.162
 
-- [ ] 4.1 `git merge --no-ff v0.1.162`，处理冲突（重点：客户端 IP 请求头与可信代理体系、Grok client tool 缓存与 sticky、S3 备份/image storage）
+- [x] 4.1 `git merge --no-ff v0.1.162`，处理冲突（重点：客户端 IP 请求头与可信代理体系、Grok client tool 缓存与 sticky、S3 备份/image storage）
 - [ ] 4.2 运行 full 门禁并修复回归
 - [ ] 4.3 完成 v0.1.162 触及能力的映射审查，核对 settings JSON backfill 与配置热更新路径并记录证据
 

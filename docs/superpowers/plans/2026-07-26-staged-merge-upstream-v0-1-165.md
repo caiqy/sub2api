@@ -511,7 +511,7 @@ finally {
 - 修改：本次 Git merge 实际触及文件
 - 修改：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
 
-- [ ] **步骤 1：创建受审 merge 状态**
+- [x] **步骤 1：创建 v0.1.162 受审 merge 状态**
 
   执行：
   ```powershell
@@ -523,7 +523,7 @@ finally {
 
   预期：peeled SHA 为 `27f094e0960ebd8e52de7ff7e763c6fec2ff4057`。
 
-- [ ] **步骤 2：融合 trusted proxy、Grok cache/Sticky、S3/image storage**
+- [x] **步骤 2：融合 trusted proxy、Grok cache/Sticky、S3/image storage**
 
   对客户端 IP 请求头与可信代理体系、Grok client tool cache 与 sticky、S3 备份/image storage 逐项记录 ours/theirs、入口调用链和融合结论，然后执行：
   ```powershell
