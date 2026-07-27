@@ -29,7 +29,7 @@
 ## 5. 合入 v0.1.163
 
 - [x] 5.1 `git merge --no-ff v0.1.163`，处理冲突（重点：OpenAI reasoning policy、scheduler quota metadata/LastUsedAt、优雅关停 Cleanup、计费修复、axios 安全升级、migration 185）
-- [ ] 5.2 运行 full 门禁并修复回归
+- [x] 5.2 运行 full 门禁并修复回归
 - [ ] 5.3 完成 v0.1.163 触及能力的映射审查并记录证据
 
 ## 6. 合入 v0.1.164

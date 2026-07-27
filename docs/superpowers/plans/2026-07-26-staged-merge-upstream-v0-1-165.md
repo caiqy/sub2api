@@ -607,11 +607,11 @@ finally {
 - 修改：RED 失败确定的 reasoning、scheduler、Cleanup、billing、依赖或 migration 实际路径
 - 修改：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
 
-- [ ] **步骤 1：先对 scheduler、fallback 与 Cleanup 运行失败测试**
+- [x] **步骤 1：先对 scheduler、fallback 与 Cleanup 运行失败测试**
 
   执行矩阵指定的 scheduler quota、`LastUsedAt`、fallback/WaitPlan、DB recheck、失败 usage、优雅关停与计费聚焦命令。行为回归必须先 RED；lockfile/manifest 融合则以已有 pnpm 与 build 结果作证据。
 
-- [ ] **步骤 2：独立修复、重跑聚焦测试和通用门禁**
+- [x] **步骤 2：独立修复、重跑聚焦测试和通用门禁**
 
   需要修复时，先对 ledger 中 RED 证据关联的真实源码和测试路径逐个执行 `git add --`，再执行：
   ```powershell
