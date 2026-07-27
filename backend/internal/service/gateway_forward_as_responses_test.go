@@ -477,3 +477,85 @@ func TestGatewayService_ForwardAsResponses_PassthroughHeaderForwardCopiesFromCli
 	require.Equal(t, "resp-trace-xyz", getHeaderRaw(upstream.lastReq.Header, "X-Custom-Trace"),
 		"header forward rule should copy X-Custom-Trace from client request to upstream")
 }
+
+func TestParseAnthropicSSEField(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		line, field, want string
+		ok                bool
+	}{
+		{"event: message_start", "event", "message_start", true},
+		{"event:message_start", "event", "message_start", true},
+		{"data: {\"type\":\"message_start\"}", "data", "{\"type\":\"message_start\"}", true},
+		{"data:{\"type\":\"message_start\"}", "data", "{\"type\":\"message_start\"}", true},
+		{"event:  message_delta", "event", "message_delta", true},
+		{"event: message_start", "data", "", false},
+		{"", "event", "", false},
+		{"invalid line", "event", "", false},
+	} {
+		got, ok := parseAnthropicSSEField(tt.line, tt.field)
+		require.Equal(t, tt.ok, ok, tt.line)
+		require.Equal(t, tt.want, got, tt.line)
+	}
+}
+
+func TestHandleResponsesBufferedStreamingResponse_CompactSSEFormat(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	resp := &http.Response{
+		Header: http.Header{"x-request-id": []string{"rid_compact"}},
+		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+			`event:message_start`,
+			`data:{"type":"message_start","message":{"id":"msg_compact","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4.5","stop_reason":"","usage":{"input_tokens":10}}}`,
+			``,
+			`event:content_block_start`,
+			`data:{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"OK"}}`,
+			``,
+			`event:message_delta`,
+			`data:{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
+			``,
+		}, "\n"))),
+	}
+
+	result, err := (&GatewayService{}).handleResponsesBufferedStreamingResponse(resp, c, "claude-sonnet-4.5", "claude-sonnet-4.5", nil, time.Now())
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 10, result.Usage.InputTokens)
+	require.Equal(t, 5, result.Usage.OutputTokens)
+}
+
+func TestHandleResponsesStreamingResponse_CompactSSEFormat(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	resp := &http.Response{
+		Header: http.Header{"x-request-id": []string{"rid_compact_stream"}},
+		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+			`event:message_start`,
+			`data:{"type":"message_start","message":{"id":"msg_compact_stream","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4.5","stop_reason":"","usage":{"input_tokens":15}}}`,
+			``,
+			`event:content_block_start`,
+			`data:{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"OK"}}`,
+			``,
+			`event:message_delta`,
+			`data:{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":6}}`,
+			``,
+			`event:message_stop`,
+			`data:{"type":"message_stop"}`,
+			``,
+		}, "\n"))),
+	}
+
+	result, err := (&GatewayService{}).handleResponsesStreamingResponse(resp, c, "claude-sonnet-4.5", "claude-sonnet-4.5", nil, time.Now())
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 15, result.Usage.InputTokens)
+	require.Equal(t, 6, result.Usage.OutputTokens)
+	require.Contains(t, rec.Body.String(), `response.completed`)
+}

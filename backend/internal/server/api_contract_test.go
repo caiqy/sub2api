@@ -382,14 +382,16 @@ func TestAPIContracts(t *testing.T) {
 						"allow_messages_dispatch": false,
 						"fallback_group_id": null,
 						"fallback_group_id_on_invalid_request": null,
-					"require_oauth_only": false,
-					"require_privacy_set": false,
-					"rpm_limit": 0,
-					"user_concurrency_enabled": false,
-					"user_concurrency_limit": 0,
-					"created_at": "2025-01-02T03:04:05Z",
-					"updated_at": "2025-01-02T03:04:05Z"
-				}
+						"require_oauth_only": false,
+						"require_privacy_set": false,
+						"max_reasoning_effort": "",
+						"reasoning_effort_mappings": null,
+						"rpm_limit": 0,
+						"user_concurrency_enabled": false,
+						"user_concurrency_limit": 0,
+						"created_at": "2025-01-02T03:04:05Z",
+						"updated_at": "2025-01-02T03:04:05Z"
+					}
 				]
 			}`,
 		},

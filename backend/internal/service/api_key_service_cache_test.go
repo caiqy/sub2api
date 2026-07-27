@@ -278,14 +278,14 @@ func TestAPIKeyService_SnapshotRoundTrip_PreservesMessagesDispatchModelConfig(t 
 	require.Equal(t, apiKey.Group.MessagesDispatchModelConfig, roundTrip.Group.MessagesDispatchModelConfig)
 }
 
-func TestAPIKeyService_SnapshotRoundTrip_PreservesGroupUserConcurrencyFields(t *testing.T) {
+func TestAPIKeyService_SnapshotRoundTrip_PreservesGroupPolicyFields(t *testing.T) {
 	svc := NewAPIKeyService(nil, nil, nil, nil, nil, nil, &config.Config{})
 	groupID := int64(9)
 	apiKey := &APIKey{
 		ID:      1,
 		UserID:  2,
 		GroupID: &groupID,
-		Key:     "k-roundtrip-group-user-concurrency",
+		Key:     "k-roundtrip-group-policy",
 		Status:  StatusActive,
 		User: &User{
 			ID:          2,
@@ -296,13 +296,17 @@ func TestAPIKeyService_SnapshotRoundTrip_PreservesGroupUserConcurrencyFields(t *
 		},
 		Group: &Group{
 			ID:                     groupID,
-			Name:                   "anthropic",
-			Platform:               PlatformAnthropic,
+			Name:                   "openai",
+			Platform:               PlatformOpenAI,
 			Status:                 StatusActive,
 			SubscriptionType:       SubscriptionTypeStandard,
 			RateMultiplier:         1,
 			UserConcurrencyEnabled: true,
 			UserConcurrencyLimit:   7,
+			MaxReasoningEffort:     "medium",
+			ReasoningEffortMappings: []ReasoningEffortMapping{
+				{From: "max", To: "xhigh"},
+			},
 		},
 	}
 
@@ -313,6 +317,8 @@ func TestAPIKeyService_SnapshotRoundTrip_PreservesGroupUserConcurrencyFields(t *
 	require.NotNil(t, roundTrip.Group)
 	require.Equal(t, apiKey.Group.UserConcurrencyEnabled, roundTrip.Group.UserConcurrencyEnabled)
 	require.Equal(t, apiKey.Group.UserConcurrencyLimit, roundTrip.Group.UserConcurrencyLimit)
+	require.Equal(t, apiKey.Group.MaxReasoningEffort, roundTrip.Group.MaxReasoningEffort)
+	require.Equal(t, apiKey.Group.ReasoningEffortMappings, roundTrip.Group.ReasoningEffortMappings)
 }
 
 func TestAPIKeyService_GetByKey_CacheHitPreservesGroupUserConcurrencyFields(t *testing.T) {
@@ -335,14 +341,18 @@ func TestAPIKeyService_GetByKey_CacheHitPreservesGroupUserConcurrencyFields(t *t
 				},
 				Group: &Group{
 					ID:                     groupID,
-					Name:                   "anthropic",
-					Platform:               PlatformAnthropic,
+					Name:                   "openai",
+					Platform:               PlatformOpenAI,
 					Status:                 StatusActive,
 					Hydrated:               true,
 					SubscriptionType:       SubscriptionTypeStandard,
 					RateMultiplier:         1,
 					UserConcurrencyEnabled: true,
 					UserConcurrencyLimit:   7,
+					MaxReasoningEffort:     "medium",
+					ReasoningEffortMappings: []ReasoningEffortMapping{
+						{From: "max", To: "xhigh"},
+					},
 				},
 			}, nil
 		},
@@ -368,6 +378,8 @@ func TestAPIKeyService_GetByKey_CacheHitPreservesGroupUserConcurrencyFields(t *t
 	require.NotNil(t, second.Group)
 	require.True(t, second.Group.UserConcurrencyEnabled)
 	require.Equal(t, 7, second.Group.UserConcurrencyLimit)
+	require.Equal(t, "medium", second.Group.MaxReasoningEffort)
+	require.Equal(t, []ReasoningEffortMapping{{From: "max", To: "xhigh"}}, second.Group.ReasoningEffortMappings)
 	require.Equal(t, int32(1), atomic.LoadInt32(&repoCalls))
 }
 

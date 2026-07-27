@@ -69,3 +69,21 @@ func TestAPIKeyAuthSnapshotPreservesBatchImageMultipliers(t *testing.T) {
 		t.Fatalf("hold multiplier = %v, want 0.9", apiKey.Group.BatchImageHoldMultiplier)
 	}
 }
+
+func TestAPIKeyService_RejectsV17AuthSnapshotWithoutReasoningEffortPolicy(t *testing.T) {
+	svc := &APIKeyService{}
+
+	apiKey, ok, err := svc.applyAuthCacheEntry("k-legacy-reasoning-mappings", &APIKeyAuthCacheEntry{
+		Snapshot: &APIKeyAuthSnapshot{Version: 17},
+	})
+
+	if err != nil {
+		t.Fatalf("expected stale snapshot to be ignored without error, got %v", err)
+	}
+	if ok {
+		t.Fatal("expected v17 auth snapshot to be rejected after reasoning effort policy was added")
+	}
+	if apiKey != nil {
+		t.Fatalf("expected no API key from stale snapshot, got %#v", apiKey)
+	}
+}

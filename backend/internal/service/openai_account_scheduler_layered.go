@@ -271,7 +271,7 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 		return nil, 0, 0, err
 	}
 	if len(accounts) == 0 {
-		return nil, 0, 0, noAvailableOpenAISelectionError(req.RequestedModel, false)
+		return nil, 0, 0, noAvailableOpenAISelectionError(req.RequestedModel, false, "")
 	}
 
 	// 1. 过滤候选
@@ -311,7 +311,7 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 		})
 	}
 	if len(filtered) == 0 {
-		return nil, 0, 0, noAvailableOpenAISelectionError(req.RequestedModel, compactBlocked)
+		return nil, 0, 0, noAvailableOpenAISelectionError(req.RequestedModel, compactBlocked, "")
 	}
 
 	// 2. 批量加载负载信息
