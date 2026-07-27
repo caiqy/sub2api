@@ -1,20 +1,20 @@
 # 子代理进度
 
-- 当前任务：29 项中的第 15 项（OpenSpec 4.2）
+- 当前任务：29 项中的第 16 项（OpenSpec 4.3）
 - 当前阶段：`implementing`
-- 状态：Task 14 已通过第 1 轮 cleanup 复审，等待生成并派发 Task 15 简报
+- 状态：Task 15 已通过第 1 轮复审，等待生成并派发 Task 16 简报
 - 简报：待生成
 - 报告：待生成
 - 审查差异：待生成
 - 基线 SHA：`075abc07399d6154130d2a2695fb24c785acd69c`
 - 任务起点 SHA：待协调提交后更新
 - 实现提交：待生成
-- 最后审查 SHA：`2d06e4939`
-- 已完成任务数：14
+- 最后审查 SHA：`521e000e7`
+- 已完成任务数：15
 - 审查模式：`thorough`
 - 审查修复轮次：0/2
-- RED/GREEN：待 Task 15 implementer 回报
-- 风险信号：trusted proxy、settings runtime、Grok cache/sticky、S3/image storage、跨模块 full gate
+- RED/GREEN：待 Task 16 implementer 回报
+- 风险信号：settings JSON backfill、配置热更新、trusted proxy、Grok cache/sticky、S3/image storage、能力矩阵 gap
 - 未解决反馈：无
 
 ## 最近完成
@@ -26,6 +26,7 @@
 - Task 12：完成（`6ebe135c1..81aa202ba`）；thorough review PASS（`ses_05e2803fbffeeoKJpSwmoE2aGm`，Sol），created-only ownership 与 v0.1.161 全门禁闭合
 - Task 13：完成（`0595aa671..0cb71a654`）；第 1 轮证据修复复审 PASS（`ses_05e0fc9a4ffeY2B2Gm76sn2hZW`，Sol），22 个精确交集 `gap=0`
 - Task 14：完成（`940c5cfcf..2d06e4939`）；第 1 轮 cleanup 复审 PASS（`ses_05def9c28ffesAqtmxvSmTT6Rn`，Sol），14 个冲突与 3 个注释化残留闭合
+- Task 15：完成（`98fa814d2..521e000e7`）；第 1 轮 transport-error 修复复审 PASS（`ses_05db12056ffeod45HWlwcTm8YS`，Sol），4 项初始回归、WS bridge Ops/摘除/脱敏与更新后 full gate 均闭合
 
 ## 约束
 

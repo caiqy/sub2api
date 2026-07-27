@@ -539,11 +539,11 @@ finally {
 - 修改：RED 失败确定的 proxy、settings、Grok、storage 或前端实际路径
 - 修改：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
 
-- [ ] **步骤 1：以失败测试审查 proxy、runtime 与 Sticky 边界**
+- [x] **步骤 1：以失败测试审查 proxy、runtime 与 Sticky 边界**
 
   运行矩阵中 trusted proxy、settings JSON backfill、热更新、Grok client tool cache、platform/session Sticky、异步图片和对象存储的聚焦测试。复杂行为发现缺口时先 RED 再最小修复。
 
-- [ ] **步骤 2：提交必要的最小修复并执行全部门禁**
+- [x] **步骤 2：提交必要的最小修复并执行全部门禁**
 
   提交前对 ledger 中 RED 证据关联的真实源码和测试路径逐个执行 `git add --`，严禁暂存其他文件。然后执行：
   ```powershell
