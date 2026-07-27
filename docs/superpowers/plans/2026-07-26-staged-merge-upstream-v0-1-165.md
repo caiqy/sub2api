@@ -579,7 +579,7 @@ finally {
 - 修改：本次 Git merge 实际触及文件
 - 修改：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
 
-- [ ] **步骤 1：创建受审 merge 状态**
+- [x] **步骤 1：创建 v0.1.163 受审 merge 状态**
 
   执行：
   ```powershell
@@ -591,7 +591,7 @@ finally {
 
   预期：peeled SHA 为 `d0bdd7e771636a8d315f542cafd39484f39bd60c`。
 
-- [ ] **步骤 2：融合 reasoning、scheduler metadata、Cleanup、计费与依赖**
+- [x] **步骤 2：融合 reasoning、scheduler metadata、Cleanup、计费与依赖**
 
   审查 OpenAI reasoning policy、scheduler quota metadata/`LastUsedAt`、优雅关停 Cleanup、计费修复、axios 安全升级和 `185_group_reasoning_effort_policy.sql`。完成台账后执行：
   ```powershell
