@@ -557,11 +557,11 @@ finally {
 **文件：**
 - 修改：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
 
-- [ ] **步骤 1：记录 settings backfill 与热更新调用链结论**
+- [x] **步骤 1：记录 settings backfill 与热更新调用链结论**
 
   预期：ledger 明确 settings JSON 的迁移/backfill、配置解析、运行时缓存重建/重载均未被绕过；同时记录 proxy、Sticky、S3/image storage 的自动或人工证据。
 
-- [ ] **步骤 2：提交阶段封闭证据**
+- [x] **步骤 2：提交阶段封闭证据**
 
   执行：
   ```powershell

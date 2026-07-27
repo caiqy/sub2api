@@ -1,20 +1,20 @@
 # 子代理进度
 
-- 当前任务：29 项中的第 16 项（OpenSpec 4.3）
+- 当前任务：29 项中的第 17 项（OpenSpec 5.1）
 - 当前阶段：`implementing`
-- 状态：Task 15 已通过第 1 轮复审，等待生成并派发 Task 16 简报
+- 状态：Task 16 已通过第 2 轮证据复审，等待生成并派发 Task 17 简报
 - 简报：待生成
 - 报告：待生成
 - 审查差异：待生成
 - 基线 SHA：`075abc07399d6154130d2a2695fb24c785acd69c`
 - 任务起点 SHA：待协调提交后更新
 - 实现提交：待生成
-- 最后审查 SHA：`521e000e7`
-- 已完成任务数：15
+- 最后审查 SHA：`68480bbc8`
+- 已完成任务数：16
 - 审查模式：`thorough`
 - 审查修复轮次：0/2
-- RED/GREEN：待 Task 16 implementer 回报
-- 风险信号：settings JSON backfill、配置热更新、trusted proxy、Grok cache/sticky、S3/image storage、能力矩阵 gap
+- RED/GREEN：待 Task 17 implementer 回报
+- 风险信号：v0.1.163 merge、OpenAI reasoning policy、scheduler quota metadata/LastUsedAt、优雅关停 Cleanup、billing、axios、migration 185
 - 未解决反馈：无
 
 ## 最近完成
@@ -27,6 +27,8 @@
 - Task 13：完成（`0595aa671..0cb71a654`）；第 1 轮证据修复复审 PASS（`ses_05e0fc9a4ffeY2B2Gm76sn2hZW`，Sol），22 个精确交集 `gap=0`
 - Task 14：完成（`940c5cfcf..2d06e4939`）；第 1 轮 cleanup 复审 PASS（`ses_05def9c28ffesAqtmxvSmTT6Rn`，Sol），14 个冲突与 3 个注释化残留闭合
 - Task 15：完成（`98fa814d2..521e000e7`）；第 1 轮 transport-error 修复复审 PASS（`ses_05db12056ffeod45HWlwcTm8YS`，Sol），4 项初始回归、WS bridge Ops/摘除/脱敏与更新后 full gate 均闭合
+- Task 15 补充：Task 16 review 发现共享 Backup S3 uploader 失效缺口；`8b2c969dc..9ba81a5b1` 第 2 轮修复与 full gate 已由同一 Sol reviewer PASS
+- Task 16：完成（`11889c61c..68480bbc8`）；第 2 轮证据修复复审 PASS（`ses_05d65883dffefGri6MnJvSQCOO`，Sol），190 raw/41 selected 口径、四行 `gap=0` 与共享 S3 runtime 修复证据闭合
 
 ## 约束
 
