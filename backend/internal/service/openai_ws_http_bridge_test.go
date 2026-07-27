@@ -858,10 +858,12 @@ func TestOpenAIWSHTTPBridgeRequiresTerminalResponseEventBeforeSuccess(t *testing
 	)
 
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "ended before terminal event")
+	require.EqualError(t, err, "upstream http bridge request failed")
 	require.NotNil(t, result)
 	require.Equal(t, "resp_bridge", result.RequestID)
-	require.Len(t, downstream, 2)
+	require.Len(t, downstream, 3)
+	require.Equal(t, "error", gjson.GetBytes(downstream[2], "type").String())
+	require.Equal(t, "Upstream request failed", gjson.GetBytes(downstream[2], "error.message").String())
 }
 
 func TestOpenAIWSHTTPBridge429ReturnsFailoverErrorWithoutClientEvent(t *testing.T) {
