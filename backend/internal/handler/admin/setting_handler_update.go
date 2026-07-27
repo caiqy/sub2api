@@ -27,6 +27,9 @@ type UpdateSettingsRequest struct {
 	FrontendURL                      string                        `json:"frontend_url"`
 	InvitationCodeEnabled            bool                          `json:"invitation_code_enabled"`
 	TotpEnabled                      bool                          `json:"totp_enabled"` // TOTP 双因素认证
+	SessionBindingEnabled            *bool                         `json:"session_binding_enabled"`
+	StepUpEnabled                    *bool                         `json:"step_up_enabled"`
+	AuditLogRetentionDays            int                           `json:"audit_log_retention_days"`
 	LoginAgreementEnabled            *bool                         `json:"login_agreement_enabled"`
 	LoginAgreementMode               *string                       `json:"login_agreement_mode"`
 	LoginAgreementUpdatedAt          *string                       `json:"login_agreement_updated_at"`
@@ -149,6 +152,7 @@ type UpdateSettingsRequest struct {
 	AffiliateRebateFreezeHours                *int                              `json:"affiliate_rebate_freeze_hours"`
 	AffiliateRebateDurationDays               *int                              `json:"affiliate_rebate_duration_days"`
 	AffiliateRebatePerInviteeCap              *float64                          `json:"affiliate_rebate_per_invitee_cap"`
+	AdminRechargeRebateEnabled                *bool                             `json:"admin_recharge_rebate_enabled"`
 	DefaultUserRPMLimit                       int                               `json:"default_user_rpm_limit"`
 	DefaultSubscriptions                      []dto.DefaultSubscriptionSetting  `json:"default_subscriptions"`
 	AuthSourceDefaultEmailBalance             *float64                          `json:"auth_source_default_email_balance"`
@@ -513,6 +517,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		}
 	}
 	loginAgreementEnabled := boolValueOrDefault(req.LoginAgreementEnabled, previousSettings.LoginAgreementEnabled)
+	sessionBindingEnabled := boolValueOrDefault(req.SessionBindingEnabled, previousSettings.SessionBindingEnabled)
+	stepUpEnabled := boolValueOrDefault(req.StepUpEnabled, previousSettings.StepUpEnabled)
+	adminRechargeRebateEnabled := boolValueOrDefault(req.AdminRechargeRebateEnabled, previousSettings.AdminRechargeRebateEnabled)
 	if loginAgreementEnabled && len(loginAgreementDocuments) == 0 {
 		response.BadRequest(c, "Login agreement documents are required when enabled")
 		return
@@ -1202,6 +1209,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		FrontendURL:                      req.FrontendURL,
 		InvitationCodeEnabled:            req.InvitationCodeEnabled,
 		TotpEnabled:                      req.TotpEnabled,
+		SessionBindingEnabled:            sessionBindingEnabled,
+		StepUpEnabled:                    stepUpEnabled,
+		AuditLogRetentionDays:            req.AuditLogRetentionDays,
 		LoginAgreementEnabled:            loginAgreementEnabled,
 		LoginAgreementMode:               loginAgreementMode,
 		LoginAgreementUpdatedAt:          loginAgreementUpdatedAt,
@@ -1310,6 +1320,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		AffiliateRebateFreezeHours:                           affiliateRebateFreezeHours,
 		AffiliateRebateDurationDays:                          affiliateRebateDurationDays,
 		AffiliateRebatePerInviteeCap:                         affiliateRebatePerInviteeCap,
+		AdminRechargeRebateEnabled:                           adminRechargeRebateEnabled,
 		DefaultUserRPMLimit:                                  req.DefaultUserRPMLimit,
 		DefaultSubscriptions:                                 defaultSubscriptions,
 		EnableModelFallback:                                  req.EnableModelFallback,
@@ -1766,6 +1777,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		InvitationCodeEnabled:                                updatedSettings.InvitationCodeEnabled,
 		TotpEnabled:                                          updatedSettings.TotpEnabled,
 		TotpEncryptionKeyConfigured:                          h.settingService.IsTotpEncryptionKeyConfigured(),
+		SessionBindingEnabled:                                updatedSettings.SessionBindingEnabled,
+		StepUpEnabled:                                        updatedSettings.StepUpEnabled,
+		AuditLogRetentionDays:                                updatedSettings.AuditLogRetentionDays,
 		LoginAgreementEnabled:                                updatedSettings.LoginAgreementEnabled,
 		LoginAgreementMode:                                   updatedSettings.LoginAgreementMode,
 		LoginAgreementUpdatedAt:                              updatedSettings.LoginAgreementUpdatedAt,
@@ -1869,6 +1883,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		AffiliateRebateFreezeHours:                           updatedSettings.AffiliateRebateFreezeHours,
 		AffiliateRebateDurationDays:                          updatedSettings.AffiliateRebateDurationDays,
 		AffiliateRebatePerInviteeCap:                         updatedSettings.AffiliateRebatePerInviteeCap,
+		AdminRechargeRebateEnabled:                           updatedSettings.AdminRechargeRebateEnabled,
 		DefaultUserRPMLimit:                                  updatedSettings.DefaultUserRPMLimit,
 		DefaultSubscriptions:                                 updatedDefaultSubscriptions,
 		EnableModelFallback:                                  updatedSettings.EnableModelFallback,

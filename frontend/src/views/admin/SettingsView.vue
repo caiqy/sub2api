@@ -1581,6 +1581,20 @@
               >
                 <div>
                   <label class="font-medium text-gray-900 dark:text-white">{{
+                    t("admin.settings.security.stepUp")
+                  }}</label>
+                  <p class="text-sm text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.security.stepUpHint") }}
+                  </p>
+                </div>
+                <Toggle v-model="form.step_up_enabled" />
+              </div>
+
+              <div
+                class="flex items-center justify-between border-t border-gray-100 pt-4 dark:border-dark-700"
+              >
+                <div>
+                  <label class="font-medium text-gray-900 dark:text-white">{{
                     t("admin.settings.registration.emailVerification")
                   }}</label>
                   <p class="text-sm text-gray-500 dark:text-gray-400">
@@ -8441,6 +8455,7 @@ const form = reactive<SettingsForm>({
   password_reset_enabled: false,
   totp_enabled: false,
   totp_encryption_key_configured: false,
+  step_up_enabled: false,
   session_binding_enabled: true,
   audit_log_retention_days: 180,
   login_agreement_enabled: false,
@@ -9822,6 +9837,7 @@ async function saveSettings() {
       invitation_code_enabled: form.invitation_code_enabled,
       password_reset_enabled: form.password_reset_enabled,
       totp_enabled: form.totp_enabled,
+      step_up_enabled: form.step_up_enabled,
       session_binding_enabled: form.session_binding_enabled,
       audit_log_retention_days: Number.isFinite(form.audit_log_retention_days)
         ? form.audit_log_retention_days

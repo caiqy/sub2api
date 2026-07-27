@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -27,6 +28,25 @@ func TestIsSemanticallyEmptyStringDefault(t *testing.T) {
 
 	for _, actual := range []string{"NULL", "'x'::text", "0", ""} {
 		require.False(t, isSemanticallyEmptyStringDefault(actual), "expected %q to not be treated as empty-string default", actual)
+	}
+}
+
+func TestMigrationsRunner_ConcurrentInstancesSerializeOnSessionLock(t *testing.T) {
+	const instances = 2
+	errorsByInstance := make([]error, instances)
+	var wg sync.WaitGroup
+	for i := 0; i < instances; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			errorsByInstance[index] = ApplyMigrations(ctx, integrationDB)
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errorsByInstance {
+		require.NoErrorf(t, err, "migration instance %d", i)
 	}
 }
 
@@ -155,6 +175,13 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	// ops_system_logs: API key id index for operational log triage
 	requireColumn(t, tx, "ops_system_logs", "api_key_id", "bigint", 0, true)
 	requireIndex(t, tx, "ops_system_logs", "idx_ops_system_logs_api_key_id_created_at")
+
+	// Bounded ingress rejection security aggregates.
+	requireColumn(t, tx, "ops_ingress_reject_aggregates", "bucket_start", "timestamp with time zone", 0, false)
+	requireColumn(t, tx, "ops_ingress_reject_aggregates", "client_ip", "inet", 0, false)
+	requireColumn(t, tx, "ops_ingress_reject_aggregates", "request_count", "bigint", 0, false)
+	requireIndex(t, tx, "ops_ingress_reject_aggregates", "idx_ops_ingress_reject_aggregates_bucket")
+	requireIndex(t, tx, "ops_ingress_reject_aggregates", "idx_ops_ingress_reject_aggregates_ip_bucket")
 
 	// user_allowed_groups table should exist
 	var uagRegclass sql.NullString

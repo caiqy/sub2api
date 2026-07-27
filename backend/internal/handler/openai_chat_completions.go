@@ -353,7 +353,10 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 				upstreamErrorAlreadyCommunicated := openAIForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
 				wroteFallback := false
 				if !upstreamErrorAlreadyCommunicated {
-					wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
+					wroteFallback = h.ensureOpenAIStreamReadErrorResponse(c, err, streamStarted)
+					if !wroteFallback {
+						wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
+					}
 				}
 				if c.Request.Context().Err() == nil && service.HasOpsUpstreamAttempted(c) && !service.HasOpsClientBusinessLimited(c) && service.GetOpsCyberPolicy(c) == nil && !service.HasOpenAIResponseTerminalWritten(c) {
 					h.submitFailedUsageLog(c, apiKey, account, reqModel, reqStream, 0, nil, nil, forwardDuration, nil, "handler.openai_gateway.chat_completions")

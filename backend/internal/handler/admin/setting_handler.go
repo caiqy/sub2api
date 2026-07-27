@@ -59,6 +59,8 @@ type SettingHandler struct {
 	paymentService           *service.PaymentService
 	userAttributeService     *service.UserAttributeService
 	notificationEmailService *service.NotificationEmailService
+	totpService              *service.TotpService
+	userService              *service.UserService
 }
 
 // NewSettingHandler 创建系统设置处理器
@@ -72,6 +74,12 @@ func NewSettingHandler(settingService *service.SettingService, emailService *ser
 		paymentService:       paymentService,
 		userAttributeService: userAttributeService,
 	}
+}
+
+// SetStepUpDeps attaches the services required by the step-up settings switch.
+func (h *SettingHandler) SetStepUpDeps(totpService *service.TotpService, userService *service.UserService) {
+	h.totpService = totpService
+	h.userService = userService
 }
 
 // SetNotificationEmailService attaches the notification template service without changing
@@ -124,6 +132,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		TotpEnabled:                                          settings.TotpEnabled,
 		TotpEncryptionKeyConfigured:                          h.settingService.IsTotpEncryptionKeyConfigured(),
 		SessionBindingEnabled:                                settings.SessionBindingEnabled,
+		StepUpEnabled:                                        settings.StepUpEnabled,
 		AuditLogRetentionDays:                                settings.AuditLogRetentionDays,
 		LoginAgreementEnabled:                                settings.LoginAgreementEnabled,
 		LoginAgreementMode:                                   settings.LoginAgreementMode,
@@ -231,6 +240,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		AffiliateRebateFreezeHours:                           settings.AffiliateRebateFreezeHours,
 		AffiliateRebateDurationDays:                          settings.AffiliateRebateDurationDays,
 		AffiliateRebatePerInviteeCap:                         settings.AffiliateRebatePerInviteeCap,
+		AdminRechargeRebateEnabled:                           settings.AdminRechargeRebateEnabled,
 		DefaultUserRPMLimit:                                  settings.DefaultUserRPMLimit,
 		DefaultSubscriptions:                                 defaultSubscriptions,
 		EnableModelFallback:                                  settings.EnableModelFallback,
