@@ -92,6 +92,8 @@
 - cleanup 验证：`gofmt -w backend/internal/handler/admin/setting_handler.go backend/internal/handler/admin/setting_handler_update.go`、`go -C backend test ./internal/handler/admin -run '^TestUpdateSettings(EnableStepUp|DisableStepUp)' -count=1`、`go -C backend test ./internal/handler/admin -run '^$'` 均退出 `0`；`git diff --check` 退出 `0`。TDD N/A：仅注释清理，不伪造 RED；Task 15 full gates、远程操作均未运行。
 - Task 15 回归与 full gate：以 `98fa814d2` 为起点，四个真实 RED 修复提交为 `57b5bf758`、`1d191894a`、`84d9a4f4f`、`69ac6209f`；分别闭合 HTTP/WS failover body 与 terminal event、Grok client-tool cache 提交、settings env 可达默认值/forwarded-IP fixture、rollback timeout 契约。聚焦矩阵均 GREEN；`make test`（Vitest `204` 文件、`1549` 用例）、`make build`、两轮 `make -C backend generate` 加 Ent/Wire 零 diff、unmerged/精确 marker/diff-check/migration 集合检查均通过，VERSION 保持 `0.1.159.6`。
 - Task 15 远程 integration：archive `69ac6209fcb4928251142a3368ffdbd750919076` 在 `local-serv-ai` 的 `/tmp/sub2api-task15-b369bbfa849c4b8fadad749d4c66f2b9` 完整通过。Go `1.26.5`、Docker Server `29.2.1`；`CI=true GOFLAGS='-v'` 和隔离三变量 temp 的 `go test -tags=integration ./...` 退出 `0`，`TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate` PASS（`4.80s`），`TestMigrationsRunner_UpgradesLocalV01596AcrossUpstreamStages` PASS（`4.58s`）。日志保存于 `C:/Users/caiqy/AppData/Local/Temp/sub2api-task15-b369bbfa849c4b8fadad749d4c66f2b9-integration.log`，archive 与远程目录均已清理；配置型/环境型 skip 已记录于 `.superpowers/sdd/task-15-report.md`，无 `FAIL`。
+- Task 15 Sol review round 1：`be5b98314` 将 transport 的 Ops/durable-account side effects 与首 turn failover 返回值最小拆分；后续 turn 或已写 downstream 的 `Do`/scanner/terminal transport failure 记录健康副作用、返回普通 error 并向仍连接客户端发送固定 `Upstream request failed` event，不回显内部地址且不触发 replay。context cancellation 与已识别 client disconnect 保持无摘除、无强写；`8807d9a34` 补齐并对齐相关 bridge/truncation 契约。RED 是 turn 2 `connection refused` 的地址回显/副作用丢失、200 后 reader error 的无 event/副作用丢失，以及 client disconnect 的重复 error event；聚焦 bridge 与 unit-tag transport helper 测试均 GREEN。
+- Task 15 Sol review round 1 full gate：最终 archive `8807d9a34` 在 `local-serv-ai` 的 `/tmp/sub2api-task15-r1-134c34a4b1ca4251b119b864ab79d38e` 完整 integration GREEN。根 `make test`（Vitest `204` 文件、`1549` 用例）、注入 Git `sh` PATH 后的 `make build`、两轮 generate/Ent-Wire 零 diff、unmerged/精确 marker/diff-check/migration 集合均通过；Go `1.26.5`、Docker `29.2.1`。远程 `CI=true GOFLAGS='-v'` 和三变量 temp 的完整 integration 退出 `0`，`TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate` PASS（`4.92s`），`TestMigrationsRunner_UpgradesLocalV01596AcrossUpstreamStages` PASS（`4.17s`）。日志为 `C:/Users/caiqy/AppData/Local/Temp/sub2api-task15-r1-134c34a4b1ca4251b119b864ab79d38e-integration.log`；archive/远程目录已清理，合法 skip 同 Task 15 report，无 `FAIL`。
 
 ## v0.1.163
 
@@ -377,6 +379,7 @@ backend/migrations/migrations.go
 backend/migrations/openai_long_context_billing_migration_test.go
 ```
 - Task 5 监督复核：`git diff-tree --no-commit-id --name-status -r 98fbd1448ad38fbf45fb7334a0cd508576f0fd74` 仅输出 `M docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`；`git diff --cached --exit-code`、generated-path diff 均退出 `0`。`git status --short` 仅余协调者 plan、OpenSpec tasks/progress 和受保护根 `.comet/current-change.json`、`paseo.json`；无 Task 5 源码、生成物或暂存项。`git worktree list --porcelain` 仅主工作区与两个既有 Task 27 detached worktree，且两个 `Test-Path`（旧 nonce 与 `w84b854`）均为 `False`。
+- 以下为 Task 5 当时状态（历史快照；不代表当前阶段状态）。
 - `v0.1.160`：证据已补齐，等待独立复审；133 paths、9 个冲突、12 个交集路径及 Task 9 门禁证据见 Task 10。
 - `v0.1.161`：实现门禁已闭合，docs/evidence 修正待 Sol 复审。257 paths、22 个精确交集路径，`protected=21`、`manual=1`、`gap=0`；跨路径补充回归不计入该统计。Task 14/v0.1.162 在复审 PASS 前封闭。
 - `v0.1.162`：待执行。
@@ -388,7 +391,7 @@ backend/migrations/openai_long_context_billing_migration_test.go
 
 - 历史阻塞（已解决，归档 HEAD `c8e0110a9a2354453753db9c4acae0ed7570458d`）：原 Make/PowerShell/Go 预检依次暴露 GNU Make 缺失、Go `1.26.1` 低于 directive、PowerShell 入口缺失；后续规范已改为 Linux 原生 gate，vfox Go `1.26.5` 和 Docker `29.2.1` 已在新 nonce 中验证。
 - 历史阻塞（已解决，规范 HEAD `849f956992178e25ab2074e1e4cc596d29f8834f`）：首次原生 full RED 暴露 handler body spool/panic、repository usage-detail transaction/retention 与 hidden UI resource ordering 断言；后续测试修复及 HEAD `99cb81de306cb0e8ea811387e362e4d601f6f4b0` 的新 nonce focused/full GREEN 已解决。
-- 当前状态：阶段 0 本地与远程门禁通过；七项非 migration/repository target skip 是已分类的基线风险。Task 5 为 `DONE_WITH_CONCERNS`：HEAD 生成内容经 detached worktree 双轮验证稳定，但受监视 Windows 工作区的随机文件映射风险仍未定因，隔离门禁与工作区门禁的等价性待 reviewer 判断。`v0.1.160` 已闭合；`v0.1.161` 实现门禁已闭合但 docs/evidence 修正待 Sol 复审；`v0.1.162` 至 `v0.1.165` 尚未开始，且 Task 14/v0.1.162 须先获该复审 PASS。
+- Task 5 当时状态（历史快照）：阶段 0 本地与远程门禁通过；七项非 migration/repository target skip 是已分类的基线风险。Task 5 为 `DONE_WITH_CONCERNS`：HEAD 生成内容经 detached worktree 双轮验证稳定，但受监视 Windows 工作区的随机文件映射风险仍未定因，隔离门禁与工作区门禁的等价性待 reviewer 判断。`v0.1.160` 已闭合；`v0.1.161` 实现门禁已闭合但 docs/evidence 修正待 Sol 复审；`v0.1.162` 至 `v0.1.165` 尚未开始，且 Task 14/v0.1.162 须先获该复审 PASS。
 
 ## Task 11 第 1 轮复审修复
 
