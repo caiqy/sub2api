@@ -31,10 +31,9 @@ func TestDeferredServiceStopWaitsForInFlightFlush(t *testing.T) {
 	svc := NewDeferredService(repo, timingWheel, time.Hour)
 	svc.ScheduleLastUsedUpdate(1)
 
-	flushDone := make(chan struct{})
+	flushDone := make(chan error, 1)
 	go func() {
-		defer close(flushDone)
-		svc.flushLastUsed(context.Background())
+		flushDone <- svc.flushLastUsed(context.Background())
 	}()
 	<-repo.onStart
 
@@ -49,6 +48,6 @@ func TestDeferredServiceStopWaitsForInFlightFlush(t *testing.T) {
 	case <-time.After(30 * time.Millisecond):
 	}
 	close(repo.release)
-	<-flushDone
+	require.NoError(t, <-flushDone)
 	require.NoError(t, <-stopDone)
 }

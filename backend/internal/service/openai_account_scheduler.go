@@ -718,10 +718,6 @@ func (b *openAISelectionProbeBudget) recordRecheck() bool {
 	b.rechecks++
 	return true
 }
-func (b *openAISelectionProbeBudget) acquireExhausted() bool {
-	return b != nil && b.limited && b.acquires >= openAIAccountSelectionProbeLimit
-}
-
 func (b *openAISelectionProbeBudget) wasAttempted(accountID int64) bool {
 	if b == nil {
 		return false
