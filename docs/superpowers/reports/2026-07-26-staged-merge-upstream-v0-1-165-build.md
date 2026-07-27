@@ -69,13 +69,12 @@
 
 ## v0.1.161
 
-- changed-files：待执行。
-- 冲突台账：无（尚未合并）。
-- 能力矩阵交集：待执行。
-- 聚焦测试：待执行。
-- 本地门禁：待执行。
-- 远程门禁：待执行。
-- 放行结论：待执行。
+- changed-files/冲突：已合并 `f2158292c`，26 个冲突与 Task 11 的六项 review finding 已闭合；Task 12 follow-up 不改写 merge 历史。
+- 聚焦测试：模型冷却、advanced/layered scheduler、fallback/WaitPlan、DB fresh recheck、session/step-up、Grok 视频/owner/spooling/redaction、content moderation、HTTP/WS failover、PromptAdminService Wire bind、YAML、API Key/billing probe UI 与 migration/repository 均 GREEN。
+- WS V2：`0775a6063` 的 terminal ownership 放宽与 `f1cde1b52` 的反向测试适配均非最终 GREEN；`c3bfb765f` 恢复 created-only ownership，`47a6c031e` 仅补齐正常 terminal-first fixture 的同 ID `response.created`。
+- 本地门禁：最终 `make test`、进程级 Git `sh` PATH 下的 `make build`、两轮 `make -C backend generate` 和 Ent/Wire 零 diff、静态/冲突/VERSION/旧 first-token timeout/migration 集合检查均 GREEN；VERSION 保持 `0.1.159.6`。
+- 远程门禁：archive `07029cc45` 在 `local-serv-ai`（Go `1.26.5`、Docker `29.2.1`）以隔离 `.test-tmp` 完整 integration GREEN；migration 新库幂等与从本地 v0.1.159.6 升级均 PASS，16 个已接受环境型 skip 未命中本阶段能力。
+- 放行结论：`DONE_WITH_CONCERNS`。Task 13 和 Sol review 保持封闭；风险为 Windows Git `sh`/历史文件锁及既有前端 advisory。
 
 ## v0.1.162
 
@@ -1901,3 +1900,13 @@ final absence check：JSON `success=true, exit_code=0`。
 - gateway/frontend：Responses、images 和 video 路由保留 usage detail capture 与 Grok WebSocket 拒绝，同时纳入 text body limit 和视频 content 代理；账号创建表单纳入上游 billing probe/expiry 字段，App 同时保留自定义菜单可见性与 favicon 更新。
 - migration：本地 `172_video_per_second_billing_metadata.sql`、`181_group_duplicate_operation_id.sql` 与上游 181/182 快照继续存在，并纳入 `183_ops_ingress_reject_aggregates.sql`、`184_auth_cache_invalidation_outbox.sql`；staged upgrade 和并发 migration runner 覆盖均保留。
 - 静态检查：精确 conflict marker 扫描和 `git ls-files -u` 均为空，提交前 `git diff --cached --check` 通过。`go test -run '^$' ./cmd/server ./internal/handler/admin ./internal/handler ./internal/service ./internal/server/routes` 通过；`pnpm exec vue-tsc --noEmit` 通过。未运行 Task 12 的 full test/build/generate/integration gates。
+
+## Task 12：v0.1.161 full gate 与回归收口（2026-07-27）
+
+- 历史保留：`0775a6063 fix: preserve local behavior after v0.1.161` 包含无效的 WS V2 terminal ownership 放宽；`f1cde1b52 test: cover terminal WS turn binding` 是把保护测试改为反向断言的无效适配，均不改写且不作为 GREEN。
+- follow-up：`c3bfb765f fix: restore created-only WS turn ownership` 恢复空 active turn 仅由同 ID `response.created` 绑定；`47a6c031e test: align websocket lifecycle fixtures` 为正常 terminal/delta 序列补同 ID created；`07029cc45 fix: remove stale Grok session hash assignments` 删除 full gate lint 发现的两项死赋值。
+- 真实证据：恢复 `TestObserveUpstreamMessage_BindsOnlyResponseCreated` 后，在 `0775a6063` 行为上外来 `response.completed` 错误成为 terminal 的 RED；`c3bfb765f` 后原保护测试和 `go test ./internal/service/openai_ws_v2 -count=1` GREEN。terminal-first lifecycle fixture 随严格契约暴露并由 `47a6c031e` 对齐，不是放宽 ownership 的理由。首次 `make test` 的唯一生产 RED 是 `grok_media.go` 两项 `ineffassign`，`07029cc45` 后 handler lint/聚焦测试及完整门禁 GREEN。
+- 聚焦与本地门禁：service 覆盖模型冷却、advanced/layered scheduler、fallback/WaitPlan、DB recheck、Grok/spooling/redaction 和 moderation；handler/admin/middleware 覆盖 session/step-up、Grok 视频、HTTP failover 和 Ops；migrations/repository/config/securityaudit/cmd server 及 API Key/billing probe/RiskControl 前端用例均通过。最终 `make test` 为后端全测试/lint 和前端 201 文件、1537 用例 GREEN；`make build` 在仅进程级补 Git `sh` PATH 后按 VERSION `0.1.159.6` GREEN；两轮 generate 的 Ent/Wire diff 均为空。
+- 静态/migration：`git diff --check`、`git ls-files -u`、精确 conflict marker 和旧本地 first-token timeout 业务符号检查均通过；本地 172/181 与上游 `181_prompt_audit.sql`、182、183、184 全部保留。migration/repository 聚焦测试通过。
+- remote integration：已提交 archive `07029cc45` 在 `local-serv-ai`（Go `1.26.5`、Docker `29.2.1`）重建 `.test-tmp` 后执行 `CI=true GOFLAGS='-v' go test -tags=integration ./...`，退出 `0`。日志 `C:/Users/caiqy/AppData/Local/Temp/sub2api-task12-07029cc45-integration.log` 无 FAIL/panic；`TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate` PASS 5.20 秒，`TestMigrationsRunner_UpgradesLocalV01596AcrossUpstreamStages` PASS 4.75 秒。16 个 skip 均为已接受 DingTalk、TLS/JA3/profile、CI concurrency、Prompt Audit Redis/PostgreSQL、无 OpenAI key 环境基线，未命中本阶段能力。远端 `/tmp/sub2api-task12-07029cc45` 与本地 archive 已清理，日志保留。
+- Task 12 结论：`DONE_WITH_CONCERNS`。残余风险为 Windows Git `sh`/历史 generate 文件锁和既有前端 advisory；Task 13 及 Sol review 继续封闭。
