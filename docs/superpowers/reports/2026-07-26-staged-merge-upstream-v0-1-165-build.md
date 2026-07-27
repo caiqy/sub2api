@@ -88,6 +88,8 @@
 - 静态检查：`git ls-files -u`、真实 conflict marker 扫描和 `git diff --cached --check` 均为空/通过；限定 Go 编译和 `pnpm exec vue-tsc --noEmit` 通过。未运行 Task 15 full test/build/generate/integration。
 - 迁移与遗留边界：本地 `172_video_per_second_billing_metadata.sql`、`181_group_duplicate_operation_id.sql` 与上游 `181_prompt_audit.sql`、182、183、184 均保留；`VERSION=0.1.159.6`，`openai-first-token-timeout` 未恢复。
 - 放行结论：`DONE_WITH_CONCERNS`，等待 Task 15 回归与 full gates。
+- Sol reviewer 第 1 轮 cleanup：`46eb292c04f14630dcfb31b28f6e83f541029d93 chore: clean v0.1.162 conflict remnants` 仅清除两个 admin setting handler 中三段冲突遗留的 `/* ... */` 死副本，并恢复 step-up 启用防自锁、关闭强制 step-up 的安全理由注释；未改变实际 JSON/setting 映射、trusted proxy、scheduler/sticky、audit 或 step-up 代码。
+- cleanup 验证：`gofmt -w backend/internal/handler/admin/setting_handler.go backend/internal/handler/admin/setting_handler_update.go`、`go -C backend test ./internal/handler/admin -run '^TestUpdateSettings(EnableStepUp|DisableStepUp)' -count=1`、`go -C backend test ./internal/handler/admin -run '^$'` 均退出 `0`；`git diff --check` 退出 `0`。TDD N/A：仅注释清理，不伪造 RED；Task 15 full gates、远程操作均未运行。
 
 ## v0.1.163
 

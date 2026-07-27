@@ -32,3 +32,12 @@
 - Task 15 待验证：可信代理/header fail-closed、Grok cache/sticky/owner/spool/redaction/usage/WS created-only、S3/backup/image task/moderation/audit、step-up/API Key/billing probe/Ops/YAML、scheduler/fallback/recheck、migration staged upgrade 和前端账户/设置流。
 - 风险：本轮仅做静态与限定编译；运行时行为尚未由 Task 15 覆盖。Windows Git `sh`/历史 generate 文件锁和既有 Browserslist/Vite advisory 仍是基线顾虑。
 - 顾虑：v0.1.162 的 forwarded-IP、Grok retry/cache 与 runtime image storage 跨安全/账号/存储边界，必须以 Task 15 回归结果决定后续放行。
+
+## Sol reviewer 第 1 轮 cleanup
+
+- TDD N/A：本轮只删除冲突遗留的注释化死副本并恢复安全理由注释，不改变可执行行为，不伪造 RED。
+- reviewer finding：Important 为两个 admin setting handler 内遗留的三段 `/* ... */` 重复字段/结构体块；Minor 为 step-up 转换门控缺少自锁与强制验证的安全理由说明。
+- 源码提交：`46eb292c04f14630dcfb31b28f6e83f541029d93 chore: clean v0.1.162 conflict remnants`，仅含 `setting_handler.go` 与 `setting_handler_update.go`；删除三段死副本，保留实际 JSON/setting 映射、trusted proxy、scheduler/sticky、audit 与 step-up 行为。
+- 注释：启用前校验当前管理员会话/TOTP 以防自锁；关闭时继续由 `EnforceStepUpAlways` 强制 step-up，以防被劫持会话降级防护。
+- 通过：`gofmt -w backend/internal/handler/admin/setting_handler.go backend/internal/handler/admin/setting_handler_update.go`；`go -C backend test ./internal/handler/admin -run '^TestUpdateSettings(EnableStepUp|DisableStepUp)' -count=1`；`go -C backend test ./internal/handler/admin -run '^$'`；源码 diff 仅含注释删除/新增及 gofmt 空白对齐。
+- 未运行：Task 15 full test、build、generate、integration 与回归门禁；无需远程操作。
