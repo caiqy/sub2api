@@ -16,7 +16,7 @@
 
 ## 3. 合入 v0.1.161
 
-- [ ] 3.1 `git merge --no-ff v0.1.161`，处理冲突（重点：step-up 2FA 开关化、模型级临时冷却与本地 scheduler、Grok 视频代理、migration 183/184）
+- [x] 3.1 `git merge --no-ff v0.1.161`，处理冲突（重点：step-up 2FA 开关化、模型级临时冷却与本地 scheduler、Grok 视频代理、migration 183/184）
 - [ ] 3.2 运行 full 门禁并修复回归
 - [ ] 3.3 完成 v0.1.161 触及能力的映射审查并记录证据
 

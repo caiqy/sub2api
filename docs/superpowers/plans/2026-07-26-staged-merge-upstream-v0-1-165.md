@@ -439,7 +439,7 @@ finally {
 - 修改：本次 Git merge 实际触及文件
 - 修改：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
 
-- [ ] **步骤 1：创建 v0.1.161 的受审 merge 状态**
+- [x] **步骤 1：创建 v0.1.161 的受审 merge 状态**
 
   执行：
   ```powershell
@@ -451,7 +451,7 @@ finally {
 
   预期：peeled SHA 为 `19149ca196eeae4a4482e5299dc6fa4ba0b06c8c`。
 
-- [ ] **步骤 2：融合 step-up、scheduler 冷却、Grok 视频和 183/184 migration 后提交 merge**
+- [x] **步骤 2：融合 step-up、scheduler 冷却、Grok 视频和 183/184 migration 后提交 merge**
 
   对 step-up 2FA 开关、模型级临时冷却与本地 scheduler、Grok 视频代理、`183_ops_ingress_reject_aggregates.sql`、`184_auth_cache_invalidation_outbox.sql` 的每项冲突或无冲突调用链更新 ledger。然后执行：
   ```powershell
