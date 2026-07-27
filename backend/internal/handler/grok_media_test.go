@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -109,6 +110,32 @@ type grokMediaEligibilityProberStub struct {
 	calls    int
 }
 
+type grokVideoOwnerBindingCache struct {
+	service.GatewayCache
+	ownerID int64
+	calls   int
+}
+
+func (c *grokVideoOwnerBindingCache) GetSessionAccountID(context.Context, int64, string) (int64, error) {
+	c.calls++
+	if c.calls == 1 {
+		return c.ownerID, nil
+	}
+	return 0, nil
+}
+
+func (*grokVideoOwnerBindingCache) SetSessionAccountID(context.Context, int64, string, int64, time.Duration) error {
+	return nil
+}
+
+func (*grokVideoOwnerBindingCache) RefreshSessionTTL(context.Context, int64, string, time.Duration) error {
+	return nil
+}
+
+func (*grokVideoOwnerBindingCache) DeleteSessionAccountID(context.Context, int64, string) error {
+	return nil
+}
+
 func (s *grokMediaEligibilityProberStub) ProbeMediaEligibility(context.Context, int64) (bool, string, error) {
 	s.calls++
 	return s.eligible, s.reason, s.err
@@ -177,7 +204,7 @@ func TestGrokVideoStatus_UsesNoRequestBodyHandle(t *testing.T) {
 	account := &service.Account{ID: 907, Name: "grok", Platform: service.PlatformGrok, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, ParentAccountID: &parentID, Credentials: map[string]any{"base_url": "https://api.x.ai/v1"}}
 	parent := &service.Account{ID: parentID, Name: "parent", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Credentials: map[string]any{"access_token": "token"}}
 	upstream := &openAIImagesHandlerHTTPUpstream{resp: &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"id":"req_123","status":"completed"}`))}}
-	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &terminalUsageGrokAccountRepo{openAIRetryAccountRepoStub{accounts: []*service.Account{account, parent}}}, upstream)
+	env := newTerminalUsageOpenAIEnvWithUpstreamAndGatewayCache(t, group, &terminalUsageGrokAccountRepo{openAIRetryAccountRepoStub{accounts: []*service.Account{account, parent}}}, upstream, &grokVideoOwnerBindingCache{ownerID: account.ID})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/videos/req_123", nil)
 
@@ -192,6 +219,36 @@ func TestGrokVideoStatus_UsesNoRequestBodyHandle(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.Equal(t, []int64{account.ID}, upstream.calls())
 	require.NoDirExists(t, missingRawDir)
+}
+
+func TestGrokVideoStatus_RejectsSchedulerAccountOtherThanOwnerBinding(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 910, Platform: service.PlatformGrok, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
+	parentID := int64(913)
+	selected := &service.Account{ID: 911, Name: "selected", Platform: service.PlatformGrok, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Priority: 1, ParentAccountID: &parentID, Credentials: map[string]any{"base_url": "https://api.x.ai/v1"}}
+	owner := &service.Account{ID: 912, Name: "owner", Platform: service.PlatformGrok, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Priority: 2, ParentAccountID: &parentID, Credentials: map[string]any{"base_url": "https://api.x.ai/v1"}}
+	parent := &service.Account{ID: parentID, Name: "parent", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Credentials: map[string]any{"access_token": "token"}}
+	cache := &grokVideoOwnerBindingCache{ownerID: owner.ID}
+	upstream := &grokMediaRequestRecorder{}
+	cfg := &config.Config{RunMode: config.RunModeSimple, Default: config.DefaultConfig{RateMultiplier: 1}, Gateway: config.GatewayConfig{Scheduling: config.GatewaySchedulingConfig{LoadBatchEnabled: false}}, Concurrency: config.ConcurrencyConfig{PingInterval: 0}}
+	billing := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(billing.Stop)
+	concurrency := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
+	repo := &terminalUsageGrokAccountRepo{openAIRetryAccountRepoStub{accounts: []*service.Account{selected, owner, parent}}}
+	gateway := service.NewOpenAIGatewayService(repo, nil, nil, nil, nil, nil, cache, cfg, nil, concurrency, nil, nil, billing, upstream, nil, nil, service.NewGrokTokenProvider(repo, nil), nil, nil)
+	h := NewOpenAIGatewayHandler(gateway, concurrency, billing, &service.APIKeyService{}, nil, nil, nil, nil, cfg)
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{ID: 101, UserID: 202, Status: service.StatusActive, GroupID: &group.ID, Group: group, User: &service.User{ID: 202, Status: service.StatusActive, Concurrency: 1}})
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 202, Concurrency: 1})
+	})
+	router.GET("/videos/:request_id", h.GrokVideoStatus)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/videos/req_123", nil))
+
+	require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+	require.Empty(t, upstream.accountIDs)
 }
 
 func TestGrokMedia_GenerateEditVideoRejectUpstreamFailoverPreserveRequestSemantics(t *testing.T) {

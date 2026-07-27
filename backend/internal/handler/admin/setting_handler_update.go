@@ -11,6 +11,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -349,6 +350,38 @@ type UpdateSettingsRequest struct {
 	AllowUserViewErrorRequests *bool `json:"allow_user_view_error_requests"`
 }
 
+func (h *SettingHandler) ensureActorTotpForStepUp(c *gin.Context) bool {
+	if c.GetString("auth_method") == service.AuditAuthMethodAdminAPIKey {
+		response.ErrorWithDetails(c, http.StatusForbidden,
+			"Admin API key cannot enable step-up verification; use an admin session with TOTP enabled",
+			"STEP_UP_ADMIN_API_KEY_FORBIDDEN", nil)
+		return false
+	}
+	subject, ok := middleware.GetAuthSubjectFromContext(c)
+	if !ok || subject.UserID <= 0 {
+		response.ErrorWithDetails(c, http.StatusForbidden,
+			"Enabling step-up verification requires an authenticated admin session",
+			"STEP_UP_ENABLE_REQUIRES_TOTP", nil)
+		return false
+	}
+	if h.userService == nil {
+		response.InternalError(c, "Step-up precondition check unavailable")
+		return false
+	}
+	user, err := h.userService.GetByID(c.Request.Context(), subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return false
+	}
+	if !user.TotpEnabled {
+		response.ErrorWithDetails(c, http.StatusBadRequest,
+			"Enable two-factor authentication (TOTP) for your account before turning on step-up verification",
+			"STEP_UP_ENABLE_REQUIRES_TOTP", nil)
+		return false
+	}
+	return true
+}
+
 // UpdateSettings 更新系统设置
 // PUT /api/v1/admin/settings
 func (h *SettingHandler) UpdateSettings(c *gin.Context) {
@@ -520,6 +553,16 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	sessionBindingEnabled := boolValueOrDefault(req.SessionBindingEnabled, previousSettings.SessionBindingEnabled)
 	stepUpEnabled := boolValueOrDefault(req.StepUpEnabled, previousSettings.StepUpEnabled)
 	adminRechargeRebateEnabled := boolValueOrDefault(req.AdminRechargeRebateEnabled, previousSettings.AdminRechargeRebateEnabled)
+	if stepUpEnabled && !previousSettings.StepUpEnabled {
+		if !h.ensureActorTotpForStepUp(c) {
+			return
+		}
+	}
+	if !stepUpEnabled && previousSettings.StepUpEnabled {
+		if !middleware.EnforceStepUpAlways(c, h.totpService, h.userService) {
+			return
+		}
+	}
 	if loginAgreementEnabled && len(loginAgreementDocuments) == 0 {
 		response.BadRequest(c, "Login agreement documents are required when enabled")
 		return
@@ -1689,6 +1732,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	if err := h.settingService.UpdateSettingsWithAuthSourceDefaults(c.Request.Context(), settings, authSourceDefaults); err != nil {
 		response.ErrorFrom(c, err)
 		return
+	}
+	if h.opsService != nil {
+		h.opsService.SetMonitoringEnabled(settings.OpsMonitoringEnabled)
 	}
 
 	// Update OpenAI fast policy (stored under dedicated key, only when provided).

@@ -230,9 +230,10 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 	}
 	sessionHash = h.gatewayService.GenerateExplicitSessionHash(c, sessionSeed)
 	boundLookupAccountID := int64(0)
+	var err error
 	if endpoint.IsVideoLookupRequest() {
 		sessionHash = service.GrokMediaVideoRequestSessionHash(requestID, subject.UserID, apiKey.ID)
-		boundLookupAccountID, err := h.gatewayService.ResolveGrokMediaVideoRequestAccount(
+		boundLookupAccountID, err = h.gatewayService.ResolveGrokMediaVideoRequestAccount(
 			c.Request.Context(), apiKey.GroupID, requestID, subject.UserID, apiKey.ID,
 		)
 		if err != nil || boundLookupAccountID <= 0 {

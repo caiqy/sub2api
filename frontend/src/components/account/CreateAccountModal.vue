@@ -5278,14 +5278,13 @@ const handleSubmit = async () => {
   form.credentials = credentials
   const extra = buildPassthroughFieldExtra(buildAnthropicExtra(buildOpenAIExtra()))
 
-  await doCreateAccount({
-    ...form,
-    group_ids: form.group_ids,
+  await createAccountAndFinish(
+    form.platform,
+    'apikey',
+    credentials,
     extra,
-    upstream_billing_probe_enabled:
-      form.platform === 'openai' ? upstreamBillingAutoProbeEnabled.value : undefined,
-    auto_pause_on_expired: autoPauseOnExpired.value
-  })
+    form.platform === 'openai' ? upstreamBillingAutoProbeEnabled.value : undefined,
+  )
 }
 
 const goBackToBasicInfo = () => {
@@ -5339,7 +5338,8 @@ const createAccountAndFinish = async (
   platform: AccountPlatform,
   type: AccountType,
   credentials: Record<string, unknown>,
-  extra?: Record<string, unknown>
+  extra?: Record<string, unknown>,
+  upstreamBillingProbeEnabled?: boolean,
 ) => {
   if (!applyTempUnschedConfig(credentials)) {
     return
@@ -5412,7 +5412,10 @@ const createAccountAndFinish = async (
     rate_multiplier: form.rate_multiplier,
     group_ids: form.group_ids,
     expires_at: form.expires_at,
-    auto_pause_on_expired: autoPauseOnExpired.value
+    auto_pause_on_expired: autoPauseOnExpired.value,
+    upstream_billing_probe_enabled: platform === 'openai' && type === 'apikey'
+      ? upstreamBillingProbeEnabled
+      : undefined,
   })
 }
 

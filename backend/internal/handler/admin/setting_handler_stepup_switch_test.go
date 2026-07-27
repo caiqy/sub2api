@@ -106,6 +106,17 @@ func TestUpdateSettingsDisableStepUpRejectsAdminAPIKey(t *testing.T) {
 	require.Equal(t, "true", repo.values[service.SettingKeyStepUpEnabled])
 }
 
+func TestUpdateSettingsPublishesOpsMonitoringSnapshot(t *testing.T) {
+	h, _ := newStepUpSwitchTestHandler(t, map[string]string{})
+	h.opsService = service.NewOpsService(nil, nil, &config.Config{Ops: config.OpsConfig{Enabled: true}}, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	require.True(t, h.opsService.IsMonitoringEnabled(t.Context()))
+	rec := doUpdateSettings(t, h, map[string]any{"ops_monitoring_enabled": false}, nil)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.False(t, h.opsService.IsMonitoringEnabled(t.Context()))
+}
+
 // 无状态转换（false→false）：不触发任何转换校验，常规保存成功且默认持久化为 false。
 func TestUpdateSettingsStepUpNoTransitionSkipsGate(t *testing.T) {
 	h, repo := newStepUpSwitchTestHandler(t, map[string]string{})
