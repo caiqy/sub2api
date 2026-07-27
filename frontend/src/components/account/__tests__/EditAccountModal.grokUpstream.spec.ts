@@ -259,6 +259,7 @@ describe('EditAccountModal Grok OAuth upstream config', () => {
     expect(toggle.attributes('aria-checked')).toBe('true')
 
     await toggle.trigger('click')
+    expect(toggle.attributes('aria-checked')).toBe('false')
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     await vi.waitFor(() => expect(updateAccountMock).toHaveBeenCalledTimes(1))
 

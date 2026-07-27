@@ -4682,14 +4682,6 @@ const handleSubmit = async () => {
       }
       applyHeaderOverride(newCredentials, headerOverrideEnabled.value, headerOverrideRows.value, 'edit')
       updatePayload.credentials = newCredentials
-
-      const newExtra: Record<string, unknown> = {
-        ...((props.account.extra as Record<string, unknown>) || {})
-      }
-      // Persist both states so a disabled account remains opted out when the
-      // backend applies the default-enabled policy to missing values.
-      newExtra[GROK_CLIENT_TOOL_CACHE_EXTRA_KEY] = grokClientToolCacheEnabled.value
-      updatePayload.extra = newExtra
     }
 
     // OpenAI: 手动覆盖订阅档位 plan_type（Plus/Pro/Free）。仅 OAuth 非影子账号：
@@ -4737,6 +4729,9 @@ const handleSubmit = async () => {
     applyOpenAIExtra(nextExtra)
     applyQuotaLimitExtra(nextExtra)
     applyPassthroughFieldExtra(nextExtra, props.account.type)
+    if (props.account.platform === 'grok' && props.account.type === 'oauth') {
+      nextExtra[GROK_CLIENT_TOOL_CACHE_EXTRA_KEY] = grokClientToolCacheEnabled.value
+    }
     if (Object.keys(nextExtra).length > 0) {
       updatePayload.extra = nextExtra
     } else if (Object.keys(currentExtra).length > 0) {

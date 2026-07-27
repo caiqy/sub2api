@@ -1262,6 +1262,7 @@ func TestOpenAIGatewayHandler_WSHTTPBridgeOrdinaryErrorUsage(t *testing.T) {
 		wantUsage      bool
 		wantErrorEvent bool
 		wantImageUsage bool
+		wantCloseCode  coderws.StatusCode
 	}{
 		{
 			name: "transport error creates one failed usage",
@@ -1270,8 +1271,9 @@ func TestOpenAIGatewayHandler_WSHTTPBridgeOrdinaryErrorUsage(t *testing.T) {
 				Status: service.StatusActive, Schedulable: true, Concurrency: 1,
 				Credentials: map[string]any{"api_key": "sk-test"}, Extra: map[string]any{"responses_websockets_v2_enabled": true},
 			},
-			upstream:  &openAIChatCompletionsHTTPUpstreamStub{err: errors.New("dial failed")},
-			wantUsage: true,
+			upstream:      &openAIChatCompletionsHTTPUpstreamStub{err: errors.New("dial failed")},
+			wantUsage:     true,
+			wantCloseCode: coderws.StatusTryAgainLater,
 		},
 		{
 			name: "non-failover HTTP error creates one failed usage",
@@ -1285,7 +1287,8 @@ func TestOpenAIGatewayHandler_WSHTTPBridgeOrdinaryErrorUsage(t *testing.T) {
 				Header:     http.Header{"Content-Type": []string{"application/json"}},
 				Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"bad bridge request"}}`)),
 			}},
-			wantUsage: true,
+			wantUsage:      true,
+			wantErrorEvent: true,
 		},
 		{
 			name: "local token error creates no failed usage",
@@ -1308,8 +1311,8 @@ func TestOpenAIGatewayHandler_WSHTTPBridgeOrdinaryErrorUsage(t *testing.T) {
 				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
 				Body:       io.NopCloser(strings.NewReader("data: {\"type\":\"error\",\"error\":{\"message\":\"typed bridge error\"}}\n\n")),
 			}},
-			wantUsage:      true,
-			wantErrorEvent: true,
+			wantUsage:     true,
+			wantCloseCode: coderws.StatusTryAgainLater,
 		},
 		{
 			name: "image result followed by error records normal usage once",
@@ -1382,7 +1385,11 @@ func TestOpenAIGatewayHandler_WSHTTPBridgeOrdinaryErrorUsage(t *testing.T) {
 			}
 			var closeErr coderws.CloseError
 			require.ErrorAs(t, err, &closeErr, "ordinary bridge failure should produce one close frame, not a client error event followed by close")
-			require.Equal(t, coderws.StatusInternalError, closeErr.Code)
+			wantCloseCode := tt.wantCloseCode
+			if wantCloseCode == 0 {
+				wantCloseCode = coderws.StatusInternalError
+			}
+			require.Equal(t, wantCloseCode, closeErr.Code)
 			select {
 			case <-done:
 			case <-time.After(3 * time.Second):
