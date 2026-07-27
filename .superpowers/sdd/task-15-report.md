@@ -28,5 +28,5 @@
 - 目标：`local-serv-ai`；唯一远程目录：`/tmp/sub2api-task15-b369bbfa849c4b8fadad749d4c66f2b9`。
 - 预检：Go `1.26.5`、Docker Server `29.2.1`。
 - 命令：`CI=true GOFLAGS='-v' TMPDIR='<remote>/src/backend/.test-tmp' TMP='<remote>/src/backend/.test-tmp' TEMP='<remote>/src/backend/.test-tmp' go test -tags=integration ./...`，退出 `0`。
-- 目标 `TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate` PASS（`4.80s`）。日志保存于 `C:/Users/caiqy/AppData/Local/Temp/sub2api-task15-b369bbfa849c4b8fadad749d4c66f2b9-integration.log`；本地 archive 与远程目录已删除。
+- 目标 `TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate` PASS（`4.80s`），`TestMigrationsRunner_UpgradesLocalV01596AcrossUpstreamStages` PASS（`4.58s`）。日志保存于 `C:/Users/caiqy/AppData/Local/Temp/sub2api-task15-b369bbfa849c4b8fadad749d4c66f2b9-integration.log`；本地 archive 与远程目录已删除。
 - 日志中保留环境/显式配置型 skip：DingTalk disabled、TLS capture/JA3 profile、并发 cache TODO、prompt-audit/Redis 未配置、OpenAI API comparison；没有 `FAIL`。
