@@ -1,8 +1,6 @@
 package service
 
-// 本文件由 gateway_service.go 纯移动拆分而来：Anthropic APIKey 直通
-// （passthrough）转发路径及其流式/非流式响应与 usage 解析。仅做代码搬迁，
-// 无任何行为变更。
+// Anthropic APIKey 直通（passthrough）转发路径及其流式/非流式响应与 usage 解析。
 
 import (
 	"bufio"

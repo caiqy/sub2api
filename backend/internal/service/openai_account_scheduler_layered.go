@@ -657,6 +657,9 @@ func (s *layeredOpenAIAccountScheduler) classifySessionStickyAccount(
 	if s.isAccountUpstreamRestrictedByChannel(ctx, account, req) {
 		return nil, true
 	}
+	if s.service != nil && s.service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel) {
+		return nil, false
+	}
 	if req.RequestedModel != "" && !account.IsModelSupported(req.RequestedModel) {
 		return nil, false
 	}

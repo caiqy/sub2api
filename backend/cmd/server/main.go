@@ -152,7 +152,8 @@ func runMainServer() {
 	if err != nil {
 		log.Fatalf("Failed to initialize application: %v", err)
 	}
-	defer app.Cleanup()
+	handlerTracker := newActiveHandlerTracker()
+	app.Server.Handler = handlerTracker.Wrap(app.Server.Handler)
 	if app.PromptAudit != nil {
 		if err := app.PromptAudit.Start(context.Background()); err != nil {
 			// Startup continues so unrelated APIs stay up. Fail-closed (unavailable)
@@ -179,12 +180,13 @@ func runMainServer() {
 
 	log.Println("Shutting down server...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	if err := app.Server.Shutdown(ctx); err != nil {
+	if err := shutdownServerWithDrain(ctx, 5*time.Second, app.Server.Shutdown, app.Server.Close, handlerTracker.Wait); err != nil {
 		log.Printf("Server forced to shutdown: %v", err)
 	}
+	app.Cleanup()
 
 	log.Println("Server exited")
 }

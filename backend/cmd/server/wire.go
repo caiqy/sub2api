@@ -7,7 +7,6 @@ import (
 	"context"
 	"log"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/ent"
@@ -118,214 +117,193 @@ func provideCleanup(
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		type cleanupStep struct {
-			name string
-			fn   func() error
-		}
-
-		// 应用层清理步骤可并行执行，基础设施资源（Redis/Ent）最后按顺序关闭。
-		parallelSteps := []cleanupStep{
-			{"OpsIngressRejectAggregator", func() error {
+		// 独立 producers 可并行停止；usage、quota、billing 和基础设施必须按依赖顺序 drain。
+		producerSteps := []cleanupPhase{
+			{name: "OpsIngressRejectAggregator", run: func(context.Context) error {
 				if opsIngressReject != nil {
 					opsIngressReject.Stop()
 				}
 				return nil
 			}},
-			{"AuthCacheInvalidationWorker", func() error {
+			{name: "AuthCacheInvalidationWorker", run: func(context.Context) error {
 				if authCacheInvalidationWorker != nil {
 					authCacheInvalidationWorker.Stop()
 				}
 				return nil
 			}},
-			{"AuthCacheInvalidationSubscriber", func() error {
+			{name: "AuthCacheInvalidationSubscriber", run: func(context.Context) error {
 				if apiKeyService != nil {
 					apiKeyService.StopAuthCacheInvalidationSubscriber()
 				}
 				return nil
 			}},
-			{"OpsRuntimeSettingsRefresh", func() error {
+			{name: "OpsRuntimeSettingsRefresh", run: func(context.Context) error {
 				if opsService != nil {
 					opsService.StopRuntimeSettingsRefresh()
 				}
 				return nil
 			}},
-			{"PromptAuditService", func() error {
+			{name: "PromptAuditService", run: func(ctx context.Context) error {
 				if promptAudit != nil {
 					return promptAudit.Shutdown(ctx)
 				}
 				return nil
 			}},
-			{"OpsScheduledReportService", func() error {
+			{name: "OpsScheduledReportService", run: func(context.Context) error {
 				if opsScheduledReport != nil {
 					opsScheduledReport.Stop()
 				}
 				return nil
 			}},
-			{"OpsCleanupService", func() error {
+			{name: "OpsCleanupService", run: func(context.Context) error {
 				if opsCleanup != nil {
 					opsCleanup.Stop()
 				}
 				return nil
 			}},
-			{"OpsSystemLogSink", func() error {
+			{name: "OpsSystemLogSink", run: func(context.Context) error {
 				if opsSystemLogSink != nil {
 					opsSystemLogSink.Stop()
 				}
 				return nil
 			}},
-			{"AuditLogService", func() error {
+			{name: "AuditLogService", run: func(context.Context) error {
 				if auditLog != nil {
 					auditLog.Stop()
 				}
 				return nil
 			}},
-			{"OpsAlertEvaluatorService", func() error {
+			{name: "OpsAlertEvaluatorService", run: func(context.Context) error {
 				if opsAlertEvaluator != nil {
 					opsAlertEvaluator.Stop()
 				}
 				return nil
 			}},
-			{"OpsAggregationService", func() error {
+			{name: "OpsAggregationService", run: func(context.Context) error {
 				if opsAggregation != nil {
 					opsAggregation.Stop()
 				}
 				return nil
 			}},
-			{"OpsMetricsCollector", func() error {
+			{name: "OpsMetricsCollector", run: func(context.Context) error {
 				if opsMetricsCollector != nil {
 					opsMetricsCollector.Stop()
 				}
 				return nil
 			}},
-			{"SchedulerSnapshotService", func() error {
+			{name: "SchedulerSnapshotService", run: func(context.Context) error {
 				if schedulerSnapshot != nil {
 					schedulerSnapshot.Stop()
 				}
 				return nil
 			}},
-			{"UsageCleanupService", func() error {
+			{name: "UsageCleanupService", run: func(context.Context) error {
 				if usageCleanup != nil {
 					usageCleanup.Stop()
 				}
 				return nil
 			}},
-			{"IdempotencyCleanupService", func() error {
+			{name: "IdempotencyCleanupService", run: func(context.Context) error {
 				if idempotencyCleanup != nil {
 					idempotencyCleanup.Stop()
 				}
 				return nil
 			}},
-			{"BatchImageCleanupService", func() error {
+			{name: "BatchImageCleanupService", run: func(context.Context) error {
 				if batchImageCleanup != nil {
 					batchImageCleanup.Stop()
 				}
 				return nil
 			}},
-			{"BatchImageWorkerRuntime", func() error {
+			{name: "BatchImageWorkerRuntime", run: func(context.Context) error {
 				if batchImageWorker != nil {
 					batchImageWorker.Stop()
 				}
 				return nil
 			}},
-			{"TokenRefreshService", func() error {
+			{name: "TokenRefreshService", run: func(context.Context) error {
 				tokenRefresh.Stop()
 				return nil
 			}},
-			{"AccountExpiryService", func() error {
+			{name: "AccountExpiryService", run: func(context.Context) error {
 				accountExpiry.Stop()
 				return nil
 			}},
-			{"ProxyExpiryService", func() error {
+			{name: "ProxyExpiryService", run: func(context.Context) error {
 				proxyExpiry.Stop()
 				return nil
 			}},
-			{"SubscriptionExpiryService", func() error {
+			{name: "SubscriptionExpiryService", run: func(context.Context) error {
 				subscriptionExpiry.Stop()
 				return nil
 			}},
-			{"SubscriptionService", func() error {
+			{name: "SubscriptionService", run: func(context.Context) error {
 				if subscriptionService != nil {
 					subscriptionService.Stop()
 				}
 				return nil
 			}},
-			{"PricingService", func() error {
+			{name: "PricingService", run: func(context.Context) error {
 				pricing.Stop()
 				return nil
 			}},
-			{"EmailQueueService", func() error {
+			{name: "EmailQueueService", run: func(context.Context) error {
 				emailQueue.Stop()
 				return nil
 			}},
-			{"BillingCacheService", func() error {
-				billingCache.Stop()
-				return nil
-			}},
-			{"UsageRecordWorkerPool", func() error {
-				if usageRecordWorkerPool != nil {
-					usageRecordWorkerPool.Stop()
-				}
-				return nil
-			}},
-			{"OAuthService", func() error {
+			{name: "OAuthService", run: func(context.Context) error {
 				oauth.Stop()
 				return nil
 			}},
-			{"OpenAIOAuthService", func() error {
+			{name: "OpenAIOAuthService", run: func(context.Context) error {
 				openaiOAuth.Stop()
 				return nil
 			}},
-			{"GeminiOAuthService", func() error {
+			{name: "GeminiOAuthService", run: func(context.Context) error {
 				geminiOAuth.Stop()
 				return nil
 			}},
-			{"AntigravityOAuthService", func() error {
+			{name: "AntigravityOAuthService", run: func(context.Context) error {
 				antigravityOAuth.Stop()
 				return nil
 			}},
-			{"GrokOAuthService", func() error {
+			{name: "GrokOAuthService", run: func(context.Context) error {
 				if grokOAuth != nil {
 					grokOAuth.Stop()
 				}
 				return nil
 			}},
-			{"OpenAIWSPool", func() error {
+			{name: "OpenAIWSPool", run: func(context.Context) error {
 				if openAIGateway != nil {
 					openAIGateway.CloseOpenAIWSPool()
 				}
 				return nil
 			}},
-			{"ScheduledTestRunnerService", func() error {
+			{name: "ScheduledTestRunnerService", run: func(context.Context) error {
 				if scheduledTestRunner != nil {
 					scheduledTestRunner.Stop()
 				}
 				return nil
 			}},
-			{"BackupService", func() error {
+			{name: "BackupService", run: func(context.Context) error {
 				if backupSvc != nil {
 					backupSvc.Stop()
 				}
 				return nil
 			}},
-			{"PaymentOrderExpiryService", func() error {
+			{name: "PaymentOrderExpiryService", run: func(context.Context) error {
 				if paymentOrderExpiry != nil {
 					paymentOrderExpiry.Stop()
 				}
 				return nil
 			}},
-			{"ChannelMonitorRunner", func() error {
+			{name: "ChannelMonitorRunner", run: func(context.Context) error {
 				if channelMonitorRunner != nil {
 					channelMonitorRunner.Stop()
 				}
 				return nil
 			}},
-			{"UserPlatformQuotaUsageFlusher", func() error {
-				if quotaFlusher != nil {
-					quotaFlusher.Stop()
-				}
-				return nil
-			}},
-			{"UpstreamBillingProbeService", func() error {
+			{name: "UpstreamBillingProbeService", run: func(context.Context) error {
 				if upstreamBillingProbe != nil {
 					upstreamBillingProbe.Stop()
 				}
@@ -333,58 +311,43 @@ func provideCleanup(
 			}},
 		}
 
-		infraSteps := []cleanupStep{
-			{"Redis", func() error {
+		phases := []cleanupPhase{
+			{name: "producers", run: func(ctx context.Context) error {
+				return runCleanupParallel(ctx, producerSteps...)
+			}},
+			{name: "usage-record-drain", run: func(context.Context) error {
+				if usageRecordWorkerPool != nil {
+					usageRecordWorkerPool.Stop()
+				}
+				return nil
+			}},
+			{name: "quota-final-flush", run: func(context.Context) error {
+				if quotaFlusher != nil {
+					quotaFlusher.Stop()
+				}
+				return nil
+			}},
+			{name: "billing-cache-drain", run: func(context.Context) error {
+				if billingCache != nil {
+					billingCache.Stop()
+				}
+				return nil
+			}},
+			{name: "Redis", run: func(context.Context) error {
 				if rdb == nil {
 					return nil
 				}
 				return rdb.Close()
 			}},
-			{"Ent", func() error {
+			{name: "Ent", run: func(context.Context) error {
 				if entClient == nil {
 					return nil
 				}
 				return entClient.Close()
 			}},
 		}
-
-		runParallel := func(steps []cleanupStep) {
-			var wg sync.WaitGroup
-			for i := range steps {
-				step := steps[i]
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					if err := step.fn(); err != nil {
-						log.Printf("[Cleanup] %s failed: %v", step.name, err)
-						return
-					}
-					log.Printf("[Cleanup] %s succeeded", step.name)
-				}()
-			}
-			wg.Wait()
-		}
-
-		runSequential := func(steps []cleanupStep) {
-			for i := range steps {
-				step := steps[i]
-				if err := step.fn(); err != nil {
-					log.Printf("[Cleanup] %s failed: %v", step.name, err)
-					continue
-				}
-				log.Printf("[Cleanup] %s succeeded", step.name)
-			}
-		}
-
-		runParallel(parallelSteps)
-		runSequential(infraSteps)
-
-		// Check if context timed out
-		select {
-		case <-ctx.Done():
-			log.Printf("[Cleanup] Warning: cleanup timed out after 10 seconds")
-		default:
-			log.Printf("[Cleanup] All cleanup steps completed")
+		if runCleanupPhases(ctx, phases...) {
+			log.Printf("[Cleanup] All cleanup phases completed")
 		}
 	}
 }

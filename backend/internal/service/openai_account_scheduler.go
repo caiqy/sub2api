@@ -585,6 +585,9 @@ func (s *defaultOpenAIAccountScheduler) classifySessionStickyAccount(
 	if isOpenAIAccountUpstreamRestrictedByChannel(ctx, s.service, account, req) {
 		return nil, true
 	}
+	if s.service != nil && s.service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel) {
+		return nil, false
+	}
 	if req.RequestedModel != "" && !account.IsModelSupported(req.RequestedModel) {
 		return nil, false
 	}
@@ -1646,6 +1649,7 @@ func (s *defaultOpenAIAccountScheduler) finishLoadBalanceSelectionFallback(
 	cfg := s.service.schedulingConfig()
 	compactBlocked := attempt.compactBlocked
 	// WaitPlan.MaxConcurrency 使用 Concurrency（非 EffectiveLoadFactor），因为 WaitPlan 控制的是 Redis 实际并发槽位等待。
+	// overflow 才启用 64 次 probe；四 pass 依次检查未尝试/未满、已尝试/未满、未尝试/已满、已尝试/已满，避免扩展池改变正常候选顺序。
 	passes := 1
 	if budget != nil && budget.limited {
 		passes = 4
