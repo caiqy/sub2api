@@ -55,7 +55,7 @@
 | 能力 | 受影响 tag | 当前状态 | 证据 |
 | --- | --- | --- | --- |
 | changed-files 与本地能力交集 | `v0.1.160` | 证据已补齐，等待独立复审 | Task 10：133 paths、12 个精确交集路径、14 项矩阵结论及 Task 9 门禁证据见第 1845 行。 |
-| changed-files 与本地能力交集 | `v0.1.161` | 已闭合 | Task 13：257 paths、22 个精确交集路径、`protected=21`、`manual=1`、`gap=0`，见本台账末尾。 |
+| changed-files 与本地能力交集 | `v0.1.161` | 证据修正待 Sol 复审 | Task 13：257 paths、22 个精确交集路径、`protected=21`、`manual=1`、`gap=0`；跨路径补充回归另列，见 `Task 13`。 |
 | changed-files 与本地能力交集 | `v0.1.162` 至 `v0.1.165` | 待执行 | v0.1.162 在独立 reviewer PASS 前保持封闭；后续 tag 的实际 diff 与调用链审查尚未开始。 |
 
 ## v0.1.160
@@ -71,11 +71,12 @@
 ## v0.1.161
 
 - changed-files/冲突：已合并 `f2158292c`，26 个冲突与 Task 11 的六项 review finding 已闭合；Task 12 follow-up 不改写 merge 历史。
-- 聚焦测试：模型冷却、advanced/layered scheduler、fallback/WaitPlan、DB fresh recheck、session/step-up、Grok 视频/owner/spooling/redaction、content moderation、HTTP/WS failover、PromptAdminService Wire bind、YAML、API Key/billing probe UI 与 migration/repository 均 GREEN。
+- 精确交集：22 条路径表的 Ent/Wire、用户资源、sticky/session、step-up、spooling、prompt cache、passthrough、images、failed usage、DB fresh recheck、scheduler、settings、quota、billing、migration、i18n 与 dependency gate 计为 `protected=21`、`manual=1`、`gap=0`。
+- 跨路径补充聚焦回归（不属于上述 22 条路径或计数）：模型冷却、fallback/WaitPlan、Grok 视频/owner/redaction、content moderation、HTTP/WS failover、YAML、API Key/billing probe UI 与 migration/repository 均 GREEN。
 - WS V2：`0775a6063` 的 terminal ownership 放宽与 `f1cde1b52` 的反向测试适配均非最终 GREEN；`c3bfb765f` 恢复 created-only ownership，`47a6c031e` 仅补齐正常 terminal-first fixture 的同 ID `response.created`。
 - 本地门禁：最终 `make test`、进程级 Git `sh` PATH 下的 `make build`、两轮 `make -C backend generate` 和 Ent/Wire 零 diff、静态/冲突/VERSION/旧 first-token timeout/migration 集合检查均 GREEN；VERSION 保持 `0.1.159.6`。
 - 远程门禁：archive `07029cc45` 在 `local-serv-ai`（Go `1.26.5`、Docker `29.2.1`）以隔离 `.test-tmp` 完整 integration GREEN；migration 新库幂等与从本地 v0.1.159.6 升级均 PASS，16 个已接受环境型 skip 未命中本阶段能力。
-- 阶段结论：`DONE_WITH_CONCERNS`。Task 13 已以 `gap=0` 闭合 v0.1.161；Task 14/v0.1.162 在独立 reviewer PASS 前保持封闭。风险为 Windows Git `sh`/历史文件锁及既有前端 advisory。
+- 阶段结论：`DONE_WITH_CONCERNS`。v0.1.161 实现门禁以精确 `gap=0` 闭合，Task 13 docs/evidence 修正待 Sol 复审；Task 14/v0.1.162 在该复审 PASS 前保持封闭。风险为 Windows Git `sh`/历史文件锁及既有前端 advisory。
 
 ## v0.1.162
 
@@ -372,7 +373,7 @@ backend/migrations/openai_long_context_billing_migration_test.go
 ```
 - Task 5 监督复核：`git diff-tree --no-commit-id --name-status -r 98fbd1448ad38fbf45fb7334a0cd508576f0fd74` 仅输出 `M docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`；`git diff --cached --exit-code`、generated-path diff 均退出 `0`。`git status --short` 仅余协调者 plan、OpenSpec tasks/progress 和受保护根 `.comet/current-change.json`、`paseo.json`；无 Task 5 源码、生成物或暂存项。`git worktree list --porcelain` 仅主工作区与两个既有 Task 27 detached worktree，且两个 `Test-Path`（旧 nonce 与 `w84b854`）均为 `False`。
 - `v0.1.160`：证据已补齐，等待独立复审；133 paths、9 个冲突、12 个交集路径及 Task 9 门禁证据见 Task 10。
-- `v0.1.161`：已闭合。257 paths、22 个精确交集路径，`protected=21`、`manual=1`、`gap=0`；Task 14/v0.1.162 仍待独立 reviewer PASS。
+- `v0.1.161`：实现门禁已闭合，docs/evidence 修正待 Sol 复审。257 paths、22 个精确交集路径，`protected=21`、`manual=1`、`gap=0`；跨路径补充回归不计入该统计。Task 14/v0.1.162 在复审 PASS 前封闭。
 - `v0.1.162`：待执行。
 - `v0.1.163`：待执行。
 - `v0.1.164`：待执行。
@@ -382,7 +383,7 @@ backend/migrations/openai_long_context_billing_migration_test.go
 
 - 历史阻塞（已解决，归档 HEAD `c8e0110a9a2354453753db9c4acae0ed7570458d`）：原 Make/PowerShell/Go 预检依次暴露 GNU Make 缺失、Go `1.26.1` 低于 directive、PowerShell 入口缺失；后续规范已改为 Linux 原生 gate，vfox Go `1.26.5` 和 Docker `29.2.1` 已在新 nonce 中验证。
 - 历史阻塞（已解决，规范 HEAD `849f956992178e25ab2074e1e4cc596d29f8834f`）：首次原生 full RED 暴露 handler body spool/panic、repository usage-detail transaction/retention 与 hidden UI resource ordering 断言；后续测试修复及 HEAD `99cb81de306cb0e8ea811387e362e4d601f6f4b0` 的新 nonce focused/full GREEN 已解决。
-- 当前状态：阶段 0 本地与远程门禁通过；七项非 migration/repository target skip 是已分类的基线风险。Task 5 为 `DONE_WITH_CONCERNS`：HEAD 生成内容经 detached worktree 双轮验证稳定，但受监视 Windows 工作区的随机文件映射风险仍未定因，隔离门禁与工作区门禁的等价性待 reviewer 判断。`v0.1.160`、`v0.1.161` 阶段均已闭合；`v0.1.162` 至 `v0.1.165` 尚未开始，且 Task 14/v0.1.162 须先获独立 reviewer PASS。
+- 当前状态：阶段 0 本地与远程门禁通过；七项非 migration/repository target skip 是已分类的基线风险。Task 5 为 `DONE_WITH_CONCERNS`：HEAD 生成内容经 detached worktree 双轮验证稳定，但受监视 Windows 工作区的随机文件映射风险仍未定因，隔离门禁与工作区门禁的等价性待 reviewer 判断。`v0.1.160` 已闭合；`v0.1.161` 实现门禁已闭合但 docs/evidence 修正待 Sol 复审；`v0.1.162` 至 `v0.1.165` 尚未开始，且 Task 14/v0.1.162 须先获该复审 PASS。
 
 ## Task 11 第 1 轮复审修复
 
@@ -1711,7 +1712,7 @@ frontend/src/i18n/locales/en/admin/resources.ts
 | failed usage | -- | `backend/internal/service/ops_service_user_error_test.go` | -- | -- | `backend/internal/repository/usage_log_repo.go` | `backend/internal/service/usage_log.go` | `protected`: `go -C backend test -tags=unit ./internal/service -run '^TestOpenAIForwardStreamingResponseFailedReturnsUsageWithError$'` |
 | user resource control | -- | `backend/internal/repository/user_repo.go` | -- | `backend/internal/service/admin_service.go` | -- | `backend/internal/repository/user_repo.go` | `protected`: `go -C backend test -tags=unit ./internal/service -run '^TestAdminServiceUpdateUserBlockedGroups$'` |
 | user bulk limits | -- | `backend/internal/handler/admin/user_handler_batch_limits_test.go` | -- | -- | -- | -- | `protected`: `go -C backend test ./internal/handler/admin -run '^TestUserHandlerBatchUpdateLimitsAcceptsPartialAndZeroValues$'` |
-| public group blocking | -- | `backend/internal/handler/admin/user_handler_list_apikey_group_test.go` | -- | `backend/internal/service/admin_group.go` | `backend/internal/repository/group_repo.go` | `backend/internal/repository/group_repo.go` | `protected`: `go -C backend test -tags=unit ./internal/service -run '^TestUserCanBindGroupRejectsBlockedPublicGroup$'` |
+| API Key group ID 解析 | -- | `backend/internal/handler/admin/user_handler_list_apikey_group_test.go` | -- | `backend/internal/service/admin_group.go` | `backend/internal/repository/group_repo.go` | `backend/internal/repository/group_repo.go` | `protected`: `go -C backend test ./internal/handler/admin -run '^TestAdminUserList_ParsesAPIKeyGroupID$' -count=1`（exit `0`，PASS） |
 | menu hiding | -- | `backend/internal/repository/user_repo.go` | -- | -- | -- | `backend/internal/repository/user_repo.go` | `protected`: `go -C backend test -tags=integration ./internal/repository -run '^TestUserRepoSuite$/TestHiddenUIResourcesRoundTrip$'` |
 | frontend translations | `frontend/src/i18n/locales/en/common.ts` | `frontend/src/i18n/locales/en/admin/settings.ts` | `frontend/src/i18n/locales/en/batchImage.ts` | `frontend/src/i18n/locales/en/admin/overview.ts` | `frontend/src/i18n/locales/en/admin/settings.ts` | `frontend/src/i18n/locales/en/admin/resources.ts` | `protected`: `pnpm --dir frontend run test:run -- src/i18n/__tests__/localeKeysExist.spec.ts` |
 | subscription quota atomic reset | -- | `backend/internal/service/subscription_service.go`<br>`backend/internal/service/user_subscription_daily_quota_test.go` | `backend/internal/service/user_subscription.go` | -- | -- | -- | `protected`: `go -C backend test ./internal/service -run '^TestAdminResetQuota_KeepsCacheAfterAtomicResetFailure$'`; the untagged `service` test asserts `resetUsageWindowsCalled`, selected daily/weekly windows, and an unchanged L1 cache (`cache.deletedKeys` empty) when the atomic reset fails. |
@@ -1915,13 +1916,13 @@ final absence check：JSON `success=true, exit_code=0`。
 ## Task 13：v0.1.161 能力矩阵与证据封闭（2026-07-27）
 
 - 状态：`DONE_WITH_CONCERNS`。起点为 `0595aa671daa90d46d3e030c84a6b096adc019af`；本节只读核对既有提交、报告和日志，不修改行为代码、不构造 TDD RED，且不重跑 Task 12 heavy gates。
-- tag changed-files：`git diff --name-only 'v0.1.160^{}..v0.1.161^{}'` 为 257 个路径，逐字原始清单保留于 `TASK6:v0.1.161:raw`（第 560-820 行）。与阶段 0 矩阵的实际交集为 22 个精确路径，均有既有测试、调用链或人工证据：`protected=21`、`manual=1`、`gap=0`。
+- tag changed-files：`git diff --name-only 'v0.1.160^{}..v0.1.161^{}'` 为 257 个路径，逐字原始清单以稳定 marker `TASK6:v0.1.161:raw:begin/end` 为准（当前快照第 562-822 行）。与阶段 0 矩阵的实际交集为下表 22 个精确路径，均有既有测试、调用链或人工证据：`protected=21`、`manual=1`、`gap=0`。
 
 | 交集路径 | 能力与结论 | 精确既有证据 |
 | --- | --- | --- |
 | `backend/cmd/server/wire_gen.go` | Ent/Wire，`protected` | `go -C backend test ./cmd/server`；Task 12 两轮 `make -C backend generate` 后 `backend/ent` 与 `wire_gen.go` 均零 diff。 |
 | `backend/internal/handler/admin/user_handler_batch_limits_test.go` | user bulk limits，`protected` | `TestUserHandlerBatchUpdateLimitsAcceptsPartialAndZeroValues`。 |
-| `backend/internal/handler/admin/user_handler_list_apikey_group_test.go` | public group blocking，`protected` | `TestUserCanBindGroupRejectsBlockedPublicGroup`；调用链 `validateAPIKeyGroupAllowed -> abortIfAPIKeyGroupNotAllowed`。 |
+| `backend/internal/handler/admin/user_handler_list_apikey_group_test.go` | API Key group ID 解析，`protected` | `TestAdminUserList_ParsesAPIKeyGroupID`；本轮 `go -C backend test ./internal/handler/admin -run '^TestAdminUserList_ParsesAPIKeyGroupID$' -count=1` exit `0`、PASS。 |
 | `backend/internal/repository/user_repo.go` | user resource control/menu hiding，`protected` | `TestAdminServiceUpdateUserBlockedGroups` 与 integration `TestUserRepoSuite/TestHiddenUIResourcesRoundTrip`。 |
 | `backend/internal/server/middleware/session_binding.go` | Grok/platform sticky、session，`protected` | `TestLayered_SessionStickyPreservesGrokBinding`、`TestGatewayService_SelectAccountForModelWithPlatform_StickyDisabledBypassesStickyReadAndWrite`、`TestGatewayService_SelectAccountForModelWithPlatform_StickySession`。 |
 | `backend/internal/server/middleware/step_up.go` | step-up，`protected` | `TestEnforceStepUpPassesWithGrant`；Task 11 的 enable/disable 转换修复聚焦测试通过。 |
@@ -1942,35 +1943,36 @@ final absence check：JSON `success=true, exit_code=0`。
 | `frontend/src/i18n/locales/en/admin/settings.ts` | frontend translations，`protected` | `pnpm --dir frontend run test:run -- src/i18n/__tests__/localeKeysExist.spec.ts`；Task 12 `make test` 亦通过。 |
 | `frontend/vite.config.ts` | dependencies/local test gates，`manual` | Task 6 `go -C backend mod verify` 与 `pnpm --dir frontend install --frozen-lockfile` 均通过且无 tracked diff；Task 12 `make test` 通过。 |
 
-- merge 与冲突台账：`f2158292c7ff3de4caa7ec22f9b7148400948f08` 的第二父及 `v0.1.161^{}` 为 `19149ca196eeae4a4482e5299dc6fa4ba0b06c8c`。原始 26 个 U 文件均为融合而非选边，`git show --remerge-diff f2158292c` 与该集合相符：
-  1. `backend/cmd/server/VERSION`：保留 `0.1.159.6`。
-  2. `backend/cmd/server/wire_gen.go`：保留 PromptAdminService bind 并吸收 auth-cache/outbox 图。
-  3. `backend/internal/config/config_test.go`：同存本地配置覆盖与上游默认值/环境读取。
-  4. `backend/internal/handler/admin/setting_handler.go`：同存本地 runtime/session 与上游 step-up、审计、充值返利字段。
-  5. `backend/internal/handler/admin/setting_handler_update.go`：同存本地热更新与上游 step-up 更新。
-  6. `backend/internal/handler/grok_media.go`：同存 spooling/redaction/usage/sticky 与 generation/video 入口。
-  7. `backend/internal/handler/grok_media_test.go`：同存 spool/redaction 与 capability/video 覆盖。
-  8. `backend/internal/handler/openai_gateway_handler_test.go`：保留 Responses/WS failover/usage，吸收上游并发支撑且不恢复旧 timeout。
-  9. `backend/internal/repository/migrations_schema_integration_test.go`：同存语义空默认值、本地 staged upgrade 和上游 runner lock 覆盖。
-  10. `backend/internal/server/routes/gateway.go`：保留 usage detail/Grok WS 拒绝并纳入 body limit/video content。
-  11. `backend/internal/service/account_service.go`：同时满足 temp-unschedulable 与 model-availability 查询。
-  12. `backend/internal/service/admin_account.go`：同存 probe 关闭和上游 ProbeEnabled 更新。
-  13. `backend/internal/service/gateway_multiplatform_test.go`：测试桩实现两个 repository 契约。
-  14. `backend/internal/service/gemini_multiplatform_test.go`：测试桩实现两个 repository 契约。
-  15. `backend/internal/service/grok_media.go`：保留解析/映射/CLI 约束，吸收 owner/status/官方 URL 限制。
-  16. `backend/internal/service/openai_alpha_search.go`：保留 failover side effect，限制 PAT/tool 401 永久置错。
-  17. `backend/internal/service/openai_embeddings.go`：保留响应头与非永久禁用前提下的 pool retry。
-  18. `backend/internal/service/openai_gateway_grok.go`：保留 attempt/延迟记录，吸收一次 encrypted-content 清理重试。
-  19. `backend/internal/service/openai_gateway_passthrough.go`：canonical model 错误处理与本地 failover/Ops 同存。
-  20. `backend/internal/service/openai_images.go`：保留响应头和条件 pool retry。
-  21. `backend/internal/service/openai_images_responses.go`：保留响应头/OAuth 条件重试，Responses image 不同账号重试。
-  22. `deploy/config.example.yaml`：同存 128 MiB 读取上限、32 MiB text body 和 8 MiB 非流默认值。
-  23. `frontend/src/App.vue`：同存自定义菜单可见性与 favicon。
-  24. `frontend/src/components/account/CreateAccountModal.vue`：同存本地能力与 billing probe/expiry payload。
-  25. `frontend/src/components/account/__tests__/CreateAccountModal.spec.ts`：保留 passthrough/mixed-channel fixture。
-  26. `frontend/src/views/admin/SettingsView.vue`：同存 gateway runtime/scheduler/session 与 step-up 开关。
+- 跨路径补充聚焦回归（不计入 22 条精确路径或 `protected=21`、`manual=1`、`gap=0`）：模型冷却、fallback/WaitPlan、Grok 视频/owner/redaction、content moderation、HTTP/WS failover、YAML、API Key/billing probe UI 与 migration/repository 均已有 Task 12 GREEN 证据。
+- merge 与冲突台账：`f2158292c7ff3de4caa7ec22f9b7148400948f08` 的第二父及 `v0.1.161^{}` 为 `19149ca196eeae4a4482e5299dc6fa4ba0b06c8c`。26 个原始 U 文件均逐项人工决议，`git show --remerge-diff f2158292c` 与该集合相符：
+  1. `backend/cmd/server/VERSION`：按中间版本策略只保留本地 `0.1.159.6`。
+  2. `backend/cmd/server/wire_gen.go`：融合本地 PromptAdminService bind 与上游 auth-cache/outbox 图。
+  3. `backend/internal/config/config_test.go`：融合本地配置覆盖与上游默认值/环境读取。
+  4. `backend/internal/handler/admin/setting_handler.go`：融合本地 runtime/session 与上游 step-up、审计、充值返利字段。
+  5. `backend/internal/handler/admin/setting_handler_update.go`：融合本地热更新与上游 step-up 更新。
+  6. `backend/internal/handler/grok_media.go`：融合 spooling/redaction/usage/sticky 与 generation/video 入口。
+  7. `backend/internal/handler/grok_media_test.go`：融合 spool/redaction 与 capability/video 覆盖。
+  8. `backend/internal/handler/openai_gateway_handler_test.go`：融合 Responses/WS failover/usage 与上游并发支撑，不恢复旧 timeout。
+  9. `backend/internal/repository/migrations_schema_integration_test.go`：融合语义空默认值、本地 staged upgrade 和上游 runner lock 覆盖。
+  10. `backend/internal/server/routes/gateway.go`：融合 usage detail/Grok WS 拒绝与 body limit/video content。
+  11. `backend/internal/service/account_service.go`：融合 temp-unschedulable 与 model-availability 查询。
+  12. `backend/internal/service/admin_account.go`：融合 probe 关闭和上游 ProbeEnabled 更新。
+  13. `backend/internal/service/gateway_multiplatform_test.go`：采用补全测试桩以实现两个 repository 契约。
+  14. `backend/internal/service/gemini_multiplatform_test.go`：采用补全测试桩以实现两个 repository 契约。
+  15. `backend/internal/service/grok_media.go`：融合解析/映射/CLI 约束与 owner/status/官方 URL 限制。
+  16. `backend/internal/service/openai_alpha_search.go`：融合 failover side effect 与 PAT/tool 401 永久置错限制。
+  17. `backend/internal/service/openai_embeddings.go`：融合响应头与非永久禁用前提下的 pool retry。
+  18. `backend/internal/service/openai_gateway_grok.go`：融合 attempt/延迟记录与一次 encrypted-content 清理重试。
+  19. `backend/internal/service/openai_gateway_passthrough.go`：融合 canonical model 错误处理与本地 failover/Ops。
+  20. `backend/internal/service/openai_images.go`：融合响应头和条件 pool retry。
+  21. `backend/internal/service/openai_images_responses.go`：融合响应头/OAuth 条件重试与 Responses image 不同账号重试。
+  22. `deploy/config.example.yaml`：融合 128 MiB 读取上限、32 MiB text body 和 8 MiB 非流默认值。
+  23. `frontend/src/App.vue`：融合自定义菜单可见性与 favicon。
+  24. `frontend/src/components/account/CreateAccountModal.vue`：融合本地能力与 billing probe/expiry payload。
+  25. `frontend/src/components/account/__tests__/CreateAccountModal.spec.ts`：采用保留 passthrough/mixed-channel fixture 的测试策略。
+  26. `frontend/src/views/admin/SettingsView.vue`：融合 gateway runtime/scheduler/session 与 step-up 开关。
 - Task 11 follow-up：`1b80f95c9` 闭合 6 项 finding：step-up 会话/TOTP、Grok video owner binding、API Key helper quota/notify、billing probe UI、Ops monitoring snapshot、YAML 空格与 body limits；`a534148f3` 记录修复，`2fce42855` 修正状态。Sol 复审 PASS（`ses_05e81d823ffe1nVy2t46bqPWUk`）。
 - Task 12 完整历史：`0775a6063` 是初始兼容集合；`f1cde1b52` 是无效反向测试，绝非 GREEN；`c3bfb765f` 恢复 created-only；`47a6c031e` 对齐 fixture；`07029cc45` 清除 Grok lint 死赋值；`81aa202ba` 记录 docs；`0595aa671` 协调 checkoff。Sol thorough review PASS（`ses_05e2803fbffeeoKJpSwmoE2aGm`）。
 - created-only 契约：仅同 ID `response.created` 可绑定空 active turn；外来 delta/terminal 不计 usage、不完成 turn、不释放 permit。正常 fixture 必须先发送同 ID created，随后才发送 delta/terminal。`TestObserveUpstreamMessage_BindsOnlyResponseCreated` 在 `0775a6063` 的 terminal 放宽行为上真实 RED，`c3bfb765f` 后与 `go test ./internal/service/openai_ws_v2 -count=1` GREEN；`47a6c031e` 只补 fixture，不放宽契约。
 - Task 12 聚焦覆盖已包含模型冷却、advanced/layered scheduler、fallback/WaitPlan、DB recheck、sticky、step-up、Grok owner/spooling/redaction/video URL、API Key helper、billing probe、Ops snapshot、YAML、moderation、HTTP/WS failover、Wire bind 和 migration 181-184。最终 `make test` 为 201 files/1537 tests，`make build` 通过；双轮 generate/diff、静态/VERSION/timeout/migration 核验及 remote integration 均通过。`VERSION=0.1.159.6`，已移除的 `openai-first-token-timeout` 未恢复。remote `local-serv-ai` 为 Go 1.26.5/Docker 29.2.1，日志无 FAIL/panic，archive 和远端目录均已清理并保留日志；16 个 skip 是已接受环境基线，不命中本阶段能力。
-- 放行边界：v0.1.161 的矩阵和证据已闭合，`gap=0`。Task 14/v0.1.162 在独立 reviewer PASS 前保持封闭；不因此开始下一 tag、push、tag、release、deploy 或合并 main。
+- 放行边界：v0.1.161 实现门禁的精确矩阵为 `gap=0`，本轮 docs/evidence 修正待 Sol 复审。Task 14/v0.1.162 在该复审 PASS 前保持封闭；不因此开始下一 tag、push、tag、release、deploy 或合并 main。
