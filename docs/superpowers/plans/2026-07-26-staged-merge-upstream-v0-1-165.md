@@ -417,11 +417,11 @@ finally {
 **文件：**
 - 修改：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
 
-- [ ] **步骤 1：记录本段 changed-files、冲突台账、能力结论和门禁证据**
+- [x] **步骤 1：记录本段 changed-files、冲突台账、能力结论和门禁证据**
 
   预期：矩阵中该 tag 的每个交集都有 `protected` 或 `manual` 结论、命令/调用链证据和阶段结果；无遗留 `gap`。ledger 写入 merge SHA、第二父、修复 SHA、远程日志路径与清理结果。
 
-- [ ] **步骤 2：提交证据并判定下一段入口**
+- [x] **步骤 2：提交证据并判定下一段入口**
 
   执行：
   ```powershell
