@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"context"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -191,5 +193,86 @@ func TestBuildCyberPolicyOpsErrorEntry_StatusCode(t *testing.T) {
 			require.Equal(t, "cyber_policy", entry.ErrorType)
 			require.Equal(t, "request", entry.ErrorPhase)
 		})
+	}
+}
+
+type blockingCyberModerationSettings struct {
+	service.SettingRepository
+}
+
+func (r *blockingCyberModerationSettings) GetValue(context.Context, string) (string, error) {
+	return "true", nil
+}
+
+func (r *blockingCyberModerationSettings) GetMultiple(context.Context, []string) (map[string]string, error) {
+	return map[string]string{
+		service.SettingKeyRiskControlEnabled:      "true",
+		service.SettingKeyContentModerationConfig: "",
+	}, nil
+}
+
+type blockingCyberModerationRepo struct {
+	service.ContentModerationRepository
+	started chan struct{}
+}
+
+func (r *blockingCyberModerationRepo) CreateLog(ctx context.Context, _ *service.ContentModerationLog) error {
+	select {
+	case r.started <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+type cyberBillingContextRepo struct {
+	service.UsageBillingRepository
+	contexts chan error
+}
+
+func (r *cyberBillingContextRepo) Apply(ctx context.Context, _ *service.UsageBillingCommand) (*service.UsageBillingApplyResult, error) {
+	r.contexts <- ctx.Err()
+	return &service.UsageBillingApplyResult{Applied: false}, nil
+}
+
+func TestRecordCyberPolicyIfMarkedBillsBeforeBlockingModeration(t *testing.T) {
+	pool := service.NewUsageRecordWorkerPoolWithOptions(service.UsageRecordWorkerPoolOptions{
+		WorkerCount:           1,
+		QueueSize:             1,
+		TaskTimeout:           50 * time.Millisecond,
+		OverflowPolicy:        "drop",
+		OverflowSamplePercent: 0,
+		AutoScaleEnabled:      false,
+	})
+	t.Cleanup(pool.Stop)
+
+	billingRepo := &cyberBillingContextRepo{contexts: make(chan error, 1)}
+	cfg := &config.Config{}
+	cfg.Default.RateMultiplier = 1
+	gateway := service.NewOpenAIGatewayService(
+		nil, nil, billingRepo, nil, nil, nil, nil, cfg, nil, nil,
+		service.NewBillingService(cfg, nil), nil, &service.BillingCacheService{}, nil, &service.DeferredService{}, nil,
+	)
+	moderationRepo := &blockingCyberModerationRepo{started: make(chan struct{}, 1)}
+	moderation := service.NewContentModerationService(&blockingCyberModerationSettings{}, moderationRepo, nil, nil, nil, nil, nil)
+	h := &OpenAIGatewayHandler{gatewayService: gateway, contentModerationService: moderation, usageRecordWorkerPool: pool}
+
+	c := newTestGinContext()
+	c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+	service.MarkOpsCyberPolicy(c, service.CyberPolicyMark{Message: "blocked", UpstreamStatus: 400, UpstreamInTok: 100, UpstreamOutTok: 20})
+	apiKey := &service.APIKey{ID: 2, User: &service.User{ID: 1}, Group: &service.Group{RateMultiplier: 1}}
+
+	h.recordCyberPolicyIfMarked(c, apiKey, &service.Account{ID: 3, Platform: service.PlatformOpenAI}, nil, "gpt-5", true, "", service.ChannelUsageFields{}, "")
+
+	select {
+	case <-moderationRepo.started:
+	case <-time.After(time.Second):
+		t.Fatal("blocking moderation did not start")
+	}
+	select {
+	case err := <-billingRepo.contexts:
+		require.NoError(t, err, "mandatory billing must receive a usable context before auxiliary work")
+	case <-time.After(30 * time.Millisecond):
+		t.Fatal("mandatory billing did not complete before blocking moderation")
 	}
 }

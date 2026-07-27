@@ -329,6 +329,9 @@ func provideCleanup(
 				}
 				return nil
 			}},
+			{name: "ops-error-log-drain", run: func(ctx context.Context) error {
+				return handler.StopOpsErrorLogWorkers(ctx)
+			}},
 			{name: "deferred-last-used-flush", run: func(ctx context.Context) error {
 				if deferredService != nil {
 					return deferredService.Stop(ctx)

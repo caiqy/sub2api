@@ -118,20 +118,18 @@ func crossedDownward(oldV, newV, threshold float64) bool {
 	return oldV >= threshold && newV < threshold
 }
 
-// dispatchBalanceLowEmail collects recipients and sends the alert in a goroutine.
+// dispatchBalanceLowEmail collects recipients and sends the alert before returning.
 func (s *BalanceNotifyService) dispatchBalanceLowEmail(ctx context.Context, user *User, newBalance, threshold float64, rechargeURL string) {
 	siteName := s.getSiteName(ctx)
 	recipients := s.collectBalanceNotifyRecipients(user)
 	slog.Info("CheckBalanceAfterDeduction: sending notification",
 		"user_id", user.ID, "recipients", recipients, "new_balance", newBalance, "threshold", threshold)
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				slog.Error("panic in balance notification", "recover", r)
-			}
-		}()
-		s.sendBalanceLowEmails(recipients, user.ID, user.Username, user.Email, newBalance, threshold, siteName, rechargeURL)
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("panic in balance notification", "recover", r)
+		}
 	}()
+	s.sendBalanceLowEmails(recipients, user.ID, user.Username, user.Email, newBalance, threshold, siteName, rechargeURL)
 }
 
 // quotaDim describes one quota dimension for notification checking.
@@ -232,21 +230,19 @@ func (s *BalanceNotifyService) checkQuotaDimCrossings(account *Account, dims []q
 		newUsed := dim.currentUsed
 		oldUsed := dim.currentUsed - cost
 		if oldUsed < effectiveThreshold && newUsed >= effectiveThreshold {
-			s.asyncSendQuotaAlert(adminEmails, account.ID, account.Name, account.Platform, dim, newUsed, effectiveThreshold, siteName)
+			s.sendQuotaAlert(adminEmails, account.ID, account.Name, account.Platform, dim, newUsed, effectiveThreshold, siteName)
 		}
 	}
 }
 
-// asyncSendQuotaAlert sends quota alert email in a goroutine with panic recovery.
-func (s *BalanceNotifyService) asyncSendQuotaAlert(adminEmails []string, accountID int64, accountName, platform string, dim quotaDim, newUsed, effectiveThreshold float64, siteName string) {
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				slog.Error("panic in quota notification", "recover", r)
-			}
-		}()
-		s.sendQuotaAlertEmails(adminEmails, accountID, accountName, platform, dim, newUsed, siteName)
+// sendQuotaAlert sends quota alert email with panic recovery.
+func (s *BalanceNotifyService) sendQuotaAlert(adminEmails []string, accountID int64, accountName, platform string, dim quotaDim, newUsed, effectiveThreshold float64, siteName string) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("panic in quota notification", "recover", r)
+		}
 	}()
+	s.sendQuotaAlertEmails(adminEmails, accountID, accountName, platform, dim, newUsed, siteName)
 }
 
 // getBalanceNotifyConfig reads global balance notification settings.

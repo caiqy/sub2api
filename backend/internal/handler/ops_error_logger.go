@@ -122,15 +122,16 @@ func startOpsErrorLogWorkers() {
 
 	workerCount, queueSize := opsErrorLogConfig()
 	opsErrorLogQueue = make(chan opsErrorLogJob, queueSize)
+	queue := opsErrorLogQueue
 	opsErrorLogQueueLen.Store(0)
 	opsErrorLogQueueBytes.Store(0)
 
 	opsErrorLogWorkersWg.Add(workerCount)
 	for i := 0; i < workerCount; i++ {
-		go func() {
+		go func(queue <-chan opsErrorLogJob) {
 			defer opsErrorLogWorkersWg.Done()
 			for {
-				job, ok := <-opsErrorLogQueue
+				job, ok := <-queue
 				if !ok {
 					return
 				}
@@ -143,7 +144,7 @@ func startOpsErrorLogWorkers() {
 			batchLoop:
 				for len(batch) < opsErrorLogBatchSize {
 					select {
-					case nextJob, ok := <-opsErrorLogQueue:
+					case nextJob, ok := <-queue:
 						if !ok {
 							if !timer.Stop() {
 								select {
@@ -169,7 +170,7 @@ func startOpsErrorLogWorkers() {
 				}
 				flushOpsErrorLogBatch(batch)
 			}
-		}()
+		}(queue)
 	}
 }
 
@@ -268,17 +269,26 @@ func normalizeOpsPersistentUserAgent(value string) string {
 	return truncateString(strings.TrimSpace(strings.ToValidUTF8(value, "")), opsErrorLogMaxUserAgentBytes)
 }
 
-func StopOpsErrorLogWorkers() bool {
+func StopOpsErrorLogWorkers(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	opsErrorLogStopOnce.Do(func() {
 		opsErrorLogShutdownOnce.Do(func() {
 			close(opsErrorLogShutdownCh)
 		})
-		opsErrorLogDrained.Store(stopOpsErrorLogWorkers())
+		opsErrorLogDrained.Store(stopOpsErrorLogWorkers(ctx))
 	})
-	return opsErrorLogDrained.Load()
+	if opsErrorLogDrained.Load() {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return errors.New("ops error log workers did not drain")
 }
 
-func stopOpsErrorLogWorkers() bool {
+func stopOpsErrorLogWorkers(ctx context.Context) bool {
 	opsErrorLogMu.Lock()
 	opsErrorLogStopping = true
 	ch := opsErrorLogQueue
@@ -300,12 +310,16 @@ func stopOpsErrorLogWorkers() bool {
 		close(done)
 	}()
 
+	timer := time.NewTimer(opsErrorLogDrainTimeout)
+	defer timer.Stop()
 	select {
 	case <-done:
 		opsErrorLogQueueLen.Store(0)
 		opsErrorLogQueueBytes.Store(0)
 		return true
-	case <-time.After(opsErrorLogDrainTimeout):
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
 		return false
 	}
 }
