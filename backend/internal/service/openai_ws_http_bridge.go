@@ -238,6 +238,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 		}
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())
+		_ = writeClientMessage(buildOpenAIWSHTTPBridgeErrorEvent(http.StatusBadGateway, safeErr))
 		return nil, fmt.Errorf("upstream http bridge request failed: %s", safeErr)
 	}
 	defer func() { _ = resp.Body.Close() }()
