@@ -175,7 +175,6 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 				return
 			}
 		}
-		sessionHash = h.gatewayService.GenerateSessionHash(c, body)
 		if coordinator != nil {
 			service.BindOpenAIRequestBodyHandle(c, coordinator.Effective())
 			requestPayloadHash = coordinator.Effective().Hash()
@@ -193,7 +192,6 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 
 	if !endpoint.IsGenerationRequest() {
 		if strings.TrimSpace(requestID) != "" {
-			sessionHash = service.GrokMediaVideoRequestSessionHash(requestID, subject.UserID, apiKey.ID)
 			requestPayloadHash = service.HashUsageRequestPayload([]byte(requestID))
 		}
 		requestInfo.ReleaseText()
