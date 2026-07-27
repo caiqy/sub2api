@@ -80,13 +80,14 @@
 
 ## v0.1.162
 
-- changed-files：待执行。
-- 冲突台账：无（尚未合并）。
-- 能力矩阵交集：待执行。
-- 聚焦测试：待执行。
-- 本地门禁：待执行。
-- 远程门禁：待执行。
-- 放行结论：待执行。
+- changed-files：`v0.1.161^{}` 到 `v0.1.162^{}` 共 190 条，原始清单见 `TASK6:v0.1.162:raw:begin/end`。
+- merge：`8bda73544d6e26a323f101e5c68981634f0375ab merge: upstream v0.1.162`；第一父 `940c5cfcf390ecbfd2e041fb2b46c99846e6ea3e`，第二父及 peeled tag 为 `27f094e0960ebd8e52de7ff7e763c6fec2ff4057`。
+- 原始 U 文件：`VERSION`、`config.go`、`config_test.go`、两个 admin setting handler 文件、`openai_gateway_handler_test.go`、`openai_gateway_messages.go`、`openai_ws_http_bridge.go`、`setting_service.go`、`setting_update.go`、`service/wire.go`、`EditAccountModal.vue`、两份 locale index；逐项决议见 Task 14。
+- 冲突融合：VERSION 保持 `0.1.159.6`；可信代理/forwarded header 保留本地安全入口与 runtime scheduler/sticky 热更新，接入上游 header JSON 回填与配置；Grok 保留 usage/ops/request body 处理和 created-only WS 契约，接入 cache 与单次 encrypted-content retry；Wire 保留 startup recovery 并接入 settings-resolved S3/image storage；前端同时保留 images/batch-image locale、header override 与 Grok cache 开关。
+- 高风险无文本冲突审查：`pkg/ip -> middleware -> server/http` 保持 Gin trusted-proxy fail-closed 路径；`grok cache -> session binding -> HTTP/WS bridge` 保持 platform sticky、owner/spool/redaction/usage 入口；`backup/image storage -> image task -> admin handler` 保持异步任务、对象存储、moderation/audit 和权限边界。Task 15 负责行为回归。
+- 静态检查：`git ls-files -u`、真实 conflict marker 扫描和 `git diff --cached --check` 均为空/通过；限定 Go 编译和 `pnpm exec vue-tsc --noEmit` 通过。未运行 Task 15 full test/build/generate/integration。
+- 迁移与遗留边界：本地 `172_video_per_second_billing_metadata.sql`、`181_group_duplicate_operation_id.sql` 与上游 `181_prompt_audit.sql`、182、183、184 均保留；`VERSION=0.1.159.6`，`openai-first-token-timeout` 未恢复。
+- 放行结论：`DONE_WITH_CONCERNS`，等待 Task 15 回归与 full gates。
 
 ## v0.1.163
 
