@@ -2063,3 +2063,4 @@ final absence check：JSON `success=true, exit_code=0`。
 - 验证：三项精确 GREEN 命令通过；`go test ./internal/service -count=1`、`go test ./internal/handler -count=1`、`go test ./cmd/server -count=1` 通过；`go generate ./cmd/server` 后 `wire_gen.go` 已更新并经零工作树 diff 核验。
 - 真实边界：未运行 Task 18/full gate，未触及 `v0.1.164`、远程、push/tag/release/deploy。cleanup phase 超时时会跳过下游 teardown，但 `main.go` 在 handler hard deadline 后仍无条件调用 `app.Cleanup()`；因此只记录有界停机取舍，不能声称下游资源必然持续保留。
 - 台账纠正：`4ba0c9f235095b1123a76cca784b92da11bb508d docs: record v0.1.163 extra review fix` 误把 `.superpowers/sdd/task-17-report.md` 加入历史。后续正式 ledger 修正提交只从 Git 索引移除该 scratch，保留其本地内容并恢复 ignore 保护；该错误及净修正会在最终报告中显式列出。
+- 净修正：首次 ledger 修正提交 `4e1c83ad2a6726aed16d7fc3c87fa7c14b3e26e0` 仅记录了正式台账，未实际删除 scratch，故不将其误记为完成。后续提交同时更新本段并从索引删除 scratch；不 reset、amend、rebase 或删除本地 scratch 内容。
