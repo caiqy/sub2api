@@ -119,9 +119,9 @@
 - 冲突台账：14 个文本冲突的融合结论见 Task 17；Task 19 只复核当前能力证据，不重做 merge。
 - 能力矩阵交集：reasoning policy、scheduler quota metadata/LastUsedAt/sticky/fallback/WaitPlan/DB recheck、shutdown/Cleanup/background drain、usage/billing/output estimate/cache/image、axios manifest/lockfile、migration 185/schema/runner 均有交集或明确标注的 stage/context evidence；`gap=0`。
 - 聚焦测试：Task 19 的定向 service/repository/cmd/server/handler/admin Go 测试均 PASS；完整命令、路径集合、调用链和行级结论保留在未提交 `.superpowers/sdd/task-19-report.md`。
-- 本地门禁：复用 Task 18 的 `make test`、`make build`、双 `make -C backend generate` 与 clean diff 证据；Task 19 未重跑 full gate，也不将其替代能力审查。
+- 本地门禁：复用 Task 18 的 `make test`、`make build`、双 `make -C backend generate` 与 clean diff 证据；本轮 clean archive 从 `dbb18b7059a5378411dc8c51fde570003dd072ba` 执行 `pnpm --dir frontend install --frozen-lockfile` PASS，`pnpm list axios` 与实际 `require('axios/package.json').version` 均断言 `1.18.1`，同一安装态 `pnpm --dir frontend run build` PASS。Task 19 未重跑 full gate，也不将其替代能力审查。
 - 远程门禁：复用 Task 18 remote integration 的两个 migration target PASS、唯一 migration 185/checksum 和 `SKIP=13` 分类；未执行远程操作。
-- 放行结论：`DONE_WITH_CONCERNS`；能力行 `protected=6`、前置外部 reviewer provenance `manual=1`、`gap=0`、`approved-removal=0`。`backend/cmd/server/VERSION` 保持 `0.1.159.6`。
+- 放行结论：`DONE_WITH_CONCERNS`；六行业务能力矩阵 `protected=6/manual=0/gap=0/approved-removal=0`；reviewer provenance 是矩阵外已满足前置。`backend/cmd/server/VERSION` 保持 `0.1.159.6`。
 
 ## v0.1.164
 
