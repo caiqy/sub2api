@@ -382,7 +382,7 @@ backend/migrations/openai_long_context_billing_migration_test.go
 
 - 历史阻塞（已解决，归档 HEAD `c8e0110a9a2354453753db9c4acae0ed7570458d`）：原 Make/PowerShell/Go 预检依次暴露 GNU Make 缺失、Go `1.26.1` 低于 directive、PowerShell 入口缺失；后续规范已改为 Linux 原生 gate，vfox Go `1.26.5` 和 Docker `29.2.1` 已在新 nonce 中验证。
 - 历史阻塞（已解决，规范 HEAD `849f956992178e25ab2074e1e4cc596d29f8834f`）：首次原生 full RED 暴露 handler body spool/panic、repository usage-detail transaction/retention 与 hidden UI resource ordering 断言；后续测试修复及 HEAD `99cb81de306cb0e8ea811387e362e4d601f6f4b0` 的新 nonce focused/full GREEN 已解决。
-- 当前状态：阶段 0 本地与远程门禁通过；七项非 migration/repository target skip 是已分类的基线风险。Task 5 为 `DONE_WITH_CONCERNS`：HEAD 生成内容经 detached worktree 双轮验证稳定，但受监视 Windows 工作区的随机文件映射风险仍未定因，隔离门禁与工作区门禁的等价性待 reviewer 判断。`v0.1.160` 的 Task 10 证据已补齐，等待独立复审；`v0.1.161` 至 `v0.1.165` 仍未开始合入或放行。
+- 当前状态：阶段 0 本地与远程门禁通过；七项非 migration/repository target skip 是已分类的基线风险。Task 5 为 `DONE_WITH_CONCERNS`：HEAD 生成内容经 detached worktree 双轮验证稳定，但受监视 Windows 工作区的随机文件映射风险仍未定因，隔离门禁与工作区门禁的等价性待 reviewer 判断。`v0.1.160` 阶段已闭合；`v0.1.161` 已合入并完成第 1 轮修复，等待独立复审；`v0.1.162` 至 `v0.1.165` 尚未开始。
 
 ## Task 11 第 1 轮复审修复
 
