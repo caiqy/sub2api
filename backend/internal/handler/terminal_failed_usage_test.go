@@ -784,6 +784,7 @@ func newTerminalGatewayMessagesEnvWithGatewayCacheAndGroups(t *testing.T, group 
 		nil,
 		nil,
 		nil,
+		nil,
 	)
 	tokenProvider := service.NewAntigravityTokenProvider(accountRepo, nil, nil)
 	antigravityService := service.NewAntigravityGatewayService(accountRepo, cache, nil, tokenProvider, nil, upstream, settingService, nil)

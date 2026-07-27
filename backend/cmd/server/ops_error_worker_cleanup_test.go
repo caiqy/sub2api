@@ -103,7 +103,7 @@ func TestProvideCleanupDrainsOpsErrorsBeforeEntTeardown(t *testing.T) {
 		&service.UsageCleanupService{}, service.NewIdempotencyCleanupService(nil, cfg), &service.BatchImageCleanupService{}, nil, nil,
 		service.NewPricingService(cfg, nil), service.NewEmailQueueService(nil, 1), service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil),
 		&service.UsageRecordWorkerPool{}, nil, &service.SubscriptionService{}, oauthSvc, openAIOAuthSvc, geminiOAuthSvc, antigravityOAuthSvc,
-		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
 	)
 
 	cleanupDone := make(chan struct{})
