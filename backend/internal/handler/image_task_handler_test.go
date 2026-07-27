@@ -143,3 +143,46 @@ func TestAsyncImageHandlerDisabledReturns404(t *testing.T) {
 	// No task was created / persisted.
 	require.Empty(t, store.tasks)
 }
+
+func TestAsyncImageHandlerShutdownCancelsExecution(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := &asyncImageMemoryStore{tasks: make(map[string]*service.ImageTaskRecord)}
+	tasks := service.NewImageTaskServiceWithUploader(store, nil, time.Hour, time.Minute)
+	started := make(chan struct{})
+	cancelled := make(chan struct{})
+	h := &AsyncImageHandler{tasks: tasks}
+	h.execute = func(_ string, c *gin.Context) {
+		close(started)
+		<-c.Request.Context().Done()
+		close(cancelled)
+	}
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		groupID := int64(3)
+		c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+			ID:      9,
+			UserID:  7,
+			GroupID: &groupID,
+			Group:   &service.Group{ID: groupID, Platform: service.PlatformOpenAI, AllowImageGeneration: true},
+		})
+		c.Next()
+	})
+	router.POST("/v1/images/generations/async", h.Submit)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations/async", strings.NewReader(`{"model":"gpt-image-1","prompt":"cat"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusAccepted, w.Code)
+	<-started
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	require.NoError(t, tasks.Shutdown(shutdownCtx))
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("gateway image execution was not cancelled")
+	}
+}

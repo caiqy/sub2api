@@ -183,6 +183,7 @@ func runMainServer() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
+	handlerTracker.CloseAdmission()
 	if err := shutdownServerWithDrain(ctx, 5*time.Second, app.Server.Shutdown, app.Server.Close, handlerTracker.Wait); err != nil {
 		log.Printf("Server forced to shutdown: %v", err)
 	}

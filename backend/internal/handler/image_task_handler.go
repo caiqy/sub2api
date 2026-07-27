@@ -100,13 +100,12 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 		return
 	}
 
-	taskCtx, recorder, cancel := newAsyncImageContext(c, body, h.tasks.ExecutionTimeout())
 	task, err := h.tasks.Create(c.Request.Context(), service.ImageTaskOwner{UserID: apiKey.UserID, APIKeyID: apiKey.ID})
 	if err != nil {
-		cancel()
 		imageTaskError(c, err)
 		return
 	}
+	taskBase := c.Copy()
 
 	pollURL := imageTaskPollURL(c.Request.URL.Path, task.ID)
 	c.Header("Cache-Control", "no-store")
@@ -122,7 +121,12 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 		"poll_url":   pollURL,
 	})
 
-	go h.run(task.ID, platform, taskCtx, recorder, cancel)
+	if !h.tasks.Run(func(lifecycleCtx context.Context) {
+		taskCtx, recorder, cancel := newAsyncImageContext(taskBase, body, lifecycleCtx, h.tasks.ExecutionTimeout())
+		h.run(task.ID, platform, taskCtx, recorder, cancel)
+	}) {
+		h.failTask(task.ID, http.StatusServiceUnavailable, imageTaskErrorPayload("api_error", "image task service is shutting down"))
+	}
 }
 
 func (h *AsyncImageHandler) checkSecurityAuditBeforeSubmit(c *gin.Context, apiKey *service.APIKey, platform string, body []byte) bool {
@@ -258,9 +262,14 @@ func (h *AsyncImageHandler) failTask(taskID string, statusCode int, taskErr json
 	}
 }
 
-func newAsyncImageContext(c *gin.Context, body []byte, timeoutDuration time.Duration) (*gin.Context, *httptest.ResponseRecorder, context.CancelFunc) {
+func newAsyncImageContext(c *gin.Context, body []byte, lifecycleCtx context.Context, timeoutDuration time.Duration) (*gin.Context, *httptest.ResponseRecorder, context.CancelFunc) {
 	base := context.WithoutCancel(c.Request.Context())
-	executionCtx, cancel := context.WithTimeout(base, timeoutDuration)
+	if lifecycleCtx == nil {
+		lifecycleCtx = context.Background()
+	}
+	executionBase, cancelExecution := context.WithCancel(base)
+	stopLifecycle := context.AfterFunc(lifecycleCtx, cancelExecution)
+	executionCtx, cancelTimeout := context.WithTimeout(executionBase, timeoutDuration)
 	request := c.Request.Clone(executionCtx)
 	request.Body = io.NopCloser(bytes.NewReader(body))
 	request.GetBody = func() (io.ReadCloser, error) {
@@ -274,7 +283,11 @@ func newAsyncImageContext(c *gin.Context, body []byte, timeoutDuration time.Dura
 	recorderCtx, _ := gin.CreateTestContext(recorder)
 	taskCtx.Writer = recorderCtx.Writer
 	taskCtx.Request = request
-	return taskCtx, recorder, cancel
+	return taskCtx, recorder, func() {
+		stopLifecycle()
+		cancelTimeout()
+		cancelExecution()
+	}
 }
 
 func asyncImageRequestStreams(contentType string, body []byte) bool {

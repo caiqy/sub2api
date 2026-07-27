@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -33,6 +36,74 @@ func TestRunCleanupPhasesOrdersDependentDrains(t *testing.T) {
 
 	require.True(t, completed)
 	require.Equal(t, []string{"producers", "usage", "quota", "billing", "infra"}, order)
+}
+
+func TestActiveHandlerTrackerRejectsLateAdmissionAfterClose(t *testing.T) {
+	tracker := newActiveHandlerTracker()
+	called := false
+	wrapped := tracker.Wrap(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		called = true
+	}))
+
+	tracker.CloseAdmission()
+	response := httptest.NewRecorder()
+	wrapped.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	require.Equal(t, http.StatusServiceUnavailable, response.Code)
+	require.False(t, called)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	require.True(t, tracker.Wait(ctx))
+}
+
+func TestRunCleanupParallelReturnsChildErrors(t *testing.T) {
+	want := errors.New("producer failed")
+	err := runCleanupParallel(context.Background(),
+		cleanupPhase{name: "failed-producer", run: func(context.Context) error { return want }},
+		cleanupPhase{name: "healthy-producer", run: func(context.Context) error { return nil }},
+	)
+
+	require.ErrorIs(t, err, want)
+}
+
+func TestRunCleanupPhasesStopsAfterProducerFailure(t *testing.T) {
+	want := errors.New("producer failed")
+	var order []string
+
+	completed := runCleanupPhases(context.Background(),
+		cleanupPhase{name: "producers", run: func(ctx context.Context) error {
+			order = append(order, "producers")
+			return runCleanupParallel(ctx, cleanupPhase{name: "failed", run: func(context.Context) error { return want }})
+		}},
+		cleanupPhase{name: "usage-record-drain", run: func(context.Context) error {
+			order = append(order, "usage")
+			return nil
+		}},
+		cleanupPhase{name: "deferred-last-used-flush", run: func(context.Context) error {
+			order = append(order, "deferred")
+			return nil
+		}},
+	)
+
+	require.False(t, completed)
+	require.Equal(t, []string{"producers"}, order)
+}
+
+func TestProvideCleanupOrdersProducerUsageAndDeferredDrains(t *testing.T) {
+	source, err := os.ReadFile("wire.go")
+	require.NoError(t, err)
+
+	producers := bytes.Index(source, []byte(`name: "producers"`))
+	imageTasks := bytes.Index(source, []byte(`name: "ImageTaskService"`))
+	usage := bytes.Index(source, []byte(`name: "usage-record-drain"`))
+	deferred := bytes.Index(source, []byte(`name: "deferred-last-used-flush"`))
+	require.GreaterOrEqual(t, producers, 0)
+	require.GreaterOrEqual(t, imageTasks, 0)
+	require.GreaterOrEqual(t, usage, 0)
+	require.GreaterOrEqual(t, deferred, 0)
+	require.Less(t, producers, usage)
+	require.Less(t, imageTasks, usage)
+	require.Less(t, usage, deferred)
 }
 
 func TestRunCleanupPhasesStopsAfterDeadline(t *testing.T) {

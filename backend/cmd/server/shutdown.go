@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"sync"
@@ -9,6 +10,8 @@ import (
 )
 
 type activeHandlerTracker struct {
+	mu       sync.Mutex
+	closed   bool
 	handlers sync.WaitGroup
 }
 
@@ -21,10 +24,26 @@ func (t *activeHandlerTracker) Wrap(next http.Handler) http.Handler {
 		next = http.DefaultServeMux
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.mu.Lock()
+		if t.closed {
+			t.mu.Unlock()
+			http.Error(w, "server is shutting down", http.StatusServiceUnavailable)
+			return
+		}
 		t.handlers.Add(1)
+		t.mu.Unlock()
 		defer t.handlers.Done()
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (t *activeHandlerTracker) CloseAdmission() {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.closed = true
+	t.mu.Unlock()
 }
 
 func (t *activeHandlerTracker) Wait(ctx context.Context) bool {
@@ -63,9 +82,9 @@ func runCleanupPhases(ctx context.Context, phases ...cleanupPhase) bool {
 		case err := <-done:
 			if err != nil {
 				log.Printf("[Cleanup] %s failed: %v", phase.name, err)
-			} else {
-				log.Printf("[Cleanup] %s succeeded", phase.name)
+				return false
 			}
+			log.Printf("[Cleanup] %s succeeded", phase.name)
 			if ctx.Err() != nil {
 				log.Printf("[Cleanup] stopped before downstream teardown: %v", ctx.Err())
 				return false
@@ -80,6 +99,8 @@ func runCleanupPhases(ctx context.Context, phases ...cleanupPhase) bool {
 
 func runCleanupParallel(ctx context.Context, steps ...cleanupPhase) error {
 	var wg sync.WaitGroup
+	var errMu sync.Mutex
+	var errs []error
 	for _, step := range steps {
 		if step.run == nil {
 			continue
@@ -89,6 +110,9 @@ func runCleanupParallel(ctx context.Context, steps ...cleanupPhase) error {
 			defer wg.Done()
 			if err := step.run(ctx); err != nil {
 				log.Printf("[Cleanup] %s failed: %v", step.name, err)
+				errMu.Lock()
+				errs = append(errs, err)
+				errMu.Unlock()
 			}
 		}(step)
 	}
@@ -99,7 +123,7 @@ func runCleanupParallel(ctx context.Context, steps ...cleanupPhase) error {
 	}()
 	select {
 	case <-done:
-		return nil
+		return errors.Join(errs...)
 	case <-ctx.Done():
 		return ctx.Err()
 	}

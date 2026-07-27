@@ -93,10 +93,12 @@ func provideCleanup(
 	idempotencyCleanup *service.IdempotencyCleanupService,
 	batchImageCleanup *service.BatchImageCleanupService,
 	batchImageWorker *service.BatchImageWorkerRuntime,
+	imageTaskService *service.ImageTaskService,
 	pricing *service.PricingService,
 	emailQueue *service.EmailQueueService,
 	billingCache *service.BillingCacheService,
 	usageRecordWorkerPool *service.UsageRecordWorkerPool,
+	deferredService *service.DeferredService,
 	subscriptionService *service.SubscriptionService,
 	oauth *service.OAuthService,
 	openaiOAuth *service.OpenAIOAuthService,
@@ -221,6 +223,12 @@ func provideCleanup(
 				}
 				return nil
 			}},
+			{name: "ImageTaskService", run: func(ctx context.Context) error {
+				if imageTaskService != nil {
+					return imageTaskService.Shutdown(ctx)
+				}
+				return nil
+			}},
 			{name: "TokenRefreshService", run: func(context.Context) error {
 				tokenRefresh.Stop()
 				return nil
@@ -318,6 +326,12 @@ func provideCleanup(
 			{name: "usage-record-drain", run: func(context.Context) error {
 				if usageRecordWorkerPool != nil {
 					usageRecordWorkerPool.Stop()
+				}
+				return nil
+			}},
+			{name: "deferred-last-used-flush", run: func(ctx context.Context) error {
+				if deferredService != nil {
+					return deferredService.Stop(ctx)
 				}
 				return nil
 			}},

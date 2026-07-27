@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -82,6 +83,14 @@ type ImageTaskService struct {
 	resolve          ImageStorageResolver
 	ttl              time.Duration
 	executionTimeout time.Duration
+
+	runMu        sync.Mutex
+	runCtx       context.Context
+	runCancel    context.CancelFunc
+	runWG        sync.WaitGroup
+	runClosed    bool
+	shutdownOnce sync.Once
+	shutdownDone chan struct{}
 }
 
 func NewImageTaskService(store ImageTaskStore) *ImageTaskService {
@@ -95,7 +104,15 @@ func NewImageTaskServiceWithOptions(store ImageTaskStore, ttl, executionTimeout 
 	if executionTimeout <= 0 {
 		executionTimeout = defaultImageTaskExecutionTimeout
 	}
-	return &ImageTaskService{store: store, ttl: ttl, executionTimeout: executionTimeout}
+	runCtx, runCancel := context.WithCancel(context.Background())
+	return &ImageTaskService{
+		store:            store,
+		ttl:              ttl,
+		executionTimeout: executionTimeout,
+		runCtx:           runCtx,
+		runCancel:        runCancel,
+		shutdownDone:     make(chan struct{}),
+	}
 }
 
 // NewImageTaskServiceWithUploader 构造一个已启用的图片任务服务：结果会先经 uploader
@@ -148,6 +165,70 @@ func (s *ImageTaskService) ExecutionTimeout() time.Duration {
 		return defaultImageTaskExecutionTimeout
 	}
 	return s.executionTimeout
+}
+
+// Run starts one accepted image execution under the service lifecycle.
+func (s *ImageTaskService) Run(task func(context.Context)) bool {
+	if s == nil || task == nil {
+		return false
+	}
+
+	s.runMu.Lock()
+	if s.runClosed {
+		s.runMu.Unlock()
+		return false
+	}
+	if s.runCtx == nil {
+		s.runCtx, s.runCancel = context.WithCancel(context.Background())
+		s.shutdownDone = make(chan struct{})
+	}
+	ctx := s.runCtx
+	s.runWG.Add(1)
+	s.runMu.Unlock()
+
+	go func() {
+		defer s.runWG.Done()
+		task(ctx)
+	}()
+	return true
+}
+
+// Shutdown prevents new image executions, cancels active ones, and waits for them.
+func (s *ImageTaskService) Shutdown(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	s.shutdownOnce.Do(func() {
+		s.runMu.Lock()
+		s.runClosed = true
+		if s.runCtx == nil {
+			s.runCtx, s.runCancel = context.WithCancel(context.Background())
+			s.shutdownDone = make(chan struct{})
+		}
+		cancel := s.runCancel
+		done := s.shutdownDone
+		s.runMu.Unlock()
+
+		cancel()
+		go func() {
+			s.runWG.Wait()
+			close(done)
+		}()
+	})
+
+	s.runMu.Lock()
+	done := s.shutdownDone
+	s.runMu.Unlock()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (s *ImageTaskService) Create(ctx context.Context, owner ImageTaskOwner) (*ImageTask, error) {

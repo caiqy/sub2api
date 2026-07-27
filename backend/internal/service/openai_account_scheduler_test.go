@@ -2438,6 +2438,68 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyRuntimeBlo
 	}
 }
 
+func TestLayeredOpenAIAccountSchedulerSessionStickyRuntimeBlockedAccountFallsBackWithoutRebinding(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(101012)
+	const requestedModel = "gpt-5.1"
+
+	testCases := []struct {
+		name  string
+		block func(*OpenAIGatewayService, *Account)
+	}{
+		{
+			name: "global runtime cooldown",
+			block: func(svc *OpenAIGatewayService, account *Account) {
+				svc.BlockAccountScheduling(account, time.Now().Add(time.Minute), "test")
+			},
+		},
+		{
+			name: "model specific transient cooldown",
+			block: func(svc *OpenAIGatewayService, account *Account) {
+				svc.openaiModelTransient = newOpenAIAccountModelTransientState(128)
+				now := time.Now()
+				svc.openaiModelTransient.recordFailure(account.ID, requestedModel, now)
+				svc.openaiModelTransient.recordFailure(account.ID, requestedModel, now.Add(time.Millisecond))
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			sticky := Account{ID: 31021, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, GroupIDs: []int64{groupID}}
+			backup := Account{ID: 31022, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 5, GroupIDs: []int64{groupID}}
+			sessionHash := "layered_session_hash_runtime_blocked_" + tc.name
+			sessionKey := "openai:" + sessionHash
+			cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{sessionKey: sticky.ID}}
+			acquiredIDs := []int64{}
+			cfg := newOpenAIStickyEnabledTestConfig()
+			cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+			svc := &OpenAIGatewayService{
+				accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{sticky, backup}},
+				cache:              cache,
+				cfg:                cfg,
+				rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+				concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{acquiredIDs: &acquiredIDs}),
+			}
+			t.Cleanup(svc.StopOpenAIAccountScheduler)
+			tc.block(svc, &sticky)
+
+			selection, decision, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", sessionHash, requestedModel, nil, OpenAIUpstreamTransportAny, false)
+			require.NoError(t, err)
+			require.NotNil(t, selection)
+			require.NotNil(t, selection.Account)
+			require.Equal(t, backup.ID, selection.Account.ID)
+			require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+			require.Equal(t, []int64{backup.ID}, acquiredIDs)
+			require.Equal(t, sticky.ID, cache.sessionBindings[sessionKey])
+			require.Zero(t, cache.deletedSessions[sessionKey])
+			if selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+			}
+		})
+	}
+}
+
 func TestOpenAIGatewayService_SelectAccountForModelWithExclusions_SkipsFreshlyRateLimitedSnapshotCandidate(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(10102)

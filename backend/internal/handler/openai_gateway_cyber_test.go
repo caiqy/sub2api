@@ -4,6 +4,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -59,6 +60,20 @@ func TestRecordCyberPolicyIfMarked_WithMark(t *testing.T) {
 	// Flag should still be true (not toggled or cleared).
 	require.True(t, c.GetBool(cyberPolicyRecordedKey),
 		"cyberPolicyRecordedKey must remain true after second call (guard)")
+}
+
+func TestRecordCyberPolicyIfMarkedUsesUsageRecordWorkerPool(t *testing.T) {
+	pool := newUsageRecordTestPool(t)
+	c := newTestGinContext()
+	c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+	service.MarkOpsCyberPolicy(c, service.CyberPolicyMark{Message: "flagged", UpstreamStatus: 400})
+	h := &OpenAIGatewayHandler{usageRecordWorkerPool: pool}
+
+	h.recordCyberPolicyIfMarked(c, nil, nil, nil, "gpt-5", true, "", service.ChannelUsageFields{}, "")
+
+	require.Eventually(t, func() bool {
+		return pool.Stats().SubmittedTasks > 0
+	}, time.Second, 10*time.Millisecond)
 }
 
 // TestRecordCyberPolicyIfMarked_ForwardSuccessSkipsUsageLog verifies the semantic:

@@ -89,3 +89,29 @@ func TestImageTaskServiceMapsStoreFailures(t *testing.T) {
 	_, err := svc.Create(context.Background(), ImageTaskOwner{UserID: 1, APIKeyID: 2})
 	require.ErrorIs(t, err, ErrImageTaskUnavailable)
 }
+
+func TestImageTaskServiceShutdownCancelsWaitsAndRejectsNewTasks(t *testing.T) {
+	svc := NewImageTaskService(nil)
+	started := make(chan struct{})
+	finished := make(chan struct{})
+
+	require.True(t, svc.Run(func(ctx context.Context) {
+		close(started)
+		<-ctx.Done()
+		close(finished)
+	}))
+	<-started
+
+	shutdownDone := make(chan error, 1)
+	go func() {
+		shutdownDone <- svc.Shutdown(context.Background())
+	}()
+
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("image task was not cancelled")
+	}
+	require.NoError(t, <-shutdownDone)
+	require.False(t, svc.Run(func(context.Context) {}))
+}
