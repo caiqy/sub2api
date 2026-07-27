@@ -54,17 +54,18 @@
 
 | 能力 | 受影响 tag | 当前状态 | 证据 |
 | --- | --- | --- | --- |
-| changed-files 与本地能力交集 | `v0.1.160` 至 `v0.1.165` | `待执行` | Task 1.6 尚未运行六段实际 diff 与调用链审查。 |
+| changed-files 与本地能力交集 | `v0.1.160` | 证据已补齐，等待独立复审 | Task 10：133 paths、12 个精确交集路径、14 项矩阵结论及 Task 9 门禁证据见第 1845 行。 |
+| changed-files 与本地能力交集 | `v0.1.161` 至 `v0.1.165` | 待执行 | 后续 tag 的实际 diff 与调用链审查尚未开始。 |
 
 ## v0.1.160
 
-- changed-files：待执行。
-- 冲突台账：无（尚未合并）。
-- 能力矩阵交集：待执行。
-- 聚焦测试：待执行。
-- 本地门禁：待执行。
-- 远程门禁：待执行。
-- 放行结论：待执行。
+- changed-files：`git diff --name-only 'v0.1.159^{}..v0.1.160^{}'` 已确认 133 paths，完整清单见 `TASK6:v0.1.160:raw`。
+- 冲突台账：9 个冲突文件及逐项融合结论见第 1818-1825 行；merge 为 `e04cb1aa2c2554a04bec55f9b4393d3efd2eb693`。
+- 能力矩阵交集：12 个精确路径，14 项计数为 `protected=13`、`manual=1`、`gap=0`，见 Task 10。
+- 聚焦测试：Task 9 的 scheduler、sticky/privacy/image、migration、audit 证据均为 GREEN，见第 1833-1842 行。
+- 本地门禁：`make test`、`make build`、两轮 generate/generated diff 和静态门禁均为 GREEN。
+- 远程门禁：archive `31b132689` 的 full integration GREEN；日志、remote 目录及本地 tar 清理证据见第 1842、1875 行。
+- Task 11 状态：证据已补齐，等待独立复审。
 
 ## v0.1.161
 
@@ -370,7 +371,7 @@ backend/migrations/migrations.go
 backend/migrations/openai_long_context_billing_migration_test.go
 ```
 - Task 5 监督复核：`git diff-tree --no-commit-id --name-status -r 98fbd1448ad38fbf45fb7334a0cd508576f0fd74` 仅输出 `M docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`；`git diff --cached --exit-code`、generated-path diff 均退出 `0`。`git status --short` 仅余协调者 plan、OpenSpec tasks/progress 和受保护根 `.comet/current-change.json`、`paseo.json`；无 Task 5 源码、生成物或暂存项。`git worktree list --porcelain` 仅主工作区与两个既有 Task 27 detached worktree，且两个 `Test-Path`（旧 nonce 与 `w84b854`）均为 `False`。
-- `v0.1.160`：待执行。
+- `v0.1.160`：证据已补齐，等待独立复审；133 paths、9 个冲突、12 个交集路径及 Task 9 门禁证据见 Task 10。
 - `v0.1.161`：待执行。
 - `v0.1.162`：待执行。
 - `v0.1.163`：待执行。
@@ -381,7 +382,7 @@ backend/migrations/openai_long_context_billing_migration_test.go
 
 - 历史阻塞（已解决，归档 HEAD `c8e0110a9a2354453753db9c4acae0ed7570458d`）：原 Make/PowerShell/Go 预检依次暴露 GNU Make 缺失、Go `1.26.1` 低于 directive、PowerShell 入口缺失；后续规范已改为 Linux 原生 gate，vfox Go `1.26.5` 和 Docker `29.2.1` 已在新 nonce 中验证。
 - 历史阻塞（已解决，规范 HEAD `849f956992178e25ab2074e1e4cc596d29f8834f`）：首次原生 full RED 暴露 handler body spool/panic、repository usage-detail transaction/retention 与 hidden UI resource ordering 断言；后续测试修复及 HEAD `99cb81de306cb0e8ea811387e362e4d601f6f4b0` 的新 nonce focused/full GREEN 已解决。
-- 当前状态：阶段 0 本地与远程门禁通过；七项非 migration/repository target skip 是已分类的基线风险。Task 5 为 `DONE_WITH_CONCERNS`：HEAD 生成内容经 detached worktree 双轮验证稳定，但受监视 Windows 工作区的随机文件映射风险仍未定因，隔离门禁与工作区门禁的等价性待 reviewer 判断。Task 6-7（能力矩阵与保护断言）也未完成，且六个 tag merge 尚未开始；仍不得开始、merge 或放行 `v0.1.160`。
+- 当前状态：阶段 0 本地与远程门禁通过；七项非 migration/repository target skip 是已分类的基线风险。Task 5 为 `DONE_WITH_CONCERNS`：HEAD 生成内容经 detached worktree 双轮验证稳定，但受监视 Windows 工作区的随机文件映射风险仍未定因，隔离门禁与工作区门禁的等价性待 reviewer 判断。`v0.1.160` 的 Task 10 证据已补齐，等待独立复审；`v0.1.161` 至 `v0.1.165` 仍未开始合入或放行。
 
 ## Task 6: 六段 changed-files 与本地能力矩阵
 
@@ -1828,7 +1829,7 @@ final absence check：JSON `success=true, exit_code=0`。
 - migration：完整 filename 均存在，`181_group_duplicate_operation_id.sql`、`181_prompt_audit.sql`、`182_prompt_audit_full_prompt.sql` 的字典序和依赖正确，后者只 ALTER 前者创建的 event 表。
 - 能力矩阵交集已审查：`wire_gen`、batch image、content moderation、OpenAI images、xAI billing、scheduler cache、upstream billing probe、Grok media、OpenAI scheduling、`181_prompt_audit.sql`、frontend package/i18n；`openai-first-token-timeout` 仍为唯一 approved-removal。
 - 静态事实：根 `VERSION` 不存在，服务器 VERSION 为 `0.1.159.6`，无 conflict marker/未合并路径；`git diff --cached --check` 在提交前为 0。上游 source-freeze patch 含 literal diff whitespace，`.gitattributes` 对该单一路径设 `-whitespace`，以保持其内容原样。
-- Task 9 full gate、回归修复和任何下一 tag 合入均尚未运行，当前不得放行 `v0.1.161`。
+- Task 9 full gate、回归修复及其复核证据已在第 1833-1875 行归档；`v0.1.161` 仍未开始合入或放行。
 
 ## Task 9：v0.1.160 回归保护与 full 门禁（2026-07-27）
 
@@ -1840,37 +1841,44 @@ final absence check：JSON `success=true, exit_code=0`。
 - 最终本地 full gate：在 PowerShell 进程补 Git `sh` PATH 后，`make test`、`make build` 均退出 `0`。Vitest 为 `199 passed` files / `1521 passed` tests；backend VERSION `0.1.159.6`，Vite `1005 modules transformed`。最终两轮 `make -C backend generate` 与每轮 `git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` 均退出 `0`、无 diff；本次未触发 Windows `user-mapped section` 锁，无需 detached worktree 备用流程。
 - 静态：`git diff --check`、cached diff check、未合并路径检查、精确 conflict marker 扫描均退出 `0`；无未合并路径或 conflict marker。
 - 远程 full integration：最终 archive 为已提交 HEAD `31b132689`；tar `C:/Users/caiqy/AppData/Local/Temp/sub2api-task-9-d70a45257d0f46c0911f6e17747ab6aa.tar`（`50,851,840` bytes，SHA-256 `0A6133485F5747EFC1DE77F349D3F16825CF0C0E9572BFC95580B85088A61235`）。唯一远程目录 `/tmp/sub2api-task-9-d70a45257d0f46c0911f6e17747ab6aa` 的创建、上传、Go `1.26.5`/Docker `29.2.1` 预检、带 `.test-tmp` 及 `TMPDIR`/`TMP`/`TEMP` 的 `CI=true GOFLAGS='-v' go test -tags=integration ./...`、下载、清理均为 `success=true, exit_code=0`。日志保存于 `C:/Users/caiqy/AppData/Local/Temp/sub2api-task-9-d70a45257d0f46c0911f6e17747ab6aa-integration.log`；remote `rm -rf && test ! -e` 和 local tar 删除均完成。
-- 顾虑：远程仍有 DingTalk、TLS/JA3、Prompt Audit Redis/PostgreSQL 条件和无 OpenAI key 的既有环境型 skip；新 migration 目标没有 skip。image moderation 测试通过时仍出现已恢复的 worker panic 日志；Browserslist、动态 import 与 `670.83 kB` chunk advisory 未消除。历史 Windows 文件锁根因仍未确定。
+- 顾虑：远程仍有 DingTalk、TLS/JA3、Prompt Audit Redis/PostgreSQL 条件和无 OpenAI key 的既有环境型 skip；新 migration 目标没有 skip。image moderation 的 worker panic 已由 `fd909c5be` 修复为测试 fixture/lifecycle 问题，替代本行原有顾虑；Browserslist、动态 import 与 `670.83 kB` chunk advisory 未消除。历史 Windows 文件锁根因仍未确定。
 
 ## Task 10：v0.1.160 能力矩阵与证据封闭（2026-07-27）
 
-- 状态：`DONE_WITH_CONCERNS`。本段是已有实现、测试和远程门禁证据的文档封闭；不改行为代码、不构造 TDD RED，且未重跑 Task 9 的 full test/build/generate/integration。
+- 状态：`DONE_WITH_CONCERNS`。本段是已有实现、测试和远程门禁证据的文档封闭；不改行为代码、不构造 TDD RED，且未重跑 Task 9 的 full test/build/generate/integration。Task 11 状态为：证据已补齐，等待独立复审。
 - 只读 Git 复核：merge 为 `e04cb1aa2c2554a04bec55f9b4393d3efd2eb693`（`merge: upstream v0.1.160`），第一父 `d3e0c596ebff2298d07a3f4f336c16aa653cb840`，精确第二父及 `v0.1.160^{}` 为 `8bfbc5ca99bf2c0ac96e0f29ffd35eb6aca27e62`。`backend/cmd/server/VERSION` 仍为 `0.1.159.6`。
 - changed-files：`git diff --name-only 'v0.1.159^{}..v0.1.160^{}'` 为 133 个精确路径，完整逐项原文保留在本台账 `TASK6:v0.1.160:raw`（第 395-531 行），未以 merge commit 的较小文件集替代 tag diff。
 - 阶段 0 能力矩阵实际交集是 12 个精确路径：`backend/cmd/server/wire_gen.go`、`backend/internal/handler/batch_image_handler.go`、`backend/internal/handler/content_moderation_helper.go`、`backend/internal/handler/openai_images.go`、`backend/internal/pkg/xai/billing.go`、`backend/internal/repository/scheduler_cache.go`、`backend/internal/service/admin_account_upstream_billing_probe_test.go`、`backend/internal/service/grok_media.go`、`backend/internal/service/openai_gateway_scheduling.go`、`backend/migrations/181_prompt_audit.sql`、`frontend/package.json`、`frontend/src/i18n/locales/en/common.ts`。这 12 个路径映射为 14 个矩阵能力结论：`protected=13`、`manual=1`、`gap=0`。
 
 | 能力交集 | 变更路径 | 结论与证据 |
 | --- | --- | --- |
-| advanced/layered scheduler、fallback/WaitPlan | `scheduler_cache.go`、`openai_gateway_scheduling.go` | `protected`：`TestLayered_PriorityDeterminism`、`TestLayered_WaitPlanFallbackSkipsUpstreamRestrictedAccount`。 |
+| advanced/layered scheduler | `scheduler_cache.go`、`openai_gateway_scheduling.go` | `protected`：`TestLayered_PriorityDeterminism`。 |
+| fallback/WaitPlan | `scheduler_cache.go`、`openai_gateway_scheduling.go` | `protected`：`TestLayered_WaitPlanFallbackSkipsUpstreamRestrictedAccount`。 |
 | DB recheck | `scheduler_cache.go` | `protected`：`TestLayered_GroupedAccountPassesDBFreshRecheck`。 |
 | Grok/platform Sticky 与 media | `grok_media.go` | `protected`：`TestLayered_SessionStickyPreservesGrokBinding`、`TestGatewayService_SelectAccountForModelWithPlatform_StickyDisabledBypassesStickyReadAndWrite`；合并静态审查确认 media eligibility、spool/snapshot 脱敏、sticky 和官方 `url` 输出同存。 |
 | privacy | `content_moderation_helper.go` | `protected`：`TestLayered_PreviousResponseStickyHonorsRequirePrivacySet`；`RequirePrivacySet` 仍是调度约束，未被 full prompt audit 存储语义替代。 |
 | image capability | `openai_images.go` | `protected`：`TestLayered_RequiredImageCapabilityFiltersUnsupportedAccounts`。 |
-| image moderation/security audit | `openai_images.go` | `protected`：`TestSecurityAuditBlockingFailuresLeaveAllDownstreamCountersAtZero`（3 子例）和 `TestPromptAuditGatePrecedesAccountBillingAndUpstreamSideEffects`（13 gateway 路径）；调用顺序为 moderation 后 audit，二者通过才转发。 |
 | async images/object storage | `batch_image_handler.go` | `protected`：`TestImageTaskServiceCompleteOffloadsToStorage`。 |
 | image/video billing | `billing.go` | `protected`：`TestCalculateImageCost`、`TestCalculateVideoCostUsesSeparateConfig`。 |
 | upstream multiplier | `admin_account_upstream_billing_probe_test.go` | `protected`：`TestOpenAIFreshUpstreamBillingRateRecomputesPeakAtSelectionTime`。 |
 | English i18n | `en/common.ts` | `protected`：`pnpm --dir frontend run test:run -- src/i18n/__tests__/localeKeysExist.spec.ts`，并由 Task 9 `make test` 的 199 files / 1521 tests 通过。 |
 | Ent/Wire | `wire_gen.go` | `protected`：`go -C backend test ./cmd/server`；Task 9 两轮 `make -C backend generate` 及各轮 generated diff 均为 0。 |
-| dependencies | `frontend/package.json` | `manual`：矩阵依赖图检查为 `go -C backend mod verify` 与 `pnpm --dir frontend install --frozen-lockfile`；Task 9 本地 `make test` 已 GREEN，不将其误写为专属行为断言。 |
+| dependencies | `frontend/package.json` | `manual`：`go -C backend mod verify` 退出 `0`（`all modules verified`）；`pnpm --dir frontend install --frozen-lockfile` 退出 `0`（`Lockfile is up to date, resolution step is skipped`、`Already up to date`）。命令前后 lockfile 和其他 tracked 文件无变更；`git diff --exit-code -- backend/go.mod backend/go.sum frontend/package.json frontend/pnpm-lock.yaml` 退出 `0`。 |
 | migrations | `181_prompt_audit.sql` | `protected`：远程 `TestMigrationsRunner_UpgradesLocalV01596AcrossUpstreamStages` PASS、无 SKIP；full integration 的 `TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate` PASS。 |
 | local test gates | `frontend/package.json` | `protected`：Task 9 `make test` GREEN。 |
 
 - 9 个冲突文件与融合结论已在本台账第 1818-1825 行逐项记录并复核：`VERSION` 保持 `0.1.159.6`；Grok handler/test 保留 spooling、脱敏、sticky 与 media eligibility；OpenAI gateway 保留 group permission 并采用显式 image intent；OpenAI images 先 moderation 后 audit；Grok service/test 兼容 `image_url`/`mask_image_url` 和 `reference_images`，规范化官方 `url`；scheduler tests 同时覆盖 sticky 与 media eligibility；OpenSpec config 同存中文规则和上游注释。
 - security audit/full prompt：`181_prompt_audit.sql` 创建 redacted metadata，`182_prompt_audit_full_prompt.sql` 仅为 event 增加 `full_prompt`；`FullPromptFromScanText` 只写 audit event。该留存边界与 `RequirePrivacySet` 调度隐私开关独立，已由上述 privacy/audit 证据保护。
 - `openai-first-token-timeout` 是唯一已审批移除项，不属于 12 路径实际交集：`manual` 静态证据为 merge 后 runtime 与测试中该 branch、constant、test 均不存在，且第 1821 行记录了保留该删除的冲突决议；它不计为 `gap`。
-- migrations：本地 `181_group_duplicate_operation_id.sql`、上游 `181_prompt_audit.sql`、`182_prompt_audit_full_prompt.sql` 三个完整 filename 均存在，按字典序先建 event 再 ALTER。目标 staged-upgrade 测试在 review-fix archive `fd909c5be1eb628a551d11128a4329ade57070f5` PASS（`4.31s`、无 SKIP）；mutation RED 发生在修复后，临时移除上游 172 使固定集合由 12 变 11，退出 1，仅证明测试敏感性，不冒充实现前 RED。
-- Task 9 提交链：`3de7191e391c0fc3edffb4de11d31a3eee9c87f5 test: cover staged migration upgrades`；`a719a8e6c0d49871b8cb31eb3a8fe08ec645f3ee fix: preserve local behavior after v0.1.160`；`31b132689f858f4b6e657c653829c80d2fc09738 fix: preserve local behavior after v0.1.160`；ledger `516e998b07d8e81a6d1e18f7acc0c0425d6b083f`；review-fix `fd909c5be1eb628a551d11128a4329ade57070f5 test: harden staged migration coverage`。
+- 补充证据（不计入阶段 0 14 项统计）：image moderation/security audit 由 `TestSecurityAuditBlockingFailuresLeaveAllDownstreamCountersAtZero`（3 子例）和 `TestPromptAuditGatePrecedesAccountBillingAndUpstreamSideEffects`（13 gateway 路径）保护；调用顺序为 moderation 后 audit，二者通过才转发。
+- migrations：本地 `181_group_duplicate_operation_id.sql`、上游 `181_prompt_audit.sql`、`182_prompt_audit_full_prompt.sql` 三个完整 filename 均存在，按字典序先建 event 再 ALTER。目标 staged-upgrade 测试在 review-fix archive `fd909c5be1eb628a551d11128a4329ade57070f5` PASS（`4.31s`、无 SKIP）；mutation RED 发生在修复后，临时删除的是上游 `172_composite_model_routes.sql`，使固定集合由 12 变 11、退出 `1`，与本地 `172_video_per_second_billing_metadata.sql` 无关，仅证明测试敏感性，不冒充实现前 RED。
+- Task 9 完整提交链与边界：
+  - `3de7191e391c0fc3edffb4de11d31a3eee9c87f5 test: cover staged migration upgrades`：仅新增 staged migration upgrade 覆盖。
+  - `a719a8e6c0d49871b8cb31eb3a8fe08ec645f3ee fix: preserve local behavior after v0.1.160`：恢复缺失的 OpenAI moderation 委派，并删除引用不存在符号的死 WS failover closure。
+  - `31b132689f858f4b6e657c653829c80d2fc09738 fix: preserve local behavior after v0.1.160`：仅为 `PromptAdminService` 添加 Wire 绑定，解除 generate 的 provider 缺失。
+  - `516e998b07d8e81a6d1e18f7acc0c0425d6b083f docs: record v0.1.160 full gate`：仅记录 Task 9 full gate 和 ledger 证据。
+  - `fd909c5be1eb628a551d11128a4329ade57070f5 test: harden staged migration coverage`：补齐上游 migration 快照/断言，并修正 image moderation 测试 mock 与异步 drain。
+  - `0186949e0e6810d5e4eb49345280a3c3a7b8267a docs: record task 9 review fixes`：仅将上述 review-fix 的 RED/GREEN、远端清理和剩余顾虑记入 Task 9 报告。
 - worker panic：根因是测试 mock 的 nil 嵌入接口在异步 `enqueueRecord -> worker -> persistContentModerationLog -> applyFlaggedAccountSideEffects -> CountFlaggedByUserSince` 调用链触发；生产 repository 实现完整接口。review-fix 补齐 mock 计数方法并等待 `CreateLog` drain，不改生产代码。修复后本机及已提交 archive 的 `TestOpenAIImages_ContentModerationUsesFrozenPayloadBeforeRelease -count=3 -v` 均 PASS，输出无 `content_moderation.worker_panic`；第 1843 行的旧 panic 顾虑由本条替代。
 - Gate 复核：Task 9 本地 `make test`、`make build`、两轮 generate/generated diff 和静态门禁均 GREEN；远程 archive `31b132689` 的 full integration GREEN。远程日志为 `C:/Users/caiqy/AppData/Local/Temp/sub2api-task-9-d70a45257d0f46c0911f6e17747ab6aa-integration.log`；remote `/tmp/sub2api-task-9-d70a45257d0f46c0911f6e17747ab6aa` 已删除并确认不存在，本地 tar 已删除。环境型 skip 仅为 DingTalk、TLS/JA3 外部条件、Prompt Audit Redis/PostgreSQL 条件和无 OpenAI key；已分类，目标 migration 未 skip。
-- 放行：能力交集 `gap=0`、目标 migration 未 skip、VERSION 不变，Task 11 入口开放。残余风险不改变此结论：既有环境型 skip、Browserslist/Vite advisory、Ryuk handshake advisory，以及 Windows `user-mapped section` 历史根因未定。
+- Task 11 状态：证据已补齐，等待独立复审。能力交集 `gap=0`、目标 migration 未 skip、VERSION 不变；残余风险为既有环境型 skip、Browserslist/Vite advisory、Ryuk handshake advisory，以及 Windows `user-mapped section` 历史根因未定。
