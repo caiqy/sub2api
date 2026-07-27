@@ -37,7 +37,13 @@ func (s *gatewayControlSettingRepoStub) Set(ctx context.Context, key, value stri
 }
 
 func (s *gatewayControlSettingRepoStub) GetMultiple(ctx context.Context, keys []string) (map[string]string, error) {
-	panic("unexpected GetMultiple call")
+	result := make(map[string]string, len(keys))
+	for _, key := range keys {
+		if value, ok := s.values[key]; ok {
+			result[key] = value
+		}
+	}
+	return result, nil
 }
 
 func (s *gatewayControlSettingRepoStub) SetMultiple(ctx context.Context, settings map[string]string) error {
