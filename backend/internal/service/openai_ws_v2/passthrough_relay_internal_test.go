@@ -476,7 +476,7 @@ func TestRelayTurnTimingHelpersCoverage(t *testing.T) {
 	require.False(t, ok)
 }
 
-func TestObserveUpstreamMessage_BindsCreatedOrTerminalActiveTurn(t *testing.T) {
+func TestObserveUpstreamMessage_BindsOnlyResponseCreated(t *testing.T) {
 	now := time.Unix(100, 0)
 	state := &relayState{activeTurn: &relayTurnTiming{startAt: now}}
 	nowFn := func() time.Time { return now.Add(time.Second) }
@@ -485,14 +485,11 @@ func TestObserveUpstreamMessage_BindsCreatedOrTerminalActiveTurn(t *testing.T) {
 	require.Empty(t, foreignDelta.responseID)
 	require.Empty(t, state.activeTurn.responseID)
 
-	directTerminal := observeUpstreamMessage(state, []byte(`{"type":"response.completed","response":{"id":"resp_direct","usage":{"input_tokens":9,"output_tokens":8}}}`), now, nowFn, nil)
-	require.True(t, directTerminal.terminal)
-	require.True(t, directTerminal.completedActiveTurn)
-	require.Equal(t, 9, state.usage.InputTokens)
-	require.Equal(t, 8, state.usage.OutputTokens)
-	require.Nil(t, state.activeTurn)
+	foreignTerminal := observeUpstreamMessage(state, []byte(`{"type":"response.completed","response":{"id":"resp_foreign","usage":{"input_tokens":9,"output_tokens":8}}}`), now, nowFn, nil)
+	require.False(t, foreignTerminal.terminal)
+	require.Equal(t, Usage{}, state.usage)
+	require.NotNil(t, state.activeTurn)
 
-	state = &relayState{activeTurn: &relayTurnTiming{startAt: now}}
 	created := observeUpstreamMessage(state, []byte(`{"type":"response.created","response":{"id":"resp_real"}}`), now, nowFn, nil)
 	require.Equal(t, "resp_real", created.responseID)
 	require.Equal(t, "resp_real", state.activeTurn.responseID)
