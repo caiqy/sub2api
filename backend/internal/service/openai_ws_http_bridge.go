@@ -237,9 +237,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if turn == 1 {
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 		}
-		safeErr := sanitizeUpstreamErrorMessage(err.Error())
-		_ = writeClientMessage(buildOpenAIWSHTTPBridgeErrorEvent(http.StatusBadGateway, safeErr))
-		return nil, fmt.Errorf("upstream http bridge request failed: %s", safeErr)
+		return nil, s.handleOpenAIWSHTTPBridgeNonFailoverTransportError(ctx, c, account, err, writeClientMessage)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -467,13 +465,27 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if turn == 1 && !wroteDownstream {
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, streamErr, true)
 		}
-		return resultWithUsage(), streamErr
+		if clientDisconnected {
+			return resultWithUsage(), streamErr
+		}
+		return resultWithUsage(), s.handleOpenAIWSHTTPBridgeNonFailoverTransportError(ctx, c, account, streamErr, writeClientMessage)
 	}
 	terminalErr := errors.New("upstream http bridge stream ended before terminal event")
 	if turn == 1 && !wroteDownstream {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, terminalErr, true)
 	}
-	return resultWithUsage(), terminalErr
+	if clientDisconnected {
+		return resultWithUsage(), terminalErr
+	}
+	return resultWithUsage(), s.handleOpenAIWSHTTPBridgeNonFailoverTransportError(ctx, c, account, terminalErr, writeClientMessage)
+}
+
+func (s *OpenAIGatewayService) handleOpenAIWSHTTPBridgeNonFailoverTransportError(ctx context.Context, c *gin.Context, account *Account, err error, writeClientMessage func([]byte) error) error {
+	if errors.Is(err, ErrRequestBodySpool) || s.recordOpenAIUpstreamTransportError(ctx, c, account, err, true) {
+		return err
+	}
+	_ = writeClientMessage(buildOpenAIWSHTTPBridgeErrorEvent(http.StatusBadGateway, "Upstream request failed"))
+	return errors.New("upstream http bridge request failed")
 }
 
 func resolveGrokWSCacheIdentity(c *gin.Context, account *Account, payload []byte, originalModel string) (string, error) {

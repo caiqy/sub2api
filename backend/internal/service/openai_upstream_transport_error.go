@@ -109,6 +109,20 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 	if errors.Is(err, ErrRequestBodySpool) {
 		return err
 	}
+	if s.recordOpenAIUpstreamTransportError(ctx, c, account, err, passthrough) {
+		return err
+	}
+
+	return &UpstreamFailoverError{
+		StatusCode:   http.StatusBadGateway,
+		ResponseBody: openAITransportFailoverBody,
+	}
+}
+
+// recordOpenAIUpstreamTransportError preserves the health and Ops effects of a
+// transport failure. It returns true when the client canceled the request, in
+// which case callers must neither fail over nor emit a replacement client event.
+func (s *OpenAIGatewayService) recordOpenAIUpstreamTransportError(ctx context.Context, c *gin.Context, account *Account, err error, passthrough bool) bool {
 	safeErr := sanitizeUpstreamErrorMessage(err.Error())
 	setOpsUpstreamError(c, 0, safeErr, "")
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -124,17 +138,13 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 	// Client disconnected: do NOT fail over to another account and do NOT evict
 	// this one — the upstream never had a chance to exhibit a fault.
 	if errors.Is(err, context.Canceled) {
-		return err
+		return true
 	}
 
 	if classifyOpenAITransportError(err).Persistent {
 		s.tempUnscheduleOpenAITransportError(ctx, account, safeErr)
 	}
-
-	return &UpstreamFailoverError{
-		StatusCode:   http.StatusBadGateway,
-		ResponseBody: openAITransportFailoverBody,
-	}
+	return false
 }
 
 // tempUnscheduleOpenAITransportError marks an account temporarily unschedulable

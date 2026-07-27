@@ -122,6 +122,117 @@ func TestProxyOpenAIWSHTTPBridgeTurnTransportErrorFailoverSafety(t *testing.T) {
 	}
 }
 
+type openAIWSHTTPBridgeAccountRepoStub struct {
+	AccountRepository
+	tempUnschedCalls int
+}
+
+func (r *openAIWSHTTPBridgeAccountRepoStub) SetTempUnschedulable(_ context.Context, _ int64, _ time.Time, _ string) error {
+	r.tempUnschedCalls++
+	return nil
+}
+
+func TestProxyOpenAIWSHTTPBridgeTurnLaterTransportErrorsKeepHealthSideEffectsWithoutReplay(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	payload := []byte(`{"type":"response.create","model":"gpt-5","input":"hi"}`)
+	transportErr := errors.New("dial tcp 10.23.45.67:443: connect: connection refused")
+
+	tests := []struct {
+		name     string
+		upstream *httpUpstreamRecorder
+	}{
+		{
+			name:     "do_error",
+			upstream: &httpUpstreamRecorder{err: transportErr},
+		},
+		{
+			name: "response_body_read_error",
+			upstream: &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       passthroughErrReadCloser{err: transportErr},
+			}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &openAIWSHTTPBridgeAccountRepoStub{}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: tt.upstream, accountRepo: repo}
+			account := &Account{ID: 12, Name: "bridge", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1}
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+			var writes [][]byte
+
+			_, err := svc.proxyOpenAIWSHTTPBridgeTurn(
+				context.Background(), c, account, "sk-test", payload, len(payload),
+				"gpt-5", "", "", "", "", 2,
+				func(message []byte) error {
+					writes = append(writes, append([]byte(nil), message...))
+					return nil
+				},
+			)
+
+			var failoverErr *UpstreamFailoverError
+			require.Error(t, err)
+			require.False(t, errors.As(err, &failoverErr))
+			require.Len(t, tt.upstream.requests, 1, "non-failover errors must not replay the completed turn")
+			require.Len(t, writes, 1)
+			require.Equal(t, "error", gjson.GetBytes(writes[0], "type").String())
+			require.Equal(t, "Upstream request failed", gjson.GetBytes(writes[0], "error.message").String())
+			require.NotContains(t, string(writes[0]), "10.23.45.67")
+			require.Equal(t, 1, repo.tempUnschedCalls)
+			require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
+
+			rawEvents, ok := c.Get(OpsUpstreamErrorsKey)
+			require.True(t, ok)
+			events, ok := rawEvents.([]*OpsUpstreamErrorEvent)
+			require.True(t, ok)
+			require.Len(t, events, 1)
+			require.Equal(t, "request_error", events[0].Kind)
+		})
+	}
+}
+
+func TestProxyOpenAIWSHTTPBridgeTurnClientDisconnectDoesNotRecordFollowupTransportFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	transportErr := errors.New("dial tcp 10.23.45.67:443: connect: connection refused")
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body: &passthroughCloseTrackingReadCloser{Reader: io.MultiReader(
+			strings.NewReader("data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n"),
+			passthroughErrReadCloser{err: transportErr},
+		)},
+	}}
+	repo := &openAIWSHTTPBridgeAccountRepoStub{}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream, accountRepo: repo}
+	account := &Account{ID: 13, Name: "bridge", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	payload := []byte(`{"type":"response.create","model":"gpt-5","input":"hi"}`)
+	writes := 0
+
+	_, err := svc.proxyOpenAIWSHTTPBridgeTurn(
+		context.Background(), c, account, "sk-test", payload, len(payload),
+		"gpt-5", "", "", "", "", 2,
+		func([]byte) error {
+			writes++
+			return context.Canceled
+		},
+	)
+
+	var failoverErr *UpstreamFailoverError
+	require.Error(t, err)
+	require.False(t, errors.As(err, &failoverErr))
+	require.Equal(t, 1, writes, "client disconnect must not trigger a replacement error event")
+	require.Equal(t, 0, repo.tempUnschedCalls)
+	require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
+	_, hasOpsError := c.Get(OpsUpstreamErrorsKey)
+	require.False(t, hasOpsError)
+}
+
 func TestProxyOpenAIWSHTTPBridgeTurnHTTPStatusFailoverSafety(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -228,13 +339,15 @@ func TestProxyOpenAIWSHTTPBridgeTurnRequiresTerminalEvent(t *testing.T) {
 		body         string
 		wantFailover bool
 		wantWrites   int
+		wantError    bool
 	}{
 		{name: "done_without_events_fails_over", body: "data: [DONE]\n\n", wantFailover: true},
 		{
 			name: "created_then_done_is_truncated_not_success",
 			body: "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_truncated\"}}\n\n" +
 				"data: [DONE]\n\n",
-			wantWrites: 1,
+			wantWrites: 2,
+			wantError:  true,
 		},
 	}
 	for _, tt := range tests {
@@ -271,6 +384,10 @@ func TestProxyOpenAIWSHTTPBridgeTurnRequiresTerminalEvent(t *testing.T) {
 				require.False(t, errors.As(err, &failoverErr))
 			}
 			require.Len(t, writes, tt.wantWrites)
+			if tt.wantError {
+				require.Equal(t, "error", gjson.GetBytes(writes[len(writes)-1], "type").String())
+				require.Equal(t, "Upstream request failed", gjson.GetBytes(writes[len(writes)-1], "error.message").String())
+			}
 		})
 	}
 }
