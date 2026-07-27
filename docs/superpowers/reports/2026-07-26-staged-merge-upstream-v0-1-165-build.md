@@ -125,13 +125,14 @@
 
 ## v0.1.164
 
-- changed-files：待执行。
-- 冲突台账：无（尚未合并）。
-- 能力矩阵交集：待执行。
-- 聚焦测试：待执行。
-- 本地门禁：待执行。
-- 远程门禁：待执行。
-- 放行结论：待执行。
+- changed-files：`U=diff(v0.1.163^{}, v0.1.164^{})=202`，`M=diff(699459921^1, 699459921)=205`。`U-M={backend/cmd/server/VERSION}`，按约束保留 `0.1.159.6`；`M-U` 为四个本地回归测试的新增依赖参数适配，未改运行时语义。
+- 冲突台账：21 个文本冲突均人工融合。`VERSION` 保留本地值；`wire_gen.go`、`ent/client.go` 经确定性生成；settings/API contract 保留原字段并加入 Alipay deep link；moderation、gateway、chat/responses、embeddings、OpenAI/images 共同保留 usage/detail/sticky/fallback 与 composite target；http/router/routes 共同保留 `UsageDetailCapture`、Grok 路由和 composite resolver；scheduler 保留 advanced/layered、default/layered sticky、fallback/WaitPlan、DB fresh recheck 并在其前解析 composite；OpenAI service 同时保留 scheduler 与 proxy stream quarantine；前端 `EditAccountModal.vue`、`types/index.ts`、`SettingsView.vue` 保留原 UI/类型并加入 Ollama/composite/Alipay。完整逐项 base/ours/theirs 证据见 ignored `.superpowers/sdd/task-20-report.md`。
+- 能力矩阵交集：composite 入口为 `ProvideRouter -> SetupRouter -> RegisterGatewayRoutes -> composite target middleware -> GatewayService.resolvePlatform`，未绕过本地调度与粘性路径；Ollama Cloud 由 account/settings admin API、service/repository 与 Wire cleanup 接入；Grok 402 cooldown 位于 `openai_gateway_grok.go` 调度错误处理；Alipay mobile deep link 贯通 settings、provider、支付 UI。
+- migration：完整保留 `172_video_per_second_billing_metadata.sql`、`172_composite_model_routes.sql`、`186_alipay_mobile_precreate_deep_link.sql`、`186_group_auth_cache_image_generation.sql`；未重命名或改写发布 migration。
+- 聚焦测试：`go test ./cmd/server`、`go test ./internal/server/routes`、`go test ./internal/handler`、`go test ./internal/handler/admin`、composite/Ollama/Grok/scheduler 命名 service 测试、`go test ./internal/service -run '^$' -count=1` 和 `pnpm --dir frontend exec vue-tsc --noEmit` 均 PASS。`git diff --check`、unmerged 检查和精确 Git marker 检查均通过。
+- 本地门禁：本任务按边界未运行 full gate；`VERSION=0.1.159.6`，`openai-first-token-timeout` 在 `backend`、`frontend`、`deploy` 中为 0 命中。
+- 远程门禁：未执行远程操作。
+- 放行结论：`DONE_WITH_CONCERNS`。merge 为 `6994599211d3714e30b67cc61ef0834a94c34610`，第一父 `07167bbfa44ecd702cf32268ad98eabb0dbb6c65`，第二父 `cd8bb98c44303b2c8f04c0da340447c992f0cb7d`；唯一 concern 是 Task 21 full gate 尚未执行。
 
 ## v0.1.165
 
