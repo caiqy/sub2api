@@ -77,3 +77,15 @@ implementer 实际执行的命令及结果如下，均来自本次 merge/ledger 
 - 风险信号：v0.1.161 的 26 个冲突虽已静态和定向编译核对，但尚未经过本 tag 的 full gate；Task 9 的远程 migration GREEN 是前序证据，不替代当前 merge 验证。
 - 风险信号：既有 Windows `user-mapped section` 生成文件锁根因未定；环境型 DingTalk、TLS/JA3、Prompt Audit Redis/PostgreSQL、无 OpenAI key skip 仍需分类观察。
 - Task 12 应验证：full test/build、两轮 generate 及 generated diff、migration/integration、step-up/session、advanced/layered scheduler/fallback/DB recheck/sticky、Grok media spooling/redaction/video URL、content moderation 和 HTTP/WS failover。
+
+## 第 1 轮复审修复
+
+- 修复提交：`1b80f95c9 fix: correct v0.1.161 conflict resolutions`。merge `f2158292c`、ledger `4c37dfccb` 和本报告原始提交 `89d5cb794` 均未改写。
+- Finding 1 step-up RED：`go test ./internal/handler/admin -run '^TestUpdateSettings(EnableStepUp|DisableStepUp)' -count=1` 的五项转换测试均期望拒绝、实际 `200`。GREEN：恢复启用前管理员 session/TOTP 校验、关闭时 `EnforceStepUpAlways` 与 SettingsView TOTP 重试后，同一聚焦命令及 Ops snapshot 测试通过；未恢复 `openai-first-token-timeout`。
+- Finding 2 Grok RED：新增 `TestGrokVideoStatus_RejectsSchedulerAccountOtherThanOwnerBinding` 期望 `404`、实际 `200`。GREEN：改为写入外层 `boundLookupAccountID` 后，owner 不同的调度选择不会转发；同组无请求体 status 测试也注入 owner binding 后通过，spooling 生命周期保持原断言。
+- Finding 3 API Key 创建 RED：`pnpm exec vitest run src/components/account/__tests__/CreateAccountModal.spec.ts --reporter=dot` 缺失 quota/notify 字段。GREEN：API Key 路径回到 `createAccountAndFinish`，保留 `upstream_billing_probe_enabled`、`expires_at` 与暂停 payload，15 项通过。
+- Finding 4 billing probe UI RED：`SettingsView.spec.ts` 找不到 `upstream-billing-probe-settings`。GREEN：恢复加载、保存、状态和 gateway 卡，25 项通过。
+- Finding 5 Ops runtime RED：新增 `TestUpdateSettingsPublishesOpsMonitoringSnapshot` 在持久化后仍读取到 enabled。GREEN：持久化成功后调用 `SetMonitoringEnabled`，聚焦 Go 测试通过。
+- Finding 6 示例 YAML RED：新增 `TestExampleConfigGatewayBodyLimits` 报 `yaml: line 178: found a tab character that violates indentation`。GREEN：使用空格缩进，保留 `text_max_body_size=33554432`，并将 `upstream_response_read_max_bytes=134217728` 与 128 MiB 契约对齐；解析及数值断言通过。
+- 本轮精确 GREEN：上述三组 Go 命令、两个 Vitest 文件和 `pnpm exec vue-tsc --noEmit` 均退出 `0`；`git diff --check` 通过。Vitest 仍有既有 `router-link` / jsdom 网络 stderr advisory，退出码为 `0`。
+- 残余 Task 12 风险：未运行 full test/build/generate/integration；仍需执行全量门禁，以及 step-up/session、scheduler、Grok media、migration/integration 与 HTTP/WS failover 的端到端验证。

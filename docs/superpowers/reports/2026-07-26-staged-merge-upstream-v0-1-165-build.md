@@ -384,6 +384,14 @@ backend/migrations/openai_long_context_billing_migration_test.go
 - 历史阻塞（已解决，规范 HEAD `849f956992178e25ab2074e1e4cc596d29f8834f`）：首次原生 full RED 暴露 handler body spool/panic、repository usage-detail transaction/retention 与 hidden UI resource ordering 断言；后续测试修复及 HEAD `99cb81de306cb0e8ea811387e362e4d601f6f4b0` 的新 nonce focused/full GREEN 已解决。
 - 当前状态：阶段 0 本地与远程门禁通过；七项非 migration/repository target skip 是已分类的基线风险。Task 5 为 `DONE_WITH_CONCERNS`：HEAD 生成内容经 detached worktree 双轮验证稳定，但受监视 Windows 工作区的随机文件映射风险仍未定因，隔离门禁与工作区门禁的等价性待 reviewer 判断。`v0.1.160` 的 Task 10 证据已补齐，等待独立复审；`v0.1.161` 至 `v0.1.165` 仍未开始合入或放行。
 
+## Task 11 第 1 轮复审修复
+
+- 修复提交：`1b80f95c9 fix: correct v0.1.161 conflict resolutions`；只包含 reviewer 指出的六项冲突融合回归及其聚焦测试，未改写 merge `f2158292c` 或先前 ledger。
+- RED：`go test ./internal/handler/admin -run '^TestUpdateSettings(EnableStepUp|DisableStepUp)' -count=1` 显示五项 step-up 转换错误放行；新增 Grok owner-binding 测试显示预期 `404`、实际 `200`；新增 Ops 测试显示持久化后 snapshot 仍为启用；`CreateAccountModal.spec.ts` 缺失 quota 字段；`SettingsView.spec.ts` 找不到 billing probe 卡；新增示例 YAML 解析测试报第 178 行 tab 缩进错误。
+- GREEN：step-up/Ops 聚焦 Go 测试、Grok status/owner-binding 聚焦 Go 测试、`TestExampleConfigGatewayBodyLimits`、`CreateAccountModal.spec.ts`、`SettingsView.spec.ts` 和 `pnpm exec vue-tsc --noEmit` 均通过。
+- 修复内容：恢复 step-up 启用前管理员会话/TOTP 校验与关闭时 `EnforceStepUpAlways`，并恢复 SettingsView 的 TOTP 重试；修正 Grok owner account 赋值作用域；API Key 创建统一进入配额/临时不可调度 helper 并保留 billing probe、expiry；恢复 billing probe 设置卡；持久化后发布 Ops monitoring 原子 snapshot；YAML 改为空格并把非流响应读取上限恢复为 128 MiB，同时保留 `text_max_body_size`。
+- Task 12 风险：本轮刻意未运行 `make test`、`make build`、generate 或 integration；全量门禁、迁移/集成、跨端 step-up 会话和完整媒体/调度路径仍须在 Task 12 执行。
+
 ## Task 6: 六段 changed-files 与本地能力矩阵
 
 - Task 6 在首次 CodeGraph MCP/全局 CLI 不可用时曾 BLOCKED；协调者随后确认现有 `.codegraph/` 健康。此任务用官方一次性 CLI `npx -y @colbymchenry/codegraph` 恢复，先执行 `sync . --quiet`，再由 `status . --json` 确认 `initialized=true`、`pendingChanges` 全 0、`worktreeMismatch=null`。
