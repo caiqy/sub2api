@@ -43,6 +43,7 @@ func (h *BackupHandler) UpdateS3Config(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	h.imageStorage.Invalidate()
 	response.Success(c, cfg)
 }
 
