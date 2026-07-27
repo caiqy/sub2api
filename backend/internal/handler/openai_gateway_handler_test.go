@@ -122,6 +122,99 @@ func TestOpenAIForwardSucceededForScheduling_UsesUpstreamTerminalEvent(t *testin
 	}
 }
 
+func TestOpenAIHandleStreamingAwareErrorWithCode_EmitsStableClassification(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	h := &OpenAIGatewayHandler{}
+	h.handleStreamingAwareErrorWithCode(
+		c,
+		http.StatusBadGateway,
+		"upstream_error",
+		service.OpenAIUpstreamHTTP2StreamErrorCode,
+		"Upstream HTTP/2 stream failed",
+		true,
+		true,
+	)
+
+	body := w.Body.String()
+	require.Contains(t, body, "event: error\n")
+	require.Equal(t, "upstream_error", gjson.Get(body[strings.Index(body, "{"):], "error.type").String())
+	require.Equal(t, service.OpenAIUpstreamHTTP2StreamErrorCode, gjson.Get(body[strings.Index(body, "{"):], "error.code").String())
+	require.NotContains(t, body, "stream ID")
+
+	streamErr, ok := service.GetOpsStreamError(c)
+	require.True(t, ok)
+	require.True(t, streamErr.CountTowardsSLA)
+	require.Equal(t, http.StatusBadGateway, streamErr.IntendedStatus)
+}
+
+func TestOpenAIForwardSucceededForScheduling(t *testing.T) {
+	require.True(t, openAIForwardSucceededForScheduling(nil))
+	require.True(t, openAIForwardSucceededForScheduling(&service.OpenAIForwardResult{}))
+	require.True(t, openAIForwardSucceededForScheduling(&service.OpenAIForwardResult{
+		OpenAIWSMode:          true,
+		UpstreamTerminalEvent: "response.completed",
+	}))
+	require.False(t, openAIForwardSucceededForScheduling(&service.OpenAIForwardResult{
+		OpenAIWSMode:          true,
+		UpstreamTerminalEvent: "response.failed",
+	}))
+}
+
+func TestOpenAIResponsesRequiredCapability(t *testing.T) {
+	tests := []struct {
+		name        string
+		imageIntent bool
+		platform    string
+		want        service.OpenAIEndpointCapability
+	}{
+		{
+			name:        "OpenAI explicit image intent requires Responses",
+			imageIntent: true,
+			platform:    service.PlatformOpenAI,
+			want:        service.OpenAIEndpointCapabilityResponses,
+		},
+		{
+			name:        "Grok explicit image intent keeps chat capability",
+			imageIntent: true,
+			platform:    service.PlatformGrok,
+			want:        service.OpenAIEndpointCapabilityChatCompletions,
+		},
+		{
+			name:     "non-image intent keeps chat capability",
+			platform: service.PlatformOpenAI,
+			want:     service.OpenAIEndpointCapabilityChatCompletions,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, openAIResponsesRequiredCapability(tt.imageIntent, tt.platform))
+		})
+	}
+}
+
+func TestResolveOpenAIMessagesMetadataSession_DoesNotDerivePromptCacheKey(t *testing.T) {
+	body := []byte(`{"model":"claude-sonnet-4-5","metadata":{"user_id":"claude-code-session"},"messages":[{"role":"user","content":"hello"}]}`)
+
+	sessionHash, promptCacheKey := resolveOpenAIMessagesMetadataSession("", "", "claude-sonnet-4-5", body)
+
+	require.NotEmpty(t, sessionHash)
+	require.Empty(t, promptCacheKey)
+}
+
+func TestResolveOpenAIMessagesMetadataSession_PreservesExplicitPromptCacheKey(t *testing.T) {
+	body := []byte(`{"metadata":{"user_id":"claude-code-session"}}`)
+
+	sessionHash, promptCacheKey := resolveOpenAIMessagesMetadataSession("", "explicit-cache", "claude-sonnet-4-5", body)
+
+	require.NotEmpty(t, sessionHash)
+	require.Equal(t, "explicit-cache", promptCacheKey)
+}
+
 func TestOpenAIHandleStreamingAwareError_NonStreaming(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
