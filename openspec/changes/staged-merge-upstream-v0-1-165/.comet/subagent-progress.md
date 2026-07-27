@@ -1,24 +1,26 @@
 # 子代理进度
 
-- 当前任务：29 项中的第 9 项（OpenSpec 2.2）
+- 当前任务：29 项中的第 10 项（OpenSpec 2.3）
 - 当前阶段：`implementing`
-- 状态：Task 8 已完成并通过 A/B 独立审查，等待生成并派发 Task 9 简报
+- 状态：Task 9 已通过复审，等待生成并派发 Task 10 简报
 - 简报：待生成
 - 报告：待生成
+- 审查差异：待生成
 - 基线 SHA：`075abc07399d6154130d2a2695fb24c785acd69c`
-- 任务起点 SHA：`3a520c407356e08437d63b1542f0779a232d2b9a`
+- 任务起点 SHA：待协调提交后更新
 - 实现提交：待生成
-- 最后审查 SHA：`3a520c407356e08437d63b1542f0779a232d2b9a`
-- 已完成任务数：8
+- 最后审查 SHA：`0186949e0`
+- 已完成任务数：9
 - 审查模式：`thorough`
 - 审查修复轮次：0/2
-- RED/GREEN：待 Task 9 implementer 回报
-- 风险信号：migration、跨模块 full gate
+- RED/GREEN：待 Task 10 implementer 回报
+- 风险信号：能力矩阵与阶段证据
 - 未解决反馈：无
 
 ## 最近完成
 
 - Task 8：完成（`d3e0c596e..3a520c407`）；reviewer B 安全/业务语义 PASS（`ses_05f7550b1ffeC0IO93bKyePzVu`），reviewer A 结构复审 PASS（`ses_05f71bdbeffe1Y0Gn9WnLacxLX`），均为 Sol
+- Task 9：完成（`d130c6754..0186949e0`）；第 1 轮修复复审 PASS（`ses_05edb6f30ffeKnMwGN2ZHqlhGg`，Sol）；mutation RED 明确记录为修复后敏感性验证，不冒充实现前 RED
 
 ## 约束
 

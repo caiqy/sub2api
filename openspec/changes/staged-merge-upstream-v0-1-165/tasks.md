@@ -11,7 +11,7 @@
 ## 2. 合入 v0.1.160
 
 - [x] 2.1 `git merge --no-ff v0.1.160`，按"上游修复+本地定制共存"原则处理冲突（重点：security-audit full prompt 与本地 privacy、Grok media 隔离、image_gen 权限、migration 181/182 及本地同号 181）
-- [ ] 2.2 运行 full 门禁（`make test`、`make build`、`local-serv-ai` Docker-backed integration、两次 backend generate、migration 新库/升级库、无冲突标记）并修复回归
+- [x] 2.2 运行 full 门禁（`make test`、`make build`、`local-serv-ai` Docker-backed integration、两次 backend generate、migration 新库/升级库、无冲突标记）并修复回归
 - [ ] 2.3 按能力矩阵完成 v0.1.160 触及能力的映射审查并记录证据
 
 ## 3. 合入 v0.1.161

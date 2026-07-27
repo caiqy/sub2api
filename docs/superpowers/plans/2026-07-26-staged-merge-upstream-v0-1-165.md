@@ -381,7 +381,7 @@ finally {
 - 修改：`backend/internal/repository/migrations_schema_integration_test.go`
 - 修改：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
 
-- [ ] **步骤 1：建立可随后续 tag 自动扩展的 migration 升级回归**
+- [x] **步骤 1：建立可随后续 tag 自动扩展的 migration 升级回归**
 
   新增 `TestMigrationsRunner_UpgradesLocalV01596AcrossUpstreamStages`，复用 `newEmptyIsolatedMigrationDB`、`applyMigrationsFS`、`requireMigrationApplied` 和嵌入的 `migrations.FS`。测试维护本次 12 个上游 filename 的固定集合，并：
 
@@ -399,7 +399,7 @@ finally {
 
   随后用 `$stage = 'v0.1.160'` 执行通用远程门禁。若测试直接通过，记录为对现有 filename runner 行为的保护；若失败，则保留该远程 RED，再进入步骤 2 做最小修复。禁止把本机缺少 Docker 导致的 skip 当作 GREEN。
 
-- [ ] **步骤 2：运行本段能力测试并以独立聚焦提交处理真实回归**
+- [x] **步骤 2：运行本段能力测试并以独立聚焦提交处理真实回归**
 
   执行矩阵为本段列出的 scheduler、Sticky、privacy、image capability 和 audit 聚焦命令。只在 RED 已证明回归时写最小修复和所需测试；提交前逐个暂存 ledger 记录的真实路径，严禁 `git add .`。然后执行：
   ```powershell
@@ -408,7 +408,7 @@ finally {
 
   预期：没有回归不创建空提交；修复不回写 merge commit。
 
-- [ ] **步骤 3：运行本地、生成、静态与远程全门禁**
+- [x] **步骤 3：运行本地、生成、静态与远程全门禁**
 
   完成通用阶段门禁脚本，`$stage` 设为 `v0.1.160`，并运行矩阵全部聚焦命令。预期：本地 `make test`、`make build`、两次生成、静态冲突检查和 local-serv-ai integration 都通过；新增 upgrade test 证明本地 172/181 与当前上游 181/182 可升级、幂等且 checksum 稳定。失败后停在本段并从本任务重跑。
 
