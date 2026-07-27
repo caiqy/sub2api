@@ -467,11 +467,11 @@ finally {
 - 修改：RED 失败确定的 scheduler、认证、Grok 或 migration 实际路径
 - 修改：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
 
-- [ ] **步骤 1：优先运行复杂路径的失败测试**
+- [x] **步骤 1：优先运行复杂路径的失败测试**
 
   对模型冷却、advanced/layered scheduler、fallback/WaitPlan、DB recheck、session/step-up、Grok 视频代理运行矩阵聚焦测试。若上游触及路径但没有断言，先写一个最小失败测试，再修复；不对纯 merge 内容虚构 RED。
 
-- [ ] **步骤 2：独立提交最小兼容修复并重跑受影响测试**
+- [x] **步骤 2：独立提交最小兼容修复并重跑受影响测试**
 
   提交前对 ledger 中 RED 证据关联的真实源码和测试路径逐个执行 `git add --`，严禁暂存其他文件。然后执行：
   ```powershell
@@ -480,7 +480,7 @@ finally {
 
   预期：仅在确有回归时提交，修复后全部聚焦测试 GREEN。
 
-- [ ] **步骤 3：执行通用阶段门禁**
+- [x] **步骤 3：执行通用阶段门禁**
 
   用 `$stage = 'v0.1.161'` 执行本地全门禁与 remote integration；远程 migration 断言本地 172/181、当前已存在上游 181-184 全部按 filename 可升级、幂等且 checksum 稳定。预期：所有门禁通过，否则阻塞本段。
 
