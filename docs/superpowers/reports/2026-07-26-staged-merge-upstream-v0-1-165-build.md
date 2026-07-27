@@ -2002,3 +2002,34 @@ final absence check：JSON `success=true, exit_code=0`。
 - created-only 契约：仅同 ID `response.created` 可绑定空 active turn；外来 delta/terminal 不计 usage、不完成 turn、不释放 permit。正常 fixture 必须先发送同 ID created，随后才发送 delta/terminal。`TestObserveUpstreamMessage_BindsOnlyResponseCreated` 在 `0775a6063` 的 terminal 放宽行为上真实 RED，`c3bfb765f` 后与 `go test ./internal/service/openai_ws_v2 -count=1` GREEN；`47a6c031e` 只补 fixture，不放宽契约。
 - Task 12 聚焦覆盖已包含模型冷却、advanced/layered scheduler、fallback/WaitPlan、DB recheck、sticky、step-up、Grok owner/spooling/redaction/video URL、API Key helper、billing probe、Ops snapshot、YAML、moderation、HTTP/WS failover、Wire bind 和 migration 181-184。最终 `make test` 为 201 files/1537 tests，`make build` 通过；双轮 generate/diff、静态/VERSION/timeout/migration 核验及 remote integration 均通过。`VERSION=0.1.159.6`，已移除的 `openai-first-token-timeout` 未恢复。remote `local-serv-ai` 为 Go 1.26.5/Docker 29.2.1，日志无 FAIL/panic，archive 和远端目录均已清理并保留日志；16 个 skip 是已接受环境基线，不命中本阶段能力。
 - 放行边界：v0.1.161 实现门禁的精确矩阵为 `gap=0`，本轮 docs/evidence 修正待 Sol 复审。Task 14/v0.1.162 在该复审 PASS 前保持封闭；不因此开始下一 tag、push、tag、release、deploy 或合并 main。
+
+## Task 17：v0.1.163 合入与记账（2026-07-27）
+
+- 状态：`DONE_WITH_CONCERNS`。任务起点为 `b7b7bba6952460bb7cc38f1d41a0de95c449bcb8`；`v0.1.163^{}` 和 merge 时的 `MERGE_HEAD^{}` 均为 `d0bdd7e771636a8d315f542cafd39484f39bd60c`。merge commit 为 `02abe1574bf8044a1b180e62b002f58f9928d88f`，第一父为任务起点，第二父为该精确 peeled SHA；未触碰 `v0.1.164`、Task 18/19、远程、tag、release、deploy 或 push。
+- 本 merge 的 first-parent diff 为 171 个文件、7,412 行新增、613 行删除。完整、可复现的 changed-files 清单由 `git diff --name-only 02abe1574bf8044a1b180e62b002f58f9928d88f^1 02abe1574bf8044a1b180e62b002f58f9928d88f` 记录；范围包括 root/dependency/deploy、Ent、migration 185、backend handler/repository/service/setup、frontend reasoning/usage/payment/mobile/i18n/UI 与 docs/screenshot。
+- 14 个文本冲突均人工融合，未使用整文件 `ours/theirs`。`git show --remerge-diff --name-only 02abe1574b` 还会列出 `backend/cmd/server/VERSION` 及两份 Ent 生成输出；前者是版本元数据保留，后两者是 post-merge regeneration，均不计入 14 个文本冲突。
+
+| 文本冲突 | ours | theirs | 最终融合 |
+| --- | --- | --- | --- |
+| `backend/internal/handler/admin/usage_handler_request_type_test.go` | 本地 usage 筛选覆盖 | request-type 筛选覆盖 | 保留双方断言。 |
+| `backend/internal/handler/openai_gateway_handler.go` | 本地网关处理 | reasoning policy 入口调整 | 保留网关处理并传递 policy 所需信息。 |
+| `backend/internal/server/api_contract_test.go` | 本地 contract | 上游响应字段 | 两侧断言共存。 |
+| `backend/internal/service/api_key_auth_cache_impl.go` | 本地缓存/并发字段 | group reasoning 字段 | `apiKeyAuthSnapshotVersion = 18`，两侧字段均进入 snapshot。 |
+| `backend/internal/service/api_key_auth_cache_version_test.go` | 本地版本断言 | 上游字段断言 | 覆盖 v18。 |
+| `backend/internal/service/api_key_service_cache_test.go` | 本地失效语义 | group policy 缓存语义 | 同时验证失效和 policy 变更。 |
+| `backend/internal/service/gateway_anthropic_passthrough.go` | 本地 cache/透传计费 | 输出估算和 forced-cache 分类 | 两类计费逻辑均保留。 |
+| `backend/internal/service/gateway_forward_as_responses_test.go` | 本地 Responses 覆盖 | compact SSE 覆盖 | 两套用例均保留。 |
+| `backend/internal/service/openai_account_scheduler.go` | advanced/layered、sticky、DB recheck | quota metadata、runtime 过滤/诊断 | 四段预算、粘性和 DB 复核与上游 metadata 共存。 |
+| `backend/internal/service/openai_account_scheduler_layered.go` | layered 候选逻辑 | 不可用原因详情 | layered 选择保留，并适配三参无可用账号错误。 |
+| `backend/internal/service/openai_gateway_grok.go` | Grok sticky/cache | pool retryable/policy rejection | 两种失败条件合并。 |
+| `backend/internal/service/openai_gateway_scheduling.go` | 本地调度失败语义 | 上游诊断详情 | `noAvailableOpenAISelectionError` 统一接受详情。 |
+| `backend/internal/service/openai_gateway_service_test.go` | 本地网关回归 | Codex identity 覆盖 | 两套测试共存。 |
+| `frontend/src/components/admin/usage/UsageFilters.vue` | username-first 展示 | 搜索取消/竞态处理 | 按用户名优先展示并取消过期请求。 |
+
+- `backend/cmd/server/VERSION` 保持 `0.1.159.6`。reasoning policy 的持久化、管理和强制执行由 `backend/internal/domain/reasoning_effort.go`、`backend/ent/schema/group.go`、`backend/internal/repository/group_repo.go`、`backend/internal/service/openai_reasoning_effort_policy.go`、`frontend/src/components/admin/group/ReasoningEffortPolicyFields.vue` 与 `backend/migrations/185_group_reasoning_effort_policy.sql` 共同覆盖。
+- Scheduler quota metadata/LastUsedAt 证据位于 `backend/internal/repository/scheduler_cache.go`、`backend/internal/repository/scheduler_cache_last_used_unit_test.go`、`backend/internal/service/openai_account_scheduler.go` 和 `backend/internal/service/openai_account_scheduler_layered.go`；融合保留 runtime 过滤、粘性、DB recheck，并隔离 LastUsedAt 写入以免污染调度键。
+- Cleanup 证据位于 `backend/cmd/server/main.go`：超时路径仍执行 cleanup，避免缓冲用量和计费记录丢失。Billing 证据位于 `backend/internal/service/gateway_anthropic_passthrough.go`、`backend/internal/service/openai_gateway_response_handling.go` 及 image usage/Responses 测试，保留 output estimate、cache 分类与 image usage 修复。
+- 依赖与 migration：`frontend/package.json` 为 `axios ^1.18.0`，`frontend/pnpm-lock.yaml` 为解析的 `1.18.1`；新增 `backend/migrations/185_group_reasoning_effort_policy.sql`，未重命名历史 migration。
+- Ent：首次 focused service 测试在 `ent/runtime.init.0` 以 `interface {} is int, not string` 失败。根因是本地并发字段令 `Group` schema 的上游 reasoning 字段索引后移。执行标准 `go generate ./ent` 后，生成器仅修改 `backend/ent/mutation.go` 和 `backend/ent/runtime/runtime.go`：`GroupMutation.Fields()` 容量 51 -> 53，`max_reasoning_effort` 索引 46 -> 48，`reasoning_effort_mappings` 索引 47 -> 49；focused service 测试随后通过。
+- 限定验证：`go generate ./ent` 通过；`go test -tags=unit ./internal/service -run '^(TestAPIKey|TestParseAnthropicSSEField|TestHandleResponses.*CompactSSEFormat|TestOpenAI)' -count=1` 通过（58.789s）；本 session 既有 focused Go handler/server 成功检查保留、未重跑；`pnpm --dir frontend exec vitest run src/components/admin/usage/__tests__/UsageFilters.spec.ts` 通过（1 file、4 tests）；`pnpm --dir frontend run build` 通过。提交前 `unmerged=0`、cached diff-check、精确 conflict marker 检查、protected staged 检查和 `VERSION=0.1.159.6` 均通过。
+- Task 18 边界：broad backend `./...`、完整 Vitest、lint/integration 等 full gate 不计为本 Task PASS。收尾前误启动的 broad Go 仅输出依赖下载，完整 Vitest 仅输出部分测试结果；均没有完成摘要、均未重跑。部分 Vitest 输出含既有 `router-link` warning 与 jsdom `AggregateError`，Task 18 必须完整复核。
