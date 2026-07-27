@@ -90,6 +90,8 @@
 - 放行结论：`DONE_WITH_CONCERNS`，等待 Task 15 回归与 full gates。
 - Sol reviewer 第 1 轮 cleanup：`46eb292c04f14630dcfb31b28f6e83f541029d93 chore: clean v0.1.162 conflict remnants` 仅清除两个 admin setting handler 中三段冲突遗留的 `/* ... */` 死副本，并恢复 step-up 启用防自锁、关闭强制 step-up 的安全理由注释；未改变实际 JSON/setting 映射、trusted proxy、scheduler/sticky、audit 或 step-up 代码。
 - cleanup 验证：`gofmt -w backend/internal/handler/admin/setting_handler.go backend/internal/handler/admin/setting_handler_update.go`、`go -C backend test ./internal/handler/admin -run '^TestUpdateSettings(EnableStepUp|DisableStepUp)' -count=1`、`go -C backend test ./internal/handler/admin -run '^$'` 均退出 `0`；`git diff --check` 退出 `0`。TDD N/A：仅注释清理，不伪造 RED；Task 15 full gates、远程操作均未运行。
+- Task 15 回归与 full gate：以 `98fa814d2` 为起点，四个真实 RED 修复提交为 `57b5bf758`、`1d191894a`、`84d9a4f4f`、`69ac6209f`；分别闭合 HTTP/WS failover body 与 terminal event、Grok client-tool cache 提交、settings env 可达默认值/forwarded-IP fixture、rollback timeout 契约。聚焦矩阵均 GREEN；`make test`（Vitest `204` 文件、`1549` 用例）、`make build`、两轮 `make -C backend generate` 加 Ent/Wire 零 diff、unmerged/精确 marker/diff-check/migration 集合检查均通过，VERSION 保持 `0.1.159.6`。
+- Task 15 远程 integration：archive `69ac6209fcb4928251142a3368ffdbd750919076` 在 `local-serv-ai` 的 `/tmp/sub2api-task15-b369bbfa849c4b8fadad749d4c66f2b9` 完整通过。Go `1.26.5`、Docker Server `29.2.1`；`CI=true GOFLAGS='-v'` 和隔离三变量 temp 的 `go test -tags=integration ./...` 退出 `0`，`TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate` PASS（`4.80s`）。日志保存于 `C:/Users/caiqy/AppData/Local/Temp/sub2api-task15-b369bbfa849c4b8fadad749d4c66f2b9-integration.log`，archive 与远程目录均已清理；配置型/环境型 skip 已记录于 `.superpowers/sdd/task-15-report.md`，无 `FAIL`。
 
 ## v0.1.163
 
