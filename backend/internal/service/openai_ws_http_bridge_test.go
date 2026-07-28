@@ -1054,7 +1054,7 @@ func TestOpenAIWSHTTPBridgeAcceptsFirstFrameAboveLegacy16MiB(t *testing.T) {
 	require.Equal(t, "gpt-5", gjson.GetBytes(upstream.lastBody, "model").String())
 }
 
-func TestOpenAIWSHTTPBridgeKeepsContinuationFramesOnHTTPWithoutPreviousResponseID(t *testing.T) {
+func TestOpenAIWSHTTPBridgeKeepsContinuationAndAppliesLaterAccountMapping(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	firstSSEBody := strings.Join([]string{
@@ -1124,6 +1124,28 @@ func TestOpenAIWSHTTPBridgeKeepsContinuationFramesOnHTTPWithoutPreviousResponseI
 		Status:      StatusActive,
 		Schedulable: true,
 	}
+	account.Credentials["model_mapping"] = map[string]any{
+		"routed-model": "account-model",
+	}
+
+	var secondResult *OpenAIForwardResult
+	hooks := &OpenAIWSIngressHooks{
+		RewriteRequest: func(turn int, payload []byte, originalModel string) (OpenAIWSRequestRewrite, error) {
+			if turn != 2 {
+				return OpenAIWSRequestRewrite{Payload: payload, OriginalModel: originalModel}, nil
+			}
+			return OpenAIWSRequestRewrite{
+				Payload:       ReplaceModelInBody(payload, "routed-model"),
+				OriginalModel: "routed-model",
+			}, nil
+		},
+		AfterTurn: func(turn int, result *OpenAIForwardResult, _ error) {
+			if turn == 2 && result != nil {
+				copy := *result
+				secondResult = &copy
+			}
+		},
+	}
 
 	errCh := make(chan error, 1)
 	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1153,7 +1175,7 @@ func TestOpenAIWSHTTPBridgeKeepsContinuationFramesOnHTTPWithoutPreviousResponseI
 		req.Header.Set("User-Agent", "codex_cli_rs/0.135.0")
 		ginCtx.Request = req
 
-		errCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "sk-test", firstMessage, nil)
+		errCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "sk-test", firstMessage, hooks)
 	}))
 	defer wsServer.Close()
 
@@ -1205,6 +1227,9 @@ func TestOpenAIWSHTTPBridgeKeepsContinuationFramesOnHTTPWithoutPreviousResponseI
 	require.Equal(t, "call_bridge_1", secondInput[1].Get("call_id").String())
 	require.Equal(t, "function_call_output", secondInput[2].Get("type").String())
 	require.Equal(t, "call_bridge_1", secondInput[2].Get("call_id").String())
+	require.Equal(t, "account-model", gjson.GetBytes(upstream.bodies[1], "model").String())
+	require.NotNil(t, secondResult)
+	require.Equal(t, "account-model", secondResult.UpstreamModel)
 	require.Equal(t, 0, captureDialer.DialCount())
 	require.Empty(t, captureConn.writes)
 }

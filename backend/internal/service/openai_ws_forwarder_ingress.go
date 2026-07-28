@@ -475,6 +475,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				if err != nil {
 					return err
 				}
+				rewritten = applyOpenAIWSAccountModelMapping(account, rewritten)
 				currentBridgePayload.payloadRaw = rewritten
 				currentBridgePayload.rawForHash = rewritten
 				currentBridgePayload.payloadBytes = len(rewritten)
