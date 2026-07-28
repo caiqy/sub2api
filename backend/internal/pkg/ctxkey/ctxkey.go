@@ -20,6 +20,12 @@ const (
 	// CompositeRouteSource 标识 composite 解析结果来自显式路由还是内置模型探测。
 	CompositeRouteSource Key = "ctx_composite_route_source"
 
+	// CompositeRouteDecision 保存完整的 composite 路由决策，供分组切换时校验归属。
+	CompositeRouteDecision Key = "ctx_composite_route_decision"
+
+	// CompositeRouteResolver 为无法在 HTTP body middleware 中解析模型的请求提供 resolver。
+	CompositeRouteResolver Key = "ctx_composite_route_resolver"
+
 	// RequestID 为服务端生成/透传的请求 ID。
 	RequestID Key = "ctx_request_id"
 

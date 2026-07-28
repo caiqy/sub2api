@@ -1640,6 +1640,113 @@ func TestOpenAIGatewayServiceRecordUsage_FallsBackToUpstreamModelWhenPrimaryUnpr
 	require.InDelta(t, expectedCost.ActualCost, userRepo.lastAmount, 1e-12)
 }
 
+func TestOpenAIGatewayServiceRecordUsage_CompositePublicAliasPricing(t *testing.T) {
+	const (
+		publicModel   = "team/gpt-5.2"
+		concreteModel = "gpt-5.4"
+	)
+	groupID := int64(904)
+	usage := OpenAIUsage{InputTokens: 20, OutputTokens: 10}
+	tokens := UsageTokens{InputTokens: 20, OutputTokens: 10}
+
+	t.Run("fallback-like alias without explicit pricing uses concrete model", func(t *testing.T) {
+		usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+		userRepo := &openAIRecordUsageUserRepoStub{}
+		svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
+		ctx := WithResolvedTargetPlatform(context.Background(), PlatformOpenAI)
+		expectedConcrete := expectedOpenAICost(t, svc, concreteModel, usage, 1.0)
+		expectedAlias := expectedOpenAICost(t, svc, publicModel, usage, 1.0)
+		require.NotEqual(t, expectedConcrete.ActualCost, expectedAlias.ActualCost)
+
+		err := svc.RecordUsage(ctx, &OpenAIRecordUsageInput{
+			Result: &OpenAIForwardResult{
+				RequestID:     "resp_composite_alias_concrete_pricing",
+				Model:         concreteModel,
+				BillingModel:  concreteModel,
+				UpstreamModel: concreteModel,
+				Usage:         usage,
+				Duration:      time.Second,
+			},
+			APIKey: &APIKey{
+				ID:      904,
+				GroupID: &groupID,
+				Group:   &Group{ID: groupID, Platform: PlatformComposite, RateMultiplier: 1},
+			},
+			User:    &User{ID: 904},
+			Account: &Account{ID: 904},
+			ChannelUsageFields: ChannelUsageFields{
+				OriginalModel:      publicModel,
+				ChannelMappedModel: publicModel,
+				BillingModelSource: BillingModelSourceRequested,
+			},
+		})
+
+		require.NoError(t, err)
+		require.NotNil(t, usageRepo.lastLog)
+		require.InDelta(t, expectedConcrete.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)
+		require.InDelta(t, expectedConcrete.ActualCost, userRepo.lastAmount, 1e-12)
+	})
+
+	t.Run("explicit channel alias pricing wins", func(t *testing.T) {
+		usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+		userRepo := &openAIRecordUsageUserRepoStub{}
+		svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
+		inputPrice := 1e-6
+		outputPrice := 2e-6
+		cache := newEmptyChannelCache()
+		cache.pricingByGroupModel[channelModelKey{groupID: groupID, platform: PlatformOpenAI, model: publicModel}] = &ChannelModelPricing{
+			BillingMode: BillingModeToken,
+			InputPrice:  &inputPrice,
+			OutputPrice: &outputPrice,
+		}
+		cache.channelByGroupID[groupID] = &Channel{ID: groupID, Status: StatusActive}
+		cache.groupPlatform[groupID] = PlatformComposite
+		cache.loadedAt = time.Now()
+		channelService := &ChannelService{}
+		channelService.cache.Store(cache)
+		svc.resolver = NewModelPricingResolver(channelService, svc.billingService)
+		ctx := WithResolvedTargetPlatform(context.Background(), PlatformOpenAI)
+		expected, err := svc.billingService.CalculateCostUnified(CostInput{
+			Ctx:            ctx,
+			Model:          publicModel,
+			GroupID:        &groupID,
+			Tokens:         tokens,
+			RequestCount:   1,
+			RateMultiplier: 1.0,
+			Resolver:       svc.resolver,
+		})
+		require.NoError(t, err)
+
+		err = svc.RecordUsage(ctx, &OpenAIRecordUsageInput{
+			Result: &OpenAIForwardResult{
+				RequestID:     "resp_composite_alias_explicit_pricing",
+				Model:         concreteModel,
+				BillingModel:  concreteModel,
+				UpstreamModel: concreteModel,
+				Usage:         usage,
+				Duration:      time.Second,
+			},
+			APIKey: &APIKey{
+				ID:      905,
+				GroupID: &groupID,
+				Group:   &Group{ID: groupID, Platform: PlatformComposite, RateMultiplier: 1},
+			},
+			User:    &User{ID: 905},
+			Account: &Account{ID: 905},
+			ChannelUsageFields: ChannelUsageFields{
+				OriginalModel:      publicModel,
+				ChannelMappedModel: publicModel,
+				BillingModelSource: BillingModelSourceRequested,
+			},
+		})
+
+		require.NoError(t, err)
+		require.NotNil(t, usageRepo.lastLog)
+		require.InDelta(t, expected.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)
+		require.InDelta(t, expected.ActualCost, userRepo.lastAmount, 1e-12)
+	})
+}
+
 func TestOpenAIGatewayServiceRecordUsage_UnpricedTokenModelFallsBackToZeroCostUsageLog(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	userRepo := &openAIRecordUsageUserRepoStub{}

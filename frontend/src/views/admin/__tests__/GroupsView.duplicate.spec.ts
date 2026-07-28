@@ -7,6 +7,7 @@ import GroupsView from '@/views/admin/GroupsView.vue'
 
 const {
   listGroups,
+  getAllIncludingInactive,
   duplicateGroup,
   getModelsListCandidates,
   getUsageSummary,
@@ -15,6 +16,7 @@ const {
   showError
 } = vi.hoisted(() => ({
   listGroups: vi.fn(),
+  getAllIncludingInactive: vi.fn(),
   duplicateGroup: vi.fn(),
   getModelsListCandidates: vi.fn(),
   getUsageSummary: vi.fn(),
@@ -27,6 +29,7 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     groups: {
       list: listGroups,
+      getAllIncludingInactive,
       duplicate: duplicateGroup,
       getModelsListCandidates,
       getUsageSummary,
@@ -162,6 +165,7 @@ describe('GroupsView duplicate action', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     for (const fn of [
       listGroups,
+      getAllIncludingInactive,
       duplicateGroup,
       getModelsListCandidates,
       getUsageSummary,
@@ -179,6 +183,7 @@ describe('GroupsView duplicate action', () => {
       page_size: 20,
       pages: 1
     })
+    getAllIncludingInactive.mockResolvedValue([sourceGroup])
     duplicateGroup.mockResolvedValue({
       ...sourceGroup,
       id: 43,
@@ -205,6 +210,17 @@ describe('GroupsView duplicate action', () => {
     expect(duplicateGroup).toHaveBeenCalledWith(42)
     expect(showSuccess).toHaveBeenCalledWith('admin.groups.duplicateSuccess')
     expect(listGroups).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
+  it('loads copy sources independently of the paginated group list', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.get('[data-tour="groups-create-btn"]').trigger('click')
+    await flushPromises()
+
+    expect(getAllIncludingInactive).toHaveBeenCalledTimes(1)
     wrapper.unmount()
   })
 

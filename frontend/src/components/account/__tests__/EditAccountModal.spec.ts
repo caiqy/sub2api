@@ -393,6 +393,23 @@ describe('EditAccountModal', () => {
     updateAccountMock.mockResolvedValue(buildAccount())
   })
 
+  it('keeps unsaved edits when Ollama usage changes', async () => {
+    const account = buildAccount()
+    const wrapper = mountModal(account)
+    const nameInput = wrapper.get<HTMLInputElement>('[data-tour="edit-account-form-name"]')
+
+    await nameInput.setValue('unsaved account name')
+    await wrapper.setProps({
+      account: {
+        ...account,
+        ollama_cloud_usage: { eligible: false }
+      }
+    })
+    await flushPromises()
+
+    expect(nameInput.element.value).toBe('unsaved account name')
+  })
+
   it('keeps random TLS fingerprint profile selected and submits -1 for anthropic oauth accounts', async () => {
 	  const wrapper = mountModal(buildAccount({
 	    platform: 'anthropic',

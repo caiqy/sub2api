@@ -254,6 +254,7 @@ func (s *OpenAIGatewayService) ParseOpenAIImagesRequest(c *gin.Context, body []b
 	}
 
 	applyOpenAIImagesDefaults(req)
+	applyResolvedOpenAIImagesModel(c, req)
 	if err := validateOpenAIImagesModel(req.Model); err != nil {
 		return nil, err
 	}
@@ -299,12 +300,22 @@ func (s *OpenAIGatewayService) ParseOpenAIImagesMultipartForm(c *gin.Context, fo
 		return nil, fmt.Errorf("image file is required")
 	}
 	applyOpenAIImagesDefaults(req)
+	applyResolvedOpenAIImagesModel(c, req)
 	if err := validateOpenAIImagesModel(req.Model); err != nil {
 		return nil, err
 	}
 	req.SizeTier = normalizeOpenAIImageSizeTier(req.Size)
 	req.RequiredCapability = classifyOpenAIImagesCapability(req)
 	return req, nil
+}
+
+func applyResolvedOpenAIImagesModel(c *gin.Context, req *OpenAIImagesRequest) {
+	if c == nil || c.Request == nil || req == nil {
+		return
+	}
+	if model, ok := ResolvedUpstreamModelFromContext(c.Request.Context()); ok {
+		req.Model = model
+	}
 }
 
 func parseOpenAIImagesMultipartValues(values map[string][]string, req *OpenAIImagesRequest) {

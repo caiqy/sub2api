@@ -46,6 +46,12 @@ type GroupDuplicateRepository interface {
 	CreateFromSource(ctx context.Context, group *Group, sourceGroupID int64) error
 }
 
+// GroupAccountCopyRepository atomically persists a group and its copied account bindings.
+type GroupAccountCopyRepository interface {
+	CreateWithAccountIDs(ctx context.Context, group *Group, accountIDs []int64) error
+	UpdateWithAccountIDs(ctx context.Context, group *Group, accountIDs []int64) error
+}
+
 // AdminGroupRepository makes the group-duplication write capability an explicit
 // admin-service dependency without widening gateway-only group test doubles.
 type AdminGroupRepository interface {

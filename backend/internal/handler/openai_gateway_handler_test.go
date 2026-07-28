@@ -636,6 +636,72 @@ func TestOpenAIGatewayMessagesDispatchGateAllowsGrokGroups(t *testing.T) {
 		require.Equal(t, "api_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
 		require.NotContains(t, rec.Body.String(), "This group does not allow /v1/messages dispatch")
 	})
+
+	t.Run("composite_openai_target_without_dispatch_flag_reaches_gateway_dependencies", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}]}`))
+		groupID := int64(4103)
+		c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{
+			ID:      5103,
+			GroupID: &groupID,
+			User:    &service.User{ID: 6103},
+			Group: &service.Group{
+				ID:                    groupID,
+				Platform:              service.PlatformComposite,
+				AllowMessagesDispatch: false,
+			},
+		})
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 6103, Concurrency: 1})
+
+		(&OpenAIGatewayHandler{}).Messages(c)
+
+		require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+		require.NotContains(t, rec.Body.String(), "This group does not allow /v1/messages dispatch")
+	})
+
+	t.Run("composite_non_openai_target_is_not_granted_dispatch", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"hi"}]}`))
+		groupID := int64(4104)
+		c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{
+			ID:      5104,
+			GroupID: &groupID,
+			User:    &service.User{ID: 6104},
+			Group:   &service.Group{ID: groupID, Platform: service.PlatformComposite},
+		})
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 6104, Concurrency: 1})
+
+		(&OpenAIGatewayHandler{}).Messages(c)
+
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+		require.Contains(t, rec.Body.String(), "Model is not supported by this OpenAI-compatible endpoint")
+	})
+}
+
+func TestOpenAIGatewayCountTokensDispatchGateUsesCompositeTarget(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", strings.NewReader(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}]}`))
+	groupID := int64(4201)
+	c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{
+		ID:      5201,
+		GroupID: &groupID,
+		User:    &service.User{ID: 6201},
+		Group: &service.Group{
+			ID:                    groupID,
+			Platform:              service.PlatformComposite,
+			AllowMessagesDispatch: false,
+		},
+	})
+	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 6201, Concurrency: 1})
+
+	(&OpenAIGatewayHandler{}).CountTokens(c)
+
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	require.NotContains(t, rec.Body.String(), "This group does not allow /v1/messages dispatch")
 }
 
 func TestOpenAIModelMappedBody(t *testing.T) {
@@ -1464,18 +1530,46 @@ func ptrInt64(v int64) *int64 {
 }
 
 type openAIWSRegressionEnvOptions struct {
-	ExpectSecondTurnCloseCode coderws.StatusCode
-	MissingAPIKeyCredential   bool
-	SkipUpstream              bool
+	ExpectSecondTurnCloseCode   coderws.StatusCode
+	MissingAPIKeyCredential     bool
+	SkipUpstream                bool
+	CaptureFirstUpstreamMessage bool
+	CompositeResolver           *service.CompositeRouteResolver
 }
 
 type openAIWSRegressionEnv struct {
-	t           *testing.T
-	opts        openAIWSRegressionEnvOptions
-	server      *httptest.Server
-	upstream    *httptest.Server
-	requestDone chan struct{}
+	t                    *testing.T
+	opts                 openAIWSRegressionEnvOptions
+	server               *httptest.Server
+	upstream             *httptest.Server
+	requestDone          chan struct{}
+	handler              *OpenAIGatewayHandler
+	apiKey               *service.APIKey
+	firstUpstreamMessage chan []byte
 }
+
+type openAIWSCompositeRouteRepo struct {
+	routes []service.CompositeModelRoute
+}
+
+func (r openAIWSCompositeRouteRepo) ListByGroup(_ context.Context, groupID int64, includeDisabled bool) ([]service.CompositeModelRoute, error) {
+	routes := make([]service.CompositeModelRoute, 0, len(r.routes))
+	for _, route := range r.routes {
+		if route.GroupID == groupID && (includeDisabled || route.Enabled) {
+			routes = append(routes, route)
+		}
+	}
+	return routes, nil
+}
+
+func (openAIWSCompositeRouteRepo) Create(context.Context, *service.CompositeModelRoute) error {
+	return nil
+}
+func (openAIWSCompositeRouteRepo) Update(context.Context, *service.CompositeModelRoute) error {
+	return nil
+}
+func (openAIWSCompositeRouteRepo) Delete(context.Context, int64) error        { return nil }
+func (openAIWSCompositeRouteRepo) DeleteByGroup(context.Context, int64) error { return nil }
 
 func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts openAIWSRegressionEnvOptions) *openAIWSRegressionEnv {
 	t.Helper()
@@ -1500,6 +1594,10 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
 	cfg.Concurrency.PingInterval = 0
 
+	var firstUpstreamMessage chan []byte
+	if opts.CaptureFirstUpstreamMessage {
+		firstUpstreamMessage = make(chan []byte, 1)
+	}
 	var upstreamServer *httptest.Server
 	if !opts.SkipUpstream {
 		upstreamServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1514,10 +1612,13 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 			turn := 0
 			for {
 				readCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-				_, _, err := conn.Read(readCtx)
+				_, payload, err := conn.Read(readCtx)
 				cancel()
 				if err != nil {
 					return
+				}
+				if turn == 0 && firstUpstreamMessage != nil {
+					firstUpstreamMessage <- append([]byte(nil), payload...)
 				}
 				turn++
 				writeCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -1595,6 +1696,9 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 	requestDone := make(chan struct{}, 1)
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
+		if opts.CompositeResolver != nil {
+			c.Request = c.Request.WithContext(service.WithCompositeRouteResolver(c.Request.Context(), opts.CompositeResolver))
+		}
 		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 1, Concurrency: 1})
 		c.Next()
@@ -1607,12 +1711,55 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 	})
 
 	return &openAIWSRegressionEnv{
-		t:           t,
-		opts:        opts,
-		server:      httptest.NewServer(router),
-		upstream:    upstreamServer,
-		requestDone: requestDone,
+		t:                    t,
+		opts:                 opts,
+		server:               httptest.NewServer(router),
+		upstream:             upstreamServer,
+		requestDone:          requestDone,
+		handler:              h,
+		apiKey:               apiKey,
+		firstUpstreamMessage: firstUpstreamMessage,
 	}
+}
+
+func TestOpenAIResponsesWebSocketResolvesCompositeExplicitAliasOnFirstFrame(t *testing.T) {
+	resolver := service.NewCompositeRouteResolver(openAIWSCompositeRouteRepo{routes: []service.CompositeModelRoute{{
+		GroupID:        2,
+		PublicModel:    "public-alias",
+		MatchType:      service.CompositeRouteMatchExact,
+		TargetPlatform: service.PlatformOpenAI,
+		UpstreamModel:  "gpt-5",
+		Endpoint:       service.CompositeRouteEndpointResponses,
+		Enabled:        true,
+	}}})
+	cache := &concurrencyCacheMock{
+		acquireUserSlotFn: func(context.Context, int64, int, string) (bool, error) { return true, nil },
+		acquireUserGroupSlotFn: func(context.Context, int64, int64, int, string) (bool, error) {
+			return true, nil
+		},
+		acquireAccountSlotFn: func(context.Context, int64, int, string) (bool, error) { return true, nil },
+	}
+	env := newOpenAIWSRegressionEnv(t, cache, openAIWSRegressionEnvOptions{
+		CaptureFirstUpstreamMessage: true,
+		CompositeResolver:           resolver,
+	})
+	defer env.Close()
+	env.apiKey.Group = &service.Group{ID: 2, Platform: service.PlatformComposite}
+
+	clientConn := env.dial(t)
+	defer func() { _ = clientConn.CloseNow() }()
+	env.writeMessage(t, clientConn, `{"type":"response.create","model":"public-alias","stream":false}`)
+
+	event := env.readMessage(t, clientConn)
+	require.Equal(t, "response.completed", gjson.GetBytes(event, "type").String())
+	select {
+	case payload := <-env.firstUpstreamMessage:
+		require.Equal(t, "gpt-5", gjson.GetBytes(payload, "model").String())
+	case <-time.After(5 * time.Second):
+		t.Fatal("upstream did not receive the first websocket frame")
+	}
+	require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
+	env.waitRequestDone(t)
 }
 
 func (e *openAIWSRegressionEnv) Close() {

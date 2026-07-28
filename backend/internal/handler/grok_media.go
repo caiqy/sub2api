@@ -129,6 +129,12 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		service.SetUsageRequestBody(c, preview)
 		service.SetOpsUpstreamRequestBodyPreview(c, preview, coordinator.Effective().Size())
 	}
+	if resolvedModel, ok := service.ResolvedUpstreamModelFromContext(c.Request.Context()); ok {
+		requestInfo.Model = resolvedModel
+		if coordinator != nil && coordinator.form != nil {
+			coordinator.form.Value["model"] = []string{resolvedModel}
+		}
+	}
 	if coordinator != nil && coordinator.form != nil && endpoint == service.GrokMediaEndpointImagesEdits {
 		forwardContentType, prepareErr := func() (string, error) {
 			forwardBody, forwardContentType, err := service.PrepareGrokMediaFormForwardBody(requestInfo)

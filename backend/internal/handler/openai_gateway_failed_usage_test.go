@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -140,6 +141,98 @@ func TestOpenAIGatewayHandler_SubmitFailedUsageLog_PrefersExactUpstreamModelOver
 	require.NotNil(t, log)
 	require.NotNil(t, log.UpstreamModel)
 	require.Equal(t, exactUpstreamModel, *log.UpstreamModel)
+}
+
+func TestOpenAIGatewayHandler_SubmitFailedUsageLog_PreservesCompositeModelTriplet(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
+	gatewayService := service.NewOpenAIGatewayService(nil, usageRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewOpenAIGatewayHandler(gatewayService, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	apiKey := &service.APIKey{ID: 101, UserID: 202, User: &service.User{ID: 202}}
+	account := &service.Account{ID: 11, Platform: service.PlatformOpenAI, Credentials: map[string]any{"api_key": "sk-test"}}
+
+	router := gin.New()
+	router.Use(middleware.UsageDetailCapture())
+	router.POST("/v1/responses", func(c *gin.Context) {
+		c.Request = c.Request.WithContext(service.WithCompositeRouteDecision(c.Request.Context(), service.CompositeRouteDecision{
+			Matched:        true,
+			Source:         service.CompositeRouteSourceExplicit,
+			PublicModel:    "public-alias",
+			TargetPlatform: service.PlatformOpenAI,
+			UpstreamModel:  "gpt-5",
+		}))
+		setOpenAIFailedUsageExactUpstreamModel(c, "gpt-5.2")
+		h.submitFailedUsageLog(c, apiKey, account, "gpt-5", false, 0, nil, nil, 0, nil, "handler.openai_gateway.responses")
+		c.Status(http.StatusBadGateway)
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"public-alias"}`))
+	router.ServeHTTP(rec, req)
+
+	log := waitForOpenAIFailedUsageLog(t, usageRepo)
+	require.NotNil(t, log)
+	require.Equal(t, "public-alias", log.RequestedModel)
+	require.Equal(t, "gpt-5", log.Model)
+	require.NotNil(t, log.UpstreamModel)
+	require.Equal(t, "gpt-5.2", *log.UpstreamModel)
+}
+
+func TestOpenAIGatewayHandler_SubmitFailedUsageLogSnapshotsCompositeModelsBeforeQueue(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
+	gatewayService := service.NewOpenAIGatewayService(nil, usageRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	pool := newUsageRecordTestPool(t)
+	h := &OpenAIGatewayHandler{gatewayService: gatewayService, usageRecordWorkerPool: pool}
+
+	block := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(block) }) }
+	t.Cleanup(release)
+	started := make(chan struct{})
+	pool.Submit(func(context.Context) {
+		close(started)
+		<-block
+	})
+	<-started
+
+	apiKey := &service.APIKey{ID: 101, UserID: 202, User: &service.User{ID: 202}}
+	account := &service.Account{ID: 11, Platform: service.PlatformOpenAI}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request = c.Request.WithContext(service.WithCompositeRouteDecision(c.Request.Context(), service.CompositeRouteDecision{
+		Matched:        true,
+		Source:         service.CompositeRouteSourceExplicit,
+		PublicModel:    "public-alias",
+		TargetPlatform: service.PlatformOpenAI,
+		UpstreamModel:  "gpt-5",
+	}))
+	setOpenAIFailedUsageExactUpstreamModel(c, "gpt-5.2")
+
+	h.submitFailedUsageLog(c, apiKey, account, "gpt-5", false, 0, nil, nil, 0, nil, "handler.openai_gateway.responses")
+
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/other", nil)
+	setOpenAIFailedUsageExactUpstreamModel(c, "reused-upstream-model")
+	release()
+
+	log := waitForOpenAIFailedUsageLog(t, usageRepo)
+	require.NotNil(t, log)
+	require.Equal(t, "public-alias", log.RequestedModel)
+	require.Equal(t, "gpt-5", log.Model)
+	require.NotNil(t, log.UpstreamModel)
+	require.Equal(t, "gpt-5.2", *log.UpstreamModel)
+}
+
+func TestSetOpenAIFailedUsageExactUpstreamModelUpdatesOpsContext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	setOpenAIFailedUsageExactUpstreamModel(c, "gpt-5.2")
+
+	require.Equal(t, "gpt-5.2", c.GetString(opsUpstreamModelKey))
 }
 
 func TestOpenAIGatewayHandler_MessagesUpstreamErrorStillCreatesUsageLog(t *testing.T) {
@@ -751,6 +844,55 @@ func TestOpenAIGatewayHandler_SubmitOpenAIImagesFailedUsageLog_UsesErrorSnapshot
 	require.Contains(t, log.DetailSnapshot.ResponseHeaders, "Content-Type: application/json")
 	require.Contains(t, log.DetailSnapshot.ResponseHeaders, "X-Request-Id: req_err_snapshot_123")
 	require.Contains(t, log.DetailSnapshot.ResponseBody, "err-carried image snapshot")
+}
+
+func TestOpenAIGatewayHandler_OpenAIImagesFailedUsageLogSnapshotsRequestBeforeQueue(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
+	gatewayService := service.NewOpenAIGatewayService(nil, usageRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	pool := newUsageRecordTestPool(t)
+	h := &OpenAIGatewayHandler{gatewayService: gatewayService, usageRecordWorkerPool: pool}
+
+	block := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() {
+		releaseOnce.Do(func() { close(block) })
+	}
+	t.Cleanup(release)
+	started := make(chan struct{})
+	pool.Submit(func(context.Context) {
+		close(started)
+		<-block
+	})
+	<-started
+
+	apiKey := &service.APIKey{ID: 101, UserID: 202, User: &service.User{ID: 202}}
+	account := &service.Account{ID: 11, Platform: service.PlatformOpenAI}
+	parsed := &service.OpenAIImagesRequest{Model: "original-model", Stream: true}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+	c.Request.Header.Set("User-Agent", "original-user-agent")
+	c.Set(openAIFailedUsageExactUpstreamModelKey, "original-upstream-model")
+
+	h.submitOpenAIImagesFailedUsageLogWithResponse(c, apiKey, account, parsed, 0, nil, nil, time.Second)
+
+	parsed.Model = "reused-model"
+	parsed.Stream = false
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/other", nil)
+	c.Request.Header.Set("User-Agent", "reused-user-agent")
+	c.Set(openAIFailedUsageExactUpstreamModelKey, "reused-upstream-model")
+	release()
+
+	log := waitForOpenAIFailedUsageLog(t, usageRepo)
+	require.Equal(t, "original-model", log.Model)
+	require.NotNil(t, log.UpstreamModel)
+	require.Equal(t, "original-upstream-model", *log.UpstreamModel)
+	require.True(t, log.Stream)
+	require.NotNil(t, log.InboundEndpoint)
+	require.Equal(t, "/v1/images/generations", *log.InboundEndpoint)
+	require.NotNil(t, log.UserAgent)
+	require.Equal(t, "original-user-agent", *log.UserAgent)
 }
 
 func TestOpenAIGatewayHandler_MessagesSelectionExhaustedAfterFailoverStillCreatesUsageLog(t *testing.T) {

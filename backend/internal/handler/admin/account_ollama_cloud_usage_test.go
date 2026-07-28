@@ -22,6 +22,21 @@ type ollamaCloudUsageHandlerTestRepo struct {
 	groupResolveCalls int
 }
 
+type ollamaCloudUsageMutationAdminService struct {
+	*stubAdminService
+	account *service.Account
+}
+
+func (s *ollamaCloudUsageMutationAdminService) CreateAccount(context.Context, *service.CreateAccountInput) (*service.Account, error) {
+	account := *s.account
+	return &account, nil
+}
+
+func (s *ollamaCloudUsageMutationAdminService) UpdateAccount(context.Context, int64, *service.UpdateAccountInput) (*service.Account, error) {
+	account := *s.account
+	return &account, nil
+}
+
 func (r *ollamaCloudUsageHandlerTestRepo) GetByID(_ context.Context, id int64) (*service.Account, error) {
 	if r.account != nil && r.account.ID == id {
 		return r.account, nil
@@ -260,6 +275,66 @@ func TestOllamaCloudUsageSharedStateMatchesListDetailAndSpecialEndpointWithoutLi
 	for _, body := range []string{listRecorder.Body.String(), detailRecorder.Body.String(), stateRecorder.Body.String()} {
 		require.NotContains(t, body, "shared-secret-key")
 		require.NotContains(t, body, "ciphertext-secret")
+	}
+}
+
+func TestOllamaCloudUsageSharedStateCreateAndUpdateResponses(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	now := time.Now().UTC()
+	source := &service.Account{
+		ID: 7, Name: "source", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+		Credentials: map[string]any{"base_url": "https://ollama.com", "api_key": "shared-secret-key"},
+		Extra: map[string]any{
+			service.OllamaCloudUsageSessionExtraKey:     "ciphertext-secret",
+			service.OllamaCloudUsageAutoRefreshExtraKey: true,
+			service.OllamaCloudUsageSnapshotExtraKey: &service.OllamaCloudUsageSnapshot{
+				Status: service.OllamaCloudUsageStatusOK, Data: &service.OllamaCloudUsageData{Plan: "pro"},
+				LastAttemptAt: now, NextRefreshAt: now.Add(time.Hour),
+			},
+		},
+		Status: service.StatusActive,
+	}
+	target := &service.Account{
+		ID: 8, Name: "target", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey,
+		Credentials: map[string]any{"base_url": "HTTPS://WWW.OLLAMA.COM:443/v1", "api_key": "shared-secret-key"},
+		Extra:       map[string]any{}, Status: service.StatusActive,
+	}
+
+	for _, method := range []string{http.MethodPost, http.MethodPut} {
+		t.Run(method, func(t *testing.T) {
+			repo := &ollamaCloudUsageHandlerTestRepo{accounts: []*service.Account{source, target}}
+			usageService := service.NewOllamaCloudUsageService(repo, nil, nil, nil, true)
+			t.Cleanup(usageService.Stop)
+			adminService := &ollamaCloudUsageMutationAdminService{stubAdminService: newStubAdminService(), account: target}
+			handler := NewAccountHandler(adminService, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			handler.SetOllamaCloudUsageService(usageService)
+			router := gin.New()
+			router.POST("/accounts", handler.Create)
+			router.PUT("/accounts/:id", handler.Update)
+
+			path := "/accounts"
+			body := `{"name":"target","platform":"anthropic","type":"apikey","credentials":{"base_url":"https://ollama.com","api_key":"shared-secret-key"}}`
+			if method == http.MethodPut {
+				path = "/accounts/8"
+				body = `{"name":"target"}`
+			}
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(method, path, bytes.NewBufferString(body))
+			request.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(recorder, request)
+			require.Equal(t, http.StatusOK, recorder.Code)
+
+			var payload struct {
+				Data struct {
+					OllamaCloudUsage *service.OllamaCloudUsageState `json:"ollama_cloud_usage"`
+				} `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
+			require.NotNil(t, payload.Data.OllamaCloudUsage)
+			require.True(t, payload.Data.OllamaCloudUsage.Configured)
+			require.Equal(t, "pro", payload.Data.OllamaCloudUsage.Snapshot.Data.Plan)
+			require.Equal(t, 1, repo.groupResolveCalls)
+		})
 	}
 }
 

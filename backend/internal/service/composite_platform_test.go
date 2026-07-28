@@ -63,3 +63,79 @@ func TestCompositeGroupSchedulerHasAllCanonicalPlatformBuckets(t *testing.T) {
 		platforms,
 	)
 }
+
+func TestResolveCompositeRouteDecisionRecomputesForDifferentEffectiveGroup(t *testing.T) {
+	service := &GatewayService{
+		compositeResolver: NewCompositeRouteResolver(compositeRouteRepoStub{
+			routes: []CompositeModelRoute{{
+				GroupID:        2,
+				PublicModel:    "public-model",
+				MatchType:      CompositeRouteMatchExact,
+				TargetPlatform: PlatformAnthropic,
+				UpstreamModel:  "claude-sonnet-4-6",
+				Endpoint:       CompositeRouteEndpointMessages,
+				Enabled:        true,
+			}},
+		}),
+	}
+	ctx := WithCompositeRouteDecision(context.Background(), CompositeRouteDecision{
+		Matched:        true,
+		GroupID:        1,
+		PublicModel:    "public-model",
+		TargetPlatform: PlatformOpenAI,
+		UpstreamModel:  "gpt-5",
+	})
+	stored, storedOK := CompositeRouteDecisionFromContext(ctx)
+	require.True(t, storedOK)
+	require.Equal(t, int64(1), stored.GroupID)
+	require.Equal(t, "gpt-5", stored.UpstreamModel)
+
+	decision, ok, err := service.resolveCompositeRouteDecision(
+		ctx,
+		&Group{ID: 2, Platform: PlatformComposite},
+		"public-model",
+		CompositeRouteEndpointMessages,
+	)
+
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, PlatformAnthropic, decision.TargetPlatform)
+	require.Equal(t, "claude-sonnet-4-6", decision.UpstreamModel)
+}
+
+func TestResolvePlatformUsesEffectiveGroupCompositeDecision(t *testing.T) {
+	gatewayService := &GatewayService{
+		compositeResolver: NewCompositeRouteResolver(compositeRouteRepoStub{
+			routes: []CompositeModelRoute{{
+				GroupID:        2,
+				PublicModel:    "public-model",
+				MatchType:      CompositeRouteMatchExact,
+				TargetPlatform: PlatformAnthropic,
+				UpstreamModel:  "claude-sonnet-4-6",
+				Endpoint:       CompositeRouteEndpointAny,
+				Enabled:        true,
+			}},
+		}),
+	}
+	ctx := WithCompositeRouteDecision(context.Background(), CompositeRouteDecision{
+		Matched:        true,
+		GroupID:        1,
+		PublicModel:    "public-model",
+		TargetPlatform: PlatformOpenAI,
+		UpstreamModel:  "gpt-5",
+	})
+	groupID := int64(2)
+
+	platform, upstreamModel, decision, forced, err := gatewayService.resolvePlatform(
+		ctx,
+		&groupID,
+		&Group{ID: groupID, Platform: PlatformComposite},
+		"public-model",
+	)
+
+	require.NoError(t, err)
+	require.False(t, forced)
+	require.Equal(t, PlatformAnthropic, platform)
+	require.Equal(t, "claude-sonnet-4-6", upstreamModel)
+	require.Equal(t, groupID, decision.GroupID)
+}

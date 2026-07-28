@@ -471,6 +471,9 @@ func setOpsEndpointContext(c *gin.Context, upstreamModel string, requestType int
 	if c == nil {
 		return
 	}
+	if strings.TrimSpace(upstreamModel) == "" && c.Request != nil {
+		upstreamModel, _ = service.ResolvedUpstreamModelFromContext(c.Request.Context())
+	}
 	if upstreamModel = strings.TrimSpace(upstreamModel); upstreamModel != "" {
 		c.Set(opsUpstreamModelKey, upstreamModel)
 	}
@@ -903,7 +906,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 				Stream:           stream,
 				InboundEndpoint:  GetInboundEndpoint(c),
 				UpstreamEndpoint: GetUpstreamEndpoint(c, platform),
-				RequestedModel:   modelName,
+				RequestedModel:   clientRequestedModel(c, modelName),
 				UpstreamModel: func() string {
 					if v, ok := c.Get(opsUpstreamModelKey); ok {
 						if s, ok := v.(string); ok {
@@ -1046,7 +1049,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			Stream:           stream,
 			InboundEndpoint:  GetInboundEndpoint(c),
 			UpstreamEndpoint: GetUpstreamEndpoint(c, platform),
-			RequestedModel:   modelName,
+			RequestedModel:   clientRequestedModel(c, modelName),
 			UpstreamModel: func() string {
 				if v, ok := c.Get(opsUpstreamModelKey); ok {
 					if s, ok := v.(string); ok {
@@ -1198,7 +1201,7 @@ func logOpsStreamError(c *gin.Context, ops *service.OpsService, wireStatus int) 
 		Stream:           true,
 		InboundEndpoint:  GetInboundEndpoint(c),
 		UpstreamEndpoint: GetUpstreamEndpoint(c, platform),
-		RequestedModel:   modelName,
+		RequestedModel:   clientRequestedModel(c, modelName),
 		UpstreamModel: func() string {
 			if v, ok := c.Get(opsUpstreamModelKey); ok {
 				if s, ok := v.(string); ok {

@@ -108,6 +108,7 @@ func TestCompositeTargetPlatformMiddlewareUsesExplicitRouteAndRewritesBody(t *te
 		})
 		c.Next()
 	})))
+	router.Use(servermiddleware.UsageDetailCapture())
 	router.Use(compositeTargetPlatformMiddleware(resolver))
 	router.POST("/v1/chat/completions", func(c *gin.Context) {
 		platform, ok := service.ResolvedTargetPlatformFromContext(c.Request.Context())
@@ -121,6 +122,10 @@ func TestCompositeTargetPlatformMiddlewareUsesExplicitRouteAndRewritesBody(t *te
 		body, err := io.ReadAll(c.Request.Body)
 		require.NoError(t, err)
 		require.JSONEq(t, `{"model":"gpt-5","messages":[]}`, string(body))
+		service.SetUsageRequestBody(c, service.RequestBodyPreviewSnapshot(string(body), int64(len(body))))
+		detail := servermiddleware.BuildUsageDetailSnapshot(c)
+		require.NotNil(t, detail)
+		require.Contains(t, detail.RequestBody, "openrouter/gpt-5")
 		c.Status(http.StatusNoContent)
 	})
 

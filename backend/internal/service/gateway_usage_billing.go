@@ -793,19 +793,23 @@ func (s *GatewayService) calculateRecordUsageCost(
 	return s.calculateTokenCost(ctx, result, apiKey, billingModel, multiplier, opts)
 }
 
-// compositeBillableModel 决定 composite 分组请求的计费模型：来源覆盖把计费模型
-// 换成公开别名等非具体模型时，只有管理员为该名字显式配置了渠道定价才按其计费
-// （OpenRouter 式自定价），否则回退到实际转发的具体模型，避免别名落入价格表的
-// 家族模糊匹配（错价）或查无价（$0）。未发生来源覆盖时原样返回。
+// selectCompositeBillableModel keeps a public alias only when its channel price is explicit.
+func selectCompositeBillableModel(billingModel, concreteBillingModel string, hasExplicitChannelPricing bool) string {
+	if concreteBillingModel == "" || billingModel == concreteBillingModel || hasExplicitChannelPricing {
+		return billingModel
+	}
+	return concreteBillingModel
+}
+
 func (s *GatewayService) compositeBillableModel(ctx context.Context, apiKey *APIKey, billingModel, concreteBillingModel string) string {
 	if concreteBillingModel == "" || billingModel == concreteBillingModel {
 		return billingModel
 	}
-	if s.resolveChannelPricing(ctx, billingModel, apiKey) != nil {
-		return billingModel
+	selected := selectCompositeBillableModel(billingModel, concreteBillingModel, s.resolveChannelPricing(ctx, billingModel, apiKey) != nil)
+	if selected != billingModel {
+		logger.LegacyPrintf("service.gateway", "[Billing] composite billing model %q has no explicit channel pricing, billing by concrete model %q", billingModel, concreteBillingModel)
 	}
-	logger.LegacyPrintf("service.gateway", "[Billing] composite billing model %q has no explicit channel pricing, billing by concrete model %q", billingModel, concreteBillingModel)
-	return concreteBillingModel
+	return selected
 }
 
 // billableModelWithFallback 在选定计费模型（可能是 composite 公开别名或未定价的映射名）

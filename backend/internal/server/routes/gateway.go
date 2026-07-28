@@ -41,6 +41,7 @@ func RegisterGatewayRoutes(
 	endpointNorm := handler.InboundEndpointMiddleware()
 	compositeTarget := compositeTargetPlatformMiddleware(compositeResolver)
 	compositeGeminiTarget := compositeGeminiTargetPlatformMiddleware(compositeResolver)
+	compositeWebSocketTarget := compositeWebSocketRouteResolverMiddleware(compositeResolver)
 
 	// 未分组 Key 拦截中间件（按协议格式区分错误响应）
 	requireGroupAnthropic := middleware.RequireGroupAssignment(settingService, middleware.AnthropicErrorWriter)
@@ -197,7 +198,7 @@ func RegisterGatewayRoutes(
 			h.Gateway.Responses(c)
 		})
 		gateway.POST("/alpha/search", textBodyLimit, h.OpenAIGateway.AlphaSearch)
-		gateway.GET("/responses", func(c *gin.Context) {
+		gateway.GET("/responses", compositeWebSocketTarget, func(c *gin.Context) {
 			h.OpenAIGateway.ResponsesWebSocket(c)
 		})
 		// OpenAI Chat Completions API: auto-route based on group platform
@@ -271,7 +272,7 @@ func RegisterGatewayRoutes(
 	r.POST("/responses", bodyLimit, clientRequestID, usageDetailCapture, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, responsesHandler)
 	r.POST("/responses/*subpath", bodyLimit, clientRequestID, usageDetailCapture, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, responsesHandler)
 	r.POST("/alpha/search", textBodyLimit, clientRequestID, usageDetailCapture, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, h.OpenAIGateway.AlphaSearch)
-	r.GET("/responses", bodyLimit, clientRequestID, usageDetailCapture, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, func(c *gin.Context) {
+	r.GET("/responses", bodyLimit, clientRequestID, usageDetailCapture, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, compositeWebSocketTarget, requireGroupAnthropic, func(c *gin.Context) {
 		if getGroupPlatform(c) == service.PlatformGrok {
 			rejectGrokUnsupportedEndpoint(c, "Responses WebSocket API")
 			return
@@ -286,7 +287,7 @@ func RegisterGatewayRoutes(
 		codexDirect.POST("/responses", responsesHandler)
 		codexDirect.POST("/responses/*subpath", responsesHandler)
 		codexDirect.POST("/alpha/search", textBodyLimit, h.OpenAIGateway.AlphaSearch)
-		codexDirect.GET("/responses", func(c *gin.Context) {
+		codexDirect.GET("/responses", compositeWebSocketTarget, func(c *gin.Context) {
 			h.OpenAIGateway.ResponsesWebSocket(c)
 		})
 		codexDirect.GET("/models", h.OpenAIGateway.CodexModels)
@@ -423,6 +424,7 @@ func compositeTargetPlatformMiddleware(resolver *service.CompositeRouteResolver)
 			}
 			if decision.Matched {
 				c.Request = c.Request.WithContext(service.WithCompositeRouteDecision(c.Request.Context(), decision))
+				service.SetUsageOriginalRequestBody(c, service.RequestBodyPreviewSnapshot(string(body), int64(len(body))))
 				if upstreamModel := strings.TrimSpace(decision.UpstreamModel); upstreamModel != "" && upstreamModel != model && gjson.ValidBytes(body) {
 					if rewritten, rewriteErr := sjson.SetBytes(body, "model", upstreamModel); rewriteErr == nil {
 						body = rewritten
@@ -431,6 +433,16 @@ func compositeTargetPlatformMiddleware(resolver *service.CompositeRouteResolver)
 			}
 		}
 		resetRequestBody(c, body)
+		c.Next()
+	}
+}
+
+func compositeWebSocketRouteResolverMiddleware(resolver *service.CompositeRouteResolver) gin.HandlerFunc {
+	if resolver == nil {
+		resolver = service.NewCompositeRouteResolver(nil)
+	}
+	return func(c *gin.Context) {
+		c.Request = c.Request.WithContext(service.WithCompositeRouteResolver(c.Request.Context(), resolver))
 		c.Next()
 	}
 }

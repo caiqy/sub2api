@@ -92,6 +92,8 @@ WITH combined AS (
     ul.request_id AS request_id,
     COALESCE(NULLIF(g.platform, ''), NULLIF(a.platform, ''), '') AS platform,
     ul.model AS model,
+    COALESCE(NULLIF(ul.requested_model, ''), ul.model) AS requested_model,
+    COALESCE(NULLIF(ul.upstream_model, ''), ul.model) AS upstream_model,
     ul.duration_ms AS duration_ms,
     NULL::INT AS status_code,
     NULL::BIGINT AS error_id,
@@ -116,6 +118,8 @@ WITH combined AS (
     COALESCE(NULLIF(o.request_id,''), NULLIF(o.client_request_id,''), '') AS request_id,
     COALESCE(NULLIF(o.platform, ''), NULLIF(g.platform, ''), NULLIF(a.platform, ''), '') AS platform,
     o.model AS model,
+    COALESCE(NULLIF(o.requested_model, ''), o.model) AS requested_model,
+    COALESCE(NULLIF(o.upstream_model, ''), o.model) AS upstream_model,
     o.duration_ms AS duration_ms,
     o.status_code AS status_code,
     o.id AS error_id,
@@ -165,6 +169,8 @@ SELECT
   request_id,
   platform,
   model,
+  requested_model,
+  upstream_model,
   duration_ms,
   status_code,
   error_id,
@@ -207,11 +213,13 @@ LIMIT $%d OFFSET $%d
 	out := make([]*service.OpsRequestDetail, 0, pageSize)
 	for rows.Next() {
 		var (
-			kind      string
-			createdAt time.Time
-			requestID sql.NullString
-			platform  sql.NullString
-			model     sql.NullString
+			kind           string
+			createdAt      time.Time
+			requestID      sql.NullString
+			platform       sql.NullString
+			model          sql.NullString
+			requestedModel sql.NullString
+			upstreamModel  sql.NullString
 
 			durationMs sql.NullInt64
 			statusCode sql.NullInt64
@@ -235,6 +243,8 @@ LIMIT $%d OFFSET $%d
 			&requestID,
 			&platform,
 			&model,
+			&requestedModel,
+			&upstreamModel,
 			&durationMs,
 			&statusCode,
 			&errorID,
@@ -251,11 +261,13 @@ LIMIT $%d OFFSET $%d
 		}
 
 		item := &service.OpsRequestDetail{
-			Kind:      service.OpsRequestKind(kind),
-			CreatedAt: createdAt,
-			RequestID: strings.TrimSpace(requestID.String),
-			Platform:  strings.TrimSpace(platform.String),
-			Model:     strings.TrimSpace(model.String),
+			Kind:           service.OpsRequestKind(kind),
+			CreatedAt:      createdAt,
+			RequestID:      strings.TrimSpace(requestID.String),
+			Platform:       strings.TrimSpace(platform.String),
+			Model:          strings.TrimSpace(model.String),
+			RequestedModel: strings.TrimSpace(requestedModel.String),
+			UpstreamModel:  strings.TrimSpace(upstreamModel.String),
 
 			DurationMs: toIntPtr(durationMs),
 			StatusCode: toIntPtr(statusCode),

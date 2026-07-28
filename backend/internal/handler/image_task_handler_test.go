@@ -106,6 +106,63 @@ func TestAsyncImageHandlerSubmitAndPoll(t *testing.T) {
 	require.Contains(t, pollWriter.Body.String(), "https://example.test/image.png")
 }
 
+func TestAsyncImageHandlerSubmitUsesCompositeTargetAndCopiesDecision(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := &asyncImageMemoryStore{tasks: make(map[string]*service.ImageTaskRecord)}
+	tasks := service.NewImageTaskServiceWithUploader(store, nil, time.Hour, time.Minute)
+	executed := make(chan struct {
+		platform string
+		decision service.CompositeRouteDecision
+	}, 1)
+	h := &AsyncImageHandler{tasks: tasks}
+	h.execute = func(platform string, c *gin.Context) {
+		decision, ok := service.CompositeRouteDecisionFromContext(c.Request.Context())
+		require.True(t, ok)
+		executed <- struct {
+			platform string
+			decision service.CompositeRouteDecision
+		}{platform: platform, decision: decision}
+		c.JSON(http.StatusOK, gin.H{"data": []gin.H{{"url": "https://example.test/image.png"}}})
+	}
+
+	groupID := int64(31)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+			ID:      9,
+			UserID:  7,
+			GroupID: &groupID,
+			Group:   &service.Group{ID: groupID, Platform: service.PlatformComposite, AllowImageGeneration: true},
+		})
+		c.Next()
+	})
+	router.POST("/v1/images/generations/async", h.Submit)
+
+	ctx := service.WithCompositeRouteDecision(context.Background(), service.CompositeRouteDecision{
+		Matched:        true,
+		GroupID:        groupID,
+		PublicModel:    "image-alias",
+		TargetPlatform: service.PlatformOpenAI,
+		UpstreamModel:  "gpt-image-1",
+		Endpoint:       service.CompositeRouteEndpointImages,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations/async", strings.NewReader(`{"model":"image-alias","prompt":"cat"}`)).WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+	select {
+	case got := <-executed:
+		require.Equal(t, service.PlatformOpenAI, got.platform)
+		require.Equal(t, groupID, got.decision.GroupID)
+		require.Equal(t, "gpt-image-1", got.decision.UpstreamModel)
+	case <-time.After(time.Second):
+		t.Fatal("async image task did not execute")
+	}
+}
+
 // When object storage is not configured the feature is fully disabled: the
 // endpoints must return 404 without creating a task or writing to Redis.
 func TestAsyncImageHandlerDisabledReturns404(t *testing.T) {

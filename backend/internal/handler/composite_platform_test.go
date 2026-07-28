@@ -77,6 +77,27 @@ func TestCompositeTargetPlatformResolvedAllowsConcreteGroupWithoutResolution(t *
 	require.True(t, compositeTargetPlatformResolved(c, apiKey, "llama-4-maverick"))
 }
 
+func TestClientRequestedUsageFieldsPreservesCompositeModelTriplet(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	c.Request = c.Request.WithContext(service.WithCompositeRouteDecision(c.Request.Context(), service.CompositeRouteDecision{
+		Matched:        true,
+		Source:         service.CompositeRouteSourceExplicit,
+		PublicModel:    "public-alias",
+		TargetPlatform: service.PlatformOpenAI,
+		UpstreamModel:  "gpt-5",
+	}))
+
+	fields := clientRequestedUsageFields(c, service.ChannelMappingResult{
+		Mapped:      true,
+		MappedModel: "gpt-5.1",
+	}, "gpt-5", "gpt-5.2")
+	require.Equal(t, "public-alias", fields.OriginalModel)
+	require.Equal(t, "gpt-5.1", fields.ChannelMappedModel)
+	require.Equal(t, "public-alias→gpt-5→gpt-5.1→gpt-5.2", fields.ModelMappingChain)
+}
+
 func TestClientRequestedModelUsesCompositePublicModel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())

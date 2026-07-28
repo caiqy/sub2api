@@ -870,6 +870,11 @@ func (h *AccountHandler) Create(c *gin.Context) {
 		h.adminService.ForceAntigravityPrivacy(ctx, account)
 		// OpenAI OAuth: 新账号直接设置隐私
 		h.adminService.ForceOpenAIPrivacy(ctx, account)
+		if h.ollamaCloudUsage != nil {
+			if resolveErr := h.ollamaCloudUsage.ResolveAccounts(ctx, []*service.Account{account}); resolveErr != nil {
+				return nil, resolveErr
+			}
+		}
 		return h.buildAccountResponseWithRuntime(ctx, account), nil
 	})
 	if err != nil {
@@ -1009,6 +1014,12 @@ func (h *AccountHandler) Update(c *gin.Context) {
 	// 异步执行，探测失败不影响账号更新响应。
 	if len(req.Credentials) > 0 {
 		h.scheduleOpenAIResponsesProbe(account)
+	}
+	if h.ollamaCloudUsage != nil {
+		if resolveErr := h.ollamaCloudUsage.ResolveAccounts(c.Request.Context(), []*service.Account{account}); resolveErr != nil {
+			response.ErrorFrom(c, resolveErr)
+			return
+		}
 	}
 
 	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))

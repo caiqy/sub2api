@@ -232,6 +232,7 @@ type openAIImagesReplayUpstream struct {
 	contentTypes []string
 	lengths      []int64
 	accountIDs   []int64
+	succeedFirst bool
 }
 
 func (u *openAIImagesReplayUpstream) Do(req *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
@@ -258,7 +259,7 @@ func (u *openAIImagesReplayUpstream) Do(req *http.Request, _ string, accountID i
 	u.accountIDs = append(u.accountIDs, accountID)
 	attempt := len(u.bodies)
 	u.mu.Unlock()
-	if attempt == 1 {
+	if attempt == 1 && !u.succeedFirst {
 		status := http.StatusInternalServerError
 		if accountID == 920 {
 			status = http.StatusTooManyRequests
@@ -266,6 +267,53 @@ func (u *openAIImagesReplayUpstream) Do(req *http.Request, _ string, accountID i
 		return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"retry"}}`))}, nil
 	}
 	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"created":1,"data":[{"b64_json":"aGVsbG8="}]}`))}, nil
+}
+
+func TestOpenAIGatewayHandlerImagesCompositeMultipartUsesResolvedUpstreamModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 925, Platform: service.PlatformComposite, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
+	account := &service.Account{
+		ID:          926,
+		Name:        "composite-image",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeAPIKey,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":       "sk",
+			"model_mapping": map[string]any{"gpt-image-1": "gpt-image-account"},
+		},
+	}
+	upstream := &openAIImagesReplayUpstream{succeedFirst: true}
+	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	require.NoError(t, writer.WriteField("model", "image-alias"))
+	require.NoError(t, writer.WriteField("prompt", "draw"))
+	image, err := writer.CreateFormFile("image", "source.png")
+	require.NoError(t, err)
+	_, err = image.Write([]byte("image"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	ctx := service.WithCompositeRouteDecision(context.Background(), service.CompositeRouteDecision{
+		Matched:        true,
+		GroupID:        group.ID,
+		PublicModel:    "image-alias",
+		TargetPlatform: service.PlatformOpenAI,
+		UpstreamModel:  "gpt-image-1",
+		Endpoint:       service.CompositeRouteEndpointImages,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body.Bytes())).WithContext(ctx)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rec := httptest.NewRecorder()
+
+	env.router("/v1/images/edits", env.handler.Images).ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	upstream.assert(t, []int64{account.ID}, []string{"gpt-image-account"}, false)
 }
 
 func (u *openAIImagesReplayUpstream) assert(t *testing.T, wantAccounts []int64, wantModels []string, wantSameBody bool) {

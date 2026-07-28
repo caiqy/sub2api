@@ -10,11 +10,21 @@ func ensureCompositeTargetPlatform(c *gin.Context, apiKey *service.APIKey, model
 	if c == nil || c.Request == nil || apiKey == nil || apiKey.Group == nil || apiKey.Group.Platform != service.PlatformComposite {
 		return
 	}
-	if _, ok := service.ResolvedTargetPlatformFromContext(c.Request.Context()); ok {
+	if decision, ok := service.CompositeRouteDecisionFromContext(c.Request.Context()); ok && decision.GroupID == apiKey.Group.ID {
 		return
 	}
 	if platform, ok := service.DetectModelPlatform(model); ok {
-		c.Request = c.Request.WithContext(service.WithResolvedTargetPlatform(c.Request.Context(), platform))
+		decision := service.CompositeRouteDecision{
+			Matched:        true,
+			Source:         service.CompositeRouteSourceDetector,
+			GroupID:        apiKey.Group.ID,
+			PublicModel:    model,
+			TargetPlatform: platform,
+			UpstreamModel:  model,
+			Endpoint:       service.CompositeRouteEndpointAny,
+		}
+		ctx := service.WithCompositeRouteDecision(service.WithoutCompositeRouteDecision(c.Request.Context()), decision)
+		c.Request = c.Request.WithContext(ctx)
 	}
 }
 

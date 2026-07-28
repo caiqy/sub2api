@@ -503,20 +503,23 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				inboundEndpoint := GetInboundEndpoint(c)
 				upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 				detailSnapshot := middleware.BuildUsageDetailSnapshot(c)
+				failedUsageInput := &service.FailedUsageLogInput{
+					APIKey:           apiKey,
+					User:             apiKey.User,
+					Account:          account,
+					Model:            modelName,
+					RequestedModel:   clientRequestedModel(c, modelName),
+					UpstreamModel:    account.GetMappedModel(modelName),
+					Stream:           stream,
+					InboundEndpoint:  inboundEndpoint,
+					UpstreamEndpoint: upstreamEndpoint,
+					UserAgent:        userAgent,
+					IPAddress:        clientIP,
+					DetailSnapshot:   detailSnapshot,
+					Duration:         forwardDuration,
+				}
 				h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
-					service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), &service.FailedUsageLogInput{
-						APIKey:           apiKey,
-						User:             apiKey.User,
-						Account:          account,
-						Model:            modelName,
-						Stream:           stream,
-						InboundEndpoint:  inboundEndpoint,
-						UpstreamEndpoint: upstreamEndpoint,
-						UserAgent:        userAgent,
-						IPAddress:        clientIP,
-						DetailSnapshot:   detailSnapshot,
-						Duration:         forwardDuration,
-					}, "handler.gemini_v1beta.models")
+					service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), failedUsageInput, "handler.gemini_v1beta.models")
 				})
 			}
 			return
@@ -546,6 +549,8 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 		detailSnapshot := middleware.BuildUsageDetailSnapshot(c)
 		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
+		channelUsageFields := clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel)
+		forceCacheBilling := fs.ForceCacheBilling
 		h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsageWithLongContext(ctx, &service.RecordUsageLongContextInput{
 				Result:                result,
@@ -562,9 +567,9 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				RequestPayloadHash:    requestPayloadHash,
 				LongContextThreshold:  200000, // Gemini 200K 阈值
 				LongContextMultiplier: 2.0,    // 超出部分双倍计费
-				ForceCacheBilling:     fs.ForceCacheBilling,
+				ForceCacheBilling:     forceCacheBilling,
 				APIKeyService:         h.apiKeyService,
-				ChannelUsageFields:    clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
+				ChannelUsageFields:    channelUsageFields,
 			}); err != nil {
 				logger.L().With(
 					zap.String("component", "handler.gemini_v1beta.models"),

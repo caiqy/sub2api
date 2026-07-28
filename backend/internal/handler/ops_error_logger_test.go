@@ -351,6 +351,33 @@ func TestLogOpsStreamError_UpstreamFailureCountsTowardsSLA(t *testing.T) {
 }
 
 // 未标记流内错误时 logOpsStreamError 必须是 no-op（不误记正常的 200 流）。
+func TestLogOpsStreamError_PreservesCompositeModelTriplet(t *testing.T) {
+	setupOpsErrorLogTestQueue(t, 4)
+
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request = c.Request.WithContext(service.WithCompositeRouteDecision(c.Request.Context(), service.CompositeRouteDecision{
+		Matched:        true,
+		Source:         service.CompositeRouteSourceExplicit,
+		PublicModel:    "public-alias",
+		TargetPlatform: service.PlatformOpenAI,
+		UpstreamModel:  "gpt-5",
+	}))
+	c.Set(opsModelKey, "gpt-5")
+	c.Set(opsUpstreamModelKey, "gpt-5.2")
+	service.MarkOpsStreamFailure(c, "upstream_error", "upstream_failure", "upstream failed", http.StatusBadGateway)
+
+	logOpsStreamError(c, service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil), http.StatusOK)
+
+	job := <-opsErrorLogQueue
+	require.NotNil(t, job.entry)
+	require.Equal(t, "public-alias", job.entry.RequestedModel)
+	require.Equal(t, "gpt-5", job.entry.Model)
+	require.Equal(t, "gpt-5.2", job.entry.UpstreamModel)
+}
+
 func TestLogOpsStreamError_NoopWhenNotMarked(t *testing.T) {
 	setupOpsErrorLogTestQueue(t, 4)
 
@@ -1183,6 +1210,24 @@ func TestSetOpsEndpointContext_EmptyModelNotStored(t *testing.T) {
 	rtVal, ok := rt.(int16)
 	require.True(t, ok)
 	require.Equal(t, int16(1), rtVal)
+}
+
+func TestSetOpsEndpointContext_UsesCompositeUpstreamModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request = c.Request.WithContext(service.WithCompositeRouteDecision(c.Request.Context(), service.CompositeRouteDecision{
+		Matched:        true,
+		Source:         service.CompositeRouteSourceExplicit,
+		PublicModel:    "public-alias",
+		TargetPlatform: service.PlatformOpenAI,
+		UpstreamModel:  "gpt-5",
+	}))
+
+	setOpsEndpointContext(c, "", int16(service.RequestTypeSync))
+
+	require.Equal(t, "gpt-5", c.GetString(opsUpstreamModelKey))
 }
 
 func TestSetOpsEndpointContext_NilContext(t *testing.T) {

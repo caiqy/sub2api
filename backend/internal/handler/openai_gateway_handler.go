@@ -138,11 +138,20 @@ func usageRecordContext(parent context.Context, base context.Context) context.Co
 	if parent == nil {
 		return base
 	}
-	if clientRequestID, _ := parent.Value(ctxkey.ClientRequestID).(string); strings.TrimSpace(clientRequestID) != "" {
-		base = context.WithValue(base, ctxkey.ClientRequestID, strings.TrimSpace(clientRequestID))
-	}
-	if requestID, _ := parent.Value(ctxkey.RequestID).(string); strings.TrimSpace(requestID) != "" {
-		base = context.WithValue(base, ctxkey.RequestID, strings.TrimSpace(requestID))
+	for _, key := range []ctxkey.Key{
+		ctxkey.ClientRequestID,
+		ctxkey.RequestID,
+		ctxkey.ForcePlatform,
+		ctxkey.ResolvedTargetPlatform,
+		ctxkey.ResolvedUpstreamModel,
+		ctxkey.RequestedPublicModel,
+		ctxkey.CompositeRouteSource,
+		ctxkey.CompositeRouteDecision,
+		ctxkey.Platform,
+	} {
+		if value := parent.Value(key); value != nil {
+			base = context.WithValue(base, key, value)
+		}
 	}
 	return base
 }
@@ -167,9 +176,16 @@ func openAIResponsesRequiredCapability(imageIntent bool, platform string) servic
 	return service.OpenAIEndpointCapabilityChatCompletions
 }
 
-func allowOpenAICompatibleMessagesDispatch(apiKey *service.APIKey) bool {
+func allowOpenAICompatibleMessagesDispatch(ctx context.Context, apiKey *service.APIKey) bool {
 	if apiKey == nil || apiKey.Group == nil {
 		return true
+	}
+	if apiKey.Group.Platform == service.PlatformComposite {
+		decision, ok := service.CompositeRouteDecisionFromContext(ctx)
+		if !ok || decision.GroupID != apiKey.Group.ID {
+			return false
+		}
+		return decision.TargetPlatform == service.PlatformOpenAI || decision.TargetPlatform == service.PlatformGrok
 	}
 	if apiKey.Group.Platform == service.PlatformGrok {
 		return true
@@ -717,6 +733,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		if usageResult != nil {
 			usageUpstreamModel = usageResult.UpstreamModel
 		}
+		channelUsageFields := clientRequestedUsageFields(c, channelMapping, reqModel, usageUpstreamModel)
 		h.submitOpenAIUsageRecordTask(c.Request.Context(), usageResult, func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
 				Result:             usageResult,
@@ -732,7 +749,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				RequestPayloadHash: requestPayloadHash,
 				APIKeyService:      h.apiKeyService,
 				QuotaPlatform:      quotaPlatform,
-				ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, usageUpstreamModel),
+				ChannelUsageFields: channelUsageFields,
 				CyberBlocked:       cyberBlocked,
 			}); err != nil {
 				logger.L().With(
@@ -927,17 +944,6 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		zap.Any("group_id", apiKey.GroupID),
 	)
 
-	// 检查分组是否允许 /v1/messages 调度
-	if !allowOpenAICompatibleMessagesDispatch(apiKey) {
-		h.anthropicErrorResponse(c, http.StatusForbidden, "permission_error",
-			"This group does not allow /v1/messages dispatch")
-		return
-	}
-
-	if !h.ensureResponsesDependencies(c, reqLog) {
-		return
-	}
-
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
 	if err != nil {
 		if maxErr, ok := extractMaxBytesError(err); ok {
@@ -968,6 +974,14 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	ensureCompositeTargetPlatform(c, apiKey, reqModel)
 	if !openAICompatibleTextTargetAllowed(c, apiKey, reqModel) {
 		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Model is not supported by this OpenAI-compatible endpoint for composite groups")
+		return
+	}
+	if !allowOpenAICompatibleMessagesDispatch(c.Request.Context(), apiKey) {
+		h.anthropicErrorResponse(c, http.StatusForbidden, "permission_error",
+			"This group does not allow /v1/messages dispatch")
+		return
+	}
+	if !h.ensureResponsesDependencies(c, reqLog) {
 		return
 	}
 	routingModel := service.NormalizeOpenAICompatRequestedModel(reqModel)
@@ -1240,6 +1254,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 
 		cyberBlocked := service.GetOpsCyberPolicy(c) != nil
+		channelUsageFields := clientRequestedUsageFields(c, channelMappingMsg, reqModel, result.UpstreamModel)
 		h.submitOpenAIUsageRecordTask(c.Request.Context(), result, func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
 				Result:             result,
@@ -1255,7 +1270,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 				RequestPayloadHash: requestPayloadHash,
 				APIKeyService:      h.apiKeyService,
 				QuotaPlatform:      quotaPlatform,
-				ChannelUsageFields: clientRequestedUsageFields(c, channelMappingMsg, reqModel, result.UpstreamModel),
+				ChannelUsageFields: channelUsageFields,
 				CyberBlocked:       cyberBlocked,
 			}); err != nil {
 				logger.L().With(
@@ -1639,14 +1654,29 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "model is required in first response.create payload")
 		return
 	}
-	ensureCompositeTargetPlatform(c, apiKey, reqModel)
-	ctx = c.Request.Context()
 	if apiKey.Group != nil && apiKey.Group.Platform == service.PlatformComposite {
-		platform, ok := service.ResolvedTargetPlatformFromContext(ctx)
-		if !ok || (platform != service.PlatformOpenAI && platform != service.PlatformGrok) {
+		resolver, ok := service.CompositeRouteResolverFromContext(ctx)
+		if !ok {
+			resolver = service.NewCompositeRouteResolver(nil)
+		}
+		decision, err := resolver.Resolve(ctx, apiKey.Group.ID, reqModel, service.CompositeRouteEndpointResponses)
+		if err != nil {
+			closeOpenAIClientWS(wsConn, coderws.StatusInternalError, "failed to resolve composite model route")
+			return
+		}
+		if !decision.Matched || (decision.TargetPlatform != service.PlatformOpenAI && decision.TargetPlatform != service.PlatformGrok) {
 			closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "Responses WebSocket API only supports OpenAI-compatible models for composite groups")
 			return
 		}
+		ctx = service.WithCompositeRouteDecision(ctx, decision)
+		c.Request = c.Request.WithContext(ctx)
+		if upstreamModel := strings.TrimSpace(decision.UpstreamModel); upstreamModel != "" && upstreamModel != reqModel {
+			firstMessage = service.ReplaceModelInBody(firstMessage, upstreamModel)
+			reqModel = upstreamModel
+		}
+	} else {
+		ensureCompositeTargetPlatform(c, apiKey, reqModel)
+		ctx = c.Request.Context()
 	}
 	previousResponseID := strings.TrimSpace(gjson.GetBytes(firstMessage, "previous_response_id").String())
 	previousResponseIDKind := service.ClassifyOpenAIPreviousResponseIDKind(previousResponseID)
@@ -2046,6 +2076,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					usageRequestID = usageResult.RequestID
 				}
 				detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
+				channelUsageFields := clientRequestedUsageFields(c, channelMappingWS, reqModel, usageUpstreamModel)
 				h.submitOpenAIUsageRecordTask(ctx, usageResult, func(taskCtx context.Context) {
 					if err := h.gatewayService.RecordUsage(taskCtx, &service.OpenAIRecordUsageInput{
 						Result:             usageResult,
@@ -2060,7 +2091,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 						RequestPayloadHash: requestPayloadHash,
 						APIKeyService:      h.apiKeyService,
 						QuotaPlatform:      quotaPlatform,
-						ChannelUsageFields: clientRequestedUsageFields(c, channelMappingWS, reqModel, usageUpstreamModel),
+						ChannelUsageFields: channelUsageFields,
 						CyberBlocked:       cyberBlocked,
 						DetailSnapshot:     detailSnapshot,
 					}); err != nil {
@@ -2364,34 +2395,35 @@ func (h *OpenAIGatewayHandler) submitFailedUsageLog(c *gin.Context, apiKey *serv
 	inboundEndpoint := GetInboundEndpoint(c)
 	upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 	upstreamModel := resolveOpenAIFailedUsageUpstreamModel(c, account, model)
+	input := &service.FailedUsageLogInput{
+		APIKey:           apiKey,
+		User:             apiKey.User,
+		Account:          account,
+		Model:            model,
+		RequestedModel:   clientRequestedModel(c, model),
+		UpstreamModel:    upstreamModel,
+		ReasoningEffort:  reasoningEffort,
+		Stream:           stream,
+		OpenAIWSMode:     strings.Contains(logKey, "responses_ws"),
+		InboundEndpoint:  inboundEndpoint,
+		UpstreamEndpoint: upstreamEndpoint,
+		UserAgent:        userAgent,
+		IPAddress:        clientIP,
+		DetailSnapshot:   detailSnapshot,
+		Duration:         duration,
+	}
 	var usage *service.OpenAIUsage
 	if len(usages) > 0 {
 		usage = usages[0]
 	}
+	if usage != nil {
+		input.InputTokens = usage.InputTokens
+		input.OutputTokens = usage.OutputTokens
+		input.CacheCreationTokens = usage.CacheCreationInputTokens
+		input.CacheReadTokens = usage.CacheReadInputTokens
+		input.ImageOutputTokens = usage.ImageOutputTokens
+	}
 	h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
-		input := &service.FailedUsageLogInput{
-			APIKey:           apiKey,
-			User:             apiKey.User,
-			Account:          account,
-			Model:            model,
-			UpstreamModel:    upstreamModel,
-			ReasoningEffort:  reasoningEffort,
-			Stream:           stream,
-			OpenAIWSMode:     strings.Contains(logKey, "responses_ws"),
-			InboundEndpoint:  inboundEndpoint,
-			UpstreamEndpoint: upstreamEndpoint,
-			UserAgent:        userAgent,
-			IPAddress:        clientIP,
-			DetailSnapshot:   detailSnapshot,
-			Duration:         duration,
-		}
-		if usage != nil {
-			input.InputTokens = usage.InputTokens
-			input.OutputTokens = usage.OutputTokens
-			input.CacheCreationTokens = usage.CacheCreationInputTokens
-			input.CacheReadTokens = usage.CacheReadInputTokens
-			input.ImageOutputTokens = usage.ImageOutputTokens
-		}
 		service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), input, logKey)
 	})
 }
@@ -2402,7 +2434,11 @@ func setOpenAIFailedUsageExactUpstreamModel(c *gin.Context, upstreamModel string
 	if c == nil {
 		return
 	}
-	c.Set(openAIFailedUsageExactUpstreamModelKey, strings.TrimSpace(upstreamModel))
+	upstreamModel = strings.TrimSpace(upstreamModel)
+	c.Set(openAIFailedUsageExactUpstreamModelKey, upstreamModel)
+	if upstreamModel != "" {
+		c.Set(opsUpstreamModelKey, upstreamModel)
+	}
 }
 
 func resolveOpenAIFailedUsageExactUpstreamModel(account *service.Account, requestedModel, defaultMappedModel string) string {

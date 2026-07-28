@@ -35,6 +35,29 @@ type stickyFallbackAccountRepo struct {
 	groupIDs []int64
 }
 
+type stickyCompositeRouteRepo struct {
+	routes []service.CompositeModelRoute
+}
+
+func (r stickyCompositeRouteRepo) ListByGroup(_ context.Context, groupID int64, includeDisabled bool) ([]service.CompositeModelRoute, error) {
+	routes := make([]service.CompositeModelRoute, 0, len(r.routes))
+	for _, route := range r.routes {
+		if route.GroupID == groupID && (includeDisabled || route.Enabled) {
+			routes = append(routes, route)
+		}
+	}
+	return routes, nil
+}
+
+func (stickyCompositeRouteRepo) Create(context.Context, *service.CompositeModelRoute) error {
+	return nil
+}
+func (stickyCompositeRouteRepo) Update(context.Context, *service.CompositeModelRoute) error {
+	return nil
+}
+func (stickyCompositeRouteRepo) Delete(context.Context, int64) error        { return nil }
+func (stickyCompositeRouteRepo) DeleteByGroup(context.Context, int64) error { return nil }
+
 func (*stickyFallbackAccountRepo) GetByID(context.Context, int64) (*service.Account, error) {
 	return nil, errors.New("account not found")
 }
@@ -234,17 +257,63 @@ func TestGatewayHandlerResolveStickyRoute_PreservesClaudeCodeRestrictionErrors(t
 	accountRepo := &stickyFallbackAccountRepo{}
 	h, apiKey := newStickyFallbackMessagesHandler(t, cfg, groups, &geminiStickyGatewayCacheStub{}, accountRepo)
 
-	_, _, _, err := h.resolveStickyRoute(context.Background(), apiKey)
+	_, _, _, _, err := h.resolveStickyRoute(context.Background(), apiKey, "")
 	require.ErrorIs(t, err, service.ErrClaudeCodeOnly)
 
 	apiKey.GroupID = &groups[2].ID
 	apiKey.Group = groups[2]
-	_, _, _, err = h.resolveStickyRoute(context.Background(), apiKey)
+	_, _, _, _, err = h.resolveStickyRoute(context.Background(), apiKey, "")
 	require.ErrorContains(t, err, "fallback group cycle detected")
 
-	group, groupID, platform, err := h.resolveStickyRoute(context.WithValue(context.Background(), ctxkey.ForcePlatform, service.PlatformAntigravity), apiKey)
+	_, group, groupID, platform, err := h.resolveStickyRoute(context.WithValue(context.Background(), ctxkey.ForcePlatform, service.PlatformAntigravity), apiKey, "")
 	require.NoError(t, err)
 	require.Nil(t, group)
 	require.Equal(t, groups[2].ID, *groupID)
 	require.Equal(t, service.PlatformAntigravity, platform)
+}
+
+func TestGatewayHandlerResolveStickyRouteRecomputesCompositeFallbackDecision(t *testing.T) {
+	originalID, fallbackID := int64(1), int64(2)
+	groups := map[int64]*service.Group{
+		originalID: {ID: originalID, Platform: service.PlatformComposite, Status: service.StatusActive, Hydrated: true, ClaudeCodeOnly: true, FallbackGroupID: &fallbackID},
+		fallbackID: {ID: fallbackID, Platform: service.PlatformComposite, Status: service.StatusActive, Hydrated: true},
+	}
+	resolver := service.NewCompositeRouteResolver(stickyCompositeRouteRepo{routes: []service.CompositeModelRoute{{
+		GroupID:        fallbackID,
+		PublicModel:    "public-model",
+		MatchType:      service.CompositeRouteMatchExact,
+		TargetPlatform: service.PlatformAnthropic,
+		UpstreamModel:  "claude-sonnet-4-6",
+		Endpoint:       service.CompositeRouteEndpointAny,
+		Enabled:        true,
+	}}})
+	cfg := &config.Config{}
+	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(billingCacheService.Stop)
+	gatewayService := service.NewGatewayService(
+		&stickyFallbackAccountRepo{}, &stickyFallbackGroupRepo{groups: groups}, nil, nil, nil, nil, nil,
+		&geminiStickyGatewayCacheStub{}, cfg, nil, concurrencyService, service.NewBillingService(cfg, nil), nil,
+		billingCacheService, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, resolver, nil, nil,
+	)
+	h := NewGatewayHandler(gatewayService, nil, nil, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
+	apiKey := &service.APIKey{GroupID: &originalID, Group: groups[originalID]}
+	ctx := service.WithCompositeRouteDecision(context.Background(), service.CompositeRouteDecision{
+		Matched:        true,
+		GroupID:        originalID,
+		PublicModel:    "public-model",
+		TargetPlatform: service.PlatformOpenAI,
+		UpstreamModel:  "gpt-5",
+	})
+
+	resolvedCtx, group, groupID, platform, err := h.resolveStickyRoute(ctx, apiKey, "public-model")
+
+	require.NoError(t, err)
+	require.Equal(t, fallbackID, group.ID)
+	require.Equal(t, fallbackID, *groupID)
+	require.Equal(t, service.PlatformAnthropic, platform)
+	decision, ok := service.CompositeRouteDecisionFromContext(resolvedCtx)
+	require.True(t, ok)
+	require.Equal(t, fallbackID, decision.GroupID)
+	require.Equal(t, "claude-sonnet-4-6", decision.UpstreamModel)
 }

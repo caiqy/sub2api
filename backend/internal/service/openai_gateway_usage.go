@@ -172,24 +172,36 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 
 	var cost *CostBreakdown
 	var err error
-	billingModel := forwardResultBillingModel(result.Model, result.UpstreamModel)
+	concreteBillingModel := forwardResultBillingModel(result.Model, result.UpstreamModel)
 	if result.BillingModel != "" {
-		billingModel = strings.TrimSpace(result.BillingModel)
+		concreteBillingModel = strings.TrimSpace(result.BillingModel)
 	}
+	billingModel := concreteBillingModel
 	if input.BillingModelSource == BillingModelSourceChannelMapped && input.ChannelMappedModel != "" && input.ChannelMappedModel != input.OriginalModel {
 		billingModel = input.ChannelMappedModel
 	}
 	if input.BillingModelSource == BillingModelSourceRequested && input.OriginalModel != "" {
 		billingModel = input.OriginalModel
 	}
-	billingModels := usageBillingModelCandidates(
-		billingModel,
-		result.BillingModel,
-		input.ChannelMappedModel,
-		input.OriginalModel,
-		result.UpstreamModel,
-		result.Model,
-	)
+	var billingModels []string
+	if apiKey.Group != nil && apiKey.Group.Platform == PlatformComposite {
+		billingModel = selectCompositeBillableModel(
+			billingModel,
+			concreteBillingModel,
+			s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey) != nil,
+		)
+		// OriginalModel is an audit field; without explicit channel pricing it must not re-enter billing fallbacks.
+		billingModels = usageBillingModelCandidates(billingModel, concreteBillingModel, result.UpstreamModel, result.Model)
+	} else {
+		billingModels = usageBillingModelCandidates(
+			billingModel,
+			result.BillingModel,
+			input.ChannelMappedModel,
+			input.OriginalModel,
+			result.UpstreamModel,
+			result.Model,
+		)
+	}
 	serviceTier := ""
 	if result.ServiceTier != nil {
 		serviceTier = strings.TrimSpace(*result.ServiceTier)

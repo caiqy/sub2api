@@ -200,6 +200,73 @@ func (r *groupRepository) CreateFromSource(ctx context.Context, groupIn *service
 	return nil
 }
 
+func (r *groupRepository) CreateWithAccountIDs(ctx context.Context, groupIn *service.Group, accountIDs []int64) error {
+	if groupIn == nil {
+		return errors.New("group is nil")
+	}
+	return r.withGroupAccountCopyTransaction(ctx, func(client *dbent.Client) error {
+		if err := createGroupRecord(ctx, client, groupIn); err != nil {
+			return err
+		}
+		if err := replaceGroupAccountBindings(ctx, client, groupIn.ID, accountIDs); err != nil {
+			return err
+		}
+		return enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventGroupChanged, nil, &groupIn.ID, nil)
+	})
+}
+
+func (r *groupRepository) UpdateWithAccountIDs(ctx context.Context, groupIn *service.Group, accountIDs []int64) error {
+	if groupIn == nil {
+		return errors.New("group is nil")
+	}
+	return r.withGroupAccountCopyTransaction(ctx, func(client *dbent.Client) error {
+		if err := updateGroupRecord(ctx, client, groupIn); err != nil {
+			return err
+		}
+		if err := replaceGroupAccountBindings(ctx, client, groupIn.ID, accountIDs); err != nil {
+			return err
+		}
+		return enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventGroupChanged, nil, &groupIn.ID, nil)
+	})
+}
+
+func (r *groupRepository) withGroupAccountCopyTransaction(ctx context.Context, fn func(*dbent.Client) error) error {
+	tx, err := r.client.Tx(ctx)
+	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+		return err
+	}
+	client := r.client
+	if err == nil {
+		defer func() { _ = tx.Rollback() }()
+		client = tx.Client()
+	}
+	if err := fn(client); err != nil {
+		return err
+	}
+	if tx != nil {
+		return tx.Commit()
+	}
+	return nil
+}
+
+func replaceGroupAccountBindings(ctx context.Context, exec sqlExecutor, groupID int64, accountIDs []int64) error {
+	if _, err := exec.ExecContext(ctx, "DELETE FROM account_groups WHERE group_id = $1", groupID); err != nil {
+		return err
+	}
+	if len(accountIDs) == 0 {
+		return nil
+	}
+	_, err := exec.ExecContext(
+		ctx,
+		`INSERT INTO account_groups (account_id, group_id, priority, created_at)
+		 SELECT unnest($1::bigint[]), $2, 50, NOW()
+		 ON CONFLICT (account_id, group_id) DO NOTHING`,
+		pq.Array(accountIDs),
+		groupID,
+	)
+	return err
+}
+
 func (r *groupRepository) GetByID(ctx context.Context, id int64) (*service.Group, error) {
 	out, err := r.GetByIDLite(ctx, id)
 	if err != nil {
@@ -227,7 +294,17 @@ func (r *groupRepository) GetByIDLite(ctx context.Context, id int64) (*service.G
 }
 
 func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) error {
-	builder := r.client.Group.UpdateOneID(groupIn.ID).
+	if err := updateGroupRecord(ctx, r.client, groupIn); err != nil {
+		return err
+	}
+	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &groupIn.ID, nil); err != nil {
+		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group update failed: group=%d err=%v", groupIn.ID, err)
+	}
+	return nil
+}
+
+func updateGroupRecord(ctx context.Context, client *dbent.Client, groupIn *service.Group) error {
+	builder := client.Group.UpdateOneID(groupIn.ID).
 		SetName(groupIn.Name).
 		SetDescription(groupIn.Description).
 		SetPlatform(groupIn.Platform).
@@ -352,9 +429,6 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		return translatePersistenceError(err, service.ErrGroupNotFound, service.ErrGroupExists)
 	}
 	groupIn.UpdatedAt = updated.UpdatedAt
-	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &groupIn.ID, nil); err != nil {
-		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group update failed: group=%d err=%v", groupIn.ID, err)
-	}
 	return nil
 }
 

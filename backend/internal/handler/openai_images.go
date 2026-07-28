@@ -487,6 +487,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		if result != nil {
 			upstreamModel = result.UpstreamModel
 		}
+		channelUsageFields := clientRequestedUsageFields(c, channelMapping, requestModel, upstreamModel)
 		h.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
 				Result:             result,
@@ -502,7 +503,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 				RequestPayloadHash: requestPayloadHash,
 				APIKeyService:      h.apiKeyService,
 				QuotaPlatform:      quotaPlatform,
-				ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, requestModel, upstreamModel),
+				ChannelUsageFields: channelUsageFields,
 			}); err != nil {
 				logger.L().With(
 					zap.String("component", "handler.openai_gateway.images"),
@@ -605,21 +606,23 @@ func (h *OpenAIGatewayHandler) submitOpenAIImagesFailedUsageLogWithResponse(c *g
 		service.SetUsageUpstreamResponse(c, upstreamStatusCode, responseHeaders, string(responseBody))
 	}
 	detailSnapshot := buildOpenAIImagesDetailSnapshot(c, parsed)
+	input := &service.FailedUsageLogInput{
+		APIKey:           apiKey,
+		User:             apiKey.User,
+		Account:          account,
+		Model:            parsed.Model,
+		RequestedModel:   clientRequestedModel(c, parsed.Model),
+		UpstreamModel:    resolveOpenAIFailedUsageUpstreamModel(c, account, parsed.Model),
+		Stream:           parsed.Stream,
+		InboundEndpoint:  GetInboundEndpoint(c),
+		UpstreamEndpoint: GetUpstreamEndpoint(c, account.Platform),
+		UserAgent:        c.GetHeader("User-Agent"),
+		IPAddress:        ip.GetClientIP(c),
+		DetailSnapshot:   detailSnapshot,
+		Duration:         duration,
+	}
 	h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
-		service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), &service.FailedUsageLogInput{
-			APIKey:           apiKey,
-			User:             apiKey.User,
-			Account:          account,
-			Model:            parsed.Model,
-			UpstreamModel:    resolveOpenAIFailedUsageUpstreamModel(c, account, parsed.Model),
-			Stream:           parsed.Stream,
-			InboundEndpoint:  GetInboundEndpoint(c),
-			UpstreamEndpoint: GetUpstreamEndpoint(c, account.Platform),
-			UserAgent:        c.GetHeader("User-Agent"),
-			IPAddress:        ip.GetClientIP(c),
-			DetailSnapshot:   detailSnapshot,
-			Duration:         duration,
-		}, "handler.openai_gateway.images")
+		service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), input, "handler.openai_gateway.images")
 	})
 }
 

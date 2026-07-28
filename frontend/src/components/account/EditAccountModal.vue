@@ -3567,13 +3567,17 @@ async function loadTLSProfiles() {
   }
 }
 
+let lastSyncedAccount: Account | null = null
+
 watch(
-  [() => props.show, () => props.account],
-  ([show, newAccount], [wasShow, previousAccount]) => {
+  [() => props.show, () => props.account?.id],
+  ([show, accountID], [wasShow, previousAccountID]) => {
+    const newAccount = props.account
     if (!show || !newAccount) {
       return
     }
-    if (!wasShow || newAccount !== previousAccount) {
+    if (!wasShow || accountID !== previousAccountID) {
+      const previousAccount = lastSyncedAccount
       if (
         previousAccount &&
         supportsPassthroughFieldExtra(previousAccount) &&
@@ -3583,6 +3587,7 @@ watch(
         appStore.showInfo(PASSTHROUGH_FIELDS_REMOVAL_MESSAGE)
       }
       syncFormFromAccount(newAccount)
+      lastSyncedAccount = newAccount
       loadTLSProfiles()
     }
   },

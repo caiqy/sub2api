@@ -28,6 +28,8 @@ type groupRepoStubForAdmin struct {
 	deleteAccountGroupsByGroupIDFn func(groupID int64) (int64, error)
 	bindAccountsToGroupFn          func(groupID int64, accountIDs []int64) error
 	getAccountIDsByGroupIDsFn      func(groupIDs []int64) ([]int64, error)
+	createWithAccountIDsFn         func(group *Group, accountIDs []int64) error
+	updateWithAccountIDsFn         func(group *Group, accountIDs []int64) error
 
 	listWithFiltersCalls       int
 	listWithFiltersParams      pagination.PaginationParams
@@ -150,6 +152,35 @@ func (s *groupRepoStubForAdmin) GetAccountIDsByGroupIDs(_ context.Context, group
 		return s.getAccountIDsByGroupIDsFn(groupIDs)
 	}
 	panic("unexpected GetAccountIDsByGroupIDs call")
+}
+
+func (s *groupRepoStubForAdmin) CreateWithAccountIDs(ctx context.Context, group *Group, accountIDs []int64) error {
+	if s.createWithAccountIDsFn != nil {
+		return s.createWithAccountIDsFn(group, accountIDs)
+	}
+	if err := s.Create(ctx, group); err != nil {
+		return err
+	}
+	if len(accountIDs) == 0 {
+		return nil
+	}
+	return s.BindAccountsToGroup(ctx, group.ID, accountIDs)
+}
+
+func (s *groupRepoStubForAdmin) UpdateWithAccountIDs(ctx context.Context, group *Group, accountIDs []int64) error {
+	if s.updateWithAccountIDsFn != nil {
+		return s.updateWithAccountIDsFn(group, accountIDs)
+	}
+	if err := s.Update(ctx, group); err != nil {
+		return err
+	}
+	if _, err := s.DeleteAccountGroupsByGroupID(ctx, group.ID); err != nil {
+		return err
+	}
+	if len(accountIDs) == 0 {
+		return nil
+	}
+	return s.BindAccountsToGroup(ctx, group.ID, accountIDs)
 }
 
 func (s *groupRepoStubForAdmin) UpdateSortOrders(_ context.Context, _ []GroupSortOrderUpdate) error {

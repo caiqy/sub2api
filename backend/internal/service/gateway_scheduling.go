@@ -115,9 +115,12 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		return nil, err
 	}
 	ctx = s.withGroupContext(ctx, group)
-	platform, hasForcePlatform, err := s.resolvePlatform(ctx, groupID, group, requestedModel)
+	platform, requestedModel, decision, hasForcePlatform, err := s.resolvePlatform(ctx, groupID, group, requestedModel)
 	if err != nil {
 		return nil, err
+	}
+	if decision.Matched {
+		ctx = WithCompositeRouteDecision(ctx, decision)
 	}
 
 	// Claude Code 限制可能已将 groupID 解析为 fallback group，
@@ -909,45 +912,42 @@ func (s *GatewayService) checkClaudeCodeRestriction(ctx context.Context, groupID
 	return group, resolvedID, nil
 }
 
-func (s *GatewayService) resolvePlatform(ctx context.Context, groupID *int64, group *Group, requestedModel string) (string, bool, error) {
+func (s *GatewayService) resolvePlatform(ctx context.Context, groupID *int64, group *Group, requestedModel string) (string, string, CompositeRouteDecision, bool, error) {
 	forcePlatform, hasForcePlatform := ctx.Value(ctxkey.ForcePlatform).(string)
 	if hasForcePlatform && forcePlatform != "" {
-		return forcePlatform, true, nil
-	}
-	if platform, ok := ResolvedTargetPlatformFromContext(ctx); ok {
-		return platform, false, nil
+		return forcePlatform, requestedModel, CompositeRouteDecision{}, true, nil
 	}
 	if group != nil {
 		if group.Platform == PlatformComposite {
 			decision, ok, err := s.resolveCompositeRouteDecision(ctx, group, requestedModel, CompositeRouteEndpointAny)
 			if err != nil {
-				return "", false, err
+				return "", "", CompositeRouteDecision{}, false, err
 			}
 			if !ok {
-				return "", false, fmt.Errorf("%w supporting model: %s (composite target platform unknown)", ErrNoAvailableAccounts, requestedModel)
+				return "", "", CompositeRouteDecision{}, false, fmt.Errorf("%w supporting model: %s (composite target platform unknown)", ErrNoAvailableAccounts, requestedModel)
 			}
-			return decision.TargetPlatform, false, nil
+			return decision.TargetPlatform, decision.UpstreamModel, decision, false, nil
 		}
-		return group.Platform, false, nil
+		return group.Platform, requestedModel, CompositeRouteDecision{}, false, nil
 	}
 	if groupID != nil {
 		group, err := s.resolveGroupByID(ctx, *groupID)
 		if err != nil {
-			return "", false, err
+			return "", "", CompositeRouteDecision{}, false, err
 		}
 		if group.Platform == PlatformComposite {
 			decision, ok, err := s.resolveCompositeRouteDecision(ctx, group, requestedModel, CompositeRouteEndpointAny)
 			if err != nil {
-				return "", false, err
+				return "", "", CompositeRouteDecision{}, false, err
 			}
 			if !ok {
-				return "", false, fmt.Errorf("%w supporting model: %s (composite target platform unknown)", ErrNoAvailableAccounts, requestedModel)
+				return "", "", CompositeRouteDecision{}, false, fmt.Errorf("%w supporting model: %s (composite target platform unknown)", ErrNoAvailableAccounts, requestedModel)
 			}
-			return decision.TargetPlatform, false, nil
+			return decision.TargetPlatform, decision.UpstreamModel, decision, false, nil
 		}
-		return group.Platform, false, nil
+		return group.Platform, requestedModel, CompositeRouteDecision{}, false, nil
 	}
-	return PlatformAnthropic, false, nil
+	return PlatformAnthropic, requestedModel, CompositeRouteDecision{}, false, nil
 }
 
 func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) ([]Account, bool, error) {

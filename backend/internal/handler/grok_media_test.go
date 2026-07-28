@@ -55,6 +55,55 @@ type grokMediaRequestRecorder struct {
 	cancel       context.CancelFunc
 }
 
+func TestGrokImagesCompositeMultipartUsesResolvedUpstreamModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 970, Platform: service.PlatformComposite, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
+	account := &service.Account{
+		ID:          971,
+		Name:        "composite-grok-image",
+		Platform:    service.PlatformGrok,
+		Type:        service.AccountTypeAPIKey,
+		Status:      service.StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":       "key",
+			"base_url":      "https://api.x.ai/v1",
+			"model_mapping": map[string]any{"grok-imagine-image-quality": "grok-upstream"},
+		},
+	}
+	upstream := &grokMediaRequestRecorder{}
+	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &terminalUsageGrokAccountRepo{openAIRetryAccountRepoStub{accounts: []*service.Account{account}}}, upstream)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	require.NoError(t, writer.WriteField("model", "image-alias"))
+	require.NoError(t, writer.WriteField("prompt", "draw"))
+	image, err := writer.CreateFormFile("image", "source.png")
+	require.NoError(t, err)
+	_, err = image.Write([]byte("image"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	ctx := service.WithCompositeRouteDecision(context.Background(), service.CompositeRouteDecision{
+		Matched:        true,
+		GroupID:        group.ID,
+		PublicModel:    "image-alias",
+		TargetPlatform: service.PlatformGrok,
+		UpstreamModel:  "grok-imagine-image-quality",
+		Endpoint:       service.CompositeRouteEndpointImages,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body.Bytes())).WithContext(ctx)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rec := httptest.NewRecorder()
+
+	env.router("/v1/images/edits", env.handler.GrokImages).ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Len(t, upstream.bodies, 1)
+	require.Equal(t, "grok-upstream", gjson.GetBytes(upstream.bodies[0], "model").String())
+}
+
 func (u *grokMediaRequestRecorder) Do(req *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
 	var body []byte
 	if req.Body != nil {

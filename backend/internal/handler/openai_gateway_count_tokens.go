@@ -78,16 +78,6 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 		zap.Any("group_id", apiKey.GroupID),
 	)
 
-	if apiKey.Group != nil && !apiKey.Group.AllowMessagesDispatch {
-		h.anthropicErrorResponse(c, http.StatusForbidden, "permission_error",
-			"This group does not allow /v1/messages dispatch")
-		return
-	}
-
-	if !h.ensureResponsesDependencies(c, reqLog) {
-		return
-	}
-
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
 	if err != nil {
 		if maxErr, ok := extractMaxBytesError(err); ok {
@@ -120,6 +110,14 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 	ensureCompositeTargetPlatform(c, apiKey, reqModel)
 	if !compositeTargetPlatformAllowed(c, apiKey, reqModel, service.PlatformOpenAI) {
 		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Model is not supported by this OpenAI-compatible endpoint for composite groups")
+		return
+	}
+	if !allowOpenAICompatibleMessagesDispatch(c.Request.Context(), apiKey) {
+		h.anthropicErrorResponse(c, http.StatusForbidden, "permission_error",
+			"This group does not allow /v1/messages dispatch")
+		return
+	}
+	if !h.ensureResponsesDependencies(c, reqLog) {
 		return
 	}
 	routingModel := service.NormalizeOpenAICompatRequestedModel(reqModel)

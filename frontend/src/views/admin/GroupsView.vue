@@ -4457,9 +4457,11 @@ const copyAccountsGroupLabel = (g: AdminGroup) => {
   return `${g.name} - ${platform} (${t("admin.groups.accountsCount", { count })})`;
 };
 
+const copySourceGroups = ref<AdminGroup[]>([]);
+
 // 复制账号的源分组选项（创建时）- 相同平台；composite 分组可汇总各平台账号
 const copyAccountsGroupOptions = computed(() => {
-  const eligibleGroups = groups.value.filter(
+  const eligibleGroups = copySourceGroups.value.filter(
     (g) =>
       canCopyAccountsFromGroup(createForm.platform, g.platform) &&
       (g.account_count || 0) > 0,
@@ -4473,7 +4475,7 @@ const copyAccountsGroupOptions = computed(() => {
 // 复制账号的源分组选项（编辑时）- 相同平台；composite 分组可汇总各平台账号，排除自身
 const copyAccountsGroupOptionsForEdit = computed(() => {
   const currentId = editingGroup.value?.id;
-  const eligibleGroups = groups.value.filter(
+  const eligibleGroups = copySourceGroups.value.filter(
     (g) =>
       canCopyAccountsFromGroup(editForm.platform, g.platform) &&
       (g.account_count || 0) > 0 &&
@@ -5236,6 +5238,15 @@ const loadGroups = async () => {
   }
 };
 
+const loadCopySourceGroups = async () => {
+  try {
+    copySourceGroups.value = await adminAPI.groups.getAllIncludingInactive();
+  } catch (error) {
+    copySourceGroups.value = [];
+    console.error("Error loading group copy sources:", error);
+  }
+};
+
 const formatCost = (cost: number): string => {
   if (cost >= 1000) return cost.toFixed(0);
   if (cost >= 100) return cost.toFixed(1);
@@ -5348,6 +5359,7 @@ const handleSort = (key: string, order: 'asc' | 'desc') => {
 
 const openCreateModal = () => {
   showCreateModal.value = true;
+  void loadCopySourceGroups();
   loadModelsListCandidates("create", 0, createForm.platform);
 };
 
@@ -5536,6 +5548,7 @@ const handleCreateGroup = async () => {
 
 const handleEdit = async (group: AdminGroup) => {
   editingGroup.value = group;
+  void loadCopySourceGroups();
   editForm.name = group.name;
   editForm.description = group.description || "";
   editForm.platform = group.platform;

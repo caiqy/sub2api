@@ -12,6 +12,7 @@ type FailedUsageLogInput struct {
 	User                *User
 	Account             *Account
 	Model               string
+	RequestedModel      string
 	UpstreamModel       string
 	ReasoningEffort     *string
 	Stream              bool
@@ -44,6 +45,7 @@ func WriteFailedUsageLogBestEffort(ctx context.Context, repo UsageLogRepository,
 		AccountID:             input.Account.ID,
 		RequestID:             resolveUsageBillingRequestID(ctx, ""),
 		Model:                 input.Model,
+		RequestedModel:        input.RequestedModel,
 		UpstreamModel:         optionalNonEqualStringPtr(input.UpstreamModel, input.Model),
 		ReasoningEffort:       input.ReasoningEffort,
 		InboundEndpoint:       optionalTrimmedStringPtr(input.InboundEndpoint),

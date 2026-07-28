@@ -89,21 +89,40 @@ func TestRunCleanupPhasesStopsAfterProducerFailure(t *testing.T) {
 	require.Equal(t, []string{"producers"}, order)
 }
 
-func TestProvideCleanupOrdersProducerUsageAndDeferredDrains(t *testing.T) {
+func TestProvideCleanupOrdersProducersAndDependentDrains(t *testing.T) {
 	source, err := os.ReadFile("wire.go")
 	require.NoError(t, err)
 
 	producers := bytes.Index(source, []byte(`name: "producers"`))
 	imageTasks := bytes.Index(source, []byte(`name: "ImageTaskService"`))
+	ollamaCloudUsage := bytes.Index(source, []byte(`name: "OllamaCloudUsageService"`))
 	usage := bytes.Index(source, []byte(`name: "usage-record-drain"`))
+	ops := bytes.Index(source, []byte(`name: "ops-error-log-drain"`))
 	deferred := bytes.Index(source, []byte(`name: "deferred-last-used-flush"`))
+	quota := bytes.Index(source, []byte(`name: "quota-final-flush"`))
+	billing := bytes.Index(source, []byte(`name: "billing-cache-drain"`))
+	redis := bytes.Index(source, []byte(`name: "Redis"`))
+	ent := bytes.Index(source, []byte(`name: "Ent"`))
 	require.GreaterOrEqual(t, producers, 0)
 	require.GreaterOrEqual(t, imageTasks, 0)
+	require.GreaterOrEqual(t, ollamaCloudUsage, 0)
 	require.GreaterOrEqual(t, usage, 0)
+	require.GreaterOrEqual(t, ops, 0)
 	require.GreaterOrEqual(t, deferred, 0)
+	require.GreaterOrEqual(t, quota, 0)
+	require.GreaterOrEqual(t, billing, 0)
+	require.GreaterOrEqual(t, redis, 0)
+	require.GreaterOrEqual(t, ent, 0)
 	require.Less(t, producers, usage)
 	require.Less(t, imageTasks, usage)
+	require.Less(t, ollamaCloudUsage, usage)
 	require.Less(t, usage, deferred)
+	require.Less(t, usage, ops)
+	require.Less(t, ops, deferred)
+	require.Less(t, deferred, quota)
+	require.Less(t, quota, billing)
+	require.Less(t, billing, redis)
+	require.Less(t, redis, ent)
 }
 
 func TestRunCleanupPhasesStopsAfterDeadline(t *testing.T) {

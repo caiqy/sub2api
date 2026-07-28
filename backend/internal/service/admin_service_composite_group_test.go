@@ -4,10 +4,20 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+type compositeCopyAccountRepoFailureStub struct {
+	AccountRepository
+	err error
+}
+
+func (s *compositeCopyAccountRepoFailureStub) GetByIDs(context.Context, []int64) ([]*Account, error) {
+	return nil, s.err
+}
 
 type accountRepoStubForCompositeModelsList struct {
 	accountRepoStub
@@ -93,6 +103,51 @@ func TestAdminService_UpdateCompositeGroupCopiesAccountsFromConcreteGroups(t *te
 	require.ElementsMatch(t, []int64{10, 20}, copiedFrom)
 	require.Equal(t, int64(99), boundGroupID)
 	require.ElementsMatch(t, []int64{301, 302}, boundAccountIDs)
+}
+
+func TestAdminService_CreateCompositeGroupValidatesCopyAccountsBeforeWrite(t *testing.T) {
+	groupRepo := &groupRepoStubForAdmin{
+		createID: 99,
+		getByIDByID: map[int64]*Group{
+			10: {ID: 10, Platform: PlatformOpenAI},
+		},
+		getAccountIDsByGroupIDsFn: func([]int64) ([]int64, error) {
+			return []int64{101}, nil
+		},
+	}
+	svc := &adminServiceImpl{
+		groupRepo:   groupRepo,
+		accountRepo: &compositeCopyAccountRepoFailureStub{err: errors.New("account lookup failed")},
+	}
+
+	group, err := svc.CreateGroup(context.Background(), &CreateGroupInput{
+		Name:                     "Composite",
+		Platform:                 PlatformComposite,
+		RateMultiplier:           1,
+		RequireOAuthOnly:         true,
+		CopyAccountsFromGroupIDs: []int64{10},
+	})
+
+	require.ErrorContains(t, err, "account lookup failed")
+	require.Nil(t, group)
+	require.Nil(t, groupRepo.created, "failed copy validation must not create an orphan group")
+}
+
+func TestAdminService_UpdateCompositeGroupValidatesCopySourcesBeforeWrite(t *testing.T) {
+	groupRepo := &groupRepoStubForAdmin{
+		getByIDByID: map[int64]*Group{
+			99: {ID: 99, Platform: PlatformComposite, RateMultiplier: 1, SubscriptionType: SubscriptionTypeStandard},
+		},
+	}
+	svc := &adminServiceImpl{groupRepo: groupRepo}
+
+	group, err := svc.UpdateGroup(context.Background(), 99, &UpdateGroupInput{
+		CopyAccountsFromGroupIDs: []int64{10},
+	})
+
+	require.ErrorContains(t, err, "source group 10 not found")
+	require.Nil(t, group)
+	require.Nil(t, groupRepo.updated, "failed copy validation must not persist group changes")
 }
 
 func TestAdminService_CreateAccountAllowsCompositeGroupAssignment(t *testing.T) {

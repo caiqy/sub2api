@@ -42,7 +42,18 @@ func clientRequestedModel(c *gin.Context, fallback string) string {
 }
 
 func clientRequestedUsageFields(c *gin.Context, mapping service.ChannelMappingResult, fallbackModel, upstreamModel string) service.ChannelUsageFields {
-	return mapping.ToUsageFields(clientRequestedModel(c, fallbackModel), upstreamModel)
+	fields := mapping.ToUsageFields(fallbackModel, upstreamModel)
+	requestedModel := clientRequestedModel(c, fallbackModel)
+	if requestedModel == "" || requestedModel == fields.OriginalModel {
+		return fields
+	}
+	fields.OriginalModel = requestedModel
+	if fields.ModelMappingChain != "" {
+		fields.ModelMappingChain = requestedModel + "→" + fields.ModelMappingChain
+	} else if fields.ChannelMappedModel != "" && fields.ChannelMappedModel != requestedModel {
+		fields.ModelMappingChain = requestedModel + "→" + fields.ChannelMappedModel
+	}
+	return fields
 }
 
 func runContentModeration(c *gin.Context, reqLog *zap.Logger, svc *service.ContentModerationService, apiKey *service.APIKey, subject middleware2.AuthSubject, protocol string, model string, body []byte) *service.ContentModerationDecision {

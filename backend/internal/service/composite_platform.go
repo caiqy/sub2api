@@ -35,6 +35,7 @@ func WithCompositeRouteDecision(ctx context.Context, decision CompositeRouteDeci
 	if ctx == nil || !decision.Matched {
 		return ctx
 	}
+	ctx = context.WithValue(ctx, ctxkey.CompositeRouteDecision, decision)
 	ctx = WithResolvedTargetPlatform(ctx, decision.TargetPlatform)
 	if model := strings.TrimSpace(decision.UpstreamModel); model != "" {
 		ctx = context.WithValue(ctx, ctxkey.ResolvedUpstreamModel, model)
@@ -46,6 +47,56 @@ func WithCompositeRouteDecision(ctx context.Context, decision CompositeRouteDeci
 		ctx = context.WithValue(ctx, ctxkey.CompositeRouteSource, source)
 	}
 	return ctx
+}
+
+// CompositeRouteDecisionFromContext returns the complete composite decision
+// stored for the current request.
+func CompositeRouteDecisionFromContext(ctx context.Context) (CompositeRouteDecision, bool) {
+	if ctx == nil {
+		return CompositeRouteDecision{}, false
+	}
+	decision, ok := ctx.Value(ctxkey.CompositeRouteDecision).(CompositeRouteDecision)
+	if !ok || !decision.Matched {
+		return CompositeRouteDecision{}, false
+	}
+	return decision, true
+}
+
+// WithCompositeRouteResolver attaches the route resolver to request-scoped
+// protocols, such as WebSocket requests whose model arrives in the first frame.
+func WithCompositeRouteResolver(ctx context.Context, resolver *CompositeRouteResolver) context.Context {
+	if ctx == nil || resolver == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, ctxkey.CompositeRouteResolver, resolver)
+}
+
+func CompositeRouteResolverFromContext(ctx context.Context) (*CompositeRouteResolver, bool) {
+	if ctx == nil {
+		return nil, false
+	}
+	resolver, ok := ctx.Value(ctxkey.CompositeRouteResolver).(*CompositeRouteResolver)
+	return resolver, ok && resolver != nil
+}
+
+// WithoutCompositeRouteDecision clears provider-specific route values when an
+// effective group changes. The public model remains the client's request.
+func WithoutCompositeRouteDecision(ctx context.Context) context.Context {
+	if ctx == nil {
+		return nil
+	}
+	ctx = context.WithValue(ctx, ctxkey.CompositeRouteDecision, CompositeRouteDecision{})
+	ctx = context.WithValue(ctx, ctxkey.ResolvedTargetPlatform, "")
+	ctx = context.WithValue(ctx, ctxkey.ResolvedUpstreamModel, "")
+	return context.WithValue(ctx, ctxkey.CompositeRouteSource, "")
+}
+
+func compositeRouteDecisionForGroup(ctx context.Context, groupID int64) (CompositeRouteDecision, bool) {
+	decision, ok := CompositeRouteDecisionFromContext(ctx)
+	if !ok || decision.GroupID != groupID {
+		return CompositeRouteDecision{}, false
+	}
+	return decision, true
 }
 
 func ResolvedUpstreamModelFromContext(ctx context.Context) (string, bool) {
@@ -151,30 +202,20 @@ func (s *GatewayService) resolveCompositeRouteDecision(ctx context.Context, grou
 	if group == nil || group.Platform != PlatformComposite {
 		return CompositeRouteDecision{}, false, nil
 	}
-	if platform, ok := ResolvedTargetPlatformFromContext(ctx); ok {
-		upstreamModel := requestedModel
-		if resolvedModel, modelOK := ResolvedUpstreamModelFromContext(ctx); modelOK {
-			upstreamModel = resolvedModel
-		}
-		source := CompositeRouteSourceDetector
-		if resolvedSource, sourceOK := CompositeRouteSourceFromContext(ctx); sourceOK {
-			source = resolvedSource
-		}
-		return CompositeRouteDecision{
-			Matched:        true,
-			Source:         source,
-			GroupID:        group.ID,
-			PublicModel:    requestedModel,
-			TargetPlatform: platform,
-			UpstreamModel:  upstreamModel,
-			Endpoint:       normalizeCompositeRouteEndpoint(endpoint),
-		}, true, nil
+	if decision, ok := compositeRouteDecisionForGroup(ctx, group.ID); ok {
+		return decision, true, nil
 	}
 	decision, err := s.compositeResolver.Resolve(ctx, group.ID, requestedModel, endpoint)
 	if err != nil {
 		return decision, false, err
 	}
 	return decision, decision.Matched, nil
+}
+
+// ResolveCompositeRouteDecision resolves a composite model route for callers
+// outside the service package.
+func (s *GatewayService) ResolveCompositeRouteDecision(ctx context.Context, group *Group, requestedModel, endpoint string) (CompositeRouteDecision, bool, error) {
+	return s.resolveCompositeRouteDecision(ctx, group, requestedModel, endpoint)
 }
 
 func isConcreteRequestPlatform(platform string) bool {

@@ -21,6 +21,10 @@ type OpsRequestDetail struct {
 
 	Platform string `json:"platform,omitempty"`
 	Model    string `json:"model,omitempty"`
+	// RequestedModel is the client-facing model before composite or channel mapping.
+	RequestedModel string `json:"requested_model,omitempty"`
+	// UpstreamModel is the model ultimately sent to the upstream provider.
+	UpstreamModel string `json:"upstream_model,omitempty"`
 
 	DurationMs *int `json:"duration_ms,omitempty"`
 	StatusCode *int `json:"status_code,omitempty"`

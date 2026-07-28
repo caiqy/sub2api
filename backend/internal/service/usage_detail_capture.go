@@ -23,6 +23,10 @@ type usageDetailRequestBodySetter interface {
 	SetUsageRequestBody(body string)
 }
 
+type usageDetailOriginalRequestBodySetter interface {
+	SetUsageOriginalRequestBody(body string)
+}
+
 type usageDetailResponseSnapshotSetter interface {
 	SetUsageResponseSnapshot(headers, body string)
 }
@@ -143,6 +147,21 @@ func SetUsageRequestBody(c *gin.Context, body string) {
 		return
 	}
 	collector.SetUsageRequestBody(body)
+}
+
+func SetUsageOriginalRequestBody(c *gin.Context, body string) {
+	if c == nil {
+		return
+	}
+	v, ok := c.Get(UsageDetailCaptureContextKey)
+	if !ok {
+		return
+	}
+	collector, ok := v.(usageDetailOriginalRequestBodySetter)
+	if !ok || collector == nil {
+		return
+	}
+	collector.SetUsageOriginalRequestBody(body)
 }
 
 func SetUsageUpstreamRequest(c *gin.Context, req *http.Request, body string) {

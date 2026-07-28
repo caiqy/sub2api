@@ -134,21 +134,32 @@ func (h *GatewayHandler) bindStickySessionForPlatform(ctx context.Context, platf
 	return h.gatewayService.BindStickySession(ctx, groupID, sessionKey, accountID)
 }
 
-func (h *GatewayHandler) resolveStickyRoute(ctx context.Context, apiKey *service.APIKey) (*service.Group, *int64, string, error) {
+func (h *GatewayHandler) resolveStickyRoute(ctx context.Context, apiKey *service.APIKey, requestedModel string) (context.Context, *service.Group, *int64, string, error) {
 	group, groupID, err := h.gatewayService.ResolveGatewayGroup(ctx, apiKey.GroupID)
 	if err != nil {
-		return nil, nil, "", err
+		return ctx, nil, nil, "", err
 	}
 	if platform, ok := ctx.Value(ctxkey.ForcePlatform).(string); ok && platform != "" {
-		return nil, groupID, platform, nil
+		return ctx, nil, groupID, platform, nil
 	}
-	if platform, ok := service.ResolvedTargetPlatformFromContext(ctx); ok {
-		return group, groupID, platform, nil
+	if group == nil {
+		return service.WithoutCompositeRouteDecision(ctx), nil, groupID, service.PlatformAnthropic, nil
 	}
-	if group != nil {
-		return group, groupID, group.Platform, nil
+	if group.Platform != service.PlatformComposite {
+		return service.WithoutCompositeRouteDecision(ctx), group, groupID, group.Platform, nil
 	}
-	return nil, groupID, service.PlatformAnthropic, nil
+	if publicModel, ok := service.RequestedPublicModelFromContext(ctx); ok {
+		requestedModel = publicModel
+	}
+	decision, ok, err := h.gatewayService.ResolveCompositeRouteDecision(ctx, group, requestedModel, service.CompositeRouteEndpointAny)
+	if err != nil {
+		return ctx, nil, nil, "", err
+	}
+	if !ok {
+		return ctx, nil, nil, "", service.ErrNoAvailableAccounts
+	}
+	ctx = service.WithCompositeRouteDecision(service.WithoutCompositeRouteDecision(ctx), decision)
+	return ctx, group, groupID, decision.TargetPlatform, nil
 }
 
 func stickySessionKeyForPlatform(platform, sessionHash string) string {
@@ -309,11 +320,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		return
 	}
 
-	resolvedGroup, stickyGroupID, platform, err := h.resolveStickyRoute(c.Request.Context(), apiKey)
+	resolvedCtx, resolvedGroup, stickyGroupID, platform, err := h.resolveStickyRoute(c.Request.Context(), apiKey, reqModel)
 	if err != nil {
 		h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error(), false)
 		return
 	}
+	c.Request = c.Request.WithContext(resolvedCtx)
 	if resolvedGroup != nil {
 		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, resolvedGroup))
 	}
@@ -638,21 +650,24 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 				if c.Request.Context().Err() == nil && service.HasOpsUpstreamAttempted(c) && !service.HasOpsClientBusinessLimited(c) {
 					detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
+					failedUsageInput := &service.FailedUsageLogInput{
+						APIKey:           apiKey,
+						User:             apiKey.User,
+						Account:          account,
+						Model:            reqModel,
+						RequestedModel:   clientRequestedModel(c, reqModel),
+						UpstreamModel:    account.GetMappedModel(reqModel),
+						ReasoningEffort:  service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort),
+						Stream:           reqStream,
+						InboundEndpoint:  inboundEndpoint,
+						UpstreamEndpoint: upstreamEndpoint,
+						UserAgent:        userAgent,
+						IPAddress:        clientIP,
+						DetailSnapshot:   detailSnapshot,
+						Duration:         forwardDuration,
+					}
 					h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
-						service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), &service.FailedUsageLogInput{
-							APIKey:           apiKey,
-							User:             apiKey.User,
-							Account:          account,
-							Model:            reqModel,
-							ReasoningEffort:  service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort),
-							Stream:           reqStream,
-							InboundEndpoint:  inboundEndpoint,
-							UpstreamEndpoint: upstreamEndpoint,
-							UserAgent:        userAgent,
-							IPAddress:        clientIP,
-							DetailSnapshot:   detailSnapshot,
-							Duration:         forwardDuration,
-						}, "handler.gateway.messages")
+						service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), failedUsageInput, "handler.gateway.messages")
 					})
 				}
 				reqLog.Error("gateway.forward_failed", forwardFailedFields...)
@@ -698,6 +713,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// ForceCacheBilling 提前拍成标量，避免 worker 闭包保活 failover 状态里的响应体。
 			forceCacheBilling := fs.ForceCacheBilling
 			quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
+			channelUsageFields := clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel)
 			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 					Result:             result,
@@ -714,7 +730,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					RequestPayloadHash: requestPayloadHash,
 					ForceCacheBilling:  forceCacheBilling,
 					APIKeyService:      h.apiKeyService,
-					ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
+					ChannelUsageFields: channelUsageFields,
 				}); err != nil {
 					logger.L().With(
 						zap.String("component", "handler.gateway.messages"),
@@ -1110,11 +1126,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						ctx := context.WithValue(c.Request.Context(), ctxkey.ForcePlatform, "")
 						c.Request = c.Request.WithContext(ctx)
 						currentAPIKey = fallbackAPIKey
-						_, currentStickyGroupID, platform, err = h.resolveStickyRoute(c.Request.Context(), fallbackAPIKey)
+						var stickyCtx context.Context
+						stickyCtx, _, currentStickyGroupID, platform, err = h.resolveStickyRoute(c.Request.Context(), fallbackAPIKey, reqModel)
 						if err != nil {
 							h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error(), streamStarted)
 							return
 						}
+						c.Request = c.Request.WithContext(stickyCtx)
 						sessionKey = stickySessionKeyForPlatform(platform, sessionHash)
 						sessionBoundAccountID = h.getCachedSessionAccountIDForPlatform(c.Request.Context(), platform, currentStickyGroupID, sessionKey)
 						hasBoundSession = sessionKey != "" && sessionBoundAccountID > 0
@@ -1183,21 +1201,24 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 				if c.Request.Context().Err() == nil && service.HasOpsUpstreamAttempted(c) && !service.HasOpsClientBusinessLimited(c) {
 					detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
+					failedUsageInput := &service.FailedUsageLogInput{
+						APIKey:           currentAPIKey,
+						User:             currentAPIKey.User,
+						Account:          account,
+						Model:            reqModel,
+						RequestedModel:   clientRequestedModel(c, reqModel),
+						UpstreamModel:    account.GetMappedModel(reqModel),
+						ReasoningEffort:  service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort),
+						Stream:           parsedReq.Stream,
+						InboundEndpoint:  inboundEndpoint,
+						UpstreamEndpoint: upstreamEndpoint,
+						UserAgent:        userAgent,
+						IPAddress:        clientIP,
+						DetailSnapshot:   detailSnapshot,
+						Duration:         forwardDuration,
+					}
 					h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
-						service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), &service.FailedUsageLogInput{
-							APIKey:           currentAPIKey,
-							User:             currentAPIKey.User,
-							Account:          account,
-							Model:            reqModel,
-							ReasoningEffort:  service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort),
-							Stream:           parsedReq.Stream,
-							InboundEndpoint:  inboundEndpoint,
-							UpstreamEndpoint: upstreamEndpoint,
-							UserAgent:        userAgent,
-							IPAddress:        clientIP,
-							DetailSnapshot:   detailSnapshot,
-							Duration:         forwardDuration,
-						}, "handler.gateway.messages")
+						service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), failedUsageInput, "handler.gateway.messages")
 					})
 				}
 				reqLog.Error("gateway.forward_failed", forwardFailedFields...)
@@ -1253,6 +1274,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// ForceCacheBilling 提前拍成标量，避免 worker 闭包保活 failover 状态里的响应体。
 			forceCacheBilling := fs.ForceCacheBilling
 			quotaPlatform := service.QuotaPlatform(c.Request.Context(), currentAPIKey)
+			channelUsageFields := clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel)
 			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 					Result:             result,
@@ -1269,7 +1291,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					RequestPayloadHash: requestPayloadHash,
 					ForceCacheBilling:  forceCacheBilling,
 					APIKeyService:      h.apiKeyService,
-					ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
+					ChannelUsageFields: channelUsageFields,
 				}); err != nil {
 					logger.L().With(
 						zap.String("component", "handler.gateway.messages"),
@@ -2001,21 +2023,26 @@ func (h *GatewayHandler) submitFailedUsageLogFromFailover(c *gin.Context, apiKey
 	inboundEndpoint := GetInboundEndpoint(c)
 	upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 	detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
+	requestedModel := clientRequestedModel(c, model)
+	upstreamModel := account.GetMappedModel(model)
+	failedUsageInput := &service.FailedUsageLogInput{
+		APIKey:           apiKey,
+		User:             apiKey.User,
+		Account:          account,
+		Model:            model,
+		RequestedModel:   requestedModel,
+		UpstreamModel:    upstreamModel,
+		ReasoningEffort:  reasoningEffort,
+		Stream:           stream,
+		InboundEndpoint:  inboundEndpoint,
+		UpstreamEndpoint: upstreamEndpoint,
+		UserAgent:        userAgent,
+		IPAddress:        clientIP,
+		DetailSnapshot:   detailSnapshot,
+		Duration:         duration,
+	}
 	h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
-		service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), &service.FailedUsageLogInput{
-			APIKey:           apiKey,
-			User:             apiKey.User,
-			Account:          account,
-			Model:            model,
-			ReasoningEffort:  reasoningEffort,
-			Stream:           stream,
-			InboundEndpoint:  inboundEndpoint,
-			UpstreamEndpoint: upstreamEndpoint,
-			UserAgent:        userAgent,
-			IPAddress:        clientIP,
-			DetailSnapshot:   detailSnapshot,
-			Duration:         duration,
-		}, logKey)
+		service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), failedUsageInput, logKey)
 	})
 }
 
@@ -2669,8 +2696,10 @@ func wrapUsageRecordTaskContext(parent context.Context, task service.UsageRecord
 	if task == nil {
 		return nil
 	}
+	// Snapshot request-scoped billing values before queueing; the worker keeps its own deadline.
+	snapshot := usageRecordContext(parent, context.Background())
 	return func(ctx context.Context) {
-		task(usageRecordContext(parent, ctx))
+		task(usageRecordContext(snapshot, ctx))
 	}
 }
 

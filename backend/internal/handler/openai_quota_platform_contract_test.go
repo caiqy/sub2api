@@ -63,6 +63,41 @@ func TestCyberPolicyUsageInputsCarryQuotaPlatform(t *testing.T) {
 	require.Empty(t, missing, "cyber 后扣必须携带请求时解析的平台和审计详情快照")
 }
 
+func TestGeminiUsageInputSnapshotsForceCacheBilling(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, filepath.Join(".", "gemini_v1beta_handler.go"), nil, 0)
+	require.NoError(t, err)
+
+	var directFailoverStateReads []token.Position
+	ast.Inspect(file, func(node ast.Node) bool {
+		literal, ok := node.(*ast.CompositeLit)
+		if !ok || !isServiceInputLiteral(literal.Type, "RecordUsageLongContextInput") {
+			return true
+		}
+		for _, elt := range literal.Elts {
+			pair, ok := elt.(*ast.KeyValueExpr)
+			if !ok {
+				continue
+			}
+			key, ok := pair.Key.(*ast.Ident)
+			if !ok || key.Name != "ForceCacheBilling" {
+				continue
+			}
+			value, ok := pair.Value.(*ast.SelectorExpr)
+			if !ok || value.Sel.Name != "ForceCacheBilling" {
+				continue
+			}
+			owner, ok := value.X.(*ast.Ident)
+			if ok && owner.Name == "fs" {
+				directFailoverStateReads = append(directFailoverStateReads, fset.Position(value.Pos()))
+			}
+		}
+		return true
+	})
+
+	require.Empty(t, directFailoverStateReads, "usage worker must receive a request-time ForceCacheBilling snapshot")
+}
+
 func isOpenAIRecordUsageInputLiteral(expr ast.Expr) bool {
 	return isServiceInputLiteral(expr, "OpenAIRecordUsageInput")
 }

@@ -14,6 +14,7 @@ type UsageDetailSnapshot = service.UsageLogDetailSnapshot
 type usageDetailCollector struct {
 	requestHeaders      string
 	requestBody         string
+	originalRequestBody string
 	upstreamHeaders     string
 	upstreamBody        string
 	upstreamRespHeaders string
@@ -101,9 +102,13 @@ func buildUsageDetailSnapshot(c *gin.Context) *UsageDetailSnapshot {
 	if collector.hasOverride {
 		responseBody = collector.overrideBody
 	}
+	requestBody := collector.requestBody
+	if collector.originalRequestBody != "" {
+		requestBody = collector.originalRequestBody
+	}
 	return (&service.UsageLogDetailSnapshot{
 		RequestHeaders:          collector.requestHeaders,
-		RequestBody:             collector.requestBody,
+		RequestBody:             requestBody,
 		UpstreamRequestHeaders:  collector.upstreamHeaders,
 		UpstreamRequestBody:     collector.upstreamBody,
 		UpstreamResponseHeaders: collector.upstreamRespHeaders,
@@ -124,6 +129,13 @@ func (c *usageDetailCollector) SetUsageRequestBody(body string) {
 		return
 	}
 	c.requestBody = body
+}
+
+func (c *usageDetailCollector) SetUsageOriginalRequestBody(body string) {
+	if c == nil {
+		return
+	}
+	c.originalRequestBody = body
 }
 
 func (c *usageDetailCollector) SetUsageUpstreamRequest(headers, body string) {
