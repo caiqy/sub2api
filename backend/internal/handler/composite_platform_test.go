@@ -113,9 +113,30 @@ func TestClientRequestedModelUsesCompositePublicModel(t *testing.T) {
 	input := buildContentModerationInput(c, nil, middleware2.AuthSubject{UserID: 42}, service.ContentModerationProtocolOpenAIChat, "gpt-5", nil)
 	require.Equal(t, "public-alias", input.Model)
 	require.Equal(t, service.PlatformOpenAI, input.Provider)
+}
 
-	fields := clientRequestedUsageFields(c, service.ChannelMappingResult{MappedModel: "gpt-5"}, "gpt-5", "gpt-5")
+func TestClientRequestedUsageFieldsPreservesConcreteCompositeRouteWithoutChannelMapping(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	c.Request = c.Request.WithContext(service.WithCompositeRouteDecision(
+		c.Request.Context(),
+		service.CompositeRouteDecision{
+			Matched:        true,
+			Source:         service.CompositeRouteSourceExplicit,
+			PublicModel:    "public-alias",
+			TargetPlatform: service.PlatformOpenAI,
+			UpstreamModel:  "gpt-5",
+		},
+	))
+
+	fields := clientRequestedUsageFields(
+		c,
+		service.ChannelMappingResult{MappedModel: "gpt-5"},
+		"gpt-5",
+		"gpt-5.2",
+	)
 	require.Equal(t, "public-alias", fields.OriginalModel)
-	require.Equal(t, "public-alias", fields.ChannelMappedModel)
-	require.Equal(t, "public-alias\u2192gpt-5", fields.ModelMappingChain)
+	require.Equal(t, "gpt-5", fields.ChannelMappedModel)
+	require.Equal(t, "public-alias→gpt-5→gpt-5.2", fields.ModelMappingChain)
 }
