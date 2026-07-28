@@ -680,6 +680,8 @@ func TestOllamaCloudUsageRefreshSingleflightAndRunnerDeduplicateSharedGroup(t *t
 	go func() { _, err := svc.Refresh(context.Background(), first.ID); errs <- err }()
 	<-started
 	go func() { _, err := svc.Refresh(context.Background(), second.ID); errs <- err }()
+	// ponytail: singleflight has no waiter hook; keep the leader blocked until the duplicate joins.
+	time.Sleep(50 * time.Millisecond)
 	close(release)
 	require.NoError(t, <-errs)
 	require.NoError(t, <-errs)
