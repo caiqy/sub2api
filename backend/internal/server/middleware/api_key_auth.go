@@ -380,6 +380,28 @@ func GetSubscriptionFromContext(c *gin.Context) (*service.UserSubscription, bool
 	return subscription, ok
 }
 
+func ApplyEffectiveGatewayRoute(c *gin.Context, route service.EffectiveGatewayRoute) {
+	if c == nil || c.Request == nil || route.APIKey == nil {
+		return
+	}
+	c.Set(string(ContextKeyAPIKey), route.APIKey)
+	if route.Subscription == nil {
+		c.Set(string(ContextKeySubscription), nil)
+	} else {
+		c.Set(string(ContextKeySubscription), route.Subscription)
+	}
+
+	ctx := service.WithoutCompositeRouteDecision(c.Request.Context())
+	if route.Group != nil {
+		ctx = context.WithValue(ctx, ctxkey.Group, route.Group)
+	}
+	if route.Decision != nil {
+		ctx = service.WithCompositeRouteDecision(ctx, *route.Decision)
+	}
+	ctx = service.WithEffectiveGatewayRoute(ctx, route)
+	c.Request = c.Request.WithContext(ctx)
+}
+
 func setGroupContext(c *gin.Context, group *service.Group) {
 	if !service.IsGroupContextValid(group) {
 		return

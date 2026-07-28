@@ -41,6 +41,7 @@ type OpenAIGatewayHandler struct {
 	imageLimiter               *imageConcurrencyLimiter
 	maxAccountSwitches         int
 	cfg                        *config.Config
+	effectiveRouteResolver     *service.EffectiveGatewayRouteResolver
 }
 
 type grokMediaEligibilityProber interface {
@@ -197,40 +198,6 @@ func openAICompatibleTextTargetAllowed(c *gin.Context, apiKey *service.APIKey, m
 	return compositeTargetPlatformAllowed(c, apiKey, model, service.PlatformOpenAI, service.PlatformGrok)
 }
 
-func (h *OpenAIGatewayHandler) resolveEffectiveOpenAIGatewayRoute(c *gin.Context, apiKey *service.APIKey, requestedModel, endpoint string) (*service.APIKey, string, bool, error) {
-	if apiKey == nil || apiKey.Group == nil || h == nil || h.apiKeyService == nil {
-		return apiKey, requestedModel, false, nil
-	}
-	group, err := h.apiKeyService.ResolveEffectiveGatewayGroup(c.Request.Context(), apiKey.Group)
-	if err != nil {
-		return nil, "", false, err
-	}
-	if group == nil || group.ID == apiKey.Group.ID {
-		return apiKey, requestedModel, false, nil
-	}
-
-	effectiveAPIKey := cloneAPIKeyWithGroup(apiKey, group)
-	ctx := context.WithValue(service.WithoutCompositeRouteDecision(c.Request.Context()), ctxkey.Group, group)
-	routingModel := requestedModel
-	if group.Platform == service.PlatformComposite {
-		resolver, ok := service.CompositeRouteResolverFromContext(ctx)
-		if !ok {
-			resolver = service.NewCompositeRouteResolver(nil)
-		}
-		decision, err := resolver.Resolve(ctx, group.ID, requestedModel, endpoint)
-		if err != nil {
-			return nil, "", false, err
-		}
-		if !decision.Matched {
-			return nil, "", false, service.ErrNoAvailableAccounts
-		}
-		ctx = service.WithCompositeRouteDecision(ctx, decision)
-		routingModel = decision.UpstreamModel
-	}
-	c.Request = c.Request.WithContext(ctx)
-	return effectiveAPIKey, routingModel, true, nil
-}
-
 // NewOpenAIGatewayHandler creates a new OpenAIGatewayHandler
 func NewOpenAIGatewayHandler(
 	gatewayService *service.OpenAIGatewayService,
@@ -242,6 +209,7 @@ func NewOpenAIGatewayHandler(
 	contentModerationService *service.ContentModerationService,
 	opsService *service.OpsService,
 	cfg *config.Config,
+	effectiveRouteResolver *service.EffectiveGatewayRouteResolver,
 ) *OpenAIGatewayHandler {
 	pingInterval := time.Duration(0)
 	maxAccountSwitches := 3
@@ -250,6 +218,9 @@ func NewOpenAIGatewayHandler(
 		if cfg.Gateway.MaxAccountSwitches > 0 {
 			maxAccountSwitches = cfg.Gateway.MaxAccountSwitches
 		}
+	}
+	if effectiveRouteResolver == nil {
+		effectiveRouteResolver = service.NewEffectiveGatewayRouteResolver(apiKeyService, service.NewCompositeRouteResolver(nil), cfg)
 	}
 	return &OpenAIGatewayHandler{
 		gatewayService:           gatewayService,
@@ -263,6 +234,7 @@ func NewOpenAIGatewayHandler(
 		imageLimiter:             &imageConcurrencyLimiter{},
 		maxAccountSwitches:       maxAccountSwitches,
 		cfg:                      cfg,
+		effectiveRouteResolver:   effectiveRouteResolver,
 	}
 }
 
@@ -370,19 +342,32 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	reqModel := modelResult.String()
 	clientModel := clientRequestedModel(c, reqModel)
 	SetClaudeCodeClientContext(c, body, nil)
-	effectiveAPIKey, effectiveModel, groupChanged, err := h.resolveEffectiveOpenAIGatewayRoute(c, apiKey, clientModel, service.CompositeRouteEndpointResponses)
-	if err != nil {
-		h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error())
-		return
+	subscription, _ := middleware2.GetSubscriptionFromContext(c)
+	route, hasRoute := service.EffectiveGatewayRouteFromContext(c.Request.Context())
+	if !hasRoute && h.effectiveRouteResolver != nil {
+		route, err = h.effectiveRouteResolver.Resolve(c.Request.Context(), apiKey, subscription, nil, clientModel, service.CompositeRouteEndpointResponses)
+		if err != nil {
+			h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error())
+			return
+		}
+		ctx := service.WithEffectiveGatewayRoute(c.Request.Context(), route)
+		if route.Decision != nil {
+			ctx = service.WithCompositeRouteDecision(service.WithoutCompositeRouteDecision(ctx), *route.Decision)
+		}
+		c.Request = c.Request.WithContext(ctx)
 	}
-	if groupChanged {
-		body = h.gatewayService.ReplaceModelInBody(body, clientModel)
-		reqModel = clientModel
+	if route.APIKey != nil {
+		apiKey = route.APIKey
 	}
-	apiKey = effectiveAPIKey
-	if effectiveModel != reqModel {
-		body = h.gatewayService.ReplaceModelInBody(body, effectiveModel)
-		reqModel = effectiveModel
+	if route.Subscription != nil {
+		subscription = route.Subscription
+	}
+	if route.ClientModel != "" {
+		clientModel = route.ClientModel
+	}
+	if route.RoutingModel != "" && route.RoutingModel != reqModel {
+		body = h.gatewayService.ReplaceModelInBody(body, route.RoutingModel)
+		reqModel = route.RoutingModel
 	}
 	ensureCompositeTargetPlatform(c, apiKey, reqModel)
 	if !compositeTargetPlatformAllowed(c, apiKey, reqModel, service.PlatformOpenAI, service.PlatformGrok) {
@@ -454,6 +439,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 
 	// 解析渠道级模型映射
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
+	route = route.WithChannelMapping(channelMapping)
+	c.Request = c.Request.WithContext(service.WithEffectiveGatewayRoute(c.Request.Context(), route))
 	seedOpenAIForwardImageIntentHint(c, channelMapping.Mapped, imageIntent)
 
 	// 提前校验 function_call_output 是否具备可关联上下文，避免上游 400。
@@ -466,8 +453,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		service.BindErrorPassthroughService(c, h.errorPassthroughService)
 	}
 
-	// Get subscription info (may be nil)
-	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	requestPlatform := openAICompatibleRequestPlatform(c.Request.Context(), apiKey)
 
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
@@ -1023,19 +1008,32 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	reqModel := modelResult.String()
 	clientModel := clientRequestedModel(c, reqModel)
 	SetClaudeCodeClientContext(c, body, nil)
-	effectiveAPIKey, effectiveModel, groupChanged, err := h.resolveEffectiveOpenAIGatewayRoute(c, apiKey, clientModel, service.CompositeRouteEndpointMessages)
-	if err != nil {
-		h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error())
-		return
+	subscription, _ := middleware2.GetSubscriptionFromContext(c)
+	route, hasRoute := service.EffectiveGatewayRouteFromContext(c.Request.Context())
+	if !hasRoute {
+		route, err = h.effectiveRouteResolver.Resolve(c.Request.Context(), apiKey, subscription, nil, clientModel, service.CompositeRouteEndpointMessages)
+		if err != nil {
+			h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error())
+			return
+		}
+		ctx := service.WithEffectiveGatewayRoute(c.Request.Context(), route)
+		if route.Decision != nil {
+			ctx = service.WithCompositeRouteDecision(service.WithoutCompositeRouteDecision(ctx), *route.Decision)
+		}
+		c.Request = c.Request.WithContext(ctx)
 	}
-	if groupChanged {
-		body = h.gatewayService.ReplaceModelInBody(body, clientModel)
-		reqModel = clientModel
+	if route.APIKey != nil {
+		apiKey = route.APIKey
 	}
-	apiKey = effectiveAPIKey
-	if effectiveModel != reqModel {
-		body = h.gatewayService.ReplaceModelInBody(body, effectiveModel)
-		reqModel = effectiveModel
+	if route.Subscription != nil {
+		subscription = route.Subscription
+	}
+	if route.ClientModel != "" {
+		clientModel = route.ClientModel
+	}
+	if route.RoutingModel != "" && route.RoutingModel != reqModel {
+		body = h.gatewayService.ReplaceModelInBody(body, route.RoutingModel)
+		reqModel = route.RoutingModel
 	}
 	ensureCompositeTargetPlatform(c, apiKey, reqModel)
 	if !openAICompatibleTextTargetAllowed(c, apiKey, reqModel) {
@@ -1066,6 +1064,8 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 
 	// 解析渠道级模型映射
 	channelMappingMsg, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
+	route = route.WithChannelMapping(channelMappingMsg)
+	c.Request = c.Request.WithContext(service.WithEffectiveGatewayRoute(c.Request.Context(), route))
 	setChannelUsageFields(c, clientRequestedUsageFields(c, channelMappingMsg, reqModel, ""))
 	mappedBodyForMessages := newOpenAIModelMappedBodyCache(body, h.gatewayService.ReplaceModelInBody)
 
@@ -1074,7 +1074,6 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		service.BindErrorPassthroughService(c, h.errorPassthroughService)
 	}
 
-	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	requestPlatform := openAICompatibleRequestPlatform(c.Request.Context(), apiKey)
 
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())

@@ -31,6 +31,7 @@ func newGatewayRoutesTestRouterWithConfig(cfg *config.Config, platform ...string
 	if len(platform) > 0 && platform[0] != "" {
 		groupPlatform = platform[0]
 	}
+	effectiveResolver := service.NewEffectiveGatewayRouteResolver(&service.APIKeyService{}, service.NewCompositeRouteResolver(nil), cfg)
 	RegisterGatewayRoutes(
 		router,
 		&handler.Handlers{
@@ -42,7 +43,8 @@ func newGatewayRoutesTestRouterWithConfig(cfg *config.Config, platform ...string
 			groupID := int64(1)
 			c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{
 				GroupID: &groupID,
-				Group:   &service.Group{Platform: groupPlatform},
+				Group:   &service.Group{ID: groupID, Platform: groupPlatform, Status: service.StatusActive},
+				User:    &service.User{ID: 1},
 			})
 			c.Next()
 		}),
@@ -51,6 +53,7 @@ func newGatewayRoutesTestRouterWithConfig(cfg *config.Config, platform ...string
 		nil,
 		nil,
 		nil,
+		effectiveResolver,
 		cfg,
 	)
 
@@ -354,9 +357,9 @@ func TestGatewayRoutesBareOpenAIImagesPathsInstallUsageDetailCapture(t *testing.
 		nil,
 		nil,
 		nil,
-		nil,
-		&config.Config{},
-	)
+		nil, nil,
+
+		&config.Config{})
 
 	for _, path := range []string{"/images/generations", "/images/edits"} {
 		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"model":"gpt-image-2","prompt":"draw a cat"}`))
@@ -377,4 +380,55 @@ func TestGatewayRoutesOpenAICountTokensPathIsRegistered(t *testing.T) {
 
 	router.ServeHTTP(w, req)
 	require.NotEqual(t, http.StatusNotFound, w.Code)
+}
+
+func TestGatewayRoutesMessagesDispatchesUsingEffectiveFallbackPlatform(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	originalID, finalID := int64(501), int64(502)
+	originalGroup := &service.Group{ID: originalID, Platform: service.PlatformAnthropic, Status: service.StatusActive, ClaudeCodeOnly: true, FallbackGroupID: &finalID}
+	finalGroup := &service.Group{ID: finalID, Platform: service.PlatformOpenAI, Status: service.StatusActive, AllowMessagesDispatch: true}
+	apiKey := &service.APIKey{ID: 503, UserID: 504, GroupID: &originalID, Group: originalGroup, User: &service.User{ID: 504, Status: service.StatusActive, Concurrency: 1}}
+	cfg := &config.Config{RunMode: config.RunModeSimple, Gateway: config.GatewayConfig{MaxBodySize: 1 << 20}}
+	effectiveResolver := newEffectiveRouteResolverForTest(cfg, map[int64]*service.Group{finalID: finalGroup}, nil)
+
+	register, ok := any(RegisterGatewayRoutes).(func(
+		*gin.Engine,
+		*handler.Handlers,
+		servermiddleware.APIKeyAuthMiddleware,
+		*service.APIKeyService,
+		*service.SubscriptionService,
+		*service.OpsService,
+		*service.SettingService,
+		*service.CompositeRouteResolver,
+		*service.EffectiveGatewayRouteResolver,
+		*config.Config,
+	))
+	require.True(t, ok, "RegisterGatewayRoutes must receive EffectiveGatewayRouteResolver")
+
+	router := gin.New()
+	router.Use(gin.Recovery())
+	register(
+		router,
+		&handler.Handlers{Gateway: &handler.GatewayHandler{}, OpenAIGateway: &handler.OpenAIGatewayHandler{}},
+		servermiddleware.APIKeyAuthMiddleware(func(c *gin.Context) {
+			c.Set(string(servermiddleware.ContextKeyAPIKey), apiKey)
+			c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: apiKey.UserID, Concurrency: apiKey.User.Concurrency})
+			c.Next()
+		}),
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		effectiveResolver,
+		cfg,
+	)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+	require.Contains(t, w.Body.String(), "Service temporarily unavailable")
 }

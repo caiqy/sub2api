@@ -97,7 +97,7 @@ func TestOpenAIGatewayHandler_ImagesAcquiresUserGroupSlotWhenEnabled(t *testing.
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 
 	apiKey := &service.APIKey{
 		ID:      101,

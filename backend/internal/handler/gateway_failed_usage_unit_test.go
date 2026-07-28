@@ -96,7 +96,7 @@ func TestGatewayHandler_MessagesForwardErrorStillCreatesUsageLog(t *testing.T) {
 		nil,
 		nil,
 	)
-	h := NewGatewayHandler(gatewayService, nil, nil, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
+	h := NewGatewayHandler(gatewayService, nil, nil, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil, nil)
 
 	apiKey := &service.APIKey{
 		ID:      101,
@@ -217,7 +217,7 @@ func TestGatewayHandler_MessagesFailoverExhaustedStillCreatesUsageLog(t *testing
 		nil,
 		nil,
 	)
-	h := NewGatewayHandler(gatewayService, nil, nil, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
+	h := NewGatewayHandler(gatewayService, nil, nil, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil, nil)
 	h.maxAccountSwitches = 0
 
 	apiKey := &service.APIKey{
@@ -332,7 +332,7 @@ func TestGatewayHandler_MessagesSelectionExhaustedAfterFailoverStillCreatesUsage
 		nil,
 		nil,
 	)
-	h := NewGatewayHandler(gatewayService, nil, nil, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
+	h := NewGatewayHandler(gatewayService, nil, nil, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil, nil)
 
 	apiKey := &service.APIKey{
 		ID:      101,
@@ -460,7 +460,7 @@ func TestGatewayHandler_MessagesStreamingPartialWriteFailureStillCreatesUsageLog
 		nil,
 		nil,
 	)
-	h := NewGatewayHandler(gatewayService, nil, nil, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
+	h := NewGatewayHandler(gatewayService, nil, nil, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil, nil)
 
 	apiKey := &service.APIKey{
 		ID:      101,

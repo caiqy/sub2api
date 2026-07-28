@@ -586,6 +586,7 @@ func TestResolveOpenAIMessagesDispatchMappedModel(t *testing.T) {
 
 func TestOpenAIGatewayMessagesDispatchGateAllowsGrokGroups(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	resolver := service.NewEffectiveGatewayRouteResolver(&service.APIKeyService{}, service.NewCompositeRouteResolver(nil), &config.Config{RunMode: config.RunModeSimple})
 
 	t.Run("openai_group_without_dispatch_flag_is_rejected", func(t *testing.T) {
 		rec := httptest.NewRecorder()
@@ -599,12 +600,13 @@ func TestOpenAIGatewayMessagesDispatchGateAllowsGrokGroups(t *testing.T) {
 			Group: &service.Group{
 				ID:                    groupID,
 				Platform:              service.PlatformOpenAI,
+				Status:                service.StatusActive,
 				AllowMessagesDispatch: false,
 			},
 		})
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 6101, Concurrency: 1})
 
-		h := &OpenAIGatewayHandler{}
+		h := &OpenAIGatewayHandler{effectiveRouteResolver: resolver}
 		h.Messages(c)
 
 		require.Equal(t, http.StatusForbidden, rec.Code)
@@ -624,12 +626,13 @@ func TestOpenAIGatewayMessagesDispatchGateAllowsGrokGroups(t *testing.T) {
 			Group: &service.Group{
 				ID:                    groupID,
 				Platform:              service.PlatformGrok,
+				Status:                service.StatusActive,
 				AllowMessagesDispatch: false,
 			},
 		})
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 6102, Concurrency: 1})
 
-		h := &OpenAIGatewayHandler{}
+		h := &OpenAIGatewayHandler{effectiveRouteResolver: resolver}
 		h.Messages(c)
 
 		require.Equal(t, http.StatusServiceUnavailable, rec.Code)
@@ -649,12 +652,13 @@ func TestOpenAIGatewayMessagesDispatchGateAllowsGrokGroups(t *testing.T) {
 			Group: &service.Group{
 				ID:                    groupID,
 				Platform:              service.PlatformComposite,
+				Status:                service.StatusActive,
 				AllowMessagesDispatch: false,
 			},
 		})
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 6103, Concurrency: 1})
 
-		(&OpenAIGatewayHandler{}).Messages(c)
+		(&OpenAIGatewayHandler{effectiveRouteResolver: resolver}).Messages(c)
 
 		require.Equal(t, http.StatusServiceUnavailable, rec.Code)
 		require.NotContains(t, rec.Body.String(), "This group does not allow /v1/messages dispatch")
@@ -669,11 +673,11 @@ func TestOpenAIGatewayMessagesDispatchGateAllowsGrokGroups(t *testing.T) {
 			ID:      5104,
 			GroupID: &groupID,
 			User:    &service.User{ID: 6104},
-			Group:   &service.Group{ID: groupID, Platform: service.PlatformComposite},
+			Group:   &service.Group{ID: groupID, Platform: service.PlatformComposite, Status: service.StatusActive},
 		})
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 6104, Concurrency: 1})
 
-		(&OpenAIGatewayHandler{}).Messages(c)
+		(&OpenAIGatewayHandler{effectiveRouteResolver: resolver}).Messages(c)
 
 		require.Equal(t, http.StatusBadRequest, rec.Code)
 		require.Contains(t, rec.Body.String(), "Model is not supported by this OpenAI-compatible endpoint")
@@ -693,12 +697,14 @@ func TestOpenAIGatewayCountTokensDispatchGateUsesCompositeTarget(t *testing.T) {
 		Group: &service.Group{
 			ID:                    groupID,
 			Platform:              service.PlatformComposite,
+			Status:                service.StatusActive,
 			AllowMessagesDispatch: false,
 		},
 	})
 	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 6201, Concurrency: 1})
 
-	(&OpenAIGatewayHandler{}).CountTokens(c)
+	resolver := service.NewEffectiveGatewayRouteResolver(&service.APIKeyService{}, service.NewCompositeRouteResolver(nil), &config.Config{RunMode: config.RunModeSimple})
+	(&OpenAIGatewayHandler{effectiveRouteResolver: resolver}).CountTokens(c)
 
 	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
 	require.NotContains(t, rec.Body.String(), "This group does not allow /v1/messages dispatch")
@@ -1496,10 +1502,11 @@ func newOpenAIHandlerForPreviousResponseIDValidation(t *testing.T, cache *concur
 		billingCacheService.Stop()
 	})
 	return &OpenAIGatewayHandler{
-		gatewayService:      gatewayService,
-		billingCacheService: billingCacheService,
-		apiKeyService:       &service.APIKeyService{},
-		concurrencyHelper:   NewConcurrencyHelper(concurrencyService, SSEPingFormatNone, time.Second),
+		gatewayService:         gatewayService,
+		billingCacheService:    billingCacheService,
+		apiKeyService:          &service.APIKeyService{},
+		concurrencyHelper:      NewConcurrencyHelper(concurrencyService, SSEPingFormatNone, time.Second),
+		effectiveRouteResolver: service.NewEffectiveGatewayRouteResolver(&service.APIKeyService{}, service.NewCompositeRouteResolver(nil), cfg),
 	}
 }
 
@@ -1701,7 +1708,7 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 
 	groupID := int64(2)
 	apiKey := &service.APIKey{
@@ -2106,7 +2113,7 @@ func TestOpenAIGatewayHandler_ChatCompletionsPassesDetailSnapshotToRecordUsage(t
 		nil,
 		nil, // userPlatformQuotaRepo
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 
 	apiKey := &service.APIKey{
 		ID:      101,
@@ -2214,7 +2221,7 @@ func TestOpenAIGatewayHandler_ResponsesRequiresChatCompletionsCapability(t *test
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 
 	apiKey := &service.APIKey{
 		ID:      101,
@@ -2317,7 +2324,7 @@ func TestOpenAIGatewayHandler_ResponsesUsesGrokRequestPlatform(t *testing.T) {
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 
 	apiKey := &service.APIKey{
 		ID:      101,
@@ -2526,7 +2533,7 @@ func TestOpenAIGatewayHandler_ChatCompletionsUsageTaskUsesCapturedEndpointAndSna
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, pool, nil, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, pool, nil, nil, nil, cfg, nil)
 
 	apiKey := &service.APIKey{
 		ID:      101,
@@ -2739,7 +2746,7 @@ func TestOpenAIGatewayHandler_RetryPathStoresLastOutboundRequestOnly(t *testing.
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 
 	apiKey := &service.APIKey{
 		ID:      101,
@@ -2853,7 +2860,7 @@ func TestOpenAIGatewayHandler_UsageDetailStoresInjectedUpstreamRequestBody(t *te
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 
 	apiKey := &service.APIKey{
 		ID:      101,
@@ -2899,6 +2906,108 @@ func requireRequestPreviewSnapshot(t *testing.T, snapshot string, wantPreview st
 	require.Equal(t, wantPreview, gjson.Get(snapshot, "preview").String())
 	require.False(t, gjson.Get(snapshot, "truncated").Bool())
 	require.Equal(t, int64(len(wantPreview)), gjson.Get(snapshot, "size").Int())
+}
+
+func runOpenAIEffectiveRouteSnapshotTest(
+	t *testing.T,
+	path string,
+	requestBody string,
+	responseBody string,
+	invoke func(*OpenAIGatewayHandler, *gin.Context),
+) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	originalID, finalID := int64(701), int64(702)
+	originalGroup := &service.Group{ID: originalID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowMessagesDispatch: true}
+	finalGroup := &service.Group{ID: finalID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowMessagesDispatch: true}
+	user := &service.User{ID: 703, Status: service.StatusActive, Concurrency: 1, Balance: 1}
+	originalKey := &service.APIKey{ID: 704, UserID: user.ID, Status: service.StatusActive, GroupID: &originalID, User: user, Group: originalGroup}
+	finalKey := *originalKey
+	finalKey.GroupID = &finalID
+	finalKey.Group = finalGroup
+	account := &service.Account{
+		ID: 705, Name: "effective-openai", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+		Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1,
+		AccountGroups: []service.AccountGroup{{GroupID: finalID}}, Credentials: map[string]any{"api_key": "sk-test"},
+	}
+	cfg := &config.Config{
+		RunMode:     config.RunModeStandard,
+		Default:     config.DefaultConfig{RateMultiplier: 1},
+		Gateway:     config.GatewayConfig{MaxAccountSwitches: 1, Scheduling: config.GatewaySchedulingConfig{LoadBatchEnabled: false}},
+		Concurrency: config.ConcurrencyConfig{PingInterval: 0},
+	}
+	accountRepo := &openAIChatCompletionsAccountRepoStub{account: account}
+	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
+	billingCacheService := service.NewBillingCacheService(nil, &effectiveGroupUserRepoStub{user: user}, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(billingCacheService.Stop)
+	gatewayService := service.NewOpenAIGatewayService(
+		accountRepo, nil, nil, nil, nil, nil, openAIChatCompletionsGatewayCacheStub{}, cfg, nil,
+		concurrencyService, service.NewBillingService(cfg, nil), nil, billingCacheService,
+		&openAIChatCompletionsHTTPUpstreamStub{response: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(responseBody)),
+		}},
+		service.NewDeferredService(accountRepo, nil, 0), nil,
+	)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
+	clientModel := gjson.Get(requestBody, "model").String()
+	route := service.EffectiveGatewayRoute{
+		APIKey: &finalKey, Group: finalGroup, GroupID: &finalID,
+		ClientModel: clientModel, RoutingModel: clientModel, UpstreamModel: clientModel,
+		Platform: service.PlatformOpenAI, Channel: service.ChannelMappingResult{ChannelID: 999},
+	}
+	var finalRoute service.EffectiveGatewayRoute
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), originalKey)
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: user.ID, Concurrency: user.Concurrency})
+		c.Request = c.Request.WithContext(service.WithEffectiveGatewayRoute(c.Request.Context(), route))
+		c.Next()
+		finalRoute, _ = service.EffectiveGatewayRouteFromContext(c.Request.Context())
+	})
+	router.POST(path, func(c *gin.Context) { invoke(h, c) })
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(requestBody))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Contains(t, accountRepo.groupIDs, finalID)
+	require.NotContains(t, accountRepo.groupIDs, originalID)
+	require.Equal(t, clientModel, finalRoute.Channel.MappedModel)
+	require.Zero(t, finalRoute.Channel.ChannelID)
+}
+
+func TestOpenAIGatewayResponsesUsesEffectiveRouteSnapshot(t *testing.T) {
+	runOpenAIEffectiveRouteSnapshotTest(
+		t,
+		"/v1/responses",
+		`{"model":"gpt-5","input":"hello","stream":false}`,
+		`{"id":"resp_1","object":"response","status":"completed","model":"gpt-5","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`,
+		func(h *OpenAIGatewayHandler, c *gin.Context) { h.Responses(c) },
+	)
+}
+
+func TestOpenAIGatewayMessagesUsesEffectiveRouteSnapshot(t *testing.T) {
+	runOpenAIEffectiveRouteSnapshotTest(
+		t,
+		"/v1/messages",
+		`{"model":"gpt-5","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`,
+		`{"id":"chatcmpl_1","object":"chat.completion","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`,
+		func(h *OpenAIGatewayHandler, c *gin.Context) { h.Messages(c) },
+	)
+}
+
+func TestOpenAIGatewayCountTokensUsesEffectiveRouteSnapshot(t *testing.T) {
+	runOpenAIEffectiveRouteSnapshotTest(
+		t,
+		"/v1/messages/count_tokens",
+		`{"model":"gpt-5","messages":[{"role":"user","content":"hello"}]}`,
+		`{"input_tokens":3}`,
+		func(h *OpenAIGatewayHandler, c *gin.Context) { h.CountTokens(c) },
+	)
 }
 
 func newOpenAIResponsesRequestBodyTestRouter(t *testing.T) (*gin.Engine, *openAIChatCompletionsUsageLogRepoStub, *openAIRetryTrackingHTTPUpstreamStub, func()) {
@@ -2958,7 +3067,7 @@ func newOpenAIResponsesRequestBodyTestRouter(t *testing.T) (*gin.Engine, *openAI
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 	apiKey := &service.APIKey{
 		ID:      101,
 		UserID:  202,
@@ -3040,7 +3149,7 @@ func newOpenAIImagesHandlerTestRouter(t *testing.T, route string, upstreamRespon
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 
 	apiKey := &service.APIKey{
 		ID:      101,

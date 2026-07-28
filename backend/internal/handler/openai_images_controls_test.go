@@ -886,6 +886,7 @@ func TestOpenAIGatewayHandlerImages_OAuthBadRequestPassesThroughUpstreamImageErr
 		nil,
 		nil,
 		cfg,
+		nil,
 	)
 
 	body := []byte(`{"model":"gpt-image-2","prompt":"draw a cat","size":"bad-size"}`)

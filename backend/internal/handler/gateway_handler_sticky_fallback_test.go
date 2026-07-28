@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -34,29 +33,6 @@ type stickyFallbackAccountRepo struct {
 	service.AccountRepository
 	groupIDs []int64
 }
-
-type stickyCompositeRouteRepo struct {
-	routes []service.CompositeModelRoute
-}
-
-func (r stickyCompositeRouteRepo) ListByGroup(_ context.Context, groupID int64, includeDisabled bool) ([]service.CompositeModelRoute, error) {
-	routes := make([]service.CompositeModelRoute, 0, len(r.routes))
-	for _, route := range r.routes {
-		if route.GroupID == groupID && (includeDisabled || route.Enabled) {
-			routes = append(routes, route)
-		}
-	}
-	return routes, nil
-}
-
-func (stickyCompositeRouteRepo) Create(context.Context, *service.CompositeModelRoute) error {
-	return nil
-}
-func (stickyCompositeRouteRepo) Update(context.Context, *service.CompositeModelRoute) error {
-	return nil
-}
-func (stickyCompositeRouteRepo) Delete(context.Context, int64) error        { return nil }
-func (stickyCompositeRouteRepo) DeleteByGroup(context.Context, int64) error { return nil }
 
 func (*stickyFallbackAccountRepo) GetByID(context.Context, int64) (*service.Account, error) {
 	return nil, errors.New("account not found")
@@ -84,7 +60,9 @@ func newStickyFallbackMessagesHandler(t *testing.T, cfg *config.Config, groups m
 	gatewayService := service.NewGatewayService(accountRepo, groupRepo, nil, nil, nil, nil, nil, cache, cfg, nil, concurrencyService, service.NewBillingService(cfg, nil), nil, billingCacheService, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	originalGroup := groups[1]
 	apiKey := &service.APIKey{ID: 101, UserID: 202, Status: service.StatusActive, GroupID: &originalGroup.ID, User: &service.User{ID: 202, Status: service.StatusActive, Concurrency: 1}, Group: originalGroup}
-	return NewGatewayHandler(gatewayService, nil, nil, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil), apiKey
+	apiKeyService := service.NewAPIKeyService(nil, nil, groupRepo, nil, nil, nil, cfg)
+	effectiveResolver := service.NewEffectiveGatewayRouteResolver(apiKeyService, service.NewCompositeRouteResolver(nil), cfg)
+	return NewGatewayHandler(gatewayService, nil, nil, nil, nil, concurrencyService, billingCacheService, nil, apiKeyService, nil, nil, nil, nil, cfg, nil, effectiveResolver), apiKey
 }
 
 func TestGatewayHandlerMessages_ClaudeCodeFallbackUsesResolvedGeminiStickyBoundary(t *testing.T) {
@@ -244,105 +222,60 @@ func TestGatewayHandlerMessages_ClaudeCodeFallbackMixedAntigravitySmartRetryClea
 	require.Equal(t, "gemini:sticky-fallback-runtime", cache.deleteCalls[0].sessionKey)
 }
 
-func TestGatewayHandlerResolveStickyRoute_PreservesClaudeCodeRestrictionErrors(t *testing.T) {
-	cfg := &config.Config{}
-	groupTwoID, groupThreeID := int64(2), int64(3)
-	groups := map[int64]*service.Group{
-		1: {ID: 1, Platform: service.PlatformAnthropic, ClaudeCodeOnly: true},
-		2: {ID: groupTwoID, Platform: service.PlatformGemini, ClaudeCodeOnly: true},
-		3: {ID: groupThreeID, Platform: service.PlatformAnthropic, ClaudeCodeOnly: true},
+func TestGatewayHandlerMessagesUsesEffectiveRouteSnapshot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	originalID, finalID := int64(601), int64(602)
+	originalGroup := &service.Group{ID: originalID, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+	finalGroup := &service.Group{ID: finalID, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{
+		ID: 603, Name: "effective-anthropic", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey,
+		Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1,
+		Credentials: map[string]any{"api_key": "test-key"},
 	}
-	groups[2].FallbackGroupID = &groupThreeID
-	groups[3].FallbackGroupID = &groupTwoID
-	accountRepo := &stickyFallbackAccountRepo{}
-	h, apiKey := newStickyFallbackMessagesHandler(t, cfg, groups, &geminiStickyGatewayCacheStub{}, accountRepo)
-
-	_, _, _, _, err := h.resolveStickyRoute(context.Background(), apiKey, "", service.CompositeRouteEndpointMessages)
-	require.ErrorIs(t, err, service.ErrClaudeCodeOnly)
-
-	apiKey.GroupID = &groups[2].ID
-	apiKey.Group = groups[2]
-	_, _, _, _, err = h.resolveStickyRoute(context.Background(), apiKey, "", service.CompositeRouteEndpointMessages)
-	require.ErrorContains(t, err, "fallback group cycle detected")
-
-	_, group, groupID, platform, err := h.resolveStickyRoute(context.WithValue(context.Background(), ctxkey.ForcePlatform, service.PlatformAntigravity), apiKey, "", service.CompositeRouteEndpointMessages)
-	require.NoError(t, err)
-	require.Nil(t, group)
-	require.Equal(t, groups[2].ID, *groupID)
-	require.Equal(t, service.PlatformAntigravity, platform)
-}
-
-func TestGatewayHandlerResolveStickyRouteRecomputesCompositeFallbackDecision(t *testing.T) {
-	originalID, fallbackID := int64(1), int64(2)
-	groups := map[int64]*service.Group{
-		originalID: {ID: originalID, Platform: service.PlatformComposite, Status: service.StatusActive, Hydrated: true, ClaudeCodeOnly: true, FallbackGroupID: &fallbackID},
-		fallbackID: {ID: fallbackID, Platform: service.PlatformComposite, Status: service.StatusActive, Hydrated: true},
-	}
-	resolver := service.NewCompositeRouteResolver(stickyCompositeRouteRepo{routes: []service.CompositeModelRoute{{
-		GroupID:        fallbackID,
-		PublicModel:    "public-model",
-		MatchType:      service.CompositeRouteMatchExact,
-		TargetPlatform: service.PlatformAnthropic,
-		UpstreamModel:  "claude-sonnet-4-6",
-		Endpoint:       service.CompositeRouteEndpointMessages,
-		Enabled:        true,
-	}}})
-	cfg := &config.Config{}
-	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
-	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
-	t.Cleanup(billingCacheService.Stop)
-	gatewayService := service.NewGatewayService(
-		&stickyFallbackAccountRepo{}, &stickyFallbackGroupRepo{groups: groups}, nil, nil, nil, nil, nil,
-		&geminiStickyGatewayCacheStub{}, cfg, nil, concurrencyService, service.NewBillingService(cfg, nil), nil,
-		billingCacheService, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, resolver, nil, nil,
+	upstream := &openAIChatCompletionsHTTPUpstreamStub{response: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"text","text":"ok"}],"model":"claude-sonnet-4-6","usage":{"input_tokens":1,"output_tokens":1}}`)),
+	}}
+	env := newTerminalGatewayMessagesEnvWithGatewayCacheAndGroups(
+		t,
+		originalGroup,
+		map[int64]*service.Group{originalID: originalGroup, finalID: finalGroup},
+		upstream,
+		openAIChatCompletionsConcurrencyCacheStub{},
+		openAIChatCompletionsGatewayCacheStub{},
+		account,
 	)
-	h := NewGatewayHandler(gatewayService, nil, nil, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
-	apiKey := &service.APIKey{GroupID: &originalID, Group: groups[originalID]}
-	ctx := service.WithCompositeRouteDecision(context.Background(), service.CompositeRouteDecision{
-		Matched:        true,
-		GroupID:        originalID,
-		PublicModel:    "public-model",
-		TargetPlatform: service.PlatformOpenAI,
-		UpstreamModel:  "gpt-5",
-	})
-
-	resolvedCtx, group, groupID, platform, err := h.resolveStickyRoute(ctx, apiKey, "public-model", service.CompositeRouteEndpointMessages)
-
-	require.NoError(t, err)
-	require.Equal(t, fallbackID, group.ID)
-	require.Equal(t, fallbackID, *groupID)
-	require.Equal(t, service.PlatformAnthropic, platform)
-	decision, ok := service.CompositeRouteDecisionFromContext(resolvedCtx)
-	require.True(t, ok)
-	require.Equal(t, fallbackID, decision.GroupID)
-	require.Equal(t, "claude-sonnet-4-6", decision.UpstreamModel)
-
-	effectiveCtx, route, err := h.resolveEffectiveGatewayRoute(ctx, apiKey, "public-model", service.CompositeRouteEndpointMessages)
-	require.NoError(t, err)
-	require.Equal(t, fallbackID, *route.apiKey.GroupID)
-	require.Same(t, groups[fallbackID], route.apiKey.Group)
-	require.Equal(t, fallbackID, *route.groupID)
-	require.Equal(t, service.PlatformAnthropic, route.platform)
-	effectiveDecision, ok := service.CompositeRouteDecisionFromContext(effectiveCtx)
-	require.True(t, ok)
-	require.Equal(t, fallbackID, effectiveDecision.GroupID)
-}
-
-func TestGatewayHandlerResolveEffectiveGatewayRouteUsesConcreteClaudeCodeFallback(t *testing.T) {
-	originalID, fallbackID := int64(1), int64(2)
-	groups := map[int64]*service.Group{
-		originalID: {ID: originalID, Platform: service.PlatformComposite, Status: service.StatusActive, Hydrated: true, ClaudeCodeOnly: true, FallbackGroupID: &fallbackID},
-		fallbackID: {ID: fallbackID, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true},
+	finalKey := *env.apiKey
+	finalKey.GroupID = &finalID
+	finalKey.Group = finalGroup
+	route := service.EffectiveGatewayRoute{
+		APIKey: env.apiKey, Group: finalGroup, GroupID: &finalID,
+		Endpoint: service.CompositeRouteEndpointMessages, ClientModel: "claude-sonnet-4-6",
+		RoutingModel: "claude-sonnet-4-6", UpstreamModel: "claude-sonnet-4-6", Platform: service.PlatformAnthropic,
+		Channel: service.ChannelMappingResult{ChannelID: 999},
 	}
-	h, apiKey := newStickyFallbackMessagesHandler(t, &config.Config{}, groups, &geminiStickyGatewayCacheStub{}, &stickyFallbackAccountRepo{})
+	route.APIKey = &finalKey
+	var finalRoute service.EffectiveGatewayRoute
 
-	resolvedCtx, route, err := h.resolveEffectiveGatewayRoute(context.Background(), apiKey, "claude-sonnet-4-6", service.CompositeRouteEndpointMessages)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), env.apiKey)
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: env.apiKey.UserID, Concurrency: env.apiKey.User.Concurrency})
+		c.Request = c.Request.WithContext(service.WithEffectiveGatewayRoute(c.Request.Context(), route))
+		c.Next()
+		finalRoute, _ = service.EffectiveGatewayRouteFromContext(c.Request.Context())
+	})
+	router.POST("/v1/messages", env.handler.Messages)
 
-	require.NoError(t, err)
-	require.Equal(t, fallbackID, *route.apiKey.GroupID)
-	require.Same(t, groups[fallbackID], route.apiKey.Group)
-	require.Equal(t, fallbackID, *route.groupID)
-	require.Equal(t, service.PlatformAnthropic, route.platform)
-	_, ok := service.CompositeRouteDecisionFromContext(resolvedCtx)
-	require.False(t, ok)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-6","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, env.accountRepo.groupIDs, finalID)
+	require.NotContains(t, env.accountRepo.groupIDs, originalID)
+	require.Equal(t, "claude-sonnet-4-6", finalRoute.Channel.MappedModel)
+	require.Zero(t, finalRoute.Channel.ChannelID)
 }

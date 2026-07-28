@@ -57,6 +57,7 @@ type GatewayHandler struct {
 	maxAccountSwitchesGemini  int
 	cfg                       *config.Config
 	settingService            *service.SettingService
+	effectiveRouteResolver    *service.EffectiveGatewayRouteResolver
 }
 
 // NewGatewayHandler creates a new GatewayHandler
@@ -76,6 +77,7 @@ func NewGatewayHandler(
 	userMsgQueueService *service.UserMessageQueueService,
 	cfg *config.Config,
 	settingService *service.SettingService,
+	effectiveRouteResolver *service.EffectiveGatewayRouteResolver,
 ) *GatewayHandler {
 	pingInterval := time.Duration(0)
 	maxAccountSwitches := 10
@@ -94,6 +96,9 @@ func NewGatewayHandler(
 	var umqHelper *UserMsgQueueHelper
 	if userMsgQueueService != nil && cfg != nil {
 		umqHelper = NewUserMsgQueueHelper(userMsgQueueService, SSEPingFormatClaude, pingInterval)
+	}
+	if effectiveRouteResolver == nil {
+		effectiveRouteResolver = service.NewEffectiveGatewayRouteResolver(apiKeyService, service.NewCompositeRouteResolver(nil), cfg)
 	}
 
 	return &GatewayHandler{
@@ -114,6 +119,7 @@ func NewGatewayHandler(
 		maxAccountSwitchesGemini:  maxAccountSwitchesGemini,
 		cfg:                       cfg,
 		settingService:            settingService,
+		effectiveRouteResolver:    effectiveRouteResolver,
 	}
 }
 
@@ -132,53 +138,6 @@ func (h *GatewayHandler) bindStickySessionForPlatform(ctx context.Context, platf
 	}
 	ctx = context.WithValue(ctx, ctxkey.ForcePlatform, platform)
 	return h.gatewayService.BindStickySession(ctx, groupID, sessionKey, accountID)
-}
-
-func (h *GatewayHandler) resolveStickyRoute(ctx context.Context, apiKey *service.APIKey, requestedModel, endpoint string) (context.Context, *service.Group, *int64, string, error) {
-	group, groupID, err := h.gatewayService.ResolveGatewayGroup(ctx, apiKey.GroupID)
-	if err != nil {
-		return ctx, nil, nil, "", err
-	}
-	if platform, ok := ctx.Value(ctxkey.ForcePlatform).(string); ok && platform != "" {
-		return ctx, nil, groupID, platform, nil
-	}
-	if group == nil {
-		return service.WithoutCompositeRouteDecision(ctx), nil, groupID, service.PlatformAnthropic, nil
-	}
-	if group.Platform != service.PlatformComposite {
-		return service.WithoutCompositeRouteDecision(ctx), group, groupID, group.Platform, nil
-	}
-	if publicModel, ok := service.RequestedPublicModelFromContext(ctx); ok {
-		requestedModel = publicModel
-	}
-	decision, ok, err := h.gatewayService.ResolveCompositeRouteDecision(ctx, group, requestedModel, endpoint)
-	if err != nil {
-		return ctx, nil, nil, "", err
-	}
-	if !ok {
-		return ctx, nil, nil, "", service.ErrNoAvailableAccounts
-	}
-	ctx = service.WithCompositeRouteDecision(service.WithoutCompositeRouteDecision(ctx), decision)
-	return ctx, group, groupID, decision.TargetPlatform, nil
-}
-
-type effectiveGatewayRoute struct {
-	apiKey   *service.APIKey
-	group    *service.Group
-	groupID  *int64
-	platform string
-}
-
-func (h *GatewayHandler) resolveEffectiveGatewayRoute(ctx context.Context, apiKey *service.APIKey, requestedModel, endpoint string) (context.Context, effectiveGatewayRoute, error) {
-	ctx, group, groupID, platform, err := h.resolveStickyRoute(ctx, apiKey, requestedModel, endpoint)
-	if err != nil {
-		return ctx, effectiveGatewayRoute{}, err
-	}
-	route := effectiveGatewayRoute{apiKey: apiKey, group: group, groupID: groupID, platform: platform}
-	if group != nil {
-		route.apiKey = cloneAPIKeyWithGroup(apiKey, group)
-	}
-	return ctx, route, nil
 }
 
 func stickySessionKeyForPlatform(platform, sessionHash string) string {
@@ -318,7 +277,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	reqModel := parsedReq.Model
 	clientRequestModel := clientRequestedModel(c, reqModel)
 	reqStream := parsedReq.Stream
-	ensureCompositeTargetPlatform(c, apiKey, reqModel)
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 
 	// 设置 max_tokens=1 + haiku 探测请求标识到 context 中
@@ -337,18 +295,31 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		return
 	}
 
-	resolvedCtx, route, err := h.resolveEffectiveGatewayRoute(c.Request.Context(), apiKey, clientRequestModel, service.CompositeRouteEndpointMessages)
-	if err != nil {
-		h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error(), false)
-		return
+	subscription, _ := middleware2.GetSubscriptionFromContext(c)
+	route, hasRoute := service.EffectiveGatewayRouteFromContext(c.Request.Context())
+	if !hasRoute {
+		route, err = h.effectiveRouteResolver.Resolve(c.Request.Context(), apiKey, subscription, nil, clientRequestModel, service.CompositeRouteEndpointMessages)
+		if err != nil {
+			h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error(), false)
+			return
+		}
+		ctx := service.WithEffectiveGatewayRoute(c.Request.Context(), route)
+		if route.Decision != nil {
+			ctx = service.WithCompositeRouteDecision(service.WithoutCompositeRouteDecision(ctx), *route.Decision)
+		}
+		c.Request = c.Request.WithContext(ctx)
 	}
-	c.Request = c.Request.WithContext(resolvedCtx)
-	apiKey = route.apiKey
-	if route.group != nil {
-		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, route.group))
+	if route.APIKey != nil {
+		apiKey = route.APIKey
 	}
-	if upstreamModel, ok := service.ResolvedUpstreamModelFromContext(c.Request.Context()); ok && upstreamModel != reqModel {
-		body = h.gatewayService.ReplaceModelInBody(body, upstreamModel)
+	if route.Subscription != nil {
+		subscription = route.Subscription
+	}
+	if route.ClientModel != "" {
+		clientRequestModel = route.ClientModel
+	}
+	if route.RoutingModel != "" && route.RoutingModel != reqModel {
+		body = h.gatewayService.ReplaceModelInBody(body, route.RoutingModel)
 		if err := coordinator.SetEffectiveBytes(body); err != nil {
 			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 			return
@@ -359,10 +330,15 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 			return
 		}
-		reqModel = upstreamModel
+		reqModel = route.RoutingModel
 	}
-	stickyGroupID, platform := route.groupID, route.platform
+	stickyGroupID, platform := route.GroupID, route.Platform
+	if forcedPlatform, ok := c.Request.Context().Value(ctxkey.ForcePlatform).(string); ok && forcedPlatform != "" {
+		platform = forcedPlatform
+	}
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
+	route = route.WithChannelMapping(channelMapping)
+	c.Request = c.Request.WithContext(service.WithEffectiveGatewayRoute(c.Request.Context(), route))
 	setChannelUsageFields(c, clientRequestedUsageFields(c, channelMapping, reqModel, ""))
 
 	// 在请求上下文中记录 thinking 状态，供 Antigravity 最终模型 key 推导/模型维度限流使用
@@ -393,9 +369,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	if h.errorPassthroughService != nil {
 		service.BindErrorPassthroughService(c, h.errorPassthroughService)
 	}
-
-	// 获取订阅信息（可能为nil）- 提前获取用于后续检查
-	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 
 	// 1. 首先获取用户并发槽位
 	userReleaseFunc, err := h.concurrencyHelper.AcquireUserSlotWithWait(c, subject.UserID, subject.Concurrency, reqStream, &streamStarted)
@@ -1150,11 +1123,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 							_ = h.antigravityGatewayService.WriteMappedClaudeError(c, account, promptTooLongErr.StatusCode, promptTooLongErr.RequestID, promptTooLongErr.Body)
 							return
 						}
-						fallbackAPIKey := cloneAPIKeyWithGroup(apiKey, fallbackGroup)
 						// 兜底重试按"直接请求兜底分组"处理：清除强制平台，允许按分组平台调度
 						ctx := service.WithoutCompositeRouteDecision(context.WithValue(c.Request.Context(), ctxkey.ForcePlatform, ""))
 						c.Request = c.Request.WithContext(ctx)
-						currentAPIKey = fallbackAPIKey
 						if reqModel != clientRequestModel {
 							body = h.gatewayService.ReplaceModelInBody(body, clientRequestModel)
 							if err := coordinator.SetEffectiveBytes(body); err != nil {
@@ -1169,20 +1140,23 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 							}
 							reqModel = clientRequestModel
 						}
-						var stickyCtx context.Context
-						var fallbackRoute effectiveGatewayRoute
-						stickyCtx, fallbackRoute, err = h.resolveEffectiveGatewayRoute(c.Request.Context(), fallbackAPIKey, reqModel, service.CompositeRouteEndpointMessages)
+						fallbackRoute, resolveErr := h.effectiveRouteResolver.Resolve(
+							c.Request.Context(), apiKey, nil, fallbackGroup,
+							clientRequestModel, service.CompositeRouteEndpointMessages,
+						)
+						err = resolveErr
 						if err != nil {
 							h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error(), streamStarted)
 							return
 						}
-						c.Request = c.Request.WithContext(stickyCtx)
-						currentAPIKey = fallbackRoute.apiKey
-						currentStickyGroupID = fallbackRoute.groupID
-						platform = fallbackRoute.platform
-						if fallbackRoute.group != nil {
-							c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, fallbackRoute.group))
+						ctx = service.WithEffectiveGatewayRoute(c.Request.Context(), fallbackRoute)
+						if fallbackRoute.Decision != nil {
+							ctx = service.WithCompositeRouteDecision(service.WithoutCompositeRouteDecision(ctx), *fallbackRoute.Decision)
 						}
+						c.Request = c.Request.WithContext(ctx)
+						currentAPIKey = fallbackRoute.APIKey
+						currentStickyGroupID = fallbackRoute.GroupID
+						platform = fallbackRoute.Platform
 						if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), currentAPIKey.User, currentAPIKey, currentAPIKey.Group, nil, service.PlatformFromAPIKey(currentAPIKey)); err != nil {
 							status, code, message, retryAfter := billingErrorDetails(err)
 							if retryAfter > 0 {
@@ -1207,6 +1181,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 							reqModel = upstreamModel
 						}
 						channelMapping, _ = h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), currentAPIKey.GroupID, reqModel)
+						fallbackRoute = fallbackRoute.WithChannelMapping(channelMapping)
+						c.Request = c.Request.WithContext(service.WithEffectiveGatewayRoute(c.Request.Context(), fallbackRoute))
 						setChannelUsageFields(c, clientRequestedUsageFields(c, channelMapping, reqModel, ""))
 						if userGroupReleaseFunc != nil {
 							userGroupReleaseFunc()
@@ -1745,17 +1721,6 @@ func (h *GatewayHandler) AntigravityModels(c *gin.Context) {
 		"object": "list",
 		"data":   antigravity.DefaultModels(),
 	})
-}
-
-func cloneAPIKeyWithGroup(apiKey *service.APIKey, group *service.Group) *service.APIKey {
-	if apiKey == nil || group == nil {
-		return apiKey
-	}
-	cloned := *apiKey
-	groupID := group.ID
-	cloned.GroupID = &groupID
-	cloned.Group = group
-	return &cloned
 }
 
 // Usage handles getting account balance and usage statistics for CC Switch integration
@@ -2381,21 +2346,31 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	// count_tokens 走 messages 严格校验时，复用已解析请求，避免二次反序列化。
 	SetClaudeCodeClientContext(c, body, parsedReq)
 	clientRequestModel := clientRequestedModel(c, parsedReq.Model)
-	resolvedCtx, route, err := h.resolveEffectiveGatewayRoute(c.Request.Context(), apiKey, clientRequestModel, service.CompositeRouteEndpointCountTokens)
-	if err != nil {
-		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error())
-		return
+	subscription, _ := middleware2.GetSubscriptionFromContext(c)
+	route, hasRoute := service.EffectiveGatewayRouteFromContext(c.Request.Context())
+	if !hasRoute {
+		route, err = h.effectiveRouteResolver.Resolve(c.Request.Context(), apiKey, subscription, nil, clientRequestModel, service.CompositeRouteEndpointCountTokens)
+		if err != nil {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error())
+			return
+		}
+		ctx := service.WithEffectiveGatewayRoute(c.Request.Context(), route)
+		if route.Decision != nil {
+			ctx = service.WithCompositeRouteDecision(service.WithoutCompositeRouteDecision(ctx), *route.Decision)
+		}
+		c.Request = c.Request.WithContext(ctx)
 	}
-	c.Request = c.Request.WithContext(resolvedCtx)
-	apiKey = route.apiKey
-	if route.group != nil {
-		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, route.group))
+	if route.APIKey != nil {
+		apiKey = route.APIKey
 	}
-	if parsedReq.Model != clientRequestModel {
-		body = h.gatewayService.ReplaceModelInBody(body, clientRequestModel)
+	if route.Subscription != nil {
+		subscription = route.Subscription
 	}
-	if upstreamModel, ok := service.ResolvedUpstreamModelFromContext(c.Request.Context()); ok && upstreamModel != clientRequestModel {
-		body = h.gatewayService.ReplaceModelInBody(body, upstreamModel)
+	if route.ClientModel != "" {
+		clientRequestModel = route.ClientModel
+	}
+	if route.RoutingModel != "" && route.RoutingModel != parsedReq.Model {
+		body = h.gatewayService.ReplaceModelInBody(body, route.RoutingModel)
 	}
 	parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRef(body), domain.PlatformAnthropic)
 	if err != nil {
@@ -2403,6 +2378,8 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		return
 	}
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, parsedReq.Model)
+	route = route.WithChannelMapping(channelMapping)
+	c.Request = c.Request.WithContext(service.WithEffectiveGatewayRoute(c.Request.Context(), route))
 	if channelMapping.Mapped {
 		body = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
 		parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRef(body), domain.PlatformAnthropic)
@@ -2429,9 +2406,6 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 
 	setOpsRequestContext(c, parsedReq.Model, parsedReq.Stream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(parsedReq.Stream, false)))
-
-	// 获取订阅信息（可能为nil）
-	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 
 	// 校验 billing eligibility（订阅/余额）
 	// 【注意】不计算并发，但需要校验订阅/余额

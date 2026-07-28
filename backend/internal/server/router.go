@@ -32,6 +32,7 @@ func SetupRouter(
 	userService *service.UserService,
 	settingService *service.SettingService,
 	compositeResolver *service.CompositeRouteResolver,
+	effectiveRouteResolver *service.EffectiveGatewayRouteResolver,
 	cfg *config.Config,
 	redisClient *redis.Client,
 ) *gin.Engine {
@@ -71,7 +72,7 @@ func SetupRouter(
 	configureEmbeddedFrontend(r, settingService, refreshFrameOrigins)
 
 	// 注册路由
-	registerRoutes(r, handlers, jwtAuth, adminAuth, apiKeyAuth, auditLog, stepUpAuth, apiKeyService, subscriptionService, opsService, userService, settingService, compositeResolver, cfg, redisClient)
+	registerRoutes(r, handlers, jwtAuth, adminAuth, apiKeyAuth, auditLog, stepUpAuth, apiKeyService, subscriptionService, opsService, userService, settingService, compositeResolver, effectiveRouteResolver, cfg, redisClient)
 
 	return r
 }
@@ -91,6 +92,7 @@ func registerRoutes(
 	userService *service.UserService,
 	settingService *service.SettingService,
 	compositeResolver *service.CompositeRouteResolver,
+	effectiveRouteResolver *service.EffectiveGatewayRouteResolver,
 	cfg *config.Config,
 	redisClient *redis.Client,
 ) {
@@ -104,7 +106,7 @@ func registerRoutes(
 	routes.RegisterAuthRoutes(v1, h, jwtAuth, auditLog, redisClient, settingService)
 	routes.RegisterUserRoutes(v1, h, jwtAuth, auditLog, settingService)
 	routes.RegisterAdminRoutes(v1, h, adminAuth, auditLog, stepUpAuth, settingService)
-	routes.RegisterGatewayRoutes(r, h, apiKeyAuth, apiKeyService, subscriptionService, opsService, settingService, compositeResolver, cfg)
+	routes.RegisterGatewayRoutes(r, h, apiKeyAuth, apiKeyService, subscriptionService, opsService, settingService, compositeResolver, effectiveRouteResolver, cfg)
 	routes.RegisterPaymentRoutes(v1, h.Payment, h.PaymentWebhook, h.Admin.Payment, jwtAuth, adminAuth, auditLog, settingService)
 
 	handler.RegisterPageRoutes(v1, cfg.Pricing.DataDir, gin.HandlerFunc(jwtAuth), gin.HandlerFunc(adminAuth), settingService, userService)

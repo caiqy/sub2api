@@ -289,7 +289,7 @@ func TestGrokVideoStatus_RejectsSchedulerAccountOtherThanOwnerBinding(t *testing
 	concurrency := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
 	repo := &terminalUsageGrokAccountRepo{openAIRetryAccountRepoStub{accounts: []*service.Account{selected, owner, parent}}}
 	gateway := service.NewOpenAIGatewayService(repo, nil, nil, nil, nil, nil, cache, cfg, nil, concurrency, nil, nil, billing, upstream, nil, nil, service.NewGrokTokenProvider(repo, nil), nil, nil)
-	h := NewOpenAIGatewayHandler(gateway, concurrency, billing, &service.APIKeyService{}, nil, nil, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gateway, concurrency, billing, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 
 	router := gin.New()
 	router.Use(func(c *gin.Context) {

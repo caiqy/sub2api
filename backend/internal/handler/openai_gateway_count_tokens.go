@@ -109,19 +109,32 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 	reqModel := parsedReq.Model
 	clientModel := clientRequestedModel(c, reqModel)
 	SetClaudeCodeClientContext(c, body, parsedReq)
-	effectiveAPIKey, effectiveModel, groupChanged, err := h.resolveEffectiveOpenAIGatewayRoute(c, apiKey, clientModel, service.CompositeRouteEndpointCountTokens)
-	if err != nil {
-		h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error())
-		return
+	subscription, _ := middleware2.GetSubscriptionFromContext(c)
+	route, hasRoute := service.EffectiveGatewayRouteFromContext(c.Request.Context())
+	if !hasRoute {
+		route, err = h.effectiveRouteResolver.Resolve(c.Request.Context(), apiKey, subscription, nil, clientModel, service.CompositeRouteEndpointCountTokens)
+		if err != nil {
+			h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error())
+			return
+		}
+		ctx := service.WithEffectiveGatewayRoute(c.Request.Context(), route)
+		if route.Decision != nil {
+			ctx = service.WithCompositeRouteDecision(service.WithoutCompositeRouteDecision(ctx), *route.Decision)
+		}
+		c.Request = c.Request.WithContext(ctx)
 	}
-	if groupChanged {
-		body = h.gatewayService.ReplaceModelInBody(body, clientModel)
-		reqModel = clientModel
+	if route.APIKey != nil {
+		apiKey = route.APIKey
 	}
-	apiKey = effectiveAPIKey
-	if effectiveModel != reqModel {
-		body = h.gatewayService.ReplaceModelInBody(body, effectiveModel)
-		reqModel = effectiveModel
+	if route.Subscription != nil {
+		subscription = route.Subscription
+	}
+	if route.ClientModel != "" {
+		clientModel = route.ClientModel
+	}
+	if route.RoutingModel != "" && route.RoutingModel != reqModel {
+		body = h.gatewayService.ReplaceModelInBody(body, route.RoutingModel)
+		reqModel = route.RoutingModel
 	}
 	parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRef(body), domain.PlatformAnthropic)
 	if err != nil {
@@ -148,6 +161,8 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(false, false)))
 
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
+	route = route.WithChannelMapping(channelMapping)
+	c.Request = c.Request.WithContext(service.WithEffectiveGatewayRoute(c.Request.Context(), route))
 	if channelMapping.Mapped {
 		body = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
 		reqModel = channelMapping.MappedModel
@@ -161,7 +176,6 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 	preferredMappedModel := resolveOpenAIMessagesDispatchMappedModel(apiKey, reqModel)
 	mappedBodyForMessages := newOpenAIModelMappedBodyCache(body, h.gatewayService.ReplaceModelInBody)
 
-	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
 		reqLog.Info("openai_count_tokens.billing_eligibility_check_failed", zap.Error(err))
 		status, code, message, retryAfter := billingErrorDetails(err)

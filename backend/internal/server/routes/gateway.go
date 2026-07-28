@@ -12,6 +12,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
+	pkgerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -31,6 +32,7 @@ func RegisterGatewayRoutes(
 	opsService *service.OpsService,
 	settingService *service.SettingService,
 	compositeResolver *service.CompositeRouteResolver,
+	effectiveRouteResolver *service.EffectiveGatewayRouteResolver,
 	cfg *config.Config,
 ) {
 	bodyLimit := middleware.RequestBodyLimit(cfg.Gateway.MaxBodySize)
@@ -39,7 +41,7 @@ func RegisterGatewayRoutes(
 	usageDetailCapture := middleware.UsageDetailCapture()
 	opsErrorLogger := handler.OpsErrorLoggerMiddleware(opsService)
 	endpointNorm := handler.InboundEndpointMiddleware()
-	compositeTarget := compositeTargetPlatformMiddleware(compositeResolver)
+	compositeTarget := compositeTargetPlatformMiddleware(effectiveRouteResolver)
 	compositeGeminiTarget := compositeGeminiTargetPlatformMiddleware(compositeResolver)
 	compositeWebSocketTarget := compositeWebSocketRouteResolverMiddleware(compositeResolver)
 
@@ -385,56 +387,66 @@ func getGroupPlatform(c *gin.Context) string {
 	return apiKey.Group.Platform
 }
 
-func compositeTargetPlatformMiddleware(resolver *service.CompositeRouteResolver) gin.HandlerFunc {
-	if resolver == nil {
-		resolver = service.NewCompositeRouteResolver(nil)
-	}
+func compositeTargetPlatformMiddleware(resolver *service.EffectiveGatewayRouteResolver) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		apiKey, ok := middleware.GetAPIKeyFromContext(c)
-		if !ok || apiKey == nil || apiKey.Group == nil || apiKey.Group.Platform != service.PlatformComposite {
-			c.Next()
-			return
-		}
-		if c.Request == nil || c.Request.Method == http.MethodGet {
+		if !ok || apiKey == nil || apiKey.Group == nil ||
+			(apiKey.Group.Platform != service.PlatformComposite && !apiKey.Group.ClaudeCodeOnly) ||
+			resolver == nil || c.Request == nil {
 			c.Next()
 			return
 		}
 
-		body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
-		if err != nil {
-			status := http.StatusBadRequest
-			message := "Failed to read request body"
-			var maxErr *http.MaxBytesError
-			if errors.As(err, &maxErr) {
-				status = http.StatusRequestEntityTooLarge
-				message = "Request body is too large"
-			}
-			c.JSON(status, gin.H{"error": gin.H{"type": "invalid_request_error", "message": message}})
-			c.Abort()
-			return
-		}
-
-		model := compositeRequestModelFromBody(c.GetHeader("Content-Type"), body)
-		if model != "" {
-			decision, err := resolver.Resolve(c.Request.Context(), apiKey.Group.ID, model, compositeRouteEndpointForPath(c.Request.URL.Path))
+		originalCtx := c.Request.Context()
+		var body []byte
+		if c.Request.Method != http.MethodGet {
+			var err error
+			body, err = pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"type": "server_error", "message": "Failed to resolve composite model route"}})
+				status := http.StatusBadRequest
+				message := "Failed to read request body"
+				var maxErr *http.MaxBytesError
+				if errors.As(err, &maxErr) {
+					status = http.StatusRequestEntityTooLarge
+					message = "Request body is too large"
+				}
+				c.JSON(status, gin.H{"error": gin.H{"type": "invalid_request_error", "message": message}})
 				c.Abort()
 				return
 			}
-			if decision.Matched {
-				c.Request = c.Request.WithContext(service.WithCompositeRouteDecision(c.Request.Context(), decision))
-				if snapshot := compositeOriginalRequestBodySnapshot(c.GetHeader("Content-Type"), body); snapshot != "" {
-					service.SetUsageOriginalRequestBody(c, snapshot)
-				}
-				if upstreamModel := strings.TrimSpace(decision.UpstreamModel); upstreamModel != "" && upstreamModel != model && gjson.ValidBytes(body) {
-					if rewritten, rewriteErr := sjson.SetBytes(body, "model", upstreamModel); rewriteErr == nil {
-						body = rewritten
-					}
-				}
+		}
+		handler.SetClaudeCodeClientContext(c, body, nil)
+		if c.Request.Method == http.MethodGet && apiKey.Group.Platform == service.PlatformComposite && !apiKey.Group.ClaudeCodeOnly {
+			c.Next()
+			return
+		}
+
+		clientModel := compositeRequestModelFromBody(c.GetHeader("Content-Type"), body)
+		subscription, _ := middleware.GetSubscriptionFromContext(c)
+		route, err := resolver.Resolve(
+			c.Request.Context(), apiKey, subscription, nil,
+			clientModel, compositeRouteEndpointForPath(c.Request.URL.Path),
+		)
+		if err != nil {
+			c.Request = c.Request.WithContext(originalCtx)
+			middleware.AbortWithError(c, pkgerrors.Code(err), pkgerrors.Reason(err), pkgerrors.Message(err))
+			c.Abort()
+			return
+		}
+		middleware.ApplyEffectiveGatewayRoute(c, route)
+		if route.Decision != nil {
+			if snapshot := compositeOriginalRequestBodySnapshot(c.GetHeader("Content-Type"), body); snapshot != "" {
+				service.SetUsageOriginalRequestBody(c, snapshot)
 			}
 		}
-		resetRequestBody(c, body)
+		if route.RoutingModel != "" && route.RoutingModel != clientModel && gjson.ValidBytes(body) {
+			if rewritten, rewriteErr := sjson.SetBytes(body, "model", route.RoutingModel); rewriteErr == nil {
+				body = rewritten
+			}
+		}
+		if c.Request.Method != http.MethodGet {
+			resetRequestBody(c, body)
+		}
 		c.Next()
 	}
 }

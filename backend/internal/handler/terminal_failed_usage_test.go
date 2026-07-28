@@ -204,7 +204,7 @@ func newTerminalUsageOpenAIEnvWithUpstreamAndGatewayCache(t *testing.T, group *s
 		nil,
 		nil,
 	)
-	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 	h.grokMediaEligibilityProber = &grokMediaEligibilityProberStub{eligible: true, reason: "eligible"}
 	h.maxAccountSwitches = 0
 	return &terminalUsageOpenAIEnv{
@@ -789,8 +789,10 @@ func newTerminalGatewayMessagesEnvWithGatewayCacheAndGroups(t *testing.T, group 
 	tokenProvider := service.NewAntigravityTokenProvider(accountRepo, nil, nil)
 	antigravityService := service.NewAntigravityGatewayService(accountRepo, cache, nil, tokenProvider, nil, upstream, settingService, nil)
 	geminiCompatService := service.NewGeminiMessagesCompatService(accountRepo, groupRepo, cache, nil, nil, nil, upstream, antigravityService, cfg)
+	apiKeyService := service.NewAPIKeyService(nil, nil, groupRepo, nil, nil, nil, cfg)
+	effectiveRouteResolver := service.NewEffectiveGatewayRouteResolver(apiKeyService, service.NewCompositeRouteResolver(nil), cfg)
 	return &terminalGatewayMessagesEnv{
-		handler:     NewGatewayHandler(gatewayService, nil, geminiCompatService, antigravityService, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, settingService),
+		handler:     NewGatewayHandler(gatewayService, nil, geminiCompatService, antigravityService, nil, concurrencyService, billingCacheService, nil, apiKeyService, nil, nil, nil, nil, cfg, settingService, effectiveRouteResolver),
 		apiKey:      &service.APIKey{ID: 101, UserID: 202, Status: service.StatusActive, GroupID: &group.ID, User: &service.User{ID: 202, Status: service.StatusActive, Concurrency: 1}, Group: group},
 		usageRepo:   usageRepo,
 		accountRepo: accountRepo,
