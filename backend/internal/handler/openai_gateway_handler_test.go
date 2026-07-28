@@ -1536,6 +1536,7 @@ type openAIWSRegressionEnvOptions struct {
 	CaptureFirstUpstreamMessage bool
 	CaptureUpstreamMessages     bool
 	CompositeResolver           *service.CompositeRouteResolver
+	AccountModelMapping         map[string]string
 }
 
 type openAIWSRegressionEnv struct {
@@ -1552,9 +1553,13 @@ type openAIWSRegressionEnv struct {
 
 type openAIWSCompositeRouteRepo struct {
 	routes []service.CompositeModelRoute
+	err    error
 }
 
 func (r openAIWSCompositeRouteRepo) ListByGroup(_ context.Context, groupID int64, includeDisabled bool) ([]service.CompositeModelRoute, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
 	routes := make([]service.CompositeModelRoute, 0, len(r.routes))
 	for _, route := range r.routes {
 		if route.GroupID == groupID && (includeDisabled || route.Enabled) {
@@ -1651,6 +1656,13 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 	}
 	if upstreamServer != nil {
 		credentials["base_url"] = upstreamServer.URL
+	}
+	if len(opts.AccountModelMapping) > 0 {
+		mapping := make(map[string]any, len(opts.AccountModelMapping))
+		for source, target := range opts.AccountModelMapping {
+			mapping[source] = target
+		}
+		credentials["model_mapping"] = mapping
 	}
 	accountRepo := &openAIChatCompletionsAccountRepoStub{account: &service.Account{
 		ID:          11,
@@ -1783,9 +1795,9 @@ func TestOpenAIResponsesWebSocketResolvesCompositeExplicitAliasOnEveryFrame(t *t
 		Enabled:        true,
 	}}})
 	cache := &concurrencyCacheMock{
-		acquireUserSlotFn: func(context.Context, int64, int, string) (bool, error) { return true, nil },
+		acquireUserSlotFn:      func(context.Context, int64, int, string) (bool, error) { return true, nil },
 		acquireUserGroupSlotFn: func(context.Context, int64, int64, int, string) (bool, error) { return true, nil },
-		acquireAccountSlotFn: func(context.Context, int64, int, string) (bool, error) { return true, nil },
+		acquireAccountSlotFn:   func(context.Context, int64, int, string) (bool, error) { return true, nil },
 	}
 	env := newOpenAIWSRegressionEnv(t, cache, openAIWSRegressionEnvOptions{CaptureUpstreamMessages: true, CompositeResolver: resolver})
 	defer env.Close()
@@ -1807,6 +1819,117 @@ func TestOpenAIResponsesWebSocketResolvesCompositeExplicitAliasOnEveryFrame(t *t
 		}
 	}
 	require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
+	env.waitRequestDone(t)
+}
+
+func TestOpenAIResponsesWebSocketAppliesAccountMappingAfterLaterCompositeRoute(t *testing.T) {
+	resolver := service.NewCompositeRouteResolver(openAIWSCompositeRouteRepo{routes: []service.CompositeModelRoute{{
+		GroupID:        2,
+		PublicModel:    "public-alias",
+		MatchType:      service.CompositeRouteMatchExact,
+		TargetPlatform: service.PlatformOpenAI,
+		UpstreamModel:  "gpt-5",
+		Endpoint:       service.CompositeRouteEndpointResponses,
+		Enabled:        true,
+	}}})
+	cache := &concurrencyCacheMock{
+		acquireUserSlotFn:      func(context.Context, int64, int, string) (bool, error) { return true, nil },
+		acquireUserGroupSlotFn: func(context.Context, int64, int64, int, string) (bool, error) { return true, nil },
+		acquireAccountSlotFn:   func(context.Context, int64, int, string) (bool, error) { return true, nil },
+	}
+	env := newOpenAIWSRegressionEnv(t, cache, openAIWSRegressionEnvOptions{
+		CaptureUpstreamMessages: true,
+		CompositeResolver:       resolver,
+		AccountModelMapping:     map[string]string{"gpt-5": "gpt-5-account"},
+	})
+	defer env.Close()
+	env.apiKey.Group = &service.Group{ID: 2, Platform: service.PlatformComposite}
+
+	clientConn := env.dial(t)
+	defer func() { _ = clientConn.CloseNow() }()
+	env.writeMessage(t, clientConn, `{"type":"response.create","model":"public-alias","stream":false}`)
+	require.Equal(t, "response.completed", gjson.GetBytes(env.readMessage(t, clientConn), "type").String())
+	env.writeMessage(t, clientConn, `{"type":"response.create","model":"public-alias","stream":false,"previous_response_id":"resp_ingress_turn_1"}`)
+	require.Equal(t, "response.completed", gjson.GetBytes(env.readMessage(t, clientConn), "type").String())
+
+	for turn := 0; turn < 2; turn++ {
+		select {
+		case payload := <-env.upstreamMessages:
+			require.Equal(t, "gpt-5-account", gjson.GetBytes(payload, "model").String(), "turn=%d", turn+1)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("upstream did not receive turn %d", turn+1)
+		}
+	}
+	require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
+	env.waitRequestDone(t)
+}
+
+func TestOpenAIResponsesWebSocketRejectsLaterCrossProviderCompositeRoute(t *testing.T) {
+	resolver := service.NewCompositeRouteResolver(openAIWSCompositeRouteRepo{routes: []service.CompositeModelRoute{
+		{GroupID: 2, PublicModel: "openai-alias", MatchType: service.CompositeRouteMatchExact, TargetPlatform: service.PlatformOpenAI, UpstreamModel: "gpt-5", Endpoint: service.CompositeRouteEndpointResponses, Enabled: true},
+		{GroupID: 2, PublicModel: "grok-alias", MatchType: service.CompositeRouteMatchExact, TargetPlatform: service.PlatformGrok, UpstreamModel: "grok-4", Endpoint: service.CompositeRouteEndpointResponses, Enabled: true},
+	}})
+	cache := &concurrencyCacheMock{
+		acquireUserSlotFn:      func(context.Context, int64, int, string) (bool, error) { return true, nil },
+		acquireUserGroupSlotFn: func(context.Context, int64, int64, int, string) (bool, error) { return true, nil },
+		acquireAccountSlotFn:   func(context.Context, int64, int, string) (bool, error) { return true, nil },
+	}
+	env := newOpenAIWSRegressionEnv(t, cache, openAIWSRegressionEnvOptions{CaptureUpstreamMessages: true, CompositeResolver: resolver})
+	defer env.Close()
+	env.apiKey.Group = &service.Group{ID: 2, Platform: service.PlatformComposite}
+
+	clientConn := env.dial(t)
+	defer func() { _ = clientConn.CloseNow() }()
+	env.writeMessage(t, clientConn, `{"type":"response.create","model":"openai-alias","stream":false}`)
+	require.Equal(t, "response.completed", gjson.GetBytes(env.readMessage(t, clientConn), "type").String())
+	env.writeMessage(t, clientConn, `{"type":"response.create","model":"grok-alias","stream":false,"previous_response_id":"resp_ingress_turn_1"}`)
+	env.readCloseError(t, clientConn, coderws.StatusPolicyViolation)
+	env.waitRequestDone(t)
+}
+
+func TestOpenAIResponsesWebSocketRejectsLaterCompositeNoRoute(t *testing.T) {
+	resolver := service.NewCompositeRouteResolver(openAIWSCompositeRouteRepo{routes: []service.CompositeModelRoute{{
+		GroupID:        2,
+		PublicModel:    "openai-alias",
+		MatchType:      service.CompositeRouteMatchExact,
+		TargetPlatform: service.PlatformOpenAI,
+		UpstreamModel:  "gpt-5",
+		Endpoint:       service.CompositeRouteEndpointResponses,
+		Enabled:        true,
+	}}})
+	cache := &concurrencyCacheMock{
+		acquireUserSlotFn:      func(context.Context, int64, int, string) (bool, error) { return true, nil },
+		acquireUserGroupSlotFn: func(context.Context, int64, int64, int, string) (bool, error) { return true, nil },
+		acquireAccountSlotFn:   func(context.Context, int64, int, string) (bool, error) { return true, nil },
+	}
+	env := newOpenAIWSRegressionEnv(t, cache, openAIWSRegressionEnvOptions{CompositeResolver: resolver})
+	defer env.Close()
+	env.apiKey.Group = &service.Group{ID: 2, Platform: service.PlatformComposite}
+
+	clientConn := env.dial(t)
+	defer func() { _ = clientConn.CloseNow() }()
+	env.writeMessage(t, clientConn, `{"type":"response.create","model":"openai-alias","stream":false}`)
+	require.Equal(t, "response.completed", gjson.GetBytes(env.readMessage(t, clientConn), "type").String())
+	env.writeMessage(t, clientConn, `{"type":"response.create","model":"missing-alias","stream":false,"previous_response_id":"resp_ingress_turn_1"}`)
+	env.readCloseError(t, clientConn, coderws.StatusPolicyViolation)
+	env.waitRequestDone(t)
+}
+
+func TestOpenAIResponsesWebSocketClosesOnCompositeResolverError(t *testing.T) {
+	resolver := service.NewCompositeRouteResolver(openAIWSCompositeRouteRepo{err: errors.New("route store unavailable")})
+	cache := &concurrencyCacheMock{
+		acquireUserSlotFn:      func(context.Context, int64, int, string) (bool, error) { return true, nil },
+		acquireUserGroupSlotFn: func(context.Context, int64, int64, int, string) (bool, error) { return true, nil },
+		acquireAccountSlotFn:   func(context.Context, int64, int, string) (bool, error) { return true, nil },
+	}
+	env := newOpenAIWSRegressionEnv(t, cache, openAIWSRegressionEnvOptions{CompositeResolver: resolver})
+	defer env.Close()
+	env.apiKey.Group = &service.Group{ID: 2, Platform: service.PlatformComposite}
+
+	clientConn := env.dial(t)
+	defer func() { _ = clientConn.CloseNow() }()
+	env.writeMessage(t, clientConn, `{"type":"response.create","model":"openai-alias","stream":false}`)
+	env.readCloseError(t, clientConn, coderws.StatusInternalError)
 	env.waitRequestDone(t)
 }
 
@@ -2859,7 +2982,8 @@ func newOpenAIResponsesRequestBodyTestRouter(t *testing.T) (*gin.Engine, *openAI
 type openAIChatCompletionsAccountRepoStub struct {
 	service.AccountRepository
 
-	account *service.Account
+	account  *service.Account
+	groupIDs []int64
 }
 
 func newOpenAIImagesHandlerTestRouter(t *testing.T, route string, upstreamResponse *http.Response) (*gin.Engine, *openAIChatCompletionsUsageLogRepoStub, func()) {
@@ -2951,6 +3075,7 @@ func (s *openAIChatCompletionsAccountRepoStub) GetByID(ctx context.Context, id i
 }
 
 func (s *openAIChatCompletionsAccountRepoStub) ListSchedulableByGroupID(ctx context.Context, groupID int64) ([]service.Account, error) {
+	s.groupIDs = append(s.groupIDs, groupID)
 	if s.account == nil {
 		return nil, nil
 	}
@@ -2965,6 +3090,7 @@ func (s *openAIChatCompletionsAccountRepoStub) ListSchedulableByPlatform(ctx con
 }
 
 func (s *openAIChatCompletionsAccountRepoStub) ListSchedulableByGroupIDAndPlatform(ctx context.Context, groupID int64, platform string) ([]service.Account, error) {
+	s.groupIDs = append(s.groupIDs, groupID)
 	if s.account == nil || s.account.Platform != platform {
 		return nil, nil
 	}

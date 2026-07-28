@@ -152,6 +152,7 @@ func startPassthroughLifecycleServer(
 	controlCtx context.Context,
 	svc *OpenAIGatewayService,
 	account *Account,
+	hooks ...*OpenAIWSIngressHooks,
 ) (*httptest.Server, <-chan error) {
 	t.Helper()
 	serverErr := make(chan error, 1)
@@ -184,7 +185,11 @@ func startPassthroughLifecycleServer(
 		req := r.Clone(controlCtx)
 		req.Header = req.Header.Clone()
 		ginCtx.Request = req
-		serverErr <- svc.ProxyResponsesWebSocketFromClient(controlCtx, ginCtx, conn, account, "sk-test", firstMessage, nil)
+		var hook *OpenAIWSIngressHooks
+		if len(hooks) > 0 {
+			hook = hooks[0]
+		}
+		serverErr <- svc.ProxyResponsesWebSocketFromClient(controlCtx, ginCtx, conn, account, "sk-test", firstMessage, hook)
 	}))
 	return server, serverErr
 }
@@ -256,6 +261,50 @@ func TestOpenAIWSPassthroughTurnLifecycle_SerializesTerminalCommitAndNextTurn(t 
 		t.Error("failed terminal write must not commit idle state")
 	})
 	require.False(t, <-admitted, "failed terminal write must keep the current turn in flight")
+}
+
+func TestPassthroughLifecycle_AppliesAccountMappingAfterLaterRequestRewrite(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	upstream := newStagedPassthroughConn()
+	upstream.Send(`{"type":"response.created","response":{"id":"resp_first","model":"gpt-5.1"}}`)
+	upstream.Send(`{"type":"response.completed","response":{"id":"resp_first","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`)
+	svc := newPassthroughLifecycleService(passthroughLifecycleConfig(), upstream)
+	account := passthroughLifecycleAccount()
+	account.Credentials["model_mapping"] = map[string]any{"routed-model": "account-model"}
+	hooks := &OpenAIWSIngressHooks{
+		RewriteRequest: func(turn int, payload []byte, originalModel string) (OpenAIWSRequestRewrite, error) {
+			if turn < 2 || originalModel != "public-model" {
+				return OpenAIWSRequestRewrite{Payload: payload, OriginalModel: originalModel}, nil
+			}
+			return OpenAIWSRequestRewrite{Payload: ReplaceModelInBody(payload, "routed-model"), OriginalModel: "routed-model"}, nil
+		},
+	}
+	server, serverErr := startPassthroughLifecycleServer(t, ctx, svc, account, hooks)
+	defer server.Close()
+	client := dialPassthroughLifecycleClient(t, server)
+	defer func() { _ = client.CloseNow() }()
+
+	require.Equal(t, "gpt-5.1", gjson.GetBytes(requirePassthroughUpstreamWrite(t, upstream, time.Second), "model").String())
+	_, err := readPassthroughLifecycleFrame(t, client, time.Second)
+	require.NoError(t, err)
+	_, err = readPassthroughLifecycleFrame(t, client, time.Second)
+	require.NoError(t, err)
+
+	writeCtx, cancelWrite := context.WithTimeout(context.Background(), time.Second)
+	err = client.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"public-model","previous_response_id":"resp_first"}`))
+	cancelWrite()
+	require.NoError(t, err)
+	require.Equal(t, "account-model", gjson.GetBytes(requirePassthroughUpstreamWrite(t, upstream, time.Second), "model").String())
+
+	upstream.Send(`{"type":"response.created","response":{"id":"resp_second","model":"account-model"}}`)
+	upstream.Send(`{"type":"response.completed","response":{"id":"resp_second","model":"account-model","usage":{"input_tokens":1,"output_tokens":1}}}`)
+	_, err = readPassthroughLifecycleFrame(t, client, time.Second)
+	require.NoError(t, err)
+	_, err = readPassthroughLifecycleFrame(t, client, time.Second)
+	require.NoError(t, err)
+	require.NoError(t, client.Close(coderws.StatusNormalClosure, "done"))
+	<-serverErr
 }
 
 func TestPassthroughLifecycle_LeaseLossSendsRetryClose(t *testing.T) {

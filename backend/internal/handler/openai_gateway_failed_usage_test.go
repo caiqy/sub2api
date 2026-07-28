@@ -342,6 +342,90 @@ func TestOpenAIGatewayHandler_MessagesUpstreamErrorStillCreatesUsageLog(t *testi
 	require.Contains(t, log.DetailSnapshot.UpstreamRequestHeaders, "Authorization: Bearer sk-test")
 }
 
+func TestOpenAIGatewayHandler_MessagesUsesEffectiveClaudeCodeFallbackGroup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	initialID, fallbackID := int64(801), int64(802)
+	initialGroup := &service.Group{ID: initialID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, ClaudeCodeOnly: true, FallbackGroupID: &fallbackID}
+	fallbackGroup := &service.Group{ID: fallbackID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowMessagesDispatch: true}
+	account := &service.Account{ID: 803, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test"}}
+	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
+	accountRepo := &openAIChatCompletionsAccountRepoStub{account: account}
+	cfg := &config.Config{RunMode: config.RunModeStandard, Default: config.DefaultConfig{RateMultiplier: 1}, Concurrency: config.ConcurrencyConfig{PingInterval: 0}}
+	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
+	user := &service.User{ID: 805, Status: service.StatusActive, Concurrency: 1, Balance: 1}
+	billingCacheService := service.NewBillingCacheService(nil, &effectiveGroupUserRepoStub{user: user}, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(billingCacheService.Stop)
+	gatewayService := service.NewOpenAIGatewayService(
+		accountRepo, usageRepo, nil, nil, nil, nil, openAIChatCompletionsGatewayCacheStub{}, cfg, nil,
+		concurrencyService, service.NewBillingService(cfg, nil), nil, billingCacheService,
+		&openAIChatCompletionsHTTPUpstreamStub{response: &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"upstream rejected"}}`))}},
+		service.NewDeferredService(accountRepo, nil, 0), nil,
+	)
+	groupRepo := terminalUsageGroupRepo{groups: map[int64]*service.Group{initialID: initialGroup, fallbackID: fallbackGroup}}
+	apiKeyService := service.NewAPIKeyService(nil, nil, groupRepo, nil, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, apiKeyService, nil, nil, nil, nil, cfg)
+	apiKey := &service.APIKey{ID: 804, UserID: 805, GroupID: &initialID, User: user, Group: initialGroup}
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.UserID, Concurrency: apiKey.User.Concurrency})
+		c.Next()
+	})
+	router.POST("/v1/messages", h.Messages)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, accountRepo.groupIDs, fallbackID)
+	require.NotContains(t, accountRepo.groupIDs, initialID)
+}
+
+func TestOpenAIGatewayHandler_CountTokensUsesEffectiveClaudeCodeFallbackGroup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	initialID, fallbackID := int64(811), int64(812)
+	initialGroup := &service.Group{ID: initialID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, ClaudeCodeOnly: true, FallbackGroupID: &fallbackID}
+	fallbackGroup := &service.Group{ID: fallbackID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowMessagesDispatch: true}
+	account := &service.Account{ID: 813, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test"}}
+	accountRepo := &openAIChatCompletionsAccountRepoStub{account: account}
+	cfg := &config.Config{RunMode: config.RunModeStandard, Default: config.DefaultConfig{RateMultiplier: 1}, Concurrency: config.ConcurrencyConfig{PingInterval: 0}}
+	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
+	user := &service.User{ID: 815, Status: service.StatusActive, Concurrency: 1, Balance: 1}
+	billingCacheService := service.NewBillingCacheService(nil, &effectiveGroupUserRepoStub{user: user}, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(billingCacheService.Stop)
+	gatewayService := service.NewOpenAIGatewayService(
+		accountRepo, nil, nil, nil, nil, nil, openAIChatCompletionsGatewayCacheStub{}, cfg, nil,
+		concurrencyService, service.NewBillingService(cfg, nil), nil, billingCacheService,
+		&openAIChatCompletionsHTTPUpstreamStub{response: &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"input_tokens":3}`))}},
+		service.NewDeferredService(accountRepo, nil, 0), nil,
+	)
+	groupRepo := terminalUsageGroupRepo{groups: map[int64]*service.Group{initialID: initialGroup, fallbackID: fallbackGroup}}
+	apiKeyService := service.NewAPIKeyService(nil, nil, groupRepo, nil, nil, nil, cfg)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, apiKeyService, nil, nil, nil, nil, cfg)
+	apiKey := &service.APIKey{ID: 814, UserID: 815, GroupID: &initialID, User: user, Group: initialGroup}
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.UserID, Concurrency: apiKey.User.Concurrency})
+		c.Next()
+	})
+	router.POST("/v1/messages/count_tokens", h.CountTokens)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", strings.NewReader(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, int64(3), gjson.Get(rec.Body.String(), "input_tokens").Int())
+	require.Contains(t, accountRepo.groupIDs, fallbackID)
+	require.NotContains(t, accountRepo.groupIDs, initialID)
+}
+
 func TestOpenAIGatewayHandler_MessagesFailoverExhaustedStillCreatesUsageLog(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -1315,6 +1399,19 @@ func TestOpenAIGatewayHandler_ResponsesCyberPolicyCreatesSingleUsageLog(t *testi
 			return
 		}
 	}
+}
+
+type effectiveGroupUserRepoStub struct {
+	service.UserRepository
+
+	user *service.User
+}
+
+func (s *effectiveGroupUserRepoStub) GetByID(ctx context.Context, id int64) (*service.User, error) {
+	if s.user != nil && s.user.ID == id {
+		return s.user, nil
+	}
+	return nil, service.ErrUserNotFound
 }
 
 type openAIFailoverAccountRepoStub struct {

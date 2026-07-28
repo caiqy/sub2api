@@ -242,6 +242,21 @@ func applyOpenAIWSRequestRewrite(hooks *OpenAIWSIngressHooks, turn int, payload 
 	return rewritten.Payload, rewritten.OriginalModel, nil
 }
 
+func applyOpenAIWSAccountModelMapping(account *Account, payload []byte) []byte {
+	if account == nil {
+		return payload
+	}
+	model := strings.TrimSpace(openAIWSPayloadStringFromRaw(payload, "model"))
+	if model == "" {
+		return payload
+	}
+	mapped := normalizeOpenAIModelForUpstream(account, account.GetMappedModel(model))
+	if mapped == model {
+		return payload
+	}
+	return ReplaceModelInBody(payload, mapped)
+}
+
 func (s *OpenAIGatewayService) getOpenAIWSConnPool() *openAIWSConnPool {
 	if s == nil {
 		return nil

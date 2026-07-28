@@ -197,6 +197,40 @@ func openAICompatibleTextTargetAllowed(c *gin.Context, apiKey *service.APIKey, m
 	return compositeTargetPlatformAllowed(c, apiKey, model, service.PlatformOpenAI, service.PlatformGrok)
 }
 
+func (h *OpenAIGatewayHandler) resolveEffectiveOpenAIGatewayRoute(c *gin.Context, apiKey *service.APIKey, requestedModel, endpoint string) (*service.APIKey, string, bool, error) {
+	if apiKey == nil || apiKey.Group == nil || h == nil || h.apiKeyService == nil {
+		return apiKey, requestedModel, false, nil
+	}
+	group, err := h.apiKeyService.ResolveEffectiveGatewayGroup(c.Request.Context(), apiKey.Group)
+	if err != nil {
+		return nil, "", false, err
+	}
+	if group == nil || group.ID == apiKey.Group.ID {
+		return apiKey, requestedModel, false, nil
+	}
+
+	effectiveAPIKey := cloneAPIKeyWithGroup(apiKey, group)
+	ctx := context.WithValue(service.WithoutCompositeRouteDecision(c.Request.Context()), ctxkey.Group, group)
+	routingModel := requestedModel
+	if group.Platform == service.PlatformComposite {
+		resolver, ok := service.CompositeRouteResolverFromContext(ctx)
+		if !ok {
+			resolver = service.NewCompositeRouteResolver(nil)
+		}
+		decision, err := resolver.Resolve(ctx, group.ID, requestedModel, endpoint)
+		if err != nil {
+			return nil, "", false, err
+		}
+		if !decision.Matched {
+			return nil, "", false, service.ErrNoAvailableAccounts
+		}
+		ctx = service.WithCompositeRouteDecision(ctx, decision)
+		routingModel = decision.UpstreamModel
+	}
+	c.Request = c.Request.WithContext(ctx)
+	return effectiveAPIKey, routingModel, true, nil
+}
+
 // NewOpenAIGatewayHandler creates a new OpenAIGatewayHandler
 func NewOpenAIGatewayHandler(
 	gatewayService *service.OpenAIGatewayService,
@@ -334,6 +368,22 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 	reqModel := modelResult.String()
+	clientModel := clientRequestedModel(c, reqModel)
+	SetClaudeCodeClientContext(c, body, nil)
+	effectiveAPIKey, effectiveModel, groupChanged, err := h.resolveEffectiveOpenAIGatewayRoute(c, apiKey, clientModel, service.CompositeRouteEndpointResponses)
+	if err != nil {
+		h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error())
+		return
+	}
+	if groupChanged {
+		body = h.gatewayService.ReplaceModelInBody(body, clientModel)
+		reqModel = clientModel
+	}
+	apiKey = effectiveAPIKey
+	if effectiveModel != reqModel {
+		body = h.gatewayService.ReplaceModelInBody(body, effectiveModel)
+		reqModel = effectiveModel
+	}
 	ensureCompositeTargetPlatform(c, apiKey, reqModel)
 	if !compositeTargetPlatformAllowed(c, apiKey, reqModel, service.PlatformOpenAI, service.PlatformGrok) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Model is not supported by this OpenAI-compatible endpoint for composite groups")
@@ -971,6 +1021,22 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		return
 	}
 	reqModel := modelResult.String()
+	clientModel := clientRequestedModel(c, reqModel)
+	SetClaudeCodeClientContext(c, body, nil)
+	effectiveAPIKey, effectiveModel, groupChanged, err := h.resolveEffectiveOpenAIGatewayRoute(c, apiKey, clientModel, service.CompositeRouteEndpointMessages)
+	if err != nil {
+		h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error())
+		return
+	}
+	if groupChanged {
+		body = h.gatewayService.ReplaceModelInBody(body, clientModel)
+		reqModel = clientModel
+	}
+	apiKey = effectiveAPIKey
+	if effectiveModel != reqModel {
+		body = h.gatewayService.ReplaceModelInBody(body, effectiveModel)
+		reqModel = effectiveModel
+	}
 	ensureCompositeTargetPlatform(c, apiKey, reqModel)
 	if !openAICompatibleTextTargetAllowed(c, apiKey, reqModel) {
 		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Model is not supported by this OpenAI-compatible endpoint for composite groups")
@@ -1961,6 +2027,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}
 				if !decision.Matched || (decision.TargetPlatform != service.PlatformOpenAI && decision.TargetPlatform != service.PlatformGrok) {
 					return service.OpenAIWSRequestRewrite{}, service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "Responses WebSocket API only supports OpenAI-compatible models for composite groups", nil)
+				}
+				if decision.TargetPlatform != account.Platform {
+					return service.OpenAIWSRequestRewrite{}, service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "response.create model targets a different provider", nil)
 				}
 				ctx = service.WithCompositeRouteDecision(ctx, decision)
 				c.Request = c.Request.WithContext(ctx)

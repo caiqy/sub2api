@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -206,5 +207,23 @@ func TestCompositeRouteResolverExplicitRoutesCoverBucketTwoProviders(t *testing.
 			require.Equal(t, tt.wantPlatform, decision.TargetPlatform)
 			require.Equal(t, tt.wantUpstream, decision.UpstreamModel)
 		})
+	}
+}
+
+func TestCompositeRouteResolverRejectsRuntimeModelsBeyondStorageContract(t *testing.T) {
+	tooLong := strings.Repeat("m", compositeRouteModelMaxLength+1)
+	legacyUpstream := strings.Repeat("u", compositeRouteModelMaxLength+50)
+	resolver := NewCompositeRouteResolver(compositeRouteRepoStub{routes: []CompositeModelRoute{
+		{GroupID: 7, PublicModel: tooLong, MatchType: CompositeRouteMatchExact, TargetPlatform: PlatformOpenAI, UpstreamModel: "gpt-5", Endpoint: CompositeRouteEndpointResponses, Enabled: true},
+		{GroupID: 7, PublicModel: "legacy/", MatchType: CompositeRouteMatchPrefix, TargetPlatform: PlatformOpenAI, UpstreamModel: legacyUpstream, Endpoint: CompositeRouteEndpointResponses, Enabled: true},
+	}})
+
+	for _, model := range []string{
+		"gpt-" + strings.Repeat("x", compositeRouteModelMaxLength),
+		tooLong,
+		"legacy/gpt-5",
+	} {
+		_, err := resolver.Resolve(context.Background(), 7, model, CompositeRouteEndpointResponses)
+		require.Error(t, err, "model=%q", model)
 	}
 }

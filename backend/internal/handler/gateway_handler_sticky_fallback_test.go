@@ -316,4 +316,33 @@ func TestGatewayHandlerResolveStickyRouteRecomputesCompositeFallbackDecision(t *
 	require.True(t, ok)
 	require.Equal(t, fallbackID, decision.GroupID)
 	require.Equal(t, "claude-sonnet-4-6", decision.UpstreamModel)
+
+	effectiveCtx, route, err := h.resolveEffectiveGatewayRoute(ctx, apiKey, "public-model", service.CompositeRouteEndpointMessages)
+	require.NoError(t, err)
+	require.Equal(t, fallbackID, *route.apiKey.GroupID)
+	require.Same(t, groups[fallbackID], route.apiKey.Group)
+	require.Equal(t, fallbackID, *route.groupID)
+	require.Equal(t, service.PlatformAnthropic, route.platform)
+	effectiveDecision, ok := service.CompositeRouteDecisionFromContext(effectiveCtx)
+	require.True(t, ok)
+	require.Equal(t, fallbackID, effectiveDecision.GroupID)
+}
+
+func TestGatewayHandlerResolveEffectiveGatewayRouteUsesConcreteClaudeCodeFallback(t *testing.T) {
+	originalID, fallbackID := int64(1), int64(2)
+	groups := map[int64]*service.Group{
+		originalID: {ID: originalID, Platform: service.PlatformComposite, Status: service.StatusActive, Hydrated: true, ClaudeCodeOnly: true, FallbackGroupID: &fallbackID},
+		fallbackID: {ID: fallbackID, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true},
+	}
+	h, apiKey := newStickyFallbackMessagesHandler(t, &config.Config{}, groups, &geminiStickyGatewayCacheStub{}, &stickyFallbackAccountRepo{})
+
+	resolvedCtx, route, err := h.resolveEffectiveGatewayRoute(context.Background(), apiKey, "claude-sonnet-4-6", service.CompositeRouteEndpointMessages)
+
+	require.NoError(t, err)
+	require.Equal(t, fallbackID, *route.apiKey.GroupID)
+	require.Same(t, groups[fallbackID], route.apiKey.Group)
+	require.Equal(t, fallbackID, *route.groupID)
+	require.Equal(t, service.PlatformAnthropic, route.platform)
+	_, ok := service.CompositeRouteDecisionFromContext(resolvedCtx)
+	require.False(t, ok)
 }

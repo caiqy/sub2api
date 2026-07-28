@@ -1232,6 +1232,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if rewriteErr != nil {
 				return rewriteErr
 			}
+			currentPayload = applyOpenAIWSAccountModelMapping(account, currentPayload)
 			currentPayloadBytes = len(currentPayload)
 		}
 		if turn > 1 && !skipBeforeTurn && hooks != nil && hooks.BeforeRequest != nil {

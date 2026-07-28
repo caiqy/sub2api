@@ -27,6 +27,9 @@ func (r *CompositeRouteResolver) Resolve(ctx context.Context, groupID int64, mod
 		decision.Reason = "model is required"
 		return decision, nil
 	}
+	if len(model) > compositeRouteModelMaxLength {
+		return decision, fmt.Errorf("model must be at most %d characters", compositeRouteModelMaxLength)
+	}
 
 	if r != nil && r.repo != nil && groupID > 0 {
 		routes, err := r.repo.ListByGroup(ctx, groupID, false)
@@ -37,6 +40,9 @@ func (r *CompositeRouteResolver) Resolve(ctx context.Context, groupID int64, mod
 			upstreamModel := strings.TrimSpace(route.UpstreamModel)
 			if upstreamModel == "" {
 				upstreamModel = model
+			}
+			if len(strings.TrimSpace(route.PublicModel)) > compositeRouteModelMaxLength || len(upstreamModel) > compositeRouteModelMaxLength {
+				return decision, fmt.Errorf("composite route model must be at most %d characters", compositeRouteModelMaxLength)
 			}
 			return CompositeRouteDecision{
 				Matched:        true,

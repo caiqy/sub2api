@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -226,6 +227,48 @@ func TestCompositeTargetPlatformMiddlewareBoundsOriginalBodySnapshot(t *testing.
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	require.Equal(t, http.StatusNoContent, w.Code)
+}
+
+func TestCompositeTargetPlatformMiddlewareRejectsOversizedRuntimeRouteModels(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	legacyUpstream := strings.Repeat("u", 150)
+	resolver := service.NewCompositeRouteResolver(compositeRouteRepoStub{routes: []service.CompositeModelRoute{{
+		GroupID:        1,
+		PublicModel:    "legacy/",
+		MatchType:      service.CompositeRouteMatchPrefix,
+		TargetPlatform: service.PlatformOpenAI,
+		UpstreamModel:  legacyUpstream,
+		Endpoint:       service.CompositeRouteEndpointResponses,
+		Enabled:        true,
+	}}})
+
+	for _, model := range []string{
+		"gpt-" + strings.Repeat("x", 101),
+		"legacy/gpt-5",
+	} {
+		t.Run(model[:6], func(t *testing.T) {
+			reachedHandler := false
+			router := gin.New()
+			router.Use(func(c *gin.Context) {
+				groupID := int64(1)
+				c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{GroupID: &groupID, Group: &service.Group{ID: groupID, Platform: service.PlatformComposite}})
+				c.Next()
+			})
+			router.Use(compositeTargetPlatformMiddleware(resolver))
+			router.POST("/v1/responses", func(c *gin.Context) {
+				reachedHandler = true
+				c.Status(http.StatusNoContent)
+			})
+
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":`+strconv.Quote(model)+`}`))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			require.Equal(t, http.StatusInternalServerError, w.Code)
+			require.False(t, reachedHandler)
+		})
+	}
 }
 
 func TestCompositeGeminiTargetPlatformMiddlewareUsesPathRoute(t *testing.T) {

@@ -1434,31 +1434,48 @@ func TestOpenAIGatewayServiceRecordUsage_ChannelMappedDoesNotOverrideBillingMode
 	subRepo := &openAIRecordUsageSubRepoStub{}
 	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, subRepo, nil)
 	usage := OpenAIUsage{InputTokens: 20, OutputTokens: 10}
+	groupID := int64(1)
+	originalInputPrice, originalOutputPrice := 1e-6, 2e-6
+	concreteInputPrice, concreteOutputPrice := 3e-6, 5e-6
+	cache := newEmptyChannelCache()
+	cache.channelByGroupID[groupID] = &Channel{ID: 1, Status: StatusActive}
+	cache.groupPlatform[groupID] = PlatformOpenAI
+	cache.pricingByGroupModel[channelModelKey{groupID: groupID, platform: PlatformOpenAI, model: "gpt-5.4"}] = &ChannelModelPricing{BillingMode: BillingModeToken, InputPrice: &originalInputPrice, OutputPrice: &originalOutputPrice}
+	cache.pricingByGroupModel[channelModelKey{groupID: groupID, platform: PlatformOpenAI, model: "gpt-5.1"}] = &ChannelModelPricing{BillingMode: BillingModeToken, InputPrice: &concreteInputPrice, OutputPrice: &concreteOutputPrice}
+	cache.loadedAt = time.Now()
+	channelService := &ChannelService{}
+	channelService.cache.Store(cache)
+	svc.resolver = NewModelPricingResolver(channelService, svc.billingService)
 
-	// 渠道未发生模型映射时，应使用 result.BillingModel 中记录的实际上游计费模型，
-	// 而不是未映射的原始请求模型。
-	expectedCost, err := svc.billingService.CalculateCost("gpt-5.1", UsageTokens{
-		InputTokens:  20,
-		OutputTokens: 10,
-	}, 1.1)
+	// 渠道未发生模型映射时，即使原始模型存在全局价格，也必须使用 concrete
+	// account-mapped model，而不是将审计字段 OriginalModel 重新带回计费候选首位。
+	expectedCost, err := svc.billingService.CalculateCostUnified(CostInput{
+		Ctx:            context.Background(),
+		Model:          "gpt-5.1",
+		GroupID:        &groupID,
+		Tokens:         UsageTokens{InputTokens: 20, OutputTokens: 10},
+		RequestCount:   1,
+		RateMultiplier: 1,
+		Resolver:       svc.resolver,
+	})
 	require.NoError(t, err)
 
 	err = svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
 		Result: &OpenAIForwardResult{
 			RequestID:     "resp_channel_unmapped_billing",
-			Model:         "glm",
+			Model:         "gpt-5.4",
 			BillingModel:  "gpt-5.1",
 			UpstreamModel: "gpt-5.1",
 			Usage:         usage,
 			Duration:      time.Second,
 		},
-		APIKey:  &APIKey{ID: 10},
+		APIKey:  &APIKey{ID: 10, GroupID: &groupID, Group: &Group{ID: groupID, Platform: PlatformOpenAI, RateMultiplier: 1}},
 		User:    &User{ID: 20},
 		Account: &Account{ID: 30},
 		ChannelUsageFields: ChannelUsageFields{
 			ChannelID:          1,
-			OriginalModel:      "glm",
-			ChannelMappedModel: "glm", // channel did NOT map
+			OriginalModel:      "gpt-5.4",
+			ChannelMappedModel: "gpt-5.4", // channel did NOT map
 			BillingModelSource: BillingModelSourceChannelMapped,
 		},
 	})
@@ -1776,9 +1793,9 @@ func TestOpenAIGatewayServiceRecordUsage_CompositePublicAliasPricing(t *testing.
 		require.NoError(t, err)
 
 		err = svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
-			Result: &OpenAIForwardResult{RequestID: "resp_composite_channel_mapped_alias", Model: concreteModel, BillingModel: concreteModel, UpstreamModel: concreteModel, Usage: usage, Duration: time.Second},
-			APIKey: &APIKey{ID: 906, GroupID: &groupID, Group: &Group{ID: groupID, Platform: PlatformComposite, RateMultiplier: 1}},
-			User:   &User{ID: 906},
+			Result:  &OpenAIForwardResult{RequestID: "resp_composite_channel_mapped_alias", Model: concreteModel, BillingModel: concreteModel, UpstreamModel: concreteModel, Usage: usage, Duration: time.Second},
+			APIKey:  &APIKey{ID: 906, GroupID: &groupID, Group: &Group{ID: groupID, Platform: PlatformComposite, RateMultiplier: 1}},
+			User:    &User{ID: 906},
 			Account: &Account{ID: 906},
 			ChannelUsageFields: ChannelUsageFields{
 				OriginalModel:      publicModel,

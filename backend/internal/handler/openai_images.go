@@ -173,7 +173,11 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		defer imageReleaseFunc()
 	}
 
-	setOpsRequestContext(c, clientRequestModel, parsed.Stream)
+	opsModel := routingModel
+	if channelMapping.Mapped {
+		opsModel = channelMapping.MappedModel
+	}
+	setOpsRequestContext(c, opsModel, parsed.Stream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(parsed.Stream, false)))
 
 	if h.errorPassthroughService != nil {

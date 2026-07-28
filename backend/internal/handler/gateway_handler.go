@@ -316,6 +316,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	}
 	body = parsedReq.Body.Bytes()
 	reqModel := parsedReq.Model
+	clientRequestModel := clientRequestedModel(c, reqModel)
 	reqStream := parsedReq.Stream
 	ensureCompositeTargetPlatform(c, apiKey, reqModel)
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
@@ -336,7 +337,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		return
 	}
 
-	resolvedCtx, route, err := h.resolveEffectiveGatewayRoute(c.Request.Context(), apiKey, reqModel, service.CompositeRouteEndpointMessages)
+	resolvedCtx, route, err := h.resolveEffectiveGatewayRoute(c.Request.Context(), apiKey, clientRequestModel, service.CompositeRouteEndpointMessages)
 	if err != nil {
 		h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error(), false)
 		return
@@ -687,20 +688,21 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				if c.Request.Context().Err() == nil && service.HasOpsUpstreamAttempted(c) && !service.HasOpsClientBusinessLimited(c) {
 					detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
 					failedUsageInput := &service.FailedUsageLogInput{
-						APIKey:           apiKey,
-						User:             apiKey.User,
-						Account:          account,
-						Model:            reqModel,
-						RequestedModel:   clientRequestedModel(c, reqModel),
-						UpstreamModel:    account.GetMappedModel(reqModel),
-						ReasoningEffort:  service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort),
-						Stream:           reqStream,
-						InboundEndpoint:  inboundEndpoint,
-						UpstreamEndpoint: upstreamEndpoint,
-						UserAgent:        userAgent,
-						IPAddress:        clientIP,
-						DetailSnapshot:   detailSnapshot,
-						Duration:         forwardDuration,
+						APIKey:             apiKey,
+						User:               apiKey.User,
+						Account:            account,
+						Model:              reqModel,
+						RequestedModel:     clientRequestedModel(c, reqModel),
+						UpstreamModel:      account.GetMappedModel(reqModel),
+						ReasoningEffort:    service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort),
+						Stream:             reqStream,
+						InboundEndpoint:    inboundEndpoint,
+						UpstreamEndpoint:   upstreamEndpoint,
+						UserAgent:          userAgent,
+						IPAddress:          clientIP,
+						DetailSnapshot:     detailSnapshot,
+						Duration:           forwardDuration,
+						ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, account.GetMappedModel(reqModel)),
 					}
 					h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 						service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), failedUsageInput, "handler.gateway.messages")
@@ -1136,7 +1138,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 							_ = h.antigravityGatewayService.WriteMappedClaudeError(c, account, promptTooLongErr.StatusCode, promptTooLongErr.RequestID, promptTooLongErr.Body)
 							return
 						}
-						if fallbackGroup.Platform != service.PlatformAnthropic ||
+						if fallbackGroup.Platform != service.PlatformAnthropic && fallbackGroup.Platform != service.PlatformComposite ||
 							fallbackGroup.SubscriptionType == service.SubscriptionTypeSubscription ||
 							fallbackGroup.FallbackGroupIDOnInvalidRequest != nil {
 							reqLog.Warn("gateway.fallback_group_invalid",
@@ -1149,19 +1151,24 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 							return
 						}
 						fallbackAPIKey := cloneAPIKeyWithGroup(apiKey, fallbackGroup)
-						if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), fallbackAPIKey.User, fallbackAPIKey, fallbackGroup, nil, service.PlatformFromAPIKey(fallbackAPIKey)); err != nil {
-							status, code, message, retryAfter := billingErrorDetails(err)
-							if retryAfter > 0 {
-								c.Header("Retry-After", strconv.Itoa(retryAfter))
-							}
-							submitPromptTooLongFailedUsage()
-							h.handleStreamingAwareError(c, status, code, message, streamStarted)
-							return
-						}
 						// 兜底重试按"直接请求兜底分组"处理：清除强制平台，允许按分组平台调度
-						ctx := context.WithValue(c.Request.Context(), ctxkey.ForcePlatform, "")
+						ctx := service.WithoutCompositeRouteDecision(context.WithValue(c.Request.Context(), ctxkey.ForcePlatform, ""))
 						c.Request = c.Request.WithContext(ctx)
 						currentAPIKey = fallbackAPIKey
+						if reqModel != clientRequestModel {
+							body = h.gatewayService.ReplaceModelInBody(body, clientRequestModel)
+							if err := coordinator.SetEffectiveBytes(body); err != nil {
+								h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+								return
+							}
+							effectiveBody = coordinator.Effective()
+							parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
+							if err != nil {
+								h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+								return
+							}
+							reqModel = clientRequestModel
+						}
 						var stickyCtx context.Context
 						var fallbackRoute effectiveGatewayRoute
 						stickyCtx, fallbackRoute, err = h.resolveEffectiveGatewayRoute(c.Request.Context(), fallbackAPIKey, reqModel, service.CompositeRouteEndpointMessages)
@@ -1175,6 +1182,15 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						platform = fallbackRoute.platform
 						if fallbackRoute.group != nil {
 							c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, fallbackRoute.group))
+						}
+						if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), currentAPIKey.User, currentAPIKey, currentAPIKey.Group, nil, service.PlatformFromAPIKey(currentAPIKey)); err != nil {
+							status, code, message, retryAfter := billingErrorDetails(err)
+							if retryAfter > 0 {
+								c.Header("Retry-After", strconv.Itoa(retryAfter))
+							}
+							submitPromptTooLongFailedUsage()
+							h.handleStreamingAwareError(c, status, code, message, streamStarted)
+							return
 						}
 						if upstreamModel, ok := service.ResolvedUpstreamModelFromContext(c.Request.Context()); ok && upstreamModel != reqModel {
 							body = h.gatewayService.ReplaceModelInBody(body, upstreamModel)
@@ -1268,20 +1284,21 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				if c.Request.Context().Err() == nil && service.HasOpsUpstreamAttempted(c) && !service.HasOpsClientBusinessLimited(c) {
 					detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
 					failedUsageInput := &service.FailedUsageLogInput{
-						APIKey:           currentAPIKey,
-						User:             currentAPIKey.User,
-						Account:          account,
-						Model:            reqModel,
-						RequestedModel:   clientRequestedModel(c, reqModel),
-						UpstreamModel:    account.GetMappedModel(reqModel),
-						ReasoningEffort:  service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort),
-						Stream:           parsedReq.Stream,
-						InboundEndpoint:  inboundEndpoint,
-						UpstreamEndpoint: upstreamEndpoint,
-						UserAgent:        userAgent,
-						IPAddress:        clientIP,
-						DetailSnapshot:   detailSnapshot,
-						Duration:         forwardDuration,
+						APIKey:             currentAPIKey,
+						User:               currentAPIKey.User,
+						Account:            account,
+						Model:              reqModel,
+						RequestedModel:     clientRequestedModel(c, reqModel),
+						UpstreamModel:      account.GetMappedModel(reqModel),
+						ReasoningEffort:    service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort),
+						Stream:             parsedReq.Stream,
+						InboundEndpoint:    inboundEndpoint,
+						UpstreamEndpoint:   upstreamEndpoint,
+						UserAgent:          userAgent,
+						IPAddress:          clientIP,
+						DetailSnapshot:     detailSnapshot,
+						Duration:           forwardDuration,
+						ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, account.GetMappedModel(reqModel)),
 					}
 					h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 						service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), failedUsageInput, "handler.gateway.messages")
@@ -2363,6 +2380,38 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	body = parsedReq.Body.Bytes()
 	// count_tokens 走 messages 严格校验时，复用已解析请求，避免二次反序列化。
 	SetClaudeCodeClientContext(c, body, parsedReq)
+	clientRequestModel := clientRequestedModel(c, parsedReq.Model)
+	resolvedCtx, route, err := h.resolveEffectiveGatewayRoute(c.Request.Context(), apiKey, clientRequestModel, service.CompositeRouteEndpointCountTokens)
+	if err != nil {
+		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error())
+		return
+	}
+	c.Request = c.Request.WithContext(resolvedCtx)
+	apiKey = route.apiKey
+	if route.group != nil {
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, route.group))
+	}
+	if parsedReq.Model != clientRequestModel {
+		body = h.gatewayService.ReplaceModelInBody(body, clientRequestModel)
+	}
+	if upstreamModel, ok := service.ResolvedUpstreamModelFromContext(c.Request.Context()); ok && upstreamModel != clientRequestModel {
+		body = h.gatewayService.ReplaceModelInBody(body, upstreamModel)
+	}
+	parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRef(body), domain.PlatformAnthropic)
+	if err != nil {
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+		return
+	}
+	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, parsedReq.Model)
+	if channelMapping.Mapped {
+		body = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
+		parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRef(body), domain.PlatformAnthropic)
+		if err != nil {
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+			return
+		}
+	}
+	setChannelUsageFields(c, clientRequestedUsageFields(c, channelMapping, parsedReq.Model, ""))
 	ensureCompositeTargetPlatform(c, apiKey, parsedReq.Model)
 	reqLog = reqLog.With(zap.String("model", parsedReq.Model), zap.Bool("stream", parsedReq.Stream))
 	// 在请求上下文中记录 thinking 状态，供 Antigravity 最终模型 key 推导/模型维度限流使用

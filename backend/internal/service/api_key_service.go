@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -297,6 +298,40 @@ func NewAPIKeyService(
 	svc.authLookupSlots = make(chan struct{}, lookupConcurrency)
 	svc.invalidAuthAbuse = newInvalidAuthAbuseLimiter(cfg)
 	return svc
+}
+
+// ResolveEffectiveGatewayGroup follows Claude Code-only fallbacks before a
+// handler applies group authorization, concurrency, or billing policy.
+func (s *APIKeyService) ResolveEffectiveGatewayGroup(ctx context.Context, group *Group) (*Group, error) {
+	if group == nil {
+		return nil, nil
+	}
+	if forcePlatform, _ := ctx.Value(ctxkey.ForcePlatform).(string); strings.TrimSpace(forcePlatform) != "" {
+		return group, nil
+	}
+
+	current := group
+	visited := map[int64]struct{}{}
+	for {
+		if _, seen := visited[current.ID]; seen {
+			return nil, fmt.Errorf("fallback group cycle detected")
+		}
+		visited[current.ID] = struct{}{}
+		if !current.ClaudeCodeOnly || IsClaudeCodeClient(ctx) {
+			return current, nil
+		}
+		if current.FallbackGroupID == nil {
+			return nil, ErrClaudeCodeOnly
+		}
+		if s == nil || s.groupRepo == nil {
+			return nil, ErrGroupNotFound
+		}
+		next, err := s.groupRepo.GetByIDLite(ctx, *current.FallbackGroupID)
+		if err != nil {
+			return nil, fmt.Errorf("get group failed: %w", err)
+		}
+		current = next
+	}
 }
 
 // SetRateLimitCacheInvalidator sets the optional rate limit cache invalidator.

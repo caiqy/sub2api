@@ -878,7 +878,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					}
 				}
 			}
-			if isResponseCreate && hooks != nil && hooks.BeforeRequest != nil {
+			if isResponseCreate && hooks != nil && (hooks.RewriteRequest != nil || hooks.BeforeRequest != nil) {
 				turnNo := int(completedTurns.Load()) + 1
 				if turnNo < 2 {
 					turnNo = 2
@@ -890,10 +890,12 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				if rewritten, _, rewriteErr := applyOpenAIWSRequestRewrite(hooks, turnNo, payload, requestModel); rewriteErr != nil {
 					return payload, nil, rewriteErr
 				} else {
-					payload = rewritten
+					payload = applyOpenAIWSAccountModelMapping(account, rewritten)
 				}
-				if err := hooks.BeforeRequest(turnNo, payload, requestModel); err != nil {
-					return payload, nil, err
+				if hooks.BeforeRequest != nil {
+					if err := hooks.BeforeRequest(turnNo, payload, requestModel); err != nil {
+						return payload, nil, err
+					}
 				}
 			}
 			// 在评估策略前先刷新 capturedSessionModel：客户端可能通过
