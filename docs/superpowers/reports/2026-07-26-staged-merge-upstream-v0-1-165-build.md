@@ -160,6 +160,23 @@
 - 远程门禁：未执行远程操作。
 - 放行结论：`DONE_WITH_CONCERNS`。merge 为 `6994599211d3714e30b67cc61ef0834a94c34610`，第一父 `07167bbfa44ecd702cf32268ad98eabb0dbb6c65`，第二父 `cd8bb98c44303b2c8f04c0da340447c992f0cb7d`；Round 1 的聚焦修复已记录，剩余边界是 Task 21 full gate 未执行。
 
+### Task 20 Round 2 Review Closure
+
+- 复审输入：`task-20-review-2.md` 的 6 个 blocker 与 4 个 non-blocking concern；本轮不改变 merge commit、migration、VERSION、Task 21/22、Docker、远程或发布边界。
+- repair 提交链：`48e2d4a0b`（Round 1 源码/测试）、`88aeed4b0`（Round 1 ledger）、`96455c43b965a1736e105ff934e16681689ddeb7`（Round 1 composite mapping recovery）、`a9292253faca30a3977d6a68c40c9785ad2ddb09`（Round 2 源码/测试）。
+- 范围口径：`699459921..48e2d4a0b` 为 53 个 `backend/`、`frontend/` 源码/测试路径与 1 个正式 ledger；加入 recovery 和 Round 2 后，`699459921..a9292253f` 为 61 个源码/测试路径与同一 1 个 ledger。`git diff --check 699459921..a9292253f` 通过。
+- blocker 闭合：
+  - Messages 与 fallback 统一采用 effective group、`messages` endpoint decision、重写后的 body/model、channel mapping 与 group concurrency；不再用原 composite group 或 `endpoint=any`。
+  - `channel_mapped` 计费始终先检查 channel alias 显式价格，缺失时才回退 concrete model。
+  - Ollama Cloud Create/Update commit 后的 usage enrichment 改为 warning telemetry，响应仍保持 mutation 成功。
+  - Responses WebSocket 为每个后续 `response.create` 重用 composite resolver、重写 payload model，并把 decision 传入 ingress 与 passthrough 路径。
+  - composite route 的 public/upstream model 都限制为 100 字符，和 usage/Ops 存储契约一致；未改写已发布 migration。
+  - 正式台账现包含 Round 1/2 repair SHA、路径范围、验证和 advisory，不将 Task 21 门禁写成已完成。
+- concern 闭合：failed usage 传播 channel usage fields，Images 成功记录基于 `routingModel` 构造三段链，Ops 列表/详情按 client、mapped、upstream 顺序展示；非 multipart 原始 body snapshot 限制为 5 MiB，multipart 保留 handler 的 metadata-only snapshot；copy source loader 以 generation/in-flight 拒绝 stale response 并报告当前失败；group-copy service 以 `-tags=unit` fresh 运行。
+- Round 2 聚焦验证通过：composite 长度/alias pricing/failed usage unit tests、Ollama mutation test、multipart snapshot tests、每帧 WS route test、group-copy unit tests、GroupsView 与 OpsErrorLogTable Vitest、`vue-tsc --noEmit`、`pnpm build` 和相关 Go package compile。前端 build 仅保留既有 Browserslist、dynamic-import 和 bundle-size warning。
+- advisory：Docker integration 的两个 group-copy rollback case 因 `docker is not available` 为 0 cases；`-race` 因 `CGO_ENABLED=0` 无法启动。两者均非 PASS 结论。完整命令和 RED/GREEN 原文位于 ignored `.superpowers/sdd/task-20-report.md`。
+- 本轮结论：`DONE_WITH_CONCERNS`。Task 21 full gate、CGO race、Docker integration、Task 22 fresh review、`v0.1.165`、remote/push/tag/release/deploy 继续封闭，未执行。
+
 ## v0.1.165
 
 - changed-files：待执行。
