@@ -125,14 +125,40 @@
 
 ## v0.1.164
 
-- changed-files：`U=diff(v0.1.163^{}, v0.1.164^{})=202`，`M=diff(699459921^1, 699459921)=205`。`U-M={backend/cmd/server/VERSION}`，按约束保留 `0.1.159.6`；`M-U` 为四个本地回归测试的新增依赖参数适配，未改运行时语义。
-- 冲突台账：21 个文本冲突均人工融合。`VERSION` 保留本地值；`wire_gen.go`、`ent/client.go` 经确定性生成；settings/API contract 保留原字段并加入 Alipay deep link；moderation、gateway、chat/responses、embeddings、OpenAI/images 共同保留 usage/detail/sticky/fallback 与 composite target；http/router/routes 共同保留 `UsageDetailCapture`、Grok 路由和 composite resolver；scheduler 保留 advanced/layered、default/layered sticky、fallback/WaitPlan、DB fresh recheck 并在其前解析 composite；OpenAI service 同时保留 scheduler 与 proxy stream quarantine；前端 `EditAccountModal.vue`、`types/index.ts`、`SettingsView.vue` 保留原 UI/类型并加入 Ollama/composite/Alipay。完整逐项 base/ours/theirs 证据见 ignored `.superpowers/sdd/task-20-report.md`。
+- changed-files：`U=diff(v0.1.163^{}, v0.1.164^{})=202`，`M=diff(699459921^1, 699459921)=205`。`U-M={backend/cmd/server/VERSION}`，按约束保留 `0.1.159.6`；`M-U` 是四个本地回归测试的新增依赖参数适配，未改变运行时语义。
+- 冲突台账：21 个文本冲突均人工融合；下表是已提交 ledger 的逐项最终决议，替代 ignored scratch 的引用。
+
+| 路径 | 最终决议 |
+| --- | --- |
+| `backend/cmd/server/VERSION` | 保留本地 `0.1.159.6`，不随上游 tag 改写。 |
+| `backend/cmd/server/wire_gen.go` | 从已融合的 Wire source 确定性生成，保留本地生命周期依赖和 composite/Ollama providers。 |
+| `backend/ent/client.go` | 从已融合 schema 生成，保留既有 Ent clients 和 `CompositeModelRoute` client。 |
+| `backend/internal/handler/admin/setting_handler.go` | 保留原 settings/payment 字段，并返回 Alipay mobile deep-link 字段。 |
+| `backend/internal/handler/admin/setting_handler_update.go` | 保留原有更新校验，贯通 Alipay mobile deep-link 请求、更新和响应。 |
+| `backend/internal/handler/content_moderation_helper.go` | moderation 使用 client public model、resolved provider；Round 1 同时让 usage fields 保留 client、concrete mapped、upstream 的完整链。 |
+| `backend/internal/handler/gateway_handler.go` | 保留 sticky/fallback 和异步 usage；Round 1 以 effective group 重算 composite decision，并在失败 usage 中快照三段模型。 |
+| `backend/internal/handler/gateway_handler_chat_completions.go` | 保留 session/sticky 语义，按 resolved target 选择与计费。 |
+| `backend/internal/handler/gateway_handler_responses.go` | 保留 image/usage 行为，先解析 target platform 再分类和调度。 |
+| `backend/internal/handler/openai_embeddings.go` | 保留 usage detail，并拒绝非 OpenAI composite target。 |
+| `backend/internal/handler/openai_gateway_handler.go` | 保留异步 usage context；Round 1 修复 Messages 授权、WS 首帧 resolver/改写，并向 Ops 同步精确 upstream model。 |
+| `backend/internal/handler/openai_images.go` | 保留 multipart/detail；Round 1 以 concrete upstream model 重建 multipart，并在失败 usage 快照模型和请求详情。 |
+| `backend/internal/server/api_contract_test.go` | 保留原 contract fixtures，加入 Alipay mobile deep-link 字段断言。 |
+| `backend/internal/server/http.go` | 传递 composite resolver，不移除既有 server setup。 |
+| `backend/internal/server/router.go` | 在所有 router 层传递 composite resolver。 |
+| `backend/internal/server/routes/gateway.go` | 保留 `UsageDetailCapture` 和 Grok guards；加入 model-aware composite routing，Round 1 在 body 改写前固定原始 client request snapshot。 |
+| `backend/internal/service/gateway_scheduling.go` | 保留 advanced/layered sticky、fallback/WaitPlan、DB fresh recheck，并在其前解析 concrete composite platform/model。 |
+| `backend/internal/service/openai_gateway_service.go` | 同时保留 scheduler state 和 proxy stream quarantine state。 |
+| `frontend/src/components/account/EditAccountModal.vue` | 保留既有账号控件；Round 1 仅在弹窗打开或 account ID 改变时回填表单，避免 Ollama runtime 刷新覆盖未保存编辑。 |
+| `frontend/src/types/index.ts` | 保留既有 contracts，补齐 composite/Ollama Cloud 类型并兼容 Alipay 字段。 |
+| `frontend/src/views/admin/SettingsView.vue` | 保留本地 scheduler/runtime settings，加入 Ollama global settings 和 Alipay deep-link switch。 |
+
+- Round 1 额外修复：group copy 在 transaction 内完成 source 校验、绑定替换和 outbox 写入；Create/Update account response 解析共享 Ollama 状态；copy source 独立加载全部 active/inactive groups；所有 failed usage input 在 `Submit` 前快照，避免 delayed worker 读取复用的 Gin request；Ops request drilldown 返回 `requested_model`、`model`、`upstream_model` 三段审计字段。
 - 能力矩阵交集：composite 入口为 `ProvideRouter -> SetupRouter -> RegisterGatewayRoutes -> composite target middleware -> GatewayService.resolvePlatform`，未绕过本地调度与粘性路径；Ollama Cloud 由 account/settings admin API、service/repository 与 Wire cleanup 接入；Grok 402 cooldown 位于 `openai_gateway_grok.go` 调度错误处理；Alipay mobile deep link 贯通 settings、provider、支付 UI。
 - migration：完整保留 `172_video_per_second_billing_metadata.sql`、`172_composite_model_routes.sql`、`186_alipay_mobile_precreate_deep_link.sql`、`186_group_auth_cache_image_generation.sql`；未重命名或改写发布 migration。
-- 聚焦测试：`go test ./cmd/server`、`go test ./internal/server/routes`、`go test ./internal/handler`、`go test ./internal/handler/admin`、composite/Ollama/Grok/scheduler 命名 service 测试、`go test ./internal/service -run '^$' -count=1` 和 `pnpm --dir frontend exec vue-tsc --noEmit` 均 PASS。`git diff --check`、unmerged 检查和精确 Git marker 检查均通过。
-- 本地门禁：本任务按边界未运行 full gate；`VERSION=0.1.159.6`，`openai-first-token-timeout` 在 `backend`、`frontend`、`deploy` 中为 0 命中。
+- 聚焦验证：Round 1 实际运行并通过三段模型 handler/route/repository 测试、失败 usage unit 测试、Ollama shutdown ordering 测试，以及 proxy quarantine 正反向/threshold/TTL 命名测试。先前的 `go test ./internal/service -run '^$' -count=1` 仅编译并执行零测试，不作为行为证据；`^TestOpenAIStreaming.*QuarantineProxy$` 只命中否定用例，也不再使用。完整命令与测试边界记录在本次 repair report。
+- 本地门禁：本任务按边界未运行 Task 21 full gate；`VERSION=0.1.159.6`，`openai-first-token-timeout` 在 `backend`、`frontend`、`deploy` 中为 0 命中。
 - 远程门禁：未执行远程操作。
-- 放行结论：`DONE_WITH_CONCERNS`。merge 为 `6994599211d3714e30b67cc61ef0834a94c34610`，第一父 `07167bbfa44ecd702cf32268ad98eabb0dbb6c65`，第二父 `cd8bb98c44303b2c8f04c0da340447c992f0cb7d`；唯一 concern 是 Task 21 full gate 尚未执行。
+- 放行结论：`DONE_WITH_CONCERNS`。merge 为 `6994599211d3714e30b67cc61ef0834a94c34610`，第一父 `07167bbfa44ecd702cf32268ad98eabb0dbb6c65`，第二父 `cd8bb98c44303b2c8f04c0da340447c992f0cb7d`；Round 1 的聚焦修复已记录，剩余边界是 Task 21 full gate 未执行。
 
 ## v0.1.165
 
