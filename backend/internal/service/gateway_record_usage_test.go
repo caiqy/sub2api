@@ -197,14 +197,18 @@ func TestGatewayServiceRecordUsage_PreservesRequestedAndUpstreamModels(t *testin
 func TestGatewayServiceRecordUsage_CompositeRequestedAliasFallsBackToConcretePricing(t *testing.T) {
 	const (
 		publicModel   = "team/claude"
-		concreteModel = "claude-sonnet-4"
+		concreteModel = "claude-opus-4-6"
 	)
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	userRepo := &openAIRecordUsageUserRepoStub{}
 	svc := newGatewayRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{})
 	usage := ClaudeUsage{InputTokens: 20, OutputTokens: 10}
-	expected, err := svc.billingService.CalculateCost(concreteModel, UsageTokens{InputTokens: 20, OutputTokens: 10}, 1)
+	tokens := UsageTokens{InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens}
+	expectedAlias, err := svc.billingService.CalculateCost(publicModel, tokens, 1)
 	require.NoError(t, err)
+	expectedConcrete, err := svc.billingService.CalculateCost(concreteModel, tokens, 1)
+	require.NoError(t, err)
+	require.NotEqual(t, expectedAlias.ActualCost, expectedConcrete.ActualCost)
 
 	err = svc.RecordUsage(context.Background(), &RecordUsageInput{
 		Result: &ForwardResult{
@@ -230,8 +234,8 @@ func TestGatewayServiceRecordUsage_CompositeRequestedAliasFallsBackToConcretePri
 
 	require.NoError(t, err)
 	require.NotNil(t, usageRepo.lastLog)
-	require.InDelta(t, expected.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)
-	require.InDelta(t, expected.ActualCost, userRepo.lastAmount, 1e-12)
+	require.InDelta(t, expectedConcrete.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)
+	require.InDelta(t, expectedConcrete.ActualCost, userRepo.lastAmount, 1e-12)
 }
 
 func TestGatewayServiceRecordUsage_EmptyImageSizeDefaultsBeforeBillingAndPersistence(t *testing.T) {
