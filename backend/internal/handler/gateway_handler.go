@@ -2360,9 +2360,6 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		apiKey = route.APIKey
 	}
 	subscription = route.Subscription
-	if route.ClientModel != "" {
-		clientRequestModel = route.ClientModel
-	}
 	if route.RoutingModel != "" && route.RoutingModel != parsedReq.Model {
 		body = h.gatewayService.ReplaceModelInBody(body, route.RoutingModel)
 	}

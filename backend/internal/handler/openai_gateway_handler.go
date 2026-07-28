@@ -369,9 +369,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			apiKey = route.APIKey
 		}
 		subscription = route.Subscription
-		if route.ClientModel != "" {
-			clientModel = route.ClientModel
-		}
 		if route.RoutingModel != "" && route.RoutingModel != reqModel {
 			body = h.gatewayService.ReplaceModelInBody(body, route.RoutingModel)
 			reqModel = route.RoutingModel
@@ -1042,9 +1039,6 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		apiKey = route.APIKey
 	}
 	subscription = route.Subscription
-	if route.ClientModel != "" {
-		clientModel = route.ClientModel
-	}
 	if route.RoutingModel != "" && route.RoutingModel != reqModel {
 		body = h.gatewayService.ReplaceModelInBody(body, route.RoutingModel)
 		reqModel = route.RoutingModel

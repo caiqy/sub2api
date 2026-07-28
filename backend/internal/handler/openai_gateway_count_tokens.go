@@ -131,12 +131,8 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 		apiKey = route.APIKey
 	}
 	subscription = route.Subscription
-	if route.ClientModel != "" {
-		clientModel = route.ClientModel
-	}
 	if route.RoutingModel != "" && route.RoutingModel != reqModel {
 		body = h.gatewayService.ReplaceModelInBody(body, route.RoutingModel)
-		reqModel = route.RoutingModel
 	}
 	parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRef(body), domain.PlatformAnthropic)
 	if err != nil {
@@ -168,7 +164,7 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 	if channelMapping.Mapped {
 		body = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
 		reqModel = channelMapping.MappedModel
-		parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRef(body), domain.PlatformAnthropic)
+		_, err = service.ParseGatewayRequest(service.NewRequestBodyRef(body), domain.PlatformAnthropic)
 		if err != nil {
 			h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 			return
