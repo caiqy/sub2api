@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -822,7 +823,8 @@ type cancelingTerminalHTTPUpstream struct {
 
 type promptTooLongFallbackBillingCache struct {
 	service.BillingCache
-	calls int
+	calls            int
+	subscriptionData *service.SubscriptionCacheData
 }
 
 func (c *promptTooLongFallbackBillingCache) GetUserBalance(context.Context, int64) (float64, error) {
@@ -831,6 +833,26 @@ func (c *promptTooLongFallbackBillingCache) GetUserBalance(context.Context, int6
 		return 100, nil
 	}
 	return 0, nil
+}
+
+func (c *promptTooLongFallbackBillingCache) GetSubscriptionCache(context.Context, int64, int64) (*service.SubscriptionCacheData, error) {
+	return c.subscriptionData, nil
+}
+
+func (c *promptTooLongFallbackBillingCache) UpdateSubscriptionUsage(context.Context, int64, int64, float64) error {
+	return nil
+}
+
+type promptTooLongFallbackSubscriptionRepo struct {
+	service.UserSubscriptionRepository
+	subscription *service.UserSubscription
+}
+
+func (r promptTooLongFallbackSubscriptionRepo) GetActiveByUserIDAndGroupID(context.Context, int64, int64) (*service.UserSubscription, error) {
+	if r.subscription == nil {
+		return nil, service.ErrSubscriptionNotFound
+	}
+	return r.subscription, nil
 }
 
 func (u cancelingTerminalHTTPUpstream) Do(*http.Request, string, int64, int) (*http.Response, error) {
@@ -977,6 +999,98 @@ func TestGatewayHandler_MessagesPromptTooLongFallbackResolvesClaudeCodeOnlyGroup
 		require.Contains(t, env.accountRepo.groupIDs, intermediateID)
 		require.NotContains(t, env.accountRepo.groupIDs, finalID)
 	})
+
+	t.Run("final subscription group uses subscription without rereading balance", func(t *testing.T) {
+		finalGroup.SubscriptionType = service.SubscriptionTypeSubscription
+		upstream := &openAIRetryTrackingHTTPUpstreamStub{responses: []*http.Response{
+			{StatusCode: http.StatusBadRequest, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"Prompt is too long"}}`))},
+			{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}`))},
+		}}
+		env := newTerminalGatewayMessagesEnvWithGatewayCacheAndGroups(t, initialGroup, map[int64]*service.Group{initialID: initialGroup, intermediateID: intermediateGroup, finalID: finalGroup}, upstream, openAIChatCompletionsConcurrencyCacheStub{}, &geminiStickyGatewayCacheStub{}, initialAccount, finalAccount)
+		env.handler.cfg.RunMode = config.RunModeStandard
+		finalSubscription := &service.UserSubscription{ID: 153, UserID: env.apiKey.UserID, GroupID: finalID, Status: service.StatusActive, ExpiresAt: time.Now().Add(time.Hour)}
+		subscriptionRepo := promptTooLongFallbackSubscriptionRepo{subscription: finalSubscription}
+		billingCache := &promptTooLongFallbackBillingCache{subscriptionData: &service.SubscriptionCacheData{Status: service.StatusActive, ExpiresAt: time.Now().Add(time.Hour)}}
+		billingCacheService := service.NewBillingCacheService(billingCache, nil, subscriptionRepo, nil, nil, nil, env.handler.cfg, nil)
+		t.Cleanup(billingCacheService.Stop)
+		env.handler.billingCacheService = billingCacheService
+		groupRepo := terminalUsageGroupRepo{group: initialGroup, groups: map[int64]*service.Group{initialID: initialGroup, intermediateID: intermediateGroup, finalID: finalGroup}}
+		apiKeyService := service.NewAPIKeyService(nil, nil, groupRepo, subscriptionRepo, nil, nil, env.handler.cfg)
+		env.handler.apiKeyService = apiKeyService
+		env.handler.effectiveRouteResolver = service.NewEffectiveGatewayRouteResolver(apiKeyService, service.NewCompositeRouteResolver(nil), env.handler.cfg)
+
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-opus-4-6","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`))
+		req.Header.Set("Content-Type", "application/json")
+		env.router().ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.Equal(t, []int64{initialAccount.ID, finalAccount.ID}, upstream.accountIDs)
+		require.Equal(t, 1, billingCache.calls)
+		log := waitForOpenAIFailedUsageLog(t, env.usageRepo)
+		require.NotNil(t, log)
+		require.NotNil(t, log.SubscriptionID)
+		require.Equal(t, finalSubscription.ID, *log.SubscriptionID)
+	})
+}
+
+func TestGatewayHandler_MessagesPromptTooLongFallbackRejectsMissingFinalSubscriptionAtomically(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	initialID, intermediateID, finalID := int64(53), int64(54), int64(55)
+	initialGroup := &service.Group{ID: initialID, Platform: service.PlatformAntigravity, Status: service.StatusActive, Hydrated: true, FallbackGroupIDOnInvalidRequest: &intermediateID}
+	intermediateGroup := &service.Group{ID: intermediateID, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true, ClaudeCodeOnly: true, FallbackGroupID: &finalID}
+	finalGroup := &service.Group{ID: finalID, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true, SubscriptionType: service.SubscriptionTypeSubscription}
+	initialAccount := &service.Account{ID: 154, Name: "initial-antigravity", Platform: service.PlatformAntigravity, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, AccountGroups: []service.AccountGroup{{GroupID: initialID}}, Credentials: map[string]any{"access_token": "token", "project_id": "project"}}
+	finalAccount := &service.Account{ID: 155, Name: "final-gemini", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, AccountGroups: []service.AccountGroup{{GroupID: finalID}}, Credentials: map[string]any{"api_key": "key"}}
+	upstream := &openAIRetryTrackingHTTPUpstreamStub{responses: []*http.Response{{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"Prompt is too long"}}`)),
+	}}}
+	groups := map[int64]*service.Group{initialID: initialGroup, intermediateID: intermediateGroup, finalID: finalGroup}
+	env := newTerminalGatewayMessagesEnvWithGatewayCacheAndGroups(t, initialGroup, groups, upstream, openAIChatCompletionsConcurrencyCacheStub{}, &geminiStickyGatewayCacheStub{}, initialAccount, finalAccount)
+	env.handler.cfg.RunMode = config.RunModeStandard
+	billingCache := &promptTooLongFallbackBillingCache{}
+	billingCacheService := service.NewBillingCacheService(billingCache, nil, nil, nil, nil, nil, env.handler.cfg, nil)
+	t.Cleanup(billingCacheService.Stop)
+	env.handler.billingCacheService = billingCacheService
+	groupRepo := terminalUsageGroupRepo{group: initialGroup, groups: groups}
+	apiKeyService := service.NewAPIKeyService(nil, nil, groupRepo, promptTooLongFallbackSubscriptionRepo{}, nil, nil, env.handler.cfg)
+	env.handler.apiKeyService = apiKeyService
+	env.handler.effectiveRouteResolver = service.NewEffectiveGatewayRouteResolver(apiKeyService, service.NewCompositeRouteResolver(nil), env.handler.cfg)
+
+	var finalAPIKey *service.APIKey
+	var requestGroup *service.Group
+	var finalRoute service.EffectiveGatewayRoute
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), env.apiKey)
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: env.apiKey.UserID, Concurrency: env.apiKey.User.Concurrency})
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, initialGroup))
+		c.Next()
+		finalAPIKey, _ = middleware.GetAPIKeyFromContext(c)
+		requestGroup, _ = c.Request.Context().Value(ctxkey.Group).(*service.Group)
+		finalRoute, _ = service.EffectiveGatewayRouteFromContext(c.Request.Context())
+	})
+	router.Use(middleware.UsageDetailCapture())
+	router.POST("/v1/messages", env.handler.Messages)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-opus-4-6","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+	require.Equal(t, []int64{initialAccount.ID}, upstream.accountIDs)
+	require.Same(t, env.apiKey, finalAPIKey)
+	require.Equal(t, initialID, *finalAPIKey.GroupID)
+	require.Same(t, initialGroup, requestGroup)
+	require.Equal(t, initialID, *finalRoute.GroupID)
+	require.Same(t, initialGroup, finalRoute.Group)
+	require.Equal(t, 1, billingCache.calls)
+	log := waitForOpenAIFailedUsageLog(t, env.usageRepo)
+	require.NotNil(t, log)
+	require.Len(t, env.usageRepo.created, 1)
 }
 
 func TestGatewayHandler_MessagesPromptTooLongFallbackMixedAntigravity429ClearsResolvedGeminiStickySession(t *testing.T) {

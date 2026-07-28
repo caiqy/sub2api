@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -112,6 +113,11 @@ func (r *EffectiveGatewayRouteResolver) Resolve(
 			var err error
 			subscription, err = r.apiKeyService.userSubRepo.GetActiveByUserIDAndGroupID(ctx, route.APIKey.UserID, group.ID)
 			if err != nil {
+				if errors.Is(err, ErrSubscriptionNotFound) {
+					subscriptionErr := infraerrors.Clone(ErrSubscriptionNotFound)
+					subscriptionErr.Code = http.StatusForbidden
+					return EffectiveGatewayRoute{}, subscriptionErr.WithCause(err)
+				}
 				return EffectiveGatewayRoute{}, ErrEffectiveGatewayRouteUnavailable.WithCause(err)
 			}
 		}

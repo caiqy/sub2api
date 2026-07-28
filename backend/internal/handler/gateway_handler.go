@@ -1113,9 +1113,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 							_ = h.antigravityGatewayService.WriteMappedClaudeError(c, account, promptTooLongErr.StatusCode, promptTooLongErr.RequestID, promptTooLongErr.Body)
 							return
 						}
-						if fallbackGroup.Platform != service.PlatformAnthropic && fallbackGroup.Platform != service.PlatformComposite ||
-							fallbackGroup.SubscriptionType == service.SubscriptionTypeSubscription ||
-							fallbackGroup.FallbackGroupIDOnInvalidRequest != nil {
+						if fallbackGroup.Platform != service.PlatformAnthropic && fallbackGroup.Platform != service.PlatformComposite {
 							reqLog.Warn("gateway.fallback_group_invalid",
 								zap.Int64("fallback_group_id", fallbackGroup.ID),
 								zap.String("fallback_platform", fallbackGroup.Platform),
@@ -1125,54 +1123,46 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 							_ = h.antigravityGatewayService.WriteMappedClaudeError(c, account, promptTooLongErr.StatusCode, promptTooLongErr.RequestID, promptTooLongErr.Body)
 							return
 						}
-						// 兜底重试按"直接请求兜底分组"处理：清除强制平台，允许按分组平台调度
-						ctx := service.WithoutCompositeRouteDecision(context.WithValue(c.Request.Context(), ctxkey.ForcePlatform, ""))
-						c.Request = c.Request.WithContext(ctx)
-						if reqModel != clientRequestModel {
-							body = h.gatewayService.ReplaceModelInBody(body, clientRequestModel)
-							if err := coordinator.SetEffectiveBytes(body); err != nil {
-								h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
-								return
-							}
-							effectiveBody = coordinator.Effective()
-							parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
-							if err != nil {
-								h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
-								return
-							}
-							reqModel = clientRequestModel
+						handleFallbackError := func(status int, code, message string) {
+							submitPromptTooLongFailedUsage()
+							h.handleStreamingAwareError(c, status, code, message, streamStarted)
 						}
-						fallbackRoute, resolveErr := h.effectiveRouteResolver.Resolve(
-							c.Request.Context(), apiKey, nil, fallbackGroup,
+						fallbackContext := service.WithoutCompositeRouteDecision(context.WithValue(c.Request.Context(), ctxkey.ForcePlatform, ""))
+						candidate, err := h.effectiveRouteResolver.Resolve(
+							fallbackContext, apiKey, currentSubscription, fallbackGroup,
 							clientRequestModel, service.CompositeRouteEndpointMessages,
 						)
-						err = resolveErr
 						if err != nil {
-							h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error(), streamStarted)
+							handleFallbackError(
+								pkgerrors.Code(err),
+								pkgerrors.Reason(err),
+								pkgerrors.Message(err),
+							)
 							return
 						}
-						ctx = c.Request.Context()
-						if fallbackRoute.Decision != nil {
-							ctx = service.WithCompositeRouteDecision(service.WithoutCompositeRouteDecision(ctx), *fallbackRoute.Decision)
-						}
-						if fallbackRoute.Group != nil {
-							ctx = context.WithValue(ctx, ctxkey.Group, fallbackRoute.Group)
-						}
-						c.Request = c.Request.WithContext(ctx)
-						currentAPIKey = fallbackRoute.APIKey
-						currentStickyGroupID = fallbackRoute.GroupID
-						platform = fallbackRoute.Platform
-						if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), currentAPIKey.User, currentAPIKey, currentAPIKey.Group, nil, service.PlatformFromAPIKey(currentAPIKey)); err != nil {
+
+						mapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(fallbackContext, candidate.GroupID, candidate.RoutingModel)
+						candidate = candidate.WithChannelMapping(mapping)
+						if err := h.billingCacheService.CheckBillingEligibility(
+							c.Request.Context(), candidate.APIKey.User, candidate.APIKey,
+							candidate.Group, candidate.Subscription, candidate.Platform,
+						); err != nil {
 							status, code, message, retryAfter := billingErrorDetails(err)
 							if retryAfter > 0 {
 								c.Header("Retry-After", strconv.Itoa(retryAfter))
 							}
-							submitPromptTooLongFailedUsage()
-							h.handleStreamingAwareError(c, status, code, message, streamStarted)
+							handleFallbackError(status, code, message)
 							return
 						}
-						if upstreamModel, ok := service.ResolvedUpstreamModelFromContext(c.Request.Context()); ok && upstreamModel != reqModel {
-							body = h.gatewayService.ReplaceModelInBody(body, upstreamModel)
+
+						middleware2.ApplyEffectiveGatewayRoute(c, candidate)
+						c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.ForcePlatform, ""))
+						currentAPIKey = candidate.APIKey
+						currentSubscription = candidate.Subscription
+						currentStickyGroupID = candidate.GroupID
+						platform = candidate.Platform
+						if candidate.RoutingModel != reqModel {
+							body = h.gatewayService.ReplaceModelInBody(body, candidate.RoutingModel)
 							if err := coordinator.SetEffectiveBytes(body); err != nil {
 								h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 								return
@@ -1183,9 +1173,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 								h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 								return
 							}
-							reqModel = upstreamModel
+							reqModel = candidate.RoutingModel
 						}
-						channelMapping, _ = h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), currentAPIKey.GroupID, reqModel)
+						channelMapping = candidate.Channel
 						setChannelUsageFields(c, clientRequestedUsageFields(c, channelMapping, reqModel, ""))
 						if userGroupReleaseFunc != nil {
 							userGroupReleaseFunc()
@@ -1201,7 +1191,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 							ctx := service.WithPrefetchedStickySession(c.Request.Context(), sessionBoundAccountID, derefGroupID(currentStickyGroupID), h.metadataBridgeEnabled())
 							c.Request = c.Request.WithContext(ctx)
 						}
-						currentSubscription = nil
 						fallbackUsed = true
 						retryWithFallback = true
 						break

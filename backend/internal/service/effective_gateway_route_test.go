@@ -53,6 +53,7 @@ func requireEffectiveGatewayApplicationError(t *testing.T, err, target error, st
 type effectiveRouteSubscriptionRepo struct {
 	UserSubscriptionRepository
 	subscriptions map[[2]int64]*UserSubscription
+	err           error
 }
 
 type effectiveRouteNilSubscriptionRepo struct {
@@ -64,6 +65,9 @@ func (effectiveRouteNilSubscriptionRepo) GetActiveByUserIDAndGroupID(context.Con
 }
 
 func (r effectiveRouteSubscriptionRepo) GetActiveByUserIDAndGroupID(_ context.Context, userID, groupID int64) (*UserSubscription, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
 	sub := r.subscriptions[[2]int64{userID, groupID}]
 	if sub == nil {
 		return nil, ErrSubscriptionNotFound
@@ -121,19 +125,52 @@ func TestEffectiveGatewayRouteResolverRejectsUnavailableFinalSubscription(t *tes
 	startID, finalID := int64(1), int64(2)
 	start := &Group{ID: startID, Status: StatusActive, ClaudeCodeOnly: true, FallbackGroupID: &finalID}
 	final := &Group{ID: finalID, Status: StatusActive, SubscriptionType: SubscriptionTypeSubscription}
-	resolver := NewEffectiveGatewayRouteResolver(
-		&APIKeyService{
-			groupRepo:   effectiveRouteGroupRepo{groups: map[int64]*Group{finalID: final}},
-			userSubRepo: effectiveRouteSubscriptionRepo{},
+	sentinel := errors.New("subscription repository unavailable")
+
+	for _, tt := range []struct {
+		name       string
+		repo       effectiveRouteSubscriptionRepo
+		want       error
+		wantStatus int
+		wantReason string
+		wantMsg    string
+		wantCause  error
+	}{
+		{
+			name:       "missing subscription",
+			repo:       effectiveRouteSubscriptionRepo{},
+			want:       ErrSubscriptionNotFound,
+			wantStatus: http.StatusForbidden,
+			wantReason: "SUBSCRIPTION_NOT_FOUND",
+			wantMsg:    "subscription not found",
+			wantCause:  ErrSubscriptionNotFound,
 		},
-		nil,
-		&config.Config{},
-	)
+		{
+			name:       "repository error",
+			repo:       effectiveRouteSubscriptionRepo{err: sentinel},
+			want:       ErrEffectiveGatewayRouteUnavailable,
+			wantStatus: http.StatusServiceUnavailable,
+			wantReason: "NO_AVAILABLE_ACCOUNTS",
+			wantMsg:    "No available accounts",
+			wantCause:  sentinel,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			resolver := NewEffectiveGatewayRouteResolver(
+				&APIKeyService{
+					groupRepo:   effectiveRouteGroupRepo{groups: map[int64]*Group{finalID: final}},
+					userSubRepo: tt.repo,
+				},
+				nil,
+				&config.Config{},
+			)
 
-	_, err := resolver.Resolve(context.Background(), &APIKey{UserID: 42, GroupID: &startID, Group: start, User: &User{ID: 42}}, nil, start, "claude-sonnet-4-6", CompositeRouteEndpointMessages)
+			_, err := resolver.Resolve(context.Background(), &APIKey{UserID: 42, GroupID: &startID, Group: start, User: &User{ID: 42}}, nil, start, "claude-sonnet-4-6", CompositeRouteEndpointMessages)
 
-	require.ErrorIs(t, err, ErrEffectiveGatewayRouteUnavailable)
-	require.ErrorIs(t, err, ErrSubscriptionNotFound)
+			requireEffectiveGatewayApplicationError(t, err, tt.want, tt.wantStatus, tt.wantReason, tt.wantMsg)
+			require.ErrorIs(t, err, tt.wantCause)
+		})
+	}
 }
 
 func TestEffectiveGatewayRouteResolverRejectsNilFinalSubscription(t *testing.T) {
