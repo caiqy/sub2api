@@ -1693,7 +1693,7 @@ func TestOpenAIGatewayServiceRecordUsage_CompositePublicAliasPricing(t *testing.
 			Account: &Account{ID: 904},
 			ChannelUsageFields: ChannelUsageFields{
 				OriginalModel:      publicModel,
-				ChannelMappedModel: publicModel,
+				ChannelMappedModel: concreteModel,
 				BillingModelSource: BillingModelSourceRequested,
 			},
 		})
@@ -1752,7 +1752,7 @@ func TestOpenAIGatewayServiceRecordUsage_CompositePublicAliasPricing(t *testing.
 			Account: &Account{ID: 905},
 			ChannelUsageFields: ChannelUsageFields{
 				OriginalModel:      publicModel,
-				ChannelMappedModel: publicModel,
+				ChannelMappedModel: concreteModel,
 				BillingModelSource: BillingModelSourceRequested,
 			},
 		})

@@ -48,6 +48,9 @@ func clientRequestedUsageFields(c *gin.Context, mapping service.ChannelMappingRe
 		return fields
 	}
 	fields.OriginalModel = requestedModel
+	if !mapping.Mapped && fields.BillingModelSource == service.BillingModelSourceChannelMapped {
+		fields.BillingModelSource = service.BillingModelSourceRequested
+	}
 	if fields.ModelMappingChain != "" {
 		fields.ModelMappingChain = requestedModel + "→" + fields.ModelMappingChain
 	} else if fields.ChannelMappedModel != "" && fields.ChannelMappedModel != requestedModel {

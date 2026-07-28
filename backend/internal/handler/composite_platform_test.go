@@ -90,11 +90,13 @@ func TestClientRequestedUsageFieldsPreservesCompositeModelTriplet(t *testing.T) 
 	}))
 
 	fields := clientRequestedUsageFields(c, service.ChannelMappingResult{
-		Mapped:      true,
-		MappedModel: "gpt-5.1",
+		Mapped:             true,
+		MappedModel:        "gpt-5.1",
+		BillingModelSource: service.BillingModelSourceChannelMapped,
 	}, "gpt-5", "gpt-5.2")
 	require.Equal(t, "public-alias", fields.OriginalModel)
 	require.Equal(t, "gpt-5.1", fields.ChannelMappedModel)
+	require.Equal(t, service.BillingModelSourceChannelMapped, fields.BillingModelSource)
 	require.Equal(t, "public-alias→gpt-5→gpt-5.1→gpt-5.2", fields.ModelMappingChain)
 }
 
@@ -132,11 +134,48 @@ func TestClientRequestedUsageFieldsPreservesConcreteCompositeRouteWithoutChannel
 
 	fields := clientRequestedUsageFields(
 		c,
-		service.ChannelMappingResult{MappedModel: "gpt-5"},
+		service.ChannelMappingResult{
+			MappedModel:        "gpt-5",
+			BillingModelSource: service.BillingModelSourceChannelMapped,
+		},
 		"gpt-5",
 		"gpt-5.2",
 	)
 	require.Equal(t, "public-alias", fields.OriginalModel)
 	require.Equal(t, "gpt-5", fields.ChannelMappedModel)
+	require.Equal(t, service.BillingModelSourceRequested, fields.BillingModelSource)
 	require.Equal(t, "public-alias→gpt-5→gpt-5.2", fields.ModelMappingChain)
+}
+
+func TestClientRequestedUsageFieldsPreservesExplicitBillingModelSource(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	c.Request = c.Request.WithContext(service.WithCompositeRouteDecision(c.Request.Context(), service.CompositeRouteDecision{
+		Matched:        true,
+		Source:         service.CompositeRouteSourceExplicit,
+		PublicModel:    "public-alias",
+		TargetPlatform: service.PlatformOpenAI,
+		UpstreamModel:  "gpt-5",
+	}))
+
+	for _, source := range []string{service.BillingModelSourceRequested, service.BillingModelSourceUpstream} {
+		fields := clientRequestedUsageFields(c, service.ChannelMappingResult{
+			MappedModel:        "gpt-5",
+			BillingModelSource: source,
+		}, "gpt-5", "gpt-5.2")
+		require.Equal(t, source, fields.BillingModelSource)
+	}
+}
+
+func TestClientRequestedUsageFieldsPreservesNonCompositeIdentity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	mapping := service.ChannelMappingResult{
+		MappedModel:        "gpt-5",
+		BillingModelSource: service.BillingModelSourceChannelMapped,
+	}
+
+	require.Equal(t, mapping.ToUsageFields("gpt-5", "gpt-5"), clientRequestedUsageFields(c, mapping, "gpt-5", "gpt-5"))
 }

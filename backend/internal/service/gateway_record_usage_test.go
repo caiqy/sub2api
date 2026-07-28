@@ -194,6 +194,46 @@ func TestGatewayServiceRecordUsage_PreservesRequestedAndUpstreamModels(t *testin
 	require.Equal(t, mappedModel, *usageRepo.lastLog.UpstreamModel)
 }
 
+func TestGatewayServiceRecordUsage_CompositeRequestedAliasFallsBackToConcretePricing(t *testing.T) {
+	const (
+		publicModel   = "team/claude"
+		concreteModel = "claude-sonnet-4"
+	)
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	svc := newGatewayRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{})
+	usage := ClaudeUsage{InputTokens: 20, OutputTokens: 10}
+	expected, err := svc.billingService.CalculateCost(concreteModel, UsageTokens{InputTokens: 20, OutputTokens: 10}, 1)
+	require.NoError(t, err)
+
+	err = svc.RecordUsage(context.Background(), &RecordUsageInput{
+		Result: &ForwardResult{
+			RequestID:     "gateway_composite_alias_concrete_pricing",
+			Model:         concreteModel,
+			UpstreamModel: concreteModel,
+			Usage:         usage,
+			Duration:      time.Second,
+		},
+		APIKey: &APIKey{
+			ID:      502,
+			GroupID: i64p(905),
+			Group:   &Group{ID: 905, Platform: PlatformComposite, RateMultiplier: 1},
+		},
+		User:    &User{ID: 602},
+		Account: &Account{ID: 702},
+		ChannelUsageFields: ChannelUsageFields{
+			OriginalModel:      publicModel,
+			ChannelMappedModel: concreteModel,
+			BillingModelSource: BillingModelSourceRequested,
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.InDelta(t, expected.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)
+	require.InDelta(t, expected.ActualCost, userRepo.lastAmount, 1e-12)
+}
+
 func TestGatewayServiceRecordUsage_EmptyImageSizeDefaultsBeforeBillingAndPersistence(t *testing.T) {
 	imagePrice2K := 0.19
 	groupID := int64(901)
