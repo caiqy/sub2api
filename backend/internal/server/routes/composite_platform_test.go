@@ -432,10 +432,55 @@ func TestCompositeTargetPlatformMiddlewareRejectsOversizedRuntimeRouteModels(t *
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, req)
 
+			require.Equal(t, http.StatusInternalServerError, w.Code)
+			require.JSONEq(t, `{"error":{"type":"server_error","message":"Failed to resolve composite model route"}}`, w.Body.String())
+			require.False(t, reachedHandler)
+		})
+	}
+}
+
+func TestCompositeTargetPlatformMiddlewareRejectsTargetGroupWithoutResolver(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, group := range []*service.Group{
+		{ID: 1, Platform: service.PlatformComposite, Status: service.StatusActive},
+		{ID: 2, Platform: service.PlatformAnthropic, Status: service.StatusActive, ClaudeCodeOnly: true},
+	} {
+		t.Run(strconv.FormatInt(group.ID, 10), func(t *testing.T) {
+			reachedHandler := false
+			router := gin.New()
+			router.Use(func(c *gin.Context) {
+				groupID := group.ID
+				c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{GroupID: &groupID, Group: group})
+				c.Next()
+			})
+			router.Use(compositeTargetPlatformMiddleware(nil))
+			router.POST("/v1/messages", func(c *gin.Context) { reachedHandler = true })
+
+			req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gpt-5"}`))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
 			require.Equal(t, http.StatusServiceUnavailable, w.Code)
 			require.False(t, reachedHandler)
 		})
 	}
+}
+
+func TestCompositeTargetPlatformMiddlewareAllowsOrdinaryGroupWithoutResolver(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		groupID := int64(3)
+		c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{GroupID: &groupID, Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI}})
+		c.Next()
+	})
+	router.Use(compositeTargetPlatformMiddleware(nil))
+	router.POST("/v1/messages", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gpt-5"}`)))
+	require.Equal(t, http.StatusNoContent, w.Code)
 }
 
 func TestCompositeGeminiTargetPlatformMiddlewareUsesPathRoute(t *testing.T) {

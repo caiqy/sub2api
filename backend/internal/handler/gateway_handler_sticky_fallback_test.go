@@ -8,8 +8,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -249,9 +251,11 @@ func TestGatewayHandlerMessagesUsesEffectiveRouteSnapshot(t *testing.T) {
 	finalKey := *env.apiKey
 	finalKey.GroupID = &finalID
 	finalKey.Group = finalGroup
+	finalSubscription := &service.UserSubscription{ID: 604, UserID: env.apiKey.UserID, GroupID: finalID, Status: service.SubscriptionStatusActive}
 	route := service.EffectiveGatewayRoute{
 		APIKey: env.apiKey, Group: finalGroup, GroupID: &finalID,
-		Endpoint: service.CompositeRouteEndpointMessages, ClientModel: "claude-sonnet-4-6",
+		Subscription: finalSubscription,
+		Endpoint:     service.CompositeRouteEndpointMessages, ClientModel: "claude-sonnet-4-6",
 		RoutingModel: "claude-sonnet-4-6", UpstreamModel: "claude-sonnet-4-6", Platform: service.PlatformAnthropic,
 		Channel: service.ChannelMappingResult{ChannelID: 999},
 	}
@@ -262,8 +266,19 @@ func TestGatewayHandlerMessagesUsesEffectiveRouteSnapshot(t *testing.T) {
 	router.Use(func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyAPIKey), env.apiKey)
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: env.apiKey.UserID, Concurrency: env.apiKey.User.Concurrency})
-		c.Request = c.Request.WithContext(service.WithEffectiveGatewayRoute(c.Request.Context(), route))
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, originalGroup))
+		middleware.ApplyEffectiveGatewayRoute(c, route)
 		c.Next()
+		effectiveKey, ok := middleware.GetAPIKeyFromContext(c)
+		require.True(t, ok)
+		require.Equal(t, finalID, *effectiveKey.GroupID)
+		require.Same(t, finalGroup, effectiveKey.Group)
+		subscription, ok := middleware.GetSubscriptionFromContext(c)
+		require.True(t, ok)
+		require.Equal(t, finalID, subscription.GroupID)
+		contextGroup, ok := c.Request.Context().Value(ctxkey.Group).(*service.Group)
+		require.True(t, ok)
+		require.Equal(t, finalID, contextGroup.ID)
 		finalRoute, _ = service.EffectiveGatewayRouteFromContext(c.Request.Context())
 	})
 	router.POST("/v1/messages", env.handler.Messages)
@@ -278,4 +293,149 @@ func TestGatewayHandlerMessagesUsesEffectiveRouteSnapshot(t *testing.T) {
 	require.NotContains(t, env.accountRepo.groupIDs, originalID)
 	require.Equal(t, "claude-sonnet-4-6", finalRoute.Channel.MappedModel)
 	require.Zero(t, finalRoute.Channel.ChannelID)
+}
+
+func TestGatewayHandlerMessagesClearsStaleSubscriptionFromEffectiveBalanceRoute(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	groupID := int64(611)
+	group := &service.Group{ID: groupID, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{
+		ID: 612, Name: "balance-anthropic", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey,
+		Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1,
+		Credentials: map[string]any{"api_key": "test-key"},
+	}
+	upstream := &openAIChatCompletionsHTTPUpstreamStub{response: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"text","text":"ok"}],"model":"claude-sonnet-4-6","usage":{"input_tokens":1,"output_tokens":1}}`)),
+	}}
+	env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+	oldSubscription := &service.UserSubscription{ID: 613, UserID: env.apiKey.UserID, GroupID: 999, Status: service.SubscriptionStatusActive}
+	route := service.EffectiveGatewayRoute{
+		APIKey: env.apiKey, Group: group, GroupID: &groupID, BillingSource: service.EffectiveGatewayBillingBalance,
+		ClientModel: "claude-sonnet-4-6", RoutingModel: "claude-sonnet-4-6", UpstreamModel: "claude-sonnet-4-6", Platform: service.PlatformAnthropic,
+	}
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), env.apiKey)
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: env.apiKey.UserID, Concurrency: env.apiKey.User.Concurrency})
+		c.Set(string(middleware.ContextKeySubscription), oldSubscription)
+		c.Request = c.Request.WithContext(service.WithEffectiveGatewayRoute(c.Request.Context(), route))
+		c.Next()
+	})
+	router.Use(middleware.UsageDetailCapture())
+	router.POST("/v1/messages", env.handler.Messages)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-6","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	select {
+	case log := <-env.usageRepo.created:
+		require.Nil(t, log.SubscriptionID)
+	case <-time.After(2 * time.Second):
+		t.Fatal("usage record not created")
+	}
+}
+
+func TestGatewayHandlerDirectWithoutEffectiveRouteResolverReturnsControlledError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tt := range []struct {
+		name    string
+		path    string
+		body    string
+		handler func(*GatewayHandler, *gin.Context)
+	}{
+		{name: "messages", path: "/v1/messages", body: `{"model":"claude-sonnet-4-6","max_tokens":16,"messages":[]}`, handler: func(h *GatewayHandler, c *gin.Context) { h.Messages(c) }},
+		{name: "count tokens", path: "/v1/messages/count_tokens", body: `{"model":"claude-sonnet-4-6","messages":[]}`, handler: func(h *GatewayHandler, c *gin.Context) { h.CountTokens(c) }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			group := &service.Group{ID: 621, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+			env := newTerminalGatewayMessagesEnv(t, group, nil)
+			env.handler.effectiveRouteResolver = nil
+			router := env.routerFor(tt.path, func(c *gin.Context) { tt.handler(env.handler, c) })
+
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, tt.path, strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+			require.Contains(t, rec.Body.String(), "Service temporarily unavailable")
+			require.Empty(t, env.accountRepo.groupIDs)
+		})
+	}
+}
+
+func TestEffectiveGatewayRouteResolverPreservesClaudeCodeRestrictionErrors(t *testing.T) {
+	groupTwoID, groupThreeID := int64(632), int64(633)
+	groups := map[int64]*service.Group{
+		631:          {ID: 631, Platform: service.PlatformAnthropic, Status: service.StatusActive, ClaudeCodeOnly: true},
+		groupTwoID:   {ID: groupTwoID, Platform: service.PlatformGemini, Status: service.StatusActive, ClaudeCodeOnly: true, FallbackGroupID: &groupThreeID},
+		groupThreeID: {ID: groupThreeID, Platform: service.PlatformAnthropic, Status: service.StatusActive, ClaudeCodeOnly: true, FallbackGroupID: &groupTwoID},
+	}
+	apiKeyService := service.NewAPIKeyService(nil, nil, &stickyFallbackGroupRepo{groups: groups}, nil, nil, nil, &config.Config{})
+	resolver := service.NewEffectiveGatewayRouteResolver(apiKeyService, service.NewCompositeRouteResolver(nil), &config.Config{})
+
+	for _, tt := range []struct {
+		name      string
+		group     *service.Group
+		wantError error
+		contains  string
+	}{
+		{name: "restriction", group: groups[631], wantError: service.ErrClaudeCodeOnly},
+		{name: "cycle", group: groups[groupTwoID], contains: "fallback group cycle detected"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			groupID := tt.group.ID
+			apiKey := &service.APIKey{UserID: 634, GroupID: &groupID, Group: tt.group, User: &service.User{ID: 634}}
+
+			_, err := resolver.Resolve(context.Background(), apiKey, nil, nil, "claude-sonnet-4-6", service.CompositeRouteEndpointMessages)
+
+			require.ErrorIs(t, err, service.ErrEffectiveGatewayRouteUnavailable)
+			if tt.wantError != nil {
+				require.ErrorIs(t, err, tt.wantError)
+			}
+			if tt.contains != "" {
+				require.ErrorContains(t, err, tt.contains)
+			}
+		})
+	}
+}
+
+func TestEffectiveGatewayRouteResolverForcePlatformBypassesClaudeCodeRestriction(t *testing.T) {
+	groupID := int64(641)
+	group := &service.Group{ID: groupID, Platform: service.PlatformAnthropic, Status: service.StatusActive, ClaudeCodeOnly: true}
+	apiKey := &service.APIKey{UserID: 642, GroupID: &groupID, Group: group, User: &service.User{ID: 642}}
+	resolver := service.NewEffectiveGatewayRouteResolver(&service.APIKeyService{}, service.NewCompositeRouteResolver(nil), &config.Config{})
+	ctx := context.WithValue(context.Background(), ctxkey.ForcePlatform, service.PlatformAntigravity)
+
+	route, err := resolver.Resolve(ctx, apiKey, nil, nil, "claude-sonnet-4-6", service.CompositeRouteEndpointMessages)
+
+	require.NoError(t, err)
+	require.Same(t, apiKey, route.APIKey)
+	require.Same(t, group, route.Group)
+	require.Equal(t, groupID, *route.GroupID)
+}
+
+func TestEffectiveGatewayRouteResolverUsesConcreteClaudeCodeFallback(t *testing.T) {
+	originalID, fallbackID := int64(651), int64(652)
+	original := &service.Group{ID: originalID, Platform: service.PlatformComposite, Status: service.StatusActive, ClaudeCodeOnly: true, FallbackGroupID: &fallbackID}
+	fallback := &service.Group{ID: fallbackID, Platform: service.PlatformAnthropic, Status: service.StatusActive}
+	apiKeyService := service.NewAPIKeyService(nil, nil, &stickyFallbackGroupRepo{groups: map[int64]*service.Group{fallbackID: fallback}}, nil, nil, nil, &config.Config{})
+	resolver := service.NewEffectiveGatewayRouteResolver(apiKeyService, service.NewCompositeRouteResolver(nil), &config.Config{})
+	apiKey := &service.APIKey{UserID: 653, GroupID: &originalID, Group: original, User: &service.User{ID: 653}}
+
+	route, err := resolver.Resolve(context.Background(), apiKey, nil, nil, "claude-sonnet-4-6", service.CompositeRouteEndpointMessages)
+
+	require.NoError(t, err)
+	require.NotSame(t, apiKey, route.APIKey)
+	require.Equal(t, fallbackID, *route.APIKey.GroupID)
+	require.Same(t, fallback, route.APIKey.Group)
+	require.Same(t, fallback, route.Group)
+	require.Equal(t, service.PlatformAnthropic, route.Platform)
+	require.Nil(t, route.Decision)
 }

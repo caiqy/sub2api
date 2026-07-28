@@ -391,9 +391,14 @@ func compositeTargetPlatformMiddleware(resolver *service.EffectiveGatewayRouteRe
 	return func(c *gin.Context) {
 		apiKey, ok := middleware.GetAPIKeyFromContext(c)
 		if !ok || apiKey == nil || apiKey.Group == nil ||
-			(apiKey.Group.Platform != service.PlatformComposite && !apiKey.Group.ClaudeCodeOnly) ||
-			resolver == nil || c.Request == nil {
+			(apiKey.Group.Platform != service.PlatformComposite && !apiKey.Group.ClaudeCodeOnly) {
 			c.Next()
+			return
+		}
+		if resolver == nil || c.Request == nil {
+			err := service.ErrEffectiveGatewayRouteUnavailable
+			middleware.AbortWithError(c, pkgerrors.Code(err), pkgerrors.Reason(err), pkgerrors.Message(err))
+			c.Abort()
 			return
 		}
 
@@ -429,7 +434,11 @@ func compositeTargetPlatformMiddleware(resolver *service.EffectiveGatewayRouteRe
 		)
 		if err != nil {
 			c.Request = c.Request.WithContext(originalCtx)
-			middleware.AbortWithError(c, pkgerrors.Code(err), pkgerrors.Reason(err), pkgerrors.Message(err))
+			if errors.Is(err, service.ErrCompositeModelInvalid) {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"type": "server_error", "message": "Failed to resolve composite model route"}})
+			} else {
+				middleware.AbortWithError(c, pkgerrors.Code(err), pkgerrors.Reason(err), pkgerrors.Message(err))
+			}
 			c.Abort()
 			return
 		}

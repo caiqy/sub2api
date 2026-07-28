@@ -879,13 +879,27 @@ func TestGatewayHandler_MessagesPromptTooLongFallbackBillingRejectionCreatesOrig
 	billingCacheService := service.NewBillingCacheService(billingCache, nil, nil, nil, nil, nil, &config.Config{Default: config.DefaultConfig{RateMultiplier: 1}}, nil)
 	t.Cleanup(func() { billingCacheService.Stop() })
 	env.handler.billingCacheService = billingCacheService
+	var finalRoute service.EffectiveGatewayRoute
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), env.apiKey)
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: env.apiKey.UserID, Concurrency: env.apiKey.User.Concurrency})
+		c.Next()
+	})
+	router.Use(middleware.UsageDetailCapture())
+	router.POST("/v1/messages", func(c *gin.Context) {
+		env.handler.Messages(c)
+		finalRoute, _ = service.EffectiveGatewayRouteFromContext(c.Request.Context())
+	})
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-opus-4-6","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`))
 	req.Header.Set("Content-Type", "application/json")
-	env.router().ServeHTTP(rec, req)
+	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.NotNil(t, finalRoute.GroupID)
+	require.Equal(t, group.ID, *finalRoute.GroupID)
 	log := waitForOpenAIFailedUsageLog(t, env.usageRepo)
 	require.NotNil(t, log)
 	require.Len(t, env.usageRepo.created, 1)

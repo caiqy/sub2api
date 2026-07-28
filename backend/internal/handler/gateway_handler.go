@@ -298,6 +298,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	route, hasRoute := service.EffectiveGatewayRouteFromContext(c.Request.Context())
 	if !hasRoute {
+		if h.effectiveRouteResolver == nil {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable")
+			return
+		}
 		route, err = h.effectiveRouteResolver.Resolve(c.Request.Context(), apiKey, subscription, nil, clientRequestModel, service.CompositeRouteEndpointMessages)
 		if err != nil {
 			h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error(), false)
@@ -312,9 +316,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	if route.APIKey != nil {
 		apiKey = route.APIKey
 	}
-	if route.Subscription != nil {
-		subscription = route.Subscription
-	}
+	subscription = route.Subscription
 	if route.ClientModel != "" {
 		clientRequestModel = route.ClientModel
 	}
@@ -1149,9 +1151,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 							h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error(), streamStarted)
 							return
 						}
-						ctx = service.WithEffectiveGatewayRoute(c.Request.Context(), fallbackRoute)
+						ctx = c.Request.Context()
 						if fallbackRoute.Decision != nil {
 							ctx = service.WithCompositeRouteDecision(service.WithoutCompositeRouteDecision(ctx), *fallbackRoute.Decision)
+						}
+						if fallbackRoute.Group != nil {
+							ctx = context.WithValue(ctx, ctxkey.Group, fallbackRoute.Group)
 						}
 						c.Request = c.Request.WithContext(ctx)
 						currentAPIKey = fallbackRoute.APIKey
@@ -1181,8 +1186,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 							reqModel = upstreamModel
 						}
 						channelMapping, _ = h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), currentAPIKey.GroupID, reqModel)
-						fallbackRoute = fallbackRoute.WithChannelMapping(channelMapping)
-						c.Request = c.Request.WithContext(service.WithEffectiveGatewayRoute(c.Request.Context(), fallbackRoute))
 						setChannelUsageFields(c, clientRequestedUsageFields(c, channelMapping, reqModel, ""))
 						if userGroupReleaseFunc != nil {
 							userGroupReleaseFunc()
@@ -2349,6 +2352,10 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	route, hasRoute := service.EffectiveGatewayRouteFromContext(c.Request.Context())
 	if !hasRoute {
+		if h.effectiveRouteResolver == nil {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable")
+			return
+		}
 		route, err = h.effectiveRouteResolver.Resolve(c.Request.Context(), apiKey, subscription, nil, clientRequestModel, service.CompositeRouteEndpointCountTokens)
 		if err != nil {
 			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error())
@@ -2363,9 +2370,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	if route.APIKey != nil {
 		apiKey = route.APIKey
 	}
-	if route.Subscription != nil {
-		subscription = route.Subscription
-	}
+	subscription = route.Subscription
 	if route.ClientModel != "" {
 		clientRequestModel = route.ClientModel
 	}

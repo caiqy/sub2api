@@ -386,7 +386,7 @@ func TestGatewayRoutesMessagesDispatchesUsingEffectiveFallbackPlatform(t *testin
 	gin.SetMode(gin.TestMode)
 	originalID, finalID := int64(501), int64(502)
 	originalGroup := &service.Group{ID: originalID, Platform: service.PlatformAnthropic, Status: service.StatusActive, ClaudeCodeOnly: true, FallbackGroupID: &finalID}
-	finalGroup := &service.Group{ID: finalID, Platform: service.PlatformOpenAI, Status: service.StatusActive, AllowMessagesDispatch: true}
+	finalGroup := &service.Group{ID: finalID, Platform: service.PlatformOpenAI, Status: service.StatusActive}
 	apiKey := &service.APIKey{ID: 503, UserID: 504, GroupID: &originalID, Group: originalGroup, User: &service.User{ID: 504, Status: service.StatusActive, Concurrency: 1}}
 	cfg := &config.Config{RunMode: config.RunModeSimple, Gateway: config.GatewayConfig{MaxBodySize: 1 << 20}}
 	effectiveResolver := newEffectiveRouteResolverForTest(cfg, map[int64]*service.Group{finalID: finalGroup}, nil)
@@ -429,6 +429,6 @@ func TestGatewayRoutesMessagesDispatchesUsingEffectiveFallbackPlatform(t *testin
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusServiceUnavailable, w.Code)
-	require.Contains(t, w.Body.String(), "Service temporarily unavailable")
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Contains(t, w.Body.String(), "does not allow /v1/messages dispatch")
 }

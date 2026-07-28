@@ -2,10 +2,18 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 )
+
+var ErrCompositeModelInvalid = errors.New("invalid composite model")
+
+type compositeModelValidationError string
+
+func (e compositeModelValidationError) Error() string { return string(e) }
+func (e compositeModelValidationError) Unwrap() error { return ErrCompositeModelInvalid }
 
 type CompositeRouteResolver struct {
 	repo CompositeModelRouteRepository
@@ -28,7 +36,7 @@ func (r *CompositeRouteResolver) Resolve(ctx context.Context, groupID int64, mod
 		return decision, nil
 	}
 	if len(model) > compositeRouteModelMaxLength {
-		return decision, fmt.Errorf("model must be at most %d characters", compositeRouteModelMaxLength)
+		return decision, fmt.Errorf("%w", compositeModelValidationError(fmt.Sprintf("model must be at most %d characters", compositeRouteModelMaxLength)))
 	}
 
 	if r != nil && r.repo != nil && groupID > 0 {
@@ -42,7 +50,7 @@ func (r *CompositeRouteResolver) Resolve(ctx context.Context, groupID int64, mod
 				upstreamModel = model
 			}
 			if len(strings.TrimSpace(route.PublicModel)) > compositeRouteModelMaxLength || len(upstreamModel) > compositeRouteModelMaxLength {
-				return decision, fmt.Errorf("composite route model must be at most %d characters", compositeRouteModelMaxLength)
+				return decision, fmt.Errorf("%w", compositeModelValidationError(fmt.Sprintf("composite route model must be at most %d characters", compositeRouteModelMaxLength)))
 			}
 			return CompositeRouteDecision{
 				Matched:        true,

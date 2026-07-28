@@ -344,30 +344,38 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	SetClaudeCodeClientContext(c, body, nil)
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	route, hasRoute := service.EffectiveGatewayRouteFromContext(c.Request.Context())
-	if !hasRoute && h.effectiveRouteResolver != nil {
-		route, err = h.effectiveRouteResolver.Resolve(c.Request.Context(), apiKey, subscription, nil, clientModel, service.CompositeRouteEndpointResponses)
-		if err != nil {
-			h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error())
+	if !hasRoute {
+		if h.effectiveRouteResolver == nil && apiKey.Group != nil &&
+			(apiKey.Group.Platform == service.PlatformComposite || apiKey.Group.ClaudeCodeOnly) {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable")
 			return
 		}
-		ctx := service.WithEffectiveGatewayRoute(c.Request.Context(), route)
-		if route.Decision != nil {
-			ctx = service.WithCompositeRouteDecision(service.WithoutCompositeRouteDecision(ctx), *route.Decision)
+		if h.effectiveRouteResolver != nil {
+			route, err = h.effectiveRouteResolver.Resolve(c.Request.Context(), apiKey, subscription, nil, clientModel, service.CompositeRouteEndpointResponses)
+			if err != nil {
+				h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error())
+				return
+			}
+			ctx := service.WithEffectiveGatewayRoute(c.Request.Context(), route)
+			if route.Decision != nil {
+				ctx = service.WithCompositeRouteDecision(service.WithoutCompositeRouteDecision(ctx), *route.Decision)
+			}
+			c.Request = c.Request.WithContext(ctx)
+			hasRoute = true
 		}
-		c.Request = c.Request.WithContext(ctx)
 	}
-	if route.APIKey != nil {
-		apiKey = route.APIKey
-	}
-	if route.Subscription != nil {
+	if hasRoute {
+		if route.APIKey != nil {
+			apiKey = route.APIKey
+		}
 		subscription = route.Subscription
-	}
-	if route.ClientModel != "" {
-		clientModel = route.ClientModel
-	}
-	if route.RoutingModel != "" && route.RoutingModel != reqModel {
-		body = h.gatewayService.ReplaceModelInBody(body, route.RoutingModel)
-		reqModel = route.RoutingModel
+		if route.ClientModel != "" {
+			clientModel = route.ClientModel
+		}
+		if route.RoutingModel != "" && route.RoutingModel != reqModel {
+			body = h.gatewayService.ReplaceModelInBody(body, route.RoutingModel)
+			reqModel = route.RoutingModel
+		}
 	}
 	ensureCompositeTargetPlatform(c, apiKey, reqModel)
 	if !compositeTargetPlatformAllowed(c, apiKey, reqModel, service.PlatformOpenAI, service.PlatformGrok) {
@@ -435,6 +443,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		if imageReleaseFunc != nil {
 			defer imageReleaseFunc()
 		}
+	}
+	if !hasRoute {
+		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable")
+		return
 	}
 
 	// 解析渠道级模型映射
@@ -1011,6 +1023,10 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	route, hasRoute := service.EffectiveGatewayRouteFromContext(c.Request.Context())
 	if !hasRoute {
+		if h.effectiveRouteResolver == nil {
+			h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable")
+			return
+		}
 		route, err = h.effectiveRouteResolver.Resolve(c.Request.Context(), apiKey, subscription, nil, clientModel, service.CompositeRouteEndpointMessages)
 		if err != nil {
 			h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error())
@@ -1025,9 +1041,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	if route.APIKey != nil {
 		apiKey = route.APIKey
 	}
-	if route.Subscription != nil {
-		subscription = route.Subscription
-	}
+	subscription = route.Subscription
 	if route.ClientModel != "" {
 		clientModel = route.ClientModel
 	}

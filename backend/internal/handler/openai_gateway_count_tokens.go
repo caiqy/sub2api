@@ -112,6 +112,10 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	route, hasRoute := service.EffectiveGatewayRouteFromContext(c.Request.Context())
 	if !hasRoute {
+		if h.effectiveRouteResolver == nil {
+			h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable")
+			return
+		}
 		route, err = h.effectiveRouteResolver.Resolve(c.Request.Context(), apiKey, subscription, nil, clientModel, service.CompositeRouteEndpointCountTokens)
 		if err != nil {
 			h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error())
@@ -126,9 +130,7 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 	if route.APIKey != nil {
 		apiKey = route.APIKey
 	}
-	if route.Subscription != nil {
-		subscription = route.Subscription
-	}
+	subscription = route.Subscription
 	if route.ClientModel != "" {
 		clientModel = route.ClientModel
 	}

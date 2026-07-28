@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -2925,6 +2927,7 @@ func runOpenAIEffectiveRouteSnapshotTest(
 	finalKey := *originalKey
 	finalKey.GroupID = &finalID
 	finalKey.Group = finalGroup
+	finalSubscription := &service.UserSubscription{ID: 706, UserID: user.ID, GroupID: finalID, Status: service.SubscriptionStatusActive}
 	account := &service.Account{
 		ID: 705, Name: "effective-openai", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
 		Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1,
@@ -2940,12 +2943,16 @@ func runOpenAIEffectiveRouteSnapshotTest(
 	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
 	billingCacheService := service.NewBillingCacheService(nil, &effectiveGroupUserRepoStub{user: user}, nil, nil, nil, nil, cfg, nil)
 	t.Cleanup(billingCacheService.Stop)
+	responseContentType := "application/json"
+	if strings.HasPrefix(responseBody, "data:") {
+		responseContentType = "text/event-stream"
+	}
 	gatewayService := service.NewOpenAIGatewayService(
 		accountRepo, nil, nil, nil, nil, nil, openAIChatCompletionsGatewayCacheStub{}, cfg, nil,
 		concurrencyService, service.NewBillingService(cfg, nil), nil, billingCacheService,
 		&openAIChatCompletionsHTTPUpstreamStub{response: &http.Response{
 			StatusCode: http.StatusOK,
-			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Header:     http.Header{"Content-Type": []string{responseContentType}},
 			Body:       io.NopCloser(strings.NewReader(responseBody)),
 		}},
 		service.NewDeferredService(accountRepo, nil, 0), nil,
@@ -2954,7 +2961,8 @@ func runOpenAIEffectiveRouteSnapshotTest(
 	clientModel := gjson.Get(requestBody, "model").String()
 	route := service.EffectiveGatewayRoute{
 		APIKey: &finalKey, Group: finalGroup, GroupID: &finalID,
-		ClientModel: clientModel, RoutingModel: clientModel, UpstreamModel: clientModel,
+		Subscription: finalSubscription,
+		ClientModel:  clientModel, RoutingModel: clientModel, UpstreamModel: clientModel,
 		Platform: service.PlatformOpenAI, Channel: service.ChannelMappingResult{ChannelID: 999},
 	}
 	var finalRoute service.EffectiveGatewayRoute
@@ -2963,8 +2971,19 @@ func runOpenAIEffectiveRouteSnapshotTest(
 	router.Use(func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyAPIKey), originalKey)
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: user.ID, Concurrency: user.Concurrency})
-		c.Request = c.Request.WithContext(service.WithEffectiveGatewayRoute(c.Request.Context(), route))
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, originalGroup))
+		middleware.ApplyEffectiveGatewayRoute(c, route)
 		c.Next()
+		effectiveKey, ok := middleware.GetAPIKeyFromContext(c)
+		require.True(t, ok)
+		require.Equal(t, finalID, *effectiveKey.GroupID)
+		require.Same(t, finalGroup, effectiveKey.Group)
+		subscription, ok := middleware.GetSubscriptionFromContext(c)
+		require.True(t, ok)
+		require.Equal(t, finalID, subscription.GroupID)
+		contextGroup, ok := c.Request.Context().Value(ctxkey.Group).(*service.Group)
+		require.True(t, ok)
+		require.Equal(t, finalID, contextGroup.ID)
 		finalRoute, _ = service.EffectiveGatewayRouteFromContext(c.Request.Context())
 	})
 	router.POST(path, func(c *gin.Context) { invoke(h, c) })
@@ -2974,6 +2993,7 @@ func runOpenAIEffectiveRouteSnapshotTest(
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
 
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.Contains(t, accountRepo.groupIDs, finalID)
 	require.NotContains(t, accountRepo.groupIDs, originalID)
 	require.Equal(t, clientModel, finalRoute.Channel.MappedModel)
@@ -2995,7 +3015,7 @@ func TestOpenAIGatewayMessagesUsesEffectiveRouteSnapshot(t *testing.T) {
 		t,
 		"/v1/messages",
 		`{"model":"gpt-5","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`,
-		`{"id":"chatcmpl_1","object":"chat.completion","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`,
+		"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
 		func(h *OpenAIGatewayHandler, c *gin.Context) { h.Messages(c) },
 	)
 }
@@ -3008,6 +3028,117 @@ func TestOpenAIGatewayCountTokensUsesEffectiveRouteSnapshot(t *testing.T) {
 		`{"input_tokens":3}`,
 		func(h *OpenAIGatewayHandler, c *gin.Context) { h.CountTokens(c) },
 	)
+}
+
+func TestOpenAIGatewayEffectiveBalanceRouteClearsStaleSubscriptionFromUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tt := range []struct {
+		name         string
+		path         string
+		requestBody  string
+		responseBody string
+		contentType  string
+		invoke       func(*OpenAIGatewayHandler, *gin.Context)
+	}{
+		{
+			name: "responses", path: "/v1/responses", requestBody: `{"model":"gpt-5","input":"hello","stream":false}`,
+			responseBody: `{"id":"resp_1","object":"response","status":"completed","model":"gpt-5","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`,
+			contentType:  "application/json", invoke: func(h *OpenAIGatewayHandler, c *gin.Context) { h.Responses(c) },
+		},
+		{
+			name: "messages", path: "/v1/messages", requestBody: `{"model":"gpt-5","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`,
+			responseBody: "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+			contentType:  "text/event-stream", invoke: func(h *OpenAIGatewayHandler, c *gin.Context) { h.Messages(c) },
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			groupID := int64(711)
+			group := &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowMessagesDispatch: true}
+			account := &service.Account{ID: 712, Name: "balance-openai", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test"}}
+			accountRepo := &openAIChatCompletionsAccountRepoStub{account: account}
+			env := newTerminalUsageOpenAIEnv(t, group, accountRepo, &http.Response{
+				StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{tt.contentType}}, Body: io.NopCloser(strings.NewReader(tt.responseBody)),
+			})
+			oldSubscription := &service.UserSubscription{ID: 713, UserID: env.apiKey.UserID, GroupID: 999, Status: service.SubscriptionStatusActive}
+			route := service.EffectiveGatewayRoute{
+				APIKey: env.apiKey, Group: group, GroupID: &groupID, BillingSource: service.EffectiveGatewayBillingBalance,
+				ClientModel: "gpt-5", RoutingModel: "gpt-5", UpstreamModel: "gpt-5", Platform: service.PlatformOpenAI,
+			}
+
+			router := gin.New()
+			router.Use(func(c *gin.Context) {
+				c.Set(string(middleware.ContextKeyAPIKey), env.apiKey)
+				c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: env.apiKey.UserID, Concurrency: env.apiKey.User.Concurrency})
+				c.Set(string(middleware.ContextKeySubscription), oldSubscription)
+				c.Request = c.Request.WithContext(service.WithEffectiveGatewayRoute(c.Request.Context(), route))
+				c.Next()
+			})
+			router.Use(middleware.UsageDetailCapture())
+			router.POST(tt.path, func(c *gin.Context) { tt.invoke(env.handler, c) })
+
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, tt.path, strings.NewReader(tt.requestBody))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+			select {
+			case log := <-env.usageRepo.created:
+				require.Nil(t, log.SubscriptionID)
+			case <-time.After(2 * time.Second):
+				t.Fatal("usage record not created")
+			}
+		})
+	}
+}
+
+func TestOpenAIGatewayDirectWithoutEffectiveRouteResolverReturnsControlledError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tt := range []struct {
+		name   string
+		path   string
+		body   string
+		invoke func(*OpenAIGatewayHandler, *gin.Context)
+	}{
+		{name: "responses", path: "/v1/responses", body: `{"model":"gpt-5","input":"hello"}`, invoke: func(h *OpenAIGatewayHandler, c *gin.Context) { h.Responses(c) }},
+		{name: "messages", path: "/v1/messages", body: `{"model":"gpt-5","max_tokens":16,"messages":[]}`, invoke: func(h *OpenAIGatewayHandler, c *gin.Context) { h.Messages(c) }},
+		{name: "count tokens", path: "/v1/messages/count_tokens", body: `{"model":"gpt-5","messages":[]}`, invoke: func(h *OpenAIGatewayHandler, c *gin.Context) { h.CountTokens(c) }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			group := &service.Group{ID: 721, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowMessagesDispatch: true}
+			accountRepo := &openAIChatCompletionsAccountRepoStub{}
+			env := newTerminalUsageOpenAIEnv(t, group, accountRepo, nil)
+			env.handler.effectiveRouteResolver = nil
+			router := env.router(tt.path, func(c *gin.Context) { tt.invoke(env.handler, c) })
+
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, tt.path, strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+			require.Contains(t, rec.Body.String(), "Service temporarily unavailable")
+			require.Empty(t, accountRepo.groupIDs)
+		})
+	}
+}
+
+func TestEffectiveRouteConsumersAssignSubscriptionAuthoritatively(t *testing.T) {
+	tests := []struct {
+		path  string
+		count int
+	}{
+		{path: "gateway_handler.go", count: 2},
+		{path: "openai_gateway_handler.go", count: 2},
+		{path: "openai_gateway_count_tokens.go", count: 1},
+	}
+	for _, tt := range tests {
+		body, err := os.ReadFile(tt.path)
+		require.NoError(t, err)
+		source := string(body)
+		require.Equal(t, tt.count, strings.Count(source, "subscription = route.Subscription"), tt.path)
+		require.NotContains(t, source, "if route.Subscription != nil", tt.path)
+	}
 }
 
 func newOpenAIResponsesRequestBodyTestRouter(t *testing.T) (*gin.Engine, *openAIChatCompletionsUsageLogRepoStub, *openAIRetryTrackingHTTPUpstreamStub, func()) {

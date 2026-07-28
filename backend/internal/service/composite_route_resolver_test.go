@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -225,5 +226,32 @@ func TestCompositeRouteResolverRejectsRuntimeModelsBeyondStorageContract(t *test
 	} {
 		_, err := resolver.Resolve(context.Background(), 7, model, CompositeRouteEndpointResponses)
 		require.Error(t, err, "model=%q", model)
+	}
+}
+
+func TestCompositeRouteResolverClassifiesRuntimeModelValidationErrors(t *testing.T) {
+	tooLong := strings.Repeat("m", compositeRouteModelMaxLength+1)
+	resolver := NewCompositeRouteResolver(compositeRouteRepoStub{routes: []CompositeModelRoute{{
+		GroupID: 7, PublicModel: "legacy/", MatchType: CompositeRouteMatchPrefix,
+		TargetPlatform: PlatformOpenAI, UpstreamModel: tooLong,
+		Endpoint: CompositeRouteEndpointResponses, Enabled: true,
+	}}})
+
+	tests := []struct {
+		name    string
+		model   string
+		message string
+	}{
+		{name: "request model", model: tooLong, message: "model must be at most 100 characters"},
+		{name: "configured route model", model: "legacy/gpt-5", message: "composite route model must be at most 100 characters"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := resolver.Resolve(context.Background(), 7, tt.model, CompositeRouteEndpointResponses)
+
+			require.Error(t, err)
+			require.True(t, errors.Is(err, ErrCompositeModelInvalid))
+			require.EqualError(t, err, tt.message)
+		})
 	}
 }
