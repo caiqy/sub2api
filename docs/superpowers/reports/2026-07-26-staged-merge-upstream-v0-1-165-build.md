@@ -177,6 +177,69 @@
 - advisory：Docker integration 的两个 group-copy rollback case 因 `docker is not available` 为 0 cases；`-race` 因 `CGO_ENABLED=0` 无法启动。两者均非 PASS 结论。完整命令和 RED/GREEN 原文位于 ignored `.superpowers/sdd/task-20-report.md`。
 - 本轮结论：`DONE_WITH_CONCERNS`。Task 21 full gate、CGO race、Docker integration、Task 22 fresh review、`v0.1.165`、remote/push/tag/release/deploy 继续封闭，未执行。
 
+### Task 20 Extra Repair 1/1 Closure
+
+- 输入：fresh Sol final review 的 6 个 Important 与 1 个 Minor；base 为 `09db65607052778852cc44c0d7252e9bf1102fb8`。
+- 可验证 repair 链：`48e2d4a0b`（Round 1 源码/测试）、`88aeed4b0`（Round 1 ledger）、`96455c43b`（composite mapping recovery）、`a9292253f`（Round 2 源码/测试）、`09db65607`（Round 2 review ledger）、`1e7b8af75`（Extra Repair 1/1 源码/测试）。最终 ledger 是包含本文件本段的紧随其后的 `docs: record v0.1.164 extra review repair` 提交；该提交不能在自身内容中引用其 SHA。
+- 精确范围：`git diff --name-only 699459921..1e7b8af75` 为 `66` 个路径，其中 `backend/` 或 `frontend/` 源码/测试路径 `65` 个、正式 ledger 路径 `1` 个；`git diff --name-only 09db65607..1e7b8af75` 为 `17` 个路径，全部是源码/测试，正式 ledger 为 `0` 个。包含本段 ledger 提交后，累计 unique-path 计数仍为 `66 = 65` 个源码/测试路径 + `1` 个正式 ledger 路径。
+- 边界：`backend/cmd/server/VERSION` 保持 `0.1.159.6`；未改 migration，未恢复 `openai-first-token-timeout`；未提交 `.comet/current-change.json`、`paseo.json`、`.superpowers/sdd/progress.md` 或 `openspec/changes/staged-merge-upstream-v0-1-165/.comet/subagent-progress.md`。
+
+#### 原始 10 个 Blocker 最终状态
+
+| ID | 最终状态 | 最终证据或修复提交 |
+| --- | --- | --- |
+| 1. Messages/count_tokens effective group | CLOSED | `1e7b8af75`：Messages、两条 count_tokens 和 Gateway 路由均使用最终 effective group、精确 endpoint、重建 body 与 channel mapping。 |
+| 2. Responses WS 首帧 composite alias | CLOSED | `48e2d4a0b` 已建立首帧 route；`1e7b8af75` 复核 first/later frame。 |
+| 3. multipart image concrete upstream model | CLOSED | `48e2d4a0b`，既有 multipart 回归保持在本轮限定矩阵边界内。 |
+| 4. async image composite context | CLOSED | `48e2d4a0b`，未重设计已关闭调用链。 |
+| 5. usage worker context ownership | CLOSED | `48e2d4a0b`，未重设计已关闭快照路径。 |
+| 6. fallback 后 stale composite decision | CLOSED | `1e7b8af75`：G1 body 恢复 public model 后按 G2 的 `messages` route 重算 decision。 |
+| 7. composite alias pricing | CLOSED | `1e7b8af75`：非 composite 未映射请求优先 concrete account model，composite explicit alias price 保持优先。 |
+| 8. group-copy transactional validation | CLOSED | `a9292253f`；Docker rollback 仍为 0-case advisory。 |
+| 9. Ollama form/runtime state | CLOSED | `a9292253f`，未改动已关闭前端路径。 |
+| 10. formal ledger completeness | CLOSED | 本段在 tracked ledger 中写入完整状态、SHA、范围与证据；最终 ledger 由包含本文件的本次 docs 提交识别。 |
+
+#### 原始 4 个 Concern 最终状态
+
+| ID | 最终状态 | 最终证据或修复提交 |
+| --- | --- | --- |
+| 1. client/mapped/upstream 三段模型 | CLOSED | `1e7b8af75`：普通 failed-usage 分支传递 `ChannelUsageFields`；Images Ops 使用 concrete channel/routing model。 |
+| 2. Ollama create/update shared state | CLOSED | `a9292253f`。 |
+| 3. copy-source request ownership | CLOSED | `a9292253f`。 |
+| 4. 证据命令语义与 producer order | CLOSED | `88aeed4b0`、`09db65607` 与本段明确 compile-only、Docker 0 cases、CGO race unavailable 和 Task 21 closed boundary。 |
+
+#### Extra Repair 1/1 Finding 最终状态
+
+| Finding | 最终状态 | 修复 |
+| --- | --- | --- |
+| Important 1: effective-group authority | CLOSED | `ResolveEffectiveGatewayGroup` 与 handler effective route 使授权、channel、并发、billing 和 scheduler 共享最终 group。 |
+| Important 2: G1 stale body/secondary fallback billing | CLOSED | secondary fallback 清除旧 decision、还原 public model 后按 G2 解析；billing 移到最终 fallback route 之后；G2 接受 concrete 或 composite。 |
+| Important 3: non-composite `channel_mapped` pricing | CLOSED | 未发生 channel mapping 时不让 `OriginalModel` 抢占 concrete price；composite explicit alias price 不回归。 |
+| Important 4: later Responses WS frames | CLOSED | later frame 路由后再次 account-map；cross-provider/no-route/resolver-error 都关闭连接；passthrough 的 `RewriteRequest` 不再依赖 `BeforeRequest`。 |
+| Important 5: runtime 100-character boundary | CLOSED | resolver 在 detector/client 和 legacy route public/upstream 值进入 billing/audit 前拒绝超过 100 字符的模型。 |
+| Important 6: self-contained formal ledger | CLOSED | 本段。 |
+| Minor: three-stage model audit | CLOSED | 两个普通 Gateway failed-usage 分支传递 channel fields；Images Ops model 使用 concrete channel/routing stage。 |
+
+#### 本轮实际 RED 与 GREEN
+
+- RED：`go test ./internal/service -run '^TestCompositeRouteResolverRejectsRuntimeModelsBeyondStorageContract$' -count=1 -v` 失败，因为 101 字符 detector model 返回 nil error。
+- RED：`go test ./internal/service -run '^TestOpenAIGatewayServiceRecordUsage_ChannelMappedDoesNotOverrideBillingModelWhenUnmapped$' -count=1 -v` 失败，因为 original price 覆盖 concrete account-mapped model。
+- RED：`go test ./internal/handler -run '^(TestOpenAIResponsesWebSocketAppliesAccountMappingAfterLaterCompositeRoute|TestOpenAIResponsesWebSocketRejectsLaterCrossProviderCompositeRoute)$' -count=1 -v` 在 later-frame ordering/mapping/provider-affinity 修复前失败。
+- RED：`go test ./internal/handler -run '^TestOpenAIGatewayHandler_MessagesUsesEffectiveClaudeCodeFallbackGroup$' -count=1 -v` 返回 `403`，证明 `Messages` 在回退前仍检查原 ClaudeCode-only group。
+- RED：`go test ./internal/service -run '^TestPassthroughLifecycle_AppliesAccountMappingAfterLaterRequestRewrite$' -count=1 -v` 初始把 `public-model` 直通，暴露 `RewriteRequest` 被 `BeforeRequest` 隐式门控。
+
+```powershell
+go test ./internal/handler -run '^(TestGatewayHandlerResolveStickyRouteRecomputesCompositeFallbackDecision|TestGatewayHandlerResolveEffectiveGatewayRouteUsesConcreteClaudeCodeFallback|TestOpenAIGatewayHandler_MessagesUsesEffectiveClaudeCodeFallbackGroup|TestOpenAIGatewayHandler_CountTokensUsesEffectiveClaudeCodeFallbackGroup|TestOpenAIResponsesWebSocketResolvesCompositeExplicitAliasOnFirstFrame|TestOpenAIResponsesWebSocketResolvesCompositeExplicitAliasOnEveryFrame|TestOpenAIResponsesWebSocketAppliesAccountMappingAfterLaterCompositeRoute|TestOpenAIResponsesWebSocketRejectsLaterCrossProviderCompositeRoute|TestOpenAIResponsesWebSocketRejectsLaterCompositeNoRoute|TestOpenAIResponsesWebSocketClosesOnCompositeResolverError)$' -count=1 -v
+go test ./internal/service -run '^(TestCompositeRouteResolverRejectsRuntimeModelsBeyondStorageContract|TestOpenAIGatewayServiceRecordUsage_ChannelMappedDoesNotOverrideBillingModelWhenUnmapped|TestOpenAIGatewayServiceRecordUsage_CompositePublicAliasPricing|TestPassthroughLifecycle_AppliesAccountMappingAfterLaterRequestRewrite)$' -count=1 -v
+go test ./internal/server/routes -run '^TestCompositeTargetPlatformMiddlewareRejectsOversizedRuntimeRouteModels$' -count=1 -v
+go test ./internal/handler ./internal/service ./internal/server/routes -run '^$' -count=1
+git diff --check 09db65607..1e7b8af75
+```
+
+- GREEN：上述全部命令退出 `0`。最后一条 compile-only 命令只证明包可编译，不替代前三条行为证据。
+- Docker rollback integration：Docker 不可用，执行 `0` cases，非 PASS。CGO race：`CGO_ENABLED=0`，`-race` 无法启动，非 PASS。
+- Task 21 full gate、Task 22、`v0.1.165`、Docker/远程 integration、push、tag、release、deploy 仍 CLOSED，均未执行。
+
 ## v0.1.165
 
 - changed-files：待执行。
