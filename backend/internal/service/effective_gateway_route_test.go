@@ -179,11 +179,14 @@ func TestEffectiveGatewayRouteWithChannelMappingPreservesOrUpdatesRoutingIdentit
 
 	unmapped := route.WithChannelMapping(ChannelMappingResult{Mapped: false, MappedModel: "ignored-model"})
 	mapped := route.WithChannelMapping(ChannelMappingResult{Mapped: true, MappedModel: "mapped-model"})
+	fallback := EffectiveGatewayRoute{}.WithChannelMapping(ChannelMappingResult{Mapped: false, MappedModel: "fallback-model"})
 
 	require.Equal(t, "claude-sonnet-4-6", unmapped.RoutingModel)
 	require.Equal(t, unmapped.RoutingModel, unmapped.UpstreamModel)
 	require.Equal(t, "mapped-model", mapped.RoutingModel)
 	require.Equal(t, mapped.RoutingModel, mapped.UpstreamModel)
+	require.Equal(t, "fallback-model", fallback.RoutingModel)
+	require.Equal(t, fallback.RoutingModel, fallback.UpstreamModel)
 }
 
 func TestEffectiveGatewayRouteWithUpstreamModelIgnoresEmptyValue(t *testing.T) {
