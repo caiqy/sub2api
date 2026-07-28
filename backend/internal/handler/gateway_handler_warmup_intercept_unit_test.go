@@ -204,11 +204,13 @@ func newTestGatewayHandler(t *testing.T, group *service.Group, accounts []*servi
 
 	concurrencySvc := service.NewConcurrencyService(&fakeConcurrencyCache{})
 	concurrencyHelper := NewConcurrencyHelper(concurrencySvc, SSEPingFormatClaude, 0)
+	effectiveResolver := service.NewEffectiveGatewayRouteResolver(&service.APIKeyService{}, service.NewCompositeRouteResolver(nil), cfg)
 
 	h := &GatewayHandler{
-		gatewayService:      gwSvc,
-		billingCacheService: billingCacheSvc,
-		concurrencyHelper:   concurrencyHelper,
+		gatewayService:         gwSvc,
+		billingCacheService:    billingCacheSvc,
+		concurrencyHelper:      concurrencyHelper,
+		effectiveRouteResolver: effectiveResolver,
 		// 这些字段对本测试不敏感，保持较小即可
 		maxAccountSwitches:       1,
 		maxAccountSwitchesGemini: 1,

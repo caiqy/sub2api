@@ -146,6 +146,7 @@ func TestGatewayHandler_GeminiV1BetaModels_ForwardErrorStillCreatesUsageLog(t *t
 		nil,
 		nil,
 		nil,
+		nil,
 	)
 	geminiCompatService := service.NewGeminiMessagesCompatService(
 		accountRepo,
@@ -272,6 +273,7 @@ func TestGatewayHandler_GeminiV1BetaModels_FailoverExhaustedStillCreatesUsageLog
 		nil,
 		nil,
 		nil,
+		nil,
 	)
 	geminiCompatService := service.NewGeminiMessagesCompatService(
 		accountRepo,
@@ -391,6 +393,7 @@ func TestGatewayHandler_GeminiV1BetaModels_SelectionExhaustedAfterFailoverStillC
 		nil,
 		nil,
 		settingService,
+		nil,
 		nil,
 		nil,
 		nil,

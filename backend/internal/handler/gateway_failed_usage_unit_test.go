@@ -95,6 +95,7 @@ func TestGatewayHandler_MessagesForwardErrorStillCreatesUsageLog(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 	)
 	h := NewGatewayHandler(gatewayService, nil, nil, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil, nil)
 
@@ -216,6 +217,7 @@ func TestGatewayHandler_MessagesFailoverExhaustedStillCreatesUsageLog(t *testing
 		nil,
 		nil,
 		nil,
+		nil,
 	)
 	h := NewGatewayHandler(gatewayService, nil, nil, nil, nil, concurrencyService, billingCacheService, nil, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil, nil)
 	h.maxAccountSwitches = 0
@@ -326,6 +328,7 @@ func TestGatewayHandler_MessagesSelectionExhaustedAfterFailoverStillCreatesUsage
 		nil,
 		nil,
 		settingService,
+		nil,
 		nil,
 		nil,
 		nil,
@@ -454,6 +457,7 @@ func TestGatewayHandler_MessagesStreamingPartialWriteFailureStillCreatesUsageLog
 		nil,
 		nil,
 		settingService,
+		nil,
 		nil,
 		nil,
 		nil,
