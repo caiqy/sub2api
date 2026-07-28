@@ -173,3 +173,39 @@ func TestEffectiveGatewayRouteResolverPreservesNonCompositeIdentity(t *testing.T
 	require.Equal(t, "claude-sonnet-4-6", route.RoutingModel)
 	require.Equal(t, "claude-sonnet-4-6", route.UpstreamModel)
 }
+
+func TestEffectiveGatewayRouteWithChannelMappingPreservesOrUpdatesRoutingIdentity(t *testing.T) {
+	route := EffectiveGatewayRoute{RoutingModel: "claude-sonnet-4-6", UpstreamModel: "stale-model"}
+
+	unmapped := route.WithChannelMapping(ChannelMappingResult{Mapped: false, MappedModel: "ignored-model"})
+	mapped := route.WithChannelMapping(ChannelMappingResult{Mapped: true, MappedModel: "mapped-model"})
+
+	require.Equal(t, "claude-sonnet-4-6", unmapped.RoutingModel)
+	require.Equal(t, unmapped.RoutingModel, unmapped.UpstreamModel)
+	require.Equal(t, "mapped-model", mapped.RoutingModel)
+	require.Equal(t, mapped.RoutingModel, mapped.UpstreamModel)
+}
+
+func TestEffectiveGatewayRouteWithUpstreamModelIgnoresEmptyValue(t *testing.T) {
+	route := EffectiveGatewayRoute{UpstreamModel: "claude-sonnet-4-6"}
+
+	require.Equal(t, "claude-sonnet-4-6", route.WithUpstreamModel("").UpstreamModel)
+	require.Equal(t, "actual-upstream-model", route.WithUpstreamModel("actual-upstream-model").UpstreamModel)
+}
+
+func TestEffectiveGatewayRouteContextRoundTrip(t *testing.T) {
+	route := EffectiveGatewayRoute{
+		Endpoint:      CompositeRouteEndpointMessages,
+		ClientModel:   "public-model",
+		RoutingModel:  "mapped-model",
+		UpstreamModel: "actual-upstream-model",
+		Channel:       ChannelMappingResult{Mapped: true, MappedModel: "mapped-model", ChannelID: 7},
+	}
+
+	got, ok := EffectiveGatewayRouteFromContext(WithEffectiveGatewayRoute(context.Background(), route))
+	_, emptyOK := EffectiveGatewayRouteFromContext(context.Background())
+
+	require.True(t, ok)
+	require.Equal(t, route, got)
+	require.False(t, emptyOK)
+}
