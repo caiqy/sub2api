@@ -60,9 +60,10 @@
           <div class="text-xs font-bold uppercase tracking-wider text-gray-400">{{ t('admin.ops.errorDetail.model') }}</div>
           <div class="mt-1 text-sm font-medium text-gray-900 dark:text-white">
             <template v-if="hasModelMapping(detail)">
-              <span class="font-mono">{{ detail.requested_model }}</span>
-              <span class="mx-1 text-gray-400">→</span>
-              <span class="font-mono text-primary-600 dark:text-primary-400">{{ detail.upstream_model }}</span>
+              <template v-for="(model, index) in modelStages(detail)" :key="`${model}-${index}`">
+                <span v-if="index > 0" class="mx-1 text-gray-400">→</span>
+                <span class="font-mono" :class="index === modelStages(detail).length - 1 ? 'text-primary-600 dark:text-primary-400' : ''">{{ model }}</span>
+              </template>
             </template>
             <template v-else>
               {{ displayModel(detail) || '—' }}
@@ -259,10 +260,15 @@ function formatRequestTypeLabel(type: number | null | undefined): string {
 }
 
 function hasModelMapping(d: OpsErrorDetail | null): boolean {
-  if (!d) return false
+	return modelStages(d).length > 1
+}
+
+function modelStages(d: OpsErrorDetail | null): string[] {
+  if (!d) return []
   const requested = String(d.requested_model || '').trim()
+	const mapped = String(d.model || '').trim()
   const upstream = String(d.upstream_model || '').trim()
-  return !!requested && !!upstream && requested !== upstream
+	return [requested, mapped, upstream].filter((model, index, stages) => !!model && stages.indexOf(model) === index)
 }
 
 function displayModel(d: OpsErrorDetail | null): string {

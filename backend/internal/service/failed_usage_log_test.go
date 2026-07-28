@@ -57,6 +57,13 @@ func TestWriteFailedUsageLogBestEffort_CreatesZeroCostUsageLog(t *testing.T) {
 		OutputTokens:        2,
 		CacheCreationTokens: 3,
 		OpenAIWSMode:        true,
+		ChannelUsageFields: ChannelUsageFields{
+			OriginalModel:      "client-model",
+			ChannelMappedModel: "channel-model",
+			ModelMappingChain:  "client-model→composite-model→channel-model",
+			ChannelID:          404,
+		},
+		UpstreamModel: "provider-model",
 	}, "service.test")
 
 	require.Equal(t, 1, repo.createBestCalls)
@@ -65,7 +72,14 @@ func TestWriteFailedUsageLogBestEffort_CreatesZeroCostUsageLog(t *testing.T) {
 	require.Equal(t, int64(101), repo.lastLog.APIKeyID)
 	require.Equal(t, int64(303), repo.lastLog.AccountID)
 	require.Equal(t, "client:failed-client-req", repo.lastLog.RequestID)
-	require.Equal(t, "gpt-5.4", repo.lastLog.Model)
+	require.Equal(t, "channel-model", repo.lastLog.Model)
+	require.Equal(t, "client-model", repo.lastLog.RequestedModel)
+	require.NotNil(t, repo.lastLog.UpstreamModel)
+	require.Equal(t, "provider-model", *repo.lastLog.UpstreamModel)
+	require.NotNil(t, repo.lastLog.ModelMappingChain)
+	require.Equal(t, "client-model→composite-model→channel-model", *repo.lastLog.ModelMappingChain)
+	require.NotNil(t, repo.lastLog.ChannelID)
+	require.Equal(t, int64(404), *repo.lastLog.ChannelID)
 	require.Equal(t, 7, repo.lastLog.InputTokens)
 	require.Equal(t, 2, repo.lastLog.OutputTokens)
 	require.Equal(t, 3, repo.lastLog.CacheCreationTokens)

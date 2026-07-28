@@ -224,6 +224,50 @@ describe('GroupsView duplicate action', () => {
     wrapper.unmount()
   })
 
+  it('keeps the newest copy-source request when an older request resolves later', async () => {
+    let resolveOld!: (groups: AdminGroup[]) => void
+    let resolveNew!: (groups: AdminGroup[]) => void
+    getAllIncludingInactive
+      .mockImplementationOnce(() => new Promise<AdminGroup[]>((resolve) => { resolveOld = resolve }))
+      .mockImplementationOnce(() => new Promise<AdminGroup[]>((resolve) => { resolveNew = resolve }))
+    const wrapper = mountView()
+    await flushPromises()
+
+    void (wrapper.vm as any).loadCopySourceGroups()
+    void (wrapper.vm as any).loadCopySourceGroups()
+    expect(getAllIncludingInactive).toHaveBeenCalledTimes(2)
+    resolveNew([{ ...sourceGroup, id: 43, name: 'Newest', platform: 'anthropic' }])
+    await flushPromises()
+    resolveOld([{ ...sourceGroup, id: 44, name: 'Stale', platform: 'anthropic' }])
+    await flushPromises()
+
+    expect((wrapper.vm as any).copyAccountsGroupOptions.map((option: { label: string }) => option.label)).toContain('Newest - admin.groups.platforms.anthropic (admin.groups.accountsCount)')
+    expect((wrapper.vm as any).copyAccountsGroupOptions.map((option: { label: string }) => option.label)).not.toContain('Stale - admin.groups.platforms.anthropic (admin.groups.accountsCount)')
+    wrapper.unmount()
+  })
+
+  it('keeps newer copy sources when an older request fails', async () => {
+    let rejectOld!: (error: Error) => void
+    let resolveNew!: (groups: AdminGroup[]) => void
+    getAllIncludingInactive
+      .mockImplementationOnce(() => new Promise<AdminGroup[]>((_resolve, reject) => { rejectOld = reject }))
+      .mockImplementationOnce(() => new Promise<AdminGroup[]>((resolve) => { resolveNew = resolve }))
+    const wrapper = mountView()
+    await flushPromises()
+
+    void (wrapper.vm as any).loadCopySourceGroups()
+    void (wrapper.vm as any).loadCopySourceGroups()
+    expect(getAllIncludingInactive).toHaveBeenCalledTimes(2)
+    resolveNew([{ ...sourceGroup, id: 43, name: 'Newest', platform: 'anthropic' }])
+    await flushPromises()
+    rejectOld(new Error('stale failure'))
+    await flushPromises()
+
+    expect((wrapper.vm as any).copyAccountsGroupOptions.map((option: { label: string }) => option.label)).toContain('Newest - admin.groups.platforms.anthropic (admin.groups.accountsCount)')
+    expect(showError).not.toHaveBeenCalledWith('admin.groups.failedToLoad')
+    wrapper.unmount()
+  })
+
   it('ignores repeated clicks while the duplicate request is in flight', async () => {
     let resolveDuplicate!: (value: AdminGroup) => void
     duplicateGroup.mockImplementationOnce(

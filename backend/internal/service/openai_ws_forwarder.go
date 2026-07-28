@@ -215,8 +215,31 @@ type OpenAIWSIngressHooks struct {
 	// ReasoningEffortMappings rewrites explicit effort values for this WS session.
 	ReasoningEffortMappings []ReasoningEffortMapping
 	BeforeTurn              func(turn int) error
+	RewriteRequest          func(turn int, payload []byte, originalModel string) (OpenAIWSRequestRewrite, error)
 	BeforeRequest           func(turn int, payload []byte, originalModel string) error
 	AfterTurn               func(turn int, result *OpenAIForwardResult, turnErr error)
+}
+
+type OpenAIWSRequestRewrite struct {
+	Payload       []byte
+	OriginalModel string
+}
+
+func applyOpenAIWSRequestRewrite(hooks *OpenAIWSIngressHooks, turn int, payload []byte, originalModel string) ([]byte, string, error) {
+	if hooks == nil || hooks.RewriteRequest == nil {
+		return payload, originalModel, nil
+	}
+	rewritten, err := hooks.RewriteRequest(turn, payload, originalModel)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(rewritten.Payload) == 0 {
+		return payload, originalModel, nil
+	}
+	if strings.TrimSpace(rewritten.OriginalModel) == "" {
+		rewritten.OriginalModel = originalModel
+	}
+	return rewritten.Payload, rewritten.OriginalModel, nil
 }
 
 func (s *OpenAIGatewayService) getOpenAIWSConnPool() *openAIWSConnPool {

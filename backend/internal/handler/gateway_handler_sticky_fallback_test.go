@@ -257,15 +257,15 @@ func TestGatewayHandlerResolveStickyRoute_PreservesClaudeCodeRestrictionErrors(t
 	accountRepo := &stickyFallbackAccountRepo{}
 	h, apiKey := newStickyFallbackMessagesHandler(t, cfg, groups, &geminiStickyGatewayCacheStub{}, accountRepo)
 
-	_, _, _, _, err := h.resolveStickyRoute(context.Background(), apiKey, "")
+	_, _, _, _, err := h.resolveStickyRoute(context.Background(), apiKey, "", service.CompositeRouteEndpointMessages)
 	require.ErrorIs(t, err, service.ErrClaudeCodeOnly)
 
 	apiKey.GroupID = &groups[2].ID
 	apiKey.Group = groups[2]
-	_, _, _, _, err = h.resolveStickyRoute(context.Background(), apiKey, "")
+	_, _, _, _, err = h.resolveStickyRoute(context.Background(), apiKey, "", service.CompositeRouteEndpointMessages)
 	require.ErrorContains(t, err, "fallback group cycle detected")
 
-	_, group, groupID, platform, err := h.resolveStickyRoute(context.WithValue(context.Background(), ctxkey.ForcePlatform, service.PlatformAntigravity), apiKey, "")
+	_, group, groupID, platform, err := h.resolveStickyRoute(context.WithValue(context.Background(), ctxkey.ForcePlatform, service.PlatformAntigravity), apiKey, "", service.CompositeRouteEndpointMessages)
 	require.NoError(t, err)
 	require.Nil(t, group)
 	require.Equal(t, groups[2].ID, *groupID)
@@ -284,7 +284,7 @@ func TestGatewayHandlerResolveStickyRouteRecomputesCompositeFallbackDecision(t *
 		MatchType:      service.CompositeRouteMatchExact,
 		TargetPlatform: service.PlatformAnthropic,
 		UpstreamModel:  "claude-sonnet-4-6",
-		Endpoint:       service.CompositeRouteEndpointAny,
+		Endpoint:       service.CompositeRouteEndpointMessages,
 		Enabled:        true,
 	}}})
 	cfg := &config.Config{}
@@ -306,7 +306,7 @@ func TestGatewayHandlerResolveStickyRouteRecomputesCompositeFallbackDecision(t *
 		UpstreamModel:  "gpt-5",
 	})
 
-	resolvedCtx, group, groupID, platform, err := h.resolveStickyRoute(ctx, apiKey, "public-model")
+	resolvedCtx, group, groupID, platform, err := h.resolveStickyRoute(ctx, apiKey, "public-model", service.CompositeRouteEndpointMessages)
 
 	require.NoError(t, err)
 	require.Equal(t, fallbackID, group.ID)

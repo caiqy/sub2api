@@ -59,6 +59,23 @@ func clientRequestedUsageFields(c *gin.Context, mapping service.ChannelMappingRe
 	return fields
 }
 
+const channelUsageFieldsContextKey = "channel_usage_fields"
+
+func setChannelUsageFields(c *gin.Context, fields service.ChannelUsageFields) {
+	if c != nil {
+		c.Set(channelUsageFieldsContextKey, fields)
+	}
+}
+
+func channelUsageFieldsFromContext(c *gin.Context) service.ChannelUsageFields {
+	if c == nil {
+		return service.ChannelUsageFields{}
+	}
+	fields, _ := c.Get(channelUsageFieldsContextKey)
+	value, _ := fields.(service.ChannelUsageFields)
+	return value
+}
+
 func runContentModeration(c *gin.Context, reqLog *zap.Logger, svc *service.ContentModerationService, apiKey *service.APIKey, subject middleware2.AuthSubject, protocol string, model string, body []byte) *service.ContentModerationDecision {
 	if svc == nil || c == nil || c.Request == nil {
 		return nil

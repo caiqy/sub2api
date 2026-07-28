@@ -134,7 +134,7 @@ func (h *GatewayHandler) bindStickySessionForPlatform(ctx context.Context, platf
 	return h.gatewayService.BindStickySession(ctx, groupID, sessionKey, accountID)
 }
 
-func (h *GatewayHandler) resolveStickyRoute(ctx context.Context, apiKey *service.APIKey, requestedModel string) (context.Context, *service.Group, *int64, string, error) {
+func (h *GatewayHandler) resolveStickyRoute(ctx context.Context, apiKey *service.APIKey, requestedModel, endpoint string) (context.Context, *service.Group, *int64, string, error) {
 	group, groupID, err := h.gatewayService.ResolveGatewayGroup(ctx, apiKey.GroupID)
 	if err != nil {
 		return ctx, nil, nil, "", err
@@ -151,7 +151,7 @@ func (h *GatewayHandler) resolveStickyRoute(ctx context.Context, apiKey *service
 	if publicModel, ok := service.RequestedPublicModelFromContext(ctx); ok {
 		requestedModel = publicModel
 	}
-	decision, ok, err := h.gatewayService.ResolveCompositeRouteDecision(ctx, group, requestedModel, service.CompositeRouteEndpointAny)
+	decision, ok, err := h.gatewayService.ResolveCompositeRouteDecision(ctx, group, requestedModel, endpoint)
 	if err != nil {
 		return ctx, nil, nil, "", err
 	}
@@ -160,6 +160,25 @@ func (h *GatewayHandler) resolveStickyRoute(ctx context.Context, apiKey *service
 	}
 	ctx = service.WithCompositeRouteDecision(service.WithoutCompositeRouteDecision(ctx), decision)
 	return ctx, group, groupID, decision.TargetPlatform, nil
+}
+
+type effectiveGatewayRoute struct {
+	apiKey   *service.APIKey
+	group    *service.Group
+	groupID  *int64
+	platform string
+}
+
+func (h *GatewayHandler) resolveEffectiveGatewayRoute(ctx context.Context, apiKey *service.APIKey, requestedModel, endpoint string) (context.Context, effectiveGatewayRoute, error) {
+	ctx, group, groupID, platform, err := h.resolveStickyRoute(ctx, apiKey, requestedModel, endpoint)
+	if err != nil {
+		return ctx, effectiveGatewayRoute{}, err
+	}
+	route := effectiveGatewayRoute{apiKey: apiKey, group: group, groupID: groupID, platform: platform}
+	if group != nil {
+		route.apiKey = cloneAPIKeyWithGroup(apiKey, group)
+	}
+	return ctx, route, nil
 }
 
 func stickySessionKeyForPlatform(platform, sessionHash string) string {
@@ -301,9 +320,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	ensureCompositeTargetPlatform(c, apiKey, reqModel)
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 
-	// 解析渠道级模型映射
-	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
-
 	// 设置 max_tokens=1 + haiku 探测请求标识到 context 中
 	// 必须在 SetClaudeCodeClientContext 之前设置，因为 ClaudeCodeValidator 需要读取此标识进行绕过判断
 	if isMaxTokensOneHaikuRequest(reqModel, parsedReq.MaxTokens) {
@@ -320,15 +336,33 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		return
 	}
 
-	resolvedCtx, resolvedGroup, stickyGroupID, platform, err := h.resolveStickyRoute(c.Request.Context(), apiKey, reqModel)
+	resolvedCtx, route, err := h.resolveEffectiveGatewayRoute(c.Request.Context(), apiKey, reqModel, service.CompositeRouteEndpointMessages)
 	if err != nil {
 		h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error(), false)
 		return
 	}
 	c.Request = c.Request.WithContext(resolvedCtx)
-	if resolvedGroup != nil {
-		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, resolvedGroup))
+	apiKey = route.apiKey
+	if route.group != nil {
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, route.group))
 	}
+	if upstreamModel, ok := service.ResolvedUpstreamModelFromContext(c.Request.Context()); ok && upstreamModel != reqModel {
+		body = h.gatewayService.ReplaceModelInBody(body, upstreamModel)
+		if err := coordinator.SetEffectiveBytes(body); err != nil {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
+		effectiveBody = coordinator.Effective()
+		parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
+		if err != nil {
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+			return
+		}
+		reqModel = upstreamModel
+	}
+	stickyGroupID, platform := route.groupID, route.platform
+	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
+	setChannelUsageFields(c, clientRequestedUsageFields(c, channelMapping, reqModel, ""))
 
 	// 在请求上下文中记录 thinking 状态，供 Antigravity 最终模型 key 推导/模型维度限流使用
 	c.Request = c.Request.WithContext(service.WithThinkingEnabled(c.Request.Context(), parsedReq.ThinkingEnabled, h.metadataBridgeEnabled()))
@@ -379,9 +413,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if userGroupReleaseFunc != nil {
-		defer userGroupReleaseFunc()
-	}
+	defer func() {
+		if userGroupReleaseFunc != nil {
+			userGroupReleaseFunc()
+		}
+	}()
 
 	// 2. 【新增】Wait后二次检查余额/订阅
 	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
@@ -1127,12 +1163,42 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						c.Request = c.Request.WithContext(ctx)
 						currentAPIKey = fallbackAPIKey
 						var stickyCtx context.Context
-						stickyCtx, _, currentStickyGroupID, platform, err = h.resolveStickyRoute(c.Request.Context(), fallbackAPIKey, reqModel)
+						var fallbackRoute effectiveGatewayRoute
+						stickyCtx, fallbackRoute, err = h.resolveEffectiveGatewayRoute(c.Request.Context(), fallbackAPIKey, reqModel, service.CompositeRouteEndpointMessages)
 						if err != nil {
 							h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts: "+err.Error(), streamStarted)
 							return
 						}
 						c.Request = c.Request.WithContext(stickyCtx)
+						currentAPIKey = fallbackRoute.apiKey
+						currentStickyGroupID = fallbackRoute.groupID
+						platform = fallbackRoute.platform
+						if fallbackRoute.group != nil {
+							c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, fallbackRoute.group))
+						}
+						if upstreamModel, ok := service.ResolvedUpstreamModelFromContext(c.Request.Context()); ok && upstreamModel != reqModel {
+							body = h.gatewayService.ReplaceModelInBody(body, upstreamModel)
+							if err := coordinator.SetEffectiveBytes(body); err != nil {
+								h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+								return
+							}
+							effectiveBody = coordinator.Effective()
+							parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
+							if err != nil {
+								h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+								return
+							}
+							reqModel = upstreamModel
+						}
+						channelMapping, _ = h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), currentAPIKey.GroupID, reqModel)
+						setChannelUsageFields(c, clientRequestedUsageFields(c, channelMapping, reqModel, ""))
+						if userGroupReleaseFunc != nil {
+							userGroupReleaseFunc()
+							userGroupReleaseFunc = nil
+						}
+						if userGroupReleaseFunc, ok = h.acquireUserGroupSlot(c, h.concurrencyHelper, subject.UserID, currentAPIKey.GroupID, currentAPIKey.Group, reqStream, &streamStarted, reqLog); !ok {
+							return
+						}
 						sessionKey = stickySessionKeyForPlatform(platform, sessionHash)
 						sessionBoundAccountID = h.getCachedSessionAccountIDForPlatform(c.Request.Context(), platform, currentStickyGroupID, sessionKey)
 						hasBoundSession = sessionKey != "" && sessionBoundAccountID > 0
@@ -2026,20 +2092,21 @@ func (h *GatewayHandler) submitFailedUsageLogFromFailover(c *gin.Context, apiKey
 	requestedModel := clientRequestedModel(c, model)
 	upstreamModel := account.GetMappedModel(model)
 	failedUsageInput := &service.FailedUsageLogInput{
-		APIKey:           apiKey,
-		User:             apiKey.User,
-		Account:          account,
-		Model:            model,
-		RequestedModel:   requestedModel,
-		UpstreamModel:    upstreamModel,
-		ReasoningEffort:  reasoningEffort,
-		Stream:           stream,
-		InboundEndpoint:  inboundEndpoint,
-		UpstreamEndpoint: upstreamEndpoint,
-		UserAgent:        userAgent,
-		IPAddress:        clientIP,
-		DetailSnapshot:   detailSnapshot,
-		Duration:         duration,
+		APIKey:             apiKey,
+		User:               apiKey.User,
+		Account:            account,
+		Model:              model,
+		RequestedModel:     requestedModel,
+		UpstreamModel:      upstreamModel,
+		ReasoningEffort:    reasoningEffort,
+		Stream:             stream,
+		InboundEndpoint:    inboundEndpoint,
+		UpstreamEndpoint:   upstreamEndpoint,
+		UserAgent:          userAgent,
+		IPAddress:          clientIP,
+		DetailSnapshot:     detailSnapshot,
+		Duration:           duration,
+		ChannelUsageFields: channelUsageFieldsFromContext(c),
 	}
 	h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 		service.WriteFailedUsageLogBestEffort(ctx, h.gatewayService.UsageLogRepository(), failedUsageInput, logKey)

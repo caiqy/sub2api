@@ -209,6 +209,12 @@ func compositeRouteFromInput(groupID int64, input CompositeRouteInput) (*Composi
 	if input.PublicModel == "" {
 		return nil, fmt.Errorf("public_model is required")
 	}
+	if len(input.PublicModel) > compositeRouteModelMaxLength {
+		return nil, fmt.Errorf("public_model must be at most %d characters", compositeRouteModelMaxLength)
+	}
+	if len(input.UpstreamModel) > compositeRouteModelMaxLength {
+		return nil, fmt.Errorf("upstream_model must be at most %d characters", compositeRouteModelMaxLength)
+	}
 	if !isConcreteRequestPlatform(input.TargetPlatform) {
 		return nil, fmt.Errorf("target_platform must be a concrete provider")
 	}
@@ -227,6 +233,8 @@ func compositeRouteFromInput(groupID int64, input CompositeRouteInput) (*Composi
 		Notes:          input.Notes,
 	}, nil
 }
+
+const compositeRouteModelMaxLength = 100
 
 func defaultModelsListCandidateIDs(platform string) []string {
 	switch platform {

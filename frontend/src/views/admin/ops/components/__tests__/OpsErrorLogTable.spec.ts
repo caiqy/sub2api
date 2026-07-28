@@ -45,7 +45,19 @@ function mountTable(row: Partial<OpsErrorLog>) {
 }
 
 describe('OpsErrorLogTable user/api-key/account columns', () => {
-  // 回归:上游错误行(phase=upstream, owner=provider)以前在单一「用户」列里只显示账号、
+	it('renders requested, mapped, and upstream models in order', () => {
+		const wrapper = mountTable({
+			requested_model: 'client-model',
+			model: 'channel-model',
+			upstream_model: 'provider-model',
+		})
+
+		const text = wrapper.text()
+		expect(text.indexOf('client-model')).toBeLessThan(text.indexOf('channel-model'))
+		expect(text.indexOf('channel-model')).toBeLessThan(text.indexOf('provider-model'))
+	})
+
+	// 回归:上游错误行(phase=upstream, owner=provider)以前在单一「用户」列里只显示账号、
   // 丢失用户;现在用户/API Key/账号各占独立列,三者同时可见。
   it('renders user, api key and account in separate columns for an upstream row', () => {
     const wrapper = mountTable({

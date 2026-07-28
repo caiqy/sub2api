@@ -887,6 +887,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				if requestModel == "" {
 					requestModel = capturedSessionModel
 				}
+				if rewritten, _, rewriteErr := applyOpenAIWSRequestRewrite(hooks, turnNo, payload, requestModel); rewriteErr != nil {
+					return payload, nil, rewriteErr
+				} else {
+					payload = rewritten
+				}
 				if err := hooks.BeforeRequest(turnNo, payload, requestModel); err != nil {
 					return payload, nil, err
 				}

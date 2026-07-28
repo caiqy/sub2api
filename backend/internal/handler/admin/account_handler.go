@@ -872,7 +872,7 @@ func (h *AccountHandler) Create(c *gin.Context) {
 		h.adminService.ForceOpenAIPrivacy(ctx, account)
 		if h.ollamaCloudUsage != nil {
 			if resolveErr := h.ollamaCloudUsage.ResolveAccounts(ctx, []*service.Account{account}); resolveErr != nil {
-				return nil, resolveErr
+				slog.Warn("ollama_cloud_usage_response_enrichment_failed", "operation", "create", "account_id", account.ID, "error", resolveErr)
 			}
 		}
 		return h.buildAccountResponseWithRuntime(ctx, account), nil
@@ -1017,8 +1017,7 @@ func (h *AccountHandler) Update(c *gin.Context) {
 	}
 	if h.ollamaCloudUsage != nil {
 		if resolveErr := h.ollamaCloudUsage.ResolveAccounts(c.Request.Context(), []*service.Account{account}); resolveErr != nil {
-			response.ErrorFrom(c, resolveErr)
-			return
+			slog.Warn("ollama_cloud_usage_response_enrichment_failed", "operation", "update", "account_id", account.ID, "error", resolveErr)
 		}
 	}
 

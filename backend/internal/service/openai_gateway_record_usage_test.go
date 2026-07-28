@@ -1745,6 +1745,52 @@ func TestOpenAIGatewayServiceRecordUsage_CompositePublicAliasPricing(t *testing.
 		require.InDelta(t, expected.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)
 		require.InDelta(t, expected.ActualCost, userRepo.lastAmount, 1e-12)
 	})
+
+	t.Run("default channel-mapped alias pricing wins", func(t *testing.T) {
+		usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+		userRepo := &openAIRecordUsageUserRepoStub{}
+		svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
+		inputPrice := 1e-6
+		outputPrice := 2e-6
+		cache := newEmptyChannelCache()
+		cache.pricingByGroupModel[channelModelKey{groupID: groupID, platform: PlatformOpenAI, model: publicModel}] = &ChannelModelPricing{
+			BillingMode: BillingModeToken,
+			InputPrice:  &inputPrice,
+			OutputPrice: &outputPrice,
+		}
+		cache.channelByGroupID[groupID] = &Channel{ID: groupID, Status: StatusActive}
+		cache.groupPlatform[groupID] = PlatformComposite
+		cache.loadedAt = time.Now()
+		channelService := &ChannelService{}
+		channelService.cache.Store(cache)
+		svc.resolver = NewModelPricingResolver(channelService, svc.billingService)
+		expected, err := svc.billingService.CalculateCostUnified(CostInput{
+			Ctx:            WithResolvedTargetPlatform(context.Background(), PlatformOpenAI),
+			Model:          publicModel,
+			GroupID:        &groupID,
+			Tokens:         tokens,
+			RequestCount:   1,
+			RateMultiplier: 1.0,
+			Resolver:       svc.resolver,
+		})
+		require.NoError(t, err)
+
+		err = svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+			Result: &OpenAIForwardResult{RequestID: "resp_composite_channel_mapped_alias", Model: concreteModel, BillingModel: concreteModel, UpstreamModel: concreteModel, Usage: usage, Duration: time.Second},
+			APIKey: &APIKey{ID: 906, GroupID: &groupID, Group: &Group{ID: groupID, Platform: PlatformComposite, RateMultiplier: 1}},
+			User:   &User{ID: 906},
+			Account: &Account{ID: 906},
+			ChannelUsageFields: ChannelUsageFields{
+				OriginalModel:      publicModel,
+				ChannelMappedModel: publicModel,
+				BillingModelSource: BillingModelSourceChannelMapped,
+			},
+		})
+
+		require.NoError(t, err)
+		require.InDelta(t, expected.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)
+		require.InDelta(t, expected.ActualCost, userRepo.lastAmount, 1e-12)
+	})
 }
 
 func TestOpenAIGatewayServiceRecordUsage_UnpricedTokenModelFallsBackToZeroCostUsageLog(t *testing.T) {

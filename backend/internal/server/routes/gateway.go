@@ -424,7 +424,9 @@ func compositeTargetPlatformMiddleware(resolver *service.CompositeRouteResolver)
 			}
 			if decision.Matched {
 				c.Request = c.Request.WithContext(service.WithCompositeRouteDecision(c.Request.Context(), decision))
-				service.SetUsageOriginalRequestBody(c, service.RequestBodyPreviewSnapshot(string(body), int64(len(body))))
+				if snapshot := compositeOriginalRequestBodySnapshot(c.GetHeader("Content-Type"), body); snapshot != "" {
+					service.SetUsageOriginalRequestBody(c, snapshot)
+				}
 				if upstreamModel := strings.TrimSpace(decision.UpstreamModel); upstreamModel != "" && upstreamModel != model && gjson.ValidBytes(body) {
 					if rewritten, rewriteErr := sjson.SetBytes(body, "model", upstreamModel); rewriteErr == nil {
 						body = rewritten
@@ -435,6 +437,20 @@ func compositeTargetPlatformMiddleware(resolver *service.CompositeRouteResolver)
 		resetRequestBody(c, body)
 		c.Next()
 	}
+}
+
+const compositeRouteSnapshotLimitBytes = 5 << 20
+
+func compositeOriginalRequestBodySnapshot(contentType string, body []byte) string {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "multipart/form-data") {
+		return ""
+	}
+	size := int64(len(body))
+	truncated := len(body) > compositeRouteSnapshotLimitBytes
+	if truncated {
+		body = body[:compositeRouteSnapshotLimitBytes]
+	}
+	return service.RequestBodyPreviewSnapshot(string(body), size, truncated)
 }
 
 func compositeWebSocketRouteResolverMiddleware(resolver *service.CompositeRouteResolver) gin.HandlerFunc {

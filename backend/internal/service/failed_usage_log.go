@@ -28,6 +28,7 @@ type FailedUsageLogInput struct {
 	CacheCreationTokens int
 	CacheReadTokens     int
 	ImageOutputTokens   int
+	ChannelUsageFields
 }
 
 // WriteFailedUsageLogBestEffort 为失败请求写入已知 token / 零成本 usage log。
@@ -39,14 +40,23 @@ func WriteFailedUsageLogBestEffort(ctx context.Context, repo UsageLogRepository,
 
 	durationMs := int(input.Duration.Milliseconds())
 	accountRateMultiplier := input.Account.BillingRateMultiplier()
+	model := input.Model
+	if input.ChannelMappedModel != "" {
+		model = input.ChannelMappedModel
+	}
+	requestedModel := input.RequestedModel
+	if requestedModel == "" {
+		requestedModel = input.OriginalModel
+	}
 	usageLog := &UsageLog{
 		UserID:                input.User.ID,
 		APIKeyID:              input.APIKey.ID,
 		AccountID:             input.Account.ID,
 		RequestID:             resolveUsageBillingRequestID(ctx, ""),
-		Model:                 input.Model,
-		RequestedModel:        input.RequestedModel,
-		UpstreamModel:         optionalNonEqualStringPtr(input.UpstreamModel, input.Model),
+		Model:                 model,
+		RequestedModel:        requestedModel,
+		UpstreamModel:         optionalNonEqualStringPtr(input.UpstreamModel, model),
+		ModelMappingChain:     optionalTrimmedStringPtr(input.ModelMappingChain),
 		ReasoningEffort:       input.ReasoningEffort,
 		InboundEndpoint:       optionalTrimmedStringPtr(input.InboundEndpoint),
 		UpstreamEndpoint:      optionalTrimmedStringPtr(input.UpstreamEndpoint),
@@ -70,6 +80,10 @@ func WriteFailedUsageLogBestEffort(ctx context.Context, repo UsageLogRepository,
 
 	if input.APIKey.GroupID != nil {
 		usageLog.GroupID = input.APIKey.GroupID
+	}
+	if input.ChannelID > 0 {
+		channelID := input.ChannelID
+		usageLog.ChannelID = &channelID
 	}
 	if input.UserAgent != "" {
 		usageLog.UserAgent = &input.UserAgent

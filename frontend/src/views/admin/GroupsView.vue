@@ -4458,6 +4458,8 @@ const copyAccountsGroupLabel = (g: AdminGroup) => {
 };
 
 const copySourceGroups = ref<AdminGroup[]>([]);
+let copySourceGeneration = 0;
+let copySourceInFlight = 0;
 
 // 复制账号的源分组选项（创建时）- 相同平台；composite 分组可汇总各平台账号
 const copyAccountsGroupOptions = computed(() => {
@@ -5239,12 +5241,24 @@ const loadGroups = async () => {
 };
 
 const loadCopySourceGroups = async () => {
-  try {
-    copySourceGroups.value = await adminAPI.groups.getAllIncludingInactive();
-  } catch (error) {
-    copySourceGroups.value = [];
-    console.error("Error loading group copy sources:", error);
-  }
+	const generation = ++copySourceGeneration;
+	copySourceInFlight = generation;
+	try {
+		const groups = await adminAPI.groups.getAllIncludingInactive();
+		if (copySourceInFlight === generation) {
+			copySourceGroups.value = groups;
+		}
+	} catch (error) {
+		if (copySourceInFlight === generation) {
+			copySourceGroups.value = [];
+			appStore.showError(t("admin.groups.failedToLoad"));
+			console.error("Error loading group copy sources:", error);
+		}
+	} finally {
+		if (copySourceInFlight === generation) {
+			copySourceInFlight = 0;
+		}
+	}
 };
 
 const formatCost = (cost: number): string => {

@@ -20,6 +20,7 @@ type ollamaCloudUsageHandlerTestRepo struct {
 	account           *service.Account
 	accounts          []*service.Account
 	groupResolveCalls int
+	groupResolveErr   error
 }
 
 type ollamaCloudUsageMutationAdminService struct {
@@ -51,6 +52,9 @@ func (r *ollamaCloudUsageHandlerTestRepo) GetByID(_ context.Context, id int64) (
 
 func (r *ollamaCloudUsageHandlerTestRepo) ListOllamaCloudUsageGroupAccounts(_ context.Context, _ []*service.Account) ([]service.Account, error) {
 	r.groupResolveCalls++
+	if r.groupResolveErr != nil {
+		return nil, r.groupResolveErr
+	}
 	result := make([]service.Account, 0, len(r.accounts)+1)
 	if r.account != nil {
 		result = append(result, *r.account)
@@ -333,6 +337,35 @@ func TestOllamaCloudUsageSharedStateCreateAndUpdateResponses(t *testing.T) {
 			require.NotNil(t, payload.Data.OllamaCloudUsage)
 			require.True(t, payload.Data.OllamaCloudUsage.Configured)
 			require.Equal(t, "pro", payload.Data.OllamaCloudUsage.Snapshot.Data.Plan)
+			require.Equal(t, 1, repo.groupResolveCalls)
+		})
+	}
+}
+
+func TestOllamaCloudUsageResolutionFailureDoesNotFailCommittedMutation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, method := range []string{http.MethodPost, http.MethodPut} {
+		t.Run(method, func(t *testing.T) {
+			target := &service.Account{ID: 8, Name: "target", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Credentials: map[string]any{"base_url": "https://ollama.com", "api_key": "shared-secret-key"}}
+			repo := &ollamaCloudUsageHandlerTestRepo{accounts: []*service.Account{target}, groupResolveErr: context.DeadlineExceeded}
+			usageService := service.NewOllamaCloudUsageService(repo, nil, nil, nil, true)
+			t.Cleanup(usageService.Stop)
+			handler := NewAccountHandler(&ollamaCloudUsageMutationAdminService{stubAdminService: newStubAdminService(), account: target}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			handler.SetOllamaCloudUsageService(usageService)
+			router := gin.New()
+			router.POST("/accounts", handler.Create)
+			router.PUT("/accounts/:id", handler.Update)
+
+			path, body := "/accounts", `{"name":"target","platform":"anthropic","type":"apikey","credentials":{"base_url":"https://ollama.com","api_key":"shared-secret-key"}}`
+			if method == http.MethodPut {
+				path, body = "/accounts/8", `{"name":"target"}`
+			}
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(method, path, bytes.NewBufferString(body))
+			request.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(recorder, request)
+
+			require.Equal(t, http.StatusOK, recorder.Code)
 			require.Equal(t, 1, repo.groupResolveCalls)
 		})
 	}

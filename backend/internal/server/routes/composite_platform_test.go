@@ -164,6 +164,7 @@ func TestCompositeTargetPlatformMiddlewareUsesExplicitRouteForMultipartImages(t 
 		})
 		c.Next()
 	})))
+	router.Use(servermiddleware.UsageDetailCapture())
 	router.Use(compositeTargetPlatformMiddleware(resolver))
 	router.POST("/v1/images/edits", func(c *gin.Context) {
 		platform, ok := service.ResolvedTargetPlatformFromContext(c.Request.Context())
@@ -181,6 +182,9 @@ func TestCompositeTargetPlatformMiddlewareUsesExplicitRouteForMultipartImages(t 
 		body, err := io.ReadAll(c.Request.Body)
 		require.NoError(t, err)
 		require.Contains(t, string(body), "image-alias")
+		service.SetUsageRequestBody(c, `{"kind":"image_metadata"}`)
+		detail := servermiddleware.BuildUsageDetailSnapshot(c)
+		require.Equal(t, `{"kind":"image_metadata"}`, detail.RequestBody)
 		c.Status(http.StatusNoContent)
 	})
 
@@ -196,6 +200,31 @@ func TestCompositeTargetPlatformMiddlewareUsesExplicitRouteForMultipartImages(t 
 
 	router.ServeHTTP(w, req)
 
+	require.Equal(t, http.StatusNoContent, w.Code)
+}
+
+func TestCompositeTargetPlatformMiddlewareBoundsOriginalBodySnapshot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(gin.HandlerFunc(servermiddleware.APIKeyAuthMiddleware(func(c *gin.Context) {
+		groupID := int64(1)
+		c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{GroupID: &groupID, Group: &service.Group{ID: groupID, Platform: service.PlatformComposite}})
+		c.Next()
+	})))
+	router.Use(servermiddleware.UsageDetailCapture())
+	router.Use(compositeTargetPlatformMiddleware(nil))
+	router.POST("/v1/responses", func(c *gin.Context) {
+		detail := servermiddleware.BuildUsageDetailSnapshot(c)
+		require.NotNil(t, detail)
+		require.LessOrEqual(t, len(detail.RequestBody), (5<<20)+1024)
+		c.Status(http.StatusNoContent)
+	})
+
+	body := `{"model":"gpt-5","input":"` + strings.Repeat("x", (5<<20)+1) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
 	require.Equal(t, http.StatusNoContent, w.Code)
 }
 

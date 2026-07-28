@@ -1000,6 +1000,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 
 	// 解析渠道级模型映射
 	channelMappingMsg, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
+	setChannelUsageFields(c, clientRequestedUsageFields(c, channelMappingMsg, reqModel, ""))
 	mappedBodyForMessages := newOpenAIModelMappedBodyCache(body, h.gatewayService.ReplaceModelInBody)
 
 	// 绑定错误透传服务，允许 service 层在非 failover 错误场景复用规则。
@@ -1719,6 +1720,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 
 	// 解析渠道级模型映射
 	channelMappingWS, _ := h.gatewayService.ResolveChannelMappingAndRestrict(ctx, apiKey.GroupID, reqModel)
+	setChannelUsageFields(c, clientRequestedUsageFields(c, channelMappingWS, reqModel, ""))
+	if channelMappingWS.Mapped {
+		setOpsRequestContext(c, channelMappingWS.MappedModel, true)
+	}
 
 	var currentUserRelease func()
 	var currentUserGroupRelease func()
@@ -1938,6 +1943,40 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			InitialRequestModel:     reqModel,
 			MaxReasoningEffort:      maxReasoningEffort,
 			ReasoningEffortMappings: reasoningEffortMappings,
+			RewriteRequest: func(turn int, payload []byte, originalModel string) (service.OpenAIWSRequestRewrite, error) {
+				if turn < 2 || apiKey.Group == nil || apiKey.Group.Platform != service.PlatformComposite {
+					return service.OpenAIWSRequestRewrite{Payload: payload, OriginalModel: originalModel}, nil
+				}
+				publicModel := strings.TrimSpace(gjson.GetBytes(payload, "model").String())
+				if publicModel == "" {
+					return service.OpenAIWSRequestRewrite{Payload: payload, OriginalModel: originalModel}, nil
+				}
+				resolver, ok := service.CompositeRouteResolverFromContext(ctx)
+				if !ok {
+					resolver = service.NewCompositeRouteResolver(nil)
+				}
+				decision, err := resolver.Resolve(ctx, apiKey.Group.ID, publicModel, service.CompositeRouteEndpointResponses)
+				if err != nil {
+					return service.OpenAIWSRequestRewrite{}, service.NewOpenAIWSClientCloseError(coderws.StatusInternalError, "failed to resolve composite model route", err)
+				}
+				if !decision.Matched || (decision.TargetPlatform != service.PlatformOpenAI && decision.TargetPlatform != service.PlatformGrok) {
+					return service.OpenAIWSRequestRewrite{}, service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "Responses WebSocket API only supports OpenAI-compatible models for composite groups", nil)
+				}
+				ctx = service.WithCompositeRouteDecision(ctx, decision)
+				c.Request = c.Request.WithContext(ctx)
+				routeModel := strings.TrimSpace(decision.UpstreamModel)
+				mapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(ctx, apiKey.GroupID, routeModel)
+				if mapping.Mapped {
+					routeModel = mapping.MappedModel
+				}
+				channelMappingWS = mapping
+				setChannelUsageFields(c, clientRequestedUsageFields(c, mapping, routeModel, ""))
+				setOpsRequestContext(c, routeModel, true)
+				return service.OpenAIWSRequestRewrite{
+					Payload:       h.gatewayService.ReplaceModelInBody(payload, routeModel),
+					OriginalModel: routeModel,
+				}, nil
+			},
 			BeforeRequest: func(turn int, payload []byte, originalModel string) error {
 				if turn == 1 {
 					return nil
@@ -2396,21 +2435,22 @@ func (h *OpenAIGatewayHandler) submitFailedUsageLog(c *gin.Context, apiKey *serv
 	upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 	upstreamModel := resolveOpenAIFailedUsageUpstreamModel(c, account, model)
 	input := &service.FailedUsageLogInput{
-		APIKey:           apiKey,
-		User:             apiKey.User,
-		Account:          account,
-		Model:            model,
-		RequestedModel:   clientRequestedModel(c, model),
-		UpstreamModel:    upstreamModel,
-		ReasoningEffort:  reasoningEffort,
-		Stream:           stream,
-		OpenAIWSMode:     strings.Contains(logKey, "responses_ws"),
-		InboundEndpoint:  inboundEndpoint,
-		UpstreamEndpoint: upstreamEndpoint,
-		UserAgent:        userAgent,
-		IPAddress:        clientIP,
-		DetailSnapshot:   detailSnapshot,
-		Duration:         duration,
+		APIKey:             apiKey,
+		User:               apiKey.User,
+		Account:            account,
+		Model:              model,
+		RequestedModel:     clientRequestedModel(c, model),
+		UpstreamModel:      upstreamModel,
+		ReasoningEffort:    reasoningEffort,
+		Stream:             stream,
+		OpenAIWSMode:       strings.Contains(logKey, "responses_ws"),
+		InboundEndpoint:    inboundEndpoint,
+		UpstreamEndpoint:   upstreamEndpoint,
+		UserAgent:          userAgent,
+		IPAddress:          clientIP,
+		DetailSnapshot:     detailSnapshot,
+		Duration:           duration,
+		ChannelUsageFields: channelUsageFieldsFromContext(c),
 	}
 	var usage *service.OpenAIUsage
 	if len(usages) > 0 {

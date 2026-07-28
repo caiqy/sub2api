@@ -46,8 +46,9 @@
 
         <template #cell-model="{ row }">
           <div v-if="hasModelMapping(row)" class="space-y-0.5 text-xs">
-            <div class="break-all font-medium text-gray-900 dark:text-white">{{ row.requested_model }}</div>
-            <div class="break-all text-gray-500 dark:text-gray-400"><span class="mr-0.5">↳</span>{{ row.upstream_model }}</div>
+            <div v-for="(model, index) in modelStages(row)" :key="`${model}-${index}`" class="break-all" :class="index === 0 ? 'font-medium text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'">
+              <span v-if="index > 0" class="mr-0.5">↳</span>{{ model }}
+            </div>
           </div>
           <span v-else-if="displayModel(row)" class="text-sm font-medium text-gray-900 dark:text-white">{{ displayModel(row) }}</span>
           <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
@@ -228,9 +229,14 @@ function isUpstreamRow(log: OpsErrorLog): boolean {
 }
 
 function hasModelMapping(log: OpsErrorLog): boolean {
+	return modelStages(log).length > 1
+}
+
+function modelStages(log: OpsErrorLog): string[] {
   const requested = String(log.requested_model || '').trim()
+	const mapped = String(log.model || '').trim()
   const upstream = String(log.upstream_model || '').trim()
-  return !!requested && !!upstream && requested !== upstream
+	return [requested, mapped, upstream].filter((model, index, stages) => !!model && stages.indexOf(model) === index)
 }
 
 function displayModel(log: OpsErrorLog): string {
