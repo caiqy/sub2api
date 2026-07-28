@@ -63,6 +63,17 @@ func TestCheckBillingEligibility_AllowsBalanceAtMinimumReserve(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestCheckBillingEligibility_RejectsMissingSubscriptionInsteadOfUsingBalance(t *testing.T) {
+	cache := &balanceEligibilityCacheStub{balance: 100}
+	cfg := &config.Config{}
+	svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(svc.Stop)
+
+	group := &Group{ID: 9, SubscriptionType: SubscriptionTypeSubscription}
+	err := svc.CheckBillingEligibility(context.Background(), &User{ID: 1}, nil, group, nil, PlatformAnthropic)
+	require.ErrorIs(t, err, ErrSubscriptionNotFound)
+}
+
 func TestSyncBalanceCacheAfterDeduction_InvalidatesExhaustedBalance(t *testing.T) {
 	cache := &balanceEligibilityCacheStub{
 		balance:                  0.50,
