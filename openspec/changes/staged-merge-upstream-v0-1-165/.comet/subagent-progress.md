@@ -1,10 +1,10 @@
 # 子代理进度
 
-- 当前任务：29 项中的第 25 项（OpenSpec 7.3）
+- 当前任务：29 项中的第 26 项（OpenSpec 8.1）
 - 当前阶段：`ready`
-- 状态：Task 24 v0.1.165 full gate 与 fresh review 已通过，OpenSpec 7.2 已闭合，Task 25 ready；已完成 24 项，最后审查 SHA `609f36d15`
-- 简报：`.superpowers/sdd/task-25-brief.md`
-- 报告：`.superpowers/sdd/task-24-report.md`
+- 状态：Task 25 v0.1.165 capability review 已通过，OpenSpec 7.3 已闭合，Task 26 ready；已完成 25 项，最后审查 SHA `53b273364`
+- 简报：`.superpowers/sdd/task-26-brief.md`
+- 报告：`.superpowers/sdd/task-25-report.md`
 - Task 20 最终复审：`.superpowers/sdd/task-20-final-review.md`
 - Task 20 预算外修复简报：`.superpowers/sdd/task-20-review-extra.md`
 - Task 20 审查差异：初始 `.superpowers/sdd/review-07167bbfa..6ebd068ff.diff`；Round 1 fix `.superpowers/sdd/review-6ebd068ff..96455c43b.diff`；Round 2 final `.superpowers/sdd/review-6ebd068ff..09db65607.diff`；extra final `.superpowers/sdd/review-6ebd068ff..babe29e00.diff`
@@ -23,12 +23,15 @@
 - Task 23 最后审查 SHA：`5f9929d30`
 - Task 24 提交：`20648b826`、`b5c99130b`、`07e52add4`、`99e2fce8f`、`6d4b48d6d`、`3cfdaffa1`、`d8022d582`、`e98ce7a78`、`27a8a08df`、`196ee1488`、`609f36d15`
 - Task 24 最后审查 SHA：`609f36d15`
-- 已完成任务数：24
+- Task 25 范围：`0ce145757..53b273364`；最终 source/test `0a1234bc0`
+- Task 25 关键修复：`dd58e6f6a`、`518bd5ff1`、`6b560cd1f`、`e63a6d380`、`dda0a2e72`、`23204b0db`、`0a1234bc0`
+- Task 25 最后审查 SHA：`53b273364`
+- 已完成任务数：25
 - 审查模式：`thorough`
 - Task 20 审查修复轮次：常规 2/2 与用户授权 extra 1/1 已作为历史记录保留；关闭写回不追加新修复轮次
 - Task 20 RED/GREEN：follow-up 范围 `babe29e00f18df9a0011d8464446654148d5eb53..4778e32dc879f682fd5774c1fb0c5a63867802c6` 的验证与归档已完成，审查无 Critical/Important
 - Task 21 结果：focused、本地 full gate、有效版本注入 build、detached 双 generate 与 remote integration 通过；最终源码净 diff 为零
-- 未解决反馈：Task 20 的 3 个非阻断 Minor 保留为历史；Task 24 reviewer 最终无 finding
+- 未解决反馈：Task 20 的 3 个历史 Minor；Task 25 的 Grok build 前 attempted、drain test 固定 `50ms`、OAuth image HeapAlloc 波动、Windows 无 `-race` 四项非阻断残余
 
 ## Task 20 关闭写回
 
@@ -73,6 +76,15 @@
 - Remote evidence：唯一目录、执行/cleanup exit 0、13 个精确环境/config skip 与 migration 12/12 证据均写入 formal ledger；无 Task 24 capability skip
 - Fresh reviewer：Task session `ses_05301c2ceffeZjH8LkLhMnmJ9L`，首轮 `CHANGES_REQUIRED` 后补齐证据与 OAuth cleanup，最终 `APPROVED`，无剩余 finding
 - 详细报告：`.superpowers/sdd/task-24-report.md`；formal ledger：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
+
+## Task 25 OpenAI Live/本地定制专项审查关闭
+
+- 范围：`0ce145757..53b273364`；最终 source/test `0a1234bc0`，VERSION 保持 `0.1.159.6`
+- 结论：Live 复用既有鉴权/调度/租约；普通 HTTP/WS 的 prompt cache、body replay/spooling/cleanup 与 final outbound model ownership 均保留
+- Review fixes：闭合 WS account/turn ownership、passthrough terminal/drain、HTTP/OpenAI/Grok final model、failed usage exactly-once；migration 12/12 证据保持
+- Fresh reviewer：Task session `ses_052b56df5ffeHTnKm6pktxM7MP`，最终 `APPROVED_WITH_MINOR`，Spec compliance PASS
+- 非阻断残余：Grok build 前 attempted；drain test 固定 `50ms`；OAuth image HeapAlloc 波动；Windows 无 CGO/gcc，未跑 `-race`
+- 详细报告：`.superpowers/sdd/task-25-report.md`；formal ledger：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
 
 ## Task 20 永久最终阻断
 

@@ -309,7 +309,7 @@ git diff --check 09db65607..1e7b8af75
 - `TestOpenAIResponsesWebSocketPassthroughSecondTurnAdmissionRejectsBeforeUpstream` 首次直接 GREEN，并非 RED：turn 1 成功，turn 2 user slot 拒绝并按既有 1013 语义关闭；user acquire count=2、group/account acquire count=1，第二帧未达 upstream，未产生第二 turn usage。该证据证明真实 handler `BeforeTurn` 已在 passthrough follow-up admission 重抢 slots。
 - 验证口径：fresh fixer 第一次 `go test ./internal/handler -count=1` exit 1，唯一失败 `TestOpenAIImages_OAuthTextIsReleasedBeforeBlockedUpstream`，HeapAlloc `55,440,896` 超过 ceiling `47,129,280`；相同命令第二次 exit 0，controller 精确 `-count=10` 为 10/10 exit 0。原因 UNKNOWN，不能声称 handler 全包无条件 PASS，也不归入任何既有 lease-loss 例外；service 仍沿用此前通过证据。
 - 最新顺序验证：`go test ./internal/service/openai_ws_v2 -count=1` exit 0（1.828s），`go test ./internal/service -count=1` exit 0（101.780s），`go test ./internal/handler -count=1` exit 0（59.497s）。并发运行三个 package 时 OAuth image HeapAlloc 再次失败：actual `55,421,176` > ceiling `47,108,160`；精确 test 隔离通过（2.633s），随后 handler 顺序 full pass。原因仍 UNKNOWN，保留为 Task 26 residual，不能称全局无条件 PASS或已接受例外。`-race` 因 `CGO_ENABLED=0` 且无 `gcc` 未运行。
-- 结论：Task 25 capability 修复为 candidate，等待 fresh re-review；不得提前称 protected closure 或勾选 OpenSpec 7.3。`VERSION` 仍为 `0.1.159.6`；Task 26、final verify、release、tag、push、deploy、远程操作仍不在范围内。
+- 结论：Task 25 fresh reviewer `ses_052b56df5ffeHTnKm6pktxM7MP` 最终为 `APPROVED_WITH_MINOR`，Spec compliance PASS；controller 接受并闭合 OpenSpec 7.3，可进入 Task 26。非阻断残余为 Grok request build 前 attempted 标记、drain lifecycle test 固定 `50ms`、OAuth image HeapAlloc 波动、Windows 无 CGO/gcc 因而未跑 `-race`。`VERSION` 仍为 `0.1.159.6`；Task 26、final verify、release、tag、push、deploy、远程操作仍未执行。
 
 ## 远程 integration 记录
 

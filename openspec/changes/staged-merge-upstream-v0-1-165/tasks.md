@@ -42,7 +42,7 @@
 
 - [x] 7.1 `git merge --no-ff v0.1.165`，处理冲突（重点：OpenAI Live gateway、ollama 用量刷新、email alias 注册查重、migration 187-190、postcss 安全升级；merge `dc3df2d57`，alias review fix `ca4ec7452`，最终审查 HEAD `5f9929d30`）
 - [x] 7.2 运行 full 门禁并修复回归
-- [ ] 7.3 专项审查 OpenAI Live gateway 与本地 prompt cache reuse、body replay 的交互，确认本地 OpenAI 定制仍生效并记录证据
+- [x] 7.3 专项审查 OpenAI Live gateway 与本地 prompt cache reuse、body replay 的交互，确认本地 OpenAI 定制仍生效并记录证据
 
 ## 8. 最终验证与收尾
 
