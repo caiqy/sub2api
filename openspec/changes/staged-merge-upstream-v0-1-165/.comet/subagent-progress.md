@@ -1,10 +1,10 @@
 # 子代理进度
 
-- 当前任务：29 项中的第 23 项（OpenSpec 7.1）
+- 当前任务：29 项中的第 24 项（OpenSpec 7.2）
 - 当前阶段：`ready`
-- 状态：Task 22 capability review 已通过，OpenSpec 6.3 已闭合，v0.1.164 stage `gap=0`，Task 23 ready；已完成 22 项，最后审查 SHA `fe0340942`
-- 简报：`.superpowers/sdd/task-23-brief.md`
-- 报告：`.superpowers/sdd/task-23-report.md`
+- 状态：Task 23 v0.1.165 merge 与 fresh review 已通过，OpenSpec 7.1 已闭合，Task 24 ready；已完成 23 项，最后审查 SHA `5f9929d30`
+- 简报：`.superpowers/sdd/task-24-brief.md`
+- 报告：`.superpowers/sdd/task-24-report.md`
 - Task 20 最终复审：`.superpowers/sdd/task-20-final-review.md`
 - Task 20 预算外修复简报：`.superpowers/sdd/task-20-review-extra.md`
 - Task 20 审查差异：初始 `.superpowers/sdd/review-07167bbfa..6ebd068ff.diff`；Round 1 fix `.superpowers/sdd/review-6ebd068ff..96455c43b.diff`；Round 2 final `.superpowers/sdd/review-6ebd068ff..09db65607.diff`；extra final `.superpowers/sdd/review-6ebd068ff..babe29e00.diff`
@@ -18,7 +18,10 @@
 - Task 22 提交：`92d590682`、`fe0340942`
 - Task 22 审查差异：`.superpowers/sdd/review-8741250..fe03409.diff`
 - Task 22 最后审查 SHA：`fe0340942`
-- 已完成任务数：22
+- Task 23 提交：`dc3df2d57`、`0f2c22e21`、`ca4ec7452`、`5f9929d30`
+- Task 23 审查差异：`.superpowers/sdd/review-34702ad..5f9929d.diff`
+- Task 23 最后审查 SHA：`5f9929d30`
+- 已完成任务数：23
 - 审查模式：`thorough`
 - Task 20 审查修复轮次：常规 2/2 与用户授权 extra 1/1 已作为历史记录保留；关闭写回不追加新修复轮次
 - Task 20 RED/GREEN：follow-up 范围 `babe29e00f18df9a0011d8464446654148d5eb53..4778e32dc879f682fd5774c1fb0c5a63867802c6` 的验证与归档已完成，审查无 Critical/Important
@@ -51,6 +54,14 @@
 - Fresh reviewer：Task session `ses_053fef073ffeS21rTntDTNu0SL`，最终 `Approved`，无 Critical/Important
 - 3 个非阻断 Minor：源码字符串护栏、两个 `count_tokens` stale-subscription runtime 覆盖缺口、Ollama 固定 `50ms` barrier
 - 详细报告：`.superpowers/sdd/task-22-report.md`；stage closure：`docs: close v0.1.164 stage gate`
+
+## Task 23 v0.1.165 Merge 关闭
+
+- Merge：`dc3df2d57`；第一父 `34702ad02`，第二父 `e9a58c1cb`，22 个冲突融合，merge commit 保持纯净
+- Review fix：`ca4ec7452` 以 `limit + 1` 检测 email alias 候选饱和并 fail closed；确定性 RED/GREEN 覆盖 lookup 与 guarded create
+- Ledger：`0f2c22e21`、`5f9929d30`；VERSION `0.1.159.6`，双方 172/181、两个 186 和 187-190 完整保留
+- Fresh reviewer：Task session `ses_053e131deffeKifkarjDB3wSBy`，最终 `Approved`，无 Critical/Important/Minor
+- 详细报告：`.superpowers/sdd/task-23-report.md`；Task 24 full gate 与 Task 25 专项审查尚未执行
 
 ## Task 20 永久最终阻断
 
