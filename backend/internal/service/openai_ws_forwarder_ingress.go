@@ -533,11 +533,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					return fmt.Errorf("resolve Grok websocket cache identity: %w", err)
 				}
 			}
-			SetOpsUpstreamAttempted(c, true)
-			if hooks != nil && hooks.OnOutboundRequest != nil {
-				hooks.OnOutboundRequest(turn, bridgePayloadRaw, strings.TrimSpace(openAIWSPayloadStringFromRaw(bridgePayloadRaw, "model")))
-			}
-			result, bridgeErr := s.proxyOpenAIWSHTTPBridgeTurn(
+			result, bridgeErr := s.proxyOpenAIWSHTTPBridgeTurnWithOutboundHook(
 				ctx,
 				c,
 				account,
@@ -551,6 +547,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				grokCacheIdentity,
 				turn,
 				writeClientMessage,
+				func(body []byte, effectiveModel string) {
+					if hooks != nil && hooks.OnOutboundRequest != nil {
+						hooks.OnOutboundRequest(turn, body, effectiveModel)
+					}
+				},
 			)
 			if hooks != nil && hooks.AfterTurn != nil {
 				hooks.AfterTurn(turn, result, bridgeErr)

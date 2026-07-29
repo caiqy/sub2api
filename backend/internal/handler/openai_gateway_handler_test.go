@@ -1565,6 +1565,7 @@ type openAIWSRegressionEnv struct {
 	upstream             *httptest.Server
 	requestDone          chan struct{}
 	handler              *OpenAIGatewayHandler
+	accountRepo          *openAIChatCompletionsAccountRepoStub
 	account              *service.Account
 	apiKey               *service.APIKey
 	firstUpstreamMessage chan []byte
@@ -1813,6 +1814,7 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 		upstream:             upstreamServer,
 		requestDone:          requestDone,
 		handler:              h,
+		accountRepo:          accountRepo,
 		account:              accountRepo.account,
 		apiKey:               apiKey,
 		firstUpstreamMessage: firstUpstreamMessage,
@@ -2243,6 +2245,12 @@ func (e *openAIWSRegressionEnv) Close() {
 	if e.server != nil {
 		e.server.Close()
 	}
+}
+
+func (e *openAIWSRegressionEnv) replaceAccount(account *service.Account) {
+	e.t.Helper()
+	e.account = account
+	e.accountRepo.account = account
 }
 
 func (e *openAIWSRegressionEnv) RunFirstTurnExpectClose(t *testing.T, closeCode coderws.StatusCode) {

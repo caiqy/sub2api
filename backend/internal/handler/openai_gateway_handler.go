@@ -2021,6 +2021,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			MaxReasoningEffort:      maxReasoningEffort,
 			ReasoningEffortMappings: reasoningEffortMappings,
 			RewriteRequest: func(turn int, payload []byte, originalModel string) (service.OpenAIWSRequestRewrite, error) {
+				resetOpenAIWSFailedUsageTurn(c)
 				if turn < 2 || apiKey.Group == nil || apiKey.Group.Platform != service.PlatformComposite {
 					return service.OpenAIWSRequestRewrite{Payload: payload, OriginalModel: originalModel}, nil
 				}
@@ -2081,6 +2082,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				setOpenAIFailedUsageExactUpstreamModel(c, effectiveModel)
 			},
 			BeforeTurn: func(turn int) error {
+				resetOpenAIWSFailedUsageTurn(c)
 				// turn==1 的会话屏蔽已由握手层检查覆盖；连接内 flag 只拦截后续 turn。
 				if cyberBlockedThisConn {
 					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, cyberSessionBlockedClientMsg, nil)
@@ -2561,6 +2563,15 @@ func setOpenAIFailedUsageExactUpstreamModel(c *gin.Context, upstreamModel string
 	if upstreamModel != "" {
 		c.Set(opsUpstreamModelKey, upstreamModel)
 	}
+}
+
+func resetOpenAIWSFailedUsageTurn(c *gin.Context) {
+	if c == nil {
+		return
+	}
+	service.SetOpsUpstreamAttempted(c, false)
+	c.Set(openAIFailedUsageExactUpstreamModelKey, "")
+	c.Set(opsUpstreamModelKey, "")
 }
 
 func resolveOpenAIFailedUsageExactUpstreamModel(account *service.Account, requestedModel, defaultMappedModel string) string {

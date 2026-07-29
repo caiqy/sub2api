@@ -51,6 +51,7 @@ func WriteFailedUsageLogBestEffort(ctx context.Context, repo UsageLogRepository,
 	}
 	upstreamModel := optionalNonEqualStringPtr(input.UpstreamModel, model)
 	if input.OpenAIWSMode && upstreamModel == nil && strings.TrimSpace(input.UpstreamModel) != "" {
+		// WS callback model is authoritative even when it equals the billed model.
 		value := strings.TrimSpace(input.UpstreamModel)
 		upstreamModel = &value
 	}

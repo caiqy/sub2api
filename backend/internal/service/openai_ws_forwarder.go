@@ -221,7 +221,7 @@ type OpenAIWSIngressHooks struct {
 	// originalModel is the pre-account-mapping model used for policy/audit.
 	BeforeRequest func(turn int, payload []byte, originalModel string) error
 	// OnOutboundRequest runs synchronously immediately before every upstream
-	// response.create write, including turn 1. payload is the final outbound
+	// response.create write or HTTP Do after final payload preparation. payload is the final outbound
 	// frame and effectiveModel is the actual model for that turn (including a
 	// passthrough session model when the frame itself omits model).
 	OnOutboundRequest func(turn int, payload []byte, effectiveModel string)

@@ -975,11 +975,15 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	firstWriteErr := relayUpstreamFrameConn.WriteFrame(firstWriteCtx, coderws.MessageText, firstClientMessage)
 	cancelFirstWrite()
 	if firstWriteErr != nil {
-		return wrapOpenAIWSIngressTurnError(
+		turnErr := wrapOpenAIWSIngressTurnError(
 			"write_upstream",
 			fmt.Errorf("write first upstream websocket request: %w", firstWriteErr),
 			false,
 		)
+		if hooks != nil && hooks.AfterTurn != nil {
+			hooks.AfterTurn(1, nil, turnErr)
+		}
+		return turnErr
 	}
 	upstreamFirstMessageSent = true
 
@@ -1097,7 +1101,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 				errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(payload)
 				if !isOpenAIWSRateLimitError(errCodeRaw, errTypeRaw, errMsgRaw) {
-					return nil
+					return errors.New("upstream websocket error event")
 				}
 				s.persistOpenAIWSRateLimitSignal(ctx, account, handshakeHeaders, payload, errCodeRaw, errTypeRaw, errMsgRaw)
 				logOpenAIWSV2Passthrough(
