@@ -1,10 +1,10 @@
 # 子代理进度
 
-- 当前任务：29 项中的第 26 项（OpenSpec 8.1）
+- 当前任务：29 项中的第 27 项（OpenSpec 8.2）
 - 当前阶段：`ready`
-- 状态：Task 25 v0.1.165 capability review 已通过，OpenSpec 7.3 已闭合，Task 26 ready；已完成 25 项，最后审查 SHA `53b273364`
-- 简报：`.superpowers/sdd/task-26-brief.md`
-- 报告：`.superpowers/sdd/task-25-report.md`
+- 状态：Task 26 version normalization 已通过，OpenSpec 8.1 已闭合，Task 27 ready；已完成 26 项，最后审查 SHA `a72934b3a`
+- 简报：`.superpowers/sdd/task-27-brief.md`
+- 报告：`.superpowers/sdd/task-26-report.md`
 - Task 20 最终复审：`.superpowers/sdd/task-20-final-review.md`
 - Task 20 预算外修复简报：`.superpowers/sdd/task-20-review-extra.md`
 - Task 20 审查差异：初始 `.superpowers/sdd/review-07167bbfa..6ebd068ff.diff`；Round 1 fix `.superpowers/sdd/review-6ebd068ff..96455c43b.diff`；Round 2 final `.superpowers/sdd/review-6ebd068ff..09db65607.diff`；extra final `.superpowers/sdd/review-6ebd068ff..babe29e00.diff`
@@ -26,7 +26,9 @@
 - Task 25 范围：`0ce145757..53b273364`；最终 source/test `0a1234bc0`
 - Task 25 关键修复：`dd58e6f6a`、`518bd5ff1`、`6b560cd1f`、`e63a6d380`、`dda0a2e72`、`23204b0db`、`0a1234bc0`
 - Task 25 最后审查 SHA：`53b273364`
-- 已完成任务数：25
+- Task 26 提交：`a72934b3a`
+- Task 26 最后审查 SHA：`a72934b3a`
+- 已完成任务数：26
 - 审查模式：`thorough`
 - Task 20 审查修复轮次：常规 2/2 与用户授权 extra 1/1 已作为历史记录保留；关闭写回不追加新修复轮次
 - Task 20 RED/GREEN：follow-up 范围 `babe29e00f18df9a0011d8464446654148d5eb53..4778e32dc879f682fd5774c1fb0c5a63867802c6` 的验证与归档已完成，审查无 Critical/Important
@@ -85,6 +87,14 @@
 - Fresh reviewer：Task session `ses_052b56df5ffeHTnKm6pktxM7MP`，最终 `APPROVED_WITH_MINOR`，Spec compliance PASS
 - 非阻断残余：Grok build 前 attempted；drain test 固定 `50ms`；OAuth image HeapAlloc 波动；Windows 无 CGO/gcc，未跑 `-race`
 - 详细报告：`.superpowers/sdd/task-25-report.md`；formal ledger：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
+
+## Task 26 最终版本规范化关闭
+
+- 范围：`665003ef1..a72934b3a`；`backend/cmd/server/VERSION` 从 `0.1.159.6` 更新为 `0.1.165.1`
+- Legacy scan：brief 原样命令 exit 0、count 0；上游 `first_output_timeout` 保留
+- 提交范围：仅 VERSION 与 formal ledger；未执行 Task 27 full verify 或发布操作
+- Fresh reviewer：Task session `ses_0518a2031ffeUwoH2ECghFo46d`，最终 `APPROVED`，无 finding
+- 详细报告：`.superpowers/sdd/task-26-report.md`
 
 ## Task 20 永久最终阻断
 

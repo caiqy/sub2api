@@ -311,6 +311,7 @@ git diff --check 09db65607..1e7b8af75
 - 最新顺序验证：`go test ./internal/service/openai_ws_v2 -count=1` exit 0（1.828s），`go test ./internal/service -count=1` exit 0（101.780s），`go test ./internal/handler -count=1` exit 0（59.497s）。并发运行三个 package 时 OAuth image HeapAlloc 再次失败：actual `55,421,176` > ceiling `47,108,160`；精确 test 隔离通过（2.633s），随后 handler 顺序 full pass。原因仍 UNKNOWN，保留为 Task 26 residual，不能称全局无条件 PASS或已接受例外。`-race` 因 `CGO_ENABLED=0` 且无 `gcc` 未运行。
 - 结论：Task 25 fresh reviewer `ses_052b56df5ffeHTnKm6pktxM7MP` 最终为 `APPROVED_WITH_MINOR`，Spec compliance PASS；controller 接受并闭合 OpenSpec 7.3，可进入 Task 26。非阻断残余为 Grok request build 前 attempted 标记、drain lifecycle test 固定 `50ms`、OAuth image HeapAlloc 波动、Windows 无 CGO/gcc 因而未跑 `-race`。`VERSION` 仍为 `0.1.159.6`；Task 26、final verify、release、tag、push、deploy、远程操作仍未执行。
 - Task 26 版本元数据证据（source HEAD `665003ef1c4bd43bd46bcb9e9a02a7156355cf51`）：OpenSpec 2.1~7.3 对应的六个上游合入阶段均已闭合，最高已合入正式 upstream tag 为 `v0.1.165`；`backend/cmd/server/VERSION` 从 `0.1.159.6` 规范为 `0.1.165.1`。按 brief 精确执行 legacy first-token PowerShell 扫描，exit `0`、count `0`；上游 `first_output_timeout` 不在扫描范围且未改动。`git diff --check` exit `0`。边界：OpenSpec 8.1 保持未勾选，留待 controller fresh review；Task 27 full verify 尚未执行，本 Task 不是 release/tag/push/deploy，也未执行远程操作或镜像构建。
+- Task 26 fresh review closure：reviewer `ses_0518a2031ffeUwoH2ECghFo46d` 最终 `APPROVED`，Spec compliance 与 Code quality 均 PASS、无 finding；controller 闭合 OpenSpec 8.1，可进入 Task 27。此结论仅覆盖版本元数据与 legacy scan，不代表 final full verify 或发布已完成。
 
 ## 远程 integration 记录
 
