@@ -247,6 +247,14 @@ func TestMigrationsRunner_UpgradesLocalV01596AcrossUpstreamStages(t *testing.T) 
 			require.ErrorIs(t, err, fs.ErrNotExist)
 		}
 	}
+	require.Len(t, currentUpstream, 12, "expected the current embedded FS to contain all upstream migrations")
+	for _, name := range []string{
+		"186_alipay_mobile_precreate_deep_link.sql",
+		"186_group_auth_cache_image_generation.sql",
+		"190_add_users_email_alias_dedup_index_notx.sql",
+	} {
+		require.Contains(t, currentUpstream, name)
+	}
 	currentRelease := ""
 	for _, snapshot := range releaseSnapshots {
 		expected := make(map[string]struct{}, len(snapshot.migrations))
@@ -295,6 +303,13 @@ func TestMigrationsRunner_UpgradesLocalV01596AcrossUpstreamStages(t *testing.T) 
 		if _, current := currentUpstream[name]; current || name == localVideoMigration || name == localGroupMigration {
 			requireMigrationApplied(t, tx, name)
 		}
+	}
+	for _, name := range []string{
+		"186_alipay_mobile_precreate_deep_link.sql",
+		"186_group_auth_cache_image_generation.sql",
+		"190_add_users_email_alias_dedup_index_notx.sql",
+	} {
+		requireMigrationApplied(t, tx, name)
 	}
 	require.NoError(t, tx.Rollback())
 
