@@ -1,7 +1,7 @@
 # 子代理进度
 
-- 当前任务：29 项中的第 20 项（OpenSpec 6.1）
-- 当前阶段：`follow-up-closure-ready`
+- 当前任务：29 项中的第 21 项（OpenSpec 6.2）
+- 当前阶段：`ready`
 - 状态：Task 20 已完成关闭写回，Task 21 ready；已完成 20 项，最后审查 SHA `4778e32dc`
 - 简报：`.superpowers/sdd/task-20-brief.md`
 - 报告：`.superpowers/sdd/task-20-report.md`
@@ -11,7 +11,7 @@
 - 基线 SHA：`075abc07399d6154130d2a2695fb24c785acd69c`
 - 任务起点 SHA：`07167bbfa`
 - 实现提交：`699459921`、`6ebd068ff`、`48e2d4a0b`、`88aeed4b0`、`96455c43b`、`a9292253f`、`09db65607`、`1e7b8af75`、`babe29e00`
-- 最后审查 SHA：`babe29e00`
+- 最后审查 SHA：`4778e32dc`
 - 已完成任务数：20
 - 审查模式：`thorough`
 - 审查修复轮次：常规 2/2 与用户授权 extra 1/1 已作为历史记录保留；关闭写回不追加新修复轮次
