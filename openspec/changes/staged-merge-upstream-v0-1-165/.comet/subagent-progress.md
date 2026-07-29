@@ -1,21 +1,47 @@
 # 子代理进度
 
-- 当前任务：29 项中的第 19 项（OpenSpec 5.3）
-- 当前阶段：`done`
-- 状态：Task 19 Round 1 修复复审 PASS；OpenSpec 5.3 已闭合，可进入 Task 20，v0.1.164 在新任务启动前继续封闭
-- 简报：`.superpowers/sdd/task-19-brief.md`
-- 报告：`.superpowers/sdd/task-19-report.md`
-- 审查差异：初始 `.superpowers/sdd/review-a452e3fdd..dbb18b705.diff`；Round 1 fix `.superpowers/sdd/review-dbb18b705..59e373f07.diff`
+- 当前任务：29 项中的第 20 项（OpenSpec 6.1）
+- 当前阶段：`follow-up-closure-ready`
+- 状态：Task 20 已完成关闭写回，Task 21 ready；已完成 20 项，最后审查 SHA `4778e32dc`
+- 简报：`.superpowers/sdd/task-20-brief.md`
+- 报告：`.superpowers/sdd/task-20-report.md`
+- 最终复审：`.superpowers/sdd/task-20-final-review.md`
+- 预算外修复简报：`.superpowers/sdd/task-20-review-extra.md`
+- 审查差异：初始 `.superpowers/sdd/review-07167bbfa..6ebd068ff.diff`；Round 1 fix `.superpowers/sdd/review-6ebd068ff..96455c43b.diff`；Round 2 final `.superpowers/sdd/review-6ebd068ff..09db65607.diff`；extra final `.superpowers/sdd/review-6ebd068ff..babe29e00.diff`
 - 基线 SHA：`075abc07399d6154130d2a2695fb24c785acd69c`
-- 任务起点 SHA：`a452e3fdd`
-- 实现提交：`dbb18b705`、`82bed8926`、`59e373f07`
-- 最后审查 SHA：`59e373f07`
-- 已完成任务数：19
+- 任务起点 SHA：`07167bbfa`
+- 实现提交：`699459921`、`6ebd068ff`、`48e2d4a0b`、`88aeed4b0`、`96455c43b`、`a9292253f`、`09db65607`、`1e7b8af75`、`babe29e00`
+- 最后审查 SHA：`babe29e00`
+- 已完成任务数：20
 - 审查模式：`thorough`
-- 审查修复轮次：1/2；同一 fresh Sol reviewer `20411d24-9062-4f23-9c14-2deb2c79e97f` / `ses_05b126592ffefdFI5RspQWcfYc` 最终 Spec/证据质量/总体均 PASS
-- RED/GREEN：Round 1 基线 `protected=5/gap=1`；clean archive frozen install、axios 1.18.1 双断言与 frontend build PASS 后为 `rows=6/protected=6/manual=0/gap=0`
-- 风险信号：能力矩阵跨 reasoning/scheduler/cleanup/billing/dependency/migration，命中 thorough task review
-- 未解决反馈：无；六行矩阵 `protected=6/manual=0/gap=0/approved-removal=0`，clean archive axios 1.18.1/build 证据与审计措辞均闭合
+- 审查修复轮次：常规 2/2 与用户授权 extra 1/1 已作为历史记录保留；关闭写回不追加新修复轮次
+- RED/GREEN：follow-up 范围 `babe29e00f18df9a0011d8464446654148d5eb53..4778e32dc879f682fd5774c1fb0c5a63867802c6` 的验证与归档已完成，审查无 Critical/Important
+- 风险信号：历史记录保留 `composite routing`、同号 172 migrations、两个 186 migrations、生成物与依赖冲突的原始审查链；当前仅做关闭记账
+- 未解决反馈：保留 3 个非阻断 Minor 作为历史事实，不再转回阻断
+
+## Task 20 关闭写回
+
+- 范围：`babe29e00f18df9a0011d8464446654148d5eb53..4778e32dc879f682fd5774c1fb0c5a63867802c6`
+- 复审会话：Paseo agent `74b8c51b-f4ae-4a56-b3a2-d8bae2d640e7`，runtime `ses_055058ab6ffeZf8yxzq33JSWqw`，内部 reviewer `ses_0550342a5ffeiJAD61Nle4BPcg`
+- 验证报告：`docs/superpowers/reports/2026-07-29-unify-effective-gateway-route-state-verify.md`
+- 归档路径：`openspec/changes/archive/2026-07-29-unify-effective-gateway-route-state`
+- 归档提交：`a948e3b5e`、`263147b6b`
+- 用户基线例外：`make test` 的 lease-loss EOF 为用户明确接受且已在原始上游 `v0.1.165` 复现的基线例外，不记为通过
+- 3 个历史 Minor：源码字符串护栏、两个 `count_tokens` stale-subscription 运行时覆盖缺口、Ollama 固定 `50ms` barrier
+
+## Task 20 永久最终阻断
+
+- Extra fixer：唯一 fresh Terra `37a75748-745f-43f6-bc4b-525beef3863b` / `ses_0592794eaffeUDPSRnfuuyDVrb`；提交 `1e7b8af75`（源码/测试）与 `babe29e00`（tracked ledger）。
+- Extra reviewer：唯一 fresh Sol `965b8494-82b5-492d-bc7a-50a228b98295` / `ses_058f9bd7bffeTdybiz4KqLVNPF`，只读 Plan Mode；结论 `0 Critical`、`Evidence=FAIL`、`Spec=CHANGES_REQUESTED`、`Overall=TASK20_BLOCKED_FINAL`、`TASK21_KEEP_CLOSED`。
+- Important 1 OPEN：effective group 仍未统一 middleware subscription、protocol dispatch、Gin context 中的 API key 与 Ops 状态；handler 内局部 effective route 不能使下游全调用链共享同一权威 group。
+- Important 2 OPEN：prompt-too-long secondary fallback 在解析最终 fallback 前校验中间 group；billing 又以 `subscription=nil` 检查最终 subscription group，使其退化为余额模式。
+- Important 3 CLOSED：composite explicit alias price 保持优先，非 composite unmapped `channel_mapped` 不再让 original model 抢占 concrete price。
+- Important 4 OPEN：普通 Responses WebSocket later frame 已执行 account mapping，但 HTTP bridge later-frame 路径仍只有 route `RewriteRequest`，未闭合 account mapping、provider affinity 与 passthrough 一致性。
+- Important 5 CLOSED：runtime resolver/direct detector/exact-prefix/legacy route 的 100 字符边界已在 billing/audit 前生效。
+- Important 6 CLOSED：tracked ledger 已自包含原始 10+4、repair chain、65+1 范围、focused evidence、advisory 与 Task 21 boundary。
+- Minor OPEN：无 channel mapping 时 public alias 仍可能覆盖 concrete 中间模型，三段审计的 requested/channel-mapped/upstream 语义未完全闭合。
+- 保持 CLOSED：Ollama post-commit enrichment、Grok multipart、5 MiB/multipart snapshot、copy-source request ownership、unit-tag group-copy evidence；不得重做。
+- 最终额度：常规 Round 2 `2/2` + extra `1/1` 均耗尽；不得再派 fixer/reviewer、不得请求额外预算、不得改源码或继续 Task 21。
 
 ## 最近完成
 

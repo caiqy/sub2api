@@ -34,7 +34,7 @@
 
 ## 6. 合入 v0.1.164
 
-- [ ] 6.1 `git merge --no-ff v0.1.164`，处理冲突（重点：composite group routing、ollama Cloud、Grok 402 冷却、Alipay deep link、migration 172 与本地同号 172、两个上游 186）
+- [x] 6.1 `git merge --no-ff v0.1.164`，处理冲突（重点：composite group routing、ollama Cloud、Grok 402 冷却、Alipay deep link、migration 172 与本地同号 172、两个上游 186；验证/归档见 `.superpowers/sdd/task-20-report.md` 与 `docs/superpowers/reports/2026-07-29-unify-effective-gateway-route-state-verify.md`，归档提交 `a948e3b5e`、`263147b6b`）
 - [ ] 6.2 运行 full 门禁并修复回归
 - [ ] 6.3 专项审查 composite group routing 入口调用链与本地 advanced/layered scheduler、Grok/platform sticky 的交互，确认本地调度定制未被绕过并记录证据
 
