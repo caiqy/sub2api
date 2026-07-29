@@ -993,9 +993,9 @@ func (r *userRepository) ExistsByEmail(ctx context.Context, email string) (bool,
 	return r.client.User.Query().Where(userEmailLookupPredicate(email)).Exist(ctx)
 }
 
-// emailAliasCandidateLimit 限制一次别名查重最多取回的候选行数。探针都以去点后的
-// 本地部分为前缀锚定（见 dotStrippedEmailExpr），正常收件箱的变体只有个位数；
-// 上限只是兜底，避免公开未鉴权的注册/发码端点把大表整张读进内存。
+// emailAliasCandidateLimit 限制一次别名查重最多检查的候选行数。SQL 对所有域去点，
+// 因此 non-Gmail dotted 地址会过匹配；额外取一行用于检测饱和，饱和时公开注册路径
+// fail closed，避免漏掉真实别名。上限也避免未鉴权端点把大表整张读进内存。
 const emailAliasCandidateLimit = 50
 
 // ExistsByEmailAlias 见 service.UserRepository。软删除过滤沿用 ExistsByEmail 的默认行为。
@@ -1022,11 +1022,14 @@ func existsByEmailAliasWithClient(ctx context.Context, client *dbent.Client, ema
 	}
 	candidates, err := client.User.Query().
 		Where(dbuser.Or(preds...)).
-		Limit(emailAliasCandidateLimit).
+		Limit(emailAliasCandidateLimit + 1).
 		Select(dbuser.FieldEmail).
 		Strings(ctx)
 	if err != nil {
 		return false, err
+	}
+	if len(candidates) > emailAliasCandidateLimit {
+		return true, nil
 	}
 
 	// 探针会有过度匹配（点号只在 Gmail 家族无意义），最终判定必须回到完整归一化规则。

@@ -98,3 +98,44 @@ func TestUserRepositoryCreateWithEmailAliasGuard(t *testing.T) {
 		Status:       service.StatusActive,
 	}))
 }
+
+func TestUserRepositoryEmailAliasGuardFailsClosedWhenDotStrippedCandidatesSaturate(t *testing.T) {
+	repo, _ := newUserEntRepo(t)
+	ctx := context.Background()
+	const local = "abcdefghijkl"
+	const domain = "example.com"
+
+	for mask := 1; mask <= emailAliasCandidateLimit+1; mask++ {
+		variant := dottedLocalVariant(local, mask) + "@" + domain
+		require.NotEqual(t, service.NormalizeEmailForAliasDedup(variant), service.NormalizeEmailForAliasDedup(dottedLocalVariant(local, 1<<(len(local)-2))+"+probe@"+domain))
+		seedUserForAliasTest(t, repo, variant)
+	}
+
+	aliasLocal := dottedLocalVariant(local, 1<<(len(local)-2))
+	seedUserForAliasTest(t, repo, aliasLocal+"+existing@"+domain)
+	probe := aliasLocal + "+probe@" + domain
+
+	exists, err := repo.ExistsByEmailAlias(ctx, probe)
+	require.NoError(t, err)
+	require.True(t, exists)
+
+	err = repo.CreateWithEmailAliasGuard(ctx, &service.User{
+		Email:        probe,
+		Username:     "saturated-alias",
+		PasswordHash: "hash",
+		Role:         service.RoleUser,
+		Status:       service.StatusActive,
+	})
+	require.ErrorIs(t, err, service.ErrEmailExists)
+}
+
+func dottedLocalVariant(local string, mask int) string {
+	result := make([]byte, 0, len(local)*2)
+	for i := range local {
+		if i > 0 && mask&(1<<(i-1)) != 0 {
+			result = append(result, '.')
+		}
+		result = append(result, local[i])
+	}
+	return string(result)
+}
