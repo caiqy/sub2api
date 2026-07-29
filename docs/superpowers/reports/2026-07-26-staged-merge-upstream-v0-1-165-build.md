@@ -253,6 +253,24 @@ git diff --check 09db65607..1e7b8af75
 - 远程完整命令 exit 0、无 `FAIL`；`--- SKIP:` 精确为 13（12 top-level + 嵌套 `TestConcurrencyCacheSuite/TestGetAccountsLoadBatch` 1）。分类为 DingTalk disabled sentinel `TestDingTalkOAuthStart_Disabled` 1、未配置 external TLS capture `TestDialerAgainstCaptureServer` 1、既有 CI TODO concurrency cache 1、未设置 `PROMPT_AUDIT_TEST_REDIS_ADDR` 的 config CAS/payload store/runtime aggregate 3、未设置 `PROMPT_AUDIT_TEST_POSTGRES_DSN` 的 prompt-audit migration/database/repository/service 六项 6、未设置 `OPENAI_API_KEY` 的 external token comparison 1；均非本阶段能力失败。
 - 临时 `6489a88b6 fix: preserve local behavior after v0.1.164` 的无效 `body = nil` 被 lint 识别为 ineffectual，已由 `aa7b67369 Revert "fix: preserve local behavior after v0.1.164"` 撤回；最终无该源码净变更。完整命令、失败根因、skip 分类和清理证据见 ignored `.superpowers/sdd/task-21-report.md`。
 
+### Task 22 Capability Review Closure
+
+- 本轮起始 branch/HEAD 已核验为 `feature/20260726/staged-merge-upstream-v0-1-165` / `8741250e7bbca577f0a3c1fa4b2a4f9b8fae69d0`；未改 backend/frontend/deploy、VERSION、OpenSpec tasks 或 Comet 文件，未重跑 full local gate 或 remote integration。CodeGraph MCP 未暴露，故以精确源码读取和 Task 21 已执行的命名测试替代，不声称 CodeGraph trace。
+- 最小能力表（详细审查见 ignored `.superpowers/sdd/task-22-report.md`）：
+
+| 能力 | 真实入口 / 分路径调用链 | 命名证据 | 结论 |
+| --- | --- | --- | --- |
+| effective composite route 下传 | `RegisterGatewayRoutes -> compositeTargetPlatformMiddleware -> EffectiveGatewayRouteResolver.Resolve -> ApplyEffectiveGatewayRoute`，后者写入最终 API key、subscription、group、decision 和 effective route context。 | Task 21 `TestCompositeTargetPlatformMiddleware(...)` 与 composite dispatch，9 top-level PASS。 | protected |
+| Path A OpenAI/Grok-compatible | `ApplyEffectiveGatewayRoute -> openAICompatibleRequestPlatform -> ChatCompletions -> SelectAccountWithSchedulerForCapability -> getOpenAIAccountSchedulerWithContext -> default/layered scheduler.Select`；平台参数进入 scheduler，未绕过 Grok/session sticky。 | Task 21 `TestOpenAIGatewayService_SelectAccountWithScheduler_(Weighted_PreservesGrokSessionSticky|SessionStickyDBRuntimeRecheckSkipsStaleCachedAccount|DBFreshGroupRecheckReleasesMovedAccount|LayeredRequirePrivacySet)`、`TestLayered_(...)`、`TestAdvancedScheduler(...)`，15 top-level PASS。 | protected |
+| Path B generic load-aware | `GatewayService.SelectAccountWithLoadAwareness -> checkClaudeCodeRestriction/withGroupContext -> resolvePlatform -> platform sticky -> load-aware selection/WaitPlan -> snapshot hydration`；不调用 Path A factory 或 `scheduler.Select`。 | Task 21 Path B matrix 5 top-level + 3 nested PASS；unit-tag `TestGatewayService_SelectAccountWithLoadAwareness` 和 `TestGatewaySelectAccountWithLoadAwareness_HydratesSelectedAccountFromSchedulerSnapshot`，2 top-level/28 nested PASS。 | protected |
+| fallback/WaitPlan/fresh recheck | Path A factory disabled 时进入 load-aware；scheduler 重查并释放失效账号；Path B `AccountWaitPlan` 与 `newSelectionResult` hydrate 当前快照账号。 | Task 21 named DB recheck, layered WaitPlan and advanced probe/reacquire cases PASS。 | protected |
+| Ollama, Grok 402, Alipay | admin Ollama routes仍注册；`TestResponsesGrok402FailoverCooldown` 证明 402 account 被 cooldown；`POST /payment/orders -> shouldUseAlipayMobilePrecreate -> Alipay.CreatePayment` 保持 deep-link precreate。 | Task 21 Ollama/admin/Alipay focused commands exit 0（5 service + 3 handler-admin）；`TestOllamaCloudUsageRefreshSingleflightAndRunnerDeduplicateSharedGroup`、`TestShouldUseAlipayMobilePrecreate`。 | protected |
+| 同号 migration | 保留 `172_video_per_second_billing_metadata.sql`、`172_composite_model_routes.sql`、`186_alipay_mobile_precreate_deep_link.sql`、`186_group_auth_cache_image_generation.sql`；runner 按完整 filename 建档。 | Task 21 remote `TestMigrationsRunner_UpgradesLocalV01596AcrossUpstreamStages` PASS (4.62s)，reapply count/checksum 不变；remote full integration exit 0/no FAIL。 | protected |
+
+- Task 21 gate 交叉引用：本地 `make test` PASS（backend default/unit、`golangci-lint` 0 issues、frontend 213 files/1613 tests）；显式 VERSION build PASS；detached 双 generate/Ent-Wire zero diff；remote integration exit 0，13 skips 已分类且不涉及本阶段能力。详见本段上方 Task 21 closure 和 ignored `.superpowers/sdd/task-21-report.md`，不在本轮复制命令。
+- 汇总：`protected=6`、`manual=0`、`approved-removal=0`、`gap=0`。没有 Critical/Important 或实际 capability gap；v0.1.164 stage release gate 因此闭合，可在不修改 OpenSpec 6.3 的前提下进入后续已授权阶段。
+- 非阻断 Minor：源码字符串护栏 `TestEffectiveRouteConsumersAssignSubscriptionAuthoritatively` 不是 runtime 证明；Gateway/OpenAI 两个 `count_tokens` 缺少 old-subscription + balance-route + nil-effective-subscription 组合的 runtime 覆盖；Ollama singleflight 测试使用固定 50ms barrier，极端负载下可能时序 flaky。它们均是残余测试证据风险，不构成当前源码 gap；本轮不为消除它们改源码或扩测。
+
 ## v0.1.165
 
 - changed-files：待执行。
