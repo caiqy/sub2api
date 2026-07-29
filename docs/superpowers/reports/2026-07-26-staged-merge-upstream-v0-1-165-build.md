@@ -273,13 +273,15 @@ git diff --check 09db65607..1e7b8af75
 
 ## v0.1.165
 
-- changed-files：待执行。
-- 冲突台账：无（尚未合并）。
-- 能力矩阵交集：待执行。
-- 聚焦测试：待执行。
-- 本地门禁：待执行。
-- 远程门禁：待执行。
-- 放行结论：待执行。
+- 固定对象：merge `dc3df2d573f3e0601226075caed8c6e7ba85718a merge: upstream v0.1.165`；第一父 `34702ad029eaa1a11a2145efbd7fcf3485ab991a`，第二父/peeled tag `e9a58c1cb8b5ef626a75c93b4d953fde5e67aa29`。`v0.1.164^{}` 为 `cd8bb98c44303b2c8f04c0da340447c992f0cb7d` 且是目标祖先；未合并 `upstream/main`。
+- changed-files：`v0.1.164..v0.1.165` 为 `54` commits、`168` raw paths；merge 相对第一父也是 `168` paths。merge commit 没有 `.superpowers`、`.comet`、`paseo.json`、formal ledger、回归修复或 migration 测试路径外的后续 Task 工作。
+- 冲突台账：`22` 个文本路径均读取 base/ours/theirs 后融合，无整文件机械选边。`VERSION` 保留 `0.1.159.6`；Ent `group.go`/`mutation.go`/`runtime.go` 由合并后的 schema 重生成，同时含 Live gate 和 local user concurrency；config/example YAML 同时保留 sticky 与 Live；gateway/chat/responses/Gemini/Grok/OpenAI handler 同时保留 local body/detail/channel snapshots、hash/failover 生命周期和 upstream `SessionID`；usage query/model 同时保留 detail projection/snapshot 和 session ID；API-key cache 同时含 Live/concurrency fields，version 为 19；admin alias stub、Anthropic passthrough、OAuth namespace 与 image failover 测试保留双方断言；postcss manifest/lock 自动融合。
+- Live/body 生命周期：上游 `openai_live` handler/service/attestation entry points 已进入 merge；现有 OpenAI prompt cache、body replay/request spooling、cleanup 与 failed usage 入口未被冲突改写。本 Task 仅保证融合和可编译，专项交互审查留给 Task 25。
+- Ollama/alias：`TestOllamaCloudUsageRefreshSingleflightAndRunnerDeduplicateSharedGroup` PASS，v0.1.164 shared state/singleflight/runner 不被上游 usage refresh 覆盖。email alias 服务/仓库 guard 已进入 merge；alias repository focused tests PASS。
+- migrations：未重命名或改写已发布 `172_video_per_second_billing_metadata.sql`、`172_composite_model_routes.sql`、`181_group_duplicate_operation_id.sql`、`181_prompt_audit.sql`、`186_alipay_mobile_precreate_deep_link.sql`、`186_group_auth_cache_image_generation.sql`；新增并保留 `187_add_usage_log_session_id.sql`、`188_allow_live_usage_request_type.sql`、`189_add_group_allow_live.sql`、`190_add_users_email_alias_dedup_index_notx.sql`（`190` 保持 `_notx.sql`）。
+- postcss：`frontend/package.json`/`pnpm-lock.yaml` 是正常 merge 结果；`pnpm --dir frontend install --frozen-lockfile` PASS，解析 `postcss 8.5.23`，未手拼 lockfile。
+- 限定验证：`make -C backend generate` PASS；handler/service/repository/config compile-only PASS；Live handler/service、Ollama shared-group、email alias repository、Anthropic passthrough、OpenAI namespace focused tests PASS；unmerged entries/精确 marker/`git diff --cached --check` 全空或 PASS。`openai-first-token-timeout` 为零匹配，VERSION 为 `0.1.159.6`。
+- 边界与结论：`DONE_WITH_CONCERNS`，仅完成 Task 23 merge 和接口级限定验证。Task 24 migration/full gate、Task 25 Live 与 prompt-cache/body-replay 专项审查、final VERSION、remote integration、OpenSpec 7.1 勾选均未执行。
 
 ## 远程 integration 记录
 
