@@ -1880,7 +1880,8 @@ func TestOpenAIResponsesWebSocketResolvesCompositeExplicitAliasOnEveryFrame(t *t
 		acquireUserGroupSlotFn: func(context.Context, int64, int64, int, string) (bool, error) { return true, nil },
 		acquireAccountSlotFn:   func(context.Context, int64, int, string) (bool, error) { return true, nil },
 	}
-	env := newOpenAIWSRegressionEnv(t, cache, openAIWSRegressionEnvOptions{CaptureUpstreamMessages: true, CompositeResolver: resolver})
+	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 2)}
+	env := newOpenAIWSRegressionEnv(t, cache, openAIWSRegressionEnvOptions{CaptureUpstreamMessages: true, CompositeResolver: resolver, UsageLogRepo: usageRepo})
 	defer env.Close()
 	env.apiKey.Group = &service.Group{ID: 2, Platform: service.PlatformComposite}
 
@@ -2228,7 +2229,8 @@ func TestOpenAIResponsesWebSocketRejectsLaterCrossProviderCompositeRoute(t *test
 		acquireUserGroupSlotFn: func(context.Context, int64, int64, int, string) (bool, error) { return true, nil },
 		acquireAccountSlotFn:   func(context.Context, int64, int, string) (bool, error) { return true, nil },
 	}
-	env := newOpenAIWSRegressionEnv(t, cache, openAIWSRegressionEnvOptions{CaptureUpstreamMessages: true, CompositeResolver: resolver})
+	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 2)}
+	env := newOpenAIWSRegressionEnv(t, cache, openAIWSRegressionEnvOptions{CaptureUpstreamMessages: true, CompositeResolver: resolver, UsageLogRepo: usageRepo})
 	defer env.Close()
 	env.apiKey.Group = &service.Group{ID: 2, Platform: service.PlatformComposite}
 
@@ -2236,9 +2238,31 @@ func TestOpenAIResponsesWebSocketRejectsLaterCrossProviderCompositeRoute(t *test
 	defer func() { _ = clientConn.CloseNow() }()
 	env.writeMessage(t, clientConn, `{"type":"response.create","model":"openai-alias","stream":false}`)
 	require.Equal(t, "response.completed", gjson.GetBytes(env.readMessage(t, clientConn), "type").String())
+	select {
+	case log := <-usageRepo.created:
+		require.Equal(t, "gpt-5", log.Model)
+	case <-time.After(5 * time.Second):
+		t.Fatal("first turn usage was not recorded")
+	}
+	select {
+	case payload := <-env.upstreamMessages:
+		require.Equal(t, "gpt-5", gjson.GetBytes(payload, "model").String())
+	case <-time.After(5 * time.Second):
+		t.Fatal("upstream did not receive the first turn")
+	}
 	env.writeMessage(t, clientConn, `{"type":"response.create","model":"grok-alias","stream":false,"previous_response_id":"resp_ingress_turn_1"}`)
 	env.readCloseError(t, clientConn, coderws.StatusPolicyViolation)
 	env.waitRequestDone(t)
+	select {
+	case unexpected := <-usageRepo.created:
+		t.Fatalf("local rejection recorded stale usage: %+v", unexpected)
+	default:
+	}
+	select {
+	case unexpected := <-env.upstreamMessages:
+		t.Fatalf("local rejection reached upstream: %s", unexpected)
+	default:
+	}
 }
 
 func TestOpenAIResponsesWebSocketRejectsLaterCompositeNoRoute(t *testing.T) {
