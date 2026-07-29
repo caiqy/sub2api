@@ -114,7 +114,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, routingModel)
 	setChannelUsageFields(c, clientRequestedUsageFields(c, channelMapping, routingModel, ""))
 	var moderationBody []byte
-	if h.contentModerationService != nil {
+	if h.contentModerationService != nil || h.securityAuditCoordinator != nil {
 		moderationBody = parsed.ModerationBody()
 	}
 	stickySessionSeed := parsed.FreezeStickySessionSeed()
@@ -164,7 +164,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		h.errorResponse(c, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message)
 		return
 	}
-	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIImages, requestModel, parsed.ModerationBody()); decision != nil && !decision.AllowNextStage {
+	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIImages, requestModel, moderationBody); decision != nil && !decision.AllowNextStage {
 		h.openAISecurityAuditError(c, decision)
 		return
 	}
