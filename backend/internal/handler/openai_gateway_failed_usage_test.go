@@ -1522,7 +1522,7 @@ func TestOpenAIGatewayHandler_FailoverExhaustedStillCreatesUsageLog(t *testing.T
 	require.Contains(t, usageRepo.lastLog.DetailSnapshot.ResponseBody, "openai raw failover")
 }
 
-func TestOpenAIGatewayHandler_ResponsesSelectionExhaustedUsesAttemptBodyReasoningEffort(t *testing.T) {
+func TestOpenAIGatewayHandler_ResponsesFailedUsageUsesAccountMappedModel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	cfg := &config.Config{
@@ -1546,7 +1546,13 @@ func TestOpenAIGatewayHandler_ResponsesSelectionExhaustedUsesAttemptBodyReasonin
 		Schedulable: true,
 		Concurrency: 1,
 		Priority:    1,
-		Credentials: map[string]any{"api_key": "sk-test"},
+		Credentials: map[string]any{
+			"api_key": "sk-test",
+			"model_mapping": map[string]any{
+				"gpt-5.4":      "gpt-5.4-high",
+				"gpt-5.4-high": "gpt-account",
+			},
+		},
 	}
 	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
 	httpUpstream := &openAIChatCompletionsHTTPUpstreamStub{
@@ -1616,6 +1622,8 @@ func TestOpenAIGatewayHandler_ResponsesSelectionExhaustedUsesAttemptBodyReasonin
 	require.Equal(t, http.StatusTooManyRequests, rec.Code)
 	log := waitForOpenAIFailedUsageLog(t, usageRepo)
 	require.NotNil(t, log)
+	require.NotNil(t, log.UpstreamModel)
+	require.Equal(t, "gpt-account", *log.UpstreamModel)
 	require.NotNil(t, log.ReasoningEffort)
 	require.Equal(t, "high", *log.ReasoningEffort)
 }

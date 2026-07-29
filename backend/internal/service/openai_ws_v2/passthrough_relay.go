@@ -67,15 +67,17 @@ type RelayOptions struct {
 	FirstMessageSent                bool
 	StartClientAfterFirstDownstream bool
 	OnUsageParseFailure             func(eventType string, usageRaw string)
-	OnTurnComplete                  func(turn RelayTurnResult)
-	BeforeWriteUpstream             func(msgType coderws.MessageType, payload []byte) error
-	BeforeWriteClient               func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) error
-	BeforeClientWrite               func(msgType coderws.MessageType, payload []byte)
-	AfterClientWrite                func(msgType coderws.MessageType, payload []byte, writeErr error)
-	BeforeRelayCancel               func(exit RelayExit)
-	ReadClientFrame                 func(ctx context.Context, clientConn FrameConn) (coderws.MessageType, []byte, error)
-	OnTrace                         func(event RelayTraceEvent)
-	Now                             func() time.Time
+	// OnTurnComplete observes a terminal event only after its frame was
+	// successfully delivered downstream; terminal observation alone is not completion.
+	OnTurnComplete      func(turn RelayTurnResult)
+	BeforeWriteUpstream func(msgType coderws.MessageType, payload []byte) error
+	BeforeWriteClient   func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) error
+	BeforeClientWrite   func(msgType coderws.MessageType, payload []byte)
+	AfterClientWrite    func(msgType coderws.MessageType, payload []byte, writeErr error)
+	BeforeRelayCancel   func(exit RelayExit)
+	ReadClientFrame     func(ctx context.Context, clientConn FrameConn) (coderws.MessageType, []byte, error)
+	OnTrace             func(event RelayTraceEvent)
+	Now                 func() time.Time
 }
 
 type RelayTraceEvent struct {
@@ -635,10 +637,6 @@ func runUpstreamToClient(
 		case coderws.MessageBinary:
 			// binary frame 直接透传，不进入 JSON 观测路径（避免无效解析开销）。
 		}
-		emitTurnComplete(onTurnComplete, state, observedEvent)
-		if observedEvent.completedActiveTurn && releaseTurn != nil {
-			releaseTurn()
-		}
 		if dropDownstreamWrites != nil && dropDownstreamWrites.Load() {
 			if droppedFrames != nil {
 				droppedFrames.Add(1)
@@ -681,6 +679,10 @@ func runUpstreamToClient(
 			return
 		}
 		wroteDownstream = true
+		emitTurnComplete(onTurnComplete, state, observedEvent)
+		if observedEvent.completedActiveTurn && releaseTurn != nil {
+			releaseTurn()
+		}
 		if afterWriteClient != nil {
 			afterWriteClient(msgType, payload)
 		}

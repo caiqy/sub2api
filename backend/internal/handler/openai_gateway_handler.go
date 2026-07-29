@@ -606,7 +606,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		// Forward request
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
-		setOpenAIFailedUsageExactUpstreamModel(c, resolveOpenAIFailedUsageExactUpstreamModel(account, reqModel, channelMapping.MappedModel))
 		// 应用渠道模型映射到请求体
 		forwardBody := body
 		attemptModel := reqModel
@@ -615,7 +614,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			attemptModel = channelMapping.MappedModel
 		}
 		attemptReasoningEffort := service.ExtractOpenAIReasoningEffortFromBody(forwardBody, attemptModel)
-		resetOpenAIWSFailedUsageTurn(c)
+		setOpenAIFailedUsageExactUpstreamModel(c, resolveOpenAIFailedUsageExactUpstreamModel(account, attemptModel, channelMapping.MappedModel))
+		service.SetOpsUpstreamAttempted(c, false)
 		// 用扣除 compact 心跳字节的口径快照：心跳注释不构成语义响应，
 		// 不能因心跳字节变化而放弃 failover 换号（#3887）。
 		writerSizeBeforeForward := service.OpenAICompactKeepaliveAdjustedWrittenSize(c)

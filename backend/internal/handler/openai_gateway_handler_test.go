@@ -1280,6 +1280,69 @@ func TestOpenAIResponsesWebSocket_SecondTurnAccountAcquireFailureRollsBackUserAn
 	require.Equal(t, int32(1), atomic.LoadInt32(&cache.releaseAccountCalled))
 }
 
+func TestOpenAIResponsesWebSocketPassthroughSecondTurnAdmissionRejectsBeforeUpstream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var userAcquireCalls, groupAcquireCalls, accountAcquireCalls int32
+	cache := &concurrencyCacheMock{
+		acquireUserSlotFn: func(context.Context, int64, int, string) (bool, error) {
+			return atomic.AddInt32(&userAcquireCalls, 1) == 1, nil
+		},
+		acquireUserGroupSlotFn: func(context.Context, int64, int64, int, string) (bool, error) {
+			atomic.AddInt32(&groupAcquireCalls, 1)
+			return true, nil
+		},
+		acquireAccountSlotFn: func(context.Context, int64, int, string) (bool, error) {
+			atomic.AddInt32(&accountAcquireCalls, 1)
+			return true, nil
+		},
+	}
+	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 2)}
+	env := newOpenAIWSRegressionEnv(t, cache, openAIWSRegressionEnvOptions{
+		Passthrough:             true,
+		CaptureUpstreamMessages: true,
+		UsageLogRepo:            usageRepo,
+	})
+	defer env.Close()
+	env.apiKey.Group.Platform = service.PlatformOpenAI
+	env.apiKey.Group.Status = service.StatusActive
+	env.apiKey.Group.Hydrated = true
+
+	clientConn := env.dial(t)
+	defer func() { _ = clientConn.CloseNow() }()
+	env.writeMessage(t, clientConn, `{"type":"response.create","model":"gpt-client","stream":false}`)
+	require.Equal(t, "response.created", gjson.GetBytes(env.readMessage(t, clientConn), "type").String())
+	require.Equal(t, "response.completed", gjson.GetBytes(env.readMessage(t, clientConn), "type").String())
+	select {
+	case <-usageRepo.created:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first turn usage was not recorded")
+	}
+	select {
+	case <-env.upstreamMessages:
+	case <-time.After(5 * time.Second):
+		t.Fatal("upstream did not receive the first turn")
+	}
+
+	env.writeMessage(t, clientConn, `{"type":"response.create","model":"gpt-client","stream":false,"previous_response_id":"resp_ingress_turn_1"}`)
+	env.readCloseError(t, clientConn, coderws.StatusTryAgainLater)
+	env.waitRequestDone(t)
+
+	require.Equal(t, int32(2), atomic.LoadInt32(&userAcquireCalls))
+	require.Equal(t, int32(1), atomic.LoadInt32(&groupAcquireCalls))
+	require.Equal(t, int32(1), atomic.LoadInt32(&accountAcquireCalls))
+	select {
+	case payload := <-env.upstreamMessages:
+		t.Fatalf("rejected second turn reached upstream: %s", payload)
+	default:
+	}
+	select {
+	case log := <-usageRepo.created:
+		t.Fatalf("rejected second turn recorded usage: %+v", log)
+	default:
+	}
+}
+
 func TestOpenAIResponsesWebSocket_GetAccessTokenFailureReleasesInitialSlotsOnce(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

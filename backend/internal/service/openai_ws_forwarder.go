@@ -225,7 +225,9 @@ type OpenAIWSIngressHooks struct {
 	// frame and effectiveModel is the actual model for that turn (including a
 	// passthrough session model when the frame itself omits model).
 	OnOutboundRequest func(turn int, payload []byte, effectiveModel string)
-	AfterTurn         func(turn int, result *OpenAIForwardResult, turnErr error)
+	// AfterTurn runs once after a delivered terminal completion, or once with
+	// turnErr when the turn terminates before that delivery.
+	AfterTurn func(turn int, result *OpenAIForwardResult, turnErr error)
 }
 
 type OpenAIWSRequestRewrite struct {

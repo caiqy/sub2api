@@ -195,6 +195,30 @@ func TestRelayMismatchedTerminalDoesNotCompleteActiveTurn(t *testing.T) {
 	}
 }
 
+func TestRelayOnTurnCompleteWaitsForTerminalDownstreamWrite(t *testing.T) {
+	terminal := []byte(`{"type":"response.completed","response":{"id":"resp_1","usage":{"input_tokens":1,"output_tokens":1}}}`)
+	clientConn := newPassthroughTestFrameConn(nil, false)
+	clientConn.failWritePayload = string(terminal)
+	upstreamConn := newPassthroughTestFrameConn([]passthroughTestFrame{
+		{msgType: coderws.MessageText, payload: []byte(`{"type":"response.created","response":{"id":"resp_1"}}`)},
+		{msgType: coderws.MessageText, payload: terminal},
+	}, true)
+	completed := make(chan RelayTurnResult, 1)
+
+	_, exit := Relay(context.Background(), clientConn, upstreamConn, []byte(`{"type":"response.create","model":"gpt-5.1"}`), RelayOptions{
+		OnTurnComplete:       func(turn RelayTurnResult) { completed <- turn },
+		UpstreamDrainTimeout: 10 * time.Millisecond,
+	})
+
+	require.NotNil(t, exit)
+	require.Equal(t, "write_client", exit.Stage)
+	select {
+	case turn := <-completed:
+		t.Fatalf("terminal frame was not delivered but completed turn %q", turn.RequestID)
+	default:
+	}
+}
+
 func (c *delayedReadFrameConn) ReadFrame(ctx context.Context) (coderws.MessageType, []byte, error) {
 	if c == nil || c.base == nil {
 		return coderws.MessageText, nil, io.EOF
