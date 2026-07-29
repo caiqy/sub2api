@@ -587,9 +587,9 @@ func TestOpenAIImages_OAuthTextIsReleasedBeforeBlockedUpstream(t *testing.T) {
 	runtime.GC()
 	var before runtime.MemStats
 	runtime.ReadMemStats(&before)
-	requestBody := []byte(`{"model":"gpt-image-2","prompt":"` + strings.Repeat("x", 20<<20) + `"}`)
-	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", &releaseAfterEOFBody{data: requestBody})
-	requestBody = nil
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", &releaseAfterEOFBody{
+		data: []byte(`{"model":"gpt-image-2","prompt":"` + strings.Repeat("x", 20<<20) + `"}`),
+	})
 	req.Header.Set("Content-Type", "application/json")
 
 	upstream := &openAIImagesOAuthHashingUpstream{openAIImagesHashingUpstream: openAIImagesHashingUpstream{started: make(chan struct{}), release: make(chan struct{})}}
