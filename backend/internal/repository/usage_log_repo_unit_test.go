@@ -168,7 +168,7 @@ func usageLogListRowColumns() []string {
 		"account_rate_multiplier", "billing_type", "request_type", "stream", "openai_ws_mode", "duration_ms", "first_token_ms",
 		"user_agent", "ip_address", "image_count", "image_size", "image_input_size", "image_output_size", "image_size_source", "image_size_breakdown",
 		"video_count", "video_resolution", "video_duration_seconds", "service_tier", "reasoning_effort",
-		"inbound_endpoint", "upstream_endpoint", "cache_ttl_overridden", "long_context_billing_applied", "channel_id", "model_mapping_chain", "billing_tier", "billing_mode", "account_stats_cost", "created_at", "has_detail",
+		"inbound_endpoint", "upstream_endpoint", "cache_ttl_overridden", "long_context_billing_applied", "channel_id", "model_mapping_chain", "billing_tier", "billing_mode", "account_stats_cost", "session_id", "created_at", "has_detail",
 	}
 }
 
@@ -180,6 +180,6 @@ func usageLogListRowValues(hasDetail bool) []driver.Value {
 		0, 0.0, 0, 0.0, 0.1, 0.2, 0.0, 0.0, 0.3, 0.3, 1.0,
 		nil, int16(0), int16(service.RequestTypeSync), false, false, nil, nil,
 		nil, nil, 0, nil, nil, nil, nil, nil, 0, nil, nil, nil, nil,
-		nil, nil, false, false, nil, nil, nil, nil, nil, createdAt, hasDetail,
+		nil, nil, false, false, nil, nil, nil, nil, nil, nil, createdAt, hasDetail,
 	}
 }
