@@ -1,9 +1,9 @@
 # 子代理进度
 
-- 当前任务：29 项中的第 24 项（OpenSpec 7.2）
+- 当前任务：29 项中的第 25 项（OpenSpec 7.3）
 - 当前阶段：`ready`
-- 状态：Task 23 v0.1.165 merge 与 fresh review 已通过，OpenSpec 7.1 已闭合，Task 24 ready；已完成 23 项，最后审查 SHA `5f9929d30`
-- 简报：`.superpowers/sdd/task-24-brief.md`
+- 状态：Task 24 v0.1.165 full gate 与 fresh review 已通过，OpenSpec 7.2 已闭合，Task 25 ready；已完成 24 项，最后审查 SHA `609f36d15`
+- 简报：`.superpowers/sdd/task-25-brief.md`
 - 报告：`.superpowers/sdd/task-24-report.md`
 - Task 20 最终复审：`.superpowers/sdd/task-20-final-review.md`
 - Task 20 预算外修复简报：`.superpowers/sdd/task-20-review-extra.md`
@@ -21,12 +21,14 @@
 - Task 23 提交：`dc3df2d57`、`0f2c22e21`、`ca4ec7452`、`5f9929d30`
 - Task 23 审查差异：`.superpowers/sdd/review-34702ad..5f9929d.diff`
 - Task 23 最后审查 SHA：`5f9929d30`
-- 已完成任务数：23
+- Task 24 提交：`20648b826`、`b5c99130b`、`07e52add4`、`99e2fce8f`、`6d4b48d6d`、`3cfdaffa1`、`d8022d582`、`e98ce7a78`、`27a8a08df`、`196ee1488`、`609f36d15`
+- Task 24 最后审查 SHA：`609f36d15`
+- 已完成任务数：24
 - 审查模式：`thorough`
 - Task 20 审查修复轮次：常规 2/2 与用户授权 extra 1/1 已作为历史记录保留；关闭写回不追加新修复轮次
 - Task 20 RED/GREEN：follow-up 范围 `babe29e00f18df9a0011d8464446654148d5eb53..4778e32dc879f682fd5774c1fb0c5a63867802c6` 的验证与归档已完成，审查无 Critical/Important
 - Task 21 结果：focused、本地 full gate、有效版本注入 build、detached 双 generate 与 remote integration 通过；最终源码净 diff 为零
-- 未解决反馈：Task 20 的 3 个非阻断 Minor 保留为历史；Task 21 reviewer 无 finding
+- 未解决反馈：Task 20 的 3 个非阻断 Minor 保留为历史；Task 24 reviewer 最终无 finding
 
 ## Task 20 关闭写回
 
@@ -61,7 +63,16 @@
 - Review fix：`ca4ec7452` 以 `limit + 1` 检测 email alias 候选饱和并 fail closed；确定性 RED/GREEN 覆盖 lookup 与 guarded create
 - Ledger：`0f2c22e21`、`5f9929d30`；VERSION `0.1.159.6`，双方 172/181、两个 186 和 187-190 完整保留
 - Fresh reviewer：Task session `ses_053e131deffeKifkarjDB3wSBy`，最终 `Approved`，无 Critical/Important/Minor
-- 详细报告：`.superpowers/sdd/task-23-report.md`；Task 24 full gate 与 Task 25 专项审查尚未执行
+- 详细报告：`.superpowers/sdd/task-23-report.md`；Task 24 full gate 已闭合，Task 25 专项审查尚未执行
+
+## Task 24 v0.1.165 Full Gate 关闭
+
+- Migration：`20648b826` 将升级测试固定为 upstream 12/12，保留 local/upstream 172/181、双 186、190 notx 与 replay count/checksum 断言；远程两个 migration target PASS
+- Test fixes：UsageLog `session_id` mock、GroupsView Live mock lifecycle 与 OAuth Images body-retention fixture 均闭合；无生产代码净改动
+- 门禁：当前 `make test` PASS（frontend `215/1626`）；显式 `VERSION=0.1.159.6` build PASS；detached 双 generate 零 diff；remote integration exit 0
+- Remote evidence：唯一目录、执行/cleanup exit 0、13 个精确环境/config skip 与 migration 12/12 证据均写入 formal ledger；无 Task 24 capability skip
+- Fresh reviewer：Task session `ses_05301c2ceffeZjH8LkLhMnmJ9L`，首轮 `CHANGES_REQUIRED` 后补齐证据与 OAuth cleanup，最终 `APPROVED`，无剩余 finding
+- 详细报告：`.superpowers/sdd/task-24-report.md`；formal ledger：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
 
 ## Task 20 永久最终阻断
 
@@ -99,6 +110,7 @@
 - 不得 push、tag、release、deploy 或 merge 到 `main`。
 - 远程工作必须使用 `ssh-skill`；不得调用原生 SSH 或 SCP。
 - 使用 OpenCode 角色路由：实施者使用 `general`，审查者使用 `reviewer`。
+- 用户明确要求后续不得使用 Paseo；所有实施与审查只使用内置 Task 角色。
 - 将每个完整 Git 修订范围作为一个 PowerShell 参数引用。
 - 用户在任务 4 阻塞后批准 Linux 原生等价 integration 门禁：重建 `backend/.test-tmp`、设置 `TMPDIR`/`TMP`/`TEMP`，运行 `CI=true GOFLAGS='-v' go test -tags=integration ./...`；远端不再要求 Make 或 PowerShell。
 - canonical OpenSpec、Design Doc 与 plan 已同步。Comet design handoff 是 design 阶段快照；`phase: build` 下官方刷新命令拒绝执行，因此不得手改其生成内容或 hash。
