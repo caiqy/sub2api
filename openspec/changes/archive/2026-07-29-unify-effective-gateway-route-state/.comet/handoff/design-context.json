@@ -1,0 +1,14 @@
+{
+  "change": "unify-effective-gateway-route-state",
+  "phase": "design",
+  "mode": "compact",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "09c97e47905349c5775af6be349cd4ac720c7621a6a6ea511beb65c7024ba5bb",
+  "files": [
+    { "path": "openspec/changes/unify-effective-gateway-route-state/proposal.md", "sha256": "a9b18d2f6c33e0efcbde08cf51a8b0d5249d5026d350690fa8056ef8fe8098b9" },
+    { "path": "openspec/changes/unify-effective-gateway-route-state/design.md", "sha256": "b24bdfd76bdb6442c40a7361c2273a15a94c487011b7764033e630a480b61e34" },
+    { "path": "openspec/changes/unify-effective-gateway-route-state/tasks.md", "sha256": "84aab042340942cedf36d4ad215afc505be7cd0577e0caedf84724db8b074fa2" },
+    { "path": "openspec/changes/unify-effective-gateway-route-state/specs/effective-gateway-routing/spec.md", "sha256": "e3ede9fe71ea9335d0a4df6b6da3e2f0185dbbcd0c4698d9a30b8e64df77e20b" }
+  ]
+}
