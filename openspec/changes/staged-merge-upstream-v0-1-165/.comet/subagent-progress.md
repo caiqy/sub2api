@@ -1,10 +1,10 @@
 # 子代理进度
 
-- 当前任务：29 项中的第 22 项（OpenSpec 6.3）
+- 当前任务：29 项中的第 23 项（OpenSpec 7.1）
 - 当前阶段：`ready`
-- 状态：Task 21 full gate 与 fresh review 已通过，OpenSpec 6.2 已闭合，Task 22 ready；已完成 21 项，最后审查 SHA `42bec51f6`
-- 简报：`.superpowers/sdd/task-22-brief.md`
-- 报告：`.superpowers/sdd/task-22-report.md`
+- 状态：Task 22 capability review 已通过，OpenSpec 6.3 已闭合，v0.1.164 stage `gap=0`，Task 23 ready；已完成 22 项，最后审查 SHA `fe0340942`
+- 简报：`.superpowers/sdd/task-23-brief.md`
+- 报告：`.superpowers/sdd/task-23-report.md`
 - Task 20 最终复审：`.superpowers/sdd/task-20-final-review.md`
 - Task 20 预算外修复简报：`.superpowers/sdd/task-20-review-extra.md`
 - Task 20 审查差异：初始 `.superpowers/sdd/review-07167bbfa..6ebd068ff.diff`；Round 1 fix `.superpowers/sdd/review-6ebd068ff..96455c43b.diff`；Round 2 final `.superpowers/sdd/review-6ebd068ff..09db65607.diff`；extra final `.superpowers/sdd/review-6ebd068ff..babe29e00.diff`
@@ -15,7 +15,10 @@
 - Task 21 提交：`6489a88b6`、`aa7b67369`、`e5801c8ae`、`704bc2670`、`42bec51f6`
 - Task 21 审查差异：`.superpowers/sdd/review-489fa10..42bec51.diff`
 - Task 21 最后审查 SHA：`42bec51f6`
-- 已完成任务数：21
+- Task 22 提交：`92d590682`、`fe0340942`
+- Task 22 审查差异：`.superpowers/sdd/review-8741250..fe03409.diff`
+- Task 22 最后审查 SHA：`fe0340942`
+- 已完成任务数：22
 - 审查模式：`thorough`
 - Task 20 审查修复轮次：常规 2/2 与用户授权 extra 1/1 已作为历史记录保留；关闭写回不追加新修复轮次
 - Task 20 RED/GREEN：follow-up 范围 `babe29e00f18df9a0011d8464446654148d5eb53..4778e32dc879f682fd5774c1fb0c5a63867802c6` 的验证与归档已完成，审查无 Critical/Important
@@ -40,6 +43,14 @@
 - Fresh reviewer：Task session `ses_05417de63ffe9wAb0x8Iszjc3k`，Spec/quality `Approved`，无 Critical/Important/Minor
 - 详细报告：`.superpowers/sdd/task-21-report.md`；formal ledger：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
 - 残余风险：主工作树存在 Windows `user-mapped section` 生成锁；同提交 detached 双轮生成已提供稳定性证据
+
+## Task 22 Capability Review 关闭
+
+- 实现范围：`8741250e7..fe0340942`；tracked 净变更仅 formal build ledger
+- 能力矩阵：`protected=6`、`manual=0`、`approved-removal=0`、`gap=0`；Path A scheduler factory 与 Path B generic load-aware 已分开审计
+- Fresh reviewer：Task session `ses_053fef073ffeS21rTntDTNu0SL`，最终 `Approved`，无 Critical/Important
+- 3 个非阻断 Minor：源码字符串护栏、两个 `count_tokens` stale-subscription runtime 覆盖缺口、Ollama 固定 `50ms` barrier
+- 详细报告：`.superpowers/sdd/task-22-report.md`；stage closure：`docs: close v0.1.164 stage gate`
 
 ## Task 20 永久最终阻断
 
