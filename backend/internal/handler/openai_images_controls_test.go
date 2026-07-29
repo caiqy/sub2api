@@ -171,7 +171,10 @@ type openAIImagesHashingUpstream struct {
 	release chan struct{}
 }
 
-type openAIImagesOAuthHashingUpstream struct{ openAIImagesHashingUpstream }
+type openAIImagesOAuthHashingUpstream struct {
+	openAIImagesHashingUpstream
+	startedOnce sync.Once
+}
 
 func (u *openAIImagesOAuthHashingUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
 	hasher := sha256.New()
@@ -182,7 +185,7 @@ func (u *openAIImagesOAuthHashingUpstream) Do(req *http.Request, _ string, _ int
 	_ = req.Body.Close()
 	u.size = size
 	copy(u.hash[:], hasher.Sum(nil))
-	close(u.started)
+	u.startedOnce.Do(func() { close(u.started) })
 	<-u.release
 	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"usage\":{},\"tool_usage\":{\"image_gen\":{\"images\":1}},\"output\":[]}}\n\n"))}, nil
 }
