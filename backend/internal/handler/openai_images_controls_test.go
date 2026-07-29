@@ -617,10 +617,13 @@ func TestOpenAIImages_OAuthTextIsReleasedBeforeBlockedUpstream(t *testing.T) {
 	runtime.GC()
 	var before runtime.MemStats
 	runtime.ReadMemStats(&before)
+	prefix := []byte(`{"model":"gpt-image-2","prompt":"`)
+	suffix := []byte(`"}`)
+	const promptSize = 20 << 20
 	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", &generatedJSONBody{
-		prefix:    []byte(`{"model":"gpt-image-2","prompt":"`),
-		remaining: 20 << 20,
-		suffix:    []byte(`"}`),
+		prefix:    prefix,
+		remaining: promptSize,
+		suffix:    suffix,
 	})
 	req.Header.Set("Content-Type", "application/json")
 
@@ -630,6 +633,16 @@ func TestOpenAIImages_OAuthTextIsReleasedBeforeBlockedUpstream(t *testing.T) {
 	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
 	recorder := httptest.NewRecorder()
 	done := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(upstream.release) }) }
+	t.Cleanup(func() {
+		release()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("timed out waiting for OAuth images handler cleanup")
+		}
+	})
 	go func() { env.router("/v1/images/generations", env.handler.Images).ServeHTTP(recorder, req); close(done) }()
 
 	select {
@@ -637,13 +650,13 @@ func TestOpenAIImages_OAuthTextIsReleasedBeforeBlockedUpstream(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for OAuth images upstream")
 	}
-	require.Positive(t, upstream.size)
+	require.GreaterOrEqual(t, upstream.size, int64(promptSize), "upstream body must include the complete prompt")
 	runtime.GC()
 	var after runtime.MemStats
 	runtime.ReadMemStats(&after)
 	require.LessOrEqual(t, after.HeapAlloc, before.HeapAlloc+uint64(12<<20), "blocked OAuth request retained 20MB text")
 
-	close(upstream.release)
+	release()
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
