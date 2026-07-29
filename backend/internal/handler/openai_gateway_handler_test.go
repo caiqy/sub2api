@@ -1553,6 +1553,8 @@ type openAIWSRegressionEnvOptions struct {
 	CompositeResolver           *service.CompositeRouteResolver
 	AccountModelMapping         map[string]string
 	ChannelModelMapping         map[string]string
+	OAuthAccount                bool
+	OAuthCredentials            map[string]any
 	UsageLogRepo                service.UsageLogRepository
 }
 
@@ -1563,6 +1565,7 @@ type openAIWSRegressionEnv struct {
 	upstream             *httptest.Server
 	requestDone          chan struct{}
 	handler              *OpenAIGatewayHandler
+	account              *service.Account
 	apiKey               *service.APIKey
 	firstUpstreamMessage chan []byte
 	upstreamMessages     chan []byte
@@ -1706,6 +1709,9 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 	if upstreamServer != nil {
 		credentials["base_url"] = upstreamServer.URL
 	}
+	for key, value := range opts.OAuthCredentials {
+		credentials[key] = value
+	}
 	if len(opts.AccountModelMapping) > 0 {
 		mapping := make(map[string]any, len(opts.AccountModelMapping))
 		for source, target := range opts.AccountModelMapping {
@@ -1727,6 +1733,9 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 			"responses_websockets_v2_enabled": true,
 		},
 	}}
+	if opts.OAuthAccount {
+		accountRepo.account.Type = service.AccountTypeOAuth
+	}
 	if opts.Passthrough {
 		accountRepo.account.Extra["openai_apikey_responses_websockets_v2_mode"] = service.OpenAIWSIngressModePassthrough
 	}
@@ -1804,6 +1813,7 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 		upstream:             upstreamServer,
 		requestDone:          requestDone,
 		handler:              h,
+		account:              accountRepo.account,
 		apiKey:               apiKey,
 		firstUpstreamMessage: firstUpstreamMessage,
 		upstreamMessages:     upstreamMessages,
@@ -1970,6 +1980,75 @@ func TestOpenAIResponsesWebSocketFailedUsageFreezesChannelThenAccountMappedModel
 		require.Equal(t, gjson.GetBytes(payload, "model").String(), *log.UpstreamModel)
 	case <-time.After(5 * time.Second):
 		t.Fatal("upstream did not receive the first websocket frame")
+	}
+}
+
+func TestOpenAIResponsesWebSocketOAuthFailedUsageUsesNormalizedOutboundModel(t *testing.T) {
+	cache := &concurrencyCacheMock{
+		acquireUserSlotFn:      func(context.Context, int64, int, string) (bool, error) { return true, nil },
+		acquireUserGroupSlotFn: func(context.Context, int64, int64, int, string) (bool, error) { return true, nil },
+		acquireAccountSlotFn:   func(context.Context, int64, int, string) (bool, error) { return true, nil },
+	}
+	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
+	env := newOpenAIWSRegressionEnv(t, cache, openAIWSRegressionEnvOptions{
+		UpstreamError:               true,
+		UpstreamErrorOnTurn:         2,
+		CaptureUpstreamMessages:     true,
+		OAuthAccount:                true,
+		OAuthCredentials:            map[string]any{"access_token": "oauth-test-token"},
+		UsageLogRepo:                usageRepo,
+	})
+	defer env.Close()
+	env.apiKey.Group.Platform = service.PlatformOpenAI
+	env.apiKey.Group.Status = service.StatusActive
+	env.apiKey.Group.Hydrated = true
+
+	// OAuth WS endpoints are fixed to chatgpt.com. Warm the shared ctx_pool
+	// through the fixture's API-key base URL, then assert the actual OAuth turn.
+	env.account.Type = service.AccountTypeAPIKey
+	warmConn := env.dial(t)
+	env.writeMessage(t, warmConn, `{"type":"response.create","model":"gpt-4.1","stream":false}`)
+	require.Equal(t, "response.completed", gjson.GetBytes(env.readMessage(t, warmConn), "type").String())
+	require.NoError(t, warmConn.Close(coderws.StatusNormalClosure, "warm complete"))
+	env.waitRequestDone(t)
+	select {
+	case <-usageRepo.created:
+	case <-time.After(5 * time.Second):
+		t.Fatal("warm turn usage was not recorded")
+	}
+	select {
+	case <-env.upstreamMessages:
+	case <-time.After(5 * time.Second):
+		t.Fatal("warm turn was not captured upstream")
+	}
+	env.account.Type = service.AccountTypeOAuth
+
+	clientConn := env.dial(t)
+	defer func() { _ = clientConn.CloseNow() }()
+	env.writeMessage(t, clientConn, `{"type":"response.create","model":"gpt-5.6","stream":false}`)
+	env.readCloseError(t, clientConn, coderws.StatusTryAgainLater)
+	env.waitRequestDone(t)
+
+	var log *service.UsageLog
+	select {
+	case log = <-usageRepo.created:
+	case <-time.After(5 * time.Second):
+		t.Fatal("failed usage was not recorded")
+	}
+	if log == nil || log.UpstreamModel == nil {
+		t.Fatalf("failed usage log upstream model = %v, want normalized outbound model", log)
+	}
+	select {
+	case payload := <-env.upstreamMessages:
+		require.Equal(t, "gpt-5.6-sol", gjson.GetBytes(payload, "model").String())
+		require.Equal(t, gjson.GetBytes(payload, "model").String(), *log.UpstreamModel)
+	case <-time.After(5 * time.Second):
+		t.Fatal("upstream did not receive the first websocket frame")
+	}
+	select {
+	case duplicate := <-usageRepo.created:
+		t.Fatalf("duplicate failed usage log: %+v", duplicate)
+	default:
 	}
 }
 
