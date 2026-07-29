@@ -1107,16 +1107,16 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					}
 					s.persistOpenAIWSRateLimitSignal(ctx, account, handshakeHeaders, payload, errCodeRaw, errTypeRaw, errMsgRaw)
 					logOpenAIWSV2Passthrough(
-					"relay_rate_limit_failover account_id=%d err_code=%s err_type=%s err_message=%s",
-					account.ID,
-					truncateOpenAIWSLogValue(errCodeRaw, openAIWSLogValueMaxLen),
-					truncateOpenAIWSLogValue(errTypeRaw, openAIWSLogValueMaxLen),
-					truncateOpenAIWSLogValue(errMsgRaw, openAIWSLogValueMaxLen),
-				)
+						"relay_rate_limit_failover account_id=%d err_code=%s err_type=%s err_message=%s",
+						account.ID,
+						truncateOpenAIWSLogValue(errCodeRaw, openAIWSLogValueMaxLen),
+						truncateOpenAIWSLogValue(errTypeRaw, openAIWSLogValueMaxLen),
+						truncateOpenAIWSLogValue(errMsgRaw, openAIWSLogValueMaxLen),
+					)
 					return &UpstreamFailoverError{
-					StatusCode:      http.StatusTooManyRequests,
-					ResponseBody:    append([]byte(nil), payload...),
-					ResponseHeaders: cloneHeader(handshakeHeaders),
+						StatusCode:      http.StatusTooManyRequests,
+						ResponseBody:    append([]byte(nil), payload...),
+						ResponseHeaders: cloneHeader(handshakeHeaders),
 					}
 				}
 				return nil

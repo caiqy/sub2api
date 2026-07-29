@@ -2135,12 +2135,12 @@ func TestOpenAIResponsesWebSocketOAuthFailedUsageUsesNormalizedOutboundModel(t *
 	}
 	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
 	env := newOpenAIWSRegressionEnv(t, cache, openAIWSRegressionEnvOptions{
-		UpstreamError:               true,
-		UpstreamErrorOnTurn:         2,
-		CaptureUpstreamMessages:     true,
-		OAuthAccount:                true,
-		OAuthCredentials:            map[string]any{"access_token": "oauth-test-token"},
-		UsageLogRepo:                usageRepo,
+		UpstreamError:           true,
+		UpstreamErrorOnTurn:     2,
+		CaptureUpstreamMessages: true,
+		OAuthAccount:            true,
+		OAuthCredentials:        map[string]any{"access_token": "oauth-test-token"},
+		UsageLogRepo:            usageRepo,
 	})
 	defer env.Close()
 	env.apiKey.Group.Platform = service.PlatformOpenAI
