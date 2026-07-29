@@ -2298,3 +2298,68 @@ func TestGatewayService_BudgetRetryTransportErrorKeepsAttemptBodiesAligned(t *te
 	require.Equal(t, originalAttempt, requestBodies["budget_constraint_error"])
 	require.Equal(t, retryAttempt, requestBodies["budget_retry_request_error"])
 }
+
+func TestGatewayService_AnthropicAPIKeyPassthrough_TransportErrorRecordsOllamaActivity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	deferred := NewDeferredService(nil, nil, time.Second)
+	svc := &GatewayService{
+		cfg:             &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+		httpUpstream:    &anthropicHTTPUpstreamRecorder{err: errors.New("dial tcp timeout")},
+		deferredService: deferred,
+	}
+	ollama := &Account{ID: 601, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Concurrency: 1, Credentials: map[string]any{"api_key": "k", "base_url": "https://ollama.com"}, Extra: map[string]any{"anthropic_passthrough": true}, Status: StatusActive, Schedulable: true}
+	other := newAnthropicAPIKeyAccountForTest()
+	other.ID = 602
+
+	for _, account := range []*Account{ollama, other} {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+		_, err := svc.forwardAnthropicAPIKeyPassthrough(context.Background(), c, account, []byte(`{"model":"x"}`), "x", "x", false, time.Now())
+		require.Error(t, err)
+	}
+	_, ok := deferred.lastUsedUpdates.Load(int64(601))
+	require.True(t, ok)
+	_, ok = deferred.lastUsedUpdates.Load(int64(602))
+	require.False(t, ok)
+}
+
+func TestGatewayService_AnthropicAPIKeyPassthrough_ContextCanceledSkipsOllamaActivity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	deferred := NewDeferredService(nil, nil, time.Second)
+	svc := &GatewayService{
+		cfg:             &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+		httpUpstream:    &anthropicHTTPUpstreamRecorder{err: context.Canceled},
+		deferredService: deferred,
+	}
+	account := &Account{ID: 603, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Concurrency: 1, Credentials: map[string]any{"api_key": "k", "base_url": "https://ollama.com"}, Extra: map[string]any{"anthropic_passthrough": true}, Status: StatusActive, Schedulable: true}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	_, err := svc.forwardAnthropicAPIKeyPassthrough(context.Background(), c, account, []byte(`{"model":"x"}`), "x", "x", false, time.Now())
+	require.Error(t, err)
+	_, ok := deferred.lastUsedUpdates.Load(int64(603))
+	require.False(t, ok)
+}
+
+func TestGatewayService_AnthropicAPIKeyPassthrough_Non2xxRecordsOllamaActivity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	deferred := NewDeferredService(nil, nil, time.Second)
+	svc := &GatewayService{
+		cfg: &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+		httpUpstream: &anthropicHTTPUpstreamRecorder{resp: &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"type":"error","error":{"type":"invalid_request_error","message":"bad"}}`)),
+		}},
+		deferredService:  deferred,
+		rateLimitService: &RateLimitService{},
+	}
+	account := &Account{ID: 604, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Concurrency: 1, Credentials: map[string]any{"api_key": "k", "base_url": "https://ollama.com"}, Extra: map[string]any{"anthropic_passthrough": true}, Status: StatusActive, Schedulable: true}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	_, _ = svc.forwardAnthropicAPIKeyPassthrough(context.Background(), c, account, []byte(`{"model":"x"}`), "x", "x", false, time.Now())
+	_, ok := deferred.lastUsedUpdates.Load(int64(604))
+	require.True(t, ok)
+}

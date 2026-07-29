@@ -344,6 +344,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 
 		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 		channelUsageFields := clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel)
+		sessionID := service.ExtractClientSessionID(c)
 		h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 				Result:             result,
@@ -360,6 +361,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 				APIKeyService:      h.apiKeyService,
 				ChannelUsageFields: channelUsageFields,
 				DetailSnapshot:     detailSnapshot,
+				SessionID:          sessionID,
 			}); err != nil {
 				reqLog.Error("gateway.responses.record_usage_failed",
 					zap.Int64("account_id", account.ID),

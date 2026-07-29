@@ -13,11 +13,14 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 type openAIImagesFailoverAccountRepo struct {
@@ -171,8 +174,12 @@ func TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhen
 	form := multipart.NewWriter(&body)
 	require.NoError(t, form.WriteField("model", "gpt-image-2"))
 	require.NoError(t, form.WriteField("prompt", "draw a cat"))
+	require.NoError(t, form.WriteField("quality", "high"))
+	require.NoError(t, form.WriteField("size", "1536x1024"))
 	require.NoError(t, form.Close())
-	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body.Bytes()))
+	core, observedLogs := observer.New(zap.DebugLevel)
+	requestCtx := logger.IntoContext(context.Background(), zap.New(core))
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body.Bytes())).WithContext(requestCtx)
 	req.Header.Set("Content-Type", form.FormDataContentType())
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -191,6 +198,16 @@ func TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhen
 	handler.Images(c)
 
 	require.ElementsMatch(t, []int64{1, 2}, upstream.calls())
+	accountSelectingLogs := observedLogs.FilterMessage("openai.images.account_selecting").All()
+	require.NotEmpty(t, accountSelectingLogs)
+	loggedFields := make(map[string]string)
+	for _, field := range accountSelectingLogs[0].Context {
+		loggedFields[field.Key] = field.String
+	}
+	require.Equal(t, "high", loggedFields["img_quality"])
+	require.Equal(t, "1536x1024", loggedFields["img_size"])
+	require.NotContains(t, loggedFields, "prompt")
+
 	require.Equal(t, http.StatusBadGateway, rec.Code)
 	require.NotEmpty(t, rec.Body.Bytes())
 	require.Equal(t, "upstream_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())

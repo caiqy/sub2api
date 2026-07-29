@@ -296,6 +296,7 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 		detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
 		channelUsageFields := clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel)
+		sessionID := service.ExtractClientSessionID(c)
 
 		h.submitOpenAIUsageRecordTask(c.Request.Context(), result, func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
@@ -312,6 +313,7 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 				QuotaPlatform:      quotaPlatform,
 				ChannelUsageFields: channelUsageFields,
 				DetailSnapshot:     detailSnapshot,
+				SessionID:          sessionID,
 			}); err != nil {
 				logger.L().With(
 					zap.String("component", "handler.openai_gateway.embeddings"),

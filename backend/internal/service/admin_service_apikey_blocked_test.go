@@ -14,6 +14,14 @@ type adminAPIKeyBlockedUserRepo struct {
 	user *User
 }
 
+func (r *adminAPIKeyBlockedUserRepo) CreateWithEmailAliasGuard(context.Context, *User) error {
+	panic("unexpected")
+}
+
+func (r *adminAPIKeyBlockedUserRepo) ExistsByEmailAlias(context.Context, string) (bool, error) {
+	panic("unexpected")
+}
+
 type adminAPIKeyBlockedAPIKeyRepo struct {
 	key     *APIKey
 	updated *APIKey
