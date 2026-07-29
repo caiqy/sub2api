@@ -1990,6 +1990,80 @@ func TestOpenAIResponsesWebSocketFailedUsageFreezesChannelThenAccountMappedModel
 	}
 }
 
+func TestOpenAIResponsesWebSocketFailoverResetsExactModelBeforeSecondAccountDialFailure(t *testing.T) {
+	cache := &concurrencyCacheMock{
+		acquireUserSlotFn:      func(context.Context, int64, int, string) (bool, error) { return true, nil },
+		acquireUserGroupSlotFn: func(context.Context, int64, int64, int, string) (bool, error) { return true, nil },
+		acquireAccountSlotFn:   func(context.Context, int64, int, string) (bool, error) { return true, nil },
+	}
+	account2Handshake := make(chan struct{}, 1)
+	account2Upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		account2Handshake <- struct{}{}
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer account2Upstream.Close()
+
+	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 2)}
+	env := newOpenAIWSRegressionEnv(t, cache, openAIWSRegressionEnvOptions{
+		UpstreamError:               true,
+		Passthrough:                 true,
+		CaptureFirstUpstreamMessage: true,
+		UsageLogRepo:                usageRepo,
+		ChannelModelMapping:         map[string]string{"gpt-client": "gpt-account-1"},
+	})
+	defer env.Close()
+	env.apiKey.Group.Platform = service.PlatformOpenAI
+	env.apiKey.Group.Status = service.StatusActive
+	env.apiKey.Group.Hydrated = true
+
+	account2 := cloneOpenAIWSRegressionAccount(env.account)
+	account2.ID = 12
+	account2.Name = "openai-ws-regression-account-2"
+	account2.Priority = 2
+	account2.Credentials = map[string]any{
+		"api_key":  "sk-test-2",
+		"base_url": account2Upstream.URL,
+		"model_mapping": map[string]any{
+			"gpt-client": "gpt-account-2",
+		},
+	}
+	env.accountRepo.accounts = []*service.Account{env.account, account2}
+
+	clientConn := env.dial(t)
+	defer func() { _ = clientConn.CloseNow() }()
+	env.writeMessage(t, clientConn, `{"type":"response.create","model":"gpt-client","stream":false}`)
+	env.readCloseError(t, clientConn, coderws.StatusTryAgainLater)
+	env.waitRequestDone(t)
+
+	select {
+	case <-account2Handshake:
+	case <-time.After(5 * time.Second):
+		t.Fatal("account2 did not reach the upstream websocket handshake")
+	}
+	select {
+	case payload := <-env.firstUpstreamMessage:
+		require.Equal(t, "gpt-account-1", gjson.GetBytes(payload, "model").String())
+	case <-time.After(5 * time.Second):
+		t.Fatal("account1 did not receive the outbound websocket frame")
+	}
+
+	var log *service.UsageLog
+	select {
+	case log = <-usageRepo.created:
+	case <-time.After(5 * time.Second):
+		t.Fatal("failed usage was not recorded")
+	}
+	require.Equal(t, account2.ID, log.AccountID)
+	require.NotNil(t, log.UpstreamModel)
+	require.Equal(t, "gpt-account-2", *log.UpstreamModel)
+	require.NotEqual(t, "gpt-account-1", *log.UpstreamModel)
+	select {
+	case duplicate := <-usageRepo.created:
+		t.Fatalf("duplicate failed usage log: %+v", duplicate)
+	default:
+	}
+}
+
 func TestOpenAIResponsesWebSocketOAuthFailedUsageUsesNormalizedOutboundModel(t *testing.T) {
 	cache := &concurrencyCacheMock{
 		acquireUserSlotFn:      func(context.Context, int64, int, string) (bool, error) { return true, nil },
@@ -3643,6 +3717,7 @@ type openAIChatCompletionsAccountRepoStub struct {
 	service.AccountRepository
 
 	account  *service.Account
+	accounts []*service.Account
 	groupIDs []int64
 }
 
@@ -3728,6 +3803,11 @@ func newOpenAIImagesHandlerTestRouter(t *testing.T, route string, upstreamRespon
 }
 
 func (s *openAIChatCompletionsAccountRepoStub) GetByID(ctx context.Context, id int64) (*service.Account, error) {
+	for _, account := range s.accounts {
+		if account != nil && account.ID == id {
+			return account, nil
+		}
+	}
 	if s.account != nil && s.account.ID == id {
 		return s.account, nil
 	}
@@ -3736,25 +3816,46 @@ func (s *openAIChatCompletionsAccountRepoStub) GetByID(ctx context.Context, id i
 
 func (s *openAIChatCompletionsAccountRepoStub) ListSchedulableByGroupID(ctx context.Context, groupID int64) ([]service.Account, error) {
 	s.groupIDs = append(s.groupIDs, groupID)
-	if s.account == nil {
-		return nil, nil
+	accounts := s.accounts
+	if len(accounts) == 0 && s.account != nil {
+		accounts = []*service.Account{s.account}
 	}
-	return []service.Account{*s.account}, nil
+	result := make([]service.Account, 0, len(accounts))
+	for _, account := range accounts {
+		if account != nil {
+			result = append(result, *account)
+		}
+	}
+	return result, nil
 }
 
 func (s *openAIChatCompletionsAccountRepoStub) ListSchedulableByPlatform(ctx context.Context, platform string) ([]service.Account, error) {
-	if s.account == nil || s.account.Platform != platform {
-		return nil, nil
+	accounts := s.accounts
+	if len(accounts) == 0 && s.account != nil {
+		accounts = []*service.Account{s.account}
 	}
-	return []service.Account{*s.account}, nil
+	result := make([]service.Account, 0, len(accounts))
+	for _, account := range accounts {
+		if account != nil && account.Platform == platform {
+			result = append(result, *account)
+		}
+	}
+	return result, nil
 }
 
 func (s *openAIChatCompletionsAccountRepoStub) ListSchedulableByGroupIDAndPlatform(ctx context.Context, groupID int64, platform string) ([]service.Account, error) {
 	s.groupIDs = append(s.groupIDs, groupID)
-	if s.account == nil || s.account.Platform != platform {
-		return nil, nil
+	accounts := s.accounts
+	if len(accounts) == 0 && s.account != nil {
+		accounts = []*service.Account{s.account}
 	}
-	return []service.Account{*s.account}, nil
+	result := make([]service.Account, 0, len(accounts))
+	for _, account := range accounts {
+		if account != nil && account.Platform == platform {
+			result = append(result, *account)
+		}
+	}
+	return result, nil
 }
 
 type openAIRetryAccountRepoStub struct {
