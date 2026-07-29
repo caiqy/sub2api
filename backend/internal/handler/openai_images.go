@@ -120,7 +120,6 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	if parsed.Multipart {
 		requestPayloadHash = service.HashUsageRequestPayload([]byte(stickySessionSeed))
 	}
-	body = nil
 	service.BindOpenAIRequestBodyHandle(c, coordinator.Effective())
 	if parsed.Prompt != "" {
 		oauthBody, prepareErr := h.gatewayService.PrepareOpenAIImagesOAuthBody(parsed, channelMapping.MappedModel)
