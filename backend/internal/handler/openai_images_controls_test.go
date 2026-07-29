@@ -225,6 +225,36 @@ func (r *releaseAfterEOFBody) Close() error {
 	return nil
 }
 
+type generatedJSONBody struct {
+	prefix    []byte
+	remaining int
+	suffix    []byte
+}
+
+func (r *generatedJSONBody) Read(p []byte) (int, error) {
+	n := copy(p, r.prefix)
+	r.prefix = r.prefix[n:]
+	if len(p) > n && r.remaining > 0 {
+		count := min(len(p)-n, r.remaining)
+		for i := range p[n : n+count] {
+			p[n+i] = 'x'
+		}
+		n += count
+		r.remaining -= count
+	}
+	if len(p) > n && r.remaining == 0 {
+		count := copy(p[n:], r.suffix)
+		n += count
+		r.suffix = r.suffix[count:]
+	}
+	if n > 0 {
+		return n, nil
+	}
+	return 0, io.EOF
+}
+
+func (r *generatedJSONBody) Close() error { return nil }
+
 type openAIImagesReplayUpstream struct {
 	service.HTTPUpstream
 	mu           sync.Mutex
@@ -587,8 +617,10 @@ func TestOpenAIImages_OAuthTextIsReleasedBeforeBlockedUpstream(t *testing.T) {
 	runtime.GC()
 	var before runtime.MemStats
 	runtime.ReadMemStats(&before)
-	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", &releaseAfterEOFBody{
-		data: []byte(`{"model":"gpt-image-2","prompt":"` + strings.Repeat("x", 20<<20) + `"}`),
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", &generatedJSONBody{
+		prefix:    []byte(`{"model":"gpt-image-2","prompt":"`),
+		remaining: 20 << 20,
+		suffix:    []byte(`"}`),
 	})
 	req.Header.Set("Content-Type", "application/json")
 
