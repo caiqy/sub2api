@@ -67,8 +67,8 @@ type RelayOptions struct {
 	FirstMessageSent                bool
 	StartClientAfterFirstDownstream bool
 	OnUsageParseFailure             func(eventType string, usageRaw string)
-	// OnTurnComplete observes a terminal event only after its frame was
-	// successfully delivered downstream; terminal observation alone is not completion.
+	// OnTurnComplete commits a delivered terminal before AfterClientWrite may
+	// open admission for the next turn; terminal observation alone is not completion.
 	OnTurnComplete      func(turn RelayTurnResult)
 	BeforeWriteUpstream func(msgType coderws.MessageType, payload []byte) error
 	BeforeWriteClient   func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) error
@@ -663,10 +663,10 @@ func runUpstreamToClient(
 			beforeClientWrite(msgType, payload)
 		}
 		writeErr := writeClient(msgType, payload)
-		if afterClientWrite != nil {
-			afterClientWrite(msgType, payload, writeErr)
-		}
 		if writeErr != nil {
+			if afterClientWrite != nil {
+				afterClientWrite(msgType, payload, writeErr)
+			}
 			emitRelayTrace(onTrace, RelayTraceEvent{
 				Stage:           "write_client_failed",
 				Direction:       "upstream_to_client",
@@ -682,6 +682,9 @@ func runUpstreamToClient(
 		emitTurnComplete(onTurnComplete, state, observedEvent)
 		if observedEvent.completedActiveTurn && releaseTurn != nil {
 			releaseTurn()
+		}
+		if afterClientWrite != nil {
+			afterClientWrite(msgType, payload, nil)
 		}
 		if afterWriteClient != nil {
 			afterWriteClient(msgType, payload)

@@ -223,6 +223,8 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 		proxyURL = account.Proxy.URL()
 	}
 	SetUsageUpstreamRequest(c, upstreamReq, upstreamHandle.PreviewString())
+	upstreamReq = withOpenAIFinalUpstreamModel(upstreamReq, body)
+	publishOpenAIFinalUpstreamModel(c, upstreamReq)
 	SetOpsUpstreamAttempted(c, true)
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	closeOpenAIRequestBody(upstreamReq)

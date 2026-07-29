@@ -194,6 +194,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	}
 
 	SetUsageUpstreamRequest(c, upstreamReq, openAIUpstreamRequestBodyPreview(upstreamReq, body))
+	publishOpenAIFinalUpstreamModel(c, upstreamReq)
 	SetOpsUpstreamAttempted(c, true)
 	upstreamStart := time.Now()
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
@@ -488,7 +489,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	account.ApplyHeaderOverrides(req.Header)
 
 	cleanupOnError = false
-	return req, nil
+	return withOpenAIFinalUpstreamModel(req, body), nil
 }
 
 func parseOpenAIPassthroughBodyHandleArgs(bodyHandleOrToken any, tokenArgs []string) (*RequestBodyHandle, string, error) {

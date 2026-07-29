@@ -21,6 +21,9 @@ const (
 	// This value is sanitized+trimmed before being persisted.
 	OpsUpstreamRequestBodyKey = "ops_upstream_request_body"
 	OpsUpstreamAttemptedKey   = "ops_upstream_attempted"
+	OpsUpstreamModelKey       = "ops_upstream_model"
+
+	OpenAIFailedUsageUpstreamModelKey = "openai_failed_usage_upstream_model"
 
 	// Optional stage latencies (milliseconds) for troubleshooting and alerting.
 	OpsAuthLatencyMsKey      = "ops_auth_latency_ms"
@@ -81,6 +84,32 @@ func HasOpsUpstreamAttempted(c *gin.Context) bool {
 		return false
 	}
 	return c.GetBool(OpsUpstreamAttemptedKey)
+}
+
+func SetOpenAIFailedUsageUpstreamModel(c *gin.Context, model string) {
+	if c == nil {
+		return
+	}
+	model = strings.TrimSpace(model)
+	c.Set(OpenAIFailedUsageUpstreamModelKey, model)
+	if model != "" {
+		c.Set(OpsUpstreamModelKey, model)
+	}
+}
+
+func GetOpenAIFailedUsageUpstreamModel(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	return strings.TrimSpace(c.GetString(OpenAIFailedUsageUpstreamModelKey))
+}
+
+func ClearOpenAIFailedUsageUpstreamModel(c *gin.Context) {
+	if c == nil {
+		return
+	}
+	c.Set(OpenAIFailedUsageUpstreamModelKey, "")
+	c.Set(OpsUpstreamModelKey, "")
 }
 
 func MarkResponseCommitted(c *gin.Context) { c.Set(ResponseCommittedKey, true) }

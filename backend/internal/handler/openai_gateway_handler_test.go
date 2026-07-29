@@ -3976,12 +3976,21 @@ func (s *openAIChatCompletionsUsageLogRepoStub) Create(ctx context.Context, log 
 type openAIChatCompletionsHTTPUpstreamStub struct {
 	service.HTTPUpstream
 
-	response *http.Response
-	err      error
-	delay    time.Duration
+	response    *http.Response
+	err         error
+	delay       time.Duration
+	requestBody []byte
 }
 
 func (s *openAIChatCompletionsHTTPUpstreamStub) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
+	if req.Body != nil {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		s.requestBody = append([]byte(nil), body...)
+		req.Body = io.NopCloser(bytes.NewReader(body))
+	}
 	if s.delay > 0 {
 		time.Sleep(s.delay)
 	}

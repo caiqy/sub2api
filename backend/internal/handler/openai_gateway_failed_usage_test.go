@@ -957,7 +957,7 @@ func TestOpenAIGatewayHandler_OpenAIImagesFailedUsageLogSnapshotsRequestBeforeQu
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
 	c.Request.Header.Set("User-Agent", "original-user-agent")
-	c.Set(openAIFailedUsageExactUpstreamModelKey, "original-upstream-model")
+	c.Set(service.OpenAIFailedUsageUpstreamModelKey, "original-upstream-model")
 
 	h.submitOpenAIImagesFailedUsageLogWithResponse(c, apiKey, account, parsed, 0, nil, nil, time.Second)
 
@@ -965,7 +965,7 @@ func TestOpenAIGatewayHandler_OpenAIImagesFailedUsageLogSnapshotsRequestBeforeQu
 	parsed.Stream = false
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/other", nil)
 	c.Request.Header.Set("User-Agent", "reused-user-agent")
-	c.Set(openAIFailedUsageExactUpstreamModelKey, "reused-upstream-model")
+	c.Set(service.OpenAIFailedUsageUpstreamModelKey, "reused-upstream-model")
 	release()
 
 	log := waitForOpenAIFailedUsageLog(t, usageRepo)
@@ -1522,7 +1522,7 @@ func TestOpenAIGatewayHandler_FailoverExhaustedStillCreatesUsageLog(t *testing.T
 	require.Contains(t, usageRepo.lastLog.DetailSnapshot.ResponseBody, "openai raw failover")
 }
 
-func TestOpenAIGatewayHandler_ResponsesFailedUsageUsesAccountMappedModel(t *testing.T) {
+func TestOpenAIGatewayHandler_ResponsesFailedUsageUsesFinalOutboundModel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	cfg := &config.Config{
@@ -1541,16 +1541,17 @@ func TestOpenAIGatewayHandler_ResponsesFailedUsageUsesAccountMappedModel(t *test
 		ID:          11,
 		Name:        "openai-test-account",
 		Platform:    service.PlatformOpenAI,
-		Type:        service.AccountTypeAPIKey,
+		Type:        service.AccountTypeOAuth,
 		Status:      service.StatusActive,
 		Schedulable: true,
 		Concurrency: 1,
 		Priority:    1,
 		Credentials: map[string]any{
-			"api_key": "sk-test",
+			"access_token":       "oauth-token",
+			"chatgpt_account_id": "acct_test",
 			"model_mapping": map[string]any{
-				"gpt-5.4":      "gpt-5.4-high",
-				"gpt-5.4-high": "gpt-account",
+				"gpt-client":  "gpt-channel",
+				"gpt-channel": "gpt-5.4-high",
 			},
 		},
 	}
@@ -1574,7 +1575,7 @@ func TestOpenAIGatewayHandler_ResponsesFailedUsageUsesAccountMappedModel(t *test
 			Status:   service.StatusActive,
 			GroupIDs: []int64{groupID},
 			ModelMapping: map[string]map[string]string{
-				service.PlatformOpenAI: {"gpt-5.4": "gpt-5.4-high"},
+				service.PlatformOpenAI: {"gpt-client": "gpt-channel"},
 			},
 		},
 		groupPlatforms: map[int64]string{groupID: service.PlatformOpenAI},
@@ -1613,7 +1614,7 @@ func TestOpenAIGatewayHandler_ResponsesFailedUsageUsesAccountMappedModel(t *test
 	router.Use(middleware.UsageDetailCapture())
 	router.POST("/v1/responses", h.Responses)
 
-	reqBody := `{"model":"gpt-5.4","stream":false,"input":"hello"}`
+	reqBody := `{"model":"gpt-client","stream":false,"input":"hello"}`
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
@@ -1623,9 +1624,8 @@ func TestOpenAIGatewayHandler_ResponsesFailedUsageUsesAccountMappedModel(t *test
 	log := waitForOpenAIFailedUsageLog(t, usageRepo)
 	require.NotNil(t, log)
 	require.NotNil(t, log.UpstreamModel)
-	require.Equal(t, "gpt-account", *log.UpstreamModel)
-	require.NotNil(t, log.ReasoningEffort)
-	require.Equal(t, "high", *log.ReasoningEffort)
+	require.Equal(t, "gpt-5.4", gjson.GetBytes(httpUpstream.requestBody, "model").String())
+	require.Equal(t, gjson.GetBytes(httpUpstream.requestBody, "model").String(), *log.UpstreamModel)
 }
 
 func TestOpenAIGatewayHandler_Responses429FastStopCreatesUsageLog(t *testing.T) {

@@ -75,6 +75,23 @@ func openAIRequestBodyBytes(c *gin.Context, body []byte) ([]byte, error) {
 }
 
 type openAIOwnedBodyHandleContextKey struct{}
+type openAIFinalUpstreamModelContextKey struct{}
+
+func withOpenAIFinalUpstreamModel(req *http.Request, body []byte) *http.Request {
+	if req == nil {
+		return nil
+	}
+	model := strings.TrimSpace(gjson.GetBytes(body, "model").String())
+	return req.WithContext(context.WithValue(req.Context(), openAIFinalUpstreamModelContextKey{}, model))
+}
+
+func publishOpenAIFinalUpstreamModel(c *gin.Context, req *http.Request) {
+	if req == nil {
+		return
+	}
+	model, _ := req.Context().Value(openAIFinalUpstreamModelContextKey{}).(string)
+	SetOpenAIFailedUsageUpstreamModel(c, model)
+}
 
 func closeOpenAIRequestBody(req *http.Request) {
 	if req == nil {

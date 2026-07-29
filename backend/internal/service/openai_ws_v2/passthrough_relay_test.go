@@ -219,6 +219,72 @@ func TestRelayOnTurnCompleteWaitsForTerminalDownstreamWrite(t *testing.T) {
 	}
 }
 
+func TestRelayCommitsTerminalBeforeFollowupAdmission(t *testing.T) {
+	type admissionObservation struct {
+		turn              int
+		onTurnCompleteRan bool
+		afterTurn1Ran     bool
+	}
+
+	clientConn := newPassthroughTestFrameConn(nil, false)
+	upstreamConn := newPassthroughTestFrameConn([]passthroughTestFrame{
+		{msgType: coderws.MessageText, payload: []byte(`{"type":"response.created","response":{"id":"resp_1"}}`)},
+		{msgType: coderws.MessageText, payload: []byte(`{"type":"response.completed","response":{"id":"resp_1","usage":{"input_tokens":1,"output_tokens":1}}}`)},
+	}, false)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	releaseFollowup := make(chan struct{})
+	followupObserved := make(chan struct{})
+	observation := make(chan admissionObservation, 1)
+	var completedTurns atomic.Int32
+	var onTurnCompleteRan atomic.Bool
+	var afterTurn1Ran atomic.Bool
+	var followupRead atomic.Bool
+
+	go Relay(ctx, clientConn, upstreamConn, []byte(`{"type":"response.create","model":"gpt-5.1"}`), RelayOptions{
+		StartClientAfterFirstDownstream: true,
+		ReadClientFrame: func(readCtx context.Context, _ FrameConn) (coderws.MessageType, []byte, error) {
+			if !followupRead.CompareAndSwap(false, true) {
+				<-readCtx.Done()
+				return coderws.MessageText, nil, readCtx.Err()
+			}
+			select {
+			case <-readCtx.Done():
+				return coderws.MessageText, nil, readCtx.Err()
+			case <-releaseFollowup:
+			}
+			observation <- admissionObservation{
+				turn:              int(completedTurns.Load()) + 1,
+				onTurnCompleteRan: onTurnCompleteRan.Load(),
+				afterTurn1Ran:     afterTurn1Ran.Load(),
+			}
+			close(followupObserved)
+			return coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1"}`), nil
+		},
+		OnTurnComplete: func(RelayTurnResult) {
+			onTurnCompleteRan.Store(true)
+			completedTurns.Add(1)
+			afterTurn1Ran.Store(true)
+		},
+		AfterClientWrite: func(_ coderws.MessageType, payload []byte, writeErr error) {
+			if writeErr == nil && gjson.GetBytes(payload, "type").String() == "response.completed" {
+				close(releaseFollowup)
+				<-followupObserved
+			}
+		},
+	})
+
+	select {
+	case got := <-observation:
+		require.Equal(t, 2, got.turn)
+		require.True(t, got.onTurnCompleteRan)
+		require.True(t, got.afterTurn1Ran)
+		require.Equal(t, int32(1), completedTurns.Load())
+	case <-time.After(time.Second):
+		t.Fatal("follow-up admission was not observed")
+	}
+}
+
 func (c *delayedReadFrameConn) ReadFrame(ctx context.Context) (coderws.MessageType, []byte, error) {
 	if c == nil || c.base == nil {
 		return coderws.MessageText, nil, io.EOF

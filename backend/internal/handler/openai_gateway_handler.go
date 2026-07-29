@@ -614,8 +614,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			attemptModel = channelMapping.MappedModel
 		}
 		attemptReasoningEffort := service.ExtractOpenAIReasoningEffortFromBody(forwardBody, attemptModel)
-		setOpenAIFailedUsageExactUpstreamModel(c, resolveOpenAIFailedUsageExactUpstreamModel(account, attemptModel, channelMapping.MappedModel))
 		service.SetOpsUpstreamAttempted(c, false)
+		service.ClearOpenAIFailedUsageUpstreamModel(c)
 		// 用扣除 compact 心跳字节的口径快照：心跳注释不构成语义响应，
 		// 不能因心跳字节变化而放弃 failover 换号（#3887）。
 		writerSizeBeforeForward := service.OpenAICompactKeepaliveAdjustedWrittenSize(c)
@@ -2552,17 +2552,8 @@ func (h *OpenAIGatewayHandler) submitFailedUsageLog(c *gin.Context, apiKey *serv
 	})
 }
 
-const openAIFailedUsageExactUpstreamModelKey = "openai_failed_usage_upstream_model"
-
 func setOpenAIFailedUsageExactUpstreamModel(c *gin.Context, upstreamModel string) {
-	if c == nil {
-		return
-	}
-	upstreamModel = strings.TrimSpace(upstreamModel)
-	c.Set(openAIFailedUsageExactUpstreamModelKey, upstreamModel)
-	if upstreamModel != "" {
-		c.Set(opsUpstreamModelKey, upstreamModel)
-	}
+	service.SetOpenAIFailedUsageUpstreamModel(c, upstreamModel)
 }
 
 func resetOpenAIWSFailedUsageTurn(c *gin.Context) {
@@ -2570,8 +2561,7 @@ func resetOpenAIWSFailedUsageTurn(c *gin.Context) {
 		return
 	}
 	service.SetOpsUpstreamAttempted(c, false)
-	c.Set(openAIFailedUsageExactUpstreamModelKey, "")
-	c.Set(opsUpstreamModelKey, "")
+	service.ClearOpenAIFailedUsageUpstreamModel(c)
 }
 
 func resolveOpenAIFailedUsageExactUpstreamModel(account *service.Account, requestedModel, defaultMappedModel string) string {
@@ -2603,7 +2593,7 @@ func resolveOpenAIForwardDefaultMappedModel(apiKey *service.APIKey, fallbackMode
 
 func resolveOpenAIFailedUsageUpstreamModel(c *gin.Context, account *service.Account, requestedModel string) string {
 	if c != nil {
-		if exactModel := strings.TrimSpace(c.GetString(openAIFailedUsageExactUpstreamModelKey)); exactModel != "" {
+		if exactModel := service.GetOpenAIFailedUsageUpstreamModel(c); exactModel != "" {
 			return exactModel
 		}
 	}

@@ -805,6 +805,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 		}
 		SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
+		publishOpenAIFinalUpstreamModel(c, upstreamReq)
 		SetOpsUpstreamAttempted(c, true)
 
 		// Get proxy URL
