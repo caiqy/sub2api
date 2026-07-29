@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -48,6 +49,11 @@ func WriteFailedUsageLogBestEffort(ctx context.Context, repo UsageLogRepository,
 	if requestedModel == "" {
 		requestedModel = input.OriginalModel
 	}
+	upstreamModel := optionalNonEqualStringPtr(input.UpstreamModel, model)
+	if input.OpenAIWSMode && upstreamModel == nil && strings.TrimSpace(input.UpstreamModel) != "" {
+		value := strings.TrimSpace(input.UpstreamModel)
+		upstreamModel = &value
+	}
 	usageLog := &UsageLog{
 		UserID:                input.User.ID,
 		APIKeyID:              input.APIKey.ID,
@@ -55,7 +61,7 @@ func WriteFailedUsageLogBestEffort(ctx context.Context, repo UsageLogRepository,
 		RequestID:             resolveUsageBillingRequestID(ctx, ""),
 		Model:                 model,
 		RequestedModel:        requestedModel,
-		UpstreamModel:         optionalNonEqualStringPtr(input.UpstreamModel, model),
+		UpstreamModel:         upstreamModel,
 		ModelMappingChain:     optionalTrimmedStringPtr(input.ModelMappingChain),
 		ReasoningEffort:       input.ReasoningEffort,
 		InboundEndpoint:       optionalTrimmedStringPtr(input.InboundEndpoint),

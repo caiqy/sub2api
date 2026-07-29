@@ -1543,6 +1543,11 @@ type openAIWSRegressionEnvOptions struct {
 	MissingAPIKeyCredential     bool
 	SkipUpstream                bool
 	UpstreamError               bool
+	UpstreamErrorOnTurn         int
+	UpstreamDisconnectOnTurn    int
+	KeepUpstreamOpenOnError     bool
+	Passthrough                 bool
+	DisableFailover             bool
 	CaptureFirstUpstreamMessage bool
 	CaptureUpstreamMessages     bool
 	CompositeResolver           *service.CompositeRouteResolver
@@ -1599,11 +1604,15 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 	cfg.Security.URLAllowlist.Enabled = false
 	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 	cfg.Gateway.MaxAccountSwitches = 1
+	if opts.DisableFailover {
+		cfg.Gateway.MaxAccountSwitches = 0
+	}
 	cfg.Gateway.Scheduling.LoadBatchEnabled = false
 	cfg.Gateway.OpenAIWS.Enabled = true
 	cfg.Gateway.OpenAIWS.OAuthEnabled = true
 	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
 	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.ModeRouterV2Enabled = opts.Passthrough
 	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
 	cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
 	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
@@ -1646,10 +1655,31 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 				if upstreamMessages != nil {
 					upstreamMessages <- append([]byte(nil), payload...)
 				}
+				if gjson.GetBytes(payload, "type").String() == "session.update" {
+					writeCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+					err = conn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"session.updated","session":{"model":"`+gjson.GetBytes(payload, "session.model").String()+`"}}`))
+					cancel()
+					if err != nil {
+						return
+					}
+					continue
+				}
 				turn++
+				if opts.UpstreamDisconnectOnTurn == turn {
+					return
+				}
+				upstreamErrorsThisTurn := opts.UpstreamError && (opts.UpstreamErrorOnTurn == 0 || opts.UpstreamErrorOnTurn == turn)
+				if opts.Passthrough && !upstreamErrorsThisTurn {
+					writeCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+					err = conn.Write(writeCtx, coderws.MessageText, []byte(fmt.Sprintf(`{"type":"response.created","response":{"id":"resp_ingress_turn_%d","model":"gpt-5.1","status":"in_progress"}}`, turn)))
+					cancel()
+					if err != nil {
+						return
+					}
+				}
 				writeCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 				response := []byte(fmt.Sprintf(`{"type":"response.completed","response":{"id":"resp_ingress_turn_%d","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`, turn))
-				if opts.UpstreamError {
+				if upstreamErrorsThisTurn {
 					response = []byte(`{"type":"error","error":{"code":"rate_limit_error","type":"rate_limit_error","message":"upstream failed"}}`)
 				}
 				err = conn.Write(writeCtx, coderws.MessageText, response)
@@ -1657,7 +1687,7 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 				if err != nil {
 					return
 				}
-				if opts.UpstreamError {
+				if upstreamErrorsThisTurn && !opts.KeepUpstreamOpenOnError {
 					return
 				}
 			}
@@ -1697,6 +1727,9 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 			"responses_websockets_v2_enabled": true,
 		},
 	}}
+	if opts.Passthrough {
+		accountRepo.account.Extra["openai_apikey_responses_websockets_v2_mode"] = service.OpenAIWSIngressModePassthrough
+	}
 	deferredService := service.NewDeferredService(accountRepo, nil, 0)
 	billingService := service.NewBillingService(cfg, nil)
 	var channelService *service.ChannelService
@@ -1931,7 +1964,128 @@ func TestOpenAIResponsesWebSocketFailedUsageFreezesChannelThenAccountMappedModel
 	log := waitForOpenAIFailedUsageLog(t, usageRepo)
 	require.NotNil(t, log)
 	require.NotNil(t, log.UpstreamModel)
-	require.Equal(t, "gpt-account", *log.UpstreamModel)
+	select {
+	case payload := <-env.firstUpstreamMessage:
+		require.Equal(t, "gpt-account", gjson.GetBytes(payload, "model").String())
+		require.Equal(t, gjson.GetBytes(payload, "model").String(), *log.UpstreamModel)
+	case <-time.After(5 * time.Second):
+		t.Fatal("upstream did not receive the first websocket frame")
+	}
+}
+
+func TestOpenAIResponsesWebSocketPassthroughFailedUsageUsesActualFirstFrameModel(t *testing.T) {
+	cache := &concurrencyCacheMock{
+		acquireUserSlotFn:      func(context.Context, int64, int, string) (bool, error) { return true, nil },
+		acquireUserGroupSlotFn: func(context.Context, int64, int64, int, string) (bool, error) { return true, nil },
+		acquireAccountSlotFn:   func(context.Context, int64, int, string) (bool, error) { return true, nil },
+	}
+	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
+	env := newOpenAIWSRegressionEnv(t, cache, openAIWSRegressionEnvOptions{
+		UpstreamError:               true,
+		Passthrough:                 true,
+		DisableFailover:             true,
+		CaptureFirstUpstreamMessage: true,
+		UsageLogRepo:                usageRepo,
+		ChannelModelMapping:         map[string]string{"gpt-client": "gpt-channel"},
+		AccountModelMapping:         map[string]string{"gpt-client": "gpt-client", "gpt-channel": "gpt-account"},
+	})
+	defer env.Close()
+	env.apiKey.Group.Platform = service.PlatformOpenAI
+	env.apiKey.Group.Status = service.StatusActive
+	env.apiKey.Group.Hydrated = true
+
+	clientConn := env.dial(t)
+	defer func() { _ = clientConn.CloseNow() }()
+	env.writeMessage(t, clientConn, `{"type":"response.create","model":"gpt-client","stream":false}`)
+	env.readCloseError(t, clientConn, coderws.StatusTryAgainLater)
+	env.waitRequestDone(t)
+
+	log := waitForOpenAIFailedUsageLog(t, usageRepo)
+	if log == nil || log.UpstreamModel == nil {
+		t.Fatalf("failed usage log upstream model = %v, want persisted outbound model", log)
+	}
+	select {
+	case payload := <-env.firstUpstreamMessage:
+		require.Equal(t, "gpt-channel", gjson.GetBytes(payload, "model").String())
+		require.Equal(t, gjson.GetBytes(payload, "model").String(), *log.UpstreamModel)
+	case <-time.After(5 * time.Second):
+		t.Fatal("upstream did not receive the first websocket frame")
+	}
+}
+
+func TestOpenAIResponsesWebSocketPassthroughFailedUsageUsesSessionUpdatedModel(t *testing.T) {
+	cache := &concurrencyCacheMock{
+		acquireUserSlotFn:      func(context.Context, int64, int, string) (bool, error) { return true, nil },
+		acquireUserGroupSlotFn: func(context.Context, int64, int64, int, string) (bool, error) { return true, nil },
+		acquireAccountSlotFn:   func(context.Context, int64, int, string) (bool, error) { return true, nil },
+	}
+	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
+	env := newOpenAIWSRegressionEnv(t, cache, openAIWSRegressionEnvOptions{
+		UpstreamError:           true,
+		UpstreamErrorOnTurn:     2,
+		KeepUpstreamOpenOnError: true,
+		Passthrough:             true,
+		DisableFailover:         true,
+		CaptureUpstreamMessages: true,
+		UsageLogRepo:            usageRepo,
+	})
+	defer env.Close()
+	env.apiKey.Group.Platform = service.PlatformOpenAI
+	env.apiKey.Group.Status = service.StatusActive
+	env.apiKey.Group.Hydrated = true
+
+	clientConn := env.dial(t)
+	defer func() { _ = clientConn.CloseNow() }()
+	env.writeMessage(t, clientConn, `{"type":"response.create","model":"gpt-initial","stream":false}`)
+	require.Equal(t, "response.created", gjson.GetBytes(env.readMessage(t, clientConn), "type").String())
+	require.Equal(t, "response.completed", gjson.GetBytes(env.readMessage(t, clientConn), "type").String())
+	select {
+	case log := <-usageRepo.created:
+		require.Equal(t, "gpt-initial", log.Model)
+	case <-time.After(5 * time.Second):
+		t.Fatal("first turn usage was not recorded")
+	}
+	select {
+	case payload := <-env.upstreamMessages:
+		require.Equal(t, "gpt-initial", gjson.GetBytes(payload, "model").String())
+	case <-time.After(5 * time.Second):
+		t.Fatal("upstream did not receive the initial websocket frame")
+	}
+	env.writeMessage(t, clientConn, `{"type":"session.update","session":{"model":"gpt-session"}}`)
+	select {
+	case payload := <-env.upstreamMessages:
+		require.Equal(t, "gpt-session", gjson.GetBytes(payload, "session.model").String())
+	case <-time.After(5 * time.Second):
+		t.Fatal("upstream did not receive session.update")
+	}
+	ack := env.readMessage(t, clientConn)
+	require.Equal(t, "session.updated", gjson.GetBytes(ack, "type").String())
+	require.Equal(t, "gpt-session", gjson.GetBytes(ack, "session.model").String())
+	env.writeMessage(t, clientConn, `{"type":"response.create","stream":false}`)
+	env.readCloseError(t, clientConn, coderws.StatusInternalError)
+	env.waitRequestDone(t)
+
+	var log *service.UsageLog
+	select {
+	case log = <-usageRepo.created:
+	case <-time.After(5 * time.Second):
+		t.Fatal("failed usage was not recorded")
+	}
+	if log == nil || log.UpstreamModel == nil {
+		t.Fatalf("failed usage log upstream model = %v, want persisted session effective model", log)
+	}
+	select {
+	case payload := <-env.upstreamMessages:
+		require.False(t, gjson.GetBytes(payload, "model").Exists())
+	case <-time.After(5 * time.Second):
+		t.Fatal("upstream did not receive the model-less response.create")
+	}
+	require.Equal(t, "gpt-session", *log.UpstreamModel)
+	select {
+	case duplicate := <-usageRepo.created:
+		t.Fatalf("duplicate failed usage log: %+v", duplicate)
+	default:
+	}
 }
 
 func TestOpenAIResponsesWebSocketRejectsLaterCrossProviderCompositeRoute(t *testing.T) {
@@ -2092,6 +2246,7 @@ func (e *openAIWSRegressionEnv) readCloseError(t *testing.T, conn *coderws.Conn,
 	require.Error(t, err)
 	var closeErr coderws.CloseError
 	require.ErrorAs(t, err, &closeErr)
+	t.Logf("websocket close reason: %s", closeErr.Reason)
 	require.Equal(t, closeCode, closeErr.Code)
 }
 

@@ -656,6 +656,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	// model would miss any admin-configured model whitelist and be silently
 	// passed through, defeating that policy on every frame after the first.
 	capturedSessionModel := openAIWSPassthroughPolicyModelForFrame(account, firstClientMessage)
+	outboundSessionModel := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "model").String())
 	initialRequestModel := ""
 	if hooks != nil {
 		initialRequestModel = hooks.InitialRequestModel
@@ -908,6 +909,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			if updated := openAIWSPassthroughPolicyModelFromSessionFrame(account, payload); updated != "" {
 				capturedSessionModel = updated
 			}
+			if updated := strings.TrimSpace(openAIWSPassthroughRequestModelFromSessionFrame(payload)); updated != "" {
+				outboundSessionModel = updated
+			}
 			usageMeta.updateSessionRequestModel(payload)
 			requestModelForThisFrame := usageMeta.requestModelForFrame(payload)
 			// Per-frame model first; if the client omits "model" on a
@@ -936,6 +940,14 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			//     service_tier 时按 default 处理，billing 应如实反映。
 			if policyErr == nil && blocked == nil && isResponseCreate {
 				usageMeta.updateFromResponseCreate(out, model, requestModelForThisFrame)
+				SetOpsUpstreamAttempted(c, true)
+				if hooks != nil && hooks.OnOutboundRequest != nil {
+					effectiveModel := strings.TrimSpace(gjson.GetBytes(out, "model").String())
+					if effectiveModel == "" {
+						effectiveModel = outboundSessionModel
+					}
+					hooks.OnOutboundRequest(int(completedTurns.Load())+1, out, effectiveModel)
+				}
 				acceptedTurn = true
 			}
 			return out, blocked, policyErr
@@ -955,6 +967,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		},
 	}
 	upstreamFirstMessageSent := false
+	SetOpsUpstreamAttempted(c, true)
+	if hooks != nil && hooks.OnOutboundRequest != nil {
+		hooks.OnOutboundRequest(1, firstClientMessage, strings.TrimSpace(gjson.GetBytes(firstClientMessage, "model").String()))
+	}
 	firstWriteCtx, cancelFirstWrite := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
 	firstWriteErr := relayUpstreamFrameConn.WriteFrame(firstWriteCtx, coderws.MessageText, firstClientMessage)
 	cancelFirstWrite()
@@ -1072,6 +1088,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 				if eventType == "error" {
 					s.handleOpenAIWSErrorEventTransientFailure(ctx, account, capturedSessionModel, handshakeHeaders, payload)
+					if completedTurns.Load() > 0 {
+						return errors.New("upstream websocket error event")
+					}
 				}
 				if wroteDownstream || eventType != "error" {
 					return nil

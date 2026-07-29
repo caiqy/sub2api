@@ -216,8 +216,16 @@ type OpenAIWSIngressHooks struct {
 	ReasoningEffortMappings []ReasoningEffortMapping
 	BeforeTurn              func(turn int) error
 	RewriteRequest          func(turn int, payload []byte, originalModel string) (OpenAIWSRequestRewrite, error)
-	BeforeRequest           func(turn int, payload []byte, originalModel string) error
-	AfterTurn               func(turn int, result *OpenAIForwardResult, turnErr error)
+	// BeforeRequest runs only for follow-up response.create frames after
+	// RewriteRequest and account mapping. payload is the transformed request;
+	// originalModel is the pre-account-mapping model used for policy/audit.
+	BeforeRequest func(turn int, payload []byte, originalModel string) error
+	// OnOutboundRequest runs synchronously immediately before every upstream
+	// response.create write, including turn 1. payload is the final outbound
+	// frame and effectiveModel is the actual model for that turn (including a
+	// passthrough session model when the frame itself omits model).
+	OnOutboundRequest func(turn int, payload []byte, effectiveModel string)
+	AfterTurn         func(turn int, result *OpenAIForwardResult, turnErr error)
 }
 
 type OpenAIWSRequestRewrite struct {

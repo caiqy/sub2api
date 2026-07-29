@@ -2061,9 +2061,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if turn == 1 {
 					return nil
 				}
-				if mappedModel := strings.TrimSpace(gjson.GetBytes(payload, "model").String()); mappedModel != "" {
-					setOpenAIFailedUsageExactUpstreamModel(c, mappedModel)
-				}
 				if !gjson.ValidBytes(payload) {
 					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", errors.New("invalid json"))
 				}
@@ -2079,6 +2076,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					return service.NewOpenAIWSClientCloseError(securityAuditWSCloseStatus(decision), securityAuditWSCloseReason(decision), nil)
 				}
 				return nil
+			},
+			OnOutboundRequest: func(_ int, _ []byte, effectiveModel string) {
+				setOpenAIFailedUsageExactUpstreamModel(c, effectiveModel)
 			},
 			BeforeTurn: func(turn int) error {
 				// turn==1 的会话屏蔽已由握手层检查覆盖；连接内 flag 只拦截后续 turn。
@@ -2156,9 +2156,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 							failedModel := reqModel
 							failedDuration := time.Duration(0)
 							if result != nil {
-								if strings.TrimSpace(result.Model) != "" {
-									failedModel = result.Model
-								}
 								failedDuration = result.Duration
 							}
 							responseBody := []byte(nil)
@@ -2234,11 +2231,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		if channelMappingWS.Mapped {
 			wsFirstMessage = h.gatewayService.ReplaceModelInBody(firstMessage, channelMappingWS.MappedModel)
 		}
-		setOpenAIFailedUsageExactUpstreamModel(c, resolveOpenAIFailedUsageExactUpstreamModel(
-			account,
-			strings.TrimSpace(gjson.GetBytes(wsFirstMessage, "model").String()),
-			"",
-		))
 		// 切组/会话失配防护：previous_response_id 未在当前分组命中粘连账号（StickyPreviousHit=false），
 		// 说明该会话链不属于本次调度到的账号，原样转发会触发上游会话链鉴权失败（“鉴权失败，请检查 API Key”）。
 		// 故剥离首包里的 previous_response_id，改用首包内 input 重建上下文；带 function_call_output 的
