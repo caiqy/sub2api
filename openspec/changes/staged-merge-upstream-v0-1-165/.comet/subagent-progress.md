@@ -1,10 +1,10 @@
 # 子代理进度
 
-- 当前任务：29 项中的第 21 项（OpenSpec 6.2）
+- 当前任务：29 项中的第 22 项（OpenSpec 6.3）
 - 当前阶段：`ready`
-- 状态：Task 20 已完成关闭写回，Task 21 ready；已完成 20 项，最后审查 SHA `4778e32dc`
-- 简报：`.superpowers/sdd/task-21-brief.md`
-- 报告：`.superpowers/sdd/task-21-report.md`
+- 状态：Task 21 full gate 与 fresh review 已通过，OpenSpec 6.2 已闭合，Task 22 ready；已完成 21 项，最后审查 SHA `42bec51f6`
+- 简报：`.superpowers/sdd/task-22-brief.md`
+- 报告：`.superpowers/sdd/task-22-report.md`
 - Task 20 最终复审：`.superpowers/sdd/task-20-final-review.md`
 - Task 20 预算外修复简报：`.superpowers/sdd/task-20-review-extra.md`
 - Task 20 审查差异：初始 `.superpowers/sdd/review-07167bbfa..6ebd068ff.diff`；Round 1 fix `.superpowers/sdd/review-6ebd068ff..96455c43b.diff`；Round 2 final `.superpowers/sdd/review-6ebd068ff..09db65607.diff`；extra final `.superpowers/sdd/review-6ebd068ff..babe29e00.diff`
@@ -12,12 +12,15 @@
 - Task 20 任务起点 SHA：`07167bbfa`
 - Task 20 实现提交：`699459921`、`6ebd068ff`、`48e2d4a0b`、`88aeed4b0`、`96455c43b`、`a9292253f`、`09db65607`、`1e7b8af75`、`babe29e00`
 - Task 20 最后审查 SHA：`4778e32dc`
-- 已完成任务数：20
+- Task 21 提交：`6489a88b6`、`aa7b67369`、`e5801c8ae`、`704bc2670`、`42bec51f6`
+- Task 21 审查差异：`.superpowers/sdd/review-489fa10..42bec51.diff`
+- Task 21 最后审查 SHA：`42bec51f6`
+- 已完成任务数：21
 - 审查模式：`thorough`
-- 审查修复轮次：常规 2/2 与用户授权 extra 1/1 已作为历史记录保留；关闭写回不追加新修复轮次
-- RED/GREEN：follow-up 范围 `babe29e00f18df9a0011d8464446654148d5eb53..4778e32dc879f682fd5774c1fb0c5a63867802c6` 的验证与归档已完成，审查无 Critical/Important
-- 风险信号：历史记录保留 `composite routing`、同号 172 migrations、两个 186 migrations、生成物与依赖冲突的原始审查链；当前仅做关闭记账
-- 未解决反馈：保留 3 个非阻断 Minor 作为历史事实，不再转回阻断
+- Task 20 审查修复轮次：常规 2/2 与用户授权 extra 1/1 已作为历史记录保留；关闭写回不追加新修复轮次
+- Task 20 RED/GREEN：follow-up 范围 `babe29e00f18df9a0011d8464446654148d5eb53..4778e32dc879f682fd5774c1fb0c5a63867802c6` 的验证与归档已完成，审查无 Critical/Important
+- Task 21 结果：focused、本地 full gate、有效版本注入 build、detached 双 generate 与 remote integration 通过；最终源码净 diff 为零
+- 未解决反馈：Task 20 的 3 个非阻断 Minor 保留为历史；Task 21 reviewer 无 finding
 
 ## Task 20 关闭写回
 
@@ -28,6 +31,15 @@
 - 归档提交：`a948e3b5e`、`263147b6b`
 - 用户基线例外：`make test` 的 lease-loss EOF 为用户明确接受且已在原始上游 `v0.1.165` 复现的基线例外，不记为通过
 - 3 个历史 Minor：源码字符串护栏、两个 `count_tokens` stale-subscription 运行时覆盖缺口、Ollama 固定 `50ms` barrier
+
+## Task 21 Full Gate 关闭
+
+- 实现范围：`489fa1025..42bec51f6`；临时 `body = nil` 提交已由下一提交精确 revert，最终源码/测试净 diff 为零
+- 本地门禁：`make test` PASS（frontend `213/1613`），显式 `VERSION=0.1.159.6` build PASS，detached worktree 双 generate/diff PASS
+- 远程门禁：`local-serv-ai` integration exit 0；migration upgrade PASS，双方 172 与两个 186 以完整文件名记录且重放 count/checksum 不变
+- Fresh reviewer：Task session `ses_05417de63ffe9wAb0x8Iszjc3k`，Spec/quality `Approved`，无 Critical/Important/Minor
+- 详细报告：`.superpowers/sdd/task-21-report.md`；formal ledger：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
+- 残余风险：主工作树存在 Windows `user-mapped section` 生成锁；同提交 detached 双轮生成已提供稳定性证据
 
 ## Task 20 永久最终阻断
 
