@@ -1542,10 +1542,13 @@ type openAIWSRegressionEnvOptions struct {
 	ExpectSecondTurnCloseCode   coderws.StatusCode
 	MissingAPIKeyCredential     bool
 	SkipUpstream                bool
+	UpstreamError               bool
 	CaptureFirstUpstreamMessage bool
 	CaptureUpstreamMessages     bool
 	CompositeResolver           *service.CompositeRouteResolver
 	AccountModelMapping         map[string]string
+	ChannelModelMapping         map[string]string
+	UsageLogRepo                service.UsageLogRepository
 }
 
 type openAIWSRegressionEnv struct {
@@ -1645,9 +1648,16 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 				}
 				turn++
 				writeCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-				err = conn.Write(writeCtx, coderws.MessageText, []byte(fmt.Sprintf(`{"type":"response.completed","response":{"id":"resp_ingress_turn_%d","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`, turn)))
+				response := []byte(fmt.Sprintf(`{"type":"response.completed","response":{"id":"resp_ingress_turn_%d","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`, turn))
+				if opts.UpstreamError {
+					response = []byte(`{"type":"error","error":{"code":"rate_limit_error","type":"rate_limit_error","message":"upstream failed"}}`)
+				}
+				err = conn.Write(writeCtx, coderws.MessageText, response)
 				cancel()
 				if err != nil {
+					return
+				}
+				if opts.UpstreamError {
 					return
 				}
 			}
@@ -1689,9 +1699,23 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 	}}
 	deferredService := service.NewDeferredService(accountRepo, nil, 0)
 	billingService := service.NewBillingService(cfg, nil)
+	var channelService *service.ChannelService
+	if len(opts.ChannelModelMapping) > 0 {
+		channelService = service.NewChannelService(openAIFailedUsageChannelRepoStub{
+			channel: service.Channel{
+				ID:       21,
+				Status:   service.StatusActive,
+				GroupIDs: []int64{2},
+				ModelMapping: map[string]map[string]string{
+					service.PlatformOpenAI: opts.ChannelModelMapping,
+				},
+			},
+			groupPlatforms: map[int64]string{2: service.PlatformOpenAI},
+		}, nil, nil, nil)
+	}
 	gatewayService := service.NewOpenAIGatewayService(
 		accountRepo,
-		nil,
+		opts.UsageLogRepo,
 		nil,
 		nil,
 		nil,
@@ -1707,7 +1731,7 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 		deferredService,
 		nil,
 		nil,
-		nil,
+		channelService,
 		nil,
 	)
 	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
@@ -1871,6 +1895,43 @@ func TestOpenAIResponsesWebSocketAppliesAccountMappingAfterLaterCompositeRoute(t
 	}
 	require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
 	env.waitRequestDone(t)
+}
+
+func TestOpenAIResponsesWebSocketFailedUsageFreezesChannelThenAccountMappedModel(t *testing.T) {
+	cache := &concurrencyCacheMock{
+		acquireUserSlotFn:      func(context.Context, int64, int, string) (bool, error) { return true, nil },
+		acquireUserGroupSlotFn: func(context.Context, int64, int64, int, string) (bool, error) { return true, nil },
+		acquireAccountSlotFn:   func(context.Context, int64, int, string) (bool, error) { return true, nil },
+	}
+	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
+	env := newOpenAIWSRegressionEnv(t, cache, openAIWSRegressionEnvOptions{
+		UpstreamError:               true,
+		CaptureFirstUpstreamMessage: true,
+		UsageLogRepo:                usageRepo,
+		ChannelModelMapping:         map[string]string{"gpt-client": "gpt-channel"},
+		AccountModelMapping:         map[string]string{"gpt-client": "gpt-client", "gpt-channel": "gpt-account"},
+	})
+	defer env.Close()
+	env.apiKey.Group.Platform = service.PlatformOpenAI
+	env.apiKey.Group.Status = service.StatusActive
+	env.apiKey.Group.Hydrated = true
+
+	clientConn := env.dial(t)
+	defer func() { _ = clientConn.CloseNow() }()
+	env.writeMessage(t, clientConn, `{"type":"response.create","model":"gpt-client","stream":false}`)
+	readCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	_, _, readErr := clientConn.Read(readCtx)
+	cancel()
+	require.Error(t, readErr)
+	var closeErr coderws.CloseError
+	require.ErrorAs(t, readErr, &closeErr)
+	require.Equal(t, coderws.StatusTryAgainLater, closeErr.Code)
+	env.waitRequestDone(t)
+
+	log := waitForOpenAIFailedUsageLog(t, usageRepo)
+	require.NotNil(t, log)
+	require.NotNil(t, log.UpstreamModel)
+	require.Equal(t, "gpt-account", *log.UpstreamModel)
 }
 
 func TestOpenAIResponsesWebSocketRejectsLaterCrossProviderCompositeRoute(t *testing.T) {
