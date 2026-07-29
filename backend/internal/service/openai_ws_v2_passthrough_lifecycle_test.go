@@ -26,6 +26,7 @@ type stagedPassthroughFrame struct {
 type stagedPassthroughConn struct {
 	frames    chan stagedPassthroughFrame
 	writes    chan []byte
+	writeErr  error
 	closed    chan struct{}
 	closeOnce sync.Once
 }
@@ -66,6 +67,9 @@ func (c *stagedPassthroughConn) ReadFrame(ctx context.Context) (coderws.MessageT
 }
 
 func (c *stagedPassthroughConn) WriteFrame(ctx context.Context, _ coderws.MessageType, payload []byte) error {
+	if c.writeErr != nil {
+		return c.writeErr
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -88,6 +92,31 @@ func (c *stagedPassthroughConn) WriteFrame(ctx context.Context, _ coderws.Messag
 		return errOpenAIWSConnClosed
 	}
 	return nil
+}
+
+func TestPassthroughLifecycle_FirstWriteFailureCallsAfterTurnOnce(t *testing.T) {
+	upstream := newStagedPassthroughConn()
+	upstream.writeErr = errors.New("first write failed")
+	called := 0
+	server, serverErr := startPassthroughLifecycleServer(t, context.Background(), newPassthroughLifecycleService(passthroughLifecycleConfig(), upstream), passthroughLifecycleAccount(), &OpenAIWSIngressHooks{
+		OnOutboundRequest: func(_ int, _ []byte, model string) { require.Equal(t, "gpt-5.1", model) },
+		AfterTurn: func(turn int, result *OpenAIForwardResult, err error) {
+			called++
+			require.Equal(t, 1, turn)
+			require.Nil(t, result)
+			require.Error(t, err)
+		},
+	})
+	defer server.Close()
+	client := dialPassthroughLifecycleClient(t, server)
+	defer func() { _ = client.CloseNow() }()
+	select {
+	case err := <-serverErr:
+		require.Error(t, err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("passthrough write failure did not return")
+	}
+	require.Equal(t, 1, called)
 }
 
 func (c *stagedPassthroughConn) Close() error {

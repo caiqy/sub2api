@@ -122,6 +122,26 @@ func TestProxyOpenAIWSHTTPBridgeTurnTransportErrorFailoverSafety(t *testing.T) {
 	}
 }
 
+func TestProxyOpenAIWSHTTPBridgeTurnLocalBuildFailureDoesNotPublishOutbound(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream := &httpUpstreamRecorder{}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	account := &Account{ID: 8, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	called := false
+	result, err := svc.proxyOpenAIWSHTTPBridgeTurnWithOutboundHook(
+		context.Background(), c, account, "sk-test", []byte(`{`), 1,
+		"gpt-5", "", "", "", "", 1, func([]byte) error { return nil },
+		func([]byte, string) { called = true },
+	)
+	require.Nil(t, result)
+	require.Error(t, err)
+	require.False(t, called)
+	require.False(t, HasOpsUpstreamAttempted(c))
+	require.Nil(t, upstream.lastReq)
+}
+
 type openAIWSHTTPBridgeAccountRepoStub struct {
 	AccountRepository
 	tempUnschedCalls int

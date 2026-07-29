@@ -1547,7 +1547,6 @@ type openAIWSRegressionEnvOptions struct {
 	UpstreamDisconnectOnTurn    int
 	KeepUpstreamOpenOnError     bool
 	Passthrough                 bool
-	DisableFailover             bool
 	CaptureFirstUpstreamMessage bool
 	CaptureUpstreamMessages     bool
 	CompositeResolver           *service.CompositeRouteResolver
@@ -1565,6 +1564,7 @@ type openAIWSRegressionEnv struct {
 	upstream             *httptest.Server
 	requestDone          chan struct{}
 	handler              *OpenAIGatewayHandler
+	gatewayService       *service.OpenAIGatewayService
 	accountRepo          *openAIChatCompletionsAccountRepoStub
 	account              *service.Account
 	apiKey               *service.APIKey
@@ -1608,9 +1608,6 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 	cfg.Security.URLAllowlist.Enabled = false
 	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 	cfg.Gateway.MaxAccountSwitches = 1
-	if opts.DisableFailover {
-		cfg.Gateway.MaxAccountSwitches = 0
-	}
 	cfg.Gateway.Scheduling.LoadBatchEnabled = false
 	cfg.Gateway.OpenAIWS.Enabled = true
 	cfg.Gateway.OpenAIWS.OAuthEnabled = true
@@ -1814,6 +1811,7 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 		upstream:             upstreamServer,
 		requestDone:          requestDone,
 		handler:              h,
+		gatewayService:       gatewayService,
 		accountRepo:          accountRepo,
 		account:              accountRepo.account,
 		apiKey:               apiKey,
@@ -2005,9 +2003,11 @@ func TestOpenAIResponsesWebSocketOAuthFailedUsageUsesNormalizedOutboundModel(t *
 	env.apiKey.Group.Status = service.StatusActive
 	env.apiKey.Group.Hydrated = true
 
-	// OAuth WS endpoints are fixed to chatgpt.com. Warm the shared ctx_pool
-	// through the fixture's API-key base URL, then assert the actual OAuth turn.
-	env.account.Type = service.AccountTypeAPIKey
+	// OAuth WS endpoints are fixed to chatgpt.com. The pool retains this API-key
+	// copy while the repository serves an independent OAuth copy for the assertion.
+	warmAccount := cloneOpenAIWSRegressionAccount(env.account)
+	warmAccount.Type = service.AccountTypeAPIKey
+	env.replaceAccount(warmAccount)
 	warmConn := env.dial(t)
 	env.writeMessage(t, warmConn, `{"type":"response.create","model":"gpt-4.1","stream":false}`)
 	require.Equal(t, "response.completed", gjson.GetBytes(env.readMessage(t, warmConn), "type").String())
@@ -2023,7 +2023,9 @@ func TestOpenAIResponsesWebSocketOAuthFailedUsageUsesNormalizedOutboundModel(t *
 	case <-time.After(5 * time.Second):
 		t.Fatal("warm turn was not captured upstream")
 	}
-	env.account.Type = service.AccountTypeOAuth
+	oauthAccount := cloneOpenAIWSRegressionAccount(env.account)
+	oauthAccount.Type = service.AccountTypeOAuth
+	env.replaceAccount(oauthAccount)
 
 	clientConn := env.dial(t)
 	defer func() { _ = clientConn.CloseNow() }()
@@ -2064,7 +2066,6 @@ func TestOpenAIResponsesWebSocketPassthroughFailedUsageUsesActualFirstFrameModel
 	env := newOpenAIWSRegressionEnv(t, cache, openAIWSRegressionEnvOptions{
 		UpstreamError:               true,
 		Passthrough:                 true,
-		DisableFailover:             true,
 		CaptureFirstUpstreamMessage: true,
 		UsageLogRepo:                usageRepo,
 		ChannelModelMapping:         map[string]string{"gpt-client": "gpt-channel"},
@@ -2106,7 +2107,6 @@ func TestOpenAIResponsesWebSocketPassthroughFailedUsageUsesSessionUpdatedModel(t
 		UpstreamErrorOnTurn:     2,
 		KeepUpstreamOpenOnError: true,
 		Passthrough:             true,
-		DisableFailover:         true,
 		CaptureUpstreamMessages: true,
 		UsageLogRepo:            usageRepo,
 	})
@@ -2239,6 +2239,9 @@ func TestOpenAIResponsesWebSocketClosesOnCompositeResolverError(t *testing.T) {
 }
 
 func (e *openAIWSRegressionEnv) Close() {
+	if e.gatewayService != nil {
+		e.gatewayService.CloseOpenAIWSPool()
+	}
 	if e.upstream != nil {
 		e.upstream.Close()
 	}
@@ -2251,6 +2254,19 @@ func (e *openAIWSRegressionEnv) replaceAccount(account *service.Account) {
 	e.t.Helper()
 	e.account = account
 	e.accountRepo.account = account
+}
+
+func cloneOpenAIWSRegressionAccount(account *service.Account) *service.Account {
+	clone := *account
+	clone.Credentials = make(map[string]any, len(account.Credentials))
+	for key, value := range account.Credentials {
+		clone.Credentials[key] = value
+	}
+	clone.Extra = make(map[string]any, len(account.Extra))
+	for key, value := range account.Extra {
+		clone.Extra[key] = value
+	}
+	return &clone
 }
 
 func (e *openAIWSRegressionEnv) RunFirstTurnExpectClose(t *testing.T, closeCode coderws.StatusCode) {
