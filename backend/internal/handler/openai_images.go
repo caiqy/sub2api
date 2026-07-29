@@ -136,7 +136,6 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			return
 		}
 	}
-	body = nil
 
 	if isMultipartImagesContentType(c.GetHeader("Content-Type")) {
 		setOpsRequestContext(c, "", false)
