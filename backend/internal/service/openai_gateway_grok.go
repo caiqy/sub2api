@@ -106,6 +106,7 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 		if buildErr != nil {
 			return nil, buildErr
 		}
+		publishOpenAIFinalUpstreamModel(c, upstreamReq)
 
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
@@ -1086,7 +1087,7 @@ func buildGrokResponsesRequest(ctx context.Context, c *gin.Context, account *Acc
 	account.ApplyHeaderOverrides(req.Header)
 	preview := RequestBodyPreviewString(body)
 	SetUsageUpstreamRequest(c, req, preview)
-	return req, nil
+	return withOpenAIFinalUpstreamModel(req, body), nil
 }
 
 // applyGrokCLIHeaders identifies subscription traffic as a supported Grok CLI

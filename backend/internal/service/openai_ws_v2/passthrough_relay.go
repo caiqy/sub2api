@@ -649,6 +649,10 @@ func runUpstreamToClient(
 				WroteDownstream: wroteDownstream,
 			})
 			if observedEvent.terminal {
+				emitTurnComplete(onTurnComplete, state, observedEvent)
+				if observedEvent.completedActiveTurn && releaseTurn != nil {
+					releaseTurn()
+				}
 				exitCh <- relayExitSignal{
 					stage:           "drain_terminal",
 					graceful:        true,

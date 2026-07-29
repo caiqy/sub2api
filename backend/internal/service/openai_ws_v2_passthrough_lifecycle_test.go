@@ -119,6 +119,74 @@ func TestPassthroughLifecycle_FirstWriteFailureCallsAfterTurnOnce(t *testing.T) 
 	require.Equal(t, 1, called)
 }
 
+func TestPassthroughLifecycle_ClientDisconnectDrainsSecondTurnCompletionOnce(t *testing.T) {
+	upstream := newStagedPassthroughConn()
+	type completion struct {
+		turn   int
+		result *OpenAIForwardResult
+		err    error
+	}
+	completed := make(chan completion, 3)
+	server, serverErr := startPassthroughLifecycleServer(t, context.Background(), newPassthroughLifecycleService(passthroughLifecycleConfig(), upstream), passthroughLifecycleAccount(), &OpenAIWSIngressHooks{
+		AfterTurn: func(turn int, result *OpenAIForwardResult, err error) {
+			completed <- completion{turn: turn, result: result, err: err}
+		},
+	})
+	defer server.Close()
+	client := dialPassthroughLifecycleClient(t, server)
+	defer func() { _ = client.CloseNow() }()
+
+	require.Equal(t, "gpt-5.1", gjson.GetBytes(requirePassthroughUpstreamWrite(t, upstream, time.Second), "model").String())
+	upstream.Send(`{"type":"response.created","response":{"id":"resp_first","model":"gpt-5.1"}}`)
+	upstream.Send(`{"type":"response.completed","response":{"id":"resp_first","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`)
+	_, err := readPassthroughLifecycleFrame(t, client, time.Second)
+	require.NoError(t, err)
+	_, err = readPassthroughLifecycleFrame(t, client, time.Second)
+	require.NoError(t, err)
+	var first completion
+	select {
+	case first = <-completed:
+	case <-time.After(time.Second):
+		t.Fatal("first passthrough turn did not complete")
+	}
+	require.NoError(t, first.err)
+	require.Equal(t, 1, first.turn)
+	require.Equal(t, "resp_first", first.result.RequestID)
+
+	writeCtx, cancelWrite := context.WithTimeout(context.Background(), time.Second)
+	err = client.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","previous_response_id":"resp_first"}`))
+	cancelWrite()
+	require.NoError(t, err)
+	require.Equal(t, "resp_first", gjson.GetBytes(requirePassthroughUpstreamWrite(t, upstream, time.Second), "previous_response_id").String())
+	upstream.Send(`{"type":"response.created","response":{"id":"resp_second","model":"gpt-5.1"}}`)
+	_, err = readPassthroughLifecycleFrame(t, client, time.Second)
+	require.NoError(t, err)
+	require.NoError(t, client.CloseNow())
+	time.Sleep(50 * time.Millisecond)
+	upstream.Send(`{"type":"response.completed","response":{"id":"resp_second","model":"gpt-5.1","usage":{"input_tokens":2,"output_tokens":3}}}`)
+
+	var second completion
+	select {
+	case second = <-completed:
+	case <-time.After(time.Second):
+		t.Fatal("drained second passthrough turn did not complete")
+	}
+	require.NoError(t, second.err)
+	require.Equal(t, 2, second.turn)
+	require.Equal(t, "resp_second", second.result.RequestID)
+	require.Equal(t, 2, second.result.Usage.InputTokens)
+	require.Equal(t, 3, second.result.Usage.OutputTokens)
+	select {
+	case extra := <-completed:
+		t.Fatalf("unexpected duplicate completion: turn=%d err=%v", extra.turn, extra.err)
+	case err := <-serverErr:
+		require.NoError(t, err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("passthrough drain did not return")
+	}
+	require.Empty(t, completed)
+}
+
 func (c *stagedPassthroughConn) Close() error {
 	c.closeOnce.Do(func() { close(c.closed) })
 	return nil

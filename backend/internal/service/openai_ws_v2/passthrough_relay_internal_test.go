@@ -193,6 +193,8 @@ func TestRunUpstreamToClient_ErrorAndDropPaths(t *testing.T) {
 		drop := &atomic.Bool{}
 		drop.Store(true)
 		dropped := &atomic.Int64{}
+		completed := make(chan RelayTurnResult, 1)
+		released := &atomic.Int64{}
 		runUpstreamToClient(
 			context.Background(),
 			newPassthroughTestFrameConn([]passthroughTestFrame{
@@ -207,7 +209,7 @@ func TestRunUpstreamToClient_ErrorAndDropPaths(t *testing.T) {
 			time.Now,
 			&relayState{activeTurn: &relayTurnTiming{startAt: time.Now()}},
 			nil,
-			nil,
+			func(turn RelayTurnResult) { completed <- turn },
 			nil,
 			nil,
 			nil,
@@ -219,12 +221,22 @@ func TestRunUpstreamToClient_ErrorAndDropPaths(t *testing.T) {
 			nil,
 			exitCh,
 			nil,
-			nil,
+			func() { released.Add(1) },
 		)
 		sig := <-exitCh
 		require.Equal(t, "drain_terminal", sig.stage)
 		require.True(t, sig.graceful)
 		require.Equal(t, int64(2), dropped.Load())
+		var turn RelayTurnResult
+		select {
+		case turn = <-completed:
+		case <-time.After(time.Second):
+			t.Fatal("dropped terminal did not complete the active turn")
+		}
+		require.Equal(t, "resp_drop", turn.RequestID)
+		require.Equal(t, 1, turn.Usage.InputTokens)
+		require.Equal(t, 1, turn.Usage.OutputTokens)
+		require.Equal(t, int64(1), released.Load())
 	})
 }
 

@@ -1628,6 +1628,73 @@ func TestOpenAIGatewayHandler_ResponsesFailedUsageUsesFinalOutboundModel(t *test
 	require.Equal(t, gjson.GetBytes(httpUpstream.requestBody, "model").String(), *log.UpstreamModel)
 }
 
+func TestOpenAIGatewayHandler_GrokResponsesFailedUsageUsesFinalOutboundModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{
+		RunMode:     config.RunModeSimple,
+		Default:     config.DefaultConfig{RateMultiplier: 1},
+		Gateway:     config.GatewayConfig{MaxAccountSwitches: 0, Scheduling: config.GatewaySchedulingConfig{LoadBatchEnabled: false}},
+		Concurrency: config.ConcurrencyConfig{PingInterval: 0},
+	}
+	groupID := int64(2)
+	group := &service.Group{ID: groupID, Platform: service.PlatformGrok, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{
+		ID: 12, Name: "grok-test-account", Platform: service.PlatformGrok, Type: service.AccountTypeAPIKey,
+		Status: service.StatusActive, Schedulable: true, Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":             "xai-test",
+			"openai_capabilities": []any{"chat_completions"},
+			"model_mapping":       map[string]any{"grok-client": "grok-account-routing", "grok-channel": "grok-4.3"},
+		},
+		Extra: map[string]any{"use_responses_api": true},
+	}
+	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 2)}
+	httpUpstream := &openAIChatCompletionsHTTPUpstreamStub{response: &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Header:     http.Header{"Content-Type": []string{"application/json"}, "X-Request-Id": []string{"req_grok_final_model"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"rate_limit_error","message":"grok overloaded"}}`)),
+	}}
+	accountRepo := &terminalUsageGrokAccountRepo{openAIRetryAccountRepoStub{accounts: []*service.Account{account}}}
+	concurrencyService := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
+	billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(func() { billingCacheService.Stop() })
+	channelService := service.NewChannelService(openAIFailedUsageChannelRepoStub{
+		channel: service.Channel{
+			ID: 22, Status: service.StatusActive, GroupIDs: []int64{groupID},
+			ModelMapping: map[string]map[string]string{service.PlatformGrok: {"grok-client": "grok-channel"}},
+		},
+		groupPlatforms: map[int64]string{groupID: service.PlatformGrok},
+	}, nil, nil, nil)
+	gatewayService := service.NewOpenAIGatewayService(
+		accountRepo, usageRepo, nil, nil, nil, nil, openAIChatCompletionsGatewayCacheStub{}, cfg, nil,
+		concurrencyService, service.NewBillingService(cfg, nil), nil, billingCacheService, httpUpstream,
+		service.NewDeferredService(accountRepo, nil, 0), nil, service.NewGrokTokenProvider(accountRepo, nil), channelService, nil,
+	)
+	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
+	apiKey := &service.APIKey{ID: 101, UserID: 202, Status: service.StatusActive, GroupID: &groupID, User: &service.User{ID: 202, Status: service.StatusActive, Concurrency: 1}, Group: group}
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.UserID, Concurrency: apiKey.User.Concurrency})
+		c.Next()
+	})
+	router.Use(middleware.UsageDetailCapture())
+	router.POST("/v1/responses", h.Responses)
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"grok-client","stream":false,"input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, req)
+
+	require.GreaterOrEqual(t, recorder.Code, http.StatusBadRequest)
+	require.Equal(t, "grok-4.3", gjson.GetBytes(httpUpstream.requestBody, "model").String())
+	log := waitForOpenAIFailedUsageLog(t, usageRepo)
+	require.NotNil(t, log)
+	require.NotNil(t, log.UpstreamModel)
+	require.Equal(t, gjson.GetBytes(httpUpstream.requestBody, "model").String(), *log.UpstreamModel)
+	require.Len(t, usageRepo.created, 1, "failed attempt must create exactly one usage log")
+}
+
 func TestOpenAIGatewayHandler_Responses429FastStopCreatesUsageLog(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
