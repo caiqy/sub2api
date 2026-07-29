@@ -1544,6 +1544,7 @@ type openAIWSRegressionEnvOptions struct {
 	SkipUpstream                bool
 	UpstreamError               bool
 	UpstreamErrorCode           string
+	UpstreamCreatedBeforeError  bool
 	UpstreamErrorOnTurn         int
 	UpstreamDisconnectOnTurn    int
 	KeepUpstreamOpenOnError     bool
@@ -1671,7 +1672,7 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 					return
 				}
 				upstreamErrorsThisTurn := opts.UpstreamError && (opts.UpstreamErrorOnTurn == 0 || opts.UpstreamErrorOnTurn == turn)
-				if opts.Passthrough && !upstreamErrorsThisTurn {
+				if opts.Passthrough && (!upstreamErrorsThisTurn || opts.UpstreamCreatedBeforeError) {
 					writeCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 					err = conn.Write(writeCtx, coderws.MessageText, []byte(fmt.Sprintf(`{"type":"response.created","response":{"id":"resp_ingress_turn_%d","model":"gpt-5.1","status":"in_progress"}}`, turn)))
 					cancel()
@@ -2142,6 +2143,33 @@ func TestOpenAIResponsesWebSocketPassthroughNonRateLimitErrorRecordsFailedUsage(
 	case duplicate := <-usageRepo.created:
 		t.Fatalf("duplicate failed usage log: %+v", duplicate)
 	default:
+	}
+}
+
+func TestOpenAIResponsesWebSocketPassthroughPartialFirstErrorRecordsFailedUsage(t *testing.T) {
+	cache := &concurrencyCacheMock{
+		acquireUserSlotFn:      func(context.Context, int64, int, string) (bool, error) { return true, nil },
+		acquireUserGroupSlotFn: func(context.Context, int64, int64, int, string) (bool, error) { return true, nil },
+		acquireAccountSlotFn:   func(context.Context, int64, int, string) (bool, error) { return true, nil },
+	}
+	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
+	env := newOpenAIWSRegressionEnv(t, cache, openAIWSRegressionEnvOptions{UpstreamError: true, UpstreamErrorCode: "server_error", UpstreamCreatedBeforeError: true, Passthrough: true, CaptureFirstUpstreamMessage: true, UsageLogRepo: usageRepo})
+	defer env.Close()
+	env.apiKey.Group.Platform = service.PlatformOpenAI
+	env.apiKey.Group.Status = service.StatusActive
+	env.apiKey.Group.Hydrated = true
+	clientConn := env.dial(t)
+	defer func() { _ = clientConn.CloseNow() }()
+	env.writeMessage(t, clientConn, `{"type":"response.create","model":"gpt-client","stream":false}`)
+	require.Equal(t, "response.created", gjson.GetBytes(env.readMessage(t, clientConn), "type").String())
+	env.readCloseError(t, clientConn, coderws.StatusInternalError)
+	env.waitRequestDone(t)
+	select {
+	case log := <-usageRepo.created:
+		require.NotNil(t, log.UpstreamModel)
+		require.Equal(t, "gpt-client", *log.UpstreamModel)
+	case <-time.After(5 * time.Second):
+		t.Fatal("partial first-turn failed usage was not recorded")
 	}
 }
 
