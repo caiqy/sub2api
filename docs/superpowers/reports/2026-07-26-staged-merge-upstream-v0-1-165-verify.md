@@ -5,10 +5,10 @@
 - 状态：`DONE_WITH_CONCERNS`。
 - 分支：`feature/20260726/staged-merge-upstream-v0-1-165`。
 - Task 27 起始 HEAD：`8c3b281f7f9e08a9f2d776f4241a922f7a85bff8`。
-- 最终 source/test HEAD：`90b0089010c77d0fef1790e2e8cf3b675d4994cd`。
+- 最终 source/test HEAD：`417bbcc6a44c35b3e3ed16efb0bb86a4717401c9`。
 - 最终版本：`0.1.165.1`。
-- 本轮发现并提交四个修复：`aff04f9cd` 仅格式化两个 WebSocket ownership 路径；`1cc41c72c` 避免 content moderation 未配置时构造完整 Images moderation payload，并使 OAuth retention fixture 的 started 信号可重入；`6c88f1891` 避免 content moderation 与 security audit 均未配置时仍构造完整 Images audit payload；`90b008901` 以一个 memoized lazy body 统一 Images 的 prompt/legacy security audit，消除生产形态重复 legacy 调用。
-- 最终 source/test HEAD 的生产形态 TDD、完整 backend constituent/package、frontend constituent、版本化 Windows build、两轮 Ent/Wire generate、静态检查和远程 integration 均有零退出证据。该 source 上原样 `make test` 的真实结果是 exit `2`，唯一失败为既有 lease-loss close-frame 竞态中的客户端 EOF；用户接受该精确 EOF/服务端 1013 上游基线例外，但非零命令不记为 PASS。此前所有 `make test` 非零、首次 SSH preflight 本机解析失败及一次 remote ENOSPC 也继续保留。
+- 本轮发现并提交五个修复：`aff04f9cd` 仅格式化两个 WebSocket ownership 路径；`1cc41c72c` 避免 content moderation 未配置时构造完整 Images moderation payload，并使 OAuth retention fixture 的 started 信号可重入；`6c88f1891` 避免 content moderation 与 security audit 均未配置时仍构造完整 Images audit payload；`90b008901` 以一个 memoized lazy body 统一 Images 的 prompt/legacy security audit，消除生产形态重复 legacy 调用；`417bbcc6a` 为 blocking prompt/legacy goroutine 分别复制 `Request`，消除共享 `req.Body` 数据竞争并补充 lazy provider 生命周期契约。
+- 最终 source/test HEAD 的 Linux race GREEN、完整原样 `make test`、版本化 Windows build、两轮 Ent/Wire generate、静态检查和全新 nonce 远程 integration 均 exit `0`；最终 Vitest 为 215 files / 1626 tests，integration 为 FAIL `0`、migration `2/2`、13 skips。此前 source `90b008901` 的原样 `make test` EOF/1013 非零、首次 SSH preflight 本机解析失败、remote ENOSPC、race `-count=1` 未命中及放大后 DATA RACE RED 均继续保留，不改写为 PASS。
 - Task 28 完整 ancestry/六个 merge 第二父验证、Task 29 浏览器烟测/OpenSpec 收口均未执行，本报告不声称这些任务完成。
 
 ## 起始状态
@@ -391,6 +391,147 @@ python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu;
 - 日志共有 13 个 `--- SKIP:`（12 top-level + 1 nested）：DingTalk Task 1.10 sentinel；未设置 `TLSFINGERPRINT_CAPTURE_URL`；既有 CI `CurrentConcurrency` TODO；3 个未设置 `PROMPT_AUDIT_TEST_REDIS_ADDR` 的 Redis fixture；6 个未设置 `PROMPT_AUDIT_TEST_POSTGRES_DSN` 的 PostgreSQL fixture；未设置外部 `OPENAI_API_KEY` 的 token comparison。均未命中 required migration targets 或 Task 27 受影响面。
 - 未 Docker prune、未构建 Sub2API 镜像、未部署，未接触服务运行目录、生产数据库或 Redis；Testcontainers 只使用既有测试镜像。
 
+## Blocking audit race 修复与最终 source `417bbcc6a`
+
+### gcc 授权安装
+
+用户明确授权在 `local-serv-ai` 安装 gcc，仅允许 gcc 及包管理器自动解析的必要依赖。安装前只读命令：
+
+```text
+python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu; cat /etc/os-release; echo package_managers; command -v dnf || true; command -v yum || true; command -v apt-get || true; echo gcc_status; rpm -q gcc || true; command -v gcc || true; echo package_processes; ps -C dnf,yum,rpm,apt,apt-get,dpkg -o pid=,comm=,args= || true; echo lock_holders; if command -v fuser >/dev/null 2>&1; then fuser /var/run/dnf.pid /var/cache/dnf/metadata_lock.pid /var/lib/rpm/.rpm.lock /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend 2>/dev/null || true; else echo fuser=missing; fi; echo readonly_preflight=ok" --timeout 120
+```
+
+- JSON `success=true, exit_code=0`；系统为 Rocky Linux `9.7 (Blue Onyx)`，`dnf`/`yum` 可用，gcc 未安装；没有并发 dnf/yum/rpm/apt/dpkg 进程或 lock holder。
+
+安装精确命令：
+
+```text
+python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu; dnf install -y gcc" --timeout 600
+```
+
+- JSON `success=true, exit_code=0`。dnf 安装 12 个包：`gcc`、`cpp`、`glibc-devel`、`glibc-headers`、`kernel-headers`、`libmpc`、`libpkgconf`、`libxcrypt-devel`、`make`、`pkgconf`、`pkgconf-m4`、`pkgconf-pkg-config`；并按依赖求解升级 6 个既有包：`glibc`、`glibc-common`、`glibc-gconv-extra`、`glibc-langpack-en`、`libgcc`、`libgomp`。未安装开发工具组，未改 Go/Docker/服务/生产数据，完成后按授权保留 gcc。
+
+安装后验证：
+
+```text
+python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu; gcc --version; rpm -q gcc; CGO_ENABLED=1 CC=gcc go env CGO_ENABLED CC; echo gcc_ready=ok" --timeout 120
+```
+
+- JSON `success=true, exit_code=0`；gcc 为 `11.5.0-14.el9.x86_64`，显式 Go 环境输出 `CGO_ENABLED=1`、`CC=gcc`。
+
+### 固定 source `90b008901` race RED
+
+- stage `race-red`；nonce `714d12f8d8004666ac19f8e95fea6b1e`；唯一 remote 目录 `/tmp/sub2api-race-red-714d12f8d8004666ac19f8e95fea6b1e`。
+
+```text
+git archive --format=tar --output="C:/Users/caiqy/AppData/Local/Temp/opencode/sub2api-race-red-714d12f8d8004666ac19f8e95fea6b1e.tar" 90b0089010c77d0fef1790e2e8cf3b675d4994cd
+python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu; test ! -e /tmp/sub2api-race-red-714d12f8d8004666ac19f8e95fea6b1e; mkdir -m 700 /tmp/sub2api-race-red-714d12f8d8004666ac19f8e95fea6b1e; go version; gcc --version | head -n 1; df -hT / /tmp; echo preflight=ok" --timeout 120
+$env:MSYS_NO_PATHCONV = "1"; python ~/.claude/skills/ssh-skill/scripts/ssh_upload.py local-serv-ai "C:/Users/caiqy/AppData/Local/Temp/opencode/sub2api-race-red-714d12f8d8004666ac19f8e95fea6b1e.tar" "/tmp/sub2api-race-red-714d12f8d8004666ac19f8e95fea6b1e/source.tar" --no-progress
+python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu; cd /tmp/sub2api-race-red-714d12f8d8004666ac19f8e95fea6b1e; sha256sum source.tar; mkdir src; tar -xf source.tar -C src; rm -f source.tar; rm -rf src/backend/.test-tmp; mkdir -p src/backend/.test-tmp; echo setup=ok" --timeout 300
+```
+
+- 四条均 exit `0`；archive size `53,770,240` bytes，local/remote SHA-256 均为 `f7121a186eafd3f80e86f52ea02f264bf7b945559d24757ea9df0be87e0743b8`；Go `1.26.5 linux/amd64`、gcc `11.5.0`。
+
+首次按指定 count 执行：
+
+```text
+python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu; cd /tmp/sub2api-race-red-714d12f8d8004666ac19f8e95fea6b1e/src/backend; CGO_ENABLED=1 CC=gcc TMPDIR='/tmp/sub2api-race-red-714d12f8d8004666ac19f8e95fea6b1e/src/backend/.test-tmp' TMP='/tmp/sub2api-race-red-714d12f8d8004666ac19f8e95fea6b1e/src/backend/.test-tmp' TEMP='/tmp/sub2api-race-red-714d12f8d8004666ac19f8e95fea6b1e/src/backend/.test-tmp' go test -race ./internal/securityaudit -run '^TestCoordinatorCheckLazyEvaluatesBodyOnceAcrossPromptAndLegacy$' -count=1 > '/tmp/sub2api-race-red-714d12f8d8004666ac19f8e95fea6b1e/race-red.log' 2>&1" --timeout 900
+```
+
+- JSON `success=true, exit_code=0`；该次调度未命中 race，日志为 package `ok`。日志下载成功，size `63` bytes，SHA-256 `a74e7876cb44f4b5478de2b4f2b8fa2e5fcb5be1e3f2fada0dfd06483efe2cbd`；不作为 RED。
+- 按原任务允许的调度放大只提高 count，不改源码或测试：
+
+```text
+python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu; cd /tmp/sub2api-race-red-714d12f8d8004666ac19f8e95fea6b1e/src/backend; CGO_ENABLED=1 CC=gcc TMPDIR='/tmp/sub2api-race-red-714d12f8d8004666ac19f8e95fea6b1e/src/backend/.test-tmp' TMP='/tmp/sub2api-race-red-714d12f8d8004666ac19f8e95fea6b1e/src/backend/.test-tmp' TEMP='/tmp/sub2api-race-red-714d12f8d8004666ac19f8e95fea6b1e/src/backend/.test-tmp' go test -race ./internal/securityaudit -run '^TestCoordinatorCheckLazyEvaluatesBodyOnceAcrossPromptAndLegacy$' -count=100 > '/tmp/sub2api-race-red-714d12f8d8004666ac19f8e95fea6b1e/race-red-count100.log' 2>&1" --timeout 900
+```
+
+- JSON `success=false, exit_code=1`；下载的 RED log size `2,528` bytes，SHA-256 `9ae589906c64c1656a386940e88420dc27ea92e6ccc3b993c594a6797b51a698`。日志明确包含 `WARNING: DATA RACE`：goroutine 35 在 `coordinator.go:82` 读取共享 `req`，goroutine 36 在 `coordinator.go:90` 写 `req.Body`，随后 `race detected during execution of test` 与 package `FAIL`。这证明 `sync.Once` 只保护 provider，未保护闭包共享的 `Request`。
+- 两份日志均通过 `ssh_download.py --no-progress` 下载。cleanup 使用：
+
+```text
+python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu; rm -rf /tmp/sub2api-race-red-714d12f8d8004666ac19f8e95fea6b1e; test ! -e /tmp/sub2api-race-red-714d12f8d8004666ac19f8e95fea6b1e; echo cleanup=ok" --timeout 120
+```
+
+- JSON `success=true, exit_code=0`；local archive 删除后不存在，下载日志保留。
+
+### 最小修复、source commit 与 race GREEN
+
+- `backend/internal/securityaudit/coordinator.go` 是唯一源码改动：两个 blocking goroutine 通过值参数各自取得独立 `Request`；`lazyLegacyEngine` 与 `Coordinator.CheckLazy` 注释明确 provider 只能在当前同步调用返回前求值且不得保留，Async 在 clone 入队前冻结。未修改测试或新增抽象。
+
+```text
+go test ./internal/securityaudit -run '^TestCoordinatorCheckLazyEvaluatesBodyOnceAcrossPromptAndLegacy$' -count=1 -v
+go test ./internal/securityaudit -count=1
+golangci-lint run ./internal/securityaudit/...
+```
+
+- 在 `backend/` 执行，三条均 exit `0`；lint 为 `0 issues.`。source commit 为 `417bbcc6a44c35b3e3ed16efb0bb86a4717401c9`（`fix: isolate blocking audit requests`），提交仅包含 `coordinator.go`，未 amend。
+- stage `race-green`；nonce `3fef3c36ca644830b8d76e740b6a3e8e`；唯一 remote 目录 `/tmp/sub2api-race-green-3fef3c36ca644830b8d76e740b6a3e8e`。
+
+```text
+git archive --format=tar --output="C:/Users/caiqy/AppData/Local/Temp/opencode/sub2api-race-green-3fef3c36ca644830b8d76e740b6a3e8e.tar" 417bbcc6a44c35b3e3ed16efb0bb86a4717401c9
+python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu; test ! -e /tmp/sub2api-race-green-3fef3c36ca644830b8d76e740b6a3e8e; mkdir -m 700 /tmp/sub2api-race-green-3fef3c36ca644830b8d76e740b6a3e8e; go version; gcc --version | head -n 1; df -hT / /tmp; echo preflight=ok" --timeout 120
+$env:MSYS_NO_PATHCONV = "1"; python ~/.claude/skills/ssh-skill/scripts/ssh_upload.py local-serv-ai "C:/Users/caiqy/AppData/Local/Temp/opencode/sub2api-race-green-3fef3c36ca644830b8d76e740b6a3e8e.tar" "/tmp/sub2api-race-green-3fef3c36ca644830b8d76e740b6a3e8e/source.tar" --no-progress
+python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu; cd /tmp/sub2api-race-green-3fef3c36ca644830b8d76e740b6a3e8e; sha256sum source.tar; mkdir src; tar -xf source.tar -C src; rm -f source.tar; rm -rf src/backend/.test-tmp; mkdir -p src/backend/.test-tmp; echo setup=ok" --timeout 300
+python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu; cd /tmp/sub2api-race-green-3fef3c36ca644830b8d76e740b6a3e8e/src/backend; CGO_ENABLED=1 CC=gcc TMPDIR='/tmp/sub2api-race-green-3fef3c36ca644830b8d76e740b6a3e8e/src/backend/.test-tmp' TMP='/tmp/sub2api-race-green-3fef3c36ca644830b8d76e740b6a3e8e/src/backend/.test-tmp' TEMP='/tmp/sub2api-race-green-3fef3c36ca644830b8d76e740b6a3e8e/src/backend/.test-tmp' go test -race ./internal/securityaudit -run '^TestCoordinatorCheckLazyEvaluatesBodyOnceAcrossPromptAndLegacy$' -count=10 > '/tmp/sub2api-race-green-3fef3c36ca644830b8d76e740b6a3e8e/race-green.log' 2>&1" --timeout 900
+```
+
+- 五条均 exit `0`；archive size `53,780,480` bytes，local/remote SHA-256 均为 `3fc7a336e443034f458356131f732b17fe687f6dc7bc2b5e0201250655996f57`。GREEN log 通过 `ssh_download.py` 下载，size `63` bytes，SHA-256 `7a84320668e3fab9a53ddf4d3d5b74ac1caf4b7813aff5512b4f775383a9b50f`；package `ok`，`DATA RACE` count `0`。
+
+```text
+python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu; rm -rf /tmp/sub2api-race-green-3fef3c36ca644830b8d76e740b6a3e8e; test ! -e /tmp/sub2api-race-green-3fef3c36ca644830b8d76e740b6a3e8e; echo cleanup=ok" --timeout 120
+```
+
+- cleanup exit `0`；local archive 不存在，GREEN log 保留。
+
+### 最终本地门禁
+
+```text
+make test
+```
+
+- 在 source `417bbcc6a44c35b3e3ed16efb0bb86a4717401c9` 上原样只执行一次，exit `0`，未重跑。default handler/service 为 `61.929s`/`105.348s`，unit handler/service 为 `96.644s`/`158.958s`，两轮 securityaudit package 均通过；`golangci-lint run ./...` 为 `0 issues.`；frontend lint/typecheck 通过，Vitest 为 `215/215 files`、`1626/1626 tests`、duration `73.51s`。完整输出位于 `C:/Users/caiqy/.local/share/opencode/tool-output/tool_fb15b8185001iS8b5UJLS60oFN`。本次无需使用获准的 EOF/1013 例外。
+
+```text
+make "VERSION=0.1.165.1" "SHELL=D:/scoop/shims/bash.exe" build
+```
+
+- exit `0`；backend ldflags 含 `-X main.Version=0.1.165.1`，frontend Vite 处理 `1019` modules。VERSION 文件/二进制字符串均为 `0.1.165.1`；`go version -m backend/bin/server` 为 Go `1.26.5`、`vcs.revision=417bbcc6a44c35b3e3ed16efb0bb86a4717401c9`。`vcs.modified=true` 来自明确排除的 dirty reports/config。
+
+detached generate 精确步骤：
+
+```text
+git worktree add --detach "C:/Users/caiqy/AppData/Local/Temp/opencode/sub2api-task27-generate-417bbcc6a" 417bbcc6a44c35b3e3ed16efb0bb86a4717401c9
+make -C backend generate
+git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
+make -C backend generate
+git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
+git status --short
+git worktree remove "C:/Users/caiqy/AppData/Local/Temp/opencode/sub2api-task27-generate-417bbcc6a"
+```
+
+- 全部 exit `0`；两轮 Ent/Wire diff 与 worktree status 均为空，移除后 `worktree_exists=False`，worktree 列表只剩主树。
+- static：`git diff --check` exit `0`，仅有三个保留文件的 LF/CRLF warning；unmerged diff/index、tracked conflict marker、legacy first-token count 均为 `0`；VERSION `0.1.165.1`；14 个 protected migrations 全存在、missing `0`。`opencode.json` 的用户 CodeGraph/ddg-search diff原样保留且未暂存。
+
+### 最终 remote integration
+
+- stage `final-verify`；nonce `936ea72e3c4140ca930f88d07e0f34a5`；唯一 remote 目录 `/tmp/sub2api-final-verify-936ea72e3c4140ca930f88d07e0f34a5`。
+
+```text
+git archive --format=tar --output="C:/Users/caiqy/AppData/Local/Temp/opencode/sub2api-final-verify-936ea72e3c4140ca930f88d07e0f34a5.tar" 417bbcc6a44c35b3e3ed16efb0bb86a4717401c9
+python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu; test ! -e /tmp/sub2api-final-verify-936ea72e3c4140ca930f88d07e0f34a5; mkdir -m 700 /tmp/sub2api-final-verify-936ea72e3c4140ca930f88d07e0f34a5; go version; gcc --version | head -n 1; docker version; docker info >/dev/null; df -hT / /tmp /var/tmp; df -i / /tmp /var/tmp; echo preflight=ok" --timeout 120
+$env:MSYS_NO_PATHCONV = "1"; python ~/.claude/skills/ssh-skill/scripts/ssh_upload.py local-serv-ai "C:/Users/caiqy/AppData/Local/Temp/opencode/sub2api-final-verify-936ea72e3c4140ca930f88d07e0f34a5.tar" "/tmp/sub2api-final-verify-936ea72e3c4140ca930f88d07e0f34a5/source.tar" --no-progress
+python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu; cd /tmp/sub2api-final-verify-936ea72e3c4140ca930f88d07e0f34a5; sha256sum source.tar; mkdir src; tar -xf source.tar -C src; rm -f source.tar; rm -rf src/backend/.test-tmp; mkdir -p src/backend/.test-tmp; test -d src/backend/.test-tmp; echo setup=ok" --timeout 300
+python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu; cd /tmp/sub2api-final-verify-936ea72e3c4140ca930f88d07e0f34a5/src/backend; CI=true GOFLAGS='-v' TMPDIR='/tmp/sub2api-final-verify-936ea72e3c4140ca930f88d07e0f34a5/src/backend/.test-tmp' TMP='/tmp/sub2api-final-verify-936ea72e3c4140ca930f88d07e0f34a5/src/backend/.test-tmp' TEMP='/tmp/sub2api-final-verify-936ea72e3c4140ca930f88d07e0f34a5/src/backend/.test-tmp' go test -tags=integration ./... > '/tmp/sub2api-final-verify-936ea72e3c4140ca930f88d07e0f34a5/integration.log' 2>&1" --timeout 1800
+$env:MSYS_NO_PATHCONV = "1"; python ~/.claude/skills/ssh-skill/scripts/ssh_download.py local-serv-ai "/tmp/sub2api-final-verify-936ea72e3c4140ca930f88d07e0f34a5/integration.log" "C:/Users/caiqy/AppData/Local/Temp/opencode/sub2api-final-verify-936ea72e3c4140ca930f88d07e0f34a5-integration.log" --no-progress
+python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu; df -hT / /tmp /var/tmp; df -i / /tmp /var/tmp; rm -rf /tmp/sub2api-final-verify-936ea72e3c4140ca930f88d07e0f34a5; test ! -e /tmp/sub2api-final-verify-936ea72e3c4140ca930f88d07e0f34a5; echo cleanup=ok" --timeout 120
+```
+
+- 七条均 exit `0`；archive size `53,780,480` bytes，local/remote SHA-256 均为 `3fc7a336e443034f458356131f732b17fe687f6dc7bc2b5e0201250655996f57`。preflight 为 Go `1.26.5`、gcc `11.5.0`、Docker client/server `29.2.1`、`docker info` 成功；根卷起始可用 `12G`、使用率 `66%`、inode `2%`。
+- integration 原样命令未加 `-p`、未重试，JSON `success=true, exit_code=0`。下载日志 size `4,295,249` bytes，SHA-256 `28458502f274803aadd1e427fb7dffbd42eabf4dd61317b4e4bcb0f6cc97f3e9`；`--- FAIL:` count `0`、package `FAIL` count `0`。
+- `TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate` PASS（`4.50s`）；`TestMigrationsRunner_UpgradesLocalV01596AcrossUpstreamStages` PASS（`4.21s`）。源码仍以两个 `require.Len(..., 12)` 固定 upstream list/embedded FS，并覆盖双方 172/181、双 186、190 notx、filename identity、重复 apply count/checksum，形成 migration `2/2` 与 `12/12` 证据。
+- 13 skips（12 top-level + 1 nested）分类不变：DingTalk sentinel、外部 TLS capture、既有 CurrentConcurrency TODO、3 个 prompt-audit Redis fixture、6 个 prompt-audit PostgreSQL fixture、外部 OpenAI token comparison；均不命中 required targets/本轮受影响面。
+- cleanup JSON `success=true, exit_code=0`；测试后根卷可用 `11G`、使用率 `70%`、inode `2%`。remote 目录和 local tar 均不存在，integration log 保留。未 Docker prune、未构建 Sub2API 镜像、未部署或访问服务/生产数据。
+
 ## 未执行项与残余风险
 
 - 未执行 Task 28 完整 ancestry、merge parent 和范围边界验证；本轮静态 migration presence 不能替代 Task 28。
@@ -398,6 +539,6 @@ python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu;
 - 未 push、tag、release、deploy、构建 Sub2API 镜像或触发 workflow。
 - Task 25 遗留：Grok 在 request build 前设置 attempted 标志；client-disconnect drain lifecycle regression 使用固定 `50ms` 排序延迟。当前命名矩阵和完整门禁均通过，但这两项仍是非阻断测试/诊断风险。
 - OAuth Images HeapAlloc 有历史波动；后续统一 lazy audit 修复在生产形态 RED/GREEN、Images 40/40 和完整 unit handler 中均通过。该测试仍使用 process-wide HeapAlloc，因此保留历史敏感性说明，不把先前失败抹除。
-- Windows 当前 `CGO_ENABLED=0` 且无 `gcc`，未运行 `-race`；不声称 race-clean。
-- 流程 concern：所有历史 `make test` 结果均已保留；最终 source/test commit `90b0089010c77d0fef1790e2e8cf3b675d4994cd` 上原样执行 exit `2`，唯一 lease-loss EOF/服务端 1013 竞态由用户接受为上游基线例外，但未记为 PASS。结论依赖同 source 的 backend/frontend constituent/package、build/generate/static 与 remote integration 组合证据。首次 SSH preflight 本机解析失败与第二次 remote ENOSPC 也保持为真实失败历史。
-- 远程环境曾因共享根卷仅余 `1.3G` 在 linker 阶段 ENOSPC；最小 cache 恢复后本次测试峰值结束仍余 `14G`。长期风险是同一 GOCACHE 可再次增长，后续门禁仍应先观察容量，但本轮不追加周期清理或 Docker 处置。
+- Windows 当前仍为 `CGO_ENABLED=0` 且无 gcc，但本轮已在 Linux Go `1.26.5` + gcc `11.5.0` 上取得 source `90b008901` 的 DATA RACE RED，并在最终 source `417bbcc6a` 上完成同一 target `-count=10` race GREEN。
+- 流程 concern：所有历史 `make test` 结果均已保留；source `90b008901` 的原样 exit `2` 仍只按用户批准的 EOF/1013 基线例外接受且未称 PASS。最终 source `417bbcc6a` 的原样 `make test` 是另一次唯一执行并真实 exit `0`；首次 SSH preflight 本机解析失败、remote ENOSPC、race `-count=1` 未命中和 `-count=100` DATA RACE exit `1` 均保持真实历史。
+- gcc 安装由用户明确授权，但 dnf 自动依赖求解除新增 12 个包外还升级了 6 个 glibc/libgcc/libgomp 包；未自动卸载。远程共享根卷历史曾仅余 `1.3G`，本轮 integration cleanup 时可用 `11G`、使用率 `70%`；长期仍有 GOCACHE 增长风险，后续门禁应先观察容量。
