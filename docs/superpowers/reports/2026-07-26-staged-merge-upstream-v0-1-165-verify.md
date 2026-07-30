@@ -5,10 +5,10 @@
 - 状态：`DONE_WITH_CONCERNS`。
 - 分支：`feature/20260726/staged-merge-upstream-v0-1-165`。
 - Task 27 起始 HEAD：`8c3b281f7f9e08a9f2d776f4241a922f7a85bff8`。
-- 最终 source/test HEAD：`6c88f1891650e0ef18b0b5ae105b8f44a069a5a4`。
+- 最终 source/test HEAD：`90b0089010c77d0fef1790e2e8cf3b675d4994cd`。
 - 最终版本：`0.1.165.1`。
-- 本轮发现并提交三个修复：`aff04f9cd` 仅格式化两个 WebSocket ownership 路径；`1cc41c72c` 避免 content moderation 未配置时构造完整 Images moderation payload，并使 OAuth retention fixture 的 started 信号可重入；`6c88f1891` 避免 content moderation 与 security audit 均未配置时仍构造完整 Images audit payload。
-- 聚焦矩阵、最终原样 `make test`、版本化 Windows build、两轮 Ent/Wire generate、静态检查和远程 integration 在最终 source/test HEAD 上均有成功证据。此前三次 `make test` 的真实非零结果、首次 SSH preflight 本机解析失败及一次 remote ENOSPC 均保留，不改写为 PASS。
+- 本轮发现并提交四个修复：`aff04f9cd` 仅格式化两个 WebSocket ownership 路径；`1cc41c72c` 避免 content moderation 未配置时构造完整 Images moderation payload，并使 OAuth retention fixture 的 started 信号可重入；`6c88f1891` 避免 content moderation 与 security audit 均未配置时仍构造完整 Images audit payload；`90b008901` 以一个 memoized lazy body 统一 Images 的 prompt/legacy security audit，消除生产形态重复 legacy 调用。
+- 最终 source/test HEAD 的生产形态 TDD、完整 backend constituent/package、frontend constituent、版本化 Windows build、两轮 Ent/Wire generate、静态检查和远程 integration 均有零退出证据。该 source 上原样 `make test` 的真实结果是 exit `2`，唯一失败为既有 lease-loss close-frame 竞态中的客户端 EOF；用户接受该精确 EOF/服务端 1013 上游基线例外，但非零命令不记为 PASS。此前所有 `make test` 非零、首次 SSH preflight 本机解析失败及一次 remote ENOSPC 也继续保留。
 - Task 28 完整 ancestry/六个 merge 第二父验证、Task 29 浏览器烟测/OpenSpec 收口均未执行，本报告不声称这些任务完成。
 
 ## 起始状态
@@ -270,13 +270,134 @@ CI=true GOFLAGS='-v' TMPDIR='/tmp/sub2api-final-verify-cbfc15a98f5e418e92f2944ef
 - 测试后 `/`、`/tmp`、`/var/tmp` 均为总量 `35G`、已用 `22G`、可用 `14G`、使用率 `62%`，inode 使用率 `2%`；未做额外 Go/Docker 清理。
 - remote cleanup 与 local archive cleanup 均 exit `0`：唯一 remote 目录不存在，local tar 不存在，下载日志保留。所有远程操作仅使用 ssh-skill Python scripts；未使用 raw SSH/SCP。
 
+## 统一审计 source `90b008901` 最终补验
+
+### 生产形态 TDD 与 source commit
+
+- 最终 source/test SHA：`90b0089010c77d0fef1790e2e8cf3b675d4994cd`，提交为 `90b008901 fix: unify image security audit payload`。
+- 三组生产形态 RED 均真实执行：service/coordinator 先因 lazy 接口不存在编译失败；Images 生产注入测试真实得到 legacy 调用次数 `expected 1, actual 2`。未用空断言或仅编译失败替代 Images 行为 RED。
+- 步骤 4 三组 GREEN 均 exit `0`。Images 四 targets `-count=10` 为 40/40 PASS；`go -C backend test ./internal/securityaudit -count=1`、`go -C backend test -tags=unit ./internal/service -count=1`、`go -C backend test -tags=unit ./internal/handler -count=1` 和聚焦 lint 均 exit `0`。
+- 实现保持 eager `Check` wrapper，只新增窄 lazy 入口；coordinator 以 `sync.Once` 让 prompt 与 legacy 共享 frozen body；Images 删除 direct moderation 调用并只走一次统一 security-audit helper。未提高 HeapAlloc ceiling、未增加配置或通用缓存框架。
+
+### 原样 `make test` 非零与 constituent 证据
+
+```text
+make test
+```
+
+- 在 `90b0089010c77d0fef1790e2e8cf3b675d4994cd` 上仅原样执行一次，exit `2`，不得记为 PASS。default Go tests、`golangci-lint run ./...`（`0 issues.`）和 unit handler package 均通过；frontend targets 因 unit service 非零而未启动。
+- 唯一失败为 `TestPassthroughLifecycle_LeaseLossSendsRetryClose`：服务端 trace 明确将 `ErrOpenAIWSIngressLeaseLost` 映射为 close code 1013，客户端断言偶发只读到 `failed to read frame header: EOF`。精确 `-count=10` 诊断 exit `1`，9 PASS/1 同型 EOF，且每次服务端均产生 1013。
+- 用户已明确接受该精确 EOF/服务端 1013 上游基线例外；接受例外不改变两条命令的非零事实，也不把它们写为 PASS。完整输出保存在 `C:/Users/caiqy/.local/share/opencode/tool-output/tool_fb0dc8a92001b12CrNYUOz3RYV`。
+- 同一 source 内容另有完整 unit service package exit `0`、unit handler package exit `0`、default constituent exit `0`、全量 lint exit `0` 的独立证据；因此保留原样 gate 非零，同时不丢失各组成门禁的实际绿色证据。
+
+首次 `make test` 未启动的 frontend constituents 在同一 source HEAD 补执行：
+
+```text
+pnpm --dir frontend run lint:check
+pnpm --dir frontend run typecheck
+pnpm --dir frontend run test:run
+```
+
+- 三条均 exit `0`；Vitest 为 `215 passed` files / `1626 passed` tests，duration `71.55s`。router-link、预期负路径和 intlify 输出均为既有非失败 stderr。
+
+### Windows build、generate 与静态检查
+
+```text
+make "VERSION=0.1.165.1" "SHELL=D:/scoop/shims/bash.exe" build
+```
+
+- exit `0`；backend ldflags 包含 `-X main.Version=0.1.165.1`，Vite 处理 `1019` modules。`backend/cmd/server/VERSION` 和二进制字符串均为 `0.1.165.1`；`go version -m backend/bin/server` 显示 Go `1.26.5`、`vcs.revision=90b0089010c77d0fef1790e2e8cf3b675d4994cd`。
+
+detached worktree 精确命令与结果：
+
+```text
+git worktree prune && git worktree add --detach "C:/Users/caiqy/AppData/Local/Temp/opencode/sub2api-task27-generate-90b008901" 90b0089010c77d0fef1790e2e8cf3b675d4994cd
+make -C backend generate
+git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
+make -C backend generate
+git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
+git status --short
+git worktree remove "C:/Users/caiqy/AppData/Local/Temp/opencode/sub2api-task27-generate-90b008901"
+```
+
+- 全部 exit `0`；两轮 Ent/Wire diff 均无输出，worktree status 为空。`Test-Path` 最终为 `False`，`git worktree list --porcelain` 只剩主树；两个目录已不存在的历史 Task 27 stale metadata 也由 `git worktree prune` 清理。
+- `git diff --check` exit `0`，仅对禁止暂存的 Task 27/Task 4/progress 文件输出 LF/CRLF warning；`git diff --name-only --diff-filter=U` 与 `git ls-files -u` 均 exit `0`、无 unmerged 文件。
+- 精确 tracked conflict marker scan exit `0`、count `0`；Task 26 原样 legacy first-token scan exit `0`、count `0`；VERSION 精确为 `0.1.165.1`。
+- protected migration presence 检查 exit `0`、count `14`，双方 172/181、双 186 和 182-190（含 `190_*_notx.sql`）全部存在。
+- `git diff -- opencode.json` exit `0` 但有输出：用户新增 CodeGraph MCP 与 disabled ddg-search 配置。该文件从起点即 dirty，按契约保留且禁止暂存；未把它误写成无 diff。
+
+### Remote final integration 精确命令
+
+- 已先加载 `ssh-skill`；所有服务器操作仅使用其 Python scripts，alias `local-serv-ai`。stage `final-verify`，新 nonce `547fff8e23a24a92ad566202331ba360`，唯一 remote 目录 `/tmp/sub2api-final-verify-547fff8e23a24a92ad566202331ba360`。
+- local archive `C:/Users/caiqy/AppData/Local/Temp/opencode/sub2api-final-verify-547fff8e23a24a92ad566202331ba360.tar` 只由下列固定 SHA 命令创建：
+
+```text
+git archive --format=tar --output="C:/Users/caiqy/AppData/Local/Temp/opencode/sub2api-final-verify-547fff8e23a24a92ad566202331ba360.tar" 90b0089010c77d0fef1790e2e8cf3b675d4994cd
+```
+
+- exit `0`；size `53,770,240` bytes；local SHA-256 `f7121a186eafd3f80e86f52ea02f264bf7b945559d24757ea9df0be87e0743b8`。
+
+preflight 精确命令：
+
+```text
+python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu; test ! -e /tmp/sub2api-final-verify-547fff8e23a24a92ad566202331ba360; mkdir -m 700 /tmp/sub2api-final-verify-547fff8e23a24a92ad566202331ba360; go version; docker version; docker info >/dev/null; df -hT / /tmp /var/tmp; df -i / /tmp /var/tmp; echo preflight=ok" --timeout 120
+```
+
+- JSON `success=true, exit_code=0, stderr=""`；Go `1.26.5 linux/amd64`，Docker client/server `29.2.1`，`docker info` 成功。根卷总量 `35G`、已用 `21G`、可用 `14G`、使用率 `60%`，inode 使用率 `2%`。
+
+upload 精确命令：
+
+```text
+$env:MSYS_NO_PATHCONV = "1"; python ~/.claude/skills/ssh-skill/scripts/ssh_upload.py local-serv-ai "C:/Users/caiqy/AppData/Local/Temp/opencode/sub2api-final-verify-547fff8e23a24a92ad566202331ba360.tar" "/tmp/sub2api-final-verify-547fff8e23a24a92ad566202331ba360/source.tar" --no-progress
+```
+
+- JSON `success=true, exit_code=0, stderr=""`。
+
+setup 精确命令：
+
+```text
+python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu; cd /tmp/sub2api-final-verify-547fff8e23a24a92ad566202331ba360; sha256sum source.tar; mkdir src; tar -xf source.tar -C src; rm -f source.tar; rm -rf src/backend/.test-tmp; mkdir -p src/backend/.test-tmp; test -d src/backend/.test-tmp; echo setup=ok" --timeout 300
+```
+
+- JSON `success=true, exit_code=0, stderr=""`；remote SHA-256 `f7121a186eafd3f80e86f52ea02f264bf7b945559d24757ea9df0be87e0743b8` 与 local 一致，`.test-tmp` 已删除重建。
+
+integration 精确命令：
+
+```text
+python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu; cd /tmp/sub2api-final-verify-547fff8e23a24a92ad566202331ba360/src/backend; CI=true GOFLAGS='-v' TMPDIR='/tmp/sub2api-final-verify-547fff8e23a24a92ad566202331ba360/src/backend/.test-tmp' TMP='/tmp/sub2api-final-verify-547fff8e23a24a92ad566202331ba360/src/backend/.test-tmp' TEMP='/tmp/sub2api-final-verify-547fff8e23a24a92ad566202331ba360/src/backend/.test-tmp' go test -tags=integration ./... > '/tmp/sub2api-final-verify-547fff8e23a24a92ad566202331ba360/integration.log' 2>&1" --timeout 1800
+```
+
+- JSON `success=true, exit_code=0, stdout="", stderr=""`；未加 `-p`、未重试或改变测试语义。
+
+download 精确命令：
+
+```text
+$env:MSYS_NO_PATHCONV = "1"; python ~/.claude/skills/ssh-skill/scripts/ssh_download.py local-serv-ai "/tmp/sub2api-final-verify-547fff8e23a24a92ad566202331ba360/integration.log" "C:/Users/caiqy/AppData/Local/Temp/opencode/sub2api-final-verify-547fff8e23a24a92ad566202331ba360-integration.log" --no-progress
+```
+
+- JSON `success=true, exit_code=0, stderr=""`。local log size `4,279,146` bytes，SHA-256 `d5bbe067dbbab72529073539aea60ef96f567e807b9a4c0591f374f685a021d6`；`--- FAIL:`/package `FAIL` count `0`。
+
+cleanup 精确命令：
+
+```text
+python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu; df -hT / /tmp /var/tmp; df -i / /tmp /var/tmp; rm -rf /tmp/sub2api-final-verify-547fff8e23a24a92ad566202331ba360; test ! -e /tmp/sub2api-final-verify-547fff8e23a24a92ad566202331ba360; echo cleanup=ok" --timeout 120
+```
+
+- JSON `success=true, exit_code=0, stderr=""`；测试后根卷总量 `35G`、已用 `22G`、可用 `14G`、使用率 `62%`，inode 使用率 `2%`。唯一 remote 目录不存在；local tar cleanup exit `0`、`archive_exists=False`，下载日志保留且 `log_exists=True`。
+
+### Migration 与 SKIP 分类
+
+- `TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate` 明确 PASS（`5.23s`）；`TestMigrationsRunner_UpgradesLocalV01596AcrossUpstreamStages` 明确 PASS（`4.98s`）。后者实际执行 `require.Len(t, upstreamMigrations, 12)` 和 `require.Len(t, currentUpstream, 12)`，并覆盖本地/上游 172/181、双 186、`190_*_notx.sql`、完整 filename identity、重复 apply record count 与 checksum 不变，形成 12/12 证据。
+- 日志共有 13 个 `--- SKIP:`（12 top-level + 1 nested）：DingTalk Task 1.10 sentinel；未设置 `TLSFINGERPRINT_CAPTURE_URL`；既有 CI `CurrentConcurrency` TODO；3 个未设置 `PROMPT_AUDIT_TEST_REDIS_ADDR` 的 Redis fixture；6 个未设置 `PROMPT_AUDIT_TEST_POSTGRES_DSN` 的 PostgreSQL fixture；未设置外部 `OPENAI_API_KEY` 的 token comparison。均未命中 required migration targets 或 Task 27 受影响面。
+- 未 Docker prune、未构建 Sub2API 镜像、未部署，未接触服务运行目录、生产数据库或 Redis；Testcontainers 只使用既有测试镜像。
+
 ## 未执行项与残余风险
 
 - 未执行 Task 28 完整 ancestry、merge parent 和范围边界验证；本轮静态 migration presence 不能替代 Task 28。
 - 未执行 Task 29 Chrome DevTools 前端烟测、能力终审、OpenSpec validate/tasks/progress/comet 收口。
 - 未 push、tag、release、deploy、构建 Sub2API 镜像或触发 workflow。
 - Task 25 遗留：Grok 在 request build 前设置 attempted 标志；client-disconnect drain lifecycle regression 使用固定 `50ms` 排序延迟。当前命名矩阵和完整门禁均通过，但这两项仍是非阻断测试/诊断风险。
-- OAuth Images HeapAlloc 有历史波动，本轮在完整 unit gate 再次真实复现并完成根因修复；修复后精确 10/10、moderation-enabled sibling、完整 unit handler 和最终展开式 gate 均通过。该测试仍使用 process-wide HeapAlloc，因此保留历史敏感性说明，不把先前失败抹除。
+- OAuth Images HeapAlloc 有历史波动；后续统一 lazy audit 修复在生产形态 RED/GREEN、Images 40/40 和完整 unit handler 中均通过。该测试仍使用 process-wide HeapAlloc，因此保留历史敏感性说明，不把先前失败抹除。
 - Windows 当前 `CGO_ENABLED=0` 且无 `gcc`，未运行 `-race`；不声称 race-clean。
-- 流程 concern：三次历史 `make test` exit `2` 均已保留；最终 source/test commit `6c88f1891650e0ef18b0b5ae105b8f44a069a5a4` 上另有唯一一次原样 `make test` exit `0`，结论不再只依赖展开式 gate。首次 SSH preflight 本机解析失败与第二次 remote ENOSPC 也保持为真实失败历史。
+- 流程 concern：所有历史 `make test` 结果均已保留；最终 source/test commit `90b0089010c77d0fef1790e2e8cf3b675d4994cd` 上原样执行 exit `2`，唯一 lease-loss EOF/服务端 1013 竞态由用户接受为上游基线例外，但未记为 PASS。结论依赖同 source 的 backend/frontend constituent/package、build/generate/static 与 remote integration 组合证据。首次 SSH preflight 本机解析失败与第二次 remote ENOSPC 也保持为真实失败历史。
 - 远程环境曾因共享根卷仅余 `1.3G` 在 linker 阶段 ENOSPC；最小 cache 恢复后本次测试峰值结束仍余 `14G`。长期风险是同一 GOCACHE 可再次增长，后续门禁仍应先观察容量，但本轮不追加周期清理或 Docker 处置。
