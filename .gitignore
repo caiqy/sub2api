@@ -68,6 +68,7 @@ docker-compose.override.yml
 .classpath
 .opencode
 .understand-anything
+.paseo.json
 
 # ===================
 # 操作系统
