@@ -1,8 +1,8 @@
 # 子代理进度
 
 - 当前任务：29 项中的第 29 项（OpenSpec 8.4）
-- 当前阶段：`implementing`
-- 状态：Task 29 能力终审、Release、racknerd 更新与浏览器烟测已完成；JWT/bearer 已 containment，上游 revoke-all 缺陷及其余凭据日志暴露均由用户明确接受为非阻断，继续 Comet 收口
+- 当前阶段：`verifying`
+- 状态：Task 29 与 full Comet verify 已完成；29/29 tasks、2/2 requirements、11/11 scenarios，最终 reviewer APPROVED，等待 verify guard
 - 简报：`.superpowers/sdd/task-29-brief.md`
 - 报告：`.superpowers/sdd/task-29-report.md`
 - Task 20 最终复审：`.superpowers/sdd/task-20-final-review.md`
@@ -105,6 +105,7 @@
 - Task 29 JWT containment：首次 env-only 轮换被数据库持久 secret 覆盖；随后同步 `security_secrets.jwt_secret` 与 `.env` 并重建应用，health PASS，浏览器回到登录页且 local auth 清空
 - Task 29 用户裁决：管理员密码、数据库密码与 TOTP key 不再轮换，受限工具日志暴露作为明确接受的非阻断残余风险；继续 Comet 后续工作
 - Task 29 Comet build check：新鲜执行 `make "VERSION=0.1.165.1" "SHELL=D:/scoop/shims/bash.exe" build` exit 0；Go binary 与 frontend build PASS，既有 advisory 不阻断
+- Task 29 Comet verify：新鲜 `make test` exit 0（Vitest 215/1626）；OpenSpec validate、六 tag ancestry、VERSION、marker 0、14 migrations PASS；full reviewer `ses_04debbfeeffe3Ilfp5b1P19C5U` APPROVED，Critical/Important 0
 - Task 29 最终结论：`protected=26`、`manual=1`、`approved-removal=1`、`gap=0`；OpenSpec 8.4 已具备勾选证据
 - 已完成任务数：29
 - 审查模式：`thorough`

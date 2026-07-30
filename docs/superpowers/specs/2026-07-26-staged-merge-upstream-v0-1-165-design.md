@@ -23,7 +23,11 @@ canonical_spec: openspec
 
 六个 tag 构成严格祖先链。当前 `upstream/main@2730c1c43` 比 `v0.1.165` 多一个 `chore: sync VERSION to 0.1.165` 提交；它不是正式 release 目标。实施前必须重新 fetch：若出现新的正式 tag，暂停并更新 OpenSpec 范围，不静默扩展。
 
-本 change 不推送、不打 tag、不触发 Release workflow、不部署，也不在任何服务器构建 Sub2API 镜像。`local-serv-ai` 只承担 Testcontainers integration，不接触服务运行目录。
+本 change 的原始边界是不推送、不打 tag、不触发 Release workflow、不部署，也不在任何服务器构建 Sub2API 镜像。`local-serv-ai` 只承担 Testcontainers integration，不接触服务运行目录。该边界后续按用户明确授权发生有限扩展，见下节和 8.4。
+
+### 1.1 Implementation Divergence：授权的测试发布
+
+最终本地后端不可运行、局域网后端仍为旧版本，无法完成同版本浏览器验收。用户随后明确授权从当前隔离分支发布 `v0.1.165.1`，并仅更新 `racknerd-serv-vpn` 测试环境。该授权没有扩展为合并 `main`、更新其他服务器或在服务器构建镜像；Release 只能使用 GitHub Actions 产物。OpenSpec design、delta spec 和本文 8.4 已记录对应目标、ancestry guard、数据库备份、健康检查与只读烟测要求。
 
 ## 2. 方案选择
 

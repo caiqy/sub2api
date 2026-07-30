@@ -677,3 +677,31 @@ if ($migrationMatches.Count -ne 14) { $migrationMatches; throw "expected 14 prot
 - 仍待处置的实际非空 secret 类别是管理员密码、数据库密码与 TOTP 加密 key；其中 TOTP key 不能直接替换，否则现有密文可能不可解。用户在理解受限工具日志暴露范围后明确决定不再处理并继续 Comet 后续工作，因此三项作为用户接受的非阻断残余风险保留，当前未擅自改动。
 - 本次管理烟测通过公网明文 HTTP 传输认证会话；完成会话撤销后不得再以该方式使用管理员登录态。后续只允许配置 HTTPS 后访问，或通过 `ssh-skill` 建立仅监听 localhost 的 tunnel 访问远端 `8080`。
 - feature tag Release 与 racknerd 测试更新不代表已合入 `main`；`origin/main` 保持 `0.1.159.6`，其他服务器未更新。
+
+## Comet Verify 最终核验
+
+### 新鲜命令证据
+
+- `comet state check staged-merge-upstream-v0-1-165 verify` 全部 PASS；规模评估为 `full`：29 tasks、1 个 delta capability、891 changed files。
+- `openspec status --change staged-merge-upstream-v0-1-165 --json` 为 `isComplete=true`；`openspec instructions apply` 为 `29/29`、`remaining=0`；OpenSpec `1.6.0` 的 `openspec validate staged-merge-upstream-v0-1-165` exit `0`。
+- verify 阶段新鲜执行 `make test` exit `0`；后端 default/unit/lint 与前端 lint/typecheck/Vitest 全部完成，Vitest 为 `215/215` files、`1626/1626` tests。预期负路径 stderr、router-link、intlify 与 Browserslist 输出仍为既有非失败 advisory。
+- 新鲜执行 `make "VERSION=0.1.165.1" "SHELL=D:/scoop/shims/bash.exe" build` exit `0`；Go binary 与 frontend production build 通过，Vite 处理 1019 modules。
+- 静态复核为 `static_verify=pass`：VERSION `0.1.165.1`，六个目标 tag 均为 HEAD 祖先，unmerged/真实 conflict marker 为 0，14 个 protected migration 全部存在。
+
+### OpenSpec 一致性结论
+
+| 维度 | 结果 |
+|---|---|
+| Completeness | PASS：29/29 tasks |
+| Correctness | PASS：2/2 requirements、11/11 scenarios |
+| Coherence | PASS with warnings |
+| Critical / Important | 0 / 0 |
+
+- 技术设计早期“不推送/发版/部署”句与后续授权扩展存在历史漂移；用户选择在 Design Doc 追加 `Implementation Divergence`，明确只放宽当前 feature Release 与 racknerd 测试更新，`main`、其他服务器和服务器构建仍禁止。OpenSpec design、delta spec 和 Design Doc 8.4 已一致。
+- canonical proposal 与 OpenSpec 8.4 的括号仍保留原始“不含推送/发版/部署”口径；实际 Release/deploy 是能力 review 之外的后续用户授权操作。该口径跳转作为文档 warning 保留，不改变归档后的 `upstream-release-sync` 能力契约。
+- 最终 reviewer `ses_04debbfeeffe3Ilfp5b1P19C5U` 给出 `APPROVED`，Critical `0`、Important `0`、Warning `2`；第二项 warning 是 Alipay 控件因测试环境支付关闭未渲染，已有页面/API/自动测试证据但仍建议在启用环境补烟测。
+- 上游 revoke-all 缺陷与剩余凭据工具日志暴露均按用户明确决定作为非阻断残余风险；不改写为测试通过或已修复。
+
+### 最终结论
+
+- `PASS_WITH_WARNINGS`：实现、规格、任务、自动门禁、Release、racknerd 与可执行浏览器验收均具备直接证据；没有阻止 Comet verify 或 archive 的 Critical/Important finding。
