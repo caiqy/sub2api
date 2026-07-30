@@ -9,7 +9,7 @@
 - 最终版本：`0.1.165.1`。
 - 本轮发现并提交五个修复：`aff04f9cd` 仅格式化两个 WebSocket ownership 路径；`1cc41c72c` 避免 content moderation 未配置时构造完整 Images moderation payload，并使 OAuth retention fixture 的 started 信号可重入；`6c88f1891` 避免 content moderation 与 security audit 均未配置时仍构造完整 Images audit payload；`90b008901` 以一个 memoized lazy body 统一 Images 的 prompt/legacy security audit，消除生产形态重复 legacy 调用；`417bbcc6a` 为 blocking prompt/legacy goroutine 分别复制 `Request`，消除共享 `req.Body` 数据竞争并补充 lazy provider 生命周期契约。
 - 最终 source/test HEAD 的 Linux race GREEN、完整原样 `make test`、版本化 Windows build、两轮 Ent/Wire generate、静态检查和全新 nonce 远程 integration 均 exit `0`；最终 Vitest 为 215 files / 1626 tests，integration 为 FAIL `0`、migration `2/2`、13 skips。此前 source `90b008901` 的原样 `make test` EOF/1013 非零、首次 SSH preflight 本机解析失败、remote ENOSPC、race `-count=1` 未命中及放大后 DATA RACE RED 均继续保留，不改写为 PASS。
-- Task 28 已在验证基线 `de3fffdd76f79831b4503ebfc204b0dc4cd156e7` 完成完整 ancestry、六个 merge 第二父、范围边界和 migration 静态复核，证据见文末 Task 28 专节；Task 29 浏览器烟测与 OpenSpec 8.4 收口仍未执行，本报告不声称这些后续任务完成。
+- Task 28 已在验证基线 `de3fffdd76f79831b4503ebfc204b0dc4cd156e7` 完成完整 ancestry、六个 merge 第二父、范围边界和 migration 静态复核；Task 29 随后完成能力终审、feature tag Release、racknerd 测试更新与只读浏览器烟测，证据见文末专节。发布与 racknerd 更新是用户在原始“不推送/发版/部署”边界之后明确授权的例外，不包含合并 `main` 或更新其他服务器。
 
 ## 起始状态
 
@@ -532,7 +532,7 @@ python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu;
 - 13 skips（12 top-level + 1 nested）分类不变：DingTalk sentinel、外部 TLS capture、既有 CurrentConcurrency TODO、3 个 prompt-audit Redis fixture、6 个 prompt-audit PostgreSQL fixture、外部 OpenAI token comparison；均不命中 required targets/本轮受影响面。
 - cleanup JSON `success=true, exit_code=0`；测试后根卷可用 `11G`、使用率 `70%`、inode `2%`。remote 目录和 local tar 均不存在，integration log 保留。未 Docker prune、未构建 Sub2API 镜像、未部署或访问服务/生产数据。
 
-## 未执行项与残余风险
+## Task 27 当时未执行项与残余风险
 
 - Task 28 后续已完成完整 ancestry、merge parent、范围边界与 migration 静态复核，见文末 Task 28 专节。
 - 未执行 Task 29 Chrome DevTools 前端烟测、能力终审、OpenSpec validate/tasks/progress/comet 收口。
@@ -633,3 +633,47 @@ if ($migrationMatches.Count -ne 14) { $migrationMatches; throw "expected 14 prot
 
 - 唯一 Task 28 concern 是两个协调器保留 report 的 LF/CRLF warning；相关命令均 exit `0`，无 whitespace error、unmerged 路径或 conflict marker。所有保留改动均未修改或暂存。
 - Task 29 浏览器烟测、能力终审以及 OpenSpec 8.4/tasks/progress/comet 收口不属于 Task 28，仍未执行。
+
+## Task 29 能力终审、测试发布与浏览器烟测（OpenSpec 8.4）
+
+### 结论与能力矩阵
+
+- 状态：`DONE_WITH_CONCERNS`。最终能力矩阵为 `protected=26`、`manual=1`、`approved-removal=1`、`gap=0`；唯一 `approved-removal` 是用户已批准保持移除的 `openai-first-token-timeout`。其余 scheduler、Sticky、fallback/WaitPlan、DB recheck、privacy、image/storage、billing、session/step-up、runtime、gateway、body lifecycle、usage、资源控制、前端、Ent/Wire、依赖、migration 与 local gates 均已有 build ledger、Task 27/28 或本节运行时证据。
+- Task 29 未修改业务源码。Release workflow guard 提交为 `d6e9360ac` 与 fail-closed 修正 `e195b80c8`；目标 release HEAD 为 `e195b80c8c58744a98271198a31d589873bb8ce1`，其 source/test 基线仍为 `417bbcc6a44c35b3e3ed16efb0bb86a4717401c9`。
+
+### Feature tag Release
+
+- workflow guard RED 证明 feature HEAD 不是 `origin/main` 祖先且旧 workflow 没有 ancestry guard；GREEN 证明 feature 分叉路径 exit `1`、self/包含路径 exit `0`，无效 ref exit `128` 并 fail closed。YAML parse 与 `git diff --check` 均通过，独立 reviewer 最终 `APPROVED`。
+- feature branch 已推送；annotated tag `v0.1.165.1` 的远端 peeled commit 为 `e195b80c8c58744a98271198a31d589873bb8ce1`。tag push 自动 run `30521569380` 已取消，完整 `workflow_dispatch` run `30521587016` 在同一 HEAD 上 conclusion `success`。
+- run 的 `build-frontend`、`update-version`、`release`、`sync-version-file` jobs 均成功；ancestry check 成功且默认分支 VERSION 同步 step 明确 `skipped`。复查 `origin/main=075abc07399d6154130d2a2695fb24c785acd69c`、VERSION `0.1.159.6`，未被 feature release 改写。
+- `SIMPLE_RELEASE` 原值为 `true`，完整发布时临时设为 `false`。等待命令被会话切换中断后复查发现仍为 `false`，随即恢复为 `true` 并再次读取确认；该中断不改写为 finally 已成功执行。
+- GitHub Release 非 draft/prerelease，包含 `checksums.txt` 与 `sub2api_0.1.165.1_linux_amd64.tar.gz`。本地下载后归档实际 SHA-256 `bdfa4fc724bce9422b0b740de3f36afb936d82945d780a0a00b14f5f2ed159f1`，与 `checksums.txt` 精确一致。
+- 当前 GitHub token 缺少 `read:packages`，API 查询返回 `403`，未写成 GHCR API PASS。racknerd 随后的实际 `docker pull` 证明精确版本 tag 与 `latest` 均解析为 digest/image ID `sha256:5da19dcbe8d413705aa4c57236e9397ff3ff7ed939b6f1812180b32fe3853db6`；image labels 为 version `0.1.165.1`、revision `e195b80c8c58744a98271198a31d589873bb8ce1`。
+
+### racknerd 备份与更新
+
+- 所有远程操作仅使用 `ssh-skill` Python scripts，alias `racknerd-serv-vpn`；没有 raw SSH/SCP、服务器镜像构建、Docker prune 或其他服务器更新。
+- 更新前应用 healthy，旧 image ID/digest 为 `sha256:70807eb499a2aad99efccfe02d1eafa934976b842ce78f4878b2b2c44b69c6ea`，label version `0.1.159.5`、revision `db5d0bc477bc9ad26ae508d50f012ede47269dc8`。PostgreSQL data 目录约 `481.3M`，根卷可用 `5.3G`。
+- 更新前在 `/data/sub2api/backups/sub2api-20260730T071810Z.dump` 创建 PostgreSQL custom-format dump；文件 `49M`、非空，SHA-256 `d13049b2c2901941d17775bfc1a9f9fe363eab4ac5b9d5fb7cac9c70bab61397`。备份命令未读取 `.env` 或显式传递数据库密码。
+- 只拉取 CI 发布的 `0.1.165.1` 与 `latest`，确认两者 digest/image ID 相同后执行 `docker compose -f /data/sub2api/docker-compose.yml up -d --no-deps --force-recreate sub2api`。PostgreSQL 与 Redis 未重建。
+- 新容器在 25 秒内变为 healthy，`GET /health` 返回 `{"status":"ok"}`；容器实际 image、version、revision 与上述 CI 镜像一致。启动日志无 migration error、panic 或 fatal；保留的环境 concern 是 URL allowlist/SSRF 检查关闭、trusted proxies 未配置、CORS origins 未配置及 pricing fallback 文件缺失告警。
+- `schema_migrations` 实际返回 14/14 protected filenames：双方 172/181、182-185、双 186、187-189 与 `190_add_users_email_alias_dedup_index_notx.sql` 全部按完整文件名存在。
+
+### Chrome DevTools 只读烟测
+
+- 通过 racknerd 实际 URL `http://107.172.5.13:8080` 的既有管理员会话验证，页面侧栏显示 `v0.1.165.1`。浏览器操作未调用服务器凭据登录，也未点击保存、测试连接、创建备份、删除、外部支付或其他写操作；结束后把复用标签页恢复到原 `/admin/redeem`。
+- `/admin/settings` 安全与认证 tab 可见 step-up 2FA、会话 IP/UA 绑定、信任反代客户端 IP与自定义客户端 IP 请求头控件；数据备份 tab 可见 S3、异步生图对象存储、定时备份与备份记录控件。settings、S3 config、image storage、schedule 与 backups 等对应 GET 均为 `200`。
+- `/admin/risk-control` 正常显示运行状态、前置拦截统计、审核 Key 负载与记录；config/status/logs GET 均为 `200`。`/admin/prompt-audit` 正常显示事件/配置 tabs 与审计事件筛选；config/runtime/events GET 均为 `200`。
+- 支付设置 tab 可达，payment config/providers GET 均为 `200`；当前环境支付开关关闭且 providers 返回空列表，因此 Alipay 控件未渲染。未为烟测开启支付，保留为环境配置限制，不宣称已完成 Alipay 交互验证。
+- 各目标页 console warning/error 均为 `0`，观察到的目标 GET 无 4xx/5xx。
+
+### 最终残余风险
+
+- Alipay 只验证到支付配置与 provider API 可达；需在已配置并启用 Alipay 的环境中补充控件级只读烟测。
+- racknerd 仍有上述安全与 pricing 配置告警，且只完成启动窗口验证；长期运行与真实流量回归不在本任务范围。
+- 安全事件状态为 `OPEN`：SSH wrapper 无法解析 Docker Go template 后，一次只读预检改用了原始 `docker inspect sub2api`，其受限工具输出意外包含所有容器环境变量；Chrome DevTools 单请求详情也展开了既有管理员会话的 Authorization header。值未写入仓库或本报告，也未面向用户复述，但应视为已进入本次 agent 工具日志。
+- 用户授权后先调用 `POST /api/v1/auth/revoke-all-sessions`，接口返回 `200 success`，但同一旧 bearer 在 5 秒后仍可访问 `/auth/me`。根因是上游提交 `3d29f7c2f`（从上游 `v0.1.160` 延续至原始 `v0.1.165`）仅在内存递增 `TokenVersion`；真实 schema/migration/repository 没有持久化字段，而同提交 unit stub 直接保留对象变化，形成假绿。用户明确决定不在本 change 修复上游自身问题、等待上游处理，且不将其作为本次阻塞；报告保留该已知上游风险。
+- 随后按用户授权轮换 JWT。第一次只更新 `.env` 后，边界检查证明新值已进入容器但旧 JWT 仍有效；源码调查确认启动时数据库 `security_secrets.jwt_secret` 会覆盖环境值。第二次将同一服务器生成的新随机值同步写入持久 secret 与 `.env` 后重建应用，新容器 healthy、`/health` 正常，既有浏览器被驱回登录页且本地 auth 已清空。旧签名 secret 已不再被运行实例使用，JWT/bearer containment 完成；备份 `.env-before-jwt-20260730T073747Z` mode `600` 保留用于受控恢复。
+- 仍待处置的实际非空 secret 类别是管理员密码、数据库密码与 TOTP 加密 key；其中 TOTP key 不能直接替换，否则现有密文可能不可解。用户在理解受限工具日志暴露范围后明确决定不再处理并继续 Comet 后续工作，因此三项作为用户接受的非阻断残余风险保留，当前未擅自改动。
+- 本次管理烟测通过公网明文 HTTP 传输认证会话；完成会话撤销后不得再以该方式使用管理员登录态。后续只允许配置 HTTPS 后访问，或通过 `ssh-skill` 建立仅监听 localhost 的 tunnel 访问远端 `8080`。
+- feature tag Release 与 racknerd 测试更新不代表已合入 `main`；`origin/main` 保持 `0.1.159.6`，其他服务器未更新。
