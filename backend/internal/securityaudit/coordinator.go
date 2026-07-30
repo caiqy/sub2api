@@ -11,6 +11,7 @@ type LegacyEngine interface {
 	Check(ctx context.Context, req Request) (*LegacyDecision, error)
 }
 
+// lazyLegacyEngine may call body only before CheckLazy returns and must not retain it.
 type lazyLegacyEngine interface {
 	CheckLazy(ctx context.Context, req Request, body func() []byte) (*LegacyDecision, error)
 }
@@ -35,6 +36,8 @@ func (c *Coordinator) Check(ctx context.Context, req Request) Decision {
 	return c.CheckLazy(ctx, req, func() []byte { return body })
 }
 
+// CheckLazy evaluates body only during this call. Engines must not retain the
+// provider; async requests are frozen before they are cloned for enqueue.
 func (c *Coordinator) CheckLazy(ctx context.Context, req Request, body func() []byte) Decision {
 	if c == nil {
 		return allowDecision(nil, nil)
@@ -77,11 +80,11 @@ func (c *Coordinator) checkBlockingLazy(ctx context.Context, req Request, body f
 	wg.Add(2)
 	var legacy *LegacyDecision
 	var prompt *PromptDecision
-	go func() {
+	go func(req Request) {
 		defer wg.Done()
 		legacy, _ = c.checkLegacyLazy(ctx, req, body)
-	}()
-	go func() {
+	}(req)
+	go func(req Request) {
 		defer wg.Done()
 		if c.prompt == nil {
 			prompt = unavailablePromptDecision(ErrorCodeUnavailable)
@@ -103,7 +106,7 @@ func (c *Coordinator) checkBlockingLazy(ctx context.Context, req Request, body f
 			return
 		}
 		prompt = result
-	}()
+	}(req)
 	wg.Wait()
 	return prioritize(legacy, prompt)
 }
