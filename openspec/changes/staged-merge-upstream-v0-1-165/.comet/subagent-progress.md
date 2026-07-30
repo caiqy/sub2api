@@ -2,7 +2,7 @@
 
 - 当前任务：29 项中的第 29 项（OpenSpec 8.4）
 - 当前阶段：`implementing`
-- 状态：Task 29 能力终审与 OpenSpec 预检已完成；浏览器烟测因缺少本地 backend/API、管理员会话和可连接 Chrome DevTools 而 BLOCKED，等待用户提供最小前置或调整验收要求
+- 状态：Task 29 能力终审、Release、racknerd 更新与浏览器烟测已完成；JWT/bearer 已 containment，上游 revoke-all 缺陷及其余凭据日志暴露均由用户明确接受为非阻断，继续 Comet 收口
 - 简报：`.superpowers/sdd/task-29-brief.md`
 - 报告：`.superpowers/sdd/task-29-report.md`
 - Task 20 最终复审：`.superpowers/sdd/task-20-final-review.md`
@@ -96,7 +96,17 @@
 - Task 29 OpenSpec 预检：CLI `1.6.0`；`openspec validate staged-merge-upstream-v0-1-165` exit 0
 - Task 29 浏览器 blocker：本地 5173/3000/8080/5432/6379 无 listener，无本地 config/backend binary/Docker，Chrome DevTools 9242 不可连接；按 plan 未启动 frontend、未将登录页/mock/静态路由冒充烟测 PASS
 - Task 29 待用户前置：提供本地可访问的 backend/API 及可由 Chrome DevTools 连接的已登录管理员会话；否则必须明确调整浏览器验收要求
-- 已完成任务数：28
+- Task 29 blocker 解除：用户明确授权 feature tag Release 与 `racknerd-serv-vpn` 测试更新；racknerd 既有管理员浏览器会话可用
+- Task 29 Release：tag `v0.1.165.1` -> `e195b80c8`；workflow run `30521587016` success，默认分支 sync skipped，`SIMPLE_RELEASE=true` 已恢复，assets checksum 匹配
+- Task 29 racknerd：备份 `/data/sub2api/backups/sub2api-20260730T071810Z.dump`（49M，SHA-256 `d13049b2c2901941d17775bfc1a9f9fe363eab4ac5b9d5fb7cac9c70bab61397`）；CI image digest `sha256:5da19dcbe8d413705aa4c57236e9397ff3ff7ed939b6f1812180b32fe3853db6`，health PASS，14/14 protected migrations
+- Task 29 browser：settings security/backup/payment、risk-control、prompt-audit 只读烟测完成；目标 GET 均 200、console warning/error 0；支付关闭且 providers 为空，Alipay 控件级验证保留为环境限制
+- Task 29 安全 concern：raw `docker inspect` 与 DevTools request detail 的受限工具输出分别包含容器环境变量和管理员 bearer；未写入仓库/报告值，需由用户后续受控轮换管理员、JWT/TOTP、数据库 secrets 并撤销该管理员会话
+- Task 29 revoke-all 实测：API 返回 200 后旧 bearer 仍 200；根因是上游 `3d29f7c2f` 只递增内存 TokenVersion，原始 v0.1.165 无 schema/migration/repository 持久化。用户决定等待上游修复，不阻塞本 change
+- Task 29 JWT containment：首次 env-only 轮换被数据库持久 secret 覆盖；随后同步 `security_secrets.jwt_secret` 与 `.env` 并重建应用，health PASS，浏览器回到登录页且 local auth 清空
+- Task 29 用户裁决：管理员密码、数据库密码与 TOTP key 不再轮换，受限工具日志暴露作为明确接受的非阻断残余风险；继续 Comet 后续工作
+- Task 29 Comet build check：新鲜执行 `make "VERSION=0.1.165.1" "SHELL=D:/scoop/shims/bash.exe" build` exit 0；Go binary 与 frontend build PASS，既有 advisory 不阻断
+- Task 29 最终结论：`protected=26`、`manual=1`、`approved-removal=1`、`gap=0`；OpenSpec 8.4 已具备勾选证据
+- 已完成任务数：29
 - 审查模式：`thorough`
 - Task 20 审查修复轮次：常规 2/2 与用户授权 extra 1/1 已作为历史记录保留；关闭写回不追加新修复轮次
 - Task 20 RED/GREEN：follow-up 范围 `babe29e00f18df9a0011d8464446654148d5eb53..4778e32dc879f682fd5774c1fb0c5a63867802c6` 的验证与归档已完成，审查无 Critical/Important
@@ -197,7 +207,7 @@
 ## 约束
 
 - 保留用户所有的未跟踪 `paseo.json`。
-- 不得 push、tag、release、deploy 或 merge 到 `main`。
+- 原始边界不得 push、tag、release、deploy 或 merge 到 `main`；用户随后仅授权本 feature tag Release 与 `racknerd-serv-vpn` 测试更新，两项已完成。`main`、其他服务器和额外发布仍禁止。
 - 远程工作必须使用 `ssh-skill`；不得调用原生 SSH 或 SCP。
 - 使用 OpenCode 角色路由：实施者使用 `general`，审查者使用 `reviewer`。
 - 用户明确要求后续不得使用 Paseo；所有实施与审查只使用内置 Task 角色。

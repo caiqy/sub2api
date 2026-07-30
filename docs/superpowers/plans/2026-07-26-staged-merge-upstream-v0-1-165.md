@@ -625,11 +625,11 @@ finally {
 **文件：**
 - 修改：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
 
-- [ ] **步骤 1：记录能力审查和阶段门禁**
+- [x] **步骤 1：记录能力审查和阶段门禁**
 
   预期：reasoning policy、scheduler metadata、Cleanup、billing、axios 与 migration 的 changed-files 交集均有证据；无 `gap`。
 
-- [ ] **步骤 2：提交阶段封闭证据**
+- [x] **步骤 2：提交阶段封闭证据**
 
   执行：
   ```powershell
@@ -647,7 +647,7 @@ finally {
 - 修改：本次 Git merge 实际触及文件
 - 修改：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
 
-- [ ] **步骤 1：创建受审 merge 状态**
+- [x] **步骤 1：创建受审 merge 状态**
 
   执行：
   ```powershell
@@ -659,7 +659,7 @@ finally {
 
   预期：peeled SHA 为 `cd8bb98c44303b2c8f04c0da340447c992f0cb7d`。
 
-- [ ] **步骤 2：融合 composite routing、Ollama、Grok 冷却、Alipay 和 migration**
+- [x] **步骤 2：融合 composite routing、Ollama、Grok 冷却、Alipay 和 migration**
 
   对 composite group routing、Ollama Cloud、Grok 402 冷却、Alipay deep link、`172_composite_model_routes.sql` 与本地 `172_video_per_second_billing_metadata.sql`、两个 `186_*` 完成台账。两份 172 都必须保留。然后执行：
   ```powershell
@@ -675,11 +675,11 @@ finally {
 - 修改：RED 失败确定的 routing、scheduler、Sticky、Ollama、支付或 migration 实际路径
 - 修改：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
 
-- [ ] **步骤 1：先以失败测试验证 composite routing 不绕过本地调度**
+- [x] **步骤 1：先以失败测试验证 composite routing 不绕过本地调度**
 
   对 composite group routing 入口使用 CodeGraph `trace` 记录到 scheduler factory、advanced/layered scheduler、Grok/platform Sticky、fallback/WaitPlan 与 DB recheck 的完整调用链。运行矩阵已有测试；少断言时先添加最小 RED，确认路由不能绕过本地调度定制。
 
-- [ ] **步骤 2：提交最小修复并执行完整门禁**
+- [x] **步骤 2：提交最小修复并执行完整门禁**
 
   需要修复时，先对 ledger 中 RED 证据关联的真实源码和测试路径逐个执行 `git add --`，再执行：
   ```powershell
@@ -693,11 +693,11 @@ finally {
 **文件：**
 - 修改：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
 
-- [ ] **步骤 1：记录 routing 到 scheduler/Sticky 的不绕过证据**
+- [x] **步骤 1：记录 routing 到 scheduler/Sticky 的不绕过证据**
 
   预期：ledger 链接入口调用链、失败/通过测试、两份 172 与两份 186 的 migration 证据，以及本地和远程门禁结果。
 
-- [ ] **步骤 2：提交阶段封闭证据**
+- [x] **步骤 2：提交阶段封闭证据**
 
   执行：
   ```powershell
@@ -715,7 +715,7 @@ finally {
 - 修改：本次 Git merge 实际触及文件
 - 修改：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
 
-- [ ] **步骤 1：创建最终 tag 的受审 merge 状态**
+- [x] **步骤 1：创建最终 tag 的受审 merge 状态**
 
   执行：
   ```powershell
@@ -727,7 +727,7 @@ finally {
 
   预期：peeled SHA 为 `e9a58c1cb8b5ef626a75c93b4d953fde5e67aa29`；不得合并 `upstream/main`。
 
-- [ ] **步骤 2：融合 Live、body 生命周期、usage、alias、migration 与 postcss**
+- [x] **步骤 2：融合 Live、body 生命周期、usage、alias、migration 与 postcss**
 
   对 OpenAI Live gateway、Ollama 用量刷新、email alias 注册查重、`187_add_usage_log_session_id.sql`、`188_allow_live_usage_request_type.sql`、`189_add_group_allow_live.sql`、`190_add_users_email_alias_dedup_index_notx.sql` 和 postcss 安全升级逐项记账。然后执行：
   ```powershell
@@ -744,7 +744,7 @@ finally {
 - 修改：`backend/internal/repository/migrations_schema_integration_test.go`（收紧最终 12/12 断言）
 - 修改：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
 
-- [ ] **步骤 1：将渐进式 migration 升级回归收紧为最终 12/12**
+- [x] **步骤 1：将渐进式 migration 升级回归收紧为最终 12/12**
 
   更新 Task 9 已新增的 `TestMigrationsRunner_UpgradesLocalV01596AcrossUpstreamStages`：在保留过滤 FS、完整 FS、重复执行、checksum 与本地 172/181 断言的基础上，明确要求固定上游集合在当前 FS 中为 12/12，并要求两个上游 186 及 `190_*_notx.sql` 均已记录。然后执行：
 
@@ -755,7 +755,7 @@ finally {
 
   用 `$stage = 'v0.1.165'` 运行通用远程门禁。若失败，保留远程 RED 后再做最小修复；若直接通过，记录现有 runner 已满足完整文件名升级契约。不得在本机把 integration skip 当作验证，也不得引入新的 migration runner 抽象。
 
-- [ ] **步骤 2：先验证 OpenAI Live 与本地请求体语义，再最小修复**
+- [x] **步骤 2：先验证 OpenAI Live 与本地请求体语义，再最小修复**
 
   用 CodeGraph `trace` 审查 OpenAI Live gateway 入口至 prompt cache reuse、body replay/spooling、cleanup、失败 usage 的路径。对矩阵命中路径运行聚焦测试；任何回归必须先 RED，再最小修复。提交前对 ledger 中 RED 证据关联的真实路径逐个执行 `git add --`，需要提交时执行：
   ```powershell
@@ -764,7 +764,7 @@ finally {
 
   预期：本地 OpenAI 定制未被 Live 改写；无回归时不创建空修复提交，migration 测试已由步骤 1 独立提交。
 
-- [ ] **步骤 3：完成本段全门禁**
+- [x] **步骤 3：完成本段全门禁**
 
   执行所有矩阵聚焦命令，再以 `$stage = 'v0.1.165'` 完整重跑通用本地/远程门禁。预期：远程 integration 覆盖新库与完整升级路径，未跳过；本地两次生成稳定；静态冲突检查为空。
 
@@ -773,11 +773,11 @@ finally {
 **文件：**
 - 修改：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
 
-- [ ] **步骤 1：记录 OpenAI Live 与本地 OpenAI 定制的交互结论**
+- [x] **步骤 1：记录 OpenAI Live 与本地 OpenAI 定制的交互结论**
 
   ledger 必须链接 gateway 入口调用链、prompt cache reuse、body replay/spooling、cleanup 和失败 usage 的测试或结构证据，并记录迁移回归的 RED/GREEN、12/12 filename、两个本地同号文件、两个 186、190 notx、幂等/checksum 结论。
 
-- [ ] **步骤 2：提交最终 tag 阶段证据**
+- [x] **步骤 2：提交最终 tag 阶段证据**
 
   执行：
   ```powershell
@@ -795,7 +795,7 @@ finally {
 - 修改：`backend/cmd/server/VERSION`
 - 修改：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`
 
-- [ ] **步骤 1：在六个阶段全部通过后更新唯一版本文件**
+- [x] **步骤 1：在六个阶段全部通过后更新唯一版本文件**
 
   将 `backend/cmd/server/VERSION` 的唯一内容改为：
   ```text
@@ -812,7 +812,7 @@ finally {
 
   预期：仅版本文件改变，旧本地首 Token 超时业务符号无输出。上游 `first_output_timeout` 行为不是扫描目标，必须保留。
 
-- [ ] **步骤 2：提交最终版本元数据**
+- [x] **步骤 2：提交最终版本元数据**
 
   执行：
   ```powershell
@@ -963,11 +963,11 @@ finally {
 - 修改：`openspec/changes/staged-merge-upstream-v0-1-165/tasks.md`
 - 审查：GitHub Release、GHCR、racknerd 测试环境
 
-- [ ] **步骤 1：逐项关闭能力矩阵**
+- [x] **步骤 1：逐项关闭能力矩阵**
 
   对 advanced/layered scheduler、fallback/WaitPlan、DB recheck、所有平台 Sticky、privacy、image capability、异步图片/对象存储、计费/倍率、session/step-up、runtime 热更新、网关透传、prompt cache、body replay/spooling、失败 usage、用户资源控制、公开分组屏蔽、菜单隐藏、前端翻译、quota 原子重置、settings backfill、Ent/Wire、依赖、migration、local gates 逐项确认入口可达、边界成立、自动或人工证据可复现。只允许 `openai-first-token-timeout` 维持 `approved-removal`；最终不得有 `gap`。
 
-- [ ] **步骤 2：保护 feature tag Release 不污染默认分支**
+- [x] **步骤 2：保护 feature tag Release 不污染默认分支**
 
   先固定当前事实：`origin/main` 为 `0.1.159.6` 且是当前 HEAD 祖先，当前 HEAD 不是 `origin/main` 祖先；现有 `sync-version-file` 会无条件更新默认分支。执行 RED：
 
@@ -993,7 +993,7 @@ finally {
 
   提交前确认 staged 只有 workflow，提交 `ci: guard version sync for branch releases`。
 
-- [ ] **步骤 3：发布完整 `v0.1.165.1` Release**
+- [x] **步骤 3：发布完整 `v0.1.165.1` Release**
 
   重新确认最高已包含上游三段式 tag 为 `v0.1.165`、origin 不存在同基准四段式 tag、VERSION 为 `0.1.165.1`、目标 release 不存在。原样执行一次 `make test` 和静态检查；通过后推送当前 feature branch，创建 annotated tag `v0.1.165.1` 指向已提交 workflow guard 的 HEAD。
 
@@ -1010,7 +1010,7 @@ finally {
 
   无论 workflow 成败，finally 都将 `SIMPLE_RELEASE` 恢复为原值并复查。成功后核验远端 tag 指向目标 HEAD，Release 非 draft/prerelease，assets 至少包含 `sub2api_0.1.165.1_linux_amd64.tar.gz` 与 `checksums.txt`；下载两者到临时目录并按 `checksums.txt` 校验 SHA-256。确认 GHCR 精确版本 tag 与 `latest` 已发布，不以仅存在 tag 或 workflow 尚在运行作为成功。
 
-- [ ] **步骤 4：备份并更新 racknerd 测试环境**
+- [x] **步骤 4：备份并更新 racknerd 测试环境**
 
   所有服务器操作使用 `ssh-skill` 的 Python scripts。更新前记录 `/data/sub2api/docker-compose.yml`、容器 health、旧 image ID/digest/label、磁盘和测试数据库大小；在 `/data/sub2api/backups/` 创建带 UTC timestamp 的 custom-format `pg_dump`，校验文件非空并记录 SHA-256。禁止输出数据库密码或 `.env` 内容。
 
@@ -1028,13 +1028,13 @@ finally {
 
   等待 health 为 healthy；检查 `/health`、容器 labels、启动日志无 migration/error/panic、PostgreSQL `schema_migrations` 包含最终 14 个 protected filename。不得在 racknerd 构建镜像、Docker prune 或更新其他容器。失败时停止 Task 29；应用回滚到旧 image ID，若旧应用无法读取新 schema，则在停止应用后恢复更新前 dump。
 
-- [ ] **步骤 5：运行 racknerd 关键后台页面烟测**
+- [x] **步骤 5：运行 racknerd 关键后台页面烟测**
 
   使用 Skill 工具加载 `chrome-devtools`，通过 racknerd 的实际 URL 和用户已登录管理员会话验证同一 `0.1.165.1` 镜像提供的前后端。若没有会话，只让用户登录，不读取服务器凭据。
 
   依次检查：`/admin/settings` security tab 的客户端 IP 与 step-up 2FA；backup tab 的 S3/image storage；`/admin/risk-control`；`/admin/prompt-audit`；payment tab 的 Alipay。记录每页标题/关键控件、对应 GET 请求状态和 console error/warning；不得点击保存、S3 test、外部支付或任何会改变服务器状态的操作。不存在的独立路由不得虚构。验证结束后关闭专用浏览器 tab，不停止 racknerd 服务。
 
-- [ ] **步骤 6：校验 OpenSpec、勾选具备证据的 29 项并提交最终文档**
+- [x] **步骤 6：校验 OpenSpec、勾选具备证据的 29 项并提交最终文档**
 
   先解析可用的 OpenSpec 1.5+ CLI 并校验 change：
   ```powershell
