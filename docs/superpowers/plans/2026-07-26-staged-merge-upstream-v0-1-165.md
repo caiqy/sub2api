@@ -958,23 +958,83 @@ finally {
 ### Task 29：完成能力级最终审查、浏览器烟测与 OpenSpec 收口（OpenSpec 8.4）
 
 **文件：**
+- 修改：`.github/workflows/release.yml`
 - 修改：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-verify.md`
 - 修改：`openspec/changes/staged-merge-upstream-v0-1-165/tasks.md`
+- 审查：GitHub Release、GHCR、racknerd 测试环境
 
 - [ ] **步骤 1：逐项关闭能力矩阵**
 
   对 advanced/layered scheduler、fallback/WaitPlan、DB recheck、所有平台 Sticky、privacy、image capability、异步图片/对象存储、计费/倍率、session/step-up、runtime 热更新、网关透传、prompt cache、body replay/spooling、失败 usage、用户资源控制、公开分组屏蔽、菜单隐藏、前端翻译、quota 原子重置、settings backfill、Ent/Wire、依赖、migration、local gates 逐项确认入口可达、边界成立、自动或人工证据可复现。只允许 `openai-first-token-timeout` 维持 `approved-removal`；最终不得有 `gap`。
 
-- [ ] **步骤 2：运行前端关键后台页面烟测**
+- [ ] **步骤 2：保护 feature tag Release 不污染默认分支**
 
-  先读取 `memory/context/frontend-debug-preview.md`，确认本地后端/API 与管理员会话可用，再启动：
+  先固定当前事实：`origin/main` 为 `0.1.159.6` 且是当前 HEAD 祖先，当前 HEAD 不是 `origin/main` 祖先；现有 `sync-version-file` 会无条件更新默认分支。执行 RED：
+
   ```powershell
-  pnpm --dir frontend dev --host 127.0.0.1 --port 5173
+  git merge-base --is-ancestor HEAD origin/main
+  if ($LASTEXITCODE -eq 0) { throw 'feature HEAD unexpectedly belongs to origin/main' }
+  $workflow = Get-Content .github/workflows/release.yml -Raw
+  if ($workflow -notmatch 'merge-base --is-ancestor') { throw 'RED: sync-version-file has no ancestry guard' }
   ```
 
-  使用 Skill 工具加载 `chrome-devtools`，打开 `http://127.0.0.1:5173` 下由 changed-files/能力矩阵确认实际存在的客户端 IP、step-up 2FA、S3/image storage、security audit、Alipay 等后台路由。记录每页加载、关键网络请求和控制台结果；不存在的路由不虚构测试，后端/API 或管理员会话不可用则记录为阻塞而非通过。浏览器验证结束后停止该开发服务。
+  预期：第一条 ancestry 命令 exit `1`；静态断言随后以 `RED: sync-version-file has no ancestry guard` 失败。然后只修改 `sync-version-file`：default branch checkout 使用 `fetch-depth: 0`；新增 `tag-ancestry` step，解析 `${{ github.event.inputs.tag || github.ref_name }}`、fetch 精确 tag，并以 `git merge-base --is-ancestor "${RELEASE_TAG}^{commit}" HEAD` 输出 `should_sync=true|false`；原 VERSION 同步 step 增加 `if: steps.tag-ancestry.outputs.should_sync == 'true'`。
 
-- [ ] **步骤 3：校验 OpenSpec、勾选具备证据的 29 项并提交最终文档**
+  GREEN 必须同时证明分叉与包含两条路径：
+
+  ```powershell
+  git merge-base --is-ancestor HEAD origin/main
+  if ($LASTEXITCODE -ne 1) { throw "expected feature ancestry exit 1, got $LASTEXITCODE" }
+  git merge-base --is-ancestor HEAD HEAD
+  if ($LASTEXITCODE -ne 0) { throw 'self ancestry must pass' }
+  python -c "import pathlib,yaml; yaml.safe_load(pathlib.Path('.github/workflows/release.yml').read_text(encoding='utf-8')); print('yaml=ok')"
+  git diff --check -- .github/workflows/release.yml
+  ```
+
+  提交前确认 staged 只有 workflow，提交 `ci: guard version sync for branch releases`。
+
+- [ ] **步骤 3：发布完整 `v0.1.165.1` Release**
+
+  重新确认最高已包含上游三段式 tag 为 `v0.1.165`、origin 不存在同基准四段式 tag、VERSION 为 `0.1.165.1`、目标 release 不存在。原样执行一次 `make test` 和静态检查；通过后推送当前 feature branch，创建 annotated tag `v0.1.165.1` 指向已提交 workflow guard 的 HEAD。
+
+  发布过程必须使用 `try/finally` 恢复仓库变量：先读取并记录 `SIMPLE_RELEASE` 原值，再临时设为 `false`；推送 tag 后取消该 tag 自动产生的 push-event Release run，随后执行：
+
+  ```powershell
+  gh workflow run release.yml --repo caiqy/sub2api --ref v0.1.165.1 -f tag=v0.1.165.1
+  do {
+      Start-Sleep -Seconds 2
+      $runId = gh run list --repo caiqy/sub2api --workflow release.yml --event workflow_dispatch --branch v0.1.165.1 --limit 1 --json databaseId --jq '.[0].databaseId'
+  } until ($runId)
+  gh run watch $runId --repo caiqy/sub2api --exit-status
+  ```
+
+  无论 workflow 成败，finally 都将 `SIMPLE_RELEASE` 恢复为原值并复查。成功后核验远端 tag 指向目标 HEAD，Release 非 draft/prerelease，assets 至少包含 `sub2api_0.1.165.1_linux_amd64.tar.gz` 与 `checksums.txt`；下载两者到临时目录并按 `checksums.txt` 校验 SHA-256。确认 GHCR 精确版本 tag 与 `latest` 已发布，不以仅存在 tag 或 workflow 尚在运行作为成功。
+
+- [ ] **步骤 4：备份并更新 racknerd 测试环境**
+
+  所有服务器操作使用 `ssh-skill` 的 Python scripts。更新前记录 `/data/sub2api/docker-compose.yml`、容器 health、旧 image ID/digest/label、磁盘和测试数据库大小；在 `/data/sub2api/backups/` 创建带 UTC timestamp 的 custom-format `pg_dump`，校验文件非空并记录 SHA-256。禁止输出数据库密码或 `.env` 内容。
+
+  只拉取 CI 镜像：
+
+  ```bash
+  docker pull ghcr.io/caiqy/sub2api:0.1.165.1
+  docker pull ghcr.io/caiqy/sub2api:latest
+  exact_id=$(docker image inspect ghcr.io/caiqy/sub2api:0.1.165.1 --format '{{.Id}}')
+  latest_id=$(docker image inspect ghcr.io/caiqy/sub2api:latest --format '{{.Id}}')
+  test "$exact_id" = "$latest_id"
+  docker image inspect ghcr.io/caiqy/sub2api:0.1.165.1 --format 'version={{index .Config.Labels "org.opencontainers.image.version"}} revision={{index .Config.Labels "org.opencontainers.image.revision"}}'
+  docker compose -f /data/sub2api/docker-compose.yml up -d --no-deps --force-recreate sub2api
+  ```
+
+  等待 health 为 healthy；检查 `/health`、容器 labels、启动日志无 migration/error/panic、PostgreSQL `schema_migrations` 包含最终 14 个 protected filename。不得在 racknerd 构建镜像、Docker prune 或更新其他容器。失败时停止 Task 29；应用回滚到旧 image ID，若旧应用无法读取新 schema，则在停止应用后恢复更新前 dump。
+
+- [ ] **步骤 5：运行 racknerd 关键后台页面烟测**
+
+  使用 Skill 工具加载 `chrome-devtools`，通过 racknerd 的实际 URL 和用户已登录管理员会话验证同一 `0.1.165.1` 镜像提供的前后端。若没有会话，只让用户登录，不读取服务器凭据。
+
+  依次检查：`/admin/settings` security tab 的客户端 IP 与 step-up 2FA；backup tab 的 S3/image storage；`/admin/risk-control`；`/admin/prompt-audit`；payment tab 的 Alipay。记录每页标题/关键控件、对应 GET 请求状态和 console error/warning；不得点击保存、S3 test、外部支付或任何会改变服务器状态的操作。不存在的独立路由不得虚构。验证结束后关闭专用浏览器 tab，不停止 racknerd 服务。
+
+- [ ] **步骤 6：校验 OpenSpec、勾选具备证据的 29 项并提交最终文档**
 
   先解析可用的 OpenSpec 1.5+ CLI 并校验 change：
   ```powershell
@@ -1001,12 +1061,12 @@ finally {
   git status --short
   ```
 
-  预期：29 项均有直接证据时才全部勾选；最终提交只含两份证据和 tasks 状态，`paseo.json` 仍未跟踪且未触碰。到此停止：不 push、不打 tag、不触发 Release workflow、不部署、不合回 `main`。
+  formal verify report 还必须记录 workflow guard RED/GREEN、feature branch/tag/Release run、变量恢复、assets/checksum、GHCR digest、racknerd 备份与更新前后 digest/health/migration、浏览器 network/console 及残余风险。预期：29 项均有直接证据时才全部勾选；最终提交只含两份证据和 tasks 状态，`paseo.json` 仍未跟踪且未触碰。到此停止：已获授权的 feature tag Release 与 racknerd 测试更新除外，不合回 `main`、不更新其他服务器、不触发额外发布。
 
 ## 计划自检
 
 - OpenSpec 29 项映射：Task 1-29 与 `tasks.md` 的 1.1-8.4 一一对应，无漏项、无扩展范围。
 - 阶段完整性：阶段 0、六个 tag 和最终验证均包含冲突台账/能力矩阵、受影响测试、`make test`、`make build`、两次 `make -C backend generate`、静态冲突检查、local-serv-ai Docker-backed integration 与证据封闭；每段失败均阻塞下一段。
 - migration 覆盖：测试以过滤 embedded FS 模拟本地 `0.1.159.6`，后以完整 FS 升级；覆盖本地/上游同号 172/181、两个上游 186、190 notx、幂等和 checksum。
-- 远程限制：所有远程命令均通过 `ssh-skill` Python 脚本；计划没有原生 SSH/SCP、服务器 Sub2API 镜像构建、发布、推送或部署步骤。
+- 远程限制：所有远程命令均通过 `ssh-skill` Python 脚本；racknerd 只拉取 CI 发布镜像，计划没有原生 SSH/SCP、服务器 Sub2API 镜像构建、Docker prune 或其他服务器更新步骤。
 - 占位符检查：本文不含未完成占位标记；运行时由实际 diff 决定的文件使用明确的 RED 证据和矩阵路径约束，不允许无依据暂存。
