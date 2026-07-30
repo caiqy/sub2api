@@ -2,7 +2,7 @@
 
 - 当前任务：29 项中的第 29 项（OpenSpec 8.4）
 - 当前阶段：`implementing`
-- 状态：Task 28 已通过独立复审；准备生成 Task 29 简报并完成能力终审、浏览器烟测与 OpenSpec 收口
+- 状态：Task 29 能力终审与 OpenSpec 预检已完成；浏览器烟测因缺少本地 backend/API、管理员会话和可连接 Chrome DevTools 而 BLOCKED，等待用户提供最小前置或调整验收要求
 - 简报：`.superpowers/sdd/task-29-brief.md`
 - 报告：`.superpowers/sdd/task-29-report.md`
 - Task 20 最终复审：`.superpowers/sdd/task-20-final-review.md`
@@ -89,7 +89,13 @@
 - Task 28 formal report：`05fb9c33591d6ab9cb8d40d7a9347776ae9e6ae4 docs: record topology and migration verification`
 - Task 28 reviewer：`ses_04e76904cffemCEPePbQ9hUIU9`，`APPROVED`；Spec PASS、document quality APPROVED，无 Critical/Important/Minor
 - Task 28 concern：Task 27/4 保留报告触发 LF/CRLF warning，但相关命令 exit 0，无 whitespace error、unmerged 或 conflict marker
-- Task 29 下一步：从当前 plan 生成简报；读取前端调试预览约束，完成能力矩阵、浏览器烟测和 OpenSpec/Comet 收口
+- Task 29 简报：已从当前 plan 重新生成并读取 `memory/context/frontend-debug-preview.md`
+- Task 29 部分 implementer：`ses_04e6f487dffeasz2C4BrYqOmKM`，状态 `BLOCKED`；未修改 tracked 文件或提交
+- Task 29 能力终审：`protected=26`、`manual=1`、`approved-removal=1`、`gap=0`；唯一 approved-removal 为 `openai-first-token-timeout`
+- Task 29 页面映射：客户端 IP 与 step-up 2FA 位于 `/admin/settings` security tab；S3/image storage 位于 backup tab；security audit 实际子页为 `/admin/risk-control` 与 `/admin/prompt-audit`；Alipay 位于 payment tab，不虚构独立路由
+- Task 29 OpenSpec 预检：CLI `1.6.0`；`openspec validate staged-merge-upstream-v0-1-165` exit 0
+- Task 29 浏览器 blocker：本地 5173/3000/8080/5432/6379 无 listener，无本地 config/backend binary/Docker，Chrome DevTools 9242 不可连接；按 plan 未启动 frontend、未将登录页/mock/静态路由冒充烟测 PASS
+- Task 29 待用户前置：提供本地可访问的 backend/API 及可由 Chrome DevTools 连接的已登录管理员会话；否则必须明确调整浏览器验收要求
 - 已完成任务数：28
 - 审查模式：`thorough`
 - Task 20 审查修复轮次：常规 2/2 与用户授权 extra 1/1 已作为历史记录保留；关闭写回不追加新修复轮次
