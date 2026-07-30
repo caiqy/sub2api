@@ -1,10 +1,10 @@
 # 子代理进度
 
 - 当前任务：29 项中的第 27 项（OpenSpec 8.2）
-- 当前阶段：`ready`
-- 状态：Task 26 version normalization 已通过，OpenSpec 8.1 已闭合，Task 27 ready；已完成 26 项，最后审查 SHA `a72934b3a`
+- 当前阶段：`implementing`
+- 状态：Task 27 thorough reviewer 返回 CHANGES_REQUIRED；用户已批准“统一审计入口 + memoized lazy payload”设计，Design Doc/delta spec commit `9fd9976d7` 已通过 OpenSpec strict validation，准备第 1 轮修复
 - 简报：`.superpowers/sdd/task-27-brief.md`
-- 报告：`.superpowers/sdd/task-26-report.md`
+- 报告：`.superpowers/sdd/task-27-report.md`
 - Task 20 最终复审：`.superpowers/sdd/task-20-final-review.md`
 - Task 20 预算外修复简报：`.superpowers/sdd/task-20-review-extra.md`
 - Task 20 审查差异：初始 `.superpowers/sdd/review-07167bbfa..6ebd068ff.diff`；Round 1 fix `.superpowers/sdd/review-6ebd068ff..96455c43b.diff`；Round 2 final `.superpowers/sdd/review-6ebd068ff..09db65607.diff`；extra final `.superpowers/sdd/review-6ebd068ff..babe29e00.diff`
@@ -28,6 +28,32 @@
 - Task 25 最后审查 SHA：`53b273364`
 - Task 26 提交：`a72934b3a`
 - Task 26 最后审查 SHA：`a72934b3a`
+- Task 27 起点：`8c3b281f7`
+- Task 27 当前提交：`aff04f9cd`、`1cc41c72c`、`35dddd7ae`、`6c88f1891`、`0884b595c`
+- Task 27 中间 source/test SHA：`1cc41c72c`
+- Task 27 RED/GREEN：首次 `make test` 因两处 gofmt exit 2；格式修复后的诊断运行暴露 OAuth Images HeapAlloc RED；`1cc41c72c` 修复后精确测试、完整 unit handler 与展开式 full gate GREEN
+- Task 27 原样门禁补跑：`35dddd7ae` 上唯一一次 `make test` exit 2；default/lint 通过，unit handler 的 `TestOpenAIImages_OAuthTextIsReleasedBeforeBlockedUpstream` 为唯一失败，`85,602,768 > 77,228,584`
+- Task 27 根因补充：`openai_images.go` 的 security-audit 调用在 coordinator 与 legacy moderation 均为 nil 时仍求值 `parsed.ModerationBody()`，存活增量约等于 20 MiB prompt；前一修复只保护 content-moderation 调用
+- Task 27 当时待完成：最小化审计 payload 构造并复用；随后在新 source HEAD 重跑 focused、原样 `make test`、build、双 generate、静态检查与 remote integration，更新 formal verify report
+- Task 27 source 修复提交：`6c88f1891650e0ef18b0b5ae105b8f44a069a5a4`
+- Task 27 当前 source/test SHA：`6c88f1891650e0ef18b0b5ae105b8f44a069a5a4`
+- Task 27 本地 GREEN：OAuth target 1/1 与 10/10、moderation/security-audit siblings、完整 unit handler、lint、唯一一次原样 `make test`、显式版本 build、detached 双 generate 与 static 均 exit 0
+- Task 27 remote 阻塞：nonce `eecce42b226d4e03a8cb2d875070f12e` 的 create/preflight 在本机 Windows native fallback 将 `BatchMode=yes` 误解析为 `outputFormat`，exit 1；未上传或运行 integration，remote 目录与 local tar 已清理
+- Task 27 当时待完成：以新 nonce 和最小 preflight 命令受控重试 ssh-skill 门禁；成功后执行 source `6c88f1891` 的 integration、更新 formal verify report并进入 task review
+- Task 27 remote execution：nonce `a9bada9b52f244e8bfc39ba41e9f092d` preflight/upload/setup/download/cleanup 均成功；integration exit 1，`internal/server/routes.test` 与 `internal/service.test` linker 报 `no space left on device`
+- Task 27 migration 部分证据：两个 migration target 均 PASS，但 routes/service 未链接且完整 skip 集不完整，因此总体仍 BLOCKED
+- Task 27 当时待完成：只读确认耗尽的 filesystem、inode 与 cache/temp 占用；仅在证据支持后清理可再生测试缓存或改用有足够空间的临时目录，再以全新 nonce 重跑完整 integration
+- Task 27 ENOSPC 诊断：`/`、`/tmp`、Go cache/temp 均在 `/dev/mapper/rl-root`；35G 已用 97%，inode 9%；`/root/.cache/go-build` 14G，module cache 约 1G；Docker build cache/Testcontainers 均非根因
+- Task 27 最小处置：先确认无并发 Go build/test，再执行 `go clean -cache`；禁止 Docker prune、modcache 清理、未知临时目录删除或服务目录访问，复查空间后以全新 nonce 重跑
+- Task 27 final remote：无并发后仅清 GOCACHE，空间从 1.3G 恢复到 15G；nonce `860617d8c7d8427a944f30c0a915c894` integration exit 0、FAIL 0、migration targets 2/2 PASS、13 skip 已分类、cleanup成功
+- Task 27 formal report：`0884b595c9821e6b4ad61adc51838c3f3157e0c1`
+- Task 27 初次审查阶段：thorough task review，轮次 `0/2`
+- Task 27 审查修复轮次：`1/2`
+- Task 27 reviewer：`ses_04f59a5a7ffeNsEaJnfunKbbcj`，结论 `CHANGES_REQUIRED`
+- Task 27 未解决审查反馈：Important 1 生产 Wire 依赖恒非 nil，关闭态仍构造大 payload；Important 2 Images 允许路径重复执行 legacy moderation；Important 3 formal report 未原样记录最终 remote 各阶段命令；Minor 同步 audit-only frozen payload 缺直接测试
+- Task 27 用户设计裁决：统一 `checkSecurityAudit` 入口；使用线程安全、最多求值一次的 lazy provider，由 prompt mode 或完成 runtime/scope 判定后的 legacy moderation 按需触发；保留 eager 兼容入口
+- Task 27 设计增量：`9fd9976d7 docs: define lazy images audit flow`；OpenSpec strict validation PASS；用户已审阅并批准落盘文档
+- Task 27 修复计划：现有 plan 的 Task 27 步骤 4-7，要求生产形态 RED、最小 lazy 实现、新 source HEAD 全门禁和 formal report 原样命令
 - 已完成任务数：26
 - 审查模式：`thorough`
 - Task 20 审查修复轮次：常规 2/2 与用户授权 extra 1/1 已作为历史记录保留；关闭写回不追加新修复轮次

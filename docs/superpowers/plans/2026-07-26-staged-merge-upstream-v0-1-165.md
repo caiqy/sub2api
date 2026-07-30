@@ -846,6 +846,77 @@ finally {
 
   报告记录全部命令、退出码、远程日志位置、未执行项和残余风险。远程前置失败或清理异常必须标为失败，不能写为 manual pass。
 
+- [ ] **步骤 4：以生产形态 RED 固定统一审计与 lazy payload 契约**
+
+  修改：
+  - `backend/internal/service/content_moderation.go`、`backend/internal/service/content_moderation_test.go`；
+  - `backend/internal/securityaudit/coordinator.go`、`backend/internal/securityaudit/coordinator_legacy.go`、`backend/internal/securityaudit/coordinator_test.go`；
+  - `backend/internal/handler/security_audit_helper.go`、`content_moderation_helper.go`、`openai_images.go`、`openai_images_controls_test.go`。
+
+  先添加并运行以下真实测试：
+
+  ```powershell
+  go -C backend test -tags=unit ./internal/service -run '^TestContentModerationCheckLazy(SkipsBodyWhenDisabled|DefersBodyUntilRequestIsInScope)$' -count=1 -v
+  go -C backend test ./internal/securityaudit -run '^TestCoordinatorCheckLazy(EvaluatesBodyOnceAcrossPromptAndLegacy|SkipsBodyWhenAllEnginesAreOff)$' -count=1 -v
+  go -C backend test -tags=unit ./internal/handler -run '^TestOpenAIImages_(UnifiedAuditRunsLegacyOnce|SecurityAuditUsesFrozenPayloadBeforeRelease)$' -count=1 -v
+  ```
+
+  RED 必须分别证明：关闭态 provider 求值次数应为 `0`；blocking prompt 与 legacy 并行时求值次数应为 `1`；生产形态同步 Images 允许请求的 legacy moderation 调用次数应为 `1`；audit-only coordinator 收到完整 prompt/image。service/coordinator 新接口测试允许先因方法缺失而编译失败；Images 单次 legacy 测试必须在现有接口上真实失败为调用次数 `2`，不得只用编译失败或空断言代替行为 RED。
+
+- [ ] **步骤 5：实现唯一审计入口与 memoized lazy body**
+
+  保留现有 eager `Check` 入口，并增加以下窄接口：
+
+  ```go
+  func (s *ContentModerationService) CheckLazy(
+      ctx context.Context,
+      input ContentModerationCheckInput,
+      body func() []byte,
+  ) (*ContentModerationDecision, error)
+
+  func (c *Coordinator) CheckLazy(
+      ctx context.Context,
+      req Request,
+      body func() []byte,
+  ) Decision
+  ```
+
+  `ContentModerationService.CheckLazy` 必须先完成 runtime snapshot、全局开关、config mode、group 和 model scope 判定，再在首次提取输入前调用 `body`。`Coordinator.CheckLazy` 必须用 `sync.Once` memoize provider：prompt mode 为 Async/Blocking 时先把 frozen body 放入 prompt request；legacy engine 接收同一 provider 并通过 lazy service 入口执行；双引擎并发也只能求值一次。现有 eager `Check` 方法继续作为兼容 wrapper。
+
+  handler 增加与现有 `checkSecurityAudit` 对称的 lazy helper。`OpenAIGatewayHandler.Images` 删除 direct `checkContentModeration`，只调用一次统一 security-audit helper，并传入 `parsed.ModerationBody`；该同步调用必须在 `parsed.ReleaseText()` 前完成。legacy block 继续通过 `openAISecurityAuditError` 输出原有 status/code/message。
+
+  不新增配置、通用缓存框架或 HeapAlloc 重试，不提高 12 MiB ceiling。仅在冻结点保留一条简短注释，说明 provider 必须在文本释放前同步求值且可能承载大输入。
+
+- [ ] **步骤 6：GREEN、聚焦回归与源码提交**
+
+  依次重跑步骤 4 三条命令，并执行：
+
+  ```powershell
+  go -C backend test -tags=unit ./internal/handler -run '^TestOpenAIImages_(OAuthTextIsReleasedBeforeBlockedUpstream|ContentModerationUsesFrozenPayloadBeforeRelease|UnifiedAuditRunsLegacyOnce|SecurityAuditUsesFrozenPayloadBeforeRelease)$' -count=10 -v
+  go -C backend test ./internal/securityaudit -count=1
+  go -C backend test -tags=unit ./internal/service -count=1
+  go -C backend test -tags=unit ./internal/handler -count=1
+  Push-Location backend
+  try { golangci-lint run ./internal/handler/... ./internal/securityaudit/... ./internal/service/... } finally { Pop-Location }
+  git diff --check
+  ```
+
+  全部 GREEN 后，只暂存上述实际修改的 Go 源码和测试，提交：
+
+  ```powershell
+  git commit -m "fix: unify image security audit payload"
+  ```
+
+- [ ] **步骤 7：在新 source HEAD 重跑 Task 27 全门禁并补齐 formal report**
+
+  对步骤 6 的已提交 source HEAD 重新执行原样 `make test`、显式 `VERSION=0.1.165.1` build、detached worktree 两轮 backend generate/diff、静态检查和全新 nonce remote integration。remote 仍须用 `ssh-skill` scripts、已提交 SHA 的 `git archive`、重建 `.test-tmp`、设置 `TMPDIR/TMP/TEMP`，并原样执行 `CI=true GOFLAGS='-v' go test -tags=integration ./...`；不得增加 `-p`、重试测试、Docker prune 或构建 Sub2API 镜像。
+
+  formal verify report 必须逐条写出最终 nonce 的本地 archive、`ssh_execute.py` preflight/setup/integration/cleanup、`ssh_upload.py`、`ssh_download.py` 原样命令和退出码；记录两个 migration target、12/12、完整 skip、日志 hash、cleanup，并保留此前三次 `make test` 非零、SSH 参数解析失败和 ENOSPC 历史。全部通过后只暂存 formal report，提交：
+
+  ```powershell
+  git commit -m "docs: record unified image audit verification"
+  ```
+
 ### Task 28：验证拓扑、冲突、migration 与范围边界（OpenSpec 8.3）
 
 **文件：**
