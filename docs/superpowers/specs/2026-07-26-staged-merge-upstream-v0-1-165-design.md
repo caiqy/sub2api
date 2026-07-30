@@ -112,6 +112,22 @@ git merge --no-ff --no-commit <tag>
 
 Git 没有报告冲突时，仍检查 changed-files 是否触及入口、条件、DTO、配置解析、运行时缓存、scheduler factory、route registry、provider、schema 或生成结果。结构审查确定调用链影响，行为测试验证最终语义。
 
+### 5.3 OpenAI Images 审计入口与大请求生命周期
+
+Task 27 复审确认生产 Wire 会同时注入 legacy content moderation 与 unified security-audit coordinator。`Images` 不再先调用 legacy moderation、再调用包含同一 legacy adapter 的 coordinator；统一由 `checkSecurityAudit` 承担一次审核和错误映射，避免允许请求重复审核、入队或记录副作用。
+
+Images 审计 payload 使用线程安全且只求值一次的 lazy provider：
+
+1. handler 在 `OpenAIImagesRequest.ReleaseText` 前把 provider 交给统一审计入口，但不立即序列化 prompt/image；
+2. prompt audit 仅在有效模式为 Async 或 Blocking 时求值；
+3. legacy moderation 先读取同一次请求的运行时配置并确认全局开关、配置模式、分组和模型范围，再按需求值；
+4. 两个引擎同时需要 body 时共享同一份不可变 frozen payload；
+5. coordinator 缺失时，现有 legacy service fallback 仍走同一 lazy 语义。
+
+现有 eager 审计接口保留给其他调用方，新增 lazy 路径只服务于需要延后大 payload 构造的入口。运行态切换判定与实际 Check 在同一审核调用中完成，不在 handler 先读状态后再检查，避免配置热更新的 TOCTOU 窗口。
+
+该修复以失败测试固定四项行为：双关闭不求值 provider；双引擎最多求值一次；同步 Images 允许路径只执行一次 legacy moderation；audit-only 模式收到完整 prompt/image frozen payload。既有 20 MiB OAuth retention 与 moderation 阻断测试继续作为生命周期回归。
+
 ## 6. 生成文件与依赖
 
 - Ent：以 `backend/ent/schema/` 和生成入口为源，不手改生成结果。

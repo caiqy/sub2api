@@ -34,6 +34,10 @@
 - **WHEN** 目标 release 区间引入触及调度、路由或网关转发核心路径的新上游能力（如 composite group routing、OpenAI Live gateway）
 - **THEN** 维护流程 MUST 审查该能力入口调用链与本地定制（advanced/layered scheduler、Grok/platform sticky、prompt cache reuse、body replay）的交互，并记录不被绕过或改写的证据
 
+#### Scenario: 最终审查发现 Images 审计入口重复与关闭态大 payload 构造
+- **WHEN** 生产依赖图中的 unified security-audit coordinator 已包含 legacy content moderation，而 OpenAI Images handler 仍直接调用 legacy moderation，或仅按依赖指针决定是否序列化 prompt/image payload
+- **THEN** Images 请求 MUST 只经统一审计入口执行 legacy/prompt 审核，legacy moderation 对每个请求最多执行一次；审核 payload MUST 在线程安全 provider 中最多冻结一次，并只在有效 prompt audit 或完成运行态与范围判定后的 legacy moderation 确实需要时求值，同时保持在请求文本释放前可用
+
 #### Scenario: 同号不同名 migration 兼容
 - **WHEN** 上游新增 migration 与本地已发布 migration 使用相同数字前缀但文件名和用途不同
 - **THEN** 维护流程 MUST 保留双方完整文件名与既有校验和，验证迁移执行器在空库和已应用本地 migration 的升级库上正确执行全部文件，不得仅因数字前缀重复而重命名历史 migration

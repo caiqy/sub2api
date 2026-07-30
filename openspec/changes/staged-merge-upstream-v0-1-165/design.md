@@ -32,11 +32,13 @@
 7. **保留同号不同名 migration**：迁移执行器按完整文件名记录并按文件名排序，因此默认同时保留本地和上游 172/181 以及两个上游 186 文件，不擅自重命名已发布 migration；通过新库和已有本地 migration 记录的升级库测试验证依赖顺序，失败时再做最小兼容修复。
 8. **保持单 change**：六个 tag 是严格线性依赖，任一阶段失败都必须阻塞后续阶段，且共享同一能力矩阵与最终版本；拆成多个 change 只会复制门禁和上下文，不能独立交付或归档。
 9. **Integration 使用 local-serv-ai**：本 change 的 Docker integration 固定在 `local-serv-ai` 执行，不依赖协调工作站是否可用 Docker；每段把已提交 HEAD 通过 `git archive` 打包，并由 `ssh-skill` 上传到 `local-serv-ai` 临时目录。在 Linux 上按 `backend/scripts/test.ps1` 的等价语义重建 `backend/.test-tmp`、设置 `TMPDIR`/`TMP`/`TEMP`，再运行 `CI=true GOFLAGS='-v' go test -tags=integration ./...`，不要求远程安装 Make 或 PowerShell。全套命令必须成功且目标 migration/repository test 必须出现真实 PASS；无关环境型 skip 单独记录。只拉取 PostgreSQL/Redis Testcontainers 镜像，不构建 Sub2API 镜像、不部署、不触碰服务运行目录。
+10. **统一 OpenAI Images 审计入口并惰性冻结 payload**：Task 27 复审发现生产 Wire 中 unified coordinator 已包含 legacy moderation adapter，handler 再直接调用 legacy service 会重复审核。Images 改为只经 coordinator/fallback 入口审核；prompt 与图片 payload 由线程安全 provider 最多冻结一次，并只在 prompt audit 有效或 legacy moderation 完成运行态/范围判定后求值。状态判定与 Check 保持在同一调用边界，避免 runtime setting 热更新的 TOCTOU。
 
 ## Risks / Trade-offs
 
 - [composite group routing 改写调度入口，静默绕过本地 advanced/layered scheduler 定制] → 每段审查调度入口调用链；针对 Grok sticky + advanced scheduler 保留既有本地测试并要求持续绿灯。
 - [OpenAI Live gateway 重构 OpenAI 转发路径，破坏本地 prompt cache reuse / body replay] → v0.1.165 段专项 diff 审查 + 定向测试。
+- [Images 大 prompt 在审核关闭时仍被序列化，且允许请求重复执行 legacy moderation] → 统一 coordinator 入口、memoized lazy payload，并以生产形态测试固定关闭态零求值、双引擎单求值、legacy 单执行和 audit-only 完整 payload。
 - [同号不同名 migration 因排序或依赖关系在升级库失败] → 保留完整文件名，分别验证空库与已应用本地 172/181 的升级库；确认 `190_*_notx.sql` 非事务执行路径。
 - [客户端 IP 体系与本地安全/审计定制交叠] → v0.1.162 段核对 settings JSON backfill 与配置热更新路径。
 - [每段 full 门禁耗时高] → 接受；失败停段策略避免时间浪费在带病推进上。
