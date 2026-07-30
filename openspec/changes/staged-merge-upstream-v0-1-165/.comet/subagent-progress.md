@@ -1,10 +1,10 @@
 # 子代理进度
 
-- 当前任务：29 项中的第 28 项（OpenSpec 8.3）
+- 当前任务：29 项中的第 29 项（OpenSpec 8.4）
 - 当前阶段：`implementing`
-- 状态：Task 27 已通过最终独立复审；准备生成 Task 28 简报并验证拓扑、冲突、migration 与范围边界
-- 简报：`.superpowers/sdd/task-28-brief.md`
-- 报告：`.superpowers/sdd/task-28-report.md`
+- 状态：Task 28 已通过独立复审；准备生成 Task 29 简报并完成能力终审、浏览器烟测与 OpenSpec 收口
+- 简报：`.superpowers/sdd/task-29-brief.md`
+- 报告：`.superpowers/sdd/task-29-report.md`
 - Task 20 最终复审：`.superpowers/sdd/task-20-final-review.md`
 - Task 20 预算外修复简报：`.superpowers/sdd/task-20-review-extra.md`
 - Task 20 审查差异：初始 `.superpowers/sdd/review-07167bbfa..6ebd068ff.diff`；Round 1 fix `.superpowers/sdd/review-6ebd068ff..96455c43b.diff`；Round 2 final `.superpowers/sdd/review-6ebd068ff..09db65607.diff`；extra final `.superpowers/sdd/review-6ebd068ff..babe29e00.diff`
@@ -82,8 +82,15 @@
 - Task 27 formal report：`763db6ad47f2c39dad46af70c8da9ce72abb45fd docs: record blocking audit race verification`
 - Task 27 最终 reviewer：`ses_04e8eb8baffe4Mte2NT5MEo2E9`，`APPROVED`；六项前次问题全部 CLOSED，无 Critical/Important/Minor
 - Task 27 残余风险：race RED 需调度放大才命中；历史 EOF/1013、HeapAlloc 波动与远端 GOCACHE/磁盘容量风险继续保留，不改写为 PASS
-- Task 28 下一步：重新从当前 plan 生成简报；旧 `.superpowers/sdd/task-28-brief.md` 属于 v0.1.159 历史任务，不得作为本 change 要求
-- 已完成任务数：27
+- Task 28 简报：已从当前 plan 重新生成；旧 v0.1.159 Task 28 内容已替换，不作为本 change 要求
+- Task 28 范围：`de3fffdd76f79831b4503ebfc204b0dc4cd156e7..05fb9c33591d6ab9cb8d40d7a9347776ae9e6ae4`
+- Task 28 拓扑：六个 tag 均为 HEAD 祖先；first-parent 恰有六个 merge 且第二父逐项匹配固定 tag SHA；`upstream/main` ancestor 命令真实 exit 1，为预期范围边界 PASS
+- Task 28 静态与 migration：VERSION `0.1.165.1`；unmerged/marker 均 0；14/14 protected migration 存在，既有新库/升级库 2/2 与 12/12、同号 172/181、双 186、190 notx、幂等/checksum 证据已关联
+- Task 28 formal report：`05fb9c33591d6ab9cb8d40d7a9347776ae9e6ae4 docs: record topology and migration verification`
+- Task 28 reviewer：`ses_04e76904cffemCEPePbQ9hUIU9`，`APPROVED`；Spec PASS、document quality APPROVED，无 Critical/Important/Minor
+- Task 28 concern：Task 27/4 保留报告触发 LF/CRLF warning，但相关命令 exit 0，无 whitespace error、unmerged 或 conflict marker
+- Task 29 下一步：从当前 plan 生成简报；读取前端调试预览约束，完成能力矩阵、浏览器烟测和 OpenSpec/Comet 收口
+- 已完成任务数：28
 - 审查模式：`thorough`
 - Task 20 审查修复轮次：常规 2/2 与用户授权 extra 1/1 已作为历史记录保留；关闭写回不追加新修复轮次
 - Task 20 RED/GREEN：follow-up 范围 `babe29e00f18df9a0011d8464446654148d5eb53..4778e32dc879f682fd5774c1fb0c5a63867802c6` 的验证与归档已完成，审查无 Critical/Important

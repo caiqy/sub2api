@@ -923,7 +923,7 @@ finally {
 - 修改：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-verify.md`
 - 审查：`.git/` 图、`backend/migrations/`、`backend/internal/repository/migrations_runner.go`
 
-- [ ] **步骤 1：验证六个 tag 祖先和六个 merge 第二父**
+- [x] **步骤 1：验证六个 tag 祖先和六个 merge 第二父**
 
   执行：
   ```powershell
@@ -939,7 +939,7 @@ finally {
 
   预期：前六条退出码 `0`；first-parent 历史按六个 tag 顺序显示且第二父逐一等于固定表；最后一条必须非零，证明未把 release 后的 `upstream/main` 合入，并将此预期非零记录为范围证据。
 
-- [ ] **步骤 2：验证静态冲突、版本和全部 migration 集合**
+- [x] **步骤 2：验证静态冲突、版本和全部 migration 集合**
 
   执行：
   ```powershell

@@ -48,5 +48,5 @@
 
 - [x] 8.1 将 `backend/cmd/server/VERSION` 规范为 `0.1.165.1` 并确认 `openai-first-token-timeout` 未被任何 tag 恢复
 - [x] 8.2 运行最终 full verify：`make test`、`make build`、`local-serv-ai` Docker-backed integration、Ent/Wire 两次生成稳定性检查
-- [ ] 8.3 校验 Git 祖先关系（`v0.1.160`~`v0.1.165` 均为 HEAD 祖先）、6 个 `--no-ff` merge 节点、无冲突标记残留；确认 12 个上游 migration 与本地同号 172/181 均保留且新库/升级库验证通过
+- [x] 8.3 校验 Git 祖先关系（`v0.1.160`~`v0.1.165` 均为 HEAD 祖先）、6 个 `--no-ff` merge 节点、无冲突标记残留；确认 12 个上游 migration 与本地同号 172/181 均保留且新库/升级库验证通过
 - [ ] 8.4 按本地保护清单逐项完成能力级专项 review 并输出验证报告（不含推送/发版/部署）
