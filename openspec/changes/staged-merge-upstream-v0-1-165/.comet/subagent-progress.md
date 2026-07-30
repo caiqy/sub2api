@@ -1,10 +1,10 @@
 # 子代理进度
 
-- 当前任务：29 项中的第 27 项（OpenSpec 8.2）
+- 当前任务：29 项中的第 28 项（OpenSpec 8.3）
 - 当前阶段：`implementing`
-- 状态：Task 27 thorough reviewer 返回 CHANGES_REQUIRED；用户已批准“统一审计入口 + memoized lazy payload”设计，Design Doc/delta spec commit `9fd9976d7` 已通过 OpenSpec strict validation，准备第 1 轮修复
-- 简报：`.superpowers/sdd/task-27-brief.md`
-- 报告：`.superpowers/sdd/task-27-report.md`
+- 状态：Task 27 已通过最终独立复审；准备生成 Task 28 简报并验证拓扑、冲突、migration 与范围边界
+- 简报：`.superpowers/sdd/task-28-brief.md`
+- 报告：`.superpowers/sdd/task-28-report.md`
 - Task 20 最终复审：`.superpowers/sdd/task-20-final-review.md`
 - Task 20 预算外修复简报：`.superpowers/sdd/task-20-review-extra.md`
 - Task 20 审查差异：初始 `.superpowers/sdd/review-07167bbfa..6ebd068ff.diff`；Round 1 fix `.superpowers/sdd/review-6ebd068ff..96455c43b.diff`；Round 2 final `.superpowers/sdd/review-6ebd068ff..09db65607.diff`；extra final `.superpowers/sdd/review-6ebd068ff..babe29e00.diff`
@@ -29,14 +29,14 @@
 - Task 26 提交：`a72934b3a`
 - Task 26 最后审查 SHA：`a72934b3a`
 - Task 27 起点：`8c3b281f7`
-- Task 27 当前提交：`aff04f9cd`、`1cc41c72c`、`35dddd7ae`、`6c88f1891`、`0884b595c`
+- Task 27 提交：`aff04f9cd`、`1cc41c72c`、`35dddd7ae`、`6c88f1891`、`0884b595c`、`9fd9976d7`、`aa5b576fe`、`90b008901`、`ac3d1b833`、`417bbcc6a`、`763db6ad4`
 - Task 27 中间 source/test SHA：`1cc41c72c`
 - Task 27 RED/GREEN：首次 `make test` 因两处 gofmt exit 2；格式修复后的诊断运行暴露 OAuth Images HeapAlloc RED；`1cc41c72c` 修复后精确测试、完整 unit handler 与展开式 full gate GREEN
 - Task 27 原样门禁补跑：`35dddd7ae` 上唯一一次 `make test` exit 2；default/lint 通过，unit handler 的 `TestOpenAIImages_OAuthTextIsReleasedBeforeBlockedUpstream` 为唯一失败，`85,602,768 > 77,228,584`
 - Task 27 根因补充：`openai_images.go` 的 security-audit 调用在 coordinator 与 legacy moderation 均为 nil 时仍求值 `parsed.ModerationBody()`，存活增量约等于 20 MiB prompt；前一修复只保护 content-moderation 调用
 - Task 27 当时待完成：最小化审计 payload 构造并复用；随后在新 source HEAD 重跑 focused、原样 `make test`、build、双 generate、静态检查与 remote integration，更新 formal verify report
 - Task 27 source 修复提交：`6c88f1891650e0ef18b0b5ae105b8f44a069a5a4`
-- Task 27 当前 source/test SHA：`6c88f1891650e0ef18b0b5ae105b8f44a069a5a4`
+- Task 27 最终 source/test SHA：`417bbcc6a44c35b3e3ed16efb0bb86a4717401c9`
 - Task 27 本地 GREEN：OAuth target 1/1 与 10/10、moderation/security-audit siblings、完整 unit handler、lint、唯一一次原样 `make test`、显式版本 build、detached 双 generate 与 static 均 exit 0
 - Task 27 remote 阻塞：nonce `eecce42b226d4e03a8cb2d875070f12e` 的 create/preflight 在本机 Windows native fallback 将 `BatchMode=yes` 误解析为 `outputFormat`，exit 1；未上传或运行 integration，remote 目录与 local tar 已清理
 - Task 27 当时待完成：以新 nonce 和最小 preflight 命令受控重试 ssh-skill 门禁；成功后执行 source `6c88f1891` 的 integration、更新 formal verify report并进入 task review
@@ -54,7 +54,36 @@
 - Task 27 用户设计裁决：统一 `checkSecurityAudit` 入口；使用线程安全、最多求值一次的 lazy provider，由 prompt mode 或完成 runtime/scope 判定后的 legacy moderation 按需触发；保留 eager 兼容入口
 - Task 27 设计增量：`9fd9976d7 docs: define lazy images audit flow`；OpenSpec strict validation PASS；用户已审阅并批准落盘文档
 - Task 27 修复计划：现有 plan 的 Task 27 步骤 4-7，要求生产形态 RED、最小 lazy 实现、新 source HEAD 全门禁和 formal report 原样命令
-- 已完成任务数：26
+- Task 27 第 1 轮 RED：service/coordinator 缺 lazy 接口均 compile fail；生产形态 Images legacy-once 测试真实失败 `expected 1, actual 2`，audit-only 测试已可执行
+- Task 27 第 1 轮 source commit：`90b0089010c77d0fef1790e2e8cf3b675d4994cd fix: unify image security audit payload`；9 个计划内 Go 文件，源码/测试工作树 clean
+- Task 27 第 1 轮 GREEN：三组计划命令 exit 0；Images 4 targets `-count=10` 为 40/40；securityaudit、unit service、unit handler packages与聚焦 lint均 exit 0
+- Task 27 新 source full gate 首次结果：原样 `make test` exit 2，仅 `TestPassthroughLifecycle_LeaseLossSendsRetryClose` 客户端读取 EOF；服务端 trace 已发送 1013。精确 `-count=10` 为 9 PASS/1 同型 EOF，属于用户已明确接受的上游基线例外，但该非零不得称为 PASS
+- Task 27 第 1 轮当时断点：不重做源码/聚焦测试；继续记录 accepted nonzero，完成其余展开式组成、build、双 generate、static、新 nonce remote integration及 formal report原样命令
+- Task 27 第 1 轮 formal report：`ac3d1b833fc9591353d4e71427f027183bea4a5e docs: record unified image audit verification`
+- Task 27 第 1 轮最终本地：frontend lint/typecheck/Vitest 215/1626、显式版本 build、detached 双 generate与static均 exit 0；原样 `make test` exit 2仅 accepted lease-loss EOF/1013，未称 PASS
+- Task 27 第 1 轮最终 remote：nonce `547fff8e23a24a92ad566202331ba360`，source `90b008901`，integration exit 0、FAIL 0、migration targets 2/2 PASS、12 top-level + 1 nested skip、cleanup成功；log SHA-256 `d5bbe067dbbab72529073539aea60ef96f567e807b9a4c0591f374f685a021d6`
+- Task 27 控制器核对：本地 retained log hash一致，`^\s*--- SKIP:` count 13、migration PASS count 2、FAIL count 0；make transcript只有 lease-loss目标失败；`1cc41c72c`、`6c88f1891`、`90b008901`逐提交归属与报告一致
+- Task 27 第 1 轮 re-review 前 checkpoint：待生成 `0884b595c..ac3d1b833` package并派发 fresh reviewer；review-fix仍为 `1/2`
+- Task 27 第 1 轮 re-reviewer：`ses_04ee98634ffev7Ir0ZxXxe0K1T`，结论 `CHANGES_REQUIRED`；前次 Important 1/2/3 与 Minor 全部 CLOSED，Spec compliance PASS
+- Task 27 第 2 轮修复预算：`2/2`（最后常规轮次）
+- Task 27 第 2 轮 Important：`checkBlockingLazy` 两个 goroutine共享闭包 `req`，legacy 复制 slice header时 prompt 同时写 `req.Body`；`sync.Once` 只保护body provider，未保护 Request字段
+- Task 27 第 2 轮 Minor：在 `Coordinator.CheckLazy`/lazy legacy owning API补充 provider只允许在同步调用返回前求值、不得保留的生命周期契约
+- Task 27 progress 归因核对：`aa5b576fe` 由主协调器按 Comet 协议提交 plan + `.comet/subagent-progress.md`，不是 implementer夹带；Task 27 report 第 11 行已更正为仅禁止 subagent 暂存、允许协调器持久化 checkpoint
+- Task 27 第 2 轮验证要求：goroutine-local Request copy；focused test与Linux `go test -race ./internal/securityaudit`；新 source HEAD重新执行 accepted-exception口径的全门禁与formal report
+- Task 27 第 2 轮首次派发：`ses_04edfbc1cffexmHgdGEB35iT2B`，状态 BLOCKED；remote race临时对象已清理，无提交
+- Task 27 race 环境阻塞：Windows 与 local-serv-ai 均缺当前可用 CGO/gcc；未授权安装server package或拉取额外container，不能把未执行race写为PASS
+- Task 27 race 环境诊断动作：只读检查本机现有 gcc/clang/zig/WSL/MSYS 工具链；无可复用环境后交由用户决定是否授权最小工具链安装
+- Task 27 race 环境诊断：`ses_04edb76dfffesHTFWoLeTcawJb`，BLOCKED；Windows/Git Bash/Scoop/MSYS2/VS LLVM无编译器，WSL2 Ubuntu可启动但无Go与gcc
+- Task 27 race 决策点：推荐在已有Go 1.26.5的local-serv-ai安装最小gcc后继续；备选为用户明确接受无race证据并仅依赖代码修复/常规测试，或在WSL安装完整Go+gcc工具链
+- Task 27 race 用户裁决：明确选择在local-serv-ai安装gcc验证；先检查OS/包管理器/并发安装，只安装gcc，不自动卸载、不Docker处置
+- Task 27 gcc 恢复：local-serv-ai 安装 gcc 11.5.0；dnf 自动安装 12 个包并升级 6 个 glibc/libgcc/libgomp 依赖，按授权保留；未改 Go/Docker/服务/生产数据
+- Task 27 race RED/GREEN：source `90b008901` 的同一 target 在 `-count=1` 未命中、`-count=100` 命中 DATA RACE；`417bbcc6a` 以 goroutine-local Request copy 修复，Linux race `-count=10` GREEN
+- Task 27 最终门禁：source `417bbcc6a` 原样 `make test` exit 0；显式版本 build、detached 双 generate、static 均 exit 0；nonce `936ea72e3c4140ca930f88d07e0f34a5` integration exit 0、FAIL 0、migration 2/2 PASS、13 skip、cleanup 成功
+- Task 27 formal report：`763db6ad47f2c39dad46af70c8da9ce72abb45fd docs: record blocking audit race verification`
+- Task 27 最终 reviewer：`ses_04e8eb8baffe4Mte2NT5MEo2E9`，`APPROVED`；六项前次问题全部 CLOSED，无 Critical/Important/Minor
+- Task 27 残余风险：race RED 需调度放大才命中；历史 EOF/1013、HeapAlloc 波动与远端 GOCACHE/磁盘容量风险继续保留，不改写为 PASS
+- Task 28 下一步：重新从当前 plan 生成简报；旧 `.superpowers/sdd/task-28-brief.md` 属于 v0.1.159 历史任务，不得作为本 change 要求
+- 已完成任务数：27
 - 审查模式：`thorough`
 - Task 20 审查修复轮次：常规 2/2 与用户授权 extra 1/1 已作为历史记录保留；关闭写回不追加新修复轮次
 - Task 20 RED/GREEN：follow-up 范围 `babe29e00f18df9a0011d8464446654148d5eb53..4778e32dc879f682fd5774c1fb0c5a63867802c6` 的验证与归档已完成，审查无 Critical/Important

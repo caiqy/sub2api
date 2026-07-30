@@ -829,7 +829,7 @@ finally {
 - 修改：`docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-verify.md`
 - 审查：所有矩阵测试和 `backend/internal/repository/migrations_schema_integration_test.go`
 
-- [ ] **步骤 1：重跑全量本地和生成门禁**
+- [x] **步骤 1：重跑全量本地和生成门禁**
 
   执行通用本地门禁脚本，并再次运行能力矩阵中的所有非 integration 聚焦测试：
   ```powershell
@@ -838,15 +838,15 @@ finally {
 
   预期：`make test`、`make build`、两次生成和静态检查均通过，版本精确为 `0.1.165.1`。Docker-backed migration 回归只在步骤 2 的远程 integration 中计为行为验证。
 
-- [ ] **步骤 2：重跑最终 local-serv-ai integration**
+- [x] **步骤 2：重跑最终 local-serv-ai integration**
 
   用 `$stage = 'final-verify'` 执行通用远程门禁脚本。预期：提交后的最终 `HEAD` 被 `git archive` 打包，远程预检和 Linux 原生等价命令 `CI=true GOFLAGS='-v' go test -tags=integration ./...` 成功，`TestMigrationsRunner_UpgradesLocalV01596AcrossUpstreamStages` 明确 PASS 并验证最终 12/12；其他 skip 已分类记录，日志下载且远程临时目录已删除。
 
-- [ ] **步骤 3：记录最终自动验证结果**
+- [x] **步骤 3：记录最终自动验证结果**
 
   报告记录全部命令、退出码、远程日志位置、未执行项和残余风险。远程前置失败或清理异常必须标为失败，不能写为 manual pass。
 
-- [ ] **步骤 4：以生产形态 RED 固定统一审计与 lazy payload 契约**
+- [x] **步骤 4：以生产形态 RED 固定统一审计与 lazy payload 契约**
 
   修改：
   - `backend/internal/service/content_moderation.go`、`backend/internal/service/content_moderation_test.go`；
@@ -863,7 +863,7 @@ finally {
 
   RED 必须分别证明：关闭态 provider 求值次数应为 `0`；blocking prompt 与 legacy 并行时求值次数应为 `1`；生产形态同步 Images 允许请求的 legacy moderation 调用次数应为 `1`；audit-only coordinator 收到完整 prompt/image。service/coordinator 新接口测试允许先因方法缺失而编译失败；Images 单次 legacy 测试必须在现有接口上真实失败为调用次数 `2`，不得只用编译失败或空断言代替行为 RED。
 
-- [ ] **步骤 5：实现唯一审计入口与 memoized lazy body**
+- [x] **步骤 5：实现唯一审计入口与 memoized lazy body**
 
   保留现有 eager `Check` 入口，并增加以下窄接口：
 
@@ -887,7 +887,7 @@ finally {
 
   不新增配置、通用缓存框架或 HeapAlloc 重试，不提高 12 MiB ceiling。仅在冻结点保留一条简短注释，说明 provider 必须在文本释放前同步求值且可能承载大输入。
 
-- [ ] **步骤 6：GREEN、聚焦回归与源码提交**
+- [x] **步骤 6：GREEN、聚焦回归与源码提交**
 
   依次重跑步骤 4 三条命令，并执行：
 
@@ -907,7 +907,7 @@ finally {
   git commit -m "fix: unify image security audit payload"
   ```
 
-- [ ] **步骤 7：在新 source HEAD 重跑 Task 27 全门禁并补齐 formal report**
+- [x] **步骤 7：在新 source HEAD 重跑 Task 27 全门禁并补齐 formal report**
 
   对步骤 6 的已提交 source HEAD 重新执行原样 `make test`、显式 `VERSION=0.1.165.1` build、detached worktree 两轮 backend generate/diff、静态检查和全新 nonce remote integration。remote 仍须用 `ssh-skill` scripts、已提交 SHA 的 `git archive`、重建 `.test-tmp`、设置 `TMPDIR/TMP/TEMP`，并原样执行 `CI=true GOFLAGS='-v' go test -tags=integration ./...`；不得增加 `-p`、重试测试、Docker prune 或构建 Sub2API 镜像。
 
