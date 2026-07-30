@@ -45,3 +45,8 @@
 #### Scenario: Integration 运行环境不可用或目标测试被跳过
 - **WHEN** Docker/Testcontainers 运行环境不可用、工具链前置不满足，或本阶段要求的 migration/repository integration test 未实际执行并通过
 - **THEN** 当前阶段 MUST 记录为阻塞且 MUST NOT 记为门禁通过，也不得进入下一 release tag
+
+#### Scenario: 从未合入默认分支的已验证分支发布测试版本
+- **WHEN** 用户明确授权从已通过 full verify 的隔离分支发布本地四段式 tag，并将 CI 镜像更新到指定测试服务器验收
+- **THEN** Release workflow MUST 正常产出精确版本二进制、checksum 与镜像，但 MUST 在同步默认分支 VERSION 前验证 tag commit 是默认分支 HEAD 的祖先；不满足时 MUST 跳过同步，禁止产生 VERSION-only 主线提交
+- **AND** 测试服务器 MUST 只拉取 CI 发布的镜像，更新前 MUST 记录旧 image digest 并备份测试数据库，更新后 MUST 验证 health、revision/migration 与关键页面；不得在服务器构建 Sub2API 镜像或把失败烟测记为通过

@@ -14,10 +14,11 @@
 - 每段合并独立通过 full 门禁：根目录 `make test`、`make build`、Docker-backed integration、Ent/Wire 两次生成稳定、migration 新库/升级库兼容、无冲突标记。
 - 本地保护清单内的每项能力在最终 HEAD 上仍然成立（能力级验收，不止文件级 diff）。
 - `backend/cmd/server/VERSION` 最终规范为 `0.1.165.1`，全量 full verify 通过。
+- 按用户最终授权，从当前隔离分支发布 `v0.1.165.1` 并在 racknerd 测试服务器完成同版本前后端浏览器验收，同时保持默认分支源码/版本一致性。
 
 **Non-Goals:**
 
-- 不推送远端、不打 tag、不触发 Release workflow、不部署（归档后另行发版）。
+- 不合回 `main`，不更新 dmit/local-serv-ai 等其他环境，不在服务器构建 Sub2API 镜像；原“不推送/发版/部署”边界仅由用户明确放宽为当前 feature tag Release 与 racknerd 测试更新。
 - 不恢复已移除的 `openai-first-token-timeout` 契约。
 - 不在本 change 内新增本地功能或重构上游代码。
 
@@ -33,6 +34,8 @@
 8. **保持单 change**：六个 tag 是严格线性依赖，任一阶段失败都必须阻塞后续阶段，且共享同一能力矩阵与最终版本；拆成多个 change 只会复制门禁和上下文，不能独立交付或归档。
 9. **Integration 使用 local-serv-ai**：本 change 的 Docker integration 固定在 `local-serv-ai` 执行，不依赖协调工作站是否可用 Docker；每段把已提交 HEAD 通过 `git archive` 打包，并由 `ssh-skill` 上传到 `local-serv-ai` 临时目录。在 Linux 上按 `backend/scripts/test.ps1` 的等价语义重建 `backend/.test-tmp`、设置 `TMPDIR`/`TMP`/`TEMP`，再运行 `CI=true GOFLAGS='-v' go test -tags=integration ./...`，不要求远程安装 Make 或 PowerShell。全套命令必须成功且目标 migration/repository test 必须出现真实 PASS；无关环境型 skip 单独记录。只拉取 PostgreSQL/Redis Testcontainers 镜像，不构建 Sub2API 镜像、不部署、不触碰服务运行目录。
 10. **统一 OpenAI Images 审计入口并惰性冻结 payload**：Task 27 复审发现生产 Wire 中 unified coordinator 已包含 legacy moderation adapter，handler 再直接调用 legacy service 会重复审核。Images 改为只经 coordinator/fallback 入口审核；prompt 与图片 payload 由线程安全 provider 最多冻结一次，并只在 prompt audit 有效或 legacy moderation 完成运行态/范围判定后求值。状态判定与 Check 保持在同一调用边界，避免 runtime setting 热更新的 TOCTOU。
+11. **feature tag Release 不同步未包含该 tag 的默认分支**：Release workflow 在 `sync-version-file` 前做 ancestry guard。当前分支可发布 `v0.1.165.1` 并产出完整 Release/GHCR；因 `main` 仍为 `0.1.159.6` 且不包含该 tag，VERSION 同步必须跳过，禁止制造 VERSION-only 主线提交。
+12. **racknerd 作为发布后测试环境**：只拉取 CI 发布的精确版本镜像，更新前记录旧 digest 并备份测试数据库；更新后验证 health、revision/migration 和关键后台页面。服务器禁止构建镜像，烟测禁止保存设置或触发外部连接测试。
 
 ## Risks / Trade-offs
 
@@ -44,12 +47,15 @@
 - [每段 full 门禁耗时高] → 接受；失败停段策略避免时间浪费在带病推进上。
 - [release tag 内 `VERSION` 比 tag 名低一个三段式版本，可能误降本地版本] → 每段把版本元数据作为独立冲突决策记录，不用它推断 release 内容；最终统一设为 `0.1.165.1`。
 - [远程 integration 环境缺少正确 Go 工具链、Docker 或目标 migration/repository test 未运行] → 每段远程执行前检查 Go 版本与 `docker info`，设置 `CI=true` 令整套 Docker 缺失路径失败，并在 verbose 日志中确认目标测试 PASS；任一前置不满足即阻塞。
+- [从 feature tag 发布后 workflow 无条件同步默认分支 VERSION] → 在同步 job 内验证 tag commit 是默认分支 HEAD 祖先；不满足时明确记录并跳过同步。
+- [racknerd 更新后 migration 或运行时不兼容] → 更新前保存数据库备份和旧 image digest；失败时停止验收并按两者回退测试环境。
 
 ## Migration Plan
 
-1. 本 change 只集成源码，不执行生产部署或生产数据库 migration。
+1. 本 change 不执行生产部署或生产数据库 migration；用户授权的 racknerd 更新只作用于测试服务器及其测试数据库。
 2. 每段在隔离分支验证 migration：保留所有已发布文件及校验和，通过 `ssh-skill` 在 `local-serv-ai` 临时目录运行空库和已有本地 migration 记录的升级路径；不得为消除编号重复而重命名历史文件。
 3. 任一阶段失败即停在当前 merge 节点修复；尚未合入主线时可直接放弃隔离分支，不需要生产回滚。
+4. racknerd 更新只运行 CI 镜像；更新前备份测试数据库并记录旧 digest，浏览器验收失败时恢复测试环境，不触碰其他服务器。
 
 ## Open Questions
 

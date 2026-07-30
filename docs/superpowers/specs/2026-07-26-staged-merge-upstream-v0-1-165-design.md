@@ -213,6 +213,16 @@ Testcontainers 只拉取仓库既有的 PostgreSQL/Redis 测试镜像。禁止�
 - OpenSpec 校验通过；
 - 前端启动本地 dev server，通过 Chrome DevTools 烟测本次变更触及的关键后台页面，无控制台或关键网络错误。
 
+### 8.4 隔离分支测试发布与 racknerd 验收
+
+本地没有可运行的 PostgreSQL/Redis，已有局域网后端仍为 `v0.1.159.6`，不能为当前 `v0.1.165.1` 前端提供有效烟测。用户因此明确扩展最终验收范围：允许从当前隔离分支发布 `v0.1.165.1`，并将 CI 产物更新到 racknerd 测试服务器。
+
+1. Release workflow 在同步默认分支 VERSION 前检查发布 tag 是否为默认分支 HEAD 的祖先；feature tag 不满足时只跳过 VERSION 同步，Release、二进制和 GHCR 镜像仍正常产出。
+2. 版本严格使用当前 HEAD 已包含的最高上游三段式 tag `v0.1.165` 对应首个本地四段式版本 `v0.1.165.1`。推送当前分支和 annotated tag 后，将仓库变量 `SIMPLE_RELEASE` 临时设为 `false`，以 `workflow_dispatch` 触发目标 tag；核验 workflow 成功、Linux amd64 archive、`checksums.txt` 及精确版本 GHCR 镜像后恢复原变量。
+3. racknerd 只拉取并运行 CI 发布的 `ghcr.io/caiqy/sub2api:0.1.165.1`/同 digest `latest`，禁止服务器构建 Sub2API 镜像。更新前记录旧 image digest、容器状态并备份测试数据库；更新后检查容器 health、版本 label、revision、migration 和关键 API。
+4. 使用 Chrome DevTools 直接烟测 racknerd 上由同一镜像提供的前后端：Settings security tab 的客户端 IP/step-up、backup tab 的 S3/image storage、`/admin/risk-control`、`/admin/prompt-audit`、payment tab 的 Alipay。只读验证页面、关键 GET 和控制台，不保存设置或触发连接测试。
+5. 失败时停止收口。应用回滚使用更新前 image digest；若 migration 导致旧应用不兼容，则同时使用更新前数据库备份恢复测试库。无论成功失败，都保留 workflow、镜像 digest、备份、健康检查和浏览器证据。
+
 ## 9. 错误处理与回退
 
 - 基线失败：停在首个 merge 前，先区分既有失败与环境阻塞。
@@ -222,6 +232,8 @@ Testcontainers 只拉取仓库既有的 PostgreSQL/Redis 测试镜像。禁止�
 - Docker/远程工具链不可用、全套 integration 失败或目标 migration/repository test 未 PASS：阶段阻塞，不降级为 manual pass。
 - 生成不稳定：回到 schema/provider/manifest 源修复，不维护不可复现生成物。
 - 最终验证失败：不得进入 archive 或分支收尾。
+- feature tag 不在默认分支祖先链：Release 可以继续，但必须跳过默认分支 VERSION 同步。
+- racknerd 更新或浏览器烟测失败：不勾选 OpenSpec 8.4；按更新前 digest/数据库备份回退测试环境，不影响其他服务器。
 
 合并仍在隔离分支时，回退方式是放弃该分支/工作区。若后续经用户选择合入主线，则按 merge 节点和对应兼容修复 revert，不改写已推送历史。
 
@@ -232,4 +244,4 @@ Testcontainers 只拉取仓库既有的 PostgreSQL/Redis 测试镜像。禁止�
 - `docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-build.md`：六段冲突台账、能力矩阵、命令与结果；
 - `docs/superpowers/reports/2026-07-26-staged-merge-upstream-v0-1-165-verify.md`：最终验证结论、残余风险和未执行项。
 
-完成要求：六个 tag 顺序成为 HEAD 祖先；29 项 OpenSpec tasks 完成；每段本地与远程 full 门禁真实执行并通过；同号 migration、新上游能力与本地定制均有证据；`VERSION=0.1.165.1`；唯一批准移除项保持移除；不存在未解释回归、未处理 `gap` 或被当作通过的跳过项。
+完成要求：六个 tag 顺序成为 HEAD 祖先；29 项 OpenSpec tasks 完成；每段本地与远程 full 门禁真实执行并通过；同号 migration、新上游能力与本地定制均有证据；`VERSION=0.1.165.1`；feature tag Release 与 racknerd 浏览器烟测通过且未产生默认分支 VERSION-only 提交；唯一批准移除项保持移除；不存在未解释回归、未处理 `gap` 或被当作通过的跳过项。
