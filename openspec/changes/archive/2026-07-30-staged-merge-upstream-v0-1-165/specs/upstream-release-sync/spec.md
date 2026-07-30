@@ -18,7 +18,7 @@
 ### Requirement: 合并后验证本地关键能力
 维护流程 SHALL 在每个分段 merge 后运行完整分段门禁（后端默认/unit/lint、前端 lint/typecheck/Vitest、前后端构建、Docker-backed integration、生成代码稳定性、migration 新库与升级库兼容性、冲突标记检查）及该阶段受影响能力的能力级审查，并在最终阶段执行完整自动验证和本地能力专项 review。测试通过 MUST NOT 替代能力级审查结论。
 
-#### Scenario: 分段 full 门禁通过
+#### Scenario: 分段自动验证通过
 - **WHEN** 一个目标 tag 的 merge、冲突处理和兼容修复完成
 - **THEN** 维护流程 MUST 运行根目录 `make test` 与 `make build`；在 Linux Docker 环境中按 `backend/scripts/test.ps1` 的等价语义重建 `backend/.test-tmp`、设置 `TMPDIR`/`TMP`/`TEMP` 并运行 `CI=true GOFLAGS='-v' go test -tags=integration ./...`；同时完成 Ent/Wire 两次生成稳定性检查、migration 新库与已有本地记录升级路径、冲突标记检查，以及该 tag 触及能力的映射审查，全部通过后才能进入下一阶段
 

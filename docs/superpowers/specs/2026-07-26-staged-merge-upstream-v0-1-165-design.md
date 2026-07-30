@@ -2,6 +2,8 @@
 comet_change: staged-merge-upstream-v0-1-165
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-07-30-staged-merge-upstream-v0-1-165
+status: final
 ---
 
 # 分段合并上游 v0.1.165 技术设计
