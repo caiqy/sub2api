@@ -9,7 +9,7 @@
 - 最终版本：`0.1.165.1`。
 - 本轮发现并提交五个修复：`aff04f9cd` 仅格式化两个 WebSocket ownership 路径；`1cc41c72c` 避免 content moderation 未配置时构造完整 Images moderation payload，并使 OAuth retention fixture 的 started 信号可重入；`6c88f1891` 避免 content moderation 与 security audit 均未配置时仍构造完整 Images audit payload；`90b008901` 以一个 memoized lazy body 统一 Images 的 prompt/legacy security audit，消除生产形态重复 legacy 调用；`417bbcc6a` 为 blocking prompt/legacy goroutine 分别复制 `Request`，消除共享 `req.Body` 数据竞争并补充 lazy provider 生命周期契约。
 - 最终 source/test HEAD 的 Linux race GREEN、完整原样 `make test`、版本化 Windows build、两轮 Ent/Wire generate、静态检查和全新 nonce 远程 integration 均 exit `0`；最终 Vitest 为 215 files / 1626 tests，integration 为 FAIL `0`、migration `2/2`、13 skips。此前 source `90b008901` 的原样 `make test` EOF/1013 非零、首次 SSH preflight 本机解析失败、remote ENOSPC、race `-count=1` 未命中及放大后 DATA RACE RED 均继续保留，不改写为 PASS。
-- Task 28 完整 ancestry/六个 merge 第二父验证、Task 29 浏览器烟测/OpenSpec 收口均未执行，本报告不声称这些任务完成。
+- Task 28 已在验证基线 `de3fffdd76f79831b4503ebfc204b0dc4cd156e7` 完成完整 ancestry、六个 merge 第二父、范围边界和 migration 静态复核，证据见文末 Task 28 专节；Task 29 浏览器烟测与 OpenSpec 8.4 收口仍未执行，本报告不声称这些后续任务完成。
 
 ## 起始状态
 
@@ -190,7 +190,7 @@ make "VERSION=0.1.165.1" "SHELL=D:/scoop/shims/bash.exe" build
 - VERSION assertion：exit `0`，`version=0.1.165.1`。
 - `git diff -- opencode.json`：exit `0`，无输出。
 - protected migration presence：exit `0`，count `14`。存在本地 `172_video_per_second_billing_metadata.sql`、`181_group_duplicate_operation_id.sql`，上游同号 `172_composite_model_routes.sql`、`181_prompt_audit.sql`，以及 182、183、184、185、双 186、187、188、189、`190_add_users_email_alias_dedup_index_notx.sql`。
-- 此处未执行 Task 28 的完整 tag ancestry/六个 merge 第二父检查，不作相关声明。
+- Task 28 后续已完成完整 tag ancestry、六个 merge 第二父和范围边界检查，见文末 Task 28 专节；本段仍只记录 Task 27 当时的静态证据。
 - 最终 source/test commit 的同组静态检查再次通过：无 unmerged index/diff、tracked conflict marker count `0`、backend/frontend legacy first-token count `0`、VERSION 为 `0.1.165.1`、`opencode.json` 无 diff，14 个 protected migration 全部存在且 missing count `0`。
 
 ## Remote final integration
@@ -534,7 +534,7 @@ python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu;
 
 ## 未执行项与残余风险
 
-- 未执行 Task 28 完整 ancestry、merge parent 和范围边界验证；本轮静态 migration presence 不能替代 Task 28。
+- Task 28 后续已完成完整 ancestry、merge parent、范围边界与 migration 静态复核，见文末 Task 28 专节。
 - 未执行 Task 29 Chrome DevTools 前端烟测、能力终审、OpenSpec validate/tasks/progress/comet 收口。
 - 未 push、tag、release、deploy、构建 Sub2API 镜像或触发 workflow。
 - Task 25 遗留：Grok 在 request build 前设置 attempted 标志；client-disconnect drain lifecycle regression 使用固定 `50ms` 排序延迟。当前命名矩阵和完整门禁均通过，但这两项仍是非阻断测试/诊断风险。
@@ -542,3 +542,94 @@ python ~/.claude/skills/ssh-skill/scripts/ssh_execute.py local-serv-ai "set -eu;
 - Windows 当前仍为 `CGO_ENABLED=0` 且无 gcc，但本轮已在 Linux Go `1.26.5` + gcc `11.5.0` 上取得 source `90b008901` 的 DATA RACE RED，并在最终 source `417bbcc6a` 上完成同一 target `-count=10` race GREEN。
 - 流程 concern：所有历史 `make test` 结果均已保留；source `90b008901` 的原样 exit `2` 仍只按用户批准的 EOF/1013 基线例外接受且未称 PASS。最终 source `417bbcc6a` 的原样 `make test` 是另一次唯一执行并真实 exit `0`；首次 SSH preflight 本机解析失败、remote ENOSPC、race `-count=1` 未命中和 `-count=100` DATA RACE exit `1` 均保持真实历史。
 - gcc 安装由用户明确授权，但 dnf 自动依赖求解除新增 12 个包外还升级了 6 个 glibc/libgcc/libgomp 包；未自动卸载。远程共享根卷历史曾仅余 `1.3G`，本轮 integration cleanup 时可用 `11G`、使用率 `70%`；长期仍有 GOCACHE 增长风险，后续门禁应先观察容量。
+
+## Task 28 拓扑、范围边界与 migration 静态复核（OpenSpec 8.3）
+
+### 结论与范围
+
+- 状态：`DONE_WITH_CONCERNS`。验证基线及 Task 28 起始 HEAD 为 `de3fffdd76f79831b4503ebfc204b0dc4cd156e7`，分支为 `feature/20260726/staged-merge-upstream-v0-1-165`。
+- 六个固定 tag commit 均为 HEAD 祖先；指定 first-parent 范围恰有六个 merge，顺序、merge SHA 与第二父全部匹配 v0.1.160 至 v0.1.165 固定表。
+- `upstream/main` 不是 HEAD 祖先，命令真实 exit `1`；这是未合入 release 后上游主线的预期范围边界 PASS，不是命令成功或 exit `0`。
+- VERSION 为 `0.1.165.1`，unmerged 路径为 0，真实 tracked conflict marker 为 0，14 个 protected migration 全部存在。
+- 本节仅完成 Task 28/OpenSpec 8.3 的只读拓扑与静态复核；没有重跑 remote integration，没有修改源码、migration、OpenSpec tasks/progress 或 plan。Task 29 与 OpenSpec 8.4 仍未完成。
+
+### 步骤 1：祖先、first-parent merge 与范围边界
+
+原样执行：
+
+```powershell
+git merge-base --is-ancestor 8bfbc5ca99bf2c0ac96e0f29ffd35eb6aca27e62 HEAD
+git merge-base --is-ancestor 19149ca196eeae4a4482e5299dc6fa4ba0b06c8c HEAD
+git merge-base --is-ancestor 27f094e0960ebd8e52de7ff7e763c6fec2ff4057 HEAD
+git merge-base --is-ancestor d0bdd7e771636a8d315f542cafd39484f39bd60c HEAD
+git merge-base --is-ancestor cd8bb98c44303b2c8f04c0da340447c992f0cb7d HEAD
+git merge-base --is-ancestor e9a58c1cb8b5ef626a75c93b4d953fde5e67aa29 HEAD
+git log --first-parent --merges --format='%H %P %s' '075abc07399d6154130d2a2695fb24c785acd69c..HEAD'
+git merge-base --is-ancestor upstream/main HEAD
+```
+
+- 前六条 ancestry 命令依次均 exit `0`。
+- first-parent 命令 exit `0`，输出由新到旧精确为六条；反向即实际 v0.1.160 到 v0.1.165 的合入顺序：
+
+```text
+dc3df2d573f3e0601226075caed8c6e7ba85718a 34702ad029eaa1a11a2145efbd7fcf3485ab991a e9a58c1cb8b5ef626a75c93b4d953fde5e67aa29 merge: upstream v0.1.165
+6994599211d3714e30b67cc61ef0834a94c34610 07167bbfa44ecd702cf32268ad98eabb0dbb6c65 cd8bb98c44303b2c8f04c0da340447c992f0cb7d merge: upstream v0.1.164
+02abe1574bf8044a1b180e62b002f58f9928d88f b7b7bba6952460bb7cc38f1d41a0de95c449bcb8 d0bdd7e771636a8d315f542cafd39484f39bd60c merge: upstream v0.1.163
+8bda73544d6e26a323f101e5c68981634f0375ab 940c5cfcf390ecbfd2e041fb2b46c99846e6ea3e 27f094e0960ebd8e52de7ff7e763c6fec2ff4057 merge: upstream v0.1.162
+f2158292c7ff3de4caa7ec22f9b7148400948f08 3fc60752acc459ecc37cd50b40df4a1f84ce3b62 19149ca196eeae4a4482e5299dc6fa4ba0b06c8c merge: upstream v0.1.161
+e04cb1aa2c2554a04bec55f9b4393d3efd2eb693 d3e0c596ebff2298d07a3f4f336c16aa653cb840 8bfbc5ca99bf2c0ac96e0f29ffd35eb6aca27e62 merge: upstream v0.1.160
+```
+
+- 因而六个固定对应关系逐项成立：`e04cb1aa...` -> `8bfbc5ca...`、`f2158292...` -> `19149ca1...`、`8bda7354...` -> `27f094e0...`、`02abe157...` -> `d0bdd7e7...`、`69945992...` -> `cd8bb98c...`、`dc3df2d5...` -> `e9a58c1c...`。
+- 最后一条 `git merge-base --is-ancestor upstream/main HEAD` 真实 exit `1`、无输出，按 brief 作为范围边界 PASS 保留。
+
+### 步骤 2：版本、冲突与 protected migrations
+
+原样执行：
+
+```powershell
+Get-Content backend/cmd/server/VERSION
+git diff --check
+git diff --name-only --diff-filter=U
+$markers = @(git grep -n -E '^(<<<<<<< .+|=======|>>>>>>> .+)$' -- . ':!docs/superpowers/reports/**')
+if ($LASTEXITCODE -notin @(0, 1)) { throw 'conflict marker scan failed' }
+if ($markers.Count -ne 0) { $markers; throw 'conflict markers remain' }
+$migrationMatches = @(git ls-tree -r --name-only HEAD backend/migrations | Select-String -Pattern '172_composite_model_routes.sql|172_video_per_second_billing_metadata.sql|181_prompt_audit.sql|181_group_duplicate_operation_id.sql|182_prompt_audit_full_prompt.sql|183_ops_ingress_reject_aggregates.sql|184_auth_cache_invalidation_outbox.sql|185_group_reasoning_effort_policy.sql|186_alipay_mobile_precreate_deep_link.sql|186_group_auth_cache_image_generation.sql|187_add_usage_log_session_id.sql|188_allow_live_usage_request_type.sql|189_add_group_allow_live.sql|190_add_users_email_alias_dedup_index_notx.sql')
+if ($migrationMatches.Count -ne 14) { $migrationMatches; throw "expected 14 protected migrations, got $($migrationMatches.Count)" }
+```
+
+- `Get-Content` exit `0`，唯一版本内容为 `0.1.165.1`。
+- `git diff --check` exit `0`，无 whitespace error；它只为禁止修改/暂存的 `.superpowers/sdd/task-27-report.md` 与 `.superpowers/sdd/task-4-report.md` 打印工作树 LF/CRLF warning。
+- `git diff --name-only --diff-filter=U` exit `0`，没有 unmerged 路径；它打印相同的两个保留文件 LF/CRLF warning。
+- marker 扫描中的原始 `git grep` exit `1`，表示零匹配；允许退出码 guard 与 count guard 均正常完成、未 throw，`$markers.Count=0`，整个 marker block exit `0`。
+- protected migration 管道中的 `git ls-tree` exit `0`，count guard 正常完成、未 throw，`$migrationMatches.Count=14`，整个 migration block exit `0`。完整集合为：
+
+```text
+172_composite_model_routes.sql
+172_video_per_second_billing_metadata.sql
+181_group_duplicate_operation_id.sql
+181_prompt_audit.sql
+182_prompt_audit_full_prompt.sql
+183_ops_ingress_reject_aggregates.sql
+184_auth_cache_invalidation_outbox.sql
+185_group_reasoning_effort_policy.sql
+186_alipay_mobile_precreate_deep_link.sql
+186_group_auth_cache_image_generation.sql
+187_add_usage_log_session_id.sql
+188_allow_live_usage_request_type.sql
+189_add_group_allow_live.sql
+190_add_users_email_alias_dedup_index_notx.sql
+```
+
+### Migration 执行语义与既有 integration 证据
+
+- [`migrations_runner.go`](../../../backend/internal/repository/migrations_runner.go) 按完整 filename 排序，并以完整 filename 作为 `schema_migrations` 主键；已执行项按完整 filename 查询并校验 SHA-256 checksum。因此同号的本地/上游 172、本地/上游 181 和两个 186 都是独立 migration，不按数字前缀折叠。
+- runner 对普通 migration 使用事务；对 `*_notx.sql` 先校验只包含幂等的 `CREATE/DROP INDEX CONCURRENTLY`，再逐语句非事务执行并记录。因此 `190_add_users_email_alias_dedup_index_notx.sql` 走明确的 notx 路径。
+- Task 24 提交的 [`migrations_schema_integration_test.go`](../../../backend/internal/repository/migrations_schema_integration_test.go) 提供两条互补路径：`TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate` 创建全新隔离库、应用全量 migration 后再次 apply；`TestMigrationsRunner_UpgradesLocalV01596AcrossUpstreamStages` 先用过滤 FS 建立仅含本地历史的升级库，再应用完整 embedded FS。
+- 升级测试固定列出 12 个上游完整 filename，以两个 `require.Len(..., 12)` 约束列表和 embedded FS，明确断言双方 172/181、双 186、`190_*_notx.sql` 已记录；第二次 apply 后 record count 不增加且 checksum map 不变，覆盖完整 filename 隔离、幂等与 checksum 保持。
+- [既有最终 remote integration 证据](#最终-remote-integration)记录两条 target 分别 PASS（`4.50s`、`4.21s`），migration `2/2`、上游集合 `12/12`；Task 28 只核读 committed test、runner 和既有 formal evidence，没有重跑远程 integration。
+
+### Concern 与后续边界
+
+- 唯一 Task 28 concern 是两个协调器保留 report 的 LF/CRLF warning；相关命令均 exit `0`，无 whitespace error、unmerged 路径或 conflict marker。所有保留改动均未修改或暂存。
+- Task 29 浏览器烟测、能力终审以及 OpenSpec 8.4/tasks/progress/comet 收口不属于 Task 28，仍未执行。
