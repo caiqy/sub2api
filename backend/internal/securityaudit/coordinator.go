@@ -11,6 +11,10 @@ type LegacyEngine interface {
 	Check(ctx context.Context, req Request) (*LegacyDecision, error)
 }
 
+type lazyLegacyEngine interface {
+	CheckLazy(ctx context.Context, req Request, body func() []byte) (*LegacyDecision, error)
+}
+
 type PromptEngine interface {
 	EffectiveMode() Mode
 	Enqueue(ctx context.Context, req Request) error
@@ -27,8 +31,26 @@ func NewCoordinator(legacy LegacyEngine, prompt PromptEngine) *Coordinator {
 }
 
 func (c *Coordinator) Check(ctx context.Context, req Request) Decision {
+	body := req.Body
+	return c.CheckLazy(ctx, req, func() []byte { return body })
+}
+
+func (c *Coordinator) CheckLazy(ctx context.Context, req Request, body func() []byte) Decision {
 	if c == nil {
 		return allowDecision(nil, nil)
+	}
+	initialBody := req.Body
+	var once sync.Once
+	var frozenBody []byte
+	bodyOnce := func() []byte {
+		once.Do(func() {
+			if body != nil {
+				frozenBody = body()
+			} else {
+				frozenBody = initialBody
+			}
+		})
+		return frozenBody
 	}
 	mode := ModeOff
 	if c.prompt != nil {
@@ -38,25 +60,26 @@ func (c *Coordinator) Check(ctx context.Context, req Request) Decision {
 	case ModeAsync:
 		// Enqueue is deliberately best-effort. The implementation owns a bounded
 		// context and copies request memory before it can outlive the Handler.
+		req.Body = bodyOnce()
 		_ = c.prompt.Enqueue(ctx, req.Clone())
-		legacy, _ := c.checkLegacy(ctx, req)
+		legacy, _ := c.checkLegacyLazy(ctx, req, bodyOnce)
 		return prioritize(legacy, nil)
 	case ModeBlocking:
-		return c.checkBlocking(ctx, req)
+		return c.checkBlockingLazy(ctx, req, bodyOnce)
 	default:
-		legacy, _ := c.checkLegacy(ctx, req)
+		legacy, _ := c.checkLegacyLazy(ctx, req, bodyOnce)
 		return prioritize(legacy, nil)
 	}
 }
 
-func (c *Coordinator) checkBlocking(ctx context.Context, req Request) Decision {
+func (c *Coordinator) checkBlockingLazy(ctx context.Context, req Request, body func() []byte) Decision {
 	var wg sync.WaitGroup
 	wg.Add(2)
 	var legacy *LegacyDecision
 	var prompt *PromptDecision
 	go func() {
 		defer wg.Done()
-		legacy, _ = c.checkLegacy(ctx, req)
+		legacy, _ = c.checkLegacyLazy(ctx, req, body)
 	}()
 	go func() {
 		defer wg.Done()
@@ -64,6 +87,7 @@ func (c *Coordinator) checkBlocking(ctx context.Context, req Request) Decision {
 			prompt = unavailablePromptDecision(ErrorCodeUnavailable)
 			return
 		}
+		req.Body = body()
 		result, err := c.prompt.Evaluate(ctx, req.Clone())
 		if err != nil {
 			var guardErr *GuardError
@@ -84,10 +108,14 @@ func (c *Coordinator) checkBlocking(ctx context.Context, req Request) Decision {
 	return prioritize(legacy, prompt)
 }
 
-func (c *Coordinator) checkLegacy(ctx context.Context, req Request) (*LegacyDecision, error) {
+func (c *Coordinator) checkLegacyLazy(ctx context.Context, req Request, body func() []byte) (*LegacyDecision, error) {
 	if c.legacy == nil {
 		return nil, nil
 	}
+	if lazy, ok := c.legacy.(lazyLegacyEngine); ok {
+		return lazy.CheckLazy(ctx, req, body)
+	}
+	req.Body = body()
 	return c.legacy.Check(ctx, req)
 }
 

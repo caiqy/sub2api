@@ -15,15 +15,20 @@ func NewLegacyModerationAdapter(svc *service.ContentModerationService) LegacyEng
 }
 
 func (a *LegacyModerationAdapter) Check(ctx context.Context, req Request) (*LegacyDecision, error) {
+	body := req.Body
+	return a.CheckLazy(ctx, req, func() []byte { return body })
+}
+
+func (a *LegacyModerationAdapter) CheckLazy(ctx context.Context, req Request, body func() []byte) (*LegacyDecision, error) {
 	if a == nil || a.service == nil {
 		return nil, nil
 	}
-	decision, err := a.service.Check(ctx, service.ContentModerationCheckInput{
+	decision, err := a.service.CheckLazy(ctx, service.ContentModerationCheckInput{
 		RequestID: req.RequestID, UserID: req.UserID, UserEmail: req.UserEmail,
 		APIKeyID: req.APIKeyID, APIKeyName: req.APIKeyName, GroupID: cloneInt64Ptr(req.GroupID),
 		GroupName: req.GroupName, Endpoint: req.Endpoint, Provider: req.Provider,
-		Model: req.Model, Protocol: req.Protocol, Body: req.Body,
-	})
+		Model: req.Model, Protocol: req.Protocol,
+	}, body)
 	if err != nil || decision == nil {
 		return nil, err
 	}

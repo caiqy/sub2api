@@ -113,10 +113,6 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	}
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, routingModel)
 	setChannelUsageFields(c, clientRequestedUsageFields(c, channelMapping, routingModel, ""))
-	var moderationBody []byte
-	if h.contentModerationService != nil || h.securityAuditCoordinator != nil {
-		moderationBody = parsed.ModerationBody()
-	}
 	stickySessionSeed := parsed.FreezeStickySessionSeed()
 	sessionHash := h.gatewayService.GenerateExplicitSessionHash(c, body)
 	requestPayloadHash := service.HashUsageRequestPayload(body)
@@ -160,11 +156,8 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		h.errorResponse(c, http.StatusForbidden, "permission_error", service.ImageGenerationPermissionMessage())
 		return
 	}
-	if decision := h.checkContentModeration(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIImages, requestModel, moderationBody); decision != nil && decision.Blocked {
-		h.errorResponse(c, contentModerationStatus(decision), contentModerationErrorCode(decision), decision.Message)
-		return
-	}
-	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIImages, requestModel, moderationBody); decision != nil && !decision.AllowNextStage {
+	// The lazy provider may freeze large input and must finish synchronously before ReleaseText.
+	if decision := h.checkSecurityAuditLazy(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIImages, requestModel, parsed.ModerationBody); decision != nil && !decision.AllowNextStage {
 		h.openAISecurityAuditError(c, decision)
 		return
 	}

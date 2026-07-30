@@ -39,6 +39,13 @@ func (h *OpenAIGatewayHandler) checkSecurityAudit(c *gin.Context, reqLog *zap.Lo
 	return runSecurityAudit(c, reqLog, h.securityAuditCoordinator, h.contentModerationService, apiKey, subject, protocol, model, body, "http")
 }
 
+func (h *OpenAIGatewayHandler) checkSecurityAuditLazy(c *gin.Context, reqLog *zap.Logger, apiKey *service.APIKey, subject middleware2.AuthSubject, protocol, model string, body func() []byte) *securityaudit.Decision {
+	if h == nil {
+		return nil
+	}
+	return runSecurityAuditLazy(c, reqLog, h.securityAuditCoordinator, h.contentModerationService, apiKey, subject, protocol, model, body, "http")
+}
+
 func (h *OpenAIGatewayHandler) checkSecurityAuditStage(c *gin.Context, reqLog *zap.Logger, apiKey *service.APIKey, subject middleware2.AuthSubject, protocol, model string, body []byte, stage string) *securityaudit.Decision {
 	if h == nil {
 		return nil
@@ -47,6 +54,14 @@ func (h *OpenAIGatewayHandler) checkSecurityAuditStage(c *gin.Context, reqLog *z
 }
 
 func runSecurityAudit(c *gin.Context, reqLog *zap.Logger, coordinator *securityaudit.Coordinator, legacy *service.ContentModerationService, apiKey *service.APIKey, subject middleware2.AuthSubject, protocol, model string, body []byte, stage string) *securityaudit.Decision {
+	return runSecurityAuditInput(c, reqLog, coordinator, legacy, apiKey, subject, protocol, model, body, nil, stage)
+}
+
+func runSecurityAuditLazy(c *gin.Context, reqLog *zap.Logger, coordinator *securityaudit.Coordinator, legacy *service.ContentModerationService, apiKey *service.APIKey, subject middleware2.AuthSubject, protocol, model string, body func() []byte, stage string) *securityaudit.Decision {
+	return runSecurityAuditInput(c, reqLog, coordinator, legacy, apiKey, subject, protocol, model, nil, body, stage)
+}
+
+func runSecurityAuditInput(c *gin.Context, reqLog *zap.Logger, coordinator *securityaudit.Coordinator, legacy *service.ContentModerationService, apiKey *service.APIKey, subject middleware2.AuthSubject, protocol, model string, inputBody []byte, body func() []byte, stage string) *securityaudit.Decision {
 	if c == nil || c.Request == nil {
 		return nil
 	}
@@ -57,7 +72,12 @@ func runSecurityAudit(c *gin.Context, reqLog *zap.Logger, coordinator *securitya
 		}
 	}
 	if coordinator == nil {
-		legacyDecision := runContentModeration(c, reqLog, legacy, apiKey, subject, protocol, model, body)
+		var legacyDecision *service.ContentModerationDecision
+		if body == nil {
+			legacyDecision = runContentModeration(c, reqLog, legacy, apiKey, subject, protocol, model, inputBody)
+		} else {
+			legacyDecision = runContentModerationLazy(c, reqLog, legacy, apiKey, subject, protocol, model, body)
+		}
 		if legacyDecision == nil {
 			return nil
 		}
@@ -75,16 +95,21 @@ func runSecurityAudit(c *gin.Context, reqLog *zap.Logger, coordinator *securitya
 		}
 		return &decision
 	}
-	request := buildSecurityAuditRequest(c, apiKey, subject, protocol, model, body, stage)
+	request := buildSecurityAuditRequest(c, apiKey, subject, protocol, model, inputBody, stage)
 	if reqLog != nil {
 		reqLog.Info("security_audit.gateway_check_start",
 			zap.String("request_id", request.RequestID), zap.Int64("user_id", request.UserID),
 			zap.Int64("api_key_id", request.APIKeyID), zap.Int64p("group_id", request.GroupID),
 			zap.String("endpoint", request.Endpoint), zap.String("provider", request.Provider),
 			zap.String("protocol", request.Protocol), zap.String("model", request.Model), zap.String("stage", request.Stage),
-			zap.Int("body_bytes", len(body)))
+			zap.Int("body_bytes", len(inputBody)))
 	}
-	decision := coordinator.Check(c.Request.Context(), request)
+	var decision securityaudit.Decision
+	if body == nil {
+		decision = coordinator.Check(c.Request.Context(), request)
+	} else {
+		decision = coordinator.CheckLazy(c.Request.Context(), request, body)
+	}
 	if decision.AllowNextStage && cacheCompletion {
 		c.Set(securityAuditCompletedContextKey, true)
 	}

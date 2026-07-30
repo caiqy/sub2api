@@ -23,13 +23,6 @@ func contentModerationErrorCode(decision *service.ContentModerationDecision) str
 	return "content_policy_violation"
 }
 
-func (h *OpenAIGatewayHandler) checkContentModeration(c *gin.Context, reqLog *zap.Logger, apiKey *service.APIKey, subject middleware2.AuthSubject, protocol string, model string, body []byte) *service.ContentModerationDecision {
-	if h == nil || h.contentModerationService == nil {
-		return nil
-	}
-	return runContentModeration(c, reqLog, h.contentModerationService, apiKey, subject, protocol, model, body)
-}
-
 func clientRequestedModel(c *gin.Context, fallback string) string {
 	fallback = strings.TrimSpace(fallback)
 	if c == nil || c.Request == nil {
@@ -77,10 +70,18 @@ func channelUsageFieldsFromContext(c *gin.Context) service.ChannelUsageFields {
 }
 
 func runContentModeration(c *gin.Context, reqLog *zap.Logger, svc *service.ContentModerationService, apiKey *service.APIKey, subject middleware2.AuthSubject, protocol string, model string, body []byte) *service.ContentModerationDecision {
+	return runContentModerationInput(c, reqLog, svc, apiKey, subject, protocol, model, body, nil)
+}
+
+func runContentModerationLazy(c *gin.Context, reqLog *zap.Logger, svc *service.ContentModerationService, apiKey *service.APIKey, subject middleware2.AuthSubject, protocol string, model string, body func() []byte) *service.ContentModerationDecision {
+	return runContentModerationInput(c, reqLog, svc, apiKey, subject, protocol, model, nil, body)
+}
+
+func runContentModerationInput(c *gin.Context, reqLog *zap.Logger, svc *service.ContentModerationService, apiKey *service.APIKey, subject middleware2.AuthSubject, protocol string, model string, inputBody []byte, body func() []byte) *service.ContentModerationDecision {
 	if svc == nil || c == nil || c.Request == nil {
 		return nil
 	}
-	input := buildContentModerationInput(c, apiKey, subject, protocol, model, body)
+	input := buildContentModerationInput(c, apiKey, subject, protocol, model, inputBody)
 	if reqLog != nil {
 		reqLog.Info("content_moderation.gateway_check_start",
 			zap.String("request_id", input.RequestID),
@@ -93,10 +94,16 @@ func runContentModeration(c *gin.Context, reqLog *zap.Logger, svc *service.Conte
 			zap.String("provider", input.Provider),
 			zap.String("protocol", input.Protocol),
 			zap.String("model", input.Model),
-			zap.Int("body_bytes", len(body)),
+			zap.Int("body_bytes", len(inputBody)),
 		)
 	}
-	decision, err := svc.Check(c.Request.Context(), input)
+	var decision *service.ContentModerationDecision
+	var err error
+	if body == nil {
+		decision, err = svc.Check(c.Request.Context(), input)
+	} else {
+		decision, err = svc.CheckLazy(c.Request.Context(), input, body)
+	}
 	if err != nil {
 		if reqLog != nil {
 			reqLog.Warn("content_moderation.check_failed", zap.Error(err))

@@ -15,11 +15,18 @@ type fakeLegacyEngine struct {
 	decision *LegacyDecision
 	err      error
 	calls    atomic.Int64
+	body     []byte
 }
 
-func (f *fakeLegacyEngine) Check(context.Context, Request) (*LegacyDecision, error) {
+func (f *fakeLegacyEngine) Check(_ context.Context, req Request) (*LegacyDecision, error) {
 	f.calls.Add(1)
+	f.body = append([]byte(nil), req.Body...)
 	return f.decision, f.err
+}
+
+func (f *fakeLegacyEngine) CheckLazy(ctx context.Context, req Request, body func() []byte) (*LegacyDecision, error) {
+	req.Body = body()
+	return f.Check(ctx, req)
 }
 
 type fakePromptEngine struct {
@@ -28,6 +35,7 @@ type fakePromptEngine struct {
 	err       error
 	enqueues  atomic.Int64
 	evaluates atomic.Int64
+	body      []byte
 }
 
 func (f *fakePromptEngine) EffectiveMode() Mode { return f.mode }
@@ -35,9 +43,40 @@ func (f *fakePromptEngine) Enqueue(context.Context, Request) error {
 	f.enqueues.Add(1)
 	return f.err
 }
-func (f *fakePromptEngine) Evaluate(context.Context, Request) (*PromptDecision, error) {
+func (f *fakePromptEngine) Evaluate(_ context.Context, req Request) (*PromptDecision, error) {
 	f.evaluates.Add(1)
+	f.body = append([]byte(nil), req.Body...)
 	return f.decision, f.err
+}
+
+func TestCoordinatorCheckLazyEvaluatesBodyOnceAcrossPromptAndLegacy(t *testing.T) {
+	legacy := &fakeLegacyEngine{decision: &LegacyDecision{Allowed: true}}
+	prompt := &fakePromptEngine{mode: ModeBlocking, decision: &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}}
+	var calls atomic.Int64
+	payload := []byte(`{"prompt":"shared"}`)
+
+	decision := NewCoordinator(legacy, prompt).CheckLazy(context.Background(), Request{}, func() []byte {
+		calls.Add(1)
+		return payload
+	})
+
+	require.True(t, decision.AllowNextStage)
+	require.Equal(t, int64(1), calls.Load())
+	require.Equal(t, payload, legacy.body)
+	require.Equal(t, payload, prompt.body)
+}
+
+func TestCoordinatorCheckLazySkipsBodyWhenAllEnginesAreOff(t *testing.T) {
+	prompt := &fakePromptEngine{mode: ModeOff}
+	var calls atomic.Int64
+
+	decision := NewCoordinator(nil, prompt).CheckLazy(context.Background(), Request{}, func() []byte {
+		calls.Add(1)
+		return []byte(`{"prompt":"unused"}`)
+	})
+
+	require.True(t, decision.AllowNextStage)
+	require.Zero(t, calls.Load())
 }
 
 func TestCoordinatorModesAndPriority(t *testing.T) {

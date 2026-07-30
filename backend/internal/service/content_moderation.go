@@ -783,6 +783,11 @@ func (s *ContentModerationService) TestAPIKeys(ctx context.Context, input TestCo
 }
 
 func (s *ContentModerationService) Check(ctx context.Context, input ContentModerationCheckInput) (*ContentModerationDecision, error) {
+	body := input.Body
+	return s.CheckLazy(ctx, input, func() []byte { return body })
+}
+
+func (s *ContentModerationService) CheckLazy(ctx context.Context, input ContentModerationCheckInput, body func() []byte) (*ContentModerationDecision, error) {
 	allow := &ContentModerationDecision{Allowed: true, Action: ContentModerationActionAllow}
 	if s == nil || s.settingRepo == nil || s.repo == nil {
 		slog.Info("content_moderation.skip_unavailable",
@@ -879,6 +884,9 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 			"model_filter_type", cfg.ModelFilter.Type,
 			"configured_models", cfg.ModelFilter.Models)
 		return allow, nil
+	}
+	if body != nil {
+		input.Body = body()
 	}
 	content := ExtractContentModerationInput(input.Protocol, input.Body)
 	logText := content.ExcerptText()

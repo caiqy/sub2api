@@ -495,6 +495,82 @@ func TestNormalizeBlockedKeywords_TrimsDedupesAndCaps(t *testing.T) {
 	require.Equal(t, []string{"foo", "bar", "baz"}, out)
 }
 
+func TestContentModerationCheckLazySkipsBodyWhenDisabled(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		riskEnabled string
+		configure   func(*ContentModerationConfig)
+	}{
+		{name: "global feature disabled", riskEnabled: "false"},
+		{name: "config disabled", riskEnabled: "true", configure: func(cfg *ContentModerationConfig) { cfg.Enabled = false }},
+		{name: "mode off", riskEnabled: "true", configure: func(cfg *ContentModerationConfig) { cfg.Mode = ContentModerationModeOff }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := defaultContentModerationConfig()
+			cfg.Enabled = true
+			cfg.Mode = ContentModerationModePreBlock
+			cfg.AllGroups = true
+			if tt.configure != nil {
+				tt.configure(cfg)
+			}
+			rawCfg, err := json.Marshal(cfg)
+			require.NoError(t, err)
+			svc := NewContentModerationService(&contentModerationTestSettingRepo{values: map[string]string{
+				SettingKeyRiskControlEnabled:      tt.riskEnabled,
+				SettingKeyContentModerationConfig: string(rawCfg),
+			}}, &contentModerationTestRepo{}, &contentModerationTestHashCache{}, nil, nil, nil, nil)
+			calls := 0
+
+			decision, err := svc.CheckLazy(context.Background(), ContentModerationCheckInput{}, func() []byte {
+				calls++
+				return []byte(`{"prompt":"must stay lazy"}`)
+			})
+
+			require.NoError(t, err)
+			require.True(t, decision.Allowed)
+			require.Zero(t, calls)
+		})
+	}
+}
+
+func TestContentModerationCheckLazyDefersBodyUntilRequestIsInScope(t *testing.T) {
+	cfg := defaultContentModerationConfig()
+	cfg.Enabled = true
+	cfg.Mode = ContentModerationModePreBlock
+	cfg.AllGroups = false
+	cfg.GroupIDs = []int64{7}
+	cfg.ModelFilter = ContentModerationModelFilter{Type: ContentModerationModelFilterInclude, Models: []string{"gpt-image-2"}}
+	cfg.KeywordBlockingMode = ContentModerationKeywordModeKeywordOnly
+	cfg.BlockedKeywords = []string{"blocked"}
+	rawCfg, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	svc := NewContentModerationService(&contentModerationTestSettingRepo{values: map[string]string{
+		SettingKeyRiskControlEnabled:      "true",
+		SettingKeyContentModerationConfig: string(rawCfg),
+	}}, &contentModerationTestRepo{}, &contentModerationTestHashCache{}, nil, nil, nil, nil)
+	calls := 0
+	body := func() []byte {
+		calls++
+		return []byte(`{"prompt":"safe"}`)
+	}
+	group7, group8 := int64(7), int64(8)
+
+	decision, err := svc.CheckLazy(context.Background(), ContentModerationCheckInput{GroupID: &group8, Model: "gpt-image-2", Protocol: ContentModerationProtocolOpenAIImages}, body)
+	require.NoError(t, err)
+	require.True(t, decision.Allowed)
+	require.Zero(t, calls)
+
+	decision, err = svc.CheckLazy(context.Background(), ContentModerationCheckInput{GroupID: &group7, Model: "gpt-image-1", Protocol: ContentModerationProtocolOpenAIImages}, body)
+	require.NoError(t, err)
+	require.True(t, decision.Allowed)
+	require.Zero(t, calls)
+
+	decision, err = svc.CheckLazy(context.Background(), ContentModerationCheckInput{GroupID: &group7, Model: "gpt-image-2", Protocol: ContentModerationProtocolOpenAIImages}, body)
+	require.NoError(t, err)
+	require.True(t, decision.Allowed)
+	require.Equal(t, 1, calls)
+}
+
 func TestMatchBlockedKeyword_CaseInsensitiveSubstring(t *testing.T) {
 	keyword, hit := matchBlockedKeyword("Please ignore the BadWord here", []string{"badword"})
 	require.True(t, hit)

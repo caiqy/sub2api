@@ -16,10 +16,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -707,6 +709,64 @@ func TestOpenAIImages_ContentModerationUsesFrozenPayloadBeforeRelease(t *testing
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for asynchronous moderation record")
 	}
+}
+
+func TestOpenAIImages_UnifiedAuditRunsLegacyOnce(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var moderationCalls atomic.Int64
+	moderationAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		moderationCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"results":[{"flagged":false,"category_scores":{}}]}`)
+	}))
+	defer moderationAPI.Close()
+	cfg := service.ContentModerationConfig{
+		Enabled: true, Mode: service.ContentModerationModePreBlock, BaseURL: moderationAPI.URL,
+		APIKeys: []string{"test-key"}, AllGroups: true, SampleRate: 100,
+	}
+	rawCfg, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	moderation := service.NewContentModerationService(&openAIImagesModerationSettings{values: map[string]string{
+		service.SettingKeyRiskControlEnabled:      "true",
+		service.SettingKeyContentModerationConfig: string(rawCfg),
+	}}, &openAIImagesModerationRepo{}, openAIImagesModerationHashCache{}, nil, nil, nil, nil)
+
+	group := &service.Group{ID: 956, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
+	account := &service.Account{ID: 957, Name: "api-key", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test"}}
+	upstream := &openAIImagesHandlerHTTPUpstream{resp: &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"created":1,"data":[{"b64_json":"aGVsbG8="}]}`))}}
+	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
+	env.handler.contentModerationService = moderation
+	env.handler.securityAuditCoordinator = securityaudit.NewCoordinator(securityaudit.NewLegacyModerationAdapter(moderation), nil)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"gpt-image-2","prompt":"safe prompt"}`))
+	req.Header.Set("Content-Type", "application/json")
+	env.router("/v1/images/generations", env.handler.Images).ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, int64(1), moderationCalls.Load(), "production wiring must run legacy moderation once")
+}
+
+func TestOpenAIImages_SecurityAuditUsesFrozenPayloadBeforeRelease(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := &handlerPromptEngine{mode: securityaudit.ModeBlocking, decision: &securityaudit.PromptDecision{Kind: securityaudit.DecisionAllow, AllowNextStage: true}}
+	group := &service.Group{ID: 958, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
+	account := &service.Account{ID: 959, Name: "api-key", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test"}}
+	upstream := &openAIImagesHandlerHTTPUpstream{resp: &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"created":1,"data":[{"b64_json":"aGVsbG8="}]}`))}}
+	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
+	env.handler.securityAuditCoordinator = securityaudit.NewCoordinator(nil, engine)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", strings.NewReader(`{"model":"gpt-image-2","prompt":"frozen prompt","images":[{"image_url":"https://example.com/source.png"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	env.router("/v1/images/edits", env.handler.Images).ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	evaluated, _, requests := engine.snapshot()
+	require.Equal(t, 1, evaluated)
+	require.Len(t, requests, 1)
+	require.Equal(t, "frozen prompt", gjson.GetBytes(requests[0].Body, "prompt").String())
+	require.Equal(t, "https://example.com/source.png", gjson.GetBytes(requests[0].Body, "images.0.image_url").String())
 }
 
 func TestOpenAIGatewayHandlerImages_MultipartEffectiveSpoolFailureReturns503(t *testing.T) {
