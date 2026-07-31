@@ -1,7 +1,0 @@
-{
-  "openspec_proposal": "openspec/changes/restore-openai-grok-body-replay/proposal.md",
-  "openspec_design": "openspec/changes/restore-openai-grok-body-replay/design.md",
-  "openspec_tasks": "openspec/changes/restore-openai-grok-body-replay/tasks.md",
-  "openspec_delta_spec": "openspec/changes/restore-openai-grok-body-replay/specs/request-body-retention-control/spec.md",
-  "archive_directory": "openspec/changes/archive/2026-07-14-restore-openai-grok-body-replay"
-}

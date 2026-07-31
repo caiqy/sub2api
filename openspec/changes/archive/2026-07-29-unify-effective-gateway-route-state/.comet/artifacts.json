@@ -1,9 +1,0 @@
-{
-  "openspec_proposal": "openspec/changes/unify-effective-gateway-route-state/proposal.md",
-  "openspec_design": "openspec/changes/unify-effective-gateway-route-state/design.md",
-  "openspec_tasks": "openspec/changes/unify-effective-gateway-route-state/tasks.md",
-  "openspec_delta_spec": "openspec/changes/unify-effective-gateway-route-state/specs/effective-gateway-routing/spec.md",
-  "handoff_context": "openspec/changes/unify-effective-gateway-route-state/.comet/handoff/design-context.json",
-  "handoff_markdown": "openspec/changes/unify-effective-gateway-route-state/.comet/handoff/design-context.md",
-  "archive_directory": "openspec/changes/archive/2026-07-29-unify-effective-gateway-route-state"
-}
