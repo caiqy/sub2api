@@ -492,7 +492,7 @@ func (s *RedeemService) Redeem(ctx context.Context, userID int64, code string) (
 			if validityDays == 0 {
 				validityDays = 30
 			}
-			_, _, err := s.subscriptionService.assignOrExtendSubscription(txCtx, &AssignSubscriptionInput{
+			_, _, _, err := s.subscriptionService.assignOrExtendSubscription(txCtx, &AssignSubscriptionInput{
 				UserID:       userID,
 				GroupID:      *redeemCode.GroupID,
 				ValidityDays: validityDays,
@@ -556,9 +556,12 @@ func (s *RedeemService) invalidateRedeemCaches(ctx context.Context, userID int64
 			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)
 		}
 		if redeemCode.GroupID != nil && s.subscriptionService != nil {
-			if err := s.subscriptionService.invalidateSubscriptionCaches(userID, *redeemCode.GroupID); err != nil {
-				logger.LegacyPrintf("service.redeem", "Warning: invalidate subscription caches after redeem failed user=%d group=%d: %v", userID, *redeemCode.GroupID, err)
+			sub, err := s.subscriptionService.userSubRepo.GetByUserIDAndGroupID(ctx, userID, *redeemCode.GroupID)
+			if err != nil {
+				logger.LegacyPrintf("service.redeem", "Warning: load committed subscription for cache invalidation failed user=%d group=%d: %v", userID, *redeemCode.GroupID, err)
+				return
 			}
+			s.subscriptionService.deferSubscriptionCacheInvalidation(ctx, sub)
 		}
 	}
 }
@@ -656,46 +659,35 @@ func (s *RedeemService) GetUserHistory(ctx context.Context, userID int64, limit 
 }
 
 // reduceOrCancelSubscription 缩短订阅天数，剩余天数 <= 0 时取消订阅
+// 锁读、到期时间/状态/备注计算与写入全部位于同一事务行锁内（复用调用方
+// 传入的兑换事务），杜绝与 AdvanceQuotaCycle 等路径的陈旧覆盖竞态。
 func (s *RedeemService) reduceOrCancelSubscription(ctx context.Context, userID, groupID int64, reduceDays int, code string) error {
-	sub, err := s.subscriptionService.userSubRepo.GetByUserIDAndGroupID(ctx, userID, groupID)
-	if err != nil {
-		return ErrSubscriptionNotFound
-	}
-
-	now := time.Now()
-	remaining := int(sub.ExpiresAt.Sub(now).Hours() / 24)
-	if remaining < 0 {
-		remaining = 0
-	}
-
 	notes := fmt.Sprintf("通过兑换码 %s 退款扣减 %d 天", code, reduceDays)
 
-	if remaining <= reduceDays {
-		// 剩余天数不足，直接取消订阅
-		if err := s.subscriptionService.userSubRepo.UpdateStatus(ctx, sub.ID, SubscriptionStatusExpired); err != nil {
-			return fmt.Errorf("cancel subscription: %w", err)
+	return s.subscriptionService.withSubscriptionUpdateTx(ctx, func(txCtx context.Context) error {
+		sub, err := s.subscriptionService.lockReadSubscriptionByUserGroup(txCtx, userID, groupID)
+		if err != nil {
+			return ErrSubscriptionNotFound
 		}
-		// 设置过期时间为当前时间
-		if err := s.subscriptionService.userSubRepo.ExtendExpiry(ctx, sub.ID, now); err != nil {
-			return fmt.Errorf("set subscription expiry: %w", err)
-		}
-	} else {
-		// 缩短天数
-		newExpiresAt := sub.ExpiresAt.AddDate(0, 0, -reduceDays)
-		if err := s.subscriptionService.userSubRepo.ExtendExpiry(ctx, sub.ID, newExpiresAt); err != nil {
-			return fmt.Errorf("reduce subscription: %w", err)
-		}
-	}
 
-	// 追加备注
-	newNotes := sub.Notes
-	if newNotes != "" {
-		newNotes += "\n"
-	}
-	newNotes += notes
-	if err := s.subscriptionService.userSubRepo.UpdateNotes(ctx, sub.ID, newNotes); err != nil {
-		return fmt.Errorf("update subscription notes: %w", err)
-	}
+		now := time.Now()
+		remaining := int(sub.ExpiresAt.Sub(now).Hours() / 24)
+		if remaining < 0 {
+			remaining = 0
+		}
 
-	return nil
+		updated := *sub
+		if remaining <= reduceDays {
+			// 剩余天数不足，直接取消订阅
+			updated.Status = SubscriptionStatusExpired
+			updated.ExpiresAt = now
+		} else {
+			// 缩短天数
+			updated.ExpiresAt = sub.ExpiresAt.AddDate(0, 0, -reduceDays)
+		}
+		updated.Notes = appendSubscriptionNotes(sub.Notes, notes)
+
+		// 单次整行写入：状态、到期时间与备注在同一事务内原子落库。
+		return s.subscriptionService.userSubRepo.Update(txCtx, &updated)
+	})
 }

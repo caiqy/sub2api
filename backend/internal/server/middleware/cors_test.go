@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -16,6 +17,34 @@ func init() {
 }
 
 // --- Task 8.2: 验证 CORS 条件化头部 ---
+
+func TestCORS_AllowHeaders_IncludesIdempotencyKeys(t *testing.T) {
+	cfg := config.CORSConfig{
+		AllowedOrigins:   []string{"https://allowed.example.com"},
+		AllowCredentials: false,
+	}
+	middleware := CORS(cfg)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodOptions, "/", nil)
+	c.Request.Header.Set("Origin", "https://allowed.example.com")
+
+	middleware(c)
+
+	// 按逗号拆分并 TrimSpace 后精确断言 token，避免 Idempotency-Key 是 X-Idempotency-Key 子串的误判
+	allowHeaders := w.Header().Get("Access-Control-Allow-Headers")
+	var tokens []string
+	for _, token := range strings.Split(allowHeaders, ",") {
+		if trimmed := strings.TrimSpace(token); trimmed != "" {
+			tokens = append(tokens, trimmed)
+		}
+	}
+	assert.Contains(t, tokens, "Idempotency-Key",
+		"Allow-Headers 应包含 Idempotency-Key")
+	assert.Contains(t, tokens, "X-Idempotency-Key",
+		"Allow-Headers 应包含 X-Idempotency-Key")
+}
 
 func TestCORS_DisallowedOrigin_NoAllowHeaders(t *testing.T) {
 	cfg := config.CORSConfig{

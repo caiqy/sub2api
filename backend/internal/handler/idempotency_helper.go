@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"time"
 
@@ -14,12 +15,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type userIdempotencyRecovery func(context.Context) (any, bool, error)
+
 func executeUserIdempotentJSON(
 	c *gin.Context,
 	scope string,
 	payload any,
 	ttl time.Duration,
 	execute func(context.Context) (any, error),
+	recovery ...userIdempotencyRecovery,
 ) {
 	coordinator := service.DefaultIdempotencyCoordinator()
 	if coordinator == nil {
@@ -48,6 +52,14 @@ func executeUserIdempotentJSON(
 		TTL:            ttl,
 	}, execute)
 	if err != nil {
+		if len(recovery) > 0 && userIdempotencyRecoveryEligible(err) {
+			data, found, recoveryErr := recovery[0](c.Request.Context())
+			if recoveryErr == nil && found {
+				c.Header("X-Idempotency-Recovered", "true")
+				response.Success(c, data)
+				return
+			}
+		}
 		if infraerrors.Code(err) == infraerrors.Code(service.ErrIdempotencyStoreUnavail) {
 			service.RecordIdempotencyStoreUnavailable(c.FullPath(), scope, "handler_fail_close")
 			logger.LegacyPrintf("handler.idempotency", "[Idempotency] store unavailable: method=%s route=%s scope=%s strategy=fail_close", c.Request.Method, c.FullPath(), scope)
@@ -62,4 +74,10 @@ func executeUserIdempotentJSON(
 		c.Header("X-Idempotency-Replayed", "true")
 	}
 	response.Success(c, result.Data)
+}
+
+func userIdempotencyRecoveryEligible(err error) bool {
+	return errors.Is(err, service.ErrIdempotencyStoreUnavail) ||
+		errors.Is(err, service.ErrIdempotencyInProgress) ||
+		errors.Is(err, service.ErrIdempotencyRetryBackoff)
 }

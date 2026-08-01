@@ -234,7 +234,9 @@ func (s *subscriptionUserSubRepoStub) Create(_ context.Context, sub *UserSubscri
 		cp.ID = s.nextID
 		s.nextID++
 	}
+	cp.UpdatedAt = time.Now()
 	sub.ID = cp.ID
+	sub.UpdatedAt = cp.UpdatedAt
 	s.byID[cp.ID] = &cp
 	s.byUserGroup[s.key(cp.UserID, cp.GroupID)] = &cp
 	return nil
@@ -259,6 +261,8 @@ func (s *subscriptionUserSubRepoStub) Update(_ context.Context, sub *UserSubscri
 	}
 	oldKey := s.key(existing.UserID, existing.GroupID)
 	cp := *sub
+	cp.UpdatedAt = time.Now()
+	sub.UpdatedAt = cp.UpdatedAt
 	s.byID[cp.ID] = &cp
 	if oldKey != s.key(cp.UserID, cp.GroupID) {
 		delete(s.byUserGroup, oldKey)

@@ -839,7 +839,7 @@ func (c *promptTooLongFallbackBillingCache) GetSubscriptionCache(context.Context
 	return c.subscriptionData, nil
 }
 
-func (c *promptTooLongFallbackBillingCache) UpdateSubscriptionUsage(context.Context, int64, int64, float64) error {
+func (c *promptTooLongFallbackBillingCache) UpdateSubscriptionUsage(context.Context, int64, int64, float64, int64) error {
 	return nil
 }
 

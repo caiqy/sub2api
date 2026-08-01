@@ -117,6 +117,11 @@ type UsageBillingApplyResult struct {
 	NewBalance           *float64           // post-deduction balance (nil = no balance deduction)
 	BalanceOverdrafted   bool               // true when the sufficient-balance guard missed and debt was still recorded
 	QuotaState           *AccountQuotaState // post-increment quota state (nil = no quota increment)
+	// SubscriptionUsageVersion is the user_subscriptions row version (UnixNano)
+	// committed by this apply when it incremented subscription usage. It is 0
+	// when no subscription cost was applied. The version comes from the DB row
+	// write and is strictly monotonic per row.
+	SubscriptionUsageVersion int64
 }
 
 // BatchImageBalanceHoldCommand describes an idempotent balance hold operation.

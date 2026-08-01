@@ -105,6 +105,36 @@ func (s *UserSubscriptionRepoSuite) TestCreate() {
 	s.Require().Equal(sub.GroupID, got.GroupID)
 }
 
+func (s *UserSubscriptionRepoSuite) TestCreate_ReturnsTriggerAssignedUpdatedAt() {
+	user := s.mustCreateUser("sub-create-trigger-version@test.com", service.RoleUser)
+	group := s.mustCreateGroup("g-create-trigger-version")
+	futureWatermark := time.Now().UTC().Add(time.Hour).Truncate(time.Microsecond)
+	_, err := s.client.ExecContext(s.ctx, `
+		INSERT INTO subscription_cache_version_watermarks (user_id, group_id, watermark_at)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (user_id, group_id) DO UPDATE SET watermark_at = EXCLUDED.watermark_at`,
+		user.ID, group.ID, futureWatermark)
+	s.Require().NoError(err)
+
+	sub := &service.UserSubscription{
+		UserID:    user.ID,
+		GroupID:   group.ID,
+		Status:    service.SubscriptionStatusActive,
+		ExpiresAt: time.Now().Add(24 * time.Hour),
+	}
+	s.Require().NoError(s.repo.Create(s.ctx, sub))
+
+	rows, err := s.client.QueryContext(s.ctx, "SELECT updated_at FROM user_subscriptions WHERE id = $1", sub.ID)
+	s.Require().NoError(err)
+	defer rows.Close()
+	s.Require().True(rows.Next())
+	var persisted time.Time
+	s.Require().NoError(rows.Scan(&persisted))
+	s.Require().NoError(rows.Err())
+	s.Require().Equal(persisted.UnixNano(), sub.UpdatedAt.UnixNano(), "Create must return the trigger-assigned database version")
+	s.Require().Greater(sub.UpdatedAt.UnixNano(), futureWatermark.UnixNano())
+}
+
 func (s *UserSubscriptionRepoSuite) TestGetByID_WithPreloads() {
 	user := s.mustCreateUser("preload@test.com", service.RoleUser)
 	group := s.mustCreateGroup("g-preload")
@@ -522,6 +552,51 @@ func (s *UserSubscriptionRepoSuite) TestResetUsageWindows_ClearsUsageAfterAutoma
 	s.Require().NoError(err)
 	s.Require().InDelta(0, got.DailyUsageUSD, 1e-6)
 	s.Require().WithinDuration(newWindowStart, *got.DailyWindowStart, time.Microsecond)
+}
+
+func (s *UserSubscriptionRepoSuite) TestUsageResets_ReturnStrictlyMonotonicRowVersions() {
+	user := s.mustCreateUser("reset-version@test.com", service.RoleUser)
+	group := s.mustCreateGroup("g-reset-version")
+	sub := s.mustCreateSubscription(user.ID, group.ID, func(c *dbent.UserSubscriptionCreate) {
+		c.SetDailyUsageUsd(10).SetWeeklyUsageUsd(20).SetMonthlyUsageUsd(30)
+	})
+
+	resetter, ok := any(s.repo).(interface {
+		ResetUsageWindowsWithVersion(context.Context, int64, bool, bool, bool, time.Time) (int64, error)
+		ResetDailyUsageWithVersion(context.Context, int64, *time.Time, time.Time) (int64, error)
+		ResetWeeklyUsageWithVersion(context.Context, int64, *time.Time, time.Time) (int64, error)
+		ResetMonthlyUsageWithVersion(context.Context, int64, *time.Time, time.Time) (int64, error)
+	})
+	s.Require().True(ok, "reset writes must expose their committed row version")
+
+	resetAt := time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC)
+	v1, err := resetter.ResetUsageWindowsWithVersion(s.ctx, sub.ID, true, true, true, resetAt)
+	s.Require().NoError(err)
+	v2, err := resetter.ResetDailyUsageWithVersion(s.ctx, sub.ID, &resetAt, resetAt.Add(24*time.Hour))
+	s.Require().NoError(err)
+	v3, err := resetter.ResetWeeklyUsageWithVersion(s.ctx, sub.ID, &resetAt, resetAt.Add(7*24*time.Hour))
+	s.Require().NoError(err)
+	v4, err := resetter.ResetMonthlyUsageWithVersion(s.ctx, sub.ID, &resetAt, resetAt.AddDate(0, 1, 0))
+	s.Require().NoError(err)
+
+	s.Require().Greater(v1, int64(0))
+	s.Require().Greater(v2, v1)
+	s.Require().Greater(v3, v2)
+	s.Require().Greater(v4, v3)
+	s.Require().Zero(v1 % 1000)
+	s.Require().Zero(v2 % 1000)
+	s.Require().Zero(v3 % 1000)
+	s.Require().Zero(v4 % 1000)
+
+	var rowVersion int64
+	rows, err := s.client.QueryContext(s.ctx,
+		"SELECT (EXTRACT(EPOCH FROM updated_at) * 1000000000)::bigint FROM user_subscriptions WHERE id = $1", sub.ID)
+	s.Require().NoError(err)
+	defer rows.Close()
+	s.Require().True(rows.Next())
+	s.Require().NoError(rows.Scan(&rowVersion))
+	s.Require().NoError(rows.Err())
+	s.Require().Equal(v4, rowVersion)
 }
 
 func (s *UserSubscriptionRepoSuite) TestResetWeeklyUsage() {

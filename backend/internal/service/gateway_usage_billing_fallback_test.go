@@ -11,6 +11,133 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type legacyVersionedUsageSubRepo struct {
+	userSubRepoNoop
+	version int64
+	calls   int
+}
+
+type legacyUnversionedUsageSubRepo struct {
+	userSubRepoNoop
+	calls int
+}
+
+func (r *legacyUnversionedUsageSubRepo) IncrementUsage(context.Context, int64, float64) error {
+	r.calls++
+	return nil
+}
+
+type legacyFallbackInvalidatingCache struct {
+	billingCacheWorkerStub
+	invalidated bool
+	published   bool
+}
+
+func (c *legacyFallbackInvalidatingCache) InvalidateSubscriptionCache(context.Context, int64, int64) error {
+	c.invalidated = true
+	return nil
+}
+
+func (c *legacyFallbackInvalidatingCache) PublishSubscriptionCacheInvalidation(context.Context, string) error {
+	c.published = true
+	return nil
+}
+
+func (*legacyFallbackInvalidatingCache) SubscribeSubscriptionCacheInvalidation(context.Context, func(string)) error {
+	return nil
+}
+
+func (r *legacyVersionedUsageSubRepo) IncrementUsage(context.Context, int64, float64) error {
+	r.calls++
+	return nil
+}
+
+func (r *legacyVersionedUsageSubRepo) IncrementUsageWithVersion(context.Context, int64, float64) (int64, error) {
+	r.calls++
+	return r.version, nil
+}
+
+func TestApplyUsageBillingLegacySubscriptionQueuesCommittedUsageVersion(t *testing.T) {
+	groupID := int64(20)
+	repo := &legacyVersionedUsageSubRepo{version: 1234567890123456000}
+	cache := &versionRecordingBillingCache{}
+
+	applied, err := applyUsageBilling(context.Background(), "legacy-version", nil, &postUsageBillingParams{
+		Cost:               &CostBreakdown{ActualCost: 2.5},
+		User:               &User{ID: 10},
+		APIKey:             &APIKey{GroupID: &groupID},
+		Subscription:       &UserSubscription{ID: 30},
+		IsSubscriptionBill: true,
+	}, &billingDeps{
+		userSubRepo:         repo,
+		billingCacheService: &BillingCacheService{cache: cache},
+	}, nil)
+
+	require.NoError(t, err)
+	require.True(t, applied)
+	require.Equal(t, 1, repo.calls)
+	require.Equal(t, repo.version, cache.usageVersion.Load(), "legacy billing must queue the version returned by the DB increment")
+}
+
+func TestApplyUsageBillingLegacySubscriptionInvalidatesWhenVersionUnavailable(t *testing.T) {
+	groupID := int64(20)
+	repo := &legacyUnversionedUsageSubRepo{}
+	cache := &legacyFallbackInvalidatingCache{}
+	l1 := &trackingSubCache{}
+	billingCacheService := &BillingCacheService{
+		cache: cache,
+	}
+	subscriptionService := NewSubscriptionService(groupRepoNoop{}, repo, billingCacheService, nil, nil)
+	subscriptionService.subCacheL1 = l1
+
+	applied, err := applyUsageBilling(context.Background(), "legacy-invalidate", nil, &postUsageBillingParams{
+		Cost:               &CostBreakdown{ActualCost: 2.5},
+		User:               &User{ID: 10},
+		APIKey:             &APIKey{GroupID: &groupID},
+		Subscription:       &UserSubscription{ID: 30},
+		IsSubscriptionBill: true,
+	}, &billingDeps{
+		userSubRepo:         repo,
+		billingCacheService: billingCacheService,
+	}, nil)
+
+	require.NoError(t, err)
+	require.True(t, applied)
+	require.Equal(t, 1, repo.calls)
+	require.Equal(t, []string{subCacheKey(10, groupID)}, l1.deletedKeys, "versionless increment must synchronously clear this process's subscription L1 cache")
+	require.Equal(t, 1, l1.waitCalls, "versionless increment must wait for the local L1 deletion")
+	require.False(t, cache.invalidated, "versionless increment must not delete Redis L2")
+	require.False(t, cache.published, "versionless increment must not publish before the durable outbox")
+}
+
+func TestApplyUsageBillingLegacySubscriptionNonpositiveVersionOnlyClearsLocalL1(t *testing.T) {
+	groupID := int64(20)
+	repo := &legacyVersionedUsageSubRepo{version: 0}
+	cache := &legacyFallbackInvalidatingCache{}
+	l1 := &trackingSubCache{}
+	billingCacheService := &BillingCacheService{cache: cache}
+	subscriptionService := NewSubscriptionService(groupRepoNoop{}, repo, billingCacheService, nil, nil)
+	subscriptionService.subCacheL1 = l1
+
+	applied, err := applyUsageBilling(context.Background(), "legacy-nonpositive-version", nil, &postUsageBillingParams{
+		Cost:               &CostBreakdown{ActualCost: 2.5},
+		User:               &User{ID: 10},
+		APIKey:             &APIKey{GroupID: &groupID},
+		Subscription:       &UserSubscription{ID: 30},
+		IsSubscriptionBill: true,
+	}, &billingDeps{
+		userSubRepo:         repo,
+		billingCacheService: billingCacheService,
+	}, nil)
+
+	require.NoError(t, err)
+	require.True(t, applied)
+	require.Equal(t, []string{subCacheKey(10, groupID)}, l1.deletedKeys)
+	require.Equal(t, 1, l1.waitCalls)
+	require.False(t, cache.invalidated, "nonpositive versions must not delete Redis L2")
+	require.False(t, cache.published, "nonpositive versions must not publish invalidations")
+}
+
 // composite 分组的公开别名经 BillingModelSource 来源覆盖成为计费模型后有两类错计：
 // 任意别名（如 team/best）查无价静默落 $0；含家族词的别名（如 all/claude）被价格表
 // 家族模糊匹配错计（Opus 流量按 Sonnet 兜底价）。compositeBillableModel 要求别名必须

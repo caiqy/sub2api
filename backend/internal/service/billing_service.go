@@ -65,7 +65,11 @@ type BillingCache interface {
 	// Subscription operations
 	GetSubscriptionCache(ctx context.Context, userID, groupID int64) (*SubscriptionCacheData, error)
 	SetSubscriptionCache(ctx context.Context, userID, groupID int64, data *SubscriptionCacheData) error
-	UpdateSubscriptionUsage(ctx context.Context, userID, groupID int64, cost float64) error
+	// UpdateSubscriptionUsage incrementally applies a committed usage delta to
+	// the cached subscription snapshot. version is the DB row version (UnixNano)
+	// of the committed increment: the delta is only applied when it is newer
+	// than both the cached snapshot version and the reset tombstone.
+	UpdateSubscriptionUsage(ctx context.Context, userID, groupID int64, cost float64, version int64) error
 	InvalidateSubscriptionCache(ctx context.Context, userID, groupID int64) error
 
 	// API Key rate limit operations

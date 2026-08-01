@@ -473,10 +473,14 @@ func ProvideSystemOperationLockService(repo IdempotencyRepository, cfg *config.C
 	return NewSystemOperationLockService(repo, buildIdempotencyConfig(cfg))
 }
 
-func ProvideIdempotencyCleanupService(repo IdempotencyRepository, cfg *config.Config) *IdempotencyCleanupService {
-	svc := NewIdempotencyCleanupService(repo, cfg)
+func ProvideIdempotencyCleanupService(repo IdempotencyRepository, receiptRepo QuotaAdvanceReceiptRepository, cfg *config.Config) *IdempotencyCleanupService {
+	svc := NewIdempotencyCleanupService(repo, cfg, receiptRepo)
 	svc.Start()
 	return svc
+}
+
+func ProvideSubscriptionService(groupRepo GroupRepository, userSubRepo UserSubscriptionRepository, billingCacheService *BillingCacheService, entClient *dbent.Client, cfg *config.Config, receiptRepo QuotaAdvanceReceiptRepository) *SubscriptionService {
+	return NewSubscriptionService(groupRepo, userSubRepo, billingCacheService, entClient, cfg, receiptRepo)
 }
 
 // ProvideScheduledTestService creates ScheduledTestService.
@@ -796,7 +800,8 @@ var ProviderSet = wire.NewSet(
 	NewNotificationEmailService,
 	ProvideEmailQueueService,
 	NewTurnstileService,
-	NewSubscriptionService,
+	ProvideSubscriptionService,
+	ProvideSubscriptionCacheInvalidationWorker,
 	wire.Bind(new(DefaultSubscriptionAssigner), new(*SubscriptionService)),
 	ProvideConcurrencyService,
 	ProvideUserMessageQueueService,

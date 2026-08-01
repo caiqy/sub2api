@@ -206,6 +206,30 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	requireColumn(t, tx, "user_allowed_groups", "created_at", "timestamp with time zone", 0, false)
 }
 
+func TestSubscriptionQuotaAdvanceReceiptMigration_IsIdempotentAndUpgradeCompatible(t *testing.T) {
+	db := newEmptyIsolatedMigrationDB(t)
+	ctx := context.Background()
+	migration, err := dbmigrations.FS.ReadFile("191_subscription_quota_advance_receipts.sql")
+	require.NoError(t, err)
+
+	// A table created before its ledger entry must not block the normal upgrade.
+	_, err = db.ExecContext(ctx, string(migration))
+	require.NoError(t, err)
+	require.NoError(t, ApplyMigrations(ctx, db))
+	require.NoError(t, ApplyMigrations(ctx, db))
+
+	tx, err := db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback() })
+	requireMigrationApplied(t, tx, "191_subscription_quota_advance_receipts.sql")
+	var receiptTable sql.NullString
+	require.NoError(t, tx.QueryRowContext(ctx, "SELECT to_regclass('public.subscription_quota_advance_receipts')").Scan(&receiptTable))
+	require.True(t, receiptTable.Valid)
+	requireColumn(t, tx, "subscription_quota_advance_receipts", "idempotency_key_hash", "character", 64, false)
+	requireColumn(t, tx, "subscription_quota_advance_receipts", "request_fingerprint", "character", 64, false)
+	requireIndex(t, tx, "subscription_quota_advance_receipts", "idx_subscription_quota_advance_receipts_expires_at")
+}
+
 func TestMigrationsRunner_UpgradesLocalV01596AcrossUpstreamStages(t *testing.T) {
 	const (
 		localVideoMigration = "172_video_per_second_billing_metadata.sql"

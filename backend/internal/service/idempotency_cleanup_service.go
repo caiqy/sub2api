@@ -11,16 +11,17 @@ import (
 
 // IdempotencyCleanupService 定期清理已过期的幂等记录，避免表无限增长。
 type IdempotencyCleanupService struct {
-	repo     IdempotencyRepository
-	interval time.Duration
-	batch    int
+	repo        IdempotencyRepository
+	receiptRepo QuotaAdvanceReceiptRepository
+	interval    time.Duration
+	batch       int
 
 	startOnce sync.Once
 	stopOnce  sync.Once
 	stopCh    chan struct{}
 }
 
-func NewIdempotencyCleanupService(repo IdempotencyRepository, cfg *config.Config) *IdempotencyCleanupService {
+func NewIdempotencyCleanupService(repo IdempotencyRepository, cfg *config.Config, receiptRepos ...QuotaAdvanceReceiptRepository) *IdempotencyCleanupService {
 	interval := 60 * time.Second
 	batch := 500
 	if cfg != nil {
@@ -31,12 +32,16 @@ func NewIdempotencyCleanupService(repo IdempotencyRepository, cfg *config.Config
 			batch = cfg.Idempotency.CleanupBatchSize
 		}
 	}
-	return &IdempotencyCleanupService{
+	svc := &IdempotencyCleanupService{
 		repo:     repo,
 		interval: interval,
 		batch:    batch,
 		stopCh:   make(chan struct{}),
 	}
+	if len(receiptRepos) > 0 {
+		svc.receiptRepo = receiptRepos[0]
+	}
+	return svc
 }
 
 func (s *IdempotencyCleanupService) Start() {
@@ -80,12 +85,20 @@ func (s *IdempotencyCleanupService) cleanupOnce() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	deleted, err := s.repo.DeleteExpired(ctx, time.Now(), s.batch)
+	now := time.Now()
+	deleted, err := s.repo.DeleteExpired(ctx, now, s.batch)
 	if err != nil {
 		logger.LegacyPrintf("service.idempotency_cleanup", "[IdempotencyCleanup] cleanup failed err=%v", err)
+	} else if deleted > 0 {
+		logger.LegacyPrintf("service.idempotency_cleanup", "[IdempotencyCleanup] cleaned expired records count=%d", deleted)
+	}
+	if s.receiptRepo == nil {
 		return
 	}
-	if deleted > 0 {
-		logger.LegacyPrintf("service.idempotency_cleanup", "[IdempotencyCleanup] cleaned expired records count=%d", deleted)
+	deleted, err = s.receiptRepo.DeleteExpired(ctx, now, s.batch)
+	if err != nil {
+		logger.LegacyPrintf("service.idempotency_cleanup", "[IdempotencyCleanup] receipt cleanup failed err=%v", err)
+	} else if deleted > 0 {
+		logger.LegacyPrintf("service.idempotency_cleanup", "[IdempotencyCleanup] cleaned expired receipt count=%d", deleted)
 	}
 }

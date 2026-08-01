@@ -88,6 +88,7 @@ type cacheWriteTask struct {
 	apiKeyID         int64
 	balance          float64
 	amount           float64
+	usageVersion     int64 // DB 行版本（UnixNano），随订阅用量增量一起传递
 	subscriptionData *subscriptionCacheData
 }
 
@@ -101,18 +102,27 @@ type subscriptionCacheInvalidationPubSub interface {
 	SubscribeSubscriptionCacheInvalidation(ctx context.Context, handler func(cacheKey string)) error
 }
 
+type versionedSubscriptionCacheInvalidator interface {
+	InvalidateSubscriptionCacheVersioned(ctx context.Context, userID, groupID, version int64) error
+}
+
+type subscriptionCacheL1Invalidator interface {
+	InvalidateSubCacheSync(userID, groupID int64)
+}
+
 // BillingCacheService 计费缓存服务
 // 负责余额和订阅数据的缓存管理，提供高性能的计费资格检查
 type BillingCacheService struct {
-	cache                 BillingCache
-	userRepo              UserRepository
-	subRepo               UserSubscriptionRepository
-	apiKeyRateLimitLoader apiKeyRateLimitLoader
-	userRPMCache          UserRPMCache
-	userGroupRateRepo     UserGroupRateRepository
-	cfg                   *config.Config
-	circuitBreaker        *billingCircuitBreaker
-	userPlatformQuotaRepo UserPlatformQuotaRepository
+	cache                          BillingCache
+	subscriptionCacheL1Invalidator subscriptionCacheL1Invalidator
+	userRepo                       UserRepository
+	subRepo                        UserSubscriptionRepository
+	apiKeyRateLimitLoader          apiKeyRateLimitLoader
+	userRPMCache                   UserRPMCache
+	userGroupRateRepo              UserGroupRateRepository
+	cfg                            *config.Config
+	circuitBreaker                 *billingCircuitBreaker
+	userPlatformQuotaRepo          UserPlatformQuotaRepository
 
 	cacheWriteChan     chan cacheWriteTask
 	cacheWriteWg       sync.WaitGroup
@@ -227,10 +237,8 @@ func (s *BillingCacheService) cacheWriteWorker(ch <-chan cacheWriteTask) {
 		case cacheWriteSetSubscription:
 			s.setSubscriptionCache(ctx, task.userID, task.groupID, task.subscriptionData)
 		case cacheWriteUpdateSubscriptionUsage:
-			if s.cache != nil {
-				if err := s.cache.UpdateSubscriptionUsage(ctx, task.userID, task.groupID, task.amount); err != nil {
-					logger.LegacyPrintf("service.billing_cache", "Warning: update subscription cache failed for user %d group %d: %v", task.userID, task.groupID, err)
-				}
+			if err := s.UpdateSubscriptionUsage(ctx, task.userID, task.groupID, task.amount, task.usageVersion); err != nil {
+				logger.LegacyPrintf("service.billing_cache", "Warning: update subscription cache failed for user %d group %d: %v", task.userID, task.groupID, err)
 			}
 		case cacheWriteDeductBalance:
 			if s.cache != nil {
@@ -479,7 +487,7 @@ func (s *BillingCacheService) getSubscriptionFromDB(ctx context.Context, userID,
 		DailyUsage:   sub.DailyUsageUSD,
 		WeeklyUsage:  sub.WeeklyUsageUSD,
 		MonthlyUsage: sub.MonthlyUsageUSD,
-		Version:      sub.UpdatedAt.Unix(),
+		Version:      sub.UpdatedAt.UnixNano(),
 	}, nil
 }
 
@@ -494,30 +502,33 @@ func (s *BillingCacheService) setSubscriptionCache(ctx context.Context, userID, 
 }
 
 // UpdateSubscriptionUsage 更新订阅用量缓存（同步调用）
-func (s *BillingCacheService) UpdateSubscriptionUsage(ctx context.Context, userID, groupID int64, costUSD float64) error {
+// version 是 DB 中该用量增量的行版本（UnixNano），用于跳过重置前旧增量与
+// 快照已包含的同版增量。
+func (s *BillingCacheService) UpdateSubscriptionUsage(ctx context.Context, userID, groupID int64, costUSD float64, version int64) error {
 	if s.cache == nil {
 		return nil
 	}
-	return s.cache.UpdateSubscriptionUsage(ctx, userID, groupID, costUSD)
+	return s.cache.UpdateSubscriptionUsage(ctx, userID, groupID, costUSD, version)
 }
 
 // QueueUpdateSubscriptionUsage 异步更新订阅用量缓存
-func (s *BillingCacheService) QueueUpdateSubscriptionUsage(userID, groupID int64, costUSD float64) {
+func (s *BillingCacheService) QueueUpdateSubscriptionUsage(userID, groupID int64, costUSD float64, version int64) {
 	if s.cache == nil {
 		return
 	}
 	// 队列满时同步回退，确保订阅用量及时更新。
 	if s.enqueueCacheWrite(cacheWriteTask{
-		kind:    cacheWriteUpdateSubscriptionUsage,
-		userID:  userID,
-		groupID: groupID,
-		amount:  costUSD,
+		kind:         cacheWriteUpdateSubscriptionUsage,
+		userID:       userID,
+		groupID:      groupID,
+		amount:       costUSD,
+		usageVersion: version,
 	}) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), cacheWriteTimeout)
 	defer cancel()
-	if err := s.UpdateSubscriptionUsage(ctx, userID, groupID, costUSD); err != nil {
+	if err := s.UpdateSubscriptionUsage(ctx, userID, groupID, costUSD, version); err != nil {
 		logger.LegacyPrintf("service.billing_cache", "Warning: update subscription cache fallback failed for user %d group %d: %v", userID, groupID, err)
 	}
 }
@@ -532,6 +543,24 @@ func (s *BillingCacheService) InvalidateSubscription(ctx context.Context, userID
 		return err
 	}
 	return nil
+}
+
+func (s *BillingCacheService) InvalidateSubscriptionVersioned(ctx context.Context, userID, groupID, version int64) error {
+	if s == nil || s.cache == nil {
+		return nil
+	}
+	if cache, ok := s.cache.(versionedSubscriptionCacheInvalidator); ok {
+		return cache.InvalidateSubscriptionCacheVersioned(ctx, userID, groupID, version)
+	}
+	return ErrSubscriptionUsageVersioningUnavailable
+}
+
+func (s *BillingCacheService) supportsVersionedSubscriptionInvalidation() bool {
+	if s == nil || s.cache == nil {
+		return true
+	}
+	_, ok := s.cache.(versionedSubscriptionCacheInvalidator)
+	return ok
 }
 
 func (s *BillingCacheService) PublishSubscriptionCacheInvalidation(ctx context.Context, cacheKey string) error {

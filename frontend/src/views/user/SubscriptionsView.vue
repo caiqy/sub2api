@@ -240,9 +240,28 @@
                 </div>
               </div>
             </div>
+
+            <div v-if="canAdvanceQuota(subscription)" class="border-t border-gray-100 pt-4 dark:border-dark-700">
+              <button
+                :data-test="`advance-quota-${subscription.id}`"
+                type="button"
+                class="btn btn-secondary inline-flex w-full items-center justify-center gap-2"
+                @click="openQuotaAdvance(subscription)"
+              >
+                <Icon name="refresh" size="sm" />
+                {{ t('userSubscriptions.quotaAdvance.action') }}
+              </button>
+            </div>
           </div>
         </div>
       </div>
+
+      <SubscriptionQuotaAdvanceDialog
+        :show="showQuotaAdvance"
+        :subscription="advancingSubscription"
+        @close="closeQuotaAdvance"
+        @success="handleQuotaAdvanceSuccess"
+      />
     </div>
   </AppLayout>
 </template>
@@ -256,10 +275,11 @@ import subscriptionsAPI from '@/api/subscriptions'
 import type { UserSubscription } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
+import SubscriptionQuotaAdvanceDialog from '@/components/subscription/SubscriptionQuotaAdvanceDialog.vue'
 import { formatDateTimeToMinute } from '@/utils/format'
 import { hasPeakRate, formatPeakRateWindow, serverTimezoneLabel } from '@/utils/peak-rate'
 import { platformBorderClass, platformBadgeClass, platformButtonClass, platformLabel } from '@/utils/platformColors'
-import { getRemainingDurationParts, isOneTimeDailyQuota, type RemainingDurationParts } from '@/utils/subscriptionQuota'
+import { getExhaustedQuotaWindows, getRemainingDurationParts, isOneTimeDailyQuota, type RemainingDurationParts } from '@/utils/subscriptionQuota'
 
 function platformAccentDotClass(p: string): string {
   switch (p) {
@@ -277,6 +297,8 @@ const appStore = useAppStore()
 
 const subscriptions = ref<UserSubscription[]>([])
 const loading = ref(true)
+const showQuotaAdvance = ref(false)
+const advancingSubscription = ref<UserSubscription | null>(null)
 
 function subscriptionHasPeakRate(subscription: UserSubscription): boolean {
   return hasPeakRate(subscription.group)
@@ -284,6 +306,26 @@ function subscriptionHasPeakRate(subscription: UserSubscription): boolean {
 
 function subscriptionPeakRateLabel(subscription: UserSubscription): string {
   return formatPeakRateWindow(subscription.group, serverTimezoneLabel(appStore.cachedPublicSettings?.server_utc_offset))
+}
+
+function canAdvanceQuota(subscription: UserSubscription): boolean {
+  return getExhaustedQuotaWindows(subscription).length > 0
+}
+
+function openQuotaAdvance(subscription: UserSubscription) {
+  advancingSubscription.value = subscription
+  showQuotaAdvance.value = true
+}
+
+function closeQuotaAdvance() {
+  showQuotaAdvance.value = false
+  advancingSubscription.value = null
+}
+
+function handleQuotaAdvanceSuccess(updated: UserSubscription) {
+  const index = subscriptions.value.findIndex((subscription) => subscription.id === updated.id)
+  if (index >= 0) subscriptions.value[index] = updated
+  appStore.showSuccess(t('userSubscriptions.quotaAdvance.success'))
 }
 
 async function loadSubscriptions() {

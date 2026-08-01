@@ -43,8 +43,30 @@ func (b *billingCacheWorkerStub) SetSubscriptionCache(ctx context.Context, userI
 	return nil
 }
 
-func (b *billingCacheWorkerStub) UpdateSubscriptionUsage(ctx context.Context, userID, groupID int64, cost float64) error {
+func (b *billingCacheWorkerStub) UpdateSubscriptionUsage(ctx context.Context, userID, groupID int64, cost float64, version int64) error {
 	atomic.AddInt64(&b.subscriptionUpdates, 1)
+	return nil
+}
+
+// versionRecordingBillingCache records the usage-delta version the worker
+// passes to the Redis repository.
+type versionRecordingBillingCache struct {
+	billingCacheWorkerStub
+	usageVersion atomic.Int64
+}
+
+type deleteRecordingBillingCache struct {
+	billingCacheWorkerStub
+	deleteCalls int
+}
+
+func (c *deleteRecordingBillingCache) InvalidateSubscriptionCache(context.Context, int64, int64) error {
+	c.deleteCalls++
+	return nil
+}
+
+func (v *versionRecordingBillingCache) UpdateSubscriptionUsage(ctx context.Context, userID, groupID int64, cost float64, version int64) error {
+	v.usageVersion.Store(version)
 	return nil
 }
 
@@ -107,7 +129,7 @@ func TestBillingCacheServiceQueueHighLoad(t *testing.T) {
 	}
 	require.Less(t, time.Since(start), 2*time.Second)
 
-	svc.QueueUpdateSubscriptionUsage(1, 2, 1.5)
+	svc.QueueUpdateSubscriptionUsage(1, 2, 1.5, 1)
 
 	require.Eventually(t, func() bool {
 		return atomic.LoadInt64(&cache.balanceUpdates) > 0
@@ -129,4 +151,47 @@ func TestBillingCacheServiceEnqueueAfterStopReturnsFalse(t *testing.T) {
 		amount: 1,
 	})
 	require.False(t, enqueued)
+}
+
+func TestBillingCacheService_QueueUpdateSubscriptionUsagePropagatesDBVersion(t *testing.T) {
+	cache := &versionRecordingBillingCache{}
+	svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, &config.Config{}, nil)
+	t.Cleanup(svc.Stop)
+
+	svc.QueueUpdateSubscriptionUsage(1, 2, 1.5, 1234567890123456789)
+
+	require.Eventually(t, func() bool {
+		return cache.usageVersion.Load() == 1234567890123456789
+	}, 2*time.Second, 10*time.Millisecond, "DB result version must reach the Redis repository through the queue worker")
+}
+
+func TestFinalizePostUsageBilling_ForwardsSubscriptionUsageVersion(t *testing.T) {
+	cache := &versionRecordingBillingCache{}
+	svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, &config.Config{}, nil)
+	t.Cleanup(svc.Stop)
+
+	groupID := int64(20)
+	finalizePostUsageBilling(context.Background(), &postUsageBillingParams{
+		Cost:               &CostBreakdown{ActualCost: 2.5},
+		User:               &User{ID: 10},
+		APIKey:             &APIKey{GroupID: &groupID},
+		Account:            &Account{},
+		IsSubscriptionBill: true,
+	}, &billingDeps{
+		billingCacheService: svc,
+	}, &UsageBillingApplyResult{SubscriptionUsageVersion: 424242})
+
+	require.Eventually(t, func() bool {
+		return cache.usageVersion.Load() == 424242
+	}, 2*time.Second, 10*time.Millisecond, "finalize must pass the DB result version into the queue")
+}
+
+func TestInvalidateSubscriptionVersioned_RejectsUnversionedCache(t *testing.T) {
+	cache := &deleteRecordingBillingCache{}
+	svc := &BillingCacheService{cache: cache}
+
+	err := svc.InvalidateSubscriptionVersioned(context.Background(), 1, 2, 3)
+
+	require.Error(t, err)
+	require.Zero(t, cache.deleteCalls, "versioned invalidation must not degrade to an unversioned delete")
 }

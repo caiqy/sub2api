@@ -145,6 +145,10 @@ func (r *dailyResetTrackingUserSubRepo) ResetDailyUsage(context.Context, int64, 
 	return nil
 }
 
+func (r *dailyResetTrackingUserSubRepo) ResetDailyUsageWithVersion(ctx context.Context, id int64, expectedWindowStart *time.Time, start time.Time) (int64, error) {
+	return 1, r.ResetDailyUsage(ctx, id, expectedWindowStart, start)
+}
+
 func TestAssignOrExtendSubscription_ExpiredDailyCardStartsNewOneTimeQuota(t *testing.T) {
 	groupRepo := &subscriptionGroupRepoStub{
 		group: &Group{ID: 1, SubscriptionType: SubscriptionTypeSubscription},
@@ -465,6 +469,10 @@ func (r *windowResetTrackingUserSubRepo) ResetDailyUsage(_ context.Context, _ in
 	return nil
 }
 
+func (r *windowResetTrackingUserSubRepo) ResetDailyUsageWithVersion(ctx context.Context, id int64, expectedWindowStart *time.Time, start time.Time) (int64, error) {
+	return 1, r.ResetDailyUsage(ctx, id, expectedWindowStart, start)
+}
+
 func (r *windowResetTrackingUserSubRepo) ResetWeeklyUsage(_ context.Context, _ int64, _ *time.Time, start time.Time) error {
 	r.resetWeeklyCalled = true
 	r.resetWeeklyStart = start
@@ -474,6 +482,10 @@ func (r *windowResetTrackingUserSubRepo) ResetWeeklyUsage(_ context.Context, _ i
 	return nil
 }
 
+func (r *windowResetTrackingUserSubRepo) ResetWeeklyUsageWithVersion(ctx context.Context, id int64, expectedWindowStart *time.Time, start time.Time) (int64, error) {
+	return 1, r.ResetWeeklyUsage(ctx, id, expectedWindowStart, start)
+}
+
 func (r *windowResetTrackingUserSubRepo) ResetMonthlyUsage(_ context.Context, _ int64, _ *time.Time, start time.Time) error {
 	r.resetMonthlyCalled = true
 	r.resetMonthlyStart = start
@@ -481,6 +493,10 @@ func (r *windowResetTrackingUserSubRepo) ResetMonthlyUsage(_ context.Context, _ 
 		return r.resetMonthlyErr
 	}
 	return nil
+}
+
+func (r *windowResetTrackingUserSubRepo) ResetMonthlyUsageWithVersion(ctx context.Context, id int64, expectedWindowStart *time.Time, start time.Time) (int64, error) {
+	return 1, r.ResetMonthlyUsage(ctx, id, expectedWindowStart, start)
 }
 
 func TestCheckAndResetWindows_InvalidatesCacheAfterPartialResetFailure(t *testing.T) {
@@ -564,6 +580,10 @@ func (r *adminResetPartialFailureRepo) ResetUsageWindows(_ context.Context, _ in
 	r.resetWeeklyCalled = resetWeekly
 	r.resetMonthlyCalled = resetMonthly
 	return r.resetWeeklyErr
+}
+
+func (r *adminResetPartialFailureRepo) ResetUsageWindowsWithVersion(ctx context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, start time.Time) (int64, error) {
+	return 1, r.ResetUsageWindows(ctx, id, resetDaily, resetWeekly, resetMonthly, start)
 }
 
 func TestSevenDayCardDoesNotReceiveSecondWeeklyQuotaBeforeExpiry(t *testing.T) {

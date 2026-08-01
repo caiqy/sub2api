@@ -15,13 +15,14 @@ import (
 )
 
 const (
-	billingBalanceKeyPrefix   = "billing:balance:"
-	billingSubKeyPrefix       = "billing:sub:"
-	billingRateLimitKeyPrefix = "apikey:rate:"
-	subCacheInvalidateChannel = "subscription:cache:invalidate"
-	billingCacheTTL           = 5 * time.Minute
-	billingCacheJitter        = 30 * time.Second
-	rateLimitCacheTTL         = 7 * 24 * time.Hour // 7 days matches the longest window
+	billingBalanceKeyPrefix    = "billing:balance:"
+	billingSubKeyPrefix        = "billing:sub:"
+	billingSubVersionKeyPrefix = "billing:sub-version:"
+	billingRateLimitKeyPrefix  = "apikey:rate:"
+	subCacheInvalidateChannel  = "subscription:cache:invalidate"
+	billingCacheTTL            = 5 * time.Minute
+	billingCacheJitter         = 30 * time.Second
+	rateLimitCacheTTL          = 7 * 24 * time.Hour // 7 days matches the longest window
 
 	// Rate limit window durations — must match service.RateLimitWindow* constants.
 	rateLimitWindow5h = 5 * time.Hour
@@ -49,6 +50,10 @@ func billingSubKey(userID, groupID int64) string {
 	return fmt.Sprintf("%s%d:%d", billingSubKeyPrefix, userID, groupID)
 }
 
+func billingSubVersionKey(userID, groupID int64) string {
+	return fmt.Sprintf("%s%d:%d", billingSubVersionKeyPrefix, userID, groupID)
+}
+
 const (
 	subFieldStatus       = "status"
 	subFieldExpiresAt    = "expires_at"
@@ -56,6 +61,7 @@ const (
 	subFieldWeeklyUsage  = "weekly_usage"
 	subFieldMonthlyUsage = "monthly_usage"
 	subFieldVersion      = "version"
+	subFieldUsageVersion = "usage_version"
 )
 
 // billingRateLimitKey generates the Redis key for API key rate limit cache.
@@ -84,16 +90,99 @@ var (
 		return 1
 	`)
 
+	// updateSubUsageScript applies a committed usage delta to the cached
+	// subscription snapshot. The delta is accepted only when its DB row version
+	// is strictly newer than BOTH the cached snapshot version and the reset
+	// tombstone (billing:sub-version:*). A missing hash is a no-op: the delta is
+	// already included in the next DB snapshot refill. No "max seen delta" is
+	// tracked: any number of deltas newer than the same snapshot remain
+	// commutative regardless of arrival order.
+	//
+	// KEYS: [1]=sub hash key, [2]=reset tombstone key
+	// ARGV: [1]=deltaVersion (UnixNano), [2]=cost, [3]=ttl_seconds
 	updateSubUsageScript = redis.NewScript(`
+		local function greater_version(left, right)
+			if type(left) ~= 'string' or string.match(left, '^%d+$') == nil then
+				return false
+			end
+			if type(right) ~= 'string' or string.match(right, '^%d+$') == nil then
+				return true
+			end
+			if string.len(left) ~= string.len(right) then
+				return string.len(left) > string.len(right)
+			end
+			return left > right
+		end
 		local exists = redis.call('EXISTS', KEYS[1])
 		if exists == 0 then
 			return 0
 		end
-		local cost = tonumber(ARGV[1])
+		local deltaVersion = ARGV[1]
+		local snapshotVersion = redis.call('HGET', KEYS[1], 'version')
+		local tombstone = redis.call('GET', KEYS[2])
+		if not greater_version(deltaVersion, tombstone) or not greater_version(deltaVersion, snapshotVersion) then
+			return 0
+		end
+		local cost = tonumber(ARGV[2])
 		redis.call('HINCRBYFLOAT', KEYS[1], 'daily_usage', cost)
 		redis.call('HINCRBYFLOAT', KEYS[1], 'weekly_usage', cost)
 		redis.call('HINCRBYFLOAT', KEYS[1], 'monthly_usage', cost)
-		redis.call('EXPIRE', KEYS[1], ARGV[2])
+		redis.call('EXPIRE', KEYS[1], ARGV[3])
+		return 1
+	`)
+
+	setSubscriptionScript = redis.NewScript(`
+		local function greater_version(left, right)
+			if type(left) ~= 'string' or string.match(left, '^%d+$') == nil then
+				return false
+			end
+			if type(right) ~= 'string' or string.match(right, '^%d+$') == nil then
+				return true
+			end
+			if string.len(left) ~= string.len(right) then
+				return string.len(left) > string.len(right)
+			end
+			return left > right
+		end
+		local current = redis.call('HGET', KEYS[1], 'version')
+		local minimum = redis.call('GET', KEYS[2])
+		local incoming = ARGV[6]
+		if not greater_version(incoming, current) or not greater_version(incoming, minimum) then
+			return 0
+		end
+		redis.call('HSET', KEYS[1],
+			'status', ARGV[1],
+			'expires_at', ARGV[2],
+			'daily_usage', ARGV[3],
+			'weekly_usage', ARGV[4],
+			'monthly_usage', ARGV[5],
+			'version', ARGV[6])
+		redis.call('EXPIRE', KEYS[1], ARGV[7])
+		return 1
+	`)
+
+	invalidateSubscriptionVersionedScript = redis.NewScript(`
+		local function greater_version(left, right)
+			if type(left) ~= 'string' or string.match(left, '^%d+$') == nil then
+				return false
+			end
+			if type(right) ~= 'string' or string.match(right, '^%d+$') == nil then
+				return true
+			end
+			if string.len(left) ~= string.len(right) then
+				return string.len(left) > string.len(right)
+			end
+			return left > right
+		end
+		local incoming = ARGV[1]
+		local minimum = redis.call('GET', KEYS[2])
+		if greater_version(incoming, minimum) then
+			redis.call('SET', KEYS[2], ARGV[1], 'EX', ARGV[2])
+		end
+		local current = redis.call('HGET', KEYS[1], 'version')
+		if greater_version(incoming, current) then
+			redis.call('DEL', KEYS[1])
+		end
 		return 1
 	`)
 
@@ -226,25 +315,21 @@ func (c *billingCache) SetSubscriptionCache(ctx context.Context, userID, groupID
 
 	key := billingSubKey(userID, groupID)
 
-	fields := map[string]any{
-		subFieldStatus:       data.Status,
-		subFieldExpiresAt:    data.ExpiresAt.Unix(),
-		subFieldDailyUsage:   data.DailyUsage,
-		subFieldWeeklyUsage:  data.WeeklyUsage,
-		subFieldMonthlyUsage: data.MonthlyUsage,
-		subFieldVersion:      data.Version,
-	}
-
-	pipe := c.rdb.Pipeline()
-	pipe.HSet(ctx, key, fields)
-	pipe.Expire(ctx, key, jitteredTTL())
-	_, err := pipe.Exec(ctx)
+	_, err := setSubscriptionScript.Run(ctx, c.rdb, []string{key, billingSubVersionKey(userID, groupID)},
+		data.Status,
+		data.ExpiresAt.Unix(),
+		data.DailyUsage,
+		data.WeeklyUsage,
+		data.MonthlyUsage,
+		data.Version,
+		int(jitteredTTL().Seconds()),
+	).Result()
 	return err
 }
 
-func (c *billingCache) UpdateSubscriptionUsage(ctx context.Context, userID, groupID int64, cost float64) error {
+func (c *billingCache) UpdateSubscriptionUsage(ctx context.Context, userID, groupID int64, cost float64, version int64) error {
 	key := billingSubKey(userID, groupID)
-	_, err := updateSubUsageScript.Run(ctx, c.rdb, []string{key}, cost, int(jitteredTTL().Seconds())).Result()
+	_, err := updateSubUsageScript.Run(ctx, c.rdb, []string{key, billingSubVersionKey(userID, groupID)}, version, cost, int(jitteredTTL().Seconds())).Result()
 	if err != nil && !errors.Is(err, redis.Nil) {
 		log.Printf("Warning: update subscription usage cache failed for user %d group %d: %v", userID, groupID, err)
 		return err
@@ -255,6 +340,15 @@ func (c *billingCache) UpdateSubscriptionUsage(ctx context.Context, userID, grou
 func (c *billingCache) InvalidateSubscriptionCache(ctx context.Context, userID, groupID int64) error {
 	key := billingSubKey(userID, groupID)
 	return c.rdb.Del(ctx, key).Err()
+}
+
+func (c *billingCache) InvalidateSubscriptionCacheVersioned(ctx context.Context, userID, groupID, version int64) error {
+	// ponytail: block equal-version refills for one cache TTL; this one subscription falls back to DB until a newer snapshot exists.
+	_, err := invalidateSubscriptionVersionedScript.Run(ctx, c.rdb,
+		[]string{billingSubKey(userID, groupID), billingSubVersionKey(userID, groupID)},
+		version, int(billingCacheTTL.Seconds()),
+	).Result()
+	return err
 }
 
 func (c *billingCache) PublishSubscriptionCacheInvalidation(ctx context.Context, cacheKey string) error {

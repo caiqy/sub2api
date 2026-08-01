@@ -365,3 +365,90 @@ func TestUsageBillingRepositoryApply_DeduplicatesAgainstArchivedKey(t *testing.T
 	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT balance FROM users WHERE id = $1", user.ID).Scan(&balance))
 	require.InDelta(t, 98.75, balance, 0.000001)
 }
+
+func TestUsageBillingSubscriptionVersion_StrictlyMonotonicAndFromRowWrite(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	user := mustCreateUser(t, client, &service.User{
+		Email:        fmt.Sprintf("usage-version-%d@example.com", time.Now().UnixNano()),
+		PasswordHash: "hash",
+		Balance:      100,
+	})
+	dailyLimit := 10.0
+	group := mustCreateGroup(t, client, &service.Group{
+		Name:             "usage-version-" + fmt.Sprint(time.Now().UnixNano()),
+		Status:           service.StatusActive,
+		SubscriptionType: service.SubscriptionTypeSubscription,
+		DailyLimitUSD:    &dailyLimit,
+	})
+	sub := mustCreateSubscription(t, client, &service.UserSubscription{
+		UserID:          user.ID,
+		GroupID:         group.ID,
+		StartsAt:        time.Now().Add(-24 * time.Hour),
+		ExpiresAt:       time.Now().Add(30 * 24 * time.Hour),
+		Status:          service.SubscriptionStatusActive,
+		DailyUsageUSD:   1,
+		WeeklyUsageUSD:  1,
+		MonthlyUsageUSD: 1,
+	})
+
+	tx := testTx(t)
+
+	v1, err := incrementUsageBillingSubscription(ctx, tx, sub.ID, 1.5)
+	require.NoError(t, err)
+	v2, err := incrementUsageBillingSubscription(ctx, tx, sub.ID, 2.5)
+	require.NoError(t, err)
+
+	require.Greater(t, v1, int64(0), "version must come from the DB row write")
+	require.Greater(t, v2, v1, "versions must be strictly monotonic per row")
+	require.Zero(t, v1%1000, "timestamptz microsecond precision must yield ns multiples of 1000")
+	require.Zero(t, v2%1000)
+
+	var rowNS int64
+	require.NoError(t, tx.QueryRowContext(ctx,
+		"SELECT (EXTRACT(EPOCH FROM updated_at) * 1000000000)::bigint FROM user_subscriptions WHERE id = $1",
+		sub.ID).Scan(&rowNS))
+	require.Equal(t, v2, rowNS, "returned version must equal the committed row version")
+
+	var daily, weekly, monthly float64
+	require.NoError(t, tx.QueryRowContext(ctx,
+		"SELECT daily_usage_usd, weekly_usage_usd, monthly_usage_usd FROM user_subscriptions WHERE id = $1",
+		sub.ID).Scan(&daily, &weekly, &monthly))
+	require.Equal(t, 5.0, daily)
+	require.Equal(t, 5.0, weekly)
+	require.Equal(t, 5.0, monthly)
+	require.NoError(t, tx.Commit(), "release the row lock before Apply opens its own transaction")
+
+	// Apply() must surface the version on UsageBillingApplyResult.
+	repo := NewUsageBillingRepository(client, integrationDB)
+	apiKey := mustCreateApiKey(t, client, &service.APIKey{
+		UserID: user.ID,
+		Key:    "sk-usage-version-" + uuid.NewString(),
+		Name:   "usage-version",
+	})
+	account := mustCreateAccount(t, client, &service.Account{
+		Name: "usage-version-account-" + uuid.NewString(),
+		Type: service.AccountTypeAPIKey,
+	})
+	cmd := &service.UsageBillingCommand{
+		RequestID:        uuid.NewString(),
+		APIKeyID:         apiKey.ID,
+		UserID:           user.ID,
+		AccountID:        account.ID,
+		AccountType:      service.AccountTypeAPIKey,
+		SubscriptionID:   &sub.ID,
+		SubscriptionCost: 0.5,
+	}
+	applied, err := repo.Apply(ctx, cmd)
+	require.NoError(t, err)
+	require.NotNil(t, applied)
+	require.True(t, applied.Applied)
+	require.Greater(t, applied.SubscriptionUsageVersion, v2,
+		"Apply must return the version committed by its own row write")
+
+	var appliedRowNS int64
+	require.NoError(t, integrationDB.QueryRowContext(ctx,
+		"SELECT (EXTRACT(EPOCH FROM updated_at) * 1000000000)::bigint FROM user_subscriptions WHERE id = $1",
+		sub.ID).Scan(&appliedRowNS))
+	require.Equal(t, applied.SubscriptionUsageVersion, appliedRowNS)
+}

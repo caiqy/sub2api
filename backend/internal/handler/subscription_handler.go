@@ -1,6 +1,10 @@
 package handler
 
 import (
+	"context"
+	"strconv"
+	"time"
+
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -28,6 +32,17 @@ type SubscriptionSummaryItem struct {
 type SubscriptionProgressInfo struct {
 	Subscription *dto.UserSubscription         `json:"subscription"`
 	Progress     *service.SubscriptionProgress `json:"progress"`
+}
+
+type AdvanceQuotaCycleRequest struct {
+	Daily   bool `json:"daily"`
+	Weekly  bool `json:"weekly"`
+	Monthly bool `json:"monthly"`
+}
+
+type AdvanceQuotaCycleResponse struct {
+	Subscription    *dto.UserSubscription `json:"subscription"`
+	DeductedSeconds int64                 `json:"deducted_seconds"`
 }
 
 // SubscriptionHandler handles user subscription operations
@@ -185,4 +200,71 @@ func (h *SubscriptionHandler) GetSummary(c *gin.Context) {
 	}
 
 	response.Success(c, summary)
+}
+
+// AdvanceQuotaCycle lets the current user exchange remaining subscription time for a fresh quota window.
+// POST /api/v1/subscriptions/:id/advance-quota-cycle
+func (h *SubscriptionHandler) AdvanceQuotaCycle(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not found in context")
+		return
+	}
+	subscriptionID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid subscription ID")
+		return
+	}
+	var req AdvanceQuotaCycleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if !req.Daily && !req.Weekly && !req.Monthly {
+		response.BadRequest(c, "At least one quota window must be selected")
+		return
+	}
+	idempotencyKey := c.GetHeader("Idempotency-Key")
+	normalizedKey, err := service.NormalizeIdempotencyKey(idempotencyKey)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if normalizedKey == "" {
+		response.ErrorFrom(c, service.ErrIdempotencyKeyRequired)
+		return
+	}
+	payload := struct {
+		SubscriptionID int64                    `json:"subscription_id"`
+		Body           AdvanceQuotaCycleRequest `json:"body"`
+	}{SubscriptionID: subscriptionID, Body: req}
+	const scope = "user.subscriptions.advance_quota_cycle"
+	actorScope := "user:" + strconv.FormatInt(subject.UserID, 10)
+	fingerprint, err := service.BuildIdempotencyFingerprint(c.Request.Method, c.FullPath(), actorScope, payload)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	receipt := service.QuotaAdvanceReceiptInput{
+		Scope:              scope,
+		IdempotencyKeyHash: service.HashIdempotencyKey(normalizedKey),
+		RequestFingerprint: fingerprint,
+		ExpiresAt:          time.Now().Add(service.QuotaAdvanceReceiptRetention()),
+	}
+	executeUserIdempotentJSON(c, scope, payload, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
+		data, execErr := h.subscriptionService.AdvanceQuotaCycleWithReceipt(ctx, subject.UserID, subscriptionID, service.QuotaWindowSelection{
+			Daily: req.Daily, Weekly: req.Weekly, Monthly: req.Monthly,
+		}, receipt, func(result *service.QuotaCycleAdvanceResult) (any, error) {
+			return AdvanceQuotaCycleResponse{
+				Subscription:    dto.UserSubscriptionFromService(result.Subscription),
+				DeductedSeconds: int64(result.DeductedDuration / time.Second),
+			}, nil
+		})
+		if execErr != nil {
+			return nil, execErr
+		}
+		return data, nil
+	}, func(ctx context.Context) (any, bool, error) {
+		return h.subscriptionService.RecoverAdvanceQuotaCycleReceipt(ctx, receipt)
+	})
 }

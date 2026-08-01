@@ -6,6 +6,23 @@
 import { apiClient } from './client'
 import type { UserSubscription, SubscriptionProgress } from '@/types'
 
+export interface AdvanceQuotaCycleRequest {
+  daily: boolean
+  weekly: boolean
+  monthly: boolean
+}
+
+export interface AdvanceQuotaCycleResponse {
+  subscription: UserSubscription
+  deducted_seconds: number
+}
+
+const quotaAdvanceOperationKeys = new Map<string, string>()
+
+function quotaAdvanceScope(id: number, request: AdvanceQuotaCycleRequest): string {
+  return `${id}-${request.daily ? 'd' : '-'}${request.weekly ? 'w' : '-'}${request.monthly ? 'm' : '-'}`
+}
+
 /**
  * Subscription summary for user dashboard
  */
@@ -67,10 +84,31 @@ export async function getSubscriptionProgress(
   return response.data
 }
 
+export async function advanceQuotaCycle(
+  subscriptionId: number,
+  request: AdvanceQuotaCycleRequest,
+): Promise<AdvanceQuotaCycleResponse> {
+  const scope = quotaAdvanceScope(subscriptionId, request)
+  let key = quotaAdvanceOperationKeys.get(scope)
+  if (!key) {
+    const requestId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    key = `subscription-quota-advance-${scope}-${requestId}`
+    quotaAdvanceOperationKeys.set(scope, key)
+  }
+  const response = await apiClient.post<AdvanceQuotaCycleResponse>(
+    `/subscriptions/${subscriptionId}/advance-quota-cycle`,
+    request,
+    { headers: { 'Idempotency-Key': key } },
+  )
+  quotaAdvanceOperationKeys.delete(scope)
+  return response.data
+}
+
 export default {
   getMySubscriptions,
   getActiveSubscriptions,
   getSubscriptionsProgress,
   getSubscriptionSummary,
-  getSubscriptionProgress
+  getSubscriptionProgress,
+  advanceQuotaCycle,
 }

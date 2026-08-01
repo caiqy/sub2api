@@ -32,6 +32,7 @@ func (r *redeemSubscriptionRepoStub) ExtendExpiry(_ context.Context, id int64, e
 		return ErrSubscriptionNotFound
 	}
 	sub.ExpiresAt = expiresAt
+	sub.UpdatedAt = time.Now()
 	return nil
 }
 
@@ -41,6 +42,7 @@ func (r *redeemSubscriptionRepoStub) UpdateStatus(_ context.Context, id int64, s
 		return ErrSubscriptionNotFound
 	}
 	sub.Status = status
+	sub.UpdatedAt = time.Now()
 	return nil
 }
 
@@ -50,6 +52,7 @@ func (r *redeemSubscriptionRepoStub) UpdateNotes(_ context.Context, id int64, no
 		return ErrSubscriptionNotFound
 	}
 	sub.Notes = notes
+	sub.UpdatedAt = time.Now()
 	return nil
 }
 
@@ -61,6 +64,7 @@ func (r *redeemSubscriptionRepoStub) ActivateWindows(_ context.Context, id int64
 	sub.DailyWindowStart = &start
 	sub.WeeklyWindowStart = &start
 	sub.MonthlyWindowStart = &start
+	sub.UpdatedAt = time.Now()
 	return nil
 }
 
@@ -72,6 +76,10 @@ func (r *redeemSubscriptionRepoStub) ResetDailyUsage(_ context.Context, id int64
 	sub.DailyUsageUSD = 0
 	sub.DailyWindowStart = &start
 	return nil
+}
+
+func (r *redeemSubscriptionRepoStub) ResetDailyUsageWithVersion(ctx context.Context, id int64, expectedWindowStart *time.Time, start time.Time) (int64, error) {
+	return 1, r.ResetDailyUsage(ctx, id, expectedWindowStart, start)
 }
 
 func (r *redeemSubscriptionRepoStub) ResetUsageWindows(_ context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, start time.Time) error {
@@ -94,6 +102,10 @@ func (r *redeemSubscriptionRepoStub) ResetUsageWindows(_ context.Context, id int
 	return nil
 }
 
+func (r *redeemSubscriptionRepoStub) ResetUsageWindowsWithVersion(ctx context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, start time.Time) (int64, error) {
+	return 1, r.ResetUsageWindows(ctx, id, resetDaily, resetWeekly, resetMonthly, start)
+}
+
 func (r *redeemSubscriptionRepoStub) IncrementUsage(_ context.Context, id int64, cost float64) error {
 	sub := r.byID[id]
 	if sub == nil {
@@ -108,6 +120,7 @@ func (r *redeemSubscriptionRepoStub) IncrementUsage(_ context.Context, id int64,
 type redeemSubscriptionCacheStub struct {
 	billingCacheWorkerStub
 	invalidations          atomic.Int32
+	versionedInvalidations atomic.Int32
 	publications           atomic.Int32
 	invalidateErr          error
 	waitInvalidateDeadline bool
@@ -125,6 +138,11 @@ func (s *redeemSubscriptionCacheStub) InvalidateSubscriptionCache(ctx context.Co
 		return ctx.Err()
 	}
 	return s.invalidateErr
+}
+
+func (s *redeemSubscriptionCacheStub) InvalidateSubscriptionCacheVersioned(ctx context.Context, _ int64, _ int64, _ int64) error {
+	s.versionedInvalidations.Add(1)
+	return s.InvalidateSubscriptionCache(ctx, 0, 0)
 }
 
 func (s *redeemSubscriptionCacheStub) PublishSubscriptionCacheInvalidation(ctx context.Context, _ string) error {
@@ -169,6 +187,29 @@ func TestInvalidateSubscriptionCaches_PublishGetsIndependentTimeout(t *testing.T
 	require.Error(t, err)
 	require.Equal(t, int32(1), cache.publications.Load())
 	require.True(t, cache.publishCtxActive.Load(), "发布不能复用已被 Redis 删除耗尽的 context")
+}
+
+func TestExtendSubscription_UsesVersionedPostCommitInvalidation(t *testing.T) {
+	now := time.Now()
+	sub := &UserSubscription{
+		ID: 30, UserID: 10, GroupID: 20, StartsAt: now.Add(-time.Hour),
+		ExpiresAt: now.Add(10 * 24 * time.Hour), Status: SubscriptionStatusActive,
+	}
+	repo := &redeemSubscriptionRepoStub{subscriptionUserSubRepoStub: newSubscriptionUserSubRepoStub()}
+	repo.seed(sub)
+	cache := &redeemSubscriptionCacheStub{}
+	svc := NewSubscriptionService(
+		&subscriptionGroupRepoStub{group: &Group{ID: sub.GroupID, SubscriptionType: SubscriptionTypeSubscription}},
+		repo,
+		&BillingCacheService{cache: cache},
+		nil,
+		nil,
+	)
+
+	_, err := svc.ExtendSubscription(context.Background(), sub.ID, 1)
+
+	require.NoError(t, err)
+	require.Equal(t, int32(1), cache.versionedInvalidations.Load(), "active term changes must tombstone the versioned subscription cache")
 }
 
 func TestSubscriptionServiceStop_CancelsCacheInvalidationSubscriber(t *testing.T) {
@@ -283,6 +324,30 @@ func TestAssignOrExtendSubscription_OuterTransactionInvalidatesAfterCommit(t *te
 	require.Equal(t, int32(1), cache.publications.Load(), "外层事务提交后必须失效缓存")
 }
 
+func TestAssignSubscription_OuterTransactionInvalidatesAfterCommit(t *testing.T) {
+	client := newPaymentOrderLifecycleTestClient(t)
+	tx, err := client.Tx(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback() })
+	txCtx := dbent.NewTxContext(context.Background(), tx)
+	repo := &redeemSubscriptionRepoStub{subscriptionUserSubRepoStub: newSubscriptionUserSubRepoStub()}
+	cache := &redeemSubscriptionCacheStub{}
+	svc := NewSubscriptionService(
+		&subscriptionGroupRepoStub{group: &Group{ID: 20, SubscriptionType: SubscriptionTypeSubscription}},
+		repo,
+		&BillingCacheService{cache: cache},
+		nil,
+		nil,
+	)
+
+	_, err = svc.AssignSubscription(txCtx, &AssignSubscriptionInput{UserID: 10, GroupID: 20, ValidityDays: 3})
+	require.NoError(t, err)
+	require.Zero(t, cache.publications.Load(), "outer transaction must retain subscription caches until commit")
+
+	require.NoError(t, tx.Commit())
+	require.Equal(t, int32(1), cache.publications.Load(), "assignment must invalidate subscription caches after commit")
+}
+
 func TestPaymentSubscriptionAssignment_DoesNotFailAfterCommitOnCacheError(t *testing.T) {
 	client := newPaymentOrderLifecycleTestClient(t)
 	repo := &redeemSubscriptionRepoStub{subscriptionUserSubRepoStub: newSubscriptionUserSubRepoStub()}
@@ -300,6 +365,7 @@ func TestPaymentSubscriptionAssignment_DoesNotFailAfterCommitOnCacheError(t *tes
 
 	require.NoError(t, err)
 	require.Equal(t, int32(1), cache.publications.Load())
+	require.Equal(t, int32(1), cache.versionedInvalidations.Load(), "payment renewal must tombstone the versioned subscription cache")
 }
 
 func TestRedeemSubscription_InvalidatesAfterCommit(t *testing.T) {
@@ -344,6 +410,7 @@ func TestRedeemSubscription_InvalidatesAfterCommit(t *testing.T) {
 			require.NoError(t, err)
 			require.Eventually(t, func() bool { return cache.invalidations.Load() > 0 }, time.Second, 10*time.Millisecond)
 			require.Equal(t, int32(1), cache.publications.Load(), "订阅兑换提交后应发布一次跨实例 L1 失效")
+			require.Equal(t, int32(1), cache.versionedInvalidations.Load(), "subscription redemption must tombstone before publishing")
 		})
 	}
 }
@@ -412,9 +479,39 @@ func TestSubscriptionSemanticMutations_PublishCrossInstanceInvalidation(t *testi
 			} else {
 				require.NoError(t, err)
 			}
+			if name == "activate windows" || name == "expire status" {
+				require.Zero(t, cache.publications.Load(), "%s 没有权威版本，必须由 outbox 发布", name)
+				require.Zero(t, cache.versionedInvalidations.Load(), "%s 不能伪造 versioned tombstone", name)
+				return
+			}
 			require.Equal(t, int32(1), cache.publications.Load(), "%s 应发布跨实例 L1 失效", name)
+			require.Equal(t, int32(1), cache.versionedInvalidations.Load(), "%s 必须使用 versioned tombstone", name)
 		})
 	}
+}
+
+func TestExpiredRenewal_UsesVersionedPostCommitInvalidation(t *testing.T) {
+	now := time.Now()
+	sub := &UserSubscription{
+		ID: 30, UserID: 10, GroupID: 20, StartsAt: now.Add(-48 * time.Hour),
+		ExpiresAt: now.Add(-time.Hour), Status: SubscriptionStatusExpired,
+	}
+	repo := &redeemSubscriptionRepoStub{subscriptionUserSubRepoStub: newSubscriptionUserSubRepoStub()}
+	repo.seed(sub)
+	cache := &redeemSubscriptionCacheStub{}
+	svc := NewSubscriptionService(
+		&subscriptionGroupRepoStub{group: &Group{ID: sub.GroupID, SubscriptionType: SubscriptionTypeSubscription}},
+		repo,
+		&BillingCacheService{cache: cache},
+		nil,
+		nil,
+	)
+
+	_, _, err := svc.AssignOrExtendSubscription(context.Background(), &AssignSubscriptionInput{UserID: sub.UserID, GroupID: sub.GroupID, ValidityDays: 1})
+
+	require.NoError(t, err)
+	require.Equal(t, int32(1), cache.versionedInvalidations.Load())
+	require.Equal(t, int32(1), cache.publications.Load())
 }
 
 func TestRecordUsage_DoesNotPublishCrossInstanceL1Invalidation(t *testing.T) {

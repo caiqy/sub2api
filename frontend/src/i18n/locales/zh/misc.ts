@@ -132,7 +132,22 @@ export default {
     resetIn: '{time} 后重置',
     quotaEndsIn: '额度将在 {time} 后结束',
     windowNotActive: '等待首次使用',
-    usageOf: '已用 {used} / {limit}'
+    usageOf: '已用 {used} / {limit}',
+    quotaAdvance: {
+      action: '提前重置额度',
+      title: '提前重置额度',
+      description: '选择要为“{name}”提前重置的已耗尽额度周期。',
+      selectWindows: '选择要重置的额度周期',
+      normalResetIn: '正常重置还需 {time}',
+      deducted: '扣减订阅有效期',
+      newExpiry: '操作后到期时间',
+      partialWarning: '未选择：{windows}。操作后可能仍无法继续使用。',
+      irreversible: '确认后立即生效，订阅有效期将缩短，且操作不可撤销。',
+      confirm: '确认提前重置',
+      submitting: '正在重置...',
+      success: '额度已重置，订阅有效期已相应扣减',
+      failed: '提前重置额度失败'
+    }
   },
 
   // Onboarding Tour

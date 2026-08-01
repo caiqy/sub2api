@@ -135,7 +135,22 @@ export default {
     resetIn: 'Resets in {time}',
     quotaEndsIn: 'Quota ends in {time}',
     windowNotActive: 'Awaiting first use',
-    usageOf: '{used} of {limit}'
+    usageOf: '{used} of {limit}',
+    quotaAdvance: {
+      action: 'Reset quota early',
+      title: 'Reset quota early',
+      description: 'Select exhausted quota periods to reset early for “{name}”.',
+      selectWindows: 'Select quota periods to reset',
+      normalResetIn: 'Normally resets in {time}',
+      deducted: 'Subscription time deducted',
+      newExpiry: 'New expiration time',
+      partialWarning: 'Not selected: {windows}. You may still be unable to continue using the subscription.',
+      irreversible: 'This takes effect immediately, shortens the subscription period, and cannot be undone.',
+      confirm: 'Confirm early reset',
+      submitting: 'Resetting...',
+      success: 'Quota reset and subscription time deducted',
+      failed: 'Failed to reset quota early'
+    }
   },
 
   // Onboarding Tour

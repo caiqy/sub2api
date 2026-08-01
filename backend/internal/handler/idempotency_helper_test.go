@@ -237,6 +237,68 @@ func TestExecuteUserIdempotentJSONFailCloseOnStoreUnavailable(t *testing.T) {
 	require.Equal(t, 0, executed)
 }
 
+func TestExecuteUserIdempotentJSONPreExecuteStoreFailureDoesNotSucceedWithoutReceipt(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service.SetDefaultIdempotencyCoordinator(service.NewIdempotencyCoordinator(userStoreUnavailableRepoStub{}, service.DefaultIdempotencyConfig()))
+	t.Cleanup(func() { service.SetDefaultIdempotencyCoordinator(nil) })
+
+	var executed, recoveryCalls int
+	router := gin.New()
+	router.Use(withUserSubject(2))
+	router.POST("/idempotent", func(c *gin.Context) {
+		executeUserIdempotentJSON(c, "user.test.scope", map[string]any{"a": 1}, time.Minute, func(context.Context) (any, error) {
+			executed++
+			return gin.H{"ok": true}, nil
+		}, func(context.Context) (any, bool, error) {
+			recoveryCalls++
+			return nil, false, nil
+		})
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/idempotent", bytes.NewBufferString(`{"a":1}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "pre-execute-missing-receipt")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	require.Contains(t, rec.Body.String(), "IDEMPOTENCY_STORE_UNAVAILABLE")
+	require.Zero(t, executed)
+	require.Equal(t, 1, recoveryCalls)
+	require.Empty(t, rec.Header().Get("X-Idempotency-Recovered"))
+}
+
+func TestExecuteUserIdempotentJSONPreExecuteStoreFailurePreservesErrorWhenReceiptLookupFails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service.SetDefaultIdempotencyCoordinator(service.NewIdempotencyCoordinator(userStoreUnavailableRepoStub{}, service.DefaultIdempotencyConfig()))
+	t.Cleanup(func() { service.SetDefaultIdempotencyCoordinator(nil) })
+
+	var executed, recoveryCalls int
+	router := gin.New()
+	router.Use(withUserSubject(2))
+	router.POST("/idempotent", func(c *gin.Context) {
+		executeUserIdempotentJSON(c, "user.test.scope", map[string]any{"a": 1}, time.Minute, func(context.Context) (any, error) {
+			executed++
+			return gin.H{"ok": true}, nil
+		}, func(context.Context) (any, bool, error) {
+			recoveryCalls++
+			return nil, false, errors.New("receipt lookup unavailable")
+		})
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/idempotent", bytes.NewBufferString(`{"a":1}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "pre-execute-receipt-error")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	require.Contains(t, rec.Body.String(), "IDEMPOTENCY_STORE_UNAVAILABLE")
+	require.Zero(t, executed)
+	require.Equal(t, 1, recoveryCalls)
+	require.Empty(t, rec.Header().Get("X-Idempotency-Recovered"))
+}
+
 func TestExecuteUserIdempotentJSONConcurrentRetrySingleSideEffectAndReplay(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := newUserMemoryIdempotencyRepoStub()

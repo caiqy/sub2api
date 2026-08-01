@@ -142,8 +142,27 @@ func postUsageBilling(ctx context.Context, p *postUsageBillingParams, deps *bill
 		// Subscription usage tracked by ActualCost so group rate multiplier
 		// consumes the quota at the expected speed.
 		if cost.ActualCost > 0 {
-			if err := deps.userSubRepo.IncrementUsage(billingCtx, p.Subscription.ID, cost.ActualCost); err != nil {
+			invalidateLocalSubscriptionL1 := func() {
+				if deps.billingCacheService == nil || p.User == nil || p.APIKey == nil || p.APIKey.GroupID == nil {
+					return
+				}
+				if invalidator := deps.billingCacheService.subscriptionCacheL1Invalidator; invalidator != nil {
+					invalidator.InvalidateSubCacheSync(p.User.ID, *p.APIKey.GroupID)
+				}
+			}
+			if incrementer, ok := deps.userSubRepo.(subscriptionUsageVersionIncrementer); ok {
+				version, err := incrementer.IncrementUsageWithVersion(billingCtx, p.Subscription.ID, cost.ActualCost)
+				if err != nil {
+					slog.Error("increment subscription usage failed", "subscription_id", p.Subscription.ID, "error", err)
+				} else if version > 0 && deps.billingCacheService != nil && p.User != nil && p.APIKey != nil && p.APIKey.GroupID != nil {
+					deps.billingCacheService.QueueUpdateSubscriptionUsage(p.User.ID, *p.APIKey.GroupID, cost.ActualCost, version)
+				} else {
+					invalidateLocalSubscriptionL1()
+				}
+			} else if err := deps.userSubRepo.IncrementUsage(billingCtx, p.Subscription.ID, cost.ActualCost); err != nil {
 				slog.Error("increment subscription usage failed", "subscription_id", p.Subscription.ID, "error", err)
+			} else {
+				invalidateLocalSubscriptionL1()
 			}
 		}
 	} else {
@@ -197,10 +216,8 @@ func postUsageBilling(ctx context.Context, p *postUsageBillingParams, deps *bill
 		}
 	}
 
-	// NOTE: finalizePostUsageBilling is NOT called here to avoid double-queuing
-	// cache updates. The legacy path does DB writes directly; the finalize path
-	// does cache queue + notifications. Notifications are dispatched separately
-	// by the caller after recording the usage log.
+	// Positive versions queue Redis usage deltas. Unknown versions only clear the
+	// local L1; durable invalidation is handled by the subscription outbox.
 }
 
 func resolveUsageBillingRequestID(ctx context.Context, upstreamRequestID string) string {
@@ -331,7 +348,11 @@ func finalizePostUsageBilling(ctx context.Context, p *postUsageBillingParams, de
 
 	if p.IsSubscriptionBill {
 		if p.Cost.ActualCost > 0 && p.User != nil && p.APIKey != nil && p.APIKey.GroupID != nil {
-			deps.billingCacheService.QueueUpdateSubscriptionUsage(p.User.ID, *p.APIKey.GroupID, p.Cost.ActualCost)
+			var usageVersion int64
+			if result != nil {
+				usageVersion = result.SubscriptionUsageVersion
+			}
+			deps.billingCacheService.QueueUpdateSubscriptionUsage(p.User.ID, *p.APIKey.GroupID, p.Cost.ActualCost, usageVersion)
 		}
 	} else if p.Cost.ActualCost > 0 && p.User != nil {
 		syncBalanceCacheAfterDeduction(ctx, p, deps, result)
@@ -495,6 +516,10 @@ type billingDeps struct {
 	balanceNotifyService  *BalanceNotifyService
 	userPlatformQuotaRepo UserPlatformQuotaRepository
 	cfg                   *config.Config
+}
+
+type subscriptionUsageVersionIncrementer interface {
+	IncrementUsageWithVersion(ctx context.Context, id int64, costUSD float64) (int64, error)
 }
 
 func (s *GatewayService) billingDeps() *billingDeps {

@@ -173,9 +173,11 @@ func (r *usageBillingRepository) applyBatchImageBalanceHold(
 
 func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, tx *sql.Tx, cmd *service.UsageBillingCommand, result *service.UsageBillingApplyResult) error {
 	if cmd.SubscriptionCost > 0 && cmd.SubscriptionID != nil {
-		if err := incrementUsageBillingSubscription(ctx, tx, *cmd.SubscriptionID, cmd.SubscriptionCost); err != nil {
+		version, err := incrementUsageBillingSubscription(ctx, tx, *cmd.SubscriptionID, cmd.SubscriptionCost)
+		if err != nil {
 			return err
 		}
+		result.SubscriptionUsageVersion = version
 	}
 
 	if cmd.BalanceCost > 0 {
@@ -212,32 +214,34 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 	return nil
 }
 
-func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, subscriptionID int64, costUSD float64) error {
+// incrementUsageBillingSubscription 原子累加订阅用量，并返回本次写入的行版本
+// （UnixNano）。版本由每行单调表达式产出：任何已提交写入之后的下一次写入
+// 必然更大（updated_at + 1µs 下限），且不小于语句执行时刻的 clock_timestamp()，
+// 不依赖事务开始时间 NOW() 或应用层墙钟。
+func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, subscriptionID int64, costUSD float64) (int64, error) {
 	const updateSQL = `
 		UPDATE user_subscriptions us
 		SET
 			daily_usage_usd = us.daily_usage_usd + $1,
 			weekly_usage_usd = us.weekly_usage_usd + $1,
 			monthly_usage_usd = us.monthly_usage_usd + $1,
-			updated_at = NOW()
+			updated_at = GREATEST(clock_timestamp(), us.updated_at + interval '1 microsecond')
 		FROM groups g
 		WHERE us.id = $2
 			AND us.deleted_at IS NULL
 			AND us.group_id = g.id
 			AND g.deleted_at IS NULL
+		RETURNING (EXTRACT(EPOCH FROM us.updated_at) * 1000000000)::bigint
 	`
-	res, err := tx.ExecContext(ctx, updateSQL, costUSD, subscriptionID)
+	var version int64
+	err := tx.QueryRowContext(ctx, updateSQL, costUSD, subscriptionID).Scan(&version)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, service.ErrSubscriptionNotFound
+	}
 	if err != nil {
-		return err
+		return 0, err
 	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected > 0 {
-		return nil
-	}
-	return service.ErrSubscriptionNotFound
+	return version, nil
 }
 
 func deductUsageBillingBalance(ctx context.Context, tx *sql.Tx, userID int64, amount float64) (float64, bool, error) {

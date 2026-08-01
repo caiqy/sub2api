@@ -96,7 +96,7 @@ func TestProvideCleanupDrainsOpsErrorsBeforeEntTeardown(t *testing.T) {
 	antigravityOAuthSvc := service.NewAntigravityOAuthService(nil)
 	cleanup := provideCleanup(
 		entClient, nil, &service.OpsMetricsCollector{}, &service.OpsAggregationService{}, &service.OpsAlertEvaluatorService{},
-		&service.OpsCleanupService{}, &service.OpsScheduledReportService{}, service.NewOpsSystemLogSink(nil), ops, nil, nil, nil,
+		&service.OpsCleanupService{}, &service.OpsScheduledReportService{}, service.NewOpsSystemLogSink(nil), ops, nil, nil, nil, nil,
 		service.NewSchedulerSnapshotService(nil, nil, nil, nil, cfg),
 		service.NewTokenRefreshService(nil, oauthSvc, openAIOAuthSvc, geminiOAuthSvc, antigravityOAuthSvc, nil, nil, cfg, nil),
 		service.NewAccountExpiryService(nil, time.Second), service.NewProxyExpiryService(nil, time.Second), service.NewSubscriptionExpiryService(nil, time.Second),

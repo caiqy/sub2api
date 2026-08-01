@@ -530,6 +530,7 @@ func (s *PaymentService) ensurePaymentSubscriptionAssigned(ctx context.Context, 
 	}
 
 	recoveredFromNote := false
+	var committedSubscription *UserSubscription
 	if !alreadyAssigned {
 		orderNote := paymentSubscriptionOrderNote(o.ID)
 		existing, lookupErr := s.subscriptionSvc.userSubRepo.GetByUserIDAndGroupID(txCtx, o.UserID, groupID)
@@ -539,14 +540,16 @@ func (s *PaymentService) ensurePaymentSubscriptionAssigned(ctx context.Context, 
 		case lookupErr != nil && !errors.Is(lookupErr, ErrSubscriptionNotFound):
 			return fmt.Errorf("check existing subscription assignment: %w", lookupErr)
 		default:
-			if _, _, err := s.subscriptionSvc.assignOrExtendSubscription(txCtx, &AssignSubscriptionInput{
+			var assignErr error
+			committedSubscription, _, _, assignErr = s.subscriptionSvc.assignOrExtendSubscription(txCtx, &AssignSubscriptionInput{
 				UserID:       o.UserID,
 				GroupID:      groupID,
 				ValidityDays: days,
 				AssignedBy:   0,
 				Notes:        orderNote,
-			}, true); err != nil {
-				return fmt.Errorf("assign subscription: %w", err)
+			}, true)
+			if assignErr != nil {
+				return fmt.Errorf("assign subscription: %w", assignErr)
 			}
 		}
 
@@ -565,7 +568,6 @@ func (s *PaymentService) ensurePaymentSubscriptionAssigned(ctx context.Context, 
 				_ = tx.Rollback()
 				claimed, checkErr := hasPaymentSubscriptionAssignmentAudit(ctx, s.entClient, o.ID)
 				if checkErr == nil && claimed {
-					s.subscriptionSvc.invalidateSubscriptionCachesBestEffort(o.UserID, groupID)
 					return nil
 				}
 			}
@@ -578,9 +580,9 @@ func (s *PaymentService) ensurePaymentSubscriptionAssigned(ctx context.Context, 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit subscription fulfillment tx: %w", err)
 	}
-	// Assignment cache invalidation is deferred while this transaction is open,
-	// then performed synchronously against the committed subscription.
-	s.subscriptionSvc.invalidateSubscriptionCachesBestEffort(o.UserID, groupID)
+	if committedSubscription != nil {
+		s.subscriptionSvc.deferSubscriptionCacheInvalidation(ctx, committedSubscription)
+	}
 	return nil
 }
 

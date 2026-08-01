@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -55,6 +57,12 @@ func (r *userSubscriptionRepository) Create(ctx context.Context, sub *service.Us
 	builder.SetNotes(sub.Notes)
 
 	created, err := builder.Save(ctx)
+	if err != nil {
+		return translatePersistenceError(err, nil, service.ErrSubscriptionAlreadyExists)
+	}
+	created, err = client.UserSubscription.Query().
+		Where(usersubscription.IDEQ(created.ID)).
+		Only(ctx)
 	if err == nil {
 		applyUserSubscriptionEntityToService(sub, created)
 	}
@@ -68,6 +76,19 @@ func (r *userSubscriptionRepository) GetByID(ctx context.Context, id int64) (*se
 		WithUser().
 		WithGroup().
 		WithAssignedByUser().
+		Only(ctx)
+	if err != nil {
+		return nil, translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
+	}
+	return userSubscriptionEntityToService(m), nil
+}
+
+func (r *userSubscriptionRepository) GetByIDForUpdate(ctx context.Context, id int64) (*service.UserSubscription, error) {
+	client := clientFromContext(ctx, r.client)
+	m, err := client.UserSubscription.Query().
+		Where(usersubscription.IDEQ(id)).
+		ForUpdate().
+		WithGroup().
 		Only(ctx)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
@@ -102,6 +123,21 @@ func (r *userSubscriptionRepository) GetByUserIDAndGroupID(ctx context.Context, 
 	return userSubscriptionEntityToService(m), nil
 }
 
+// GetByUserIDAndGroupIDForUpdate 以 user+group 行锁读取订阅，语义与
+// GetByIDForUpdate 一致：必须在事务上下文中调用，锁持有至事务结束。
+func (r *userSubscriptionRepository) GetByUserIDAndGroupIDForUpdate(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error) {
+	client := clientFromContext(ctx, r.client)
+	m, err := client.UserSubscription.Query().
+		Where(usersubscription.UserIDEQ(userID), usersubscription.GroupIDEQ(groupID)).
+		ForUpdate().
+		WithGroup().
+		Only(ctx)
+	if err != nil {
+		return nil, translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
+	}
+	return userSubscriptionEntityToService(m), nil
+}
+
 func (r *userSubscriptionRepository) GetActiveByUserIDAndGroupID(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error) {
 	client := clientFromContext(ctx, r.client)
 	m, err := client.UserSubscription.Query().
@@ -119,34 +155,71 @@ func (r *userSubscriptionRepository) GetActiveByUserIDAndGroupID(ctx context.Con
 	return userSubscriptionEntityToService(m), nil
 }
 
+// monotonicUpdatedAtExpr 是每行严格单调的 updated_at 表达式：
+//   - 值至少为当前行 updated_at + 1 microsecond（timestamptz 精度），因此任何
+//     已提交写入之后的下一次写入必然更大，同一行版本严格递增；
+//   - 同时不小于 clock_timestamp()（语句执行时刻的真实时钟），避免应用层
+//     Go 时钟或事务开始时间（NOW()）回拨/停留导致的版本倒挂或同值碰撞。
+const monotonicUpdatedAtExpr = `GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')`
+
+// versionNanoExpr 把 updated_at 转换为 UnixNano 整数（timestamptz 微秒精度，
+// 因此 nanosecond 值恒为 1000 的倍数）。
+const versionNanoExpr = `(EXTRACT(EPOCH FROM updated_at) * 1000000000)::bigint`
+
 func (r *userSubscriptionRepository) Update(ctx context.Context, sub *service.UserSubscription) error {
 	if sub == nil {
 		return service.ErrSubscriptionNilInput
 	}
 
 	client := clientFromContext(ctx, r.client)
-	builder := client.UserSubscription.UpdateOneID(sub.ID).
-		SetUserID(sub.UserID).
-		SetGroupID(sub.GroupID).
-		SetStartsAt(sub.StartsAt).
-		SetExpiresAt(sub.ExpiresAt).
-		SetStatus(sub.Status).
-		SetNillableDailyWindowStart(sub.DailyWindowStart).
-		SetNillableWeeklyWindowStart(sub.WeeklyWindowStart).
-		SetNillableMonthlyWindowStart(sub.MonthlyWindowStart).
-		SetDailyUsageUsd(sub.DailyUsageUSD).
-		SetWeeklyUsageUsd(sub.WeeklyUsageUSD).
-		SetMonthlyUsageUsd(sub.MonthlyUsageUSD).
-		SetNillableAssignedBy(sub.AssignedBy).
-		SetAssignedAt(sub.AssignedAt).
-		SetNotes(sub.Notes)
-
-	updated, err := builder.Save(ctx)
-	if err == nil {
-		applyUserSubscriptionEntityToService(sub, updated)
-		return nil
+	rows, err := client.QueryContext(ctx, `
+		UPDATE user_subscriptions SET
+			user_id = $2,
+			group_id = $3,
+			starts_at = $4,
+			expires_at = $5,
+			status = $6,
+			daily_window_start = $7,
+			weekly_window_start = $8,
+			monthly_window_start = $9,
+			daily_usage_usd = $10,
+			weekly_usage_usd = $11,
+			monthly_usage_usd = $12,
+			assigned_by = $13,
+			assigned_at = $14,
+			notes = $15,
+			updated_at = `+monotonicUpdatedAtExpr+`
+		WHERE id = $1 AND deleted_at IS NULL
+		RETURNING `+versionNanoExpr,
+		sub.ID, sub.UserID, sub.GroupID, sub.StartsAt, sub.ExpiresAt, sub.Status,
+		sub.DailyWindowStart, sub.WeeklyWindowStart, sub.MonthlyWindowStart,
+		sub.DailyUsageUSD, sub.WeeklyUsageUSD, sub.MonthlyUsageUSD,
+		sub.AssignedBy, sub.AssignedAt, sub.Notes,
+	)
+	if err != nil {
+		return translatePersistenceError(err, service.ErrSubscriptionNotFound, service.ErrSubscriptionAlreadyExists)
 	}
-	return translatePersistenceError(err, service.ErrSubscriptionNotFound, service.ErrSubscriptionAlreadyExists)
+	var version int64
+	if rows.Next() {
+		err = rows.Scan(&version)
+	} else {
+		if err = rows.Err(); err == nil {
+			err = sql.ErrNoRows
+		}
+	}
+	closeErr := rows.Close()
+	if err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return service.ErrSubscriptionNotFound
+		}
+		return translatePersistenceError(err, service.ErrSubscriptionNotFound, service.ErrSubscriptionAlreadyExists)
+	}
+	// 行版本必须来自数据库写入；调用方据此刷新缓存快照版本。
+	sub.UpdatedAt = time.Unix(0, version)
+	return nil
 }
 
 func (r *userSubscriptionRepository) Delete(ctx context.Context, id int64) error {
@@ -334,10 +407,23 @@ func (r *userSubscriptionRepository) ExistsActiveByUserIDAndGroupID(ctx context.
 
 func (r *userSubscriptionRepository) ExtendExpiry(ctx context.Context, subscriptionID int64, newExpiresAt time.Time) error {
 	client := clientFromContext(ctx, r.client)
-	_, err := client.UserSubscription.UpdateOneID(subscriptionID).
-		SetExpiresAt(newExpiresAt).
-		Save(ctx)
-	return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
+	res, err := client.ExecContext(ctx, `
+		UPDATE user_subscriptions SET
+			expires_at = $2,
+			updated_at = `+monotonicUpdatedAtExpr+`
+		WHERE id = $1 AND deleted_at IS NULL
+	`, subscriptionID, newExpiresAt)
+	if err != nil {
+		return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return service.ErrSubscriptionNotFound
+	}
+	return nil
 }
 
 func (r *userSubscriptionRepository) UpdateStatus(ctx context.Context, subscriptionID int64, status string) error {
@@ -367,121 +453,141 @@ func (r *userSubscriptionRepository) ActivateWindows(ctx context.Context, id int
 }
 
 func (r *userSubscriptionRepository) ResetUsageWindows(ctx context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, newWindowStart time.Time) error {
+	_, err := r.ResetUsageWindowsWithVersion(ctx, id, resetDaily, resetWeekly, resetMonthly, newWindowStart)
+	return err
+}
+
+func (r *userSubscriptionRepository) ResetUsageWindowsWithVersion(ctx context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, newWindowStart time.Time) (int64, error) {
 	client := clientFromContext(ctx, r.client)
-	update := client.UserSubscription.UpdateOneID(id)
-	if resetDaily {
-		update.SetDailyUsageUsd(0).SetDailyWindowStart(newWindowStart)
+	version, err := r.subscriptionWriteVersion(ctx, client, `
+		UPDATE user_subscriptions
+		SET daily_usage_usd = CASE WHEN $2 THEN 0 ELSE daily_usage_usd END,
+			daily_window_start = CASE WHEN $2 THEN $3 ELSE daily_window_start END,
+			weekly_usage_usd = CASE WHEN $4 THEN 0 ELSE weekly_usage_usd END,
+			weekly_window_start = CASE WHEN $4 THEN $3 ELSE weekly_window_start END,
+			monthly_usage_usd = CASE WHEN $5 THEN 0 ELSE monthly_usage_usd END,
+			monthly_window_start = CASE WHEN $5 THEN $3 ELSE monthly_window_start END,
+			updated_at = `+monotonicUpdatedAtExpr+`
+		WHERE id = $1 AND deleted_at IS NULL
+		RETURNING `+versionNanoExpr,
+		id, resetDaily, newWindowStart, resetWeekly, resetMonthly,
+	)
+	if err != nil {
+		return 0, translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
 	}
-	if resetWeekly {
-		update.SetWeeklyUsageUsd(0).SetWeeklyWindowStart(newWindowStart)
-	}
-	if resetMonthly {
-		update.SetMonthlyUsageUsd(0).SetMonthlyWindowStart(newWindowStart)
-	}
-	_, err := update.Save(ctx)
-	return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
+	return version, nil
 }
 
 func (r *userSubscriptionRepository) ResetDailyUsage(ctx context.Context, id int64, expectedWindowStart *time.Time, newWindowStart time.Time) error {
-	client := clientFromContext(ctx, r.client)
-	query := client.UserSubscription.Update().Where(usersubscription.IDEQ(id))
-	if expectedWindowStart == nil {
-		query = query.Where(usersubscription.DailyWindowStartIsNil())
-	} else {
-		query = query.Where(usersubscription.DailyWindowStartEQ(*expectedWindowStart))
-	}
-	n, err := query.
-		SetDailyUsageUsd(0).
-		SetDailyWindowStart(newWindowStart).
-		Save(ctx)
-	return r.translateConditionalWindowReset(ctx, client, id, n, err)
+	_, err := r.ResetDailyUsageWithVersion(ctx, id, expectedWindowStart, newWindowStart)
+	return err
+}
+
+func (r *userSubscriptionRepository) ResetDailyUsageWithVersion(ctx context.Context, id int64, expectedWindowStart *time.Time, newWindowStart time.Time) (int64, error) {
+	return r.resetConditionalUsageWithVersion(ctx, id, expectedWindowStart, newWindowStart, "daily")
 }
 
 func (r *userSubscriptionRepository) ResetWeeklyUsage(ctx context.Context, id int64, expectedWindowStart *time.Time, newWindowStart time.Time) error {
-	client := clientFromContext(ctx, r.client)
-	query := client.UserSubscription.Update().Where(usersubscription.IDEQ(id))
-	if expectedWindowStart == nil {
-		query = query.Where(usersubscription.WeeklyWindowStartIsNil())
-	} else {
-		query = query.Where(usersubscription.WeeklyWindowStartEQ(*expectedWindowStart))
-	}
-	n, err := query.
-		SetWeeklyUsageUsd(0).
-		SetWeeklyWindowStart(newWindowStart).
-		Save(ctx)
-	return r.translateConditionalWindowReset(ctx, client, id, n, err)
+	_, err := r.ResetWeeklyUsageWithVersion(ctx, id, expectedWindowStart, newWindowStart)
+	return err
+}
+
+func (r *userSubscriptionRepository) ResetWeeklyUsageWithVersion(ctx context.Context, id int64, expectedWindowStart *time.Time, newWindowStart time.Time) (int64, error) {
+	return r.resetConditionalUsageWithVersion(ctx, id, expectedWindowStart, newWindowStart, "weekly")
 }
 
 func (r *userSubscriptionRepository) ResetMonthlyUsage(ctx context.Context, id int64, expectedWindowStart *time.Time, newWindowStart time.Time) error {
-	client := clientFromContext(ctx, r.client)
-	query := client.UserSubscription.Update().Where(usersubscription.IDEQ(id))
-	if expectedWindowStart == nil {
-		query = query.Where(usersubscription.MonthlyWindowStartIsNil())
-	} else {
-		query = query.Where(usersubscription.MonthlyWindowStartEQ(*expectedWindowStart))
-	}
-	n, err := query.
-		SetMonthlyUsageUsd(0).
-		SetMonthlyWindowStart(newWindowStart).
-		Save(ctx)
-	return r.translateConditionalWindowReset(ctx, client, id, n, err)
+	_, err := r.ResetMonthlyUsageWithVersion(ctx, id, expectedWindowStart, newWindowStart)
+	return err
 }
 
-func (r *userSubscriptionRepository) translateConditionalWindowReset(ctx context.Context, client *dbent.Client, id int64, affected int, err error) error {
-	if err != nil {
-		return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
+func (r *userSubscriptionRepository) ResetMonthlyUsageWithVersion(ctx context.Context, id int64, expectedWindowStart *time.Time, newWindowStart time.Time) (int64, error) {
+	return r.resetConditionalUsageWithVersion(ctx, id, expectedWindowStart, newWindowStart, "monthly")
+}
+
+func (r *userSubscriptionRepository) resetConditionalUsageWithVersion(ctx context.Context, id int64, expectedWindowStart *time.Time, newWindowStart time.Time, window string) (int64, error) {
+	client := clientFromContext(ctx, r.client)
+	var query string
+	switch window {
+	case "daily":
+		query = `UPDATE user_subscriptions SET daily_usage_usd = 0, daily_window_start = $3, updated_at = ` + monotonicUpdatedAtExpr + ` WHERE id = $1 AND deleted_at IS NULL AND ((daily_window_start IS NULL AND $2 IS NULL) OR daily_window_start = $2) RETURNING ` + versionNanoExpr
+	case "weekly":
+		query = `UPDATE user_subscriptions SET weekly_usage_usd = 0, weekly_window_start = $3, updated_at = ` + monotonicUpdatedAtExpr + ` WHERE id = $1 AND deleted_at IS NULL AND ((weekly_window_start IS NULL AND $2 IS NULL) OR weekly_window_start = $2) RETURNING ` + versionNanoExpr
+	case "monthly":
+		query = `UPDATE user_subscriptions SET monthly_usage_usd = 0, monthly_window_start = $3, updated_at = ` + monotonicUpdatedAtExpr + ` WHERE id = $1 AND deleted_at IS NULL AND ((monthly_window_start IS NULL AND $2 IS NULL) OR monthly_window_start = $2) RETURNING ` + versionNanoExpr
 	}
-	if affected > 0 {
-		return nil
+	version, err := r.subscriptionWriteVersion(ctx, client, query, id, expectedWindowStart, newWindowStart)
+	if !errors.Is(err, sql.ErrNoRows) {
+		if err != nil {
+			return 0, translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
+		}
+		return version, nil
 	}
 
 	// A stale reset is an expected no-op: another request already advanced the
 	// window. Preserve not-found semantics for callers that target a missing row.
 	exists, err := client.UserSubscription.Query().Where(usersubscription.IDEQ(id)).Exist(ctx)
 	if err != nil {
-		return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
+		return 0, translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
 	}
 	if !exists {
-		return service.ErrSubscriptionNotFound
+		return 0, service.ErrSubscriptionNotFound
 	}
-	return nil
+	return 0, nil
 }
 
 // IncrementUsage 原子性地累加订阅用量。
 // 限额检查已在请求前由 BillingCacheService.CheckBillingEligibility 完成，
 // 此处仅负责记录实际消费，确保消费数据的完整性。
 func (r *userSubscriptionRepository) IncrementUsage(ctx context.Context, id int64, costUSD float64) error {
+	_, err := r.IncrementUsageWithVersion(ctx, id, costUSD)
+	return err
+}
+
+func (r *userSubscriptionRepository) IncrementUsageWithVersion(ctx context.Context, id int64, costUSD float64) (int64, error) {
 	const updateSQL = `
 		UPDATE user_subscriptions us
 		SET
 			daily_usage_usd = us.daily_usage_usd + $1,
 			weekly_usage_usd = us.weekly_usage_usd + $1,
 			monthly_usage_usd = us.monthly_usage_usd + $1,
-			updated_at = NOW()
+			updated_at = GREATEST(clock_timestamp(), us.updated_at + interval '1 microsecond')
 		FROM groups g
 		WHERE us.id = $2
 			AND us.deleted_at IS NULL
 			AND us.group_id = g.id
 			AND g.deleted_at IS NULL
+		RETURNING (EXTRACT(EPOCH FROM us.updated_at) * 1000000000)::bigint
 	`
 
 	client := clientFromContext(ctx, r.client)
-	result, err := client.ExecContext(ctx, updateSQL, costUSD, id)
+	version, err := r.subscriptionWriteVersion(ctx, client, updateSQL, costUSD, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, service.ErrSubscriptionNotFound
+	}
+	return version, err
+}
+
+func (r *userSubscriptionRepository) subscriptionWriteVersion(ctx context.Context, client *dbent.Client, query string, args ...any) (int64, error) {
+	rows, err := client.QueryContext(ctx, query, args...)
 	if err != nil {
-		return err
+		return 0, err
 	}
-
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return 0, err
+		}
+		return 0, sql.ErrNoRows
 	}
-
-	if affected > 0 {
-		return nil
+	var version int64
+	if err := rows.Scan(&version); err != nil {
+		return 0, err
 	}
-
-	// affected == 0：订阅不存在或已删除
-	return service.ErrSubscriptionNotFound
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	return version, nil
 }
 
 func (r *userSubscriptionRepository) BatchUpdateExpiredStatus(ctx context.Context) (int64, error) {

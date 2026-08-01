@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,6 +18,8 @@ type resetQuotaUserSubRepoStub struct {
 	userSubRepoNoop
 
 	sub *UserSubscription
+
+	resetVersion int64
 
 	resetDailyCalled   bool
 	resetWeeklyCalled  bool
@@ -65,6 +68,11 @@ func (r *resetQuotaUserSubRepoStub) ResetUsageWindows(_ context.Context, _ int64
 	return nil
 }
 
+func (r *resetQuotaUserSubRepoStub) ResetUsageWindowsWithVersion(ctx context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, windowStart time.Time) (int64, error) {
+	err := r.ResetUsageWindows(ctx, id, resetDaily, resetWeekly, resetMonthly, windowStart)
+	return r.resetVersion, err
+}
+
 func (r *resetQuotaUserSubRepoStub) ResetDailyUsage(_ context.Context, _ int64, _ *time.Time, windowStart time.Time) error {
 	r.resetDailyCalled = true
 	if r.resetDailyErr == nil && r.sub != nil {
@@ -74,14 +82,74 @@ func (r *resetQuotaUserSubRepoStub) ResetDailyUsage(_ context.Context, _ int64, 
 	return r.resetDailyErr
 }
 
+func (r *resetQuotaUserSubRepoStub) ResetDailyUsageWithVersion(ctx context.Context, id int64, expectedWindowStart *time.Time, windowStart time.Time) (int64, error) {
+	err := r.ResetDailyUsage(ctx, id, expectedWindowStart, windowStart)
+	return r.resetVersion, err
+}
+
 func (r *resetQuotaUserSubRepoStub) ResetWeeklyUsage(_ context.Context, _ int64, _ *time.Time, _ time.Time) error {
 	r.resetWeeklyCalled = true
 	return r.resetWeeklyErr
 }
 
+func (r *resetQuotaUserSubRepoStub) ResetWeeklyUsageWithVersion(ctx context.Context, id int64, expectedWindowStart *time.Time, windowStart time.Time) (int64, error) {
+	err := r.ResetWeeklyUsage(ctx, id, expectedWindowStart, windowStart)
+	return r.resetVersion, err
+}
+
 func (r *resetQuotaUserSubRepoStub) ResetMonthlyUsage(_ context.Context, _ int64, _ *time.Time, _ time.Time) error {
 	r.resetMonthlyCalled = true
 	return r.resetMonthlyErr
+}
+
+func (r *resetQuotaUserSubRepoStub) ResetMonthlyUsageWithVersion(ctx context.Context, id int64, expectedWindowStart *time.Time, windowStart time.Time) (int64, error) {
+	err := r.ResetMonthlyUsage(ctx, id, expectedWindowStart, windowStart)
+	return r.resetVersion, err
+}
+
+type resetQuotaVersionedCache struct {
+	billingCacheWorkerStub
+	version int64
+}
+
+func (c *resetQuotaVersionedCache) InvalidateSubscriptionCacheVersioned(_ context.Context, _ int64, _ int64, version int64) error {
+	c.version = version
+	return nil
+}
+
+type unversionedResetQuotaRepo struct {
+	userSubRepoNoop
+	sub    *UserSubscription
+	writes int
+}
+
+type dailyOnlyVersionedResetQuotaRepo struct {
+	unversionedResetQuotaRepo
+}
+
+func (r *dailyOnlyVersionedResetQuotaRepo) ResetDailyUsageWithVersion(ctx context.Context, id int64, expectedWindowStart *time.Time, windowStart time.Time) (int64, error) {
+	if err := r.ResetDailyUsage(ctx, id, expectedWindowStart, windowStart); err != nil {
+		return 0, err
+	}
+	return 1, nil
+}
+
+func (r *unversionedResetQuotaRepo) GetByID(_ context.Context, id int64) (*UserSubscription, error) {
+	if r.sub == nil || r.sub.ID != id {
+		return nil, ErrSubscriptionNotFound
+	}
+	cp := *r.sub
+	return &cp, nil
+}
+
+func (r *unversionedResetQuotaRepo) ResetUsageWindows(context.Context, int64, bool, bool, bool, time.Time) error {
+	r.writes++
+	return nil
+}
+
+func (r *unversionedResetQuotaRepo) ResetDailyUsage(context.Context, int64, *time.Time, time.Time) error {
+	r.writes++
+	return nil
 }
 
 func newResetQuotaSvc(stub *resetQuotaUserSubRepoStub) *SubscriptionService {
@@ -235,4 +303,132 @@ func TestAdminResetQuota_ReturnsRefreshedSub(t *testing.T) {
 	// 服务应返回第二次 GetByID 的刷新值而非初始的 99.9
 	require.Equal(t, float64(0), result.DailyUsageUSD, "返回的订阅应反映已归零的用量")
 	require.True(t, stub.resetDailyCalled)
+}
+
+func TestAdminResetQuota_UsesCommittedResetVersionForCacheInvalidation(t *testing.T) {
+	stub := &resetQuotaUserSubRepoStub{
+		sub:          &UserSubscription{ID: 10, UserID: 10, GroupID: 20},
+		resetVersion: 1234567890123456000,
+	}
+	cache := &resetQuotaVersionedCache{}
+	svc := newResetQuotaSvc(stub)
+	svc.billingCacheService = &BillingCacheService{cache: cache}
+
+	_, err := svc.AdminResetQuota(context.Background(), 10, true, false, false)
+
+	require.NoError(t, err)
+	require.Equal(t, stub.resetVersion, cache.version, "manual reset must tombstone cached usage at its committed row version")
+}
+
+func TestAdminResetQuota_OuterTransactionInvalidatesAfterCommit(t *testing.T) {
+	client := newPaymentOrderLifecycleTestClient(t)
+	tx, err := client.Tx(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback() })
+	stub := &resetQuotaUserSubRepoStub{
+		sub:          &UserSubscription{ID: 12, UserID: 10, GroupID: 20},
+		resetVersion: 1234567890123456000,
+	}
+	cache := &resetQuotaVersionedCache{}
+	svc := newResetQuotaSvc(stub)
+	svc.billingCacheService = &BillingCacheService{cache: cache}
+
+	_, err = svc.AdminResetQuota(dbent.NewTxContext(context.Background(), tx), 12, true, false, false)
+	require.NoError(t, err)
+	require.Zero(t, cache.version, "outer transaction must retain reset cache state until commit")
+
+	require.NoError(t, tx.Commit())
+	require.Equal(t, stub.resetVersion, cache.version)
+}
+
+func TestCheckAndResetWindows_UsesCommittedResetVersionForCacheInvalidation(t *testing.T) {
+	now := time.Now()
+	windowStart := now.Add(-48 * time.Hour)
+	stub := &resetQuotaUserSubRepoStub{
+		sub: &UserSubscription{
+			ID: 11, UserID: 10, GroupID: 20,
+			StartsAt: now.Add(-72 * time.Hour), ExpiresAt: now.Add(72 * time.Hour),
+			Status: SubscriptionStatusActive, DailyWindowStart: &windowStart,
+		},
+		resetVersion: 2234567890123456000,
+	}
+	cache := &resetQuotaVersionedCache{}
+	svc := newResetQuotaSvc(stub)
+	svc.billingCacheService = &BillingCacheService{cache: cache}
+
+	err := svc.CheckAndResetWindows(context.Background(), stub.sub)
+
+	require.NoError(t, err)
+	require.Equal(t, stub.resetVersion, cache.version, "automatic reset must tombstone cached usage at its committed row version")
+}
+
+func TestAdminResetQuota_RejectsMissingVersionedResetCapability(t *testing.T) {
+	repo := &unversionedResetQuotaRepo{sub: &UserSubscription{ID: 13, UserID: 10, GroupID: 20}}
+	svc := NewSubscriptionService(groupRepoNoop{}, repo, nil, nil, nil)
+
+	_, err := svc.AdminResetQuota(context.Background(), 13, true, false, false)
+
+	require.Error(t, err)
+	require.Zero(t, repo.writes, "manual reset must fail before a versionless write")
+}
+
+func TestAdminResetQuota_RejectsUnversionedCacheBeforeReset(t *testing.T) {
+	stub := &resetQuotaUserSubRepoStub{sub: &UserSubscription{ID: 14, UserID: 10, GroupID: 20}, resetVersion: 1}
+	svc := newResetQuotaSvc(stub)
+	svc.billingCacheService = &BillingCacheService{cache: &billingCacheWorkerStub{}}
+
+	_, err := svc.AdminResetQuota(context.Background(), 14, true, false, false)
+
+	require.Error(t, err)
+	require.False(t, stub.resetDailyCalled, "manual reset must fail before writing when cache tombstones are unavailable")
+}
+
+func TestCheckAndResetWindows_RejectsMissingVersionedResetCapability(t *testing.T) {
+	now := time.Now()
+	windowStart := now.Add(-48 * time.Hour)
+	repo := &unversionedResetQuotaRepo{sub: &UserSubscription{
+		ID: 15, UserID: 10, GroupID: 20,
+		StartsAt: now.Add(-72 * time.Hour), ExpiresAt: now.Add(72 * time.Hour),
+		Status: SubscriptionStatusActive, DailyWindowStart: &windowStart,
+	}}
+	svc := NewSubscriptionService(groupRepoNoop{}, repo, nil, nil, nil)
+
+	err := svc.CheckAndResetWindows(context.Background(), repo.sub)
+
+	require.Error(t, err)
+	require.Zero(t, repo.writes, "automatic reset must fail before a versionless write")
+}
+
+func TestCheckAndResetWindows_RejectsUnversionedCacheBeforeReset(t *testing.T) {
+	now := time.Now()
+	windowStart := now.Add(-48 * time.Hour)
+	stub := &resetQuotaUserSubRepoStub{sub: &UserSubscription{
+		ID: 16, UserID: 10, GroupID: 20,
+		StartsAt: now.Add(-72 * time.Hour), ExpiresAt: now.Add(72 * time.Hour),
+		Status: SubscriptionStatusActive, DailyWindowStart: &windowStart,
+	}, resetVersion: 1}
+	svc := newResetQuotaSvc(stub)
+	svc.billingCacheService = &BillingCacheService{cache: &billingCacheWorkerStub{}}
+
+	err := svc.CheckAndResetWindows(context.Background(), stub.sub)
+
+	require.Error(t, err)
+	require.False(t, stub.resetDailyCalled, "automatic reset must fail before writing when cache tombstones are unavailable")
+}
+
+func TestCheckAndResetWindows_PreflightsAllExpiredWindowCapabilitiesBeforeWriting(t *testing.T) {
+	now := time.Now()
+	dailyStart := now.Add(-48 * time.Hour)
+	weeklyStart := now.Add(-14 * 24 * time.Hour)
+	repo := &dailyOnlyVersionedResetQuotaRepo{unversionedResetQuotaRepo: unversionedResetQuotaRepo{sub: &UserSubscription{
+		ID: 17, UserID: 10, GroupID: 20,
+		StartsAt: now.Add(-72 * time.Hour), ExpiresAt: now.Add(72 * time.Hour),
+		Status: SubscriptionStatusActive, DailyWindowStart: &dailyStart, WeeklyWindowStart: &weeklyStart,
+	}}}
+	svc := NewSubscriptionService(groupRepoNoop{}, repo, nil, nil, nil)
+
+	err := svc.CheckAndResetWindows(context.Background(), repo.sub)
+
+	require.ErrorIs(t, err, ErrSubscriptionUsageVersioningUnavailable)
+	require.Zero(t, repo.writes, "automatic reset must preflight all expired window capabilities before any write")
 }

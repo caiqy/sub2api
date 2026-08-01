@@ -1820,11 +1820,19 @@ func (r *stubUserSubscriptionRepo) ResetUsageWindows(context.Context, int64, boo
 	return errors.New("not implemented")
 }
 
+func (r *stubUserSubscriptionRepo) ResetUsageWindowsWithVersion(ctx context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, start time.Time) (int64, error) {
+	return 1, r.ResetUsageWindows(ctx, id, resetDaily, resetWeekly, resetMonthly, start)
+}
+
 func (r *stubUserSubscriptionRepo) ResetDailyUsage(ctx context.Context, id int64, _ *time.Time, newWindowStart time.Time) error {
 	if r.resetDaily != nil {
 		return r.resetDaily(ctx, id, newWindowStart)
 	}
 	return errors.New("not implemented")
+}
+
+func (r *stubUserSubscriptionRepo) ResetDailyUsageWithVersion(ctx context.Context, id int64, expectedWindowStart *time.Time, start time.Time) (int64, error) {
+	return 1, r.ResetDailyUsage(ctx, id, expectedWindowStart, start)
 }
 
 func (r *stubUserSubscriptionRepo) ResetWeeklyUsage(ctx context.Context, id int64, _ *time.Time, newWindowStart time.Time) error {
@@ -1834,11 +1842,19 @@ func (r *stubUserSubscriptionRepo) ResetWeeklyUsage(ctx context.Context, id int6
 	return errors.New("not implemented")
 }
 
+func (r *stubUserSubscriptionRepo) ResetWeeklyUsageWithVersion(ctx context.Context, id int64, expectedWindowStart *time.Time, start time.Time) (int64, error) {
+	return 1, r.ResetWeeklyUsage(ctx, id, expectedWindowStart, start)
+}
+
 func (r *stubUserSubscriptionRepo) ResetMonthlyUsage(ctx context.Context, id int64, _ *time.Time, newWindowStart time.Time) error {
 	if r.resetMonthly != nil {
 		return r.resetMonthly(ctx, id, newWindowStart)
 	}
 	return errors.New("not implemented")
+}
+
+func (r *stubUserSubscriptionRepo) ResetMonthlyUsageWithVersion(ctx context.Context, id int64, expectedWindowStart *time.Time, start time.Time) (int64, error) {
+	return 1, r.ResetMonthlyUsage(ctx, id, expectedWindowStart, start)
 }
 
 func (r *stubUserSubscriptionRepo) IncrementUsage(ctx context.Context, id int64, costUSD float64) error {
