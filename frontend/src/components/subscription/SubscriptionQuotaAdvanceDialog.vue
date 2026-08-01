@@ -12,30 +12,21 @@
         {{ t('userSubscriptions.quotaAdvance.description', { name: subscription?.group?.name || '' }) }}
       </p>
 
-      <fieldset class="divide-y divide-gray-200 border-y border-gray-200 dark:divide-dark-700 dark:border-dark-700">
-        <legend class="sr-only">{{ t('userSubscriptions.quotaAdvance.selectWindows') }}</legend>
-        <label
+      <ul class="divide-y divide-gray-200 border-y border-gray-200 dark:divide-dark-700 dark:border-dark-700">
+        <li
           v-for="window in windows"
           :key="window.key"
-          class="flex cursor-pointer items-center justify-between gap-4 py-3"
+          data-test="advance-window"
+          class="flex items-center justify-between gap-4 py-3"
         >
-          <span class="flex items-center gap-3">
-            <input
-              v-model="selected"
-              type="checkbox"
-              :value="window.key"
-              :disabled="submitting"
-              class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-800"
-            />
-            <span class="text-sm font-medium text-gray-800 dark:text-gray-200">
-              {{ windowLabel(window.key) }}
-            </span>
+          <span class="text-sm font-medium text-gray-800 dark:text-gray-200">
+            {{ windowLabel(window.key) }}
           </span>
           <span class="text-xs text-gray-500 dark:text-dark-400">
             {{ t('userSubscriptions.quotaAdvance.normalResetIn', { time: formatDuration(window.remainingMs) }) }}
           </span>
-        </label>
-      </fieldset>
+        </li>
+      </ul>
 
       <dl v-if="preview.deductedMs > 0" class="space-y-2 border-b border-gray-200 pb-4 text-sm dark:border-dark-700">
         <div class="flex items-center justify-between gap-4">
@@ -52,13 +43,9 @@
         </div>
       </dl>
 
-      <div
-        v-if="selected.length > 0 && preview.unselectedExhausted.length > 0"
-        data-test="partial-warning"
-        class="flex gap-2 text-sm text-amber-700 dark:text-amber-300"
-      >
+      <div v-if="preview.deductedMs > 0 && !preview.affordable" data-test="insufficient-validity" class="flex gap-2 text-sm text-red-700 dark:text-red-300">
         <Icon name="exclamationTriangle" size="sm" class="mt-0.5 shrink-0" />
-        <span>{{ t('userSubscriptions.quotaAdvance.partialWarning', { windows: unselectedWindowNames }) }}</span>
+        <span>{{ t('userSubscriptions.quotaAdvance.insufficientValidity') }}</span>
       </div>
 
       <div class="flex gap-2 text-sm text-red-700 dark:text-red-300">
@@ -87,7 +74,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { UserSubscription } from '@/types'
 import { advanceQuotaCycle } from '@/api/subscriptions'
@@ -114,20 +101,13 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const appStore = useAppStore()
-const selected = ref<SubscriptionQuotaWindow[]>([])
 const submitting = ref(false)
 
 const windows = computed(() => props.subscription ? getExhaustedQuotaWindows(props.subscription) : [])
 const preview = computed(() => props.subscription
-  ? getQuotaAdvancePreview(props.subscription, selected.value)
-  : { deductedMs: 0, newExpiresAt: null, unselectedExhausted: [] })
-const canSubmit = computed(() => selected.value.length > 0 && preview.value.deductedMs > 0 && !submitting.value)
-const unselectedWindowNames = computed(() => preview.value.unselectedExhausted.map(windowLabel).join(', '))
-
-watch(() => [props.show, props.subscription?.id], () => {
-  selected.value = []
-  submitting.value = false
-})
+  ? getQuotaAdvancePreview(props.subscription)
+  : { deductedMs: 0, newExpiresAt: null, affordable: false })
+const canSubmit = computed(() => windows.value.length > 0 && preview.value.affordable && !submitting.value)
 
 function windowLabel(window: SubscriptionQuotaWindow): string {
   return t(`userSubscriptions.${window}`)
@@ -151,10 +131,11 @@ async function submit() {
   if (!props.subscription || !canSubmit.value) return
   submitting.value = true
   try {
+    const confirmedWindows = new Set(windows.value.map((window) => window.key))
     const result = await advanceQuotaCycle(props.subscription.id, {
-      daily: selected.value.includes('daily'),
-      weekly: selected.value.includes('weekly'),
-      monthly: selected.value.includes('monthly'),
+      daily: confirmedWindows.has('daily'),
+      weekly: confirmedWindows.has('weekly'),
+      monthly: confirmedWindows.has('monthly'),
     })
     emit('success', result.subscription)
     emit('close')

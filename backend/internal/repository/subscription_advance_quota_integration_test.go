@@ -291,7 +291,7 @@ func TestAdvanceQuotaCycle_ConcurrentRequestsDeductOnce(t *testing.T) {
 	for callErr := range errs {
 		if callErr == nil {
 			success++
-		} else if service.ErrQuotaAdvanceWindowNotExhausted.Is(callErr) {
+		} else if service.ErrQuotaAdvanceStateChanged.Is(callErr) {
 			rejected++
 		} else {
 			t.Fatalf("unexpected concurrent result: %v", callErr)

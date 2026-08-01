@@ -50,6 +50,20 @@ describe('SubscriptionsView quota advance action', () => {
     expect(wrapper.find('[data-test="advance-quota-1"]').exists()).toBe(false)
   })
 
+  it('keeps the action visible when an exhausted window needs more validity than remains', async () => {
+    getMySubscriptions.mockResolvedValue([makeSubscription({
+      daily_usage_usd: 0,
+      weekly_usage_usd: 70,
+      weekly_window_start: '2026-07-29T12:00:00.000Z',
+      expires_at: '2026-08-03T12:00:00.000Z',
+    })])
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="advance-quota-1"]').exists()).toBe(true)
+  })
+
   it('replaces the subscription with the successful reset response', async () => {
     const subscription = makeSubscription()
     getMySubscriptions.mockResolvedValue([subscription])
@@ -60,7 +74,6 @@ describe('SubscriptionsView quota advance action', () => {
     const wrapper = mountView(false)
     await flushPromises()
     await wrapper.get('[data-test="advance-quota-1"]').trigger('click')
-    await wrapper.get('input[type="checkbox"]').setValue(true)
 
     await wrapper.get('[data-test="confirm-advance"]').trigger('click')
     await flushPromises()
@@ -110,7 +123,7 @@ function makeSubscription(overrides: Partial<UserSubscription> = {}): UserSubscr
       platform: 'openai',
       rate_multiplier: 1,
       daily_limit_usd: 10,
-      weekly_limit_usd: null,
+      weekly_limit_usd: 70,
       monthly_limit_usd: null,
       peak_rate_enabled: false,
     } as UserSubscription['group'],

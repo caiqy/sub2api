@@ -25,16 +25,33 @@ describe('subscription quota advance', () => {
 
     expect(getExhaustedQuotaWindows(subscription, now).map((window) => window.key)).toEqual([
       'weekly',
+      'monthly',
     ])
   })
 
-  it('uses the longest selected remaining time and reports unselected exhausted windows', () => {
-    const preview = getQuotaAdvancePreview(makeSubscription(), ['daily', 'weekly'], now)
+  it('uses the longest remaining time across all exhausted windows', () => {
+    const preview = getQuotaAdvancePreview(makeSubscription(), now)
 
     expect(preview).toEqual({
+      deductedMs: 20 * 24 * 60 * 60 * 1000,
+      newExpiresAt: '2026-08-20T12:00:00.000Z',
+      affordable: true,
+    })
+  })
+
+  it('keeps every exhausted window visible when the combined deduction exceeds remaining validity', () => {
+    const subscription = makeSubscription({
+      expires_at: '2026-08-03T12:00:00.000Z',
+      monthly_usage_usd: 0,
+    })
+
+    expect(getExhaustedQuotaWindows(subscription, now).map((window) => window.key)).toEqual([
+      'daily',
+      'weekly',
+    ])
+    expect(getQuotaAdvancePreview(subscription, now)).toMatchObject({
       deductedMs: 5 * 24 * 60 * 60 * 1000,
-      newExpiresAt: '2026-09-04T12:00:00.000Z',
-      unselectedExhausted: ['monthly'],
+      affordable: false,
     })
   })
 

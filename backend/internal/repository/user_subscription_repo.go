@@ -510,11 +510,11 @@ func (r *userSubscriptionRepository) resetConditionalUsageWithVersion(ctx contex
 	var query string
 	switch window {
 	case "daily":
-		query = `UPDATE user_subscriptions SET daily_usage_usd = 0, daily_window_start = $3, updated_at = ` + monotonicUpdatedAtExpr + ` WHERE id = $1 AND deleted_at IS NULL AND ((daily_window_start IS NULL AND $2 IS NULL) OR daily_window_start = $2) RETURNING ` + versionNanoExpr
+		query = `UPDATE user_subscriptions SET daily_usage_usd = 0, daily_window_start = $3, updated_at = ` + monotonicUpdatedAtExpr + ` WHERE id = $1 AND deleted_at IS NULL AND daily_window_start IS NOT DISTINCT FROM $2::timestamptz RETURNING ` + versionNanoExpr
 	case "weekly":
-		query = `UPDATE user_subscriptions SET weekly_usage_usd = 0, weekly_window_start = $3, updated_at = ` + monotonicUpdatedAtExpr + ` WHERE id = $1 AND deleted_at IS NULL AND ((weekly_window_start IS NULL AND $2 IS NULL) OR weekly_window_start = $2) RETURNING ` + versionNanoExpr
+		query = `UPDATE user_subscriptions SET weekly_usage_usd = 0, weekly_window_start = $3, updated_at = ` + monotonicUpdatedAtExpr + ` WHERE id = $1 AND deleted_at IS NULL AND weekly_window_start IS NOT DISTINCT FROM $2::timestamptz RETURNING ` + versionNanoExpr
 	case "monthly":
-		query = `UPDATE user_subscriptions SET monthly_usage_usd = 0, monthly_window_start = $3, updated_at = ` + monotonicUpdatedAtExpr + ` WHERE id = $1 AND deleted_at IS NULL AND ((monthly_window_start IS NULL AND $2 IS NULL) OR monthly_window_start = $2) RETURNING ` + versionNanoExpr
+		query = `UPDATE user_subscriptions SET monthly_usage_usd = 0, monthly_window_start = $3, updated_at = ` + monotonicUpdatedAtExpr + ` WHERE id = $1 AND deleted_at IS NULL AND monthly_window_start IS NOT DISTINCT FROM $2::timestamptz RETURNING ` + versionNanoExpr
 	}
 	version, err := r.subscriptionWriteVersion(ctx, client, query, id, expectedWindowStart, newWindowStart)
 	if !errors.Is(err, sql.ErrNoRows) {

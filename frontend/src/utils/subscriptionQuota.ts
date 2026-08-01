@@ -13,7 +13,7 @@ export interface ExhaustedQuotaWindow {
 export interface QuotaAdvancePreview {
   deductedMs: number
   newExpiresAt: string | null
-  unselectedExhausted: SubscriptionQuotaWindow[]
+  affordable: boolean
 }
 
 export interface RemainingDurationParts {
@@ -84,7 +84,7 @@ export function getExhaustedQuotaWindows(
     if (!config.limit || config.limit <= 0 || config.usage < config.limit || !config.start) return []
     const resetMs = effectiveWindowStartMs(subscription.starts_at, config.start, config.periodMs) + config.periodMs
     const remainingMs = resetMs - nowMs
-    if (!Number.isFinite(resetMs) || remainingMs <= 0 || expiresMs - remainingMs <= nowMs) return []
+    if (!Number.isFinite(resetMs) || remainingMs <= 0) return []
     return [{ key: config.key, remainingMs, resetsAt: new Date(resetMs).toISOString() }]
   })
 }
@@ -107,21 +107,16 @@ function isMidnightTimestamp(value: string): boolean {
 
 export function getQuotaAdvancePreview(
   subscription: UserSubscription,
-  selected: SubscriptionQuotaWindow[],
   now: Date = new Date(),
 ): QuotaAdvancePreview {
   const windows = getExhaustedQuotaWindows(subscription, now)
-  const selectedSet = new Set(selected)
-  const deductedMs = windows.reduce(
-    (max, window) => selectedSet.has(window.key) ? Math.max(max, window.remainingMs) : max,
-    0,
-  )
+  const deductedMs = windows.reduce((max, window) => Math.max(max, window.remainingMs), 0)
   const expiresMs = subscription.expires_at ? new Date(subscription.expires_at).getTime() : NaN
   return {
     deductedMs,
     newExpiresAt: deductedMs > 0 && Number.isFinite(expiresMs)
       ? new Date(expiresMs - deductedMs).toISOString()
       : null,
-    unselectedExhausted: windows.filter((window) => !selectedSet.has(window.key)).map((window) => window.key),
+    affordable: deductedMs > 0 && Number.isFinite(expiresMs) && expiresMs - deductedMs > now.getTime(),
   }
 }

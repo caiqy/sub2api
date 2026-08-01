@@ -13,6 +13,8 @@ import (
 func TestCalculateQuotaCycleAdvance_DeductsRemainingDailyTime(t *testing.T) {
 	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
 	sub := exhaustedQuotaSubscription(now)
+	sub.WeeklyUsageUSD = 0
+	sub.MonthlyUsageUSD = 0
 	originalExpiry := sub.ExpiresAt
 
 	result, err := calculateQuotaCycleAdvance(sub, QuotaWindowSelection{Daily: true}, now)
@@ -28,7 +30,7 @@ func TestCalculateQuotaCycleAdvance_DeductsRemainingDailyTime(t *testing.T) {
 func TestCalculateQuotaCycleAdvance_UsesLongestSelectedRemainingTime(t *testing.T) {
 	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
 	sub := exhaustedQuotaSubscription(now)
-	originalMonthlyStart := *sub.MonthlyWindowStart
+	sub.MonthlyUsageUSD = 0
 
 	result, err := calculateQuotaCycleAdvance(sub, QuotaWindowSelection{Daily: true, Weekly: true}, now)
 
@@ -37,8 +39,25 @@ func TestCalculateQuotaCycleAdvance_UsesLongestSelectedRemainingTime(t *testing.
 	require.Equal(t, sub.ExpiresAt.Add(-5*24*time.Hour), result.Subscription.ExpiresAt)
 	require.Equal(t, float64(0), result.Subscription.DailyUsageUSD)
 	require.Equal(t, float64(0), result.Subscription.WeeklyUsageUSD)
-	require.Equal(t, sub.MonthlyUsageUSD, result.Subscription.MonthlyUsageUSD)
-	require.Equal(t, originalMonthlyStart, *result.Subscription.MonthlyWindowStart)
+	require.Equal(t, float64(0), result.Subscription.MonthlyUsageUSD)
+}
+
+func TestCalculateQuotaCycleAdvance_RejectsPartialSelectionOfExhaustedWindows(t *testing.T) {
+	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	sub := exhaustedQuotaSubscription(now)
+	originalExpiry := sub.ExpiresAt
+	originalDailyUsage := sub.DailyUsageUSD
+	originalWeeklyUsage := sub.WeeklyUsageUSD
+	originalMonthlyUsage := sub.MonthlyUsageUSD
+
+	result, err := calculateQuotaCycleAdvance(sub, QuotaWindowSelection{Daily: true}, now)
+
+	require.ErrorIs(t, err, ErrQuotaAdvanceStateChanged, "a request omitting exhausted weekly and monthly windows must be rejected")
+	require.Nil(t, result)
+	require.Equal(t, originalExpiry, sub.ExpiresAt)
+	require.Equal(t, originalDailyUsage, sub.DailyUsageUSD)
+	require.Equal(t, originalWeeklyUsage, sub.WeeklyUsageUSD)
+	require.Equal(t, originalMonthlyUsage, sub.MonthlyUsageUSD)
 }
 
 func TestCalculateQuotaCycleAdvance_RejectsInvalidState(t *testing.T) {
@@ -61,7 +80,7 @@ func TestCalculateQuotaCycleAdvance_RejectsInvalidState(t *testing.T) {
 				sub.DailyUsageUSD = 9.99
 			},
 			selection: QuotaWindowSelection{Daily: true},
-			wantErr:   ErrQuotaAdvanceWindowNotExhausted,
+			wantErr:   ErrQuotaAdvanceStateChanged,
 		},
 		{
 			name: "daily window already reached its normal reset",
@@ -70,7 +89,7 @@ func TestCalculateQuotaCycleAdvance_RejectsInvalidState(t *testing.T) {
 				sub.DailyWindowStart = &start
 			},
 			selection: QuotaWindowSelection{Daily: true},
-			wantErr:   ErrQuotaAdvanceWindowNotExhausted,
+			wantErr:   ErrQuotaAdvanceStateChanged,
 		},
 		{
 			name: "one-time daily quota has no next cycle",
@@ -93,6 +112,8 @@ func TestCalculateQuotaCycleAdvance_RejectsInvalidState(t *testing.T) {
 			name: "deduction would expire subscription",
 			mutate: func(sub *UserSubscription) {
 				sub.ExpiresAt = now.Add(10 * time.Hour)
+				sub.WeeklyUsageUSD = 0
+				sub.MonthlyUsageUSD = 0
 			},
 			selection: QuotaWindowSelection{Daily: true},
 			wantErr:   ErrQuotaAdvanceWouldExpire,

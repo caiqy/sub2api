@@ -33,20 +33,15 @@ describe('SubscriptionQuotaAdvanceDialog', () => {
     showError.mockReset()
   })
 
-  it('starts unchecked and disables confirmation until a window is selected', async () => {
+  it('lists all exhausted windows as one mandatory reset and confirms the full set', async () => {
     const wrapper = mountDialog()
 
-    const options = wrapper.findAll('input[type="checkbox"]')
-    expect(options).toHaveLength(3)
-    expect(options.every((option) => !(option.element as HTMLInputElement).checked)).toBe(true)
-    expect(wrapper.get('[data-test="confirm-advance"]').attributes('disabled')).toBeDefined()
-
-    await options[0].setValue(true)
-
+    expect(wrapper.findAll('input[type="checkbox"]')).toHaveLength(0)
+    expect(wrapper.text()).toContain('userSubscriptions.daily')
+    expect(wrapper.text()).toContain('userSubscriptions.weekly')
+    expect(wrapper.text()).toContain('userSubscriptions.monthly')
     expect(wrapper.get('[data-test="confirm-advance"]').attributes('disabled')).toBeUndefined()
-    expect(wrapper.get('[data-test="deducted-duration"]').text()).toContain('20h')
-    expect(wrapper.get('[data-test="partial-warning"]').text()).toContain('userSubscriptions.weekly')
-    expect(wrapper.get('[data-test="partial-warning"]').text()).toContain('userSubscriptions.monthly')
+    expect(wrapper.get('[data-test="deducted-duration"]').text()).toContain('20d')
   })
 
   it('cancels without sending a request', async () => {
@@ -58,16 +53,15 @@ describe('SubscriptionQuotaAdvanceDialog', () => {
     expect(wrapper.emitted('close')).toHaveLength(1)
   })
 
-  it('submits selected windows once and emits the updated subscription', async () => {
+  it('submits all displayed exhausted windows once and emits the updated subscription', async () => {
     const updated = makeSubscription({ daily_usage_usd: 0, expires_at: '2026-09-08T16:00:00.000Z' })
     advanceQuotaCycle.mockResolvedValue({ subscription: updated, deducted_seconds: 72000 })
     const wrapper = mountDialog()
-    await wrapper.findAll('input[type="checkbox"]')[0].setValue(true)
 
     await wrapper.get('[data-test="confirm-advance"]').trigger('click')
     await flushPromises()
 
-    expect(advanceQuotaCycle).toHaveBeenCalledWith(1, { daily: true, weekly: false, monthly: false })
+    expect(advanceQuotaCycle).toHaveBeenCalledWith(1, { daily: true, weekly: true, monthly: true })
     expect(wrapper.emitted('success')?.[0]).toEqual([updated])
     expect(wrapper.emitted('close')).toHaveLength(1)
   })
@@ -75,33 +69,43 @@ describe('SubscriptionQuotaAdvanceDialog', () => {
   it('shows the message from a flat API interceptor error', async () => {
     advanceQuotaCycle.mockRejectedValue({
       status: 409,
-      code: 'QUOTA_ADVANCE_WINDOW_NOT_EXHAUSTED',
-      message: 'quota window is no longer exhausted',
+      code: 'QUOTA_ADVANCE_STATE_CHANGED',
+      message: 'quota window state changed; reopen the confirmation dialog',
     })
     const wrapper = mountDialog()
-    await wrapper.findAll('input[type="checkbox"]')[0].setValue(true)
 
     await wrapper.get('[data-test="confirm-advance"]').trigger('click')
     await flushPromises()
 
-    expect(showError).toHaveBeenCalledWith('quota window is no longer exhausted')
+    expect(showError).toHaveBeenCalledWith('quota window state changed; reopen the confirmation dialog')
   })
 
   it('falls back to the generic quota advance error when the API error has no message', async () => {
     advanceQuotaCycle.mockRejectedValue({})
     const wrapper = mountDialog()
-    await wrapper.findAll('input[type="checkbox"]')[0].setValue(true)
 
     await wrapper.get('[data-test="confirm-advance"]').trigger('click')
     await flushPromises()
 
     expect(showError).toHaveBeenCalledWith('userSubscriptions.quotaAdvance.failed')
   })
+
+  it('shows all exhausted windows but disables confirmation when the validity cannot cover them', () => {
+    const wrapper = mountDialog(makeSubscription({
+      expires_at: '2026-08-03T12:00:00.000Z',
+      monthly_usage_usd: 0,
+    }))
+
+    expect(wrapper.text()).toContain('userSubscriptions.daily')
+    expect(wrapper.text()).toContain('userSubscriptions.weekly')
+    expect(wrapper.get('[data-test="insufficient-validity"]').text()).toContain('userSubscriptions.quotaAdvance.insufficientValidity')
+    expect(wrapper.get('[data-test="confirm-advance"]').attributes('disabled')).toBeDefined()
+  })
 })
 
-function mountDialog() {
+function mountDialog(subscription = makeSubscription()) {
   return mount(SubscriptionQuotaAdvanceDialog, {
-    props: { show: true, subscription: makeSubscription() },
+    props: { show: true, subscription },
     global: { stubs: { BaseDialog: BaseDialogStub, Icon: true } },
   })
 }

@@ -46,6 +46,7 @@ var (
 	ErrAdjustWouldExpire                      = infraerrors.BadRequest("ADJUST_WOULD_EXPIRE", "adjustment would result in expired subscription (remaining days must be > 0)")
 	ErrQuotaAdvanceSelectionRequired          = infraerrors.BadRequest("QUOTA_ADVANCE_SELECTION_REQUIRED", "at least one quota window must be selected")
 	ErrQuotaAdvanceWindowNotExhausted         = infraerrors.Conflict("QUOTA_ADVANCE_WINDOW_NOT_EXHAUSTED", "selected quota window is not exhausted")
+	ErrQuotaAdvanceStateChanged               = infraerrors.Conflict("QUOTA_ADVANCE_STATE_CHANGED", "quota window state changed; reopen the confirmation dialog")
 	ErrQuotaAdvanceOneTimeWindow              = infraerrors.BadRequest("QUOTA_ADVANCE_ONE_TIME_WINDOW", "one-time daily quota has no next cycle")
 	ErrQuotaAdvanceUnavailable                = infraerrors.Forbidden("QUOTA_ADVANCE_UNAVAILABLE", "subscription is not eligible for quota cycle advance")
 	ErrQuotaAdvanceWouldExpire                = infraerrors.BadRequest("QUOTA_ADVANCE_WOULD_EXPIRE", "quota cycle advance would expire the subscription")
@@ -61,6 +62,10 @@ type QuotaWindowSelection struct {
 type QuotaCycleAdvanceResult struct {
 	Subscription     *UserSubscription
 	DeductedDuration time.Duration
+}
+
+func quotaWindowCanAdvance(limit *float64, usage float64, start *time.Time, period time.Duration, now time.Time) bool {
+	return limit != nil && *limit > 0 && usage >= *limit && start != nil && start.Add(period).After(now)
 }
 
 type quotaCycleLockingRepository interface {
@@ -107,6 +112,22 @@ func calculateQuotaCycleAdvance(sub *UserSubscription, selection QuotaWindowSele
 	}
 	if sub == nil || sub.Group == nil || sub.Status != SubscriptionStatusActive || !sub.ExpiresAt.After(now) {
 		return nil, ErrQuotaAdvanceUnavailable
+	}
+
+	dailyCanAdvance := !sub.HasOneTimeDailyQuota() && quotaWindowCanAdvance(
+		sub.Group.DailyLimitUSD, sub.DailyUsageUSD, sub.effectiveDailyWindowStart(), 24*time.Hour, now,
+	)
+	weeklyCanAdvance := quotaWindowCanAdvance(
+		sub.Group.WeeklyLimitUSD, sub.WeeklyUsageUSD, sub.effectiveWeeklyWindowStart(), 7*24*time.Hour, now,
+	)
+	monthlyCanAdvance := quotaWindowCanAdvance(
+		sub.Group.MonthlyLimitUSD, sub.MonthlyUsageUSD, sub.effectiveMonthlyWindowStart(), 30*24*time.Hour, now,
+	)
+	if selection.Daily && sub.HasOneTimeDailyQuota() {
+		return nil, ErrQuotaAdvanceOneTimeWindow
+	}
+	if selection != (QuotaWindowSelection{Daily: dailyCanAdvance, Weekly: weeklyCanAdvance, Monthly: monthlyCanAdvance}) {
+		return nil, ErrQuotaAdvanceStateChanged
 	}
 
 	updated := *sub

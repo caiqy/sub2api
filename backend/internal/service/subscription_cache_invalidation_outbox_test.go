@@ -196,7 +196,7 @@ func TestAdvanceQuotaCycle_UsesVersionedPostCommitInvalidation(t *testing.T) {
 		entClient:           client,
 	}
 
-	_, err := svc.AdvanceQuotaCycle(context.Background(), sub.UserID, sub.ID, QuotaWindowSelection{Daily: true})
+	_, err := svc.AdvanceQuotaCycle(context.Background(), sub.UserID, sub.ID, QuotaWindowSelection{Daily: true, Weekly: true, Monthly: true})
 
 	require.NoError(t, err)
 	require.Equal(t, int32(1), cache.versionedInvalidations.Load())
