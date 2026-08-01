@@ -1,6 +1,15 @@
 import type { UserSubscription } from '@/types'
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000
+const QUOTA_ADVANCE_GRACE_USD = 1
+
+function quotaUsageCanAdvance(limit: number, usage: number): boolean {
+  if (limit <= 0) return false
+  const threshold = Math.max(limit - QUOTA_ADVANCE_GRACE_USD, 0)
+  // Keep this formula in sync with the backend; it only covers binary64 error.
+  const tolerance = 4 * Number.EPSILON * Math.max(1, Math.abs(limit), Math.abs(usage))
+  return usage + tolerance >= threshold
+}
 
 export type SubscriptionQuotaWindow = 'daily' | 'weekly' | 'monthly'
 
@@ -81,7 +90,7 @@ export function getExhaustedQuotaWindows(
 
   return configs.flatMap((config) => {
     if (config.key === 'daily' && isOneTimeDailyQuota(subscription)) return []
-    if (!config.limit || config.limit <= 0 || config.usage < config.limit || !config.start) return []
+    if (!config.limit || !quotaUsageCanAdvance(config.limit, config.usage) || !config.start) return []
     const resetMs = effectiveWindowStartMs(subscription.starts_at, config.start, config.periodMs) + config.periodMs
     const remainingMs = resetMs - nowMs
     if (!Number.isFinite(resetMs) || remainingMs <= 0) return []
@@ -110,7 +119,7 @@ export function getQuotaAdvancePreview(
   now: Date = new Date(),
 ): QuotaAdvancePreview {
   const windows = getExhaustedQuotaWindows(subscription, now)
-  const deductedMs = windows.reduce((max, window) => Math.max(max, window.remainingMs), 0)
+  const deductedMs = windows.length === 1 ? windows[0]?.remainingMs ?? 0 : 0
   const expiresMs = subscription.expires_at ? new Date(subscription.expires_at).getTime() : NaN
   return {
     deductedMs,

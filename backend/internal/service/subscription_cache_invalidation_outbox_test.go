@@ -188,6 +188,8 @@ func TestAdvanceQuotaCycle_UsesVersionedPostCommitInvalidation(t *testing.T) {
 	repo := newTermLockingUserSubRepo()
 	repo.updateVersion = 1
 	sub := exhaustedQuotaSubscription(time.Now())
+	sub.WeeklyUsageUSD = 0
+	sub.MonthlyUsageUSD = 0
 	repo.seed(sub)
 	cache := &redeemSubscriptionCacheStub{}
 	svc := &SubscriptionService{
@@ -196,7 +198,7 @@ func TestAdvanceQuotaCycle_UsesVersionedPostCommitInvalidation(t *testing.T) {
 		entClient:           client,
 	}
 
-	_, err := svc.AdvanceQuotaCycle(context.Background(), sub.UserID, sub.ID, QuotaWindowSelection{Daily: true, Weekly: true, Monthly: true})
+	_, err := svc.AdvanceQuotaCycle(context.Background(), sub.UserID, sub.ID, QuotaWindowSelection{Daily: true})
 
 	require.NoError(t, err)
 	require.Equal(t, int32(1), cache.versionedInvalidations.Load())

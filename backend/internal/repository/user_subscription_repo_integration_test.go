@@ -11,6 +11,7 @@ import (
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -30,6 +31,57 @@ func (s *UserSubscriptionRepoSuite) SetupTest() {
 
 func TestUserSubscriptionRepoSuite(t *testing.T) {
 	suite.Run(t, new(UserSubscriptionRepoSuite))
+}
+
+func TestUserSubscriptionRepository_GetByIDForUpdatePreloadsResponseRelations(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	suffix := time.Now().UnixNano()
+	owner, err := client.User.Create().
+		SetEmail(fmt.Sprintf("quota-lock-owner-%d@test.com", suffix)).
+		SetPasswordHash("hash").
+		SetRole(service.RoleUser).
+		SetStatus(service.StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+	assigner, err := client.User.Create().
+		SetEmail(fmt.Sprintf("quota-lock-assigner-%d@test.com", suffix)).
+		SetPasswordHash("hash").
+		SetRole(service.RoleAdmin).
+		SetStatus(service.StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+	group, err := client.Group.Create().
+		SetName(fmt.Sprintf("quota-lock-group-%d", suffix)).
+		SetStatus(service.StatusActive).
+		SetSubscriptionType(service.SubscriptionTypeSubscription).
+		Save(ctx)
+	require.NoError(t, err)
+	now := time.Now().UTC().Truncate(time.Second)
+	sub, err := client.UserSubscription.Create().
+		SetUserID(owner.ID).
+		SetGroupID(group.ID).
+		SetStartsAt(now.Add(-time.Hour)).
+		SetExpiresAt(now.Add(24 * time.Hour)).
+		SetStatus(service.SubscriptionStatusActive).
+		SetAssignedBy(assigner.ID).
+		SetAssignedAt(now).
+		SetNotes("").
+		Save(ctx)
+	require.NoError(t, err)
+	tx, err := client.Tx(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback() }()
+
+	got, err := (&userSubscriptionRepository{client: client}).GetByIDForUpdate(dbent.NewTxContext(ctx, tx), sub.ID)
+
+	require.NoError(t, err)
+	require.NotNil(t, got.User)
+	require.Equal(t, owner.ID, got.User.ID)
+	require.NotNil(t, got.Group)
+	require.Equal(t, group.ID, got.Group.ID)
+	require.NotNil(t, got.AssignedByUser)
+	require.Equal(t, assigner.ID, got.AssignedByUser.ID)
 }
 
 func (s *UserSubscriptionRepoSuite) mustCreateUser(email string, role string) *service.User {

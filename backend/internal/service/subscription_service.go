@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"math/rand/v2"
 	"strconv"
 	"strings"
@@ -45,8 +46,9 @@ var (
 	ErrSubscriptionNilInput                   = infraerrors.BadRequest("SUBSCRIPTION_NIL_INPUT", "subscription input cannot be nil")
 	ErrAdjustWouldExpire                      = infraerrors.BadRequest("ADJUST_WOULD_EXPIRE", "adjustment would result in expired subscription (remaining days must be > 0)")
 	ErrQuotaAdvanceSelectionRequired          = infraerrors.BadRequest("QUOTA_ADVANCE_SELECTION_REQUIRED", "at least one quota window must be selected")
-	ErrQuotaAdvanceWindowNotExhausted         = infraerrors.Conflict("QUOTA_ADVANCE_WINDOW_NOT_EXHAUSTED", "selected quota window is not exhausted")
+	ErrQuotaAdvanceWindowNotExhausted         = infraerrors.Conflict("QUOTA_ADVANCE_WINDOW_NOT_EXHAUSTED", "selected quota window is not eligible for early reset")
 	ErrQuotaAdvanceStateChanged               = infraerrors.Conflict("QUOTA_ADVANCE_STATE_CHANGED", "quota window state changed; reopen the confirmation dialog")
+	ErrQuotaAdvanceMultipleWindows            = infraerrors.Conflict("QUOTA_ADVANCE_MULTIPLE_WINDOWS", "multiple quota windows are eligible; early reset is only available for a single window")
 	ErrQuotaAdvanceOneTimeWindow              = infraerrors.BadRequest("QUOTA_ADVANCE_ONE_TIME_WINDOW", "one-time daily quota has no next cycle")
 	ErrQuotaAdvanceUnavailable                = infraerrors.Forbidden("QUOTA_ADVANCE_UNAVAILABLE", "subscription is not eligible for quota cycle advance")
 	ErrQuotaAdvanceWouldExpire                = infraerrors.BadRequest("QUOTA_ADVANCE_WOULD_EXPIRE", "quota cycle advance would expire the subscription")
@@ -64,8 +66,21 @@ type QuotaCycleAdvanceResult struct {
 	DeductedDuration time.Duration
 }
 
+const quotaAdvanceGraceUSD = 1.0
+
+func quotaUsageCanAdvance(limit *float64, usage float64) bool {
+	if limit == nil || *limit <= 0 {
+		return false
+	}
+	threshold := math.Max(*limit-quotaAdvanceGraceUSD, 0)
+	scale := math.Max(1, math.Max(math.Abs(*limit), math.Abs(usage)))
+	// Keep this formula in sync with the frontend; it only covers binary64 error.
+	tolerance := 4 * (math.Nextafter(1, 2) - 1) * scale
+	return usage+tolerance >= threshold
+}
+
 func quotaWindowCanAdvance(limit *float64, usage float64, start *time.Time, period time.Duration, now time.Time) bool {
-	return limit != nil && *limit > 0 && usage >= *limit && start != nil && start.Add(period).After(now)
+	return quotaUsageCanAdvance(limit, usage) && start != nil && start.Add(period).After(now)
 }
 
 type quotaCycleLockingRepository interface {
@@ -123,6 +138,9 @@ func calculateQuotaCycleAdvance(sub *UserSubscription, selection QuotaWindowSele
 	monthlyCanAdvance := quotaWindowCanAdvance(
 		sub.Group.MonthlyLimitUSD, sub.MonthlyUsageUSD, sub.effectiveMonthlyWindowStart(), 30*24*time.Hour, now,
 	)
+	if dailyCanAdvance && weeklyCanAdvance || dailyCanAdvance && monthlyCanAdvance || weeklyCanAdvance && monthlyCanAdvance {
+		return nil, ErrQuotaAdvanceMultipleWindows
+	}
 	if selection.Daily && sub.HasOneTimeDailyQuota() {
 		return nil, ErrQuotaAdvanceOneTimeWindow
 	}
@@ -140,16 +158,14 @@ func calculateQuotaCycleAdvance(sub *UserSubscription, selection QuotaWindowSele
 		if oneTime {
 			return ErrQuotaAdvanceOneTimeWindow
 		}
-		if limit == nil || *limit <= 0 || usage < *limit || start == nil {
+		if !quotaUsageCanAdvance(limit, usage) || start == nil {
 			return ErrQuotaAdvanceWindowNotExhausted
 		}
 		remaining := start.Add(period).Sub(now)
 		if remaining <= 0 {
 			return ErrQuotaAdvanceWindowNotExhausted
 		}
-		if remaining > deducted {
-			deducted = remaining
-		}
+		deducted = remaining
 		reset()
 		return nil
 	}
@@ -873,18 +889,23 @@ func normalizeAssignValidityDays(days int) int {
 
 // RevokeSubscription 撤销订阅
 func (s *SubscriptionService) RevokeSubscription(ctx context.Context, subscriptionID int64) error {
-	// 先获取订阅信息用于失效缓存
-	sub, err := s.userSubRepo.GetByID(ctx, subscriptionID)
-	if err != nil {
+	var revoked *UserSubscription
+	if err := s.withSubscriptionUpdateTx(ctx, func(txCtx context.Context) error {
+		if _, err := s.lockReadSubscriptionByID(txCtx, subscriptionID); err != nil {
+			return err
+		}
+		if err := s.userSubRepo.Delete(txCtx, subscriptionID); err != nil {
+			return err
+		}
+		// Keep this read in the transaction to observe the authoritative cache version assigned by the delete trigger.
+		var err error
+		revoked, err = s.userSubRepo.GetByIDIncludeDeleted(txCtx, subscriptionID)
+		return err
+	}); err != nil {
 		return err
 	}
 
-	if err := s.userSubRepo.Delete(ctx, subscriptionID); err != nil {
-		return err
-	}
-
-	s.deferSubscriptionCacheLocalInvalidation(ctx, sub.UserID, sub.GroupID)
-
+	s.deferSubscriptionCacheInvalidation(ctx, revoked)
 	return nil
 }
 

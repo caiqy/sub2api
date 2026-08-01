@@ -41,8 +41,8 @@ describe('SubscriptionsView quota advance action', () => {
     expect(wrapper.find('[data-test="advance-quota-1"]').exists()).toBe(true)
   })
 
-  it('hides the action while quota remains', async () => {
-    getMySubscriptions.mockResolvedValue([makeSubscription({ daily_usage_usd: 9 })])
+  it('hides the action below the early-reset threshold', async () => {
+    getMySubscriptions.mockResolvedValue([makeSubscription({ daily_usage_usd: 8.9999999999 })])
 
     const wrapper = mountView()
     await flushPromises()
@@ -62,6 +62,21 @@ describe('SubscriptionsView quota advance action', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-test="advance-quota-1"]').exists()).toBe(true)
+  })
+
+  it('hides the action and explains when multiple windows are exhausted', async () => {
+    getMySubscriptions.mockResolvedValue([makeSubscription({
+      weekly_usage_usd: 70,
+      weekly_window_start: '2026-07-29T12:00:00.000Z',
+    })])
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="advance-quota-1"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="advance-quota-multiple-1"]').text()).toContain(
+      'userSubscriptions.quotaAdvance.multipleWindowsUnavailable',
+    )
   })
 
   it('replaces the subscription with the successful reset response', async () => {

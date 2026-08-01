@@ -252,6 +252,13 @@
                 {{ t('userSubscriptions.quotaAdvance.action') }}
               </button>
             </div>
+            <p
+              v-else-if="getExhaustedQuotaWindows(subscription).length > 1"
+              :data-test="`advance-quota-multiple-${subscription.id}`"
+              class="border-t border-gray-100 pt-4 text-xs text-gray-500 dark:border-dark-700 dark:text-dark-400"
+            >
+              {{ t('userSubscriptions.quotaAdvance.multipleWindowsUnavailable') }}
+            </p>
           </div>
         </div>
       </div>
@@ -309,7 +316,7 @@ function subscriptionPeakRateLabel(subscription: UserSubscription): string {
 }
 
 function canAdvanceQuota(subscription: UserSubscription): boolean {
-  return getExhaustedQuotaWindows(subscription).length > 0
+  return getExhaustedQuotaWindows(subscription).length === 1
 }
 
 function openQuotaAdvance(subscription: UserSubscription) {

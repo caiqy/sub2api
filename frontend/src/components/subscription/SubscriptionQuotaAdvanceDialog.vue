@@ -107,7 +107,7 @@ const windows = computed(() => props.subscription ? getExhaustedQuotaWindows(pro
 const preview = computed(() => props.subscription
   ? getQuotaAdvancePreview(props.subscription)
   : { deductedMs: 0, newExpiresAt: null, affordable: false })
-const canSubmit = computed(() => windows.value.length > 0 && preview.value.affordable && !submitting.value)
+const canSubmit = computed(() => windows.value.length === 1 && preview.value.affordable && !submitting.value)
 
 function windowLabel(window: SubscriptionQuotaWindow): string {
   return t(`userSubscriptions.${window}`)

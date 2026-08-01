@@ -29,24 +29,24 @@ describe('subscription quota advance', () => {
     ])
   })
 
-  it('uses the longest remaining time across all exhausted windows', () => {
+  it('does not create an advance preview for multiple exhausted windows', () => {
     const preview = getQuotaAdvancePreview(makeSubscription(), now)
 
     expect(preview).toEqual({
-      deductedMs: 20 * 24 * 60 * 60 * 1000,
-      newExpiresAt: '2026-08-20T12:00:00.000Z',
-      affordable: true,
+      deductedMs: 0,
+      newExpiresAt: null,
+      affordable: false,
     })
   })
 
-  it('keeps every exhausted window visible when the combined deduction exceeds remaining validity', () => {
+  it('marks a single exhausted window unaffordable when its deduction exceeds remaining validity', () => {
     const subscription = makeSubscription({
       expires_at: '2026-08-03T12:00:00.000Z',
+      daily_usage_usd: 0,
       monthly_usage_usd: 0,
     })
 
     expect(getExhaustedQuotaWindows(subscription, now).map((window) => window.key)).toEqual([
-      'daily',
       'weekly',
     ])
     expect(getQuotaAdvancePreview(subscription, now)).toMatchObject({
@@ -62,7 +62,59 @@ describe('subscription quota advance', () => {
 
     const windows = getExhaustedQuotaWindows(subscription, new Date('2026-07-31T08:00:00.000Z'))
 
+
     expect(windows.find((window) => window.key === 'daily')?.remainingMs).toBe(4 * 60 * 60 * 1000)
+  })
+
+  it('excludes a window more than one dollar below its limit', () => {
+    const subscription = makeSubscription({
+      daily_usage_usd: 0,
+      weekly_usage_usd: 0,
+      monthly_usage_usd: 298.9999999999,
+    })
+
+    expect(getExhaustedQuotaWindows(subscription, now)).toEqual([])
+  })
+
+  it.each([1, 0.5])('includes a zero-usage window whose positive limit is %s dollar', (limit) => {
+    const subscription = makeSubscription({
+      daily_usage_usd: 0,
+      weekly_usage_usd: 0,
+      monthly_usage_usd: 0,
+    })
+    subscription.group!.daily_limit_usd = 0
+    subscription.group!.weekly_limit_usd = 0
+    subscription.group!.monthly_limit_usd = limit
+
+    expect(getExhaustedQuotaWindows(subscription, now).map((window) => window.key)).toEqual([
+      'monthly',
+    ])
+  })
+
+  it('includes an independently represented decimal value exactly one dollar below the limit', () => {
+    const subscription = makeSubscription({
+      daily_usage_usd: 0.1,
+      weekly_usage_usd: 0,
+      monthly_usage_usd: 0,
+    })
+    subscription.group!.daily_limit_usd = 1.1
+    subscription.group!.weekly_limit_usd = 0
+    subscription.group!.monthly_limit_usd = 0
+
+    expect(getExhaustedQuotaWindows(subscription, now).map((window) => window.key)).toEqual(['daily'])
+  })
+
+  it('includes the shared large-magnitude machine-epsilon boundary', () => {
+    const subscription = makeSubscription({
+      daily_usage_usd: 999_998.9999999994,
+      weekly_usage_usd: 0,
+      monthly_usage_usd: 0,
+    })
+    subscription.group!.daily_limit_usd = 1_000_000
+    subscription.group!.weekly_limit_usd = 0
+    subscription.group!.monthly_limit_usd = 0
+
+    expect(getExhaustedQuotaWindows(subscription, now).map((window) => window.key)).toEqual(['daily'])
   })
 })
 
@@ -74,9 +126,9 @@ function makeSubscription(overrides: Partial<UserSubscription> = {}): UserSubscr
     status: 'active',
     starts_at: '2026-07-21T12:00:00.000Z',
     expires_at: '2026-09-09T12:00:00.000Z',
-    daily_usage_usd: 10,
-    weekly_usage_usd: 70,
-    monthly_usage_usd: 300,
+    daily_usage_usd: 9,
+    weekly_usage_usd: 69,
+    monthly_usage_usd: 299,
     daily_window_start: '2026-07-31T08:00:00.000Z',
     weekly_window_start: '2026-07-29T12:00:00.000Z',
     monthly_window_start: '2026-07-21T12:00:00.000Z',

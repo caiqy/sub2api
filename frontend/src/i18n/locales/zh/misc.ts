@@ -136,7 +136,8 @@ export default {
     quotaAdvance: {
       action: '提前重置额度',
       title: '提前重置额度',
-      description: '以下“{name}”的已耗尽额度周期将一起提前重置。',
+      description: '提前重置“{name}”已达到门槛的额度周期，将以扣减订阅有效期为代价。',
+      multipleWindowsUnavailable: '多个额度周期同时达到提前重置门槛，暂不支持该操作，请等待自然重置。',
       normalResetIn: '正常重置还需 {time}',
       deducted: '扣减订阅有效期',
       newExpiry: '操作后到期时间',

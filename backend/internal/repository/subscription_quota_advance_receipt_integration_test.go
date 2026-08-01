@@ -110,7 +110,7 @@ func createQuotaAdvanceReceiptFixture(t *testing.T) (userID, subscriptionID int6
 		SetDailyWindowStart(now.Add(-4 * time.Hour)).
 		SetWeeklyWindowStart(now.Add(-2 * 24 * time.Hour)).
 		SetDailyUsageUsd(10).
-		SetWeeklyUsageUsd(70).
+		SetWeeklyUsageUsd(0).
 		SetNotes("").
 		Save(ctx)
 	require.NoError(t, err)

@@ -1613,11 +1613,16 @@ func (r *revokeSubscriptionRepoStub) GetByID(_ context.Context, id int64) (*User
 	return &cp, nil
 }
 
+func (r *revokeSubscriptionRepoStub) GetByIDIncludeDeleted(ctx context.Context, id int64) (*UserSubscription, error) {
+	return r.GetByID(ctx, id)
+}
+
 func (r *revokeSubscriptionRepoStub) Delete(_ context.Context, id int64) error {
 	if r.sub == nil || r.sub.ID != id {
 		return ErrSubscriptionNotFound
 	}
 	r.deleteCalled = true
+	r.sub.UpdatedAt = time.Unix(0, 1000)
 	return nil
 }
 

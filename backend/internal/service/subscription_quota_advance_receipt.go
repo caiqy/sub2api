@@ -135,11 +135,6 @@ func (s *SubscriptionService) advanceQuotaCycle(
 	if err := s.userSubRepo.Update(txCtx, result.Subscription); err != nil {
 		return nil, nil, err
 	}
-	updatedSubscription, err := s.userSubRepo.GetByID(txCtx, subscriptionID)
-	if err != nil {
-		return nil, nil, err
-	}
-	result.Subscription = updatedSubscription
 
 	var response json.RawMessage
 	if receiptInput != nil {

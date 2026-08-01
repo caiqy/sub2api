@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type postCommitReadFailSubscriptionRepo struct {
+type refreshReadForbiddenSubscriptionRepo struct {
 	service.UserSubscriptionRepository
 	locking interface {
 		GetByIDForUpdate(context.Context, int64) (*service.UserSubscription, error)
@@ -23,16 +23,16 @@ type postCommitReadFailSubscriptionRepo struct {
 	}
 }
 
-func (r *postCommitReadFailSubscriptionRepo) GetByIDForUpdate(ctx context.Context, id int64) (*service.UserSubscription, error) {
+func (r *refreshReadForbiddenSubscriptionRepo) GetByIDForUpdate(ctx context.Context, id int64) (*service.UserSubscription, error) {
 	return r.locking.GetByIDForUpdate(ctx, id)
 }
 
-func (r *postCommitReadFailSubscriptionRepo) GetByUserIDAndGroupIDForUpdate(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error) {
+func (r *refreshReadForbiddenSubscriptionRepo) GetByUserIDAndGroupIDForUpdate(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error) {
 	return r.locking.GetByUserIDAndGroupIDForUpdate(ctx, userID, groupID)
 }
 
-func (r *postCommitReadFailSubscriptionRepo) GetByID(context.Context, int64) (*service.UserSubscription, error) {
-	return nil, errors.New("post-commit read unavailable")
+func (r *refreshReadForbiddenSubscriptionRepo) GetByID(context.Context, int64) (*service.UserSubscription, error) {
+	return nil, errors.New("unexpected refresh GetByID after Update")
 }
 
 // firstLockReadBarrierRepo wraps the real repository and parks the FIRST
@@ -352,7 +352,7 @@ func TestAdvanceQuotaCycle_HidesSubscriptionOwnedByAnotherUser(t *testing.T) {
 	require.Equal(t, float64(10), stored.DailyUsageUsd)
 }
 
-func TestAdvanceQuotaCycle_DoesNotTurnCommittedUpdateIntoFailureWhenRefreshReadFails(t *testing.T) {
+func TestAdvanceQuotaCycle_CommitsAuthoritativeUpdatedObjectWithoutRefreshRead(t *testing.T) {
 	ctx := context.Background()
 	client := testEntClient(t)
 	suffix := time.Now().UnixNano()
@@ -386,7 +386,7 @@ func TestAdvanceQuotaCycle_DoesNotTurnCommittedUpdateIntoFailureWhenRefreshReadF
 	require.NoError(t, err)
 
 	baseRepo := NewUserSubscriptionRepository(client)
-	repo := &postCommitReadFailSubscriptionRepo{
+	repo := &refreshReadForbiddenSubscriptionRepo{
 		UserSubscriptionRepository: baseRepo,
 		locking: baseRepo.(interface {
 			GetByIDForUpdate(context.Context, int64) (*service.UserSubscription, error)
@@ -401,4 +401,12 @@ func TestAdvanceQuotaCycle_DoesNotTurnCommittedUpdateIntoFailureWhenRefreshReadF
 	require.NoError(t, err)
 	require.NotNil(t, result.Subscription)
 	require.Zero(t, result.Subscription.DailyUsageUSD)
+	require.NotNil(t, result.Subscription.User)
+	require.Equal(t, user.ID, result.Subscription.User.ID)
+	require.NotNil(t, result.Subscription.Group)
+	require.Equal(t, group.ID, result.Subscription.Group.ID)
+	stored, err := client.UserSubscription.Get(ctx, sub.ID)
+	require.NoError(t, err)
+	require.Zero(t, stored.DailyUsageUsd)
+	require.Equal(t, stored.UpdatedAt.UnixNano(), result.Subscription.UpdatedAt.UnixNano())
 }

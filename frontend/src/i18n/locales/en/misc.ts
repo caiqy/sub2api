@@ -139,7 +139,8 @@ export default {
     quotaAdvance: {
       action: 'Reset quota early',
       title: 'Reset quota early',
-      description: 'The following exhausted quota periods for “{name}” will be reset early together.',
+      description: 'Reset the eligible quota period for “{name}” early by deducting subscription time.',
+      multipleWindowsUnavailable: 'Early reset is unavailable while multiple quota periods are eligible; please wait for the natural reset.',
       normalResetIn: 'Normally resets in {time}',
       deducted: 'Subscription time deducted',
       newExpiry: 'New expiration time',

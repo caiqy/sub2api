@@ -33,15 +33,15 @@ describe('SubscriptionQuotaAdvanceDialog', () => {
     showError.mockReset()
   })
 
-  it('lists all exhausted windows as one mandatory reset and confirms the full set', async () => {
+  it('lists the single exhausted window without a selector', async () => {
     const wrapper = mountDialog()
 
     expect(wrapper.findAll('input[type="checkbox"]')).toHaveLength(0)
     expect(wrapper.text()).toContain('userSubscriptions.daily')
-    expect(wrapper.text()).toContain('userSubscriptions.weekly')
-    expect(wrapper.text()).toContain('userSubscriptions.monthly')
+    expect(wrapper.text()).not.toContain('userSubscriptions.weekly')
+    expect(wrapper.text()).not.toContain('userSubscriptions.monthly')
     expect(wrapper.get('[data-test="confirm-advance"]').attributes('disabled')).toBeUndefined()
-    expect(wrapper.get('[data-test="deducted-duration"]').text()).toContain('20d')
+    expect(wrapper.get('[data-test="deducted-duration"]').text()).toContain('20h')
   })
 
   it('cancels without sending a request', async () => {
@@ -53,7 +53,7 @@ describe('SubscriptionQuotaAdvanceDialog', () => {
     expect(wrapper.emitted('close')).toHaveLength(1)
   })
 
-  it('submits all displayed exhausted windows once and emits the updated subscription', async () => {
+  it('submits the displayed exhausted window once and emits the updated subscription', async () => {
     const updated = makeSubscription({ daily_usage_usd: 0, expires_at: '2026-09-08T16:00:00.000Z' })
     advanceQuotaCycle.mockResolvedValue({ subscription: updated, deducted_seconds: 72000 })
     const wrapper = mountDialog()
@@ -61,7 +61,7 @@ describe('SubscriptionQuotaAdvanceDialog', () => {
     await wrapper.get('[data-test="confirm-advance"]').trigger('click')
     await flushPromises()
 
-    expect(advanceQuotaCycle).toHaveBeenCalledWith(1, { daily: true, weekly: true, monthly: true })
+    expect(advanceQuotaCycle).toHaveBeenCalledWith(1, { daily: true, weekly: false, monthly: false })
     expect(wrapper.emitted('success')?.[0]).toEqual([updated])
     expect(wrapper.emitted('close')).toHaveLength(1)
   })
@@ -90,15 +90,23 @@ describe('SubscriptionQuotaAdvanceDialog', () => {
     expect(showError).toHaveBeenCalledWith('userSubscriptions.quotaAdvance.failed')
   })
 
-  it('shows all exhausted windows but disables confirmation when the validity cannot cover them', () => {
+  it('shows the exhausted window but disables confirmation when validity cannot cover it', () => {
     const wrapper = mountDialog(makeSubscription({
       expires_at: '2026-08-03T12:00:00.000Z',
+      daily_usage_usd: 0,
+      weekly_usage_usd: 70,
       monthly_usage_usd: 0,
     }))
 
-    expect(wrapper.text()).toContain('userSubscriptions.daily')
     expect(wrapper.text()).toContain('userSubscriptions.weekly')
     expect(wrapper.get('[data-test="insufficient-validity"]').text()).toContain('userSubscriptions.quotaAdvance.insufficientValidity')
+    expect(wrapper.get('[data-test="confirm-advance"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('disables confirmation when directly given multiple exhausted windows', () => {
+    const wrapper = mountDialog(makeSubscription({ weekly_usage_usd: 70 }))
+
+    expect(wrapper.findAll('[data-test="advance-window"]')).toHaveLength(2)
     expect(wrapper.get('[data-test="confirm-advance"]').attributes('disabled')).toBeDefined()
   })
 })
@@ -119,8 +127,8 @@ function makeSubscription(overrides: Partial<UserSubscription> = {}): UserSubscr
     starts_at: '2026-07-21T12:00:00.000Z',
     expires_at: '2026-09-09T12:00:00.000Z',
     daily_usage_usd: 10,
-    weekly_usage_usd: 70,
-    monthly_usage_usd: 300,
+    weekly_usage_usd: 0,
+    monthly_usage_usd: 0,
     daily_window_start: '2026-07-31T08:00:00.000Z',
     weekly_window_start: '2026-07-29T12:00:00.000Z',
     monthly_window_start: '2026-07-21T12:00:00.000Z',

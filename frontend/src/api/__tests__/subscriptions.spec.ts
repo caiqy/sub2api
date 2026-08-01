@@ -27,10 +27,10 @@ describe('subscription quota advance API', () => {
 
   it('reuses the operation key after an ambiguous failed request', async () => {
     post.mockRejectedValueOnce(new Error('network timeout'))
-    await expect(advanceQuotaCycle(9, { daily: true, weekly: true, monthly: false })).rejects.toThrow('network timeout')
+    await expect(advanceQuotaCycle(9, { daily: true, weekly: false, monthly: false })).rejects.toThrow('network timeout')
 
-    post.mockResolvedValueOnce({ data: { subscription: { id: 9 }, deducted_seconds: 432000 } })
-    await advanceQuotaCycle(9, { daily: true, weekly: true, monthly: false })
+    post.mockResolvedValueOnce({ data: { subscription: { id: 9 }, deducted_seconds: 72000 } })
+    await advanceQuotaCycle(9, { daily: true, weekly: false, monthly: false })
 
     expect(post.mock.calls[1][2].headers).toEqual(post.mock.calls[0][2].headers)
   })
