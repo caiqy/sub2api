@@ -4,12 +4,19 @@
 - Review mode: `thorough`
 - 当前任务: Task 4 - 验证阶段 0 的本地保护测试与生成稳定性
 - 映射 OpenSpec: 1.4
-- 阶段: `implementation-fix-2 / dispatch-intent`
+- 阶段: `implementation-fix-2 / result + review-1 / dispatch-intent`
 - Fix-2 dispatch token: `task-4-fix-attempt-2-ddb37f772`
 - Fix-2 role: `fix-agent`
 - Fix-2 model: `high`
 - Fix-2 base HEAD: `ddb37f772a4e8278127e38d431623a66470b3a65`
-- Fix-2 task ID: `pending atomic functions.task return`
+- Fix-2 task ID: `ses_03f711161ffePGgNus3wyHeB8X`
+- Fix-2 result: `DONE`
+- Fix-2 commits: lint `03d522fea7b7292730799cc2178dc072f29cee66`; repaired ledger `31f239703220b6a0765834d37fbc5981dc8c25fd`
+- Review-1 dispatch token: `task-4-review-attempt-1-31f239703`
+- Review-1 role: `reviewer`
+- Review-1 model: `high`
+- Review-1 base HEAD: `31f239703220b6a0765834d37fbc5981dc8c25fd`
+- Review-1 task ID: `pending atomic functions.task return`
 - Diagnostic-2 dispatch token: `task-4-diagnostic-attempt-2-be284ffd7`
 - Diagnostic-2 role: `diagnostic-agent`
 - Diagnostic-2 model: `high`
@@ -19,7 +26,7 @@
 - Diagnostic-2 result: `DONE`
 - Root cause 4: `b24bc74b` 引入未检查的 deferred `rows.Close()`；最小修复为 `defer func() { _ = rows.Close() }()`。
 - Generate diagnosis: 第 `1/3` 次 clean generate 成功且无 Ent/Wire diff；此前随机路径错误符合瞬态外部 mapping lock，持有者未确定。
-- Gap diagnosis: 行 1/2/3/11 与非Docker行13的精确现有测试已定位并通过；Docker行10/13余项交Task5。
+- Gap diagnosis: 行 1/2/3/11 与非Docker行13的精确现有测试已定位并通过；仅Docker行10交Task5，row13 deploy scripts在v0.1.169合入后由Task13验证。
 - Fix dispatch token: `task-4-fix-attempt-1-6456c3858`
 - Fix role: `fix-agent`
 - Fix model: `high`
@@ -57,5 +64,5 @@
 - Risk signals: service test tag 配置不匹配；`wire_gen.go` 生成漂移；conflict grep 合法字符串假阳性。
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
-- 审查-修复轮次: `0/2`
-- 状态: Plan/brief已闭合剩余门禁；即将派发fresh fix-2 agent，返回前不得重复派发，Task4不得review/checkoff。
+- 审查-修复轮次: `1/2 dispatching`
+- 状态: fix-2报告DONE且tracked worktree clean；即将派发fresh reviewer核验全部Task4提交、命令证据、run ID偏差与lint RED判定，返回前不得重复派发或checkoff。
