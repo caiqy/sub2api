@@ -4,7 +4,7 @@
 - Review mode: `thorough`
 - 当前任务: Task 3 - 建立能力矩阵与冲突台账
 - 映射 OpenSpec: 1.3
-- 阶段: `implementing / dispatch-intent`
+- 阶段: `implementer-result`
 - Dispatch token: `task-3-implementer-attempt-1-1bc578a39`
 - Role: `implementer`
 - Attempt: `1`
@@ -12,12 +12,12 @@
 - Base HEAD: `1bc578a39170440cb042c38d7cb99aab8329defd`
 - Brief: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-3-brief.md`
 - Report: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-3-report.md`
-- Task ID: `pending atomic functions.task return`
-- Result: `pending`
-- Implementation commit: `pending`
-- Verification summary: `pending`
-- Risk signals: `pending`
-- Concerns: `pending`
+- Task ID: `ses_03fd8db43ffephmpAkewpqf9W7`
+- Result: `DONE`（agent 返回“状态：完成”，按契约归一化）
+- Implementation commit: `32a766184a819c12c6daf043fc40bb2b72498c3b`
+- Verification summary: 提交仅含 build ledger；`git diff --check HEAD~1..HEAD` 无输出，工作树仅显示 selection 文件。
+- Risk signals: 单任务 ledger diff 与三个 release changed-files 清单规模超过 200 行，触发 thorough review。
+- Concerns: Ent/Wire、依赖与 migration 仍为 `gap`，由 Task 4 关闭。
 - TDD: `tdd`; implementer 必须加载 Skill。该任务无生产代码修改，不伪造 RED；报告必须记录 `N/A` 原因、三段 changed-files 和矩阵/台账审计结果。
 - 审查-修复轮次: `0/2`
-- 状态: 即将调用原子 `functions.task`；返回前不得重复派发。
+- 状态: implementer 已返回；待核验 report/commit 并生成 thorough review package。
