@@ -1659,3 +1659,101 @@ frontend/src/views/user/__tests__/PaymentView.spec.ts
 - This invocation is explicitly not PASS evidence. The compose script remains out of scope for this round and was not changed. The prior exact static inspection of four `no-new-privileges:true` entries remains separate review evidence.
 
 - Ledger scope for the following commit is this report only. Task 13's negative matrix remains unrun; no Plan/OpenSpec task, progress, or runtime selection file changed.
+
+## Task 13 v0.1.169 GHSA Negative Matrix And Behavior Review
+
+- Review date: `2026-08-02`; branch: `feature/20260802/staged-merge-upstream-v0-1-169`; `VERSION` remains `0.1.165.4`.
+- Initial and pre-ledger tracked status was clean; `.comet/current-change.json` remained the sole untracked path. It was never read, staged, modified, committed, stashed, or deleted.
+- No fetch, push, tag, release, deploy, Docker integration/image action, SSH/server/database/Redis/Nginx operation, runtime-selection change, Plan/OpenSpec checkoff, or Task 14 full gate was run.
+
+### GHSA Matrix Mapping And Focused Commands
+
+| Required input/boundary | Direct assertion(s) | Result |
+| --- | --- | --- |
+| Raw traversal: `../models`, `../../models`, `...` | `TestSanitizedUpstreamPathSuffixRejectsNonConformingSegments`; all three exact values are direct helper inputs. | rejected |
+| Encoded traversal: `%2e%2e/models`, `%2E%2E%2Fmodels`, `compact%2f..%2fmodels` | `TestOpenAIResponsesRequestPathSuffixRejectsNonConformingSubpaths` verifies parsed paths never contribute an upstream suffix; `TestGatewayRoutesResponsesSubpathRejectsNonConformingSubpaths` applies every exact suffix to `/v1/responses`, `/responses`, and `/backend-api/codex/responses`. | rejected at edge |
+| Backslash: `compact\detail`, `%5c..%5cmodels` | Direct guard entries plus the same parsed/three-family route matrix. | rejected |
+| Raw helper query/fragment: `compact?next=%2fmodels`, `compact#fragment` | Exact direct inputs to `sanitizedUpstreamPathSuffix`. | rejected |
+| Real HTTP query: `/v1/responses/compact?next=%2fmodels`, `/responses/compact?next=%2fmodels`, `/backend-api/codex/responses/compact?next=%2fmodels` | `TestOpenAIResponsesRequestPathSuffixRejectsNonConformingSubpaths` asserts suffix `/compact`; `TestGatewayRoutesOpenAIResponsesCompactPathIsRegistered` keeps each route out of 404. | allowed; query excluded from suffix |
+| Empty segment: `//double`, `/compact//detail` | Direct guard entries and the three-family route matrix. | rejected |
+| Bounds: one 129-byte segment; 9 nonempty segments | Existing `TestSanitizedUpstreamPathSuffixEnforcesBounds` constructs `maxUpstreamPathSegmentLen+1` and `maxUpstreamPathSegments+1`; current limits are 128 bytes and 8 segments. | rejected |
+| Invalid path/model characters: NUL/control, non-ASCII, space, `:`, `;`, `@`, `%` | `TestSanitizedUpstreamPathSuffixRejectsNonConformingSegments` covers path variants; `TestBuildGeminiAIStudioModelActionURLRejectsNonConformingModel` covers model variants including semicolon, space, non-ASCII, and percent. | rejected |
+| Gemini native URL model and compat body model | `TestGeminiAIStudioInvalidModelsDoNotSendRequests` calls both real native and compat paths with `../models`, asserts an error, and asserts the HTTP upstream stub call count is zero. | error before request |
+| Legal regressions: root/trailing slash, `compact`, response ID, `gemini-2.5-pro`, three AI Studio actions | Existing legal tables retain empty root suffix, `/v1/responses/`, compact, response ID, and `gemini-2.5-pro`; `TestBuildGeminiAIStudioModelActionURL` covers `generateContent`, `streamGenerateContent`, and `countTokens`. | preserved |
+
+- All malformed Responses subpaths in the added route matrix return `404` with `Unsupported responses subpath`. The guard aborts before the registered handler, therefore before account selection and every upstream sender; malformed paths are also not treated as compact by `TestOpenAIResponsesRequestPathSuffixRejectsNonConformingSubpaths`.
+- The matrix additions were characterization assertions: they first passed against the existing guard and URL-builder behavior. No production compatibility source was changed and no artificial RED was created.
+
+```powershell
+go test -count=1 ./internal/service -run '^(TestSanitizedUpstreamPathSuffixRejectsNonConformingSegments|TestSanitizedUpstreamPathSuffixEnforcesBounds|TestOpenAIResponsesRequestPathSuffixRejectsNonConformingSubpaths|TestAppendOpenAIResponsesRequestPathSuffixRefusesUnsafeSuffix|TestBuildGeminiAIStudioModelActionURL|TestBuildGeminiAIStudioModelActionURLRejectsNonConformingModel|TestOpenAIProxyStreamCircuitThresholdTTLAndSuccessReset|TestOpenAIProxyStreamCircuitDisabled)$'
+```
+
+- Final exit `0`: `ok github.com/Wei-Shaw/sub2api/internal/service 2.364s`.
+
+```powershell
+go test -count=1 ./internal/server/routes -run '^(TestGatewayRoutesResponsesSubpathRejectsNonConformingSubpaths|TestGatewayRoutesOpenAIResponsesCompactPathIsRegistered)$'
+```
+
+- Final exit `0`: `ok github.com/Wei-Shaw/sub2api/internal/server/routes 2.223s`.
+
+```powershell
+go test -count=1 ./internal/securityaudit -run '^(TestParseQwen3GuardStrictAndPolicy|TestParseQwen3GuardIgnoresAuxiliaryResponseFields)$'
+```
+
+- Final exit `0`: `ok github.com/Wei-Shaw/sub2api/internal/securityaudit 2.009s`.
+- The first runs before characterization edits were also green: service `2.317s`, routes `2.038s`, and security audit `1.978s`. The repeated post-characterization service/routes runs were green at `1.604s` and `1.674s`.
+- Test-only commit: `140f9fb7b` (`test: cover v0.1.169 path guard matrix`), exactly `backend/internal/service/upstream_path_guard_test.go`, `backend/internal/service/gemini_upstream_url_test.go`, and `backend/internal/server/routes/gateway_test.go`.
+- Compatibility production commit: none. The fixed compatibility allowlist was not expanded or used.
+
+### Compose Script Portability RED And GREEN
+
+- RED command: `D:/scoop/shims/bash.exe deploy/tests/docker-compose-security-test.sh`.
+- RED exit: `0`; exact stdout: `docker compose security test passed\n`; stderr was non-empty and therefore not PASS: 5,956 UTF-8 bytes, 564 lines, SHA-256 `0753b8dd8634a77b5368a45b6fbc845387648cfb92aae29c70fcf68cf1c631a8`. It consists of repeated `buffer:` diagnostics and four `integer expression expected` errors. Its exact prefix is `deploy/tests/docker-compose-security-test.sh: line 29: [: buffer:`; its exact suffix is `buffer: p` through `buffer: :` followed by `1: integer expression expected\n`.
+- Root cause: `command -v awk` resolved `/d/scoop/shims/awk`; `awk -W version` reported GNU Awk 3.1.6. The script put its YAML count in Awk command substitution, so this environment's diagnostics became the shell numeric operand while the failed numeric comparison did not make the script fail.
+- The first pure-shell implementation exposed a real RED: the four-space catch-all `case` arm matched the six-space option before the exact option arm, resetting `in_security_opt` and yielding the explicit `deploy/docker-compose.yml must enable no-new-privileges exactly once for the sub2api service`. `bash -x` showed `sub2api` and `security_opt` states reached `1`, followed by the catch-all reset at the option line. The one-line ordering correction put the exact option arm first.
+- Minimal fix: replace only the Awk count with a POSIX `read`/`case` state scan. It confines matching to the `sub2api` service and its `security_opt` block, strips a final CR from each line, counts the exact item, and preserves the existing `count -ne 1` rejection for zero and duplicates.
+
+```powershell
+D:/scoop/shims/bash.exe -n deploy/tests/docker-compose-security-test.sh
+$bash = 'D:/scoop/shims/bash.exe'
+$scripts = @('deploy/tests/docker-compose-security-test.sh', 'deploy/tests/docker-runtime-resources-test.sh')
+foreach ($script in $scripts) { if (-not (Test-Path -LiteralPath $script)) { throw "missing v0.1.169 deploy test: $script" }; & $bash $script; if ($LASTEXITCODE -ne 0) { throw "deploy test failed: $script" } }
+```
+
+- Syntax exit `0` with no output. The exact-loop GREEN exit was `0`; stdout was exactly `docker compose security test passed` then `docker runtime resources test passed`, each newline-terminated; stderr was empty.
+- Independent final security-script capture: exit `0`; stdout exactly `docker compose security test passed\n`; stderr exactly empty.
+- Script-only commit: `a86d33b26` (`fix: make compose security verification portable`), exactly `deploy/tests/docker-compose-security-test.sh`.
+
+### v0.1.169 Call-Chain Review
+
+| Area | Current source/call-chain conclusion |
+| --- | --- |
+| Responses guards and compact | Each Responses route family wraps `guardResponsesSubpath` in `backend/internal/server/routes/gateway.go:159-176`; it calls `IsForwardableOpenAIResponsesRequestPath`, emits the required 404 body, and returns. That call reaches `sanitizedUpstreamPathSuffix` in `upstream_path_guard.go:67-85`. `openAIResponsesRequestPathSuffix` revalidates extracted `URL.Path` data and `appendOpenAIResponsesRequestPathSuffix` revalidates again before URL concatenation in `openai_gateway_request_body.go:525-570`. `isOpenAIResponsesCompactPath` accepts only `/compact` or `/compact/...`; rejected input cannot become compact. |
+| Normal, passthrough, replay, audit, scheduler | Normal and passthrough senders call the append guard before `http.NewRequest` (`openai_gateway_forward.go:1009-1033`; `openai_gateway_passthrough.go:356-390`). Responses body replay retains original bytes only for mapping/reopenable cleanup and does not construct client-controlled path data. Prompt audit runs before selection (`openai_gateway_handler.go:466-590`); scheduler receives selection inputs and contains no Responses suffix assembly (`openai_account_scheduler.go:2362-2558`). |
+| Gemini native and compat | Native handler parses then checks the URL model at `gemini_v1beta_handler.go:173-183`, and calls `ForwardNativeHandle` at lines 467-479. Native API-key/AI Studio OAuth builders call `buildGeminiAIStudioModelActionURL` before `newRequestWithHandle` (`gemini_messages_compat_service.go:1317-1335,1375-1394`). Chat and messages compat AI Studio paths use the same builder before `http.NewRequestWithContext` (`gemini_chat_completions_compat_service.go:304-408`; `gemini_messages_compat_service.go:657-791`). On builder error, both loops return before `httpUpstream.Do` (`gemini_messages_compat_service.go:831-850,1429-1450`). Project-ID modes keep the model in JSON. |
+| Circuit and Qwen3Guard | Scheduler's initial selection retains proxy quarantine; only a second no-capacity OpenAI pass may use the intended context fail-open bypass. `prompt_qwen3guard.go:88-178` ignores auxiliary fields while Safety/Categories alone determine policy; the final focused Qwen command passed. |
+| Count tokens, pricing, token refresh | `GatewayService.ForwardCountTokens` retains mapping/rewrite/retry/error accounting in `gateway_count_tokens.go:20-245`. Pricing keeps fallback merge/load at `pricing_service.go:551-603`, including image input/output/usage multiplier paths. Token refresh retains deleted/schedulable/platform/active/type/refresh-token/cooldown filters and cursor order in `account_repo.go:1091-1184`, consumed by `token_refresh_service.go:486-578`. |
+| Release/runtime/compose | The retained Linux amd64 fallback packages `backend/resources`; `Dockerfile.goreleaser`, `deploy/Dockerfile`, and `.goreleaser.yaml` are covered by the green runtime-resource script. The repaired compose scanner verifies one `no-new-privileges:true` within each `sub2api` service only. No Docker deployment occurred. |
+
+### Canonical Matrix
+
+| # | Capability | Task 13 status | Evidence and v0.1.169 impact |
+| --- | --- | --- | --- |
+| 1 | scheduler/WaitPlan/sticky recheck | `protected` | Prior direct scheduler/privacy/previous-response tests remain valid; v0.1.169 adds the reviewed context-aware proxy circuit check without replacing selection. |
+| 2 | OpenAI HTTP/WS/Live and usage | `protected` | Prior direct relay, Live, usage snapshot, and failure behavior evidence remains valid; no path guard changes enter these senders except guarded suffix input. |
+| 3 | prompt/security audit | `protected` | Prior route/WS audit tests plus current Qwen3Guard command; audit remains before scheduling. |
+| 4 | Images/replay | `protected` | Prior direct Images audit, lifecycle, and replay tests remain valid; the response path guard does not share image URL construction. |
+| 5 | async images/storage/billing | `protected` | Prior direct async/storage/image billing evidence remains valid; current pricing source review preserves multipliers. |
+| 6 | settings/user/group controls | `protected` | Prior direct settings, scoped update, batch-limit, and group-copy evidence remains valid; no v0.1.169 regression path found. |
+| 7 | repository/passkey | `protected` | Prior direct repository/passkey evidence remains valid; no v0.1.169 path intersects it. |
+| 8 | subscription quota | `unverified` | Docker-only receipt/outbox/migration integration remains unverified because Docker is unavailable; this is not a gap and no remote fallback was attempted. |
+| 9 | frontend local capability | `protected` | Existing direct frontend capability evidence remains valid; no v0.1.169 frontend path requires a new manual-only conclusion. |
+| 10 | Ent/Wire/dependency/migration | `protected` | Task 11 recorded two clean generate passes, stable generated paths, dependency resolution, and migration OIDs. No generation was required by this task. |
+| 11 | Responses GHSA guards | `protected` | Current exact negative matrix, three-family edge rejection, query boundary, compact regression, and append-time defense all pass. |
+| 12 | Gemini native/compat URL construction | `protected` | Current builder, invalid model, all-action, and native/compat zero-request assertions pass. |
+| 13 | proxy circuit and Qwen3Guard | `protected` | Current service/securityaudit focused command passes; reviewed fail-open and auxiliary-field boundaries are preserved. |
+| 14 | release fallback/runtime resources/compose hardening | `protected` | Current runtime script and repaired no-stderr compose script pass; no Docker deployment was run. |
+
+- Final Task 13 counts: `protected=13`, `manual=0`, `gap=0`, `unverified=1`.
+- The sole `unverified` entry is Docker-only quota/receipt/outbox/migration integration. Historical evidence cited above is explicitly historical where not rerun; it is not represented as a fresh Task 13 full gate.
+- Ledger commit is the only remaining tracked change. Task 14 full gate has not run.
