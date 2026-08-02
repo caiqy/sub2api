@@ -4,7 +4,7 @@
 - Review mode: `thorough`
 - 当前任务: Task 7 - 对 v0.1.166 运行 merge 后行为审查并修复 RED
 - 映射 OpenSpec: 2.2
-- 阶段: `task-7 / implementation-blocked + resume-1-dispatch-intent`
+- 阶段: `task-7 / implementation-result + review-dispatch-intent`
 - Task-7 dispatch token: `task-7-implementer-attempt-1-916aab893`
 - Task-7 role: `implementer`
 - Task-7 model: `high`
@@ -18,7 +18,17 @@
 - Task-7 resume-1 token: `task-7-resume-1-51b756687`
 - Task-7 resume-1 model: `high`
 - Task-7 resume-1 base HEAD: `51b75668702a71c239a098198dd102750dc015aa`
-- Task-7 resume-1 task ID: `pending resumed functions.task return`
+- Task-7 resume-1 task ID: `ses_03edf1dc3ffe75KorXeHrqOEPG`
+- Task-7 final result: `DONE`
+- Task-7 compatibility commit: `none`（聚焦命令无产品RED）
+- Task-7 ledger commit: `3044445abb04381396151f0e4eeb3d16f597b13c`
+- Task-7 final matrix: `protected=6,manual=0,gap=0,unverified=0`
+- Task-7 review dispatch token: `task-7-review-attempt-1-3044445ab`
+- Task-7 reviewer role: `reviewer`
+- Task-7 reviewer model: `high`
+- Task-7 reviewer base HEAD: `3044445abb04381396151f0e4eeb3d16f597b13c`
+- Task-7 review package: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/review-6c372593c..3044445ab.diff`
+- Task-7 reviewer task ID: `pending atomic functions.task return`
 - Task-7 review-fix rounds: `0/5`
 - Task-6 dispatch token: `task-6-implementer-attempt-1-3a7bf096e`
 - Task-6 role: `implementer`
@@ -156,4 +166,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - Task-4审查-修复轮次: `2/2 PASS`
-- 状态: Task7 blocker已保留在未提交ledger；Plan/brief已改为tagged settings顶级PASS门禁，即将恢复同一implementer，返回前不得重复派发或checkoff。
+- 状态: Task7保护测试与behavior ledger已提交；即将派发fresh reviewer，Task8 full gate尚未运行且不得提前checkoff。
