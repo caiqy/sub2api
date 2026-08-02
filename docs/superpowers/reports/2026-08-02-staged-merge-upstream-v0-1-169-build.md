@@ -1780,3 +1780,47 @@ The compact matrix above records Task 13 review areas. This table preserves the 
 | 14 | Ent/Wire, dependencies, migrations | `protected` | Task 11's two clean generation passes, stable dependency output, and unchanged migration OIDs remain applicable; this task did not run a full gate. |
 
 - Corrected canonical counts: `protected=13`, `manual=0`, `gap=0`, `unverified=1`.
+
+## Task 13 Review-Fix Round 1/5
+
+- Scope remained limited to the approved scanner script, Responses guard/testability paths, Gemini test fixture, and this ledger. No Plan/OpenSpec/progress/runtime selection file was modified; no Task 14 full gate, fetch, push, tag, release, deploy, Docker integration, or remote operation ran.
+
+### RED And GREEN Evidence
+
+- Gemini independent RED: `go test -count=1 ./internal/service -run '^TestGeminiAIStudioInvalidModelsDoNotSendRequests$'` exited `1`. `native_URL_model` panicked at `GeminiMessagesCompatService.validateUpstreamBaseURL` (`gemini_messages_compat_service.go:509`) because the test's `GeminiMessagesCompatService` had `cfg == nil`; the panic occurred before URL construction and `httpUpstream.Do`.
+- Minimal fixture correction: `gemini_upstream_url_test.go` imports `internal/config` and constructs the service with a non-nil config whose URL allowlist is disabled, matching the normal URL-format validation branch. No compat production code changed.
+- Gemini independent GREEN: the identical command exited `0`, `ok github.com/Wei-Shaw/sub2api/internal/service 2.022s`. Both native URL-model and compat body-model subtests ran their real forwarding paths, returned errors, and retained stub calls `0`.
+- Compose fixture RED: after adding persistent scanner fixtures but before the state fix, `D:/scoop/shims/bash.exe deploy/tests/docker-compose-security-test.sh` exited `1` with exact stderr `scanner fixture other-before expected exit 0, got 1`. The broad `"    "*` arm incorrectly cleared `in_security_opt` on a six-space list item before the required option.
+- Compose GREEN: the reset arm now matches only a genuine four-space mapping key (`"    "[A-Za-z0-9_-]*:`). Persistent fixtures cover zero, one, adjacent duplicate, another option before the required option, another option between separated duplicates, and CRLF input. `D:/scoop/shims/bash.exe -n deploy/tests/docker-compose-security-test.sh` exited `0` without output; the exact deploy loop exited `0` with stdout `docker compose security test passed` and `docker runtime resources test passed`; independent security-script capture exited `0`, stdout exactly `docker compose security test passed\n`, stderr exactly empty.
+- Responses guard extraction is a behavior-preserving move of the same `guardResponsesSubpath` closure to package scope. It has no production RED. `TestGatewayRoutesResponsesSubpathRejectsNonConformingSubpaths` now calls the guard directly with a counting next handler for all three prefixes and every malformed suffix, asserts downstream calls remain `0`, and separately preserves actual-router `404` plus `Unsupported responses subpath` assertions.
+- `upstream_path_guard_test.go` now applies the same three-prefix by suffix matrix to direct suffix extraction, asserting no compact classification and no appended upstream suffix. It adds raw `compact\detail`; its bounds are fixed literals (129-byte segment, nine segments) and assert constants remain `128` and `8`.
+
+```powershell
+go test -count=1 ./internal/service -run '^(TestSanitizedUpstreamPathSuffixRejectsNonConformingSegments|TestSanitizedUpstreamPathSuffixEnforcesBounds|TestOpenAIResponsesRequestPathSuffixRejectsNonConformingSubpaths|TestAppendOpenAIResponsesRequestPathSuffixRefusesUnsafeSuffix|TestBuildGeminiAIStudioModelActionURL|TestBuildGeminiAIStudioModelActionURLRejectsNonConformingModel|TestOpenAIProxyStreamCircuitThresholdTTLAndSuccessReset|TestOpenAIProxyStreamCircuitDisabled)$'
+go test -count=1 ./internal/server/routes -run '^(TestGatewayRoutesResponsesSubpathRejectsNonConformingSubpaths|TestGatewayRoutesOpenAIResponsesCompactPathIsRegistered)$'
+```
+
+- Both final commands exited `0`: service `ok github.com/Wei-Shaw/sub2api/internal/service 2.775s`; routes `ok github.com/Wei-Shaw/sub2api/internal/server/routes 1.894s`.
+
+### Corrected Call Chains
+
+- Count tokens: `RegisterGatewayRoutes` defines `countTokensHandler` (`gateway.go:62-70`) and registers it at both `/v1/messages/count_tokens` and `/messages/count_tokens` (`gateway.go:198-200,306`). OpenAI groups call `OpenAIGatewayHandler.CountTokens`, which resolves route/model/billing/account then bridges upstream; Grok calls `OpenAIGatewayHandler.GrokCountTokens`, which locally estimates with `EstimateGrokCountTokens`; other Anthropic-compatible groups call `GatewayHandler.CountTokens`, whose selected account reaches `GatewayService.ForwardCountTokens` (`gateway_handler.go:2424-2442`). The service preserves body rewrite, mapping, retry, and error handling (`gateway_count_tokens.go:20-100`).
+- Image pricing and multipliers: `OpenAIGatewayService.calculateOpenAIRecordUsageTokenCost` passes usage tokens and the resolved rate multiplier to `BillingService.CalculateCostUnified` (`openai_gateway_usage.go:507-536`). `BillingService.computeTokenBreakdown` splits image input and output tokens into dedicated costs, applies priority/long-context pricing and then tier and rate multipliers (`billing_service.go:1013-1119`). Image generation uses `calculateOpenAIImageCost` and passes the same multiplier to `CalculateImageCost` or channel pricing (`openai_gateway_usage.go:539-577`). `resolveImageRateMultiplier` selects the independent group multiplier or effective group multiplier (`image_billing_multiplier.go:3-10`); incomplete media snapshots are refreshed before configured image-price use (`openai_gateway_usage.go:628-674`). This replaces the prior fallback-loader-only citation.
+
+### Canonical Matrix Correction
+
+| Canonical row | Corrected status | Evidence boundary |
+| --- | --- | --- |
+| 9: Passkey joined-login, active/backend-mode check, audit, token issuance | `manual` | Source chain exists, but prior discovery found no direct joined-path top-level test. |
+| 12: frontend Model Plaza embedded/authentication boundary | `manual` | Server visibility and frontend utility tests are protected, but no direct `/model-plaza` or `embedded=1` route/auth test exists. |
+| All other rows except Docker-only row 10 | `protected` | Retain the direct and reviewed evidence recorded above and in prior Task 13 sections. |
+| 10: subscription quota/receipt/outbox/migration integration | `unverified` | Docker remains unavailable; no remote fallback was attempted. |
+
+- Final corrected counts: `protected=11`, `manual=2`, `gap=0`, `unverified=1`.
+
+### Commit And Status Record
+
+- Prior Task 13 commits: `140f9fb7b` (`test: cover v0.1.169 path guard matrix`), exactly the three original guard/Gemini/route test files; `a86d33b26` (`fix: make compose security verification portable`), exactly the compose scanner; `09b27ba46` (`docs: record v0.1.169 behavior review`) and `d378cf804` (`docs: correct v0.1.169 behavior matrix`), ledger only.
+- Round 1 scanner commit: `e0b827f95` (`fix: correct compose security scanner boundaries`), exactly `deploy/tests/docker-compose-security-test.sh`.
+- Round 1 testability commit: `46bda30bb` (`test: close v0.1.169 path guard evidence gaps`), exactly `backend/internal/server/routes/gateway.go`, `backend/internal/server/routes/gateway_test.go`, `backend/internal/service/upstream_path_guard_test.go`, and `backend/internal/service/gemini_upstream_url_test.go`.
+- The next commit is ledger-only. Task 14 has not run; final status must remain only `?? .comet/current-change.json`.
