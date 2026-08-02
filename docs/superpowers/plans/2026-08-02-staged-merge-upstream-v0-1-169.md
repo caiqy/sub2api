@@ -872,30 +872,62 @@ Expected: 此 evidence commit 严格只含 build ledger，保持 preceding merge
 **映射 OpenSpec:** 2.2
 
 **Files:**
+- Modify for protection coverage: `backend/internal/service/openai_ws_v2/passthrough_relay_test.go`
 - Modify when RED exists: `backend/internal/handler/admin/setting_handler_update.go`, `backend/internal/handler/openai_gateway_handler.go`, `backend/internal/service/gateway_forward_as_responses.go`, `backend/internal/service/openai_ws_forwarder.go`, `backend/internal/service/openai_ws_v2/passthrough_relay.go`, `backend/internal/service/openai_ws_v2_passthrough_adapter.go` 和对应命名测试。
 - Modify: `docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md`
 
 **Interfaces:**
 - Consumes: v0.1.166 merge 后 changed-files 和阶段 0 保护测试。
-- Produces: `protected` 或 `manual` 的阶段 1 行；可复现回归只能由独立兼容提交修复。
+- Produces: `protected` 或 `manual` 的阶段 1 行；response-bound terminal callback 保护测试保持独立，可复现回归只能由独立兼容提交修复。
 
-**Step 1: 先运行 v0.1.166 的行为聚焦测试，保存任何 RED**
+**Step 1: 恢复与本地 response ownership 兼容的逐 terminal callback 保护测试**
+
+在 `backend/internal/service/openai_ws_v2/passthrough_relay_test.go` 增加 table-driven `TestRelay_OnTurnComplete_PerTerminalEvent`。对 `response.completed`、`response.done`、`response.failed`、`response.incomplete`、`response.cancelled`、`response.canceled` 分别创建独立 Relay：先发送匹配 active turn 的 `response.created`，再发送对应 terminal；断言恰好一次 `OnTurnComplete`、匹配的 `RequestID`/`TerminalEventType` 和 usage。禁止复用旧上游缺少 `response.created` 的 fixture，也不得为测试改生产代码。
+
+Run from `backend`:
+```powershell
+$terminalLog = Join-Path $env:TEMP 'sub2api-v0.1.166-terminal-callback.log'
+go test -v -count=1 ./internal/service/openai_ws_v2 -run '^TestRelay_OnTurnComplete_PerTerminalEvent$' 2>&1 | Tee-Object -FilePath $terminalLog
+$terminalExit = $LASTEXITCODE
+if ($terminalExit -ne 0) { throw "terminal callback protection failed; inspect $terminalLog" }
+if (-not (Select-String -Path $terminalLog -Pattern '^--- PASS: TestRelay_OnTurnComplete_PerTerminalEvent \(' -Quiet)) { throw 'missing terminal callback top-level PASS' }
+```
+
+Expected: 新测试首跑 PASS，证明 merged ownership 实现已覆盖六种 active terminal callback，并创建下述严格单文件保护提交。若首次运行 RED，则保存失败证据、跳过本单文件提交，将未提交测试与 Step 3 的最小生产修复一起纳入 Step 4 兼容提交：
+```powershell
+git add backend/internal/service/openai_ws_v2/passthrough_relay_test.go
+$staged = @(git diff --cached --name-only)
+if (Compare-Object -ReferenceObject @('backend/internal/service/openai_ws_v2/passthrough_relay_test.go') -DifferenceObject $staged) { throw 'terminal callback protection allowlist mismatch' }
+git.exe commit -m "test: preserve relay terminal callbacks after v0.1.166"
+```
+
+**Step 2: 运行 v0.1.166 的行为聚焦测试，保存任何 RED**
 
 Run from `backend`:
 ```powershell
 go test -count=1 ./internal/server/middleware -run '^(TestPanelRateLimiterGlobalPerUser|TestPanelRateLimiterFailOpenOnRedisError)$'
+if ($LASTEXITCODE -ne 0) { throw 'panel rate limiter behavior failed' }
 go test -count=1 ./internal/handler/admin -run '^(TestUpdateSettingsPartialPayloadKeepsUnsentKeys|TestUpdateSettingsFullPayloadStillClearsSentEmptyFields)$'
-go test -count=1 ./internal/service -run '^(TestCompositeRouteResolverExplicitExactRouteRewritesModel|TestOpenAIGatewayService_Forward_WSv2_ResponseDoneUsageParsed|TestRelay_OnTurnComplete_UsesCurrentResponseCreateModel|TestRelay_OnTurnComplete_PerTerminalEvent|TestGatewayServiceRecordUsage_AttachesFinalUpstreamRequestSnapshot|TestGatewayService_ForwardAsResponses_PassthroughHeaderForwardCopiesFromClientRequest)$'
+if ($LASTEXITCODE -ne 0) { throw 'partial settings behavior failed' }
+go test -count=1 ./internal/service -run '^(TestCompositeRouteResolverExplicitExactRouteRewritesModel|TestOpenAIGatewayService_Forward_WSv2_ResponseDoneUsageParsed|TestGatewayServiceRecordUsage_AttachesFinalUpstreamRequestSnapshot|TestGatewayService_ForwardAsResponses_PassthroughHeaderForwardCopiesFromClientRequest)$'
+if ($LASTEXITCODE -ne 0) { throw 'service behavior review failed' }
+$relayTargets = @('TestRelay_OnTurnComplete_PerTerminalEvent', 'TestRelay_OnTurnComplete_UsesCurrentResponseCreateModel', 'TestRelay_OnTurnComplete_IgnoresTerminalForUnknownResponse', 'TestRelay_OnTurnComplete_ProvidesTurnMetrics')
+$relayLog = Join-Path $env:TEMP 'sub2api-v0.1.166-relay-behavior.log'
+go test -v -count=1 ./internal/service/openai_ws_v2 -run '^(TestRelay_OnTurnComplete_PerTerminalEvent|TestRelay_OnTurnComplete_UsesCurrentResponseCreateModel|TestRelay_OnTurnComplete_IgnoresTerminalForUnknownResponse|TestRelay_OnTurnComplete_ProvidesTurnMetrics)$' 2>&1 | Tee-Object -FilePath $relayLog
+$relayExit = $LASTEXITCODE
+if ($relayExit -ne 0) { throw "v0.1.166 relay behavior failed; inspect $relayLog" }
+foreach ($target in $relayTargets) { if (-not (Select-String -Path $relayLog -Pattern ('^--- PASS: ' + [regex]::Escape($target) + ' \(') -Quiet)) { throw "missing relay top-level PASS: $target" } }
 go test -count=1 ./internal/handler -run '^(TestGatewayChatCredentialStopDoesNotSelectAnotherAccountAndReturnsSafe503|TestOpenAIUsageRecordTaskCopiesCompositeBillingContextAfterQueueDelay)$'
+if ($LASTEXITCODE -ne 0) { throw 'handler behavior review failed' }
 ```
 
-Expected: 每个测试 PASS，且 changed-files × matrix 审查明确说明上游限流、部分设置、WS 计费、composite route 没有回归本地 scheduler/sticky/fallback/usage。
+Expected: 每个命令紧邻检查 exit 并 PASS；四个 relay 目标必须各自出现锚定顶级 `--- PASS:`，`no tests to run` 或缺失任一目标均阻塞。changed-files × matrix 审查明确说明上游限流、部分设置、WS 计费、composite route 没有回归本地 scheduler/sticky/fallback/usage。
 
-**Step 2: 对发现的 RED 用失败测试驱动最小兼容修复**
+**Step 3: 对发现的 RED 用失败测试驱动最小兼容修复**
 
-在保持失败输出的前提下，先在失败测试所在文件加入精确回归断言，再仅修改对应生产文件：settings RED 使用 `setting_handler_update.go`；Responses/body replay RED 使用 `gateway_forward_as_responses.go`；HTTP gateway/usage RED 使用 `openai_gateway_handler.go`；WS turn/terminal/model RED 使用 `openai_ws_forwarder.go`、`passthrough_relay.go` 或 `passthrough_adapter.go`。重复 Step 1 的精确命令直到 PASS。
+在保持失败输出的前提下，先在失败测试所在文件加入精确回归断言，再仅修改对应生产文件：settings RED 使用 `setting_handler_update.go`；Responses/body replay RED 使用 `gateway_forward_as_responses.go`；HTTP gateway/usage RED 使用 `openai_gateway_handler.go`；WS turn/terminal/model RED 使用 `openai_ws_forwarder.go`、`passthrough_relay.go` 或 `passthrough_adapter.go`。每项修复先重复触发该 RED 的 Step 1 或 Step 2 精确命令直到 PASS；全部修复后完整重跑 Step 2，任一命令非零或缺少 relay 顶级 PASS 都继续 BLOCK。
 
-**Step 3: 独立提交每组兼容修复**
+**Step 4: 独立提交每组兼容修复**
 
 Run for each non-empty RED fix set:
 ```powershell
@@ -910,9 +942,9 @@ git.exe commit -m "fix: preserve local behavior after v0.1.166"
 
 Expected: 每个兼容提交同时包含复现测试、最小源修复和由该修复触发的生成输出；无 RED 时不创建空兼容提交。
 
-**Step 4: 严格提交 merge 后行为审查 ledger evidence**
+**Step 5: 严格提交 merge 后行为审查 ledger evidence**
 
-在 ledger 按能力矩阵写入每个测试命令、审查的调用链、RED 和兼容提交 SHA；确认 `gap=0` 后运行：
+在 ledger 按能力矩阵写入 terminal callback 保护提交、每个测试命令、审查的调用链、RED 和兼容提交 SHA；确认 `gap=0` 后运行：
 
 ```powershell
 git add -f -- docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
