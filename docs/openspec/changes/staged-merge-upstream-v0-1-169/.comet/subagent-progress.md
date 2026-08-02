@@ -4,7 +4,13 @@
 - Review mode: `thorough`
 - 当前任务: Task 4 - 验证阶段 0 的本地保护测试与生成稳定性
 - 映射 OpenSpec: 1.4
-- 阶段: `implementation-fix / result`
+- 阶段: `debugging-2 / dispatch-intent`
+- Diagnostic-2 dispatch token: `task-4-diagnostic-attempt-2-be284ffd7`
+- Diagnostic-2 role: `diagnostic-agent`
+- Diagnostic-2 model: `high`
+- Diagnostic-2 base HEAD: `be284ffd792833555bcb5b73eebda1a8121d49e6`
+- Diagnostic-2 report: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-4-debug-2-report.md`
+- Diagnostic-2 task ID: `pending atomic functions.task return`
 - Fix dispatch token: `task-4-fix-attempt-1-6456c3858`
 - Fix role: `fix-agent`
 - Fix model: `high`
@@ -43,4 +49,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - 审查-修复轮次: `0/2`
-- 状态: Task 4 `BLOCKED`；待核验 report/worktree，并对新 errcheck、Windows generate 和非Docker gap 做 systematic root-cause investigation。
+- 状态: 即将派发第二轮 systematic diagnostic；只调查 errcheck、Windows mmap 与非Docker gap 关闭命令，不改 tracked 文件。
