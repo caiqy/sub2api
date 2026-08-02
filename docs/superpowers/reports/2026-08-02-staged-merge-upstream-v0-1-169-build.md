@@ -1227,3 +1227,50 @@ Final corrected statistics: `protected=6`, `manual=0`, `gap=0`, `unverified=0`.
 - The `make test` and two generator failures block Task 8. No product-code repair was attempted.
 - No fetch, push, tag, GitHub Actions, release, image build/publish, deploy, SSH/server, database, Redis, or Nginx operation was performed.
 - Only this ledger is staged for the required evidence commit; the detailed Task 8 report is untracked/ignored operational evidence.
+
+## Task 8 v0.1.166 Local Gate Closure: Superseding Fresh Evidence
+
+- Final status: `DONE`.
+- This section supersedes only the Task 8 conclusion at lines 1194-1229. The historical `BLOCKED` commands, failures, and generated-output recovery evidence remain intact above.
+- Fresh baseline status before this rerun: only `?? .comet/current-change.json`; the index was empty.
+- `git show HEAD:backend/cmd/server/VERSION` exited `0` and printed `0.1.165.4`.
+- Reviewed compatibility commits are present: `f89f65b77` (`fix: close v0.1.166 compatibility gate`) and `1e17598af` (`fix: harden websocket model switching`).
+
+### Historical Blocker Diagnosis
+
+- The earlier non-Docker failures were diagnosed and closed by `f89f65b77`: Images JSON keepalive fallback, pre-upgrade WS ingress lease behavior, passthrough first/session model handling, terminal-only relay fixture framing, and the usage-log repository capability-query mock.
+- The later WS review findings were closed by `1e17598af`: unsupported later model switches now close before upstream forwarding, composite routing requires the selected account to support the final route/channel model, and identity account mappings do not remap a channel target on later explicit turns.
+- The earlier mapped-section generator failures are preserved above. This fresh rerun performed two clean generator passes; no recovery was needed.
+
+### Fresh Step 1 Gate Evidence
+
+| Command | Exit | Key output / conclusion |
+| --- | ---: | --- |
+| `make test` | `0` | Backend tests and lint passed; frontend reported `222` test files and `1,667` tests passed. Existing test-warning output was non-fatal. |
+| `make "VERSION=0.1.165.4" "SHELL=D:/scoop/shims/bash.exe" build` | `0` | Backend built with `CGO_ENABLED=0` and `-X main.Version=0.1.165.4`; `vue-tsc -b && vite build` completed. Browserslist, dynamic-import, and chunk-size warnings were non-fatal. |
+| First `make -C backend generate` | `0` | Ent and Wire generation completed. |
+| First `git.exe diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` | `0` | No Ent/Wire diff. |
+| First `git.exe diff --exit-code -- backend/go.sum` | `0` | `go.sum` unchanged. |
+| Second `make -C backend generate` | `0` | Ent and Wire generation completed again. |
+| Second `git.exe diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` | `0` | No Ent/Wire diff. |
+| Second `git.exe diff --exit-code -- backend/go.sum` | `0` | `go.sum` remained stable. |
+| `git.exe diff --check` | `0` | No whitespace errors. |
+| `git.exe diff --cached --check` | `0` | Empty index passed. |
+| `git diff --name-only --diff-filter=U` | `0` | No unmerged paths. |
+| Conflict-marker script from the brief | `0` | Embedded `git grep` returned `1` (`conflict_scan_exit=1`), the required no-match PASS result. |
+| `git rev-parse HEAD:backend/migrations/191_subscription_quota_advance_receipts.sql` | `0` | `c22d47d79cbbaf4bc40524d42ef52e6cc8ac3af6`. |
+| `git rev-parse HEAD:backend/migrations/192_subscription_cache_invalidation_outbox.sql` | `0` | `502ecec1caf9f76e022c2e83acf3707190539301`. |
+
+### Fresh Step 2 Docker Decision
+
+- The exact Docker preflight script exited `0`; `C:\Users\caiqy\AppData\Local\Temp\sub2api-v0166-docker-preflight.log` contains `docker_command=unavailable`.
+- `TestAdvanceQuotaCycle_ConcurrentRequestsDeductOnce`: `unverified` (not run because Docker is unavailable).
+- `TestAdvanceQuotaCycleReceipt_RollsBackSubscriptionWhenReceiptWriteFails`: `unverified` (not run because Docker is unavailable).
+- `TestSubscriptionCacheInvalidationOutbox_TriggersSemanticChangesAndRollsBack`: `unverified` (not run because Docker is unavailable).
+- No remote fallback or integration invocation was attempted. Docker/Testcontainers availability remains the sole residual verification risk.
+
+### Step 3 Commit And Final Cleanliness
+
+- Evidence commit: pending at the time this section was authored; it is updated below after the strict ledger-only commit succeeds.
+- Commit allowlist: exactly `docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md`.
+- No Plan, OpenSpec, progress, selection, product, generated, dependency, or configuration file was modified or staged for this closure.
