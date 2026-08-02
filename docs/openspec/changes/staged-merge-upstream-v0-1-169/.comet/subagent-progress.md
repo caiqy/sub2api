@@ -4,7 +4,7 @@
 - Review mode: `thorough`
 - 当前任务: Task 3 - 建立能力矩阵与冲突台账
 - 映射 OpenSpec: 1.3
-- 阶段: `task-review / re-review-dispatch-intent`
+- 阶段: `done / checkoff`
 - Dispatch token: `task-3-rereviewer-attempt-1-d6aab7c92`
 - Role: `re-reviewer`
 - Attempt: `1`
@@ -16,8 +16,8 @@
 - Implementer task ID: `ses_03fd8db43ffephmpAkewpqf9W7`
 - Reviewer task ID: `ses_03fd2aa02ffeubDnSOK5eIMJeT`
 - Fix task ID: `ses_03fcf7480ffe3DLaroSQAlqJn1`
-- Re-reviewer task ID: `pending atomic functions.task return`
-- Result: implementer `DONE`; reviewer `CHANGES_REQUESTED`
+- Re-reviewer task ID: `ses_03fc764beffeHh1WkKPv6VxXld`
+- Result: implementer `DONE`; initial reviewer `CHANGES_REQUESTED`; fix `DONE_WITH_CONCERNS`; re-reviewer `PASS`
 - Implementation commit: `32a766184a819c12c6daf043fc40bb2b72498c3b`
 - Verification summary: 提交仅含 build ledger；`git diff --check HEAD~1..HEAD` 无输出，工作树仅显示 selection 文件。
 - Risk signals: 单任务 ledger diff 与三个 release changed-files 清单规模超过 200 行，触发 thorough review。
@@ -30,6 +30,7 @@
 - Fix risk: 未运行 Task 4，所有能力仍为 `gap`。
 - Fix concern: Task 4 必须逐项运行测试并完成入口/调用链/资源审查后才能关闭阻塞。
 - Re-review package: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/review-d8a3706d7..fe6357c9d.diff`（覆盖两个相邻 ledger-only fix commits）。
+- Re-review verdict: 原 1 Critical、3 Important、1 Minor 全部 `ADDRESSED`；无新 Critical/Important；`gap=14` 由 Task 4 关闭。
 - TDD: `tdd`; implementer 必须加载 Skill。该任务无生产代码修改，不伪造 RED；报告必须记录 `N/A` 原因、三段 changed-files 和矩阵/台账审计结果。
 - 审查-修复轮次: `1/2`
-- 状态: 即将派发 fresh scoped re-review；只判定原 findings 与 fix diff，不扩大审查范围。
+- 状态: Task 3 review clean；顶层 Plan Task 3 与 OpenSpec 1.3 已由 controller 勾选，待提交本三路径 checkoff。

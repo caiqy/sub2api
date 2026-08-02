@@ -244,7 +244,7 @@ Expected: implementer 提交严格只含 build ledger，不创建或推送 tag�
 
 ### Task 3: 建立能力矩阵与冲突台账
 
-- [ ] Task 3: 建立能力矩阵与冲突台账
+- [x] Task 3: 建立能力矩阵与冲突台账
 
 **映射 OpenSpec:** 1.3
 
