@@ -1271,6 +1271,7 @@ Final corrected statistics: `protected=6`, `manual=0`, `gap=0`, `unverified=0`.
 
 ### Step 3 Commit And Final Cleanliness
 
-- Evidence commit: pending at the time this section was authored; it is updated below after the strict ledger-only commit succeeds.
-- Commit allowlist: exactly `docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md`.
-- No Plan, OpenSpec, progress, selection, product, generated, dependency, or configuration file was modified or staged for this closure.
+- Closure evidence commit: `e322157f2da2e7161b6253ddf47e9c8a98ff412e` (`docs: close v0.1.166 merge stage`).
+- Its path is exactly `docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md`.
+- `git show --check e322157f2da2e7161b6253ddf47e9c8a98ff412e` passed; after that commit the index was empty and status contained only `?? .comet/current-change.json`.
+- No Plan, OpenSpec, progress, selection, product, generated, dependency, or configuration file was modified or staged for the closure.
