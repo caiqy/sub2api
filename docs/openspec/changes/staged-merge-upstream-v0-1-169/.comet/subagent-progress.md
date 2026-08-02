@@ -4,7 +4,7 @@
 - Review mode: `thorough`
 - 当前任务: Task 15 - 一次更新最终版本
 - 映射 OpenSpec: 5.1
-- 阶段: `task-14 / complete; task-15 / pending`
+- 阶段: `task-15 / implementer-dispatch-intent`
 - Task-10 dispatch token: `task-10-implementer-attempt-1-e46cd9d55`
 - Task-10 role: `implementer`
 - Task-10 model: `high`
@@ -134,6 +134,9 @@
 - Task-14 reviewer task ID: `ses_03ceb0f79ffesJpArunHaXEPRt`
 - Task-14 reviewer result: `ALL_ADDRESSED; Spec compliance PASS; Task quality APPROVED; no findings`
 - Task-14 controller verification: 7个修复相关tests PASS；test/ledger scopes、VERSION/OID与clean gate通过。
+- Task-15 brief: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-15-brief.md`
+- Task-15 implementer dispatch token: `task-15-implementer-e6794c1a`
+- Task-15 implementer task ID: `pending functions.task return`
 - Task-9 dispatch token: `task-9-implementer-attempt-1-97d44dd20`
 - Task-9 role: `implementer`
 - Task-9 model: `high`
@@ -490,4 +493,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - Task-4审查-修复轮次: `2/2 PASS`
-- 状态: Task14/OpenSpec 4.3已checkoff；Task15待唯一VERSION更新。
+- 状态: Task15 implementer即将派发；reviewer与Task16不得运行。
