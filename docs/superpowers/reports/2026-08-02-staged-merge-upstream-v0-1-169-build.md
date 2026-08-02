@@ -1076,3 +1076,87 @@ if ($null -eq $dockerCommand) { 'docker_command=unavailable' | Set-Content -Lite
 - Correction: `git diff --name-status c7ae76df77755b5b84b26b91606d37efc13b5deb^1 c7ae76df77755b5b84b26b91606d37efc13b5deb -- frontend/package.json frontend/pnpm-lock.yaml` produced no paths. The merged frontend manifest and lockfile did not change; the package-manager command was unnecessary and caused no tree churn.
 - Follow-up code/test commit: `9bde22ff6e7d87dfea5a19386813760a65c7771f` restores the omitted effective route resolver argument, supplies the nil-safe test limiter, and records the current response-create model in both relay turn activation paths.
 - TDD evidence: router compile was RED with the missing `RegisterGatewayRoutes` argument and the stale `RegisterUserRoutes` test signature; the corrected server compile and `TestRegisterUserRoutesRegistersImageHistoryEndpoints` are GREEN. The corrected relay fixture first produced `expected: gpt-5.6-terra`, `actual: gpt-5.6-sol`; after the two state updates, the exact regression and `TestRelay_OnTurnComplete_` family pass.
+
+## Task 7 v0.1.166 Post-Merge Behavior Review
+
+- Review date: `2026-08-02`; dispatch base: `6c372593c243f9c73354277a01b9e3c7dc37403b`.
+- VERSION remains `0.1.165.4`.
+- Protection commit: `ef1b65f41c572f78d5e8246647cf775a999b7df4` (`test: preserve relay terminal callbacks after v0.1.166`), strictly one file: `backend/internal/service/openai_ws_v2/passthrough_relay_test.go`.
+- The new `TestRelay_OnTurnComplete_PerTerminalEvent` creates an independent relay for each of `response.completed`, `response.done`, `response.failed`, `response.incomplete`, `response.cancelled`, and `response.canceled`. Each fixture first receives the matching `response.created`; it asserts exactly one callback with the matching request ID, terminal event type, and input/output/cached usage.
+- First protection result: PASS, exit `0`, with the top-level `--- PASS: TestRelay_OnTurnComplete_PerTerminalEvent (` anchor and all six subtests. This is existing-behavior protection, so no production file changed and no artificial RED was created.
+
+### Command Evidence
+
+| Command | Exit | Key output / conclusion |
+| --- | --- | --- |
+| `go test -v -count=1 ./internal/service/openai_ws_v2 -run '^TestRelay_OnTurnComplete_PerTerminalEvent$'` | `0` | Top-level PASS plus all six terminal subtests; repeated after `gofmt` with the same result. |
+| `go test -count=1 ./internal/server/middleware -run '^(TestPanelRateLimiterGlobalPerUser|TestPanelRateLimiterFailOpenOnRedisError)$'` | `0` | `ok .../internal/server/middleware 2.110s`. |
+| `go test -count=1 ./internal/handler/admin -run '^(TestUpdateSettingsPartialPayloadKeepsUnsentKeys|TestUpdateSettingsFullPayloadStillClearsSentEmptyFields)$'` | `0` | `ok .../internal/handler/admin 2.253s [no tests to run]`; this is a blocking no-target result. |
+| `go test -count=1 ./internal/service -run '^(TestCompositeRouteResolverExplicitExactRouteRewritesModel|TestOpenAIGatewayService_Forward_WSv2_ResponseDoneUsageParsed|TestGatewayServiceRecordUsage_AttachesFinalUpstreamRequestSnapshot|TestGatewayService_ForwardAsResponses_PassthroughHeaderForwardCopiesFromClientRequest)$'` | `0` | `ok .../internal/service 1.524s`. |
+| `go test -v -count=1 ./internal/service/openai_ws_v2 -run '^(TestRelay_OnTurnComplete_PerTerminalEvent|TestRelay_OnTurnComplete_UsesCurrentResponseCreateModel|TestRelay_OnTurnComplete_IgnoresTerminalForUnknownResponse|TestRelay_OnTurnComplete_ProvidesTurnMetrics)$'` | `0` | All four required top-level `--- PASS:` anchors present. |
+| `go test -count=1 ./internal/handler -run '^(TestGatewayChatCredentialStopDoesNotSelectAnotherAccountAndReturnsSafe503|TestOpenAIUsageRecordTaskCopiesCompositeBillingContextAfterQueueDelay)$'` | `0` | `ok .../internal/handler 1.497s`. |
+| `go test -list '^(TestUpdateSettingsPartialPayloadKeepsUnsentKeys|TestUpdateSettingsFullPayloadStillClearsSentEmptyFields)$' ./internal/handler/admin` | `0` | No names listed, reproducing the missing-target condition. |
+| `go test -tags unit -count=1 ./internal/handler/admin -run '^(TestUpdateSettingsPartialPayloadKeepsUnsentKeys|TestUpdateSettingsFullPayloadStillClearsSentEmptyFields)$'` | `0` | Diagnostic only: the two named settings tests pass when their declared build tag is enabled. It does not replace the required untagged Step 2 command. |
+
+### RED And Root Cause
+
+- RED: none. No production compatibility patch was attempted.
+- Blocker root cause: `backend/internal/handler/admin/setting_handler_partial_payload_test.go` begins with `//go:build unit`. The exact untagged brief command excludes both named tests and exits `0` with `no tests to run`. The `-tags unit` diagnostic proves the behavior is green but cannot satisfy the brief's explicit no-target blocking rule.
+- Compatibility SHA: none.
+
+### Changed-File Call-Chain Review
+
+| Capability | Call-chain conclusion |
+| --- | --- |
+| Panel limiter | `RegisterAdminRoutes -> PanelRateLimiter.Global -> userScoped -> RateLimiter.Allow`; the key remains `panel:global:user:<userID>`, and an allow error calls `Next()` (fail-open). The focused tests pass. |
+| Partial settings | `SettingsView.saveSettings -> SettingHandler.UpdateSettings`; `UpdateSettings` binds raw `sentFields` before the typed request and computes `omittedSettingKeys`, so unsent value fields remain distinguishable from explicitly sent zero values. The code path is present, but the required untagged test did not execute. |
+| Effective composite route | `EffectiveGatewayRouteResolver.Resolve -> CompositeRouteResolver.Resolve`; the resolver starts from the effective group, preserves `ClientModel`, and writes only `RoutingModel`/`UpstreamModel` from a matched explicit route. No scheduler, sticky, or fallback selection is replaced by this route-resolution path. |
+| WS turn/model/usage | WS forwarding reaches `Relay`; `response.created` binds the active response ID, and a matching delivered terminal reaches `emitTurnComplete` once with per-turn model and parsed usage. The four anchored relay tests, including all six terminal variants, pass. |
+| Responses body replay | `ForwardAsResponsesHandle` reads the coordinated body handle, retains the original Responses body for passthrough-field mapping, creates a reopenable upstream handle, and cleans it up after send. The focused header-forward/replay target passes. |
+| HTTP failover/usage | Credential exhaustion reaches `handleFailoverExhausted` and uses the safe credential response. Queued usage tasks pass through `wrapUsageRecordTaskContext`, which snapshots request-scoped billing values before dispatch; `RecordUsage` keeps composite billing selection and upstream-model usage fields. Both focused handler targets pass. |
+
+### Phase Matrix And Status
+
+| Capability | Status | Evidence |
+| --- | --- | --- |
+| Panel limiter | `protected` | Focused PASS and call-chain review. |
+| Partial settings | `gap` | Required command ran no named tests; unit-tag diagnostic is not a substitute. |
+| Effective composite route | `protected` | Focused service PASS and call-chain review. |
+| WS terminal/model/usage | `protected` | Focused service PASS, four relay anchors, and terminal protection commit. |
+| Responses body replay | `protected` | Focused service PASS and call-chain review. |
+| HTTP failover/usage | `protected` | Focused handler PASS and call-chain review. |
+
+统计：`protected=5`，`manual=0`，`gap=1`，`unverified=0`。
+
+- Ledger SHA: none. The required `gap=0` precondition is false, so the strict ledger-only commit `docs: record v0.1.166 behavior review` was not created.
+- Status: `BLOCKED`. No Task 8 full gate, full test/build, Docker, fetch, merge, push, tag, release, deploy, or remote operation was run.
+- Residual risk: the partial-settings contract is behaviorally green only under its existing `unit` build tag; the exact Step 2 review command cannot attest it until the brief command or test-tag arrangement is resolved by the controller.
+
+### Task 7 Resume: Tagged Settings Gate And Closure
+
+- The prior untagged settings command, its `no tests to run` output, `gap=1`, and `BLOCKED` status above are retained as historical evidence. The active brief now requires the declared `unit` build tag, so that old no-target blocker is superseded only for this Task 7 review gate.
+- First resumed settings gate: `go test -v -tags unit -count=1 ./internal/handler/admin -run '^(TestUpdateSettingsPartialPayloadKeepsUnsentKeys|TestUpdateSettingsFullPayloadStillClearsSentEmptyFields)$'` exited `0` (`1.825s`) with both required anchors: `--- PASS: TestUpdateSettingsPartialPayloadKeepsUnsentKeys (` and `--- PASS: TestUpdateSettingsFullPayloadStillClearsSentEmptyFields (`.
+
+| Full Step 2 command | Exit | Key output / anchor |
+| --- | --- | --- |
+| `go test -count=1 ./internal/server/middleware -run '^(TestPanelRateLimiterGlobalPerUser|TestPanelRateLimiterFailOpenOnRedisError)$'` | `0` | `ok .../internal/server/middleware 1.698s`. |
+| `go test -v -tags unit -count=1 ./internal/handler/admin -run '^(TestUpdateSettingsPartialPayloadKeepsUnsentKeys|TestUpdateSettingsFullPayloadStillClearsSentEmptyFields)$'` | `0` | `ok .../internal/handler/admin 1.900s`; both settings top-level PASS anchors present. |
+| `go test -count=1 ./internal/service -run '^(TestCompositeRouteResolverExplicitExactRouteRewritesModel|TestOpenAIGatewayService_Forward_WSv2_ResponseDoneUsageParsed|TestGatewayServiceRecordUsage_AttachesFinalUpstreamRequestSnapshot|TestGatewayService_ForwardAsResponses_PassthroughHeaderForwardCopiesFromClientRequest)$'` | `0` | `ok .../internal/service 1.472s`. |
+| `go test -v -count=1 ./internal/service/openai_ws_v2 -run '^(TestRelay_OnTurnComplete_PerTerminalEvent|TestRelay_OnTurnComplete_UsesCurrentResponseCreateModel|TestRelay_OnTurnComplete_IgnoresTerminalForUnknownResponse|TestRelay_OnTurnComplete_ProvidesTurnMetrics)$'` | `0` | `ok .../internal/service/openai_ws_v2 0.548s`; all four required top-level PASS anchors present. |
+| `go test -count=1 ./internal/handler -run '^(TestGatewayChatCredentialStopDoesNotSelectAnotherAccountAndReturnsSafe503|TestOpenAIUsageRecordTaskCopiesCompositeBillingContextAfterQueueDelay)$'` | `0` | `ok .../internal/handler 1.850s`. |
+
+- All commands used their immediate brief-defined exit check. No RED occurred on the resumed full Step 2 run; compatibility SHA remains none and no empty compatibility commit was created.
+- Call-chain recheck: `RegisterAdminRoutes -> PanelRateLimiter.Global -> userScoped -> RateLimiter.Allow` retains per-user, Redis fail-open behavior. `SettingsView.saveSettings -> SettingHandler.UpdateSettings -> omittedSettingKeys` now has direct tagged target evidence for omitted-versus-explicit-empty semantics. `EffectiveGatewayRouteResolver.Resolve -> CompositeRouteResolver.Resolve` preserves the selected effective group and separates client from routing/upstream model, without replacing scheduler/sticky/fallback selection. WS forwarding reaches response-bound `Relay`, where matching delivered terminals invoke `emitTurnComplete` once with final model and usage. `ForwardAsResponsesHandle` retains original Responses bytes for passthrough mapping and replayable upstream-body cleanup. `handleFailoverExhausted` keeps safe credential exhaustion handling, while `wrapUsageRecordTaskContext` snapshots billing context before queued `RecordUsage` preserves composite/upstream usage fields.
+
+| Capability | Final status | Evidence |
+| --- | --- | --- |
+| Panel limiter | `protected` | Full Step 2 PASS and call-chain review. |
+| Partial settings | `protected` | Full tagged settings PASS with both required top-level anchors. |
+| Effective composite route | `protected` | Full service command PASS and call-chain review. |
+| WS terminal/model/usage | `protected` | Terminal protection SHA `ef1b65f41c572f78d5e8246647cf775a999b7df4`, full service PASS, and four relay anchors. |
+| Responses body replay | `protected` | Full service command PASS and call-chain review. |
+| HTTP failover/usage | `protected` | Full handler command PASS and call-chain review. |
+
+Final statistics: `protected=6`, `manual=0`, `gap=0`, `unverified=0`.
+
+- Status: `DONE`. VERSION remains `0.1.165.4`; no Task 8 full gate, generate, Docker, network, remote, or release operation was run.
