@@ -4,7 +4,15 @@
 - Review mode: `thorough`
 - 当前任务: Task 7 - 对 v0.1.166 运行 merge 后行为审查并修复 RED
 - 映射 OpenSpec: 2.2
-- 阶段: `task-6 / complete + task-7 / pending`
+- 阶段: `task-7 / implementation-dispatch-intent`
+- Task-7 dispatch token: `task-7-implementer-attempt-1-916aab893`
+- Task-7 role: `implementer`
+- Task-7 model: `high`
+- Task-7 base HEAD: `916aab8932f0bd6ee38c63efb4c392c89ffaa22e`
+- Task-7 brief: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-7-brief.md`
+- Task-7 report: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-7-report.md`
+- Task-7 task ID: `pending atomic functions.task return`
+- Task-7 review-fix rounds: `0/5`
 - Task-6 dispatch token: `task-6-implementer-attempt-1-3a7bf096e`
 - Task-6 role: `implementer`
 - Task-6 model: `high`
@@ -141,4 +149,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - Task-4审查-修复轮次: `2/2 PASS`
-- 状态: Task6与OpenSpec 2.1已由controller勾选；Task7完整v0.1.166行为审查尚未派发。
+- 状态: Task6与OpenSpec 2.1已完成；Task7 Plan已修正并终审ready，即将派发fresh implementer，返回前不得重复派发或checkoff。
