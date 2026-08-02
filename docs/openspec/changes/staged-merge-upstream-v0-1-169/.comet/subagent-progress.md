@@ -4,7 +4,7 @@
 - Review mode: `thorough`
 - 当前任务: Task 8 - 执行 v0.1.166 完整门禁并建立阶段检查点
 - 映射 OpenSpec: 2.3
-- 阶段: `task-8 / test-diagnostics-dispatch-intent`
+- 阶段: `task-8 / test-diagnostics-result`
 - Task-8 dispatch token: `task-8-implementer-attempt-1-217946c5d`
 - Task-8 role: `implementer`
 - Task-8 model: `standard`
@@ -21,13 +21,17 @@
 - Task-8 handler diagnostic model: `high`
 - Task-8 handler diagnostic base HEAD: `277ef61ced6fb67b6f94bbe91244ef2833c6d6f6`
 - Task-8 handler diagnostic report: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-8-debug-handler-report.md`
-- Task-8 handler diagnostic task ID: `pending atomic functions.task return`
+- Task-8 handler diagnostic task ID: `ses_03eabfc42ffer1YnjmQ0hUuiw7`
+- Task-8 handler diagnostic result: `DONE`
+- Task-8 handler diagnostic root cause: v0.1.166 merge `c7ae76df7`保留测试但遗漏对应handler生产hunk；三目标独跑、组合5轮、完整handler package稳定失败。
 - Task-8 repository diagnostic token: `task-8-repository-diagnostic-1-277ef61ce`
 - Task-8 repository diagnostic role: `diagnostic-agent`
 - Task-8 repository diagnostic model: `standard`
 - Task-8 repository diagnostic base HEAD: `277ef61ced6fb67b6f94bbe91244ef2833c6d6f6`
 - Task-8 repository diagnostic report: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-8-debug-repository-report.md`
-- Task-8 repository diagnostic task ID: `pending atomic functions.task return`
+- Task-8 repository diagnostic task ID: `ses_03eabfc1dffeuqELElK792gex0`
+- Task-8 repository diagnostic result: `DONE`
+- Task-8 repository diagnostic root cause: RequestID sqlmock测试漏掉既有`to_regclass`兼容查询期望；目标`-count=5`与package均稳定失败，生产行为无需修改。
 - Task-7 dispatch token: `task-7-implementer-attempt-1-916aab893`
 - Task-7 role: `implementer`
 - Task-7 model: `high`
@@ -207,4 +211,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - Task-4审查-修复轮次: `2/2 PASS`
-- 状态: Task8 BLOCKED evidence已提交；handler/repository只读诊断即将并行派发，Task9不得运行。
+- 状态: Task8两项测试根因已定位；待读取诊断报告并完成generate锁诊断后派fix，Task9不得运行。
