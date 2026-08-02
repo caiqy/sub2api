@@ -2,9 +2,9 @@
 
 - Plan: `docs/superpowers/plans/2026-08-02-staged-merge-upstream-v0-1-169.md`
 - Review mode: `thorough`
-- 当前任务: Task 11 - 封闭 v0.1.168 的本机门禁、migration 证据与阶段证据
-- 映射 OpenSpec: 3.3
-- 阶段: `task-11 / fresh-review-result`
+- 当前任务: Task 12 - 在未提交状态合入 v0.1.169 并完成阻塞审查
+- 映射 OpenSpec: 4.1
+- 阶段: `task-11 / complete; task-12 / pending`
 - Task-10 dispatch token: `task-10-implementer-attempt-1-e46cd9d55`
 - Task-10 role: `implementer`
 - Task-10 model: `high`
@@ -71,6 +71,7 @@
 - Task-11 reviewer dispatch token: `task-11-reviewer-82d05cc1`
 - Task-11 reviewer task ID: `ses_03d6e4117ffe7ifSrFkaJYhZsV`
 - Task-11 reviewer result: `ALL_ADDRESSED; Spec compliance PASS; Task quality APPROVED; no findings`
+- Task-11 controller verification: ledger parent/message/scope、VERSION/OID、preflight log与clean gate均通过；Docker targets保持unverified。
 - Task-9 dispatch token: `task-9-implementer-attempt-1-97d44dd20`
 - Task-9 role: `implementer`
 - Task-9 model: `high`
@@ -427,4 +428,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - Task-4审查-修复轮次: `2/2 PASS`
-- 状态: Task11 review clean；待controller轻量核验与checkoff，Task12不得运行。
+- 状态: Task11/OpenSpec 3.3已checkoff；Task12待未提交merge与阻塞审查。

@@ -1216,7 +1216,7 @@ Expected: migration 回归测试和任何 RED 修复仍在独立兼容提交；�
 
 ### Task 11: 封闭 v0.1.168 的本机门禁、migration 证据与阶段证据
 
-- [ ] Task 11: 封闭 v0.1.168 的本机门禁、migration 证据与阶段证据
+- [x] Task 11: 封闭 v0.1.168 的本机门禁、migration 证据与阶段证据
 
 **映射 OpenSpec:** 3.3
 
