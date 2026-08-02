@@ -4,7 +4,7 @@
 - Review mode: `thorough`
 - 当前任务: Task 8 - 执行 v0.1.166 完整门禁并建立阶段检查点
 - 映射 OpenSpec: 2.3
-- 阶段: `task-8 / fix-round-1-context-resolved + resume-dispatch-intent`
+- 阶段: `task-8 / fix-round-1-blocked-result`
 - Task-8 dispatch token: `task-8-implementer-attempt-1-217946c5d`
 - Task-8 role: `implementer`
 - Task-8 model: `standard`
@@ -59,7 +59,11 @@
 - Task-8 fix-1 resume token: `task-8-fix-round-1-resume-2-f04516d6b`
 - Task-8 fix-1 resume model: `high`
 - Task-8 fix-1 resume base HEAD: `f04516d6b54b4106ce5118bf546360292ed1b7d4`
-- Task-8 fix-1 resume task ID: `pending resumed functions.task return`
+- Task-8 fix-1 resume task ID: `ses_03eb927c5ffeWoSyMoGEmiNdWU`
+- Task-8 fix-1 resume result: `BLOCKED`
+- Task-8 fix-1 commits: `none`（scope内修复尚未提交）
+- Task-8 fix-1 verification: 11项handler、完整handler、repository controls/full package、relay/lifecycle tests均PASS；`make test`仍FAIL。
+- Task-8 new blocker: `TestGetPanelRateLimitSettingsCachedAvoidsRepeatedDBReads`期望1次DB read，实际15次，超出当前allowlist。
 - Task-8 fix-1 findings: handler 11个稳定RED来自merge遗漏生产hunk；RequestID sqlmock漏`to_regclass`期望；Wire generate缺传递checksum。现有RED即TDD保护，禁止整文件覆盖。
 - Task-8 routing: 这些failure阻塞全局阶段门禁，作为v0.1.166 late compatibility repair独立提交；Task8 evidence closure须在fresh full gate后另行追加。
 - Task-7 dispatch token: `task-7-implementer-attempt-1-916aab893`
@@ -241,4 +245,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - Task-4审查-修复轮次: `2/2 PASS`
-- 状态: Task8 terminal语义已裁决且最小allowlist已锁定；即将恢复fix round 1，Task9不得运行。
+- 状态: Task8 fix round 1 scope内GREEN但未提交；panel cache新失败待诊断，Task9不得运行。
