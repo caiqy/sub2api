@@ -2,9 +2,9 @@
 
 - Plan: `docs/superpowers/plans/2026-08-02-staged-merge-upstream-v0-1-169.md`
 - Review mode: `thorough`
-- 当前任务: Task 7 - 对 v0.1.166 运行 merge 后行为审查并修复 RED
-- 映射 OpenSpec: 2.2
-- 阶段: `task-7 / fix-round-1-result + scoped-re-review-dispatch-intent`
+- 当前任务: Task 8 - 执行 v0.1.166 完整门禁并建立阶段检查点
+- 映射 OpenSpec: 2.3
+- 阶段: `task-7 / complete; task-8 / pending`
 - Task-7 dispatch token: `task-7-implementer-attempt-1-916aab893`
 - Task-7 role: `implementer`
 - Task-7 model: `high`
@@ -44,8 +44,10 @@
 - Task-7 re-review model: `standard`
 - Task-7 re-review base HEAD: `58bfcb3006d9f70a113f5a993524f378574972c4`
 - Task-7 re-review package: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/review-d3e435947..58bfcb300.diff`
-- Task-7 re-review task ID: `pending atomic functions.task return`
-- Task-7 review-fix rounds: `1/5 reviewing`
+- Task-7 re-review task ID: `ses_03ed22a34ffea4EcA50TjZSBqz`
+- Task-7 re-review result: `ALL_ADDRESSED`
+- Task-7 review-fix rounds: `1/5 complete`
+- Task-7 controller verification: panel PASS；settings `2/2`、service `4/4`、relay `4/4`、handler `2/2`顶级PASS；worktree仅允许的`.comet/current-change.json`未跟踪。
 - Task-6 dispatch token: `task-6-implementer-attempt-1-3a7bf096e`
 - Task-6 role: `implementer`
 - Task-6 model: `high`
@@ -182,4 +184,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - Task-4审查-修复轮次: `2/2 PASS`
-- 状态: Task7 fix round 1已提交；即将派scoped re-review，Task8仍不得运行或checkoff。
+- 状态: Task7已通过scoped re-review与controller fresh验证并checkoff；Task8待执行。

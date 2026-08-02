@@ -867,7 +867,7 @@ Expected: 此 evidence commit 严格只含 build ledger，保持 preceding merge
 
 ### Task 7: 对 v0.1.166 运行 merge 后行为审查并修复 RED
 
-- [ ] Task 7: 对 v0.1.166 运行 merge 后行为审查并修复 RED
+- [x] Task 7: 对 v0.1.166 运行 merge 后行为审查并修复 RED
 
 **映射 OpenSpec:** 2.2
 

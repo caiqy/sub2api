@@ -9,7 +9,7 @@
 ## 2. 分段合入 v0.1.166
 
 - [x] 2.1 使用 `git merge --no-ff --no-commit v0.1.166`，逐文件融合冲突并创建第二父为固定 tag SHA 的 merge commit
-- [ ] 2.2 审查面板 API 限流、settings 部分更新、WebSocket 每轮模型计费、composite routing 与本地调度/usage/网关定制的交互；以失败测试驱动必要的最小兼容修复
+- [x] 2.2 审查面板 API 限流、settings 部分更新、WebSocket 每轮模型计费、composite routing 与本地调度/usage/网关定制的交互；以失败测试驱动必要的最小兼容修复
 - [ ] 2.3 运行 v0.1.166 聚焦测试、本机 full 门禁及适用的本机 integration，关闭能力矩阵 gap 并记录阶段证据
 
 ## 3. 分段合入 v0.1.168
