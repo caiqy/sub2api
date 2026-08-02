@@ -1496,3 +1496,144 @@ if ($null -eq $dockerCommand) { 'docker_command=unavailable' | Set-Content -Lite
 - Fresh gate scope checks all passed; both generator passes left no `backend/ent` or `backend/cmd/server/wire_gen.go` diff.
 - No Plan, OpenSpec task/checkoff, `.comet/current-change.json`, product, generated, migration, dependency, configuration, or non-ledger path was modified.
 - No fetch, push, tag, release, deploy, Docker integration, or remote/server operation was performed.
+
+## Task 12 v0.1.169 Uncommitted Merge Review
+
+### Preflight And Conflict Record
+
+- Branch: `feature/20260802/staged-merge-upstream-v0-1-169`.
+- Pre-merge HEAD: `e6b163fcb62e608b7af0ca0f872e25de9e2fb516`.
+- `git rev-parse 'v0.1.169^{}'`: `26d894ef4f50645a4bf1030e378ac892f17d0223` (required OID).
+- Pre-merge staged paths: none. Exact pre-merge status: `?? .comet/current-change.json`; this runtime selection file was neither changed, staged, nor committed.
+- `git merge --no-ff --no-commit v0.1.169` produced these exact 11 conflict paths:
+
+```text
+.goreleaser.simple.yaml
+.goreleaser.yaml
+backend/cmd/server/VERSION
+backend/internal/handler/openai_gateway_handler_test.go
+backend/internal/server/routes/gateway.go
+backend/internal/server/routes/gateway_test.go
+backend/internal/service/openai_account_scheduler.go
+backend/internal/service/openai_gateway_service.go
+frontend/src/utils/__tests__/subscriptionQuota.spec.ts
+frontend/src/utils/subscriptionQuota.ts
+frontend/src/views/user/SubscriptionsView.vue
+```
+
+| Path | Classification | Ours behavior | Theirs behavior | Fused result | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| `.goreleaser.simple.yaml` | `接口/配置演进` | Deletes the superseded secondary simple release config after the main config became the Linux amd64 fallback. | Keeps a separate simple config and adds `backend/resources` to Docker extra files. | Kept the local deletion; the retained main config carries the upstream resource payload. | Local release commit `5350370ad` is `ci: simplify linux amd64 release`; resulting `.goreleaser.yaml` has one Linux amd64 GHCR target and `backend/resources`. |
+| `.goreleaser.yaml` | `接口/配置演进` | Limits artifacts and GHCR image to the local Linux amd64 fallback. | Restores multi-platform/DockerHub manifests and adds resources. | Preserved the local fallback policy and added only `backend/resources` required by the upstream image runtime. | Three-stage YAML inspection; final Docker `extra_files` contains `deploy/docker-entrypoint.sh` and `backend/resources`. |
+| `backend/cmd/server/VERSION` | `版本/依赖` | `0.1.165.4`. | `0.1.168`. | Exactly `0.1.165.4`. | Post-commit `git show HEAD:backend/cmd/server/VERSION` check. |
+| `backend/internal/handler/openai_gateway_handler_test.go` | `上游修复` | No overlapping test block. | Adds WebSocket turn mapping, billing-model, and proxy failure reporting coverage. | Retained every upstream test block. | Three-stage conflict block was an add-vs-empty hunk; targeted packages compile after merge. |
+| `backend/internal/server/routes/gateway.go` | `接口/配置演进` | Adds usage-detail capture and composite WebSocket/Grok routing on bare Responses routes. | Adds `guardResponsesSubpath` to all Responses subpath routes. | Retained usage/composite/Grok routing and wrapped each subpath route with the upstream guard. | Final route registrations and `TestGatewayRoutesResponsesSubpathRejectsNonConformingSubpaths`. |
+| `backend/internal/server/routes/gateway_test.go` | `接口/配置演进` | Tests bare image routes install usage-detail capture before auth. | Tests malformed Responses subpaths are rejected at the edge. | Retained both independent tests. | Focused route command passed both named tests. |
+| `backend/internal/service/openai_account_scheduler.go` | `接口/配置演进` | Extracts a service-level compatibility helper and adds platform compatibility checks. | Passes context to the proxy-stream quarantine predicate so its fail-open bypass can work. | Retained local helper/platform checks and called `isOpenAIProxyStreamQuarantined(ctx, account)`. | Parent diff isolated the only conflict; `go test ./internal/service -run '^$'` compiles the merged scheduler. |
+| `backend/internal/service/openai_gateway_service.go` | `接口/配置演进` | Adds scheduler mutex and local model-transient initialization fields. | Adds atomic timestamp for rate-limited proxy quarantine fail-open logging. | Retained all local fields and `openaiProxyStreamFailOpenLogAt`. | Struct three-stage inspection and service compilation. |
+| `frontend/src/utils/__tests__/subscriptionQuota.spec.ts` | `接口/配置演进` | Adds quota-advance window/precision tests. | Adds local-calendar expiry relation/duration tests. | Retained both test suites and imports. | `pnpm --dir frontend exec vitest run src/utils/__tests__/subscriptionQuota.spec.ts`: 15 passed. |
+| `frontend/src/utils/subscriptionQuota.ts` | `接口/配置演进` | Provides exhausted-window and advance-preview computations. | Provides expiry relation and rounded remaining duration computations. | Retained both exported behaviors. | The merged 15-test Vitest run above. |
+| `frontend/src/views/user/SubscriptionsView.vue` | `接口/配置演进` | Imports quota-advance window helper for the local action UI. | Imports expiry relation for user-facing expiration labels. | Uses a combined import with both helpers. | Type-level source fusion and the merged utility test suite. |
+
+- No actual `migration` conflict occurred. `git diff --cached --name-only -- backend/ent/migrate frontend/package.json frontend/pnpm-lock.yaml backend/go.mod backend/go.sum` was empty before generation; local migration filenames and OIDs were therefore not altered.
+
+### Blocking Security, Gateway, And Resource Review
+
+| Review area | Conclusion and merged call-chain evidence |
+| --- | --- |
+| OpenAI Responses paths | All `/v1/responses`, `/responses`, and `/backend-api/codex/responses` subpath routes call `guardResponsesSubpath` in `backend/internal/server/routes/gateway.go:159-176,216,297,320`. `sanitizedUpstreamPathSuffix` is a closed allowlist with segment/depth bounds in `backend/internal/service/upstream_path_guard.go:31-94`; `openAIResponsesRequestPathSuffix` and `appendOpenAIResponsesRequestPathSuffix` revalidate in `backend/internal/service/openai_gateway_request_body.go:521-570`. Both normal and passthrough senders construct the final request only after those calls in `openai_gateway_forward.go:1009-1033` and `openai_gateway_passthrough.go:356-390`. No unsafe client path can reach those URL construction/send points. |
+| Gemini native and compat model paths | Native handler parses then immediately checks URL model input in `gemini_v1beta_handler.go:173-183`; its forwarding reaches `ForwardNativeHandle` at lines 467-479. `buildGeminiAIStudioModelActionURL` validates the model segment and allowlisted action before concatenation in `gemini_upstream_url.go:17-45`. Chat/messages compat API-key and AI Studio OAuth flows use that builder immediately before `http.NewRequestWithContext` in `gemini_chat_completions_compat_service.go:304-408` and `gemini_messages_compat_service.go:657-791`. Project-ID modes keep model in JSON rather than URL. |
+| Guard bypass review | Gateway routes reject malformed suffixes before handler scheduling; request-body replay has its own append-time guard. Prompt audit runs inside `OpenAIGatewayHandler.Responses` before account selection (`openai_gateway_handler.go:466-590`) and does not construct an upstream URL. Scheduler selection only receives account/model/capability inputs (`openai_account_scheduler.go:2362-2558`) and contains no client-path URL assembly. |
+| Proxy stream circuit | `selectAccountWithScheduler` makes a second pass only after the normal selection returns no available accounts, a live quarantine exists, and the platform is OpenAI; it uses a context bypass only then (`openai_account_scheduler.go:2362-2400`). The initial pass continues to quarantine blocked proxies, preserving normal selection. The fused `ctx` argument permits the intended fail-open branch instead of permanently withholding all capacity. |
+| Qwen3Guard | Auxiliary lines, including `Refusal`, are ignored at `prompt_qwen3guard.go:88-110`; Safety/Categories still solely determine normalized policy at lines 112-178. `go test ./internal/securityaudit -run '^TestParseQwen3GuardIgnoresAuxiliaryResponseFields$'` passed. |
+| Count tokens and pricing | `GatewayService.ForwardCountTokens` retains model mapping, body rewrite/retry, upstream error accounting, and successful response behavior in `gateway_count_tokens.go:20-245`. `PricingService` retains fallback merge/load behavior at `pricing_service.go:551-603`; local independent image multiplier behavior remains in `image_billing_multiplier.go:3-10` and usage refresh protects incomplete group snapshots in `openai_gateway_usage.go:628-674`. The resource diff changes only GPT-5.6 Terra/Luna rates while retaining long-context multipliers. |
+| Token refresh candidates | Candidate SQL retains deleted/schedulable/platform/active/type/refresh-token/cooldown filtering and ordered cursor pages in `account_repo.go:1091-1184`; refresh uses those exact options in `token_refresh_service.go:486-578`. |
+| Release and compose safety | Final `.goreleaser.yaml` retains Linux amd64 fallback and packages `backend/resources`. Each compose file has exactly one application `no-new-privileges:true`: `deploy/docker-compose.yml:23`, `docker-compose.local.yml:31`, `docker-compose.standalone.yml:19`, and `docker-compose.dev.yml:21`. No deployment was run. The upstream shell test was not accepted as a pass because the local Scoop `bash.exe`/`awk.exe` produced `integer expression expected` while exiting 0; direct exact-line inspection is the review evidence. |
+
+### Generation, Tests, And Merge Commit
+
+- `go mod tidy` exited `0`; `make generate` exited `0` and ran `go generate ./ent` plus `go generate ./cmd/server` (Wire wrote `wire_gen.go`). No generated, `go.mod`, or `go.sum` diff remained after the tool run.
+- No frontend manifest changed, so `pnpm --dir frontend install --lockfile-only --frozen-lockfile=false` was intentionally not run. `frontend/pnpm-lock.yaml` remained outside the merge diff.
+- A focused compile exposed the automatic non-conflict fusion defect in `gemini_chat_completions_compat_service.go:331,398`: local code had expanded the builder closure to return wire bytes while the upstream URL-builder error paths retained three returns. The minimal merge-resolution repair returned `nil` for the wire body at both sites. The red compile command failed first; the same command then passed.
+- Verification passed: `go test ./internal/service -run '^$'`; `go test ./internal/server/routes -run '^(TestGatewayRoutesBareOpenAIImagesPathsInstallUsageDetailCapture|TestGatewayRoutesResponsesSubpathRejectsNonConformingSubpaths)$'`; `go test ./internal/securityaudit -run '^TestParseQwen3GuardIgnoresAuxiliaryResponseFields$'`; and the 15-test subscription quota Vitest command above.
+- Before commit: no unmerged paths, `git diff --cached --check` passed, staged count was `70`, and the forbidden planning/ledger/OpenSpec/progress/runtime selection allowlist check passed.
+- Pure merge commit: `827369f76f8f301320759a0dc85b11ab05a7a1d6` (`Merge tag 'v0.1.169' into feature/20260802/staged-merge-upstream-v0-1-169`). Parents: `e6b163fcb62e608b7af0ca0f872e25de9e2fb516` and `26d894ef4f50645a4bf1030e378ac892f17d0223`; the required second-parent verification passed. `VERSION` is exactly `0.1.165.4`.
+- The pure merge contains exactly these 70 first-parent paths, and no ledger, Plan, Design, OpenSpec, progress, or runtime selection path:
+
+```text
+.github/workflows/backend-ci.yml
+.goreleaser.yaml
+Dockerfile.goreleaser
+backend/internal/config/config.go
+backend/internal/config/config_test.go
+backend/internal/handler/available_channel_handler.go
+backend/internal/handler/available_channel_handler_test.go
+backend/internal/handler/gemini_v1beta_handler.go
+backend/internal/handler/openai_gateway_handler_test.go
+backend/internal/pkg/xai/oauth.go
+backend/internal/repository/account_repo.go
+backend/internal/repository/account_repo_integration_test.go
+backend/internal/repository/account_repo_temp_unsched_test.go
+backend/internal/securityaudit/prompt_qwen3guard.go
+backend/internal/securityaudit/prompt_qwen3guard_test.go
+backend/internal/server/routes/gateway.go
+backend/internal/server/routes/gateway_test.go
+backend/internal/service/account_test_service.go
+backend/internal/service/billing_service.go
+backend/internal/service/billing_service_test.go
+backend/internal/service/claude_code_validator.go
+backend/internal/service/claude_code_validator_test.go
+backend/internal/service/email_message.go
+backend/internal/service/email_message_test.go
+backend/internal/service/email_service.go
+backend/internal/service/gateway_anthropic_apikey_passthrough_test.go
+backend/internal/service/gateway_context_management_test.go
+backend/internal/service/gateway_count_tokens.go
+backend/internal/service/gemini_chat_completions_compat_service.go
+backend/internal/service/gemini_messages_compat_service.go
+backend/internal/service/gemini_upstream_url.go
+backend/internal/service/gemini_upstream_url_test.go
+backend/internal/service/notification_email_service_test.go
+backend/internal/service/openai_account_scheduler.go
+backend/internal/service/openai_account_scheduler_test.go
+backend/internal/service/openai_gateway_request_body.go
+backend/internal/service/openai_gateway_scheduling.go
+backend/internal/service/openai_gateway_service.go
+backend/internal/service/openai_gateway_service_test.go
+backend/internal/service/openai_proxy_stream_circuit.go
+backend/internal/service/openai_proxy_stream_circuit_test.go
+backend/internal/service/ops_cleanup_service.go
+backend/internal/service/ops_scheduled_report_service_test.go
+backend/internal/service/pricing_service.go
+backend/internal/service/pricing_service_test.go
+backend/internal/service/token_refresh_service_candidates_test.go
+backend/internal/service/upstream_path_guard.go
+backend/internal/service/upstream_path_guard_test.go
+backend/resources/model-pricing/model_prices_and_context_window.json
+deploy/Dockerfile
+deploy/config.example.yaml
+deploy/docker-compose.dev.yml
+deploy/docker-compose.local.yml
+deploy/docker-compose.standalone.yml
+deploy/docker-compose.yml
+deploy/tests/docker-compose-security-test.sh
+deploy/tests/docker-runtime-resources-test.sh
+frontend/src/components/payment/SubscriptionPlanCard.vue
+frontend/src/components/payment/__tests__/SubscriptionPlanCard.spec.ts
+frontend/src/i18n/locales/en/admin/channels.ts
+frontend/src/i18n/locales/en/admin/settings.ts
+frontend/src/i18n/locales/zh/admin/channels.ts
+frontend/src/i18n/locales/zh/admin/settings.ts
+frontend/src/utils/__tests__/subscriptionQuota.spec.ts
+frontend/src/utils/subscriptionQuota.ts
+frontend/src/views/admin/SettingsView.vue
+frontend/src/views/admin/SubscriptionsView.vue
+frontend/src/views/admin/__tests__/SettingsView.spec.ts
+frontend/src/views/user/SubscriptionsView.vue
+frontend/src/views/user/__tests__/PaymentView.spec.ts
+```
+
+### Residual Risk Assigned To Task 13
+
+- Task 13's exhaustive negative path matrix was not added or run. This Task 12 review used merged call-chain inspection and only the named focused route test; it does not claim exhaustive encoded/traversal coverage.
+- No Plan/OpenSpec task was checked off, and `.comet/current-change.json` remains untouched. No fetch, push, tag, release, deploy, Docker deployment, or remote/server operation was performed.
