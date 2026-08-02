@@ -4,20 +4,22 @@
 - Review mode: `thorough`
 - 当前任务: Task 1 - 验证 Comet 已绑定的 source/execution 双基线隔离位置
 - 映射 OpenSpec: 1.1
-- 阶段: `implementer-result`
-- Dispatch token: `task-1-implementer-attempt-1-5f915bc93`
-- Role: `implementer`
+- 阶段: `task-review / dispatch-intent`
+- Dispatch token: `task-1-reviewer-attempt-1-49466c2fd`
+- Role: `reviewer`
 - Attempt: `1`
 - Model: `standard`
-- Base HEAD: `5f915bc9315b49930c4661b13279b3c6409d55a4`
+- Base HEAD: `10ee678a49c389958315bfdb1466796dc715f2e5`
 - Brief: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-1-brief.md`
 - Report: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-1-report.md`
-- Task ID: `ses_03fefc619ffeflenedeO5s94TG`
-- Result: `DONE`
+- Review package: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/review-10ee678a4..0cfb15843.diff`
+- Implementer task ID: `ses_03fefc619ffeflenedeO5s94TG`
+- Reviewer task ID: `pending atomic functions.task return`
+- Result: implementer `DONE`; reviewer `pending`
 - Implementation commit: `0cfb1584381ca719525d44d5248f8749f11e0b36`
 - Verification summary: 提交仅含 build ledger，暂存区为空，工作区仅 `?? .comet/current-change.json`。
 - Risk signals: 无
 - Concerns: 无
-- TDD: `tdd`; implementer 必须加载 Skill。该任务无生产代码修改，不伪造 RED；报告必须记录 `N/A` 原因和全部门禁命令结果。
+- TDD: RED/GREEN `N/A`（证据型 docs-only 任务）；report 已记录不伪造失败测试及全部门禁结果。
 - 审查-修复轮次: `0/2`
-- 状态: implementer 已返回；待核验 report/commit 并生成 thorough review package。
+- 状态: 即将调用原子 `functions.task` 派发 thorough reviewer；返回前不得重复派发。
