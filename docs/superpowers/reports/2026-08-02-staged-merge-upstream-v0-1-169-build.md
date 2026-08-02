@@ -1160,3 +1160,33 @@ if ($null -eq $dockerCommand) { 'docker_command=unavailable' | Set-Content -Lite
 Final statistics: `protected=6`, `manual=0`, `gap=0`, `unverified=0`.
 
 - Status: `DONE`. VERSION remains `0.1.165.4`; no Task 8 full gate, generate, Docker, network, remote, or release operation was run.
+
+### Task 7 Fix Round 1/5: Tagged Target Correction
+
+- Historical preservation: the earlier untagged settings `no tests to run` blocker, its `gap=1` state, and the first `gap=0` closure above remain unchanged. This correction supersedes the first closure because its service command ran only `2/4` requested targets and its handler command ran only `1/2`: `TestGatewayServiceRecordUsage_AttachesFinalUpstreamRequestSnapshot`, `TestGatewayService_ForwardAsResponses_PassthroughHeaderForwardCopiesFromClientRequest`, and `TestGatewayChatCredentialStopDoesNotSelectAnotherAccountAndReturnsSafe503` require the `unit` tag.
+- Timeout protection SHA: `8e1a566ed4716c60cf098bf98dccce67a1fbddf9` (`test: bound relay terminal callback coverage`) changes only `backend/internal/service/openai_ws_v2/passthrough_relay_test.go`. Each `TestRelay_OnTurnComplete_PerTerminalEvent` subtest now owns `context.WithTimeout(context.Background(), time.Second)` with `defer cancel()`, preventing a fixture hang without changing production behavior or response ownership.
+- Timeout verification: the terminal protection command exited `0` (`0.560s`) with its top-level anchor and six terminal subtests; the relay gate exited `0` (`0.527s`) with all four required top-level anchors.
+
+| Corrected full Step 2 command | Exit | Top-level PASS evidence |
+| --- | --- | --- |
+| `go test -count=1 ./internal/server/middleware -run '^(TestPanelRateLimiterGlobalPerUser|TestPanelRateLimiterFailOpenOnRedisError)$'` | `0` | `ok .../internal/server/middleware 1.875s`. |
+| `go test -v -tags unit -count=1 ./internal/handler/admin -run '^(TestUpdateSettingsPartialPayloadKeepsUnsentKeys|TestUpdateSettingsFullPayloadStillClearsSentEmptyFields)$'` | `0` | `TestUpdateSettingsPartialPayloadKeepsUnsentKeys`; `TestUpdateSettingsFullPayloadStillClearsSentEmptyFields`. |
+| `go test -v -tags unit -count=1 ./internal/service -run '^(TestCompositeRouteResolverExplicitExactRouteRewritesModel|TestOpenAIGatewayService_Forward_WSv2_ResponseDoneUsageParsed|TestGatewayServiceRecordUsage_AttachesFinalUpstreamRequestSnapshot|TestGatewayService_ForwardAsResponses_PassthroughHeaderForwardCopiesFromClientRequest)$'` | `0` | `TestCompositeRouteResolverExplicitExactRouteRewritesModel`; `TestOpenAIGatewayService_Forward_WSv2_ResponseDoneUsageParsed`; `TestGatewayServiceRecordUsage_AttachesFinalUpstreamRequestSnapshot`; `TestGatewayService_ForwardAsResponses_PassthroughHeaderForwardCopiesFromClientRequest`. |
+| `go test -v -count=1 ./internal/service/openai_ws_v2 -run '^(TestRelay_OnTurnComplete_PerTerminalEvent|TestRelay_OnTurnComplete_UsesCurrentResponseCreateModel|TestRelay_OnTurnComplete_IgnoresTerminalForUnknownResponse|TestRelay_OnTurnComplete_ProvidesTurnMetrics)$'` | `0` | `TestRelay_OnTurnComplete_PerTerminalEvent`; `TestRelay_OnTurnComplete_UsesCurrentResponseCreateModel`; `TestRelay_OnTurnComplete_IgnoresTerminalForUnknownResponse`; `TestRelay_OnTurnComplete_ProvidesTurnMetrics`. |
+| `go test -v -tags unit -count=1 ./internal/handler -run '^(TestGatewayChatCredentialStopDoesNotSelectAnotherAccountAndReturnsSafe503|TestOpenAIUsageRecordTaskCopiesCompositeBillingContextAfterQueueDelay)$'` | `0` | `TestGatewayChatCredentialStopDoesNotSelectAnotherAccountAndReturnsSafe503`; `TestOpenAIUsageRecordTaskCopiesCompositeBillingContextAfterQueueDelay`. |
+
+- The command-level anchor checks ran immediately after every tagged command; there was no `no tests to run`, partial tagged execution, missing target, or RED. No production file changed. Compatibility SHA: none; no empty compatibility commit was created.
+- Call-chain recheck: `RegisterAdminRoutes -> PanelRateLimiter.Global -> userScoped -> RateLimiter.Allow` remains per-user and fail-open. `SettingsView.saveSettings -> SettingHandler.UpdateSettings -> omittedSettingKeys` retains omitted-versus-explicit-empty semantics. `EffectiveGatewayRouteResolver.Resolve -> CompositeRouteResolver.Resolve` preserves effective-group selection and client/routing/upstream model separation without replacing scheduler, sticky, or fallback selection. WS forwarding uses response-bound `Relay -> emitTurnComplete` for final model and usage. `ForwardAsResponsesHandle` retains original request bytes for passthrough mapping and replayable body cleanup. `handleFailoverExhausted` returns safe credential exhaustion errors, while `wrapUsageRecordTaskContext -> RecordUsage` preserves queued composite billing and upstream usage fields.
+
+| Capability | Final status | Evidence |
+| --- | --- | --- |
+| Panel limiter | `protected` | Corrected Step 2 PASS and call-chain review. |
+| Partial settings | `protected` | Tagged `2/2` top-level PASS anchors. |
+| Effective composite route | `protected` | Tagged service target PASS and call-chain review. |
+| WS terminal/model/usage | `protected` | Test SHAs `ef1b65f41c572f78d5e8246647cf775a999b7df4` and `8e1a566ed4716c60cf098bf98dccce67a1fbddf9`, six terminal subtests, and four relay anchors. |
+| Responses body replay | `protected` | Tagged service target PASS and call-chain review. |
+| HTTP failover/usage | `protected` | Tagged handler `2/2` top-level PASS anchors and call-chain review. |
+
+Final corrected statistics: `protected=6`, `manual=0`, `gap=0`, `unverified=0`.
+
+- Corrected status: `DONE`. VERSION remains `0.1.165.4`; no Task 8 full gate, generate, Docker, remote, network, or release operation was run.
