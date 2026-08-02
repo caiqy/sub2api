@@ -4,7 +4,13 @@
 - Review mode: `thorough`
 - 当前任务: Task 4 - 验证阶段 0 的本地保护测试与生成稳定性
 - 映射 OpenSpec: 1.4
-- 阶段: `implementer-result`
+- 阶段: `debugging / dispatch-intent`
+- Diagnostic dispatch token: `task-4-diagnostic-attempt-1-a0d366e6c`
+- Diagnostic role: `diagnostic-agent`
+- Diagnostic model: `high`
+- Diagnostic base HEAD: `a0d366e6ca008b028cb0cabed1173790b6e7caea`
+- Diagnostic report: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-4-debug-report.md`
+- Diagnostic task ID: `pending atomic functions.task return`
 - Dispatch token: `task-4-implementer-attempt-1-1c6e5b405`
 - Role: `implementer`
 - Attempt: `1`
@@ -22,4 +28,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - 审查-修复轮次: `0/2`
-- 状态: implementer 已返回；Task 4 不得 checkoff，待核验 report/commit/worktree 并分类 full-gate 与 generate 阻塞。
+- 状态: 即将派发 systematic-debugging diagnostic agent；不修改 tracked 文件，Task 4 不得 review/checkoff。
