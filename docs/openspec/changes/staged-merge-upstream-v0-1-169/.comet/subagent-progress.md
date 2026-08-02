@@ -4,7 +4,7 @@
 - Review mode: `thorough`
 - 当前任务: Task 9 - 在未提交状态合入 v0.1.168 并完成阻塞审查
 - 映射 OpenSpec: 3.1
-- 阶段: `task-9 / fix-round-2-scoped-re-review-dispatch-intent`
+- 阶段: `task-9 / fix-round-2-scoped-re-review-result`
 - Task-9 dispatch token: `task-9-implementer-attempt-1-97d44dd20`
 - Task-9 role: `implementer`
 - Task-9 model: `high`
@@ -29,8 +29,9 @@
 - Task-9 fix-2 re-review base HEAD: `c028e7e5ca6315c597133ce6b835a6ddd77bcec2`
 - Task-9 fix-2 focused package: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/review-7cd90bf7f..c028e7e5c.diff`
 - Task-9 fix-2 corrected full package: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/review-97d44dd20..c028e7e5c.diff`
-- Task-9 fix-2 re-review task ID: `pending resumed functions.task return`
-- Task-9 review-fix rounds: `2/5 reviewing`
+- Task-9 fix-2 re-review task ID: `ses_03de8e0f1ffenEcw82NwPh9K7Q`
+- Task-9 fix-2 re-review result: `ALL_ADDRESSED; Spec compliance PASS; Task quality APPROVED`
+- Task-9 review-fix rounds: `2/5 complete`
 - Task-8 dispatch token: `task-8-implementer-attempt-1-217946c5d`
 - Task-8 role: `implementer`
 - Task-8 model: `standard`
@@ -358,4 +359,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - Task-4审查-修复轮次: `2/2 PASS`
-- 状态: Task9 round2 scoped re-review即将派发；两个safety branch保留，Task10不得运行。
+- 状态: Task9 review clean；待controller fresh tool/topology核验、checkoff及safety清理，Task10不得运行。
