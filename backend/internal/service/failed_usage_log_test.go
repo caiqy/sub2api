@@ -98,3 +98,18 @@ func TestWriteFailedUsageLogBestEffort_CreatesZeroCostUsageLog(t *testing.T) {
 	require.Equal(t, detail.RequestBody, repo.lastLog.DetailSnapshot.RequestBody)
 	require.Equal(t, detail.ResponseBody, repo.lastLog.DetailSnapshot.ResponseBody)
 }
+
+func TestWriteFailedUsageLogBestEffort_OmitsMatchingNonWSUpstreamModel(t *testing.T) {
+	repo := &failedUsageLogRepoStub{}
+
+	WriteFailedUsageLogBestEffort(context.Background(), repo, &FailedUsageLogInput{
+		APIKey:        &APIKey{ID: 1},
+		User:          &User{ID: 2},
+		Account:       &Account{ID: 3},
+		Model:         "gpt-5.6-terra",
+		UpstreamModel: " gpt-5.6-terra ",
+	}, "service.test")
+
+	require.NotNil(t, repo.lastLog)
+	require.Nil(t, repo.lastLog.UpstreamModel)
+}

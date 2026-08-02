@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -41,7 +42,7 @@ func TestHandleResponsesStreamingResponse_ReturnsScannerErrorWithoutCompleting(t
 		}, "\n"))},
 	}
 
-	result, err := (&GatewayService{}).handleResponsesStreamingResponse(resp, c, "claude-sonnet-4.5", "claude-sonnet-4.5", nil, time.Now())
+	result, err := (&GatewayService{}).handleResponsesStreamingResponse(resp, c, "claude-sonnet-4.5", "claude-sonnet-4.5", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
 
 	require.ErrorContains(t, err, "upstream stream read failed")
 	require.Nil(t, result)
@@ -75,7 +76,7 @@ func TestHandleResponsesStreamingResponse_IgnoresScannerErrorAfterCompletedTermi
 		}, "\n"))},
 	}
 
-	result, err := (&GatewayService{}).handleResponsesStreamingResponse(resp, c, "claude-sonnet-4.5", "claude-sonnet-4.5", nil, time.Now())
+	result, err := (&GatewayService{}).handleResponsesStreamingResponse(resp, c, "claude-sonnet-4.5", "claude-sonnet-4.5", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
 
 	require.NoError(t, err)
 	require.NotNil(t, result)

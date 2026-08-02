@@ -281,7 +281,21 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		writerSizeBeforeForward := c.Writer.Size()
 		forwardStart := time.Now()
 		service.SetOpsUpstreamAttempted(c, false)
-		result, err := h.gatewayService.ForwardAsResponsesHandle(requestCtx, c, account, effectiveBody, parsedReq)
+		var result *service.ForwardResult
+		setActualUpstreamEndpoint(c, "")
+		if shouldUseAntigravityCompat(account) {
+			if h.antigravityGatewayService == nil {
+				h.responsesErrorResponse(c, http.StatusBadGateway, "upstream_error", "Antigravity compatibility service is not configured")
+				if accountReleaseFunc != nil {
+					accountReleaseFunc()
+				}
+				return
+			}
+			setActualUpstreamEndpoint(c, EndpointAntigravityGenerateContent)
+			result, err = h.antigravityGatewayService.ForwardAsResponses(requestCtx, c, account, body, parsedReq)
+		} else {
+			result, err = h.gatewayService.ForwardAsResponsesHandle(requestCtx, c, account, effectiveBody, parsedReq)
+		}
 		forwardDuration := time.Since(forwardStart)
 
 		if accountReleaseFunc != nil {
