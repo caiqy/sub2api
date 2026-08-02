@@ -292,13 +292,17 @@ func startPassthroughLifecycleServer(
 }
 
 func dialPassthroughLifecycleClient(t *testing.T, server *httptest.Server) *coderws.Conn {
+	return dialPassthroughLifecycleClientWithModel(t, server, "gpt-5.1")
+}
+
+func dialPassthroughLifecycleClientWithModel(t *testing.T, server *httptest.Server, model string) *coderws.Conn {
 	t.Helper()
 	dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
 	clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
 	cancelDial()
 	require.NoError(t, err)
 	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
-	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","stream":false}`))
+	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"`+model+`","stream":false}`))
 	cancelWrite()
 	require.NoError(t, err)
 	return clientConn
@@ -396,6 +400,82 @@ func TestPassthroughLifecycle_AppliesAccountMappingAfterLaterRequestRewrite(t *t
 
 	upstream.Send(`{"type":"response.created","response":{"id":"resp_second","model":"account-model"}}`)
 	upstream.Send(`{"type":"response.completed","response":{"id":"resp_second","model":"account-model","usage":{"input_tokens":1,"output_tokens":1}}}`)
+	_, err = readPassthroughLifecycleFrame(t, client, time.Second)
+	require.NoError(t, err)
+	_, err = readPassthroughLifecycleFrame(t, client, time.Second)
+	require.NoError(t, err)
+	require.NoError(t, client.Close(coderws.StatusNormalClosure, "done"))
+	<-serverErr
+}
+
+func TestPassthroughLifecycle_SessionUpdateModelLessTurnUsesMappedFastPolicyFallback(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	upstream := newStagedPassthroughConn()
+	svc := newPassthroughLifecycleService(passthroughLifecycleConfig(), upstream)
+	settings := &OpenAIFastPolicySettings{Rules: []OpenAIFastPolicyRule{{
+		ServiceTier:    OpenAIFastTierPriority,
+		Action:         BetaPolicyActionFilter,
+		Scope:          BetaPolicyScopeAll,
+		ModelWhitelist: []string{"gpt-5.5-account"},
+		FallbackAction: BetaPolicyActionPass,
+	}}}
+	rawSettings, err := json.Marshal(settings)
+	require.NoError(t, err)
+	svc.settingService = NewSettingService(&openAIFastPolicyRepoStub{values: map[string]string{
+		SettingKeyOpenAIFastPolicySettings: string(rawSettings),
+	}}, svc.cfg)
+	account := passthroughLifecycleAccount()
+	account.Credentials["model_mapping"] = map[string]any{
+		"gpt-client":  "gpt-client",
+		"gpt-channel": "gpt-account",
+		"gpt-5.5":     "gpt-5.5-account",
+	}
+	outboundModels := make(chan string, 2)
+	hooks := &OpenAIWSIngressHooks{
+		MapRequestModel: func(_ int, model string) (string, error) {
+			if model == "gpt-client" {
+				return "gpt-channel", nil
+			}
+			return model, nil
+		},
+		OnOutboundRequest: func(_ int, _ []byte, model string) {
+			outboundModels <- model
+		},
+	}
+	server, serverErr := startPassthroughLifecycleServer(t, ctx, svc, account, hooks)
+	defer server.Close()
+	client := dialPassthroughLifecycleClientWithModel(t, server, "gpt-client")
+	defer func() { _ = client.CloseNow() }()
+
+	first := requirePassthroughUpstreamWrite(t, upstream, time.Second)
+	require.Equal(t, "gpt-channel", gjson.GetBytes(first, "model").String())
+	upstream.Send(`{"type":"response.created","response":{"id":"resp_first","model":"gpt-channel"}}`)
+	upstream.Send(`{"type":"response.completed","response":{"id":"resp_first","model":"gpt-channel","usage":{"input_tokens":1,"output_tokens":1}}}`)
+	_, err = readPassthroughLifecycleFrame(t, client, time.Second)
+	require.NoError(t, err)
+	_, err = readPassthroughLifecycleFrame(t, client, time.Second)
+	require.NoError(t, err)
+
+	writeCtx, cancelWrite := context.WithTimeout(context.Background(), time.Second)
+	err = client.Write(writeCtx, coderws.MessageText, []byte(`{"type":"session.update","session":{"model":"gpt-5.5"}}`))
+	cancelWrite()
+	require.NoError(t, err)
+	sessionUpdate := requirePassthroughUpstreamWrite(t, upstream, time.Second)
+	require.Equal(t, "gpt-5.5", gjson.GetBytes(sessionUpdate, "session.model").String())
+
+	writeCtx, cancelWrite = context.WithTimeout(context.Background(), time.Second)
+	err = client.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","service_tier":"priority"}`))
+	cancelWrite()
+	require.NoError(t, err)
+	followup := requirePassthroughUpstreamWrite(t, upstream, time.Second)
+	require.False(t, gjson.GetBytes(followup, "model").Exists())
+	require.False(t, gjson.GetBytes(followup, "service_tier").Exists())
+	require.Equal(t, "gpt-channel", <-outboundModels)
+	require.Equal(t, "gpt-5.5", <-outboundModels)
+
+	upstream.Send(`{"type":"response.created","response":{"id":"resp_second","model":"gpt-5.5"}}`)
+	upstream.Send(`{"type":"response.completed","response":{"id":"resp_second","model":"gpt-5.5","usage":{"input_tokens":1,"output_tokens":1}}}`)
 	_, err = readPassthroughLifecycleFrame(t, client, time.Second)
 	require.NoError(t, err)
 	_, err = readPassthroughLifecycleFrame(t, client, time.Second)

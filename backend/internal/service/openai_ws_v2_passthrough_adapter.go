@@ -976,6 +976,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				turnNo = 2
 			}
 			requestModelForThisFrame := ""
+			preserveChannelMappedModel := false
 			if isResponseCreate {
 				requestModelForThisFrame = usageMeta.requestModelForFrame(payload)
 				if requestModelForThisFrame == "" {
@@ -997,10 +998,17 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 							return payload, nil, err
 						}
 						if upstreamModel = strings.TrimSpace(upstreamModel); upstreamModel != "" {
+							// An identity account mapping marks the client model as a valid
+							// channel-mapping source. Preserve the channel target on every
+							// explicit turn so later frames cannot apply account mapping again.
+							accountModel, matched := account.ResolveMappedModel(policyModel)
+							preserveChannelMappedModel = matched && accountModel == policyModel
 							payload = s.ReplaceModelInBody(payload, upstreamModel)
 						}
 					}
-					payload = applyOpenAIWSAccountModelMapping(account, payload)
+					if !preserveChannelMappedModel {
+						payload = applyOpenAIWSAccountModelMapping(account, payload)
+					}
 					if hooks.BeforeRequest != nil {
 						if err := hooks.BeforeRequest(turnNo, payload, policyModel); err != nil {
 							return payload, nil, err
@@ -1032,6 +1040,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			// model whitelist still resolves. An empty model would miss
 			// any whitelist and silently fall back to pass.
 			model := openAIWSPassthroughPolicyModelForFrame(account, payload)
+			if isResponseCreate && preserveChannelMappedModel {
+				model = strings.TrimSpace(gjson.GetBytes(payload, "model").String())
+			}
 			if model == "" {
 				model = capturedSessionModel
 			}

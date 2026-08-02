@@ -2445,26 +2445,27 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	require.NoError(t, err)
 
 	clientEvents := make([][]byte, 0, turnCount)
-	readCompleted := func() {
-		for {
+	readTurnEvents := func(turn int) {
+		responseID := fmt.Sprintf("resp_usage_e2e_%d", turn)
+		for _, expectedType := range []string{"response.created", "response.completed"} {
 			readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
 			_, event, readErr := clientConn.Read(readCtx)
 			cancelRead()
 			require.NoError(t, readErr)
-			if gjson.GetBytes(event, "type").String() != "response.completed" {
-				continue
+			require.Equal(t, expectedType, gjson.GetBytes(event, "type").String(), "turn=%d", turn)
+			require.Equal(t, responseID, gjson.GetBytes(event, "response.id").String(), "turn=%d", turn)
+			if expectedType == "response.completed" {
+				clientEvents = append(clientEvents, append([]byte(nil), event...))
 			}
-			clientEvents = append(clientEvents, append([]byte(nil), event...))
-			return
 		}
 	}
-	readCompleted()
+	readTurnEvents(1)
 	if turnCount == 2 {
 		writeCtx, cancelWrite = context.WithTimeout(context.Background(), 3*time.Second)
 		err = clientConn.Write(writeCtx, coderws.MessageText, []byte(tc.secondPayload))
 		cancelWrite()
 		require.NoError(t, err)
-		readCompleted()
+		readTurnEvents(2)
 	}
 	_ = clientConn.Close(coderws.StatusNormalClosure, "done")
 
@@ -2875,6 +2876,39 @@ func TestOpenAIResponsesWebSocket_SecondTurnAccountAcquireFailureRollsBackUserAn
 	require.Equal(t, int32(2), atomic.LoadInt32(&cache.releaseUserCalled))
 	require.Equal(t, int32(2), atomic.LoadInt32(&cache.releaseUserGroupCalled))
 	require.Equal(t, int32(1), atomic.LoadInt32(&cache.releaseAccountCalled))
+}
+
+func TestOpenAIResponsesWebSocket_RejectsUnsupportedLaterModelSwitch(t *testing.T) {
+	cache := &concurrencyCacheMock{
+		acquireUserSlotFn:      func(context.Context, int64, int, string) (bool, error) { return true, nil },
+		acquireUserGroupSlotFn: func(context.Context, int64, int64, int, string) (bool, error) { return true, nil },
+		acquireAccountSlotFn:   func(context.Context, int64, int, string) (bool, error) { return true, nil },
+	}
+	env := newOpenAIWSRegressionEnv(t, cache, openAIWSRegressionEnvOptions{
+		CaptureUpstreamMessages: true,
+		AccountModelMapping:     map[string]string{"gpt-5.1": "gpt-5.1"},
+	})
+	defer env.Close()
+
+	clientConn := env.dial(t)
+	defer func() { _ = clientConn.CloseNow() }()
+	env.writeMessage(t, clientConn, `{"type":"response.create","model":"gpt-5.1","stream":false}`)
+	require.Equal(t, "response.completed", gjson.GetBytes(env.readMessage(t, clientConn), "type").String())
+	env.writeMessage(t, clientConn, `{"type":"response.create","model":"gpt-unsupported","stream":false,"previous_response_id":"resp_ingress_turn_1"}`)
+
+	env.readCloseError(t, clientConn, coderws.StatusPolicyViolation)
+	env.waitRequestDone(t)
+	select {
+	case payload := <-env.upstreamMessages:
+		require.Equal(t, "gpt-5.1", gjson.GetBytes(payload, "model").String())
+	case <-time.After(5 * time.Second):
+		t.Fatal("upstream did not receive the first websocket frame")
+	}
+	select {
+	case payload := <-env.upstreamMessages:
+		t.Fatalf("unsupported later model reached upstream: %s", payload)
+	default:
+	}
 }
 
 func TestOpenAIResponsesWebSocketPassthroughSecondTurnAdmissionRejectsBeforeUpstream(t *testing.T) {
@@ -3397,7 +3431,8 @@ func TestOpenAIResponsesWebSocketAppliesAccountMappingAfterLaterCompositeRoute(t
 	env := newOpenAIWSRegressionEnv(t, cache, openAIWSRegressionEnvOptions{
 		CaptureUpstreamMessages: true,
 		CompositeResolver:       resolver,
-		AccountModelMapping:     map[string]string{"gpt-5": "gpt-5-account"},
+		ChannelModelMapping:     map[string]string{"gpt-5": "gpt-5-channel"},
+		AccountModelMapping:     map[string]string{"gpt-5": "gpt-5-account", "gpt-5-channel": "gpt-5-account"},
 	})
 	defer env.Close()
 	env.apiKey.Group = &service.Group{ID: 2, Platform: service.PlatformComposite}
@@ -3418,6 +3453,51 @@ func TestOpenAIResponsesWebSocketAppliesAccountMappingAfterLaterCompositeRoute(t
 		}
 	}
 	require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
+	env.waitRequestDone(t)
+}
+
+func TestOpenAIResponsesWebSocket_RejectsLaterCompositeRouteUnsupportedByAccount(t *testing.T) {
+	resolver := service.NewCompositeRouteResolver(openAIWSCompositeRouteRepo{routes: []service.CompositeModelRoute{
+		{
+			GroupID:        2,
+			PublicModel:    "public-first",
+			MatchType:      service.CompositeRouteMatchExact,
+			TargetPlatform: service.PlatformOpenAI,
+			UpstreamModel:  "gpt-5",
+			Endpoint:       service.CompositeRouteEndpointResponses,
+			Enabled:        true,
+		},
+		{
+			GroupID:        2,
+			PublicModel:    "public-unsupported",
+			MatchType:      service.CompositeRouteMatchExact,
+			TargetPlatform: service.PlatformOpenAI,
+			UpstreamModel:  "gpt-unsupported",
+			Endpoint:       service.CompositeRouteEndpointResponses,
+			Enabled:        true,
+		},
+	}})
+	cache := &concurrencyCacheMock{
+		acquireUserSlotFn:      func(context.Context, int64, int, string) (bool, error) { return true, nil },
+		acquireUserGroupSlotFn: func(context.Context, int64, int64, int, string) (bool, error) { return true, nil },
+		acquireAccountSlotFn:   func(context.Context, int64, int, string) (bool, error) { return true, nil },
+	}
+	env := newOpenAIWSRegressionEnv(t, cache, openAIWSRegressionEnvOptions{
+		CaptureUpstreamMessages: true,
+		CompositeResolver:       resolver,
+		ChannelModelMapping:     map[string]string{"gpt-unsupported": "gpt-unsupported-channel"},
+		AccountModelMapping:     map[string]string{"gpt-5": "gpt-5-account"},
+	})
+	defer env.Close()
+	env.apiKey.Group = &service.Group{ID: 2, Platform: service.PlatformComposite}
+
+	clientConn := env.dial(t)
+	defer func() { _ = clientConn.CloseNow() }()
+	env.writeMessage(t, clientConn, `{"type":"response.create","model":"public-first","stream":false}`)
+	require.Equal(t, "response.completed", gjson.GetBytes(env.readMessage(t, clientConn), "type").String())
+	env.writeMessage(t, clientConn, `{"type":"response.create","model":"public-unsupported","stream":false,"previous_response_id":"resp_ingress_turn_1"}`)
+
+	env.readCloseError(t, clientConn, coderws.StatusPolicyViolation)
 	env.waitRequestDone(t)
 }
 
@@ -5611,6 +5691,31 @@ func TestOpenAIResponsesWebSocket_PassthroughTracksModelPerTurn(t *testing.T) {
 	require.Equal(t, "terra→terra-channel→gpt-5.6-terra", *got.logs[1].ModelMappingChain)
 	require.InDelta(t, got.logs[1].TotalCost*2, got.logs[0].TotalCost, 1e-12,
 		"each turn must be billed with its own channel-mapped model")
+}
+
+func TestOpenAIResponsesWebSocket_PassthroughKeepsIdentityMappedChannelModelAcrossTurns(t *testing.T) {
+	got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+		firstPayload:  `{"type":"response.create","model":"gpt-client","stream":false}`,
+		secondPayload: `{"type":"response.create","model":"gpt-client","stream":false}`,
+		channelMapping: map[string]string{
+			"gpt-client": "gpt-channel",
+		},
+		accountModelMapping: map[string]any{
+			"gpt-client":  "gpt-client",
+			"gpt-channel": "gpt-account",
+		},
+	})
+
+	require.Len(t, got.upstreamPayloads, 2)
+	for turn, payload := range got.upstreamPayloads {
+		require.Equal(t, "gpt-channel", gjson.GetBytes(payload, "model").String(), "turn=%d", turn+1)
+	}
+	require.Len(t, got.logs, 2)
+	for turn, usageLog := range got.logs {
+		require.Equal(t, "gpt-client", usageLog.RequestedModel, "turn=%d", turn+1)
+		require.NotNil(t, usageLog.UpstreamModel, "turn=%d", turn+1)
+		require.Equal(t, "gpt-channel", *usageLog.UpstreamModel, "turn=%d", turn+1)
+	}
 }
 
 func TestOpenAIResponsesWebSocket_UnchangedChannelTargetOutsideAccountMappingKeysRemainsValid(t *testing.T) {
