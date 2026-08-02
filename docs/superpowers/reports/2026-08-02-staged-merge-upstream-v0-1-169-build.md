@@ -1757,3 +1757,26 @@ foreach ($script in $scripts) { if (-not (Test-Path -LiteralPath $script)) { thr
 - Final Task 13 counts: `protected=13`, `manual=0`, `gap=0`, `unverified=1`.
 - The sole `unverified` entry is Docker-only quota/receipt/outbox/migration integration. Historical evidence cited above is explicitly historical where not rerun; it is not represented as a fresh Task 13 full gate.
 - Ledger commit is the only remaining tracked change. Task 14 full gate has not run.
+
+### Canonical Matrix Label Correction
+
+The compact matrix above records Task 13 review areas. This table preserves the original 14 canonical capability boundaries used by Tasks 4-12; it supersedes its row labels, not its evidence or final counts.
+
+| # | Canonical capability | Final status | v0.1.169 review evidence |
+| --- | --- | --- | --- |
+| 1 | layered scheduler, DB recheck, WaitPlan fallback | `protected` | Existing direct scheduler/WaitPlan/privacy evidence remains applicable; context-aware proxy circuit call preserves the selection path. |
+| 2 | Grok/platform/session/previous-response sticky and privacy/image capability | `protected` | Existing direct sticky/privacy evidence remains applicable; no Responses/Gemini guard path bypasses it. |
+| 3 | OpenAI HTTP/WS/Live turn ownership, final model, usage, passthrough | `protected` | Existing direct relay/Live/usage/replay evidence remains applicable; guarded Responses suffixes enter normal/passthrough senders only after validation. |
+| 4 | prompt/security audit route and WS gates | `protected` | Prior direct audit evidence plus current Qwen3Guard strict/auxiliary-field command. |
+| 5 | Images audit and text lifecycle | `protected` | Prior direct Images audit/lifecycle evidence remains applicable. |
+| 6 | Images request-body replay, spooling, cleanup | `protected` | Prior direct replay/spooling evidence remains applicable. |
+| 7 | async images, object storage, image input/output billing | `protected` | Prior direct async/storage/billing evidence and current image multiplier source review remain applicable. |
+| 8 | settings hot and partial update | `protected` | Prior direct tagged settings evidence remains applicable. |
+| 9 | repository scoped updates, user/API key, passkey/session step-up | `protected` | Prior repository/passkey direct evidence remains applicable. |
+| 10 | subscription quota cycle, receipt/outbox, migration integration | `unverified` | Docker-only integration remains unverified because Docker is unavailable; no remote fallback was attempted. |
+| 11 | user resources, group copy, batch limits | `protected` | Prior direct unit-tag user/group/batch evidence remains applicable. |
+| 12 | frontend local capability | `protected` | Prior direct frontend capability suite remains applicable. |
+| 13 | pricing, count_tokens, release fallback, deploy security | `protected` | Current focused circuit/pricing/count-tokens review plus final runtime-resource and no-stderr compose scripts. |
+| 14 | Ent/Wire, dependencies, migrations | `protected` | Task 11's two clean generation passes, stable dependency output, and unchanged migration OIDs remain applicable; this task did not run a full gate. |
+
+- Corrected canonical counts: `protected=13`, `manual=0`, `gap=0`, `unverified=1`.
