@@ -1879,3 +1879,52 @@ if ($null -eq $dockerCommand) { 'docker_command=unavailable' | Set-Content -Lite
 - `git add -f -- docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md` exited `0` and emitted Git's non-failing warning that this ledger's LF working copy will be replaced by CRLF the next time Git touches it.
 - Only this ledger is modified for Task 14. No Plan/OpenSpec task/checkoff, runtime selection, product, generated, migration, dependency, configuration, or non-ledger path was changed.
 - No fetch, push, tag, release, deploy, Docker integration/image action, SSH, server, or other remote operation was performed.
+
+## Task 14 Recovery Round 1 Final Closure
+
+- The preceding Task 14 `BLOCKED` evidence remains historically accurate and is superseded by this fresh recovery evidence. Final Task 14 status is `DONE`; Docker-only PostgreSQL/Testcontainers evidence remains explicitly `unverified`.
+- Fix commit: `d4e84fe75` (`test: remove duplicate websocket test declarations`), strictly `backend/internal/handler/openai_gateway_handler_test.go` with `223` deletions. It removed only the six stale duplicate top-level definitions and retained the first, current definitions with `2.5` and `16e-6` assertions plus the sole `TestOpenAIResponsesWebSocket_PassthroughKeepsIdentityMappedChannelModelAcrossTurns`.
+
+### Duplicate-Test RED And GREEN
+
+- RED is the existing fresh Task 14 `make test` result recorded above: exit `2` with six `redeclared in this block` compile errors. No new artificial RED was created for a deletion-only test repair.
+- `go test -count=1 ./internal/handler -run '^$'`, from `backend`, exited `0`: `ok github.com/Wei-Shaw/sub2api/internal/handler 1.930s [no tests to run]`.
+- `go test -v -count=1 ./internal/handler -run '^(TestOpenAIResponsesWebSocket_PassthroughTracksModelPerTurn|TestOpenAIResponsesWebSocket_PassthroughKeepsIdentityMappedChannelModelAcrossTurns|TestOpenAIResponsesWebSocket_UnchangedChannelTargetOutsideAccountMappingKeysRemainsValid|TestOpenAIResponsesWebSocket_PassthroughKeepsTurnMappingSnapshot|TestOpenAIResponsesWebSocket_CtxPoolAppliesPerTurnMappingAndPreservesRequestedModel|TestOpenAIWSTurnBillingModelPreservesImagePricingModel|TestShouldReportOpenAIWSProxyAccountFailure)$'`, from `backend`, exited `0`; all seven named top-level tests emitted `--- PASS:` anchors.
+- The top-level-name scan of `backend/internal/handler/openai_gateway_handler_test.go` exited `0`: `top_level_test_names=106`, with no duplicate names. `git diff --check` also exited `0` before the fix commit.
+
+### Fresh Full Gate
+
+| Command | Exit | Fresh result |
+| --- | ---: | --- |
+| `make test` | `0` | Backend suites passed; frontend summary was `225` test files and `1698` tests passed. Non-failing stdout/stderr was retained: Browserslist says `caniuse-lite` is 8 months old; SettingsView tests repeatedly warn that `router-link` is unresolved and emit one jsdom `AggregateError`; expected error-path tests log malformed saved-user JSON, subscription `Network error`, table-loader `Server error`, and Ops token-stat load error; intlify reports its absent message compiler for payment keys and missing `common.time.daysAgo`/`common.time.never` keys. |
+| `make "VERSION=0.1.165.4" "SHELL=D:/scoop/shims/bash.exe" build` | `0` | Backend build plus `vue-tsc -b && vite build` passed; Vite built in `29.94s`. Non-failing warnings: Browserslist `caniuse-lite` data is 8 months old; dynamic-plus-static import warnings for `stores/app.ts`, `stores/auth.ts`, `stores/adminSettings.ts`, `router/title.ts`, `utils/userUiVisibility.ts`, and `router/index.ts`; and chunks over 500 kB after minification. |
+| First `make -C backend generate` | `0` | Ent and server Wire generation completed; Wire wrote `cmd/server/wire_gen.go` twice. |
+| First `git.exe diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` | `0` | No generated-path diff or output. |
+| Second `make -C backend generate` | `0` | Ent and server Wire generation completed again; Wire wrote `cmd/server/wire_gen.go` twice. |
+| Second `git.exe diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` | `0` | No generated-path diff or output. |
+| `git.exe diff --check` | `0` | No whitespace-error output. |
+| `git.exe diff --cached --check` | `0` | Empty index passed with no output. |
+| `git diff --name-only --diff-filter=U` | `0` | No unmerged paths. |
+| Conflict-marker script from the brief | `0` | Embedded `git grep` exited `1` with no matches, the required PASS condition. |
+| `git rev-parse HEAD:backend/migrations/191_subscription_quota_advance_receipts.sql` | `0` | `c22d47d79cbbaf4bc40524d42ef52e6cc8ac3af6`. |
+| `git rev-parse HEAD:backend/migrations/192_subscription_cache_invalidation_outbox.sql` | `0` | `502ecec1caf9f76e022c2e83acf3707190539301`. |
+| `git show HEAD:backend/cmd/server/VERSION` | `0` | Exactly `0.1.165.4`. |
+
+### Docker Preflight And Conditional Integration
+
+- The fresh preflight script exited `0`. `C:\Users\caiqy\AppData\Local\Temp\sub2api-v0169-docker-preflight.log` contains exactly `docker_command=unavailable`; `preflightAvailable=false`.
+- Docker was unavailable, so integration was not run. Static, historical, compile-only, or unit evidence is not a substitute.
+
+| Integration target | Classification | Evidence |
+| --- | --- | --- |
+| `TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate` | `unverified` | Docker preflight unavailable; not run. |
+| `TestMigrationsRunner_PreservesPasskeyAndSubscriptionQuotaMigrationsAcrossUpgrade` | `unverified` | Docker preflight unavailable; not run. |
+| `TestAdvanceQuotaCycleReceipt_RollsBackSubscriptionWhenReceiptWriteFails` | `unverified` | Docker preflight unavailable; not run. |
+| `TestSubscriptionCacheInvalidationOutbox_TriggersSemanticChangesAndRollsBack` | `unverified` | Docker preflight unavailable; not run. |
+| New/upgrade PostgreSQL migration evidence | `unverified` | Docker/Testcontainers integration was unavailable and not run. |
+
+### Final Scope
+
+- Before this ledger append, status and index were clean except for `?? .comet/current-change.json`; the runtime-selection file was not read, modified, staged, committed, stashed, or deleted.
+- This final closure changes only the ledger. No Plan/OpenSpec task/checkoff, progress, product, generated, migration, dependency, configuration, or other non-ledger path was changed.
+- No fetch, push, tag, release, deploy, Docker integration/image action, SSH, server, or remote operation was performed.
