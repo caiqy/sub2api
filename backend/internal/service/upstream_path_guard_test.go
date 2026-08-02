@@ -12,6 +12,9 @@ import (
 func TestSanitizedUpstreamPathSuffixRejectsNonConformingSegments(t *testing.T) {
 	// 到达业务代码的 URL.Path 已是百分号解码后的结果，因此用例按解码后的形态书写。
 	rejected := []string{
+		"../models",
+		"../../models",
+		"...",
 		"/..",
 		"/../..",
 		"/../../x/y",
@@ -19,6 +22,9 @@ func TestSanitizedUpstreamPathSuffixRejectsNonConformingSegments(t *testing.T) {
 		"/compact/..",
 		`/..\..\x`,
 		`/compact\..`,
+		`/compact\detail`,
+		"compact?next=%2fmodels",
+		"compact#fragment",
 		"/?a=b",
 		"/compact?a=b",
 		"/compact#frag",
@@ -106,6 +112,14 @@ func TestOpenAIResponsesRequestPathSuffixRejectsNonConformingSubpaths(t *testing
 	gin.SetMode(gin.TestMode)
 
 	nonConformingPaths := []string{
+		"/v1/responses/../models",
+		"/v1/responses/../../models",
+		"/v1/responses/...",
+		"/v1/responses/%2e%2e/models",
+		"/v1/responses/%2E%2E%2Fmodels",
+		"/v1/responses/compact%2f..%2fmodels",
+		`/v1/responses/compact\detail`,
+		"/v1/responses/%5c..%5cmodels",
 		"/v1/responses/../../x/y",
 		"/v1/responses/..%2f..%2fx/y",
 		"/v1/responses/%2e%2e/%2e%2e/x",
@@ -115,6 +129,7 @@ func TestOpenAIResponsesRequestPathSuffixRejectsNonConformingSubpaths(t *testing
 		"/v1/responses/%3fa=b",
 		"/v1/responses/x%23frag",
 		"/v1/responses//double",
+		"/v1/responses/compact//detail",
 	}
 	for _, path := range nonConformingPaths {
 		t.Run(path, func(t *testing.T) {
@@ -132,10 +147,14 @@ func TestOpenAIResponsesRequestPathSuffixRejectsNonConformingSubpaths(t *testing
 
 	// 合法子路径必须保持原样转发。
 	for path, want := range map[string]string{
-		"/v1/responses":                        "",
-		"/v1/responses/compact":                "/compact",
-		"/responses/compact/":                  "/compact",
-		"/backend-api/codex/responses/compact": "/compact",
+		"/v1/responses":                                       "",
+		"/v1/responses/":                                      "",
+		"/v1/responses/compact":                               "/compact",
+		"/v1/responses/compact?next=%2fmodels":                "/compact",
+		"/responses/compact?next=%2fmodels":                   "/compact",
+		"/backend-api/codex/responses/compact?next=%2fmodels": "/compact",
+		"/responses/compact/":                                 "/compact",
+		"/backend-api/codex/responses/compact":                "/compact",
 	} {
 		t.Run("forwardable_"+path, func(t *testing.T) {
 			c := newResponsesSuffixTestContext(t, path)

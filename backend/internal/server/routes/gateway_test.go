@@ -68,6 +68,9 @@ func TestGatewayRoutesOpenAIResponsesCompactPathIsRegistered(t *testing.T) {
 		"/responses/compact",
 		"/backend-api/codex/responses",
 		"/backend-api/codex/responses/compact",
+		"/v1/responses/compact?next=%2fmodels",
+		"/responses/compact?next=%2fmodels",
+		"/backend-api/codex/responses/compact?next=%2fmodels",
 	} {
 		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"model":"gpt-5"}`))
 		req.Header.Set("Content-Type", "application/json")
@@ -338,24 +341,32 @@ func TestGatewayRoutesGrokAllowsCLICompatibilityEntrypoints(t *testing.T) {
 func TestGatewayRoutesResponsesSubpathRejectsNonConformingSubpaths(t *testing.T) {
 	router := newGatewayRoutesTestRouter()
 
-	for _, path := range []string{
-		"/v1/responses/../../x/y",
-		"/v1/responses/..%2f..%2fx/y",
-		"/v1/responses/%2e%2e/%2e%2e/x",
-		"/responses/%2e%2e%2fx",
-		"/backend-api/codex/responses/..%2f..%2fx",
-		`/v1/responses/..\..\x`,
-		"/v1/responses/%3fa=b",
-		"/v1/responses/x%23frag",
-		"/v1/responses/compact%2f..",
+	for _, prefix := range []string{
+		"/v1/responses",
+		"/responses",
+		"/backend-api/codex/responses",
 	} {
-		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"model":"gpt-5"}`))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
+		for _, suffix := range []string{
+			"/../models",
+			"/../../models",
+			"/...",
+			"/%2e%2e/models",
+			"/%2E%2E%2Fmodels",
+			"/compact%2f..%2fmodels",
+			`/compact\detail`,
+			"/%5c..%5cmodels",
+			"//double",
+			"/compact//detail",
+		} {
+			path := prefix + suffix
+			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"model":"gpt-5"}`))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
 
-		router.ServeHTTP(w, req)
-		require.Equal(t, http.StatusNotFound, w.Code, "path=%s must be rejected at the edge", path)
-		require.Contains(t, w.Body.String(), "Unsupported responses subpath", "path=%s", path)
+			router.ServeHTTP(w, req)
+			require.Equal(t, http.StatusNotFound, w.Code, "path=%s must be rejected at the edge", path)
+			require.Contains(t, w.Body.String(), "Unsupported responses subpath", "path=%s", path)
+		}
 	}
 }
 

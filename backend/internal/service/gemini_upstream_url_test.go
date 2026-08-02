@@ -1,8 +1,12 @@
 package service
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -40,6 +44,10 @@ func TestBuildGeminiAIStudioModelActionURLRejectsNonConformingModel(t *testing.T
 		"gemini 2.5 pro",
 		"gemini\x00pro",
 		"gemini-2.5-pro@001",
+		"gemini-2.5-pro;001",
+		"gemini 2.5 pro",
+		"gemini-模型",
+		"gemini-2.5-pro%",
 		"gemini~pro",
 		"models/gemini-2.5-pro",
 		"...",
@@ -59,4 +67,43 @@ func TestBuildGeminiAIStudioModelActionURLRejectsNonConformingModel(t *testing.T
 
 	_, err = buildGeminiAIStudioModelActionURL("", "gemini-2.5-pro", "generateContent", false)
 	require.Error(t, err)
+}
+
+func TestGeminiAIStudioInvalidModelsDoNotSendRequests(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	account := &Account{
+		Type: AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"api_key": "test-key",
+		},
+	}
+	for _, tc := range []struct {
+		name    string
+		forward func(*GeminiMessagesCompatService, *gin.Context, *Account) error
+	}{
+		{
+			name: "native URL model",
+			forward: func(svc *GeminiMessagesCompatService, c *gin.Context, account *Account) error {
+				_, err := svc.ForwardNative(context.Background(), c, account, "../models", "generateContent", false, []byte(`{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`))
+				return err
+			},
+		},
+		{
+			name: "compat body model",
+			forward: func(svc *GeminiMessagesCompatService, c *gin.Context, account *Account) error {
+				_, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"../models","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`))
+				return err
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-pro:generateContent", nil)
+			upstream := &geminiCompatHTTPUpstreamStub{}
+			svc := &GeminiMessagesCompatService{httpUpstream: upstream}
+
+			require.Error(t, tc.forward(svc, c, account))
+			require.Zero(t, upstream.calls)
+		})
+	}
 }
