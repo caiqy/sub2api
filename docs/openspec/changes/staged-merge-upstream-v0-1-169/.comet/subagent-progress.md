@@ -4,7 +4,7 @@
 - Review mode: `thorough`
 - 当前任务: Task 6 - 在未提交状态合入 v0.1.166 并完成阻塞审查
 - 映射 OpenSpec: 2.1
-- 阶段: `task-6 / review-result + fix-round-1-dispatch-intent`
+- 阶段: `task-6 / fix-round-1-result + scoped-re-review-dispatch-intent`
 - Task-6 dispatch token: `task-6-implementer-attempt-1-3a7bf096e`
 - Task-6 role: `implementer`
 - Task-6 model: `high`
@@ -29,8 +29,17 @@
 - Task-6 fix-1 role: `fix-agent (resume implementer)`
 - Task-6 fix-1 model: `high`
 - Task-6 fix-1 base HEAD: `f4aef3a1c7893a197f385b2887d59f9f47b56476`
-- Task-6 fix-1 task ID: `pending resumed functions.task return`
-- Task-6 review-fix rounds: `1/5 dispatching`
+- Task-6 fix-1 task ID: `ses_03f19ece1ffe8RaMOnqqVb8Gli`
+- Task-6 fix-1 result: `DONE`
+- Task-6 fix-1 commits: code/test `9bde22ff6e7d87dfea5a19386813760a65c7771f`; ledger correction `ca670aa7f0d72b6b0548a084635b0601200e0bfc`
+- Task-6 fix-1 verification: server compile、user route test、relay final-model RED/GREEN及OnTurnComplete family通过；gofmt finding经`gofmt -d`判定不成立。
+- Task-6 re-review dispatch token: `task-6-re-review-round-1-ca670aa7f`
+- Task-6 re-review role: `reviewer`
+- Task-6 re-review model: `standard`
+- Task-6 re-review base HEAD: `ca670aa7f0d72b6b0548a084635b0601200e0bfc`
+- Task-6 re-review package: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/review-afd5c0acf..ca670aa7f.diff`
+- Task-6 re-review task ID: `pending atomic functions.task return`
+- Task-6 review-fix rounds: `1/5 reviewing`
 - Task-5 dispatch token: `task-5-implementer-attempt-1-f1e9836a3`
 - Task-5 role: `implementer`
 - Task-5 model: `standard`
@@ -130,4 +139,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - Task-4审查-修复轮次: `2/2 PASS`
-- 状态: Task6 review未通过；即将恢复原implementer修复已验证的router/server-test/relay/evidence问题，返回前不得重复派发或checkoff。
+- 状态: fix round 1已提交；即将派发scoped re-review逐项裁决原findings与fix diff，返回前不得重复派发或checkoff。
