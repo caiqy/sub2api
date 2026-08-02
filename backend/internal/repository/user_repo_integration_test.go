@@ -205,7 +205,10 @@ func (s *UserRepoSuite) TestUpdateAndSetBlockedGroupsReuseOuterTransaction() {
 	loaded, err := s.repo.GetByID(s.ctx, user.ID)
 	s.Require().NoError(err)
 	loaded.Username = "inside-tx"
-	s.Require().NoError(s.repo.Update(txCtx, loaded))
+	s.Require().NoError(s.repo.Update(txCtx, loaded, service.UserUpdateFields{Username: true}))
+	updated, err := s.repo.GetByID(txCtx, user.ID)
+	s.Require().NoError(err)
+	s.Require().Equal("inside-tx", updated.Username)
 	s.Require().NoError(s.repo.SetBlockedGroups(txCtx, user.ID, []int64{group.ID}))
 	s.Require().NoError(tx.Rollback())
 
@@ -226,7 +229,10 @@ func (s *UserRepoSuite) TestUpdateRollsBackWhenSetBlockedGroupsFailsInOuterTrans
 	loaded, err := s.repo.GetByID(s.ctx, user.ID)
 	s.Require().NoError(err)
 	loaded.Username = "inside-tx"
-	s.Require().NoError(s.repo.Update(txCtx, loaded))
+	s.Require().NoError(s.repo.Update(txCtx, loaded, service.UserUpdateFields{Username: true}))
+	updated, err := s.repo.GetByID(txCtx, user.ID)
+	s.Require().NoError(err)
+	s.Require().Equal("inside-tx", updated.Username)
 	s.Require().Error(s.repo.SetBlockedGroups(txCtx, user.ID+999999, []int64{group.ID}))
 	s.Require().NoError(tx.Rollback())
 
