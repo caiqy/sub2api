@@ -2,35 +2,24 @@
 
 - Plan: `docs/superpowers/plans/2026-08-02-staged-merge-upstream-v0-1-169.md`
 - Review mode: `thorough`
-- 当前任务: Task 3 - 建立能力矩阵与冲突台账
-- 映射 OpenSpec: 1.3
-- 阶段: `done / checkoff`
-- Dispatch token: `task-3-rereviewer-attempt-1-d6aab7c92`
-- Role: `re-reviewer`
+- 当前任务: Task 4 - 验证阶段 0 的本地保护测试与生成稳定性
+- 映射 OpenSpec: 1.4
+- 阶段: `implementing / dispatch-intent`
+- Dispatch token: `task-4-implementer-attempt-1-1c6e5b405`
+- Role: `implementer`
 - Attempt: `1`
 - Model: `high`
-- Base HEAD: `d8a3706d7126d3eb17718ee9b90c7dba72034dea`
-- Brief: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-3-brief.md`
-- Report: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-3-report.md`
-- Review package: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/review-ba8601061..32a766184.diff`
-- Implementer task ID: `ses_03fd8db43ffephmpAkewpqf9W7`
-- Reviewer task ID: `ses_03fd2aa02ffeubDnSOK5eIMJeT`
-- Fix task ID: `ses_03fcf7480ffe3DLaroSQAlqJn1`
-- Re-reviewer task ID: `ses_03fc764beffeHh1WkKPv6VxXld`
-- Result: implementer `DONE`; initial reviewer `CHANGES_REQUESTED`; fix `DONE_WITH_CONCERNS`; re-reviewer `PASS`
-- Implementation commit: `32a766184a819c12c6daf043fc40bb2b72498c3b`
-- Verification summary: 提交仅含 build ledger；`git diff --check HEAD~1..HEAD` 无输出，工作树仅显示 selection 文件。
-- Risk signals: 单任务 ledger diff 与三个 release changed-files 清单规模超过 200 行，触发 thorough review。
-- Concerns: Ent/Wire、依赖与 migration 仍为 `gap`，由 Task 4 关闭。
-- Review verdict: `Spec ❌`; `Quality CHANGES_REQUESTED`
-- Open finding (Critical): 11 个 `protected` 没有当前直接测试 PASS，状态语义失真。
-- Open findings (Important): 2 个 `manual` 没有已完成人工审查证据；受影响 tag 映射与 changed-files 不一致；六列冲突台账分隔行只有五列。
-- Review finding (Minor): 证据单元未清楚区分历史测试存在、静态审查与当前未验证。
-- Fix result: `DONE_WITH_CONCERNS`; commit `fe6357c9da7ee9668497c5429ecda26795fd0192`；矩阵 `14` 行、`gap=14`、六列表格和 Images 六项自检通过。
-- Fix risk: 未运行 Task 4，所有能力仍为 `gap`。
-- Fix concern: Task 4 必须逐项运行测试并完成入口/调用链/资源审查后才能关闭阻塞。
-- Re-review package: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/review-d8a3706d7..fe6357c9d.diff`（覆盖两个相邻 ledger-only fix commits）。
-- Re-review verdict: 原 1 Critical、3 Important、1 Minor 全部 `ADDRESSED`；无新 Critical/Important；`gap=14` 由 Task 4 关闭。
-- TDD: `tdd`; implementer 必须加载 Skill。该任务无生产代码修改，不伪造 RED；报告必须记录 `N/A` 原因、三段 changed-files 和矩阵/台账审计结果。
-- 审查-修复轮次: `1/2`
-- 状态: Task 3 review clean；顶层 Plan Task 3 与 OpenSpec 1.3 已由 controller 勾选，待提交本三路径 checkoff。
+- Base HEAD: `1c6e5b4050540b04b8df2976e8cb25e8d2be5eec`
+- Brief: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-4-brief.md`
+- Report: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-4-report.md`
+- Task ID: `pending atomic functions.task return`
+- Result: `pending`
+- Implementation commits: `pending`
+- RED evidence: `pending`
+- GREEN evidence: `pending`
+- Verification summary: `pending`
+- Risk signals: `pending`
+- Concerns: `pending`
+- TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
+- 审查-修复轮次: `0/2`
+- 状态: 即将调用原子 `functions.task`；返回前不得重复派发。
