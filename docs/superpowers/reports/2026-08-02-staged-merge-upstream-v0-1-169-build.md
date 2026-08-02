@@ -746,3 +746,69 @@ git rev-parse HEAD:backend/migrations/192_subscription_cache_invalidation_outbox
 - 风险信号：两轮 generate 都重现受跟踪 `wire_gen.go` diff；其内容已恢复且未进入提交，但 generated-output 不能放行。
 - 风险信号：冲突扫描正则把合法字符串分隔符作为 marker 命中；仓库没有 unmerged 文件，仍需在 controller 层决定是否修正检测模式。
 - 顾虑：Docker integration 未执行，保持 `gap` 交 Task 5；本轮未执行 fetch、merge、push、tag、release、deploy、镜像、SSH、服务器、数据库、Redis 或 Nginx 操作。
+
+## Task 4 Repaired Stage 0 Gates (Fix-2)
+
+- 修复基线：`2c108ca1dbe3db1918da136517e31adba5fb34dd`。
+- 已保留的隔离提交：Images `746c0ccdef0b4536adc9867b0cfc89357b1b9787`、outbox build tag `663955ae8`、Wire `f01473818`。
+- lint 修复提交：`03d522fea7b7292730799cc2178dc072f29cee66`（仅 `backend/internal/repository/user_subscription_repo.go`）。
+
+### Lint TDD
+
+- RED：`golangci-lint run ./internal/repository` exit `1`，唯一产品 finding 为 `internal/repository/user_subscription_repo.go:578:18` 的 `errcheck`，即 `defer rows.Close()` 未检查返回值。brief 的行级后置正则要求同一行同时带 `errcheck` 标签，因 linter 将标签输出在独立汇总行而额外抛出；原始 finding 仍为预期的精确 RED。
+- GREEN：同一 linter 命令从 `backend` 目录运行，exit `0`，输出 `0 issues.`；最小修复为 `defer func() { _ = rows.Close() }()`，与同包既有模式一致且不改变行为。
+
+### Direct Protection Evidence
+
+- 五组新增 non-Docker gap 测试均 exit `0`：rows 1/2 privacy and previous-response sticky；row 3 WebSocket slot ownership；row 3 Live/terminal lifecycle；row 13 pricing/count_tokens/release fallback；row 11 的 unit-tag user resources/batch/group copy 与 default user-group binding。
+- 完整 brief 聚焦集全部 exit `0`：9 个 backend Go test 命令和指定 Vitest 命令；Vitest 为 `4` files、`50` tests passed。
+- `make test` exit `0`；`make "VERSION=0.1.165.4" "SHELL=D:/scoop/shims/bash.exe" build` exit `0`。
+- 前端测试与 build 仍输出既有 Browserslist、Vue `router-link`、jsdom、Vite dynamic-import/chunk-size 警告，但全部相关命令退出 `0`。
+
+### Generation Evidence
+
+所有 Task 4 generation 均由 brief 的同一 bounded-retry helper 执行；每次完整 stdout/stderr、exit code 与 diff paths 已保留在以下日志中。
+
+| run ID | attempts | result | stdout/stderr logs |
+| --- | --- | --- | --- |
+| `fix2-wire-refresh` | `1` | exit `0`，无 generated diff | `C:\Users\caiqy\AppData\Local\Temp\sub2api-stage0-fix2-wire-refresh-attempt-1.log`; `C:\Users\caiqy\AppData\Local\Temp\sub2api-stage0-fix2-wire-refresh-attempt-1.stderr.log` |
+| `fix2-wire-stability-1` | `1` | exit `0`，无 generated diff | `C:\Users\caiqy\AppData\Local\Temp\sub2api-stage0-fix2-wire-stability-1-attempt-1.log`; `C:\Users\caiqy\AppData\Local\Temp\sub2api-stage0-fix2-wire-stability-1-attempt-1.stderr.log` |
+| `fix2-wire-stability-2` | `2` | attempt 1 exit `2`，仅 `backend/ent/announcementread/announcementread.go` 的 `user-mapped section open`，helper 恢复 Ent/Wire 后等待 2 秒；attempt 2 exit `0`，无 generated diff | `C:\Users\caiqy\AppData\Local\Temp\sub2api-stage0-fix2-wire-stability-2-attempt-1.log`; `C:\Users\caiqy\AppData\Local\Temp\sub2api-stage0-fix2-wire-stability-2-attempt-1.stderr.log`; `C:\Users\caiqy\AppData\Local\Temp\sub2api-stage0-fix2-wire-stability-2-attempt-2.log`; `C:\Users\caiqy\AppData\Local\Temp\sub2api-stage0-fix2-wire-stability-2-attempt-2.stderr.log` |
+| `fix2-full-stability-1` | `1` | exit `0`，无 generated diff | `C:\Users\caiqy\AppData\Local\Temp\sub2api-stage0-fix2-full-stability-1-attempt-1.log`; `C:\Users\caiqy\AppData\Local\Temp\sub2api-stage0-fix2-full-stability-1-attempt-1.stderr.log` |
+| `fix2-full-stability-2` | `1` | exit `0`，无 generated diff | `C:\Users\caiqy\AppData\Local\Temp\sub2api-stage0-fix2-full-stability-2-attempt-1.log`; `C:\Users\caiqy\AppData\Local\Temp\sub2api-stage0-fix2-full-stability-2-attempt-1.stderr.log` |
+
+- 总 retry 次数：`1`。失败 stderr 除该 generated-path exact signature、`exit status` 和 make wrapper 外无 `error`、`fail`、`panic` 或 `fatal`；未杀进程、未调整 antivirus 或 CodeGraph。
+- 每次成功后 `git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` 均 exit `0` 且无输出。
+
+### Static And OID Gates
+
+- `git diff --check`、`git diff --cached --check`、`git diff --name-only --diff-filter=U` 均 exit `0` 且无输出。
+- 完整行 conflict scan exit `1` 且无匹配，为指定 PASS 条件。
+- migration OID 均 exit `0`：receipt `c22d47d79cbbaf4bc40524d42ef52e6cc8ac3af6`；outbox `502ecec1caf9f76e022c2e83acf3707190539301`。
+
+### Repaired 14-Line Matrix
+
+| # | 状态 | 当前直接证据 |
+| --- | --- | --- |
+| 1 | `protected` | scheduler/WaitPlan 及 privacy DB recheck 命名测试通过。 |
+| 2 | `protected` | session/image 与 previous-response privacy sticky 命名测试通过。 |
+| 3 | `protected` | usage snapshot、WebSocket ownership、Live/terminal lifecycle 命名测试通过。 |
+| 4 | `protected` | prompt-audit route 与 subsequent-turn gate 命名测试通过。 |
+| 5 | `protected` | 八个 Images 审计/文本生命周期直接测试通过。 |
+| 6 | `protected` | full `make test` 通过，包含 request-body replay/spooling 覆盖。 |
+| 7 | `protected` | full `make test` 通过，包含 async image、object storage 和图片计费覆盖。 |
+| 8 | `protected` | full `make test` 通过，包含 settings hot/partial update 覆盖。 |
+| 9 | `protected` | full `make test` 通过，包含 scoped update、session/passkey 覆盖。 |
+| 10 | `gap` | Docker quota/outbox/migration integration 仅交 Task 5。 |
+| 11 | `protected` | user resources、batch limits、group duplication 的 18 个 unit-tag 测试和 group binding 测试通过。 |
+| 12 | `protected` | 指定 Vitest 四文件 `50` tests 通过。 |
+| 13 | `protected` | pricing/count_tokens/release fallback 命名测试通过；deploy scripts 是 v0.1.169 merge 后的未来阶段证据，不是当前 gap。 |
+| 14 | `protected` | full test、VERSION/SHELL build、五轮受控 generate 与 migration OID 全部通过。 |
+
+统计：`protected=13`，`manual=0`，`gap=1`，`unverified=0`；唯一 gap 是 row 10，归属 Task 5。
+
+### Risk Signals And Concerns
+
+- 一次 Windows `user-mapped section open` 在精确、允许的重试条件下恢复；所有后续 generation 稳定、无 diff，但其外部环境属性应继续保留为风险信号。
+- Docker quota/outbox/migration integration 未执行，严格保留给 Task 5。
+- 未执行 fetch、merge、push、tag、release、deploy、服务器或镜像操作；ledger 提交前无 tracked 工作树 diff。
