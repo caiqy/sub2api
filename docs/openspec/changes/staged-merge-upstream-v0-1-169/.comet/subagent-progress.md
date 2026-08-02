@@ -2,9 +2,9 @@
 
 - Plan: `docs/superpowers/plans/2026-08-02-staged-merge-upstream-v0-1-169.md`
 - Review mode: `thorough`
-- 当前任务: Task 14 - 封闭 v0.1.169 的本机门禁与阶段证据
-- 映射 OpenSpec: 4.3
-- 阶段: `task-14 / fresh-review-result`
+- 当前任务: Task 15 - 一次更新最终版本
+- 映射 OpenSpec: 5.1
+- 阶段: `task-14 / complete; task-15 / pending`
 - Task-10 dispatch token: `task-10-implementer-attempt-1-e46cd9d55`
 - Task-10 role: `implementer`
 - Task-10 model: `high`
@@ -133,6 +133,7 @@
 - Task-14 reviewer dispatch token: `task-14-reviewer-c2d18a7e`
 - Task-14 reviewer task ID: `ses_03ceb0f79ffesJpArunHaXEPRt`
 - Task-14 reviewer result: `ALL_ADDRESSED; Spec compliance PASS; Task quality APPROVED; no findings`
+- Task-14 controller verification: 7个修复相关tests PASS；test/ledger scopes、VERSION/OID与clean gate通过。
 - Task-9 dispatch token: `task-9-implementer-attempt-1-97d44dd20`
 - Task-9 role: `implementer`
 - Task-9 model: `high`
@@ -489,4 +490,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - Task-4审查-修复轮次: `2/2 PASS`
-- 状态: Task14 review clean；待controller轻量核验与checkoff，Task15不得运行。
+- 状态: Task14/OpenSpec 4.3已checkoff；Task15待唯一VERSION更新。

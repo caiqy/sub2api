@@ -22,7 +22,7 @@
 
 - [x] 4.1 使用 `git merge --no-ff --no-commit v0.1.169`，逐文件融合冲突并创建第二父为固定 tag SHA 的 merge commit
 - [x] 4.2 审查 GHSA-vrxq-qm4h-6hgg 路径片段闭集校验、代理断流熔断 fail-open、release 资源、Qwen3Guard、count_tokens、pricing 与本地网关/审计/调度定制的交互
-- [ ] 4.3 运行 v0.1.169 安全与行为聚焦测试、本机 full 门禁及适用的本机 integration，关闭能力矩阵 gap 并记录阶段证据
+- [x] 4.3 运行 v0.1.169 安全与行为聚焦测试、本机 full 门禁及适用的本机 integration，关闭能力矩阵 gap 并记录阶段证据
 
 ## 5. 最终版本与验证
 
