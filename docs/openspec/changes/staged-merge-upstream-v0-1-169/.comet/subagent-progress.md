@@ -4,7 +4,7 @@
 - Review mode: `thorough`
 - 当前任务: Task 13 - 对 v0.1.169 完成 GHSA 负向矩阵与行为审查
 - 映射 OpenSpec: 4.2
-- 阶段: `task-13 / fix-round-1-resume-dispatch-intent`
+- 阶段: `task-13 / fix-round-1-result`
 - Task-10 dispatch token: `task-10-implementer-attempt-1-e46cd9d55`
 - Task-10 role: `implementer`
 - Task-10 model: `high`
@@ -104,13 +104,15 @@
 - Task-13 reviewer dispatch token: `task-13-reviewer-01a4e9d7`
 - Task-13 reviewer task ID: `ses_03d292145ffefbQVt47rrWEvqP`
 - Task-13 reviewer result: `CHANGES_REQUIRED; Spec compliance FAIL; 5 Important, 1 Minor, 0 Critical`
-- Task-13 review-fix rounds: `1/5 changes_required`
 - Task-13 findings: Responses direct zero-call/not-compact/fixed bounds/raw coverage；Gemini new test未执行；canonical manual状态误升；compose sibling option状态错误；count_tokens/pricing链路证据与ledger SHA/scope不完整。
 - Task-13 fix-1 dispatch token: `task-13-fix-round-1-cf5b8720`
 - Task-13 fix-1 task ID: `ses_03d3cb3d4ffel7ONTPdZnbo65f`
 - Task-13 fix-1 blocked: independent Gemini test panics before guard because test fixture omitted `GeminiMessagesCompatService.cfg`; no edits/commits made。
 - Task-13 fix-1 resolution: authorize minimal `gemini_upstream_url_test.go` fixture config only；production compat scope remains unchanged。
 - Task-13 fix-1 resume dispatch token: `task-13-fix-round-1-resume-0f8746c2`
+- Task-13 fix-1 result: `DONE; all 5 Important + 1 Minor addressed`
+- Task-13 fix-1 commits: compose `e0b827f95`; testability `46bda30bb`; ledger `3778b2428`
+- Task-13 review-fix rounds: `1/5 fixed; round 2 pending`
 - Task-9 dispatch token: `task-9-implementer-attempt-1-97d44dd20`
 - Task-9 role: `implementer`
 - Task-9 model: `high`
@@ -467,4 +469,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - Task-4审查-修复轮次: `2/2 PASS`
-- 状态: Task13 fix round 1即将按fixture correction恢复；Task14不得运行。
+- 状态: Task13 fix round 1已完成；待scoped re-review，Task14不得运行。
