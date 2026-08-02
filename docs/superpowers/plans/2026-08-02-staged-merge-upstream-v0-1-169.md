@@ -1544,7 +1544,7 @@ Expected: implementer 提交严格只含 ledger；最终 index 为空，status �
 
 ### Task 15: 一次更新最终版本
 
-- [ ] Task 15: 一次更新最终版本
+- [x] Task 15: 一次更新最终版本
 
 **映射 OpenSpec:** 5.1
 
