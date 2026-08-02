@@ -2,31 +2,22 @@
 
 - Plan: `docs/superpowers/plans/2026-08-02-staged-merge-upstream-v0-1-169.md`
 - Review mode: `thorough`
-- 当前任务: Task 2 - 重新获取 refs 并固定 tag 范围
-- 映射 OpenSpec: 1.2
-- 阶段: `done / checkoff`
-- Dispatch token: `task-2-rereviewer-attempt-1-427a806f9`
-- Role: `re-reviewer`
+- 当前任务: Task 3 - 建立能力矩阵与冲突台账
+- 映射 OpenSpec: 1.3
+- 阶段: `implementing / dispatch-intent`
+- Dispatch token: `task-3-implementer-attempt-1-1bc578a39`
+- Role: `implementer`
 - Attempt: `1`
 - Model: `standard`
-- Base HEAD: `1d663e01fd4efeefb40791ec588071d20bca186a`
-- Brief: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-2-brief.md`
-- Report: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-2-report.md`
-- Review package: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/review-acca9d40c..1d663e01f.diff`
-- Implementer task ID: `ses_03fe6d374ffeQ6LCrviqEa8tNZ`
-- Reviewer task ID: `ses_03fe16e9bffecMKm7d8PB8lbA5`
-- Fix task ID: `ses_03fde3529ffej12BD67LT6zCT3`
-- Re-reviewer task ID: `ses_03fdbf8daffeOxiq959yh1GA5W`
-- Result: implementer `DONE`; initial reviewer `CHANGES_REQUESTED`; fix `DONE`; re-reviewer `PASS`
-- Implementation commit: `1d663e01fd4efeefb40791ec588071d20bca186a`
-- Verification summary: 祖先链通过、正式 tag 上界为 `v0.1.169`，提交仅含 build ledger，状态仅 `?? .comet/current-change.json`。
-- Risk signals: `upstream/main` 已前进至 `b74024c78`，范围外提交已记录。
-- Concerns: 无阻塞顾虑。
-- Review verdict: `Spec ❌`; `Quality CHANGES_REQUESTED`
-- Open finding (Important): `c772d1866` 在 ledger 中为 `moonfunjohn`、在 report 中为 `moonfunjiang`；两者均声称是完整 `git log --oneline`，必须用权威输出修正错误一方。
-- Fix result: `DONE`; commit `none (report-only)`；`git show -s --format='%h %s' c772d1866` 确认 `moonfunjohn`，report 已修正并追加 Fix round 1/2 证据。
-- Re-review package: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/review-1d663e01f..1d663e01f-report-only.diff`（tracked diff 为零；修复仅在 ignored report）。
-- Re-review verdict: 原 Important `ADDRESSED`；report 与 ledger 均为 `moonfunjohn`；无新 Critical/Important breakage。
-- TDD: `tdd`; implementer 必须加载 Skill。该任务无生产代码修改，不伪造 RED；报告必须记录 `N/A` 原因和全部 refs/tag 门禁结果。
-- 审查-修复轮次: `1/2`
-- 状态: Task 2 review clean；顶层 Plan Task 2 与 OpenSpec 1.2 已由 controller 勾选，待提交本三路径 checkoff。
+- Base HEAD: `1bc578a39170440cb042c38d7cb99aab8329defd`
+- Brief: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-3-brief.md`
+- Report: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-3-report.md`
+- Task ID: `pending atomic functions.task return`
+- Result: `pending`
+- Implementation commit: `pending`
+- Verification summary: `pending`
+- Risk signals: `pending`
+- Concerns: `pending`
+- TDD: `tdd`; implementer 必须加载 Skill。该任务无生产代码修改，不伪造 RED；报告必须记录 `N/A` 原因、三段 changed-files 和矩阵/台账审计结果。
+- 审查-修复轮次: `0/2`
+- 状态: 即将调用原子 `functions.task`；返回前不得重复派发。
