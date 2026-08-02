@@ -1657,7 +1657,7 @@ Expected: ledger 明确关联最终 source HEAD 和命令退出码；提交后 i
 
 ### Task 17: 验证拓扑、migration 保留和最终 integration 状态
 
-- [ ] Task 17: 验证拓扑、migration 保留和最终 integration 状态
+- [x] Task 17: 验证拓扑、migration 保留和最终 integration 状态
 
 **映射 OpenSpec:** 5.3
 

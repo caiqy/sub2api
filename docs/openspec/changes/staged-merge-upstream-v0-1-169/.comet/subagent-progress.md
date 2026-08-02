@@ -2,9 +2,9 @@
 
 - Plan: `docs/superpowers/plans/2026-08-02-staged-merge-upstream-v0-1-169.md`
 - Review mode: `thorough`
-- 当前任务: Task 17 - 验证拓扑、migration 保留和最终 integration 状态
-- 映射 OpenSpec: 5.3
-- 阶段: `task-17 / fresh-review-result`
+- 当前任务: Task 18 - 完成本地能力专项 review 与最终验证报告
+- 映射 OpenSpec: 5.4
+- 阶段: `task-17 / complete; task-18 / pending`
 - Task-10 dispatch token: `task-10-implementer-attempt-1-e46cd9d55`
 - Task-10 role: `implementer`
 - Task-10 model: `high`
@@ -175,6 +175,7 @@
 - Task-17 reviewer dispatch token: `task-17-reviewer-6f12e8b9`
 - Task-17 reviewer task ID: `ses_03cb3651effeHmOSA1UJpJQu3j`
 - Task-17 reviewer result: `ALL_ADDRESSED; Spec compliance PASS; Task quality APPROVED`
+- Task-17 controller verification: ancestors/3 merge set、migration filenames/diff/OID、Docker log、scope与clean gate通过。
 - Task-9 dispatch token: `task-9-implementer-attempt-1-97d44dd20`
 - Task-9 role: `implementer`
 - Task-9 model: `high`
@@ -531,4 +532,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - Task-4审查-修复轮次: `2/2 PASS`
-- 状态: Task17 review clean；待controller核验与checkoff，Task18不得运行。
+- 状态: Task17/OpenSpec 5.3已checkoff；Task18待最终verify report与strict validate。
