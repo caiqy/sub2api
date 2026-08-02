@@ -4,7 +4,7 @@
 - Review mode: `thorough`
 - 当前任务: Task 16 - 在最终 source HEAD 重跑完整本机验证
 - 映射 OpenSpec: 5.2
-- 阶段: `task-16 / fresh-review-dispatch-intent`
+- 阶段: `task-16 / review-result-changes-required`
 - Task-10 dispatch token: `task-10-implementer-attempt-1-e46cd9d55`
 - Task-10 role: `implementer`
 - Task-10 model: `high`
@@ -153,7 +153,11 @@
 - Task-16 source HEAD: `b54cd46a45ccf934885a2ab66597e386ebecbf99`
 - Task-16 ledger commit: `063bc56ae`
 - Task-16 reviewer dispatch token: `task-16-reviewer-f923ad71`
-- Task-16 reviewer task ID: `pending functions.task return`
+- Task-16 reviewer task ID: `ses_03cc8af3affeZNRCltBgcnloI9`
+- Task-16 reviewer result: `CHANGES_REQUIRED; Spec compliance FAIL; 1 Important, 0 Critical/Minor`
+- Task-16 review-fix rounds: `1/5 changes_required`
+- Task-16 Important: untagged service command selects 6/9；Gateway usage、quota advance、quota reset三项需`-tags unit`，ledger 9/9 claim错误。
+- Task-16 controller discovery: untagged list 6；`-tags=unit` list 9；both commands exit 0。
 - Task-9 dispatch token: `task-9-implementer-attempt-1-97d44dd20`
 - Task-9 role: `implementer`
 - Task-9 model: `high`
@@ -510,4 +514,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - Task-4审查-修复轮次: `2/2 PASS`
-- 状态: Task16 fresh reviewer即将派发；Task17不得运行。
+- 状态: Task16 fix round 1待fresh tagged 9/9与ledger correction；Task17不得运行。
