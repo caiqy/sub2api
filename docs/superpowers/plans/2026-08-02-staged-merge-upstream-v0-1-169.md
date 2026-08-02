@@ -6,7 +6,7 @@ base-ref: e9a0e4aa53b5d9d5f5c84986cfadd8098dc8e4f3
 
 # 分段合并上游 v0.1.169 实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` to implement this plan task-by-task. Only the 18 top-level `Task N` lines are Plan checkboxes; controller owns their status.
 
 **Goal:** 在 Comet 已确认的干净隔离位置将上游 `v0.1.166`、`v0.1.168`、`v0.1.169` 作为三个可审计的 merge 节点按顺序合入，保护本地能力，并将版本一次更新为 `0.1.169.1`。
 
@@ -33,6 +33,30 @@ base-ref: e9a0e4aa53b5d9d5f5c84986cfadd8098dc8e4f3
 - 每个阶段的 ledger 证据提交后，index 必须为空；`git status --short --untracked-files=all` 过滤实际存在的 `?? .comet/current-change.json` 后必须为空；有 `gap` 的能力矩阵不得进入下一阶段。
 - 每次 merge 前都执行同一 clean gate：`git diff --cached --name-only` 必须无输出；`git status --short --untracked-files=all` 仅可输出实际存在的 `?? .comet/current-change.json`。每次 merge commit 前必须无 unmerged index、`git diff --cached --check` 通过，且 staged paths 不含 runtime selection、build/verify ledger、计划、Design Doc、OpenSpec proposal/design/delta spec/tasks 等规划产物。兼容/证据提交前都列出 staged paths，并验证它们是该提交命令中明确列出的 allowlist 子集。
 - 所有 `git add backend/ent` 以 Task 1 和本阶段 merge 前 clean gate 均通过为前提：若任一 gate 发现 `backend/ent/` 有用户改动，立即 BLOCK 并由 Comet 重建干净隔离位置；只有该目录由当前 merge 或当前兼容修复的生成步骤产生变化时才可递归暂存。
+- Comet SDD 分工固定：implementer 和 reviewer 均不得修改本计划。唯一合法的 Plan checkbox 修改是 controller 在 reviewer 通过后将当前顶层 Task 从 `[ ]` 改为 `[x]`，再同步唯一映射的 OpenSpec `tasks.md` 项。implementer 完成该 Task 的代码/ledger commit(s) 后，worktree/index 必须通过本计划的 clean 规则，随后必须由 thorough reviewer 审查。controller 创建的 checkoff commit 严格只暂存本计划、`tasks.md` 和 progress 三个路径；checkoff commit 不是 merge 或兼容提交，三个 upstream merge 前仍须重新通过 clean gate。
+- 通用 progress lifecycle：若平台可在 agent 完成前向 controller 返回 live agent/task ID，派发成功后立即将 agent identity、role、attempt 与显式 model 写入 progress，并创建严格 progress-only commit。`subagent-progress.md` 已由 planning 提交纳入 tracked，执行期间按普通 tracked 文件暂存。
+- 本平台 `functions.task` 是对 controller 的原子工具调用：工具返回前 controller 没有可执行的中间回合，returned `task_id` 与完成结果一起返回。每次 implementer、reviewer 或 fix 派发前，controller 必须先以 progress-only commit 写入唯一 dispatch token、role、attempt、显式 model、brief/report 路径与 base HEAD；不得把“待派发 implementer”宣称为已有 agent identity。工具返回后的第一个动作必须写入 returned `task_id`、`DONE`/`DONE_WITH_CONCERNS`/`BLOCKED`/`NEEDS_CONTEXT`、commit/test/report evidence，并创建 progress-only commit；该结果 checkpoint 可以与下一角色“即将派发”状态合并。
+- 恢复规则：若 progress 只有 dispatch intent 而没有 returned `task_id` 或结果，先检查指定 report、Git 提交和宿主工具结果/通知；确认已有结果才恢复对应流程，不能确认时标记 `BLOCKED`，禁止盲目重复派发。已有 `task_id` 且需要 fix round 时按平台支持方式 resume；Comet thorough review 的 round 计数不重置。任何 implementer/reviewer 启动前及每次 merge clean gate 前，最新 progress checkpoint 必须已提交，且 worktree 过滤实际 `?? .comet/current-change.json` 后为空。
+- Controller 每次 progress checkpoint 使用以下严格 allowlist：
+
+```powershell
+$progressPath = 'docs/openspec/changes/staged-merge-upstream-v0-1-169/.comet/subagent-progress.md'
+git add -- $progressPath
+$staged = @(git diff --cached --name-only)
+$staged
+if (Compare-Object -ReferenceObject @($progressPath) -DifferenceObject $staged) { throw 'controller progress allowlist mismatch' }
+git.exe commit -m "docs: record SDD progress"
+```
+- Controller 每次 checkoff 都使用以下严格 allowlist；三条路径均应因本次 reviewer verdict、顶层 Task/OpenSpec 勾选和 progress 记录而改变：
+
+```powershell
+$checkoffAllow = @('docs/superpowers/plans/2026-08-02-staged-merge-upstream-v0-1-169.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/tasks.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/.comet/subagent-progress.md')
+git add -- $checkoffAllow
+$staged = @(git diff --cached --name-only)
+$staged
+if (Compare-Object -ReferenceObject $checkoffAllow -DifferenceObject $staged) { throw 'controller checkoff allowlist mismatch' }
+git.exe commit -m "docs: check off reviewed task"
+```
 
 ## 文件结构与职责
 
@@ -40,7 +64,9 @@ base-ref: e9a0e4aa53b5d9d5f5c84986cfadd8098dc8e4f3
 | --- | --- |
 | `docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md` | 创建；同时记录 immutable source base、`$executionBase`、tag manifest、每段 changed-files、冲突台账、能力矩阵、命令退出码、Docker 判定、失败/修复和阶段结论。 |
 | `docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-verify.md` | 创建；记录最终门禁、tag 拓扑、migration 结果、能力专项 review、残余风险和非目标确认。 |
-| `docs/openspec/changes/staged-merge-upstream-v0-1-169/tasks.md` | 修改；仅在对应实施任务的证据提交中勾选已完成的 OpenSpec 项。 |
+| `docs/superpowers/plans/2026-08-02-staged-merge-upstream-v0-1-169.md` | 仅由 controller 在 reviewer 通过后勾选对应 Task 顶层 checkbox，随 docs-only checkoff commit 提交。 |
+| `docs/openspec/changes/staged-merge-upstream-v0-1-169/tasks.md` | 仅由 controller 在 reviewer 通过后勾选唯一映射 OpenSpec 项，随 docs-only checkoff commit 提交。 |
+| `docs/openspec/changes/staged-merge-upstream-v0-1-169/.comet/subagent-progress.md` | planning 已纳入 tracked；仅由 controller 记录可恢复的 dispatch intent/result。live-ID 平台在成功派发后立即记录 identity；本平台在工具返回后立即记录 returned `task_id` 和结果。每次 checkpoint 以 progress-only commit 提交；review 通过后的 checkoff 再随三路径 docs-only commit 记录。 |
 | `backend/cmd/server/VERSION` | 仅在 Task 15 修改为 `0.1.169.1`。 |
 | `backend/internal/repository/migrations_subscription_quota_passkey_upgrade_integration_test.go` | 创建；验证先应用本地 `0.1.165.4` migration 集合再应用完整 `v0.1.169` 集合时，双方 `191_*` 和本地 `192_*` 的排序、执行、幂等和 checksum 均稳定。 |
 | `backend/internal/handler/openai_images.go`、`backend/internal/handler/security_audit_helper.go`、`backend/internal/handler/openai_images_controls_test.go` | 阶段 0 增加 Images 直接保护测试；仅在该测试或最终专项审查出现 RED 时修改生产代码，保持统一审计、单次 moderation/freeze、延迟求值和文本生命周期契约。 |
@@ -81,6 +107,8 @@ Task 3 建立下表的每一行，并在每段以 `protected`、`manual`、`unve
 
 ### Task 1: 验证 Comet 已绑定的 source/execution 双基线隔离位置
 
+- [ ] Task 1: 验证 Comet 已绑定的 source/execution 双基线隔离位置
+
 **映射 OpenSpec:** 1.1
 
 **Files:**
@@ -91,7 +119,7 @@ Task 3 建立下表的每一行，并在每段以 `protected`、`manual`、`unve
 - Consumes: Comet 已确认的实际隔离位置、绑定分支、immutable source base `e9a0e4aa53b5d9d5f5c84986cfadd8098dc8e4f3` 与当前 `VERSION=0.1.165.4`。
 - Produces: ledger 的实际隔离位置/绑定分支、immutable source base、`$executionBase`、source-to-execution planning-only tree diff/commit path 清单，以及 runtime selection 存在或缺失的状态记录。
 
-- [ ] **Step 1: 验证已确认的 source/execution 双基线和绑定分支**
+**Step 1: 验证已确认的 source/execution 双基线和绑定分支**
 
 Run:
 ```powershell
@@ -120,7 +148,7 @@ $baselineCommitPaths
 
 Expected: 位置和分支与 Comet 联合决策/绑定记录一致；`git merge-base --is-ancestor` 成功，`$executionBase` 是 immutable source base 的后代，而不是被要求等于 source base；source 与 execution 的 VERSION 均为 `0.1.165.4`，source base 的两个 migration blob OID 精确匹配固定值。`$baselineDiff` 与 `$baselineCommitPaths` 都只能包含 `docs/openspec/changes/staged-merge-upstream-v0-1-169/` 前缀下的当前 change 路径，或两个精确的 Design Doc/Plan 路径；任何提交曾触及 `backend/`、`frontend/`、`deploy/`、`.github/`、`Makefile` 或其他路径，即使随后 revert 至净零差异，也必须阻塞。基线或绑定不一致时停止，不创建 branch/worktree，也不开始 merge。
 
-- [ ] **Step 2: 验证唯一允许的 runtime selection 状态**
+**Step 2: 验证唯一允许的 runtime selection 状态**
 
 Run:
 ```powershell
@@ -135,7 +163,7 @@ $status
 
 Expected: `$status` 只能为空或精确为 `?? .comet/current-change.json`；任何其它用户/运行时路径或任何 `$index` 路径都 BLOCK，并由 Comet 切换/重建干净隔离位置后重新 Task 1。ledger 仅记录 runtime selection 是否存在，不建立任意用户 dirty path 排除清单。
 
-- [ ] **Step 3: 验证 Windows build shell**
+**Step 3: 验证 Windows build shell**
 
 Run:
 ```powershell
@@ -146,11 +174,23 @@ Get-Command $bash -ErrorAction Stop
 
 Expected: 两个检查均成功；缺失 bash 记为环境阻塞，不修改产品代码、Makefile 或测试来规避。
 
-- [ ] **Step 4: 初始化 ledger 的基线段但不提前提交**
+**Step 4: 初始化并严格提交 ledger 的基线段**
 
-在 ledger 写入实施时间、Comet 确认的隔离位置、绑定分支、immutable source base、`$executionBase`、source-to-execution planning-only diff、source/execution 的 `VERSION=0.1.165.4`、runtime selection 存在或缺失、两个 immutable source base migration blob OID、三个目标 tag 和“禁止推送/发布/部署/服务器/Nginx 操作”的边界。阶段 0 的 ledger 与 1.1-1.5 tasks 状态只在 Task 5 一起提交。
+在 ledger 写入实施时间、Comet 确认的隔离位置、绑定分支、immutable source base、`$executionBase`、source-to-execution planning-only diff、source/execution 的 `VERSION=0.1.165.4`、runtime selection 存在或缺失、两个 immutable source base migration blob OID、三个目标 tag 和“禁止推送/发布/部署/服务器/Nginx 操作”的边界，然后运行：
+
+```powershell
+git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
+$staged = @(git diff --cached --name-only)
+$staged
+if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'stage 0 baseline identity allowlist mismatch' }
+git.exe commit -m "docs: record stage 0 baseline identity"
+```
+
+Expected: implementer 提交严格只含 build ledger，不勾选计划或 OpenSpec。thorough reviewer 通过后，由 controller 创建独立 checkoff commit，勾选顶层 Task 1 和 OpenSpec 1.1 并更新 progress。
 
 ### Task 2: 重新获取 refs 并固定 tag 范围
+
+- [ ] Task 2: 重新获取 refs 并固定 tag 范围
 
 **映射 OpenSpec:** 1.2
 
@@ -161,7 +201,7 @@ Expected: 两个检查均成功；缺失 bash 记为环境阻塞，不修改产�
 - Consumes: 三个正式 tag 和 `upstream/main`。
 - Produces: 被核验的 peeled SHA、严格祖先链和明确排除的 tag 后提交清单。
 
-- [ ] **Step 1: 更新本地 upstream refs**
+**Step 1: 更新本地 upstream refs**
 
 Run:
 ```powershell
@@ -173,7 +213,7 @@ git rev-parse 'v0.1.169^{}'
 
 Expected: 输出依次精确为 `dc893dd0b8eab41df5be595ae9fcd1aa74a062b8`、`99c8e4bf7564823bafbab369acab6539e734c1bb`、`26d894ef4f50645a4bf1030e378ac892f17d0223`。
 
-- [ ] **Step 2: 验证祖先关系与 release 上界**
+**Step 2: 验证祖先关系与 release 上界**
 
 Run:
 ```powershell
@@ -185,15 +225,26 @@ git log --oneline v0.1.169..upstream/main
 
 Expected: 两个 `merge-base` 命令退出 0；最新正式 `v0.1.*` tag 是 `v0.1.169`；最后一个命令的所有提交被记录为范围外而不合并。若最新正式 tag 更高，停止在此任务，更新 OpenSpec 范围后才继续。
 
-- [ ] **Step 3: 将 tag manifest 与排除提交写入 ledger**
+**Step 3: 将 tag manifest 与排除提交写入 ledger**
 
 记录每段 tag、peeled SHA、预期 commit/file 数 `62/142`、`36/170`、`38/72`，以及 `v0.1.169..upstream/main` 的完整 oneline 输出。
 
-- [ ] **Step 4: 将 refs 证据写入未提交的阶段 0 ledger**
+**Step 4: 将 refs 证据严格提交为 ledger evidence**
 
-Expected: 该 ledger 更新保留到 Task 5，与全部 1.1-1.5 勾选和阶段 0 结论一次性提交；不创建或推送 tag。
+Run:
+```powershell
+git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
+$staged = @(git diff --cached --name-only)
+$staged
+if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'upstream tag manifest allowlist mismatch' }
+git.exe commit -m "docs: record upstream tag manifest"
+```
+
+Expected: implementer 提交严格只含 build ledger，不创建或推送 tag，也不勾选计划或 OpenSpec。reviewer 通过后 controller 单独 check off Task 2/OpenSpec 1.2。
 
 ### Task 3: 建立能力矩阵与冲突台账
+
+- [ ] Task 3: 建立能力矩阵与冲突台账
 
 **映射 OpenSpec:** 1.3
 
@@ -204,7 +255,7 @@ Expected: 该 ledger 更新保留到 Task 5，与全部 1.1-1.5 勾选和阶段 
 - Consumes: 本计划的 Canonical 能力矩阵、三个 tag 的 `git diff --name-only` 结果。
 - Produces: 每行含行为契约、入口/调用链、关键文件、受影响 tag、聚焦测试、人工审查点、状态和证据的矩阵；以及冲突台账。
 
-- [ ] **Step 1: 获取三个 release 区间的 changed-files**
+**Step 1: 获取三个 release 区间的 changed-files**
 
 Run:
 ```powershell
@@ -215,19 +266,30 @@ git diff --name-only v0.1.168..v0.1.169
 
 Expected: 三份清单分别写入 ledger 对应阶段，作为后续行为审查的输入，不以“测试全绿”替代矩阵结论。
 
-- [ ] **Step 2: 写入完整 canonical 能力矩阵**
+**Step 2: 写入完整 canonical 能力矩阵**
 
 将本计划“Canonical 能力矩阵”的全部 14 行逐字落入 ledger，并为每行填入当前状态 `protected`、`manual`、`unverified` 或 `gap`。Images 行必须逐项列出统一入口、legacy 单次、单次冻结、关闭态零大 payload、运行态/范围后求值、`ReleaseText` 前可用六项契约。
 
-- [ ] **Step 3: 建立六分类冲突台账格式**
+**Step 3: 建立六分类冲突台账格式**
 
 每个实际冲突记录文件名、分类、ours 行为、theirs 行为、融合结果和验证证据。分类只允许“上游修复”“本地定制”“接口/配置演进”“版本/依赖”“生成代码”“migration”。
 
-- [ ] **Step 4: 将保护面证据写入未提交的阶段 0 ledger**
+**Step 4: 将保护面证据严格提交为 ledger evidence**
 
-Expected: ledger 含完整矩阵和空的、可追踪的冲突台账；该更新留待 Task 5 与 1.1-1.5 状态一起提交。
+Run:
+```powershell
+git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
+$staged = @(git diff --cached --name-only)
+$staged
+if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'stage 0 capability matrix allowlist mismatch' }
+git.exe commit -m "docs: record stage 0 capability matrix"
+```
+
+Expected: ledger 含完整矩阵和空的、可追踪的冲突台账；implementer 提交严格只含 build ledger，reviewer 通过后 controller 单独 check off Task 3/OpenSpec 1.3。
 
 ### Task 4: 验证阶段 0 的本地保护测试与生成稳定性
+
+- [ ] Task 4: 验证阶段 0 的本地保护测试与生成稳定性
 
 **映射 OpenSpec:** 1.4
 
@@ -244,7 +306,7 @@ Expected: ledger 含完整矩阵和空的、可追踪的冲突台账；该更新
 - Consumes: Canonical matrix中的所有 `protected` 行。
 - Produces: 基线通过/失败证据；高风险行只能由命名测试覆盖，不接受口头推断。
 
-- [ ] **Step 1: 补齐 Images 精确生命周期的直接保护测试**
+**Step 1: 补齐 Images 精确生命周期的直接保护测试**
 
 在 `backend/internal/handler/openai_images_controls_test.go` 新增以下三个测试，复用当前 Images handler fixture 和它的 payload-provider 计数桩：
 
@@ -261,7 +323,7 @@ go test -count=1 ./internal/handler -run '^(TestOpenAIImages_DisabledSecurityAud
 
 Expected: 三个直接测试 PASS；若任一 RED，先保留失败输出，再只修改 `openai_images.go` 或 `security_audit_helper.go` 使 provider 惰性、线程安全且单次冻结，禁止复制 legacy moderation 调用。
 
-- [ ] **Step 2: 提交 Images 保护测试和任何最小修复**
+**Step 2: 提交 Images 保护测试和任何最小修复**
 
 Run:
 ```powershell
@@ -276,7 +338,7 @@ git.exe commit -m "test: protect images audit lifecycle"
 
 Expected: 此提交严格只包含实际改变的 Images 直接保护测试和所列必要的最小修复文件；provider/handler 已满足六项精确契约。
 
-- [ ] **Step 3: 运行 scheduler、sticky、gateway、审计、Images 和 quota 聚焦测试**
+**Step 3: 运行 scheduler、sticky、gateway、审计、Images 和 quota 聚焦测试**
 
 Run from `backend`:
 ```powershell
@@ -292,7 +354,7 @@ pnpm --dir frontend exec vitest run src/utils/__tests__/subscriptionQuota.spec.t
 
 Expected: 每个命名测试 PASS。任何失败先在 ledger 保存 RED，再在首次引入该回归的 release 段写最小复现断言和兼容修复，不能在基线任务中改变产品行为。
 
-- [ ] **Step 4: 执行阶段 0 full gate 与两轮生成检查**
+**Step 4: 执行阶段 0 full gate 与两轮生成检查**
 
 Run from repository root:
 ```powershell
@@ -312,11 +374,22 @@ git rev-parse HEAD:backend/migrations/192_subscription_cache_invalidation_outbox
 
 Expected: 两次 generate 均不产生 `backend/ent` 或 `backend/cmd/server/wire_gen.go` diff；两个 whitespace 命令无输出；unmerged 和 conflict marker 命令无输出；最后两个命令精确输出 `c22d47d79cbbaf4bc40524d42ef52e6cc8ac3af6` 和 `502ecec1caf9f76e022c2e83acf3707190539301`。
 
-- [ ] **Step 5: 将阶段 0 full gate 结果写入 ledger**
+**Step 5: 将阶段 0 full gate 结果写入 ledger**
 
-Expected: ledger 为每个命令记录退出码和命名失败；不存在未归属的生成物；该更新留待 Task 5 统一提交。
+Run:
+```powershell
+git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
+$staged = @(git diff --cached --name-only)
+$staged
+if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'stage 0 local gates allowlist mismatch' }
+git.exe commit -m "docs: record stage 0 local gates"
+```
+
+Expected: ledger 为每个命令记录退出码和命名失败；不存在未归属的生成物。Images 代码/测试提交保持独立；本提交严格只含 build ledger，reviewer 通过后 controller 单独 check off Task 4/OpenSpec 1.4。
 
 ### Task 5: 执行阶段 0 Docker/Testcontainers 判定
+
+- [ ] Task 5: 执行阶段 0 Docker/Testcontainers 判定
 
 **映射 OpenSpec:** 1.5
 
@@ -327,7 +400,7 @@ Expected: ledger 为每个命令记录退出码和命名失败；不存在未归
 - Consumes: 本机 Docker daemon 与现有 repository integration fixture。
 - Produces: `protected` 的逐顶级测试证据，或带环境原因和契约影响的 `unverified` 条目。
 
-- [ ] **Step 1: 运行轻量 Docker 预检并保存结果**
+**Step 1: 运行轻量 Docker 预检并保存结果**
 
 Run:
 ```powershell
@@ -338,7 +411,7 @@ if ($null -eq $dockerCommand) { 'docker_command=unavailable' | Set-Content -Lite
 
 Expected: 输出 server version 且 `exit_code=0` 代表 Docker preflight 可用；`docker_command=unavailable` 直接代表 preflight unavailable，不读取陈旧 `$LASTEXITCODE`。命令不存在或 daemon 不可达时，将完整日志、可用的退出码和受影响契约记为 `unverified`，不尝试 SSH 或其他远程补验。
 
-- [ ] **Step 2: Docker 可用时运行基线 integration 并验证顶级 PASS**
+**Step 2: Docker 可用时运行基线 integration 并验证顶级 PASS**
 
 Run from `backend` only when Step 1 succeeds:
 ```powershell
@@ -353,21 +426,20 @@ foreach ($target in $targets) { $pattern = '^--- PASS: ' + [regex]::Escape($targ
 
 Expected: 四个指定顶级测试都以锚定 `--- PASS: TestName (` 行出现。Docker preflight 成功后的非零退出先按 systematic debugging 保存/检查完整日志：断言或代码失败 BLOCK；只有日志证明 Docker/Testcontainers 环境不可用时才记为 `unverified`。`--- SKIP:`、`no tests to run` 或缺少单个 PASS 都不能通过。
 
-- [ ] **Step 3: 仅对已证明的环境阻塞记录 unverified**
+**Step 3: 仅对已证明的环境阻塞记录 unverified**
 
 预检失败时，在 ledger 记录实际预检命令、完整日志、退出码、未执行的四个 integration 目标，以及“PostgreSQL transaction/lock、receipt、outbox、migration 幂等未验证”的影响。预检成功但 integration 非零时，先依照日志执行 systematic debugging；只有 Docker/Testcontainers 不可用的证据才能设为 `unverified`，否则设为 BLOCK，不开始 v0.1.166。
 
-- [ ] **Step 4: 勾选并提交完整阶段 0 证据**
+**Step 4: 提交 Docker/阶段 0 ledger evidence**
 
-在 `tasks.md` 勾选 1.1、1.2、1.3、1.4、1.5，并在 ledger 写明 Docker 结论、日志位置、退出码、`protected`/`unverified` 状态和残余风险。
+在 ledger 写明 Docker 结论、日志位置、退出码、`protected`/`unverified` 状态和残余风险。implementer 不修改或暂存 `tasks.md`。
 
 Run:
 ```powershell
 git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
-git add docs/openspec/changes/staged-merge-upstream-v0-1-169/tasks.md
 $staged = @(git diff --cached --name-only)
 $staged
-if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/tasks.md') -DifferenceObject $staged) { throw 'stage 0 evidence allowlist mismatch' }
+if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'stage 0 Docker evidence allowlist mismatch' }
 git.exe commit -m "docs: close stage 0 baseline"
 $selectionStatus = '?? .comet/current-change.json'
 $index = @(git diff --cached --name-only)
@@ -378,9 +450,11 @@ if ($unexpected) { throw "stage 0 evidence left dirty paths: $($unexpected -join
 $status
 ```
 
-Expected: 提交恰好包含 stage 0 ledger 与 tasks 1.1-1.5；最终 index 为空，status 过滤实际存在的 `?? .comet/current-change.json` 后为空，也没有远程服务器操作。
+Expected: implementer 提交严格只含 stage 0 Docker/ledger evidence；最终 index 为空，status 过滤实际存在的 `?? .comet/current-change.json` 后为空，也没有远程服务器操作。reviewer 通过后 controller 只勾选 Task 5/OpenSpec 1.5；此前 Task 1-4 都已各自 check off，因此此时 1.1-1.5 均完成。
 
 ### Task 6: 在未提交状态合入 v0.1.166 并完成阻塞审查
+
+- [ ] Task 6: 在未提交状态合入 v0.1.166 并完成阻塞审查
 
 **映射 OpenSpec:** 2.1
 
@@ -390,9 +464,9 @@ Expected: 提交恰好包含 stage 0 ledger 与 tasks 1.1-1.5；最终 index 为
 
 **Interfaces:**
 - Consumes: 从 `$executionBase` 推进且干净的阶段 0 HEAD 和 `v0.1.166^{}`。
-- Produces: 第二父为 `dc893dd0b8eab41df5be595ae9fcd1aa74a062b8` 的 merge commit；所有语义不兼容在提交前阻塞。
+- Produces: 第二父为 `dc893dd0b8eab41df5be595ae9fcd1aa74a062b8` 的 merge commit 与独立 merge-review ledger evidence；所有语义不兼容在提交前阻塞。
 
-- [ ] **Step 1: 启动唯一允许的首段 merge**
+**Step 1: 启动唯一允许的首段 merge**
 
 Run:
 ```powershell
@@ -429,7 +503,7 @@ Expected: merge 前 `$index` 必须为空，`$status` 只能为空或精确为 `
 | `backend/internal/service/openai_ws_v2_passthrough_adapter.go` | 本地定制；保留 adapter usage/model 映射。 |
 | `frontend/src/views/admin/__tests__/UsageView.spec.ts` | 接口/配置演进；保留本地用量页面断言并融合上游 UI 行为。 |
 
-- [ ] **Step 2: 在 merge commit 前执行阻塞式审查**
+**Step 2: 在 merge commit 前执行阻塞式审查**
 
 逐个解决 `$conflictPaths` 的所有实际文件，写入冲突台账的 ours/theirs/fusion/证据；预测表未列出的冲突也必须处理，不能只暂存表内 17 项。审查 `config.go`、settings DTO/handler、router、Responses 转发、OpenAI handler、WS relay/adapter、Gemini compat、usage 调用链和前端 UsageView；确认 panel API rate limit、settings 部分更新、每轮模型计费、effective composite route、account failover、terminal ownership 与本地 quota reset 不存在不可共存语义。
 
@@ -443,7 +517,7 @@ Expected: 最后一个命令无输出；非冲突上游结果已由 merge 放入
 
 阻塞条件：任何未决 conflict marker、未注册路由、DTO/config 字段丢失、请求绕过审计/usage、或无法同时保留上游修复与本地定制时，不得创建 merge commit，记录证据后等待用户取舍。
 
-- [ ] **Step 3: 由工具生成依赖和生成输出**
+**Step 3: 由工具生成依赖和生成输出**
 
 Run from `backend` after source/manifest 融合:
 ```powershell
@@ -458,7 +532,7 @@ pnpm --dir frontend install --lockfile-only --frozen-lockfile=false
 
 Expected: `go.sum`、`backend/ent`、`backend/cmd/server/wire_gen.go` 和 `frontend/pnpm-lock.yaml` 仅由对应工具更新；存在变更时进入本 merge commit。
 
-- [ ] **Step 4: 创建 v0.1.166 merge commit 并核验第二父**
+**Step 4: 创建 v0.1.166 merge commit 并核验第二父**
 
 Run:
 ```powershell
@@ -467,7 +541,7 @@ git diff --name-only --diff-filter=U
 git diff --cached --check
 $staged = @(git diff --cached --name-only)
 $staged
-$mergePlanningPaths = @('.comet/current-change.json', 'docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md', 'docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-verify.md', 'docs/superpowers/plans/2026-08-02-staged-merge-upstream-v0-1-169.md', 'docs/superpowers/specs/2026-08-02-staged-merge-upstream-v0-1-169-design.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/proposal.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/design.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/specs/upstream-release-sync/spec.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/tasks.md')
+$mergePlanningPaths = @('.comet/current-change.json', 'docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md', 'docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-verify.md', 'docs/superpowers/plans/2026-08-02-staged-merge-upstream-v0-1-169.md', 'docs/superpowers/specs/2026-08-02-staged-merge-upstream-v0-1-169-design.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/proposal.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/design.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/specs/upstream-release-sync/spec.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/tasks.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/.comet/subagent-progress.md')
 $forbidden = $staged | Where-Object { $_ -in $mergePlanningPaths }
 if ($forbidden) { throw "forbidden paths staged for merge: $($forbidden -join ', ')" }
 git commit --no-edit
@@ -476,7 +550,23 @@ git rev-parse HEAD^2
 
 Expected: unmerged 命令无输出，cached whitespace 检查通过；`$staged` 由上游自动暂存结果、所有实际 `$conflictPaths` 和工具产生的 `backend/go.mod`、`backend/go.sum`、Ent/Wire/lockfile 组成，且不含 runtime selection、ledger、计划、Design Doc 或任一 OpenSpec 规划产物。第二父精确为 `dc893dd0b8eab41df5be595ae9fcd1aa74a062b8`。
 
+**Step 5: 严格提交 v0.1.166 merge-review ledger evidence**
+
+在 ledger 记录实际 `$conflictPaths`、六分类冲突台账、合并后的第二父和阻塞审查结论，然后运行：
+
+```powershell
+git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
+$staged = @(git diff --cached --name-only)
+$staged
+if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'v0.1.166 merge-review evidence allowlist mismatch' }
+git.exe commit -m "docs: record v0.1.166 merge review"
+```
+
+Expected: 此 evidence commit 严格只含 build ledger，保持 preceding merge commit 纯 merge；reviewer 通过后 controller 单独 check off Task 6/OpenSpec 2.1。
+
 ### Task 7: 对 v0.1.166 运行 merge 后行为审查并修复 RED
+
+- [ ] Task 7: 对 v0.1.166 运行 merge 后行为审查并修复 RED
 
 **映射 OpenSpec:** 2.2
 
@@ -488,7 +578,7 @@ Expected: unmerged 命令无输出，cached whitespace 检查通过；`$staged` 
 - Consumes: v0.1.166 merge 后 changed-files 和阶段 0 保护测试。
 - Produces: `protected` 或 `manual` 的阶段 1 行；可复现回归只能由独立兼容提交修复。
 
-- [ ] **Step 1: 先运行 v0.1.166 的行为聚焦测试，保存任何 RED**
+**Step 1: 先运行 v0.1.166 的行为聚焦测试，保存任何 RED**
 
 Run from `backend`:
 ```powershell
@@ -500,11 +590,11 @@ go test -count=1 ./internal/handler -run '^(TestGatewayChatCredentialStopDoesNot
 
 Expected: 每个测试 PASS，且 changed-files × matrix 审查明确说明上游限流、部分设置、WS 计费、composite route 没有回归本地 scheduler/sticky/fallback/usage。
 
-- [ ] **Step 2: 对发现的 RED 用失败测试驱动最小兼容修复**
+**Step 2: 对发现的 RED 用失败测试驱动最小兼容修复**
 
 在保持失败输出的前提下，先在失败测试所在文件加入精确回归断言，再仅修改对应生产文件：settings RED 使用 `setting_handler_update.go`；Responses/body replay RED 使用 `gateway_forward_as_responses.go`；HTTP gateway/usage RED 使用 `openai_gateway_handler.go`；WS turn/terminal/model RED 使用 `openai_ws_forwarder.go`、`passthrough_relay.go` 或 `passthrough_adapter.go`。重复 Step 1 的精确命令直到 PASS。
 
-- [ ] **Step 3: 独立提交每组兼容修复**
+**Step 3: 独立提交每组兼容修复**
 
 Run for each non-empty RED fix set:
 ```powershell
@@ -519,23 +609,34 @@ git.exe commit -m "fix: preserve local behavior after v0.1.166"
 
 Expected: 每个兼容提交同时包含复现测试、最小源修复和由该修复触发的生成输出；无 RED 时不创建空兼容提交。
 
-- [ ] **Step 4: 记录 merge 后行为审查**
+**Step 4: 严格提交 merge 后行为审查 ledger evidence**
 
-在 ledger 按能力矩阵写入每个测试命令、审查的调用链、RED 和兼容提交 SHA；确认 `gap=0` 后进入 Task 8。
+在 ledger 按能力矩阵写入每个测试命令、审查的调用链、RED 和兼容提交 SHA；确认 `gap=0` 后运行：
+
+```powershell
+git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
+$staged = @(git diff --cached --name-only)
+$staged
+if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'v0.1.166 behavior-review evidence allowlist mismatch' }
+git.exe commit -m "docs: record v0.1.166 behavior review"
+```
+
+Expected: 兼容代码提交保持独立，无 RED 时不创建空兼容提交；此 evidence commit 严格只含 build ledger，reviewer 通过后 controller 单独 check off Task 7/OpenSpec 2.2。
 
 ### Task 8: 封闭 v0.1.166 的本机门禁与阶段证据
+
+- [ ] Task 8: 封闭 v0.1.166 的本机门禁与阶段证据
 
 **映射 OpenSpec:** 2.3
 
 **Files:**
 - Modify: `docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md`
-- Modify: `docs/openspec/changes/staged-merge-upstream-v0-1-169/tasks.md`
 
 **Interfaces:**
 - Consumes: v0.1.166 merge 与所有兼容提交。
 - Produces: 可作为 v0.1.168 前置条件的封闭阶段 1 证据。
 
-- [ ] **Step 1: 运行 v0.1.166 full gate**
+**Step 1: 运行 v0.1.166 full gate**
 
 Run from repository root:
 ```powershell
@@ -555,7 +656,7 @@ git rev-parse HEAD:backend/migrations/192_subscription_cache_invalidation_outbox
 
 Expected: 所有命令满足全局约束；VERSION 仍为 `0.1.165.4`；最后两个命令精确输出两个固定 base-ref blob OID。
 
-- [ ] **Step 2: 运行 v0.1.166 Docker 判定与 integration**
+**Step 2: 运行 v0.1.166 Docker 判定与 integration**
 
 Run:
 ```powershell
@@ -577,14 +678,14 @@ foreach ($target in $targets) { $pattern = '^--- PASS: ' + [regex]::Escape($targ
 
 Expected: 仅在 `$preflightAvailable` 为 true 的环境中运行 integration，三项逐一以锚定顶级 PASS 匹配；命令不存在或 preflight 失败直接记录 `unverified`。preflight 成功后的非零退出先按 systematic debugging 分类，代码/断言失败 BLOCK，只有 Docker/Testcontainers 环境不可用证据可记为 `unverified`，不远程补跑。
 
-- [ ] **Step 3: 提交阶段 1 证据并验证清洁度**
+**Step 3: 提交阶段 1 证据并验证清洁度**
 
 Run:
 ```powershell
-git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md docs/openspec/changes/staged-merge-upstream-v0-1-169/tasks.md
+git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
 $staged = @(git diff --cached --name-only)
 $staged
-if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/tasks.md') -DifferenceObject $staged) { throw 'v0.1.166 evidence allowlist mismatch' }
+if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'v0.1.166 evidence allowlist mismatch' }
 git.exe commit -m "docs: close v0.1.166 merge stage"
 $selectionStatus = '?? .comet/current-change.json'
 $index = @(git diff --cached --name-only)
@@ -595,9 +696,11 @@ if ($unexpected) { throw "v0.1.166 evidence left dirty paths: $($unexpected -joi
 $status
 ```
 
-Expected: OpenSpec 2.1-2.3 被勾选；提交只含 ledger/tasks；最终 index 为空，status 过滤实际存在的 `?? .comet/current-change.json` 后为空，任何其它路径阻塞。
+Expected: implementer 提交严格只含 ledger；最终 index 为空，status 过滤实际存在的 `?? .comet/current-change.json` 后为空，任何其它路径阻塞。reviewer 通过后 controller 单独 check off Task 8/OpenSpec 2.3。
 
 ### Task 9: 在未提交状态合入 v0.1.168 并完成阻塞审查
+
+- [ ] Task 9: 在未提交状态合入 v0.1.168 并完成阻塞审查
 
 **映射 OpenSpec:** 3.1
 
@@ -607,9 +710,9 @@ Expected: OpenSpec 2.1-2.3 被勾选；提交只含 ledger/tasks；最终 index 
 
 **Interfaces:**
 - Consumes: 从 `$executionBase` 经 v0.1.166 阶段推进的封闭 HEAD 和 `v0.1.168^{}`。
-- Produces: 第二父为 `99c8e4bf7564823bafbab369acab6539e734c1bb` 的 merge commit。
+- Produces: 第二父为 `99c8e4bf7564823bafbab369acab6539e734c1bb` 的 merge commit 与独立 merge-review ledger evidence。
 
-- [ ] **Step 1: 启动唯一允许的第二段 merge**
+**Step 1: 启动唯一允许的第二段 merge**
 
 Run:
 ```powershell
@@ -626,7 +729,7 @@ $conflictPaths
 
 Expected: merge 前 `$index` 必须为空，`$status` 只能为空或精确为 `?? .comet/current-change.json`；其它任何用户路径均阻塞并要求 Comet 重建隔离位置。merge 不提交；`$conflictPaths` 全量写入六分类台账。
 
-- [ ] **Step 2: 在 merge commit 前阻塞审查 Passkey、模型广场和本地数据语义**
+**Step 2: 在 merge commit 前阻塞审查 Passkey、模型广场和本地数据语义**
 
 在未提交 merge 状态审查 `backend/internal/handler/passkey_handler.go`、`backend/internal/service/passkey.go`、`backend/internal/repository/passkey_repo.go`、`backend/internal/handler/model_plaza_handler.go`、`backend/internal/repository/user_repo.go`、`backend/internal/repository/api_key_repo.go`、`backend/internal/securityaudit/prompt_config.go`、`backend/internal/service/openai_live.go`、Wire/provider、路由和前端 `frontend/src/router/index.ts`、`frontend/src/views/ModelPlazaView.vue`、`frontend/src/views/user/ProfileView.vue`。
 
@@ -634,7 +737,7 @@ Expected: merge 前 `$index` 必须为空，`$status` 只能为空或精确为 `
 
 阻塞条件：Passkey/auth route 未注册、模型广场越过本地权限、scoped update 丢失本地 quota 数据、Wire/Ent 生成源与输出不一致，或 migration filename/checksum 被修改时，不得提交 merge。
 
-- [ ] **Step 3: 重新生成需要工具维护的输出**
+**Step 3: 重新生成需要工具维护的输出**
 
 Run from `backend`:
 ```powershell
@@ -649,7 +752,7 @@ pnpm --dir frontend install --lockfile-only --frozen-lockfile=false
 
 Expected: Ent/Wire、Go checksum 与 lockfile 都由工具生成；发生变化的输出归入当前 merge commit。
 
-- [ ] **Step 4: 创建 v0.1.168 merge commit 并核验第二父**
+**Step 4: 创建 v0.1.168 merge commit 并核验第二父**
 
 Run:
 ```powershell
@@ -658,7 +761,7 @@ git diff --name-only --diff-filter=U
 git diff --cached --check
 $staged = @(git diff --cached --name-only)
 $staged
-$mergePlanningPaths = @('.comet/current-change.json', 'docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md', 'docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-verify.md', 'docs/superpowers/plans/2026-08-02-staged-merge-upstream-v0-1-169.md', 'docs/superpowers/specs/2026-08-02-staged-merge-upstream-v0-1-169-design.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/proposal.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/design.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/specs/upstream-release-sync/spec.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/tasks.md')
+$mergePlanningPaths = @('.comet/current-change.json', 'docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md', 'docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-verify.md', 'docs/superpowers/plans/2026-08-02-staged-merge-upstream-v0-1-169.md', 'docs/superpowers/specs/2026-08-02-staged-merge-upstream-v0-1-169-design.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/proposal.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/design.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/specs/upstream-release-sync/spec.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/tasks.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/.comet/subagent-progress.md')
 $forbidden = $staged | Where-Object { $_ -in $mergePlanningPaths }
 if ($forbidden) { throw "forbidden paths staged for merge: $($forbidden -join ', ')" }
 git.exe commit --no-edit
@@ -667,7 +770,23 @@ git rev-parse HEAD^2
 
 Expected: 所有实际 `$conflictPaths` 已逐项暂存，unmerged/cached whitespace 检查通过；`$staged` 不含 runtime selection、ledger、计划、Design Doc 或任一 OpenSpec 规划产物，且 Go manifest/checksum、Ent/Wire/lockfile 的工具输出均在本 merge commit。第二父精确为 `99c8e4bf7564823bafbab369acab6539e734c1bb`。
 
+**Step 5: 严格提交 v0.1.168 merge-review ledger evidence**
+
+在 ledger 记录实际 `$conflictPaths`、Passkey/模型广场/migration 阻塞审查和合并后的第二父，然后运行：
+
+```powershell
+git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
+$staged = @(git diff --cached --name-only)
+$staged
+if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'v0.1.168 merge-review evidence allowlist mismatch' }
+git.exe commit -m "docs: record v0.1.168 merge review"
+```
+
+Expected: 此 evidence commit 严格只含 build ledger，保持 preceding merge commit 纯 merge；reviewer 通过后 controller 单独 check off Task 9/OpenSpec 3.1。
+
 ### Task 10: 对 v0.1.168 审查交互并新增 migration 升级回归测试
+
+- [ ] Task 10: 对 v0.1.168 审查交互并新增 migration 升级回归测试
 
 **映射 OpenSpec:** 3.2
 
@@ -680,7 +799,7 @@ Expected: 所有实际 `$conflictPaths` 已逐项暂存，unmerged/cached whites
 - Consumes: `applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) error`、完整 embedded migration FS。
 - Produces: `TestMigrationsRunner_PreservesPasskeyAndSubscriptionQuotaMigrationsAcrossUpgrade`，它先应用排除 `191_passkey_credentials.sql` 的基线 FS，再应用完整 FS。
 
-- [ ] **Step 1: 写出 migration 升级 RED 测试**
+**Step 1: 写出 migration 升级 RED 测试**
 
 在新测试文件中创建 test-local `fstest.MapFS`：从完整 embedded migration `fs.FS` 复制所有 `.sql`，唯独排除 `191_passkey_credentials.sql`。在 test 函数前写入注释：`filtered FS 仅模拟从本地 0.1.165.4 集合升级；历史本地 migration 不变性由 build ledger 的 base-ref Git blob OID 断言单独证明。` 测试按以下顺序执行并断言：
 
@@ -698,7 +817,7 @@ go test -tags=integration -v -count=1 -run '^TestMigrationsRunner_PreservesPassk
 
 Expected: Docker 可用时测试必须在基线 FS、完整 FS 和完整 FS 重跑三步都通过；Docker/Testcontainers 不可用时记录 `unverified`，不得以编译或包级成功替代该升级路径。
 
-- [ ] **Step 2: 运行 Passkey、模型广场、scoped update、prompt audit 和 Live 聚焦测试**
+**Step 2: 运行 Passkey、模型广场、scoped update、prompt audit 和 Live 聚焦测试**
 
 Run from `backend`:
 ```powershell
@@ -715,7 +834,7 @@ pnpm --dir frontend exec vitest run src/api/__tests__/passkey.spec.ts src/compon
 
 Expected: 所有已匹配的命名测试 PASS；没有匹配到测试的命令必须先用 `go test -list` 确认 target 的实际名称，再在 ledger 以实际存在的顶级测试名重跑，不能把 `no tests to run` 记为 PASS。
 
-- [ ] **Step 3: 用最小兼容提交修复可复现 RED**
+**Step 3: 用最小兼容提交修复可复现 RED**
 
 对每个 RED，先在该组件的现有 `_test.go` 文件添加只覆盖丢失语义的断言，然后只修改产生该行为的 Passkey、model plaza、repository、prompt config 或 Live 文件。若修改 schema/provider 源，运行 `make -C backend generate` 并在同一提交加入 `backend/ent` 和 `backend/cmd/server/wire_gen.go`。
 
@@ -732,23 +851,34 @@ git.exe commit -m "fix: preserve local behavior after v0.1.168"
 
 Expected: migration 回归测试与任何实际兼容修复同属 v0.1.168 的兼容提交；若其它 RED 不存在，不创建空修复提交。
 
-- [ ] **Step 4: 记录 merge 后行为审查**
+**Step 4: 严格提交 merge 后行为审查 ledger evidence**
 
-在 ledger 说明 Passkey、model plaza、scoped update、prompt audit config 恢复、OpenAI Live 容错、前端权限/路由、quota reset 与 migration 的调用链结论，所有阶段 2 矩阵行必须非 `gap`。
+在 ledger 说明 Passkey、model plaza、scoped update、prompt audit config 恢复、OpenAI Live 容错、前端权限/路由、quota reset 与 migration 的调用链结论，所有阶段 2 矩阵行必须非 `gap`，然后运行：
+
+```powershell
+git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
+$staged = @(git diff --cached --name-only)
+$staged
+if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'v0.1.168 behavior-review evidence allowlist mismatch' }
+git.exe commit -m "docs: record v0.1.168 behavior review"
+```
+
+Expected: migration 回归测试和任何 RED 修复仍在独立兼容提交；无 RED 时不创建空兼容提交。此 evidence commit 严格只含 build ledger，reviewer 通过后 controller 单独 check off Task 10/OpenSpec 3.2。
 
 ### Task 11: 封闭 v0.1.168 的本机门禁、migration 证据与阶段证据
+
+- [ ] Task 11: 封闭 v0.1.168 的本机门禁、migration 证据与阶段证据
 
 **映射 OpenSpec:** 3.3
 
 **Files:**
 - Modify: `docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md`
-- Modify: `docs/openspec/changes/staged-merge-upstream-v0-1-169/tasks.md`
 
 **Interfaces:**
 - Consumes: v0.1.168 merge、升级 migration 测试与兼容提交。
 - Produces: 迁移在新库/升级库上的明确通过或 `unverified` 风险，以及可进入 v0.1.169 的封闭阶段。
 
-- [ ] **Step 1: 运行 v0.1.168 full gate**
+**Step 1: 运行 v0.1.168 full gate**
 
 Run from repository root:
 ```powershell
@@ -768,7 +898,7 @@ git rev-parse HEAD:backend/migrations/192_subscription_cache_invalidation_outbox
 
 Expected: 所有门禁通过；两个 191 文件和本地 192 文件不因 generate 或 merge 改名；最后两个命令精确输出两个固定 base-ref blob OID。
 
-- [ ] **Step 2: Docker 可用时验证新库和升级库，逐项匹配 PASS**
+**Step 2: Docker 可用时验证新库和升级库，逐项匹配 PASS**
 
 Run:
 ```powershell
@@ -790,14 +920,14 @@ foreach ($target in $targets) { $pattern = '^--- PASS: ' + [regex]::Escape($targ
 
 Expected: 仅在 `$preflightAvailable` 为 true 时运行 integration。新库幂等、基线升级后新增 Passkey、双方 191/local 192 checksum、quota receipt rollback 和 repository 行为均有锚定顶级 PASS。命令不存在或 preflight 失败直接记录 `unverified`；preflight 成功后的失败必须先按 systematic debugging 分类，只有 Docker/Testcontainers 环境不可用才能记录升级库路径为 `unverified`，静态/空库测试不能替代。
 
-- [ ] **Step 3: 提交阶段 2 证据并验证清洁度**
+**Step 3: 提交阶段 2 证据并验证清洁度**
 
 Run:
 ```powershell
-git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md docs/openspec/changes/staged-merge-upstream-v0-1-169/tasks.md
+git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
 $staged = @(git diff --cached --name-only)
 $staged
-if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/tasks.md') -DifferenceObject $staged) { throw 'v0.1.168 evidence allowlist mismatch' }
+if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'v0.1.168 evidence allowlist mismatch' }
 git.exe commit -m "docs: close v0.1.168 merge stage"
 $selectionStatus = '?? .comet/current-change.json'
 $index = @(git diff --cached --name-only)
@@ -808,9 +938,11 @@ if ($unexpected) { throw "v0.1.168 evidence left dirty paths: $($unexpected -joi
 $status
 ```
 
-Expected: OpenSpec 3.1-3.3 被勾选；提交只含 ledger/tasks；最终 index 为空，status 过滤实际存在的 `?? .comet/current-change.json` 后为空，无未归属生成物或未解决索引项。
+Expected: implementer 提交严格只含 ledger；最终 index 为空，status 过滤实际存在的 `?? .comet/current-change.json` 后为空，无未归属生成物或未解决索引项。reviewer 通过后 controller 单独 check off Task 11/OpenSpec 3.3。
 
 ### Task 12: 在未提交状态合入 v0.1.169 并完成阻塞审查
+
+- [ ] Task 12: 在未提交状态合入 v0.1.169 并完成阻塞审查
 
 **映射 OpenSpec:** 4.1
 
@@ -820,9 +952,9 @@ Expected: OpenSpec 3.1-3.3 被勾选；提交只含 ledger/tasks；最终 index 
 
 **Interfaces:**
 - Consumes: 从 `$executionBase` 经 v0.1.166/v0.1.168 阶段推进的封闭 HEAD 和 `v0.1.169^{}`。
-- Produces: 第二父为 `26d894ef4f50645a4bf1030e378ac892f17d0223` 的 merge commit；所有客户端可控 URL path 入口受闭集护栏保护。
+- Produces: 第二父为 `26d894ef4f50645a4bf1030e378ac892f17d0223` 的 merge commit 与独立 merge-review ledger evidence；所有客户端可控 URL path 入口受闭集护栏保护。
 
-- [ ] **Step 1: 启动唯一允许的第三段 merge**
+**Step 1: 启动唯一允许的第三段 merge**
 
 Run:
 ```powershell
@@ -839,13 +971,13 @@ $conflictPaths
 
 Expected: merge 前 `$index` 必须为空，`$status` 只能为空或精确为 `?? .comet/current-change.json`；其它任何用户路径均阻塞并要求 Comet 重建隔离位置。merge 停在未提交状态；实际 `$conflictPaths` 逐文件进入六分类台账。
 
-- [ ] **Step 2: 在 merge commit 前执行 GHSA、gateway 与资源阻塞审查**
+**Step 2: 在 merge commit 前执行 GHSA、gateway 与资源阻塞审查**
 
 审查所有客户端可控片段进入上游 URL 拼接的路径：Responses 的 `/v1/responses`、`/responses`、`/backend-api/codex/responses`，以及 Gemini native/compat 模型名。确认 `sanitizedUpstreamPathSuffix` 和 `validateUpstreamPathSegment` 在 URL 构造/请求发送前生效，gateway route、compat bridge、prompt audit、body replay、scheduler 不形成绕过。
 
 同时审查 `openai_proxy_stream_circuit.go` 的 fail-open、Qwen3Guard 辅助字段、`gateway_count_tokens.go`、pricing 服务/资源、token refresh、release fallback 与 `no-new-privileges` 部署配置。逐项解决实际 `$conflictPaths` 后运行 `if ($conflictPaths.Count -gt 0) { git add -- $conflictPaths }` 和 `git diff --name-only --diff-filter=U`；后者必须无输出。阻塞任何漏洞输入可达上游、合法路径被改写、proxy circuit 变为 fail-closed、或本地审计/调度被绕过的状态。
 
-- [ ] **Step 3: 由工具生成依赖和生成输出**
+**Step 3: 由工具生成依赖和生成输出**
 
 Run from `backend`:
 ```powershell
@@ -860,7 +992,7 @@ pnpm --dir frontend install --lockfile-only --frozen-lockfile=false
 
 Expected: 所有生成物归入这次 merge；不能手工修改 Go checksum、Ent/Wire 或 lockfile。
 
-- [ ] **Step 4: 创建 v0.1.169 merge commit 并核验第二父**
+**Step 4: 创建 v0.1.169 merge commit 并核验第二父**
 
 Run:
 ```powershell
@@ -869,7 +1001,7 @@ git diff --name-only --diff-filter=U
 git diff --cached --check
 $staged = @(git diff --cached --name-only)
 $staged
-$mergePlanningPaths = @('.comet/current-change.json', 'docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md', 'docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-verify.md', 'docs/superpowers/plans/2026-08-02-staged-merge-upstream-v0-1-169.md', 'docs/superpowers/specs/2026-08-02-staged-merge-upstream-v0-1-169-design.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/proposal.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/design.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/specs/upstream-release-sync/spec.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/tasks.md')
+$mergePlanningPaths = @('.comet/current-change.json', 'docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md', 'docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-verify.md', 'docs/superpowers/plans/2026-08-02-staged-merge-upstream-v0-1-169.md', 'docs/superpowers/specs/2026-08-02-staged-merge-upstream-v0-1-169-design.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/proposal.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/design.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/specs/upstream-release-sync/spec.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/tasks.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/.comet/subagent-progress.md')
 $forbidden = $staged | Where-Object { $_ -in $mergePlanningPaths }
 if ($forbidden) { throw "forbidden paths staged for merge: $($forbidden -join ', ')" }
 git.exe commit --no-edit
@@ -878,7 +1010,23 @@ git rev-parse HEAD^2
 
 Expected: 所有实际 `$conflictPaths` 已逐项暂存，unmerged/cached whitespace 检查通过；`$staged` 不含 runtime selection、ledger、计划、Design Doc 或任一 OpenSpec 规划产物，且所有工具产生的 manifest/checksum/生成输出在本 merge commit。第二父精确为 `26d894ef4f50645a4bf1030e378ac892f17d0223`；VERSION 仍为 `0.1.165.4`。
 
+**Step 5: 严格提交 v0.1.169 merge-review ledger evidence**
+
+在 ledger 记录实际 `$conflictPaths`、GHSA/gateway/资源阻塞审查和合并后的第二父，然后运行：
+
+```powershell
+git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
+$staged = @(git diff --cached --name-only)
+$staged
+if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'v0.1.169 merge-review evidence allowlist mismatch' }
+git.exe commit -m "docs: record v0.1.169 merge review"
+```
+
+Expected: 此 evidence commit 严格只含 build ledger，保持 preceding merge commit 纯 merge；reviewer 通过后 controller 单独 check off Task 12/OpenSpec 4.1。
+
 ### Task 13: 对 v0.1.169 完成 GHSA 负向矩阵与行为审查
+
+- [ ] Task 13: 对 v0.1.169 完成 GHSA 负向矩阵与行为审查
 
 **映射 OpenSpec:** 4.2
 
@@ -890,7 +1038,7 @@ Expected: 所有实际 `$conflictPaths` 已逐项暂存，unmerged/cached whites
 - Consumes: `sanitizedUpstreamPathSuffix`、`validateUpstreamPathSegment`、`buildGeminiAIStudioModelActionURL`、三类 Responses 路由。
 - Produces: GHSA 负向输入在边缘被拒绝且从不参与 upstream suffix 拼接/请求，合法输入保持原样。
 
-- [ ] **Step 1: 写入并运行精确 GHSA 负向矩阵**
+**Step 1: 写入并运行精确 GHSA 负向矩阵**
 
 在 `upstream_path_guard_test.go`、`gateway_test.go` 和 `gemini_upstream_url_test.go` 的表驱动测试中覆盖下表。编码 path traversal 和其他非法 path suffix 在三类 Responses 入口都断言 `404`、`Unsupported responses subpath`、上游请求计数为零且不被误判为 `compact`。helper 原始 `?/#` 输入与真实 HTTP query 是不同边界。
 
@@ -916,7 +1064,7 @@ go test -count=1 ./internal/securityaudit -run '^(TestParseQwen3GuardStrictAndPo
 
 Expected: 所有负向项拒绝于边缘；合法项通过；proxy circuit 保持 fail-open 语义；Qwen3Guard 辅助字段不改变既定策略。
 
-- [ ] **Step 2: 验证 v0.1.169 新增 deploy 测试脚本**
+**Step 2: 验证 v0.1.169 新增 deploy 测试脚本**
 
 Run after the v0.1.169 merge, using the bash verified in Task 1:
 ```powershell
@@ -927,11 +1075,11 @@ foreach ($script in $scripts) { if (-not (Test-Path -LiteralPath $script)) { thr
 
 Expected: 两个脚本都在 v0.1.169 merge 后存在并由已验证 bash 成功执行；它们不作为阶段 0 文件或测试目标。失败阻塞阶段，不执行部署。
 
-- [ ] **Step 3: 审查 v0.1.169 与本地能力的调用链**
+**Step 3: 审查 v0.1.169 与本地能力的调用链**
 
 将 path guard、Gemini compat、Responses route、prompt audit、OpenAI gateway、scheduler、body replay、count_tokens、pricing、token refresh 和 release fallback 逐项映射到 canonical matrix。确认安全护栏没有因本地分支绕过，pricing 与图片/usage 倍率没有退化，部署安全文件只随上游树合并且未执行部署。
 
-- [ ] **Step 4: 对 RED 创建独立兼容提交**
+**Step 4: 对 RED 创建独立兼容提交**
 
 先使相关单元/路由测试 RED，再修改最小 path guard、Gemini URL builder 或调用方代码，重新运行 Step 1。
 
@@ -948,23 +1096,34 @@ git.exe commit -m "fix: preserve local behavior after v0.1.169"
 
 Expected: 仅在 RED 存在时创建该兼容提交；测试和修复在同一提交，生成输出随源提交。
 
-- [ ] **Step 5: 记录 merge 后行为审查**
+**Step 5: 严格提交 merge 后行为审查 ledger evidence**
 
-在 ledger 逐项写入 GHSA 矩阵结果、路径入口/调用链、proxy circuit、Qwen3Guard、count_tokens、pricing、token refresh、release fallback 的证据，并确认阶段 3 `gap=0`。
+在 ledger 逐项写入 GHSA 矩阵结果、路径入口/调用链、proxy circuit、Qwen3Guard、count_tokens、pricing、token refresh、release fallback 的证据，并确认阶段 3 `gap=0`，然后运行：
+
+```powershell
+git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
+$staged = @(git diff --cached --name-only)
+$staged
+if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'v0.1.169 behavior-review evidence allowlist mismatch' }
+git.exe commit -m "docs: record v0.1.169 behavior review"
+```
+
+Expected: 兼容代码提交保持独立，无 RED 时不创建空兼容提交；此 evidence commit 严格只含 build ledger，reviewer 通过后 controller 单独 check off Task 13/OpenSpec 4.2。
 
 ### Task 14: 封闭 v0.1.169 的本机门禁与阶段证据
+
+- [ ] Task 14: 封闭 v0.1.169 的本机门禁与阶段证据
 
 **映射 OpenSpec:** 4.3
 
 **Files:**
 - Modify: `docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md`
-- Modify: `docs/openspec/changes/staged-merge-upstream-v0-1-169/tasks.md`
 
 **Interfaces:**
 - Consumes: v0.1.169 merge、GHSA 负向矩阵和兼容提交。
 - Produces: 可进行最终版本更新的封闭阶段 3 证据。
 
-- [ ] **Step 1: 运行 v0.1.169 full gate**
+**Step 1: 运行 v0.1.169 full gate**
 
 Run from repository root:
 ```powershell
@@ -984,7 +1143,7 @@ git rev-parse HEAD:backend/migrations/192_subscription_cache_invalidation_outbox
 
 Expected: full gate 通过，VERSION 仍为 `0.1.165.4`，无生成 diff、whitespace、unmerged 或 tracked conflict marker；最后两个命令精确输出 `c22d47d79cbbaf4bc40524d42ef52e6cc8ac3af6` 和 `502ecec1caf9f76e022c2e83acf3707190539301`。
 
-- [ ] **Step 2: 运行 v0.1.169 Docker 判定与 integration**
+**Step 2: 运行 v0.1.169 Docker 判定与 integration**
 
 Run:
 ```powershell
@@ -1006,14 +1165,14 @@ foreach ($target in $targets) { $pattern = '^--- PASS: ' + [regex]::Escape($targ
 
 Expected: 仅在 `$preflightAvailable` 为 true 时运行 integration，每个目标以锚定顶级 PASS 匹配。命令不存在或 preflight 失败直接记录 `unverified`；preflight 成功后的失败先按 systematic debugging 分类，代码/断言失败 BLOCK，只有 Docker/Testcontainers 环境不可用时记录环境根因和未验证 migration/repository 契约。
 
-- [ ] **Step 3: 提交阶段 3 证据并验证清洁度**
+**Step 3: 提交阶段 3 证据并验证清洁度**
 
 Run:
 ```powershell
-git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md docs/openspec/changes/staged-merge-upstream-v0-1-169/tasks.md
+git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
 $staged = @(git diff --cached --name-only)
 $staged
-if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/tasks.md') -DifferenceObject $staged) { throw 'v0.1.169 evidence allowlist mismatch' }
+if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'v0.1.169 evidence allowlist mismatch' }
 git.exe commit -m "docs: close v0.1.169 merge stage"
 $selectionStatus = '?? .comet/current-change.json'
 $index = @(git diff --cached --name-only)
@@ -1024,9 +1183,11 @@ if ($unexpected) { throw "v0.1.169 evidence left dirty paths: $($unexpected -joi
 $status
 ```
 
-Expected: OpenSpec 4.1-4.3 被勾选；提交只含 ledger/tasks；最终 index 为空，status 过滤实际存在的 `?? .comet/current-change.json` 后为空，阶段位置没有新增未归因路径。
+Expected: implementer 提交严格只含 ledger；最终 index 为空，status 过滤实际存在的 `?? .comet/current-change.json` 后为空，阶段位置没有新增未归因路径。reviewer 通过后 controller 单独 check off Task 14/OpenSpec 4.3。
 
 ### Task 15: 一次更新最终版本
+
+- [ ] Task 15: 一次更新最终版本
 
 **映射 OpenSpec:** 5.1
 
@@ -1037,7 +1198,7 @@ Expected: OpenSpec 4.1-4.3 被勾选；提交只含 ledger/tasks；最终 index 
 - Consumes: 三个封闭 merge 阶段和当前 `VERSION=0.1.165.4`。
 - Produces: 唯一最终版本 `0.1.169.1`。
 
-- [ ] **Step 1: 确认三个阶段已封闭**
+**Step 1: 确认三个阶段已封闭**
 
 Run:
 ```powershell
@@ -1047,7 +1208,7 @@ git log --merges --first-parent --format='%H %P' e9a0e4aa53b5d9d5f5c84986cfadd80
 
 Expected: VERSION 仍为 `0.1.165.4`；merge log 从 immutable source base 而非 `$executionBase` 开始，first-parent 区间存在三个 merge 行且各阶段 ledger 结论为封闭。
 
-- [ ] **Step 2: 修改并提交唯一的版本变更**
+**Step 2: 修改并提交唯一的版本变更**
 
 将 `backend/cmd/server/VERSION` 的完整内容改为 `0.1.169.1`，然后运行：
 ```powershell
@@ -1062,7 +1223,11 @@ git show HEAD:backend/cmd/server/VERSION
 
 Expected: 输出精确为 `0.1.169.1`；提交严格只包含 `backend/cmd/server/VERSION`，不包含生成物、文档或 tag 操作。
 
+reviewer 通过后 controller 单独 check off Task 15/OpenSpec 5.1。
+
 ### Task 16: 在最终 source HEAD 重跑完整本机验证
+
+- [ ] Task 16: 在最终 source HEAD 重跑完整本机验证
 
 **映射 OpenSpec:** 5.2
 
@@ -1073,7 +1238,7 @@ Expected: 输出精确为 `0.1.169.1`；提交严格只包含 `backend/cmd/serve
 - Consumes: `VERSION=0.1.169.1` 的最终 source HEAD。
 - Produces: 最终自动门禁、Images 精确契约和前后端能力的可审计结果。
 
-- [ ] **Step 1: 重跑全部命中的能力聚焦测试**
+**Step 1: 重跑全部命中的能力聚焦测试**
 
 Run from `backend`:
 ```powershell
@@ -1089,7 +1254,7 @@ pnpm --dir frontend exec vitest run src/utils/__tests__/subscriptionQuota.spec.t
 
 Expected: 上述测试逐项 PASS，且 Images 六项契约都由直接测试证据支撑。
 
-- [ ] **Step 2: 重跑 final full gate 和静态检查**
+**Step 2: 重跑 final full gate 和静态检查**
 
 Run from repository root:
 ```powershell
@@ -1109,7 +1274,7 @@ git rev-parse HEAD:backend/migrations/192_subscription_cache_invalidation_outbox
 
 Expected: 后端默认/unit/lint、前端 ESLint/Vitest/typecheck/build 均经 `make test`/已验证的 `VERSION=0.1.169.1` Windows build 命令通过；两轮生成稳定；静态检查无输出；最后两个命令精确输出 `c22d47d79cbbaf4bc40524d42ef52e6cc8ac3af6` 和 `502ecec1caf9f76e022c2e83acf3707190539301`。
 
-- [ ] **Step 3: 提交最终自动验证证据**
+**Step 3: 提交最终自动验证证据**
 
 Run:
 ```powershell
@@ -1127,9 +1292,11 @@ if ($unexpected) { throw "final gate evidence left dirty paths: $($unexpected -j
 $status
 ```
 
-Expected: ledger 明确关联最终 source HEAD 和命令退出码；提交后 index 为空，status 过滤实际存在的 `?? .comet/current-change.json` 后为空。
+Expected: ledger 明确关联最终 source HEAD 和命令退出码；提交后 index 为空，status 过滤实际存在的 `?? .comet/current-change.json` 后为空。reviewer 通过后 controller 单独 check off Task 16/OpenSpec 5.2。
 
 ### Task 17: 验证拓扑、migration 保留和最终 integration 状态
+
+- [ ] Task 17: 验证拓扑、migration 保留和最终 integration 状态
 
 **映射 OpenSpec:** 5.3
 
@@ -1140,7 +1307,7 @@ Expected: ledger 明确关联最终 source HEAD 和命令退出码；提交后 i
 - Consumes: 最终 HEAD、三个 tag peeled SHA、三个完整 migration filename。
 - Produces: ancestor/second-parent/migration/integration 的最终可判定结论。
 
-- [ ] **Step 1: 验证三个 tag 祖先和 merge 第二父**
+**Step 1: 验证三个 tag 祖先和 merge 第二父**
 
 Run:
 ```powershell
@@ -1152,7 +1319,7 @@ git log --merges --first-parent --format='%H %P' e9a0e4aa53b5d9d5f5c84986cfadd80
 
 Expected: 三个 ancestor 命令退出 0；merge log 从 immutable source base 而非 `$executionBase` 开始，恰有三个 merge commit，且其第二父集合精确包含 `dc893dd0b8eab41df5be595ae9fcd1aa74a062b8`、`99c8e4bf7564823bafbab369acab6539e734c1bb`、`26d894ef4f50645a4bf1030e378ac892f17d0223`。
 
-- [ ] **Step 2: 验证 migration filename、排序和 checksum 身份**
+**Step 2: 验证 migration filename、排序和 checksum 身份**
 
 Run:
 ```powershell
@@ -1164,7 +1331,7 @@ git rev-parse HEAD:backend/migrations/192_subscription_cache_invalidation_outbox
 
 Expected: 三个完整 filename 都存在；本地两个历史文件没有 rename，Passkey 文件作为上游新增保留；最后两个命令精确输出 `c22d47d79cbbaf4bc40524d42ef52e6cc8ac3af6` 和 `502ecec1caf9f76e022c2e83acf3707190539301`。升级 integration 的 filtered FS 与这两个 blob identity 是互补证据，前者不能替代后者。Docker 已可用时，Task 11/14 的升级测试必须出现顶级 PASS；不可用时该项保持 `unverified`，不得改写为成功。
 
-- [ ] **Step 3: 执行最终 Docker 判定**
+**Step 3: 执行最终 Docker 判定**
 
 Run:
 ```powershell
@@ -1186,7 +1353,7 @@ foreach ($target in $targets) { $pattern = '^--- PASS: ' + [regex]::Escape($targ
 
 Expected: 仅在 `$preflightAvailable` 为 true 时运行 integration；可用 Docker 环境中五项以锚定顶级 PASS 匹配。命令不存在或 preflight 失败直接记为 `unverified`；preflight 成功后的失败先按 systematic debugging 分类，代码/断言失败 BLOCK，只有 Docker/Testcontainers 环境不可用时才将原始错误、完整日志、退出码和“新库/升级库 PostgreSQL 路径未验证”写入 ledger。
 
-- [ ] **Step 4: 提交拓扑与 migration 证据**
+**Step 4: 提交拓扑与 migration 证据**
 
 Run:
 ```powershell
@@ -1204,40 +1371,41 @@ if ($unexpected) { throw "topology evidence left dirty paths: $($unexpected -joi
 $status
 ```
 
-Expected: 该提交只更新最终拓扑、migration 和 integration 证据；提交后 index 为空，status 过滤实际存在的 `?? .comet/current-change.json` 后为空。
+Expected: 该提交只更新最终拓扑、migration 和 integration 证据；提交后 index 为空，status 过滤实际存在的 `?? .comet/current-change.json` 后为空。reviewer 通过后 controller 单独 check off Task 17/OpenSpec 5.3。
 
 ### Task 18: 完成本地能力专项 review 与最终验证报告
+
+- [ ] Task 18: 完成本地能力专项 review 与最终验证报告
 
 **映射 OpenSpec:** 5.4
 
 **Files:**
 - Create: `docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-verify.md`
-- Modify: `docs/openspec/changes/staged-merge-upstream-v0-1-169/tasks.md`
 
 **Interfaces:**
 - Consumes: build ledger、最终测试结果、tag 拓扑和 Docker 判定。
 - Produces: 可供 OpenSpec/Comet Verify 使用的最终 report，明确通过项和唯一允许的 `unverified` 风险。
 
-- [ ] **Step 1: 逐项完成本地能力专项 review**
+**Step 1: 逐项完成本地能力专项 review**
 
 在 verify report 为 canonical 矩阵每一行写入测试、调用链或生成物证据，并显式复核 scheduler、各平台 sticky、fallback/WaitPlan、DB recheck、privacy、image capability、异步图片/对象存储、图片输入计费、上游倍率、session binding/step-up、runtime setting 热更新、gateway 透传、body replay/cleanup、用户资源控制、分组复制、批量限额、quota cycle reset、前端本地功能、版本依赖、生成代码和 migrations。
 
 Images 段必须单列六项精确契约。GHSA 段必须列出三类 Responses 入口、所有负向类别、Gemini native/compat 的“构造上游 URL 前拒绝且请求数为零”证据。Docker 不可用时，只列出 Task 5/8/11/14/17 已记录的 `unverified` 契约和原因。
 
-- [ ] **Step 2: 执行 OpenSpec 严格验证**
+**Step 2: 执行 OpenSpec 严格验证**
 
 Run:
 ```powershell
 openspec validate staged-merge-upstream-v0-1-169 --strict
 ```
 
-Expected: 命令退出 0。若失败，只可修改实际需要的下列路径：`docs/openspec/changes/staged-merge-upstream-v0-1-169/proposal.md`、`docs/openspec/changes/staged-merge-upstream-v0-1-169/design.md`、`docs/openspec/changes/staged-merge-upstream-v0-1-169/specs/upstream-release-sync/spec.md`、`docs/openspec/changes/staged-merge-upstream-v0-1-169/tasks.md`、`docs/superpowers/specs/2026-08-02-staged-merge-upstream-v0-1-169-design.md`、`docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-verify.md`；不得修改已验证源码来回避文档验证。
+Expected: 命令退出 0，并只读取 controller 已逐项勾选的 `tasks.md`。若失败，只可修改实际需要的下列路径：`docs/openspec/changes/staged-merge-upstream-v0-1-169/proposal.md`、`docs/openspec/changes/staged-merge-upstream-v0-1-169/design.md`、`docs/openspec/changes/staged-merge-upstream-v0-1-169/specs/upstream-release-sync/spec.md`、`docs/superpowers/specs/2026-08-02-staged-merge-upstream-v0-1-169-design.md`、`docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-verify.md`；不得修改 `tasks.md` 或已验证源码来回避文档验证。
 
-- [ ] **Step 3: 严格验证失败时创建独立 docs 修复提交**
+**Step 3: 严格验证失败时创建独立 docs 修复提交**
 
-仅在 Step 2 非零且修复后 strict validate 变为 0 时执行。列出实际修改的路径，确认全部属于 Step 2 列出的六个路径，然后运行：
+仅在 Step 2 非零且修复后 strict validate 变为 0 时执行。列出实际修改的路径，确认全部属于 Step 2 列出的五个路径，然后运行：
 ```powershell
-$docsAllow = @('docs/openspec/changes/staged-merge-upstream-v0-1-169/proposal.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/design.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/specs/upstream-release-sync/spec.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/tasks.md', 'docs/superpowers/specs/2026-08-02-staged-merge-upstream-v0-1-169-design.md', 'docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-verify.md')
+$docsAllow = @('docs/openspec/changes/staged-merge-upstream-v0-1-169/proposal.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/design.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/specs/upstream-release-sync/spec.md', 'docs/superpowers/specs/2026-08-02-staged-merge-upstream-v0-1-169-design.md', 'docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-verify.md')
 $changed = @(git diff --name-only)
 $changed
 $unexpected = $changed | Where-Object { $_ -notin $docsAllow }
@@ -1252,16 +1420,16 @@ git.exe commit -m "docs: fix staged merge spec validation"
 
 Expected: strict validate 首次成功时不创建此提交；失败修复时，该提交只包含实际需要的明确 docs 路径。
 
-- [ ] **Step 4: 更新任务状态、提交最终报告并检查清洁度**
+**Step 4: 提交最终报告并检查清洁度**
 
-将 `tasks.md` 的 5.1-5.4 勾选，报告明确写出“未推送、未发版、未部署、未操作服务器、未操作 Nginx，生产临时盾仍保留”。
+报告明确写出“未推送、未发版、未部署、未操作服务器、未操作 Nginx，生产临时盾仍保留”。implementer 不修改或暂存 `tasks.md`。
 
 Run:
 ```powershell
-git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-verify.md docs/openspec/changes/staged-merge-upstream-v0-1-169/tasks.md
+git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-verify.md
 $staged = @(git diff --cached --name-only)
 $staged
-if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-verify.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/tasks.md') -DifferenceObject $staged) { throw 'final verify evidence allowlist mismatch' }
+if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-verify.md') -DifferenceObject $staged) { throw 'final verify evidence allowlist mismatch' }
 git.exe commit -m "docs: verify staged upstream merge"
 $selectionStatus = '?? .comet/current-change.json'
 $index = @(git diff --cached --name-only)
@@ -1272,13 +1440,15 @@ if ($unexpected) { throw "final verify evidence left dirty paths: $($unexpected 
 $status
 ```
 
-Expected: 18 个 OpenSpec 任务均有对应证据且 1.1-1.5、2.1-2.3、3.1-3.3、4.1-4.3、5.1-5.4 全部勾选；最终 index 为空，status 过滤实际存在的 `?? .comet/current-change.json` 后为空；不执行 push、tag、release、deploy、镜像构建、服务器或 Nginx 命令。
+Expected: implementer commit 严格只含 verify report；最终 index 为空，status 过滤实际存在的 `?? .comet/current-change.json` 后为空；不执行 push、tag、release、deploy、镜像构建、服务器或 Nginx 命令。reviewer 通过后 controller 单独 check off Task 18/OpenSpec 5.4；至此 18 个顶层 Task 和 1.1-1.5、2.1-2.3、3.1-3.3、4.1-4.3、5.1-5.4 均已通过各自 docs-only checkoff commit 完成。
 
 ## 计划自审
 
 | 检查项 | 结论 |
 | --- | --- |
-| Spec coverage | OpenSpec 1.1-1.5、2.1-2.3、3.1-3.3、4.1-4.3、5.1-5.4 共 18 项均有一个同编号任务；Task 5、8、11、14、18 分别勾选阶段 0、v0.1.166、v0.1.168、v0.1.169 和最终条目。三段 no-ff/no-commit、merge 前阻塞审查、merge 后行为审查、17 冲突、能力矩阵、Images、quota reset、迁移、Docker 和最终版本均有明确步骤。 |
+| SDD coverage | 18 个 `### Task N` 均有唯一顶层 `- [ ] Task N` checkbox，Plan 中仅此 18 个 checkbox；内部 Step 为非 checkbox 编号。implementer/reviewer 不修改 Plan；仅 controller 在 reviewer 通过后将当前 Task 改为 `[x]`、同步唯一 OpenSpec 项并写入 progress。 |
+| Progress/topology coverage | 通用 live-ID 平台在成功派发后持久 agent identity；本平台不存在“dispatch success 与 completion 之间”的 controller 窗口，因此在原子调用两侧持久 dispatch intent 和 returned result。恢复先查 report、Git 与宿主工具结果，不能确认即 BLOCKED 而不重派；已有 task ID 的 fix resume 保持 Comet thorough round。任何下一次派发和每次 merge clean gate 前最新 checkpoint 均已提交且 worktree clean。progress-only 与三路径 docs-only checkoff commits 均不改变最终 `git log --merges` 恰有三个 upstream merge 节点的判定。 |
+| Spec coverage | OpenSpec 1.1-1.5、2.1-2.3、3.1-3.3、4.1-4.3、5.1-5.4 共 18 项均有一个同编号任务；三段 no-ff/no-commit、merge 前阻塞审查、merge 后行为审查、17 冲突、能力矩阵、Images、quota reset、迁移、Docker 和最终版本均有明确步骤。 |
 | Placeholder scan | 本计划没有未填内容、未命名测试或未定义接口占位；所有条件分支给出停止、RED、`unverified` 或 PASS 判定，且真实 HTTP query 与 helper raw 输入的 GHSA 断言明确分离。 |
 | 双基线与类型/名称一致性 | frontmatter `base-ref` 始终是 immutable source base，`$executionBase` 仅为其 planning-only 后代；Task 1 使用当前 change OpenSpec 目录前缀加两个精确文档路径同时验证 source-to-execution tree diff 和全提交触及路径，且 source/execution VERSION 都为 `0.1.165.4`。`applyMigrationsFS`、quota 接口、路径护栏、Gemini URL builder、migration 文件名、两个 source-base blob OID、tag SHA、最终从 source base 开始的 merge range 和 integration 顶级测试名在任务间使用一致。 |
 | 范围边界 | 计划只描述 Comet 已确认的实际隔离位置内的 merge、测试、文档和本地生成；明确排除 push、发布、部署、镜像、服务器、数据库运行态和 Nginx 操作。 |
