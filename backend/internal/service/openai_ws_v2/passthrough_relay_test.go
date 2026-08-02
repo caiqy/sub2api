@@ -677,6 +677,8 @@ func TestRelay_OnTurnComplete_PerTerminalEvent(t *testing.T) {
 
 	for _, tc := range terminalCases {
 		t.Run(tc.eventType, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
 			clientConn := newPassthroughTestFrameConn(nil, false)
 			upstreamConn := newPassthroughTestFrameConn([]passthroughTestFrame{
 				{msgType: coderws.MessageText, payload: []byte(`{"type":"response.created","response":{"id":"` + tc.requestID + `"}}`)},
@@ -684,7 +686,7 @@ func TestRelay_OnTurnComplete_PerTerminalEvent(t *testing.T) {
 			}, true)
 			turns := make([]RelayTurnResult, 0, 1)
 
-			_, relayExit := Relay(context.Background(), clientConn, upstreamConn, []byte(`{"type":"response.create","model":"gpt-5.6-terra"}`), RelayOptions{
+			_, relayExit := Relay(ctx, clientConn, upstreamConn, []byte(`{"type":"response.create","model":"gpt-5.6-terra"}`), RelayOptions{
 				OnTurnComplete: func(turn RelayTurnResult) {
 					turns = append(turns, turn)
 				},
