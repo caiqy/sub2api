@@ -4,7 +4,7 @@
 - Review mode: `thorough`
 - 当前任务: Task 10 - 对 v0.1.168 审查交互并新增 migration 升级回归测试
 - 映射 OpenSpec: 3.2
-- 阶段: `task-10 / task-review-result`
+- 阶段: `task-10 / fix-round-1-dispatch-intent`
 - Task-10 dispatch token: `task-10-implementer-attempt-1-e46cd9d55`
 - Task-10 role: `implementer`
 - Task-10 model: `high`
@@ -29,6 +29,11 @@
 - Task-10 review Important 3: Passkey session/token、frontend route/hidden-menu、PostgreSQL lost-update等缺直接证据却统一标protected；须补测或降为manual/unverified。
 - Task-10 review Minor deferred: repository target count 11 vs 12不一致。
 - Task-10 review-fix rounds: `0/5 changes_required; round 1 pending`
+- Task-10 fix-1 dispatch token: `task-10-fix-round-1-b488abf91`
+- Task-10 fix-1 role: `fix-agent (resume implementer)`
+- Task-10 fix-1 model: `high`
+- Task-10 fix-1 base HEAD: `b488abf91e11ca6cc17f7aa1580c577efb1a3d6d`
+- Task-10 fix-1 task ID: `pending resumed functions.task return`
 - Task-9 dispatch token: `task-9-implementer-attempt-1-97d44dd20`
 - Task-9 role: `implementer`
 - Task-9 model: `high`
@@ -385,4 +390,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - Task-4审查-修复轮次: `2/2 PASS`
-- 状态: Task10 review未通过；准备fix round 1补target evidence与矩阵修正，Task11不得运行。
+- 状态: Task10 fix round 1即将派发，仅补测试/evidence不扩产品scope，Task11不得运行。
