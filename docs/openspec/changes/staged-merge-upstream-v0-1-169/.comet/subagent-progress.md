@@ -4,7 +4,7 @@
 - Review mode: `thorough`
 - 当前任务: Task 1 - 验证 Comet 已绑定的 source/execution 双基线隔离位置
 - 映射 OpenSpec: 1.1
-- 阶段: `task-review / result`
+- 阶段: `done / checkoff`
 - Dispatch token: `task-1-reviewer-attempt-1-49466c2fd`
 - Role: `reviewer`
 - Attempt: `1`
@@ -23,6 +23,7 @@
 - Review verdict: `Spec ✅`; `Quality APPROVED`
 - Review findings: Critical 0，Important 0，Minor 1（report 提及 `git diff --check HEAD^ HEAD`，但未在命令块展示；非 brief 必需门禁，不阻塞）。
 - Cannot verify from diff: Comet 绑定待 controller 核对；其余实时命令采用 implementer report 证据；无外部操作由 controller 工具记录核对。
+- Controller resolution: `isolation=branch`；`bound_branch=feature/20260802/staged-merge-upstream-v0-1-169` 与当前分支一致；`comet state check ... build` 全部 PASS。其余实时门禁采用可重跑 implementer report，controller 本轮工具记录无 push/tag/release/deploy/服务器操作。
 - TDD: RED/GREEN `N/A`（证据型 docs-only 任务）；report 已记录不伪造失败测试及全部门禁结果。
 - 审查-修复轮次: `0/2`
-- 状态: review clean；待 controller 核对 Comet 绑定后执行三路径 checkoff。
+- 状态: Task 1 review clean；顶层 Plan Task 1 与 OpenSpec 1.1 已由 controller 勾选，待提交本三路径 checkoff。

@@ -107,7 +107,7 @@ Task 3 建立下表的每一行，并在每段以 `protected`、`manual`、`unve
 
 ### Task 1: 验证 Comet 已绑定的 source/execution 双基线隔离位置
 
-- [ ] Task 1: 验证 Comet 已绑定的 source/execution 双基线隔离位置
+- [x] Task 1: 验证 Comet 已绑定的 source/execution 双基线隔离位置
 
 **映射 OpenSpec:** 1.1
 
