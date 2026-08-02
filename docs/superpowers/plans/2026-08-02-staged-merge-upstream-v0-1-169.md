@@ -190,7 +190,7 @@ Expected: implementer 提交严格只含 build ledger，不勾选计划或 OpenS
 
 ### Task 2: 重新获取 refs 并固定 tag 范围
 
-- [ ] Task 2: 重新获取 refs 并固定 tag 范围
+- [x] Task 2: 重新获取 refs 并固定 tag 范围
 
 **映射 OpenSpec:** 1.2
 
