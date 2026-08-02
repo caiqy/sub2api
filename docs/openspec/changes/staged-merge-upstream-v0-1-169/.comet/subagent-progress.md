@@ -4,7 +4,7 @@
 - Review mode: `thorough`
 - 当前任务: Task 7 - 对 v0.1.166 运行 merge 后行为审查并修复 RED
 - 映射 OpenSpec: 2.2
-- 阶段: `task-7 / implementation-result + review-dispatch-intent`
+- 阶段: `task-7 / review-result + fix-round-1-dispatch-intent`
 - Task-7 dispatch token: `task-7-implementer-attempt-1-916aab893`
 - Task-7 role: `implementer`
 - Task-7 model: `high`
@@ -28,8 +28,15 @@
 - Task-7 reviewer model: `high`
 - Task-7 reviewer base HEAD: `3044445abb04381396151f0e4eeb3d16f597b13c`
 - Task-7 review package: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/review-6c372593c..3044445ab.diff`
-- Task-7 reviewer task ID: `pending atomic functions.task return`
-- Task-7 review-fix rounds: `0/5`
+- Task-7 reviewer task ID: `ses_03ed22a34ffea4EcA50TjZSBqz`
+- Task-7 review result: `Spec compliance FAIL; Task quality CHANGES_REQUIRED`
+- Task-7 review findings: service gate只实际执行2/4、handler gate只执行1/2；terminal subtests缺少短context timeout；report顶层状态仍BLOCKED。
+- Task-7 fix-1 dispatch token: `task-7-fix-round-1-c0c16510d`
+- Task-7 fix-1 role: `fix-agent (resume implementer)`
+- Task-7 fix-1 model: `high`
+- Task-7 fix-1 base HEAD: `c0c16510db1775c20dc9e88fa6e9a679cd0fdedf`
+- Task-7 fix-1 task ID: `pending resumed functions.task return`
+- Task-7 review-fix rounds: `1/5 dispatching`
 - Task-6 dispatch token: `task-6-implementer-attempt-1-3a7bf096e`
 - Task-6 role: `implementer`
 - Task-6 model: `high`
@@ -166,4 +173,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - Task-4审查-修复轮次: `2/2 PASS`
-- 状态: Task7保护测试与behavior ledger已提交；即将派发fresh reviewer，Task8 full gate尚未运行且不得提前checkoff。
+- 状态: Task7 review未通过；Plan/brief已加入tagged service/handler全锚点与terminal timeout，准备恢复原implementer修复，Task8仍不得运行。
