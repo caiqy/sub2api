@@ -907,8 +907,12 @@ Run from `backend`:
 ```powershell
 go test -count=1 ./internal/server/middleware -run '^(TestPanelRateLimiterGlobalPerUser|TestPanelRateLimiterFailOpenOnRedisError)$'
 if ($LASTEXITCODE -ne 0) { throw 'panel rate limiter behavior failed' }
-go test -count=1 ./internal/handler/admin -run '^(TestUpdateSettingsPartialPayloadKeepsUnsentKeys|TestUpdateSettingsFullPayloadStillClearsSentEmptyFields)$'
-if ($LASTEXITCODE -ne 0) { throw 'partial settings behavior failed' }
+$settingsTargets = @('TestUpdateSettingsPartialPayloadKeepsUnsentKeys', 'TestUpdateSettingsFullPayloadStillClearsSentEmptyFields')
+$settingsLog = Join-Path $env:TEMP 'sub2api-v0.1.166-partial-settings.log'
+go test -v -tags unit -count=1 ./internal/handler/admin -run '^(TestUpdateSettingsPartialPayloadKeepsUnsentKeys|TestUpdateSettingsFullPayloadStillClearsSentEmptyFields)$' 2>&1 | Tee-Object -FilePath $settingsLog
+$settingsExit = $LASTEXITCODE
+if ($settingsExit -ne 0) { throw "partial settings behavior failed; inspect $settingsLog" }
+foreach ($target in $settingsTargets) { if (-not (Select-String -Path $settingsLog -Pattern ('^--- PASS: ' + [regex]::Escape($target) + ' \(') -Quiet)) { throw "missing settings top-level PASS: $target" } }
 go test -count=1 ./internal/service -run '^(TestCompositeRouteResolverExplicitExactRouteRewritesModel|TestOpenAIGatewayService_Forward_WSv2_ResponseDoneUsageParsed|TestGatewayServiceRecordUsage_AttachesFinalUpstreamRequestSnapshot|TestGatewayService_ForwardAsResponses_PassthroughHeaderForwardCopiesFromClientRequest)$'
 if ($LASTEXITCODE -ne 0) { throw 'service behavior review failed' }
 $relayTargets = @('TestRelay_OnTurnComplete_PerTerminalEvent', 'TestRelay_OnTurnComplete_UsesCurrentResponseCreateModel', 'TestRelay_OnTurnComplete_IgnoresTerminalForUnknownResponse', 'TestRelay_OnTurnComplete_ProvidesTurnMetrics')
@@ -921,7 +925,7 @@ go test -count=1 ./internal/handler -run '^(TestGatewayChatCredentialStopDoesNot
 if ($LASTEXITCODE -ne 0) { throw 'handler behavior review failed' }
 ```
 
-Expected: 每个命令紧邻检查 exit 并 PASS；四个 relay 目标必须各自出现锚定顶级 `--- PASS:`，`no tests to run` 或缺失任一目标均阻塞。changed-files × matrix 审查明确说明上游限流、部分设置、WS 计费、composite route 没有回归本地 scheduler/sticky/fallback/usage。
+Expected: 每个命令紧邻检查 exit 并 PASS；两个 `unit`-tag settings 目标和四个 relay 目标必须各自出现锚定顶级 `--- PASS:`，`no tests to run` 或缺失任一目标均阻塞。changed-files × matrix 审查明确说明上游限流、部分设置、WS 计费、composite route 没有回归本地 scheduler/sticky/fallback/usage。
 
 **Step 3: 对发现的 RED 用失败测试驱动最小兼容修复**
 
@@ -944,7 +948,7 @@ Expected: 每个兼容提交同时包含复现测试、最小源修复和由该�
 
 **Step 5: 严格提交 merge 后行为审查 ledger evidence**
 
-在 ledger 按能力矩阵写入 terminal callback 保护提交、每个测试命令、审查的调用链、RED 和兼容提交 SHA；确认 `gap=0` 后运行：
+保留 ledger 中已写入的 untagged settings `no tests to run`、诊断命令、`gap=1` 和 `BLOCKED` 历史，不得改写或删除；在其后追加 `-tags unit` settings 命令、两个锚定顶级 PASS、旧 blocker 已 supersede 的结论，以及 terminal callback 保护提交、其余每个测试命令、审查调用链、RED/兼容提交 SHA 和最终矩阵。确认最终 `gap=0` 后运行：
 
 ```powershell
 git add -f -- docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
