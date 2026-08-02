@@ -1379,7 +1379,7 @@ Expected: 此 evidence commit 严格只含 build ledger，保持 preceding merge
 
 ### Task 13: 对 v0.1.169 完成 GHSA 负向矩阵与行为审查
 
-- [ ] Task 13: 对 v0.1.169 完成 GHSA 负向矩阵与行为审查
+- [x] Task 13: 对 v0.1.169 完成 GHSA 负向矩阵与行为审查
 
 **映射 OpenSpec:** 4.2
 
