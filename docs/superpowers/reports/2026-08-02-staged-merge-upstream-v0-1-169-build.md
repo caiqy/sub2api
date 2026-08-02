@@ -2016,3 +2016,19 @@ git show HEAD:backend/cmd/server/VERSION
 - Non-failing full-gate warnings: the same Browserslist notice; expected error-path test logs; intlify absent message compiler/missing-key logs; Vite dynamic-plus-static import notices and the post-minification chunk-size warning.
 - Both generator checks were clean. No Task 17 Docker integration was run.
 - Only this ledger is modified for Task 16. No Plan/OpenSpec task/checkoff, runtime selection, product, test, generated, migration, dependency, configuration, Docker, fetch, push, tag, release, deploy, server, or remote operation was performed.
+
+## Task 16 Review-Fix Round 1/5: Service Selection Correction
+
+- Scope: this correction supersedes only the Task 16 service-focused target-selection claim. Handler, routes, frontend, two generator passes, and full-gate evidence above are unchanged and were not rerun.
+- Controller discovery: the original exact untagged service command exited `0` but its verbose target output selected only these six of nine requested top-level tests: `TestLayered_GroupedAccountPassesDBFreshRecheck`, `TestLayered_SessionStickyPreservesGrokBinding`, `TestLayered_WaitPlanFallbackSkipsUpstreamRestrictedAccount`, `TestSanitizedUpstreamPathSuffixRejectsNonConformingSegments`, `TestBuildGeminiAIStudioModelActionURLRejectsNonConformingModel`, and `TestOpenAIProxyStreamCircuitThresholdTTLAndSuccessReset`. It did not select `TestGatewayServiceRecordUsage_AttachesFinalUpstreamRequestSnapshot`, `TestCalculateQuotaCycleAdvance_ResetsOnlySingleExhaustedWindow`, or `TestAdminResetQuota_UsesCommittedResetVersionForCacheInvalidation`; its exit `0` therefore cannot support the prior `9/9` service claim.
+- Current source HEAD before this ledger correction: `8bbaafb0473afe2693b6763dd760cd9860de21d0`. `git show HEAD:backend/cmd/server/VERSION` exited `0` and returned exactly `0.1.169.1`.
+
+```powershell
+# From backend
+go test -v -count=1 -tags=unit ./internal/service -run '^(TestLayered_GroupedAccountPassesDBFreshRecheck|TestLayered_SessionStickyPreservesGrokBinding|TestLayered_WaitPlanFallbackSkipsUpstreamRestrictedAccount|TestGatewayServiceRecordUsage_AttachesFinalUpstreamRequestSnapshot|TestCalculateQuotaCycleAdvance_ResetsOnlySingleExhaustedWindow|TestAdminResetQuota_UsesCommittedResetVersionForCacheInvalidation|TestSanitizedUpstreamPathSuffixRejectsNonConformingSegments|TestBuildGeminiAIStudioModelActionURLRejectsNonConformingModel|TestOpenAIProxyStreamCircuitThresholdTTLAndSuccessReset)$'
+```
+
+- Fresh exit: `0`; final package result: `ok github.com/Wei-Shaw/sub2api/internal/service 1.732s`.
+- The fresh tagged command emitted top-level `RUN` and `PASS` for all nine: `TestLayered_GroupedAccountPassesDBFreshRecheck`, `TestLayered_SessionStickyPreservesGrokBinding`, `TestLayered_WaitPlanFallbackSkipsUpstreamRestrictedAccount`, `TestGatewayServiceRecordUsage_AttachesFinalUpstreamRequestSnapshot`, `TestCalculateQuotaCycleAdvance_ResetsOnlySingleExhaustedWindow`, `TestAdminResetQuota_UsesCommittedResetVersionForCacheInvalidation`, `TestSanitizedUpstreamPathSuffixRejectsNonConformingSegments`, `TestBuildGeminiAIStudioModelActionURLRejectsNonConformingModel`, and `TestOpenAIProxyStreamCircuitThresholdTTLAndSuccessReset`.
+- This fresh tagged `9/9` record is the superseding Task 16 service-focused evidence. It does not recast the original untagged run as `9/9` and does not substitute for any unrelated gate.
+- Initial and pre-ledger status remained only `?? .comet/current-change.json`; it was not read, modified, staged, committed, stashed, or deleted. Task 17 Docker integration was not run. No code, Plan/OpenSpec task, progress, runtime selection, full gate, fetch, push, tag, release, deploy, Docker, server, or remote operation occurred.
