@@ -297,17 +297,19 @@ Expected: ledger 含完整矩阵和空的、可追踪的冲突台账；implement
 - Modify: `docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md`
 - Test: `backend/internal/service/openai_account_scheduler_layered_test.go`
 - Test: `backend/internal/handler/openai_images_controls_test.go`
-- Modify when a new assertion exposes RED: `backend/internal/handler/openai_images.go`, `backend/internal/handler/security_audit_helper.go`
+- Modify when a new assertion exposes RED: `backend/internal/handler/openai_images.go`
 - Test: `backend/internal/service/subscription_advance_quota_test.go`
 - Test: `backend/internal/service/subscription_reset_quota_test.go`
 - Modify test: `backend/internal/service/subscription_cache_invalidation_outbox_test.go`
 - Generated: `backend/cmd/server/wire_gen.go`
 - Modify for lint only: `backend/internal/repository/user_subscription_repo.go`
 - Test: `frontend/src/utils/__tests__/subscriptionQuota.spec.ts`
+- Modify for Step 9 review repair only: `backend/internal/handler/openai_gateway_handler.go`, `backend/internal/handler/openai_images.go`, `backend/internal/handler/openai_images_controls_test.go`
+- Do not modify for Step 9: shared `handlerPromptEngine`, constructors, interfaces, or any file outside the preceding Step 9 allowlists.
 
 **Interfaces:**
 - Consumes: Canonical matrix中的所有 `protected` 行，以及已记录的 default service test undefined-helper 编译失败、stale Wire 输出和 deferred rows-close errcheck diagnostic evidence。
-- Produces: 基线通过/失败证据；允许仅修复 outbox test build tag、`wire_gen.go` stale output 与 `user_subscription_repo.go` 的 deferred rows-close lint defect。高风险行只能由命名测试覆盖，不接受口头推断。
+- Produces: 基线通过/失败证据；允许仅修复 outbox test build tag、`wire_gen.go` stale output 与 `user_subscription_repo.go` 的 deferred rows-close lint defect，并在 Step 9 以 request-scoped Images payload hook 复现及修复首轮 P1。高风险行只能由命名测试覆盖，不接受口头推断；ledger evidence 必须逐命令记录或引用既有 Fix-2 证据。
 
 **Step 1: 补齐 Images 精确生命周期的直接保护测试**
 
@@ -324,16 +326,16 @@ Run from `backend`:
 go test -count=1 ./internal/handler -run '^(TestOpenAIImages_DisabledSecurityAuditDoesNotFreezePayload|TestOpenAIImages_LegacyModerationDefersPayloadUntilRuntimeScope|TestOpenAIImages_SecurityAuditFreezesPayloadAtMostOnce)$'
 ```
 
-Expected: 三个直接测试 PASS；若任一 RED，先保留失败输出，再只修改 `openai_images.go` 或 `security_audit_helper.go` 使 provider 惰性、线程安全且单次冻结，禁止复制 legacy moderation 调用。
+Expected: 三个直接测试 PASS；若任一 RED，先保留失败输出，再只修改 `openai_images.go` 使 provider 惰性、线程安全且单次冻结，禁止复制 legacy moderation 调用。
 
 **Step 2: 提交 Images 保护测试和任何最小修复**
 
 Run:
 ```powershell
-git add backend/internal/handler/openai_images_controls_test.go backend/internal/handler/openai_images.go backend/internal/handler/security_audit_helper.go
+git add backend/internal/handler/openai_images_controls_test.go backend/internal/handler/openai_images.go
 $staged = @(git diff --cached --name-only)
 $staged
-$imagesAllow = @('backend/internal/handler/openai_images_controls_test.go', 'backend/internal/handler/openai_images.go', 'backend/internal/handler/security_audit_helper.go')
+$imagesAllow = @('backend/internal/handler/openai_images_controls_test.go', 'backend/internal/handler/openai_images.go')
 $unexpected = $staged | Where-Object { $_ -notin $imagesAllow }
 if ($unexpected -or $staged.Count -eq 0) { throw "Images protection allowlist mismatch: $($unexpected -join ', ')" }
 git.exe commit -m "test: protect images audit lifecycle"
@@ -474,7 +476,7 @@ Run from repository root:
 pnpm --dir frontend exec vitest run src/utils/__tests__/subscriptionQuota.spec.ts src/views/admin/__tests__/SettingsView.spec.ts src/views/admin/__tests__/UsageView.spec.ts src/components/channels/__tests__/AvailableChannelsTable.spec.ts
 ```
 
-Expected: 每个命名测试 PASS。rows 1、2、3、13 的现有 non-Docker 部分和 row 11 只有在上述直接命令实际 PASS 后才可记为 `protected`；row 11 可由其 18 个 unit-tag 测试与 default group-bind 测试直接记为 `protected`，不只为 `manual`。row 13 的 deploy scripts 尚未合入，明确为非当前 gap，由 Task 13 在 v0.1.169 merge 后执行并关闭该阶段证据；Task 5 只负责 row 10 quota/outbox/migration integration，不承接 row 13。Task 4 的三项已诊断 baseline gate defect 仅按 Step 3/4/5 修复；其余失败先在 ledger 保存 RED，再在首次引入该回归的 release 段写最小复现断言和兼容修复，不能在基线任务中改变产品行为。matrix 只有当前直接测试 PASS 才可记为 `protected`，仅完成具体调用链审查才可记为 `manual`；Task 4 结束不得有其它 `gap`，否则 BLOCK。
+Expected: 每个命名测试 PASS。rows 1、2、3、13 的现有 non-Docker 部分和 row 11 只有在上述直接命令实际 PASS 后才可记为 `protected`；row 11 可由其 18 个 unit-tag 测试与 default group-bind 测试直接记为 `protected`，不只为 `manual`。row 13 的 deploy scripts 尚未合入，明确为非当前 gap，由 Task 13 在 v0.1.169 merge 后执行并关闭该阶段证据；Task 5 只负责 row 10 quota/outbox/migration integration，不承接 row 13。Task 4 的三项已诊断 baseline gate defect 仅按 Step 3/4/5 修复；首轮 review P1 仅按 Step 9 的同请求 hook TDD 修复，不能通过修改 shared `handlerPromptEngine` 或改变生产默认路径规避。其余失败先在 ledger 保存 RED，再在首次引入该回归的 release 段写最小复现断言和兼容修复，不能在基线任务中改变产品行为。matrix 只有当前直接测试 PASS 才可记为 `protected`，仅完成具体调用链审查才可记为 `manual`；Task 4 只有在 Step 9 的 review repair、逐命令 ledger evidence、fresh reviewer 2/2 和 clean gate 均完成后才能闭合，否则 BLOCK。
 
 **Step 7: 重跑阶段 0 full gate 与两轮生成检查**
 
@@ -545,7 +547,146 @@ if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-stage
 git.exe commit -m "docs: record repaired stage 0 gates"
 ```
 
-Expected: 仅在 Step 7 的 `make test`、VERSION/SHELL build、两轮 generate、除 conflict scan 外的静态检查和 migration OID 命令全部退出 0，且 conflict scan 为其指定的 no-match exit `1` 后，ledger 才追加每个修复后命令的退出码和命名失败；ledger 必须逐一记录 `wire-refresh`、`wire-stability-1`、`wire-stability-2`、`full-stability-1`、`full-stability-2` 的 stdout/stderr 日志路径。不得改写既有 `docs: record stage 0 local gates` 失败证据提交。不存在未归属的生成物。Images、unit-tag、Wire、lint 与 repaired ledger 五类提交保持分离，本提交严格只含 build ledger；implementer 不勾选 Plan/OpenSpec，reviewer 通过后 controller 单独 check off Task 4/OpenSpec 1.4。
+Expected: 仅在 Step 7 的 `make test`、VERSION/SHELL build、两轮 generate、除 conflict scan 外的静态检查和 migration OID 命令全部退出 0，且 conflict scan 为其指定的 no-match exit `1` 后，ledger 才追加每个修复后命令的退出码和命名失败；ledger 必须逐一记录 `wire-refresh`、`wire-stability-1`、`wire-stability-2`、`full-stability-1`、`full-stability-2` 的 stdout/stderr 日志路径。不得改写既有 `docs: record stage 0 local gates` 失败证据提交。不存在未归属的生成物。Images、unit-tag、Wire、lint 与 repaired ledger 五类提交保持分离，本提交严格只含 build ledger；Step 8 不闭合 Task 4，Step 9 的 review-repair code commit 和 final evidence commit 仍必需；implementer 不勾选 Plan/OpenSpec。
+
+**Step 9: 闭合首轮 review findings**
+
+本 Step 只处理已确认的 Images P1 与证据补全。禁止修改 shared `handlerPromptEngine`、新增接口、constructor 参数或任何生产默认语义；禁止运行 `make -C backend generate`、Docker、remote、`git fetch`、merge、push、tag、release 或部署命令。任何预期 RED/GREEN、复测或 clean gate 未满足都 BLOCK，保留日志并停止，不以环境或编译故障替代语义结果。
+
+1. **P1 RED: 将测试 hook 接到同一 `ServeHTTP` 请求，但暂不接入 Images callsite。** 在 `backend/internal/handler/openai_gateway_handler.go` 的 `OpenAIGatewayHandler` 中添加未导出字段，且只用于测试观测：
+
+```go
+// nil preserves the production parsed.ModerationBody provider.
+imagesModerationBody func(*service.OpenAIImagesRequest) []byte
+```
+
+在 `backend/internal/handler/openai_images_controls_test.go` 的三个既有 Images lifecycle 测试中，各自创建独立 handler，并在发起 request 前把计数 provider 设为该实例的 `imagesModerationBody`；request 开始后不得再变更 hook 或 handler。hook 必须保存收到的 `*service.OpenAIImagesRequest` 指针、递增 provider count，并返回 `parsed.ModerationBody()`。每个 `ServeHTTP` 都在 goroutine 中运行，使用 `done` channel 和 bounded `select` 等待完成，timeout 即 `t.Fatal`；此子步不得改动 `openai_images.go:160` callsite。
+
+在同一 `openai_images_controls_test.go` 定义 test-local `blockingImagesPromptEngine`，不复用或修改 shared `handlerPromptEngine`。它实现 `securityaudit.PromptEngine` 的 `EffectiveMode() securityaudit.Mode`、`Enqueue(context.Context, securityaudit.Request) error` 和 `Evaluate(context.Context, securityaudit.Request) (*securityaudit.PromptDecision, error)`：`EffectiveMode` 返回 `securityaudit.ModeBlocking`，而且只有 `Evaluate` 实际被调用时才关闭/发送 `started`、等待 `release`、再返回允许继续的 `securityaudit.PromptDecision`。RED 子阶段不得将第三个测试配置为该 blocking engine，也不得等待 `started`；它必须使用可正常完成的 non-blocking engine，使旧 callsite 仍走真实 `parsed.ModerationBody`，然后通过 bounded `done` 得到 provider `expected/want 1, actual/got 0`。这使 RED 只证明 hook 尚未接入，而不会等待未触发的 hook 或死锁。
+
+Run from `backend` before changing `openai_images.go`:
+
+```powershell
+$imagesRedLog = Join-Path $env:TEMP "sub2api-stage0-images-hook-red-$([guid]::NewGuid().ToString('N')).log"
+go test -count=1 ./internal/handler -run '^(TestOpenAIImages_DisabledSecurityAuditDoesNotFreezePayload|TestOpenAIImages_LegacyModerationDefersPayloadUntilRuntimeScope|TestOpenAIImages_SecurityAuditFreezesPayloadAtMostOnce)$' 2>&1 | Tee-Object -FilePath $imagesRedLog
+$imagesRedExit = $LASTEXITCODE
+if ($imagesRedExit -eq 0) { throw 'expected Images hook RED before the callsite uses imagesModerationBody' }
+$imagesRed = Get-Content -Raw -LiteralPath $imagesRedLog
+if ($imagesRed -notmatch 'TestOpenAIImages_SecurityAuditFreezesPayloadAtMostOnce' -or $imagesRed -notmatch '(?is)(?:expected|want).*1.*(?:actual|got).*0|(?:actual|got).*0.*(?:expected|want).*1') { throw "expected third-test provider-count assertion RED; inspect $imagesRedLog" }
+if ($imagesRed -match '(?i)(build failed|undefined:|docker|testcontainers)') { throw "RED must be the unused-callsite assertion, not a compile or environment failure; inspect $imagesRedLog" }
+```
+
+Expected: 前两个测试保持其同请求 `0` 计数契约；第三个测试以 non-blocking engine 在 bounded handler completion 后因 hook 尚未被 Images callsite 使用而得到 `expected/want 1, actual/got 0` RED。RED 不等待 `started`，也不得死锁；编译错误、Docker/Testcontainers 或其他环境失败不构成该 RED。
+
+2. **P1 GREEN: 在唯一 callsite 接入 hook，保持 production 默认路径。** 仅在 `backend/internal/handler/openai_images.go` 当前 line 160 前建立 provider：hook 非 nil 时 provider 调用 `h.imagesModerationBody(parsed)`；hook 为 nil 时保持当前 `parsed.ModerationBody` method value。将该 provider 传给现有 `checkSecurityAuditLazy` 调用，随后保持 `coordinator.ReleaseMultipartValues()` 和 `parsed.ReleaseText()` 的原顺序。形状必须等价于：
+
+```go
+moderationBody := parsed.ModerationBody
+if h.imagesModerationBody != nil {
+	moderationBody = func() []byte { return h.imagesModerationBody(parsed) }
+}
+if decision := h.checkSecurityAuditLazy(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIImages, requestModel, moderationBody); decision != nil && !decision.AllowNextStage {
+	h.openAISecurityAuditError(c, decision)
+	return
+}
+```
+
+不得增加新接口或 constructor 参数。三个测试分别断言同一请求内 provider/legacy 为 `0/0/1` 所需的计数。GREEN 的第三个测试才配置 `blockingImagesPromptEngine`：以 goroutine 启动 `ServeHTTP` 并用 bounded `select` 等待 `started`；先断言 provider count 为 1，再读取 captured parsed 指针并断言 `Prompt` 尚未清空。用 `sync.Once` 包装 `release` 函数，在创建 engine 后立即 `t.Cleanup(release)`，再主动调用 `release()`；以 bounded `select` 等待 `done`，最后断言 `Prompt` 已清空、provider count 为 1、legacy moderation count 为 1。任何 `started` 或 `done` timeout 都必须 `t.Fatal`，而 `t.Cleanup(release)` 仍保证解除阻塞。每个测试继续使用独立 handler，hook 必须在 request 前设置且 request 开始后不再 mutate。
+
+Run from `backend`:
+
+```powershell
+go test -count=1 ./internal/handler -run '^(TestOpenAIImages_DisabledSecurityAuditDoesNotFreezePayload|TestOpenAIImages_LegacyModerationDefersPayloadUntilRuntimeScope|TestOpenAIImages_SecurityAuditFreezesPayloadAtMostOnce)$'
+go test -count=1 ./internal/handler -run '^(TestOpenAIImages_UnifiedAuditRunsLegacyOnce|TestOpenAIImages_ContentModerationUsesFrozenPayloadBeforeRelease|TestOpenAIImages_SecurityAuditUsesFrozenPayloadBeforeRelease|TestOpenAIImages_MultipartTextIsReleasedBeforeBlockedUpstream|TestOpenAIImages_OAuthTextIsReleasedBeforeBlockedUpstream|TestOpenAIImages_DisabledSecurityAuditDoesNotFreezePayload|TestOpenAIImages_LegacyModerationDefersPayloadUntilRuntimeScope|TestOpenAIImages_SecurityAuditFreezesPayloadAtMostOnce)$'
+go test -count=1 ./internal/handler -run '^(TestGatewayHandlerMessagesUsesEffectiveRouteSnapshot|TestOpenAIImages_UnifiedAuditRunsLegacyOnce|TestOpenAIImages_ContentModerationUsesFrozenPayloadBeforeRelease|TestOpenAIImages_SecurityAuditUsesFrozenPayloadBeforeRelease|TestOpenAIImages_MultipartTextIsReleasedBeforeBlockedUpstream|TestOpenAIImages_OAuthTextIsReleasedBeforeBlockedUpstream|TestOpenAIImages_DisabledSecurityAuditDoesNotFreezePayload|TestOpenAIImages_LegacyModerationDefersPayloadUntilRuntimeScope|TestOpenAIImages_SecurityAuditFreezesPayloadAtMostOnce)$'
+```
+
+Run from repository root:
+
+```powershell
+make test
+```
+
+Expected: 三个 hook 测试、完整八个 Images 测试、handler focused 命令和 `make test` 均 exit 0；GREEN 第三个测试的 blocking engine 只在 `Evaluate` 触发后发出 `started`，并由 cleanup-safe `release` 解除；production hook 为 nil 时仍只把 `parsed.ModerationBody` 传入原有审计路径。
+
+3. **严格提交 P1 code/test repair。** 仅在前一子步全部 GREEN 后运行：
+
+```powershell
+git add backend/internal/handler/openai_gateway_handler.go backend/internal/handler/openai_images.go backend/internal/handler/openai_images_controls_test.go
+$staged = @(git diff --cached --name-only)
+$staged
+$reviewRepairAllow = @('backend/internal/handler/openai_gateway_handler.go', 'backend/internal/handler/openai_images.go', 'backend/internal/handler/openai_images_controls_test.go')
+$unexpected = $staged | Where-Object { $_ -notin $reviewRepairAllow }
+if ($unexpected -or $staged.Count -ne $reviewRepairAllow.Count -or (Compare-Object -ReferenceObject $reviewRepairAllow -DifferenceObject $staged)) { throw "review repair allowlist mismatch: $($unexpected -join ', ')" }
+git.exe commit -m "test: observe Images audit payload lifecycle"
+```
+
+Expected: commit 严格只含三个 P1 code/test 文件；ledger 留待下一子步，shared `handlerPromptEngine` 不在 diff 中。
+
+4. **P2: 在 ledger 末尾追加逐命令 Review Repair Evidence。** 不改写旧 RED、旧 history 或旧 commit；在 `docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md` 最末尾新增 `## Review Repair Evidence`。从 `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-4-brief.md` 逐字抄录 rows 1/2、row 3a、row 3b、row 13 non-Docker 与 row 11 的两条命令，且逐条保存 exact command、exit code 和关键输出；不得写“五组”或“全部通过”。对本轮没有重跑的每条命令，必须记录其 Fix-2 实际 evidence 的时间戳和来源，明确为引用而不是伪造的新运行。
+
+Evidence 中还必须逐条列出下列全部九个 focused backend 命令、Vitest、`make test`、VERSION/SHELL build、repository lint、static/conflict/OID 检查，以及各自 exact command、exit 和关键输出：
+
+```powershell
+# Run from backend, retaining one exit code and key output for every command.
+go test -count=1 ./internal/service -run '^(TestLayered_GroupedAccountPassesDBFreshRecheck|TestLayered_WaitPlanFallbackSkipsUpstreamRestrictedAccount|TestLayered_SessionStickyPreservesGrokBinding|TestLayered_SessionStickyRecheckHonorsImageCapability|TestGatewayServiceRecordUsage_AttachesFinalUpstreamRequestSnapshot|TestCalculateQuotaCycleAdvance_ResetsOnlySingleExhaustedWindow|TestAdvanceQuotaCycle_RejectsTwoExhaustedWindowsBeforeUpdate|TestAdminResetQuota_UsesCommittedResetVersionForCacheInvalidation|TestCheckAndResetWindows_UsesCommittedResetVersionForCacheInvalidation)$'
+go test -count=1 ./internal/handler -run '^(TestGatewayHandlerMessagesUsesEffectiveRouteSnapshot|TestOpenAIImages_UnifiedAuditRunsLegacyOnce|TestOpenAIImages_ContentModerationUsesFrozenPayloadBeforeRelease|TestOpenAIImages_SecurityAuditUsesFrozenPayloadBeforeRelease|TestOpenAIImages_MultipartTextIsReleasedBeforeBlockedUpstream|TestOpenAIImages_OAuthTextIsReleasedBeforeBlockedUpstream|TestOpenAIImages_DisabledSecurityAuditDoesNotFreezePayload|TestOpenAIImages_LegacyModerationDefersPayloadUntilRuntimeScope|TestOpenAIImages_SecurityAuditFreezesPayloadAtMostOnce)$'
+go test -count=1 ./internal/server/routes -run '^(TestEveryGatewayPOSTRouteIsClassifiedForPromptAuditCoverage|TestResponsesWebSocketHasFirstAndSubsequentTurnPromptGates)$'
+go test -count=1 ./internal/service -run '^(TestLayered_FallbackWaitPlanRechecksPrivacyRequirementAgainstDB|TestLayered_PreviousResponseStickyHonorsRequirePrivacySet)$'
+go test -count=1 ./internal/handler -run '^(TestOpenAIResponsesWebSocket_ReacquireSlotsOnSecondTurnWithoutDoubleRelease|TestOpenAIResponsesWebSocket_SecondTurnGroupAcquireFailureRollsBackUserSlot|TestOpenAIResponsesWebSocket_SecondTurnAccountAcquireFailureRollsBackUserAndGroupSlots)$'
+go test -count=1 ./internal/service -run '^(TestRunLiveControllerClosesExpiredSession|TestLiveSidebandNormalCloseEndsCall|TestOpenAIWSPassthroughTurnLifecycle_SerializesTerminalCommitAndNextTurn)$'
+go test -count=1 ./internal/service -run '^(TestGetModelPricing_Gpt54UsesStaticFallbackWhenRemoteMissing|TestOpenAIGatewayService_ForwardCountTokensAsAnthropic_OAuthFallsBackWhenPlatformEndpointUnsupported|TestGatewayServiceNewSelectionResult_ReleasesAcquiredSlotWhenHydrationFails)$'
+go test -count=1 -tags unit ./internal/handler ./internal/handler/admin ./internal/service -run '^(TestGetMyPlatformQuotas_EmptyReturns200WithEmptyArray|TestGetMyPlatformQuotas_D14_LazyZeroForExpiredWindow|TestGetMyPlatformQuotas_NilRepo_Returns200Empty|TestGetMyPlatformQuotas_NoAuth_Returns401|TestLazyZeroQuotaForResponse_UserViewStripsWindowStart|TestLazyZeroQuotaForResponse_AdminViewIncludesWindowStart|TestLazyZeroQuotaForResponse_ActiveWindowPreservesUsage|TestUserHandlerBatchUpdateLimitsAcceptsPartialAndZeroValues|TestUserHandlerBatchUpdateLimitsRejectsInvalidRequests|TestUserHandlerBatchUpdateLimitsAllUsesEveryListedUser|TestDuplicateGroupHandlerReturnsAdminDTOWithoutOperationMetadata|TestDuplicateGroupHandlerRejectsInvalidID|TestDuplicateGroupHandlerReplaysSameIdempotencyKey|TestDuplicateGroupHandlerRecoversAfterMarkSucceededFailure|TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState|TestDuplicateGroupRecoversSameOperationAndScopesByAdmin|TestDuplicateGroupAdvancesNameAndTruncatesUnicodeByRunes|TestDuplicateGroupAtomicCreateFailureReturnsNoCopy)$'
+go test -count=1 ./internal/service -run '^TestUserCanBindGroupRejectsBlockedPublicGroup$'
+```
+
+Also record the following commands from their indicated working directory:
+
+```powershell
+# Run from repository root.
+pnpm --dir frontend exec vitest run src/utils/__tests__/subscriptionQuota.spec.ts src/views/admin/__tests__/SettingsView.spec.ts src/views/admin/__tests__/UsageView.spec.ts src/components/channels/__tests__/AvailableChannelsTable.spec.ts
+make test
+make "VERSION=0.1.165.4" "SHELL=D:/scoop/shims/bash.exe" build
+git diff --check
+git diff --cached --check
+git diff --name-only --diff-filter=U
+$conflictPattern = '^(<<<<<<< .+|\|\|\|\|\|\|\| .+|=======|>>>>>>> .+)$'
+git grep -n -I -E $conflictPattern -- ':!docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md'
+$conflictExit = $LASTEXITCODE
+if ($conflictExit -eq 0) { throw 'tracked conflict markers found' }
+if ($conflictExit -ne 1) { throw "conflict marker scan failed: $conflictExit" }
+git rev-parse HEAD:backend/migrations/191_subscription_quota_advance_receipts.sql
+git rev-parse HEAD:backend/migrations/192_subscription_cache_invalidation_outbox.sql
+git status --short --untracked-files=all
+```
+
+```powershell
+# Run from backend.
+golangci-lint run ./internal/repository
+```
+
+明确记录旧 ledger line 738 的“row 13 交 Task 5”仅为当时失败的历史结论，现已被 supersede：Task 5 仅负责 row 10 Docker quota/outbox/migration integration；row 13 deploy scripts 仅由 v0.1.169 merge 后的 Task 13 执行。还要记录 controller 已读取 12 个 Temp generate 日志，保留真实 runId 前缀：失败 attempts 的 stderr 仅含 `user-mapped section open` announcement/read 与 `exit status`/`make` wrapper，stdout 记录的 11 个 `backend/ent` diff paths 均已恢复；retry 成功和其余四次均 exit 0 且 `diff_paths` 为空。不得改写任一旧日志或 evidence。
+
+重跑最小 high-signal 命令只限三个/八个 Images 测试、default service focused、精确 unit outbox、repository lint、`make test`、`git diff --check`、`git diff --cached --check`、unmerged、conflict 和 status；其余 required evidence 只能逐条重跑或按前述 Fix-2 规则引用，不能概括为 PASS。
+
+5. **严格提交 P2 ledger evidence，复核并闭合 Task 4。** 只有 P2 evidence 完整、所有实际重跑命令 GREEN 且 historic references 明确时，运行：
+
+```powershell
+git add -f -- docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
+$staged = @(git diff --cached --name-only)
+$staged
+if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'review repair evidence allowlist mismatch' }
+git.exe commit -m "docs: complete stage 0 review evidence"
+$selectionStatus = '?? .comet/current-change.json'
+$index = @(git diff --cached --name-only)
+if ($index) { throw "review repair evidence left staged paths: $($index -join ', ')" }
+$status = @(git status --short --untracked-files=all)
+$unexpected = $status | Where-Object { $_ -ne $selectionStatus }
+if ($unexpected) { throw "review repair evidence left dirty paths: $($unexpected -join '; ')" }
+$status
+```
+
+Expected: P2 commit 严格只含 ledger，结束时 tracked worktree clean，status 只能为空或精确为 `?? .comet/current-change.json`。派发 fix 前，controller 必须将完整 Task 4（含 Step 9）同步到 ignored brief，并确保该 brief 不再授权 `backend/internal/handler/security_audit_helper.go`；brief stale 是 controller sync 工作，不是 Plan 内容缺陷。P1 commit 之后派发 fresh reviewer 2/2 审核 code/test 与 ledger；只有 reviewer 通过后 controller 才单独 check off Task 4/OpenSpec 1.4，implementer/reviewer 均不得修改 Plan、OpenSpec tasks 或 progress。
 
 ### Task 5: 执行阶段 0 row 10 Docker/Testcontainers 判定
 
@@ -1624,7 +1765,7 @@ Expected: implementer commit 严格只含 verify report；最终 index 为空，
 | --- | --- |
 | SDD coverage | 18 个 `### Task N` 均有唯一顶层 `- [ ] Task N` checkbox，Plan 中仅此 18 个 checkbox；内部 Step 为非 checkbox 编号。implementer/reviewer 不修改 Plan；仅 controller 在 reviewer 通过后将当前 Task 改为 `[x]`、同步唯一 OpenSpec 项并写入 progress。 |
 | Progress/topology coverage | 通用 live-ID 平台在成功派发后持久 agent identity；本平台不存在“dispatch success 与 completion 之间”的 controller 窗口，因此在原子调用两侧持久 dispatch intent 和 returned result。恢复先查 report、Git 与宿主工具结果，不能确认即 BLOCKED 而不重派；已有 task ID 的 fix resume 保持 Comet thorough round。任何下一次派发和每次 merge clean gate 前最新 checkpoint 均已提交且 worktree clean。progress-only 与三路径 docs-only checkoff commits 均不改变最终 `git log --merges` 恰有三个 upstream merge 节点的判定。 |
-| Spec coverage | OpenSpec 1.1-1.5、2.1-2.3、3.1-3.3、4.1-4.3、5.1-5.4 共 18 项均有一个同编号任务；Task 4 将 Images、outbox unit-tag、Wire、deferred rows-close lint 与 repaired stage-0 ledger 分离提交，逐字包含 debug-2 rows 1/2/3/11/13 的现有 non-Docker 命令，并以三次上限、具名日志和 generated-path stderr 审计的 Windows retry 包装全部 Task 4 generate；Task 5 只验证 row 10 quota/outbox/migration integration，row 13 deploy scripts 只由 v0.1.169 merge 后的 Task 13 执行。三段 no-ff/no-commit、merge 前阻塞审查、merge 后行为审查、17 冲突、能力矩阵、quota reset、迁移、Docker 和最终版本均有明确步骤；所有阶段/最终 conflict scan 均识别 diff3 marker，只有 no-match exit `1` 通过。 |
+| Spec coverage | OpenSpec 1.1-1.5、2.1-2.3、3.1-3.3、4.1-4.3、5.1-5.4 共 18 项均有一个同编号任务；Task 4 将 Images、outbox unit-tag、Wire、deferred rows-close lint、repaired stage-0 ledger 与 Step 9 首轮 review repair 分离提交。Step 9 的 P1 只允许 request-scoped `imagesModerationBody` hook、Images callsite 与 test-local blocking prompt engine，先以同请求 `expected/want 1, actual/got 0` RED 再 GREEN；P2 在不改写历史的前提下逐命令追加 evidence、明确 row 13 历史 supersede 和 12 个 generate 日志。Task 4 只有 fresh reviewer 2/2 与 tracked clean 后闭合；Task 5 只验证 row 10 quota/outbox/migration integration，row 13 deploy scripts 只由 v0.1.169 merge 后的 Task 13 执行。三段 no-ff/no-commit、merge 前阻塞审查、merge 后行为审查、17 冲突、能力矩阵、quota reset、迁移、Docker 和最终版本均有明确步骤；所有阶段/最终 conflict scan 均识别 diff3 marker，只有 no-match exit `1` 通过。 |
 | Placeholder scan | 本计划没有未填内容、未命名测试或未定义接口占位；所有条件分支给出停止、RED、`unverified` 或 PASS 判定，且真实 HTTP query 与 helper raw 输入的 GHSA 断言明确分离。 |
 | 双基线与类型/名称一致性 | frontmatter `base-ref` 始终是 immutable source base，`$executionBase` 仅为其 planning-only 后代；Task 1 使用当前 change OpenSpec 目录前缀加两个精确文档路径同时验证 source-to-execution tree diff 和全提交触及路径，且 source/execution VERSION 都为 `0.1.165.4`。`applyMigrationsFS`、quota 接口、路径护栏、Gemini URL builder、migration 文件名、两个 source-base blob OID、tag SHA、最终从 source base 开始的 merge range 和 integration 顶级测试名在任务间使用一致。 |
 | 范围边界 | 计划只描述 Comet 已确认的实际隔离位置内的 merge、测试、文档和本地生成；明确排除 push、发布、部署、镜像、服务器、数据库运行态和 Nginx 操作。 |
