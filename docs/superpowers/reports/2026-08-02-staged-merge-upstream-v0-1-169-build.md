@@ -1427,3 +1427,72 @@ No migration conflict occurred. Passkey/auth/session binding/step-up, Model Plaz
 统计：`protected=8`，`manual=2`，`gap=0`，`unverified=1`。
 
 - Scope self-review: no product, test, compatibility-commit, Plan, OpenSpec, progress, or selection file changed in this correction round. The following commit stages only this ledger.
+
+## Task 11 v0.1.168 Local Gate, Migration, And Stage Closure
+
+- Final status: `DONE`, with Docker-backed integration and new/upgrade PostgreSQL evidence `unverified` because Docker is unavailable.
+- VERSION remains `0.1.165.4`.
+- Task 10 references remain `ec4d23bfe` (compatibility) and `af2b92748` (final ledger).
+- Fresh pre-gate status contained only `?? .comet/current-change.json`; it was not modified, staged, or committed.
+
+### Fresh Step 1 Full Gate
+
+```powershell
+make test
+make "VERSION=0.1.165.4" "SHELL=D:/scoop/shims/bash.exe" build
+make -C backend generate
+git.exe diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
+make -C backend generate
+git.exe diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
+git.exe diff --check
+git.exe diff --cached --check
+git diff --name-only --diff-filter=U
+$conflictPattern = '^(<<<<<<< .+|\|\|\|\|\|\|\| .+|=======|>>>>>>> .+)$'
+git grep -n -I -E $conflictPattern -- ':!docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md'
+$conflictExit = $LASTEXITCODE
+if ($conflictExit -eq 0) { throw 'tracked conflict markers found' }
+if ($conflictExit -ne 1) { throw "conflict marker scan failed: $conflictExit" }
+git rev-parse HEAD:backend/migrations/191_subscription_quota_advance_receipts.sql
+git rev-parse HEAD:backend/migrations/192_subscription_cache_invalidation_outbox.sql
+```
+
+| Command | Exit | Fresh evidence |
+| --- | ---: | --- |
+| `make test` | `0` | Backend default and `unit` suites passed; backend lint printed `0 issues.`; frontend printed `225 passed` test files and `1685 passed` tests. Existing test stderr warnings were non-failing. |
+| `make "VERSION=0.1.165.4" "SHELL=D:/scoop/shims/bash.exe" build` | `0` | Backend build and `vue-tsc -b && vite build` completed; Vite printed `built in 31.48s`. Existing dynamic-import and chunk-size warnings were non-failing. |
+| First `make -C backend generate` | `0` | `go generate ./ent` and `go generate ./cmd/server` completed. |
+| First `git.exe diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` | `0` | No generated-path output or diff. |
+| Second `make -C backend generate` | `0` | Ent and Wire generation completed again. |
+| Second `git.exe diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` | `0` | No generated-path output or diff. |
+| `git.exe diff --check` | `0` | No whitespace-error output. |
+| `git.exe diff --cached --check` | `0` | Empty index passed with no output. |
+| `git diff --name-only --diff-filter=U` | `0` | No unmerged paths. |
+| Conflict-marker script | `0` | Embedded `git grep` exit was `1` with no matches, the required PASS result. |
+| `git rev-parse HEAD:backend/migrations/191_subscription_quota_advance_receipts.sql` | `0` | `c22d47d79cbbaf4bc40524d42ef52e6cc8ac3af6`. |
+| `git rev-parse HEAD:backend/migrations/192_subscription_cache_invalidation_outbox.sql` | `0` | `502ecec1caf9f76e022c2e83acf3707190539301`. |
+
+### Docker Preflight And Conditional Integration
+
+```powershell
+$preflightLog = Join-Path $env:TEMP 'sub2api-v0168-docker-preflight.log'
+$dockerCommand = Get-Command docker -ErrorAction SilentlyContinue
+if ($null -eq $dockerCommand) { 'docker_command=unavailable' | Set-Content -LiteralPath $preflightLog; $preflightAvailable = $false } else { & $dockerCommand.Path version --format '{{.Server.Version}}' 2>&1 | Tee-Object -FilePath $preflightLog; $preflightExitCode = $LASTEXITCODE; "exit_code=$preflightExitCode" | Add-Content -LiteralPath $preflightLog; $preflightAvailable = ($preflightExitCode -eq 0) }
+```
+
+- Preflight script exit: `0`; `C:\Users\caiqy\AppData\Local\Temp\sub2api-v0168-docker-preflight.log` contains exactly `docker_command=unavailable`; therefore `preflightAvailable=false`.
+- The integration command was not run. Static, empty-library, compile-only, and historical evidence do not substitute for Docker/Testcontainers evidence.
+
+| Integration target | Classification | Reason |
+| --- | --- | --- |
+| `TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate` | `unverified` | Docker preflight unavailable; not run. |
+| `TestMigrationsRunner_PreservesPasskeyAndSubscriptionQuotaMigrationsAcrossUpgrade` | `unverified` | Docker preflight unavailable; not run. |
+| `TestAdvanceQuotaCycleReceipt_RollsBackSubscriptionWhenReceiptWriteFails` | `unverified` | Docker preflight unavailable; not run. |
+| `TestUserRepoSuite` | `unverified` | Docker preflight unavailable; not run. |
+| `TestSubscriptionCacheInvalidationMigration_RawRerunIsIdempotent` | `unverified` | Docker preflight unavailable; not run. |
+| New/upgrade PostgreSQL migration evidence | `unverified` | Docker/Testcontainers integration was not available. |
+
+### Scope And Closure
+
+- Fresh gate scope checks all passed; both generator passes left no `backend/ent` or `backend/cmd/server/wire_gen.go` diff.
+- No Plan, OpenSpec task/checkoff, `.comet/current-change.json`, product, generated, migration, dependency, configuration, or non-ledger path was modified.
+- No fetch, push, tag, release, deploy, Docker integration, or remote/server operation was performed.
