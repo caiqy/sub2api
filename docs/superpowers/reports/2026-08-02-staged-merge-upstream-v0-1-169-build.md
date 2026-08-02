@@ -1069,3 +1069,10 @@ if ($null -eq $dockerCommand) { 'docker_command=unavailable' | Set-Content -Lite
 - `go test -tags unit ./internal/service -run '^TestWriteFailedUsageLogBestEffort_OmitsMatchingNonWSUpstreamModel$'` exit `0`.
 - The broad conflict-marker scan's only `=======` result was the established literal delimiter at `backend/internal/pkg/antigravity/request_transformer.go:267`; it was reviewed and is not a merge marker.
 - Task 7's full behavior suite was not run under Task 6 constraints. Focused compile and usage checks reduce merge risk but do not replace that planned suite.
+
+### Fix Round 1/5 Correction
+
+- Original merge-review ledger commit: `764b03fe96eb1e9e6d90f58cd3d570c8d20e5442`.
+- Correction: `git diff --name-status c7ae76df77755b5b84b26b91606d37efc13b5deb^1 c7ae76df77755b5b84b26b91606d37efc13b5deb -- frontend/package.json frontend/pnpm-lock.yaml` produced no paths. The merged frontend manifest and lockfile did not change; the package-manager command was unnecessary and caused no tree churn.
+- Follow-up code/test commit: `9bde22ff6e7d87dfea5a19386813760a65c7771f` restores the omitted effective route resolver argument, supplies the nil-safe test limiter, and records the current response-create model in both relay turn activation paths.
+- TDD evidence: router compile was RED with the missing `RegisterGatewayRoutes` argument and the stale `RegisterUserRoutes` test signature; the corrected server compile and `TestRegisterUserRoutesRegistersImageHistoryEndpoints` are GREEN. The corrected relay fixture first produced `expected: gpt-5.6-terra`, `actual: gpt-5.6-sol`; after the two state updates, the exact regression and `TestRelay_OnTurnComplete_` family pass.
