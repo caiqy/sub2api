@@ -1275,3 +1275,48 @@ Final corrected statistics: `protected=6`, `manual=0`, `gap=0`, `unverified=0`.
 - Its path is exactly `docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md`.
 - `git show --check e322157f2da2e7161b6253ddf47e9c8a98ff412e` passed; after that commit the index was empty and status contained only `?? .comet/current-change.json`.
 - No Plan, OpenSpec, progress, selection, product, generated, dependency, or configuration file was modified or staged for the closure.
+
+## Task 9 v0.1.168 Merge Review: Rebuild Fix Round 1
+
+- Final merge commit: `de4264ba5d15ca1024da51846f43bf48b02a9882` (`Merge tag 'v0.1.168' into rebuild/task9-wire-tool-20260802`).
+- Parents: `cd78fa1d5406a9ab468e47806c5ce94ac69c79f1` and `99c8e4bf7564823bafbab369acab6539e734c1bb`; the second parent is the required peeled `v0.1.168` SHA.
+- Superseded attempt: merge `c44f0288b7bf25ce0e0a999e0a9d2a94ed3633ac` and ledger `084ac7b34261f42b27df9fe45c05acf78f45c462` are outside the rebuilt feature lineage and retained only by `safety/task9-before-wire-tool-rebuild-20260802`.
+- The rebuild began at the original first parent, ran exactly `git merge --no-ff --no-commit v0.1.168`, and restored `c44f0288b` as the reviewed resolution baseline before applying the tool-only correction.
+
+### Conflict Ledger
+
+| Path | Classification | Resolution / evidence |
+| --- | --- | --- |
+| `backend/cmd/server/VERSION` | `版本/依赖` | Kept local `0.1.165.4`; versioned build passed. |
+| `backend/cmd/server/wire_gen.go` | `生成代码` | Restored reviewed baseline then regenerated from merged providers; two clean generation passes. |
+| `backend/internal/handler/admin/setting_handler.go` | `接口/配置演进` | Retained local settings DTO surface and Model Plaza response fields. |
+| `backend/internal/handler/admin/setting_handler_update.go` | `接口/配置演进` | Retained local partial-update semantics and Model Plaza request/response fields. |
+| `backend/internal/server/http.go` | `接口/配置演进` | Combined optional JWT with local user/effective-route dependencies. |
+| `backend/internal/server/router.go` | `接口/配置演进` | Retained local page/gateway wiring and registered Model Plaza through optional JWT. |
+| `backend/internal/service/admin_user.go` | `本地定制` | Preserved field-masked/atomic balance updates with blocked-group and hidden-menu controls. |
+| `backend/internal/service/gateway_claude_oauth_body.go` | `上游修复` | Preserved cache-control boundaries while applying billing-attribution and prompt-block repair. |
+| `frontend/src/views/admin/SettingsView.vue` | `接口/配置演进` | Retained local settings controls with Passkey and Model Plaza bindings. |
+
+No migration conflict occurred. Passkey/auth/session binding/step-up, Model Plaza permission and hidden-menu settings, scoped updates, quota receipt/transaction lock/tombstone/outbox, prompt config, and OpenAI Live use the reviewed `c44f0288b` resolution tree unchanged; the rebuilt tree adds only the formal Wire tool declaration.
+
+### Go Tool Stability
+
+- The prior `github.com/google/subcommands // indirect` workaround was pruned by `go mod tidy`, after which `//go:generate go run github.com/google/wire/cmd/wire` could not resolve Wire's transitive checksum.
+- `go mod edit -tool github.com/google/wire/cmd/wire` formally registers the generator. After `go mod tidy`, `make generate` completed twice.
+- Final diff from the reviewed `c44f0288b` merge tree is exactly `backend/go.mod`, adding `tool github.com/google/wire/cmd/wire`; Ent/Wire and `go.sum` have no content diff. `main.go` and no `tools.go` were changed.
+
+### Fresh Verification
+
+| Command | Exit | Result |
+| --- | ---: | --- |
+| Initial `make generate` after tool declaration | `1` | Ent could not write `backend/ent/proxy_delete.go` because a user-mapped section was open; controller confirmed no Go/Wire process and this was the sole generated-file pollution. |
+| `git restore --worktree -- backend/ent/proxy_delete.go` | `0` | Restored exactly the generated-file pollution from the merge index; retained the `go.mod` tool directive. |
+| `make generate` (two successful retries after restoring `proxy_delete.go`) | `0`, `0` | Ent/Wire stable. |
+| `go test -tags=unit -count=1 ./internal/handler ./internal/service ./internal/repository ./internal/server/routes` | `0` | All four focused packages passed. |
+| Focused Passkey/Model Plaza/Settings Vitest command | `0` | `42` tests passed. |
+| `pnpm typecheck` | `0` | Vue typecheck passed. |
+| `make "VERSION=0.1.165.4" "SHELL=D:/scoop/shims/bash.exe" build` | `0` | Backend and frontend production build passed. |
+| `gofmt -d`, `git diff --check`, `git diff --cached --check`, conflict-marker, forbidden-path checks | `0` | Clean; no unmerged or forbidden merge path. |
+| Merge-tree migration/version checks | `0` | `VERSION=0.1.165.4`; passkey=`522b16b5bba12aedb9c4198d2d4ef082c8ea718f`, receipt=`c22d47d79cbbaf4bc40524d42ef52e6cc8ac3af6`, outbox=`502ecec1caf9f76e022c2e83acf3707190539301`. |
+
+- This evidence is committed separately, contains only this ledger, and leaves selection, Plan, OpenSpec, and progress files outside both commits.
