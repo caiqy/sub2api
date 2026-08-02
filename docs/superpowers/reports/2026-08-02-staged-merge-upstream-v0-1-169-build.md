@@ -1928,3 +1928,91 @@ if ($null -eq $dockerCommand) { 'docker_command=unavailable' | Set-Content -Lite
 - Before this ledger append, status and index were clean except for `?? .comet/current-change.json`; the runtime-selection file was not read, modified, staged, committed, stashed, or deleted.
 - This final closure changes only the ledger. No Plan/OpenSpec task/checkoff, progress, product, generated, migration, dependency, configuration, or other non-ledger path was changed.
 - No fetch, push, tag, release, deploy, Docker integration/image action, SSH, server, or remote operation was performed.
+
+## Task 16 Final Source-HEAD Local Verification
+
+- Final source HEAD for every command in this section: `b54cd46a45ccf934885a2ab66597e386ebecbf99`.
+- Initial and pre-ledger status: only `?? .comet/current-change.json`; it was not read, changed, staged, committed, stashed, or deleted.
+- `VERSION`: exactly `0.1.169.1`.
+
+### Fresh Focused Capability Tests
+
+```powershell
+# From backend
+go test -count=1 ./internal/service -run '^(TestLayered_GroupedAccountPassesDBFreshRecheck|TestLayered_SessionStickyPreservesGrokBinding|TestLayered_WaitPlanFallbackSkipsUpstreamRestrictedAccount|TestGatewayServiceRecordUsage_AttachesFinalUpstreamRequestSnapshot|TestCalculateQuotaCycleAdvance_ResetsOnlySingleExhaustedWindow|TestAdminResetQuota_UsesCommittedResetVersionForCacheInvalidation|TestSanitizedUpstreamPathSuffixRejectsNonConformingSegments|TestBuildGeminiAIStudioModelActionURLRejectsNonConformingModel|TestOpenAIProxyStreamCircuitThresholdTTLAndSuccessReset)$'
+go test -count=1 ./internal/handler -run '^(TestOpenAIImages_UnifiedAuditRunsLegacyOnce|TestOpenAIImages_ContentModerationUsesFrozenPayloadBeforeRelease|TestOpenAIImages_SecurityAuditUsesFrozenPayloadBeforeRelease|TestOpenAIImages_MultipartTextIsReleasedBeforeBlockedUpstream|TestOpenAIImages_OAuthTextIsReleasedBeforeBlockedUpstream|TestOpenAIImages_DisabledSecurityAuditDoesNotFreezePayload|TestOpenAIImages_LegacyModerationDefersPayloadUntilRuntimeScope|TestOpenAIImages_SecurityAuditFreezesPayloadAtMostOnce|TestGatewayHandlerMessagesUsesEffectiveRouteSnapshot)$'
+go test -count=1 ./internal/server/routes -run '^(TestEveryGatewayPOSTRouteIsClassifiedForPromptAuditCoverage|TestResponsesWebSocketHasFirstAndSubsequentTurnPromptGates|TestGatewayRoutesResponsesSubpathRejectsNonConformingSubpaths)$'
+
+# From root
+pnpm --dir frontend exec vitest run src/utils/__tests__/subscriptionQuota.spec.ts src/views/admin/__tests__/SettingsView.spec.ts src/views/admin/__tests__/UsageView.spec.ts src/components/channels/__tests__/AvailableChannelsTable.spec.ts
+```
+
+| Command | Exit | Fresh result |
+| --- | ---: | --- |
+| Service focused command | `0` | `ok github.com/Wei-Shaw/sub2api/internal/service 3.040s`. |
+| Handler focused command | `0` | `ok github.com/Wei-Shaw/sub2api/internal/handler 5.656s`. |
+| Routes focused command | `0` | `ok github.com/Wei-Shaw/sub2api/internal/server/routes 2.190s`. |
+| Frontend focused command | `0` | All four requested files selected: `4 passed`, `67 passed`, duration `12.38s`. |
+
+### Target Selection And Images Evidence
+
+- Fresh `-v` reruns used the same anchored matcher for each Go package. They emitted `RUN` and `PASS` for every named target, so no `no tests to run` result was accepted.
+- Service selection: `TestLayered_GroupedAccountPassesDBFreshRecheck`, `TestLayered_SessionStickyPreservesGrokBinding`, `TestLayered_WaitPlanFallbackSkipsUpstreamRestrictedAccount`, `TestGatewayServiceRecordUsage_AttachesFinalUpstreamRequestSnapshot`, `TestCalculateQuotaCycleAdvance_ResetsOnlySingleExhaustedWindow`, `TestAdminResetQuota_UsesCommittedResetVersionForCacheInvalidation`, `TestSanitizedUpstreamPathSuffixRejectsNonConformingSegments`, `TestBuildGeminiAIStudioModelActionURLRejectsNonConformingModel`, and `TestOpenAIProxyStreamCircuitThresholdTTLAndSuccessReset` all passed; package result `ok .../internal/service 2.719s`.
+- Handler selection: the eight Images tests below and `TestGatewayHandlerMessagesUsesEffectiveRouteSnapshot` all emitted `RUN`/`PASS`; package result `ok .../internal/handler 5.143s`.
+- Routes selection: `TestEveryGatewayPOSTRouteIsClassifiedForPromptAuditCoverage`, `TestResponsesWebSocketHasFirstAndSubsequentTurnPromptGates`, and `TestGatewayRoutesResponsesSubpathRejectsNonConformingSubpaths` all emitted `RUN`/`PASS`; package result `ok .../internal/server/routes 1.685s`.
+
+| Images direct `RUN`/`PASS` target | Lifecycle evidence |
+| --- | --- |
+| `TestOpenAIImages_UnifiedAuditRunsLegacyOnce` | Unified Images audit path and one legacy invocation. |
+| `TestOpenAIImages_ContentModerationUsesFrozenPayloadBeforeRelease` | Content moderation reads frozen payload before release. |
+| `TestOpenAIImages_SecurityAuditUsesFrozenPayloadBeforeRelease` | Security audit reads frozen payload before release. |
+| `TestOpenAIImages_MultipartTextIsReleasedBeforeBlockedUpstream` | Multipart text is released before the blocked upstream path. |
+| `TestOpenAIImages_OAuthTextIsReleasedBeforeBlockedUpstream` | OAuth text is released before the blocked upstream path. |
+| `TestOpenAIImages_DisabledSecurityAuditDoesNotFreezePayload` | Disabled security audit leaves payload unfrozen. |
+| `TestOpenAIImages_LegacyModerationDefersPayloadUntilRuntimeScope` | Legacy moderation defers payload evaluation until runtime scope. |
+| `TestOpenAIImages_SecurityAuditFreezesPayloadAtMostOnce` | Security audit freezes payload at most once. |
+
+### Final Fresh Full Gate
+
+```powershell
+make test
+make "VERSION=0.1.169.1" "SHELL=D:/scoop/shims/bash.exe" build
+make -C backend generate
+git.exe diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
+make -C backend generate
+git.exe diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
+git.exe diff --check
+git.exe diff --cached --check
+git diff --name-only --diff-filter=U
+$conflictPattern = '^(<<<<<<< .+|\|\|\|\|\|\|\| .+|=======|>>>>>>> .+)$'
+git grep -n -I -E $conflictPattern -- ':!docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md'
+$conflictExit = $LASTEXITCODE
+if ($conflictExit -eq 0) { throw 'tracked conflict markers found' }
+if ($conflictExit -ne 1) { throw "conflict marker scan failed: $conflictExit" }
+git rev-parse HEAD:backend/migrations/191_subscription_quota_advance_receipts.sql
+git rev-parse HEAD:backend/migrations/192_subscription_cache_invalidation_outbox.sql
+git show HEAD:backend/cmd/server/VERSION
+```
+
+| Command | Exit | Fresh result |
+| --- | ---: | --- |
+| `make test` | `0` | Default and `unit` backend suites passed, `golangci-lint` reported `0 issues.`, and frontend reported `225` test files / `1698` tests passed. |
+| `make "VERSION=0.1.169.1" "SHELL=D:/scoop/shims/bash.exe" build` | `0` | Backend build plus `vue-tsc -b && vite build` completed; Vite reported `built in 29.75s`. |
+| First `make -C backend generate` | `0` | Ent and Wire generation completed; Wire wrote `cmd/server/wire_gen.go` twice. |
+| First generated-path diff | `0` | No `backend/ent` or `backend/cmd/server/wire_gen.go` diff. |
+| Second `make -C backend generate` | `0` | Ent and Wire generation completed again; Wire wrote `cmd/server/wire_gen.go` twice. |
+| Second generated-path diff | `0` | No `backend/ent` or `backend/cmd/server/wire_gen.go` diff. |
+| `git.exe diff --check` | `0` | No whitespace-error output. |
+| `git.exe diff --cached --check` | `0` | No whitespace-error output. |
+| `git diff --name-only --diff-filter=U` | `0` | No unmerged paths. |
+| Conflict-marker script | `0` | Embedded `git grep` exit was `1` with no matches, the required PASS condition. |
+| Receipt migration OID | `0` | `c22d47d79cbbaf4bc40524d42ef52e6cc8ac3af6`. |
+| Cache-invalidation outbox migration OID | `0` | `502ecec1caf9f76e022c2e83acf3707190539301`. |
+| `git show HEAD:backend/cmd/server/VERSION` | `0` | Exactly `0.1.169.1`. |
+
+### Warnings And Scope
+
+- Non-failing focused/frontend warnings: Browserslist `caniuse-lite` data is 8 months old; SettingsView reports unresolved `router-link`; one expected jsdom `AggregateError` was emitted. The command still selected the four requested files and passed all 67 tests.
+- Non-failing full-gate warnings: the same Browserslist notice; expected error-path test logs; intlify absent message compiler/missing-key logs; Vite dynamic-plus-static import notices and the post-minification chunk-size warning.
+- Both generator checks were clean. No Task 17 Docker integration was run.
+- Only this ledger is modified for Task 16. No Plan/OpenSpec task/checkoff, runtime selection, product, test, generated, migration, dependency, configuration, Docker, fetch, push, tag, release, deploy, server, or remote operation was performed.
