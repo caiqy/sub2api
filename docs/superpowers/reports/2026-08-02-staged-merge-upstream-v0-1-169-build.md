@@ -988,3 +988,45 @@ git rev-parse HEAD:backend/migrations/192_subscription_cache_invalidation_outbox
 - The old statement at ledger line 738 that assigned row 13 to Task 5 is superseded. Task 5 only owns row 10 Docker quota/outbox/migration integration.
 - Row 13 deploy scripts are exclusively Task 13 work after the v0.1.169 merge. The current row 13 non-Docker test evidence is the explicit Fix-2 historical reference above.
 - Current remaining risk signal: the historic Windows user-mapped-section failure was transient and recovered under the bounded Fix-2 rules. Existing frontend warning output remains non-failing. Docker row 10 remains outside Task 4 and is not represented as complete here.
+
+## Task 5 Docker/Testcontainers Row 10 Determination
+
+- 实施时间：2026-08-02。
+- 执行基线：`63da8b61addc8717f0436e36a8e76ad7406ac6b4`。
+- 结论：row 10 为 `unverified`，不是 `protected` 或 PASS。Docker CLI 在本机不可用，因此未启动 Testcontainers integration；没有执行 SSH、远程验证、镜像构建或部署。
+
+### Docker Preflight Evidence
+
+```powershell
+$log = Join-Path $env:TEMP 'sub2api-stage0-docker-preflight.log'
+$dockerCommand = Get-Command docker -ErrorAction SilentlyContinue
+if ($null -eq $dockerCommand) { 'docker_command=unavailable' | Set-Content -LiteralPath $log; $preflightAvailable = $false } else { & $dockerCommand.Path version --format '{{.Server.Version}}' 2>&1 | Tee-Object -FilePath $log; $preflightExitCode = $LASTEXITCODE; "exit_code=$preflightExitCode" | Add-Content -LiteralPath $log; $preflightAvailable = ($preflightExitCode -eq 0) }
+```
+
+- 日志：`C:\Users\caiqy\AppData\Local\Temp\sub2api-stage0-docker-preflight.log`。
+- 完整日志：`docker_command=unavailable`。
+- Docker process exit code：N/A；命令不存在，未读取陈旧 `$LASTEXITCODE`。预检结论：`preflightAvailable=false`。
+
+### Row 10 Integration Status
+
+| Target | 状态 | 证据 |
+| --- | --- | --- |
+| `TestAdvanceQuotaCycle_ConcurrentRequestsDeductOnce` | `unverified`（未执行） | Docker preflight unavailable；未启动 integration。 |
+| `TestAdvanceQuotaCycleReceipt_RollsBackSubscriptionWhenReceiptWriteFails` | `unverified`（未执行） | Docker preflight unavailable；未启动 integration。 |
+| `TestSubscriptionCacheInvalidationOutbox_TriggersSemanticChangesAndRollsBack` | `unverified`（未执行） | Docker preflight unavailable；未启动 integration。 |
+| `TestSubscriptionCacheInvalidationMigration_RawRerunIsIdempotent` | `unverified`（未执行） | Docker preflight unavailable；未启动 integration。 |
+
+- 未执行的精确 integration 命令：`go test -tags=integration -v -count=1 -run '^(TestAdvanceQuotaCycle_ConcurrentRequestsDeductOnce|TestAdvanceQuotaCycleReceipt_RollsBackSubscriptionWhenReceiptWriteFails|TestSubscriptionCacheInvalidationOutbox_TriggersSemanticChangesAndRollsBack|TestSubscriptionCacheInvalidationMigration_RawRerunIsIdempotent)$' ./internal/repository`（应从 `backend` 运行）。
+- 未验证契约：PostgreSQL transaction/lock 的并发单次扣减、receipt 写入失败时 subscription rollback、outbox semantic change/rollback、migration raw rerun idempotency。
+- 残余风险：本机尚无直接 Docker/Testcontainers 证据，row 10 不能作为 release PASS；Docker 可用的环境必须重跑上述四个精确目标，并验证每一个锚定的顶级 `--- PASS: TestName (` 输出。
+
+### Matrix Closure And Self-review
+
+| # | 状态 | 当前直接证据 |
+| --- | --- | --- |
+| 10 | `unverified` | Docker CLI unavailable；四个 quota/receipt/outbox/migration Testcontainers targets 未执行。 |
+
+统计：`protected=13`，`manual=0`，`gap=0`，`unverified=1`。
+
+- 自审：本次 tracked diff 仅为本 ledger；未修改 Plan、OpenSpec、`tasks.md`、progress、应用源码或配置。
+- 自审：未执行 fetch、merge、push、tag、release、deploy、server/SSH、镜像构建；row 13 deploy scripts 未纳入本任务。
