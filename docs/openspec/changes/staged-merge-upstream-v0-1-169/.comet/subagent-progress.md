@@ -4,17 +4,18 @@
 - Review mode: `thorough`
 - 当前任务: Task 2 - 重新获取 refs 并固定 tag 范围
 - 映射 OpenSpec: 1.2
-- 阶段: `task-review / result`
-- Dispatch token: `task-2-reviewer-attempt-1-011d245ae`
-- Role: `reviewer`
+- 阶段: `final-fix / dispatch-intent`
+- Dispatch token: `task-2-fix-attempt-1-31add9bb4`
+- Role: `fix-agent`
 - Attempt: `1`
-- Model: `standard`
-- Base HEAD: `acca9d40c3e8565c00b0c3a665d0b55d7288602e`
+- Model: `cheap`
+- Base HEAD: `31add9bb42519b5f4ac59eb619e0d44cd180f732`
 - Brief: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-2-brief.md`
 - Report: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-2-report.md`
 - Review package: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/review-acca9d40c..1d663e01f.diff`
 - Implementer task ID: `ses_03fe6d374ffeQ6LCrviqEa8tNZ`
 - Reviewer task ID: `ses_03fe16e9bffecMKm7d8PB8lbA5`
+- Fix task ID: `pending atomic functions.task return`
 - Result: implementer `DONE`; reviewer `CHANGES_REQUESTED`
 - Implementation commit: `1d663e01fd4efeefb40791ec588071d20bca186a`
 - Verification summary: 祖先链通过、正式 tag 上界为 `v0.1.169`，提交仅含 build ledger，状态仅 `?? .comet/current-change.json`。
@@ -24,4 +25,4 @@
 - Open finding (Important): `c772d1866` 在 ledger 中为 `moonfunjohn`、在 report 中为 `moonfunjiang`；两者均声称是完整 `git log --oneline`，必须用权威输出修正错误一方。
 - TDD: `tdd`; implementer 必须加载 Skill。该任务无生产代码修改，不伪造 RED；报告必须记录 `N/A` 原因和全部 refs/tag 门禁结果。
 - 审查-修复轮次: `1/2`
-- 状态: thorough 修复第 `1/2` 轮待派发；Task 2 不得 checkoff。
+- 状态: 即将派发 fresh fix agent 修正 report 转录；tracked ledger 已由权威 `git show` 证明正确，不创建空 commit。
