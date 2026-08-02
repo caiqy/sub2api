@@ -1403,7 +1403,8 @@ No migration conflict occurred. Passkey/auth/session binding/step-up, Model Plaz
 
 ### Corrected Call-Chain Conclusions
 
-- `ConfigManager.Reload` calls `markUntrustedIfNoActiveSnapshot` on unavailable settings, parse failure, or activation error. A trusted existing snapshot remains available after reload failure. `BlockingActivationDegraded` fails closed only for known blocking intent, including a weaker stale snapshot or an activated config with no usable endpoint. The 17 exact Config/Admin tests above cover these cases.
+- With known blocking intent, `BlockingActivationDegraded` returns degraded/fail closed only for an untrusted state, no active snapshot, or an active mode weaker than `ModeBlocking`; a trusted active snapshot remains after reload failure.
+- An activated blocking config whose `EnabledEndpoints()` is empty fails closed at `PromptService -> GuardEvaluator.Evaluate` on the guard ingress, not in `BlockingActivationDegraded`; the 17 exact Config/Admin tests above remain the evidence for these Config/Admin behaviors.
 - `PasskeyService.FinishLogin` consumes the session and rejects inactive accounts before WebAuthn completion; the handler applies backend-mode, audit actor/auth-method, successful-login recording, and token issuance. These source-path facts are `manual` because no direct top-level test was found for their joined path.
 - `ModelPlazaView` applies embedded layout only when `embedded=1` and the auth store is authenticated. Its public route and this embedded predicate are `manual`; server visibility, settings switch, and hidden custom-menu utilities have their own direct test scopes above.
 
