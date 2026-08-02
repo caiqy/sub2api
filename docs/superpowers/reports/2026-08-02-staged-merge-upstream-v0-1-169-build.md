@@ -2032,3 +2032,71 @@ go test -v -count=1 -tags=unit ./internal/service -run '^(TestLayered_GroupedAcc
 - The fresh tagged command emitted top-level `RUN` and `PASS` for all nine: `TestLayered_GroupedAccountPassesDBFreshRecheck`, `TestLayered_SessionStickyPreservesGrokBinding`, `TestLayered_WaitPlanFallbackSkipsUpstreamRestrictedAccount`, `TestGatewayServiceRecordUsage_AttachesFinalUpstreamRequestSnapshot`, `TestCalculateQuotaCycleAdvance_ResetsOnlySingleExhaustedWindow`, `TestAdminResetQuota_UsesCommittedResetVersionForCacheInvalidation`, `TestSanitizedUpstreamPathSuffixRejectsNonConformingSegments`, `TestBuildGeminiAIStudioModelActionURLRejectsNonConformingModel`, and `TestOpenAIProxyStreamCircuitThresholdTTLAndSuccessReset`.
 - This fresh tagged `9/9` record is the superseding Task 16 service-focused evidence. It does not recast the original untagged run as `9/9` and does not substitute for any unrelated gate.
 - Initial and pre-ledger status remained only `?? .comet/current-change.json`; it was not read, modified, staged, committed, stashed, or deleted. Task 17 Docker integration was not run. No code, Plan/OpenSpec task, progress, runtime selection, full gate, fetch, push, tag, release, deploy, Docker, server, or remote operation occurred.
+
+## Task 17 Verify Topology, Migration Preservation, And Final Integration Status
+
+- Pre-ledger final source `HEAD`: `8b9934393c9c503c3aabf7517f0bf3b69f7db2b3`.
+- Initial status exit `0`: exactly `?? .comet/current-change.json`. The runtime-selection file was not read, modified, staged, committed, stashed, or deleted.
+
+### Topology Evidence
+
+```powershell
+git merge-base --is-ancestor v0.1.166 HEAD
+git merge-base --is-ancestor v0.1.168 HEAD
+git merge-base --is-ancestor v0.1.169 HEAD
+git log --merges --first-parent --format='%H %P' e9a0e4aa53b5d9d5f5c84986cfadd8098dc8e4f3..HEAD
+```
+
+- All three ancestor commands exited `0`.
+- The first-parent merge log exited `0` and returned exactly three rows:
+
+```text
+827369f76f8f301320759a0dc85b11ab05a7a1d6 e6b163fcb62e608b7af0ca0f872e25de9e2fb516 26d894ef4f50645a4bf1030e378ac892f17d0223
+de4264ba5d15ca1024da51846f43bf48b02a9882 cd78fa1d5406a9ab468e47806c5ce94ac69c79f1 99c8e4bf7564823bafbab369acab6539e734c1bb
+c7ae76df77755b5b84b26b91606d37efc13b5deb e9d2ce48e23391f12a255ca9430d3f16bfd7fea3 dc893dd0b8eab41df5be595ae9fcd1aa74a062b8
+```
+
+- Second-parent set is exactly `26d894ef4f50645a4bf1030e378ac892f17d0223`, `99c8e4bf7564823bafbab369acab6539e734c1bb`, and `dc893dd0b8eab41df5be595ae9fcd1aa74a062b8`.
+
+### Migration Files And Blob Identity
+
+```powershell
+git ls-files --error-unmatch backend/migrations/191_passkey_credentials.sql backend/migrations/191_subscription_quota_advance_receipts.sql backend/migrations/192_subscription_cache_invalidation_outbox.sql
+git diff --name-status e9a0e4aa53b5d9d5f5c84986cfadd8098dc8e4f3..HEAD -- backend/migrations/191_passkey_credentials.sql backend/migrations/191_subscription_quota_advance_receipts.sql backend/migrations/192_subscription_cache_invalidation_outbox.sql
+git rev-parse HEAD:backend/migrations/191_subscription_quota_advance_receipts.sql
+git rev-parse HEAD:backend/migrations/192_subscription_cache_invalidation_outbox.sql
+```
+
+- All four commands exited `0`.
+- All three exact migration filenames are tracked. The name-status output is only `A\tbackend/migrations/191_passkey_credentials.sql`; Passkey is the upstream addition.
+- Receipt and outbox have no rename or content change in the filtered diff. Their final blob OIDs are exactly `c22d47d79cbbaf4bc40524d42ef52e6cc8ac3af6` and `502ecec1caf9f76e022c2e83acf3707190539301`, respectively.
+- Filtered-FS upgrade evidence and these final blob identities remain separate, complementary requirements.
+
+### Docker Preflight And Integration Decision
+
+```powershell
+$preflightLog = Join-Path $env:TEMP 'sub2api-final-docker-preflight.log'
+$dockerCommand = Get-Command docker -ErrorAction SilentlyContinue
+if ($null -eq $dockerCommand) { 'docker_command=unavailable' | Set-Content -LiteralPath $preflightLog; $preflightAvailable = $false } else { & $dockerCommand.Path version --format '{{.Server.Version}}' 2>&1 | Tee-Object -FilePath $preflightLog; $preflightExitCode = $LASTEXITCODE; "exit_code=$preflightExitCode" | Add-Content -LiteralPath $preflightLog; $preflightAvailable = ($preflightExitCode -eq 0) }
+```
+
+- Preflight script exit: `0`. Log: `C:\Users\caiqy\AppData\Local\Temp\sub2api-final-docker-preflight.log`; exact content: `docker_command=unavailable`.
+- Docker process exit: N/A because the `docker` command is unavailable. `preflightAvailable=false`; no integration command was run and no static, unit, historical, or compile-only result is substituted for it.
+
+| Integration target or path | Classification | Evidence |
+| --- | --- | --- |
+| `TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate` | `unverified` | Docker preflight unavailable; not run. |
+| `TestMigrationsRunner_PreservesPasskeyAndSubscriptionQuotaMigrationsAcrossUpgrade` | `unverified` | Docker preflight unavailable; not run. |
+| `TestAdvanceQuotaCycle_ConcurrentRequestsDeductOnce` | `unverified` | Docker preflight unavailable; not run. |
+| `TestAdvanceQuotaCycleReceipt_RollsBackSubscriptionWhenReceiptWriteFails` | `unverified` | Docker preflight unavailable; not run. |
+| `TestSubscriptionCacheInvalidationOutbox_TriggersSemanticChangesAndRollsBack` | `unverified` | Docker preflight unavailable; not run. |
+| New and upgrade PostgreSQL migration paths | `unverified` | Docker/Testcontainers integration was unavailable and not run. |
+
+- The exact integration command was intentionally not invoked: `go test -tags=integration -v -count=1 -run '^(TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate|TestMigrationsRunner_PreservesPasskeyAndSubscriptionQuotaMigrationsAcrossUpgrade|TestAdvanceQuotaCycle_ConcurrentRequestsDeductOnce|TestAdvanceQuotaCycleReceipt_RollsBackSubscriptionWhenReceiptWriteFails|TestSubscriptionCacheInvalidationOutbox_TriggersSemanticChangesAndRollsBack)$' ./internal/repository` from `backend`.
+
+### Version, Source Context, And Scope
+
+- `git rev-parse HEAD` exited `0` with `8b9934393c9c503c3aabf7517f0bf3b69f7db2b3`.
+- `git show e9a0e4aa53b5d9d5f5c84986cfadd8098dc8e4f3:backend/cmd/server/VERSION` exited `0` with `0.1.165.4`; `git show HEAD:backend/cmd/server/VERSION` exited `0` with final `0.1.169.1`.
+- The version authority is `backend/cmd/server/VERSION`; root `VERSION` is absent and was not treated as a version source.
+- This Task 17 append is the only tracked change. No Plan/OpenSpec checkoff, runtime selection, source, migration, configuration, Docker integration/image action, fetch, push, tag, release, deploy, server, remote operation, or Task 18 work was performed.
