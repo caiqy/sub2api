@@ -1190,3 +1190,40 @@ Final statistics: `protected=6`, `manual=0`, `gap=0`, `unverified=0`.
 Final corrected statistics: `protected=6`, `manual=0`, `gap=0`, `unverified=0`.
 
 - Corrected status: `DONE`. VERSION remains `0.1.165.4`; no Task 8 full gate, generate, Docker, remote, network, or release operation was run.
+
+## Task 8 v0.1.166 Local Gate Closure
+
+- Final status: `BLOCKED`.
+- VERSION remains `0.1.165.4` (`git show HEAD:backend/cmd/server/VERSION`, exit `0`).
+- Base and recovered worktree status contained only `?? .comet/current-change.json`; generated working-tree output from the failed gate commands was restored and not staged.
+
+### Gate Evidence
+
+| Command | Exit | Key output / conclusion |
+| --- | --- | --- |
+| `make test` | `2` | `internal/handler` failed (`79.533s`) and `internal/repository` failed (`6.443s`); examples include `TestOpenAIEnsureForwardErrorResponse_ImageJSONKeepaliveWritesSingleJSONFallback` and `TestUsageLogRepositoryListWithFiltersRequestID`. This is a non-Docker gate failure. |
+| `make "VERSION=0.1.165.4" "SHELL=D:/scoop/shims/bash.exe" build` | `0` | Backend built with `-X main.Version=0.1.165.4`; `vue-tsc -b && vite build` completed. Existing Browserslist, dynamic-import, and chunk-size warnings were emitted. |
+| First `make -C backend generate` | `1` | `promocodeusage.go` could not be opened because a user-mapped section was open. |
+| First `git.exe diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` | `1` | The interrupted generator left Ent output differences. |
+| Second `make -C backend generate` | `1` | `paymentorder_delete.go` could not be opened because a user-mapped section was open. |
+| Second `git.exe diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` | `1` | The interrupted generator again left Ent output differences. |
+| `git.exe diff --check` | `0` | Passed after restoring the gate-created generated output. |
+| `git.exe diff --cached --check` | `0` | Passed. |
+| `git diff --name-only --diff-filter=U` | `0` | No unmerged paths. |
+| Conflict-marker script from the brief | `0` | Embedded `git grep` exit was `1`, the required no-match PASS result. |
+| `git rev-parse HEAD:backend/migrations/191_subscription_quota_advance_receipts.sql` | `0` | `c22d47d79cbbaf4bc40524d42ef52e6cc8ac3af6`. |
+| `git rev-parse HEAD:backend/migrations/192_subscription_cache_invalidation_outbox.sql` | `0` | `502ecec1caf9f76e022c2e83acf3707190539301`. |
+
+### Docker Decision And Integration Contract
+
+- The exact Docker preflight script completed with `preflightAvailable=false`; log `C:\Users\caiqy\AppData\Local\Temp\sub2api-v0166-docker-preflight.log` contains `docker_command=unavailable`.
+- `TestAdvanceQuotaCycle_ConcurrentRequestsDeductOnce`: `unverified` (not run).
+- `TestAdvanceQuotaCycleReceipt_RollsBackSubscriptionWhenReceiptWriteFails`: `unverified` (not run).
+- `TestSubscriptionCacheInvalidationOutbox_TriggersSemanticChangesAndRollsBack`: `unverified` (not run).
+- No integration PASS is claimed because Docker was unavailable. No remote fallback was attempted.
+
+### Self-review
+
+- The `make test` and two generator failures block Task 8. No product-code repair was attempted.
+- No fetch, push, tag, GitHub Actions, release, image build/publish, deploy, SSH/server, database, Redis, or Nginx operation was performed.
+- Only this ledger is staged for the required evidence commit; the detailed Task 8 report is untracked/ignored operational evidence.
