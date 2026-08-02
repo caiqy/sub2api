@@ -4,13 +4,17 @@
 - Review mode: `thorough`
 - 当前任务: Task 4 - 验证阶段 0 的本地保护测试与生成稳定性
 - 映射 OpenSpec: 1.4
-- 阶段: `debugging-2 / dispatch-intent`
+- 阶段: `debugging-2 / result`
 - Diagnostic-2 dispatch token: `task-4-diagnostic-attempt-2-be284ffd7`
 - Diagnostic-2 role: `diagnostic-agent`
 - Diagnostic-2 model: `high`
 - Diagnostic-2 base HEAD: `be284ffd792833555bcb5b73eebda1a8121d49e6`
 - Diagnostic-2 report: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-4-debug-2-report.md`
-- Diagnostic-2 task ID: `pending atomic functions.task return`
+- Diagnostic-2 task ID: `ses_03f8f0d73ffe9uxirtXYsRv6Kv`
+- Diagnostic-2 result: `DONE`
+- Root cause 4: `b24bc74b` 引入未检查的 deferred `rows.Close()`；最小修复为 `defer func() { _ = rows.Close() }()`。
+- Generate diagnosis: 第 `1/3` 次 clean generate 成功且无 Ent/Wire diff；此前随机路径错误符合瞬态外部 mapping lock，持有者未确定。
+- Gap diagnosis: 行 1/2/3/11 与非Docker行13的精确现有测试已定位并通过；Docker行10/13余项交Task5。
 - Fix dispatch token: `task-4-fix-attempt-1-6456c3858`
 - Fix role: `fix-agent`
 - Fix model: `high`
@@ -49,4 +53,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - 审查-修复轮次: `0/2`
-- 状态: 即将派发第二轮 systematic diagnostic；只调查 errcheck、Windows mmap 与非Docker gap 关闭命令，不改 tracked 文件。
+- 状态: diagnostic-2 完成且worktree clean；待controller将lint文件、限定retry和精确gap关闭命令加入Plan/brief。
