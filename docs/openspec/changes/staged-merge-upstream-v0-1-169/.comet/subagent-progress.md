@@ -4,7 +4,7 @@
 - Review mode: `thorough`
 - 当前任务: Task 18 - 完成本地能力专项 review 与最终验证报告
 - 映射 OpenSpec: 5.4
-- 阶段: `task-18 / fresh-review-dispatch-intent`
+- 阶段: `task-18 / fix-dispatch-intent`
 - Task-10 dispatch token: `task-10-implementer-attempt-1-e46cd9d55`
 - Task-10 role: `implementer`
 - Task-10 model: `high`
@@ -183,7 +183,9 @@
 - Task-18 docs repair commit: `none`
 - Task-18 verify commit: `659364fbfed8a36b937b664510d6157cf99d0022`
 - Task-18 reviewer dispatch token: `task-18-reviewer-8ad560e1`
-- Task-18 reviewer task ID: `pending functions.task return`
+- Task-18 reviewer task ID: `ses_03ca57f89ffeyio8RAPFxoXSH3`
+- Task-18 reviewer result: `concerns; 2 Important, 3 Minor`
+- Task-18 fix dispatch token: `task-18-fix-cb7bc3d2`
 - Task-9 dispatch token: `task-9-implementer-attempt-1-97d44dd20`
 - Task-9 role: `implementer`
 - Task-9 model: `high`
@@ -540,4 +542,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - Task-4审查-修复轮次: `2/2 PASS`
-- 状态: Task18 fresh reviewer即将派发。
+- 状态: Task18 reviewer要求修订；即将恢复原implementer执行report-only correction。
