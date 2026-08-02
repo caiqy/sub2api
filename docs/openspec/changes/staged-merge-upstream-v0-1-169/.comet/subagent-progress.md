@@ -4,7 +4,7 @@
 - Review mode: `thorough`
 - 当前任务: Task 2 - 重新获取 refs 并固定 tag 范围
 - 映射 OpenSpec: 1.2
-- 阶段: `task-review / dispatch-intent`
+- 阶段: `task-review / result`
 - Dispatch token: `task-2-reviewer-attempt-1-011d245ae`
 - Role: `reviewer`
 - Attempt: `1`
@@ -14,12 +14,14 @@
 - Report: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-2-report.md`
 - Review package: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/review-acca9d40c..1d663e01f.diff`
 - Implementer task ID: `ses_03fe6d374ffeQ6LCrviqEa8tNZ`
-- Reviewer task ID: `pending atomic functions.task return`
-- Result: implementer `DONE`; reviewer `pending`
+- Reviewer task ID: `ses_03fe16e9bffecMKm7d8PB8lbA5`
+- Result: implementer `DONE`; reviewer `CHANGES_REQUESTED`
 - Implementation commit: `1d663e01fd4efeefb40791ec588071d20bca186a`
 - Verification summary: 祖先链通过、正式 tag 上界为 `v0.1.169`，提交仅含 build ledger，状态仅 `?? .comet/current-change.json`。
 - Risk signals: `upstream/main` 已前进至 `b74024c78`，范围外提交已记录。
 - Concerns: 无阻塞顾虑。
+- Review verdict: `Spec ❌`; `Quality CHANGES_REQUESTED`
+- Open finding (Important): `c772d1866` 在 ledger 中为 `moonfunjohn`、在 report 中为 `moonfunjiang`；两者均声称是完整 `git log --oneline`，必须用权威输出修正错误一方。
 - TDD: `tdd`; implementer 必须加载 Skill。该任务无生产代码修改，不伪造 RED；报告必须记录 `N/A` 原因和全部 refs/tag 门禁结果。
-- 审查-修复轮次: `0/2`
-- 状态: 即将调用原子 `functions.task` 派发 thorough reviewer；返回前不得重复派发。
+- 审查-修复轮次: `1/2`
+- 状态: thorough 修复第 `1/2` 轮待派发；Task 2 不得 checkoff。
