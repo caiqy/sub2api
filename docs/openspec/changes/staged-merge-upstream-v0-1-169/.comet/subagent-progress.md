@@ -4,7 +4,12 @@
 - Review mode: `thorough`
 - 当前任务: Task 4 - 验证阶段 0 的本地保护测试与生成稳定性
 - 映射 OpenSpec: 1.4
-- 阶段: `debugging-2 / result`
+- 阶段: `implementation-fix-2 / dispatch-intent`
+- Fix-2 dispatch token: `task-4-fix-attempt-2-ddb37f772`
+- Fix-2 role: `fix-agent`
+- Fix-2 model: `high`
+- Fix-2 base HEAD: `ddb37f772a4e8278127e38d431623a66470b3a65`
+- Fix-2 task ID: `pending atomic functions.task return`
 - Diagnostic-2 dispatch token: `task-4-diagnostic-attempt-2-be284ffd7`
 - Diagnostic-2 role: `diagnostic-agent`
 - Diagnostic-2 model: `high`
@@ -53,4 +58,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - 审查-修复轮次: `0/2`
-- 状态: diagnostic-2 完成且worktree clean；待controller将lint文件、限定retry和精确gap关闭命令加入Plan/brief。
+- 状态: Plan/brief已闭合剩余门禁；即将派发fresh fix-2 agent，返回前不得重复派发，Task4不得review/checkoff。
