@@ -1,0 +1,30 @@
+{
+  "change": "staged-merge-upstream-v0-1-169",
+  "phase": "design",
+  "mode": "beta",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "a2846068fce9eeaaaee276a9e44062920f706541a5751e709cd9037d0585729b",
+  "files": [
+    {
+      "path": "docs/openspec/changes/staged-merge-upstream-v0-1-169/proposal.md",
+      "sha256": "ec469b655882309dff36557c6d8627776f3c1b12410ffadd744405c60c03145a",
+      "role": "supporting"
+    },
+    {
+      "path": "docs/openspec/changes/staged-merge-upstream-v0-1-169/design.md",
+      "sha256": "d19909140d1b7ffd988e7172d2da8b6b633b7c0f255acbd80ca03c1b7a493f69",
+      "role": "supporting"
+    },
+    {
+      "path": "docs/openspec/changes/staged-merge-upstream-v0-1-169/tasks.md",
+      "sha256": "5eeaae858d57e1d754494d570a080810da0d63ca0b267b81a955608641b357f1",
+      "role": "supporting"
+    },
+    {
+      "path": "docs/openspec/changes/staged-merge-upstream-v0-1-169/specs/upstream-release-sync/spec.md",
+      "sha256": "22ffb95a863969e632b40d320514d12b4c41904523c6af40d03cfeb50500dc95",
+      "role": "spec"
+    }
+  ]
+}
