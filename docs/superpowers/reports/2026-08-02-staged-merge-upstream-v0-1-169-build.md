@@ -1824,3 +1824,58 @@ go test -count=1 ./internal/server/routes -run '^(TestGatewayRoutesResponsesSubp
 - Round 1 scanner commit: `e0b827f95` (`fix: correct compose security scanner boundaries`), exactly `deploy/tests/docker-compose-security-test.sh`.
 - Round 1 testability commit: `46bda30bb` (`test: close v0.1.169 path guard evidence gaps`), exactly `backend/internal/server/routes/gateway.go`, `backend/internal/server/routes/gateway_test.go`, `backend/internal/service/upstream_path_guard_test.go`, and `backend/internal/service/gemini_upstream_url_test.go`.
 - The next commit is ledger-only. Task 14 has not run; final status must remain only `?? .comet/current-change.json`.
+
+## Task 14 v0.1.169 Fresh Local Gate And Stage Closure
+
+- Execution date: `2026-08-02`; initial status and index were clean except for the allowed `?? .comet/current-change.json`. The runtime-selection file was not read, modified, staged, committed, stashed, or deleted.
+- Final Task 14 status: `BLOCKED`. The fresh full gate found a tracked duplicate-test compile failure; this ledger records the failure rather than treating historical green evidence as a substitute.
+- VERSION check: `git show HEAD:backend/cmd/server/VERSION` exited `0` and returned exactly `0.1.165.4`.
+
+### Fresh Step 1 Full Gate
+
+| Command | Exit | Fresh result |
+| --- | ---: | --- |
+| `make test` | `2` | BLOCKED. `internal/handler/openai_gateway_handler_test.go` does not compile because six top-level functions are redeclared: `TestOpenAIResponsesWebSocket_PassthroughTracksModelPerTurn`, `TestOpenAIResponsesWebSocket_UnchangedChannelTargetOutsideAccountMappingKeysRemainsValid`, `TestOpenAIResponsesWebSocket_PassthroughKeepsTurnMappingSnapshot`, `TestOpenAIResponsesWebSocket_CtxPoolAppliesPerTurnMappingAndPreservesRequestedModel`, `TestOpenAIWSTurnBillingModelPreservesImagePricingModel`, and `TestShouldReportOpenAIWSProxyAccountFailure`. The package therefore reports `FAIL .../internal/handler [build failed]`; other completed packages retained their reported `ok`/`?` outcomes. |
+| `make "VERSION=0.1.165.4" "SHELL=D:/scoop/shims/bash.exe" build` | `0` | Backend build plus `vue-tsc -b && vite build` passed; Vite reported `built in 31.58s`. Non-failing warnings were retained: Browserslist `caniuse-lite` data is 8 months old; dynamic-plus-static import warnings for `stores/app.ts`, `stores/auth.ts`, `stores/adminSettings.ts`, `router/title.ts`, `utils/userUiVisibility.ts`, and `router/index.ts`; and the post-minification chunk-size warning for chunks over 500 kB. |
+| First `make -C backend generate` | `0` | `go generate ./ent` and `go generate ./cmd/server` completed; Wire wrote `cmd/server/wire_gen.go` twice. |
+| First `git.exe diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` | `0` | No generated-path diff or output. |
+| Second `make -C backend generate` | `0` | `go generate ./ent` and `go generate ./cmd/server` completed again; Wire again wrote `cmd/server/wire_gen.go` twice. |
+| Second `git.exe diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` | `0` | No generated-path diff or output. |
+| `git.exe diff --check` | `0` | No whitespace-error output. |
+| `git.exe diff --cached --check` | `0` | Empty index passed with no output. |
+| `git diff --name-only --diff-filter=U` | `0` | No unmerged paths. |
+| Conflict-marker script from the brief | `0` | Embedded `git grep` exited `1` with no matches, which is the required PASS condition. |
+| `git rev-parse HEAD:backend/migrations/191_subscription_quota_advance_receipts.sql` | `0` | `c22d47d79cbbaf4bc40524d42ef52e6cc8ac3af6`. |
+| `git rev-parse HEAD:backend/migrations/192_subscription_cache_invalidation_outbox.sql` | `0` | `502ecec1caf9f76e022c2e83acf3707190539301`. |
+
+### Failure Classification
+
+- The failure is reproducible through the required `make test` command and is not a Docker, generator, or environment failure.
+- `git blame` identifies the first definitions at lines 1424-1645 as originating in `7ce6e8d65` and the second definitions at lines 5878-6124 as introduced by merge commit `c7ae76df7`. The latter duplicates the same six top-level test names; several duplicated assertions also retain older cost ratios.
+- Task 14 is ledger-only. No non-ledger test source was modified to repair the merge defect, so the full gate cannot be reported as passed.
+
+### Docker Preflight And Conditional Integration
+
+```powershell
+$preflightLog = Join-Path $env:TEMP 'sub2api-v0169-docker-preflight.log'
+$dockerCommand = Get-Command docker -ErrorAction SilentlyContinue
+if ($null -eq $dockerCommand) { 'docker_command=unavailable' | Set-Content -LiteralPath $preflightLog; $preflightAvailable = $false } else { & $dockerCommand.Path version --format '{{.Server.Version}}' 2>&1 | Tee-Object -FilePath $preflightLog; $preflightExitCode = $LASTEXITCODE; "exit_code=$preflightExitCode" | Add-Content -LiteralPath $preflightLog; $preflightAvailable = ($preflightExitCode -eq 0) }
+```
+
+- Preflight script exit: `0`. `C:\Users\caiqy\AppData\Local\Temp\sub2api-v0169-docker-preflight.log` contains exactly `docker_command=unavailable`; `preflightAvailable=false`.
+- Docker was unavailable, so the integration command was not run. Static, compile-only, and historical evidence are not substituted for PostgreSQL/Testcontainers execution.
+
+| Integration target | Classification | Evidence |
+| --- | --- | --- |
+| `TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate` | `unverified` | Docker preflight unavailable; not run. |
+| `TestMigrationsRunner_PreservesPasskeyAndSubscriptionQuotaMigrationsAcrossUpgrade` | `unverified` | Docker preflight unavailable; not run. |
+| `TestAdvanceQuotaCycleReceipt_RollsBackSubscriptionWhenReceiptWriteFails` | `unverified` | Docker preflight unavailable; not run. |
+| `TestSubscriptionCacheInvalidationOutbox_TriggersSemanticChangesAndRollsBack` | `unverified` | Docker preflight unavailable; not run. |
+| New/upgrade PostgreSQL migration evidence | `unverified` | Docker/Testcontainers integration was unavailable and not run. |
+
+### Scope And Commit Boundary
+
+- After all gates and before this append, `git status --short --untracked-files=all` returned only `?? .comet/current-change.json`; working-tree and index diffs were empty.
+- `git add -f -- docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md` exited `0` and emitted Git's non-failing warning that this ledger's LF working copy will be replaced by CRLF the next time Git touches it.
+- Only this ledger is modified for Task 14. No Plan/OpenSpec task/checkoff, runtime selection, product, generated, migration, dependency, configuration, or non-ledger path was changed.
+- No fetch, push, tag, release, deploy, Docker integration/image action, SSH, server, or other remote operation was performed.
