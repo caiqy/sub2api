@@ -4,14 +4,24 @@
 - Review mode: `thorough`
 - 当前任务: Task 6 - 在未提交状态合入 v0.1.166 并完成阻塞审查
 - 映射 OpenSpec: 2.1
-- 阶段: `task-6 / implementation-dispatch-intent`
+- 阶段: `task-6 / implementation-result + review-dispatch-intent`
 - Task-6 dispatch token: `task-6-implementer-attempt-1-3a7bf096e`
 - Task-6 role: `implementer`
 - Task-6 model: `high`
 - Task-6 base HEAD: `3a7bf096e4e7c5573a4fbf5b624ff89273be0c45`
 - Task-6 brief: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-6-brief.md`
 - Task-6 report: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-6-report.md`
-- Task-6 task ID: `pending atomic functions.task return`
+- Task-6 task ID: `ses_03f19ece1ffe8RaMOnqqVb8Gli`
+- Task-6 attempt-1 result: `BLOCKED` on interleaved `openai_gateway_handler_test.go`; controller ruled additive top-level declaration fusion per Plan。
+- Task-6 final result: `DONE_WITH_CONCERNS`
+- Task-6 merge commit: `c7ae76df77755b5b84b26b91606d37efc13b5deb`；parents `e9d2ce48e...` + `dc893dd0b8...`
+- Task-6 ledger commit: `764b03fe96eb1e9e6d90f58cd3d570c8d20e5442`
+- Task-6 review dispatch token: `task-6-review-attempt-1-764b03fe9`
+- Task-6 reviewer role: `reviewer`
+- Task-6 reviewer model: `high`
+- Task-6 reviewer base HEAD: `764b03fe96eb1e9e6d90f58cd3d570c8d20e5442`
+- Task-6 review package: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/review-e9d2ce48e..764b03fe9.diff`
+- Task-6 reviewer task ID: `pending atomic functions.task return`
 - Task-6 review-fix rounds: `0/5`
 - Task-5 dispatch token: `task-5-implementer-attempt-1-f1e9836a3`
 - Task-5 role: `implementer`
@@ -112,4 +122,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - Task-4审查-修复轮次: `2/2 PASS`
-- 状态: Task5与OpenSpec 1.5已完成；即将派发Task6 fresh implementer执行v0.1.166 no-commit merge与阻塞审查，返回前不得重复派发或checkoff。
+- 状态: Task6 pure merge与ledger evidence已提交；即将派发fresh reviewer审查17项融合，Task7完整行为门禁尚未执行且不得提前checkoff。
