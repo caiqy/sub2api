@@ -25,11 +25,11 @@ Residual boundaries are deliberate: row 9 remains manual for the Passkey joined-
 | --- | --- | --- | --- |
 | 1 | layered scheduler, DB recheck, WaitPlan fallback | `protected` | `OpenAIGatewayHandler.Messages -> EffectiveGatewayRouteResolver -> layered scheduler -> DB fresh recheck -> WaitPlan`; direct `TestLayered_GroupedAccountPassesDBFreshRecheck`, `TestLayered_WaitPlanFallbackSkipsUpstreamRestrictedAccount`, `TestLayered_FallbackWaitPlanRechecksPrivacyRequirementAgainstDB`, and `TestGatewayHandlerMessagesUsesEffectiveRouteSnapshot` evidence. |
 | 2 | Grok/platform/session/previous-response sticky, privacy, image capability | `protected` | OpenAI selection reaches the layered scheduler's session/previous-response sticky checks before privacy/image capability recheck; direct `TestLayered_SessionStickyPreservesGrokBinding`, `TestLayered_SessionStickyRecheckHonorsImageCapability`, `TestLayered_PreviousResponseStickyEnabled`, and `TestLayered_PreviousResponseStickyHonorsRequirePrivacySet`. |
-| 3 | OpenAI HTTP/WS/Live, turn ownership, final outbound model, failed usage, prompt-cache reuse, passthrough fields | `protected` | HTTP/WS forwarding reaches response-bound relay turn completion and `RecordUsage`; direct evidence includes `TestOpenAIGatewayService_Forward_WSv2_ResponseDoneUsageParsed`, `TestRelay_OnTurnComplete_UsesCurrentResponseCreateModel`, `TestRelay_OnTurnComplete_PerTerminalEvent`, `TestGatewayServiceRecordUsage_AttachesFinalUpstreamRequestSnapshot`, and focused WS ownership/Live lifecycle gates. |
+| 3 | OpenAI HTTP/WS/Live, turn ownership, final outbound model, failed usage, prompt-cache reuse, passthrough fields | `protected` | HTTP/WS forwarding reaches response-bound relay turn completion and `RecordUsage`; direct evidence includes `TestOpenAIGatewayService_Forward_WSv2_ResponseDoneUsageParsed`, `TestRelay_OnTurnComplete_UsesCurrentResponseCreateModel`, `TestRelay_OnTurnComplete_PerTerminalEvent`, `TestGatewayServiceRecordUsage_AttachesFinalUpstreamRequestSnapshot`, `TestDeriveCompatPromptCacheKey_StableAcrossLaterTurns`, `TestGatewayService_ForwardAsResponses_PassthroughHeaderForwardCopiesFromClientRequest`, and focused WS ownership/Live lifecycle gates. |
 | 4 | prompt/security audit | `protected` | Gateway POST routes classify into audit before selection; WS first and subsequent turns pass the same gate: `TestEveryGatewayPOSTRouteIsClassifiedForPromptAuditCoverage` and `TestResponsesWebSocketHasFirstAndSubsequentTurnPromptGates`. Current Qwen3Guard strict/auxiliary-field focused gate is also green. |
 | 5 | Images exact audit and text lifecycle | `protected` | `Images -> checkSecurityAuditLazy -> runSecurityAuditLazy -> Coordinator.CheckLazy`; the coordinator shares the frozen payload with legacy moderation and release follows audit. All eight direct Images lifecycle tests are recorded below. |
 | 6 | request-body replay/spooling/cleanup | `protected` | Images body ingress spools/reopens the mapped effective body, then cleans it up after send; `TestOpenAIImages_InlineSpoolKeepsRawBodyAndOmitsSnapshots` and `TestOpenAIGatewayHandlerImages_MultipartReplayUsesMappedEffectiveBody` passed under the protected local gate. |
-| 7 | async images, object storage, image input/output billing and upstream multiplier | `protected` | Prompt guard precedes async task creation; task completion can offload to object storage; usage then applies resolved image multiplier. Direct evidence: `TestAsyncImagePromptGuardRunsBeforeTaskCreation`, `TestAsyncImageSuccessfulPrecheckIsNotRepeatedByDetachedExecution`, `TestGatewayServiceRecordUsage_EmptyImageSizeDefaultsBeforeBillingAndPersistence`, and `TestGatewayServiceRecordUsage_PeakRateAffectsTokenModeImageOutputTokens`. |
+| 7 | async images, object storage, image input/output billing and upstream multiplier | `protected` | Prompt guard precedes async task creation; task completion can offload to object storage; usage then applies resolved image multiplier. Direct evidence: `TestAsyncImagePromptGuardRunsBeforeTaskCreation`, `TestAsyncImageSuccessfulPrecheckIsNotRepeatedByDetachedExecution`, `TestImageTaskServiceCompleteOffloadsToStorage`, `TestGatewayServiceRecordUsage_EmptyImageSizeDefaultsBeforeBillingAndPersistence`, `TestGatewayServiceRecordUsage_PeakRateAffectsTokenModeImageOutputTokens`, and `TestOpenAIFreshUpstreamBillingRateRecomputesPeakAtSelectionTime`. |
 | 8 | settings hot/partial update | `protected` | `SettingsView.saveSettings -> SettingHandler.UpdateSettings -> omittedSettingKeys -> setting runtime reload`; direct tagged `TestUpdateSettingsPartialPayloadKeepsUnsentKeys` and `TestUpdateSettingsFullPayloadStillClearsSentEmptyFields` passed. |
 | 9 | repository scoped updates, user/API key, Passkey/session step-up | `manual` | Scoped user/API-key update and Passkey setting coverage are protected, but `PasskeyService.FinishLogin -> session consume -> active/backend-mode checks -> audit -> token issuance` has no direct joined-login top-level test. This row remains manual specifically for that joined-login boundary. |
 | 10 | subscription quota reset, receipt/outbox/migration integration | `unverified` | Unit/static quota evidence and frontend quota tests are protected, but PostgreSQL transaction/lock, receipt rollback, outbox rollback, migration-runner and upgrade integration require unavailable Docker/Testcontainers. The complete residual union is listed below. |
@@ -48,12 +48,12 @@ The direct Task 16 handler command selected and passed all eight tests below. Th
 | --- | --- |
 | Unified audit entry; legacy moderation runs once | `TestOpenAIImages_UnifiedAuditRunsLegacyOnce` |
 | Moderation and security consumers see the frozen payload before release | `TestOpenAIImages_ContentModerationUsesFrozenPayloadBeforeRelease`; `TestOpenAIImages_SecurityAuditUsesFrozenPayloadBeforeRelease` |
-| Disabled security audit neither freezes nor retains a large payload | `TestOpenAIImages_DisabledSecurityAuditDoesNotFreezePayload` |
+| Disabled security audit makes zero freeze and provider calls | `TestOpenAIImages_DisabledSecurityAuditDoesNotFreezePayload` |
 | Runtime scope is evaluated before legacy moderation freezes the payload | `TestOpenAIImages_LegacyModerationDefersPayloadUntilRuntimeScope` |
 | Security audit freezes at most once | `TestOpenAIImages_SecurityAuditFreezesPayloadAtMostOnce` |
 | Multipart and OAuth text remains available through audit/moderation and is released before a blocked upstream return | `TestOpenAIImages_MultipartTextIsReleasedBeforeBlockedUpstream`; `TestOpenAIImages_OAuthTextIsReleasedBeforeBlockedUpstream` |
 
-`OpenAIImagesRequest.ReleaseText` clears prompt/image text only after the lazy audit/moderation consumers complete. The direct handler evidence confirms both no-freeze disabled/scope boundaries and the at-most-once shared-payload boundary.
+`TestOpenAIImages_DisabledSecurityAuditDoesNotFreezePayload` directly proves zero frozen payload and zero provider calls for the disabled boundary; it does not by itself use a 20 MiB payload. `TestOpenAIImages_MultipartTextIsReleasedBeforeBlockedUpstream` and `TestOpenAIImages_OAuthTextIsReleasedBeforeBlockedUpstream` each supply the 20 MiB payload lifecycle evidence: text remains available through audit/moderation and is released before the blocked upstream return. `OpenAIImagesRequest.ReleaseText` clears prompt/image text only after the lazy audit/moderation consumers complete.
 
 ## GHSA-vrxq-qm4h-6hgg Review
 
@@ -82,9 +82,10 @@ Task 5, Task 8, Task 11, Task 14, and Task 17 each recorded `docker_command=unav
 | `TestSubscriptionCacheInvalidationOutbox_TriggersSemanticChangesAndRollsBack` | Docker was unavailable in all applicable stage/final preflights. |
 | `TestSubscriptionCacheInvalidationMigration_RawRerunIsIdempotent` | Docker was unavailable in Task 5 and Task 11; no later Testcontainers run superseded it. |
 | `TestUserRepoSuite` | Docker was unavailable in Task 11; no later Testcontainers run superseded it. |
+| `TestAPIKeyRepoSuite` | Docker was unavailable in Task 10; no later Testcontainers run superseded it. |
 | New and upgrade PostgreSQL migration paths | The Testcontainers migration lifecycle could not start without Docker. |
 
-The final Task 17 five-target set is exactly the two migration-runner targets, concurrent quota deduction, receipt rollback, and outbox semantic-change/rollback target shown above. It and the new/upgrade PostgreSQL paths remain `unverified`. Filtered-FS upgrade tests, static inspection, compilation, historical output, and blob identity are complementary evidence only; none is reported here as an integration PASS.
+Task 10 additionally leaves the User/API-key PostgreSQL lost-update category unverified, including the independent `TestAPIKeyRepoSuite` and the retained `TestUserRepoSuite`; compile-only or field-mask unit evidence does not cover their transactional concurrency behavior. The final Task 17 five-target set is exactly the two migration-runner targets, concurrent quota deduction, receipt rollback, and outbox semantic-change/rollback target shown above. It and the new/upgrade PostgreSQL paths remain `unverified`. Filtered-FS upgrade tests, static inspection, compilation, historical output, and blob identity are complementary evidence only; none is reported here as an integration PASS.
 
 ## OpenSpec Strict Validation
 
@@ -110,7 +111,7 @@ Change 'staged-merge-upstream-v0-1-169' is valid
 exit_code=0
 ```
 
-No OpenSpec document repair was needed. Repair commit: none. `docs/openspec/changes/staged-merge-upstream-v0-1-169/tasks.md` was not read, changed, staged, or checked off.
+No OpenSpec document repair was needed. Repair commit: none. `docs/openspec/changes/staged-merge-upstream-v0-1-169/tasks.md` was not changed, staged, or checked off.
 
 ## Operational Boundary And Final Status
 
