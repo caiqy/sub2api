@@ -4,13 +4,18 @@
 - Review mode: `thorough`
 - 当前任务: Task 4 - 验证阶段 0 的本地保护测试与生成稳定性
 - 映射 OpenSpec: 1.4
-- 阶段: `debugging / dispatch-intent`
+- 阶段: `debugging / result`
 - Diagnostic dispatch token: `task-4-diagnostic-attempt-1-a0d366e6c`
 - Diagnostic role: `diagnostic-agent`
 - Diagnostic model: `high`
 - Diagnostic base HEAD: `a0d366e6ca008b028cb0cabed1173790b6e7caea`
 - Diagnostic report: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-4-debug-report.md`
-- Diagnostic task ID: `pending atomic functions.task return`
+- Diagnostic task ID: `ses_03fb22abaffeN0QlfdkK71lxw2`
+- Diagnostic result: `DONE`
+- Root cause 1: 未标记的 outbox 测试引用四个 `unit`-tag helper，失配由 `b24bc74b` 引入。
+- Root cause 2: `wire_gen.go` 是相对当前 Wire 生成结果的陈旧产物，未发现生成器不稳定。
+- Root cause 3: conflict grep 仅锚定行首，误匹配合法长等号字符串。
+- Candidate scope: `subscription_cache_invalidation_outbox_test.go`、`wire_gen.go`、Task 4 Plan/brief regex。
 - Dispatch token: `task-4-implementer-attempt-1-1c6e5b405`
 - Role: `implementer`
 - Attempt: `1`
@@ -28,4 +33,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - 审查-修复轮次: `0/2`
-- 状态: 即将派发 systematic-debugging diagnostic agent；不修改 tracked 文件，Task 4 不得 review/checkoff。
+- 状态: diagnostic 完成且 worktree clean；三项超出原 allowlist，待 controller 最小更新 Plan/brief 后派 fresh fix agent。
