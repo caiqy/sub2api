@@ -4,18 +4,19 @@
 - Review mode: `thorough`
 - 当前任务: Task 3 - 建立能力矩阵与冲突台账
 - 映射 OpenSpec: 1.3
-- 阶段: `final-fix / result`
-- Dispatch token: `task-3-fix-attempt-1-cca379b9a`
-- Role: `fix-agent`
+- 阶段: `task-review / re-review-dispatch-intent`
+- Dispatch token: `task-3-rereviewer-attempt-1-d6aab7c92`
+- Role: `re-reviewer`
 - Attempt: `1`
 - Model: `high`
-- Base HEAD: `cca379b9a7391e2593b1730f983cac0529f6f902`
+- Base HEAD: `d8a3706d7126d3eb17718ee9b90c7dba72034dea`
 - Brief: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-3-brief.md`
 - Report: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-3-report.md`
 - Review package: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/review-ba8601061..32a766184.diff`
 - Implementer task ID: `ses_03fd8db43ffephmpAkewpqf9W7`
 - Reviewer task ID: `ses_03fd2aa02ffeubDnSOK5eIMJeT`
 - Fix task ID: `ses_03fcf7480ffe3DLaroSQAlqJn1`
+- Re-reviewer task ID: `pending atomic functions.task return`
 - Result: implementer `DONE`; reviewer `CHANGES_REQUESTED`
 - Implementation commit: `32a766184a819c12c6daf043fc40bb2b72498c3b`
 - Verification summary: 提交仅含 build ledger；`git diff --check HEAD~1..HEAD` 无输出，工作树仅显示 selection 文件。
@@ -28,6 +29,7 @@
 - Fix result: `DONE_WITH_CONCERNS`; commit `fe6357c9da7ee9668497c5429ecda26795fd0192`；矩阵 `14` 行、`gap=14`、六列表格和 Images 六项自检通过。
 - Fix risk: 未运行 Task 4，所有能力仍为 `gap`。
 - Fix concern: Task 4 必须逐项运行测试并完成入口/调用链/资源审查后才能关闭阻塞。
+- Re-review package: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/review-d8a3706d7..fe6357c9d.diff`（覆盖两个相邻 ledger-only fix commits）。
 - TDD: `tdd`; implementer 必须加载 Skill。该任务无生产代码修改，不伪造 RED；报告必须记录 `N/A` 原因、三段 changed-files 和矩阵/台账审计结果。
 - 审查-修复轮次: `1/2`
-- 状态: 修复第 `1/2` 轮完成；待核验 report/commit 并派发 fresh scoped re-review。
+- 状态: 即将派发 fresh scoped re-review；只判定原 findings 与 fix diff，不扩大审查范围。
