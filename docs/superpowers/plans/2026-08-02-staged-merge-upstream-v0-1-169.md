@@ -300,11 +300,13 @@ Expected: ledger 含完整矩阵和空的、可追踪的冲突台账；implement
 - Modify when a new assertion exposes RED: `backend/internal/handler/openai_images.go`, `backend/internal/handler/security_audit_helper.go`
 - Test: `backend/internal/service/subscription_advance_quota_test.go`
 - Test: `backend/internal/service/subscription_reset_quota_test.go`
+- Modify test: `backend/internal/service/subscription_cache_invalidation_outbox_test.go`
+- Generated: `backend/cmd/server/wire_gen.go`
 - Test: `frontend/src/utils/__tests__/subscriptionQuota.spec.ts`
 
 **Interfaces:**
-- Consumes: Canonical matrix中的所有 `protected` 行。
-- Produces: 基线通过/失败证据；高风险行只能由命名测试覆盖，不接受口头推断。
+- Consumes: Canonical matrix中的所有 `protected` 行，以及已记录的 default service test undefined-helper 编译失败和 stale Wire 输出 diagnostic evidence。
+- Produces: 基线通过/失败证据；允许仅修复 outbox test build tag 与 `wire_gen.go` 的 baseline gate defect。高风险行只能由命名测试覆盖，不接受口头推断。
 
 **Step 1: 补齐 Images 精确生命周期的直接保护测试**
 
@@ -338,7 +340,53 @@ git.exe commit -m "test: protect images audit lifecycle"
 
 Expected: 此提交严格只包含实际改变的 Images 直接保护测试和所列必要的最小修复文件；provider/handler 已满足六项精确契约。
 
-**Step 3: 运行 scheduler、sticky、gateway、审计、Images 和 quota 聚焦测试**
+**Step 3: 用 build-tag TDD 修复 outbox test 的 baseline 编译缺陷**
+
+以已记录的 `go test ./internal/service` default build 下 undefined helper 编译失败为 RED。在 `backend/internal/service/subscription_cache_invalidation_outbox_test.go` 文件首加入以下 build tag 和空行，使 consumer 与四个 unit-only helper owners 一致：
+
+```go
+//go:build unit
+
+```
+
+先运行原 service 聚焦命令确认其它目标在无 tag 的 default build 下 PASS，再运行精确 unit 命令覆盖该文件全部七个测试：
+
+```powershell
+go test -count=1 ./internal/service -run '^(TestLayered_GroupedAccountPassesDBFreshRecheck|TestLayered_WaitPlanFallbackSkipsUpstreamRestrictedAccount|TestLayered_SessionStickyPreservesGrokBinding|TestLayered_SessionStickyRecheckHonorsImageCapability|TestGatewayServiceRecordUsage_AttachesFinalUpstreamRequestSnapshot|TestCalculateQuotaCycleAdvance_ResetsOnlySingleExhaustedWindow|TestAdvanceQuotaCycle_RejectsTwoExhaustedWindowsBeforeUpdate|TestAdminResetQuota_UsesCommittedResetVersionForCacheInvalidation|TestCheckAndResetWindows_UsesCommittedResetVersionForCacheInvalidation)$'
+go test -count=1 -tags unit ./internal/service -run '^(TestSubscriptionCacheInvalidationWorker_(RequiresTombstoneAndPublishBeforeAck|UsesSafetySecondPass|PublishGetsIndependentTimeout)|TestSubscriptionCacheInvalidationFastPath_(WaitsForOuterCommit|NilCacheStillClearsLocalL1|UnknownVersionOnlyClearsLocalL1)|TestAdvanceQuotaCycle_UsesVersionedPostCommitInvalidation)$'
+git add backend/internal/service/subscription_cache_invalidation_outbox_test.go
+$staged = @(git diff --cached --name-only)
+$staged
+if (Compare-Object -ReferenceObject @('backend/internal/service/subscription_cache_invalidation_outbox_test.go') -DifferenceObject $staged) { throw 'outbox unit-tag allowlist mismatch' }
+git.exe commit -m "test: align outbox tests with unit tag"
+```
+
+Expected: default service 聚焦目标均 PASS，unit 命令精确覆盖并 PASS 七个 outbox 测试；提交严格只含该一个 test 文件。
+
+**Step 4: 刷新并稳定 Wire 生成输出**
+
+运行 `make -C backend generate`。只允许诊断已记录的依赖顺序/变量名 `backend/cmd/server/wire_gen.go` diff；禁止修改 `wire.go`、provider 或 module。
+
+```powershell
+make -C backend generate
+$wireDiff = @(git diff --name-only)
+$wireDiff
+if (Compare-Object -ReferenceObject @('backend/cmd/server/wire_gen.go') -DifferenceObject $wireDiff) { throw 'Wire generation changed paths outside wire_gen.go' }
+git diff --check -- backend/cmd/server/wire_gen.go
+git add backend/cmd/server/wire_gen.go
+$staged = @(git diff --cached --name-only)
+$staged
+if (Compare-Object -ReferenceObject @('backend/cmd/server/wire_gen.go') -DifferenceObject $staged) { throw 'Wire output allowlist mismatch' }
+git.exe commit -m "chore: refresh Wire output"
+make -C backend generate
+git.exe diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
+make -C backend generate
+git.exe diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
+```
+
+Expected: Wire commit 严格只含 `backend/cmd/server/wire_gen.go` 且人工确认 diff 仅为已诊断的依赖顺序/变量名生成变更；提交后两轮 generate 均退出 0 且不产生 Ent/Wire diff。
+
+**Step 5: 运行 scheduler、sticky、gateway、审计、Images 和 quota 聚焦测试**
 
 Run from `backend`:
 ```powershell
@@ -352,9 +400,9 @@ Run from repository root:
 pnpm --dir frontend exec vitest run src/utils/__tests__/subscriptionQuota.spec.ts src/views/admin/__tests__/SettingsView.spec.ts src/views/admin/__tests__/UsageView.spec.ts src/components/channels/__tests__/AvailableChannelsTable.spec.ts
 ```
 
-Expected: 每个命名测试 PASS。任何失败先在 ledger 保存 RED，再在首次引入该回归的 release 段写最小复现断言和兼容修复，不能在基线任务中改变产品行为。
+Expected: 每个命名测试 PASS。Task 4 的两项已诊断 baseline gate defect 仅按 Step 3/4 修复；其余失败先在 ledger 保存 RED，再在首次引入该回归的 release 段写最小复现断言和兼容修复，不能在基线任务中改变产品行为。matrix 只有当前直接测试 PASS 才可记为 `protected`，仅完成具体调用链审查才可记为 `manual`；Docker 专属 `gap` 留给 Task 5，任何其它 `gap` 必须在进入 full gate 前有明确状态或 BLOCK。
 
-**Step 4: 执行阶段 0 full gate 与两轮生成检查**
+**Step 6: 重跑阶段 0 full gate 与两轮生成检查**
 
 Run from repository root:
 ```powershell
@@ -367,25 +415,29 @@ git.exe diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
 git.exe diff --check
 git.exe diff --cached --check
 git diff --name-only --diff-filter=U
-git grep -n -I -E '^(<<<<<<<|=======|>>>>>>>)' -- ':!docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md'
+$conflictPattern = '^(<<<<<<< .+|\|\|\|\|\|\|\| .+|=======|>>>>>>> .+)$'
+git grep -n -I -E $conflictPattern -- ':!docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md'
+$conflictExit = $LASTEXITCODE
+if ($conflictExit -eq 0) { throw 'tracked conflict markers found' }
+if ($conflictExit -ne 1) { throw "conflict marker scan failed: $conflictExit" }
 git rev-parse HEAD:backend/migrations/191_subscription_quota_advance_receipts.sql
 git rev-parse HEAD:backend/migrations/192_subscription_cache_invalidation_outbox.sql
 ```
 
-Expected: 两次 generate 均不产生 `backend/ent` 或 `backend/cmd/server/wire_gen.go` diff；两个 whitespace 命令无输出；unmerged 和 conflict marker 命令无输出；最后两个命令精确输出 `c22d47d79cbbaf4bc40524d42ef52e6cc8ac3af6` 和 `502ecec1caf9f76e022c2e83acf3707190539301`。
+Expected: 两次 generate 均不产生 `backend/ent` 或 `backend/cmd/server/wire_gen.go` diff；两个 whitespace 命令无输出；unmerged 命令无输出；conflict marker scan 的 no-match exit `1` 是 PASS，exit `0` 的真实 marker 或其它 grep 错误均 BLOCK；最后两个命令精确输出 `c22d47d79cbbaf4bc40524d42ef52e6cc8ac3af6` 和 `502ecec1caf9f76e022c2e83acf3707190539301`。
 
-**Step 5: 将阶段 0 full gate 结果写入 ledger**
+**Step 7: 追加 repaired stage 0 gate 结果并严格提交 ledger**
 
 Run:
 ```powershell
 git add -f -- docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
 $staged = @(git diff --cached --name-only)
 $staged
-if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'stage 0 local gates allowlist mismatch' }
-git.exe commit -m "docs: record stage 0 local gates"
+if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'repaired stage 0 gates allowlist mismatch' }
+git.exe commit -m "docs: record repaired stage 0 gates"
 ```
 
-Expected: ledger 为每个命令记录退出码和命名失败；不存在未归属的生成物。Images 代码/测试提交保持独立；本提交严格只含 build ledger，reviewer 通过后 controller 单独 check off Task 4/OpenSpec 1.4。
+Expected: ledger 追加每个修复后命令的退出码和命名失败，不改写既有 `docs: record stage 0 local gates` 失败证据提交；不存在未归属的生成物。Images、unit-tag、Wire 与 repaired ledger 四类提交保持分离，本提交严格只含 build ledger；implementer 不勾选 Plan/OpenSpec，reviewer 通过后 controller 单独 check off Task 4/OpenSpec 1.4。
 
 ### Task 5: 执行阶段 0 Docker/Testcontainers 判定
 
@@ -649,12 +701,16 @@ git.exe diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
 git.exe diff --check
 git.exe diff --cached --check
 git diff --name-only --diff-filter=U
-git grep -n -I -E '^(<<<<<<<|=======|>>>>>>>)' -- ':!docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md'
+$conflictPattern = '^(<<<<<<< .+|\|\|\|\|\|\|\| .+|=======|>>>>>>> .+)$'
+git grep -n -I -E $conflictPattern -- ':!docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md'
+$conflictExit = $LASTEXITCODE
+if ($conflictExit -eq 0) { throw 'tracked conflict markers found' }
+if ($conflictExit -ne 1) { throw "conflict marker scan failed: $conflictExit" }
 git rev-parse HEAD:backend/migrations/191_subscription_quota_advance_receipts.sql
 git rev-parse HEAD:backend/migrations/192_subscription_cache_invalidation_outbox.sql
 ```
 
-Expected: 所有命令满足全局约束；VERSION 仍为 `0.1.165.4`；最后两个命令精确输出两个固定 base-ref blob OID。
+Expected: 所有命令满足全局约束；VERSION 仍为 `0.1.165.4`；conflict marker scan 的 no-match exit `1` 是 PASS，exit `0` 的真实 marker 或其它 grep 错误均 BLOCK；最后两个命令精确输出两个固定 base-ref blob OID。
 
 **Step 2: 运行 v0.1.166 Docker 判定与 integration**
 
@@ -891,12 +947,16 @@ git.exe diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
 git.exe diff --check
 git.exe diff --cached --check
 git diff --name-only --diff-filter=U
-git grep -n -I -E '^(<<<<<<<|=======|>>>>>>>)' -- ':!docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md'
+$conflictPattern = '^(<<<<<<< .+|\|\|\|\|\|\|\| .+|=======|>>>>>>> .+)$'
+git grep -n -I -E $conflictPattern -- ':!docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md'
+$conflictExit = $LASTEXITCODE
+if ($conflictExit -eq 0) { throw 'tracked conflict markers found' }
+if ($conflictExit -ne 1) { throw "conflict marker scan failed: $conflictExit" }
 git rev-parse HEAD:backend/migrations/191_subscription_quota_advance_receipts.sql
 git rev-parse HEAD:backend/migrations/192_subscription_cache_invalidation_outbox.sql
 ```
 
-Expected: 所有门禁通过；两个 191 文件和本地 192 文件不因 generate 或 merge 改名；最后两个命令精确输出两个固定 base-ref blob OID。
+Expected: 所有门禁通过；两个 191 文件和本地 192 文件不因 generate 或 merge 改名；conflict marker scan 的 no-match exit `1` 是 PASS，exit `0` 的真实 marker 或其它 grep 错误均 BLOCK；最后两个命令精确输出两个固定 base-ref blob OID。
 
 **Step 2: Docker 可用时验证新库和升级库，逐项匹配 PASS**
 
@@ -1136,12 +1196,16 @@ git.exe diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
 git.exe diff --check
 git.exe diff --cached --check
 git diff --name-only --diff-filter=U
-git grep -n -I -E '^(<<<<<<<|=======|>>>>>>>)' -- ':!docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md'
+$conflictPattern = '^(<<<<<<< .+|\|\|\|\|\|\|\| .+|=======|>>>>>>> .+)$'
+git grep -n -I -E $conflictPattern -- ':!docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md'
+$conflictExit = $LASTEXITCODE
+if ($conflictExit -eq 0) { throw 'tracked conflict markers found' }
+if ($conflictExit -ne 1) { throw "conflict marker scan failed: $conflictExit" }
 git rev-parse HEAD:backend/migrations/191_subscription_quota_advance_receipts.sql
 git rev-parse HEAD:backend/migrations/192_subscription_cache_invalidation_outbox.sql
 ```
 
-Expected: full gate 通过，VERSION 仍为 `0.1.165.4`，无生成 diff、whitespace、unmerged 或 tracked conflict marker；最后两个命令精确输出 `c22d47d79cbbaf4bc40524d42ef52e6cc8ac3af6` 和 `502ecec1caf9f76e022c2e83acf3707190539301`。
+Expected: full gate 通过，VERSION 仍为 `0.1.165.4`，无生成 diff、whitespace 或 unmerged；conflict marker scan 的 no-match exit `1` 是 PASS，exit `0` 的真实 marker 或其它 grep 错误均 BLOCK；最后两个命令精确输出 `c22d47d79cbbaf4bc40524d42ef52e6cc8ac3af6` 和 `502ecec1caf9f76e022c2e83acf3707190539301`。
 
 **Step 2: 运行 v0.1.169 Docker 判定与 integration**
 
@@ -1267,12 +1331,16 @@ git.exe diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
 git.exe diff --check
 git.exe diff --cached --check
 git diff --name-only --diff-filter=U
-git grep -n -I -E '^(<<<<<<<|=======|>>>>>>>)' -- ':!docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md'
+$conflictPattern = '^(<<<<<<< .+|\|\|\|\|\|\|\| .+|=======|>>>>>>> .+)$'
+git grep -n -I -E $conflictPattern -- ':!docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md'
+$conflictExit = $LASTEXITCODE
+if ($conflictExit -eq 0) { throw 'tracked conflict markers found' }
+if ($conflictExit -ne 1) { throw "conflict marker scan failed: $conflictExit" }
 git rev-parse HEAD:backend/migrations/191_subscription_quota_advance_receipts.sql
 git rev-parse HEAD:backend/migrations/192_subscription_cache_invalidation_outbox.sql
 ```
 
-Expected: 后端默认/unit/lint、前端 ESLint/Vitest/typecheck/build 均经 `make test`/已验证的 `VERSION=0.1.169.1` Windows build 命令通过；两轮生成稳定；静态检查无输出；最后两个命令精确输出 `c22d47d79cbbaf4bc40524d42ef52e6cc8ac3af6` 和 `502ecec1caf9f76e022c2e83acf3707190539301`。
+Expected: 后端默认/unit/lint、前端 ESLint/Vitest/typecheck/build 均经 `make test`/已验证的 `VERSION=0.1.169.1` Windows build 命令通过；两轮生成稳定；静态检查无输出；conflict marker scan 的 no-match exit `1` 是 PASS，exit `0` 的真实 marker 或其它 grep 错误均 BLOCK；最后两个命令精确输出 `c22d47d79cbbaf4bc40524d42ef52e6cc8ac3af6` 和 `502ecec1caf9f76e022c2e83acf3707190539301`。
 
 **Step 3: 提交最终自动验证证据**
 
@@ -1448,7 +1516,7 @@ Expected: implementer commit 严格只含 verify report；最终 index 为空，
 | --- | --- |
 | SDD coverage | 18 个 `### Task N` 均有唯一顶层 `- [ ] Task N` checkbox，Plan 中仅此 18 个 checkbox；内部 Step 为非 checkbox 编号。implementer/reviewer 不修改 Plan；仅 controller 在 reviewer 通过后将当前 Task 改为 `[x]`、同步唯一 OpenSpec 项并写入 progress。 |
 | Progress/topology coverage | 通用 live-ID 平台在成功派发后持久 agent identity；本平台不存在“dispatch success 与 completion 之间”的 controller 窗口，因此在原子调用两侧持久 dispatch intent 和 returned result。恢复先查 report、Git 与宿主工具结果，不能确认即 BLOCKED 而不重派；已有 task ID 的 fix resume 保持 Comet thorough round。任何下一次派发和每次 merge clean gate 前最新 checkpoint 均已提交且 worktree clean。progress-only 与三路径 docs-only checkoff commits 均不改变最终 `git log --merges` 恰有三个 upstream merge 节点的判定。 |
-| Spec coverage | OpenSpec 1.1-1.5、2.1-2.3、3.1-3.3、4.1-4.3、5.1-5.4 共 18 项均有一个同编号任务；三段 no-ff/no-commit、merge 前阻塞审查、merge 后行为审查、17 冲突、能力矩阵、Images、quota reset、迁移、Docker 和最终版本均有明确步骤。 |
+| Spec coverage | OpenSpec 1.1-1.5、2.1-2.3、3.1-3.3、4.1-4.3、5.1-5.4 共 18 项均有一个同编号任务；Task 4 将 Images、outbox unit-tag、Wire 与 repaired stage-0 ledger 分离提交，并将 Docker-only gap 交给 Task 5。三段 no-ff/no-commit、merge 前阻塞审查、merge 后行为审查、17 冲突、能力矩阵、quota reset、迁移、Docker 和最终版本均有明确步骤；所有阶段/最终 conflict scan 均识别 diff3 marker，只有 no-match exit `1` 通过。 |
 | Placeholder scan | 本计划没有未填内容、未命名测试或未定义接口占位；所有条件分支给出停止、RED、`unverified` 或 PASS 判定，且真实 HTTP query 与 helper raw 输入的 GHSA 断言明确分离。 |
 | 双基线与类型/名称一致性 | frontmatter `base-ref` 始终是 immutable source base，`$executionBase` 仅为其 planning-only 后代；Task 1 使用当前 change OpenSpec 目录前缀加两个精确文档路径同时验证 source-to-execution tree diff 和全提交触及路径，且 source/execution VERSION 都为 `0.1.165.4`。`applyMigrationsFS`、quota 接口、路径护栏、Gemini URL builder、migration 文件名、两个 source-base blob OID、tag SHA、最终从 source base 开始的 merge range 和 integration 顶级测试名在任务间使用一致。 |
 | 范围边界 | 计划只描述 Comet 已确认的实际隔离位置内的 merge、测试、文档和本地生成；明确排除 push、发布、部署、镜像、服务器、数据库运行态和 Nginx 操作。 |
