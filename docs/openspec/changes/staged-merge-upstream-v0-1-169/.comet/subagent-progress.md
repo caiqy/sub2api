@@ -4,7 +4,7 @@
 - Review mode: `thorough`
 - 当前任务: Task 15 - 一次更新最终版本
 - 映射 OpenSpec: 5.1
-- 阶段: `task-15 / corrected-resume-dispatch-intent`
+- 阶段: `task-15 / implementer-result`
 - Task-10 dispatch token: `task-10-implementer-attempt-1-e46cd9d55`
 - Task-10 role: `implementer`
 - Task-10 model: `high`
@@ -140,6 +140,8 @@
 - Task-15 implementer result: `BLOCKED without edits by controller brief typo: v0.1.166 second parent incorrectly stated as 49836f1f...`
 - Task-15 correction: actual/planned `v0.1.166^{}` and merge second parent is `dc893dd0b8eab41df5be595ae9fcd1aa74a062b8`; brief corrected。
 - Task-15 resume dispatch token: `task-15-resume-8bc475e1`
+- Task-15 implementer result: `DONE; corrected precondition PASS; VERSION 0.1.169.1`
+- Task-15 version commit: `6184c48b2d87e6282c795d40b7bd4544a1fb90cb`
 - Task-9 dispatch token: `task-9-implementer-attempt-1-97d44dd20`
 - Task-9 role: `implementer`
 - Task-9 model: `high`
@@ -496,4 +498,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - Task-4审查-修复轮次: `2/2 PASS`
-- 状态: Task15即将按corrected precondition恢复；Task16不得运行。
+- 状态: Task15 implementer已完成；待fresh reviewer，Task16不得运行。
