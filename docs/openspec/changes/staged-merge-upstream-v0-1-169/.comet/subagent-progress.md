@@ -2,9 +2,9 @@
 
 - Plan: `docs/superpowers/plans/2026-08-02-staged-merge-upstream-v0-1-169.md`
 - Review mode: `thorough`
-- 当前任务: Task 9 - 在未提交状态合入 v0.1.168 并完成阻塞审查
-- 映射 OpenSpec: 3.1
-- 阶段: `task-9 / fix-round-2-scoped-re-review-result`
+- 当前任务: Task 10 - 对 v0.1.168 审查交互并新增 migration 升级回归测试
+- 映射 OpenSpec: 3.2
+- 阶段: `task-9 / complete; task-10 / pending`
 - Task-9 dispatch token: `task-9-implementer-attempt-1-97d44dd20`
 - Task-9 role: `implementer`
 - Task-9 model: `high`
@@ -32,6 +32,8 @@
 - Task-9 fix-2 re-review task ID: `ses_03de8e0f1ffenEcw82NwPh9K7Q`
 - Task-9 fix-2 re-review result: `ALL_ADDRESSED; Spec compliance PASS; Task quality APPROVED`
 - Task-9 review-fix rounds: `2/5 complete`
+- Task-9 controller verification: current lineage=`de4264ba5`→`c028e7e5c`；old merge/ledger非祖先；fresh `go mod tidy -> generate -> generate`最终无diff；VERSION/OID/marker/scope/status通过。
+- Task-9 safety cleanup: reviewer通过后已按用户授权删除两个local safety branches。
 - Task-8 dispatch token: `task-8-implementer-attempt-1-217946c5d`
 - Task-8 role: `implementer`
 - Task-8 model: `standard`
@@ -359,4 +361,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - Task-4审查-修复轮次: `2/2 PASS`
-- 状态: Task9 review clean；待controller fresh tool/topology核验、checkoff及safety清理，Task10不得运行。
+- 状态: Task9/OpenSpec 3.1已checkoff；v0.1.168 merge阶段就绪，Task10待执行。

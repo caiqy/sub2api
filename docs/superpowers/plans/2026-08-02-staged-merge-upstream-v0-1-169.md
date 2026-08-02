@@ -1049,7 +1049,7 @@ Expected: implementer 提交严格只含 ledger；最终 index 为空，status �
 
 ### Task 9: 在未提交状态合入 v0.1.168 并完成阻塞审查
 
-- [ ] Task 9: 在未提交状态合入 v0.1.168 并完成阻塞审查
+- [x] Task 9: 在未提交状态合入 v0.1.168 并完成阻塞审查
 
 **映射 OpenSpec:** 3.1
 
