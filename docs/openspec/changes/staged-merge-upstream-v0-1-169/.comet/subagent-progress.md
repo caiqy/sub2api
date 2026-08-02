@@ -4,7 +4,7 @@
 - Review mode: `thorough`
 - 当前任务: Task 10 - 对 v0.1.168 审查交互并新增 migration 升级回归测试
 - 映射 OpenSpec: 3.2
-- 阶段: `task-10 / fix-round-2-result`
+- 阶段: `task-10 / fix-round-2-scoped-re-review-dispatch-intent`
 - Task-10 dispatch token: `task-10-implementer-attempt-1-e46cd9d55`
 - Task-10 role: `implementer`
 - Task-10 model: `high`
@@ -46,7 +46,6 @@
 - Task-10 fix-1 re-review result: `OPEN_FINDINGS; Spec compliance FAIL; Task quality CHANGES_REQUIRED`
 - Task-10 fix-1 open Important: 无endpoint fail-closed错误归因于`BlockingActivationDegraded`；实际由`PromptService -> GuardEvaluator.Evaluate`在EnabledEndpoints为空时阻断。
 - Task-10 fix-1 minor deferred: scratch report backend-mode/settings计数5应为6。
-- Task-10 review-fix rounds: `1/5 changes_required; round 2 pending`
 - Task-10 fix-2 dispatch token: `task-10-fix-round-2-edce4acad`
 - Task-10 fix-2 role: `fix-agent (resume implementer; docs-only)`
 - Task-10 fix-2 model: `standard`
@@ -55,6 +54,13 @@
 - Task-10 fix-2 result: `DONE`
 - Task-10 fix-2 ledger commit: `af2b92748` (`docs: clarify v0.1.168 prompt evidence`)
 - Task-10 fix-2 verification: ledger-only scope、diff/show checks clean；未运行测试；status仅selection。
+- Task-10 fix-2 re-review token: `task-10-fix-round-2-re-review-af2b92748`
+- Task-10 fix-2 re-review role: `reviewer (resume)`
+- Task-10 fix-2 re-review model: `standard`
+- Task-10 fix-2 re-review base HEAD: `af2b92748`
+- Task-10 fix-2 re-review package: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/review-c0edbc5e9..af2b92748.diff`
+- Task-10 fix-2 re-review task ID: `pending resumed functions.task return`
+- Task-10 review-fix rounds: `2/5 reviewing`
 - Task-9 dispatch token: `task-9-implementer-attempt-1-97d44dd20`
 - Task-9 role: `implementer`
 - Task-9 model: `high`
@@ -411,4 +417,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - Task-4审查-修复轮次: `2/2 PASS`
-- 状态: Task10 fix round 2已提交；待scoped re-review，Task11不得运行。
+- 状态: Task10 fix round 2 scoped re-review即将派发，Task11不得运行。
