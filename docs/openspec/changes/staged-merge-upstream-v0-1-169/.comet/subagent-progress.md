@@ -4,7 +4,7 @@
 - Review mode: `thorough`
 - 当前任务: Task 4 - 验证阶段 0 的本地保护测试与生成稳定性
 - 映射 OpenSpec: 1.4
-- 阶段: `implementation-fix-2 / result + review-1 / dispatch-intent`
+- 阶段: `review-1 / result + repair-planning`
 - Fix-2 dispatch token: `task-4-fix-attempt-2-ddb37f772`
 - Fix-2 role: `fix-agent`
 - Fix-2 model: `high`
@@ -16,7 +16,11 @@
 - Review-1 role: `reviewer`
 - Review-1 model: `high`
 - Review-1 base HEAD: `31f239703220b6a0765834d37fbc5981dc8c25fd`
-- Review-1 task ID: `pending atomic functions.task return`
+- Review-1 task ID: `ses_03f5bdc2bffeYb902r9rlYdzCY`
+- Review-1 result: `NEEDS_CHANGES`
+- Review-1 P1: 三条Images计数测试先直接调用helper、再发独立handler请求，不能侦测同一请求中的提前或重复payload求值。
+- Review-1 P2: repaired ledger缺少逐命令表；初始row13归Task5的历史句需由追加证据明确supersede为Task13。
+- Controller evidence: 12个Temp generate日志已直接读取；唯一失败为generated Ent path的`user-mapped section open`加允许wrapper，恢复后重试及其余四次均exit 0/no diff。
 - Diagnostic-2 dispatch token: `task-4-diagnostic-attempt-2-be284ffd7`
 - Diagnostic-2 role: `diagnostic-agent`
 - Diagnostic-2 model: `high`
@@ -64,5 +68,5 @@
 - Risk signals: service test tag 配置不匹配；`wire_gen.go` 生成漂移；conflict grep 合法字符串假阳性。
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
-- 审查-修复轮次: `1/2 dispatching`
-- 状态: fix-2报告DONE且tracked worktree clean；即将派发fresh reviewer核验全部Task4提交、命令证据、run ID偏差与lint RED判定，返回前不得重复派发或checkoff。
+- 审查-修复轮次: `1/2 needs-fix`
+- 状态: 首轮review未通过；controller正在将同请求Images provider观测与ledger补证加入Plan/brief，完成前不得派修复或checkoff。
