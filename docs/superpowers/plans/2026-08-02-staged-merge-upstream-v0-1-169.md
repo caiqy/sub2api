@@ -690,7 +690,7 @@ Expected: P2 commit 严格只含 ledger，结束时 tracked worktree clean，sta
 
 ### Task 5: 执行阶段 0 row 10 Docker/Testcontainers 判定
 
-- [ ] Task 5: 执行阶段 0 row 10 Docker/Testcontainers 判定
+- [x] Task 5: 执行阶段 0 row 10 Docker/Testcontainers 判定
 
 **映射 OpenSpec:** 1.5
 
