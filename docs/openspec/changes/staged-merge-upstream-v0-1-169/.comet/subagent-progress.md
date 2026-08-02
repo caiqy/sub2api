@@ -4,7 +4,12 @@
 - Review mode: `thorough`
 - 当前任务: Task 4 - 验证阶段 0 的本地保护测试与生成稳定性
 - 映射 OpenSpec: 1.4
-- 阶段: `review-1 / result + repair-planning`
+- 阶段: `review-1 / fix-dispatch-intent`
+- Review-fix dispatch token: `task-4-review-fix-attempt-1-902646803`
+- Review-fix role: `fix-agent`
+- Review-fix model: `high`
+- Review-fix base HEAD: `902646803918e27cc3d9e04bff5dcbe7b722efd8`
+- Review-fix task ID: `pending atomic functions.task return`
 - Fix-2 dispatch token: `task-4-fix-attempt-2-ddb37f772`
 - Fix-2 role: `fix-agent`
 - Fix-2 model: `high`
@@ -68,5 +73,5 @@
 - Risk signals: service test tag 配置不匹配；`wire_gen.go` 生成漂移；conflict grep 合法字符串假阳性。
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
-- 审查-修复轮次: `1/2 needs-fix`
-- 状态: 首轮review未通过；controller正在将同请求Images provider观测与ledger补证加入Plan/brief，完成前不得派修复或checkoff。
+- 审查-修复轮次: `1/2 fixing`
+- 状态: Step9 Plan/brief已终审ready；即将派发fresh review-fix agent，返回前不得重复派发或checkoff。
