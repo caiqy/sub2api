@@ -4,14 +4,26 @@
 - Review mode: `thorough`
 - 当前任务: Task 9 - 在未提交状态合入 v0.1.168 并完成阻塞审查
 - 映射 OpenSpec: 3.1
-- 阶段: `task-9 / implementer-dispatch-intent`
+- 阶段: `task-9 / fix-round-2-ledger-rebuild-result`
 - Task-9 dispatch token: `task-9-implementer-attempt-1-97d44dd20`
 - Task-9 role: `implementer`
 - Task-9 model: `high`
 - Task-9 base HEAD: `97d44dd20d71c7cf9fc3d018ac9fb64f66e02f67`
 - Task-9 brief: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-9-brief.md`
 - Task-9 report: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-9-report.md`
-- Task-9 task ID: `pending atomic functions.task return`
+- Task-9 task ID: `ses_03e0d1905ffePuOhTHE793Eov1`
+- Task-9 reviewer task ID: `ses_03de8e0f1ffenEcw82NwPh9K7Q`
+- Task-9 initial attempt: `c44f0288b`/`084ac7b34`；因Wire tool依赖不tidy-stable被review拒绝，旧tip保留于`safety/task9-before-wire-tool-rebuild-20260802`=`4e2071c0f...`。
+- Task-9 tool diagnostic: `ses_03ddf9a54ffemHFCYVA6b120my`证明Go tool directive使`tidy -> generate -> generate`稳定且最终仅go.mod变化。
+- Task-9 user authorization: 已明确选择重建未推送Task9本地历史。
+- Task-9 corrected merge commit: `de4264ba5d15ca1024da51846f43bf48b02a9882`；parents `cd78fa1d5...` + `99c8e4bf7...`；相对旧reviewed tree仅go.mod tool directive。
+- Task-9 fix-1 ledger: `7cd90bf7f...`（已被round2 ledger重建取代）；re-review只发现generate顺序措辞不准确。
+- Task-9 fix-2 result: `DONE`（docs-only ledger rebuild）
+- Task-9 current ledger commit: `c028e7e5ca6315c597133ce6b835a6ddd77bcec2`；直接父为unchanged merge `de4264ba5`，严格one-file scope。
+- Task-9 fix-2 evidence: 明确initial generate exit1、精确restore、其后两次成功retry `0,0`；Claude OAuth分类保持`上游修复`。
+- Task-9 safety branches: wire rebuild=`4e2071c0f...`；ledger rebuild=`7560de2c...`；review通过前均保留。
+- Task-9 report contract: `SATISFIED`；顶层SHA和supersession状态已更新。
+- Task-9 review-fix rounds: `2/5 pending scoped re-review`
 - Task-8 dispatch token: `task-8-implementer-attempt-1-217946c5d`
 - Task-8 role: `implementer`
 - Task-8 model: `standard`
@@ -339,4 +351,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - Task-4审查-修复轮次: `2/2 PASS`
-- 状态: Task8已完成；Task9 implementer即将派发，Task10不得运行。
+- 状态: Task9 merge保持de4264ba5、ledger已更正为c028e7e5c；待round2 scoped re-review，Task10不得运行。
