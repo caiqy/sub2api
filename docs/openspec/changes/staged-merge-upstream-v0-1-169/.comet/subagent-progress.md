@@ -4,12 +4,17 @@
 - Review mode: `thorough`
 - 当前任务: Task 4 - 验证阶段 0 的本地保护测试与生成稳定性
 - 映射 OpenSpec: 1.4
-- 阶段: `implementation-fix / dispatch-intent`
+- 阶段: `implementation-fix / result`
 - Fix dispatch token: `task-4-fix-attempt-1-6456c3858`
 - Fix role: `fix-agent`
 - Fix model: `high`
 - Fix base HEAD: `6456c3858b5053a5691757434f0070a39c8d30bf`
-- Fix task ID: `pending atomic functions.task return`
+- Fix task ID: `ses_03fa00f9effe30X43JLlex0GRM`
+- Fix result: `BLOCKED`
+- Fix commits: `663955ae8`; `f01473818`（既有 Images `746c0ccde` 保留）。
+- Fix verification: default/unit 聚焦、Wire 提交后两轮生成、聚焦测试、build、完整性检查与 OID 通过；`make test` 在 `user_subscription_repo.go:578` 被 `errcheck` 阻断。
+- New risk: full-gate Ent generate 两轮受 Windows `user-mapped section open` 阻断；agent 已恢复本轮部分生成物。
+- Remaining concern: matrix 仍有 7 个 `gap`，含非 Docker pricing/count_tokens/release fallback；未提交 repaired-gates ledger。
 - Diagnostic dispatch token: `task-4-diagnostic-attempt-1-a0d366e6c`
 - Diagnostic role: `diagnostic-agent`
 - Diagnostic model: `high`
@@ -38,4 +43,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - 审查-修复轮次: `0/2`
-- 状态: Plan/brief 已最小扩展；即将派发 fresh fix agent，返回前不得重复派发，Task 4 不得 review/checkoff。
+- 状态: Task 4 `BLOCKED`；待核验 report/worktree，并对新 errcheck、Windows generate 和非Docker gap 做 systematic root-cause investigation。
