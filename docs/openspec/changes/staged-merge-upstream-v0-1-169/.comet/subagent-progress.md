@@ -2,9 +2,9 @@
 
 - Plan: `docs/superpowers/plans/2026-08-02-staged-merge-upstream-v0-1-169.md`
 - Review mode: `thorough`
-- 当前任务: Task 6 - 在未提交状态合入 v0.1.166 并完成阻塞审查
-- 映射 OpenSpec: 2.1
-- 阶段: `task-6 / fix-round-1-result + scoped-re-review-dispatch-intent`
+- 当前任务: Task 7 - 对 v0.1.166 运行 merge 后行为审查并修复 RED
+- 映射 OpenSpec: 2.2
+- 阶段: `task-6 / complete + task-7 / pending`
 - Task-6 dispatch token: `task-6-implementer-attempt-1-3a7bf096e`
 - Task-6 role: `implementer`
 - Task-6 model: `high`
@@ -38,8 +38,10 @@
 - Task-6 re-review model: `standard`
 - Task-6 re-review base HEAD: `ca670aa7f0d72b6b0548a084635b0601200e0bfc`
 - Task-6 re-review package: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/review-afd5c0acf..ca670aa7f.diff`
-- Task-6 re-review task ID: `pending atomic functions.task return`
-- Task-6 review-fix rounds: `1/5 reviewing`
+- Task-6 re-review task ID: `ses_03efcdf45ffeS1kUg6VUavAVM0`
+- Task-6 re-review result: `ALL_ADDRESSED; Spec compliance PASS; Task quality APPROVED`
+- Task-6 review-fix rounds: `1/5 (ALL_ADDRESSED)`
+- Task-6 controller verification: server packages compile；user image-history route test与relay final-model test通过；merge second parent精确`dc893dd0...`；VERSION `0.1.165.4`；static/marker/worktree gate clean。
 - Task-5 dispatch token: `task-5-implementer-attempt-1-f1e9836a3`
 - Task-5 role: `implementer`
 - Task-5 model: `standard`
@@ -139,4 +141,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - Task-4审查-修复轮次: `2/2 PASS`
-- 状态: fix round 1已提交；即将派发scoped re-review逐项裁决原findings与fix diff，返回前不得重复派发或checkoff。
+- 状态: Task6与OpenSpec 2.1已由controller勾选；Task7完整v0.1.166行为审查尚未派发。

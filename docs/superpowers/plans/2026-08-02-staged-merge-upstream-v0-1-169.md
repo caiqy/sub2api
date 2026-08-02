@@ -755,7 +755,7 @@ Expected: implementer 提交严格只含 row 10 Docker/ledger evidence；最终 
 
 ### Task 6: 在未提交状态合入 v0.1.166 并完成阻塞审查
 
-- [ ] Task 6: 在未提交状态合入 v0.1.166 并完成阻塞审查
+- [x] Task 6: 在未提交状态合入 v0.1.166 并完成阻塞审查
 
 **映射 OpenSpec:** 2.1
 
