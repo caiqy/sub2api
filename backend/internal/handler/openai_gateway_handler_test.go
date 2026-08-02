@@ -2289,17 +2289,25 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 				}
 			}
 
-			response := fmt.Sprintf(
+			responseID := fmt.Sprintf("resp_usage_e2e_%d", turn)
+			created := fmt.Sprintf(
+				`{"type":"response.created","response":{"id":%q,"model":%q}}`,
+				responseID,
+				gjson.GetBytes(payload, "model").String(),
+			)
+			completed := fmt.Sprintf(
 				`{"type":"response.completed","response":{"id":"resp_usage_e2e_%d","model":%q,"usage":{"input_tokens":2,"output_tokens":1}}}`,
 				turn,
 				gjson.GetBytes(payload, "model").String(),
 			)
-			writeCtx, cancelWrite := context.WithTimeout(r.Context(), 3*time.Second)
-			writeErr := conn.Write(writeCtx, coderws.MessageText, []byte(response))
-			cancelWrite()
-			if writeErr != nil {
-				upstreamErrCh <- writeErr
-				return
+			for _, response := range []string{created, completed} {
+				writeCtx, cancelWrite := context.WithTimeout(r.Context(), 3*time.Second)
+				writeErr := conn.Write(writeCtx, coderws.MessageText, []byte(response))
+				cancelWrite()
+				if writeErr != nil {
+					upstreamErrCh <- writeErr
+					return
+				}
 			}
 		}
 		upstreamErrCh <- nil
@@ -2438,12 +2446,17 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 
 	clientEvents := make([][]byte, 0, turnCount)
 	readCompleted := func() {
-		readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
-		_, event, readErr := clientConn.Read(readCtx)
-		cancelRead()
-		require.NoError(t, readErr)
-		require.Equal(t, "response.completed", gjson.GetBytes(event, "type").String())
-		clientEvents = append(clientEvents, append([]byte(nil), event...))
+		for {
+			readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
+			_, event, readErr := clientConn.Read(readCtx)
+			cancelRead()
+			require.NoError(t, readErr)
+			if gjson.GetBytes(event, "type").String() != "response.completed" {
+				continue
+			}
+			clientEvents = append(clientEvents, append([]byte(nil), event...))
+			return
+		}
 	}
 	readCompleted()
 	if turnCount == 2 {

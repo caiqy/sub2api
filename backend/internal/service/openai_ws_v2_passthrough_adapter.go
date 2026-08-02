@@ -711,6 +711,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	// passed through, defeating that policy on every frame after the first.
 	capturedSessionModel := openAIWSPassthroughPolicyModelForFrame(account, firstClientMessage)
 	outboundSessionModel := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "model").String())
+	sessionModelUpdated := false
+	preserveChannelMappedFirstModel := false
 	initialRequestModel := ""
 	if hooks != nil {
 		initialRequestModel = strings.TrimSpace(hooks.InitialRequestModel)
@@ -725,9 +727,15 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		}
 		if mappedModel = strings.TrimSpace(mappedModel); mappedModel != "" {
 			firstClientMessage = s.ReplaceModelInBody(firstClientMessage, mappedModel)
+			if originalModel, matched := account.ResolveMappedModel(initialRequestModel); matched && originalModel == initialRequestModel {
+				capturedSessionModel = mappedModel
+				preserveChannelMappedFirstModel = true
+			}
 		}
 	}
-	capturedSessionModel = openAIWSPassthroughPolicyModelForFrame(account, firstClientMessage)
+	if !preserveChannelMappedFirstModel {
+		capturedSessionModel = openAIWSPassthroughPolicyModelForFrame(account, firstClientMessage)
+	}
 	if capturedSessionModel != "" && capturedSessionModel != strings.TrimSpace(gjson.GetBytes(firstClientMessage, "model").String()) {
 		firstClientMessage = s.ReplaceModelInBody(firstClientMessage, capturedSessionModel)
 	}
@@ -983,7 +991,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					if rewrittenModel = strings.TrimSpace(rewrittenModel); rewrittenModel != "" {
 						policyModel = rewrittenModel
 					}
-					if hooks.MapRequestModel != nil {
+					if hooks.MapRequestModel != nil && (!sessionModelUpdated || strings.TrimSpace(gjson.GetBytes(payload, "model").String()) != "") {
 						upstreamModel, err := hooks.MapRequestModel(turnNo, policyModel)
 						if err != nil {
 							return payload, nil, err
@@ -1012,6 +1020,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			}
 			if updated := strings.TrimSpace(openAIWSPassthroughRequestModelFromSessionFrame(payload)); updated != "" {
 				outboundSessionModel = updated
+				sessionModelUpdated = true
 			}
 			usageMeta.updateSessionRequestModel(payload)
 			if requestModelForThisFrame == "" {
@@ -1026,7 +1035,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			if model == "" {
 				model = capturedSessionModel
 			}
-			if isResponseCreate && model != "" && model != strings.TrimSpace(gjson.GetBytes(payload, "model").String()) {
+			if isResponseCreate && model != "" && (!sessionModelUpdated || strings.TrimSpace(gjson.GetBytes(payload, "model").String()) != "") && model != strings.TrimSpace(gjson.GetBytes(payload, "model").String()) {
 				payload = s.ReplaceModelInBody(payload, model)
 			}
 			out, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, model, payload)
@@ -1098,6 +1107,15 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			msgType, payload, readErr := conn.ReadFrame(readCtx)
 			if readErr != nil {
 				return msgType, payload, readErr
+			}
+			if msgType == coderws.MessageText {
+				if updated := openAIWSPassthroughPolicyModelFromSessionFrame(account, payload); updated != "" {
+					capturedSessionModel = updated
+				}
+				if updated := strings.TrimSpace(openAIWSPassthroughRequestModelFromSessionFrame(payload)); updated != "" {
+					outboundSessionModel = updated
+					sessionModelUpdated = true
+				}
 			}
 			if msgType == coderws.MessageText && strings.TrimSpace(gjson.GetBytes(payload, "type").String()) == "response.create" {
 				return msgType, payload, nil

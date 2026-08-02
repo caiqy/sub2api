@@ -382,6 +382,8 @@ func TestUsageLogRepositoryListWithFiltersRequestID(t *testing.T) {
 
 	filters := usagestats.UsageLogFilters{RequestID: " req-0123 "}
 
+	mock.ExpectQuery("SELECT to_regclass\\('public\\.usage_log_details'\\) IS NOT NULL").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	mock.ExpectQuery("SELECT .* FROM usage_logs WHERE request_id = \\$1 ORDER BY id DESC LIMIT \\$2 OFFSET \\$3").
 		WithArgs("req-0123", 21, 0).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))

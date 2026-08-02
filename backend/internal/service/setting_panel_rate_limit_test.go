@@ -169,6 +169,9 @@ func TestGetPanelRateLimitSettingsCachedAvoidsRepeatedDBReads(t *testing.T) {
 		SettingKeyPanelRateLimitSettings: `{"enabled":true,"user_rpm":100,"heavy_rpm":20,"exempt_admin":true,"public_ip_rpm":50}`,
 	}}
 	svc := newPanelRateLimitTestService(repo)
+	repo.mu.Lock()
+	baselineCalls := repo.getValueCalls
+	repo.mu.Unlock()
 
 	for i := 0; i < 5; i++ {
 		settings := svc.GetPanelRateLimitSettingsCached(context.Background())
@@ -178,5 +181,5 @@ func TestGetPanelRateLimitSettingsCachedAvoidsRepeatedDBReads(t *testing.T) {
 	repo.mu.Lock()
 	calls := repo.getValueCalls
 	repo.mu.Unlock()
-	require.Equal(t, 1, calls, "TTL 内应只读一次 DB")
+	require.Equal(t, 1, calls-baselineCalls, "TTL 内应只读一次 DB")
 }
