@@ -2,28 +2,22 @@
 
 - Plan: `docs/superpowers/plans/2026-08-02-staged-merge-upstream-v0-1-169.md`
 - Review mode: `thorough`
-- 当前任务: Task 1 - 验证 Comet 已绑定的 source/execution 双基线隔离位置
-- 映射 OpenSpec: 1.1
-- 阶段: `done / checkoff`
-- Dispatch token: `task-1-reviewer-attempt-1-49466c2fd`
-- Role: `reviewer`
+- 当前任务: Task 2 - 重新获取 refs 并固定 tag 范围
+- 映射 OpenSpec: 1.2
+- 阶段: `implementing / dispatch-intent`
+- Dispatch token: `task-2-implementer-attempt-1-fa62cebf6`
+- Role: `implementer`
 - Attempt: `1`
 - Model: `standard`
-- Base HEAD: `10ee678a49c389958315bfdb1466796dc715f2e5`
-- Brief: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-1-brief.md`
-- Report: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-1-report.md`
-- Review package: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/review-10ee678a4..0cfb15843.diff`
-- Implementer task ID: `ses_03fefc619ffeflenedeO5s94TG`
-- Reviewer task ID: `ses_03feb6a72ffe3mZm7KI0mj2NtQ`
-- Result: implementer `DONE`; reviewer `PASS`
-- Implementation commit: `0cfb1584381ca719525d44d5248f8749f11e0b36`
-- Verification summary: 提交仅含 build ledger，暂存区为空，工作区仅 `?? .comet/current-change.json`。
-- Risk signals: 无
-- Concerns: 无
-- Review verdict: `Spec ✅`; `Quality APPROVED`
-- Review findings: Critical 0，Important 0，Minor 1（report 提及 `git diff --check HEAD^ HEAD`，但未在命令块展示；非 brief 必需门禁，不阻塞）。
-- Cannot verify from diff: Comet 绑定待 controller 核对；其余实时命令采用 implementer report 证据；无外部操作由 controller 工具记录核对。
-- Controller resolution: `isolation=branch`；`bound_branch=feature/20260802/staged-merge-upstream-v0-1-169` 与当前分支一致；`comet state check ... build` 全部 PASS。其余实时门禁采用可重跑 implementer report，controller 本轮工具记录无 push/tag/release/deploy/服务器操作。
-- TDD: RED/GREEN `N/A`（证据型 docs-only 任务）；report 已记录不伪造失败测试及全部门禁结果。
+- Base HEAD: `fa62cebf61c6c041eac58b574b629b6c5c9c5416`
+- Brief: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-2-brief.md`
+- Report: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-2-report.md`
+- Task ID: `pending atomic functions.task return`
+- Result: `pending`
+- Implementation commit: `pending`
+- Verification summary: `pending`
+- Risk signals: `pending`
+- Concerns: `pending`
+- TDD: `tdd`; implementer 必须加载 Skill。该任务无生产代码修改，不伪造 RED；报告必须记录 `N/A` 原因和全部 refs/tag 门禁结果。
 - 审查-修复轮次: `0/2`
-- 状态: Task 1 review clean；顶层 Plan Task 1 与 OpenSpec 1.1 已由 controller 勾选，待提交本三路径 checkoff。
+- 状态: 即将调用原子 `functions.task`；返回前不得重复派发。
