@@ -4,7 +4,7 @@
 - Review mode: `thorough`
 - 当前任务: Task 4 - 验证阶段 0 的本地保护测试与生成稳定性
 - 映射 OpenSpec: 1.4
-- 阶段: `implementing / dispatch-intent`
+- 阶段: `implementer-result`
 - Dispatch token: `task-4-implementer-attempt-1-1c6e5b405`
 - Role: `implementer`
 - Attempt: `1`
@@ -12,14 +12,14 @@
 - Base HEAD: `1c6e5b4050540b04b8df2976e8cb25e8d2be5eec`
 - Brief: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-4-brief.md`
 - Report: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-4-report.md`
-- Task ID: `pending atomic functions.task return`
-- Result: `pending`
-- Implementation commits: `pending`
-- RED evidence: `pending`
-- GREEN evidence: `pending`
-- Verification summary: `pending`
-- Risk signals: `pending`
-- Concerns: `pending`
+- Task ID: `ses_03fc2f323ffeUFwMzt4GFv0QrK`
+- Result: `DONE_WITH_CONCERNS`
+- Implementation commits: `746c0ccdef0b4536adc9867b0cfc89357b1b9787`; `8d564ea9e`
+- RED evidence: 见 report；Images 新保护测试直接 PASS 时不得伪造 RED。
+- GREEN evidence: Images/routing/frontend 聚焦测试与 `VERSION=0.1.165.4` build 通过。
+- Verification summary: `make test` 受 `unit` build-tag helper 缺失阻断；Wire 两轮 generate 稳定产生 diff。
+- Risk signals: service test tag 配置不匹配；`wire_gen.go` 生成漂移；conflict grep 合法字符串假阳性。
+- Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - 审查-修复轮次: `0/2`
-- 状态: 即将调用原子 `functions.task`；返回前不得重复派发。
+- 状态: implementer 已返回；Task 4 不得 checkoff，待核验 report/commit/worktree 并分类 full-gate 与 generate 阻塞。
