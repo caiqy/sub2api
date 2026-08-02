@@ -79,6 +79,24 @@ func (openAIImagesModerationHashCache) HasFlaggedInputHash(context.Context, stri
 	return false, nil
 }
 
+type blockingImagesPromptEngine struct {
+	started     chan struct{}
+	release     <-chan struct{}
+	startedOnce sync.Once
+}
+
+func (*blockingImagesPromptEngine) EffectiveMode() securityaudit.Mode {
+	return securityaudit.ModeBlocking
+}
+func (*blockingImagesPromptEngine) Enqueue(context.Context, securityaudit.Request) error {
+	return nil
+}
+func (e *blockingImagesPromptEngine) Evaluate(context.Context, securityaudit.Request) (*securityaudit.PromptDecision, error) {
+	e.startedOnce.Do(func() { close(e.started) })
+	<-e.release
+	return &securityaudit.PromptDecision{Kind: securityaudit.DecisionAllow, AllowNextStage: true}, nil
+}
+
 type openAIImagesSpoolSwitchRepo struct {
 	*openAIRetryAccountRepoStub
 	onList func()
@@ -772,38 +790,43 @@ func TestOpenAIImages_SecurityAuditUsesFrozenPayloadBeforeRelease(t *testing.T) 
 func TestOpenAIImages_DisabledSecurityAuditDoesNotFreezePayload(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	var providerCalls atomic.Int64
-	payloadProvider := func() []byte {
-		providerCalls.Add(1)
-		return []byte(`{"prompt":"` + strings.Repeat("x", 1<<20) + `"}`)
-	}
+	var received atomic.Pointer[service.OpenAIImagesRequest]
 	group := &service.Group{ID: 960, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
 	account := &service.Account{ID: 961, Name: "api-key", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test"}}
 	upstream := &openAIImagesHandlerHTTPUpstream{resp: &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"created":1,"data":[{"b64_json":"aGVsbG8="}]}`))}}
 	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
 	env.handler.securityAuditCoordinator = securityaudit.NewCoordinator(nil, nil)
-
-	auditRecorder := httptest.NewRecorder()
-	auditContext, _ := gin.CreateTestContext(auditRecorder)
-	auditContext.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
-	decision := env.handler.checkSecurityAuditLazy(auditContext, nil, &service.APIKey{ID: 962, UserID: 963, GroupID: &group.ID, Group: group}, middleware2.AuthSubject{UserID: 963}, service.ContentModerationProtocolOpenAIImages, "gpt-image-2", payloadProvider)
-
-	require.NotNil(t, decision)
-	require.True(t, decision.AllowNextStage)
-	require.Zero(t, providerCalls.Load(), "disabled audits must not freeze the payload")
+	env.handler.imagesModerationBody = func(parsed *service.OpenAIImagesRequest) []byte {
+		received.Store(parsed)
+		providerCalls.Add(1)
+		return parsed.ModerationBody()
+	}
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"gpt-image-2","prompt":"continue"}`))
 	req.Header.Set("Content-Type", "application/json")
-	env.router("/v1/images/generations", env.handler.Images).ServeHTTP(rec, req)
+	done := make(chan struct{})
+	go func() {
+		env.router("/v1/images/generations", env.handler.Images).ServeHTTP(rec, req)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for Images request")
+	}
 
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.Equal(t, []int64{account.ID}, upstream.calls())
+	require.Zero(t, providerCalls.Load(), "disabled audits must not freeze the payload")
+	require.Nil(t, received.Load())
 }
 
 func TestOpenAIImages_LegacyModerationDefersPayloadUntilRuntimeScope(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	var providerCalls atomic.Int64
 	var moderationCalls atomic.Int64
+	var received atomic.Pointer[service.OpenAIImagesRequest]
 	moderationAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		moderationCalls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
@@ -825,28 +848,31 @@ func TestOpenAIImages_LegacyModerationDefersPayloadUntilRuntimeScope(t *testing.
 	upstream := &openAIImagesHandlerHTTPUpstream{resp: &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"created":1,"data":[{"b64_json":"aGVsbG8="}]}`))}}
 	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
 	env.handler.contentModerationService = moderation
-	payloadProvider := func() []byte {
+	env.handler.securityAuditCoordinator = securityaudit.NewCoordinator(securityaudit.NewLegacyModerationAdapter(moderation), nil)
+	env.handler.imagesModerationBody = func(parsed *service.OpenAIImagesRequest) []byte {
+		received.Store(parsed)
 		providerCalls.Add(1)
-		return []byte(`{"prompt":"` + strings.Repeat("x", 1<<20) + `"}`)
+		return parsed.ModerationBody()
 	}
-
-	auditRecorder := httptest.NewRecorder()
-	auditContext, _ := gin.CreateTestContext(auditRecorder)
-	auditContext.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
-	decision := env.handler.checkSecurityAuditLazy(auditContext, nil, &service.APIKey{ID: 966, UserID: 968, GroupID: &group.ID, Group: group}, middleware2.AuthSubject{UserID: 968}, service.ContentModerationProtocolOpenAIImages, "gpt-image-2", payloadProvider)
-
-	require.NotNil(t, decision)
-	require.True(t, decision.AllowNextStage)
-	require.Zero(t, providerCalls.Load(), "out-of-scope legacy moderation must not freeze the payload")
-	require.Zero(t, moderationCalls.Load(), "out-of-scope legacy moderation must not call its API")
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"gpt-image-2","prompt":"continue"}`))
 	req.Header.Set("Content-Type", "application/json")
-	env.router("/v1/images/generations", env.handler.Images).ServeHTTP(rec, req)
+	done := make(chan struct{})
+	go func() {
+		env.router("/v1/images/generations", env.handler.Images).ServeHTTP(rec, req)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for Images request")
+	}
 
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.Equal(t, []int64{account.ID}, upstream.calls())
+	require.Zero(t, providerCalls.Load(), "out-of-scope legacy moderation must not freeze the payload")
+	require.Nil(t, received.Load())
 	require.Zero(t, moderationCalls.Load(), "out-of-scope legacy moderation must remain idle on the request path")
 }
 
@@ -854,6 +880,7 @@ func TestOpenAIImages_SecurityAuditFreezesPayloadAtMostOnce(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	var providerCalls atomic.Int64
 	var moderationCalls atomic.Int64
+	var received atomic.Pointer[service.OpenAIImagesRequest]
 	moderationAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		moderationCalls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
@@ -870,44 +897,53 @@ func TestOpenAIImages_SecurityAuditFreezesPayloadAtMostOnce(t *testing.T) {
 		service.SettingKeyRiskControlEnabled:      "true",
 		service.SettingKeyContentModerationConfig: string(rawCfg),
 	}}, &openAIImagesModerationRepo{}, openAIImagesModerationHashCache{}, nil, nil, nil, nil)
-	engine := &handlerPromptEngine{mode: securityaudit.ModeBlocking, decision: &securityaudit.PromptDecision{Kind: securityaudit.DecisionAllow, AllowNextStage: true}}
+	started := make(chan struct{})
+	releaseSignal := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseSignal) }) }
+	engine := &blockingImagesPromptEngine{started: started, release: releaseSignal}
+	t.Cleanup(release)
 	group := &service.Group{ID: 969, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
 	account := &service.Account{ID: 970, Name: "api-key", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test"}}
 	upstream := &openAIImagesHandlerHTTPUpstream{resp: &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"created":1,"data":[{"b64_json":"aGVsbG8="}]}`))}}
 	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
 	env.handler.contentModerationService = moderation
 	env.handler.securityAuditCoordinator = securityaudit.NewCoordinator(securityaudit.NewLegacyModerationAdapter(moderation), engine)
-	payloadProvider := func() []byte {
+	env.handler.imagesModerationBody = func(parsed *service.OpenAIImagesRequest) []byte {
+		received.Store(parsed)
 		providerCalls.Add(1)
-		return []byte(`{"prompt":"security-audit-payload-` + strings.Repeat("x", 1<<20) + `"}`)
+		return parsed.ModerationBody()
 	}
-
-	auditRecorder := httptest.NewRecorder()
-	auditContext, _ := gin.CreateTestContext(auditRecorder)
-	auditContext.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
-	decision := env.handler.checkSecurityAuditLazy(auditContext, nil, &service.APIKey{ID: 971, UserID: 972, GroupID: &group.ID, Group: group}, middleware2.AuthSubject{UserID: 972}, service.ContentModerationProtocolOpenAIImages, "gpt-image-2", payloadProvider)
-
-	require.NotNil(t, decision)
-	require.True(t, decision.AllowNextStage)
-	require.Equal(t, int64(1), providerCalls.Load(), "coordinator and legacy moderation must share one frozen payload")
-	require.Equal(t, int64(1), moderationCalls.Load(), "legacy moderation must run once")
-	evaluated, _, requests := engine.snapshot()
-	require.Equal(t, 1, evaluated)
-	require.Len(t, requests, 1)
-	require.Contains(t, string(requests[0].Body), "security-audit-payload-", "audit must receive text before the request path releases it")
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"gpt-image-2","prompt":"text remains available until audit completes"}`))
 	req.Header.Set("Content-Type", "application/json")
-	env.router("/v1/images/generations", env.handler.Images).ServeHTTP(rec, req)
+	done := make(chan struct{})
+	go func() {
+		env.router("/v1/images/generations", env.handler.Images).ServeHTTP(rec, req)
+		close(done)
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for Images security audit")
+	}
+	require.Equal(t, int64(1), providerCalls.Load(), "same-request audit must invoke imagesModerationBody exactly once")
+	parsed := received.Load()
+	require.NotNil(t, parsed)
+	require.Equal(t, "text remains available until audit completes", parsed.Prompt)
+	release()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for Images request")
+	}
 
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.Equal(t, []int64{account.ID}, upstream.calls())
-	evaluated, _, requests = engine.snapshot()
-	require.Equal(t, 2, evaluated)
-	require.Len(t, requests, 2)
-	require.Equal(t, "text remains available until audit completes", gjson.GetBytes(requests[1].Body, "prompt").String())
-	require.Equal(t, int64(2), moderationCalls.Load(), "legacy moderation must run once for each completed audit")
+	require.Equal(t, int64(1), providerCalls.Load(), "same-request audit must invoke imagesModerationBody exactly once")
+	require.Empty(t, parsed.Prompt)
+	require.Equal(t, int64(1), moderationCalls.Load(), "legacy moderation must run once")
 }
 
 func TestOpenAIGatewayHandlerImages_MultipartEffectiveSpoolFailureReturns503(t *testing.T) {

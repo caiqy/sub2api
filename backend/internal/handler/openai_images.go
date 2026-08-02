@@ -157,7 +157,11 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		return
 	}
 	// The lazy provider may freeze large input and must finish synchronously before ReleaseText.
-	if decision := h.checkSecurityAuditLazy(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIImages, requestModel, parsed.ModerationBody); decision != nil && !decision.AllowNextStage {
+	moderationBody := parsed.ModerationBody
+	if h.imagesModerationBody != nil {
+		moderationBody = func() []byte { return h.imagesModerationBody(parsed) }
+	}
+	if decision := h.checkSecurityAuditLazy(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIImages, requestModel, moderationBody); decision != nil && !decision.AllowNextStage {
 		h.openAISecurityAuditError(c, decision)
 		return
 	}

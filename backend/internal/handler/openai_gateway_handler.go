@@ -42,6 +42,8 @@ type OpenAIGatewayHandler struct {
 	maxAccountSwitches         int
 	cfg                        *config.Config
 	effectiveRouteResolver     *service.EffectiveGatewayRouteResolver
+	// nil preserves the production parsed.ModerationBody provider.
+	imagesModerationBody func(*service.OpenAIImagesRequest) []byte
 }
 
 type grokMediaEligibilityProber interface {
