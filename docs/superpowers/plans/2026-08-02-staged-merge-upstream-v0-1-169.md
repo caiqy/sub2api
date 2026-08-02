@@ -1135,7 +1135,7 @@ Expected: 此 evidence commit 严格只含 build ledger，保持 preceding merge
 
 ### Task 10: 对 v0.1.168 审查交互并新增 migration 升级回归测试
 
-- [ ] Task 10: 对 v0.1.168 审查交互并新增 migration 升级回归测试
+- [x] Task 10: 对 v0.1.168 审查交互并新增 migration 升级回归测试
 
 **映射 OpenSpec:** 3.2
 

@@ -15,7 +15,7 @@
 ## 3. 分段合入 v0.1.168
 
 - [x] 3.1 使用 `git merge --no-ff --no-commit v0.1.168`，逐文件融合冲突并创建第二父为固定 tag SHA 的 merge commit
-- [ ] 3.2 审查 Passkey、模型广场、repository scoped updates、prompt audit 配置恢复、OpenAI Live store 容错与本地功能交互；保留 `191_passkey_credentials.sql` 和本地 `191_subscription_quota_advance_receipts.sql`
+- [x] 3.2 审查 Passkey、模型广场、repository scoped updates、prompt audit 配置恢复、OpenAI Live store 容错与本地功能交互；保留 `191_passkey_credentials.sql` 和本地 `191_subscription_quota_advance_receipts.sql`
 - [ ] 3.3 运行 v0.1.168 聚焦测试、本机 full 门禁及适用的本机 integration，验证或明确记录双方 191 migration 的新库/升级库风险并关闭阶段证据
 
 ## 4. 分段合入 v0.1.169
