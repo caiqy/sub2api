@@ -882,7 +882,7 @@ Expected: 此 evidence commit 严格只含 build ledger，保持 preceding merge
 
 **Step 1: 恢复与本地 response ownership 兼容的逐 terminal callback 保护测试**
 
-在 `backend/internal/service/openai_ws_v2/passthrough_relay_test.go` 增加 table-driven `TestRelay_OnTurnComplete_PerTerminalEvent`。对 `response.completed`、`response.done`、`response.failed`、`response.incomplete`、`response.cancelled`、`response.canceled` 分别创建独立 Relay：先发送匹配 active turn 的 `response.created`，再发送对应 terminal；断言恰好一次 `OnTurnComplete`、匹配的 `RequestID`/`TerminalEventType` 和 usage。禁止复用旧上游缺少 `response.created` 的 fixture，也不得为测试改生产代码。
+在 `backend/internal/service/openai_ws_v2/passthrough_relay_test.go` 增加 table-driven `TestRelay_OnTurnComplete_PerTerminalEvent`。对 `response.completed`、`response.done`、`response.failed`、`response.incomplete`、`response.cancelled`、`response.canceled` 分别创建独立 Relay：每个 subtest 使用短 `context.WithTimeout` 并 `defer cancel()`，先发送匹配 active turn 的 `response.created`，再发送对应 terminal；断言恰好一次 `OnTurnComplete`、匹配的 `RequestID`/`TerminalEventType` 和 usage。禁止复用旧上游缺少 `response.created` 的 fixture，也不得为测试改生产代码。
 
 Run from `backend`:
 ```powershell
@@ -913,19 +913,27 @@ go test -v -tags unit -count=1 ./internal/handler/admin -run '^(TestUpdateSettin
 $settingsExit = $LASTEXITCODE
 if ($settingsExit -ne 0) { throw "partial settings behavior failed; inspect $settingsLog" }
 foreach ($target in $settingsTargets) { if (-not (Select-String -Path $settingsLog -Pattern ('^--- PASS: ' + [regex]::Escape($target) + ' \(') -Quiet)) { throw "missing settings top-level PASS: $target" } }
-go test -count=1 ./internal/service -run '^(TestCompositeRouteResolverExplicitExactRouteRewritesModel|TestOpenAIGatewayService_Forward_WSv2_ResponseDoneUsageParsed|TestGatewayServiceRecordUsage_AttachesFinalUpstreamRequestSnapshot|TestGatewayService_ForwardAsResponses_PassthroughHeaderForwardCopiesFromClientRequest)$'
-if ($LASTEXITCODE -ne 0) { throw 'service behavior review failed' }
+$serviceTargets = @('TestCompositeRouteResolverExplicitExactRouteRewritesModel', 'TestOpenAIGatewayService_Forward_WSv2_ResponseDoneUsageParsed', 'TestGatewayServiceRecordUsage_AttachesFinalUpstreamRequestSnapshot', 'TestGatewayService_ForwardAsResponses_PassthroughHeaderForwardCopiesFromClientRequest')
+$serviceLog = Join-Path $env:TEMP 'sub2api-v0.1.166-service-behavior.log'
+go test -v -tags unit -count=1 ./internal/service -run '^(TestCompositeRouteResolverExplicitExactRouteRewritesModel|TestOpenAIGatewayService_Forward_WSv2_ResponseDoneUsageParsed|TestGatewayServiceRecordUsage_AttachesFinalUpstreamRequestSnapshot|TestGatewayService_ForwardAsResponses_PassthroughHeaderForwardCopiesFromClientRequest)$' 2>&1 | Tee-Object -FilePath $serviceLog
+$serviceExit = $LASTEXITCODE
+if ($serviceExit -ne 0) { throw "service behavior review failed; inspect $serviceLog" }
+foreach ($target in $serviceTargets) { if (-not (Select-String -Path $serviceLog -Pattern ('^--- PASS: ' + [regex]::Escape($target) + ' \(') -Quiet)) { throw "missing service top-level PASS: $target" } }
 $relayTargets = @('TestRelay_OnTurnComplete_PerTerminalEvent', 'TestRelay_OnTurnComplete_UsesCurrentResponseCreateModel', 'TestRelay_OnTurnComplete_IgnoresTerminalForUnknownResponse', 'TestRelay_OnTurnComplete_ProvidesTurnMetrics')
 $relayLog = Join-Path $env:TEMP 'sub2api-v0.1.166-relay-behavior.log'
 go test -v -count=1 ./internal/service/openai_ws_v2 -run '^(TestRelay_OnTurnComplete_PerTerminalEvent|TestRelay_OnTurnComplete_UsesCurrentResponseCreateModel|TestRelay_OnTurnComplete_IgnoresTerminalForUnknownResponse|TestRelay_OnTurnComplete_ProvidesTurnMetrics)$' 2>&1 | Tee-Object -FilePath $relayLog
 $relayExit = $LASTEXITCODE
 if ($relayExit -ne 0) { throw "v0.1.166 relay behavior failed; inspect $relayLog" }
 foreach ($target in $relayTargets) { if (-not (Select-String -Path $relayLog -Pattern ('^--- PASS: ' + [regex]::Escape($target) + ' \(') -Quiet)) { throw "missing relay top-level PASS: $target" } }
-go test -count=1 ./internal/handler -run '^(TestGatewayChatCredentialStopDoesNotSelectAnotherAccountAndReturnsSafe503|TestOpenAIUsageRecordTaskCopiesCompositeBillingContextAfterQueueDelay)$'
-if ($LASTEXITCODE -ne 0) { throw 'handler behavior review failed' }
+$handlerTargets = @('TestGatewayChatCredentialStopDoesNotSelectAnotherAccountAndReturnsSafe503', 'TestOpenAIUsageRecordTaskCopiesCompositeBillingContextAfterQueueDelay')
+$handlerLog = Join-Path $env:TEMP 'sub2api-v0.1.166-handler-behavior.log'
+go test -v -tags unit -count=1 ./internal/handler -run '^(TestGatewayChatCredentialStopDoesNotSelectAnotherAccountAndReturnsSafe503|TestOpenAIUsageRecordTaskCopiesCompositeBillingContextAfterQueueDelay)$' 2>&1 | Tee-Object -FilePath $handlerLog
+$handlerExit = $LASTEXITCODE
+if ($handlerExit -ne 0) { throw "handler behavior review failed; inspect $handlerLog" }
+foreach ($target in $handlerTargets) { if (-not (Select-String -Path $handlerLog -Pattern ('^--- PASS: ' + [regex]::Escape($target) + ' \(') -Quiet)) { throw "missing handler top-level PASS: $target" } }
 ```
 
-Expected: 每个命令紧邻检查 exit 并 PASS；两个 `unit`-tag settings 目标和四个 relay 目标必须各自出现锚定顶级 `--- PASS:`，`no tests to run` 或缺失任一目标均阻塞。changed-files × matrix 审查明确说明上游限流、部分设置、WS 计费、composite route 没有回归本地 scheduler/sticky/fallback/usage。
+Expected: 每个命令紧邻检查 exit 并 PASS；两个 settings、四个 service、四个 relay 和两个 handler 目标必须各自出现锚定顶级 `--- PASS:`，`no tests to run`、混合 build-tag 部分执行或缺失任一目标均阻塞。changed-files × matrix 审查明确说明上游限流、部分设置、WS 计费、composite route 没有回归本地 scheduler/sticky/fallback/usage。
 
 **Step 3: 对发现的 RED 用失败测试驱动最小兼容修复**
 
@@ -948,7 +956,7 @@ Expected: 每个兼容提交同时包含复现测试、最小源修复和由该�
 
 **Step 5: 严格提交 merge 后行为审查 ledger evidence**
 
-保留 ledger 中已写入的 untagged settings `no tests to run`、诊断命令、`gap=1` 和 `BLOCKED` 历史，不得改写或删除；在其后追加 `-tags unit` settings 命令、两个锚定顶级 PASS、旧 blocker 已 supersede 的结论，以及 terminal callback 保护提交、其余每个测试命令、审查调用链、RED/兼容提交 SHA 和最终矩阵。确认最终 `gap=0` 后运行：
+保留 ledger 中已写入的 untagged settings `no tests to run`、诊断命令、`gap=1`、`BLOCKED`，以及第一次 closure 中未锚定全部 service/handler targets 的历史，不得改写或删除；在其后追加带 `-tags unit -v` 的 settings/service/handler 命令及全部 `2/4/2` 顶级 PASS、四个 relay 顶级 PASS、旧 blocker/错误 closure 已 supersede 的结论，以及 terminal callback timeout 修复提交、审查调用链、RED/兼容提交 SHA 和最终矩阵。确认最终 `gap=0` 后运行：
 
 ```powershell
 git add -f -- docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
