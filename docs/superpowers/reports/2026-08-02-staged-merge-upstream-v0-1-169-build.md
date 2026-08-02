@@ -635,3 +635,114 @@ frontend/src/views/user/__tests__/PaymentView.spec.ts
 
 - 风险信号：三个区间均有单文件变更超过 200 行，尤其 `v0.1.165..v0.1.166` 的 gateway/Antigravity/panel-rate-limit 测试与服务文件、`v0.1.166..v0.1.168` 的 passkey/model-plaza/frontend 页面、`v0.1.168..v0.1.169` 的 upstream path guard；必须由 Task 4 聚焦验证，不能仅凭 changed-files 放行。
 - 顾虑：Task 4 前，14 项均为 `gap`，所有未运行的自动契约和未完成的人工审查均不能声称 PASS 或已完成；这些 `gap` 阻塞下一阶段。
+
+## Task 4 阶段 0 本地保护测试与生成稳定性
+
+- 实施时间：2026-08-02
+- 实施基线：`22ede455341978f0403926b42639c3d05f5f417a`
+- Images 保护提交：`746c0ccdef0b4536adc9867b0cfc89357b1b9787`（仅 `backend/internal/handler/openai_images_controls_test.go`）。
+- RED：N/A。三个新增保护测试首次运行即通过，证明的是既有行为；没有为了流程制造 RED，也未修改 `openai_images.go` 或 `security_audit_helper.go`。
+
+### Images TDD 与 CodeGraph 审查
+
+- 破坏点：关闭审计时提前求值 payload、legacy runtime/group scope 检查前求值、coordinator 的 prompt/legacy 双消费者重复求值。
+- 新增 `TestOpenAIImages_DisabledSecurityAuditDoesNotFreezePayload`、`TestOpenAIImages_LegacyModerationDefersPayloadUntilRuntimeScope`、`TestOpenAIImages_SecurityAuditFreezesPayloadAtMostOnce`；前两者以原子计数验证零次 provider 调用和继续上游路径，第三者以原子计数验证单次冻结、legacy 单次调用和审计读取释放前文本。
+- CodeGraph 调用链结论：`Images` -> `checkSecurityAuditLazy` -> `runSecurityAuditLazy` -> `Coordinator.CheckLazy`。后者通过 `sync.Once` 的 `bodyOnce` 在 blocking prompt 与 legacy moderation 间共享冻结 payload；`ContentModerationService.CheckLazy` 先检查 runtime、enabled/mode 和 group/model scope，之后才调用 provider；返回后 `Images` 才执行 `ReleaseMultipartValues` 与 `parsed.ReleaseText`。
+
+### 命令证据
+
+```powershell
+go test -count=1 ./internal/handler -run '^(TestOpenAIImages_DisabledSecurityAuditDoesNotFreezePayload|TestOpenAIImages_LegacyModerationDefersPayloadUntilRuntimeScope|TestOpenAIImages_SecurityAuditFreezesPayloadAtMostOnce)$'
+```
+
+- exit code：`0`；关键输出：`ok github.com/Wei-Shaw/sub2api/internal/handler 1.584s`。
+
+```powershell
+go test -count=1 ./internal/service -run '^(TestLayered_GroupedAccountPassesDBFreshRecheck|TestLayered_WaitPlanFallbackSkipsUpstreamRestrictedAccount|TestLayered_SessionStickyPreservesGrokBinding|TestLayered_SessionStickyRecheckHonorsImageCapability|TestGatewayServiceRecordUsage_AttachesFinalUpstreamRequestSnapshot|TestCalculateQuotaCycleAdvance_ResetsOnlySingleExhaustedWindow|TestAdvanceQuotaCycle_RejectsTwoExhaustedWindowsBeforeUpdate|TestAdminResetQuota_UsesCommittedResetVersionForCacheInvalidation|TestCheckAndResetWindows_UsesCommittedResetVersionForCacheInvalidation)$'
+```
+
+- exit code：`1`；未进入命名测试。`subscription_cache_invalidation_outbox_test.go` 缺少 `newPaymentOrderLifecycleTestClient`、`redeemSubscriptionCacheStub`、`newTermLockingUserSubRepo`、`exhaustedQuotaSubscription`。
+- 根因审查：四个 helper 均存在于当前仓库，但定义文件带 `//go:build unit`；无 tag 的 brief 命令与 `make test` 均未包含这些定义。诊断命令 `go test -tags unit -count=1 ./internal/service -run '^(TestLayered_GroupedAccountPassesDBFreshRecheck|TestLayered_WaitPlanFallbackSkipsUpstreamRestrictedAccount|TestLayered_SessionStickyPreservesGrokBinding|TestLayered_SessionStickyRecheckHonorsImageCapability|TestGatewayServiceRecordUsage_AttachesFinalUpstreamRequestSnapshot|TestCalculateQuotaCycleAdvance_ResetsOnlySingleExhaustedWindow|TestAdvanceQuotaCycle_RejectsTwoExhaustedWindowsBeforeUpdate|TestAdminResetQuota_UsesCommittedResetVersionForCacheInvalidation|TestCheckAndResetWindows_UsesCommittedResetVersionForCacheInvalidation)$'` 的 exit code 为 `0`，关键输出为 `ok github.com/Wei-Shaw/sub2api/internal/service 1.763s`。此诊断不改变 brief 原命令的失败记录，也未越界修复 service 测试。
+
+```powershell
+go test -count=1 ./internal/handler -run '^(TestGatewayHandlerMessagesUsesEffectiveRouteSnapshot|TestOpenAIImages_UnifiedAuditRunsLegacyOnce|TestOpenAIImages_ContentModerationUsesFrozenPayloadBeforeRelease|TestOpenAIImages_SecurityAuditUsesFrozenPayloadBeforeRelease|TestOpenAIImages_MultipartTextIsReleasedBeforeBlockedUpstream|TestOpenAIImages_OAuthTextIsReleasedBeforeBlockedUpstream|TestOpenAIImages_DisabledSecurityAuditDoesNotFreezePayload|TestOpenAIImages_LegacyModerationDefersPayloadUntilRuntimeScope|TestOpenAIImages_SecurityAuditFreezesPayloadAtMostOnce)$'
+```
+
+- exit code：`0`；关键输出：`ok github.com/Wei-Shaw/sub2api/internal/handler 4.694s`。
+
+```powershell
+go test -count=1 ./internal/server/routes -run '^(TestEveryGatewayPOSTRouteIsClassifiedForPromptAuditCoverage|TestResponsesWebSocketHasFirstAndSubsequentTurnPromptGates)$'
+```
+
+- exit code：`0`；关键输出：`ok github.com/Wei-Shaw/sub2api/internal/server/routes 1.902s`。
+
+```powershell
+pnpm --dir frontend exec vitest run src/utils/__tests__/subscriptionQuota.spec.ts src/views/admin/__tests__/SettingsView.spec.ts src/views/admin/__tests__/UsageView.spec.ts src/components/channels/__tests__/AvailableChannelsTable.spec.ts
+```
+
+- exit code：`0`；`4` files、`50` tests passed。输出含已有 Browserslist、`router-link` 和 jsdom `AggregateError` 警告，未导致测试失败。
+
+```powershell
+make test
+```
+
+- exit code：`2`；根因与无 tag service 聚焦命令相同。其余已运行包包含 `internal/handler`、`internal/handler/admin`、`internal/repository`、`internal/securityaudit`、`internal/server/routes` 均为 `ok`；不得将该 full gate 标为通过。
+
+```powershell
+make "VERSION=0.1.165.4" "SHELL=D:/scoop/shims/bash.exe" build
+```
+
+- exit code：`0`；backend `CGO_ENABLED=0 go build` 与 frontend `vue-tsc -b && vite build` 均成功。Vite 输出既有动态/静态 import 和 chunk-size 警告。
+
+```powershell
+make -C backend generate
+git.exe diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
+make -C backend generate
+git.exe diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
+```
+
+- 两次 generate exit code 均为 `0`；两次 diff exit code 均为 `1`，且仅稳定重现 `backend/cmd/server/wire_gen.go` 的 Wire provider 声明顺序漂移：`SubscriptionQuotaAdvanceReceiptRepository`、`SubscriptionCacheInvalidationOutboxRepository` 和 worker 的位置被重排，变量名从 `subscriptionQuotaAdvanceReceiptRepository` 变为 `quotaAdvanceReceiptRepository`。
+- 该生成物不在 Task 4 allowlist，已在记录证据后恢复至 `HEAD`，未暂存、未提交；`backend/ent` 无 diff。此项阻塞 generated-output 契约。
+
+```powershell
+git.exe diff --check
+git.exe diff --cached --check
+git diff --name-only --diff-filter=U
+git grep -n -I -E '^(<<<<<<<|=======|>>>>>>>)' -- ':!docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md'
+git rev-parse HEAD:backend/migrations/191_subscription_quota_advance_receipts.sql
+git rev-parse HEAD:backend/migrations/192_subscription_cache_invalidation_outbox.sql
+```
+
+- 前三个命令 exit code 均为 `0` 且无输出。
+- conflict-marker scan exit code 为 `0`，但输出 `backend/internal/pkg/antigravity/request_transformer.go:267:===========================================`；经上下文审查，这是 `mcpXMLProtocol` 的合法多行字符串分隔符，不是未合并标记。原命令的“无输出”期望未满足，未修改非 allowlist 源码。
+- 两个 OID 命令 exit code 均为 `0`，输出分别精确为 `c22d47d79cbbaf4bc40524d42ef52e6cc8ac3af6`、`502ecec1caf9f76e022c2e83acf3707190539301`。
+
+### Task 4 当前 14 行能力矩阵
+
+状态规则：只有本轮直接行为测试覆盖完整契约时为 `protected`；未完成的 Docker 专项契约继续为 `gap`，不提前标记 `unverified`。
+
+| # | 能力契约 | 当前状态 | 本轮真实证据或 gap 原因 |
+| --- | --- | --- | --- |
+| 1 | layered scheduler、DB recheck、WaitPlan fallback | `gap` | `-tags unit` 的本轮聚焦子集通过，但 matrix 所列 privacy fallback recheck 未运行；原 brief 命令编译失败。 |
+| 2 | Grok/platform/session/previous-response sticky | `gap` | `-tags unit` 的 session/image 子集通过；previous-response sticky 两项未运行。 |
+| 3 | HTTP/WS/Live turn ownership、usage snapshot | `gap` | `TestGatewayServiceRecordUsage_AttachesFinalUpstreamRequestSnapshot` 在 unit-tag 诊断通过；WS/Live/terminal 其余指定契约未运行。 |
+| 4 | prompt/security audit route 与 WS gate | `protected` | 两个 routes 直接测试本轮通过；CodeGraph 已核对 helper -> coordinator 的审计入口。 |
+| 5 | Images 审计与文本生命周期 | `protected` | 八个 Images 直接测试本轮通过；新增三条覆盖关闭态、runtime scope 惰性和 coordinator/legacy 单次冻结，并完成调用链审查。 |
+| 6 | Images request-body replay/spooling/cleanup | `protected` | `make test` 本轮实际完成 `internal/handler` 包并返回 `ok`，含两个 matrix 指定 handler 测试。 |
+| 7 | async image task、对象存储、图片计费 | `gap` | handler 子包通过，但 service 中图片计费目标受同一编译门禁阻断，未完成完整能力契约。 |
+| 8 | settings 热更新和部分更新 | `protected` | `make test` 本轮实际完成 `internal/handler/admin` 包并返回 `ok`，含 matrix 指定 settings 测试。 |
+| 9 | repository scoped update、session/passkey step-up | `protected` | `make test` 本轮实际完成 `internal/repository` 和相关 handler 包并返回 `ok`；无该能力的本轮失败。 |
+| 10 | subscription quota cycle reset | `gap` | 前端 quota 测试通过，但 receipt/outbox/concurrency backend 测试受 service 编译门禁阻断。 |
+| 11 | 用户资源控制、分组复制、批量限额 | `gap` | 未执行该行完整的指定入口测试或逐入口人工审查。 |
+| 12 | 前端本地能力 | `protected` | 指定 Vitest 4 files/50 tests 本轮通过。 |
+| 13 | pricing、count_tokens、release fallback、部署安全 | `gap` | 未运行 pricing/count_tokens 定向测试；Docker 专项契约明确留给 Task 5。 |
+| 14 | Ent/Wire、依赖、migrations | `gap` | VERSION/SHELL build 和 migration OID 通过，但 full gate 失败且两轮 generate 稳定产生 Wire diff。 |
+
+状态统计：`protected=6`，`manual=0`，`gap=8`，`unverified=0`。
+
+### Task 4 风险信号与顾虑
+
+- 风险信号：无 tag 的 service test 及 `make test` 都因测试 helper 被 `unit` build tag 排除而失败；该问题阻断 scheduler、usage、quota 和部分图片计费证据。
+- 风险信号：两轮 generate 都重现受跟踪 `wire_gen.go` diff；其内容已恢复且未进入提交，但 generated-output 不能放行。
+- 风险信号：冲突扫描正则把合法字符串分隔符作为 marker 命中；仓库没有 unmerged 文件，仍需在 controller 层决定是否修正检测模式。
+- 顾虑：Docker integration 未执行，保持 `gap` 交 Task 5；本轮未执行 fetch、merge、push、tag、release、deploy、镜像、SSH、服务器、数据库、Redis 或 Nginx 操作。
