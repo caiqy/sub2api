@@ -1637,3 +1637,25 @@ frontend/src/views/user/__tests__/PaymentView.spec.ts
 
 - Task 13's exhaustive negative path matrix was not added or run. This Task 12 review used merged call-chain inspection and only the named focused route test; it does not claim exhaustive encoded/traversal coverage.
 - No Plan/OpenSpec task was checked off, and `.comet/current-change.json` remains untouched. No fetch, push, tag, release, deploy, Docker deployment, or remote/server operation was performed.
+
+## Task 12 Review-Fix Round 1/5: Release Resource Verification
+
+- Reviewer severity: `Important`.
+- Code fix commit: `c20b4ac6f` (`fix: align release resource verification`), with exactly one path: `deploy/tests/docker-runtime-resources-test.sh`.
+
+### Root Cause And TDD Evidence
+
+- RED command: `D:/scoop/shims/bash.exe deploy/tests/docker-runtime-resources-test.sh`; exit `1`.
+- Exact RED output: `docker runtime resources test failed: .goreleaser.yaml has 1 occurrences of '      - backend/resources', expected 4`.
+- Root cause: the upstream test assumed four multi-architecture Docker targets and also asserted `.goreleaser.simple.yaml`. Task 12 intentionally retained local commit `5350370ad`'s single Linux amd64 fallback, merged `backend/resources` into its single target, and deleted the redundant simple configuration. The test no longer represented the merged release contract.
+- Minimal correction: change the main `.goreleaser.yaml` resource expectation from `4` to `1` and remove only the deleted `.goreleaser.simple.yaml` assertion. No release configuration or workflow changed.
+- GREEN command: `D:/scoop/shims/bash.exe deploy/tests/docker-runtime-resources-test.sh`; exit `0`; exact output: `docker runtime resources test passed`.
+- POSIX syntax command: `D:/scoop/shims/bash.exe -n deploy/tests/docker-runtime-resources-test.sh`; exit `0` with no output.
+- `git diff --check` exited `0` with no output before the code commit. The code commit allowlist and `git diff --cached --check` both contained only `deploy/tests/docker-runtime-resources-test.sh`.
+
+### Compose Script Diagnostic
+
+- `D:/scoop/shims/bash.exe deploy/tests/docker-compose-security-test.sh` was run as required. It emitted repeated `awk`/`integer expression expected` diagnostics under the local Scoop bash/awk environment while returning exit `0` and printing its success text.
+- This invocation is explicitly not PASS evidence. The compose script remains out of scope for this round and was not changed. The prior exact static inspection of four `no-new-privileges:true` entries remains separate review evidence.
+
+- Ledger scope for the following commit is this report only. Task 13's negative matrix remains unrun; no Plan/OpenSpec task, progress, or runtime selection file changed.
