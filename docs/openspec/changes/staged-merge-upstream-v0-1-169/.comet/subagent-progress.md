@@ -4,7 +4,7 @@
 - Review mode: `thorough`
 - 当前任务: Task 12 - 在未提交状态合入 v0.1.169 并完成阻塞审查
 - 映射 OpenSpec: 4.1
-- 阶段: `task-12 / implementer-result`
+- 阶段: `task-12 / fresh-review-dispatch-intent`
 - Task-10 dispatch token: `task-10-implementer-attempt-1-e46cd9d55`
 - Task-10 role: `implementer`
 - Task-10 model: `high`
@@ -78,6 +78,8 @@
 - Task-12 implementer result: `DONE; 11 conflicts fused; blocking review PASS; Task13 matrix not run`
 - Task-12 merge commit: `827369f76f8f301320759a0dc85b11ab05a7a1d6`
 - Task-12 ledger commit: `6232213a5c11fa2ea41d2b779bd11ce17c9540e0`
+- Task-12 reviewer dispatch token: `task-12-reviewer-b2751e49`
+- Task-12 reviewer task ID: `pending functions.task return`
 - Task-9 dispatch token: `task-9-implementer-attempt-1-97d44dd20`
 - Task-9 role: `implementer`
 - Task-9 model: `high`
@@ -434,4 +436,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - Task-4审查-修复轮次: `2/2 PASS`
-- 状态: Task12 implementer已完成；待fresh reviewer，Task13不得运行。
+- 状态: Task12 fresh reviewer即将派发；Task13不得运行。
