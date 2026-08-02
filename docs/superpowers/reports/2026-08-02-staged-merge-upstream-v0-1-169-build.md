@@ -1320,3 +1320,67 @@ No migration conflict occurred. Passkey/auth/session binding/step-up, Model Plaz
 | Merge-tree migration/version checks | `0` | `VERSION=0.1.165.4`; passkey=`522b16b5bba12aedb9c4198d2d4ef082c8ea718f`, receipt=`c22d47d79cbbaf4bc40524d42ef52e6cc8ac3af6`, outbox=`502ecec1caf9f76e022c2e83acf3707190539301`. |
 
 - This evidence is committed separately, contains only this ledger, and leaves selection, Plan, OpenSpec, and progress files outside both commits.
+
+## Task 10 v0.1.168 Behavior Review And Migration Upgrade Regression
+
+- Compatibility commit: `ec4d23bfe` (`fix: preserve local behavior after v0.1.168`), exactly `backend/internal/repository/migrations_subscription_quota_passkey_upgrade_integration_test.go` and `backend/internal/repository/user_repo_integration_test.go`.
+- VERSION remains `0.1.165.4`.
+- Local migration blobs remain `c22d47d79cbbaf4bc40524d42ef52e6cc8ac3af6` (receipt) and `502ecec1caf9f76e022c2e83acf3707190539301` (outbox), equal to the immutable source-base ledger values. Historical migrations were not edited.
+
+### TDD And Environment Classification
+
+- The new test was written before any Task 10 production change. It constructs a test-local `fstest.MapFS` from `completeFS`, excludes only `191_passkey_credentials.sql`, and executes exactly `baselineFS -> completeFS -> completeFS`.
+- It asserts the baseline has receipt/outbox and not Passkey; all three exact filenames have the embedded-FS SHA-256 checksum and exactly one `schema_migrations` row after the second complete run; `passkey_credentials`, `subscription_quota_advance_receipts`, and `subscription_cache_invalidation_outbox` exist.
+- Fresh Docker preflight: `docker info --format '{{.ServerVersion}}'` could not resolve `docker`; Docker/Testcontainers is therefore `unverified`. The exact migration integration command was not run, no remote fallback was attempted, and no integration PASS is claimed.
+- Compile-only, not a test substitute: `go test -tags=integration -c -o C:\Users\caiqy\AppData\Local\Temp\opencode\sub2api-task10-repository-integration.test.exe ./internal/repository` exited `0` after confirmation that `-c` does not execute the test binary or Testcontainers.
+- Existing RED was a compile failure in `user_repo_integration_test.go`: two stale calls omitted `service.UserUpdateFields` after `86fb4781f` scoped `UserRepository.Update`. The fixture now declares `{Username: true}` and observes the in-transaction write before rollback. No production change was needed.
+
+### Focused Test Evidence
+
+| Command / classification | Exit | Matched targets / result |
+| --- | ---: | --- |
+| `go test -count=1 ./internal/handler -run '^(TestPasskey|TestModelPlaza|TestUserHandler)'` | `0` | `TestPasskeyBeginLoginRejectsDisabledAdminSwitch`, `TestPasskeyBeginLoginReportsSettingStoreFailure`, `TestPasskeyCredentialListRemainsAvailableWhenSignInDisabled` |
+| `go test -count=1 ./internal/service -run '^(TestPasskey|TestChannelPlaza|TestOpenAILive|TestSettingServiceUpdate|TestUserServiceUpdateFields)'` | `0` | `TestPasskeySummaryReportsCurrentBackupState`, `TestPasskeyEnrollmentAndRevocationRequireAccountPassword` |
+| `go test -count=1 ./internal/securityaudit -run '^(TestPromptConfig|TestPromptHandler|TestPromptService)'` | `0` | `TestPromptServiceHasExplicitIdempotentLifecycle`, `TestPromptServiceStartReportsDependencyFailureWithoutPanic`, `TestPromptServiceRejectsInvalidDeleteConfirmationClaims` |
+| `go test -count=1 ./internal/repository -run '^(TestUserRepo|TestUserRepoAPIKeyGroupFilterSuite|TestUserRepository)'` | `0` | 11 `TestUserRepository*` alias/identity/update targets listed by `go test -list`; no `no tests to run` result was accepted |
+| `pnpm --dir frontend exec vitest run src/api/__tests__/passkey.spec.ts src/components/modelPlaza/__tests__/PlazaModelPricingTable.spec.ts src/views/admin/__tests__/SettingsView.spec.ts src/stores/__tests__/app.spec.ts` | `0` | 4 files, 68 tests: passkey 3, Plaza pricing 9, Settings 30, app store 26 |
+| Safe unit-tag target discovery | `0` | handler/service test sources contain no `testcontainers`/`dockertest` references; `TestModelPlazaHandler_NilSettingServiceFailsClosed404` and the Live lifecycle targets were listed before execution |
+| `go test -tags=unit -count=1 ./internal/handler -run '^TestModelPlazaHandler_NilSettingServiceFailsClosed404$'` | `0` | Model Plaza fails closed when settings are unavailable |
+| `go test -tags=unit -count=1 ./internal/service -run '^(TestWaitForLiveObserverRetryTreatsStoreErrorAsRetryable|TestObserveLiveCallStoreOutageFallsBackToExpiryFinalize)$'` | `0` | Live store error retry and expiry-finalize fallback |
+| `go test -tags=unit -count=1 ./internal/service -run '^(TestAPIKeyUpdate_OnlyDeclaresRequestedColumns|TestAPIKeyUpdate_DeclaresUsageColumnsOnExplicitReset|TestAPIKeyUpdate_DeclaresStatusWhenReactivated|TestUpdateQuotaUsed_ExhaustedMarkOnlyDeclaresStatus|TestUpdateProfile_OnlyDeclaresRequestedColumns)$'` | `0` | User/API-key field masks, explicit reset fields, and quota-exhausted status-only update |
+
+- The four exact Go commands were followed by `go test -list` with their same regexes. Every listed target above was matched and the command exit was `0`; the unit-tag target discovery/reruns close the Model Plaza, Live, and scoped-update names that the untagged aggregate patterns did not select.
+- Vitest emitted existing Browserslist, unresolved `router-link`, and jsdom `AggregateError` warnings but exited `0`; no warning was recorded as a test failure.
+
+### Call-Chain Review
+
+| Capability | Conclusion |
+| --- | --- |
+| Passkey/auth/session/step-up | `PasskeyHandler -> requirePasskeysEnabled -> PasskeyService -> PasskeySessionStore`; WebAuthn is configured with required user verification, login consumes a five-minute session, checks active/backend-mode user status, records the Passkey audit method, then creates the normal token pair. Enrollment/revocation requires both an authenticated subject and the account-password service gate, so no separate TOTP round is entered after a verified Passkey assertion. |
+| Model Plaza permissions/hidden menu | Optional-JWT Model Plaza routing reaches `Get`; disabled settings return 404, `require_auth` rejects anonymous users, and `filterPlazaVisibleGroups` returns anonymous non-exclusive groups or only an authenticated user's allowed exclusive groups. User rate lookup may degrade only pricing display. Custom-menu hiding filters custom navigation items, not this feature-flagged public `/model-plaza` route; server-side group filtering remains authoritative. |
+| User/API-key scoped updates and quota | `UserService.updateProfile -> UserRepository.Update(fields)` omits balance/status fields and repository writes only declared columns. `APIKeyService.Update -> APIKeyRepository.Update(fields)` validates ownership/group permission and writes quota or usage only for explicit requests; the hot-path exhausted mark writes only status after atomic increment. |
+| Prompt config restoration | `ConfigManager.Reload -> ParseStorageConfig -> ActiveFromStorage -> snapshot` reads storage intent before activation; load errors mark an untrusted snapshot and blocking intent fails closed. Undecryptable endpoint tokens remain persisted and visible for repair but are excluded from runtime use. |
+| OpenAI Live store tolerance | `OpenAIGatewayHandler.Live` authenticates API key/subject, platform and allow-live permission, audit, billing, and concurrency before `CreateLiveCall`. Live state-store retrieval errors are retryable and observer outage falls back to expiry finalization; WebSocket state cache read failure degrades to a miss instead of blocking the request. |
+| Frontend route/permissions | `/model-plaza` is a public route; `embedded=1` selects `AppLayout` only when authenticated, while API authorization is enforced by the backend setting. Header visibility is feature-flagged, and admin SettingsView persists the Passkey/Model Plaza configuration; the focused frontend tests pass. |
+| Quota receipt/outbox | `applyMigrationsFS` keeps checksums immutable across the filtered upgrade, then creates Passkey alongside local receipt and invalidation-outbox surfaces. The outbox worker tombstones/publishes before acknowledgement and schedules a second pass; Docker-backed transaction/migration execution remains explicitly unverified. |
+
+### Phase 2 Matrix
+
+| Capability | Status | Evidence |
+| --- | --- | --- |
+| Passkey/auth/session/step-up | `protected` | Focused handler/service tests and call-chain review. |
+| Model Plaza permissions and hidden menu boundary | `protected` | Untagged frontend evidence, safe tagged handler rerun, and server-side visibility review. |
+| User/API-key scoped update and quota fields | `protected` | Compile repair plus five explicit field-mask/quota tests. |
+| Prompt config restoration | `protected` | Prompt focused tests and fail-closed snapshot review. |
+| OpenAI Live store fault tolerance | `protected` | Two named retry/fallback tests and handler/store review. |
+| Frontend route/permissions | `protected` | Model Plaza/passkey/settings/app Vitest evidence and route review. |
+| Receipt/outbox migration upgrade | `unverified` | Docker CLI unavailable; compile-only and source/OID evidence do not replace integration execution. |
+| Migration/version invariants | `protected` | VERSION and both local migration blob OIDs unchanged. |
+
+统计：`protected=7`，`manual=0`，`gap=0`，`unverified=1`。
+
+### Scope And Self-review
+
+- No schema/provider source changed, so `make -C backend generate` was not run and no generated diff was created.
+- The compatibility commit is allowlist-compliant; this evidence commit stages only this ledger.
+- No fetch, merge, push, tag, release, image, deploy, remote/server, DB, Redis, or Nginx operation was performed.
