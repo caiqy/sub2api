@@ -4,7 +4,7 @@
 - Review mode: `thorough`
 - 当前任务: Task 12 - 在未提交状态合入 v0.1.169 并完成阻塞审查
 - 映射 OpenSpec: 4.1
-- 阶段: `task-12 / fix-round-1-dispatch-intent`
+- 阶段: `task-12 / fix-round-1-result`
 - Task-10 dispatch token: `task-10-implementer-attempt-1-e46cd9d55`
 - Task-10 role: `implementer`
 - Task-10 model: `high`
@@ -81,11 +81,14 @@
 - Task-12 reviewer dispatch token: `task-12-reviewer-b2751e49`
 - Task-12 reviewer task ID: `ses_03d547e4fffeuFLFVRzhZxB7EE`
 - Task-12 reviewer result: `CHANGES_REQUIRED; Spec compliance FAIL; 1 Important, 0 Critical`
-- Task-12 review-fix rounds: `1/5 changes_required`
 - Task-12 Important: `docker-runtime-resources-test.sh`仍要求主配置4次resources及已删除simple配置，和本地单一Linux amd64 fallback冲突，backend CI必然失败。
 - Task-12 controller RED: `D:/scoop/shims/bash.exe deploy/tests/docker-runtime-resources-test.sh` exit 1，实际1次、期望4次。
 - Task-12 fix-1 dispatch token: `task-12-fix-round-1-74b910ce`
-- Task-12 fix-1 task ID: `pending resumed functions.task return`
+- Task-12 fix-1 task ID: `ses_03d66b307ffea0tspigwLgzhd9`
+- Task-12 fix-1 result: `DONE; runtime-resource script RED exit 1 -> GREEN exit 0`
+- Task-12 fix-1 code commit: `c20b4ac6f51baf88c5e7a2299c1a5b54b77540f5`
+- Task-12 fix-1 ledger commit: `969cdab5ef3320e8d5a57f9d442e9b6667c4ed9c`
+- Task-12 review-fix rounds: `1/5 fixed; round 2 pending`
 - Task-9 dispatch token: `task-9-implementer-attempt-1-97d44dd20`
 - Task-9 role: `implementer`
 - Task-9 model: `high`
@@ -442,4 +445,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - Task-4审查-修复轮次: `2/2 PASS`
-- 状态: Task12 fix round 1即将派发；Task13不得运行。
+- 状态: Task12 fix round 1已完成；待scoped re-review，Task13不得运行。
