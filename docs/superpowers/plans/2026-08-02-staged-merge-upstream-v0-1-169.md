@@ -1736,7 +1736,7 @@ Expected: 该提交只更新最终拓扑、migration 和 integration 证据；�
 
 ### Task 18: 完成本地能力专项 review 与最终验证报告
 
-- [ ] Task 18: 完成本地能力专项 review 与最终验证报告
+- [x] Task 18: 完成本地能力专项 review 与最终验证报告
 
 **映射 OpenSpec:** 5.4
 
