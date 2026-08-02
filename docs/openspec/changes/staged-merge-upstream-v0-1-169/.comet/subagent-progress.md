@@ -2,9 +2,9 @@
 
 - Plan: `docs/superpowers/plans/2026-08-02-staged-merge-upstream-v0-1-169.md`
 - Review mode: `thorough`
-- 当前任务: Task 4 - 验证阶段 0 的本地保护测试与生成稳定性
-- 映射 OpenSpec: 1.4
-- 阶段: `review-1 / fix-result + review-2 / dispatch-intent`
+- 当前任务: Task 5 - 执行阶段 0 row 10 Docker/Testcontainers 判定
+- 映射 OpenSpec: 1.5
+- 阶段: `task-4 / complete + task-5 / pending`
 - Review-fix dispatch token: `task-4-review-fix-attempt-1-902646803`
 - Review-fix role: `fix-agent`
 - Review-fix model: `high`
@@ -17,7 +17,10 @@
 - Review-2 role: `reviewer`
 - Review-2 model: `high`
 - Review-2 base HEAD: `073d453534ac78661b82030cb975475daa7f9529`
-- Review-2 task ID: `pending atomic functions.task return`
+- Review-2 task ID: `ses_03f2cd9adffeSZCA60h4Kst0BQ`
+- Review-2 result: `PASS`
+- Controller verification: 同请求Images `go test` exit 0（1.556s）；repository lint exit 0（0 issues）；静态/conflict gate exit 0；完整`make test` exit 0（219 files/1650 tests）；generated paths无diff；tracked clean，仅selection。
+- Controller verification limit: `go test -race`因当前`CGO_ENABLED=0`不可运行；标准测试、channel同步静态审查与fresh reviewer均通过。
 - Fix-2 dispatch token: `task-4-fix-attempt-2-ddb37f772`
 - Fix-2 role: `fix-agent`
 - Fix-2 model: `high`
@@ -81,5 +84,5 @@
 - Risk signals: service test tag 配置不匹配；`wire_gen.go` 生成漂移；conflict grep 合法字符串假阳性。
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
-- 审查-修复轮次: `2/2 dispatching`
-- 状态: review-fix已完成且tracked clean；即将派发fresh reviewer 2/2，返回前不得重复派发或checkoff。
+- 审查-修复轮次: `2/2 PASS`
+- 状态: Task4与OpenSpec 1.4已由controller勾选；Task5尚未派发，唯一剩余基线gap为row10 Docker quota/outbox/migration integration。
