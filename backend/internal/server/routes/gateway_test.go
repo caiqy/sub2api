@@ -340,6 +340,10 @@ func TestGatewayRoutesGrokAllowsCLICompatibilityEntrypoints(t *testing.T) {
 // 在入口就被拒绝，不得进入调度与转发流程。
 func TestGatewayRoutesResponsesSubpathRejectsNonConformingSubpaths(t *testing.T) {
 	router := newGatewayRoutesTestRouter()
+	directNextCalls := 0
+	directGuard := guardResponsesSubpath(func(*gin.Context) {
+		directNextCalls++
+	})
 
 	for _, prefix := range []string{
 		"/v1/responses",
@@ -359,6 +363,11 @@ func TestGatewayRoutesResponsesSubpathRejectsNonConformingSubpaths(t *testing.T)
 			"/compact//detail",
 		} {
 			path := prefix + suffix
+			directContext, _ := gin.CreateTestContext(httptest.NewRecorder())
+			directContext.Request = httptest.NewRequest(http.MethodPost, path, nil)
+			directGuard(directContext)
+			require.Zero(t, directNextCalls, "path=%s must not call the downstream handler", path)
+
 			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"model":"gpt-5"}`))
 			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()

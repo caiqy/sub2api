@@ -23,6 +23,7 @@ func TestSanitizedUpstreamPathSuffixRejectsNonConformingSegments(t *testing.T) {
 		`/..\..\x`,
 		`/compact\..`,
 		`/compact\detail`,
+		`compact\detail`,
 		"compact?next=%2fmodels",
 		"compact#fragment",
 		"/?a=b",
@@ -90,18 +91,16 @@ func TestSanitizedUpstreamPathSuffixRejectsNonConformingSegments(t *testing.T) {
 }
 
 func TestSanitizedUpstreamPathSuffixEnforcesBounds(t *testing.T) {
-	longSegment := "/"
-	for i := 0; i < maxUpstreamPathSegmentLen+1; i++ {
-		longSegment += "a"
-	}
-	_, ok := sanitizedUpstreamPathSuffix(longSegment)
+	const tooLongSegment = "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	const tooManySegments = "/a/a/a/a/a/a/a/a/a"
+
+	require.Equal(t, 128, maxUpstreamPathSegmentLen)
+	require.Equal(t, 8, maxUpstreamPathSegments)
+	require.Len(t, tooLongSegment[1:], 129)
+	_, ok := sanitizedUpstreamPathSuffix(tooLongSegment)
 	require.False(t, ok, "over-long segment must be rejected")
 
-	deep := ""
-	for i := 0; i <= maxUpstreamPathSegments; i++ {
-		deep += "/a"
-	}
-	_, ok = sanitizedUpstreamPathSuffix(deep)
+	_, ok = sanitizedUpstreamPathSuffix(tooManySegments)
 	require.False(t, ok, "over-deep suffix must be rejected")
 }
 
@@ -111,38 +110,36 @@ func TestSanitizedUpstreamPathSuffixEnforcesBounds(t *testing.T) {
 func TestOpenAIResponsesRequestPathSuffixRejectsNonConformingSubpaths(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	nonConformingPaths := []string{
-		"/v1/responses/../models",
-		"/v1/responses/../../models",
-		"/v1/responses/...",
-		"/v1/responses/%2e%2e/models",
-		"/v1/responses/%2E%2E%2Fmodels",
-		"/v1/responses/compact%2f..%2fmodels",
-		`/v1/responses/compact\detail`,
-		"/v1/responses/%5c..%5cmodels",
-		"/v1/responses/../../x/y",
-		"/v1/responses/..%2f..%2fx/y",
-		"/v1/responses/%2e%2e/%2e%2e/x",
-		"/responses/%2e%2e%2fx",
-		"/backend-api/codex/responses/../../../x",
-		`/v1/responses/..\..\x`,
-		"/v1/responses/%3fa=b",
-		"/v1/responses/x%23frag",
-		"/v1/responses//double",
-		"/v1/responses/compact//detail",
-	}
-	for _, path := range nonConformingPaths {
-		t.Run(path, func(t *testing.T) {
-			c := newResponsesSuffixTestContext(t, path)
+	for _, prefix := range []string{
+		"/v1/responses",
+		"/responses",
+		"/backend-api/codex/responses",
+	} {
+		for _, suffix := range []string{
+			"/../models",
+			"/../../models",
+			"/...",
+			"/%2e%2e/models",
+			"/%2E%2E%2Fmodels",
+			"/compact%2f..%2fmodels",
+			`/compact\detail`,
+			"/%5c..%5cmodels",
+			"//double",
+			"/compact//detail",
+		} {
+			path := prefix + suffix
+			t.Run(path, func(t *testing.T) {
+				c := newResponsesSuffixTestContext(t, path)
 
-			require.False(t, IsForwardableOpenAIResponsesRequestPath(c),
-				"path %q must be rejected at the gateway edge", path)
-			require.Empty(t, openAIResponsesRequestPathSuffix(c),
-				"path %q must never contribute an upstream path suffix", path)
-			require.Equal(t, chatgptCodexURL,
-				appendOpenAIResponsesRequestPathSuffix(chatgptCodexURL, openAIResponsesRequestPathSuffix(c)))
-			require.False(t, isOpenAIResponsesCompactPath(c))
-		})
+				require.False(t, IsForwardableOpenAIResponsesRequestPath(c),
+					"path %q must be rejected at the gateway edge", path)
+				require.Empty(t, openAIResponsesRequestPathSuffix(c),
+					"path %q must never contribute an upstream path suffix", path)
+				require.Equal(t, chatgptCodexURL,
+					appendOpenAIResponsesRequestPathSuffix(chatgptCodexURL, openAIResponsesRequestPathSuffix(c)))
+				require.False(t, isOpenAIResponsesCompactPath(c))
+			})
+		}
 	}
 
 	// 合法子路径必须保持原样转发。

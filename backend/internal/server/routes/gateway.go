@@ -22,6 +22,25 @@ import (
 	"github.com/tidwall/sjson"
 )
 
+// /responses/*subpath 的子路径会被转发到上游同名端点之后，因此在入口就拒掉
+// 不可转发的子路径，不让它进入调度与转发流程。可转发的判定见
+// service.IsForwardableOpenAIResponsesRequestPath 及 upstream_path_guard.go。
+func guardResponsesSubpath(next gin.HandlerFunc) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !service.IsForwardableOpenAIResponsesRequestPath(c) {
+			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
+			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{
+				"error": gin.H{
+					"type":    "not_found_error",
+					"message": "Unsupported responses subpath",
+				},
+			})
+			return
+		}
+		next(c)
+	}
+}
+
 // RegisterGatewayRoutes 注册 API 网关路由（Claude/OpenAI/Gemini 兼容）
 func RegisterGatewayRoutes(
 	r *gin.Engine,
@@ -156,25 +175,6 @@ func RegisterGatewayRoutes(
 		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 		c.JSON(http.StatusNotFound, gin.H{"error": gin.H{"type": "not_found_error", "message": "Videos API is not supported for this platform"}})
 	}
-	// /responses/*subpath 的子路径会被转发到上游同名端点之后，因此在入口就拒掉
-	// 不可转发的子路径，不让它进入调度与转发流程。可转发的判定见
-	// service.IsForwardableOpenAIResponsesRequestPath 及 upstream_path_guard.go。
-	guardResponsesSubpath := func(next gin.HandlerFunc) gin.HandlerFunc {
-		return func(c *gin.Context) {
-			if !service.IsForwardableOpenAIResponsesRequestPath(c) {
-				service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
-				c.AbortWithStatusJSON(http.StatusNotFound, gin.H{
-					"error": gin.H{
-						"type":    "not_found_error",
-						"message": "Unsupported responses subpath",
-					},
-				})
-				return
-			}
-			next(c)
-		}
-	}
-
 	// API网关（Claude API兼容）
 	gateway := r.Group("/v1")
 	gateway.Use(bodyLimit)

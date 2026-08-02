@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -100,7 +101,12 @@ func TestGeminiAIStudioInvalidModelsDoNotSendRequests(t *testing.T) {
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-pro:generateContent", nil)
 			upstream := &geminiCompatHTTPUpstreamStub{}
-			svc := &GeminiMessagesCompatService{httpUpstream: upstream}
+			svc := &GeminiMessagesCompatService{
+				cfg: &config.Config{Security: config.SecurityConfig{
+					URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+				}},
+				httpUpstream: upstream,
+			}
 
 			require.Error(t, tc.forward(svc, c, account))
 			require.Zero(t, upstream.calls)
