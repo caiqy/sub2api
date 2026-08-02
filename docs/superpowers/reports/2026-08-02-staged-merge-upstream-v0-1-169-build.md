@@ -812,3 +812,179 @@ git rev-parse HEAD:backend/migrations/192_subscription_cache_invalidation_outbox
 - 一次 Windows `user-mapped section open` 在精确、允许的重试条件下恢复；所有后续 generation 稳定、无 diff，但其外部环境属性应继续保留为风险信号。
 - Docker quota/outbox/migration integration 未执行，严格保留给 Task 5。
 - 未执行 fetch、merge、push、tag、release、deploy、服务器或镜像操作；ledger 提交前无 tracked 工作树 diff。
+
+## Review Repair Evidence
+
+- Review repair P1 commit：`d750199d0`（`test: observe Images audit payload lifecycle`），严格只含 `backend/internal/handler/openai_gateway_handler.go`、`backend/internal/handler/openai_images.go`、`backend/internal/handler/openai_images_controls_test.go`。
+- P1 仅增加 request-scoped test hook。hook 为 nil 时仍传入原始 `parsed.ModerationBody`；没有修改 shared `handlerPromptEngine`、constructor、interface 或默认生产路径。
+- 本轮没有执行 `make -C backend generate`、Docker、remote、fetch、merge、push、tag、release 或 deploy。
+
+### P1 RED And GREEN
+
+RED command, run from `backend`:
+
+```powershell
+$imagesRedLog = Join-Path $env:TEMP "sub2api-stage0-images-hook-red-$([guid]::NewGuid().ToString('N')).log"
+go test -count=1 ./internal/handler -run '^(TestOpenAIImages_DisabledSecurityAuditDoesNotFreezePayload|TestOpenAIImages_LegacyModerationDefersPayloadUntilRuntimeScope|TestOpenAIImages_SecurityAuditFreezesPayloadAtMostOnce)$' 2>&1 | Tee-Object -FilePath $imagesRedLog
+$imagesRedExit = $LASTEXITCODE
+```
+
+- exit code：`1`；日志：`C:\Users\caiqy\AppData\Local\Temp\sub2api-stage0-images-hook-red-0a87b6d6705b4b3e86079c8459fc7910.log`。
+- 关键输出仅为 `TestOpenAIImages_SecurityAuditFreezesPayloadAtMostOnce` 的 provider assertion：`expected: 1`、`actual : 0`。前两个同请求 zero-count 测试完成，未出现 `build failed`、`undefined:`、Docker 或 Testcontainers 签名。
+- RED 的第三个测试使用 `ModeAsync` 的非阻塞 engine，不等待 `started`；旧 callsite 仍使用真实 `parsed.ModerationBody`，所以请求 bounded completion 后测试 hook 尚未被调用。
+
+GREEN commands, run from `backend` unless stated otherwise:
+
+```powershell
+go test -count=1 ./internal/handler -run '^(TestOpenAIImages_DisabledSecurityAuditDoesNotFreezePayload|TestOpenAIImages_LegacyModerationDefersPayloadUntilRuntimeScope|TestOpenAIImages_SecurityAuditFreezesPayloadAtMostOnce)$'
+```
+
+- exit code：`0`；关键输出：`ok github.com/Wei-Shaw/sub2api/internal/handler 1.517s`。
+- 第三个测试改用 test-local `blockingImagesPromptEngine`，并按 `started`、provider count、captured parsed pointer、`release`、`done` 顺序验证。`sync.Once` 的 `t.Cleanup(release)` 在超时或断言失败时仍解除阻塞；释放前 `Prompt` 可见，`done` 后已清空。
+
+```powershell
+go test -count=1 ./internal/handler -run '^(TestOpenAIImages_UnifiedAuditRunsLegacyOnce|TestOpenAIImages_ContentModerationUsesFrozenPayloadBeforeRelease|TestOpenAIImages_SecurityAuditUsesFrozenPayloadBeforeRelease|TestOpenAIImages_MultipartTextIsReleasedBeforeBlockedUpstream|TestOpenAIImages_OAuthTextIsReleasedBeforeBlockedUpstream|TestOpenAIImages_DisabledSecurityAuditDoesNotFreezePayload|TestOpenAIImages_LegacyModerationDefersPayloadUntilRuntimeScope|TestOpenAIImages_SecurityAuditFreezesPayloadAtMostOnce)$'
+```
+
+- exit code：`0`；关键输出：`ok github.com/Wei-Shaw/sub2api/internal/handler 5.082s`。
+
+```powershell
+go test -count=1 ./internal/handler -run '^(TestGatewayHandlerMessagesUsesEffectiveRouteSnapshot|TestOpenAIImages_UnifiedAuditRunsLegacyOnce|TestOpenAIImages_ContentModerationUsesFrozenPayloadBeforeRelease|TestOpenAIImages_SecurityAuditUsesFrozenPayloadBeforeRelease|TestOpenAIImages_MultipartTextIsReleasedBeforeBlockedUpstream|TestOpenAIImages_OAuthTextIsReleasedBeforeBlockedUpstream|TestOpenAIImages_DisabledSecurityAuditDoesNotFreezePayload|TestOpenAIImages_LegacyModerationDefersPayloadUntilRuntimeScope|TestOpenAIImages_SecurityAuditFreezesPayloadAtMostOnce)$'
+```
+
+- exit code：`0`；关键输出：`ok github.com/Wei-Shaw/sub2api/internal/handler 4.380s`。
+
+```powershell
+make test
+```
+
+- exit code：`0`；关键输出：frontend `219` test files passed、`1650` tests passed。输出仍包含既有 Vue/router-link、jsdom 与 intentional error-path test warnings，但没有失败。
+
+### Current Actual Reruns
+
+The following commands were actually rerun in this review repair. They are not Fix-2 citations.
+
+```powershell
+go test -count=1 ./internal/service -run '^(TestLayered_GroupedAccountPassesDBFreshRecheck|TestLayered_WaitPlanFallbackSkipsUpstreamRestrictedAccount|TestLayered_SessionStickyPreservesGrokBinding|TestLayered_SessionStickyRecheckHonorsImageCapability|TestGatewayServiceRecordUsage_AttachesFinalUpstreamRequestSnapshot|TestCalculateQuotaCycleAdvance_ResetsOnlySingleExhaustedWindow|TestAdvanceQuotaCycle_RejectsTwoExhaustedWindowsBeforeUpdate|TestAdminResetQuota_UsesCommittedResetVersionForCacheInvalidation|TestCheckAndResetWindows_UsesCommittedResetVersionForCacheInvalidation)$'
+```
+
+- exit code：`0`；关键输出：`ok github.com/Wei-Shaw/sub2api/internal/service 1.592s`。
+
+```powershell
+go test -count=1 -tags unit ./internal/service -run '^(TestSubscriptionCacheInvalidationWorker_(RequiresTombstoneAndPublishBeforeAck|UsesSafetySecondPass|PublishGetsIndependentTimeout)|TestSubscriptionCacheInvalidationFastPath_(WaitsForOuterCommit|NilCacheStillClearsLocalL1|UnknownVersionOnlyClearsLocalL1)|TestAdvanceQuotaCycle_UsesVersionedPostCommitInvalidation)$'
+```
+
+- exit code：`0`；关键输出：`ok github.com/Wei-Shaw/sub2api/internal/service 3.546s`。
+
+```powershell
+golangci-lint run ./internal/repository
+```
+
+- exit code：`0`；关键输出：`0 issues.`。
+
+```powershell
+git diff --check
+git diff --cached --check
+git diff --name-only --diff-filter=U
+$conflictPattern = '^(<<<<<<< .+|\|\|\|\|\|\|\| .+|=======|>>>>>>> .+)$'
+git grep -n -I -E $conflictPattern -- ':!docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md'
+$conflictExit = $LASTEXITCODE
+if ($conflictExit -eq 0) { throw 'tracked conflict markers found' }
+if ($conflictExit -ne 1) { throw "conflict marker scan failed: $conflictExit" }
+```
+
+- `git diff --check` exit code：`0`，无输出。
+- `git diff --cached --check` exit code：`0`，无输出。
+- `git diff --name-only --diff-filter=U` exit code：`0`，无输出。
+- conflict scan exit code：`1`，无匹配；这是指定的 PASS 条件。
+
+```powershell
+git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
+git status --short --untracked-files=all
+```
+
+- generated-path diff exit code：`0`，无输出。
+- status exit code：`0`；关键输出仅为 `?? .comet/current-change.json`。
+
+### Fix-2 Historical References Only
+
+The following entries were not rerun in this review repair. They are exact command and result references to Fix-2 evidence recorded at `2026-08-02T12:00:51+08:00` in commit `31f239703220b6a0765834d37fbc5981dc8c25fd`, not claims of new execution.
+
+```powershell
+go test -count=1 ./internal/server/routes -run '^(TestEveryGatewayPOSTRouteIsClassifiedForPromptAuditCoverage|TestResponsesWebSocketHasFirstAndSubsequentTurnPromptGates)$'
+```
+
+- Fix-2 exit code：`0`；关键输出：`ok github.com/Wei-Shaw/sub2api/internal/server/routes 2.112s`。
+
+```powershell
+go test -count=1 ./internal/service -run '^(TestLayered_FallbackWaitPlanRechecksPrivacyRequirementAgainstDB|TestLayered_PreviousResponseStickyHonorsRequirePrivacySet)$'
+```
+
+- Fix-2 exit code：`0`；关键输出：两个 rows 1/2 privacy and previous-response sticky 测试通过。
+
+```powershell
+go test -count=1 ./internal/handler -run '^(TestOpenAIResponsesWebSocket_ReacquireSlotsOnSecondTurnWithoutDoubleRelease|TestOpenAIResponsesWebSocket_SecondTurnGroupAcquireFailureRollsBackUserSlot|TestOpenAIResponsesWebSocket_SecondTurnAccountAcquireFailureRollsBackUserAndGroupSlots)$'
+```
+
+- Fix-2 exit code：`0`；关键输出：三个 row 3a Responses WebSocket slot ownership/rollback 测试通过。
+
+```powershell
+go test -count=1 ./internal/service -run '^(TestRunLiveControllerClosesExpiredSession|TestLiveSidebandNormalCloseEndsCall|TestOpenAIWSPassthroughTurnLifecycle_SerializesTerminalCommitAndNextTurn)$'
+```
+
+- Fix-2 exit code：`0`；关键输出：三个 row 3b Live/sideband/terminal lifecycle 测试通过。
+
+```powershell
+go test -count=1 ./internal/service -run '^(TestGetModelPricing_Gpt54UsesStaticFallbackWhenRemoteMissing|TestOpenAIGatewayService_ForwardCountTokensAsAnthropic_OAuthFallsBackWhenPlatformEndpointUnsupported|TestGatewayServiceNewSelectionResult_ReleasesAcquiredSlotWhenHydrationFails)$'
+```
+
+- Fix-2 exit code：`0`；关键输出：三个 row 13 non-Docker pricing/count_tokens/selection-release fallback 测试通过。
+
+```powershell
+go test -count=1 -tags unit ./internal/handler ./internal/handler/admin ./internal/service -run '^(TestGetMyPlatformQuotas_EmptyReturns200WithEmptyArray|TestGetMyPlatformQuotas_D14_LazyZeroForExpiredWindow|TestGetMyPlatformQuotas_NilRepo_Returns200Empty|TestGetMyPlatformQuotas_NoAuth_Returns401|TestLazyZeroQuotaForResponse_UserViewStripsWindowStart|TestLazyZeroQuotaForResponse_AdminViewIncludesWindowStart|TestLazyZeroQuotaForResponse_ActiveWindowPreservesUsage|TestUserHandlerBatchUpdateLimitsAcceptsPartialAndZeroValues|TestUserHandlerBatchUpdateLimitsRejectsInvalidRequests|TestUserHandlerBatchUpdateLimitsAllUsesEveryListedUser|TestDuplicateGroupHandlerReturnsAdminDTOWithoutOperationMetadata|TestDuplicateGroupHandlerRejectsInvalidID|TestDuplicateGroupHandlerReplaysSameIdempotencyKey|TestDuplicateGroupHandlerRecoversAfterMarkSucceededFailure|TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState|TestDuplicateGroupRecoversSameOperationAndScopesByAdmin|TestDuplicateGroupAdvancesNameAndTruncatesUnicodeByRunes|TestDuplicateGroupAtomicCreateFailureReturnsNoCopy)$'
+```
+
+- Fix-2 exit code：`0`；关键输出：18 个 row 11 user resources、batch limits 和 group duplication unit-tag 测试通过。
+
+```powershell
+go test -count=1 ./internal/service -run '^TestUserCanBindGroupRejectsBlockedPublicGroup$'
+```
+
+- Fix-2 exit code：`0`；关键输出：row 11 default user-group binding 测试通过。
+
+```powershell
+pnpm --dir frontend exec vitest run src/utils/__tests__/subscriptionQuota.spec.ts src/views/admin/__tests__/SettingsView.spec.ts src/views/admin/__tests__/UsageView.spec.ts src/components/channels/__tests__/AvailableChannelsTable.spec.ts
+```
+
+- Fix-2 exit code：`0`；关键输出：`4` files、`50` tests passed。
+
+```powershell
+make "VERSION=0.1.165.4" "SHELL=D:/scoop/shims/bash.exe" build
+```
+
+- Fix-2 exit code：`0`；关键输出：`CGO_ENABLED=0 go build` 与 `vue-tsc -b && vite build` 成功。
+
+```powershell
+git rev-parse HEAD:backend/migrations/191_subscription_quota_advance_receipts.sql
+git rev-parse HEAD:backend/migrations/192_subscription_cache_invalidation_outbox.sql
+```
+
+- Fix-2 exit codes：`0`、`0`；关键输出依次为 `c22d47d79cbbaf4bc40524d42ef52e6cc8ac3af6`、`502ecec1caf9f76e022c2e83acf3707190539301`。
+
+### Fix-2 Generation Log Inspection
+
+- Controller independently read all `12` retained Fix-2 Temp logs. The real run IDs are `fix2-wire-refresh`、`fix2-wire-stability-1`、`fix2-wire-stability-2`、`fix2-full-stability-1` and `fix2-full-stability-2`.
+- `fix2-wire-refresh` attempt 1 stdout/stderr: `C:\Users\caiqy\AppData\Local\Temp\sub2api-stage0-fix2-wire-refresh-attempt-1.log`; `C:\Users\caiqy\AppData\Local\Temp\sub2api-stage0-fix2-wire-refresh-attempt-1.stderr.log`.
+- `fix2-wire-stability-1` attempt 1 stdout/stderr: `C:\Users\caiqy\AppData\Local\Temp\sub2api-stage0-fix2-wire-stability-1-attempt-1.log`; `C:\Users\caiqy\AppData\Local\Temp\sub2api-stage0-fix2-wire-stability-1-attempt-1.stderr.log`.
+- `fix2-wire-stability-2` attempt 1 stdout/stderr: `C:\Users\caiqy\AppData\Local\Temp\sub2api-stage0-fix2-wire-stability-2-attempt-1.log`; `C:\Users\caiqy\AppData\Local\Temp\sub2api-stage0-fix2-wire-stability-2-attempt-1.stderr.log`.
+- `fix2-wire-stability-2` attempt 2 stdout/stderr: `C:\Users\caiqy\AppData\Local\Temp\sub2api-stage0-fix2-wire-stability-2-attempt-2.log`; `C:\Users\caiqy\AppData\Local\Temp\sub2api-stage0-fix2-wire-stability-2-attempt-2.stderr.log`.
+- `fix2-full-stability-1` attempt 1 stdout/stderr: `C:\Users\caiqy\AppData\Local\Temp\sub2api-stage0-fix2-full-stability-1-attempt-1.log`; `C:\Users\caiqy\AppData\Local\Temp\sub2api-stage0-fix2-full-stability-1-attempt-1.stderr.log`.
+- `fix2-full-stability-2` attempt 1 stdout/stderr: `C:\Users\caiqy\AppData\Local\Temp\sub2api-stage0-fix2-full-stability-2-attempt-1.log`; `C:\Users\caiqy\AppData\Local\Temp\sub2api-stage0-fix2-full-stability-2-attempt-1.stderr.log`.
+- Four success attempts and the recovered retry each record `exit_code=0` and `diff_paths=`. The sole failed stdout records exit `2` and these 11 temporary `backend/ent` paths: `backend/ent/announcementread/announcementread.go`, `backend/ent/idempotencyrecord_create.go`, `backend/ent/identityadoptiondecision_update.go`, `backend/ent/promocode/promocode.go`, `backend/ent/proxy_delete.go`, `backend/ent/securitysecret/securitysecret.go`, `backend/ent/securitysecret/securitysecret_query.go`, `backend/ent/usagecleanuptask.go`, `backend/ent/usagelogdetail/usagelogdetail.go`, `backend/ent/userattributedefinition_query.go`, `backend/ent/userattributevalue/userattributevalue.go`.
+- The failed stderr contains the generated path `announcementread.go` with the exact `user-mapped section open` signature, followed only by `exit status 1`, `ent\generate.go:6: running "go": exit status 1`, and `make: *** [generate] Error 1` wrappers. Fix-2 restored the generated paths, waited two seconds, and retry attempt 2 completed with an empty diff path list; the current generated-path diff check above is also empty.
+
+### Superseded Historical Conclusion And Scope
+
+- The old statement at ledger line 738 that assigned row 13 to Task 5 is superseded. Task 5 only owns row 10 Docker quota/outbox/migration integration.
+- Row 13 deploy scripts are exclusively Task 13 work after the v0.1.169 merge. The current row 13 non-Docker test evidence is the explicit Fix-2 historical reference above.
+- Current remaining risk signal: the historic Windows user-mapped-section failure was transient and recovered under the bounded Fix-2 rules. Existing frontend warning output remains non-failing. Docker row 10 remains outside Task 4 and is not represented as complete here.
