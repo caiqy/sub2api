@@ -302,11 +302,12 @@ Expected: ledger 含完整矩阵和空的、可追踪的冲突台账；implement
 - Test: `backend/internal/service/subscription_reset_quota_test.go`
 - Modify test: `backend/internal/service/subscription_cache_invalidation_outbox_test.go`
 - Generated: `backend/cmd/server/wire_gen.go`
+- Modify for lint only: `backend/internal/repository/user_subscription_repo.go`
 - Test: `frontend/src/utils/__tests__/subscriptionQuota.spec.ts`
 
 **Interfaces:**
-- Consumes: Canonical matrix中的所有 `protected` 行，以及已记录的 default service test undefined-helper 编译失败和 stale Wire 输出 diagnostic evidence。
-- Produces: 基线通过/失败证据；允许仅修复 outbox test build tag 与 `wire_gen.go` 的 baseline gate defect。高风险行只能由命名测试覆盖，不接受口头推断。
+- Consumes: Canonical matrix中的所有 `protected` 行，以及已记录的 default service test undefined-helper 编译失败、stale Wire 输出和 deferred rows-close errcheck diagnostic evidence。
+- Produces: 基线通过/失败证据；允许仅修复 outbox test build tag、`wire_gen.go` stale output 与 `user_subscription_repo.go` 的 deferred rows-close lint defect。高风险行只能由命名测试覆盖，不接受口头推断。
 
 **Step 1: 补齐 Images 精确生命周期的直接保护测试**
 
@@ -365,10 +366,44 @@ Expected: default service 聚焦目标均 PASS，unit 命令精确覆盖并 PASS
 
 **Step 4: 刷新并稳定 Wire 生成输出**
 
-运行 `make -C backend generate`。只允许诊断已记录的依赖顺序/变量名 `backend/cmd/server/wire_gen.go` diff；禁止修改 `wire.go`、provider 或 module。
+以下 helper 只在本 Step 的同一 PowerShell Run block 内有效。每次调用先验证 clean Ent/Wire baseline；保存含 `<runId>-attempt-<attempt>` 的完整 stdout/stderr、exit code 和失败后 diff paths。只有至少一条 stderr 以 generated path 加精确 `user-mapped section open` signature 匹配，且剔除该行和已知 make/exit-status 包装后的其余 stderr 不含 `error`、`fail`、`panic` 或 `fatal`，才恢复本次生成的 Ent/Wire paths、等待 2 秒并最多重试三次；其它错误、非 generated path、恢复失败或第三次失败均 BLOCK。此规则不识别锁持有者、不杀进程，也不改 antivirus、CodeGraph、`wire.go`、provider 或 module。
 
 ```powershell
-make -C backend generate
+$runGenerateWithRetry = {
+    param([Parameter(Mandatory)][string]$runId)
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        $baselinePaths = @(git diff --name-only)
+        $nonGeneratedBaseline = $baselinePaths | Where-Object { $_ -notlike 'backend/ent/*' -and $_ -ne 'backend/cmd/server/wire_gen.go' }
+        if ($nonGeneratedBaseline -or $baselinePaths) { throw "generate requires a clean Ent/Wire baseline: $($baselinePaths -join ', ')" }
+
+        $log = Join-Path $env:TEMP "sub2api-stage0-$runId-attempt-$attempt.log"
+        $stderrLog = Join-Path $env:TEMP "sub2api-stage0-$runId-attempt-$attempt.stderr.log"
+        & make -C backend generate 1> $log 2> $stderrLog
+        $exitCode = $LASTEXITCODE
+        "exit_code=$exitCode" | Add-Content -LiteralPath $log
+        $failedPaths = @(git diff --name-only)
+        "diff_paths=$($failedPaths -join ',')" | Add-Content -LiteralPath $log
+        $nonGeneratedPaths = $failedPaths | Where-Object { $_ -notlike 'backend/ent/*' -and $_ -ne 'backend/cmd/server/wire_gen.go' }
+        if ($nonGeneratedPaths) { throw "generate changed non-generated paths: $($nonGeneratedPaths -join ', ')" }
+        if ($exitCode -eq 0) { return }
+
+        $stderrLines = @(Get-Content -LiteralPath $stderrLog)
+        $mappedSectionPattern = '^(?=.*backend[\\/](?:ent[\\/].+|cmd[\\/]server[\\/]wire_gen\.go))(?=.*user-mapped section open).+$'
+        $mappedSectionLines = $stderrLines | Where-Object { $_ -match $mappedSectionPattern }
+        if (-not $mappedSectionLines) { throw "generate failed without a retriable generated-path signature; inspect $log and $stderrLog" }
+        $makeWrapperPattern = '^(?:make(?:\[\d+\])?:.*|.*exit status \d+.*)$'
+        $residualStderr = $stderrLines | Where-Object { $_ -notmatch $mappedSectionPattern -and $_ -notmatch $makeWrapperPattern }
+        $additionalErrors = $residualStderr | Where-Object { $_ -match '(?i)\b(error|fail|panic|fatal)\b' }
+        if ($additionalErrors) { throw "generate stderr contains non-retriable errors: $($additionalErrors -join '; ')" }
+        git restore --source=HEAD --worktree -- backend/ent backend/cmd/server/wire_gen.go
+        git.exe diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
+        if ($LASTEXITCODE -ne 0) { throw "generated paths could not be recovered; inspect $log and $stderrLog" }
+        if ($attempt -eq 3) { throw "generate failed after three attempts; inspect $log and $stderrLog" }
+        Start-Sleep -Seconds 2
+    }
+}
+
+& $runGenerateWithRetry 'wire-refresh'
 $wireDiff = @(git diff --name-only)
 $wireDiff
 if (Compare-Object -ReferenceObject @('backend/cmd/server/wire_gen.go') -DifferenceObject $wireDiff) { throw 'Wire generation changed paths outside wire_gen.go' }
@@ -378,21 +413,60 @@ $staged = @(git diff --cached --name-only)
 $staged
 if (Compare-Object -ReferenceObject @('backend/cmd/server/wire_gen.go') -DifferenceObject $staged) { throw 'Wire output allowlist mismatch' }
 git.exe commit -m "chore: refresh Wire output"
-make -C backend generate
+& $runGenerateWithRetry 'wire-stability-1'
 git.exe diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
-make -C backend generate
+& $runGenerateWithRetry 'wire-stability-2'
 git.exe diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
 ```
 
-Expected: Wire commit 严格只含 `backend/cmd/server/wire_gen.go` 且人工确认 diff 仅为已诊断的依赖顺序/变量名生成变更；提交后两轮 generate 均退出 0 且不产生 Ent/Wire diff。
+Expected: Wire commit 严格只含 `backend/cmd/server/wire_gen.go` 且人工确认 diff 仅为已诊断的依赖顺序/变量名生成变更；每次 generate 均有完整日志、exit 和 diff-path 证据，成功后两轮 generate 均退出 0 且不产生 Ent/Wire diff。
 
-**Step 5: 运行 scheduler、sticky、gateway、审计、Images 和 quota 聚焦测试**
+**Step 5: 用 lint TDD 修复 deferred subscription rows close**
+
+以已记录的 `golangci-lint run ./internal/repository` 在 `backend/internal/repository/user_subscription_repo.go:578` 对 `defer rows.Close()` 的 unchecked errcheck 为 RED。Run from `backend`，并先运行：
+
+```powershell
+$redLintLog = Join-Path $env:TEMP "sub2api-stage0-repository-lint-red-$([guid]::NewGuid().ToString('N')).log"
+golangci-lint run ./internal/repository 2>&1 | Tee-Object -FilePath $redLintLog
+$redLintExit = $LASTEXITCODE
+if ($redLintExit -eq 0) { throw 'expected deferred rows.Close errcheck RED' }
+$lintFindings = @(Get-Content -LiteralPath $redLintLog | Where-Object { $_ -match '^[^:]+:\d+:\d+:' })
+$expectedLintPattern = '^(?=.*internal[\\/]repository[\\/]user_subscription_repo\.go:578:18)(?=.*errcheck)(?=.*rows\.Close).+$'
+$expectedLintFindings = $lintFindings | Where-Object { $_ -match $expectedLintPattern }
+$unexpectedLintFindings = $lintFindings | Where-Object { $_ -notmatch $expectedLintPattern }
+if ($expectedLintFindings.Count -ne 1 -or $unexpectedLintFindings) { throw "unexpected repository lint findings: $($lintFindings -join '; ')" }
+```
+
+只将该行改为 `defer func() { _ = rows.Close() }()`，复用同包既有 pattern；不新增抽象，不改变行为。然后运行并提交：
+
+Run the same command from `backend` and preserve its GREEN log:
+
+```powershell
+$greenLintLog = Join-Path $env:TEMP "sub2api-stage0-repository-lint-green-$([guid]::NewGuid().ToString('N')).log"
+golangci-lint run ./internal/repository 2>&1 | Tee-Object -FilePath $greenLintLog
+if ($LASTEXITCODE -ne 0) { throw "repository lint remains RED; inspect $greenLintLog" }
+git add backend/internal/repository/user_subscription_repo.go
+$staged = @(git diff --cached --name-only)
+$staged
+if (Compare-Object -ReferenceObject @('backend/internal/repository/user_subscription_repo.go') -DifferenceObject $staged) { throw 'deferred rows close lint allowlist mismatch' }
+git.exe commit -m "fix: handle deferred subscription rows close"
+```
+
+Expected: RED 必须只含精确的 `user_subscription_repo.go:578:18` `errcheck`/`rows.Close` finding，任何其它 lint finding BLOCK；同命令 GREEN 必须 exit 0。提交严格只含该 repository 文件的一行 deferred-close lint 修复，无新抽象或行为变化。
+
+**Step 6: 运行 scheduler、sticky、gateway、审计、Images 和 quota 聚焦测试**
 
 Run from `backend`:
 ```powershell
 go test -count=1 ./internal/service -run '^(TestLayered_GroupedAccountPassesDBFreshRecheck|TestLayered_WaitPlanFallbackSkipsUpstreamRestrictedAccount|TestLayered_SessionStickyPreservesGrokBinding|TestLayered_SessionStickyRecheckHonorsImageCapability|TestGatewayServiceRecordUsage_AttachesFinalUpstreamRequestSnapshot|TestCalculateQuotaCycleAdvance_ResetsOnlySingleExhaustedWindow|TestAdvanceQuotaCycle_RejectsTwoExhaustedWindowsBeforeUpdate|TestAdminResetQuota_UsesCommittedResetVersionForCacheInvalidation|TestCheckAndResetWindows_UsesCommittedResetVersionForCacheInvalidation)$'
 go test -count=1 ./internal/handler -run '^(TestGatewayHandlerMessagesUsesEffectiveRouteSnapshot|TestOpenAIImages_UnifiedAuditRunsLegacyOnce|TestOpenAIImages_ContentModerationUsesFrozenPayloadBeforeRelease|TestOpenAIImages_SecurityAuditUsesFrozenPayloadBeforeRelease|TestOpenAIImages_MultipartTextIsReleasedBeforeBlockedUpstream|TestOpenAIImages_OAuthTextIsReleasedBeforeBlockedUpstream|TestOpenAIImages_DisabledSecurityAuditDoesNotFreezePayload|TestOpenAIImages_LegacyModerationDefersPayloadUntilRuntimeScope|TestOpenAIImages_SecurityAuditFreezesPayloadAtMostOnce)$'
 go test -count=1 ./internal/server/routes -run '^(TestEveryGatewayPOSTRouteIsClassifiedForPromptAuditCoverage|TestResponsesWebSocketHasFirstAndSubsequentTurnPromptGates)$'
+go test -count=1 ./internal/service -run '^(TestLayered_FallbackWaitPlanRechecksPrivacyRequirementAgainstDB|TestLayered_PreviousResponseStickyHonorsRequirePrivacySet)$'
+go test -count=1 ./internal/handler -run '^(TestOpenAIResponsesWebSocket_ReacquireSlotsOnSecondTurnWithoutDoubleRelease|TestOpenAIResponsesWebSocket_SecondTurnGroupAcquireFailureRollsBackUserSlot|TestOpenAIResponsesWebSocket_SecondTurnAccountAcquireFailureRollsBackUserAndGroupSlots)$'
+go test -count=1 ./internal/service -run '^(TestRunLiveControllerClosesExpiredSession|TestLiveSidebandNormalCloseEndsCall|TestOpenAIWSPassthroughTurnLifecycle_SerializesTerminalCommitAndNextTurn)$'
+go test -count=1 ./internal/service -run '^(TestGetModelPricing_Gpt54UsesStaticFallbackWhenRemoteMissing|TestOpenAIGatewayService_ForwardCountTokensAsAnthropic_OAuthFallsBackWhenPlatformEndpointUnsupported|TestGatewayServiceNewSelectionResult_ReleasesAcquiredSlotWhenHydrationFails)$'
+go test -count=1 -tags unit ./internal/handler ./internal/handler/admin ./internal/service -run '^(TestGetMyPlatformQuotas_EmptyReturns200WithEmptyArray|TestGetMyPlatformQuotas_D14_LazyZeroForExpiredWindow|TestGetMyPlatformQuotas_NilRepo_Returns200Empty|TestGetMyPlatformQuotas_NoAuth_Returns401|TestLazyZeroQuotaForResponse_UserViewStripsWindowStart|TestLazyZeroQuotaForResponse_AdminViewIncludesWindowStart|TestLazyZeroQuotaForResponse_ActiveWindowPreservesUsage|TestUserHandlerBatchUpdateLimitsAcceptsPartialAndZeroValues|TestUserHandlerBatchUpdateLimitsRejectsInvalidRequests|TestUserHandlerBatchUpdateLimitsAllUsesEveryListedUser|TestDuplicateGroupHandlerReturnsAdminDTOWithoutOperationMetadata|TestDuplicateGroupHandlerRejectsInvalidID|TestDuplicateGroupHandlerReplaysSameIdempotencyKey|TestDuplicateGroupHandlerRecoversAfterMarkSucceededFailure|TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState|TestDuplicateGroupRecoversSameOperationAndScopesByAdmin|TestDuplicateGroupAdvancesNameAndTruncatesUnicodeByRunes|TestDuplicateGroupAtomicCreateFailureReturnsNoCopy)$'
+go test -count=1 ./internal/service -run '^TestUserCanBindGroupRejectsBlockedPublicGroup$'
 ```
 
 Run from repository root:
@@ -400,17 +474,51 @@ Run from repository root:
 pnpm --dir frontend exec vitest run src/utils/__tests__/subscriptionQuota.spec.ts src/views/admin/__tests__/SettingsView.spec.ts src/views/admin/__tests__/UsageView.spec.ts src/components/channels/__tests__/AvailableChannelsTable.spec.ts
 ```
 
-Expected: 每个命名测试 PASS。Task 4 的两项已诊断 baseline gate defect 仅按 Step 3/4 修复；其余失败先在 ledger 保存 RED，再在首次引入该回归的 release 段写最小复现断言和兼容修复，不能在基线任务中改变产品行为。matrix 只有当前直接测试 PASS 才可记为 `protected`，仅完成具体调用链审查才可记为 `manual`；Docker 专属 `gap` 留给 Task 5，任何其它 `gap` 必须在进入 full gate 前有明确状态或 BLOCK。
+Expected: 每个命名测试 PASS。rows 1、2、3、13 的现有 non-Docker 部分和 row 11 只有在上述直接命令实际 PASS 后才可记为 `protected`；row 11 可由其 18 个 unit-tag 测试与 default group-bind 测试直接记为 `protected`，不只为 `manual`。row 13 的 deploy scripts 尚未合入，明确为非当前 gap，由 Task 13 在 v0.1.169 merge 后执行并关闭该阶段证据；Task 5 只负责 row 10 quota/outbox/migration integration，不承接 row 13。Task 4 的三项已诊断 baseline gate defect 仅按 Step 3/4/5 修复；其余失败先在 ledger 保存 RED，再在首次引入该回归的 release 段写最小复现断言和兼容修复，不能在基线任务中改变产品行为。matrix 只有当前直接测试 PASS 才可记为 `protected`，仅完成具体调用链审查才可记为 `manual`；Task 4 结束不得有其它 `gap`，否则 BLOCK。
 
-**Step 6: 重跑阶段 0 full gate 与两轮生成检查**
+**Step 7: 重跑阶段 0 full gate 与两轮生成检查**
 
 Run from repository root:
 ```powershell
 make test
 make "VERSION=0.1.165.4" "SHELL=D:/scoop/shims/bash.exe" build
-make -C backend generate
+$runGenerateWithRetry = {
+    param([Parameter(Mandatory)][string]$runId)
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        $baselinePaths = @(git diff --name-only)
+        $nonGeneratedBaseline = $baselinePaths | Where-Object { $_ -notlike 'backend/ent/*' -and $_ -ne 'backend/cmd/server/wire_gen.go' }
+        if ($nonGeneratedBaseline -or $baselinePaths) { throw "generate requires a clean Ent/Wire baseline: $($baselinePaths -join ', ')" }
+
+        $log = Join-Path $env:TEMP "sub2api-stage0-$runId-attempt-$attempt.log"
+        $stderrLog = Join-Path $env:TEMP "sub2api-stage0-$runId-attempt-$attempt.stderr.log"
+        & make -C backend generate 1> $log 2> $stderrLog
+        $exitCode = $LASTEXITCODE
+        "exit_code=$exitCode" | Add-Content -LiteralPath $log
+        $failedPaths = @(git diff --name-only)
+        "diff_paths=$($failedPaths -join ',')" | Add-Content -LiteralPath $log
+        $nonGeneratedPaths = $failedPaths | Where-Object { $_ -notlike 'backend/ent/*' -and $_ -ne 'backend/cmd/server/wire_gen.go' }
+        if ($nonGeneratedPaths) { throw "generate changed non-generated paths: $($nonGeneratedPaths -join ', ')" }
+        if ($exitCode -eq 0) { return }
+
+        $stderrLines = @(Get-Content -LiteralPath $stderrLog)
+        $mappedSectionPattern = '^(?=.*backend[\\/](?:ent[\\/].+|cmd[\\/]server[\\/]wire_gen\.go))(?=.*user-mapped section open).+$'
+        $mappedSectionLines = $stderrLines | Where-Object { $_ -match $mappedSectionPattern }
+        if (-not $mappedSectionLines) { throw "generate failed without a retriable generated-path signature; inspect $log and $stderrLog" }
+        $makeWrapperPattern = '^(?:make(?:\[\d+\])?:.*|.*exit status \d+.*)$'
+        $residualStderr = $stderrLines | Where-Object { $_ -notmatch $mappedSectionPattern -and $_ -notmatch $makeWrapperPattern }
+        $additionalErrors = $residualStderr | Where-Object { $_ -match '(?i)\b(error|fail|panic|fatal)\b' }
+        if ($additionalErrors) { throw "generate stderr contains non-retriable errors: $($additionalErrors -join '; ')" }
+        git restore --source=HEAD --worktree -- backend/ent backend/cmd/server/wire_gen.go
+        git.exe diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
+        if ($LASTEXITCODE -ne 0) { throw "generated paths could not be recovered; inspect $log and $stderrLog" }
+        if ($attempt -eq 3) { throw "generate failed after three attempts; inspect $log and $stderrLog" }
+        Start-Sleep -Seconds 2
+    }
+}
+
+& $runGenerateWithRetry 'full-stability-1'
 git.exe diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
-make -C backend generate
+& $runGenerateWithRetry 'full-stability-2'
 git.exe diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
 git.exe diff --check
 git.exe diff --cached --check
@@ -426,7 +534,7 @@ git rev-parse HEAD:backend/migrations/192_subscription_cache_invalidation_outbox
 
 Expected: 两次 generate 均不产生 `backend/ent` 或 `backend/cmd/server/wire_gen.go` diff；两个 whitespace 命令无输出；unmerged 命令无输出；conflict marker scan 的 no-match exit `1` 是 PASS，exit `0` 的真实 marker 或其它 grep 错误均 BLOCK；最后两个命令精确输出 `c22d47d79cbbaf4bc40524d42ef52e6cc8ac3af6` 和 `502ecec1caf9f76e022c2e83acf3707190539301`。
 
-**Step 7: 追加 repaired stage 0 gate 结果并严格提交 ledger**
+**Step 8: 追加 repaired stage 0 gate 结果并严格提交 ledger**
 
 Run:
 ```powershell
@@ -437,11 +545,11 @@ if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-stage
 git.exe commit -m "docs: record repaired stage 0 gates"
 ```
 
-Expected: ledger 追加每个修复后命令的退出码和命名失败，不改写既有 `docs: record stage 0 local gates` 失败证据提交；不存在未归属的生成物。Images、unit-tag、Wire 与 repaired ledger 四类提交保持分离，本提交严格只含 build ledger；implementer 不勾选 Plan/OpenSpec，reviewer 通过后 controller 单独 check off Task 4/OpenSpec 1.4。
+Expected: 仅在 Step 7 的 `make test`、VERSION/SHELL build、两轮 generate、除 conflict scan 外的静态检查和 migration OID 命令全部退出 0，且 conflict scan 为其指定的 no-match exit `1` 后，ledger 才追加每个修复后命令的退出码和命名失败；ledger 必须逐一记录 `wire-refresh`、`wire-stability-1`、`wire-stability-2`、`full-stability-1`、`full-stability-2` 的 stdout/stderr 日志路径。不得改写既有 `docs: record stage 0 local gates` 失败证据提交。不存在未归属的生成物。Images、unit-tag、Wire、lint 与 repaired ledger 五类提交保持分离，本提交严格只含 build ledger；implementer 不勾选 Plan/OpenSpec，reviewer 通过后 controller 单独 check off Task 4/OpenSpec 1.4。
 
-### Task 5: 执行阶段 0 Docker/Testcontainers 判定
+### Task 5: 执行阶段 0 row 10 Docker/Testcontainers 判定
 
-- [ ] Task 5: 执行阶段 0 Docker/Testcontainers 判定
+- [ ] Task 5: 执行阶段 0 row 10 Docker/Testcontainers 判定
 
 **映射 OpenSpec:** 1.5
 
@@ -450,7 +558,7 @@ Expected: ledger 追加每个修复后命令的退出码和命名失败，不改
 
 **Interfaces:**
 - Consumes: 本机 Docker daemon 与现有 repository integration fixture。
-- Produces: `protected` 的逐顶级测试证据，或带环境原因和契约影响的 `unverified` 条目。
+- Produces: 仅 row 10 quota/outbox/migration 的 `protected` 顶级测试证据，或带环境原因和契约影响的 `unverified` 条目；不承担 row 13 deploy scripts。
 
 **Step 1: 运行轻量 Docker 预检并保存结果**
 
@@ -476,11 +584,11 @@ if ($exitCode -ne 0) { throw "integration failed; retain $log and classify the r
 foreach ($target in $targets) { $pattern = '^--- PASS: ' + [regex]::Escape($target) + ' \('; if (-not (Select-String -Path $log -Pattern $pattern -Quiet)) { throw "missing top-level PASS: $target" } }
 ```
 
-Expected: 四个指定顶级测试都以锚定 `--- PASS: TestName (` 行出现。Docker preflight 成功后的非零退出先按 systematic debugging 保存/检查完整日志：断言或代码失败 BLOCK；只有日志证明 Docker/Testcontainers 环境不可用时才记为 `unverified`。`--- SKIP:`、`no tests to run` 或缺少单个 PASS 都不能通过。
+Expected: 四个指定顶级测试都以锚定 `--- PASS: TestName (` 行出现，只证明 row 10 的 quota/outbox/migration integration。Docker preflight 成功后的非零退出先按 systematic debugging 保存/检查完整日志：断言或代码失败 BLOCK；只有日志证明 Docker/Testcontainers 环境不可用时才记为 `unverified`。`--- SKIP:`、`no tests to run` 或缺少单个 PASS 都不能通过。
 
 **Step 3: 仅对已证明的环境阻塞记录 unverified**
 
-预检失败时，在 ledger 记录实际预检命令、完整日志、退出码、未执行的四个 integration 目标，以及“PostgreSQL transaction/lock、receipt、outbox、migration 幂等未验证”的影响。预检成功但 integration 非零时，先依照日志执行 systematic debugging；只有 Docker/Testcontainers 不可用的证据才能设为 `unverified`，否则设为 BLOCK，不开始 v0.1.166。
+预检失败时，在 ledger 记录实际预检命令、完整日志、退出码、未执行的四个 row 10 integration 目标，以及“PostgreSQL transaction/lock、receipt、outbox、migration 幂等未验证”的影响。预检成功但 integration 非零时，先依照日志执行 systematic debugging；只有 Docker/Testcontainers 不可用的证据才能设为 `unverified`，否则设为 BLOCK，不开始 v0.1.166。row 13 deploy scripts 由 Task 13 在 v0.1.169 merge 后单独执行，不能在此记录为 Docker gap。
 
 **Step 4: 提交 Docker/阶段 0 ledger evidence**
 
@@ -502,7 +610,7 @@ if ($unexpected) { throw "stage 0 evidence left dirty paths: $($unexpected -join
 $status
 ```
 
-Expected: implementer 提交严格只含 stage 0 Docker/ledger evidence；最终 index 为空，status 过滤实际存在的 `?? .comet/current-change.json` 后为空，也没有远程服务器操作。reviewer 通过后 controller 只勾选 Task 5/OpenSpec 1.5；此前 Task 1-4 都已各自 check off，因此此时 1.1-1.5 均完成。
+Expected: implementer 提交严格只含 row 10 Docker/ledger evidence；最终 index 为空，status 过滤实际存在的 `?? .comet/current-change.json` 后为空，也没有远程服务器操作。reviewer 通过后 controller 只勾选 Task 5/OpenSpec 1.5；此前 Task 1-4 都已各自 check off，因此此时 1.1-1.5 均完成。
 
 ### Task 6: 在未提交状态合入 v0.1.166 并完成阻塞审查
 
@@ -1516,7 +1624,7 @@ Expected: implementer commit 严格只含 verify report；最终 index 为空，
 | --- | --- |
 | SDD coverage | 18 个 `### Task N` 均有唯一顶层 `- [ ] Task N` checkbox，Plan 中仅此 18 个 checkbox；内部 Step 为非 checkbox 编号。implementer/reviewer 不修改 Plan；仅 controller 在 reviewer 通过后将当前 Task 改为 `[x]`、同步唯一 OpenSpec 项并写入 progress。 |
 | Progress/topology coverage | 通用 live-ID 平台在成功派发后持久 agent identity；本平台不存在“dispatch success 与 completion 之间”的 controller 窗口，因此在原子调用两侧持久 dispatch intent 和 returned result。恢复先查 report、Git 与宿主工具结果，不能确认即 BLOCKED 而不重派；已有 task ID 的 fix resume 保持 Comet thorough round。任何下一次派发和每次 merge clean gate 前最新 checkpoint 均已提交且 worktree clean。progress-only 与三路径 docs-only checkoff commits 均不改变最终 `git log --merges` 恰有三个 upstream merge 节点的判定。 |
-| Spec coverage | OpenSpec 1.1-1.5、2.1-2.3、3.1-3.3、4.1-4.3、5.1-5.4 共 18 项均有一个同编号任务；Task 4 将 Images、outbox unit-tag、Wire 与 repaired stage-0 ledger 分离提交，并将 Docker-only gap 交给 Task 5。三段 no-ff/no-commit、merge 前阻塞审查、merge 后行为审查、17 冲突、能力矩阵、quota reset、迁移、Docker 和最终版本均有明确步骤；所有阶段/最终 conflict scan 均识别 diff3 marker，只有 no-match exit `1` 通过。 |
+| Spec coverage | OpenSpec 1.1-1.5、2.1-2.3、3.1-3.3、4.1-4.3、5.1-5.4 共 18 项均有一个同编号任务；Task 4 将 Images、outbox unit-tag、Wire、deferred rows-close lint 与 repaired stage-0 ledger 分离提交，逐字包含 debug-2 rows 1/2/3/11/13 的现有 non-Docker 命令，并以三次上限、具名日志和 generated-path stderr 审计的 Windows retry 包装全部 Task 4 generate；Task 5 只验证 row 10 quota/outbox/migration integration，row 13 deploy scripts 只由 v0.1.169 merge 后的 Task 13 执行。三段 no-ff/no-commit、merge 前阻塞审查、merge 后行为审查、17 冲突、能力矩阵、quota reset、迁移、Docker 和最终版本均有明确步骤；所有阶段/最终 conflict scan 均识别 diff3 marker，只有 no-match exit `1` 通过。 |
 | Placeholder scan | 本计划没有未填内容、未命名测试或未定义接口占位；所有条件分支给出停止、RED、`unverified` 或 PASS 判定，且真实 HTTP query 与 helper raw 输入的 GHSA 断言明确分离。 |
 | 双基线与类型/名称一致性 | frontmatter `base-ref` 始终是 immutable source base，`$executionBase` 仅为其 planning-only 后代；Task 1 使用当前 change OpenSpec 目录前缀加两个精确文档路径同时验证 source-to-execution tree diff 和全提交触及路径，且 source/execution VERSION 都为 `0.1.165.4`。`applyMigrationsFS`、quota 接口、路径护栏、Gemini URL builder、migration 文件名、两个 source-base blob OID、tag SHA、最终从 source base 开始的 merge range 和 integration 顶级测试名在任务间使用一致。 |
 | 范围边界 | 计划只描述 Comet 已确认的实际隔离位置内的 merge、测试、文档和本地生成；明确排除 push、发布、部署、镜像、服务器、数据库运行态和 Nginx 操作。 |
