@@ -669,21 +669,32 @@ func TestRelay_OnTurnComplete_UsesCurrentResponseCreateModel(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	turns := make(chan RelayTurnResult, 2)
+	results := make(chan RelayResult, 1)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_, _ = Relay(ctx, clientConn, upstreamConn, firstPayload, RelayOptions{
+		result, _ := Relay(ctx, clientConn, upstreamConn, firstPayload, RelayOptions{
 			OnTurnComplete: func(turn RelayTurnResult) {
 				turns <- turn
 			},
 		})
+		results <- result
 	}()
 
 	upstreamConn.readCh <- passthroughTestFrame{
 		msgType: coderws.MessageText,
+		payload: []byte(`{"type":"response.created","response":{"id":"resp_sol"}}`),
+	}
+	upstreamConn.readCh <- passthroughTestFrame{
+		msgType: coderws.MessageText,
 		payload: []byte(`{"type":"response.completed","response":{"id":"resp_sol","usage":{"input_tokens":2,"output_tokens":1}}}`),
 	}
-	firstTurn := <-turns
+	var firstTurn RelayTurnResult
+	select {
+	case firstTurn = <-turns:
+	case <-time.After(time.Second):
+		t.Fatal("first turn did not complete")
+	}
 	require.Equal(t, "gpt-5.6-sol", firstTurn.RequestModel)
 
 	clientConn.readCh <- passthroughTestFrame{
@@ -695,13 +706,28 @@ func TestRelay_OnTurnComplete_UsesCurrentResponseCreateModel(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 	upstreamConn.readCh <- passthroughTestFrame{
 		msgType: coderws.MessageText,
+		payload: []byte(`{"type":"response.created","response":{"id":"resp_terra"}}`),
+	}
+	upstreamConn.readCh <- passthroughTestFrame{
+		msgType: coderws.MessageText,
 		payload: []byte(`{"type":"response.completed","response":{"id":"resp_terra","usage":{"input_tokens":3,"output_tokens":1}}}`),
 	}
-	secondTurn := <-turns
+	var secondTurn RelayTurnResult
+	select {
+	case secondTurn = <-turns:
+	case <-time.After(time.Second):
+		t.Fatal("second turn did not complete")
+	}
 	require.Equal(t, "gpt-5.6-terra", secondTurn.RequestModel)
 
 	_ = clientConn.Close()
 	_ = upstreamConn.Close()
+	select {
+	case result := <-results:
+		require.Equal(t, "gpt-5.6-terra", result.RequestModel)
+	case <-time.After(2 * time.Second):
+		t.Fatal("relay did not return a final result")
+	}
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):

@@ -196,9 +196,11 @@ func Relay(
 	}
 	turnStartCh := make(chan relayTurnStart, 8)
 	startTurn := func(payload []byte, startedAt time.Time) {
+		requestModel := strings.TrimSpace(gjson.GetBytes(payload, "model").String())
+		state.setRequestModel(requestModel)
 		state.activeTurn = &relayTurnTiming{
 			startAt:      startedAt,
-			requestModel: strings.TrimSpace(gjson.GetBytes(payload, "model").String()),
+			requestModel: requestModel,
 		}
 	}
 	publishTurn := func(payload []byte) {
@@ -558,6 +560,7 @@ func runUpstreamToClient(
 	wroteDownstream := false
 	armTurn := func(turn relayTurnStart) {
 		requestModel := strings.TrimSpace(gjson.GetBytes(turn.payload, "model").String())
+		state.setRequestModel(requestModel)
 		state.activeTurn = &relayTurnTiming{startAt: turn.startAt, requestModel: requestModel}
 	}
 	upstreamFrames := make(chan relayUpstreamFrame, 1)

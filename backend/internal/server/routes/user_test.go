@@ -28,6 +28,7 @@ func TestRegisterUserRoutesRegistersImageHistoryEndpoints(t *testing.T) {
 			c.Next()
 		}),
 		nil,
+		servermiddleware.NewPanelRateLimiter(nil, nil),
 	)
 
 	for _, path := range []string{"/api/v1/images/history", "/api/v1/images/history/123"} {
