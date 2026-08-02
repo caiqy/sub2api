@@ -1384,3 +1384,45 @@ No migration conflict occurred. Passkey/auth/session binding/step-up, Model Plaz
 - No schema/provider source changed, so `make -C backend generate` was not run and no generated diff was created.
 - The compatibility commit is allowlist-compliant; this evidence commit stages only this ledger.
 - No fetch, merge, push, tag, release, image, deploy, remote/server, DB, Redis, or Nginx operation was performed.
+
+### Task 10 Fix Round 1/5: Corrected Direct Evidence
+
+- This section supersedes the Task 10 `Focused Test Evidence`, `Call-Chain Review`, and Phase 2 matrix above where they marked inferred coverage as `protected`. The compatibility commit `ec4d23bfe` is unchanged; this round changes only evidence.
+- No existing test was RED. PostgreSQL lost-update and migration-upgrade integration remain `unverified` because Docker/Testcontainers is unavailable; compile-only remains non-evidence for their behavior.
+
+| Exact command | Exit | Exact top-level targets / result |
+| --- | ---: | --- |
+| `go test -v -tags=unit -count=1 ./internal/handler -run '^(TestFilterPlazaVisibleGroups_AnonymousSeesOnlyNonExclusive|TestFilterPlazaVisibleGroups_AuthedSeesGrantedExclusive|TestFilterPlazaVisibleGroups_AuthedEmptySetSeesNoExclusive|TestModelPlazaHandler_NilSettingServiceFailsClosed404)$'` | `0` | All 4 named Model Plaza visibility/fail-closed targets emitted top-level PASS anchors. |
+| `go test -v -tags=unit -count=1 ./internal/service -run '^(TestListPlazaGroups_GroupCentricAggregation|TestListPlazaGroups_DedupFirstWinsWithPricingUpgrade|TestListPlazaGroups_PlatformIsolation|TestListPlazaGroups_InactiveChannelSkipped|TestListPlazaGroups_SortedByRateMultiplierAsc|TestListPlazaGroups_OfficialPricingFill|TestListPlazaGroups_RepoErrorsPropagate|TestSettingService_PasskeySwitchPersistsAndDefaultsToConfigured|TestSettingService_StalePasskeyTrueWithoutConfigReportsDisabled|TestIsBackendModeEnabled_ReturnsTrue|TestIsBackendModeEnabled_ReturnsFalse|TestIsBackendModeEnabled_ReturnsFalseOnNotFound|TestIsBackendModeEnabled_ReturnsFalseOnDBError|TestIsBackendModeEnabled_CachesResult|TestUpdateSettings_InvalidatesBackendModeCache)$'` | `0` | All 15 named Plaza aggregation, Passkey switch, and backend-mode/settings targets emitted top-level PASS anchors. |
+| `go test -v -tags=unit -count=1 ./internal/securityaudit -run '^(TestDefaultConfigIsOff|TestConfigRejectsBlockingWithoutAudit|TestConfigRuntimeLoadErrorIsStableBoundedAndSecretFree|TestConfigManagerPublicRequiresSuccessfullyLoadedSnapshot|TestConfigManagerUndecryptableTokenKeepsConfigVisibleAndRecoverable|TestConfigManagerUndecryptableTokenStillFailsClosedForBlockingIntent|TestConfigManagerColdStartOnlyFailsClosedForExplicitBlockingIntent|TestConfigManagerStaleWeakerSnapshotFailsClosedWhenBlockingExpected|TestConfigManagerStartupLoadFailureDoesNotBlockWhenBlockingNotIntended|TestConfigManagerStartupLoadFailureFailsClosedWhenBlockingIntended|TestConfigManagerUntrustedClearsOnSuccessfulDisable|TestConfigManagerUntrustedWithoutBlockingDoesNotForceBlockingMode|TestPromptAdminConfigRequiresVersionMapsConflictAndNeverEchoesToken|TestPromptAdminGetConfigReturnsSecretFreeUnavailableError|TestPromptAdminProbeSupportsTemporaryOrSavedTokenWithoutEcho|TestPromptAdminRejectsInvalidEventIDsTimesAndPagination|TestPromptAdminDeleteConfirmationErrorsStayGeneric)$'` | `0` | All 17 named Config/Default/PromptAdmin targets emitted top-level PASS anchors. |
+| `pnpm --dir frontend exec vitest run src/utils/__tests__/userUiVisibility.spec.ts src/components/layout/__tests__/AppSidebar.spec.ts` | `0` | 2 files, 13 tests passed; custom-menu visibility utility and sidebar hide behavior only. |
+| `go test -list '^(TestUserRepo|TestUserRepoAPIKeyGroupFilterSuite|TestUserRepository)' ./internal/repository` | `0` | Exactly 12 actual `TestUserRepository*` targets: BindAuthIdentityToUserCanonicalizesLegacyWeChatAlias; UpsertIdentityAdoptionDecisionIsIdempotentUnderConcurrency; ExistsByEmailAlias; ExistsByEmailAliasIgnoresMalformedInput; CreateWithEmailAliasGuard; EmailAliasGuardFailsClosedWhenDotStrippedCandidatesSaturate; GetByEmailNormalizesLegacySpacingAndCase; ExistsByEmailNormalizesLegacySpacingAndCase; CreateRejectsNormalizedEmailDuplicate; UpdateRejectsNormalizedEmailDuplicate; GetByEmailReportsNormalizedEmailConflict; CreateSerializesNormalizedEmailConflictsUnderConcurrency. |
+
+- `go test -tags=unit -list '^(Test.*(FinishLogin|PasskeySession|Passkey.*Login|BackendMode.*Passkey|Passkey.*Token|Passkey.*Audit))' ./internal/handler` listed only `TestPasskeyBeginLoginRejectsDisabledAdminSwitch` and `TestPasskeyBeginLoginReportsSettingStoreFailure`; the analogous service and repository discovery commands listed no direct target. These lists are discovery evidence, not PASS.
+- Frontend test search found no direct `ModelPlazaView`, `/model-plaza`, or `isEmbedded` test. It found only `userUiVisibility.spec.ts` and `AppSidebar.spec.ts` for hidden custom-menu behavior. Existing Model Plaza pricing component, Passkey API, and SettingsView evidence remains separately valid, but does not protect the route/embedded boundary.
+
+### Corrected Call-Chain Conclusions
+
+- `ConfigManager.Reload` calls `markUntrustedIfNoActiveSnapshot` on unavailable settings, parse failure, or activation error. A trusted existing snapshot remains available after reload failure. `BlockingActivationDegraded` fails closed only for known blocking intent, including a weaker stale snapshot or an activated config with no usable endpoint. The 17 exact Config/Admin tests above cover these cases.
+- `PasskeyService.FinishLogin` consumes the session and rejects inactive accounts before WebAuthn completion; the handler applies backend-mode, audit actor/auth-method, successful-login recording, and token issuance. These source-path facts are `manual` because no direct top-level test was found for their joined path.
+- `ModelPlazaView` applies embedded layout only when `embedded=1` and the auth store is authenticated. Its public route and this embedded predicate are `manual`; server visibility, settings switch, and hidden custom-menu utilities have their own direct test scopes above.
+
+### Corrected Phase 2 Matrix
+
+| Capability | Status | Current evidence |
+| --- | --- | --- |
+| Model Plaza server visibility and aggregation | `protected` | 4 handler visibility/fail-closed plus 7 `ListPlazaGroups` PASS targets. |
+| Model Plaza frontend route and embedded authentication | `manual` | Source review; no direct frontend route/embedded test exists. |
+| Hidden custom-menu utility and sidebar behavior | `protected` | 13 direct Vitest assertions; does not imply Model Plaza route coverage. |
+| Passkey feature switch/settings | `protected` | 2 direct Passkey switch targets and backend-mode settings targets pass. |
+| Passkey consume, active/backend-mode login, audit, and token issuance | `manual` | Direct-test discovery found no joined-path target; source review only. |
+| Prompt Config/Admin restoration and fail-closed activation | `protected` | 17 exact Config/Default/PromptAdmin PASS targets. |
+| OpenAI Live store fault tolerance | `protected` | Prior round's named retry/fallback tests remain direct PASS evidence. |
+| User/API-key scoped update and quota fields | `protected` | Prior round's five field-mask/quota targets remain direct PASS evidence. |
+| Repository regex evidence | `protected` | Prior executed repository command passed; current exact discovery corrects its target count to 12. |
+| Receipt/outbox migration upgrade and PostgreSQL lost-update | `unverified` | Docker CLI unavailable; no Testcontainers execution. |
+| Migration/version invariants | `protected` | VERSION and local migration OIDs remain unchanged. |
+
+统计：`protected=8`，`manual=2`，`gap=0`，`unverified=1`。
+
+- Scope self-review: no product, test, compatibility-commit, Plan, OpenSpec, progress, or selection file changed in this correction round. The following commit stages only this ledger.
