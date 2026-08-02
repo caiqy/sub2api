@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -657,6 +658,47 @@ func TestRelay_OnTurnComplete_IgnoresTerminalForUnknownResponse(t *testing.T) {
 	require.Equal(t, 1, turns[0].Usage.OutputTokens)
 	require.Equal(t, 2, result.Usage.InputTokens)
 	require.Equal(t, 1, result.Usage.OutputTokens)
+}
+
+func TestRelay_OnTurnComplete_PerTerminalEvent(t *testing.T) {
+	terminalCases := []struct {
+		eventType    string
+		requestID    string
+		inputTokens  int
+		outputTokens int
+	}{
+		{eventType: "response.completed", requestID: "resp_completed", inputTokens: 11, outputTokens: 7},
+		{eventType: "response.done", requestID: "resp_done", inputTokens: 12, outputTokens: 8},
+		{eventType: "response.failed", requestID: "resp_failed", inputTokens: 13, outputTokens: 9},
+		{eventType: "response.incomplete", requestID: "resp_incomplete", inputTokens: 14, outputTokens: 10},
+		{eventType: "response.cancelled", requestID: "resp_cancelled", inputTokens: 15, outputTokens: 11},
+		{eventType: "response.canceled", requestID: "resp_canceled", inputTokens: 16, outputTokens: 12},
+	}
+
+	for _, tc := range terminalCases {
+		t.Run(tc.eventType, func(t *testing.T) {
+			clientConn := newPassthroughTestFrameConn(nil, false)
+			upstreamConn := newPassthroughTestFrameConn([]passthroughTestFrame{
+				{msgType: coderws.MessageText, payload: []byte(`{"type":"response.created","response":{"id":"` + tc.requestID + `"}}`)},
+				{msgType: coderws.MessageText, payload: []byte(`{"type":"` + tc.eventType + `","response":{"id":"` + tc.requestID + `","usage":{"input_tokens":` + strconv.Itoa(tc.inputTokens) + `,"output_tokens":` + strconv.Itoa(tc.outputTokens) + `,"input_tokens_details":{"cached_tokens":3}}}}`)},
+			}, true)
+			turns := make([]RelayTurnResult, 0, 1)
+
+			_, relayExit := Relay(context.Background(), clientConn, upstreamConn, []byte(`{"type":"response.create","model":"gpt-5.6-terra"}`), RelayOptions{
+				OnTurnComplete: func(turn RelayTurnResult) {
+					turns = append(turns, turn)
+				},
+			})
+
+			require.Nil(t, relayExit)
+			require.Len(t, turns, 1)
+			require.Equal(t, tc.requestID, turns[0].RequestID)
+			require.Equal(t, tc.eventType, turns[0].TerminalEventType)
+			require.Equal(t, tc.inputTokens, turns[0].Usage.InputTokens)
+			require.Equal(t, tc.outputTokens, turns[0].Usage.OutputTokens)
+			require.Equal(t, 3, turns[0].Usage.CacheReadInputTokens)
+		})
+	}
 }
 
 func TestRelay_OnTurnComplete_UsesCurrentResponseCreateModel(t *testing.T) {
