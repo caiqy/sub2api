@@ -32,7 +32,7 @@ func (r *adminAPIKeyBlockedAPIKeyRepo) GetByID(context.Context, int64) (*APIKey,
 	return &clone, nil
 }
 
-func (r *adminAPIKeyBlockedAPIKeyRepo) Update(_ context.Context, key *APIKey) error {
+func (r *adminAPIKeyBlockedAPIKeyRepo) Update(_ context.Context, key *APIKey, _ APIKeyUpdateFields) error {
 	clone := *key
 	r.updated = &clone
 	return nil
@@ -162,7 +162,9 @@ func (r *adminAPIKeyBlockedUserRepo) GetByEmail(context.Context, string) (*User,
 func (r *adminAPIKeyBlockedUserRepo) GetFirstAdmin(context.Context) (*User, error) {
 	panic("unexpected")
 }
-func (r *adminAPIKeyBlockedUserRepo) Update(context.Context, *User) error { panic("unexpected") }
+func (r *adminAPIKeyBlockedUserRepo) Update(context.Context, *User, UserUpdateFields) error {
+	panic("unexpected")
+}
 func (r *adminAPIKeyBlockedUserRepo) Delete(context.Context, int64) error { panic("unexpected") }
 func (r *adminAPIKeyBlockedUserRepo) GetUserAvatar(context.Context, int64) (*UserAvatar, error) {
 	panic("unexpected")
@@ -192,6 +194,12 @@ func (r *adminAPIKeyBlockedUserRepo) UpdateBalance(context.Context, int64, float
 	panic("unexpected")
 }
 func (r *adminAPIKeyBlockedUserRepo) DeductBalance(context.Context, int64, float64) error {
+	panic("unexpected")
+}
+func (r *adminAPIKeyBlockedUserRepo) AdjustBalance(context.Context, int64, float64) (BalanceChange, error) {
+	panic("unexpected")
+}
+func (r *adminAPIKeyBlockedUserRepo) SetBalance(context.Context, int64, float64) (BalanceChange, error) {
 	panic("unexpected")
 }
 func (r *adminAPIKeyBlockedUserRepo) UpdateConcurrency(context.Context, int64, int) error {
