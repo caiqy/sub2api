@@ -4,7 +4,7 @@
 - Review mode: `thorough`
 - 当前任务: Task 8 - 执行 v0.1.166 完整门禁并建立阶段检查点
 - 映射 OpenSpec: 2.3
-- 阶段: `task-8 / generate-diagnostic-dispatch-intent`
+- 阶段: `task-8 / generate-diagnostic-result`
 - Task-8 dispatch token: `task-8-implementer-attempt-1-217946c5d`
 - Task-8 role: `implementer`
 - Task-8 model: `standard`
@@ -37,7 +37,9 @@
 - Task-8 generate diagnostic model: `standard`
 - Task-8 generate diagnostic base HEAD: `63b7777bf02528bf38072a320ff812144eb7d2cc`
 - Task-8 generate diagnostic report: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/task-8-debug-generate-report.md`
-- Task-8 generate diagnostic task ID: `pending atomic functions.task return`
+- Task-8 generate diagnostic task ID: `ses_03e9f8417ffeeeiqRpuPIpgpDK`
+- Task-8 generate diagnostic result: `DONE`
+- Task-8 generate diagnostic root cause: 历史Windows映射锁当前未复现；fresh generate的独立稳定阻塞为`backend/go.sum`缺少Wire传递依赖checksum，Ent完成后Wire exit 2；诊断生成的10条go.sum差异已恢复。
 - Task-7 dispatch token: `task-7-implementer-attempt-1-916aab893`
 - Task-7 role: `implementer`
 - Task-7 model: `high`
@@ -217,4 +219,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - Task-4审查-修复轮次: `2/2 PASS`
-- 状态: Task8两项测试根因已定位；generate/.test-tmp锁诊断即将派发，Task9不得运行。
+- 状态: Task8三项根因均已定位；待定义最小兼容/checksum修复轮并复跑full gate，Task9不得运行。
