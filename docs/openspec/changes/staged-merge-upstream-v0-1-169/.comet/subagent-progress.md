@@ -4,7 +4,7 @@
 - Review mode: `thorough`
 - 当前任务: Task 10 - 对 v0.1.168 审查交互并新增 migration 升级回归测试
 - 映射 OpenSpec: 3.2
-- 阶段: `task-10 / implementer-result`
+- 阶段: `task-10 / task-review-dispatch-intent`
 - Task-10 dispatch token: `task-10-implementer-attempt-1-e46cd9d55`
 - Task-10 role: `implementer`
 - Task-10 model: `high`
@@ -17,6 +17,13 @@
 - Task-10 ledger commit: `f8ff17231`
 - Task-10 verification: Step2全部exit0，frontend 68/68；integration compile-only通过但不构成升级PASS。
 - Task-10 concern: Docker CLI unavailable，migration/Testcontainers baseline→complete→complete升级路径保持`unverified`。
+- Task-10 review token: `task-10-review-attempt-1-f8ff17231`
+- Task-10 reviewer role: `reviewer (fresh)`
+- Task-10 reviewer model: `high`
+- Task-10 reviewer base HEAD: `f8ff17231acce931d695b188c1496c4eb406c71f`
+- Task-10 review package: `.superpowers/sdd/2026-08-02-staged-merge-upstream-v0-1-169/review-e46cd9d55..f8ff17231.diff`
+- Task-10 reviewer task ID: `pending atomic functions.task return`
+- Task-10 review-fix rounds: `0/5 reviewing`
 - Task-9 dispatch token: `task-9-implementer-attempt-1-97d44dd20`
 - Task-9 role: `implementer`
 - Task-9 model: `high`
@@ -373,4 +380,4 @@
 - Concerns: Docker 专项仍为 `gap`，交 Task 5；矩阵 `protected=6, gap=8`。
 - TDD: `tdd`; Images 三条保护测试先写先跑，RED 时才允许最小生产修复；若直接 PASS，则不改生产代码、不伪造 RED。
 - Task-4审查-修复轮次: `2/2 PASS`
-- 状态: Task10 implementer已完成；待读取report并派task review，Task11不得运行。
+- 状态: Task10 fresh task review即将派发，Task11不得运行。
