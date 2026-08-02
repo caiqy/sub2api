@@ -1584,7 +1584,7 @@ reviewer 通过后 controller 单独 check off Task 15/OpenSpec 5.1。
 
 ### Task 16: 在最终 source HEAD 重跑完整本机验证
 
-- [ ] Task 16: 在最终 source HEAD 重跑完整本机验证
+- [x] Task 16: 在最终 source HEAD 重跑完整本机验证
 
 **映射 OpenSpec:** 5.2
 
