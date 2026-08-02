@@ -34,14 +34,14 @@ base-ref: e9a0e4aa53b5d9d5f5c84986cfadd8098dc8e4f3
 - 每次 merge 前都执行同一 clean gate：`git diff --cached --name-only` 必须无输出；`git status --short --untracked-files=all` 仅可输出实际存在的 `?? .comet/current-change.json`。每次 merge commit 前必须无 unmerged index、`git diff --cached --check` 通过，且 staged paths 不含 runtime selection、build/verify ledger、计划、Design Doc、OpenSpec proposal/design/delta spec/tasks 等规划产物。兼容/证据提交前都列出 staged paths，并验证它们是该提交命令中明确列出的 allowlist 子集。
 - 所有 `git add backend/ent` 以 Task 1 和本阶段 merge 前 clean gate 均通过为前提：若任一 gate 发现 `backend/ent/` 有用户改动，立即 BLOCK 并由 Comet 重建干净隔离位置；只有该目录由当前 merge 或当前兼容修复的生成步骤产生变化时才可递归暂存。
 - Comet SDD 分工固定：implementer 和 reviewer 均不得修改本计划。唯一合法的 Plan checkbox 修改是 controller 在 reviewer 通过后将当前顶层 Task 从 `[ ]` 改为 `[x]`，再同步唯一映射的 OpenSpec `tasks.md` 项。implementer 完成该 Task 的代码/ledger commit(s) 后，worktree/index 必须通过本计划的 clean 规则，随后必须由 thorough reviewer 审查。controller 创建的 checkoff commit 严格只暂存本计划、`tasks.md` 和 progress 三个路径；checkoff commit 不是 merge 或兼容提交，三个 upstream merge 前仍须重新通过 clean gate。
-- 通用 progress lifecycle：若平台可在 agent 完成前向 controller 返回 live agent/task ID，派发成功后立即将 agent identity、role、attempt 与显式 model 写入 progress，并创建严格 progress-only commit。`subagent-progress.md` 已由 planning 提交纳入 tracked，执行期间按普通 tracked 文件暂存。
+- 通用 progress lifecycle：若平台可在 agent 完成前向 controller 返回 live agent/task ID，派发成功后立即将 agent identity、role、attempt 与显式 model 写入 progress，并创建严格 progress-only commit。`subagent-progress.md` 已由 planning 提交纳入 tracked；仓库 docs ignore 规则仍要求显式 `-f` 暂存，安全性由每次 exact staged allowlist 保障。
 - 本平台 `functions.task` 是对 controller 的原子工具调用：工具返回前 controller 没有可执行的中间回合，returned `task_id` 与完成结果一起返回。每次 implementer、reviewer 或 fix 派发前，controller 必须先以 progress-only commit 写入唯一 dispatch token、role、attempt、显式 model、brief/report 路径与 base HEAD；不得把“待派发 implementer”宣称为已有 agent identity。工具返回后的第一个动作必须写入 returned `task_id`、`DONE`/`DONE_WITH_CONCERNS`/`BLOCKED`/`NEEDS_CONTEXT`、commit/test/report evidence，并创建 progress-only commit；该结果 checkpoint 可以与下一角色“即将派发”状态合并。
 - 恢复规则：若 progress 只有 dispatch intent 而没有 returned `task_id` 或结果，先检查指定 report、Git 提交和宿主工具结果/通知；确认已有结果才恢复对应流程，不能确认时标记 `BLOCKED`，禁止盲目重复派发。已有 `task_id` 且需要 fix round 时按平台支持方式 resume；Comet thorough review 的 round 计数不重置。任何 implementer/reviewer 启动前及每次 merge clean gate 前，最新 progress checkpoint 必须已提交，且 worktree 过滤实际 `?? .comet/current-change.json` 后为空。
 - Controller 每次 progress checkpoint 使用以下严格 allowlist：
 
 ```powershell
 $progressPath = 'docs/openspec/changes/staged-merge-upstream-v0-1-169/.comet/subagent-progress.md'
-git add -- $progressPath
+git add -f -- $progressPath
 $staged = @(git diff --cached --name-only)
 $staged
 if (Compare-Object -ReferenceObject @($progressPath) -DifferenceObject $staged) { throw 'controller progress allowlist mismatch' }
@@ -51,7 +51,7 @@ git.exe commit -m "docs: record SDD progress"
 
 ```powershell
 $checkoffAllow = @('docs/superpowers/plans/2026-08-02-staged-merge-upstream-v0-1-169.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/tasks.md', 'docs/openspec/changes/staged-merge-upstream-v0-1-169/.comet/subagent-progress.md')
-git add -- $checkoffAllow
+git add -f -- $checkoffAllow
 $staged = @(git diff --cached --name-only)
 $staged
 if (Compare-Object -ReferenceObject $checkoffAllow -DifferenceObject $staged) { throw 'controller checkoff allowlist mismatch' }
@@ -179,7 +179,7 @@ Expected: 两个检查均成功；缺失 bash 记为环境阻塞，不修改产�
 在 ledger 写入实施时间、Comet 确认的隔离位置、绑定分支、immutable source base、`$executionBase`、source-to-execution planning-only diff、source/execution 的 `VERSION=0.1.165.4`、runtime selection 存在或缺失、两个 immutable source base migration blob OID、三个目标 tag 和“禁止推送/发布/部署/服务器/Nginx 操作”的边界，然后运行：
 
 ```powershell
-git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
+git add -f -- docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
 $staged = @(git diff --cached --name-only)
 $staged
 if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'stage 0 baseline identity allowlist mismatch' }
@@ -233,7 +233,7 @@ Expected: 两个 `merge-base` 命令退出 0；最新正式 `v0.1.*` tag 是 `v0
 
 Run:
 ```powershell
-git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
+git add -f -- docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
 $staged = @(git diff --cached --name-only)
 $staged
 if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'upstream tag manifest allowlist mismatch' }
@@ -278,7 +278,7 @@ Expected: 三份清单分别写入 ledger 对应阶段，作为后续行为审�
 
 Run:
 ```powershell
-git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
+git add -f -- docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
 $staged = @(git diff --cached --name-only)
 $staged
 if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'stage 0 capability matrix allowlist mismatch' }
@@ -378,7 +378,7 @@ Expected: 两次 generate 均不产生 `backend/ent` 或 `backend/cmd/server/wir
 
 Run:
 ```powershell
-git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
+git add -f -- docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
 $staged = @(git diff --cached --name-only)
 $staged
 if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'stage 0 local gates allowlist mismatch' }
@@ -436,7 +436,7 @@ Expected: 四个指定顶级测试都以锚定 `--- PASS: TestName (` 行出现�
 
 Run:
 ```powershell
-git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
+git add -f -- docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
 $staged = @(git diff --cached --name-only)
 $staged
 if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'stage 0 Docker evidence allowlist mismatch' }
@@ -555,7 +555,7 @@ Expected: unmerged 命令无输出，cached whitespace 检查通过；`$staged` 
 在 ledger 记录实际 `$conflictPaths`、六分类冲突台账、合并后的第二父和阻塞审查结论，然后运行：
 
 ```powershell
-git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
+git add -f -- docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
 $staged = @(git diff --cached --name-only)
 $staged
 if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'v0.1.166 merge-review evidence allowlist mismatch' }
@@ -614,7 +614,7 @@ Expected: 每个兼容提交同时包含复现测试、最小源修复和由该�
 在 ledger 按能力矩阵写入每个测试命令、审查的调用链、RED 和兼容提交 SHA；确认 `gap=0` 后运行：
 
 ```powershell
-git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
+git add -f -- docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
 $staged = @(git diff --cached --name-only)
 $staged
 if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'v0.1.166 behavior-review evidence allowlist mismatch' }
@@ -682,7 +682,7 @@ Expected: 仅在 `$preflightAvailable` 为 true 的环境中运行 integration�
 
 Run:
 ```powershell
-git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
+git add -f -- docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
 $staged = @(git diff --cached --name-only)
 $staged
 if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'v0.1.166 evidence allowlist mismatch' }
@@ -775,7 +775,7 @@ Expected: 所有实际 `$conflictPaths` 已逐项暂存，unmerged/cached whites
 在 ledger 记录实际 `$conflictPaths`、Passkey/模型广场/migration 阻塞审查和合并后的第二父，然后运行：
 
 ```powershell
-git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
+git add -f -- docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
 $staged = @(git diff --cached --name-only)
 $staged
 if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'v0.1.168 merge-review evidence allowlist mismatch' }
@@ -856,7 +856,7 @@ Expected: migration 回归测试与任何实际兼容修复同属 v0.1.168 的�
 在 ledger 说明 Passkey、model plaza、scoped update、prompt audit config 恢复、OpenAI Live 容错、前端权限/路由、quota reset 与 migration 的调用链结论，所有阶段 2 矩阵行必须非 `gap`，然后运行：
 
 ```powershell
-git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
+git add -f -- docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
 $staged = @(git diff --cached --name-only)
 $staged
 if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'v0.1.168 behavior-review evidence allowlist mismatch' }
@@ -924,7 +924,7 @@ Expected: 仅在 `$preflightAvailable` 为 true 时运行 integration。新库�
 
 Run:
 ```powershell
-git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
+git add -f -- docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
 $staged = @(git diff --cached --name-only)
 $staged
 if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'v0.1.168 evidence allowlist mismatch' }
@@ -1015,7 +1015,7 @@ Expected: 所有实际 `$conflictPaths` 已逐项暂存，unmerged/cached whites
 在 ledger 记录实际 `$conflictPaths`、GHSA/gateway/资源阻塞审查和合并后的第二父，然后运行：
 
 ```powershell
-git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
+git add -f -- docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
 $staged = @(git diff --cached --name-only)
 $staged
 if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'v0.1.169 merge-review evidence allowlist mismatch' }
@@ -1101,7 +1101,7 @@ Expected: 仅在 RED 存在时创建该兼容提交；测试和修复在同一�
 在 ledger 逐项写入 GHSA 矩阵结果、路径入口/调用链、proxy circuit、Qwen3Guard、count_tokens、pricing、token refresh、release fallback 的证据，并确认阶段 3 `gap=0`，然后运行：
 
 ```powershell
-git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
+git add -f -- docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
 $staged = @(git diff --cached --name-only)
 $staged
 if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'v0.1.169 behavior-review evidence allowlist mismatch' }
@@ -1169,7 +1169,7 @@ Expected: 仅在 `$preflightAvailable` 为 true 时运行 integration，每个�
 
 Run:
 ```powershell
-git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
+git add -f -- docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
 $staged = @(git diff --cached --name-only)
 $staged
 if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'v0.1.169 evidence allowlist mismatch' }
@@ -1278,7 +1278,7 @@ Expected: 后端默认/unit/lint、前端 ESLint/Vitest/typecheck/build 均经 `
 
 Run:
 ```powershell
-git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
+git add -f -- docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
 $staged = @(git diff --cached --name-only)
 $staged
 if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'final gate evidence allowlist mismatch' }
@@ -1357,7 +1357,7 @@ Expected: 仅在 `$preflightAvailable` 为 true 时运行 integration；可用 D
 
 Run:
 ```powershell
-git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
+git add -f -- docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md
 $staged = @(git diff --cached --name-only)
 $staged
 if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-build.md') -DifferenceObject $staged) { throw 'topology evidence allowlist mismatch' }
@@ -1410,7 +1410,7 @@ $changed = @(git diff --name-only)
 $changed
 $unexpected = $changed | Where-Object { $_ -notin $docsAllow }
 if ($unexpected -or $changed.Count -eq 0) { throw "docs repair allowlist mismatch: $($unexpected -join ', ')" }
-git add -- $changed
+git add -f -- $changed
 $staged = @(git diff --cached --name-only)
 $staged
 $unexpected = $staged | Where-Object { $_ -notin $docsAllow }
@@ -1426,7 +1426,7 @@ Expected: strict validate 首次成功时不创建此提交；失败修复时，
 
 Run:
 ```powershell
-git add docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-verify.md
+git add -f -- docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-verify.md
 $staged = @(git diff --cached --name-only)
 $staged
 if (Compare-Object -ReferenceObject @('docs/superpowers/reports/2026-08-02-staged-merge-upstream-v0-1-169-verify.md') -DifferenceObject $staged) { throw 'final verify evidence allowlist mismatch' }
