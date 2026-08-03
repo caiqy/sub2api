@@ -1,7 +1,7 @@
 package service
 
-// 本文件由 gateway_service.go 纯移动拆分而来：Bedrock 上游转发（CC 兼容转换、
-// 请求构建、错误处理与非流式响应）。仅做代码搬迁，无任何行为变更。
+// Bedrock 上游转发：复用 Forward 已物化的请求体，并处理 CC 兼容转换、
+// 请求构建、错误处理及流式/非流式响应。
 
 import (
 	"bytes"
@@ -58,11 +58,11 @@ func (s *GatewayService) forwardBedrock(
 	c *gin.Context,
 	account *Account,
 	parsed *ParsedRequest,
+	body []byte,
 	startTime time.Time,
 ) (*ForwardResult, error) {
 	reqModel := parsed.Model
 	reqStream := parsed.Stream
-	body := parsed.Body.Bytes()
 
 	region := bedrockRuntimeRegion(account)
 	mappedModel, ok := ResolveBedrockModelID(account, reqModel)
@@ -130,6 +130,7 @@ func (s *GatewayService) forwardBedrock(
 		return s.handleBedrockUpstreamErrors(ctx, resp, c, account)
 	}
 	if reqStream {
+		// 释放 GetBody 闭包捕获的完整 wire slice，避免在流式响应期继续持有请求体。
 		resp.Request = nil
 	}
 

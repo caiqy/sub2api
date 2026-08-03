@@ -2525,6 +2525,74 @@ func TestGatewayService_ForwardFirstAttemptReusesMaterializedBody(t *testing.T) 
 	require.Less(t, forwardAlloc, 2*oneReadAlloc+(16<<20), "first Forward attempt must reuse its initial materialization")
 }
 
+func TestGatewayService_BedrockFirstAttemptReusesMaterializedBody(t *testing.T) {
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"` + strings.Repeat("x", 89<<20/10) + `"}]}`)
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	materialized, err := handle.ReadAll()
+	require.NoError(t, err)
+	require.Equal(t, int(handle.Size()), len(materialized))
+	runtime.ReadMemStats(&after)
+	oneReadAlloc := after.TotalAlloc - before.TotalAlloc
+	materialized = nil
+	runtime.GC()
+
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	svc := &GatewayService{cfg: cfg, httpUpstream: discardGatewayForwardUpstream{}, rateLimitService: &RateLimitService{}}
+	account := &Account{
+		ID: 510, Name: "bedrock-first-attempt-materialization", Platform: PlatformAnthropic, Type: AccountTypeBedrock, Concurrency: 1,
+		Credentials: map[string]any{"auth_mode": "apikey", "api_key": "bedrock-key"},
+	}
+	byteRecorder := httptest.NewRecorder()
+	byteContext, _ := gin.CreateTestContext(byteRecorder)
+	byteContext.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	byteParsed := &ParsedRequest{Body: NewRequestBodyRef(body), Model: "claude-sonnet-4-5"}
+	runtime.ReadMemStats(&before)
+	_, err = svc.Forward(context.Background(), byteContext, account, byteParsed)
+	runtime.ReadMemStats(&after)
+	require.NoError(t, err)
+	byteForwardAlloc := after.TotalAlloc - before.TotalAlloc
+	byteParsed = nil
+	body = nil
+	runtime.GC()
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	parsed := &ParsedRequest{Body: NewRequestBodyRefFromHandle(handle), Model: "claude-sonnet-4-5"}
+
+	runtime.ReadMemStats(&before)
+	_, err = svc.Forward(context.Background(), c, account, parsed)
+	runtime.ReadMemStats(&after)
+	require.NoError(t, err)
+	forwardAlloc := after.TotalAlloc - before.TotalAlloc
+	t.Logf("one_read_alloc=%d byte_forward_alloc=%d bedrock_forward_alloc=%d", oneReadAlloc, byteForwardAlloc, forwardAlloc)
+	require.Less(t, forwardAlloc, byteForwardAlloc+oneReadAlloc+(8<<20), "Bedrock first attempt must add at most one handle materialization")
+}
+
+func TestGatewayService_BedrockBodyHandleReadFailurePreservesSpoolSentinel(t *testing.T) {
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`)
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+	require.NoError(t, os.Remove(handle.spoolPath))
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	account := &Account{Platform: PlatformAnthropic, Type: AccountTypeBedrock}
+	_, err = (&GatewayService{}).Forward(context.Background(), c, account, &ParsedRequest{
+		Body:  NewRequestBodyRefFromHandle(handle),
+		Model: "claude-sonnet-4-5",
+	})
+
+	require.ErrorIs(t, err, ErrRequestBodySpool)
+}
+
 func TestGatewayService_AnthropicPassthroughFirstAttemptReusesMaterializedBody(t *testing.T) {
 	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"` + strings.Repeat("x", 89<<20/10) + `"}]}`)
 	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: t.TempDir()})

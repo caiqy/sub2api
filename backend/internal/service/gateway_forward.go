@@ -145,7 +145,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	}
 
 	if account != nil && account.IsBedrock() {
-		return s.forwardBedrock(ctx, c, account, parsed, startTime)
+		return s.forwardBedrock(ctx, c, account, parsed, sourceBody, startTime)
 	}
 
 	// Beta policy: evaluate once; block check + cache filter set for buildUpstreamRequest.

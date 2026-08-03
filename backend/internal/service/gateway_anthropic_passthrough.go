@@ -387,6 +387,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		if input.Parsed != nil {
 			input.Parsed.RequestPayloadHash = lastWireHandle.Hash()
 		}
+		// 先验证再改绑，避免校验失败后 ParsedRequest 丢失原有的 byte-backed body。
 		acceptedWireBody, err = lastWireHandle.ReadAll()
 		if err != nil {
 			return nil, fmt.Errorf("read accepted anthropic passthrough wire body: %w", err)
