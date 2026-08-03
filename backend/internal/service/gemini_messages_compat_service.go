@@ -109,6 +109,8 @@ func (s *GeminiMessagesCompatService) applyGeminiAPIKeyPassthroughFields(ctx con
 	return updatedBody, outbound, nil
 }
 
+var openGeminiMessagesCompatRequestBody = (*RequestBodyHandle).Open
+
 // GetTokenProvider returns the token provider for OAuth accounts
 func (s *GeminiMessagesCompatService) GetTokenProvider() *GeminiTokenProvider {
 	return s.tokenProvider
@@ -709,7 +711,7 @@ func (s *GeminiMessagesCompatService) ForwardHandle(ctx context.Context, c *gin.
 	var requestIDHeader string
 	var upstreamPreview string
 	newRequest := func(ctx context.Context, url string) (*http.Request, error) {
-		reader, err := outboundHandle.Open()
+		reader, err := openGeminiMessagesCompatRequestBody(outboundHandle)
 		if err != nil {
 			return nil, err
 		}
@@ -827,6 +829,9 @@ func (s *GeminiMessagesCompatService) ForwardHandle(ctx context.Context, c *gin.
 	for attempt := 1; attempt <= geminiMaxRetries; attempt++ {
 		upstreamReq, idHeader, err := buildReq(ctx)
 		if err != nil {
+			if errors.Is(err, ErrRequestBodySpool) {
+				return nil, fmt.Errorf("open Gemini outbound request body: %w", err)
+			}
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return nil, err
 			}
@@ -1204,7 +1209,8 @@ func (s *GeminiMessagesCompatService) prepareMessagesCompatSignatureRetryHandle(
 		return nil, nil, stageName, err
 	}
 	convertedBody = ensureGeminiFunctionCallThoughtSignatures(convertedBody)
-	handle, headers, err := s.prepareMessagesCompatOutboundHandle(ctx, c, account, mappedModel, strippedBody, convertedBody)
+	// Passthrough map/forward rules keep reading the original client request; only Gemini conversion uses the stripped retry body.
+	handle, headers, err := s.prepareMessagesCompatOutboundHandle(ctx, c, account, mappedModel, canonicalBody, convertedBody)
 	return handle, headers, stageName, err
 }
 

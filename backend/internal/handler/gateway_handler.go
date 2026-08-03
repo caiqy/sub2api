@@ -1089,6 +1089,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 				return
 			}
+			attemptParsedReq.Model = strings.Clone(attemptParsedReq.Model)
+			attemptParsedReq.MetadataUserID = strings.Clone(attemptParsedReq.MetadataUserID)
+			attemptParsedReq.OutputEffort = strings.Clone(attemptParsedReq.OutputEffort)
 
 			// 转发请求 - 根据账号平台分流
 			c.Set("parsed_request", attemptParsedReq)
@@ -1114,12 +1117,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					service.WithForwardGeminiSession(derefGroupID(currentStickyGroupID), sessionKey),
 				)
 			} else if account.Platform == service.PlatformGemini {
-				geminiBody, readErr := attemptParsedReq.Body.ReadAll()
-				if readErr != nil {
-					err = readErr
-				} else {
-					result, err = h.geminiCompatService.Forward(requestCtx, c, account, geminiBody)
-				}
+				result, err = h.geminiCompatService.ForwardHandle(requestCtx, c, account, attemptHandle)
 			} else {
 				result, err = h.gatewayService.Forward(requestCtx, c, account, attemptParsedReq)
 			}

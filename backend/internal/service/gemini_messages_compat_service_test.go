@@ -88,6 +88,52 @@ func TestGeminiMessagesCompatSignatureRetryBuildsHandleFromCanonical(t *testing.
 	require.Contains(t, string(retryBody), "work")
 }
 
+func TestGeminiMessagesCompatSignatureRetryUsesCanonicalPassthroughSource(t *testing.T) {
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":1024,"thinking":{"type":"enabled","budget_tokens":1024},"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"work","signature":"stale"}]},{"role":"user","content":"continue"}]}`)
+	canonical, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(canonical) })
+	account := &Account{Platform: PlatformGemini, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "key"}}
+	svc := &GeminiMessagesCompatService{}
+
+	originalApply := geminiApplyAccountPassthroughFieldsWithContext
+	t.Cleanup(func() { geminiApplyAccountPassthroughFieldsWithContext = originalApply })
+	var passthroughSource []byte
+	geminiApplyAccountPassthroughFieldsWithContext = func(_ context.Context, _ *Account, _ http.Header, sourceBody, targetBody []byte, _ http.Header) ([]byte, error) {
+		passthroughSource = append([]byte(nil), sourceBody...)
+		return targetBody, nil
+	}
+
+	retryHandle, _, _, err := svc.prepareMessagesCompatSignatureRetryHandle(context.Background(), nil, account, "gemini-2.5-flash", "claude-sonnet-4-5", canonical, 0)
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(retryHandle) })
+	require.JSONEq(t, string(body), string(passthroughSource))
+}
+
+func TestGeminiMessagesCompatOutboundOpenFailurePreservesSpoolError(t *testing.T) {
+	originalOpen := openGeminiMessagesCompatRequestBody
+	openGeminiMessagesCompatRequestBody = func(*RequestBodyHandle) (io.ReadCloser, error) {
+		return nil, fmt.Errorf("forced outbound open failure: %w", ErrRequestBodySpool)
+	}
+	t.Cleanup(func() { openGeminiMessagesCompatRequestBody = originalOpen })
+
+	body := []byte(`{"model":"gemini-2.5-flash","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`)
+	canonical, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(canonical) })
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	upstream := &geminiCompatHTTPUpstreamStub{}
+	svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
+	account := &Account{ID: 1, Platform: PlatformGemini, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "key"}}
+
+	_, err = svc.ForwardHandle(context.Background(), c, account, canonical)
+	require.ErrorIs(t, err, ErrRequestBodySpool)
+	require.False(t, c.Writer.Written(), "handler must remain able to map the spool error to 503")
+	require.Zero(t, upstream.calls)
+}
+
 func TestGeminiMessagesCompatSignatureRetryPropagatesCanonicalSpoolFailure(t *testing.T) {
 	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":1024,"thinking":{"type":"enabled","budget_tokens":1024},"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"work","signature":"stale"}]},{"role":"user","content":"continue"}]}`)
 	canonical, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
