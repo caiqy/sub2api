@@ -8,7 +8,7 @@
 
 | 持有对象 | 大小量级 | 持有时长 | 证据 |
 |---|---|---|---|
-| 请求体 `[]byte` 全量驻留 | ≤10MB/请求（DB 实测最大 1.3MB） | 整个请求生命周期 | `request_body_handle.go` spool 阈值 `10<<20`，**≤10MB 全部留在内存** |
+| 请求体 `[]byte` 全量驻留（v2 前状态） | ≤10MB/请求（DB 实测最大 1.3MB） | 整个请求生命周期 | v2 前 `request_body_handle.go` spool 阈值为 `10<<20`，**≤10MB 全部留在内存** |
 | 内容审核同步调用期间持有 body | body + 提取文本 | 外部 API 往返 300ms~3s（超时上限 30s） | pre_block 模式走 `checkSync` **同步**审核；`input.Body = body()` 后不释放 |
 | 审核日志 excerpt | 12000 runes 全量截断（avg 5802 字符/条） | 构建 log 对象期间 | DB 实测 max=12000 |
 | usage_log_details 快照 | 响应体最大 3.3MB/条 | 写入 DB 期间 | DB 实测；retention=20 说明持续小量写入 |

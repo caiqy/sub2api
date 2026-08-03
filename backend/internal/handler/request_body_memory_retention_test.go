@@ -58,20 +58,46 @@ func TestRequestBodyMemoryRetentionWhileUpstreamBlocked(t *testing.T) {
 	}
 	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
 
-	heapAt2MB, previewAt2MB := measureBlockedRequestBodyHeap(t, 2<<20, spoolDir)
-	heapAt89MB, previewAt89MB := measureBlockedRequestBodyHeap(t, 89<<20/10, spoolDir)
+	var heapAt2MB, heapAt89MB uint64
+	var previewAt2MB, previewAt89MB, snapshotAt2MB, snapshotAt89MB int
+	t.Run("2MB", func(t *testing.T) {
+		heapAt2MB, previewAt2MB, snapshotAt2MB = measureBlockedRequestBodyHeap(t, 2<<20, spoolDir)
+	})
+	t.Run("8.9MB", func(t *testing.T) {
+		heapAt89MB, previewAt89MB, snapshotAt89MB = measureBlockedRequestBodyHeap(t, 89<<20/10, spoolDir)
+	})
 	growth := uint64(0)
 	if heapAt89MB >= heapAt2MB {
 		growth = heapAt89MB - heapAt2MB
 	}
-	t.Logf("heap_at_2mb=%d heap_at_8_9mb=%d retained_growth=%d preview_at_2mb=%d preview_at_8_9mb=%d", heapAt2MB, heapAt89MB, growth, previewAt2MB, previewAt89MB)
+	t.Logf("heap_at_2mb=%d heap_at_8_9mb=%d retained_growth=%d preview_at_2mb=%d preview_at_8_9mb=%d snapshot_at_2mb=%d snapshot_at_8_9mb=%d", heapAt2MB, heapAt89MB, growth, previewAt2MB, previewAt89MB, snapshotAt2MB, snapshotAt89MB)
 
 	require.Less(t, growth, uint64(3<<20), "retained heap must not scale with full request body size")
 	require.LessOrEqual(t, previewAt2MB, int(service.DefaultRequestBodyPreviewLimitBytes))
 	require.LessOrEqual(t, previewAt89MB, int(service.DefaultRequestBodyPreviewLimitBytes))
+	require.LessOrEqual(t, snapshotAt2MB, int(service.DefaultRequestBodyPreviewLimitBytes))
+	require.LessOrEqual(t, snapshotAt89MB, int(service.DefaultRequestBodyPreviewLimitBytes))
+
+	t.Run("ordinary preview boundary", func(t *testing.T) {
+		limit := int(service.DefaultRequestBodyPreviewLimitBytes)
+		const prefix = `{"message":"`
+		const suffix = `"}`
+		text := strings.Repeat("plain text ", limit/len("plain text ")+1)
+		preview := prefix + text[:limit-len(prefix)-len(suffix)] + suffix
+		require.Len(t, preview, limit)
+
+		raw := service.RequestBodyPreviewSnapshot(preview, int64(len(preview)+1))
+		var snapshot matrixRequestBodyPreview
+		require.NoError(t, json.Unmarshal([]byte(raw), &snapshot))
+		require.NotContains(t, snapshot.Preview, "inline binary payload omitted")
+		require.Greater(t, len(snapshot.Preview), limit-(1<<10))
+		require.LessOrEqual(t, len(snapshot.Preview), limit)
+		require.LessOrEqual(t, len(raw), limit)
+		t.Logf("ordinary_preview_bytes=%d serialized_snapshot_bytes=%d", len(snapshot.Preview), len(raw))
+	})
 }
 
-func measureBlockedRequestBodyHeap(t *testing.T, size int64, spoolDir string) (uint64, int) {
+func measureBlockedRequestBodyHeap(t *testing.T, size int64, spoolDir string) (uint64, int, int) {
 	t.Helper()
 	upstream := &retentionBlockingTransport{started: make(chan struct{}), release: make(chan struct{})}
 	done := make(chan struct{})
@@ -98,15 +124,17 @@ func measureBlockedRequestBodyHeap(t *testing.T, size int64, spoolDir string) (u
 	require.NotNil(t, detail)
 	var snapshot matrixRequestBodyPreview
 	require.NoError(t, json.Unmarshal([]byte(detail.UpstreamRequestBody), &snapshot))
+	require.Greater(t, snapshot.Size, size-(1<<10))
 	require.True(t, snapshot.Truncated)
 	heap := retainedHeapAfterGC()
 	previewSize := len(snapshot.Preview)
+	snapshotSize := len(detail.UpstreamRequestBody)
 
 	release()
 	waitMatrixSignal(t, done, "retention handler completion")
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 	assertMatrixTempFiles(t, spoolDir, "sub2api-request-body-", false)
-	return heap, previewSize
+	return heap, previewSize, snapshotSize
 }
 
 func retentionJSONBody(size int64) io.Reader {
@@ -122,8 +150,9 @@ func retentionJSONBody(size int64) io.Reader {
 type retentionPaddingReader struct{}
 
 func (retentionPaddingReader) Read(p []byte) (int, error) {
+	const text = "ordinary request preview text "
 	for i := range p {
-		p[i] = 'x'
+		p[i] = text[i%len(text)]
 	}
 	return len(p), nil
 }
