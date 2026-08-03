@@ -77,6 +77,42 @@ func TestGatewayService_AnthropicAPIKeyPassthroughRetriesFromBodyHandles(t *test
 	}
 }
 
+func TestGatewayService_AnthropicPassthroughRetryRereadsHandleAfterForwardFirstAttemptBytes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	spoolDir := t.TempDir()
+	t.Setenv("TMPDIR", spoolDir)
+	t.Setenv("TMP", spoolDir)
+	t.Setenv("TEMP", spoolDir)
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"` + strings.Repeat("x", 2<<20) + `"}]}`)
+	parsed := &ParsedRequest{Body: NewRequestBodyRef(body), Model: "claude-sonnet-4-5"}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	upstream := &anthropicRetryHandleUpstream{
+		statuses:         []int{http.StatusInternalServerError, http.StatusOK},
+		removeSpoolDir:   spoolDir,
+		removeSpoolAfter: 1,
+	}
+	cfg := &config.Config{
+		Gateway:  config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
+		Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}},
+	}
+	svc := &GatewayService{
+		cfg:                 cfg,
+		httpUpstream:        upstream,
+		rateLimitService:    &RateLimitService{},
+		settingService:      NewSettingService(upstreamPreviewSettingRepo{}, cfg),
+		tlsFPProfileService: &TLSFingerprintProfileService{},
+	}
+	account := newAnthropicAPIKeyAccountForTest()
+	account.Credentials["custom_error_codes_enabled"] = true
+	account.Credentials["custom_error_codes"] = []any{float64(http.StatusBadRequest)}
+
+	result, err := svc.Forward(context.Background(), c, account, parsed)
+	require.Nil(t, result)
+	require.ErrorIs(t, err, ErrRequestBodySpool)
+	require.Len(t, upstream.bodies, 1)
+}
+
 type anthropicRetryHandleUpstream struct {
 	statuses         []int
 	bodies           [][]byte
