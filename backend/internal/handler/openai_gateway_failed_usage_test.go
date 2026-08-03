@@ -1336,7 +1336,9 @@ func TestOpenAIGatewayHandler_ChatCompletionsHashesBeforeChannelMapping(t *testi
 	}
 	apiKey := env.apiKey
 	requestContext := env.requestContext
-	wantUsageHash := service.HashUsageRequestPayload(rawBody)
+	policyBody, changed := service.ApplyOpenAIReasoningEffortPolicy(rawBody, "high", nil)
+	require.True(t, changed)
+	wantUsageHash := service.HashUsageRequestPayload(policyBody)
 	wantCyberKey := service.CyberSessionBlockKey(apiKey.ID, requestContext, rawBody)
 
 	require.Equal(t, "mapped-model", gjson.GetBytes(upstreamBody, "model").String())
