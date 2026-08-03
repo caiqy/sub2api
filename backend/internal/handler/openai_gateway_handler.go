@@ -353,8 +353,11 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 
+	// Generate session hash before compact normalization (header first; fallback to prompt_cache_key).
+	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
+	cyberBlockKeyHTTP := service.CyberSessionBlockKey(apiKey.ID, c, body)
+
 	setOpsRequestContext(c, "", false)
-	sessionHashBody := body
 	body, ok = h.normalizeOpenAIResponsesCompactRequest(c, reqLog, body)
 	if !ok {
 		return
@@ -364,13 +367,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	// 失败仍走 JSON+状态码链路；未标记客户端流式或间隔为 0 时是 no-op。
 	stopCompactKeepalive := service.StartOpenAICompactSSEKeepalive(c, h.openAICompactKeepaliveInterval())
 	defer stopCompactKeepalive()
-	if err := coordinator.SetEffectiveBytes(body); err != nil {
-		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
-		return
-	}
-	effectiveHandle := coordinator.Effective()
-	requestPayloadHash := effectiveHandle.Hash()
-	service.BindOpenAIRequestBodyHandle(c, effectiveHandle)
 
 	// 校验请求体 JSON 合法性
 	if !gjson.ValidBytes(body) {
@@ -502,6 +498,14 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	if !h.validateFunctionCallOutputRequest(c, body, reqLog) {
 		return
 	}
+	if err := coordinator.SetEffectiveBytes(body); err != nil {
+		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+		return
+	}
+	finalHandle := coordinator.Effective()
+	requestPayloadHash := finalHandle.Hash()
+	service.BindOpenAIRequestBodyHandle(c, finalHandle)
+	body = nil
 
 	// 绑定错误透传服务，允许 service 层在非 failover 错误场景复用规则。
 	if h.errorPassthroughService != nil {
@@ -544,9 +548,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 
-	// Generate session hash (header first; fallback to prompt_cache_key)
-	sessionHash := h.gatewayService.GenerateSessionHash(c, sessionHashBody)
-	if h.rejectIfCyberSessionBlocked(c, apiKey, sessionHashBody, reqModel, cyberBlockFormatResponses) {
+	if h.rejectIfCyberSessionKeyBlocked(c, apiKey, cyberBlockKeyHTTP, reqModel, cyberBlockFormatResponses) {
 		return
 	}
 	requireCompact := isOpenAIRemoteCompactPath(c)
@@ -649,15 +651,27 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		if !acquired {
 			return
 		}
+		canonicalBody, readErr := finalHandle.ReadAll()
+		if readErr != nil {
+			if accountReleaseFunc != nil {
+				accountReleaseFunc()
+			}
+			if errors.Is(readErr, service.ErrRequestBodySpool) {
+				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body", streamStarted)
+				return
+			}
+			h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body", streamStarted)
+			return
+		}
 
 		// Forward request
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
 		// 应用渠道模型映射到请求体
-		forwardBody := body
+		forwardBody := canonicalBody
 		attemptModel := reqModel
 		if channelMapping.Mapped {
-			forwardBody = service.ReplaceModelInBody(body, channelMapping.MappedModel)
+			forwardBody = service.ReplaceModelInBody(canonicalBody, channelMapping.MappedModel)
 			attemptModel = channelMapping.MappedModel
 		}
 		attemptReasoningEffort := service.ExtractOpenAIReasoningEffortFromBody(forwardBody, attemptModel)
@@ -670,6 +684,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		// 从不可变的 canonical forwardBody 派生本次尝试 body 并整块剔除上游私有的加密
 		// reasoning item（含耦合的 id/summary），避免非透传上游 400 拒绝 Kiro reasoning 形态。
 		attemptBody := h.deriveOpenAIForwardAttemptBody(reqLog, forwardBody, account, &passthroughFailoverState)
+		canonicalBody = nil
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
 				if accountReleaseFunc != nil {
@@ -680,10 +695,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		}()
 		forwardDuration := time.Since(forwardStart)
 		forwardDurationMs := forwardDuration.Milliseconds()
-		cyberBlockKeyHTTP := ""
-		if service.GetOpsCyberPolicy(c) != nil {
-			cyberBlockKeyHTTP = service.CyberSessionBlockKey(apiKey.ID, c, sessionHashBody)
-		}
 		h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, err != nil, cyberBlockKeyHTTP, clientRequestedUsageFields(c, channelMapping, reqModel, ""), requestPayloadHash)
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
 		responseLatencyMs := forwardDurationMs
@@ -3283,14 +3294,19 @@ const (
 // written + ops entry enqueued). Fail-open: disabled switch / empty key /
 // store error → false.
 func (h *OpenAIGatewayHandler) rejectIfCyberSessionBlocked(c *gin.Context, apiKey *service.APIKey, body []byte, model string, format cyberSessionBlockFormat) bool {
+	if apiKey == nil {
+		return h.rejectIfCyberSessionKeyBlocked(c, apiKey, "", model, format)
+	}
+	return h.rejectIfCyberSessionKeyBlocked(c, apiKey, service.CyberSessionBlockKey(apiKey.ID, c, body), model, format)
+}
+
+func (h *OpenAIGatewayHandler) rejectIfCyberSessionKeyBlocked(c *gin.Context, apiKey *service.APIKey, key string, model string, format cyberSessionBlockFormat) bool {
 	if h == nil || h.gatewayService == nil || apiKey == nil {
 		return false
 	}
-	// 开关默认关：先走 ~ns 级缓存开关检查，再付出 key 派生(gjson+sha256)成本。
 	if enabled, _ := h.gatewayService.CyberSessionBlockRuntime(c.Request.Context()); !enabled {
 		return false
 	}
-	key := service.CyberSessionBlockKey(apiKey.ID, c, body)
 	if key == "" {
 		return false
 	}
