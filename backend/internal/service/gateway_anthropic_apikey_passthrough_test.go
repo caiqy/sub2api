@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -76,8 +78,10 @@ func TestGatewayService_AnthropicAPIKeyPassthroughRetriesFromBodyHandles(t *test
 }
 
 type anthropicRetryHandleUpstream struct {
-	statuses []int
-	bodies   [][]byte
+	statuses         []int
+	bodies           [][]byte
+	removeSpoolDir   string
+	removeSpoolAfter int
 }
 
 func (u *anthropicRetryHandleUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
@@ -94,6 +98,17 @@ func (u *anthropicRetryHandleUpstream) DoWithTLS(req *http.Request, _ string, _ 
 	}
 	_ = req.Body.Close()
 	u.bodies = append(u.bodies, body)
+	if u.removeSpoolDir != "" && len(u.bodies) == u.removeSpoolAfter {
+		entries, err := os.ReadDir(u.removeSpoolDir)
+		if err != nil {
+			return nil, err
+		}
+		for _, entry := range entries {
+			if err := os.Remove(filepath.Join(u.removeSpoolDir, entry.Name())); err != nil {
+				return nil, err
+			}
+		}
+	}
 	status := u.statuses[len(u.bodies)-1]
 	responseBody := []byte(`{"id":"msg_test","model":"claude-test","usage":{"input_tokens":1,"output_tokens":1}}`)
 	return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(bytes.NewReader(responseBody))}, nil
@@ -2264,6 +2279,56 @@ func TestGatewayService_ForwardErrorKeepsByteBackedParsedBodyReadable(t *testing
 	require.Error(t, err)
 	readableBody, err := parsed.Body.ReadAll()
 	require.NoError(t, err)
+	require.JSONEq(t, string(body), string(readableBody))
+}
+
+func TestGatewayService_AnthropicPassthroughAcceptedWireSpoolFailureKeepsByteBackedParsedBodyReadable(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	sourceDir, wireDir := t.TempDir(), t.TempDir()
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"` + strings.Repeat("x", 2<<20) + `"}]}`)
+	source, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: sourceDir})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(source) })
+	t.Setenv("TMPDIR", wireDir)
+	t.Setenv("TMP", wireDir)
+	t.Setenv("TEMP", wireDir)
+
+	parsed := &ParsedRequest{Body: NewRequestBodyRef(body), Model: "claude-sonnet-4-5"}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	upstream := &anthropicRetryHandleUpstream{
+		statuses:         []int{http.StatusOK},
+		removeSpoolDir:   wireDir,
+		removeSpoolAfter: 1,
+	}
+	cfg := &config.Config{
+		Gateway:  config.GatewayConfig{MaxLineSize: defaultMaxLineSize},
+		Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}},
+	}
+	svc := &GatewayService{
+		cfg:                 cfg,
+		httpUpstream:        upstream,
+		rateLimitService:    &RateLimitService{},
+		settingService:      NewSettingService(upstreamPreviewSettingRepo{}, cfg),
+		tlsFPProfileService: &TLSFingerprintProfileService{},
+	}
+
+	result, err := svc.forwardAnthropicAPIKeyPassthroughWithInput(context.Background(), c, newAnthropicAPIKeyAccountForTest(), anthropicPassthroughForwardInput{
+		SourceHandle:      source,
+		BodyHandle:        source,
+		SourceBody:        body,
+		Body:              body,
+		Parsed:            parsed,
+		SourceHandleOwned: true,
+		RequestModel:      "claude-sonnet-4-5",
+		OriginalModel:     "claude-sonnet-4-5",
+		StartTime:         time.Now(),
+	})
+	require.Nil(t, result)
+	require.ErrorIs(t, err, ErrRequestBodySpool)
+	require.Nil(t, parsed.Body.Handle())
+	readableBody, readErr := parsed.Body.ReadAll()
+	require.NoError(t, readErr)
 	require.JSONEq(t, string(body), string(readableBody))
 }
 

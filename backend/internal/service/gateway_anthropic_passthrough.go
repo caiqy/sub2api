@@ -386,13 +386,13 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	if lastWireHandle != nil {
 		if input.Parsed != nil {
 			input.Parsed.RequestPayloadHash = lastWireHandle.Hash()
-			if input.SourceHandleOwned {
-				input.Parsed.Body = NewRequestBodyRefFromHandle(lastWireHandle)
-			}
 		}
 		acceptedWireBody, err = lastWireHandle.ReadAll()
 		if err != nil {
 			return nil, fmt.Errorf("read accepted anthropic passthrough wire body: %w", err)
+		}
+		if input.Parsed != nil && input.SourceHandleOwned {
+			input.Parsed.Body = NewRequestBodyRefFromHandle(lastWireHandle)
 		}
 		if input.RequestStream || !input.SourceHandleOwned {
 			acceptedWireBody = nil
