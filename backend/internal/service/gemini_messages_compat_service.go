@@ -1490,6 +1490,9 @@ func (s *GeminiMessagesCompatService) ForwardNativeHandle(ctx context.Context, c
 			_ = upstreamReq.Body.Close()
 		}
 		if err != nil {
+			if errors.Is(err, ErrRequestBodySpool) {
+				return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+			}
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,

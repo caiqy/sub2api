@@ -134,6 +134,22 @@ func TestGeminiMessagesCompatOutboundOpenFailurePreservesSpoolError(t *testing.T
 	require.Zero(t, upstream.calls)
 }
 
+func TestGeminiMessagesCompatForwardNativeTransportSpoolErrorReturns503WithoutRetry(t *testing.T) {
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash:countTokens", nil)
+	upstream := &geminiCompatHTTPUpstreamStub{err: fmt.Errorf("transport read failed: %w", ErrRequestBodySpool)}
+	svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
+	account := &Account{ID: 1, Platform: PlatformGemini, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "key"}}
+
+	result, err := svc.ForwardNative(context.Background(), c, account, "gemini-2.5-flash", "countTokens", false, []byte(`{"contents":[{"parts":[{"text":"hello"}]}]}`))
+
+	require.Error(t, err)
+	require.Nil(t, result)
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
+	require.Equal(t, 1, upstream.calls)
+}
+
 func TestGeminiMessagesCompatSignatureRetryPropagatesCanonicalSpoolFailure(t *testing.T) {
 	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":1024,"thinking":{"type":"enabled","budget_tokens":1024},"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"work","signature":"stale"}]},{"role":"user","content":"continue"}]}`)
 	canonical, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
