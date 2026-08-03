@@ -108,7 +108,7 @@ func TestForwardEmbeddings_APIKeyPassthroughRecordsUsageAndBatchInput(t *testing
 func TestForwardEmbeddingsStoresBoundedUsageAndOpsUpstreamPreview(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	const upstreamModel = "mapped-embedding-model"
-	input := strings.Repeat("x", int(defaultRequestBodyPreviewLimitBytes)+1024)
+	input := strings.Repeat("x", int(DefaultRequestBodyPreviewLimitBytes)+1024)
 	body := []byte(`{"model":"text-embedding-3-small","input":"` + input + `"}`)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -134,7 +134,7 @@ func TestForwardEmbeddingsStoresBoundedUsageAndOpsUpstreamPreview(t *testing.T) 
 	require.Error(t, err)
 	require.Contains(t, collector.headers, ":method: POST")
 	require.Contains(t, collector.headers, "/v1/embeddings")
-	require.LessOrEqual(t, len(collector.body), int(defaultRequestBodyPreviewLimitBytes))
+	require.LessOrEqual(t, len(collector.body), int(DefaultRequestBodyPreviewLimitBytes))
 	require.Equal(t, requestBodyPreviewOmittedMarker, collector.body)
 	require.Equal(t, collector.body, requireOpsPreviewString(t, c, requestBodyPreviewOmittedMarker))
 }

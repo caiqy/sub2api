@@ -21,8 +21,8 @@ import (
 )
 
 const (
-	defaultRequestBodySpoolThresholdBytes int64 = 10 << 20
-	defaultRequestBodyPreviewLimitBytes   int64 = 5 << 20
+	DefaultRequestBodySpoolThresholdBytes int64 = 1 << 20
+	DefaultRequestBodyPreviewLimitBytes   int64 = 256 << 10
 	defaultRequestBodySpoolPrefix               = "sub2api-request-body-"
 	requestBodyPreviewSnapshotKind              = "request_body_preview"
 	requestBodyPreviewOmittedMarker             = "[inline binary payload omitted]"
@@ -190,9 +190,9 @@ func NewRequestBodyHandleFromBytes(body []byte, opts RequestBodyHandleOptions) (
 }
 
 func RequestBodyPreviewString(body []byte) string {
-	truncated := int64(len(body)) > defaultRequestBodyPreviewLimitBytes
-	if int64(len(body)) > defaultRequestBodyPreviewLimitBytes {
-		body = body[:defaultRequestBodyPreviewLimitBytes]
+	truncated := int64(len(body)) > DefaultRequestBodyPreviewLimitBytes
+	if int64(len(body)) > DefaultRequestBodyPreviewLimitBytes {
+		body = body[:DefaultRequestBodyPreviewLimitBytes]
 	}
 	return sanitizeRequestBodyPreview(string(body), truncated)
 }
@@ -203,7 +203,7 @@ func RequestBodyPreviewSnapshot(preview string, size int64, forceTruncated ...bo
 		size = int64(providedBytes)
 	}
 	truncated := size > int64(providedBytes) || len(forceTruncated) > 0 && forceTruncated[0]
-	return marshalRequestBodyPreviewSnapshot(preview, size, truncated, int(defaultRequestBodyPreviewLimitBytes))
+	return marshalRequestBodyPreviewSnapshot(preview, size, truncated, int(DefaultRequestBodyPreviewLimitBytes))
 }
 
 func marshalRequestBodyPreviewSnapshot(preview string, size int64, truncated bool, maxBytes int) string {
@@ -296,8 +296,8 @@ func boundedGJSONString(raw string, maxBytes int) (string, bool) {
 }
 
 func sanitizeRequestBodyPreview(preview string, truncated bool) string {
-	if int64(len(preview)) > defaultRequestBodyPreviewLimitBytes {
-		preview = preview[:defaultRequestBodyPreviewLimitBytes]
+	if int64(len(preview)) > DefaultRequestBodyPreviewLimitBytes {
+		preview = preview[:DefaultRequestBodyPreviewLimitBytes]
 		truncated = true
 	}
 	if isOmittedRequestBodyPreview(preview) {
@@ -493,10 +493,10 @@ func containsNonEmptyDataURL(raw string) bool {
 
 func normalizeRequestBodyHandleOptions(opts RequestBodyHandleOptions) RequestBodyHandleOptions {
 	if opts.SpoolThresholdBytes <= 0 {
-		opts.SpoolThresholdBytes = defaultRequestBodySpoolThresholdBytes
+		opts.SpoolThresholdBytes = DefaultRequestBodySpoolThresholdBytes
 	}
 	if opts.PreviewLimitBytes <= 0 {
-		opts.PreviewLimitBytes = defaultRequestBodyPreviewLimitBytes
+		opts.PreviewLimitBytes = DefaultRequestBodyPreviewLimitBytes
 	}
 	if opts.TempDir == "" {
 		opts.TempDir = os.TempDir()

@@ -29,9 +29,6 @@ func TestRequestBodySizeMatrix(t *testing.T) {
 		gzip      bool
 		multipart bool
 	}{
-		{"identity/5MB", 5 << 20, false, false},
-		{"identity/10MB", 10 << 20, false, false},
-		{"identity/12MB", 12 << 20, false, false},
 		{"gzip/5MB", 5 << 20, true, false},
 		{"gzip/10MB", 10 << 20, true, false},
 		{"gzip/12MB", 12 << 20, true, false},
@@ -49,12 +46,37 @@ func TestRequestBodySizeMatrix(t *testing.T) {
 	}
 }
 
+func TestRequestBodyDefaultSpoolThresholdMatrix(t *testing.T) {
+	require.Equal(t, int64(1<<20), service.DefaultRequestBodySpoolThresholdBytes)
+	require.Equal(t, int64(256<<10), service.DefaultRequestBodyPreviewLimitBytes)
+	require.LessOrEqual(t, service.DefaultRequestBodyPreviewLimitBytes, service.DefaultRequestBodySpoolThresholdBytes)
+
+	for _, tt := range []struct {
+		name string
+		size int
+	}{
+		{"identity/0.5MB", 512 << 10},
+		{"identity/1MB", 1 << 20},
+		{"identity/1MB+1", (1 << 20) + 1},
+		{"identity/2MB", 2 << 20},
+		{"identity/10MB", 10 << 20},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			testRequestBodySizeMatrixJSON(t, tt.size, false)
+		})
+	}
+}
+
 func testRequestBodySizeMatrixJSON(t *testing.T, size int, compressed bool) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	rawDir, effectiveDir := t.TempDir(), t.TempDir()
 	oldOptions := jsonRequestBodyHandleOptions
-	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 10 << 20, PreviewLimitBytes: 64, TempDir: rawDir}
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{
+		SpoolThresholdBytes: service.DefaultRequestBodySpoolThresholdBytes,
+		PreviewLimitBytes:   service.DefaultRequestBodyPreviewLimitBytes,
+		TempDir:             rawDir,
+	}
 	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
 	t.Setenv("TMPDIR", effectiveDir)
 	t.Setenv("TMP", effectiveDir)
@@ -104,7 +126,8 @@ func testRequestBodySizeMatrixJSON(t *testing.T, size int, compressed bool) {
 	assertMatrixRequestBodySnapshot(t, "usage request", detail.RequestBody, clientBody, "")
 	assertMatrixRequestBodySnapshot(t, "usage upstream", detail.UpstreamRequestBody, upstreamBody, "")
 	assertMatrixRequestBodySnapshot(t, "ops upstream", opsBody, upstreamBody, "")
-	assertMatrixTempFiles(t, rawDir, "sub2api-request-body-", size > 10<<20)
+	wantSpool := int64(size) > service.DefaultRequestBodySpoolThresholdBytes
+	assertMatrixTempFiles(t, rawDir, "sub2api-request-body-", wantSpool)
 	assertMatrixTempFiles(t, effectiveDir, "sub2api-request-body-", false)
 
 	release()

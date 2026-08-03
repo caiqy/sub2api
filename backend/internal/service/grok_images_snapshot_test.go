@@ -78,7 +78,7 @@ func TestBuildGrokResponsesRequestStoresUsageAndOpsUpstreamPreview(t *testing.T)
 
 func TestForwardOpenAIImagesAPIKeyStoresBoundedUsageAndOpsUpstreamPreview(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	prompt := strings.Repeat("x", int(defaultRequestBodyPreviewLimitBytes)+1024)
+	prompt := strings.Repeat("x", int(DefaultRequestBodyPreviewLimitBytes)+1024)
 	body := []byte(`{"model":"gpt-image-2","prompt":"` + prompt + `"}`)
 
 	rec := httptest.NewRecorder()
@@ -106,7 +106,7 @@ func TestForwardOpenAIImagesAPIKeyStoresBoundedUsageAndOpsUpstreamPreview(t *tes
 	_, _ = svc.ForwardImages(context.Background(), c, account, body, parsed, "")
 
 	require.NotEmpty(t, collector.body)
-	require.LessOrEqual(t, len(collector.body), int(defaultRequestBodyPreviewLimitBytes))
+	require.LessOrEqual(t, len(collector.body), int(DefaultRequestBodyPreviewLimitBytes))
 	require.Equal(t, requestBodyPreviewOmittedMarker, collector.body)
 	require.Equal(t, collector.body, requireOpsPreviewString(t, c, requestBodyPreviewOmittedMarker))
 }

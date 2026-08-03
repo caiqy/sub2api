@@ -186,7 +186,7 @@ func TestGatewayCompatCallersCaptureFinalPreviewAttemptAndFailoverHeaders(t *tes
 			require.JSONEq(t, string(upstream.lastBody), collector.body)
 			require.Equal(t, tt.name, gjson.Get(collector.body, "metadata.final_preview").String())
 			require.JSONEq(t, collector.body, requireOpsPreviewString(t, c, tt.name))
-			require.LessOrEqual(t, len(collector.body), int(defaultRequestBodyPreviewLimitBytes))
+			require.LessOrEqual(t, len(collector.body), int(DefaultRequestBodyPreviewLimitBytes))
 			require.True(t, HasOpsUpstreamAttempted(c))
 		})
 	}
@@ -498,7 +498,7 @@ func TestGatewayService_AnthropicPassthroughBuildFailureKeepsOriginalOpsBodySize
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
-	payload := strings.Repeat("x", int(defaultRequestBodyPreviewLimitBytes)+1024)
+	payload := strings.Repeat("x", int(DefaultRequestBodyPreviewLimitBytes)+1024)
 	body := []byte(`{"model":"claude-3-5-sonnet-latest","image_url":"data:image/png;base64,c2VjcmV0","padding":"` + payload + `"}`)
 	parsed := &ParsedRequest{Body: NewRequestBodyRef(body), Model: "claude-3-5-sonnet-latest"}
 	svc := &GatewayService{cfg: &config.Config{}, rateLimitService: &RateLimitService{}}

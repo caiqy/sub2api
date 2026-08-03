@@ -94,13 +94,13 @@ type grokMediaEligibilityProber interface {
 	ProbeMediaEligibility(ctx context.Context, accountID int64) (bool, string, error)
 }
 
-const openAIResponsesRequestBodySpoolThresholdBytes int64 = 10 << 20
+const openAIResponsesRequestBodySpoolThresholdBytes int64 = service.DefaultRequestBodySpoolThresholdBytes
 
 func openAIForwardSucceededForScheduling(result *service.OpenAIForwardResult) bool {
 	return result.SucceededForScheduling()
 }
 
-var openAIResponsesRequestBodyPreviewLimitBytes int64 = 5 << 20
+var openAIResponsesRequestBodyPreviewLimitBytes int64 = service.DefaultRequestBodyPreviewLimitBytes
 
 const requestBodyPreviewSnapshotKind = "request_body_preview"
 

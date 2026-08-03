@@ -4662,7 +4662,7 @@ func TestOpenAIGatewayHandler_ResponsesSpoolCreateFailureReturns503(t *testing.T
 	t.Setenv("TMP", missingTempDir)
 	t.Setenv("TEMP", missingTempDir)
 
-	reqBody := `{"model":"gpt-5.4","stream":false,"input":"` + strings.Repeat("x", int(openAIResponsesRequestBodySpoolThresholdBytes)) + `"}`
+	reqBody := `{"model":"gpt-5.4","stream":false,"input":"` + strings.Repeat("x", int(service.DefaultRequestBodySpoolThresholdBytes)) + `"}`
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")

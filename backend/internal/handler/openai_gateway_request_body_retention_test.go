@@ -134,7 +134,7 @@ func TestOpenAIRequestBodyPreviewSnapshotSpoolFailureStillReturnsWrapper(t *test
 	t.Setenv("TMPDIR", missingTempDir)
 	t.Setenv("TMP", missingTempDir)
 	t.Setenv("TEMP", missingTempDir)
-	body := []byte(strings.Repeat("x", int(openAIResponsesRequestBodySpoolThresholdBytes)+1))
+	body := []byte(strings.Repeat("x", int(service.DefaultRequestBodySpoolThresholdBytes)+1))
 
 	snapshot := openAIRequestBodyPreviewSnapshot(body)
 

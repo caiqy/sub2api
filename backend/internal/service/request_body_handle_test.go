@@ -347,7 +347,7 @@ func TestRequestBodyHandle_ZeroOptionsUseSafeDefaults(t *testing.T) {
 }
 
 func TestRequestBodyPreviewStringFromBytesUsesDefaultLimit(t *testing.T) {
-	body := []byte(strings.Repeat("x", int(defaultRequestBodyPreviewLimitBytes)+1))
+	body := []byte(strings.Repeat("x", int(DefaultRequestBodyPreviewLimitBytes)+1))
 
 	preview := RequestBodyPreviewString(body)
 
@@ -405,14 +405,14 @@ func TestRequestBodyPreviewsKeepTextAndCrossObjectLookalikes(t *testing.T) {
 }
 
 func TestRequestBodyPreviewOnlyScansBoundedPrefix(t *testing.T) {
-	prefix := `{"text":"` + strings.Repeat("x", int(defaultRequestBodyPreviewLimitBytes))
+	prefix := `{"text":"` + strings.Repeat("x", int(DefaultRequestBodyPreviewLimitBytes))
 	body := []byte(prefix + `","image_url":"data:image/png;base64,c2VjcmV0"}`)
 
 	preview := RequestBodyPreviewString(body)
 
 	require.Equal(t, requestBodyPreviewOmittedMarker, preview)
 
-	sensitivePrefix := []byte(`{"image_url":"data:image/png;base64,c2VjcmV0","text":"` + strings.Repeat("x", int(defaultRequestBodyPreviewLimitBytes)) + `"}`)
+	sensitivePrefix := []byte(`{"image_url":"data:image/png;base64,c2VjcmV0","text":"` + strings.Repeat("x", int(DefaultRequestBodyPreviewLimitBytes)) + `"}`)
 	require.Contains(t, RequestBodyPreviewString(sensitivePrefix), "omitted")
 }
 
@@ -429,7 +429,7 @@ func TestRequestBodyPreviewFindsSensitivePayloadAtDepth257(t *testing.T) {
 }
 
 func TestRequestBodyPreviewFailsClosedForDataFirstSourceAcrossBound(t *testing.T) {
-	body := []byte(`{"source":{"data":"c2VjcmV0` + strings.Repeat("x", int(defaultRequestBodyPreviewLimitBytes)) + `","type":"base64"}}`)
+	body := []byte(`{"source":{"data":"c2VjcmV0` + strings.Repeat("x", int(DefaultRequestBodyPreviewLimitBytes)) + `","type":"base64"}}`)
 
 	require.Contains(t, RequestBodyPreviewString(body), "omitted")
 }

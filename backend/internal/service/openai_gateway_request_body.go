@@ -37,9 +37,9 @@ func getOpenAIRequestBodyHandle(c *gin.Context) *RequestBodyHandle {
 
 func openAIRequestBodyHandleOptions() RequestBodyHandleOptions {
 	return RequestBodyHandleOptions{
-		SpoolThresholdBytes: 10 << 20,
-		PreviewLimitBytes:   5 << 20,
-		FilePrefix:          "sub2api-request-body-",
+		SpoolThresholdBytes: DefaultRequestBodySpoolThresholdBytes,
+		PreviewLimitBytes:   DefaultRequestBodyPreviewLimitBytes,
+		FilePrefix:          defaultRequestBodySpoolPrefix,
 	}
 }
 

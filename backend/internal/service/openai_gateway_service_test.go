@@ -3458,7 +3458,7 @@ func TestOpenAIRawCompatCallersCaptureFinalPreviewAttemptAndFailoverHeaders(t *t
 			require.JSONEq(t, string(upstream.lastBody), collector.body)
 			require.Equal(t, "mapped-model", gjson.Get(collector.body, "model").String())
 			require.JSONEq(t, collector.body, requireOpsPreviewString(t, c, "mapped-model"))
-			require.LessOrEqual(t, len(collector.body), int(defaultRequestBodyPreviewLimitBytes))
+			require.LessOrEqual(t, len(collector.body), int(DefaultRequestBodyPreviewLimitBytes))
 			require.True(t, HasOpsUpstreamAttempted(c))
 		})
 	}

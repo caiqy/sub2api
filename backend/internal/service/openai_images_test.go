@@ -1310,26 +1310,26 @@ func TestOpenAIGatewayServiceForwardImages_JSONInlineDataWithLargeExponentIsOmit
 				require.NotContains(t, preview, "data:")
 				require.NotContains(t, preview, imageBase64)
 				require.NotContains(t, preview, maskBase64)
-				require.LessOrEqual(t, len(preview), int(defaultRequestBodyPreviewLimitBytes))
+				require.LessOrEqual(t, len(preview), int(DefaultRequestBodyPreviewLimitBytes))
 			}
 			opsPreview := requireOpsPreviewString(t, c, "omitted")
 			require.NotContains(t, opsPreview, "data:")
 			require.NotContains(t, opsPreview, imageBase64)
 			require.NotContains(t, opsPreview, maskBase64)
-			require.LessOrEqual(t, len(opsPreview), int(defaultRequestBodyPreviewLimitBytes))
+			require.LessOrEqual(t, len(opsPreview), int(DefaultRequestBodyPreviewLimitBytes))
 		})
 	}
 }
 
 func TestOpenAIImagesJSONPreviewKeepsBoundedOrdinaryJSON(t *testing.T) {
-	body := []byte(`{"model":"gpt-image-2","prompt":"` + strings.Repeat("x", int(defaultRequestBodyPreviewLimitBytes)+1024) + `"}`)
+	body := []byte(`{"model":"gpt-image-2","prompt":"` + strings.Repeat("x", int(DefaultRequestBodyPreviewLimitBytes)+1024) + `"}`)
 	preview, omitted := openAIImagesJSONPreview(body)
 	require.True(t, omitted)
 	require.Equal(t, requestBodyPreviewOmittedMarker, preview)
 }
 
 func TestOpenAIImagesJSONPreviewDoesNotDecodePastBoundedPreview(t *testing.T) {
-	body := []byte(`{"prompt":"` + strings.Repeat("x", int(defaultRequestBodyPreviewLimitBytes)+1024))
+	body := []byte(`{"prompt":"` + strings.Repeat("x", int(DefaultRequestBodyPreviewLimitBytes)+1024))
 
 	preview, omitted := openAIImagesJSONPreview(body)
 
