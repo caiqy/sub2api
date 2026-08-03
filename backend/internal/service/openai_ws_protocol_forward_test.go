@@ -19,6 +19,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 type httpUpstreamSequenceRecorder struct {
@@ -28,6 +29,7 @@ type httpUpstreamSequenceRecorder struct {
 
 	responses []*http.Response
 	errs      []error
+	afterDo   func(attempt int)
 	callCount int
 }
 
@@ -45,6 +47,9 @@ func (u *httpUpstreamSequenceRecorder) Do(req *http.Request, proxyURL string, ac
 		req.Body = io.NopCloser(bytes.NewReader(b))
 	} else {
 		u.bodies = append(u.bodies, nil)
+	}
+	if u.afterDo != nil {
+		u.afterDo(idx)
 	}
 	if idx < len(u.errs) && u.errs[idx] != nil {
 		return nil, u.errs[idx]
@@ -247,7 +252,17 @@ func TestOpenAIGatewayService_Forward_HTTPIngressRetriesInvalidEncryptedContentO
 		},
 	}
 
-	body := []byte(`{"model":"gpt-5.1","stream":false,"previous_response_id":"resp_http_retry","input":[{"type":"reasoning","encrypted_content":"gAAA","summary":[{"type":"summary_text","text":"keep me"}]},{"type":"input_text","text":"hello"}]}`)
+	body := []byte(`{"model":"gpt-5.1","stream":false,"instructions":"test","previous_response_id":"resp_http_retry","input":[{"type":"reasoning","encrypted_content":"gAAA","summary":[{"type":"summary_text","text":"keep me"}]},{"type":"input_text","text":"hello"}]}`)
+	firstAttemptBody, err := sjson.DeleteBytes(body, "previous_response_id")
+	require.NoError(t, err)
+	handle, err := NewRequestBodyHandleFromBytes(firstAttemptBody, RequestBodyHandleOptions{
+		SpoolThresholdBytes: 1,
+		TempDir:             t.TempDir(),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+	BindOpenAIRequestBodyHandle(c, handle)
+
 	result, err := svc.Forward(context.Background(), c, account, body)
 	require.NoError(t, err)
 	require.NotNil(t, result)

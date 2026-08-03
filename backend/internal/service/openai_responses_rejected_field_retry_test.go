@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -170,15 +171,23 @@ func TestOpenAIGatewayService_OpenAIHTTPStripsInputNamespacesBeforeFirstForward(
 }
 
 func TestOpenAIGatewayService_RetriesExplicitMaxOutputTokensRejection(t *testing.T) {
-	body := []byte(`{"model":"gpt-5.5","stream":false,"max_output_tokens":4096,"input":[{"type":"message","role":"user","content":{"max_output_tokens":"keep"}}]}`)
+	body := []byte(`{"model":"gpt-5.5","stream":false,"instructions":"test","max_output_tokens":4096,"input":[{"type":"message","role":"user","content":{"max_output_tokens":"keep"}}]}`)
 	upstream := &httpUpstreamRecorder{responses: []*http.Response{
 		newOpenAIRejectedFieldTestResponse(http.StatusBadRequest, `{"error":{"code":"unsupported_parameter","message":"Unsupported parameter: max_output_tokens","param":"max_output_tokens","type":"invalid_request_error"}}`),
 		newOpenAIRejectedFieldTestResponse(http.StatusOK, `{"output":[],"usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`),
 	}}
+	c := newOpenAIRejectedFieldTestContext(body)
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{
+		SpoolThresholdBytes: 1,
+		TempDir:             t.TempDir(),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+	BindOpenAIRequestBodyHandle(c, handle)
 
 	result, err := newOpenAIRejectedFieldTestService(upstream).Forward(
 		context.Background(),
-		newOpenAIRejectedFieldTestContext(body),
+		c,
 		newOpenAIRejectedFieldTestAccount(),
 		body,
 	)
@@ -189,6 +198,41 @@ func TestOpenAIGatewayService_RetriesExplicitMaxOutputTokensRejection(t *testing
 	require.Equal(t, int64(4096), gjson.GetBytes(upstream.bodies[0], "max_output_tokens").Int())
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "max_output_tokens").Exists())
 	require.Equal(t, "keep", gjson.GetBytes(upstream.bodies[1], "input.0.content.max_output_tokens").String())
+}
+
+func TestOpenAIGatewayService_RejectedFieldRetryReturnsSpoolError(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.5","stream":false,"instructions":"test","max_output_tokens":4096,"input":"hello"}`)
+	c := newOpenAIRejectedFieldTestContext(body)
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{
+		SpoolThresholdBytes: 1,
+		TempDir:             t.TempDir(),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+	BindOpenAIRequestBodyHandle(c, handle)
+
+	upstream := &httpUpstreamSequenceRecorder{
+		responses: []*http.Response{
+			newOpenAIRejectedFieldTestResponse(http.StatusBadRequest, `{"error":{"code":"unsupported_parameter","message":"Unsupported parameter: max_output_tokens","param":"max_output_tokens","type":"invalid_request_error"}}`),
+			newOpenAIRejectedFieldTestResponse(http.StatusOK, `{"output":[],"usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`),
+		},
+		afterDo: func(attempt int) {
+			if attempt == 0 {
+				require.NoError(t, os.Remove(handle.spoolPath))
+			}
+		},
+	}
+
+	result, err := newOpenAIRejectedFieldTestService(upstream).Forward(
+		context.Background(),
+		c,
+		newOpenAIRejectedFieldTestAccount(),
+		body,
+	)
+
+	require.ErrorIs(t, err, ErrRequestBodySpool)
+	require.Nil(t, result)
+	require.Equal(t, 1, upstream.callCount)
 }
 
 func TestOpenAIGatewayService_ComposesProactiveNamespaceStripWithRejectedFieldRetry(t *testing.T) {
@@ -216,7 +260,7 @@ func TestOpenAIGatewayService_ComposesProactiveNamespaceStripWithRejectedFieldRe
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "max_output_tokens").Exists())
 }
 
-func newOpenAIRejectedFieldTestService(upstream *httpUpstreamRecorder) *OpenAIGatewayService {
+func newOpenAIRejectedFieldTestService(upstream HTTPUpstream) *OpenAIGatewayService {
 	return &OpenAIGatewayService{
 		cfg: &config.Config{Security: config.SecurityConfig{
 			URLAllowlist: config.URLAllowlistConfig{Enabled: false},
