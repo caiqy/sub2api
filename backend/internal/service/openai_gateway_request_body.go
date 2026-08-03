@@ -77,6 +77,10 @@ func openAIRequestBodyBytes(c *gin.Context, body []byte) ([]byte, error) {
 type openAIOwnedBodyHandleContextKey struct{}
 type openAIFinalUpstreamModelContextKey struct{}
 
+type openAIMatchedRequestBodyHandle struct {
+	handle *RequestBodyHandle
+}
+
 func withOpenAIFinalUpstreamModel(req *http.Request, body []byte) *http.Request {
 	if req == nil {
 		return nil
@@ -166,7 +170,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithSourceBody(ctx context.Co
 		return nil, err
 	}
 	if bodyHandle != nil {
-		return s.buildUpstreamRequestOpenAIPassthrough(ctx, c, account, sourceBody, body, bodyHandle, token)
+		return s.buildUpstreamRequestOpenAIPassthrough(ctx, c, account, sourceBody, body, openAIMatchedRequestBodyHandle{handle: bodyHandle}, token)
 	}
 	return s.buildUpstreamRequestOpenAIPassthrough(ctx, c, account, sourceBody, body, token)
 }
@@ -675,12 +679,12 @@ func newOpenAIRequestView(body []byte) openAIRequestView {
 
 	view := openAIRequestView{body: body}
 	var seen uint8
-	// parseRawJSONView reads body without copying; view keeps body alive for extracted strings.
+	// parseRawJSONView reads body without copying; clone retained scalars so clearing body releases it.
 	parseRawJSONView(body).ForEach(func(key, value gjson.Result) bool {
 		switch key.Str {
 		case "model":
 			if seen&modelField == 0 {
-				view.Model = strings.TrimSpace(value.String())
+				view.Model = strings.Clone(strings.TrimSpace(value.String()))
 				seen |= modelField
 			}
 		case "stream":
@@ -690,22 +694,22 @@ func newOpenAIRequestView(body []byte) openAIRequestView {
 			}
 		case "prompt_cache_key":
 			if seen&promptCacheKeyField == 0 {
-				view.PromptCacheKey = strings.TrimSpace(value.String())
+				view.PromptCacheKey = strings.Clone(strings.TrimSpace(value.String()))
 				seen |= promptCacheKeyField
 			}
 		case "previous_response_id":
 			if seen&previousResponseIDField == 0 {
-				view.PreviousResponseID = strings.TrimSpace(value.String())
+				view.PreviousResponseID = strings.Clone(strings.TrimSpace(value.String()))
 				seen |= previousResponseIDField
 			}
 		case "service_tier":
 			if seen&serviceTierField == 0 {
-				view.ServiceTier = strings.TrimSpace(value.String())
+				view.ServiceTier = strings.Clone(strings.TrimSpace(value.String()))
 				seen |= serviceTierField
 			}
 		case "reasoning":
 			if seen&reasoningField == 0 {
-				view.ReasoningEffort = strings.TrimSpace(value.Get("effort").String())
+				view.ReasoningEffort = strings.Clone(strings.TrimSpace(value.Get("effort").String()))
 				seen |= reasoningField
 			}
 		}

@@ -776,6 +776,30 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	httpInvalidEncryptedContentRetryTried := false
 	agentTaskRecoveryTried := false
 	rejectedFieldRetryState := newOpenAIResponsesRejectedFieldRetryState(body)
+	passthroughSourceBodyNeeded := false
+	if enabled, rules, rulesErr := AccountPassthroughFieldRules(account); rulesErr != nil {
+		return nil, rulesErr
+	} else if enabled {
+		for _, rule := range rules {
+			if rule.Target == "body" && (rule.Mode == "map" || rule.Mode == "forward") {
+				passthroughSourceBodyNeeded = true
+				break
+			}
+		}
+	}
+	var sourceHandle *RequestBodyHandle
+	var sourceHandleOwned bool
+	if passthroughSourceBodyNeeded {
+		sourceHandle, sourceHandleOwned, err = openAIRequestBodyHandleForContext(c, originalBody)
+		if err != nil {
+			return nil, err
+		}
+		defer func() {
+			if sourceHandleOwned {
+				CleanupRequestBodyHandle(sourceHandle)
+			}
+		}()
+	}
 	attemptHandle, attemptHandleOwned, err := openAIRequestBodyHandleForContext(c, body)
 	if err != nil {
 		return nil, err
@@ -787,12 +811,22 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}()
 
 	firstAttemptBody := body
+	firstSourceBody := originalBody
 	body = nil
+	originalBody = nil
 	for {
 		attemptBody := firstAttemptBody
 		firstAttemptBody = nil
 		if len(attemptBody) == 0 {
 			attemptBody, err = attemptHandle.ReadAll()
+			if err != nil {
+				return nil, err
+			}
+		}
+		sourceBody := firstSourceBody
+		firstSourceBody = nil
+		if passthroughSourceBodyNeeded && len(sourceBody) == 0 {
+			sourceBody, err = sourceHandle.ReadAll()
 			if err != nil {
 				return nil, err
 			}
@@ -804,7 +838,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		if firstOutputTimeout > 0 {
 			upstreamCtx, headerGuard = newOpenAIFirstOutputHeaderGuard(upstreamCtx, releaseUpstreamCtx, startTime.Add(firstOutputTimeout))
 		}
-		upstreamReq, err := s.buildUpstreamRequestWithSourceBody(upstreamCtx, c, account, originalBody, attemptBody, attemptHandle, token, reqStream, promptCacheKey, isCodexCLI)
+		upstreamReq, err := s.buildUpstreamRequestWithSourceBody(upstreamCtx, c, account, sourceBody, attemptBody, attemptHandle, token, reqStream, promptCacheKey, isCodexCLI)
 		if headerGuard == nil {
 			releaseUpstreamCtx()
 		}
@@ -816,9 +850,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		upstreamPreview := openAIUpstreamRequestBodyPreview(upstreamReq, attemptBody)
 		if _, ownsFinalBody := upstreamReq.Context().Value(openAIOwnedBodyHandleContextKey{}).(*RequestBodyHandle); !ownsFinalBody {
-			if openAIRequestBodyHandleMatchesBytes(attemptHandle, attemptBody) {
-				upstreamPreview = attemptHandle.PreviewString()
-			}
+			upstreamPreview = attemptHandle.PreviewString()
 		}
 		SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
 		publishOpenAIFinalUpstreamModel(c, upstreamReq)
@@ -832,6 +864,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 		// Send request
 		attemptBody = nil
+		sourceBody = nil
 		requestView.body = nil
 		reqBody = nil
 		upstreamStart := time.Now()
@@ -876,6 +909,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 			upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 			upstreamCode := extractUpstreamErrorCode(respBody)
+			var requestBody []byte
+			var readErr error
 			if !agentTaskRecoveryTried && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
 				agentTaskRecoveryTried = true
 				expectedTaskID := account.GetCredential("task_id")
@@ -887,14 +922,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			respBody = s.redactAgentIdentitySensitiveBody(ctx, account, respBody)
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
 			if !httpInvalidEncryptedContentRetryTried && resp.StatusCode == http.StatusBadRequest && upstreamCode == "invalid_encrypted_content" {
-				canonicalBody, readErr := attemptHandle.ReadAll()
+				requestBody, readErr = attemptHandle.ReadAll()
 				if readErr != nil {
 					return nil, readErr
 				}
-				requestView = newOpenAIRequestView(canonicalBody)
+				requestView = newOpenAIRequestView(requestBody)
 				reqBody = nil
 				decoded, decodeErr := ensureReqBody()
-				canonicalBody = nil
 				if decodeErr != nil {
 					return nil, decodeErr
 				}
@@ -919,36 +953,41 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					requestView = newOpenAIRequestView(retryBody)
 					reqBody = nil
 					retryBody = nil
+					requestBody = nil
 					logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Retrying non-WSv2 request once after invalid_encrypted_content (account: %s)", account.Name)
 					continue
 				}
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Skip non-WSv2 invalid_encrypted_content retry because encrypted reasoning items are missing (account: %s)", account.Name)
 			}
-			canonicalBody, readErr := attemptHandle.ReadAll()
-			if readErr != nil {
-				return nil, readErr
-			}
-			retryBody, reason, changed, retryErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, canonicalBody, respBody)
-			canonicalBody = nil
-			if retryErr != nil {
-				return nil, fmt.Errorf("normalize rejected Responses field retry body: %w", retryErr)
-			} else if changed && rejectedFieldRetryState.Allow(retryBody) {
-				retryHandle, retryHandleOwned, err := openAIRequestBodyHandleForBytes(attemptHandle, retryBody)
-				if err != nil {
-					return nil, err
+			if resp.StatusCode == http.StatusBadRequest && isExplicitOpenAIResponsesFieldRejection(upstreamCode, upstreamMsg) {
+				if requestBody == nil {
+					requestBody, readErr = attemptHandle.ReadAll()
+					if readErr != nil {
+						return nil, readErr
+					}
 				}
-				if attemptHandleOwned && retryHandle != attemptHandle {
-					CleanupRequestBodyHandle(attemptHandle)
+				retryBody, reason, changed, retryErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, requestBody, respBody)
+				if retryErr != nil {
+					return nil, fmt.Errorf("normalize rejected Responses field retry body: %w", retryErr)
+				} else if changed && rejectedFieldRetryState.Allow(retryBody) {
+					retryHandle, retryHandleOwned, err := openAIRequestBodyHandleForBytes(attemptHandle, retryBody)
+					if err != nil {
+						return nil, err
+					}
+					if attemptHandleOwned && retryHandle != attemptHandle {
+						CleanupRequestBodyHandle(attemptHandle)
+					}
+					if retryHandle != attemptHandle {
+						attemptHandle = retryHandle
+						attemptHandleOwned = retryHandleOwned
+					}
+					requestView = newOpenAIRequestView(retryBody)
+					reqBody = nil
+					retryBody = nil
+					requestBody = nil
+					logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Retrying non-WSv2 request after %s (account: %s)", reason, account.Name)
+					continue
 				}
-				if retryHandle != attemptHandle {
-					attemptHandle = retryHandle
-					attemptHandleOwned = retryHandleOwned
-				}
-				requestView = newOpenAIRequestView(retryBody)
-				reqBody = nil
-				retryBody = nil
-				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Retrying non-WSv2 request after %s (account: %s)", reason, account.Name)
-				continue
 			}
 			if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
 				upstreamDetail := ""
@@ -979,9 +1018,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					!shouldDisable && account.IsPoolMode() && (account.IsPoolModeRetryableStatus(resp.StatusCode) || isOpenAITransientProcessingError(resp.StatusCode, upstreamMsg, respBody)),
 				)
 			}
-			requestBody, readErr := attemptHandle.ReadAll()
-			if readErr != nil {
-				return nil, readErr
+			if requestBody == nil {
+				requestBody, readErr = attemptHandle.ReadAll()
+				if readErr != nil {
+					return nil, readErr
+				}
 			}
 			result, err := s.handleErrorResponse(ctx, resp, c, account, requestBody, billingModel)
 			requestBody = nil

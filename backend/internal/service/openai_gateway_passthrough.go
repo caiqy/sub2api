@@ -345,6 +345,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	bodyHandleOrToken any,
 	tokenArgs ...string,
 ) (*http.Request, error) {
+	_, bodyHandleMatchesInput := bodyHandleOrToken.(openAIMatchedRequestBodyHandle)
 	bodyHandle, token, err := parseOpenAIPassthroughBodyHandleArgs(bodyHandleOrToken, tokenArgs)
 	if err != nil {
 		return nil, err
@@ -379,13 +380,18 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 			outboundHeader.Add(key, value)
 		}
 	}
+	inputBody := body
 	body, err = applyAccountPassthroughFieldsWithContext(ctx, account, inboundHeader, sourceBody, body, outboundHeader)
 	if err != nil {
 		return nil, err
 	}
-	bodyHandle, ownedBodyHandle, err := openAIRequestBodyHandleForBytes(bodyHandle, body)
-	if err != nil {
-		return nil, err
+	bodyUnchanged := len(body) == len(inputBody) && (len(body) == 0 || &body[0] == &inputBody[0])
+	ownedBodyHandle := false
+	if !bodyHandleMatchesInput || !bodyUnchanged {
+		bodyHandle, ownedBodyHandle, err = openAIRequestBodyHandleForBytes(bodyHandle, body)
+		if err != nil {
+			return nil, err
+		}
 	}
 	req, err := openAINewRequestWithBodyHandle(ctx, http.MethodPost, targetURL, bodyHandle, ownedBodyHandle)
 	if err != nil {
@@ -501,6 +507,10 @@ func parseOpenAIPassthroughBodyHandleArgs(bodyHandleOrToken any, tokenArgs []str
 	case *RequestBodyHandle:
 		if len(tokenArgs) == 1 {
 			return value, tokenArgs[0], nil
+		}
+	case openAIMatchedRequestBodyHandle:
+		if value.handle != nil && len(tokenArgs) == 1 {
+			return value.handle, tokenArgs[0], nil
 		}
 	}
 	return nil, "", fmt.Errorf("invalid OpenAI passthrough request builder arguments")

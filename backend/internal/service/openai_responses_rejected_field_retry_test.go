@@ -235,6 +235,91 @@ func TestOpenAIGatewayService_RejectedFieldRetryReturnsSpoolError(t *testing.T) 
 	require.Equal(t, 1, upstream.callCount)
 }
 
+func TestOpenAIGatewayService_RetryPassthroughSourceDoesNotAliasCallerBody(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.5","stream":false,"instructions":"test","max_output_tokens":4096,"metadata":{"user_id":"source-user"},"input":"hello"}`)
+	c := newOpenAIRejectedFieldTestContext(body)
+	account := newOpenAIRejectedFieldTestAccount()
+	account.Extra["passthrough_fields_enabled"] = true
+	account.Extra["passthrough_field_rules"] = []PassthroughFieldRule{
+		{Target: "body", Mode: "forward", Key: "metadata.user_id"},
+	}
+	upstream := &httpUpstreamSequenceRecorder{
+		responses: []*http.Response{
+			newOpenAIRejectedFieldTestResponse(http.StatusBadRequest, `{"error":{"code":"unsupported_parameter","message":"Unsupported parameter: max_output_tokens","param":"max_output_tokens","type":"invalid_request_error"}}`),
+			newOpenAIRejectedFieldTestResponse(http.StatusOK, `{"output":[],"usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`),
+		},
+		afterDo: func(attempt int) {
+			if attempt == 0 {
+				copy(body, bytes.Replace(body, []byte("source-user"), []byte("hacked-user"), 1))
+			}
+		},
+	}
+
+	result, err := newOpenAIRejectedFieldTestService(upstream).Forward(context.Background(), c, account, body)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, upstream.bodies, 2)
+	require.Equal(t, "source-user", gjson.GetBytes(upstream.bodies[0], "metadata.user_id").String())
+	require.Equal(t, "source-user", gjson.GetBytes(upstream.bodies[1], "metadata.user_id").String())
+}
+
+func TestOpenAIHandleErrorResponse_FailoverDoesNotReadDeletedRequestSpool(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.5","stream":false,"instructions":"test","input":"hello"}`)
+	c := newOpenAIRejectedFieldTestContext(body)
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{
+		SpoolThresholdBytes: 1,
+		TempDir:             t.TempDir(),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+	BindOpenAIRequestBodyHandle(c, handle)
+	upstream := &httpUpstreamSequenceRecorder{
+		responses: []*http.Response{
+			newOpenAIRejectedFieldTestResponse(http.StatusTooManyRequests, `{"error":{"code":"rate_limit_exceeded","message":"rate limited","type":"rate_limit_error"}}`),
+		},
+		afterDo: func(attempt int) {
+			if attempt == 0 {
+				require.NoError(t, os.Remove(handle.spoolPath))
+			}
+		},
+	}
+
+	result, err := newOpenAIRejectedFieldTestService(upstream).Forward(context.Background(), c, newOpenAIRejectedFieldTestAccount(), body)
+
+	require.Nil(t, result)
+	require.NotErrorIs(t, err, ErrRequestBodySpool)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusTooManyRequests, failoverErr.StatusCode)
+}
+
+func TestOpenAIRequestBodyHandle_KnownAttemptSkipsHashRematch(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.5","stream":false,"instructions":"test","input":"hello"}`)
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+	handle.hash = "force-rematch-if-hashed"
+
+	req, err := newOpenAIRejectedFieldTestService(&httpUpstreamRecorder{}).buildUpstreamRequestWithSourceBody(
+		context.Background(),
+		newOpenAIRejectedFieldTestContext(body),
+		newOpenAIRejectedFieldTestAccount(),
+		body,
+		body,
+		handle,
+		"sk-test",
+		false,
+		"",
+		false,
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { closeOpenAIRequestBody(req) })
+
+	_, ownsFinalBody := req.Context().Value(openAIOwnedBodyHandleContextKey{}).(*RequestBodyHandle)
+	require.False(t, ownsFinalBody)
+}
+
 func TestOpenAIGatewayService_ComposesProactiveNamespaceStripWithRejectedFieldRetry(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.5","stream":false,"max_output_tokens":2048,"input":[{"type":"function_call","name":"first","namespace":"remove-first","arguments":"{}"},{"type":"custom_tool_call","name":"second","namespace":"remove-second","input":"{}"}]}`)
 	upstream := &httpUpstreamRecorder{responses: []*http.Response{

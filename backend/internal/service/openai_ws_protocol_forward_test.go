@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -285,6 +288,122 @@ func TestOpenAIGatewayService_Forward_HTTPIngressRetriesInvalidEncryptedContentO
 	reason, _ := c.Get("openai_ws_transport_reason")
 	require.Equal(t, string(OpenAIUpstreamTransportHTTPSSE), decision)
 	require.Equal(t, "client_protocol_http", reason)
+}
+
+func TestOpenAIGatewayService_Forward_HTTPIngressRetriesInvalidEncryptedContentSpoolFailure(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.1","stream":false,"instructions":"test","input":[{"type":"reasoning","encrypted_content":"gAAA","summary":[]},{"type":"input_text","text":"hello"}]}`)
+	c := newOpenAIRejectedFieldTestContext(body)
+	SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{
+		SpoolThresholdBytes: 1,
+		TempDir:             t.TempDir(),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+	BindOpenAIRequestBodyHandle(c, handle)
+	upstream := &httpUpstreamSequenceRecorder{
+		responses: []*http.Response{
+			newOpenAIRejectedFieldTestResponse(http.StatusBadRequest, `{"error":{"code":"invalid_encrypted_content","type":"invalid_request_error","message":"The encrypted content could not be verified."}}`),
+		},
+		afterDo: func(attempt int) {
+			if attempt == 0 {
+				require.NoError(t, os.Remove(handle.spoolPath))
+			}
+		},
+	}
+
+	result, err := newOpenAIRejectedFieldTestService(upstream).Forward(context.Background(), c, newOpenAIRejectedFieldTestAccount(), body)
+
+	require.ErrorIs(t, err, ErrRequestBodySpool)
+	require.Nil(t, result)
+	require.Equal(t, 1, upstream.callCount)
+}
+
+func TestOpenAIGatewayService_Forward_HTTPIngressChainsInvalidEncryptedAndRejectedFieldHandles(t *testing.T) {
+	ownedDir := t.TempDir()
+	t.Setenv("TMPDIR", ownedDir)
+	t.Setenv("TMP", ownedDir)
+	t.Setenv("TEMP", ownedDir)
+	padding := strings.Repeat("x", int(DefaultRequestBodySpoolThresholdBytes)+1024)
+	body := []byte(fmt.Sprintf(`{"model":"gpt-5.1","stream":false,"instructions":"test","max_output_tokens":4096,"padding":%q,"input":[{"type":"reasoning","encrypted_content":"gAAA","summary":[]},{"type":"input_text","text":"hello"}]}`, padding))
+	c := newOpenAIRejectedFieldTestContext(body)
+	SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+	borrowedHandle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{
+		SpoolThresholdBytes: 1,
+		TempDir:             t.TempDir(),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(borrowedHandle) })
+	BindOpenAIRequestBodyHandle(c, borrowedHandle)
+
+	var firstOwnedPath string
+	upstream := &httpUpstreamSequenceRecorder{
+		responses: []*http.Response{
+			newOpenAIRejectedFieldTestResponse(http.StatusBadRequest, `{"error":{"code":"invalid_encrypted_content","type":"invalid_request_error","message":"The encrypted content could not be verified."}}`),
+			newOpenAIRejectedFieldTestResponse(http.StatusBadRequest, `{"error":{"code":"unsupported_parameter","message":"Unsupported parameter: max_output_tokens","param":"max_output_tokens","type":"invalid_request_error"}}`),
+			newOpenAIRejectedFieldTestResponse(http.StatusOK, `{"output":[],"usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`),
+		},
+		afterDo: func(attempt int) {
+			if attempt != 1 && attempt != 2 {
+				return
+			}
+			entries, readErr := os.ReadDir(ownedDir)
+			require.NoError(t, readErr)
+			require.Len(t, entries, 1)
+			currentPath := filepath.Join(ownedDir, entries[0].Name())
+			if attempt == 1 {
+				firstOwnedPath = currentPath
+				return
+			}
+			require.NotEqual(t, firstOwnedPath, currentPath)
+			require.NoFileExists(t, firstOwnedPath)
+		},
+	}
+
+	result, err := newOpenAIRejectedFieldTestService(upstream).Forward(context.Background(), c, newOpenAIRejectedFieldTestAccount(), body)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, upstream.bodies, 3)
+	require.True(t, gjson.GetBytes(upstream.bodies[0], "input.0.encrypted_content").Exists())
+	require.False(t, gjson.GetBytes(upstream.bodies[1], "input.0.encrypted_content").Exists())
+	require.True(t, gjson.GetBytes(upstream.bodies[1], "max_output_tokens").Exists())
+	require.False(t, gjson.GetBytes(upstream.bodies[2], "input.0.encrypted_content").Exists())
+	require.False(t, gjson.GetBytes(upstream.bodies[2], "max_output_tokens").Exists())
+	_, err = borrowedHandle.ReadAll()
+	require.NoError(t, err)
+	entries, err := os.ReadDir(ownedDir)
+	require.NoError(t, err)
+	require.Empty(t, entries)
+}
+
+func TestOpenAIGatewayService_Forward_HTTPIngressInvalidEncryptedRetryHandleRebuildFailure(t *testing.T) {
+	missingTempDir := filepath.Join(t.TempDir(), "missing")
+	t.Setenv("TMPDIR", missingTempDir)
+	t.Setenv("TMP", missingTempDir)
+	t.Setenv("TEMP", missingTempDir)
+	padding := strings.Repeat("x", int(DefaultRequestBodySpoolThresholdBytes)+1024)
+	body := []byte(fmt.Sprintf(`{"model":"gpt-5.1","stream":false,"instructions":"test","padding":%q,"input":[{"type":"reasoning","encrypted_content":"gAAA","summary":[]}]}`, padding))
+	c := newOpenAIRejectedFieldTestContext(body)
+	SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+	borrowedHandle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{
+		SpoolThresholdBytes: 1,
+		TempDir:             t.TempDir(),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(borrowedHandle) })
+	BindOpenAIRequestBodyHandle(c, borrowedHandle)
+	upstream := &httpUpstreamSequenceRecorder{responses: []*http.Response{
+		newOpenAIRejectedFieldTestResponse(http.StatusBadRequest, `{"error":{"code":"invalid_encrypted_content","type":"invalid_request_error","message":"The encrypted content could not be verified."}}`),
+	}}
+
+	result, err := newOpenAIRejectedFieldTestService(upstream).Forward(context.Background(), c, newOpenAIRejectedFieldTestAccount(), body)
+
+	require.ErrorIs(t, err, ErrRequestBodySpool)
+	require.Nil(t, result)
+	require.Equal(t, 1, upstream.callCount)
+	_, readErr := borrowedHandle.ReadAll()
+	require.NoError(t, readErr)
 }
 
 func TestOpenAIGatewayService_Forward_HTTPIngressRetriesWrappedInvalidEncryptedContentOnce(t *testing.T) {

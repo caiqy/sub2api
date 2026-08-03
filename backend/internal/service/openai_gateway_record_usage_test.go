@@ -3,14 +3,47 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/stretchr/testify/require"
 )
+
+func TestOpenAIRequestViewScalarStringsDoNotAliasBody(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.5","prompt_cache_key":"cache-key","previous_response_id":"resp_123","service_tier":"priority","reasoning":{"effort":"high"}}`)
+	view := newOpenAIRequestView(body)
+	bodyStart := uintptr(unsafe.Pointer(unsafe.SliceData(body)))
+	bodyEnd := bodyStart + uintptr(len(body))
+
+	for name, value := range map[string]string{
+		"model":                view.Model,
+		"prompt_cache_key":     view.PromptCacheKey,
+		"previous_response_id": view.PreviousResponseID,
+		"service_tier":         view.ServiceTier,
+		"reasoning.effort":     view.ReasoningEffort,
+	} {
+		valueAddress := uintptr(unsafe.Pointer(unsafe.StringData(value)))
+		require.Falsef(t, valueAddress >= bodyStart && valueAddress < bodyEnd, "%s aliases the request body", name)
+	}
+}
+
+func TestOpenAIFinalUpstreamModelDoesNotAliasBody(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.5","input":"hello"}`)
+	req, err := http.NewRequest(http.MethodPost, "https://example.com/v1/responses", nil)
+	require.NoError(t, err)
+	req = withOpenAIFinalUpstreamModel(req, body)
+	model, _ := req.Context().Value(openAIFinalUpstreamModelContextKey{}).(string)
+	bodyStart := uintptr(unsafe.Pointer(unsafe.SliceData(body)))
+	bodyEnd := bodyStart + uintptr(len(body))
+	modelAddress := uintptr(unsafe.Pointer(unsafe.StringData(model)))
+
+	require.False(t, modelAddress >= bodyStart && modelAddress < bodyEnd)
+}
 
 type openAIRecordUsageLogRepoStub struct {
 	UsageLogRepository
