@@ -294,7 +294,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 		if err != nil {
 			if errors.Is(err, service.ErrRequestBodySpool) {
-				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body", streamStarted || service.IsResponseCommitted(c))
 				return
 			}
 			if result != nil && result.ImageCount > 0 {

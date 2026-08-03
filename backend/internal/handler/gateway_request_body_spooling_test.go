@@ -423,6 +423,91 @@ func TestGatewayHandler_MessagesStreamingAcceptedWireSpoolFailureWritesSSEError(
 	}
 }
 
+func TestRequestBodySpoolFailureAfterPingWritesSSEError(t *testing.T) {
+	t.Run("chat completions", func(t *testing.T) {
+		gin.SetMode(gin.TestMode)
+		cache := &blockingResponsesUserSlotCache{waiting: make(chan struct{}), release: make(chan struct{})}
+		upstream := &responsesSpoolTransportUpstream{}
+		group := &service.Group{ID: 59, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+		account := &service.Account{ID: 160, Name: "openai-post-ping-spool", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "key"}}
+		env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
+		env.handler.cfg.Gateway.OpenAIWS.Enabled = false
+		env.handler.concurrencyHelper = NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatComment, time.Millisecond)
+
+		recorder := httptest.NewRecorder()
+		done := make(chan struct{})
+		go func() {
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5","stream":true,"messages":[{"role":"user","content":"hello"}]}`))
+			req.Header.Set("Content-Type", "application/json")
+			env.router("/v1/chat/completions", env.handler.ChatCompletions).ServeHTTP(recorder, req)
+			close(done)
+		}()
+		waitGatewayReplaySignal(t, cache.waiting, "Chat Completions user slot wait")
+		close(cache.release)
+		waitGatewayReplaySignal(t, done, "Chat Completions spool failure")
+
+		assertPostPingSSEError(t, recorder, `data: {"error":`)
+		if upstream.calls != 1 {
+			t.Fatalf("upstream calls = %d, want 1", upstream.calls)
+		}
+	})
+
+	t.Run("messages", func(t *testing.T) {
+		gin.SetMode(gin.TestMode)
+		rawDir := t.TempDir()
+		oldOptions := jsonRequestBodyHandleOptions
+		jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: rawDir}
+		t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+
+		cache := &blockingResponsesUserSlotCache{waiting: make(chan struct{}), release: make(chan struct{})}
+		upstream := &responsesSpoolTransportUpstream{}
+		group := &service.Group{ID: 60, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+		account := &service.Account{ID: 161, Name: "anthropic-post-ping-spool", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "token"}}
+		env := newTerminalGatewayMessagesEnvWithConcurrencyCache(t, group, upstream, cache, account)
+		env.handler.concurrencyHelper = NewConcurrencyHelper(env.handler.concurrencyHelper.concurrencyService, SSEPingFormatClaude, time.Millisecond)
+
+		recorder := httptest.NewRecorder()
+		done := make(chan struct{})
+		go func() {
+			req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-5","max_tokens":16,"stream":true,"messages":[{"role":"user","content":"hello"}]}`))
+			req.Header.Set("Content-Type", "application/json")
+			env.router().ServeHTTP(recorder, req)
+			close(done)
+		}()
+		waitGatewayReplaySignal(t, cache.waiting, "Messages user slot wait")
+		entries, err := os.ReadDir(rawDir)
+		if err != nil || len(entries) == 0 {
+			t.Fatalf("request spool missing: entries=%d err=%v", len(entries), err)
+		}
+		for _, entry := range entries {
+			if err := os.Remove(filepath.Join(rawDir, entry.Name())); err != nil {
+				t.Fatalf("remove request spool: %v", err)
+			}
+		}
+		close(cache.release)
+		waitGatewayReplaySignal(t, done, "Messages spool failure")
+
+		assertPostPingSSEError(t, recorder, `"type":"error"`)
+		if upstream.calls != 0 {
+			t.Fatalf("upstream calls = %d, want 0", upstream.calls)
+		}
+	})
+}
+
+func assertPostPingSSEError(t *testing.T, recorder *httptest.ResponseRecorder, errorMarker string) {
+	t.Helper()
+	body := recorder.Body.String()
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want committed 200; body = %s", recorder.Code, body)
+	}
+	if !strings.Contains(body, "event: error\n") || !strings.Contains(body, errorMarker) {
+		t.Fatalf("response missing SSE error event: %s", body)
+	}
+	if strings.Contains(body, "\n\n{\"error\"") {
+		t.Fatalf("response appended bare JSON after SSE ping: %s", body)
+	}
+}
+
 func TestGatewayHandler_MessagesSuccessPreservesAcceptedWirePayloadHash(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	group := &service.Group{ID: 58, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}

@@ -550,7 +550,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					if selection.Acquired && selection.ReleaseFunc != nil {
 						selection.ReleaseFunc()
 					}
-					h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body", streamStarted || service.IsResponseCommitted(c))
 					return
 				}
 				interceptType := detectInterceptType(interceptBody, reqModel, parsedReq.MaxTokens, isClaudeCodeClient)
@@ -836,7 +836,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			attemptParsedReq, err := parsedReq.CloneForHandle(effectiveBody)
 			if err != nil {
 				if status, ok := requestBodyReadErrorStatus(err); ok {
-					h.errorResponse(c, status, "api_error", "Failed to spool request body")
+					h.handleStreamingAwareError(c, status, "api_error", "Failed to spool request body", streamStarted || service.IsResponseCommitted(c))
 					return
 				}
 				h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
@@ -914,7 +914,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						selection.ReleaseFunc()
 					}
 					if status, ok := requestBodyReadErrorStatus(readErr); ok {
-						h.errorResponse(c, status, "api_error", "Failed to spool request body")
+						h.handleStreamingAwareError(c, status, "api_error", "Failed to spool request body", streamStarted || service.IsResponseCommitted(c))
 						return
 					}
 					h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
@@ -1064,7 +1064,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			attemptBody, err := attemptParsedReq.Body.ReadAll()
 			if err != nil {
 				if status, ok := requestBodyReadErrorStatus(err); ok {
-					h.errorResponse(c, status, "api_error", "Failed to spool request body")
+					h.handleStreamingAwareError(c, status, "api_error", "Failed to spool request body", streamStarted || service.IsResponseCommitted(c))
 					return
 				}
 				h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
@@ -1079,7 +1079,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			attemptBody = h.gatewayService.ApplyBedrockCCCompat(c, attemptBody, attemptParsedReq.Model, account, apiKey.GroupID)
 			attemptHandle, err := service.NewRequestBodyHandleFromBytes(attemptBody, service.RequestBodyHandleOptions{})
 			if err != nil {
-				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body", streamStarted || service.IsResponseCommitted(c))
 				return
 			}
 			attemptBody = nil
@@ -1230,12 +1230,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						if candidate.RoutingModel != reqModel {
 							fallbackBody, readErr := effectiveBody.ReadAll()
 							if readErr != nil {
-								h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+								h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body", streamStarted || service.IsResponseCommitted(c))
 								return
 							}
 							fallbackBody = h.gatewayService.ReplaceModelInBody(fallbackBody, candidate.RoutingModel)
 							if err := coordinator.SetEffectiveBytes(fallbackBody); err != nil {
-								h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+								h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body", streamStarted || service.IsResponseCommitted(c))
 								return
 							}
 							effectiveBody = coordinator.Effective()
