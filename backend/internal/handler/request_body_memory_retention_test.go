@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"testing"
 	"unsafe"
 
@@ -26,6 +27,7 @@ type retentionBlockingTransport struct {
 	contentType string
 	firstStatus int
 	firstBody   string
+	streamBody  bool
 	calls       int
 }
 
@@ -44,6 +46,17 @@ func (u *retentionBlockingTransport) Do(req *http.Request, _ string, _ int64, _ 
 			Body:       io.NopCloser(strings.NewReader(u.firstBody)),
 		}, nil
 	}
+	if u.streamBody {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": {u.contentType}},
+			Body: &retentionBlockingStreamBody{
+				prefix:  strings.NewReader(u.body),
+				started: u.started,
+				release: u.release,
+			},
+		}, nil
+	}
 	close(u.started)
 	<-u.release
 	return &http.Response{
@@ -52,6 +65,24 @@ func (u *retentionBlockingTransport) Do(req *http.Request, _ string, _ int64, _ 
 		Body:       io.NopCloser(strings.NewReader(u.body)),
 	}, nil
 }
+
+type retentionBlockingStreamBody struct {
+	prefix  *strings.Reader
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (b *retentionBlockingStreamBody) Read(p []byte) (int, error) {
+	if b.prefix.Len() > 0 {
+		return b.prefix.Read(p)
+	}
+	b.once.Do(func() { close(b.started) })
+	<-b.release
+	return 0, io.EOF
+}
+
+func (*retentionBlockingStreamBody) Close() error { return nil }
 
 func (u *retentionBlockingTransport) DoWithTLS(req *http.Request, proxyURL string, accountID int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
 	return u.Do(req, proxyURL, accountID, concurrency)
@@ -101,7 +132,7 @@ func TestRequestBodyMemoryRetentionWhileUpstreamBlocked(t *testing.T) {
 	}
 	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
 
-	for _, branch := range []string{"responses", "passthrough", "grok-responses", "responses-chat-fallback", "chat-raw", "chat-converted", "messages-anthropic", "messages-gemini", "messages-gemini-mixed"} {
+	for _, branch := range []string{"responses", "passthrough", "grok-responses", "responses-chat-fallback", "chat-raw", "chat-converted", "messages-anthropic", "messages-anthropic-stream", "messages-gemini", "messages-gemini-mixed"} {
 		t.Run(branch, func(t *testing.T) {
 			var heapAt2MB, heapAt89MB uint64
 			var previewAt2MB, previewAt89MB, snapshotAt2MB, snapshotAt89MB int
@@ -180,6 +211,12 @@ func measureBlockedRequestBodyHeap(t *testing.T, branch string, size int64, spoo
 		path = "/v1/messages"
 		platform = service.PlatformAnthropic
 		upstream.body = `{"id":"msg_retention","type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"model":"claude-sonnet-4-5","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`
+	case "messages-anthropic-stream":
+		path = "/v1/messages"
+		platform = service.PlatformAnthropic
+		upstream.contentType = "text/event-stream"
+		upstream.streamBody = true
+		upstream.body = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_retention\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[],\"stop_reason\":null,\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
 	case "messages-gemini", "messages-gemini-mixed":
 		path = "/v1/messages"
 		platform = service.PlatformGemini
@@ -260,8 +297,12 @@ func retentionJSONBody(branch, path string, size int64) io.Reader {
 	} else if path == "/v1/messages" {
 		prefix, suffix = `{"model":"gemini-2.5-flash","max_tokens":16,"stream":false,"messages":[{"role":"user","content":"`, `"}]}`
 	}
-	if branch == "messages-anthropic" {
-		prefix = `{"model":"claude-sonnet-4-5","max_tokens":16,"stream":false,"messages":[{"role":"user","content":"`
+	if branch == "messages-anthropic" || branch == "messages-anthropic-stream" {
+		stream := "false"
+		if branch == "messages-anthropic-stream" {
+			stream = "true"
+		}
+		prefix = `{"model":"claude-sonnet-4-5","max_tokens":16,"stream":` + stream + `,"messages":[{"role":"user","content":"`
 	}
 	if branch == "messages-gemini-mixed" {
 		prefix = `{"model":"claude-opus-4-6","max_tokens":16,"stream":false,"messages":[{"role":"user","content":"`

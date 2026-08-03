@@ -2267,6 +2267,38 @@ func TestGatewayService_ForwardErrorKeepsByteBackedParsedBodyReadable(t *testing
 	require.JSONEq(t, string(body), string(readableBody))
 }
 
+func TestGatewayService_ForwardKeepsBorrowedParsedBodyHandle(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`)
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+	parsed := &ParsedRequest{Body: NewRequestBodyRefFromHandle(handle), Model: "claude-sonnet-4-5"}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": {"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"id":"msg_borrowed","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)),
+	}}}
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	svc := &GatewayService{
+		cfg:              cfg,
+		httpUpstream:     upstream,
+		rateLimitService: &RateLimitService{},
+		settingService:   NewSettingService(upstreamPreviewSettingRepo{}, cfg),
+	}
+	account := &Account{ID: 508, Name: "parsed-body-borrower", Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Concurrency: 1, Credentials: map[string]any{"api_key": "upstream-key"}}
+
+	_, err = svc.Forward(context.Background(), c, account, parsed)
+	require.NoError(t, err)
+	require.Same(t, handle, parsed.Body.Handle())
+	readableBody, err := parsed.Body.ReadAll()
+	require.NoError(t, err)
+	require.JSONEq(t, string(body), string(readableBody))
+}
+
 func TestGatewayService_BuildUpstreamRequestSameHandleMaterializesOnce(t *testing.T) {
 	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"` + strings.Repeat("x", 89<<20/10) + `"}]}`)
 	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: t.TempDir()})
@@ -2291,7 +2323,7 @@ func TestGatewayService_BuildUpstreamRequestSameHandleMaterializesOnce(t *testin
 	svc := &GatewayService{cfg: &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}}}
 	account := &Account{ID: 506, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "upstream-key"}}
 	runtime.ReadMemStats(&before)
-	req, wireHandle, err := svc.buildUpstreamRequestWithHandles(context.Background(), c, account, handle, handle, "upstream-key", "apikey", "claude-sonnet-4-5", false, false)
+	req, wireHandle, err := svc.buildUpstreamRequestWithHandles(context.Background(), c, account, handle, handle, nil, nil, "upstream-key", "apikey", "claude-sonnet-4-5", false, false)
 	runtime.ReadMemStats(&after)
 	require.NoError(t, err)
 	if req != nil && req.Body != nil {
@@ -2301,6 +2333,59 @@ func TestGatewayService_BuildUpstreamRequestSameHandleMaterializesOnce(t *testin
 	buildAlloc := after.TotalAlloc - before.TotalAlloc
 	t.Logf("one_read_alloc=%d build_alloc=%d", oneReadAlloc, buildAlloc)
 	require.Less(t, buildAlloc, oneReadAlloc+(8<<20), "source==canonical must not allocate a second full materialization")
+}
+
+func TestGatewayService_ForwardFirstAttemptReusesMaterializedBody(t *testing.T) {
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"` + strings.Repeat("x", 89<<20/10) + `"}]}`)
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+	body = nil
+
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	materialized, err := handle.ReadAll()
+	require.NoError(t, err)
+	require.Equal(t, int(handle.Size()), len(materialized))
+	runtime.ReadMemStats(&after)
+	oneReadAlloc := after.TotalAlloc - before.TotalAlloc
+	materialized = nil
+	runtime.GC()
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	svc := &GatewayService{
+		cfg:              cfg,
+		httpUpstream:     discardGatewayForwardUpstream{},
+		rateLimitService: &RateLimitService{},
+		settingService:   NewSettingService(upstreamPreviewSettingRepo{}, cfg),
+	}
+	account := &Account{ID: 509, Name: "first-attempt-materialization", Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Concurrency: 1, Credentials: map[string]any{"api_key": "upstream-key"}}
+	parsed := &ParsedRequest{Body: NewRequestBodyRefFromHandle(handle), Model: "claude-sonnet-4-5"}
+
+	runtime.ReadMemStats(&before)
+	_, err = svc.Forward(context.Background(), c, account, parsed)
+	runtime.ReadMemStats(&after)
+	require.NoError(t, err)
+	forwardAlloc := after.TotalAlloc - before.TotalAlloc
+	t.Logf("one_read_alloc=%d forward_alloc=%d", oneReadAlloc, forwardAlloc)
+	require.Less(t, forwardAlloc, 2*oneReadAlloc+(16<<20), "first Forward attempt must reuse its initial materialization")
+}
+
+type discardGatewayForwardUpstream struct{ HTTPUpstream }
+
+func (discardGatewayForwardUpstream) DoWithTLS(req *http.Request, _ string, _ int64, _ int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	if _, err := io.Copy(io.Discard, req.Body); err != nil {
+		return nil, err
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": {"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"id":"msg_materialized","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)),
+	}, nil
 }
 
 func TestGatewayService_SignatureRetryTransportErrorKeepsAttemptBodiesAligned(t *testing.T) {

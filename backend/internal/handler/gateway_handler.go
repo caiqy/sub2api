@@ -1373,8 +1373,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 捕获请求信息（用于异步记录，避免在 goroutine 中访问 gin.Context）
 			userAgent := c.GetHeader("User-Agent")
 			clientIP := ip.GetClientIP(c)
-			// attempt handle is the final request body before the upstream call.
-			requestPayloadHash := attemptParsedReq.Body.Handle().Hash()
+			requestPayloadHash := attemptParsedReq.RequestPayloadHash
+			if requestPayloadHash == "" && attemptParsedReq.Body != nil && attemptParsedReq.Body.Handle() != nil {
+				requestPayloadHash = attemptParsedReq.Body.Handle().Hash()
+			}
 			inboundEndpoint := GetInboundEndpoint(c)
 			upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 			detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)

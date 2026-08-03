@@ -242,16 +242,22 @@ func (s *GatewayService) buildUpstreamRequestWithSourceBody(ctx context.Context,
 	return req, wireBody, nil
 }
 
-func (s *GatewayService) buildUpstreamRequestWithHandles(ctx context.Context, c *gin.Context, account *Account, sourceHandle, bodyHandle *RequestBodyHandle, token, tokenType, modelID string, reqStream bool, mimicClaudeCode bool) (*http.Request, *RequestBodyHandle, error) {
-	sourceBody, err := sourceHandle.ReadAll()
-	if err != nil {
-		return nil, nil, fmt.Errorf("read source request body: %w", err)
-	}
-	body := sourceBody
-	if sourceHandle != bodyHandle {
-		body, err = bodyHandle.ReadAll()
+func (s *GatewayService) buildUpstreamRequestWithHandles(ctx context.Context, c *gin.Context, account *Account, sourceHandle, bodyHandle *RequestBodyHandle, sourceBody, body []byte, token, tokenType, modelID string, reqStream bool, mimicClaudeCode bool) (*http.Request, *RequestBodyHandle, error) {
+	var err error
+	if sourceBody == nil {
+		sourceBody, err = sourceHandle.ReadAll()
 		if err != nil {
-			return nil, nil, fmt.Errorf("read canonical request body: %w", err)
+			return nil, nil, fmt.Errorf("read source request body: %w", err)
+		}
+	}
+	if body == nil {
+		if sourceHandle == bodyHandle {
+			body = sourceBody
+		} else {
+			body, err = bodyHandle.ReadAll()
+			if err != nil {
+				return nil, nil, fmt.Errorf("read canonical request body: %w", err)
+			}
 		}
 	}
 	req, wireBody, err := s.buildUpstreamRequestWithSourceBody(ctx, c, account, sourceBody, body, token, tokenType, modelID, reqStream, mimicClaudeCode)

@@ -398,6 +398,47 @@ func TestGatewayHandler_MessagesStreamingAcceptedWireSpoolFailureWritesSSEError(
 	}
 }
 
+func TestGatewayHandler_MessagesSuccessPreservesAcceptedWirePayloadHash(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 58, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{
+		ID: 159, Name: "anthropic-accepted-wire-hash", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey,
+		Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1,
+		Credentials: map[string]any{"api_key": "token"},
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []service.PassthroughFieldRule{
+				{Target: "body", Mode: "inject", Key: "metadata.accepted_wire", Value: "changed"},
+			},
+		},
+	}
+	upstream := &gatewayAcceptedWireCapturingUpstream{}
+	env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+	var finalParsed *service.ParsedRequest
+	router := env.routerFor("/v1/messages", func(c *gin.Context) {
+		env.handler.Messages(c)
+		value, _ := c.Get("parsed_request")
+		finalParsed, _ = value.(*service.ParsedRequest)
+	})
+
+	recorder := httptest.NewRecorder()
+	body := `{"model":"claude-sonnet-4-5","max_tokens":16,"stream":false,"messages":[{"role":"user","content":"hello"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", recorder.Code, recorder.Body.String())
+	}
+	if finalParsed == nil {
+		t.Fatal("handler did not retain final parsed request")
+	}
+	wantHash := service.HashUsageRequestPayload(upstream.body)
+	if finalParsed.RequestPayloadHash == "" || finalParsed.RequestPayloadHash != wantHash {
+		t.Fatalf("RequestPayloadHash = %q, want %q", finalParsed.RequestPayloadHash, wantHash)
+	}
+}
+
 func TestGatewayHandler_ResponsesAntigravityTransformedSpoolOpenFailureReturns503(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	group := &service.Group{ID: 52, Platform: service.PlatformAntigravity, Status: service.StatusActive, Hydrated: true}
@@ -822,6 +863,24 @@ type gatewayAcceptedWireDeletingUpstream struct {
 	service.HTTPUpstream
 	spoolDir string
 	calls    int
+}
+
+type gatewayAcceptedWireCapturingUpstream struct {
+	service.HTTPUpstream
+	body []byte
+}
+
+func (u *gatewayAcceptedWireCapturingUpstream) DoWithTLS(req *http.Request, _ string, _ int64, _ int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	var err error
+	u.body, err = io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": {"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"id":"msg_hash","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)),
+	}, nil
 }
 
 func (u *gatewayAcceptedWireDeletingUpstream) DoWithTLS(req *http.Request, _ string, _ int64, _ int, _ *tlsfingerprint.Profile) (*http.Response, error) {

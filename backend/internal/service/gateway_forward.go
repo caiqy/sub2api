@@ -379,26 +379,29 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		}
 	}
 	canonicalHandle := sourceHandle
-	canonicalHandleOwned := false
 	if !bytes.Equal(body, sourceBody) {
 		canonicalHandle, err = NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("spool canonical request body: %w", err)
 		}
-		canonicalHandleOwned = true
 		defer CleanupRequestBodyHandle(canonicalHandle)
 	}
-	parsed.Body.Replace(nil)
-	parsed.Body = NewRequestBodyRefFromHandle(canonicalHandle)
-	defer func() {
-		currentHandle := parsed.Body.Handle()
-		if currentHandle == nil || (!sourceHandleOwned || currentHandle != sourceHandle) && (!canonicalHandleOwned || currentHandle != canonicalHandle) {
-			return
-		}
-		if restoredBody, restoreErr := currentHandle.ReadAll(); restoreErr == nil {
-			_ = parsed.ReplaceBody(restoredBody)
-		}
-	}()
+	if sourceHandleOwned {
+		// Forward created these handles for a byte-backed caller, so restore bytes before cleanup.
+		parsed.Body.Replace(nil)
+		parsed.Body = NewRequestBodyRefFromHandle(canonicalHandle)
+		defer func() {
+			if currentHandle := parsed.Body.Handle(); currentHandle != nil {
+				if restoredBody, restoreErr := currentHandle.ReadAll(); restoreErr == nil {
+					_ = parsed.ReplaceBody(restoredBody)
+				}
+			}
+		}()
+	} else {
+		// The handler owns and cleans this borrowed handle after Forward returns.
+		parsed.Body = NewRequestBodyRefFromHandle(sourceHandle)
+	}
+	firstSourceBody, firstCanonicalBody := sourceBody, body
 	body = nil
 	sourceBody = nil
 	replaceBody = nil
@@ -423,9 +426,12 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	defer func() { CleanupRequestBodyHandle(lastWireHandle) }()
 	retryStart := time.Now()
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
-		// 构建上游请求（每次重试需要重新构建，因为请求体需要重新读取）
+		// 首轮复用预处理已物化的 bytes；后续 retry 才从 handle 读取。
+		attemptSourceBody, attemptCanonicalBody := firstSourceBody, firstCanonicalBody
+		firstSourceBody, firstCanonicalBody = nil, nil
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
-		upstreamReq, wireHandle, err := s.buildUpstreamRequestWithHandles(upstreamCtx, c, account, sourceHandle, canonicalHandle, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
+		upstreamReq, wireHandle, err := s.buildUpstreamRequestWithHandles(upstreamCtx, c, account, sourceHandle, canonicalHandle, attemptSourceBody, attemptCanonicalBody, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
+		attemptSourceBody, attemptCanonicalBody = nil, nil
 		releaseUpstreamCtx()
 		if err != nil {
 			return nil, err
@@ -527,7 +533,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 						return nil, handleErr
 					}
 					retryCtx, releaseRetryCtx := detachStreamUpstreamContext(ctx, reqStream)
-					retryReq, retryWireHandle, buildErr := s.buildUpstreamRequestWithHandles(retryCtx, c, account, sourceHandle, filteredHandle, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
+					retryReq, retryWireHandle, buildErr := s.buildUpstreamRequestWithHandles(retryCtx, c, account, sourceHandle, filteredHandle, nil, nil, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 					releaseRetryCtx()
 					CleanupRequestBodyHandle(filteredHandle)
 					defer func() { CleanupRequestBodyHandle(retryWireHandle) }()
@@ -580,7 +586,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 										return nil, handleErr2
 									}
 									retryCtx2, releaseRetryCtx2 := detachStreamUpstreamContext(ctx, reqStream)
-									retryReq2, retryWireHandle2, buildErr2 := s.buildUpstreamRequestWithHandles(retryCtx2, c, account, sourceHandle, filteredHandle2, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
+									retryReq2, retryWireHandle2, buildErr2 := s.buildUpstreamRequestWithHandles(retryCtx2, c, account, sourceHandle, filteredHandle2, nil, nil, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 									releaseRetryCtx2()
 									CleanupRequestBodyHandle(filteredHandle2)
 									defer func() { CleanupRequestBodyHandle(retryWireHandle2) }()
@@ -683,7 +689,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					if applied && time.Since(retryStart) < maxRetryElapsed {
 						logger.LegacyPrintf("service.gateway", "Account %d: detected budget_tokens constraint error, retrying with rectified budget (budget_tokens=%d, max_tokens=%d)", account.ID, BudgetRectifyBudgetTokens, BudgetRectifyMaxTokens)
 						budgetRetryCtx, releaseBudgetRetryCtx := detachStreamUpstreamContext(ctx, reqStream)
-						budgetRetryReq, budgetWireHandle, buildErr := s.buildUpstreamRequestWithHandles(budgetRetryCtx, c, account, sourceHandle, rectifiedHandle, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
+						budgetRetryReq, budgetWireHandle, buildErr := s.buildUpstreamRequestWithHandles(budgetRetryCtx, c, account, sourceHandle, rectifiedHandle, nil, nil, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 						releaseBudgetRetryCtx()
 						defer func() { CleanupRequestBodyHandle(budgetWireHandle) }()
 						if errors.Is(buildErr, ErrRequestBodySpool) {
@@ -899,16 +905,16 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		}
 		return s.handleErrorResponse(ctx, resp, c, account, reqModel)
 	}
+	var acceptedWireBody []byte
 	if lastWireHandle != nil {
-		finalBody, err := lastWireHandle.ReadAll()
+		parsed.RequestPayloadHash = lastWireHandle.Hash()
+		acceptedWireBody, err = lastWireHandle.ReadAll()
 		if err != nil {
 			return nil, fmt.Errorf("read accepted upstream request body: %w", err)
 		}
-		// Preserve the accepted wire body for existing usage and logging consumers after the upstream wait.
-		if err := parsed.ReplaceBody(finalBody); err != nil {
-			return nil, fmt.Errorf("rewrite request body: %w", err)
+		if reqStream || !sourceHandleOwned {
+			acceptedWireBody = nil
 		}
-		finalBody = nil
 	}
 
 	// 触发上游接受回调（提前释放串行锁，不等流完成）
@@ -974,6 +980,18 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		if err != nil {
 			return nil, err
 		}
+	}
+	if sourceHandleOwned && lastWireHandle != nil {
+		if acceptedWireBody == nil {
+			acceptedWireBody, err = lastWireHandle.ReadAll()
+			if err != nil {
+				return nil, fmt.Errorf("read accepted upstream request body: %w", err)
+			}
+		}
+		if err := parsed.ReplaceBody(acceptedWireBody); err != nil {
+			return nil, fmt.Errorf("rewrite request body: %w", err)
+		}
+		acceptedWireBody = nil
 	}
 	return &ForwardResult{
 		RequestID:        resp.Header.Get("x-request-id"),
