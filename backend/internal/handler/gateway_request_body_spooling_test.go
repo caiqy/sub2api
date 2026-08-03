@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -287,6 +288,134 @@ func TestGatewayHandler_ResponsesLargeBodyWaitsWithReplayHandle(t *testing.T) {
 	}
 	close(cache.release)
 	waitGatewayReplaySignal(t, done, "handler completion")
+	assertGatewaySpoolDirsEmpty(t, rawDir, effectiveDir)
+}
+
+func TestGatewayHandler_MessagesNormalizedModelStaysHandleBacked(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawDir, effectiveDir := t.TempDir(), t.TempDir()
+	oldOptions := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: rawDir}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+	t.Setenv("TMPDIR", effectiveDir)
+	t.Setenv("TMP", effectiveDir)
+	t.Setenv("TEMP", effectiveDir)
+
+	cache := &blockingResponsesUserSlotCache{waiting: make(chan struct{}), release: make(chan struct{})}
+	upstream := &blockingGatewayRequestBodyUpstream{started: make(chan []byte, 1), release: make(chan struct{}), status: http.StatusBadRequest}
+	var cacheReleaseOnce, upstreamReleaseOnce sync.Once
+	releaseCache := func() { cacheReleaseOnce.Do(func() { close(cache.release) }) }
+	releaseUpstream := func() { upstreamReleaseOnce.Do(func() { close(upstream.release) }) }
+	t.Cleanup(releaseCache)
+	t.Cleanup(releaseUpstream)
+	group := &service.Group{ID: 50, Platform: service.PlatformAntigravity, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 151, Name: "antigravity-normalized", Platform: service.PlatformAntigravity, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"access_token": "token", "project_id": "project", "model_mapping": map[string]any{"claude-opus-4-6": "claude-opus-4-6"}}}
+	env := newTerminalGatewayMessagesEnvWithConcurrencyCache(t, group, upstream, cache, account)
+	env.handler.contentModerationService = nil
+	env.handler.securityAuditCoordinator = nil
+
+	runtime.GC()
+	var before runtime.MemStats
+	runtime.ReadMemStats(&before)
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", &generatedJSONBody{
+		prefix:    []byte(`{"model":"claude-opus-4-6[1m]","max_tokens":16,"messages":[{"role":"user","content":"`),
+		remaining: 20 << 20,
+		suffix:    []byte(`"}]}`),
+	})
+	req.Header.Set("Content-Type", "application/json")
+
+	var requestContext *gin.Context
+	router := env.routerFor("/v1/messages", func(c *gin.Context) {
+		requestContext = c
+		env.handler.Messages(c)
+	})
+	recorder := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() { router.ServeHTTP(recorder, req); close(done) }()
+	waitGatewayReplaySignal(t, cache.waiting, "normalized Messages user slot wait")
+	runtime.GC()
+	runtime.GC()
+	var after runtime.MemStats
+	runtime.ReadMemStats(&after)
+	if after.HeapAlloc > before.HeapAlloc+uint64(24<<20) {
+		t.Fatalf("normalized Messages wait retained request bytes: before=%d after=%d", before.HeapAlloc, after.HeapAlloc)
+	}
+
+	releaseCache()
+	upstreamBody := <-upstream.started
+	parsedReq, ok := requestContext.Get("parsed_request")
+	if !ok {
+		t.Fatal("parsed request missing while upstream waits")
+	}
+	parsed, ok := parsedReq.(*service.ParsedRequest)
+	if !ok || parsed.Body.Handle() == nil {
+		t.Fatal("normalized request is not handle-backed")
+	}
+	canonicalBody, err := parsed.Body.ReadAll()
+	if err != nil {
+		t.Fatalf("read normalized handle: %v", err)
+	}
+	if len(upstreamBody) == 0 {
+		t.Fatal("normalized Messages upstream body is empty")
+	}
+	if got := gjson.GetBytes(canonicalBody, "model").String(); got != "claude-opus-4-6" {
+		t.Fatalf("normalized model = %q", got)
+	}
+	releaseUpstream()
+	waitGatewayReplaySignal(t, done, "normalized Messages completion")
+	assertGatewaySpoolDirsEmpty(t, rawDir, effectiveDir)
+}
+
+func TestGatewayHandler_ResponsesAntigravityWaitsWithHandle(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawDir, effectiveDir := t.TempDir(), t.TempDir()
+	oldOptions := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: rawDir}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+	t.Setenv("TMPDIR", effectiveDir)
+	t.Setenv("TMP", effectiveDir)
+	t.Setenv("TEMP", effectiveDir)
+
+	cache := &blockingResponsesUserSlotCache{waiting: make(chan struct{}), release: make(chan struct{})}
+	upstream := &blockingGatewayRequestBodyUpstream{started: make(chan []byte, 1), release: make(chan struct{}), status: http.StatusBadRequest}
+	var cacheReleaseOnce, upstreamReleaseOnce sync.Once
+	releaseCache := func() { cacheReleaseOnce.Do(func() { close(cache.release) }) }
+	releaseUpstream := func() { upstreamReleaseOnce.Do(func() { close(upstream.release) }) }
+	t.Cleanup(releaseCache)
+	t.Cleanup(releaseUpstream)
+	group := &service.Group{ID: 51, Platform: service.PlatformAntigravity, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 152, Name: "antigravity-responses", Platform: service.PlatformAntigravity, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"access_token": "token", "project_id": "project", "model_mapping": map[string]any{"claude-opus-4-6": "claude-opus-4-6"}}}
+	env := newTerminalGatewayMessagesEnvWithConcurrencyCache(t, group, upstream, cache, account)
+	env.handler.contentModerationService = nil
+	env.handler.securityAuditCoordinator = nil
+
+	runtime.GC()
+	var before runtime.MemStats
+	runtime.ReadMemStats(&before)
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", &generatedJSONBody{
+		prefix:    []byte(`{"model":"claude-opus-4-6","input":"`),
+		remaining: 20 << 20,
+		suffix:    []byte(`"}`),
+	})
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() { env.routerFor("/v1/responses", env.handler.Responses).ServeHTTP(recorder, req); close(done) }()
+	waitGatewayReplaySignal(t, cache.waiting, "Antigravity Responses user slot wait")
+	runtime.GC()
+	runtime.GC()
+	var after runtime.MemStats
+	runtime.ReadMemStats(&after)
+	if after.HeapAlloc > before.HeapAlloc+uint64(24<<20) {
+		t.Fatalf("Antigravity Responses wait retained request bytes: before=%d after=%d", before.HeapAlloc, after.HeapAlloc)
+	}
+
+	releaseCache()
+	if upstreamBody := <-upstream.started; len(upstreamBody) == 0 {
+		t.Fatal("Antigravity Responses upstream body is empty")
+	}
+	releaseUpstream()
+	waitGatewayReplaySignal(t, done, "Antigravity Responses completion")
 	assertGatewaySpoolDirsEmpty(t, rawDir, effectiveDir)
 }
 

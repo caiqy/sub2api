@@ -52,6 +52,28 @@ func TestAntigravityUpstreamErrorBodyReadLimit_RespectsDiagnosticLimit(t *testin
 	require.Equal(t, int64(svc.settingService.cfg.Gateway.LogUpstreamErrorBodyMaxBytes), svc.upstreamErrorBodyReadLimit())
 }
 
+func TestForwardAsResponsesHandle_UsesReplayableTransformedHandle(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gemini-3.1-pro-high","input":"Reply exactly: ok"}`)
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+
+	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{antigravityCompatSuccessResponse()}}
+	svc := newAntigravityCompatService(config.GatewayConfig{MaxLineSize: defaultMaxLineSize}, upstream)
+	c, _ := newAntigravityCompatContext(http.MethodPost, "/v1/responses", body)
+	parsed, err := ParseGatewayRequest(NewRequestBodyRefFromHandle(handle), "responses")
+	require.NoError(t, err)
+	require.NotNil(t, parsed.Body.Handle())
+
+	result, err := svc.ForwardAsResponsesHandle(context.Background(), c, newAntigravityCompatAccount(AccountTypeOAuth), handle, parsed)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, upstream.requestBodies, 1)
+	require.Contains(t, string(upstream.requestBodies[0]), "Reply exactly: ok")
+}
+
 func TestStripSignatureSensitiveBlocksFromClaudeRequest(t *testing.T) {
 	req := &antigravity.ClaudeRequest{
 		Model: "claude-sonnet-4-5",

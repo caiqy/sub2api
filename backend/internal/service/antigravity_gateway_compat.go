@@ -31,22 +31,21 @@ const (
 
 type antigravityCompatRequest struct {
 	protocol        antigravityCompatProtocol
-	originalBody    []byte
-	claudeBody      []byte
 	originalModel   string
 	clientStream    bool
 	includeUsage    bool
 	startTime       time.Time
 	reasoningEffort *string
+	thinkingEnabled bool
 }
 
 type antigravityCompatUpstreamCall struct {
-	request      antigravityCompatRequest
-	billingModel string
-	prefix       string
-	proxyURL     string
-	accessToken  string
-	geminiBody   []byte
+	request       antigravityCompatRequest
+	billingModel  string
+	prefix        string
+	proxyURL      string
+	accessToken   string
+	payloadHandle *RequestBodyHandle
 }
 
 // ForwardAsChatCompletions 使用 Antigravity 原生 OAuth 账号转发 Chat Completions 请求。
@@ -84,16 +83,18 @@ func (s *AntigravityGatewayService) ForwardAsChatCompletions(
 		return nil, fmt.Errorf("marshal anthropic request: %w", err)
 	}
 
+	reasoningEffort := extractCCReasoningEffortFromBody(body)
+	thinkingEnabled := OpenAIBodyHasThinkingEnabled(body)
+	body = nil
 	return s.forwardAntigravityCompat(ctx, c, account, antigravityCompatRequest{
 		protocol:        antigravityCompatChatCompletions,
-		originalBody:    body,
-		claudeBody:      claudeBody,
 		originalModel:   request.Model,
 		clientStream:    request.Stream,
 		includeUsage:    request.StreamOptions != nil && request.StreamOptions.IncludeUsage,
 		startTime:       time.Now(),
-		reasoningEffort: extractCCReasoningEffortFromBody(body),
-	})
+		reasoningEffort: reasoningEffort,
+		thinkingEnabled: thinkingEnabled,
+	}, claudeBody)
 }
 
 // ForwardAsResponses 使用 Antigravity 原生 OAuth 账号转发 Responses 请求。
@@ -104,8 +105,30 @@ func (s *AntigravityGatewayService) ForwardAsResponses(
 	body []byte,
 	_ *ParsedRequest,
 ) (*ForwardResult, error) {
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("create responses request body handle: %w", err)
+	}
+	defer CleanupRequestBodyHandle(handle)
+	return s.ForwardAsResponsesHandle(ctx, c, account, handle, nil)
+}
+
+func (s *AntigravityGatewayService) ForwardAsResponsesHandle(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	bodyHandle *RequestBodyHandle,
+	_ *ParsedRequest,
+) (*ForwardResult, error) {
 	if err := s.validateAntigravityCompatAccount(c, account); err != nil {
 		return nil, err
+	}
+	if bodyHandle == nil {
+		return nil, fmt.Errorf("%w: responses request body handle is nil", ErrRequestBodySpool)
+	}
+	body, err := bodyHandle.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("read responses request body: %w", err)
 	}
 
 	var request apicompat.ResponsesRequest
@@ -126,15 +149,17 @@ func (s *AntigravityGatewayService) ForwardAsResponses(
 		return nil, fmt.Errorf("marshal anthropic request: %w", err)
 	}
 
+	reasoningEffort := ExtractResponsesReasoningEffortFromBody(body)
+	thinkingEnabled := OpenAIBodyHasThinkingEnabled(body)
+	body = nil
 	return s.forwardAntigravityCompat(ctx, c, account, antigravityCompatRequest{
 		protocol:        antigravityCompatResponses,
-		originalBody:    body,
-		claudeBody:      claudeBody,
 		originalModel:   request.Model,
 		clientStream:    request.Stream,
 		startTime:       time.Now(),
-		reasoningEffort: ExtractResponsesReasoningEffortFromBody(body),
-	})
+		reasoningEffort: reasoningEffort,
+		thinkingEnabled: thinkingEnabled,
+	}, claudeBody)
 }
 
 func (s *AntigravityGatewayService) validateAntigravityCompatAccount(c *gin.Context, account *Account) error {
@@ -167,8 +192,9 @@ func (s *AntigravityGatewayService) forwardAntigravityCompat(
 	c *gin.Context,
 	account *Account,
 	request antigravityCompatRequest,
+	claudeBody []byte,
 ) (*ForwardResult, error) {
-	call, err := s.prepareAntigravityCompatCall(ctx, c, account, request)
+	call, err := s.prepareAntigravityCompatCall(ctx, c, account, request, claudeBody)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +206,8 @@ func (s *AntigravityGatewayService) forwardAntigravityCompat(
 		proxyURL:        call.proxyURL,
 		accessToken:     call.accessToken,
 		action:          "streamGenerateContent",
-		body:            call.geminiBody,
+		payloadHandle:   call.payloadHandle,
+		ownedPayload:    true,
 		c:               c,
 		httpUpstream:    s.httpUpstream,
 		settingService:  s.settingService,
@@ -203,9 +230,10 @@ func (s *AntigravityGatewayService) prepareAntigravityCompatCall(
 	c *gin.Context,
 	account *Account,
 	request antigravityCompatRequest,
+	claudeBody []byte,
 ) (*antigravityCompatUpstreamCall, error) {
 	var claudeRequest antigravity.ClaudeRequest
-	if json.Unmarshal(request.claudeBody, &claudeRequest) != nil {
+	if json.Unmarshal(claudeBody, &claudeRequest) != nil {
 		return nil, s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", "Invalid request body")
 	}
 
@@ -235,19 +263,26 @@ func (s *AntigravityGatewayService) prepareAntigravityCompatCall(
 		_ = s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, err
 	}
-	geminiBody, err := s.buildAntigravityCompatGeminiBody(ctx, request.claudeBody, &claudeRequest, projectID, mappedModel)
+	geminiBody, err := s.buildAntigravityCompatGeminiBody(ctx, claudeBody, &claudeRequest, projectID, mappedModel)
 	if err != nil {
 		return nil, s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", "Invalid request")
 	}
-
-	request.reasoningEffort = ApplyThinkingEnabledFallback(request.reasoningEffort, request.originalBody, mappedModel)
+	claudeBody = nil
+	if request.reasoningEffort == nil && request.thinkingEnabled {
+		request.reasoningEffort = DefaultEffortForThinkingEnabled(mappedModel)
+	}
+	payloadHandle, err := NewRequestBodyHandleFromBytes(geminiBody, RequestBodyHandleOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("create antigravity compatibility payload handle: %w", err)
+	}
+	geminiBody = nil
 	return &antigravityCompatUpstreamCall{
-		request:      request,
-		billingModel: mappedModel,
-		prefix:       logPrefix(getSessionID(c), account.Name),
-		proxyURL:     antigravityCompatProxyURL(account),
-		accessToken:  accessToken,
-		geminiBody:   geminiBody,
+		request:       request,
+		billingModel:  mappedModel,
+		prefix:        logPrefix(getSessionID(c), account.Name),
+		proxyURL:      antigravityCompatProxyURL(account),
+		accessToken:   accessToken,
+		payloadHandle: payloadHandle,
 	}, nil
 }
 

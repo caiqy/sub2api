@@ -206,6 +206,38 @@ func TestGeminiV1BetaModels_ReleasesAcquiredAccountSlotWhenThoughtSignatureSpool
 	require.Equal(t, 1, cache.releaseCalls())
 }
 
+func TestGeminiV1BetaModels_ThoughtSignatureCleanupUsesEffectiveHandle(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawDir := t.TempDir()
+	old := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: rawDir}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = old })
+
+	upstream := &geminiEffectiveHandleUpstream{t: t, rawDir: rawDir}
+	group := &service.Group{ID: 98, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
+	first := &service.Account{ID: 981, Name: "first", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "first"}}
+	second := &service.Account{ID: 982, Name: "second", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 2, Credentials: map[string]any{"api_key": "second"}}
+	cache := openAIChatCompletionsGatewayCacheStub{}
+	env := newTerminalGatewayMessagesEnvWithGatewayCache(t, group, upstream, openAIChatCompletionsConcurrencyCacheStub{}, cache, first, second)
+	env.handler.cfg.Gateway.Sticky.Gemini.Enabled = true
+
+	body := `{"contents":[{"role":"user","parts":[{"text":"/.gemini/tmp/` + strings.Repeat("a", 64) + `","thoughtSignature":"old-account"}]}]}`
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash:generateContent", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	env.routerFor("/v1beta/models/*modelAction", env.handler.GeminiV1BetaModels).ServeHTTP(recorder, req)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Len(t, upstream.bodies, 2)
+	require.Equal(t, []int64{first.ID, second.ID}, upstream.accountIDs)
+	require.True(t, upstream.mutatedRaw)
+	for _, forwarded := range upstream.bodies {
+		require.NotContains(t, string(forwarded), "old-account")
+		require.NotContains(t, string(forwarded), "raw-only")
+	}
+	require.Empty(t, readTestDir(t, rawDir))
+}
+
 func TestGeminiV1BetaModels_RequestBodyLifecycleAcrossActions(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	old := jsonRequestBodyHandleOptions
@@ -484,6 +516,41 @@ type geminiBlockingBodyUpstream struct {
 	releaseOnce   sync.Once
 	requestHashes []string
 	response      *http.Response
+}
+
+type geminiEffectiveHandleUpstream struct {
+	service.HTTPUpstream
+	t          *testing.T
+	rawDir     string
+	bodies     [][]byte
+	accountIDs []int64
+	mutatedRaw bool
+}
+
+func (u *geminiEffectiveHandleUpstream) Do(req *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
+	body, err := io.ReadAll(req.Body)
+	require.NoError(u.t, err)
+	require.NoError(u.t, req.Body.Close())
+	u.bodies = append(u.bodies, body)
+	u.accountIDs = append(u.accountIDs, accountID)
+	if len(u.bodies) == 1 {
+		entries, err := os.ReadDir(u.rawDir)
+		require.NoError(u.t, err)
+		for _, entry := range entries {
+			path := filepath.Join(u.rawDir, entry.Name())
+			candidate, err := os.ReadFile(path)
+			require.NoError(u.t, err)
+			if bytes.Contains(candidate, []byte("old-account")) {
+				replacement := []byte(`{"contents":[{"role":"user","parts":[{"text":"raw-only","thoughtSignature":"old-account"}]}]}`)
+				require.NoError(u.t, os.WriteFile(path, replacement, 0o600))
+				u.mutatedRaw = true
+			}
+		}
+	}
+	if len(u.bodies) == 1 {
+		return &http.Response{StatusCode: http.StatusUnauthorized, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"switch account"}}`))}, nil
+	}
+	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}`))}, nil
 }
 
 func newGeminiBlockingBodyUpstream(t *testing.T, response *http.Response) *geminiBlockingBodyUpstream {

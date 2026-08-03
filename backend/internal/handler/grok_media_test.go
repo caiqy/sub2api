@@ -595,7 +595,7 @@ func TestGrokMedia_MultipartSpoolPreservesFilesAndOmitsSnapshots(t *testing.T) {
 	require.Empty(t, readTestDir(t, rawDir))
 }
 
-func TestGrokMedia_TextIsReleasedBeforeBlockedUpstream(t *testing.T) {
+func TestGrokMedia_SessionSeedReleasedBeforeBlockedUpstream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	grokHandler := func(c *gin.Context) *OpenAIGatewayHandler {
 		handler, ok := c.MustGet("handler").(*OpenAIGatewayHandler)

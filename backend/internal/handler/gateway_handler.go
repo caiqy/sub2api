@@ -273,7 +273,20 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
 	}
-	body = parsedReq.Body.Bytes()
+	if parsedReq.Body.Handle() == nil {
+		normalizedBody := parsedReq.Body.Bytes()
+		if err := coordinator.SetEffectiveBytes(normalizedBody); err != nil {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
+		effectiveBody = coordinator.Effective()
+		parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
+		if err != nil {
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+			return
+		}
+	}
+	body = nil
 	reqModel := parsedReq.Model
 	clientRequestModel := clientRequestedModel(c, reqModel)
 	reqStream := parsedReq.Stream
@@ -321,12 +334,18 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		clientRequestModel = route.ClientModel
 	}
 	if route.RoutingModel != "" && route.RoutingModel != reqModel {
-		body = h.gatewayService.ReplaceModelInBody(body, route.RoutingModel)
-		if err := coordinator.SetEffectiveBytes(body); err != nil {
+		routeBody, readErr := effectiveBody.ReadAll()
+		if readErr != nil {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
+		routeBody = h.gatewayService.ReplaceModelInBody(routeBody, route.RoutingModel)
+		if err := coordinator.SetEffectiveBytes(routeBody); err != nil {
 			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 			return
 		}
 		effectiveBody = coordinator.Effective()
+		routeBody = nil
 		parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
 		if err != nil {
 			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
@@ -359,7 +378,14 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		return
 	}
 
-	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolAnthropicMessages, reqModel, body); decision != nil && !decision.AllowNextStage {
+	auditBody, err := effectiveBody.ReadAll()
+	if err != nil {
+		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+		return
+	}
+	decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolAnthropicMessages, reqModel, auditBody)
+	auditBody = nil
+	if decision != nil && !decision.AllowNextStage {
 		h.anthropicSecurityAuditError(c, decision)
 		return
 	}
@@ -508,7 +534,16 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 			// 检查请求拦截（预热请求、SUGGESTION MODE等）
 			if account.IsInterceptWarmupEnabled() {
-				interceptType := detectInterceptType(body, reqModel, parsedReq.MaxTokens, isClaudeCodeClient)
+				interceptBody, readErr := effectiveBody.ReadAll()
+				if readErr != nil {
+					if selection.Acquired && selection.ReleaseFunc != nil {
+						selection.ReleaseFunc()
+					}
+					h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+					return
+				}
+				interceptType := detectInterceptType(interceptBody, reqModel, parsedReq.MaxTokens, isClaudeCodeClient)
+				interceptBody = nil
 				if interceptType != InterceptTypeNone {
 					if selection.Acquired && selection.ReleaseFunc != nil {
 						selection.ReleaseFunc()
@@ -603,7 +638,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					service.WithForwardGeminiSession(derefGroupID(stickyGroupID), sessionKey),
 				)
 			} else {
-				result, err = h.geminiCompatService.Forward(requestCtx, c, account, body)
+				geminiBody, readErr := effectiveBody.ReadAll()
+				if readErr != nil {
+					err = readErr
+				} else {
+					result, err = h.geminiCompatService.Forward(requestCtx, c, account, geminiBody)
+					geminiBody = nil
+				}
 			}
 			forwardDuration := time.Since(forwardStartedAt)
 			if accountReleaseFunc != nil {
@@ -860,6 +901,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			if account.IsInterceptWarmupEnabled() {
 				attemptBody, readErr := attemptParsedReq.Body.ReadAll()
 				if readErr != nil {
+					if selection.Acquired && selection.ReleaseFunc != nil {
+						selection.ReleaseFunc()
+					}
 					if status, ok := requestBodyReadErrorStatus(readErr); ok {
 						h.errorResponse(c, status, "api_error", "Failed to spool request body")
 						return
@@ -994,6 +1038,18 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 注入回调到 ParsedRequest：使用外层 wrapper 以便提前清理 AfterFunc
 			attemptParsedReq.OnUpstreamAccepted = queueRelease
 			// ===== 用户消息串行队列 END =====
+			attemptResourcesOwned := true
+			defer func() {
+				if !attemptResourcesOwned {
+					return
+				}
+				if queueRelease != nil {
+					queueRelease()
+				}
+				if accountReleaseFunc != nil {
+					accountReleaseFunc()
+				}
+			}()
 
 			// Account rewrites are synchronous; the resulting bytes are immediately rebound to a handle.
 			attemptBody, err := attemptParsedReq.Body.ReadAll()
@@ -1017,6 +1073,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 				return
 			}
+			attemptBody = nil
 			attemptHandleOwned := true
 			defer func() {
 				if attemptHandleOwned {
@@ -1076,6 +1133,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
 			}
+			attemptResourcesOwned = false
 			if err != nil {
 				if status, ok := requestBodyReadErrorStatus(err); ok {
 					h.errorResponse(c, status, "api_error", "Failed to spool request body")
@@ -1164,12 +1222,18 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						currentStickyGroupID = candidate.GroupID
 						platform = candidate.Platform
 						if candidate.RoutingModel != reqModel {
-							body = h.gatewayService.ReplaceModelInBody(body, candidate.RoutingModel)
-							if err := coordinator.SetEffectiveBytes(body); err != nil {
+							fallbackBody, readErr := effectiveBody.ReadAll()
+							if readErr != nil {
+								h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+								return
+							}
+							fallbackBody = h.gatewayService.ReplaceModelInBody(fallbackBody, candidate.RoutingModel)
+							if err := coordinator.SetEffectiveBytes(fallbackBody); err != nil {
 								h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 								return
 							}
 							effectiveBody = coordinator.Effective()
+							fallbackBody = nil
 							parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
 							if err != nil {
 								h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")

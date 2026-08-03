@@ -141,7 +141,9 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			if err != nil {
 				return "", err
 			}
-			return forwardContentType, coordinator.SetEffectiveBytes(forwardBody)
+			setErr := coordinator.SetEffectiveBytes(forwardBody)
+			forwardBody = nil
+			return forwardContentType, setErr
 		}()
 		if prepareErr != nil {
 			if errors.Is(prepareErr, service.ErrRequestBodySpool) {
@@ -186,7 +188,23 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			requestPayloadHash = coordinator.Effective().Hash()
 			coordinator.ReleaseMultipartValues()
 		}
-		requestInfo.ReleaseText()
+	}
+
+	if !endpoint.IsGenerationRequest() {
+		if strings.TrimSpace(requestID) != "" {
+			requestPayloadHash = service.HashUsageRequestPayload([]byte(requestID))
+		}
+	}
+
+	sessionSeed := body
+	if len(sessionSeed) == 0 && strings.TrimSpace(requestID) != "" {
+		sessionSeed = []byte(requestID)
+	}
+	sessionHash = h.gatewayService.GenerateSessionHash(c, sessionSeed)
+	sessionSeed = nil
+	body = nil
+	requestInfo.ReleaseText()
+	if endpoint.IsGenerationRequest() {
 		imageReleaseFunc, acquired := h.acquireImageGenerationSlot(c, streamStarted)
 		if !acquired {
 			return
@@ -194,13 +212,6 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		if imageReleaseFunc != nil {
 			defer imageReleaseFunc()
 		}
-	}
-
-	if !endpoint.IsGenerationRequest() {
-		if strings.TrimSpace(requestID) != "" {
-			requestPayloadHash = service.HashUsageRequestPayload([]byte(requestID))
-		}
-		requestInfo.ReleaseText()
 	}
 
 	if h.errorPassthroughService != nil {
@@ -228,11 +239,6 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		return
 	}
 
-	sessionSeed := body
-	if len(sessionSeed) == 0 && strings.TrimSpace(requestID) != "" {
-		sessionSeed = []byte(requestID)
-	}
-	sessionHash = h.gatewayService.GenerateSessionHash(c, sessionSeed)
 	boundLookupAccountID := int64(0)
 	var err error
 	if endpoint.IsVideoLookupRequest() {

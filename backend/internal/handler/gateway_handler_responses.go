@@ -160,6 +160,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		APIKeyID:  apiKey.ID,
 	}
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
+	body = nil
 
 	// Error passthrough binding
 	if h.errorPassthroughService != nil {
@@ -292,7 +293,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 				return
 			}
 			setActualUpstreamEndpoint(c, EndpointAntigravityGenerateContent)
-			result, err = h.antigravityGatewayService.ForwardAsResponses(requestCtx, c, account, body, parsedReq)
+			result, err = h.antigravityGatewayService.ForwardAsResponsesHandle(requestCtx, c, account, effectiveBody, parsedReq)
 		} else {
 			result, err = h.gatewayService.ForwardAsResponsesHandle(requestCtx, c, account, effectiveBody, parsedReq)
 		}
