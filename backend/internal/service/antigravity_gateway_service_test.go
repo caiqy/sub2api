@@ -74,6 +74,23 @@ func TestForwardAsResponsesHandle_UsesReplayableTransformedHandle(t *testing.T) 
 	require.Contains(t, string(upstream.requestBodies[0]), "Reply exactly: ok")
 }
 
+func TestAntigravityCompatSpoolErrorPreservesSentinel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gemini-3.1-pro-high","input":"hello"}`)
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+	spoolErr := fmt.Errorf("open transformed payload: %w", ErrRequestBodySpool)
+	svc := newAntigravityCompatService(config.GatewayConfig{MaxLineSize: defaultMaxLineSize}, &httpUpstreamStub{err: spoolErr})
+	c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/responses", body)
+
+	result, err := svc.ForwardAsResponsesHandle(context.Background(), c, newAntigravityCompatAccount(AccountTypeOAuth), handle, nil)
+
+	require.Nil(t, result)
+	require.ErrorIs(t, err, ErrRequestBodySpool)
+	require.Empty(t, recorder.Body.String())
+}
+
 func TestStripSignatureSensitiveBlocksFromClaudeRequest(t *testing.T) {
 	req := &antigravity.ClaudeRequest{
 		Model: "claude-sonnet-4-5",

@@ -219,6 +219,9 @@ func (s *AntigravityGatewayService) forwardAntigravityCompat(
 		sessionHash:     "",
 	})
 	if err != nil {
+		if errors.Is(err, ErrRequestBodySpool) {
+			return nil, err
+		}
 		return nil, s.handleAntigravityCompatTransportError(c, err)
 	}
 

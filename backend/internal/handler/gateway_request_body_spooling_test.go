@@ -237,6 +237,29 @@ func TestGatewayHandler_ResponsesSpoolTransportFailureReturns503WithoutUsage(t *
 	}
 }
 
+func TestGatewayHandler_ResponsesAntigravityTransformedSpoolOpenFailureReturns503(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 52, Platform: service.PlatformAntigravity, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 153, Name: "antigravity-spool", Platform: service.PlatformAntigravity, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"access_token": "token", "project_id": "project", "model_mapping": map[string]any{"claude-opus-4-6": "claude-opus-4-6"}}}
+	upstream := &antigravityCompatSpoolOpenUpstream{}
+	env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"claude-opus-4-6","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	env.routerFor("/v1/responses", env.handler.Responses).ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body = %s", recorder.Code, recorder.Body.String())
+	}
+	if got := gjson.Get(recorder.Body.String(), "error.code").String(); got != "server_error" {
+		t.Fatalf("error.code = %q, want server_error", got)
+	}
+	if upstream.calls == 0 {
+		t.Fatal("transformed payload did not reach retry transport")
+	}
+}
+
 func TestGatewayHandler_ResponsesForwardBodyErrorDoesNotAppendAfterResponseCommit(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -473,9 +496,14 @@ func TestGatewayHandler_MessagesCleansDerivedAttemptHandleAfterForwardPanic(t *t
 	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: rawDir}
 	t.Cleanup(func() { jsonRequestBodyHandleOptions = old })
 
-	group := &service.Group{ID: 45, Platform: service.PlatformAntigravity, Status: service.StatusActive, Hydrated: true}
-	account := &service.Account{ID: 145, Name: "antigravity", Platform: service.PlatformAntigravity, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"access_token": "token", "project_id": "project"}}
-	env := newTerminalGatewayMessagesEnv(t, group, panicGatewayRequestBodyUpstream{}, account)
+	group := &service.Group{ID: 45, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 145, Name: "anthropic-oauth", Platform: service.PlatformAnthropic, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"access_token": "token"}, Extra: map[string]any{"user_msg_queue_mode": "serialize"}}
+	concurrency := &gatewayResourceTrackingConcurrencyCache{waitForAccount: false}
+	queue := &gatewayResourceTrackingQueueCache{}
+	env := newTerminalGatewayMessagesEnvWithConcurrencyCache(t, group, panicGatewayRequestBodyUpstream{}, concurrency, account)
+	queueService := service.NewUserMessageQueueService(queue, nil, &env.handler.cfg.Gateway.UserMessageQueue)
+	t.Cleanup(queueService.Stop)
+	env.handler.userMsgQueueHelper = NewUserMsgQueueHelper(queueService, SSEPingFormatClaude, 0)
 
 	func() {
 		defer func() { _ = recover() }()
@@ -489,6 +517,59 @@ func TestGatewayHandler_MessagesCleansDerivedAttemptHandleAfterForwardPanic(t *t
 			t.Fatalf("spool remains after Forward panic in %s: entries=%d err=%v", dir, len(entries), err)
 		}
 	}
+	if got := concurrency.accountReleaseCalls(); got != 1 {
+		t.Fatalf("selection release calls = %d, want 1", got)
+	}
+	if got := queue.releaseCalls(); got != 1 {
+		t.Fatalf("queue release calls = %d, want 1", got)
+	}
+	if increments, decrements := concurrency.waitCalls(); increments != 0 || decrements != 0 {
+		t.Fatalf("unexpected wait counter calls = (%d, %d)", increments, decrements)
+	}
+}
+
+func TestGatewayHandler_MessagesAttemptSpoolFailureReleasesResources(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	old := jsonRequestBodyHandleOptions
+	rawDir := t.TempDir()
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: rawDir}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = old })
+	missingTemp := filepath.Join(t.TempDir(), "missing")
+	t.Setenv("TMPDIR", missingTemp)
+	t.Setenv("TMP", missingTemp)
+	t.Setenv("TEMP", missingTemp)
+
+	group := &service.Group{ID: 53, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 154, Name: "anthropic-attempt-spool", Platform: service.PlatformAnthropic, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"access_token": "token"}, Extra: map[string]any{"user_msg_queue_mode": "serialize"}}
+	concurrency := &gatewayResourceTrackingConcurrencyCache{waitForAccount: true}
+	queue := &gatewayResourceTrackingQueueCache{}
+	upstream := &responsesSpoolTransportUpstream{}
+	env := newTerminalGatewayMessagesEnvWithConcurrencyCache(t, group, upstream, concurrency, account)
+	queueService := service.NewUserMessageQueueService(queue, nil, &env.handler.cfg.Gateway.UserMessageQueue)
+	t.Cleanup(queueService.Stop)
+	env.handler.userMsgQueueHelper = NewUserMsgQueueHelper(queueService, SSEPingFormatClaude, 0)
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-opus-4-6","max_tokens":16,"messages":[{"role":"user","content":"`+strings.Repeat("x", 12<<20)+`"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	env.router().ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body = %s", recorder.Code, recorder.Body.String())
+	}
+	if got := concurrency.accountReleaseCalls(); got != 1 {
+		t.Fatalf("account release calls = %d, want 1", got)
+	}
+	if got := queue.releaseCalls(); got != 1 {
+		t.Fatalf("queue release calls = %d, want 1", got)
+	}
+	if increments, decrements := concurrency.waitCalls(); increments != 1 || decrements != 1 {
+		t.Fatalf("wait counter calls = (%d, %d), want (1, 1)", increments, decrements)
+	}
+	if upstream.calls != 0 {
+		t.Fatalf("upstream calls = %d, want 0", upstream.calls)
+	}
+	assertGatewaySpoolDirsEmpty(t, rawDir)
 }
 
 type panicGatewayRequestBodyUpstream struct{ service.HTTPUpstream }
@@ -496,6 +577,101 @@ type panicGatewayRequestBodyUpstream struct{ service.HTTPUpstream }
 type responsesSpoolTransportUpstream struct {
 	service.HTTPUpstream
 	calls int
+}
+
+type antigravityCompatSpoolOpenUpstream struct {
+	service.HTTPUpstream
+	calls int
+}
+
+func (u *antigravityCompatSpoolOpenUpstream) Do(*http.Request, string, int64, int) (*http.Response, error) {
+	u.calls++
+	return nil, fmt.Errorf("open transformed payload: %w", service.ErrRequestBodySpool)
+}
+
+type gatewayResourceTrackingConcurrencyCache struct {
+	openAIChatCompletionsConcurrencyCacheStub
+	mu              sync.Mutex
+	waitForAccount  bool
+	accountAcquires int
+	accountReleases int
+	waitIncrements  int
+	waitDecrements  int
+}
+
+func (c *gatewayResourceTrackingConcurrencyCache) AcquireAccountSlot(context.Context, int64, int, string) (bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.accountAcquires++
+	return !c.waitForAccount || c.accountAcquires > 1, nil
+}
+
+func (c *gatewayResourceTrackingConcurrencyCache) ReleaseAccountSlot(context.Context, int64, string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.accountReleases++
+	return nil
+}
+
+func (c *gatewayResourceTrackingConcurrencyCache) IncrementAccountWaitCount(context.Context, int64, int) (bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.waitIncrements++
+	return true, nil
+}
+
+func (c *gatewayResourceTrackingConcurrencyCache) DecrementAccountWaitCount(context.Context, int64) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.waitDecrements++
+	return nil
+}
+
+func (c *gatewayResourceTrackingConcurrencyCache) accountReleaseCalls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.accountReleases
+}
+
+func (c *gatewayResourceTrackingConcurrencyCache) waitCalls() (int, int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.waitIncrements, c.waitDecrements
+}
+
+type gatewayResourceTrackingQueueCache struct {
+	service.UserMsgQueueCache
+	mu       sync.Mutex
+	releases int
+}
+
+func (*gatewayResourceTrackingQueueCache) AcquireLock(context.Context, int64, string, int) (bool, error) {
+	return true, nil
+}
+
+func (c *gatewayResourceTrackingQueueCache) ReleaseLock(context.Context, int64, string) (bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.releases++
+	return true, nil
+}
+
+func (*gatewayResourceTrackingQueueCache) GetLastCompletedMs(context.Context, int64) (int64, error) {
+	return 0, nil
+}
+
+func (*gatewayResourceTrackingQueueCache) GetCurrentTimeMs(context.Context) (int64, error) {
+	return 0, nil
+}
+
+func (*gatewayResourceTrackingQueueCache) ReconcileExpiredLockCandidates(context.Context, int) (int, error) {
+	return 0, nil
+}
+
+func (c *gatewayResourceTrackingQueueCache) releaseCalls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.releases
 }
 
 type blockingResponsesUserSlotCache struct {
@@ -534,6 +710,10 @@ func (panicGatewayRequestBodyUpstream) Do(req *http.Request, _ string, _ int64, 
 	// The upstream owns the active request reader; this test isolates handler-owned attempt cleanup.
 	_ = req.Body.Close()
 	panic("forward panic")
+}
+
+func (u panicGatewayRequestBodyUpstream) DoWithTLS(req *http.Request, proxyURL string, accountID int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, proxyURL, accountID, concurrency)
 }
 
 func testGatewayRequestBodySpoolLifecycle(t *testing.T, mapModel bool, upstreamStatus, wantStatus int) {
