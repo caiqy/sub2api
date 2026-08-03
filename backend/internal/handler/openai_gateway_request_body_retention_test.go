@@ -23,7 +23,7 @@ import (
 
 func TestOpenAIGatewayHandler_ResponsesFinalHandleIncludesRequestLevelRewrites(t *testing.T) {
 	group := &service.Group{MaxReasoningEffort: "high"}
-	env := newOpenAIResponsesRetentionTestEnv(t, group, nil, nil, nil)
+	env := newOpenAIResponsesRetentionTestEnv(t, group, nil, nil, nil, nil, nil)
 	route := service.EffectiveGatewayRoute{
 		APIKey: env.apiKey, Group: env.apiKey.Group, GroupID: env.apiKey.GroupID,
 		ClientModel: "client-model", RoutingModel: "routed-model", UpstreamModel: "routed-model", Platform: service.PlatformOpenAI,
@@ -49,7 +49,7 @@ func TestOpenAIGatewayHandler_ResponsesFinalHandleIncludesRequestLevelRewrites(t
 func TestOpenAIGatewayHandler_ResponsesSessionAndCyberKeysUseRawBody(t *testing.T) {
 	cache := &openAIResponsesRetentionGatewayCache{}
 	settings := service.NewSettingService(&openAIResponsesRetentionSettingRepo{}, &config.Config{})
-	env := newOpenAIResponsesRetentionTestEnv(t, nil, cache, nil, settings)
+	env := newOpenAIResponsesRetentionTestEnv(t, nil, cache, nil, settings, nil, nil)
 	rawBody := []byte(`{"model":"client-model","stream":false,"store":true,"prompt_cache_key":"raw-session","input":"hello"}`)
 	route := service.EffectiveGatewayRoute{
 		APIKey: env.apiKey, Group: env.apiKey.Group, GroupID: env.apiKey.GroupID,
@@ -102,10 +102,39 @@ func TestOpenAIGatewayHandler_ResponsesReadFailureReleasesAccountSlot(t *testing
 		}
 		return true, nil
 	}
-	env := newOpenAIResponsesRetentionTestEnv(t, nil, nil, cache, nil)
+	env := newOpenAIResponsesRetentionTestEnv(t, nil, nil, cache, nil, nil, nil)
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":false,"input":"hello"}`))
+	request.Header.Set("Content-Type", "application/json")
+	env.router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+	require.Equal(t, int32(1), atomic.LoadInt32(&cache.releaseAccountCalled))
+	require.Empty(t, env.upstream.requests)
+}
+
+func TestOpenAIGatewayHandler_ChatCompletionsReadFailureReleasesAccountSlot(t *testing.T) {
+	spoolDir := t.TempDir()
+	oldOptions := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: spoolDir}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+
+	cache := &concurrencyCacheMock{}
+	cache.acquireUserSlotFn = func(context.Context, int64, int, string) (bool, error) { return true, nil }
+	cache.acquireAccountSlotFn = func(context.Context, int64, int, string) (bool, error) {
+		entries, err := os.ReadDir(spoolDir)
+		require.NoError(t, err)
+		require.NotEmpty(t, entries)
+		for _, entry := range entries {
+			require.NoError(t, os.Remove(filepath.Join(spoolDir, entry.Name())))
+		}
+		return true, nil
+	}
+	env := newOpenAIResponsesRetentionTestEnv(t, nil, nil, cache, nil, nil, nil)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5","stream":false,"messages":[{"role":"user","content":"hello"}]}`))
 	request.Header.Set("Content-Type", "application/json")
 	env.router.ServeHTTP(recorder, request)
 
@@ -130,6 +159,8 @@ func newOpenAIResponsesRetentionTestEnv(
 	gatewayCache service.GatewayCache,
 	concurrencyCache service.ConcurrencyCache,
 	settingService *service.SettingService,
+	channelService *service.ChannelService,
+	accounts []*service.Account,
 ) *openAIResponsesRetentionTestEnv {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -166,14 +197,14 @@ func newOpenAIResponsesRetentionTestEnv(
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
 		Body:       io.NopCloser(strings.NewReader(`{"id":"resp_1","object":"response","status":"completed","model":"gpt-5","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2,"input_tokens_details":{"cached_tokens":0}}}`)),
 	}}}
-	accountRepo := &openAIChatCompletionsAccountRepoStub{account: account}
+	accountRepo := &openAIChatCompletionsAccountRepoStub{account: account, accounts: accounts}
 	concurrencyService := service.NewConcurrencyService(concurrencyCache)
 	billingCacheService := service.NewBillingCacheService(&openAIResponsesRequestBodyRetentionBillingCacheStub{}, nil, nil, nil, nil, nil, cfg, nil)
 	t.Cleanup(billingCacheService.Stop)
 	gatewayService := service.NewOpenAIGatewayService(
 		accountRepo, nil, billingRepo, nil, nil, nil, gatewayCache, cfg, nil, concurrencyService,
 		service.NewBillingService(cfg, nil), nil, billingCacheService, upstream, service.NewDeferredService(accountRepo, nil, 0), nil,
-		settingService,
+		settingService, channelService,
 	)
 	handler := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 	apiKey := &service.APIKey{
@@ -194,6 +225,7 @@ func newOpenAIResponsesRetentionTestEnv(
 	router.Use(middleware.UsageDetailCapture())
 	router.POST("/v1/responses", handler.Responses)
 	router.POST("/v1/responses/compact", handler.Responses)
+	router.POST("/v1/chat/completions", handler.ChatCompletions)
 	env.router = router
 	return env
 }
@@ -202,6 +234,7 @@ type openAIResponsesRetentionGatewayCache struct {
 	openAIChatCompletionsGatewayCacheStub
 	sessionHash string
 	cyberKey    string
+	blocked     chan string
 }
 
 func (c *openAIResponsesRetentionGatewayCache) GetSessionAccountID(_ context.Context, _ int64, sessionHash string) (int64, error) {
@@ -215,7 +248,10 @@ func (c *openAIResponsesRetentionGatewayCache) SetSessionAccountID(_ context.Con
 	return nil
 }
 
-func (c *openAIResponsesRetentionGatewayCache) SetCyberSessionBlocked(context.Context, string, time.Duration) error {
+func (c *openAIResponsesRetentionGatewayCache) SetCyberSessionBlocked(_ context.Context, key string, _ time.Duration) error {
+	if c.blocked != nil {
+		c.blocked <- key
+	}
 	return nil
 }
 
@@ -378,10 +414,14 @@ type openAIResponsesRequestBodyRetentionBillingRepoStub struct {
 	service.UsageBillingRepository
 
 	lastCmd *service.UsageBillingCommand
+	applied chan *service.UsageBillingCommand
 }
 
 func (s *openAIResponsesRequestBodyRetentionBillingRepoStub) Apply(ctx context.Context, cmd *service.UsageBillingCommand) (*service.UsageBillingApplyResult, error) {
 	s.lastCmd = cmd
+	if s.applied != nil {
+		s.applied <- cmd
+	}
 	return &service.UsageBillingApplyResult{Applied: true}, nil
 }
 

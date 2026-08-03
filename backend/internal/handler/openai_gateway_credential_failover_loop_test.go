@@ -482,6 +482,63 @@ func TestResponsesFinalHandleReplayAcrossFailover(t *testing.T) {
 	}
 }
 
+func TestOpenAIGatewayHandler_ChatCompletionsFinalHandleReplayAcrossFailover(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	groupID := int64(1)
+	accounts := []*service.Account{
+		{
+			ID: 11, Name: "openai-account-1", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+			Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1,
+			Credentials: map[string]any{"api_key": "sk-test-1"}, Extra: map[string]any{"openai_responses_supported": false},
+		},
+		{
+			ID: 12, Name: "openai-account-2", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+			Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 2,
+			Credentials: map[string]any{"api_key": "sk-test-2"}, Extra: map[string]any{"openai_responses_supported": false},
+		},
+	}
+	channelService := service.NewChannelService(openAIFailedUsageChannelRepoStub{
+		channel: service.Channel{
+			ID: 21, Status: service.StatusActive, GroupIDs: []int64{groupID},
+			ModelMapping: map[string]map[string]string{service.PlatformOpenAI: {"client-model": "mapped-model"}},
+		},
+		groupPlatforms: map[int64]string{groupID: service.PlatformOpenAI},
+	}, nil, nil, nil)
+	env := newOpenAIResponsesRetentionTestEnv(t, nil, nil, nil, nil, channelService, accounts)
+	env.upstream.responses = []*http.Response{
+		{
+			StatusCode: 520,
+			Header:     http.Header{"Content-Type": []string{"text/html"}},
+			Body:       io.NopCloser(strings.NewReader("<html>520: unknown error</html>")),
+		},
+		{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"chatcmpl_replayed","object":"chat.completion","model":"mapped-model","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)),
+		},
+	}
+	rawBody := `{"model":"client-model","messages":[{"role":"user","content":"hello"}],"stop":["END"],"stream":false}`
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(rawBody))
+	request.Header.Set("Content-Type", "application/json")
+	env.router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, []int64{11, 12}, env.upstream.accountIDs)
+	require.Len(t, env.upstream.requests, 2)
+	bodies := make([][]byte, 0, len(env.upstream.requests))
+	for _, upstreamRequest := range env.upstream.requests {
+		body, err := io.ReadAll(upstreamRequest.Body)
+		require.NoError(t, err)
+		bodies = append(bodies, body)
+	}
+	require.JSONEq(t, string(bodies[0]), string(bodies[1]))
+	for _, body := range bodies {
+		require.Equal(t, "mapped-model", gjson.GetBytes(body, "model").String())
+	}
+}
+
 func TestResponsesCredentialFailoverLoop(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

@@ -123,7 +123,11 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		h.openAISecurityAuditError(c, decision)
 		return
 	}
-	if h.rejectIfCyberSessionBlocked(c, apiKey, body, reqModel, cyberBlockFormatChat) {
+	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
+	promptCacheKey := h.gatewayService.ExtractSessionID(c, body)
+	usageRequestPayloadHash := service.HashUsageRequestPayload(body)
+	cyberBlockKeyChat := service.CyberSessionBlockKey(apiKey.ID, c, body)
+	if h.rejectIfCyberSessionKeyBlocked(c, apiKey, cyberBlockKeyChat, reqModel, cyberBlockFormatChat) {
 		return
 	}
 
@@ -143,7 +147,10 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 		return
 	}
-	service.BindOpenAIRequestBodyHandle(c, coordinator.Effective())
+	effectiveHandle := coordinator.Effective()
+	service.BindOpenAIRequestBodyHandle(c, effectiveHandle)
+	body = nil
+	effectiveBody = nil
 
 	if h.errorPassthroughService != nil {
 		service.BindErrorPassthroughService(c, h.errorPassthroughService)
@@ -172,9 +179,6 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		h.handleStreamingAwareError(c, status, code, message, streamStarted)
 		return
 	}
-
-	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
-	promptCacheKey := h.gatewayService.ExtractSessionID(c, body)
 
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
@@ -248,12 +252,23 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		if !acquired {
 			return
 		}
+		forwardBody, readErr := effectiveHandle.ReadAll()
+		if readErr != nil {
+			if accountReleaseFunc != nil {
+				accountReleaseFunc()
+			}
+			status := http.StatusBadRequest
+			if errors.Is(readErr, service.ErrRequestBodySpool) {
+				status = http.StatusServiceUnavailable
+			}
+			h.handleStreamingAwareError(c, status, "api_error", "Failed to spool request body", streamStarted)
+			return
+		}
 
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
 		setOpenAIFailedUsageExactUpstreamModel(c, resolveOpenAIFailedUsageExactUpstreamModel(account, reqModel, channelMapping.MappedModel))
 
-		forwardBody := effectiveBody
 		writerSizeBeforeForward := c.Writer.Size()
 		service.SetOpsUpstreamAttempted(c, false)
 		result, err := func() (*service.OpenAIForwardResult, error) {
@@ -264,11 +279,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			}()
 			return h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, promptCacheKey, "")
 		}()
-		cyberBlockKeyChat := ""
-		if service.GetOpsCyberPolicy(c) != nil {
-			cyberBlockKeyChat = service.CyberSessionBlockKey(apiKey.ID, c, body)
-		}
-		h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, err != nil, cyberBlockKeyChat, clientRequestedUsageFields(c, channelMapping, reqModel, ""), service.HashUsageRequestPayload(body))
+		h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, err != nil, cyberBlockKeyChat, clientRequestedUsageFields(c, channelMapping, reqModel, ""), usageRequestPayloadHash)
 
 		forwardDuration := time.Since(forwardStart)
 		forwardDurationMs := forwardDuration.Milliseconds()

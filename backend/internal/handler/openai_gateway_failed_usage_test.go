@@ -1292,6 +1292,58 @@ func TestOpenAIGatewayHandler_ChatCompletionsUpstreamErrorStillCreatesUsageLog(t
 	require.Contains(t, usageRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "Authorization: Bearer sk-test")
 }
 
+func TestOpenAIGatewayHandler_ChatCompletionsHashesBeforeChannelMapping(t *testing.T) {
+	cache := &openAIResponsesRetentionGatewayCache{blocked: make(chan string, 1)}
+	settings := service.NewSettingService(&openAIResponsesRetentionSettingRepo{}, &config.Config{})
+	groupID := int64(1)
+	channelService := service.NewChannelService(openAIFailedUsageChannelRepoStub{
+		channel: service.Channel{
+			ID: 21, Status: service.StatusActive, GroupIDs: []int64{groupID},
+			ModelMapping: map[string]map[string]string{service.PlatformOpenAI: {"client-model": "mapped-model"}},
+		},
+		groupPlatforms: map[int64]string{groupID: service.PlatformOpenAI},
+	}, nil, nil, nil)
+	env := newOpenAIResponsesRetentionTestEnv(t, nil, cache, nil, settings, channelService, nil)
+	env.billingRepo.applied = make(chan *service.UsageBillingCommand, 1)
+	env.upstream.responses = []*http.Response{{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_request_error","code":"cyber_policy","message":"blocked"}}`)),
+	}}
+	rawBody := []byte(`{"model":"client-model","prompt_cache_key":"chat-session","messages":[{"role":"user","content":"hello"}]}`)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(rawBody))
+	request.Header.Set("Content-Type", "application/json")
+	env.router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.Len(t, env.upstream.requests, 1)
+	upstreamBody, err := io.ReadAll(env.upstream.requests[0].Body)
+	require.NoError(t, err)
+	var recordedUsageHash string
+	select {
+	case cmd := <-env.billingRepo.applied:
+		recordedUsageHash = cmd.RequestPayloadHash
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for cyber usage billing")
+	}
+	var recordedCyberKey string
+	select {
+	case recordedCyberKey = <-cache.blocked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for cyber session block")
+	}
+	apiKey := env.apiKey
+	requestContext := env.requestContext
+	wantUsageHash := service.HashUsageRequestPayload(rawBody)
+	wantCyberKey := service.CyberSessionBlockKey(apiKey.ID, requestContext, rawBody)
+
+	require.Equal(t, "mapped-model", gjson.GetBytes(upstreamBody, "model").String())
+	require.Equal(t, wantUsageHash, recordedUsageHash)
+	require.Equal(t, wantCyberKey, recordedCyberKey)
+}
+
 func TestOpenAIGatewayHandler_ResponsesCyberPolicyCreatesSingleUsageLog(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
