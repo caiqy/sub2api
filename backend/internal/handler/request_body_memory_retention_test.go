@@ -9,6 +9,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -63,6 +64,30 @@ func retainedHeapAfterGC() uint64 {
 	var stats runtime.MemStats
 	runtime.ReadMemStats(&stats)
 	return stats.HeapAlloc
+}
+
+func TestCloneGatewayParsedRequestScalarsDetachesBodyBackingArray(t *testing.T) {
+	body := []byte(`{"model":"claude-sonnet-4-5","metadata":{"user_id":"session-user"},"output_config":{"effort":"high"},"messages":[]}`)
+	parsed, err := service.ParseGatewayRequest(service.NewRequestBodyRef(body), service.PlatformAnthropic)
+	require.NoError(t, err)
+	require.True(t, stringBackedByBytes(parsed.Model, body))
+	require.True(t, stringBackedByBytes(parsed.MetadataUserID, body))
+	require.True(t, stringBackedByBytes(parsed.OutputEffort, body))
+
+	cloneGatewayParsedRequestScalars(parsed)
+
+	require.False(t, stringBackedByBytes(parsed.Model, body))
+	require.False(t, stringBackedByBytes(parsed.MetadataUserID, body))
+	require.False(t, stringBackedByBytes(parsed.OutputEffort, body))
+}
+
+func stringBackedByBytes(value string, body []byte) bool {
+	if value == "" || len(body) == 0 {
+		return false
+	}
+	valueStart := uintptr(unsafe.Pointer(unsafe.StringData(value)))
+	bodyStart := uintptr(unsafe.Pointer(unsafe.SliceData(body)))
+	return valueStart >= bodyStart && valueStart < bodyStart+uintptr(len(body))
 }
 
 func TestRequestBodyMemoryRetentionWhileUpstreamBlocked(t *testing.T) {

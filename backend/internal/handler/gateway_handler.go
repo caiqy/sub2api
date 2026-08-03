@@ -198,6 +198,15 @@ func (h *GatewayHandler) acquireUserGroupSlot(
 	return wrapReleaseOnDone(ctx, releaseFunc), true
 }
 
+func cloneGatewayParsedRequestScalars(parsed *service.ParsedRequest) {
+	if parsed == nil {
+		return
+	}
+	parsed.Model = strings.Clone(parsed.Model)
+	parsed.MetadataUserID = strings.Clone(parsed.MetadataUserID)
+	parsed.OutputEffort = strings.Clone(parsed.OutputEffort)
+}
+
 // Messages handles Claude API compatible messages endpoint
 // POST /v1/messages
 func (h *GatewayHandler) Messages(c *gin.Context) {
@@ -286,9 +295,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			return
 		}
 	}
-	parsedReq.Model = strings.Clone(parsedReq.Model)
-	parsedReq.MetadataUserID = strings.Clone(parsedReq.MetadataUserID)
-	parsedReq.OutputEffort = strings.Clone(parsedReq.OutputEffort)
+	cloneGatewayParsedRequestScalars(parsedReq)
 	body = nil
 	reqModel := parsedReq.Model
 	clientRequestModel := clientRequestedModel(c, reqModel)
@@ -354,9 +361,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 			return
 		}
-		parsedReq.Model = strings.Clone(parsedReq.Model)
-		parsedReq.MetadataUserID = strings.Clone(parsedReq.MetadataUserID)
-		parsedReq.OutputEffort = strings.Clone(parsedReq.OutputEffort)
+		cloneGatewayParsedRequestScalars(parsedReq)
 		reqModel = route.RoutingModel
 	}
 	stickyGroupID, platform := route.GroupID, route.Platform
@@ -1090,9 +1095,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				return
 			}
 			// gjson scalar strings can reference the full materialized attempt body; clone them before the upstream wait.
-			attemptParsedReq.Model = strings.Clone(attemptParsedReq.Model)
-			attemptParsedReq.MetadataUserID = strings.Clone(attemptParsedReq.MetadataUserID)
-			attemptParsedReq.OutputEffort = strings.Clone(attemptParsedReq.OutputEffort)
+			cloneGatewayParsedRequestScalars(attemptParsedReq)
 
 			// 转发请求 - 根据账号平台分流
 			c.Set("parsed_request", attemptParsedReq)
@@ -1242,6 +1245,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 								h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 								return
 							}
+							// Detach small gjson scalars so account waits do not retain the full fallback body backing array.
+							cloneGatewayParsedRequestScalars(parsedReq)
 							reqModel = candidate.RoutingModel
 						}
 						channelMapping = candidate.Channel
