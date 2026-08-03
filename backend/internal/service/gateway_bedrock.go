@@ -129,6 +129,9 @@ func (s *GatewayService) forwardBedrock(
 	if resp.StatusCode >= 400 {
 		return s.handleBedrockUpstreamErrors(ctx, resp, c, account)
 	}
+	if reqStream {
+		resp.Request = nil
+	}
 
 	// Bedrock 分支绕过通用 Forward 成功路径，这里保持上游接受回调语义一致。
 	if parsed.OnUpstreamAccepted != nil {

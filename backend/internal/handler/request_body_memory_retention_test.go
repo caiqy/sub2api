@@ -28,6 +28,7 @@ type retentionBlockingTransport struct {
 	firstStatus int
 	firstBody   string
 	streamBody  bool
+	attachReq   bool
 	calls       int
 }
 
@@ -47,7 +48,7 @@ func (u *retentionBlockingTransport) Do(req *http.Request, _ string, _ int64, _ 
 		}, nil
 	}
 	if u.streamBody {
-		return &http.Response{
+		resp := &http.Response{
 			StatusCode: http.StatusOK,
 			Header:     http.Header{"Content-Type": {u.contentType}},
 			Body: &retentionBlockingStreamBody{
@@ -55,7 +56,11 @@ func (u *retentionBlockingTransport) Do(req *http.Request, _ string, _ int64, _ 
 				started: u.started,
 				release: u.release,
 			},
-		}, nil
+		}
+		if u.attachReq {
+			resp.Request = req
+		}
+		return resp, nil
 	}
 	close(u.started)
 	<-u.release
@@ -132,7 +137,7 @@ func TestRequestBodyMemoryRetentionWhileUpstreamBlocked(t *testing.T) {
 	}
 	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
 
-	for _, branch := range []string{"responses", "passthrough", "grok-responses", "responses-chat-fallback", "chat-raw", "chat-converted", "messages-anthropic", "messages-anthropic-stream", "messages-anthropic-passthrough-stream", "messages-gemini", "messages-gemini-mixed"} {
+	for _, branch := range []string{"responses", "passthrough", "grok-responses", "responses-chat-fallback", "chat-raw", "chat-converted", "messages-anthropic", "messages-anthropic-stream", "messages-anthropic-passthrough-stream", "messages-bedrock-stream", "messages-gemini", "messages-gemini-mixed"} {
 		t.Run(branch, func(t *testing.T) {
 			var heapAt2MB, heapAt89MB uint64
 			var previewAt2MB, previewAt89MB, snapshotAt2MB, snapshotAt89MB int
@@ -189,6 +194,7 @@ func measureBlockedRequestBodyHeap(t *testing.T, branch string, size int64, spoo
 	var router http.Handler
 	path := "/v1/responses"
 	platform := service.PlatformOpenAI
+	accountType := service.AccountTypeAPIKey
 	extra := map[string]any{}
 	switch branch {
 	case "passthrough":
@@ -220,6 +226,14 @@ func measureBlockedRequestBodyHeap(t *testing.T, branch string, size int64, spoo
 		if branch == "messages-anthropic-passthrough-stream" {
 			extra["anthropic_passthrough"] = true
 		}
+	case "messages-bedrock-stream":
+		path = "/v1/messages"
+		platform = service.PlatformAnthropic
+		accountType = service.AccountTypeBedrock
+		upstream.contentType = "application/vnd.amazon.eventstream"
+		upstream.streamBody = true
+		upstream.attachReq = true
+		upstream.body = ""
 	case "messages-gemini", "messages-gemini-mixed":
 		path = "/v1/messages"
 		platform = service.PlatformGemini
@@ -241,7 +255,12 @@ func measureBlockedRequestBodyHeap(t *testing.T, branch string, size int64, spoo
 		})
 	} else if path == "/v1/messages" {
 		group := &service.Group{ID: 1401, Platform: platform, Status: service.StatusActive, Hydrated: true}
-		account := &service.Account{ID: 1401, Name: "retention", Platform: platform, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-retention"}, Extra: extra}
+		credentials := map[string]any{"api_key": "sk-retention"}
+		if accountType == service.AccountTypeBedrock {
+			credentials["auth_mode"] = "apikey"
+			credentials["aws_region"] = "us-east-1"
+		}
+		account := &service.Account{ID: 1401, Name: "retention", Platform: platform, Type: accountType, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: credentials, Extra: extra}
 		env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
 		router = env.routerFor(path, func(c *gin.Context) {
 			requestContext = c
@@ -300,9 +319,9 @@ func retentionJSONBody(branch, path string, size int64) io.Reader {
 	} else if path == "/v1/messages" {
 		prefix, suffix = `{"model":"gemini-2.5-flash","max_tokens":16,"stream":false,"messages":[{"role":"user","content":"`, `"}]}`
 	}
-	if branch == "messages-anthropic" || branch == "messages-anthropic-stream" || branch == "messages-anthropic-passthrough-stream" {
+	if branch == "messages-anthropic" || branch == "messages-anthropic-stream" || branch == "messages-anthropic-passthrough-stream" || branch == "messages-bedrock-stream" {
 		stream := "false"
-		if branch == "messages-anthropic-stream" || branch == "messages-anthropic-passthrough-stream" {
+		if branch == "messages-anthropic-stream" || branch == "messages-anthropic-passthrough-stream" || branch == "messages-bedrock-stream" {
 			stream = "true"
 		}
 		prefix = `{"model":"claude-sonnet-4-5","max_tokens":16,"stream":` + stream + `,"messages":[{"role":"user","content":"`
