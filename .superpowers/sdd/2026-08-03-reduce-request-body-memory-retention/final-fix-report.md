@@ -134,3 +134,38 @@ git diff -- backend/internal/service/openai_ws_forwarder_v2.go backend/internal/
 - 完整测试：PASS；`internal/handler` 78.536s，`internal/service` 112.121s。
 - WS diff 命令无输出。
 - 未修改依赖、配置、schema 或其他生产文件；`.comet/current-change.json` 保持未跟踪且未提交。
+
+## Wave 3 Final Closure
+
+状态：`PASS`
+
+修复提交：`e30fdabb5 fix: preserve gemini transport spool errors`
+
+### IMPORTANT：Gemini Messages Transport Spool Error
+
+- 根因：`HTTPUpstream.Do` 可从重定向 `GetBody` 或 spool reader 返回 wrapped `ErrRequestBodySpool`，但 transport error 分支把它当作普通网络错误重试，最终经 `writeClaudeError(502)` 丢失 sentinel。
+- 修复：关闭当前 request body 后，优先用 `errors.Is` 识别 `ErrRequestBodySpool` 并 `%w` 返回；不重试、不提交 service 层 502，由 handler 映射 503。
+- RED：`TestGatewayHandler_MessagesGeminiTransportSpoolFailureReturns503AndReleasesAccountSlot` 观察到 5 次上游调用，最终状态 502，响应为 `Upstream request failed after retries`，耗时 14.42s。
+- GREEN：同一真实 handler 测试仅调用 transport 1 次，返回 503，未出现 service 502 文案，账号槽位释放 1 次，耗时 1.508s。
+
+### Clone Comment
+
+- 在 attempt `strings.Clone` 前补充注释：gjson scalar 可能引用完整 materialized body backing array，必须在上游等待前复制切断引用。
+
+### Wave 3 Verification
+
+以下命令均通过：
+
+```text
+go test ./internal/service -run '(GeminiMessagesCompat|TransportSpool|ErrRequestBodySpool)' -count=1
+go test ./internal/handler -run '(GatewayHandler_Messages|RequestBodySpool)' -count=1
+go build ./...
+go vet ./...
+go test ./... -count=1
+git diff --check
+git diff -- backend/internal/service/openai_ws_forwarder_v2.go backend/internal/service/openai_ws_protocol_forward.go
+```
+
+- 完整测试：PASS；`internal/handler` 81.126s，`internal/service` 113.606s。
+- WS diff 命令无输出。
+- 未修改依赖、配置、schema 或其他生产文件；`.comet/current-change.json` 保持未跟踪且未提交。
