@@ -886,6 +886,17 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		}
 		return s.handleErrorResponse(ctx, resp, c, account, reqModel)
 	}
+	if lastWireHandle != nil && lastWireHandle.Hash() != canonicalHandle.Hash() {
+		finalBody, err := lastWireHandle.ReadAll()
+		if err != nil {
+			return nil, fmt.Errorf("read accepted upstream request body: %w", err)
+		}
+		// Preserve the accepted wire body for existing usage and logging consumers after the upstream wait.
+		if err := parsed.ReplaceBody(finalBody); err != nil {
+			return nil, fmt.Errorf("rewrite request body: %w", err)
+		}
+		finalBody = nil
+	}
 
 	// 触发上游接受回调（提前释放串行锁，不等流完成）
 	if parsed.OnUpstreamAccepted != nil {
@@ -951,18 +962,6 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			return nil, err
 		}
 	}
-	if lastWireHandle != nil && lastWireHandle.Hash() != canonicalHandle.Hash() {
-		finalBody, err := lastWireHandle.ReadAll()
-		if err != nil {
-			return nil, fmt.Errorf("read accepted upstream request body: %w", err)
-		}
-		// Preserve the accepted wire body for existing usage and logging consumers after the upstream wait.
-		if err := parsed.ReplaceBody(finalBody); err != nil {
-			return nil, fmt.Errorf("rewrite request body: %w", err)
-		}
-		finalBody = nil
-	}
-
 	return &ForwardResult{
 		RequestID:        resp.Header.Get("x-request-id"),
 		Usage:            *usage,

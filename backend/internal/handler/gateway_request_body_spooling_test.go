@@ -297,6 +297,51 @@ func TestGatewayHandler_MessagesSpecialRetrySpoolFailureReturns503WithoutRetry(t
 	}
 }
 
+func TestGatewayHandler_MessagesAcceptedWireSpoolFailureDoesNotCommitSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawDir, wireDir := t.TempDir(), t.TempDir()
+	oldOptions := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: rawDir}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+	t.Setenv("TMPDIR", wireDir)
+	t.Setenv("TMP", wireDir)
+	t.Setenv("TEMP", wireDir)
+
+	group := &service.Group{ID: 56, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{
+		ID: 157, Name: "anthropic-accepted-wire-spool", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey,
+		Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1,
+		Credentials: map[string]any{"api_key": "token"},
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []service.PassthroughFieldRule{
+				{Target: "body", Mode: "inject", Key: "metadata.accepted_wire", Value: "changed"},
+			},
+		},
+	}
+	upstream := &gatewayAcceptedWireDeletingUpstream{spoolDir: wireDir}
+	env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+
+	recorder := httptest.NewRecorder()
+	body := `{"model":"claude-sonnet-4-5","max_tokens":16,"stream":false,"messages":[{"role":"user","content":"` + strings.Repeat("x", 2<<20) + `"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	env.router().ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body prefix = %q", recorder.Code, recorder.Body.String()[:smallestInt(256, recorder.Body.Len())])
+	}
+	if strings.Contains(recorder.Body.String(), "msg_accepted") {
+		t.Fatalf("success response was committed before accepted wire validation: %s", recorder.Body.String())
+	}
+	if upstream.calls != 1 {
+		t.Fatalf("upstream calls = %d, want 1", upstream.calls)
+	}
+	if env.usageRepo.lastLog != nil {
+		t.Fatalf("accepted wire spool failure recorded usage: %#v", env.usageRepo.lastLog)
+	}
+}
+
 func TestGatewayHandler_ResponsesAntigravityTransformedSpoolOpenFailureReturns503(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	group := &service.Group{ID: 52, Platform: service.PlatformAntigravity, Status: service.StatusActive, Hydrated: true}
@@ -715,6 +760,36 @@ type gatewaySpecialRetrySpoolUpstream struct {
 	service.HTTPUpstream
 	responses []string
 	calls     int
+}
+
+type gatewayAcceptedWireDeletingUpstream struct {
+	service.HTTPUpstream
+	spoolDir string
+	calls    int
+}
+
+func (u *gatewayAcceptedWireDeletingUpstream) DoWithTLS(req *http.Request, _ string, _ int64, _ int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	u.calls++
+	if _, err := io.Copy(io.Discard, req.Body); err != nil {
+		return nil, err
+	}
+	if err := req.Body.Close(); err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(u.spoolDir)
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range entries {
+		if err := os.Remove(filepath.Join(u.spoolDir, entry.Name())); err != nil {
+			return nil, err
+		}
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": {"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"id":"msg_accepted","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)),
+	}, nil
 }
 
 func (u *gatewaySpecialRetrySpoolUpstream) DoWithTLS(req *http.Request, _ string, _ int64, _ int, _ *tlsfingerprint.Profile) (*http.Response, error) {
