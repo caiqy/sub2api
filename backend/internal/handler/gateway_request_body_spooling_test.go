@@ -342,6 +342,62 @@ func TestGatewayHandler_MessagesAcceptedWireSpoolFailureDoesNotCommitSuccess(t *
 	}
 }
 
+func TestGatewayHandler_MessagesStreamingAcceptedWireSpoolFailureWritesSSEError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawDir, wireDir := t.TempDir(), t.TempDir()
+	oldOptions := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: rawDir}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+	t.Setenv("TMPDIR", wireDir)
+	t.Setenv("TMP", wireDir)
+	t.Setenv("TEMP", wireDir)
+
+	group := &service.Group{ID: 57, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{
+		ID: 158, Name: "anthropic-streaming-accepted-wire-spool", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey,
+		Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1,
+		Credentials: map[string]any{"api_key": "token"},
+		Extra: map[string]any{
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []service.PassthroughFieldRule{
+				{Target: "body", Mode: "inject", Key: "metadata.accepted_wire", Value: "changed"},
+			},
+		},
+	}
+	cache := &blockingResponsesUserSlotCache{waiting: make(chan struct{}), release: make(chan struct{})}
+	upstream := &gatewayAcceptedWireDeletingUpstream{spoolDir: wireDir}
+	env := newTerminalGatewayMessagesEnvWithConcurrencyCache(t, group, upstream, cache, account)
+	env.handler.concurrencyHelper = NewConcurrencyHelper(env.handler.concurrencyHelper.concurrencyService, SSEPingFormatClaude, time.Millisecond)
+
+	recorder := httptest.NewRecorder()
+	done := make(chan struct{})
+	body := `{"model":"claude-sonnet-4-5","max_tokens":16,"stream":true,"messages":[{"role":"user","content":"` + strings.Repeat("x", 2<<20) + `"}]}`
+	go func() {
+		req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		env.router().ServeHTTP(recorder, req)
+		close(done)
+	}()
+	waitGatewayReplaySignal(t, cache.waiting, "streaming user slot wait")
+	time.Sleep(20 * time.Millisecond)
+	close(cache.release)
+	waitGatewayReplaySignal(t, done, "streaming accepted wire failure")
+
+	responseBody := recorder.Body.String()
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want committed 200; body = %s", recorder.Code, responseBody)
+	}
+	if !strings.Contains(responseBody, `data: {"type": "ping"}`) {
+		t.Fatalf("response missing committed SSE ping: %s", responseBody)
+	}
+	if !strings.Contains(responseBody, `data: {"type":"error","error":{"type":"api_error","message":"Failed to spool request body"}}`) {
+		t.Fatalf("response missing SSE error frame: %s", responseBody)
+	}
+	if strings.Contains(responseBody, "\n\n{\"type\":\"error\"") {
+		t.Fatalf("response appended bare JSON after SSE ping: %s", responseBody)
+	}
+}
+
 func TestGatewayHandler_ResponsesAntigravityTransformedSpoolOpenFailureReturns503(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	group := &service.Group{ID: 52, Platform: service.PlatformAntigravity, Status: service.StatusActive, Hydrated: true}

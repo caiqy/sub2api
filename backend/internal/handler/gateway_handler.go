@@ -1142,7 +1142,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			attemptResourcesOwned = false
 			if err != nil {
 				if status, ok := requestBodyReadErrorStatus(err); ok {
-					h.errorResponse(c, status, "api_error", "Failed to spool request body")
+					h.handleStreamingAwareError(c, status, "api_error", "Failed to spool request body", streamStarted)
 					return
 				}
 				// Beta policy block: return 400 immediately, no failover
