@@ -23,6 +23,7 @@ import (
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 type grokCredentialHandlerRepo struct {
@@ -400,6 +401,85 @@ func (u *grokCredentialHandlerUpstream) requests() ([]string, []string) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	return append([]string(nil), u.requestURLs...), append([]string(nil), u.authorization...)
+}
+
+type responsesFinalHandleReplayUpstream struct {
+	service.HTTPUpstream
+	mu         sync.Mutex
+	calls      int
+	accountIDs []int64
+	bodies     [][]byte
+}
+
+func (u *responsesFinalHandleReplayUpstream) Do(req *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	u.mu.Lock()
+	u.calls++
+	call := u.calls
+	u.accountIDs = append(u.accountIDs, accountID)
+	u.bodies = append(u.bodies, append([]byte(nil), body...))
+	u.mu.Unlock()
+	if call == 1 {
+		return &http.Response{
+			StatusCode: 520,
+			Header:     http.Header{"Content-Type": []string{"text/html"}},
+			Body:       io.NopCloser(strings.NewReader("<html>520: unknown error</html>")),
+		}, nil
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body: io.NopCloser(strings.NewReader(
+			`{"id":"resp_replayed","object":"response","status":"completed","model":"routed-model","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`,
+		)),
+	}, nil
+}
+
+func (u *responsesFinalHandleReplayUpstream) snapshot() ([]int64, [][]byte) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	bodies := make([][]byte, len(u.bodies))
+	for i := range u.bodies {
+		bodies[i] = append([]byte(nil), u.bodies[i]...)
+	}
+	return append([]int64(nil), u.accountIDs...), bodies
+}
+
+func TestResponsesFinalHandleReplayAcrossFailover(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream := &responsesFinalHandleReplayUpstream{}
+	handler := newOpenAIResponsesFailoverTestHandler(t, upstream)
+	c, recorder := newOpenAIResponsesFailoverTestContext(t, context.Background())
+	apiKey, ok := middleware.GetAPIKeyFromContext(c)
+	require.True(t, ok)
+	apiKey.Group.MaxReasoningEffort = "high"
+	rawBody := `{"model":"client-model","stream":false,"reasoning":{"effort":"xhigh"},"input":[` +
+		`{"type":"message","role":"user","content":"hello"},` +
+		`{"type":"reasoning","id":"rs_replay","encrypted_content":"ENC_REPLAY","summary":[]}` +
+		`]}`
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(rawBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+	route := service.EffectiveGatewayRoute{
+		APIKey: apiKey, Group: apiKey.Group, GroupID: apiKey.GroupID,
+		ClientModel: "client-model", RoutingModel: "routed-model", UpstreamModel: "routed-model", Platform: service.PlatformOpenAI,
+	}
+	c.Request = c.Request.WithContext(service.WithEffectiveGatewayRoute(c.Request.Context(), route))
+
+	handler.Responses(c)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	accountIDs, bodies := upstream.snapshot()
+	require.Equal(t, []int64{1, 2}, accountIDs)
+	require.Len(t, bodies, 2)
+	require.JSONEq(t, string(bodies[0]), string(bodies[1]))
+	for _, body := range bodies {
+		require.Equal(t, "routed-model", gjson.GetBytes(body, "model").String())
+		require.Equal(t, "high", gjson.GetBytes(body, "reasoning.effort").String())
+		require.Equal(t, "ENC_REPLAY", gjson.GetBytes(body, "input.1.encrypted_content").String())
+	}
 }
 
 func TestResponsesCredentialFailoverLoop(t *testing.T) {

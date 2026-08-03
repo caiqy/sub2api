@@ -50,7 +50,7 @@ func TestOpenAIGatewayHandler_ResponsesSessionAndCyberKeysUseRawBody(t *testing.
 	cache := &openAIResponsesRetentionGatewayCache{}
 	settings := service.NewSettingService(&openAIResponsesRetentionSettingRepo{}, &config.Config{})
 	env := newOpenAIResponsesRetentionTestEnv(t, nil, cache, nil, settings)
-	rawBody := []byte(`{"model":"client-model","stream":false,"prompt_cache_key":"raw-session","input":"hello"}`)
+	rawBody := []byte(`{"model":"client-model","stream":false,"store":true,"prompt_cache_key":"raw-session","input":"hello"}`)
 	route := service.EffectiveGatewayRoute{
 		APIKey: env.apiKey, Group: env.apiKey.Group, GroupID: env.apiKey.GroupID,
 		ClientModel: "client-model", RoutingModel: "routed-model", UpstreamModel: "routed-model", Platform: service.PlatformOpenAI,
@@ -58,15 +58,30 @@ func TestOpenAIGatewayHandler_ResponsesSessionAndCyberKeysUseRawBody(t *testing.
 	env.route = &route
 
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(string(rawBody)))
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses/compact", strings.NewReader(string(rawBody)))
 	request.Header.Set("Content-Type", "application/json")
 	env.router.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Len(t, env.upstream.requests, 1)
+	normalizedBody, err := io.ReadAll(env.upstream.requests[0].Body)
+	require.NoError(t, err)
+	require.False(t, gjson.GetBytes(normalizedBody, "prompt_cache_key").Exists())
+	require.False(t, gjson.GetBytes(normalizedBody, "store").Exists())
+	require.False(t, gjson.GetBytes(normalizedBody, "stream").Exists())
 	require.NotNil(t, env.requestContext)
 	wantSessionHash := env.handler.gatewayService.GenerateSessionHash(env.requestContext, rawBody)
 	require.Equal(t, wantSessionHash, strings.TrimPrefix(cache.sessionHash, service.PlatformOpenAI+":"))
 	require.Equal(t, service.CyberSessionBlockKey(env.apiKey.ID, env.requestContext, rawBody), cache.cyberKey)
+
+	grokRecorder := httptest.NewRecorder()
+	grokContext, _ := gin.CreateTestContext(grokRecorder)
+	grokContext.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{}`))
+	grokContext.Request.Header.Set("X-Grok-Conv-Id", "grok-conversation")
+	grokContext.Request = grokContext.Request.WithContext(service.WithResolvedTargetPlatform(grokContext.Request.Context(), service.PlatformGrok))
+	require.NotEmpty(t, env.handler.gatewayService.GenerateSessionHash(grokContext, []byte(`{}`)))
+	require.Empty(t, service.CyberSessionBlockKey(env.apiKey.ID, grokContext, []byte(`{}`)), "Grok-only header is outside the cyber block key contract")
+	require.Equal(t, service.CyberSessionBlockKey(env.apiKey.ID, grokContext, rawBody), service.CyberSessionBlockKey(env.apiKey.ID, env.requestContext, rawBody))
 }
 
 func TestOpenAIGatewayHandler_ResponsesReadFailureReleasesAccountSlot(t *testing.T) {
@@ -178,6 +193,7 @@ func newOpenAIResponsesRetentionTestEnv(
 	})
 	router.Use(middleware.UsageDetailCapture())
 	router.POST("/v1/responses", handler.Responses)
+	router.POST("/v1/responses/compact", handler.Responses)
 	env.router = router
 	return env
 }
