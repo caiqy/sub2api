@@ -247,9 +247,12 @@ func (s *GatewayService) buildUpstreamRequestWithHandles(ctx context.Context, c 
 	if err != nil {
 		return nil, nil, fmt.Errorf("read source request body: %w", err)
 	}
-	body, err := bodyHandle.ReadAll()
-	if err != nil {
-		return nil, nil, fmt.Errorf("read canonical request body: %w", err)
+	body := sourceBody
+	if sourceHandle != bodyHandle {
+		body, err = bodyHandle.ReadAll()
+		if err != nil {
+			return nil, nil, fmt.Errorf("read canonical request body: %w", err)
+		}
 	}
 	req, wireBody, err := s.buildUpstreamRequestWithSourceBody(ctx, c, account, sourceBody, body, token, tokenType, modelID, reqStream, mimicClaudeCode)
 	sourceBody = nil

@@ -97,11 +97,13 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		return nil, fmt.Errorf("read request body: %w", err)
 	}
 	sourceHandle := parsed.Body.Handle()
+	sourceHandleOwned := false
 	if sourceHandle == nil {
 		sourceHandle, err = NewRequestBodyHandleFromBytes(sourceBody, RequestBodyHandleOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("spool source request body: %w", err)
 		}
+		sourceHandleOwned = true
 		defer CleanupRequestBodyHandle(sourceHandle)
 	}
 
@@ -377,15 +379,26 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		}
 	}
 	canonicalHandle := sourceHandle
+	canonicalHandleOwned := false
 	if !bytes.Equal(body, sourceBody) {
 		canonicalHandle, err = NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("spool canonical request body: %w", err)
 		}
+		canonicalHandleOwned = true
 		defer CleanupRequestBodyHandle(canonicalHandle)
 	}
 	parsed.Body.Replace(nil)
 	parsed.Body = NewRequestBodyRefFromHandle(canonicalHandle)
+	defer func() {
+		currentHandle := parsed.Body.Handle()
+		if currentHandle == nil || (!sourceHandleOwned || currentHandle != sourceHandle) && (!canonicalHandleOwned || currentHandle != canonicalHandle) {
+			return
+		}
+		if restoredBody, restoreErr := currentHandle.ReadAll(); restoreErr == nil {
+			_ = parsed.ReplaceBody(restoredBody)
+		}
+	}()
 	body = nil
 	sourceBody = nil
 	replaceBody = nil
@@ -886,7 +899,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		}
 		return s.handleErrorResponse(ctx, resp, c, account, reqModel)
 	}
-	if lastWireHandle != nil && lastWireHandle.Hash() != canonicalHandle.Hash() {
+	if lastWireHandle != nil {
 		finalBody, err := lastWireHandle.ReadAll()
 		if err != nil {
 			return nil, fmt.Errorf("read accepted upstream request body: %w", err)
