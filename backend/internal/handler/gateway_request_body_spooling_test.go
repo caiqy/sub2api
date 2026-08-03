@@ -390,8 +390,20 @@ func TestGatewayHandler_MessagesStreamingAcceptedWireSpoolFailureWritesSSEError(
 	if !strings.Contains(responseBody, `data: {"type": "ping"}`) {
 		t.Fatalf("response missing committed SSE ping: %s", responseBody)
 	}
-	if !strings.Contains(responseBody, `data: {"type":"error","error":{"type":"api_error","message":"Failed to spool request body"}}`) {
-		t.Fatalf("response missing SSE error frame: %s", responseBody)
+	var errorData string
+	for _, frame := range strings.Split(responseBody, "\n\n") {
+		eventName := "message"
+		for _, line := range strings.Split(frame, "\n") {
+			if strings.HasPrefix(line, "event:") {
+				eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			}
+			if eventName == "error" && strings.HasPrefix(line, "data:") {
+				errorData = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			}
+		}
+	}
+	if errorData != `{"type":"error","error":{"type":"api_error","message":"Failed to spool request body"}}` {
+		t.Fatalf("strict SSE parser error data = %q; response = %s", errorData, responseBody)
 	}
 	if strings.Contains(responseBody, "\n\n{\"type\":\"error\"") {
 		t.Fatalf("response appended bare JSON after SSE ping: %s", responseBody)
