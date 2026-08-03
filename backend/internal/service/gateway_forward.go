@@ -96,6 +96,14 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	if err != nil {
 		return nil, fmt.Errorf("read request body: %w", err)
 	}
+	sourceHandle := parsed.Body.Handle()
+	if sourceHandle == nil {
+		sourceHandle, err = NewRequestBodyHandleFromBytes(sourceBody, RequestBodyHandleOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("spool source request body: %w", err)
+		}
+		defer CleanupRequestBodyHandle(sourceHandle)
+	}
 
 	// Web Search 模拟：纯 web_search 请求时，直接调用搜索 API 构造响应
 	if account != nil && s.shouldEmulateWebSearch(ctx, account, parsed.GroupID, sourceBody) {
@@ -142,6 +150,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 
 	body := sourceBody
 	replaceBody := func(next []byte) error {
+		if bytes.Equal(next, body) {
+			return nil
+		}
 		if err := parsed.ReplaceBody(next); err != nil {
 			return fmt.Errorf("rewrite request body: %w", err)
 		}
@@ -365,23 +376,52 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			logger.LegacyPrintf("service.gateway", "Account %d: rewrote thinking.type for %s (Anthropic-SDK default 'enabled' -> vendor-specific)", account.ID, reqModel)
 		}
 	}
+	canonicalHandle := sourceHandle
+	if !bytes.Equal(body, sourceBody) {
+		canonicalHandle, err = NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("spool canonical request body: %w", err)
+		}
+		defer CleanupRequestBodyHandle(canonicalHandle)
+	}
+	parsed.Body.Replace(nil)
+	parsed.Body = NewRequestBodyRefFromHandle(canonicalHandle)
+	body = nil
+	sourceBody = nil
+	replaceBody = nil
+	newDerivedHandle := func(rewrite func([]byte) []byte) (*RequestBodyHandle, error) {
+		canonicalBody, err := canonicalHandle.ReadAll()
+		if err != nil {
+			return nil, fmt.Errorf("read canonical request body: %w", err)
+		}
+		derivedBody := rewrite(canonicalBody)
+		canonicalBody = nil
+		handle, err := NewRequestBodyHandleFromBytes(derivedBody, RequestBodyHandleOptions{})
+		derivedBody = nil
+		if err != nil {
+			return nil, fmt.Errorf("spool derived request body: %w", err)
+		}
+		return handle, nil
+	}
 
 	// 重试循环
 	var resp *http.Response
-	lastWireBody := body
+	var lastWireHandle *RequestBodyHandle
+	defer func() { CleanupRequestBodyHandle(lastWireHandle) }()
 	retryStart := time.Now()
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
 		// 构建上游请求（每次重试需要重新构建，因为请求体需要重新读取）
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
-		upstreamReq, wireBody, err := s.buildUpstreamRequestWithSourceBody(upstreamCtx, c, account, sourceBody, body, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
+		upstreamReq, wireHandle, err := s.buildUpstreamRequestWithHandles(upstreamCtx, c, account, sourceHandle, canonicalHandle, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 		releaseUpstreamCtx()
 		if err != nil {
 			return nil, err
 		}
-		SetUsageUpstreamRequest(c, upstreamReq, RequestBodyPreviewString(wireBody))
+		SetUsageUpstreamRequest(c, upstreamReq, wireHandle.PreviewString())
 		SetOpsUpstreamAttempted(c, true)
 		// 记录本次实际发送的 wire body；只有请求成功后才写回 ParsedRequest，避免 400 retry 基于已签名 CCH 再改写。
-		lastWireBody = wireBody
+		CleanupRequestBodyHandle(lastWireHandle)
+		lastWireHandle = wireHandle
 
 		// 发送请求
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
@@ -392,6 +432,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			// Transport attempt left local validation; count Ollama Cloud activity.
 			if !errors.Is(err, context.Canceled) {
 				scheduleOllamaCloudUsageActivity(s.deferredService, account)
+			}
+			if errors.Is(err, ErrRequestBodySpool) {
+				return nil, fmt.Errorf("send upstream request: %w", err)
 			}
 			// Ensure the client receives an error response (handlers assume Forward writes on non-failover errors).
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
@@ -461,22 +504,26 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					// 2) Only if upstream still errors AND error message points to tool/function signature issues:
 					//    also downgrade tool_use/tool_result blocks to text.
 
-					filteredBody := FilterThinkingBlocksForRetry(body, reqModel)
+					filteredHandle, handleErr := newDerivedHandle(func(body []byte) []byte {
+						return FilterThinkingBlocksForRetry(body, reqModel)
+					})
+					if handleErr != nil {
+						return nil, handleErr
+					}
 					retryCtx, releaseRetryCtx := detachStreamUpstreamContext(ctx, reqStream)
-					retryReq, retryWireBody, buildErr := s.buildUpstreamRequestWithSourceBody(retryCtx, c, account, sourceBody, filteredBody, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
+					retryReq, retryWireHandle, buildErr := s.buildUpstreamRequestWithHandles(retryCtx, c, account, sourceHandle, filteredHandle, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 					releaseRetryCtx()
+					CleanupRequestBodyHandle(filteredHandle)
+					defer func() { CleanupRequestBodyHandle(retryWireHandle) }()
 					if buildErr == nil {
 						SetOpsUpstreamAttempted(c, true)
 						retryResp, retryErr := s.httpUpstream.DoWithTLS(retryReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
 						if retryErr == nil {
 							if retryResp.StatusCode < 400 {
-								SetUsageUpstreamRequest(c, retryReq, RequestBodyPreviewString(retryWireBody))
-								// 重试请求被上游接受后同步 ParsedRequest，保证 usage/日志看到真实请求体。
-								lastWireBody = retryWireBody
-								if err := replaceBody(retryWireBody); err != nil {
-									_ = retryResp.Body.Close()
-									return nil, err
-								}
+								SetUsageUpstreamRequest(c, retryReq, retryWireHandle.PreviewString())
+								CleanupRequestBodyHandle(lastWireHandle)
+								lastWireHandle = retryWireHandle
+								retryWireHandle = nil
 								logger.LegacyPrintf("service.gateway", "Account %d: thinking block retry succeeded (blocks downgraded)", account.ID)
 								resp = retryResp
 								break
@@ -504,22 +551,26 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 								msg2 := extractUpstreamErrorMessage(retryRespBody)
 								if looksLikeToolSignatureError(msg2) && time.Since(retryStart) < maxRetryElapsed {
 									logger.LegacyPrintf("service.gateway", "Account %d: signature retry still failing and looks tool-related, retrying with tool blocks downgraded", account.ID)
-									filteredBody2 := FilterSignatureSensitiveBlocksForRetry(body, reqModel)
+									filteredHandle2, handleErr2 := newDerivedHandle(func(body []byte) []byte {
+										return FilterSignatureSensitiveBlocksForRetry(body, reqModel)
+									})
+									if handleErr2 != nil {
+										return nil, handleErr2
+									}
 									retryCtx2, releaseRetryCtx2 := detachStreamUpstreamContext(ctx, reqStream)
-									retryReq2, retryWireBody2, buildErr2 := s.buildUpstreamRequestWithSourceBody(retryCtx2, c, account, sourceBody, filteredBody2, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
+									retryReq2, retryWireHandle2, buildErr2 := s.buildUpstreamRequestWithHandles(retryCtx2, c, account, sourceHandle, filteredHandle2, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 									releaseRetryCtx2()
+									CleanupRequestBodyHandle(filteredHandle2)
+									defer func() { CleanupRequestBodyHandle(retryWireHandle2) }()
 									if buildErr2 == nil {
 										SetOpsUpstreamAttempted(c, true)
 										retryResp2, retryErr2 := s.httpUpstream.DoWithTLS(retryReq2, proxyURL, account.ID, account.Concurrency, tlsProfile)
 										if retryErr2 == nil {
 											if retryResp2.StatusCode < 400 {
-												SetUsageUpstreamRequest(c, retryReq2, RequestBodyPreviewString(retryWireBody2))
-												// 二阶段工具块降级成功时也必须更新当前 body。
-												lastWireBody = retryWireBody2
-												if err := replaceBody(retryWireBody2); err != nil {
-													_ = retryResp2.Body.Close()
-													return nil, err
-												}
+												SetUsageUpstreamRequest(c, retryReq2, retryWireHandle2.PreviewString())
+												CleanupRequestBodyHandle(lastWireHandle)
+												lastWireHandle = retryWireHandle2
+												retryWireHandle2 = nil
 											}
 											resp = retryResp2
 											break
@@ -535,7 +586,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 											UpstreamURL:         safeUpstreamURL(retryReq2.URL.String()),
 											Kind:                "signature_retry_tools_request_error",
 											Message:             sanitizeUpstreamErrorMessage(retryErr2.Error()),
-											UpstreamRequestBody: RequestBodyPreviewSnapshot(RequestBodyPreviewString(retryWireBody2), int64(len(retryWireBody2))),
+											UpstreamRequestBody: RequestBodyPreviewSnapshot(retryWireHandle2.PreviewString(), retryWireHandle2.Size()),
 										})
 										logger.LegacyPrintf("service.gateway", "Account %d: tool-downgrade signature retry failed: %v", account.ID, retryErr2)
 									} else {
@@ -556,7 +607,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 							_ = retryResp.Body.Close()
 						}
 						logger.LegacyPrintf("service.gateway", "Account %d: signature error retry failed: %v", account.ID, retryErr)
-						appendOpsUpstreamError(c, OpsUpstreamErrorEvent{Platform: account.Platform, AccountID: account.ID, AccountName: account.Name, UpstreamStatusCode: 0, UpstreamURL: safeUpstreamURL(retryReq.URL.String()), Kind: "signature_retry_request_error", Message: sanitizeUpstreamErrorMessage(retryErr.Error()), UpstreamRequestBody: RequestBodyPreviewSnapshot(RequestBodyPreviewString(retryWireBody), int64(len(retryWireBody)))})
+						appendOpsUpstreamError(c, OpsUpstreamErrorEvent{Platform: account.Platform, AccountID: account.ID, AccountName: account.Name, UpstreamStatusCode: 0, UpstreamURL: safeUpstreamURL(retryReq.URL.String()), Kind: "signature_retry_request_error", Message: sanitizeUpstreamErrorMessage(retryErr.Error()), UpstreamRequestBody: RequestBodyPreviewSnapshot(retryWireHandle.PreviewString(), retryWireHandle.Size())})
 					} else {
 						logger.LegacyPrintf("service.gateway", "Account %d: signature error retry build request failed: %v", account.ID, buildErr)
 					}
@@ -585,24 +636,31 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 						}(),
 					})
 
-					rectifiedBody, applied := RectifyThinkingBudget(body)
+					var applied bool
+					rectifiedHandle, handleErr := newDerivedHandle(func(body []byte) []byte {
+						var rectified []byte
+						rectified, applied = RectifyThinkingBudget(body)
+						return rectified
+					})
+					if handleErr != nil {
+						return nil, handleErr
+					}
+					defer CleanupRequestBodyHandle(rectifiedHandle)
 					if applied && time.Since(retryStart) < maxRetryElapsed {
 						logger.LegacyPrintf("service.gateway", "Account %d: detected budget_tokens constraint error, retrying with rectified budget (budget_tokens=%d, max_tokens=%d)", account.ID, BudgetRectifyBudgetTokens, BudgetRectifyMaxTokens)
 						budgetRetryCtx, releaseBudgetRetryCtx := detachStreamUpstreamContext(ctx, reqStream)
-						budgetRetryReq, budgetWireBody, buildErr := s.buildUpstreamRequestWithSourceBody(budgetRetryCtx, c, account, sourceBody, rectifiedBody, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
+						budgetRetryReq, budgetWireHandle, buildErr := s.buildUpstreamRequestWithHandles(budgetRetryCtx, c, account, sourceHandle, rectifiedHandle, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 						releaseBudgetRetryCtx()
+						defer func() { CleanupRequestBodyHandle(budgetWireHandle) }()
 						if buildErr == nil {
 							SetOpsUpstreamAttempted(c, true)
 							budgetRetryResp, retryErr := s.httpUpstream.DoWithTLS(budgetRetryReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
 							if retryErr == nil {
 								if budgetRetryResp.StatusCode < 400 {
-									SetUsageUpstreamRequest(c, budgetRetryReq, RequestBodyPreviewString(budgetWireBody))
-									// budget 修正请求成功后，ParsedRequest 也要描述被接受的修正版。
-									lastWireBody = budgetWireBody
-									if err := replaceBody(budgetWireBody); err != nil {
-										_ = budgetRetryResp.Body.Close()
-										return nil, err
-									}
+									SetUsageUpstreamRequest(c, budgetRetryReq, budgetWireHandle.PreviewString())
+									CleanupRequestBodyHandle(lastWireHandle)
+									lastWireHandle = budgetWireHandle
+									budgetWireHandle = nil
 								}
 								resp = budgetRetryResp
 								break
@@ -611,7 +669,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 								_ = budgetRetryResp.Body.Close()
 							}
 							logger.LegacyPrintf("service.gateway", "Account %d: budget rectifier retry failed: %v", account.ID, retryErr)
-							appendOpsUpstreamError(c, OpsUpstreamErrorEvent{Platform: account.Platform, AccountID: account.ID, AccountName: account.Name, UpstreamStatusCode: 0, UpstreamURL: safeUpstreamURL(budgetRetryReq.URL.String()), Kind: "budget_retry_request_error", Message: sanitizeUpstreamErrorMessage(retryErr.Error()), UpstreamRequestBody: RequestBodyPreviewSnapshot(RequestBodyPreviewString(budgetWireBody), int64(len(budgetWireBody)))})
+							appendOpsUpstreamError(c, OpsUpstreamErrorEvent{Platform: account.Platform, AccountID: account.ID, AccountName: account.Name, UpstreamStatusCode: 0, UpstreamURL: safeUpstreamURL(budgetRetryReq.URL.String()), Kind: "budget_retry_request_error", Message: sanitizeUpstreamErrorMessage(retryErr.Error()), UpstreamRequestBody: RequestBodyPreviewSnapshot(budgetWireHandle.PreviewString(), budgetWireHandle.Size())})
 						} else {
 							logger.LegacyPrintf("service.gateway", "Account %d: budget rectifier retry build failed: %v", account.ID, buildErr)
 						}
@@ -799,15 +857,6 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		return s.handleErrorResponse(ctx, resp, c, account, reqModel)
 	}
 
-	// 处理正常响应
-
-	if !bytes.Equal(lastWireBody, body) {
-		// 成功后再同步最终 wire body，避免失败重试从已签名 CCH 的 body 继续派生。
-		if err := replaceBody(lastWireBody); err != nil {
-			return nil, err
-		}
-	}
-
 	// 触发上游接受回调（提前释放串行锁，不等流完成）
 	if parsed.OnUpstreamAccepted != nil {
 		parsed.OnUpstreamAccepted()
@@ -871,6 +920,17 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		if err != nil {
 			return nil, err
 		}
+	}
+	if lastWireHandle != nil && lastWireHandle.Hash() != canonicalHandle.Hash() {
+		finalBody, err := lastWireHandle.ReadAll()
+		if err != nil {
+			return nil, fmt.Errorf("read accepted upstream request body: %w", err)
+		}
+		// Preserve the accepted wire body for existing usage and logging consumers after the upstream wait.
+		if err := parsed.ReplaceBody(finalBody); err != nil {
+			return nil, fmt.Errorf("rewrite request body: %w", err)
+		}
+		finalBody = nil
 	}
 
 	return &ForwardResult{

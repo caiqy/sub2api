@@ -76,7 +76,7 @@ func TestRequestBodyMemoryRetentionWhileUpstreamBlocked(t *testing.T) {
 	}
 	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
 
-	for _, branch := range []string{"responses", "passthrough", "grok-responses", "responses-chat-fallback", "chat-raw", "chat-converted", "messages-gemini", "messages-gemini-mixed"} {
+	for _, branch := range []string{"responses", "passthrough", "grok-responses", "responses-chat-fallback", "chat-raw", "chat-converted", "messages-anthropic", "messages-gemini", "messages-gemini-mixed"} {
 		t.Run(branch, func(t *testing.T) {
 			var heapAt2MB, heapAt89MB uint64
 			var previewAt2MB, previewAt89MB, snapshotAt2MB, snapshotAt89MB int
@@ -151,6 +151,10 @@ func measureBlockedRequestBodyHeap(t *testing.T, branch string, size int64, spoo
 		extra["openai_responses_supported"] = true
 		upstream.contentType = "text/event-stream"
 		upstream.body = "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_retention\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"
+	case "messages-anthropic":
+		path = "/v1/messages"
+		platform = service.PlatformAnthropic
+		upstream.body = `{"id":"msg_retention","type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"model":"claude-sonnet-4-5","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`
 	case "messages-gemini", "messages-gemini-mixed":
 		path = "/v1/messages"
 		platform = service.PlatformGemini
@@ -230,6 +234,9 @@ func retentionJSONBody(branch, path string, size int64) io.Reader {
 		prefix, suffix = `{"model":"gpt-5","stream":false,"messages":[{"role":"user","content":"`, `"}]}`
 	} else if path == "/v1/messages" {
 		prefix, suffix = `{"model":"gemini-2.5-flash","max_tokens":16,"stream":false,"messages":[{"role":"user","content":"`, `"}]}`
+	}
+	if branch == "messages-anthropic" {
+		prefix = `{"model":"claude-sonnet-4-5","max_tokens":16,"stream":false,"messages":[{"role":"user","content":"`
 	}
 	if branch == "messages-gemini-mixed" {
 		prefix = `{"model":"claude-opus-4-6","max_tokens":16,"stream":false,"messages":[{"role":"user","content":"`

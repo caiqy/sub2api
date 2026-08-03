@@ -242,6 +242,40 @@ func (s *GatewayService) buildUpstreamRequestWithSourceBody(ctx context.Context,
 	return req, wireBody, nil
 }
 
+func (s *GatewayService) buildUpstreamRequestWithHandles(ctx context.Context, c *gin.Context, account *Account, sourceHandle, bodyHandle *RequestBodyHandle, token, tokenType, modelID string, reqStream bool, mimicClaudeCode bool) (*http.Request, *RequestBodyHandle, error) {
+	sourceBody, err := sourceHandle.ReadAll()
+	if err != nil {
+		return nil, nil, fmt.Errorf("read source request body: %w", err)
+	}
+	body, err := bodyHandle.ReadAll()
+	if err != nil {
+		return nil, nil, fmt.Errorf("read canonical request body: %w", err)
+	}
+	req, wireBody, err := s.buildUpstreamRequestWithSourceBody(ctx, c, account, sourceBody, body, token, tokenType, modelID, reqStream, mimicClaudeCode)
+	sourceBody = nil
+	body = nil
+	if err != nil {
+		return nil, nil, err
+	}
+	wireHandle, err := NewRequestBodyHandleFromBytes(wireBody, RequestBodyHandleOptions{})
+	wireBody = nil
+	if err != nil {
+		return nil, nil, fmt.Errorf("spool upstream request body: %w", err)
+	}
+	reader, err := wireHandle.Open()
+	if err != nil {
+		CleanupRequestBodyHandle(wireHandle)
+		return nil, nil, fmt.Errorf("open upstream request body: %w", err)
+	}
+	if req.Body != nil {
+		_ = req.Body.Close()
+	}
+	req.Body = reader
+	req.GetBody = wireHandle.Open
+	req.ContentLength = wireHandle.Size()
+	return req, wireHandle, nil
+}
+
 // vertexSupportedBetaTokens 是 Vertex AI 的 Anthropic 端点接受的 anthropic-beta
 // 白名单。Vertex 对任何未知 token 直接 HTTP 400，故采用白名单（与 Bedrock 的
 // bedrockSupportedBetaTokens 同思路）而非黑名单：未来 Claude Code 新增的、Vertex 尚未
