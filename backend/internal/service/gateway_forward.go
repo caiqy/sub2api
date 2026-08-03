@@ -425,6 +425,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 
 		// 发送请求
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+		if upstreamReq.Body != nil {
+			_ = upstreamReq.Body.Close()
+		}
 		if err != nil {
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
@@ -518,6 +521,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					if buildErr == nil {
 						SetOpsUpstreamAttempted(c, true)
 						retryResp, retryErr := s.httpUpstream.DoWithTLS(retryReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+						if retryReq.Body != nil {
+							_ = retryReq.Body.Close()
+						}
 						if retryErr == nil {
 							if retryResp.StatusCode < 400 {
 								SetUsageUpstreamRequest(c, retryReq, retryWireHandle.PreviewString())
@@ -565,6 +571,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 									if buildErr2 == nil {
 										SetOpsUpstreamAttempted(c, true)
 										retryResp2, retryErr2 := s.httpUpstream.DoWithTLS(retryReq2, proxyURL, account.ID, account.Concurrency, tlsProfile)
+										if retryReq2.Body != nil {
+											_ = retryReq2.Body.Close()
+										}
 										if retryErr2 == nil {
 											if retryResp2.StatusCode < 400 {
 												SetUsageUpstreamRequest(c, retryReq2, retryWireHandle2.PreviewString())
@@ -655,6 +664,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 						if buildErr == nil {
 							SetOpsUpstreamAttempted(c, true)
 							budgetRetryResp, retryErr := s.httpUpstream.DoWithTLS(budgetRetryReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+							if budgetRetryReq.Body != nil {
+								_ = budgetRetryReq.Body.Close()
+							}
 							if retryErr == nil {
 								if budgetRetryResp.StatusCode < 400 {
 									SetUsageUpstreamRequest(c, budgetRetryReq, budgetWireHandle.PreviewString())
