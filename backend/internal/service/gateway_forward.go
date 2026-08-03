@@ -114,6 +114,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 
 	if account != nil && account.IsAnthropicAPIKeyPassthroughEnabled() {
 		passthroughBody := sourceBody
+		passthroughHandle := sourceHandle
 		passthroughModel := parsed.Model
 		if passthroughModel != "" {
 			if mappedModel := account.GetMappedModel(passthroughModel); mappedModel != passthroughModel {
@@ -122,13 +123,24 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				passthroughModel = mappedModel
 			}
 		}
+		if !bytes.Equal(passthroughBody, sourceBody) {
+			passthroughHandle, err = NewRequestBodyHandleFromBytes(passthroughBody, RequestBodyHandleOptions{})
+			if err != nil {
+				return nil, fmt.Errorf("spool anthropic passthrough body: %w", err)
+			}
+			defer CleanupRequestBodyHandle(passthroughHandle)
+		}
 		return s.forwardAnthropicAPIKeyPassthroughWithInput(ctx, c, account, anthropicPassthroughForwardInput{
-			Body:          passthroughBody,
-			Parsed:        parsed,
-			RequestModel:  passthroughModel,
-			OriginalModel: parsed.Model,
-			RequestStream: parsed.Stream,
-			StartTime:     startTime,
+			SourceHandle:      passthroughHandle,
+			BodyHandle:        passthroughHandle,
+			SourceBody:        passthroughBody,
+			Body:              passthroughBody,
+			Parsed:            parsed,
+			SourceHandleOwned: sourceHandleOwned,
+			RequestModel:      passthroughModel,
+			OriginalModel:     parsed.Model,
+			RequestStream:     parsed.Stream,
+			StartTime:         startTime,
 		})
 	}
 

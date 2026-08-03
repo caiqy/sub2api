@@ -132,7 +132,7 @@ func TestRequestBodyMemoryRetentionWhileUpstreamBlocked(t *testing.T) {
 	}
 	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
 
-	for _, branch := range []string{"responses", "passthrough", "grok-responses", "responses-chat-fallback", "chat-raw", "chat-converted", "messages-anthropic", "messages-anthropic-stream", "messages-gemini", "messages-gemini-mixed"} {
+	for _, branch := range []string{"responses", "passthrough", "grok-responses", "responses-chat-fallback", "chat-raw", "chat-converted", "messages-anthropic", "messages-anthropic-stream", "messages-anthropic-passthrough-stream", "messages-gemini", "messages-gemini-mixed"} {
 		t.Run(branch, func(t *testing.T) {
 			var heapAt2MB, heapAt89MB uint64
 			var previewAt2MB, previewAt89MB, snapshotAt2MB, snapshotAt89MB int
@@ -211,12 +211,15 @@ func measureBlockedRequestBodyHeap(t *testing.T, branch string, size int64, spoo
 		path = "/v1/messages"
 		platform = service.PlatformAnthropic
 		upstream.body = `{"id":"msg_retention","type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"model":"claude-sonnet-4-5","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`
-	case "messages-anthropic-stream":
+	case "messages-anthropic-stream", "messages-anthropic-passthrough-stream":
 		path = "/v1/messages"
 		platform = service.PlatformAnthropic
 		upstream.contentType = "text/event-stream"
 		upstream.streamBody = true
 		upstream.body = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_retention\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[],\"stop_reason\":null,\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+		if branch == "messages-anthropic-passthrough-stream" {
+			extra["anthropic_passthrough"] = true
+		}
 	case "messages-gemini", "messages-gemini-mixed":
 		path = "/v1/messages"
 		platform = service.PlatformGemini
@@ -297,9 +300,9 @@ func retentionJSONBody(branch, path string, size int64) io.Reader {
 	} else if path == "/v1/messages" {
 		prefix, suffix = `{"model":"gemini-2.5-flash","max_tokens":16,"stream":false,"messages":[{"role":"user","content":"`, `"}]}`
 	}
-	if branch == "messages-anthropic" || branch == "messages-anthropic-stream" {
+	if branch == "messages-anthropic" || branch == "messages-anthropic-stream" || branch == "messages-anthropic-passthrough-stream" {
 		stream := "false"
-		if branch == "messages-anthropic-stream" {
+		if branch == "messages-anthropic-stream" || branch == "messages-anthropic-passthrough-stream" {
 			stream = "true"
 		}
 		prefix = `{"model":"claude-sonnet-4-5","max_tokens":16,"stream":` + stream + `,"messages":[{"role":"user","content":"`

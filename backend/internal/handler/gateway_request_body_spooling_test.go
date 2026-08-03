@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -298,6 +299,15 @@ func TestGatewayHandler_MessagesSpecialRetrySpoolFailureReturns503WithoutRetry(t
 }
 
 func TestGatewayHandler_MessagesAcceptedWireSpoolFailureDoesNotCommitSuccess(t *testing.T) {
+	testGatewayHandlerMessagesAcceptedWireSpoolFailure(t, false)
+}
+
+func TestGatewayHandler_MessagesAnthropicPassthroughAcceptedWireSpoolFailureDoesNotCommitSuccess(t *testing.T) {
+	testGatewayHandlerMessagesAcceptedWireSpoolFailure(t, true)
+}
+
+func testGatewayHandlerMessagesAcceptedWireSpoolFailure(t *testing.T, passthrough bool) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	rawDir, wireDir := t.TempDir(), t.TempDir()
 	oldOptions := jsonRequestBodyHandleOptions
@@ -318,6 +328,9 @@ func TestGatewayHandler_MessagesAcceptedWireSpoolFailureDoesNotCommitSuccess(t *
 				{Target: "body", Mode: "inject", Key: "metadata.accepted_wire", Value: "changed"},
 			},
 		},
+	}
+	if passthrough {
+		account.Extra["anthropic_passthrough"] = true
 	}
 	upstream := &gatewayAcceptedWireDeletingUpstream{spoolDir: wireDir}
 	env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
@@ -418,6 +431,7 @@ func TestGatewayHandler_MessagesSuccessPreservesAcceptedWirePayloadHash(t *testi
 		Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1,
 		Credentials: map[string]any{"api_key": "token"},
 		Extra: map[string]any{
+			"anthropic_passthrough":      true,
 			"passthrough_fields_enabled": true,
 			"passthrough_field_rules": []service.PassthroughFieldRule{
 				{Target: "body", Mode: "inject", Key: "metadata.accepted_wire", Value: "changed"},
@@ -426,6 +440,7 @@ func TestGatewayHandler_MessagesSuccessPreservesAcceptedWirePayloadHash(t *testi
 	}
 	upstream := &gatewayAcceptedWireCapturingUpstream{}
 	env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+	billingRepo := captureTerminalGatewayUsageBilling(t, env, group, upstream)
 	var finalParsed *service.ParsedRequest
 	router := env.routerFor("/v1/messages", func(c *gin.Context) {
 		env.handler.Messages(c)
@@ -449,6 +464,67 @@ func TestGatewayHandler_MessagesSuccessPreservesAcceptedWirePayloadHash(t *testi
 	if finalParsed.RequestPayloadHash == "" || finalParsed.RequestPayloadHash != wantHash {
 		t.Fatalf("RequestPayloadHash = %q, want %q", finalParsed.RequestPayloadHash, wantHash)
 	}
+	if billingRepo.lastCmd == nil || billingRepo.lastCmd.RequestPayloadHash != wantHash {
+		t.Fatalf("billing RequestPayloadHash = %q, want %q", billingRepo.requestPayloadHash(), wantHash)
+	}
+}
+
+type gatewayRequestBodyUsageBillingRepo struct {
+	service.UsageBillingRepository
+	lastCmd *service.UsageBillingCommand
+}
+
+func (r *gatewayRequestBodyUsageBillingRepo) Apply(_ context.Context, cmd *service.UsageBillingCommand) (*service.UsageBillingApplyResult, error) {
+	r.lastCmd = cmd
+	return &service.UsageBillingApplyResult{}, nil
+}
+
+func (r *gatewayRequestBodyUsageBillingRepo) requestPayloadHash() string {
+	if r.lastCmd == nil {
+		return ""
+	}
+	return r.lastCmd.RequestPayloadHash
+}
+
+func captureTerminalGatewayUsageBilling(t *testing.T, env *terminalGatewayMessagesEnv, group *service.Group, upstream service.HTTPUpstream) *gatewayRequestBodyUsageBillingRepo {
+	t.Helper()
+	cfg := env.handler.cfg
+	cfg.RunMode = config.RunModeStandard
+	billingRepo := &gatewayRequestBodyUsageBillingRepo{}
+	billingCacheService := service.NewBillingCacheService(openAIResponsesRequestBodyRetentionBillingCacheStub{}, nil, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(billingCacheService.Stop)
+	env.handler.billingCacheService = billingCacheService
+	env.handler.gatewayService = service.NewGatewayService(
+		env.accountRepo,
+		terminalUsageGroupRepo{group: group},
+		env.usageRepo,
+		billingRepo,
+		nil,
+		nil,
+		nil,
+		openAIChatCompletionsGatewayCacheStub{},
+		cfg,
+		nil,
+		env.handler.concurrencyHelper.concurrencyService,
+		service.NewBillingService(cfg, nil),
+		nil,
+		billingCacheService,
+		nil,
+		upstream,
+		service.NewDeferredService(env.accountRepo, nil, 0),
+		nil,
+		nil,
+		nil,
+		nil,
+		env.handler.settingService,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+	return billingRepo
 }
 
 func TestGatewayHandler_ResponsesAntigravityTransformedSpoolOpenFailureReturns503(t *testing.T) {

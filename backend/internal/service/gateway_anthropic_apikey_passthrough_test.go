@@ -2299,6 +2299,55 @@ func TestGatewayService_ForwardKeepsBorrowedParsedBodyHandle(t *testing.T) {
 	require.JSONEq(t, string(body), string(readableBody))
 }
 
+func TestGatewayService_AnthropicPassthroughPreservesParsedBodyOwnership(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`)
+	newService := func() *GatewayService {
+		cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+		return &GatewayService{
+			cfg:              cfg,
+			httpUpstream:     discardGatewayForwardUpstream{},
+			rateLimitService: &RateLimitService{},
+			settingService:   NewSettingService(upstreamPreviewSettingRepo{}, cfg),
+		}
+	}
+	newAccount := func() *Account {
+		account := newAnthropicAPIKeyAccountForTest()
+		account.Extra["passthrough_fields_enabled"] = true
+		account.Extra["passthrough_field_rules"] = []PassthroughFieldRule{{Target: "body", Mode: "inject", Key: "metadata.accepted_wire", Value: "changed"}}
+		return account
+	}
+
+	t.Run("byte-backed", func(t *testing.T) {
+		parsed := &ParsedRequest{Body: NewRequestBodyRef(body), Model: "claude-sonnet-4-5"}
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+		_, err := newService().Forward(context.Background(), c, newAccount(), parsed)
+		require.NoError(t, err)
+		require.Nil(t, parsed.Body.Handle())
+		readableBody, err := parsed.Body.ReadAll()
+		require.NoError(t, err)
+		require.Equal(t, "changed", gjson.GetBytes(readableBody, "metadata.accepted_wire").String())
+	})
+
+	t.Run("borrowed-handle", func(t *testing.T) {
+		handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
+		require.NoError(t, err)
+		t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+		parsed := &ParsedRequest{Body: NewRequestBodyRefFromHandle(handle), Model: "claude-sonnet-4-5"}
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+		_, err = newService().Forward(context.Background(), c, newAccount(), parsed)
+		require.NoError(t, err)
+		require.Same(t, handle, parsed.Body.Handle())
+		readableBody, err := parsed.Body.ReadAll()
+		require.NoError(t, err)
+		require.JSONEq(t, string(body), string(readableBody))
+	})
+}
+
 func TestGatewayService_BuildUpstreamRequestSameHandleMaterializesOnce(t *testing.T) {
 	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"` + strings.Repeat("x", 89<<20/10) + `"}]}`)
 	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: t.TempDir()})
@@ -2373,6 +2422,46 @@ func TestGatewayService_ForwardFirstAttemptReusesMaterializedBody(t *testing.T) 
 	forwardAlloc := after.TotalAlloc - before.TotalAlloc
 	t.Logf("one_read_alloc=%d forward_alloc=%d", oneReadAlloc, forwardAlloc)
 	require.Less(t, forwardAlloc, 2*oneReadAlloc+(16<<20), "first Forward attempt must reuse its initial materialization")
+}
+
+func TestGatewayService_AnthropicPassthroughFirstAttemptReusesMaterializedBody(t *testing.T) {
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"` + strings.Repeat("x", 89<<20/10) + `"}]}`)
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+	body = nil
+
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	materialized, err := handle.ReadAll()
+	require.NoError(t, err)
+	require.Equal(t, int(handle.Size()), len(materialized))
+	runtime.ReadMemStats(&after)
+	oneReadAlloc := after.TotalAlloc - before.TotalAlloc
+	materialized = nil
+	runtime.GC()
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	svc := &GatewayService{
+		cfg:              cfg,
+		httpUpstream:     discardGatewayForwardUpstream{},
+		rateLimitService: &RateLimitService{},
+		settingService:   NewSettingService(upstreamPreviewSettingRepo{}, cfg),
+	}
+	account := newAnthropicAPIKeyAccountForTest()
+	parsed := &ParsedRequest{Body: NewRequestBodyRefFromHandle(handle), Model: "claude-sonnet-4-5"}
+
+	runtime.ReadMemStats(&before)
+	_, err = svc.Forward(context.Background(), c, account, parsed)
+	runtime.ReadMemStats(&after)
+	require.NoError(t, err)
+	forwardAlloc := after.TotalAlloc - before.TotalAlloc
+	t.Logf("one_read_alloc=%d passthrough_forward_alloc=%d", oneReadAlloc, forwardAlloc)
+	require.Less(t, forwardAlloc, 2*oneReadAlloc+(16<<20), "passthrough first attempt must reuse Forward's initial materialization")
 }
 
 type discardGatewayForwardUpstream struct{ HTTPUpstream }

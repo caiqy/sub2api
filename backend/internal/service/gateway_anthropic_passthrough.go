@@ -25,15 +25,17 @@ import (
 )
 
 type anthropicPassthroughForwardInput struct {
-	SourceHandle  *RequestBodyHandle
-	BodyHandle    *RequestBodyHandle
-	OwnBodyHandle bool
-	Body          []byte
-	Parsed        *ParsedRequest
-	RequestModel  string
-	OriginalModel string
-	RequestStream bool
-	StartTime     time.Time
+	SourceHandle      *RequestBodyHandle
+	BodyHandle        *RequestBodyHandle
+	OwnBodyHandle     bool
+	SourceBody        []byte
+	Body              []byte
+	Parsed            *ParsedRequest
+	SourceHandleOwned bool
+	RequestModel      string
+	OriginalModel     string
+	RequestStream     bool
+	StartTime         time.Time
 }
 
 func applyOutputTokenEstimation(usage *ClaudeUsage, accumulatedText string) {
@@ -64,6 +66,8 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthrough(
 	return s.forwardAnthropicAPIKeyPassthroughWithInput(ctx, c, account, anthropicPassthroughForwardInput{
 		SourceHandle:  handle,
 		BodyHandle:    handle,
+		SourceBody:    body,
+		Body:          body,
 		RequestModel:  reqModel,
 		OriginalModel: originalModel,
 		RequestStream: reqStream,
@@ -87,13 +91,45 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		}
 		defer CleanupRequestBodyHandle(handle)
 		input.SourceHandle, input.BodyHandle = handle, handle
+		input.SourceBody = input.Body
 	}
-	if input.OwnBodyHandle && input.BodyHandle != input.SourceHandle {
-		defer CleanupRequestBodyHandle(input.BodyHandle)
+	var lastWireHandle *RequestBodyHandle
+	defer func() { CleanupRequestBodyHandle(lastWireHandle) }()
+	ownedBodyHandle := input.BodyHandle
+	if !input.OwnBodyHandle || ownedBodyHandle == input.SourceHandle {
+		ownedBodyHandle = nil
 	}
-	body, err := input.BodyHandle.ReadAll()
-	if err != nil {
-		return nil, fmt.Errorf("read anthropic passthrough effective body: %w", err)
+	defer func() { CleanupRequestBodyHandle(ownedBodyHandle) }()
+	if input.Parsed != nil && input.SourceHandleOwned {
+		input.Parsed.Body.Replace(nil)
+		input.Parsed.Body = NewRequestBodyRefFromHandle(input.BodyHandle)
+		defer func() {
+			if currentHandle := input.Parsed.Body.Handle(); currentHandle != nil {
+				if restoredBody, restoreErr := currentHandle.ReadAll(); restoreErr == nil {
+					_ = input.Parsed.ReplaceBody(restoredBody)
+				}
+			}
+		}()
+	}
+	sourceBody := input.SourceBody
+	if sourceBody == nil {
+		var err error
+		sourceBody, err = input.SourceHandle.ReadAll()
+		if err != nil {
+			return nil, fmt.Errorf("read anthropic passthrough source body: %w", err)
+		}
+	}
+	body := input.Body
+	if body == nil {
+		if input.BodyHandle == input.SourceHandle {
+			body = sourceBody
+		} else {
+			var err error
+			body, err = input.BodyHandle.ReadAll()
+			if err != nil {
+				return nil, fmt.Errorf("read anthropic passthrough effective body: %w", err)
+			}
+		}
 	}
 	token, tokenType, err := s.GetAccessToken(ctx, account)
 	if err != nil {
@@ -116,62 +152,90 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		SetOpsUpstreamRequestBodyPreview(c, input.BodyHandle.PreviewString(), input.BodyHandle.Size())
 	}
 	// Pre-filter: strip empty text blocks (including nested in tool_result) to prevent upstream 400.
-	input.Body = StripEmptyTextBlocks(body)
+	effectiveBody := StripEmptyTextBlocks(body)
 	// Pre-filter: strip web-search history blocks the upstream cannot accept
 	// (emulation-synthesized ones always; genuine ones additionally for
 	// passback-required third-party upstreams such as GLM/Kimi/DeepSeek,
 	// which reject server_tool_use with 400). input.RequestModel 已是映射后的模型 ID。
-	input.Body = FilterWebSearchHistoryBlocks(input.Body, input.RequestModel)
-	if !bytes.Equal(body, input.Body) {
-		handle, err := NewRequestBodyHandleFromBytes(input.Body, RequestBodyHandleOptions{})
+	effectiveBody = FilterWebSearchHistoryBlocks(effectiveBody, input.RequestModel)
+	if !bytes.Equal(body, effectiveBody) {
+		handle, err := NewRequestBodyHandleFromBytes(effectiveBody, RequestBodyHandleOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("create filtered anthropic passthrough body handle: %w", err)
 		}
+		CleanupRequestBodyHandle(ownedBodyHandle)
+		ownedBodyHandle = handle
 		input.BodyHandle = handle
-		input.OwnBodyHandle = true
-	}
-	if input.Parsed != nil {
-		// 透传分支也会改写实际 wire body，成功 usage hash 依赖这里同步当前 body。
-		if err := input.Parsed.ReplaceBody(input.Body); err != nil {
-			return nil, err
+		if input.Parsed != nil && input.SourceHandleOwned {
+			input.Parsed.Body = NewRequestBodyRefFromHandle(handle)
 		}
 	}
+	firstSourceBody, firstBody := sourceBody, effectiveBody
+	input.SourceBody, input.Body, sourceBody, body, effectiveBody = nil, nil, nil, nil, nil
 
 	var resp *http.Response
 	retryStart := time.Now()
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
-		sourceBody, err := input.SourceHandle.ReadAll()
-		if err != nil {
-			return nil, fmt.Errorf("read anthropic passthrough source body: %w", err)
+		attemptSourceBody, attemptBody := firstSourceBody, firstBody
+		firstSourceBody, firstBody = nil, nil
+		if attemptSourceBody == nil {
+			attemptSourceBody, err = input.SourceHandle.ReadAll()
+			if err != nil {
+				return nil, fmt.Errorf("read anthropic passthrough source body: %w", err)
+			}
 		}
-		body, err := input.BodyHandle.ReadAll()
-		if err != nil {
-			return nil, fmt.Errorf("read anthropic passthrough effective body: %w", err)
+		if attemptBody == nil {
+			if input.BodyHandle == input.SourceHandle {
+				attemptBody = attemptSourceBody
+			} else {
+				attemptBody, err = input.BodyHandle.ReadAll()
+				if err != nil {
+					return nil, fmt.Errorf("read anthropic passthrough effective body: %w", err)
+				}
+			}
 		}
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, input.RequestStream)
-		upstreamReq, wireBody, err := s.buildUpstreamRequestAnthropicAPIKeyPassthrough(upstreamCtx, c, account, sourceBody, body, token)
+		upstreamReq, wireBody, err := s.buildUpstreamRequestAnthropicAPIKeyPassthrough(upstreamCtx, c, account, attemptSourceBody, attemptBody, token)
+		attemptSourceBody, attemptBody = nil, nil
 		releaseUpstreamCtx()
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"type": "error", "error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
 			return nil, err
 		}
-		SetUsageUpstreamRequest(c, upstreamReq, RequestBodyPreviewString(wireBody))
-		SetOpsUpstreamAttempted(c, true)
-		if input.Parsed != nil && !bytes.Equal(wireBody, input.Body) {
-			// build 阶段会按 beta 能力清理 body，发送前同步到 ParsedRequest 当前视图。
-			if err := input.Parsed.ReplaceBody(wireBody); err != nil {
-				return nil, err
-			}
-			input.Body = input.Parsed.Body.Bytes()
+		wireHandle, err := NewRequestBodyHandleFromBytes(wireBody, RequestBodyHandleOptions{})
+		wireBody = nil
+		if err != nil {
+			return nil, fmt.Errorf("spool anthropic passthrough wire body: %w", err)
 		}
+		wireReader, err := wireHandle.Open()
+		if err != nil {
+			CleanupRequestBodyHandle(wireHandle)
+			return nil, fmt.Errorf("open anthropic passthrough wire body: %w", err)
+		}
+		if upstreamReq.Body != nil {
+			_ = upstreamReq.Body.Close()
+		}
+		upstreamReq.Body = wireReader
+		upstreamReq.GetBody = wireHandle.Open
+		upstreamReq.ContentLength = wireHandle.Size()
+		SetUsageUpstreamRequest(c, upstreamReq, wireHandle.PreviewString())
+		SetOpsUpstreamAttempted(c, true)
+		CleanupRequestBodyHandle(lastWireHandle)
+		lastWireHandle = wireHandle
 
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+		if upstreamReq.Body != nil {
+			_ = upstreamReq.Body.Close()
+		}
 		if err != nil {
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
 			}
 			if !errors.Is(err, context.Canceled) {
 				scheduleOllamaCloudUsageActivity(s.deferredService, account)
+			}
+			if errors.Is(err, ErrRequestBodySpool) {
+				return nil, fmt.Errorf("send anthropic passthrough request: %w", err)
 			}
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			setOpsUpstreamError(c, 0, safeErr, "")
@@ -318,6 +382,22 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	if resp.StatusCode >= 400 {
 		return s.handleErrorResponse(ctx, resp, c, account, input.RequestModel)
 	}
+	var acceptedWireBody []byte
+	if lastWireHandle != nil {
+		if input.Parsed != nil {
+			input.Parsed.RequestPayloadHash = lastWireHandle.Hash()
+			if input.SourceHandleOwned {
+				input.Parsed.Body = NewRequestBodyRefFromHandle(lastWireHandle)
+			}
+		}
+		acceptedWireBody, err = lastWireHandle.ReadAll()
+		if err != nil {
+			return nil, fmt.Errorf("read accepted anthropic passthrough wire body: %w", err)
+		}
+		if input.RequestStream || !input.SourceHandleOwned {
+			acceptedWireBody = nil
+		}
+	}
 
 	var usage *ClaudeUsage
 	var firstTokenMs *int
@@ -338,6 +418,18 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	}
 	if usage == nil {
 		usage = &ClaudeUsage{}
+	}
+	if input.Parsed != nil && input.SourceHandleOwned && lastWireHandle != nil {
+		if acceptedWireBody == nil {
+			acceptedWireBody, err = lastWireHandle.ReadAll()
+			if err != nil {
+				return nil, fmt.Errorf("read accepted anthropic passthrough wire body: %w", err)
+			}
+		}
+		if err := input.Parsed.ReplaceBody(acceptedWireBody); err != nil {
+			return nil, fmt.Errorf("rewrite anthropic passthrough request body: %w", err)
+		}
+		acceptedWireBody = nil
 	}
 
 	return &ForwardResult{
