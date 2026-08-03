@@ -393,20 +393,23 @@ func (h *GatewayHandler) writeResponsesForwardRequestBodyError(c *gin.Context, e
 	if !ok {
 		return false
 	}
-	if c.Writer.Written() {
-		return true
-	}
+	errType := "invalid_request_error"
+	message := "Failed to read request body"
 	if status == http.StatusRequestEntityTooLarge {
 		if maxErr, ok := extractMaxBytesError(err); ok {
-			h.responsesErrorResponse(c, status, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
-			return true
+			message = buildBodyTooLargeMessage(maxErr.Limit)
 		}
+	} else if status == http.StatusServiceUnavailable {
+		errType = "server_error"
+		message = "Failed to spool request body"
+	} else {
+		status = http.StatusBadRequest
 	}
-	if status == http.StatusServiceUnavailable {
-		h.responsesErrorResponse(c, status, "server_error", "Failed to spool request body")
+	if c.Writer.Written() || service.IsResponseCommitted(c) {
+		h.handleStreamingAwareError(c, status, errType, message, true)
 		return true
 	}
-	h.responsesErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+	h.responsesErrorResponse(c, status, errType, message)
 	return true
 }
 

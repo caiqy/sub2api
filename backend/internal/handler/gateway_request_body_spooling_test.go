@@ -707,9 +707,10 @@ func TestGatewayHandler_MessagesGeminiTransportSpoolFailureReturns503AndReleases
 	}
 }
 
-func TestGatewayHandler_ResponsesForwardBodyErrorDoesNotAppendAfterResponseCommit(t *testing.T) {
+func TestGatewayHandler_ResponsesForwardBodyErrorWritesResponseFailedAfterCommit(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	c.Writer.WriteHeader(http.StatusOK)
 	if _, err := c.Writer.WriteString("data: existing\n\n"); err != nil {
 		t.Fatalf("write committed response: %v", err)
@@ -718,8 +719,12 @@ func TestGatewayHandler_ResponsesForwardBodyErrorDoesNotAppendAfterResponseCommi
 	if !(&GatewayHandler{}).writeResponsesForwardRequestBodyError(c, fmt.Errorf("forward responses: %w", service.ErrRequestBodySpool)) {
 		t.Fatal("spool error was not handled")
 	}
-	if got, want := recorder.Body.String(), "data: existing\n\n"; got != want {
-		t.Fatalf("body = %q, want %q", got, want)
+	body := recorder.Body.String()
+	if !strings.Contains(body, "event: response.failed\n") || !strings.Contains(body, `"type":"response.failed"`) {
+		t.Fatalf("response.failed event missing: %s", body)
+	}
+	if strings.Contains(body, "\n\n{\"error\"") {
+		t.Fatalf("response appended bare JSON after SSE data: %s", body)
 	}
 }
 
