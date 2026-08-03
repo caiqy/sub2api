@@ -1303,14 +1303,14 @@ func TestOpenAIGatewayHandler_ChatCompletionsHashesBeforeChannelMapping(t *testi
 		},
 		groupPlatforms: map[int64]string{groupID: service.PlatformOpenAI},
 	}, nil, nil, nil)
-	env := newOpenAIResponsesRetentionTestEnv(t, nil, cache, nil, settings, channelService, nil)
+	env := newOpenAIResponsesRetentionTestEnv(t, &service.Group{MaxReasoningEffort: "high"}, cache, nil, settings, channelService, nil)
 	env.billingRepo.applied = make(chan *service.UsageBillingCommand, 1)
 	env.upstream.responses = []*http.Response{{
 		StatusCode: http.StatusBadRequest,
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
 		Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_request_error","code":"cyber_policy","message":"blocked"}}`)),
 	}}
-	rawBody := []byte(`{"model":"client-model","prompt_cache_key":"chat-session","messages":[{"role":"user","content":"hello"}]}`)
+	rawBody := []byte(`{"model":"client-model","reasoning_effort":"xhigh","prompt_cache_key":"chat-session","messages":[{"role":"user","content":"hello"}]}`)
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(rawBody))
@@ -1340,6 +1340,7 @@ func TestOpenAIGatewayHandler_ChatCompletionsHashesBeforeChannelMapping(t *testi
 	wantCyberKey := service.CyberSessionBlockKey(apiKey.ID, requestContext, rawBody)
 
 	require.Equal(t, "mapped-model", gjson.GetBytes(upstreamBody, "model").String())
+	require.Equal(t, "high", gjson.GetBytes(upstreamBody, "reasoning.effort").String())
 	require.Equal(t, wantUsageHash, recordedUsageHash)
 	require.Equal(t, wantCyberKey, recordedCyberKey)
 }
