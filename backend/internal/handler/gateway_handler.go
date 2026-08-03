@@ -1089,6 +1089,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 				return
 			}
+			// gjson scalar strings can reference the full materialized attempt body; clone them before the upstream wait.
 			attemptParsedReq.Model = strings.Clone(attemptParsedReq.Model)
 			attemptParsedReq.MetadataUserID = strings.Clone(attemptParsedReq.MetadataUserID)
 			attemptParsedReq.OutputEffort = strings.Clone(attemptParsedReq.OutputEffort)

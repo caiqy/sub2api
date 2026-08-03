@@ -851,6 +851,9 @@ func (s *GeminiMessagesCompatService) ForwardHandle(ctx context.Context, c *gin.
 			_ = upstreamReq.Body.Close()
 		}
 		if err != nil {
+			if errors.Is(err, ErrRequestBodySpool) {
+				return nil, fmt.Errorf("send Gemini upstream request: %w", err)
+			}
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,

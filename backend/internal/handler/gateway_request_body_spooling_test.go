@@ -305,6 +305,33 @@ func TestGatewayHandler_MessagesGeminiMaterializationFailureReturns503WithoutUps
 	}
 }
 
+func TestGatewayHandler_MessagesGeminiTransportSpoolFailureReturns503AndReleasesAccountSlot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cache := &gatewayResourceTrackingConcurrencyCache{}
+	upstream := &responsesSpoolTransportUpstream{}
+	group := &service.Group{ID: 54, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 155, Name: "gemini-transport-spool", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "key"}}
+	env := newTerminalGatewayMessagesEnvWithConcurrencyCache(t, group, upstream, cache, account)
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gemini-2.5-flash","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	env.routerFor("/v1/messages", env.handler.Messages).ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body = %s", recorder.Code, recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), "Upstream request failed after retries") {
+		t.Fatalf("service committed transport 502 before handler mapping: %s", recorder.Body.String())
+	}
+	if upstream.calls != 1 {
+		t.Fatalf("upstream calls = %d, want 1", upstream.calls)
+	}
+	if got := cache.accountReleaseCalls(); got != 1 {
+		t.Fatalf("account releases = %d, want 1", got)
+	}
+}
+
 func TestGatewayHandler_ResponsesForwardBodyErrorDoesNotAppendAfterResponseCommit(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -622,6 +649,11 @@ type panicGatewayRequestBodyUpstream struct{ service.HTTPUpstream }
 type responsesSpoolTransportUpstream struct {
 	service.HTTPUpstream
 	calls int
+}
+
+func (u *responsesSpoolTransportUpstream) Do(*http.Request, string, int64, int) (*http.Response, error) {
+	u.calls++
+	return nil, fmt.Errorf("read request body: %w", service.ErrRequestBodySpool)
 }
 
 type antigravityCompatSpoolOpenUpstream struct {
