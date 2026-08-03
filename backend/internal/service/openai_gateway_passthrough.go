@@ -205,6 +205,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		upstreamReq, buildErr := s.buildUpstreamRequestOpenAIPassthrough(upstreamCtx, c, account, attemptBody, attemptBody, openAIMatchedRequestBodyHandle{handle: currentHandle}, token)
 		releaseUpstreamCtx()
 		if buildErr != nil {
+			if errors.Is(buildErr, ErrRequestBodySpool) {
+				return nil, buildErr
+			}
 			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": buildErr.Error()}})
 			return nil, buildErr
 		}

@@ -238,6 +238,47 @@ func TestGatewayHandler_ResponsesSpoolTransportFailureReturns503WithoutUsage(t *
 	}
 }
 
+func TestOpenAIPassthroughBuildRequestBodySpoolFailureReturns503WithoutPollution(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	missingTemp := filepath.Join(t.TempDir(), "missing")
+	t.Setenv("TMPDIR", missingTemp)
+	t.Setenv("TMP", missingTemp)
+	t.Setenv("TEMP", missingTemp)
+
+	group := &service.Group{ID: 61, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{
+		ID: 162, Name: "openai-passthrough-build-spool", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+		Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1,
+		Credentials: map[string]any{"api_key": "key"},
+		Extra: map[string]any{
+			"openai_passthrough":         true,
+			"use_responses_api":          true,
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []service.PassthroughFieldRule{
+				{Target: "body", Mode: "inject", Key: "metadata.large", Value: strings.Repeat("x", int(service.DefaultRequestBodySpoolThresholdBytes)+1)},
+			},
+		},
+	}
+	upstream := &responsesSpoolTransportUpstream{}
+	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
+	env.handler.cfg.Gateway.OpenAIWS.Enabled = false
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":false,"input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	env.router("/v1/responses", env.handler.Responses).ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body = %s", recorder.Code, recorder.Body.String())
+	}
+	if !gjson.Valid(recorder.Body.String()) || gjson.Get(recorder.Body.String(), "error.message").String() != "Failed to spool request body" {
+		t.Fatalf("response is polluted instead of one spool JSON error: %s", recorder.Body.String())
+	}
+	if upstream.calls != 0 {
+		t.Fatalf("upstream calls = %d, want 0", upstream.calls)
+	}
+}
+
 func TestGatewayHandler_MessagesSpecialRetrySpoolFailureReturns503WithoutRetry(t *testing.T) {
 	tests := []struct {
 		name      string
