@@ -2,6 +2,8 @@
 comet_change: staged-merge-upstream-v0-1-169
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-08-03-staged-merge-upstream-v0-1-169
+status: final
 ---
 
 # 分段合并上游 v0.1.169 技术设计
@@ -226,3 +228,11 @@ Migration 的最低目标证据包括现有新库幂等/schema 测试，以及�
 - 每段结束时 worktree/index 过滤实际存在的 `?? .comet/current-change.json` 后干净，生成输出均归属于对应 merge 或兼容修复提交。
 - OpenSpec 严格校验和 Comet Verify 通过或以流程允许的明确偏差结论结束。
 - 没有推送、发版、部署、服务器操作或 Nginx 修改。
+
+## 12. Implementation Divergence
+
+本节记录 delta spec 与 design doc 之间的偏差及实际执行结果，供归档时审计。
+
+- **偏差场景**：delta spec「从未合入默认分支的已验证分支发布测试版本」（`specs/upstream-release-sync/spec.md`）描述了用户明确授权后从已验证分支发布版本并验收的流程要求；本 design doc 第 2.2 节将「不推送、不打 tag、不触发 GitHub Actions、不发布或构建镜像」列为非目标。两者并非同一约束：非目标限定的是 change 内部 build/verify 阶段的默认执行边界，spec 场景描述的是用户另行授权发布时的流程语义。
+- **实际执行**：2026-08-03 用户明确授权「提交并发布下一个版本」后，`main` 快进至最终验证 HEAD（`2e3264905`），创建并推送 annotated tag `v0.1.169.1`；Release workflow（run `30776732045`）成功产出 `sub2api_0.1.169.1_linux_amd64.tar.gz` 与 `checksums.txt`，GHCR `0.1.169.1` 与 `latest` 指向同一 digest，`sync-version-file` 验证 tag commit 为 default branch HEAD 祖先后完成 VERSION 同步。
+- **结论**：该场景已按 delta spec 语义实际执行并通过，无需修改第 2.2 节表述；此节仅作为验证阶段追加的漂移记录（verify 允许产物），不改变任何实现。

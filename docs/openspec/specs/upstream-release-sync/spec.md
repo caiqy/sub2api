@@ -1,4 +1,32 @@
-## MODIFIED Requirements
+# upstream-release-sync Specification
+
+## Purpose
+约束一次上游 release 合并从目标确认、隔离分支、冲突处理到验证和语义 review 的完整维护流程。
+## Requirements
+### Requirement: 确认上游合并目标
+维护流程 SHALL 在合并前确认本地当前版本、upstream 最新 release tag、以及目标分支或 tag 的选择理由。
+
+#### Scenario: 选择 upstream release tag
+- **WHEN** upstream 存在比本地当前定制版本更新的 release tag
+- **THEN** 维护流程记录目标 tag，并说明为何不默认使用 `upstream/main`
+
+### Requirement: 在隔离分支执行合并
+维护流程 SHALL 从干净的本地主线创建临时分支执行上游合并，除非用户明确选择其他隔离方式。
+
+#### Scenario: 创建临时合并分支
+- **WHEN** 本地 `main` 干净且已确认目标 upstream tag
+- **THEN** 维护流程在临时分支中执行合并，不直接改写 `main`
+
+### Requirement: 合并前建立本地能力保护门禁
+维护流程 MUST 在首次上游 merge 前验证当前本地质量门禁，将本地能力映射到现有行为测试，并为上游目标触及且缺少保护的高风险本地能力补充最小回归测试。该门禁未通过时 MUST NOT 开始上游 merge。
+
+#### Scenario: 当前本地基线稳定
+- **WHEN** 维护流程尚未合入首个目标 tag
+- **THEN** 后端与前端既定本地质量门禁 MUST 在当前本地 `HEAD` 上通过，或将既有失败明确标记为阻塞
+
+#### Scenario: 高风险本地能力缺少行为断言
+- **WHEN** 本地独有能力所在路径被目标 release 修改，且现有测试不能断言该能力的关键行为
+- **THEN** 维护流程 MUST 在首次 merge 前添加可复现的最小回归测试
 
 ### Requirement: 按正式 release tag 分段集成
 维护流程 SHALL 允许将一个最终上游 release 目标拆为具有严格祖先顺序的多个正式 tag 阶段。每个阶段 MUST 完成冲突处理、能力审查和阶段验证后，才能进入下一阶段。
@@ -15,10 +43,25 @@
 - **WHEN** 阶段验证发现阶段 0 已保护的本地能力不再成立
 - **THEN** 维护流程 MUST 在当前 release 区间内保留失败证据并完成最小修复，不得继续合入下一 tag
 
+### Requirement: 保留上游更新和本地定制
+维护流程 MUST 在冲突处理和无文本冲突的语义审查中优先保留上游修复和本地定制能力。仅当用户在了解行为差异后明确批准某项本地能力移除时，维护流程 MAY 将其登记为例外；其他无法共存的语义 MUST 暂停等待用户确认。
+
+#### Scenario: 冲突能力可以共存
+- **WHEN** upstream 更新和本地定制修改同一文件或调用链但行为可以同时成立
+- **THEN** 合并结果 MUST 同时保留上游更新和本地定制语义
+
+#### Scenario: 用户明确批准能力移除
+- **WHEN** upstream 仅部分覆盖本地能力，且用户在获知缺失范围和行为差异后仍明确选择完全采用上游
+- **THEN** 维护流程 MAY 删除该本地能力，但 MUST 在 proposal、delta spec、任务和验证报告中记录例外范围
+
+#### Scenario: 未批准的能力不能共存
+- **WHEN** upstream 更新和本地定制存在不可共存语义，且该能力不在已批准例外中
+- **THEN** 维护流程 MUST 停止自动处理并请求用户选择保留策略
+
 ### Requirement: 合并后验证本地关键能力
 维护流程 SHALL 在每个分段 merge 后运行所选验证配置要求的自动门禁及该阶段受影响能力的能力级审查，并在最终阶段执行完整本机自动验证和本地能力专项 review。测试通过 MUST NOT 替代能力级审查结论；用户明确选择本机验证配置时，未执行的 Docker-backed integration MUST 作为残余风险保留，不得伪装为通过。
 
-#### Scenario: 分段本机自动验证通过
+#### Scenario: 分段自动验证通过
 - **WHEN** 一个目标 tag 的 merge、冲突处理和兼容修复完成，且用户已选择本机验证配置
 - **THEN** 维护流程 MUST 运行根目录 `make test` 与 `make build`、受影响能力聚焦测试、Ent/Wire 两次生成稳定性检查、冲突标记检查和能力映射审查，全部通过后才能进入下一阶段
 
@@ -26,7 +69,7 @@
 - **WHEN** 本机 Docker/Testcontainers 运行环境可用
 - **THEN** 维护流程 MUST 在本机运行 integration，并验证 migration 新库与已有本地记录升级路径；要求的 migration/repository integration test 未实际通过时 MUST 阻塞当前阶段
 
-#### Scenario: 用户接受本机 integration 不可用风险
+#### Scenario: Integration 运行环境不可用或目标测试被跳过
 - **WHEN** 用户已明确选择仅本机验证，且本机 Docker/Testcontainers 不可用或目标 integration 无法执行
 - **THEN** 维护流程 MUST 记录未执行命令、环境原因和受影响契约，将其列入阶段及最终报告的残余风险，并 MAY 在其他本机门禁通过后继续下一 release tag；维护流程 MUST NOT 使用远程服务器补跑，也 MUST NOT 将 integration 记录为通过
 
