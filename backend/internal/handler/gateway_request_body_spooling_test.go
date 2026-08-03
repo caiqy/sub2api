@@ -237,6 +237,66 @@ func TestGatewayHandler_ResponsesSpoolTransportFailureReturns503WithoutUsage(t *
 	}
 }
 
+func TestGatewayHandler_MessagesSpecialRetrySpoolFailureReturns503WithoutRetry(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      string
+		responses []string
+		wantCalls int
+	}{
+		{
+			name: "thinking retry",
+			body: `{"model":"claude-sonnet-4-5","max_tokens":1024,"thinking":{"type":"enabled","budget_tokens":1024},"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"work","signature":"stale"}]},{"role":"user","content":"continue"}]}`,
+			responses: []string{
+				`{"type":"error","error":{"type":"invalid_request_error","message":"Invalid signature in thinking block"}}`,
+			},
+			wantCalls: 2,
+		},
+		{
+			name: "tool retry",
+			body: `{"model":"claude-sonnet-4-5","max_tokens":1024,"thinking":{"type":"enabled","budget_tokens":1024},"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"work","signature":"stale"},{"type":"tool_use","id":"toolu_1","name":"lookup","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"ok"}]}]}`,
+			responses: []string{
+				`{"type":"error","error":{"type":"invalid_request_error","message":"Invalid signature in thinking block"}}`,
+				`{"type":"error","error":{"type":"invalid_request_error","message":"Invalid signature in tool_use block"}}`,
+			},
+			wantCalls: 3,
+		},
+		{
+			name: "budget retry",
+			body: `{"model":"claude-sonnet-4-5","max_tokens":512,"thinking":{"type":"enabled","budget_tokens":512},"messages":[{"role":"user","content":"hello"}]}`,
+			responses: []string{
+				`{"type":"error","error":{"type":"invalid_request_error","message":"thinking budget_tokens input should be greater than or equal to 1024"}}`,
+			},
+			wantCalls: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			group := &service.Group{ID: 55, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+			account := &service.Account{ID: 156, Name: "anthropic-special-retry-spool", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "token"}}
+			upstream := &gatewaySpecialRetrySpoolUpstream{responses: tt.responses}
+			env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+
+			recorder := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			env.router().ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusServiceUnavailable {
+				t.Fatalf("status = %d, want 503; body = %s", recorder.Code, recorder.Body.String())
+			}
+			if upstream.calls != tt.wantCalls {
+				t.Fatalf("upstream calls = %d, want %d", upstream.calls, tt.wantCalls)
+			}
+			if env.usageRepo.lastLog != nil {
+				t.Fatalf("spool retry failure recorded usage: %#v", env.usageRepo.lastLog)
+			}
+		})
+	}
+}
+
 func TestGatewayHandler_ResponsesAntigravityTransformedSpoolOpenFailureReturns503(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	group := &service.Group{ID: 52, Platform: service.PlatformAntigravity, Status: service.StatusActive, Hydrated: true}
@@ -649,6 +709,27 @@ type panicGatewayRequestBodyUpstream struct{ service.HTTPUpstream }
 type responsesSpoolTransportUpstream struct {
 	service.HTTPUpstream
 	calls int
+}
+
+type gatewaySpecialRetrySpoolUpstream struct {
+	service.HTTPUpstream
+	responses []string
+	calls     int
+}
+
+func (u *gatewaySpecialRetrySpoolUpstream) DoWithTLS(req *http.Request, _ string, _ int64, _ int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	u.calls++
+	if u.calls > len(u.responses) {
+		return nil, fmt.Errorf("special retry transport: %w", service.ErrRequestBodySpool)
+	}
+	if _, err := io.Copy(io.Discard, req.Body); err != nil {
+		return nil, err
+	}
+	return &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{"Content-Type": {"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(u.responses[u.calls-1])),
+	}, nil
 }
 
 func (u *responsesSpoolTransportUpstream) Do(*http.Request, string, int64, int) (*http.Response, error) {

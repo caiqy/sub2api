@@ -518,6 +518,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					releaseRetryCtx()
 					CleanupRequestBodyHandle(filteredHandle)
 					defer func() { CleanupRequestBodyHandle(retryWireHandle) }()
+					if errors.Is(buildErr, ErrRequestBodySpool) {
+						return nil, buildErr
+					}
 					if buildErr == nil {
 						SetOpsUpstreamAttempted(c, true)
 						retryResp, retryErr := s.httpUpstream.DoWithTLS(retryReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
@@ -568,6 +571,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 									releaseRetryCtx2()
 									CleanupRequestBodyHandle(filteredHandle2)
 									defer func() { CleanupRequestBodyHandle(retryWireHandle2) }()
+									if errors.Is(buildErr2, ErrRequestBodySpool) {
+										return nil, buildErr2
+									}
 									if buildErr2 == nil {
 										SetOpsUpstreamAttempted(c, true)
 										retryResp2, retryErr2 := s.httpUpstream.DoWithTLS(retryReq2, proxyURL, account.ID, account.Concurrency, tlsProfile)
@@ -586,6 +592,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 										}
 										if retryResp2 != nil && retryResp2.Body != nil {
 											_ = retryResp2.Body.Close()
+										}
+										if errors.Is(retryErr2, ErrRequestBodySpool) {
+											return nil, retryErr2
 										}
 										appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 											Platform:            account.Platform,
@@ -614,6 +623,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 						}
 						if retryResp != nil && retryResp.Body != nil {
 							_ = retryResp.Body.Close()
+						}
+						if errors.Is(retryErr, ErrRequestBodySpool) {
+							return nil, retryErr
 						}
 						logger.LegacyPrintf("service.gateway", "Account %d: signature error retry failed: %v", account.ID, retryErr)
 						appendOpsUpstreamError(c, OpsUpstreamErrorEvent{Platform: account.Platform, AccountID: account.ID, AccountName: account.Name, UpstreamStatusCode: 0, UpstreamURL: safeUpstreamURL(retryReq.URL.String()), Kind: "signature_retry_request_error", Message: sanitizeUpstreamErrorMessage(retryErr.Error()), UpstreamRequestBody: RequestBodyPreviewSnapshot(retryWireHandle.PreviewString(), retryWireHandle.Size())})
@@ -661,6 +673,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 						budgetRetryReq, budgetWireHandle, buildErr := s.buildUpstreamRequestWithHandles(budgetRetryCtx, c, account, sourceHandle, rectifiedHandle, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 						releaseBudgetRetryCtx()
 						defer func() { CleanupRequestBodyHandle(budgetWireHandle) }()
+						if errors.Is(buildErr, ErrRequestBodySpool) {
+							return nil, buildErr
+						}
 						if buildErr == nil {
 							SetOpsUpstreamAttempted(c, true)
 							budgetRetryResp, retryErr := s.httpUpstream.DoWithTLS(budgetRetryReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
@@ -679,6 +694,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 							}
 							if budgetRetryResp != nil && budgetRetryResp.Body != nil {
 								_ = budgetRetryResp.Body.Close()
+							}
+							if errors.Is(retryErr, ErrRequestBodySpool) {
+								return nil, retryErr
 							}
 							logger.LegacyPrintf("service.gateway", "Account %d: budget rectifier retry failed: %v", account.ID, retryErr)
 							appendOpsUpstreamError(c, OpsUpstreamErrorEvent{Platform: account.Platform, AccountID: account.ID, AccountName: account.Name, UpstreamStatusCode: 0, UpstreamURL: safeUpstreamURL(budgetRetryReq.URL.String()), Kind: "budget_retry_request_error", Message: sanitizeUpstreamErrorMessage(retryErr.Error()), UpstreamRequestBody: RequestBodyPreviewSnapshot(budgetWireHandle.PreviewString(), budgetWireHandle.Size())})
