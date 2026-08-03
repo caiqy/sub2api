@@ -84,6 +84,15 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 	if err != nil {
 		return nil, fmt.Errorf("apply grok Free function-tool cache route: %w", err)
 	}
+	reasoningEffort := extractOpenAIReasoningEffortFromBody(patchedBody, originalModel)
+	currentHandle, err := NewRequestBodyHandleFromBytes(patchedBody, openAIRequestBodyHandleOptions())
+	if err != nil {
+		return nil, fmt.Errorf("create Grok Responses request body: %w", err)
+	}
+	defer func() { CleanupRequestBodyHandle(currentHandle) }()
+	body = nil
+	patchedBody = nil
+	mixedCacheIntentBody = nil
 
 	token, _, err := s.getRequestCredential(ctx, c, account)
 	if err != nil {
@@ -102,13 +111,16 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 	SetOpsUpstreamAttempted(c, true)
 	var resp *http.Response
 	for attempt := 0; ; attempt++ {
-		upstreamReq, buildErr := buildGrokResponsesRequest(upstreamCtx, c, account, patchedBody, token, cacheIdentity, s.cfg)
+		upstreamReq, buildErr := buildGrokResponsesRequestWithHandle(upstreamCtx, c, account, currentHandle, upstreamModel, token, cacheIdentity, s.cfg)
 		if buildErr != nil {
 			return nil, buildErr
 		}
 		publishOpenAIFinalUpstreamModel(c, upstreamReq)
 
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+		if upstreamReq.Body != nil {
+			_ = upstreamReq.Body.Close()
+		}
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		if err != nil {
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
@@ -129,7 +141,11 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 			break
 		}
 
-		retryBody, changed, trimErr := trimGrokInvalidEncryptedContentRetryBody(patchedBody)
+		currentBody, readErr := currentHandle.ReadAll()
+		if readErr != nil {
+			return nil, fmt.Errorf("read Grok Responses retry body: %w", readErr)
+		}
+		retryBody, changed, trimErr := trimGrokInvalidEncryptedContentRetryBody(currentBody)
 		if trimErr != nil {
 			return nil, fmt.Errorf("prepare Grok invalid encrypted_content retry: %w", trimErr)
 		}
@@ -138,7 +154,12 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 			break
 		}
 
-		patchedBody = retryBody
+		retryHandle, handleErr := NewRequestBodyHandleFromBytes(retryBody, openAIRequestBodyHandleOptions())
+		if handleErr != nil {
+			return nil, fmt.Errorf("create Grok Responses retry body: %w", handleErr)
+		}
+		CleanupRequestBodyHandle(currentHandle)
+		currentHandle = retryHandle
 		slog.Info("grok_invalid_encrypted_content_retry", "account_id", account.ID, "cache_identity_present", cacheIdentity != "")
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -172,7 +193,11 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 				RetryableOnSameAccount: account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 			}
 		}
-		return s.handleErrorResponse(ctx, resp, c, account, patchedBody, upstreamModel)
+		errorBody, readErr := currentHandle.ReadAll()
+		if readErr != nil {
+			return nil, fmt.Errorf("read Grok Responses error body: %w", readErr)
+		}
+		return s.handleErrorResponse(ctx, resp, c, account, errorBody, upstreamModel)
 	}
 
 	s.updateGrokUsageFromResponse(ctx, account, resp.Header, resp.StatusCode)
@@ -207,7 +232,6 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 	if usage == nil {
 		usage = &OpenAIUsage{}
 	}
-	reasoningEffort := extractOpenAIReasoningEffortFromBody(patchedBody, originalModel)
 	return &OpenAIForwardResult{
 		RequestID:       firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("xai-request-id")),
 		ResponseID:      responseID,
@@ -221,6 +245,32 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 		Duration:        time.Since(startTime),
 		FirstTokenMs:    firstTokenMs,
 	}, nil
+}
+
+func buildGrokResponsesRequestWithHandle(ctx context.Context, c *gin.Context, account *Account, bodyHandle *RequestBodyHandle, model, token, cacheIdentity string, cfg *config.Config) (*http.Request, error) {
+	targetURL, err := buildGrokResponsesURL(account, cfg)
+	if err != nil {
+		return nil, err
+	}
+	req, err := openAINewRequestWithBodyHandle(ctx, http.MethodPost, targetURL, bodyHandle, false)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	if account.IsGrokOAuth() {
+		applyGrokCLIHeaders(req.Header)
+	}
+	applyGrokCacheHeaders(req.Header, cacheIdentity)
+	if c != nil {
+		if v := c.GetHeader("OpenAI-Beta"); strings.TrimSpace(v) != "" {
+			req.Header.Set("OpenAI-Beta", v)
+		}
+	}
+	account.ApplyHeaderOverrides(req.Header)
+	SetUsageUpstreamRequest(c, req, bodyHandle.PreviewString())
+	return req.WithContext(context.WithValue(req.Context(), openAIFinalUpstreamModelContextKey{}, strings.TrimSpace(model))), nil
 }
 
 func isGrokInvalidEncryptedContentResponse(statusCode int, body []byte) bool {

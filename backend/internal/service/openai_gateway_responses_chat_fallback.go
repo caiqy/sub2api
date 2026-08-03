@@ -83,6 +83,11 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	if serviceTier == nil {
 		serviceTier = extractOpenAIServiceTierFromBody(chatBody)
 	}
+	outboundHandle, err := NewRequestBodyHandleFromBytes(chatBody, openAIRequestBodyHandleOptions())
+	if err != nil {
+		return nil, fmt.Errorf("create chat completions fallback request body: %w", err)
+	}
+	defer CleanupRequestBodyHandle(outboundHandle)
 
 	logger.L().Debug("openai responses: forwarding via raw chat completions",
 		zap.Int64("account_id", account.ID),
@@ -98,7 +103,12 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 		return nil, err
 	}
 	upstreamCtx := ctx
-	resp, err := s.sendCCUpstreamRequest(upstreamCtx, c, account, targetURL, chatBody, clientStream, apiKey, account.GetOpenAIUserAgent(), "")
+	body = nil
+	responsesReq = apicompat.ResponsesRequest{}
+	effectiveTools = nil
+	chatReq = nil
+	chatBody = nil
+	resp, err := s.sendCCUpstreamRequestHandle(upstreamCtx, c, account, targetURL, outboundHandle, upstreamModel, clientStream, apiKey, account.GetOpenAIUserAgent(), "")
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +118,11 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 		if foErr := s.failoverOpenAIUpstreamHTTPError(ctx, c, account, resp, respBody, upstreamMsg, upstreamModel); foErr != nil {
 			return nil, foErr
 		}
-		return s.handleErrorResponse(ctx, resp, c, account, chatBody, billingModel)
+		errorBody, readErr := outboundHandle.ReadAll()
+		if readErr != nil {
+			return nil, fmt.Errorf("read chat completions fallback request body: %w", readErr)
+		}
+		return s.handleErrorResponse(ctx, resp, c, account, errorBody, billingModel)
 	}
 
 	if clientStream {

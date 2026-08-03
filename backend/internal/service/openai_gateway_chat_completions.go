@@ -62,6 +62,13 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	if err != nil {
 		return nil, fmt.Errorf("read request body: %w", err)
 	}
+	sourceHandle, ownedSourceHandle, err := openAIRequestBodyHandleForContext(c, body)
+	if err != nil {
+		return nil, fmt.Errorf("create chat completions source body: %w", err)
+	}
+	if ownedSourceHandle {
+		defer CleanupRequestBodyHandle(sourceHandle)
+	}
 	restrictionResult := s.detectCodexClientRestriction(c, account, body)
 	logCodexCLIOnlyDetection(ctx, c, account, getAPIKeyIDFromContext(c), restrictionResult, body)
 	if restrictionResult.Enabled && !restrictionResult.Matched {
@@ -249,6 +256,21 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		return nil, policyErr
 	}
 	responsesBody = updatedBody
+	var responseServiceTier *string
+	if responsesReq.ServiceTier != "" {
+		value := responsesReq.ServiceTier
+		responseServiceTier = &value
+	}
+	var responseReasoningEffort *string
+	if responsesReq.Reasoning != nil && responsesReq.Reasoning.Effort != "" {
+		value := responsesReq.Reasoning.Effort
+		responseReasoningEffort = &value
+	}
+	outboundHandle, err := NewRequestBodyHandleFromBytes(responsesBody, openAIRequestBodyHandleOptions())
+	if err != nil {
+		return nil, fmt.Errorf("create responses request body: %w", err)
+	}
+	defer CleanupRequestBodyHandle(outboundHandle)
 
 	// 5. Get access token
 	token, _, err := s.GetRequestCredential(ctx, c, account)
@@ -258,7 +280,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 
 	// 6. Build upstream request
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
-	upstreamReq, err := s.buildUpstreamRequestWithSourceBody(upstreamCtx, c, account, body, responsesBody, token, true, promptCacheKey, false)
+	upstreamReq, err := s.buildUpstreamRequestWithSourceBody(upstreamCtx, c, account, body, responsesBody, outboundHandle, token, true, promptCacheKey, false)
 	releaseUpstreamCtx()
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
@@ -273,8 +295,12 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	if account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	SetUsageUpstreamRequest(c, upstreamReq, openAIUpstreamRequestBodyPreview(upstreamReq, responsesBody))
+	SetUsageUpstreamRequest(c, upstreamReq, openAIUpstreamRequestBodyPreview(upstreamReq, []byte(outboundHandle.PreviewString())))
 	SetOpsUpstreamAttempted(c, true)
+	body = nil
+	responsesBody = nil
+	chatReq = apicompat.ChatCompletionsRequest{}
+	responsesReq = nil
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	closeOpenAIRequestBody(upstreamReq)
 	if err != nil {
@@ -290,7 +316,11 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 			if err := s.recoverAgentIdentityTask(ctx, account, expectedTaskID); err != nil {
 				return nil, fmt.Errorf("agent identity task recovery failed: %w", err)
 			}
-			return s.ForwardAsChatCompletions(markAgentIdentityTaskRecoveryTried(ctx), c, account, body, promptCacheKey, defaultMappedModel)
+			recoveryBody, readErr := sourceHandle.ReadAll()
+			if readErr != nil {
+				return nil, fmt.Errorf("read chat completions recovery body: %w", readErr)
+			}
+			return s.ForwardAsChatCompletions(markAgentIdentityTaskRecoveryTried(ctx), c, account, recoveryBody, promptCacheKey, defaultMappedModel)
 		}
 		if account.Type == AccountTypeAPIKey &&
 			openai_compat.ResolveResponsesSupport(account.Extra) == openai_compat.ResponsesSupportUnknown &&
@@ -300,7 +330,11 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 				zap.Int("upstream_status", resp.StatusCode),
 				zap.String("upstream_message", upstreamMsg),
 			)
-			return s.forwardAsRawChatCompletions(ctx, c, account, nil, defaultMappedModel)
+			fallbackBody, readErr := sourceHandle.ReadAll()
+			if readErr != nil {
+				return nil, fmt.Errorf("read raw chat completions fallback body: %w", readErr)
+			}
+			return s.forwardAsRawChatCompletions(ctx, c, account, fallbackBody, defaultMappedModel)
 		}
 		if foErr := s.failoverOpenAIUpstreamHTTPError(ctx, c, account, resp, respBody, upstreamMsg, upstreamModel); foErr != nil {
 			return nil, foErr
@@ -328,14 +362,8 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 
 	// Propagate ServiceTier and ReasoningEffort to result for billing
 	if handleErr == nil && result != nil {
-		if responsesReq.ServiceTier != "" {
-			st := responsesReq.ServiceTier
-			result.ServiceTier = &st
-		}
-		if responsesReq.Reasoning != nil && responsesReq.Reasoning.Effort != "" {
-			re := responsesReq.Reasoning.Effort
-			result.ReasoningEffort = &re
-		}
+		result.ServiceTier = responseServiceTier
+		result.ReasoningEffort = responseReasoningEffort
 	}
 
 	// Extract and save Codex usage snapshot from response headers (for OAuth accounts).

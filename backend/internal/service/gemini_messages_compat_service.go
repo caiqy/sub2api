@@ -614,8 +614,33 @@ func (s *GeminiMessagesCompatService) SelectAccountForAIStudioEndpoints(ctx cont
 }
 
 func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*ForwardResult, error) {
-	startTime := time.Now()
+	bodyHandle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("create Gemini Messages request body: %w", err)
+	}
+	defer CleanupRequestBodyHandle(bodyHandle)
+	return s.ForwardHandle(ctx, c, account, bodyHandle)
+}
 
+type geminiMessagesCompatPrepared struct {
+	originalModel      string
+	mappedModel        string
+	stream             bool
+	useUpstreamStream  bool
+	imageInputSize     string
+	imageSize          string
+	outboundHandle     *RequestBodyHandle
+	passthroughHeaders http.Header
+}
+
+func (s *GeminiMessagesCompatService) prepareMessagesCompatForward(ctx context.Context, c *gin.Context, account *Account, bodyHandle *RequestBodyHandle) (*geminiMessagesCompatPrepared, error) {
+	if bodyHandle == nil {
+		return nil, fmt.Errorf("%w: Gemini Messages request body handle is nil", ErrRequestBodySpool)
+	}
+	body, err := bodyHandle.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("read Gemini Messages request body: %w", err)
+	}
 	var req struct {
 		Model  string `json:"model"`
 		Stream bool   `json:"stream"`
@@ -626,34 +651,85 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 	if strings.TrimSpace(req.Model) == "" {
 		return nil, fmt.Errorf("missing model")
 	}
-
-	originalModel := req.Model
+	if account.Type != AccountTypeAPIKey && account.Type != AccountTypeOAuth && account.Type != AccountTypeServiceAccount {
+		return nil, fmt.Errorf("unsupported account type: %s", account.Type)
+	}
 	mappedModel := req.Model
 	if account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount {
 		mappedModel = account.GetMappedModel(req.Model)
 	}
-
-	geminiReq, err := convertClaudeMessagesToGeminiGenerateContent(body)
+	convertedBody, err := convertClaudeMessagesToGeminiGenerateContent(body)
 	if err != nil {
 		return nil, s.writeClaudeError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
-	geminiReq = ensureGeminiFunctionCallThoughtSignatures(geminiReq)
-	originalClaudeBody := body
+	convertedBody = ensureGeminiFunctionCallThoughtSignatures(convertedBody)
+	outboundHandle, passthroughHeaders, err := s.prepareMessagesCompatOutboundHandle(ctx, c, account, mappedModel, body, convertedBody)
+	if err != nil {
+		if errors.Is(err, ErrRequestBodySpool) {
+			return nil, fmt.Errorf("create Gemini outbound request body: %w", err)
+		}
+		return nil, s.writeClaudeError(c, http.StatusBadGateway, "upstream_error", err.Error())
+	}
+	useUpstreamStream := req.Stream || account.Type == AccountTypeOAuth && strings.TrimSpace(account.GetCredential("project_id")) != ""
+	imageInputSize := s.extractImageInputSize(body)
+	return &geminiMessagesCompatPrepared{
+		originalModel:      req.Model,
+		mappedModel:        mappedModel,
+		stream:             req.Stream,
+		useUpstreamStream:  useUpstreamStream,
+		imageInputSize:     imageInputSize,
+		imageSize:          normalizeOpenAIImageSizeTier(imageInputSize),
+		outboundHandle:     outboundHandle,
+		passthroughHeaders: passthroughHeaders,
+	}, nil
+}
+
+func (s *GeminiMessagesCompatService) ForwardHandle(ctx context.Context, c *gin.Context, account *Account, bodyHandle *RequestBodyHandle) (*ForwardResult, error) {
+	startTime := time.Now()
+	prepared, err := s.prepareMessagesCompatForward(ctx, c, account, bodyHandle)
+	if err != nil {
+		return nil, err
+	}
+	originalModel := prepared.originalModel
+	mappedModel := prepared.mappedModel
+	clientStream := prepared.stream
+	imageInputSize := prepared.imageInputSize
+	imageSize := prepared.imageSize
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
 
+	useUpstreamStream := prepared.useUpstreamStream
+	outboundHandle := prepared.outboundHandle
+	passthroughHeaders := prepared.passthroughHeaders
+	defer func() { CleanupRequestBodyHandle(outboundHandle) }()
+
 	var requestIDHeader string
 	var upstreamPreview string
-	var buildReq func(ctx context.Context) (*http.Request, string, error)
-	useUpstreamStream := req.Stream
-	if account.Type == AccountTypeOAuth && !req.Stream && strings.TrimSpace(account.GetCredential("project_id")) != "" {
-		// Code Assist's non-streaming generateContent may return no content; use streaming upstream and aggregate.
-		useUpstreamStream = true
+	newRequest := func(ctx context.Context, url string) (*http.Request, error) {
+		reader, err := outboundHandle.Open()
+		if err != nil {
+			return nil, err
+		}
+		upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, reader)
+		if err != nil {
+			_ = reader.Close()
+			return nil, err
+		}
+		upstreamReq.ContentLength = outboundHandle.Size()
+		upstreamReq.GetBody = outboundHandle.Open
+		upstreamReq.Header.Set("Content-Type", "application/json")
+		for key, values := range passthroughHeaders {
+			for _, value := range values {
+				upstreamReq.Header.Add(key, value)
+			}
+		}
+		upstreamPreview = outboundHandle.PreviewString()
+		return upstreamReq, nil
 	}
-
+	var buildReq func(context.Context) (*http.Request, string, error)
 	switch account.Type {
 	case AccountTypeAPIKey:
 		buildReq = func(ctx context.Context) (*http.Request, string, error) {
@@ -661,45 +737,24 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 			if strings.TrimSpace(apiKey) == "" {
 				return nil, "", errors.New("gemini api_key not configured")
 			}
-
-			baseURL := account.GetGeminiBaseURL(geminicli.AIStudioBaseURL)
-			normalizedBaseURL, err := s.validateUpstreamBaseURL(baseURL)
+			baseURL, err := s.validateUpstreamBaseURL(account.GetGeminiBaseURL(geminicli.AIStudioBaseURL))
 			if err != nil {
 				return nil, "", err
 			}
-
 			action := "generateContent"
-			if req.Stream {
+			if clientStream {
 				action = "streamGenerateContent"
 			}
-			fullURL, err := buildGeminiAIStudioModelActionURL(normalizedBaseURL, mappedModel, action, req.Stream)
+			fullURL, err := buildGeminiAIStudioModelActionURL(baseURL, mappedModel, action, clientStream)
 			if err != nil {
 				return nil, "", err
 			}
-
-			finalGeminiReq, passthroughHeaders, err := s.applyGeminiAPIKeyPassthroughFields(ctx, c, account, originalClaudeBody, geminiReq)
-			if err != nil {
-				return nil, "", err
+			upstreamReq, err := newRequest(ctx, fullURL)
+			if err == nil {
+				upstreamReq.Header.Set("x-goog-api-key", apiKey)
 			}
-
-			restGeminiReq := normalizeGeminiRequestForAIStudio(finalGeminiReq)
-			upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(restGeminiReq))
-			if err != nil {
-				return nil, "", err
-			}
-			upstreamReq.Header.Set("Content-Type", "application/json")
-			for key, values := range passthroughHeaders {
-				upstreamReq.Header.Del(key)
-				for _, value := range values {
-					upstreamReq.Header.Add(key, value)
-				}
-			}
-			upstreamReq.Header.Set("x-goog-api-key", apiKey)
-			upstreamPreview = RequestBodyPreviewString(restGeminiReq)
-			return upstreamReq, "x-request-id", nil
+			return upstreamReq, "x-request-id", err
 		}
-		requestIDHeader = "x-request-id"
-
 	case AccountTypeOAuth:
 		buildReq = func(ctx context.Context) (*http.Request, string, error) {
 			if s.tokenProvider == nil {
@@ -709,90 +764,39 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 			if err != nil {
 				return nil, "", err
 			}
-
-			projectID := strings.TrimSpace(account.GetCredential("project_id"))
-
 			action := "generateContent"
 			if useUpstreamStream {
 				action = "streamGenerateContent"
 			}
-
-			// Apply passthrough field rules for OAuth accounts
-			finalGeminiReq, passthroughHeaders, err := s.applyGeminiAPIKeyPassthroughFields(ctx, c, account, originalClaudeBody, geminiReq)
-			if err != nil {
-				return nil, "", err
-			}
-
-			// Two modes for OAuth:
-			// 1. With project_id -> Code Assist API (wrapped request)
-			// 2. Without project_id -> AI Studio API (direct OAuth, like API key but with Bearer token)
-			if projectID != "" {
-				// Mode 1: Code Assist API
+			var fullURL string
+			if strings.TrimSpace(account.GetCredential("project_id")) != "" {
 				baseURL, err := s.validateUpstreamBaseURL(geminicli.GeminiCliBaseURL)
 				if err != nil {
 					return nil, "", err
 				}
-				fullURL := fmt.Sprintf("%s/v1internal:%s", strings.TrimRight(baseURL, "/"), action)
+				fullURL = fmt.Sprintf("%s/v1internal:%s", strings.TrimRight(baseURL, "/"), action)
 				if useUpstreamStream {
 					fullURL += "?alt=sse"
 				}
-
-				wrapped := map[string]any{
-					"model":   mappedModel,
-					"project": projectID,
-				}
-				var inner any
-				if err := json.Unmarshal(finalGeminiReq, &inner); err != nil {
-					return nil, "", fmt.Errorf("failed to parse gemini request: %w", err)
-				}
-				wrapped["request"] = inner
-				wrappedBytes, _ := json.Marshal(wrapped)
-
-				upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(wrappedBytes))
-				if err != nil {
-					return nil, "", err
-				}
-				upstreamReq.Header.Set("Content-Type", "application/json")
-				for key, values := range passthroughHeaders {
-					for _, v := range values {
-						upstreamReq.Header.Add(key, v)
-					}
-				}
-				upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
-				upstreamReq.Header.Set("User-Agent", geminicli.GeminiCLIUserAgent)
-				upstreamPreview = RequestBodyPreviewString(wrappedBytes)
-				return upstreamReq, "x-request-id", nil
 			} else {
-				// Mode 2: AI Studio API with OAuth (like API key mode, but using Bearer token)
-				baseURL := account.GetGeminiBaseURL(geminicli.AIStudioBaseURL)
-				normalizedBaseURL, err := s.validateUpstreamBaseURL(baseURL)
+				baseURL, err := s.validateUpstreamBaseURL(account.GetGeminiBaseURL(geminicli.AIStudioBaseURL))
 				if err != nil {
 					return nil, "", err
 				}
-
-				fullURL, err := buildGeminiAIStudioModelActionURL(normalizedBaseURL, mappedModel, action, useUpstreamStream)
+				fullURL, err = buildGeminiAIStudioModelActionURL(baseURL, mappedModel, action, useUpstreamStream)
 				if err != nil {
 					return nil, "", err
 				}
-
-				restGeminiReq := normalizeGeminiRequestForAIStudio(finalGeminiReq)
-				upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(restGeminiReq))
-				if err != nil {
-					return nil, "", err
-				}
-				upstreamReq.Header.Set("Content-Type", "application/json")
-				for key, values := range passthroughHeaders {
-					for _, v := range values {
-						upstreamReq.Header.Add(key, v)
-					}
-				}
-				upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
-				upstreamPreview = RequestBodyPreviewString(restGeminiReq)
-				return upstreamReq, "x-request-id", nil
 			}
+			upstreamReq, err := newRequest(ctx, fullURL)
+			if err == nil {
+				upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
+				if strings.TrimSpace(account.GetCredential("project_id")) != "" {
+					upstreamReq.Header.Set("User-Agent", geminicli.GeminiCLIUserAgent)
+				}
+			}
+			return upstreamReq, "x-request-id", err
 		}
-		requestIDHeader = "x-request-id"
-
 	case AccountTypeServiceAccount:
 		buildReq = func(ctx context.Context) (*http.Request, string, error) {
 			if s.tokenProvider == nil {
@@ -802,30 +806,20 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 			if err != nil {
 				return nil, "", err
 			}
-
 			action := "generateContent"
-			if req.Stream {
+			if clientStream {
 				action = "streamGenerateContent"
 			}
-			fullURL, err := buildVertexGeminiURL(account.VertexProjectID(), account.VertexLocation(mappedModel), mappedModel, action, req.Stream)
+			fullURL, err := buildVertexGeminiURL(account.VertexProjectID(), account.VertexLocation(mappedModel), mappedModel, action, clientStream)
 			if err != nil {
 				return nil, "", err
 			}
-
-			restGeminiReq := normalizeGeminiRequestForAIStudio(geminiReq)
-			upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(restGeminiReq))
-			if err != nil {
-				return nil, "", err
+			upstreamReq, err := newRequest(ctx, fullURL)
+			if err == nil {
+				upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
 			}
-			upstreamReq.Header.Set("Content-Type", "application/json")
-			upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
-			upstreamPreview = RequestBodyPreviewString(restGeminiReq)
-			return upstreamReq, "x-request-id", nil
+			return upstreamReq, "x-request-id", err
 		}
-		requestIDHeader = "x-request-id"
-
-	default:
-		return nil, fmt.Errorf("unsupported account type: %s", account.Type)
 	}
 
 	var resp *http.Response
@@ -848,10 +842,10 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 
 		SetOpsUpstreamAttempted(c, true)
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+		if upstreamReq.Body != nil {
+			_ = upstreamReq.Body.Close()
+		}
 		if err != nil {
-			if upstreamReq.Body != nil {
-				_ = upstreamReq.Body.Close()
-			}
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,
@@ -902,27 +896,16 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 					Detail:             upstreamDetail,
 				})
 
-				var strippedClaudeBody []byte
-				stageName := ""
-				// 路径说明：本处上游是 Gemini，但被剥离的 body 是 Anthropic 格式。传 originalModel
-				// （客户端原 Anthropic model）而非 mappedModel（上游 Gemini model），让剥离逻辑按
-				// 客户端请求的 Anthropic 子协议族判定（详见 ResolveThinkingProtocol 文档）。
-				switch signatureRetryStage {
-				case 0:
-					// Stage 1: disable thinking + thinking->text
-					strippedClaudeBody = FilterThinkingBlocksForRetry(originalClaudeBody, originalModel)
-					stageName = "thinking-only"
-					signatureRetryStage = 1
-				default:
-					// Stage 2: additionally downgrade tool_use/tool_result blocks to text
-					strippedClaudeBody = FilterSignatureSensitiveBlocksForRetry(originalClaudeBody, originalModel)
-					stageName = "thinking+tools"
-					signatureRetryStage = 2
+				retryHandle, retryHeaders, stageName, prepareErr := s.prepareMessagesCompatSignatureRetryHandle(ctx, c, account, mappedModel, originalModel, bodyHandle, signatureRetryStage)
+				signatureRetryStage++
+				if errors.Is(prepareErr, ErrRequestBodySpool) {
+					return nil, prepareErr
 				}
-				retryGeminiReq, txErr := convertClaudeMessagesToGeminiGenerateContent(strippedClaudeBody)
-				if txErr == nil {
+				if prepareErr == nil {
 					logger.LegacyPrintf("service.gemini_messages_compat", "Gemini account %d: detected signature-related 400, retrying with downgraded Claude blocks (%s)", account.ID, stageName)
-					geminiReq = retryGeminiReq
+					CleanupRequestBodyHandle(outboundHandle)
+					outboundHandle = retryHandle
+					passthroughHeaders = retryHeaders
 					// Consume one retry budget attempt and continue with the updated request payload.
 					sleepGeminiBackoff(1)
 					continue
@@ -1129,7 +1112,7 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 
 	var usage *ClaudeUsage
 	var firstTokenMs *int
-	if req.Stream {
+	if clientStream {
 		streamRes, err := s.handleStreamingResponse(c, resp, startTime, originalModel)
 		if err != nil {
 			return nil, err
@@ -1159,8 +1142,6 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 
 	// 图片生成计费
 	imageCount := 0
-	imageInputSize := s.extractImageInputSize(body)
-	imageSize := normalizeOpenAIImageSizeTier(imageInputSize)
 	if isImageGenerationModel(originalModel) {
 		imageCount = 1
 	}
@@ -1170,13 +1151,61 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 		Usage:          *usage,
 		Model:          originalModel,
 		UpstreamModel:  mappedModel,
-		Stream:         req.Stream,
+		Stream:         clientStream,
 		Duration:       time.Since(startTime),
 		FirstTokenMs:   firstTokenMs,
 		ImageCount:     imageCount,
 		ImageSize:      imageSize,
 		ImageInputSize: imageInputSize,
 	}, nil
+}
+
+func (s *GeminiMessagesCompatService) prepareMessagesCompatOutboundHandle(ctx context.Context, c *gin.Context, account *Account, mappedModel string, claudeBody, convertedBody []byte) (*RequestBodyHandle, http.Header, error) {
+	passthroughHeaders := http.Header{}
+	finalBody := convertedBody
+	var err error
+	if account.Type == AccountTypeAPIKey || account.Type == AccountTypeOAuth {
+		finalBody, passthroughHeaders, err = s.applyGeminiAPIKeyPassthroughFields(ctx, c, account, claudeBody, convertedBody)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	if account.Type == AccountTypeOAuth && strings.TrimSpace(account.GetCredential("project_id")) != "" {
+		wrapped := map[string]any{"model": mappedModel, "project": account.GetCredential("project_id")}
+		var inner any
+		if err := json.Unmarshal(finalBody, &inner); err != nil {
+			return nil, nil, fmt.Errorf("failed to parse gemini request: %w", err)
+		}
+		wrapped["request"] = inner
+		finalBody, err = json.Marshal(wrapped)
+		if err != nil {
+			return nil, nil, err
+		}
+	} else {
+		finalBody = normalizeGeminiRequestForAIStudio(finalBody)
+	}
+	handle, err := NewRequestBodyHandleFromBytes(finalBody, RequestBodyHandleOptions{})
+	return handle, passthroughHeaders, err
+}
+
+func (s *GeminiMessagesCompatService) prepareMessagesCompatSignatureRetryHandle(ctx context.Context, c *gin.Context, account *Account, mappedModel, originalModel string, canonicalHandle *RequestBodyHandle, stage int) (*RequestBodyHandle, http.Header, string, error) {
+	canonicalBody, err := canonicalHandle.ReadAll()
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("read Gemini signature retry body: %w", err)
+	}
+	stageName := "thinking-only"
+	strippedBody := FilterThinkingBlocksForRetry(canonicalBody, originalModel)
+	if stage > 0 {
+		stageName = "thinking+tools"
+		strippedBody = FilterSignatureSensitiveBlocksForRetry(canonicalBody, originalModel)
+	}
+	convertedBody, err := convertClaudeMessagesToGeminiGenerateContent(strippedBody)
+	if err != nil {
+		return nil, nil, stageName, err
+	}
+	convertedBody = ensureGeminiFunctionCallThoughtSignatures(convertedBody)
+	handle, headers, err := s.prepareMessagesCompatOutboundHandle(ctx, c, account, mappedModel, strippedBody, convertedBody)
+	return handle, headers, stageName, err
 }
 
 func isGeminiSignatureRelatedError(respBody []byte) bool {

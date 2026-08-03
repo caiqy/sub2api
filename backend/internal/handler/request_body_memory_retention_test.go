@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -18,8 +19,10 @@ import (
 
 type retentionBlockingTransport struct {
 	service.HTTPUpstream
-	started chan struct{}
-	release chan struct{}
+	started     chan struct{}
+	release     chan struct{}
+	body        string
+	contentType string
 }
 
 func (u *retentionBlockingTransport) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
@@ -33,9 +36,13 @@ func (u *retentionBlockingTransport) Do(req *http.Request, _ string, _ int64, _ 
 	<-u.release
 	return &http.Response{
 		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": {"application/json"}},
-		Body:       io.NopCloser(strings.NewReader(`{"id":"resp_retention","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`)),
+		Header:     http.Header{"Content-Type": {u.contentType}},
+		Body:       io.NopCloser(strings.NewReader(u.body)),
 	}, nil
+}
+
+func (u *retentionBlockingTransport) DoWithTLS(req *http.Request, proxyURL string, accountID int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, proxyURL, accountID, concurrency)
 }
 
 func retainedHeapAfterGC() uint64 {
@@ -58,25 +65,29 @@ func TestRequestBodyMemoryRetentionWhileUpstreamBlocked(t *testing.T) {
 	}
 	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
 
-	var heapAt2MB, heapAt89MB uint64
-	var previewAt2MB, previewAt89MB, snapshotAt2MB, snapshotAt89MB int
-	t.Run("2MB", func(t *testing.T) {
-		heapAt2MB, previewAt2MB, snapshotAt2MB = measureBlockedRequestBodyHeap(t, 2<<20, spoolDir)
-	})
-	t.Run("8.9MB", func(t *testing.T) {
-		heapAt89MB, previewAt89MB, snapshotAt89MB = measureBlockedRequestBodyHeap(t, 89<<20/10, spoolDir)
-	})
-	growth := uint64(0)
-	if heapAt89MB >= heapAt2MB {
-		growth = heapAt89MB - heapAt2MB
-	}
-	t.Logf("heap_at_2mb=%d heap_at_8_9mb=%d retained_growth=%d preview_at_2mb=%d preview_at_8_9mb=%d snapshot_at_2mb=%d snapshot_at_8_9mb=%d", heapAt2MB, heapAt89MB, growth, previewAt2MB, previewAt89MB, snapshotAt2MB, snapshotAt89MB)
+	for _, branch := range []string{"responses", "passthrough", "grok-responses", "responses-chat-fallback", "chat-raw", "chat-converted", "messages-gemini"} {
+		t.Run(branch, func(t *testing.T) {
+			var heapAt2MB, heapAt89MB uint64
+			var previewAt2MB, previewAt89MB, snapshotAt2MB, snapshotAt89MB int
+			t.Run("2MB", func(t *testing.T) {
+				heapAt2MB, previewAt2MB, snapshotAt2MB = measureBlockedRequestBodyHeap(t, branch, 2<<20, spoolDir)
+			})
+			t.Run("8.9MB", func(t *testing.T) {
+				heapAt89MB, previewAt89MB, snapshotAt89MB = measureBlockedRequestBodyHeap(t, branch, 89<<20/10, spoolDir)
+			})
+			growth := uint64(0)
+			if heapAt89MB >= heapAt2MB {
+				growth = heapAt89MB - heapAt2MB
+			}
+			t.Logf("branch=%s heap_at_2mb=%d heap_at_8_9mb=%d retained_growth=%d preview_at_2mb=%d preview_at_8_9mb=%d snapshot_at_2mb=%d snapshot_at_8_9mb=%d", branch, heapAt2MB, heapAt89MB, growth, previewAt2MB, previewAt89MB, snapshotAt2MB, snapshotAt89MB)
 
-	require.Less(t, growth, uint64(3<<20), "retained heap must not scale with full request body size")
-	require.LessOrEqual(t, previewAt2MB, int(service.DefaultRequestBodyPreviewLimitBytes))
-	require.LessOrEqual(t, previewAt89MB, int(service.DefaultRequestBodyPreviewLimitBytes))
-	require.LessOrEqual(t, snapshotAt2MB, int(service.DefaultRequestBodyPreviewLimitBytes))
-	require.LessOrEqual(t, snapshotAt89MB, int(service.DefaultRequestBodyPreviewLimitBytes))
+			require.Less(t, growth, uint64(3<<20), "retained heap must not scale with full request body size")
+			require.LessOrEqual(t, previewAt2MB, int(service.DefaultRequestBodyPreviewLimitBytes))
+			require.LessOrEqual(t, previewAt89MB, int(service.DefaultRequestBodyPreviewLimitBytes))
+			require.LessOrEqual(t, snapshotAt2MB, int(service.DefaultRequestBodyPreviewLimitBytes))
+			require.LessOrEqual(t, snapshotAt89MB, int(service.DefaultRequestBodyPreviewLimitBytes))
+		})
+	}
 
 	t.Run("ordinary preview boundary", func(t *testing.T) {
 		limit := int(service.DefaultRequestBodyPreviewLimitBytes)
@@ -97,22 +108,68 @@ func TestRequestBodyMemoryRetentionWhileUpstreamBlocked(t *testing.T) {
 	})
 }
 
-func measureBlockedRequestBodyHeap(t *testing.T, size int64, spoolDir string) (uint64, int, int) {
+func measureBlockedRequestBodyHeap(t *testing.T, branch string, size int64, spoolDir string) (uint64, int, int) {
 	t.Helper()
-	upstream := &retentionBlockingTransport{started: make(chan struct{}), release: make(chan struct{})}
+	upstream := &retentionBlockingTransport{
+		started:     make(chan struct{}),
+		release:     make(chan struct{}),
+		contentType: "application/json",
+		body:        `{"id":"resp_retention","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`,
+	}
 	done := make(chan struct{})
 	release := cleanupMatrixBlockedHandler(t, upstream.release, done)
-	group := &service.Group{ID: 1401, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
-	account := &service.Account{ID: 1401, Name: "retention", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-retention"}}
-	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
-	env.handler.cfg.Gateway.OpenAIWS.Enabled = false
 	var requestContext *gin.Context
-	router := env.router("/v1/responses", func(c *gin.Context) {
-		requestContext = c
-		env.handler.Responses(c)
-	})
+	var router http.Handler
+	path := "/v1/responses"
+	platform := service.PlatformOpenAI
+	extra := map[string]any{}
+	switch branch {
+	case "passthrough":
+		extra["openai_passthrough"] = true
+	case "grok-responses":
+		platform = service.PlatformGrok
+	case "responses-chat-fallback":
+		extra["openai_responses_mode"] = "force_chat_completions"
+		upstream.body = `{"id":"chatcmpl_retention","choices":[{"message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`
+	case "chat-raw":
+		path = "/v1/chat/completions"
+		extra["openai_responses_supported"] = false
+		upstream.body = `{"id":"chatcmpl_retention","choices":[{"message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`
+	case "chat-converted":
+		path = "/v1/chat/completions"
+		extra["openai_responses_supported"] = true
+		upstream.contentType = "text/event-stream"
+		upstream.body = "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_retention\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"
+	case "messages-gemini":
+		path = "/v1/messages"
+		platform = service.PlatformGemini
+		upstream.body = `{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}`
+	}
+	group := &service.Group{ID: 1401, Platform: platform, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 1401, Name: "retention", Platform: platform, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-retention"}, Extra: extra}
+	if branch == "grok-responses" {
+		account.Credentials["base_url"] = "https://api.x.ai/v1"
+	}
+	if path == "/v1/messages" {
+		env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+		router = env.routerFor(path, func(c *gin.Context) {
+			requestContext = c
+			env.handler.Messages(c)
+		})
+	} else {
+		env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
+		env.handler.cfg.Gateway.OpenAIWS.Enabled = false
+		router = env.router(path, func(c *gin.Context) {
+			requestContext = c
+			if path == "/v1/chat/completions" {
+				env.handler.ChatCompletions(c)
+				return
+			}
+			env.handler.Responses(c)
+		})
+	}
 	recorder := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", retentionJSONBody(size))
+	req := httptest.NewRequest(http.MethodPost, path, retentionJSONBody(branch, path, size))
 	req.Header.Set("Content-Type", "application/json")
 	go func() {
 		router.ServeHTTP(recorder, req)
@@ -137,9 +194,16 @@ func measureBlockedRequestBodyHeap(t *testing.T, size int64, spoolDir string) (u
 	return heap, previewSize, snapshotSize
 }
 
-func retentionJSONBody(size int64) io.Reader {
-	const prefix = `{"model":"gpt-5","stream":false,"input":"`
-	const suffix = `"}`
+func retentionJSONBody(branch, path string, size int64) io.Reader {
+	prefix, suffix := `{"model":"gpt-5","stream":false,"input":"`, `"}`
+	if branch == "grok-responses" {
+		prefix = `{"model":"grok-4.5","stream":false,"input":"`
+	}
+	if path == "/v1/chat/completions" {
+		prefix, suffix = `{"model":"gpt-5","stream":false,"messages":[{"role":"user","content":"`, `"}]}`
+	} else if path == "/v1/messages" {
+		prefix, suffix = `{"model":"gemini-2.5-flash","max_tokens":16,"stream":false,"messages":[{"role":"user","content":"`, `"}]}`
+	}
 	return io.MultiReader(
 		strings.NewReader(prefix),
 		io.LimitReader(retentionPaddingReader{}, size-int64(len(prefix)+len(suffix))),

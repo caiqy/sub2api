@@ -35,6 +35,70 @@ var openaiCCRawAllowedHeaders = map[string]bool{
 	"user-agent":      true,
 }
 
+func (s *OpenAIGatewayService) sendCCUpstreamRequestHandle(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	targetURL string,
+	bodyHandle *RequestBodyHandle,
+	upstreamModel string,
+	stream bool,
+	bearerToken string,
+	userAgent string,
+	grokCacheIdentity string,
+) (*http.Response, error) {
+	if bodyHandle == nil {
+		return nil, fmt.Errorf("request body handle is nil")
+	}
+	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
+	upstreamReq, err := openAINewRequestWithBodyHandle(upstreamCtx, http.MethodPost, targetURL, bodyHandle, false)
+	releaseUpstreamCtx()
+	if err != nil {
+		return nil, fmt.Errorf("build upstream request: %w", err)
+	}
+	upstreamReq = upstreamReq.WithContext(WithHTTPUpstreamProfile(upstreamReq.Context(), HTTPUpstreamProfileOpenAI))
+	upstreamReq.Header.Set("Content-Type", "application/json")
+	upstreamReq.Header.Set("Authorization", "Bearer "+bearerToken)
+	if stream {
+		upstreamReq.Header.Set("Accept", "text/event-stream")
+	} else {
+		upstreamReq.Header.Set("Accept", "application/json")
+	}
+	for key, values := range c.Request.Header {
+		if openaiCCRawAllowedHeaders[strings.ToLower(key)] {
+			for _, value := range values {
+				upstreamReq.Header.Add(key, value)
+			}
+		}
+	}
+	if userAgent != "" {
+		upstreamReq.Header.Set("user-agent", userAgent)
+	}
+	if account.Platform == PlatformGrok {
+		if account.IsGrokOAuth() {
+			applyGrokCLIHeaders(upstreamReq.Header)
+		}
+		applyGrokCacheHeaders(upstreamReq.Header, grokCacheIdentity)
+	}
+	account.ApplyHeaderOverrides(upstreamReq.Header)
+	proxyURL := ""
+	if account.Proxy != nil {
+		proxyURL = account.Proxy.URL()
+	}
+	SetUsageUpstreamRequest(c, upstreamReq, bodyHandle.PreviewString())
+	upstreamReq = upstreamReq.WithContext(context.WithValue(upstreamReq.Context(), openAIFinalUpstreamModelContextKey{}, strings.TrimSpace(upstreamModel)))
+	publishOpenAIFinalUpstreamModel(c, upstreamReq)
+	SetOpsUpstreamAttempted(c, true)
+	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+	if upstreamReq.Body != nil {
+		_ = upstreamReq.Body.Close()
+	}
+	if err != nil {
+		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
+	}
+	return resp, nil
+}
+
 // forwardAsRawChatCompletions 直转客户端的 Chat Completions 请求到上游
 // `{base_url}/v1/chat/completions`，**不**做 CC↔Responses 协议转换。
 //
@@ -72,6 +136,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 		return nil, fmt.Errorf("missing model in request")
 	}
 	clientStream := gjson.GetBytes(body, "stream").Bool()
+	bodyLength := len(body)
 
 	// 1b. Extract service tier from the raw body before any transformation.
 	serviceTier := extractOpenAIServiceTierFromBody(body)
@@ -168,7 +233,14 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	if customUA == "" && account.IsGrokOAuth() {
 		customUA = "sub2api-grok/1.0"
 	}
-	resp, err := s.sendCCUpstreamRequest(ctx, c, account, targetURL, upstreamBody, clientStream, token, customUA, grokCacheIdentity)
+	outboundHandle, err := NewRequestBodyHandleFromBytes(upstreamBody, openAIRequestBodyHandleOptions())
+	if err != nil {
+		return nil, fmt.Errorf("create raw chat completions request body: %w", err)
+	}
+	defer CleanupRequestBodyHandle(outboundHandle)
+	body = nil
+	upstreamBody = nil
+	resp, err := s.sendCCUpstreamRequestHandle(ctx, c, account, targetURL, outboundHandle, upstreamModel, clientStream, token, customUA, grokCacheIdentity)
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +288,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	var result *OpenAIForwardResult
 	var forwardErr error
 	if clientStream {
-		result, forwardErr = s.streamRawChatCompletions(c, resp, account, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime, len(body))
+		result, forwardErr = s.streamRawChatCompletions(c, resp, account, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime, bodyLength)
 	} else {
 		result, forwardErr = s.bufferRawChatCompletions(c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
 	}

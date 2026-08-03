@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +25,7 @@ type geminiCompatHTTPUpstreamStub struct {
 	err      error
 	calls    int
 	lastReq  *http.Request
+	onDo     func()
 }
 
 type geminiCompatStickyAccountRepo struct {
@@ -66,6 +68,48 @@ type geminiCompatCountingCache struct {
 	setCalls     map[string]int
 	deleteCalls  map[string]int
 	refreshCalls map[string]int
+}
+
+func TestGeminiMessagesCompatSignatureRetryBuildsHandleFromCanonical(t *testing.T) {
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":1024,"thinking":{"type":"enabled","budget_tokens":1024},"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"work","signature":"stale"}]},{"role":"user","content":"continue"}]}`)
+	canonical, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(canonical) })
+	account := &Account{Platform: PlatformGemini, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "key"}}
+	svc := &GeminiMessagesCompatService{}
+
+	retryHandle, _, stageName, err := svc.prepareMessagesCompatSignatureRetryHandle(context.Background(), nil, account, "gemini-2.5-flash", "claude-sonnet-4-5", canonical, 0)
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(retryHandle) })
+	require.Equal(t, "thinking-only", stageName)
+	retryBody, err := retryHandle.ReadAll()
+	require.NoError(t, err)
+	require.NotContains(t, string(retryBody), `"signature":"stale"`)
+	require.Contains(t, string(retryBody), "work")
+}
+
+func TestGeminiMessagesCompatSignatureRetryPropagatesCanonicalSpoolFailure(t *testing.T) {
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":1024,"thinking":{"type":"enabled","budget_tokens":1024},"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"work","signature":"stale"}]},{"role":"user","content":"continue"}]}`)
+	canonical, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(canonical) })
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	upstream := &geminiCompatHTTPUpstreamStub{
+		response: &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Header:     http.Header{"Content-Type": {"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"invalid thought_signature"}}`)),
+		},
+		onDo: func() { require.NoError(t, os.Remove(canonical.spoolPath)) },
+	}
+	svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
+	account := &Account{ID: 1, Platform: PlatformGemini, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "key"}}
+
+	_, err = svc.ForwardHandle(context.Background(), c, account, canonical)
+	require.ErrorIs(t, err, ErrRequestBodySpool)
 }
 
 func (c *geminiCompatCountingCache) GetSessionAccountID(_ context.Context, _ int64, key string) (int64, error) {
@@ -198,6 +242,9 @@ func TestGeminiMessagesCompatServiceStickyEnabledForPlatform_UnknownPlatformDefa
 func (s *geminiCompatHTTPUpstreamStub) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
 	s.calls++
 	s.lastReq = req
+	if s.onDo != nil {
+		s.onDo()
+	}
 	if s.err != nil {
 		return nil, s.err
 	}

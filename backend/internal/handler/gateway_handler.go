@@ -286,6 +286,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			return
 		}
 	}
+	parsedReq.Model = strings.Clone(parsedReq.Model)
+	parsedReq.MetadataUserID = strings.Clone(parsedReq.MetadataUserID)
+	parsedReq.OutputEffort = strings.Clone(parsedReq.OutputEffort)
 	body = nil
 	reqModel := parsedReq.Model
 	clientRequestModel := clientRequestedModel(c, reqModel)
@@ -351,6 +354,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 			return
 		}
+		parsedReq.Model = strings.Clone(parsedReq.Model)
+		parsedReq.MetadataUserID = strings.Clone(parsedReq.MetadataUserID)
+		parsedReq.OutputEffort = strings.Clone(parsedReq.OutputEffort)
 		reqModel = route.RoutingModel
 	}
 	stickyGroupID, platform := route.GroupID, route.Platform
@@ -638,19 +644,17 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					service.WithForwardGeminiSession(derefGroupID(stickyGroupID), sessionKey),
 				)
 			} else {
-				geminiBody, readErr := effectiveBody.ReadAll()
-				if readErr != nil {
-					err = readErr
-				} else {
-					result, err = h.geminiCompatService.Forward(requestCtx, c, account, geminiBody)
-					geminiBody = nil
-				}
+				result, err = h.geminiCompatService.ForwardHandle(requestCtx, c, account, effectiveBody)
 			}
 			forwardDuration := time.Since(forwardStartedAt)
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
 			}
 			if err != nil {
+				if status, ok := requestBodyReadErrorStatus(err); ok {
+					h.handleStreamingAwareError(c, status, "api_error", "Failed to spool request body", streamStarted)
+					return
+				}
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
 					lastFailedAccount = account

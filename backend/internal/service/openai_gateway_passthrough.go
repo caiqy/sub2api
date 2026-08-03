@@ -146,6 +146,12 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		imageSizeTier = imageCfg.SizeTier
 		imageInputSize = imageCfg.InputSize
 	}
+	serviceTier := extractOpenAIServiceTierFromBody(body)
+	currentHandle, err := NewRequestBodyHandleFromBytes(body, openAIRequestBodyHandleOptions())
+	if err != nil {
+		return nil, fmt.Errorf("create OpenAI passthrough request body: %w", err)
+	}
+	defer CleanupRequestBodyHandle(currentHandle)
 
 	logger.LegacyPrintf("service.openai_gateway",
 		"[OpenAI 自动透传] 命中自动透传分支: account=%d name=%s type=%s model=%s stream=%v",
@@ -176,14 +182,6 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		return nil, err
 	}
 
-	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
-	upstreamReq, err := s.buildUpstreamRequestOpenAIPassthrough(upstreamCtx, c, account, body, body, token)
-	releaseUpstreamCtx()
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
-		return nil, err
-	}
-	defer closeOpenAIRequestBody(upstreamReq)
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
@@ -193,31 +191,51 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		c.Set("openai_passthrough", true)
 	}
 
-	SetUsageUpstreamRequest(c, upstreamReq, openAIUpstreamRequestBodyPreview(upstreamReq, body))
-	publishOpenAIFinalUpstreamModel(c, upstreamReq)
-	SetOpsUpstreamAttempted(c, true)
-	upstreamStart := time.Now()
-	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
-	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
-	if err != nil {
-		// Transport-level failure (proxy/DNS/TCP/TLS — no HTTP response). Convert to
-		// a failover so the handler switches to a healthy account, and temporarily
-		// unschedule the account on durable faults (e.g. rejected proxy credentials).
-		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
+	body = nil
+	canonicalImageIntentBody = nil
+	var resp *http.Response
+	upstreamResponseCtx := ctx
+	recoveryTried := agentIdentityTaskRecoveryWasTried(ctx)
+	for {
+		attemptBody, readErr := currentHandle.ReadAll()
+		if readErr != nil {
+			return nil, fmt.Errorf("read OpenAI passthrough request body: %w", readErr)
+		}
+		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
+		upstreamReq, buildErr := s.buildUpstreamRequestOpenAIPassthrough(upstreamCtx, c, account, attemptBody, attemptBody, openAIMatchedRequestBodyHandle{handle: currentHandle}, token)
+		releaseUpstreamCtx()
+		if buildErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": buildErr.Error()}})
+			return nil, buildErr
+		}
+		SetUsageUpstreamRequest(c, upstreamReq, openAIUpstreamRequestBodyPreview(upstreamReq, []byte(currentHandle.PreviewString())))
+		publishOpenAIFinalUpstreamModel(c, upstreamReq)
+		SetOpsUpstreamAttempted(c, true)
+		upstreamResponseCtx = upstreamReq.Context()
+		attemptBody = nil
+		upstreamStart := time.Now()
+		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+		closeOpenAIRequestBody(upstreamReq)
+		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
+		if err != nil {
+			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
+		}
+		if resp.StatusCode < 400 || recoveryTried || !s.isAgentIdentityAccount(ctx, account) {
+			break
+		}
+		respBody := s.readUpstreamErrorBody(resp)
+		_ = resp.Body.Close()
+		resp.Body = io.NopCloser(bytes.NewReader(respBody))
+		if !isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
+			break
+		}
+		if err := s.recoverAgentIdentityTask(ctx, account, account.GetCredential("task_id")); err != nil {
+			return nil, fmt.Errorf("agent identity task recovery failed: %w", err)
+		}
+		recoveryTried = true
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
-		if !agentIdentityTaskRecoveryWasTried(ctx) && s.isAgentIdentityAccount(ctx, account) {
-			respBody := s.readUpstreamErrorBody(resp)
-			_ = resp.Body.Close()
-			resp.Body = io.NopCloser(bytes.NewReader(respBody))
-			if isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
-				if err := s.recoverAgentIdentityTask(ctx, account, account.GetCredential("task_id")); err != nil {
-					return nil, fmt.Errorf("agent identity task recovery failed: %w", err)
-				}
-				return s.forwardOpenAIPassthrough(markAgentIdentityTaskRecoveryTried(ctx), c, account, body, canonicalImageIntentBody, reqModel, attemptImageIntentInvalidated, reasoningEffort, reqStream, startTime)
-			}
-		}
 		// 透传模式默认保持原样代理；但 429/529 属于网关必须兜底的
 		// 上游容量类错误，应先触发多账号 failover 以维持基础 SLA。
 		shouldFailover := shouldFailoverOpenAIPassthroughResponse(resp.StatusCode)
@@ -236,13 +254,15 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 				shouldFailover = !isOpenAIContextWindowError(extractUpstreamErrorMessage(errorBody), errorBody)
 			}
 		}
-		if shouldFailover {
-			return nil, s.handleFailoverErrorResponsePassthrough(ctx, resp, c, account, body)
+		errorRequestBody, readErr := currentHandle.ReadAll()
+		if readErr != nil {
+			return nil, fmt.Errorf("read OpenAI passthrough error body: %w", readErr)
 		}
-		return nil, s.handleErrorResponsePassthrough(ctx, resp, c, account, body)
+		if shouldFailover {
+			return nil, s.handleFailoverErrorResponsePassthrough(ctx, resp, c, account, errorRequestBody)
+		}
+		return nil, s.handleErrorResponsePassthrough(ctx, resp, c, account, errorRequestBody)
 	}
-
-	serviceTier := extractOpenAIServiceTierFromBody(body)
 
 	var usage *OpenAIUsage
 	var firstTokenMs *int
@@ -250,7 +270,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	imageCount := 0
 	var imageOutputSizes []string
 	if reqStream {
-		result, err := s.handleStreamingResponsePassthrough(upstreamReq.Context(), resp, c, account, startTime, reqModel, upstreamPassthroughModel)
+		result, err := s.handleStreamingResponsePassthrough(upstreamResponseCtx, resp, c, account, startTime, reqModel, upstreamPassthroughModel)
 		if err != nil {
 			return nil, err
 		}

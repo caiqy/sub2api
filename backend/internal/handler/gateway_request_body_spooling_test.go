@@ -260,6 +260,51 @@ func TestGatewayHandler_ResponsesAntigravityTransformedSpoolOpenFailureReturns50
 	}
 }
 
+func TestGatewayHandler_MessagesGeminiMaterializationFailureReturns503WithoutUpstream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawDir := t.TempDir()
+	oldOptions := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: rawDir}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+
+	cache := &blockingResponsesUserSlotCache{waiting: make(chan struct{}), release: make(chan struct{})}
+	upstream := &responsesSpoolTransportUpstream{}
+	group := &service.Group{ID: 53, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 154, Name: "gemini-spool", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "key"}}
+	env := newTerminalGatewayMessagesEnvWithConcurrencyCache(t, group, upstream, cache, account)
+
+	recorder := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gemini-2.5-flash","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`))
+		req.Header.Set("Content-Type", "application/json")
+		env.routerFor("/v1/messages", env.handler.Messages).ServeHTTP(recorder, req)
+		close(done)
+	}()
+	waitGatewayReplaySignal(t, cache.waiting, "Gemini Messages user slot wait")
+	entries, err := os.ReadDir(rawDir)
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("request spool missing: entries=%d err=%v", len(entries), err)
+	}
+	for _, entry := range entries {
+		if err := os.Remove(filepath.Join(rawDir, entry.Name())); err != nil {
+			t.Fatalf("remove request spool: %v", err)
+		}
+	}
+	close(cache.release)
+	waitGatewayReplaySignal(t, done, "Gemini Messages materialization failure")
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body = %s", recorder.Code, recorder.Body.String())
+	}
+	if upstream.calls != 0 {
+		t.Fatalf("upstream calls = %d, want 0", upstream.calls)
+	}
+	if cache.accountReleases != 1 {
+		t.Fatalf("account releases = %d, want 1", cache.accountReleases)
+	}
+}
+
 func TestGatewayHandler_ResponsesForwardBodyErrorDoesNotAppendAfterResponseCommit(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -676,9 +721,10 @@ func (c *gatewayResourceTrackingQueueCache) releaseCalls() int {
 
 type blockingResponsesUserSlotCache struct {
 	openAIChatCompletionsConcurrencyCacheStub
-	waiting chan struct{}
-	release chan struct{}
-	calls   int
+	waiting         chan struct{}
+	release         chan struct{}
+	calls           int
+	accountReleases int
 }
 
 func (c *blockingResponsesUserSlotCache) AcquireUserSlot(ctx context.Context, _ int64, _ int, _ string) (bool, error) {
@@ -693,6 +739,11 @@ func (c *blockingResponsesUserSlotCache) AcquireUserSlot(ctx context.Context, _ 
 	case <-ctx.Done():
 		return false, ctx.Err()
 	}
+}
+
+func (c *blockingResponsesUserSlotCache) ReleaseAccountSlot(context.Context, int64, string) error {
+	c.accountReleases++
+	return nil
 }
 
 func (u *responsesSpoolTransportUpstream) DoWithTLS(req *http.Request, proxyURL string, accountID int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
