@@ -357,6 +357,69 @@ func TestGatewayHandler_ResponsesSpoolTransportFailureReturns503WithoutUsage(t *
 	}
 }
 
+func TestGatewayHandler_CountTokensSpoolFailuresReturn503WithoutRetry(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 64, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 165, Name: "count-tokens-spool", Platform: service.PlatformAnthropic, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"access_token": "token"}}
+
+	t.Run("initial read failure", func(t *testing.T) {
+		upstream := &countTokensSpoolFailureUpstream{}
+		env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+		recorder := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", countTokensInitialSpoolFailureBody{})
+		req.Header.Set("Content-Type", "application/json")
+
+		env.routerFor("/v1/messages/count_tokens", env.handler.CountTokens).ServeHTTP(recorder, req)
+
+		assertCountTokensSpool503(t, recorder)
+		if upstream.calls != 0 {
+			t.Fatalf("upstream calls = %d, want 0", upstream.calls)
+		}
+	})
+
+	for _, tt := range []struct {
+		name       string
+		deleteBody bool
+	}{
+		{name: "retry read failure", deleteBody: true},
+		{name: "transport sentinel"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			spoolDir := t.TempDir()
+			oldOptions := jsonRequestBodyHandleOptions
+			jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: spoolDir}
+			t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+			t.Setenv("TMPDIR", spoolDir)
+			t.Setenv("TMP", spoolDir)
+			t.Setenv("TEMP", spoolDir)
+
+			upstream := &countTokensSpoolFailureUpstream{spoolDir: spoolDir, deleteBody: tt.deleteBody}
+			env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+			recorder := httptest.NewRecorder()
+			body := `{"model":"claude-sonnet-4-5","thinking":{"type":"enabled","budget_tokens":1024},"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"work","signature":"stale"}]},{"role":"user","content":"` + strings.Repeat("x", 2<<20) + `"}]}`
+			req := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+
+			env.routerFor("/v1/messages/count_tokens", env.handler.CountTokens).ServeHTTP(recorder, req)
+
+			assertCountTokensSpool503(t, recorder)
+			if upstream.calls != 1 {
+				t.Fatalf("upstream calls = %d, want 1", upstream.calls)
+			}
+		})
+	}
+}
+
+func assertCountTokensSpool503(t *testing.T, recorder *httptest.ResponseRecorder) {
+	t.Helper()
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body = %s", recorder.Code, recorder.Body.String())
+	}
+	if got := gjson.Get(recorder.Body.String(), "error.message").String(); got != "Failed to spool request body" {
+		t.Fatalf("error.message = %q, want Failed to spool request body; body = %s", got, recorder.Body.String())
+	}
+}
+
 func TestOpenAIPassthroughBuildRequestBodySpoolFailureReturns503WithoutPollution(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	missingTemp := filepath.Join(t.TempDir(), "missing")
@@ -1330,6 +1393,19 @@ type responsesSpoolTransportUpstream struct {
 	calls int
 }
 
+type countTokensInitialSpoolFailureBody struct{}
+
+func (countTokensInitialSpoolFailureBody) Read([]byte) (int, error) {
+	return 0, fmt.Errorf("read initial count_tokens body: %w", service.ErrRequestBodySpool)
+}
+
+type countTokensSpoolFailureUpstream struct {
+	service.HTTPUpstream
+	spoolDir   string
+	deleteBody bool
+	calls      int
+}
+
 type gatewaySpecialRetrySpoolUpstream struct {
 	service.HTTPUpstream
 	responses []string
@@ -1436,6 +1512,33 @@ func (u *gatewaySpecialRetrySpoolUpstream) DoWithTLS(req *http.Request, _ string
 func (u *responsesSpoolTransportUpstream) Do(*http.Request, string, int64, int) (*http.Response, error) {
 	u.calls++
 	return nil, fmt.Errorf("read request body: %w", service.ErrRequestBodySpool)
+}
+
+func (u *countTokensSpoolFailureUpstream) DoWithTLS(req *http.Request, _ string, _ int64, _ int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	u.calls++
+	if !u.deleteBody {
+		return nil, fmt.Errorf("read count_tokens transport body: %w", service.ErrRequestBodySpool)
+	}
+	if _, err := io.Copy(io.Discard, req.Body); err != nil {
+		return nil, err
+	}
+	if err := req.Body.Close(); err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(u.spoolDir)
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range entries {
+		if err := os.Remove(filepath.Join(u.spoolDir, entry.Name())); err != nil {
+			return nil, err
+		}
+	}
+	return &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{"Content-Type": {"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"type":"error","error":{"type":"invalid_request_error","message":"Invalid signature in thinking block"}}`)),
+	}, nil
 }
 
 type antigravityCompatSpoolOpenUpstream struct {

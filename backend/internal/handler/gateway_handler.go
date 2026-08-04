@@ -2396,6 +2396,10 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	// 读取请求体
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
 	if err != nil {
+		if errors.Is(err, service.ErrRequestBodySpool) {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 			return
@@ -2562,7 +2566,13 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	// 转发请求（不记录使用量）
 	if err := h.gatewayService.ForwardCountTokens(c.Request.Context(), c, account, parsedReq); err != nil {
 		reqLog.Error("gateway.count_tokens_forward_failed", zap.Int64("account_id", account.ID), zap.Error(err))
-		// 错误响应已在 ForwardCountTokens 中处理
+		if errors.Is(err, service.ErrRequestBodySpool) {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
+		if !c.Writer.Written() {
+			h.errorResponse(c, http.StatusBadGateway, "upstream_error", "Upstream request failed")
+		}
 		return
 	}
 }

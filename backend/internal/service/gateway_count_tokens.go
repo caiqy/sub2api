@@ -167,6 +167,9 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 		if resp != nil && resp.Body != nil {
 			_ = resp.Body.Close()
 		}
+		if errors.Is(err, ErrRequestBodySpool) {
+			return err
+		}
 		setOpsUpstreamError(c, 0, sanitizeUpstreamErrorMessage(err.Error()), "")
 		s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Request failed")
 		return fmt.Errorf("upstream request failed: %w", err)
@@ -210,6 +213,9 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 			}
 			if retryErr != nil && retryResp != nil && retryResp.Body != nil {
 				_ = retryResp.Body.Close()
+			}
+			if errors.Is(retryErr, ErrRequestBodySpool) {
+				return retryErr
 			}
 			if retryErr == nil {
 				if retryResp.StatusCode < 400 {
@@ -332,6 +338,9 @@ func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx contex
 	if err != nil {
 		if resp != nil && resp.Body != nil {
 			_ = resp.Body.Close()
+		}
+		if errors.Is(err, ErrRequestBodySpool) {
+			return err
 		}
 		setOpsUpstreamError(c, 0, sanitizeUpstreamErrorMessage(err.Error()), "")
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
