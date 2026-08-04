@@ -114,6 +114,9 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 
 	var resp *http.Response
 	for attempt := 1; attempt <= geminiMaxRetries; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		upstreamReq, idHeader, upstreamBody, err := buildReq(ctx)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -139,7 +142,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 			})
 			if attempt < geminiMaxRetries {
 				logger.LegacyPrintf("service.gemini_chat_completions", "Gemini account %d: upstream request failed, retry %d/%d: %v", account.ID, attempt, geminiMaxRetries, err)
-				sleepGeminiBackoff(attempt)
+				sleepGeminiBackoff(attempt, ctx)
 				continue
 			}
 			setOpsUpstreamError(c, 0, safeErr, "")
@@ -184,7 +187,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 					Message:            upstreamMsg,
 				})
 				logger.LegacyPrintf("service.gemini_chat_completions", "Gemini account %d: upstream status %d, retry %d/%d", account.ID, resp.StatusCode, attempt, geminiMaxRetries)
-				sleepGeminiBackoff(attempt)
+				sleepGeminiBackoff(attempt, ctx)
 				continue
 			}
 			resp = &http.Response{

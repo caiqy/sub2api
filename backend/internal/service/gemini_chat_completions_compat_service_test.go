@@ -1,11 +1,61 @@
 package service
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestGeminiChatCompletionsCompatCancellationStopsRetryLoop(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for _, tt := range []struct {
+		name     string
+		response *http.Response
+		err      error
+	}{
+		{name: "transport error", err: errors.New("dial failed")},
+		{name: "retryable status", response: &http.Response{StatusCode: http.StatusInternalServerError, Header: http.Header{}, Body: io.NopCloser(bytes.NewBufferString(`{"error":{"message":"retry"}}`))}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			stub := &geminiCompatHTTPUpstreamStub{response: tt.response, err: tt.err, onDo: cancel}
+			svc := &GeminiMessagesCompatService{httpUpstream: stub, cfg: &config.Config{}}
+			account := &Account{
+				ID: 1, Platform: PlatformGemini, Type: AccountTypeAPIKey, Concurrency: 1,
+				Credentials: map[string]any{"api_key": "test-key"},
+			}
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			body := []byte(`{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"hello"}]}`)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body)).WithContext(ctx)
+
+			done := make(chan error, 1)
+			go func() {
+				_, err := svc.ForwardAsChatCompletions(ctx, c, account, body)
+				done <- err
+			}()
+
+			select {
+			case err := <-done:
+				require.ErrorIs(t, err, context.Canceled)
+				require.Equal(t, 1, stub.calls)
+			case <-time.After(500 * time.Millisecond):
+				t.Fatal("Gemini Chat Completions retry loop did not stop after cancellation")
+			}
+		})
+	}
+}
 
 func TestGeminiResponseToChatCompletionsPreservesInlineData(t *testing.T) {
 	tests := []struct {
