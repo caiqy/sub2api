@@ -88,6 +88,13 @@ func (s *GatewayService) forwardBedrock(
 	if err != nil {
 		return nil, fmt.Errorf("prepare bedrock request body: %w", err)
 	}
+	bedrockHandle, err := NewRequestBodyHandleFromBytes(bedrockBody, RequestBodyHandleOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("create bedrock request body handle: %w", err)
+	}
+	defer CleanupRequestBodyHandle(bedrockHandle)
+	body = nil
+	bedrockBody = nil
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -113,7 +120,7 @@ func (s *GatewayService) forwardBedrock(
 	}
 
 	// 执行上游请求（含重试）
-	resp, err := s.executeBedrockUpstream(ctx, c, account, bedrockBody, mappedModel, region, reqStream, signer, bedrockAPIKey, proxyURL)
+	resp, err := s.executeBedrockUpstream(ctx, c, account, bedrockHandle, mappedModel, region, reqStream, signer, bedrockAPIKey, proxyURL)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +137,7 @@ func (s *GatewayService) forwardBedrock(
 		return s.handleBedrockUpstreamErrors(ctx, resp, c, account)
 	}
 	if reqStream {
-		// 释放 GetBody 闭包捕获的完整 wire slice，避免在流式响应期继续持有请求体。
+		// 响应流不再需要已完成的请求元数据或其 body handle。
 		resp.Request = nil
 	}
 
@@ -178,7 +185,7 @@ func (s *GatewayService) executeBedrockUpstream(
 	ctx context.Context,
 	c *gin.Context,
 	account *Account,
-	body []byte,
+	bodyHandle *RequestBodyHandle,
 	modelID string,
 	region string,
 	stream bool,
@@ -190,6 +197,10 @@ func (s *GatewayService) executeBedrockUpstream(
 	var err error
 	retryStart := time.Now()
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
+		body, readErr := bodyHandle.ReadAll()
+		if readErr != nil {
+			return nil, fmt.Errorf("read bedrock request body: %w", readErr)
+		}
 		var upstreamReq *http.Request
 		if account.IsBedrockAPIKey() {
 			upstreamReq, err = s.buildUpstreamRequestBedrockAPIKey(ctx, body, modelID, region, stream, apiKey)
@@ -199,13 +210,27 @@ func (s *GatewayService) executeBedrockUpstream(
 		if err != nil {
 			return nil, err
 		}
+		reader, readErr := bodyHandle.Open()
+		if readErr != nil {
+			return nil, fmt.Errorf("open bedrock request body: %w", readErr)
+		}
+		upstreamReq.Body = reader
+		upstreamReq.ContentLength = bodyHandle.Size()
+		upstreamReq.GetBody = bodyHandle.Open
 
-		SetUsageUpstreamRequest(c, upstreamReq, RequestBodyPreviewString(body))
+		SetUsageUpstreamRequest(c, upstreamReq, bodyHandle.PreviewString())
 		SetOpsUpstreamAttempted(c, true)
+		body = nil
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, nil)
+		if upstreamReq.Body != nil {
+			_ = upstreamReq.Body.Close()
+		}
 		if err != nil {
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
+			}
+			if errors.Is(err, ErrRequestBodySpool) {
+				return nil, err
 			}
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			setOpsUpstreamError(c, 0, safeErr, "")

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -137,7 +139,7 @@ func TestRequestBodyMemoryRetentionWhileUpstreamBlocked(t *testing.T) {
 	}
 	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
 
-	for _, branch := range []string{"responses", "passthrough", "grok-responses", "responses-chat-fallback", "chat-raw", "chat-converted", "messages-anthropic", "messages-anthropic-stream", "messages-anthropic-passthrough-stream", "messages-bedrock-stream", "messages-gemini", "messages-gemini-mixed"} {
+	for _, branch := range []string{"responses", "passthrough", "grok-responses", "responses-chat-fallback", "chat-raw", "chat-converted", "messages-anthropic", "messages-anthropic-stream", "messages-anthropic-passthrough-stream", "messages-bedrock", "messages-bedrock-stream", "messages-gemini", "messages-gemini-mixed", "gemini-antigravity-native"} {
 		t.Run(branch, func(t *testing.T) {
 			var heapAt2MB, heapAt89MB uint64
 			var previewAt2MB, previewAt89MB, snapshotAt2MB, snapshotAt89MB int
@@ -226,18 +228,27 @@ func measureBlockedRequestBodyHeap(t *testing.T, branch string, size int64, spoo
 		if branch == "messages-anthropic-passthrough-stream" {
 			extra["anthropic_passthrough"] = true
 		}
-	case "messages-bedrock-stream":
+	case "messages-bedrock", "messages-bedrock-stream":
 		path = "/v1/messages"
 		platform = service.PlatformAnthropic
 		accountType = service.AccountTypeBedrock
-		upstream.contentType = "application/vnd.amazon.eventstream"
-		upstream.streamBody = true
-		upstream.attachReq = true
-		upstream.body = ""
+		upstream.body = `{"id":"msg_retention","type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"model":"claude-sonnet-4-5","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`
+		if branch == "messages-bedrock-stream" {
+			upstream.contentType = "application/vnd.amazon.eventstream"
+			upstream.streamBody = true
+			upstream.attachReq = true
+			upstream.body = ""
+		}
 	case "messages-gemini", "messages-gemini-mixed":
 		path = "/v1/messages"
 		platform = service.PlatformGemini
 		upstream.body = `{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}`
+	case "gemini-antigravity-native":
+		path = "/antigravity/v1beta/models/gemini-2.5-flash:generateContent"
+		platform = service.PlatformAntigravity
+		accountType = service.AccountTypeOAuth
+		upstream.contentType = "text/event-stream"
+		upstream.body = "data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":1,\"candidatesTokenCount\":1}}}\n\n"
 	}
 	if branch == "messages-gemini-mixed" {
 		initialID, intermediateID, finalID := int64(1401), int64(1402), int64(1403)
@@ -252,6 +263,20 @@ func measureBlockedRequestBodyHeap(t *testing.T, branch string, size int64, spoo
 		router = env.routerFor(path, func(c *gin.Context) {
 			requestContext = c
 			env.handler.Messages(c)
+		})
+	} else if branch == "gemini-antigravity-native" {
+		group := &service.Group{ID: 1401, Platform: platform, Status: service.StatusActive, Hydrated: true}
+		account := &service.Account{
+			ID: 1401, Name: "retention-antigravity-native", Platform: service.PlatformAntigravity, Type: accountType,
+			Status: service.StatusActive, Schedulable: true, Concurrency: 1,
+			Credentials: map[string]any{"access_token": "token", "project_id": "project", "model_mapping": map[string]any{"gemini-2.5-flash": "gemini-2.5-flash"}},
+		}
+		env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+		router = env.routerFor("/antigravity/v1beta/models/*modelAction", func(c *gin.Context) {
+			requestContext = c
+			c.Set(string(middleware.ContextKeyForcePlatform), service.PlatformAntigravity)
+			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.ForcePlatform, service.PlatformAntigravity))
+			env.handler.GeminiV1BetaModels(c)
 		})
 	} else if path == "/v1/messages" {
 		group := &service.Group{ID: 1401, Platform: platform, Status: service.StatusActive, Hydrated: true}
@@ -319,12 +344,15 @@ func retentionJSONBody(branch, path string, size int64) io.Reader {
 	} else if path == "/v1/messages" {
 		prefix, suffix = `{"model":"gemini-2.5-flash","max_tokens":16,"stream":false,"messages":[{"role":"user","content":"`, `"}]}`
 	}
-	if branch == "messages-anthropic" || branch == "messages-anthropic-stream" || branch == "messages-anthropic-passthrough-stream" || branch == "messages-bedrock-stream" {
+	if branch == "messages-anthropic" || branch == "messages-anthropic-stream" || branch == "messages-anthropic-passthrough-stream" || branch == "messages-bedrock" || branch == "messages-bedrock-stream" {
 		stream := "false"
 		if branch == "messages-anthropic-stream" || branch == "messages-anthropic-passthrough-stream" || branch == "messages-bedrock-stream" {
 			stream = "true"
 		}
 		prefix = `{"model":"claude-sonnet-4-5","max_tokens":16,"stream":` + stream + `,"messages":[{"role":"user","content":"`
+	}
+	if branch == "gemini-antigravity-native" {
+		prefix, suffix = `{"contents":[{"role":"user","parts":[{"text":"`, `"}]}]}`
 	}
 	if branch == "messages-gemini-mixed" {
 		prefix = `{"model":"claude-opus-4-6","max_tokens":16,"stream":false,"messages":[{"role":"user","content":"`

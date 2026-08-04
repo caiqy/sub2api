@@ -254,8 +254,11 @@ func TestExecuteBedrockUpstreamCapturesCurrentPreviewAndAttempt(t *testing.T) {
 	upstream := &anthropicHTTPUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"ok":true}`))}}
 	svc := &GatewayService{httpUpstream: upstream}
 	account := &Account{ID: 901, Name: "bedrock-apikey", Platform: PlatformAnthropic, Type: AccountTypeBedrock, Concurrency: 1, Credentials: map[string]any{"auth_mode": "apikey"}}
+	bodyHandle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+	require.NoError(t, err)
+	defer CleanupRequestBodyHandle(bodyHandle)
 
-	resp, err := svc.executeBedrockUpstream(context.Background(), c, account, body, "anthropic.claude-sonnet-4-5-v1:0", "us-east-1", false, nil, "bedrock-key", "")
+	resp, err := svc.executeBedrockUpstream(context.Background(), c, account, bodyHandle, "anthropic.claude-sonnet-4-5-v1:0", "us-east-1", false, nil, "bedrock-key", "")
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	defer func() { _ = resp.Body.Close() }()

@@ -43,6 +43,16 @@ func WithForwardGeminiSession(groupID int64, sessionHash string) ForwardGeminiOp
 }
 
 func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte, isStickySession bool, options ...ForwardGeminiOption) (*ForwardResult, error) {
+	bodyHandle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("create gemini request body handle: %w", err)
+	}
+	body = nil
+	defer CleanupRequestBodyHandle(bodyHandle)
+	return s.forwardGeminiHandle(ctx, c, account, originalModel, action, stream, bodyHandle, isStickySession, options...)
+}
+
+func (s *AntigravityGatewayService) forwardGeminiHandle(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, bodyHandle *RequestBodyHandle, isStickySession bool, options ...ForwardGeminiOption) (*ForwardResult, error) {
 	startTime := time.Now()
 	forwardOpts := forwardGeminiOptions{}
 	for _, apply := range options {
@@ -60,8 +70,12 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 	if strings.TrimSpace(action) == "" {
 		return nil, s.writeGoogleError(c, http.StatusBadRequest, "Missing action in URL")
 	}
-	if len(body) == 0 {
+	if bodyHandle == nil || bodyHandle.Size() == 0 {
 		return nil, s.writeGoogleError(c, http.StatusBadRequest, "Request body is empty")
+	}
+	body, err := bodyHandle.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("read gemini request body: %w", err)
 	}
 
 	// 解析请求以获取 image_size（用于图片计费）
@@ -128,6 +142,20 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 	if err != nil {
 		return nil, s.writeGoogleError(c, http.StatusInternalServerError, "Failed to build upstream request")
 	}
+	injectedHandle, err := NewRequestBodyHandleFromBytes(injectedBody, RequestBodyHandleOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("create injected gemini request body handle: %w", err)
+	}
+	defer CleanupRequestBodyHandle(injectedHandle)
+	outboundHandle, err := NewRequestBodyHandleFromBytes(wrappedBody, RequestBodyHandleOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("create antigravity request body handle: %w", err)
+	}
+	defer CleanupRequestBodyHandle(outboundHandle)
+	hasThoughtSignature := bytes.Contains(injectedBody, []byte(`"thoughtSignature"`))
+	body = nil
+	injectedBody = nil
+	wrappedBody = nil
 	accessToken, err := s.getAntigravityAccessToken(ctx, account)
 	if err != nil {
 		return nil, err
@@ -145,7 +173,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 		proxyURL:        proxyURL,
 		accessToken:     accessToken,
 		action:          upstreamAction,
-		body:            wrappedBody,
+		payloadHandle:   outboundHandle,
 		c:               c,
 		httpUpstream:    s.httpUpstream,
 		settingService:  s.settingService,
@@ -196,24 +224,39 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 			if fallbackModel != "" && fallbackModel != mappedModel {
 				logger.LegacyPrintf("service.antigravity_gateway", "[Antigravity] Model not found (%s), retrying with fallback model %s (account: %s)", mappedModel, fallbackModel, account.Name)
 
-				fallbackWrapped, err := s.wrapV1InternalRequest(projectID, fallbackModel, injectedBody)
-				if err == nil {
-					fallbackReq, err := antigravity.NewAPIRequest(ctx, upstreamAction, accessToken, fallbackWrapped)
-					if err == nil {
-						for key, values := range extraHeaders {
-							for _, value := range values {
-								fallbackReq.Header.Add(key, value)
-							}
-						}
-						SetUsageUpstreamRequest(c, fallbackReq, RequestBodyPreviewString(fallbackWrapped))
+				fallbackInjected, readErr := injectedHandle.ReadAll()
+				if readErr != nil {
+					return nil, fmt.Errorf("read injected gemini request body: %w", readErr)
+				}
+				fallbackWrapped, wrapErr := s.wrapV1InternalRequest(projectID, fallbackModel, fallbackInjected)
+				fallbackInjected = nil
+				if wrapErr == nil {
+					fallbackHandle, handleErr := NewRequestBodyHandleFromBytes(fallbackWrapped, RequestBodyHandleOptions{})
+					fallbackWrapped = nil
+					if handleErr != nil {
+						return nil, fmt.Errorf("create fallback gemini request body handle: %w", handleErr)
+					}
+					fallbackParams := antigravityRetryLoopParams{ctx: ctx, action: upstreamAction, accessToken: accessToken, payloadHandle: fallbackHandle, extraHeaders: extraHeaders}
+					fallbackReq, buildErr := newAntigravityPayloadRequest(&fallbackParams, resolveAntigravityForwardBaseURL())
+					if buildErr == nil {
+						SetUsageUpstreamRequest(c, fallbackReq, fallbackHandle.PreviewString())
 						SetOpsUpstreamAttempted(c, true)
-						fallbackResp, err := s.httpUpstream.Do(fallbackReq, proxyURL, account.ID, account.Concurrency)
-						if err == nil && fallbackResp.StatusCode < 400 {
+						fallbackResp, fallbackErr := s.httpUpstream.Do(fallbackReq, proxyURL, account.ID, account.Concurrency)
+						if fallbackReq.Body != nil {
+							_ = fallbackReq.Body.Close()
+						}
+						CleanupRequestBodyHandle(fallbackHandle)
+						if errors.Is(fallbackErr, ErrRequestBodySpool) {
+							return nil, fallbackErr
+						}
+						if fallbackErr == nil && fallbackResp != nil && fallbackResp.StatusCode < 400 {
 							_ = resp.Body.Close()
 							resp = fallbackResp
 						} else if fallbackResp != nil {
 							_ = fallbackResp.Body.Close()
 						}
+					} else {
+						CleanupRequestBodyHandle(fallbackHandle)
 					}
 				}
 			}
@@ -229,7 +272,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 			s.settingService != nil &&
 			s.settingService.IsSignatureRectifierEnabled(ctx) &&
 			isSignatureRelatedError(signatureCheckBody) &&
-			bytes.Contains(injectedBody, []byte(`"thoughtSignature"`)) {
+			hasThoughtSignature {
 			upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractAntigravityErrorMessage(signatureCheckBody)))
 			upstreamDetail := s.getUpstreamErrorDetail(signatureCheckBody)
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -245,9 +288,20 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 
 			logger.LegacyPrintf("service.antigravity_gateway", "Antigravity Gemini account %d: detected signature-related 400, retrying with cleaned thought signatures", account.ID)
 
-			cleanedInjectedBody := CleanGeminiNativeThoughtSignatures(injectedBody)
+			retryInjectedBody, readErr := injectedHandle.ReadAll()
+			if readErr != nil {
+				return nil, fmt.Errorf("read injected gemini retry body: %w", readErr)
+			}
+			cleanedInjectedBody := CleanGeminiNativeThoughtSignatures(retryInjectedBody)
+			retryInjectedBody = nil
 			retryWrappedBody, wrapErr := s.wrapV1InternalRequest(projectID, mappedModel, cleanedInjectedBody)
+			cleanedInjectedBody = nil
 			if wrapErr == nil {
+				retryHandle, handleErr := NewRequestBodyHandleFromBytes(retryWrappedBody, RequestBodyHandleOptions{})
+				retryWrappedBody = nil
+				if handleErr != nil {
+					return nil, fmt.Errorf("create gemini retry body handle: %w", handleErr)
+				}
 				retryResult, retryErr := s.antigravityRetryLoop(antigravityRetryLoopParams{
 					ctx:             ctx,
 					prefix:          prefix,
@@ -255,7 +309,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 					proxyURL:        proxyURL,
 					accessToken:     accessToken,
 					action:          upstreamAction,
-					body:            retryWrappedBody,
+					payloadHandle:   retryHandle,
 					c:               c,
 					httpUpstream:    s.httpUpstream,
 					settingService:  s.settingService,
@@ -266,6 +320,10 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 					groupID:         forwardOpts.groupID,
 					sessionHash:     forwardOpts.sessionHash,
 				})
+				CleanupRequestBodyHandle(retryHandle)
+				if errors.Is(retryErr, ErrRequestBodySpool) {
+					return nil, retryErr
+				}
 				if retryErr == nil {
 					retryResp := retryResult.resp
 					if retryResp.StatusCode < 400 {
@@ -457,11 +515,7 @@ func (s *AntigravityGatewayService) ForwardGeminiHandle(ctx context.Context, c *
 	if bodyHandle == nil {
 		return nil, fmt.Errorf("gemini request body handle is nil")
 	}
-	body, err := bodyHandle.ReadAll()
-	if err != nil {
-		return nil, fmt.Errorf("read gemini request body: %w", err)
-	}
-	return s.ForwardGemini(ctx, c, account, originalModel, action, stream, body, isStickySession, options...)
+	return s.forwardGeminiHandle(ctx, c, account, originalModel, action, stream, bodyHandle, isStickySession, options...)
 }
 
 // cleanGeminiRequest 清理 Gemini 请求体中的 Schema
