@@ -14,6 +14,9 @@ import (
 	"go.uber.org/zap"
 )
 
+// ponytail: package-local seam for deterministic spool-read failure tests; do not replace in parallel.
+var parseOpenAICountTokensGatewayRequest = service.ParseGatewayRequest
+
 // GrokCountTokens handles Anthropic-compatible count_tokens requests locally.
 // The route middleware already authenticates the API key and resolves the
 // group; this handler intentionally does not select an account or check billing.
@@ -110,9 +113,13 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 	service.SetUsageRequestBody(c, openAIResponsesRequestBodyPreviewSnapshot(effectiveBody))
 
 	bodyRef := service.NewRequestBodyRefFromHandle(effectiveBody)
-	parsedReq, err := service.ParseGatewayRequest(bodyRef, domain.PlatformAnthropic)
+	parsedReq, err := parseOpenAICountTokensGatewayRequest(bodyRef, domain.PlatformAnthropic)
 	if err != nil {
 		logRequestBodyParseFailure(reqLog, body, err)
+		if errors.Is(err, service.ErrRequestBodySpool) {
+			h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
 		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
 	}
@@ -122,8 +129,12 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 			return
 		}
 		effectiveBody = coordinator.Effective()
-		parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
+		parsedReq, err = parseOpenAICountTokensGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
 		if err != nil {
+			if errors.Is(err, service.ErrRequestBodySpool) {
+				h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+				return
+			}
 			h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 			return
 		}
@@ -173,8 +184,12 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 		}
 		effectiveBody = coordinator.Effective()
 		body = nil
-		parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
+		parsedReq, err = parseOpenAICountTokensGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
 		if err != nil {
+			if errors.Is(err, service.ErrRequestBodySpool) {
+				h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+				return
+			}
 			h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 			return
 		}
@@ -215,8 +230,12 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 		}
 		effectiveBody = coordinator.Effective()
 		body = nil
-		parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
+		parsedReq, err = parseOpenAICountTokensGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
 		if err != nil {
+			if errors.Is(err, service.ErrRequestBodySpool) {
+				h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+				return
+			}
 			h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 			return
 		}

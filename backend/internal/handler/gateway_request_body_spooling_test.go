@@ -441,6 +441,125 @@ func TestOpenAIGatewayHandler_LenientReaderRequestBodySpoolFailuresReturn503(t *
 	}
 }
 
+func TestOpenAIGatewayHandler_CountTokensParseSpoolFailuresReturn503WithoutSideEffects(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name      string
+		body      string
+		failParse int
+		newEnv    func(*testing.T) *openAIResponsesRetentionTestEnv
+	}{
+		{
+			name:      "initial parse",
+			body:      `{"model":"gpt-5","messages":[{"role":"user","content":"hello"}]}`,
+			failParse: 1,
+			newEnv: func(t *testing.T) *openAIResponsesRetentionTestEnv {
+				env := newOpenAIResponsesRetentionTestEnv(t, nil, nil, nil, nil, nil, nil)
+				env.apiKey.Group.AllowMessagesDispatch = true
+				return env
+			},
+		},
+		{
+			name:      "route reparse",
+			body:      `{"model":"public-count-tokens","messages":[{"role":"user","content":"hello"}]}`,
+			failParse: 2,
+			newEnv: func(t *testing.T) *openAIResponsesRetentionTestEnv {
+				env := newOpenAIResponsesRetentionTestEnv(t, nil, nil, nil, nil, nil, nil)
+				env.apiKey.Group.Platform = service.PlatformComposite
+				resolver := service.NewCompositeRouteResolver(openAIWSCompositeRouteRepo{routes: []service.CompositeModelRoute{{
+					GroupID:        env.apiKey.Group.ID,
+					PublicModel:    "public-count-tokens",
+					MatchType:      service.CompositeRouteMatchExact,
+					TargetPlatform: service.PlatformOpenAI,
+					UpstreamModel:  "gpt-5",
+					Endpoint:       service.CompositeRouteEndpointCountTokens,
+					Enabled:        true,
+				}}})
+				env.handler.effectiveRouteResolver = service.NewEffectiveGatewayRouteResolver(&service.APIKeyService{}, resolver, env.handler.cfg)
+				return env
+			},
+		},
+		{
+			name:      "channel reparse",
+			body:      `{"model":"client-model","messages":[{"role":"user","content":"hello"}]}`,
+			failParse: 2,
+			newEnv: func(t *testing.T) *openAIResponsesRetentionTestEnv {
+				groupID := int64(1)
+				channelService := service.NewChannelService(openAIFailedUsageChannelRepoStub{
+					channel: service.Channel{
+						ID:           21,
+						Status:       service.StatusActive,
+						GroupIDs:     []int64{groupID},
+						ModelMapping: map[string]map[string]string{service.PlatformOpenAI: {"client-model": "mapped-model"}},
+					},
+					groupPlatforms: map[int64]string{groupID: service.PlatformOpenAI},
+				}, nil, nil, nil)
+				env := newOpenAIResponsesRetentionTestEnv(t, nil, nil, nil, nil, channelService, nil)
+				env.apiKey.Group.AllowMessagesDispatch = true
+				return env
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spoolDir := t.TempDir()
+			oldOptions := jsonRequestBodyHandleOptions
+			jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: spoolDir}
+			t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+
+			parseCalls := 0
+			oldParse := parseOpenAICountTokensGatewayRequest
+			parseOpenAICountTokensGatewayRequest = func(body *service.RequestBodyRef, protocol string) (*service.ParsedRequest, error) {
+				parseCalls++
+				if parseCalls == tt.failParse {
+					entries, err := os.ReadDir(spoolDir)
+					if err != nil || len(entries) != 1 {
+						t.Fatalf("parse %d spool entries = %d, err = %v; want 1", parseCalls, len(entries), err)
+					}
+					if err := os.Remove(filepath.Join(spoolDir, entries[0].Name())); err != nil {
+						t.Fatalf("remove parse %d spool: %v", parseCalls, err)
+					}
+				}
+				parsed, err := service.ParseGatewayRequest(body, protocol)
+				if parseCalls == tt.failParse && !errors.Is(err, service.ErrRequestBodySpool) {
+					t.Fatalf("parse %d error = %v, want ErrRequestBodySpool", parseCalls, err)
+				}
+				return parsed, err
+			}
+			t.Cleanup(func() { parseOpenAICountTokensGatewayRequest = oldParse })
+
+			env := tt.newEnv(t)
+			env.router.POST("/v1/messages/count_tokens", env.handler.CountTokens)
+			before := env.handler.gatewayService.SnapshotOpenAIAccountSchedulerMetrics()
+			recorder := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+
+			env.router.ServeHTTP(recorder, req)
+
+			after := env.handler.gatewayService.SnapshotOpenAIAccountSchedulerMetrics()
+			assertCountTokensSpool503(t, recorder)
+			if got := gjson.Get(recorder.Body.String(), "error.type").String(); got != "api_error" {
+				t.Fatalf("error.type = %q, want api_error; body = %s", got, recorder.Body.String())
+			}
+			if parseCalls != tt.failParse {
+				t.Fatalf("parse calls = %d, want %d", parseCalls, tt.failParse)
+			}
+			if len(env.upstream.requests) != 0 {
+				t.Fatalf("upstream calls = %d, want 0", len(env.upstream.requests))
+			}
+			if env.billingRepo.lastCmd != nil {
+				t.Fatalf("spool parse failure applied usage billing: %#v", env.billingRepo.lastCmd)
+			}
+			if after.RuntimeStatsAccountCount != before.RuntimeStatsAccountCount || after.AccountSwitchTotal != before.AccountSwitchTotal {
+				t.Fatalf("scheduler metrics changed: before=%+v after=%+v", before, after)
+			}
+			assertGatewaySpoolDirsEmpty(t, spoolDir)
+		})
+	}
+}
+
 func TestOpenAIGatewayHandler_AlphaSearchInitialSpoolReadFailureReturns503WithoutSideEffects(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	group := &service.Group{ID: 65, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
