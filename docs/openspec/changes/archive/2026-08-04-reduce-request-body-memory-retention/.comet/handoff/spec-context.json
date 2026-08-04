@@ -1,0 +1,30 @@
+{
+  "change": "reduce-request-body-memory-retention",
+  "phase": "design",
+  "mode": "beta",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "eb5522db13da54e6495a661e0d91bec19551f929574ef373ab21735aeba7ac0a",
+  "files": [
+    {
+      "path": "docs/openspec/changes/reduce-request-body-memory-retention/proposal.md",
+      "sha256": "cbd8a840386d6c5b7bb9e5ddd5f71b441032b26140ebdac47f5cb751d33f175f",
+      "role": "supporting"
+    },
+    {
+      "path": "docs/openspec/changes/reduce-request-body-memory-retention/design.md",
+      "sha256": "cc21631ae1360e6c89b9272490f31fc724e740a17c909fff53b265d47c1f3ecd",
+      "role": "supporting"
+    },
+    {
+      "path": "docs/openspec/changes/reduce-request-body-memory-retention/tasks.md",
+      "sha256": "214585641183cc3322479eebfdca8e65d17cc8fc3333000a8d3f804071263d5d",
+      "role": "supporting"
+    },
+    {
+      "path": "docs/openspec/changes/reduce-request-body-memory-retention/specs/request-body-retention-control/spec.md",
+      "sha256": "94130a895cf9d23c3e13f4bf7243fc549c7ddc56e68b9f40035ebacb2e50a23a",
+      "role": "spec"
+    }
+  ]
+}
