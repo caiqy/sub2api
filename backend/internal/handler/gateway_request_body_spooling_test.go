@@ -35,6 +35,80 @@ func TestGatewayHandler_ResponsesCompressedRequestBodySpoolsEffectiveBodyUntilBl
 	testGatewayRequestBodySpoolLifecycle(t, true, http.StatusBadRequest, http.StatusBadRequest)
 }
 
+func TestGatewayHandler_ChatCompletionsPreservesLenientJSONContract(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		body []byte
+		want string
+	}{
+		{
+			name: "UTF-8 BOM",
+			body: []byte("\xef\xbb\xbf" + `{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"hello"}]}`),
+			want: "hello",
+		},
+		{
+			name: "raw control byte in JSON string",
+			body: []byte("{\"model\":\"claude-sonnet-4-5\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\x00world\"}]}"),
+			want: "hello\x00world",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			group := &service.Group{ID: 62, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+			account := &service.Account{ID: 163, Name: "anthropic-lenient-json", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "token"}}
+			upstream := &gatewayAcceptedWireCapturingUpstream{chat: true}
+			env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+
+			recorder := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			env.routerFor("/v1/chat/completions", env.handler.ChatCompletions).ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body = %s", recorder.Code, recorder.Body.String())
+			}
+			if got := gjson.GetBytes(upstream.body, "messages.0.content").String(); got != tt.want {
+				t.Fatalf("upstream content = %q, want %q; body = %s", got, tt.want, upstream.body)
+			}
+		})
+	}
+}
+
+func TestGatewayHandler_ChatCompletionsCompressedBodyHonorsConfiguredLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 63, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 164, Name: "anthropic-body-limit", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "token"}}
+	upstream := &gatewayAcceptedWireCapturingUpstream{}
+	env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+	env.handler.cfg.Gateway.MaxBodySize = 256
+
+	body := []byte(`{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"` + strings.Repeat("x", 512) + `"}]}`)
+	var compressed bytes.Buffer
+	zipper := gzip.NewWriter(&compressed)
+	if _, err := zipper.Write(body); err != nil {
+		t.Fatalf("gzip body: %v", err)
+	}
+	if err := zipper.Close(); err != nil {
+		t.Fatalf("close gzip: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(compressed.Bytes()))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+	env.routerFor("/v1/chat/completions", env.handler.ChatCompletions).ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body = %s", recorder.Code, recorder.Body.String())
+	}
+	if got := gjson.Get(recorder.Body.String(), "error.type").String(); got != "invalid_request_error" {
+		t.Fatalf("error.type = %q, want invalid_request_error; body = %s", got, recorder.Body.String())
+	}
+	if upstream.body != nil {
+		t.Fatalf("oversized request reached upstream: %s", upstream.body)
+	}
+}
+
 func TestGatewayHandler_MessagesAndResponsesUpstream5xxPreserveErrorContract(t *testing.T) {
 	t.Run("messages", func(t *testing.T) {
 		testGatewayRequestBodySpoolLifecycle(t, false, http.StatusInternalServerError, http.StatusBadGateway)
@@ -1178,6 +1252,7 @@ type gatewayAcceptedWireDeletingUpstream struct {
 type gatewayAcceptedWireCapturingUpstream struct {
 	service.HTTPUpstream
 	body []byte
+	chat bool
 }
 
 type gatewayAntigravityClaudeSignatureUpstream struct {
@@ -1214,11 +1289,16 @@ func (u *gatewayAcceptedWireCapturingUpstream) DoWithTLS(req *http.Request, _ st
 	if err != nil {
 		return nil, err
 	}
-	return &http.Response{
+	resp := &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": {"application/json"}},
 		Body:       io.NopCloser(strings.NewReader(`{"id":"msg_hash","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)),
-	}, nil
+	}
+	if u.chat {
+		resp.Header.Set("Content-Type", "text/event-stream")
+		resp.Body = io.NopCloser(strings.NewReader("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_lenient\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-4-5\",\"stop_reason\":null,\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"ok\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"))
+	}
+	return resp, nil
 }
 
 func (u *gatewayAcceptedWireDeletingUpstream) DoWithTLS(req *http.Request, _ string, _ int64, _ int, _ *tlsfingerprint.Profile) (*http.Response, error) {

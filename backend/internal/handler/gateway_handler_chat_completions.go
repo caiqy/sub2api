@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -68,6 +69,19 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 			return
 		}
 		h.chatCompletionsErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		return
+	}
+	body, err = httputil.NormalizeLenientJSONRequestBody(body, gatewayMaxBodySize(h.cfg))
+	if err != nil {
+		h.chatCompletionsErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		return
+	}
+	if err := coordinator.SetEffectiveBytes(body); err != nil {
+		if errors.Is(err, service.ErrRequestBodySpool) {
+			h.chatCompletionsErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+		} else {
+			h.chatCompletionsErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		}
 		return
 	}
 
