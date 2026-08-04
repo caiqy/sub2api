@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -41,27 +42,33 @@ func (h *OpenAIGatewayHandler) Live(c *gin.Context) {
 	var coordinator *requestBodyCoordinator
 	var request *service.LiveCallRequest
 	var err error
-	if strings.HasPrefix(strings.ToLower(c.GetHeader("Content-Type")), "multipart/form-data") {
-		request, err = parseLiveCallRequest(c)
+	multipartRequest := strings.HasPrefix(strings.ToLower(c.GetHeader("Content-Type")), "multipart/form-data")
+	if multipartRequest {
+		coordinator, err = newMultipartRequestBody(c.Request, 0)
+		if err == nil {
+			request, err = parseLiveCallMultipartForm(coordinator.form)
+		}
 	} else {
 		coordinator, err = newJSONRequestBody(c.Request)
 		if err == nil {
-			defer coordinator.Cleanup()
 			var body []byte
 			body, err = coordinator.ReadRaw()
 			if err == nil {
 				request, err = parseLiveCallJSON(bytes.NewReader(body))
 			}
-			if err == nil {
-				var canonical []byte
-				canonical, err = json.Marshal(request)
-				if err == nil {
-					err = coordinator.SetEffectiveBytes(canonical)
-				}
-				canonical = nil
-			}
 			body = nil
 		}
+	}
+	if coordinator != nil {
+		defer coordinator.Cleanup()
+	}
+	if err == nil {
+		var canonical []byte
+		canonical, err = json.Marshal(request)
+		if err == nil {
+			err = coordinator.SetEffectiveBytes(canonical)
+		}
+		canonical = nil
 	}
 	if err != nil {
 		if errors.Is(err, service.ErrRequestBodySpool) {
@@ -95,12 +102,12 @@ func (h *OpenAIGatewayHandler) Live(c *gin.Context) {
 		h.openAISecurityAuditError(c, decision)
 		return
 	}
-	var liveBody *service.RequestBodyHandle
-	if coordinator != nil {
-		liveBody = coordinator.Effective()
+	liveBody := coordinator.Effective()
+	if !multipartRequest {
 		service.SetUsageRequestBody(c, service.RequestBodyPreviewSnapshot(liveBody.PreviewString(), liveBody.Size()))
-		request = nil
 	}
+	coordinator.ReleaseMultipartValues()
+	request = nil
 
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	if h.billingCacheService == nil {
@@ -165,6 +172,23 @@ func parseLiveCallRequest(c *gin.Context) (*service.LiveCallRequest, error) {
 		return request, nil
 	}
 	return parseLiveCallJSON(c.Request.Body)
+}
+
+func parseLiveCallMultipartForm(form *multipart.Form) (*service.LiveCallRequest, error) {
+	if form == nil {
+		return nil, errors.New("multipart form is required")
+	}
+	request := &service.LiveCallRequest{}
+	if values := form.Value["sdp"]; len(values) > 0 {
+		request.SDP = values[0]
+	}
+	if values := form.Value["session"]; len(values) > 0 {
+		request.Session = json.RawMessage(values[0])
+	}
+	if err := service.ValidateLiveCallRequest(request); err != nil {
+		return nil, err
+	}
+	return request, nil
 }
 
 func parseLiveCallJSON(reader io.Reader) (*service.LiveCallRequest, error) {

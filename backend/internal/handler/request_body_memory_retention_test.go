@@ -224,7 +224,7 @@ func TestRequestBodyMemoryRetentionWhileUpstreamBlocked(t *testing.T) {
 	}
 	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
 
-	for _, branch := range []string{"responses", "passthrough", "grok-responses", "responses-chat-fallback", "chat-raw", "chat-converted", "count-tokens", "alpha-search", "live", "openai-messages", "openai-messages-chat-fallback", "gateway-chat-anthropic", "gateway-chat-gemini", "messages-anthropic", "messages-anthropic-stream", "messages-anthropic-passthrough-stream", "messages-antigravity-oauth", "messages-bedrock", "messages-bedrock-stream", "messages-gemini", "messages-gemini-mixed", "gemini-antigravity-native"} {
+	for _, branch := range []string{"responses", "passthrough", "grok-responses", "responses-chat-fallback", "chat-raw", "chat-converted", "count-tokens", "openai-count-tokens", "alpha-search", "live", "live-multipart", "openai-messages", "openai-messages-chat-fallback", "gateway-chat-anthropic", "gateway-chat-gemini", "messages-anthropic", "messages-anthropic-stream", "messages-anthropic-passthrough-stream", "messages-antigravity-oauth", "messages-bedrock", "messages-bedrock-stream", "messages-gemini", "messages-gemini-mixed", "gemini-antigravity-native"} {
 		t.Run(branch, func(t *testing.T) {
 			var heapAt2MB, heapAt89MB uint64
 			var previewAt2MB, previewAt89MB, snapshotAt2MB, snapshotAt89MB int
@@ -304,10 +304,13 @@ func measureBlockedRequestBodyHeap(t *testing.T, branch string, size int64, spoo
 		path = "/v1/messages/count_tokens"
 		platform = service.PlatformAnthropic
 		upstream.body = `{"input_tokens":1}`
+	case "openai-count-tokens":
+		path = "/v1/messages/count_tokens"
+		upstream.body = `{"input_tokens":1}`
 	case "alpha-search":
 		path = "/v1/alpha/search"
 		upstream.body = `{"type":"computer_initialize_state","id":"search_retention"}`
-	case "live":
+	case "live", "live-multipart":
 		path = "/v1/realtime/calls"
 		upstream.contentType = "application/sdp"
 		upstream.body = "v=0\r\n"
@@ -408,6 +411,14 @@ func measureBlockedRequestBodyHeap(t *testing.T, branch string, size int64, spoo
 			requestContext = c
 			env.handler.CountTokens(c)
 		})
+	} else if branch == "openai-count-tokens" {
+		group := &service.Group{ID: 1401, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowMessagesDispatch: true}
+		account := &service.Account{ID: 1401, Name: "retention-openai-count-tokens", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"access_token": "token"}}
+		env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
+		router = env.router(path, func(c *gin.Context) {
+			requestContext = c
+			env.handler.CountTokens(c)
+		})
 	} else if branch == "alpha-search" {
 		group := &service.Group{ID: 1401, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
 		account := &service.Account{ID: 1401, Name: "retention-alpha-search", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-retention"}}
@@ -416,7 +427,7 @@ func measureBlockedRequestBodyHeap(t *testing.T, branch string, size int64, spoo
 			requestContext = c
 			env.handler.AlphaSearch(c)
 		})
-	} else if branch == "live" {
+	} else if branch == "live" || branch == "live-multipart" {
 		group := &service.Group{ID: 1401, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowLive: true}
 		account := &service.Account{ID: 1401, Name: "retention-live", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"access_token": "token", "chatgpt_account_id": "acct-retention"}}
 		cache := &retentionLiveGatewayCache{}
@@ -483,8 +494,15 @@ func measureBlockedRequestBodyHeap(t *testing.T, branch string, size int64, spoo
 		})
 	}
 	recorder := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, path, retentionJSONBody(branch, path, size))
-	req.Header.Set("Content-Type", "application/json")
+	requestBody := retentionJSONBody(branch, path, size)
+	contentType := "application/json"
+	if branch == "live-multipart" {
+		const boundary = "sub2api-retention-boundary"
+		requestBody = retentionLiveMultipartBody(size, boundary)
+		contentType = "multipart/form-data; boundary=" + boundary
+	}
+	req := httptest.NewRequest(http.MethodPost, path, requestBody)
+	req.Header.Set("Content-Type", contentType)
 	go func() {
 		router.ServeHTTP(recorder, req)
 		close(done)
@@ -494,7 +512,7 @@ func measureBlockedRequestBodyHeap(t *testing.T, branch string, size int64, spoo
 	detail := middleware.GetUsageDetailSnapshot(requestContext)
 	require.NotNil(t, detail)
 	var snapshot matrixRequestBodyPreview
-	if branch != "count-tokens" && branch != "alpha-search" && branch != "live" {
+	if branch != "count-tokens" && branch != "openai-count-tokens" && branch != "alpha-search" && branch != "live" && branch != "live-multipart" {
 		require.NoError(t, json.Unmarshal([]byte(detail.UpstreamRequestBody), &snapshot))
 		require.Greater(t, snapshot.Size, size-(1<<10))
 		require.True(t, snapshot.Truncated)
@@ -507,11 +525,26 @@ func measureBlockedRequestBodyHeap(t *testing.T, branch string, size int64, spoo
 	waitMatrixSignal(t, done, "retention handler completion")
 	wantStatus := http.StatusOK
 	require.Equal(t, wantStatus, recorder.Code, recorder.Body.String())
-	if branch == "live" {
+	if branch == "live" || branch == "live-multipart" {
 		require.Equal(t, 1, upstream.calls, "Live retention case must reach transport")
 	}
 	assertMatrixTempFiles(t, spoolDir, "sub2api-request-body-", false)
 	return heap, previewSize, snapshotSize
+}
+
+func retentionLiveMultipartBody(size int64, boundary string) io.Reader {
+	prefix := "--" + boundary + "\r\n" +
+		"Content-Disposition: form-data; name=\"sdp\"\r\n\r\n" +
+		"v=0\r\n\r\n" +
+		"--" + boundary + "\r\n" +
+		"Content-Disposition: form-data; name=\"session\"\r\n\r\n" +
+		`{"model":"gpt-live","instructions":"`
+	suffix := `"}` + "\r\n--" + boundary + "--\r\n"
+	return io.MultiReader(
+		strings.NewReader(prefix),
+		io.LimitReader(retentionPaddingReader{}, size-int64(len(prefix)+len(suffix))),
+		strings.NewReader(suffix),
+	)
 }
 
 func retentionJSONBody(branch, path string, size int64) io.Reader {

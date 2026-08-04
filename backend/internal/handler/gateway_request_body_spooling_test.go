@@ -410,6 +410,37 @@ func TestGatewayHandler_CountTokensSpoolFailuresReturn503WithoutRetry(t *testing
 	}
 }
 
+func TestOpenAIGatewayHandler_LenientReaderRequestBodySpoolFailuresReturn503(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tt := range []struct {
+		name     string
+		path     string
+		platform string
+		handle   func(*OpenAIGatewayHandler, *gin.Context)
+	}{
+		{name: "messages", path: "/v1/messages", platform: service.PlatformOpenAI, handle: func(h *OpenAIGatewayHandler, c *gin.Context) { h.Messages(c) }},
+		{name: "openai count tokens", path: "/v1/messages/count_tokens", platform: service.PlatformOpenAI, handle: func(h *OpenAIGatewayHandler, c *gin.Context) { h.CountTokens(c) }},
+		{name: "grok count tokens", path: "/v1/messages/count_tokens", platform: service.PlatformGrok, handle: func(h *OpenAIGatewayHandler, c *gin.Context) { h.GrokCountTokens(c) }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			group := &service.Group{ID: 67, Platform: tt.platform, Status: service.StatusActive, Hydrated: true, AllowMessagesDispatch: true}
+			account := &service.Account{ID: 169, Name: "lenient-reader-spool", Platform: tt.platform, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "token"}}
+			upstream := &responsesSpoolTransportUpstream{}
+			env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
+			recorder := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, tt.path, countTokensInitialSpoolFailureBody{})
+			req.Header.Set("Content-Type", "application/json")
+
+			env.router(tt.path, func(c *gin.Context) { tt.handle(env.handler, c) }).ServeHTTP(recorder, req)
+
+			assertCountTokensSpool503(t, recorder)
+			if upstream.calls != 0 {
+				t.Fatalf("upstream calls = %d, want 0", upstream.calls)
+			}
+		})
+	}
+}
+
 func TestOpenAIGatewayHandler_AlphaSearchInitialSpoolReadFailureReturns503WithoutSideEffects(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	group := &service.Group{ID: 65, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}

@@ -27,6 +27,26 @@ type countTokensRuntimeStateRepo struct {
 	setErrorCalls    int
 }
 
+type countTokensTransportErrorUpstream struct {
+	HTTPUpstream
+	response *http.Response
+	err      error
+}
+
+func (u countTokensTransportErrorUpstream) Do(*http.Request, string, int64, int) (*http.Response, error) {
+	return u.response, u.err
+}
+
+type countTokensTransportErrorBody struct {
+	io.Reader
+	closed bool
+}
+
+func (b *countTokensTransportErrorBody) Close() error {
+	b.closed = true
+	return nil
+}
+
 func (r *countTokensRuntimeStateRepo) SetTempUnschedulable(_ context.Context, _ int64, _ time.Time, _ string) error {
 	r.tempUnschedCalls++
 	return nil
@@ -89,6 +109,32 @@ func TestOpenAIGatewayService_ForwardCountTokensAsAnthropic_APIKeyUsesResponsesI
 	require.Equal(t, "gpt-5.3-codex", gjson.Get(collector.body, "model").String())
 	require.JSONEq(t, collector.body, requireOpsPreviewString(t, c, "gpt-5.3-codex"))
 	require.True(t, HasOpsUpstreamAttempted(c))
+}
+
+func TestOpenAIGatewayService_ForwardCountTokensAsAnthropic_TransportSpoolErrorClosesResponseAndReturnsUnchanged(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", nil)
+	responseBody := &countTokensTransportErrorBody{Reader: strings.NewReader(`{"error":"partial"}`)}
+	transportErr := fmt.Errorf("read count_tokens transport body: %w", ErrRequestBodySpool)
+	svc := &OpenAIGatewayService{
+		cfg: &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{
+			Enabled:           false,
+			AllowInsecureHTTP: true,
+		}}},
+		httpUpstream: countTokensTransportErrorUpstream{
+			response: &http.Response{StatusCode: http.StatusBadGateway, Header: http.Header{}, Body: responseBody},
+			err:      transportErr,
+		},
+	}
+	account := &Account{ID: 102, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test", "base_url": "http://upstream.example"}}
+
+	err := svc.ForwardCountTokensAsAnthropic(context.Background(), c, account, []byte(`{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"hello"}]}`), "gpt-5")
+
+	require.Same(t, transportErr, err)
+	require.True(t, responseBody.closed)
+	require.False(t, c.Writer.Written())
 }
 
 func TestOpenAIGatewayService_ForwardCountTokensAsAnthropic_OAuthFallsBackWhenPlatformEndpointUnsupported(t *testing.T) {
@@ -183,7 +229,9 @@ func TestOpenAIGatewayService_OpenAIOAuthInputTokensFallbackUsesMinimumWhenEstim
 		UpstreamModel: "gpt-5",
 	}
 
-	writeOpenAIOAuthInputTokensFallback(c, &Account{ID: 303}, prepared, http.StatusUnauthorized)
+	_, estimateErr := estimateOpenAIInputTokens(prepared.Request)
+	require.Error(t, estimateErr)
+	writeOpenAIOAuthInputTokensFallback(c, &Account{ID: 303}, openAIInputTokensFallbackMinimum, estimateErr, prepared.UpstreamModel, http.StatusUnauthorized)
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.JSONEq(t, `{"input_tokens":1}`, rec.Body.String())

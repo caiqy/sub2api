@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -86,7 +87,17 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 		return fmt.Errorf("count_tokens: missing account")
 	}
 
+	var err error
+	body, err = openAIRequestBodyBytes(c, body)
+	if err != nil {
+		if errors.Is(err, ErrRequestBodySpool) {
+			return err
+		}
+		writeAnthropicCountTokensError(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+		return err
+	}
 	prepared, err := prepareOpenAIInputTokensCountRequest(body, account, defaultMappedModel)
+	body = nil
 	if err != nil {
 		writeAnthropicCountTokensError(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return err
@@ -97,6 +108,15 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 		writeAnthropicCountTokensError(c, http.StatusInternalServerError, "api_error", "Failed to build request")
 		return fmt.Errorf("marshal openai input_tokens body: %w", err)
 	}
+	outboundHandle, err := NewRequestBodyHandleFromBytes(upstreamBody, openAIRequestBodyHandleOptions())
+	if err != nil {
+		if errors.Is(err, ErrRequestBodySpool) {
+			return err
+		}
+		writeAnthropicCountTokensError(c, http.StatusInternalServerError, "api_error", "Failed to build request")
+		return fmt.Errorf("create openai input_tokens body: %w", err)
+	}
+	defer CleanupRequestBodyHandle(outboundHandle)
 
 	logger.L().Debug("openai count_tokens: model mapping applied",
 		zap.Int64("account_id", account.ID),
@@ -105,6 +125,18 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 		zap.String("billing_model", prepared.BillingModel),
 		zap.String("upstream_model", prepared.UpstreamModel),
 	)
+	fallbackEstimate := openAIInputTokensFallbackMinimum
+	var fallbackEstimateErr error
+	if account.Type == AccountTypeOAuth {
+		var estimated int
+		estimated, fallbackEstimateErr = estimateOpenAIInputTokens(prepared.Request)
+		if fallbackEstimateErr == nil && estimated > 0 {
+			fallbackEstimate = estimated
+		}
+	}
+	fallbackUpstreamModel := strings.Clone(prepared.UpstreamModel)
+	prepared = nil
+	upstreamBody = nil
 
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {
@@ -112,21 +144,30 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 		return fmt.Errorf("get access token: %w", err)
 	}
 
-	upstreamReq, err := s.buildInputTokensUpstreamRequest(ctx, c, account, upstreamBody, token)
+	upstreamReq, err := s.buildInputTokensUpstreamRequest(ctx, c, account, outboundHandle, token)
 	if err != nil {
+		if errors.Is(err, ErrRequestBodySpool) {
+			return err
+		}
 		writeAnthropicCountTokensError(c, http.StatusInternalServerError, "api_error", "Failed to build request")
 		return fmt.Errorf("build input_tokens request: %w", err)
 	}
+	defer closeOpenAIRequestBody(upstreamReq)
 
 	proxyURL := ""
 	if account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	upstreamPreview := RequestBodyPreviewString(upstreamBody)
-	SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
+	SetUsageUpstreamRequest(c, upstreamReq, outboundHandle.PreviewString())
 	SetOpsUpstreamAttempted(c, true)
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+		if errors.Is(err, ErrRequestBodySpool) {
+			return err
+		}
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())
 		setOpsUpstreamError(c, 0, safeErr, "")
 		writeAnthropicCountTokensError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed")
@@ -143,7 +184,7 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 	if resp.StatusCode >= 400 {
 		upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
 		if account.Type == AccountTypeOAuth && isOpenAIOAuthInputTokensUnsupported(resp.StatusCode, respBody) {
-			writeOpenAIOAuthInputTokensFallback(c, account, prepared, resp.StatusCode)
+			writeOpenAIOAuthInputTokensFallback(c, account, fallbackEstimate, fallbackEstimateErr, fallbackUpstreamModel, resp.StatusCode)
 			return nil
 		}
 
@@ -232,7 +273,7 @@ func (s *OpenAIGatewayService) buildInputTokensUpstreamRequest(
 	ctx context.Context,
 	c *gin.Context,
 	account *Account,
-	body []byte,
+	bodyHandle *RequestBodyHandle,
 	token string,
 ) (*http.Request, error) {
 	targetURL := openaiPlatformAPIInputTokensURL
@@ -246,13 +287,14 @@ func (s *OpenAIGatewayService) buildInputTokensUpstreamRequest(
 		}
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
+	req, err := openAINewRequestWithBodyHandle(ctx, http.MethodPost, targetURL, bodyHandle, false)
 	if err != nil {
 		return nil, err
 	}
 	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
 	authHeaders, err := s.buildOpenAIAuthenticationHeaders(ctx, account, token)
 	if err != nil {
+		closeOpenAIRequestBody(req)
 		return nil, err
 	}
 	for key, values := range authHeaders {
@@ -299,25 +341,21 @@ func isOpenAIInputTokensUnsupported(statusCode int, body []byte) bool {
 	return strings.Contains(msg, "input_tokens") && strings.Contains(msg, "not found")
 }
 
-func writeOpenAIOAuthInputTokensFallback(c *gin.Context, account *Account, prepared *openAIInputTokensCountPrepared, statusCode int) {
-	estimated := openAIInputTokensFallbackMinimum
-	if got, err := estimateOpenAIInputTokens(prepared.Request); err == nil {
-		if got > 0 {
-			estimated = got
-		}
+func writeOpenAIOAuthInputTokensFallback(c *gin.Context, account *Account, estimated int, estimateErr error, upstreamModel string, statusCode int) {
+	if estimateErr == nil {
 		logger.L().Info("openai count_tokens: oauth fallback to local tiktoken estimate",
 			zap.Int64("account_id", account.ID),
 			zap.Int("upstream_status", statusCode),
 			zap.Int("estimated_input_tokens", estimated),
-			zap.String("upstream_model", prepared.UpstreamModel),
+			zap.String("upstream_model", upstreamModel),
 		)
 	} else {
 		logger.L().Warn("openai count_tokens: oauth local tiktoken fallback failed, using minimum estimate",
 			zap.Int64("account_id", account.ID),
 			zap.Int("upstream_status", statusCode),
 			zap.Int("estimated_input_tokens", estimated),
-			zap.String("upstream_model", prepared.UpstreamModel),
-			zap.Error(err),
+			zap.String("upstream_model", upstreamModel),
+			zap.Error(estimateErr),
 		)
 	}
 

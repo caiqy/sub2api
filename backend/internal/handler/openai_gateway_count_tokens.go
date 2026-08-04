@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -19,6 +20,10 @@ import (
 func (h *OpenAIGatewayHandler) GrokCountTokens(c *gin.Context) {
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
 	if err != nil {
+		if errors.Is(err, service.ErrRequestBodySpool) {
+			h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			h.anthropicErrorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 			return
@@ -80,6 +85,10 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
 	if err != nil {
+		if errors.Is(err, service.ErrRequestBodySpool) {
+			h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			h.anthropicErrorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 			return
@@ -91,16 +100,36 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return
 	}
-	service.SetUsageRequestBody(c, openAIRequestBodyPreviewSnapshot(body))
+	coordinator := &requestBodyCoordinator{}
+	if err := coordinator.SetEffectiveBytes(body); err != nil {
+		h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+		return
+	}
+	defer coordinator.Cleanup()
+	effectiveBody := coordinator.Effective()
+	service.SetUsageRequestBody(c, openAIResponsesRequestBodyPreviewSnapshot(effectiveBody))
 
-	bodyRef := service.NewRequestBodyRef(body)
+	bodyRef := service.NewRequestBodyRefFromHandle(effectiveBody)
 	parsedReq, err := service.ParseGatewayRequest(bodyRef, domain.PlatformAnthropic)
 	if err != nil {
 		logRequestBodyParseFailure(reqLog, body, err)
 		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return
 	}
-	body = parsedReq.Body.Bytes()
+	if parsedReq.Body.Handle() == nil {
+		if err := coordinator.SetEffectiveBytes(parsedReq.Body.Bytes()); err != nil {
+			h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
+		effectiveBody = coordinator.Effective()
+		parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
+		if err != nil {
+			h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+			return
+		}
+	}
+	cloneGatewayParsedRequestScalars(parsedReq)
+	body = nil
 	if parsedReq.Model == "" {
 		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "model is required")
 		return
@@ -108,7 +137,7 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 
 	reqModel := parsedReq.Model
 	clientModel := clientRequestedModel(c, reqModel)
-	SetClaudeCodeClientContext(c, body, parsedReq)
+	SetClaudeCodeClientContext(c, nil, parsedReq)
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	route, hasRoute := service.EffectiveGatewayRouteFromContext(c.Request.Context())
 	if !hasRoute {
@@ -132,12 +161,24 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 	}
 	subscription = route.Subscription
 	if route.RoutingModel != "" && route.RoutingModel != reqModel {
+		body, err = effectiveBody.ReadAll()
+		if err != nil {
+			h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
 		body = h.gatewayService.ReplaceModelInBody(body, route.RoutingModel)
-	}
-	parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRef(body), domain.PlatformAnthropic)
-	if err != nil {
-		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
-		return
+		if err := coordinator.SetEffectiveBytes(body); err != nil {
+			h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
+		effectiveBody = coordinator.Effective()
+		body = nil
+		parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
+		if err != nil {
+			h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+			return
+		}
+		cloneGatewayParsedRequestScalars(parsedReq)
 	}
 	reqModel = parsedReq.Model
 	ensureCompositeTargetPlatform(c, apiKey, reqModel)
@@ -162,17 +203,37 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 	route = route.WithChannelMapping(channelMapping)
 	c.Request = c.Request.WithContext(service.WithEffectiveGatewayRoute(c.Request.Context(), route))
 	if channelMapping.Mapped {
+		body, err = effectiveBody.ReadAll()
+		if err != nil {
+			h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
 		body = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
-		reqModel = channelMapping.MappedModel
-		_, err = service.ParseGatewayRequest(service.NewRequestBodyRef(body), domain.PlatformAnthropic)
+		if err := coordinator.SetEffectiveBytes(body); err != nil {
+			h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
+		effectiveBody = coordinator.Effective()
+		body = nil
+		parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
 		if err != nil {
 			h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 			return
 		}
+		cloneGatewayParsedRequestScalars(parsedReq)
+		reqModel = parsedReq.Model
 	}
 	routingModel := service.NormalizeOpenAICompatRequestedModel(reqModel)
 	preferredMappedModel := resolveOpenAIMessagesDispatchMappedModel(apiKey, reqModel)
-	mappedBodyForMessages := newOpenAIModelMappedBodyCache(body, h.gatewayService.ReplaceModelInBody)
+	body, err = effectiveBody.ReadAll()
+	if err != nil {
+		h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+		return
+	}
+	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
+	body = nil
+	service.BindOpenAIRequestBodyHandle(c, effectiveBody)
+	parsedReq = nil
 
 	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
 		reqLog.Info("openai_count_tokens.billing_eligibility_check_failed", zap.Error(err))
@@ -185,7 +246,6 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 	}
 
 	requestStart := time.Now()
-	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
 	currentRoutingModel := routingModel
 	if preferredMappedModel != "" {
 		currentRoutingModel = preferredMappedModel
@@ -229,10 +289,13 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 	if selection.Acquired && selection.ReleaseFunc != nil {
 		defer selection.ReleaseFunc()
 	}
-	forwardBody := mappedBodyForMessages(channelMapping.Mapped, channelMapping.MappedModel)
 	defaultMappedModel := preferredMappedModel
 
-	if err := h.gatewayService.ForwardCountTokensAsAnthropic(c.Request.Context(), c, account, forwardBody, defaultMappedModel); err != nil {
+	if err := h.gatewayService.ForwardCountTokensAsAnthropic(c.Request.Context(), c, account, nil, defaultMappedModel); err != nil {
+		if errors.Is(err, service.ErrRequestBodySpool) {
+			h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
 		reqLog.Error("openai_count_tokens.forward_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 	}
 }
