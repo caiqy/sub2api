@@ -2,14 +2,19 @@ package routes
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
@@ -384,7 +389,7 @@ func TestCompositeTargetPlatformMiddlewareBoundsOriginalBodySnapshot(t *testing.
 	router.POST("/v1/responses", func(c *gin.Context) {
 		detail := servermiddleware.BuildUsageDetailSnapshot(c)
 		require.NotNil(t, detail)
-		require.LessOrEqual(t, len(detail.RequestBody), (5<<20)+1024)
+		require.LessOrEqual(t, len(detail.RequestBody), int(service.DefaultRequestBodyPreviewLimitBytes))
 		c.Status(http.StatusNoContent)
 	})
 
@@ -394,6 +399,115 @@ func TestCompositeTargetPlatformMiddlewareBoundsOriginalBodySnapshot(t *testing.
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	require.Equal(t, http.StatusNoContent, w.Code)
+}
+
+func TestCompositeTargetPlatformMiddlewareDoesNotRetainDecodedBodyAcrossNext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, mode := range []string{"composite", "claude-code-only"} {
+		t.Run(mode, func(t *testing.T) {
+			heapAt2MB := measureCompositeMiddlewareBlockedHeap(t, mode, 2<<20)
+			heapAt89MB := measureCompositeMiddlewareBlockedHeap(t, mode, 89<<20/10)
+			growth := uint64(0)
+			if heapAt89MB > heapAt2MB {
+				growth = heapAt89MB - heapAt2MB
+			}
+			t.Logf("mode=%s heap_at_2mb=%d heap_at_8_9mb=%d retained_growth=%d", mode, heapAt2MB, heapAt89MB, growth)
+			require.Less(t, growth, uint64(3<<20), "decoded request body must not remain live while downstream is blocked")
+		})
+	}
+}
+
+func measureCompositeMiddlewareBlockedHeap(t *testing.T, mode string, size int64) uint64 {
+	t.Helper()
+	originalID, finalID := int64(801), int64(802)
+	group := &service.Group{ID: originalID, Platform: service.PlatformComposite, Status: service.StatusActive}
+	resolver := effectiveCompositeRouteResolverForTest(nil)
+	if mode == "claude-code-only" {
+		group = &service.Group{ID: originalID, Platform: service.PlatformAnthropic, Status: service.StatusActive, ClaudeCodeOnly: true, FallbackGroupID: &finalID}
+		finalGroup := &service.Group{ID: finalID, Platform: service.PlatformOpenAI, Status: service.StatusActive}
+		resolver = newEffectiveRouteResolverForTest(&config.Config{RunMode: config.RunModeSimple}, map[int64]*service.Group{finalID: finalGroup}, nil)
+	}
+	apiKey := &service.APIKey{ID: 803, UserID: 804, GroupID: &originalID, Group: group, User: &service.User{ID: 804, Status: service.StatusActive}}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan struct{})
+	var releaseOnce sync.Once
+	cleanup := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(func() {
+		cleanup()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("timed out waiting for composite middleware cleanup")
+		}
+	})
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(servermiddleware.ContextKeyAPIKey), apiKey)
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, group))
+		c.Next()
+	})
+	router.Use(servermiddleware.UsageDetailCapture())
+	router.Use(compositeTargetPlatformMiddleware(resolver))
+	router.POST("/v1/responses", func(c *gin.Context) {
+		_, err := io.Copy(io.Discard, c.Request.Body)
+		require.NoError(t, err)
+		require.NoError(t, c.Request.Body.Close())
+		close(started)
+		<-release
+		c.Status(http.StatusNoContent)
+	})
+
+	var compressed bytes.Buffer
+	zipper := gzip.NewWriter(&compressed)
+	_, err := io.WriteString(zipper, `{"model":"gpt-5","input":"`)
+	require.NoError(t, err)
+	_, err = io.CopyN(zipper, compositePaddingReader{}, size-int64(len(`{"model":"gpt-5","input":""}`)))
+	require.NoError(t, err)
+	_, err = io.WriteString(zipper, `"}`)
+	require.NoError(t, err)
+	require.NoError(t, zipper.Close())
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(compressed.Bytes()))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+	recorder := httptest.NewRecorder()
+	go func() {
+		router.ServeHTTP(recorder, req)
+		close(done)
+	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for blocked composite handler")
+	}
+
+	runtime.GC()
+	runtime.GC()
+	debug.FreeOSMemory()
+	var stats runtime.MemStats
+	runtime.ReadMemStats(&stats)
+	heap := stats.HeapAlloc
+
+	cleanup()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for composite handler")
+	}
+	require.Equal(t, http.StatusNoContent, recorder.Code, recorder.Body.String())
+	return heap
+}
+
+type compositePaddingReader struct{}
+
+func (compositePaddingReader) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 'x'
+	}
+	return len(p), nil
 }
 
 func TestCompositeTargetPlatformMiddlewareRejectsOversizedRuntimeRouteModels(t *testing.T) {

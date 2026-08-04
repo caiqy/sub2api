@@ -477,24 +477,53 @@ func compositeTargetPlatformMiddleware(resolver *service.EffectiveGatewayRouteRe
 			}
 		}
 		if c.Request.Method != http.MethodGet {
-			resetRequestBody(c, body)
+			bodyHandle, handleErr := service.NewRequestBodyHandleFromBytes(body, service.RequestBodyHandleOptions{})
+			body = nil
+			if handleErr != nil {
+				abortCompositeRequestBodySpoolError(c)
+				return
+			}
+			defer service.CleanupRequestBodyHandle(bodyHandle)
+			reader, openErr := bodyHandle.Open()
+			if openErr != nil {
+				abortCompositeRequestBodySpoolError(c)
+				return
+			}
+			defer func() { _ = reader.Close() }()
+			c.Request.Body = reader
+			c.Request.ContentLength = bodyHandle.Size()
+			c.Request.Header.Set("Content-Length", strconv.FormatInt(bodyHandle.Size(), 10))
 		}
 		c.Next()
 	}
 }
-
-const compositeRouteSnapshotLimitBytes = 5 << 20
 
 func compositeOriginalRequestBodySnapshot(contentType string, body []byte) string {
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "multipart/form-data") {
 		return ""
 	}
 	size := int64(len(body))
-	truncated := len(body) > compositeRouteSnapshotLimitBytes
+	limit := int(service.DefaultRequestBodyPreviewLimitBytes)
+	truncated := len(body) > limit
 	if truncated {
-		body = body[:compositeRouteSnapshotLimitBytes]
+		body = body[:limit]
 	}
 	return service.RequestBodyPreviewSnapshot(string(body), size, truncated)
+}
+
+func abortCompositeRequestBodySpoolError(c *gin.Context) {
+	const message = "Failed to spool request body"
+	if strings.Contains(c.Request.URL.Path, "/messages") {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"type":  "error",
+			"error": gin.H{"type": "api_error", "message": message},
+		})
+	} else {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": gin.H{"type": "api_error", "message": message},
+		})
+	}
+	c.Abort()
 }
 
 func compositeWebSocketRouteResolverMiddleware(resolver *service.CompositeRouteResolver) gin.HandlerFunc {
@@ -585,12 +614,6 @@ func compositeGeminiModelFromParams(c *gin.Context) string {
 		return strings.TrimSpace(modelAction[:idx])
 	}
 	return modelAction
-}
-
-func resetRequestBody(c *gin.Context, body []byte) {
-	c.Request.Body = io.NopCloser(bytes.NewReader(body))
-	c.Request.ContentLength = int64(len(body))
-	c.Request.Header.Set("Content-Length", strconv.Itoa(len(body)))
 }
 
 func compositeRouteEndpointForPath(path string) string {
