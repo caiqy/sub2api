@@ -410,6 +410,44 @@ func TestGatewayHandler_CountTokensSpoolFailuresReturn503WithoutRetry(t *testing
 	}
 }
 
+func TestOpenAIGatewayHandler_AlphaSearchInitialSpoolReadFailureReturns503WithoutSideEffects(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 65, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 166, Name: "alpha-search-spool", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "token"}}
+	accountRepo := &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}
+	upstream := &responsesSpoolTransportUpstream{}
+	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, accountRepo, upstream)
+	before := env.handler.gatewayService.SnapshotOpenAIAccountSchedulerMetrics()
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/alpha/search", alphaSearchInitialSpoolFailureBody{})
+	req.Header.Set("Content-Type", "application/json")
+	env.router("/v1/alpha/search", env.handler.AlphaSearch).ServeHTTP(recorder, req)
+
+	after := env.handler.gatewayService.SnapshotOpenAIAccountSchedulerMetrics()
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body = %s", recorder.Code, recorder.Body.String())
+	}
+	if got := gjson.Get(recorder.Body.String(), "error.type").String(); got != "api_error" {
+		t.Fatalf("error.type = %q, want api_error; body = %s", got, recorder.Body.String())
+	}
+	if got := gjson.Get(recorder.Body.String(), "error.message").String(); got != "Failed to spool request body" {
+		t.Fatalf("error.message = %q, want spool failure; body = %s", got, recorder.Body.String())
+	}
+	if upstream.calls != 0 {
+		t.Fatalf("upstream calls = %d, want 0", upstream.calls)
+	}
+	if len(accountRepo.platforms) != 0 {
+		t.Fatalf("account selections = %d, want 0", len(accountRepo.platforms))
+	}
+	if after.RuntimeStatsAccountCount != before.RuntimeStatsAccountCount || after.AccountSwitchTotal != before.AccountSwitchTotal {
+		t.Fatalf("scheduler metrics changed: before=%+v after=%+v", before, after)
+	}
+	if env.usageRepo.lastLog != nil {
+		t.Fatalf("initial spool failure recorded usage: %#v", env.usageRepo.lastLog)
+	}
+}
+
 func TestOpenAIGatewayHandler_AlphaSearchSpoolFailureReturns503WithoutScheduleFailure(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	group := &service.Group{ID: 65, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
@@ -1467,6 +1505,12 @@ type countTokensInitialSpoolFailureBody struct{}
 
 func (countTokensInitialSpoolFailureBody) Read([]byte) (int, error) {
 	return 0, fmt.Errorf("read initial count_tokens body: %w", service.ErrRequestBodySpool)
+}
+
+type alphaSearchInitialSpoolFailureBody struct{}
+
+func (alphaSearchInitialSpoolFailureBody) Read([]byte) (int, error) {
+	return 0, fmt.Errorf("read initial alpha/search body: %w", service.ErrRequestBodySpool)
 }
 
 type liveInitialSpoolFailureBody struct{}
