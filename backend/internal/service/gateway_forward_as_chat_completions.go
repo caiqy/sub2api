@@ -34,6 +34,20 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	parsed *ParsedRequest,
 ) (*ForwardResult, error) {
 	startTime := time.Now()
+	var err error
+	if body == nil {
+		body, err = openAIRequestBodyBytes(c, body)
+		if err != nil {
+			return nil, fmt.Errorf("read chat completions request body: %w", err)
+		}
+	}
+	sourceHandle, sourceOwned, err := openAIRequestBodyHandleForContext(c, body)
+	if err != nil {
+		return nil, fmt.Errorf("spool chat completions request body: %w", err)
+	}
+	if sourceOwned {
+		defer CleanupRequestBodyHandle(sourceHandle)
+	}
 
 	// 1. Parse Chat Completions request
 	var ccReq apicompat.ChatCompletionsRequest
@@ -104,6 +118,13 @@ func (s *GatewayService) ForwardAsChatCompletions(
 
 	// 7. Enforce cache_control block limit
 	anthropicBody = enforceCacheControlLimit(anthropicBody)
+	reasoningEffort := extractCCReasoningEffortFromBody(body)
+	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, body, mappedModel)
+	bodyHandle, err := NewRequestBodyHandleFromBytes(anthropicBody, RequestBodyHandleOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("spool anthropic request body: %w", err)
+	}
+	defer CleanupRequestBodyHandle(bodyHandle)
 
 	// 8. Get access token
 	token, tokenType, err := s.GetAccessToken(ctx, account)
@@ -122,20 +143,30 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	// (map/forward modes) read values from the original Chat Completions body
 	// rather than the converted Anthropic body.
 	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
-	upstreamReq, upstreamBody, err := s.buildUpstreamRequestWithSourceBody(upstreamCtx, c, account, body, anthropicBody, token, tokenType, mappedModel, reqStream, shouldMimicClaudeCode)
+	upstreamReq, wireHandle, err := s.buildUpstreamRequestWithHandles(upstreamCtx, c, account, sourceHandle, bodyHandle, body, anthropicBody, token, tokenType, mappedModel, reqStream, shouldMimicClaudeCode)
 	releaseUpstreamCtx()
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
+	defer CleanupRequestBodyHandle(wireHandle)
+	defer func() { _ = upstreamReq.Body.Close() }()
+	body = nil
+	anthropicBody = nil
+	ccReq = apicompat.ChatCompletionsRequest{}
+	responsesReq = nil
+	anthropicReq = nil
 
 	// 11. Send request
-	upstreamPreview := RequestBodyPreviewString(upstreamBody)
+	upstreamPreview := wireHandle.PreviewString()
 	SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
 	SetOpsUpstreamAttempted(c, true)
 	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {
 		if resp != nil && resp.Body != nil {
 			_ = resp.Body.Close()
+		}
+		if errors.Is(err, ErrRequestBodySpool) {
+			return nil, err
 		}
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())
 		setOpsUpstreamError(c, 0, safeErr, "")
@@ -184,13 +215,6 @@ func (s *GatewayService) ForwardAsChatCompletions(
 		writeGatewayCCError(c, mapUpstreamStatusCode(resp.StatusCode), "server_error", upstreamMsg)
 		return nil, fmt.Errorf("upstream error: %d %s", resp.StatusCode, upstreamMsg)
 	}
-
-	// 13. Extract reasoning effort from CC request body
-	reasoningEffort := extractCCReasoningEffortFromBody(body)
-	// 国产模型默认 effort 补充：本路径是客户端 CC 请求 → Anthropic 上游，
-	// 如果上游是 passback-required 国产模型 (Kimi-anthropic / GLM-anthropic / MiniMax)
-	// 且客户端在 body 里传了 thinking.type=enabled，补中默认 effort。
-	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, body, mappedModel)
 
 	// 14. Handle normal response
 	// Read Anthropic SSE → convert to Responses events → convert to CC format

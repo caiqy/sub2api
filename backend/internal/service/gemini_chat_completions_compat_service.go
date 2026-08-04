@@ -29,6 +29,13 @@ func (s *GeminiMessagesCompatService) ForwardAsChatCompletions(
 	body []byte,
 ) (*ForwardResult, error) {
 	startTime := time.Now()
+	var err error
+	if body == nil {
+		body, err = openAIRequestBodyBytes(c, body)
+		if err != nil {
+			return nil, fmt.Errorf("read chat completions request body: %w", err)
+		}
+	}
 
 	var ccReq apicompat.ChatCompletionsRequest
 	if err := json.Unmarshal(body, &ccReq); err != nil {
@@ -58,7 +65,14 @@ func (s *GeminiMessagesCompatService) ForwardAsChatCompletions(
 		return nil, fmt.Errorf("marshal chat completions compat request: %w", err)
 	}
 
-	return s.forwardClaudeBodyAsChatCompletions(ctx, c, account, claudeBody, originalModel, clientStream, includeUsage, startTime, body)
+	reasoningEffort := extractCCReasoningEffortFromBody(body)
+	thinkingEnabled := OpenAIBodyHasThinkingEnabled(body)
+	imageInputSize := s.extractImageInputSize(claudeBody)
+	body = nil
+	ccReq = apicompat.ChatCompletionsRequest{}
+	responsesReq = nil
+	anthropicReq = nil
+	return s.forwardClaudeBodyAsChatCompletions(ctx, c, account, claudeBody, originalModel, clientStream, includeUsage, startTime, reasoningEffort, thinkingEnabled, imageInputSize)
 }
 
 func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
@@ -70,7 +84,9 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 	clientStream bool,
 	includeUsage bool,
 	startTime time.Time,
-	originalChatBody []byte,
+	reasoningEffort *string,
+	thinkingEnabled bool,
+	imageInputSize string,
 ) (*ForwardResult, error) {
 	var req struct {
 		Model  string `json:"model"`
@@ -87,12 +103,22 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 	if account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount {
 		mappedModel = account.GetMappedModel(req.Model)
 	}
+	if reasoningEffort == nil && thinkingEnabled {
+		reasoningEffort = DefaultEffortForThinkingEnabled(mappedModel)
+	}
 
 	geminiReq, err := convertClaudeMessagesToGeminiGenerateContent(claudeBody)
 	if err != nil {
 		return nil, s.writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
 	geminiReq = ensureGeminiFunctionCallThoughtSignatures(geminiReq)
+	geminiHandle, err := NewRequestBodyHandleFromBytes(geminiReq, RequestBodyHandleOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("spool Gemini request body: %w", err)
+	}
+	defer CleanupRequestBodyHandle(geminiHandle)
+	geminiReq = nil
+	claudeBody = nil
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -107,7 +133,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 	buildReq, requestIDHeader := s.buildGeminiChatCompletionsUpstreamRequestFunc(
 		account,
 		mappedModel,
-		geminiReq,
+		geminiHandle,
 		clientStream,
 		useUpstreamStream,
 	)
@@ -117,20 +143,30 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		upstreamReq, idHeader, upstreamBody, err := buildReq(ctx)
+		upstreamReq, idHeader, err := buildReq(ctx)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil, err
+			}
+			if errors.Is(err, ErrRequestBodySpool) {
 				return nil, err
 			}
 			return nil, s.writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", err.Error())
 		}
 		requestIDHeader = idHeader
-		upstreamPreview := RequestBodyPreviewString(upstreamBody)
+		upstreamPreview := openAIUpstreamRequestBodyPreview(upstreamReq, nil)
 		SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
 		SetOpsUpstreamAttempted(c, true)
 
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+		closeOpenAIRequestBody(upstreamReq)
 		if err != nil {
+			if resp != nil && resp.Body != nil {
+				_ = resp.Body.Close()
+			}
+			if errors.Is(err, ErrRequestBodySpool) {
+				return nil, err
+			}
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,
@@ -210,11 +246,6 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		c.Header("x-request-id", requestID)
 	}
 
-	reasoningEffort := extractCCReasoningEffortFromBody(originalChatBody)
-	// 国产模型默认 effort 补充（本路径上游是 Gemini，不会命中 passback-required）。
-	// 保持与 OpenAI 网关路径调用模式一致，便于未来上游变异时语义一致。
-	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, originalChatBody, mappedModel)
-
 	if resp.StatusCode >= 400 {
 		respBody := s.readUpstreamErrorBody(resp)
 		policy := ErrorPolicyNone
@@ -282,7 +313,6 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 	}
 
 	imageCount := 0
-	imageInputSize := s.extractImageInputSize(claudeBody)
 	imageSize := normalizeOpenAIImageSizeTier(imageInputSize)
 	if isImageGenerationModel(originalModel) {
 		imageCount = 1
@@ -307,22 +337,36 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 func (s *GeminiMessagesCompatService) buildGeminiChatCompletionsUpstreamRequestFunc(
 	account *Account,
 	mappedModel string,
-	geminiReq []byte,
+	geminiHandle *RequestBodyHandle,
 	clientStream bool,
 	useUpstreamStream bool,
-) (func(context.Context) (*http.Request, string, []byte, error), string) {
+) (func(context.Context) (*http.Request, string, error), string) {
+	newRequest := func(ctx context.Context, targetURL string, body []byte) (*http.Request, error) {
+		bodyHandle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+		if err != nil {
+			return nil, err
+		}
+		return openAINewRequestWithBodyHandle(ctx, http.MethodPost, targetURL, bodyHandle, true)
+	}
+	newRESTRequest := func(ctx context.Context, targetURL string) (*http.Request, error) {
+		body, err := geminiHandle.ReadAll()
+		if err != nil {
+			return nil, err
+		}
+		return newRequest(ctx, targetURL, normalizeGeminiRequestForAIStudio(body))
+	}
 	switch account.Type {
 	case AccountTypeAPIKey:
-		return func(ctx context.Context) (*http.Request, string, []byte, error) {
+		return func(ctx context.Context) (*http.Request, string, error) {
 			apiKey := account.GetCredential("api_key")
 			if strings.TrimSpace(apiKey) == "" {
-				return nil, "", nil, errors.New("gemini api_key not configured")
+				return nil, "", errors.New("gemini api_key not configured")
 			}
 
 			baseURL := account.GetGeminiBaseURL(geminicli.AIStudioBaseURL)
 			normalizedBaseURL, err := s.validateUpstreamBaseURL(baseURL)
 			if err != nil {
-				return nil, "", nil, err
+				return nil, "", err
 			}
 
 			action := "generateContent"
@@ -331,27 +375,26 @@ func (s *GeminiMessagesCompatService) buildGeminiChatCompletionsUpstreamRequestF
 			}
 			fullURL, err := buildGeminiAIStudioModelActionURL(normalizedBaseURL, mappedModel, action, clientStream)
 			if err != nil {
-				return nil, "", nil, err
+				return nil, "", err
 			}
 
-			restGeminiReq := normalizeGeminiRequestForAIStudio(geminiReq)
-			upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(restGeminiReq))
+			upstreamReq, err := newRESTRequest(ctx, fullURL)
 			if err != nil {
-				return nil, "", nil, err
+				return nil, "", err
 			}
 			upstreamReq.Header.Set("Content-Type", "application/json")
 			upstreamReq.Header.Set("x-goog-api-key", apiKey)
-			return upstreamReq, "x-request-id", restGeminiReq, nil
+			return upstreamReq, "x-request-id", nil
 		}, "x-request-id"
 
 	case AccountTypeOAuth:
-		return func(ctx context.Context) (*http.Request, string, []byte, error) {
+		return func(ctx context.Context) (*http.Request, string, error) {
 			if s.tokenProvider == nil {
-				return nil, "", nil, errors.New("gemini token provider not configured")
+				return nil, "", errors.New("gemini token provider not configured")
 			}
 			accessToken, err := s.tokenProvider.GetAccessToken(ctx, account)
 			if err != nil {
-				return nil, "", nil, err
+				return nil, "", err
 			}
 
 			projectID := strings.TrimSpace(account.GetCredential("project_id"))
@@ -363,16 +406,20 @@ func (s *GeminiMessagesCompatService) buildGeminiChatCompletionsUpstreamRequestF
 			if projectID != "" {
 				baseURL, err := s.validateUpstreamBaseURL(geminicli.GeminiCliBaseURL)
 				if err != nil {
-					return nil, "", nil, err
+					return nil, "", err
 				}
 				fullURL := fmt.Sprintf("%s/v1internal:%s", strings.TrimRight(baseURL, "/"), action)
 				if useUpstreamStream {
 					fullURL += "?alt=sse"
 				}
 
+				geminiReq, err := geminiHandle.ReadAll()
+				if err != nil {
+					return nil, "", err
+				}
 				var inner any
 				if err := json.Unmarshal(geminiReq, &inner); err != nil {
-					return nil, "", nil, fmt.Errorf("failed to parse gemini request: %w", err)
+					return nil, "", fmt.Errorf("failed to parse gemini request: %w", err)
 				}
 				wrappedBytes, _ := json.Marshal(map[string]any{
 					"model":   mappedModel,
@@ -380,45 +427,44 @@ func (s *GeminiMessagesCompatService) buildGeminiChatCompletionsUpstreamRequestF
 					"request": inner,
 				})
 
-				upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(wrappedBytes))
+				upstreamReq, err := newRequest(ctx, fullURL, wrappedBytes)
 				if err != nil {
-					return nil, "", nil, err
+					return nil, "", err
 				}
 				upstreamReq.Header.Set("Content-Type", "application/json")
 				upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
 				upstreamReq.Header.Set("User-Agent", geminicli.GeminiCLIUserAgent)
-				return upstreamReq, "x-request-id", wrappedBytes, nil
+				return upstreamReq, "x-request-id", nil
 			}
 
 			baseURL := account.GetGeminiBaseURL(geminicli.AIStudioBaseURL)
 			normalizedBaseURL, err := s.validateUpstreamBaseURL(baseURL)
 			if err != nil {
-				return nil, "", nil, err
+				return nil, "", err
 			}
 
 			fullURL, err := buildGeminiAIStudioModelActionURL(normalizedBaseURL, mappedModel, action, useUpstreamStream)
 			if err != nil {
-				return nil, "", nil, err
+				return nil, "", err
 			}
 
-			restGeminiReq := normalizeGeminiRequestForAIStudio(geminiReq)
-			upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(restGeminiReq))
+			upstreamReq, err := newRESTRequest(ctx, fullURL)
 			if err != nil {
-				return nil, "", nil, err
+				return nil, "", err
 			}
 			upstreamReq.Header.Set("Content-Type", "application/json")
 			upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
-			return upstreamReq, "x-request-id", restGeminiReq, nil
+			return upstreamReq, "x-request-id", nil
 		}, "x-request-id"
 
 	case AccountTypeServiceAccount:
-		return func(ctx context.Context) (*http.Request, string, []byte, error) {
+		return func(ctx context.Context) (*http.Request, string, error) {
 			if s.tokenProvider == nil {
-				return nil, "", nil, errors.New("gemini token provider not configured")
+				return nil, "", errors.New("gemini token provider not configured")
 			}
 			accessToken, err := s.tokenProvider.GetAccessToken(ctx, account)
 			if err != nil {
-				return nil, "", nil, err
+				return nil, "", err
 			}
 
 			action := "generateContent"
@@ -427,22 +473,21 @@ func (s *GeminiMessagesCompatService) buildGeminiChatCompletionsUpstreamRequestF
 			}
 			fullURL, err := buildVertexGeminiURL(account.VertexProjectID(), account.VertexLocation(mappedModel), mappedModel, action, clientStream)
 			if err != nil {
-				return nil, "", nil, err
+				return nil, "", err
 			}
 
-			restGeminiReq := normalizeGeminiRequestForAIStudio(geminiReq)
-			upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(restGeminiReq))
+			upstreamReq, err := newRESTRequest(ctx, fullURL)
 			if err != nil {
-				return nil, "", nil, err
+				return nil, "", err
 			}
 			upstreamReq.Header.Set("Content-Type", "application/json")
 			upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
-			return upstreamReq, "x-request-id", restGeminiReq, nil
+			return upstreamReq, "x-request-id", nil
 		}, "x-request-id"
 
 	default:
-		return func(context.Context) (*http.Request, string, []byte, error) {
-			return nil, "", nil, fmt.Errorf("unsupported account type: %s", account.Type)
+		return func(context.Context) (*http.Request, string, error) {
+			return nil, "", fmt.Errorf("unsupported account type: %s", account.Type)
 		}, "x-request-id"
 	}
 }

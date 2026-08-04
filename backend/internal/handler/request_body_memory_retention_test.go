@@ -139,7 +139,7 @@ func TestRequestBodyMemoryRetentionWhileUpstreamBlocked(t *testing.T) {
 	}
 	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
 
-	for _, branch := range []string{"responses", "passthrough", "grok-responses", "responses-chat-fallback", "chat-raw", "chat-converted", "messages-anthropic", "messages-anthropic-stream", "messages-anthropic-passthrough-stream", "messages-antigravity-oauth", "messages-bedrock", "messages-bedrock-stream", "messages-gemini", "messages-gemini-mixed", "gemini-antigravity-native"} {
+	for _, branch := range []string{"responses", "passthrough", "grok-responses", "responses-chat-fallback", "chat-raw", "chat-converted", "gateway-chat-anthropic", "gateway-chat-gemini", "messages-anthropic", "messages-anthropic-stream", "messages-anthropic-passthrough-stream", "messages-antigravity-oauth", "messages-bedrock", "messages-bedrock-stream", "messages-gemini", "messages-gemini-mixed", "gemini-antigravity-native"} {
 		t.Run(branch, func(t *testing.T) {
 			var heapAt2MB, heapAt89MB uint64
 			var previewAt2MB, previewAt89MB, snapshotAt2MB, snapshotAt89MB int
@@ -215,6 +215,15 @@ func measureBlockedRequestBodyHeap(t *testing.T, branch string, size int64, spoo
 		extra["openai_responses_supported"] = true
 		upstream.contentType = "text/event-stream"
 		upstream.body = "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_retention\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"
+	case "gateway-chat-anthropic":
+		path = "/v1/chat/completions"
+		platform = service.PlatformAnthropic
+		upstream.contentType = "text/event-stream"
+		upstream.body = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_retention\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-4-5\",\"stop_reason\":\"\",\"usage\":{\"input_tokens\":1}}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"ok\"}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n"
+	case "gateway-chat-gemini":
+		path = "/v1/chat/completions"
+		platform = service.PlatformGemini
+		upstream.body = `{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}`
 	case "messages-anthropic":
 		path = "/v1/messages"
 		platform = service.PlatformAnthropic
@@ -283,6 +292,14 @@ func measureBlockedRequestBodyHeap(t *testing.T, branch string, size int64, spoo
 			c.Set(string(middleware.ContextKeyForcePlatform), service.PlatformAntigravity)
 			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.ForcePlatform, service.PlatformAntigravity))
 			env.handler.GeminiV1BetaModels(c)
+		})
+	} else if branch == "gateway-chat-anthropic" || branch == "gateway-chat-gemini" {
+		group := &service.Group{ID: 1401, Platform: platform, Status: service.StatusActive, Hydrated: true}
+		account := &service.Account{ID: 1401, Name: "retention", Platform: platform, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-retention"}}
+		env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+		router = env.routerFor(path, func(c *gin.Context) {
+			requestContext = c
+			env.handler.ChatCompletions(c)
 		})
 	} else if path == "/v1/messages" {
 		group := &service.Group{ID: 1401, Platform: platform, Status: service.StatusActive, Hydrated: true}
@@ -356,6 +373,11 @@ func retentionJSONBody(branch, path string, size int64) io.Reader {
 	}
 	if path == "/v1/chat/completions" {
 		prefix, suffix = `{"model":"gpt-5","stream":false,"messages":[{"role":"user","content":"`, `"}]}`
+		if branch == "gateway-chat-anthropic" {
+			prefix = `{"model":"claude-sonnet-4-5","stream":false,"messages":[{"role":"user","content":"`
+		} else if branch == "gateway-chat-gemini" {
+			prefix = `{"model":"gemini-2.5-flash","stream":false,"messages":[{"role":"user","content":"`
+		}
 	} else if path == "/v1/messages" {
 		prefix, suffix = `{"model":"gemini-2.5-flash","max_tokens":16,"stream":false,"messages":[{"role":"user","content":"`, `"}]}`
 	}

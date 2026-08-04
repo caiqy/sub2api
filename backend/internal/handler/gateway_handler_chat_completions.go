@@ -43,9 +43,26 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		zap.Any("group_id", apiKey.GroupID),
 	)
 
-	// Read request body
-	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
+	coordinator, err := newJSONRequestBody(c.Request)
 	if err != nil {
+		if errors.Is(err, service.ErrRequestBodySpool) {
+			h.chatCompletionsErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
+		if maxErr, ok := extractMaxBytesError(err); ok {
+			h.chatCompletionsErrorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+			return
+		}
+		h.chatCompletionsErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		return
+	}
+	defer coordinator.Cleanup()
+	body, err := coordinator.ReadRaw()
+	if err != nil {
+		if errors.Is(err, service.ErrRequestBodySpool) {
+			h.chatCompletionsErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			h.chatCompletionsErrorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 			return
@@ -58,7 +75,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		h.chatCompletionsErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return
 	}
-	service.SetUsageRequestBody(c, openAIRequestBodyPreviewSnapshot(body))
+	service.SetUsageRequestBody(c, service.RequestBodyPreviewSnapshot(coordinator.Effective().PreviewString(), coordinator.Effective().Size()))
 
 	setOpsRequestContext(c, "", false)
 
@@ -109,6 +126,46 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		h.openAISecurityAuditError(c, decision)
 		return
 	}
+	requestPayloadHash := service.HashUsageRequestPayload(body)
+
+	bodyRef := service.NewRequestBodyRefFromHandle(coordinator.Effective())
+	parsedReq, parseErr := service.ParseGatewayRequest(bodyRef, "chat_completions")
+	if errors.Is(parseErr, service.ErrRequestBodySpool) {
+		h.chatCompletionsErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+		return
+	}
+	if parsedReq == nil {
+		parsedReq = &service.ParsedRequest{Model: reqModel, Stream: reqStream, Body: bodyRef}
+	}
+	cloneGatewayParsedRequestScalars(parsedReq)
+	parsedReq.SessionContext = &service.SessionContext{
+		ClientIP:  ip.GetClientIP(c),
+		UserAgent: c.GetHeader("User-Agent"),
+		APIKeyID:  apiKey.ID,
+	}
+	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
+	groupPlatform := effectiveAPIKeyPlatform(c, apiKey)
+	selectionSessionHash := sessionHash
+	if groupPlatform == service.PlatformGemini && selectionSessionHash != "" {
+		selectionSessionHash = "gemini:" + selectionSessionHash
+	}
+
+	effectiveBody := body
+	if channelMapping.Mapped {
+		effectiveBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
+	}
+	if err := coordinator.SetEffectiveBytes(effectiveBody); err != nil {
+		if errors.Is(err, service.ErrRequestBodySpool) {
+			h.chatCompletionsErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+		} else {
+			h.chatCompletionsErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		}
+		return
+	}
+	effectiveHandle := coordinator.Effective()
+	service.BindOpenAIRequestBodyHandle(c, effectiveHandle)
+	body = nil
+	effectiveBody = nil
 
 	// Error passthrough binding
 	if h.errorPassthroughService != nil {
@@ -147,24 +204,6 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 		h.chatCompletionsErrorResponse(c, status, code, message)
 		return
-	}
-
-	// Parse request for session hash
-	bodyRef := service.NewRequestBodyRef(body)
-	parsedReq, _ := service.ParseGatewayRequest(bodyRef, "chat_completions")
-	if parsedReq == nil {
-		parsedReq = &service.ParsedRequest{Model: reqModel, Stream: reqStream, Body: bodyRef}
-	}
-	parsedReq.SessionContext = &service.SessionContext{
-		ClientIP:  ip.GetClientIP(c),
-		UserAgent: c.GetHeader("User-Agent"),
-		APIKeyID:  apiKey.ID,
-	}
-	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
-	groupPlatform := effectiveAPIKeyPlatform(c, apiKey)
-	selectionSessionHash := sessionHash
-	if groupPlatform == service.PlatformGemini && selectionSessionHash != "" {
-		selectionSessionHash = "gemini:" + selectionSessionHash
 	}
 
 	// 3. Account selection + failover loop
@@ -249,10 +288,6 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		// 5. Forward request
 		writerSizeBeforeForward := c.Writer.Size()
 		forwardStart := time.Now()
-		forwardBody := body
-		if channelMapping.Mapped {
-			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
-		}
 		var result *service.ForwardResult
 		setActualUpstreamEndpoint(c, "")
 		if account.Platform == service.PlatformGemini {
@@ -263,7 +298,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				}
 				return
 			}
-			result, err = h.geminiCompatService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody)
+			result, err = h.geminiCompatService.ForwardAsChatCompletions(c.Request.Context(), c, account, nil)
 		} else if shouldUseAntigravityCompat(account) {
 			if h.antigravityGatewayService == nil {
 				h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "upstream_error", "Antigravity compatibility service is not configured")
@@ -272,10 +307,18 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				}
 				return
 			}
+			forwardBody, readErr := effectiveHandle.ReadAll()
+			if readErr != nil {
+				if accountReleaseFunc != nil {
+					accountReleaseFunc()
+				}
+				h.chatCompletionsErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+				return
+			}
 			setActualUpstreamEndpoint(c, EndpointAntigravityGenerateContent)
 			result, err = h.antigravityGatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, parsedReq)
 		} else {
-			result, err = h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, parsedReq)
+			result, err = h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, nil, parsedReq)
 		}
 		forwardDuration := time.Since(forwardStart)
 
@@ -284,6 +327,12 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 
 		if err != nil {
+			if errors.Is(err, service.ErrRequestBodySpool) {
+				if c.Writer.Size() == writerSizeBeforeForward {
+					h.chatCompletionsErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+				}
+				return
+			}
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {
 				if c.Writer.Size() != writerSizeBeforeForward {
@@ -328,7 +377,6 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		// 6. Record usage
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
-		requestPayloadHash := service.HashUsageRequestPayload(body)
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 		detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
