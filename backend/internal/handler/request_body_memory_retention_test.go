@@ -151,6 +151,9 @@ func (u *retentionBlockingTransport) Do(req *http.Request, _ string, _ int64, _ 
 
 func (u *retentionBlockingTransport) responseHeaders() http.Header {
 	headers := u.responseHeader.Clone()
+	if headers == nil {
+		headers = make(http.Header)
+	}
 	headers.Set("Content-Type", u.contentType)
 	return headers
 }
