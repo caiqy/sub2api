@@ -17,6 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// Test hook only; tests replacing it must not run in parallel.
 var newAntigravityFallbackPayloadRequest = newAntigravityPayloadRequest
 
 // ForwardGemini 转发 Gemini 协议请求

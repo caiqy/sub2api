@@ -253,6 +253,126 @@ func TestGeminiV1BetaModels_AntigravityInitialSpoolReadFailureReturns503(t *test
 	require.Equal(t, 1, cache.releaseCalls())
 }
 
+func TestGeminiV1BetaModels_AntigravitySecondarySpoolFailuresReturn503WithoutBilling(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const model = "gemini-wave9"
+
+	tests := []struct {
+		name          string
+		status        int
+		responseBody  string
+		failCall      int
+		deleteSpools  bool
+		thoughtSig    bool
+		allowOverages bool
+		settings      map[string]string
+	}{
+		{
+			name: "smart retry transport", status: http.StatusServiceUnavailable, failCall: 2,
+			responseBody: `{"error":{"code":503,"status":"UNAVAILABLE","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","metadata":{"model":"gemini-wave9-smart"},"reason":"MODEL_CAPACITY_EXHAUSTED"}]}}`,
+		},
+		{
+			name: "single account retry transport", status: http.StatusServiceUnavailable, failCall: 2,
+			responseBody: `{"error":{"code":503,"status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","metadata":{"model":"gemini-wave9-single"},"reason":"RATE_LIMIT_EXCEEDED"},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"7s"}]}}`,
+		},
+		{
+			name: "credits retry transport", status: http.StatusTooManyRequests, failCall: 2, allowOverages: true,
+			responseBody: `{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"QUOTA_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","metadata":{"model":"gemini-wave9-credits"},"reason":"RATE_LIMIT_EXCEEDED"},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"0.1s"}]}}`,
+		},
+		{
+			name: "model fallback build", status: http.StatusNotFound, deleteSpools: true,
+			responseBody: `{"error":{"message":"model not found"}}`,
+			settings:     map[string]string{service.SettingKeyEnableModelFallback: "true", service.SettingKeyFallbackModelAntigravity: "gemini-wave9-fallback"},
+		},
+		{
+			name: "model fallback transport", status: http.StatusNotFound, failCall: 2,
+			responseBody: `{"error":{"message":"model not found"}}`,
+			settings:     map[string]string{service.SettingKeyEnableModelFallback: "true", service.SettingKeyFallbackModelAntigravity: "gemini-wave9-fallback"},
+		},
+		{
+			name: "signature retry build", status: http.StatusBadRequest, deleteSpools: true, thoughtSig: true,
+			responseBody: `{"response":{"error":{"code":400,"message":"Corrupted thought signature.","status":"INVALID_ARGUMENT"}}}`,
+		},
+		{
+			name: "signature retry transport", status: http.StatusBadRequest, failCall: 2, thoughtSig: true,
+			responseBody: `{"response":{"error":{"code":400,"message":"Corrupted thought signature.","status":"INVALID_ARGUMENT"}}}`,
+		},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spoolDir := t.TempDir()
+			t.Setenv("TMPDIR", spoolDir)
+			t.Setenv("TMP", spoolDir)
+			t.Setenv("TEMP", spoolDir)
+			oldOptions := jsonRequestBodyHandleOptions
+			jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: spoolDir}
+			t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+
+			group := &service.Group{ID: int64(110 + i), Platform: service.PlatformAntigravity, Status: service.StatusActive, Hydrated: true}
+			account := &service.Account{
+				ID: int64(210 + i), Name: "antigravity-secondary-spool", Platform: service.PlatformAntigravity, Type: service.AccountTypeOAuth,
+				Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1,
+				Credentials: map[string]any{"access_token": "token", "project_id": "project", "model_mapping": map[string]any{model: "gemini-wave9-mapped"}},
+			}
+			if tt.allowOverages {
+				account.Extra = map[string]any{"allow_overages": true}
+			}
+			upstream := &geminiSecondarySpoolUpstream{
+				t: t, spoolDir: spoolDir, failCall: tt.failCall, deleteSpools: tt.deleteSpools,
+				firstResponse: &http.Response{StatusCode: tt.status, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(tt.responseBody))},
+			}
+			env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+			settingService := service.NewSettingService(&geminiModerationSettingRepo{values: tt.settings}, env.handler.cfg)
+			env.handler.settingService = settingService
+			env.handler.antigravityGatewayService = service.NewAntigravityGatewayService(
+				env.accountRepo, openAIChatCompletionsGatewayCacheStub{}, nil,
+				service.NewAntigravityTokenProvider(env.accountRepo, nil, nil), nil, upstream, settingService, nil,
+			)
+			billingRepo := captureTerminalGatewayUsageBilling(t, env, group, upstream)
+
+			text := "hello"
+			if tt.deleteSpools {
+				text = strings.Repeat("x", int(service.DefaultRequestBodySpoolThresholdBytes)+1024)
+			}
+			body := `{"contents":[{"role":"user","parts":[{"text":"` + text + `"}]}]}`
+			if tt.thoughtSig {
+				body = `{"contents":[{"role":"user","parts":[{"text":"` + text + `"}]},{"role":"model","parts":[{"text":"thinking","thought":true,"thoughtSignature":"bad-signature"}]}]}`
+			}
+
+			var writerSpy *geminiHandlerWriterSpy
+			router := env.routerFor("/antigravity/v1beta/models/*modelAction", func(c *gin.Context) {
+				c.Set(string(middleware.ContextKeyForcePlatform), service.PlatformAntigravity)
+				c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.ForcePlatform, service.PlatformAntigravity))
+				writerSpy = &geminiHandlerWriterSpy{ResponseWriter: c.Writer}
+				c.Writer = writerSpy
+				upstream.writer = writerSpy
+				env.handler.GeminiV1BetaModels(c)
+			})
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/antigravity/v1beta/models/"+model+":generateContent", strings.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(recorder, request)
+
+			require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+			require.NotNil(t, writerSpy)
+			require.False(t, writerSpy.writtenBeforeFirstHeader, "service must not write before handler maps the sentinel")
+			require.Equal(t, http.StatusServiceUnavailable, writerSpy.firstStatus)
+			if tt.failCall > 0 {
+				require.False(t, upstream.writtenAtFailure, "writer must remain uncommitted when transport returns the sentinel")
+				require.Equal(t, tt.failCall, upstream.calls)
+			} else {
+				require.Equal(t, 1, upstream.calls)
+			}
+			require.Nil(t, billingRepo.lastCmd, "spool failures must not invoke successful billing")
+			failedUsage := waitForOpenAIFailedUsageLog(t, env.usageRepo)
+			require.NotNil(t, failedUsage, "an attempted transport may create a failed audit usage record")
+			require.Zero(t, failedUsage.TotalCost)
+			require.Zero(t, failedUsage.ActualCost)
+		})
+	}
+}
+
 func TestGeminiV1BetaModels_ThoughtSignatureCleanupUsesEffectiveHandle(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rawDir := t.TempDir()
@@ -531,6 +651,54 @@ type geminiSpoolReleaseConcurrencyCache struct {
 	releaseOnce sync.Once
 	mu          sync.Mutex
 	releases    int
+}
+
+type geminiHandlerWriterSpy struct {
+	gin.ResponseWriter
+	writtenBeforeFirstHeader bool
+	firstStatus              int
+}
+
+func (w *geminiHandlerWriterSpy) WriteHeader(status int) {
+	if w.firstStatus == 0 {
+		w.writtenBeforeFirstHeader = w.ResponseWriter.Written()
+		w.firstStatus = status
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+type geminiSecondarySpoolUpstream struct {
+	service.HTTPUpstream
+	t                *testing.T
+	spoolDir         string
+	firstResponse    *http.Response
+	writer           gin.ResponseWriter
+	failCall         int
+	deleteSpools     bool
+	writtenAtFailure bool
+	calls            int
+}
+
+func (u *geminiSecondarySpoolUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	u.calls++
+	if u.calls == u.failCall {
+		u.writtenAtFailure = u.writer != nil && u.writer.Written()
+		return nil, fmt.Errorf("secondary transport: %w", service.ErrRequestBodySpool)
+	}
+	if req != nil && req.Body != nil {
+		_, err := io.Copy(io.Discard, req.Body)
+		require.NoError(u.t, err)
+		require.NoError(u.t, req.Body.Close())
+	}
+	if u.deleteSpools {
+		entries, err := os.ReadDir(u.spoolDir)
+		require.NoError(u.t, err)
+		require.NotEmpty(u.t, entries)
+		for _, entry := range entries {
+			require.NoError(u.t, os.Remove(filepath.Join(u.spoolDir, entry.Name())))
+		}
+	}
+	return u.firstResponse, nil
 }
 
 func (c *geminiSpoolReleaseConcurrencyCache) AcquireAccountSlot(context.Context, int64, int, string) (bool, error) {
