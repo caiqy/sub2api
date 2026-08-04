@@ -1405,6 +1405,63 @@ func TestAntigravityGatewayService_ForwardGemini_RetriesCorruptedThoughtSignatur
 	require.Equal(t, "signature_error", events[0].Kind)
 }
 
+func TestAntigravityGatewayService_ForwardGemini_SignatureRetryBuilderSpoolErrorReturnsSentinel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	writer := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(writer)
+	body := []byte(`{"contents":[{"role":"user","parts":[{"text":"hello"}]},{"role":"model","parts":[{"text":"thinking","thought":true,"thoughtSignature":"bad-signature"}]}]}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/antigravity/v1beta/models/gemini-wave11:generateContent", bytes.NewReader(body))
+
+	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"response":{"error":{"code":400,"message":"Corrupted thought signature.","status":"INVALID_ARGUMENT"}}}`)),
+	}}}
+	svc := &AntigravityGatewayService{
+		settingService: NewSettingService(&antigravitySettingRepoStub{}, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
+		tokenProvider:  &AntigravityTokenProvider{},
+		httpUpstream:   upstream,
+	}
+	account := &Account{
+		ID: 110, Name: "signature-builder-spool", Platform: PlatformAntigravity, Type: AccountTypeOAuth, Status: StatusActive, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "token", "project_id": "project", "model_mapping": map[string]any{"gemini-wave11": "gemini-wave11-mapped"}},
+	}
+
+	spoolErr := fmt.Errorf("build signature retry request: %w", ErrRequestBodySpool)
+	oldBuilder := newAntigravitySignatureRetryPayloadRequest
+	builderCalls := 0
+	writtenAtBuilder := true
+	newAntigravitySignatureRetryPayloadRequest = func(*antigravityRetryLoopParams, string) (*http.Request, error) {
+		builderCalls++
+		writtenAtBuilder = c.Writer.Written()
+		return nil, spoolErr
+	}
+	t.Cleanup(func() { newAntigravitySignatureRetryPayloadRequest = oldBuilder })
+
+	result, err := svc.ForwardGemini(context.Background(), c, account, "gemini-wave11", "generateContent", false, body, false)
+
+	require.Nil(t, result)
+	require.True(t, err == spoolErr, "spool sentinel must be returned without wrapping")
+	require.Equal(t, 1, builderCalls, "signature retry must reach the real builder boundary exactly once")
+	require.Equal(t, 1, upstream.callCount, "initial request must succeed before the signature retry builder fails")
+	require.False(t, writtenAtBuilder, "service must not commit the response before returning the sentinel")
+	require.False(t, c.Writer.Written())
+}
+
+func TestAntigravityRetryLoop_NilPayloadRequestReturnsError(t *testing.T) {
+	svc := &AntigravityGatewayService{}
+	result, err := svc.antigravityRetryLoop(antigravityRetryLoopParams{
+		ctx:     context.Background(),
+		account: &Account{},
+		requestBuilder: func(*antigravityRetryLoopParams, string) (*http.Request, error) {
+			return nil, nil
+		},
+	})
+
+	require.Nil(t, result)
+	require.EqualError(t, err, "antigravity request builder returned nil request")
+}
+
 func TestAntigravityGatewayService_ForwardGemini_SignatureRetryPropagatesFailover(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	writer := httptest.NewRecorder()
@@ -1600,7 +1657,11 @@ func TestAntigravityGatewayService_ForwardGemini_ModelFallbackBuildSpoolErrorRet
 		Credentials: map[string]any{"access_token": "token", "project_id": "project", "model_mapping": map[string]any{"gemini-wave8": "gemini-wave8-mapped"}},
 	}
 	oldBuilder := newAntigravityFallbackPayloadRequest
+	builderCalls := 0
+	writtenAtBuilder := true
 	newAntigravityFallbackPayloadRequest = func(*antigravityRetryLoopParams, string) (*http.Request, error) {
+		builderCalls++
+		writtenAtBuilder = c.Writer.Written()
 		return nil, fmt.Errorf("build fallback request: %w", ErrRequestBodySpool)
 	}
 	t.Cleanup(func() { newAntigravityFallbackPayloadRequest = oldBuilder })
@@ -1609,6 +1670,9 @@ func TestAntigravityGatewayService_ForwardGemini_ModelFallbackBuildSpoolErrorRet
 
 	require.Nil(t, result)
 	require.ErrorIs(t, err, ErrRequestBodySpool)
+	require.Equal(t, 1, builderCalls)
+	require.False(t, writtenAtBuilder, "service must not commit the response before returning the sentinel")
+	require.False(t, c.Writer.Written())
 	require.Equal(t, 1, upstream.callCount)
 	require.Empty(t, writer.Body.String())
 }

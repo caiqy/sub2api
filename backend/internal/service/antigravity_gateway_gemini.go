@@ -17,26 +17,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Test hooks only; tests replacing them must not run in parallel.
+// Test hooks replace request construction at the real retry builder boundaries;
+// tests replacing them must not run in parallel.
 var (
-	newAntigravityFallbackPayloadRequest = newAntigravityPayloadRequest
-	antigravitySignatureRetryBuilderHook func() error
+	newAntigravityFallbackPayloadRequest       = newAntigravityPayloadRequest
+	newAntigravitySignatureRetryPayloadRequest = newAntigravityPayloadRequest
 )
-
-func SetAntigravityGeminiBuilderHooksForTest(fallback, signature func() error) func() {
-	oldFallback := newAntigravityFallbackPayloadRequest
-	oldSignature := antigravitySignatureRetryBuilderHook
-	if fallback != nil {
-		newAntigravityFallbackPayloadRequest = func(*antigravityRetryLoopParams, string) (*http.Request, error) {
-			return nil, fallback()
-		}
-	}
-	antigravitySignatureRetryBuilderHook = signature
-	return func() {
-		newAntigravityFallbackPayloadRequest = oldFallback
-		antigravitySignatureRetryBuilderHook = oldSignature
-	}
-}
 
 // ForwardGemini 转发 Gemini 协议请求
 //
@@ -351,19 +337,17 @@ func (s *AntigravityGatewayService) forwardGeminiHandle(ctx context.Context, c *
 					isStickySession: isStickySession,
 					groupID:         forwardOpts.groupID,
 					sessionHash:     forwardOpts.sessionHash,
+					requestBuilder:  newAntigravitySignatureRetryPayloadRequest,
 				}
-				var retryResult *antigravityRetryLoopResult
-				var retryErr error
-				if antigravitySignatureRetryBuilderHook != nil {
-					retryErr = antigravitySignatureRetryBuilderHook()
-				} else {
-					retryResult, retryErr = s.antigravityRetryLoop(retryParams)
-				}
+				retryResult, retryErr := s.antigravityRetryLoop(retryParams)
 				if errors.Is(retryErr, ErrRequestBodySpool) {
 					CleanupRequestBodyHandle(retryHandle)
 					return nil, retryErr
 				}
 				CleanupRequestBodyHandle(retryHandle)
+				if retryErr == nil && retryResult == nil {
+					retryErr = errors.New("signature retry returned nil result")
+				}
 				if retryErr == nil {
 					retryResp := retryResult.resp
 					if retryResp.StatusCode < 400 {

@@ -42,6 +42,7 @@ type antigravityRetryLoopParams struct {
 	groupID         int64  // 用于模型级限流时清除粘性会话
 	sessionHash     string // 用于模型级限流时清除粘性会话
 	extraHeaders    http.Header
+	requestBuilder  func(*antigravityRetryLoopParams, string) (*http.Request, error)
 }
 
 // antigravityRetryLoopResult 重试循环的结果
@@ -560,9 +561,16 @@ urlFallbackLoop:
 			default:
 			}
 
-			upstreamReq, err := newAntigravityPayloadRequest(&p, baseURL)
+			requestBuilder := p.requestBuilder
+			if requestBuilder == nil {
+				requestBuilder = newAntigravityPayloadRequest
+			}
+			upstreamReq, err := requestBuilder(&p, baseURL)
 			if err != nil {
 				return nil, err
+			}
+			if upstreamReq == nil {
+				return nil, errors.New("antigravity request builder returned nil request")
 			}
 			SetUsageUpstreamRequest(p.c, upstreamReq, antigravityPayloadPreview(&p))
 			SetOpsUpstreamAttempted(p.c, true)

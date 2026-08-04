@@ -262,7 +262,6 @@ func TestGeminiV1BetaModels_AntigravitySecondarySpoolFailuresReturn503WithoutBil
 		status        int
 		responseBody  string
 		failCall      int
-		buildFailure  string
 		thoughtSig    bool
 		allowOverages bool
 		settings      map[string]string
@@ -280,18 +279,9 @@ func TestGeminiV1BetaModels_AntigravitySecondarySpoolFailuresReturn503WithoutBil
 			responseBody: `{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"QUOTA_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","metadata":{"model":"gemini-wave9-credits"},"reason":"RATE_LIMIT_EXCEEDED"},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"0.1s"}]}}`,
 		},
 		{
-			name: "model fallback builder spool failure", status: http.StatusNotFound, buildFailure: "fallback",
-			responseBody: `{"error":{"message":"model not found"}}`,
-			settings:     map[string]string{service.SettingKeyEnableModelFallback: "true", service.SettingKeyFallbackModelAntigravity: "gemini-wave9-fallback"},
-		},
-		{
 			name: "model fallback transport", status: http.StatusNotFound, failCall: 2,
 			responseBody: `{"error":{"message":"model not found"}}`,
 			settings:     map[string]string{service.SettingKeyEnableModelFallback: "true", service.SettingKeyFallbackModelAntigravity: "gemini-wave9-fallback"},
-		},
-		{
-			name: "signature retry builder spool failure", status: http.StatusBadRequest, buildFailure: "signature", thoughtSig: true,
-			responseBody: `{"response":{"error":{"code":400,"message":"Corrupted thought signature.","status":"INVALID_ARGUMENT"}}}`,
 		},
 		{
 			name: "signature retry transport", status: http.StatusBadRequest, failCall: 2, thoughtSig: true,
@@ -308,20 +298,6 @@ func TestGeminiV1BetaModels_AntigravitySecondarySpoolFailuresReturn503WithoutBil
 			oldOptions := jsonRequestBodyHandleOptions
 			jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: spoolDir}
 			t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
-			builderCalls := 0
-			if tt.buildFailure != "" {
-				builder := func() error {
-					builderCalls++
-					return fmt.Errorf("%s builder: %w", tt.buildFailure, service.ErrRequestBodySpool)
-				}
-				var fallbackBuilder, signatureBuilder func() error
-				if tt.buildFailure == "fallback" {
-					fallbackBuilder = builder
-				} else {
-					signatureBuilder = builder
-				}
-				t.Cleanup(service.SetAntigravityGeminiBuilderHooksForTest(fallbackBuilder, signatureBuilder))
-			}
 
 			group := &service.Group{ID: int64(110 + i), Platform: service.PlatformAntigravity, Status: service.StatusActive, Hydrated: true}
 			account := &service.Account{
@@ -374,9 +350,6 @@ func TestGeminiV1BetaModels_AntigravitySecondarySpoolFailuresReturn503WithoutBil
 				require.Equal(t, tt.failCall, upstream.calls)
 			} else {
 				require.Equal(t, 1, upstream.calls)
-			}
-			if tt.buildFailure != "" {
-				require.Equal(t, 1, builderCalls, "target builder must be reached exactly once")
 			}
 			require.Nil(t, billingRepo.lastCmd, "spool failures must not invoke successful billing")
 			failedUsage := waitForOpenAIFailedUsageLog(t, env.usageRepo)
