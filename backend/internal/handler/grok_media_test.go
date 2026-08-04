@@ -853,6 +853,30 @@ func TestGrokMedia_MultipartEffectiveSpoolFailureReturns503(t *testing.T) {
 	require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
 	require.Empty(t, upstream.calls())
 }
+
+func TestGrokMedia_TransportSpoolFailureReturns503WithoutUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 919, Platform: service.PlatformGrok, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
+	account := &service.Account{
+		ID: 920, Name: "grok-spool", Platform: service.PlatformGrok, Type: service.AccountTypeAPIKey,
+		Status: service.StatusActive, Schedulable: true, Concurrency: 1,
+		Credentials: map[string]any{"api_key": "key", "base_url": "https://api.x.ai/v1"},
+	}
+	upstream := &responsesSpoolTransportUpstream{}
+	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &terminalUsageGrokAccountRepo{openAIRetryAccountRepoStub{accounts: []*service.Account{account}}}, upstream)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"grok-imagine-image","prompt":"draw"}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	env.router("/v1/images/generations", env.handler.GrokImages).ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
+	require.Equal(t, "api_error", gjson.Get(rec.Body.String(), "error.type").String())
+	require.Equal(t, "Failed to spool request body", gjson.Get(rec.Body.String(), "error.message").String())
+	require.Equal(t, 1, upstream.calls)
+	require.Nil(t, env.usageRepo.lastLog)
+}
+
 func TestGrokMediaRequiredCapability(t *testing.T) {
 	tests := []struct {
 		name     string

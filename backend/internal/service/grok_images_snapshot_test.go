@@ -3,10 +3,13 @@ package service
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -39,6 +42,55 @@ func TestGrokMediaRequestInfo_ReleaseText(t *testing.T) {
 	require.Empty(t, request.MaskImageURL)
 	require.Nil(t, request.Uploads[0].Data)
 	require.Nil(t, request.MaskUpload.Data)
+}
+
+func TestForwardGrokMediaPreservesRequestBodySpoolFailures(t *testing.T) {
+	t.Setenv(xai.EnvAllowUnsafeURLOverrides, "true")
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"grok-imagine-image","prompt":"draw"}`)
+	account := &Account{
+		ID: 12, Name: "grok-spool", Platform: PlatformGrok, Type: AccountTypeAPIKey, Concurrency: 1,
+		Credentials: map[string]any{"api_key": "key", "base_url": "https://xai.test/v1"},
+	}
+
+	for _, tt := range []struct {
+		name         string
+		callBody     []byte
+		transportErr error
+		wantCalls    int
+	}{
+		{name: "bound read", callBody: nil},
+		{name: "outbound open", callBody: body},
+		{name: "transport", callBody: body, transportErr: fmt.Errorf("read request body: %w", ErrRequestBodySpool), wantCalls: 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
+			c.Request.Header.Set("Content-Type", "application/json")
+			upstream := &httpUpstreamRecorder{err: tt.transportErr}
+			svc := &OpenAIGatewayService{httpUpstream: upstream}
+
+			if tt.transportErr == nil {
+				spoolDir := t.TempDir()
+				handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: spoolDir})
+				require.NoError(t, err)
+				t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+				BindOpenAIRequestBodyHandle(c, handle)
+				entries, err := os.ReadDir(spoolDir)
+				require.NoError(t, err)
+				require.Len(t, entries, 1)
+				require.NoError(t, os.Remove(filepath.Join(spoolDir, entries[0].Name())))
+			}
+
+			result, err := svc.ForwardGrokMedia(context.Background(), c, account, GrokMediaEndpointImagesGenerations, "", tt.callBody, "application/json")
+
+			require.Nil(t, result)
+			require.ErrorIs(t, err, ErrRequestBodySpool)
+			require.Len(t, upstream.requests, tt.wantCalls)
+			require.False(t, c.Writer.Written())
+		})
+	}
 }
 
 type grokPreviewAccountRepo struct {
