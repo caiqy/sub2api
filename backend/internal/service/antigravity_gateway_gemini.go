@@ -17,6 +17,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+var newAntigravityFallbackPayloadRequest = newAntigravityPayloadRequest
+
 // ForwardGemini 转发 Gemini 协议请求
 //
 // 限流处理流程:
@@ -237,7 +239,7 @@ func (s *AntigravityGatewayService) forwardGeminiHandle(ctx context.Context, c *
 						return nil, fmt.Errorf("create fallback gemini request body handle: %w", handleErr)
 					}
 					fallbackParams := antigravityRetryLoopParams{ctx: ctx, action: upstreamAction, accessToken: accessToken, payloadHandle: fallbackHandle, extraHeaders: extraHeaders}
-					fallbackReq, buildErr := newAntigravityPayloadRequest(&fallbackParams, resolveAntigravityForwardBaseURL())
+					fallbackReq, buildErr := newAntigravityFallbackPayloadRequest(&fallbackParams, resolveAntigravityForwardBaseURL())
 					if errors.Is(buildErr, ErrRequestBodySpool) {
 						CleanupRequestBodyHandle(fallbackHandle)
 						return nil, buildErr

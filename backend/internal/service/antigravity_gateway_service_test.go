@@ -9,8 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1520,28 +1518,16 @@ func TestAntigravityGatewayService_ForwardGemini_ModelFallbackUpdatesUsageSnapsh
 
 func TestAntigravityGatewayService_ForwardGemini_ModelFallbackBuildSpoolErrorReturnsSentinel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	tempDir := t.TempDir()
-	t.Setenv("TMPDIR", tempDir)
-	t.Setenv("TMP", tempDir)
-	t.Setenv("TEMP", tempDir)
 	writer := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(writer)
-	body := []byte(`{"contents":[{"role":"user","parts":[{"text":"` + strings.Repeat("x", 2<<20) + `"}]}]}`)
+	body := []byte(`{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/antigravity/v1beta/models/gemini-wave8:streamGenerateContent", bytes.NewReader(body))
 
-	firstCall := make(chan struct{})
-	releaseFirst := make(chan struct{})
 	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{
 		StatusCode: http.StatusNotFound,
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
 		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"model not found"}}`)),
 	}}}
-	upstream.onCall = func(_ *http.Request, stub *queuedHTTPUpstreamStub) {
-		if stub.callCount == 1 {
-			close(firstCall)
-			<-releaseFirst
-		}
-	}
 	svc := &AntigravityGatewayService{
 		settingService: NewSettingService(&antigravitySettingRepoValuesStub{values: map[string]string{
 			SettingKeyEnableModelFallback:      "true",
@@ -1554,51 +1540,16 @@ func TestAntigravityGatewayService_ForwardGemini_ModelFallbackBuildSpoolErrorRet
 		ID: 106, Name: "fallback-build-spool", Platform: PlatformAntigravity, Type: AccountTypeOAuth, Status: StatusActive, Concurrency: 1,
 		Credentials: map[string]any{"access_token": "token", "project_id": "project", "model_mapping": map[string]any{"gemini-wave8": "gemini-wave8-mapped"}},
 	}
-
-	type forwardResult struct {
-		result *ForwardResult
-		err    error
+	oldBuilder := newAntigravityFallbackPayloadRequest
+	newAntigravityFallbackPayloadRequest = func(*antigravityRetryLoopParams, string) (*http.Request, error) {
+		return nil, fmt.Errorf("build fallback request: %w", ErrRequestBodySpool)
 	}
-	done := make(chan forwardResult, 1)
-	go func() {
-		result, err := svc.ForwardGemini(context.Background(), c, account, "gemini-wave8", "streamGenerateContent", true, body, false)
-		done <- forwardResult{result: result, err: err}
-	}()
-	<-firstCall
-	entries, err := os.ReadDir(tempDir)
-	require.NoError(t, err)
-	baseline := make(map[string]struct{}, len(entries))
-	for _, entry := range entries {
-		baseline[entry.Name()] = struct{}{}
-	}
-	removed := make(chan error, 1)
-	go func() {
-		deadline := time.Now().Add(5 * time.Second)
-		for time.Now().Before(deadline) {
-			entries, readErr := os.ReadDir(tempDir)
-			if readErr != nil {
-				removed <- readErr
-				return
-			}
-			for _, entry := range entries {
-				if _, exists := baseline[entry.Name()]; exists {
-					continue
-				}
-				if removeErr := os.Remove(filepath.Join(tempDir, entry.Name())); removeErr == nil || errors.Is(removeErr, os.ErrNotExist) {
-					removed <- nil
-					return
-				}
-			}
-			time.Sleep(time.Millisecond)
-		}
-		removed <- errors.New("fallback spool file was not removed")
-	}()
-	close(releaseFirst)
-	out := <-done
-	require.NoError(t, <-removed)
+	t.Cleanup(func() { newAntigravityFallbackPayloadRequest = oldBuilder })
 
-	require.Nil(t, out.result)
-	require.ErrorIs(t, out.err, ErrRequestBodySpool)
+	result, err := svc.ForwardGemini(context.Background(), c, account, "gemini-wave8", "streamGenerateContent", true, body, false)
+
+	require.Nil(t, result)
+	require.ErrorIs(t, err, ErrRequestBodySpool)
 	require.Equal(t, 1, upstream.callCount)
 	require.Empty(t, writer.Body.String())
 }
