@@ -25,7 +25,7 @@
 | 第 4 轮 | 穷举式（26 文件逐 hunk） | Responses 标量 clone 遗漏 | 1 wave |
 | 第 5 轮（最终） | 发布前整体关 | parser spool 未统一 503、OAuth/Websearch 静默 Bytes()、transport 漏关 resp body、Gemini backoff 不响应 ctx | 1 wave（16） |
 
-**回归审查最终结论**：**PASS（可发布）**——无未解决的业务回归；重放一致性、错误映射（未提交 503 / 已提交协议终止帧）、failover、usage/billing（含零费用 failed usage 审计语义）、streaming 协议（SSE `event: error`/`response.failed`）均与 base 一致；新增 2 个导出常量（有意的默认值 API），无其他 exported API 变更；WS 文件零改动；wave 14 为纯测试，wave 16 含生产修复。
+**回归审查最终结论**：**PASS（可发布）**——无未解决的业务回归；重放一致性、错误映射（未提交 503 / 已提交协议终止帧）、failover、usage/billing（含零费用 failed usage 审计语义）、streaming 协议（SSE `event: error`/`response.failed`）均与 base 一致；新增 2 个导出常量（`DefaultRequestBodySpoolThresholdBytes`/`DefaultRequestBodyPreviewLimitBytes`，有意的默认值 API），无其他 exported API 变更；WS 文件零改动；wave 14 为纯测试，wave 16/17 含生产修复。
 
 ## 1. Completeness（完整性）
 
