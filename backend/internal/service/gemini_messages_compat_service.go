@@ -686,6 +686,8 @@ func (s *GeminiMessagesCompatService) prepareMessagesCompatForward(ctx context.C
 	}, nil
 }
 
+// ForwardHandle borrows bodyHandle; the caller retains cleanup ownership.
+// Transformed outbound handles created here are owned and cleaned before return.
 func (s *GeminiMessagesCompatService) ForwardHandle(ctx context.Context, c *gin.Context, account *Account, bodyHandle *RequestBodyHandle) (*ForwardResult, error) {
 	startTime := time.Now()
 	prepared, err := s.prepareMessagesCompatForward(ctx, c, account, bodyHandle)

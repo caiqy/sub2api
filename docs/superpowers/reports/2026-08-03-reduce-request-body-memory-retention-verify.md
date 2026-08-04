@@ -2,8 +2,8 @@
 
 - Change: reduce-request-body-memory-retention
 - 日期: 2026-08-03
-- verify_mode: full（31 任务 / 39 文件 / 2757 行新增）
-- 分支: feature/20260803/reduce-request-body-memory-retention（64 commits，HEAD 7deb66b8e，Wave 19 基线 adbc7802f，base 8b494e187）
+- verify_mode: full（31 任务；Wave 20 复验）
+- 分支: feature/20260803/reduce-request-body-memory-retention（68 commits，代码审查 HEAD 10cf5efed，Wave 20 基线 6430be715，base 8b494e187）
 
 ## Summary
 
@@ -15,7 +15,7 @@
 
 ## 回归专项审查（用户要求，2026-08-03 补充）
 
-验证通过后追加**七轮**业务回归专项审查（19 个修复 wave，7deb66b8e 收尾，64 commits），全部发现已解决：
+验证通过后追加**八轮**业务回归专项审查（20 个修复 wave，10cf5efed 收尾，68 commits），全部发现已解决：
 
 | 轮次 | 方法 | 发现 | 处置 |
 |------|------|------|------|
@@ -26,17 +26,18 @@
 | 第 5 轮 | 全链路错误语义复核 | parser spool 未统一 503、OAuth/Websearch ReadAll 错误未传播、transport spool error 漏关 response body、Gemini backoff 不响应 ctx | 1 wave（16） |
 | 第 6 轮 | Gateway Chat 收尾 | Gateway Chat 未 handle 化、Chat retry backoff 不响应 ctx、验证报告范围失真 | 1 wave（17） |
 | 第 7 轮（最终） | 发布前整体关 | Wave 17/18 Gateway Chat 复审：post-ping SSE spool error 追加裸 JSON、lenient JSON/解压后限长契约回归、未提交 spool error envelope 漂移 | Wave 18 修复 post-ping/lenient，Wave 19 修复 envelope |
+| 第 8 轮（复核） | Wave 20 驻留与错误语义 | Composite/ClaudeCodeOnly 解压 body、OpenAI `/v1/messages` 转换 body 跨等待驻留；Grok media transport spool 落为 502；设计/API 清单失真 | Wave 20 修复并复验 |
 
-**回归审查最终结论**：**PASS（可发布）**——无未解决的业务回归；重放一致性、错误映射（未提交 503 / 已提交协议终止帧）、failover、usage/billing（含零费用 failed usage 审计语义）、streaming 协议（SSE `event: error`/`response.failed`）均与 base 一致；新增 2 个导出常量（`DefaultRequestBodySpoolThresholdBytes`/`DefaultRequestBodyPreviewLimitBytes`，有意的默认值 API），无其他 exported API 变更；WS 文件零改动；wave 14 为纯测试，wave 16/17/18/19 含生产修复。
+**回归审查最终结论**：**PASS（可发布）**——无未解决的业务回归；重放一致性、错误映射（未提交 503 / 已提交协议终止帧）、failover、usage/billing（含零费用 failed usage 审计语义）、streaming 协议（SSE `event: error`/`response.failed`）均与 base 一致；既有 exported 签名未改变，新增导出表面为 `DefaultRequestBodySpoolThresholdBytes`、`DefaultRequestBodyPreviewLimitBytes`、`GeminiMessagesCompatService.ForwardHandle`、`AntigravityGatewayService.ForwardAsResponsesHandle` 和 `ParsedRequest.RequestPayloadHash`；WS 文件零改动；wave 14 为纯测试，wave 16/17/18/19/20 含生产修复。
 
 ## 1. Completeness（完整性）
 
 - tasks.md：31 个任务全部 `[x]`（0 未完成）
-- 变更文件 39 个，与 tasks.md 描述一致（handler/service 生产代码、测试、memory 文档）
+- 变更范围与 tasks.md 及后续 20 个回归修复 wave 一致（handler/service 生产代码、测试、memory 文档）
 - delta spec 4 个 requirement 全部有对应实现：
   - 大请求文件化（spool 阈值 1MB 导出常量、preview 256KB）✅
   - usage 指纹与业务语义保持（session/usage/cyber hash 预计算口径测试）✅
-  - 上游等待期零完整副本（17 条路径阻塞 heap 矩阵）✅
+  - 上游等待期零完整副本（20 条路径阻塞 heap 覆盖）✅
   - preview 有界（256KB 上限 + 序列化快照断言）✅
 
 ## 2. Correctness（正确性）
@@ -54,7 +55,7 @@
 ### Requirement 3: 上游等待期间不持有完整请求体内存副本 ✅
 - handler 循环内按需物化（Responses/ChatCompletions/Anthropic/Gemini/Grok）
 - service 层 Forward retry handle 化（invalid_encrypted_content/rejected field 改写重建 handle）
-- 17 条大 body 路径阻塞 transport heap 验证：retained growth 均 < 3MiB（2MB vs 8.9MB 增长 84KB；混合 Gemini 分支从 7.2MB 降至 1.5KB）
+- 20 条大 body 路径阻塞 transport heap 验证：retained growth 均 < 3MiB；Wave 20 最终复验 Composite 6,392B、ClaudeCodeOnly 1,008B、OpenAI `/v1/messages` 13,464B
 - WS 分支明确排除（后续 change），两个 WS 文件 git diff 零改动
 
 ### Requirement 4: preview 有界 ✅
@@ -64,7 +65,7 @@
 ## 3. Coherence（一致性）
 
 - 实现符合 design.md 高层决策（D1 阈值 1MB、D2 常量统一派生、D3 循环内物化）与 Design Doc 全链路 handle 化方案
-- 公开 `Forward` 签名保持；仅新增 handle-backed 内部入口（ForwardGeminiHandle/ForwardAsResponsesHandle）
+- 既有公开 `Forward` 签名保持；导出新增项完整清单为两个默认常量、两个 handle-backed 方法及 `ParsedRequest.RequestPayloadHash` 字段
 - 无新增依赖、配置、数据库 schema
 - memory/context 文档已更新为 v2 结论（10MB 标注为 v2 前状态）
 
@@ -72,14 +73,14 @@
 
 - build 阶段 final whole-branch review（thorough）：3 Critical + 2 Important，经 3 轮修复全部解决（final fix waves 1-3）
 - 覆盖正确性（ownership 边界、错误映射）、安全（preview 清洗、无敏感泄漏）、边界（hash 口径、槽位释放）
-- spool 失败统一 503 约束整体通过（materialization / outbound open / transport / signature retry 的 sentinel 均保留至 handler）
+- spool 失败统一 503 约束整体通过（materialization / outbound open / transport / signature retry 的 sentinel 均保留至 handler，含 Grok media）
 
 ## 5. 验证证据
 
 - `go build ./...`：exit 0
 - `go vet ./...`：exit 0
-- `go test ./... -count=1`（backend/）：exit 0，无 FAIL/panic
-- blocked transport heap 矩阵：17 路径 retained growth < 3MiB
+- `go test ./... -count=1`（backend/）：exit 0；handler 80.665s，service 115.353s，无 FAIL/panic
+- blocked transport heap 覆盖：20 路径 retained growth < 3MiB；Wave 20 三条新增路径最终增长分别为 6,392B / 1,008B / 13,464B
 - WS 文件 `git diff`：零改动
 
 ## 结论

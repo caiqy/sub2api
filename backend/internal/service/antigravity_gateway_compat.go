@@ -113,6 +113,8 @@ func (s *AntigravityGatewayService) ForwardAsResponses(
 	return s.ForwardAsResponsesHandle(ctx, c, account, handle, nil)
 }
 
+// ForwardAsResponsesHandle borrows bodyHandle; the caller retains cleanup ownership.
+// The compatibility forwarding path owns and cleans its transformed payload handles.
 func (s *AntigravityGatewayService) ForwardAsResponsesHandle(
 	ctx context.Context,
 	c *gin.Context,
