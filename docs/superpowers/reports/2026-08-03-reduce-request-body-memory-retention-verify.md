@@ -3,7 +3,7 @@
 - Change: reduce-request-body-memory-retention
 - 日期: 2026-08-03
 - verify_mode: full（31 任务 / 39 文件 / 2757 行新增）
-- 分支: feature/20260803/reduce-request-body-memory-retention（33 commits，base 8b494e187）
+- 分支: feature/20260803/reduce-request-body-memory-retention（59 commits，HEAD 82bfe412b，base 8b494e187）
 
 ## Summary
 
@@ -15,7 +15,7 @@
 
 ## 回归专项审查（用户要求，2026-08-03 补充）
 
-验证通过后追加**五轮**业务回归专项审查（16 个修复 wave，b563f6066 收尾，55 commits），全部发现已解决：
+验证通过后追加**七轮**业务回归专项审查（18 个修复 wave，82bfe412b 收尾，59 commits），全部发现已解决：
 
 | 轮次 | 方法 | 发现 | 处置 |
 |------|------|------|------|
@@ -23,9 +23,9 @@
 | 第 2 轮 | 修复 wave 复核 | post-ping SSE 裸 JSON、Responses silent EOF、passthrough build 400、Antigravity 502、等待期持有 | 5 wave |
 | 第 3 轮 | 二级路径 + 收尾 | Antigravity 二级路径吞 sentinel、测试假阳性、Claude 路径 byte-backed、body 未关闭 | 3 wave |
 | 第 4 轮 | 穷举式（26 文件逐 hunk） | Responses 标量 clone 遗漏 | 1 wave |
-| 第 5 轮（最终） | 发布前整体关 | parser spool 未统一 503、OAuth/Websearch 静默 Bytes()、transport 漏关 resp body、Gemini backoff 不响应 ctx | 1 wave（16） |
+| 第 7 轮（最终） | 发布前整体关 | parser spool 未统一 503、OAuth/Websearch 静默 Bytes()、transport 漏关 resp body、Gemini backoff 不响应 ctx | 3 wave（16-18） |
 
-**回归审查最终结论**：**PASS（可发布）**——无未解决的业务回归；重放一致性、错误映射（未提交 503 / 已提交协议终止帧）、failover、usage/billing（含零费用 failed usage 审计语义）、streaming 协议（SSE `event: error`/`response.failed`）均与 base 一致；新增 2 个导出常量（`DefaultRequestBodySpoolThresholdBytes`/`DefaultRequestBodyPreviewLimitBytes`，有意的默认值 API），无其他 exported API 变更；WS 文件零改动；wave 14 为纯测试，wave 16/17 含生产修复。
+**回归审查最终结论**：**PASS（可发布）**——无未解决的业务回归；重放一致性、错误映射（未提交 503 / 已提交协议终止帧）、failover、usage/billing（含零费用 failed usage 审计语义）、streaming 协议（SSE `event: error`/`response.failed`）均与 base 一致；新增 2 个导出常量（`DefaultRequestBodySpoolThresholdBytes`/`DefaultRequestBodyPreviewLimitBytes`，有意的默认值 API），无其他 exported API 变更；WS 文件零改动；wave 14 为纯测试，wave 16/17/18 含生产修复。
 
 ## 1. Completeness（完整性）
 
@@ -34,7 +34,7 @@
 - delta spec 4 个 requirement 全部有对应实现：
   - 大请求文件化（spool 阈值 1MB 导出常量、preview 256KB）✅
   - usage 指纹与业务语义保持（session/usage/cyber hash 预计算口径测试）✅
-  - 上游等待期零完整副本（8 条路径阻塞 heap 矩阵）✅
+  - 上游等待期零完整副本（17 条路径阻塞 heap 矩阵）✅
   - preview 有界（256KB 上限 + 序列化快照断言）✅
 
 ## 2. Correctness（正确性）
@@ -52,7 +52,7 @@
 ### Requirement 3: 上游等待期间不持有完整请求体内存副本 ✅
 - handler 循环内按需物化（Responses/ChatCompletions/Anthropic/Gemini/Grok）
 - service 层 Forward retry handle 化（invalid_encrypted_content/rejected field 改写重建 handle）
-- 8 条大 body 路径阻塞 transport heap 验证：retained growth 均 < 3MiB（2MB vs 8.9MB 增长 84KB；混合 Gemini 分支从 7.2MB 降至 1.5KB）
+- 17 条大 body 路径阻塞 transport heap 验证：retained growth 均 < 3MiB（2MB vs 8.9MB 增长 84KB；混合 Gemini 分支从 7.2MB 降至 1.5KB）
 - WS 分支明确排除（后续 change），两个 WS 文件 git diff 零改动
 
 ### Requirement 4: preview 有界 ✅
@@ -77,7 +77,7 @@
 - `go build ./...`：exit 0
 - `go vet ./...`：exit 0
 - `go test ./... -count=1`（backend/）：exit 0，无 FAIL/panic
-- blocked transport heap 矩阵：8 路径 retained growth < 3MiB
+- blocked transport heap 矩阵：17 路径 retained growth < 3MiB
 - WS 文件 `git diff`：零改动
 
 ## 结论

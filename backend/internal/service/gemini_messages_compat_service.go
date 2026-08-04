@@ -1915,7 +1915,7 @@ func sleepGeminiBackoff(attempt int, contexts ...context.Context) {
 	if sleepFor < 0 {
 		sleepFor = 0
 	}
-	// ponytail: variadic context preserves the unmodified chat compat caller.
+	// ponytail: variadic context keeps compatibility; all production callers pass their context.
 	ctx := context.Background()
 	if len(contexts) > 0 && contexts[0] != nil {
 		ctx = contexts[0]
