@@ -883,6 +883,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		if err != nil {
 			if errors.Is(err, ErrRequestBodySpool) {
+				if resp != nil && resp.Body != nil {
+					_ = resp.Body.Close()
+				}
 				return nil, err
 			}
 			if resp != nil && resp.Body != nil {

@@ -150,6 +150,30 @@ func TestGeminiMessagesCompatForwardNativeTransportSpoolErrorReturns503WithoutRe
 	require.Equal(t, 1, upstream.calls)
 }
 
+func TestGeminiMessagesCompatForwardHandleTransportSpoolErrorClosesResponseBody(t *testing.T) {
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`)
+	canonical, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(canonical) })
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	responseBody := &closeTrackingReadCloser{Reader: strings.NewReader(`{"error":"partial"}`)}
+	upstream := &geminiCompatHTTPUpstreamStub{
+		response: &http.Response{StatusCode: http.StatusBadGateway, Header: http.Header{}, Body: responseBody},
+		err:      fmt.Errorf("transport read failed: %w", ErrRequestBodySpool),
+	}
+	svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
+	account := &Account{ID: 1, Platform: PlatformGemini, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "key"}}
+
+	result, err := svc.ForwardHandle(context.Background(), c, account, canonical)
+
+	require.Nil(t, result)
+	require.ErrorIs(t, err, ErrRequestBodySpool)
+	require.True(t, responseBody.closed)
+	require.False(t, c.Writer.Written())
+}
+
 func TestGeminiMessagesCompatSignatureRetryPropagatesCanonicalSpoolFailure(t *testing.T) {
 	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":1024,"thinking":{"type":"enabled","budget_tokens":1024},"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"work","signature":"stale"}]},{"role":"user","content":"continue"}]}`)
 	canonical, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
@@ -308,7 +332,7 @@ func (s *geminiCompatHTTPUpstreamStub) Do(req *http.Request, proxyURL string, ac
 		s.onDo()
 	}
 	if s.err != nil {
-		return nil, s.err
+		return s.response, s.err
 	}
 	if s.response == nil {
 		return nil, fmt.Errorf("missing stub response")

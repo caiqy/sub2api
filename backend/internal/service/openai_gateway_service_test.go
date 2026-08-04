@@ -104,7 +104,7 @@ func (u *openAIHTTPUpstreamRecorder) Do(req *http.Request, proxyURL string, acco
 		req.Body = io.NopCloser(bytes.NewReader(b))
 	}
 	if u.err != nil {
-		return nil, u.err
+		return u.resp, u.err
 	}
 	return u.resp, nil
 }
@@ -3245,6 +3245,27 @@ func TestOpenAIForward_SpoolReadFailureDoesNotFailover(t *testing.T) {
 	var failoverErr *UpstreamFailoverError
 	require.False(t, errors.As(err, &failoverErr))
 	require.NotNil(t, upstream.lastReq)
+}
+
+func TestOpenAIForward_RequestBodySpoolTransportErrorClosesResponseBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"gpt-5.1","input":"hello","stream":false}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	responseBody := &closeTrackingReadCloser{Reader: strings.NewReader(`{"error":"partial"}`)}
+	upstream := &openAIHTTPUpstreamRecorder{
+		resp: &http.Response{StatusCode: http.StatusBadGateway, Header: http.Header{}, Body: responseBody},
+		err:  fmt.Errorf("read request body: %w", ErrRequestBodySpool),
+	}
+	svc := &OpenAIGatewayService{httpUpstream: upstream}
+
+	result, err := svc.Forward(context.Background(), c, openAITestOAuthAccount(), body)
+
+	require.Nil(t, result)
+	require.ErrorIs(t, err, ErrRequestBodySpool)
+	require.True(t, responseBody.closed)
+	require.False(t, c.Writer.Written())
 }
 
 func TestOpenAIRequestBuilderRejectsInvalidBodyHandleArgumentType(t *testing.T) {

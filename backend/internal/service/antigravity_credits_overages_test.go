@@ -165,13 +165,10 @@ func TestHandleSmartRetry_QuotaExhaustedTransportSpoolErrorStopsCreditsReplay(t 
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	spoolErr := fmt.Errorf("read credits retry payload: %w", ErrRequestBodySpool)
-	upstream := &mockSmartRetryUpstream{
-		responses: []*http.Response{nil, {
-			StatusCode: http.StatusOK,
-			Header:     http.Header{},
-			Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
-		}},
-		errors: []error{spoolErr, nil},
+	responseBody := &closeTrackingReadCloser{Reader: strings.NewReader(`{"error":"partial"}`)}
+	upstream := &transportSpoolCloseUpstream{
+		resp: &http.Response{StatusCode: http.StatusBadGateway, Header: http.Header{}, Body: responseBody},
+		err:  spoolErr,
 	}
 	repo := &stubAntigravityAccountRepo{}
 	account := &Account{
@@ -206,7 +203,8 @@ func TestHandleSmartRetry_QuotaExhaustedTransportSpoolErrorStopsCreditsReplay(t 
 	require.ErrorIs(t, result.err, ErrRequestBodySpool)
 	require.Nil(t, result.resp)
 	require.Nil(t, result.switchError)
-	require.Len(t, upstream.calls, 1)
+	require.Equal(t, 1, upstream.callCount)
+	require.True(t, responseBody.closed)
 	require.Empty(t, repo.modelRateLimitCalls)
 	require.Empty(t, repo.extraUpdateCalls)
 	require.False(t, account.isCreditsExhausted())

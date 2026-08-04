@@ -216,6 +216,9 @@ func (s *AntigravityGatewayService) attemptCreditsOveragesRetry(
 	creditsResp, err := p.httpUpstream.Do(creditsReq, p.proxyURL, p.account.ID, p.account.Concurrency)
 	if errors.Is(err, ErrRequestBodySpool) {
 		_ = creditsReq.Body.Close()
+		if creditsResp != nil && creditsResp.Body != nil {
+			_ = creditsResp.Body.Close()
+		}
 		return &creditsOveragesRetryResult{err: err}
 	}
 	_ = creditsReq.Body.Close()
