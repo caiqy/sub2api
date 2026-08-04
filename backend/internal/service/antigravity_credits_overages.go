@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -207,6 +208,10 @@ func (s *AntigravityGatewayService) attemptCreditsOveragesRetry(
 	SetOpsUpstreamAttempted(p.c, true)
 
 	creditsResp, err := p.httpUpstream.Do(creditsReq, p.proxyURL, p.account.ID, p.account.Concurrency)
+	if errors.Is(err, ErrRequestBodySpool) {
+		_ = creditsReq.Body.Close()
+		return &creditsOveragesRetryResult{err: err}
+	}
 	_ = creditsReq.Body.Close()
 	if err == nil && creditsResp != nil && creditsResp.StatusCode < 400 {
 		s.clearCreditsExhausted(p.ctx, p.account)

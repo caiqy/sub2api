@@ -5,6 +5,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -157,6 +158,59 @@ func TestHandleSmartRetry_QuotaExhausted_UsesCreditsAndStoresIndependentState(t 
 	require.Len(t, upstream.requestBodies, 1)
 	require.Contains(t, string(upstream.requestBodies[0]), "enabledCreditTypes")
 	require.Empty(t, repo.modelRateLimitCalls, "overages 成功后不应写入普通 model_rate_limits")
+}
+
+func TestHandleSmartRetry_QuotaExhaustedTransportSpoolErrorStopsCreditsReplay(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	spoolErr := fmt.Errorf("read credits retry payload: %w", ErrRequestBodySpool)
+	upstream := &mockSmartRetryUpstream{
+		responses: []*http.Response{nil, {
+			StatusCode: http.StatusOK,
+			Header:     http.Header{},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
+		}},
+		errors: []error{spoolErr, nil},
+	}
+	repo := &stubAntigravityAccountRepo{}
+	account := &Account{
+		ID: 107, Name: "credits-spool", Type: AccountTypeOAuth, Platform: PlatformAntigravity, Concurrency: 1,
+		Extra: map[string]any{"allow_overages": true},
+	}
+	payloadHandle, err := NewRequestBodyHandleFromBytes([]byte(`{"model":"claude-sonnet-4-5","request":{}}`), RequestBodyHandleOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(payloadHandle) })
+	respBody := []byte(`{
+		"error": {
+			"status": "RESOURCE_EXHAUSTED",
+			"message": "QUOTA_EXHAUSTED",
+			"details": [
+				{"@type":"type.googleapis.com/google.rpc.ErrorInfo","metadata":{"model":"claude-sonnet-4-5"},"reason":"RATE_LIMIT_EXCEEDED"},
+				{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"0.1s"}
+			]
+		}
+	}`)
+	params := antigravityRetryLoopParams{
+		ctx: context.Background(), prefix: "[test]", account: account, accessToken: "token", action: "generateContent",
+		payloadHandle: payloadHandle, c: c, httpUpstream: upstream, accountRepo: repo, requestedModel: "claude-sonnet-4-5",
+		handleError: func(context.Context, string, *Account, int, http.Header, []byte, string, int64, string, bool) *handleModelRateLimitResult {
+			return nil
+		},
+	}
+
+	result := (&AntigravityGatewayService{accountRepo: repo}).handleSmartRetry(params,
+		&http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{}}, respBody, "https://ag.test", 0, []string{"https://ag.test"})
+
+	require.Equal(t, smartRetryActionBreakWithResp, result.action)
+	require.ErrorIs(t, result.err, ErrRequestBodySpool)
+	require.Nil(t, result.resp)
+	require.Nil(t, result.switchError)
+	require.Len(t, upstream.calls, 1)
+	require.Empty(t, repo.modelRateLimitCalls)
+	require.Empty(t, repo.extraUpdateCalls)
+	require.False(t, account.isCreditsExhausted())
+	require.Empty(t, recorder.Body.String())
 }
 
 func TestAntigravityRetryLoop_CreditsRetryOverwritesAttemptSnapshots(t *testing.T) {
