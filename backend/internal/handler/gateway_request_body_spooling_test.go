@@ -612,6 +612,76 @@ func TestRequestBodySpoolFailureAfterPingWritesSSEError(t *testing.T) {
 		}
 	})
 
+	t.Run("gateway chat transport", func(t *testing.T) {
+		gin.SetMode(gin.TestMode)
+		cache := &blockingResponsesUserSlotCache{waiting: make(chan struct{}), release: make(chan struct{})}
+		upstream := &responsesSpoolTransportUpstream{}
+		group := &service.Group{ID: 64, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+		account := &service.Account{ID: 165, Name: "gateway-chat-post-ping-spool", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "token"}}
+		env := newTerminalGatewayMessagesEnvWithConcurrencyCache(t, group, upstream, cache, account)
+		env.handler.concurrencyHelper = NewConcurrencyHelper(env.handler.concurrencyHelper.concurrencyService, SSEPingFormatClaude, time.Millisecond)
+
+		recorder := httptest.NewRecorder()
+		done := make(chan struct{})
+		go func() {
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"claude-sonnet-4-5","stream":true,"messages":[{"role":"user","content":"hello"}]}`))
+			req.Header.Set("Content-Type", "application/json")
+			env.routerFor("/v1/chat/completions", env.handler.ChatCompletions).ServeHTTP(recorder, req)
+			close(done)
+		}()
+		waitGatewayReplaySignal(t, cache.waiting, "Gateway Chat user slot wait")
+		time.Sleep(20 * time.Millisecond)
+		close(cache.release)
+		waitGatewayReplaySignal(t, done, "Gateway Chat transport spool failure")
+
+		assertPostPingSSEError(t, recorder, `"message":"Failed to spool request body"`)
+		if upstream.calls != 1 {
+			t.Fatalf("upstream calls = %d, want 1", upstream.calls)
+		}
+	})
+
+	t.Run("gateway chat Antigravity read", func(t *testing.T) {
+		gin.SetMode(gin.TestMode)
+		rawDir := t.TempDir()
+		oldOptions := jsonRequestBodyHandleOptions
+		jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: rawDir}
+		t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+
+		cache := &blockingResponsesUserSlotCache{waiting: make(chan struct{}), release: make(chan struct{})}
+		upstream := &responsesSpoolTransportUpstream{}
+		group := &service.Group{ID: 65, Platform: service.PlatformAntigravity, Status: service.StatusActive, Hydrated: true}
+		account := &service.Account{ID: 166, Name: "gateway-chat-antigravity-post-ping-spool", Platform: service.PlatformAntigravity, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"access_token": "token", "project_id": "project"}}
+		env := newTerminalGatewayMessagesEnvWithConcurrencyCache(t, group, upstream, cache, account)
+		env.handler.concurrencyHelper = NewConcurrencyHelper(env.handler.concurrencyHelper.concurrencyService, SSEPingFormatClaude, time.Millisecond)
+
+		recorder := httptest.NewRecorder()
+		done := make(chan struct{})
+		go func() {
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"claude-sonnet-4-5","stream":true,"messages":[{"role":"user","content":"hello"}]}`))
+			req.Header.Set("Content-Type", "application/json")
+			env.routerFor("/v1/chat/completions", env.handler.ChatCompletions).ServeHTTP(recorder, req)
+			close(done)
+		}()
+		waitGatewayReplaySignal(t, cache.waiting, "Gateway Chat Antigravity user slot wait")
+		time.Sleep(20 * time.Millisecond)
+		entries, err := os.ReadDir(rawDir)
+		if err != nil || len(entries) == 0 {
+			t.Fatalf("request spool missing: entries=%d err=%v", len(entries), err)
+		}
+		for _, entry := range entries {
+			if err := os.Remove(filepath.Join(rawDir, entry.Name())); err != nil {
+				t.Fatalf("remove request spool: %v", err)
+			}
+		}
+		close(cache.release)
+		waitGatewayReplaySignal(t, done, "Gateway Chat Antigravity spool failure")
+
+		assertPostPingSSEError(t, recorder, `"message":"Failed to spool request body"`)
+		if upstream.calls != 0 {
+			t.Fatalf("upstream calls = %d, want 0", upstream.calls)
+		}
+	})
+
 	t.Run("messages", func(t *testing.T) {
 		gin.SetMode(gin.TestMode)
 		rawDir := t.TempDir()

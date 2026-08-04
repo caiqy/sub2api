@@ -326,7 +326,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()
 				}
-				h.chatCompletionsErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body", streamStarted || c.Writer.Written())
 				return
 			}
 			setActualUpstreamEndpoint(c, EndpointAntigravityGenerateContent)
@@ -342,9 +342,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 
 		if err != nil {
 			if errors.Is(err, service.ErrRequestBodySpool) {
-				if c.Writer.Size() == writerSizeBeforeForward {
-					h.chatCompletionsErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
-				}
+				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body", streamStarted || c.Writer.Written())
 				return
 			}
 			var failoverErr *service.UpstreamFailoverError
