@@ -410,6 +410,35 @@ func TestGatewayHandler_CountTokensSpoolFailuresReturn503WithoutRetry(t *testing
 	}
 }
 
+func TestOpenAIGatewayHandler_AlphaSearchSpoolFailureReturns503WithoutScheduleFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 65, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 166, Name: "alpha-search-spool", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "token"}}
+	upstream := &responsesSpoolTransportUpstream{}
+	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
+	env.handler.cfg.Gateway.OpenAIWS.SchedulerMode = "weighted"
+	before := env.handler.gatewayService.SnapshotOpenAIAccountSchedulerMetrics()
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/alpha/search", strings.NewReader(`{"model":"gpt-5","commands":{}}`))
+	req.Header.Set("Content-Type", "application/json")
+	env.router("/v1/alpha/search", env.handler.AlphaSearch).ServeHTTP(recorder, req)
+
+	after := env.handler.gatewayService.SnapshotOpenAIAccountSchedulerMetrics()
+	if after.RuntimeStatsAccountCount != before.RuntimeStatsAccountCount {
+		t.Fatalf("runtime stats account count = %d, want %d", after.RuntimeStatsAccountCount, before.RuntimeStatsAccountCount)
+	}
+	if after.AccountSwitchTotal != before.AccountSwitchTotal {
+		t.Fatalf("account switch total = %d, want %d", after.AccountSwitchTotal, before.AccountSwitchTotal)
+	}
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body = %s", recorder.Code, recorder.Body.String())
+	}
+	if upstream.calls != 1 {
+		t.Fatalf("upstream calls = %d, want 1", upstream.calls)
+	}
+}
+
 func assertCountTokensSpool503(t *testing.T, recorder *httptest.ResponseRecorder) {
 	t.Helper()
 	if recorder.Code != http.StatusServiceUnavailable {
