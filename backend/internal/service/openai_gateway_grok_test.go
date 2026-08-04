@@ -2406,6 +2406,50 @@ func TestForwardAsAnthropicForGrokUsesXAIResponses(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "ok")
 }
 
+func TestForwardAsAnthropicForGrokEncryptedContentRetryStoresActualUpstreamBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	body := []byte(`{"model":"grok","max_tokens":32,"stream":false,"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"prior reasoning","signature":"foreign-cipher"},{"type":"text","text":"prior answer"}]},{"role":"user","content":"continue"}]}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	c.Set("api_key", &APIKey{ID: 5404})
+	collector := &usageUpstreamSnapshotCollector{}
+	c.Set(UsageDetailCaptureContextKey, collector)
+
+	account := healthyGrokOAuthGatewayTestAccount(59, "access-token")
+	repo := &grokQuotaAccountRepo{
+		mockAccountRepoForPlatform: &mockAccountRepoForPlatform{
+			accountsByID: map[int64]*Account{59: account},
+		},
+	}
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		{
+			StatusCode: http.StatusBadRequest,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"code":"invalid_encrypted_content","type":"invalid_request_error","message":"bad encrypted content"}}`)),
+		},
+		grokMessagesSSECompletedResponse("resp_grok_messages_retry", 0),
+	}}
+	svc := &OpenAIGatewayService{
+		httpUpstream:      upstream,
+		grokTokenProvider: NewGrokTokenProvider(repo, nil),
+		accountRepo:       repo,
+	}
+
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, upstream.bodies, 2)
+	require.True(t, gjson.GetBytes(upstream.bodies[0], "input.0.encrypted_content").Exists())
+	require.False(t, gjson.GetBytes(upstream.bodies[1], "input.0.encrypted_content").Exists())
+
+	wantRetryBody := string(upstream.bodies[1])
+	require.NotEmpty(t, wantRetryBody)
+	require.Equal(t, wantRetryBody, collector.body)
+	require.Equal(t, wantRetryBody, unwrapRequestBodyPreviewForTest(c.GetString(OpsUpstreamRequestBodyKey)))
+}
+
 func TestForwardAsAnthropicForGrokFunctionToolUsesCacheCapableMixedRoute(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

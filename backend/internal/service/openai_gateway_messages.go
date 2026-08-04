@@ -407,7 +407,10 @@ func (s *OpenAIGatewayService) forwardAsAnthropicHandle(
 		if compatTurnState != "" && upstreamReq.Header.Get("x-codex-turn-state") == "" {
 			upstreamReq.Header.Set("x-codex-turn-state", compatTurnState)
 		}
-		SetUsageUpstreamRequest(c, upstreamReq, openAIUpstreamRequestBodyPreview(upstreamReq, attemptBody))
+		// The Grok builder records the current handle preview for every retry.
+		if account.Platform != PlatformGrok {
+			SetUsageUpstreamRequest(c, upstreamReq, openAIUpstreamRequestBodyPreview(upstreamReq, attemptBody))
+		}
 		attemptBody = nil
 		sourceBody = nil
 		SetOpsUpstreamAttempted(c, true)
