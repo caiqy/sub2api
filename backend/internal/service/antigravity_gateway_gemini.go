@@ -17,8 +17,26 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Test hook only; tests replacing it must not run in parallel.
-var newAntigravityFallbackPayloadRequest = newAntigravityPayloadRequest
+// Test hooks only; tests replacing them must not run in parallel.
+var (
+	newAntigravityFallbackPayloadRequest = newAntigravityPayloadRequest
+	antigravitySignatureRetryBuilderHook func() error
+)
+
+func SetAntigravityGeminiBuilderHooksForTest(fallback, signature func() error) func() {
+	oldFallback := newAntigravityFallbackPayloadRequest
+	oldSignature := antigravitySignatureRetryBuilderHook
+	if fallback != nil {
+		newAntigravityFallbackPayloadRequest = func(*antigravityRetryLoopParams, string) (*http.Request, error) {
+			return nil, fallback()
+		}
+	}
+	antigravitySignatureRetryBuilderHook = signature
+	return func() {
+		newAntigravityFallbackPayloadRequest = oldFallback
+		antigravitySignatureRetryBuilderHook = oldSignature
+	}
+}
 
 // ForwardGemini 转发 Gemini 协议请求
 //
@@ -316,7 +334,7 @@ func (s *AntigravityGatewayService) forwardGeminiHandle(ctx context.Context, c *
 				if handleErr != nil {
 					return nil, fmt.Errorf("create gemini retry body handle: %w", handleErr)
 				}
-				retryResult, retryErr := s.antigravityRetryLoop(antigravityRetryLoopParams{
+				retryParams := antigravityRetryLoopParams{
 					ctx:             ctx,
 					prefix:          prefix,
 					account:         account,
@@ -333,7 +351,14 @@ func (s *AntigravityGatewayService) forwardGeminiHandle(ctx context.Context, c *
 					isStickySession: isStickySession,
 					groupID:         forwardOpts.groupID,
 					sessionHash:     forwardOpts.sessionHash,
-				})
+				}
+				var retryResult *antigravityRetryLoopResult
+				var retryErr error
+				if antigravitySignatureRetryBuilderHook != nil {
+					retryErr = antigravitySignatureRetryBuilderHook()
+				} else {
+					retryResult, retryErr = s.antigravityRetryLoop(retryParams)
+				}
 				if errors.Is(retryErr, ErrRequestBodySpool) {
 					CleanupRequestBodyHandle(retryHandle)
 					return nil, retryErr
