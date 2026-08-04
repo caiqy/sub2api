@@ -868,7 +868,7 @@ func (s *GeminiMessagesCompatService) ForwardHandle(ctx context.Context, c *gin.
 			})
 			if attempt < geminiMaxRetries {
 				logger.LegacyPrintf("service.gemini_messages_compat", "Gemini account %d: upstream request failed, retry %d/%d: %v", account.ID, attempt, geminiMaxRetries, err)
-				sleepGeminiBackoff(attempt)
+				sleepGeminiBackoff(attempt, ctx)
 				continue
 			}
 			setOpsUpstreamError(c, 0, safeErr, "")
@@ -918,7 +918,7 @@ func (s *GeminiMessagesCompatService) ForwardHandle(ctx context.Context, c *gin.
 					outboundHandle = retryHandle
 					passthroughHeaders = retryHeaders
 					// Consume one retry budget attempt and continue with the updated request payload.
-					sleepGeminiBackoff(1)
+					sleepGeminiBackoff(1, ctx)
 					continue
 				}
 			}
@@ -983,7 +983,7 @@ func (s *GeminiMessagesCompatService) ForwardHandle(ctx context.Context, c *gin.
 				})
 
 				logger.LegacyPrintf("service.gemini_messages_compat", "Gemini account %d: upstream status %d, retry %d/%d", account.ID, resp.StatusCode, attempt, geminiMaxRetries)
-				sleepGeminiBackoff(attempt)
+				sleepGeminiBackoff(attempt, ctx)
 				continue
 			}
 			// Final attempt: surface the upstream error body (mapped below) instead of a generic retry error.
@@ -1507,7 +1507,7 @@ func (s *GeminiMessagesCompatService) ForwardNativeHandle(ctx context.Context, c
 			})
 			if attempt < geminiMaxRetries {
 				logger.LegacyPrintf("service.gemini_messages_compat", "Gemini account %d: upstream request failed, retry %d/%d: %v", account.ID, attempt, geminiMaxRetries, err)
-				sleepGeminiBackoff(attempt)
+				sleepGeminiBackoff(attempt, ctx)
 				continue
 			}
 			if action == "countTokens" {
@@ -1576,7 +1576,7 @@ func (s *GeminiMessagesCompatService) ForwardNativeHandle(ctx context.Context, c
 				})
 
 				logger.LegacyPrintf("service.gemini_messages_compat", "Gemini account %d: upstream status %d, retry %d/%d", account.ID, resp.StatusCode, attempt, geminiMaxRetries)
-				sleepGeminiBackoff(attempt)
+				sleepGeminiBackoff(attempt, ctx)
 				continue
 			}
 			if action == "countTokens" {
@@ -1902,7 +1902,7 @@ func (s *GeminiMessagesCompatService) poolModeSkippedFailoverError(c *gin.Contex
 	}
 }
 
-func sleepGeminiBackoff(attempt int) {
+func sleepGeminiBackoff(attempt int, contexts ...context.Context) {
 	delay := geminiRetryBaseDelay * time.Duration(1<<uint(attempt-1))
 	if delay > geminiRetryMaxDelay {
 		delay = geminiRetryMaxDelay
@@ -1915,7 +1915,17 @@ func sleepGeminiBackoff(attempt int) {
 	if sleepFor < 0 {
 		sleepFor = 0
 	}
-	time.Sleep(sleepFor)
+	// ponytail: variadic context preserves the unmodified chat compat caller.
+	ctx := context.Background()
+	if len(contexts) > 0 && contexts[0] != nil {
+		ctx = contexts[0]
+	}
+	timer := time.NewTimer(sleepFor)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+	case <-timer.C:
+	}
 }
 
 var (

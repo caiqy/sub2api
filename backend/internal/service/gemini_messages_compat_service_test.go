@@ -174,6 +174,16 @@ func TestGeminiMessagesCompatForwardHandleTransportSpoolErrorClosesResponseBody(
 	require.False(t, c.Writer.Written())
 }
 
+func TestSleepGeminiBackoff_ContextCancellationReturnsImmediately(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	start := time.Now()
+
+	sleepGeminiBackoff(1, ctx)
+
+	require.Less(t, time.Since(start), 100*time.Millisecond)
+}
+
 func TestGeminiMessagesCompatSignatureRetryPropagatesCanonicalSpoolFailure(t *testing.T) {
 	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":1024,"thinking":{"type":"enabled","budget_tokens":1024},"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"work","signature":"stale"}]},{"role":"user","content":"continue"}]}`)
 	canonical, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
