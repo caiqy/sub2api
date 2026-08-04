@@ -150,7 +150,11 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 
 	// Parse and hash before queueing so waits retain only the replayable handle.
 	bodyRef := service.NewRequestBodyRefFromHandle(effectiveBody)
-	parsedReq, _ := service.ParseGatewayRequest(bodyRef, "responses")
+	parsedReq, parseErr := service.ParseGatewayRequest(bodyRef, "responses")
+	if errors.Is(parseErr, service.ErrRequestBodySpool) {
+		h.responsesErrorResponse(c, http.StatusServiceUnavailable, "server_error", "Failed to spool request body")
+		return
+	}
 	if parsedReq == nil {
 		parsedReq = &service.ParsedRequest{Model: reqModel, Stream: reqStream, Body: bodyRef}
 	}

@@ -203,6 +203,51 @@ func TestGatewayHandler_RequestBodySpoolOpenFailureMapsTo503(t *testing.T) {
 	}
 }
 
+func TestGatewayHandler_ParserSecondHandleReadFailureMapsTo503(t *testing.T) {
+	spoolDir := t.TempDir()
+	handle, err := service.NewRequestBodyHandleFromBytes(
+		[]byte(`{"model":"claude-test","messages":[{"role":"user","content":"hello"}]}`),
+		service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: spoolDir},
+	)
+	if err != nil {
+		t.Fatalf("create request body handle: %v", err)
+	}
+	defer service.CleanupRequestBodyHandle(handle)
+
+	if _, err := service.ParseGatewayRequest(service.NewRequestBodyRefFromHandle(handle), service.PlatformAnthropic); err != nil {
+		t.Fatalf("first parse: %v", err)
+	}
+	entries, err := os.ReadDir(spoolDir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("find spool: entries=%d err=%v", len(entries), err)
+	}
+	if err := os.Remove(filepath.Join(spoolDir, entries[0].Name())); err != nil {
+		t.Fatalf("remove spool: %v", err)
+	}
+	_, parseErr := service.ParseGatewayRequest(service.NewRequestBodyRefFromHandle(handle), service.PlatformAnthropic)
+	if !errors.Is(parseErr, service.ErrRequestBodySpool) {
+		t.Fatalf("second parse error = %v, want ErrRequestBodySpool", parseErr)
+	}
+
+	for _, tt := range []struct {
+		name  string
+		write func(*GatewayHandler, *gin.Context, error)
+	}{
+		{"messages", func(h *GatewayHandler, c *gin.Context, err error) { h.handleMessagesParseError(c, err, false) }},
+		{"responses", func(h *GatewayHandler, c *gin.Context, err error) { h.writeResponsesForwardRequestBodyError(c, err) }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+			tt.write(&GatewayHandler{}, c, parseErr)
+			if recorder.Code != http.StatusServiceUnavailable {
+				t.Fatalf("status = %d, want 503; body = %s", recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+}
+
 func TestGatewayHandler_ResponsesForwardBodyErrorUsesRequestBodyStatus(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)

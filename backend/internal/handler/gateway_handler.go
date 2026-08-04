@@ -207,6 +207,14 @@ func cloneGatewayParsedRequestScalars(parsed *service.ParsedRequest) {
 	parsed.OutputEffort = strings.Clone(parsed.OutputEffort)
 }
 
+func (h *GatewayHandler) handleMessagesParseError(c *gin.Context, err error, streamStarted bool) {
+	if errors.Is(err, service.ErrRequestBodySpool) {
+		h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body", streamStarted || service.IsResponseCommitted(c))
+		return
+	}
+	h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+}
+
 // Messages handles Claude API compatible messages endpoint
 // POST /v1/messages
 func (h *GatewayHandler) Messages(c *gin.Context) {
@@ -279,7 +287,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	parsedReq, err := service.ParseGatewayRequest(bodyRef, domain.PlatformAnthropic)
 	if err != nil {
 		logRequestBodyParseFailure(reqLog, body, err)
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+		h.handleMessagesParseError(c, err, false)
 		return
 	}
 	if parsedReq.Body.Handle() == nil {
@@ -291,7 +299,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		effectiveBody = coordinator.Effective()
 		parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
 		if err != nil {
-			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+			h.handleMessagesParseError(c, err, false)
 			return
 		}
 	}
@@ -358,7 +366,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		routeBody = nil
 		parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
 		if err != nil {
-			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+			h.handleMessagesParseError(c, err, false)
 			return
 		}
 		cloneGatewayParsedRequestScalars(parsedReq)
@@ -835,11 +843,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		for {
 			attemptParsedReq, err := parsedReq.CloneForHandle(effectiveBody)
 			if err != nil {
-				if status, ok := requestBodyReadErrorStatus(err); ok {
-					h.handleStreamingAwareError(c, status, "api_error", "Failed to spool request body", streamStarted || service.IsResponseCommitted(c))
-					return
-				}
-				h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+				h.handleMessagesParseError(c, err, streamStarted)
 				return
 			}
 
@@ -1091,7 +1095,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}()
 			attemptParsedReq, err = attemptParsedReq.CloneForHandle(attemptHandle)
 			if err != nil {
-				h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+				h.handleMessagesParseError(c, err, streamStarted)
 				return
 			}
 			// gjson scalar strings can reference the full materialized attempt body; clone them before the upstream wait.
@@ -1242,7 +1246,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 							fallbackBody = nil
 							parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
 							if err != nil {
-								h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+								h.handleMessagesParseError(c, err, streamStarted)
 								return
 							}
 							// Detach small gjson scalars so account waits do not retain the full fallback body backing array.
