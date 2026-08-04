@@ -273,6 +273,9 @@ func (s *OpenAIGatewayService) CreateLiveCallHandle(
 }
 
 func (s *OpenAIGatewayService) shouldFailoverLiveCreateError(err error) bool {
+	if errors.Is(err, ErrRequestBodySpool) {
+		return false
+	}
 	var upstreamErr *UpstreamFailoverError
 	if !errors.As(err, &upstreamErr) {
 		// 凭证读取和网络传输错误都可能只影响当前账号或代理。
@@ -327,6 +330,7 @@ func (s *OpenAIGatewayService) createUpstreamLiveCallHandle(
 	}
 	authHeaders, err := s.buildOpenAIAuthenticationHeaders(ctx, account, token)
 	if err != nil {
+		closeOpenAIRequestBody(upstreamReq)
 		logLiveCreateStageFailure(ctx, account.ID, "authentication_headers", err)
 		return nil, err
 	}
@@ -337,6 +341,7 @@ func (s *OpenAIGatewayService) createUpstreamLiveCallHandle(
 	}
 	upstreamReq.Host = "chatgpt.com"
 	if err := resolveAndSetOpenAIChatGPTAccountHeaders(ctx, s.accountRepo, upstreamReq.Header, account); err != nil {
+		closeOpenAIRequestBody(upstreamReq)
 		logLiveCreateStageFailure(ctx, account.ID, "account_headers", err)
 		return nil, err
 	}

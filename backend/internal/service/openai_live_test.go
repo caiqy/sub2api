@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +26,45 @@ type liveHTTPUpstreamStub struct {
 type liveAttestationStub struct {
 	header string
 	err    error
+}
+
+type livePredispatchAccountRepo struct {
+	AccountRepository
+	parent *Account
+	failAt int
+	calls  int
+}
+
+func (r *livePredispatchAccountRepo) GetByID(context.Context, int64) (*Account, error) {
+	r.calls++
+	if r.calls == r.failAt {
+		return nil, errors.New("injected Live header failure")
+	}
+	return r.parent, nil
+}
+
+type liveTransportErrorUpstream struct {
+	HTTPUpstream
+	request *http.Request
+	resp    *http.Response
+	err     error
+	calls   int
+}
+
+func (u *liveTransportErrorUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	u.request = req
+	u.calls++
+	return u.resp, u.err
+}
+
+type liveCloseTrackingBody struct {
+	io.Reader
+	closed bool
+}
+
+func (b *liveCloseTrackingBody) Close() error {
+	b.closed = true
+	return nil
 }
 
 func (s liveAttestationStub) Check(context.Context) error {
@@ -142,6 +183,67 @@ func TestCreateUpstreamLiveCallPreservesSession(t *testing.T) {
 	require.True(t, HTTPUpstreamRedirectsDisabled(upstream.request.Context()))
 }
 
+func TestOpenAILiveCreateUpstreamHandleClosesBodyOnPredispatchFailure(t *testing.T) {
+	parentID := int64(70)
+	parent := &Account{ID: parentID, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "token", "chatgpt_account_id": "acct-parent"}}
+	shadow := &Account{ID: 71, Platform: PlatformOpenAI, Type: AccountTypeOAuth, ParentAccountID: &parentID}
+
+	for _, tt := range []struct {
+		name   string
+		failAt int
+	}{
+		{name: "authentication headers", failAt: 2},
+		{name: "account headers", failAt: 3},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			handle, err := NewRequestBodyHandleFromBytes(
+				[]byte(`{"sdp":"v=0\\r\\n","session":{"model":"gpt-live"}}`),
+				RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()},
+			)
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				runtime.GC()
+				handle.mu.Lock()
+				handle.spoolReaders = 0
+				handle.cleaned = false
+				handle.mu.Unlock()
+				CleanupRequestBodyHandle(handle)
+			})
+			repo := &livePredispatchAccountRepo{parent: parent, failAt: tt.failAt}
+			service := &OpenAIGatewayService{accountRepo: repo}
+
+			created, err := service.createUpstreamLiveCallHandle(context.Background(), shadow, handle, "attestation")
+
+			require.Nil(t, created)
+			require.ErrorContains(t, err, "injected Live header failure")
+			handle.mu.Lock()
+			readers := handle.spoolReaders
+			handle.mu.Unlock()
+			require.Zero(t, readers, "pre-dispatch failures must close the upstream request body")
+		})
+	}
+}
+
+func TestOpenAILiveCreateUpstreamHandleTransportSpoolErrorClosesBodies(t *testing.T) {
+	handle, err := NewRequestBodyHandleFromBytes([]byte(`{"sdp":"v=0\\r\\n","session":{"model":"gpt-live","instructions":"`+strings.Repeat("x", 2048)+`"}}`), RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+	responseBody := &liveCloseTrackingBody{Reader: strings.NewReader(`{"error":"partial"}`)}
+	upstream := &liveTransportErrorUpstream{
+		resp: &http.Response{StatusCode: http.StatusBadGateway, Header: http.Header{}, Body: responseBody},
+		err:  fmt.Errorf("read Live transport body: %w", ErrRequestBodySpool),
+	}
+	service := &OpenAIGatewayService{httpUpstream: upstream}
+
+	created, err := service.createUpstreamLiveCallHandle(context.Background(), openAITestOAuthAccount(), handle, "attestation")
+
+	require.Nil(t, created)
+	require.ErrorIs(t, err, ErrRequestBodySpool)
+	require.Equal(t, 1, upstream.calls)
+	requireRequestBodyClosed(t, upstream.request)
+	require.True(t, responseBody.closed)
+}
+
 func TestLiveAttestationCipherRoundTripAndRejectsOtherInstanceKey(t *testing.T) {
 	first := newLiveAttestationCipher(&config.Config{
 		JWT: config.JWTConfig{Secret: "first-live-secret"},
@@ -208,8 +310,9 @@ func TestLiveSidebandNormalCloseEndsCall(t *testing.T) {
 	require.Equal(t, abnormalClose, liveSidebandReadError(abnormalClose))
 }
 
-func TestLiveCreateFailoverUsesExistingOpenAIPolicy(t *testing.T) {
+func TestOpenAILiveCreateFailoverUsesExistingOpenAIPolicy(t *testing.T) {
 	service := &OpenAIGatewayService{}
+	require.False(t, service.shouldFailoverLiveCreateError(fmt.Errorf("read Live request body: %w", ErrRequestBodySpool)))
 	require.False(t, service.shouldFailoverLiveCreateError(&UpstreamFailoverError{
 		StatusCode:   http.StatusBadRequest,
 		ResponseBody: []byte(`{"error":{"message":"invalid session"}}`),

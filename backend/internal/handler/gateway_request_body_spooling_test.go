@@ -439,6 +439,47 @@ func TestOpenAIGatewayHandler_AlphaSearchSpoolFailureReturns503WithoutScheduleFa
 	}
 }
 
+func TestOpenAILiveHandler_SpoolFailuresReturn503WithoutAccountSwitch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 66, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowLive: true}
+	accounts := []*service.Account{
+		{ID: 167, Name: "live-spool-first", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"access_token": "token", "chatgpt_account_id": "acct-first"}},
+		{ID: 168, Name: "live-spool-second", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 2, Credentials: map[string]any{"access_token": "token", "chatgpt_account_id": "acct-second"}},
+	}
+
+	t.Run("initial read failure", func(t *testing.T) {
+		env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: accounts}, &liveSpoolFailureUpstream{})
+		recorder := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/realtime/calls", liveInitialSpoolFailureBody{})
+		req.Header.Set("Content-Type", "application/json")
+
+		env.router("/v1/realtime/calls", env.handler.Live).ServeHTTP(recorder, req)
+
+		if recorder.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d, want 503; body = %s", recorder.Code, recorder.Body.String())
+		}
+	})
+
+	t.Run("transport sentinel", func(t *testing.T) {
+		upstream := &liveSpoolFailureUpstream{}
+		cache := &retentionLiveGatewayCache{}
+		env := newTerminalUsageOpenAIEnvWithUpstreamAndGatewayCache(t, group, &openAIRetryAccountRepoStub{accounts: accounts}, upstream, cache)
+		enableRetentionLiveAttestation(t, env.handler.gatewayService, cache)
+		recorder := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/realtime/calls", strings.NewReader(`{"sdp":"v=0\\r\\n","session":{"model":"gpt-live"}}`))
+		req.Header.Set("Content-Type", "application/json")
+
+		env.router("/v1/realtime/calls", env.handler.Live).ServeHTTP(recorder, req)
+
+		if len(upstream.accountIDs) != 1 || upstream.accountIDs[0] != accounts[0].ID {
+			t.Fatalf("upstream account IDs = %v, want [%d]; body = %s", upstream.accountIDs, accounts[0].ID, recorder.Body.String())
+		}
+		if recorder.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d, want 503; body = %s", recorder.Code, recorder.Body.String())
+		}
+	})
+}
+
 func assertCountTokensSpool503(t *testing.T, recorder *httptest.ResponseRecorder) {
 	t.Helper()
 	if recorder.Code != http.StatusServiceUnavailable {
@@ -1426,6 +1467,22 @@ type countTokensInitialSpoolFailureBody struct{}
 
 func (countTokensInitialSpoolFailureBody) Read([]byte) (int, error) {
 	return 0, fmt.Errorf("read initial count_tokens body: %w", service.ErrRequestBodySpool)
+}
+
+type liveInitialSpoolFailureBody struct{}
+
+func (liveInitialSpoolFailureBody) Read([]byte) (int, error) {
+	return 0, fmt.Errorf("read initial Live body: %w", service.ErrRequestBodySpool)
+}
+
+type liveSpoolFailureUpstream struct {
+	service.HTTPUpstream
+	accountIDs []int64
+}
+
+func (u *liveSpoolFailureUpstream) Do(_ *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
+	u.accountIDs = append(u.accountIDs, accountID)
+	return nil, fmt.Errorf("read Live transport body: %w", service.ErrRequestBodySpool)
 }
 
 type countTokensSpoolFailureUpstream struct {

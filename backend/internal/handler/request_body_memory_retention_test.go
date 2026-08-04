@@ -6,11 +6,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"runtime"
 	"runtime/debug"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 	"unsafe"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
@@ -23,29 +25,85 @@ import (
 
 type retentionBlockingTransport struct {
 	service.HTTPUpstream
-	started     chan struct{}
-	release     chan struct{}
-	body        string
-	contentType string
-	firstStatus int
-	firstBody   string
-	streamBody  bool
-	attachReq   bool
-	retainReq   bool
-	blockedReq  *http.Request
-	calls       int
+	started        chan struct{}
+	release        chan struct{}
+	body           string
+	contentType    string
+	firstStatus    int
+	firstBody      string
+	streamBody     bool
+	attachReq      bool
+	retainReq      bool
+	blockedReq     *http.Request
+	responseHeader http.Header
+	calls          int
 }
 
-type retentionBlockingUserSlotCache struct {
+type retentionLiveGatewayCache struct {
+	openAIChatCompletionsGatewayCacheStub
 	openAIChatCompletionsConcurrencyCacheStub
-	started chan struct{}
-	release chan struct{}
 }
 
-func (c *retentionBlockingUserSlotCache) AcquireUserSlot(context.Context, int64, int, string) (bool, error) {
-	close(c.started)
-	<-c.release
+type retentionLiveAttestation struct{}
+
+func (retentionLiveAttestation) Check(context.Context) error { return nil }
+func (retentionLiveAttestation) Generate(context.Context) (string, error) {
+	return `{"v":1,"s":0,"t":"test"}`, nil
+}
+
+type retentionLiveCipher struct{}
+
+func (retentionLiveCipher) Encrypt(string) (string, error) { return "encrypted", nil }
+func (retentionLiveCipher) Decrypt(string) (string, error) { return `{"v":1,"s":0,"t":"test"}`, nil }
+
+func enableRetentionLiveAttestation(t *testing.T, gateway *service.OpenAIGatewayService, cache *retentionLiveGatewayCache) {
+	t.Helper()
+	value := reflect.ValueOf(gateway).Elem()
+	for fieldName, replacement := range map[string]any{
+		"liveAttestation":       retentionLiveAttestation{},
+		"liveAttestationCipher": retentionLiveCipher{},
+		"concurrencyService":    service.NewConcurrencyService(cache),
+	} {
+		field := value.FieldByName(fieldName)
+		require.True(t, field.IsValid(), fieldName)
+		reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().Set(reflect.ValueOf(replacement))
+	}
+}
+
+func (*retentionLiveGatewayCache) SaveLiveCall(context.Context, *service.LiveCallRecord, time.Duration) error {
+	return nil
+}
+
+func (*retentionLiveGatewayCache) GetLiveCall(context.Context, string) (*service.LiveCallRecord, error) {
+	return nil, service.ErrLiveCallNotFound
+}
+
+func (*retentionLiveGatewayCache) ClaimLiveController(context.Context, string, string, string) (bool, error) {
 	return false, nil
+}
+
+func (*retentionLiveGatewayCache) ReleaseLiveController(context.Context, string, string) (bool, error) {
+	return false, nil
+}
+
+func (*retentionLiveGatewayCache) GetLiveController(context.Context, string) (string, error) {
+	return "", service.ErrLiveCallNotFound
+}
+
+func (*retentionLiveGatewayCache) MarkLiveCallClosed(context.Context, string, time.Duration) (bool, error) {
+	return false, nil
+}
+
+func (*retentionLiveGatewayCache) AcquireLiveLease(context.Context, int64, int, int64, int, int64, string, bool) (bool, error) {
+	return true, nil
+}
+
+func (*retentionLiveGatewayCache) RefreshLiveLease(context.Context, int64, int64, int64, string) (bool, error) {
+	return true, nil
+}
+
+func (*retentionLiveGatewayCache) ReleaseLiveLease(context.Context, int64, int64, int64, string) error {
+	return nil
 }
 
 func (u *retentionBlockingTransport) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
@@ -86,9 +144,15 @@ func (u *retentionBlockingTransport) Do(req *http.Request, _ string, _ int64, _ 
 	<-u.release
 	return &http.Response{
 		StatusCode: http.StatusOK,
-		Header:     http.Header{"Content-Type": {u.contentType}},
+		Header:     u.responseHeaders(),
 		Body:       io.NopCloser(strings.NewReader(u.body)),
 	}, nil
+}
+
+func (u *retentionBlockingTransport) responseHeaders() http.Header {
+	headers := u.responseHeader.Clone()
+	headers.Set("Content-Type", u.contentType)
+	return headers
 }
 
 type retentionBlockingStreamBody struct {
@@ -242,6 +306,9 @@ func measureBlockedRequestBodyHeap(t *testing.T, branch string, size int64, spoo
 		upstream.body = `{"type":"computer_initialize_state","id":"search_retention"}`
 	case "live":
 		path = "/v1/realtime/calls"
+		upstream.contentType = "application/sdp"
+		upstream.body = "v=0\r\n"
+		upstream.responseHeader = http.Header{"Location": {"/backend-api/codex/call_retention"}}
 	case "openai-messages":
 		path = "/v1/messages"
 		extra["openai_responses_supported"] = true
@@ -349,8 +416,9 @@ func measureBlockedRequestBodyHeap(t *testing.T, branch string, size int64, spoo
 	} else if branch == "live" {
 		group := &service.Group{ID: 1401, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowLive: true}
 		account := &service.Account{ID: 1401, Name: "retention-live", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"access_token": "token", "chatgpt_account_id": "acct-retention"}}
-		env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
-		env.handler.concurrencyHelper.concurrencyService = service.NewConcurrencyService(&retentionBlockingUserSlotCache{started: upstream.started, release: upstream.release})
+		cache := &retentionLiveGatewayCache{}
+		env := newTerminalUsageOpenAIEnvWithUpstreamAndGatewayCache(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream, cache)
+		enableRetentionLiveAttestation(t, env.handler.gatewayService, cache)
 		router = env.router(path, func(c *gin.Context) {
 			requestContext = c
 			env.handler.Live(c)
@@ -435,10 +503,10 @@ func measureBlockedRequestBodyHeap(t *testing.T, branch string, size int64, spoo
 	release()
 	waitMatrixSignal(t, done, "retention handler completion")
 	wantStatus := http.StatusOK
-	if branch == "live" {
-		wantStatus = http.StatusTooManyRequests
-	}
 	require.Equal(t, wantStatus, recorder.Code, recorder.Body.String())
+	if branch == "live" {
+		require.Equal(t, 1, upstream.calls, "Live retention case must reach transport")
+	}
 	assertMatrixTempFiles(t, spoolDir, "sub2api-request-body-", false)
 	return heap, previewSize, snapshotSize
 }
