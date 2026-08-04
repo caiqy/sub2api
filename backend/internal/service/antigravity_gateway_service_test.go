@@ -478,6 +478,37 @@ func (s *queuedHTTPUpstreamStub) DoWithTLS(req *http.Request, proxyURL string, a
 	return s.Do(req, proxyURL, accountID, concurrency)
 }
 
+type claudeSignatureRetryHTTPUpstream struct {
+	HTTPUpstream
+	responses        []*http.Response
+	requestBodies    [][]byte
+	requestBodyPaths []string
+	onCall           func(int)
+}
+
+func (s *claudeSignatureRetryHTTPUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	path := ""
+	if reader, ok := req.Body.(requestBodySpoolReadCloser); ok {
+		if file, ok := reader.ReadCloser.(*os.File); ok {
+			path = file.Name()
+		}
+	}
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	s.requestBodies = append(s.requestBodies, body)
+	s.requestBodyPaths = append(s.requestBodyPaths, path)
+	call := len(s.requestBodies)
+	if s.onCall != nil {
+		s.onCall(call)
+	}
+	if call > len(s.responses) {
+		return nil, errors.New("unexpected Claude signature retry upstream call")
+	}
+	return s.responses[call-1], nil
+}
+
 type recordingInternal500CounterCache struct {
 	incrementCalls []int64
 	resetCalls     []int64
@@ -1942,6 +1973,137 @@ func TestAntigravityGatewayService_ForwardUpstreamKeepsLargeBodyFileBackedWhileB
 	require.Equal(t, int64(len(body)), req.ContentLength)
 	close(upstream.release)
 	require.NoError(t, <-done)
+}
+
+func TestAntigravityGatewayService_ClaudeForwardHandleSignatureRetryReparsesFileBackedCanonical(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	writer := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(writer)
+	filler := strings.Repeat("x", int(DefaultRequestBodySpoolThresholdBytes)+1)
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":4096,"stream":false,"thinking":{"type":"enabled","budget_tokens":1024},"messages":[{"role":"user","content":"start"},{"role":"assistant","content":[{"type":"thinking","thinking":"secret plan","signature":"bad-signature"},{"type":"tool_use","id":"tool-1","name":"lookup","input":{"query":"wave13"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-1","content":"result"},{"type":"text","text":"` + filler + `"}]}]}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	canonicalHandle, err := NewRequestBodyHandleFromReader(bytes.NewReader(body), RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(canonicalHandle) })
+	require.NotEmpty(t, canonicalHandle.spoolPath)
+
+	readCalls := 0
+	oldRead := readAntigravityClaudeCanonicalBody
+	readAntigravityClaudeCanonicalBody = func(handle *RequestBodyHandle) ([]byte, error) {
+		require.Same(t, canonicalHandle, handle)
+		readCalls++
+		return handle.ReadAll()
+	}
+	t.Cleanup(func() { readAntigravityClaudeCanonicalBody = oldRead })
+
+	signatureError := func() *http.Response {
+		return &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"Corrupted thought signature."}}`))}
+	}
+	upstream := &claudeSignatureRetryHTTPUpstream{responses: []*http.Response{
+		signatureError(),
+		signatureError(),
+		{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":1,\"candidatesTokenCount\":1}}}\n\n"))},
+	}}
+	upstream.onCall = func(call int) {
+		require.Equal(t, call, readCalls, "each retry must re-read canonical exactly once")
+	}
+	svc := &AntigravityGatewayService{
+		settingService: NewSettingService(&antigravitySettingRepoStub{}, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
+		tokenProvider:  &AntigravityTokenProvider{},
+		httpUpstream:   upstream,
+	}
+	account := &Account{ID: 112, Name: "claude-signature", Platform: PlatformAntigravity, Type: AccountTypeOAuth, Concurrency: 1, Credentials: map[string]any{
+		"access_token": "token", "project_id": "project", "model_mapping": map[string]any{"claude-sonnet-4-5": "gemini-3-pro-high"},
+	}}
+
+	result, err := svc.ForwardHandle(context.Background(), c, account, canonicalHandle, false)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 3, readCalls)
+	require.Len(t, upstream.requestBodies, 3)
+	require.Contains(t, string(upstream.requestBodies[0]), `"thought":true`)
+	require.Contains(t, string(upstream.requestBodies[0]), `"functionCall"`)
+	require.NotContains(t, string(upstream.requestBodies[1]), `"thought":true`)
+	require.Contains(t, string(upstream.requestBodies[1]), `"functionCall"`, "thinking-only retry must preserve tools")
+	require.NotContains(t, string(upstream.requestBodies[2]), `"functionCall"`)
+	require.NotContains(t, string(upstream.requestBodies[2]), `"functionResponse"`)
+	require.Contains(t, string(upstream.requestBodies[2]), `(tool_use)`)
+	require.Len(t, upstream.requestBodyPaths, 3)
+	for _, path := range upstream.requestBodyPaths {
+		require.NotEmpty(t, path, "large outbound payload must remain file-backed")
+		require.NotEqual(t, canonicalHandle.spoolPath, path)
+	}
+	require.NotEqual(t, upstream.requestBodyPaths[0], upstream.requestBodyPaths[1])
+	require.NotEqual(t, upstream.requestBodyPaths[1], upstream.requestBodyPaths[2])
+	require.Equal(t, HashUsageRequestPayload(body), canonicalHandle.Hash())
+	canonicalBody, err := canonicalHandle.ReadAll()
+	require.NoError(t, err)
+	require.Equal(t, body, canonicalBody)
+}
+
+func TestAntigravityGatewayService_ClaudeForwardHandleSignatureRetryPreservesFailover(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	writer := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(writer)
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":4096,"thinking":{"type":"enabled","budget_tokens":1024},"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"secret","signature":"bad"}]}]}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	handle, err := NewRequestBodyHandleFromReader(bytes.NewReader(body), RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+	upstream := &claudeSignatureRetryHTTPUpstream{responses: []*http.Response{
+		{StatusCode: http.StatusBadRequest, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"Corrupted thought signature."}}`))},
+		{StatusCode: http.StatusBadRequest, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"invalid project resource name"}}`))},
+	}}
+	svc := &AntigravityGatewayService{
+		settingService: NewSettingService(&antigravitySettingRepoStub{}, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
+		tokenProvider:  &AntigravityTokenProvider{},
+		httpUpstream:   upstream,
+	}
+	account := &Account{ID: 113, Name: "claude-signature-failover", Platform: PlatformAntigravity, Type: AccountTypeOAuth, Concurrency: 1, Credentials: map[string]any{"access_token": "token", "project_id": "project"}}
+
+	result, err := svc.ForwardHandle(context.Background(), c, account, handle, false)
+
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusBadRequest, failoverErr.StatusCode)
+	require.True(t, failoverErr.RetryableOnSameAccount)
+	require.Len(t, upstream.requestBodies, 2)
+	require.False(t, c.Writer.Written())
+}
+
+func TestAntigravityGatewayService_ClaudeForwardHandleSignatureRetryPreservesSpoolSentinel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	writer := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(writer)
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":4096,"thinking":{"type":"enabled","budget_tokens":1024},"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"secret","signature":"bad"}]}]}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	handle, err := NewRequestBodyHandleFromReader(bytes.NewReader(body), RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+	upstream := &claudeSignatureRetryHTTPUpstream{responses: []*http.Response{{
+		StatusCode: http.StatusBadRequest, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"Corrupted thought signature."}}`)),
+	}}}
+	upstream.onCall = func(call int) {
+		if call == 1 {
+			require.NoError(t, os.Remove(handle.spoolPath))
+		}
+	}
+	svc := &AntigravityGatewayService{
+		settingService: NewSettingService(&antigravitySettingRepoStub{}, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
+		tokenProvider:  &AntigravityTokenProvider{},
+		httpUpstream:   upstream,
+	}
+	account := &Account{ID: 114, Name: "claude-signature-spool", Platform: PlatformAntigravity, Type: AccountTypeOAuth, Concurrency: 1, Credentials: map[string]any{"access_token": "token", "project_id": "project"}}
+
+	result, err := svc.ForwardHandle(context.Background(), c, account, handle, false)
+
+	require.Nil(t, result)
+	require.ErrorIs(t, err, ErrRequestBodySpool)
+	require.Len(t, upstream.requestBodies, 1)
+	require.False(t, c.Writer.Written())
 }
 
 func TestAntigravityGatewayService_ForwardEnabledThinkingRetriesInvalidBudget(t *testing.T) {

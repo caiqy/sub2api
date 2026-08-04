@@ -595,6 +595,46 @@ func TestGatewayHandler_MessagesSuccessPreservesAcceptedWirePayloadHash(t *testi
 	}
 }
 
+func TestGatewayHandler_MessagesAntigravityClaudeSignatureRetryBillsCanonicalHash(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawDir, effectiveDir := t.TempDir(), t.TempDir()
+	oldOptions := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: rawDir}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
+	t.Setenv("TMPDIR", effectiveDir)
+	t.Setenv("TMP", effectiveDir)
+	t.Setenv("TEMP", effectiveDir)
+
+	group := &service.Group{ID: 61, Platform: service.PlatformAntigravity, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 162, Name: "antigravity-signature-hash", Platform: service.PlatformAntigravity, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{
+		"access_token": "token", "project_id": "project", "model_mapping": map[string]any{"claude-sonnet-4-5": "gemini-3-pro-high"},
+	}}
+	upstream := &gatewayAntigravityClaudeSignatureUpstream{}
+	env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+	billingRepo := captureTerminalGatewayUsageBilling(t, env, group, upstream)
+	body := `{"model":"claude-sonnet-4-5","max_tokens":4096,"stream":false,"thinking":{"type":"enabled","budget_tokens":1024},"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"secret","signature":"bad"}]},{"role":"user","content":"` + strings.Repeat("x", int(service.DefaultRequestBodySpoolThresholdBytes)+1) + `"}]}`
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	env.router().ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", recorder.Code, recorder.Body.String())
+	}
+	if len(upstream.requestBodies) != 2 {
+		t.Fatalf("upstream calls = %d, want 2", len(upstream.requestBodies))
+	}
+	wantHash := service.HashUsageRequestPayload([]byte(body))
+	if billingRepo.lastCmd == nil || billingRepo.lastCmd.RequestPayloadHash != wantHash {
+		t.Fatalf("billing RequestPayloadHash = %q, want canonical %q", billingRepo.requestPayloadHash(), wantHash)
+	}
+	if retryHash := service.HashUsageRequestPayload(upstream.requestBodies[1]); retryHash == wantHash {
+		t.Fatalf("retry payload hash unexpectedly equals canonical hash: %q", retryHash)
+	}
+	assertGatewaySpoolDirsEmpty(t, rawDir, effectiveDir)
+}
+
 type gatewayRequestBodyUsageBillingRepo struct {
 	service.UsageBillingRepository
 	lastCmd *service.UsageBillingCommand
@@ -1087,6 +1127,34 @@ type gatewayAcceptedWireDeletingUpstream struct {
 type gatewayAcceptedWireCapturingUpstream struct {
 	service.HTTPUpstream
 	body []byte
+}
+
+type gatewayAntigravityClaudeSignatureUpstream struct {
+	service.HTTPUpstream
+	requestBodies [][]byte
+}
+
+func (u *gatewayAntigravityClaudeSignatureUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	u.requestBodies = append(u.requestBodies, body)
+	if len(u.requestBodies) == 1 {
+		return &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Header:     http.Header{"Content-Type": {"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"Corrupted thought signature."}}`)),
+		}, nil
+	}
+	if len(u.requestBodies) == 2 {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": {"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader("data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":1,\"candidatesTokenCount\":1}}}\n\n")),
+		}, nil
+	}
+	return nil, errors.New("unexpected Antigravity Claude signature retry upstream call")
 }
 
 func (u *gatewayAcceptedWireCapturingUpstream) DoWithTLS(req *http.Request, _ string, _ int64, _ int, _ *tlsfingerprint.Profile) (*http.Response, error) {
