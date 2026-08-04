@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -28,6 +29,21 @@ import (
 //	          ├─ 成功 → 正常返回
 //	          └─ 失败 → 设置模型限流 + 清除粘性绑定 → 切换账号
 func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte, isStickySession bool, options ...ForwardGeminiOption) (*ForwardResult, error) {
+	bodyHandle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("create antigravity request body handle: %w", err)
+	}
+	body = nil
+	defer CleanupRequestBodyHandle(bodyHandle)
+	return s.ForwardHandle(ctx, c, account, bodyHandle, isStickySession, options...)
+}
+
+// ForwardHandle borrows the handler-owned canonical body handle. Full Claude
+// request structures exist only during synchronous conversion windows.
+func (s *AntigravityGatewayService) ForwardHandle(ctx context.Context, c *gin.Context, account *Account, bodyHandle *RequestBodyHandle, isStickySession bool, options ...ForwardGeminiOption) (*ForwardResult, error) {
+	if bodyHandle == nil {
+		return nil, fmt.Errorf("antigravity request body handle is nil")
+	}
 	forwardOpts := forwardGeminiOptions{}
 	for _, apply := range options {
 		if apply != nil {
@@ -37,12 +53,7 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 
 	// 上游透传账号直接转发，不走 OAuth token 刷新
 	if account.Type == AccountTypeUpstream {
-		handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
-		if err != nil {
-			return nil, fmt.Errorf("create upstream request body handle: %w", err)
-		}
-		defer CleanupRequestBodyHandle(handle)
-		return s.ForwardUpstream(ctx, c, account, handle)
+		return s.ForwardUpstream(ctx, c, account, bodyHandle)
 	}
 
 	startTime := time.Now()
@@ -51,6 +62,10 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 	prefix := logPrefix(sessionID, account.Name)
 
 	// 解析 Claude 请求
+	body, err := bodyHandle.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("read antigravity request body: %w", err)
+	}
 	var claudeReq antigravity.ClaudeRequest
 	if err := json.Unmarshal(body, &claudeReq); err != nil {
 		return nil, s.writeClaudeError(c, http.StatusBadRequest, "invalid_request_error", "Invalid request body")
@@ -96,6 +111,15 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 	if err != nil {
 		return nil, s.writeClaudeError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
+	requestStream := claudeReq.Stream
+	claudeReq = antigravity.ClaudeRequest{}
+	body = nil
+	payloadHandle, err := NewRequestBodyHandleFromBytes(geminiBody, RequestBodyHandleOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("create antigravity payload handle: %w", err)
+	}
+	geminiBody = nil
+	defer CleanupRequestBodyHandle(payloadHandle)
 	accessToken, err := s.getAntigravityAccessToken(ctx, account)
 	if err != nil {
 		return nil, err
@@ -113,7 +137,7 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 		proxyURL:        proxyURL,
 		accessToken:     accessToken,
 		action:          action,
-		body:            geminiBody,
+		payloadHandle:   payloadHandle,
 		c:               c,
 		httpUpstream:    s.httpUpstream,
 		settingService:  s.settingService,
@@ -126,6 +150,9 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 		extraHeaders:    extraHeaders,
 	})
 	if err != nil {
+		if errors.Is(err, ErrRequestBodySpool) {
+			return nil, err
+		}
 		// 检查是否是账号切换信号，转换为 UpstreamFailoverError 让 Handler 切换账号
 		if switchErr, ok := IsAntigravityAccountSwitchError(err); ok {
 			return nil, &UpstreamFailoverError{
@@ -177,8 +204,16 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 			}
 
 			for _, stage := range retryStages {
-				retryClaudeReq := claudeReq
-				retryClaudeReq.Messages = append([]antigravity.ClaudeMessage(nil), claudeReq.Messages...)
+				canonicalBody, readErr := bodyHandle.ReadAll()
+				if readErr != nil {
+					return nil, fmt.Errorf("read antigravity signature retry body: %w", readErr)
+				}
+				var retryClaudeReq antigravity.ClaudeRequest
+				if unmarshalErr := json.Unmarshal(canonicalBody, &retryClaudeReq); unmarshalErr != nil {
+					canonicalBody = nil
+					return nil, fmt.Errorf("parse antigravity signature retry body: %w", unmarshalErr)
+				}
+				canonicalBody = nil
 
 				stripped, stripErr := stage.strip(&retryClaudeReq)
 				if stripErr != nil || !stripped {
@@ -188,9 +223,15 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 				logger.LegacyPrintf("service.antigravity_gateway", "Antigravity account %d: detected signature-related 400, retrying once (%s)", account.ID, stage.name)
 
 				retryGeminiBody, txErr := antigravity.TransformClaudeToGeminiWithOptions(&retryClaudeReq, projectID, mappedModel, s.getClaudeTransformOptions(ctx))
+				retryClaudeReq = antigravity.ClaudeRequest{}
 				if txErr != nil {
 					continue
 				}
+				retryHandle, handleErr := NewRequestBodyHandleFromBytes(retryGeminiBody, RequestBodyHandleOptions{})
+				if handleErr != nil {
+					return nil, fmt.Errorf("create antigravity signature retry handle: %w", handleErr)
+				}
+				retryGeminiBody = nil
 				retryResult, retryErr := s.antigravityRetryLoop(antigravityRetryLoopParams{
 					ctx:             ctx,
 					prefix:          prefix,
@@ -198,7 +239,7 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 					proxyURL:        proxyURL,
 					accessToken:     accessToken,
 					action:          action,
-					body:            retryGeminiBody,
+					payloadHandle:   retryHandle,
 					c:               c,
 					httpUpstream:    s.httpUpstream,
 					settingService:  s.settingService,
@@ -209,7 +250,11 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 					groupID:         forwardOpts.groupID,
 					sessionHash:     forwardOpts.sessionHash,
 				})
+				CleanupRequestBodyHandle(retryHandle)
 				if retryErr != nil {
+					if errors.Is(retryErr, ErrRequestBodySpool) {
+						return nil, retryErr
+					}
 					appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 						Platform:           account.Platform,
 						AccountID:          account.ID,
@@ -296,10 +341,18 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 					Detail:             s.getUpstreamErrorDetail(respBody),
 				})
 
-				// 修正 claudeReq 的 thinking 参数（adaptive 模式不修正）
-				if claudeReq.Thinking == nil || claudeReq.Thinking.Type != "adaptive" {
-					retryClaudeReq := claudeReq
-					retryClaudeReq.Messages = append([]antigravity.ClaudeMessage(nil), claudeReq.Messages...)
+				// 修正 canonical 请求的 thinking 参数（adaptive 模式不修正）
+				retryBody, readErr := bodyHandle.ReadAll()
+				if readErr != nil {
+					return nil, fmt.Errorf("read antigravity budget retry body: %w", readErr)
+				}
+				var retryClaudeReq antigravity.ClaudeRequest
+				if unmarshalErr := json.Unmarshal(retryBody, &retryClaudeReq); unmarshalErr != nil {
+					retryBody = nil
+					return nil, fmt.Errorf("parse antigravity budget retry body: %w", unmarshalErr)
+				}
+				retryBody = nil
+				if retryClaudeReq.Thinking == nil || retryClaudeReq.Thinking.Type != "adaptive" {
 					// 创建新的 ThinkingConfig 避免修改原始 claudeReq.Thinking 指针
 					retryClaudeReq.Thinking = &antigravity.ThinkingConfig{
 						Type:         "enabled",
@@ -312,7 +365,13 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 					logger.LegacyPrintf("service.antigravity_gateway", "Antigravity account %d: detected budget_tokens constraint error, retrying with rectified budget (budget_tokens=%d, max_tokens=%d)", account.ID, BudgetRectifyBudgetTokens, BudgetRectifyMaxTokens)
 
 					retryGeminiBody, txErr := antigravity.TransformClaudeToGeminiWithOptions(&retryClaudeReq, projectID, mappedModel, transformOpts)
+					retryClaudeReq = antigravity.ClaudeRequest{}
 					if txErr == nil {
+						retryHandle, handleErr := NewRequestBodyHandleFromBytes(retryGeminiBody, RequestBodyHandleOptions{})
+						if handleErr != nil {
+							return nil, fmt.Errorf("create antigravity budget retry handle: %w", handleErr)
+						}
+						retryGeminiBody = nil
 						retryResult, retryErr := s.antigravityRetryLoop(antigravityRetryLoopParams{
 							ctx:             ctx,
 							prefix:          prefix,
@@ -320,7 +379,7 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 							proxyURL:        proxyURL,
 							accessToken:     accessToken,
 							action:          action,
-							body:            retryGeminiBody,
+							payloadHandle:   retryHandle,
 							c:               c,
 							httpUpstream:    s.httpUpstream,
 							settingService:  s.settingService,
@@ -331,6 +390,10 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 							groupID:         forwardOpts.groupID,
 							sessionHash:     forwardOpts.sessionHash,
 						})
+						CleanupRequestBodyHandle(retryHandle)
+						if errors.Is(retryErr, ErrRequestBodySpool) {
+							return nil, retryErr
+						}
 						if retryErr == nil {
 							retryResp := retryResult.resp
 							if retryResp.StatusCode < 400 {
@@ -435,7 +498,7 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 	var usage *ClaudeUsage
 	var firstTokenMs *int
 	var clientDisconnect bool
-	if claudeReq.Stream {
+	if requestStream {
 		// 客户端要求流式，直接透传转换
 		streamRes, err := s.handleClaudeStreamingResponse(c, resp, startTime, originalModel)
 		if err != nil {
@@ -461,24 +524,11 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 		Usage:            *usage,
 		Model:            originalModel,
 		UpstreamModel:    billingModel,
-		Stream:           claudeReq.Stream,
+		Stream:           requestStream,
 		Duration:         time.Since(startTime),
 		FirstTokenMs:     firstTokenMs,
 		ClientDisconnect: clientDisconnect,
 	}, nil
-}
-
-// ForwardHandle borrows the handler-owned spool and materializes it only for
-// the synchronous Claude-to-Gemini transform. The gateway handler owns cleanup.
-func (s *AntigravityGatewayService) ForwardHandle(ctx context.Context, c *gin.Context, account *Account, bodyHandle *RequestBodyHandle, isStickySession bool, options ...ForwardGeminiOption) (*ForwardResult, error) {
-	if bodyHandle == nil {
-		return nil, fmt.Errorf("antigravity request body handle is nil")
-	}
-	body, err := bodyHandle.ReadAll()
-	if err != nil {
-		return nil, fmt.Errorf("read antigravity request body: %w", err)
-	}
-	return s.Forward(ctx, c, account, body, isStickySession, options...)
 }
 
 func isSignatureRelatedError(respBody []byte) bool {
