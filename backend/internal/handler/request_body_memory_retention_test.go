@@ -31,6 +31,8 @@ type retentionBlockingTransport struct {
 	firstBody   string
 	streamBody  bool
 	attachReq   bool
+	retainReq   bool
+	blockedReq  *http.Request
 	calls       int
 }
 
@@ -63,6 +65,10 @@ func (u *retentionBlockingTransport) Do(req *http.Request, _ string, _ int64, _ 
 			resp.Request = req
 		}
 		return resp, nil
+	}
+	if u.retainReq {
+		u.blockedReq = req
+		defer func() { u.blockedReq = nil }()
 	}
 	close(u.started)
 	<-u.release
@@ -223,6 +229,7 @@ func measureBlockedRequestBodyHeap(t *testing.T, branch string, size int64, spoo
 	case "openai-messages-chat-fallback":
 		path = "/v1/messages"
 		extra["openai_responses_supported"] = false
+		upstream.retainReq = true
 		upstream.body = `{"id":"chatcmpl_retention","choices":[{"message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`
 	case "gateway-chat-anthropic":
 		path = "/v1/chat/completions"
