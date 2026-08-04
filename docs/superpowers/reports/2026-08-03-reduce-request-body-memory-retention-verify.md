@@ -3,7 +3,7 @@
 - Change: reduce-request-body-memory-retention
 - 日期: 2026-08-03
 - verify_mode: full（31 任务 / 39 文件 / 2757 行新增）
-- 分支: feature/20260803/reduce-request-body-memory-retention（59 commits，HEAD 82bfe412b，base 8b494e187）
+- 分支: feature/20260803/reduce-request-body-memory-retention（64 commits，HEAD 7deb66b8e，Wave 19 基线 adbc7802f，base 8b494e187）
 
 ## Summary
 
@@ -15,7 +15,7 @@
 
 ## 回归专项审查（用户要求，2026-08-03 补充）
 
-验证通过后追加**七轮**业务回归专项审查（18 个修复 wave，82bfe412b 收尾，59 commits），全部发现已解决：
+验证通过后追加**七轮**业务回归专项审查（19 个修复 wave，7deb66b8e 收尾，64 commits），全部发现已解决：
 
 | 轮次 | 方法 | 发现 | 处置 |
 |------|------|------|------|
@@ -23,9 +23,11 @@
 | 第 2 轮 | 修复 wave 复核 | post-ping SSE 裸 JSON、Responses silent EOF、passthrough build 400、Antigravity 502、等待期持有 | 5 wave |
 | 第 3 轮 | 二级路径 + 收尾 | Antigravity 二级路径吞 sentinel、测试假阳性、Claude 路径 byte-backed、body 未关闭 | 3 wave |
 | 第 4 轮 | 穷举式（26 文件逐 hunk） | Responses 标量 clone 遗漏 | 1 wave |
-| 第 7 轮（最终） | 发布前整体关 | parser spool 未统一 503、OAuth/Websearch 静默 Bytes()、transport 漏关 resp body、Gemini backoff 不响应 ctx | 3 wave（16-18） |
+| 第 5 轮 | 全链路错误语义复核 | parser spool 未统一 503、OAuth/Websearch ReadAll 错误未传播、transport spool error 漏关 response body、Gemini backoff 不响应 ctx | 1 wave（16） |
+| 第 6 轮 | Gateway Chat 收尾 | Gateway Chat 未 handle 化、Chat retry backoff 不响应 ctx、验证报告范围失真 | 1 wave（17） |
+| 第 7 轮（最终） | 发布前整体关 | Wave 17/18 Gateway Chat 复审：post-ping SSE spool error 追加裸 JSON、lenient JSON/解压后限长契约回归、未提交 spool error envelope 漂移 | Wave 18 修复 post-ping/lenient，Wave 19 修复 envelope |
 
-**回归审查最终结论**：**PASS（可发布）**——无未解决的业务回归；重放一致性、错误映射（未提交 503 / 已提交协议终止帧）、failover、usage/billing（含零费用 failed usage 审计语义）、streaming 协议（SSE `event: error`/`response.failed`）均与 base 一致；新增 2 个导出常量（`DefaultRequestBodySpoolThresholdBytes`/`DefaultRequestBodyPreviewLimitBytes`，有意的默认值 API），无其他 exported API 变更；WS 文件零改动；wave 14 为纯测试，wave 16/17/18 含生产修复。
+**回归审查最终结论**：**PASS（可发布）**——无未解决的业务回归；重放一致性、错误映射（未提交 503 / 已提交协议终止帧）、failover、usage/billing（含零费用 failed usage 审计语义）、streaming 协议（SSE `event: error`/`response.failed`）均与 base 一致；新增 2 个导出常量（`DefaultRequestBodySpoolThresholdBytes`/`DefaultRequestBodyPreviewLimitBytes`，有意的默认值 API），无其他 exported API 变更；WS 文件零改动；wave 14 为纯测试，wave 16/17/18/19 含生产修复。
 
 ## 1. Completeness（完整性）
 
