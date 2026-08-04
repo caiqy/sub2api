@@ -2450,6 +2450,27 @@ func TestForwardAsAnthropicForGrokEncryptedContentRetryStoresActualUpstreamBody(
 	require.Equal(t, wantRetryBody, unwrapRequestBodyPreviewForTest(c.GetString(OpsUpstreamRequestBodyKey)))
 }
 
+func TestBuildGrokResponsesRequestWithHandleLeavesSnapshotRecordingToCaller(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	collector := &usageUpstreamSnapshotCollector{}
+	c.Set(UsageDetailCaptureContextKey, collector)
+	bodyHandle, err := NewRequestBodyHandleFromBytes([]byte(`{"model":"grok-4.5","input":"hello"}`), RequestBodyHandleOptions{})
+	require.NoError(t, err)
+	defer CleanupRequestBodyHandle(bodyHandle)
+
+	req, err := buildGrokResponsesRequestWithHandle(context.Background(), c, healthyGrokOAuthGatewayTestAccount(60, "access-token"), bodyHandle, "grok-4.5", "access-token", "cache-id", nil)
+	require.NoError(t, err)
+	defer func() { _ = req.Body.Close() }()
+
+	require.Empty(t, collector.body)
+	_, recorded := c.Get(OpsUpstreamRequestBodyKey)
+	require.False(t, recorded)
+}
+
 func TestForwardAsAnthropicForGrokFunctionToolUsesCacheCapableMixedRoute(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

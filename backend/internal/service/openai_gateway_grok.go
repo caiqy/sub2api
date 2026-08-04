@@ -115,6 +115,7 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 		if buildErr != nil {
 			return nil, buildErr
 		}
+		SetUsageUpstreamRequest(c, upstreamReq, currentHandle.PreviewString())
 		publishOpenAIFinalUpstreamModel(c, upstreamReq)
 
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
@@ -269,7 +270,6 @@ func buildGrokResponsesRequestWithHandle(ctx context.Context, c *gin.Context, ac
 		}
 	}
 	account.ApplyHeaderOverrides(req.Header)
-	SetUsageUpstreamRequest(c, req, bodyHandle.PreviewString())
 	return req.WithContext(context.WithValue(req.Context(), openAIFinalUpstreamModelContextKey{}, strings.TrimSpace(model))), nil
 }
 
