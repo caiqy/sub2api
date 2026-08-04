@@ -20,6 +20,9 @@ const (
 	creditsExhaustedDuration = 5 * time.Hour
 )
 
+// Test hook only; tests replacing it must not run in parallel.
+var newAntigravityCreditsPayloadRequest = newAntigravityPayloadRequest
+
 type antigravity429Category string
 
 const (
@@ -197,8 +200,11 @@ func (s *AntigravityGatewayService) attemptCreditsOveragesRetry(
 	logger.LegacyPrintf("service.antigravity_gateway", "%s status=429 credit_overages_retry model=%s account=%d (injecting enabledCreditTypes)",
 		p.prefix, modelKey, p.account.ID)
 
-	creditsReq, err := newAntigravityPayloadRequest(&p, baseURL)
+	creditsReq, err := newAntigravityCreditsPayloadRequest(&p, baseURL)
 	if err != nil {
+		if errors.Is(err, ErrRequestBodySpool) {
+			return &creditsOveragesRetryResult{err: err}
+		}
 		logger.LegacyPrintf("service.antigravity_gateway", "%s credit_overages_failed model=%s account=%d build_request_err=%v",
 			p.prefix, modelKey, p.account.ID, err)
 		return &creditsOveragesRetryResult{err: fmt.Errorf("build credits retry request: %w", err)}

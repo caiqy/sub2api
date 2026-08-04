@@ -179,6 +179,31 @@ func TestHandleSingleAccountRetryInPlace_TransportSpoolErrorStopsRetries(t *test
 	require.Empty(t, recorder.Body.String())
 }
 
+func TestAttemptCreditsOveragesRetry_BuildSpoolErrorReturnsUnchanged(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	spoolErr := fmt.Errorf("build credits retry request: %w", ErrRequestBodySpool)
+	oldBuilder := newAntigravityCreditsPayloadRequest
+	newAntigravityCreditsPayloadRequest = func(*antigravityRetryLoopParams, string) (*http.Request, error) {
+		return nil, spoolErr
+	}
+	t.Cleanup(func() { newAntigravityCreditsPayloadRequest = oldBuilder })
+	payloadHandle, err := NewRequestBodyHandleFromBytes([]byte(`{"request":{}}`), RequestBodyHandleOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(payloadHandle) })
+
+	account := &Account{ID: 108, Name: "credits-build-spool", Platform: PlatformAntigravity, Type: AccountTypeOAuth, Concurrency: 1}
+	result := (&AntigravityGatewayService{}).attemptCreditsOveragesRetry(antigravityRetryLoopParams{
+		ctx: context.Background(), prefix: "[test]", account: account, accessToken: "token", action: "generateContent",
+		payloadHandle: payloadHandle, c: c,
+	}, "https://ag.test", "gemini-wave9", 0, http.StatusTooManyRequests, nil)
+
+	require.True(t, result.err == spoolErr, "spool sentinel must be returned without wrapping")
+	require.False(t, HasOpsUpstreamAttempted(c))
+	require.Empty(t, recorder.Body.String())
+}
+
 func TestStripSignatureSensitiveBlocksFromClaudeRequest(t *testing.T) {
 	req := &antigravity.ClaudeRequest{
 		Model: "claude-sonnet-4-5",
