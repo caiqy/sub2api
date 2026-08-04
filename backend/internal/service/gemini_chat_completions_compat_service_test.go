@@ -8,6 +8,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -55,6 +58,47 @@ func TestGeminiChatCompletionsCompatCancellationStopsRetryLoop(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGeminiChatCompletionsCompatFirstAttemptReusesTransformedBody(t *testing.T) {
+	body := []byte(`{"contents":[{"role":"user","parts":[{"text":"` + strings.Repeat("x", 8<<20) + `"}]}]}`)
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+
+	svc := &GeminiMessagesCompatService{cfg: &config.Config{}}
+	account := &Account{ID: 2, Platform: PlatformGemini, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "test-key"}}
+	buildReq, _ := svc.buildGeminiChatCompletionsUpstreamRequestFunc(account, "gemini-2.5-flash", handle, body, false, false)
+	measureBuild := func() (uint64, error) {
+		runtime.GC()
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		req, _, err := buildReq(context.Background())
+		if req != nil {
+			closeOpenAIRequestBody(req)
+		}
+		runtime.ReadMemStats(&after)
+		return after.TotalAlloc - before.TotalAlloc, err
+	}
+
+	firstAlloc, err := measureBuild()
+	require.NoError(t, err)
+	retryAlloc, err := measureBuild()
+	require.NoError(t, err)
+	t.Logf("first_build_alloc=%d retry_build_alloc=%d", firstAlloc, retryAlloc)
+	require.Greater(t, retryAlloc, firstAlloc+uint64(len(body)/2), "retry must add a canonical handle materialization while the first build reuses transformed bytes")
+
+	missingHandle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(missingHandle) })
+	buildMissing, _ := svc.buildGeminiChatCompletionsUpstreamRequestFunc(account, "gemini-2.5-flash", missingHandle, body, false, false)
+	require.NoError(t, os.Remove(missingHandle.spoolPath))
+	firstReq, _, err := buildMissing(context.Background())
+	require.NoError(t, err, "first build must not read the canonical handle")
+	closeOpenAIRequestBody(firstReq)
+	_, _, err = buildMissing(context.Background())
+	require.ErrorIs(t, err, ErrRequestBodySpool, "retry must read the canonical handle")
+	runtime.KeepAlive(body)
 }
 
 func TestGeminiResponseToChatCompletionsPreservesInlineData(t *testing.T) {

@@ -117,7 +117,6 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		return nil, fmt.Errorf("spool Gemini request body: %w", err)
 	}
 	defer CleanupRequestBodyHandle(geminiHandle)
-	geminiReq = nil
 	claudeBody = nil
 
 	proxyURL := ""
@@ -134,9 +133,11 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		account,
 		mappedModel,
 		geminiHandle,
+		geminiReq,
 		clientStream,
 		useUpstreamStream,
 	)
+	geminiReq = nil
 
 	var resp *http.Response
 	for attempt := 1; attempt <= geminiMaxRetries; attempt++ {
@@ -338,6 +339,7 @@ func (s *GeminiMessagesCompatService) buildGeminiChatCompletionsUpstreamRequestF
 	account *Account,
 	mappedModel string,
 	geminiHandle *RequestBodyHandle,
+	firstBody []byte,
 	clientStream bool,
 	useUpstreamStream bool,
 ) (func(context.Context) (*http.Request, string, error), string) {
@@ -348,8 +350,16 @@ func (s *GeminiMessagesCompatService) buildGeminiChatCompletionsUpstreamRequestF
 		}
 		return openAINewRequestWithBodyHandle(ctx, http.MethodPost, targetURL, bodyHandle, true)
 	}
+	canonicalBody := func() ([]byte, error) {
+		if firstBody != nil {
+			body := firstBody
+			firstBody = nil
+			return body, nil
+		}
+		return geminiHandle.ReadAll()
+	}
 	newRESTRequest := func(ctx context.Context, targetURL string) (*http.Request, error) {
-		body, err := geminiHandle.ReadAll()
+		body, err := canonicalBody()
 		if err != nil {
 			return nil, err
 		}
@@ -413,7 +423,7 @@ func (s *GeminiMessagesCompatService) buildGeminiChatCompletionsUpstreamRequestF
 					fullURL += "?alt=sse"
 				}
 
-				geminiReq, err := geminiHandle.ReadAll()
+				geminiReq, err := canonicalBody()
 				if err != nil {
 					return nil, "", err
 				}
