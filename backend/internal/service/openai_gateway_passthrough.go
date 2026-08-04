@@ -221,6 +221,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		closeOpenAIRequestBody(upstreamReq)
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		if err != nil {
+			if resp != nil && resp.Body != nil {
+				_ = resp.Body.Close()
+			}
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 		}
 		if resp.StatusCode < 400 || recoveryTried || !s.isAgentIdentityAccount(ctx, account) {
