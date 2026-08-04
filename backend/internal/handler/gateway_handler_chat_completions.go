@@ -326,7 +326,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()
 				}
-				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body", streamStarted || c.Writer.Written())
+				h.handleChatCompletionsStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body", streamStarted || c.Writer.Written())
 				return
 			}
 			setActualUpstreamEndpoint(c, EndpointAntigravityGenerateContent)
@@ -342,7 +342,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 
 		if err != nil {
 			if errors.Is(err, service.ErrRequestBodySpool) {
-				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body", streamStarted || c.Writer.Written())
+				h.handleChatCompletionsStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body", streamStarted || c.Writer.Written())
 				return
 			}
 			var failoverErr *service.UpstreamFailoverError
@@ -422,6 +422,14 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		})
 		return
 	}
+}
+
+func (h *GatewayHandler) handleChatCompletionsStreamingAwareError(c *gin.Context, status int, errType, message string, streamStarted bool) {
+	if streamStarted {
+		h.handleStreamingAwareError(c, status, errType, message, true)
+		return
+	}
+	h.chatCompletionsErrorResponse(c, status, errType, message)
 }
 
 // chatCompletionsErrorResponse writes an error in OpenAI Chat Completions format.

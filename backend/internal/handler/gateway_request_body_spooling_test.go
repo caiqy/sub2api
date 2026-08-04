@@ -583,6 +583,29 @@ func TestGatewayHandler_MessagesStreamingAcceptedWireSpoolFailureWritesSSEError(
 	}
 }
 
+func TestGatewayHandler_ChatCompletionsUncommittedSpoolFailureUsesOpenAIEnvelope(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream := &responsesSpoolTransportUpstream{}
+	group := &service.Group{ID: 66, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 167, Name: "gateway-chat-spool", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "token"}}
+	env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"claude-sonnet-4-5","stream":false,"messages":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	env.routerFor("/v1/chat/completions", env.handler.ChatCompletions).ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body = %s", recorder.Code, recorder.Body.String())
+	}
+	if got, want := recorder.Body.String(), `{"error":{"message":"Failed to spool request body","type":"api_error"}}`; got != want {
+		t.Fatalf("body = %q, want exact OpenAI envelope %q", got, want)
+	}
+	if upstream.calls != 1 {
+		t.Fatalf("upstream calls = %d, want 1", upstream.calls)
+	}
+}
+
 func TestRequestBodySpoolFailureAfterPingWritesSSEError(t *testing.T) {
 	t.Run("chat completions", func(t *testing.T) {
 		gin.SetMode(gin.TestMode)
