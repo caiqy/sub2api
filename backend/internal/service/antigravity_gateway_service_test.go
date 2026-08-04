@@ -91,6 +91,31 @@ func TestAntigravityCompatSpoolErrorPreservesSentinel(t *testing.T) {
 	require.Empty(t, recorder.Body.String())
 }
 
+func TestAntigravityGatewayService_ForwardGeminiTransportSpoolErrorReturnsWithoutRetry(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	body := []byte(`{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash:generateContent", bytes.NewReader(body))
+	upstream := &queuedHTTPUpstreamStub{errors: []error{fmt.Errorf("read native payload: %w", ErrRequestBodySpool)}}
+	svc := &AntigravityGatewayService{
+		settingService: NewSettingService(&antigravitySettingRepoStub{}, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
+		tokenProvider:  &AntigravityTokenProvider{},
+		httpUpstream:   upstream,
+	}
+	account := &Account{
+		ID: 103, Name: "antigravity-native-spool", Platform: PlatformAntigravity, Type: AccountTypeOAuth, Status: StatusActive, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "token", "project_id": "project", "model_mapping": map[string]any{"gemini-2.5-flash": "gemini-2.5-flash"}},
+	}
+
+	result, err := svc.ForwardGemini(context.Background(), c, account, "gemini-2.5-flash", "generateContent", false, body, false)
+
+	require.Nil(t, result)
+	require.ErrorIs(t, err, ErrRequestBodySpool)
+	require.Equal(t, 1, upstream.callCount)
+	require.Empty(t, recorder.Body.String())
+}
+
 func TestStripSignatureSensitiveBlocksFromClaudeRequest(t *testing.T) {
 	req := &antigravity.ClaudeRequest{
 		Model: "claude-sonnet-4-5",

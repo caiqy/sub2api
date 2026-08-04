@@ -512,7 +512,11 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				c.Writer.Header().Del("Cache-Control")
 				c.Writer.Header().Del("Connection")
 				c.Writer.Header().Del("X-Accel-Buffering")
-				googleError(c, http.StatusBadGateway, "Upstream request failed")
+				if errors.Is(err, service.ErrRequestBodySpool) {
+					googleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
+				} else {
+					googleError(c, http.StatusBadGateway, "Upstream request failed")
+				}
 			}
 			if c.Request.Context().Err() == nil && service.HasOpsUpstreamAttempted(c) && !service.HasOpsClientBusinessLimited(c) {
 				userAgent := c.GetHeader("User-Agent")

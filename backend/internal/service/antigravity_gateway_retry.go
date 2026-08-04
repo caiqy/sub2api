@@ -545,6 +545,9 @@ urlFallbackLoop:
 				err = errors.New("upstream returned nil response")
 			}
 			if err != nil {
+				if errors.Is(err, ErrRequestBodySpool) {
+					return nil, err
+				}
 				safeErr := sanitizeUpstreamErrorMessage(err.Error())
 				appendOpsUpstreamError(p.c, OpsUpstreamErrorEvent{
 					Platform:           p.account.Platform,

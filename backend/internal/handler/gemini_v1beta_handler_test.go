@@ -206,6 +206,53 @@ func TestGeminiV1BetaModels_ReleasesAcquiredAccountSlotWhenThoughtSignatureSpool
 	require.Equal(t, 1, cache.releaseCalls())
 }
 
+func TestGeminiV1BetaModels_AntigravityInitialSpoolReadFailureReturns503(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	old := jsonRequestBodyHandleOptions
+	rawDir := t.TempDir()
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: rawDir}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = old })
+
+	cache := &geminiSpoolReleaseConcurrencyCache{acquired: make(chan struct{}), proceed: make(chan struct{})}
+	t.Cleanup(cache.Release)
+	group := &service.Group{ID: 94, Platform: service.PlatformAntigravity, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{
+		ID: 94, Name: "antigravity", Platform: service.PlatformAntigravity, Type: service.AccountTypeOAuth,
+		Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1,
+		Credentials: map[string]any{"access_token": "token", "project_id": "project", "model_mapping": map[string]any{"gemini-2.5-flash": "gemini-2.5-flash"}},
+	}
+	env := newTerminalGatewayMessagesEnvWithConcurrencyCache(t, group, &openAIChatCompletionsHTTPUpstreamStub{}, cache, account)
+	env.handler.cfg.Gateway.Sticky.Gemini.Enabled = true
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/antigravity/v1beta/models/gemini-2.5-flash:generateContent", strings.NewReader(`{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`))
+	request.Header.Set("Content-Type", "application/json")
+	done := make(chan struct{})
+	go func() {
+		env.routerFor("/antigravity/v1beta/models/*modelAction", func(c *gin.Context) {
+			c.Set(string(middleware.ContextKeyForcePlatform), service.PlatformAntigravity)
+			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.ForcePlatform, service.PlatformAntigravity))
+			env.handler.GeminiV1BetaModels(c)
+		}).ServeHTTP(recorder, request)
+		close(done)
+	}()
+
+	select {
+	case <-cache.acquired:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Gemini handler did not acquire the account slot")
+	}
+	entries, err := os.ReadDir(rawDir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.NoError(t, os.Remove(filepath.Join(rawDir, entries[0].Name())))
+	cache.Release()
+	requireGeminiHandlerDone(t, done)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+	require.Equal(t, 1, cache.releaseCalls())
+}
+
 func TestGeminiV1BetaModels_ThoughtSignatureCleanupUsesEffectiveHandle(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rawDir := t.TempDir()
