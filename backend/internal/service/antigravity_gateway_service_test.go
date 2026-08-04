@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -189,6 +190,101 @@ func TestHandleSingleAccountRetryInPlace_TransportSpoolErrorStopsRetries(t *test
 	require.Empty(t, recorder.Body.String())
 }
 
+func TestAntigravityRetryLoop_TransportErrorCleansRequestBodySpool(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	responseBody := &closeTrackingReadCloser{Reader: strings.NewReader(`{"error":"preflight"}`)}
+	upstream := &transportSpoolCloseUpstream{
+		resp:   &http.Response{StatusCode: http.StatusBadGateway, Header: http.Header{}, Body: responseBody},
+		err:    errors.New("preflight rejected request"),
+		onCall: cancel,
+	}
+	payloadHandle, spoolDir := newAntigravityRetrySpoolHandle(t)
+	result, err := (&AntigravityGatewayService{}).antigravityRetryLoop(antigravityRetryLoopParams{
+		ctx: ctx, prefix: "[test]", account: &Account{ID: 109, Name: "main-preflight", Platform: PlatformAntigravity, Type: AccountTypeOAuth, Concurrency: 1},
+		accessToken: "token", action: "generateContent", payloadHandle: payloadHandle, c: c, httpUpstream: upstream,
+	})
+
+	require.Nil(t, result)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, 1, upstream.callCount)
+	require.True(t, responseBody.closed)
+	requireAntigravityRetrySpoolReleased(t, upstream.request, payloadHandle, spoolDir)
+}
+
+func TestHandleSmartRetry_TransportErrorCleansRequestBodySpool(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	ctx, cancel := context.WithCancel(context.Background())
+	responseBody := &closeTrackingReadCloser{Reader: strings.NewReader(`{"error":"preflight"}`)}
+	upstream := &transportSpoolCloseUpstream{
+		resp:   &http.Response{StatusCode: http.StatusBadGateway, Header: http.Header{}, Body: responseBody},
+		err:    errors.New("preflight rejected request"),
+		onCall: cancel,
+	}
+	payloadHandle, spoolDir := newAntigravityRetrySpoolHandle(t)
+	respBody := []byte(`{"error":{"code":503,"status":"UNAVAILABLE","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","metadata":{"model":"cleanup-smart-model"},"reason":"MODEL_CAPACITY_EXHAUSTED"}]}}`)
+	result := (&AntigravityGatewayService{}).handleSmartRetry(antigravityRetryLoopParams{
+		ctx: ctx, prefix: "[test]", account: &Account{ID: 110, Name: "smart-preflight", Platform: PlatformAntigravity, Type: AccountTypeOAuth, Concurrency: 1},
+		accessToken: "token", action: "generateContent", payloadHandle: payloadHandle, c: c, httpUpstream: upstream,
+	}, &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}}, respBody, "https://ag.test", 0, []string{"https://ag.test"})
+
+	require.Equal(t, smartRetryActionBreakWithResp, result.action)
+	require.ErrorIs(t, result.err, context.Canceled)
+	require.Equal(t, 1, upstream.callCount)
+	require.True(t, responseBody.closed)
+	requireAntigravityRetrySpoolReleased(t, upstream.request, payloadHandle, spoolDir)
+}
+
+func TestHandleSingleAccountRetryInPlace_TransportErrorCleansRequestBodySpool(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	ctx, cancel := context.WithCancel(WithSingleAccountRetry(context.Background(), true, false))
+	responseBody := &closeTrackingReadCloser{Reader: strings.NewReader(`{"error":"preflight"}`)}
+	upstream := &transportSpoolCloseUpstream{
+		resp:   &http.Response{StatusCode: http.StatusBadGateway, Header: http.Header{}, Body: responseBody},
+		err:    errors.New("preflight rejected request"),
+		onCall: cancel,
+	}
+	payloadHandle, spoolDir := newAntigravityRetrySpoolHandle(t)
+	result := (&AntigravityGatewayService{}).handleSingleAccountRetryInPlace(antigravityRetryLoopParams{
+		ctx: ctx, prefix: "[test]", account: &Account{ID: 111, Name: "single-preflight", Platform: PlatformAntigravity, Type: AccountTypeOAuth, Concurrency: 1},
+		accessToken: "token", action: "generateContent", payloadHandle: payloadHandle, c: c, httpUpstream: upstream,
+	}, &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}}, []byte(`{"error":"unavailable"}`), "https://ag.test", 0, "cleanup-single-model")
+
+	require.Equal(t, smartRetryActionBreakWithResp, result.action)
+	require.ErrorIs(t, result.err, context.Canceled)
+	require.Equal(t, 1, upstream.callCount)
+	require.True(t, responseBody.closed)
+	requireAntigravityRetrySpoolReleased(t, upstream.request, payloadHandle, spoolDir)
+}
+
+func newAntigravityRetrySpoolHandle(t *testing.T) (*RequestBodyHandle, string) {
+	t.Helper()
+	spoolDir := t.TempDir()
+	handle, err := NewRequestBodyHandleFromBytes([]byte(`{"request":"payload"}`), RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: spoolDir})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+	entries, err := os.ReadDir(spoolDir)
+	require.NoError(t, err)
+	require.NotEmpty(t, entries)
+	return handle, spoolDir
+}
+
+func requireAntigravityRetrySpoolReleased(t *testing.T, req *http.Request, handle *RequestBodyHandle, spoolDir string) {
+	t.Helper()
+	requireRequestBodyClosed(t, req)
+	CleanupRequestBodyHandle(handle)
+	entries, err := os.ReadDir(spoolDir)
+	require.NoError(t, err)
+	require.Empty(t, entries)
+}
+
 func TestAttemptCreditsOveragesRetry_BuildSpoolErrorReturnsUnchanged(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
@@ -314,12 +410,16 @@ type transportSpoolCloseUpstream struct {
 	request   *http.Request
 	resp      *http.Response
 	err       error
+	onCall    func()
 	callCount int
 }
 
 func (s *transportSpoolCloseUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
 	s.request = req
 	s.callCount++
+	if s.onCall != nil {
+		s.onCall()
+	}
 	return s.resp, s.err
 }
 
