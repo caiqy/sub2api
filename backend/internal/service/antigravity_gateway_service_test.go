@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -42,6 +43,13 @@ func newAntigravityTestService(cfg *config.Config) *AntigravityGatewayService {
 	return &AntigravityGatewayService{
 		settingService: &SettingService{cfg: cfg},
 	}
+}
+
+func TestAntigravityGatewayService_ClaudeCanonicalReadsUseDirectHandle(t *testing.T) {
+	source, err := os.ReadFile("antigravity_gateway_claude.go")
+	require.NoError(t, err)
+	require.NotContains(t, string(source), "readAntigravityClaudeCanonicalBody")
+	require.Equal(t, 3, strings.Count(string(source), "bodyHandle.ReadAll()"))
 }
 
 func TestAntigravityUpstreamErrorBodyReadLimit_RespectsDiagnosticLimit(t *testing.T) {
@@ -484,6 +492,23 @@ type claudeSignatureRetryHTTPUpstream struct {
 	requestBodies    [][]byte
 	requestBodyPaths []string
 	onCall           func(int)
+}
+
+type claudeSignatureRetryDiscardUpstream struct {
+	HTTPUpstream
+	responses []*http.Response
+	calls     int
+}
+
+func (s *claudeSignatureRetryDiscardUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	if _, err := io.Copy(io.Discard, req.Body); err != nil {
+		return nil, err
+	}
+	s.calls++
+	if s.calls > len(s.responses) {
+		return nil, errors.New("unexpected Claude signature retry upstream call")
+	}
+	return s.responses[s.calls-1], nil
 }
 
 func (s *claudeSignatureRetryHTTPUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
@@ -1988,15 +2013,6 @@ func TestAntigravityGatewayService_ClaudeForwardHandleSignatureRetryReparsesFile
 	t.Cleanup(func() { CleanupRequestBodyHandle(canonicalHandle) })
 	require.NotEmpty(t, canonicalHandle.spoolPath)
 
-	readCalls := 0
-	oldRead := readAntigravityClaudeCanonicalBody
-	readAntigravityClaudeCanonicalBody = func(handle *RequestBodyHandle) ([]byte, error) {
-		require.Same(t, canonicalHandle, handle)
-		readCalls++
-		return handle.ReadAll()
-	}
-	t.Cleanup(func() { readAntigravityClaudeCanonicalBody = oldRead })
-
 	signatureError := func() *http.Response {
 		return &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"Corrupted thought signature."}}`))}
 	}
@@ -2005,9 +2021,6 @@ func TestAntigravityGatewayService_ClaudeForwardHandleSignatureRetryReparsesFile
 		signatureError(),
 		{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":1,\"candidatesTokenCount\":1}}}\n\n"))},
 	}}
-	upstream.onCall = func(call int) {
-		require.Equal(t, call, readCalls, "each retry must re-read canonical exactly once")
-	}
 	svc := &AntigravityGatewayService{
 		settingService: NewSettingService(&antigravitySettingRepoStub{}, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
 		tokenProvider:  &AntigravityTokenProvider{},
@@ -2021,7 +2034,6 @@ func TestAntigravityGatewayService_ClaudeForwardHandleSignatureRetryReparsesFile
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	require.Equal(t, 3, readCalls)
 	require.Len(t, upstream.requestBodies, 3)
 	require.Contains(t, string(upstream.requestBodies[0]), `"thought":true`)
 	require.Contains(t, string(upstream.requestBodies[0]), `"functionCall"`)
@@ -2041,6 +2053,55 @@ func TestAntigravityGatewayService_ClaudeForwardHandleSignatureRetryReparsesFile
 	canonicalBody, err := canonicalHandle.ReadAll()
 	require.NoError(t, err)
 	require.Equal(t, body, canonicalBody)
+}
+
+func TestAntigravityGatewayService_ClaudeForwardHandleSignatureRetryCanonicalReadAllocation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":4096,"stream":false,"thinking":{"type":"enabled","budget_tokens":1024},"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"secret","signature":"bad"},{"type":"tool_use","id":"tool-1","name":"lookup","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-1","content":"ok"}]}],"ignored":"` + strings.Repeat("x", 89<<20/10) + `"}`)
+	canonicalHandle, err := NewRequestBodyHandleFromReader(bytes.NewReader(body), RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(canonicalHandle) })
+	body = nil
+
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	materialized, err := canonicalHandle.ReadAll()
+	require.NoError(t, err)
+	require.Equal(t, int(canonicalHandle.Size()), len(materialized))
+	runtime.ReadMemStats(&after)
+	oneReadAlloc := after.TotalAlloc - before.TotalAlloc
+	materialized = nil
+	runtime.GC()
+
+	signatureError := func() *http.Response {
+		return &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"Corrupted thought signature."}}`))}
+	}
+	upstream := &claudeSignatureRetryDiscardUpstream{responses: []*http.Response{
+		signatureError(),
+		signatureError(),
+		{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":1,\"candidatesTokenCount\":1}}}\n\n"))},
+	}}
+	svc := &AntigravityGatewayService{
+		settingService: NewSettingService(&antigravitySettingRepoStub{}, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
+		tokenProvider:  &AntigravityTokenProvider{},
+		httpUpstream:   upstream,
+	}
+	account := &Account{ID: 115, Name: "claude-signature-allocation", Platform: PlatformAntigravity, Type: AccountTypeOAuth, Concurrency: 1, Credentials: map[string]any{
+		"access_token": "token", "project_id": "project", "model_mapping": map[string]any{"claude-sonnet-4-5": "gemini-3-pro-high"},
+	}}
+
+	runtime.ReadMemStats(&before)
+	result, err := svc.ForwardHandle(context.Background(), c, account, canonicalHandle, false)
+	runtime.ReadMemStats(&after)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 3, upstream.calls)
+	forwardAlloc := after.TotalAlloc - before.TotalAlloc
+	t.Logf("one_read_alloc=%d signature_retry_alloc=%d", oneReadAlloc, forwardAlloc)
+	require.Less(t, forwardAlloc, 3*oneReadAlloc+(16<<20), "initial send and two signature retries must each materialize canonical once")
 }
 
 func TestAntigravityGatewayService_ClaudeForwardHandleSignatureRetryPreservesFailover(t *testing.T) {
