@@ -95,9 +95,13 @@ func TestAntigravityGatewayService_ForwardGeminiTransportSpoolErrorReturnsWithou
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
-	body := []byte(`{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`)
+	body := []byte(`{"contents":[{"role":"user","parts":[{"text":"` + strings.Repeat("x", int(DefaultRequestBodySpoolThresholdBytes)+1) + `"}]}]}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash:generateContent", bytes.NewReader(body))
-	upstream := &queuedHTTPUpstreamStub{errors: []error{fmt.Errorf("read native payload: %w", ErrRequestBodySpool)}}
+	responseBody := &closeTrackingReadCloser{Reader: strings.NewReader(`{"error":"partial"}`)}
+	upstream := &transportSpoolCloseUpstream{
+		resp: &http.Response{StatusCode: http.StatusBadGateway, Header: http.Header{}, Body: responseBody},
+		err:  fmt.Errorf("read native payload: %w", ErrRequestBodySpool),
+	}
 	svc := &AntigravityGatewayService{
 		settingService: NewSettingService(&antigravitySettingRepoStub{}, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
 		tokenProvider:  &AntigravityTokenProvider{},
@@ -113,6 +117,8 @@ func TestAntigravityGatewayService_ForwardGeminiTransportSpoolErrorReturnsWithou
 	require.Nil(t, result)
 	require.ErrorIs(t, err, ErrRequestBodySpool)
 	require.Equal(t, 1, upstream.callCount)
+	requireRequestBodyClosed(t, upstream.request)
+	require.True(t, responseBody.closed)
 	require.Empty(t, recorder.Body.String())
 }
 
@@ -121,15 +127,15 @@ func TestHandleSmartRetry_TransportSpoolErrorStopsModelCapacityRetries(t *testin
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	spoolErr := fmt.Errorf("read smart retry payload: %w", ErrRequestBodySpool)
-	upstream := &queuedHTTPUpstreamStub{
-		responses: []*http.Response{nil, {
-			StatusCode: http.StatusOK,
-			Header:     http.Header{},
-			Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
-		}},
-		errors: []error{spoolErr, nil},
+	responseBody := &closeTrackingReadCloser{Reader: strings.NewReader(`{"error":"partial"}`)}
+	upstream := &transportSpoolCloseUpstream{
+		resp: &http.Response{StatusCode: http.StatusBadGateway, Header: http.Header{}, Body: responseBody},
+		err:  spoolErr,
 	}
 	account := &Account{ID: 104, Name: "smart-spool", Platform: PlatformAntigravity, Type: AccountTypeOAuth, Concurrency: 1}
+	payloadHandle, err := NewRequestBodyHandleFromBytes([]byte(`{"request":"`+strings.Repeat("x", int(DefaultRequestBodySpoolThresholdBytes)+1)+`"}`), RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(payloadHandle) })
 	respBody := []byte(`{
 		"error": {
 			"code": 503,
@@ -141,7 +147,7 @@ func TestHandleSmartRetry_TransportSpoolErrorStopsModelCapacityRetries(t *testin
 	}`)
 	result := (&AntigravityGatewayService{}).handleSmartRetry(antigravityRetryLoopParams{
 		ctx: context.Background(), prefix: "[test]", account: account, accessToken: "token", action: "generateContent",
-		body: []byte(`{"request":{}}`), c: c, httpUpstream: upstream,
+		payloadHandle: payloadHandle, c: c, httpUpstream: upstream,
 	}, &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}}, respBody, "https://ag.test", 0, []string{"https://ag.test"})
 
 	require.Equal(t, smartRetryActionBreakWithResp, result.action)
@@ -149,6 +155,8 @@ func TestHandleSmartRetry_TransportSpoolErrorStopsModelCapacityRetries(t *testin
 	require.Nil(t, result.resp)
 	require.Nil(t, result.switchError)
 	require.Equal(t, 1, upstream.callCount)
+	requireRequestBodyClosed(t, upstream.request)
+	require.True(t, responseBody.closed)
 	require.Empty(t, recorder.Body.String())
 }
 
@@ -157,18 +165,18 @@ func TestHandleSingleAccountRetryInPlace_TransportSpoolErrorStopsRetries(t *test
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	spoolErr := fmt.Errorf("read single-account retry payload: %w", ErrRequestBodySpool)
-	upstream := &queuedHTTPUpstreamStub{
-		responses: []*http.Response{nil, {
-			StatusCode: http.StatusOK,
-			Header:     http.Header{},
-			Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
-		}},
-		errors: []error{spoolErr, nil},
+	responseBody := &closeTrackingReadCloser{Reader: strings.NewReader(`{"error":"partial"}`)}
+	upstream := &transportSpoolCloseUpstream{
+		resp: &http.Response{StatusCode: http.StatusBadGateway, Header: http.Header{}, Body: responseBody},
+		err:  spoolErr,
 	}
 	account := &Account{ID: 105, Name: "single-spool", Platform: PlatformAntigravity, Type: AccountTypeOAuth, Concurrency: 1}
+	payloadHandle, err := NewRequestBodyHandleFromBytes([]byte(`{"request":"`+strings.Repeat("x", int(DefaultRequestBodySpoolThresholdBytes)+1)+`"}`), RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(payloadHandle) })
 	result := (&AntigravityGatewayService{}).handleSingleAccountRetryInPlace(antigravityRetryLoopParams{
 		ctx: WithSingleAccountRetry(context.Background(), true, false), prefix: "[test]", account: account,
-		accessToken: "token", action: "generateContent", body: []byte(`{"request":{}}`), c: c, httpUpstream: upstream,
+		accessToken: "token", action: "generateContent", payloadHandle: payloadHandle, c: c, httpUpstream: upstream,
 	}, &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}}, []byte(`{"error":"unavailable"}`), "https://ag.test", 0, "wave8-single-spool-model")
 
 	require.Equal(t, smartRetryActionBreakWithResp, result.action)
@@ -176,6 +184,8 @@ func TestHandleSingleAccountRetryInPlace_TransportSpoolErrorStopsRetries(t *test
 	require.Nil(t, result.resp)
 	require.Nil(t, result.switchError)
 	require.Equal(t, 1, upstream.callCount)
+	requireRequestBodyClosed(t, upstream.request)
+	require.True(t, responseBody.closed)
 	require.Empty(t, recorder.Body.String())
 }
 
@@ -287,6 +297,30 @@ func TestIsPromptTooLongError(t *testing.T) {
 type httpUpstreamStub struct {
 	resp *http.Response
 	err  error
+}
+
+type closeTrackingReadCloser struct {
+	io.Reader
+	closed bool
+}
+
+func (r *closeTrackingReadCloser) Close() error {
+	r.closed = true
+	return nil
+}
+
+type transportSpoolCloseUpstream struct {
+	HTTPUpstream
+	request   *http.Request
+	resp      *http.Response
+	err       error
+	callCount int
+}
+
+func (s *transportSpoolCloseUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	s.request = req
+	s.callCount++
+	return s.resp, s.err
 }
 
 func (s *httpUpstreamStub) Do(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {

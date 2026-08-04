@@ -223,6 +223,12 @@ func (s *AntigravityGatewayService) handleSmartRetry(p antigravityRetryLoopParam
 
 			retryResp, retryErr := p.httpUpstream.Do(retryReq, p.proxyURL, p.account.ID, p.account.Concurrency)
 			if errors.Is(retryErr, ErrRequestBodySpool) {
+				if retryReq.Body != nil {
+					_ = retryReq.Body.Close()
+				}
+				if retryResp != nil && retryResp.Body != nil {
+					_ = retryResp.Body.Close()
+				}
 				return &smartRetryResult{action: smartRetryActionBreakWithResp, err: retryErr}
 			}
 			if retryErr == nil && retryResp != nil && retryResp.StatusCode != http.StatusTooManyRequests && retryResp.StatusCode != http.StatusServiceUnavailable {
@@ -404,6 +410,12 @@ func (s *AntigravityGatewayService) handleSingleAccountRetryInPlace(
 
 		retryResp, retryErr := p.httpUpstream.Do(retryReq, p.proxyURL, p.account.ID, p.account.Concurrency)
 		if errors.Is(retryErr, ErrRequestBodySpool) {
+			if retryReq.Body != nil {
+				_ = retryReq.Body.Close()
+			}
+			if retryResp != nil && retryResp.Body != nil {
+				_ = retryResp.Body.Close()
+			}
 			return &smartRetryResult{action: smartRetryActionBreakWithResp, err: retryErr}
 		}
 		if retryErr == nil && retryResp != nil && retryResp.StatusCode != http.StatusTooManyRequests && retryResp.StatusCode != http.StatusServiceUnavailable {
@@ -561,6 +573,12 @@ urlFallbackLoop:
 			}
 			if err != nil {
 				if errors.Is(err, ErrRequestBodySpool) {
+					if upstreamReq.Body != nil {
+						_ = upstreamReq.Body.Close()
+					}
+					if resp != nil && resp.Body != nil {
+						_ = resp.Body.Close()
+					}
 					return nil, err
 				}
 				safeErr := sanitizeUpstreamErrorMessage(err.Error())
