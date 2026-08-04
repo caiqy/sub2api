@@ -36,6 +36,18 @@ type retentionBlockingTransport struct {
 	calls       int
 }
 
+type retentionBlockingUserSlotCache struct {
+	openAIChatCompletionsConcurrencyCacheStub
+	started chan struct{}
+	release chan struct{}
+}
+
+func (c *retentionBlockingUserSlotCache) AcquireUserSlot(context.Context, int64, int, string) (bool, error) {
+	close(c.started)
+	<-c.release
+	return false, nil
+}
+
 func (u *retentionBlockingTransport) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
 	if _, err := io.Copy(io.Discard, req.Body); err != nil {
 		return nil, err
@@ -145,7 +157,7 @@ func TestRequestBodyMemoryRetentionWhileUpstreamBlocked(t *testing.T) {
 	}
 	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
 
-	for _, branch := range []string{"responses", "passthrough", "grok-responses", "responses-chat-fallback", "chat-raw", "chat-converted", "openai-messages", "openai-messages-chat-fallback", "gateway-chat-anthropic", "gateway-chat-gemini", "messages-anthropic", "messages-anthropic-stream", "messages-anthropic-passthrough-stream", "messages-antigravity-oauth", "messages-bedrock", "messages-bedrock-stream", "messages-gemini", "messages-gemini-mixed", "gemini-antigravity-native"} {
+	for _, branch := range []string{"responses", "passthrough", "grok-responses", "responses-chat-fallback", "chat-raw", "chat-converted", "count-tokens", "alpha-search", "live", "openai-messages", "openai-messages-chat-fallback", "gateway-chat-anthropic", "gateway-chat-gemini", "messages-anthropic", "messages-anthropic-stream", "messages-anthropic-passthrough-stream", "messages-antigravity-oauth", "messages-bedrock", "messages-bedrock-stream", "messages-gemini", "messages-gemini-mixed", "gemini-antigravity-native"} {
 		t.Run(branch, func(t *testing.T) {
 			var heapAt2MB, heapAt89MB uint64
 			var previewAt2MB, previewAt89MB, snapshotAt2MB, snapshotAt89MB int
@@ -221,6 +233,15 @@ func measureBlockedRequestBodyHeap(t *testing.T, branch string, size int64, spoo
 		extra["openai_responses_supported"] = true
 		upstream.contentType = "text/event-stream"
 		upstream.body = "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_retention\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"
+	case "count-tokens":
+		path = "/v1/messages/count_tokens"
+		platform = service.PlatformAnthropic
+		upstream.body = `{"input_tokens":1}`
+	case "alpha-search":
+		path = "/v1/alpha/search"
+		upstream.body = `{"type":"computer_initialize_state","id":"search_retention"}`
+	case "live":
+		path = "/v1/realtime/calls"
 	case "openai-messages":
 		path = "/v1/messages"
 		extra["openai_responses_supported"] = true
@@ -309,6 +330,31 @@ func measureBlockedRequestBodyHeap(t *testing.T, branch string, size int64, spoo
 			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.ForcePlatform, service.PlatformAntigravity))
 			env.handler.GeminiV1BetaModels(c)
 		})
+	} else if branch == "count-tokens" {
+		group := &service.Group{ID: 1401, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+		account := &service.Account{ID: 1401, Name: "retention-count-tokens", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-retention"}}
+		env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+		router = env.routerFor(path, func(c *gin.Context) {
+			requestContext = c
+			env.handler.CountTokens(c)
+		})
+	} else if branch == "alpha-search" {
+		group := &service.Group{ID: 1401, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+		account := &service.Account{ID: 1401, Name: "retention-alpha-search", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-retention"}}
+		env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
+		router = env.router(path, func(c *gin.Context) {
+			requestContext = c
+			env.handler.AlphaSearch(c)
+		})
+	} else if branch == "live" {
+		group := &service.Group{ID: 1401, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowLive: true}
+		account := &service.Account{ID: 1401, Name: "retention-live", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"access_token": "token", "chatgpt_account_id": "acct-retention"}}
+		env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
+		env.handler.concurrencyHelper.concurrencyService = service.NewConcurrencyService(&retentionBlockingUserSlotCache{started: upstream.started, release: upstream.release})
+		router = env.router(path, func(c *gin.Context) {
+			requestContext = c
+			env.handler.Live(c)
+		})
 	} else if branch == "openai-messages" || branch == "openai-messages-chat-fallback" {
 		group := &service.Group{ID: 1401, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowMessagesDispatch: true}
 		account := &service.Account{ID: 1401, Name: "retention-openai-messages", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-retention"}, Extra: extra}
@@ -377,16 +423,22 @@ func measureBlockedRequestBodyHeap(t *testing.T, branch string, size int64, spoo
 	detail := middleware.GetUsageDetailSnapshot(requestContext)
 	require.NotNil(t, detail)
 	var snapshot matrixRequestBodyPreview
-	require.NoError(t, json.Unmarshal([]byte(detail.UpstreamRequestBody), &snapshot))
-	require.Greater(t, snapshot.Size, size-(1<<10))
-	require.True(t, snapshot.Truncated)
+	if branch != "count-tokens" && branch != "alpha-search" && branch != "live" {
+		require.NoError(t, json.Unmarshal([]byte(detail.UpstreamRequestBody), &snapshot))
+		require.Greater(t, snapshot.Size, size-(1<<10))
+		require.True(t, snapshot.Truncated)
+	}
 	heap := retainedHeapAfterGC()
 	previewSize := len(snapshot.Preview)
 	snapshotSize := len(detail.UpstreamRequestBody)
 
 	release()
 	waitMatrixSignal(t, done, "retention handler completion")
-	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	wantStatus := http.StatusOK
+	if branch == "live" {
+		wantStatus = http.StatusTooManyRequests
+	}
+	require.Equal(t, wantStatus, recorder.Code, recorder.Body.String())
 	assertMatrixTempFiles(t, spoolDir, "sub2api-request-body-", false)
 	return heap, previewSize, snapshotSize
 }
@@ -418,6 +470,15 @@ func retentionJSONBody(branch, path string, size int64) io.Reader {
 	}
 	if branch == "gemini-antigravity-native" {
 		prefix, suffix = `{"contents":[{"role":"user","parts":[{"text":"`, `"}]}]}`
+	}
+	if branch == "count-tokens" {
+		prefix, suffix = `{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"`, `"}]}`
+	}
+	if branch == "alpha-search" {
+		prefix, suffix = `{"model":"gpt-5","query":"`, `"}`
+	}
+	if branch == "live" {
+		prefix, suffix = `{"sdp":"v=0\\r\\n","session":{"model":"gpt-live","instructions":"`, `"}}`
 	}
 	if branch == "messages-gemini-mixed" {
 		prefix = `{"model":"claude-opus-4-6","max_tokens":16,"stream":false,"messages":[{"role":"user","content":"`

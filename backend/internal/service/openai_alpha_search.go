@@ -30,9 +30,14 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	if s == nil || c == nil || account == nil {
 		return nil, fmt.Errorf("service, context, and account are required")
 	}
+	var err error
+	body, err = openAIRequestBodyBytes(c, body)
+	if err != nil {
+		return nil, fmt.Errorf("read alpha search request body: %w", err)
+	}
 	sourceBody := body
 	modelResult := gjson.GetBytes(body, "model")
-	requestedModel := strings.TrimSpace(modelResult.String())
+	requestedModel := strings.Clone(strings.TrimSpace(modelResult.String()))
 	if modelResult.Type != gjson.String || requestedModel == "" {
 		return nil, fmt.Errorf("model is required")
 	}
@@ -40,6 +45,13 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	upstreamModel := normalizeOpenAIModelForUpstream(account, account.GetMappedModel(requestedModel))
 	if upstreamModel != "" && upstreamModel != requestedModel {
 		body = ReplaceModelInBody(body, upstreamModel)
+	}
+	bodyHandle, bodyHandleOwned, err := openAIRequestBodyHandleForContext(c, body)
+	if err != nil {
+		return nil, fmt.Errorf("create alpha search request body: %w", err)
+	}
+	if bodyHandleOwned {
+		defer CleanupRequestBodyHandle(bodyHandle)
 	}
 
 	token, _, err := s.GetAccessToken(ctx, account)
@@ -54,18 +66,26 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 		return nil, err
 	}
 	if account.IsOpenAIPersonalAccessToken() {
-		return s.forwardAlphaSearchViaResponsesWebSearch(ctx, c, account, body, token, proxyURL, requestedModel, upstreamModel)
+		sourceBody = nil
+		body = nil
+		return s.forwardAlphaSearchViaResponsesWebSearch(ctx, c, account, bodyHandle, token, proxyURL, requestedModel, upstreamModel)
 	}
 
-	req, err := s.buildOpenAIAlphaSearchRequest(ctx, c, account, sourceBody, body, token)
+	req, err := s.buildOpenAIAlphaSearchRequest(ctx, c, account, sourceBody, body, bodyHandle, token)
 	if err != nil {
 		return nil, err
 	}
+	sourceBody = nil
+	body = nil
 
 	upstreamStart := time.Now()
 	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+	closeOpenAIRequestBody(req)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -119,24 +139,40 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	}, nil
 }
 
-func (s *OpenAIGatewayService) forwardAlphaSearchViaResponsesWebSearch(ctx context.Context, c *gin.Context, account *Account, alphaBody []byte, token string, proxyURL string, requestedModel string, upstreamModel string) (*OpenAIForwardResult, error) {
+func (s *OpenAIGatewayService) forwardAlphaSearchViaResponsesWebSearch(ctx context.Context, c *gin.Context, account *Account, alphaHandle *RequestBodyHandle, token string, proxyURL string, requestedModel string, upstreamModel string) (*OpenAIForwardResult, error) {
 	if upstreamModel == "" {
 		upstreamModel = requestedModel
 	}
+	alphaBody, err := alphaHandle.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("read alpha search fallback body: %w", err)
+	}
+	sessionID := strings.Clone(strings.TrimSpace(gjson.GetBytes(alphaBody, "id").String()))
 	responsesBody, err := buildOpenAIAlphaSearchResponsesWebSearchBody(alphaBody, upstreamModel)
 	if err != nil {
 		return nil, err
 	}
-	req, err := s.buildOpenAIAlphaSearchResponsesWebSearchRequest(ctx, c, account, alphaBody, responsesBody, token)
+	responsesHandle, err := NewRequestBodyHandleFromBytes(responsesBody, openAIRequestBodyHandleOptions())
+	if err != nil {
+		return nil, fmt.Errorf("create alpha search fallback body: %w", err)
+	}
+	defer CleanupRequestBodyHandle(responsesHandle)
+	req, err := s.buildOpenAIAlphaSearchResponsesWebSearchRequest(ctx, c, account, responsesHandle, token, sessionID)
 	if err != nil {
 		return nil, err
 	}
+	alphaBody = nil
+	responsesBody = nil
 	SetActualOpenAIUpstreamEndpoint(c, "/v1/responses")
 
 	upstreamStart := time.Now()
 	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+	closeOpenAIRequestBody(req)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -189,11 +225,17 @@ func (s *OpenAIGatewayService) forwardAlphaSearchViaResponsesWebSearch(ctx conte
 	}, nil
 }
 
-func (s *OpenAIGatewayService) buildOpenAIAlphaSearchResponsesWebSearchRequest(ctx context.Context, c *gin.Context, account *Account, alphaBody []byte, body []byte, token string) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, chatgptCodexURL, bytes.NewReader(body))
+func (s *OpenAIGatewayService) buildOpenAIAlphaSearchResponsesWebSearchRequest(ctx context.Context, c *gin.Context, account *Account, bodyHandle *RequestBodyHandle, token string, sessionID string) (*http.Request, error) {
+	req, err := openAINewRequestWithBodyHandle(ctx, http.MethodPost, chatgptCodexURL, bodyHandle, false)
 	if err != nil {
 		return nil, err
 	}
+	cleanupOnError := true
+	defer func() {
+		if cleanupOnError {
+			closeOpenAIRequestBody(req)
+		}
+	}()
 	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
 	authHeaders, err := s.buildOpenAIAuthenticationHeaders(ctx, account, token)
 	if err != nil {
@@ -233,7 +275,7 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchResponsesWebSearchRequest(c
 		req.Header.Set("User-Agent", codexCLIUserAgent)
 	}
 	apiKeyID := getAPIKeyIDFromContext(c)
-	if sessionID := strings.TrimSpace(gjson.GetBytes(alphaBody, "id").String()); sessionID != "" {
+	if sessionID != "" {
 		isolated := isolateOpenAISessionID(apiKeyID, sessionID)
 		req.Header.Set("Session_ID", isolated)
 		req.Header.Set("Conversation_ID", isolated)
@@ -241,6 +283,7 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchResponsesWebSearchRequest(c
 	s.overrideBrowserUserAgent(ctx, account, req)
 	enforceCodexIdentityHeaders(req.Header)
 	account.ApplyHeaderOverrides(req.Header)
+	cleanupOnError = false
 	return req, nil
 }
 
@@ -399,12 +442,12 @@ func collectOpenAIAlphaSearchURLCitations(value any, results *[]any, seen map[st
 	}
 }
 
-func (s *OpenAIGatewayService) buildOpenAIAlphaSearchRequest(ctx context.Context, c *gin.Context, account *Account, sourceBody []byte, body []byte, token string) (*http.Request, error) {
+func (s *OpenAIGatewayService) buildOpenAIAlphaSearchRequest(ctx context.Context, c *gin.Context, account *Account, sourceBody []byte, body []byte, bodyHandle *RequestBodyHandle, token string) (*http.Request, error) {
 	clientBeta := ""
 	if c != nil {
 		clientBeta = c.GetHeader("OpenAI-Beta")
 	}
-	req, err := s.buildUpstreamRequestOpenAIPassthrough(ctx, c, account, sourceBody, body, token)
+	req, err := s.buildUpstreamRequestOpenAIPassthrough(ctx, c, account, sourceBody, body, openAIMatchedRequestBodyHandle{handle: bodyHandle}, token)
 	if err != nil {
 		return nil, err
 	}

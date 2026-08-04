@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -23,6 +24,16 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+type grokRespErrUpstream struct {
+	HTTPUpstream
+	resp *http.Response
+	err  error
+}
+
+func (u *grokRespErrUpstream) Do(*http.Request, string, int64, int) (*http.Response, error) {
+	return u.resp, u.err
+}
 
 func TestPatchGrokResponsesBodySetsMappedModelAndDropsUnsupportedFields(t *testing.T) {
 	t.Parallel()
@@ -42,6 +53,28 @@ func TestPatchGrokResponsesBodySetsMappedModelAndDropsUnsupportedFields(t *testi
 	require.False(t, gjson.GetBytes(patched, "prompt_cache_retention").Exists())
 	require.False(t, gjson.GetBytes(patched, "safety_identifier").Exists())
 	require.Equal(t, "high", gjson.GetBytes(patched, "reasoning.effort").String())
+}
+
+func TestForwardGrokResponsesTransportErrorClosesResponseBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	body := []byte(`{"model":"grok","input":"hello","stream":false}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	c.Set("api_key", &APIKey{ID: 1})
+	responseBody := &passthroughCloseTrackingReadCloser{Reader: strings.NewReader(`{"error":"partial"}`)}
+	upstream := &grokRespErrUpstream{
+		resp: &http.Response{StatusCode: http.StatusBadGateway, Header: http.Header{}, Body: responseBody},
+		err:  errors.New("transport failure"),
+	}
+	svc := &OpenAIGatewayService{httpUpstream: upstream}
+	account := &Account{ID: 1, Name: "grok", Platform: PlatformGrok, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "key", "base_url": "https://api.x.ai/v1"}}
+
+	result, err := svc.forwardGrokResponses(context.Background(), c, account, body, "grok", false, time.Now())
+
+	require.Nil(t, result)
+	require.Error(t, err)
+	require.True(t, responseBody.closed)
 }
 
 func TestPatchGrokResponsesBodySanitizesComposerReasoningParameters(t *testing.T) {

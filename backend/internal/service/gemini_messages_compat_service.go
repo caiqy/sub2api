@@ -829,6 +829,9 @@ func (s *GeminiMessagesCompatService) ForwardHandle(ctx context.Context, c *gin.
 	var resp *http.Response
 	signatureRetryStage := 0
 	for attempt := 1; attempt <= geminiMaxRetries; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		upstreamReq, idHeader, err := buildReq(ctx)
 		if err != nil {
 			if errors.Is(err, ErrRequestBodySpool) {
@@ -853,10 +856,10 @@ func (s *GeminiMessagesCompatService) ForwardHandle(ctx context.Context, c *gin.
 			_ = upstreamReq.Body.Close()
 		}
 		if err != nil {
+			if resp != nil && resp.Body != nil {
+				_ = resp.Body.Close()
+			}
 			if errors.Is(err, ErrRequestBodySpool) {
-				if resp != nil && resp.Body != nil {
-					_ = resp.Body.Close()
-				}
 				return nil, fmt.Errorf("send Gemini upstream request: %w", err)
 			}
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
@@ -871,6 +874,9 @@ func (s *GeminiMessagesCompatService) ForwardHandle(ctx context.Context, c *gin.
 			if attempt < geminiMaxRetries {
 				logger.LegacyPrintf("service.gemini_messages_compat", "Gemini account %d: upstream request failed, retry %d/%d: %v", account.ID, attempt, geminiMaxRetries, err)
 				sleepGeminiBackoff(attempt, ctx)
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				continue
 			}
 			setOpsUpstreamError(c, 0, safeErr, "")
@@ -921,6 +927,9 @@ func (s *GeminiMessagesCompatService) ForwardHandle(ctx context.Context, c *gin.
 					passthroughHeaders = retryHeaders
 					// Consume one retry budget attempt and continue with the updated request payload.
 					sleepGeminiBackoff(1, ctx)
+					if err := ctx.Err(); err != nil {
+						return nil, err
+					}
 					continue
 				}
 			}
@@ -986,6 +995,9 @@ func (s *GeminiMessagesCompatService) ForwardHandle(ctx context.Context, c *gin.
 
 				logger.LegacyPrintf("service.gemini_messages_compat", "Gemini account %d: upstream status %d, retry %d/%d", account.ID, resp.StatusCode, attempt, geminiMaxRetries)
 				sleepGeminiBackoff(attempt, ctx)
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				continue
 			}
 			// Final attempt: surface the upstream error body (mapped below) instead of a generic retry error.
@@ -1471,6 +1483,9 @@ func (s *GeminiMessagesCompatService) ForwardNativeHandle(ctx context.Context, c
 
 	var resp *http.Response
 	for attempt := 1; attempt <= geminiMaxRetries; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		upstreamReq, idHeader, err := buildReq(ctx)
 		if err != nil {
 			if errors.Is(err, ErrRequestBodySpool) {
@@ -1495,6 +1510,9 @@ func (s *GeminiMessagesCompatService) ForwardNativeHandle(ctx context.Context, c
 			_ = upstreamReq.Body.Close()
 		}
 		if err != nil {
+			if resp != nil && resp.Body != nil {
+				_ = resp.Body.Close()
+			}
 			if errors.Is(err, ErrRequestBodySpool) {
 				return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
 			}
@@ -1510,6 +1528,9 @@ func (s *GeminiMessagesCompatService) ForwardNativeHandle(ctx context.Context, c
 			if attempt < geminiMaxRetries {
 				logger.LegacyPrintf("service.gemini_messages_compat", "Gemini account %d: upstream request failed, retry %d/%d: %v", account.ID, attempt, geminiMaxRetries, err)
 				sleepGeminiBackoff(attempt, ctx)
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				continue
 			}
 			if action == "countTokens" {
@@ -1579,6 +1600,9 @@ func (s *GeminiMessagesCompatService) ForwardNativeHandle(ctx context.Context, c
 
 				logger.LegacyPrintf("service.gemini_messages_compat", "Gemini account %d: upstream status %d, retry %d/%d", account.ID, resp.StatusCode, attempt, geminiMaxRetries)
 				sleepGeminiBackoff(attempt, ctx)
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				continue
 			}
 			if action == "countTokens" {

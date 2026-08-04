@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -172,6 +173,60 @@ func TestGeminiMessagesCompatForwardHandleTransportSpoolErrorClosesResponseBody(
 	require.ErrorIs(t, err, ErrRequestBodySpool)
 	require.True(t, responseBody.closed)
 	require.False(t, c.Writer.Written())
+}
+
+func TestGeminiMessagesCompatCancellationStopsRetryLoops(t *testing.T) {
+	for _, native := range []bool{false, true} {
+		name := "messages"
+		if native {
+			name = "native"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			upstream := &geminiCompatHTTPUpstreamStub{err: errors.New("transport failure"), onDo: cancel}
+			svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
+			account := &Account{ID: 1, Platform: PlatformGemini, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "key"}}
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+
+			var err error
+			if native {
+				_, err = svc.ForwardNative(ctx, c, account, "gemini-2.5-flash", "generateContent", false, []byte(`{"contents":[{"parts":[{"text":"hello"}]}]}`))
+			} else {
+				body := []byte(`{"model":"gemini-2.5-flash","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`)
+				handle, handleErr := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+				require.NoError(t, handleErr)
+				t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+				_, err = svc.ForwardHandle(ctx, c, account, handle)
+			}
+
+			require.ErrorIs(t, err, context.Canceled)
+			require.Equal(t, 1, upstream.calls)
+		})
+	}
+}
+
+func TestGeminiMessagesCompatForwardNativeTransportErrorClosesResponseBody(t *testing.T) {
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash:generateContent", nil)
+	responseBody := &closeTrackingReadCloser{Reader: strings.NewReader(`{"error":"partial"}`)}
+	ctx, cancel := context.WithCancel(context.Background())
+	upstream := &geminiCompatHTTPUpstreamStub{
+		response: &http.Response{StatusCode: http.StatusBadGateway, Header: http.Header{}, Body: responseBody},
+		err:      errors.New("transport failure"),
+		onDo:     cancel,
+	}
+	svc := &GeminiMessagesCompatService{httpUpstream: upstream, cfg: &config.Config{}}
+	account := &Account{ID: 1, Platform: PlatformGemini, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "key"}}
+	defer cancel()
+
+	result, err := svc.ForwardNative(ctx, c, account, "gemini-2.5-flash", "generateContent", false, []byte(`{"contents":[{"parts":[{"text":"hello"}]}]}`))
+
+	require.Nil(t, result)
+	require.Error(t, err)
+	require.True(t, responseBody.closed)
 }
 
 func TestSleepGeminiBackoff_ContextCancellationReturnsImmediately(t *testing.T) {

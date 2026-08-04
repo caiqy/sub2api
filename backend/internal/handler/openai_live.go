@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -37,12 +38,44 @@ func (h *OpenAIGatewayHandler) Live(c *gin.Context) {
 		h.errorResponse(c, http.StatusForbidden, "permission_error", "Live is not enabled for this group")
 		return
 	}
-	request, err := parseLiveCallRequest(c)
+	var coordinator *requestBodyCoordinator
+	var request *service.LiveCallRequest
+	var err error
+	if strings.HasPrefix(strings.ToLower(c.GetHeader("Content-Type")), "multipart/form-data") {
+		request, err = parseLiveCallRequest(c)
+	} else {
+		coordinator, err = newJSONRequestBody(c.Request)
+		if err == nil {
+			defer coordinator.Cleanup()
+			var body []byte
+			body, err = coordinator.ReadRaw()
+			if err == nil {
+				request, err = parseLiveCallJSON(bytes.NewReader(body))
+			}
+			if err == nil {
+				var canonical []byte
+				canonical, err = json.Marshal(request)
+				if err == nil {
+					err = coordinator.SetEffectiveBytes(canonical)
+				}
+				canonical = nil
+			}
+			body = nil
+		}
+	}
 	if err != nil {
+		if errors.Is(err, service.ErrRequestBodySpool) {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
+		if maxErr, ok := extractMaxBytesError(err); ok {
+			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+			return
+		}
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
 	}
-	model := strings.TrimSpace(gjson.GetBytes(request.Session, "model").String())
+	model := strings.Clone(strings.TrimSpace(gjson.GetBytes(request.Session, "model").String()))
 	reqLog := requestLogger(
 		c,
 		"handler.openai_gateway.live",
@@ -61,6 +94,12 @@ func (h *OpenAIGatewayHandler) Live(c *gin.Context) {
 	); decision != nil && !decision.AllowNextStage {
 		h.openAISecurityAuditError(c, decision)
 		return
+	}
+	var liveBody *service.RequestBodyHandle
+	if coordinator != nil {
+		liveBody = coordinator.Effective()
+		service.SetUsageRequestBody(c, service.RequestBodyPreviewSnapshot(liveBody.PreviewString(), liveBody.Size()))
+		request = nil
 	}
 
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
@@ -100,7 +139,12 @@ func (h *OpenAIGatewayHandler) Live(c *gin.Context) {
 	defer userRelease()
 
 	identity := liveCallIdentity(c, apiKey, subject.UserID, subscription)
-	created, err := h.gatewayService.CreateLiveCall(c.Request.Context(), request, identity, subject.Concurrency)
+	var created *service.LiveCallCreated
+	if liveBody != nil {
+		created, err = h.gatewayService.CreateLiveCallHandle(c.Request.Context(), liveBody, identity, subject.Concurrency)
+	} else {
+		created, err = h.gatewayService.CreateLiveCall(c.Request.Context(), request, identity, subject.Concurrency)
+	}
 	if err != nil {
 		h.writeLiveCreateError(c, err)
 		return
@@ -120,8 +164,12 @@ func parseLiveCallRequest(c *gin.Context) (*service.LiveCallRequest, error) {
 		}
 		return request, nil
 	}
+	return parseLiveCallJSON(c.Request.Body)
+}
+
+func parseLiveCallJSON(reader io.Reader) (*service.LiveCallRequest, error) {
 	var request service.LiveCallRequest
-	decoder := json.NewDecoder(c.Request.Body)
+	decoder := json.NewDecoder(reader)
 	if err := decoder.Decode(&request); err != nil {
 		return nil, errors.New("request body must be valid JSON")
 	}

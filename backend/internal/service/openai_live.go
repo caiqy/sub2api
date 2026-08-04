@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -130,6 +129,41 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 	if err := ValidateLiveCallRequest(request); err != nil {
 		return nil, err
 	}
+	body, err := json.Marshal(request)
+	if err != nil {
+		return nil, err
+	}
+	bodyHandle, err := NewRequestBodyHandleFromBytes(body, openAIRequestBodyHandleOptions())
+	if err != nil {
+		return nil, fmt.Errorf("create Live request body: %w", err)
+	}
+	defer CleanupRequestBodyHandle(bodyHandle)
+	return s.CreateLiveCallHandle(ctx, bodyHandle, identity, userMaxConcurrency)
+}
+
+// CreateLiveCallHandle borrows bodyHandle; the caller retains cleanup ownership.
+func (s *OpenAIGatewayService) CreateLiveCallHandle(
+	ctx context.Context,
+	bodyHandle *RequestBodyHandle,
+	identity LiveCallIdentity,
+	userMaxConcurrency int,
+) (*LiveCallCreated, error) {
+	body, err := bodyHandle.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("read Live request body: %w", err)
+	}
+	var request LiveCallRequest
+	if err := json.Unmarshal(body, &request); err != nil {
+		return nil, errors.New("request body must be valid JSON")
+	}
+	if err := ValidateLiveCallRequest(&request); err != nil {
+		return nil, err
+	}
+	model := strings.Clone(strings.TrimSpace(gjson.GetBytes(request.Session, "model").String()))
+	if model == "" {
+		model = "gpt-live"
+	}
+	body = nil
 	store, err := s.liveStore()
 	if err != nil {
 		return nil, err
@@ -192,7 +226,7 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 			return nil, ErrLiveConcurrencyFull
 		}
 
-		created, createErr := s.createUpstreamLiveCall(ctx, account, request, attestation)
+		created, createErr := s.createUpstreamLiveCallHandle(ctx, account, bodyHandle, attestation)
 		selection.ReleaseFunc()
 		if createErr != nil {
 			s.releaseLiveLease(account.ID, identity.UserID, identity.APIKeyID, leaseID)
@@ -205,10 +239,6 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 		}
 
 		now := time.Now()
-		model := strings.TrimSpace(gjson.GetBytes(request.Session, "model").String())
-		if model == "" {
-			model = "gpt-live"
-		}
 		record := &LiveCallRecord{
 			CallID:                created.CallID,
 			CallHash:              hashLiveCallID(created.CallID),
@@ -261,11 +291,6 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 	request *LiveCallRequest,
 	attestation string,
 ) (*LiveCallCreated, error) {
-	token, _, err := s.GetAccessToken(ctx, account)
-	if err != nil {
-		logLiveCreateStageFailure(ctx, account.ID, "access_token", err)
-		return nil, err
-	}
 	body, err := json.Marshal(struct {
 		SDP     string          `json:"sdp"`
 		Session json.RawMessage `json:"session"`
@@ -276,8 +301,27 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 	if err != nil {
 		return nil, err
 	}
+	bodyHandle, err := NewRequestBodyHandleFromBytes(body, openAIRequestBodyHandleOptions())
+	if err != nil {
+		return nil, fmt.Errorf("create Live upstream body: %w", err)
+	}
+	defer CleanupRequestBodyHandle(bodyHandle)
+	return s.createUpstreamLiveCallHandle(ctx, account, bodyHandle, attestation)
+}
+
+func (s *OpenAIGatewayService) createUpstreamLiveCallHandle(
+	ctx context.Context,
+	account *Account,
+	bodyHandle *RequestBodyHandle,
+	attestation string,
+) (*LiveCallCreated, error) {
+	token, _, err := s.GetAccessToken(ctx, account)
+	if err != nil {
+		logLiveCreateStageFailure(ctx, account.ID, "access_token", err)
+		return nil, err
+	}
 	reqCtx := WithHTTPUpstreamRedirectsDisabled(WithHTTPUpstreamProfile(ctx, HTTPUpstreamProfileOpenAI))
-	upstreamReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost, chatGPTLiveCallsURL, bytes.NewReader(body))
+	upstreamReq, err := openAINewRequestWithBodyHandle(reqCtx, http.MethodPost, chatGPTLiveCallsURL, bodyHandle, false)
 	if err != nil {
 		return nil, err
 	}
@@ -302,7 +346,11 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 	applyLiveUpstreamIdentityHeaders(upstreamReq.Header)
 
 	resp, err := s.httpUpstream.Do(upstreamReq, resolveAccountProxyURL(account), account.ID, account.Concurrency)
+	closeOpenAIRequestBody(upstreamReq)
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
 		logLiveCreateStageFailure(ctx, account.ID, "upstream_transport", err)
 		return nil, err
 	}

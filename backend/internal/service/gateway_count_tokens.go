@@ -24,7 +24,10 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 	}
 
 	if account != nil && account.IsAnthropicAPIKeyPassthroughEnabled() {
-		passthroughBody := parsed.Body.Bytes()
+		passthroughBody, err := parsed.Body.ReadAll()
+		if err != nil {
+			return fmt.Errorf("read count_tokens passthrough body: %w", err)
+		}
 		if reqModel := parsed.Model; reqModel != "" {
 			if mappedModel := account.GetMappedModel(reqModel); mappedModel != reqModel {
 				passthroughBody = s.replaceModelInBody(passthroughBody, mappedModel)
@@ -40,12 +43,12 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 		return nil
 	}
 
-	body := parsed.Body.Bytes()
+	body, err := parsed.Body.ReadAll()
+	if err != nil {
+		return fmt.Errorf("read count_tokens body: %w", err)
+	}
 	replaceBody := func(next []byte) error {
-		if err := parsed.ReplaceBody(next); err != nil {
-			return fmt.Errorf("rewrite count_tokens body: %w", err)
-		}
-		body = parsed.Body.Bytes()
+		body = next
 		return nil
 	}
 	reqModel := parsed.Model
@@ -125,13 +128,27 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 	}
 
 	// 构建上游请求
+	logicalHandle, logicalHandleOwned, err := openAIRequestBodyHandleForBytes(parsed.Body.Handle(), body)
+	if err != nil {
+		return fmt.Errorf("create count_tokens request body: %w", err)
+	}
+	if logicalHandleOwned {
+		defer CleanupRequestBodyHandle(logicalHandle)
+	}
 	upstreamReq, wireBody, err := s.buildCountTokensRequest(ctx, c, account, body, token, tokenType, reqModel, shouldMimicClaudeCode)
 	if err != nil {
 		s.countTokensError(c, http.StatusInternalServerError, "api_error", "Failed to build request")
 		return err
 	}
 	// 先记录首发 wire body；如果后面进入 400 retry，retry 会基于未签名的逻辑 body 重新构建。
-	acceptedWireBody := wireBody
+	wireHandle, err := bindCountTokensRequestBodyHandle(upstreamReq, wireBody)
+	if err != nil {
+		return fmt.Errorf("bind count_tokens request body: %w", err)
+	}
+	defer CleanupRequestBodyHandle(wireHandle)
+	acceptedWireHandle := wireHandle
+	body = nil
+	wireBody = nil
 
 	// 获取代理URL（自定义 base URL 模式下，proxy 通过 buildCustomRelayURL 作为查询参数传递）
 	proxyURL := ""
@@ -143,7 +160,13 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 
 	// 发送请求
 	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+	if upstreamReq.Body != nil {
+		_ = upstreamReq.Body.Close()
+	}
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
 		setOpsUpstreamError(c, 0, sanitizeUpstreamErrorMessage(err.Error()), "")
 		s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Request failed")
 		return fmt.Errorf("upstream request failed: %w", err)
@@ -166,14 +189,32 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 	if resp.StatusCode == 400 && s.shouldRectifySignatureError(ctx, account, respBody, reqModel) {
 		logger.LegacyPrintf("service.gateway", "Account %d: detected thinking block signature error on count_tokens, retrying with filtered thinking blocks", account.ID)
 
-		filteredBody := FilterThinkingBlocksForRetry(body, reqModel)
+		logicalBody, readErr := logicalHandle.ReadAll()
+		if readErr != nil {
+			return fmt.Errorf("read count_tokens retry body: %w", readErr)
+		}
+		filteredBody := FilterThinkingBlocksForRetry(logicalBody, reqModel)
+		logicalBody = nil
 		retryReq, retryWireBody, buildErr := s.buildCountTokensRequest(ctx, c, account, filteredBody, token, tokenType, reqModel, shouldMimicClaudeCode)
 		if buildErr == nil {
+			retryHandle, handleErr := bindCountTokensRequestBodyHandle(retryReq, retryWireBody)
+			if handleErr != nil {
+				return fmt.Errorf("bind count_tokens retry body: %w", handleErr)
+			}
+			defer CleanupRequestBodyHandle(retryHandle)
+			filteredBody = nil
+			retryWireBody = nil
 			retryResp, retryErr := s.httpUpstream.DoWithTLS(retryReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+			if retryReq.Body != nil {
+				_ = retryReq.Body.Close()
+			}
+			if retryErr != nil && retryResp != nil && retryResp.Body != nil {
+				_ = retryResp.Body.Close()
+			}
 			if retryErr == nil {
 				if retryResp.StatusCode < 400 {
 					// count_tokens 签名重试成功后记录最终 wire body，错误响应仍保留原 body 便于后续处理。
-					acceptedWireBody = retryWireBody
+					acceptedWireHandle = retryHandle
 				}
 				resp = retryResp
 				respBody, err = ReadUpstreamResponseBody(resp.Body, s.cfg, c, countTokensTooLarge)
@@ -188,10 +229,19 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 		}
 	}
 
-	if resp.StatusCode < 400 && !bytes.Equal(acceptedWireBody, body) {
-		// count_tokens 成功后再同步最终 wire body，避免 retry 从已签名 body 派生。
-		if err := replaceBody(acceptedWireBody); err != nil {
-			return err
+	if resp.StatusCode < 400 {
+		acceptedBody, err := acceptedWireHandle.ReadAll()
+		if err != nil {
+			return fmt.Errorf("read accepted count_tokens body: %w", err)
+		}
+		logicalBody, err := logicalHandle.ReadAll()
+		if err != nil {
+			return fmt.Errorf("read logical count_tokens body: %w", err)
+		}
+		if !bytes.Equal(acceptedBody, logicalBody) {
+			if err := parsed.ReplaceBody(acceptedBody); err != nil {
+				return fmt.Errorf("restore count_tokens body: %w", err)
+			}
 		}
 	}
 
@@ -262,6 +312,13 @@ func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx contex
 	}
 	SetOpsUpstreamRequestBodyPreview(c, RequestBodyPreviewString(wireBody), int64(len(wireBody)))
 	SetUsageUpstreamRequest(c, upstreamReq, RequestBodyPreviewString(wireBody))
+	wireHandle, err := bindCountTokensRequestBodyHandle(upstreamReq, wireBody)
+	if err != nil {
+		return fmt.Errorf("bind count_tokens passthrough body: %w", err)
+	}
+	defer CleanupRequestBodyHandle(wireHandle)
+	body = nil
+	wireBody = nil
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -269,7 +326,13 @@ func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx contex
 	}
 
 	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+	if upstreamReq.Body != nil {
+		_ = upstreamReq.Body.Close()
+	}
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
 		setOpsUpstreamError(c, 0, sanitizeUpstreamErrorMessage(err.Error()), "")
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 			Platform:           account.Platform,
@@ -359,6 +422,25 @@ func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx contex
 	}
 	c.Data(resp.StatusCode, contentType, respBody)
 	return nil
+}
+
+func bindCountTokensRequestBodyHandle(req *http.Request, body []byte) (*RequestBodyHandle, error) {
+	handle, err := NewRequestBodyHandleFromBytes(body, openAIRequestBodyHandleOptions())
+	if err != nil {
+		return nil, err
+	}
+	reader, err := handle.Open()
+	if err != nil {
+		CleanupRequestBodyHandle(handle)
+		return nil, err
+	}
+	if req.Body != nil {
+		_ = req.Body.Close()
+	}
+	req.Body = reader
+	req.GetBody = handle.Open
+	req.ContentLength = handle.Size()
+	return handle, nil
 }
 
 func (s *GatewayService) buildCountTokensRequestAnthropicAPIKeyPassthrough(

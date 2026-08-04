@@ -14,10 +14,34 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+type ccCloseTrackingReadCloser struct {
+	io.Reader
+	closed bool
+}
+
+func (r *ccCloseTrackingReadCloser) Close() error {
+	r.closed = true
+	return nil
+}
+
+type ccRespErrUpstream struct {
+	resp *http.Response
+	err  error
+}
+
+func (u *ccRespErrUpstream) Do(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	return u.resp, u.err
+}
+
+func (u *ccRespErrUpstream) DoWithTLS(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, proxyURL, accountID, accountConcurrency)
+}
 
 func TestBuildOpenAIChatCompletionsURL(t *testing.T) {
 	t.Parallel()
@@ -100,6 +124,31 @@ func TestSendCCUpstreamRequestHandleReplaysSpoolBackedBody(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.JSONEq(t, string(body), string(upstream.lastBody))
+}
+
+func TestSendCCUpstreamRequestHandleClosesErrorResponseBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}]}`)
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	respBody := &ccCloseTrackingReadCloser{Reader: strings.NewReader(`{"error":"upstream"}`)}
+	upstreamErr := errors.New("transport failure")
+	upstream := &ccRespErrUpstream{resp: &http.Response{
+		StatusCode: http.StatusBadGateway,
+		Header:     http.Header{"Content-Type": {"application/json"}},
+		Body:       respBody,
+	}, err: upstreamErr}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+
+	resp, err := svc.sendCCUpstreamRequestHandle(context.Background(), c, rawChatCompletionsTestAccount(), "http://upstream.example/v1/chat/completions", handle, "gpt-5.4", false, "token", "", "")
+	require.Nil(t, resp)
+	require.Error(t, err)
+	require.True(t, respBody.closed)
 }
 
 func TestForwardAsRawChatCompletions_ForcesStreamUsageUpstreamAndPassesUsageDownstream(t *testing.T) {

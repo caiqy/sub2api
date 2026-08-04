@@ -2408,18 +2408,38 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return
 	}
-	service.SetUsageRequestBody(c, openAIRequestBodyPreviewSnapshot(body))
+	coordinator := &requestBodyCoordinator{}
+	if err := coordinator.SetEffectiveBytes(body); err != nil {
+		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+		return
+	}
+	defer coordinator.Cleanup()
+	effectiveBody := coordinator.Effective()
+	service.SetUsageRequestBody(c, service.RequestBodyPreviewSnapshot(effectiveBody.PreviewString(), effectiveBody.Size()))
 
 	setOpsRequestContext(c, "", false)
 
-	bodyRef := service.NewRequestBodyRef(body)
+	bodyRef := service.NewRequestBodyRefFromHandle(effectiveBody)
 	parsedReq, err := service.ParseGatewayRequest(bodyRef, domain.PlatformAnthropic)
 	if err != nil {
 		logRequestBodyParseFailure(reqLog, body, err)
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+		h.handleMessagesParseError(c, err, false)
 		return
 	}
-	body = parsedReq.Body.Bytes()
+	if parsedReq.Body.Handle() == nil {
+		if err := coordinator.SetEffectiveBytes(parsedReq.Body.Bytes()); err != nil {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
+		effectiveBody = coordinator.Effective()
+		parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
+		if err != nil {
+			h.handleMessagesParseError(c, err, false)
+			return
+		}
+	}
+	cloneGatewayParsedRequestScalars(parsedReq)
+	body = nil
 	// count_tokens 走 messages 严格校验时，复用已解析请求，避免二次反序列化。
 	SetClaudeCodeClientContext(c, body, parsedReq)
 	clientRequestModel := clientRequestedModel(c, parsedReq.Model)
@@ -2446,23 +2466,47 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	}
 	subscription = route.Subscription
 	if route.RoutingModel != "" && route.RoutingModel != parsedReq.Model {
+		body, err = effectiveBody.ReadAll()
+		if err != nil {
+			h.handleMessagesParseError(c, err, false)
+			return
+		}
 		body = h.gatewayService.ReplaceModelInBody(body, route.RoutingModel)
-	}
-	parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRef(body), domain.PlatformAnthropic)
-	if err != nil {
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
-		return
+		if err := coordinator.SetEffectiveBytes(body); err != nil {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
+		effectiveBody = coordinator.Effective()
+		body = nil
+		parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
+		if err != nil {
+			h.handleMessagesParseError(c, err, false)
+			return
+		}
+		cloneGatewayParsedRequestScalars(parsedReq)
 	}
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, parsedReq.Model)
 	route = route.WithChannelMapping(channelMapping)
 	c.Request = c.Request.WithContext(service.WithEffectiveGatewayRoute(c.Request.Context(), route))
 	if channelMapping.Mapped {
-		body = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
-		parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRef(body), domain.PlatformAnthropic)
+		body, err = effectiveBody.ReadAll()
 		if err != nil {
-			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+			h.handleMessagesParseError(c, err, false)
 			return
 		}
+		body = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
+		if err := coordinator.SetEffectiveBytes(body); err != nil {
+			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
+		effectiveBody = coordinator.Effective()
+		body = nil
+		parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
+		if err != nil {
+			h.handleMessagesParseError(c, err, false)
+			return
+		}
+		cloneGatewayParsedRequestScalars(parsedReq)
 	}
 	setChannelUsageFields(c, clientRequestedUsageFields(c, channelMapping, parsedReq.Model, ""))
 	ensureCompositeTargetPlatform(c, apiKey, parsedReq.Model)

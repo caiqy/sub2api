@@ -63,6 +63,8 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return
 	}
+	coordinator := &requestBodyCoordinator{}
+	defer coordinator.Cleanup()
 	if !gjson.ValidBytes(body) {
 		logRequestBodyParseFailure(reqLog, body, nil)
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
@@ -74,7 +76,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "model is required")
 		return
 	}
-	requestedModel := strings.TrimSpace(modelResult.String())
+	requestedModel := strings.Clone(strings.TrimSpace(modelResult.String()))
 	reqLog = reqLog.With(zap.String("model", requestedModel))
 	setOpsRequestContext(c, requestedModel, false)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeSync))
@@ -85,6 +87,18 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, requestedModel)
 	forwardBody := openAIModelMappedBody(body, channelMapping.Mapped, channelMapping.MappedModel, h.gatewayService.ReplaceModelInBody)
+	searchID := strings.Clone(strings.TrimSpace(gjson.GetBytes(body, "id").String()))
+	sessionHash := h.gatewayService.GenerateSessionHashWithFallback(c, nil, searchID)
+	requestPayloadHash := service.HashUsageRequestPayload(body)
+	if err := coordinator.SetEffectiveBytes(forwardBody); err != nil {
+		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+		return
+	}
+	forwardHandle := coordinator.Effective()
+	service.SetUsageRequestBody(c, service.RequestBodyPreviewSnapshot(forwardHandle.PreviewString(), forwardHandle.Size()))
+	service.BindOpenAIRequestBodyHandle(c, forwardHandle)
+	body = nil
+	forwardBody = nil
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
 
@@ -105,8 +119,6 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		return
 	}
 
-	searchID := strings.TrimSpace(gjson.GetBytes(body, "id").String())
-	sessionHash := h.gatewayService.GenerateSessionHashWithFallback(c, nil, searchID)
 	failedAccountIDs := make(map[int64]struct{})
 	var lastFailoverErr *service.UpstreamFailoverError
 	switchCount := 0
@@ -163,14 +175,14 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 			if accountRelease != nil {
 				defer accountRelease()
 			}
-			return h.gatewayService.ForwardAlphaSearch(c.Request.Context(), c, account, forwardBody)
+			return h.gatewayService.ForwardAlphaSearch(c.Request.Context(), c, account, nil)
 		}()
 		service.SetOpsLatencyMs(c, service.OpsResponseLatencyMsKey, time.Since(forwardStart).Milliseconds())
 
 		if err == nil {
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(requestedModel), true, nil)
 			if result != nil {
-				h.recordAlphaSearchUsage(c, apiKey, account, subscription, channelMapping, requestedModel, body, result, subject.UserID)
+				h.recordAlphaSearchUsage(c, apiKey, account, subscription, channelMapping, requestedModel, requestPayloadHash, result, subject.UserID)
 			}
 			return
 		}
@@ -227,14 +239,13 @@ func (h *OpenAIGatewayHandler) recordAlphaSearchUsage(
 	subscription *service.UserSubscription,
 	channelMapping service.ChannelMappingResult,
 	requestedModel string,
-	body []byte,
+	requestPayloadHash string,
 	result *service.OpenAIForwardResult,
 	userID int64,
 ) {
 	userAgent := c.GetHeader("User-Agent")
 	clientIP := ip.GetClientIP(c)
 	sessionID := service.ExtractClientSessionID(c)
-	requestPayloadHash := service.HashUsageRequestPayload(body)
 	inboundEndpoint := GetInboundEndpoint(c)
 	upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 	quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
