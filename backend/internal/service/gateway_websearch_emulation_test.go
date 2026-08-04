@@ -3,8 +3,11 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -98,6 +101,22 @@ func TestExtractSearchQueryFromBody_ArrayContentSkipsEmptyText(t *testing.T) {
 func TestExtractSearchQueryFromBody_ArrayContentNoTextBlock(t *testing.T) {
 	body := `{"messages":[{"role":"user","content":[{"type":"image","source":{}}]}]}`
 	require.Equal(t, "", extractSearchQueryFromBody([]byte(body)))
+}
+
+func TestHandleWebSearchEmulation_SecondHandleReadFailurePreservesSpoolSentinel(t *testing.T) {
+	handle, err := NewRequestBodyHandleFromReader(bytes.NewReader(webSearchToolBody), RequestBodyHandleOptions{
+		SpoolThresholdBytes: 1,
+		TempDir:             t.TempDir(),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+	parsed, err := ParseGatewayRequest(NewRequestBodyRefFromHandle(handle), PlatformAnthropic)
+	require.NoError(t, err)
+	require.NoError(t, os.Remove(handle.spoolPath))
+
+	_, err = (&GatewayService{}).handleWebSearchEmulation(context.Background(), nil, newAnthropicAPIKeyAccount(WebSearchModeEnabled), parsed)
+
+	require.True(t, errors.Is(err, ErrRequestBodySpool), "error = %v", err)
 }
 
 // --- buildSearchResultBlocks ---

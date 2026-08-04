@@ -1,6 +1,9 @@
 package service
 
 import (
+	"bytes"
+	"errors"
+	"os"
 	"regexp"
 	"testing"
 
@@ -24,7 +27,8 @@ func TestBuildOAuthMetadataUserID_FallbackWithoutAccountUUID(t *testing.T) {
 
 	fp := &Fingerprint{ClientID: "deadbeef"} // should be used as user id in legacy format
 
-	got := svc.buildOAuthMetadataUserID(parsed, account, fp)
+	got, err := svc.buildOAuthMetadataUserID(parsed, account, fp)
+	require.NoError(t, err)
 	require.NotEmpty(t, got)
 
 	// Legacy format: user_{client}_account__session_{uuid}
@@ -51,7 +55,8 @@ func TestBuildOAuthMetadataUserID_UsesAccountUUIDWhenPresent(t *testing.T) {
 		},
 	}
 
-	got := svc.buildOAuthMetadataUserID(parsed, account, nil)
+	got, err := svc.buildOAuthMetadataUserID(parsed, account, nil)
+	require.NoError(t, err)
 	require.NotEmpty(t, got)
 
 	// New format: user_{client}_account_{account_uuid}_session_{uuid}
@@ -87,9 +92,12 @@ func TestBuildOAuthMetadataUserID_SessionIDStableAcrossTurns(t *testing.T) {
 		`{"role":"assistant","content":"answer 2"},` +
 		`{"role":"user","content":"third question"}]}`)
 
-	id1 := svc.buildOAuthMetadataUserID(round1, account, fp)
-	id2 := svc.buildOAuthMetadataUserID(round2, account, fp)
-	id3 := svc.buildOAuthMetadataUserID(round3, account, fp)
+	id1, err := svc.buildOAuthMetadataUserID(round1, account, fp)
+	require.NoError(t, err)
+	id2, err := svc.buildOAuthMetadataUserID(round2, account, fp)
+	require.NoError(t, err)
+	id3, err := svc.buildOAuthMetadataUserID(round3, account, fp)
+	require.NoError(t, err)
 
 	require.NotEmpty(t, id1)
 	require.Equal(t, id1, id2, "session_id 应随对话增长保持不变")
@@ -98,6 +106,34 @@ func TestBuildOAuthMetadataUserID_SessionIDStableAcrossTurns(t *testing.T) {
 	// 不同的首条 user 消息应派生出不同的 session_id（不同会话）。
 	other := mustParse(`{"model":"claude-sonnet-4-5","system":"sys","messages":[` +
 		`{"role":"user","content":"a completely different opener"}]}`)
-	idOther := svc.buildOAuthMetadataUserID(other, account, fp)
+	idOther, err := svc.buildOAuthMetadataUserID(other, account, fp)
+	require.NoError(t, err)
 	require.NotEqual(t, id1, idOther, "不同首条消息应派生不同 session_id")
+}
+
+func TestBuildOAuthMetadataUserID_SecondHandleReadFailurePreservesSpoolSentinel(t *testing.T) {
+	body := []byte(`{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"stable opener"}]}`)
+	svc := &GatewayService{}
+	account := &Account{ID: 778, Type: AccountTypeOAuth, Extra: map[string]any{"account_uuid": "acc-uuid"}}
+	fp := &Fingerprint{ClientID: "clientid778", UserAgent: "claude-cli/2.1.161 (external, cli)"}
+	expectedParsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+	require.NoError(t, err)
+	expectedID, err := svc.buildOAuthMetadataUserID(expectedParsed, account, fp)
+	require.NoError(t, err)
+	require.NotEmpty(t, expectedID)
+
+	handle, err := NewRequestBodyHandleFromReader(bytes.NewReader(body), RequestBodyHandleOptions{
+		SpoolThresholdBytes: 1,
+		TempDir:             t.TempDir(),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+	parsed, err := ParseGatewayRequest(NewRequestBodyRefFromHandle(handle), PlatformAnthropic)
+	require.NoError(t, err)
+	require.NoError(t, os.Remove(handle.spoolPath))
+
+	got, err := svc.buildOAuthMetadataUserID(parsed, account, fp)
+
+	require.True(t, errors.Is(err, ErrRequestBodySpool), "error = %v", err)
+	require.Empty(t, got)
 }

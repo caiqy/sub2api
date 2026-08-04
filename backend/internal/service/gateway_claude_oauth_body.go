@@ -320,12 +320,12 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 	return out, modelID
 }
 
-func (s *GatewayService) buildOAuthMetadataUserID(parsed *ParsedRequest, account *Account, fp *Fingerprint) string {
+func (s *GatewayService) buildOAuthMetadataUserID(parsed *ParsedRequest, account *Account, fp *Fingerprint) (string, error) {
 	if parsed == nil || account == nil {
-		return ""
+		return "", nil
 	}
 	if parsed.MetadataUserID != "" {
-		return ""
+		return "", nil
 	}
 
 	userID := strings.TrimSpace(account.GetClaudeUserID())
@@ -343,7 +343,11 @@ func (s *GatewayService) buildOAuthMetadataUserID(parsed *ParsedRequest, account
 	// 不复用 GenerateSessionHash —— 后者是粘性路由键、按设计逐轮变化（见其测试）。
 	var firstUserText string
 	if parsed.Body != nil {
-		firstUserText = extractFirstUserText(parsed.Body.Bytes())
+		body, err := parsed.Body.ReadAll()
+		if err != nil {
+			return "", fmt.Errorf("read OAuth session seed: %w", err)
+		}
+		firstUserText = extractFirstUserText(body)
 	}
 	seed := buildStableSessionSeed(account.ID, sessionContextDiscriminator(parsed.SessionContext), firstUserText)
 	sessionID := generateSessionUUID(seed)
@@ -354,7 +358,7 @@ func (s *GatewayService) buildOAuthMetadataUserID(parsed *ParsedRequest, account
 		uaVersion = ExtractCLIVersion(fp.UserAgent)
 	}
 	accountUUID := strings.TrimSpace(account.GetExtraString("account_uuid"))
-	return FormatMetadataUserID(userID, accountUUID, sessionID, uaVersion)
+	return FormatMetadataUserID(userID, accountUUID, sessionID, uaVersion), nil
 }
 
 // applyClaudeCodeOAuthMimicryToBody 将"非 Claude Code 客户端 + Claude OAuth 账号"

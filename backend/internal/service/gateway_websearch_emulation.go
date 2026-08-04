@@ -150,7 +150,11 @@ func (s *GatewayService) handleWebSearchEmulation(
 		parsed.OnUpstreamAccepted()
 	}
 
-	query := extractSearchQueryFromBody(parsed.Body.Bytes())
+	body, err := parsed.Body.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("read web search request body: %w", err)
+	}
+	query := extractSearchQueryFromBody(body)
 	if query == "" {
 		return nil, fmt.Errorf("web search emulation: no query found in messages")
 	}
