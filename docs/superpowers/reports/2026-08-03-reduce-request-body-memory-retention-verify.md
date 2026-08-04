@@ -2,8 +2,8 @@
 
 - Change: reduce-request-body-memory-retention
 - 日期: 2026-08-03
-- verify_mode: full（31 任务；Wave 24 复验）
-- 分支: feature/20260803/reduce-request-body-memory-retention（81 commits，代码审查 HEAD 8b599a7be，base 8b494e187）
+- verify_mode: full（31 任务；Wave 26 复验）
+- 分支: feature/20260803/reduce-request-body-memory-retention（84 commits，代码审查 HEAD 9c2e41a7b，base 8b494e187）
 
 ## Summary
 
@@ -15,7 +15,7 @@
 
 ## 回归专项审查（用户要求，2026-08-03 补充）
 
-验证通过后追加**九轮**业务回归专项审查（24 个修复 wave，8b599a7be 收尾，81 commits），全部发现已解决：
+验证通过后追加**十轮**业务回归专项审查（26 个修复 wave，9c2e41a7b 收尾，84 commits），全部发现已解决：
 
 | 轮次 | 方法 | 发现 | 处置 |
 |------|------|------|------|
@@ -28,13 +28,14 @@
 | 第 7 轮（最终） | 发布前整体关 | Wave 17/18 Gateway Chat 复审：post-ping SSE spool error 追加裸 JSON、lenient JSON/解压后限长契约回归、未提交 spool error envelope 漂移 | Wave 18 修复 post-ping/lenient，Wave 19 修复 envelope |
 | 第 8 轮（复核） | Wave 20 驻留与错误语义 | Composite/ClaudeCodeOnly 解压 body、OpenAI `/v1/messages` 转换 body 跨等待驻留；Grok media transport spool 落为 502；设计/API 清单失真 | Wave 20 修复并复验 |
 | 第 9 轮（最终） | 剩余入口与契约收尾 | OpenAI `/v1/messages` raw-chat fallback、Grok retry snapshot、CountTokens/AlphaSearch/Live、Gateway Chat 与 Composite 契约、CC sender 关闭缺口 | Wave 21-24 修复并复验 |
+| 第 10 轮（最终复核） | CountTokens / Live / AlphaSearch / 共享发送器收尾 | OpenAI CountTokens、Live multipart、Alpha Search、`sendCCUpstreamRequestHandle`、Composite/Gateway Chat 复核 | Wave 25-26 修复并复验 |
 
 **回归审查最终结论**：**PASS（可发布）**——无未解决的业务回归；重放一致性、错误映射（未提交 503 / 已提交协议终止帧）、failover、usage/billing（含零费用 failed usage 审计语义）、streaming 协议（SSE `event: error`/`response.failed`）均与 base 一致；既有 exported 签名未改变，新增导出表面为 `DefaultRequestBodySpoolThresholdBytes`、`DefaultRequestBodyPreviewLimitBytes`、`GeminiMessagesCompatService.ForwardHandle`、`AntigravityGatewayService.ForwardAsResponsesHandle` 和 `ParsedRequest.RequestPayloadHash`；WS 文件零改动；wave 14 为纯测试，wave 16/17/18/19/20 含生产修复。
 
 ## 1. Completeness（完整性）
 
 - tasks.md：31 个任务全部 `[x]`（0 未完成）
-- 变更范围与 tasks.md 及后续 24 个回归修复 wave 一致（handler/service 生产代码、测试、memory 文档）
+- 变更范围与 tasks.md 及后续 26 个回归修复 wave 一致（handler/service 生产代码、测试、memory 文档）
 - delta spec 4 个 requirement 全部有对应实现：
   - 大请求文件化（spool 阈值 1MB 导出常量、preview 256KB）✅
   - usage 指纹与业务语义保持（session/usage/cyber hash 预计算口径测试）✅
