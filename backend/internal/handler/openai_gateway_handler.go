@@ -1065,7 +1065,13 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return
 	}
-	service.SetUsageRequestBody(c, openAIRequestBodyPreviewSnapshot(body))
+	coordinator := &requestBodyCoordinator{}
+	if err := coordinator.SetEffectiveBytes(body); err != nil {
+		h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+		return
+	}
+	defer coordinator.Cleanup()
+	service.SetUsageRequestBody(c, openAIResponsesRequestBodyPreviewSnapshot(coordinator.Effective()))
 
 	if !gjson.ValidBytes(body) {
 		logRequestBodyParseFailure(reqLog, body, nil)
@@ -1078,7 +1084,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "model is required")
 		return
 	}
-	reqModel := modelResult.String()
+	reqModel := strings.Clone(modelResult.String())
 	clientModel := clientRequestedModel(c, reqModel)
 	SetClaudeCodeClientContext(c, body, nil)
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
@@ -1105,6 +1111,10 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	subscription = route.Subscription
 	if route.RoutingModel != "" && route.RoutingModel != reqModel {
 		body = h.gatewayService.ReplaceModelInBody(body, route.RoutingModel)
+		if err := coordinator.SetEffectiveBytes(body); err != nil {
+			h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
 		reqModel = route.RoutingModel
 	}
 	ensureCompositeTargetPlatform(c, apiKey, reqModel)
@@ -1139,7 +1149,21 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	route = route.WithChannelMapping(channelMappingMsg)
 	c.Request = c.Request.WithContext(service.WithEffectiveGatewayRoute(c.Request.Context(), route))
 	setChannelUsageFields(c, clientRequestedUsageFields(c, channelMappingMsg, reqModel, ""))
-	mappedBodyForMessages := newOpenAIModelMappedBodyCache(body, h.gatewayService.ReplaceModelInBody)
+	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
+	promptCacheKey := h.gatewayService.ExtractSessionID(c, body)
+	sessionHash, promptCacheKey = resolveOpenAIMessagesMetadataSession(sessionHash, promptCacheKey, reqModel, body)
+	cyberBlockKeyMsg := service.CyberSessionBlockKey(apiKey.ID, c, body)
+	requestPayloadHash := service.HashUsageRequestPayload(body)
+	reasoningEffort := service.NormalizeClaudeOutputEffort(strings.Clone(gjson.GetBytes(body, "output_config.effort").String()))
+	if channelMappingMsg.Mapped {
+		body = h.gatewayService.ReplaceModelInBody(body, channelMappingMsg.MappedModel)
+		if err := coordinator.SetEffectiveBytes(body); err != nil {
+			h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+			return
+		}
+	}
+	service.BindOpenAIRequestBodyHandle(c, coordinator.Effective())
+	body = nil
 
 	// 绑定错误透传服务，允许 service 层在非 failover 错误场景复用规则。
 	if h.errorPassthroughService != nil {
@@ -1180,10 +1204,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		return
 	}
 
-	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
-	promptCacheKey := h.gatewayService.ExtractSessionID(c, body)
-	sessionHash, promptCacheKey = resolveOpenAIMessagesMetadataSession(sessionHash, promptCacheKey, reqModel, body)
-	if h.rejectIfCyberSessionBlocked(c, apiKey, body, reqModel, cyberBlockFormatAnthropic) {
+	if h.rejectIfCyberSessionKeyBlocked(c, apiKey, cyberBlockKeyMsg, reqModel, cyberBlockFormatAnthropic) {
 		return
 	}
 
@@ -1235,7 +1256,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 				}
 			} else {
 				if lastFailoverErr != nil {
-					h.submitFailoverFailedUsageLog(c, apiKey, lastFailedAccount, reqModel, reqStream, lastFailoverErr, lastFailedDuration, service.NormalizeClaudeOutputEffort(gjson.GetBytes(body, "output_config.effort").String()), "handler.openai_gateway.messages")
+					h.submitFailoverFailedUsageLog(c, apiKey, lastFailedAccount, reqModel, reqStream, lastFailoverErr, lastFailedDuration, reasoningEffort, "handler.openai_gateway.messages")
 					h.handleAnthropicFailoverExhausted(c, lastFailoverErr, streamStarted)
 				} else {
 					h.anthropicStreamingAwareError(c, http.StatusBadGateway, "api_error", "Upstream request failed", streamStarted)
@@ -1246,7 +1267,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		if selection == nil || selection.Account == nil {
 			if lastFailoverErr != nil {
 				markOpsRoutingCapacityLimited(c)
-				h.submitFailoverFailedUsageLog(c, apiKey, lastFailedAccount, reqModel, reqStream, lastFailoverErr, lastFailedDuration, service.NormalizeClaudeOutputEffort(gjson.GetBytes(body, "output_config.effort").String()), "handler.openai_gateway.messages")
+				h.submitFailoverFailedUsageLog(c, apiKey, lastFailedAccount, reqModel, reqStream, lastFailoverErr, lastFailedDuration, reasoningEffort, "handler.openai_gateway.messages")
 				h.handleAnthropicFailoverExhausted(c, lastFailoverErr, streamStarted)
 			} else {
 				cls := classifyOpenAICompatibleNoAccountErrorFromGin(c, h.gatewayService, apiKey, currentRoutingModel, reqModel)
@@ -1279,24 +1300,18 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			defaultMappedModel = resolveOpenAIForwardDefaultMappedModel(apiKey, c.GetString("openai_messages_fallback_model"))
 		}
 		setOpenAIFailedUsageExactUpstreamModel(c, resolveOpenAIFailedUsageExactUpstreamModel(account, reqModel, defaultMappedModel))
-		// 应用渠道模型映射到请求体
-		forwardBody := mappedBodyForMessages(channelMappingMsg.Mapped, channelMappingMsg.MappedModel)
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()
 				}
 			}()
-			return h.gatewayService.ForwardAsAnthropic(c.Request.Context(), c, account, forwardBody, promptCacheKey, defaultMappedModel)
+			return h.gatewayService.ForwardAsAnthropic(c.Request.Context(), c, account, nil, promptCacheKey, defaultMappedModel)
 		}()
 
 		forwardDuration := time.Since(forwardStart)
 		forwardDurationMs := forwardDuration.Milliseconds()
-		cyberBlockKeyMsg := ""
-		if service.GetOpsCyberPolicy(c) != nil {
-			cyberBlockKeyMsg = service.CyberSessionBlockKey(apiKey.ID, c, body)
-		}
-		h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, err != nil, cyberBlockKeyMsg, clientRequestedUsageFields(c, channelMappingMsg, reqModel, ""), service.HashUsageRequestPayload(body))
+		h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, err != nil, cyberBlockKeyMsg, clientRequestedUsageFields(c, channelMappingMsg, reqModel, ""), requestPayloadHash)
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
 		responseLatencyMs := forwardDurationMs
 		if upstreamLatencyMs > 0 && forwardDurationMs > upstreamLatencyMs {
@@ -1307,6 +1322,10 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			service.SetOpsLatencyMs(c, service.OpsTimeToFirstTokenMsKey, int64(*result.FirstTokenMs))
 		}
 		if err != nil {
+			if errors.Is(err, service.ErrRequestBodySpool) {
+				h.anthropicStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body", streamStarted)
+				return
+			}
 			if result != nil && result.ImageCount > 0 {
 				reqLog.Warn("openai_messages.forward_partial_error_with_image_result",
 					zap.Int64("account_id", account.ID),
@@ -1346,13 +1365,13 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 					lastFailedAccount = account
 					lastFailedDuration = forwardDuration
 					if switchCount >= maxAccountSwitches {
-						h.submitFailoverFailedUsageLog(c, apiKey, account, reqModel, reqStream, failoverErr, forwardDuration, service.NormalizeClaudeOutputEffort(gjson.GetBytes(body, "output_config.effort").String()), "handler.openai_gateway.messages")
+						h.submitFailoverFailedUsageLog(c, apiKey, account, reqModel, reqStream, failoverErr, forwardDuration, reasoningEffort, "handler.openai_gateway.messages")
 						h.handleAnthropicFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
 					switchCount++
 					if h.gatewayService.ShouldStopOpenAIOAuth429Failover(account, failoverErr.StatusCode, switchCount, &oauth429FailoverState) {
-						h.submitFailoverFailedUsageLog(c, apiKey, account, reqModel, reqStream, failoverErr, forwardDuration, service.NormalizeClaudeOutputEffort(gjson.GetBytes(body, "output_config.effort").String()), "handler.openai_gateway.messages")
+						h.submitFailoverFailedUsageLog(c, apiKey, account, reqModel, reqStream, failoverErr, forwardDuration, reasoningEffort, "handler.openai_gateway.messages")
 						h.handleAnthropicFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
@@ -1367,7 +1386,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 				h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(currentRoutingModel), false, nil)
 				wroteFallback := h.ensureAnthropicErrorResponse(c, streamStarted)
 				if c.Request.Context().Err() == nil && service.HasOpsUpstreamAttempted(c) && !service.HasOpsClientBusinessLimited(c) && service.GetOpsCyberPolicy(c) == nil {
-					h.submitFailedUsageLog(c, apiKey, account, reqModel, reqStream, 0, nil, nil, forwardDuration, service.NormalizeClaudeOutputEffort(gjson.GetBytes(body, "output_config.effort").String()), "handler.openai_gateway.messages")
+					h.submitFailedUsageLog(c, apiKey, account, reqModel, reqStream, 0, nil, nil, forwardDuration, reasoningEffort, "handler.openai_gateway.messages")
 				}
 				reqLog.Warn("openai_messages.forward_failed",
 					zap.Int64("account_id", account.ID),
@@ -1385,7 +1404,6 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
-		requestPayloadHash := service.HashUsageRequestPayload(body)
 		detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account, result)

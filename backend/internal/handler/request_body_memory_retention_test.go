@@ -139,7 +139,7 @@ func TestRequestBodyMemoryRetentionWhileUpstreamBlocked(t *testing.T) {
 	}
 	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
 
-	for _, branch := range []string{"responses", "passthrough", "grok-responses", "responses-chat-fallback", "chat-raw", "chat-converted", "gateway-chat-anthropic", "gateway-chat-gemini", "messages-anthropic", "messages-anthropic-stream", "messages-anthropic-passthrough-stream", "messages-antigravity-oauth", "messages-bedrock", "messages-bedrock-stream", "messages-gemini", "messages-gemini-mixed", "gemini-antigravity-native"} {
+	for _, branch := range []string{"responses", "passthrough", "grok-responses", "responses-chat-fallback", "chat-raw", "chat-converted", "openai-messages", "gateway-chat-anthropic", "gateway-chat-gemini", "messages-anthropic", "messages-anthropic-stream", "messages-anthropic-passthrough-stream", "messages-antigravity-oauth", "messages-bedrock", "messages-bedrock-stream", "messages-gemini", "messages-gemini-mixed", "gemini-antigravity-native"} {
 		t.Run(branch, func(t *testing.T) {
 			var heapAt2MB, heapAt89MB uint64
 			var previewAt2MB, previewAt89MB, snapshotAt2MB, snapshotAt89MB int
@@ -212,6 +212,11 @@ func measureBlockedRequestBodyHeap(t *testing.T, branch string, size int64, spoo
 		upstream.body = `{"id":"chatcmpl_retention","choices":[{"message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`
 	case "chat-converted":
 		path = "/v1/chat/completions"
+		extra["openai_responses_supported"] = true
+		upstream.contentType = "text/event-stream"
+		upstream.body = "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_retention\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"
+	case "openai-messages":
+		path = "/v1/messages"
 		extra["openai_responses_supported"] = true
 		upstream.contentType = "text/event-stream"
 		upstream.body = "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_retention\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"
@@ -292,6 +297,15 @@ func measureBlockedRequestBodyHeap(t *testing.T, branch string, size int64, spoo
 			c.Set(string(middleware.ContextKeyForcePlatform), service.PlatformAntigravity)
 			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.ForcePlatform, service.PlatformAntigravity))
 			env.handler.GeminiV1BetaModels(c)
+		})
+	} else if branch == "openai-messages" {
+		group := &service.Group{ID: 1401, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowMessagesDispatch: true}
+		account := &service.Account{ID: 1401, Name: "retention-openai-messages", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-retention"}, Extra: extra}
+		env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
+		env.handler.cfg.Gateway.OpenAIWS.Enabled = false
+		router = env.router(path, func(c *gin.Context) {
+			requestContext = c
+			env.handler.Messages(c)
 		})
 	} else if branch == "gateway-chat-anthropic" || branch == "gateway-chat-gemini" {
 		group := &service.Group{ID: 1401, Platform: platform, Status: service.StatusActive, Hydrated: true}
@@ -380,6 +394,9 @@ func retentionJSONBody(branch, path string, size int64) io.Reader {
 		}
 	} else if path == "/v1/messages" {
 		prefix, suffix = `{"model":"gemini-2.5-flash","max_tokens":16,"stream":false,"messages":[{"role":"user","content":"`, `"}]}`
+	}
+	if branch == "openai-messages" {
+		prefix = `{"model":"gpt-5","max_tokens":16,"stream":false,"messages":[{"role":"user","content":"`
 	}
 	if branch == "messages-anthropic" || branch == "messages-anthropic-stream" || branch == "messages-anthropic-passthrough-stream" || branch == "messages-antigravity-oauth" || branch == "messages-bedrock" || branch == "messages-bedrock-stream" {
 		stream := "false"

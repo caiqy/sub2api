@@ -33,6 +33,35 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
+	bodyHandle := getOpenAIRequestBodyHandle(c)
+	owned := false
+	var err error
+	if len(body) != 0 || bodyHandle == nil {
+		bodyHandle, owned, err = openAIRequestBodyHandleForContext(c, body)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("spool anthropic request body: %w", err)
+	}
+	if owned {
+		defer CleanupRequestBodyHandle(bodyHandle)
+	}
+	body = nil
+	return s.forwardAsAnthropicHandle(ctx, c, account, bodyHandle, promptCacheKey, defaultMappedModel)
+}
+
+// forwardAsAnthropicHandle borrows the caller-owned canonical request handle.
+func (s *OpenAIGatewayService) forwardAsAnthropicHandle(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	bodyHandle *RequestBodyHandle,
+	promptCacheKey string,
+	defaultMappedModel string,
+) (*OpenAIForwardResult, error) {
+	body, err := bodyHandle.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("read anthropic request body: %w", err)
+	}
 	// 入口分流：APIKey 账号 + 上游不支持 Responses API → 走 CC 直转（与
 	// ForwardAsChatCompletions 对称）。缺少此分流时，/v1/messages 入站请求
 	// 会被无条件转为 Responses 格式发往上游 /v1/responses，导致只支持
@@ -277,6 +306,24 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			return nil, fmt.Errorf("apply grok Free function-tool cache route: %w", patchErr)
 		}
 	}
+	resultServiceTier := responsesReq.ServiceTier
+	resultReasoningEffort := ""
+	if responsesReq.Reasoning != nil {
+		resultReasoningEffort = responsesReq.Reasoning.Effort
+	}
+	responsesHandle, err := NewRequestBodyHandleFromBytes(responsesBody, RequestBodyHandleOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("spool OpenAI messages outbound body: %w", err)
+	}
+	defer func() { CleanupRequestBodyHandle(responsesHandle) }()
+	firstSourceBody := body
+	firstResponsesBody := responsesBody
+	body = nil
+	responsesBody = nil
+	updatedBody = nil
+	anthropicReq = apicompat.AnthropicRequest{}
+	anthropicDigestReq = nil
+	responsesReq = nil
 
 	// 5. Get access token
 	token, _, err := s.getRequestCredential(ctx, c, account)
@@ -291,46 +338,6 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		// 既有 body/session/conversation 行为。身份头在 post-build 阶段统一恢复。
 		setOpenAICompatMessagesBridgeContext(c, true)
 	}
-	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
-	var upstreamReq *http.Request
-	if account.Platform == PlatformGrok {
-		upstreamReq, err = buildGrokResponsesRequest(upstreamCtx, c, account, responsesBody, token, grokCacheIdentity, s.cfg)
-	} else {
-		upstreamReq, err = s.buildUpstreamRequestWithSourceBody(upstreamCtx, c, account, body, responsesBody, token, isStream, promptCacheKey, false)
-	}
-	releaseUpstreamCtx()
-	if err != nil {
-		return nil, fmt.Errorf("build upstream request: %w", err)
-	}
-
-	// Override session_id with a deterministic UUID derived from the isolated
-	// session key, ensuring different API keys produce different upstream sessions.
-	if account.Platform != PlatformGrok && promptCacheKey != "" {
-		isolatedSessionID := generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey))
-		upstreamReq.Header.Set("session_id", isolatedSessionID)
-		if upstreamReq.Header.Get("conversation_id") != "" {
-			upstreamReq.Header.Set("conversation_id", isolatedSessionID)
-		}
-	}
-	if account.Type == AccountTypeOAuth && account.Platform != PlatformGrok {
-		// buildUpstreamRequest 保留 Messages bridge 的 body/session 兼容行为，并会先
-		// 清除身份头。真正发送前恢复完整 Codex 身份，避免 ChatGPT Codex 上游因缺失
-		// originator/OpenAI-Beta 返回 404（issue #3901）。
-		ensureCodexIdentityHeaders(upstreamReq.Header)
-		enforceCodexIdentityHeaders(upstreamReq.Header)
-		logger.L().Debug("openai messages: upstream identity restored",
-			zap.Int64("account_id", account.ID),
-			zap.String("upstream_model", upstreamModel),
-			zap.Bool("compat_identity_restored", true),
-		)
-	}
-	if account.Type == AccountTypeOAuth && promptCacheKey != "" && strings.TrimSpace(c.GetHeader("conversation_id")) == "" {
-		upstreamReq.Header.Del("conversation_id")
-	}
-	if compatTurnState != "" && upstreamReq.Header.Get("x-codex-turn-state") == "" {
-		upstreamReq.Header.Set("x-codex-turn-state", compatTurnState)
-	}
-
 	// 7. Send request
 	proxyURL := ""
 	if account.Proxy != nil {
@@ -341,22 +348,77 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	// treating the 400 as a hard failure / failover trigger.
 	var resp *http.Response
 	for attempt := 0; ; attempt++ {
-		if attempt > 0 {
-			if account.Platform != PlatformGrok {
-				break
+		if attempt > 0 && account.Platform != PlatformGrok {
+			break
+		}
+		attemptBody := firstResponsesBody
+		firstResponsesBody = nil
+		sourceBody := firstSourceBody
+		firstSourceBody = nil
+		if account.Platform != PlatformGrok {
+			if attemptBody == nil {
+				attemptBody, err = responsesHandle.ReadAll()
+				if err != nil {
+					return nil, fmt.Errorf("read OpenAI messages outbound body: %w", err)
+				}
 			}
-			upstreamCtxRetry, releaseRetry := detachUpstreamContext(ctx)
-			upstreamReq, err = buildGrokResponsesRequest(upstreamCtxRetry, c, account, responsesBody, token, grokCacheIdentity, s.cfg)
-			releaseRetry()
-			if err != nil {
-				return nil, fmt.Errorf("build grok retry request: %w", err)
+			if sourceBody == nil {
+				sourceBody, err = bodyHandle.ReadAll()
+				if err != nil {
+					return nil, fmt.Errorf("read OpenAI messages source body: %w", err)
+				}
 			}
 		}
-		SetUsageUpstreamRequest(c, upstreamReq, openAIUpstreamRequestBodyPreview(upstreamReq, responsesBody))
+
+		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
+		var upstreamReq *http.Request
+		if account.Platform == PlatformGrok {
+			upstreamReq, err = buildGrokResponsesRequestWithHandle(upstreamCtx, c, account, responsesHandle, upstreamModel, token, grokCacheIdentity, s.cfg)
+		} else {
+			upstreamReq, err = s.buildUpstreamRequestWithSourceBody(upstreamCtx, c, account, sourceBody, attemptBody, responsesHandle, token, isStream, promptCacheKey, false)
+		}
+		releaseUpstreamCtx()
+		if err != nil {
+			return nil, fmt.Errorf("build upstream request: %w", err)
+		}
+
+		// Override session_id with a deterministic UUID derived from the isolated
+		// session key, ensuring different API keys produce different upstream sessions.
+		if account.Platform != PlatformGrok && promptCacheKey != "" {
+			isolatedSessionID := generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey))
+			upstreamReq.Header.Set("session_id", isolatedSessionID)
+			if upstreamReq.Header.Get("conversation_id") != "" {
+				upstreamReq.Header.Set("conversation_id", isolatedSessionID)
+			}
+		}
+		if account.Type == AccountTypeOAuth && account.Platform != PlatformGrok {
+			ensureCodexIdentityHeaders(upstreamReq.Header)
+			enforceCodexIdentityHeaders(upstreamReq.Header)
+			logger.L().Debug("openai messages: upstream identity restored",
+				zap.Int64("account_id", account.ID),
+				zap.String("upstream_model", upstreamModel),
+				zap.Bool("compat_identity_restored", true),
+			)
+		}
+		if account.Type == AccountTypeOAuth && promptCacheKey != "" && strings.TrimSpace(c.GetHeader("conversation_id")) == "" {
+			upstreamReq.Header.Del("conversation_id")
+		}
+		if compatTurnState != "" && upstreamReq.Header.Get("x-codex-turn-state") == "" {
+			upstreamReq.Header.Set("x-codex-turn-state", compatTurnState)
+		}
+		SetUsageUpstreamRequest(c, upstreamReq, openAIUpstreamRequestBodyPreview(upstreamReq, attemptBody))
+		attemptBody = nil
+		sourceBody = nil
 		SetOpsUpstreamAttempted(c, true)
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		closeOpenAIRequestBody(upstreamReq)
 		if err != nil {
+			if resp != nil && resp.Body != nil {
+				_ = resp.Body.Close()
+			}
+			if errors.Is(err, ErrRequestBodySpool) {
+				return nil, err
+			}
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 		}
 		if account.Platform != PlatformGrok || attempt > 0 || resp.StatusCode != http.StatusBadRequest {
@@ -369,13 +431,19 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		// Prefer explicit decrypt errors; also strip once on any 400 when the
 		// outbound body still carries reasoning.encrypted_content (account
 		// switch often returns opaque "Upstream error: 400").
+		currentResponsesBody, readErr := responsesHandle.ReadAll()
+		if readErr != nil {
+			return nil, fmt.Errorf("read Grok messages retry body: %w", readErr)
+		}
 		shouldStrip := isGrokInvalidEncryptedContentResponse(resp.StatusCode, respBody) ||
-			requestHasGrokEncryptedReasoning(responsesBody)
+			requestHasGrokEncryptedReasoning(currentResponsesBody)
 		if !shouldStrip {
+			currentResponsesBody = nil
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
 			break
 		}
-		retryBody, changed, trimErr := trimGrokInvalidEncryptedContentRetryBody(responsesBody)
+		retryBody, changed, trimErr := trimGrokInvalidEncryptedContentRetryBody(currentResponsesBody)
+		currentResponsesBody = nil
 		if trimErr != nil {
 			return nil, fmt.Errorf("prepare Grok invalid encrypted_content retry: %w", trimErr)
 		}
@@ -383,7 +451,13 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
 			break
 		}
-		responsesBody = retryBody
+		retryHandle, handleErr := NewRequestBodyHandleFromBytes(retryBody, RequestBodyHandleOptions{})
+		retryBody = nil
+		if handleErr != nil {
+			return nil, fmt.Errorf("spool Grok messages retry body: %w", handleErr)
+		}
+		CleanupRequestBodyHandle(responsesHandle)
+		responsesHandle = retryHandle
 		logger.L().Info("openai messages: retrying after stripping invalid Grok encrypted_content",
 			zap.Int64("account_id", account.ID),
 			zap.Bool("cache_identity_present", strings.TrimSpace(grokCacheIdentity) != ""),
@@ -400,7 +474,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			if err := s.recoverAgentIdentityTask(ctx, account, expectedTaskID); err != nil {
 				return nil, fmt.Errorf("agent identity task recovery failed: %w", err)
 			}
-			return s.ForwardAsAnthropic(markAgentIdentityTaskRecoveryTried(ctx), c, account, body, promptCacheKey, defaultMappedModel)
+			return s.forwardAsAnthropicHandle(markAgentIdentityTaskRecoveryTried(ctx), c, account, bodyHandle, promptCacheKey, defaultMappedModel)
 		}
 		if previousResponseID != "" && (isOpenAICompatPreviousResponseNotFound(resp.StatusCode, upstreamMsg, respBody) || isOpenAICompatPreviousResponseUnsupported(resp.StatusCode, upstreamMsg, respBody)) {
 			if isOpenAICompatPreviousResponseUnsupported(resp.StatusCode, upstreamMsg, respBody) {
@@ -413,7 +487,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 				zap.String("previous_response_id", truncateOpenAIWSLogValue(previousResponseID, openAIWSIDValueMaxLen)),
 				zap.String("upstream_model", upstreamModel),
 			)
-			return s.ForwardAsAnthropic(ctx, c, account, body, promptCacheKey, defaultMappedModel)
+			return s.forwardAsAnthropicHandle(ctx, c, account, bodyHandle, promptCacheKey, defaultMappedModel)
 		}
 		// Grok account-switched history often fails decrypt; strip encrypted
 		// reasoning once at the client-body level so failover accounts can accept
@@ -421,7 +495,13 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		if account.Platform == PlatformGrok &&
 			isGrokInvalidEncryptedContentResponse(resp.StatusCode, respBody) &&
 			!grokEncryptedContentStripRetried(ctx) {
-			if strippedBody, ok := stripAnthropicThinkingSignatures(body); ok {
+			canonicalBody, readErr := bodyHandle.ReadAll()
+			if readErr != nil {
+				return nil, fmt.Errorf("read Grok failover source body: %w", readErr)
+			}
+			strippedBody, stripped := stripAnthropicThinkingSignatures(canonicalBody)
+			canonicalBody = nil
+			if stripped {
 				logger.L().Info("openai messages: stripping thinking signatures for Grok failover retry",
 					zap.Int64("account_id", account.ID),
 				)
@@ -472,12 +552,12 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		if promptCacheKey != "" && anthropicDigestChain != "" {
 			s.bindOpenAICompatAnthropicDigestPromptCacheKey(account, apiKeyID, anthropicDigestChain, promptCacheKey, anthropicMatchedDigestChain)
 		}
-		if responsesReq.ServiceTier != "" {
-			st := responsesReq.ServiceTier
+		if resultServiceTier != "" {
+			st := resultServiceTier
 			result.ServiceTier = &st
 		}
-		if responsesReq.Reasoning != nil && responsesReq.Reasoning.Effort != "" {
-			re := responsesReq.Reasoning.Effort
+		if resultReasoningEffort != "" {
+			re := resultReasoningEffort
 			result.ReasoningEffort = &re
 		}
 	}
