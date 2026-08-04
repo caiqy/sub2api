@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -112,6 +114,69 @@ func TestAntigravityGatewayService_ForwardGeminiTransportSpoolErrorReturnsWithou
 
 	require.Nil(t, result)
 	require.ErrorIs(t, err, ErrRequestBodySpool)
+	require.Equal(t, 1, upstream.callCount)
+	require.Empty(t, recorder.Body.String())
+}
+
+func TestHandleSmartRetry_TransportSpoolErrorStopsModelCapacityRetries(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	spoolErr := fmt.Errorf("read smart retry payload: %w", ErrRequestBodySpool)
+	upstream := &queuedHTTPUpstreamStub{
+		responses: []*http.Response{nil, {
+			StatusCode: http.StatusOK,
+			Header:     http.Header{},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
+		}},
+		errors: []error{spoolErr, nil},
+	}
+	account := &Account{ID: 104, Name: "smart-spool", Platform: PlatformAntigravity, Type: AccountTypeOAuth, Concurrency: 1}
+	respBody := []byte(`{
+		"error": {
+			"code": 503,
+			"status": "UNAVAILABLE",
+			"details": [
+				{"@type":"type.googleapis.com/google.rpc.ErrorInfo","metadata":{"model":"wave8-smart-spool-model"},"reason":"MODEL_CAPACITY_EXHAUSTED"}
+			]
+		}
+	}`)
+	result := (&AntigravityGatewayService{}).handleSmartRetry(antigravityRetryLoopParams{
+		ctx: context.Background(), prefix: "[test]", account: account, accessToken: "token", action: "generateContent",
+		body: []byte(`{"request":{}}`), c: c, httpUpstream: upstream,
+	}, &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}}, respBody, "https://ag.test", 0, []string{"https://ag.test"})
+
+	require.Equal(t, smartRetryActionBreakWithResp, result.action)
+	require.ErrorIs(t, result.err, ErrRequestBodySpool)
+	require.Nil(t, result.resp)
+	require.Nil(t, result.switchError)
+	require.Equal(t, 1, upstream.callCount)
+	require.Empty(t, recorder.Body.String())
+}
+
+func TestHandleSingleAccountRetryInPlace_TransportSpoolErrorStopsRetries(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	spoolErr := fmt.Errorf("read single-account retry payload: %w", ErrRequestBodySpool)
+	upstream := &queuedHTTPUpstreamStub{
+		responses: []*http.Response{nil, {
+			StatusCode: http.StatusOK,
+			Header:     http.Header{},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
+		}},
+		errors: []error{spoolErr, nil},
+	}
+	account := &Account{ID: 105, Name: "single-spool", Platform: PlatformAntigravity, Type: AccountTypeOAuth, Concurrency: 1}
+	result := (&AntigravityGatewayService{}).handleSingleAccountRetryInPlace(antigravityRetryLoopParams{
+		ctx: WithSingleAccountRetry(context.Background(), true, false), prefix: "[test]", account: account,
+		accessToken: "token", action: "generateContent", body: []byte(`{"request":{}}`), c: c, httpUpstream: upstream,
+	}, &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}}, []byte(`{"error":"unavailable"}`), "https://ag.test", 0, "wave8-single-spool-model")
+
+	require.Equal(t, smartRetryActionBreakWithResp, result.action)
+	require.ErrorIs(t, result.err, ErrRequestBodySpool)
+	require.Nil(t, result.resp)
+	require.Nil(t, result.switchError)
 	require.Equal(t, 1, upstream.callCount)
 	require.Empty(t, recorder.Body.String())
 }
@@ -1451,6 +1516,91 @@ func TestAntigravityGatewayService_ForwardGemini_ModelFallbackUpdatesUsageSnapsh
 	if len(upstream.requestBodies[0]) > 0 {
 		require.NotEqual(t, string(upstream.requestBodies[0]), collector.body)
 	}
+}
+
+func TestAntigravityGatewayService_ForwardGemini_ModelFallbackBuildSpoolErrorReturnsSentinel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tempDir := t.TempDir()
+	t.Setenv("TMPDIR", tempDir)
+	t.Setenv("TMP", tempDir)
+	t.Setenv("TEMP", tempDir)
+	writer := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(writer)
+	body := []byte(`{"contents":[{"role":"user","parts":[{"text":"` + strings.Repeat("x", 2<<20) + `"}]}]}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/antigravity/v1beta/models/gemini-wave8:streamGenerateContent", bytes.NewReader(body))
+
+	firstCall := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{
+		StatusCode: http.StatusNotFound,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"model not found"}}`)),
+	}}}
+	upstream.onCall = func(_ *http.Request, stub *queuedHTTPUpstreamStub) {
+		if stub.callCount == 1 {
+			close(firstCall)
+			<-releaseFirst
+		}
+	}
+	svc := &AntigravityGatewayService{
+		settingService: NewSettingService(&antigravitySettingRepoValuesStub{values: map[string]string{
+			SettingKeyEnableModelFallback:      "true",
+			SettingKeyFallbackModelAntigravity: "gemini-wave8-fallback",
+		}}, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
+		tokenProvider: &AntigravityTokenProvider{},
+		httpUpstream:  upstream,
+	}
+	account := &Account{
+		ID: 106, Name: "fallback-build-spool", Platform: PlatformAntigravity, Type: AccountTypeOAuth, Status: StatusActive, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "token", "project_id": "project", "model_mapping": map[string]any{"gemini-wave8": "gemini-wave8-mapped"}},
+	}
+
+	type forwardResult struct {
+		result *ForwardResult
+		err    error
+	}
+	done := make(chan forwardResult, 1)
+	go func() {
+		result, err := svc.ForwardGemini(context.Background(), c, account, "gemini-wave8", "streamGenerateContent", true, body, false)
+		done <- forwardResult{result: result, err: err}
+	}()
+	<-firstCall
+	entries, err := os.ReadDir(tempDir)
+	require.NoError(t, err)
+	baseline := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		baseline[entry.Name()] = struct{}{}
+	}
+	removed := make(chan error, 1)
+	go func() {
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			entries, readErr := os.ReadDir(tempDir)
+			if readErr != nil {
+				removed <- readErr
+				return
+			}
+			for _, entry := range entries {
+				if _, exists := baseline[entry.Name()]; exists {
+					continue
+				}
+				if removeErr := os.Remove(filepath.Join(tempDir, entry.Name())); removeErr == nil || errors.Is(removeErr, os.ErrNotExist) {
+					removed <- nil
+					return
+				}
+			}
+			time.Sleep(time.Millisecond)
+		}
+		removed <- errors.New("fallback spool file was not removed")
+	}()
+	close(releaseFirst)
+	out := <-done
+	require.NoError(t, <-removed)
+
+	require.Nil(t, out.result)
+	require.ErrorIs(t, out.err, ErrRequestBodySpool)
+	require.Equal(t, 1, upstream.callCount)
+	require.Empty(t, writer.Body.String())
 }
 
 func TestPassthroughFieldsV2AntigravityForwardGemini_BodyInjectAndMapDoNotChain(t *testing.T) {

@@ -203,6 +203,9 @@ func (s *AntigravityGatewayService) handleSmartRetry(p antigravityRetryLoopParam
 			// 智能重试：创建新请求
 			retryReq, err := newAntigravityPayloadRequest(&p, baseURL)
 			if err != nil {
+				if errors.Is(err, ErrRequestBodySpool) {
+					return &smartRetryResult{action: smartRetryActionBreakWithResp, err: err}
+				}
 				logger.LegacyPrintf("service.antigravity_gateway", "%s status=smart_retry_request_build_failed error=%v", p.prefix, err)
 				p.handleError(p.ctx, p.prefix, p.account, resp.StatusCode, resp.Header, respBody, p.requestedModel, p.groupID, p.sessionHash, p.isStickySession)
 				return &smartRetryResult{
@@ -216,6 +219,9 @@ func (s *AntigravityGatewayService) handleSmartRetry(p antigravityRetryLoopParam
 			}
 
 			retryResp, retryErr := p.httpUpstream.Do(retryReq, p.proxyURL, p.account.ID, p.account.Concurrency)
+			if errors.Is(retryErr, ErrRequestBodySpool) {
+				return &smartRetryResult{action: smartRetryActionBreakWithResp, err: retryErr}
+			}
 			if retryErr == nil && retryResp != nil && retryResp.StatusCode != http.StatusTooManyRequests && retryResp.StatusCode != http.StatusServiceUnavailable {
 				log.Printf("%s status=%d smart_retry_success attempt=%d/%d", p.prefix, retryResp.StatusCode, attempt, maxAttempts)
 				// 重试成功，清除 MODEL_CAPACITY_EXHAUSTED cooldown
@@ -386,11 +392,17 @@ func (s *AntigravityGatewayService) handleSingleAccountRetryInPlace(
 		// 创建新请求
 		retryReq, err := newAntigravityPayloadRequest(&p, baseURL)
 		if err != nil {
+			if errors.Is(err, ErrRequestBodySpool) {
+				return &smartRetryResult{action: smartRetryActionBreakWithResp, err: err}
+			}
 			logger.LegacyPrintf("service.antigravity_gateway", "%s single_account_503_retry: request_build_failed error=%v", p.prefix, err)
 			break
 		}
 
 		retryResp, retryErr := p.httpUpstream.Do(retryReq, p.proxyURL, p.account.ID, p.account.Concurrency)
+		if errors.Is(retryErr, ErrRequestBodySpool) {
+			return &smartRetryResult{action: smartRetryActionBreakWithResp, err: retryErr}
+		}
 		if retryErr == nil && retryResp != nil && retryResp.StatusCode != http.StatusTooManyRequests && retryResp.StatusCode != http.StatusServiceUnavailable {
 			logger.LegacyPrintf("service.antigravity_gateway", "%s status=%d single_account_503_retry_success attempt=%d/%d total_waited=%v",
 				p.prefix, retryResp.StatusCode, attempt, antigravitySingleAccountSmartRetryMaxAttempts, totalWaited)

@@ -238,17 +238,28 @@ func (s *AntigravityGatewayService) forwardGeminiHandle(ctx context.Context, c *
 					}
 					fallbackParams := antigravityRetryLoopParams{ctx: ctx, action: upstreamAction, accessToken: accessToken, payloadHandle: fallbackHandle, extraHeaders: extraHeaders}
 					fallbackReq, buildErr := newAntigravityPayloadRequest(&fallbackParams, resolveAntigravityForwardBaseURL())
+					if errors.Is(buildErr, ErrRequestBodySpool) {
+						CleanupRequestBodyHandle(fallbackHandle)
+						return nil, buildErr
+					}
 					if buildErr == nil {
 						SetUsageUpstreamRequest(c, fallbackReq, fallbackHandle.PreviewString())
 						SetOpsUpstreamAttempted(c, true)
 						fallbackResp, fallbackErr := s.httpUpstream.Do(fallbackReq, proxyURL, account.ID, account.Concurrency)
+						if errors.Is(fallbackErr, ErrRequestBodySpool) {
+							if fallbackReq.Body != nil {
+								_ = fallbackReq.Body.Close()
+							}
+							CleanupRequestBodyHandle(fallbackHandle)
+							if fallbackResp != nil && fallbackResp.Body != nil {
+								_ = fallbackResp.Body.Close()
+							}
+							return nil, fallbackErr
+						}
 						if fallbackReq.Body != nil {
 							_ = fallbackReq.Body.Close()
 						}
 						CleanupRequestBodyHandle(fallbackHandle)
-						if errors.Is(fallbackErr, ErrRequestBodySpool) {
-							return nil, fallbackErr
-						}
 						if fallbackErr == nil && fallbackResp != nil && fallbackResp.StatusCode < 400 {
 							_ = resp.Body.Close()
 							resp = fallbackResp
@@ -320,10 +331,11 @@ func (s *AntigravityGatewayService) forwardGeminiHandle(ctx context.Context, c *
 					groupID:         forwardOpts.groupID,
 					sessionHash:     forwardOpts.sessionHash,
 				})
-				CleanupRequestBodyHandle(retryHandle)
 				if errors.Is(retryErr, ErrRequestBodySpool) {
+					CleanupRequestBodyHandle(retryHandle)
 					return nil, retryErr
 				}
+				CleanupRequestBodyHandle(retryHandle)
 				if retryErr == nil {
 					retryResp := retryResult.resp
 					if retryResp.StatusCode < 400 {
