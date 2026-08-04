@@ -139,7 +139,7 @@ func TestRequestBodyMemoryRetentionWhileUpstreamBlocked(t *testing.T) {
 	}
 	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
 
-	for _, branch := range []string{"responses", "passthrough", "grok-responses", "responses-chat-fallback", "chat-raw", "chat-converted", "openai-messages", "gateway-chat-anthropic", "gateway-chat-gemini", "messages-anthropic", "messages-anthropic-stream", "messages-anthropic-passthrough-stream", "messages-antigravity-oauth", "messages-bedrock", "messages-bedrock-stream", "messages-gemini", "messages-gemini-mixed", "gemini-antigravity-native"} {
+	for _, branch := range []string{"responses", "passthrough", "grok-responses", "responses-chat-fallback", "chat-raw", "chat-converted", "openai-messages", "openai-messages-chat-fallback", "gateway-chat-anthropic", "gateway-chat-gemini", "messages-anthropic", "messages-anthropic-stream", "messages-anthropic-passthrough-stream", "messages-antigravity-oauth", "messages-bedrock", "messages-bedrock-stream", "messages-gemini", "messages-gemini-mixed", "gemini-antigravity-native"} {
 		t.Run(branch, func(t *testing.T) {
 			var heapAt2MB, heapAt89MB uint64
 			var previewAt2MB, previewAt89MB, snapshotAt2MB, snapshotAt89MB int
@@ -220,6 +220,10 @@ func measureBlockedRequestBodyHeap(t *testing.T, branch string, size int64, spoo
 		extra["openai_responses_supported"] = true
 		upstream.contentType = "text/event-stream"
 		upstream.body = "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_retention\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"
+	case "openai-messages-chat-fallback":
+		path = "/v1/messages"
+		extra["openai_responses_supported"] = false
+		upstream.body = `{"id":"chatcmpl_retention","choices":[{"message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`
 	case "gateway-chat-anthropic":
 		path = "/v1/chat/completions"
 		platform = service.PlatformAnthropic
@@ -298,7 +302,7 @@ func measureBlockedRequestBodyHeap(t *testing.T, branch string, size int64, spoo
 			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.ForcePlatform, service.PlatformAntigravity))
 			env.handler.GeminiV1BetaModels(c)
 		})
-	} else if branch == "openai-messages" {
+	} else if branch == "openai-messages" || branch == "openai-messages-chat-fallback" {
 		group := &service.Group{ID: 1401, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowMessagesDispatch: true}
 		account := &service.Account{ID: 1401, Name: "retention-openai-messages", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-retention"}, Extra: extra}
 		env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
@@ -395,7 +399,7 @@ func retentionJSONBody(branch, path string, size int64) io.Reader {
 	} else if path == "/v1/messages" {
 		prefix, suffix = `{"model":"gemini-2.5-flash","max_tokens":16,"stream":false,"messages":[{"role":"user","content":"`, `"}]}`
 	}
-	if branch == "openai-messages" {
+	if branch == "openai-messages" || branch == "openai-messages-chat-fallback" {
 		prefix = `{"model":"gpt-5","max_tokens":16,"stream":false,"messages":[{"role":"user","content":"`
 	}
 	if branch == "messages-anthropic" || branch == "messages-anthropic-stream" || branch == "messages-anthropic-passthrough-stream" || branch == "messages-antigravity-oauth" || branch == "messages-bedrock" || branch == "messages-bedrock-stream" {

@@ -31,12 +31,16 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 	ctx context.Context,
 	c *gin.Context,
 	account *Account,
-	body []byte,
+	bodyHandle *RequestBodyHandle,
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
 	startTime := time.Now()
 
 	// 1. Parse Anthropic request
+	body, err := bodyHandle.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("read anthropic request body: %w", err)
+	}
 	var anthropicReq apicompat.AnthropicRequest
 	if err := json.Unmarshal(body, &anthropicReq); err != nil {
 		writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
@@ -96,7 +100,17 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 	if err != nil {
 		return nil, err
 	}
-	resp, err := s.sendCCUpstreamRequest(ctx, c, account, targetURL, chatBody, clientStream, apiKey, account.GetOpenAIUserAgent(), "")
+	chatHandle, err := NewRequestBodyHandleFromBytes(chatBody, openAIRequestBodyHandleOptions())
+	if err != nil {
+		return nil, fmt.Errorf("spool OpenAI messages chat fallback body: %w", err)
+	}
+	defer CleanupRequestBodyHandle(chatHandle)
+	body = nil
+	chatBody = nil
+	anthropicReq = apicompat.AnthropicRequest{}
+	chatReq = nil
+
+	resp, err := s.sendCCUpstreamRequestHandle(ctx, c, account, targetURL, chatHandle, upstreamModel, clientStream, apiKey, account.GetOpenAIUserAgent(), "")
 	if err != nil {
 		return nil, err
 	}

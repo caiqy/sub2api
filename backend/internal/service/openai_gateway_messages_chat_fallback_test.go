@@ -114,10 +114,13 @@ func TestForwardAsAnthropic_ForceChatCompletionsPreservesFinalModelReasoningEffo
 	}
 }
 
-func TestForwardAsAnthropic_ForceChatCompletionsNonStreaming(t *testing.T) {
+func TestForwardAnthropicViaRawChatCompletionsHandle_NonStreaming(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	body := []byte(`{"model":"gpt-5.4","max_tokens":32,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	bodyHandle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+	require.NoError(t, err)
+	defer CleanupRequestBodyHandle(bodyHandle)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
@@ -135,7 +138,7 @@ func TestForwardAsAnthropic_ForceChatCompletionsNonStreaming(t *testing.T) {
 		httpUpstream: upstream,
 	}
 
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, forceChatMessagesFallbackAccount(), body, "", "")
+	result, err := svc.forwardAnthropicViaRawChatCompletions(context.Background(), c, forceChatMessagesFallbackAccount(), bodyHandle, "")
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, "http://upstream.example/v1/chat/completions", upstream.lastReq.URL.String())
