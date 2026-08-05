@@ -445,6 +445,21 @@ func (h *GatewayHandler) chatCompletionsErrorResponse(c *gin.Context, status int
 // handleCCFailoverExhausted writes a failover-exhausted error in CC format.
 func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *service.UpstreamFailoverError, streamStarted bool) {
 	if streamStarted {
+		if lastErr != nil && lastErr.IsCredentialFailure() {
+			status, message := credentialFailoverClientResponse(lastErr)
+			h.handleChatCompletionsStreamingAwareError(c, status, "server_error", message, true)
+			return
+		}
+		statusCode := http.StatusBadGateway
+		if lastErr != nil && lastErr.StatusCode > 0 {
+			statusCode = lastErr.StatusCode
+		}
+		message := "All available accounts exhausted"
+		if lastErr != nil && service.IsOpenAISilentRefusalErrorBody(lastErr.ResponseBody) {
+			message = service.OpenAISilentRefusalClientMessage()
+			statusCode = http.StatusBadGateway
+		}
+		h.handleChatCompletionsStreamingAwareError(c, statusCode, "server_error", message, true)
 		return
 	}
 	if lastErr != nil {

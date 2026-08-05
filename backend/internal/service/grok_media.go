@@ -642,6 +642,9 @@ func (s *OpenAIGatewayService) forwardGrokMediaVideoContent(
 	upstreamStart := time.Now()
 	statusResp, err := s.httpUpstream.Do(statusReq, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
+		if statusResp != nil && statusResp.Body != nil {
+			_ = statusResp.Body.Close()
+		}
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
@@ -702,6 +705,9 @@ func (s *OpenAIGatewayService) forwardGrokMediaVideoContent(
 	contentResp, err := s.httpUpstream.Do(contentReq, proxyURL, account.ID, account.Concurrency)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
+		if contentResp != nil && contentResp.Body != nil {
+			_ = contentResp.Body.Close()
+		}
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
 	defer func() { _ = contentResp.Body.Close() }()
