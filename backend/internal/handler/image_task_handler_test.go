@@ -293,7 +293,7 @@ func TestAsyncImageHandlerRunRejectedCleansOwnedBody(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 }
 
-func TestNewAsyncImageContextSpoolOpenFailure(t *testing.T) {
+func TestAsyncImageHandlerRunWithBodyHandleSpoolOpenFailureFailsTask(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	spoolDir := t.TempDir()
 	handle, err := service.NewRequestBodyHandleFromBytes(
@@ -302,21 +302,37 @@ func TestNewAsyncImageContextSpoolOpenFailure(t *testing.T) {
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { service.CleanupRequestBodyHandle(handle) })
+	store := &asyncImageMemoryStore{tasks: make(map[string]*service.ImageTaskRecord)}
+	tasks := service.NewImageTaskServiceWithUploader(store, nil, time.Hour, time.Minute)
+	h := &AsyncImageHandler{tasks: tasks, execute: func(_ string, _ *gin.Context) { t.Error("spool-open failure must not execute") }}
+	task, err := tasks.Create(context.Background(), service.ImageTaskOwner{UserID: 7, APIKeyID: 9})
+	require.NoError(t, err)
 
 	entries, err := os.ReadDir(spoolDir)
 	require.NoError(t, err)
+	removed := false
 	for _, entry := range entries {
 		if strings.HasPrefix(entry.Name(), "sub2api-request-body-") {
 			require.NoError(t, os.Remove(filepath.Join(spoolDir, entry.Name())))
+			removed = true
 			break
 		}
 	}
+	require.True(t, removed, "spooled request body file must exist")
 
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations/async", nil)
-	_, _, _, err = newAsyncImageContext(c, handle, context.Background(), time.Minute)
-	require.ErrorIs(t, err, service.ErrRequestBodySpool)
+	h.runWithBodyHandle(task.ID, service.PlatformOpenAI, c, handle, context.Background())
+
+	got, err := tasks.Get(context.Background(), service.ImageTaskOwner{UserID: 7, APIKeyID: 9}, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, service.ImageTaskStatusFailed, got.Status)
+	require.Equal(t, http.StatusServiceUnavailable, got.HTTPStatus)
+	require.Eventually(t, func() bool {
+		entries, err := os.ReadDir(spoolDir)
+		return err == nil && len(entries) == 0
+	}, time.Second, 10*time.Millisecond)
 }
 
 func TestAsyncImageHandlerSubmitAndPoll(t *testing.T) {
