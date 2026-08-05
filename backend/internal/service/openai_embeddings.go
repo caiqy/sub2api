@@ -103,6 +103,9 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	closeOpenAIRequestBody(upstreamReq)
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
 		if errors.Is(err, ErrRequestBodySpool) {
 			return nil, fmt.Errorf("send embeddings request: %w", err)
 		}

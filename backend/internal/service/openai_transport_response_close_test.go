@@ -74,6 +74,21 @@ func TestOpenAIChatCompletionsOpenAIPassthroughGrokMediaTransportErrorClosesResp
 				return err
 			},
 		},
+		{
+			name: "Embeddings",
+			run: func(service *OpenAIGatewayService) error {
+				body := []byte(`{"model":"text-embedding-3-small","input":"hello"}`)
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/embeddings", bytes.NewReader(body))
+				account := &Account{
+					ID: 3, Name: "embeddings", Platform: PlatformOpenAI,
+					Type: AccountTypeAPIKey, Concurrency: 1,
+					Credentials: map[string]any{"api_key": "key", "base_url": "https://api.openai.com"},
+				}
+				_, err := service.ForwardEmbeddings(context.Background(), c, account, body, "")
+				return err
+			},
+		},
 	}
 
 	for _, tt := range tests {
