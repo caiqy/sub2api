@@ -72,6 +72,12 @@ server:
     # 每个流的最大上传缓冲区（字节，默认 512KB）
     max_upload_buffer_per_stream: 524288
 
+# Go pprof diagnostic server. Keep disabled in normal production operation.
+# 仅供本机诊断；启用后只允许回环地址。
+pprof:
+  enabled: false
+  address: "127.0.0.1:6060"
+
 # =============================================================================
 # WebAuthn / Passkey Configuration
 # WebAuthn / Passkey 配置

@@ -19,6 +19,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/server"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/setup"
 	"github.com/Wei-Shaw/sub2api/internal/web"
@@ -139,6 +140,13 @@ func runMainServer() {
 	if err := logger.Init(logger.OptionsFromConfig(cfg.Log)); err != nil {
 		log.Fatalf("Failed to initialize logger: %v", err)
 	}
+	pprofServer, err := server.StartPprofServer(cfg.Pprof)
+	if err != nil {
+		log.Fatalf("Failed to start pprof server: %v", err)
+	}
+	if pprofServer != nil {
+		log.Printf("Pprof server started on %s", pprofServer.Address())
+	}
 	if cfg.RunMode == config.RunModeSimple {
 		log.Println("⚠️  WARNING: Running in SIMPLE mode - billing and quota checks are DISABLED")
 	}
@@ -186,6 +194,11 @@ func runMainServer() {
 	handlerTracker.CloseAdmission()
 	if err := shutdownServerWithDrain(ctx, 5*time.Second, app.Server.Shutdown, app.Server.Close, handlerTracker.Wait); err != nil {
 		log.Printf("Server forced to shutdown: %v", err)
+	}
+	if pprofServer != nil {
+		if err := pprofServer.Shutdown(ctx); err != nil {
+			log.Printf("Pprof server shutdown failed: %v", err)
+		}
 	}
 	app.Cleanup()
 

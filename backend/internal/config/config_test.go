@@ -55,6 +55,30 @@ func resetViperWithJWTSecret(t *testing.T) {
 	t.Setenv("JWT_SECRET", strings.Repeat("x", 32))
 }
 
+func TestPprofDefaults(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	t.Setenv("CONFIG_FILE", "")
+	t.Setenv("DATA_DIR", "")
+	t.Setenv("JWT_SECRET", strings.Repeat("x", 32))
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.False(t, cfg.Pprof.Enabled)
+	require.Equal(t, "127.0.0.1:6060", cfg.Pprof.Address)
+}
+
+func TestPprofEnvironmentOverridesDefaults(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("PPROF_ENABLED", "true")
+	t.Setenv("PPROF_ADDRESS", "127.0.0.1:6061")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.True(t, cfg.Pprof.Enabled)
+	require.Equal(t, "127.0.0.1:6061", cfg.Pprof.Address)
+}
+
 func TestLoadServerTimingConfig(t *testing.T) {
 	t.Run("disabled by default", func(t *testing.T) {
 		resetViperWithJWTSecret(t)

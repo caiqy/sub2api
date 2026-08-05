@@ -64,6 +64,7 @@ const DefaultUpstreamResponseReadMaxBytes int64 = 128 * 1024 * 1024
 
 type Config struct {
 	Server                  ServerConfig                  `mapstructure:"server"`
+	Pprof                   PprofConfig                   `mapstructure:"pprof"`
 	Log                     LogConfig                     `mapstructure:"log"`
 	CORS                    CORSConfig                    `mapstructure:"cors"`
 	Security                SecurityConfig                `mapstructure:"security"`
@@ -703,6 +704,11 @@ type ServerConfig struct {
 	TrustedProxiesConfigured bool      `mapstructure:"-" json:"-" yaml:"-"`   // 是否显式配置了可信代理列表
 	MaxRequestBodySize       int64     `mapstructure:"max_request_body_size"` // 全局最大请求体限制
 	H2C                      H2CConfig `mapstructure:"h2c"`                   // HTTP/2 Cleartext 配置
+}
+
+type PprofConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	Address string `mapstructure:"address"`
 }
 
 // H2CConfig HTTP/2 Cleartext 配置
@@ -1919,6 +1925,9 @@ func setDefaults() {
 	viper.SetDefault("server.h2c.max_read_frame_size", 1<<20)              // 1MB（够用）
 	viper.SetDefault("server.h2c.max_upload_buffer_per_connection", 2<<20) // 2MB
 	viper.SetDefault("server.h2c.max_upload_buffer_per_stream", 512<<10)   // 512KB
+
+	viper.SetDefault("pprof.enabled", false)
+	viper.SetDefault("pprof.address", "127.0.0.1:6060")
 
 	// Log
 	viper.SetDefault("log.level", "info")
