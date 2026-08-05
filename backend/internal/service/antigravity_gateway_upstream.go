@@ -57,10 +57,6 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 	// context_management 时 strip，与 Anthropic 直连 / Bedrock / Vertex 路径保持一致。
 	clientBeta := c.GetHeader("anthropic-beta")
 	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(body, clientBeta); changed {
-		body = sanitized
-	}
-
-	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(body, clientBeta); changed {
 		bodyHandle, err = NewRequestBodyHandleFromBytes(sanitized, RequestBodyHandleOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("create sanitized upstream request body: %w", err)

@@ -1962,6 +1962,33 @@ func TestAntigravityGatewayService_ForwardUpstream_CapturesUsageSnapshotBeforeSe
 	require.Contains(t, collector.headers, "Anthropic-Beta: tools-2024-04-04")
 }
 
+func TestAntigravityGatewayService_ForwardUpstreamStripsContextManagementFromWireBodyWithoutBeta(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"context_management":{"edits":[{"type":"clear_tool_uses_20250919"}]}}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"id":"msg_1","usage":{"input_tokens":1,"output_tokens":1}}`)),
+	}}}
+	svc := &AntigravityGatewayService{
+		settingService: NewSettingService(&antigravitySettingRepoStub{}, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
+		httpUpstream:   upstream,
+	}
+	account := &Account{ID: 76, Name: "upstream-sanitize", Platform: PlatformAntigravity, Type: AccountTypeUpstream, Concurrency: 1, Credentials: map[string]any{"base_url": "https://example.com", "api_key": "token"}}
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+
+	result, err := svc.ForwardUpstream(context.Background(), c, account, handle)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, upstream.requestBodies, 1)
+	require.False(t, gjson.GetBytes(upstream.requestBodies[0], "context_management").Exists(), string(upstream.requestBodies[0]))
+}
+
 func TestAntigravityGatewayService_ForwardUpstreamKeepsLargeBodyFileBackedWhileBlocked(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	writer := httptest.NewRecorder()
