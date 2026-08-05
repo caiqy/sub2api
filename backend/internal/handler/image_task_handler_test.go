@@ -2,9 +2,13 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -42,6 +46,277 @@ func (s *asyncImageMemoryStore) Get(_ context.Context, id string) (*service.Imag
 	copy.Result = append(json.RawMessage(nil), task.Result...)
 	copy.Error = append(json.RawMessage(nil), task.Error...)
 	return &copy, nil
+}
+
+func useAsyncImageSpoolDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	old := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{
+		SpoolThresholdBytes: service.DefaultRequestBodySpoolThresholdBytes,
+		PreviewLimitBytes:   service.DefaultRequestBodyPreviewLimitBytes,
+		TempDir:             dir,
+	}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = old })
+	return dir
+}
+
+func TestAsyncImageHandlerSpoolsReplaysAndCleansOwnedBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	spoolDir := useAsyncImageSpoolDir(t)
+	store := &asyncImageMemoryStore{tasks: make(map[string]*service.ImageTaskRecord)}
+	tasks := service.NewImageTaskServiceWithUploader(store, nil, time.Hour, time.Minute)
+	release := make(chan struct{})
+	gotBody := make(chan struct {
+		bodyHash      [32]byte
+		replayHash    [32]byte
+		contentType   string
+		contentLength int64
+		err           error
+	}, 1)
+	h := &AsyncImageHandler{tasks: tasks}
+	h.execute = func(_ string, c *gin.Context) {
+		body, err := io.ReadAll(c.Request.Body)
+		if err == nil {
+			err = c.Request.Body.Close()
+		}
+		if err != nil {
+			gotBody <- struct {
+				bodyHash      [32]byte
+				replayHash    [32]byte
+				contentType   string
+				contentLength int64
+				err           error
+			}{err: err}
+			return
+		}
+		replay, err := c.Request.GetBody()
+		if err != nil {
+			gotBody <- struct {
+				bodyHash      [32]byte
+				replayHash    [32]byte
+				contentType   string
+				contentLength int64
+				err           error
+			}{err: err}
+			return
+		}
+		replayed, err := io.ReadAll(replay)
+		if closeErr := replay.Close(); err == nil {
+			err = closeErr
+		}
+		gotBody <- struct {
+			bodyHash      [32]byte
+			replayHash    [32]byte
+			contentType   string
+			contentLength int64
+			err           error
+		}{
+			bodyHash:      sha256.Sum256(body),
+			replayHash:    sha256.Sum256(replayed),
+			contentType:   c.Request.Header.Get("Content-Type"),
+			contentLength: c.Request.ContentLength,
+			err:           err,
+		}
+		<-release
+		c.JSON(http.StatusOK, gin.H{"data": []gin.H{{"url": "https://example.test/image.png"}}})
+	}
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		groupID := int64(3)
+		c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+			ID:      9,
+			UserID:  7,
+			GroupID: &groupID,
+			Group:   &service.Group{ID: groupID, Platform: service.PlatformOpenAI, AllowImageGeneration: true},
+		})
+		c.Next()
+	})
+	router.POST("/v1/images/generations/async", h.Submit)
+
+	body := []byte(`{"model":"gpt-image-1","prompt":"` + strings.Repeat("x", int(service.DefaultRequestBodySpoolThresholdBytes)) + `"}`)
+	wantHash := sha256.Sum256(body)
+	request := httptest.NewRequest(http.MethodPost, "/v1/images/generations/async", strings.NewReader(string(body)))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusAccepted, recorder.Code)
+	select {
+	case got := <-gotBody:
+		require.NoError(t, got.err)
+		require.Equal(t, wantHash, got.bodyHash)
+		require.Equal(t, wantHash, got.replayHash)
+		require.Equal(t, "application/json", got.contentType)
+		require.Equal(t, int64(len(body)), got.contentLength)
+	case <-time.After(time.Second):
+		t.Fatal("async image task did not read its body")
+	}
+	assertMatrixTempFiles(t, spoolDir, "sub2api-request-body-", true)
+	close(release)
+	require.Eventually(t, func() bool {
+		entries, err := os.ReadDir(spoolDir)
+		return err == nil && len(entries) == 0
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestAsyncImageHandlerSpoolCreateFailureReturns503WithoutTask(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	old := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{
+		SpoolThresholdBytes: service.DefaultRequestBodySpoolThresholdBytes,
+		PreviewLimitBytes:   service.DefaultRequestBodyPreviewLimitBytes,
+		TempDir:             filepath.Join(t.TempDir(), "missing"),
+	}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = old })
+	store := &asyncImageMemoryStore{tasks: make(map[string]*service.ImageTaskRecord)}
+	tasks := service.NewImageTaskServiceWithUploader(store, nil, time.Hour, time.Minute)
+	h := &AsyncImageHandler{tasks: tasks, execute: func(_ string, _ *gin.Context) { t.Error("image task must not execute") }}
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		groupID := int64(3)
+		c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+			ID:      9,
+			UserID:  7,
+			GroupID: &groupID,
+			Group:   &service.Group{ID: groupID, Platform: service.PlatformOpenAI, AllowImageGeneration: true},
+		})
+		c.Next()
+	})
+	router.POST("/v1/images/generations/async", h.Submit)
+
+	body := `{"model":"gpt-image-1","prompt":"` + strings.Repeat("x", int(service.DefaultRequestBodySpoolThresholdBytes)) + `"}`
+	request := httptest.NewRequest(http.MethodPost, "/v1/images/generations/async", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "Failed to spool request body")
+	require.Empty(t, store.tasks)
+}
+
+func TestAsyncImageHandlerOwnedBodyCleanupOnTerminalPaths(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		execute func(*gin.Context)
+	}{
+		{"success", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"data": []gin.H{{"url": "https://example.test/image.png"}}})
+		}},
+		{"failure", func(c *gin.Context) { c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"message": "failed"}}) }},
+		{"panic", func(*gin.Context) { panic("image task panic") }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			spoolDir := useAsyncImageSpoolDir(t)
+			store := &asyncImageMemoryStore{tasks: make(map[string]*service.ImageTaskRecord)}
+			tasks := service.NewImageTaskServiceWithUploader(store, nil, time.Hour, time.Minute)
+			h := &AsyncImageHandler{tasks: tasks, execute: func(_ string, c *gin.Context) { tt.execute(c) }}
+
+			router := gin.New()
+			router.Use(func(c *gin.Context) {
+				groupID := int64(3)
+				c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+					ID:      9,
+					UserID:  7,
+					GroupID: &groupID,
+					Group:   &service.Group{ID: groupID, Platform: service.PlatformOpenAI, AllowImageGeneration: true},
+				})
+				c.Next()
+			})
+			router.POST("/v1/images/generations/async", h.Submit)
+
+			body := `{"model":"gpt-image-1","prompt":"` + strings.Repeat("x", int(service.DefaultRequestBodySpoolThresholdBytes)) + `"}`
+			request := httptest.NewRequest(http.MethodPost, "/v1/images/generations/async", strings.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+			require.Equal(t, http.StatusAccepted, recorder.Code)
+
+			var accepted struct {
+				TaskID string `json:"task_id"`
+			}
+			require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &accepted))
+			require.Eventually(t, func() bool {
+				task, err := tasks.Get(context.Background(), service.ImageTaskOwner{UserID: 7, APIKeyID: 9}, accepted.TaskID)
+				return err == nil && task.Status != service.ImageTaskStatusProcessing
+			}, time.Second, 10*time.Millisecond)
+			require.Eventually(t, func() bool {
+				entries, err := os.ReadDir(spoolDir)
+				return err == nil && len(entries) == 0
+			}, time.Second, 10*time.Millisecond)
+		})
+	}
+}
+
+func TestAsyncImageHandlerRunRejectedCleansOwnedBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	spoolDir := useAsyncImageSpoolDir(t)
+	store := &asyncImageMemoryStore{tasks: make(map[string]*service.ImageTaskRecord)}
+	tasks := service.NewImageTaskServiceWithUploader(store, nil, time.Hour, time.Minute)
+	require.NoError(t, tasks.Shutdown(context.Background()))
+	h := &AsyncImageHandler{tasks: tasks, execute: func(_ string, _ *gin.Context) { t.Error("rejected task must not execute") }}
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		groupID := int64(3)
+		c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+			ID:      9,
+			UserID:  7,
+			GroupID: &groupID,
+			Group:   &service.Group{ID: groupID, Platform: service.PlatformOpenAI, AllowImageGeneration: true},
+		})
+		c.Next()
+	})
+	router.POST("/v1/images/generations/async", h.Submit)
+
+	body := `{"model":"gpt-image-1","prompt":"` + strings.Repeat("x", int(service.DefaultRequestBodySpoolThresholdBytes)) + `"}`
+	request := httptest.NewRequest(http.MethodPost, "/v1/images/generations/async", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusAccepted, recorder.Code)
+
+	var accepted struct {
+		TaskID string `json:"task_id"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &accepted))
+	task, err := tasks.Get(context.Background(), service.ImageTaskOwner{UserID: 7, APIKeyID: 9}, accepted.TaskID)
+	require.NoError(t, err)
+	require.Equal(t, service.ImageTaskStatusFailed, task.Status)
+	require.Eventually(t, func() bool {
+		entries, err := os.ReadDir(spoolDir)
+		return err == nil && len(entries) == 0
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestNewAsyncImageContextSpoolOpenFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	spoolDir := t.TempDir()
+	handle, err := service.NewRequestBodyHandleFromBytes(
+		[]byte(`{"model":"gpt-image-1","prompt":"cat"}`),
+		service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: spoolDir},
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { service.CleanupRequestBodyHandle(handle) })
+
+	entries, err := os.ReadDir(spoolDir)
+	require.NoError(t, err)
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "sub2api-request-body-") {
+			require.NoError(t, os.Remove(filepath.Join(spoolDir, entry.Name())))
+			break
+		}
+	}
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations/async", nil)
+	_, _, _, err = newAsyncImageContext(c, handle, context.Background(), time.Minute)
+	require.ErrorIs(t, err, service.ErrRequestBodySpool)
 }
 
 func TestAsyncImageHandlerSubmitAndPoll(t *testing.T) {
@@ -203,6 +478,7 @@ func TestAsyncImageHandlerDisabledReturns404(t *testing.T) {
 
 func TestAsyncImageHandlerShutdownCancelsExecution(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	spoolDir := useAsyncImageSpoolDir(t)
 	store := &asyncImageMemoryStore{tasks: make(map[string]*service.ImageTaskRecord)}
 	tasks := service.NewImageTaskServiceWithUploader(store, nil, time.Hour, time.Minute)
 	started := make(chan struct{})
@@ -227,7 +503,8 @@ func TestAsyncImageHandlerShutdownCancelsExecution(t *testing.T) {
 	})
 	router.POST("/v1/images/generations/async", h.Submit)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations/async", strings.NewReader(`{"model":"gpt-image-1","prompt":"cat"}`))
+	body := `{"model":"gpt-image-1","prompt":"` + strings.Repeat("x", int(service.DefaultRequestBodySpoolThresholdBytes)) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations/async", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -242,4 +519,8 @@ func TestAsyncImageHandlerShutdownCancelsExecution(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("gateway image execution was not cancelled")
 	}
+	require.Eventually(t, func() bool {
+		entries, err := os.ReadDir(spoolDir)
+		return err == nil && len(entries) == 0
+	}, time.Second, 10*time.Millisecond)
 }

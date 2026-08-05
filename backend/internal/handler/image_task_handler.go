@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -104,9 +103,21 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 	if !h.checkSecurityAuditBeforeSubmit(c, apiKey, platform, body) {
 		return
 	}
+	bodyHandle, err := service.NewRequestBodyHandleFromBytes(body, jsonRequestBodyHandleOptions)
+	if err != nil {
+		imageTaskJSONError(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+		return
+	}
+	body = nil
+	if c.Request.Body != nil {
+		_ = c.Request.Body.Close()
+	}
+	c.Request.Body = http.NoBody
+	c.Request.GetBody = nil
 
 	task, err := h.tasks.Create(c.Request.Context(), service.ImageTaskOwner{UserID: apiKey.UserID, APIKeyID: apiKey.ID})
 	if err != nil {
+		service.CleanupRequestBodyHandle(bodyHandle)
 		imageTaskError(c, err)
 		return
 	}
@@ -127,9 +138,9 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 	})
 
 	if !h.tasks.Run(func(lifecycleCtx context.Context) {
-		taskCtx, recorder, cancel := newAsyncImageContext(taskBase, body, lifecycleCtx, h.tasks.ExecutionTimeout())
-		h.run(task.ID, platform, taskCtx, recorder, cancel)
+		h.runWithBodyHandle(task.ID, platform, taskBase, bodyHandle, lifecycleCtx)
 	}) {
+		service.CleanupRequestBodyHandle(bodyHandle)
 		h.failTask(task.ID, http.StatusServiceUnavailable, imageTaskErrorPayload("api_error", "image task service is shutting down"))
 	}
 }
@@ -261,13 +272,27 @@ func (h *AsyncImageHandler) run(taskID, platform string, taskCtx *gin.Context, r
 	h.failTask(taskID, statusCode, extractImageTaskError(body))
 }
 
+func (h *AsyncImageHandler) runWithBodyHandle(taskID, platform string, taskBase *gin.Context, bodyHandle *service.RequestBodyHandle, lifecycleCtx context.Context) {
+	defer service.CleanupRequestBodyHandle(bodyHandle)
+	taskCtx, recorder, cancel, err := newAsyncImageContext(taskBase, bodyHandle, lifecycleCtx, h.tasks.ExecutionTimeout())
+	if err != nil {
+		h.failTask(taskID, http.StatusServiceUnavailable, imageTaskErrorPayload("api_error", "failed to open image task request body"))
+		return
+	}
+	h.run(taskID, platform, taskCtx, recorder, cancel)
+}
+
 func (h *AsyncImageHandler) failTask(taskID string, statusCode int, taskErr json.RawMessage) {
 	if err := h.tasks.Fail(context.Background(), taskID, statusCode, taskErr); err != nil {
 		logger.L().Error("image_task.failure_store_failed", zap.String("task_id", taskID), zap.Error(err))
 	}
 }
 
-func newAsyncImageContext(c *gin.Context, body []byte, lifecycleCtx context.Context, timeoutDuration time.Duration) (*gin.Context, *httptest.ResponseRecorder, context.CancelFunc) {
+func newAsyncImageContext(c *gin.Context, bodyHandle *service.RequestBodyHandle, lifecycleCtx context.Context, timeoutDuration time.Duration) (*gin.Context, *httptest.ResponseRecorder, context.CancelFunc, error) {
+	reader, err := bodyHandle.Open()
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	base := context.WithoutCancel(c.Request.Context())
 	if lifecycleCtx == nil {
 		lifecycleCtx = context.Background()
@@ -276,11 +301,9 @@ func newAsyncImageContext(c *gin.Context, body []byte, lifecycleCtx context.Cont
 	stopLifecycle := context.AfterFunc(lifecycleCtx, cancelExecution)
 	executionCtx, cancelTimeout := context.WithTimeout(executionBase, timeoutDuration)
 	request := c.Request.Clone(executionCtx)
-	request.Body = io.NopCloser(bytes.NewReader(body))
-	request.GetBody = func() (io.ReadCloser, error) {
-		return io.NopCloser(bytes.NewReader(body)), nil
-	}
-	request.ContentLength = int64(len(body))
+	request.Body = reader
+	request.GetBody = bodyHandle.Open
+	request.ContentLength = bodyHandle.Size()
 	request.URL.Path = strings.TrimSuffix(request.URL.Path, "/async")
 
 	taskCtx := c.Copy()
@@ -288,11 +311,13 @@ func newAsyncImageContext(c *gin.Context, body []byte, lifecycleCtx context.Cont
 	recorderCtx, _ := gin.CreateTestContext(recorder)
 	taskCtx.Writer = recorderCtx.Writer
 	taskCtx.Request = request
-	return taskCtx, recorder, func() {
+	cancel := func() {
+		_ = request.Body.Close()
 		stopLifecycle()
 		cancelTimeout()
 		cancelExecution()
 	}
+	return taskCtx, recorder, cancel, nil
 }
 
 func asyncImageRequestStreams(contentType string, body []byte) bool {
