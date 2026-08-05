@@ -1,0 +1,209 @@
+{
+  "schema": "comet.native.implementation-scope.v2",
+  "contractHash": "a07aa0c3c16b3540edea4be6f3b8b79cefa5644aca39d3a502768a11fde57b31",
+  "baselineProjectionRef": "runtime/evidence/snapshots/9b27af9a72907a75fe6cc55d17c7e49bb48c3c4f2982db1cb13ccdedac496b6c.json",
+  "baselineProjectionHash": "9b27af9a72907a75fe6cc55d17c7e49bb48c3c4f2982db1cb13ccdedac496b6c",
+  "currentProjectionRef": "runtime/evidence/snapshots/ea555b9bad00896f0b0ff497acd159331765ae28a46f0badd04736029957f0db.json",
+  "currentProjectionHash": "ea555b9bad00896f0b0ff497acd159331765ae28a46f0badd04736029957f0db",
+  "complete": true,
+  "declaredArtifacts": [
+    {
+      "path": "backend/internal/handler/image_task_handler.go",
+      "kind": "file"
+    },
+    {
+      "path": "backend/internal/handler/image_task_handler_test.go",
+      "kind": "file"
+    },
+    {
+      "path": "backend/internal/handler/request_body_memory_retention_test.go",
+      "kind": "file"
+    },
+    {
+      "path": "backend/internal/handler/request_body_size_matrix_test.go",
+      "kind": "file"
+    },
+    {
+      "path": "backend/internal/service/openai_embeddings.go",
+      "kind": "file"
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_grok_chat_bridge_test.go",
+      "kind": "file"
+    },
+    {
+      "path": "backend/internal/service/openai_transport_response_close_test.go",
+      "kind": "file"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-harden-request-body-retention-regressions.md",
+      "kind": "file"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-08-05-harden-request-body-retention-regressions-design.md",
+      "kind": "file"
+    }
+  ],
+  "changes": [
+    {
+      "path": "backend/internal/handler/image_task_handler.go",
+      "kind": "modified",
+      "before": {
+        "hash": "1fe7421831abcc265ee590141a4c5493b8618d4d2c44fc597bde889c39044711",
+        "size": 12382
+      },
+      "after": {
+        "hash": "5c9b88db64b139cadaffb33ec7281840739d8f363a5bacf7b62b866ebc9b3b77",
+        "size": 13352
+      },
+      "attributedTo": [
+        {
+          "path": "backend/internal/handler/image_task_handler.go",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/handler/image_task_handler_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "218d1d75ba62a988a79be77bb113fdfe3b9d506422b39202108b2d662a00fa89",
+        "size": 8802
+      },
+      "after": {
+        "hash": "00d648427162bd02c7528aed36dac8823cfb61f08d1fcdcad8f58ff009686199",
+        "size": 23684
+      },
+      "attributedTo": [
+        {
+          "path": "backend/internal/handler/image_task_handler_test.go",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/handler/request_body_memory_retention_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "df75be570aed361226e6f04c86ed31d699c73ee3cb3d2ea846bb63c719c56088",
+        "size": 30137
+      },
+      "after": {
+        "hash": "6c6391960088a6c0246eaf4815a63fa284992a862c1fbec5fb2c0d140819562e",
+        "size": 32841
+      },
+      "attributedTo": [
+        {
+          "path": "backend/internal/handler/request_body_memory_retention_test.go",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/handler/request_body_size_matrix_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "4bc64acbc9854e0f141f2be983096002ff6ee2a799ac21e43b340d990f2bb721",
+        "size": 12691
+      },
+      "after": {
+        "hash": "5210f1ff7530395d8bca0d28fcc301112d142a813ddfb1694556249499eba58c",
+        "size": 13046
+      },
+      "attributedTo": [
+        {
+          "path": "backend/internal/handler/request_body_size_matrix_test.go",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/openai_embeddings.go",
+      "kind": "modified",
+      "before": {
+        "hash": "fbd39f1a96fcd6c2e6d55071f8b37a20cac27b6eeafcd7a55618639343d79c8c",
+        "size": 8591
+      },
+      "after": {
+        "hash": "7754e5cfcd9b6af8384f764adb99d4e5d09afcc883e5fc417782bbcce27e5754",
+        "size": 8659
+      },
+      "attributedTo": [
+        {
+          "path": "backend/internal/service/openai_embeddings.go",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/openai_gateway_grok_chat_bridge_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "76972716471c6b16b00dda31b7679f7a909e1361eb9c8117b58f425afcd20853",
+        "size": 33305
+      },
+      "after": {
+        "hash": "8fc57629cc7f4536f29370a8d788d16e92b50fe96287a14a789f153d44d3ad22",
+        "size": 34904
+      },
+      "attributedTo": [
+        {
+          "path": "backend/internal/service/openai_gateway_grok_chat_bridge_test.go",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/openai_transport_response_close_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "68158a3af27cfa3a3e6be2c4b0f615f3d409db0e2084f9acdd3b928fa0b40f9b",
+        "size": 3066
+      },
+      "after": {
+        "hash": "d47b98ed8958f5d92d04774ae8be15b93029e0782217398cc9c36774894fb426",
+        "size": 3705
+      },
+      "attributedTo": [
+        {
+          "path": "backend/internal/service/openai_transport_response_close_test.go",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "docs/superpowers/plans/2026-08-05-harden-request-body-retention-regressions.md",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "b35012a4cd5d0c93193e5b8862c3ce203c80b4790473e73a5e090e416764da82",
+        "size": 22215
+      },
+      "attributedTo": [
+        {
+          "path": "docs/superpowers/plans/2026-08-05-harden-request-body-retention-regressions.md",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-08-05-harden-request-body-retention-regressions-design.md",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "95f259d26d7c55d0662a48ca3712f5454a2b4a1d1695ba296a774ece785c5031",
+        "size": 4022
+      },
+      "attributedTo": [
+        {
+          "path": "docs/superpowers/specs/2026-08-05-harden-request-body-retention-regressions-design.md",
+          "kind": "file"
+        }
+      ]
+    }
+  ],
+  "unattributed": [],
+  "unresolvedScopes": [],
+  "noCodeReason": null,
+  "scopeHash": "a2b5c1349b8d0c38d327e89a65505d15759d33ec9a61d2149e719d83b106ec5f"
+}

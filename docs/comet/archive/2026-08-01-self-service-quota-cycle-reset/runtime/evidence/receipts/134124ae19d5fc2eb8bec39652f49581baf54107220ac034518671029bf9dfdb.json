@@ -1,0 +1,29 @@
+{
+  "schema": "comet.native.verification-receipt.v3",
+  "kind": "manual-evidence",
+  "role": "acceptance-evidence",
+  "status": "passed",
+  "bindings": {
+    "change": "self-service-quota-cycle-reset",
+    "sourceRevision": 6,
+    "contractHash": "d8d4c47615b33cf1eb7263528f0464e6e05c1270ba622bc3830d1de61106183f",
+    "scopeHash": "a6cae28ee9a406754dc68ade67dfd00a2347010a3123364dc80ff38d16e3bb0f",
+    "snapshotHash": "6fd71777485df2b34ecbdc14cbdf75f38b3289a7289140da774f5c3185d48785",
+    "artifactHash": "635a091b43bd719feaa9f07bbae827eee0d80f144d6b8561b06b95902b0ff7b0"
+  },
+  "acceptanceIds": [
+    "acceptance-153798848b32ae5e992a0505e9d45c81f233732799825e88a0aa1ce99230684d",
+    "acceptance-bb5f7ebab9b9429b1092784f135750c4c7557b5d48585c24f5252481ae5f7e1e"
+  ],
+  "actor": "native-runtime:manual-evidence",
+  "issuedAt": "2026-08-01T00:22:01.639Z",
+  "evidence": {
+    "steps": [
+      "静态核对 advanceQuotaCycle 的 Ent transaction、FOR UPDATE、receipt 同事务写入、提交后版本化 fast path 与 trigger/outbox 持久失效路径。"
+    ],
+    "observations": [
+      "最终只读审查未发现 Critical/Important；权益更新与 receipt 在提交前完成，Redis 不在数据库事务内，事务提交后由权威版本墓碑和 durable outbox 收敛。真实 PostgreSQL/Redis integration 因本机无 Docker 未执行。"
+    ]
+  },
+  "receiptHash": "134124ae19d5fc2eb8bec39652f49581baf54107220ac034518671029bf9dfdb"
+}

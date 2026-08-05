@@ -1,0 +1,58 @@
+{
+  "schema": "comet.native.verification-receipt.v3",
+  "kind": "automated-check",
+  "role": "acceptance-evidence",
+  "status": "passed",
+  "bindings": {
+    "change": "require-all-exhausted-quota-windows",
+    "sourceRevision": 3,
+    "contractHash": "bfd96357f270b8a1b505f1657018a9b080363409c47f8a64dbe685b4f2c3622e",
+    "scopeHash": "0625b9eec1a7c9fe0d71638c8507927734149f19de73772db873ebbdbfd9850b",
+    "snapshotHash": "d4e48902900a80b3f2918ae07690fa6f2a54f4a8906212b88efc61740c847e07",
+    "artifactHash": "f6cb482b16cb2b62d1f7d4bcce4058917c50208f9ca78315b56ac17c6f7d7e25"
+  },
+  "acceptanceIds": [
+    "acceptance-2917878f82b203fcf34343f88a876cf66add565a28435b115b805f57bc71c41b",
+    "acceptance-34a45c39ea3d663895fc27a325ab71e1361e15d98e5ea67ff5261187f46eafd8",
+    "acceptance-465f95e268eed1e3562d5a960211c80a050e3ac9752166ae08567239667a25ac",
+    "acceptance-4d23987b6b32d0a2182b9b2275104c577301d1f17349cc60cd0aa7d7e9425512",
+    "acceptance-5e0640f63235f0852b1bcffe49b7b685b15a72a0f01c90092cc6ddc3516622f2",
+    "acceptance-65f2fd7ee2f40236f71a981d0993ce2f939c57cfa8ac4649a0010de9cc2aec5f",
+    "acceptance-66e34234c096515c32d18e9b8a059230c5dabb154f23e006cbef319af9e5196c",
+    "acceptance-749ad7c3fb703ca1777f4c910144b7ff709e10728552d4418410ba230ecb2431",
+    "acceptance-a0f5fb90e14054dbac6e690475e607ab625c99daa43b2b9d4348878c2afa9a65",
+    "acceptance-b1648a2e0d7b501d95f1737a705f9c0ec092caf13c97aa56a6ff8e870ae3156c",
+    "acceptance-c254cac1495eec52359d5a2a226577aaa7f21ff65bf41c968cb824ddb9332acb"
+  ],
+  "actor": "native-runtime:command:cmd",
+  "issuedAt": "2026-08-01T01:58:46.187Z",
+  "evidence": {
+    "executable": "cmd",
+    "args": [
+      "/c",
+      "cd /d backend && go test -tags=unit ./internal/service"
+    ],
+    "cwd": ".",
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "timeoutMs": 180000,
+    "startedAt": "2026-08-01T01:58:42.768Z",
+    "endedAt": "2026-08-01T01:58:46.187Z",
+    "worktree": {
+      "provider": "git",
+      "root": ".",
+      "beforeCommit": "b24bc74bdccd91a2f2fc6b1f49e5d058dbe53158",
+      "afterCommit": "b24bc74bdccd91a2f2fc6b1f49e5d058dbe53158"
+    },
+    "afterFence": {
+      "snapshotHash": "d4e48902900a80b3f2918ae07690fa6f2a54f4a8906212b88efc61740c847e07",
+      "scopeHash": "0625b9eec1a7c9fe0d71638c8507927734149f19de73772db873ebbdbfd9850b",
+      "matched": true
+    },
+    "outputHash": "0ad1a6ab3e02f04cfd4a48b32f49b6321b4dc67efdc168432f666ba8471da54e",
+    "outputSummary": "ok  \tgithub.com/Wei-Shaw/sub2api/internal/service\t(cached)",
+    "outputTruncated": false
+  },
+  "receiptHash": "237efbb95463e33f17703656be677035582e55df6d8880d85316270c57998048"
+}

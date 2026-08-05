@@ -1,0 +1,57 @@
+{
+  "schema": "comet.native.verification-receipt.v3",
+  "kind": "automated-check",
+  "role": "acceptance-evidence",
+  "status": "passed",
+  "bindings": {
+    "change": "self-service-quota-cycle-reset",
+    "sourceRevision": 6,
+    "contractHash": "d8d4c47615b33cf1eb7263528f0464e6e05c1270ba622bc3830d1de61106183f",
+    "scopeHash": "a6cae28ee9a406754dc68ade67dfd00a2347010a3123364dc80ff38d16e3bb0f",
+    "snapshotHash": "6fd71777485df2b34ecbdc14cbdf75f38b3289a7289140da774f5c3185d48785",
+    "artifactHash": "635a091b43bd719feaa9f07bbae827eee0d80f144d6b8561b06b95902b0ff7b0"
+  },
+  "acceptanceIds": [
+    "acceptance-06f459e03b1c3111c21c18eedc6b17e42e3476e8e4c61d37bba7504f0e44bb79",
+    "acceptance-07dbe6f38cdf71a1ebc8a48e5dc1a6dbe092bfb20ff50ca9634379527fac7842",
+    "acceptance-0c5380eef5101591556aa68c61f4dc1cc9da3b22b38afd5f92fcb2b24bbbb49f",
+    "acceptance-2571b0a82db98feba6b9f200562db1d4da5bca37603c28f906b069972197f8b0",
+    "acceptance-2bfb0a76779a7455c75e74c044a07477ae4dab4ca048bd95a447b20100b6fca9",
+    "acceptance-4df497bb410b42ffaa600d710854d77eef0edadf58824af9511a1a7cb4a7cb6c",
+    "acceptance-a177333414734704a320274e71b644c2e082ca2c30eeac1048d60097182bcd86",
+    "acceptance-a6946c1f90279c13bf4e64609a48fc59b5b106faa86406fcd8a6370aad682d6b",
+    "acceptance-ee4c8c65543ad006864873e0ea51d0f9de9ffcfd0a2bf922db988e0a01b8a41d"
+  ],
+  "actor": "native-runtime:command:pwsh",
+  "issuedAt": "2026-08-01T00:16:20.151Z",
+  "evidence": {
+    "executable": "pwsh",
+    "args": [
+      "-NoProfile",
+      "-Command",
+      "$output = & pnpm --dir frontend exec vitest run src/api/__tests__/subscriptions.spec.ts src/utils/__tests__/subscriptionQuota.spec.ts src/components/subscription/__tests__/SubscriptionQuotaAdvanceDialog.spec.ts src/views/user/__tests__/SubscriptionsView.spec.ts 2>&1; $code = $LASTEXITCODE; if ($code -ne 0) { $output; exit $code }; \"PASS: 4 frontend quota-reset suites\""
+    ],
+    "cwd": ".",
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "timeoutMs": 300000,
+    "startedAt": "2026-08-01T00:15:41.423Z",
+    "endedAt": "2026-08-01T00:16:20.151Z",
+    "worktree": {
+      "provider": "git",
+      "root": ".",
+      "beforeCommit": "93c0bda8a4920030b7e5d6b1461349bb541b9329",
+      "afterCommit": "93c0bda8a4920030b7e5d6b1461349bb541b9329"
+    },
+    "afterFence": {
+      "snapshotHash": "6fd71777485df2b34ecbdc14cbdf75f38b3289a7289140da774f5c3185d48785",
+      "scopeHash": "a6cae28ee9a406754dc68ade67dfd00a2347010a3123364dc80ff38d16e3bb0f",
+      "matched": true
+    },
+    "outputHash": "505d92e95a60a1d324d017d4b441611c7f335326970314383521fba3611e861f",
+    "outputSummary": "PASS: 4 frontend quota-reset suites",
+    "outputTruncated": false
+  },
+  "receiptHash": "cd224173c0ea565a4df19f6f332e639f1dc6c8983f69df926d463f7bcd187879"
+}

@@ -1,0 +1,303 @@
+{
+  "schema": "comet.native.implementation-scope.v2",
+  "contractHash": "5259b488af14ef2888c60e26bd9c0443adb1668b6e80b2ba84484492beb7ef01",
+  "baselineProjectionRef": "runtime/evidence/snapshots/608d519b94c46e5da9a100a50682f73fb7f00dd5928ad8a1f105036619fcca85.json",
+  "baselineProjectionHash": "608d519b94c46e5da9a100a50682f73fb7f00dd5928ad8a1f105036619fcca85",
+  "currentProjectionRef": "runtime/evidence/snapshots/654f58bc279e3f396f3bc7312a03be139c648dd2bb44d72b7f3dccf7525e2065.json",
+  "currentProjectionHash": "654f58bc279e3f396f3bc7312a03be139c648dd2bb44d72b7f3dccf7525e2065",
+  "complete": true,
+  "declaredArtifacts": [
+    {
+      "path": "backend/internal/repository/subscription_quota_advance_receipt_integration_test.go",
+      "kind": "file"
+    },
+    {
+      "path": "backend/internal/service/subscription_advance_quota_test.go",
+      "kind": "file"
+    },
+    {
+      "path": "backend/internal/service/subscription_cache_invalidation_outbox_test.go",
+      "kind": "file"
+    },
+    {
+      "path": "backend/internal/service/subscription_service.go",
+      "kind": "file"
+    },
+    {
+      "path": "frontend/src/api/__tests__/subscriptions.spec.ts",
+      "kind": "file"
+    },
+    {
+      "path": "frontend/src/components/subscription/SubscriptionQuotaAdvanceDialog.vue",
+      "kind": "file"
+    },
+    {
+      "path": "frontend/src/components/subscription/__tests__/SubscriptionQuotaAdvanceDialog.spec.ts",
+      "kind": "file"
+    },
+    {
+      "path": "frontend/src/i18n/locales/en/misc.ts",
+      "kind": "file"
+    },
+    {
+      "path": "frontend/src/i18n/locales/zh/misc.ts",
+      "kind": "file"
+    },
+    {
+      "path": "frontend/src/utils/__tests__/subscriptionQuota.spec.ts",
+      "kind": "file"
+    },
+    {
+      "path": "frontend/src/utils/subscriptionQuota.ts",
+      "kind": "file"
+    },
+    {
+      "path": "frontend/src/views/user/SubscriptionsView.vue",
+      "kind": "file"
+    },
+    {
+      "path": "frontend/src/views/user/__tests__/SubscriptionsView.spec.ts",
+      "kind": "file"
+    }
+  ],
+  "changes": [
+    {
+      "path": "backend/internal/repository/subscription_quota_advance_receipt_integration_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "06b8e84e231943334b54e57b25ef43dfec1877b6954abcd0a32ac549b9a5294b",
+        "size": 14968
+      },
+      "after": {
+        "hash": "4d642f7327948a0a5de2b77b1201bf6111068990568f80055b856905fc9f920c",
+        "size": 14967
+      },
+      "attributedTo": [
+        {
+          "path": "backend/internal/repository/subscription_quota_advance_receipt_integration_test.go",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/subscription_advance_quota_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "2d768940ac71322510a892ee6170f9ac5c598bf5f4c8448c68e28cf0462943e2",
+        "size": 5878
+      },
+      "after": {
+        "hash": "a8d1a719a902ac94a5c701eb3689ae4a7ac38f1dc69fc603cccb5863df319cae",
+        "size": 8010
+      },
+      "attributedTo": [
+        {
+          "path": "backend/internal/service/subscription_advance_quota_test.go",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/subscription_cache_invalidation_outbox_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "6a924f841e18d53093fad16631fcc6e24252aac85a380daf011651641966e002",
+        "size": 7619
+      },
+      "after": {
+        "hash": "37e44b1e4fc211fbf8f056d483d29c7e8d689ad73cc6a91805ee7716f67c5994",
+        "size": 7639
+      },
+      "attributedTo": [
+        {
+          "path": "backend/internal/service/subscription_cache_invalidation_outbox_test.go",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/subscription_service.go",
+      "kind": "modified",
+      "before": {
+        "hash": "b87b1c54ec79a9d7de0e6ce85766c229b02fe243eb35981fd6a252bc459ef969",
+        "size": 55887
+      },
+      "after": {
+        "hash": "bfc9809c83ecae94f0766aa0c7721e8d182e483ab5a36630562da2f392c3a8ac",
+        "size": 56216
+      },
+      "attributedTo": [
+        {
+          "path": "backend/internal/service/subscription_service.go",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/api/__tests__/subscriptions.spec.ts",
+      "kind": "modified",
+      "before": {
+        "hash": "eb896b6bd35532b2223723e4b724b0557138439741bf8dc9805ba4e5494f6127",
+        "size": 1543
+      },
+      "after": {
+        "hash": "2729bdd2862233fc12136f202a089cbb9945e408f305143edee64a63f38d71a1",
+        "size": 1544
+      },
+      "attributedTo": [
+        {
+          "path": "frontend/src/api/__tests__/subscriptions.spec.ts",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/components/subscription/SubscriptionQuotaAdvanceDialog.vue",
+      "kind": "modified",
+      "before": {
+        "hash": "374a38e148f21c421515daf735fe0a2f5c5d855a790ec151ce9fcb2212dc5ede",
+        "size": 5572
+      },
+      "after": {
+        "hash": "bd9cdd21aa8122a7ca732a094971178063e67deac9bc0416d17d866db9ee38f4",
+        "size": 5574
+      },
+      "attributedTo": [
+        {
+          "path": "frontend/src/components/subscription/SubscriptionQuotaAdvanceDialog.vue",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/components/subscription/__tests__/SubscriptionQuotaAdvanceDialog.spec.ts",
+      "kind": "modified",
+      "before": {
+        "hash": "afb6b0097b1e9935635431f6647bd159c0b9cb70df20784e4e4ecfdbec32c944",
+        "size": 5141
+      },
+      "after": {
+        "hash": "14c144d81cdd074915a0ed62eb74be5888734096a01f358353a3f23a1f7ed8e9",
+        "size": 5444
+      },
+      "attributedTo": [
+        {
+          "path": "frontend/src/components/subscription/__tests__/SubscriptionQuotaAdvanceDialog.spec.ts",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/i18n/locales/en/misc.ts",
+      "kind": "modified",
+      "before": {
+        "hash": "4ae008b50e4444208b2c335f4d8d9bbf2a2c70349ad5e11f52a68759824f4862",
+        "size": 39800
+      },
+      "after": {
+        "hash": "97c80b7f3eb5615208f3b7acbf83c71b1fae73eea73fe667b36dd2b292bed8a8",
+        "size": 39946
+      },
+      "attributedTo": [
+        {
+          "path": "frontend/src/i18n/locales/en/misc.ts",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/i18n/locales/zh/misc.ts",
+      "kind": "modified",
+      "before": {
+        "hash": "615224ac4231c31ca9869f194afc8a9a6ddda8cf11ae91f6e36301bac7da8ca2",
+        "size": 38804
+      },
+      "after": {
+        "hash": "00b8d76d996ad50fd521f99b8dda8b31e4377e19496fb3571b10b01f21e763ef",
+        "size": 38950
+      },
+      "attributedTo": [
+        {
+          "path": "frontend/src/i18n/locales/zh/misc.ts",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/utils/__tests__/subscriptionQuota.spec.ts",
+      "kind": "modified",
+      "before": {
+        "hash": "f6736487b1113e2db8a20c3f7efbe4e9cd13e63dd9a01975aa9d288b5717ce2f",
+        "size": 4060
+      },
+      "after": {
+        "hash": "b84e35c18c067aff9225bd92ea355bbe750452aa1ba9386342bf9fa8530cfb6f",
+        "size": 4031
+      },
+      "attributedTo": [
+        {
+          "path": "frontend/src/utils/__tests__/subscriptionQuota.spec.ts",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/utils/subscriptionQuota.ts",
+      "kind": "modified",
+      "before": {
+        "hash": "95da1c34b968229a141745804c0665844091d30597f8cab53f06098b327606a8",
+        "size": 4606
+      },
+      "after": {
+        "hash": "6e39bf9cb35bd2cedf2ba6789b9420cd7713ca456f6a02441561314794625028",
+        "size": 4592
+      },
+      "attributedTo": [
+        {
+          "path": "frontend/src/utils/subscriptionQuota.ts",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/views/user/SubscriptionsView.vue",
+      "kind": "modified",
+      "before": {
+        "hash": "cdffe96ddd3ce096fb0e00f02e91076461048b1f0cd1391bbc9e27dc705617c7",
+        "size": 17298
+      },
+      "after": {
+        "hash": "8df16f0751eb9cdeacf03af5b3a3e8eb91ae79d757ec95785a77e07326ed0d80",
+        "size": 17690
+      },
+      "attributedTo": [
+        {
+          "path": "frontend/src/views/user/SubscriptionsView.vue",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/views/user/__tests__/SubscriptionsView.spec.ts",
+      "kind": "modified",
+      "before": {
+        "hash": "738f350e46e647e9e83d4ff941a6ff62bf0be1c8482255526db1e86fa6b5b55c",
+        "size": 4258
+      },
+      "after": {
+        "hash": "d552c5daf462890bda3437f42313be20bf0cbf2930a9a1c301b9198d4c6b5426",
+        "size": 4801
+      },
+      "attributedTo": [
+        {
+          "path": "frontend/src/views/user/__tests__/SubscriptionsView.spec.ts",
+          "kind": "file"
+        }
+      ]
+    }
+  ],
+  "unattributed": [],
+  "unresolvedScopes": [],
+  "noCodeReason": null,
+  "scopeHash": "dfac935d13ba5646efc90f1478fea73f2df3245593d82f5bccc6a483b0701db7"
+}

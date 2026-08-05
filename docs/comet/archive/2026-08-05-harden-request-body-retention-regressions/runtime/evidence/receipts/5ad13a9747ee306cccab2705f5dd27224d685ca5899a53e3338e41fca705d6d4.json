@@ -1,0 +1,49 @@
+{
+  "schema": "comet.native.verification-receipt.v3",
+  "kind": "automated-check",
+  "role": "acceptance-evidence",
+  "status": "passed",
+  "bindings": {
+    "change": "harden-request-body-retention-regressions",
+    "sourceRevision": 3,
+    "contractHash": "a07aa0c3c16b3540edea4be6f3b8b79cefa5644aca39d3a502768a11fde57b31",
+    "scopeHash": "a2b5c1349b8d0c38d327e89a65505d15759d33ec9a61d2149e719d83b106ec5f",
+    "snapshotHash": "ea555b9bad00896f0b0ff497acd159331765ae28a46f0badd04736029957f0db",
+    "artifactHash": "0af64afb3ebc810a3c5867caa44551593484b3cb4f25ce8e586422a9d9e6eab6"
+  },
+  "acceptanceIds": [
+    "acceptance-373044d637846fc298956a1c86cbcbffa4fa02d1f287b7c56d26c22ec4ffe4a7"
+  ],
+  "actor": "native-runtime:command:pwsh",
+  "issuedAt": "2026-08-05T09:47:18.452Z",
+  "evidence": {
+    "executable": "pwsh",
+    "args": [
+      "-NoProfile",
+      "-Command",
+      "Set-Location -LiteralPath 'backend'; $out = go test ./... -count=1 2>&1; $code = $LASTEXITCODE; if ($code -ne 0) { $out; exit $code }; 'PASS go test ./... -count=1'"
+    ],
+    "cwd": ".",
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "timeoutMs": 900000,
+    "startedAt": "2026-08-05T09:44:53.459Z",
+    "endedAt": "2026-08-05T09:47:18.452Z",
+    "worktree": {
+      "provider": "git",
+      "root": ".",
+      "beforeCommit": "ca3a1dfab8d8751a9a0ef76f4b8ae27f2cd57626",
+      "afterCommit": "ca3a1dfab8d8751a9a0ef76f4b8ae27f2cd57626"
+    },
+    "afterFence": {
+      "snapshotHash": "ea555b9bad00896f0b0ff497acd159331765ae28a46f0badd04736029957f0db",
+      "scopeHash": "a2b5c1349b8d0c38d327e89a65505d15759d33ec9a61d2149e719d83b106ec5f",
+      "matched": true
+    },
+    "outputHash": "ca8b166fc48d26da8e1609549ce11e58e28a72eebb1616bf9ab6aa68a4c01551",
+    "outputSummary": "PASS go test ./... -count=1",
+    "outputTruncated": false
+  },
+  "receiptHash": "5ad13a9747ee306cccab2705f5dd27224d685ca5899a53e3338e41fca705d6d4"
+}

@@ -1,0 +1,49 @@
+{
+  "schema": "comet.native.verification-receipt.v3",
+  "kind": "automated-check",
+  "role": "acceptance-evidence",
+  "status": "passed",
+  "bindings": {
+    "change": "harden-request-body-retention-regressions",
+    "sourceRevision": 3,
+    "contractHash": "a07aa0c3c16b3540edea4be6f3b8b79cefa5644aca39d3a502768a11fde57b31",
+    "scopeHash": "a2b5c1349b8d0c38d327e89a65505d15759d33ec9a61d2149e719d83b106ec5f",
+    "snapshotHash": "ea555b9bad00896f0b0ff497acd159331765ae28a46f0badd04736029957f0db",
+    "artifactHash": "0af64afb3ebc810a3c5867caa44551593484b3cb4f25ce8e586422a9d9e6eab6"
+  },
+  "acceptanceIds": [
+    "acceptance-373044d637846fc298956a1c86cbcbffa4fa02d1f287b7c56d26c22ec4ffe4a7"
+  ],
+  "actor": "native-runtime:command:pwsh",
+  "issuedAt": "2026-08-05T09:47:36.044Z",
+  "evidence": {
+    "executable": "pwsh",
+    "args": [
+      "-NoProfile",
+      "-Command",
+      "Set-Location -LiteralPath 'backend'; $out = go build ./... 2>&1; $code = $LASTEXITCODE; if ($code -ne 0) { $out; exit $code }; 'PASS go build ./...'"
+    ],
+    "cwd": ".",
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "timeoutMs": 900000,
+    "startedAt": "2026-08-05T09:47:25.396Z",
+    "endedAt": "2026-08-05T09:47:36.044Z",
+    "worktree": {
+      "provider": "git",
+      "root": ".",
+      "beforeCommit": "ca3a1dfab8d8751a9a0ef76f4b8ae27f2cd57626",
+      "afterCommit": "ca3a1dfab8d8751a9a0ef76f4b8ae27f2cd57626"
+    },
+    "afterFence": {
+      "snapshotHash": "ea555b9bad00896f0b0ff497acd159331765ae28a46f0badd04736029957f0db",
+      "scopeHash": "a2b5c1349b8d0c38d327e89a65505d15759d33ec9a61d2149e719d83b106ec5f",
+      "matched": true
+    },
+    "outputHash": "bcac9a4f56cc7f46ad45fedd4ad68d63ca49b60a968afeba37d7d8100eb04fd2",
+    "outputSummary": "PASS go build ./...",
+    "outputTruncated": false
+  },
+  "receiptHash": "140d247d7d2f96f32538ef981513d0103e67679fc543affb5163f81c4d057d7c"
+}

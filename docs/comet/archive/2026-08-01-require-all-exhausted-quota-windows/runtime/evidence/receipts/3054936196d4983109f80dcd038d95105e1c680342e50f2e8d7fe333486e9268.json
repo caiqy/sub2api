@@ -1,0 +1,57 @@
+{
+  "schema": "comet.native.verification-receipt.v3",
+  "kind": "automated-check",
+  "role": "acceptance-evidence",
+  "status": "passed",
+  "bindings": {
+    "change": "require-all-exhausted-quota-windows",
+    "sourceRevision": 3,
+    "contractHash": "bfd96357f270b8a1b505f1657018a9b080363409c47f8a64dbe685b4f2c3622e",
+    "scopeHash": "0625b9eec1a7c9fe0d71638c8507927734149f19de73772db873ebbdbfd9850b",
+    "snapshotHash": "d4e48902900a80b3f2918ae07690fa6f2a54f4a8906212b88efc61740c847e07",
+    "artifactHash": "f6cb482b16cb2b62d1f7d4bcce4058917c50208f9ca78315b56ac17c6f7d7e25"
+  },
+  "acceptanceIds": [
+    "acceptance-0dfb6787bf6f5594eb1bf9675830139bf81bcd5c56a422cbaa0b5bd486d52b35",
+    "acceptance-1d4428feadb8374a198167794e37a0142a69c0d0b3f5769e2f53bd8474e40458",
+    "acceptance-2571b0a82db98feba6b9f200562db1d4da5bca37603c28f906b069972197f8b0",
+    "acceptance-704e30075196b0792b73098f8e35b971343b29e1378ae82dee535202bd3f0385",
+    "acceptance-9499d8266a985695f7d8e3f6b4b748f875c7fd8c96a881195b86c722fa20d52d",
+    "acceptance-975e3669681f19e05a52bf00e6364497f960521b3e043cffd883afc5743fbf86",
+    "acceptance-985f0482450204a90f7d5775b8c52eb657d48ef45292ef7a176c92eab23ab25b",
+    "acceptance-9b1f2e07449f9048aefb2c4860b226a773df575c87be02813bd8a5778b0e10ef",
+    "acceptance-bf50daa7420b2b8325d2894e32d46d07764a1fdf4a337fefc32a45bb5d60afc0",
+    "acceptance-efe631596810467fc2609e0922d84b55e46671798d269f9884b6f954fdbb2876"
+  ],
+  "actor": "native-runtime:command:cmd",
+  "issuedAt": "2026-08-01T01:59:36.967Z",
+  "evidence": {
+    "executable": "cmd",
+    "args": [
+      "/c",
+      "cd /d frontend && pnpm exec vitest run src/utils/__tests__/subscriptionQuota.spec.ts src/components/subscription/__tests__/SubscriptionQuotaAdvanceDialog.spec.ts src/views/user/__tests__/SubscriptionsView.spec.ts"
+    ],
+    "cwd": ".",
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "timeoutMs": 180000,
+    "startedAt": "2026-08-01T01:59:31.131Z",
+    "endedAt": "2026-08-01T01:59:36.967Z",
+    "worktree": {
+      "provider": "git",
+      "root": ".",
+      "beforeCommit": "b24bc74bdccd91a2f2fc6b1f49e5d058dbe53158",
+      "afterCommit": "b24bc74bdccd91a2f2fc6b1f49e5d058dbe53158"
+    },
+    "afterFence": {
+      "snapshotHash": "d4e48902900a80b3f2918ae07690fa6f2a54f4a8906212b88efc61740c847e07",
+      "scopeHash": "0625b9eec1a7c9fe0d71638c8507927734149f19de73772db873ebbdbfd9850b",
+      "matched": true
+    },
+    "outputHash": "139d10e55dcf826ee01f56c725c4238ff037c8794bfe8c3c417c7300db1e1328",
+    "outputSummary": "\u001b[1m\u001b[7m\u001b[36m RUN \u001b[39m\u001b[27m\u001b[22m \u001b[36mv2.1.9 \u001b[39m\u001b[90mD:/Caiqy/Projects/Github/sub2api/frontend\u001b[39m\n\n \u001b[32m✓\u001b[39m src/utils/__tests__/subscriptionQuota.spec.ts \u001b[2m(\u001b[22m\u001b[2m5 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[90m 6\u001b[2mms\u001b[22m\u001b[39m\nBrowserslist: browsers data (caniuse-lite) is 8 months old. Please run:\n  npx update-browserslist-db@latest\n  Why you should do it regularly: https://github.com/browserslist/update-db#readme\n \u001b[32m✓\u001b[39m src/components/subscription/__tests__/SubscriptionQuotaAdvanceDialog.spec.ts \u001b[2m(\u001b[22m\u001b[2m6 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[90m 96\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m src/views/user/__tests__/SubscriptionsView.spec.ts \u001b[2m(\u001b[22m\u001b[2m4 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[90m 90\u001b[2mms\u001b[22m\u001b[39m\n\n\u001b[2m Test Files \u001b[22m \u001b[1m\u001b[32m3 passed\u001b[39m\u001b[22m\u001b[90m (3)\u001b[39m\n\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m15 passed\u001b[39m\u001b[22m\u001b[90m (15)\u001b[39m\n\u001b[2m   Start at \u001b[22m 09:59:32\n\u001b[2m   Duration \u001b[22m 4.08s\u001b[2m (transform 1.50s, setup 458ms, collect 3.63s, tests 192ms, environment 2.39s, prepare 715ms)\u001b[22m",
+    "outputTruncated": false
+  },
+  "receiptHash": "3054936196d4983109f80dcd038d95105e1c680342e50f2e8d7fe333486e9268"
+}

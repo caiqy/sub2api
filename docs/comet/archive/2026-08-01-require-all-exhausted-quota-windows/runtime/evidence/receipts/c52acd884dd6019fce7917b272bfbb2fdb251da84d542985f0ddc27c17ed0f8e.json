@@ -1,0 +1,66 @@
+{
+  "schema": "comet.native.verification-receipt.v3",
+  "kind": "automated-check",
+  "role": "acceptance-evidence",
+  "status": "passed",
+  "bindings": {
+    "change": "require-all-exhausted-quota-windows",
+    "sourceRevision": 6,
+    "contractHash": "bfd96357f270b8a1b505f1657018a9b080363409c47f8a64dbe685b4f2c3622e",
+    "scopeHash": "de22f08eed5619a370bcacd17a27b6da094ee2deaaed3913f0a5be554350acf7",
+    "snapshotHash": "82de231bb98468c3cf0436abdc04af98ea2f09bddbb769cfec2ef44b922dc6e5",
+    "artifactHash": "a991556b53f58a0211051616d6557d496a751604c599914db473139d97eeda99"
+  },
+  "acceptanceIds": [
+    "acceptance-15814a0ad0a2cdd422590d4cba241f0de33da5063e65a9c93de26368890aecb0",
+    "acceptance-2917878f82b203fcf34343f88a876cf66add565a28435b115b805f57bc71c41b",
+    "acceptance-34a45c39ea3d663895fc27a325ab71e1361e15d98e5ea67ff5261187f46eafd8",
+    "acceptance-465f95e268eed1e3562d5a960211c80a050e3ac9752166ae08567239667a25ac",
+    "acceptance-4d23987b6b32d0a2182b9b2275104c577301d1f17349cc60cd0aa7d7e9425512",
+    "acceptance-5e0640f63235f0852b1bcffe49b7b685b15a72a0f01c90092cc6ddc3516622f2",
+    "acceptance-65f2fd7ee2f40236f71a981d0993ce2f939c57cfa8ac4649a0010de9cc2aec5f",
+    "acceptance-66e34234c096515c32d18e9b8a059230c5dabb154f23e006cbef319af9e5196c",
+    "acceptance-73a460b9d5e81c451150d59241e98e0ea6dab33498f54cc4d99eeed4efbd49c1",
+    "acceptance-749ad7c3fb703ca1777f4c910144b7ff709e10728552d4418410ba230ecb2431",
+    "acceptance-7b400725c37c36c52326dedac29ee050f1bd0bd2c1918a58696c162239cf7788",
+    "acceptance-a0f5fb90e14054dbac6e690475e607ab625c99daa43b2b9d4348878c2afa9a65",
+    "acceptance-b1648a2e0d7b501d95f1737a705f9c0ec092caf13c97aa56a6ff8e870ae3156c",
+    "acceptance-c254cac1495eec52359d5a2a226577aaa7f21ff65bf41c968cb824ddb9332acb",
+    "acceptance-e4eea9146426c54535121c054fa68b284bfc5e9550fdd214d68d494c3b4c1340"
+  ],
+  "actor": "native-runtime:command:go",
+  "issuedAt": "2026-08-01T03:10:54.074Z",
+  "evidence": {
+    "executable": "go",
+    "args": [
+      "-C",
+      "backend",
+      "test",
+      "-tags=unit",
+      "./internal/service",
+      "-count=1"
+    ],
+    "cwd": ".",
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "timeoutMs": 300000,
+    "startedAt": "2026-08-01T03:08:09.580Z",
+    "endedAt": "2026-08-01T03:10:54.074Z",
+    "worktree": {
+      "provider": "git",
+      "root": ".",
+      "beforeCommit": "b24bc74bdccd91a2f2fc6b1f49e5d058dbe53158",
+      "afterCommit": "b24bc74bdccd91a2f2fc6b1f49e5d058dbe53158"
+    },
+    "afterFence": {
+      "snapshotHash": "82de231bb98468c3cf0436abdc04af98ea2f09bddbb769cfec2ef44b922dc6e5",
+      "scopeHash": "de22f08eed5619a370bcacd17a27b6da094ee2deaaed3913f0a5be554350acf7",
+      "matched": true
+    },
+    "outputHash": "11866cc37e1f5ba571852868cbf7c8031d011ab9d0b4af3416dd630b7ce4d184",
+    "outputSummary": "ok  \tgithub.com/Wei-Shaw/sub2api/internal/service\t156.934s",
+    "outputTruncated": false
+  },
+  "receiptHash": "c52acd884dd6019fce7917b272bfbb2fdb251da84d542985f0ddc27c17ed0f8e"
+}

@@ -1,0 +1,23 @@
+schema: comet.native.v3
+minimum_runtime_version: 3
+revision: 8
+verification_protocol: legacy-v1
+name: require-all-exhausted-quota-windows
+language: zh-CN
+phase: archive
+brief: brief.md
+approval: confirmed
+approved_contract_hash: bfd96357f270b8a1b505f1657018a9b080363409c47f8a64dbe685b4f2c3622e
+spec_changes:
+  - capability: subscription-quota-cycle
+    operation: replace
+    source: specs/subscription-quota-cycle/spec.md
+    base_hash: 2ee30ded0d9ec73e740c8192843ed343af6b230b445335f09fd6d6a4a7963f95
+verification_result: pass
+verification_report: verification.md
+implementation_scope: runtime/evidence/scopes/de22f08eed5619a370bcacd17a27b6da094ee2deaaed3913f0a5be554350acf7.json
+verification_evidence: runtime/evidence/verifications/9e9fef2792d7fca562d6e4bef4e72c6b181abad17df7345a8b0a465c7d21a72d.json
+partial_allowance: null
+archived: true
+created_at: 2026-08-01
+run_id: 73722e17-4e6f-49f6-845e-b880c39a750d

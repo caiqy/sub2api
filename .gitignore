@@ -143,6 +143,12 @@ docs/*
 !docs/ASYNC_IMAGE_TASKS.md
 !docs/legal/
 !docs/legal/*.md
+!docs/comet/
+docs/comet/*
+!docs/comet/archive/
+!docs/comet/archive/**
+!docs/comet/specs/
+!docs/comet/specs/**
 .serena/
 .codex/
 .superpowers/

@@ -1,0 +1,28 @@
+{
+  "schema": "comet.native.verification-receipt.v3",
+  "kind": "manual-evidence",
+  "role": "acceptance-evidence",
+  "status": "passed",
+  "bindings": {
+    "change": "single-window-quota-advance",
+    "sourceRevision": 11,
+    "contractHash": "6bc2901efff17122ce9796d776a184bc3136681d92664471e63952eb3680a9ac",
+    "scopeHash": "db63c4589d54d486b66ec720cb7683de67af19763cab3237f0d4b2d955edb2c3",
+    "snapshotHash": "54dc7a9c120e93cbb0740058fea0d45766312f4bed7844c5f944474388857179",
+    "artifactHash": "e09dba2456175f04b81f7fc81a4f568582e465050e854cac061ec323cdb3b450"
+  },
+  "acceptanceIds": [
+    "acceptance-1d9376ffafb08fd347cf68c02b2ea26bdf4682d9b83af6710eacee2559e4afb6"
+  ],
+  "actor": "native-runtime:manual-evidence",
+  "issuedAt": "2026-08-01T17:21:29.777Z",
+  "evidence": {
+    "steps": [
+      "核对已发布实现、对应自动化测试与 Release workflow"
+    ],
+    "observations": [
+      "v0.1.165.4 已发布；发布前 Go unit、前端 1650 项、typecheck、lint、build 均通过；本轮 Go 定向测试与前端 24 项复核通过，workflow 30707125724 成功"
+    ]
+  },
+  "receiptHash": "c89d53ddd57dd8930b317904c30561b0643e4a8037255ef8bd0b90b7e8ec5cb4"
+}

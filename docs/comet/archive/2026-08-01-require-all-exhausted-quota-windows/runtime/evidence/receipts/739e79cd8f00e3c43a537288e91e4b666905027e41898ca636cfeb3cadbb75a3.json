@@ -1,0 +1,28 @@
+{
+  "schema": "comet.native.verification-receipt.v3",
+  "kind": "manual-evidence",
+  "role": "acceptance-evidence",
+  "status": "passed",
+  "bindings": {
+    "change": "require-all-exhausted-quota-windows",
+    "sourceRevision": 3,
+    "contractHash": "bfd96357f270b8a1b505f1657018a9b080363409c47f8a64dbe685b4f2c3622e",
+    "scopeHash": "0625b9eec1a7c9fe0d71638c8507927734149f19de73772db873ebbdbfd9850b",
+    "snapshotHash": "d4e48902900a80b3f2918ae07690fa6f2a54f4a8906212b88efc61740c847e07",
+    "artifactHash": "f6cb482b16cb2b62d1f7d4bcce4058917c50208f9ca78315b56ac17c6f7d7e25"
+  },
+  "acceptanceIds": [
+    "acceptance-e4eea9146426c54535121c054fa68b284bfc5e9550fdd214d68d494c3b4c1340"
+  ],
+  "actor": "native-runtime:manual-evidence",
+  "issuedAt": "2026-08-01T02:00:43.436Z",
+  "evidence": {
+    "steps": [
+      "审查锁后重算与幂等路径"
+    ],
+    "observations": [
+      "advanceQuotaCycle 在事务中调用 GetByIDForUpdate 后重新计算窗口集合，失败发生在 Update 前；receipt 路径在同一事务内查找和创建确认回执。真实 PostgreSQL 并发集成测试因本机缺少 Docker CLI 未执行。"
+    ]
+  },
+  "receiptHash": "739e79cd8f00e3c43a537288e91e4b666905027e41898ca636cfeb3cadbb75a3"
+}

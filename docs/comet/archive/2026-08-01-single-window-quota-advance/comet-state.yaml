@@ -1,0 +1,23 @@
+schema: comet.native.v3
+minimum_runtime_version: 3
+revision: 13
+verification_protocol: legacy-v1
+name: single-window-quota-advance
+language: zh-CN
+phase: archive
+brief: brief.md
+approval: confirmed
+approved_contract_hash: 6bc2901efff17122ce9796d776a184bc3136681d92664471e63952eb3680a9ac
+spec_changes:
+  - capability: subscription-quota-cycle
+    operation: replace
+    source: specs/subscription-quota-cycle/spec.md
+    base_hash: ac13aa5cdb6d7eb0d16e879648a19380fd307e97415c9fff600f2495dd9b4c50
+verification_result: pass
+verification_report: verification.md
+implementation_scope: runtime/evidence/scopes/db63c4589d54d486b66ec720cb7683de67af19763cab3237f0d4b2d955edb2c3.json
+verification_evidence: runtime/evidence/verifications/c6c1c9578d0056d9f0e1d00828f303480260f494000ef2d297e203f71f09e5e5.json
+partial_allowance: null
+archived: true
+created_at: 2026-08-01
+run_id: 5f596d0c-793b-4de9-be7f-c01554af2446

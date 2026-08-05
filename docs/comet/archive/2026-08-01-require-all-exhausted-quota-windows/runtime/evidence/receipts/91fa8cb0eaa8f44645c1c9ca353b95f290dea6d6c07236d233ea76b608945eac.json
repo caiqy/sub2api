@@ -1,0 +1,37 @@
+{
+  "schema": "comet.native.verification-receipt.v3",
+  "kind": "static-inspection",
+  "role": "required-check",
+  "status": "passed",
+  "bindings": {
+    "change": "require-all-exhausted-quota-windows",
+    "sourceRevision": 3,
+    "contractHash": "bfd96357f270b8a1b505f1657018a9b080363409c47f8a64dbe685b4f2c3622e",
+    "scopeHash": "0625b9eec1a7c9fe0d71638c8507927734149f19de73772db873ebbdbfd9850b",
+    "snapshotHash": "d4e48902900a80b3f2918ae07690fa6f2a54f4a8906212b88efc61740c847e07",
+    "artifactHash": "f6cb482b16cb2b62d1f7d4bcce4058917c50208f9ca78315b56ac17c6f7d7e25"
+  },
+  "acceptanceIds": [],
+  "actor": "native-runtime:scoped-text-safety",
+  "issuedAt": "2026-08-01T02:04:29.392Z",
+  "evidence": {
+    "subjects": [
+      "backend/internal/repository/subscription_advance_quota_integration_test.go",
+      "backend/internal/service/subscription_advance_quota_test.go",
+      "backend/internal/service/subscription_cache_invalidation_outbox_test.go",
+      "backend/internal/service/subscription_service.go",
+      "frontend/src/components/subscription/SubscriptionQuotaAdvanceDialog.vue",
+      "frontend/src/components/subscription/__tests__/SubscriptionQuotaAdvanceDialog.spec.ts",
+      "frontend/src/i18n/locales/en/misc.ts",
+      "frontend/src/i18n/locales/zh/misc.ts",
+      "frontend/src/utils/__tests__/subscriptionQuota.spec.ts",
+      "frontend/src/utils/subscriptionQuota.ts",
+      "frontend/src/views/user/__tests__/SubscriptionsView.spec.ts"
+    ],
+    "rule": "scoped-text-safety",
+    "resultSummary": "The built-in scoped inspection passed without skipped or blocking input.",
+    "checkReceiptRef": "runtime/evidence/check-receipts/0ff5b4d381a641f20771182ddc1202e7dad27df54579c84992213750792021d9.json",
+    "checkReceiptHash": "0ff5b4d381a641f20771182ddc1202e7dad27df54579c84992213750792021d9"
+  },
+  "receiptHash": "91fa8cb0eaa8f44645c1c9ca353b95f290dea6d6c07236d233ea76b608945eac"
+}

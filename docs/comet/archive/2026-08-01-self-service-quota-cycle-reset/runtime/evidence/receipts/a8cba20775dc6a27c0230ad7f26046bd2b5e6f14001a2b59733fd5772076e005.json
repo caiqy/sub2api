@@ -1,0 +1,50 @@
+{
+  "schema": "comet.native.verification-receipt.v3",
+  "kind": "automated-check",
+  "role": "acceptance-evidence",
+  "status": "passed",
+  "bindings": {
+    "change": "self-service-quota-cycle-reset",
+    "sourceRevision": 6,
+    "contractHash": "d8d4c47615b33cf1eb7263528f0464e6e05c1270ba622bc3830d1de61106183f",
+    "scopeHash": "a6cae28ee9a406754dc68ade67dfd00a2347010a3123364dc80ff38d16e3bb0f",
+    "snapshotHash": "6fd71777485df2b34ecbdc14cbdf75f38b3289a7289140da774f5c3185d48785",
+    "artifactHash": "635a091b43bd719feaa9f07bbae827eee0d80f144d6b8561b06b95902b0ff7b0"
+  },
+  "acceptanceIds": [
+    "acceptance-2bfb0a76779a7455c75e74c044a07477ae4dab4ca048bd95a447b20100b6fca9",
+    "acceptance-ee4c8c65543ad006864873e0ea51d0f9de9ffcfd0a2bf922db988e0a01b8a41d"
+  ],
+  "actor": "native-runtime:command:pwsh",
+  "issuedAt": "2026-08-01T00:17:45.902Z",
+  "evidence": {
+    "executable": "pwsh",
+    "args": [
+      "-NoProfile",
+      "-Command",
+      "$output = & pnpm --dir frontend typecheck 2>&1; $code = $LASTEXITCODE; if ($code -ne 0) { $output; exit $code }; \"PASS: pnpm --dir frontend typecheck\""
+    ],
+    "cwd": ".",
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "timeoutMs": 300000,
+    "startedAt": "2026-08-01T00:17:11.247Z",
+    "endedAt": "2026-08-01T00:17:45.902Z",
+    "worktree": {
+      "provider": "git",
+      "root": ".",
+      "beforeCommit": "93c0bda8a4920030b7e5d6b1461349bb541b9329",
+      "afterCommit": "93c0bda8a4920030b7e5d6b1461349bb541b9329"
+    },
+    "afterFence": {
+      "snapshotHash": "6fd71777485df2b34ecbdc14cbdf75f38b3289a7289140da774f5c3185d48785",
+      "scopeHash": "a6cae28ee9a406754dc68ade67dfd00a2347010a3123364dc80ff38d16e3bb0f",
+      "matched": true
+    },
+    "outputHash": "0bfdd618adb04fd6cf17efff93a7b406d3dc3a559d710e3d91f1ff4672b7a5fb",
+    "outputSummary": "PASS: pnpm --dir frontend typecheck",
+    "outputTruncated": false
+  },
+  "receiptHash": "a8cba20775dc6a27c0230ad7f26046bd2b5e6f14001a2b59733fd5772076e005"
+}

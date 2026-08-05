@@ -1,0 +1,35 @@
+{
+  "schema": "comet.native.verification-receipt.v3",
+  "kind": "static-inspection",
+  "role": "required-check",
+  "status": "passed",
+  "bindings": {
+    "change": "harden-request-body-retention-regressions",
+    "sourceRevision": 3,
+    "contractHash": "a07aa0c3c16b3540edea4be6f3b8b79cefa5644aca39d3a502768a11fde57b31",
+    "scopeHash": "a2b5c1349b8d0c38d327e89a65505d15759d33ec9a61d2149e719d83b106ec5f",
+    "snapshotHash": "ea555b9bad00896f0b0ff497acd159331765ae28a46f0badd04736029957f0db",
+    "artifactHash": "0af64afb3ebc810a3c5867caa44551593484b3cb4f25ce8e586422a9d9e6eab6"
+  },
+  "acceptanceIds": [],
+  "actor": "native-runtime:scoped-text-safety",
+  "issuedAt": "2026-08-05T09:55:29.348Z",
+  "evidence": {
+    "subjects": [
+      "backend/internal/handler/image_task_handler.go",
+      "backend/internal/handler/image_task_handler_test.go",
+      "backend/internal/handler/request_body_memory_retention_test.go",
+      "backend/internal/handler/request_body_size_matrix_test.go",
+      "backend/internal/service/openai_embeddings.go",
+      "backend/internal/service/openai_gateway_grok_chat_bridge_test.go",
+      "backend/internal/service/openai_transport_response_close_test.go",
+      "docs/superpowers/plans/2026-08-05-harden-request-body-retention-regressions.md",
+      "docs/superpowers/specs/2026-08-05-harden-request-body-retention-regressions-design.md"
+    ],
+    "rule": "scoped-text-safety",
+    "resultSummary": "The built-in scoped inspection passed without skipped or blocking input.",
+    "checkReceiptRef": "runtime/evidence/check-receipts/3dcbf0bce07797773f53352586bfba29b8993204a4aa0f402d20b1c9e023a37d.json",
+    "checkReceiptHash": "3dcbf0bce07797773f53352586bfba29b8993204a4aa0f402d20b1c9e023a37d"
+  },
+  "receiptHash": "8fe563177a7424eba68cf1001ec170f81724ae078ec22af3159721f8d478fc03"
+}

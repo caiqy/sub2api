@@ -1,0 +1,39 @@
+{
+  "schema": "comet.native.verification-receipt.v3",
+  "kind": "static-inspection",
+  "role": "required-check",
+  "status": "passed",
+  "bindings": {
+    "change": "require-all-exhausted-quota-windows",
+    "sourceRevision": 6,
+    "contractHash": "bfd96357f270b8a1b505f1657018a9b080363409c47f8a64dbe685b4f2c3622e",
+    "scopeHash": "de22f08eed5619a370bcacd17a27b6da094ee2deaaed3913f0a5be554350acf7",
+    "snapshotHash": "82de231bb98468c3cf0436abdc04af98ea2f09bddbb769cfec2ef44b922dc6e5",
+    "artifactHash": "a991556b53f58a0211051616d6557d496a751604c599914db473139d97eeda99"
+  },
+  "acceptanceIds": [],
+  "actor": "native-runtime:scoped-text-safety",
+  "issuedAt": "2026-08-01T03:13:53.494Z",
+  "evidence": {
+    "subjects": [
+      "backend/cmd/server/VERSION",
+      "backend/internal/repository/subscription_advance_quota_integration_test.go",
+      "backend/internal/repository/user_subscription_repo.go",
+      "backend/internal/service/subscription_advance_quota_test.go",
+      "backend/internal/service/subscription_cache_invalidation_outbox_test.go",
+      "backend/internal/service/subscription_service.go",
+      "frontend/src/components/subscription/SubscriptionQuotaAdvanceDialog.vue",
+      "frontend/src/components/subscription/__tests__/SubscriptionQuotaAdvanceDialog.spec.ts",
+      "frontend/src/i18n/locales/en/misc.ts",
+      "frontend/src/i18n/locales/zh/misc.ts",
+      "frontend/src/utils/__tests__/subscriptionQuota.spec.ts",
+      "frontend/src/utils/subscriptionQuota.ts",
+      "frontend/src/views/user/__tests__/SubscriptionsView.spec.ts"
+    ],
+    "rule": "scoped-text-safety",
+    "resultSummary": "The built-in scoped inspection passed without skipped or blocking input.",
+    "checkReceiptRef": "runtime/evidence/check-receipts/19b19ff101cd74d475e03ad03e874d11e523ee704449d8d62b05d4312b542b28.json",
+    "checkReceiptHash": "19b19ff101cd74d475e03ad03e874d11e523ee704449d8d62b05d4312b542b28"
+  },
+  "receiptHash": "cba674c004dcf4af320b04172526d9841221532b482c9feff129f2aa55e015ec"
+}

@@ -1,0 +1,46 @@
+{
+  "schema": "comet.native.verification-receipt.v3",
+  "kind": "static-inspection",
+  "role": "required-check",
+  "status": "passed",
+  "bindings": {
+    "change": "self-service-quota-cycle-reset",
+    "sourceRevision": 3,
+    "contractHash": "d8d4c47615b33cf1eb7263528f0464e6e05c1270ba622bc3830d1de61106183f",
+    "scopeHash": "a88275a5cd7109b68475ea17052aa8ee78d65e5e1ef6ffc2413e29ff9ed47b3a",
+    "snapshotHash": "bcff1170b76893d51535ae9624eab8d747c916f1d7cfd5d51d92b604a58eeaf0",
+    "artifactHash": "ba07d3cc4a6503315e9d3286413fa1d7e9f1174cba55ed27c77ca3752878437f"
+  },
+  "acceptanceIds": [],
+  "actor": "native-runtime:scoped-text-safety",
+  "issuedAt": "2026-07-31T13:01:46.176Z",
+  "evidence": {
+    "subjects": [
+      "backend/internal/handler/subscription_advance_quota_test.go",
+      "backend/internal/handler/subscription_handler.go",
+      "backend/internal/repository/billing_cache.go",
+      "backend/internal/repository/billing_cache_test.go",
+      "backend/internal/repository/subscription_advance_quota_integration_test.go",
+      "backend/internal/repository/user_subscription_repo.go",
+      "backend/internal/server/routes/user.go",
+      "backend/internal/service/billing_cache_service.go",
+      "backend/internal/service/subscription_advance_quota_test.go",
+      "backend/internal/service/subscription_service.go",
+      "frontend/src/api/__tests__/subscriptions.spec.ts",
+      "frontend/src/api/subscriptions.ts",
+      "frontend/src/components/subscription/SubscriptionQuotaAdvanceDialog.vue",
+      "frontend/src/components/subscription/__tests__/SubscriptionQuotaAdvanceDialog.spec.ts",
+      "frontend/src/i18n/locales/en/misc.ts",
+      "frontend/src/i18n/locales/zh/misc.ts",
+      "frontend/src/utils/__tests__/subscriptionQuota.spec.ts",
+      "frontend/src/utils/subscriptionQuota.ts",
+      "frontend/src/views/user/SubscriptionsView.vue",
+      "frontend/src/views/user/__tests__/SubscriptionsView.spec.ts"
+    ],
+    "rule": "scoped-text-safety",
+    "resultSummary": "The built-in scoped inspection passed without skipped or blocking input.",
+    "checkReceiptRef": "runtime/evidence/check-receipts/98732012daf5eb78d05562d47b6a5e75ce896f3a6c851c1f123d82b4af3018b5.json",
+    "checkReceiptHash": "98732012daf5eb78d05562d47b6a5e75ce896f3a6c851c1f123d82b4af3018b5"
+  },
+  "receiptHash": "8e51d07818d2c75bb0b48dee4c24ee198f9d7fb56ce5dac75bae01130d2ee909"
+}

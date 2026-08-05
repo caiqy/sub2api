@@ -1,0 +1,574 @@
+{
+  "schema": "comet.native.implementation-scope.v2",
+  "contractHash": "d8d4c47615b33cf1eb7263528f0464e6e05c1270ba622bc3830d1de61106183f",
+  "baselineProjectionRef": "runtime/evidence/snapshots/1c89b818ab19822b7406dddffe461936896c812a61583e8465b7fe72a5b4a416.json",
+  "baselineProjectionHash": "1c89b818ab19822b7406dddffe461936896c812a61583e8465b7fe72a5b4a416",
+  "currentProjectionRef": "runtime/evidence/snapshots/bcff1170b76893d51535ae9624eab8d747c916f1d7cfd5d51d92b604a58eeaf0.json",
+  "currentProjectionHash": "bcff1170b76893d51535ae9624eab8d747c916f1d7cfd5d51d92b604a58eeaf0",
+  "complete": false,
+  "declaredArtifacts": [
+    {
+      "path": "backend/internal/repository/billing_cache.go",
+      "kind": "file"
+    },
+    {
+      "path": "backend/internal/repository/subscription_advance_quota_integration_test.go",
+      "kind": "file"
+    },
+    {
+      "path": "backend/internal/service/subscription_service.go",
+      "kind": "file"
+    },
+    {
+      "path": "frontend/src/components/subscription/SubscriptionQuotaAdvanceDialog.vue",
+      "kind": "file"
+    },
+    {
+      "path": "frontend/src/views/user/SubscriptionsView.vue",
+      "kind": "file"
+    },
+    {
+      "path": "frontend/src/views/user/__tests__/SubscriptionsView.spec.ts",
+      "kind": "file"
+    }
+  ],
+  "changes": [
+    {
+      "path": "backend/internal/handler/subscription_advance_quota_test.go",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "b3a426e59fa6c439aeade47bdd5ca1c060993a595ec46e5b1ab8ac50fa06abd0",
+        "size": 911
+      },
+      "attributedTo": []
+    },
+    {
+      "path": "backend/internal/handler/subscription_handler.go",
+      "kind": "modified",
+      "before": {
+        "hash": "41e65234d80253b0e4634dad18788060cce9494a8108f06b340685513fb6d1e0",
+        "size": 5800
+      },
+      "after": {
+        "hash": "37d211448914a773f73996a42a97b2a44e19275dec7a429f5ef48d1617b56486",
+        "size": 7708
+      },
+      "attributedTo": []
+    },
+    {
+      "path": "backend/internal/repository/billing_cache.go",
+      "kind": "modified",
+      "before": {
+        "hash": "234266ef1569c0afd6dd48ba682be65a089df65ff2f3d615bbb237853a52a7ad",
+        "size": 21138
+      },
+      "after": {
+        "hash": "d00f662ad1d805c7e69c7a986b1658fd5639073cb857ea11127046806f67cec4",
+        "size": 22645
+      },
+      "attributedTo": [
+        {
+          "path": "backend/internal/repository/billing_cache.go",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/repository/billing_cache_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "51a10eeb3f8a9eb03872ede70191b660717ad3dff054f81a43ff9b515582e620",
+        "size": 2328
+      },
+      "after": {
+        "hash": "86795614625ef643fe3a65d5c7fd06e8cff96f7d5c62a1700cdb5cd27c6b18f2",
+        "size": 4964
+      },
+      "attributedTo": []
+    },
+    {
+      "path": "backend/internal/repository/subscription_advance_quota_integration_test.go",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "e1d41a707187e82890a4844eb5017bf8fd6395f36d3f451721f0277be447f29c",
+        "size": 6371
+      },
+      "attributedTo": [
+        {
+          "path": "backend/internal/repository/subscription_advance_quota_integration_test.go",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/repository/user_subscription_repo.go",
+      "kind": "modified",
+      "before": {
+        "hash": "18d5bc6c9a62a1bed91ae23fb522ecae414ec25abb16712d1378b917192c7d42",
+        "size": 22443
+      },
+      "after": {
+        "hash": "58e36db4a360f3a82e88d61504327a9cf206c1f23bba0625e698857016db3046",
+        "size": 22885
+      },
+      "attributedTo": []
+    },
+    {
+      "path": "backend/internal/server/routes/user.go",
+      "kind": "modified",
+      "before": {
+        "hash": "b577489bcad3a709d5b246b031dfb114602fe636f2636150f2eff36885fc38da",
+        "size": 4548
+      },
+      "after": {
+        "hash": "1f5496ac07b0366541dd88e15251fd49bed4ba240ff52c92eda397e2ab53b016",
+        "size": 4632
+      },
+      "attributedTo": []
+    },
+    {
+      "path": "backend/internal/service/billing_cache_service.go",
+      "kind": "modified",
+      "before": {
+        "hash": "a25c1522e3e45e5755cc62f79a9b1ccd1f4ad54eee9d52339aade4a245ef2865",
+        "size": 49247
+      },
+      "after": {
+        "hash": "995737350a7e377ed06e43c6ed56ae4c14e2b3bb2b54963f3a86d0e7b4707fe7",
+        "size": 49767
+      },
+      "attributedTo": []
+    },
+    {
+      "path": "backend/internal/service/subscription_advance_quota_test.go",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "57e7b2276417b4608e0b50b8d6808ece0fa81154a0d7b8fb896e046ce6b39ac8",
+        "size": 5521
+      },
+      "attributedTo": []
+    },
+    {
+      "path": "backend/internal/service/subscription_service.go",
+      "kind": "modified",
+      "before": {
+        "hash": "a570b65408cb0ca7b5f6450487b3a0938a5de69c08b00235b91940325522de65",
+        "size": 41678
+      },
+      "after": {
+        "hash": "f7beace94aa824ae075c39a2effc56219cbe1da714b62ae9edf9bee789717dbb",
+        "size": 47670
+      },
+      "attributedTo": [
+        {
+          "path": "backend/internal/service/subscription_service.go",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/api/__tests__/subscriptions.spec.ts",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "eb896b6bd35532b2223723e4b724b0557138439741bf8dc9805ba4e5494f6127",
+        "size": 1543
+      },
+      "attributedTo": []
+    },
+    {
+      "path": "frontend/src/api/subscriptions.ts",
+      "kind": "modified",
+      "before": {
+        "hash": "81a7efce17fb1a471a45b59e7d00a826905b038045436b3a52fbddc8477f7edc",
+        "size": 2007
+      },
+      "after": {
+        "hash": "2b11b8fc5b87b8074c5cf2305dda95adf4036298e08748d8d49bf0d525872c5d",
+        "size": 3240
+      },
+      "attributedTo": []
+    },
+    {
+      "path": "frontend/src/components/subscription/SubscriptionQuotaAdvanceDialog.vue",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "9d5da9fb837516741e7de1ef3c2765794d5d47834f8234f1a954daea68d0244c",
+        "size": 6337
+      },
+      "attributedTo": [
+        {
+          "path": "frontend/src/components/subscription/SubscriptionQuotaAdvanceDialog.vue",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/components/subscription/__tests__/SubscriptionQuotaAdvanceDialog.spec.ts",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "05088a031e989625e9ad78aae7922d4072d19eef943e5f82b38acfe5c9179b71",
+        "size": 3963
+      },
+      "attributedTo": []
+    },
+    {
+      "path": "frontend/src/i18n/locales/en/misc.ts",
+      "kind": "modified",
+      "before": {
+        "hash": "5f24255ef1ae403af6629715c7e78d558c5136c7a8a9323effecbacb2de2d726",
+        "size": 39075
+      },
+      "after": {
+        "hash": "6839656cbbb4f94d911fc4be734c1478071d9c38f4de3df3b9d019f870d69e10",
+        "size": 39844
+      },
+      "attributedTo": []
+    },
+    {
+      "path": "frontend/src/i18n/locales/zh/misc.ts",
+      "kind": "modified",
+      "before": {
+        "hash": "fb2d227c054cd9f24924397d87581ff5c1aa2bb3a88e1a36b67e2f77651eb267",
+        "size": 38108
+      },
+      "after": {
+        "hash": "9336c3d67cc7cfcf31176b45269b91727837e1ba066a5befbdef2ebb290ecbd5",
+        "size": 38850
+      },
+      "attributedTo": []
+    },
+    {
+      "path": "frontend/src/utils/__tests__/subscriptionQuota.spec.ts",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "36fc917483efaa97d716126f3337a7b5f320537d12c0d5afe2fcfd0db673ffff",
+        "size": 3583
+      },
+      "attributedTo": []
+    },
+    {
+      "path": "frontend/src/utils/subscriptionQuota.ts",
+      "kind": "modified",
+      "before": {
+        "hash": "f8fb2fb5beece38b2a8b6bfac9f4dac6d190400b271bc6bff327146bcdebbd89",
+        "size": 1276
+      },
+      "after": {
+        "hash": "2907bf35739cd6aee15eb69acd3c2e9a3761c5d54435f2a193884e37cdbe5f61",
+        "size": 4804
+      },
+      "attributedTo": []
+    },
+    {
+      "path": "frontend/src/views/user/SubscriptionsView.vue",
+      "kind": "modified",
+      "before": {
+        "hash": "7fc947666d1f01c3d480f04d3e306b16179adfb7472257d00a89d64e88cdcb9e",
+        "size": 15642
+      },
+      "after": {
+        "hash": "cdffe96ddd3ce096fb0e00f02e91076461048b1f0cd1391bbc9e27dc705617c7",
+        "size": 17298
+      },
+      "attributedTo": [
+        {
+          "path": "frontend/src/views/user/SubscriptionsView.vue",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/views/user/__tests__/SubscriptionsView.spec.ts",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "de2267fa6d08a3bb64abd3d202a8224f166b51cf2f790b5f289d9875696fc206",
+        "size": 3849
+      },
+      "attributedTo": [
+        {
+          "path": "frontend/src/views/user/__tests__/SubscriptionsView.spec.ts",
+          "kind": "file"
+        }
+      ]
+    }
+  ],
+  "unattributed": [
+    {
+      "path": "backend/internal/handler/subscription_advance_quota_test.go",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "b3a426e59fa6c439aeade47bdd5ca1c060993a595ec46e5b1ab8ac50fa06abd0",
+        "size": 911
+      },
+      "attributedTo": []
+    },
+    {
+      "path": "backend/internal/handler/subscription_handler.go",
+      "kind": "modified",
+      "before": {
+        "hash": "41e65234d80253b0e4634dad18788060cce9494a8108f06b340685513fb6d1e0",
+        "size": 5800
+      },
+      "after": {
+        "hash": "37d211448914a773f73996a42a97b2a44e19275dec7a429f5ef48d1617b56486",
+        "size": 7708
+      },
+      "attributedTo": []
+    },
+    {
+      "path": "backend/internal/repository/billing_cache_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "51a10eeb3f8a9eb03872ede70191b660717ad3dff054f81a43ff9b515582e620",
+        "size": 2328
+      },
+      "after": {
+        "hash": "86795614625ef643fe3a65d5c7fd06e8cff96f7d5c62a1700cdb5cd27c6b18f2",
+        "size": 4964
+      },
+      "attributedTo": []
+    },
+    {
+      "path": "backend/internal/repository/user_subscription_repo.go",
+      "kind": "modified",
+      "before": {
+        "hash": "18d5bc6c9a62a1bed91ae23fb522ecae414ec25abb16712d1378b917192c7d42",
+        "size": 22443
+      },
+      "after": {
+        "hash": "58e36db4a360f3a82e88d61504327a9cf206c1f23bba0625e698857016db3046",
+        "size": 22885
+      },
+      "attributedTo": []
+    },
+    {
+      "path": "backend/internal/server/routes/user.go",
+      "kind": "modified",
+      "before": {
+        "hash": "b577489bcad3a709d5b246b031dfb114602fe636f2636150f2eff36885fc38da",
+        "size": 4548
+      },
+      "after": {
+        "hash": "1f5496ac07b0366541dd88e15251fd49bed4ba240ff52c92eda397e2ab53b016",
+        "size": 4632
+      },
+      "attributedTo": []
+    },
+    {
+      "path": "backend/internal/service/billing_cache_service.go",
+      "kind": "modified",
+      "before": {
+        "hash": "a25c1522e3e45e5755cc62f79a9b1ccd1f4ad54eee9d52339aade4a245ef2865",
+        "size": 49247
+      },
+      "after": {
+        "hash": "995737350a7e377ed06e43c6ed56ae4c14e2b3bb2b54963f3a86d0e7b4707fe7",
+        "size": 49767
+      },
+      "attributedTo": []
+    },
+    {
+      "path": "backend/internal/service/subscription_advance_quota_test.go",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "57e7b2276417b4608e0b50b8d6808ece0fa81154a0d7b8fb896e046ce6b39ac8",
+        "size": 5521
+      },
+      "attributedTo": []
+    },
+    {
+      "path": "frontend/src/api/__tests__/subscriptions.spec.ts",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "eb896b6bd35532b2223723e4b724b0557138439741bf8dc9805ba4e5494f6127",
+        "size": 1543
+      },
+      "attributedTo": []
+    },
+    {
+      "path": "frontend/src/api/subscriptions.ts",
+      "kind": "modified",
+      "before": {
+        "hash": "81a7efce17fb1a471a45b59e7d00a826905b038045436b3a52fbddc8477f7edc",
+        "size": 2007
+      },
+      "after": {
+        "hash": "2b11b8fc5b87b8074c5cf2305dda95adf4036298e08748d8d49bf0d525872c5d",
+        "size": 3240
+      },
+      "attributedTo": []
+    },
+    {
+      "path": "frontend/src/components/subscription/__tests__/SubscriptionQuotaAdvanceDialog.spec.ts",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "05088a031e989625e9ad78aae7922d4072d19eef943e5f82b38acfe5c9179b71",
+        "size": 3963
+      },
+      "attributedTo": []
+    },
+    {
+      "path": "frontend/src/i18n/locales/en/misc.ts",
+      "kind": "modified",
+      "before": {
+        "hash": "5f24255ef1ae403af6629715c7e78d558c5136c7a8a9323effecbacb2de2d726",
+        "size": 39075
+      },
+      "after": {
+        "hash": "6839656cbbb4f94d911fc4be734c1478071d9c38f4de3df3b9d019f870d69e10",
+        "size": 39844
+      },
+      "attributedTo": []
+    },
+    {
+      "path": "frontend/src/i18n/locales/zh/misc.ts",
+      "kind": "modified",
+      "before": {
+        "hash": "fb2d227c054cd9f24924397d87581ff5c1aa2bb3a88e1a36b67e2f77651eb267",
+        "size": 38108
+      },
+      "after": {
+        "hash": "9336c3d67cc7cfcf31176b45269b91727837e1ba066a5befbdef2ebb290ecbd5",
+        "size": 38850
+      },
+      "attributedTo": []
+    },
+    {
+      "path": "frontend/src/utils/__tests__/subscriptionQuota.spec.ts",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "36fc917483efaa97d716126f3337a7b5f320537d12c0d5afe2fcfd0db673ffff",
+        "size": 3583
+      },
+      "attributedTo": []
+    },
+    {
+      "path": "frontend/src/utils/subscriptionQuota.ts",
+      "kind": "modified",
+      "before": {
+        "hash": "f8fb2fb5beece38b2a8b6bfac9f4dac6d190400b271bc6bff327146bcdebbd89",
+        "size": 1276
+      },
+      "after": {
+        "hash": "2907bf35739cd6aee15eb69acd3c2e9a3761c5d54435f2a193884e37cdbe5f61",
+        "size": 4804
+      },
+      "attributedTo": []
+    }
+  ],
+  "unresolvedScopes": [
+    {
+      "id": "scope:384047b88546a7937f37771287213ab0b1d58ebce2b0d2dcb4880710dc8b27e1",
+      "kind": "unattributed-change",
+      "source": "implementation-scope",
+      "path": "backend/internal/handler/subscription_advance_quota_test.go",
+      "reason": "Changed path is not covered by a declared artifact: backend/internal/handler/subscription_advance_quota_test.go"
+    },
+    {
+      "id": "scope:a0184237b9bd7a19bf20fe8b4ec3298c2556514a99fb9bb4738cea1b00747801",
+      "kind": "unattributed-change",
+      "source": "implementation-scope",
+      "path": "backend/internal/handler/subscription_handler.go",
+      "reason": "Changed path is not covered by a declared artifact: backend/internal/handler/subscription_handler.go"
+    },
+    {
+      "id": "scope:fe82a5071d145d0e0e6fdee818e845b37116fc49bf8fbed0d1d2f8f98a008908",
+      "kind": "unattributed-change",
+      "source": "implementation-scope",
+      "path": "backend/internal/repository/billing_cache_test.go",
+      "reason": "Changed path is not covered by a declared artifact: backend/internal/repository/billing_cache_test.go"
+    },
+    {
+      "id": "scope:de4c224702242ecbf576207bc046e8790c7115cabced0b87a7a732b67e0f9013",
+      "kind": "unattributed-change",
+      "source": "implementation-scope",
+      "path": "backend/internal/repository/user_subscription_repo.go",
+      "reason": "Changed path is not covered by a declared artifact: backend/internal/repository/user_subscription_repo.go"
+    },
+    {
+      "id": "scope:1c2363e06a1ffa25fb6cc2727e9e0ac10af7796214126117ff2e10b3effe52c1",
+      "kind": "unattributed-change",
+      "source": "implementation-scope",
+      "path": "backend/internal/server/routes/user.go",
+      "reason": "Changed path is not covered by a declared artifact: backend/internal/server/routes/user.go"
+    },
+    {
+      "id": "scope:c446d76e3513773cc10d7056df1e51188deada0208a7b6cfaf57fa925da350e7",
+      "kind": "unattributed-change",
+      "source": "implementation-scope",
+      "path": "backend/internal/service/billing_cache_service.go",
+      "reason": "Changed path is not covered by a declared artifact: backend/internal/service/billing_cache_service.go"
+    },
+    {
+      "id": "scope:fce681a73b4d954c5ce2be7eb7f009b448668a9b5cf85006c4c6c5dc10934c24",
+      "kind": "unattributed-change",
+      "source": "implementation-scope",
+      "path": "backend/internal/service/subscription_advance_quota_test.go",
+      "reason": "Changed path is not covered by a declared artifact: backend/internal/service/subscription_advance_quota_test.go"
+    },
+    {
+      "id": "scope:868c5cd5feab5e26c69b7d0a72bc0c7bc06fc56a0093b8767229803bc74f16f9",
+      "kind": "unattributed-change",
+      "source": "implementation-scope",
+      "path": "frontend/src/api/__tests__/subscriptions.spec.ts",
+      "reason": "Changed path is not covered by a declared artifact: frontend/src/api/__tests__/subscriptions.spec.ts"
+    },
+    {
+      "id": "scope:bc29b8116aa359cb1fd86ec221d920e25be05b89a31af1946c9bb53248c15a2f",
+      "kind": "unattributed-change",
+      "source": "implementation-scope",
+      "path": "frontend/src/api/subscriptions.ts",
+      "reason": "Changed path is not covered by a declared artifact: frontend/src/api/subscriptions.ts"
+    },
+    {
+      "id": "scope:58f121131849f4fd4a59200abc32800ce074c6154419e99dd6212b86e4bb9003",
+      "kind": "unattributed-change",
+      "source": "implementation-scope",
+      "path": "frontend/src/components/subscription/__tests__/SubscriptionQuotaAdvanceDialog.spec.ts",
+      "reason": "Changed path is not covered by a declared artifact: frontend/src/components/subscription/__tests__/SubscriptionQuotaAdvanceDialog.spec.ts"
+    },
+    {
+      "id": "scope:666059fe559cc005be21f39ea8675d48d8bf7e2ecdbac58aa2a943b5268b53f8",
+      "kind": "unattributed-change",
+      "source": "implementation-scope",
+      "path": "frontend/src/i18n/locales/en/misc.ts",
+      "reason": "Changed path is not covered by a declared artifact: frontend/src/i18n/locales/en/misc.ts"
+    },
+    {
+      "id": "scope:0e1d61f61c0ca353bf69794785dd07810746ae779e2428e8bb51505bd005da14",
+      "kind": "unattributed-change",
+      "source": "implementation-scope",
+      "path": "frontend/src/i18n/locales/zh/misc.ts",
+      "reason": "Changed path is not covered by a declared artifact: frontend/src/i18n/locales/zh/misc.ts"
+    },
+    {
+      "id": "scope:4cc8fc16c4417ceeae9fbf9c23ef5d53b77d5a64f44853beba9c09e6ef6ddbdd",
+      "kind": "unattributed-change",
+      "source": "implementation-scope",
+      "path": "frontend/src/utils/__tests__/subscriptionQuota.spec.ts",
+      "reason": "Changed path is not covered by a declared artifact: frontend/src/utils/__tests__/subscriptionQuota.spec.ts"
+    },
+    {
+      "id": "scope:0d986385c51f7665dc8d706ed265f5677bc3ac12ed77fdb7d456bb7754296c51",
+      "kind": "unattributed-change",
+      "source": "implementation-scope",
+      "path": "frontend/src/utils/subscriptionQuota.ts",
+      "reason": "Changed path is not covered by a declared artifact: frontend/src/utils/subscriptionQuota.ts"
+    }
+  ],
+  "noCodeReason": null,
+  "scopeHash": "11505c77bf777a1b659b30569f29f8d0586007eeeb9c3bcf9841ef382bdbe398"
+}

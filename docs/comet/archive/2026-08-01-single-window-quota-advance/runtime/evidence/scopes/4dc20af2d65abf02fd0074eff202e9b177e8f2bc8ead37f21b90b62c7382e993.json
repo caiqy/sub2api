@@ -1,0 +1,470 @@
+{
+  "schema": "comet.native.implementation-scope.v2",
+  "contractHash": "6bc2901efff17122ce9796d776a184bc3136681d92664471e63952eb3680a9ac",
+  "baselineProjectionRef": "runtime/evidence/snapshots/608d519b94c46e5da9a100a50682f73fb7f00dd5928ad8a1f105036619fcca85.json",
+  "baselineProjectionHash": "608d519b94c46e5da9a100a50682f73fb7f00dd5928ad8a1f105036619fcca85",
+  "currentProjectionRef": "runtime/evidence/snapshots/54dc7a9c120e93cbb0740058fea0d45766312f4bed7844c5f944474388857179.json",
+  "currentProjectionHash": "54dc7a9c120e93cbb0740058fea0d45766312f4bed7844c5f944474388857179",
+  "complete": false,
+  "declaredArtifacts": [
+    {
+      "path": "backend/internal/repository/subscription_advance_quota_integration_test.go",
+      "kind": "file"
+    },
+    {
+      "path": "backend/internal/repository/subscription_quota_advance_receipt_integration_test.go",
+      "kind": "file"
+    },
+    {
+      "path": "backend/internal/repository/user_subscription_repo.go",
+      "kind": "file"
+    },
+    {
+      "path": "backend/internal/repository/user_subscription_repo_integration_test.go",
+      "kind": "file"
+    },
+    {
+      "path": "backend/internal/service/subscription_advance_quota_test.go",
+      "kind": "file"
+    },
+    {
+      "path": "backend/internal/service/subscription_cache_invalidation_outbox_test.go",
+      "kind": "file"
+    },
+    {
+      "path": "backend/internal/service/subscription_quota_advance_receipt.go",
+      "kind": "file"
+    },
+    {
+      "path": "backend/internal/service/subscription_revoke_cache_test.go",
+      "kind": "file"
+    },
+    {
+      "path": "backend/internal/service/subscription_service.go",
+      "kind": "file"
+    },
+    {
+      "path": "backend/internal/service/user_subscription_daily_quota_test.go",
+      "kind": "file"
+    },
+    {
+      "path": "frontend/src/api/__tests__/subscriptions.spec.ts",
+      "kind": "file"
+    },
+    {
+      "path": "frontend/src/components/subscription/SubscriptionQuotaAdvanceDialog.vue",
+      "kind": "file"
+    },
+    {
+      "path": "frontend/src/components/subscription/__tests__/SubscriptionQuotaAdvanceDialog.spec.ts",
+      "kind": "file"
+    },
+    {
+      "path": "frontend/src/i18n/locales/en/misc.ts",
+      "kind": "file"
+    },
+    {
+      "path": "frontend/src/i18n/locales/zh/misc.ts",
+      "kind": "file"
+    },
+    {
+      "path": "frontend/src/utils/__tests__/subscriptionQuota.spec.ts",
+      "kind": "file"
+    },
+    {
+      "path": "frontend/src/utils/subscriptionQuota.ts",
+      "kind": "file"
+    },
+    {
+      "path": "frontend/src/views/user/SubscriptionsView.vue",
+      "kind": "file"
+    },
+    {
+      "path": "frontend/src/views/user/__tests__/SubscriptionsView.spec.ts",
+      "kind": "file"
+    }
+  ],
+  "changes": [
+    {
+      "path": "backend/cmd/server/VERSION",
+      "kind": "modified",
+      "before": {
+        "hash": "258dc5fb587afe835ce560735f2bb5741830e596ef645791057b1e64c578104a",
+        "size": 10
+      },
+      "after": {
+        "hash": "a7ca0881722cb8c2ffc5994b66fc0ecdce50e2507d649d2aabefad07392d93c0",
+        "size": 11
+      },
+      "attributedTo": []
+    },
+    {
+      "path": "backend/internal/repository/subscription_advance_quota_integration_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "03999d42ba58ed2b56ceb02f947f962bcda814a665e689554981ae77da3462fb",
+        "size": 13370
+      },
+      "after": {
+        "hash": "830972e641df9582fc01957908993dcb51349d5924b18a260c0071ff18da6bda",
+        "size": 13800
+      },
+      "attributedTo": [
+        {
+          "path": "backend/internal/repository/subscription_advance_quota_integration_test.go",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/repository/subscription_quota_advance_receipt_integration_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "06b8e84e231943334b54e57b25ef43dfec1877b6954abcd0a32ac549b9a5294b",
+        "size": 14968
+      },
+      "after": {
+        "hash": "4d642f7327948a0a5de2b77b1201bf6111068990568f80055b856905fc9f920c",
+        "size": 14967
+      },
+      "attributedTo": [
+        {
+          "path": "backend/internal/repository/subscription_quota_advance_receipt_integration_test.go",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/repository/user_subscription_repo.go",
+      "kind": "modified",
+      "before": {
+        "hash": "e0d771c5e44cc83a8db53437027920559ad98ab9192b34d8b290e1d27db46b7a",
+        "size": 27745
+      },
+      "after": {
+        "hash": "d6ec4368995e86e61b9e585514a2a3f926505f0bcdbd4d69c047d958a8a1c4c8",
+        "size": 27783
+      },
+      "attributedTo": [
+        {
+          "path": "backend/internal/repository/user_subscription_repo.go",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/repository/user_subscription_repo_integration_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "7e9712bcd8f10e82e03dd6bd826734e851a996a3c9b7bdeb4583e2f87aad446c",
+        "size": 36701
+      },
+      "after": {
+        "hash": "caafe3e46d3110b98d68955722b80d8111ecc968ccf7dfe54c2e0ffc2a4684b6",
+        "size": 38455
+      },
+      "attributedTo": [
+        {
+          "path": "backend/internal/repository/user_subscription_repo_integration_test.go",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/subscription_advance_quota_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "2d768940ac71322510a892ee6170f9ac5c598bf5f4c8448c68e28cf0462943e2",
+        "size": 5878
+      },
+      "after": {
+        "hash": "307138600c6f2752a8e5e624d371fb3bd085bd875075c7a7ef5a7d042c3514ba",
+        "size": 11120
+      },
+      "attributedTo": [
+        {
+          "path": "backend/internal/service/subscription_advance_quota_test.go",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/subscription_cache_invalidation_outbox_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "6a924f841e18d53093fad16631fcc6e24252aac85a380daf011651641966e002",
+        "size": 7619
+      },
+      "after": {
+        "hash": "37e44b1e4fc211fbf8f056d483d29c7e8d689ad73cc6a91805ee7716f67c5994",
+        "size": 7639
+      },
+      "attributedTo": [
+        {
+          "path": "backend/internal/service/subscription_cache_invalidation_outbox_test.go",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/subscription_quota_advance_receipt.go",
+      "kind": "modified",
+      "before": {
+        "hash": "9d94ee175c374f503c36afd6e81f07e2fbc61d38a4c8082ea773bca25185d08d",
+        "size": 5693
+      },
+      "after": {
+        "hash": "7a07ea946d3f2d05e8ace2ade245647812b7fcbb6262557fb581e6c5f34fb0da",
+        "size": 5533
+      },
+      "attributedTo": [
+        {
+          "path": "backend/internal/service/subscription_quota_advance_receipt.go",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/subscription_revoke_cache_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "6f015532304c93b9876bf5c9db13d2abd3638490809ab4ca0a06c0c518c9e99a",
+        "size": 4733
+      },
+      "after": {
+        "hash": "b5d22ac29d2409e3180e1477c8f6b83613d9b2b93dc0075ee14fca74a8295709",
+        "size": 8864
+      },
+      "attributedTo": [
+        {
+          "path": "backend/internal/service/subscription_revoke_cache_test.go",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/subscription_service.go",
+      "kind": "modified",
+      "before": {
+        "hash": "b87b1c54ec79a9d7de0e6ce85766c229b02fe243eb35981fd6a252bc459ef969",
+        "size": 55887
+      },
+      "after": {
+        "hash": "80acbc02e6b0e96464c7f1fd753b5b2487e87cc67ca6e9faa10d286a886f347f",
+        "size": 56971
+      },
+      "attributedTo": [
+        {
+          "path": "backend/internal/service/subscription_service.go",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/user_subscription_daily_quota_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "a626986843cdea4d76973c3adc2040ecff4deaad3a934454bd59bd8caf0dcaf3",
+        "size": 57691
+      },
+      "after": {
+        "hash": "39a7743f3fff5c76e6e7248b129f964ed843cfcc7d23ecaf3d33ce5df7489258",
+        "size": 57878
+      },
+      "attributedTo": [
+        {
+          "path": "backend/internal/service/user_subscription_daily_quota_test.go",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/api/__tests__/subscriptions.spec.ts",
+      "kind": "modified",
+      "before": {
+        "hash": "eb896b6bd35532b2223723e4b724b0557138439741bf8dc9805ba4e5494f6127",
+        "size": 1543
+      },
+      "after": {
+        "hash": "2729bdd2862233fc12136f202a089cbb9945e408f305143edee64a63f38d71a1",
+        "size": 1544
+      },
+      "attributedTo": [
+        {
+          "path": "frontend/src/api/__tests__/subscriptions.spec.ts",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/components/subscription/SubscriptionQuotaAdvanceDialog.vue",
+      "kind": "modified",
+      "before": {
+        "hash": "374a38e148f21c421515daf735fe0a2f5c5d855a790ec151ce9fcb2212dc5ede",
+        "size": 5572
+      },
+      "after": {
+        "hash": "bd9cdd21aa8122a7ca732a094971178063e67deac9bc0416d17d866db9ee38f4",
+        "size": 5574
+      },
+      "attributedTo": [
+        {
+          "path": "frontend/src/components/subscription/SubscriptionQuotaAdvanceDialog.vue",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/components/subscription/__tests__/SubscriptionQuotaAdvanceDialog.spec.ts",
+      "kind": "modified",
+      "before": {
+        "hash": "afb6b0097b1e9935635431f6647bd159c0b9cb70df20784e4e4ecfdbec32c944",
+        "size": 5141
+      },
+      "after": {
+        "hash": "14c144d81cdd074915a0ed62eb74be5888734096a01f358353a3f23a1f7ed8e9",
+        "size": 5444
+      },
+      "attributedTo": [
+        {
+          "path": "frontend/src/components/subscription/__tests__/SubscriptionQuotaAdvanceDialog.spec.ts",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/i18n/locales/en/misc.ts",
+      "kind": "modified",
+      "before": {
+        "hash": "4ae008b50e4444208b2c335f4d8d9bbf2a2c70349ad5e11f52a68759824f4862",
+        "size": 39800
+      },
+      "after": {
+        "hash": "1576f2c7e2461b78ab15672987ef835e9f731041c8d2e334e26db0ccdcd0182e",
+        "size": 39944
+      },
+      "attributedTo": [
+        {
+          "path": "frontend/src/i18n/locales/en/misc.ts",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/i18n/locales/zh/misc.ts",
+      "kind": "modified",
+      "before": {
+        "hash": "615224ac4231c31ca9869f194afc8a9a6ddda8cf11ae91f6e36301bac7da8ca2",
+        "size": 38804
+      },
+      "after": {
+        "hash": "607ab3b5d90c65ba1642d6b23cd4c16498aadcc38d1aafb2a79dbd704f130a8c",
+        "size": 38971
+      },
+      "attributedTo": [
+        {
+          "path": "frontend/src/i18n/locales/zh/misc.ts",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/utils/__tests__/subscriptionQuota.spec.ts",
+      "kind": "modified",
+      "before": {
+        "hash": "f6736487b1113e2db8a20c3f7efbe4e9cd13e63dd9a01975aa9d288b5717ce2f",
+        "size": 4060
+      },
+      "after": {
+        "hash": "b63386e5f2173782ab452b8adc121055ce53966df40640fdddd65282814a2d4f",
+        "size": 5780
+      },
+      "attributedTo": [
+        {
+          "path": "frontend/src/utils/__tests__/subscriptionQuota.spec.ts",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/utils/subscriptionQuota.ts",
+      "kind": "modified",
+      "before": {
+        "hash": "95da1c34b968229a141745804c0665844091d30597f8cab53f06098b327606a8",
+        "size": 4606
+      },
+      "after": {
+        "hash": "82c6aa74503d59d13af93e23e65f42117657497932137a6100b5511eb706d468",
+        "size": 5004
+      },
+      "attributedTo": [
+        {
+          "path": "frontend/src/utils/subscriptionQuota.ts",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/views/user/SubscriptionsView.vue",
+      "kind": "modified",
+      "before": {
+        "hash": "cdffe96ddd3ce096fb0e00f02e91076461048b1f0cd1391bbc9e27dc705617c7",
+        "size": 17298
+      },
+      "after": {
+        "hash": "8df16f0751eb9cdeacf03af5b3a3e8eb91ae79d757ec95785a77e07326ed0d80",
+        "size": 17690
+      },
+      "attributedTo": [
+        {
+          "path": "frontend/src/views/user/SubscriptionsView.vue",
+          "kind": "file"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/views/user/__tests__/SubscriptionsView.spec.ts",
+      "kind": "modified",
+      "before": {
+        "hash": "738f350e46e647e9e83d4ff941a6ff62bf0be1c8482255526db1e86fa6b5b55c",
+        "size": 4258
+      },
+      "after": {
+        "hash": "5ea200e66c85b65d894fa912f916e2b6239ebfd607157ce612b78f3c9e912518",
+        "size": 4824
+      },
+      "attributedTo": [
+        {
+          "path": "frontend/src/views/user/__tests__/SubscriptionsView.spec.ts",
+          "kind": "file"
+        }
+      ]
+    }
+  ],
+  "unattributed": [
+    {
+      "path": "backend/cmd/server/VERSION",
+      "kind": "modified",
+      "before": {
+        "hash": "258dc5fb587afe835ce560735f2bb5741830e596ef645791057b1e64c578104a",
+        "size": 10
+      },
+      "after": {
+        "hash": "a7ca0881722cb8c2ffc5994b66fc0ecdce50e2507d649d2aabefad07392d93c0",
+        "size": 11
+      },
+      "attributedTo": []
+    }
+  ],
+  "unresolvedScopes": [
+    {
+      "id": "scope:ac44401194d7daab2ce28dba7acc5df6a189a3beca4b10aa0d8439798e74b25b",
+      "kind": "unattributed-change",
+      "source": "implementation-scope",
+      "path": "backend/cmd/server/VERSION",
+      "reason": "Changed path is not covered by a declared artifact: backend/cmd/server/VERSION"
+    }
+  ],
+  "noCodeReason": null,
+  "scopeHash": "4dc20af2d65abf02fd0074eff202e9b177e8f2bc8ead37f21b90b62c7382e993"
+}

@@ -1,0 +1,49 @@
+{
+  "schema": "comet.native.verification-receipt.v3",
+  "kind": "automated-check",
+  "role": "acceptance-evidence",
+  "status": "passed",
+  "bindings": {
+    "change": "self-service-quota-cycle-reset",
+    "sourceRevision": 3,
+    "contractHash": "d8d4c47615b33cf1eb7263528f0464e6e05c1270ba622bc3830d1de61106183f",
+    "scopeHash": "a88275a5cd7109b68475ea17052aa8ee78d65e5e1ef6ffc2413e29ff9ed47b3a",
+    "snapshotHash": "bcff1170b76893d51535ae9624eab8d747c916f1d7cfd5d51d92b604a58eeaf0",
+    "artifactHash": "ba07d3cc4a6503315e9d3286413fa1d7e9f1174cba55ed27c77ca3752878437f"
+  },
+  "acceptanceIds": [
+    "acceptance-4df497bb410b42ffaa600d710854d77eef0edadf58824af9511a1a7cb4a7cb6c"
+  ],
+  "actor": "native-runtime:command:pnpm.cmd",
+  "issuedAt": "2026-07-31T12:58:02.095Z",
+  "evidence": {
+    "executable": "pnpm.cmd",
+    "args": [
+      "--dir",
+      "frontend",
+      "lint:check"
+    ],
+    "cwd": ".",
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "timeoutMs": 120000,
+    "startedAt": "2026-07-31T12:57:26.647Z",
+    "endedAt": "2026-07-31T12:58:02.095Z",
+    "worktree": {
+      "provider": "git",
+      "root": ".",
+      "beforeCommit": "93c0bda8a4920030b7e5d6b1461349bb541b9329",
+      "afterCommit": "93c0bda8a4920030b7e5d6b1461349bb541b9329"
+    },
+    "afterFence": {
+      "snapshotHash": "bcff1170b76893d51535ae9624eab8d747c916f1d7cfd5d51d92b604a58eeaf0",
+      "scopeHash": "a88275a5cd7109b68475ea17052aa8ee78d65e5e1ef6ffc2413e29ff9ed47b3a",
+      "matched": true
+    },
+    "outputHash": "f8c5b938a004748752be676f4cdb3151da4486b5ea6d6abc3a5706f4628f8313",
+    "outputSummary": "> sub2api-frontend@1.0.0 lint:check D:\\Caiqy\\Projects\\Github\\sub2api\\frontend\n> eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts",
+    "outputTruncated": false
+  },
+  "receiptHash": "cc1c17dfc346a4f5bc4306b5cfd553a14d17cab0409c4bef65e77465944e234b"
+}

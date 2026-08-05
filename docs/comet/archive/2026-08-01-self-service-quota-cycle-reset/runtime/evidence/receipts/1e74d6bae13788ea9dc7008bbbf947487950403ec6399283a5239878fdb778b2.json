@@ -1,0 +1,49 @@
+{
+  "schema": "comet.native.verification-receipt.v3",
+  "kind": "automated-check",
+  "role": "acceptance-evidence",
+  "status": "passed",
+  "bindings": {
+    "change": "self-service-quota-cycle-reset",
+    "sourceRevision": 6,
+    "contractHash": "d8d4c47615b33cf1eb7263528f0464e6e05c1270ba622bc3830d1de61106183f",
+    "scopeHash": "a6cae28ee9a406754dc68ade67dfd00a2347010a3123364dc80ff38d16e3bb0f",
+    "snapshotHash": "6fd71777485df2b34ecbdc14cbdf75f38b3289a7289140da774f5c3185d48785",
+    "artifactHash": "635a091b43bd719feaa9f07bbae827eee0d80f144d6b8561b06b95902b0ff7b0"
+  },
+  "acceptanceIds": [
+    "acceptance-65f2fd7ee2f40236f71a981d0993ce2f939c57cfa8ac4649a0010de9cc2aec5f"
+  ],
+  "actor": "native-runtime:command:pwsh",
+  "issuedAt": "2026-08-01T00:20:34.062Z",
+  "evidence": {
+    "executable": "pwsh",
+    "args": [
+      "-NoProfile",
+      "-Command",
+      "$output = & git diff --check 2>&1; $code = $LASTEXITCODE; if ($code -ne 0) { $output; exit $code }; \"PASS: git diff --check\""
+    ],
+    "cwd": ".",
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "timeoutMs": 120000,
+    "startedAt": "2026-08-01T00:20:33.411Z",
+    "endedAt": "2026-08-01T00:20:34.062Z",
+    "worktree": {
+      "provider": "git",
+      "root": ".",
+      "beforeCommit": "93c0bda8a4920030b7e5d6b1461349bb541b9329",
+      "afterCommit": "93c0bda8a4920030b7e5d6b1461349bb541b9329"
+    },
+    "afterFence": {
+      "snapshotHash": "6fd71777485df2b34ecbdc14cbdf75f38b3289a7289140da774f5c3185d48785",
+      "scopeHash": "a6cae28ee9a406754dc68ade67dfd00a2347010a3123364dc80ff38d16e3bb0f",
+      "matched": true
+    },
+    "outputHash": "31cf2fdb7add39319cbe2a557a8a1e940788a6f50ed73da63638a8233281a8f8",
+    "outputSummary": "PASS: git diff --check",
+    "outputTruncated": false
+  },
+  "receiptHash": "1e74d6bae13788ea9dc7008bbbf947487950403ec6399283a5239878fdb778b2"
+}

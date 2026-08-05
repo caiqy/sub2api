@@ -1,0 +1,66 @@
+{
+  "schema": "comet.native.verification-receipt.v3",
+  "kind": "automated-check",
+  "role": "acceptance-evidence",
+  "status": "passed",
+  "bindings": {
+    "change": "self-service-quota-cycle-reset",
+    "sourceRevision": 6,
+    "contractHash": "d8d4c47615b33cf1eb7263528f0464e6e05c1270ba622bc3830d1de61106183f",
+    "scopeHash": "a6cae28ee9a406754dc68ade67dfd00a2347010a3123364dc80ff38d16e3bb0f",
+    "snapshotHash": "6fd71777485df2b34ecbdc14cbdf75f38b3289a7289140da774f5c3185d48785",
+    "artifactHash": "635a091b43bd719feaa9f07bbae827eee0d80f144d6b8561b06b95902b0ff7b0"
+  },
+  "acceptanceIds": [
+    "acceptance-0bd22d1527506254fbb2513432237b88f28eed31ec849e2f1d1c5a9ebb3f0651",
+    "acceptance-153798848b32ae5e992a0505e9d45c81f233732799825e88a0aa1ce99230684d",
+    "acceptance-23f3db6f468947df863a477de5776d43160f615f7619773a1942a557de9be0a2",
+    "acceptance-2917878f82b203fcf34343f88a876cf66add565a28435b115b805f57bc71c41b",
+    "acceptance-34a45c39ea3d663895fc27a325ab71e1361e15d98e5ea67ff5261187f46eafd8",
+    "acceptance-465f95e268eed1e3562d5a960211c80a050e3ac9752166ae08567239667a25ac",
+    "acceptance-622a93408825b81ae1fcb857214947957709920d3568cfe93ca88a9f19a9fc02",
+    "acceptance-65f2fd7ee2f40236f71a981d0993ce2f939c57cfa8ac4649a0010de9cc2aec5f",
+    "acceptance-73a460b9d5e81c451150d59241e98e0ea6dab33498f54cc4d99eeed4efbd49c1",
+    "acceptance-7b400725c37c36c52326dedac29ee050f1bd0bd2c1918a58696c162239cf7788",
+    "acceptance-8a65d7449d659d0f530dc7411771b0c3c2077198195c6ca40c543ae6ce657c4d",
+    "acceptance-a47e28a33584e5390cfcc95cec23f004b663f889bab18df57c768dcca1ac2ecf",
+    "acceptance-acef01b009f63d3f60f49ce037d78e48cc5b95973e0541778ff549cf36e77b99",
+    "acceptance-aea2b467ff62c674b2d87153ffec727a04429a1d0083300169f39aa91653f7f2",
+    "acceptance-bb5f7ebab9b9429b1092784f135750c4c7557b5d48585c24f5252481ae5f7e1e",
+    "acceptance-bf339b5d22e9bfef03f45816c501ab51d31613c8a50e95627d8c18b2e5778801",
+    "acceptance-ee4c8c65543ad006864873e0ea51d0f9de9ffcfd0a2bf922db988e0a01b8a41d",
+    "acceptance-f127c57f3c6e1cf6ad01a7f2400ea353830d5227b169f69b245bfddadf463867"
+  ],
+  "actor": "native-runtime:command:pwsh",
+  "issuedAt": "2026-08-01T00:15:14.954Z",
+  "evidence": {
+    "executable": "pwsh",
+    "args": [
+      "-NoProfile",
+      "-Command",
+      "$output = & go -C backend test -tags=unit ./... 2>&1; $code = $LASTEXITCODE; if ($code -ne 0) { $output; exit $code }; \"PASS: go -C backend test -tags=unit ./...\""
+    ],
+    "cwd": ".",
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "timeoutMs": 600000,
+    "startedAt": "2026-08-01T00:15:01.769Z",
+    "endedAt": "2026-08-01T00:15:14.954Z",
+    "worktree": {
+      "provider": "git",
+      "root": ".",
+      "beforeCommit": "93c0bda8a4920030b7e5d6b1461349bb541b9329",
+      "afterCommit": "93c0bda8a4920030b7e5d6b1461349bb541b9329"
+    },
+    "afterFence": {
+      "snapshotHash": "6fd71777485df2b34ecbdc14cbdf75f38b3289a7289140da774f5c3185d48785",
+      "scopeHash": "a6cae28ee9a406754dc68ade67dfd00a2347010a3123364dc80ff38d16e3bb0f",
+      "matched": true
+    },
+    "outputHash": "1c88199058bf1ee18178a007fbb08478eaf68971ff741de21dbfa948279890ef",
+    "outputSummary": "PASS: go -C backend test -tags=unit ./...",
+    "outputTruncated": false
+  },
+  "receiptHash": "1ee37f45c921f1503bb801e42ed50bf77ce89ceba084694237e1e5ef7f9c1e2e"
+}

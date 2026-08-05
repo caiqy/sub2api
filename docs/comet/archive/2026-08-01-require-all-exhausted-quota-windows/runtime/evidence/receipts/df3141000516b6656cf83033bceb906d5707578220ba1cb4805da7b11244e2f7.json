@@ -1,0 +1,68 @@
+{
+  "schema": "comet.native.verification-receipt.v3",
+  "kind": "automated-check",
+  "role": "acceptance-evidence",
+  "status": "passed",
+  "bindings": {
+    "change": "require-all-exhausted-quota-windows",
+    "sourceRevision": 6,
+    "contractHash": "bfd96357f270b8a1b505f1657018a9b080363409c47f8a64dbe685b4f2c3622e",
+    "scopeHash": "de22f08eed5619a370bcacd17a27b6da094ee2deaaed3913f0a5be554350acf7",
+    "snapshotHash": "82de231bb98468c3cf0436abdc04af98ea2f09bddbb769cfec2ef44b922dc6e5",
+    "artifactHash": "a991556b53f58a0211051616d6557d496a751604c599914db473139d97eeda99"
+  },
+  "acceptanceIds": [
+    "acceptance-0dfb6787bf6f5594eb1bf9675830139bf81bcd5c56a422cbaa0b5bd486d52b35",
+    "acceptance-1d4428feadb8374a198167794e37a0142a69c0d0b3f5769e2f53bd8474e40458",
+    "acceptance-2571b0a82db98feba6b9f200562db1d4da5bca37603c28f906b069972197f8b0",
+    "acceptance-704e30075196b0792b73098f8e35b971343b29e1378ae82dee535202bd3f0385",
+    "acceptance-9499d8266a985695f7d8e3f6b4b748f875c7fd8c96a881195b86c722fa20d52d",
+    "acceptance-975e3669681f19e05a52bf00e6364497f960521b3e043cffd883afc5743fbf86",
+    "acceptance-985f0482450204a90f7d5775b8c52eb657d48ef45292ef7a176c92eab23ab25b",
+    "acceptance-9b1f2e07449f9048aefb2c4860b226a773df575c87be02813bd8a5778b0e10ef",
+    "acceptance-bf50daa7420b2b8325d2894e32d46d07764a1fdf4a337fefc32a45bb5d60afc0",
+    "acceptance-efe631596810467fc2609e0922d84b55e46671798d269f9884b6f954fdbb2876"
+  ],
+  "actor": "native-runtime:command:powershell.exe",
+  "issuedAt": "2026-08-01T03:12:19.284Z",
+  "evidence": {
+    "executable": "powershell.exe",
+    "args": [
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      "C:\\Users\\caiqy\\.version-fox\\sdks\\nodejs\\pnpm.ps1",
+      "--dir",
+      "frontend",
+      "exec",
+      "vitest",
+      "run",
+      "src/utils/__tests__/subscriptionQuota.spec.ts",
+      "src/components/subscription/__tests__/SubscriptionQuotaAdvanceDialog.spec.ts",
+      "src/views/user/__tests__/SubscriptionsView.spec.ts"
+    ],
+    "cwd": ".",
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "timeoutMs": 180000,
+    "startedAt": "2026-08-01T03:12:13.031Z",
+    "endedAt": "2026-08-01T03:12:19.284Z",
+    "worktree": {
+      "provider": "git",
+      "root": ".",
+      "beforeCommit": "b24bc74bdccd91a2f2fc6b1f49e5d058dbe53158",
+      "afterCommit": "b24bc74bdccd91a2f2fc6b1f49e5d058dbe53158"
+    },
+    "afterFence": {
+      "snapshotHash": "82de231bb98468c3cf0436abdc04af98ea2f09bddbb769cfec2ef44b922dc6e5",
+      "scopeHash": "de22f08eed5619a370bcacd17a27b6da094ee2deaaed3913f0a5be554350acf7",
+      "matched": true
+    },
+    "outputHash": "6e013e0894deb4ab7e26cdd5b1e9f0883ab0a90a099f2ce5d45bdd93d902da97",
+    "outputSummary": "\u001b[1m\u001b[7m\u001b[36m RUN \u001b[39m\u001b[27m\u001b[22m \u001b[36mv2.1.9 \u001b[39m\u001b[90mD:/Caiqy/Projects/Github/sub2api/frontend\u001b[39m\n\n \u001b[32m✓\u001b[39m src/utils/__tests__/subscriptionQuota.spec.ts \u001b[2m(\u001b[22m\u001b[2m5 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[90m 6\u001b[2mms\u001b[22m\u001b[39m\nBrowserslist: browsers data (caniuse-lite) is 8 months old. Please run:\n  npx update-browserslist-db@latest\n  Why you should do it regularly: https://github.com/browserslist/update-db#readme\n \u001b[32m✓\u001b[39m src/components/subscription/__tests__/SubscriptionQuotaAdvanceDialog.spec.ts \u001b[2m(\u001b[22m\u001b[2m6 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[90m 99\u001b[2mms\u001b[22m\u001b[39m\n \u001b[32m✓\u001b[39m src/views/user/__tests__/SubscriptionsView.spec.ts \u001b[2m(\u001b[22m\u001b[2m4 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[90m 95\u001b[2mms\u001b[22m\u001b[39m\n\n\u001b[2m Test Files \u001b[22m \u001b[1m\u001b[32m3 passed\u001b[39m\u001b[22m\u001b[90m (3)\u001b[39m\n\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m15 passed\u001b[39m\u001b[22m\u001b[90m (15)\u001b[39m\n\u001b[2m   Start at \u001b[22m 11:12:14\n\u001b[2m   Duration \u001b[22m 4.21s\u001b[2m (transform 1.49s, setup 504ms, collect 3.72s, tests 199ms, environment 2.49s, prepare 772ms)\u001b[22m",
+    "outputTruncated": false
+  },
+  "receiptHash": "df3141000516b6656cf83033bceb906d5707578220ba1cb4805da7b11244e2f7"
+}

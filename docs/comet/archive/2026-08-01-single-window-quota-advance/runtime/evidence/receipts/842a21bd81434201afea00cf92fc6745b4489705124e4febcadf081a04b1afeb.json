@@ -1,0 +1,53 @@
+{
+  "schema": "comet.native.verification-receipt.v3",
+  "kind": "automated-check",
+  "role": "acceptance-evidence",
+  "status": "passed",
+  "bindings": {
+    "change": "single-window-quota-advance",
+    "sourceRevision": 6,
+    "contractHash": "eea51fc64d56d4b468b36a04b74a2aba7f48f207f5ded3aa5943fdd93f343cf3",
+    "scopeHash": "7a56f210fe323549419285dd4d3760fa5bcf5e51c23ef92696951bc1ab61a0fa",
+    "snapshotHash": "79e856c78c45969ad78bcba73d4832d05d7f043eeac335028e373cd31e73468b",
+    "artifactHash": "4e3ba326e66b988386362710f88c9f3402b9767a8387f92462b15aba00fec22c"
+  },
+  "acceptanceIds": [
+    "acceptance-3897db06af04cb406bd70032eec212a03c8e9e5dbb22e3f1f4594787b83ae083"
+  ],
+  "actor": "native-runtime:command:go",
+  "issuedAt": "2026-08-01T06:42:06.515Z",
+  "evidence": {
+    "executable": "go",
+    "args": [
+      "-C",
+      "backend",
+      "test",
+      "-tags=unit",
+      "./internal/service",
+      "-run",
+      "TestCalculateQuotaCycleAdvance"
+    ],
+    "cwd": ".",
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "timeoutMs": 120000,
+    "startedAt": "2026-08-01T06:41:29.011Z",
+    "endedAt": "2026-08-01T06:42:06.515Z",
+    "worktree": {
+      "provider": "git",
+      "root": ".",
+      "beforeCommit": "54fbe346efa3f414382b5ba0a4bbc05eba6ce38b",
+      "afterCommit": "54fbe346efa3f414382b5ba0a4bbc05eba6ce38b"
+    },
+    "afterFence": {
+      "snapshotHash": "79e856c78c45969ad78bcba73d4832d05d7f043eeac335028e373cd31e73468b",
+      "scopeHash": "7a56f210fe323549419285dd4d3760fa5bcf5e51c23ef92696951bc1ab61a0fa",
+      "matched": true
+    },
+    "outputHash": "7f21a0b328143797517d858fa5522e91340076d48d8768bbd30cdf2374cad8bf",
+    "outputSummary": "ok  \tgithub.com/Wei-Shaw/sub2api/internal/service\t1.870s",
+    "outputTruncated": false
+  },
+  "receiptHash": "842a21bd81434201afea00cf92fc6745b4489705124e4febcadf081a04b1afeb"
+}

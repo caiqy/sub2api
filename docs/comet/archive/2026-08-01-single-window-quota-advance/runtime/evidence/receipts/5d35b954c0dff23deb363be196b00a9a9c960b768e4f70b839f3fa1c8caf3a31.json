@@ -1,0 +1,46 @@
+{
+  "schema": "comet.native.verification-receipt.v3",
+  "kind": "static-inspection",
+  "role": "required-check",
+  "status": "passed",
+  "bindings": {
+    "change": "single-window-quota-advance",
+    "sourceRevision": 11,
+    "contractHash": "6bc2901efff17122ce9796d776a184bc3136681d92664471e63952eb3680a9ac",
+    "scopeHash": "db63c4589d54d486b66ec720cb7683de67af19763cab3237f0d4b2d955edb2c3",
+    "snapshotHash": "54dc7a9c120e93cbb0740058fea0d45766312f4bed7844c5f944474388857179",
+    "artifactHash": "e09dba2456175f04b81f7fc81a4f568582e465050e854cac061ec323cdb3b450"
+  },
+  "acceptanceIds": [],
+  "actor": "native-runtime:scoped-text-safety",
+  "issuedAt": "2026-08-01T17:19:20.028Z",
+  "evidence": {
+    "subjects": [
+      "backend/cmd/server/VERSION",
+      "backend/internal/repository/subscription_advance_quota_integration_test.go",
+      "backend/internal/repository/subscription_quota_advance_receipt_integration_test.go",
+      "backend/internal/repository/user_subscription_repo.go",
+      "backend/internal/repository/user_subscription_repo_integration_test.go",
+      "backend/internal/service/subscription_advance_quota_test.go",
+      "backend/internal/service/subscription_cache_invalidation_outbox_test.go",
+      "backend/internal/service/subscription_quota_advance_receipt.go",
+      "backend/internal/service/subscription_revoke_cache_test.go",
+      "backend/internal/service/subscription_service.go",
+      "backend/internal/service/user_subscription_daily_quota_test.go",
+      "frontend/src/api/__tests__/subscriptions.spec.ts",
+      "frontend/src/components/subscription/SubscriptionQuotaAdvanceDialog.vue",
+      "frontend/src/components/subscription/__tests__/SubscriptionQuotaAdvanceDialog.spec.ts",
+      "frontend/src/i18n/locales/en/misc.ts",
+      "frontend/src/i18n/locales/zh/misc.ts",
+      "frontend/src/utils/__tests__/subscriptionQuota.spec.ts",
+      "frontend/src/utils/subscriptionQuota.ts",
+      "frontend/src/views/user/SubscriptionsView.vue",
+      "frontend/src/views/user/__tests__/SubscriptionsView.spec.ts"
+    ],
+    "rule": "scoped-text-safety",
+    "resultSummary": "The built-in scoped inspection passed without skipped or blocking input.",
+    "checkReceiptRef": "runtime/evidence/check-receipts/96e1dac68e8fcc852d313179cfec09aed583e62a2d777caa9503d6b7702166d8.json",
+    "checkReceiptHash": "96e1dac68e8fcc852d313179cfec09aed583e62a2d777caa9503d6b7702166d8"
+  },
+  "receiptHash": "5d35b954c0dff23deb363be196b00a9a9c960b768e4f70b839f3fa1c8caf3a31"
+}

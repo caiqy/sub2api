@@ -1,0 +1,39 @@
+{
+  "schema": "comet.native.verification-receipt.v3",
+  "kind": "static-inspection",
+  "role": "required-check",
+  "status": "passed",
+  "bindings": {
+    "change": "single-window-quota-advance",
+    "sourceRevision": 8,
+    "contractHash": "eea51fc64d56d4b468b36a04b74a2aba7f48f207f5ded3aa5943fdd93f343cf3",
+    "scopeHash": "5b656f4585855be954dda6f07562e8217b801d80cfb7007e7089e7a9dbe5b843",
+    "snapshotHash": "499bdbdfadb189907e17c521e0cac97370f30f55527c05f9d99673b0a4aeaafc",
+    "artifactHash": "4e3ba326e66b988386362710f88c9f3402b9767a8387f92462b15aba00fec22c"
+  },
+  "acceptanceIds": [],
+  "actor": "native-runtime:scoped-text-safety",
+  "issuedAt": "2026-08-01T07:06:50.945Z",
+  "evidence": {
+    "subjects": [
+      "backend/internal/repository/subscription_quota_advance_receipt_integration_test.go",
+      "backend/internal/service/subscription_advance_quota_test.go",
+      "backend/internal/service/subscription_cache_invalidation_outbox_test.go",
+      "backend/internal/service/subscription_service.go",
+      "frontend/src/api/__tests__/subscriptions.spec.ts",
+      "frontend/src/components/subscription/SubscriptionQuotaAdvanceDialog.vue",
+      "frontend/src/components/subscription/__tests__/SubscriptionQuotaAdvanceDialog.spec.ts",
+      "frontend/src/i18n/locales/en/misc.ts",
+      "frontend/src/i18n/locales/zh/misc.ts",
+      "frontend/src/utils/__tests__/subscriptionQuota.spec.ts",
+      "frontend/src/utils/subscriptionQuota.ts",
+      "frontend/src/views/user/SubscriptionsView.vue",
+      "frontend/src/views/user/__tests__/SubscriptionsView.spec.ts"
+    ],
+    "rule": "scoped-text-safety",
+    "resultSummary": "The built-in scoped inspection passed without skipped or blocking input.",
+    "checkReceiptRef": "runtime/evidence/check-receipts/fff479897f6ca863808f95b2d18db701672c17ec689762f30cc99d1954919d3f.json",
+    "checkReceiptHash": "fff479897f6ca863808f95b2d18db701672c17ec689762f30cc99d1954919d3f"
+  },
+  "receiptHash": "6e637b3488a42cdf046ce225fce9122206853f6e551aeb9282ead900cc78dcfc"
+}

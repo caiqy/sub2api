@@ -1,0 +1,39 @@
+{
+  "schema": "comet.native.verification-receipt.v3",
+  "kind": "static-inspection",
+  "role": "required-check",
+  "status": "passed",
+  "bindings": {
+    "change": "single-window-quota-advance",
+    "sourceRevision": 3,
+    "contractHash": "5259b488af14ef2888c60e26bd9c0443adb1668b6e80b2ba84484492beb7ef01",
+    "scopeHash": "dfac935d13ba5646efc90f1478fea73f2df3245593d82f5bccc6a483b0701db7",
+    "snapshotHash": "654f58bc279e3f396f3bc7312a03be139c648dd2bb44d72b7f3dccf7525e2065",
+    "artifactHash": "4e3ba326e66b988386362710f88c9f3402b9767a8387f92462b15aba00fec22c"
+  },
+  "acceptanceIds": [],
+  "actor": "native-runtime:scoped-text-safety",
+  "issuedAt": "2026-08-01T05:46:25.033Z",
+  "evidence": {
+    "subjects": [
+      "backend/internal/repository/subscription_quota_advance_receipt_integration_test.go",
+      "backend/internal/service/subscription_advance_quota_test.go",
+      "backend/internal/service/subscription_cache_invalidation_outbox_test.go",
+      "backend/internal/service/subscription_service.go",
+      "frontend/src/api/__tests__/subscriptions.spec.ts",
+      "frontend/src/components/subscription/SubscriptionQuotaAdvanceDialog.vue",
+      "frontend/src/components/subscription/__tests__/SubscriptionQuotaAdvanceDialog.spec.ts",
+      "frontend/src/i18n/locales/en/misc.ts",
+      "frontend/src/i18n/locales/zh/misc.ts",
+      "frontend/src/utils/__tests__/subscriptionQuota.spec.ts",
+      "frontend/src/utils/subscriptionQuota.ts",
+      "frontend/src/views/user/SubscriptionsView.vue",
+      "frontend/src/views/user/__tests__/SubscriptionsView.spec.ts"
+    ],
+    "rule": "scoped-text-safety",
+    "resultSummary": "The built-in scoped inspection passed without skipped or blocking input.",
+    "checkReceiptRef": "runtime/evidence/check-receipts/3d35e2e618307b6a07caf43f4a49c01d8e96dd470079a63bc19b542295d2e20a.json",
+    "checkReceiptHash": "3d35e2e618307b6a07caf43f4a49c01d8e96dd470079a63bc19b542295d2e20a"
+  },
+  "receiptHash": "7b74febf82ebc7e971280c130189896899c4e534c077df4a22bee8b77792a790"
+}

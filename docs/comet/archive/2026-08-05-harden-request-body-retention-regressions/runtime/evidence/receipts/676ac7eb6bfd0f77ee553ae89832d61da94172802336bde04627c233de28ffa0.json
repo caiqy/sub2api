@@ -1,0 +1,50 @@
+{
+  "schema": "comet.native.verification-receipt.v3",
+  "kind": "automated-check",
+  "role": "acceptance-evidence",
+  "status": "passed",
+  "bindings": {
+    "change": "harden-request-body-retention-regressions",
+    "sourceRevision": 3,
+    "contractHash": "a07aa0c3c16b3540edea4be6f3b8b79cefa5644aca39d3a502768a11fde57b31",
+    "scopeHash": "a2b5c1349b8d0c38d327e89a65505d15759d33ec9a61d2149e719d83b106ec5f",
+    "snapshotHash": "ea555b9bad00896f0b0ff497acd159331765ae28a46f0badd04736029957f0db",
+    "artifactHash": "0af64afb3ebc810a3c5867caa44551593484b3cb4f25ce8e586422a9d9e6eab6"
+  },
+  "acceptanceIds": [
+    "acceptance-850977037cf1ba6efb38ac289503019904f43a2f77b4c8148f34064f7a36f1a7",
+    "acceptance-baa896cbd42127ad86df368fe66495df7ee7cc6de3b4d8e0af7daec6fee55816"
+  ],
+  "actor": "native-runtime:command:pwsh",
+  "issuedAt": "2026-08-05T09:48:16.922Z",
+  "evidence": {
+    "executable": "pwsh",
+    "args": [
+      "-NoProfile",
+      "-Command",
+      "Set-Location -LiteralPath 'backend'; $out = go test ./internal/service/openai_ws_v2 ./internal/service -run 'OpenAIWS|WebSocket' -count=1 2>&1; $code = $LASTEXITCODE; if ($code -ne 0) { $out; exit $code }; Set-Location -LiteralPath '..'; $out = git diff --exit-code 6e25e848d -- backend/internal/service/openai_ws_forwarder_v2.go backend/internal/service/openai_ws_protocol_forward.go 2>&1; $code = $LASTEXITCODE; if ($code -ne 0) { $out; exit $code }; 'PASS WS tests and production-file zero diff'"
+    ],
+    "cwd": ".",
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "timeoutMs": 900000,
+    "startedAt": "2026-08-05T09:48:01.044Z",
+    "endedAt": "2026-08-05T09:48:16.922Z",
+    "worktree": {
+      "provider": "git",
+      "root": ".",
+      "beforeCommit": "ca3a1dfab8d8751a9a0ef76f4b8ae27f2cd57626",
+      "afterCommit": "ca3a1dfab8d8751a9a0ef76f4b8ae27f2cd57626"
+    },
+    "afterFence": {
+      "snapshotHash": "ea555b9bad00896f0b0ff497acd159331765ae28a46f0badd04736029957f0db",
+      "scopeHash": "a2b5c1349b8d0c38d327e89a65505d15759d33ec9a61d2149e719d83b106ec5f",
+      "matched": true
+    },
+    "outputHash": "550ce4f8d5ffda2f6f98cf84ffc979e8887223c07d410c50b1bd5c9d5b7111af",
+    "outputSummary": "PASS WS tests and production-file zero diff",
+    "outputTruncated": false
+  },
+  "receiptHash": "676ac7eb6bfd0f77ee553ae89832d61da94172802336bde04627c233de28ffa0"
+}

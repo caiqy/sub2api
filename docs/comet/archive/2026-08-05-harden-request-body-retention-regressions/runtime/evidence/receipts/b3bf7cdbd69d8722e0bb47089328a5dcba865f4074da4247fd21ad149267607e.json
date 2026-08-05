@@ -1,0 +1,49 @@
+{
+  "schema": "comet.native.verification-receipt.v3",
+  "kind": "automated-check",
+  "role": "acceptance-evidence",
+  "status": "passed",
+  "bindings": {
+    "change": "harden-request-body-retention-regressions",
+    "sourceRevision": 3,
+    "contractHash": "a07aa0c3c16b3540edea4be6f3b8b79cefa5644aca39d3a502768a11fde57b31",
+    "scopeHash": "a2b5c1349b8d0c38d327e89a65505d15759d33ec9a61d2149e719d83b106ec5f",
+    "snapshotHash": "ea555b9bad00896f0b0ff497acd159331765ae28a46f0badd04736029957f0db",
+    "artifactHash": "0af64afb3ebc810a3c5867caa44551593484b3cb4f25ce8e586422a9d9e6eab6"
+  },
+  "acceptanceIds": [
+    "acceptance-373044d637846fc298956a1c86cbcbffa4fa02d1f287b7c56d26c22ec4ffe4a7"
+  ],
+  "actor": "native-runtime:command:pwsh",
+  "issuedAt": "2026-08-05T09:47:53.720Z",
+  "evidence": {
+    "executable": "pwsh",
+    "args": [
+      "-NoProfile",
+      "-Command",
+      "Set-Location -LiteralPath 'backend'; $out = go vet ./... 2>&1; $code = $LASTEXITCODE; if ($code -ne 0) { $out; exit $code }; 'PASS go vet ./...'"
+    ],
+    "cwd": ".",
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "timeoutMs": 900000,
+    "startedAt": "2026-08-05T09:47:42.893Z",
+    "endedAt": "2026-08-05T09:47:53.720Z",
+    "worktree": {
+      "provider": "git",
+      "root": ".",
+      "beforeCommit": "ca3a1dfab8d8751a9a0ef76f4b8ae27f2cd57626",
+      "afterCommit": "ca3a1dfab8d8751a9a0ef76f4b8ae27f2cd57626"
+    },
+    "afterFence": {
+      "snapshotHash": "ea555b9bad00896f0b0ff497acd159331765ae28a46f0badd04736029957f0db",
+      "scopeHash": "a2b5c1349b8d0c38d327e89a65505d15759d33ec9a61d2149e719d83b106ec5f",
+      "matched": true
+    },
+    "outputHash": "6de1eff8f5ec6316aebba263b3c81148f40b2fcc8e77dfb0f2b73f48aa225598",
+    "outputSummary": "PASS go vet ./...",
+    "outputTruncated": false
+  },
+  "receiptHash": "b3bf7cdbd69d8722e0bb47089328a5dcba865f4074da4247fd21ad149267607e"
+}

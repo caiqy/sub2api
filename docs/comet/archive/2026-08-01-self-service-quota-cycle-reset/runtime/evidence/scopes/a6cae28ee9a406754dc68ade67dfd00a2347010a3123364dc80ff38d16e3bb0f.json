@@ -1,0 +1,1102 @@
+{
+  "schema": "comet.native.implementation-scope.v2",
+  "contractHash": "d8d4c47615b33cf1eb7263528f0464e6e05c1270ba622bc3830d1de61106183f",
+  "baselineProjectionRef": "runtime/evidence/snapshots/1c89b818ab19822b7406dddffe461936896c812a61583e8465b7fe72a5b4a416.json",
+  "baselineProjectionHash": "1c89b818ab19822b7406dddffe461936896c812a61583e8465b7fe72a5b4a416",
+  "currentProjectionRef": "runtime/evidence/snapshots/6fd71777485df2b34ecbdc14cbdf75f38b3289a7289140da774f5c3185d48785.json",
+  "currentProjectionHash": "6fd71777485df2b34ecbdc14cbdf75f38b3289a7289140da774f5c3185d48785",
+  "complete": true,
+  "declaredArtifacts": [
+    {
+      "path": "backend",
+      "kind": "directory"
+    },
+    {
+      "path": "frontend",
+      "kind": "directory"
+    }
+  ],
+  "changes": [
+    {
+      "path": "backend/cmd/server/ops_error_worker_cleanup_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "25a699650e602e1ce988b0500ed68eaf05f6d3bb5e49b2144a4600369a1299de",
+        "size": 4175
+      },
+      "after": {
+        "hash": "9df705a69cd4c9b6fcbaa10cf6b1a16d2c84430bca5e09b864da357f31fd2db4",
+        "size": 4180
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/cmd/server/wire.go",
+      "kind": "modified",
+      "before": {
+        "hash": "a05a5902cdfee2e3a35fa4e6e24871d67e6eb4fe876dbce82b46fda1580363ee",
+        "size": 10806
+      },
+      "after": {
+        "hash": "2273394e91573a838653762a8a42280434fd3356dc7ab314f77751f7a6c72a44",
+        "size": 11101
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/cmd/server/wire_gen.go",
+      "kind": "modified",
+      "before": {
+        "hash": "22c28381d24490df18943bfbd60ca1abac1f97299288ca574f65c3b5cb8aa72e",
+        "size": 41813
+      },
+      "after": {
+        "hash": "9b39fe3140959e5e0791cb68c6ac8d801639a0f53a2b0e0964204741a6b728b5",
+        "size": 42622
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/cmd/server/wire_gen_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "fc90bfb189bd70a8c9df32af396d982505034821a0cd139dd3055d7a7d446cf0",
+        "size": 2811
+      },
+      "after": {
+        "hash": "0855cdf61bfad06eb14884ceff1b1f0f75320401912ebe49777f2487c505b35b",
+        "size": 2857
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/handler/idempotency_helper.go",
+      "kind": "modified",
+      "before": {
+        "hash": "8b6ac6821289cfe10b70600d4ce454c0c56edb901924e3f883031535ae4dfe4b",
+        "size": 1919
+      },
+      "after": {
+        "hash": "c6da024754aa1888ffb52cc2dbbbb363ed6c95b2dd1d0fd69d9dc79be224fe49",
+        "size": 2528
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/handler/idempotency_helper_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "4a19ce29662a935fca5d754c97d10e91b3177dec5f70f8f4e02eda3e472ca3e9",
+        "size": 8708
+      },
+      "after": {
+        "hash": "89448e6410263696f6dffad528b5d13a9d91fbdfa261c868239dca8fed134f38",
+        "size": 11325
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/handler/subscription_advance_quota_test.go",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "bc897376f7d0fa1a02107c675bde6717ebbfbc8c120d5e65858d3d4f88bffc9a",
+        "size": 3107
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/handler/subscription_handler.go",
+      "kind": "modified",
+      "before": {
+        "hash": "41e65234d80253b0e4634dad18788060cce9494a8108f06b340685513fb6d1e0",
+        "size": 5800
+      },
+      "after": {
+        "hash": "8a4e27fdc4bd3d84275e7ebb5cb2e1cc2dbf34f72567197b9d6ddfe250d59688",
+        "size": 8727
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/handler/terminal_failed_usage_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "27a56e08429241996bd0fb7433e633585530589bef81366706cbe142f55a165a",
+        "size": 98637
+      },
+      "after": {
+        "hash": "516b28837a0e28617a03aeaca801caf54898194fff1ae9e63e424c9835e4d77d",
+        "size": 98644
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/repository/billing_cache.go",
+      "kind": "modified",
+      "before": {
+        "hash": "234266ef1569c0afd6dd48ba682be65a089df65ff2f3d615bbb237853a52a7ad",
+        "size": 21138
+      },
+      "after": {
+        "hash": "ed361f2a369010b6368a5b208486f1d06bff451530a6ca52c5929464649f9bc3",
+        "size": 24686
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/repository/billing_cache_integration_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "6c5f892f553b69432a12ede2c14a40bbcee0faa9e0b3c6d33233f95302c42a6e",
+        "size": 12592
+      },
+      "after": {
+        "hash": "8a3c3e6d3b3d6687449ab6ba2e6df71ef6fd60c7ae9d98536478610a6da209fb",
+        "size": 12606
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/repository/billing_cache_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "51a10eeb3f8a9eb03872ede70191b660717ad3dff054f81a43ff9b515582e620",
+        "size": 2328
+      },
+      "after": {
+        "hash": "a3050bb508b7627cff74ee7385d314344ee1afca17c65faf5f32079a8adcd0f7",
+        "size": 12426
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/repository/migrations_schema_integration_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "3465ea2b2465a7de3d83a959fd3fb93cf1993962a334ae8dc772a56aed03478c",
+        "size": 26949
+      },
+      "after": {
+        "hash": "0fc62eba0eb6b272fcdf31ffc9c0f3ebe970a11fc182422b21cf1fda6e71f648",
+        "size": 28193
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/repository/subscription_advance_quota_integration_test.go",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "57b9b827ffe79300c660f6c6f068d1b07b36ec6c538e37a06f3a5c64ce34b021",
+        "size": 13376
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/repository/subscription_cache_invalidation_outbox_integration_test.go",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "15217d2395144d784205b8637663c6a768728b08c3d3152f5cd03652fc79935d",
+        "size": 30119
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/repository/subscription_cache_invalidation_outbox_repo.go",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "0f601f3a1598b7cabe295230eef1dfd4ddb51bd76cd250e75a27d9fe23ee5bda",
+        "size": 3755
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/repository/subscription_quota_advance_receipt_integration_test.go",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "06b8e84e231943334b54e57b25ef43dfec1877b6954abcd0a32ac549b9a5294b",
+        "size": 14968
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/repository/subscription_quota_advance_receipt_repo.go",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "bbae58c13769c8cd79fc44544704cbf50c84215d45dfe2e2d1ac0a2755253fdc",
+        "size": 3142
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/repository/usage_billing_repo.go",
+      "kind": "modified",
+      "before": {
+        "hash": "98cfb4c3ba0dfa1e9cb1205dec99ab53bacf23452ed9ecabe7b5e7cbcfdc6444",
+        "size": 19133
+      },
+      "after": {
+        "hash": "07fc82b82d08eac9ae0fe24ced7746f881a0e68ce2180e58288e658a97f11ec5",
+        "size": 19689
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/repository/usage_billing_repo_integration_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "2bb60fe119a928ae95c678856d73c78306e0e901ecefaca308c27e83f71e6014",
+        "size": 12560
+      },
+      "after": {
+        "hash": "8e18bf3346758cbdd3725480daf906c3c72456b353160520c9f6da44b76cbef2",
+        "size": 15938
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/repository/user_subscription_repo.go",
+      "kind": "modified",
+      "before": {
+        "hash": "18d5bc6c9a62a1bed91ae23fb522ecae414ec25abb16712d1378b917192c7d42",
+        "size": 22443
+      },
+      "after": {
+        "hash": "0e36d460fb77f97254a78b4d71324c18a3f002cf356dddd235cce41b1d194009",
+        "size": 27799
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/repository/user_subscription_repo_integration_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "4f5d09f3dfe2ae768330786312d9ddf4338dc19082a83e027d7e9c3eda910ec7",
+        "size": 33340
+      },
+      "after": {
+        "hash": "7e9712bcd8f10e82e03dd6bd826734e851a996a3c9b7bdeb4583e2f87aad446c",
+        "size": 36701
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/repository/user_subscription_repo_update_test.go",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "29dd6bf57e4c6247390ba0e6ebf8c9d31879c8629f46120bbc6b78af737774e5",
+        "size": 1122
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/repository/wire.go",
+      "kind": "modified",
+      "before": {
+        "hash": "4cca48574fbf0f5c5ee5a7415ccfa0775075c6e104c9e3cae2cbfb8136d0fcb3",
+        "size": 7400
+      },
+      "after": {
+        "hash": "eb2391a142bc9db11a9aa156778866a7470886e0331889b2d949ca5edb9c8a99",
+        "size": 7498
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/server/middleware/api_key_auth_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "900284b0190cb37bcbfb1422b457abc60a219f7c468860bae1e6c56f6a273961",
+        "size": 58962
+      },
+      "after": {
+        "hash": "1f2978aa634a481afde7eaf584fa7cee8a0630a21abc76b3e6fe385bf6eed400",
+        "size": 59914
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/server/middleware/cors.go",
+      "kind": "modified",
+      "before": {
+        "hash": "4c9fb70786ab052e64f08c114c036f2e68d650e1e3b845d0234720384e2e0766",
+        "size": 3369
+      },
+      "after": {
+        "hash": "07cc0e9363b056602b047fc27e50eb5d4820d295692e97b7f04d380d64379fa3",
+        "size": 3411
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/server/middleware/cors_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "4718a0a5e238b835ae0e47ae0be9ba678e5465a6cc66892c13706fc8b3b1a6d5",
+        "size": 9449
+      },
+      "after": {
+        "hash": "4a6e4e0787169d1dd4ac7f44d25375bc3b883f7748e96f5eface178685af9fc2",
+        "size": 10430
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/server/routes/user.go",
+      "kind": "modified",
+      "before": {
+        "hash": "b577489bcad3a709d5b246b031dfb114602fe636f2636150f2eff36885fc38da",
+        "size": 4548
+      },
+      "after": {
+        "hash": "1f5496ac07b0366541dd88e15251fd49bed4ba240ff52c92eda397e2ab53b016",
+        "size": 4632
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/admin_service_delete_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "f0a40268b5bf3502cbb8858502ea919c7dc0b2baf9dd5bfe4d307dbb320e9b4f",
+        "size": 25700
+      },
+      "after": {
+        "hash": "925d324494c9207057ca49db6fc8e01d485559a301c19c58a6b98f180b3b7f03",
+        "size": 25715
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/billing_cache_service.go",
+      "kind": "modified",
+      "before": {
+        "hash": "a25c1522e3e45e5755cc62f79a9b1ccd1f4ad54eee9d52339aade4a245ef2865",
+        "size": 49247
+      },
+      "after": {
+        "hash": "ef54ebbb00fce139c5be6b3475f6006f35e84438cbd8d222b9a57a66874313ce",
+        "size": 50534
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/billing_cache_service_singleflight_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "fa0f9937c3a6e65de6a3c9fbf90e160a173bd780f7c2c3d9f663d51658cb77d4",
+        "size": 4733
+      },
+      "after": {
+        "hash": "7b9e72b9d7d2b5a4e31501406b01d0db26be4fae16bfae57ea13f61087c6fe33",
+        "size": 4748
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/billing_cache_service_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "047e588a66a6351ea4fccf7414f16be486fe62d7caa73ee1409b7e44ca8d5979",
+        "size": 4272
+      },
+      "after": {
+        "hash": "cf56acf41fa95a9b1abf39603200e1bbaec416c7301fa7615a5fbcad10731129",
+        "size": 6635
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/billing_service.go",
+      "kind": "modified",
+      "before": {
+        "hash": "86e97f08a12aef6fe057fce48fe58339b684febaa7f0c47d886c688eb137fdb4",
+        "size": 65269
+      },
+      "after": {
+        "hash": "0fe6b296af8a159c04fc0e1757710b76da6da5b02dcbc101c05eb38e1f0b3c70",
+        "size": 65582
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/gateway_usage_billing.go",
+      "kind": "modified",
+      "before": {
+        "hash": "4e15af3b339d4db9ff1498e6073421f08d0de4e95a824380ff21c53210100a6f",
+        "size": 44697
+      },
+      "after": {
+        "hash": "7004456941ebcdc256ec7d0ce0cbeb266edc0fe5e9cd4fd923ce3a2c8c50b77c",
+        "size": 45851
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/gateway_usage_billing_fallback_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "950a1f0bb0ca65cabf18e845aa9936689f787c0c3ad51dee98e16cb20eef5ae4",
+        "size": 3394
+      },
+      "after": {
+        "hash": "8be5a80621e1ab02c670c3e7e84480078b5adbd1193cceff5b115a7df2e01f06",
+        "size": 7966
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/idempotency_cleanup_service.go",
+      "kind": "modified",
+      "before": {
+        "hash": "11d702416b6ff6154311f8d2013ba12a1914edf16a07752c986e582606977125",
+        "size": 2197
+      },
+      "after": {
+        "hash": "2d7a42b314bd79acc0539ede09c7778e6a4b4f8cc2f4dff4db000e08e1d91bc7",
+        "size": 2760
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/payment_fulfillment.go",
+      "kind": "modified",
+      "before": {
+        "hash": "55ffd763cffc38e92f0c394f2b22353cbdbdd1c7a72af2ff7bc5825825cbf4e1",
+        "size": 29170
+      },
+      "after": {
+        "hash": "528b49e4ac0e13944e743f82267e99d7bfc072bcc430414e02f6fc42ec74d20d",
+        "size": 29096
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/redeem_service.go",
+      "kind": "modified",
+      "before": {
+        "hash": "0436470bafd87f4435695b004deff5c94ac3eedea3c509430c69e409d3b87f4d",
+        "size": 22791
+      },
+      "after": {
+        "hash": "8a278df356e223c7c8dcddb6d82519d5703741557fcc7625fac4933e0455a2a0",
+        "size": 22735
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/redeem_subscription_cache_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "71e5e07c0bf31a259fb1298fd822536fcffaea8cc3954250cc47ba62dc2b566d",
+        "size": 14646
+      },
+      "after": {
+        "hash": "ebac90670b352c1f60472362d9db7c71f499b97f8867c6e95ea83df6b54a24e6",
+        "size": 18989
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/subscription_advance_quota_test.go",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "57454ccc1c044377f12dd675b98d84e30237727b1b703a858a7585bf9b3bb4f3",
+        "size": 5077
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/subscription_assign_idempotency_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "592451a163fc9015e6555a6137c87eefabd25cd188477b64f8398c10a4524ffe",
+        "size": 22489
+      },
+      "after": {
+        "hash": "c4c7fe37a53b4e61d59233c64639eb7f42adb3ec785fb77fadc3dbfd494c84ac",
+        "size": 22603
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/subscription_cache_invalidation_outbox.go",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "b18caff5a721accfb071cd6582fab653185a9ed97b16d54a3a25d389d0f31c50",
+        "size": 5432
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/subscription_cache_invalidation_outbox_test.go",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "35c25764c783661a2403226187417a1ae4d0f548783219a214b9913ccd35185c",
+        "size": 7590
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/subscription_quota_advance_receipt.go",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "9d94ee175c374f503c36afd6e81f07e2fbc61d38a4c8082ea773bca25185d08d",
+        "size": 5693
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/subscription_reset_quota_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "c76112e62d22fbce7f55d201d698139f1b54c313d8a2af8ced66b9c9d585fa08",
+        "size": 7267
+      },
+      "after": {
+        "hash": "1d5d5aaab6cea99a28dc14a5abe0f77537fef93467379c9edb7552fedf92f627",
+        "size": 15031
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/subscription_service.go",
+      "kind": "modified",
+      "before": {
+        "hash": "a570b65408cb0ca7b5f6450487b3a0938a5de69c08b00235b91940325522de65",
+        "size": 41678
+      },
+      "after": {
+        "hash": "cf1174736b0e41418b515179a30086e36bf13b253af35ef14448e273fb9a9f7c",
+        "size": 54759
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/subscription_term_locking_test.go",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "cb5d421c91fbfb51dd2a0b7dadd077562136a2545cfbfdd1d5f669b3de3124ae",
+        "size": 14724
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/usage_billing.go",
+      "kind": "modified",
+      "before": {
+        "hash": "ec887c150fc725004c1c1e23ae0bdbc423f44c70a873a8e98c99daf7428642e5",
+        "size": 4777
+      },
+      "after": {
+        "hash": "d49a21557bba4b0b2409d67e200509a017ea294837e07c52b2c0288d8bc80c0f",
+        "size": 5085
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/user_service_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "a229ae5fac9b9925758b3c47cf11d48b4916a09b159f1d25f2b494e9a0cdec57",
+        "size": 30507
+      },
+      "after": {
+        "hash": "06ecc025be2273d40d7ff964a24032b255ee4d1ac51b8298132b58395d00949e",
+        "size": 30514
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/user_subscription_daily_quota_test.go",
+      "kind": "modified",
+      "before": {
+        "hash": "6994875a92fb6a107fadb34e899c346da42c2af6f47dd7c57ed2d6c687ed9c18",
+        "size": 56484
+      },
+      "after": {
+        "hash": "a626986843cdea4d76973c3adc2040ecff4deaad3a934454bd59bd8caf0dcaf3",
+        "size": 57691
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/internal/service/wire.go",
+      "kind": "modified",
+      "before": {
+        "hash": "bcbcaa9990911cde2bbecd5148c7dd620ca0ef9fa140f546524bc43aa47613e3",
+        "size": 33433
+      },
+      "after": {
+        "hash": "c09a34ca55f176998787258b3ca4e0d9fefb1ce6237f0a2f82dfa78ffa651c42",
+        "size": 33898
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/migrations/191_subscription_quota_advance_receipts.sql",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "da96db347664a15ef4178566ff0b85c9f8507732ded7c55d44a98dc69b2bc960",
+        "size": 762
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "backend/migrations/192_subscription_cache_invalidation_outbox.sql",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "a04ccd5c22705790c1a90fa4ea9fb8766aed862688733ccfd529522f98a166cc",
+        "size": 6072
+      },
+      "attributedTo": [
+        {
+          "path": "backend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/api/__tests__/subscriptions.spec.ts",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "eb896b6bd35532b2223723e4b724b0557138439741bf8dc9805ba4e5494f6127",
+        "size": 1543
+      },
+      "attributedTo": [
+        {
+          "path": "frontend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/api/subscriptions.ts",
+      "kind": "modified",
+      "before": {
+        "hash": "81a7efce17fb1a471a45b59e7d00a826905b038045436b3a52fbddc8477f7edc",
+        "size": 2007
+      },
+      "after": {
+        "hash": "2b11b8fc5b87b8074c5cf2305dda95adf4036298e08748d8d49bf0d525872c5d",
+        "size": 3240
+      },
+      "attributedTo": [
+        {
+          "path": "frontend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/components/subscription/SubscriptionQuotaAdvanceDialog.vue",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "9815b46ad513a9e221f4131d0fc2e46d128dbb52d573fe864e8e749746d345c8",
+        "size": 6347
+      },
+      "attributedTo": [
+        {
+          "path": "frontend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/components/subscription/__tests__/SubscriptionQuotaAdvanceDialog.spec.ts",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "d8d4a11ffad94cca37be0c1738be511c2bca65bec6dd5292e7d9fedd8fb8718a",
+        "size": 4941
+      },
+      "attributedTo": [
+        {
+          "path": "frontend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/i18n/locales/en/misc.ts",
+      "kind": "modified",
+      "before": {
+        "hash": "5f24255ef1ae403af6629715c7e78d558c5136c7a8a9323effecbacb2de2d726",
+        "size": 39075
+      },
+      "after": {
+        "hash": "6839656cbbb4f94d911fc4be734c1478071d9c38f4de3df3b9d019f870d69e10",
+        "size": 39844
+      },
+      "attributedTo": [
+        {
+          "path": "frontend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/i18n/locales/zh/misc.ts",
+      "kind": "modified",
+      "before": {
+        "hash": "fb2d227c054cd9f24924397d87581ff5c1aa2bb3a88e1a36b67e2f77651eb267",
+        "size": 38108
+      },
+      "after": {
+        "hash": "9336c3d67cc7cfcf31176b45269b91727837e1ba066a5befbdef2ebb290ecbd5",
+        "size": 38850
+      },
+      "attributedTo": [
+        {
+          "path": "frontend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/utils/__tests__/subscriptionQuota.spec.ts",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "36fc917483efaa97d716126f3337a7b5f320537d12c0d5afe2fcfd0db673ffff",
+        "size": 3583
+      },
+      "attributedTo": [
+        {
+          "path": "frontend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/utils/subscriptionQuota.ts",
+      "kind": "modified",
+      "before": {
+        "hash": "f8fb2fb5beece38b2a8b6bfac9f4dac6d190400b271bc6bff327146bcdebbd89",
+        "size": 1276
+      },
+      "after": {
+        "hash": "2907bf35739cd6aee15eb69acd3c2e9a3761c5d54435f2a193884e37cdbe5f61",
+        "size": 4804
+      },
+      "attributedTo": [
+        {
+          "path": "frontend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/views/user/SubscriptionsView.vue",
+      "kind": "modified",
+      "before": {
+        "hash": "7fc947666d1f01c3d480f04d3e306b16179adfb7472257d00a89d64e88cdcb9e",
+        "size": 15642
+      },
+      "after": {
+        "hash": "cdffe96ddd3ce096fb0e00f02e91076461048b1f0cd1391bbc9e27dc705617c7",
+        "size": 17298
+      },
+      "attributedTo": [
+        {
+          "path": "frontend",
+          "kind": "directory"
+        }
+      ]
+    },
+    {
+      "path": "frontend/src/views/user/__tests__/SubscriptionsView.spec.ts",
+      "kind": "added",
+      "before": null,
+      "after": {
+        "hash": "de2267fa6d08a3bb64abd3d202a8224f166b51cf2f790b5f289d9875696fc206",
+        "size": 3849
+      },
+      "attributedTo": [
+        {
+          "path": "frontend",
+          "kind": "directory"
+        }
+      ]
+    }
+  ],
+  "unattributed": [],
+  "unresolvedScopes": [],
+  "noCodeReason": null,
+  "scopeHash": "a6cae28ee9a406754dc68ade67dfd00a2347010a3123364dc80ff38d16e3bb0f"
+}

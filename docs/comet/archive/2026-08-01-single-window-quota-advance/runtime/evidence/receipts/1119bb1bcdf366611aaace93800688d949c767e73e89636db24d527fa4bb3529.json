@@ -1,0 +1,54 @@
+{
+  "schema": "comet.native.verification-receipt.v3",
+  "kind": "automated-check",
+  "role": "acceptance-evidence",
+  "status": "passed",
+  "bindings": {
+    "change": "single-window-quota-advance",
+    "sourceRevision": 3,
+    "contractHash": "5259b488af14ef2888c60e26bd9c0443adb1668b6e80b2ba84484492beb7ef01",
+    "scopeHash": "dfac935d13ba5646efc90f1478fea73f2df3245593d82f5bccc6a483b0701db7",
+    "snapshotHash": "654f58bc279e3f396f3bc7312a03be139c648dd2bb44d72b7f3dccf7525e2065",
+    "artifactHash": "4e3ba326e66b988386362710f88c9f3402b9767a8387f92462b15aba00fec22c"
+  },
+  "acceptanceIds": [
+    "acceptance-d895609bae14c6e2c43e07608ef2399e7f3c0dc5df9a45e4c9161c2f91ccdc36"
+  ],
+  "actor": "native-runtime:command:go",
+  "issuedAt": "2026-08-01T05:40:54.450Z",
+  "evidence": {
+    "executable": "go",
+    "args": [
+      "-C",
+      "backend",
+      "test",
+      "-tags=unit",
+      "./internal/service",
+      "-run",
+      "TestAdvanceQuotaCycle_RejectsTwoExhaustedWindowsBeforeUpdate",
+      "-count=1"
+    ],
+    "cwd": ".",
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "timeoutMs": 120000,
+    "startedAt": "2026-08-01T05:40:45.253Z",
+    "endedAt": "2026-08-01T05:40:54.450Z",
+    "worktree": {
+      "provider": "git",
+      "root": ".",
+      "beforeCommit": "54fbe346efa3f414382b5ba0a4bbc05eba6ce38b",
+      "afterCommit": "54fbe346efa3f414382b5ba0a4bbc05eba6ce38b"
+    },
+    "afterFence": {
+      "snapshotHash": "654f58bc279e3f396f3bc7312a03be139c648dd2bb44d72b7f3dccf7525e2065",
+      "scopeHash": "dfac935d13ba5646efc90f1478fea73f2df3245593d82f5bccc6a483b0701db7",
+      "matched": true
+    },
+    "outputHash": "13adccbcceff67ee813d5db9371c027fada190d28304578d50d4dfd90bb6b98e",
+    "outputSummary": "ok  \tgithub.com/Wei-Shaw/sub2api/internal/service\t1.716s",
+    "outputTruncated": false
+  },
+  "receiptHash": "1119bb1bcdf366611aaace93800688d949c767e73e89636db24d527fa4bb3529"
+}

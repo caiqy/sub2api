@@ -1,0 +1,47 @@
+{
+  "schema": "comet.native.verification-receipt.v3",
+  "kind": "automated-check",
+  "role": "acceptance-evidence",
+  "status": "passed",
+  "bindings": {
+    "change": "require-all-exhausted-quota-windows",
+    "sourceRevision": 6,
+    "contractHash": "bfd96357f270b8a1b505f1657018a9b080363409c47f8a64dbe685b4f2c3622e",
+    "scopeHash": "de22f08eed5619a370bcacd17a27b6da094ee2deaaed3913f0a5be554350acf7",
+    "snapshotHash": "82de231bb98468c3cf0436abdc04af98ea2f09bddbb769cfec2ef44b922dc6e5",
+    "artifactHash": "a991556b53f58a0211051616d6557d496a751604c599914db473139d97eeda99"
+  },
+  "acceptanceIds": [
+    "acceptance-15814a0ad0a2cdd422590d4cba241f0de33da5063e65a9c93de26368890aecb0"
+  ],
+  "actor": "native-runtime:command:go",
+  "issuedAt": "2026-08-01T03:07:49.838Z",
+  "evidence": {
+    "executable": "go",
+    "args": [
+      "version"
+    ],
+    "cwd": ".",
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "timeoutMs": 60000,
+    "startedAt": "2026-08-01T03:07:49.704Z",
+    "endedAt": "2026-08-01T03:07:49.838Z",
+    "worktree": {
+      "provider": "git",
+      "root": ".",
+      "beforeCommit": "b24bc74bdccd91a2f2fc6b1f49e5d058dbe53158",
+      "afterCommit": "b24bc74bdccd91a2f2fc6b1f49e5d058dbe53158"
+    },
+    "afterFence": {
+      "snapshotHash": "82de231bb98468c3cf0436abdc04af98ea2f09bddbb769cfec2ef44b922dc6e5",
+      "scopeHash": "de22f08eed5619a370bcacd17a27b6da094ee2deaaed3913f0a5be554350acf7",
+      "matched": true
+    },
+    "outputHash": "89dcc0e791e19c2da9bb1b127660cfeaa4725589dd52e972325c903181dc1842",
+    "outputSummary": "go version go1.26.3 windows/amd64",
+    "outputTruncated": false
+  },
+  "receiptHash": "088a944cb2b0f3eca20f19d7c28ab40c08fe2f267d0cf4aab79a694a7f1ba2bb"
+}

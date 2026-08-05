@@ -1,0 +1,23 @@
+schema: comet.native.v3
+minimum_runtime_version: 3
+revision: 8
+verification_protocol: legacy-v1
+name: self-service-quota-cycle-reset
+language: zh-CN
+phase: archive
+brief: brief.md
+approval: confirmed
+approved_contract_hash: d8d4c47615b33cf1eb7263528f0464e6e05c1270ba622bc3830d1de61106183f
+spec_changes:
+  - capability: subscription-quota-cycle
+    operation: create
+    source: specs/subscription-quota-cycle/spec.md
+    base_hash: null
+verification_result: pass
+verification_report: verification.md
+implementation_scope: runtime/evidence/scopes/a6cae28ee9a406754dc68ade67dfd00a2347010a3123364dc80ff38d16e3bb0f.json
+verification_evidence: runtime/evidence/verifications/9b6fee79b1b54393668ceabc5b54758af1813603309a783f1d877f1f9f4515be.json
+partial_allowance: null
+archived: true
+created_at: 2026-07-31
+run_id: aee8390a-34ae-4754-b2db-026db18af3a0
