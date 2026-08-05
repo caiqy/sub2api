@@ -45,7 +45,9 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 	if strings.TrimSpace(claudeReq.Model) == "" {
 		return nil, fmt.Errorf("missing model")
 	}
-	originalModel := claudeReq.Model
+	originalModel := strings.Clone(claudeReq.Model)
+	requestStream := claudeReq.Stream
+	claudeReq = antigravity.ClaudeRequest{}
 
 	// 构建上游请求 URL
 	upstreamURL := baseURL + "/v1/messages"
@@ -65,6 +67,7 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 		}
 		defer CleanupRequestBodyHandle(bodyHandle)
 	}
+	body = nil
 	requestBody, err := bodyHandle.Open()
 	if err != nil {
 		return nil, err
@@ -131,7 +134,7 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 	var firstTokenMs *int
 	var clientDisconnect bool
 
-	if claudeReq.Stream {
+	if requestStream {
 		// 流式响应：透传
 		c.Header("Content-Type", "text/event-stream")
 		c.Header("Cache-Control", "no-cache")
@@ -164,7 +167,7 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 
 	return &ForwardResult{
 		Model:            originalModel,
-		Stream:           claudeReq.Stream,
+		Stream:           requestStream,
 		Duration:         duration,
 		FirstTokenMs:     firstTokenMs,
 		ClientDisconnect: clientDisconnect,
