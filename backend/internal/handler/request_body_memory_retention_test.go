@@ -232,9 +232,17 @@ func TestAsyncImageRequestBodyMemoryRetentionWhileWorkersBlocked(t *testing.T) {
 func measureBlockedAsyncImageHeap(t *testing.T, size int64, workers int, spoolDir string) uint64 {
 	t.Helper()
 	store := &asyncImageMemoryStore{tasks: make(map[string]*service.ImageTaskRecord)}
+	release := make(chan struct{})
 	tasks := service.NewImageTaskServiceWithUploader(store, nil, time.Hour, time.Minute)
 	started := make(chan struct{}, workers)
-	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseWorkers := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(func() {
+		releaseWorkers()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		require.NoError(t, tasks.Shutdown(shutdownCtx))
+	})
 	h := &AsyncImageHandler{tasks: tasks}
 	h.execute = func(_ string, c *gin.Context) {
 		started <- struct{}{}
@@ -262,7 +270,7 @@ func measureBlockedAsyncImageHeap(t *testing.T, size int64, workers int, spoolDi
 		waitMatrixSignal(t, started, "async image worker")
 	}
 	heap := retainedHeapAfterGC()
-	close(release)
+	releaseWorkers()
 	require.NoError(t, tasks.Shutdown(context.Background()))
 	assertMatrixTempFiles(t, spoolDir, "sub2api-request-body-", false)
 	return heap

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -155,6 +156,117 @@ func TestAsyncImageHandlerSpoolsReplaysAndCleansOwnedBody(t *testing.T) {
 	}
 	assertMatrixTempFiles(t, spoolDir, "sub2api-request-body-", true)
 	close(release)
+	require.Eventually(t, func() bool {
+		entries, err := os.ReadDir(spoolDir)
+		return err == nil && len(entries) == 0
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestAsyncImageHandlerSpoolsReplaysAndCleansOwnedMultipartBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	spoolDir := useAsyncImageSpoolDir(t)
+	store := &asyncImageMemoryStore{tasks: make(map[string]*service.ImageTaskRecord)}
+	tasks := service.NewImageTaskServiceWithUploader(store, nil, time.Hour, time.Minute)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseWorker := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(func() {
+		releaseWorker()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		require.NoError(t, tasks.Shutdown(shutdownCtx))
+	})
+	blocked := make(chan struct{})
+	gotBody := make(chan struct {
+		bodyHash      [32]byte
+		replayHash    [32]byte
+		contentType   string
+		contentLength int64
+		err           error
+	}, 1)
+	h := &AsyncImageHandler{tasks: tasks}
+	h.execute = func(_ string, c *gin.Context) {
+		body, err := io.ReadAll(c.Request.Body)
+		if err == nil {
+			err = c.Request.Body.Close()
+		}
+		if err != nil {
+			gotBody <- struct {
+				bodyHash      [32]byte
+				replayHash    [32]byte
+				contentType   string
+				contentLength int64
+				err           error
+			}{err: err}
+			return
+		}
+		replay, err := c.Request.GetBody()
+		if err != nil {
+			gotBody <- struct {
+				bodyHash      [32]byte
+				replayHash    [32]byte
+				contentType   string
+				contentLength int64
+				err           error
+			}{err: err}
+			return
+		}
+		replayed, err := io.ReadAll(replay)
+		if closeErr := replay.Close(); err == nil {
+			err = closeErr
+		}
+		gotBody <- struct {
+			bodyHash      [32]byte
+			replayHash    [32]byte
+			contentType   string
+			contentLength int64
+			err           error
+		}{
+			bodyHash:      sha256.Sum256(body),
+			replayHash:    sha256.Sum256(replayed),
+			contentType:   c.Request.Header.Get("Content-Type"),
+			contentLength: c.Request.ContentLength,
+			err:           err,
+		}
+		close(blocked)
+		<-release
+		c.JSON(http.StatusOK, gin.H{"data": []gin.H{{"url": "https://example.test/image.png"}}})
+	}
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		groupID := int64(3)
+		c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+			ID:      9,
+			UserID:  7,
+			GroupID: &groupID,
+			Group:   &service.Group{ID: groupID, Platform: service.PlatformOpenAI, AllowImageGeneration: true},
+		})
+		c.Next()
+	})
+	router.POST("/v1/images/generations/async", h.Submit)
+
+	body, contentType := matrixMultipartBody(t, int(service.DefaultRequestBodySpoolThresholdBytes)+1)
+	wantHash := sha256.Sum256(body)
+	request := httptest.NewRequest(http.MethodPost, "/v1/images/generations/async", bytes.NewReader(body))
+	request.Header.Set("Content-Type", contentType)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusAccepted, recorder.Code)
+	select {
+	case got := <-gotBody:
+		require.NoError(t, got.err)
+		require.Equal(t, wantHash, got.bodyHash)
+		require.Equal(t, wantHash, got.replayHash)
+		require.Equal(t, contentType, got.contentType)
+		require.Equal(t, int64(len(body)), got.contentLength)
+	case <-time.After(time.Second):
+		t.Fatal("async image task did not read its multipart body")
+	}
+	waitMatrixSignal(t, blocked, "async image multipart worker")
+	assertMatrixTempFiles(t, spoolDir, "sub2api-request-body-", true)
+	releaseWorker()
 	require.Eventually(t, func() bool {
 		entries, err := os.ReadDir(spoolDir)
 		return err == nil && len(entries) == 0
