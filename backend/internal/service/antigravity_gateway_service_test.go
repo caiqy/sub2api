@@ -1989,6 +1989,35 @@ func TestAntigravityGatewayService_ForwardUpstreamStripsContextManagementFromWir
 	require.False(t, gjson.GetBytes(upstream.requestBodies[0], "context_management").Exists(), string(upstream.requestBodies[0]))
 }
 
+func TestAntigravityGatewayService_ForwardUpstreamTransportErrorClosesResponseBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"hello"}]}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	responseBody := &closeTrackingReadCloser{Reader: strings.NewReader(`{"error":"partial"}`)}
+	transportErr := errors.New("upstream transport failed")
+	upstream := &transportSpoolCloseUpstream{
+		resp: &http.Response{StatusCode: http.StatusBadGateway, Header: http.Header{}, Body: responseBody},
+		err:  transportErr,
+	}
+	svc := &AntigravityGatewayService{
+		settingService: NewSettingService(&antigravitySettingRepoStub{}, &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}),
+		httpUpstream:   upstream,
+	}
+	account := &Account{ID: 75, Name: "upstream-error", Platform: PlatformAntigravity, Type: AccountTypeUpstream, Concurrency: 1, Credentials: map[string]any{"base_url": "https://example.com", "api_key": "token"}}
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+
+	result, err := svc.ForwardUpstream(context.Background(), c, account, handle)
+
+	require.Nil(t, result)
+	require.ErrorIs(t, err, transportErr)
+	require.True(t, responseBody.closed)
+	require.Empty(t, recorder.Body.String())
+}
+
 func TestAntigravityGatewayService_ForwardUpstreamKeepsLargeBodyFileBackedWhileBlocked(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	writer := httptest.NewRecorder()
