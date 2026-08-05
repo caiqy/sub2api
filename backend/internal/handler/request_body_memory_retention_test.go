@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -211,6 +212,60 @@ func stringBackedByBytes(value string, body []byte) bool {
 	valueStart := uintptr(unsafe.Pointer(unsafe.StringData(value)))
 	bodyStart := uintptr(unsafe.Pointer(unsafe.SliceData(body)))
 	return valueStart >= bodyStart && valueStart < bodyStart+uintptr(len(body))
+}
+
+func TestAsyncImageRequestBodyMemoryRetentionWhileWorkersBlocked(t *testing.T) {
+	for run := 0; run < 3; run++ {
+		t.Run(fmt.Sprintf("run-%d", run), func(t *testing.T) {
+			spoolDir := useAsyncImageSpoolDir(t)
+			heap2MB := measureBlockedAsyncImageHeap(t, 2<<20, 4, spoolDir)
+			heap89MB := measureBlockedAsyncImageHeap(t, 89<<20/10, 4, spoolDir)
+			var growth uint64
+			if heap89MB > heap2MB {
+				growth = heap89MB - heap2MB
+			}
+			require.Less(t, growth, uint64(6<<20), "four workers must not retain four complete request bodies")
+		})
+	}
+}
+
+func measureBlockedAsyncImageHeap(t *testing.T, size int64, workers int, spoolDir string) uint64 {
+	t.Helper()
+	store := &asyncImageMemoryStore{tasks: make(map[string]*service.ImageTaskRecord)}
+	tasks := service.NewImageTaskServiceWithUploader(store, nil, time.Hour, time.Minute)
+	started := make(chan struct{}, workers)
+	release := make(chan struct{})
+	h := &AsyncImageHandler{tasks: tasks}
+	h.execute = func(_ string, c *gin.Context) {
+		started <- struct{}{}
+		<-release
+		c.JSON(http.StatusOK, gin.H{"data": []gin.H{{"url": "https://example.test/image.png"}}})
+	}
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		groupID := int64(1501)
+		c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{
+			ID: 1501, UserID: 1501, GroupID: &groupID,
+			Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI, AllowImageGeneration: true},
+		})
+		c.Next()
+	})
+	router.POST("/v1/images/generations/async", h.Submit)
+	for i := 0; i < workers; i++ {
+		recorder := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/v1/images/generations/async", retentionAsyncImageJSONBody(size))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
+	}
+	for i := 0; i < workers; i++ {
+		waitMatrixSignal(t, started, "async image worker")
+	}
+	heap := retainedHeapAfterGC()
+	close(release)
+	require.NoError(t, tasks.Shutdown(context.Background()))
+	assertMatrixTempFiles(t, spoolDir, "sub2api-request-body-", false)
+	return heap
 }
 
 func TestRequestBodyMemoryRetentionWhileUpstreamBlocked(t *testing.T) {
@@ -595,6 +650,16 @@ func retentionJSONBody(branch, path string, size int64) io.Reader {
 	if branch == "messages-gemini-mixed" {
 		prefix = `{"model":"claude-opus-4-6","max_tokens":16,"stream":false,"messages":[{"role":"user","content":"`
 	}
+	return io.MultiReader(
+		strings.NewReader(prefix),
+		io.LimitReader(retentionPaddingReader{}, size-int64(len(prefix)+len(suffix))),
+		strings.NewReader(suffix),
+	)
+}
+
+func retentionAsyncImageJSONBody(size int64) io.Reader {
+	const prefix = `{"model":"gpt-image-1","prompt":"`
+	const suffix = `"}`
 	return io.MultiReader(
 		strings.NewReader(prefix),
 		io.LimitReader(retentionPaddingReader{}, size-int64(len(prefix)+len(suffix))),
