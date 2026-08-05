@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -63,6 +64,14 @@ func TestRequestBodyDefaultSpoolThresholdMatrix(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			testRequestBodySizeMatrixJSON(t, tt.size, false)
+		})
+	}
+}
+
+func TestMultipartRequestBodyDefaultSpoolThresholdBoundary(t *testing.T) {
+	for _, size := range []int{1 << 20, (1 << 20) + 1} {
+		t.Run(fmt.Sprintf("%d", size), func(t *testing.T) {
+			testRequestBodySizeMatrixMultipart(t, size)
 		})
 	}
 }
@@ -142,7 +151,7 @@ func testRequestBodySizeMatrixMultipart(t *testing.T, size int) {
 	gin.SetMode(gin.TestMode)
 	rawDir, formDir := t.TempDir(), t.TempDir()
 	oldOptions := jsonRequestBodyHandleOptions
-	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 10 << 20, PreviewLimitBytes: 64, TempDir: rawDir}
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: service.DefaultRequestBodySpoolThresholdBytes, PreviewLimitBytes: 64, TempDir: rawDir}
 	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
 	t.Setenv("TMPDIR", formDir)
 	t.Setenv("TMP", formDir)
@@ -182,7 +191,8 @@ func testRequestBodySizeMatrixMultipart(t *testing.T, size int) {
 	for _, snapshot := range []string{detail.RequestBody, detail.UpstreamRequestBody, opsBody} {
 		assertMatrixRequestBodySnapshot(t, "multipart snapshot", snapshot, clientBody, "matrix-file-")
 	}
-	assertMatrixTempFiles(t, rawDir, "sub2api-request-body-", size > 10<<20)
+	wantSpool := int64(size) > service.DefaultRequestBodySpoolThresholdBytes
+	assertMatrixTempFiles(t, rawDir, "sub2api-request-body-", wantSpool)
 	assertMatrixTempFiles(t, formDir, "multipart-", true)
 
 	release()

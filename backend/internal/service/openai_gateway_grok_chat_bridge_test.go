@@ -481,6 +481,39 @@ func TestForwardGrokChatViaResponsesStreamingPropagatesCachedUsage(t *testing.T)
 	require.Contains(t, recorder.Body.String(), "data: [DONE]")
 }
 
+func TestForwardGrokChatViaResponsesLargeBodyPreservesSilentRefusalDetection(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	content := strings.Repeat("x", openAISilentRefusalMinRequestBodyBytes)
+	body := []byte(`{"model":"grok","stream":true,"messages":[{"role":"user","content":"` + content + `"}]}`)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, grokChatRawEndpoint, bytes.NewReader(body))
+	c.Set("api_key", &APIKey{ID: 7401})
+
+	account := grokChatBridgeTestAccount(74)
+	repo := &grokQuotaAccountRepo{mockAccountRepoForPlatform: &mockAccountRepoForPlatform{
+		accountsByID: map[int64]*Account{account.ID: account},
+	}}
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "Xai-Request-Id": []string{"silent-refusal"}},
+		Body:       io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_empty\",\"status\":\"completed\",\"output\":[]}}\n\n")),
+	}}
+	svc := &OpenAIGatewayService{
+		httpUpstream:      upstream,
+		grokTokenProvider: NewGrokTokenProvider(repo, nil),
+		accountRepo:       repo,
+	}
+
+	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "")
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.True(t, IsOpenAISilentRefusalErrorBody(failoverErr.ResponseBody))
+	require.Empty(t, recorder.Body.String(), "silent refusal must not release pending empty chunks")
+}
+
 func TestForwardGrokChatRuntimeGateFallsBackToRaw(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
