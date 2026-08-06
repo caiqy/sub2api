@@ -267,7 +267,6 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 	}
 	requestPayloadHash := service.HashUsageRequestPayload(body)
 	hasThoughtSignature := bytes.Contains(body, []byte(`"thoughtSignature"`))
-	body = nil
 
 	// Get subscription (may be nil)
 	subscription, _ := middleware.GetSubscriptionFromContext(c)
@@ -381,13 +380,11 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				return
 			}
 			cleanedBody := service.CleanGeminiNativeThoughtSignatures(canonicalBody)
-			canonicalBody = nil
 			if err := coordinator.SetEffectiveBytes(cleanedBody); err != nil {
 				googleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
 				return
 			}
 			effectiveBody = coordinator.Effective()
-			cleanedBody = nil
 			sessionBoundAccountID = account.ID
 		} else if selectionSessionKey != "" && sessionBoundAccountID == 0 && !cleanedForUnknownBinding && hasThoughtSignature {
 			// 无缓存绑定但请求里已有 thoughtSignature：常见于缓存丢失/TTL 过期后，客户端继续携带旧签名。
@@ -401,13 +398,11 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				return
 			}
 			cleanedBody := service.CleanGeminiNativeThoughtSignatures(canonicalBody)
-			canonicalBody = nil
 			if err := coordinator.SetEffectiveBytes(cleanedBody); err != nil {
 				googleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
 				return
 			}
 			effectiveBody = coordinator.Effective()
-			cleanedBody = nil
 			cleanedForUnknownBinding = true
 			sessionBoundAccountID = account.ID
 		} else if sessionBoundAccountID == 0 {

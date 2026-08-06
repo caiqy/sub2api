@@ -623,14 +623,16 @@ func retentionJSONBody(branch, path string, size int64) io.Reader {
 	if branch == "grok-responses" {
 		prefix = `{"model":"grok-4.5","stream":false,"input":"`
 	}
-	if path == "/v1/chat/completions" {
+	switch path {
+	case "/v1/chat/completions":
 		prefix, suffix = `{"model":"gpt-5","stream":false,"messages":[{"role":"user","content":"`, `"}]}`
-		if branch == "gateway-chat-anthropic" {
+		switch branch {
+		case "gateway-chat-anthropic":
 			prefix = `{"model":"claude-sonnet-4-5","stream":false,"messages":[{"role":"user","content":"`
-		} else if branch == "gateway-chat-gemini" {
+		case "gateway-chat-gemini":
 			prefix = `{"model":"gemini-2.5-flash","stream":false,"messages":[{"role":"user","content":"`
 		}
-	} else if path == "/v1/messages" {
+	case "/v1/messages":
 		prefix, suffix = `{"model":"gemini-2.5-flash","max_tokens":16,"stream":false,"messages":[{"role":"user","content":"`, `"}]}`
 	}
 	if branch == "openai-messages" || branch == "openai-messages-chat-fallback" {

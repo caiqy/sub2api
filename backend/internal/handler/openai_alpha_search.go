@@ -101,8 +101,6 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 	forwardHandle := coordinator.Effective()
 	service.SetUsageRequestBody(c, service.RequestBodyPreviewSnapshot(forwardHandle.PreviewString(), forwardHandle.Size()))
 	service.BindOpenAIRequestBodyHandle(c, forwardHandle)
-	body = nil
-	forwardBody = nil
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
 

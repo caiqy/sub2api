@@ -108,7 +108,6 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 		imageTaskJSONError(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 		return
 	}
-	body = nil
 	if c.Request.Body != nil {
 		_ = c.Request.Body.Close()
 	}

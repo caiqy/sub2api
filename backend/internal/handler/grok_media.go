@@ -142,7 +142,6 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 				return "", err
 			}
 			setErr := coordinator.SetEffectiveBytes(forwardBody)
-			forwardBody = nil
 			return forwardContentType, setErr
 		}()
 		if prepareErr != nil {
@@ -201,8 +200,6 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		sessionSeed = []byte(requestID)
 	}
 	sessionHash = h.gatewayService.GenerateSessionHash(c, sessionSeed)
-	sessionSeed = nil
-	body = nil
 	requestInfo.ReleaseText()
 	if endpoint.IsGenerationRequest() {
 		imageReleaseFunc, acquired := h.acquireImageGenerationSlot(c, streamStarted)
