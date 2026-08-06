@@ -62,3 +62,20 @@ Task 3 删除 `sendCCUpstreamRequest` 前，CodeGraph 未发现静态、接口�
 | `backend/Makefile` | `0327160ff0959575ed6a8f950d7d257a96ae3ab0` |
 
 本 change 未修改 lint/CI/Go/Make 配置，未使用 suppression、假读取或清零 helper，未恢复或修改 `staged-merge-upstream-v0-1-171`。
+
+## Full Verify
+
+| 检查项 | 结果 | 证据 |
+| --- | --- | --- |
+| Tasks 完整性 | PASS | OpenSpec tasks 10/10 完成 |
+| OpenSpec design 一致性 | PASS | 三批 lint 闭包与最小语义保持策略一致 |
+| Design Doc 一致性 | PASS | baseline identity、protected inputs、精确测试和最终门禁均满足设计约束 |
+| 能力规格场景 | PASS | `local-test-gates` 与 `request-body-retention-control` 相关门禁和精确测试通过 |
+| Proposal 目标 | PASS | backend lint 从 144 issues 恢复为 0，且未放宽 lint 配置 |
+| Delta spec 漂移 | PASS | `skip_specs: true`，无 delta spec，因此无漂移 |
+| Design Doc 可定位性 | PASS | `docs/superpowers/specs/2026-08-06-restore-backend-lint-gate-design.md` 存在且属于当前 change |
+
+- verify 阶段独立执行根级 `make test`：exit 0；backend 默认测试、unit-tagged 测试和 golangci-lint 通过，frontend ESLint、Vue typecheck 和 Vitest 通过，Vitest 汇总为 225 files、1698 tests。
+- `comet classic openspec validate restore-backend-lint-gate --strict`：exit 0，change valid。
+- build 最终 thorough review 已对同一实现 diff 给出 PASS；build 后无实现或测试改动，verify 阶段重新核对 proposal、design、Design Doc、tasks 和能力规格。
+- 验证结论：PASS。无 CRITICAL、IMPORTANT、WARNING 或 SUGGESTION。

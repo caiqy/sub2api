@@ -2,6 +2,8 @@
 comet_change: restore-backend-lint-gate
 role: technical-design
 canonical_spec: openspec
+archived-with: 2026-08-07-restore-backend-lint-gate
+status: final
 ---
 
 # Restore Backend Lint Gate 深度技术设计

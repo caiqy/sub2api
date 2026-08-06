@@ -2,6 +2,7 @@
 change: restore-backend-lint-gate
 design-doc: docs/superpowers/specs/2026-08-06-restore-backend-lint-gate-design.md
 base-ref: 9dafc41f7ca0d7ea334698bf554cf7e0facb6038
+archived-with: 2026-08-07-restore-backend-lint-gate
 ---
 
 # Restore Backend Lint Gate 实施计划
