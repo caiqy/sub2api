@@ -1058,6 +1058,10 @@ func TestOpenAIGatewayHandlerImages_OAuthMultipartSkipsEffectiveSpool(t *testing
 
 func TestOpenAIGatewayHandlerImages_MultipartReplayUsesMappedEffectiveBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	rawDir := t.TempDir()
+	oldOptions := jsonRequestBodyHandleOptions
+	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: rawDir, FilePrefix: "sub2api-test-"}
+	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
 	for _, tt := range []struct {
 		name         string
 		accounts     []*service.Account
@@ -1109,6 +1113,7 @@ func TestOpenAIGatewayHandlerImages_MultipartReplayUsesMappedEffectiveBody(t *te
 
 			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 			upstream.assert(t, tt.wantAccounts, tt.wantModels, tt.wantSameBody)
+			require.Empty(t, readTestDir(t, rawDir), "replayed effective body must clean its spool after handler completes")
 		})
 	}
 }
