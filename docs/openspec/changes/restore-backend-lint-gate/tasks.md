@@ -16,6 +16,6 @@
 
 ## 4. 恢复全仓绿色门禁
 
-- [ ] 4.1 运行 gofmt、`git diff --check` 与 uncapped golangci-lint，确认 144 项全部关闭且结果为 0 issues
-- [ ] 4.2 重跑 backend 默认/unit 测试及请求体内存保留矩阵，确认请求体 ownership、spool、retry/failover 和上游等待语义未回退
-- [ ] 4.3 运行仓库级 `make test` 并记录 exit 0，形成供后续 upstream merge change 更新 source base 的验证证据
+- [x] 4.1 运行 gofmt、`git diff --check` 与 uncapped golangci-lint，确认 144 项全部关闭且结果为 0 issues
+- [x] 4.2 重跑 backend 默认/unit 测试及请求体内存保留矩阵，确认请求体 ownership、spool、retry/failover 和上游等待语义未回退
+- [x] 4.3 运行仓库级 `make test` 并记录 exit 0，形成供后续 upstream merge change 更新 source base 的验证证据

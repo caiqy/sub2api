@@ -527,7 +527,7 @@ coordinator 不在本计划中选择 isolation、build、TDD 或 review 模式�
   if ($LASTEXITCODE -ne 0) { throw 'OpenSpec 3.3 task-checkoff failed' }
   ```
 
-- [ ] Task 4：最终 gate、证据与范围断言
+- [x] Task 4：最终 gate、证据与范围断言
 
   **OpenSpec 映射：**
   `4.1 运行 gofmt、`git diff --check` 与 uncapped golangci-lint，确认 144 项全部关闭且结果为 0 issues`
