@@ -428,7 +428,7 @@ coordinator 不在本计划中选择 isolation、build、TDD 或 review 模式�
   if ($LASTEXITCODE -ne 0) { throw 'OpenSpec 1.2 task-checkoff failed' }
   ```
 
-- [ ] Task 1：修复 handler、routes 与 QF1003
+- [x] Task 1：修复 handler、routes 与 QF1003
 
   **OpenSpec 映射：**
   `2.1 修复 handler 与 routes 中的无效局部 body 清零，保留可观察的 ownership/结构体字段清理，并通过 scoped lint 与 handler 测试`

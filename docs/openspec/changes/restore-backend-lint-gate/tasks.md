@@ -5,8 +5,8 @@
 
 ## 2. 修复入口层 lint
 
-- [ ] 2.1 修复 handler 与 routes 中的无效局部 body 清零，保留可观察的 ownership/结构体字段清理，并通过 scoped lint 与 handler 测试
-- [ ] 2.2 将生产与测试文件中的 3 项 QF1003 改为语义等价 tagged switch，并通过相关 handler 测试
+- [x] 2.1 修复 handler 与 routes 中的无效局部 body 清零，保留可观察的 ownership/结构体字段清理，并通过 scoped lint 与 handler 测试
+- [x] 2.2 将生产与测试文件中的 3 项 QF1003 改为语义等价 tagged switch，并通过相关 handler 测试
 
 ## 3. 修复服务层 lint
 
