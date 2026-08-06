@@ -103,11 +103,8 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 		return nil, err
 	}
 	upstreamCtx := ctx
-	body = nil
 	responsesReq = apicompat.ResponsesRequest{}
-	effectiveTools = nil
 	chatReq = nil
-	chatBody = nil
 	resp, err := s.sendCCUpstreamRequestHandle(upstreamCtx, c, account, targetURL, outboundHandle, upstreamModel, clientStream, apiKey, account.GetOpenAIUserAgent(), "")
 	if err != nil {
 		return nil, err

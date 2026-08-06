@@ -90,9 +90,6 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 		return nil, fmt.Errorf("create Grok Responses request body: %w", err)
 	}
 	defer func() { CleanupRequestBodyHandle(currentHandle) }()
-	body = nil
-	patchedBody = nil
-	mixedCacheIntentBody = nil
 
 	token, _, err := s.getRequestCredential(ctx, c, account)
 	if err != nil {

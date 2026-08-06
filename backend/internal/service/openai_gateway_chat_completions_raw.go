@@ -241,8 +241,6 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 		return nil, fmt.Errorf("create raw chat completions request body: %w", err)
 	}
 	defer CleanupRequestBodyHandle(outboundHandle)
-	body = nil
-	upstreamBody = nil
 	resp, err := s.sendCCUpstreamRequestHandle(ctx, c, account, targetURL, outboundHandle, upstreamModel, clientStream, token, customUA, grokCacheIdentity)
 	if err != nil {
 		return nil, err

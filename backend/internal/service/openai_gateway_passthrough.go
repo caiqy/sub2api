@@ -191,8 +191,6 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		c.Set("openai_passthrough", true)
 	}
 
-	body = nil
-	canonicalImageIntentBody = nil
 	var resp *http.Response
 	upstreamResponseCtx := ctx
 	recoveryTried := agentIdentityTaskRecoveryWasTried(ctx)
@@ -215,7 +213,6 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		publishOpenAIFinalUpstreamModel(c, upstreamReq)
 		SetOpsUpstreamAttempted(c, true)
 		upstreamResponseCtx = upstreamReq.Context()
-		attemptBody = nil
 		upstreamStart := time.Now()
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		closeOpenAIRequestBody(upstreamReq)

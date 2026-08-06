@@ -66,8 +66,6 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 		return nil, err
 	}
 	if account.IsOpenAIPersonalAccessToken() {
-		sourceBody = nil
-		body = nil
 		return s.forwardAlphaSearchViaResponsesWebSearch(ctx, c, account, bodyHandle, token, proxyURL, requestedModel, upstreamModel)
 	}
 
@@ -75,8 +73,6 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	if err != nil {
 		return nil, err
 	}
-	sourceBody = nil
-	body = nil
 
 	upstreamStart := time.Now()
 	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
@@ -161,8 +157,6 @@ func (s *OpenAIGatewayService) forwardAlphaSearchViaResponsesWebSearch(ctx conte
 	if err != nil {
 		return nil, err
 	}
-	alphaBody = nil
-	responsesBody = nil
 	SetActualOpenAIUpstreamEndpoint(c, "/v1/responses")
 
 	upstreamStart := time.Now()

@@ -105,8 +105,6 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 		return nil, fmt.Errorf("spool OpenAI messages chat fallback body: %w", err)
 	}
 	defer CleanupRequestBodyHandle(chatHandle)
-	body = nil
-	chatBody = nil
 	anthropicReq = apicompat.AnthropicRequest{}
 	chatReq = nil
 

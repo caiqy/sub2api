@@ -163,7 +163,6 @@ func (s *OpenAIGatewayService) CreateLiveCallHandle(
 	if model == "" {
 		model = "gpt-live"
 	}
-	body = nil
 	store, err := s.liveStore()
 	if err != nil {
 		return nil, err
