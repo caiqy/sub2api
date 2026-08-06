@@ -68,7 +68,7 @@ unexpected ignored change artifacts: (none)
 - `v0.1.171^{}`：`f0e7a9c7a23a7d02fb159b62fa809621eb0475a6`，与固定 peeled SHA 一致。
 - 严格祖先链：`git merge-base --is-ancestor v0.1.170 v0.1.171` exit 0。
 - merged `upstream/main` 的正式 tag 筛选为 `^v0\.1\.\d+$`；降序首项仍为 `v0.1.171`，未发现更高正式 tag。
-- 冻结范围预期规模：`b576f73a22c4bf23d61727fc93950766a7e33929..v0.1.170` 为 `62/242`；`v0.1.170..v0.1.171` 为 `49/206`。
+- 冻结范围预期规模：`v0.1.169..v0.1.170` 为 `62/242`；`v0.1.170..v0.1.171` 为 `49/206`。
 
 ### Task 2 命令与退出码
 
@@ -85,7 +85,8 @@ feature/20260806/staged-merge-upstream-v0-1-171
 Assert-CleanGate                                            exit 0
 git diff --cached --name-only                               exit 0
 git status --short --untracked-files=all                    exit 0
-git ls-files --others --ignored --exclude-standard -- ...   exit 0
+git ls-files --others --ignored --exclude-standard -- docs/openspec/changes/staged-merge-upstream-v0-1-171 docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md docs/superpowers/specs/2026-08-06-staged-merge-upstream-v0-1-171-design.md docs/superpowers/reports/2026-08-06-staged-merge-upstream-v0-1-171-build.md docs/superpowers/reports/2026-08-06-staged-merge-upstream-v0-1-171-verify.md
+exit 0
 
 git fetch upstream --tags --prune                           exit 0
 upstream/main: 00b859617 -> c123caddd
@@ -98,7 +99,8 @@ f0e7a9c7a23a7d02fb159b62fa809621eb0475a6
 
 git merge-base --is-ancestor v0.1.170 v0.1.171              exit 0
 
-git for-each-ref refs/tags --merged=upstream/main ...       exit 0
+git for-each-ref refs/tags --merged=upstream/main --format='%(refname:short)' | Where-Object { $_ -match '^v0\.1\.\d+$' } | Sort-Object { [version]$_.Substring(1) } -Descending
+exit 0
 highest formal v0.1.* tag: v0.1.171
 
 git log --oneline v0.1.171..upstream/main                   exit 0
