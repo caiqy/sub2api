@@ -461,7 +461,7 @@ coordinator 不在本计划中选择 isolation、build、TDD 或 review 模式�
   if ($LASTEXITCODE -ne 0) { throw 'OpenSpec 2.2 task-checkoff failed' }
   ```
 
-- [ ] Task 2：修复 Gateway/Anthropic/Bedrock/Antigravity
+- [x] Task 2：修复 Gateway/Anthropic/Bedrock/Antigravity
 
   **OpenSpec 映射：**
   `3.1 修复通用 Gateway、Anthropic、Bedrock 与 Antigravity 路径及其测试源中的无效局部 body 清零，并通过 manifest 闭包、package 测试和内存保留矩阵`
