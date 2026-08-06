@@ -68,9 +68,7 @@ func (s *GeminiMessagesCompatService) ForwardAsChatCompletions(
 	reasoningEffort := extractCCReasoningEffortFromBody(body)
 	thinkingEnabled := OpenAIBodyHasThinkingEnabled(body)
 	imageInputSize := s.extractImageInputSize(claudeBody)
-	body = nil
 	ccReq = apicompat.ChatCompletionsRequest{}
-	responsesReq = nil
 	anthropicReq = nil
 	return s.forwardClaudeBodyAsChatCompletions(ctx, c, account, claudeBody, originalModel, clientStream, includeUsage, startTime, reasoningEffort, thinkingEnabled, imageInputSize)
 }
@@ -117,7 +115,6 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		return nil, fmt.Errorf("spool Gemini request body: %w", err)
 	}
 	defer CleanupRequestBodyHandle(geminiHandle)
-	claudeBody = nil
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -137,7 +134,6 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		clientStream,
 		useUpstreamStream,
 	)
-	geminiReq = nil
 
 	var resp *http.Response
 	for attempt := 1; attempt <= geminiMaxRetries; attempt++ {

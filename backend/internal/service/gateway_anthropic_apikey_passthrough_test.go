@@ -2457,7 +2457,6 @@ func TestGatewayService_BuildUpstreamRequestSameHandleMaterializesOnce(t *testin
 	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: t.TempDir()})
 	require.NoError(t, err)
 	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
-	body = nil
 
 	runtime.GC()
 	var before, after runtime.MemStats
@@ -2467,7 +2466,6 @@ func TestGatewayService_BuildUpstreamRequestSameHandleMaterializesOnce(t *testin
 	require.Equal(t, int(handle.Size()), len(materialized))
 	runtime.ReadMemStats(&after)
 	oneReadAlloc := after.TotalAlloc - before.TotalAlloc
-	materialized = nil
 	runtime.GC()
 
 	recorder := httptest.NewRecorder()
@@ -2493,7 +2491,6 @@ func TestGatewayService_ForwardFirstAttemptReusesMaterializedBody(t *testing.T) 
 	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: t.TempDir()})
 	require.NoError(t, err)
 	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
-	body = nil
 
 	runtime.GC()
 	var before, after runtime.MemStats
@@ -2503,7 +2500,6 @@ func TestGatewayService_ForwardFirstAttemptReusesMaterializedBody(t *testing.T) 
 	require.Equal(t, int(handle.Size()), len(materialized))
 	runtime.ReadMemStats(&after)
 	oneReadAlloc := after.TotalAlloc - before.TotalAlloc
-	materialized = nil
 	runtime.GC()
 
 	recorder := httptest.NewRecorder()
@@ -2542,7 +2538,6 @@ func TestGatewayService_BedrockFirstAttemptReusesMaterializedBody(t *testing.T) 
 	require.Equal(t, int(handle.Size()), len(materialized))
 	runtime.ReadMemStats(&after)
 	oneReadAlloc := after.TotalAlloc - before.TotalAlloc
-	materialized = nil
 	runtime.GC()
 
 	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
@@ -2560,8 +2555,6 @@ func TestGatewayService_BedrockFirstAttemptReusesMaterializedBody(t *testing.T) 
 	runtime.ReadMemStats(&after)
 	require.NoError(t, err)
 	byteForwardAlloc := after.TotalAlloc - before.TotalAlloc
-	byteParsed = nil
-	body = nil
 	runtime.GC()
 
 	recorder := httptest.NewRecorder()
@@ -2601,7 +2594,6 @@ func TestGatewayService_AnthropicPassthroughFirstAttemptReusesMaterializedBody(t
 	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: t.TempDir()})
 	require.NoError(t, err)
 	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
-	body = nil
 
 	runtime.GC()
 	var before, after runtime.MemStats
@@ -2611,7 +2603,6 @@ func TestGatewayService_AnthropicPassthroughFirstAttemptReusesMaterializedBody(t
 	require.Equal(t, int(handle.Size()), len(materialized))
 	runtime.ReadMemStats(&after)
 	oneReadAlloc := after.TotalAlloc - before.TotalAlloc
-	materialized = nil
 	runtime.GC()
 
 	recorder := httptest.NewRecorder()

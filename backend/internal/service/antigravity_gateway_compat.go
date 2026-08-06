@@ -85,7 +85,6 @@ func (s *AntigravityGatewayService) ForwardAsChatCompletions(
 
 	reasoningEffort := extractCCReasoningEffortFromBody(body)
 	thinkingEnabled := OpenAIBodyHasThinkingEnabled(body)
-	body = nil
 	return s.forwardAntigravityCompat(ctx, c, account, antigravityCompatRequest{
 		protocol:        antigravityCompatChatCompletions,
 		originalModel:   request.Model,
@@ -153,7 +152,6 @@ func (s *AntigravityGatewayService) ForwardAsResponsesHandle(
 
 	reasoningEffort := ExtractResponsesReasoningEffortFromBody(body)
 	thinkingEnabled := OpenAIBodyHasThinkingEnabled(body)
-	body = nil
 	return s.forwardAntigravityCompat(ctx, c, account, antigravityCompatRequest{
 		protocol:        antigravityCompatResponses,
 		originalModel:   request.Model,
@@ -272,7 +270,6 @@ func (s *AntigravityGatewayService) prepareAntigravityCompatCall(
 	if err != nil {
 		return nil, s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", "Invalid request")
 	}
-	claudeBody = nil
 	if request.reasoningEffort == nil && request.thinkingEnabled {
 		request.reasoningEffort = DefaultEffortForThinkingEnabled(mappedModel)
 	}
@@ -280,7 +277,6 @@ func (s *AntigravityGatewayService) prepareAntigravityCompatCall(
 	if err != nil {
 		return nil, fmt.Errorf("create antigravity compatibility payload handle: %w", err)
 	}
-	geminiBody = nil
 	return &antigravityCompatUpstreamCall{
 		request:       request,
 		billingModel:  mappedModel,

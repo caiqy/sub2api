@@ -63,7 +63,6 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 		}
 		defer CleanupRequestBodyHandle(bodyHandle)
 	}
-	body = nil
 	requestBody, err := bodyHandle.Open()
 	if err != nil {
 		return nil, err

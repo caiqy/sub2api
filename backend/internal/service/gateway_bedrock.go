@@ -93,8 +93,6 @@ func (s *GatewayService) forwardBedrock(
 		return nil, fmt.Errorf("create bedrock request body handle: %w", err)
 	}
 	defer CleanupRequestBodyHandle(bedrockHandle)
-	body = nil
-	bedrockBody = nil
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -220,7 +218,6 @@ func (s *GatewayService) executeBedrockUpstream(
 
 		SetUsageUpstreamRequest(c, upstreamReq, bodyHandle.PreviewString())
 		SetOpsUpstreamAttempted(c, true)
-		body = nil
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, nil)
 		if upstreamReq.Body != nil {
 			_ = upstreamReq.Body.Close()

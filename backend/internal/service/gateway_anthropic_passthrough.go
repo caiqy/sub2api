@@ -171,7 +171,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		}
 	}
 	firstSourceBody, firstBody := sourceBody, effectiveBody
-	input.SourceBody, input.Body, sourceBody, body, effectiveBody = nil, nil, nil, nil, nil
+	input.SourceBody, input.Body = nil, nil
 
 	var resp *http.Response
 	retryStart := time.Now()
@@ -196,14 +196,12 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		}
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, input.RequestStream)
 		upstreamReq, wireBody, err := s.buildUpstreamRequestAnthropicAPIKeyPassthrough(upstreamCtx, c, account, attemptSourceBody, attemptBody, token)
-		attemptSourceBody, attemptBody = nil, nil
 		releaseUpstreamCtx()
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"type": "error", "error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
 			return nil, err
 		}
 		wireHandle, err := NewRequestBodyHandleFromBytes(wireBody, RequestBodyHandleOptions{})
-		wireBody = nil
 		if err != nil {
 			return nil, fmt.Errorf("spool anthropic passthrough wire body: %w", err)
 		}
@@ -430,7 +428,6 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		if err := input.Parsed.ReplaceBody(acceptedWireBody); err != nil {
 			return nil, fmt.Errorf("rewrite anthropic passthrough request body: %w", err)
 		}
-		acceptedWireBody = nil
 	}
 
 	return &ForwardResult{
