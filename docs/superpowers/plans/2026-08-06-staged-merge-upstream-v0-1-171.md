@@ -315,7 +315,7 @@ Commit-NamedPaths -Message 'docs: record v0.1.171 baseline identity' -Paths @($b
 
 ### Task 2: 获取 refs 并冻结两个正式 tag 范围
 
-- [ ] Task 2: 获取 refs 并冻结两个正式 tag 范围
+- [x] Task 2: 获取 refs 并冻结两个正式 tag 范围
 
 **映射 OpenSpec：**1.2
 
