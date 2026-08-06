@@ -368,7 +368,7 @@ Commit-NamedPaths -Message 'docs: record v0.1.171 upstream manifest' -Paths @($b
 
 ### Task 3: 建立 changed-files 能力矩阵和六类冲突台账
 
-- [ ] Task 3: 建立 changed-files 能力矩阵和六类冲突台账
+- [x] Task 3: 建立 changed-files 能力矩阵和六类冲突台账
 
 **映射 OpenSpec：**1.3
 
