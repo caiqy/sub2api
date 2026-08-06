@@ -2119,7 +2119,6 @@ func TestAntigravityGatewayService_ClaudeForwardHandleSignatureRetryCanonicalRea
 	canonicalHandle, err := NewRequestBodyHandleFromReader(bytes.NewReader(body), RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: t.TempDir()})
 	require.NoError(t, err)
 	t.Cleanup(func() { CleanupRequestBodyHandle(canonicalHandle) })
-	body = nil
 
 	runtime.GC()
 	var before, after runtime.MemStats
@@ -2129,7 +2128,6 @@ func TestAntigravityGatewayService_ClaudeForwardHandleSignatureRetryCanonicalRea
 	require.Equal(t, int(canonicalHandle.Size()), len(materialized))
 	runtime.ReadMemStats(&after)
 	oneReadAlloc := after.TotalAlloc - before.TotalAlloc
-	materialized = nil
 	runtime.GC()
 
 	signatureError := func() *http.Response {

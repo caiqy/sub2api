@@ -54,7 +54,6 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 	if err != nil {
 		return nil, fmt.Errorf("create gemini request body handle: %w", err)
 	}
-	body = nil
 	defer CleanupRequestBodyHandle(bodyHandle)
 	return s.forwardGeminiHandle(ctx, c, account, originalModel, action, stream, bodyHandle, isStickySession, options...)
 }
@@ -160,9 +159,6 @@ func (s *AntigravityGatewayService) forwardGeminiHandle(ctx context.Context, c *
 	}
 	defer CleanupRequestBodyHandle(outboundHandle)
 	hasThoughtSignature := bytes.Contains(injectedBody, []byte(`"thoughtSignature"`))
-	body = nil
-	injectedBody = nil
-	wrappedBody = nil
 	accessToken, err := s.getAntigravityAccessToken(ctx, account)
 	if err != nil {
 		return nil, err
@@ -236,10 +232,8 @@ func (s *AntigravityGatewayService) forwardGeminiHandle(ctx context.Context, c *
 					return nil, fmt.Errorf("read injected gemini request body: %w", readErr)
 				}
 				fallbackWrapped, wrapErr := s.wrapV1InternalRequest(projectID, fallbackModel, fallbackInjected)
-				fallbackInjected = nil
 				if wrapErr == nil {
 					fallbackHandle, handleErr := NewRequestBodyHandleFromBytes(fallbackWrapped, RequestBodyHandleOptions{})
-					fallbackWrapped = nil
 					if handleErr != nil {
 						return nil, fmt.Errorf("create fallback gemini request body handle: %w", handleErr)
 					}
@@ -311,12 +305,9 @@ func (s *AntigravityGatewayService) forwardGeminiHandle(ctx context.Context, c *
 				return nil, fmt.Errorf("read injected gemini retry body: %w", readErr)
 			}
 			cleanedInjectedBody := CleanGeminiNativeThoughtSignatures(retryInjectedBody)
-			retryInjectedBody = nil
 			retryWrappedBody, wrapErr := s.wrapV1InternalRequest(projectID, mappedModel, cleanedInjectedBody)
-			cleanedInjectedBody = nil
 			if wrapErr == nil {
 				retryHandle, handleErr := NewRequestBodyHandleFromBytes(retryWrappedBody, RequestBodyHandleOptions{})
-				retryWrappedBody = nil
 				if handleErr != nil {
 					return nil, fmt.Errorf("create gemini retry body handle: %w", handleErr)
 				}

@@ -363,7 +363,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			return
 		}
 		effectiveBody = coordinator.Effective()
-		routeBody = nil
 		parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
 		if err != nil {
 			h.handleMessagesParseError(c, err, false)
@@ -403,7 +402,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		return
 	}
 	decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolAnthropicMessages, reqModel, auditBody)
-	auditBody = nil
 	if decision != nil && !decision.AllowNextStage {
 		h.anthropicSecurityAuditError(c, decision)
 		return
@@ -562,7 +560,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					return
 				}
 				interceptType := detectInterceptType(interceptBody, reqModel, parsedReq.MaxTokens, isClaudeCodeClient)
-				interceptBody = nil
 				if interceptType != InterceptTypeNone {
 					if selection.Acquired && selection.ReleaseFunc != nil {
 						selection.ReleaseFunc()
@@ -1086,7 +1083,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body", streamStarted || service.IsResponseCommitted(c))
 				return
 			}
-			attemptBody = nil
 			attemptHandleOwned := true
 			defer func() {
 				if attemptHandleOwned {
@@ -1243,7 +1239,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 								return
 							}
 							effectiveBody = coordinator.Effective()
-							fallbackBody = nil
 							parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
 							if err != nil {
 								h.handleMessagesParseError(c, err, streamStarted)
@@ -2481,7 +2476,6 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 			return
 		}
 		effectiveBody = coordinator.Effective()
-		body = nil
 		parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
 		if err != nil {
 			h.handleMessagesParseError(c, err, false)
@@ -2504,7 +2498,6 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 			return
 		}
 		effectiveBody = coordinator.Effective()
-		body = nil
 		parsedReq, err = service.ParseGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
 		if err != nil {
 			h.handleMessagesParseError(c, err, false)

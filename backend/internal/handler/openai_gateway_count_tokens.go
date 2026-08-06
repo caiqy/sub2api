@@ -140,7 +140,6 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 		}
 	}
 	cloneGatewayParsedRequestScalars(parsedReq)
-	body = nil
 	if parsedReq.Model == "" {
 		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "model is required")
 		return
@@ -183,7 +182,6 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 			return
 		}
 		effectiveBody = coordinator.Effective()
-		body = nil
 		parsedReq, err = parseOpenAICountTokensGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
 		if err != nil {
 			if errors.Is(err, service.ErrRequestBodySpool) {
@@ -229,7 +227,6 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 			return
 		}
 		effectiveBody = coordinator.Effective()
-		body = nil
 		parsedReq, err = parseOpenAICountTokensGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
 		if err != nil {
 			if errors.Is(err, service.ErrRequestBodySpool) {
@@ -250,7 +247,6 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 		return
 	}
 	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
-	body = nil
 	service.BindOpenAIRequestBodyHandle(c, effectiveBody)
 	parsedReq = nil
 

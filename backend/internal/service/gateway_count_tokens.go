@@ -148,7 +148,6 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 	defer CleanupRequestBodyHandle(wireHandle)
 	acceptedWireHandle := wireHandle
 	body = nil
-	wireBody = nil
 
 	// 获取代理URL（自定义 base URL 模式下，proxy 通过 buildCustomRelayURL 作为查询参数传递）
 	proxyURL := ""
@@ -197,7 +196,6 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 			return fmt.Errorf("read count_tokens retry body: %w", readErr)
 		}
 		filteredBody := FilterThinkingBlocksForRetry(logicalBody, reqModel)
-		logicalBody = nil
 		retryReq, retryWireBody, buildErr := s.buildCountTokensRequest(ctx, c, account, filteredBody, token, tokenType, reqModel, shouldMimicClaudeCode)
 		if buildErr == nil {
 			retryHandle, handleErr := bindCountTokensRequestBodyHandle(retryReq, retryWireBody)
@@ -205,8 +203,6 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 				return fmt.Errorf("bind count_tokens retry body: %w", handleErr)
 			}
 			defer CleanupRequestBodyHandle(retryHandle)
-			filteredBody = nil
-			retryWireBody = nil
 			retryResp, retryErr := s.httpUpstream.DoWithTLS(retryReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 			if retryReq.Body != nil {
 				_ = retryReq.Body.Close()
@@ -323,8 +319,6 @@ func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx contex
 		return fmt.Errorf("bind count_tokens passthrough body: %w", err)
 	}
 	defer CleanupRequestBodyHandle(wireHandle)
-	body = nil
-	wireBody = nil
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {

@@ -419,17 +419,13 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	}
 	firstSourceBody, firstCanonicalBody := sourceBody, body
 	body = nil
-	sourceBody = nil
-	replaceBody = nil
 	newDerivedHandle := func(rewrite func([]byte) []byte) (*RequestBodyHandle, error) {
 		canonicalBody, err := canonicalHandle.ReadAll()
 		if err != nil {
 			return nil, fmt.Errorf("read canonical request body: %w", err)
 		}
 		derivedBody := rewrite(canonicalBody)
-		canonicalBody = nil
 		handle, err := NewRequestBodyHandleFromBytes(derivedBody, RequestBodyHandleOptions{})
-		derivedBody = nil
 		if err != nil {
 			return nil, fmt.Errorf("spool derived request body: %w", err)
 		}
@@ -447,7 +443,6 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		firstSourceBody, firstCanonicalBody = nil, nil
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
 		upstreamReq, wireHandle, err := s.buildUpstreamRequestWithHandles(upstreamCtx, c, account, sourceHandle, canonicalHandle, attemptSourceBody, attemptCanonicalBody, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
-		attemptSourceBody, attemptCanonicalBody = nil, nil
 		releaseUpstreamCtx()
 		if err != nil {
 			return nil, err
@@ -1007,7 +1002,6 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		if err := parsed.ReplaceBody(acceptedWireBody); err != nil {
 			return nil, fmt.Errorf("rewrite request body: %w", err)
 		}
-		acceptedWireBody = nil
 	}
 	return &ForwardResult{
 		RequestID:        resp.Header.Get("x-request-id"),

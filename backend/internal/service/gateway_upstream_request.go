@@ -261,13 +261,10 @@ func (s *GatewayService) buildUpstreamRequestWithHandles(ctx context.Context, c 
 		}
 	}
 	req, wireBody, err := s.buildUpstreamRequestWithSourceBody(ctx, c, account, sourceBody, body, token, tokenType, modelID, reqStream, mimicClaudeCode)
-	sourceBody = nil
-	body = nil
 	if err != nil {
 		return nil, nil, err
 	}
 	wireHandle, err := NewRequestBodyHandleFromBytes(wireBody, RequestBodyHandleOptions{})
-	wireBody = nil
 	if err != nil {
 		return nil, nil, fmt.Errorf("spool upstream request body: %w", err)
 	}

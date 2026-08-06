@@ -33,7 +33,6 @@ func (s *AntigravityGatewayService) Forward(ctx context.Context, c *gin.Context,
 	if err != nil {
 		return nil, fmt.Errorf("create antigravity request body handle: %w", err)
 	}
-	body = nil
 	defer CleanupRequestBodyHandle(bodyHandle)
 	return s.ForwardHandle(ctx, c, account, bodyHandle, isStickySession, options...)
 }
@@ -113,12 +112,10 @@ func (s *AntigravityGatewayService) ForwardHandle(ctx context.Context, c *gin.Co
 	}
 	requestStream := claudeReq.Stream
 	claudeReq = antigravity.ClaudeRequest{}
-	body = nil
 	payloadHandle, err := NewRequestBodyHandleFromBytes(geminiBody, RequestBodyHandleOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("create antigravity payload handle: %w", err)
 	}
-	geminiBody = nil
 	defer CleanupRequestBodyHandle(payloadHandle)
 	accessToken, err := s.getAntigravityAccessToken(ctx, account)
 	if err != nil {
@@ -210,10 +207,8 @@ func (s *AntigravityGatewayService) ForwardHandle(ctx context.Context, c *gin.Co
 				}
 				var retryClaudeReq antigravity.ClaudeRequest
 				if unmarshalErr := json.Unmarshal(canonicalBody, &retryClaudeReq); unmarshalErr != nil {
-					canonicalBody = nil
 					return nil, fmt.Errorf("parse antigravity signature retry body: %w", unmarshalErr)
 				}
-				canonicalBody = nil
 
 				stripped, stripErr := stage.strip(&retryClaudeReq)
 				if stripErr != nil || !stripped {
@@ -231,7 +226,6 @@ func (s *AntigravityGatewayService) ForwardHandle(ctx context.Context, c *gin.Co
 				if handleErr != nil {
 					return nil, fmt.Errorf("create antigravity signature retry handle: %w", handleErr)
 				}
-				retryGeminiBody = nil
 				retryResult, retryErr := s.antigravityRetryLoop(antigravityRetryLoopParams{
 					ctx:             ctx,
 					prefix:          prefix,
@@ -348,10 +342,8 @@ func (s *AntigravityGatewayService) ForwardHandle(ctx context.Context, c *gin.Co
 				}
 				var retryClaudeReq antigravity.ClaudeRequest
 				if unmarshalErr := json.Unmarshal(retryBody, &retryClaudeReq); unmarshalErr != nil {
-					retryBody = nil
 					return nil, fmt.Errorf("parse antigravity budget retry body: %w", unmarshalErr)
 				}
-				retryBody = nil
 				if retryClaudeReq.Thinking == nil || retryClaudeReq.Thinking.Type != "adaptive" {
 					// 创建新的 ThinkingConfig 避免修改原始 claudeReq.Thinking 指针
 					retryClaudeReq.Thinking = &antigravity.ThinkingConfig{
@@ -371,7 +363,6 @@ func (s *AntigravityGatewayService) ForwardHandle(ctx context.Context, c *gin.Co
 						if handleErr != nil {
 							return nil, fmt.Errorf("create antigravity budget retry handle: %w", handleErr)
 						}
-						retryGeminiBody = nil
 						retryResult, retryErr := s.antigravityRetryLoop(antigravityRetryLoopParams{
 							ctx:             ctx,
 							prefix:          prefix,

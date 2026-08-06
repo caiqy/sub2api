@@ -178,8 +178,6 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 	}
 	effectiveHandle := coordinator.Effective()
 	service.BindOpenAIRequestBodyHandle(c, effectiveHandle)
-	body = nil
-	effectiveBody = nil
 
 	// Error passthrough binding
 	if h.errorPassthroughService != nil {

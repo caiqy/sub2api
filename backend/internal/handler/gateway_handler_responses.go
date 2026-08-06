@@ -166,7 +166,6 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		APIKeyID:  apiKey.ID,
 	}
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
-	body = nil
 
 	// Error passthrough binding
 	if h.errorPassthroughService != nil {
@@ -401,14 +400,15 @@ func (h *GatewayHandler) writeResponsesForwardRequestBodyError(c *gin.Context, e
 	}
 	errType := "invalid_request_error"
 	message := "Failed to read request body"
-	if status == http.StatusRequestEntityTooLarge {
+	switch status {
+	case http.StatusRequestEntityTooLarge:
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			message = buildBodyTooLargeMessage(maxErr.Limit)
 		}
-	} else if status == http.StatusServiceUnavailable {
+	case http.StatusServiceUnavailable:
 		errType = "server_error"
 		message = "Failed to spool request body"
-	} else {
+	default:
 		status = http.StatusBadRequest
 	}
 	if c.Writer.Written() || service.IsResponseCommitted(c) {

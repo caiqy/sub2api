@@ -813,7 +813,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	firstAttemptBody := body
 	firstSourceBody := originalBody
 	body = nil
-	originalBody = nil
 	for {
 		attemptBody := firstAttemptBody
 		firstAttemptBody = nil
@@ -863,8 +862,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 
 		// Send request
-		attemptBody = nil
-		sourceBody = nil
 		requestView.body = nil
 		reqBody = nil
 		upstreamStart := time.Now()
@@ -955,7 +952,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					}
 					requestView = newOpenAIRequestView(retryBody)
 					reqBody = nil
-					retryBody = nil
 					requestBody = nil
 					logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Retrying non-WSv2 request once after invalid_encrypted_content (account: %s)", account.Name)
 					continue
@@ -986,7 +982,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					}
 					requestView = newOpenAIRequestView(retryBody)
 					reqBody = nil
-					retryBody = nil
 					requestBody = nil
 					logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Retrying non-WSv2 request after %s (account: %s)", reason, account.Name)
 					continue
@@ -1028,7 +1023,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				}
 			}
 			result, err := s.handleErrorResponse(ctx, resp, c, account, requestBody, billingModel)
-			requestBody = nil
 			var failoverErr *UpstreamFailoverError
 			if !errors.As(err, &failoverErr) {
 				SetUsageResponseSnapshot(c, FormatUsageDetailResponseHeadersText(resp.StatusCode, resp.Header), string(respBody))
@@ -1043,7 +1037,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			return nil, readErr
 		}
 		serviceTier := extractOpenAIServiceTierFromBody(requestBody)
-		requestBody = nil
 		// 上游接受后只保留计费需要的标量，避免响应处理期间继续保活完整 input/tools map。
 		reqBody = nil
 

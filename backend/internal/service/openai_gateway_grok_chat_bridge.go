@@ -592,8 +592,6 @@ func (s *OpenAIGatewayService) forwardGrokChatCompletionsViaResponses(
 		return nil, fmt.Errorf("create grok responses bridge request body: %w", err)
 	}
 	defer CleanupRequestBodyHandle(responsesHandle)
-	responsesBody = nil
-	body = nil
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	upstreamReq, err := buildGrokResponsesRequestWithHandle(upstreamCtx, c, account, responsesHandle, upstreamModel, token, cacheIdentity, s.cfg)
 	releaseUpstreamCtx()

@@ -56,7 +56,6 @@ func (h *OpenAIGatewayHandler) Live(c *gin.Context) {
 			if err == nil {
 				request, err = parseLiveCallJSON(bytes.NewReader(body))
 			}
-			body = nil
 		}
 	}
 	if coordinator != nil {
@@ -68,7 +67,6 @@ func (h *OpenAIGatewayHandler) Live(c *gin.Context) {
 		if err == nil {
 			err = coordinator.SetEffectiveBytes(canonical)
 		}
-		canonical = nil
 	}
 	if err != nil {
 		if errors.Is(err, service.ErrRequestBodySpool) {

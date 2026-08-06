@@ -45,7 +45,6 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	if owned {
 		defer CleanupRequestBodyHandle(bodyHandle)
 	}
-	body = nil
 	return s.forwardAsAnthropicHandle(ctx, c, account, bodyHandle, promptCacheKey, defaultMappedModel)
 }
 
@@ -319,11 +318,7 @@ func (s *OpenAIGatewayService) forwardAsAnthropicHandle(
 	defer func() { CleanupRequestBodyHandle(responsesHandle) }()
 	firstSourceBody := body
 	firstResponsesBody := responsesBody
-	body = nil
-	responsesBody = nil
-	updatedBody = nil
 	anthropicReq = apicompat.AnthropicRequest{}
-	anthropicDigestReq = nil
 	responsesReq = nil
 
 	// 5. Get access token
@@ -412,8 +407,6 @@ func (s *OpenAIGatewayService) forwardAsAnthropicHandle(
 			upstreamPreview = responsesHandle.PreviewString()
 		}
 		SetUsageUpstreamRequest(c, upstreamReq, upstreamPreview)
-		attemptBody = nil
-		sourceBody = nil
 		SetOpsUpstreamAttempted(c, true)
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		closeOpenAIRequestBody(upstreamReq)
@@ -443,12 +436,10 @@ func (s *OpenAIGatewayService) forwardAsAnthropicHandle(
 		shouldStrip := isGrokInvalidEncryptedContentResponse(resp.StatusCode, respBody) ||
 			requestHasGrokEncryptedReasoning(currentResponsesBody)
 		if !shouldStrip {
-			currentResponsesBody = nil
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
 			break
 		}
 		retryBody, changed, trimErr := trimGrokInvalidEncryptedContentRetryBody(currentResponsesBody)
-		currentResponsesBody = nil
 		if trimErr != nil {
 			return nil, fmt.Errorf("prepare Grok invalid encrypted_content retry: %w", trimErr)
 		}
@@ -457,7 +448,6 @@ func (s *OpenAIGatewayService) forwardAsAnthropicHandle(
 			break
 		}
 		retryHandle, handleErr := NewRequestBodyHandleFromBytes(retryBody, RequestBodyHandleOptions{})
-		retryBody = nil
 		if handleErr != nil {
 			return nil, fmt.Errorf("spool Grok messages retry body: %w", handleErr)
 		}
@@ -505,7 +495,6 @@ func (s *OpenAIGatewayService) forwardAsAnthropicHandle(
 				return nil, fmt.Errorf("read Grok failover source body: %w", readErr)
 			}
 			strippedBody, stripped := stripAnthropicThinkingSignatures(canonicalBody)
-			canonicalBody = nil
 			if stripped {
 				logger.L().Info("openai messages: stripping thinking signatures for Grok failover retry",
 					zap.Int64("account_id", account.ID),

@@ -478,7 +478,6 @@ func compositeTargetPlatformMiddleware(resolver *service.EffectiveGatewayRouteRe
 		}
 		if c.Request.Method != http.MethodGet {
 			bodyHandle, handleErr := service.NewRequestBodyHandleFromBytes(body, service.RequestBodyHandleOptions{})
-			body = nil
 			if handleErr != nil {
 				abortCompositeRequestBodySpoolError(c)
 				return

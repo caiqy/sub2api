@@ -149,8 +149,6 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	}
 	effectiveHandle := coordinator.Effective()
 	service.BindOpenAIRequestBodyHandle(c, effectiveHandle)
-	body = nil
-	effectiveBody = nil
 
 	if h.errorPassthroughService != nil {
 		service.BindErrorPassthroughService(c, h.errorPassthroughService)

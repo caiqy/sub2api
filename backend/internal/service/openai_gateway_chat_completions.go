@@ -297,8 +297,6 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	}
 	SetUsageUpstreamRequest(c, upstreamReq, openAIUpstreamRequestBodyPreview(upstreamReq, []byte(outboundHandle.PreviewString())))
 	SetOpsUpstreamAttempted(c, true)
-	body = nil
-	responsesBody = nil
 	chatReq = apicompat.ChatCompletionsRequest{}
 	responsesReq = nil
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)

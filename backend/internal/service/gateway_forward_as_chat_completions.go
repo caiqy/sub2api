@@ -150,10 +150,7 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	}
 	defer CleanupRequestBodyHandle(wireHandle)
 	defer func() { _ = upstreamReq.Body.Close() }()
-	body = nil
-	anthropicBody = nil
 	ccReq = apicompat.ChatCompletionsRequest{}
-	responsesReq = nil
 	anthropicReq = nil
 
 	// 11. Send request
