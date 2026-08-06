@@ -386,7 +386,7 @@ coordinator 不在本计划中选择 isolation、build、TDD 或 review 模式�
 
 ## 执行任务
 
-- [ ] Gate 0：验证身份、保护输入、lint RED 与行为基线
+- [x] Gate 0：验证身份、保护输入、lint RED 与行为基线
 
   **OpenSpec 映射：**
   `1.1 在实施分支上复核已固定的 144 项 baseline manifest、39 个文件、分类计数和受保护文件 blob，确认相对 `b576f73a` 未漂移`

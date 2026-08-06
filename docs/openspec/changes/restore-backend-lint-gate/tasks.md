@@ -1,7 +1,7 @@
 ## 1. 固定基线与回归合同
 
-- [ ] 1.1 在实施分支上复核已固定的 144 项 baseline manifest、39 个文件、分类计数和受保护文件 blob，确认相对 `b576f73a` 未漂移
-- [ ] 1.2 运行请求体内存保留、spool、retry/failover 聚焦测试，建立修复前的绿色行为基线与 lint RED
+- [x] 1.1 在实施分支上复核已固定的 144 项 baseline manifest、39 个文件、分类计数和受保护文件 blob，确认相对 `b576f73a` 未漂移
+- [x] 1.2 运行请求体内存保留、spool、retry/failover 聚焦测试，建立修复前的绿色行为基线与 lint RED
 
 ## 2. 修复入口层 lint
 
