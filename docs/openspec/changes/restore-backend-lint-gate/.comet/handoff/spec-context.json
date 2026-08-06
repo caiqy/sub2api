@@ -1,0 +1,25 @@
+{
+  "change": "restore-backend-lint-gate",
+  "phase": "design",
+  "mode": "beta",
+  "canonical_spec": "openspec",
+  "generated_by": "comet-handoff.sh",
+  "context_hash": "de3dc8afe0812399f3ae57ccfd4d7eff62f05c36bf934e8764a32c4a3413f03f",
+  "files": [
+    {
+      "path": "docs/openspec/changes/restore-backend-lint-gate/proposal.md",
+      "sha256": "658b8df942b4a4985fcf2326f5f5160361814244ba0fbca4f93e05790d17da38",
+      "role": "supporting"
+    },
+    {
+      "path": "docs/openspec/changes/restore-backend-lint-gate/design.md",
+      "sha256": "7dca139e5ba7a9d285f2eda2eb53afd06d169ed00e3e7721a6c61a3a9a6de3db",
+      "role": "supporting"
+    },
+    {
+      "path": "docs/openspec/changes/restore-backend-lint-gate/tasks.md",
+      "sha256": "46ecec45c759299dd28d53d6e7fe76516ba13195d3e90b32ec9ffdddf4a957c1",
+      "role": "supporting"
+    }
+  ]
+}
