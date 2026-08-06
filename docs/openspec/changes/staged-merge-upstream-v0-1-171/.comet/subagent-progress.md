@@ -1,0 +1,27 @@
+# Comet Subagent Progress
+
+- Change: `staged-merge-upstream-v0-1-171`
+- Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
+- Review mode: `thorough`
+- TDD mode: `tdd`
+- Previous task: `Task 3` complete; implementation `c766d8fa8`, fix `db8bff0dd`, checkoff `5c023a8d0`, thorough re-review APPROVED
+- Current task: `Task 4: 保护基线能力并完成非 Docker 门禁`
+- OpenSpec mapping: `1.4 在当前本地基线上运行聚焦保护测试、make test、make build、两轮 backend generate 与静态检查；为命中但缺少断言的高风险本地能力补最小保护测试`
+- Stage: `blocked`
+- Review/fix round: `0/2`
+- Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
+- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-4-brief.md`
+- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-4-report.md`
+- Implementation commit: `0382157209f52304878c369ccf48c1c4a06ef80b`
+- Changed files: `backend/internal/handler/openai_images_controls_test.go`
+- TDD evidence: 新增 forced-spool replay cleanup 断言在 source base 直接 GREEN；未伪造 RED；无生产改动
+- Passed: focused Go tests; frontend 4 files / 67 tests
+- Blocker: `make test` exit 2; golangci-lint 54 existing production issues; build/generate/static gates not run
+- Additional gap: quota tests require `-tags=unit`; supplied regex未命中
+- Debug result: immutable source base has 144 lint issues across 39 files under checked-in Go 1.26.5 / golangci-lint 2.9 toolchain; not environment drift
+- Quota gate: plan command omitted `-tags=unit`; corrected full pattern matches and passes 13 tests
+- Debug report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-4-debug-report.md`
+- Upstream comparison: original `v0.1.169` and `v0.1.171` both pass uncapped golangci-lint v2.9 with 0 issues; 144 issues are fork-local
+- User decision: create a separate Classic full prerequisite lint-remediation change; pause this change at Task 4
+- Resume condition: prerequisite change is completed and integrated into main, then explicitly update/reconfirm this change's immutable source base before rerunning Task 4
+- Status: BLOCKED pending prerequisite change
