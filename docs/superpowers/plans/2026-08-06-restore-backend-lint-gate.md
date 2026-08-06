@@ -490,7 +490,7 @@ coordinator 不在本计划中选择 isolation、build、TDD 或 review 模式�
   if ($LASTEXITCODE -ne 0) { throw 'OpenSpec 3.1 task-checkoff failed' }
   ```
 
-- [ ] Task 3：修复 OpenAI/Gemini/Grok/unused
+- [x] Task 3：修复 OpenAI/Gemini/Grok/unused
 
   **OpenSpec 映射：**
   `3.2 修复 OpenAI、Gemini、Grok 适配路径中的无效局部 body 清零，并通过 scoped lint、package 测试和 retry/failover 聚焦测试`

@@ -11,8 +11,8 @@
 ## 3. 修复服务层 lint
 
 - [x] 3.1 修复通用 Gateway、Anthropic、Bedrock 与 Antigravity 路径及其测试源中的无效局部 body 清零，并通过 manifest 闭包、package 测试和内存保留矩阵
-- [ ] 3.2 修复 OpenAI、Gemini、Grok 适配路径中的无效局部 body 清零，并通过 scoped lint、package 测试和 retry/failover 聚焦测试
-- [ ] 3.3 删除确认无调用方的 `sendCCUpstreamRequest` 私有方法，并完成三批 changed-file allowlist 与 issue manifest 交叉检查
+- [x] 3.2 修复 OpenAI、Gemini、Grok 适配路径中的无效局部 body 清零，并通过 scoped lint、package 测试和 retry/failover 聚焦测试
+- [x] 3.3 删除确认无调用方的 `sendCCUpstreamRequest` 私有方法，并完成三批 changed-file allowlist 与 issue manifest 交叉检查
 
 ## 4. 恢复全仓绿色门禁
 
