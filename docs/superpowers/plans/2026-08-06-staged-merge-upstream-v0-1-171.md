@@ -418,7 +418,8 @@ Commit-NamedPaths -Message 'docs: record v0.1.171 capability matrix' -Paths @($b
 ```powershell
 Push-Location backend
 try {
-    Invoke-CheckedNative 'baseline service focus tests' { go test -count=1 ./internal/service -run '^(TestLayered_|TestOpenAISelectAccountWithLoadAwareness_|TestGatewayServiceRecordUsage_|TestCalculateQuotaCycleAdvance_|TestAdvanceQuotaCycle_)' }
+    Invoke-CheckedNative 'baseline service focus tests' { go test -count=1 ./internal/service -run '^(TestLayered_|TestOpenAISelectAccountWithLoadAwareness_|TestGatewayServiceRecordUsage_)' }
+    Invoke-CheckedNative 'baseline quota focus tests' { go test -tags=unit -count=1 ./internal/service -run '^(TestCalculateQuotaCycleAdvance_.*|TestAdvanceQuotaCycle_.*|TestAdminResetQuota_(UsesCommittedResetVersionForCacheInvalidation|OuterTransactionInvalidatesAfterCommit)|TestCheckAndResetWindows_UsesCommittedResetVersionForCacheInvalidation)$' }
     Invoke-CheckedNative 'baseline handler focus tests' { go test -count=1 ./internal/handler -run '^(TestGatewayHandlerMessagesUsesEffectiveRouteSnapshot|TestOpenAIImages_|TestOpenAIResponsesWebSocket_)' }
     Invoke-CheckedNative 'baseline route audit tests' { go test -count=1 ./internal/server/routes -run '^(TestEveryGatewayPOSTRouteIsClassifiedForPromptAuditCoverage|TestResponsesWebSocketHasFirstAndSubsequentTurnPromptGates)$' }
 } finally {
