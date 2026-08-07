@@ -1406,7 +1406,7 @@ func (s *OpenAIGatewayService) handleGrokAccountUpstreamError(ctx context.Contex
 	if s == nil || account == nil {
 		return
 	}
-	if (account.IsPoolMode() && account.IsPoolModeRetryableStatus(statusCode)) || isGrokContentPolicyRejection(statusCode, responseBody) {
+	if isGrokContentPolicyRejection(statusCode, responseBody) {
 		return
 	}
 	now := time.Now()
