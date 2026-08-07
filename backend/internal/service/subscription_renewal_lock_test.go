@@ -105,6 +105,41 @@ func TestAssignOrExtendSubscriptionUsesLockedCurrentRow(t *testing.T) {
 	require.Equal(t, float64(4), sub.DailyUsageUSD)
 }
 
+func TestAssignOrExtendSubscriptionRenewsUnexpiredSuspendedWithoutResettingQuotaWindows(t *testing.T) {
+	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
+	expiresAt := now.AddDate(0, 0, 20)
+	dailyWindowStart := now.Add(-24 * time.Hour)
+	weeklyWindowStart := now.Add(-7 * 24 * time.Hour)
+	monthlyWindowStart := now.Add(-30 * 24 * time.Hour)
+	repo := &lockingRenewalRepo{
+		stale: UserSubscription{ID: 8, UserID: 12, GroupID: 14, ExpiresAt: now.Add(-time.Hour), Status: SubscriptionStatusExpired},
+		current: UserSubscription{
+			ID: 8, UserID: 12, GroupID: 14, StartsAt: now.AddDate(0, 0, -10), ExpiresAt: expiresAt,
+			Status: SubscriptionStatusSuspended, Notes: "paused",
+			DailyWindowStart: &dailyWindowStart, WeeklyWindowStart: &weeklyWindowStart, MonthlyWindowStart: &monthlyWindowStart,
+			DailyUsageUSD: 4, WeeklyUsageUSD: 5, MonthlyUsageUSD: 6,
+		},
+	}
+	svc := NewSubscriptionService(&subscriptionGroupRepoStub{group: &Group{ID: 14, SubscriptionType: SubscriptionTypeSubscription}}, repo, nil, nil, nil)
+	svc.now = func() time.Time { return now }
+
+	renewed, extended, err := svc.AssignOrExtendSubscription(context.Background(), &AssignSubscriptionInput{
+		UserID: 12, GroupID: 14, ValidityDays: 5, Notes: "renewed",
+	})
+
+	require.NoError(t, err)
+	require.True(t, extended)
+	require.Equal(t, expiresAt.AddDate(0, 0, 5), renewed.ExpiresAt)
+	require.Equal(t, SubscriptionStatusActive, renewed.Status)
+	require.Equal(t, "paused\nrenewed", renewed.Notes)
+	require.Equal(t, dailyWindowStart, *renewed.DailyWindowStart)
+	require.Equal(t, weeklyWindowStart, *renewed.WeeklyWindowStart)
+	require.Equal(t, monthlyWindowStart, *renewed.MonthlyWindowStart)
+	require.Equal(t, 4.0, renewed.DailyUsageUSD)
+	require.Equal(t, 5.0, renewed.WeeklyUsageUSD)
+	require.Equal(t, 6.0, renewed.MonthlyUsageUSD)
+}
+
 func TestAssignOrExtendSubscriptionSerializedRenewalsAccumulateDays(t *testing.T) {
 	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
 	initialExpiry := now.AddDate(0, 0, 10)
