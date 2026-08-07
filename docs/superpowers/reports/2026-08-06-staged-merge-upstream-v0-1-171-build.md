@@ -793,3 +793,12 @@ frontend/src/views/auth/__tests__/WechatCallbackView.spec.ts
 - **Task 7，未闭合且不得写为 PASS：**`user_subscription.go` 已把领域 `CheckDailyLimit`、`CheckWeeklyLimit`、`CheckMonthlyLimit` 改为 inclusive `<=`；但 `BillingCacheService.CheckBillingEligibility` 仍以缓存 usage `>= limit` 拒绝。canonical Task 7 要求先建立端到端 exact-limit 放行、超限拒绝的 RED/GREEN 回归，并做最小修复。
 - **Task 8，未闭合且不得写为 PASS：**带 `unit` tag 的 `TestDelayedFirstUseAnchorsMonthlyWindowAtActivation` 仍断言首次使用激活窗口，`TestAdminResetQuota_ResetBoth` 仍断言操作精确时刻；两者与用户裁决的 `StartsAt` 和当天零点语义相反。canonical Task 8 要求以 `go test -tags=unit` gate 先记录真实 RED，再修正测试/实现到用户裁决。
 - Task 6 不修改这两类生产代码或测试；它们必须由 Task 7/8 的 TDD 闭合。
+
+## Task 7：v0.1.170 scheduler/usage TDD 闭合
+
+- 状态：`DONE`。实现提交为 `6dd4f244d`、`872354880`、`2c17b1824`、`5a5329ad8`；最终 reviewer `ses_024c20d5bffeK4Sp85JQ3IkatW` 对 spec 与 quality 均 `APPROVED`。
+- quota RED/GREEN：daily/weekly/monthly 领域正成本达到 exact limit 放行；结算后 cache `usage == limit` 放行，`usage > limit` 拒绝。生产边界仅从 `>=` 收敛为 `>`。
+- scheduler/sticky RED/GREEN：修复 selection-time sticky 提前覆盖；layered previous-response/session/acquired/WaitPlan 返回携带真实 profit gate；通用 Gateway 与 native Gemini WaitPlan 只在 terminal admission 后按当前平台绑定一次，veto 不绑定并只释放一次槽位。
+- 本机 fresh gates：更新后的 default/unit service、default/unit handler 四条 focused 命令均 exit `0`；`git diff --check` exit `0`。quota lifecycle 已纳入 service focused regex，WaitPlan/sticky handler 回归已纳入 handler focused regex。
+- 提交边界：仅 scheduler/profit/usage production/test 与一个 `NewContentModerationService` 第八参数 `nil` compile adapter；未吸收 Task 8 的 gateway-body/audit/subscription-window/frontend 行为。
+- residual：无既有绑定时的并发首次 sticky 写仍不是原子 CAS；当前非并发契约未要求该语义，留给独立 concurrency change。

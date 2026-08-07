@@ -644,7 +644,7 @@ if ($merge170Parent2 -ne $tag170) { throw "v0.1.170 merge second parent mismatch
 
 ### Task 7: 以 TDD 修复 v0.1.170 scheduler/usage 回归
 
-- [ ] Task 7: 以 TDD 修复 v0.1.170 scheduler/usage 回归
+- [x] Task 7: 以 TDD 修复 v0.1.170 scheduler/usage 回归
 
 **映射 OpenSpec：**2.2
 
