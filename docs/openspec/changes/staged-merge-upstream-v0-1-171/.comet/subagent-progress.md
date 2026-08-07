@@ -4,42 +4,15 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Previous task: `Task 5` complete; evidence commits `f349d6a26`, `a5f20fdf2`, `45912d266`, `fe686e346`; checkoff `2f9f1a259`; user-authorized final review `ses_025bb84b8ffeA7SdGDek6Uv669` APPROVED
-- Current task: `Task 6: 创建纯净的 v0.1.170 merge 节点`
-- OpenSpec mapping: `2.1 使用 git merge --no-ff --no-commit v0.1.170，逐文件语义融合实际冲突并创建第二父为固定 tag SHA 的 merge commit；merge commit 不混入后续兼容修复`
-- Stage: `task-fix`
-- Review/fix round: `2/2`
+- Previous task: `Task 6` complete; merge `98c7b0487`, evidence `db8f0a678`/`1042611de`, checkoff `43eae6f5c`, final review `ses_025209a6fffeaGxYNgxdc8BBCL` APPROVED
+- Current task: `Task 7: 以 TDD 修复 v0.1.170 scheduler/usage 回归`
+- OpenSpec mapping: `2.2 审查分组利润控制、账号倍率同步、槽位后二次复核和请求级定价时刻，与本地 advanced/layered scheduler、sticky、fallback/WaitPlan、DB recheck、usage billing 和倍率语义的交互；以失败测试驱动必要的最小兼容修复`
+- Stage: `implementing`
+- Review/fix round: `0/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
-- Brief: `.superpowers/sdd/task-6-brief.md`
-- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-6-report.md`
-- Stage 0 result: `protected=1/manual=9/unverified=1/gap=0`; Docker migration is the only unverified contract
-- Stage 0 clean helper fix: `c33ddd835`; scoped ignored enumeration and clean gate PASS
-- Task 6 target: `v0.1.170@c043c24774228ba891ddf90d783aa6dc7d0855b5`
-- Task 6 merge state: active; `MERGE_HEAD=60286d35` annotated tag object, peeled commit `c043c247`; 28 unresolved conflicts
-- Coordinator plan fix: annotated-tag guard updated but intentionally remains unstaged until after the pure merge commit
-- Semantic blocker: `user_subscription.go` CheckDaily/Weekly/MonthlyLimit uses local strict `<` versus upstream inclusive `<=`; exact-limit requests have opposite outcomes
-- Task 6 implementation commit: `98c7b04874361a1cf95b8dea90ed1c4db2f05d4d`
-- Merge parents: `30528a82e32bfedc011d741e870964beb5743aa4` + `c043c24774228ba891ddf90d783aa6dc7d0855b5`
-- User decision: adopt upstream inclusive `<=` for CheckDaily/Weekly/MonthlyLimit; exact-limit requests are allowed
-- Applied decision: inclusive quota predicates are present in the unresolved merge worktree but not staged
-- New semantic blocker: missing Codex `instructions` is local fail-closed 403/no-upstream versus upstream default-injection/forwarding
-- User decision: adopt upstream Codex behavior; inject default `instructions` and forward instead of local 403
-- Applied decisions: quota inclusive `<=` and Codex default-injection/forwarding are staged as conflict resolutions; 23 conflicts remain
-- New semantic blocker: first subscription quota window starts at local entitlement `StartsAt` versus upstream first-use `s.now()`
-- User decision: preserve local subscription-window anchor at entitlement `StartsAt`, not first-use `s.now()`
-- Applied decision: first quota window remains anchored at entitlement `StartsAt`; 23 conflicts remain
-- New semantic blocker: `AdminResetQuota` window starts at local calendar-day zero versus upstream exact administrator action time
-- User decision: `AdminResetQuota` is a local customization; preserve calendar-day-zero window start
-- Merge policy: non-local customization follows upstream; local-only customization stays local; when both sides change the same user-visible semantics, ask the user
-- Verification reported: frontend lint/tests/build, backend `go test ./...`, native `go build`, merge guards, migrations and generated output PASS; Docker integration unavailable
-- Task 6 reviewer: `ses_02548a49cffeVWAV3kJ6QI2qFw` REJECTED spec and quality
-- Open Important findings: formal ledger lacks all 28 final conflict outcomes/generated-source mapping; Task 6 report retains stale BLOCKED claims; inclusive gateway boundary and two subscription unit contracts are known post-merge REDs
-- Ownership decision: preserve pure merge; assign gateway/billing boundary to Task 7 and tagged-unit subscription contracts to Task 8 with explicit plan gates
-- Fix boundary: plan handoff + ledger/report evidence only; no Task 6 source/test amendment
-- First fix commit: `db8f0a678`; ledger/report evidence and Task 7/8 known-RED handoffs completed
-- Re-reviewer: `ses_025343ccdffeNf50aRq4YTma7B` REJECTED
-- Remaining Important: pure merge includes two non-upstream test paths with five constructor-signature `nil` argument adaptations, outside current allowlist
-- Decision options: narrowly authorize these required compile adaptations in Task 6, or explicitly authorize local history rewrite and move them to Task 8
-- User decision: narrowly authorize the two content-moderation test constructor-signature adaptations in Task 6; preserve existing merge history
-- Final fix boundary: update allowlist/source-ownership guard and ledger/report exception classification; no source changes or history rewrite
-- Status: second and final Task 6 review-fix pending
+- Brief: `.superpowers/sdd/task-7-brief.md`
+- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-7-report.md`
+- Known RED handoff: inclusive `Check*Limit <=` may still be rejected by gateway `CheckBillingEligibility` using `usage >= limit`; add exact-limit allow / over-limit deny regression
+- Scope: scheduler/profit/usage only; Task 8 owns gateway-body/audit/subscription-window/frontend regressions
+- Task 7 implementation commit: pending
+- Status: Task 7 implementer dispatch pending
