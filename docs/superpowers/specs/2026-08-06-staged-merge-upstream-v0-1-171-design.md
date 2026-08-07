@@ -153,6 +153,8 @@ Ledger 记录 source/execution base、branch/worktree、tag manifest、dirty pat
 
 其他重点：Anthropic 流式中断用量、OpenAI WS 外部取消错误帧、流内 429/pool 重试、Responses 工具图片、内容审核代理/最新输入、订阅窗口对齐、settings 支付方式保持、图片 data URL。它们分别命中本地 usage、WS lease、request-body handle、统一审计、quota reset 和前端设置保护面。
 
+订阅窗口冲突采用精确时间语义：新订阅、用户手动提前重置和管理员手动重置均以实际操作时间作为窗口起点，后续自动重置直接信任已持久化的窗口起点。删除仅用于兼容旧版 `startOfDay` 数据的 midnight 纠偏及其专属测试；既有旧记录继续按其已保存的 `00:00` 起点运行，不新增来源字段或数据迁移。
+
 ### 7.2 v0.1.171
 
 Codex identity 将 User-Agent/originator/version 统一到动态版本来源。必须追踪 HTTP、透传、WebSocket 握手、探针、模型列表、账号测试和 alpha-search；账号级自定义 UA 只能贡献允许的客户端/环境信息，不得恢复陈旧版本。alpha-search 的 PAT fallback、request-body handle、失败副作用和按次计费必须保持。

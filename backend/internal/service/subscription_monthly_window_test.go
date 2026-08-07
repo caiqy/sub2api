@@ -22,10 +22,10 @@ type monthlyResetUserSubRepo struct {
 	resetAt     time.Time
 }
 
-func (r *monthlyResetUserSubRepo) ResetMonthlyUsage(_ context.Context, _ int64, _ *time.Time, resetAt time.Time) error {
+func (r *monthlyResetUserSubRepo) ResetMonthlyUsageWithVersion(_ context.Context, _ int64, _ *time.Time, resetAt time.Time) (int64, error) {
 	r.resetCalled = true
 	r.resetAt = resetAt
-	return nil
+	return 1, nil
 }
 
 func (r *activateWindowUserSubRepo) ActivateWindows(_ context.Context, _ int64, start time.Time) error {
@@ -66,32 +66,11 @@ func TestThirtyDaySubscriptionDoesNotResetMonthlyQuotaBeforeExpiry(t *testing.T)
 	require.Equal(t, expiresAt, *renewed.MonthlyResetTime())
 }
 
-func TestCheckAndResetWindowsDoesNotResetExactThirtyDayLegacyMonthlyWindow(t *testing.T) {
-	windowStart := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
-	startsAt := time.Date(2026, 7, 1, 23, 30, 0, 0, time.UTC)
-	now := startsAt.Add(30 * 24 * time.Hour)
-	repo := &monthlyResetUserSubRepo{}
-	svc := NewSubscriptionService(groupRepoNoop{}, repo, nil, nil, nil)
-	svc.now = func() time.Time { return now }
-	sub := &UserSubscription{
-		ID:                 1,
-		StartsAt:           startsAt,
-		ExpiresAt:          startsAt.Add(30 * 24 * time.Hour),
-		MonthlyWindowStart: &windowStart,
-		MonthlyUsageUSD:    12,
-	}
-
-	require.NoError(t, svc.CheckAndResetWindows(context.Background(), sub))
-	require.False(t, repo.resetCalled)
-	require.Equal(t, 12.0, sub.MonthlyUsageUSD)
-	require.Equal(t, windowStart, *sub.MonthlyWindowStart)
-}
-
 func TestCheckAndResetWindowsResetsPartialFinalMonthlySubscriptions(t *testing.T) {
 	for _, durationDays := range []int{31, 45} {
 		t.Run(strconv.Itoa(durationDays)+"_days", func(t *testing.T) {
-			legacyWindowStart := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 			startsAt := time.Date(2026, 7, 1, 23, 30, 0, 0, time.UTC)
+			windowStart := startsAt
 			now := startsAt.Add(30 * 24 * time.Hour)
 			repo := &monthlyResetUserSubRepo{}
 			svc := NewSubscriptionService(groupRepoNoop{}, repo, nil, nil, nil)
@@ -100,7 +79,7 @@ func TestCheckAndResetWindowsResetsPartialFinalMonthlySubscriptions(t *testing.T
 				ID:                 2,
 				StartsAt:           startsAt,
 				ExpiresAt:          startsAt.Add(time.Duration(durationDays) * 24 * time.Hour),
-				MonthlyWindowStart: &legacyWindowStart,
+				MonthlyWindowStart: &windowStart,
 				MonthlyUsageUSD:    12,
 			}
 
@@ -112,26 +91,9 @@ func TestCheckAndResetWindowsResetsPartialFinalMonthlySubscriptions(t *testing.T
 	}
 }
 
-func TestNormalizeExpiredWindowsKeepsLegacyMonthlyUsageBeforeExpiry(t *testing.T) {
-	windowStart := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
-	startsAt := windowStart.Add(23*time.Hour + 30*time.Minute)
-	now := windowStart.Add(30 * 24 * time.Hour)
-	subs := []UserSubscription{{
-		StartsAt:           startsAt,
-		ExpiresAt:          startsAt.Add(30 * 24 * time.Hour),
-		MonthlyWindowStart: &windowStart,
-		MonthlyUsageUSD:    12,
-	}}
-
-	normalizeExpiredWindowsAt(subs, now)
-
-	require.Equal(t, 12.0, subs[0].MonthlyUsageUSD)
-	require.Equal(t, windowStart, *subs[0].MonthlyWindowStart)
-}
-
 func TestNormalizeExpiredWindowsResetsMonthlyUsageWithPartialFinalPeriod(t *testing.T) {
 	startsAt := time.Date(2026, 7, 1, 23, 30, 0, 0, time.UTC)
-	windowStart := startsAt.Add(-23*time.Hour - 30*time.Minute)
+	windowStart := startsAt
 	now := startsAt.Add(30 * 24 * time.Hour)
 	subs := []UserSubscription{{
 		StartsAt:           startsAt,
@@ -146,31 +108,9 @@ func TestNormalizeExpiredWindowsResetsMonthlyUsageWithPartialFinalPeriod(t *test
 	require.Nil(t, subs[0].MonthlyWindowStart)
 }
 
-func TestValidateAndCheckLimitsKeepsLegacyMonthlyUsageBeforeExpiry(t *testing.T) {
-	windowStart := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
-	startsAt := windowStart.Add(23*time.Hour + 30*time.Minute)
-	now := windowStart.Add(30 * 24 * time.Hour)
-	limit := 10.0
-	sub := &UserSubscription{
-		Status:             SubscriptionStatusActive,
-		StartsAt:           startsAt,
-		ExpiresAt:          startsAt.Add(30 * 24 * time.Hour),
-		MonthlyWindowStart: &windowStart,
-		MonthlyUsageUSD:    12,
-	}
-	svc := NewSubscriptionService(groupRepoNoop{}, userSubRepoNoop{}, nil, nil, nil)
-	svc.now = func() time.Time { return now }
-
-	needsMaintenance, err := svc.ValidateAndCheckLimits(sub, &Group{MonthlyLimitUSD: &limit})
-
-	require.ErrorIs(t, err, ErrMonthlyLimitExceeded)
-	require.False(t, needsMaintenance)
-	require.Equal(t, 12.0, sub.MonthlyUsageUSD)
-}
-
 func TestValidateAndCheckLimitsResetsMonthlyUsageWithPartialFinalPeriod(t *testing.T) {
 	startsAt := time.Date(2026, 7, 1, 23, 30, 0, 0, time.UTC)
-	windowStart := startsAt.Add(-23*time.Hour - 30*time.Minute)
+	windowStart := startsAt
 	now := startsAt.Add(30 * 24 * time.Hour)
 	limit := 10.0
 	sub := &UserSubscription{
@@ -204,7 +144,7 @@ func TestValidateAndCheckLimitsRejectsExactExpiry(t *testing.T) {
 
 func TestAutomaticWindowsAllowPartialFinalDailyAndWeeklyPeriods(t *testing.T) {
 	startsAt := time.Date(2026, 7, 1, 15, 45, 0, 0, time.UTC)
-	legacyWindowStart := startOfDay(startsAt)
+	windowStart := startsAt
 	tests := []struct {
 		name      string
 		period    time.Duration
@@ -217,7 +157,7 @@ func TestAutomaticWindowsAllowPartialFinalDailyAndWeeklyPeriods(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			sub := &UserSubscription{StartsAt: startsAt, ExpiresAt: tt.expiresAt}
-			resetAt, ok := sub.automaticWindowStartAt(&legacyWindowStart, tt.period, startsAt.Add(tt.period))
+			resetAt, ok := sub.automaticWindowStartAt(&windowStart, tt.period, startsAt.Add(tt.period))
 
 			require.True(t, ok)
 			require.Equal(t, startsAt.Add(tt.period), resetAt)

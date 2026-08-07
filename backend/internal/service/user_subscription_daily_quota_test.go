@@ -225,7 +225,7 @@ func TestAssignOrExtendSubscription_ExpiredSubscriptionAppendsMatchingNotes(t *t
 
 func TestUserSubscriptionNeedsDailyReset_DailyCardKeepsOneTimeQuota(t *testing.T) {
 	start := time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)
-	dailyWindowStart := time.Date(2026, 5, 18, 0, 0, 0, 0, time.UTC)
+	dailyWindowStart := start
 	sub := &UserSubscription{
 		StartsAt:         start,
 		ExpiresAt:        start.Add(24 * time.Hour),
@@ -239,7 +239,7 @@ func TestUserSubscriptionNeedsDailyReset_DailyCardKeepsOneTimeQuota(t *testing.T
 
 func TestUserSubscriptionNeedsDailyReset_MultiDaySubscriptionStillRefreshes(t *testing.T) {
 	start := time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)
-	dailyWindowStart := time.Date(2026, 5, 18, 0, 0, 0, 0, time.UTC)
+	dailyWindowStart := start
 	sub := &UserSubscription{
 		StartsAt:         start,
 		ExpiresAt:        start.AddDate(0, 0, 2),
@@ -247,13 +247,13 @@ func TestUserSubscriptionNeedsDailyReset_MultiDaySubscriptionStillRefreshes(t *t
 	}
 
 	require.False(t, sub.HasOneTimeDailyQuota())
-	require.False(t, sub.NeedsDailyResetAt(dailyWindowStart.Add(24*time.Hour)), "legacy midnight 不应让多日订阅提前到 0 点刷新")
+	require.False(t, sub.NeedsDailyResetAt(dailyWindowStart.Add(24*time.Hour-time.Nanosecond)))
 	require.True(t, sub.NeedsDailyResetAt(start.Add(24*time.Hour)), "多日订阅应按 StartsAt 精确 24 小时窗口刷新")
 }
 
 func TestUserSubscriptionDailyResetTime_DailyCardReturnsExpiry(t *testing.T) {
 	start := time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)
-	dailyWindowStart := time.Date(2026, 5, 18, 0, 0, 0, 0, time.UTC)
+	dailyWindowStart := start
 	expiresAt := start.Add(24 * time.Hour)
 	sub := &UserSubscription{
 		StartsAt:         start,
@@ -902,68 +902,10 @@ func TestValidateAndCheckLimits_DailyCardDoesNotAllowSecondQuotaAfterMidnight(t 
 	require.Equal(t, dailyLimit+0.01, sub.DailyUsageUSD, "热路径不应清零日卡已用额度")
 }
 
-func TestLegacyMidnightWeeklyWindowUsesStartsAtAnchor(t *testing.T) {
-	startsAt := time.Date(2026, 6, 26, 15, 30, 0, 0, time.UTC)
-	legacyMidnight := time.Date(2026, 6, 26, 0, 0, 0, 0, time.UTC)
-	sub := &UserSubscription{
-		StartsAt:          startsAt,
-		WeeklyWindowStart: &legacyMidnight,
-	}
-
-	beforeReset := time.Date(2026, 7, 3, 0, 0, 0, 0, time.UTC)
-	require.False(t, sub.NeedsWeeklyResetAt(beforeReset))
-	require.Nil(t, sub.NextWeeklyWindowStart(beforeReset))
-
-	atReset := time.Date(2026, 7, 3, 15, 30, 0, 0, time.UTC)
-	require.True(t, sub.NeedsWeeklyResetAt(atReset))
-	next := sub.NextWeeklyWindowStart(atReset)
-	require.NotNil(t, next)
-	require.Equal(t, atReset, *next)
-}
-
-func TestLegacyMidnightMonthlyWindowUsesStartsAtAnchor(t *testing.T) {
-	startsAt := time.Date(2026, 6, 26, 15, 30, 0, 0, time.UTC)
-	legacyMidnight := time.Date(2026, 6, 26, 0, 0, 0, 0, time.UTC)
-	sub := &UserSubscription{
-		StartsAt:           startsAt,
-		MonthlyWindowStart: &legacyMidnight,
-	}
-
-	beforeReset := time.Date(2026, 7, 26, 0, 0, 0, 0, time.UTC)
-	require.False(t, sub.NeedsMonthlyResetAt(beforeReset))
-	require.Nil(t, sub.NextMonthlyWindowStart(beforeReset))
-
-	atReset := time.Date(2026, 7, 26, 15, 30, 0, 0, time.UTC)
-	require.True(t, sub.NeedsMonthlyResetAt(atReset))
-	next := sub.NextMonthlyWindowStart(atReset)
-	require.NotNil(t, next)
-	require.Equal(t, atReset, *next)
-}
-
-func TestLegacyMidnightResetTimeUsesEffectiveAnchor(t *testing.T) {
-	startsAt := time.Date(2026, 6, 26, 15, 30, 0, 0, time.UTC)
-	legacyMidnight := time.Date(2026, 6, 26, 0, 0, 0, 0, time.UTC)
-	sub := &UserSubscription{
-		StartsAt:           startsAt,
-		WeeklyWindowStart:  &legacyMidnight,
-		MonthlyWindowStart: &legacyMidnight,
-	}
-
-	weeklyReset := sub.WeeklyResetTime()
-	require.NotNil(t, weeklyReset)
-	require.Equal(t, time.Date(2026, 7, 3, 15, 30, 0, 0, time.UTC), *weeklyReset,
-		"legacy midnight window: WeeklyResetTime 应为下周 15:30（startsAt+7d）")
-
-	monthlyReset := sub.MonthlyResetTime()
-	require.NotNil(t, monthlyReset)
-	require.Equal(t, time.Date(2026, 7, 26, 15, 30, 0, 0, time.UTC), *monthlyReset,
-		"legacy midnight window: MonthlyResetTime 应为 30d 后 15:30（startsAt+30d）")
-}
-
-func TestThirtyDayCardLegacyMidnightDoesNotResetMonthlyBeforeExpiry(t *testing.T) {
+func TestThirtyDayCardDoesNotResetMonthlyBeforeExpiry(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	startsAt := now.Add(-29 * 24 * time.Hour)
-	legacyMidnight := startOfDay(startsAt)
+	monthlyWindowStart := startsAt
 	repo := &windowResetTrackingUserSubRepo{}
 	svc := NewSubscriptionService(groupRepoNoop{}, repo, nil, nil, nil)
 	sub := &UserSubscription{
@@ -972,21 +914,21 @@ func TestThirtyDayCardLegacyMidnightDoesNotResetMonthlyBeforeExpiry(t *testing.T
 		GroupID:            20,
 		StartsAt:           startsAt,
 		ExpiresAt:          startsAt.Add(30 * 24 * time.Hour),
-		MonthlyWindowStart: &legacyMidnight,
+		MonthlyWindowStart: &monthlyWindowStart,
 		MonthlyUsageUSD:    10,
 	}
 
 	err := svc.CheckAndResetWindows(context.Background(), sub)
 
 	require.NoError(t, err)
-	require.False(t, repo.resetMonthlyCalled, "30 日卡 legacy midnight window 在到期前 1 天不应重置月配额")
+	require.False(t, repo.resetMonthlyCalled, "30 日卡在到期前 1 天不应重置月配额")
 	require.Equal(t, 10.0, sub.MonthlyUsageUSD)
 }
 
-func TestSevenDayCardLegacyMidnightDoesNotResetBeforeExpiry(t *testing.T) {
+func TestSevenDayCardDoesNotResetBeforeExpiry(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	startsAt := now.Add(-6*24*time.Hour + time.Hour)
-	legacyMidnight := startOfDay(startsAt)
+	weeklyWindowStart := startsAt
 	repo := &windowResetTrackingUserSubRepo{}
 	svc := NewSubscriptionService(groupRepoNoop{}, repo, nil, nil, nil)
 	sub := &UserSubscription{
@@ -995,43 +937,15 @@ func TestSevenDayCardLegacyMidnightDoesNotResetBeforeExpiry(t *testing.T) {
 		GroupID:           20,
 		StartsAt:          startsAt,
 		ExpiresAt:         startsAt.Add(7 * 24 * time.Hour),
-		WeeklyWindowStart: &legacyMidnight,
+		WeeklyWindowStart: &weeklyWindowStart,
 		WeeklyUsageUSD:    10,
 	}
 
 	err := svc.CheckAndResetWindows(context.Background(), sub)
 
 	require.NoError(t, err)
-	require.False(t, repo.resetWeeklyCalled, "7 日卡 legacy midnight window 在到期前 1 小时不应调用 ResetWeeklyUsage")
+	require.False(t, repo.resetWeeklyCalled, "7 日卡在到期前 1 小时不应调用 ResetWeeklyUsage")
 	require.Equal(t, 10.0, sub.WeeklyUsageUSD)
-}
-
-func TestFixLegacyMidnightAnchor_FirstPeriodMidnightReturnsStartsAt(t *testing.T) {
-	startsAt := time.Date(2026, 6, 15, 14, 30, 0, 0, time.UTC)
-	// 首个周期内的 legacy midnight 应回到 StartsAt，避免把首刷推迟到第二个周期。
-	adminResetMidnight := time.Date(2026, 6, 20, 0, 0, 0, 0, time.UTC)
-
-	weekly := fixLegacyMidnightAnchor(startsAt, &adminResetMidnight, 7*24*time.Hour)
-	monthly := fixLegacyMidnightAnchor(startsAt, &adminResetMidnight, 30*24*time.Hour)
-
-	require.NotNil(t, weekly)
-	require.NotNil(t, monthly)
-	require.Equal(t, startsAt, *weekly, "首个周周期内的 midnight 应纠偏回 StartsAt")
-	require.Equal(t, startsAt, *monthly, "首个月周期内的 midnight 应纠偏回 StartsAt")
-}
-
-func TestFixLegacyMidnightAnchor_StartsAtMidnightNotCorrected(t *testing.T) {
-	startsAt := time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC)
-	legacyMidnight := time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC)
-
-	weekly := fixLegacyMidnightAnchor(startsAt, &legacyMidnight, 7*24*time.Hour)
-	monthly := fixLegacyMidnightAnchor(startsAt, &legacyMidnight, 30*24*time.Hour)
-
-	require.NotNil(t, weekly)
-	require.NotNil(t, monthly)
-	// StartsAt=00:00 是合法锚点，不应被纠偏
-	require.Equal(t, legacyMidnight, *weekly, "StartsAt=00:00 时 midnight windowStart 不应被纠偏")
-	require.Equal(t, legacyMidnight, *monthly, "StartsAt=00:00 时 midnight windowStart 不应被纠偏")
 }
 
 func TestFutureWeeklyResetTime_StaleWindow(t *testing.T) {
@@ -1068,37 +982,6 @@ func TestFutureMonthlyResetTime_StaleWindow(t *testing.T) {
 	next := sub.FutureMonthlyResetTime(now)
 	require.NotNil(t, next)
 	require.Equal(t, startsAt.Add(90*24*time.Hour), *next, "stale monthly: 应返回下一个未来 reset（start+3*30d）")
-}
-
-func TestFixLegacyMidnightAnchor_AlignedWindowStaysStable(t *testing.T) {
-	startsAt := time.Date(2026, 6, 15, 14, 30, 0, 0, time.UTC)
-	// 窗口已对齐到 StartsAt+7d（一个周期后），非 midnight
-	alignedWeekly := startsAt.Add(7 * 24 * time.Hour)
-	alignedMonthly := startsAt.Add(30 * 24 * time.Hour)
-
-	weekly := fixLegacyMidnightAnchor(startsAt, &alignedWeekly, 7*24*time.Hour)
-	monthly := fixLegacyMidnightAnchor(startsAt, &alignedMonthly, 30*24*time.Hour)
-
-	require.NotNil(t, weekly)
-	require.NotNil(t, monthly)
-	require.Equal(t, alignedWeekly, *weekly, "已对齐的非 midnight 窗口应保持原值")
-	require.Equal(t, alignedMonthly, *monthly, "已对齐的非 midnight 窗口应保持原值")
-}
-
-func TestLegacyMidnightLaterPeriodDoesNotMoveWindowIntoFuture(t *testing.T) {
-	startsAt := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
-	legacyMidnight := time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC)
-	now := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
-	sub := &UserSubscription{
-		StartsAt:          startsAt,
-		WeeklyWindowStart: &legacyMidnight,
-	}
-
-	effective := sub.effectiveWeeklyWindowStart()
-
-	require.NotNil(t, effective)
-	require.False(t, effective.After(now), "later legacy midnight 纠偏不能把有效窗口推到未来")
-	require.Equal(t, startsAt.Add(7*24*time.Hour), *effective, "later legacy midnight 应回落到最近已到达边界")
 }
 
 func TestExtendSubscription_ExpiredSubscriptionResetsQuotaWindows(t *testing.T) {
@@ -1292,26 +1175,6 @@ func TestCheckAndResetWindows_StaleDailyUsesLatestWindowStart(t *testing.T) {
 	require.Equal(t, 0.0, sub.DailyUsageUSD)
 }
 
-func TestLegacyMidnightDailyWindowUsesStartsAtAnchor(t *testing.T) {
-	startsAt := time.Date(2026, 6, 26, 15, 30, 0, 0, time.UTC)
-	legacyMidnight := time.Date(2026, 6, 26, 0, 0, 0, 0, time.UTC)
-	sub := &UserSubscription{
-		StartsAt:         startsAt,
-		ExpiresAt:        startsAt.Add(7 * 24 * time.Hour),
-		DailyWindowStart: &legacyMidnight,
-	}
-
-	beforeReset := time.Date(2026, 6, 27, 0, 0, 0, 0, time.UTC)
-	require.False(t, sub.NeedsDailyResetAt(beforeReset))
-	require.Nil(t, sub.NextDailyWindowStart(beforeReset))
-
-	atReset := time.Date(2026, 6, 27, 15, 30, 0, 0, time.UTC)
-	require.True(t, sub.NeedsDailyResetAt(atReset))
-	next := sub.NextDailyWindowStart(atReset)
-	require.NotNil(t, next)
-	require.Equal(t, atReset, *next)
-}
-
 func TestCreateSubscriptionAnchorsWindowsToStartsAt(t *testing.T) {
 	groupRepo := &subscriptionGroupRepoStub{group: &Group{ID: 20, SubscriptionType: SubscriptionTypeSubscription}}
 	subRepo := newSubscriptionUserSubRepoStub()
@@ -1330,47 +1193,6 @@ func TestCreateSubscriptionAnchorsWindowsToStartsAt(t *testing.T) {
 	require.Equal(t, sub.StartsAt, *sub.DailyWindowStart)
 	require.Equal(t, sub.StartsAt, *sub.WeeklyWindowStart)
 	require.Equal(t, sub.StartsAt, *sub.MonthlyWindowStart)
-}
-
-func TestFixLegacyMidnightAnchor_DelayedFirstUse(t *testing.T) {
-	startsAt := time.Date(2026, 6, 26, 15, 30, 0, 0, time.UTC)
-	// 旧版首次激活发生在 StartsAt 之后 2 天的 00:00
-	windowStart := time.Date(2026, 6, 28, 0, 0, 0, 0, time.UTC)
-
-	weekly := fixLegacyMidnightAnchor(startsAt, &windowStart, 7*24*time.Hour)
-	monthly := fixLegacyMidnightAnchor(startsAt, &windowStart, 30*24*time.Hour)
-
-	require.NotNil(t, weekly)
-	require.NotNil(t, monthly)
-
-	// 延迟首次使用但仍处于首个周期内的 legacy midnight 应纠偏回 StartsAt，
-	// 避免把首个重置点推迟到第二个周期。
-	expectedWeeklyAnchor := startsAt
-	expectedMonthlyAnchor := startsAt
-
-	require.Equal(t, expectedWeeklyAnchor, *weekly,
-		"StartsAt=6/26 15:30, window=6/28 00:00: weekly 应纠偏回 StartsAt")
-	require.Equal(t, expectedMonthlyAnchor, *monthly,
-		"StartsAt=6/26 15:30, window=6/28 00:00: monthly 应纠偏回 StartsAt")
-
-	// 验证纠偏后的锚点不改变原有时分秒
-	require.Equal(t, startsAt.Hour(), weekly.Hour())
-	require.Equal(t, startsAt.Minute(), weekly.Minute())
-	require.Equal(t, startsAt.Hour(), monthly.Hour())
-	require.Equal(t, startsAt.Minute(), monthly.Minute())
-}
-
-func TestFixLegacyMidnightAnchor_FirstPeriodMidnightReturnsStartsAt_Weekly(t *testing.T) {
-	startsAt := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
-
-	// 非对齐 midnight（不在 StartsAt+n*period 边界上）
-	nonAligned := startsAt.Add(7*24*time.Hour - 12*time.Hour)
-
-	weekly := fixLegacyMidnightAnchor(startsAt, &nonAligned, 7*24*time.Hour)
-
-	require.NotNil(t, weekly)
-	require.Equal(t, startsAt, *weekly,
-		"首个周期内的非对齐 midnight 应纠偏回 startsAt，避免推迟首刷")
 }
 
 func TestCheckAndResetWindows_L1WaitAfterReset(t *testing.T) {

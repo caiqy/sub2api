@@ -1182,7 +1182,6 @@ func (s *SubscriptionService) checkAndActivateWindowAt(ctx context.Context, sub 
 }
 
 // AdminResetQuota manually resets the daily, weekly, and/or monthly usage windows.
-// Uses startOfDay(now) as the new window start. Automatic reset uses anchor-based window starts instead.
 func (s *SubscriptionService) AdminResetQuota(ctx context.Context, subscriptionID int64, resetDaily, resetWeekly, resetMonthly bool) (*UserSubscription, error) {
 	if !resetDaily && !resetWeekly && !resetMonthly {
 		return nil, ErrInvalidInput
@@ -1191,7 +1190,7 @@ func (s *SubscriptionService) AdminResetQuota(ctx context.Context, subscriptionI
 	if err != nil {
 		return nil, err
 	}
-	windowStart := startOfDay(s.now())
+	windowStart := s.now()
 	version, err := s.resetUsageWindowsWithVersion(ctx, sub.ID, resetDaily, resetWeekly, resetMonthly, windowStart)
 	if err != nil {
 		return nil, err

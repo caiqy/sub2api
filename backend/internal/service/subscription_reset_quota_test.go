@@ -165,7 +165,6 @@ func TestAdminResetQuota_ResetBoth(t *testing.T) {
 	svc := newResetQuotaSvc(stub)
 	resetAt := time.Date(2026, 7, 1, 10, 37, 42, 123, time.UTC)
 	svc.now = func() time.Time { return resetAt }
-	dayStart := startOfDay(resetAt)
 
 	result, err := svc.AdminResetQuota(context.Background(), 1, true, true, false)
 
@@ -174,9 +173,9 @@ func TestAdminResetQuota_ResetBoth(t *testing.T) {
 	require.True(t, stub.resetDailyCalled, "应调用 ResetDailyUsage")
 	require.True(t, stub.resetWeeklyCalled, "应调用 ResetWeeklyUsage")
 	require.False(t, stub.resetMonthlyCalled, "不应调用 ResetMonthlyUsage")
-	require.Equal(t, dayStart, stub.windowStart)
-	require.Equal(t, dayStart, *result.DailyWindowStart)
-	require.Equal(t, dayStart, *result.WeeklyWindowStart)
+	require.Equal(t, resetAt, stub.windowStart)
+	require.Equal(t, resetAt, *result.DailyWindowStart)
+	require.Equal(t, resetAt, *result.WeeklyWindowStart)
 }
 
 func TestAdminResetQuota_ResetDailyOnly(t *testing.T) {
@@ -277,31 +276,6 @@ func TestAdminResetQuota_ResetMonthlyOnly(t *testing.T) {
 	require.False(t, stub.resetDailyCalled, "不应调用 ResetDailyUsage")
 	require.False(t, stub.resetWeeklyCalled, "不应调用 ResetWeeklyUsage")
 	require.True(t, stub.resetMonthlyCalled, "应调用 ResetMonthlyUsage")
-}
-
-func TestAdminResetQuota_BeforeStartsAtSameDayPreservesAutomaticBoundary(t *testing.T) {
-	startsAt := time.Date(2026, 7, 1, 15, 0, 0, 0, time.UTC)
-	resetAt := time.Date(2026, 7, 1, 10, 37, 42, 123, time.UTC)
-	stub := &resetQuotaUserSubRepoStub{
-		sub: &UserSubscription{
-			ID:        10,
-			UserID:    10,
-			GroupID:   20,
-			StartsAt:  startsAt,
-			ExpiresAt: startsAt.Add(45 * 24 * time.Hour),
-		},
-	}
-	svc := newResetQuotaSvc(stub)
-	svc.now = func() time.Time { return resetAt }
-	dayStart := startOfDay(resetAt)
-
-	result, err := svc.AdminResetQuota(context.Background(), 10, false, false, true)
-
-	require.NoError(t, err)
-	require.Equal(t, dayStart, *result.MonthlyWindowStart)
-	boundary, ok := result.automaticWindowStartAt(result.MonthlyWindowStart, 30*24*time.Hour, startsAt.Add(30*24*time.Hour))
-	require.True(t, ok)
-	require.Equal(t, startsAt.Add(30*24*time.Hour), boundary)
 }
 
 func TestAdminResetQuota_ResetMonthlyUsageError(t *testing.T) {

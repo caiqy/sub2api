@@ -75,7 +75,7 @@ func (s *UserSubscription) NeedsDailyReset() bool {
 }
 
 func (s *UserSubscription) effectiveDailyWindowStart() *time.Time {
-	return fixLegacyMidnightAnchor(s.StartsAt, s.DailyWindowStart, 24*time.Hour)
+	return s.DailyWindowStart
 }
 
 func (s *UserSubscription) NeedsDailyResetAt(now time.Time) bool {
@@ -94,41 +94,11 @@ func (s *UserSubscription) NeedsWeeklyReset() bool {
 }
 
 func (s *UserSubscription) effectiveWeeklyWindowStart() *time.Time {
-	return fixLegacyMidnightAnchor(s.StartsAt, s.WeeklyWindowStart, 7*24*time.Hour)
+	return s.WeeklyWindowStart
 }
 
 func (s *UserSubscription) effectiveMonthlyWindowStart() *time.Time {
-	return fixLegacyMidnightAnchor(s.StartsAt, s.MonthlyWindowStart, 30*24*time.Hour)
-}
-
-func isMidnight(t time.Time) bool {
-	return t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0 && t.Nanosecond() == 0
-}
-
-func fixLegacyMidnightAnchor(startsAt time.Time, windowStart *time.Time, period time.Duration) *time.Time {
-	if windowStart == nil || startsAt.IsZero() {
-		return windowStart
-	}
-	if !isMidnight(*windowStart) {
-		return windowStart
-	}
-	// StartsAt=00:00 是合法锚点，不纠偏。
-	if isMidnight(startsAt) {
-		return windowStart
-	}
-	since := windowStart.Sub(startsAt)
-	if since < 0 {
-		return &startsAt
-	}
-	if since < period {
-		return &startsAt
-	}
-	periods := int(since / period)
-	aligned := startsAt.Add(time.Duration(periods) * period)
-	if aligned.Equal(*windowStart) {
-		return windowStart
-	}
-	return &aligned
+	return s.MonthlyWindowStart
 }
 
 func (s *UserSubscription) NeedsWeeklyResetAt(now time.Time) bool {
@@ -164,20 +134,6 @@ func (s *UserSubscription) automaticWindowStartAt(previous *time.Time, period ti
 	}
 
 	anchor := *previous
-	switch period {
-	case 24 * time.Hour:
-		if corrected := s.effectiveDailyWindowStart(); corrected != nil {
-			anchor = *corrected
-		}
-	case 7 * 24 * time.Hour:
-		if corrected := s.effectiveWeeklyWindowStart(); corrected != nil {
-			anchor = *corrected
-		}
-	case 30 * 24 * time.Hour:
-		if corrected := s.effectiveMonthlyWindowStart(); corrected != nil {
-			anchor = *corrected
-		}
-	}
 	next := anchor.Add(period)
 	if now.Before(next) || !next.Before(s.ExpiresAt) {
 		return time.Time{}, false
