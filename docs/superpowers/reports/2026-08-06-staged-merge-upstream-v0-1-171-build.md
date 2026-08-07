@@ -909,3 +909,47 @@ frontend/src/views/auth/__tests__/WechatCallbackView.spec.ts
 - fresh gates：Task 13 service、handler、middleware 三条 canonical focused 命令 PASS；`internal/service` tagged-unit captcha/renewal/WS/usage 集、`internal/handler` tagged-unit passkey/reasoning/usage 集、Stripe provider、securityaudit 与 routes 精确测试 PASS；`gofmt -d` 与 `git diff --check` 无输出。
 - review：fresh reviewer `ses_02230eff6ffeDls4b42Mlt42NK` 两轮指出 renewal fixture 时钟稳定性和 captcha counter 边界说明；修复后最终 remaining findings `none`，spec `PASS`，quality `APPROVED`。
 - residual：本机 Docker CLI 不可用，Docker/Testcontainers integration 保持 `unverified`；`go test -race` 因 cgo 不可用未运行。Prettier 未安装，但目标 Vitest、Go format 与 whitespace checks 均通过；Task 14 仍须运行 Tasks 12/13 focused、root full gate、两轮 generate、静态检查和 Docker 条件门禁。
+
+## Task 14：v0.1.171 阶段证据闭合
+
+- fresh verifier：Task 14 brief 与 canonical plan Task 14 已完整读取；Comet resume probe 返回 `action=none`、`reason=no active Native changes`，未进入任何 workflow。
+- 运行 HEAD：`d603b97eddb50ebde3d32e80cd7c193fb2e98428`。preflight 与静态复核均确认 `backend/cmd/server/VERSION=0.1.169.3`、无 staged/unmerged index entry、无 tracked conflict marker，且可见 worktree 仅为受保护的 `?? .comet/current-change.json`。
+- v0.1.171 实际冲突与能力簇来源：Task 11 的 20 个文本冲突、merge `cca37e01eb719d65ce81dc7569b190fe9550ae5d`（第二父 `f0e7a9c7a23a7d02fb159b62fa809621eb0475a6`）；Task 12 为 `e9c262283`、`938d00eb4`、`d5a52310d`；Task 13 为 `fa8c76cae`、`c0305f70e`、`d8be6ed62`、`37ac82d7d`、`b1f00a968`、`1bb18f906`。本 Task 未修改产品代码、测试、plan/tasks/checkpoint、VERSION 或 runtime。
+
+### Task 14 聚焦与 full gate
+
+| 命令 | exit | fresh 结果 |
+| --- | ---: | --- |
+| `go test -count=1 ./internal/pkg/openai -run '^Test.*Codex.*'` | `0` | `internal/pkg/openai` PASS，`0.550s`。 |
+| `go test -count=1 ./internal/service -run '^(Test.*Codex.*|Test.*Capacity.*|Test.*AlphaSearch.*|TestOpenAI.*(Forward|Passthrough|WS).*)$'` | `0` | `internal/service` PASS，`44.777s`。 |
+| `go test -count=1 ./internal/handler -run '^(Test.*Gateway.*(Body|Failover|Usage).*|TestOpenAI.*WebSocket.*)$'` | `0` | `internal/handler` PASS，`19.700s`。 |
+| `go test -count=1 ./internal/service -run '^(Test.*(Tencent|Aliyun|Turnstile|Captcha|Auth|Refund|Renewal|Reasoning|WebSocket|Prompt|Usage).*)$'` | `0` | `internal/service` PASS，`11.802s`。 |
+| `go test -count=1 ./internal/handler -run '^(Test.*(Captcha|Auth|Passkey|Setting|Prompt|Usage).*)$'` | `0` | `internal/handler` PASS，`10.642s`。 |
+| `go test -count=1 ./internal/server/middleware -run '^(Test.*(Auth|SecurityHeaders|CSP).*)$'` | `0` | `internal/server/middleware` PASS，`1.886s`。 |
+| `pnpm --dir frontend exec vitest run src/components/__tests__/AliyunCaptchaWidget.spec.ts src/components/__tests__/TencentCaptchaGate.spec.ts src/components/auth/__tests__/PendingOAuthCreateAccountForm.spec.ts src/views/auth/__tests__/TencentCaptchaActionGate.spec.ts src/views/admin/__tests__/SettingsView.spec.ts src/views/admin/__tests__/groupsReasoningEffort.spec.ts` | `0` | 6 files、73 tests PASS，`9.67s`。 |
+| `make test` | `0` | root full gate PASS；Vitest 末尾为 236 files、1806 tests PASS。 |
+| `make VERSION=0.1.169.3 SHELL=D:/scoop/shims/bash.exe build` | `0` | backend build、`vue-tsc -b` 和 Vite production build PASS；1051 modules transformed。 |
+| `make -C backend generate`，随后 `git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` | `0` / `0` | 第 1 轮生成后 Ent/Wire 零 diff。 |
+| `make -C backend generate`，随后 `git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` | `0` / `0` | 第 2 轮生成后 Ent/Wire 零 diff。 |
+
+### Task 14 静态与 Docker 条件门禁
+
+- `git diff --check`、`git diff --cached --check`、`git diff --cached --name-only`、`git diff --name-only --diff-filter=U` 和 `git ls-files -u` 均 exit `0` 且无输出。
+- `git grep -n -I -e '^<<<<<<< ' -e '^=======$' -e '^>>>>>>> ' -- .` exit `1`（无匹配），作为 tracked application/config/migration source 冲突标记检查通过。
+- `git status --short --untracked-files=all` 只输出 `?? .comet/current-change.json`；没有产品或测试变更。`go test -race` 未运行，符合 Task 14 明确边界。
+- Docker local-only preflight 的首命令 `docker context show` 无法启动：`docker: The term 'docker' is not recognized as a name of a cmdlet, function, script file, or executable program.` 因未能确认本机 CLI/context，未运行 `docker version` 或 migration integration，未联系任何远程服务。
+- `TestMigrationsRunner_PreservesPasskeyAndSubscriptionQuotaMigrationsAcrossUpgrade` 对空库、从本地 191/192 升级、排序、幂等和 checksum 的 Testcontainers 契约状态为 `unverified`，原因仅为本机 Docker CLI 缺失。
+
+### v0.1.171 阶段能力矩阵
+
+| # | 能力契约 | 入口/调用链与 fresh 证据 | 状态 |
+| ---: | --- | --- | --- |
+| 1 | scheduler/sticky/fallback | `OpenAIGatewayHandler -> OpenAIGatewayService -> SelectAccountWithLoadAwareness -> layered scheduler -> WaitPlan`; `TestOpenAISelectAccountWithLoadAwareness_StickyWaitPlan`、`TestLayered_WaitPlanFallbackSkipsUpstreamRestrictedAccount` 的既有直接覆盖，Task 12 `Capacity` focused 与本次 full gate 复核。 | `manual` |
+| 2 | HTTP/WS/usage/body | gateway handler -> forward/passthrough/WS -> request body handle -> final outbound/usage；Task 12 的 Codex/forward/passthrough/WS service focused 与 body/failover/usage handler focused 本次均 PASS。 | `protected` |
+| 3 | alpha-search | `AlphaSearch -> ForwardAlphaSearch -> matched RequestBodyHandle -> fallback/retry/cleanup`；Task 12 `AlphaSearch` focused 本次 PASS，且 existing direct identity/replay regressions仍由 full gate 覆盖。 | `protected` |
+| 4 | audit/auth/settings/CSP | captcha/auth handlers -> setting service -> middleware/session/cache；Task 13 Tencent/Aliyun/auth/settings/Passkey/Prompt focused 与 `SecurityHeaders`/CSP focused 本次均 PASS。 | `protected` |
+| 5 | subscription/refund/outbox | payment/refund -> subscription service -> locked repository/receipt -> invalidation outbox；Task 13 Refund/Renewal/Usage focused 本次 PASS，suspended renewal、exact window 和 outbox 组合保留已审计调用链证据。 | `manual` |
+| 6 | frontend | Aliyun/Tencent captcha widgets and auth gate -> SettingsView save -> three Tencent secrets clear; 6 canonical files/73 tests本次 PASS。 | `protected` |
+| 7 | dependency/generation/migration | source -> Ent/Wire generation and manifests; migration runner -> filename/checksum/upgrade integration；两轮生成零 diff、build/static PASS；Docker-only migration execution未验证。 | `unverified` |
+
+最终汇总：`protected=4`、`manual=2`、`unverified=1`、`gap=0`。`unverified` 仅限 Docker/Testcontainers migration 边界；所有非 Docker Task 14 gates 均有 fresh exit-0 证据。
