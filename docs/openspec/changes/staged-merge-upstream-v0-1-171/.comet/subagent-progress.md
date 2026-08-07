@@ -7,7 +7,7 @@
 - Previous task: `Task 3` complete; implementation `c766d8fa8`, fix `db8bff0dd`, checkoff `5c023a8d0`, thorough re-review APPROVED
 - Current task: `Task 4: 保护基线能力并完成非 Docker 门禁`
 - OpenSpec mapping: `1.4 在当前本地基线上运行聚焦保护测试、make test、make build、两轮 backend generate 与静态检查；为命中但缺少断言的高风险本地能力补最小保护测试`
-- Stage: `blocked-debugging`
+- Stage: `implementing`
 - Review/fix round: `0/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
 - Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-4-brief.md`
@@ -29,4 +29,7 @@
 - Fresh focused evidence: Go `49 + 13 + 39 + 2` tests and frontend `67` tests PASS
 - Current blocker: `make test` did not return an exit code before the 600-second harness timeout after visible frontend `225 files / 1698 tests` passed
 - Follow-up: dispatch a fresh systematic-debugging agent to isolate the non-terminating or slow Make subtarget; main coordinator must not execute the task directly
-- Status: BLOCKED pending root-cause diagnosis
+- Debug agent: `ses_026327218ffe2Vmy9Jcd6bKbbo` proved exact `make test` exit 0 in `00:08:26`; backend, unit, and frontend subtargets all exit 0 with no residual process
+- Root cause: 600-second harness budget was too small for the serial full gate; no code or Make defect found
+- Resume action: original Task 4 implementer continues with build, generate stability, and conflict checks using the durable debug evidence
+- Status: RESUMED, Task 4 implementer continuation pending
