@@ -4,20 +4,20 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Previous task: `Task 17` complete; no repository implementation commit; checkoff `75c234cd4`; final reviewer `ses_021ce6beeffeB7E0RdjCrBk2Mf` PASS spec and APPROVED evidence quality
-- Current task: `Task 18: 完成能力专项 review 和最终验证报告`
-- OpenSpec mapping: `4.4 完成本地能力专项 review、strict validation 和最终 build/verify evidence`
-- Stage: `ready`
+- Previous task: `Task 18` complete; report commits `7b18bcf7f`, `9fb23b19e`; checkoff `67d305ced`; final reviewer `ses_021b8df76ffegyInaceIX7EXLS` PASS spec and APPROVED evidence quality
+- Current task: none; all 18 canonical plan tasks and all OpenSpec tasks are checked
+- OpenSpec mapping: complete through `4.4`
+- Stage: `complete`
 - Review/fix round: `0/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
 - Brief: pending
 - Report: pending
-- Scope: close every final capability-matrix row, run OpenSpec strict validation, write build ledger and final verify report, and commit only those two reports
+- Scope: Build complete; run the Comet build guard and hand off to Verify without additional product or report changes
 - Environment: local Docker unavailable; migration integration remains `unverified` on skip; no remote execution
-- Hard boundary: final `gap` must be zero, all non-Docker gates must retain true PASS evidence, and Docker integration must remain explicit UNVERIFIED; no push/tag/release/deploy/server operation
-- Task 17 result: both target merge nodes are unique and ordered with exact second parents; VERSION and five migration blobs match; canonical final integration helper returned unverified because local Docker CLI is absent.
+- Hard boundary: Docker integration remains explicit UNVERIFIED; no push/tag/release/deploy/server operation is authorized
+- Task 18 result: strict validation PASS; final canonical matrix `protected=6`, `manual=4`, Docker-only `unverified=1`, `gap=0`; reports reviewed and approved.
 - User resolution retained: renewing an unexpired suspended subscription extends expiry, restores `active`, appends notes and preserves quota windows/usage.
-- Task 18 handoff: inherit Task 16 full-gate evidence and Task 17 topology/blob evidence verbatim; residuals are Docker integration and unavailable race/cgo only, with no remote substitution.
+- Verify handoff: inherit Task 16 full-gate evidence, Task 17 topology/blob evidence and final reports; residuals are Docker integration and unavailable race/cgo only, with no remote substitution.
 - Integration residual: Docker CLI unavailable; no remote execution and no false PASS.
 - Worktree: only protected `.comet/current-change.json` remains untracked after this checkpoint commit.
-- Status: ready for Task 18 final capability review and reports.
+- Status: ready for `comet guard staged-merge-upstream-v0-1-171 build --apply`.
