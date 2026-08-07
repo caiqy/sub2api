@@ -4327,6 +4327,12 @@ function applyOpenAIExtra(extra: Record<string, unknown>) {
     delete extra.openai_oauth_passthrough
   }
 
+  if (props.account.type === 'oauth' && openaiFlattenNamespacesEnabled.value) {
+    extra.openai_responses_flatten_namespaces = true
+  } else {
+    delete extra.openai_responses_flatten_namespaces
+  }
+
   if (isSparkShadow.value) {
     delete extra.openai_long_context_billing_enabled
   } else {
