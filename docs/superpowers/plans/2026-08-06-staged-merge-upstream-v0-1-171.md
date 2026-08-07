@@ -716,13 +716,13 @@ Commit-NamedPaths -Message 'fix: preserve scheduler and usage after v0.1.170' -P
 ```powershell
 Push-Location backend
 try {
-    Invoke-CheckedNative 'v0.1.170 gateway/audit/subscription service tests' { go test -count=1 ./internal/service -run '^(TestGateway.*PartialUsage.*|Test.*Anthropic.*|Test.*ContentModeration.*|Test.*Subscription.*|Test.*Setting.*|Test.*RequestBody.*)$' }
+    Invoke-CheckedNative 'v0.1.170 gateway/audit/subscription service tests' { go test -count=1 ./internal/service -run '^(TestGateway.*PartialUsage.*|TestOpenAI.*(WS|WebSocket).*|Test.*Anthropic.*|Test.*ContentModeration.*|Test.*Subscription.*|Test.*Setting.*|Test.*RequestBody.*)$' }
     Invoke-CheckedNative 'v0.1.170 subscription unit contract tests' { go test -tags=unit -count=1 ./internal/service -run '^(TestDelayedFirstUseAnchorsMonthlyWindowAtActivation|TestAdminResetQuota_.*)$' }
     Invoke-CheckedNative 'v0.1.170 gateway/body handler tests' { go test -count=1 ./internal/handler -run '^(TestOpenAI.*(WS|WebSocket|Images|Responses).*|TestGatewayHandler.*(Usage|Body|Settings).*)$' }
 } finally {
     Pop-Location
 }
-Invoke-CheckedNative 'v0.1.170 frontend focus tests' { pnpm --dir frontend exec vitest run src/components/account/__tests__/CreateAccountModal.spec.ts src/components/account/__tests__/EditAccountModal.spec.ts src/components/payment/__tests__/PaymentMethodSelector.spec.ts src/features/prompt-audit/__tests__/viewModel.spec.ts src/views/admin/__tests__/SettingsView.spec.ts }
+Invoke-CheckedNative 'v0.1.170 frontend focus tests' { pnpm --dir frontend exec vitest run src/components/account/__tests__/CreateAccountModal.spec.ts src/components/account/__tests__/EditAccountModal.spec.ts src/components/account/__tests__/BulkEditAccountModal.spec.ts src/components/account/__tests__/UpstreamBillingRateCell.spec.ts src/components/payment/__tests__/PaymentMethodSelector.spec.ts src/features/prompt-audit/__tests__/viewModel.spec.ts src/features/prompt-audit/__tests__/PromptAuditView.spec.ts src/views/admin/__tests__/AccountsView.bulkEdit.spec.ts src/views/admin/__tests__/SettingsView.spec.ts }
 ```
 
 2. 每个失败先写最小 RED，随后修复而不跨簇。必须证明请求体在 retry/failover 后不重用已关闭 handle、成功/失败 usage 不重复或遗漏、统一 audit 不绕开 latest-input/代理条件、subscription window/reset/outbox 仍保持锁和提交后失效、settings 未发送字段不丢失、本地前端入口未被上游页面改写。Task 6 已知的 tagged-unit RED 必须按用户裁决修正：首次订阅窗口锚定 entitlement `StartsAt`，`AdminResetQuota` 锚定当天零点；不得改回上游首次使用/操作时刻语义。

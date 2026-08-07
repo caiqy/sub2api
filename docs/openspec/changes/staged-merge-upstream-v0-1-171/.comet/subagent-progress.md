@@ -7,8 +7,8 @@
 - Previous task: `Task 7` complete; implementations `6dd4f244d`/`872354880`/`2c17b1824`/`5a5329ad8`; final review `ses_024c20d5bffeK4Sp85JQ3IkatW` APPROVED spec and quality; fresh default/unit service/handler gates PASS
 - Current task: `Task 8: 审查 v0.1.170 gateway/body、audit/auth、subscription/migration 和 frontend 交互`
 - OpenSpec mapping: `2.3 审查 Anthropic 流式用量、OpenAI WS/流内错误、Responses 工具输出、内容审核代理/最新输入、订阅窗口和 settings 更新，与本地 request-body spooling、统一审计、quota reset/outbox 和前端定制的交互`
-- Stage: `task-review`
-- Review/fix round: `0/2`
+- Stage: `task-fix`
+- Review/fix round: `1/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
 - Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-171-task-8-brief.md`
 - Report: `.superpowers/sdd/staged-merge-upstream-v0-1-171-task-8-report.md`
@@ -21,4 +21,8 @@
 - Baseline GREEN: gateway/body, audit/auth, settings focused gates; no empty commits created
 - Final focused gates: service PASS; tagged-unit subscription PASS; handler PASS; frontend 5 files/119 tests PASS; `git diff --check` PASS
 - Residual: Docker/Testcontainers migration integration remains unverified under Task 9 ownership; existing Vitest stderr noise did not fail tests
-- Status: Task 8 implementation complete; fresh thorough review pending
+- Task 8 reviewer: `ses_024ae509bffe1B6CIrQ4Hvmdc5` REJECTED spec and quality
+- Open Important findings: Anthropic partial error queues both zero-cost failed usage and partial usage; pooled Responses WS drops accumulated image result on read failure
+- Open Minor/test gaps: subscription test name still says activation instead of StartsAt; frontend gate omitted BulkEditAccountModal, UpstreamBillingRateCell, AccountsView bulk edit, and PromptAuditView
+- Verified disposition: both usage findings reproduce in current source and belong to Task 8; make failed/partial submission mutually exclusive and preserve accumulated pooled WS result without changing billing semantics
+- Status: Task 8 review-fix 1/2 in progress
