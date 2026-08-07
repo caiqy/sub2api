@@ -7,7 +7,7 @@
 - Previous task: `Task 3` complete; implementation `c766d8fa8`, fix `db8bff0dd`, checkoff `5c023a8d0`, thorough re-review APPROVED
 - Current task: `Task 4: 保护基线能力并完成非 Docker 门禁`
 - OpenSpec mapping: `1.4 在当前本地基线上运行聚焦保护测试、make test、make build、两轮 backend generate 与静态检查；为命中但缺少断言的高风险本地能力补最小保护测试`
-- Stage: `implementing`
+- Stage: `blocked-debugging`
 - Review/fix round: `0/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
 - Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-4-brief.md`
@@ -25,4 +25,8 @@
 - Prerequisite result: `restore-backend-lint-gate` completed and archived in `main@16c07d806`
 - Resume decision: user confirmed `main@16c07d806` as the replacement immutable source base; merged by `fd109296b`
 - Resume requirement: rerun all Task 4 gates on the replacement source base; retain old reports as historical evidence
-- Status: RESUMED, pending fresh Task 4 implementer
+- Fresh implementer: `ses_026465aaaffe10lmTCe7QtVx5m` returned BLOCKED; no commit and no tracked source diff
+- Fresh focused evidence: Go `49 + 13 + 39 + 2` tests and frontend `67` tests PASS
+- Current blocker: `make test` did not return an exit code before the 600-second harness timeout after visible frontend `225 files / 1698 tests` passed
+- Follow-up: dispatch a fresh systematic-debugging agent to isolate the non-terminating or slow Make subtarget; main coordinator must not execute the task directly
+- Status: BLOCKED pending root-cause diagnosis
