@@ -4,19 +4,20 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Previous task: `Task 10` complete; capability `3279e7bcb`, evidence `cbf19103b`, checkoff `7afa6972a`; final reviewer `ses_022c8f968ffep8uovtcjDyEaX3` PASS spec and evidence
-- Current task: `Task 11: 创建纯净的 v0.1.171 merge 节点`
-- OpenSpec mapping: `3.1 使用 git merge --no-ff --no-commit v0.1.171，完成语义融合并创建第二父匹配固定 tag SHA 的纯 merge commit`
+- Previous task: `Task 11` complete; merge `cca37e01e`, ledger `b450a5ce5`, checkoff `eedfc336b`; final reviewer `ses_0228e93c7ffeHaJt3dBC7z3PwF` PASS spec and pure-merge quality
+- Current task: `Task 12: 以 TDD 修复 v0.1.171 Codex、过载重试和 gateway/body 回归`
+- OpenSpec mapping: `3.2 审查 Codex identity/version、账号 UA、过载有界重试与本地 HTTP/WS/alpha-search/body/sticky/failover 交互`
 - Stage: `ready`
 - Review/fix round: `0/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
 - Brief: pending
 - Report: pending
-- Scope: clean gate, merge annotated `v0.1.171`, resolve only merge-required conflicts/generation, create pure merge commit, verify second parent
+- Scope: run Codex/gateway/body focused tests, add missing behavior tests, fix only real RED, review and commit one gateway/body capability cluster
 - Environment: local Docker unavailable; migration integration remains `unverified` on skip; no remote execution
 - Hard boundary: any unexplained RED, gap, generated diff, conflict artifact, or falsely recorded integration PASS blocks v0.1.171 merge
-- Task 10 gates: Tasks 7-9 focused, root `make test`, versioned `make build`, two stable generation rounds and static checks PASS; matrix `gap=0`.
-- Integration residual: Docker CLI unavailable, PostgreSQL migration integration remains `unverified`; no remote execution and no false PASS.
-- User resolution retained: all persisted subscription window starts are authoritative; administrator reset uses exact operation time; no legacy midnight correction or migration.
+- Task 11 identity: merge parents `5f505520d` / `f0e7a9c7a`; `VERSION=0.1.169.3`; 20 conflicts and two compatibility paths audited in build ledger.
+- User resolution retained: renewing an unexpired suspended subscription extends expiry, restores `active`, appends notes and preserves quota windows/usage.
+- Task 13 handoff: Aliyun custom-CSP enhancement, Tencent secret clearing, suspended-renewal composition/comment and tagged/admin/full frontend gates; these do not belong in Task 12 gateway/body scope.
+- Integration residual: Docker CLI unavailable; no remote execution and no false PASS.
 - Worktree: only protected `.comet/current-change.json` remains untracked after this checkpoint commit.
-- Status: ready for Task 11 clean gate and `v0.1.171` merge entry.
+- Status: ready for Task 12 brief and TDD implementation.
