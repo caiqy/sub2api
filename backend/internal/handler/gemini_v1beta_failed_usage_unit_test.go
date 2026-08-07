@@ -186,15 +186,17 @@ func TestGatewayHandler_GeminiV1BetaModels_ForwardErrorStillCreatesUsageLog(t *t
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
-	require.NotNil(t, usageLogRepo.lastLog)
-	require.Equal(t, 0, usageLogRepo.lastLog.InputTokens)
-	require.Equal(t, 0, usageLogRepo.lastLog.OutputTokens)
-	require.Equal(t, 0.0, usageLogRepo.lastLog.TotalCost)
-	require.Equal(t, 0.0, usageLogRepo.lastLog.ActualCost)
-	require.NotNil(t, usageLogRepo.lastLog.DetailSnapshot)
-	requireRequestPreviewSnapshot(t, usageLogRepo.lastLog.DetailSnapshot.RequestBody, reqBody)
-	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, "gemini upstream rejected payload")
-	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "X-Goog-Api-Key: gemini-test-key")
+	logs := usageLogRepo.snapshots()
+	require.Len(t, logs, 1)
+	log := logs[0]
+	require.Equal(t, 0, log.InputTokens)
+	require.Equal(t, 0, log.OutputTokens)
+	require.Equal(t, 0.0, log.TotalCost)
+	require.Equal(t, 0.0, log.ActualCost)
+	require.NotNil(t, log.DetailSnapshot)
+	requireRequestPreviewSnapshot(t, log.DetailSnapshot.RequestBody, reqBody)
+	require.Contains(t, log.DetailSnapshot.ResponseBody, "gemini upstream rejected payload")
+	require.Contains(t, log.DetailSnapshot.UpstreamRequestHeaders, "X-Goog-Api-Key: gemini-test-key")
 }
 
 func TestGatewayHandler_GeminiV1BetaModels_FailoverExhaustedStillCreatesUsageLog(t *testing.T) {
@@ -314,12 +316,14 @@ func TestGatewayHandler_GeminiV1BetaModels_FailoverExhaustedStillCreatesUsageLog
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusTooManyRequests, rec.Code)
-	require.NotNil(t, usageLogRepo.lastLog)
-	require.NotNil(t, usageLogRepo.lastLog.DetailSnapshot)
-	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseHeaders, "X-Request-Id: gemini_failover_123")
-	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, `"RESOURCE_EXHAUSTED_RAW"`)
-	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, "gemini raw failover")
-	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "X-Goog-Api-Key: gemini-test-key")
+	logs := usageLogRepo.snapshots()
+	require.Len(t, logs, 1)
+	log := logs[0]
+	require.NotNil(t, log.DetailSnapshot)
+	require.Contains(t, log.DetailSnapshot.ResponseHeaders, "X-Request-Id: gemini_failover_123")
+	require.Contains(t, log.DetailSnapshot.ResponseBody, `"RESOURCE_EXHAUSTED_RAW"`)
+	require.Contains(t, log.DetailSnapshot.ResponseBody, "gemini raw failover")
+	require.Contains(t, log.DetailSnapshot.UpstreamRequestHeaders, "X-Goog-Api-Key: gemini-test-key")
 }
 
 func TestGatewayHandler_GeminiV1BetaModels_SelectionExhaustedAfterFailoverStillCreatesUsageLog(t *testing.T) {
@@ -439,10 +443,12 @@ func TestGatewayHandler_GeminiV1BetaModels_SelectionExhaustedAfterFailoverStillC
 
 	require.Equal(t, http.StatusTooManyRequests, rec.Code)
 	require.JSONEq(t, `{"error":{"code":429,"message":"Upstream rate limit exceeded, please retry later","status":"RESOURCE_EXHAUSTED"}}`, rec.Body.String())
-	require.NotNil(t, usageLogRepo.lastLog)
-	require.NotNil(t, usageLogRepo.lastLog.DetailSnapshot)
-	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseHeaders, "X-Request-Id: gemini_selection_exhausted_123")
-	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, `"RESOURCE_EXHAUSTED_RAW"`)
-	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, "gemini raw failover")
-	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "X-Goog-Api-Key: gemini-test-key")
+	logs := usageLogRepo.snapshots()
+	require.Len(t, logs, 1)
+	log := logs[0]
+	require.NotNil(t, log.DetailSnapshot)
+	require.Contains(t, log.DetailSnapshot.ResponseHeaders, "X-Request-Id: gemini_selection_exhausted_123")
+	require.Contains(t, log.DetailSnapshot.ResponseBody, `"RESOURCE_EXHAUSTED_RAW"`)
+	require.Contains(t, log.DetailSnapshot.ResponseBody, "gemini raw failover")
+	require.Contains(t, log.DetailSnapshot.UpstreamRequestHeaders, "X-Goog-Api-Key: gemini-test-key")
 }

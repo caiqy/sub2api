@@ -148,10 +148,6 @@ type stubUsageLogRepo struct {
 
 	mu      sync.Mutex
 	records []stubUsageLogSnapshot
-
-	// ponytail: retained for the shared Gemini tests; remove after they adopt snapshots.
-	created int
-	lastLog *service.UsageLog
 }
 
 type stubUsageLogSnapshot struct {
@@ -163,12 +159,10 @@ func (s *stubUsageLogRepo) Create(_ context.Context, log *service.UsageLog) (boo
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.created++
 	if log != nil {
 		copied := *log
 		copied.DetailSnapshot = log.DetailSnapshot.Normalize()
 		s.records = append(s.records, stubUsageLogSnapshot{source: log, log: copied})
-		s.lastLog = &copied
 	}
 	return true, nil
 }
@@ -187,8 +181,6 @@ func (s *stubUsageLogRepo) PersistDetailBestEffort(_ context.Context, log *servi
 		}
 
 		s.records[i].log.DetailSnapshot = log.DetailSnapshot.Normalize()
-		copied := s.records[i].log
-		s.lastLog = &copied
 		return
 	}
 }
