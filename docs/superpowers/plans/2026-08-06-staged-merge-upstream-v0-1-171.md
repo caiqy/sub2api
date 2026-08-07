@@ -477,7 +477,7 @@ Assert-NoConflictArtifacts
 
 ### Task 5: 执行基线 Docker 条件门禁并封存阶段 0 证据
 
-- [ ] Task 5: 执行基线 Docker 条件门禁并封存阶段 0 证据
+- [x] Task 5: 执行基线 Docker 条件门禁并封存阶段 0 证据
 
 **映射 OpenSpec：**1.5
 

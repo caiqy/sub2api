@@ -4,7 +4,7 @@
 - [x] 1.2 重新获取 upstream refs，确认 `v0.1.171` 仍为最新正式 tag，记录 tag 后 `upstream/main` 提交并排除出范围；若出现更高 tag，返回 OpenSpec 更新范围
 - [x] 1.3 建立两段 changed-files × 本地能力矩阵与冲突台账，覆盖 scheduler/sticky/fallback、网关 HTTP/WS 与 usage、请求体生命周期、alpha-search/composite 路由、prompt audit、subscription quota cycle reset、settings、前端、生成物和 migrations
 - [x] 1.4 在当前本地基线上运行聚焦保护测试、`make test`、`make build`、两轮 backend generate 与静态检查；为命中但缺少断言的高风险本地能力补最小保护测试
-- [ ] 1.5 检查本机 Docker/Testcontainers；可用时运行基线 integration，不可用时记录环境证据、未验证契约和残余风险，且不使用远程服务器补跑
+- [x] 1.5 检查本机 Docker/Testcontainers；可用时运行基线 integration，不可用时记录环境证据、未验证契约和残余风险，且不使用远程服务器补跑
 
 ## 2. 分段合入 v0.1.170
 
