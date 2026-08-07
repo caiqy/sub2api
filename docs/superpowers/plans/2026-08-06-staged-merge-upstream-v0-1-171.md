@@ -1111,7 +1111,7 @@ Commit-NamedPaths -Message 'fix: preserve frontend customization after v0.1.171'
 
 ### Task 14: 关闭 v0.1.171 阶段并记录证据
 
-- [ ] Task 14: 关闭 v0.1.171 阶段并记录证据
+- [x] Task 14: 关闭 v0.1.171 阶段并记录证据
 
 **映射 OpenSpec：**3.4
 
