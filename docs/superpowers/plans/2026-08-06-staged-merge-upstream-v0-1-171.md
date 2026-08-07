@@ -658,7 +658,9 @@ if ($merge170Parent2 -ne $tag170) { throw "v0.1.170 merge second parent mismatch
 Push-Location backend
 try {
     Invoke-CheckedNative 'v0.1.170 scheduler/usage service tests' { go test -count=1 ./internal/service -run '^(Test.*Profit.*|Test.*Pricing.*|Test.*Layered.*|Test.*Sticky.*|Test.*WaitPlan.*|TestGatewayServiceRecordUsage.*)$' }
+    Invoke-CheckedNative 'v0.1.170 scheduler/usage unit service tests' { go test -tags=unit -count=1 ./internal/service -run '^(Test.*Profit.*|Test.*Pricing.*|Test.*Layered.*|Test.*Sticky.*|Test.*WaitPlan.*|TestGatewayServiceRecordUsage.*)$' }
     Invoke-CheckedNative 'v0.1.170 scheduler/usage handler tests' { go test -count=1 ./internal/handler -run '^(Test.*Profit.*|TestOpenAI.*Pricing.*|TestGatewayHandler.*Sticky.*|Test.*Usage.*)$' }
+    Invoke-CheckedNative 'v0.1.170 scheduler/usage unit handler tests' { go test -tags=unit -count=1 ./internal/handler -run '^(Test.*Profit.*|TestOpenAI.*Pricing.*|TestGatewayHandler.*Sticky.*|Test.*Usage.*)$' }
 } finally {
     Pop-Location
 }
@@ -666,7 +668,7 @@ try {
 
 预期：聚焦命令中的测试全部 PASS；每个失败先写入 ledger，归属为 `v0.1.170`。
 
-2. 对缺失契约先补测试并实际运行：若直接 GREEN，记录上游实现已满足契约且不创建生产修复；若失败，保存真实 RED 后再做最小实现。断言必须覆盖默认利润控制关闭时选择不变、不合格账号不进入排序且不提前绑定 sticky、取得槽位后倍率变化释放槽位并重新选号、同一请求在等待/重试/切号中使用固定定价时刻、组合 group 不被误直接门禁，以及 advanced/layered scheduler、WaitPlan、DB recheck 和 usage billing 仍被调用。另补一条 gateway billing eligibility 回归，证明用户已选择的 inclusive quota 边界在 `Check*Limit -> CheckBillingEligibility` 端到端一致：用量加本次请求恰好达到上限时放行，超过上限时拒绝。
+2. 对缺失契约先补测试并实际运行：若直接 GREEN，记录上游实现已满足契约且不创建生产修复；若失败，保存真实 RED 后再做最小实现。断言必须覆盖默认利润控制关闭时选择不变、不合格账号不进入排序且不提前绑定 sticky、取得槽位后倍率变化释放槽位并重新选号、同一请求在等待/重试/切号中使用固定定价时刻、组合 group 不被误直接门禁，以及 advanced/layered scheduler、WaitPlan、DB recheck 和 usage billing 仍被调用。另补一条表驱动跨层 quota 生命周期回归，覆盖 daily/weekly/monthly：领域 `Check*Limit` 对“已有用量 + 本次正成本 = limit”放行；结算后 billing cache 快照 `usage = limit` 的 `CheckBillingEligibility` 继续放行；`usage > limit` 拒绝。该测试验证真实 API 契约序列，不伪造 HTTP 预检中不存在的正成本参数。
 
 3. 只为已复现 RED 写最小兼容实现；对每个测试重跑相同 `go test` 命令至 GREEN。涉及 schema/provider 时先改源、运行 `make -C backend generate`，并将生成输出归于本提交。
 
