@@ -938,7 +938,7 @@ frontend/src/views/auth/__tests__/WechatCallbackView.spec.ts
 - `git grep -n -I -e '^<<<<<<< ' -e '^=======$' -e '^>>>>>>> ' -- .` exit `1`（无匹配），作为 tracked application/config/migration source 冲突标记检查通过。
 - `git status --short --untracked-files=all` 只输出 `?? .comet/current-change.json`；没有产品或测试变更。`go test -race` 未运行，符合 Task 14 明确边界。
 - Docker local-only preflight 的首命令 `docker context show` 无法启动：`docker: The term 'docker' is not recognized as a name of a cmdlet, function, script file, or executable program.` 因未能确认本机 CLI/context，未运行 `docker version` 或 migration integration，未联系任何远程服务。
-- `TestMigrationsRunner_PreservesPasskeyAndSubscriptionQuotaMigrationsAcrossUpgrade` 对空库、从本地 191/192 升级、排序、幂等和 checksum 的 Testcontainers 契约状态为 `unverified`，原因仅为本机 Docker CLI 缺失。
+- canonical `Invoke-MigrationUpgradeIntegration -Stage 'v0.1.171-final'` 未调用：其 Docker preflight 前提不成立。`TestMigrationsRunner_PreservesPasskeyAndSubscriptionQuotaMigrationsAcrossUpgrade` 对空库、从本地 191/192 升级、排序、幂等和 checksum 的 Testcontainers 契约仍为 `unverified`，原因仅为本机 Docker CLI 缺失。
 
 ### v0.1.171 阶段能力矩阵
 
@@ -952,4 +952,4 @@ frontend/src/views/auth/__tests__/WechatCallbackView.spec.ts
 | 6 | frontend | Aliyun/Tencent captcha widgets and auth gate -> SettingsView save -> three Tencent secrets clear; 6 canonical files/73 tests本次 PASS。 | `protected` |
 | 7 | dependency/generation/migration | source -> Ent/Wire generation and manifests; migration runner -> filename/checksum/upgrade integration；两轮生成零 diff、build/static PASS；Docker-only migration execution未验证。 | `unverified` |
 
-最终汇总：`protected=4`、`manual=2`、`unverified=1`、`gap=0`。`unverified` 仅限 Docker/Testcontainers migration 边界；所有非 Docker Task 14 gates 均有 fresh exit-0 证据。
+最终汇总：`protected=4`、`manual=2`、`unverified=1`、`gap=0`。`unverified` 仅限 Docker/Testcontainers migration 边界；所有非 Docker Task 14 gates 均按各自预期 exit semantics 通过，tracked conflict-marker no-match scan 的预期结果为 exit `1`。
