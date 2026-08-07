@@ -352,6 +352,35 @@ func TestFetchCodexModelsManifestDefaultClientVersion(t *testing.T) {
 	}
 }
 
+func TestFetchCodexModelsManifestDefaultIdentityFollowsCanonicalVersion(t *testing.T) {
+	SetCodexCanonicalUserAgentResolver(func() string {
+		return "codex_cli_rs/0.200.1" + codexCLIUserAgentSuffix
+	})
+	t.Cleanup(func() { SetCodexCanonicalUserAgentResolver(nil) })
+
+	var gotClientVersion string
+	var gotHeaders http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotClientVersion = r.URL.Query().Get("client_version")
+		gotHeaders = r.Header.Clone()
+		_, _ = w.Write([]byte(`{"models":[]}`))
+	}))
+	defer server.Close()
+
+	original := chatgptCodexModelsURL
+	chatgptCodexModelsURL = server.URL
+	t.Cleanup(func() { chatgptCodexModelsURL = original })
+
+	account := newCodexModelsTestAccount()
+	account.Credentials["user_agent"] = "codex-tui/0.125.0 (Mac OS X 15.1.0; arm64) iTerm.app"
+	_, err := (&OpenAIGatewayService{}).FetchCodexModelsManifest(context.Background(), account, "", "")
+	require.NoError(t, err)
+	require.Equal(t, "0.200.1", gotClientVersion)
+	require.Equal(t, "codex-tui", gotHeaders.Get("Originator"))
+	require.Equal(t, "codex-tui/0.200.1 (Mac OS X 15.1.0; arm64) iTerm.app", gotHeaders.Get("User-Agent"))
+	require.Equal(t, "0.200.1", gotHeaders.Get("Version"))
+}
+
 func TestFetchCodexModelsManifestNotModified(t *testing.T) {
 	var gotIfNoneMatch string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
