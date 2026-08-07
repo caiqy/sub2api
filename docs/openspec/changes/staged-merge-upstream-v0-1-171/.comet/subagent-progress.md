@@ -7,8 +7,8 @@
 - Previous task: `Task 4` complete; implementation `038215720`, checkoff `b12b4d578`, thorough review `ses_0260b7ce5ffe6Y6sClsJ4DMHUp` APPROVED
 - Current task: `Task 5: 执行基线 Docker 条件门禁并封存阶段 0 证据`
 - OpenSpec mapping: `1.5 检查本机 Docker/Testcontainers；可用时运行基线 integration，不可用时记录环境证据、未验证契约和残余风险，且不使用远程服务器补跑`
-- Stage: `task-review`
-- Review/fix round: `0/2`
+- Stage: `task-fix`
+- Review/fix round: `1/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
 - Brief: `.superpowers/sdd/task-5-brief.md`
 - Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-5-report.md`
@@ -20,4 +20,7 @@
 - Task 5 changed file: `docs/superpowers/reports/2026-08-06-staged-merge-upstream-v0-1-171-build.md`
 - Task 5 evidence: local `docker` command unavailable; fixed migration integration recorded `unverified`; `Assert-CleanGate` PASS
 - Task 5 risk signals: migration boundary and DONE_WITH_CONCERNS; no production diff
-- Status: thorough task reviewer pending
+- Task 5 reviewer: `ses_025fbb9ffffeINUOdkWs194jEV` REJECTED spec and quality
+- Open Important findings: matrix rows 3 and 5 overstate narrow tests as full-row protected; six manual rows lack actual structural conclusions; Task 4 focused commands/exits are incompletely summarized in ledger
+- Fix boundary: ledger/report evidence only; no source changes; rerun clean gate and request fresh re-review
+- Status: first review-fix agent pending
