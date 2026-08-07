@@ -4,32 +4,16 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Previous task: `Task 3` complete; implementation `c766d8fa8`, fix `db8bff0dd`, checkoff `5c023a8d0`, thorough re-review APPROVED
-- Current task: `Task 4: 保护基线能力并完成非 Docker 门禁`
-- OpenSpec mapping: `1.4 在当前本地基线上运行聚焦保护测试、make test、make build、两轮 backend generate 与静态检查；为命中但缺少断言的高风险本地能力补最小保护测试`
+- Previous task: `Task 4` complete; implementation `038215720`, checkoff `b12b4d578`, thorough review `ses_0260b7ce5ffe6Y6sClsJ4DMHUp` APPROVED
+- Current task: `Task 5: 执行基线 Docker 条件门禁并封存阶段 0 证据`
+- OpenSpec mapping: `1.5 检查本机 Docker/Testcontainers；可用时运行基线 integration，不可用时记录环境证据、未验证契约和残余风险，且不使用远程服务器补跑`
 - Stage: `implementing`
 - Review/fix round: `0/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
-- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-4-brief.md`
-- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-4-report.md`
-- Implementation commit: `0382157209f52304878c369ccf48c1c4a06ef80b`
-- Changed files: `backend/internal/handler/openai_images_controls_test.go`
-- TDD evidence: 新增 forced-spool replay cleanup 断言在 source base 直接 GREEN；未伪造 RED；无生产改动
-- Passed: focused Go tests; frontend 4 files / 67 tests
-- Historical blocker: old source base `b576f73a2` had `make test` exit 2 from fork-local lint debt
-- Additional gap: quota tests require `-tags=unit`; supplied regex未命中
-- Debug result: immutable source base has 144 lint issues across 39 files under checked-in Go 1.26.5 / golangci-lint 2.9 toolchain; not environment drift
-- Quota gate: plan command omitted `-tags=unit`; corrected full pattern matches and passes 13 tests
-- Debug report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-4-debug-report.md`
-- Upstream comparison: original `v0.1.169` and `v0.1.171` both pass uncapped golangci-lint v2.9 with 0 issues; 144 issues are fork-local
-- Prerequisite result: `restore-backend-lint-gate` completed and archived in `main@16c07d806`
-- Resume decision: user confirmed `main@16c07d806` as the replacement immutable source base; merged by `fd109296b`
-- Resume requirement: rerun all Task 4 gates on the replacement source base; retain old reports as historical evidence
-- Fresh implementer: `ses_026465aaaffe10lmTCe7QtVx5m` returned BLOCKED; no commit and no tracked source diff
-- Fresh focused evidence: Go `49 + 13 + 39 + 2` tests and frontend `67` tests PASS
-- Current blocker: `make test` did not return an exit code before the 600-second harness timeout after visible frontend `225 files / 1698 tests` passed
-- Follow-up: dispatch a fresh systematic-debugging agent to isolate the non-terminating or slow Make subtarget; main coordinator must not execute the task directly
-- Debug agent: `ses_026327218ffe2Vmy9Jcd6bKbbo` proved exact `make test` exit 0 in `00:08:26`; backend, unit, and frontend subtargets all exit 0 with no residual process
-- Root cause: 600-second harness budget was too small for the serial full gate; no code or Make defect found
-- Resume action: original Task 4 implementer continues with build, generate stability, and conflict checks using the durable debug evidence
-- Status: RESUMED, Task 4 implementer continuation pending
+- Brief: `.superpowers/sdd/task-5-brief.md`
+- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-5-report.md`
+- Task 4 evidence: focused Go `49 + 13 + 39 + 2`, frontend `67`, full `make test`, canonical Windows build, three generate passes, conflict/index/whitespace checks all PASS
+- Task 4 diagnostics: 600-second harness budget was insufficient; bare Windows build lacked the verified Bash shell; neither issue required source or Makefile changes
+- Task 4 reviewer Minor: historical report wording still describes the superseded bare-build brief; carry to final report cleanup
+- Task 5 implementation commit: pending
+- Status: Task 5 implementer dispatch pending
