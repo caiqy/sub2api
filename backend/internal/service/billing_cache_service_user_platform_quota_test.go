@@ -603,91 +603,101 @@ func (f *exactSubscriptionLimitCache) GetSubscriptionCache(_ context.Context, _ 
 	return f.subscription, nil
 }
 
-func TestGatewayBillingEligibility_ExactSubscriptionLimitIsInclusive(t *testing.T) {
-	dailyLimit := 10.0
-	cache := &exactSubscriptionLimitCache{subscription: &SubscriptionCacheData{
-		Status:     SubscriptionStatusActive,
-		ExpiresAt:  time.Now().Add(time.Hour),
-		DailyUsage: dailyLimit,
-	}}
-	svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, &config.Config{}, nil)
-	t.Cleanup(svc.Stop)
+func TestGatewayBillingEligibility_SubscriptionLimitLifecycle(t *testing.T) {
+	const limit = 10.0
+	const additionalCost = 0.25
 
-	group := &Group{ID: 10, SubscriptionType: SubscriptionTypeSubscription, DailyLimitUSD: &dailyLimit}
-	subscription := &UserSubscription{DailyUsageUSD: dailyLimit}
-	if !subscription.CheckDailyLimit(group, 0) {
-		t.Fatal("request that exactly reaches the daily limit must pass CheckDailyLimit")
-	}
-	if err := svc.CheckBillingEligibility(context.Background(), &User{ID: 42}, nil, group, subscription, "anthropic"); err != nil {
-		t.Fatalf("exact-limit request must pass billing eligibility: %v", err)
-	}
-	if cache.called {
-		t.Fatal("subscription billing must not consult user-platform quota")
-	}
-
-	// The next nonzero-cost request exceeds the same boundary and must be rejected.
-	if subscription.CheckDailyLimit(group, 0.01) {
-		t.Fatal("request exceeding the daily limit must fail CheckDailyLimit")
-	}
-	cache.subscription.DailyUsage = dailyLimit + 0.01
-	if err := svc.CheckBillingEligibility(context.Background(), &User{ID: 42}, nil, group, subscription, "anthropic"); !errors.Is(err, ErrDailyLimitExceeded) {
-		t.Fatalf("request after reaching the daily limit must fail billing eligibility, got %v", err)
-	}
-}
-
-func TestGatewayBillingEligibility_ExactWeeklyLimitIsInclusive(t *testing.T) {
-	weeklyLimit := 10.0
-	cache := &exactSubscriptionLimitCache{subscription: &SubscriptionCacheData{
-		Status:      SubscriptionStatusActive,
-		ExpiresAt:   time.Now().Add(time.Hour),
-		WeeklyUsage: weeklyLimit,
-	}}
-	svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, &config.Config{}, nil)
-	t.Cleanup(svc.Stop)
-
-	group := &Group{ID: 10, SubscriptionType: SubscriptionTypeSubscription, WeeklyLimitUSD: &weeklyLimit}
-	subscription := &UserSubscription{WeeklyUsageUSD: weeklyLimit}
-	if !subscription.CheckWeeklyLimit(group, 0) {
-		t.Fatal("request that exactly reaches the weekly limit must pass CheckWeeklyLimit")
-	}
-	if err := svc.CheckBillingEligibility(context.Background(), &User{ID: 42}, nil, group, subscription, "anthropic"); err != nil {
-		t.Fatalf("exact-limit request must pass billing eligibility: %v", err)
-	}
-
-	if subscription.CheckWeeklyLimit(group, 0.01) {
-		t.Fatal("request exceeding the weekly limit must fail CheckWeeklyLimit")
-	}
-	cache.subscription.WeeklyUsage = weeklyLimit + 0.01
-	if err := svc.CheckBillingEligibility(context.Background(), &User{ID: 42}, nil, group, subscription, "anthropic"); !errors.Is(err, ErrWeeklyLimitExceeded) {
-		t.Fatalf("request after reaching the weekly limit must fail billing eligibility, got %v", err)
-	}
-}
-
-func TestGatewayBillingEligibility_ExactMonthlyLimitIsInclusive(t *testing.T) {
-	monthlyLimit := 10.0
-	cache := &exactSubscriptionLimitCache{subscription: &SubscriptionCacheData{
-		Status:       SubscriptionStatusActive,
-		ExpiresAt:    time.Now().Add(time.Hour),
-		MonthlyUsage: monthlyLimit,
-	}}
-	svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, &config.Config{}, nil)
-	t.Cleanup(svc.Stop)
-
-	group := &Group{ID: 10, SubscriptionType: SubscriptionTypeSubscription, MonthlyLimitUSD: &monthlyLimit}
-	subscription := &UserSubscription{MonthlyUsageUSD: monthlyLimit}
-	if !subscription.CheckMonthlyLimit(group, 0) {
-		t.Fatal("request that exactly reaches the monthly limit must pass CheckMonthlyLimit")
-	}
-	if err := svc.CheckBillingEligibility(context.Background(), &User{ID: 42}, nil, group, subscription, "anthropic"); err != nil {
-		t.Fatalf("exact-limit request must pass billing eligibility: %v", err)
+	tests := []struct {
+		name             string
+		setLimit         func(*Group, *float64)
+		setDomainUsage   func(*UserSubscription, float64)
+		setCachedUsage   func(*SubscriptionCacheData, float64)
+		checkDomainLimit func(*UserSubscription, *Group, float64) bool
+		exceededErr      error
+	}{
+		{
+			name: "daily",
+			setLimit: func(group *Group, limit *float64) {
+				group.DailyLimitUSD = limit
+			},
+			setDomainUsage: func(subscription *UserSubscription, usage float64) {
+				subscription.DailyUsageUSD = usage
+			},
+			setCachedUsage: func(snapshot *SubscriptionCacheData, usage float64) {
+				snapshot.DailyUsage = usage
+			},
+			checkDomainLimit: func(subscription *UserSubscription, group *Group, cost float64) bool {
+				return subscription.CheckDailyLimit(group, cost)
+			},
+			exceededErr: ErrDailyLimitExceeded,
+		},
+		{
+			name: "weekly",
+			setLimit: func(group *Group, limit *float64) {
+				group.WeeklyLimitUSD = limit
+			},
+			setDomainUsage: func(subscription *UserSubscription, usage float64) {
+				subscription.WeeklyUsageUSD = usage
+			},
+			setCachedUsage: func(snapshot *SubscriptionCacheData, usage float64) {
+				snapshot.WeeklyUsage = usage
+			},
+			checkDomainLimit: func(subscription *UserSubscription, group *Group, cost float64) bool {
+				return subscription.CheckWeeklyLimit(group, cost)
+			},
+			exceededErr: ErrWeeklyLimitExceeded,
+		},
+		{
+			name: "monthly",
+			setLimit: func(group *Group, limit *float64) {
+				group.MonthlyLimitUSD = limit
+			},
+			setDomainUsage: func(subscription *UserSubscription, usage float64) {
+				subscription.MonthlyUsageUSD = usage
+			},
+			setCachedUsage: func(snapshot *SubscriptionCacheData, usage float64) {
+				snapshot.MonthlyUsage = usage
+			},
+			checkDomainLimit: func(subscription *UserSubscription, group *Group, cost float64) bool {
+				return subscription.CheckMonthlyLimit(group, cost)
+			},
+			exceededErr: ErrMonthlyLimitExceeded,
+		},
 	}
 
-	if subscription.CheckMonthlyLimit(group, 0.01) {
-		t.Fatal("request exceeding the monthly limit must fail CheckMonthlyLimit")
-	}
-	cache.subscription.MonthlyUsage = monthlyLimit + 0.01
-	if err := svc.CheckBillingEligibility(context.Background(), &User{ID: 42}, nil, group, subscription, "anthropic"); !errors.Is(err, ErrMonthlyLimitExceeded) {
-		t.Fatalf("request after reaching the monthly limit must fail billing eligibility, got %v", err)
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			group := &Group{ID: 10, SubscriptionType: SubscriptionTypeSubscription}
+			tc.setLimit(group, ptr(limit))
+			subscription := &UserSubscription{}
+			tc.setDomainUsage(subscription, limit-additionalCost)
+
+			// Domain limit checks receive cost; billing eligibility observes the post-settlement cache snapshot.
+			if !tc.checkDomainLimit(subscription, group, additionalCost) {
+				t.Fatal("usage plus positive cost that exactly reaches the limit must pass the domain limit check")
+			}
+
+			cache := &exactSubscriptionLimitCache{subscription: &SubscriptionCacheData{
+				Status:    SubscriptionStatusActive,
+				ExpiresAt: time.Now().Add(time.Hour),
+			}}
+			tc.setCachedUsage(cache.subscription, limit)
+			svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, &config.Config{}, nil)
+			t.Cleanup(svc.Stop)
+
+			if err := svc.CheckBillingEligibility(context.Background(), &User{ID: 42}, nil, group, subscription, "anthropic"); err != nil {
+				t.Fatalf("post-settlement snapshot at the limit must pass billing eligibility: %v", err)
+			}
+			if cache.called {
+				t.Fatal("subscription billing must not consult user-platform quota")
+			}
+
+			tc.setCachedUsage(cache.subscription, limit+additionalCost)
+			if err := svc.CheckBillingEligibility(context.Background(), &User{ID: 42}, nil, group, subscription, "anthropic"); !errors.Is(err, tc.exceededErr) {
+				t.Fatalf("post-settlement snapshot over the limit must fail billing eligibility, got %v", err)
+			}
+		})
 	}
 }
 

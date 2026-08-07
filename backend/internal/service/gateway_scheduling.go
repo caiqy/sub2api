@@ -489,7 +489,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 							result.ReleaseFunc() // 释放槽位，继续尝试下一个账号
 							continue
 						}
-						_ = s.bindStickySessionForPlatform(ctx, groupID, sessionHash, item.account.ID, platform, "gateway_load_aware")
+						_ = s.bindGatewayStickySessionDuringSelection(ctx, groupID, sessionHash, item.account.ID, platform, "gateway_load_aware")
 						if s.debugModelRoutingEnabled() {
 							logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] routed select: group_id=%v model=%s session=%s account=%d", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), item.account.ID)
 						}
@@ -742,7 +742,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				if !s.checkAndRegisterSession(ctx, selected.account, sessionHash) {
 					result.ReleaseFunc() // 释放槽位，继续尝试下一个账号
 				} else {
-					_ = s.bindStickySessionForPlatform(ctx, groupID, sessionHash, selected.account.ID, platform, "gateway_load_aware")
+					_ = s.bindGatewayStickySessionDuringSelection(ctx, groupID, sessionHash, selected.account.ID, platform, "gateway_load_aware")
 					return s.newSelectionResult(ctx, selected.account, true, result.ReleaseFunc, nil)
 				}
 			}
@@ -788,7 +788,7 @@ func (s *GatewayService) tryAcquireByLegacyOrder(ctx context.Context, candidates
 				result.ReleaseFunc() // 释放槽位，继续尝试下一个账号
 				continue
 			}
-			_ = s.bindStickySessionForPlatform(ctx, groupID, sessionHash, acc.ID, platform, "gateway_load_aware")
+			_ = s.bindGatewayStickySessionDuringSelection(ctx, groupID, sessionHash, acc.ID, platform, "gateway_load_aware")
 			selection, err := s.newSelectionResult(ctx, acc, true, result.ReleaseFunc, nil)
 			if err != nil {
 				return nil, false, err
@@ -1906,7 +1906,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 		}
 
 		if selected != nil {
-			if err := s.bindStickySessionForPlatform(ctx, groupID, sessionHash, selected.ID, platform, "gateway_legacy_single"); err != nil {
+			if err := s.bindGatewayStickySessionDuringSelection(ctx, groupID, sessionHash, selected.ID, platform, "gateway_legacy_single"); err != nil {
 				logger.LegacyPrintf("service.gateway", "set session account failed: session=%s account_id=%d err=%v", sessionHash, selected.ID, err)
 			}
 			if s.debugModelRoutingEnabled() {
@@ -2029,7 +2029,7 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 	}
 
 	// 4. 建立粘性绑定
-	if err := s.bindStickySessionForPlatform(ctx, groupID, sessionHash, selected.ID, platform, "gateway_legacy_single"); err != nil {
+	if err := s.bindGatewayStickySessionDuringSelection(ctx, groupID, sessionHash, selected.ID, platform, "gateway_legacy_single"); err != nil {
 		logger.LegacyPrintf("service.gateway", "set session account failed: session=%s account_id=%d err=%v", sessionHash, selected.ID, err)
 	}
 
@@ -2172,7 +2172,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 		}
 
 		if selected != nil {
-			if err := s.bindStickySessionForPlatform(ctx, groupID, sessionHash, selected.ID, nativePlatform, "gateway_legacy_mixed"); err != nil {
+			if err := s.bindGatewayStickySessionDuringSelection(ctx, groupID, sessionHash, selected.ID, nativePlatform, "gateway_legacy_mixed"); err != nil {
 				logger.LegacyPrintf("service.gateway", "set session account failed: session=%s account_id=%d err=%v", sessionHash, selected.ID, err)
 			}
 			if s.debugModelRoutingEnabled() {
@@ -2296,7 +2296,7 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 	}
 
 	// 4. 建立粘性绑定
-	if err := s.bindStickySessionForPlatform(ctx, groupID, sessionHash, selected.ID, nativePlatform, "gateway_legacy_mixed"); err != nil {
+	if err := s.bindGatewayStickySessionDuringSelection(ctx, groupID, sessionHash, selected.ID, nativePlatform, "gateway_legacy_mixed"); err != nil {
 		logger.LegacyPrintf("service.gateway", "set session account failed: session=%s account_id=%d err=%v", sessionHash, selected.ID, err)
 	}
 

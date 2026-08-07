@@ -957,14 +957,17 @@ func (s *BillingCacheService) checkSubscriptionEligibility(ctx context.Context, 
 	}
 
 	// 检查限额（使用传入的Group限额配置）
+	// 等值有意放行，与 UserSubscription.CheckDailyLimit 保持一致。
 	if group.HasDailyLimit() && subData.DailyUsage > *group.DailyLimitUSD {
 		return ErrDailyLimitExceeded
 	}
 
+	// 等值有意放行，与 UserSubscription.CheckWeeklyLimit 保持一致。
 	if group.HasWeeklyLimit() && subData.WeeklyUsage > *group.WeeklyLimitUSD {
 		return ErrWeeklyLimitExceeded
 	}
 
+	// 等值有意放行，与 UserSubscription.CheckMonthlyLimit 保持一致。
 	if group.HasMonthlyLimit() && subData.MonthlyUsage > *group.MonthlyLimitUSD {
 		return ErrMonthlyLimitExceeded
 	}
