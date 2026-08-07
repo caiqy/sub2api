@@ -458,7 +458,7 @@ Commit-NamedPaths -Message 'test: protect v0.1.171 merge baseline' -Paths $basel
 
 ```powershell
 Invoke-CheckedNative 'baseline make test' { make test }
-Invoke-CheckedNative 'baseline make build' { make "VERSION=0.1.169.3" build }
+Invoke-CheckedNative 'baseline make build' { make "VERSION=0.1.169.3" "SHELL=D:/scoop/shims/bash.exe" build }
 Invoke-CheckedNative 'baseline first generate refresh' { make -C backend generate }
 $refreshGenerateDiff = @(git diff --name-only -- backend/ent backend/cmd/server/wire_gen.go)
 if ($LASTEXITCODE -ne 0) { throw 'failed to inspect baseline generate refresh diff' }
@@ -800,7 +800,7 @@ Commit-NamedPaths -Message 'test: cover v0.1.170 migration identity' -Paths $mig
 
 ```powershell
 Invoke-CheckedNative 'v0.1.170 stage make test' { make test }
-Invoke-CheckedNative 'v0.1.170 stage make build' { make "VERSION=0.1.169.3" build }
+Invoke-CheckedNative 'v0.1.170 stage make build' { make "VERSION=0.1.169.3" "SHELL=D:/scoop/shims/bash.exe" build }
 Invoke-CheckedNative 'v0.1.170 stage first generate' { make -C backend generate }
 git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
 if ($LASTEXITCODE -ne 0) { throw 'first stage generate changed tracked output' }
@@ -1019,7 +1019,7 @@ Commit-NamedPaths -Message 'fix: preserve frontend customization after v0.1.171'
 
 ```powershell
 Invoke-CheckedNative 'v0.1.171 stage make test' { make test }
-Invoke-CheckedNative 'v0.1.171 stage make build' { make "VERSION=0.1.169.3" build }
+Invoke-CheckedNative 'v0.1.171 stage make build' { make "VERSION=0.1.169.3" "SHELL=D:/scoop/shims/bash.exe" build }
 Invoke-CheckedNative 'v0.1.171 stage first generate' { make -C backend generate }
 git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
 if ($LASTEXITCODE -ne 0) { throw 'v0.1.171 first generate changed tracked output' }
@@ -1091,7 +1091,7 @@ Commit-NamedPaths -Message 'chore: bump version to 0.1.171.1' -Paths @('backend/
 
 ```powershell
 Invoke-CheckedNative 'final make test' { make test }
-Invoke-CheckedNative 'final make build' { make "VERSION=0.1.171.1" build }
+Invoke-CheckedNative 'final make build' { make "VERSION=0.1.171.1" "SHELL=D:/scoop/shims/bash.exe" build }
 Invoke-CheckedNative 'final first generate' { make -C backend generate }
 git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
 if ($LASTEXITCODE -ne 0) { throw 'final first generate changed tracked output' }
