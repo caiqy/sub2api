@@ -7,8 +7,8 @@
 - Previous task: `Task 5` complete; evidence commits `f349d6a26`, `a5f20fdf2`, `45912d266`, `fe686e346`; checkoff `2f9f1a259`; user-authorized final review `ses_025bb84b8ffeA7SdGDek6Uv669` APPROVED
 - Current task: `Task 6: 创建纯净的 v0.1.170 merge 节点`
 - OpenSpec mapping: `2.1 使用 git merge --no-ff --no-commit v0.1.170，逐文件语义融合实际冲突并创建第二父为固定 tag SHA 的 merge commit；merge commit 不混入后续兼容修复`
-- Stage: `task-review`
-- Review/fix round: `0/2`
+- Stage: `task-fix`
+- Review/fix round: `1/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
 - Brief: `.superpowers/sdd/task-6-brief.md`
 - Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-6-report.md`
@@ -32,4 +32,8 @@
 - User decision: `AdminResetQuota` is a local customization; preserve calendar-day-zero window start
 - Merge policy: non-local customization follows upstream; local-only customization stays local; when both sides change the same user-visible semantics, ask the user
 - Verification reported: frontend lint/tests/build, backend `go test ./...`, native `go build`, merge guards, migrations and generated output PASS; Docker integration unavailable
-- Status: pure merge committed; thorough task reviewer pending
+- Task 6 reviewer: `ses_02548a49cffeVWAV3kJ6QI2qFw` REJECTED spec and quality
+- Open Important findings: formal ledger lacks all 28 final conflict outcomes/generated-source mapping; Task 6 report retains stale BLOCKED claims; inclusive gateway boundary and two subscription unit contracts are known post-merge REDs
+- Ownership decision: preserve pure merge; assign gateway/billing boundary to Task 7 and tagged-unit subscription contracts to Task 8 with explicit plan gates
+- Fix boundary: plan handoff + ledger/report evidence only; no Task 6 source/test amendment
+- Status: first Task 6 review-fix pending
