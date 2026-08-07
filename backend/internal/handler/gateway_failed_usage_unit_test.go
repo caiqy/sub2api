@@ -422,8 +422,8 @@ func TestGatewayHandler_MessagesStreamingPartialWriteFailureStillCreatesUsageLog
 				"X-Request-Id": []string{"gateway_stream_fail_123"},
 			},
 			Body: io.NopCloser(strings.NewReader(partialMessageStartSSE +
-				"event: error\n" +
-				"data: {\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"upstream stream failed after partial write\"}}\n\n")),
+				"event: message_delta\n" +
+				"data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":null},\"usage\":{\"output_tokens\":1}}\n\n")),
 		},
 	}
 
@@ -494,7 +494,11 @@ func TestGatewayHandler_MessagesStreamingPartialWriteFailureStillCreatesUsageLog
 	require.Contains(t, rec.Body.String(), "event: message_start")
 	require.Contains(t, rec.Body.String(), `data: {"type":"error"`)
 	require.Contains(t, rec.Body.String(), `"type":"error"`)
+	require.Equal(t, 1, usageLogRepo.created)
 	require.NotNil(t, usageLogRepo.lastLog)
+	require.Equal(t, 10, usageLogRepo.lastLog.InputTokens)
+	require.Equal(t, 1, usageLogRepo.lastLog.OutputTokens)
 	require.NotNil(t, usageLogRepo.lastLog.DetailSnapshot)
 	requireRequestPreviewSnapshot(t, usageLogRepo.lastLog.DetailSnapshot.RequestBody, reqBody)
+	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, "message_delta")
 }

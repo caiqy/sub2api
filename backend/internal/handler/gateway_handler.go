@@ -1430,7 +1430,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				clientIP := ip.GetClientIP(c)
 				inboundEndpoint := GetInboundEndpoint(c)
 				upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
-				if c.Request.Context().Err() == nil && service.HasOpsUpstreamAttempted(c) && !service.HasOpsClientBusinessLimited(c) {
+				if result == nil && c.Request.Context().Err() == nil && service.HasOpsUpstreamAttempted(c) && !service.HasOpsClientBusinessLimited(c) {
 					detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
 					failedUsageInput := &service.FailedUsageLogInput{
 						APIKey:             currentAPIKey,

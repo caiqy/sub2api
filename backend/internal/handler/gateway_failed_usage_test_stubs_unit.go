@@ -144,10 +144,12 @@ func (s *stubGroupRepo) GetByIDLite(ctx context.Context, id int64) (*service.Gro
 
 type stubUsageLogRepo struct {
 	service.UsageLogRepository
+	created int
 	lastLog *service.UsageLog
 }
 
 func (s *stubUsageLogRepo) Create(_ context.Context, log *service.UsageLog) (bool, error) {
+	s.created++
 	if log != nil {
 		copied := *log
 		s.lastLog = &copied
