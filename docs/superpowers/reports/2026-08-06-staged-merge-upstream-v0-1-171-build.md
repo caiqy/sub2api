@@ -616,16 +616,40 @@ frontend/src/views/auth/__tests__/WechatCallbackView.spec.ts
 | 10 | Codex identity、动态版本、UA、过载重试 | HTTP/alpha-search `ForwardAlphaSearch`、passthrough `forwardOpenAIPassthrough`、WS 和 `newOpenAIAccountProbe` -> current identity/version headers -> upstream request/retry -> final account/model/error | `backend/internal/service/openai_alpha_search.go`、`backend/internal/service/openai_gateway_passthrough.go`、`backend/internal/service/openai_account_probe.go`、`backend/internal/service/openai_codex_identity.go`、`backend/internal/service/openai_gateway_service.go`、`tag-source v0.1.171:backend/internal/service/openai_codex_version_sync_service.go:OpenAICodexVersionSyncService`、`backend/internal/pkg/openai/request.go` | `v0.1.170`、`v0.1.171` | 人工审查：模型列表、账号测试和 alpha-search 共用身份来源，重试保留最终语义 | `manual` | 已完成 M10 结构复核：当前 source 的 `backend/internal/service/openai_gateway_passthrough.go:forwardOpenAIPassthrough`、`backend/internal/service/openai_codex_identity.go:ensureCodexIdentityHeaders`/`enforceCodexIdentityHeaders`、`backend/internal/service/openai_gateway_service.go:codexCLIUserAgent`/`codexCLIVersion`、`backend/internal/service/openai_account_probe.go:newOpenAIAccountProbe` 与 `backend/internal/service/openai_alpha_search.go:ForwardAlphaSearch` 维持既有链路；version sync service 仅为 `tag-source v0.1.171:backend/internal/service/openai_codex_version_sync_service.go:OpenAICodexVersionSyncService`，不是当前 source base 文件。未提升为组合级自动证明。 |
 | 11 | Ent/Wire、Go/pnpm 依赖、CSP/deploy 配置、migrations | schema/provider/manifest source -> `make -C backend generate` -> Ent/Wire output；migration runner -> ordered filename/checksum；frontend manifest -> pnpm lock；`SecurityHeaders` -> CSP policy/nonce | `backend/ent/schema/`、`backend/cmd/server/wire.go`、`backend/cmd/server/wire_gen.go`、`backend/go.mod`、`backend/go.sum`、`frontend/package.json`、`frontend/pnpm-lock.yaml`、`backend/internal/server/middleware/security_headers.go`、`deploy/config.example.yaml`、`backend/migrations/` | `v0.1.170`、`v0.1.171` | 人工审查：source-driven generation、两轮无 diff、完整 migration filename/排序/checksum 和本机 integration | `unverified` | Task 4 的 refresh、stable 1、stable 2 generate 均 exit 0 且生成 diff 为空；仅完整 migration 空库/升级/幂等/checksum integration 因本机 Docker CLI 缺失而未验证。 |
 
-### 冲突台账模板
+### Task 6 最终冲突台账（取代模板）
 
-| 阶段 | 文件 | 分类 | ours 行为 | theirs 行为 | 最小融合 | 验证证据 | 状态 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 待发生 | 待填 | 上游修复 | 待填 | 待填 | 待填 | 待填 | 待填 |
-| 待发生 | 待填 | 本地定制 | 待填 | 待填 | 待填 | 待填 | 待填 |
-| 待发生 | 待填 | 接口/配置演进 | 待填 | 待填 | 待填 | 待填 | 待填 |
-| 待发生 | 待填 | 版本/依赖 | 待填 | 待填 | 待填 | 待填 | 待填 |
-| 待发生 | 待填 | 生成代码 | 待填 | 待填 | 待填 | 待填 | 待填 |
-| 待发生 | 待填 | migration | 待填 | 待填 | 待填 | 待填 | 待填 |
+以下是 `v0.1.170` 的实际 28 个文本冲突。`CC` 是 `git show --cc --format= --unified=0 98c7b048... -- <下表 28 路径>`，exit `0`，显示两亲本与最终 hunk；`TP` 是 merge parent 检查，`WC` 是 `git diff --check 30528a82... 98c7b048...`，exit `0`。它们证明 pure merge 拓扑与最终文本，不是 merge 后行为 PASS。
+
+| # | 文件 | 分类 | ours 行为 | theirs 行为 | 最终融合 | 验证证据 | 状态 |
+| ---: | --- | --- | --- | --- | --- | --- | --- |
+| 1 | `backend/cmd/server/VERSION` | 版本/依赖 | `0.1.169.3` | `0.1.169` | 保持 `0.1.169.3` | `CC`、对象读取 | 已融合 |
+| 2 | `backend/cmd/server/wire_gen.go` | 生成代码 | 本地 Wire 输出 | 上游 provider 输出 | 从融合 Wire source 的最终输出 | `CC`、生成映射 | 已融合 |
+| 3 | `backend/ent/client.go` | 生成代码 | 本地 Ent entities | 上游 Group profit schema | 完整 schema 的 final client | `CC`、生成映射 | 已融合 |
+| 4 | `backend/ent/group.go` | 生成代码 | 本地 Group fields | profit fields | 两侧 Group fields | `CC`、生成映射 | 已融合 |
+| 5 | `backend/ent/mutation.go` | 生成代码 | 本地 mutation fields | profit mutation fields | 两侧 mutation API | `CC`、生成映射 | 已融合 |
+| 6 | `backend/internal/handler/admin/setting_handler.go` | 接口/配置演进 | 本地 settings DTO | 上游 settings/admin fields | 两组 response fields | `CC` | 已融合 |
+| 7 | `backend/internal/handler/admin/setting_handler_update.go` | 接口/配置演进 | 本地 runtime update | 上游 settings update | 两侧 partial update fields | `CC` | 已融合 |
+| 8 | `backend/internal/handler/gateway_handler.go` | 上游修复 | body/detail snapshot | profit/pricing/partial usage | 两侧 route 与 usage 数据 | `CC` | 已融合 |
+| 9 | `backend/internal/handler/gateway_handler_chat_completions.go` | 接口/配置演进 | local usage fields | `PricingAt` | usage input 带两侧字段 | `CC` | 已融合 |
+| 10 | `backend/internal/handler/gemini_v1beta_handler.go` | 上游修复 | detail snapshot/slot | profit admission/`PricingAt` | 两侧 usage/slot 路径 | `CC` | 已融合 |
+| 11 | `backend/internal/handler/openai_alpha_search.go` | 上游修复 | effective request body | profit selection | 两侧入口语义 | `CC` | 已融合 |
+| 12 | `backend/internal/handler/openai_chat_completions.go` | 接口/配置演进 | local usage fields | `PricingAt` | usage input 带两侧字段 | `CC` | 已融合 |
+| 13 | `backend/internal/handler/openai_embeddings.go` | 接口/配置演进 | local usage fields | `PricingAt` | usage input 带两侧字段 | `CC` | 已融合 |
+| 14 | `backend/internal/handler/openai_gateway_count_tokens.go` | 上游修复 | effective body/count path | profit gate | count tokens 显式抑制 profit gate | `CC` | 已融合 |
+| 15 | `backend/internal/handler/openai_gateway_handler.go` | 上游修复 | concurrency/body/usage | profit veto/turn pricing | 两侧 slot/body/usage 语义 | `CC` | 已融合 |
+| 16 | `backend/internal/service/admin_account.go` | 接口/配置演进 | `probeToggleOff` prefetch | `RateMultiplier` prefetch | prefetch 条件取并集 | `CC` | 已融合 |
+| 17 | `backend/internal/service/api_key_auth_cache_impl.go` | 接口/配置演进 | snapshot v19 local controls | snapshot v18 profit fields | v20 覆盖两侧 fields | `CC` | 已融合 |
+| 18 | `backend/internal/service/content_moderation.go` | 上游修复 | `buildLog` matched-keyword contract | moderation proxy client/cache | helpers 和 log contract 共存 | `CC` | 已融合 |
+| 19 | `backend/internal/service/gateway_scheduling.go` | 上游修复 | composite route/platform | group profit gate | route decision 后装 gate | `CC` | 已融合 |
+| 20 | `backend/internal/service/gateway_usage_billing.go` | 接口/配置演进 | `DetailSnapshot` | `PricingAt` | usage structs 传递两侧 fields | `CC` | 已融合 |
+| 21 | `backend/internal/service/openai_account_scheduler.go` | 上游修复 | layered sticky/DB recheck | upstream-cost ordering | 两侧 scheduler behavior | `CC` | 已融合 |
+| 22 | `backend/internal/service/openai_gateway_scheduling.go` | 上游修复 | quota auto-pause | legacy profit gate | 两者先于 selection | `CC` | 已融合 |
+| 23 | `backend/internal/service/openai_oauth_passthrough_test.go` | 本地定制 | missing instructions reject | default instructions forward | 按用户裁决保留 upstream default/forward test | `CC` | 已融合 |
+| 24 | `backend/internal/service/subscription_service.go` | 本地定制 | `StartsAt`/day-start reset | `s.now()` window reset | `StartsAt` 优先，`startOfDay(s.now())` | `CC` | 已融合；Task 8 RED handoff |
+| 25 | `backend/internal/service/user_subscription.go` | 本地定制 | strict `<` 和 local windows | inclusive `<=`/upstream windows | `Check*Limit` 为 `<=`，保留 local window correction | `CC` | 已融合；Task 7 RED handoff |
+| 26 | `frontend/src/components/account/CreateAccountModal.vue` | 本地定制 | passthrough `extra` | billing probe payload | passthrough 加 API-key probe | `CC` | 已融合 |
+| 27 | `frontend/src/components/account/EditAccountModal.vue` | 本地定制 | passthrough/quota editor | probe/rate-sync controls | 两侧 `extra` fields | `CC` | 已融合 |
+| 28 | `frontend/src/components/account/__tests__/CreateAccountModal.spec.ts` | 本地定制 | local create harness | upstream probe/import harness | 两组 mock/assertions | `CC` | 已融合 |
 
 ### Task 3 TDD 与风险
 
@@ -738,3 +762,27 @@ frontend/src/views/auth/__tests__/WechatCallbackView.spec.ts
 - 此节替代此前 M2/M3/M7/M8/M9/M10 的错误定位：`ResponsesWebSocket` 为 `backend/internal/handler/openai_gateway_handler.go:ResponsesWebSocket`；`StepUpSessionKey` 为 `backend/internal/server/middleware/step_up.go:StepUpSessionKey`；`AdvanceQuotaCycleWithReceipt` 为 `backend/internal/service/subscription_quota_advance_receipt.go:AdvanceQuotaCycleWithReceipt`；`adminAPI` 为 `frontend/src/api/admin/index.ts:adminAPI`。
 - 当前 source 的 Codex identity/version 入口为 `backend/internal/service/openai_codex_identity.go:ensureCodexIdentityHeaders`/`enforceCodexIdentityHeaders` 和 `backend/internal/service/openai_gateway_service.go:codexCLIUserAgent`/`codexCLIVersion`。`OpenAICodexVersionSyncService` 仅为 `tag-source v0.1.171:backend/internal/service/openai_codex_version_sync_service.go:OpenAICodexVersionSyncService`，不作为当前 source base 文件引用。
 - Superseding conclusion: `protected=1`，`manual=9`，`unverified=1`，`gap=0`；Docker/Testcontainers migration 仍是唯一 `unverified` 边界。
+
+## Task 6：v0.1.170 merge 最终证据与 handoff
+
+- 唯一可信状态：`DONE`，仅表示 pure merge 拓扑和上述 28 项融合边界已完成；不表示所有 merge 后行为已验证。
+- merge commit：`98c7b04874361a1cf95b8dea90ed1c4db2f05d4d`（`merge: upstream v0.1.170`）。
+- parents：第一父 `30528a82e32bfedc011d741e870964beb5743aa4`；第二父 `c043c24774228ba891ddf90d783aa6dc7d0855b5`（固定 `v0.1.170^{}`）。`TP` exit `0` 证实该拓扑。
+- `backend/cmd/server/VERSION` 经对象读取仍为 `0.1.169.3`；没有将中间版本升级混入 merge。
+- 全部 28 个 final hunk 已以 `CC` 复核；`WC` 未报告空白错误。未在本轮重跑 implementer 已运行的测试。
+
+### Generated source mapping
+
+| 输出 | 最终 source mapping | 复核结论 |
+| --- | --- | --- |
+| `backend/ent/client.go` | 完整 `backend/ent/schema/**`；本冲突的关键 source 为 `backend/ent/schema/group.go` | 最终 client 包含 Group profit 字段和既有本地 schema。 |
+| `backend/ent/group.go`、`backend/ent/mutation.go` | `backend/ent/schema/group.go` | 最终 output 同时暴露本地 Group API 和 profit-control 字段。 |
+| `backend/cmd/server/wire_gen.go` | `backend/cmd/server/wire.go`、`backend/internal/handler/wire.go`、`backend/internal/repository/wire.go`、`backend/internal/service/wire.go` | `wire_gen.go` 仍标记为 `Code generated by Wire. DO NOT EDIT.`；没有把它作为手写融合源。 |
+
+- 按 Task 6 的原始 `$generated170Exceptions` 定义重建：将 `git diff --name-only 30528a82... 98c7b048...` 与 `git diff --name-only v0.1.169..v0.1.170` 比较，结果仅为 `backend/internal/handler/openai_gateway_cyber_test.go` 与 `backend/internal/handler/openai_images_controls_test.go`；两者均非生成输出。因此 Ent/Wire/go.sum/pnpm-lock 没有未映射的 generated exception。上表覆盖所有实际生成输出的 source mapping。
+
+### Known RED handoff
+
+- **Task 7，未闭合且不得写为 PASS：**`user_subscription.go` 已把领域 `CheckDailyLimit`、`CheckWeeklyLimit`、`CheckMonthlyLimit` 改为 inclusive `<=`；但 `BillingCacheService.CheckBillingEligibility` 仍以缓存 usage `>= limit` 拒绝。canonical Task 7 要求先建立端到端 exact-limit 放行、超限拒绝的 RED/GREEN 回归，并做最小修复。
+- **Task 8，未闭合且不得写为 PASS：**带 `unit` tag 的 `TestDelayedFirstUseAnchorsMonthlyWindowAtActivation` 仍断言首次使用激活窗口，`TestAdminResetQuota_ResetBoth` 仍断言操作精确时刻；两者与用户裁决的 `StartsAt` 和当天零点语义相反。canonical Task 8 要求以 `go test -tags=unit` gate 先记录真实 RED，再修正测试/实现到用户裁决。
+- Task 6 不修改这两类生产代码或测试；它们必须由 Task 7/8 的 TDD 闭合。
