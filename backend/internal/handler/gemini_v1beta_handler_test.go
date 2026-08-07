@@ -501,7 +501,7 @@ func TestGeminiV1BetaModels_ModelPathAndContentAuditKeepGoogleErrors(t *testing.
 		moderation := service.NewContentModerationService(&geminiModerationSettingRepo{values: map[string]string{
 			service.SettingKeyRiskControlEnabled:      "true",
 			service.SettingKeyContentModerationConfig: string(rawCfg),
-		}}, geminiModerationRepo{}, geminiModerationHashCache{}, nil, nil, nil, nil)
+		}}, geminiModerationRepo{}, geminiModerationHashCache{}, nil, nil, nil, nil, nil)
 		group := &service.Group{ID: 95, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
 		account := &service.Account{ID: 95, Name: "api-key", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "key"}}
 		env := newTerminalGatewayMessagesEnv(t, group, &openAIChatCompletionsHTTPUpstreamStub{err: fmt.Errorf("must not be called")}, account)
