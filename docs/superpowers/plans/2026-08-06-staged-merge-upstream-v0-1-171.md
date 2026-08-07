@@ -1036,7 +1036,7 @@ if ($merge171Parent2 -ne $tag171) { throw "v0.1.171 merge second parent mismatch
 
 ### Task 12: 以 TDD 修复 v0.1.171 Codex、过载重试和 gateway/body 回归
 
-- [ ] Task 12: 以 TDD 修复 v0.1.171 Codex、过载重试和 gateway/body 回归
+- [x] Task 12: 以 TDD 修复 v0.1.171 Codex、过载重试和 gateway/body 回归
 
 **映射 OpenSpec：**3.2
 
