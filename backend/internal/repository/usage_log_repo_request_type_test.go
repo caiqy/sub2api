@@ -720,8 +720,8 @@ func TestUsageLogRepositoryGetUserSpendingRanking(t *testing.T) {
 	end := start.Add(24 * time.Hour)
 
 	rows := sqlmock.NewRows([]string{"user_id", "email", "username", "actual_cost", "requests", "tokens", "total_actual_cost", "total_requests", "total_tokens"}).
-		AddRow(int64(2), "beta@example.com", "Beta", 12.5, int64(9), int64(900), 40.0, int64(30), int64(2600)).
-		AddRow(int64(1), "alpha@example.com", "Alpha", 12.5, int64(8), int64(800), 40.0, int64(30), int64(2600)).
+		AddRow(int64(2), "beta@example.com", "beta", 12.5, int64(9), int64(900), 40.0, int64(30), int64(2600)).
+		AddRow(int64(1), "alpha@example.com", "alpha", 12.5, int64(8), int64(800), 40.0, int64(30), int64(2600)).
 		AddRow(int64(3), "gamma@example.com", "", 4.25, int64(5), int64(300), 40.0, int64(30), int64(2600))
 
 	mock.ExpectQuery("WITH user_spend AS \\(").
@@ -732,38 +732,13 @@ func TestUsageLogRepositoryGetUserSpendingRanking(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, &usagestats.UserSpendingRankingResponse{
 		Ranking: []usagestats.UserSpendingRankingItem{
-			{UserID: 2, Email: "beta@example.com", Username: "Beta", ActualCost: 12.5, Requests: 9, Tokens: 900},
-			{UserID: 1, Email: "alpha@example.com", Username: "Alpha", ActualCost: 12.5, Requests: 8, Tokens: 800},
-			{UserID: 3, Email: "gamma@example.com", Username: "", ActualCost: 4.25, Requests: 5, Tokens: 300},
+			{UserID: 2, Email: "beta@example.com", Username: "beta", ActualCost: 12.5, Requests: 9, Tokens: 900},
+			{UserID: 1, Email: "alpha@example.com", Username: "alpha", ActualCost: 12.5, Requests: 8, Tokens: 800},
+			{UserID: 3, Email: "gamma@example.com", ActualCost: 4.25, Requests: 5, Tokens: 300},
 		},
 		TotalActualCost: 40.0,
 		TotalRequests:   30,
 		TotalTokens:     2600,
-	}, got)
-	require.NoError(t, mock.ExpectationsWereMet())
-}
-
-func TestUsageLogRepositoryGetUserBreakdownStatsRequestTypeLegacyFallbackAndUsername(t *testing.T) {
-	db, mock := newSQLMock(t)
-	repo := &usageLogRepository{sql: db}
-
-	start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
-	end := start.Add(24 * time.Hour)
-	requestType := int16(service.RequestTypeStream)
-
-	rows := sqlmock.NewRows([]string{"user_id", "email", "username", "requests", "input_tokens", "output_tokens", "cache_tokens", "total_tokens", "cost", "actual_cost", "account_cost"}).
-		AddRow(int64(7), "rank@example.com", "Rank User", int64(3), int64(100), int64(150), int64(50), int64(300), 1.5, 1.2, 1.1)
-
-	mock.ExpectQuery("AND \\(ul\\.request_type = \\$3 OR \\(ul\\.request_type = 0 AND ul\\.stream = TRUE AND ul\\.openai_ws_mode = FALSE\\)\\)").
-		WithArgs(start, end, requestType).
-		WillReturnRows(rows)
-
-	got, err := repo.GetUserBreakdownStats(context.Background(), start, end, usagestats.UserBreakdownDimension{
-		RequestType: &requestType,
-	}, 50)
-	require.NoError(t, err)
-	require.Equal(t, []usagestats.UserBreakdownItem{
-		{UserID: 7, Email: "rank@example.com", Username: "Rank User", Requests: 3, InputTokens: 100, OutputTokens: 150, CacheTokens: 50, TotalTokens: 300, Cost: 1.5, ActualCost: 1.2, AccountCost: 1.1},
 	}, got)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

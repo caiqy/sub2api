@@ -623,6 +623,16 @@ func (s *SubscriptionService) updateExistingSubscriptionTerm(
 		if err := s.userSubRepo.ExtendExpiry(txCtx, existingSub.ID, newExpiresAt); err != nil {
 			return fmt.Errorf("extend subscription: %w", err)
 		}
+		if existingSub.Status != SubscriptionStatusActive {
+			if err := s.userSubRepo.UpdateStatus(txCtx, existingSub.ID, SubscriptionStatusActive); err != nil {
+				return fmt.Errorf("update subscription status: %w", err)
+			}
+		}
+		if notes != "" {
+			if err := s.userSubRepo.UpdateNotes(txCtx, existingSub.ID, appendSubscriptionNotes(existingSub.Notes, notes)); err != nil {
+				return fmt.Errorf("update subscription notes: %w", err)
+			}
+		}
 
 		return nil
 	})

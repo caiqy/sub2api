@@ -54,6 +54,7 @@ type SettingHandler struct {
 	settingService           *service.SettingService
 	emailService             *service.EmailService
 	turnstileService         *service.TurnstileService
+	aliyunCaptchaService     *service.AliyunCaptchaService
 	opsService               *service.OpsService
 	paymentConfigService     *service.PaymentConfigService
 	paymentService           *service.PaymentService
@@ -76,16 +77,25 @@ func NewSettingHandler(settingService *service.SettingService, emailService *ser
 	}
 }
 
-// SetStepUpDeps attaches the services required by the step-up settings switch.
-func (h *SettingHandler) SetStepUpDeps(totpService *service.TotpService, userService *service.UserService) {
-	h.totpService = totpService
-	h.userService = userService
-}
-
 // SetNotificationEmailService attaches the notification template service without changing
 // the constructor signature used by existing unit tests.
 func (h *SettingHandler) SetNotificationEmailService(notificationEmailService *service.NotificationEmailService) {
 	h.notificationEmailService = notificationEmailService
+}
+
+// SetAliyunCaptchaService attaches the Aliyun captcha credential validator without
+// changing the constructor signature used by existing unit tests.
+func (h *SettingHandler) SetAliyunCaptchaService(aliyunCaptchaService *service.AliyunCaptchaService) {
+	h.aliyunCaptchaService = aliyunCaptchaService
+}
+
+// SetStepUpDeps attaches the services backing the step-up switch preconditions
+// (enable requires the acting admin to have TOTP enabled; disable is itself a
+// step-up gated operation), without changing the constructor signature used by
+// existing unit tests.
+func (h *SettingHandler) SetStepUpDeps(totpService *service.TotpService, userService *service.UserService) {
+	h.totpService = totpService
+	h.userService = userService
 }
 
 // GetSettings 获取所有系统设置
@@ -153,6 +163,17 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		TurnstileEnabled:                                     settings.TurnstileEnabled,
 		TurnstileSiteKey:                                     settings.TurnstileSiteKey,
 		TurnstileSecretKeyConfigured:                         settings.TurnstileSecretKeyConfigured,
+		TencentCaptchaEnabled:                                settings.TencentCaptchaEnabled,
+		TencentCaptchaAppID:                                  settings.TencentCaptchaAppID,
+		TencentCaptchaAppSecretKeyConfigured:                 settings.TencentCaptchaAppSecretKeyConfigured,
+		TencentCaptchaCloudSecretIDConfigured:                settings.TencentCaptchaCloudSecretIDConfigured,
+		TencentCaptchaCloudSecretKeyConfigured:               settings.TencentCaptchaCloudSecretKeyConfigured,
+		AliyunCaptchaEnabled:                                 settings.AliyunCaptchaEnabled,
+		AliyunCaptchaAccessKeyID:                             settings.AliyunCaptchaAccessKeyID,
+		AliyunCaptchaAccessKeySecretConfigured:               settings.AliyunCaptchaAccessKeySecretConfigured,
+		AliyunCaptchaSceneID:                                 settings.AliyunCaptchaSceneID,
+		AliyunCaptchaPrefix:                                  settings.AliyunCaptchaPrefix,
+		AliyunCaptchaRegion:                                  settings.AliyunCaptchaRegion,
 		APIKeyACLTrustForwardedIP:                            settings.APIKeyACLTrustForwardedIP,
 		ForwardedClientIPHeaders:                             settings.ForwardedClientIPHeaders,
 		LinuxDoConnectEnabled:                                settings.LinuxDoConnectEnabled,
@@ -289,6 +310,9 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		EnableClientDatelineNormalization:                            settings.EnableClientDatelineNormalization,
 		AntigravityUserAgentVersion:                                  settings.AntigravityUserAgentVersion,
 		OpenAICodexUserAgent:                                         settings.OpenAICodexUserAgent,
+		OpenAICodexClientVersion:                                     settings.OpenAICodexClientVersion,
+		OpenAICodexClientVersionSynced:                               settings.OpenAICodexClientVersionSynced,
+		OpenAICodexVersionAutoSyncEnabled:                            settings.OpenAICodexVersionAutoSyncEnabled,
 		MinCodexVersion:                                              settings.MinCodexVersion,
 		MaxCodexVersion:                                              settings.MaxCodexVersion,
 		CodexCLIOnlyBlacklist:                                        settings.CodexCLIOnlyBlacklist,
@@ -356,8 +380,9 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		PaymentCancelRateLimitMode:                                   paymentCfg.CancelRateLimitMode,
 		PaymentAlipayForceQRCode:                                     paymentCfg.AlipayForceQRCode,
 		PaymentAlipayMobilePrecreateDeepLink:                         paymentCfg.AlipayMobilePrecreateDeepLink,
-		ChannelMonitorEnabled:                                        settings.ChannelMonitorEnabled,
-		ChannelMonitorDefaultIntervalSeconds:                         settings.ChannelMonitorDefaultIntervalSeconds,
+
+		ChannelMonitorEnabled:                settings.ChannelMonitorEnabled,
+		ChannelMonitorDefaultIntervalSeconds: settings.ChannelMonitorDefaultIntervalSeconds,
 
 		AvailableChannelsEnabled: settings.AvailableChannelsEnabled,
 

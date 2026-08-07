@@ -780,7 +780,7 @@ func (r *activeRenewalUserSubRepoStub) Update(_ context.Context, sub *UserSubscr
 	return nil
 }
 
-func TestActiveRenewalDoesNotRechargeQuotaWindows(t *testing.T) {
+func TestActiveRenewalKeepsQuotaWindowsAndAppendsNotes(t *testing.T) {
 	now := time.Now().UTC()
 	start := now.Add(-3 * 24 * time.Hour)
 	oldExpiresAt := now.Add(4 * 24 * time.Hour)
@@ -812,7 +812,7 @@ func TestActiveRenewalDoesNotRechargeQuotaWindows(t *testing.T) {
 		UserID:       200,
 		GroupID:      1,
 		ValidityDays: 7,
-		Notes:        "new notes ignored for unexpired renewal",
+		Notes:        "new notes for unexpired renewal",
 	})
 
 	require.NoError(t, err)
@@ -831,14 +831,14 @@ func TestActiveRenewalDoesNotRechargeQuotaWindows(t *testing.T) {
 	require.Equal(t, 5.0, renewed.DailyUsageUSD, "DailyUsageUSD 应保持原值")
 	require.Equal(t, 40.0, renewed.WeeklyUsageUSD, "WeeklyUsageUSD 应保持原值")
 	require.Equal(t, 80.0, renewed.MonthlyUsageUSD, "MonthlyUsageUSD 应保持原值")
-	require.Equal(t, notes, renewed.Notes, "未过期续订只延长 ExpiresAt，不应追加 Notes")
+	require.Equal(t, notes+"\nnew notes for unexpired renewal", renewed.Notes, "未过期续订应追加 Notes")
 
 	require.True(t, subRepo.extendExpiryCalled, "续期应调用 ExtendExpiry")
 	require.False(t, subRepo.updateStatusCalled, "活跃订阅续期不应调用 UpdateStatus")
-	require.False(t, subRepo.updateNotesCalled, "未过期续订不应调用 UpdateNotes")
+	require.True(t, subRepo.updateNotesCalled, "带 Notes 的未过期续订应调用 UpdateNotes")
 }
 
-func TestActiveRenewalDoesNotReactivateSuspendedSubscription(t *testing.T) {
+func TestActiveRenewalReactivatesSuspendedSubscription(t *testing.T) {
 	now := time.Now().UTC()
 	start := now.Add(-3 * 24 * time.Hour)
 	oldExpiresAt := now.Add(4 * 24 * time.Hour)
@@ -872,10 +872,10 @@ func TestActiveRenewalDoesNotReactivateSuspendedSubscription(t *testing.T) {
 
 	require.NoError(t, err)
 	require.True(t, reused)
-	require.Equal(t, SubscriptionStatusSuspended, renewed.Status)
+	require.Equal(t, SubscriptionStatusActive, renewed.Status)
 	require.Equal(t, oldExpiresAt.AddDate(0, 0, 7), renewed.ExpiresAt)
 	require.Equal(t, 40.0, renewed.WeeklyUsageUSD)
-	require.False(t, subRepo.updateStatusCalled, "未过期 suspended 续订只延长 ExpiresAt，不应恢复 active")
+	require.True(t, subRepo.updateStatusCalled, "未过期 suspended 续订应恢复 active")
 }
 
 func TestValidateAndCheckLimits_DailyCardDoesNotAllowSecondQuotaAfterMidnight(t *testing.T) {

@@ -274,8 +274,7 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchResponsesWebSearchRequest(c
 		req.Header.Set("Session_ID", isolated)
 		req.Header.Set("Conversation_ID", isolated)
 	}
-	s.overrideBrowserUserAgent(ctx, account, req)
-	enforceCodexIdentityHeaders(req.Header)
+	enforceCodexIdentityHeadersWithUA(req.Header, s.codexIdentityOverrideUA(account))
 	account.ApplyHeaderOverrides(req.Header)
 	cleanupOnError = false
 	return req, nil
@@ -473,7 +472,24 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchRequest(ctx context.Context
 	} else if account.Type == AccountTypeOAuth {
 		req.Header.Set("Version", codexCLIVersion)
 	}
+	stripOpenAIAlphaSearchResponsesHeaders(req.Header)
 	return req, nil
+}
+
+func stripOpenAIAlphaSearchResponsesHeaders(headers http.Header) {
+	if headers == nil {
+		return
+	}
+	for _, key := range []string{
+		"OpenAI-Beta",
+		"Session_ID",
+		"Conversation_ID",
+		"X-Codex-Beta-Features",
+		"X-Codex-Turn-State",
+		responsesLiteHeaderKey,
+	} {
+		headers.Del(key)
+	}
 }
 
 func (s *OpenAIGatewayService) openAIAlphaSearchURL(account *Account) (string, error) {
