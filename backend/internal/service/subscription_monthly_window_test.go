@@ -33,7 +33,7 @@ func (r *activateWindowUserSubRepo) ActivateWindows(_ context.Context, _ int64, 
 	return nil
 }
 
-func TestDelayedFirstUseAnchorsMonthlyWindowAtActivation(t *testing.T) {
+func TestDelayedFirstUseAnchorsMonthlyWindowAtStartsAt(t *testing.T) {
 	repo := &activateWindowUserSubRepo{}
 	svc := NewSubscriptionService(groupRepoNoop{}, repo, nil, nil, nil)
 	startsAt := time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)
