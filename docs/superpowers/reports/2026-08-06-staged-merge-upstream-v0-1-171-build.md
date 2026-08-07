@@ -851,3 +851,39 @@ frontend/src/views/auth/__tests__/WechatCallbackView.spec.ts
 | 11 Ent/Wire/dependency/CSP/migrations | `unverified` | 五个 migration blob identity PASS；两轮 generate 零 diff；build/static PASS。仅 PostgreSQL 空库/升级 integration 因 Docker CLI 不存在未验证。 |
 
 最终汇总：`protected=3`、`manual=7`、`unverified=1`、`gap=0`。每个 `manual` 行均有 post-merge 调用链审查与 Task 10 full gate 证据；`unverified` 仅限规范允许的 Docker/Testcontainers 边界。
+
+## Task 11：纯净 v0.1.171 merge 节点
+
+- 状态：`DONE`。merge commit `cca37e01eb719d65ce81dc7569b190fe9550ae5d`，第一父 `5f505520ded16114e3f2850f7b856a0650a82755`，第二父精确为固定 tag peeled SHA `f0e7a9c7a23a7d02fb159b62fa809621eb0475a6`；`VERSION=0.1.169.3`。
+- annotated tag object 为 `afd154b92aac36c6dafb1fa8e181ca827c78c465`；merge 204 paths，其中 202 条属于 `v0.1.170..v0.1.171`，另两条为直接 compile/test compatibility：`backend/cmd/server/ops_error_worker_cleanup_test.go` 与 `backend/internal/service/user_subscription_daily_quota_test.go`。
+- 用户裁决：未到期但 suspended 的订阅续期后延长到期日、恢复 `active`、追加续期备注，额度窗口与用量保持不变。
+
+### 实际 20 个文本冲突
+
+| 文件 | 分类 | 融合结果 |
+| --- | --- | --- |
+| `backend/cmd/server/VERSION` | version/dependency/generated | 保留中间版本 `0.1.169.3`。 |
+| `backend/cmd/server/wire.go` | version/dependency/generated | 本地 cleanup 生命周期与上游 Codex version-sync shutdown 并存。 |
+| `backend/cmd/server/wire_gen.go` | version/dependency/generated | 从融合后的 Wire/provider 源重新生成。 |
+| `backend/go.sum` | version/dependency/generated | 以最终 `go.mod` 执行 `go mod tidy`，补齐 Wire tool 依赖。 |
+| `backend/internal/handler/admin/setting_handler.go` | settings/auth | 保留 sticky/WS layered 响应并加入 captcha/Codex version 字段。 |
+| `backend/internal/handler/admin/setting_handler_update.go` | settings/auth | 双方 request validation、persistence 与 response 路径并存。 |
+| `backend/internal/handler/composite_platform_test.go` | gateway | 保留 model-chain 与 reasoning-effort 两组覆盖。 |
+| `backend/internal/handler/openai_gateway_handler.go` | gateway | 保留 Messages dispatch/dependency guard，并加入 reasoning policy binding。 |
+| `backend/internal/repository/usage_log_repo_request_type_test.go` | scheduler/usage | 保留 detail probe mock 与 dashboard label fixtures。 |
+| `backend/internal/repository/user_subscription_repo.go` | audit/subscription | locked read 保留本地 response relation preload 和上游 renewal lock。 |
+| `backend/internal/service/api_key_service_cache_test.go` | settings/auth | user concurrency snapshot 与 composite reasoning cache 覆盖并存。 |
+| `backend/internal/service/openai_alpha_search.go` | gateway | 保留 body handle/入站 Version，并加入 Responses header stripping。 |
+| `backend/internal/service/openai_gateway_service.go` | gateway | 保留 optional local dependencies，并加入 Codex identity enforcement。 |
+| `backend/internal/service/openai_gateway_service_test.go` | gateway | body helper 与 temporary-unschedulable failover 覆盖并存。 |
+| `backend/internal/service/setting_service.go` | settings/auth | runtime invalidator 与 Codex client-version cache 并存。 |
+| `backend/internal/service/subscription_service.go` | audit/subscription | 按用户裁决采用 suspended renewal 自动恢复 active 与 notes 语义。 |
+| `backend/internal/service/wire.go` | version/dependency/generated | 本地 subscription/cache providers 与 Tencent/Aliyun captcha providers 并存。 |
+| `frontend/src/components/charts/ModelDistributionChart.vue` | frontend | 采用 trim 后 email fallback，保留本地图表行为。 |
+| `frontend/src/components/charts/__tests__/ModelDistributionChart.spec.ts` | frontend | missing-cost/tooltip 与 user-label/Other totals fixtures 并存。 |
+| `frontend/src/types/index.ts` | frontend | 保留 account-extra intersections 并加入 `codex_reset_credit_snapshot`。 |
+
+- generation/source mapping：`wire_gen.go` 仅由融合后的 Wire/provider 源生成；`go.sum` 仅由最终 `go.mod` 生成；Ent 无需额外 staged output；frontend manifest 未变，因此未刷新 lockfile。
+- 验证：`make generate` PASS；`go test ./cmd/server ./internal/handler ./internal/repository ./internal/service` PASS；subscription/locking、usage repo、cleanup、Alpha Search focused PASS；ModelDistributionChart 5 tests PASS；commit 前无 unmerged index、staged conflict marker 或 whitespace error。
+- fresh reviewer `ses_0228e93c7ffeHaJt3dBC7z3PwF` 最终结论：Task 11 spec `PASS`，pure merge quality `PASS`。
+- Task 13 RED handoff：上游原样遗漏 Aliyun `*.alicdn.com` custom-CSP enhancement；SettingsView 保存成功后未清空三个 Tencent secrets；补 suspended renewal 组合断言/契约注释并运行 tagged/admin/full frontend gates。这些不属于 Task 11 pure merge。
