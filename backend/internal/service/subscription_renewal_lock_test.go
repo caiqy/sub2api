@@ -106,8 +106,8 @@ func TestAssignOrExtendSubscriptionUsesLockedCurrentRow(t *testing.T) {
 }
 
 func TestAssignOrExtendSubscriptionRenewsUnexpiredSuspendedWithoutResettingQuotaWindows(t *testing.T) {
-	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
-	expiresAt := now.AddDate(0, 0, 20)
+	now := time.Now().UTC().Truncate(time.Second)
+	expiresAt := now.AddDate(0, 0, 1)
 	dailyWindowStart := now.Add(-24 * time.Hour)
 	weeklyWindowStart := now.Add(-7 * 24 * time.Hour)
 	monthlyWindowStart := now.Add(-30 * 24 * time.Hour)
