@@ -7,7 +7,7 @@
 - Previous task: `Task 7` complete; implementations `6dd4f244d`/`872354880`/`2c17b1824`/`5a5329ad8`; final review `ses_024c20d5bffeK4Sp85JQ3IkatW` APPROVED spec and quality; fresh default/unit service/handler gates PASS
 - Current task: `Task 8: 审查 v0.1.170 gateway/body、audit/auth、subscription/migration 和 frontend 交互`
 - OpenSpec mapping: `2.3 审查 Anthropic 流式用量、OpenAI WS/流内错误、Responses 工具输出、内容审核代理/最新输入、订阅窗口和 settings 更新，与本地 request-body spooling、统一审计、quota reset/outbox 和前端定制的交互`
-- Stage: `task-prep`
+- Stage: `task-review`
 - Review/fix round: `0/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
 - Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-171-task-8-brief.md`
@@ -15,4 +15,10 @@
 - Known RED handoff: tagged-unit subscription tests still encode upstream first-use/operation-time windows; user decision requires entitlement `StartsAt` and `AdminResetQuota` day start
 - Scope: gateway/body, audit/auth, subscription/migration behavior, settings, and frontend only; Task 9 owns migration filename/checksum integration and Ent/Wire generation
 - Residual from Task 7: non-CAS concurrent first sticky binding, outside this change contract
-- Status: Task 8 brief ready for implementation dispatch
+- Task 8 implementer: `ses_024b86893ffeXeiV9WpojQr0dY` DONE
+- Task 8 commits: `31555b6a1` subscription test anchors; `0a66f7093` frontend Codex namespace persistence
+- Baseline RED: tagged-unit subscription tests encoded first-use/operation-time anchors; EditAccountModal omitted OAuth `openai_responses_flatten_namespaces` writes and clears
+- Baseline GREEN: gateway/body, audit/auth, settings focused gates; no empty commits created
+- Final focused gates: service PASS; tagged-unit subscription PASS; handler PASS; frontend 5 files/119 tests PASS; `git diff --check` PASS
+- Residual: Docker/Testcontainers migration integration remains unverified under Task 9 ownership; existing Vitest stderr noise did not fail tests
+- Status: Task 8 implementation complete; fresh thorough review pending
