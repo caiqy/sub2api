@@ -934,7 +934,7 @@ if ($LASTEXITCODE -ne 0) { throw 'OpenSpec 2.5 state checkoff failed' }
 
 ### Task 11: 创建纯净的 v0.1.171 merge 节点
 
-- [ ] Task 11: 创建纯净的 v0.1.171 merge 节点
+- [x] Task 11: 创建纯净的 v0.1.171 merge 节点
 
 **映射 OpenSpec：**3.1
 
