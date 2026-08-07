@@ -334,7 +334,7 @@ Commit-NamedPaths -Message 'docs: record v0.1.171 baseline identity' -Paths @($b
 
 **映射 OpenSpec：**1.2
 
-**文件：**修改 build ledger。初次 full gate 已证明 `backend/internal/handler/gateway_handler.go` 与 `backend/internal/service/gateway_usage_billing.go` 存在纯 `gofmt` RED；允许只对这两个精确文件运行 `gofmt` 并独立提交 `style: format v0.1.170 gateway files`，随后必须从 Tasks 7-9 focused gates 起完整重跑 Task 10，不复用失败运行的半段结果。
+**文件：**修改 build ledger。初次 full gate 已证明 `backend/internal/handler/gateway_handler.go` 与 `backend/internal/service/gateway_usage_billing.go` 存在纯 `gofmt` RED；允许只对这两个精确文件运行 `gofmt` 并独立提交 `style: format v0.1.170 gateway files`。第二次 full gate 进一步复现两个行为簇 RED：允许在 `backend/internal/service/openai_gateway_grok.go` 中让 pool mode 在保留 quota snapshot、显式 403 temporary rule 后再跳过默认调度状态，在 `backend/internal/service/user_subscription.go` 中让 legacy-anchor 纠偏使用传入的 `previous`，并把 `backend/internal/service/subscription_monthly_window_test.go` fixture 更新为 versioned monthly reset interface；分别提交 `fix: preserve grok pool error handling after v0.1.170` 与 `fix: preserve subscription automatic windows after v0.1.170`。每次修复后都必须从 Tasks 7-9 focused gates 起完整重跑 Task 10，不复用失败运行的半段结果。
 
 **步骤：**
 
