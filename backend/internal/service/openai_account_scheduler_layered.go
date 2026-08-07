@@ -92,9 +92,9 @@ func (s *layeredOpenAIAccountScheduler) Select(
 				decision.SelectedAccountID = selection.Account.ID
 				decision.SelectedAccountType = selection.Account.Type
 				if req.SessionHash != "" {
-					_ = s.service.BindStickySession(ctx, req.GroupID, req.SessionHash, selection.Account.ID)
+					_ = s.service.bindOpenAIStickySessionDuringSelection(ctx, req.GroupID, req.SessionHash, selection.Account.ID)
 				}
-				return selection, decision, nil
+				return attachSelectionProfitGate(ctx, selection), decision, nil
 			}
 		}
 
@@ -224,11 +224,11 @@ func (s *layeredOpenAIAccountScheduler) selectBySessionHash(
 	result, acquireErr := s.service.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
 	if acquireErr == nil && result != nil && result.Acquired {
 		_ = s.service.refreshStickySessionTTL(ctx, req.GroupID, sessionHash, s.service.openAIWSSessionStickyTTL())
-		return &AccountSelectionResult{
+		return attachSelectionProfitGate(ctx, &AccountSelectionResult{
 			Account:     account,
 			Acquired:    true,
 			ReleaseFunc: result.ReleaseFunc,
-		}, req, nil
+		}), req, nil
 	}
 
 	cfg := s.service.schedulingConfig()
@@ -241,7 +241,7 @@ func (s *layeredOpenAIAccountScheduler) selectBySessionHash(
 		return nil, req, nil
 	}
 	if s.service.concurrencyService != nil {
-		return &AccountSelectionResult{
+		return attachSelectionProfitGate(ctx, &AccountSelectionResult{
 			Account: account,
 			WaitPlan: &AccountWaitPlan{
 				AccountID:      accountID,
@@ -249,7 +249,7 @@ func (s *layeredOpenAIAccountScheduler) selectBySessionHash(
 				Timeout:        cfg.StickySessionWaitTimeout,
 				MaxWaiting:     cfg.StickySessionMaxWaiting,
 			},
-		}, req, nil
+		}), req, nil
 	}
 	return nil, req, nil
 }
@@ -402,13 +402,13 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 		}
 		if result != nil && result.Acquired {
 			if req.SessionHash != "" && !req.SkipStickyBind {
-				_ = s.service.BindStickySession(ctx, req.GroupID, req.SessionHash, fresh.ID)
+				_ = s.service.bindOpenAIStickySessionDuringSelection(ctx, req.GroupID, req.SessionHash, fresh.ID)
 			}
-			return &AccountSelectionResult{
+			return attachSelectionProfitGate(ctx, &AccountSelectionResult{
 				Account:     fresh,
 				Acquired:    true,
 				ReleaseFunc: result.ReleaseFunc,
-			}, len(candidates), loadSkew, nil
+			}), len(candidates), loadSkew, nil
 		}
 		available = removeFromAvailable(available, selected.account.ID)
 	}
@@ -431,7 +431,7 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 	}
 	sortAccountsByPriorityAndLastUsed(fallbackAccounts, false)
 	for _, account := range fallbackAccounts {
-		return &AccountSelectionResult{
+		return attachSelectionProfitGate(ctx, &AccountSelectionResult{
 			Account: account,
 			WaitPlan: &AccountWaitPlan{
 				AccountID:      account.ID,
@@ -439,7 +439,7 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 				Timeout:        cfg.FallbackWaitTimeout,
 				MaxWaiting:     cfg.FallbackMaxWaiting,
 			},
-		}, len(candidates), loadSkew, nil
+		}), len(candidates), loadSkew, nil
 	}
 
 	return nil, len(candidates), loadSkew, ErrNoAvailableAccounts

@@ -15,6 +15,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/gemini"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/googleapi"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
@@ -457,18 +458,15 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				geminiConcurrency.DecrementAccountWaitCount(c.Request.Context(), account.ID)
 				accountWaitCounted = false
 			}
-			stickyState.bindSelectedAccount = true
-			stickyState.SelectionSessionKey = selectionSessionKey
-			if err := h.finalizeGeminiStickySelection(c.Request.Context(), stickyState, account.ID); err != nil {
-				reqLog.Warn("gemini.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
-			}
 		}
 		// 终检与准入后绑定使用选号结果携带的门（见 responses 同名注释）。
 		admissionCtx := service.ContextWithSelectionProfitGate(c.Request.Context(), selection)
+		admissionCtx = context.WithValue(admissionCtx, ctxkey.ForcePlatform, service.PlatformGemini)
 		latest, vetoed, reason := h.gatewayService.GatewayProfitControlVetoLatest(admissionCtx, account)
 		if vetoed {
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
+				accountReleaseFunc = nil
 			}
 			reqLog.Debug("gemini.account_slot_profit_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
 			if fs.RecordProfitVeto(account.ID) == FailoverExhausted {
@@ -671,7 +669,6 @@ type geminiStickySelectionState struct {
 	GeminiDigestChain     string
 	GeminiSessionUUID     string
 	MatchedDigestChain    string
-	bindSelectedAccount   bool
 }
 
 func (h *GatewayHandler) geminiStickyEnabled() bool {
@@ -768,13 +765,6 @@ func (h *GatewayHandler) prepareGeminiStickySelectionFromRequest(c *gin.Context,
 		GeminiPrefixHash:  geminiPrefixHash,
 		GeminiDigestChain: geminiDigestChain,
 	})
-}
-
-func (h *GatewayHandler) finalizeGeminiStickySelection(ctx context.Context, state geminiStickySelectionState, accountID int64) error {
-	if !h.geminiStickyEnabled() || !state.bindSelectedAccount {
-		return nil
-	}
-	return h.bindGeminiStickySession(ctx, state.GroupID, state.SelectionSessionKey, accountID)
 }
 
 func (h *GatewayHandler) geminiStickySessionKey(sessionKey string) string {

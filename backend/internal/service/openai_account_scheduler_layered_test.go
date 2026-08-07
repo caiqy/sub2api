@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/stretchr/testify/require"
 )
 
@@ -1643,4 +1644,119 @@ func TestLayered_SessionStickyDisabledBypassesLookupBindAndRefresh(t *testing.T)
 	if selection.ReleaseFunc != nil {
 		selection.ReleaseFunc()
 	}
+}
+
+func TestLayered_ProfitGatePersistsAcrossSelectionReturns(t *testing.T) {
+	const sessionHash = "layered-profit-session"
+	groupID := int64(920500)
+	rate := 0.2
+	selected := Account{
+		ID:             9205001,
+		Platform:       PlatformOpenAI,
+		Type:           AccountTypeAPIKey,
+		Status:         StatusActive,
+		Schedulable:    true,
+		Concurrency:    1,
+		Priority:       1,
+		RateMultiplier: &rate,
+		GroupIDs:       []int64{groupID},
+		Extra:          map[string]any{"openai_apikey_responses_websockets_v2_enabled": true},
+	}
+
+	newService := func(cache *stubGatewayCache, concurrency stubConcurrencyCache, previous bool) *OpenAIGatewayService {
+		cfg := newOpenAIStickyEnabledTestConfig()
+		cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+		if previous {
+			cfg.Gateway.OpenAIWS.Enabled = true
+			cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+			cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+		}
+		svc := &OpenAIGatewayService{
+			accountRepo:        stubOpenAIAccountRepo{accounts: []Account{selected}},
+			cache:              cache,
+			cfg:                cfg,
+			concurrencyService: NewConcurrencyService(concurrency),
+		}
+		if previous {
+			svc.openaiWSStateStore = &openAIWSStateStoreSpy{responseAccounts: map[string]int64{"resp-layered-profit": selected.ID}}
+		}
+		return svc
+	}
+
+	profitContext := func(svc *OpenAIGatewayService) context.Context {
+		group := &Group{
+			ID:                   groupID,
+			Platform:             PlatformOpenAI,
+			Status:               StatusActive,
+			Hydrated:             true,
+			RateMultiplier:       1,
+			ProfitControlEnabled: true,
+		}
+		ctx := context.WithValue(context.Background(), ctxkey.Group, group)
+		ctx, _ = svc.WithOpenAIRequestPricingContext(ctx, &groupID)
+		return svc.withOpenAIProfitControlGate(ctx, &groupID)
+	}
+
+	t.Run("previous response keeps an existing session binding", func(t *testing.T) {
+		cache := &stubGatewayCache{sessionBindings: map[string]int64{"openai:" + sessionHash: 9205099}}
+		svc := newService(cache, stubConcurrencyCache{}, true)
+		t.Cleanup(svc.StopOpenAIAccountScheduler)
+
+		selection, _, err := svc.getOpenAIAccountScheduler().Select(profitContext(svc), OpenAIAccountScheduleRequest{
+			GroupID:            &groupID,
+			PreviousResponseID: "resp-layered-profit",
+			SessionHash:        sessionHash,
+			RequestedModel:     "gpt-5.1",
+		})
+		require.NoError(t, err)
+		require.True(t, selection.ProfitGateActive())
+		require.Equal(t, int64(9205099), cache.sessionBindings["openai:"+sessionHash])
+		selection.ReleaseFunc()
+	})
+
+	t.Run("session acquired carries the gate", func(t *testing.T) {
+		cache := &stubGatewayCache{sessionBindings: map[string]int64{"openai:" + sessionHash: selected.ID}}
+		svc := newService(cache, stubConcurrencyCache{}, false)
+		t.Cleanup(svc.StopOpenAIAccountScheduler)
+
+		selection, _, err := svc.getOpenAIAccountScheduler().Select(profitContext(svc), OpenAIAccountScheduleRequest{GroupID: &groupID, SessionHash: sessionHash})
+		require.NoError(t, err)
+		require.True(t, selection.ProfitGateActive())
+		require.True(t, selection.Acquired)
+		selection.ReleaseFunc()
+	})
+
+	t.Run("layered acquired carries the gate and keeps an existing session binding", func(t *testing.T) {
+		cache := &stubGatewayCache{sessionBindings: map[string]int64{"openai:" + sessionHash: 9205099}}
+		svc := newService(cache, stubConcurrencyCache{}, false)
+		t.Cleanup(svc.StopOpenAIAccountScheduler)
+
+		selection, _, err := svc.getOpenAIAccountScheduler().Select(profitContext(svc), OpenAIAccountScheduleRequest{GroupID: &groupID, SessionHash: sessionHash, StickyWeighted: true})
+		require.NoError(t, err)
+		require.True(t, selection.ProfitGateActive())
+		require.True(t, selection.Acquired)
+		require.Equal(t, int64(9205099), cache.sessionBindings["openai:"+sessionHash])
+		selection.ReleaseFunc()
+	})
+
+	t.Run("session and layered wait plans carry the gate", func(t *testing.T) {
+		for _, tt := range []struct {
+			name        string
+			sessionHash string
+			cache       *stubGatewayCache
+		}{
+			{name: "session", sessionHash: sessionHash, cache: &stubGatewayCache{sessionBindings: map[string]int64{"openai:" + sessionHash: selected.ID}}},
+			{name: "layered", cache: &stubGatewayCache{}},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				svc := newService(tt.cache, stubConcurrencyCache{acquireResults: map[int64]bool{selected.ID: false}}, false)
+				t.Cleanup(svc.StopOpenAIAccountScheduler)
+
+				selection, _, err := svc.getOpenAIAccountScheduler().Select(profitContext(svc), OpenAIAccountScheduleRequest{GroupID: &groupID, SessionHash: tt.sessionHash})
+				require.NoError(t, err)
+				require.True(t, selection.ProfitGateActive())
+				require.NotNil(t, selection.WaitPlan)
+			})
+		}
+	})
 }

@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -134,20 +133,6 @@ func TestGeminiStickyMainFlow_EnabledDigestFallbackWorksWithoutInitialSessionKey
 	require.Equal(t, int64(333), cache.sessionBindings[state.SelectionSessionKey])
 }
 
-func TestGeminiStickyMainFlow_EnabledNonStickyPathPreserved(t *testing.T) {
-	h := newGeminiStickyToggleHandler(t, true, nil, nil)
-
-	state := h.prepareGeminiStickySelection(context.Background(), geminiStickySelectionInput{
-		GroupID:    nil,
-		SessionKey: "gemini:plain-session",
-	})
-
-	require.Equal(t, "gemini:plain-session", state.SelectionSessionKey)
-	require.False(t, state.UseDigestFallback)
-	state.bindSelectedAccount = false
-	require.NoError(t, h.finalizeGeminiStickySelection(context.Background(), state, 444))
-}
-
 type geminiStickyGatewayCacheStub struct {
 	sessionBindings  map[string]int64
 	defaultAccountID int64
@@ -176,7 +161,7 @@ func (c *geminiStickyGatewayCacheStub) GetSessionAccountID(_ context.Context, gr
 	if c.defaultAccountID > 0 {
 		return c.defaultAccountID, nil
 	}
-	return 0, errors.New("not found")
+	return 0, service.ErrStickySessionNotFound
 }
 
 func (c *geminiStickyGatewayCacheStub) SetSessionAccountID(_ context.Context, groupID int64, sessionHash string, accountID int64, _ time.Duration) error {

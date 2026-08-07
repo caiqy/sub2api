@@ -36,6 +36,16 @@ type stickyFallbackAccountRepo struct {
 	groupIDs []int64
 }
 
+type profitAdmissionWaitConcurrencyCache struct {
+	openAIChatCompletionsConcurrencyCacheStub
+	accountAcquireCalls int
+}
+
+func (c *profitAdmissionWaitConcurrencyCache) AcquireAccountSlot(context.Context, int64, int, string) (bool, error) {
+	c.accountAcquireCalls++
+	return c.accountAcquireCalls > 1, nil
+}
+
 func (*stickyFallbackAccountRepo) GetByID(context.Context, int64) (*service.Account, error) {
 	return nil, errors.New("account not found")
 }
@@ -176,6 +186,73 @@ func TestGatewayHandlerMessages_ClaudeCodeFallbackSuccessBindsResolvedGeminiStic
 				require.Equal(t, 1, calls)
 				require.Equal(t, account.ID, cache.sessionBindings[sessionKey])
 			}
+		})
+	}
+}
+
+func TestGatewayHandlerMessages_ProfitAdmissionKeepsExistingStickyBinding(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for _, tt := range []struct {
+		name       string
+		platform   string
+		model      string
+		sessionKey string
+		body       string
+		response   string
+	}{
+		{
+			name:       "gemini",
+			platform:   service.PlatformGemini,
+			model:      "gemini-2.5-flash",
+			sessionKey: "gemini:profit-gemini",
+			body:       `{"model":"gemini-2.5-flash","max_tokens":16,"metadata":{"user_id":"{\"device_id\":\"client\",\"session_id\":\"profit-gemini\"}"},"messages":[{"role":"user","content":"hello"}]}`,
+			response:   `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}`,
+		},
+		{
+			name:       "anthropic",
+			platform:   service.PlatformAnthropic,
+			model:      "claude-sonnet-4-6",
+			sessionKey: "profit-anthropic",
+			body:       `{"model":"claude-sonnet-4-6","max_tokens":16,"metadata":{"user_id":"{\"device_id\":\"client\",\"session_id\":\"profit-anthropic\"}"},"messages":[{"role":"user","content":"hello"}]}`,
+			response:   `{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"text","text":"ok"}],"model":"claude-sonnet-4-6","usage":{"input_tokens":1,"output_tokens":1}}`,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			group := &service.Group{
+				ID:                   920600,
+				Platform:             tt.platform,
+				Status:               service.StatusActive,
+				Hydrated:             true,
+				RateMultiplier:       1,
+				SubscriptionType:     service.SubscriptionTypeStandard,
+				ProfitControlEnabled: true,
+			}
+			expensiveRate, cheapRate := 1.1, 0.2
+			expensive := &service.Account{ID: 9206001, Name: "sticky-expensive", Platform: tt.platform, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, RateMultiplier: &expensiveRate, AccountGroups: []service.AccountGroup{{GroupID: group.ID}}, GroupIDs: []int64{group.ID}, Credentials: map[string]any{"api_key": "expensive"}}
+			cheap := &service.Account{ID: 9206002, Name: "admitted-cheap", Platform: tt.platform, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, RateMultiplier: &cheapRate, AccountGroups: []service.AccountGroup{{GroupID: group.ID}}, GroupIDs: []int64{group.ID}, Credentials: map[string]any{"api_key": "cheap"}}
+			cache := &geminiStickyGatewayCacheStub{sessionBindings: map[string]int64{tt.sessionKey: expensive.ID}}
+			upstream := &openAIRetryTrackingHTTPUpstreamStub{responses: []*http.Response{{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(tt.response)),
+			}}}
+			concurrencyCache := &profitAdmissionWaitConcurrencyCache{}
+			env := newTerminalGatewayMessagesEnvWithGatewayCache(t, group, upstream, concurrencyCache, cache, expensive, cheap)
+			env.handler.cfg.Gateway.Scheduling.LoadBatchEnabled = true
+			env.handler.cfg.Gateway.Sticky.Gemini.Enabled = true
+			env.handler.cfg.Gateway.Sticky.Anthropic.Enabled = true
+
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			env.router().ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			require.Equal(t, []int64{cheap.ID}, upstream.accountIDs)
+			require.GreaterOrEqual(t, concurrencyCache.accountAcquireCalls, 2)
+			require.NotZero(t, cache.getCalls[tt.sessionKey])
+			require.Equal(t, expensive.ID, cache.sessionBindings[tt.sessionKey])
 		})
 	}
 }

@@ -481,6 +481,95 @@ func TestGeminiV1BetaModels_CLILargeBodyUsesStickyAccountWhileSpooling(t *testin
 	require.Empty(t, entries, "spools must be removed after the handler returns")
 }
 
+type geminiProfitWaitConcurrencyCache struct {
+	openAIChatCompletionsConcurrencyCacheStub
+	waitStarted chan struct{}
+	proceed     chan struct{}
+	acquires    int
+	releases    int
+}
+
+func (c *geminiProfitWaitConcurrencyCache) AcquireAccountSlot(context.Context, int64, int, string) (bool, error) {
+	c.acquires++
+	if c.acquires == 1 {
+		return false, nil
+	}
+	close(c.waitStarted)
+	<-c.proceed
+	return true, nil
+}
+
+func (c *geminiProfitWaitConcurrencyCache) ReleaseAccountSlot(context.Context, int64, string) error {
+	c.releases++
+	return nil
+}
+
+func TestGeminiV1BetaModels_WaitPlanProfitAdmissionDefersStickyWrite(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for _, tt := range []struct {
+		name       string
+		veto       bool
+		wantStatus int
+		wantWrites int
+	}{
+		{name: "terminal veto writes nothing", veto: true, wantStatus: http.StatusBadGateway},
+		{name: "terminal admission writes once", wantStatus: http.StatusOK, wantWrites: 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			group := &service.Group{
+				ID:                   920700,
+				Platform:             service.PlatformGemini,
+				Status:               service.StatusActive,
+				Hydrated:             true,
+				RateMultiplier:       1,
+				SubscriptionType:     service.SubscriptionTypeStandard,
+				ProfitControlEnabled: true,
+			}
+			rate := 0.2
+			account := &service.Account{ID: 9207001, Name: "gemini-profit", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, RateMultiplier: &rate, AccountGroups: []service.AccountGroup{{GroupID: group.ID}}, GroupIDs: []int64{group.ID}, Credentials: map[string]any{"api_key": "key"}}
+			cache := &geminiStickyGatewayCacheStub{}
+			concurrencyCache := &geminiProfitWaitConcurrencyCache{waitStarted: make(chan struct{}), proceed: make(chan struct{})}
+			upstream := &openAIChatCompletionsHTTPUpstreamStub{response: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}`)),
+			}}
+			env := newTerminalGatewayMessagesEnvWithGatewayCache(t, group, upstream, concurrencyCache, cache, account)
+			env.handler.cfg.Gateway.Scheduling.LoadBatchEnabled = true
+			env.handler.cfg.Gateway.Sticky.Gemini.Enabled = true
+			env.handler.cfg.Gateway.Sticky.Anthropic.Enabled = false
+
+			rec := httptest.NewRecorder()
+			done := make(chan struct{})
+			go func() {
+				req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash:generateContent", strings.NewReader(`{"contents":[{"role":"user","parts":[{"text":"hello"}]}],"metadata":{"user_id":"{\"device_id\":\"client\",\"session_id\":\"profit-gemini-wait\"}"}}`))
+				req.Header.Set("Content-Type", "application/json")
+				env.routerFor("/v1beta/models/*modelAction", env.handler.GeminiV1BetaModels).ServeHTTP(rec, req)
+				close(done)
+			}()
+
+			select {
+			case <-concurrencyCache.waitStarted:
+			case <-time.After(5 * time.Second):
+				t.Fatal("Gemini handler did not enter the wait plan")
+			}
+			if tt.veto {
+				rate = 1.1
+			}
+			close(concurrencyCache.proceed)
+			requireGeminiHandlerDone(t, done)
+
+			const sessionKey = "gemini:profit-gemini-wait"
+			require.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+			require.Equal(t, tt.wantWrites, cache.setCalls[sessionKey])
+			if tt.veto {
+				require.Equal(t, 1, concurrencyCache.releases)
+			}
+		})
+	}
+}
+
 func TestGeminiV1BetaModels_ModelPathAndContentAuditKeepGoogleErrors(t *testing.T) {
 	t.Run("model path", func(t *testing.T) {
 		model, action, err := parseGeminiModelAction("gemini-2.5-flash/streamGenerateContent")
