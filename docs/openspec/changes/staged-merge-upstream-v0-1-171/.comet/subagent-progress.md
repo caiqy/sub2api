@@ -7,7 +7,7 @@
 - Previous task: `Task 4` complete; implementation `038215720`, checkoff `b12b4d578`, thorough review `ses_0260b7ce5ffe6Y6sClsJ4DMHUp` APPROVED
 - Current task: `Task 5: 执行基线 Docker 条件门禁并封存阶段 0 证据`
 - OpenSpec mapping: `1.5 检查本机 Docker/Testcontainers；可用时运行基线 integration，不可用时记录环境证据、未验证契约和残余风险，且不使用远程服务器补跑`
-- Stage: `implementing`
+- Stage: `task-review`
 - Review/fix round: `0/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
 - Brief: `.superpowers/sdd/task-5-brief.md`
@@ -15,5 +15,9 @@
 - Task 4 evidence: focused Go `49 + 13 + 39 + 2`, frontend `67`, full `make test`, canonical Windows build, three generate passes, conflict/index/whitespace checks all PASS
 - Task 4 diagnostics: 600-second harness budget was insufficient; bare Windows build lacked the verified Bash shell; neither issue required source or Makefile changes
 - Task 4 reviewer Minor: historical report wording still describes the superseded bare-build brief; carry to final report cleanup
-- Task 5 implementation commit: pending
-- Status: Task 5 implementer dispatch pending
+- Task 5 implementer: `ses_02605244fffeNOUgpfIYONRFbD` returned DONE_WITH_CONCERNS
+- Task 5 implementation commit: `f349d6a26268901ed8e12a53b594caa02ad569ed`
+- Task 5 changed file: `docs/superpowers/reports/2026-08-06-staged-merge-upstream-v0-1-171-build.md`
+- Task 5 evidence: local `docker` command unavailable; fixed migration integration recorded `unverified`; `Assert-CleanGate` PASS
+- Task 5 risk signals: migration boundary and DONE_WITH_CONCERNS; no production diff
+- Status: thorough task reviewer pending
