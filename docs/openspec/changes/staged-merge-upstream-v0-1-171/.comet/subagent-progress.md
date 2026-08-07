@@ -4,34 +4,16 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Previous task: `Task 4` complete; implementation `038215720`, checkoff `b12b4d578`, thorough review `ses_0260b7ce5ffe6Y6sClsJ4DMHUp` APPROVED
-- Current task: `Task 5: 执行基线 Docker 条件门禁并封存阶段 0 证据`
-- OpenSpec mapping: `1.5 检查本机 Docker/Testcontainers；可用时运行基线 integration，不可用时记录环境证据、未验证契约和残余风险，且不使用远程服务器补跑`
+- Previous task: `Task 5` complete; evidence commits `f349d6a26`, `a5f20fdf2`, `45912d266`, `fe686e346`; checkoff `2f9f1a259`; user-authorized final review `ses_025bb84b8ffeA7SdGDek6Uv669` APPROVED
+- Current task: `Task 6: 创建纯净的 v0.1.170 merge 节点`
+- OpenSpec mapping: `2.1 使用 git merge --no-ff --no-commit v0.1.170，逐文件语义融合实际冲突并创建第二父为固定 tag SHA 的 merge commit；merge commit 不混入后续兼容修复`
 - Stage: `task-fix`
-- Review/fix round: `extra 3/3 (user-authorized)`
+- Review/fix round: `0/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
-- Brief: `.superpowers/sdd/task-5-brief.md`
-- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-5-report.md`
-- Task 4 evidence: focused Go `49 + 13 + 39 + 2`, frontend `67`, full `make test`, canonical Windows build, three generate passes, conflict/index/whitespace checks all PASS
-- Task 4 diagnostics: 600-second harness budget was insufficient; bare Windows build lacked the verified Bash shell; neither issue required source or Makefile changes
-- Task 4 reviewer Minor: historical report wording still describes the superseded bare-build brief; carry to final report cleanup
-- Task 5 implementer: `ses_02605244fffeNOUgpfIYONRFbD` returned DONE_WITH_CONCERNS
-- Task 5 implementation commit: `f349d6a26268901ed8e12a53b594caa02ad569ed`
-- Task 5 changed file: `docs/superpowers/reports/2026-08-06-staged-merge-upstream-v0-1-171-build.md`
-- Task 5 evidence: local `docker` command unavailable; fixed migration integration recorded `unverified`; `Assert-CleanGate` PASS
-- Task 5 risk signals: migration boundary and DONE_WITH_CONCERNS; no production diff
-- Task 5 reviewer: `ses_025fbb9ffffeINUOdkWs194jEV` REJECTED spec and quality
-- Open Important findings: matrix rows 3 and 5 overstate narrow tests as full-row protected; six manual rows lack actual structural conclusions; Task 4 focused commands/exits are incompletely summarized in ledger
-- Fix boundary: ledger/report evidence only; no source changes; rerun clean gate and request fresh re-review
-- First fix commit: `a5f20fdf2091fa6f312836116f625ad6ab256b96`; rows 3/5 downgraded, eight manual conclusions and focused command evidence added
-- Re-reviewer: `ses_025ef55f5ffeHfGBDxaNK3z41f` still REJECTED
-- Remaining Important: row 1 overstates pool-mode retry as protected though focused regex does not cover its tests
-- Remaining Minor: add exact source paths/symbols for M3/M7/M8 traceability
-- Final fix boundary: downgrade row 1 to manual, add actual M1 conclusion and source locations, update status counts, ledger/report only
-- Second fix commit: `45912d266`; M1 downgraded and matrix count updated to `protected=1/manual=9/unverified=1/gap=0`; clean gate PASS
-- Final re-reviewer: `ses_025dfdf50ffepngrgrjndZwIo2` REJECTED after round `2/2`
-- Remaining Important: five ledger `path:symbol` references are wrong or absent (`ResponsesWebSocket`, `StepUpSessionKey`, `AdvanceQuotaCycleWithReceipt`, frontend `adminAPI`, and absent current-source Codex version sync service)
-- Remaining Minor: durable Task 5 report must explicitly supersede old `protected=2/manual=8` with `protected=1/manual=9`
-- User decision: explicitly authorized one extra evidence-only fix/re-review round; no source changes or test reruns
-- Extra fix boundary: correct five `path:symbol` references, mark tag-only symbols honestly, supersede stale report summary, rerun clean gate
-- Status: user-authorized final evidence fix pending
+- Brief: `.superpowers/sdd/task-6-brief.md`
+- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-6-report.md`
+- Stage 0 result: `protected=1/manual=9/unverified=1/gap=0`; Docker migration is the only unverified contract
+- Stage 0 clean helper fix: `c33ddd835`; scoped ignored enumeration and clean gate PASS
+- Task 6 target: `v0.1.170@c043c24774228ba891ddf90d783aa6dc7d0855b5`
+- Task 6 implementation commit: pending
+- Status: Task 6 implementer dispatch pending
