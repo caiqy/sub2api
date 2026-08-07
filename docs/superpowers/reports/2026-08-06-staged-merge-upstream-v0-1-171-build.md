@@ -133,7 +133,7 @@ e3e033bb3 fix(payment): preserve UTF-8 in EasyPay errors
 
 - Task 3 执行 base：`e95ef3f021f5b1ffe6b4a351dc00ce87a710b1b7`。
 - 矩阵输入只使用下列两个 Git tag 区间的完整 changed-files；未以包级测试成功替代范围审查。
-- Task 5 已按阶段 0 当前证据关闭下列各行：`protected` 仅表示有精确命令证据，`manual` 仅表示必须执行的具名结构审查点，`unverified` 仅表示本机 Docker/Testcontainers 边界。
+- Task 5 已按阶段 0 当前证据关闭下列各行：`protected` 仅表示有精确命令证据；`manual` 表示已完成下文记录的当前 source base 结构复核，不能视为自动证明；`unverified` 仅表示本机 Docker/Testcontainers 边界。
 
 ### changed-files 命令与计数
 
@@ -605,15 +605,15 @@ frontend/src/views/auth/__tests__/WechatCallbackView.spec.ts
 | # | 行为契约 | 入口/调用链 | 关键文件 | 受影响 tag | 聚焦命令或人工审查点 | 阶段 0 状态 | 证据位置 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | advanced/layered scheduler、pool mode、DB recheck、WaitPlan fallback、同账号重试 | `OpenAIGatewayHandler` -> `OpenAIGatewayService` -> `OpenAIAccountScheduler.Select` -> sticky/session -> layered filter -> slot/`WaitPlan` | `backend/internal/service/openai_account_scheduler.go`、`backend/internal/service/openai_account_scheduler_layered.go`、`backend/internal/service/openai_gateway_scheduling.go`、`backend/internal/service/openai_account_scheduler_test.go` | `v0.1.170` | 人工审查：候选过滤、粘性绑定、槽位释放后 DB recheck 与重新选号 | `protected` | Task 4 的 `go test -count=1 ./internal/service -run '^(TestLayered_|TestOpenAISelectAccountWithLoadAwareness_|TestGatewayServiceRecordUsage_)'` exit 0；报告明确记录 DB recheck、`WaitPlan` 和 sticky 覆盖。 |
-| 2 | Grok/platform/session/previous-response sticky、privacy、image capability | scheduler/WS 入口 -> platform 归一化与 sticky lookup -> capability/privacy/transport 过滤 | `backend/internal/service/openai_account_scheduler_layered.go`、`backend/internal/service/openai_gateway_grok.go`、`backend/internal/service/openai_ws_forwarder_ingress.go` | `v0.1.170`、`v0.1.171` | 人工审查：跨轮绑定、privacy 和 image 条件不会被上游选择短路 | `manual` | 明确结构审查点：`selectBySessionHash` 与 WS 入口；Task 4 的 sticky 测试不是 privacy/image 条件的自动证明。 |
-| 3 | OpenAI HTTP/WS、turn ownership、最终 outbound model、failed usage、prompt-cache reuse、proxy circuit | HTTP `OpenAIGatewayHandler` 或 WS forwarder -> `OpenAIGatewayService` -> forward/usage billing -> usage worker | `backend/internal/handler/openai_gateway_handler.go`、`backend/internal/service/openai_ws_forwarder_ingress.go`、`backend/internal/service/openai_gateway_usage.go`、`backend/internal/service/gateway_usage_billing.go` | `v0.1.170`、`v0.1.171` | 人工审查：流式失败、WS 终止和切号均不重复计费 | `protected` | Task 4 的 service、handler 和 routes 精确集合均 exit 0；其中包含 `TestGatewayServiceRecordUsage_`、`TestOpenAIResponsesWebSocket_` 和所有 gateway POST 路由分类断言。 |
-| 4 | alpha-search、Responses fallback、PAT 401 副作用、WebSearchCalls、body handle | alpha-search handler/service -> upstream request builder -> matched `RequestBodyHandle` -> fallback/retry | `backend/internal/handler/openai_alpha_search.go`、`backend/internal/service/openai_alpha_search.go`、`backend/internal/service/request_body_handle.go` | `v0.1.170`、`v0.1.171` | 人工审查：fallback/retry 后 handle 可重放且最终释放 | `manual` | 明确结构审查点：`ForwardAlphaSearch`、`buildOpenAIAlphaSearchRequest` 和 `RequestBodyHandle` 的 fallback/retry 生命周期；Task 4 未将该完整契约伪装为自动证明。 |
-| 5 | 请求体 spooling/replay/cleanup、异步图片、对象存储、图片输入计费 | request-body coordinator -> Images handler -> `OpenAIGatewayService.ForwardImages` -> async `ImageTaskStore.Save/Get` -> `ImageStorage.Save` -> usage billing | `backend/internal/handler/request_body_coordinator.go`、`backend/internal/handler/openai_images.go`、`backend/internal/service/openai_images.go`、`backend/internal/service/image_task.go`、`backend/internal/repository/image_task_store.go`、`backend/internal/service/image_storage.go` | `v0.1.170` | 人工审查：body 不泄漏、不提前关闭，图片计费仅一次 | `protected` | Task 4 的 `TestOpenAIGatewayHandlerImages_MultipartReplayUsesMappedEffectiveBody` exit 0，强制一字节 spool 阈值并断言重放、映射 body 与空 spool 目录。 |
+| 2 | Grok/platform/session/previous-response sticky、privacy、image capability | scheduler/WS 入口 -> platform 归一化与 sticky lookup -> capability/privacy/transport 过滤 | `backend/internal/service/openai_account_scheduler_layered.go`、`backend/internal/service/openai_gateway_grok.go`、`backend/internal/service/openai_ws_forwarder_ingress.go` | `v0.1.170`、`v0.1.171` | 人工审查：跨轮绑定、privacy 和 image 条件不会被上游选择短路 | `manual` | 已完成 M2 结构复核：sticky 候选先分类和 DB recheck，才取槽位；Task 4 sticky 测试不自动证明 privacy/image 条件。 |
+| 3 | OpenAI HTTP/WS、turn ownership、最终 outbound model、failed usage、prompt-cache reuse、proxy circuit | HTTP `OpenAIGatewayHandler` 或 WS forwarder -> `OpenAIGatewayService` -> forward/usage billing -> usage worker | `backend/internal/handler/openai_gateway_handler.go`、`backend/internal/service/openai_ws_forwarder_ingress.go`、`backend/internal/service/openai_gateway_usage.go`、`backend/internal/service/gateway_usage_billing.go` | `v0.1.170`、`v0.1.171` | 人工审查：流式失败、WS 终止和切号均不重复计费 | `manual` | Task 4 仅自动覆盖 usage、Responses WebSocket 和路由分类子集；M3 已复核当前 HTTP/WS、session hash、outbound model 与 proxy circuit 链路，prompt-cache reuse/circuit 语义仍非精确自动证明。 |
+| 4 | alpha-search、Responses fallback、PAT 401 副作用、WebSearchCalls、body handle | alpha-search handler/service -> upstream request builder -> matched `RequestBodyHandle` -> fallback/retry | `backend/internal/handler/openai_alpha_search.go`、`backend/internal/service/openai_alpha_search.go`、`backend/internal/service/request_body_handle.go` | `v0.1.170`、`v0.1.171` | 人工审查：fallback/retry 后 handle 可重放且最终释放 | `manual` | 已完成 M4 结构复核：`AlphaSearch` 绑定 effective handle；`ForwardAlphaSearch` 通过 matched handle 建请求并在 owned 情况 cleanup；Task 4 未自动证明整条 fallback/PAT 链。 |
+| 5 | 请求体 spooling/replay/cleanup、异步图片、对象存储、图片输入计费 | request-body coordinator -> Images handler -> `OpenAIGatewayService.ForwardImages` -> async `ImageTaskStore.Save/Get` -> `ImageStorage.Save` -> usage billing | `backend/internal/handler/request_body_coordinator.go`、`backend/internal/handler/openai_images.go`、`backend/internal/service/openai_images.go`、`backend/internal/service/image_task.go`、`backend/internal/repository/image_task_store.go`、`backend/internal/service/image_storage.go` | `v0.1.170` | 人工审查：body 不泄漏、不提前关闭，图片计费仅一次 | `manual` | Task 4 的 multipart replay/spool-cleanup 测试仅保护该子契约；M5 已复核 handle 生命周期、任务 owner/TTL/Redis 存取和对象存储启用门，但没有把异步图片、对象存储或图片计费提升为自动证明。 |
 | 6 | 统一 prompt/security audit 与 Images | gateway/images handler -> request-body coordinator -> `runContentModerationLazy` -> prompt snapshot/coordinator -> legacy moderation -> `OpenAIGatewayService.ForwardImages` | `backend/internal/handler/content_moderation_helper.go`、`backend/internal/handler/request_body_coordinator.go`、`backend/internal/securityaudit/prompt_service.go`、`backend/internal/service/openai_images.go` | `v0.1.170`、`v0.1.171` | 人工审查：每请求最多一次 moderation/payload freeze；关闭态不构造大 payload；`ReleaseText` 前仍可审核 | `protected` | Task 4 的 `TestOpenAIImages_` 集合 exit 0；报告明确记录 audit、legacy-once、frozen payload、lazy evaluation、single freeze 和 text release ordering。 |
-| 7 | settings 热更新、repository scoped update、API Key auth cache、session binding/step-up | setting handler -> `SettingService` -> repository scoped update/callback；auth middleware -> `APIKeyService.GetByKey` -> L1/L2 auth cache；`SessionBindingContext` -> `WithSessionBinding` -> `enforceSessionBinding`；`TotpHandler.StepUp` -> `StepUpSessionKey` | `backend/internal/repository/setting_repo.go`、`backend/internal/repository/user_repo.go`、`backend/internal/service/api_key_service.go`、`backend/internal/server/middleware/session_binding.go`、`backend/internal/server/middleware/step_up.go`、`backend/internal/handler/totp_handler.go` | `v0.1.170`、`v0.1.171` | 人工审查：部分更新不清空本地字段，失效事件和 session/step-up 不遗漏 | `manual` | 明确结构审查点：scoped setting callback、L1/L2 auth cache、`enforceSessionBinding` 和 `StepUpSessionKey`；Task 4 的 frontend 设置测试不替代该安全链审查。 |
-| 8 | subscription quota reset、续期、退款/余额、receipt、tombstone、outbox | payment/refund handler -> `SubscriptionService` -> `UserSubscriptionRepository` -> transaction/receipt -> cache invalidation outbox | `backend/internal/service/subscription_service.go`、`backend/internal/service/payment_refund.go`、`backend/internal/repository/user_subscription_repo.go`、`backend/migrations/` | `v0.1.170`、`v0.1.171` | 人工审查：单窗口资格、事务锁、提交后 invalidation 与失败回滚 | `manual` | 明确结构审查点：`AdvanceQuotaCycleWithReceipt`、payment/refund transaction 和 outbox；Task 4 的 13 个 quota 单元测试仅自动保护 reset/tombstone/invalidation 子集。 |
-| 9 | 用户资源控制、分组复制/批量限额、account shadow、前端本地定制 | admin handler/service -> account/group repository；`AccountsView`/`GroupsView`/Settings/Usage/Subscription/Channels/mobile UI -> admin APIs | `backend/internal/handler/admin/account_handler.go`、`backend/internal/repository/group_repo.go`、`frontend/src/views/admin/AccountsView.vue`、`frontend/src/views/admin/GroupsView.vue`、`frontend/src/api/admin/accounts.ts` | `v0.1.170`、`v0.1.171` | 人工审查：变更页面保持本地入口和资源控制语义 | `manual` | 明确结构审查点：`AccountHandler`、`group_repo`、`AccountsView` 和 `GroupsView`；Task 4 的 67 个 frontend 测试未被夸大为该跨模块契约的全量自动证明。 |
-| 10 | Codex identity、动态版本、UA、过载重试 | HTTP/alpha-search `ForwardAlphaSearch`、passthrough `forwardOpenAIPassthrough`、WS 和 `newOpenAIAccountProbe` -> identity/version resolver -> upstream request/retry -> final account/model/error | `backend/internal/service/openai_alpha_search.go`、`backend/internal/service/openai_gateway_passthrough.go`、`backend/internal/service/openai_account_probe.go`、`backend/internal/service/openai_codex_identity.go`、`backend/internal/service/openai_codex_version_sync_service.go`、`backend/internal/pkg/openai/request.go` | `v0.1.170`、`v0.1.171` | 人工审查：模型列表、账号测试和 alpha-search 共用身份来源，重试保留最终语义 | `manual` | 明确结构审查点：`forwardOpenAIPassthrough`、`enforceCodexIdentityHeaders`、`newOpenAIAccountProbe` 和 alpha-search fallback；Task 4 未提供该组合的精确 PASS。 |
+| 7 | settings 热更新、repository scoped update、API Key auth cache、session binding/step-up | setting handler -> `SettingService` -> repository scoped update/callback；auth middleware -> `APIKeyService.GetByKey` -> L1/L2 auth cache；`SessionBindingContext` -> `WithSessionBinding` -> `enforceSessionBinding`；`TotpHandler.StepUp` -> `StepUpSessionKey` | `backend/internal/repository/setting_repo.go`、`backend/internal/repository/user_repo.go`、`backend/internal/service/api_key_service.go`、`backend/internal/server/middleware/session_binding.go`、`backend/internal/server/middleware/step_up.go`、`backend/internal/handler/totp_handler.go` | `v0.1.170`、`v0.1.171` | 人工审查：部分更新不清空本地字段，失效事件和 session/step-up 不遗漏 | `manual` | 已完成 M7 结构复核：omitted setting 不写回零值，写后刷新缓存；认证先查 L1/L2；binding mismatch 撤销会话并审计，step-up 以 session key fail-closed。 |
+| 8 | subscription quota reset、续期、退款/余额、receipt、tombstone、outbox | payment/refund handler -> `SubscriptionService` -> `UserSubscriptionRepository` -> transaction/receipt -> cache invalidation outbox | `backend/internal/service/subscription_service.go`、`backend/internal/service/payment_refund.go`、`backend/internal/repository/user_subscription_repo.go`、`backend/migrations/` | `v0.1.170`、`v0.1.171` | 人工审查：单窗口资格、事务锁、提交后 invalidation 与失败回滚 | `manual` | 已完成 M8 结构复核：receipt、`FOR UPDATE`、订阅更新在同一事务；仅 commit 后投递 invalidation，outbox 成功 tombstone/publish 后才二次投递或 ack。 |
+| 9 | 用户资源控制、分组复制/批量限额、account shadow、前端本地定制 | admin handler/service -> account/group repository；`AccountsView`/`GroupsView`/Settings/Usage/Subscription/Channels/mobile UI -> admin APIs | `backend/internal/handler/admin/account_handler.go`、`backend/internal/repository/group_repo.go`、`frontend/src/views/admin/AccountsView.vue`、`frontend/src/views/admin/GroupsView.vue`、`frontend/src/api/admin/accounts.ts` | `v0.1.170`、`v0.1.171` | 人工审查：变更页面保持本地入口和资源控制语义 | `manual` | 已完成 M9 结构复核：前端列表仍调用 admin API；handler 以幂等调用进入 `AdminService`；group 资源变更使用事务锁。未把 67 个 frontend 测试扩展为跨模块全量证明。 |
+| 10 | Codex identity、动态版本、UA、过载重试 | HTTP/alpha-search `ForwardAlphaSearch`、passthrough `forwardOpenAIPassthrough`、WS 和 `newOpenAIAccountProbe` -> identity/version resolver -> upstream request/retry -> final account/model/error | `backend/internal/service/openai_alpha_search.go`、`backend/internal/service/openai_gateway_passthrough.go`、`backend/internal/service/openai_account_probe.go`、`backend/internal/service/openai_codex_identity.go`、`backend/internal/service/openai_codex_version_sync_service.go`、`backend/internal/pkg/openai/request.go` | `v0.1.170`、`v0.1.171` | 人工审查：模型列表、账号测试和 alpha-search 共用身份来源，重试保留最终语义 | `manual` | 已完成 M10 结构复核：passthrough 每次从 handle 重读，发布 final upstream model 后关闭 body；Codex identity 成对收敛 UA/originator/version，probe 仅恢复符合条件的 OpenAI 账号。 |
 | 11 | Ent/Wire、Go/pnpm 依赖、CSP/deploy 配置、migrations | schema/provider/manifest source -> `make -C backend generate` -> Ent/Wire output；migration runner -> ordered filename/checksum；frontend manifest -> pnpm lock；`SecurityHeaders` -> CSP policy/nonce | `backend/ent/schema/`、`backend/cmd/server/wire.go`、`backend/cmd/server/wire_gen.go`、`backend/go.mod`、`backend/go.sum`、`frontend/package.json`、`frontend/pnpm-lock.yaml`、`backend/internal/server/middleware/security_headers.go`、`deploy/config.example.yaml`、`backend/migrations/` | `v0.1.170`、`v0.1.171` | 人工审查：source-driven generation、两轮无 diff、完整 migration filename/排序/checksum 和本机 integration | `unverified` | Task 4 的 refresh、stable 1、stable 2 generate 均 exit 0 且生成 diff 为空；仅完整 migration 空库/升级/幂等/checksum integration 因本机 Docker CLI 缺失而未验证。 |
 
 ### 冲突台账模板
@@ -631,7 +631,7 @@ frontend/src/views/auth/__tests__/WechatCallbackView.spec.ts
 
 - TDD 不适用。本 Task 只记录 Git 区间事实、能力审查入口和冲突台账模板，不包含生产代码或行为变更；未伪造 RED/GREEN。
 - 风险信号：两个 release 区间共 448 个 changed files，横跨 scheduler、gateway/body、audit/auth、subscription/migration、frontend 和生成物。
-- 顾虑：阶段 0 的状态已关闭为 4 个 `protected`、6 个 `manual` 和 1 个仅 Docker 边界的 `unverified`；后续 merge 阶段仍必须以对应的聚焦验证或结构审查更新，不能将 `manual` 推断为自动证明。
+- 顾虑：阶段 0 的状态已关闭为 2 个 `protected`、8 个 `manual` 和 1 个仅 Docker 边界的 `unverified`；后续 merge 阶段仍必须以对应的聚焦验证或结构审查更新，不能将 `manual` 推断为自动证明。
 
 ## Task 4 恢复：更新 immutable source base
 
@@ -647,7 +647,81 @@ frontend/src/views/auth/__tests__/WechatCallbackView.spec.ts
 
 - TDD 不适用。本任务只运行既有 integration 条件门禁并记录证据，不修改生产行为；未伪造 RED/GREEN。
 - Task 4 当前证据：`make test` exit 0；canonical Bash-shell `make VERSION=0.1.169.3 build` exit 0；`make -C backend generate` 的 refresh、stable 1、stable 2 均 exit 0，且每轮 `backend/ent` 与 `backend/cmd/server/wire_gen.go` diff 均为空；静态冲突检查 exit 0。
+
+### Task 4 聚焦命令的持久化转录
+
+以下均为 `task-4-report.md` 的已有结果，本 Task 未重跑：
+
+| 完整命令 | Exit | 测试发现/摘要 |
+| --- | ---: | --- |
+| `go test -count=1 ./internal/service -run '^(TestLayered_|TestOpenAISelectAccountWithLoadAwareness_|TestGatewayServiceRecordUsage_)'` | `0` | `ok github.com/Wei-Shaw/sub2api/internal/service 1.662s`；独立 `-list` 发现 `49` 个测试。 |
+| `go test -tags=unit -count=1 ./internal/service -run '^(TestCalculateQuotaCycleAdvance_.*|TestAdvanceQuotaCycle_.*|TestAdminResetQuota_(UsesCommittedResetVersionForCacheInvalidation|OuterTransactionInvalidatesAfterCommit)|TestCheckAndResetWindows_UsesCommittedResetVersionForCacheInvalidation)$'` | `0` | `ok github.com/Wei-Shaw/sub2api/internal/service 1.845s`；独立 `-list` 发现 `13` 个 quota 测试。 |
+| `go test -count=1 ./internal/handler -run '^(TestGatewayHandlerMessagesUsesEffectiveRouteSnapshot|TestOpenAIImages_|TestOpenAIResponsesWebSocket_)'` | `0` | `ok github.com/Wei-Shaw/sub2api/internal/handler 10.149s`；独立 `-list` 发现 `39` 个 handler 测试。 |
+| `go test -count=1 ./internal/server/routes -run '^(TestEveryGatewayPOSTRouteIsClassifiedForPromptAuditCoverage|TestResponsesWebSocketHasFirstAndSubsequentTurnPromptGates)$'` | `0` | `ok github.com/Wei-Shaw/sub2api/internal/server/routes 1.651s`；独立 `-list` 发现 `2` 个 routes 测试。 |
+| `pnpm --dir frontend exec vitest run src/utils/__tests__/subscriptionQuota.spec.ts src/views/admin/__tests__/SettingsView.spec.ts src/views/admin/__tests__/UsageView.spec.ts src/components/channels/__tests__/AvailableChannelsTable.spec.ts` | `0` | `4` files、`67` tests passed in `19.43s`（`15 + 30 + 16 + 6`）。 |
+| `go test -count=1 ./internal/handler -run '^TestOpenAIGatewayHandlerImages_MultipartReplayUsesMappedEffectiveBody$'` | `0` | `ok github.com/Wei-Shaw/sub2api/internal/handler 2.660s`；单个具名测试验证 mapped replay 与 forced-spool cleanup。 |
+
+### Task 5 Reviewer Evidence Repair
+
+- 结构复核 source base：`16c07d8064b0b4604e9f47ef782e7d29534402d3`；本次复核 HEAD `d3c010a67dbfcca411d8b255f25b2a66b9ab2744` 是其后代。相对该 source base 的 `backend`/`frontend` 差异只有既有 `backend/internal/handler/openai_images_controls_test.go`，没有本 Task 生产代码变更。
+
+#### M2：Grok/platform/session/previous-response sticky、privacy、image capability
+
+- 已复核：`selectBySessionHash` 与 `ResponsesWebSocket` 的首轮入口。
+- 调用链/不变量：sticky ID 经过 schedulable 获取、分类及 DB recheck 后才取槽位；失效时清 sticky 或置 `SkipStickyBind`，仅成功取槽位刷新 TTL，繁忙账号以真实 `Concurrency` 形成 `WaitPlan`。
+- 当前 source base 结论：跨轮 sticky 链路存在且先复核再占槽；privacy/image capability 的跨轮组合没有精确自动执行证据，因此保持 `manual`。
+- tag merge 后重新验证：previous-response 与 session 两类绑定，及 platform/privacy/image/transport 过滤不被任何快捷路径绕过。
+
+#### M3：OpenAI HTTP/WS、usage、prompt-cache reuse、proxy circuit
+
+- 已复核：`Responses`、`ResponsesWebSocket`、session hash、passthrough final model 和 proxy stream circuit。
+- 调用链/不变量：HTTP 在 route/model mapping 后固定 effective body；WS 校验首个 `response.create`、映射模型并用 defer 释放 turn 槽位；session hash 优先 metadata/cacheable content 后再回退内容摘要；proxy circuit 以 OpenAI proxy ID 有界、TTL 隔离，只在无可用账号且确有隔离时 fail-open 重选。
+- 当前 source base 结论：HTTP/WS 路由、body、槽位和 circuit 的结构链存在；Task 4 仅自动证明 usage、WS 和路由分类子集，未精确证明 prompt-cache reuse 或 circuit 语义，故整行必须是 `manual`。
+- tag merge 后重新验证：prompt-cache 命中/重绑、proxy trip/TTL/fail-open、最终 outbound model 与 failover/WS 终止下 failed usage 的一次性结算。
+
+#### M4：alpha-search、Responses fallback、PAT 401、WebSearchCalls、body handle
+
+- 已复核：`AlphaSearch`、`ForwardAlphaSearch`、`buildOpenAIAlphaSearchRequest` 和 `RequestBodyHandle`。
+- 调用链/不变量：handler 将 effective handle bind 到 context；服务复用匹配 handle，owned handle 由 defer cleanup；request 通过 `Open`/`GetBody` 重放，关闭 reader 后才删除 spool，删除失败安排有限重试；PAT 路径分流到 Responses WebSearch，单次 401 不按通用路径认定全局凭据失效。
+- 当前 source base 结论：fallback/replay/cleanup 与 PAT 分流的结构路径可追溯，但没有一条 Task 4 精确 PASS 覆盖整个组合，保持 `manual`。
+- tag merge 后重新验证：PAT 401 副作用、Responses fallback、WebSearchCalls 计费和 retry 后 handle 的重放/释放。
+
+#### M5：spooling/replay/cleanup、异步图片、对象存储、图片计费
+
+- 已复核：`requestBodyCoordinator`、`RequestBodyHandle`、`ImageTaskService`、Redis `ImageTaskStore` 和对象存储启用 wiring。
+- 调用链/不变量：coordinator 替换 effective handle 时清理旧 owned handle；spool reader 未关闭时只标记 cleanup，最后 reader 关闭后删除；任务 `Create` 以 owner 和 TTL 写 Redis，`Get` 对 owner/API key 不匹配返回 not found；对象存储未启用时 async task 整体禁用，避免写 Redis。
+- 当前 source base 结论：请求体、任务归属和存储启用门的结构明确；multipart replay/spool-cleanup 的单测没有覆盖 async task、对象存储或图片输入/输出计费，整行保持 `manual`。
+- tag merge 后重新验证：async 图片从 `ForwardImages` 到 uploader/store 的成功和失败路径，以及每次图片输入/输出只结算一次。
+
+#### M7：settings、auth cache、session binding、step-up
+
+- 已复核：`UpdateSettingsOmitting`/`SetMultiple`、`APIKeyService.GetByKey`、`SessionBindingContext`/`enforceSessionBinding`、`TotpHandler.StepUp`/`StepUpSessionKey`。
+- 调用链/不变量：omitted key 在写入前从 map 删除，部分更新从存储重建缓存并调用 update callback；认证先查 L1/L2 并以 singleflight 汇合；binding mismatch 撤销 session family、审计并 401；step-up 优先 session ID，未授权或检查失败均拒绝。
+- 当前 source base 结论：局部更新和安全门控的实际入口、失效与 fail-closed 路径均存在；跨实例 cache invalidation 与所有敏感路由组合没有完整自动证明，保持 `manual`。
+- tag merge 后重新验证：partial settings 不覆盖未携带字段、L1/L2 失效广播、session mismatch 和 step-up 路由门控。
+
+#### M8：subscription quota、receipt、tombstone、outbox
+
+- 已复核：`AdvanceQuotaCycleWithReceipt`、subscription locking repository 和 invalidation outbox worker。
+- 调用链/不变量：同一事务内先检查 receipt、`GetByIDForUpdate`、计算并更新订阅、写 receipt；仅 commit 成功后才 defer invalidation；outbox 先 tombstone 和 publish，成功后安排第二次安全投递或最终 ack，失败则 retry。
+- 当前 source base 结论：事务、receipt 和 post-commit invalidation 顺序由源码落实；Task 4 的 13 个 quota 测试只自动保护其中子集，支付/退款全链仍为 `manual`。
+- tag merge 后重新验证：续期、退款/余额回滚、单窗口资格、行锁和 outbox 重试/二次投递。
+
+#### M9：用户资源控制、分组复制/批量限额、account shadow、前端本地定制
+
+- 已复核：`AccountsView`、`GroupsView`、`AccountHandler`、`AdminService` 的 duplicate/batch/shadow 入口和 `groupRepository` 事务资源路径。
+- 调用链/不变量：前端列表与 duplicate 操作继续经 `adminAPI`；账户创建由 `executeAdminIdempotent` 进入 `AdminService`，仅新建结果调度探测；服务接口保留 batch limit、group duplicate 和 shadow 入口；group 删除先事务锁定并原子处理关联资源。
+- 当前 source base 结论：本地 UI 到 admin service 的入口及资源控制边界未丢失；67 个 frontend 测试不能证明全部 clone/batch/shadow 语义，保持 `manual`。
+- tag merge 后重新验证：复制后的账号绑定/优先级、批量限额和 shadow 资源归属，以及 Accounts/Groups 页面仍调用本地 API 语义。
+
+#### M10：Codex identity、动态版本、UA、过载重试
+
+- 已复核：`forwardOpenAIPassthrough`、`enforceCodexIdentityHeaders`、Codex manifest/probe 和 alpha-search 入口。
+- 调用链/不变量：passthrough 每次从 immutable handle 读 body，构造请求后发布 final upstream model，并关闭 request body；identity 将 UA/originator 配对，非官方或缺失身份回退默认 Codex CLI，过低 version 被提升；probe 只 rehydrate active、schedulable、probe-enabled 的 OpenAI 账号。
+- 当前 source base 结论：身份收敛、final model 发布、探活资格和重试入口可追溯；动态版本同步与所有 overload/retry 终态缺少组合级精确 PASS，保持 `manual`。
+- tag merge 后重新验证：models、probe、alpha-search 和 passthrough 使用同一身份/version 规则，并保留最终模型与错误语义。
+
+- 阶段 0 矩阵汇总：`protected=2`，`manual=8`，`unverified=1`（仅 Docker/Testcontainers migration 边界），`gap=0`。`gap=0` 仅因每个 `manual` 行已有上述实际结构复核结论，不表示获得自动保护。
 - 固定 `Invoke-MigrationUpgradeIntegration -Stage 'baseline'` 已运行。外层 PowerShell exit 0，返回 `Status=unverified`，原因为本机未解析到 `docker` 可执行文件；目标 Go test 未启动，未出现精确 PASS 或 SKIP。
 - helper 返回的 Docker preflight 路径：`C:/Users/caiqy/AppData/Local/Temp/sub2api-v0.1.171-baseline-docker-preflight.log`。后续 `Test-Path` 为 `False`：PowerShell 的命令解析错误未进入 helper 的 `2>&1` 管道，空管道未创建该文件。目标 test log `C:/Users/caiqy/AppData/Local/Temp/sub2api-v0.1.171-baseline-migration-upgrade.log` 同样不存在，因为 integration 未启动。
-- 阶段 0 矩阵汇总：`protected=4`，`manual=6`，`unverified=1`（仅 Docker/Testcontainers migration 边界），`gap=0`。
-- 风险信号：跨模块、并发和公共 API 为上游后续 merge 审查范围，当前无生产 diff；安全链保留为 matrix 行 7 的 `manual` 审查；migration 为唯一 `unverified`；结论 `DONE_WITH_CONCERNS`；本次受跟踪的 ledger diff 未超过 200 行。
+- 风险信号：跨模块、并发和公共 API 为上游后续 merge 审查范围；matrix 行 2-5、7-10 均为已复核但未自动证明的 `manual`；migration 为唯一 `unverified`；结论 `DONE_WITH_CONCERNS`；本次受跟踪的 ledger diff 未超过 200 行。
