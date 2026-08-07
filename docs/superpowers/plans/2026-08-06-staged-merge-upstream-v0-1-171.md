@@ -601,15 +601,24 @@ if ($forbiddenStaged.Count -ne 0) { throw "non-merge files staged: $($forbiddenS
 $upstream170Paths = @(git diff --name-only v0.1.169..v0.1.170)
 if ($LASTEXITCODE -ne 0) { throw 'failed to build v0.1.170 positive path allowlist' }
 $upstream170Set = [System.Collections.Generic.HashSet[string]]::new([string[]]$upstream170Paths)
+$compileAdaptationPaths = @(
+    'backend/internal/handler/openai_gateway_cyber_test.go',
+    'backend/internal/handler/openai_images_controls_test.go'
+)
 $unexpectedMergePaths = @($mergeStaged | Where-Object {
     -not $upstream170Set.Contains($_) -and
+    $_ -notin $compileAdaptationPaths -and
     $_ -ne 'backend/cmd/server/wire_gen.go' -and
     $_ -ne 'backend/go.sum' -and
     $_ -ne 'frontend/pnpm-lock.yaml' -and
     -not $_.StartsWith('backend/ent/')
 })
-if ($unexpectedMergePaths.Count -ne 0) { throw "v0.1.170 staged paths outside upstream/generated allowlist: $($unexpectedMergePaths -join ', ')" }
-$generated170Exceptions = @($mergeStaged | Where-Object { -not $upstream170Set.Contains($_) })
+if ($unexpectedMergePaths.Count -ne 0) { throw "v0.1.170 staged paths outside upstream/generated/compile-adaptation allowlist: $($unexpectedMergePaths -join ', ')" }
+$stagedCompileAdaptations = @($mergeStaged | Where-Object { $_ -in $compileAdaptationPaths })
+if ($stagedCompileAdaptations.Count -gt 0 -and 'backend/internal/service/content_moderation.go' -notin $mergeStaged) {
+    throw 'v0.1.170 content-moderation test signature adaptation lacks staged constructor source'
+}
+$generated170Exceptions = @($mergeStaged | Where-Object { -not $upstream170Set.Contains($_) -and $_ -notin $compileAdaptationPaths })
 if ('backend/go.sum' -in $generated170Exceptions -and 'backend/go.mod' -notin $mergeStaged) { throw 'v0.1.170 go.sum exception lacks staged go.mod source' }
 if ('frontend/pnpm-lock.yaml' -in $generated170Exceptions -and 'frontend/package.json' -notin $mergeStaged) { throw 'v0.1.170 lockfile exception lacks staged package.json source' }
 if (@($generated170Exceptions | Where-Object { $_.StartsWith('backend/ent/') }).Count -gt 0 -and
@@ -620,7 +629,7 @@ if ('backend/cmd/server/wire_gen.go' -in $generated170Exceptions -and
     @($mergeStaged | Where-Object { $_.StartsWith('backend/') -and $_.EndsWith('.go') -and $_ -ne 'backend/cmd/server/wire_gen.go' }).Count -eq 0) {
     throw 'v0.1.170 Wire output exception lacks staged Go source'
 }
-# 对完整 `git diff --cached` 做人工审查，并在冲突台账逐项记录所有 generated exception 的源映射；无法证明源驱动时停止。
+# 对完整 `git diff --cached` 做人工审查，并在冲突台账逐项记录 compile adaptation 和 generated exception 的源映射；无法证明源驱动时停止。
 Assert-AnnotatedTagMergeHead -TagName 'v0.1.170' -TagObject $tag170Object -PeeledCommit $tag170
 git diff --cached --check
 if ($LASTEXITCODE -ne 0) { throw 'v0.1.170 merge staging has whitespace errors' }
@@ -631,7 +640,7 @@ $merge170Parent2 = (git rev-parse "$merge170Commit^2").Trim()
 if ($merge170Parent2 -ne $tag170) { throw "v0.1.170 merge second parent mismatch: $merge170Parent2" }
 ```
 
-**提交边界：**`merge: upstream v0.1.170` 只含上游树、冲突融合、从已融合源生成的必要输出；没有 scheduler/usage、gateway/body、audit/auth、subscription/migration 或 frontend 的 merge 后回归修复。**检查点：**第二父精确是 `$tag170`，否则此阶段不闭合。
+**提交边界：**`merge: upstream v0.1.170` 只含上游树、冲突融合、从已融合源生成的必要输出，以及用户明确批准的两个 content-moderation 测试构造器签名适配；没有 scheduler/usage、gateway/body、audit/auth、subscription/migration 或 frontend 的 merge 后行为回归修复。**检查点：**第二父精确是 `$tag170`，否则此阶段不闭合。
 
 ### Task 7: 以 TDD 修复 v0.1.170 scheduler/usage 回归
 
