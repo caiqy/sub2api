@@ -10,7 +10,7 @@ review_mode: thorough
 isolation: branch
 verify_mode: null
 auto_transition: true
-base_ref: b576f73a22c4bf23d61727fc93950766a7e33929
+base_ref: 16c07d8064b0b4604e9f47ef782e7d29534402d3
 design_doc: docs/superpowers/specs/2026-08-06-staged-merge-upstream-v0-1-171-design.md
 plan: docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md
 verify_result: pending
