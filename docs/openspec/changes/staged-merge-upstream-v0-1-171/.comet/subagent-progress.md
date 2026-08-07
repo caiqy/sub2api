@@ -8,7 +8,7 @@
 - Current task: `Task 5: 执行基线 Docker 条件门禁并封存阶段 0 证据`
 - OpenSpec mapping: `1.5 检查本机 Docker/Testcontainers；可用时运行基线 integration，不可用时记录环境证据、未验证契约和残余风险，且不使用远程服务器补跑`
 - Stage: `task-fix`
-- Review/fix round: `1/2`
+- Review/fix round: `2/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
 - Brief: `.superpowers/sdd/task-5-brief.md`
 - Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-5-report.md`
@@ -23,4 +23,9 @@
 - Task 5 reviewer: `ses_025fbb9ffffeINUOdkWs194jEV` REJECTED spec and quality
 - Open Important findings: matrix rows 3 and 5 overstate narrow tests as full-row protected; six manual rows lack actual structural conclusions; Task 4 focused commands/exits are incompletely summarized in ledger
 - Fix boundary: ledger/report evidence only; no source changes; rerun clean gate and request fresh re-review
-- Status: first review-fix agent pending
+- First fix commit: `a5f20fdf2091fa6f312836116f625ad6ab256b96`; rows 3/5 downgraded, eight manual conclusions and focused command evidence added
+- Re-reviewer: `ses_025ef55f5ffeHfGBDxaNK3z41f` still REJECTED
+- Remaining Important: row 1 overstates pool-mode retry as protected though focused regex does not cover its tests
+- Remaining Minor: add exact source paths/symbols for M3/M7/M8 traceability
+- Final fix boundary: downgrade row 1 to manual, add actual M1 conclusion and source locations, update status counts, ledger/report only
+- Status: second and final review-fix agent pending
