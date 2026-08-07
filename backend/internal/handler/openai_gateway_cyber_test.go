@@ -254,7 +254,7 @@ func TestRecordCyberPolicyIfMarkedBillsBeforeBlockingModeration(t *testing.T) {
 		service.NewBillingService(cfg, nil), nil, &service.BillingCacheService{}, nil, &service.DeferredService{}, nil,
 	)
 	moderationRepo := &blockingCyberModerationRepo{started: make(chan struct{}, 1)}
-	moderation := service.NewContentModerationService(&blockingCyberModerationSettings{}, moderationRepo, nil, nil, nil, nil, nil)
+	moderation := service.NewContentModerationService(&blockingCyberModerationSettings{}, moderationRepo, nil, nil, nil, nil, nil, nil)
 	h := &OpenAIGatewayHandler{gatewayService: gateway, contentModerationService: moderation, usageRecordWorkerPool: pool}
 
 	c := newTestGinContext()

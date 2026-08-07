@@ -706,7 +706,7 @@ func TestOpenAIImages_ContentModerationUsesFrozenPayloadBeforeRelease(t *testing
 	moderation := service.NewContentModerationService(&openAIImagesModerationSettings{values: map[string]string{
 		service.SettingKeyRiskControlEnabled:      "true",
 		service.SettingKeyContentModerationConfig: string(rawCfg),
-	}}, repo, openAIImagesModerationHashCache{}, nil, nil, nil, nil)
+	}}, repo, openAIImagesModerationHashCache{}, nil, nil, nil, nil, nil)
 
 	group := &service.Group{ID: 952, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
 	account := &service.Account{ID: 953, Name: "oauth", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Credentials: map[string]any{"access_token": "token"}}
@@ -747,7 +747,7 @@ func TestOpenAIImages_UnifiedAuditRunsLegacyOnce(t *testing.T) {
 	moderation := service.NewContentModerationService(&openAIImagesModerationSettings{values: map[string]string{
 		service.SettingKeyRiskControlEnabled:      "true",
 		service.SettingKeyContentModerationConfig: string(rawCfg),
-	}}, &openAIImagesModerationRepo{}, openAIImagesModerationHashCache{}, nil, nil, nil, nil)
+	}}, &openAIImagesModerationRepo{}, openAIImagesModerationHashCache{}, nil, nil, nil, nil, nil)
 
 	group := &service.Group{ID: 956, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
 	account := &service.Account{ID: 957, Name: "api-key", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test"}}
@@ -842,7 +842,7 @@ func TestOpenAIImages_LegacyModerationDefersPayloadUntilRuntimeScope(t *testing.
 	moderation := service.NewContentModerationService(&openAIImagesModerationSettings{values: map[string]string{
 		service.SettingKeyRiskControlEnabled:      "true",
 		service.SettingKeyContentModerationConfig: string(rawCfg),
-	}}, &openAIImagesModerationRepo{}, openAIImagesModerationHashCache{}, nil, nil, nil, nil)
+	}}, &openAIImagesModerationRepo{}, openAIImagesModerationHashCache{}, nil, nil, nil, nil, nil)
 	group := &service.Group{ID: 964, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
 	account := &service.Account{ID: 965, Name: "api-key", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "sk-test"}}
 	upstream := &openAIImagesHandlerHTTPUpstream{resp: &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"created":1,"data":[{"b64_json":"aGVsbG8="}]}`))}}
@@ -896,7 +896,7 @@ func TestOpenAIImages_SecurityAuditFreezesPayloadAtMostOnce(t *testing.T) {
 	moderation := service.NewContentModerationService(&openAIImagesModerationSettings{values: map[string]string{
 		service.SettingKeyRiskControlEnabled:      "true",
 		service.SettingKeyContentModerationConfig: string(rawCfg),
-	}}, &openAIImagesModerationRepo{}, openAIImagesModerationHashCache{}, nil, nil, nil, nil)
+	}}, &openAIImagesModerationRepo{}, openAIImagesModerationHashCache{}, nil, nil, nil, nil, nil)
 	started := make(chan struct{})
 	releaseSignal := make(chan struct{})
 	var releaseOnce sync.Once

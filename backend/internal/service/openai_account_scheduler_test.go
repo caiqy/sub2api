@@ -212,6 +212,10 @@ func (r schedulerTestGroupRepo) GetByID(ctx context.Context, id int64) (*Group, 
 	return &cloned, nil
 }
 
+func (r schedulerTestGroupRepo) GetByIDLite(ctx context.Context, id int64) (*Group, error) {
+	return r.GetByID(ctx, id)
+}
+
 type schedulerChannelRepoStub struct {
 	channels       []Channel
 	groupPlatforms map[int64]string
@@ -388,7 +392,7 @@ func (c *schedulerTestGatewayCache) GetSessionAccountID(ctx context.Context, gro
 	if id, ok := c.sessionBindings[sessionHash]; ok {
 		return id, nil
 	}
-	return 0, errors.New("not found")
+	return 0, ErrStickySessionNotFound
 }
 
 func (c *schedulerTestGatewayCache) SetSessionAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) error {

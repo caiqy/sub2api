@@ -6,6 +6,7 @@ import { resolve } from 'node:path'
 
 const {
   createAccountMock,
+  probeUpstreamBillingMock,
   checkMixedChannelRiskMock,
   getSettingsMock,
   getWebSearchEmulationConfigMock,
@@ -13,6 +14,7 @@ const {
   showInfoMock
 } = vi.hoisted(() => ({
   createAccountMock: vi.fn(),
+  probeUpstreamBillingMock: vi.fn(),
   checkMixedChannelRiskMock: vi.fn(),
   getSettingsMock: vi.fn(),
   getWebSearchEmulationConfigMock: vi.fn(),
@@ -39,6 +41,7 @@ vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       create: createAccountMock,
+      probeUpstreamBilling: probeUpstreamBillingMock,
       checkMixedChannelRisk: checkMixedChannelRiskMock
     },
     settings: {
@@ -312,6 +315,8 @@ describe('CreateAccountModal', () => {
   beforeEach(() => {
     createAccountMock.mockReset()
     createAccountMock.mockResolvedValue({ id: 1 })
+    probeUpstreamBillingMock.mockReset()
+    probeUpstreamBillingMock.mockResolvedValue({})
     checkMixedChannelRiskMock.mockReset()
     checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
     getSettingsMock.mockReset()
@@ -592,6 +597,19 @@ describe('CreateAccountModal', () => {
         ]
       })
     }))
+  })
+
+  it('enables upstream billing probes for antigravity upstream accounts by default', async () => {
+    const wrapper = mountModal()
+
+    await switchToAntigravityUpstream(wrapper)
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledWith(expect.objectContaining({
+      upstream_billing_probe_enabled: true
+    }))
+    expect(probeUpstreamBillingMock).toHaveBeenCalledWith(1)
   })
 
   it('uses helper default base_url for create apikey fallback and antigravity upstream input', async () => {

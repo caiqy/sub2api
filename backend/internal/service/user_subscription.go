@@ -143,6 +143,54 @@ func (s *UserSubscription) NeedsMonthlyReset() bool {
 	return s.NeedsMonthlyResetAt(time.Now())
 }
 
+func (s *UserSubscription) canAutomaticallyResetDailyAt(now time.Time) bool {
+	_, ok := s.automaticWindowStartAt(s.DailyWindowStart, 24*time.Hour, now)
+	return !s.HasOneTimeDailyQuota() && ok
+}
+
+func (s *UserSubscription) canAutomaticallyResetWeeklyAt(now time.Time) bool {
+	_, ok := s.automaticWindowStartAt(s.WeeklyWindowStart, 7*24*time.Hour, now)
+	return ok
+}
+
+func (s *UserSubscription) canAutomaticallyResetMonthlyAt(now time.Time) bool {
+	_, ok := s.automaticWindowStartAt(s.MonthlyWindowStart, 30*24*time.Hour, now)
+	return ok
+}
+
+func (s *UserSubscription) automaticWindowStartAt(previous *time.Time, period time.Duration, now time.Time) (time.Time, bool) {
+	if previous == nil {
+		return time.Time{}, false
+	}
+
+	anchor := *previous
+	switch period {
+	case 24 * time.Hour:
+		if corrected := s.effectiveDailyWindowStart(); corrected != nil {
+			anchor = *corrected
+		}
+	case 7 * 24 * time.Hour:
+		if corrected := s.effectiveWeeklyWindowStart(); corrected != nil {
+			anchor = *corrected
+		}
+	case 30 * 24 * time.Hour:
+		if corrected := s.effectiveMonthlyWindowStart(); corrected != nil {
+			anchor = *corrected
+		}
+	}
+	next := anchor.Add(period)
+	if now.Before(next) || !next.Before(s.ExpiresAt) {
+		return time.Time{}, false
+	}
+
+	periods := now.Sub(anchor) / period
+	lastPeriodBeforeExpiry := (s.ExpiresAt.Sub(anchor) - 1) / period
+	if periods > lastPeriodBeforeExpiry {
+		periods = lastPeriodBeforeExpiry
+	}
+	return anchor.Add(periods * period), true
+}
+
 func (s *UserSubscription) NeedsMonthlyResetAt(now time.Time) bool {
 	ws := s.effectiveMonthlyWindowStart()
 	if ws == nil {
@@ -301,23 +349,22 @@ func (s *UserSubscription) CheckDailyLimit(group *Group, additionalCost float64)
 	if !group.HasDailyLimit() {
 		return true
 	}
-	// 使用 < 而非 <=，与缓存路径 (billing_cache_service) 的 >= 判定语义保持一致：
-	// usage >= limit → 拒绝，usage < limit → 放行
-	return s.DailyUsageUSD+additionalCost < *group.DailyLimitUSD
+	// Inclusive limit: a request that exactly reaches the configured limit is allowed.
+	return s.DailyUsageUSD+additionalCost <= *group.DailyLimitUSD
 }
 
 func (s *UserSubscription) CheckWeeklyLimit(group *Group, additionalCost float64) bool {
 	if !group.HasWeeklyLimit() {
 		return true
 	}
-	return s.WeeklyUsageUSD+additionalCost < *group.WeeklyLimitUSD
+	return s.WeeklyUsageUSD+additionalCost <= *group.WeeklyLimitUSD
 }
 
 func (s *UserSubscription) CheckMonthlyLimit(group *Group, additionalCost float64) bool {
 	if !group.HasMonthlyLimit() {
 		return true
 	}
-	return s.MonthlyUsageUSD+additionalCost < *group.MonthlyLimitUSD
+	return s.MonthlyUsageUSD+additionalCost <= *group.MonthlyLimitUSD
 }
 
 func (s *UserSubscription) CheckAllLimits(group *Group, additionalCost float64) (daily, weekly, monthly bool) {
