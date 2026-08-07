@@ -7,12 +7,16 @@
 - Previous task: `Task 6` complete; merge `98c7b0487`, evidence `db8f0a678`/`1042611de`, checkoff `43eae6f5c`, final review `ses_025209a6fffeaGxYNgxdc8BBCL` APPROVED
 - Current task: `Task 7: 以 TDD 修复 v0.1.170 scheduler/usage 回归`
 - OpenSpec mapping: `2.2 审查分组利润控制、账号倍率同步、槽位后二次复核和请求级定价时刻，与本地 advanced/layered scheduler、sticky、fallback/WaitPlan、DB recheck、usage billing 和倍率语义的交互；以失败测试驱动必要的最小兼容修复`
-- Stage: `implementing`
+- Stage: `task-review`
 - Review/fix round: `0/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
 - Brief: `.superpowers/sdd/task-7-brief.md`
 - Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-7-report.md`
 - Known RED handoff: inclusive `Check*Limit <=` may still be rejected by gateway `CheckBillingEligibility` using `usage >= limit`; add exact-limit allow / over-limit deny regression
 - Scope: scheduler/profit/usage only; Task 8 owns gateway-body/audit/subscription-window/frontend regressions
-- Task 7 implementation commit: pending
-- Status: Task 7 implementer dispatch pending
+- Task 7 implementer: `ses_02518ff05ffePGGV61RePjR6ej` DONE
+- Task 7 implementation commit: `6dd4f244d`
+- Changed files: `billing_cache_service.go`, `billing_cache_service_user_platform_quota_test.go`
+- TDD: daily/weekly/monthly exact-limit cases RED under `>=`; GREEN after minimal `>` boundary; scheduler/usage service and handler focused gates PASS
+- Risk signals: none reported; no public API, migration, security, or shared-state shape change
+- Status: thorough task reviewer pending
