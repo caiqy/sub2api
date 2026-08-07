@@ -793,6 +793,8 @@ func (p *openAIAccountProbe) sendProbeRequest(ctx context.Context, account *Acco
 		if chatgptAccountID := account.GetChatGPTAccountID(); chatgptAccountID != "" {
 			req.Header.Set("chatgpt-account-id", chatgptAccountID)
 		}
+		applyOpenAICodexProbeHeaders(req.Header)
+		enforceCodexIdentityHeadersWithUA(req.Header, p.service.codexIdentityOverrideUA(account))
 	}
 
 	proxyURL := ""

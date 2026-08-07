@@ -352,6 +352,56 @@ func TestFetchCodexModelsManifestDefaultClientVersion(t *testing.T) {
 	}
 }
 
+func TestFetchCodexModelsManifestClientVersionFallbackIsOAuthOnly(t *testing.T) {
+	SetCodexCanonicalUserAgentResolver(func() string {
+		return "codex_cli_rs/0.200.1" + codexCLIUserAgentSuffix
+	})
+	t.Cleanup(func() { SetCodexCanonicalUserAgentResolver(nil) })
+
+	tests := []struct {
+		name          string
+		oauth         bool
+		clientVersion string
+		want          string
+	}{
+		{name: "oauth empty", oauth: true, want: "0.200.1"},
+		{name: "oauth explicit", oauth: true, clientVersion: "0.144.0", want: "0.144.0"},
+		{name: "api key empty", want: ""},
+		{name: "api key explicit", clientVersion: "0.144.0", want: "0.144.0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.oauth {
+				var got string
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					got = r.URL.Query().Get("client_version")
+					_, _ = w.Write([]byte(`{"models":[]}`))
+				}))
+				defer server.Close()
+				original := chatgptCodexModelsURL
+				chatgptCodexModelsURL = server.URL
+				t.Cleanup(func() { chatgptCodexModelsURL = original })
+
+				_, err := (&OpenAIGatewayService{}).FetchCodexModelsManifest(context.Background(), newCodexModelsTestAccount(), tt.clientVersion, "")
+				require.NoError(t, err)
+				require.Equal(t, tt.want, got)
+				return
+			}
+
+			var got string
+			upstream := &codexModelsHTTPUpstreamStub{do: func(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+				got = req.URL.Query().Get("client_version")
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"models":[]}`))}, nil
+			}}
+			_, err := newCodexModelsAPIKeyTestService(upstream).FetchCodexModelsManifest(
+				context.Background(), newCodexModelsAPIKeyTestAccount("https://upstream.example/v1"), tt.clientVersion, "",
+			)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
 func TestFetchCodexModelsManifestDefaultIdentityFollowsCanonicalVersion(t *testing.T) {
 	SetCodexCanonicalUserAgentResolver(func() string {
 		return "codex_cli_rs/0.200.1" + codexCLIUserAgentSuffix

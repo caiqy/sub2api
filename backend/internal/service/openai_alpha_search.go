@@ -473,6 +473,9 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchRequest(ctx context.Context
 		req.Header.Set("Version", codexCLIVersion)
 	}
 	stripOpenAIAlphaSearchResponsesHeaders(req.Header)
+	if account.Type == AccountTypeOAuth {
+		enforceCodexIdentityHeadersWithUA(req.Header, s.codexIdentityOverrideUA(account))
+	}
 	return req, nil
 }
 

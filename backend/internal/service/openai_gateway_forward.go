@@ -1012,14 +1012,20 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					Detail:             upstreamDetail,
 				})
 
-				shouldDisable := s.handleFailoverSideEffects(ctx, resp, account, respBody, upstreamModel)
-				return nil, newOpenAIUpstreamFailoverError(
+				requestScopedTransient := isOpenAIUpstreamCapacityShedEvent(respBody)
+				shouldDisable := false
+				if !requestScopedTransient {
+					shouldDisable = s.handleFailoverSideEffects(ctx, resp, account, respBody, upstreamModel)
+				}
+				failoverErr := newOpenAIUpstreamFailoverError(
 					resp.StatusCode,
 					resp.Header,
 					respBody,
 					upstreamMsg,
-					!shouldDisable && account.IsPoolMode() && (account.IsPoolModeRetryableStatus(resp.StatusCode) || isOpenAITransientProcessingError(resp.StatusCode, upstreamMsg, respBody)),
+					requestScopedTransient || (!shouldDisable && account.IsPoolMode() && (account.IsPoolModeRetryableStatus(resp.StatusCode) || isOpenAITransientProcessingError(resp.StatusCode, upstreamMsg, respBody))),
 				)
+				failoverErr.RequestScopedTransient = requestScopedTransient
+				return nil, failoverErr
 			}
 			if requestBody == nil {
 				requestBody, readErr = attemptHandle.ReadAll()

@@ -79,7 +79,10 @@ func TestProbe_SendProbeRequest_OAuthUsesCustomUserAgentWhenConfigured(t *testin
 
 	result := probe.sendProbeRequest(context.Background(), account, "gpt-4o-mini", GatewayOpenAIWSSchedulerLayeredConfig{ProbeTimeoutSeconds: 1})
 	require.NoError(t, result.err)
-	require.Equal(t, "custom-probe-ua/1.0", upstream.lastReq.Header.Get("User-Agent"))
+	identity := resolveCodexOutboundIdentity(account.GetOpenAIUserAgent())
+	require.Equal(t, identity.userAgent, upstream.lastReq.Header.Get("User-Agent"))
+	require.Equal(t, identity.originator, upstream.lastReq.Header.Get("Originator"))
+	require.Equal(t, identity.version, upstream.lastReq.Header.Get("Version"))
 }
 
 func TestProbe_SendProbeRequest_APIKeyUsesResponsesURLBuilder(t *testing.T) {

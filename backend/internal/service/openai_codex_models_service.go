@@ -241,9 +241,6 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 	}
 
 	clientVersion = strings.TrimSpace(clientVersion)
-	if clientVersion == "" {
-		clientVersion = codexClientVersionFromUA(codexCanonicalUserAgent())
-	}
 
 	requestEndpoint := chatgptCodexModelsURL
 	authToken := ""
@@ -277,6 +274,9 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 		appendModelsPath = true
 	default:
 		return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_MODELS_ACCOUNT_TYPE_UNSUPPORTED", "account type %q cannot fetch the Codex models manifest", credAccount.Type)
+	}
+	if clientVersion == "" && credAccount.IsOpenAIOAuth() {
+		clientVersion = codexClientVersionFromUA(codexCanonicalUserAgent())
 	}
 
 	requestURL, err := buildCodexModelsManifestURL(requestEndpoint, appendModelsPath, clientVersion)

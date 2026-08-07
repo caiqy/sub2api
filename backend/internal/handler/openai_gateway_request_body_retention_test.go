@@ -46,6 +46,83 @@ func TestOpenAIGatewayHandler_ResponsesFinalHandleIncludesRequestLevelRewrites(t
 	require.Equal(t, service.HashUsageRequestPayload(upstreamBody), env.billingRepo.lastCmd.RequestPayloadHash, string(upstreamBody))
 }
 
+func TestOpenAIGatewayHandler_ResponsesHTTPCapacityShedRetriesSameAccountBeforeFailover(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		accountType string
+		statusCode  int
+		code        string
+		retryCount  int
+	}{
+		{"oauth overloaded 400", service.AccountTypeOAuth, http.StatusBadRequest, "server_is_overloaded", 3},
+		{"api key slow down 503", service.AccountTypeAPIKey, http.StatusServiceUnavailable, "slow_down", 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			credentials := map[string]any{
+				"api_key":                  "sk-test",
+				"pool_mode":                true,
+				"pool_mode_retry_count":    1,
+				"openai_responses_enabled": true,
+			}
+			if tt.accountType == service.AccountTypeOAuth {
+				credentials = map[string]any{
+					"access_token":       "oauth-token",
+					"chatgpt_account_id": "acct-test",
+				}
+			}
+			secondCredentials := make(map[string]any, len(credentials))
+			for key, value := range credentials {
+				secondCredentials[key] = value
+			}
+			if tt.accountType == service.AccountTypeOAuth {
+				secondCredentials["access_token"] = "oauth-token-second"
+				secondCredentials["chatgpt_account_id"] = "acct-second"
+			}
+			accounts := []*service.Account{
+				{ID: 71, Platform: service.PlatformOpenAI, Type: tt.accountType, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: credentials},
+				{ID: 72, Platform: service.PlatformOpenAI, Type: tt.accountType, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 2, Credentials: secondCredentials},
+			}
+			env := newOpenAIResponsesRetentionTestEnv(t, nil, nil, nil, nil, nil, accounts)
+			errorResponse := `{"error":{"code":"` + tt.code + `","message":"retry later"}}`
+			env.upstream.responses = make([]*http.Response, 0, tt.retryCount+2)
+			for range tt.retryCount + 1 {
+				env.upstream.responses = append(env.upstream.responses, &http.Response{
+					StatusCode: tt.statusCode,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(errorResponse)),
+				})
+			}
+			env.upstream.responses = append(env.upstream.responses, &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"id":"resp_retry","object":"response","status":"completed","model":"gpt-5.6","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)),
+			})
+
+			body := `{"model":"gpt-5.6","stream":false,"input":"retry"}`
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
+			env.router.ServeHTTP(recorder, request)
+
+			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+			wantAccountIDs := make([]int64, tt.retryCount+2)
+			for i := range tt.retryCount + 1 {
+				wantAccountIDs[i] = 71
+			}
+			wantAccountIDs[len(wantAccountIDs)-1] = 72
+			require.Equal(t, wantAccountIDs, env.upstream.accountIDs)
+			require.Len(t, env.upstream.requests, len(wantAccountIDs))
+			firstBody, err := io.ReadAll(env.upstream.requests[0].Body)
+			require.NoError(t, err)
+			for _, upstreamRequest := range env.upstream.requests[1:] {
+				forwarded, err := io.ReadAll(upstreamRequest.Body)
+				require.NoError(t, err)
+				require.JSONEq(t, string(firstBody), string(forwarded))
+			}
+		})
+	}
+}
+
 func TestOpenAIGatewayHandler_ResponsesSessionAndCyberKeysUseRawBody(t *testing.T) {
 	cache := &openAIResponsesRetentionGatewayCache{}
 	settings := service.NewSettingService(&openAIResponsesRetentionSettingRepo{}, &config.Config{})

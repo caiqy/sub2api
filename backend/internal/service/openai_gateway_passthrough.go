@@ -249,16 +249,25 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		// 透传模式默认保持原样代理；但 429/529 属于网关必须兜底的
 		// 上游容量类错误，应先触发多账号 failover 以维持基础 SLA。
 		shouldFailover := shouldFailoverOpenAIPassthroughResponse(resp.StatusCode)
+		errorBody := []byte(nil)
+		if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusServiceUnavailable {
+			errorBody = s.readUpstreamErrorBody(resp)
+			_ = resp.Body.Close()
+			resp.Body = io.NopCloser(bytes.NewReader(errorBody))
+			shouldFailover = shouldFailover || isOpenAIUpstreamCapacityShedEvent(errorBody)
+		}
 		if resp.StatusCode == http.StatusRequestEntityTooLarge {
-			errorBody := s.readUpstreamErrorBody(resp)
+			errorBody = s.readUpstreamErrorBody(resp)
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(errorBody))
 			shouldFailover = isOpenAIRequestBodyTooLargeError(resp.StatusCode, "", errorBody)
 		}
 		if resp.StatusCode >= http.StatusInternalServerError && resp.StatusCode != 529 {
-			shouldFailover = shouldFailover && account.Type == AccountTypeAPIKey
+			shouldFailover = shouldFailover && (account.Type == AccountTypeAPIKey || isOpenAIUpstreamCapacityShedEvent(errorBody))
 			if shouldFailover {
-				errorBody := s.readUpstreamErrorBody(resp)
+				if errorBody == nil {
+					errorBody = s.readUpstreamErrorBody(resp)
+				}
 				_ = resp.Body.Close()
 				resp.Body = io.NopCloser(bytes.NewReader(errorBody))
 				shouldFailover = !isOpenAIContextWindowError(extractUpstreamErrorMessage(errorBody), errorBody)
@@ -611,7 +620,11 @@ func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 	logOpenAIInstructionsRequiredDebug(ctx, c, account, resp.StatusCode, upstreamMsg, requestBody, body)
 	reqModel, _, _ := extractOpenAIRequestMetaFromBody(requestBody)
 	canonicalModel := canonicalOpenAIAccountSchedulingModel(account, reqModel)
-	shouldDisable := s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body, canonicalModel)
+	requestScopedTransient := isOpenAIUpstreamCapacityShedEvent(body)
+	shouldDisable := false
+	if !requestScopedTransient {
+		shouldDisable = s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body, canonicalModel)
+	}
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 		Platform:             account.Platform,
 		AccountID:            account.ID,
@@ -624,13 +637,15 @@ func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 		Detail:               upstreamDetail,
 		UpstreamResponseBody: upstreamDetail,
 	})
-	return newOpenAIUpstreamFailoverError(
+	failoverErr := newOpenAIUpstreamFailoverError(
 		resp.StatusCode,
 		resp.Header,
 		body,
 		upstreamMsg,
-		!shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
+		requestScopedTransient || (!shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode)),
 	)
+	failoverErr.RequestScopedTransient = requestScopedTransient
+	return failoverErr
 }
 
 func (s *OpenAIGatewayService) handleErrorResponsePassthrough(

@@ -475,3 +475,63 @@ func TestOpenAIGatewayService_Forward_ModelCapacityErrorTriggersFailoverAndSameA
 	require.Contains(t, string(failoverErr.ResponseBody), "Selected model is at capacity")
 	require.False(t, c.Writer.Written(), "service 层应返回 failover 错误给上层重试/换号，而不是直接向客户端写响应")
 }
+
+func TestOpenAIGatewayService_Forward_HTTPCapacityShedIsRequestScoped(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		accountType string
+		passthrough bool
+		statusCode  int
+		code        string
+	}{
+		{"oauth forward overloaded 400", AccountTypeOAuth, false, http.StatusBadRequest, "server_is_overloaded"},
+		{"api key forward slow down 503", AccountTypeAPIKey, false, http.StatusServiceUnavailable, "slow_down"},
+		{"oauth passthrough slow down 503", AccountTypeOAuth, true, http.StatusServiceUnavailable, "slow_down"},
+		{"api key passthrough overloaded 400", AccountTypeAPIKey, true, http.StatusBadRequest, "server_is_overloaded"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			body := []byte(`{"model":"gpt-5.6","stream":false,"input":"retry"}`)
+			upstream := &httpUpstreamRecorder{}
+			for range 2 {
+				upstream.responses = append(upstream.responses, &http.Response{
+					StatusCode: tt.statusCode,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"error":{"code":"` + tt.code + `","message":"retry later"}}`)),
+				})
+			}
+			cfg := &config.Config{}
+			svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+			svc.rateLimitService = NewRateLimitService(transientCooldownAccountRepo{}, nil, cfg, nil, nil)
+			account := &Account{
+				ID:          7001,
+				Platform:    PlatformOpenAI,
+				Type:        tt.accountType,
+				Concurrency: 1,
+				Credentials: map[string]any{"api_key": "sk-test"},
+				Extra:       map[string]any{"use_responses_api": true},
+			}
+			if tt.accountType == AccountTypeOAuth {
+				account.Credentials = map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "acct-test"}
+			}
+			if tt.passthrough {
+				account.Extra["openai_passthrough"] = true
+			}
+
+			for range 2 {
+				recorder := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(recorder)
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+				c.Request.Header.Set("Content-Type", "application/json")
+
+				_, err := svc.Forward(context.Background(), c, account, body)
+				var failoverErr *UpstreamFailoverError
+				require.ErrorAs(t, err, &failoverErr)
+				require.True(t, failoverErr.RetryableOnSameAccount)
+				require.True(t, failoverErr.RequestScopedTransient)
+			}
+
+			require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
+			require.False(t, svc.isOpenAIAccountModelRuntimeBlocked(account, "gpt-5.6"))
+		})
+	}
+}
