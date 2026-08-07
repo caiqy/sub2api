@@ -41,8 +41,8 @@ type RecordUsageInput struct {
 	APIKey             *APIKey
 	User               *User
 	Account            *Account
-	Subscription       *UserSubscription  // 可选：订阅信息
-	PricingAt          time.Time          // token 售价固定时刻；零值保持既有的记录时刻语义
+	Subscription       *UserSubscription // 可选：订阅信息
+	PricingAt          time.Time         // token 售价固定时刻；零值保持既有的记录时刻语义
 	DetailSnapshot     *UsageLogDetailSnapshot
 	InboundEndpoint    string             // 入站端点（客户端请求路径）
 	UpstreamEndpoint   string             // 上游端点（标准化后的上游路径）
@@ -604,8 +604,8 @@ type RecordUsageLongContextInput struct {
 	APIKey                *APIKey
 	User                  *User
 	Account               *Account
-	Subscription          *UserSubscription  // 可选：订阅信息
-	PricingAt             time.Time          // token 售价固定时刻；零值保持既有的记录时刻语义
+	Subscription          *UserSubscription // 可选：订阅信息
+	PricingAt             time.Time         // token 售价固定时刻；零值保持既有的记录时刻语义
 	DetailSnapshot        *UsageLogDetailSnapshot
 	InboundEndpoint       string             // 入站端点（客户端请求路径）
 	UpstreamEndpoint      string             // 上游端点（标准化后的上游路径）
