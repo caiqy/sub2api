@@ -7,8 +7,8 @@
 - Previous task: `Task 7` complete; implementations `6dd4f244d`/`872354880`/`2c17b1824`/`5a5329ad8`; final review `ses_024c20d5bffeK4Sp85JQ3IkatW` APPROVED spec and quality; fresh default/unit service/handler gates PASS
 - Current task: `Task 8: 审查 v0.1.170 gateway/body、audit/auth、subscription/migration 和 frontend 交互`
 - OpenSpec mapping: `2.3 审查 Anthropic 流式用量、OpenAI WS/流内错误、Responses 工具输出、内容审核代理/最新输入、订阅窗口和 settings 更新，与本地 request-body spooling、统一审计、quota reset/outbox 和前端定制的交互`
-- Stage: `task-review`
-- Review/fix round: `1/2`
+- Stage: `task-fix`
+- Review/fix round: `2/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
 - Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-171-task-8-brief.md`
 - Report: `.superpowers/sdd/staged-merge-upstream-v0-1-171-task-8-report.md`
@@ -29,4 +29,7 @@
 - Review-fix RED/GREEN: Anthropic partial stream wrote 2 usage records then exactly 1 with 10/1 tokens; pooled WS image read error returned nil then preserved `ImageCount=1` result with error
 - Expanded frontend evidence: BulkEditAccountModal, UpstreamBillingRateCell, AccountsView bulk edit, and PromptAuditView PASS; final expanded gate 9 files/169 tests PASS
 - Updated final gates: service PASS; tagged-unit subscription PASS; handler PASS plus exact-one unit regression PASS; `git diff --check` PASS
-- Status: Task 8 review-fix 1/2 complete; final fresh thorough review pending
+- Task 8 final reviewer: `ses_02490cc8bffeYlcxYrzvgHr8bg` REJECTED spec and quality on one test-only Important
+- Open Important finding: exact-one usage test stub mutates/reads `created` and `lastLog` without synchronization; production findings are resolved
+- Fix boundary: mutex-protected immutable record snapshots and snapshot-based assertions only; no production change; run exact test with `-race`
+- Status: Task 8 review-fix 2/2 in progress
