@@ -887,3 +887,14 @@ frontend/src/views/auth/__tests__/WechatCallbackView.spec.ts
 - 验证：`make generate` PASS；`go test ./cmd/server ./internal/handler ./internal/repository ./internal/service` PASS；subscription/locking、usage repo、cleanup、Alpha Search focused PASS；ModelDistributionChart 5 tests PASS；commit 前无 unmerged index、staged conflict marker 或 whitespace error。
 - fresh reviewer `ses_0228e93c7ffeHaJt3dBC7z3PwF` 最终结论：Task 11 spec `PASS`，pure merge quality `PASS`。
 - Task 13 RED handoff：上游原样遗漏 Aliyun `*.alicdn.com` custom-CSP enhancement；SettingsView 保存成功后未清空三个 Tencent secrets；补 suspended renewal 组合断言/契约注释并运行 tagged/admin/full frontend gates。这些不属于 Task 11 pure merge。
+
+## Task 12：v0.1.171 Codex、过载重试与 gateway/body TDD 闭合
+
+- 状态：`DONE`。实现提交为 `e9c262283`（`fix: preserve gateway body after v0.1.171`）、`938d00eb4`（`fix: complete v0.1.171 gateway contracts`）、`d5a52310d`（`fix: restore api key model list version fallback`）。三个提交仅包含 gateway/body production 与直接测试，未混入 Task 13 的 captcha/CSP/settings/frontend/subscription 路径。
+- Codex identity/version：OAuth model-list 空版本使用动态 canonical fallback，显式 query 保持调用方值，但 UA/originator/`Version` 仍由同一 identity finalizer 归一化；API-key/custom-upstream 空版本保持 baseline 固定 `openAICodexProbeVersion` query 与 `Version`，显式版本保持不变。普通 OAuth alpha-search 在所有版本赋值后执行 finalizer；layered scheduler probe 同样在最终出站前归一化，陈旧 account UA 不会恢复旧版本。
+- 过载与 failover：普通 HTTP forward/passthrough 的 `400/503` body code `server_is_overloaded`、`slow_down` 被标为 request-scoped transient。默认三次或配置 N 次同账号重试耗尽后才切号，不写 account/account-model cooldown；OAuth `400` 与 API-key `503` 行为测试同时验证切号前尝试次数及每次 body replay 一致。
+- body/usage/final outbound：直接测试覆盖 spool memory/file handle 在 retry/failover 中保持可重放且最终释放，读取后的 passthrough body 被重建供后续错误处理；failed usage 仅记录一次，WS 与 HTTP 路径保留最终 outbound account/model、sticky/failover 与终态错误语义。
+- TDD：首轮 model-list RED 证明空 OAuth 版本仍使用固定 probe version；review-fix 1/2 的 HTTP capacity、alpha-search、probe 和 model-list matrix 均先真实 RED 后 GREEN；review-fix 2/2 的 API-key empty case 先证明 query/`Version` 错误为空，再恢复固定 fallback 到 GREEN。未为已满足的 WS/body/usage 契约制造生产 diff。
+- fresh gates：`go test -count=1 ./internal/pkg/openai -run '^Test.*Codex.*'` PASS；`go test -count=1 ./internal/service -run '^(Test.*Codex.*|Test.*Capacity.*|Test.*AlphaSearch.*|TestOpenAI.*(Forward|Passthrough|WS).*)$'` PASS；`go test -count=1 ./internal/handler -run '^(Test.*Gateway.*(Body|Failover|Usage).*|TestOpenAI.*WebSocket.*)$'` PASS；最终 `go test -count=1 ./internal/service` PASS（`116.812s`）。
+- review：fresh reviewer `ses_0226e28cdffesrBs14KK5EWCp6` 首轮指出 HTTP overload、alpha-search、probe 与 API-key model-list 四个真实缺口；两轮 TDD 修复后最终 remaining findings `none`，spec `PASS`，quality `APPROVED`。
+- residual：本机 Docker CLI 不可用，migration integration 继续保持 `unverified`；Task 12 不涉及 migration，未使用远程服务器且未记录虚假 PASS。Task 13 handoff 保持为 Aliyun custom-CSP、Tencent secret clearing、suspended-renewal 组合契约及对应 backend/frontend gates。
