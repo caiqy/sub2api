@@ -324,6 +324,12 @@ func TestEnhanceCSPPolicy(t *testing.T) {
 		assert.Contains(t, config.DefaultCSPPolicy, "style-src 'self' 'unsafe-inline' https://*.captcha.gtimg.com")
 	})
 
+	t.Run("adds_aliyun_captcha_sdk_domain_for_custom_policy", func(t *testing.T) {
+		enhanced := enhanceCSPPolicy("default-src 'self'; script-src 'self' __CSP_NONCE__")
+
+		assert.Equal(t, 1, countDirectiveValue(enhanced, "script-src", "https://*.alicdn.com"))
+	})
+
 	t.Run("handles_policy_without_script_src", func(t *testing.T) {
 		policy := "default-src 'self'"
 		enhanced := enhanceCSPPolicy(policy)

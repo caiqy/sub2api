@@ -120,6 +120,8 @@ func TestVerifyCaptchaReadsProviderConfigurationOnce(t *testing.T) {
 	repo := &settingRepoStub{values: tencentCaptchaSettings()}
 	verifier := &tencentCaptchaVerifierStub{response: &TencentCaptchaVerifyResponse{CaptchaCode: 1}}
 	svc := newAuthServiceForCaptchaRepoTest(repo, false, &turnstileVerifierSpy{}, verifier)
+	repo.getMultipleCalls = 0
+	repo.getValueCalls = 0
 
 	err := svc.VerifyCaptcha(context.Background(), CaptchaProof{
 		TencentTicket:  "ticket",
