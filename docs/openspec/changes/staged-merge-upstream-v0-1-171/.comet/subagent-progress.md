@@ -7,7 +7,7 @@
 - Previous task: `Task 9` complete; implementations `7cea803e3`/`def1bf577`/`a2a3b2bc8`; final review `ses_0244eebc1ffeRZyeqaEQhW3R0t` APPROVED spec and quality; blobs/generation PASS, Docker integration unverified
 - Current task: `Task 10: 关闭 v0.1.170 阶段并记录证据`
 - OpenSpec mapping: `2.5 运行 v0.1.170 聚焦测试、本机 full 门禁及适用 integration，关闭能力矩阵 gap 并记录阶段证据`
-- Stage: `task-fix`
+- Stage: `blocked`
 - Review/fix round: `2/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
 - Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-171-task-10-brief.md`
@@ -25,4 +25,8 @@
 - Grok root cause: pool-mode retryable early return precedes quota snapshot and explicit 403 rule; 429 loses observability and configured 403 cooldown is skipped
 - Subscription root cause: monthly fixture lacks versioned reset interface; `automaticWindowStartAt` corrects struct fields instead of its supplied `previous` anchor
 - Fix boundary: exact Grok production file; subscription production helper plus monthly unit fixture; two capability commits, then restart all Task 10 gates
-- Status: Task 10 review-fix 2/2 in progress
+- Review-fix 2/2 Grok commit: `fb882192a`; exact and related Grok tests PASS
+- Subscription attempt: versioned fixture and supplied-previous correction make the original two RED tests PASS, but full monthly-window unit set exposes two new manual-anchor RED tests
+- Open semantic conflict: initial legacy midnight before `StartsAt` must correct to entitlement start, while later administrator-created midnight anchors must remain midnight; the current uncommitted helper change cannot distinguish them
+- Worktree: uncommitted `user_subscription.go` and `subscription_monthly_window_test.go` attempt retained for evidence; protected `.comet/current-change.json` remains untracked
+- Status: review/fix round cap 2/2 exhausted; user authorization required for an additional narrow round or rollback of the subscription attempt
