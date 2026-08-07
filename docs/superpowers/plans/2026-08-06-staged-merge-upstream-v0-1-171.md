@@ -648,7 +648,7 @@ if ($merge170Parent2 -ne $tag170) { throw "v0.1.170 merge second parent mismatch
 
 **映射 OpenSpec：**2.2
 
-**文件：**优先审查并按实际 RED 修改 `backend/internal/service/openai_profit_control*.go`、`backend/internal/service/gateway_profit_control*.go`、`backend/internal/service/gateway_request_pricing*.go`、`backend/internal/service/gateway_usage_billing.go`、`backend/internal/service/billing_cache_service*.go`、`backend/internal/handler/openai_profit_*_test.go`、`backend/internal/handler/openai_ws_turn_pricing_test.go`、`backend/internal/handler/failover_loop_profit_veto_test.go`、gateway billing eligibility 聚焦测试及同路径测试。允许 `backend/internal/handler/gemini_v1beta_handler_test.go` 仅补 `NewContentModerationService` 的末尾 `emailService=nil`，作为 handler unit 门禁的 compile-only prerequisite；不得在该文件吸收 Task 8 行为修复。
+**文件：**优先审查并按实际 RED 修改 `backend/internal/service/openai_profit_control*.go`、`backend/internal/service/gateway_profit_control*.go`、`backend/internal/service/gateway_request_pricing*.go`、`backend/internal/service/gateway_usage_billing.go`、`backend/internal/service/billing_cache_service*.go`、`backend/internal/service/openai_account_scheduler_layered*.go`、`backend/internal/handler/gateway_handler.go`、`backend/internal/handler/gemini_v1beta_handler.go`、`backend/internal/handler/gemini_sticky_toggle_test.go`、`backend/internal/handler/openai_profit_*_test.go`、`backend/internal/handler/openai_ws_turn_pricing_test.go`、`backend/internal/handler/failover_loop_profit_veto_test.go`、gateway billing eligibility 聚焦测试及同路径测试。`backend/internal/handler/gemini_v1beta_handler_test.go` 可保留 `NewContentModerationService` 的末尾 `emailService=nil` compile-only prerequisite，并可承载本 Task 的 Gemini WaitPlan/profit/sticky 回归；不得吸收 Task 8 行为修复。
 
 **步骤：**
 
@@ -657,10 +657,10 @@ if ($merge170Parent2 -ne $tag170) { throw "v0.1.170 merge second parent mismatch
 ```powershell
 Push-Location backend
 try {
-    Invoke-CheckedNative 'v0.1.170 scheduler/usage service tests' { go test -count=1 ./internal/service -run '^(Test.*Profit.*|Test.*Pricing.*|Test.*Layered.*|Test.*Sticky.*|Test.*WaitPlan.*|TestGatewayServiceRecordUsage.*)$' }
-    Invoke-CheckedNative 'v0.1.170 scheduler/usage unit service tests' { go test -tags=unit -count=1 ./internal/service -run '^(Test.*Profit.*|Test.*Pricing.*|Test.*Layered.*|Test.*Sticky.*|Test.*WaitPlan.*|TestGatewayServiceRecordUsage.*)$' }
-    Invoke-CheckedNative 'v0.1.170 scheduler/usage handler tests' { go test -count=1 ./internal/handler -run '^(Test.*Profit.*|TestOpenAI.*Pricing.*|TestGatewayHandler.*Sticky.*|Test.*Usage.*)$' }
-    Invoke-CheckedNative 'v0.1.170 scheduler/usage unit handler tests' { go test -tags=unit -count=1 ./internal/handler -run '^(Test.*Profit.*|TestOpenAI.*Pricing.*|TestGatewayHandler.*Sticky.*|Test.*Usage.*)$' }
+    Invoke-CheckedNative 'v0.1.170 scheduler/usage service tests' { go test -count=1 ./internal/service -run '^(Test.*Profit.*|Test.*Pricing.*|Test.*Layered.*|Test.*Sticky.*|Test.*WaitPlan.*|TestGatewayServiceRecordUsage.*|TestGatewayBillingEligibility.*)$' }
+    Invoke-CheckedNative 'v0.1.170 scheduler/usage unit service tests' { go test -tags=unit -count=1 ./internal/service -run '^(Test.*Profit.*|Test.*Pricing.*|Test.*Layered.*|Test.*Sticky.*|Test.*WaitPlan.*|TestGatewayServiceRecordUsage.*|TestGatewayBillingEligibility.*)$' }
+    Invoke-CheckedNative 'v0.1.170 scheduler/usage handler tests' { go test -count=1 ./internal/handler -run '^(Test.*Profit.*|TestOpenAI.*Pricing.*|TestGatewayHandler.*Sticky.*|Test.*Sticky.*|Test.*WaitPlan.*|Test.*Usage.*)$' }
+    Invoke-CheckedNative 'v0.1.170 scheduler/usage unit handler tests' { go test -tags=unit -count=1 ./internal/handler -run '^(Test.*Profit.*|TestOpenAI.*Pricing.*|TestGatewayHandler.*Sticky.*|Test.*Sticky.*|Test.*WaitPlan.*|Test.*Usage.*)$' }
 } finally {
     Pop-Location
 }
@@ -680,11 +680,17 @@ $schedulerUsagePaths = @(
     'backend/internal/service/gateway_profit_control.go',
     'backend/internal/service/gateway_request_pricing.go',
     'backend/internal/service/gateway_usage_billing.go',
+    'backend/internal/service/openai_account_scheduler_layered.go',
+    'backend/internal/service/openai_account_scheduler_layered_test.go',
+    'backend/internal/service/gateway_profit_control_v2_test.go',
     'backend/internal/service/billing_cache_service.go',
     'backend/internal/service/billing_cache_service_test.go',
     'backend/internal/service/openai_profit_control_test.go',
     'backend/internal/handler/openai_profit_slot_recheck_test.go',
     'backend/internal/handler/openai_ws_turn_pricing_test.go',
+    'backend/internal/handler/gateway_handler.go',
+    'backend/internal/handler/gemini_v1beta_handler.go',
+    'backend/internal/handler/gemini_sticky_toggle_test.go',
     'backend/internal/handler/gemini_v1beta_handler_test.go'
 )
 Commit-NamedPaths -Message 'fix: preserve scheduler and usage after v0.1.170' -Paths $schedulerUsagePaths

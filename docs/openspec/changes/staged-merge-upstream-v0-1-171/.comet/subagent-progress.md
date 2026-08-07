@@ -7,8 +7,8 @@
 - Previous task: `Task 6` complete; merge `98c7b0487`, evidence `db8f0a678`/`1042611de`, checkoff `43eae6f5c`, final review `ses_025209a6fffeaGxYNgxdc8BBCL` APPROVED
 - Current task: `Task 7: 以 TDD 修复 v0.1.170 scheduler/usage 回归`
 - OpenSpec mapping: `2.2 审查分组利润控制、账号倍率同步、槽位后二次复核和请求级定价时刻，与本地 advanced/layered scheduler、sticky、fallback/WaitPlan、DB recheck、usage billing 和倍率语义的交互；以失败测试驱动必要的最小兼容修复`
-- Stage: `task-review`
-- Review/fix round: `1/2`
+- Stage: `task-fix`
+- Review/fix round: `2/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
 - Brief: `.superpowers/sdd/task-7-brief.md`
 - Report: `.superpowers/sdd/task-7-report.md`
@@ -23,4 +23,7 @@
 - Task 7 reviewer: `ses_025099351ffeyLHUnIxDBHZbTj` REJECTED spec, APPROVED quality
 - Resolved Important findings: table-driven lifecycle uses positive settlement cost and equality/over-limit cache snapshots; default and `-tags=unit` focused gates both executed
 - Review-fix additions: sticky-veto regression routes all selection-time writes through profit-aware binding; handler unit gate received one compile-only final `emailService=nil` argument with no Task 8 behavior
-- Status: first Task 7 review-fix complete; fresh thorough review pending
+- Task 7 re-reviewer: `ses_024eaf5c6ffeYl7emeRvP6HAJ6` REJECTED spec and quality
+- Open Important findings: layered results omit the active profit gate and bind sticky during selection; two generic Gateway handler paths use overwrite-style binding after admission; Gemini WaitPlan binds before terminal veto and repeats the bind; Gateway after-admission binding defaults to Anthropic when no force platform is present
+- Verified disposition: all four findings reproduce in the current call paths and belong to Task 7; fix by reusing existing gate attachment and platform-aware after-admission paths. Atomic sticky CAS Minor is outside the current non-concurrent contract; record as residual only.
+- Status: second and final Task 7 review-fix in progress
