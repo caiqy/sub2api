@@ -4,20 +4,20 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Previous task: `Task 14` complete; ledger commits `5677e9559`, `c1ed6e286`; checkoff `33db728ae`; final reviewer `ses_022069653ffemP2j0kPg5mlX8n` PASS spec and APPROVED evidence quality
-- Current task: `Task 15: 一次更新最终 VERSION`
-- OpenSpec mapping: `4.1 两段闭合后将 backend/cmd/server/VERSION 一次更新为 0.1.171.1`
+- Previous task: `Task 15` complete; version commit `73df72483`; checkoff `440ba3fbc`; final reviewer `ses_021fc403dffen1qQEsm4ObHPAs` PASS spec and APPROVED scope quality
+- Current task: `Task 16: 在最终 source HEAD 重跑完整本机门禁`
+- OpenSpec mapping: `4.2 在最终 source HEAD 重跑能力 focused、make test/build、两轮 generate 与静态检查`
 - Stage: `ready`
 - Review/fix round: `0/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
 - Brief: pending
 - Report: pending
-- Scope: verify both tag ancestry and intermediate VERSION, change only backend/cmd/server/VERSION to `0.1.171.1`, then commit the single path
+- Scope: on final VERSION `0.1.171.1`, rerun all matrix focused commands, root make test/build, two stable generate passes and static conflict checks; create no evidence commit in this task
 - Environment: local Docker unavailable; migration integration remains `unverified` on skip; no remote execution
-- Hard boundary: do not create an intermediate `0.1.170.1` or modify any path besides backend/cmd/server/VERSION; ancestry or pre-version mismatch blocks the bump
-- Task 14 result: all non-Docker focused/full/build/generate/static gates passed; matrix `gap=0`; Docker-backed migration remains the sole `unverified` boundary.
+- Hard boundary: any non-Docker gate failure or generated diff keeps Task 16 unchecked and requires a TDD remediation in the original capability cluster; no product edit may hide unavailable Docker
+- Task 15 result: VERSION changed exactly once from `0.1.169.3` to `0.1.171.1`; both target tags are ancestors and the version commit changes one path.
 - User resolution retained: renewing an unexpired suspended subscription extends expiry, restores `active`, appends notes and preserves quota windows/usage.
-- Task 15 handoff: expected current VERSION is `0.1.169.3`; target is exactly `0.1.171.1`; both `v0.1.170` and `v0.1.171` must be HEAD ancestors.
+- Task 16 handoff: expected VERSION is exactly `0.1.171.1`; Task 14 focused/full command set is the minimum rerun surface, with final evidence deferred to Task 18.
 - Integration residual: Docker CLI unavailable; no remote execution and no false PASS.
 - Worktree: only protected `.comet/current-change.json` remains untracked after this checkpoint commit.
-- Status: ready for Task 15 version bump.
+- Status: ready for Task 16 final source gates.
