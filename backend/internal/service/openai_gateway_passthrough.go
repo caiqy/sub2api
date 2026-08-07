@@ -246,8 +246,8 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
-		// 透传模式默认保持原样代理；但 429/529 属于网关必须兜底的
-		// 上游容量类错误，应先触发多账号 failover 以维持基础 SLA。
+		// 透传模式默认保持原样代理；但网关 failover 范围包括 429/529
+		// 与 request-scoped capacity body codes，以维持基础 SLA。
 		shouldFailover := shouldFailoverOpenAIPassthroughResponse(resp.StatusCode)
 		errorBody := []byte(nil)
 		if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusServiceUnavailable {
@@ -837,9 +837,8 @@ func openAIStreamFailedEventErrorCode(payload []byte) string {
 	return code
 }
 
-// isOpenAIUpstreamCapacityShedEvent 判断流内 failed 事件是否为上游容量降载信号。
-// 上游在容量紧张时会把请求丢进降载路径：HTTP 200 之后立刻推 event: error
-// （code=server_is_overloaded / slow_down）并以 response.failed 收尾。
+// isOpenAIUpstreamCapacityShedEvent 判断流内 failed 事件或普通 HTTP error body
+// 是否为上游容量降载信号（code=server_is_overloaded / slow_down）。
 func isOpenAIUpstreamCapacityShedEvent(payload []byte) bool {
 	switch openAIStreamFailedEventErrorCode(payload) {
 	case "server_is_overloaded", "slow_down":

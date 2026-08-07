@@ -366,7 +366,7 @@ func TestFetchCodexModelsManifestClientVersionFallbackIsOAuthOnly(t *testing.T) 
 	}{
 		{name: "oauth empty", oauth: true, want: "0.200.1"},
 		{name: "oauth explicit", oauth: true, clientVersion: "0.144.0", want: "0.144.0"},
-		{name: "api key empty", want: ""},
+		{name: "api key empty", want: openAICodexProbeVersion},
 		{name: "api key explicit", clientVersion: "0.144.0", want: "0.144.0"},
 	}
 	for _, tt := range tests {
@@ -388,16 +388,17 @@ func TestFetchCodexModelsManifestClientVersionFallbackIsOAuthOnly(t *testing.T) 
 				return
 			}
 
-			var got string
+			var gotQuery, gotVersion string
 			upstream := &codexModelsHTTPUpstreamStub{do: func(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
-				got = req.URL.Query().Get("client_version")
+				gotQuery = req.URL.Query().Get("client_version")
+				gotVersion = req.Header.Get("Version")
 				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"models":[]}`))}, nil
 			}}
 			_, err := newCodexModelsAPIKeyTestService(upstream).FetchCodexModelsManifest(
 				context.Background(), newCodexModelsAPIKeyTestAccount("https://upstream.example/v1"), tt.clientVersion, "",
 			)
 			require.NoError(t, err)
-			require.Equal(t, tt.want, got)
+			require.Equal(t, []string{tt.want, tt.want}, []string{gotQuery, gotVersion})
 		})
 	}
 }

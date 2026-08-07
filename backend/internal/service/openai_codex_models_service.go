@@ -275,8 +275,12 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 	default:
 		return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_MODELS_ACCOUNT_TYPE_UNSUPPORTED", "account type %q cannot fetch the Codex models manifest", credAccount.Type)
 	}
-	if clientVersion == "" && credAccount.IsOpenAIOAuth() {
-		clientVersion = codexClientVersionFromUA(codexCanonicalUserAgent())
+	if clientVersion == "" {
+		if credAccount.IsOpenAIOAuth() {
+			clientVersion = codexClientVersionFromUA(codexCanonicalUserAgent())
+		} else {
+			clientVersion = openAICodexProbeVersion
+		}
 	}
 
 	requestURL, err := buildCodexModelsManifestURL(requestEndpoint, appendModelsPath, clientVersion)
