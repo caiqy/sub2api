@@ -10,7 +10,7 @@ canonical_spec: openspec
 
 本设计细化 `docs/openspec/changes/staged-merge-upstream-v0-1-171/` 中已确认的 proposal、delta spec、design 和 tasks。OpenSpec delta spec 是验收事实源，本文只定义实施结构、冲突策略、风险控制和测试方法。
 
-不可变 source base 为 `main@b576f73a2`，运行版本为 `0.1.169.3`。该基线已包含上游 `v0.1.169`、此前分段合并的兼容修复，以及其后的本地请求体内存驻留治理、alpha-search/composite 路由、可选 pprof 和相关回归加固。Build 期间可能先提交当前 change 的规划产物，因此实际 execution base MAY 是 source base 的 planning-only 后代；`b576f73a2` 必须是其祖先，两者之间只允许当前 change 规划产物，禁止应用源码差异。
+不可变 source base 为 `main@16c07d806`，运行版本为 `0.1.169.3`。该基线已包含上游 `v0.1.169`、此前分段合并的兼容修复、本地请求体内存驻留治理、alpha-search/composite 路由、可选 pprof、相关回归加固，以及独立完成并归档的 backend lint remediation。实际 execution base 可是 source base 的后代；`16c07d806` 必须是其祖先，两者之间只允许当前 change 产物和已审查的基线保护测试，不得包含未归属的生产行为差异。
 
 目标 tag 形成严格祖先链：
 
@@ -178,7 +178,7 @@ Codex identity 将 User-Agent/originator/version 统一到动态版本来源。�
 验证分两层：
 
 1. 始终执行非 Docker 的 migration 嵌入、排序/checksum、文件存在性和编译测试。
-2. 本机 Docker 可用时，执行 PostgreSQL 空库和从 `main@b576f73a2` migration 集升级的 integration。升级基线 FS 必须包含本地 191/192 与上游 passkey 191，但排除上游 group profit 192/193；随后应用完整 FS，验证新增 192/193、幂等和 checksum。
+2. 本机 Docker 可用时，执行 PostgreSQL 空库和从 `main@16c07d806` migration 集升级的 integration。升级基线 FS 必须包含本地 191/192 与上游 passkey 191，但排除上游 group profit 192/193；随后应用完整 FS，验证新增 192/193、幂等和 checksum。
 
 Implementation plan 应固定升级测试名称及 `--- PASS:` 匹配规则；命令 exit 0、package `ok`、`no tests to run` 或 `--- SKIP:` 不能单独作为目标 integration 通过证据。
 

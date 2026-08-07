@@ -632,3 +632,13 @@ frontend/src/views/auth/__tests__/WechatCallbackView.spec.ts
 - TDD 不适用。本 Task 只记录 Git 区间事实、能力审查入口和冲突台账模板，不包含生产代码或行为变更；未伪造 RED/GREEN。
 - 风险信号：两个 release 区间共 448 个 changed files，横跨 scheduler、gateway/body、audit/auth、subscription/migration、frontend 和生成物。
 - 顾虑：矩阵 11 行在阶段 0 均为 `gap`，后续阶段必须以对应的聚焦验证或人工审查证据更新，不能据此预判为 `protected`。
+
+## Task 4 恢复：更新 immutable source base
+
+- 原 source base `b576f73a22c4bf23d61727fc93950766a7e33929` 的 Task 4 lint 阻塞保留为历史证据，不改写原始结果。
+- 独立前置 change `restore-backend-lint-gate` 已完成、验证并归档到 `main@16c07d8064b0b4604e9f47ef782e7d29534402d3`。
+- 用户于 2026-08-07 明确确认用该 `main` 提交替代原 source base。
+- 新 immutable source base：`16c07d8064b0b4604e9f47ef782e7d29534402d3`。
+- 恢复时 execution base：`fd109296b5f41398350070dd8df826846d9adb1b`，即当前 change checkpoint 与新 `main` 的 merge commit。
+- `git merge-base --is-ancestor 16c07d8064b0b4604e9f47ef782e7d29534402d3 fd109296b5f41398350070dd8df826846d9adb1b` exit 0；相对新 source base 的 backend 差异仅为已提交并审查的 `backend/internal/handler/openai_images_controls_test.go` 基线保护断言，无未归属生产差异。
+- source 与 execution `VERSION` 均为 `0.1.169.3`。Task 4 必须在新基线上重新执行全部聚焦测试、修正后的 quota unit 集合、`make test`、`make build`、三轮 generate 稳定性和静态冲突检查；不得沿用旧阻塞前的通过结果替代重跑。

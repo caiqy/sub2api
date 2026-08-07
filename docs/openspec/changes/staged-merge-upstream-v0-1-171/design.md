@@ -1,7 +1,7 @@
 ## Context
 
 - 需求背景见 `proposal.md`，行为契约见 `specs/upstream-release-sync/spec.md`。
-- 当前固定基线为 `main@b576f73a2`，运行版本 `0.1.169.3`；目标 tag 为 `v0.1.170@c043c24774228ba891ddf90d783aa6dc7d0855b5` 和 `v0.1.171@f0e7a9c7a23a7d02fb159b62fa809621eb0475a6`，两者形成严格祖先链。
+- 当前固定基线为 lint remediation 归档后的 `main@16c07d806`，运行版本 `0.1.169.3`；目标 tag 为 `v0.1.170@c043c24774228ba891ddf90d783aa6dc7d0855b5` 和 `v0.1.171@f0e7a9c7a23a7d02fb159b62fa809621eb0475a6`，两者形成严格祖先链。
 - `v0.1.169..v0.1.170` 包含 62 commits / 242 files，`v0.1.170..v0.1.171` 包含 49 commits / 206 files；总计 392 个上游变更文件，其中 151 个与当前本地演进路径重叠。
 - 对当前 HEAD 与 `v0.1.170` 的只读 merge-tree 预测显示 28 个文本冲突，集中在生成代码、settings、gateway、scheduler、usage billing、subscription、account UI 和测试；实际冲突集合以 Build 隔离位置中的 merge 结果为准。
 - 本地主线已发布 `192_subscription_cache_invalidation_outbox.sql`；上游 `v0.1.170` 新增 `192_group_profit_control.sql` 和 `193_group_profit_control_auth_cache_invalidation.sql`。迁移执行器以完整文件名作为身份，三个文件必须共存。

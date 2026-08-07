@@ -1,7 +1,7 @@
 ---
 change: staged-merge-upstream-v0-1-171
 design-doc: docs/superpowers/specs/2026-08-06-staged-merge-upstream-v0-1-171-design.md
-base-ref: b576f73a22c4bf23d61727fc93950766a7e33929
+base-ref: 16c07d8064b0b4604e9f47ef782e7d29534402d3
 ---
 
 # 分段合并上游 v0.1.171 实施计划
@@ -16,7 +16,7 @@ base-ref: b576f73a22c4bf23d61727fc93950766a7e33929
 
 ## 全局约束
 
-- immutable source base 固定为 `b576f73a22c4bf23d61727fc93950766a7e33929`，其运行版本必须为 `0.1.169.3`。执行位置的 `$executionBase` 可是仅含当前 change 规划产物的后代；source base 必须是其祖先。
+- immutable source base 固定为 `16c07d8064b0b4604e9f47ef782e7d29534402d3`，其运行版本必须为 `0.1.169.3`。该提交是已归档 lint remediation 合入后的 `main`；执行位置的 `$executionBase` 可是仅含当前 change 产物和已审查基线保护测试的后代，source base 必须是其祖先。
 - 两段只能依次合入 `v0.1.170@c043c24774228ba891ddf90d783aa6dc7d0855b5`、`v0.1.171@f0e7a9c7a23a7d02fb159b62fa809621eb0475a6`。不合入 `v0.1.171` 之后的 `upstream/main` 提交，发现更高正式 tag 时停止并回到 OpenSpec 更新范围。
 - 每段唯一 merge 入口分别是 `git merge --no-ff --no-commit v0.1.170` 和 `git merge --no-ff --no-commit v0.1.171`。merge commit 只承载目标上游树和完成 merge 必需的冲突融合，第二父必须是该段固定 peeled SHA；后续语义修复不得混入 merge commit。
 - 中间阶段的 `backend/cmd/server/VERSION` 固定为 `0.1.169.3`；两段均闭合后才在一个提交中改为 `0.1.171.1`。
@@ -50,7 +50,7 @@ base-ref: b576f73a22c4bf23d61727fc93950766a7e33929
 以下 PowerShell 片段在每个 Task 的独立执行会话中重新运行。它们不创建分支/worktree，也不修改 Comet runtime state。
 
 ```powershell
-$sourceBase = 'b576f73a22c4bf23d61727fc93950766a7e33929'
+$sourceBase = '16c07d8064b0b4604e9f47ef782e7d29534402d3'
 $tag170 = 'c043c24774228ba891ddf90d783aa6dc7d0855b5'
 $tag171 = 'f0e7a9c7a23a7d02fb159b62fa809621eb0475a6'
 $layoutJson = @(comet classic root show 2>&1)
@@ -742,7 +742,7 @@ foreach ($entry in $requiredMigrationSources.GetEnumerator()) {
 - **升级库路径**：按完整 filename 排序运行 baseline FS、完整 FS、完整 FS；
 - **空库路径**：在全新数据库直接运行完整 FS、完整 FS。
 
-两条路径都断言每个 filename 的 checksum 与 `schema_migrations` 单行记录稳定，并对新增 migration 所创建的关系补 `to_regclass` 断言。同步更新测试中仍描述 `0.1.165.4` 或“唯一升级路径”的旧注释，使其准确描述 `main@b576f73a2` / `0.1.169.3` 本地 migration 集。
+两条路径都断言每个 filename 的 checksum 与 `schema_migrations` 单行记录稳定，并对新增 migration 所创建的关系补 `to_regclass` 断言。同步更新测试中仍描述 `0.1.165.4` 或“唯一升级路径”的旧注释，使其准确描述 `main@16c07d806` / `0.1.169.3` 本地 migration 集。
 
 测试结构固定保持下列顺序：
 
