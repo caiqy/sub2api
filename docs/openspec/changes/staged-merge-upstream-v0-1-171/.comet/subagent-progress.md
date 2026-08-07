@@ -7,7 +7,7 @@
 - Previous task: `Task 4` complete; implementation `038215720`, checkoff `b12b4d578`, thorough review `ses_0260b7ce5ffe6Y6sClsJ4DMHUp` APPROVED
 - Current task: `Task 5: 执行基线 Docker 条件门禁并封存阶段 0 证据`
 - OpenSpec mapping: `1.5 检查本机 Docker/Testcontainers；可用时运行基线 integration，不可用时记录环境证据、未验证契约和残余风险，且不使用远程服务器补跑`
-- Stage: `task-fix`
+- Stage: `blocked`
 - Review/fix round: `2/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
 - Brief: `.superpowers/sdd/task-5-brief.md`
@@ -28,4 +28,8 @@
 - Remaining Important: row 1 overstates pool-mode retry as protected though focused regex does not cover its tests
 - Remaining Minor: add exact source paths/symbols for M3/M7/M8 traceability
 - Final fix boundary: downgrade row 1 to manual, add actual M1 conclusion and source locations, update status counts, ledger/report only
-- Status: second and final review-fix agent pending
+- Second fix commit: `45912d266`; M1 downgraded and matrix count updated to `protected=1/manual=9/unverified=1/gap=0`; clean gate PASS
+- Final re-reviewer: `ses_025dfdf50ffepngrgrjndZwIo2` REJECTED after round `2/2`
+- Remaining Important: five ledger `path:symbol` references are wrong or absent (`ResponsesWebSocket`, `StepUpSessionKey`, `AdvanceQuotaCycleWithReceipt`, frontend `adminAPI`, and absent current-source Codex version sync service)
+- Remaining Minor: durable Task 5 report must explicitly supersede old `protected=2/manual=8` with `protected=1/manual=9`
+- Status: BLOCKED; thorough review-fix budget exhausted, user decision required before any additional fix round
