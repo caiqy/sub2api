@@ -775,7 +775,7 @@ foreach ($entry in $requiredMigrationSources.GetEnumerator()) {
 - **升级库路径**：按完整 filename 排序运行 baseline FS、完整 FS、完整 FS；
 - **空库路径**：在全新数据库直接运行完整 FS、完整 FS。
 
-两条路径都断言每个 filename 的 checksum 与 `schema_migrations` 单行记录稳定，并对新增 migration 所创建的关系补 `to_regclass` 断言。同步更新测试中仍描述 `0.1.165.4` 或“唯一升级路径”的旧注释，使其准确描述 `main@16c07d806` / `0.1.169.3` 本地 migration 集。
+两条路径都断言每个 filename 的 checksum 与 `schema_migrations` 单行记录稳定，并对新增 migration 所创建的关系补 `to_regclass` 断言。由于 profit 192 只给既有 `groups` 增列、193 只替换既有 trigger function，还必须在 baseline 后证明三个 profit 列及函数中的 profit 字段引用缺席，在两条 complete 路径中验证三个列的类型/nullability/default，并通过 `pg_get_functiondef` 验证函数引用全部三个字段。同步更新测试中仍描述 `0.1.165.4` 或“唯一升级路径”的旧注释，使其准确描述 `main@16c07d806` / `0.1.169.3` 本地 migration 集。
 
 测试结构固定保持下列顺序：
 

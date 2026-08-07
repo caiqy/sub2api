@@ -7,8 +7,8 @@
 - Previous task: `Task 8` complete; implementations `31555b6a1`/`0a66f7093`/`7e0193f19`/`85ac93e68`/`242aa3509`/`37da92567`; final review `ses_024795b9effe3HArQFeeIfbU8M` APPROVED spec and quality; canonical focused gates PASS
 - Current task: `Task 9: 固化 v0.1.170 migration identity 并按源生成 Ent/Wire`
 - OpenSpec mapping: `2.4 保留上游 192/193 profit migrations 与本地 192 outbox，按完整 filename 验证排序/checksum，并从 schema/provider 源验证 Ent/Wire 稳定`
-- Stage: `task-review`
-- Review/fix round: `0/2`
+- Stage: `task-fix`
+- Review/fix round: `1/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
 - Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-171-task-9-brief.md`
 - Report: `.superpowers/sdd/staged-merge-upstream-v0-1-171-task-9-report.md`
@@ -20,4 +20,7 @@
 - Blob identity: all five authoritative source and HEAD blob OIDs match
 - Integration: exact package command exit 0 but target did not execute because Docker harness exited before `m.Run()`; result remains `unverified`
 - Generation: three consecutive `make -C backend generate` rounds PASS with no Ent/Wire diff
-- Status: Task 9 implementation review-ready; fresh thorough review pending
+- Task 9 reviewer: `ses_024620589ffexwR3qIkK5u7XHZ` REJECTED spec and quality
+- Open Important finding: `to_regclass(groups/auth_cache_invalidation_outbox)` cannot prove profit 192 columns or 193 function replacement because both relations predate these migrations
+- Fix boundary: baseline absence plus complete column metadata and `pg_get_functiondef` assertions in the integration test only; no migration/runner change
+- Status: Task 9 review-fix 1/2 in progress
