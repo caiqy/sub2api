@@ -4,20 +4,20 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Previous task: `Task 11` complete; merge `cca37e01e`, ledger `b450a5ce5`, checkoff `eedfc336b`; final reviewer `ses_0228e93c7ffeHaJt3dBC7z3PwF` PASS spec and pure-merge quality
-- Current task: `Task 12: 以 TDD 修复 v0.1.171 Codex、过载重试和 gateway/body 回归`
-- OpenSpec mapping: `3.2 审查 Codex identity/version、账号 UA、过载有界重试与本地 HTTP/WS/alpha-search/body/sticky/failover 交互`
+- Previous task: `Task 12` complete; capability commits `e9c262283`, `938d00eb4`, `d5a52310d`; ledger `783c8e9a7`; checkoff `45393d3ed`; final reviewer `ses_0226e28cdffesrBs14KK5EWCp6` PASS spec and APPROVED quality
+- Current task: `Task 13: 以 TDD 修复 v0.1.171 audit/auth、subscription/migration 和 frontend 回归`
+- OpenSpec mapping: `3.3 审查 captcha/auth/settings/CSP、refund/usage、subscription、reasoning、WS lease、prompt audit 与 frontend 交互`
 - Stage: `ready`
 - Review/fix round: `0/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
 - Brief: pending
 - Report: pending
-- Scope: run Codex/gateway/body focused tests, add missing behavior tests, fix only real RED, review and commit one gateway/body capability cluster
+- Scope: run backend auth/refund/reasoning, handler, middleware CSP and focused frontend tests; add missing behavior tests; fix only real RED in separate audit/auth, subscription/migration and frontend clusters
 - Environment: local Docker unavailable; migration integration remains `unverified` on skip; no remote execution
-- Hard boundary: any unexplained RED, gap, generated diff, conflict artifact, or falsely recorded integration PASS blocks v0.1.171 merge
-- Task 11 identity: merge parents `5f505520d` / `f0e7a9c7a`; `VERSION=0.1.169.3`; 20 conflicts and two compatibility paths audited in build ledger.
+- Hard boundary: provider/auth, monetary/usage, subscription transaction, WS/prompt-audit or frontend behavior conflicts require user decision; any unexplained RED, generated diff or false integration PASS blocks Task 14
+- Task 12 result: Codex identity is canonical across model-list/alpha-search/probe; HTTP capacity retries are request-scoped, bounded and no-cooldown; body replay/release and final usage/account/model contracts have direct tests.
 - User resolution retained: renewing an unexpired suspended subscription extends expiry, restores `active`, appends notes and preserves quota windows/usage.
 - Task 13 handoff: Aliyun custom-CSP enhancement, Tencent secret clearing, suspended-renewal composition/comment and tagged/admin/full frontend gates; these do not belong in Task 12 gateway/body scope.
 - Integration residual: Docker CLI unavailable; no remote execution and no false PASS.
 - Worktree: only protected `.comet/current-change.json` remains untracked after this checkpoint commit.
-- Status: ready for Task 12 brief and TDD implementation.
+- Status: ready for Task 13 brief and TDD implementation.
