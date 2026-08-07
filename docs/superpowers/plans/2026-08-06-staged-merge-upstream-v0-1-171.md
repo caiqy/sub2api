@@ -717,7 +717,7 @@ Commit-NamedPaths -Message 'fix: preserve scheduler and usage after v0.1.170' -P
 Push-Location backend
 try {
     Invoke-CheckedNative 'v0.1.170 gateway/audit/subscription service tests' { go test -count=1 ./internal/service -run '^(TestGateway.*PartialUsage.*|TestOpenAI.*(WS|WebSocket).*|Test.*Anthropic.*|Test.*ContentModeration.*|Test.*Subscription.*|Test.*Setting.*|Test.*RequestBody.*)$' }
-    Invoke-CheckedNative 'v0.1.170 subscription unit contract tests' { go test -tags=unit -count=1 ./internal/service -run '^(TestDelayedFirstUseAnchorsMonthlyWindowAtActivation|TestAdminResetQuota_.*)$' }
+    Invoke-CheckedNative 'v0.1.170 subscription unit contract tests' { go test -tags=unit -count=1 ./internal/service -run '^(TestDelayedFirstUseAnchorsMonthlyWindowAtStartsAt|TestAdminResetQuota_.*)$' }
     Invoke-CheckedNative 'v0.1.170 gateway/body handler tests' { go test -count=1 ./internal/handler -run '^(TestOpenAI.*(WS|WebSocket|Images|Responses).*|TestGatewayHandler.*(Usage|Body|Settings).*)$' }
 } finally {
     Pop-Location
