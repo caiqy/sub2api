@@ -953,3 +953,79 @@ frontend/src/views/auth/__tests__/WechatCallbackView.spec.ts
 | 7 | dependency/generation/migration | source -> Ent/Wire generation and manifests; migration runner -> filename/checksum/upgrade integration；两轮生成零 diff、build/static PASS；Docker-only migration execution未验证。 | `unverified` |
 
 最终汇总：`protected=4`、`manual=2`、`unverified=1`、`gap=0`。`unverified` 仅限 Docker/Testcontainers migration 边界；所有非 Docker Task 14 gates 均按各自预期 exit semantics 通过，tracked conflict-marker no-match scan 的预期结果为 exit `1`。
+
+## Task 16-18: Final Gate, Topology, And Capability Review
+
+### Final Provenance
+
+| Item | Value | Result |
+| --- | --- | --- |
+| Immutable source base | `16c07d8064b0b4604e9f47ef782e7d29534402d3` | Ancestor of execution base and reporting HEAD; source VERSION was `0.1.169.3`. |
+| Execution base | `fd109296b5f41398350070dd8df826846d9adb1b` | Ancestor of reporting HEAD; checkpoint merge with the immutable source base. |
+| Tested source HEAD | `73df7248383b9f534df64956efe3c0d321f0e3bc` | Task 16 source gate, the one-file `chore: bump version to 0.1.171.1` commit. |
+| Reporting HEAD | `436ebf66676aabee02e44a974e76cbb671b4e163` | Rebound by `git rev-parse HEAD`; VERSION is `0.1.171.1`. |
+| Post-test history | `440ba3f`, `7175134`, `5149a93`, `b182aab`, `75c234c`, `436ebf6` | Only plan/OpenSpec checkoffs and Comet checkpoint progress. `git diff --name-only 73df724..HEAD` contains only the plan, OpenSpec tasks, and `.comet/subagent-progress.md`; no product, test, VERSION, or generated file changed after Task 16. |
+| Initial worktree | `?? .comet/current-change.json` only | Selector-only; index empty; no unmerged entries. |
+
+### Task 16 Gates Inherited Without Rerun
+
+Task 16 ran the final focused set on tested source HEAD `73df724...`; its complete command transcript is preserved in the Task 16 temporary report. All non-Docker focused commands returned exit `0`: scheduler/usage default and unit service/handler, gateway/body/audit/subscription and exact failed-usage handler tests, 9-file account/settings/payment/prompt-audit frontend suite, five-migration identity loop, exact subscription-window and full service-unit gates, Codex/capacity/alpha-search/gateway-body suites, auth/refund/reasoning/CSP suites, 6-file captcha/settings/reasoning frontend suite, tagged audit suites, Stripe, security-audit, routes, middleware, and SettingsView gates.
+
+| Gate | Exact inherited result |
+| --- | --- |
+| Root full test | `make test`: exit `0`; 236 Vitest files / 1806 tests, backend default/unit/lint and frontend ESLint/typecheck/Vitest passed. |
+| Final build | `make VERSION=0.1.171.1 SHELL=D:/scoop/shims/bash.exe build`: exit `0`; backend build, `vue-tsc -b`, and Vite production build passed. |
+| Generate round 1 | `make -C backend generate`: exit `0`; `git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go`: exit `0`. |
+| Generate round 2 | `make -C backend generate`: exit `0`; `git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go`: exit `0`. |
+| Static | Worktree/index whitespace, staged index, unmerged worktree/index, and conflict-marker checks passed with the expected no-match `git grep` exit `1`. |
+
+Existing non-blocking output remains documented: Browserslist data, Vue `router-link`/jsdom test stderr, expected mocked-error/i18n stderr, and Vite dynamic-import / 699 kB chunk advisories. No long test, build, generate, or race command was rerun by Task 18.
+
+### Task 17 Topology And Migration Rebinding
+
+| Object | Current result |
+| --- | --- |
+| `v0.1.170` tag | Annotated tag object `60286d35e4b6dc6851ab69f890c2d1b7b7a3bcb8`; peeled SHA `c043c24774228ba891ddf90d783aa6dc7d0855b5`; ancestor check exit `0`. |
+| `v0.1.171` tag | Annotated tag object `afd154b92aac36c6dafb1fa8e181ca827c78c465`; peeled SHA `f0e7a9c7a23a7d02fb159b62fa809621eb0475a6`; ancestor check exit `0`. |
+| v0.1.170 merge | `98c7b04874361a1cf95b8dea90ed1c4db2f05d4d 30528a82e32bfedc011d741e870964beb5743aa4 c043c24774228ba891ddf90d783aa6dc7d0855b5` |
+| v0.1.171 merge | `cca37e01eb719d65ce81dc7569b190fe9550ae5d 5f505520ded16114e3f2850f7b856a0650a82755 f0e7a9c7a23a7d02fb159b62fa809621eb0475a6` |
+
+| Migration | Authority | Blob OID | HEAD match |
+| --- | --- | --- | --- |
+| `191_passkey_credentials.sql` | `16c07d8064b0b4604e9f47ef782e7d29534402d3` | `522b16b5bba12aedb9c4198d2d4ef082c8ea718f` | yes |
+| `191_subscription_quota_advance_receipts.sql` | `16c07d8064b0b4604e9f47ef782e7d29534402d3` | `c22d47d79cbbaf4bc40524d42ef52e6cc8ac3af6` | yes |
+| `192_subscription_cache_invalidation_outbox.sql` | `16c07d8064b0b4604e9f47ef782e7d29534402d3` | `502ecec1caf9f76e022c2e83acf3707190539301` | yes |
+| `192_group_profit_control.sql` | `c043c24774228ba891ddf90d783aa6dc7d0855b5` | `072b3c5db17accfd5197ea72f9a49fd6bdf446b4` | yes |
+| `193_group_profit_control_auth_cache_invalidation.sql` | `c043c24774228ba891ddf90d783aa6dc7d0855b5` | `f32f6e6f8b6d026b2e8620c90954336e30550c41` | yes |
+
+The canonical Task 17 `Invoke-MigrationUpgradeIntegration -Stage 'final'` result remains `unverified`: the local Docker CLI cannot be resolved, no native Docker process or target Go integration test ran, and no remote endpoint was contacted.
+
+### Final Capability Matrix
+
+Task 18 reread the final source with CodeGraph before direct read-only confirmation of stale-index candidates. `layeredOpenAIAccountScheduler.Select` performs previous-response, session sticky, then layered selection; `selectBySessionHash` applies platform/privacy/request/transport checks and DB recheck before slot acquisition and only then returns a `WaitPlan`. `OpenAIGatewayHandler.Images` runs lazy security audit before `ReleaseText`. `SubscriptionService.AdminResetQuota` anchors manual resets at `s.now()`.
+
+| # | Capability and call-path evidence | Direct gate evidence | Status |
+| ---: | --- | --- | --- |
+| 1 | `OpenAIGatewayHandler -> OpenAIGatewayService -> getOpenAIAccountSchedulerWithContext -> layered Select -> selectBySessionHash/DB recheck -> slot or WaitPlan`; pool admission and same-account retry remain in the selection path. | Task 16 scheduler/usage default+unit service and handler focused gates all exit `0`. | `protected` |
+| 2 | `ResponsesWebSocket/Images -> SelectAccountWithSchedulerForCapability -> layered sticky -> platform/privacy/image/transport filters`; previous-response and session sticky preserve fallback semantics. | Focused sticky/gateway suites and final full gate passed, but no one direct test covers every Grok/platform/privacy/image cross-product. | `manual` |
+| 3 | HTTP/WS ingress -> selection/admission -> final outbound account/model -> usage/circuit; turn leases and body handles are released on terminal paths. | Task 16 gateway/body/failover/usage, exact failed-usage, Codex/forward/WS, and full gates passed; prompt-cache/circuit composition is source-reviewed. | `manual` |
+| 4 | `AlphaSearch -> ForwardAlphaSearch -> matched RequestBodyHandle -> Responses/PAT fallback/retry/cleanup`; composite route resolution and reasoning policy remain before forwarding. | Task 16 AlphaSearch/Codex/capacity gates and reasoning focused gates passed; PAT side-effect composition is source-reviewed. | `manual` |
+| 5 | Images and gateway routes -> unified audit coordinator -> latest-input/proxy/legacy moderation -> prompt snapshot stage; Images invokes lazy audit before text release. | Task 16 security-audit and route coverage tests, Images/gateway focused gates, and full gate passed. | `protected` |
+| 6 | Settings handler -> scoped update/runtime refresh; auth -> L1/L2 cache -> session binding/step-up; captcha provider selection -> fail-closed auth routes -> CSP. | Task 16 settings/auth/passkey/captcha/CSP, tagged audit, middleware, and SettingsView gates all passed. | `protected` |
+| 7 | Subscription/refund -> locked repository -> receipt/reset -> post-commit invalidation outbox; failed usage follows final account/model and zero-cost failure rules. | Task 16 exact-window, service-unit, refund/renewal/usage, Stripe, and tagged audit gates passed. | `protected` |
+| 8 | Admin account/group actions -> `AdminService` -> repository transaction paths; duplicate, shadow, and bulk limits retain local controls. | Direct backend duplicate/bulk/shadow coverage is included in final `make test`; Task 16 account/admin frontend suite passed. | `protected` |
+| 9 | Local account/settings/payment/prompt-audit/captcha/reasoning views -> local admin/auth APIs -> backend contracts. | Task 16 9-file/174-test and 6-file/73-test frontend suites, SettingsView, and full 1806-test gate passed. | `protected` |
+| 10 | Dependency/manifest and schema/provider sources -> Ent/Wire; final VERSION, tag topology, and generated output stay source-driven. | Final build, two generate rounds with zero diff, static checks, VERSION, tag and merge-parent checks passed. | `protected` |
+| 11 | Migration runner -> full filenames/checksums -> PostgreSQL upgrade integration; all five authoritative blobs match HEAD. | Static identity loop passed. Canonical helper returned `unverified`, not PASS, because Docker is absent. | Docker-only `unverified` |
+
+Matrix totals: `protected=7`, `manual=3`, Docker-only `unverified=1`, `gap=0`. Manual rows retain both reviewed call paths and passing supporting gates, but are not represented as fully direct behavior proofs. The sole unverified integration leaves empty database, local 191/192 upgrade, ordering, idempotency, relations, and checksum contracts unverified.
+
+### Task 18 Strict Validation And Scope
+
+```text
+COMMAND: comet classic openspec -- validate staged-merge-upstream-v0-1-171 --strict
+OUTPUT: Change 'staged-merge-upstream-v0-1-171' is valid
+EXIT: 0
+```
+
+This change was not pushed, tagged, released, deployed, or used to operate any server. Task 18 did not run Docker integration or `go test -race`; race remains unavailable because cgo is unavailable. Final state: `DONE_WITH_CONCERNS` solely for the documented Docker integration and race residuals.
