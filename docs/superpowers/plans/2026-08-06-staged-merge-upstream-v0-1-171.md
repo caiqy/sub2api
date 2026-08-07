@@ -405,7 +405,7 @@ Commit-NamedPaths -Message 'docs: record v0.1.171 capability matrix' -Paths @($b
 
 ### Task 4: 保护基线能力并完成非 Docker 门禁
 
-- [ ] Task 4: 保护基线能力并完成非 Docker 门禁
+- [x] Task 4: 保护基线能力并完成非 Docker 门禁
 
 **映射 OpenSpec：**1.4
 
