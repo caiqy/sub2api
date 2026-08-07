@@ -124,21 +124,23 @@ func TestGatewayHandler_MessagesForwardErrorStillCreatesUsageLog(t *testing.T) {
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
-	require.NotNil(t, usageLogRepo.lastLog)
-	require.Equal(t, 0, usageLogRepo.lastLog.InputTokens)
-	require.Equal(t, 0, usageLogRepo.lastLog.OutputTokens)
-	require.Equal(t, 0.0, usageLogRepo.lastLog.TotalCost)
-	require.Equal(t, 0.0, usageLogRepo.lastLog.ActualCost)
-	require.NotNil(t, usageLogRepo.lastLog.DurationMs)
-	require.Greater(t, *usageLogRepo.lastLog.DurationMs, 0)
-	require.NotNil(t, usageLogRepo.lastLog.ReasoningEffort)
-	require.Equal(t, "high", *usageLogRepo.lastLog.ReasoningEffort)
-	require.NotNil(t, usageLogRepo.lastLog.DetailSnapshot)
-	requireRequestPreviewSnapshot(t, usageLogRepo.lastLog.DetailSnapshot.RequestBody, reqBody)
-	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, "anthropic upstream rejected payload")
-	requireSerializedHeader(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "X-Api-Key", "anthropic-test-key")
-	requireSerializedHeader(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "anthropic-version", "2023-06-01")
-	requireSerializedHeader(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "Content-Type", "application/json")
+	logs := usageLogRepo.snapshots()
+	require.NotEmpty(t, logs)
+	log := logs[len(logs)-1]
+	require.Equal(t, 0, log.InputTokens)
+	require.Equal(t, 0, log.OutputTokens)
+	require.Equal(t, 0.0, log.TotalCost)
+	require.Equal(t, 0.0, log.ActualCost)
+	require.NotNil(t, log.DurationMs)
+	require.Greater(t, *log.DurationMs, 0)
+	require.NotNil(t, log.ReasoningEffort)
+	require.Equal(t, "high", *log.ReasoningEffort)
+	require.NotNil(t, log.DetailSnapshot)
+	requireRequestPreviewSnapshot(t, log.DetailSnapshot.RequestBody, reqBody)
+	require.Contains(t, log.DetailSnapshot.ResponseBody, "anthropic upstream rejected payload")
+	requireSerializedHeader(t, log.DetailSnapshot.UpstreamRequestHeaders, "X-Api-Key", "anthropic-test-key")
+	requireSerializedHeader(t, log.DetailSnapshot.UpstreamRequestHeaders, "anthropic-version", "2023-06-01")
+	requireSerializedHeader(t, log.DetailSnapshot.UpstreamRequestHeaders, "Content-Type", "application/json")
 }
 
 func TestGatewayHandler_MessagesFailoverExhaustedStillCreatesUsageLog(t *testing.T) {
@@ -247,14 +249,16 @@ func TestGatewayHandler_MessagesFailoverExhaustedStillCreatesUsageLog(t *testing
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusTooManyRequests, rec.Code)
-	require.NotNil(t, usageLogRepo.lastLog)
-	require.NotNil(t, usageLogRepo.lastLog.DetailSnapshot)
-	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseHeaders, ":status: 429")
-	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, `"anthropic_rate_limited_raw"`)
-	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, "anthropic raw failover")
-	requireSerializedHeader(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "X-Api-Key", "anthropic-test-key")
-	requireSerializedHeader(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "anthropic-version", "2023-06-01")
-	requireSerializedHeader(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "Content-Type", "application/json")
+	logs := usageLogRepo.snapshots()
+	require.NotEmpty(t, logs)
+	log := logs[len(logs)-1]
+	require.NotNil(t, log.DetailSnapshot)
+	require.Contains(t, log.DetailSnapshot.ResponseHeaders, ":status: 429")
+	require.Contains(t, log.DetailSnapshot.ResponseBody, `"anthropic_rate_limited_raw"`)
+	require.Contains(t, log.DetailSnapshot.ResponseBody, "anthropic raw failover")
+	requireSerializedHeader(t, log.DetailSnapshot.UpstreamRequestHeaders, "X-Api-Key", "anthropic-test-key")
+	requireSerializedHeader(t, log.DetailSnapshot.UpstreamRequestHeaders, "anthropic-version", "2023-06-01")
+	requireSerializedHeader(t, log.DetailSnapshot.UpstreamRequestHeaders, "Content-Type", "application/json")
 }
 
 func TestGatewayHandler_MessagesSelectionExhaustedAfterFailoverStillCreatesUsageLog(t *testing.T) {
@@ -363,13 +367,15 @@ func TestGatewayHandler_MessagesSelectionExhaustedAfterFailoverStillCreatesUsage
 
 	require.Equal(t, http.StatusTooManyRequests, rec.Code)
 	require.JSONEq(t, `{"type":"error","error":{"type":"rate_limit_error","message":"Upstream rate limit exceeded, please retry later"}}`, rec.Body.String())
-	require.NotNil(t, usageLogRepo.lastLog)
-	require.NotNil(t, usageLogRepo.lastLog.DetailSnapshot)
-	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, `"anthropic_rate_limited_raw"`)
-	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, "anthropic raw failover")
-	requireSerializedHeader(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "X-Api-Key", "anthropic-test-key")
-	requireSerializedHeader(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "anthropic-version", "2023-06-01")
-	requireSerializedHeader(t, usageLogRepo.lastLog.DetailSnapshot.UpstreamRequestHeaders, "Content-Type", "application/json")
+	logs := usageLogRepo.snapshots()
+	require.NotEmpty(t, logs)
+	log := logs[len(logs)-1]
+	require.NotNil(t, log.DetailSnapshot)
+	require.Contains(t, log.DetailSnapshot.ResponseBody, `"anthropic_rate_limited_raw"`)
+	require.Contains(t, log.DetailSnapshot.ResponseBody, "anthropic raw failover")
+	requireSerializedHeader(t, log.DetailSnapshot.UpstreamRequestHeaders, "X-Api-Key", "anthropic-test-key")
+	requireSerializedHeader(t, log.DetailSnapshot.UpstreamRequestHeaders, "anthropic-version", "2023-06-01")
+	requireSerializedHeader(t, log.DetailSnapshot.UpstreamRequestHeaders, "Content-Type", "application/json")
 }
 
 func requireSerializedHeader(t *testing.T, raw, name, want string) {
@@ -494,11 +500,12 @@ func TestGatewayHandler_MessagesStreamingPartialWriteFailureStillCreatesUsageLog
 	require.Contains(t, rec.Body.String(), "event: message_start")
 	require.Contains(t, rec.Body.String(), `data: {"type":"error"`)
 	require.Contains(t, rec.Body.String(), `"type":"error"`)
-	require.Equal(t, 1, usageLogRepo.created)
-	require.NotNil(t, usageLogRepo.lastLog)
-	require.Equal(t, 10, usageLogRepo.lastLog.InputTokens)
-	require.Equal(t, 1, usageLogRepo.lastLog.OutputTokens)
-	require.NotNil(t, usageLogRepo.lastLog.DetailSnapshot)
-	requireRequestPreviewSnapshot(t, usageLogRepo.lastLog.DetailSnapshot.RequestBody, reqBody)
-	require.Contains(t, usageLogRepo.lastLog.DetailSnapshot.ResponseBody, "message_delta")
+	logs := usageLogRepo.snapshots()
+	require.Len(t, logs, 1)
+	log := logs[0]
+	require.Equal(t, 10, log.InputTokens)
+	require.Equal(t, 1, log.OutputTokens)
+	require.NotNil(t, log.DetailSnapshot)
+	requireRequestPreviewSnapshot(t, log.DetailSnapshot.RequestBody, reqBody)
+	require.Contains(t, log.DetailSnapshot.ResponseBody, "message_delta")
 }

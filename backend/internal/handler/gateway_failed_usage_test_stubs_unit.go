@@ -4,6 +4,7 @@ package handler
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -144,24 +145,64 @@ func (s *stubGroupRepo) GetByIDLite(ctx context.Context, id int64) (*service.Gro
 
 type stubUsageLogRepo struct {
 	service.UsageLogRepository
+
+	mu      sync.Mutex
+	records []stubUsageLogSnapshot
+
+	// ponytail: retained for the shared Gemini tests; remove after they adopt snapshots.
 	created int
 	lastLog *service.UsageLog
 }
 
+type stubUsageLogSnapshot struct {
+	source *service.UsageLog
+	log    service.UsageLog
+}
+
 func (s *stubUsageLogRepo) Create(_ context.Context, log *service.UsageLog) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	s.created++
 	if log != nil {
 		copied := *log
+		copied.DetailSnapshot = log.DetailSnapshot.Normalize()
+		s.records = append(s.records, stubUsageLogSnapshot{source: log, log: copied})
 		s.lastLog = &copied
 	}
 	return true, nil
 }
 
 func (s *stubUsageLogRepo) PersistDetailBestEffort(_ context.Context, log *service.UsageLog) {
-	if log != nil {
-		copied := *log
-		s.lastLog = &copied
+	if log == nil {
+		return
 	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for i := range s.records {
+		if s.records[i].source != log {
+			continue
+		}
+
+		s.records[i].log.DetailSnapshot = log.DetailSnapshot.Normalize()
+		copied := s.records[i].log
+		s.lastLog = &copied
+		return
+	}
+}
+
+func (s *stubUsageLogRepo) snapshots() []service.UsageLog {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	logs := make([]service.UsageLog, len(s.records))
+	for i, snapshot := range s.records {
+		logs[i] = snapshot.log
+		logs[i].DetailSnapshot = snapshot.log.DetailSnapshot.Normalize()
+	}
+	return logs
 }
 
 func filterAccountsByPlatform(accounts []service.Account, platform string) []service.Account {
