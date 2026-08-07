@@ -4,20 +4,20 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Previous task: `Task 13` complete; capability commits `fa8c76cae`, `d8be6ed62`, `1bb18f906`, `c0305f70e`, `37ac82d7d`, `b1f00a968`; ledger `a7b253569`; checkoff `703e97d6f`; final reviewer `ses_02230eff6ffeDls4b42Mlt42NK` PASS spec and APPROVED quality
-- Current task: `Task 14: 关闭 v0.1.171 阶段并记录证据`
-- OpenSpec mapping: `3.4 运行 v0.1.171 聚焦测试、本机 full 门禁及适用 integration，关闭能力矩阵 gap`
+- Previous task: `Task 14` complete; ledger commits `5677e9559`, `c1ed6e286`; checkoff `33db728ae`; final reviewer `ses_022069653ffemP2j0kPg5mlX8n` PASS spec and APPROVED evidence quality
+- Current task: `Task 15: 一次更新最终 VERSION`
+- OpenSpec mapping: `4.1 两段闭合后将 backend/cmd/server/VERSION 一次更新为 0.1.171.1`
 - Stage: `ready`
 - Review/fix round: `0/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
 - Brief: pending
 - Report: pending
-- Scope: rerun Tasks 12/13 focused commands, root make test/build, two stable backend generate passes, static conflict checks and Docker-conditional migration integration; update ledger only after all non-Docker gates pass
+- Scope: verify both tag ancestry and intermediate VERSION, change only backend/cmd/server/VERSION to `0.1.171.1`, then commit the single path
 - Environment: local Docker unavailable; migration integration remains `unverified` on skip; no remote execution
-- Hard boundary: any unexplained focused/full RED, generated diff, conflict artifact, nonzero matrix gap or falsely recorded integration PASS blocks Task 15; VERSION remains `0.1.169.3`
-- Task 13 result: Aliyun custom CSP, Tencent secret clearing and suspended renewal contracts are protected; refund/usage, reasoning, WS lease and prompt audit focused evidence is recorded in the build ledger.
+- Hard boundary: do not create an intermediate `0.1.170.1` or modify any path besides backend/cmd/server/VERSION; ancestry or pre-version mismatch blocks the bump
+- Task 14 result: all non-Docker focused/full/build/generate/static gates passed; matrix `gap=0`; Docker-backed migration remains the sole `unverified` boundary.
 - User resolution retained: renewing an unexpired suspended subscription extends expiry, restores `active`, appends notes and preserves quota windows/usage.
-- Task 14 handoff: rerun all Task 12/13 focused gates, root full gates, two generate checks and static checks; migration integration remains conditional on local Docker only.
+- Task 15 handoff: expected current VERSION is `0.1.169.3`; target is exactly `0.1.171.1`; both `v0.1.170` and `v0.1.171` must be HEAD ancestors.
 - Integration residual: Docker CLI unavailable; no remote execution and no false PASS.
 - Worktree: only protected `.comet/current-change.json` remains untracked after this checkpoint commit.
-- Status: ready for Task 14 stage verification.
+- Status: ready for Task 15 version bump.
