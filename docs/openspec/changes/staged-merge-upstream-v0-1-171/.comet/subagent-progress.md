@@ -7,7 +7,7 @@
 - Previous task: `Task 8` complete; implementations `31555b6a1`/`0a66f7093`/`7e0193f19`/`85ac93e68`/`242aa3509`/`37da92567`; final review `ses_024795b9effe3HArQFeeIfbU8M` APPROVED spec and quality; canonical focused gates PASS
 - Current task: `Task 9: 固化 v0.1.170 migration identity 并按源生成 Ent/Wire`
 - OpenSpec mapping: `2.4 保留上游 192/193 profit migrations 与本地 192 outbox，按完整 filename 验证排序/checksum，并从 schema/provider 源验证 Ent/Wire 稳定`
-- Stage: `task-fix`
+- Stage: `task-review`
 - Review/fix round: `2/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
 - Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-171-task-9-brief.md`
@@ -28,4 +28,6 @@
 - Task 9 final reviewer: `ses_024580a0cffepEMMM43cPQAAGH` REJECTED spec and quality on default-expression truncation
 - Open Important finding: string normalization drops everything after the first PostgreSQL cast and can accept non-zero/true expressions
 - Fix boundary: evaluate the complete trusted catalog default expression inside the isolated DB, then compare typed text values; integration test only
-- Status: Task 9 review-fix 2/2 in progress
+- Review-fix 2/2 commit: `a2a3b2bc8` evaluates each complete trusted catalog default expression in PostgreSQL before typed false/zero comparison
+- Review-fix verification: verbose integration remains Docker-skipped/unverified; post-fix generate and Ent/Wire diff PASS; `git diff --check` PASS
+- Status: Task 9 review-fix 2/2 complete; final fresh thorough review pending
