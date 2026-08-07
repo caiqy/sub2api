@@ -1183,7 +1183,7 @@ Commit-NamedPaths -Message 'chore: bump version to 0.1.171.1' -Paths @('backend/
 
 ### Task 16: 在最终 source HEAD 重跑完整本机门禁
 
-- [ ] Task 16: 在最终 source HEAD 重跑完整本机门禁
+- [x] Task 16: 在最终 source HEAD 重跑完整本机门禁
 
 **映射 OpenSpec：**4.2
 
