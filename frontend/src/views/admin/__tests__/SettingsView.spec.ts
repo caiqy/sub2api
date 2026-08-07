@@ -817,6 +817,59 @@ describe("admin SettingsView payment visible method controls", () => {
     );
   });
 
+  it("clears Tencent captcha secrets after a successful save", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await openSecurityTab(wrapper);
+
+    await wrapper.get('[data-testid="captcha-enabled-toggle"]').setValue(true);
+    await wrapper.get('[data-testid="captcha-provider-tencent"]').trigger("click");
+    await flushPromises();
+
+    const card = wrapper
+      .findAll(".card")
+      .find((node) => node.text().includes("admin.settings.captcha.title"));
+    expect(card).toBeDefined();
+    const inputs = card!.findAll("input").filter((input) => input.attributes("type") !== "checkbox");
+    await inputs[1]!.setValue("app-secret-value");
+    await inputs[2]!.setValue("cloud-secret-id-value");
+    await inputs[3]!.setValue("cloud-secret-key-value");
+
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect((inputs[1]!.element as HTMLInputElement).value).toBe("");
+    expect((inputs[2]!.element as HTMLInputElement).value).toBe("");
+    expect((inputs[3]!.element as HTMLInputElement).value).toBe("");
+  });
+
+  it("keeps Tencent captcha secrets when save fails", async () => {
+    updateSettings.mockRejectedValueOnce(new Error("save failed"));
+    const wrapper = mountView();
+    await flushPromises();
+    await openSecurityTab(wrapper);
+
+    await wrapper.get('[data-testid="captcha-enabled-toggle"]').setValue(true);
+    await wrapper.get('[data-testid="captcha-provider-tencent"]').trigger("click");
+    await flushPromises();
+
+    const card = wrapper
+      .findAll(".card")
+      .find((node) => node.text().includes("admin.settings.captcha.title"));
+    expect(card).toBeDefined();
+    const inputs = card!.findAll("input").filter((input) => input.attributes("type") !== "checkbox");
+    await inputs[1]!.setValue("app-secret-value");
+    await inputs[2]!.setValue("cloud-secret-id-value");
+    await inputs[3]!.setValue("cloud-secret-key-value");
+
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect((inputs[1]!.element as HTMLInputElement).value).toBe("app-secret-value");
+    expect((inputs[2]!.element as HTMLInputElement).value).toBe("cloud-secret-id-value");
+    expect((inputs[3]!.element as HTMLInputElement).value).toBe("cloud-secret-key-value");
+  });
+
   it("人机验证切换到阿里云并保存配置", async () => {
     const wrapper = mountView();
     await flushPromises();
