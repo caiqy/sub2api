@@ -4,20 +4,20 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Previous task: `Task 15` complete; version commit `73df72483`; checkoff `440ba3fbc`; final reviewer `ses_021fc403dffen1qQEsm4ObHPAs` PASS spec and APPROVED scope quality
-- Current task: `Task 16: 在最终 source HEAD 重跑完整本机门禁`
-- OpenSpec mapping: `4.2 在最终 source HEAD 重跑能力 focused、make test/build、两轮 generate 与静态检查`
+- Previous task: `Task 16` complete; no repository implementation commit; checkoff `5149a93bb`; final reviewer `ses_021dd9546ffeuLAoYwwtxdkuht` PASS spec and APPROVED evidence quality
+- Current task: `Task 17: 验证拓扑、migration identity 和最终 Docker 结果`
+- OpenSpec mapping: `4.3 校验 tag/merge topology、VERSION、migration filenames/blobs 与最终本机 integration 结果`
 - Stage: `ready`
 - Review/fix round: `0/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
 - Brief: pending
 - Report: pending
-- Scope: on final VERSION `0.1.171.1`, rerun all matrix focused commands, root make test/build, two stable generate passes and static conflict checks; create no evidence commit in this task
+- Scope: verify both tag ancestry and unique ordered first-parent merge nodes, exact merge parents, final VERSION and five migration filenames/blobs; probe local Docker and run final integration only if available
 - Environment: local Docker unavailable; migration integration remains `unverified` on skip; no remote execution
-- Hard boundary: any non-Docker gate failure or generated diff keeps Task 16 unchecked and requires a TDD remediation in the original capability cluster; no product edit may hide unavailable Docker
-- Task 15 result: VERSION changed exactly once from `0.1.169.3` to `0.1.171.1`; both target tags are ancestors and the version commit changes one path.
+- Hard boundary: topology, VERSION, filename or authoritative blob mismatch blocks Task 18; unavailable Docker remains explicit unverified and may not be replaced by remote execution or a false PASS
+- Task 16 result: 27 non-Docker focused gates, make test/build, two generate rounds and static checks passed; final VERSION is `0.1.171.1`; migration execution alone remains unverified.
 - User resolution retained: renewing an unexpired suspended subscription extends expiry, restores `active`, appends notes and preserves quota windows/usage.
-- Task 16 handoff: expected VERSION is exactly `0.1.171.1`; Task 14 focused/full command set is the minimum rerun surface, with final evidence deferred to Task 18.
+- Task 17 handoff: expected merge nodes are `98c7b0487` for v0.1.170 and `cca37e01e` for v0.1.171; expected second parents are fixed peeled SHAs `c043c2477` and `f0e7a9c7a`.
 - Integration residual: Docker CLI unavailable; no remote execution and no false PASS.
 - Worktree: only protected `.comet/current-change.json` remains untracked after this checkpoint commit.
-- Status: ready for Task 16 final source gates.
+- Status: ready for Task 17 topology and migration verification.
