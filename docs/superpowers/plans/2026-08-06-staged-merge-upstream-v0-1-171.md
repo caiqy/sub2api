@@ -1213,7 +1213,7 @@ Assert-NoConflictArtifacts
 
 ### Task 17: 验证拓扑、migration identity 和最终 Docker 结果
 
-- [ ] Task 17: 验证拓扑、migration identity 和最终 Docker 结果
+- [x] Task 17: 验证拓扑、migration identity 和最终 Docker 结果
 
 **映射 OpenSpec：**4.3
 
