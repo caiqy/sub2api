@@ -7,8 +7,8 @@
 - Previous task: `Task 4` complete; implementation `038215720`, checkoff `b12b4d578`, thorough review `ses_0260b7ce5ffe6Y6sClsJ4DMHUp` APPROVED
 - Current task: `Task 5: 执行基线 Docker 条件门禁并封存阶段 0 证据`
 - OpenSpec mapping: `1.5 检查本机 Docker/Testcontainers；可用时运行基线 integration，不可用时记录环境证据、未验证契约和残余风险，且不使用远程服务器补跑`
-- Stage: `blocked`
-- Review/fix round: `2/2`
+- Stage: `task-fix`
+- Review/fix round: `extra 3/3 (user-authorized)`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
 - Brief: `.superpowers/sdd/task-5-brief.md`
 - Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-5-report.md`
@@ -32,4 +32,6 @@
 - Final re-reviewer: `ses_025dfdf50ffepngrgrjndZwIo2` REJECTED after round `2/2`
 - Remaining Important: five ledger `path:symbol` references are wrong or absent (`ResponsesWebSocket`, `StepUpSessionKey`, `AdvanceQuotaCycleWithReceipt`, frontend `adminAPI`, and absent current-source Codex version sync service)
 - Remaining Minor: durable Task 5 report must explicitly supersede old `protected=2/manual=8` with `protected=1/manual=9`
-- Status: BLOCKED; thorough review-fix budget exhausted, user decision required before any additional fix round
+- User decision: explicitly authorized one extra evidence-only fix/re-review round; no source changes or test reruns
+- Extra fix boundary: correct five `path:symbol` references, mark tag-only symbols honestly, supersede stale report summary, rerun clean gate
+- Status: user-authorized final evidence fix pending
