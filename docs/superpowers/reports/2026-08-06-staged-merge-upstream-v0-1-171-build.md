@@ -812,3 +812,12 @@ frontend/src/views/auth/__tests__/WechatCallbackView.spec.ts
 - 审查证据：request-body replay/cleanup、统一 audit latest-input/proxy/no-duplicate moderation、settings omitted-field、subscription versioned reset/outbox/post-commit invalidation均由现有调用链和 focused tests 保护；无对应 RED 的簇未创建空提交。
 - 本机 fresh gates：updated service、tagged-unit subscription、handler、Anthropic/Gemini exact usage 和 expanded frontend 9 files/169 tests 均 exit `0`；`git diff --check` exit `0`。
 - residual：`go test -race` 因当前 Go 环境 `-race requires cgo` 未运行；Docker/Testcontainers migration integration 仍为 `unverified`，未使用远程服务器，未标记 PASS。
+
+## Task 9：v0.1.170 migration identity 与 Ent/Wire
+
+- 状态：`DONE`（静态/生成门禁闭合，Docker-backed behavior 仍 `unverified`）。实现提交为 `7cea803e3`、`def1bf577`、`a2a3b2bc8`；最终 reviewer `ses_0244eebc1ffeRZyeqaEQhW3R0t` 对 spec 与 quality 均 `APPROVED`。
+- 五个 authoritative blob 与 HEAD 完全一致：`191_passkey_credentials.sql=522b16b5...`、`191_subscription_quota_advance_receipts.sql=c22d47d7...`、`192_subscription_cache_invalidation_outbox.sql=502ecec1...`、`192_group_profit_control.sql=072b3c5d...`、`193_group_profit_control_auth_cache_invalidation.sql=f32f6e6f...`。
+- integration test 静态契约：baseline 只排除 profit 192/193；升级库按 baseline/complete/complete，空库按 complete/complete；两库隔离；五 filename checksum/exactly-one、实际新 relation、profit 三列 metadata/default 与 193 function replacement 均有断言。
+- default 断言由 PostgreSQL 求值完整 trusted catalog expression 后比较 typed false/zero，不会截断 cast 后运算。
+- generation：实施阶段三轮、两次 review-fix 后各一轮、协调器最终一轮均 exit `0`，`backend/ent` 与 `backend/cmd/server/wire_gen.go` 始终无 diff；未创建 generated-only remediation。
+- integration residual：verbose target command exit `0`，但 harness 在 `m.Run()` 前输出 `docker is not available; skipping integration tests`；目标测试未执行，未记录 PASS，未使用远程服务器。

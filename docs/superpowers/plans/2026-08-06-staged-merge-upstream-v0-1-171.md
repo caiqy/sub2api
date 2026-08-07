@@ -742,7 +742,7 @@ Commit-NamedPaths -Message 'fix: preserve frontend customization after v0.1.170'
 
 ### Task 9: 固化 v0.1.170 migration identity 并按源生成 Ent/Wire
 
-- [ ] Task 9: 固化 v0.1.170 migration identity 并按源生成 Ent/Wire
+- [x] Task 9: 固化 v0.1.170 migration identity 并按源生成 Ent/Wire
 
 **映射 OpenSpec：**2.4
 

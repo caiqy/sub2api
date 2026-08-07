@@ -4,30 +4,15 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Previous task: `Task 8` complete; implementations `31555b6a1`/`0a66f7093`/`7e0193f19`/`85ac93e68`/`242aa3509`/`37da92567`; final review `ses_024795b9effe3HArQFeeIfbU8M` APPROVED spec and quality; canonical focused gates PASS
-- Current task: `Task 9: 固化 v0.1.170 migration identity 并按源生成 Ent/Wire`
-- OpenSpec mapping: `2.4 保留上游 192/193 profit migrations 与本地 192 outbox，按完整 filename 验证排序/checksum，并从 schema/provider 源验证 Ent/Wire 稳定`
-- Stage: `task-review`
-- Review/fix round: `2/2`
+- Previous task: `Task 9` complete; implementations `7cea803e3`/`def1bf577`/`a2a3b2bc8`; final review `ses_0244eebc1ffeRZyeqaEQhW3R0t` APPROVED spec and quality; blobs/generation PASS, Docker integration unverified
+- Current task: `Task 10: 关闭 v0.1.170 阶段并记录证据`
+- OpenSpec mapping: `2.5 运行 v0.1.170 聚焦测试、本机 full 门禁及适用 integration，关闭能力矩阵 gap 并记录阶段证据`
+- Stage: `task-prep`
+- Review/fix round: `0/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
-- Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-171-task-9-brief.md`
-- Report: `.superpowers/sdd/staged-merge-upstream-v0-1-171-task-9-report.md`
-- Scope: five published migration filenames/blobs, empty/upgrade DB integration test shape, runner only on real RED, and Ent/Wire generation stability
-- Environment: local Docker/Testcontainers unavailable; integration must remain `unverified` if it cannot actually run; no remote execution
-- Hard boundary: any Ent/Wire diff after generation blocks Task 9 and must not be committed as generated-only remediation
-- Task 9 implementer: `ses_0246cecaaffeAbZTzY3mjLTm9H` DONE
-- Task 9 commit: `7cea803e3` changes only the migration upgrade integration test
-- Blob identity: all five authoritative source and HEAD blob OIDs match
-- Integration: exact package command exit 0 but target did not execute because Docker harness exited before `m.Run()`; result remains `unverified`
-- Generation: three consecutive `make -C backend generate` rounds PASS with no Ent/Wire diff
-- Task 9 reviewer: `ses_024620589ffexwR3qIkK5u7XHZ` REJECTED spec and quality
-- Open Important finding: `to_regclass(groups/auth_cache_invalidation_outbox)` cannot prove profit 192 columns or 193 function replacement because both relations predate these migrations
-- Fix boundary: baseline absence plus complete column metadata and `pg_get_functiondef` assertions in the integration test only; no migration/runner change
-- Review-fix 1/2 commit: `def1bf577` adds baseline absence and complete column/function effect assertions in the integration test only
-- Review-fix verification: verbose integration remains Docker-skipped/unverified; one post-fix generate round and Ent/Wire diff PASS; `git diff --check` PASS
-- Task 9 final reviewer: `ses_024580a0cffepEMMM43cPQAAGH` REJECTED spec and quality on default-expression truncation
-- Open Important finding: string normalization drops everything after the first PostgreSQL cast and can accept non-zero/true expressions
-- Fix boundary: evaluate the complete trusted catalog default expression inside the isolated DB, then compare typed text values; integration test only
-- Review-fix 2/2 commit: `a2a3b2bc8` evaluates each complete trusted catalog default expression in PostgreSQL before typed false/zero comparison
-- Review-fix verification: verbose integration remains Docker-skipped/unverified; post-fix generate and Ent/Wire diff PASS; `git diff --check` PASS
-- Status: Task 9 review-fix 2/2 complete; final fresh thorough review pending
+- Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-171-task-10-brief.md`
+- Report: `.superpowers/sdd/staged-merge-upstream-v0-1-171-task-10-report.md`
+- Scope: rerun Tasks 7-9 focused gates, root `make test`/versioned `make build`, two stable generation rounds, static conflict checks, migration integration evidence, and build-ledger-only commit
+- Environment: local Docker unavailable; migration integration remains `unverified` on skip; no remote execution
+- Hard boundary: any unexplained RED, gap, generated diff, conflict artifact, or falsely recorded integration PASS blocks v0.1.171 merge
+- Status: Task 10 brief ready for implementation dispatch
