@@ -791,7 +791,7 @@ frontend/src/views/auth/__tests__/WechatCallbackView.spec.ts
 ### Known RED handoff
 
 - **Task 7，未闭合且不得写为 PASS：**`user_subscription.go` 已把领域 `CheckDailyLimit`、`CheckWeeklyLimit`、`CheckMonthlyLimit` 改为 inclusive `<=`；但 `BillingCacheService.CheckBillingEligibility` 仍以缓存 usage `>= limit` 拒绝。canonical Task 7 要求先建立端到端 exact-limit 放行、超限拒绝的 RED/GREEN 回归，并做最小修复。
-- **Task 8，未闭合且不得写为 PASS：**带 `unit` tag 的 `TestDelayedFirstUseAnchorsMonthlyWindowAtActivation` 仍断言首次使用激活窗口，`TestAdminResetQuota_ResetBoth` 仍断言操作精确时刻；两者与用户裁决的 `StartsAt` 和当天零点语义相反。canonical Task 8 要求以 `go test -tags=unit` gate 先记录真实 RED，再修正测试/实现到用户裁决。
+- **Task 8，历史 RED：**带 `unit` tag 的首次窗口与管理员重置测试暴露了窗口锚点冲突。首次窗口仍按 entitlement `StartsAt`；管理员重置的“当天零点”临时裁决已在 Task 10 被用户最终决定取代为与用户手动重置一致的精确操作时刻。
 - Task 6 不修改这两类生产代码或测试；它们必须由 Task 7/8 的 TDD 闭合。
 
 ## Task 7：v0.1.170 scheduler/usage TDD 闭合
@@ -806,7 +806,7 @@ frontend/src/views/auth/__tests__/WechatCallbackView.spec.ts
 ## Task 8：v0.1.170 gateway/body、audit/subscription 与 frontend 闭合
 
 - 状态：`DONE`。实现提交为 `31555b6a1`、`0a66f7093`、`7e0193f19`、`85ac93e68`、`242aa3509`、`37da92567`；最终 reviewer `ses_024795b9effe3HArQFeeIfbU8M` 对 spec 与 quality 均 `APPROVED`。
-- subscription：陈旧 tagged-unit 期望已按用户裁决更正；首次窗口锚定 entitlement `StartsAt`，`AdminResetQuota` 锚定当天零点，自动 monthly boundary 保持 entitlement 锚点。仅测试与测试名变更，生产实现原本正确。
+- subscription：首次窗口锚定 entitlement `StartsAt`。Task 8 当时保留的 `AdminResetQuota` 当天零点语义已在 Task 10 经用户最终裁决改为精确操作时刻，并删除无价值的 legacy midnight 纠偏。
 - frontend：恢复 OpenAI OAuth `openai_responses_flatten_namespaces` 在 EditAccountModal 的启用写入与关闭删除；其他 `extra` 字段与 account type/platform 边界不变。
 - usage：Anthropic partial error 的 failed-only/partial usage 改为互斥，真实 handler 回归断言 exactly one 记录及 10/1 tokens/detail；pooled Responses WS 在已观察图片后 read error 保留 `ImageCount=1` partial result，输出前错误仍可返回 nil failover。
 - 审查证据：request-body replay/cleanup、统一 audit latest-input/proxy/no-duplicate moderation、settings omitted-field、subscription versioned reset/outbox/post-commit invalidation均由现有调用链和 focused tests 保护；无对应 RED 的簇未创建空提交。
@@ -821,3 +821,33 @@ frontend/src/views/auth/__tests__/WechatCallbackView.spec.ts
 - default 断言由 PostgreSQL 求值完整 trusted catalog expression 后比较 typed false/zero，不会截断 cast 后运算。
 - generation：实施阶段三轮、两次 review-fix 后各一轮、协调器最终一轮均 exit `0`，`backend/ent` 与 `backend/cmd/server/wire_gen.go` 始终无 diff；未创建 generated-only remediation。
 - integration residual：verbose target command exit `0`，但 harness 在 `m.Run()` 前输出 `docker is not available; skipping integration tests`；目标测试未执行，未记录 PASS，未使用远程服务器。
+
+## Task 10：v0.1.170 阶段最终门禁
+
+- 状态：`READY FOR EVIDENCE COMMIT`。所有本机非 Docker 门禁通过，能力矩阵 `gap=0`；目标 migration integration 因本机无 Docker CLI 保持 `unverified`。
+- subscription 语义裁决：用户确认不再兼容少量旧 `startOfDay` 窗口。新订阅、用户手动提前重置和管理员手动重置均使用精确时间；自动窗口直接信任持久化起点。删除 `fixLegacyMidnightAnchor`/`isMidnight` 与纯 legacy 纠偏测试，partial-final-period、新订阅和合法手动 midnight 锚点覆盖保留。
+- TDD：三个精确时间测试先真实 RED；实现后 focused 命令及 `go test -tags=unit ./internal/service -count=1` PASS，后者用时 `171.743s`。fresh reviewer `ses_022e109bdffernoTnGMuO6rPiW` 无 finding，spec `PASS`、quality `APPROVED`；capability commit 为 `3279e7bcb`（`fix: use exact subscription window anchors`）。
+- Tasks 7-8 focused：scheduler/usage default+unit service、default+unit handler，gateway/audit/subscription default+unit service、handler均 exit `0`；frontend 9 files / 169 tests PASS。
+- Task 9 identity：五个 authoritative blob 再次精确匹配：`522b16b5...`、`c22d47d7...`、`502ecec1...`、`072b3c5d...`、`f32f6e6f...`。
+- full gate：根目录 `make test` exit `0`，前端 `230` files / `1747` tests PASS；`make VERSION=0.1.169.3 SHELL=D:/scoop/shims/bash.exe build` exit `0`，backend build 和 frontend `vue-tsc`/Vite build 完成，Vite 转换 `1042` modules。
+- generation/static：连续两轮 `make -C backend generate` exit `0`，`backend/ent` 与 `backend/cmd/server/wire_gen.go` 每轮零 diff；worktree/index whitespace、unmerged files/index entries、tracked conflict markers 检查均通过。
+- integration residual：`docker version --format '{{json .Server}}'` 无法执行，PowerShell 报告 `docker` 命令不存在；未运行目标 PostgreSQL integration，未记录 PASS，未使用远程服务器。
+- 其他 residual：`go test -race` 仍因当前环境 `-race requires cgo` 未运行；前端测试/build 仅有既有 stderr、Browserslist、动态/静态 import 和 chunk-size 警告，无失败。
+
+### v0.1.170 最终能力矩阵
+
+| # | 最终状态 | post-merge 证据 |
+| --- | --- | --- |
+| 1 scheduler/layered/pool/WaitPlan | `protected` | Task 7 default+unit service/handler focused PASS；利润门禁、sticky、槽位复核、WaitPlan 与 exact-limit TDD 修复经 reviewer `ses_024c20d5bffeK4Sp85JQ3IkatW` 批准；Task 10 fresh focused/full PASS。 |
+| 2 Grok/platform/session/privacy/image | `manual` | Task 10 的 Grok 429/403 回归修复 `fb882192a` 已通过精确测试；Task 7/8 调用链审查与 full gate 复核 sticky、privacy/image 过滤未被短路。 |
+| 3 OpenAI HTTP/WS/usage/cache/circuit | `manual` | Task 8 Anthropic partial usage 与 pooled Responses WS 修复经 reviewer `ses_024795b9effe3HArQFeeIfbU8M` 批准；Task 10 gateway/handler focused 与 full gate PASS，prompt-cache/circuit 保留人工调用链证据。 |
+| 4 alpha-search/Responses/PAT/body handle | `manual` | Task 8 复核 `AlphaSearch`/`ForwardAlphaSearch` matched handle ownership与 replay/cleanup；Task 10 handler focused、`make test`/build PASS。 |
+| 5 request-body/images/storage/image billing | `manual` | Task 8 request-body replay/cleanup 与 Images 调用链审查闭合；Task 10 service/handler focused 和 full gate PASS，异步 storage/billing 组合保留人工证据。 |
+| 6 prompt/security audit 与 Images | `protected` | Task 8 latest-input/proxy/no-duplicate moderation 行为测试及审查通过；Task 10 focused/full PASS。 |
+| 7 settings/cache/session/step-up | `manual` | Task 8 omitted-field/scoped update 调用链与 frontend Settings focused PASS；Task 10 frontend 169 focused tests、1747 full tests 与 build PASS。 |
+| 8 subscription/renewal/refund/receipt/outbox | `manual` | 精确窗口 RED/GREEN、完整 `internal/service` unit PASS；fresh reviewer `ses_022e109bdffernoTnGMuO6rPiW` 批准；Task 8 versioned reset/outbox 与 receipt/transaction 调用链人工审查闭合，Task 10 focused/full PASS。 |
+| 9 用户资源/分组/account shadow/frontend | `protected` | root `make test` 覆盖 `admin_group_duplicate_test.go`、`admin_service_batch_limits_test.go`、`admin_service_spark_shadow_test.go` 等后端直接测试；Task 8 frontend 9 files/169 tests 与 reviewer 批准；Task 10 frontend full 230 files/1747 tests 和 production build PASS。 |
+| 10 Codex identity/version/UA/retry | `manual` | 当前 v0.1.170 HTTP/passthrough/probe/alpha-search 身份链已人工复核并随 full gate PASS；`v0.1.171` 新增部分将在下一阶段重新打开验证。 |
+| 11 Ent/Wire/dependency/CSP/migrations | `unverified` | 五个 migration blob identity PASS；两轮 generate 零 diff；build/static PASS。仅 PostgreSQL 空库/升级 integration 因 Docker CLI 不存在未验证。 |
+
+最终汇总：`protected=3`、`manual=7`、`unverified=1`、`gap=0`。每个 `manual` 行均有 post-merge 调用链审查与 Task 10 full gate 证据；`unverified` 仅限规范允许的 Docker/Testcontainers 边界。
