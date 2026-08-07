@@ -12,32 +12,104 @@ All non-Docker final gates passed. The sole integration residual is Docker-only 
 | --- | --- |
 | Immutable source base | `16c07d8064b0b4604e9f47ef782e7d29534402d3` (`VERSION=0.1.169.3`) |
 | Execution base | `fd109296b5f41398350070dd8df826846d9adb1b` (`VERSION=0.1.169.3`) |
-| Tested source HEAD | `73df7248383b9f534df64956efe3c0d321f0e3bc` (`chore: bump version to 0.1.171.1`) |
-| Reporting HEAD | `436ebf66676aabee02e44a974e76cbb671b4e163` (`docs: advance to final verification report`) |
+| Task 16 actual repository HEAD | `unrecorded` |
+| Final product-source anchor | `73df7248383b9f534df64956efe3c0d321f0e3bc` (`chore: bump version to 0.1.171.1`) |
+| Review-fix 1 pre-fix rebind HEAD | `7b18bcf7ffdfbd88ce16c4e5bec80232ac2883c2` (`docs: record v0.1.171 verification`) |
 | Final VERSION | `0.1.171.1` |
 | Worktree before report staging | Only `?? .comet/current-change.json`; staged index empty; no unmerged paths or index entries. |
 
-`16c07d806...` is an ancestor of both `fd109296...` and reporting HEAD. The Task 16 source gate is bound to `73df724...`. Its only descendants before reporting HEAD are documentation checkoffs and Comet checkpoint commits: plan/OpenSpec task checkoffs at `440ba3f`, `5149a93`, and `75c234c`; `.comet/subagent-progress.md` checkpoints at `7175134`, `b182aab`, and `436ebf6`. `git diff --name-only 73df724..436ebf6` lists only those plan, task, and checkpoint paths. No long gate is claimed as rerun on a later documentation-only HEAD.
+Task 16 preflight recorded selector-only status, final VERSION, empty index, and no unmerged entries, but did not record `git rev-parse HEAD`. Its actual repository HEAD is therefore `unrecorded`; this report does not call `73df724...` the tested HEAD. `73df724...` is the final product-source anchor/version commit. A controller post-run capture, not Task 16 preflight evidence, recorded the current history and `git diff --name-only 73df724..7b18bcf`: the range contains only plan/OpenSpec task checkoffs, Comet checkpoints, and report commits. Thus the product tree covered by inherited Task 16 evidence can be precisely bound to the `73df724...` anchor, while Task 16's actual repository HEAD remains unclaimed.
+
+## Review-Fix 1 Pre-Fix Rebind
+
+The following short read-only commands ran before this correction on reports-only HEAD `7b18bcf7ffdfbd88ce16c4e5bec80232ac2883c2`:
+
+```text
+COMMAND: git rev-parse HEAD
+OUTPUT: 7b18bcf7ffdfbd88ce16c4e5bec80232ac2883c2
+EXIT: 0
+
+COMMAND: git show HEAD:backend/cmd/server/VERSION
+OUTPUT: 0.1.171.1
+EXIT: 0
+
+COMMAND: git for-each-ref --format='%(refname:short) %(objectname) %(*objectname)' refs/tags/v0.1.170 refs/tags/v0.1.171
+OUTPUT:
+v0.1.170 60286d35e4b6dc6851ab69f890c2d1b7b7a3bcb8 c043c24774228ba891ddf90d783aa6dc7d0855b5
+v0.1.171 afd154b92aac36c6dafb1fa8e181ca827c78c465 f0e7a9c7a23a7d02fb159b62fa809621eb0475a6
+EXIT: 0
+
+COMMAND: git merge-base --is-ancestor c043c24774228ba891ddf90d783aa6dc7d0855b5 HEAD
+OUTPUT: (no output)
+EXIT: 0
+
+COMMAND: git merge-base --is-ancestor f0e7a9c7a23a7d02fb159b62fa809621eb0475a6 HEAD
+OUTPUT: (no output)
+EXIT: 0
+
+COMMAND: git rev-list --first-parent --merges 16c07d8064b0b4604e9f47ef782e7d29534402d3..HEAD
+OUTPUT:
+cca37e01eb719d65ce81dc7569b190fe9550ae5d
+98c7b04874361a1cf95b8dea90ed1c4db2f05d4d
+fd109296b5f41398350070dd8df826846d9adb1b
+EXIT: 0
+
+COMMAND: git rev-list --parents -n 1 98c7b04874361a1cf95b8dea90ed1c4db2f05d4d
+OUTPUT: 98c7b04874361a1cf95b8dea90ed1c4db2f05d4d 30528a82e32bfedc011d741e870964beb5743aa4 c043c24774228ba891ddf90d783aa6dc7d0855b5
+EXIT: 0
+
+COMMAND: git rev-list --parents -n 1 cca37e01eb719d65ce81dc7569b190fe9550ae5d
+OUTPUT: cca37e01eb719d65ce81dc7569b190fe9550ae5d 5f505520ded16114e3f2850f7b856a0650a82755 f0e7a9c7a23a7d02fb159b62fa809621eb0475a6
+EXIT: 0
+```
+
+The target second parents occur exactly once in the recorded first-parent merge list: v0.1.171 is index `0` and v0.1.170 is index `1` from newest to oldest, giving chronological order v0.1.170 then v0.1.171. HEAD `7b18bcf...` has only the previous build ledger and verify report relative to `436ebf...`; it is a reports-only commit.
+
+| Filename | Literal command and exit | Authority / HEAD blob output |
+| --- | --- | --- |
+| `191_passkey_credentials.sql` | `git cat-file -e HEAD:backend/migrations/191_passkey_credentials.sql`, exit `0` | `git rev-parse 16c07d8064b0b4604e9f47ef782e7d29534402d3:backend/migrations/191_passkey_credentials.sql HEAD:backend/migrations/191_passkey_credentials.sql`, exit `0`: `522b16b5bba12aedb9c4198d2d4ef082c8ea718f` / same |
+| `191_subscription_quota_advance_receipts.sql` | `git cat-file -e HEAD:backend/migrations/191_subscription_quota_advance_receipts.sql`, exit `0` | `git rev-parse 16c07d8064b0b4604e9f47ef782e7d29534402d3:backend/migrations/191_subscription_quota_advance_receipts.sql HEAD:backend/migrations/191_subscription_quota_advance_receipts.sql`, exit `0`: `c22d47d79cbbaf4bc40524d42ef52e6cc8ac3af6` / same |
+| `192_subscription_cache_invalidation_outbox.sql` | `git cat-file -e HEAD:backend/migrations/192_subscription_cache_invalidation_outbox.sql`, exit `0` | `git rev-parse 16c07d8064b0b4604e9f47ef782e7d29534402d3:backend/migrations/192_subscription_cache_invalidation_outbox.sql HEAD:backend/migrations/192_subscription_cache_invalidation_outbox.sql`, exit `0`: `502ecec1caf9f76e022c2e83acf3707190539301` / same |
+| `192_group_profit_control.sql` | `git cat-file -e HEAD:backend/migrations/192_group_profit_control.sql`, exit `0` | `git rev-parse c043c24774228ba891ddf90d783aa6dc7d0855b5:backend/migrations/192_group_profit_control.sql HEAD:backend/migrations/192_group_profit_control.sql`, exit `0`: `072b3c5db17accfd5197ea72f9a49fd6bdf446b4` / same |
+| `193_group_profit_control_auth_cache_invalidation.sql` | `git cat-file -e HEAD:backend/migrations/193_group_profit_control_auth_cache_invalidation.sql`, exit `0` | `git rev-parse c043c24774228ba891ddf90d783aa6dc7d0855b5:backend/migrations/193_group_profit_control_auth_cache_invalidation.sql HEAD:backend/migrations/193_group_profit_control_auth_cache_invalidation.sql`, exit `0`: `f32f6e6f8b6d026b2e8620c90954336e30550c41` / same |
+
+```text
+COMMAND: git status --short --untracked-files=all
+OUTPUT: ?? .comet/current-change.json
+EXIT: 0
+
+COMMAND: git diff --cached --name-only
+OUTPUT: (no output)
+EXIT: 0
+
+COMMAND: git diff --name-only --diff-filter=U
+OUTPUT: (no output)
+EXIT: 0
+
+COMMAND: git ls-files -u
+OUTPUT: (no output)
+EXIT: 0
+```
 
 ## Tags And Topology
 
 | Item | Object / parent list | Result |
 | --- | --- | --- |
-| `v0.1.170` | Tag object `60286d35e4b6dc6851ab69f890c2d1b7b7a3bcb8`; peeled `c043c24774228ba891ddf90d783aa6dc7d0855b5` | Annotated tag; ancestor of reporting HEAD. |
-| `v0.1.171` | Tag object `afd154b92aac36c6dafb1fa8e181ca827c78c465`; peeled `f0e7a9c7a23a7d02fb159b62fa809621eb0475a6` | Annotated tag; ancestor of reporting HEAD. |
+| `v0.1.170` | Tag object `60286d35e4b6dc6851ab69f890c2d1b7b7a3bcb8`; peeled `c043c24774228ba891ddf90d783aa6dc7d0855b5` | Annotated tag; ancestor of pre-fix rebind HEAD. |
+| `v0.1.171` | Tag object `afd154b92aac36c6dafb1fa8e181ca827c78c465`; peeled `f0e7a9c7a23a7d02fb159b62fa809621eb0475a6` | Annotated tag; ancestor of pre-fix rebind HEAD. |
 | v0.1.170 merge | `98c7b04874361a1cf95b8dea90ed1c4db2f05d4d 30528a82e32bfedc011d741e870964beb5743aa4 c043c24774228ba891ddf90d783aa6dc7d0855b5` | Exact second parent. |
 | v0.1.171 merge | `cca37e01eb719d65ce81dc7569b190fe9550ae5d 5f505520ded16114e3f2850f7b856a0650a82755 f0e7a9c7a23a7d02fb159b62fa809621eb0475a6` | Exact second parent; follows v0.1.170 on first parent. |
 
 ## Task 16 Focused Gates
 
-These are the complete inherited final-source command outcomes from the Task 16 temporary report. All Go commands ran from `backend`; Vitest commands ran from repository root.
+The compact index below is superseded by the exact 28-row inherited transcript that follows it. All Go commands ran from `backend`; Vitest commands ran from repository root.
 
 | ID | Command | Exit | Result |
 | --- | --- | ---: | --- |
 | F1 | `go test -count=1 ./internal/service -run '^(Test.*Profit.*|Test.*Pricing.*|Test.*Layered.*|Test.*Sticky.*|Test.*WaitPlan.*|TestGatewayServiceRecordUsage.*|TestGatewayBillingEligibility.*)$'` | 0 | PASS |
 | F2 | `go test -tags=unit -count=1 ./internal/service -run '^(Test.*Profit.*|Test.*Pricing.*|Test.*Layered.*|Test.*Sticky.*|Test.*WaitPlan.*|TestGatewayServiceRecordUsage.*|TestGatewayBillingEligibility.*)$'` | 0 | PASS |
 | F3 | `go test -count=1 ./internal/handler -run '^(Test.*Profit.*|TestOpenAI.*Pricing.*|TestGatewayHandler.*Sticky.*|Test.*Sticky.*|Test.*WaitPlan.*|Test.*Usage.*)$'` | 0 | PASS |
-| F4 | `go test -tags=unit -count=1 ./internal/handler -run '^(Test.*Profit.*|TestOpenAI.*Pricing.*|TestGatewayHandler.*Sticky.*|Test.*WaitPlan.*|Test.*Usage.*)$'` | 0 | PASS |
+| F4 | `go test -tags=unit -count=1 ./internal/handler -run '^(Test.*Profit.*|TestOpenAI.*Pricing.*|TestGatewayHandler.*Sticky.*|Test.*Sticky.*|Test.*WaitPlan.*|Test.*Usage.*)$'` | 0 | PASS |
 | F5 | `go test -count=1 ./internal/service -run '^(TestGateway.*PartialUsage.*|TestOpenAI.*(WS|WebSocket).*|Test.*Anthropic.*|Test.*ContentModeration.*|Test.*Subscription.*|Test.*Setting.*|Test.*RequestBody.*)$'` | 0 | PASS |
 | F6 | `go test -tags=unit -count=1 ./internal/service -run '^(TestDelayedFirstUseAnchorsMonthlyWindowAtStartsAt|TestAdminResetQuota_.*)$'` | 0 | PASS |
 | F7 | `go test -count=1 ./internal/handler -run '^(TestOpenAI.*(WS|WebSocket|Images|Responses).*|TestGatewayHandler.*(Usage|Body|Settings).*)$'` | 0 | PASS |
@@ -62,6 +134,71 @@ These are the complete inherited final-source command outcomes from the Task 16 
 | F26 | `go test -count=1 ./internal/server/routes -run '^(TestEveryGatewayPOSTRouteIsClassifiedForPromptAuditCoverage|TestResponsesWebSocketHasFirstAndSubsequentTurnPromptGates)$'` | 0 | PASS, 2 named tests |
 | F27 | `go test -count=1 ./internal/server/middleware` | 0 | PASS |
 | F28 | `pnpm --dir frontend exec vitest run src/views/admin/__tests__/SettingsView.spec.ts` | 0 | PASS, 36 tests |
+
+### Exact Inherited 28-Row Transcript
+
+| ID | Task | Exact command | Exit | Count / elapsed | Warnings / result |
+| --- | ---: | --- | ---: | --- | --- |
+| F1 | 7 | `go test -count=1 ./internal/service -run '^(Test.*Profit.*|Test.*Pricing.*|Test.*Layered.*|Test.*Sticky.*|Test.*WaitPlan.*|TestGatewayServiceRecordUsage.*|TestGatewayBillingEligibility.*)$'` | 0 | 1 package; Go 1.670s; wall 8.119s | PASS |
+| F2 | 7 | `go test -tags=unit -count=1 ./internal/service -run '^(Test.*Profit.*|Test.*Pricing.*|Test.*Layered.*|Test.*Sticky.*|Test.*WaitPlan.*|TestGatewayServiceRecordUsage.*|TestGatewayBillingEligibility.*)$'` | 0 | 1 package; Go 8.730s; wall 16.016s | PASS |
+| F3 | 7 | `go test -count=1 ./internal/handler -run '^(Test.*Profit.*|TestOpenAI.*Pricing.*|TestGatewayHandler.*Sticky.*|Test.*Sticky.*|Test.*WaitPlan.*|Test.*Usage.*)$'` | 0 | 1 package; Go 11.978s; wall 17.770s | PASS |
+| F4 | 7 | `go test -tags=unit -count=1 ./internal/handler -run '^(Test.*Profit.*|TestOpenAI.*Pricing.*|TestGatewayHandler.*Sticky.*|Test.*Sticky.*|Test.*WaitPlan.*|Test.*Usage.*)$'` | 0 | 1 package; Go 43.061s; wall 49.365s | PASS |
+| F5 | 8 | `go test -count=1 ./internal/service -run '^(TestGateway.*PartialUsage.*|TestOpenAI.*(WS|WebSocket).*|Test.*Anthropic.*|Test.*ContentModeration.*|Test.*Subscription.*|Test.*Setting.*|Test.*RequestBody.*)$'` | 0 | 1 package; Go 45.559s; wall 51.880s | PASS |
+| F6 | 8 | `go test -tags=unit -count=1 ./internal/service -run '^(TestDelayedFirstUseAnchorsMonthlyWindowAtStartsAt|TestAdminResetQuota_.*)$'` | 0 | 1 package; Go 1.623s; wall 8.921s | PASS |
+| F7 | 8 | `go test -count=1 ./internal/handler -run '^(TestOpenAI.*(WS|WebSocket|Images|Responses).*|TestGatewayHandler.*(Usage|Body|Settings).*)$'` | 0 | 1 package; Go 21.020s; wall 26.808s | PASS |
+| F8 | 8 | `go test -tags=unit -count=1 ./internal/handler -run '^TestGatewayHandler_Messages(ForwardErrorStillCreatesUsageLog|FailoverExhaustedStillCreatesUsageLog|SelectionExhaustedAfterFailoverStillCreatesUsageLog|StreamingPartialWriteFailureStillCreatesUsageLog)$'` | 0 | 1 package / 4 named cases; Go 1.605s; wall 8.214s | Exact usage PASS |
+| F9 | 8 | `go test -tags=unit -count=1 ./internal/handler -run '^TestGatewayHandler_GeminiV1BetaModels_(ForwardErrorStillCreatesUsageLog|FailoverExhaustedStillCreatesUsageLog|SelectionExhaustedAfterFailoverStillCreatesUsageLog)$'` | 0 | 1 package / 3 named cases; Go 30.281s; wall 36.613s | Exact Gemini usage PASS |
+| F10 | 8 | `pnpm --dir frontend exec vitest run src/components/account/__tests__/CreateAccountModal.spec.ts src/components/account/__tests__/EditAccountModal.spec.ts src/components/account/__tests__/BulkEditAccountModal.spec.ts src/components/account/__tests__/UpstreamBillingRateCell.spec.ts src/components/payment/__tests__/PaymentMethodSelector.spec.ts src/features/prompt-audit/__tests__/viewModel.spec.ts src/features/prompt-audit/__tests__/PromptAuditView.spec.ts src/views/admin/__tests__/AccountsView.bulkEdit.spec.ts src/views/admin/__tests__/SettingsView.spec.ts` | 0 | 9 files / 174 tests; Vitest 11.74s; wall 13.813s | Existing Browserslist, `router-link`, and jsdom `AggregateError` stderr; PASS |
+| F11 | 9 | Literal ordered-map command in appendix | 0 | 5 files / 5 blob matches; 1.487s | Every `cat-file`, authority/HEAD `rev-parse`, source ref, and OID recorded; PASS |
+| F12 | 9 | `go test -tags=integration -count=1 -v ./internal/repository -run '^TestMigrationsRunner_PreservesPasskeyAndSubscriptionQuotaMigrationsAcrossUpgrade$'` | 0 | 1 package; Go 1.681s; wall 17.446s | `docker is not available; skipping integration tests`; no target PASS; Docker-only UNVERIFIED |
+| F13 | 10 | `go test -tags=unit -count=1 -v ./internal/service -run 'Test(AdminResetQuota|AutomaticWindow|CheckAndResetWindowsResetsPartialFinalMonthlySubscriptions|AutomaticWindowsAllowPartialFinalDailyAndWeeklyPeriods)'` | 0 | 1 package / 21 top-level tests and 4 subtests; Go 1.634s; wall 8.882s | Exact-window PASS |
+| F14 | 10 | `go test -tags=unit -count=1 ./internal/service` | 0 | 1 package; Go 170.305s; wall 177.675s | Stage unit package PASS |
+| F15 | 12 | `go test -count=1 ./internal/pkg/openai -run '^Test.*Codex.*'` | 0 | 1 package; Go 0.541s; wall 2.404s | PASS |
+| F16 | 12 | `go test -count=1 ./internal/service -run '^(Test.*Codex.*|Test.*Capacity.*|Test.*AlphaSearch.*|TestOpenAI.*(Forward|Passthrough|WS).*)$'` | 0 | 1 package; Go 44.740s; wall 51.020s | PASS |
+| F17 | 12 | `go test -count=1 ./internal/handler -run '^(Test.*Gateway.*(Body|Failover|Usage).*|TestOpenAI.*WebSocket.*)$'` | 0 | 1 package; Go 19.447s; wall 25.253s | PASS |
+| F18 | 13 | `go test -count=1 ./internal/service -run '^(Test.*(Tencent|Aliyun|Turnstile|Captcha|Auth|Refund|Renewal|Reasoning|WebSocket|Prompt|Usage).*)$'` | 0 | 1 package; Go 11.882s; wall 18.204s | PASS |
+| F19 | 13 | `go test -count=1 ./internal/handler -run '^(Test.*(Captcha|Auth|Passkey|Setting|Prompt|Usage).*)$'` | 0 | 1 package; Go 10.781s; wall 16.579s | PASS |
+| F20 | 13 | `go test -count=1 ./internal/server/middleware -run '^(Test.*(Auth|SecurityHeaders|CSP).*)$'` | 0 | 1 package; Go 1.990s; wall 6.842s | PASS |
+| F21 | 13 | `pnpm --dir frontend exec vitest run src/components/__tests__/AliyunCaptchaWidget.spec.ts src/components/__tests__/TencentCaptchaGate.spec.ts src/components/auth/__tests__/PendingOAuthCreateAccountForm.spec.ts src/views/auth/__tests__/TencentCaptchaActionGate.spec.ts src/views/admin/__tests__/SettingsView.spec.ts src/views/admin/__tests__/groupsReasoningEffort.spec.ts` | 0 | 6 files / 73 tests; Vitest 9.41s; wall 11.360s | Existing Browserslist, `router-link`, and jsdom `AggregateError` stderr; PASS |
+| F22 | 13 audit | `go test -tags=unit -count=1 ./internal/service -run '^(Test(VerifyCaptcha.*|VerifyActionCaptcha.*|AuthServiceVerifyActionCaptcha.*|SettingService_.*Captcha.*|PrepDeductBalanceRequiresForceWhenBalanceIsInsufficient|WriteFailedUsageLogBestEffort_CreatesZeroCostUsageLog|AssignOrExtendSubscription.*|OpenAIWSIngressLease.*|OpenAIGatewayService_ProxyResponsesWebSocketFromClient_(LeaseLossSendsRetryClose|IdleTimeoutReleasesStoreDisabledSession)))$'` | 0 | 1 package; Go 2.663s; wall 9.989s | Tagged/unit audit PASS |
+| F23 | 13 audit | `go test -tags=unit -count=1 ./internal/handler -run '^(Test(PasskeyBeginLogin.*|OpenAIReasoningEffortPolicyForCompositeTarget|GatewayHandlerPreCancelledCompatibleRequestsDoNotSelectAccount|OpenAIGatewayHandler_.*FailedUsage.*|OpenAIResponsesWebSocket.*FailedUsage.*))$'` | 0 | 1 package; Go 2.042s; wall 8.313s | Tagged/unit audit PASS |
+| F24 | 13 audit | `go test -tags=unit -count=1 ./internal/payment/provider -run '^TestStripeRefundUsesStableAmountSpecificIdempotencyKey$'` | 0 | 1 package; Go 1.216s; wall 4.395s | PASS |
+| F25 | 13 audit | `go test -count=1 ./internal/securityaudit -run '^(Test(PromptSnapshot.*|ResponsesWebSocketOnlyAuditsResponseCreateAndPreservesStage))$'` | 0 | 1 package; Go 1.796s; wall 6.852s | PASS |
+| F26 | 13 audit | `go test -count=1 ./internal/server/routes -run '^(TestEveryGatewayPOSTRouteIsClassifiedForPromptAuditCoverage|TestResponsesWebSocketHasFirstAndSubsequentTurnPromptGates)$'` | 0 | 1 package / 2 named tests; Go 1.599s; wall 7.308s | PASS |
+| F27 | 13 audit | `go test -count=1 ./internal/server/middleware` | 0 | 1 package; Go 1.894s; wall 6.679s | PASS |
+| F28 | 13 audit | `pnpm --dir frontend exec vitest run src/views/admin/__tests__/SettingsView.spec.ts` | 0 | 1 file / 36 tests; Vitest 9.09s; wall 11.038s | Existing Browserslist, `router-link`, and jsdom `AggregateError` stderr; PASS |
+
+### F11 Literal Ordered-Map Command
+
+```powershell
+$sourceBase = '16c07d8064b0b4604e9f47ef782e7d29534402d3'
+$tag170 = 'c043c24774228ba891ddf90d783aa6dc7d0855b5'
+$requiredMigrationSources = [ordered]@{
+    '191_passkey_credentials.sql' = $sourceBase
+    '191_subscription_quota_advance_receipts.sql' = $sourceBase
+    '192_subscription_cache_invalidation_outbox.sql' = $sourceBase
+    '192_group_profit_control.sql' = $tag170
+    '193_group_profit_control_auth_cache_invalidation.sql' = $tag170
+}
+
+foreach ($entry in $requiredMigrationSources.GetEnumerator()) {
+    $name = $entry.Key
+    $sourceRef = $entry.Value
+    git cat-file -e "HEAD:backend/migrations/$name"
+    $catFileExit = $LASTEXITCODE
+    $expectedOutput = @(git rev-parse "${sourceRef}:backend/migrations/$name" 2>&1)
+    $expectedExit = $LASTEXITCODE
+    $actualOutput = @(git rev-parse "HEAD:backend/migrations/$name" 2>&1)
+    $actualExit = $LASTEXITCODE
+    $expected = ($expectedOutput -join '').Trim()
+    $actual = ($actualOutput -join '').Trim()
+    $match = $catFileExit -eq 0 -and $expectedExit -eq 0 -and $actualExit -eq 0 -and $expected -eq $actual
+    "FILENAME=$name SOURCE_REF=$sourceRef CAT_FILE_EXIT=$catFileExit EXPECTED_EXIT=$expectedExit ACTUAL_EXIT=$actualExit EXPECTED=$expected ACTUAL=$actual MATCH=$match"
+    if (-not $match) { exit 1 }
+}
+```
+
+F11 exited `0` for five entries; every `cat-file`, authority `rev-parse`, and HEAD `rev-parse` exit was `0`, and all expected/actual OID pairs match the migration table below.
 
 ## Full, Build, Generate, And Static Gates
 
@@ -96,25 +233,32 @@ The canonical `Invoke-MigrationUpgradeIntegration -Stage 'final'` helper was inh
 
 ## Capability Review
 
-CodeGraph was used before supplemental read-only source confirmation. It confirmed these current paths: layered scheduling is `OpenAIGatewayHandler -> OpenAIGatewayService -> getOpenAIAccountSchedulerWithContext -> layeredOpenAIAccountScheduler.Select`; `selectBySessionHash` checks schedulable/platform/privacy/request/transport compatibility, does DB recheck, then acquires a slot or returns `WaitPlan`. OpenAI Images calls `checkSecurityAuditLazy` before `ReleaseText`. `AdminResetQuota` uses `s.now()` for manual reset anchoring.
+CodeGraph preceded the supplemental review. It located `GetPoolModeRetryCount`, `TestGetPoolModeRetryStatusCodes`, and `FailoverState.HandleFailoverError`; its source shows the account retry count is clamped to `0..10` and same-account retry occurs before temporary unscheduling/switching. The fresh, short direct checks below ran on pre-fix HEAD `7b18bcf...`:
 
-| # | Capability | Call-path evidence | Test evidence | Status |
+| ID | Command | Exit | Result |
+| --- | --- | ---: | --- |
+| P1 | `go test -tags=unit -count=1 ./internal/service -run '^(TestGetPoolModeRetryCount|TestGetPoolModeRetryStatusCodes|TestIsPoolModeRetryableStatus_Account)$'` | 0 | `ok github.com/Wei-Shaw/sub2api/internal/service 1.656s` |
+| P2 | `go test -count=1 ./internal/handler -run '^TestHandleFailoverError_SameAccountRetry$'` | 0 | `ok github.com/Wei-Shaw/sub2api/internal/handler 8.266s` |
+
+| # | Canonical capability | Call-path evidence | Direct / supporting evidence | Status |
 | ---: | --- | --- | --- | --- |
-| 1 | Advanced/layered scheduler, pool admission, DB recheck, sticky, WaitPlan/fallback | Gateway handler -> scheduler service -> layered `Select` -> sticky DB recheck -> slot/`WaitPlan`; pool retry remains in account selection. | F1-F4 | `protected` |
-| 2 | Grok/platform/session sticky, privacy/image capability, prompt-cache reuse | Responses/Images -> capability scheduler -> previous-response/session sticky -> platform/privacy/image/transport filters. | F1-F10 and full gate support this path, but not every cross-product. | `manual` |
-| 3 | OpenAI HTTP/WS/turn ownership, final outbound account/model, usage/circuit, replay/release | HTTP/WS ingress -> admission -> forward/failover -> final account/model usage; turn and request-body cleanup are terminal-path owned. | F5-F10, F15-F17 | `manual` |
-| 4 | Alpha-search, Responses/PAT/composite reasoning and routing | AlphaSearch -> ForwardAlphaSearch -> matched body handle -> fallback/retry/cleanup; composite resolver/reasoning precedes forward. | F15-F18 | `manual` |
-| 5 | Unified security audit, latest-input/proxy/Images duplicate moderation and snapshot stage | Gateway/Images -> audit coordinator -> snapshot/legacy moderation; Images lazy audit precedes text release. | F5, F25, F26 | `protected` |
-| 6 | Runtime settings, auth cache/session/step-up, captcha providers/CSP and fail-closed auth | Setting update -> runtime refresh; auth cache -> session binding/step-up; captcha provider selection -> auth gate/CSP. | F18-F23, F27-F28 | `protected` |
-| 7 | Exact subscription windows, renewal lock, quota reset/receipt/outbox, refund and failed usage | Refund/subscription -> locked repository -> receipt/reset -> post-commit outbox; failed usage preserves final identity. | F13-F14, F18, F22, F24 | `protected` |
-| 8 | User resource controls, group duplication, account shadow and admin bulk limits | Admin handlers -> AdminService -> repository transaction/resource paths. | Root full gate plus F10 | `protected` |
-| 9 | Local frontend account/settings/payment/prompt-audit/captcha/reasoning behavior | Local views/components -> local admin/auth APIs -> backend contracts. | F10, F21, F28 and full gate | `protected` |
-| 10 | Dependencies, generated Ent/Wire, VERSION and merge topology | Manifest/schema/provider -> source-driven outputs; VERSION/tag/merge checks bind release topology. | Full/build/two-generate/static/topology gates | `protected` |
-| 11 | Migration filenames, blobs and integration | Migration runner -> full filenames/checksums -> PostgreSQL upgrade paths. | F11 passed; F12 target was skipped without Docker. | Docker-only `unverified` |
+| 1 | scheduler/layered/pool/WaitPlan | `OpenAIGatewayHandler -> OpenAIGatewayService -> getOpenAIAccountSchedulerWithContext -> layeredOpenAIAccountScheduler.Select -> selectBySessionHash -> DB recheck -> slot or WaitPlan`; pool retry flows through `GetPoolModeRetryCount` and `HandleFailoverError`. | Direct: P1/P2, F1-F4. Supporting: final full gate. | `protected` |
+| 2 | Grok/platform/session/privacy/image | `ResponsesWebSocket`/Images -> capability scheduler -> previous-response or session sticky -> platform/privacy/image/transport filters. | Supporting: F1-F10 and full gate; no direct test covers every Grok/platform/privacy/image combination. | `manual` |
+| 3 | OpenAI HTTP/WS/usage/cache/circuit | HTTP/WS ingress -> admission/turn ownership -> final outbound account/model -> usage; prompt-cache reuse and proxy circuit remain on the forwarding path. | Direct: F5-F9, F15-F17. Supporting: full gate; cache/circuit composition remains source-reviewed. | `manual` |
+| 4 | alpha-search/Responses/PAT/body handle | `AlphaSearch -> ForwardAlphaSearch -> matched RequestBodyHandle -> Responses/PAT fallback/retry/cleanup`; composite route/reasoning policy precedes forwarding. | Direct: F16. Supporting: F15-F18 and full gate; PAT composition is source-reviewed. | `manual` |
+| 5 | request-body/images/async image tasks/object storage/image input billing | Images/gateway body coordinator -> effective handle -> `ForwardImages` -> image task store/object storage -> image input/output usage billing. | Direct: F5, F7. Supporting: full gate; async-task/storage/input-billing composition is source-reviewed. | `manual` |
+| 6 | prompt/security audit + Images | Gateway/Images -> unified audit coordinator -> latest-input/proxy/legacy moderation -> prompt snapshot stage; Images calls lazy audit before `ReleaseText`. | Direct: F7, F25-F26. Supporting: F5 and full gate. | `protected` |
+| 7 | settings/cache/session/step-up/captcha/CSP | Setting update -> scoped persistence/runtime refresh; auth cache -> session binding/step-up; provider selection -> fail-closed auth gates/CSP. | Direct: F18-F23, F27-F28. | `protected` |
+| 8 | subscription/renewal/refund/receipt/outbox | Refund/subscription -> locked repository -> receipt/reset -> post-commit cache-invalidation outbox; failed usage preserves final identity. | Direct: F13-F14, F18, F22, F24. | `protected` |
+| 9 | user resource/group duplication/account shadow/admin bulk/frontend | Admin handler -> `AdminService` -> repository transaction/resource controls; local Accounts/Groups/admin frontend remains on local APIs. | Direct: final `make test` duplicate/bulk/shadow coverage, F10/F21/F28 frontend suites. | `protected` |
+| 10 | Codex identity/dynamic version/custom UA/bounded overload retry | HTTP/passthrough/WS/probe/model-list/alpha-search -> Codex identity finalizer/dynamic version -> bounded same-account retry -> final error/account/model. | Direct: F15-F17. Supporting: full gate. | `protected` |
+| 11 | Ent/Wire/dependency/migration filenames/blobs/integration | Schema/provider/manifest -> source-driven Ent/Wire; migration runner -> filenames/checksums -> PostgreSQL upgrade integration. | Direct: full/build/two-generate/static and F11. Docker F12 has no target PASS. | Docker-only `unverified` |
 
-Matrix counts: `protected=7`, `manual=3`, Docker-only `unverified=1`, `gap=0`. `manual` rows have both call-path review and passing supporting gates, but are not promoted on call-path evidence alone.
+Matrix counts: `protected=6`, `manual=4`, Docker-only `unverified=1`, `gap=0`. A `protected` row has direct behavior/gate evidence; every `manual` row has its call path plus supporting gates but is not promoted from call-path evidence alone.
 
 ## Strict Validation
+
+Inherited from the prior final verification; not rerun during this review fix because OpenSpec artifacts are unchanged.
 
 ```text
 COMMAND: comet classic openspec -- validate staged-merge-upstream-v0-1-171 --strict

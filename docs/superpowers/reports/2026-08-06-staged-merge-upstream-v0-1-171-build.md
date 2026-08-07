@@ -962,14 +962,15 @@ frontend/src/views/auth/__tests__/WechatCallbackView.spec.ts
 | --- | --- | --- |
 | Immutable source base | `16c07d8064b0b4604e9f47ef782e7d29534402d3` | Ancestor of execution base and reporting HEAD; source VERSION was `0.1.169.3`. |
 | Execution base | `fd109296b5f41398350070dd8df826846d9adb1b` | Ancestor of reporting HEAD; checkpoint merge with the immutable source base. |
-| Tested source HEAD | `73df7248383b9f534df64956efe3c0d321f0e3bc` | Task 16 source gate, the one-file `chore: bump version to 0.1.171.1` commit. |
+| Task 16 actual repository HEAD | `unrecorded` | Task 16 preflight omitted `git rev-parse HEAD`. |
+| Final product-source anchor | `73df7248383b9f534df64956efe3c0d321f0e3bc` | One-file `chore: bump version to 0.1.171.1` commit; not claimed as Task 16's actual HEAD. |
 | Reporting HEAD | `436ebf66676aabee02e44a974e76cbb671b4e163` | Rebound by `git rev-parse HEAD`; VERSION is `0.1.171.1`. |
 | Post-test history | `440ba3f`, `7175134`, `5149a93`, `b182aab`, `75c234c`, `436ebf6` | Only plan/OpenSpec checkoffs and Comet checkpoint progress. `git diff --name-only 73df724..HEAD` contains only the plan, OpenSpec tasks, and `.comet/subagent-progress.md`; no product, test, VERSION, or generated file changed after Task 16. |
 | Initial worktree | `?? .comet/current-change.json` only | Selector-only; index empty; no unmerged entries. |
 
 ### Task 16 Gates Inherited Without Rerun
 
-Task 16 ran the final focused set on tested source HEAD `73df724...`; its complete command transcript is preserved in the Task 16 temporary report. All non-Docker focused commands returned exit `0`: scheduler/usage default and unit service/handler, gateway/body/audit/subscription and exact failed-usage handler tests, 9-file account/settings/payment/prompt-audit frontend suite, five-migration identity loop, exact subscription-window and full service-unit gates, Codex/capacity/alpha-search/gateway-body suites, auth/refund/reasoning/CSP suites, 6-file captcha/settings/reasoning frontend suite, tagged audit suites, Stripe, security-audit, routes, middleware, and SettingsView gates.
+Task 16's actual repository HEAD is unrecorded. Its preflight establishes selector-only state and final VERSION; controller post-run history binds the inherited test evidence to the unchanged `73df724...` final product-source anchor without asserting that anchor was the actual Task 16 HEAD. Its complete command transcript is preserved in the Task 16 temporary report. All non-Docker focused commands returned exit `0`: scheduler/usage default and unit service/handler, gateway/body/audit/subscription and exact failed-usage handler tests, 9-file account/settings/payment/prompt-audit frontend suite, five-migration identity loop, exact subscription-window and full service-unit gates, Codex/capacity/alpha-search/gateway-body suites, auth/refund/reasoning/CSP suites, 6-file captcha/settings/reasoning frontend suite, tagged audit suites, Stripe, security-audit, routes, middleware, and SettingsView gates.
 
 | Gate | Exact inherited result |
 | --- | --- |
@@ -1002,23 +1003,7 @@ The canonical Task 17 `Invoke-MigrationUpgradeIntegration -Stage 'final'` result
 
 ### Final Capability Matrix
 
-Task 18 reread the final source with CodeGraph before direct read-only confirmation of stale-index candidates. `layeredOpenAIAccountScheduler.Select` performs previous-response, session sticky, then layered selection; `selectBySessionHash` applies platform/privacy/request/transport checks and DB recheck before slot acquisition and only then returns a `WaitPlan`. `OpenAIGatewayHandler.Images` runs lazy security audit before `ReleaseText`. `SubscriptionService.AdminResetQuota` anchors manual resets at `s.now()`.
-
-| # | Capability and call-path evidence | Direct gate evidence | Status |
-| ---: | --- | --- | --- |
-| 1 | `OpenAIGatewayHandler -> OpenAIGatewayService -> getOpenAIAccountSchedulerWithContext -> layered Select -> selectBySessionHash/DB recheck -> slot or WaitPlan`; pool admission and same-account retry remain in the selection path. | Task 16 scheduler/usage default+unit service and handler focused gates all exit `0`. | `protected` |
-| 2 | `ResponsesWebSocket/Images -> SelectAccountWithSchedulerForCapability -> layered sticky -> platform/privacy/image/transport filters`; previous-response and session sticky preserve fallback semantics. | Focused sticky/gateway suites and final full gate passed, but no one direct test covers every Grok/platform/privacy/image cross-product. | `manual` |
-| 3 | HTTP/WS ingress -> selection/admission -> final outbound account/model -> usage/circuit; turn leases and body handles are released on terminal paths. | Task 16 gateway/body/failover/usage, exact failed-usage, Codex/forward/WS, and full gates passed; prompt-cache/circuit composition is source-reviewed. | `manual` |
-| 4 | `AlphaSearch -> ForwardAlphaSearch -> matched RequestBodyHandle -> Responses/PAT fallback/retry/cleanup`; composite route resolution and reasoning policy remain before forwarding. | Task 16 AlphaSearch/Codex/capacity gates and reasoning focused gates passed; PAT side-effect composition is source-reviewed. | `manual` |
-| 5 | Images and gateway routes -> unified audit coordinator -> latest-input/proxy/legacy moderation -> prompt snapshot stage; Images invokes lazy audit before text release. | Task 16 security-audit and route coverage tests, Images/gateway focused gates, and full gate passed. | `protected` |
-| 6 | Settings handler -> scoped update/runtime refresh; auth -> L1/L2 cache -> session binding/step-up; captcha provider selection -> fail-closed auth routes -> CSP. | Task 16 settings/auth/passkey/captcha/CSP, tagged audit, middleware, and SettingsView gates all passed. | `protected` |
-| 7 | Subscription/refund -> locked repository -> receipt/reset -> post-commit invalidation outbox; failed usage follows final account/model and zero-cost failure rules. | Task 16 exact-window, service-unit, refund/renewal/usage, Stripe, and tagged audit gates passed. | `protected` |
-| 8 | Admin account/group actions -> `AdminService` -> repository transaction paths; duplicate, shadow, and bulk limits retain local controls. | Direct backend duplicate/bulk/shadow coverage is included in final `make test`; Task 16 account/admin frontend suite passed. | `protected` |
-| 9 | Local account/settings/payment/prompt-audit/captcha/reasoning views -> local admin/auth APIs -> backend contracts. | Task 16 9-file/174-test and 6-file/73-test frontend suites, SettingsView, and full 1806-test gate passed. | `protected` |
-| 10 | Dependency/manifest and schema/provider sources -> Ent/Wire; final VERSION, tag topology, and generated output stay source-driven. | Final build, two generate rounds with zero diff, static checks, VERSION, tag and merge-parent checks passed. | `protected` |
-| 11 | Migration runner -> full filenames/checksums -> PostgreSQL upgrade integration; all five authoritative blobs match HEAD. | Static identity loop passed. Canonical helper returned `unverified`, not PASS, because Docker is absent. | Docker-only `unverified` |
-
-Matrix totals: `protected=7`, `manual=3`, Docker-only `unverified=1`, `gap=0`. Manual rows retain both reviewed call paths and passing supporting gates, but are not represented as fully direct behavior proofs. The sole unverified integration leaves empty database, local 191/192 upgrade, ordering, idempotency, relations, and checksum contracts unverified.
+The initial Task 18 matrix summary is replaced by the canonical 11-row Review-Fix 1/2 matrix below. It corrects row identities, applies the direct-evidence threshold for `protected`, and is the only final matrix/count source in this ledger.
 
 ### Task 18 Strict Validation And Scope
 
@@ -1029,3 +1014,43 @@ EXIT: 0
 ```
 
 This change was not pushed, tagged, released, deployed, or used to operate any server. Task 18 did not run Docker integration or `go test -race`; race remains unavailable because cgo is unavailable. Final state: `DONE_WITH_CONCERNS` solely for the documented Docker integration and race residuals.
+
+## Review-Fix 1/2: Final Evidence Correction
+
+This section supersedes the Task 16-18 provenance and final matrix above where they differ. No product, test, plan, task, checkpoint, VERSION, runtime, or server operation changed.
+
+### Provenance Correction And Pre-Fix Rebind
+
+- Task 16 preflight did not record `git rev-parse HEAD`. Its actual repository HEAD is therefore `unrecorded`; `73df7248383b9f534df64956efe3c0d321f0e3bc` is the final product-source anchor/version commit, not a claimed actual tested HEAD.
+- Task 16 did record selector-only status, exact `VERSION=0.1.171.1`, empty index, and no unmerged entries. A controller post-run history/diff capture is explicitly not Task 16 preflight evidence: from `73df724...` through the reporting lineage only plan/OpenSpec task checkoffs, Comet checkpoints, and report commits changed. The inherited tests can therefore be bound to the unchanged `73df724...` product tree without asserting Task 16's repository HEAD.
+- The fresh pre-fix rebind ran on `7b18bcf7ffdfbd88ce16c4e5bec80232ac2883c2`, a reports-only commit whose parent is `436ebf66676aabee02e44a974e76cbb671b4e163` and whose only paths are the build ledger and verify report. It recorded `VERSION=0.1.171.1`, both annotated tag objects and peeled SHAs, both ancestor checks, first-parent merge list/parents/order, five `cat-file -e` checks, five authority/HEAD blob pairs, selector-only status, empty index, and no unmerged paths. The literal commands, outputs, and exits are in the persistent verify report's `Review-Fix 1 Pre-Fix Rebind` section.
+- Target merge uniqueness/order from that actual rebind: v0.1.170 is exactly `98c7b04874361a1cf95b8dea90ed1c4db2f05d4d` with second parent `c043c24774228ba891ddf90d783aa6dc7d0855b5`; v0.1.171 is exactly `cca37e01eb719d65ce81dc7569b190fe9550ae5d` with second parent `f0e7a9c7a23a7d02fb159b62fa809621eb0475a6`; first-parent chronological order is v0.1.170 then v0.1.171.
+
+### Task 16 Transcript Correction
+
+- The verify report now contains all 28 inherited Task 16 rows with their exact commands/regexes, package/file/test counts, elapsed times, warnings, and PASS or Docker-only UNVERIFIED outcomes. F4 includes the omitted `Test.*Sticky.*` alternative.
+- F11 is no longer a non-executable summary: the verify report includes the literal ordered-map PowerShell command, all five filename/source mappings, and its `0` exit / five exact blob-match result.
+- Task 18 did not rerun the long focused/full/build/generate gates. It ran only the following fresh short pool/retry checks on pre-fix HEAD `7b18bcf...` after CodeGraph located their real packages and names:
+
+| Command | Exit | Result |
+| --- | ---: | --- |
+| `go test -tags=unit -count=1 ./internal/service -run '^(TestGetPoolModeRetryCount|TestGetPoolModeRetryStatusCodes|TestIsPoolModeRetryableStatus_Account)$'` | 0 | `ok github.com/Wei-Shaw/sub2api/internal/service 1.656s` |
+| `go test -count=1 ./internal/handler -run '^TestHandleFailoverError_SameAccountRetry$'` | 0 | `ok github.com/Wei-Shaw/sub2api/internal/handler 8.266s` |
+
+### Corrected Canonical 11-Row Matrix
+
+| # | Canonical capability | Call path | Direct / supporting evidence | Status |
+| ---: | --- | --- | --- | --- |
+| 1 | scheduler/layered/pool/WaitPlan | Gateway handler -> scheduler -> layered Select -> sticky DB recheck -> slot or WaitPlan; pool retry -> count/status -> `HandleFailoverError`. | Direct P1/P2 and Task 16 F1-F4; full gate supports. | `protected` |
+| 2 | Grok/platform/session/privacy/image | Responses/Images -> capability scheduler -> previous-response/session sticky -> platform/privacy/image/transport filters. | Supporting F1-F10/full; no direct all-cross-product test. | `manual` |
+| 3 | OpenAI HTTP/WS/usage/cache/circuit | HTTP/WS ingress -> turn/admission -> final account/model -> usage; cache/circuit remain on forwarding path. | Direct F5-F9/F15-F17; cache/circuit composition supporting only. | `manual` |
+| 4 | alpha-search/Responses/PAT/body handle | AlphaSearch -> ForwardAlphaSearch -> matched body handle -> Responses/PAT fallback/retry/cleanup. | Direct F16; PAT composition supporting only. | `manual` |
+| 5 | request-body/images/async image tasks/object storage/image input billing | Body coordinator -> effective handle -> ForwardImages -> task store/object storage -> image billing. | Direct F5/F7; async/storage/input-billing composition supporting only. | `manual` |
+| 6 | prompt/security audit + Images | Gateway/Images -> unified audit -> latest-input/proxy/legacy moderation -> snapshot; audit precedes `ReleaseText`. | Direct F7/F25/F26. | `protected` |
+| 7 | settings/cache/session/step-up/captcha/CSP | Setting update -> runtime refresh; auth cache -> binding/step-up; provider -> fail-closed auth/CSP. | Direct F18-F23/F27-F28. | `protected` |
+| 8 | subscription/renewal/refund/receipt/outbox | Refund/subscription -> locked repo -> receipt/reset -> post-commit outbox. | Direct F13/F14/F18/F22/F24. | `protected` |
+| 9 | user resource/group duplication/account shadow/admin bulk/frontend | Admin handler -> AdminService -> repository controls; local admin frontend -> local APIs. | Direct final `make test` coverage plus F10/F21/F28. | `protected` |
+| 10 | Codex identity/dynamic version/custom UA/bounded overload retry | HTTP/passthrough/WS/probe/model-list/alpha-search -> identity/version finalizer -> bounded retry -> final account/model/error. | Direct F15-F17. | `protected` |
+| 11 | Ent/Wire/dependency/migration filenames/blobs/integration | Source manifests/schema -> Ent/Wire; migration runner -> filenames/checksums -> PostgreSQL integration. | Direct build/two-generate/static/F11; F12 has no target PASS. | Docker-only `unverified` |
+
+Corrected totals: `protected=6`, `manual=4`, Docker-only `unverified=1`, `gap=0`. Every `protected` row has direct evidence; manual rows retain call-path plus supporting evidence only. Docker migration and cgo/race residuals remain unchanged: empty database, local 191/192 upgrade, ordering, idempotency, relations, and checksum are unverified; `go test -race` remains unavailable without cgo.
