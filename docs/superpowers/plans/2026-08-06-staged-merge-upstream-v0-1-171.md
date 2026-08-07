@@ -1073,7 +1073,7 @@ Commit-NamedPaths -Message 'fix: preserve gateway body after v0.1.171' -Paths $g
 
 ### Task 13: 以 TDD 修复 v0.1.171 audit/auth、subscription/migration 和 frontend 回归
 
-- [ ] Task 13: 以 TDD 修复 v0.1.171 audit/auth、subscription/migration 和 frontend 回归
+- [x] Task 13: 以 TDD 修复 v0.1.171 audit/auth、subscription/migration 和 frontend 回归
 
 **映射 OpenSpec：**3.3
 
