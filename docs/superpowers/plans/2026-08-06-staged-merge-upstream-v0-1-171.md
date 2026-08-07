@@ -52,7 +52,9 @@ base-ref: 16c07d8064b0b4604e9f47ef782e7d29534402d3
 ```powershell
 $sourceBase = '16c07d8064b0b4604e9f47ef782e7d29534402d3'
 $tag170 = 'c043c24774228ba891ddf90d783aa6dc7d0855b5'
+$tag170Object = '60286d35e4b6dc6851ab69f890c2d1b7b7a3bcb8'
 $tag171 = 'f0e7a9c7a23a7d02fb159b62fa809621eb0475a6'
+$tag171Object = 'afd154b92aac36c6dafb1fa8e181ca827c78c465'
 $layoutJson = @(comet classic root show 2>&1)
 if ($LASTEXITCODE -ne 0) { throw "comet classic root show failed: $($layoutJson -join [Environment]::NewLine)" }
 $layout = ($layoutJson -join [Environment]::NewLine) | ConvertFrom-Json
@@ -187,6 +189,24 @@ function Assert-NoConflictArtifacts {
     $markers = @(git grep -n -I -e '^<<<<<<< ' -e '^=======$' -e '^>>>>>>> ' -- .)
     if ($LASTEXITCODE -gt 1) { throw 'tracked conflict-marker scan failed' }
     if ($markers.Count -ne 0) { throw "tracked conflict markers remain: $($markers -join '; ')" }
+}
+
+function Assert-AnnotatedTagMergeHead {
+    param(
+        [Parameter(Mandatory)][string]$TagName,
+        [Parameter(Mandatory)][string]$TagObject,
+        [Parameter(Mandatory)][string]$PeeledCommit
+    )
+    $tagRef = (@(git rev-parse -q --verify "refs/tags/$TagName" 2>$null) -join '').Trim()
+    if ($LASTEXITCODE -ne 0 -or $tagRef -ne $TagObject) { throw "$TagName tag object drifted" }
+    $tagType = (@(git cat-file -t $tagRef 2>$null) -join '').Trim()
+    if ($LASTEXITCODE -ne 0 -or $tagType -ne 'tag') { throw "$TagName is not the required annotated tag object" }
+    $tagPeel = (@(git rev-parse -q --verify "refs/tags/$TagName^{}" 2>$null) -join '').Trim()
+    if ($LASTEXITCODE -ne 0 -or $tagPeel -ne $PeeledCommit) { throw "$TagName peeled commit drifted" }
+    $mergeHeadObject = (@(git rev-parse -q --verify MERGE_HEAD 2>$null) -join '').Trim()
+    if ($LASTEXITCODE -ne 0 -or $mergeHeadObject -ne $TagObject) { throw "$TagName MERGE_HEAD object mismatch" }
+    $mergeHeadPeel = (@(git rev-parse -q --verify 'MERGE_HEAD^{}' 2>$null) -join '').Trim()
+    if ($LASTEXITCODE -ne 0 -or $mergeHeadPeel -ne $PeeledCommit) { throw "$TagName MERGE_HEAD peeled commit mismatch" }
 }
 ```
 
@@ -523,11 +543,7 @@ $merge170Exit = $LASTEXITCODE
 $merge170Conflicts = @(git diff --name-only --diff-filter=U)
 $conflictListExit = $LASTEXITCODE
 if ($conflictListExit -ne 0) { throw 'failed to enumerate v0.1.170 conflicts' }
-$mergeHeadOutput = @(git rev-parse -q --verify MERGE_HEAD 2>$null)
-$mergeHeadExit = $LASTEXITCODE
-if ($mergeHeadExit -ne 0) { throw "v0.1.170 merge did not establish MERGE_HEAD (merge exit $merge170Exit)" }
-$mergeHead = ($mergeHeadOutput -join '').Trim()
-if ($mergeHead -ne $tag170) { throw "unexpected v0.1.170 MERGE_HEAD: $mergeHead" }
+Assert-AnnotatedTagMergeHead -TagName 'v0.1.170' -TagObject $tag170Object -PeeledCommit $tag170
 if ($merge170Exit -notin @(0, 1)) { throw "v0.1.170 merge failed fatally (exit $merge170Exit)" }
 if ($merge170Exit -eq 1 -and $merge170Conflicts.Count -eq 0) { throw 'v0.1.170 merge failed without resolvable conflicts' }
 $merge170Conflicts
@@ -605,8 +621,7 @@ if ('backend/cmd/server/wire_gen.go' -in $generated170Exceptions -and
     throw 'v0.1.170 Wire output exception lacks staged Go source'
 }
 # 对完整 `git diff --cached` 做人工审查，并在冲突台账逐项记录所有 generated exception 的源映射；无法证明源驱动时停止。
-$mergeHeadBeforeCommit = @(git rev-parse -q --verify MERGE_HEAD 2>$null)
-if ($LASTEXITCODE -ne 0 -or (($mergeHeadBeforeCommit -join '').Trim()) -ne $tag170) { throw 'v0.1.170 MERGE_HEAD drifted before commit' }
+Assert-AnnotatedTagMergeHead -TagName 'v0.1.170' -TagObject $tag170Object -PeeledCommit $tag170
 git diff --cached --check
 if ($LASTEXITCODE -ne 0) { throw 'v0.1.170 merge staging has whitespace errors' }
 git commit -m 'merge: upstream v0.1.170'
@@ -837,11 +852,7 @@ $merge171Exit = $LASTEXITCODE
 $merge171Conflicts = @(git diff --name-only --diff-filter=U)
 $conflictListExit = $LASTEXITCODE
 if ($conflictListExit -ne 0) { throw 'failed to enumerate v0.1.171 conflicts' }
-$mergeHeadOutput = @(git rev-parse -q --verify MERGE_HEAD 2>$null)
-$mergeHeadExit = $LASTEXITCODE
-if ($mergeHeadExit -ne 0) { throw "v0.1.171 merge did not establish MERGE_HEAD (merge exit $merge171Exit)" }
-$mergeHead = ($mergeHeadOutput -join '').Trim()
-if ($mergeHead -ne $tag171) { throw "unexpected v0.1.171 MERGE_HEAD: $mergeHead" }
+Assert-AnnotatedTagMergeHead -TagName 'v0.1.171' -TagObject $tag171Object -PeeledCommit $tag171
 if ($merge171Exit -notin @(0, 1)) { throw "v0.1.171 merge failed fatally (exit $merge171Exit)" }
 if ($merge171Exit -eq 1 -and $merge171Conflicts.Count -eq 0) { throw 'v0.1.171 merge failed without resolvable conflicts' }
 $merge171Conflicts
@@ -912,8 +923,7 @@ if ('backend/cmd/server/wire_gen.go' -in $generated171Exceptions -and
     throw 'v0.1.171 Wire output exception lacks staged Go source'
 }
 # 对完整 `git diff --cached` 做人工审查，并在冲突台账逐项记录所有 generated exception 的源映射；无法证明源驱动时停止。
-$mergeHeadBeforeCommit = @(git rev-parse -q --verify MERGE_HEAD 2>$null)
-if ($LASTEXITCODE -ne 0 -or (($mergeHeadBeforeCommit -join '').Trim()) -ne $tag171) { throw 'v0.1.171 MERGE_HEAD drifted before commit' }
+Assert-AnnotatedTagMergeHead -TagName 'v0.1.171' -TagObject $tag171Object -PeeledCommit $tag171
 git diff --cached --check
 if ($LASTEXITCODE -ne 0) { throw 'v0.1.171 merge staging has whitespace errors' }
 git commit -m 'merge: upstream v0.1.171'
