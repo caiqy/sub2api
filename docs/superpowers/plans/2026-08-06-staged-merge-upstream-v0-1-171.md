@@ -334,7 +334,7 @@ Commit-NamedPaths -Message 'docs: record v0.1.171 baseline identity' -Paths @($b
 
 **映射 OpenSpec：**1.2
 
-**文件：**修改 build ledger。初次 full gate 已证明 `backend/internal/handler/gateway_handler.go` 与 `backend/internal/service/gateway_usage_billing.go` 存在纯 `gofmt` RED；允许只对这两个精确文件运行 `gofmt` 并独立提交 `style: format v0.1.170 gateway files`。第二次 full gate 进一步复现两个行为簇 RED：允许在 `backend/internal/service/openai_gateway_grok.go` 中让 pool mode 在保留 quota snapshot、显式 403 temporary rule 后再跳过默认调度状态，在 `backend/internal/service/user_subscription.go` 中让 legacy-anchor 纠偏使用传入的 `previous`，并把 `backend/internal/service/subscription_monthly_window_test.go` fixture 更新为 versioned monthly reset interface；分别提交 `fix: preserve grok pool error handling after v0.1.170` 与 `fix: preserve subscription automatic windows after v0.1.170`。每次修复后都必须从 Tasks 7-9 focused gates 起完整重跑 Task 10，不复用失败运行的半段结果。
+**文件：**修改 build ledger。初次 full gate 已证明 `backend/internal/handler/gateway_handler.go` 与 `backend/internal/service/gateway_usage_billing.go` 存在纯 `gofmt` RED；允许只对这两个精确文件运行 `gofmt` 并独立提交 `style: format v0.1.170 gateway files`。第二次 full gate 进一步复现两个行为簇 RED：允许在 `backend/internal/service/openai_gateway_grok.go` 中让 pool mode 在保留 quota snapshot、显式 403 temporary rule 后再跳过默认调度状态；订阅窗口按用户确认改为精确时间语义，删除 legacy midnight 纠偏，管理员重置与用户手动重置一样使用实际操作时间，并把 `backend/internal/service/subscription_monthly_window_test.go` fixture 更新为 versioned monthly reset interface。每次修复后都必须从 Tasks 7-9 focused gates 起完整重跑 Task 10，不复用失败运行的半段结果。
 
 **步骤：**
 
@@ -725,7 +725,7 @@ try {
 Invoke-CheckedNative 'v0.1.170 frontend focus tests' { pnpm --dir frontend exec vitest run src/components/account/__tests__/CreateAccountModal.spec.ts src/components/account/__tests__/EditAccountModal.spec.ts src/components/account/__tests__/BulkEditAccountModal.spec.ts src/components/account/__tests__/UpstreamBillingRateCell.spec.ts src/components/payment/__tests__/PaymentMethodSelector.spec.ts src/features/prompt-audit/__tests__/viewModel.spec.ts src/features/prompt-audit/__tests__/PromptAuditView.spec.ts src/views/admin/__tests__/AccountsView.bulkEdit.spec.ts src/views/admin/__tests__/SettingsView.spec.ts }
 ```
 
-2. 每个失败先写最小 RED，随后修复而不跨簇。必须证明请求体在 retry/failover 后不重用已关闭 handle、成功/失败 usage 不重复或遗漏、统一 audit 不绕开 latest-input/代理条件、subscription window/reset/outbox 仍保持锁和提交后失效、settings 未发送字段不丢失、本地前端入口未被上游页面改写。Task 6 已知的 tagged-unit RED 必须按用户裁决修正：首次订阅窗口锚定 entitlement `StartsAt`，`AdminResetQuota` 锚定当天零点；不得改回上游首次使用/操作时刻语义。
+2. 每个失败先写最小 RED，随后修复而不跨簇。必须证明请求体在 retry/failover 后不重用已关闭 handle、成功/失败 usage 不重复或遗漏、统一 audit 不绕开 latest-input/代理条件、subscription window/reset/outbox 仍保持锁和提交后失效、settings 未发送字段不丢失、本地前端入口未被上游页面改写。Task 6 已知的 tagged-unit RED 必须按用户最终裁决修正：首次订阅窗口锚定 entitlement `StartsAt`；所有持久化窗口直接使用精确起点，`AdminResetQuota` 与用户手动重置一样锚定实际操作时刻，不保留 legacy midnight 纠偏。
 
 3. 按实际涉及面分别提交，不将四类修复合并：
 
@@ -820,13 +820,71 @@ Commit-NamedPaths -Message 'test: cover v0.1.170 migration identity' -Paths $mig
 
 ### Task 10: 关闭 v0.1.170 阶段并记录证据
 
-- [ ] Task 10: 关闭 v0.1.170 阶段并记录证据
+- [x] Task 10: 关闭 v0.1.170 阶段并记录证据
 
 **映射 OpenSpec：**2.5
 
-**文件：**修改 build ledger。
+**文件：**修改 build ledger、technical design、`backend/internal/service/user_subscription.go`、`backend/internal/service/subscription_service.go`、`backend/internal/service/subscription_monthly_window_test.go`、`backend/internal/service/subscription_reset_quota_test.go`、`backend/internal/service/subscription_calculate_progress_test.go`、`backend/internal/service/user_subscription_daily_quota_test.go`。
 
 **步骤：**
+
+0. 先保留现有手动锚点 RED，并增加管理员精确时间断言：
+
+```powershell
+Push-Location backend
+try {
+    go test -tags=unit ./internal/service -run 'Test(AdminResetQuota_ResetBoth|AutomaticWindowPreservesPeriodAlignedLaterMidnightManualAnchor|AutomaticWindowPreservesExactMidnightManualAnchor)$' -count=1 -v
+    if ($LASTEXITCODE -eq 0) { throw 'expected exact manual-anchor RED before implementation' }
+} finally { Pop-Location }
+```
+
+预期：管理员重置仍返回当天 `00:00`，两个自动窗口测试仍把合法手动锚点改写到 `StartsAt` 相位，因此 RED。测试中把 `TestAdminResetQuota_ResetBoth` 的预期从 `startOfDay(resetAt)` 改为 `resetAt`；删除只验证 legacy midnight 纠偏的用例。仍验证末尾不足完整周期的用例把窗口起点改为精确 `StartsAt` 后保留。
+
+最小生产实现固定为：
+
+```go
+func (s *UserSubscription) effectiveDailyWindowStart() *time.Time { return s.DailyWindowStart }
+func (s *UserSubscription) effectiveWeeklyWindowStart() *time.Time { return s.WeeklyWindowStart }
+func (s *UserSubscription) effectiveMonthlyWindowStart() *time.Time { return s.MonthlyWindowStart }
+
+// automaticWindowStartAt 直接使用 *previous 作为 anchor。
+anchor := *previous
+
+// AdminResetQuota 与用户 AdvanceQuotaCycle 一样使用实际操作时间。
+windowStart := s.now()
+```
+
+删除 `isMidnight`、`fixLegacyMidnightAnchor` 及其专属测试，不新增字段或 migration。随后执行：
+
+```powershell
+gofmt -w backend/internal/service/user_subscription.go backend/internal/service/subscription_service.go backend/internal/service/subscription_monthly_window_test.go backend/internal/service/subscription_reset_quota_test.go backend/internal/service/subscription_calculate_progress_test.go backend/internal/service/user_subscription_daily_quota_test.go
+Push-Location backend
+try {
+    go test -tags=unit ./internal/service -run 'Test(AdminResetQuota|AutomaticWindow|CheckAndResetWindowsResetsPartialFinalMonthlySubscriptions|AutomaticWindowsAllowPartialFinalDailyAndWeeklyPeriods)' -count=1 -v
+    if ($LASTEXITCODE -ne 0) { throw 'subscription exact-window focused tests failed' }
+    go test -tags=unit ./internal/service -count=1
+    if ($LASTEXITCODE -ne 0) { throw 'subscription unit package failed' }
+} finally { Pop-Location }
+```
+
+预期：管理员和用户手动重置均保留实际操作时间，自动窗口始终从持久化起点推进，subscription unit package PASS。
+
+fresh task review 对 spec 与 quality 均通过后，提交精确窗口 capability；technical design 与直接代码/测试同提交，保证该用户裁决有合法归属且不会遗留 dirty path：
+
+```powershell
+$subscriptionExactWindowPaths = @(
+    'backend/internal/service/user_subscription.go',
+    'backend/internal/service/subscription_service.go',
+    'backend/internal/service/subscription_monthly_window_test.go',
+    'backend/internal/service/subscription_reset_quota_test.go',
+    'backend/internal/service/subscription_calculate_progress_test.go',
+    'backend/internal/service/user_subscription_daily_quota_test.go',
+    $designDoc
+)
+Commit-NamedPaths -Message 'fix: use exact subscription window anchors' -Paths $subscriptionExactWindowPaths
+```
+
+提交边界：只包含精确窗口生产代码、直接测试与该行为的 technical design 决策，不包含 plan、ledger、OpenSpec tasks、checkpoint 或 `.comet/current-change.json`。
 
 1. 重跑 Tasks 7-9 的所有聚焦命令，然后执行阶段 full gate：
 
@@ -846,14 +904,33 @@ Assert-NoConflictArtifacts
 
 2. 再运行 `Invoke-MigrationUpgradeIntegration -Stage 'v0.1.170-final'`。只有真实 PASS 才将该 integration 行标 `protected`；Docker/Testcontainers 不可用或明确 SKIP 时保留 `unverified` 和日志证据。
 
-3. 在 ledger 写入实际冲突、每个兼容提交、矩阵状态、聚焦/full 命令、integration 结果和 `v0.1.170` 结论。确认 `gap=0`，然后：
+3. 在 ledger 写入实际冲突、每个兼容提交（含精确窗口 capability SHA）、逐行最终矩阵状态、聚焦/full 命令、integration 结果和 `v0.1.170` 结论。确认 `gap=0`，然后：
 
 ```powershell
 Commit-NamedPaths -Message 'docs: record v0.1.170 stage evidence' -Paths @($buildLedger)
-Assert-CleanGate
 ```
 
-**提交边界：**仅 build ledger。**检查点：**`gap` 非零、未解释 RED、full gate 失败或错误地把 integration 写为 PASS 都阻塞 Task 11。
+4. evidence review 通过后，用文件工具把本 Task 与 OpenSpec 2.5 的唯一 checkbox 改为 `[x]`，仅提交 plan/tasks，并更新两个持久状态：
+
+```powershell
+git add -f -- $planFile $openSpecTasks
+if ($LASTEXITCODE -ne 0) { throw 'failed to stage Task 10 checkoff' }
+$checkoffPaths = @(git diff --cached --name-only | Sort-Object)
+$expectedCheckoffPaths = @($openSpecTasks, $planFile) | Sort-Object
+if (Compare-Object -ReferenceObject $expectedCheckoffPaths -DifferenceObject $checkoffPaths) { throw 'Task 10 checkoff path mismatch' }
+git diff --cached --check
+if ($LASTEXITCODE -ne 0) { throw 'Task 10 checkoff whitespace validation failed' }
+git commit -m 'docs: close v0.1.170 stage'
+if ($LASTEXITCODE -ne 0) { throw 'Task 10 checkoff commit failed' }
+comet state task-checkoff $planFile 'Task 10: 关闭 v0.1.170 阶段并记录证据'
+if ($LASTEXITCODE -ne 0) { throw 'plan Task 10 state checkoff failed' }
+comet state task-checkoff $openSpecTasks '2.5 运行 v0.1.170 聚焦测试、本机 full 门禁及适用的本机 integration，关闭能力矩阵 gap 并记录阶段证据后再进入下一 tag'
+if ($LASTEXITCODE -ne 0) { throw 'OpenSpec 2.5 state checkoff failed' }
+```
+
+随后用文件工具把 checkpoint 更新到 Task 11，只提交 `$changeDir/.comet/subagent-progress.md`，消息为 `docs: advance to v0.1.171 merge`。确认其他 tracked dirty path 为空后再执行 `Assert-CleanGate`。
+
+**提交边界：**evidence commit 仅 build ledger；checkoff commit 仅 plan/tasks；checkpoint commit 仅 subagent progress。**检查点：**`gap` 非零、未解释 RED、full gate 失败、错误地把 integration 写为 PASS，或最终 clean gate 失败，都阻塞 Task 11。
 
 ### Task 11: 创建纯净的 v0.1.171 merge 节点
 
