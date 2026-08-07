@@ -120,6 +120,7 @@ func TestVerifyCaptchaReadsProviderConfigurationOnce(t *testing.T) {
 	repo := &settingRepoStub{values: tencentCaptchaSettings()}
 	verifier := &tencentCaptchaVerifierStub{response: &TencentCaptchaVerifyResponse{CaptchaCode: 1}}
 	svc := newAuthServiceForCaptchaRepoTest(repo, false, &turnstileVerifierSpy{}, verifier)
+	// Exclude NewSettingService bootstrap reads; assertions below cover the captcha hot path.
 	repo.getMultipleCalls = 0
 	repo.getValueCalls = 0
 
