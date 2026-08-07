@@ -4,29 +4,19 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Previous task: `Task 9` complete; implementations `7cea803e3`/`def1bf577`/`a2a3b2bc8`; final review `ses_0244eebc1ffeRZyeqaEQhW3R0t` APPROVED spec and quality; blobs/generation PASS, Docker integration unverified
-- Current task: `Task 10: 关闭 v0.1.170 阶段并记录证据`
-- OpenSpec mapping: `2.5 运行 v0.1.170 聚焦测试、本机 full 门禁及适用 integration，关闭能力矩阵 gap 并记录阶段证据`
-- Stage: `blocked`
-- Review/fix round: `2/2`
+- Previous task: `Task 10` complete; capability `3279e7bcb`, evidence `cbf19103b`, checkoff `7afa6972a`; final reviewer `ses_022c8f968ffep8uovtcjDyEaX3` PASS spec and evidence
+- Current task: `Task 11: 创建纯净的 v0.1.171 merge 节点`
+- OpenSpec mapping: `3.1 使用 git merge --no-ff --no-commit v0.1.171，完成语义融合并创建第二父匹配固定 tag SHA 的纯 merge commit`
+- Stage: `ready`
+- Review/fix round: `0/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
-- Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-171-task-10-brief.md`
-- Report: `.superpowers/sdd/staged-merge-upstream-v0-1-171-task-10-report.md`
-- Scope: rerun Tasks 7-9 focused gates, root `make test`/versioned `make build`, two stable generation rounds, static conflict checks, migration integration evidence, and build-ledger-only commit
+- Brief: pending
+- Report: pending
+- Scope: clean gate, merge annotated `v0.1.171`, resolve only merge-required conflicts/generation, create pure merge commit, verify second parent
 - Environment: local Docker unavailable; migration integration remains `unverified` on skip; no remote execution
 - Hard boundary: any unexplained RED, gap, generated diff, conflict artifact, or falsely recorded integration PASS blocks v0.1.171 merge
-- Task 10 verifier: `ses_024476804ffeYi5DkdffGjs9Qw` BLOCKED before evidence write
-- Initial Task 7/8 focused gates: all PASS; Task 9 blobs PASS and Docker integration remains unverified
-- Full gate RED: root `make test` exit 2 after 4m55s; golangci-lint reports gofmt-only differences in `gateway_handler.go:818` and `gateway_usage_billing.go:44/607`
-- Root cause evidence: handler lines originate in pure merge `98c7b0487`; `gofmt -d` for both files contains whitespace/alignment changes only
-- Fix boundary: exact two-file gofmt style commit, then restart all Task 10 gates from the beginning
-- Review-fix 1/2 commit: `656519063` pure gofmt for the two authorized gateway files
-- Second full gate RED: Task 7/8 focused gates and Task 9 blobs/integration classification PASS, then root `make test` failed four backend unit service tests
-- Grok root cause: pool-mode retryable early return precedes quota snapshot and explicit 403 rule; 429 loses observability and configured 403 cooldown is skipped
-- Subscription root cause: monthly fixture lacks versioned reset interface; `automaticWindowStartAt` corrects struct fields instead of its supplied `previous` anchor
-- Fix boundary: exact Grok production file; subscription production helper plus monthly unit fixture; two capability commits, then restart all Task 10 gates
-- Review-fix 2/2 Grok commit: `fb882192a`; exact and related Grok tests PASS
-- Subscription attempt: versioned fixture and supplied-previous correction make the original two RED tests PASS, but full monthly-window unit set exposes two new manual-anchor RED tests
-- Open semantic conflict: initial legacy midnight before `StartsAt` must correct to entitlement start, while later administrator-created midnight anchors must remain midnight; the current uncommitted helper change cannot distinguish them
-- Worktree: uncommitted `user_subscription.go` and `subscription_monthly_window_test.go` attempt retained for evidence; protected `.comet/current-change.json` remains untracked
-- Status: review/fix round cap 2/2 exhausted; user authorization required for an additional narrow round or rollback of the subscription attempt
+- Task 10 gates: Tasks 7-9 focused, root `make test`, versioned `make build`, two stable generation rounds and static checks PASS; matrix `gap=0`.
+- Integration residual: Docker CLI unavailable, PostgreSQL migration integration remains `unverified`; no remote execution and no false PASS.
+- User resolution retained: all persisted subscription window starts are authoritative; administrator reset uses exact operation time; no legacy midnight correction or migration.
+- Worktree: only protected `.comet/current-change.json` remains untracked after this checkpoint commit.
+- Status: ready for Task 11 clean gate and `v0.1.171` merge entry.
