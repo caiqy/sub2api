@@ -1292,7 +1292,7 @@ $finalIntegration
 
 ### Task 18: 完成能力专项 review 和最终验证报告
 
-- [ ] Task 18: 完成能力专项 review 和最终验证报告
+- [x] Task 18: 完成能力专项 review 和最终验证报告
 
 **映射 OpenSpec：**4.4
 

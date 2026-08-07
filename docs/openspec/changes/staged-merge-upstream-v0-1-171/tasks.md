@@ -26,4 +26,4 @@
 - [x] 4.1 两段全部闭合后将 `backend/cmd/server/VERSION` 一次更新为 `0.1.171.1`，不创建中间过程版本
 - [x] 4.2 在最终 source HEAD 重跑全部能力聚焦测试、`make test`、`make build`、两轮 backend generate、静态冲突、unmerged index 与 whitespace 检查
 - [x] 4.3 校验两个正式 tag 均为结果 HEAD 祖先、两个 merge 第二父正确，双方 `191_*`、双方 `192_*` 与上游 `193_*` migration 均保留，并记录本机 integration 实际结果或未验证风险
-- [ ] 4.4 完成本地能力专项 review 与最终验证报告，明确本 change 未推送、未发版、未部署、未操作服务器；发布与部署等待用户另行明确授权
+- [x] 4.4 完成本地能力专项 review 与最终验证报告，明确本 change 未推送、未发版、未部署、未操作服务器；发布与部署等待用户另行明确授权
