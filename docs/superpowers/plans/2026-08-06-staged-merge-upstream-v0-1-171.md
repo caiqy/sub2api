@@ -527,7 +527,7 @@ Assert-CleanGate
 
 ### Task 6: 创建纯净的 v0.1.170 merge 节点
 
-- [ ] Task 6: 创建纯净的 v0.1.170 merge 节点
+- [x] Task 6: 创建纯净的 v0.1.170 merge 节点
 
 **映射 OpenSpec：**2.1
 

@@ -8,7 +8,7 @@
 
 ## 2. 分段合入 v0.1.170
 
-- [ ] 2.1 使用 `git merge --no-ff --no-commit v0.1.170`，逐文件语义融合实际冲突并创建第二父为固定 tag SHA 的 merge commit；merge commit 不混入后续兼容修复
+- [x] 2.1 使用 `git merge --no-ff --no-commit v0.1.170`，逐文件语义融合实际冲突并创建第二父为固定 tag SHA 的 merge commit；merge commit 不混入后续兼容修复
 - [ ] 2.2 审查分组利润控制、账号倍率同步、槽位后二次复核和请求级定价时刻，与本地 advanced/layered scheduler、sticky、fallback/WaitPlan、DB recheck、usage billing 和倍率语义的交互；以失败测试驱动必要的最小兼容修复
 - [ ] 2.3 审查 Anthropic 流式用量、OpenAI WS/流内错误、Responses 工具输出、内容审核代理/最新输入、订阅窗口和 settings 更新，与本地 request-body spooling、统一审计、quota reset/outbox 和前端定制的交互
 - [ ] 2.4 保留上游 `192_group_profit_control.sql`、`193_group_profit_control_auth_cache_invalidation.sql` 与本地 `192_subscription_cache_invalidation_outbox.sql`，从 schema/provider 源重新生成 Ent/Wire，并验证完整文件名、排序和 checksum
