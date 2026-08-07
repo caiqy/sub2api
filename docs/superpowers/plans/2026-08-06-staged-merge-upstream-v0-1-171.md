@@ -703,7 +703,7 @@ Commit-NamedPaths -Message 'fix: preserve scheduler and usage after v0.1.170' -P
 
 ### Task 8: 审查 v0.1.170 gateway/body、audit/auth、subscription/migration 和 frontend 交互
 
-- [ ] Task 8: 审查 v0.1.170 gateway/body、audit/auth、subscription/migration 和 frontend 交互
+- [x] Task 8: 审查 v0.1.170 gateway/body、audit/auth、subscription/migration 和 frontend 交互
 
 **映射 OpenSpec：**2.3
 

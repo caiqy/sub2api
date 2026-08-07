@@ -4,35 +4,15 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Previous task: `Task 7` complete; implementations `6dd4f244d`/`872354880`/`2c17b1824`/`5a5329ad8`; final review `ses_024c20d5bffeK4Sp85JQ3IkatW` APPROVED spec and quality; fresh default/unit service/handler gates PASS
-- Current task: `Task 8: 审查 v0.1.170 gateway/body、audit/auth、subscription/migration 和 frontend 交互`
-- OpenSpec mapping: `2.3 审查 Anthropic 流式用量、OpenAI WS/流内错误、Responses 工具输出、内容审核代理/最新输入、订阅窗口和 settings 更新，与本地 request-body spooling、统一审计、quota reset/outbox 和前端定制的交互`
-- Stage: `task-review`
-- Review/fix round: `2/2`
+- Previous task: `Task 8` complete; implementations `31555b6a1`/`0a66f7093`/`7e0193f19`/`85ac93e68`/`242aa3509`/`37da92567`; final review `ses_024795b9effe3HArQFeeIfbU8M` APPROVED spec and quality; canonical focused gates PASS
+- Current task: `Task 9: 固化 v0.1.170 migration identity 并按源生成 Ent/Wire`
+- OpenSpec mapping: `2.4 保留上游 192/193 profit migrations 与本地 192 outbox，按完整 filename 验证排序/checksum，并从 schema/provider 源验证 Ent/Wire 稳定`
+- Stage: `task-prep`
+- Review/fix round: `0/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
-- Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-171-task-8-brief.md`
-- Report: `.superpowers/sdd/staged-merge-upstream-v0-1-171-task-8-report.md`
-- Known RED handoff: tagged-unit subscription tests still encode upstream first-use/operation-time windows; user decision requires entitlement `StartsAt` and `AdminResetQuota` day start
-- Scope: gateway/body, audit/auth, subscription/migration behavior, settings, and frontend only; Task 9 owns migration filename/checksum integration and Ent/Wire generation
-- Residual from Task 7: non-CAS concurrent first sticky binding, outside this change contract
-- Task 8 implementer: `ses_024b86893ffeXeiV9WpojQr0dY` DONE
-- Task 8 commits: `31555b6a1` subscription test anchors; `0a66f7093` frontend Codex namespace persistence
-- Baseline RED: tagged-unit subscription tests encoded first-use/operation-time anchors; EditAccountModal omitted OAuth `openai_responses_flatten_namespaces` writes and clears
-- Baseline GREEN: gateway/body, audit/auth, settings focused gates; no empty commits created
-- Final focused gates: service PASS; tagged-unit subscription PASS; handler PASS; frontend 5 files/119 tests PASS; `git diff --check` PASS
-- Residual: Docker/Testcontainers migration integration remains unverified under Task 9 ownership; existing Vitest stderr noise did not fail tests
-- Task 8 reviewer: `ses_024ae509bffe1B6CIrQ4Hvmdc5` REJECTED spec and quality
-- Open Important findings: Anthropic partial error queues both zero-cost failed usage and partial usage; pooled Responses WS drops accumulated image result on read failure
-- Open Minor/test gaps: subscription test name still says activation instead of StartsAt; frontend gate omitted BulkEditAccountModal, UpstreamBillingRateCell, AccountsView bulk edit, and PromptAuditView
-- Verified disposition: both usage findings reproduce in current source and belong to Task 8; make failed/partial submission mutually exclusive and preserve accumulated pooled WS result without changing billing semantics
-- Review-fix 1/2 commits: `7e0193f19` gateway/body exact-one partial usage and pooled WS image result; `85ac93e68` StartsAt test naming
-- Review-fix RED/GREEN: Anthropic partial stream wrote 2 usage records then exactly 1 with 10/1 tokens; pooled WS image read error returned nil then preserved `ImageCount=1` result with error
-- Expanded frontend evidence: BulkEditAccountModal, UpstreamBillingRateCell, AccountsView bulk edit, and PromptAuditView PASS; final expanded gate 9 files/169 tests PASS
-- Updated final gates: service PASS; tagged-unit subscription PASS; handler PASS plus exact-one unit regression PASS; `git diff --check` PASS
-- Task 8 final reviewer: `ses_02490cc8bffeYlcxYrzvgHr8bg` REJECTED spec and quality on one test-only Important
-- Open Important finding: exact-one usage test stub mutates/reads `created` and `lastLog` without synchronization; production findings are resolved
-- Fix boundary: mutex-protected immutable record snapshots and snapshot-based assertions only; no production change; run exact test with `-race`
-- Review-fix 2/2 commits: `242aa3509` mutex-protected usage snapshots; `37da92567` Gemini tests migrated to the same accessor and compatibility fields removed
-- Review-fix verification: no `usageLogRepo.created/lastLog` reads remain; Anthropic exact-one and three Gemini failed-usage tests PASS; canonical subscription gate PASS; handler focused gate PASS; `git diff --check` PASS
-- Race gate unavailable because local Go reports `-race requires cgo`; no race PASS claimed
-- Status: Task 8 review-fix 2/2 complete; final fresh thorough review pending
+- Brief: `.superpowers/sdd/staged-merge-upstream-v0-1-171-task-9-brief.md`
+- Report: `.superpowers/sdd/staged-merge-upstream-v0-1-171-task-9-report.md`
+- Scope: five published migration filenames/blobs, empty/upgrade DB integration test shape, runner only on real RED, and Ent/Wire generation stability
+- Environment: local Docker/Testcontainers unavailable; integration must remain `unverified` if it cannot actually run; no remote execution
+- Hard boundary: any Ent/Wire diff after generation blocks Task 9 and must not be committed as generated-only remediation
+- Status: Task 9 brief ready for implementation dispatch

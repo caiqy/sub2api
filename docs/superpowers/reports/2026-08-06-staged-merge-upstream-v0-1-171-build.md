@@ -802,3 +802,13 @@ frontend/src/views/auth/__tests__/WechatCallbackView.spec.ts
 - 本机 fresh gates：更新后的 default/unit service、default/unit handler 四条 focused 命令均 exit `0`；`git diff --check` exit `0`。quota lifecycle 已纳入 service focused regex，WaitPlan/sticky handler 回归已纳入 handler focused regex。
 - 提交边界：仅 scheduler/profit/usage production/test 与一个 `NewContentModerationService` 第八参数 `nil` compile adapter；未吸收 Task 8 的 gateway-body/audit/subscription-window/frontend 行为。
 - residual：无既有绑定时的并发首次 sticky 写仍不是原子 CAS；当前非并发契约未要求该语义，留给独立 concurrency change。
+
+## Task 8：v0.1.170 gateway/body、audit/subscription 与 frontend 闭合
+
+- 状态：`DONE`。实现提交为 `31555b6a1`、`0a66f7093`、`7e0193f19`、`85ac93e68`、`242aa3509`、`37da92567`；最终 reviewer `ses_024795b9effe3HArQFeeIfbU8M` 对 spec 与 quality 均 `APPROVED`。
+- subscription：陈旧 tagged-unit 期望已按用户裁决更正；首次窗口锚定 entitlement `StartsAt`，`AdminResetQuota` 锚定当天零点，自动 monthly boundary 保持 entitlement 锚点。仅测试与测试名变更，生产实现原本正确。
+- frontend：恢复 OpenAI OAuth `openai_responses_flatten_namespaces` 在 EditAccountModal 的启用写入与关闭删除；其他 `extra` 字段与 account type/platform 边界不变。
+- usage：Anthropic partial error 的 failed-only/partial usage 改为互斥，真实 handler 回归断言 exactly one 记录及 10/1 tokens/detail；pooled Responses WS 在已观察图片后 read error 保留 `ImageCount=1` partial result，输出前错误仍可返回 nil failover。
+- 审查证据：request-body replay/cleanup、统一 audit latest-input/proxy/no-duplicate moderation、settings omitted-field、subscription versioned reset/outbox/post-commit invalidation均由现有调用链和 focused tests 保护；无对应 RED 的簇未创建空提交。
+- 本机 fresh gates：updated service、tagged-unit subscription、handler、Anthropic/Gemini exact usage 和 expanded frontend 9 files/169 tests 均 exit `0`；`git diff --check` exit `0`。
+- residual：`go test -race` 因当前 Go 环境 `-race requires cgo` 未运行；Docker/Testcontainers migration integration 仍为 `unverified`，未使用远程服务器，未标记 PASS。
