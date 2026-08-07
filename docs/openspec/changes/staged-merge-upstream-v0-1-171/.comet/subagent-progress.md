@@ -4,20 +4,20 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Previous task: `Task 16` complete; no repository implementation commit; checkoff `5149a93bb`; final reviewer `ses_021dd9546ffeuLAoYwwtxdkuht` PASS spec and APPROVED evidence quality
-- Current task: `Task 17: 验证拓扑、migration identity 和最终 Docker 结果`
-- OpenSpec mapping: `4.3 校验 tag/merge topology、VERSION、migration filenames/blobs 与最终本机 integration 结果`
+- Previous task: `Task 17` complete; no repository implementation commit; checkoff `75c234cd4`; final reviewer `ses_021ce6beeffeB7E0RdjCrBk2Mf` PASS spec and APPROVED evidence quality
+- Current task: `Task 18: 完成能力专项 review 和最终验证报告`
+- OpenSpec mapping: `4.4 完成本地能力专项 review、strict validation 和最终 build/verify evidence`
 - Stage: `ready`
 - Review/fix round: `0/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
 - Brief: pending
 - Report: pending
-- Scope: verify both tag ancestry and unique ordered first-parent merge nodes, exact merge parents, final VERSION and five migration filenames/blobs; probe local Docker and run final integration only if available
+- Scope: close every final capability-matrix row, run OpenSpec strict validation, write build ledger and final verify report, and commit only those two reports
 - Environment: local Docker unavailable; migration integration remains `unverified` on skip; no remote execution
-- Hard boundary: topology, VERSION, filename or authoritative blob mismatch blocks Task 18; unavailable Docker remains explicit unverified and may not be replaced by remote execution or a false PASS
-- Task 16 result: 27 non-Docker focused gates, make test/build, two generate rounds and static checks passed; final VERSION is `0.1.171.1`; migration execution alone remains unverified.
+- Hard boundary: final `gap` must be zero, all non-Docker gates must retain true PASS evidence, and Docker integration must remain explicit UNVERIFIED; no push/tag/release/deploy/server operation
+- Task 17 result: both target merge nodes are unique and ordered with exact second parents; VERSION and five migration blobs match; canonical final integration helper returned unverified because local Docker CLI is absent.
 - User resolution retained: renewing an unexpired suspended subscription extends expiry, restores `active`, appends notes and preserves quota windows/usage.
-- Task 17 handoff: expected merge nodes are `98c7b0487` for v0.1.170 and `cca37e01e` for v0.1.171; expected second parents are fixed peeled SHAs `c043c2477` and `f0e7a9c7a`.
+- Task 18 handoff: inherit Task 16 full-gate evidence and Task 17 topology/blob evidence verbatim; residuals are Docker integration and unavailable race/cgo only, with no remote substitution.
 - Integration residual: Docker CLI unavailable; no remote execution and no false PASS.
 - Worktree: only protected `.comet/current-change.json` remains untracked after this checkpoint commit.
-- Status: ready for Task 17 topology and migration verification.
+- Status: ready for Task 18 final capability review and reports.
