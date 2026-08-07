@@ -7,7 +7,7 @@
 - Previous task: `Task 6` complete; merge `98c7b0487`, evidence `db8f0a678`/`1042611de`, checkoff `43eae6f5c`, final review `ses_025209a6fffeaGxYNgxdc8BBCL` APPROVED
 - Current task: `Task 7: 以 TDD 修复 v0.1.170 scheduler/usage 回归`
 - OpenSpec mapping: `2.2 审查分组利润控制、账号倍率同步、槽位后二次复核和请求级定价时刻，与本地 advanced/layered scheduler、sticky、fallback/WaitPlan、DB recheck、usage billing 和倍率语义的交互；以失败测试驱动必要的最小兼容修复`
-- Stage: `task-fix`
+- Stage: `task-review`
 - Review/fix round: `2/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
 - Brief: `.superpowers/sdd/task-7-brief.md`
@@ -15,8 +15,8 @@
 - Known RED handoff: inclusive `Check*Limit <=` may still be rejected by gateway `CheckBillingEligibility` using `usage >= limit`; add exact-limit allow / over-limit deny regression
 - Scope: scheduler/profit/usage only; Task 8 owns gateway-body/audit/subscription-window/frontend regressions
 - Task 7 implementer: `ses_02518ff05ffePGGV61RePjR6ej` DONE
-- Task 7 implementation commits: `6dd4f244d`, `872354880`, `2c17b1824`
-- Changed files: `billing_cache_service.go`, `billing_cache_service_user_platform_quota_test.go`, `gateway_scheduling.go`, `gateway_service.go`, `gemini_v1beta_handler_test.go`
+- Task 7 implementation commits: `6dd4f244d`, `872354880`, `2c17b1824`, `5a5329ad8`
+- Changed files: quota cache/test, gateway scheduling/service, layered scheduler/test, generic Gateway and Gemini handler sticky tests, and the compile-only Gemini constructor adapter
 - TDD: daily/weekly/monthly exact-limit cases RED under `>=`; sticky veto RED reproduced selection-time binding overwrite; GREEN after minimal quota boundary and sticky binding route fixes
 - Focused gates: default/unit service PASS; default/unit handler PASS; `git diff --check` PASS
 - Risk signals: none reported; no public API, migration, security, or shared-state shape change
@@ -26,4 +26,6 @@
 - Task 7 re-reviewer: `ses_024eaf5c6ffeYl7emeRvP6HAJ6` REJECTED spec and quality
 - Open Important findings: layered results omit the active profit gate and bind sticky during selection; two generic Gateway handler paths use overwrite-style binding after admission; Gemini WaitPlan binds before terminal veto and repeats the bind; Gateway after-admission binding defaults to Anthropic when no force platform is present
 - Verified disposition: all four findings reproduce in the current call paths and belong to Task 7; fix by reusing existing gate attachment and platform-aware after-admission paths. Atomic sticky CAS Minor is outside the current non-concurrent contract; record as residual only.
-- Status: second and final Task 7 review-fix in progress
+- Review-fix 2/2 result: layered acquired/WaitPlan results carry the gate; selection writes use the gate-aware helper; generic Gateway and native Gemini WaitPlan bind once after terminal admission with the current sticky platform; veto releases the slot without binding
+- Focused gates after `5a5329ad8`: updated default/unit service PASS; updated default/unit handler PASS; `git diff --check` PASS
+- Status: second and final Task 7 review-fix complete; final fresh thorough review pending

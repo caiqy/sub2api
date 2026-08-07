@@ -689,6 +689,7 @@ $schedulerUsagePaths = @(
     'backend/internal/handler/openai_profit_slot_recheck_test.go',
     'backend/internal/handler/openai_ws_turn_pricing_test.go',
     'backend/internal/handler/gateway_handler.go',
+    'backend/internal/handler/gateway_handler_sticky_fallback_test.go',
     'backend/internal/handler/gemini_v1beta_handler.go',
     'backend/internal/handler/gemini_sticky_toggle_test.go',
     'backend/internal/handler/gemini_v1beta_handler_test.go'
