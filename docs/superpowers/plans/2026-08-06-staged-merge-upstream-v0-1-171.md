@@ -657,7 +657,7 @@ try {
 
 预期：聚焦命令中的测试全部 PASS；每个失败先写入 ledger，归属为 `v0.1.170`。
 
-2. 对缺失契约先补测试并实际运行：若直接 GREEN，记录上游实现已满足契约且不创建生产修复；若失败，保存真实 RED 后再做最小实现。断言必须覆盖默认利润控制关闭时选择不变、不合格账号不进入排序且不提前绑定 sticky、取得槽位后倍率变化释放槽位并重新选号、同一请求在等待/重试/切号中使用固定定价时刻、组合 group 不被误直接门禁，以及 advanced/layered scheduler、WaitPlan、DB recheck 和 usage billing 仍被调用。
+2. 对缺失契约先补测试并实际运行：若直接 GREEN，记录上游实现已满足契约且不创建生产修复；若失败，保存真实 RED 后再做最小实现。断言必须覆盖默认利润控制关闭时选择不变、不合格账号不进入排序且不提前绑定 sticky、取得槽位后倍率变化释放槽位并重新选号、同一请求在等待/重试/切号中使用固定定价时刻、组合 group 不被误直接门禁，以及 advanced/layered scheduler、WaitPlan、DB recheck 和 usage billing 仍被调用。另补一条 gateway billing eligibility 回归，证明用户已选择的 inclusive quota 边界在 `Check*Limit -> CheckBillingEligibility` 端到端一致：用量加本次请求恰好达到上限时放行，超过上限时拒绝。
 
 3. 只为已复现 RED 写最小兼容实现；对每个测试重跑相同 `go test` 命令至 GREEN。涉及 schema/provider 时先改源、运行 `make -C backend generate`，并将生成输出归于本提交。
 
@@ -696,6 +696,7 @@ Commit-NamedPaths -Message 'fix: preserve scheduler and usage after v0.1.170' -P
 Push-Location backend
 try {
     Invoke-CheckedNative 'v0.1.170 gateway/audit/subscription service tests' { go test -count=1 ./internal/service -run '^(TestGateway.*PartialUsage.*|Test.*Anthropic.*|Test.*ContentModeration.*|Test.*Subscription.*|Test.*Setting.*|Test.*RequestBody.*)$' }
+    Invoke-CheckedNative 'v0.1.170 subscription unit contract tests' { go test -tags=unit -count=1 ./internal/service -run '^(TestDelayedFirstUseAnchorsMonthlyWindowAtActivation|TestAdminResetQuota_.*)$' }
     Invoke-CheckedNative 'v0.1.170 gateway/body handler tests' { go test -count=1 ./internal/handler -run '^(TestOpenAI.*(WS|WebSocket|Images|Responses).*|TestGatewayHandler.*(Usage|Body|Settings).*)$' }
 } finally {
     Pop-Location
@@ -703,7 +704,7 @@ try {
 Invoke-CheckedNative 'v0.1.170 frontend focus tests' { pnpm --dir frontend exec vitest run src/components/account/__tests__/CreateAccountModal.spec.ts src/components/account/__tests__/EditAccountModal.spec.ts src/components/payment/__tests__/PaymentMethodSelector.spec.ts src/features/prompt-audit/__tests__/viewModel.spec.ts src/views/admin/__tests__/SettingsView.spec.ts }
 ```
 
-2. 每个失败先写最小 RED，随后修复而不跨簇。必须证明请求体在 retry/failover 后不重用已关闭 handle、成功/失败 usage 不重复或遗漏、统一 audit 不绕开 latest-input/代理条件、subscription window/reset/outbox 仍保持锁和提交后失效、settings 未发送字段不丢失、本地前端入口未被上游页面改写。
+2. 每个失败先写最小 RED，随后修复而不跨簇。必须证明请求体在 retry/failover 后不重用已关闭 handle、成功/失败 usage 不重复或遗漏、统一 audit 不绕开 latest-input/代理条件、subscription window/reset/outbox 仍保持锁和提交后失效、settings 未发送字段不丢失、本地前端入口未被上游页面改写。Task 6 已知的 tagged-unit RED 必须按用户裁决修正：首次订阅窗口锚定 entitlement `StartsAt`，`AdminResetQuota` 锚定当天零点；不得改回上游首次使用/操作时刻语义。
 
 3. 按实际涉及面分别提交，不将四类修复合并：
 
