@@ -78,8 +78,8 @@ func (r *lockingRenewalRepo) Update(_ context.Context, sub *UserSubscription) er
 }
 
 func TestAssignOrExtendSubscriptionUsesLockedCurrentRow(t *testing.T) {
-	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
-	lockedExpiry := now.AddDate(0, 0, 20)
+	now := time.Now().UTC().Truncate(time.Second)
+	lockedExpiry := now.AddDate(0, 0, 1)
 	windowStart := now.Add(-24 * time.Hour)
 	repo := &lockingRenewalRepo{
 		stale: UserSubscription{ID: 7, UserID: 11, GroupID: 13, ExpiresAt: now.Add(-time.Hour), Status: SubscriptionStatusExpired, Notes: "stale"},
@@ -89,7 +89,6 @@ func TestAssignOrExtendSubscriptionUsesLockedCurrentRow(t *testing.T) {
 		},
 	}
 	svc := NewSubscriptionService(&subscriptionGroupRepoStub{group: &Group{ID: 13, SubscriptionType: SubscriptionTypeSubscription}}, repo, nil, nil, nil)
-	svc.now = func() time.Time { return now }
 
 	sub, extended, err := svc.AssignOrExtendSubscription(context.Background(), &AssignSubscriptionInput{
 		UserID: 11, GroupID: 13, ValidityDays: 5, Notes: "renewed",
@@ -141,12 +140,11 @@ func TestAssignOrExtendSubscriptionRenewsUnexpiredSuspendedWithoutResettingQuota
 }
 
 func TestAssignOrExtendSubscriptionSerializedRenewalsAccumulateDays(t *testing.T) {
-	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
-	initialExpiry := now.AddDate(0, 0, 10)
+	now := time.Now().UTC().Truncate(time.Second)
+	initialExpiry := now.AddDate(0, 0, 1)
 	stale := UserSubscription{ID: 17, UserID: 21, GroupID: 23, StartsAt: now, ExpiresAt: initialExpiry, Status: SubscriptionStatusActive}
 	repo := &lockingRenewalRepo{stale: stale, current: stale}
 	svc := NewSubscriptionService(&subscriptionGroupRepoStub{group: &Group{ID: 23, SubscriptionType: SubscriptionTypeSubscription}}, repo, nil, nil, nil)
-	svc.now = func() time.Time { return now }
 	input := &AssignSubscriptionInput{UserID: 21, GroupID: 23, ValidityDays: 7}
 
 	_, _, err := svc.AssignOrExtendSubscription(context.Background(), input)
