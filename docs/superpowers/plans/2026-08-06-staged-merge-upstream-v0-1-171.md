@@ -334,7 +334,7 @@ Commit-NamedPaths -Message 'docs: record v0.1.171 baseline identity' -Paths @($b
 
 **映射 OpenSpec：**1.2
 
-**文件：**修改 build ledger。
+**文件：**修改 build ledger。初次 full gate 已证明 `backend/internal/handler/gateway_handler.go` 与 `backend/internal/service/gateway_usage_billing.go` 存在纯 `gofmt` RED；允许只对这两个精确文件运行 `gofmt` 并独立提交 `style: format v0.1.170 gateway files`，随后必须从 Tasks 7-9 focused gates 起完整重跑 Task 10，不复用失败运行的半段结果。
 
 **步骤：**
 
