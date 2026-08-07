@@ -7,7 +7,7 @@
 - Previous task: `Task 5` complete; evidence commits `f349d6a26`, `a5f20fdf2`, `45912d266`, `fe686e346`; checkoff `2f9f1a259`; user-authorized final review `ses_025bb84b8ffeA7SdGDek6Uv669` APPROVED
 - Current task: `Task 6: 创建纯净的 v0.1.170 merge 节点`
 - OpenSpec mapping: `2.1 使用 git merge --no-ff --no-commit v0.1.170，逐文件语义融合实际冲突并创建第二父为固定 tag SHA 的 merge commit；merge commit 不混入后续兼容修复`
-- Stage: `implementing`
+- Stage: `task-review`
 - Review/fix round: `0/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
 - Brief: `.superpowers/sdd/task-6-brief.md`
@@ -15,5 +15,21 @@
 - Stage 0 result: `protected=1/manual=9/unverified=1/gap=0`; Docker migration is the only unverified contract
 - Stage 0 clean helper fix: `c33ddd835`; scoped ignored enumeration and clean gate PASS
 - Task 6 target: `v0.1.170@c043c24774228ba891ddf90d783aa6dc7d0855b5`
-- Task 6 implementation commit: pending
-- Status: Task 6 implementer dispatch pending
+- Task 6 merge state: active; `MERGE_HEAD=60286d35` annotated tag object, peeled commit `c043c247`; 28 unresolved conflicts
+- Coordinator plan fix: annotated-tag guard updated but intentionally remains unstaged until after the pure merge commit
+- Semantic blocker: `user_subscription.go` CheckDaily/Weekly/MonthlyLimit uses local strict `<` versus upstream inclusive `<=`; exact-limit requests have opposite outcomes
+- Task 6 implementation commit: `98c7b04874361a1cf95b8dea90ed1c4db2f05d4d`
+- Merge parents: `30528a82e32bfedc011d741e870964beb5743aa4` + `c043c24774228ba891ddf90d783aa6dc7d0855b5`
+- User decision: adopt upstream inclusive `<=` for CheckDaily/Weekly/MonthlyLimit; exact-limit requests are allowed
+- Applied decision: inclusive quota predicates are present in the unresolved merge worktree but not staged
+- New semantic blocker: missing Codex `instructions` is local fail-closed 403/no-upstream versus upstream default-injection/forwarding
+- User decision: adopt upstream Codex behavior; inject default `instructions` and forward instead of local 403
+- Applied decisions: quota inclusive `<=` and Codex default-injection/forwarding are staged as conflict resolutions; 23 conflicts remain
+- New semantic blocker: first subscription quota window starts at local entitlement `StartsAt` versus upstream first-use `s.now()`
+- User decision: preserve local subscription-window anchor at entitlement `StartsAt`, not first-use `s.now()`
+- Applied decision: first quota window remains anchored at entitlement `StartsAt`; 23 conflicts remain
+- New semantic blocker: `AdminResetQuota` window starts at local calendar-day zero versus upstream exact administrator action time
+- User decision: `AdminResetQuota` is a local customization; preserve calendar-day-zero window start
+- Merge policy: non-local customization follows upstream; local-only customization stays local; when both sides change the same user-visible semantics, ask the user
+- Verification reported: frontend lint/tests/build, backend `go test ./...`, native `go build`, merge guards, migrations and generated output PASS; Docker integration unavailable
+- Status: pure merge committed; thorough task reviewer pending
