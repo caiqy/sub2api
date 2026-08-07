@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"fmt"
 	"io/fs"
 	"math/big"
 	"strings"
@@ -66,13 +67,6 @@ func TestMigrationsRunner_PreservesPasskeyAndSubscriptionQuotaMigrationsAcrossUp
 		{"profit_min_margin", "numeric", "zero"},
 		{"profit_safety_buffer", "numeric", "zero"},
 	}
-	normalizeDefault := func(value string) string {
-		value = strings.ToLower(strings.TrimSpace(value))
-		if base, _, found := strings.Cut(value, "::"); found {
-			value = base
-		}
-		return strings.Trim(value, " '()")
-	}
 	assertProfitColumnsAbsent := func(db *sql.DB) {
 		t.Helper()
 		for _, expected := range profitColumns {
@@ -102,13 +96,14 @@ WHERE table_schema = 'public'
 			require.Equal(t, expected.dataType, dataType)
 			require.Equal(t, "NO", nullable)
 			require.True(t, defaultValue.Valid, "expected groups.%s to have a default", expected.name)
-			normalizedDefault := normalizeDefault(defaultValue.String)
+			var evaluatedDefault string
+			require.NoError(t, db.QueryRowContext(ctx, fmt.Sprintf("SELECT (%s)::text", defaultValue.String)).Scan(&evaluatedDefault))
 			if expected.defaultKind == "false" {
-				require.Equal(t, "false", normalizedDefault)
+				require.Equal(t, "false", evaluatedDefault)
 				continue
 			}
-			defaultNumber, ok := new(big.Rat).SetString(normalizedDefault)
-			require.True(t, ok, "expected groups.%s default to be numeric, got %q", expected.name, defaultValue.String)
+			defaultNumber, ok := new(big.Rat).SetString(evaluatedDefault)
+			require.True(t, ok, "expected groups.%s default to be numeric, got %q", expected.name, evaluatedDefault)
 			require.Zero(t, defaultNumber.Sign(), "expected groups.%s default to equal zero", expected.name)
 		}
 	}
