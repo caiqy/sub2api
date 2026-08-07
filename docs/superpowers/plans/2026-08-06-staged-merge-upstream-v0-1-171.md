@@ -102,12 +102,7 @@ function Assert-CleanGate {
     if ($unexpected.Count -ne 0) { throw "unexpected dirty paths: $($unexpected -join '; ')" }
 
     # docs/* 被 ignore；只显式枚举当前 change 的允许产物，防止临时文件混入归档范围。
-    $ignoredChangeFiles = @(git ls-files --others --ignored --exclude-standard --
-        $changeDir
-        $planFile
-        $designDoc
-        $buildLedger
-        $verifyReport)
+    $ignoredChangeFiles = @(git ls-files --others --ignored --exclude-standard -- $changeDir $planFile $designDoc $buildLedger $verifyReport)
     if ($LASTEXITCODE -ne 0) { throw 'scoped ignored-file enumeration failed' }
     $allowedIgnoredExact = [System.Collections.Generic.HashSet[string]]::new([string[]]@(
         "$changeDir/.comet.yaml",
