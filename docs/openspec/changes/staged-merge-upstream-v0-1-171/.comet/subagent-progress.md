@@ -7,7 +7,7 @@
 - Previous task: `Task 5` complete; evidence commits `f349d6a26`, `a5f20fdf2`, `45912d266`, `fe686e346`; checkoff `2f9f1a259`; user-authorized final review `ses_025bb84b8ffeA7SdGDek6Uv669` APPROVED
 - Current task: `Task 6: 创建纯净的 v0.1.170 merge 节点`
 - OpenSpec mapping: `2.1 使用 git merge --no-ff --no-commit v0.1.170，逐文件语义融合实际冲突并创建第二父为固定 tag SHA 的 merge commit；merge commit 不混入后续兼容修复`
-- Stage: `task-fix`
+- Stage: `implementing`
 - Review/fix round: `0/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
 - Brief: `.superpowers/sdd/task-6-brief.md`
