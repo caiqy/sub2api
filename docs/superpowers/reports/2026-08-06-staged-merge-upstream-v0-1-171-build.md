@@ -1063,3 +1063,19 @@ Corrected totals: `protected=6`, `manual=4`, Docker-only `unverified=1`, `gap=0`
 - frontend TDD：旧实现不触发 Turnstile action gate，`CaptchaChallenge.verifyAction()` 不返回已完成 token；review-fix 又真实复现 site-key 变化后的 stale token 与 pending OAuth 双 Turnstile 实例。`a2adddfab`、`665afee53` 修复 token 生命周期、action proof 流转和 challenge 互斥。
 - fresh gates：Task 13 backend service/handler/middleware focused、tagged service/handler、`golangci-lint` PASS；frontend focused 40、canonical-plus-EmailVerify 90、typecheck、ESLint PASS。fresh reviewer `ses_020480e2bffeE2SlM4So5zU3WN` 最终 spec `PASS`、quality `APPROVED`；唯一非阻断项为未 squash 的 `fixup!` 提交消息。
 - 能力矩阵第 7 行由新的 Turnstile OAuth/passkey direct behavior tests 加强，状态仍为 `protected`；其他十行及 Docker-only `unverified` 不变。完整 final gate、strict validation 与 Verify report completion 将在重新进入 Verify 后刷新。
+
+### Remediation 后 Build 退出门禁
+
+```text
+make test
+```
+
+PASS（exit 0）：backend 默认测试通过；frontend `237` files / `1814` tests 全部通过。测试 stderr 仅包含既有的预期错误路径、i18n、Browserslist、`router-link` 与 jsdom warnings。
+
+```text
+make VERSION=0.1.171.1 SHELL=D:/scoop/shims/bash.exe build
+```
+
+PASS（exit 0）：backend 编译成功；frontend `vue-tsc -b` 与 Vite production build 成功，`1051` modules transformed，`built in 33.07s`。输出仅有既有 Browserslist、dynamic/static import 和 chunk-size warnings。
+
+Task 13 与 OpenSpec 3.3 已重新勾选，两个 `comet state task-checkoff` 均 `PASS`。Build remediation 现满足全任务、全提交、TDD、thorough review 和显式全量测试/构建退出条件，可重新进入独立 Verify。
