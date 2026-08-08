@@ -51,6 +51,14 @@ describe('CaptchaChallenge', () => {
       randstr: ''
     })
 
+    await wrapper.setProps({ turnstileSiteKey: 'rotated-site-key' })
+    await expect(exposed(wrapper).verifyAction()).resolves.toBeNull()
+
+    await wrapper.get('[data-testid="verify"]').trigger('click')
+    await wrapper.setProps({ turnstileEnabled: false })
+    await wrapper.setProps({ turnstileEnabled: true })
+    await expect(exposed(wrapper).verifyAction()).resolves.toBeNull()
+
     await wrapper.get('[data-testid="expire"]').trigger('click')
     await expect(exposed(wrapper).verifyAction()).resolves.toBeNull()
 

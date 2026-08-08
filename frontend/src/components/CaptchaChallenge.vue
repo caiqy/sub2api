@@ -25,12 +25,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import TurnstileWidget from '@/components/TurnstileWidget.vue'
 import TencentCaptchaGate from '@/components/TencentCaptchaGate.vue'
 import AliyunCaptchaWidget from '@/components/AliyunCaptchaWidget.vue'
 
-// ActionCaptchaResult 动作触发式验证（腾讯/阿里云弹窗）的结果：
+// ActionCaptchaResult: Turnstile 复用已完成 token；腾讯/阿里云在动作时获取 proof。
 // 腾讯 token=ticket、randstr 非空；阿里云 token=captchaVerifyParam、randstr 恒为空。
 export interface ActionCaptchaResult {
   token: string
@@ -60,6 +60,13 @@ const tencentRef = ref<InstanceType<typeof TencentCaptchaGate> | null>(null)
 const aliyunRef = ref<InstanceType<typeof AliyunCaptchaWidget> | null>(null)
 const turnstileToken = ref('')
 
+watch(
+  () => [props.turnstileEnabled, props.turnstileSiteKey],
+  () => {
+    turnstileToken.value = ''
+  }
+)
+
 function onTurnstileVerify(token: string): void {
   turnstileToken.value = token
   emit('verify', token, '')
@@ -82,7 +89,7 @@ function reset(): void {
   aliyunRef.value?.reset()
 }
 
-// verifyAction 返回当前已完成的 Turnstile token，或弹出当前动作触发式验证码并等待结果。
+// verifyAction 复用当前已完成的 Turnstile token，或获取腾讯/阿里云的动作 proof。
 async function verifyAction(): Promise<ActionCaptchaResult | null> {
   if (props.turnstileEnabled && props.turnstileSiteKey) {
     return turnstileToken.value ? { token: turnstileToken.value, randstr: '' } : null

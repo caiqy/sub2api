@@ -67,7 +67,7 @@
         </div>
 
         <!-- Turnstile Widget for Resend -->
-        <div v-if="actionCaptchaEnabled || (turnstileEnabled && showResendTurnstile)">
+        <div v-if="resendCaptchaEnabled">
           <TurnstileWidget
             ref="turnstileRef"
             :site-key="turnstileSiteKey"
@@ -283,7 +283,7 @@ const aliyunCaptchaReady = computed(
     Boolean(aliyunCaptchaSceneId.value) &&
     Boolean(aliyunCaptchaPrefix.value)
 )
-// 动作触发式验证码（腾讯/阿里云）：重发验证码、创建账号时弹窗验证
+// Turnstile 复用已完成 token；腾讯/阿里云在重发和创建账号动作时获取 proof。
 const actionCaptchaEnabled = computed(
   () =>
     (turnstileEnabled.value && Boolean(turnstileSiteKey.value)) ||
@@ -306,8 +306,11 @@ const validationToastMessage = computed(
 const pendingOAuthCreateTurnstileRequired = computed(
   () => isPendingOAuthFlow() && turnstileEnabled.value
 )
+const resendCaptchaEnabled = computed(
+  () => captchaEnabled.value && (!isPendingOAuthFlow() || showResendTurnstile.value)
+)
 const pendingOAuthCreateCaptchaEnabled = computed(
-  () => isPendingOAuthFlow() && captchaEnabled.value
+  () => isPendingOAuthFlow() && captchaEnabled.value && !showResendTurnstile.value
 )
 
 watch(validationToastMessage, (value, previousValue) => {
@@ -611,7 +614,12 @@ function clearStoredCaptchaProof(): void {
 // ==================== Handlers ====================
 
 async function handleResendCode(): Promise<void> {
-  // Turnstile stays staged; Tencent is acquired from this action.
+  // Pending OAuth swaps to the resend challenge before consuming a fresh proof.
+  if (isPendingOAuthFlow() && captchaEnabled.value && !showResendTurnstile.value) {
+    showResendTurnstile.value = true
+    return
+  }
+
   if (turnstileEnabled.value && !showResendTurnstile.value) {
     showResendTurnstile.value = true
     return

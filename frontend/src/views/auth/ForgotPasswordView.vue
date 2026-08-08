@@ -172,7 +172,7 @@ const aliyunCaptchaReady = computed(
     Boolean(aliyunCaptchaSceneId.value) &&
     Boolean(aliyunCaptchaPrefix.value)
 )
-// 动作触发式验证码（腾讯/阿里云）：提交时弹窗验证
+// Turnstile 复用已完成 token；腾讯/阿里云在提交时获取 proof。
 const actionCaptchaEnabled = computed(
   () =>
     (turnstileEnabled.value && Boolean(turnstileSiteKey.value)) ||

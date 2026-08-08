@@ -252,6 +252,9 @@ describe('EmailVerifyView', () => {
           Icon: true,
           TurnstileWidget: {
             template: '<button data-testid="resend-captcha" @click="$emit(\'verify\', \'fresh-proof\')">verify</button>',
+            methods: {
+              reset: vi.fn(),
+            },
           },
           transition: false,
         },
@@ -495,6 +498,7 @@ describe('EmailVerifyView', () => {
             template: '<button data-testid="create-turnstile" @click="$emit(\'verify\', \'create-token\')">verify</button>',
             methods: {
               reset: createTurnstileResetMock,
+              verifyAction: () => ({ token: 'create-token', randstr: '' }),
             },
           },
           transition: false,
@@ -526,6 +530,58 @@ describe('EmailVerifyView', () => {
       turnstile_token: 'create-token',
     })
     expect(setTokenMock).toHaveBeenCalledWith('oauth-access-token')
+  })
+
+  it('mounts one pending OAuth captcha challenge at a time', async () => {
+    authStoreState.pendingAuthSession = {
+      token: 'pending-token-5',
+      token_field: 'pending_auth_token',
+      provider: 'oidc',
+      redirect: '/profile',
+    }
+    getPublicSettingsMock.mockResolvedValue({
+      turnstile_enabled: true,
+      turnstile_site_key: 'site-key',
+      site_name: 'Sub2API',
+      registration_email_suffix_whitelist: [],
+    })
+    sendPendingOAuthVerifyCodeMock.mockResolvedValue({ countdown: 0 })
+    sessionStorage.setItem(
+      'register_data',
+      JSON.stringify({
+        email: 'fresh@example.com',
+        password: 'secret-123',
+        turnstile_token: 'send-code-token',
+      })
+    )
+
+    const CaptchaChallengeStub = defineComponent({
+      setup(_, { expose }) {
+        expose({ verifyAction: vi.fn(), reset: vi.fn() })
+        return () => h('div', { 'data-testid': 'pending-oauth-captcha-challenge' })
+      },
+    })
+    const wrapper = mount(EmailVerifyView, {
+      global: {
+        stubs: {
+          AuthLayout: { template: '<div><slot /><slot name="footer" /></div>' },
+          Icon: true,
+          TurnstileWidget: CaptchaChallengeStub,
+          transition: false,
+        },
+      },
+    })
+
+    await flushPromises()
+    expect(wrapper.findAll('[data-testid="pending-oauth-captcha-challenge"]')).toHaveLength(1)
+
+    const resendButton = wrapper.findAll('button').find((button) =>
+      button.text().includes('auth.clickToResend')
+    )!
+    await resendButton.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-testid="pending-oauth-captcha-challenge"]')).toHaveLength(1)
   })
 
   it('resets the pending oauth create-account turnstile after submit failure', async () => {
@@ -560,6 +616,7 @@ describe('EmailVerifyView', () => {
             template: '<button data-testid="create-turnstile" @click="$emit(\'verify\', \'create-token\')">verify</button>',
             methods: {
               reset: createTurnstileResetMock,
+              verifyAction: () => ({ token: 'create-token', randstr: '' }),
             },
           },
           transition: false,
