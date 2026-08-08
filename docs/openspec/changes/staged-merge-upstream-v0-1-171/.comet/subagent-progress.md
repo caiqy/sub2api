@@ -4,20 +4,20 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Previous task: `Task 18` complete; report commits `7b18bcf7f`, `9fb23b19e`; checkoff `67d305ced`; final reviewer `ses_021b8df76ffegyInaceIX7EXLS` PASS spec and APPROVED evidence quality
-- Current task: none; all 18 canonical plan tasks and all OpenSpec tasks are checked
-- OpenSpec mapping: complete through `4.4`
-- Stage: `complete`
+- Previous task: Verify attempt 1 returned Build; final reviewer `ses_020707aafffeli3vLaRDsqQmoa` found an IMPORTANT Turnstile action-gate gap; administrator exact-time finding was rejected because it conflicts with the user's persisted decision
+- Current task: `Task 13 remediation: Turnstile OAuth/passkey action gate`
+- OpenSpec mapping: reopen `3.3` captcha/auth compatibility only
+- Stage: `ready`
 - Review/fix round: `0/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
 - Brief: pending
 - Report: pending
-- Scope: Build complete; run the Comet build guard and hand off to Verify without additional product or report changes
+- Scope: add backend/frontend RED tests for Turnstile-only OAuth start and passkey login, implement the minimum shared provider dispatch/proof flow, rerun focused gates, update final evidence
 - Environment: local Docker unavailable; migration integration remains `unverified` on skip; no remote execution
-- Hard boundary: Docker integration remains explicit UNVERIFIED; no push/tag/release/deploy/server operation is authorized
-- Task 18 result: strict validation PASS; final canonical matrix `protected=6`, `manual=4`, Docker-only `unverified=1`, `gap=0`; reports reviewed and approved.
+- Hard boundary: preserve administrator/manual exact-time reset semantics; do not touch scheduler/gateway/subscription/migration behavior; Docker remains UNVERIFIED; no remote/release operation
+- Verify finding: `VerifyActionCaptchaIfEnabled` currently bypasses Turnstile-only settings and frontend OAuth/passkey actions do not submit the existing Turnstile token.
 - User resolution retained: renewing an unexpired suspended subscription extends expiry, restores `active`, appends notes and preserves quota windows/usage.
-- Verify handoff: inherit Task 16 full-gate evidence, Task 17 topology/blob evidence and final reports; residuals are Docker integration and unavailable race/cgo only, with no remote substitution.
+- Verify handoff: after remediation, refresh auth-focused and full verification evidence; retain existing topology/blob evidence and Docker/race residuals.
 - Integration residual: Docker CLI unavailable; no remote execution and no false PASS.
 - Worktree: only protected `.comet/current-change.json` remains untracked after this checkpoint commit.
-- Status: ready for `comet guard staged-merge-upstream-v0-1-171 build --apply`.
+- Status: ready for fresh TDD implementer and thorough review.

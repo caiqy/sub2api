@@ -1073,7 +1073,7 @@ Commit-NamedPaths -Message 'fix: preserve gateway body after v0.1.171' -Paths $g
 
 ### Task 13: 以 TDD 修复 v0.1.171 audit/auth、subscription/migration 和 frontend 回归
 
-- [x] Task 13: 以 TDD 修复 v0.1.171 audit/auth、subscription/migration 和 frontend 回归
+- [ ] Task 13: 以 TDD 修复 v0.1.171 audit/auth、subscription/migration 和 frontend 回归
 
 **映射 OpenSpec：**3.3
 
@@ -1108,6 +1108,8 @@ Commit-NamedPaths -Message 'fix: preserve frontend customization after v0.1.171'
 每个变量在调用前显式列出本次实际 production/test/generated 路径；测试文件跟随主能力，不跨簇混入。无 RED、无 diff 的簇不创建提交。
 
 **提交边界：**三个能力簇独立，分别只包含 audit/auth、subscription/migration、frontend。**检查点：**provider/认证、金额/usage、订阅事务、WS/prompt audit 和前端路径如有不可兼容的用户可见结论，停止等待用户决定。
+
+**Verify remediation 1/3：**最终审查确认 OAuth 启动和 passkey 登录的 action gate 在 Turnstile-only 配置下错误放行，违反本任务及 OpenSpec 3.3 的互斥 provider fail-closed 契约。以 TDD 补 backend/frontend Turnstile proof 流转并复用既有 provider 分派；不得改写用户已裁决的管理员精确重置时间语义。
 
 ### Task 14: 关闭 v0.1.171 阶段并记录证据
 
