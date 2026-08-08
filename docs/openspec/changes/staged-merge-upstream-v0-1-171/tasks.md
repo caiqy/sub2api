@@ -18,7 +18,7 @@
 
 - [x] 3.1 使用 `git merge --no-ff --no-commit v0.1.171`，逐文件语义融合实际冲突并创建第二父为固定 tag SHA 的 merge commit；merge commit 不混入后续兼容修复
 - [x] 3.2 审查 Codex 出站身份归一化、动态版本同步、账号级自定义 UA 和流内过载有界重试，与本地 HTTP/透传/WS/探针/模型列表/alpha-search、请求体释放、sticky/failover 和错误响应语义的交互
-- [ ] 3.3 审查腾讯天御/阿里云验证码、认证入口、settings/CSP/前端卡片，以及退款事务、用量失败落库、composite 推理强度、订阅续期、WebSocket 租约和 prompt audit 修复，与本地能力的交互；以失败测试驱动最小兼容修复
+- [x] 3.3 审查腾讯天御/阿里云验证码、认证入口、settings/CSP/前端卡片，以及退款事务、用量失败落库、composite 推理强度、订阅续期、WebSocket 租约和 prompt audit 修复，与本地能力的交互；以失败测试驱动最小兼容修复
 - [x] 3.4 运行 v0.1.171 聚焦测试、本机 full 门禁及适用的本机 integration，关闭能力矩阵 gap 并记录阶段证据
 
 ## 4. 最终版本与验证
