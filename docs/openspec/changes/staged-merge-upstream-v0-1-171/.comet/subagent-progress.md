@@ -4,20 +4,20 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Previous task: Verify attempt 1 returned Build; final reviewer `ses_020707aafffeli3vLaRDsqQmoa` found an IMPORTANT Turnstile action-gate gap; administrator exact-time finding was rejected because it conflicts with the user's persisted decision
-- Current task: `Task 13 remediation: Turnstile OAuth/passkey action gate`
-- OpenSpec mapping: reopen `3.3` captcha/auth compatibility only
-- Stage: `ready`
-- Review/fix round: `0/2`
+- Previous task: Task 13 remediation accepted; fresh reviewer `ses_020480e2bffeE2SlM4So5zU3WN` returned spec `PASS` and quality `APPROVED`
+- Current task: `Build exit guard`
+- OpenSpec mapping: `3.3` captcha/auth compatibility rechecked and complete
+- Stage: `final-review-complete`
+- Review/fix round: `1/2`
 - Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
-- Brief: pending
-- Report: pending
-- Scope: add backend/frontend RED tests for Turnstile-only OAuth start and passkey login, implement the minimum shared provider dispatch/proof flow, rerun focused gates, update final evidence
+- Brief: `.superpowers/sdd/task-13-remediation-verify-1.md`
+- Report: `.superpowers/sdd/staged-merge-upstream-v0-1-171-task-13-remediation-verify-1-report.md`
+- Scope: remediation complete; preserve exact-time manual reset decision and rerun independent final Verify
 - Environment: local Docker unavailable; migration integration remains `unverified` on skip; no remote execution
 - Hard boundary: preserve administrator/manual exact-time reset semantics; do not touch scheduler/gateway/subscription/migration behavior; Docker remains UNVERIFIED; no remote/release operation
 - Verify finding: `VerifyActionCaptchaIfEnabled` currently bypasses Turnstile-only settings and frontend OAuth/passkey actions do not submit the existing Turnstile token.
 - User resolution retained: renewing an unexpired suspended subscription extends expiry, restores `active`, appends notes and preserves quota windows/usage.
-- Verify handoff: after remediation, refresh auth-focused and full verification evidence; retain existing topology/blob evidence and Docker/race residuals.
+- Verify handoff: `make test` passed with frontend 237 files / 1814 tests; version-locked full build passed; refresh independent Verify evidence while retaining topology/blob evidence and Docker/race residuals.
 - Integration residual: Docker CLI unavailable; no remote execution and no false PASS.
 - Worktree: only protected `.comet/current-change.json` remains untracked after this checkpoint commit.
-- Status: ready for fresh TDD implementer and thorough review.
+- Status: all plan/OpenSpec tasks checked; both Task 13 checkoff commands passed; ready for Build guard and independent Verify.
