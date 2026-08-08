@@ -2,9 +2,9 @@
 
 ## Outcome
 
-`DONE_WITH_CONCERNS`
+`BUILD REMEDIATION COMPLETE; FINAL VERIFY PENDING`
 
-All non-Docker final gates passed. The sole integration residual is Docker-only migration execution; `go test -race` remains unavailable because the local environment lacks cgo. No product, test, plan, OpenSpec task, checkpoint, VERSION, runtime selector, remote, server, release, or deployment operation was changed or performed by this verifier.
+The prior non-Docker final gates passed, but Verify attempt 1 found and remediated a Turnstile action-gate gap after those gates. Remediation-focused gates and thorough review passed; independent final Verify must still rerun before completion. Docker-only migration execution and unavailable cgo/race remain residuals. No remote, server, release, or deployment operation was performed.
 
 ## Provenance
 
@@ -269,3 +269,12 @@ EXIT: 0
 ## Non-Operations
 
 This change was not pushed, tagged, released, deployed, or used to operate any server. Docker integration was not rerun. `go test -race` was not run because cgo is unavailable.
+
+## Verify Attempt 1 Remediation
+
+- Final reviewer `ses_020707aafffeli3vLaRDsqQmoa` reported two Important findings. The administrator-midnight finding was rejected: the user explicitly decided that administrator and user manual resets use the exact operation time, and Task 10 TDD plus the Design Doc persist that decision.
+- The Turnstile finding was accepted: OAuth start and passkey login bypassed proof when Turnstile was the selected mutually exclusive provider. Verify transitioned back to Build with `verify_failures=1` and reopened Task 13 / OpenSpec 3.3.
+- Backend commits `b889ee9c3` and `6f98da6e3` route `VerifyActionCaptchaIfEnabled` through the shared `VerifyCaptcha` provider dispatch and add direct OAuth POST/passkey ceremony tests for supplied and missing Turnstile proof.
+- Frontend commits `a2adddfab` and `665afee53` include Turnstile in auth action gating, retain/reset the completed token in `CaptchaChallenge`, prevent stale token reuse after provider/site-key changes, and keep pending OAuth resend/create-account challenges mutually exclusive.
+- TDD RED reproduced verifier bypass, missing-proof acceptance, absent frontend action calls, stale cached token, and concurrent Turnstile challenge mounting. GREEN and focused gates passed: tagged service/handler packages; Task 13 service/handler/middleware focused suites; frontend focused `40`, canonical-plus-EmailVerify `90`; `vue-tsc`, ESLint, and `golangci-lint`.
+- Fresh reviewer `ses_020480e2bffeE2SlM4So5zU3WN` concluded spec `PASS`, code quality `APPROVED`, with only the non-blocking unsquashed `fixup!` commit-message note. `AdminResetQuota`, subscription, scheduler, gateway, migration and VERSION were not modified.

@@ -1054,3 +1054,12 @@ This section supersedes the Task 16-18 provenance and final matrix above where t
 | 11 | Ent/Wire/dependency/migration filenames/blobs/integration | Source manifests/schema -> Ent/Wire; migration runner -> filenames/checksums -> PostgreSQL integration. | Direct build/two-generate/static/F11; F12 has no target PASS. | Docker-only `unverified` |
 
 Corrected totals: `protected=6`, `manual=4`, Docker-only `unverified=1`, `gap=0`. Every `protected` row has direct evidence; manual rows retain call-path plus supporting evidence only. Docker migration and cgo/race residuals remain unchanged: empty database, local 191/192 upgrade, ordering, idempotency, relations, and checksum are unverified; `go test -race` remains unavailable without cgo.
+
+## Verify Attempt 1：Turnstile action-gate remediation
+
+- 状态：`DONE`，但 change 的独立 final Verify 尚待重跑。Verify reviewer `ses_020707aafffeli3vLaRDsqQmoa` 发现 OAuth 启动与 passkey 登录在 Turnstile-only 配置下放行，属于 OpenSpec 3.3 的真实 IMPORTANT 缺口；workflow 以 `verify_failures=1` 返回 Build。
+- reviewer 同时建议把 `AdminResetQuota` 改回当天零点。该建议与用户已持久化的最终裁决冲突，已拒绝：管理员与用户手动重置均使用实际操作时刻，自动窗口直接信任精确持久化起点。
+- backend TDD：旧实现下 Turnstile verifier 调用数为零，missing/rejected/error proof 均被放行，OAuth POST/passkey ceremony 也未 fail-closed；`b889ee9c3`、`6f98da6e3` 复用 `VerifyCaptcha` 单次 settings 读取与三 provider 分派后 GREEN。
+- frontend TDD：旧实现不触发 Turnstile action gate，`CaptchaChallenge.verifyAction()` 不返回已完成 token；review-fix 又真实复现 site-key 变化后的 stale token 与 pending OAuth 双 Turnstile 实例。`a2adddfab`、`665afee53` 修复 token 生命周期、action proof 流转和 challenge 互斥。
+- fresh gates：Task 13 backend service/handler/middleware focused、tagged service/handler、`golangci-lint` PASS；frontend focused 40、canonical-plus-EmailVerify 90、typecheck、ESLint PASS。fresh reviewer `ses_020480e2bffeE2SlM4So5zU3WN` 最终 spec `PASS`、quality `APPROVED`；唯一非阻断项为未 squash 的 `fixup!` 提交消息。
+- 能力矩阵第 7 行由新的 Turnstile OAuth/passkey direct behavior tests 加强，状态仍为 `protected`；其他十行及 Docker-only `unverified` 不变。完整 final gate、strict validation 与 Verify report completion 将在重新进入 Verify 后刷新。
