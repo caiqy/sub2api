@@ -218,16 +218,15 @@ func TestAuthServiceVerifyActionCaptchaIfEnabledDispatchesAliyun(t *testing.T) {
 	require.Equal(t, "captcha-verify-param", spy.lastParam)
 }
 
-func TestAuthServiceVerifyActionCaptchaIfEnabledSkipsWhenOnlyTurnstile(t *testing.T) {
+func TestAuthServiceVerifyActionCaptchaIfEnabledRejectsMissingTurnstileProof(t *testing.T) {
 	spy := &aliyunVerifierSpy{}
 	authService := newAliyunAuthServiceForTest(&config.Config{}, map[string]string{
 		SettingKeyTurnstileEnabled:   "true",
 		SettingKeyTurnstileSecretKey: "secret",
 	}, spy)
 
-	// Turnstile 不扩大既有覆盖：扩展入口不拦截
 	err := authService.VerifyActionCaptchaIfEnabled(context.Background(), CaptchaProof{}, "127.0.0.1")
 
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrTurnstileVerificationFailed)
 	require.Zero(t, spy.called)
 }
