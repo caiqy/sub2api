@@ -2,9 +2,9 @@
 
 ## Outcome
 
-`BUILD REMEDIATION COMPLETE; FINAL VERIFY PENDING`
+`通过（保留环境残余风险）`
 
-The prior non-Docker final gates passed, but Verify attempt 1 found and remediated a Turnstile action-gate gap after those gates. Remediation-focused gates and thorough review passed; independent final Verify must still rerun before completion. Docker-only migration execution and unavailable cgo/race remain residuals. No remote, server, release, or deployment operation was performed.
+Verify attempt 1 发现的 Turnstile action-gate 缺口已完成 TDD remediation。Verify attempt 2 在修复后独立重跑全部非 Docker 门禁，并经原 full-change reviewer 复核通过。唯一 integration 残余是本机缺少 Docker；`CGO_ENABLED=0`，因此 race gate 仍不可用。未执行远程、服务器、发布或部署操作。
 
 ## Provenance
 
@@ -15,8 +15,9 @@ The prior non-Docker final gates passed, but Verify attempt 1 found and remediat
 | Task 16 actual repository HEAD | `unrecorded` |
 | Final product-source anchor | `73df7248383b9f534df64956efe3c0d321f0e3bc` (`chore: bump version to 0.1.171.1`) |
 | Review-fix 1 pre-fix rebind HEAD | `7b18bcf7ffdfbd88ce16c4e5bec80232ac2883c2` (`docs: record v0.1.171 verification`) |
+| Verify attempt 2 tested HEAD | `18880a980` (`docs: complete v0.1.171 remediation build`) |
 | Final VERSION | `0.1.171.1` |
-| Worktree before report staging | Only `?? .comet/current-change.json`; staged index empty; no unmerged paths or index entries. |
+| Worktree before attempt 2 report staging | Only current-change Comet runtime state plus `?? .comet/current-change.json`; no unrelated dirty path, generated drift or unmerged entry. |
 
 Task 16 preflight recorded selector-only status, final VERSION, empty index, and no unmerged entries, but did not record `git rev-parse HEAD`. Its actual repository HEAD is therefore `unrecorded`; this report does not call `73df724...` the tested HEAD. `73df724...` is the final product-source anchor/version commit. A controller post-run capture, not Task 16 preflight evidence, recorded the current history and `git diff --name-only 73df724..7b18bcf`: the range contains only plan/OpenSpec task checkoffs, Comet checkpoints, and report commits. Thus the product tree covered by inherited Task 16 evidence can be precisely bound to the `73df724...` anchor, while Task 16's actual repository HEAD remains unclaimed.
 
@@ -258,7 +259,7 @@ Matrix counts: `protected=6`, `manual=4`, Docker-only `unverified=1`, `gap=0`. A
 
 ## Strict Validation
 
-Inherited from the prior final verification; not rerun during this review fix because OpenSpec artifacts are unchanged.
+Verify attempt 2 重新执行，结果如下：
 
 ```text
 COMMAND: comet classic openspec -- validate staged-merge-upstream-v0-1-171 --strict
@@ -278,3 +279,30 @@ This change was not pushed, tagged, released, deployed, or used to operate any s
 - Frontend commits `a2adddfab` and `665afee53` include Turnstile in auth action gating, retain/reset the completed token in `CaptchaChallenge`, prevent stale token reuse after provider/site-key changes, and keep pending OAuth resend/create-account challenges mutually exclusive.
 - TDD RED reproduced verifier bypass, missing-proof acceptance, absent frontend action calls, stale cached token, and concurrent Turnstile challenge mounting. GREEN and focused gates passed: tagged service/handler packages; Task 13 service/handler/middleware focused suites; frontend focused `40`, canonical-plus-EmailVerify `90`; `vue-tsc`, ESLint, and `golangci-lint`.
 - Fresh reviewer `ses_020480e2bffeE2SlM4So5zU3WN` concluded spec `PASS`, code quality `APPROVED`, with only the non-blocking unsquashed `fixup!` commit-message note. `AdminResetQuota`, subscription, scheduler, gateway, migration and VERSION were not modified.
+
+## Verify Attempt 2
+
+### OpenSpec 与设计一致性
+
+| 维度 | 结果 |
+| --- | --- |
+| Completeness | `18/18` tasks；`2/2` requirements；`17/17` scenarios 已映射，其中 14 PASS、3 个条件未触发 |
+| Correctness | PASS；Turnstile OAuth start/passkey 已按互斥 provider fail-closed |
+| Coherence | PASS；实现符合 OpenSpec design 与 Design Doc，手动重置精确时间语义无漂移 |
+| Capability matrix | `protected=6`、`manual=4`、Docker-only `unverified=1`、`gap=0` |
+
+### 独立门禁
+
+- `make test`：PASS（exit 0）；backend 默认测试通过，frontend `237` files / `1814` tests。
+- `make VERSION=0.1.171.1 SHELL=D:/scoop/shims/bash.exe build`：PASS（exit 0）；backend 编译、`vue-tsc -b`、Vite production build 通过，`1051` modules transformed。
+- 连续两轮 `make -C backend generate`：PASS；每轮后 Ent/Wire 路径均零 diff。
+- `golangci-lint run ./...`：PASS，`0 issues`；frontend ESLint 与 `vue-tsc --noEmit`：PASS。
+- whitespace、staged whitespace、unmerged index、tracked conflict markers：PASS。
+- `v0.1.170`、`v0.1.171` 均为 HEAD 祖先；merge commits `98c7b0487`、`cca37e01e` 的第二父分别精确匹配固定 peeled SHA；VERSION 为 `0.1.171.1`；双方 191、双方 192、上游 193 migration 文件 hash 已重新确认。
+- 本机 `docker` 命令不存在，PostgreSQL migration integration 继续标为 `unverified`；`CGO_ENABLED=0`，未运行 `go test -race`。
+
+### Final Review
+
+原 full-change reviewer `ses_020707aafffeli3vLaRDsqQmoa` 复核后撤回 administrator-midnight finding，确认 Turnstile finding 已关闭：无 CRITICAL、IMPORTANT 或 WARNING；spec compliance `PASS`、code quality `APPROVED`、Ready for archive `YES`。
+
+两个非阻断 hygiene 建议：共享历史前可按需 squash `6f98da6e3 fixup! ...`；Verify guard 将刷新仍描述 Build exit 的 runtime handoff。两者均不影响行为或归档就绪性。
