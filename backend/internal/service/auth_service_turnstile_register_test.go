@@ -11,15 +11,17 @@ import (
 )
 
 type turnstileVerifierSpy struct {
-	called    int
-	lastToken string
-	result    *TurnstileVerifyResponse
-	err       error
+	called       int
+	lastToken    string
+	lastRemoteIP string
+	result       *TurnstileVerifyResponse
+	err          error
 }
 
-func (s *turnstileVerifierSpy) VerifyToken(_ context.Context, _ string, token, _ string) (*TurnstileVerifyResponse, error) {
+func (s *turnstileVerifierSpy) VerifyToken(_ context.Context, _ string, token, remoteIP string) (*TurnstileVerifyResponse, error) {
 	s.called++
 	s.lastToken = token
+	s.lastRemoteIP = remoteIP
 	if s.err != nil {
 		return nil, s.err
 	}

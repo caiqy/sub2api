@@ -58,6 +58,17 @@ func (v *oauthCaptchaVerifier) VerifyTicket(_ context.Context, _ service.Tencent
 	return &service.TencentCaptchaVerifyResponse{CaptchaCode: 1}, nil
 }
 
+type oauthTurnstileVerifier struct {
+	calls int
+	token string
+}
+
+func (v *oauthTurnstileVerifier) VerifyToken(_ context.Context, _ string, token, _ string) (*service.TurnstileVerifyResponse, error) {
+	v.calls++
+	v.token = token
+	return &service.TurnstileVerifyResponse{Success: true}, nil
+}
+
 func newOAuthCaptchaTestHandler(enabled bool) (*AuthHandler, *oauthCaptchaVerifier) {
 	values := map[string]string{}
 	if enabled {
@@ -74,6 +85,21 @@ func newOAuthCaptchaTestHandler(enabled bool) (*AuthHandler, *oauthCaptchaVerifi
 	verifier := &oauthCaptchaVerifier{}
 	authService := service.NewAuthService(nil, nil, nil, nil, cfg, settings, nil, nil, nil, nil, nil, nil, nil)
 	authService.SetTencentCaptchaService(service.NewTencentCaptchaService(settings, verifier))
+	return &AuthHandler{authService: authService, settingSvc: settings, cfg: cfg}, verifier
+}
+
+func newTurnstileOAuthCaptchaTestHandler() (*AuthHandler, *oauthTurnstileVerifier) {
+	cfg := &config.Config{}
+	settings := service.NewSettingService(&oauthCaptchaSettingRepo{values: map[string]string{
+		service.SettingKeyTurnstileEnabled:   "true",
+		service.SettingKeyTurnstileSecretKey: "turnstile-secret",
+	}}, cfg)
+	verifier := &oauthTurnstileVerifier{}
+	authService := service.NewAuthService(
+		nil, nil, nil, nil, cfg, settings, nil,
+		service.NewTurnstileService(settings, verifier),
+		nil, nil, nil, nil, nil,
+	)
 	return &AuthHandler{authService: authService, settingSvc: settings, cfg: cfg}, verifier
 }
 
@@ -146,6 +172,40 @@ func TestOAuthStartPostRequiresTencentProofWhenEnabled(t *testing.T) {
 			require.False(t, handler.requireActionCaptchaForOAuthLoginStart(c))
 			require.Equal(t, http.StatusBadRequest, recorder.Code)
 			require.Contains(t, recorder.Body.String(), "TENCENT_CAPTCHA_VERIFICATION_FAILED")
+			require.Zero(t, verifier.calls)
+		})
+	}
+}
+
+func TestOAuthStartPostBindsAndRequiresTurnstileProofWhenEnabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for provider := range oauthStartHandlers() {
+		t.Run(provider, func(t *testing.T) {
+			handler, verifier := newTurnstileOAuthCaptchaTestHandler()
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(
+				http.MethodPost,
+				"/api/v1/auth/oauth/"+provider+"/start",
+				strings.NewReader(`{"turnstile_token":"turnstile-token"}`),
+			)
+			c.Request.Header.Set("Content-Type", "application/json")
+
+			require.True(t, handler.requireActionCaptchaForOAuthLoginStart(c))
+			require.Equal(t, 1, verifier.calls)
+			require.Equal(t, "turnstile-token", verifier.token)
+		})
+
+		t.Run(provider+" missing proof", func(t *testing.T) {
+			handler, verifier := newTurnstileOAuthCaptchaTestHandler()
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/"+provider+"/start", strings.NewReader(`{}`))
+			c.Request.Header.Set("Content-Type", "application/json")
+
+			require.False(t, handler.requireActionCaptchaForOAuthLoginStart(c))
+			require.Equal(t, http.StatusBadRequest, recorder.Code)
+			require.Contains(t, recorder.Body.String(), "TURNSTILE_VERIFICATION_FAILED")
 			require.Zero(t, verifier.calls)
 		})
 	}

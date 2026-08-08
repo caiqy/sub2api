@@ -32,6 +32,17 @@ func (s *passkeyCaptchaVerifierStub) VerifyTicket(_ context.Context, _ service.T
 	return &service.TencentCaptchaVerifyResponse{CaptchaCode: 1}, nil
 }
 
+type passkeyTurnstileVerifierStub struct {
+	calls int
+	token string
+}
+
+func (s *passkeyTurnstileVerifierStub) VerifyToken(_ context.Context, _ string, token, _ string) (*service.TurnstileVerifyResponse, error) {
+	s.calls++
+	s.token = token
+	return &service.TurnstileVerifyResponse{Success: true}, nil
+}
+
 type passkeyBeginSessionStoreStub struct {
 	service.PasskeySessionStore
 	storeCalls int
@@ -141,6 +152,34 @@ func newTencentProtectedPasskeyHandler(t *testing.T) (*PasskeyHandler, *passkeyC
 	return NewPasskeyHandler(passkeys, authService, settings), verifier, sessions
 }
 
+func newTurnstileProtectedPasskeyHandler(t *testing.T) (*PasskeyHandler, *passkeyTurnstileVerifierStub, *passkeyBeginSessionStoreStub) {
+	t.Helper()
+	cfg := &config.Config{WebAuthn: config.WebAuthnConfig{
+		Enabled:       true,
+		RPDisplayName: "Sub2API",
+		RPID:          "sub2api.example.com",
+		RPOrigins:     []string{"https://sub2api.example.com"},
+	}}
+	repo := &passkeySwitchSettingRepo{
+		value: "true",
+		values: map[string]string{
+			service.SettingKeyTurnstileEnabled:   "true",
+			service.SettingKeyTurnstileSecretKey: "turnstile-secret",
+		},
+	}
+	settings := service.NewSettingService(repo, cfg)
+	verifier := &passkeyTurnstileVerifierStub{}
+	authService := service.NewAuthService(
+		nil, nil, nil, nil, cfg, settings, nil,
+		service.NewTurnstileService(settings, verifier),
+		nil, nil, nil, nil, nil,
+	)
+	sessions := &passkeyBeginSessionStoreStub{}
+	passkeys, err := service.NewPasskeyService(cfg, nil, sessions, nil)
+	require.NoError(t, err)
+	return NewPasskeyHandler(passkeys, authService, settings), verifier, sessions
+}
+
 func newPasskeyBeginLoginContext(body string) (*gin.Context, *httptest.ResponseRecorder) {
 	recorder := httptest.NewRecorder()
 	ginContext, _ := gin.CreateTestContext(recorder)
@@ -179,6 +218,33 @@ func TestPasskeyBeginLoginAcceptsTencentCaptchaProofBeforeCeremony(t *testing.T)
 	require.Equal(t, 1, verifier.calls)
 	require.Equal(t, service.TencentCaptchaProof{Ticket: "ticket-value", Randstr: "@rand-value"}, verifier.proof)
 	require.Equal(t, 1, sessions.storeCalls)
+}
+
+func TestPasskeyBeginLoginBindsAndRequiresTurnstileProofBeforeCeremony(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Run("accepts proof", func(t *testing.T) {
+		handler, verifier, sessions := newTurnstileProtectedPasskeyHandler(t)
+		ginContext, recorder := newPasskeyBeginLoginContext(`{"turnstile_token":"turnstile-token"}`)
+
+		handler.BeginLogin(ginContext)
+
+		require.Equal(t, http.StatusOK, recorder.Code)
+		require.Equal(t, 1, verifier.calls)
+		require.Equal(t, "turnstile-token", verifier.token)
+		require.Equal(t, 1, sessions.storeCalls)
+	})
+
+	t.Run("rejects missing proof", func(t *testing.T) {
+		handler, verifier, sessions := newTurnstileProtectedPasskeyHandler(t)
+		ginContext, recorder := newPasskeyBeginLoginContext(`{}`)
+
+		handler.BeginLogin(ginContext)
+
+		require.Equal(t, http.StatusBadRequest, recorder.Code)
+		require.Contains(t, recorder.Body.String(), "TURNSTILE_VERIFICATION_FAILED")
+		require.Zero(t, verifier.calls)
+		require.Zero(t, sessions.storeCalls)
+	})
 }
 
 func TestPasskeyCredentialListRemainsAvailableWhenSignInDisabled(t *testing.T) {

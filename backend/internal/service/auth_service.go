@@ -457,42 +457,12 @@ func captchaProvidersConflict(enabled ...bool) bool {
 	return count > 1
 }
 
-// VerifyActionCaptchaIfEnabled 仅保护动作触发的扩展入口（OAuth 登录启动、passkey 登录），
-// 腾讯天御与阿里云验证码启用时拦截；不扩大 Cloudflare Turnstile 的既有覆盖范围。
+// VerifyActionCaptchaIfEnabled 保护动作触发的扩展入口（OAuth 登录启动、passkey 登录）。
 func (s *AuthService) VerifyActionCaptchaIfEnabled(ctx context.Context, proof CaptchaProof, remoteIP string) error {
 	if s == nil || s.settingService == nil {
 		return ErrServiceUnavailable
 	}
-
-	providerConfig, err := s.settingService.GetCaptchaProviderConfig(ctx)
-	if err != nil {
-		logger.LegacyPrintf("service.auth", "%s", "[Auth] Failed to read captcha provider settings")
-		return ErrServiceUnavailable
-	}
-	tencentEnabled := providerConfig.Tencent.Enabled
-	aliyunEnabled := providerConfig.Aliyun.Enabled
-	if !tencentEnabled && !aliyunEnabled {
-		return nil
-	}
-	if captchaProvidersConflict(providerConfig.TurnstileEnabled, tencentEnabled, aliyunEnabled) {
-		return ErrCaptchaProviderConflict
-	}
-	if aliyunEnabled {
-		if s.aliyunCaptchaService == nil {
-			return ErrAliyunCaptchaNotConfigured
-		}
-		return s.aliyunCaptchaService.VerifyParamWithConfig(ctx, providerConfig.Aliyun, proof.TurnstileToken)
-	}
-	if s.tencentCaptchaService == nil {
-		return ErrTencentCaptchaNotConfigured
-	}
-	return s.tencentCaptchaService.VerifyTicketWithConfig(
-		ctx,
-		providerConfig.Tencent,
-		proof.TencentTicket,
-		proof.TencentRandstr,
-		remoteIP,
-	)
+	return s.VerifyCaptcha(ctx, proof, remoteIP)
 }
 
 // VerifyTurnstileForRegister 保留旧内部接口，生产 handler 使用 VerifyCaptchaForRegister。

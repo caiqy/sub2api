@@ -167,7 +167,23 @@ func TestVerifyActionCaptchaIfEnabledVerifiesTencentProof(t *testing.T) {
 	require.Equal(t, TencentCaptchaProof{Ticket: "ticket", Randstr: "@rand"}, verifier.proof)
 }
 
-func TestVerifyActionCaptchaIfEnabledDoesNotExpandTurnstileCoverage(t *testing.T) {
+func TestVerifyActionCaptchaIfEnabledVerifiesTurnstileProof(t *testing.T) {
+	settings := map[string]string{
+		SettingKeyTurnstileEnabled:   "true",
+		SettingKeyTurnstileSecretKey: "turnstile-secret",
+	}
+	turnstileVerifier := &turnstileVerifierSpy{}
+	svc := newAuthServiceForCaptchaTest(settings, false, turnstileVerifier, nil)
+
+	err := svc.VerifyActionCaptchaIfEnabled(context.Background(), CaptchaProof{TurnstileToken: "turnstile-token"}, "203.0.113.10")
+
+	require.NoError(t, err)
+	require.Equal(t, 1, turnstileVerifier.called)
+	require.Equal(t, "turnstile-token", turnstileVerifier.lastToken)
+	require.Equal(t, "203.0.113.10", turnstileVerifier.lastRemoteIP)
+}
+
+func TestVerifyActionCaptchaIfEnabledRejectsMissingTurnstileProof(t *testing.T) {
 	settings := map[string]string{
 		SettingKeyTurnstileEnabled:   "true",
 		SettingKeyTurnstileSecretKey: "turnstile-secret",
@@ -177,8 +193,55 @@ func TestVerifyActionCaptchaIfEnabledDoesNotExpandTurnstileCoverage(t *testing.T
 
 	err := svc.VerifyActionCaptchaIfEnabled(context.Background(), CaptchaProof{}, "203.0.113.10")
 
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrTurnstileVerificationFailed)
 	require.Zero(t, turnstileVerifier.called)
+}
+
+func TestVerifyActionCaptchaIfEnabledFailsClosedOnTurnstileRejectionAndError(t *testing.T) {
+	settings := map[string]string{
+		SettingKeyTurnstileEnabled:   "true",
+		SettingKeyTurnstileSecretKey: "turnstile-secret",
+	}
+
+	t.Run("rejection", func(t *testing.T) {
+		turnstileVerifier := &turnstileVerifierSpy{result: &TurnstileVerifyResponse{Success: false}}
+		svc := newAuthServiceForCaptchaTest(settings, false, turnstileVerifier, nil)
+
+		err := svc.VerifyActionCaptchaIfEnabled(context.Background(), CaptchaProof{TurnstileToken: "rejected-token"}, "203.0.113.10")
+
+		require.ErrorIs(t, err, ErrTurnstileVerificationFailed)
+		require.Equal(t, 1, turnstileVerifier.called)
+	})
+
+	t.Run("verifier error", func(t *testing.T) {
+		turnstileVerifier := &turnstileVerifierSpy{err: errors.New("turnstile unavailable")}
+		svc := newAuthServiceForCaptchaTest(settings, false, turnstileVerifier, nil)
+
+		err := svc.VerifyActionCaptchaIfEnabled(context.Background(), CaptchaProof{TurnstileToken: "error-token"}, "203.0.113.10")
+
+		require.Error(t, err)
+		require.ErrorContains(t, err, "turnstile unavailable")
+		require.Equal(t, 1, turnstileVerifier.called)
+	})
+}
+
+func TestVerifyActionCaptchaIfEnabledRejectsProviderConflict(t *testing.T) {
+	settings := tencentCaptchaSettings()
+	settings[SettingKeyTurnstileEnabled] = "true"
+	settings[SettingKeyTurnstileSecretKey] = "turnstile-secret"
+	turnstileVerifier := &turnstileVerifierSpy{}
+	tencentVerifier := &tencentCaptchaVerifierStub{response: &TencentCaptchaVerifyResponse{CaptchaCode: 1}}
+	svc := newAuthServiceForCaptchaTest(settings, false, turnstileVerifier, tencentVerifier)
+
+	err := svc.VerifyActionCaptchaIfEnabled(context.Background(), CaptchaProof{
+		TurnstileToken: "turnstile-token",
+		TencentTicket:  "ticket",
+		TencentRandstr: "@rand",
+	}, "203.0.113.10")
+
+	require.ErrorIs(t, err, ErrCaptchaProviderConflict)
+	require.Zero(t, turnstileVerifier.called)
+	require.Zero(t, tencentVerifier.calls)
 }
 
 func TestVerifyActionCaptchaIfEnabledFailsClosedOnSettingReadError(t *testing.T) {
