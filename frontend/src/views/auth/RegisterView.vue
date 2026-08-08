@@ -422,9 +422,10 @@ const aliyunCaptchaReady = computed(
     Boolean(aliyunCaptchaSceneId.value) &&
     Boolean(aliyunCaptchaPrefix.value)
 )
-// 动作触发式验证码（腾讯/阿里云）：提交、OAuth 启动时弹窗验证
+// 动作验证码：Turnstile 复用已完成票据；腾讯/阿里云在动作发起时验证。
 const actionCaptchaEnabled = computed(
   () =>
+    (turnstileEnabled.value && Boolean(turnstileSiteKey.value)) ||
     (tencentCaptchaEnabled.value && Boolean(tencentCaptchaAppId.value)) ||
     aliyunCaptchaReady.value
 )

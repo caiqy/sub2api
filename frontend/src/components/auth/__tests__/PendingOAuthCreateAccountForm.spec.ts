@@ -272,7 +272,10 @@ describe('PendingOAuthCreateAccountForm', () => {
         stubs: {
           TurnstileWidget: {
             template: '<button data-testid="turnstile-verify" @click="$emit(\'verify\', \'proof-token\')">verify</button>',
-            methods: { reset: turnstileReset }
+            methods: {
+              reset: turnstileReset,
+              verifyAction: () => ({ token: 'proof-token', randstr: '' })
+            }
           }
         }
       }
@@ -308,7 +311,10 @@ describe('PendingOAuthCreateAccountForm', () => {
         stubs: {
           TurnstileWidget: {
             template: '<button data-testid="turnstile-verify" @click="$emit(\'verify\', \'turnstile-token\')">verify</button>',
-            methods: { reset: vi.fn() }
+            methods: {
+              reset: vi.fn(),
+              verifyAction: () => ({ token: 'turnstile-token', randstr: '' })
+            }
           }
         }
       }
@@ -345,7 +351,10 @@ describe('PendingOAuthCreateAccountForm', () => {
         stubs: {
           TurnstileWidget: {
             template: '<button data-testid="turnstile-verify" @click="$emit(\'verify\', \'turnstile-token\')">verify</button>',
-            methods: { reset: turnstileReset }
+            methods: {
+              reset: turnstileReset,
+              verifyAction: () => ({ token: 'turnstile-token', randstr: '' })
+            }
           }
         }
       }
@@ -396,7 +405,10 @@ describe('PendingOAuthCreateAccountForm', () => {
         stubs: {
           TurnstileWidget: {
             template: '<button data-testid="turnstile-verify" @click="$emit(\'verify\', \'turnstile-token\')">verify</button>',
-            methods: { reset: turnstileReset }
+            methods: {
+              reset: turnstileReset,
+              verifyAction: () => ({ token: 'turnstile-token', randstr: '' })
+            }
           }
         }
       }

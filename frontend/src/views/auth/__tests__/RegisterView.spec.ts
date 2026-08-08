@@ -1,10 +1,15 @@
+import { defineComponent, h } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import RegisterView from '@/views/auth/RegisterView.vue'
 
-const { getPublicSettingsMock } = vi.hoisted(() => ({
-  getPublicSettingsMock: vi.fn()
+const { getPublicSettingsMock, startOAuthLoginMock, verifyActionMock } = vi.hoisted(() => ({
+  getPublicSettingsMock: vi.fn(),
+  startOAuthLoginMock: vi.fn(),
+  verifyActionMock: vi.fn()
 }))
+
+const locationState = { href: 'http://localhost/register' }
 
 const publicSettings = {
   registration_enabled: true,
@@ -53,7 +58,26 @@ vi.mock('@/api/auth', async () => {
   const actual = await vi.importActual<typeof import('@/api/auth')>('@/api/auth')
   return {
     ...actual,
-    getPublicSettings: (...args: unknown[]) => getPublicSettingsMock(...args)
+    getPublicSettings: (...args: unknown[]) => getPublicSettingsMock(...args),
+    startOAuthLogin: (...args: unknown[]) => startOAuthLoginMock(...args)
+  }
+})
+
+const CaptchaChallengeStub = defineComponent({
+  setup(_, { expose }) {
+    expose({ verifyAction: verifyActionMock, reset: vi.fn() })
+    return () => h('div')
+  }
+})
+
+const OAuthButtonStub = defineComponent({
+  emits: ['start'],
+  setup(_, { emit }) {
+    return () => h('button', {
+      type: 'button',
+      'data-testid': 'oauth-start',
+      onClick: () => emit('start', { provider: 'github', params: { aff_code: '' } })
+    })
   }
 })
 
@@ -63,9 +87,9 @@ function mountRegister() {
       stubs: {
         AuthLayout: { template: '<div><slot /><slot name="footer" /></div>' },
         Icon: true,
-        TurnstileWidget: { template: '<div data-testid="turnstile-widget" />' },
+        TurnstileWidget: CaptchaChallengeStub,
         LoginAgreementPrompt: true,
-        EmailOAuthButtons: true,
+        EmailOAuthButtons: OAuthButtonStub,
         LinuxDoOAuthSection: true,
         WechatOAuthSection: true,
         OidcOAuthSection: true,
@@ -79,7 +103,16 @@ function mountRegister() {
 describe('RegisterView invitation layout', () => {
   beforeEach(() => {
     getPublicSettingsMock.mockReset()
+    startOAuthLoginMock.mockReset()
+    verifyActionMock.mockReset()
     getPublicSettingsMock.mockResolvedValue(publicSettings)
+    startOAuthLoginMock.mockResolvedValue({ authorize_url: 'https://github.example/authorize' })
+    verifyActionMock.mockResolvedValue({ token: 'turnstile-token', randstr: '' })
+    locationState.href = 'http://localhost/register'
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: locationState
+    })
   })
 
   it('keeps the optional affiliate invitation field before Turnstile', async () => {
@@ -108,5 +141,41 @@ describe('RegisterView invitation layout', () => {
 
     expect(wrapper.find('[data-testid="affiliate-invitation-field"]').exists()).toBe(false)
     expect(wrapper.get('#invitation_code').exists()).toBe(true)
+  })
+
+  it('starts OAuth through the Turnstile gate with its completed token', async () => {
+    getPublicSettingsMock.mockResolvedValueOnce({
+      ...publicSettings,
+      github_oauth_enabled: true
+    })
+    const wrapper = mountRegister()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="oauth-start"]').trigger('click')
+    await flushPromises()
+
+    expect(verifyActionMock).toHaveBeenCalledOnce()
+    expect(startOAuthLoginMock).toHaveBeenCalledWith(
+      { provider: 'github', params: { aff_code: '' } },
+      { turnstile_token: 'turnstile-token' }
+    )
+    expect(locationState.href).toBe('https://github.example/authorize')
+  })
+
+  it('does not start OAuth when Turnstile has no completed token', async () => {
+    getPublicSettingsMock.mockResolvedValueOnce({
+      ...publicSettings,
+      github_oauth_enabled: true
+    })
+    verifyActionMock.mockResolvedValue(null)
+    const wrapper = mountRegister()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="oauth-start"]').trigger('click')
+    await flushPromises()
+
+    expect(verifyActionMock).toHaveBeenCalledOnce()
+    expect(startOAuthLoginMock).not.toHaveBeenCalled()
+    expect(locationState.href).toBe('http://localhost/register')
   })
 })

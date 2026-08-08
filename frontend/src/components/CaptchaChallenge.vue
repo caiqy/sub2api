@@ -3,9 +3,9 @@
     v-if="turnstileEnabled && turnstileSiteKey"
     ref="turnstileRef"
     :site-key="turnstileSiteKey"
-    @verify="(token) => emit('verify', token, '')"
-    @expire="emit('expire')"
-    @error="emit('error')"
+    @verify="onTurnstileVerify"
+    @expire="onTurnstileExpire"
+    @error="onTurnstileError"
   />
   <TencentCaptchaGate
     v-else-if="tencentEnabled && tencentAppId"
@@ -58,16 +58,35 @@ const emit = defineEmits<{
 const turnstileRef = ref<InstanceType<typeof TurnstileWidget> | null>(null)
 const tencentRef = ref<InstanceType<typeof TencentCaptchaGate> | null>(null)
 const aliyunRef = ref<InstanceType<typeof AliyunCaptchaWidget> | null>(null)
+const turnstileToken = ref('')
+
+function onTurnstileVerify(token: string): void {
+  turnstileToken.value = token
+  emit('verify', token, '')
+}
+
+function onTurnstileExpire(): void {
+  turnstileToken.value = ''
+  emit('expire')
+}
+
+function onTurnstileError(): void {
+  turnstileToken.value = ''
+  emit('error')
+}
 
 function reset(): void {
+  turnstileToken.value = ''
   turnstileRef.value?.reset()
   tencentRef.value?.reset()
   aliyunRef.value?.reset()
 }
 
-// verifyAction 弹出当前启用的动作触发式验证码（腾讯/阿里云）并等待结果；
-// 用户关闭弹窗返回 null，验证异常 emit('error') 并返回 null。
+// verifyAction 返回当前已完成的 Turnstile token，或弹出当前动作触发式验证码并等待结果。
 async function verifyAction(): Promise<ActionCaptchaResult | null> {
+  if (props.turnstileEnabled && props.turnstileSiteKey) {
+    return turnstileToken.value ? { token: turnstileToken.value, randstr: '' } : null
+  }
   if (props.tencentEnabled && props.tencentAppId) {
     try {
       const proof = (await tencentRef.value?.verify()) ?? null

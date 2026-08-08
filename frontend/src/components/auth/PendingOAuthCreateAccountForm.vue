@@ -157,6 +157,7 @@ const aliyunCaptchaReady = computed(
 // 动作触发式验证码（腾讯/阿里云）：发送验证码、提交时弹窗验证
 const actionCaptchaEnabled = computed(
   () =>
+    (turnstileEnabled.value && Boolean(turnstileSiteKey.value)) ||
     (tencentCaptchaEnabled.value && Boolean(tencentCaptchaAppId.value)) ||
     aliyunCaptchaReady.value
 )

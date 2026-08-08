@@ -226,4 +226,101 @@ describe('Tencent captcha action gate', () => {
 
     expect(loginWithPasskeyMock).not.toHaveBeenCalled()
   })
+
+  it('starts OAuth through the Turnstile gate with its completed token', async () => {
+    getPublicSettingsMock.mockResolvedValueOnce({
+      turnstile_enabled: true,
+      turnstile_site_key: 'turnstile-site-key',
+      tencent_captcha_enabled: false,
+      tencent_captcha_app_id: '',
+      backend_mode_enabled: false,
+      password_reset_enabled: false,
+      passkey_enabled: true,
+      github_oauth_enabled: true,
+      google_oauth_enabled: false
+    })
+    verifyActionMock.mockResolvedValue({ token: 'turnstile-token', randstr: '' })
+    const wrapper = mountLogin()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="oauth-start"]').trigger('click')
+    await flushPromises()
+
+    expect(verifyActionMock).toHaveBeenCalledOnce()
+    expect(startOAuthLoginMock).toHaveBeenCalledWith(
+      { provider: 'github', params: { redirect: '/dashboard' } },
+      { turnstile_token: 'turnstile-token' }
+    )
+    expect(locationState.href).toBe('https://github.example/authorize')
+  })
+
+  it('does not start OAuth when Turnstile has no completed token', async () => {
+    getPublicSettingsMock.mockResolvedValueOnce({
+      turnstile_enabled: true,
+      turnstile_site_key: 'turnstile-site-key',
+      tencent_captcha_enabled: false,
+      tencent_captcha_app_id: '',
+      backend_mode_enabled: false,
+      password_reset_enabled: false,
+      passkey_enabled: true,
+      github_oauth_enabled: true,
+      google_oauth_enabled: false
+    })
+    verifyActionMock.mockResolvedValue(null)
+    const wrapper = mountLogin()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="oauth-start"]').trigger('click')
+    await flushPromises()
+
+    expect(verifyActionMock).toHaveBeenCalledOnce()
+    expect(startOAuthLoginMock).not.toHaveBeenCalled()
+    expect(locationState.href).toBe('http://localhost/login')
+  })
+
+  it('passes a completed Turnstile token to Passkey login', async () => {
+    getPublicSettingsMock.mockResolvedValueOnce({
+      turnstile_enabled: true,
+      turnstile_site_key: 'turnstile-site-key',
+      tencent_captcha_enabled: false,
+      tencent_captcha_app_id: '',
+      backend_mode_enabled: false,
+      password_reset_enabled: false,
+      passkey_enabled: true,
+      github_oauth_enabled: true,
+      google_oauth_enabled: false
+    })
+    verifyActionMock.mockResolvedValue({ token: 'turnstile-token', randstr: '' })
+    const wrapper = mountLogin()
+    await flushPromises()
+
+    await wrapper.get('button.btn-secondary.w-full').trigger('click')
+    await flushPromises()
+
+    expect(verifyActionMock).toHaveBeenCalledOnce()
+    expect(loginWithPasskeyMock).toHaveBeenCalledWith({ turnstile_token: 'turnstile-token' })
+  })
+
+  it('does not invoke Passkey when Turnstile has no completed token', async () => {
+    getPublicSettingsMock.mockResolvedValueOnce({
+      turnstile_enabled: true,
+      turnstile_site_key: 'turnstile-site-key',
+      tencent_captcha_enabled: false,
+      tencent_captcha_app_id: '',
+      backend_mode_enabled: false,
+      password_reset_enabled: false,
+      passkey_enabled: true,
+      github_oauth_enabled: true,
+      google_oauth_enabled: false
+    })
+    verifyActionMock.mockResolvedValue(null)
+    const wrapper = mountLogin()
+    await flushPromises()
+
+    await wrapper.get('button.btn-secondary.w-full').trigger('click')
+    await flushPromises()
+
+    expect(verifyActionMock).toHaveBeenCalledOnce()
+    expect(loginWithPasskeyMock).not.toHaveBeenCalled()
+  })
 })
