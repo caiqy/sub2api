@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 23: 融合 gateway、transport 和 protocol 修复`
 - OpenSpec mapping: `5.5 以 TDD 审查 upstream response model audit、Codex identity/capacity failover、transport timeout、body replay/release、sticky/final account、WS prewarm、count_tokens、Grok、图片 cooldown 和协议清洗`
-- Stage: `task-review`
+- Stage: `task-fix`
 - Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `f5c1a00a2333cad7b53c78b5373640a8a02ca981`
@@ -23,4 +23,8 @@
 - Audit evidence: capacity failover/output boundary, per-attempt observer, timeout variants, count_tokens fallback, cooldown, prewarm, body lifecycle, sticky/final account/model and QuotaPlatform construction points reviewed
 - Final gates: both focused protection sets, compile, service lint and static checks PASS
 - Concern: disabling identity enforcement plus non-official custom UA can expose historical probe seed; reported as existing opt-out configuration semantics
-- Status: fresh thorough task reviewer pending
+- Reviewer: `ses_01847b5f0ffeAfj0ycjZ0zaDXD` returned `Needs fixes`
+- Important findings accepted: pre-output SSE capacity failover returns a non-nil usage result; TLS-fingerprint direct/SOCKS5/HTTP CONNECT/uTLS paths bypass bounded dial/handshake deadlines
+- Minor finding accepted: add an independent literal invariant fixing the canonical default originator to `codex-tui`
+- Concern disposition: reviewer confirmed identity-enforcement opt-out semantics are intentional and non-official UA falls back canonical; no production identity fix needed
+- Status: fresh Task 23 fix implementer pending
