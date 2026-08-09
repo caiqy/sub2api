@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 23: 融合 gateway、transport 和 protocol 修复`
 - OpenSpec mapping: `5.5 以 TDD 审查 upstream response model audit、Codex identity/capacity failover、transport timeout、body replay/release、sticky/final account、WS prewarm、count_tokens、Grok、图片 cooldown 和协议清洗`
-- Stage: `implementing`
+- Stage: `task-review`
 - Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `f5c1a00a2333cad7b53c78b5373640a8a02ca981`
@@ -16,4 +16,11 @@
 - TDD rule: run upstream/local protection sets before edits and preserve genuine RED; do not rewrite production identity to satisfy a stale test when canonical `codex-tui` is correct
 - Risk signals: cross-module、security、concurrency、network transport、request-body lifecycle、billing
 - Hard boundary: pre-output capacity may fail over; post-output errors never switch account or double bill; per-attempt response-model observer reset; direct/TLS/SOCKS5 timeouts bounded; final account/model and sticky consistent; request body released exactly once; count_tokens fallback does not cool OAuth
-- Status: fresh Task 23 implementer dispatch pending
+- Implementer: `ses_01858602dffevLBONForfY3E1M` returned `DONE_WITH_CONCERNS`
+- Implementation commit: `0b8eefb416f548bda25a7f45b7417917dc88637f` (parent `08a6f3b9cce1e4dc19684a20c328c1c0eabe729f`)
+- Genuine RED: routed Codex probe assertion expected historical `codex_cli_rs`; actual enforced outbound identity is canonical `codex-tui`
+- Fix scope: test expectation now references `openai.CodexDefaultOriginator`; no production or Task 24 paths changed
+- Audit evidence: capacity failover/output boundary, per-attempt observer, timeout variants, count_tokens fallback, cooldown, prewarm, body lifecycle, sticky/final account/model and QuotaPlatform construction points reviewed
+- Final gates: both focused protection sets, compile, service lint and static checks PASS
+- Concern: disabling identity enforcement plus non-official custom UA can expose historical probe seed; reported as existing opt-out configuration semantics
+- Status: fresh thorough task reviewer pending
