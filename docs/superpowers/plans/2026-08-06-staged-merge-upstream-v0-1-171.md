@@ -1383,7 +1383,7 @@ Assert-CleanGate
 
 ### Task 19: 固定 v0.1.172/v0.1.173 manifest、重叠面和新基线
 
-- [ ] Task 19: 固定 v0.1.172/v0.1.173 manifest、重叠面和新基线
+- [x] Task 19: 固定 v0.1.172/v0.1.173 manifest、重叠面和新基线
 
 **映射 OpenSpec：**5.1
 
