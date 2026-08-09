@@ -911,7 +911,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 
 			eventType, eventResponseID, _ := parseOpenAIWSEventEnvelope(upstreamMessage)
 			bindResponseID := ""
-			responseModelObserver.ObserveOpenAI(upstreamMessage, eventType)
 			if responseID == "" && eventResponseID != "" {
 				bindResponseID = eventResponseID
 			}
@@ -922,6 +921,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if eventResponseID != "" && !eventOwned {
 				continue
 			}
+			responseModelObserver.ObserveOpenAI(upstreamMessage, eventType)
 			if eventType != "" {
 				eventCount++
 				if firstEventType == "" {

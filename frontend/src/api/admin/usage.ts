@@ -48,7 +48,6 @@ export async function getStats(params: {
   model?: string
   request_type?: UsageRequestType
   stream?: boolean
-	upstream_model_mismatch?: boolean
   upstream_model_mismatch?: boolean
   period?: string
   start_date?: string
