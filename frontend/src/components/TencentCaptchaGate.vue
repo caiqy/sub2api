@@ -31,6 +31,9 @@ const internationalContainerVisible = ref<boolean>(isInternational.value)
 
 let instance: { show(): void; destroy(): void } | null = null
 let pending: Promise<TencentCaptchaProof | null> | null = null
+// 区分未被领取的 pending（预加载或尚未被 action 消费）与已被某个 action 领取的 pending：
+// 一个 pending 只允许一个调用者领取 proof，其余并发调用立即得到 null。
+let pendingClaimed = false
 let cancelPending: (() => void) | null = null
 let cachedProof: TencentCaptchaProof | null = null
 let cachedProofCreatedAt = 0
@@ -119,11 +122,15 @@ function verify(): Promise<TencentCaptchaProof | null> {
       cachedProofCreatedAt = 0
       // 预加载 promise 已经完成，消费缓存时同步清除引用，避免同一票据被并发复用。
       pending = null
+      pendingClaimed = false
       return Promise.resolve(proof)
     }
   }
 
   if (pending) {
+    // pending 已被另一个并发 action 领取：立即返回 null，不再等待预加载 challenge。
+    if (pendingClaimed) return Promise.resolve(null)
+    pendingClaimed = true
     const verification = pending
     internationalContainerVisible.value = true
     // 预加载阶段可能因容器不可见而被 SDK 延迟绘制，提交时在容器显示后重新触发同一个实例。
@@ -142,12 +149,19 @@ function verify(): Promise<TencentCaptchaProof | null> {
   internationalContainerVisible.value = true
   const verification = createVerificationPromise(true)
   pending = verification
+  pendingClaimed = true
   void verification.then(
     () => {
-      if (pending === verification) pending = null
+      if (pending === verification) {
+        pending = null
+        pendingClaimed = false
+      }
     },
     () => {
-      if (pending === verification) pending = null
+      if (pending === verification) {
+        pending = null
+        pendingClaimed = false
+      }
     }
   )
   return verification
@@ -168,7 +182,10 @@ function preload(): void {
     })
     .catch(() => undefined)
     .finally(() => {
-      if (pending === verification) pending = null
+      if (pending === verification) {
+        pending = null
+        pendingClaimed = false
+      }
     })
 }
 
@@ -178,6 +195,7 @@ function reset(reinitialize: boolean = true): void {
   cancelPending?.()
   cancelPending = null
   pending = null
+  pendingClaimed = false
   cachedProof = null
   cachedProofCreatedAt = 0
   internationalContainerVisible.value = isInternational.value

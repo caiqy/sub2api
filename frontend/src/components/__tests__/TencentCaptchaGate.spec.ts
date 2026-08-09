@@ -94,7 +94,7 @@ describe('TencentCaptchaGate', () => {
     await expect(resultVerification).rejects.toThrow('Tencent Captcha verification failed')
   })
 
-  it('reuses one pending promise for concurrent verify calls', async () => {
+  it('gives a proof to only the first of concurrent verify calls', async () => {
     const show = vi.fn()
     let callback: ((result: CaptchaResult) => void) | undefined
     window.TencentCaptcha = class {
@@ -112,8 +112,87 @@ describe('TencentCaptchaGate', () => {
     callback?.({ ret: 0, ticket: 'ticket-value', randstr: 'rand-value' })
 
     await expect(first).resolves.toEqual({ ticket: 'ticket-value', randstr: 'rand-value' })
-    await expect(second).resolves.toEqual({ ticket: 'ticket-value', randstr: 'rand-value' })
+    await expect(second).resolves.toBeNull()
     expect(show).toHaveBeenCalledOnce()
+  })
+
+  it('lets only one action claim a preloaded international pending', async () => {
+    let callback: ((result: CaptchaResult) => void) | undefined
+    window.TCaptchaGlobal = true
+    window.TencentCaptcha = class {
+      constructor(...received: unknown[]) {
+        callback = received[2] as (result: CaptchaResult) => void
+      }
+      show = vi.fn()
+      destroy = vi.fn()
+    } as unknown as typeof window.TencentCaptcha
+    const wrapper = mount(TencentCaptchaGate, {
+      props: { appId: '123456789', region: 'intl' }
+    })
+    await flushPromises()
+
+    const first = wrapper.vm.verify()
+    const second = wrapper.vm.verify()
+    await flushPromises()
+    callback?.({ ret: 0, ticket: 'ticket-value', randstr: 'rand-value' })
+
+    await expect(first).resolves.toEqual({ ticket: 'ticket-value', randstr: 'rand-value' })
+    await expect(second).resolves.toBeNull()
+  })
+
+  it('starts a fresh challenge after a claimed pending settles', async () => {
+    let callback: ((result: CaptchaResult) => void) | undefined
+    let constructorCount = 0
+    window.TencentCaptcha = class {
+      constructor(_appId: string, resultCallback: (result: CaptchaResult) => void) {
+        constructorCount += 1
+        callback = resultCallback
+      }
+      show = vi.fn()
+      destroy = vi.fn()
+    }
+    const wrapper = mount(TencentCaptchaGate, { props: { appId: '123456789' } })
+
+    const first = wrapper.vm.verify()
+    void wrapper.vm.verify()
+    await flushPromises()
+    callback?.({ ret: 0, ticket: 'ticket-value', randstr: 'rand-value' })
+    await expect(first).resolves.toEqual({ ticket: 'ticket-value', randstr: 'rand-value' })
+    expect(constructorCount).toBe(1)
+
+    const after = wrapper.vm.verify()
+    await flushPromises()
+    expect(constructorCount).toBe(2)
+    callback?.({ ret: 0, ticket: 'second-ticket', randstr: 'second-rand' })
+    await expect(after).resolves.toEqual({ ticket: 'second-ticket', randstr: 'second-rand' })
+  })
+
+  it('starts a fresh challenge after reset clears a claimed pending', async () => {
+    let callback: ((result: CaptchaResult) => void) | undefined
+    let constructorCount = 0
+    const destroy = vi.fn()
+    window.TencentCaptcha = class {
+      constructor(_appId: string, resultCallback: (result: CaptchaResult) => void) {
+        constructorCount += 1
+        callback = resultCallback
+      }
+      show = vi.fn()
+      destroy = destroy
+    }
+    const wrapper = mount(TencentCaptchaGate, { props: { appId: '123456789' } })
+
+    const first = wrapper.vm.verify()
+    void wrapper.vm.verify()
+    await flushPromises()
+    wrapper.vm.reset()
+    await expect(first).resolves.toBeNull()
+    expect(destroy).toHaveBeenCalledOnce()
+
+    const after = wrapper.vm.verify()
+    await flushPromises()
+    expect(constructorCount).toBe(2)
+    callback?.({ ret: 0, ticket: 'ticket-value', randstr: 'rand-value' })
+    await expect(after).resolves.toEqual({ ticket: 'ticket-value', randstr: 'rand-value' })
   })
 
   // 国际站新版 SDK 会先把 Robot checkbox 渲染到首参容器，点击后才弹出挑战。

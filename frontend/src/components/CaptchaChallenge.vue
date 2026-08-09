@@ -1,6 +1,6 @@
 <template>
   <TurnstileWidget
-    v-if="turnstileEnabled && turnstileSiteKey"
+    v-if="validProvider === 'turnstile'"
     ref="turnstileRef"
     :site-key="turnstileSiteKey"
     @verify="onTurnstileVerify"
@@ -8,16 +8,16 @@
     @error="onTurnstileError"
   />
   <TencentCaptchaGate
-    v-else-if="tencentEnabled && tencentAppId"
+    v-else-if="validProvider === 'tencent'"
     ref="tencentRef"
     :app-id="tencentAppId"
     :region="tencentRegion"
   />
   <AliyunCaptchaWidget
-    v-else-if="aliyunEnabled && aliyunSceneId && aliyunPrefix"
+    v-else-if="validProvider === 'aliyun'"
     ref="aliyunRef"
-    :scene-id="aliyunSceneId"
-    :prefix="aliyunPrefix"
+    :scene-id="aliyunSceneId ?? ''"
+    :prefix="aliyunPrefix ?? ''"
     :region="aliyunRegion === 'sgp' ? 'sgp' : 'cn'"
     @verify="(param: string) => emit('verify', param, '')"
     @expire="emit('expire')"
@@ -26,7 +26,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import TurnstileWidget from '@/components/TurnstileWidget.vue'
 import TencentCaptchaGate from '@/components/TencentCaptchaGate.vue'
 import AliyunCaptchaWidget from '@/components/AliyunCaptchaWidget.vue'
@@ -62,6 +62,17 @@ const tencentRef = ref<InstanceType<typeof TencentCaptchaGate> | null>(null)
 const aliyunRef = ref<InstanceType<typeof AliyunCaptchaWidget> | null>(null)
 const turnstileToken = ref('')
 
+// 恰好一个 provider 启用且其必需配置完整时才有效，否则 fail-closed：
+// 模板渲染与 verifyAction 共用同一判定，避免多 provider 或残缺配置被部分消费。
+type ProviderKind = 'turnstile' | 'tencent' | 'aliyun'
+const validProvider = computed<ProviderKind | null>(() => {
+  const candidates: ProviderKind[] = []
+  if (props.turnstileEnabled && props.turnstileSiteKey) candidates.push('turnstile')
+  if (props.tencentEnabled && props.tencentAppId) candidates.push('tencent')
+  if (props.aliyunEnabled && props.aliyunSceneId && props.aliyunPrefix) candidates.push('aliyun')
+  return candidates.length === 1 ? candidates[0] : null
+})
+
 watch(
   () => [props.turnstileEnabled, props.turnstileSiteKey],
   () => {
@@ -93,10 +104,10 @@ function reset(): void {
 
 // verifyAction 复用当前已完成的 Turnstile token，或获取腾讯/阿里云的动作 proof。
 async function verifyAction(): Promise<ActionCaptchaResult | null> {
-  if (props.turnstileEnabled && props.turnstileSiteKey) {
+  if (validProvider.value === 'turnstile') {
     return turnstileToken.value ? { token: turnstileToken.value, randstr: '' } : null
   }
-  if (props.tencentEnabled && props.tencentAppId) {
+  if (validProvider.value === 'tencent') {
     try {
       const proof = (await tencentRef.value?.verify()) ?? null
       if (!proof) return null
@@ -106,7 +117,7 @@ async function verifyAction(): Promise<ActionCaptchaResult | null> {
       return null
     }
   }
-  if (props.aliyunEnabled && props.aliyunSceneId && props.aliyunPrefix) {
+  if (validProvider.value === 'aliyun') {
     try {
       const param = (await aliyunRef.value?.verify()) ?? null
       if (!param) return null
