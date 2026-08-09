@@ -6,8 +6,8 @@
 - TDD mode: `tdd`
 - Current task: `Task 21: 关闭 OAuth pending、captcha 和认证兼容面`
 - OpenSpec mapping: `5.3 以 TDD 审查 OAuth pending 账号接管修复、腾讯验证码 region/ticket/CSP 与本地 Turnstile/Tencent/Aliyun 互斥 provider、OAuth/passkey 和前端 challenge 生命周期的交互`
-- Stage: `task-fix`
-- Review/fix round: `1/2`
+- Stage: `task-review`
+- Review/fix round: `2/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `a9b6724d2e484ada2e0b4de7238a83843d7fbd64`
 - Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-21-brief.md`
@@ -34,4 +34,8 @@
 - Re-reviewer: `ses_0187fcb01ffeEduByLy2jqbuv5` returned `Needs fixes`
 - Remaining Important: `validProvider` counts complete candidates rather than all enabled booleans, so one complete plus one incomplete-enabled provider is incorrectly accepted
 - Minor follow-ups accepted: add Tencent rejection-to-success recovery coverage and correct report changed-file count
-- Status: final Task 21 fix round implementer pending
+- Final fix implementer: `ses_0187aeccaffe5oCx3miRoJShxS`
+- Final fix commit: `1f8245c98ed686ccff8cd1733fb30d0067404fbb` (parent `9b11a32f260ffc6fb431fa7fc50d9e8a55b935ad`)
+- Final fix scope: enabled-provider cardinality separated from required-field validation; mixed-completeness RED/GREEN; Tencent claimed-rejection recovery test added without production change
+- Final gates: component specs 23 tests, original Task 21 specs 60 tests, narrowed unit-tag security suites, OAuth takeover, vue-tsc/lint/backend compile/static checks PASS
+- Status: final fresh thorough re-review pending; another Important finding requires escalation
