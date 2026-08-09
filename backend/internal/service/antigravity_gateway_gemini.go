@@ -59,6 +59,7 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 }
 
 func (s *AntigravityGatewayService) forwardGeminiHandle(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, bodyHandle *RequestBodyHandle, isStickySession bool, options ...ForwardGeminiOption) (*ForwardResult, error) {
+	beginUpstreamResponseModelObservation(c)
 	startTime := time.Now()
 	forwardOpts := forwardGeminiOptions{}
 	for _, apply := range options {
@@ -264,6 +265,7 @@ func (s *AntigravityGatewayService) forwardGeminiHandle(ctx context.Context, c *
 						if fallbackErr == nil && fallbackResp != nil && fallbackResp.StatusCode < 400 {
 							_ = resp.Body.Close()
 							resp = fallbackResp
+							billingModel = fallbackModel
 						} else if fallbackResp != nil {
 							_ = fallbackResp.Body.Close()
 						}
@@ -512,17 +514,19 @@ handleSuccess:
 	}
 
 	return &ForwardResult{
-		RequestID:        requestID,
-		Usage:            *usage,
-		Model:            originalModel,
-		UpstreamModel:    billingModel,
-		Stream:           stream,
-		Duration:         time.Since(startTime),
-		FirstTokenMs:     firstTokenMs,
-		ClientDisconnect: clientDisconnect,
-		ImageCount:       imageCount,
-		ImageSize:        imageSize,
-		ImageInputSize:   imageInputSize,
+		RequestID:                     requestID,
+		Usage:                         *usage,
+		Model:                         originalModel,
+		UpstreamModel:                 billingModel,
+		UpstreamResponseModel:         observedUpstreamResponseModel(c),
+		UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
+		Stream:                        stream,
+		Duration:                      time.Since(startTime),
+		FirstTokenMs:                  firstTokenMs,
+		ClientDisconnect:              clientDisconnect,
+		ImageCount:                    imageCount,
+		ImageSize:                     imageSize,
+		ImageInputSize:                imageInputSize,
 	}, nil
 }
 

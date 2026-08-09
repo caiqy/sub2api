@@ -444,7 +444,7 @@ func (r *userSubscriptionRepository) UpdateNotes(ctx context.Context, subscripti
 	return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
 }
 
-func (r *userSubscriptionRepository) ActivateWindows(ctx context.Context, id int64, start time.Time) error {
+func (r *userSubscriptionRepository) ActivateWindows(ctx context.Context, id int64, dailyStart, periodicStart time.Time) error {
 	client := clientFromContext(ctx, r.client)
 	n, err := client.UserSubscription.Update().
 		Where(
@@ -453,9 +453,9 @@ func (r *userSubscriptionRepository) ActivateWindows(ctx context.Context, id int
 			usersubscription.WeeklyWindowStartIsNil(),
 			usersubscription.MonthlyWindowStartIsNil(),
 		).
-		SetDailyWindowStart(start).
-		SetWeeklyWindowStart(start).
-		SetMonthlyWindowStart(start).
+		SetDailyWindowStart(dailyStart).
+		SetWeeklyWindowStart(periodicStart).
+		SetMonthlyWindowStart(periodicStart).
 		Save(ctx)
 	return r.translateConditionalWindowReset(ctx, client, id, n, err)
 }
@@ -479,25 +479,25 @@ func (r *userSubscriptionRepository) translateConditionalWindowReset(ctx context
 	return nil
 }
 
-func (r *userSubscriptionRepository) ResetUsageWindows(ctx context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, newWindowStart time.Time) error {
-	_, err := r.ResetUsageWindowsWithVersion(ctx, id, resetDaily, resetWeekly, resetMonthly, newWindowStart)
+func (r *userSubscriptionRepository) ResetUsageWindows(ctx context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, dailyStart, periodicStart time.Time) error {
+	_, err := r.ResetUsageWindowsWithVersion(ctx, id, resetDaily, resetWeekly, resetMonthly, dailyStart, periodicStart)
 	return err
 }
 
-func (r *userSubscriptionRepository) ResetUsageWindowsWithVersion(ctx context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, newWindowStart time.Time) (int64, error) {
+func (r *userSubscriptionRepository) ResetUsageWindowsWithVersion(ctx context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, dailyStart, periodicStart time.Time) (int64, error) {
 	client := clientFromContext(ctx, r.client)
 	version, err := r.subscriptionWriteVersion(ctx, client, `
 		UPDATE user_subscriptions
 		SET daily_usage_usd = CASE WHEN $2 THEN 0 ELSE daily_usage_usd END,
 			daily_window_start = CASE WHEN $2 THEN $3 ELSE daily_window_start END,
 			weekly_usage_usd = CASE WHEN $4 THEN 0 ELSE weekly_usage_usd END,
-			weekly_window_start = CASE WHEN $4 THEN $3 ELSE weekly_window_start END,
+			weekly_window_start = CASE WHEN $4 THEN $6 ELSE weekly_window_start END,
 			monthly_usage_usd = CASE WHEN $5 THEN 0 ELSE monthly_usage_usd END,
-			monthly_window_start = CASE WHEN $5 THEN $3 ELSE monthly_window_start END,
+			monthly_window_start = CASE WHEN $5 THEN $6 ELSE monthly_window_start END,
 			updated_at = `+monotonicUpdatedAtExpr+`
 		WHERE id = $1 AND deleted_at IS NULL
 		RETURNING `+versionNanoExpr,
-		id, resetDaily, newWindowStart, resetWeekly, resetMonthly,
+		id, resetDaily, dailyStart, resetWeekly, resetMonthly, periodicStart,
 	)
 	if err != nil {
 		return 0, translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)

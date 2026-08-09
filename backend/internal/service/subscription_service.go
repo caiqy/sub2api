@@ -89,7 +89,7 @@ type quotaCycleLockingRepository interface {
 }
 
 type versionedUsageWindowsResetter interface {
-	ResetUsageWindowsWithVersion(ctx context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, newWindowStart time.Time) (int64, error)
+	ResetUsageWindowsWithVersion(ctx context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, dailyStart, periodicStart time.Time) (int64, error)
 }
 
 type versionedDailyUsageResetter interface {
@@ -1184,7 +1184,7 @@ func (s *SubscriptionService) checkAndActivateWindowAt(ctx context.Context, sub 
 	if !sub.StartsAt.IsZero() {
 		windowStart = sub.StartsAt
 	}
-	if err := s.userSubRepo.ActivateWindows(ctx, sub.ID, windowStart); err != nil {
+	if err := s.userSubRepo.ActivateWindows(ctx, sub.ID, windowStart, windowStart); err != nil {
 		return err
 	}
 	s.deferSubscriptionCacheLocalInvalidation(ctx, sub.UserID, sub.GroupID)
@@ -1201,7 +1201,7 @@ func (s *SubscriptionService) AdminResetQuota(ctx context.Context, subscriptionI
 		return nil, err
 	}
 	windowStart := s.now()
-	version, err := s.resetUsageWindowsWithVersion(ctx, sub.ID, resetDaily, resetWeekly, resetMonthly, windowStart)
+	version, err := s.resetUsageWindowsWithVersion(ctx, sub.ID, resetDaily, resetWeekly, resetMonthly, windowStart, windowStart)
 	if err != nil {
 		return nil, err
 	}
@@ -1312,7 +1312,7 @@ func (s *SubscriptionService) preflightVersionedUsageWindowResets(resetDaily, re
 	return nil
 }
 
-func (s *SubscriptionService) resetUsageWindowsWithVersion(ctx context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, newWindowStart time.Time) (int64, error) {
+func (s *SubscriptionService) resetUsageWindowsWithVersion(ctx context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, dailyStart, periodicStart time.Time) (int64, error) {
 	resetter, ok := s.userSubRepo.(versionedUsageWindowsResetter)
 	if !ok {
 		return 0, ErrSubscriptionUsageVersioningUnavailable
@@ -1320,7 +1320,7 @@ func (s *SubscriptionService) resetUsageWindowsWithVersion(ctx context.Context, 
 	if err := s.requireVersionedSubscriptionInvalidation(); err != nil {
 		return 0, err
 	}
-	return resetter.ResetUsageWindowsWithVersion(ctx, id, resetDaily, resetWeekly, resetMonthly, newWindowStart)
+	return resetter.ResetUsageWindowsWithVersion(ctx, id, resetDaily, resetWeekly, resetMonthly, dailyStart, periodicStart)
 }
 
 func (s *SubscriptionService) resetDailyUsageWithVersion(ctx context.Context, id int64, expectedWindowStart *time.Time, newWindowStart time.Time) (int64, error) {

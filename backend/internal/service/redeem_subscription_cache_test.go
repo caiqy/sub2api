@@ -56,14 +56,14 @@ func (r *redeemSubscriptionRepoStub) UpdateNotes(_ context.Context, id int64, no
 	return nil
 }
 
-func (r *redeemSubscriptionRepoStub) ActivateWindows(_ context.Context, id int64, start time.Time) error {
+func (r *redeemSubscriptionRepoStub) ActivateWindows(_ context.Context, id int64, dailyStart, periodicStart time.Time) error {
 	sub := r.byID[id]
 	if sub == nil {
 		return ErrSubscriptionNotFound
 	}
-	sub.DailyWindowStart = &start
-	sub.WeeklyWindowStart = &start
-	sub.MonthlyWindowStart = &start
+	sub.DailyWindowStart = &dailyStart
+	sub.WeeklyWindowStart = &periodicStart
+	sub.MonthlyWindowStart = &periodicStart
 	sub.UpdatedAt = time.Now()
 	return nil
 }
@@ -82,28 +82,28 @@ func (r *redeemSubscriptionRepoStub) ResetDailyUsageWithVersion(ctx context.Cont
 	return 1, r.ResetDailyUsage(ctx, id, expectedWindowStart, start)
 }
 
-func (r *redeemSubscriptionRepoStub) ResetUsageWindows(_ context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, start time.Time) error {
+func (r *redeemSubscriptionRepoStub) ResetUsageWindows(_ context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, dailyStart, periodicStart time.Time) error {
 	sub := r.byID[id]
 	if sub == nil {
 		return ErrSubscriptionNotFound
 	}
 	if resetDaily {
 		sub.DailyUsageUSD = 0
-		sub.DailyWindowStart = &start
+		sub.DailyWindowStart = &dailyStart
 	}
 	if resetWeekly {
 		sub.WeeklyUsageUSD = 0
-		sub.WeeklyWindowStart = &start
+		sub.WeeklyWindowStart = &periodicStart
 	}
 	if resetMonthly {
 		sub.MonthlyUsageUSD = 0
-		sub.MonthlyWindowStart = &start
+		sub.MonthlyWindowStart = &periodicStart
 	}
 	return nil
 }
 
-func (r *redeemSubscriptionRepoStub) ResetUsageWindowsWithVersion(ctx context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, start time.Time) (int64, error) {
-	return 1, r.ResetUsageWindows(ctx, id, resetDaily, resetWeekly, resetMonthly, start)
+func (r *redeemSubscriptionRepoStub) ResetUsageWindowsWithVersion(ctx context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, dailyStart, periodicStart time.Time) (int64, error) {
+	return 1, r.ResetUsageWindows(ctx, id, resetDaily, resetWeekly, resetMonthly, dailyStart, periodicStart)
 }
 
 func (r *redeemSubscriptionRepoStub) IncrementUsage(_ context.Context, id int64, cost float64) error {

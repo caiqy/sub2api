@@ -382,11 +382,13 @@ type activateWindowsTrackingUserSubRepo struct {
 
 	activateCalled bool
 	activateStart  time.Time
+	periodicStart  time.Time
 }
 
-func (r *activateWindowsTrackingUserSubRepo) ActivateWindows(_ context.Context, _ int64, start time.Time) error {
+func (r *activateWindowsTrackingUserSubRepo) ActivateWindows(_ context.Context, _ int64, start, periodicStart time.Time) error {
 	r.activateCalled = true
 	r.activateStart = start
+	r.periodicStart = periodicStart
 	return nil
 }
 
@@ -404,6 +406,7 @@ func TestCheckAndActivateWindowUsesExactStartsAt(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, repo.activateCalled, "ActivateWindows should be called for unactivated window")
 	require.Equal(t, startsAt, repo.activateStart, "should use exact StartsAt, not truncated to midnight")
+	require.Equal(t, startsAt, repo.periodicStart, "should use exact StartsAt, not truncated to midnight")
 }
 
 func TestCheckAndActivateWindow_L1WaitAfterActivate(t *testing.T) {
@@ -575,7 +578,7 @@ func (r *adminResetPartialFailureRepo) GetByID(_ context.Context, id int64) (*Us
 	return &cp, nil
 }
 
-func (r *adminResetPartialFailureRepo) ResetUsageWindows(_ context.Context, _ int64, resetDaily, resetWeekly, resetMonthly bool, _ time.Time) error {
+func (r *adminResetPartialFailureRepo) ResetUsageWindows(_ context.Context, _ int64, resetDaily, resetWeekly, resetMonthly bool, _, _ time.Time) error {
 	r.resetUsageWindowsCalled = true
 	r.resetDailyCalled = resetDaily
 	r.resetWeeklyCalled = resetWeekly
@@ -583,8 +586,8 @@ func (r *adminResetPartialFailureRepo) ResetUsageWindows(_ context.Context, _ in
 	return r.resetWeeklyErr
 }
 
-func (r *adminResetPartialFailureRepo) ResetUsageWindowsWithVersion(ctx context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, start time.Time) (int64, error) {
-	return 1, r.ResetUsageWindows(ctx, id, resetDaily, resetWeekly, resetMonthly, start)
+func (r *adminResetPartialFailureRepo) ResetUsageWindowsWithVersion(ctx context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, dailyStart, periodicStart time.Time) (int64, error) {
+	return 1, r.ResetUsageWindows(ctx, id, resetDaily, resetWeekly, resetMonthly, dailyStart, periodicStart)
 }
 
 func TestSevenDayCardDoesNotReceiveSecondWeeklyQuotaBeforeExpiry(t *testing.T) {

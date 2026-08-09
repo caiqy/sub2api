@@ -28,8 +28,8 @@ func (r *monthlyResetUserSubRepo) ResetMonthlyUsageWithVersion(_ context.Context
 	return 1, nil
 }
 
-func (r *activateWindowUserSubRepo) ActivateWindows(_ context.Context, _ int64, start time.Time) error {
-	r.windowStart = start
+func (r *activateWindowUserSubRepo) ActivateWindows(_ context.Context, _ int64, _, periodicStart time.Time) error {
+	r.windowStart = periodicStart
 	return nil
 }
 

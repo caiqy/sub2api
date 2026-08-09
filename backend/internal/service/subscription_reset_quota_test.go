@@ -38,11 +38,11 @@ func (r *resetQuotaUserSubRepoStub) GetByID(_ context.Context, id int64) (*UserS
 	return &cp, nil
 }
 
-func (r *resetQuotaUserSubRepoStub) ResetUsageWindows(_ context.Context, _ int64, resetDaily, resetWeekly, resetMonthly bool, windowStart time.Time) error {
+func (r *resetQuotaUserSubRepoStub) ResetUsageWindows(_ context.Context, _ int64, resetDaily, resetWeekly, resetMonthly bool, dailyStart, periodicStart time.Time) error {
 	r.resetDailyCalled = resetDaily
 	r.resetWeeklyCalled = resetWeekly
 	r.resetMonthlyCalled = resetMonthly
-	r.windowStart = windowStart
+	r.windowStart = dailyStart
 	if resetDaily && r.resetDailyErr != nil {
 		return r.resetDailyErr
 	}
@@ -57,21 +57,21 @@ func (r *resetQuotaUserSubRepoStub) ResetUsageWindows(_ context.Context, _ int64
 	}
 	if resetDaily {
 		r.sub.DailyUsageUSD = 0
-		r.sub.DailyWindowStart = &windowStart
+		r.sub.DailyWindowStart = &dailyStart
 	}
 	if resetWeekly {
 		r.sub.WeeklyUsageUSD = 0
-		r.sub.WeeklyWindowStart = &windowStart
+		r.sub.WeeklyWindowStart = &periodicStart
 	}
 	if resetMonthly {
 		r.sub.MonthlyUsageUSD = 0
-		r.sub.MonthlyWindowStart = &windowStart
+		r.sub.MonthlyWindowStart = &periodicStart
 	}
 	return nil
 }
 
-func (r *resetQuotaUserSubRepoStub) ResetUsageWindowsWithVersion(ctx context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, windowStart time.Time) (int64, error) {
-	err := r.ResetUsageWindows(ctx, id, resetDaily, resetWeekly, resetMonthly, windowStart)
+func (r *resetQuotaUserSubRepoStub) ResetUsageWindowsWithVersion(ctx context.Context, id int64, resetDaily, resetWeekly, resetMonthly bool, dailyStart, periodicStart time.Time) (int64, error) {
+	err := r.ResetUsageWindows(ctx, id, resetDaily, resetWeekly, resetMonthly, dailyStart, periodicStart)
 	return r.resetVersion, err
 }
 
@@ -144,7 +144,7 @@ func (r *unversionedResetQuotaRepo) GetByID(_ context.Context, id int64) (*UserS
 	return &cp, nil
 }
 
-func (r *unversionedResetQuotaRepo) ResetUsageWindows(context.Context, int64, bool, bool, bool, time.Time) error {
+func (r *unversionedResetQuotaRepo) ResetUsageWindows(context.Context, int64, bool, bool, bool, time.Time, time.Time) error {
 	r.writes++
 	return nil
 }

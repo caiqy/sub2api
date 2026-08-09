@@ -60,6 +60,7 @@ type UpdateSettingsRequest struct {
 	TencentCaptchaAppSecretKey   string `json:"tencent_captcha_app_secret_key"`
 	TencentCaptchaCloudSecretID  string `json:"tencent_captcha_cloud_secret_id"`
 	TencentCaptchaCloudSecretKey string `json:"tencent_captcha_cloud_secret_key"`
+	TencentCaptchaRegion         string `json:"tencent_captcha_region"`
 
 	// 阿里云验证码 2.0 设置
 	AliyunCaptchaEnabled         bool   `json:"aliyun_captcha_enabled"`
@@ -1524,6 +1525,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		TencentCaptchaAppSecretKey:       req.TencentCaptchaAppSecretKey,
 		TencentCaptchaCloudSecretID:      req.TencentCaptchaCloudSecretID,
 		TencentCaptchaCloudSecretKey:     req.TencentCaptchaCloudSecretKey,
+		TencentCaptchaRegion:             req.TencentCaptchaRegion,
 		AliyunCaptchaEnabled:             req.AliyunCaptchaEnabled,
 		AliyunCaptchaAccessKeyID:         req.AliyunCaptchaAccessKeyID,
 		AliyunCaptchaAccessKeySecret:     req.AliyunCaptchaAccessKeySecret,
@@ -2146,6 +2148,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		TencentCaptchaAppSecretKeyConfigured:                 updatedSettings.TencentCaptchaAppSecretKeyConfigured,
 		TencentCaptchaCloudSecretIDConfigured:                updatedSettings.TencentCaptchaCloudSecretIDConfigured,
 		TencentCaptchaCloudSecretKeyConfigured:               updatedSettings.TencentCaptchaCloudSecretKeyConfigured,
+		TencentCaptchaRegion:                                 updatedSettings.TencentCaptchaRegion,
 		AliyunCaptchaEnabled:                                 updatedSettings.AliyunCaptchaEnabled,
 		AliyunCaptchaAccessKeyID:                             updatedSettings.AliyunCaptchaAccessKeyID,
 		AliyunCaptchaAccessKeySecretConfigured:               updatedSettings.AliyunCaptchaAccessKeySecretConfigured,

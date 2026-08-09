@@ -43,13 +43,13 @@ func (s *AntigravityGatewayService) ForwardHandle(ctx context.Context, c *gin.Co
 	if bodyHandle == nil {
 		return nil, fmt.Errorf("antigravity request body handle is nil")
 	}
+	beginUpstreamResponseModelObservation(c)
 	forwardOpts := forwardGeminiOptions{}
 	for _, apply := range options {
 		if apply != nil {
 			apply(&forwardOpts)
 		}
 	}
-
 	// 上游透传账号直接转发，不走 OAuth token 刷新
 	if account.Type == AccountTypeUpstream {
 		return s.ForwardUpstream(ctx, c, account, bodyHandle)
@@ -511,14 +511,16 @@ func (s *AntigravityGatewayService) ForwardHandle(ctx context.Context, c *gin.Co
 	}
 
 	return &ForwardResult{
-		RequestID:        requestID,
-		Usage:            *usage,
-		Model:            originalModel,
-		UpstreamModel:    billingModel,
-		Stream:           requestStream,
-		Duration:         time.Since(startTime),
-		FirstTokenMs:     firstTokenMs,
-		ClientDisconnect: clientDisconnect,
+		RequestID:                     requestID,
+		Usage:                         *usage,
+		Model:                         originalModel,
+		UpstreamModel:                 billingModel,
+		UpstreamResponseModel:         observedUpstreamResponseModel(c),
+		UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
+		Stream:                        requestStream,
+		Duration:                      time.Since(startTime),
+		FirstTokenMs:                  firstTokenMs,
+		ClientDisconnect:              clientDisconnect,
 	}, nil
 }
 
