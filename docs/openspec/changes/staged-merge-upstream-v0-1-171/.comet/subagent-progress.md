@@ -6,11 +6,12 @@
 - TDD mode: `tdd`
 - Current task: `Task 19: 固定 v0.1.172/v0.1.173 manifest、重叠面和新基线`
 - OpenSpec mapping: `5.1 保留 170/171 已完成任务与 Verify 报告作为历史证据，使旧 Verify 对新增范围失效；重新 fetch upstream refs，固定 v0.1.172/v0.1.173 annotated object 与 peeled SHA、173 为最新正式 tag、严格祖先链、172 的 208/113 和 173 的 352/初步 138 文件面`
-- Stage: `implementing`
+- Stage: `task-review`
 - Review/fix round: `1/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Review base: `54912d79ef52d530936ee8ffe245197e23a0e662`
 - Implementation commit: `5214710fd64d51befc25529e4ff28b0a6f96b9ff`
+- Fix commit: `dfa8ec6b2119262e78eb97731b54ceb0c148371e`
 - Changed files: `docs/superpowers/reports/2026-08-06-staged-merge-upstream-v0-1-171-build.md` only
 - Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-19-brief.md`
 - Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-19-report.md`
@@ -22,5 +23,6 @@
 - Reviewer: `ses_018fa21abffekymLsMYAfVHbK4` returned spec concerns / quality Needs fixes
 - Review finding: ledger capability matrix must spell out Grok setting name/default/explicit exceptions; report top-level BLOCKED must be labeled as initial attempt
 - Reviewer conflict ruling: do not adopt suggested midnight `AdminResetQuota`; user-approved contract is actual operation time for new purchase/user/admin manual reset, then 24-hour advancement. Fix agent must make that wording explicit.
+- Fix evidence: eight exact wording assertions PASS; committed path only build ledger; `git diff --check HEAD^ HEAD` PASS; no full tests rerun for wording-only diff
 - Hard boundary: 不修改产品代码，不 merge 172/173，不 bump VERSION；不 push/tag/release/deploy，不构建镜像，不操作服务器；Docker unavailable 与 CGO=0 如实记录
-- Status: fresh Task 19 fix agent pending for review round 1/2
+- Status: fix agent `ses_018f477d7ffeQXL45ipUcMTxDO` returned DONE_WITH_CONCERNS; scoped re-review pending
