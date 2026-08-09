@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 20: 创建纯 v0.1.172 merge 节点`
 - OpenSpec mapping: `5.2 使用 git merge --no-ff --no-commit v0.1.172，逐文件语义融合实际冲突并创建第二父为固定 155c494964c3ea6ecc31f52679525c1034bf0f16 的纯 merge commit`
-- Stage: `task-review`
+- Stage: `task-fix`
 - Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Review base: `825c546fe314ce860c8c9b5a8b2458a88301478b`
@@ -19,4 +19,9 @@
 - Risk signals: cross-module、安全、并发、schema/API、DONE_WITH_CONCERNS、diff>200 均命中
 - Concerns: frontend package无 Prettier executable；second-parent diff 的 legacy docs 有既有 trailing blank lines，但 first-parent merge diff clean；仅运行本任务 targeted/compile gates
 - Hard boundary: VERSION remains `0.1.171.1`; preserve OAuth pending security guard and actual-operation-time subscription anchor; keep migration identities; no merge-after compatibility fixes, ledger, plan/tasks or runtime in merge commit
-- Status: implementer `ses_018ea0362ffeVR7bwsS5sr19TY` returned DONE_WITH_CONCERNS; thorough task reviewer pending
+- Reviewer: `ses_018c41350ffenxSdscoYwwovE8` returned `Needs fixes`
+- Important findings accepted: invalid midnight subscription test contract; duplicate/missing frontend usage mismatch filter typing; ingress WS foreign response observed before ownership guard
+- Coordinator reproduction: midnight suite fails 4 tests for the expected policy mismatch; `pnpm exec vue-tsc --noEmit` fails on duplicate identifier and missing `AdminUsageQueryParams.upstream_model_mismatch`
+- Minor finding accepted: replace tab indentation in the reviewed frontend merge hunks without adding Prettier
+- Architecture suggestion rejected for this task: keeping two repository timestamps is already integrated and production callers pass one operation time; changing the broad interface is unnecessary for the binding behavior
+- Status: fresh Task 20 fix implementer pending
