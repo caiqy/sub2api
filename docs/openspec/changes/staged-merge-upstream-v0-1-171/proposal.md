@@ -1,6 +1,6 @@
 ## Why
 
-当前 change 已完成 `v0.1.170`、`v0.1.171` 合并及 Verify，但尚未归档；上游随后发布正式 tag `v0.1.172` 和 `v0.1.173`。172 相对 171 新增 54 commits / 208 files，其中 113 个路径与当前 fork 相对 171 的本地演进重叠；173 相对 172 新增 120 commits / 300 files，初步与当前 fork 重叠 116 个路径。两个 tag 包含 OAuth 账号接管高危修复、Grok/xAI 与 Channel Monitor V2、网关/计费/订阅语义变化和连续 schema/migration，因此旧 Verify 对扩展后的最终范围失效，必须追加第三、第四个受审 release 阶段。
+当前 change 已完成 `v0.1.170`、`v0.1.171` 合并及 Verify，但尚未归档；上游随后发布正式 tag `v0.1.172` 和 `v0.1.173`。172 相对 171 新增 54 commits / 208 files，其中 113 个路径与当前 fork 相对 171 的本地演进重叠；173 相对 172 新增 120 commits / 352 files，初步与当前 fork 重叠 138 个路径。早期 `300 files` 来自 GitHub Compare API 的 files 数组上限，完整本地 Git tree diff 是范围事实源。两个 tag 包含 OAuth 账号接管高危修复、Grok/xAI 与 Channel Monitor V2、网关/计费/订阅语义变化和连续 schema/migration，因此旧 Verify 对扩展后的最终范围失效，必须追加第三、第四个受审 release 阶段。
 
 ## What Changes
 

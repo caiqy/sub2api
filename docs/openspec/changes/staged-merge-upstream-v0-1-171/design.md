@@ -2,7 +2,7 @@
 
 - 需求背景见 `proposal.md`，行为契约见 `specs/upstream-release-sync/spec.md`。
 - 当前固定基线为 lint remediation 归档后的 `main@16c07d806`，运行版本 `0.1.169.3`；目标 tag 为 `v0.1.170@c043c24774228ba891ddf90d783aa6dc7d0855b5`、`v0.1.171@f0e7a9c7a23a7d02fb159b62fa809621eb0475a6`、`v0.1.172@155c494964c3ea6ecc31f52679525c1034bf0f16` 和 `v0.1.173@29009f0b2ea14edf3b11ae2564fb617ff91a03b4`，四者形成严格祖先链。
-- 四段分别包含 62 commits / 242 files、49 commits / 206 files、54 commits / 208 files、120 commits / 300 files；172 有 113 个本地重叠路径，173 在 172 merge 前的初步重叠为 116 个路径，并在 172 阶段闭合后重算精确重叠。
+- 四段分别包含 62 commits / 242 files、49 commits / 206 files、54 commits / 208 files、120 commits / 352 files；172 有 113 个本地重叠路径，173 在 172 merge 前的初步重叠为 138 个路径，并在 172 阶段闭合后重算精确重叠。GitHub Compare API 只返回前 300 个 files，文件面门禁使用本地固定 commit tree diff。
 - 对当前 HEAD 与 `v0.1.170` 的只读 merge-tree 预测显示 28 个文本冲突，集中在生成代码、settings、gateway、scheduler、usage billing、subscription、account UI 和测试；实际冲突集合以 Build 隔离位置中的 merge 结果为准。
 - 本地主线已发布 `192_subscription_cache_invalidation_outbox.sql`；上游 `v0.1.170` 新增 `192_group_profit_control.sql` 和 `193_group_profit_control_auth_cache_invalidation.sql`。迁移执行器以完整文件名作为身份，三个文件必须共存。
 

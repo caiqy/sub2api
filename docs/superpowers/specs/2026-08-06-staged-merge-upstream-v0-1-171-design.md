@@ -19,9 +19,9 @@ canonical_spec: openspec
 | 1 | `c043c24774228ba891ddf90d783aa6dc7d0855b5` | `v0.1.169..v0.1.170` | 62 | 242 |
 | 2 | `f0e7a9c7a23a7d02fb159b62fa809621eb0475a6` | `v0.1.170..v0.1.171` | 49 | 206 |
 | 3 | `155c494964c3ea6ecc31f52679525c1034bf0f16` | `v0.1.171..v0.1.172` | 54 | 208 |
-| 4 | `29009f0b2ea14edf3b11ae2564fb617ff91a03b4` | `v0.1.172..v0.1.173` | 120 | 300 |
+| 4 | `29009f0b2ea14edf3b11ae2564fb617ff91a03b4` | `v0.1.172..v0.1.173` | 120 | 352 |
 
-前两段合计修改 392 个文件；第三段新增 208 个 changed files，其中 113 个与当前 fork 相对 171 的本地演进重叠。第四段新增 300 个 changed files，172 merge 前初步与当前 fork 重叠 116 个路径，主要集中在 Grok gateway/scheduler、settings、Channel Monitor、pricing、前端和生成代码；精确重叠在 172 阶段闭合后重算。首段预测与前两段实际冲突保留历史证据；第三、四段实际冲突集合以 Build 隔离位置为准。
+前两段合计修改 392 个文件；第三段新增 208 个 changed files，其中 113 个与当前 fork 相对 171 的本地演进重叠。第四段新增 352 个 changed files，172 merge 前初步与当前 fork 重叠 138 个路径，主要集中在 Grok gateway/scheduler、settings、Channel Monitor、pricing、前端和生成代码；精确重叠在 172 阶段闭合后重算。早期 discovery 的 300/116 来自 GitHub Compare API 仅返回前 300 个 files，本设计改用固定 peeled commit 的完整本地 Git tree diff。首段预测与前两段实际冲突保留历史证据；第三、四段实际冲突集合以 Build 隔离位置为准。
 
 Migration identity 已形成新的同号风险：本地已有 `192_subscription_cache_invalidation_outbox.sql`，上游新增 `192_group_profit_control.sql` 和 `193_group_profit_control_auth_cache_invalidation.sql`；172 的 UsageLog `194_*`/`195_*` 与 173 的 Channel Monitor `194_*`/`195_*` 也同号。执行器沿用完整文件名身份，所有同号不同名文件必须共存。
 

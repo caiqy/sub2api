@@ -1391,7 +1391,7 @@ Assert-CleanGate
 
 **接口：**
 - Consumes: 已验证 171 HEAD、`$tag171`、固定远端 `upstream=https://github.com/Wei-Shaw/sub2api`。
-- Produces: `$tag172`/`$tag172Object`、`$tag173`/`$tag173Object`、四 tag 严格祖先链、172 的 208/113、173 的 300 与初步重叠记录、第三/四阶段能力矩阵和可复现 171 baseline。
+- Produces: `$tag172`/`$tag172Object`、`$tag173`/`$tag173Object`、四 tag 严格祖先链、172 的 208/113、173 的 352/初步 138 与 GitHub 300-file 截断说明、第三/四阶段能力矩阵和可复现 171 baseline。
 
 **步骤：**
 
@@ -1466,7 +1466,7 @@ if ($overlap172.Count -ne 113) { throw "unexpected v0.1.172 overlap count: $($ov
 $files172 | Set-Variable -Name files172Manifest
 $overlap172 | Set-Variable -Name overlap172Manifest
 $files173 = @(git diff --name-only "$tag172..$tag173")
-if ($LASTEXITCODE -ne 0 -or $files173.Count -ne 300) { throw "unexpected v0.1.173 file count: $($files173.Count)" }
+if ($LASTEXITCODE -ne 0 -or $files173.Count -ne 352) { throw "unexpected v0.1.173 file count: $($files173.Count)" }
 $preMergeLocalAgainst172 = @(git diff --name-only "$tag172...HEAD")
 if ($LASTEXITCODE -ne 0) { throw 'cannot enumerate preliminary local delta against v0.1.172' }
 $preliminaryOverlap173 = @($files173 | Where-Object { $preMergeLocalAgainst172 -contains $_ } | Sort-Object -Unique)
@@ -1483,13 +1483,13 @@ Invoke-CheckedNative 'pre-172 backend lint' { Push-Location backend; try { golan
 Assert-NoConflictArtifacts
 ```
 
-5. ledger 记录旧 Verify 只绑定至 171、`$extensionPlanningBase`/`$extensionExecutionBase` 与规划/runtime checkpoint 路径清单、Docker/cgo 现状、两个新增 tag manifest、172 的 208/113、173 的 300/初步 overlap 清单和八个能力簇；仅提交 ledger：
+5. ledger 记录旧 Verify 只绑定至 171、`$extensionPlanningBase`/`$extensionExecutionBase` 与规划/runtime checkpoint 路径清单、Docker/cgo 现状、两个新增 tag manifest、172 的 208/113、173 的 352/初步 138 完整清单、GitHub Compare API 的 300-file 截断来源和八个能力簇；仅提交 ledger：
 
 ```powershell
 Commit-NamedPaths -Message 'docs: record v0.1.173 merge baseline' -Paths @($buildLedger)
 ```
 
-**提交边界：**`docs: record v0.1.173 merge baseline` 只含 build ledger。**检查点：**tag、latest release、祖先链、172 的 208/113、173 的 300 或 baseline 任一不符均阻塞 merge。
+**提交边界：**`docs: record v0.1.173 merge baseline` 只含 build ledger。**检查点：**tag、latest release、祖先链、172 的 208/113、173 的 352 或 baseline 任一不符均阻塞 merge。
 
 ### Task 20: 创建纯 v0.1.172 merge 节点
 
@@ -1821,7 +1821,7 @@ git merge-base --is-ancestor $tag172 HEAD
 if ($LASTEXITCODE -ne 0) { throw 'v0.1.172 is not an ancestor after stage gate' }
 if ((Get-Content -Raw backend/cmd/server/VERSION).Trim() -ne '0.1.171.1') { throw '172 stage changed intermediate VERSION' }
 $files173 = @(git diff --name-only "$tag172..$tag173")
-if ($LASTEXITCODE -ne 0 -or $files173.Count -ne 300) { throw 'v0.1.173 manifest drifted' }
+if ($LASTEXITCODE -ne 0 -or $files173.Count -ne 352) { throw 'v0.1.173 manifest drifted' }
 $localAfter172 = @(git diff --name-only "$tag172...HEAD")
 if ($LASTEXITCODE -ne 0) { throw 'cannot enumerate local delta after v0.1.172' }
 $overlap173 = @($files173 | Where-Object { $localAfter172 -contains $_ } | Sort-Object -Unique)
