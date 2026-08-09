@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 21: 关闭 OAuth pending、captcha 和认证兼容面`
 - OpenSpec mapping: `5.3 以 TDD 审查 OAuth pending 账号接管修复、腾讯验证码 region/ticket/CSP 与本地 Turnstile/Tencent/Aliyun 互斥 provider、OAuth/passkey 和前端 challenge 生命周期的交互`
-- Stage: `implementing`
+- Stage: `task-review`
 - Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `a9b6724d2e484ada2e0b4de7238a83843d7fbd64`
@@ -16,4 +16,10 @@
 - TDD rule: run the listed OAuth/captcha backend and frontend protection tests before production edits; preserve any genuine RED, but do not fabricate a change when all gates pass
 - Risk signals: security、cross-module、frontend、authentication provider matrix
 - Hard boundary: pending non-terminal sessions cannot bind/modify/consume identity; Turnstile/Tencent/Aliyun remain mutually exclusive and fail-closed; Tencent region propagates through every auth entry; preserve Turnstile token reset lifecycle
-- Status: fresh Task 21 implementer dispatch pending
+- Implementer: `ses_018a546bdffe44qEvvl6E65Ea0` returned `DONE`
+- Implementation result: `NO_CODE_COMMIT`; all Task 21 bound contracts already hold at `93f671a4cb25c237cb7a2addb33670b1efc4fb54`
+- Initial gates: OAuth takeover PASS; frontend captcha 53/53 PASS; broad backend regex gate exposed one reproducible out-of-scope Codex probe assertion (`codex_cli_rs` expected, `codex-tui` actual)
+- Audit evidence: pending guard precedes adoption/apply/consume; provider matrix mutually exclusive and fail-closed; Tencent region reaches all auth entries; Turnstile/Tencent token lifecycle, CSP/settings/passkey/OAuth paths intact
+- Final gates: Task 21 focused backend PASS; frontend vue-tsc/lint PASS; backend compile, whitespace/conflict/VERSION/scope checks PASS
+- Concern routing: stale Codex probe identity assertion belongs to Task 23 gateway/Codex protection set; production normalization to `codex-tui` is current upstream behavior
+- Status: fresh thorough task reviewer pending
