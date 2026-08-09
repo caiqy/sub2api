@@ -178,7 +178,7 @@ function Commit-NamedPaths {
     $staged = @(git diff --cached --name-only | Sort-Object)
     $expected = $normalizedPaths
     if (Compare-Object -ReferenceObject $expected -DifferenceObject $staged) {
-        throw "staged allowlist mismatch for $Message: $($staged -join ', ')"
+        throw "staged allowlist mismatch for ${Message}: $($staged -join ', ')"
     }
     git diff --cached --check
     if ($LASTEXITCODE -ne 0) { throw "whitespace check failed for $Message" }
