@@ -4,41 +4,16 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Current task: `Task 21: 关闭 OAuth pending、captcha 和认证兼容面`
-- OpenSpec mapping: `5.3 以 TDD 审查 OAuth pending 账号接管修复、腾讯验证码 region/ticket/CSP 与本地 Turnstile/Tencent/Aliyun 互斥 provider、OAuth/passkey 和前端 challenge 生命周期的交互`
-- Stage: `task-complete`
-- Review/fix round: `2/2`
+- Current task: `Task 22: 保留实际时刻额度窗口并融合 billing 修复`
+- OpenSpec mapping: `5.4 以 TDD 审查金额量化、订阅/usage persistence 与本地 quota receipt/outbox/cache；明确保留新购及用户/管理员手动重置的实际操作时刻锚点和后续 24 小时滚动窗口`
+- Stage: `implementing`
+- Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
-- Task start HEAD: `a9b6724d2e484ada2e0b4de7238a83843d7fbd64`
-- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-21-brief.md`
-- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-21-report.md`
-- Dependency: Task 20 merge/fix/re-review complete; VERSION remains `0.1.171.1`
-- TDD rule: run the listed OAuth/captcha backend and frontend protection tests before production edits; preserve any genuine RED, but do not fabricate a change when all gates pass
-- Risk signals: security、cross-module、frontend、authentication provider matrix
-- Hard boundary: pending non-terminal sessions cannot bind/modify/consume identity; Turnstile/Tencent/Aliyun remain mutually exclusive and fail-closed; Tencent region propagates through every auth entry; preserve Turnstile token reset lifecycle
-- Implementer: `ses_018a546bdffe44qEvvl6E65Ea0` returned `DONE`
-- Implementation result: `NO_CODE_COMMIT`; all Task 21 bound contracts already hold at `93f671a4cb25c237cb7a2addb33670b1efc4fb54`
-- Initial gates: OAuth takeover PASS; frontend captcha 53/53 PASS; broad backend regex gate exposed one reproducible out-of-scope Codex probe assertion (`codex_cli_rs` expected, `codex-tui` actual)
-- Audit evidence: pending guard precedes adoption/apply/consume; provider matrix mutually exclusive and fail-closed; Tencent region reaches all auth entries; Turnstile/Tencent token lifecycle, CSP/settings/passkey/OAuth paths intact
-- Final gates: Task 21 focused backend PASS; frontend vue-tsc/lint PASS; backend compile, whitespace/conflict/VERSION/scope checks PASS
-- Concern routing: stale Codex probe identity assertion belongs to Task 23 gateway/Codex protection set; production normalization to `codex-tui` is current upstream behavior
-- Reviewer: `ses_0189918e8ffeYtUoJVrLJuuRoi` returned `Needs fixes`
-- Important findings accepted: frontend dirty multi-provider config selects/serializes inconsistently; Tencent pending verification promise can be consumed by concurrent actions; initial backend commands omitted `-tags unit`
-- Coordinator unit-tag reproduction: handler/repository security tests run; service still has routed Codex probe RED; middleware test package fails compile because `api_key_auth_test.go` stub calls the merged two-timestamp repository method with one timestamp
-- Probe disposition: reviewer confirmed route to Task 23, not a Task 21 blocker
-- Fix implementer: `ses_0188abbf3ffeqyN0b91S0p2Q8Z`
-- Fix commit: `790c262e41f038cb822453d58f81e03c1ff82a15` (parent `a92aaa1d70ffd29fbac0e7f0f9fdac1778c4bee6`)
-- Fix scope: shared valid-provider resolution; single-claim Tencent pending proof; direct frontend regressions; middleware test stub two-timestamp signature
-- TDD evidence: multi-provider selection and concurrent/prefetched proof reuse RED before implementation, GREEN after; existing middleware unit compile RED became GREEN
-- Final gates: original 6 frontend specs 58 tests PASS; unit-tag security suites (43 service tests) PASS; OAuth takeover, vue-tsc, frontend lint, backend compile and static checks PASS
-- Re-reviewer: `ses_0187fcb01ffeEduByLy2jqbuv5` returned `Needs fixes`
-- Remaining Important: `validProvider` counts complete candidates rather than all enabled booleans, so one complete plus one incomplete-enabled provider is incorrectly accepted
-- Minor follow-ups accepted: add Tencent rejection-to-success recovery coverage and correct report changed-file count
-- Final fix implementer: `ses_0187aeccaffe5oCx3miRoJShxS`
-- Final fix commit: `1f8245c98ed686ccff8cd1733fb30d0067404fbb` (parent `9b11a32f260ffc6fb431fa7fc50d9e8a55b935ad`)
-- Final fix scope: enabled-provider cardinality separated from required-field validation; mixed-completeness RED/GREEN; Tencent claimed-rejection recovery test added without production change
-- Final gates: component specs 23 tests, original Task 21 specs 60 tests, narrowed unit-tag security suites, OAuth takeover, vue-tsc/lint/backend compile/static checks PASS
-- Final re-reviewer: `ses_01875340bffeZDGAgd1OfjvSZu` returned `Task quality: Approved`; all original Important findings addressed, no new Critical/Important
-- Non-blocking report source lines refreshed to final HEAD layout
-- Routed concern: stale Codex probe identity assertion remains assigned to Task 23
-- Status: Task 21 complete; Plan Task 21 and OpenSpec 5.3 checked off
+- Task start HEAD: `5e16678af626354b430e9ec672ac23c16bdc77a9`
+- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-22-brief.md`
+- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-22-report.md`
+- Dependency: Task 20 already removed the invalid midnight suite and preserved exact-time production paths; Task 21 synchronized the unit middleware subscription stub
+- TDD rule: run exact-anchor and subscription/billing protection tests before edits; the plan's predicted midnight RED may already be GREEN, so do not fabricate RED or duplicate fixes
+- Risk signals: money、persistence、concurrency、cache/outbox、cross-module
+- Hard boundary: purchase/user reset/admin reset use exact operation time; daily auto windows advance every 24h; one-day cards do not regrant quota; NUMERIC(20,8) quantization, transaction locks, receipt/outbox/cache invalidation remain intact
+- Status: fresh Task 22 implementer dispatch pending
