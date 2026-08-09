@@ -21,9 +21,20 @@
 - [x] 3.3 审查腾讯天御/阿里云验证码、认证入口、settings/CSP/前端卡片，以及退款事务、用量失败落库、composite 推理强度、订阅续期、WebSocket 租约和 prompt audit 修复，与本地能力的交互；以失败测试驱动最小兼容修复
 - [x] 3.4 运行 v0.1.171 聚焦测试、本机 full 门禁及适用的本机 integration，关闭能力矩阵 gap 并记录阶段证据
 
-## 4. 最终版本与验证
+## 4. v0.1.171 历史版本与验证（已完成，现被范围扩展取代）
 
 - [x] 4.1 两段全部闭合后将 `backend/cmd/server/VERSION` 一次更新为 `0.1.171.1`，不创建中间过程版本
 - [x] 4.2 在最终 source HEAD 重跑全部能力聚焦测试、`make test`、`make build`、两轮 backend generate、静态冲突、unmerged index 与 whitespace 检查
 - [x] 4.3 校验两个正式 tag 均为结果 HEAD 祖先、两个 merge 第二父正确，双方 `191_*`、双方 `192_*` 与上游 `193_*` migration 均保留，并记录本机 integration 实际结果或未验证风险
 - [x] 4.4 完成本地能力专项 review 与最终验证报告，明确本 change 未推送、未发版、未部署、未操作服务器；发布与部署等待用户另行明确授权
+
+## 5. 已验证未归档状态扩展到 v0.1.172
+
+- [ ] 5.1 保留 170/171 已完成任务与 Verify 报告作为历史证据，使旧 Verify 对新增范围失效；重新 fetch upstream refs，固定 `v0.1.172` peeled SHA、最新正式 tag、严格祖先链、208 changed files、113 overlap 和第三阶段能力矩阵
+- [ ] 5.2 使用 `git merge --no-ff --no-commit v0.1.172`，逐文件语义融合实际冲突并创建第二父为固定 `155c494964c3ea6ecc31f52679525c1034bf0f16` 的纯 merge commit
+- [ ] 5.3 以 TDD 审查 OAuth pending 账号接管修复、腾讯验证码 region/ticket/CSP 与本地 Turnstile/Tencent/Aliyun 互斥 provider、OAuth/passkey 和前端 challenge 生命周期的交互
+- [ ] 5.4 以 TDD 审查金额量化、订阅/usage persistence 与本地 quota receipt/outbox/cache；明确保留新购及用户/管理员手动重置的实际操作时刻锚点和后续 24 小时滚动窗口
+- [ ] 5.5 以 TDD 审查 upstream response model audit、Codex identity/capacity failover、transport timeout、body replay/release、sticky/final account、WS prewarm、count_tokens、Grok、图片 cooldown 和协议清洗
+- [ ] 5.6 融合 UsageLog schema/Ent、194/195 migration、单条/批量/best-effort insert、查询筛选和管理端展示，并审查模型广场、错误时间范围及既有本地 frontend 定制
+- [ ] 5.7 运行 v0.1.172 全部能力聚焦测试、`make test`、版本锁定 build、backend/frontend lint、typecheck、两轮 generate、静态冲突与适用的本机 integration，关闭能力矩阵 gap
+- [ ] 5.8 三段全部闭合后将 VERSION 更新为 `0.1.172.1`，校验三个 tag 祖先与 merge 第二父、191/192/193/194/195 migration identity，完成 thorough review 和新的最终 Verify 报告

@@ -2,9 +2,9 @@
 
 ## Outcome
 
-`通过（保留环境残余风险）`
+`历史通过：仅覆盖至 v0.1.171；已被 v0.1.172 范围扩展取代`
 
-Verify attempt 1 发现的 Turnstile action-gate 缺口已完成 TDD remediation。Verify attempt 2 在修复后独立重跑全部非 Docker 门禁，并经原 full-change reviewer 复核通过。唯一 integration 残余是本机缺少 Docker；`CGO_ENABLED=0`，因此 race gate 仍不可用。未执行远程、服务器、发布或部署操作。
+Verify attempt 1 发现的 Turnstile action-gate 缺口已完成 TDD remediation。Verify attempt 2 在修复后独立重跑全部非 Docker 门禁，并经原 full-change reviewer 复核通过；该结论只绑定至 `v0.1.171` 最终树。用户在归档前把当前 change 扩展到正式 `v0.1.172`，因此本报告保留为历史证据但不再代表当前最终范围通过；新的 Verify 必须在第三段 merge、兼容修复和全门禁后生成。未执行远程、服务器、发布或部署操作。
 
 ## Provenance
 

@@ -4,7 +4,7 @@ role: technical-design
 canonical_spec: openspec
 ---
 
-# 分段合并上游 v0.1.171 技术设计
+# 分段合并上游 v0.1.172 技术设计
 
 ## 1. 背景与事实源
 
@@ -18,8 +18,9 @@ canonical_spec: openspec
 |---|---|---|---:|---:|
 | 1 | `c043c24774228ba891ddf90d783aa6dc7d0855b5` | `v0.1.169..v0.1.170` | 62 | 242 |
 | 2 | `f0e7a9c7a23a7d02fb159b62fa809621eb0475a6` | `v0.1.170..v0.1.171` | 49 | 206 |
+| 3 | `155c494964c3ea6ecc31f52679525c1034bf0f16` | `v0.1.171..v0.1.172` | 54 | 208 |
 
-两段合计修改 392 个文件；从 `v0.1.169` 分叉后，本地演进和目标上游区间有 151 个重叠路径，主要集中在 `backend/internal/service`、handler、repository、settings/auth、前端账号/设置和生成代码。设计阶段只读 `git merge-tree --write-tree HEAD v0.1.170^{commit}` 预测首段 28 个文本冲突；实际冲突集合以 Build 隔离位置为准。
+前两段合计修改 392 个文件；第三段新增 208 个 changed files，其中 113 个与当前 fork 相对 171 的本地演进重叠，主要集中在 gateway、usage、subscription、auth/captcha、settings、前端和生成代码。首段预测与前两段实际冲突保留历史证据；第三段实际冲突集合以 Build 隔离位置为准。
 
 Migration identity 已形成新的同号风险：本地已有 `192_subscription_cache_invalidation_outbox.sql`，上游新增 `192_group_profit_control.sql` 和 `193_group_profit_control_auth_cache_invalidation.sql`。执行器沿用完整文件名身份，双方 192 必须与既有双方 191 一并共存。
 
@@ -27,16 +28,16 @@ Migration identity 已形成新的同号风险：本地已有 `192_subscription_
 
 ### 2.1 目标
 
-- `v0.1.170`、`v0.1.171` 按顺序成为结果 HEAD 的祖先，并各自保留可审计 merge 节点。
+- `v0.1.170`、`v0.1.171`、`v0.1.172` 按顺序成为结果 HEAD 的祖先，并各自保留可审计 merge 节点。
 - 上游功能/修复与本地定制共存；回归归属到首次出现的 release 区间。
 - Merge commit 保持纯净；语义兼容修复按用户确认的能力簇拆分。
 - 双方 `191_*`、双方 `192_*` 与上游 `193_*` migration 保持完整文件名和 identity。
-- 最终版本精确为 `0.1.171.1`，本机自动门禁、能力级 review、生成稳定性和拓扑验证完成。
+- 最终版本精确为 `0.1.172.1`，本机自动门禁、能力级 review、生成稳定性和拓扑验证完成。
 - Docker-backed integration 未执行时，报告准确列出环境原因和未验证契约。
 
 ### 2.2 非目标
 
-- 不合入 `v0.1.171` 之后的 `upstream/main` 提交，不静默吸收实施前出现的更高 tag。
+- 不合入 `v0.1.172` 之后的 `upstream/main` 提交，不静默吸收实施前出现的更高 tag。
 - 不新增本地产品功能，不做无关重构。
 - 不推送、不打 tag、不触发 GitHub Actions、不发布或构建 Sub2API 镜像。
 - 不部署，不操作服务器、数据库、Redis 或 Nginx。
@@ -61,7 +62,10 @@ Migration identity 已形成新的同号风险：本地已有 `192_subscription_
   -> v0.1.170 聚焦 + full + 可用的 integration 门禁
   -> merge --no-ff --no-commit v0.1.171
   -> 重复冲突、生成、能力簇修复和阶段门禁
-  -> VERSION=0.1.171.1
+  -> 保留 170/171 历史证据并使旧 Verify 对新增范围失效
+  -> merge --no-ff --no-commit v0.1.172
+  -> security/auth、subscription/billing、gateway/transport、schema/frontend 四簇修复与门禁
+  -> VERSION=0.1.172.1
   -> 最终全门禁 / 拓扑 / migration identity / 能力终审
 ```
 
@@ -74,6 +78,7 @@ Migration identity 已形成新的同号风险：本地已有 `192_subscription_
 ```text
 git merge --no-ff --no-commit v0.1.170
 git merge --no-ff --no-commit v0.1.171
+git merge --no-ff --no-commit v0.1.172
 ```
 
 提交边界：
@@ -85,7 +90,7 @@ git merge --no-ff --no-commit v0.1.171
 - **subscription/migration 修复提交**：quota reset、订阅续期、退款/余额、outbox、migration 与生成源。
 - **frontend 修复提交**：账号、分组、认证设置、退款/用量及既有本地 UI 定制。
 - **证据提交**：只更新 build ledger、任务状态和阶段结论。
-- **最终版本提交**：两段封闭后一次更新 `backend/cmd/server/VERSION` 为 `0.1.171.1`。
+- **最终版本提交**：三段封闭后一次更新 `backend/cmd/server/VERSION` 为 `0.1.172.1`。
 
 不要求每个能力簇都产生提交；没有真实修复时不创建空提交。一次修复只属于一个主要能力簇，必要的直接测试和生成输出与源修复同提交。所有暂存使用显式路径，禁止 `git add .`；`.comet/current-change.json` 不得混入业务提交。
 
@@ -137,7 +142,7 @@ Ledger 记录 source/execution base、branch/worktree、tag manifest、dirty pat
 
 特殊文件策略：
 
-- `VERSION`：两段冲突均保留 `0.1.169.3`，最终再更新为 `0.1.171.1`。
+- `VERSION`：前两段冲突保留 `0.1.169.3`，171 阶段曾闭合为 `0.1.171.1`；172 merge 冲突继续保留该中间 fork 版本，第三段全部闭合后再更新为 `0.1.172.1`。
 - Go 依赖：先融合 `go.mod`，再由 Go module 工具生成 `go.sum`。
 - Ent/Wire：先融合 schema/provider 源，再重新生成；不手工编辑生成语义。
 - 前端 lockfile：先融合 manifest，再用仓库现有 pnpm 版本生成。
@@ -167,6 +172,14 @@ Codex identity 将 User-Agent/originator/version 统一到动态版本来源。�
 
 其余重点包括 composite reasoning effort、Messages 临时不可调度切号、入站 WS 租约终止事件、请求取消后的 snapshot 短路和 Responses `output_text` prompt audit。
 
+### 7.3 v0.1.172
+
+OAuth pending 账号接管修复是第三段最高优先级：非终态登录 session 不得执行 adoption/binding、修改目标用户或消费 session；终态登录和已登录用户主动绑定必须保持。腾讯验证码 region/ticket/CSP 变更需与三 provider 互斥、Turnstile token 生命周期和 OAuth/passkey action proof 交叉验证。
+
+上游 midnight 日额度修复与本地决策直接冲突。本 change 明确保留实际操作时刻锚点：新购、用户手动重置、管理员手动重置及后续自动日窗口按持久化锚点每 24 小时推进；不得引入 `timezone.StartOfDay` 改写。金额量化、并发续期、receipt/outbox/cache 仍接入上游修复。
+
+upstream response model audit 必须在协议转换或 client-facing rewrite 前冻结上游声明模型，并与 requested/outbound model 区分；覆盖 HTTP、Responses、Anthropic/Gemini/Grok、WS、单条/批量/best-effort usage persistence 和管理端筛选。capacity failover、Codex `codex-tui`、dial/TLS/SOCKS5 timeout、count_tokens fallback、WS prewarm、Grok、图片 cooldown、工具 schema 与 Responses→Anthropic 清洗不得绕过本地 body/sticky/final-account/usage 契约。
+
 ## 8. Migration 与生成稳定性
 
 最终 migration 集至少保留：
@@ -176,6 +189,8 @@ Codex identity 将 User-Agent/originator/version 统一到动态版本来源。�
 - `192_subscription_cache_invalidation_outbox.sql`
 - `192_group_profit_control.sql`
 - `193_group_profit_control_auth_cache_invalidation.sql`
+- `194_add_usage_log_upstream_response_model.sql`
+- `195_add_usage_log_upstream_model_mismatch_index_notx.sql`
 
 验证分两层：
 
@@ -225,12 +240,12 @@ Docker/Testcontainers 不可用时，ledger 和最终报告把目标 migration/r
 
 ## 11. 完成条件
 
-- 两个正式 tag 都是结果 HEAD 祖先，两个 merge 第二父与固定 SHA 一致。
-- `backend/cmd/server/VERSION` 精确为 `0.1.171.1`。
+- 三个正式 tag 都是结果 HEAD 祖先，三个 merge 第二父与固定 SHA 一致。
+- `backend/cmd/server/VERSION` 精确为 `0.1.172.1`。
 - 能力矩阵无 `gap`；`unverified` 仅来自已记录的本机 integration 环境边界。
 - 利润控制/倍率同步、Codex identity/过载重试、验证码/auth/settings、退款/usage/subscription、WS/prompt audit 与本地保护面均有直接行为或结构证据。
 - alpha-search、request-body 生命周期、layered scheduler、统一 audit 和 quota reset/outbox 保持本地契约。
-- 双方 191/192 与上游 193 migration 保留；真实 PostgreSQL 升级仅在实际执行成功时记为通过。
+- 双方 191/192 与上游 193/194/195 migration 保留；真实 PostgreSQL 升级仅在实际执行成功时记为通过。
 - 聚焦测试、`make test`、`make build`、两轮 generate 和静态检查在最终 source HEAD 上通过。
 - 每段结束时 worktree/index 除 Comet runtime selection 外干净，生成输出归属于对应 merge 或能力簇提交。
 - OpenSpec strict validate 和 Comet Verify 通过或按流程记录明确允许的环境边界。

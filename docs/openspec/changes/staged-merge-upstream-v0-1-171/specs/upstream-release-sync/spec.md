@@ -4,8 +4,8 @@
 维护流程 SHALL 允许将一个最终上游 release 目标拆为具有严格祖先顺序的多个正式 tag 阶段。每个阶段 MUST 完成冲突处理、能力审查和阶段验证后，才能进入下一阶段。
 
 #### Scenario: 顺序合入多个 tag
-- **WHEN** 用户选择按 `v0.1.170`、`v0.1.171` 分段集成，且两者形成严格祖先链
-- **THEN** 维护流程 MUST 按两个正式 tag 的顺序建立独立 `--no-ff` merge 节点，不得跳过尚未完成验证的前置阶段，也不得合入 `v0.1.171` 之后的 `upstream/main` 提交
+- **WHEN** 用户选择按 `v0.1.170`、`v0.1.171`、`v0.1.172` 分段集成，且三者形成严格祖先链
+- **THEN** 维护流程 MUST 按三个正式 tag 的顺序建立独立 `--no-ff` merge 节点，不得跳过尚未完成验证的前置阶段，也不得合入 `v0.1.172` 之后的 `upstream/main` 提交
 
 #### Scenario: 从已验证但未归档的中间 release 继续扩展
 - **WHEN** 一个分段合并 change 已通过中间 release 的最终验证但尚未归档，且用户将目标扩展到后续正式 tag
@@ -16,8 +16,8 @@
 - **THEN** 维护流程 MUST 在当前 release 区间内保留失败证据并完成最小修复，不得继续合入下一 tag
 
 #### Scenario: 最终版本与 merge 拓扑闭合
-- **WHEN** `v0.1.170` 和 `v0.1.171` 两个阶段均已通过验证
-- **THEN** 维护流程 MUST 将结果版本更新为 `0.1.171.1`，确认两个 tag 都是结果 HEAD 的祖先，且两个 merge 节点的第二父分别精确匹配实施前固定的 peeled SHA
+- **WHEN** `v0.1.170`、`v0.1.171` 和 `v0.1.172` 三个阶段均已通过验证
+- **THEN** 维护流程 MUST 将结果版本更新为 `0.1.172.1`，确认三个 tag 都是结果 HEAD 的祖先，且三个 merge 节点的第二父分别精确匹配实施前固定的 peeled SHA
 
 ### Requirement: 合并后验证本地关键能力
 维护流程 SHALL 在每个分段 merge 后运行所选验证配置要求的自动门禁及该阶段受影响能力的能力级审查，并在最终阶段执行完整本机自动验证和本地能力专项 review。测试通过 MUST NOT 替代能力级审查结论；用户明确选择本机验证配置时，未执行的 Docker-backed integration MUST 作为残余风险保留，不得伪装为通过。
@@ -57,6 +57,22 @@
 #### Scenario: 验证码与认证设置兼容
 - **WHEN** `v0.1.171` 新增腾讯天御与阿里云验证码并合并后台人机验证设置
 - **THEN** 注册、登录、找回密码、OAuth 启动和 passkey 登录 MUST 按所选互斥服务商执行 fail-closed 拦截，既有 Turnstile 配置与本地 settings 热更新、CSP、自定义菜单及前端认证流程 MUST 保持兼容
+
+#### Scenario: v0.1.172 OAuth pending 安全修复与验证码兼容
+- **WHEN** `v0.1.172` 修复 pending OAuth 非终态 session 可绑定攻击者身份的账号接管漏洞，并扩展腾讯验证码 region/ticket/CSP
+- **THEN** 非终态登录 session MUST NOT 绑定身份、修改目标用户或消费 session；终态登录与已登录用户主动绑定 MUST 保持可用，且 Turnstile、腾讯、阿里云三种互斥 provider 在全部认证入口继续 fail-closed
+
+#### Scenario: v0.1.172 响应模型审计与本地网关共存
+- **WHEN** 网关记录上游响应声明模型并恢复 pre-output capacity failover
+- **THEN** HTTP、Responses、Anthropic/Gemini/Grok、WebSocket 和失败用量路径 MUST 保存请求模型、实际 outbound 模型与上游响应模型的可区分证据，并保持本地 body replay/release、sticky、最终账号、错误改写和单次计费契约
+
+#### Scenario: 上游 midnight 日额度修复与本地实际时刻锚点冲突
+- **WHEN** `v0.1.172` 把订阅日额度改为配置时区 0 点刷新，而本地产品决策要求实际操作时刻锚点
+- **THEN** 新购、用户手动重置和管理员手动重置 MUST 以实际操作时刻作为窗口起点，后续自动日窗口 MUST 按该锚点每 24 小时推进，不得被静默改为 midnight；既有一日卡、事务锁、receipt、outbox 和 cache invalidation 语义 MUST 保持
+
+#### Scenario: UsageLog 194/195 migration 与本地持久化共存
+- **WHEN** `v0.1.172` 为 upstream response model audit 新增 UsageLog 字段、`194` schema migration 和 `195` 非事务索引 migration
+- **THEN** schema、Ent、单条/批量/best-effort usage insert、查询筛选和管理端展示 MUST 一致，194/195 MUST 与既有双方 191/192 和 193 按完整文件名共存；真实 PostgreSQL integration 未执行时 MUST 保持 `unverified`
 
 #### Scenario: 最终审查发现 Images 审计入口重复与关闭态大 payload 构造
 - **WHEN** 生产依赖图中的 unified security-audit coordinator 已包含 legacy content moderation，而 OpenAI Images handler 仍直接调用 legacy moderation，或仅按依赖指针决定是否序列化 prompt/image payload
