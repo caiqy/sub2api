@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 21: 关闭 OAuth pending、captcha 和认证兼容面`
 - OpenSpec mapping: `5.3 以 TDD 审查 OAuth pending 账号接管修复、腾讯验证码 region/ticket/CSP 与本地 Turnstile/Tencent/Aliyun 互斥 provider、OAuth/passkey 和前端 challenge 生命周期的交互`
-- Stage: `task-review`
+- Stage: `task-fix`
 - Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `a9b6724d2e484ada2e0b4de7238a83843d7fbd64`
@@ -22,4 +22,8 @@
 - Audit evidence: pending guard precedes adoption/apply/consume; provider matrix mutually exclusive and fail-closed; Tencent region reaches all auth entries; Turnstile/Tencent token lifecycle, CSP/settings/passkey/OAuth paths intact
 - Final gates: Task 21 focused backend PASS; frontend vue-tsc/lint PASS; backend compile, whitespace/conflict/VERSION/scope checks PASS
 - Concern routing: stale Codex probe identity assertion belongs to Task 23 gateway/Codex protection set; production normalization to `codex-tui` is current upstream behavior
-- Status: fresh thorough task reviewer pending
+- Reviewer: `ses_0189918e8ffeYtUoJVrLJuuRoi` returned `Needs fixes`
+- Important findings accepted: frontend dirty multi-provider config selects/serializes inconsistently; Tencent pending verification promise can be consumed by concurrent actions; initial backend commands omitted `-tags unit`
+- Coordinator unit-tag reproduction: handler/repository security tests run; service still has routed Codex probe RED; middleware test package fails compile because `api_key_auth_test.go` stub calls the merged two-timestamp repository method with one timestamp
+- Probe disposition: reviewer confirmed route to Task 23, not a Task 21 blocker
+- Status: fresh Task 21 fix implementer pending
