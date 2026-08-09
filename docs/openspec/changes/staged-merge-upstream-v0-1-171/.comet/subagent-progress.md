@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 22: 保留实际时刻额度窗口并融合 billing 修复`
 - OpenSpec mapping: `5.4 以 TDD 审查金额量化、订阅/usage persistence 与本地 quota receipt/outbox/cache；明确保留新购及用户/管理员手动重置的实际操作时刻锚点和后续 24 小时滚动窗口`
-- Stage: `task-fix`
+- Stage: `task-review`
 - Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `5e16678af626354b430e9ec672ac23c16bdc77a9`
@@ -26,4 +26,9 @@
 - Important finding accepted: repository command omitted integration-tag contracts; `user_subscription_repo_integration_test.go` still asserts/calls the old one-timestamp versioned reset interface
 - Environment boundary: Docker/Testcontainers remains unavailable; tagged compile and static contract can be repaired, but execution must remain `UNVERIFIED` rather than PASS
 - Minor report corrections accepted: bulk test coverage was overstated; distinguish 8-decimal service quantization from subscription usage columns stored at DECIMAL(20,10)
-- Status: fresh Task 22 fix implementer pending
+- Fix implementer: `ses_01860f0a5ffeB7anSaMQHSJxJ2`
+- Fix commit: `aab0c0b21b1fa65db32a764525a331c6e2f2aa5d` (parent `5c295af55d1aa8ed1ec39082f5aba9ea67355aab`)
+- Fix scope: integration test anonymous interface/call synchronized to daily+periodic timestamps; no production change
+- Verification: integration-tag compile PASS; Docker-backed contract execution UNVERIFIED because no local container runtime; unit/focused/build/static gates PASS
+- Report corrected to distinguish non-tag tests, tagged compile, unexecuted integration and actual schema scales
+- Status: fresh thorough re-review pending
