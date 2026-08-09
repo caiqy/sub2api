@@ -1560,7 +1560,7 @@ if ((git rev-parse 'HEAD^2').Trim() -ne $tag172) { throw 'v0.1.172 second parent
 
 ### Task 21: 关闭 OAuth pending、captcha 和认证兼容面
 
-- [ ] Task 21: 关闭 OAuth pending、captcha 和认证兼容面
+- [x] Task 21: 关闭 OAuth pending、captcha 和认证兼容面
 
 **映射 OpenSpec：**5.3
 

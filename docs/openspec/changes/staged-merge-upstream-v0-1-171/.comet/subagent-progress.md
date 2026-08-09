@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 21: 关闭 OAuth pending、captcha 和认证兼容面`
 - OpenSpec mapping: `5.3 以 TDD 审查 OAuth pending 账号接管修复、腾讯验证码 region/ticket/CSP 与本地 Turnstile/Tencent/Aliyun 互斥 provider、OAuth/passkey 和前端 challenge 生命周期的交互`
-- Stage: `task-review`
+- Stage: `task-complete`
 - Review/fix round: `2/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `a9b6724d2e484ada2e0b4de7238a83843d7fbd64`
@@ -38,4 +38,7 @@
 - Final fix commit: `1f8245c98ed686ccff8cd1733fb30d0067404fbb` (parent `9b11a32f260ffc6fb431fa7fc50d9e8a55b935ad`)
 - Final fix scope: enabled-provider cardinality separated from required-field validation; mixed-completeness RED/GREEN; Tencent claimed-rejection recovery test added without production change
 - Final gates: component specs 23 tests, original Task 21 specs 60 tests, narrowed unit-tag security suites, OAuth takeover, vue-tsc/lint/backend compile/static checks PASS
-- Status: final fresh thorough re-review pending; another Important finding requires escalation
+- Final re-reviewer: `ses_01875340bffeZDGAgd1OfjvSZu` returned `Task quality: Approved`; all original Important findings addressed, no new Critical/Important
+- Non-blocking report source lines refreshed to final HEAD layout
+- Routed concern: stale Codex probe identity assertion remains assigned to Task 23
+- Status: Task 21 complete; Plan Task 21 and OpenSpec 5.3 checked off
