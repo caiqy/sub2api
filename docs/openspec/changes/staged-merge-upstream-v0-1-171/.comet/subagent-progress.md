@@ -6,8 +6,8 @@
 - TDD mode: `tdd`
 - Current task: `Task 20: 创建纯 v0.1.172 merge 节点`
 - OpenSpec mapping: `5.2 使用 git merge --no-ff --no-commit v0.1.172，逐文件语义融合实际冲突并创建第二父为固定 155c494964c3ea6ecc31f52679525c1034bf0f16 的纯 merge commit`
-- Stage: `task-review`
-- Review/fix round: `0/2`
+- Stage: `task-complete`
+- Review/fix round: `1/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Review base: `825c546fe314ce860c8c9b5a8b2458a88301478b`
 - Implementation commit: `95fa00f99b3f0d3509e02f6a5f9d29fbed96c984`
@@ -29,4 +29,5 @@
 - Fix scope: WS observer ownership ordering + existing-session regression test; delete invalid midnight suite; frontend usage filter typing and reviewed tab indentation
 - TDD evidence: WS foreign-response test RED on polluted conflict flag, then GREEN after moving observation behind ownership guard
 - Implementer verification: exact-time subscription tests, frontend vue-tsc, required backend static compile, whitespace/conflict/VERSION/scope checks PASS
-- Status: fresh thorough re-review pending
+- Re-reviewer: `ses_018ad1c32ffedEoFAqDoM2JGc4` returned `Task quality: Approved`; all original findings addressed, no new Critical/Important/Minor
+- Status: Task 20 complete; Plan Task 20 and OpenSpec 5.2 checked off

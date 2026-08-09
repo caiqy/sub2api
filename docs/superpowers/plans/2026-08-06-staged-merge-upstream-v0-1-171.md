@@ -1493,7 +1493,7 @@ Commit-NamedPaths -Message 'docs: record v0.1.173 merge baseline' -Paths @($buil
 
 ### Task 20: 创建纯 v0.1.172 merge 节点
 
-- [ ] Task 20: 创建纯 v0.1.172 merge 节点
+- [x] Task 20: 创建纯 v0.1.172 merge 节点
 
 **映射 OpenSpec：**5.2
 
