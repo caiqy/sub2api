@@ -4,33 +4,16 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Current task: `Task 22: 保留实际时刻额度窗口并融合 billing 修复`
-- OpenSpec mapping: `5.4 以 TDD 审查金额量化、订阅/usage persistence 与本地 quota receipt/outbox/cache；明确保留新购及用户/管理员手动重置的实际操作时刻锚点和后续 24 小时滚动窗口`
-- Stage: `task-complete`
+- Current task: `Task 23: 融合 gateway、transport 和 protocol 修复`
+- OpenSpec mapping: `5.5 以 TDD 审查 upstream response model audit、Codex identity/capacity failover、transport timeout、body replay/release、sticky/final account、WS prewarm、count_tokens、Grok、图片 cooldown 和协议清洗`
+- Stage: `implementing`
 - Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
-- Task start HEAD: `5e16678af626354b430e9ec672ac23c16bdc77a9`
-- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-22-brief.md`
-- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-22-report.md`
-- Dependency: Task 20 already removed the invalid midnight suite and preserved exact-time production paths; Task 21 synchronized the unit middleware subscription stub
-- TDD rule: run exact-anchor and subscription/billing protection tests before edits; the plan's predicted midnight RED may already be GREEN, so do not fabricate RED or duplicate fixes
-- Risk signals: money、persistence、concurrency、cache/outbox、cross-module
-- Hard boundary: purchase/user reset/admin reset use exact operation time; daily auto windows advance every 24h; one-day cards do not regrant quota; NUMERIC(20,8) quantization, transaction locks, receipt/outbox/cache invalidation remain intact
-- Implementer: `ses_0186f0404ffe9zpunoXkiOvIqv` returned `DONE`
-- Implementation commit: `f9c05bf4ac2c587f284ffab9e38e05c830a1a720` (parent `d254cac04c8584e363fde28bc97cb6c8356a5529`)
-- Genuine RED: `TestAssignSubscriptionRenewsExpiredSemanticMatch` still expected StartOfDay; production returned exact renewal time
-- Fix scope: restore exact renewal-time assertion and remove now-unused timezone import; no production changes
-- Audit evidence: purchase/renew/admin reset/activation share exact operation timestamps; automatic windows preserve anchor + integral 24h periods; one-day cards exempt; quantization/locks/CAS/receipt/outbox/cache paths intact
-- Final gates: subscription/billing unit focus, repository contracts, backend build and static checks PASS
-- Reviewer: `ses_01867a11effedeqFq7ygwoIsCZ` returned `Needs fixes`
-- Important finding accepted: repository command omitted integration-tag contracts; `user_subscription_repo_integration_test.go` still asserts/calls the old one-timestamp versioned reset interface
-- Environment boundary: Docker/Testcontainers remains unavailable; tagged compile and static contract can be repaired, but execution must remain `UNVERIFIED` rather than PASS
-- Minor report corrections accepted: bulk test coverage was overstated; distinguish 8-decimal service quantization from subscription usage columns stored at DECIMAL(20,10)
-- Fix implementer: `ses_01860f0a5ffeB7anSaMQHSJxJ2`
-- Fix commit: `aab0c0b21b1fa65db32a764525a331c6e2f2aa5d` (parent `5c295af55d1aa8ed1ec39082f5aba9ea67355aab`)
-- Fix scope: integration test anonymous interface/call synchronized to daily+periodic timestamps; no production change
-- Verification: integration-tag compile PASS; Docker-backed contract execution UNVERIFIED because no local container runtime; unit/focused/build/static gates PASS
-- Report corrected to distinguish non-tag tests, tagged compile, unexecuted integration and actual schema scales
-- Re-reviewer: `ses_0185c28fcffeq4iTGIhIaPGYfI` returned `Task quality: Approved`; all findings addressed, no new Critical/Important/Minor
-- Residual risk: real PostgreSQL versioned reset/receipt/outbox integration remains `UNVERIFIED` until Docker/Testcontainers is available
-- Status: Task 22 complete; Plan Task 22 and OpenSpec 5.4 checked off
+- Task start HEAD: `f5c1a00a2333cad7b53c78b5373640a8a02ca981`
+- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-23-brief.md`
+- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-23-report.md`
+- Dependency: Tasks 20-22 complete; Task 21 routed stale `TestProbe_SendProbeRequest_OAuthUsesCodexResponsesEndpoint` expectation to this Codex/gateway task
+- TDD rule: run upstream/local protection sets before edits and preserve genuine RED; do not rewrite production identity to satisfy a stale test when canonical `codex-tui` is correct
+- Risk signals: cross-module、security、concurrency、network transport、request-body lifecycle、billing
+- Hard boundary: pre-output capacity may fail over; post-output errors never switch account or double bill; per-attempt response-model observer reset; direct/TLS/SOCKS5 timeouts bounded; final account/model and sticky consistent; request body released exactly once; count_tokens fallback does not cool OAuth
+- Status: fresh Task 23 implementer dispatch pending
