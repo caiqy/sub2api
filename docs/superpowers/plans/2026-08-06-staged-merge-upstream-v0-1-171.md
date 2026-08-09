@@ -1395,7 +1395,7 @@ Assert-CleanGate
 
 **步骤：**
 
-1. 重新运行统一检查命令与 `Assert-CleanGate`，固定扩展 execution base，拒绝 extension range 中的 merge commit，并确认 `77a9a548b26ff3290339fefce4c7ac48a7d9fbe8..HEAD` 逐父只含本次 173 规划文档：
+1. 重新运行统一检查命令与 `Assert-CleanGate`，固定扩展 execution base，拒绝 extension range 中的 merge commit，并确认 `77a9a548b26ff3290339fefce4c7ac48a7d9fbe8..HEAD` 逐父只含本次 173 规划文档和独立 Comet runtime checkpoint：
 
 ```powershell
 Assert-CleanGate
@@ -1410,6 +1410,11 @@ $allowed173PlanningPaths = @(
     "$changeDir/design.md",
     "$changeDir/specs/upstream-release-sync/spec.md",
     "$changeDir/tasks.md",
+    "$changeDir/.comet.yaml",
+    "$changeDir/.comet/run-state.json",
+    "$changeDir/.comet/state-events.jsonl",
+    "$changeDir/.comet/subagent-progress.md",
+    "$changeDir/.comet/trajectory.jsonl",
     $designDoc,
     $planFile
 )
@@ -1478,7 +1483,7 @@ Invoke-CheckedNative 'pre-172 backend lint' { Push-Location backend; try { golan
 Assert-NoConflictArtifacts
 ```
 
-5. ledger 记录旧 Verify 只绑定至 171、`$extensionPlanningBase`/`$extensionExecutionBase` 与规划路径清单、Docker/cgo 现状、两个新增 tag manifest、172 的 208/113、173 的 300/初步 overlap 清单和八个能力簇；仅提交 ledger：
+5. ledger 记录旧 Verify 只绑定至 171、`$extensionPlanningBase`/`$extensionExecutionBase` 与规划/runtime checkpoint 路径清单、Docker/cgo 现状、两个新增 tag manifest、172 的 208/113、173 的 300/初步 overlap 清单和八个能力簇；仅提交 ledger：
 
 ```powershell
 Commit-NamedPaths -Message 'docs: record v0.1.173 merge baseline' -Paths @($buildLedger)
