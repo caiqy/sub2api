@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 21: 关闭 OAuth pending、captcha 和认证兼容面`
 - OpenSpec mapping: `5.3 以 TDD 审查 OAuth pending 账号接管修复、腾讯验证码 region/ticket/CSP 与本地 Turnstile/Tencent/Aliyun 互斥 provider、OAuth/passkey 和前端 challenge 生命周期的交互`
-- Stage: `task-fix`
+- Stage: `task-review`
 - Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `a9b6724d2e484ada2e0b4de7238a83843d7fbd64`
@@ -26,4 +26,9 @@
 - Important findings accepted: frontend dirty multi-provider config selects/serializes inconsistently; Tencent pending verification promise can be consumed by concurrent actions; initial backend commands omitted `-tags unit`
 - Coordinator unit-tag reproduction: handler/repository security tests run; service still has routed Codex probe RED; middleware test package fails compile because `api_key_auth_test.go` stub calls the merged two-timestamp repository method with one timestamp
 - Probe disposition: reviewer confirmed route to Task 23, not a Task 21 blocker
-- Status: fresh Task 21 fix implementer pending
+- Fix implementer: `ses_0188abbf3ffeqyN0b91S0p2Q8Z`
+- Fix commit: `790c262e41f038cb822453d58f81e03c1ff82a15` (parent `a92aaa1d70ffd29fbac0e7f0f9fdac1778c4bee6`)
+- Fix scope: shared valid-provider resolution; single-claim Tencent pending proof; direct frontend regressions; middleware test stub two-timestamp signature
+- TDD evidence: multi-provider selection and concurrent/prefetched proof reuse RED before implementation, GREEN after; existing middleware unit compile RED became GREEN
+- Final gates: original 6 frontend specs 58 tests PASS; unit-tag security suites (43 service tests) PASS; OAuth takeover, vue-tsc, frontend lint, backend compile and static checks PASS
+- Status: fresh thorough re-review pending
