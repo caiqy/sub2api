@@ -1943,8 +1943,8 @@ Makefile
 | 1 | 172 usage、upstream response model、dashboard 与 UsageLog migration | usage log schema/repository/handler、dashboard/usage frontend、194/195 migration | `manual`，待 172 merge 后复核 API 与 migration identity。 |
 | 2 | 172 OpenAI/Codex、Anthropic/Antigravity 与请求兼容 | count-tokens、Codex identity/version、Responses/Anthropic bridge、body/WS/usage | `manual`，保持 171 baseline 的 body、final-model 与 usage 契约。 |
 | 3 | 172 auth、captcha、settings、CSP 与安全缓存 | captcha、OAuth pending flow、setting partial update、API key middleware/security headers | `manual`，待 merge 后复核 fail-closed 与失效链。 |
-| 4 | 172 subscription、payment、billing 与 scheduler 交叉面 | quota window、Easypay refund、gateway billing、transient/rate-limit | `manual`，保持用户确认的精确窗口锚点。 |
-| 5 | 173 Grok SSO、refresh token、默认模型与跨客户端 mapping | xAI OAuth/SSO、models、settings/account mapping | `manual`，默认 wildcard 关闭、密码授权拒绝。 |
+| 4 | 172 subscription、payment、billing 与 scheduler 交叉面 | quota window、Easypay refund、gateway billing、transient/rate-limit | `manual`，新购、用户手动重置、管理员手动重置均以实际操作时刻作为日窗口锚点；后续按该锚点每 24 小时推进，不得改为当天零点（midnight）。 |
+| 5 | 173 Grok SSO、refresh token、默认模型与跨客户端 mapping | xAI OAuth/SSO、models、settings/account mapping | `manual`，`grok_cross_client_model_map_enabled` 缺失、空值或 `false` 时不得加入 `gpt-*`、`codex-*`、`o1*`/`o3*`/`o4*`、`claude-*` wildcard；仅显式 `true` 或账号显式 `model_mapping` 可用，密码授权不受兼容配置影响，一律硬拒绝。 |
 | 6 | 173 Grok media/Voice/search、quota、cooldown 与 gateway scheduling | Grok audio/media/search/billing、team/model threshold、sticky/failover | `manual`，保持 body、usage、恢复和并发调度边界。 |
 | 7 | 173 Channel Monitor V2、V1/V2 mode 与用户隐私 | V2 runner/repository/routes/frontend、194-206 migrations | `manual`，默认 V1、runner 互斥、普通用户吞吐脱敏。 |
 | 8 | 173 Ent/Wire、依赖、pricing schema、migration 与 frontend | Group price schema/generated output、go.sum/pnpm lock、217-220 migrations、pricing UI | `unverified`，Docker/Testcontainers 迁移执行仍不可用；生成和 identity 在对应后续 gate 重跑。 |
