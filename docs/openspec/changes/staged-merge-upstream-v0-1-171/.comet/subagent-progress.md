@@ -4,20 +4,15 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Previous task: Task 13 remediation accepted; fresh reviewer `ses_020480e2bffeE2SlM4So5zU3WN` returned spec `PASS` and quality `APPROVED`
-- Current task: `Build exit guard`
-- OpenSpec mapping: `3.3` captcha/auth compatibility rechecked and complete
-- Stage: `final-review-complete`
-- Review/fix round: `1/2`
-- Model: 当前 Task 工具未暴露 model 选择参数，使用平台默认 model
-- Brief: `.superpowers/sdd/task-13-remediation-verify-1.md`
-- Report: `.superpowers/sdd/staged-merge-upstream-v0-1-171-task-13-remediation-verify-1-report.md`
-- Scope: remediation complete; preserve exact-time manual reset decision and rerun independent final Verify
-- Environment: local Docker unavailable; migration integration remains `unverified` on skip; no remote execution
-- Hard boundary: preserve administrator/manual exact-time reset semantics; do not touch scheduler/gateway/subscription/migration behavior; Docker remains UNVERIFIED; no remote/release operation
-- Verify finding: `VerifyActionCaptchaIfEnabled` currently bypasses Turnstile-only settings and frontend OAuth/passkey actions do not submit the existing Turnstile token.
-- User resolution retained: renewing an unexpired suspended subscription extends expiry, restores `active`, appends notes and preserves quota windows/usage.
-- Verify handoff: `make test` passed with frontend 237 files / 1814 tests; version-locked full build passed; refresh independent Verify evidence while retaining topology/blob evidence and Docker/race residuals.
-- Integration residual: Docker CLI unavailable; no remote execution and no false PASS.
-- Worktree: only protected `.comet/current-change.json` remains untracked after this checkpoint commit.
-- Status: all plan/OpenSpec tasks checked; both Task 13 checkoff commands passed; ready for Build guard and independent Verify.
+- Current task: `Task 19: 固定 v0.1.172/v0.1.173 manifest、重叠面和新基线`
+- OpenSpec mapping: `5.1 保留 170/171 已完成任务与 Verify 报告作为历史证据，使旧 Verify 对新增范围失效；重新 fetch upstream refs，固定 v0.1.172/v0.1.173 annotated object 与 peeled SHA、173 为最新正式 tag、严格祖先链、172 的 208/113 和 173 的 300/初步 116 文件面`
+- Stage: `implementing`
+- Review/fix round: `0/2`
+- Model: Task 工具当前未暴露 model 参数，使用平台默认 model
+- Base: `cd9ecba6d`
+- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-19-brief.md`
+- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-19-report.md`
+- Prior attempt: 在任何 baseline、ledger 或 merge 提交前因发现 v0.1.173 而 BLOCKED；已由提交 `cd9ecba6d` 的批准设计/计划取代
+- TDD evidence: 本任务只固定 manifest、运行既有 baseline 并写 ledger，不修改产品行为；不伪造 RED
+- Hard boundary: 不修改产品代码，不 merge 172/173，不 bump VERSION；不 push/tag/release/deploy，不构建镜像，不操作服务器；Docker unavailable 与 CGO=0 如实记录
+- Status: fresh Task 19 implementer dispatch pending
