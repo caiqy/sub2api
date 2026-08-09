@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 22: 保留实际时刻额度窗口并融合 billing 修复`
 - OpenSpec mapping: `5.4 以 TDD 审查金额量化、订阅/usage persistence 与本地 quota receipt/outbox/cache；明确保留新购及用户/管理员手动重置的实际操作时刻锚点和后续 24 小时滚动窗口`
-- Stage: `task-review`
+- Stage: `task-fix`
 - Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `5e16678af626354b430e9ec672ac23c16bdc77a9`
@@ -22,4 +22,8 @@
 - Fix scope: restore exact renewal-time assertion and remove now-unused timezone import; no production changes
 - Audit evidence: purchase/renew/admin reset/activation share exact operation timestamps; automatic windows preserve anchor + integral 24h periods; one-day cards exempt; quantization/locks/CAS/receipt/outbox/cache paths intact
 - Final gates: subscription/billing unit focus, repository contracts, backend build and static checks PASS
-- Status: fresh thorough task reviewer pending
+- Reviewer: `ses_01867a11effedeqFq7ygwoIsCZ` returned `Needs fixes`
+- Important finding accepted: repository command omitted integration-tag contracts; `user_subscription_repo_integration_test.go` still asserts/calls the old one-timestamp versioned reset interface
+- Environment boundary: Docker/Testcontainers remains unavailable; tagged compile and static contract can be repaired, but execution must remain `UNVERIFIED` rather than PASS
+- Minor report corrections accepted: bulk test coverage was overstated; distinguish 8-decimal service quantization from subscription usage columns stored at DECIMAL(20,10)
+- Status: fresh Task 22 fix implementer pending
