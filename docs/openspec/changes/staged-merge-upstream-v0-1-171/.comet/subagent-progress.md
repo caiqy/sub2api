@@ -6,13 +6,17 @@
 - TDD mode: `tdd`
 - Current task: `Task 20: 创建纯 v0.1.172 merge 节点`
 - OpenSpec mapping: `5.2 使用 git merge --no-ff --no-commit v0.1.172，逐文件语义融合实际冲突并创建第二父为固定 155c494964c3ea6ecc31f52679525c1034bf0f16 的纯 merge commit`
-- Stage: `implementing`
+- Stage: `task-review`
 - Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
-- Checkpoint parent: `aaeb4bba1`; implementer review base is the resulting runtime checkpoint commit
+- Review base: `825c546fe314ce860c8c9b5a8b2458a88301478b`
+- Implementation commit: `95fa00f99b3f0d3509e02f6a5f9d29fbed96c984`
+- Changed files: 207 paths in the v0.1.172 merge result; 34 content conflicts semantically resolved
 - Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-20-brief.md`
 - Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-20-report.md`
 - Dependency: Task 19 checked off; manifest `208/113/352/138`, tag identities and pre-172 local baseline passed
-- TDD evidence: pure merge task does not fabricate RED; compile/generation/conflict checks are mandatory before commit
+- TDD evidence: pure merge task did not fabricate RED; Ent/Wire generation, exact-anchor subscription tests, OAuth pending takeover test, required static compile and conflict checks PASS
+- Risk signals: cross-module、安全、并发、schema/API、DONE_WITH_CONCERNS、diff>200 均命中
+- Concerns: frontend package无 Prettier executable；second-parent diff 的 legacy docs 有既有 trailing blank lines，但 first-parent merge diff clean；仅运行本任务 targeted/compile gates
 - Hard boundary: VERSION remains `0.1.171.1`; preserve OAuth pending security guard and actual-operation-time subscription anchor; keep migration identities; no merge-after compatibility fixes, ledger, plan/tasks or runtime in merge commit
-- Status: fresh Task 20 implementer dispatch pending
+- Status: implementer `ses_018ea0362ffeVR7bwsS5sr19TY` returned DONE_WITH_CONCERNS; thorough task reviewer pending
