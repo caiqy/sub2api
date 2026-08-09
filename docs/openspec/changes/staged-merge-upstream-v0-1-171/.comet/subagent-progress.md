@@ -6,8 +6,8 @@
 - TDD mode: `tdd`
 - Current task: `Task 19: 固定 v0.1.172/v0.1.173 manifest、重叠面和新基线`
 - OpenSpec mapping: `5.1 保留 170/171 已完成任务与 Verify 报告作为历史证据，使旧 Verify 对新增范围失效；重新 fetch upstream refs，固定 v0.1.172/v0.1.173 annotated object 与 peeled SHA、173 为最新正式 tag、严格祖先链、172 的 208/113 和 173 的 352/初步 138 文件面`
-- Stage: `task-review`
-- Review/fix round: `0/2`
+- Stage: `implementing`
+- Review/fix round: `1/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Review base: `54912d79ef52d530936ee8ffe245197e23a0e662`
 - Implementation commit: `5214710fd64d51befc25529e4ff28b0a6f96b9ff`
@@ -19,5 +19,8 @@
 - Risk signals: cross-module、DONE_WITH_CONCERNS、evidence diff >200 lines；security/concurrency/schema/API 只列为后续 merge 审查面，本任务未改产品
 - Residuals: Docker unavailable、`CGO_ENABLED=0`；继承的无效 `OPENAI_API_KEY` 导致可选远程对照 401，清空该变量的子进程 local-only `make test` PASS
 - Open concern: plan helper `Commit-NamedPaths` 的双引号 `$Message:` 会触发 PowerShell parser error；implementer 仅在内存中使用 `${Message}:` 完成本任务，计划源待协调修正
+- Reviewer: `ses_018fa21abffekymLsMYAfVHbK4` returned spec concerns / quality Needs fixes
+- Review finding: ledger capability matrix must spell out Grok setting name/default/explicit exceptions; report top-level BLOCKED must be labeled as initial attempt
+- Reviewer conflict ruling: do not adopt suggested midnight `AdminResetQuota`; user-approved contract is actual operation time for new purchase/user/admin manual reset, then 24-hour advancement. Fix agent must make that wording explicit.
 - Hard boundary: 不修改产品代码，不 merge 172/173，不 bump VERSION；不 push/tag/release/deploy，不构建镜像，不操作服务器；Docker unavailable 与 CGO=0 如实记录
-- Status: implementer `ses_01920ddc0ffe1Mfs1252HmYlR9` returned DONE_WITH_CONCERNS; thorough task reviewer pending
+- Status: fresh Task 19 fix agent pending for review round 1/2
