@@ -1616,7 +1616,7 @@ if ($task21ChangedPaths.Count -gt 0) { Commit-NamedPaths -Message 'fix: preserve
 
 ### Task 22: 保留实际时刻额度窗口并融合 billing 修复
 
-- [ ] Task 22: 保留实际时刻额度窗口并融合 billing 修复
+- [x] Task 22: 保留实际时刻额度窗口并融合 billing 修复
 
 **映射 OpenSpec：**5.4
 

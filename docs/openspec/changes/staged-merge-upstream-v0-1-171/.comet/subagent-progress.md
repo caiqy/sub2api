@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 22: 保留实际时刻额度窗口并融合 billing 修复`
 - OpenSpec mapping: `5.4 以 TDD 审查金额量化、订阅/usage persistence 与本地 quota receipt/outbox/cache；明确保留新购及用户/管理员手动重置的实际操作时刻锚点和后续 24 小时滚动窗口`
-- Stage: `task-review`
+- Stage: `task-complete`
 - Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `5e16678af626354b430e9ec672ac23c16bdc77a9`
@@ -31,4 +31,6 @@
 - Fix scope: integration test anonymous interface/call synchronized to daily+periodic timestamps; no production change
 - Verification: integration-tag compile PASS; Docker-backed contract execution UNVERIFIED because no local container runtime; unit/focused/build/static gates PASS
 - Report corrected to distinguish non-tag tests, tagged compile, unexecuted integration and actual schema scales
-- Status: fresh thorough re-review pending
+- Re-reviewer: `ses_0185c28fcffeq4iTGIhIaPGYfI` returned `Task quality: Approved`; all findings addressed, no new Critical/Important/Minor
+- Residual risk: real PostgreSQL versioned reset/receipt/outbox integration remains `UNVERIFIED` until Docker/Testcontainers is available
+- Status: Task 22 complete; Plan Task 22 and OpenSpec 5.4 checked off
