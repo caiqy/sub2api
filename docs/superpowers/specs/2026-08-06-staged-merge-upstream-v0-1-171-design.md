@@ -4,7 +4,7 @@ role: technical-design
 canonical_spec: openspec
 ---
 
-# 分段合并上游 v0.1.172 技术设计
+# 分段合并上游 v0.1.173 技术设计
 
 ## 1. 背景与事实源
 
@@ -19,25 +19,26 @@ canonical_spec: openspec
 | 1 | `c043c24774228ba891ddf90d783aa6dc7d0855b5` | `v0.1.169..v0.1.170` | 62 | 242 |
 | 2 | `f0e7a9c7a23a7d02fb159b62fa809621eb0475a6` | `v0.1.170..v0.1.171` | 49 | 206 |
 | 3 | `155c494964c3ea6ecc31f52679525c1034bf0f16` | `v0.1.171..v0.1.172` | 54 | 208 |
+| 4 | `29009f0b2ea14edf3b11ae2564fb617ff91a03b4` | `v0.1.172..v0.1.173` | 120 | 300 |
 
-前两段合计修改 392 个文件；第三段新增 208 个 changed files，其中 113 个与当前 fork 相对 171 的本地演进重叠，主要集中在 gateway、usage、subscription、auth/captcha、settings、前端和生成代码。首段预测与前两段实际冲突保留历史证据；第三段实际冲突集合以 Build 隔离位置为准。
+前两段合计修改 392 个文件；第三段新增 208 个 changed files，其中 113 个与当前 fork 相对 171 的本地演进重叠。第四段新增 300 个 changed files，172 merge 前初步与当前 fork 重叠 116 个路径，主要集中在 Grok gateway/scheduler、settings、Channel Monitor、pricing、前端和生成代码；精确重叠在 172 阶段闭合后重算。首段预测与前两段实际冲突保留历史证据；第三、四段实际冲突集合以 Build 隔离位置为准。
 
-Migration identity 已形成新的同号风险：本地已有 `192_subscription_cache_invalidation_outbox.sql`，上游新增 `192_group_profit_control.sql` 和 `193_group_profit_control_auth_cache_invalidation.sql`。执行器沿用完整文件名身份，双方 192 必须与既有双方 191 一并共存。
+Migration identity 已形成新的同号风险：本地已有 `192_subscription_cache_invalidation_outbox.sql`，上游新增 `192_group_profit_control.sql` 和 `193_group_profit_control_auth_cache_invalidation.sql`；172 的 UsageLog `194_*`/`195_*` 与 173 的 Channel Monitor `194_*`/`195_*` 也同号。执行器沿用完整文件名身份，所有同号不同名文件必须共存。
 
 ## 2. 目标与边界
 
 ### 2.1 目标
 
-- `v0.1.170`、`v0.1.171`、`v0.1.172` 按顺序成为结果 HEAD 的祖先，并各自保留可审计 merge 节点。
+- `v0.1.170`、`v0.1.171`、`v0.1.172`、`v0.1.173` 按顺序成为结果 HEAD 的祖先，并各自保留可审计 merge 节点。
 - 上游功能/修复与本地定制共存；回归归属到首次出现的 release 区间。
 - Merge commit 保持纯净；语义兼容修复按用户确认的能力簇拆分。
 - 双方 `191_*`、双方 `192_*` 与上游 `193_*` migration 保持完整文件名和 identity。
-- 最终版本精确为 `0.1.172.1`，本机自动门禁、能力级 review、生成稳定性和拓扑验证完成。
+- 最终版本精确为 `0.1.173.1`，本机自动门禁、能力级 review、生成稳定性和拓扑验证完成。
 - Docker-backed integration 未执行时，报告准确列出环境原因和未验证契约。
 
 ### 2.2 非目标
 
-- 不合入 `v0.1.172` 之后的 `upstream/main` 提交，不静默吸收实施前出现的更高 tag。
+- 不合入 `v0.1.173` 之后的 `upstream/main` 提交，不静默吸收实施前出现的更高 tag。
 - 不新增本地产品功能，不做无关重构。
 - 不推送、不打 tag、不触发 GitHub Actions、不发布或构建 Sub2API 镜像。
 - 不部署，不操作服务器、数据库、Redis 或 Nginx。
@@ -45,10 +46,10 @@ Migration identity 已形成新的同号风险：本地已有 `192_subscription_
 
 ## 3. 采用方案
 
-采用“单 change、两段受审 merge、按能力簇修复、逐段封闭”。拒绝以下替代方案：
+采用“单 change、四段受审 merge、按能力簇修复、逐段封闭”。170/171 已完成，不重复实施；172/173 继续顺序推进。拒绝以下替代方案：
 
 - 一次合入 `v0.1.171`：历史更短，但无法区分回归首次来自 170 还是 171。
-- 两段 merge、每段一个汇总修复提交：提交更少，但调度、网关、认证、订阅和前端回归会耦合，审查与回退成本更高。
+- 172/173 各自只用一个汇总修复提交：提交更少，但 Grok、Channel Monitor、调度、认证、订阅和前端回归会耦合，审查与回退成本更高。
 - 两个独立 changes：阶段严格线性依赖，共享基线、能力矩阵和最终版本，拆分只会复制上下文与归档工作。
 
 实施状态机：
@@ -65,7 +66,9 @@ Migration identity 已形成新的同号风险：本地已有 `192_subscription_
   -> 保留 170/171 历史证据并使旧 Verify 对新增范围失效
   -> merge --no-ff --no-commit v0.1.172
   -> security/auth、subscription/billing、gateway/transport、schema/frontend 四簇修复与门禁
-  -> VERSION=0.1.172.1
+  -> merge --no-ff --no-commit v0.1.173
+  -> Grok auth/mapping、Grok gateway/scheduler、Channel Monitor V2、pricing/schema/frontend 四簇修复与门禁
+  -> VERSION=0.1.173.1
   -> 最终全门禁 / 拓扑 / migration identity / 能力终审
 ```
 
@@ -79,6 +82,7 @@ Migration identity 已形成新的同号风险：本地已有 `192_subscription_
 git merge --no-ff --no-commit v0.1.170
 git merge --no-ff --no-commit v0.1.171
 git merge --no-ff --no-commit v0.1.172
+git merge --no-ff --no-commit v0.1.173
 ```
 
 提交边界：
@@ -90,7 +94,7 @@ git merge --no-ff --no-commit v0.1.172
 - **subscription/migration 修复提交**：quota reset、订阅续期、退款/余额、outbox、migration 与生成源。
 - **frontend 修复提交**：账号、分组、认证设置、退款/用量及既有本地 UI 定制。
 - **证据提交**：只更新 build ledger、任务状态和阶段结论。
-- **最终版本提交**：三段封闭后一次更新 `backend/cmd/server/VERSION` 为 `0.1.172.1`。
+- **最终版本提交**：四段封闭后一次更新 `backend/cmd/server/VERSION` 为 `0.1.173.1`。
 
 不要求每个能力簇都产生提交；没有真实修复时不创建空提交。一次修复只属于一个主要能力簇，必要的直接测试和生成输出与源修复同提交。所有暂存使用显式路径，禁止 `git add .`；`.comet/current-change.json` 不得混入业务提交。
 
@@ -142,7 +146,7 @@ Ledger 记录 source/execution base、branch/worktree、tag manifest、dirty pat
 
 特殊文件策略：
 
-- `VERSION`：前两段冲突保留 `0.1.169.3`，171 阶段曾闭合为 `0.1.171.1`；172 merge 冲突继续保留该中间 fork 版本，第三段全部闭合后再更新为 `0.1.172.1`。
+- `VERSION`：前两段冲突保留 `0.1.169.3`，171 阶段曾闭合为 `0.1.171.1`；172/173 merge 与兼容阶段继续保留该中间 fork 版本，第四段全部闭合后再更新为 `0.1.173.1`。
 - Go 依赖：先融合 `go.mod`，再由 Go module 工具生成 `go.sum`。
 - Ent/Wire：先融合 schema/provider 源，再重新生成；不手工编辑生成语义。
 - 前端 lockfile：先融合 manifest，再用仓库现有 pnpm 版本生成。
@@ -180,6 +184,14 @@ OAuth pending 账号接管修复是第三段最高优先级：非终态登录 se
 
 upstream response model audit 必须在协议转换或 client-facing rewrite 前冻结上游声明模型，并与 requested/outbound model 区分；覆盖 HTTP、Responses、Anthropic/Gemini/Grok、WS、单条/批量/best-effort usage persistence 和管理端筛选。capacity failover、Codex `codex-tui`、dial/TLS/SOCKS5 timeout、count_tokens fallback、WS prewarm、Grok、图片 cooldown、工具 schema 与 Responses→Anthropic 清洗不得绕过本地 body/sticky/final-account/usage 契约。
 
+### 7.4 v0.1.173
+
+Grok 默认模型映射需要主动修正 tag/release 偏差：release note、`domain_constants.go` 注释和 xAI 单元测试要求跨客户端 wildcard opt-in，但 tag 的初始化/解析把缺失值当 true。本 change 采用用户批准的默认关闭语义：新装默认写 false，设置缺失/空值解析为 false；显式 true 才加入 `gpt-*`、`codex-*`、`o1*`/`o3*`/`o4*`、`claude-*`，账号显式 mapping 不受影响。密码授权仅保留兼容 DTO/config，UI 隐藏且 service 固定拒绝。
+
+Grok 图片/视频、Voice、custom voices、web search、free 24h gate、team+model 冷却、流式空闲换号和 7d/30d 阈值扩大 gateway/scheduler/usage 表面。每个入口必须保持本地 sticky/failover、最终账号与 outbound model、body replay/release、统一审计和单次计费；free 软门禁基于本地滚动 24h 用量，与订阅实际时刻锚点独立，恢复条件和临时下线原因可观察。
+
+Channel Monitor V2 通过真实网关流量被动聚合。默认继续 V1 主动探测，V2 仅在显式设置时启用，两套 runner 互斥；admin 保留完整吞吐，普通用户默认隐藏 RPM/TPM。rollup、cache、ignored categories、趋势/排行 API 和前端模式切换需与现有 Channel Monitor V1、Available Channels 和本地渠道定制交叉验证。
+
 ## 8. Migration 与生成稳定性
 
 最终 migration 集至少保留：
@@ -191,11 +203,15 @@ upstream response model audit 必须在协议转换或 client-facing rewrite 前
 - `193_group_profit_control_auth_cache_invalidation.sql`
 - `194_add_usage_log_upstream_response_model.sql`
 - `195_add_usage_log_upstream_model_mismatch_index_notx.sql`
+- `194_channel_monitor_v2.sql`
+- `195_channel_monitor_mode.sql`
+- `196_channel_monitor_v2_ignored_error_categories.sql` 至 `206_channel_monitor_v2_privacy_defaults.sql`
+- `217_group_video_model_prices.sql` 至 `220_clear_non_grok_video_generation_config.sql`
 
 验证分两层：
 
 1. 始终执行非 Docker 的 migration 嵌入、排序/checksum、文件存在性和编译测试。
-2. 本机 Docker 可用时，执行 PostgreSQL 空库和从 `main@16c07d806` migration 集升级的 integration。升级基线 FS 必须包含本地 191/192 与上游 passkey 191，但排除上游 group profit 192/193；随后应用完整 FS，验证新增 192/193、幂等和 checksum。
+2. 本机 Docker 可用时，执行 PostgreSQL 空库和从 `main@16c07d806` migration 集升级的 integration。升级基线 FS 必须包含本地 191/192 与上游 passkey 191，但排除后续上游 migration；随后应用完整 FS，验证同号 191/192/194/195、193、196-206、217-220、migration 220 备份及非 Grok/非 composite 清理边界、幂等和 checksum。
 
 Implementation plan 应固定升级测试名称及 `--- PASS:` 匹配规则；命令 exit 0、package `ok`、`no tests to run` 或 `--- SKIP:` 不能单独作为目标 integration 通过证据。
 
@@ -240,12 +256,12 @@ Docker/Testcontainers 不可用时，ledger 和最终报告把目标 migration/r
 
 ## 11. 完成条件
 
-- 三个正式 tag 都是结果 HEAD 祖先，三个 merge 第二父与固定 SHA 一致。
-- `backend/cmd/server/VERSION` 精确为 `0.1.172.1`。
+- 四个正式 tag 都是结果 HEAD 祖先，四个 merge 第二父与固定 SHA 一致。
+- `backend/cmd/server/VERSION` 精确为 `0.1.173.1`。
 - 能力矩阵无 `gap`；`unverified` 仅来自已记录的本机 integration 环境边界。
 - 利润控制/倍率同步、Codex identity/过载重试、验证码/auth/settings、退款/usage/subscription、WS/prompt audit 与本地保护面均有直接行为或结构证据。
 - alpha-search、request-body 生命周期、layered scheduler、统一 audit 和 quota reset/outbox 保持本地契约。
-- 双方 191/192 与上游 193/194/195 migration 保留；真实 PostgreSQL 升级仅在实际执行成功时记为通过。
+- 双方 191/192、上游 193、UsageLog 194/195、Channel Monitor 194-206 和 Grok pricing 217-220 migration 保留；真实 PostgreSQL 升级仅在实际执行成功时记为通过。
 - 聚焦测试、`make test`、`make build`、两轮 generate 和静态检查在最终 source HEAD 上通过。
 - 每段结束时 worktree/index 除 Comet runtime selection 外干净，生成输出归属于对应 merge 或能力簇提交。
 - OpenSpec strict validate 和 Comet Verify 通过或按流程记录明确允许的环境边界。

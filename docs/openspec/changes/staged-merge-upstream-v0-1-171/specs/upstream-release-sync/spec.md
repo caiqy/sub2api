@@ -4,8 +4,8 @@
 维护流程 SHALL 允许将一个最终上游 release 目标拆为具有严格祖先顺序的多个正式 tag 阶段。每个阶段 MUST 完成冲突处理、能力审查和阶段验证后，才能进入下一阶段。
 
 #### Scenario: 顺序合入多个 tag
-- **WHEN** 用户选择按 `v0.1.170`、`v0.1.171`、`v0.1.172` 分段集成，且三者形成严格祖先链
-- **THEN** 维护流程 MUST 按三个正式 tag 的顺序建立独立 `--no-ff` merge 节点，不得跳过尚未完成验证的前置阶段，也不得合入 `v0.1.172` 之后的 `upstream/main` 提交
+- **WHEN** 用户选择按 `v0.1.170`、`v0.1.171`、`v0.1.172`、`v0.1.173` 分段集成，且四者形成严格祖先链
+- **THEN** 维护流程 MUST 按四个正式 tag 的顺序建立独立 `--no-ff` merge 节点，不得跳过尚未完成验证的前置阶段，也不得合入 `v0.1.173` 之后的 `upstream/main` 提交
 
 #### Scenario: 从已验证但未归档的中间 release 继续扩展
 - **WHEN** 一个分段合并 change 已通过中间 release 的最终验证但尚未归档，且用户将目标扩展到后续正式 tag
@@ -16,8 +16,8 @@
 - **THEN** 维护流程 MUST 在当前 release 区间内保留失败证据并完成最小修复，不得继续合入下一 tag
 
 #### Scenario: 最终版本与 merge 拓扑闭合
-- **WHEN** `v0.1.170`、`v0.1.171` 和 `v0.1.172` 三个阶段均已通过验证
-- **THEN** 维护流程 MUST 将结果版本更新为 `0.1.172.1`，确认三个 tag 都是结果 HEAD 的祖先，且三个 merge 节点的第二父分别精确匹配实施前固定的 peeled SHA
+- **WHEN** `v0.1.170`、`v0.1.171`、`v0.1.172` 和 `v0.1.173` 四个阶段均已通过验证
+- **THEN** 维护流程 MUST 将结果版本更新为 `0.1.173.1`，确认四个 tag 都是结果 HEAD 的祖先，且四个 merge 节点的第二父分别精确匹配实施前固定的 peeled SHA
 
 ### Requirement: 合并后验证本地关键能力
 维护流程 SHALL 在每个分段 merge 后运行所选验证配置要求的自动门禁及该阶段受影响能力的能力级审查，并在最终阶段执行完整本机自动验证和本地能力专项 review。测试通过 MUST NOT 替代能力级审查结论；用户明确选择本机验证配置时，未执行的 Docker-backed integration MUST 作为残余风险保留，不得伪装为通过。
@@ -73,6 +73,26 @@
 #### Scenario: UsageLog 194/195 migration 与本地持久化共存
 - **WHEN** `v0.1.172` 为 upstream response model audit 新增 UsageLog 字段、`194` schema migration 和 `195` 非事务索引 migration
 - **THEN** schema、Ent、单条/批量/best-effort usage insert、查询筛选和管理端展示 MUST 一致，194/195 MUST 与既有双方 191/192 和 193 按完整文件名共存；真实 PostgreSQL integration 未执行时 MUST 保持 `unverified`
+
+#### Scenario: v0.1.173 Grok 跨客户端模型映射默认关闭
+- **WHEN** Grok 账号未配置显式 `model_mapping`，且系统设置缺失或 `grok_cross_client_model_map_enabled=false`
+- **THEN** `gpt-*`、`codex-*`、`o1*`/`o3*`/`o4*`、`claude-*` MUST NOT 被静默改写为 Grok 默认文本模型；原生 Grok alias、管理员显式开启和账号显式映射 MUST 保持可用并即时生效
+
+#### Scenario: v0.1.173 Grok 密码授权保持硬禁用
+- **WHEN** 配置中存在兼容键 `gateway.grok.password_auth_enabled` 或客户端直接调用密码授权 API
+- **THEN** 管理端 MUST NOT 展示邮箱密码授权入口，服务端 MUST 固定拒绝该请求，且密码不得进入账号凭据、日志或持久化路径
+
+#### Scenario: v0.1.173 Grok 网关、计费和调度与本地能力共存
+- **WHEN** 图片/视频、Voice TTS/STT/Realtime、custom voices、web search、free 24h 软门禁、模型级冷却或调度阈值进入 Grok 调用链
+- **THEN** 路由 MUST 保持最终账号/模型、sticky/failover、request-body replay/release、统一审计和单次 usage 语义；媒体/Voice/search MUST 按对应维度计费，free gate 与本地订阅额度窗口 MUST 相互独立且临时下线可恢复
+
+#### Scenario: v0.1.173 Channel Monitor V1/V2 互斥与隐私默认
+- **WHEN** 系统升级后未显式选择监控模式，或管理员切换 `channel_monitor_mode`
+- **THEN** 默认 MUST 继续使用 V1 主动探测，V2 被动聚合 MUST 仅在显式选择时启用且两套 runner 互斥；管理员可见完整指标，普通用户默认隐藏 RPM/TPM，现有渠道页面与 API 契约保持兼容
+
+#### Scenario: v0.1.173 同号 migration 与清理边界
+- **WHEN** 173 新增 Channel Monitor `194_*`/`195_*`、`196_*` 至 `206_*` 和 Grok pricing `217_*` 至 `220_*`
+- **THEN** 172 的 UsageLog `194_*`/`195_*` 与 173 同号文件 MUST 按完整文件名共存且 tag blob 不变；migration 220 MUST 先备份待清理值，只清理既非 Grok 也非 composite 的分组视频定价残值，保留 Grok/composite 分组且不得修改其它定价维度；真实 PostgreSQL integration 未执行时相关契约 MUST 保持 `unverified`
 
 #### Scenario: 最终审查发现 Images 审计入口重复与关闭态大 payload 构造
 - **WHEN** 生产依赖图中的 unified security-audit coordinator 已包含 legacy content moderation，而 OpenAI Images handler 仍直接调用 legacy moderation，或仅按依赖指针决定是否序列化 prompt/image payload

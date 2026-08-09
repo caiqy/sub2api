@@ -4,32 +4,33 @@ design-doc: docs/superpowers/specs/2026-08-06-staged-merge-upstream-v0-1-171-des
 base-ref: 16c07d8064b0b4604e9f47ef782e7d29534402d3
 ---
 
-# 分段合并上游 v0.1.172 实施计划
+# 分段合并上游 v0.1.173 实施计划
 
 > **For agentic workers:** REQUIRED SUB-SKILL: 使用 `subagent-driven-development`（推荐）或 `executing-plans` 逐任务执行；所有任务使用 checkbox 跟踪。既有 Comet 配置为 branch + subagent-driven-development + TDD + thorough review。
 
-**目标：**保留已完成的 `v0.1.170`/`v0.1.171` 历史证据，继续把 `v0.1.172` 合为第三个可审计纯 merge 节点，保留本地能力和 migration identity，最终将版本更新为 `0.1.172.1`。
+**目标：**保留已完成的 `v0.1.170`/`v0.1.171` 历史证据，继续把 `v0.1.172`、`v0.1.173` 合为第三、第四个可审计纯 merge 节点，保留本地能力和 migration identity，最终将版本更新为 `0.1.173.1`。
 
-**实施结构：**Tasks 1-18 是已完成的 170/171 历史阶段，不重复执行。Tasks 19-28 固定 172 manifest 与新基线，创建第三个纯 merge，再按 security/auth、subscription/billing、gateway/transport、usage schema/frontend 四簇做 TDD 兼容审查；最终用全门禁、三段拓扑、migration identity 和 thorough review 闭合。
+**实施结构：**Tasks 1-18 是已完成的 170/171 历史阶段，不重复执行。Tasks 19-25 固定 172/173 manifest，创建并封闭第三个纯 merge；Tasks 26-32 创建第四个纯 merge，再按 Grok auth/mapping、Grok gateway/scheduler、Channel Monitor V2、pricing/schema/frontend 做 TDD 兼容审查；Tasks 33-35 用最终全门禁、四段拓扑、migration identity 和 thorough review 闭合。
 
 **技术栈：**Git merge、Go、Ent、Wire、PostgreSQL/Testcontainers、pnpm/Vitest、PowerShell、OpenSpec。
 
 ## 全局约束
 
 - immutable source base 固定为 `16c07d8064b0b4604e9f47ef782e7d29534402d3`，其运行版本必须为 `0.1.169.3`。该提交是已归档 lint remediation 合入后的 `main`；执行位置的 `$executionBase` 可是仅含当前 change 产物和已审查基线保护测试的后代，source base 必须是其祖先。
-- 三段依次为 `v0.1.170@c043c24774228ba891ddf90d783aa6dc7d0855b5`、`v0.1.171@f0e7a9c7a23a7d02fb159b62fa809621eb0475a6`、`v0.1.172@155c494964c3ea6ecc31f52679525c1034bf0f16`。不合入 `v0.1.172` 之后的 `upstream/main`，发现更高正式 tag 时停止并更新 OpenSpec。
-- 第三段唯一 merge 入口是 `git merge --no-ff --no-commit v0.1.172`。merge commit 只承载目标上游树和完成 merge 必需的冲突融合，第二父必须是固定 172 peeled SHA；后续语义修复不得混入 merge commit。
-- 172 merge 与兼容阶段保持 `backend/cmd/server/VERSION=0.1.171.1`；第三段全部闭合后才在独立提交中改为 `0.1.172.1`。
+- 四段依次为 `v0.1.170@c043c24774228ba891ddf90d783aa6dc7d0855b5`、`v0.1.171@f0e7a9c7a23a7d02fb159b62fa809621eb0475a6`、`v0.1.172@155c494964c3ea6ecc31f52679525c1034bf0f16`、`v0.1.173@29009f0b2ea14edf3b11ae2564fb617ff91a03b4`。不合入 `v0.1.173` 之后的 `upstream/main`，发现更高正式 tag 时停止并更新 OpenSpec。
+- 第三、四段唯一 merge 入口分别是 `git merge --no-ff --no-commit v0.1.172`、`git merge --no-ff --no-commit v0.1.173`。每个 merge commit 只承载目标上游树和完成冲突融合必需的路径，第二父必须是对应固定 peeled SHA；后续语义修复不得混入 merge commit。
+- 172/173 merge 与兼容阶段保持 `backend/cmd/server/VERSION=0.1.171.1`；第四段全部闭合后才在独立提交中改为 `0.1.173.1`。
 - 所有暂存必须使用显式路径，禁止 `git add .`。`schema`/provider/manifest 源与相应 Ent/Wire、`go.sum` 或前端 lockfile 输出同一提交；不得手工编辑生成输出或 lockfile。
-- migration identity 以完整文件名为准。最终必须保留双方 191、双方 192、193，并新增 `194_add_usage_log_upstream_response_model.sql`、`195_add_usage_log_upstream_model_mismatch_index_notx.sql`；不得重命名或改写已发布 migration。
+- migration identity 以完整文件名为准。最终必须保留双方 191、双方 192、193、UsageLog 194/195、Channel Monitor 194-206 和 Grok pricing 217-220；同号不同名文件共存，不得重命名或改写已发布 migration。
 - 用户最终裁决：新购、用户手动重置、管理员手动重置均以实际操作时刻作为日窗口锚点，后续按该锚点每 24 小时推进；不得采用 172 的配置时区 midnight 滚动语义。
+- 用户最终裁决：`grok_cross_client_model_map_enabled` 默认关闭；设置缺失/空值不得加入 `gpt-*`/`codex-*`/`o*`/`claude-*` wildcard，显式 true 与账号显式 `model_mapping` 仍有效。Grok 密码授权硬禁用；Channel Monitor 默认 V1，V2 显式切换且互斥，普通用户吞吐默认隐藏。
 - 任何冲突若会改变用户可见语义而不能同时保留上游和本地契约，记录 ours/theirs/影响后立即停在当前未提交阶段，等待用户决定；不得预先选择 ours、theirs 或静默删除一方行为。
 - Docker/Testcontainers 只在本机条件可用时执行。不可用或目标测试明确 `SKIP` 时只能记录为 `unverified`，列出原因和受影响契约；不得访问远程服务器补验。`exit 0`、包级 `ok`、`no tests to run` 均不构成 integration PASS。
 - 不执行 push、tag、release、GitHub Actions、镜像构建/发布、deploy、服务器、数据库、Redis 或 Nginx 操作。
 - 每个 Task 都可能在新的 PowerShell/subagent 会话中执行；不得依赖上一 Task 的变量、函数、当前目录或临时文件。每个 Task 开始时必须重新执行下方“统一检查命令”中的 layout/context/helper 初始化，再执行本 Task 使用的命令。
 - 每个 Task 的实现、验证和所选 review gate 通过后，协调者同时把 plan 中唯一 Task checkbox 和映射的 OpenSpec checkbox 从 `[ ]` 改为 `[x]`，以 `git add -f` 显式暂存这两个文件并用 `docs: record SDD progress` 独立提交，然后分别运行 `comet state task-checkoff` 精确验证两段唯一任务文本。plan/tasks 不得混入 merge、能力簇、版本或证据提交。
 - `.comet/current-change.json`、change 内 `.comet.yaml`、handoff 和 `subagent-progress.md` 属于 Comet runtime/归档状态，不得混入业务、merge 或进度提交；由 Comet 持续维护并在最终归档边界处理。
-- 所有原生命令（Git、Go、make、pnpm、Docker、Comet/OpenSpec adapter）都必须立即检查退出码。除明确允许 merge 冲突、`git grep` 无匹配、Docker 不可用或目标 integration SKIP 的分支外，任何非零退出码立即停止；不得让后续成功命令覆盖失败码。
+- 所有原生命令（Git、Go、make、pnpm、Docker、Comet/OpenSpec adapter）都必须立即检查退出码。除明确允许 merge 冲突、`Invoke-ExpectedRed` 要求并留存的测试 RED、`git grep` 无匹配、Docker 不可用或目标 integration SKIP 的分支外，任何非零退出码立即停止；不得让后续成功命令覆盖失败码。
 - 后续门禁发现已完成 Task 所属能力簇的遗漏时，不回退或取消已勾选任务。当前尚未勾选的 gate Task 保持打开，由执行编排层创建一个明确命名的 remediation 子步骤/agent，按原能力簇提交消息完成 RED/修复/review，并在当前 Task 证据中关联该提交后重跑整个当前门禁。若修复改变 spec/设计或新增任务超过阈值，按 Comet Spec 增量/范围扩张协议暂停，不能用 remediation 绕过。
 - 上述 remediation 不适用于“源已提交但对应生成输出遗漏”的历史所有权错误。该情况必须硬阻塞，不得创建 generated-only 提交；只能在未共享的隔离历史中重建 source-owning 提交，使源与输出同提交，再重新执行该提交的 review 和当前 gate。任何历史重写都必须先停下按用户确认的分支恢复策略处理。
 
@@ -44,7 +45,7 @@ base-ref: 16c07d8064b0b4604e9f47ef782e7d29534402d3
 | `backend/ent/schema/`、`backend/internal/**/wire.go`、`backend/cmd/server/wire.go` | Ent/Wire 的源；先融合这些源，再运行 `make -C backend generate`。 |
 | `backend/ent/`、`backend/cmd/server/wire_gen.go` | Ent/Wire 生成输出；只由生成命令更新。 |
 | `backend/go.mod`、`backend/go.sum`、`frontend/package.json`、`frontend/pnpm-lock.yaml` | 依赖源和工具生成输出；只在实际 upstream manifest 冲突或能力修复触及依赖时按已有工具更新。 |
-| `backend/cmd/server/VERSION` | Task 15 的 `0.1.171.1` 是中间 fork 版本；仅 Task 26 改为最终 `0.1.172.1`。 |
+| `backend/cmd/server/VERSION` | Task 15 的 `0.1.171.1` 是中间 fork 版本；仅 Task 33 改为最终 `0.1.173.1`。 |
 
 ## 统一检查命令
 
@@ -52,12 +53,15 @@ base-ref: 16c07d8064b0b4604e9f47ef782e7d29534402d3
 
 ```powershell
 $sourceBase = '16c07d8064b0b4604e9f47ef782e7d29534402d3'
+$extensionPlanningBase = '77a9a548b26ff3290339fefce4c7ac48a7d9fbe8'
 $tag170 = 'c043c24774228ba891ddf90d783aa6dc7d0855b5'
 $tag170Object = '60286d35e4b6dc6851ab69f890c2d1b7b7a3bcb8'
 $tag171 = 'f0e7a9c7a23a7d02fb159b62fa809621eb0475a6'
 $tag171Object = 'afd154b92aac36c6dafb1fa8e181ca827c78c465'
 $tag172 = '155c494964c3ea6ecc31f52679525c1034bf0f16'
 $tag172Object = '61ba94d2e85a00ba639fc870b91946b1bd2f990d'
+$tag173 = '29009f0b2ea14edf3b11ae2564fb617ff91a03b4'
+$tag173Object = '9e2a27ad39201a14074982bae331c4610161586a'
 $layoutJson = @(comet classic root show 2>&1)
 if ($LASTEXITCODE -ne 0) { throw "comet classic root show failed: $($layoutJson -join [Environment]::NewLine)" }
 $layout = ($layoutJson -join [Environment]::NewLine) | ConvertFrom-Json
@@ -79,15 +83,40 @@ $designDoc = "$superpowersRootGit/specs/2026-08-06-staged-merge-upstream-v0-1-17
 $buildLedger = "$superpowersRootGit/reports/2026-08-06-staged-merge-upstream-v0-1-171-build.md"
 $verifyReport = "$superpowersRootGit/reports/2026-08-06-staged-merge-upstream-v0-1-171-verify.md"
 $runtimeSelection = '?? .comet/current-change.json'
-$requiredMigrationSources = [ordered]@{
+$requiredMigrationSources171 = [ordered]@{
     '191_passkey_credentials.sql' = $sourceBase
     '191_subscription_quota_advance_receipts.sql' = $sourceBase
     '192_subscription_cache_invalidation_outbox.sql' = $sourceBase
     '192_group_profit_control.sql' = $tag170
     '193_group_profit_control_auth_cache_invalidation.sql' = $tag170
-    '194_add_usage_log_upstream_response_model.sql' = $tag172
-    '195_add_usage_log_upstream_model_mismatch_index_notx.sql' = $tag172
 }
+$requiredMigrationSources172 = [ordered]@{}
+foreach ($entry in $requiredMigrationSources171.GetEnumerator()) {
+    $requiredMigrationSources172[$entry.Key] = $entry.Value
+}
+$requiredMigrationSources172['194_add_usage_log_upstream_response_model.sql'] = $tag172
+$requiredMigrationSources172['195_add_usage_log_upstream_model_mismatch_index_notx.sql'] = $tag172
+$requiredMigrationSourcesFinal = [ordered]@{}
+foreach ($entry in $requiredMigrationSources172.GetEnumerator()) {
+    $requiredMigrationSourcesFinal[$entry.Key] = $entry.Value
+}
+$requiredMigrationSourcesFinal['194_channel_monitor_v2.sql'] = $tag173
+$requiredMigrationSourcesFinal['195_channel_monitor_mode.sql'] = $tag173
+$requiredMigrationSourcesFinal['196_channel_monitor_v2_ignored_error_categories.sql'] = $tag173
+$requiredMigrationSourcesFinal['197_channel_monitor_v2_seed_popular_models.sql'] = $tag173
+$requiredMigrationSourcesFinal['198_channel_monitor_v2_health_thresholds.sql'] = $tag173
+$requiredMigrationSourcesFinal['199_channel_monitor_v2_fixed_rollups.sql'] = $tag173
+$requiredMigrationSourcesFinal['200_channel_monitor_v2_rollup_permissions.sql'] = $tag173
+$requiredMigrationSourcesFinal['201_channel_monitor_v2_refresh_5m.sql'] = $tag173
+$requiredMigrationSourcesFinal['202_channel_monitor_v2_full_table_permissions.sql'] = $tag173
+$requiredMigrationSourcesFinal['203_channel_monitor_v2_default_ignore_and_cache.sql'] = $tag173
+$requiredMigrationSourcesFinal['204_channel_monitor_hide_throughput.sql'] = $tag173
+$requiredMigrationSourcesFinal['205_channel_monitor_v2_reset_factory_cache_thresholds.sql'] = $tag173
+$requiredMigrationSourcesFinal['206_channel_monitor_v2_privacy_defaults.sql'] = $tag173
+$requiredMigrationSourcesFinal['217_group_video_model_prices.sql'] = $tag173
+$requiredMigrationSourcesFinal['218_group_audio_voice_pricing.sql'] = $tag173
+$requiredMigrationSourcesFinal['219_group_search_price_per_1k.sql'] = $tag173
+$requiredMigrationSourcesFinal['220_clear_non_grok_video_generation_config.sql'] = $tag173
 
 function Invoke-CheckedNative {
     param(
@@ -196,12 +225,30 @@ function Assert-NoConflictArtifacts {
     if ($markers.Count -ne 0) { throw "tracked conflict markers remain: $($markers -join '; ')" }
 }
 
+function Invoke-ExpectedRed {
+    param(
+        [Parameter(Mandatory)][string]$Label,
+        [Parameter(Mandatory)][scriptblock]$Command,
+        [Parameter(Mandatory)][string]$LogPath,
+        [Parameter(Mandatory)][string]$ExpectedFailPattern
+    )
+    $output = @(& $Command 2>&1)
+    $exitCode = $LASTEXITCODE
+    $output | Set-Content -LiteralPath $LogPath
+    if ($exitCode -eq 0) { throw "$Label unexpectedly passed; expected RED" }
+    if (@($output | Where-Object { $_ -match $ExpectedFailPattern }).Count -eq 0) {
+        throw "$Label failed without the expected target test failure; inspect $LogPath"
+    }
+    return @{ Label = $Label; ExitCode = $exitCode; Log = $LogPath }
+}
+
 function Assert-AnnotatedTagMergeHead {
     param(
         [Parameter(Mandatory)][string]$TagName,
         [Parameter(Mandatory)][string]$TagObject,
         [Parameter(Mandatory)][string]$PeeledCommit
     )
+    # Git keeps the annotated tag object in MERGE_HEAD; the resulting commit peels it for parent 2.
     $tagRef = (@(git rev-parse -q --verify "refs/tags/$TagName" 2>$null) -join '').Trim()
     if ($LASTEXITCODE -ne 0 -or $tagRef -ne $TagObject) { throw "$TagName tag object drifted" }
     $tagType = (@(git cat-file -t $tagRef 2>$null) -join '').Trim()
@@ -271,6 +318,10 @@ Task 3 将以下每行写入 build ledger，并在每个阶段更新为 `protect
 | 用户资源控制、分组复制/批量限额、account shadow、前端本地定制 | backend handler/repository 和 Accounts/Groups/Settings/Usage/Subscription/Channels/mobile UI；变更页面保持本地入口。 |
 | Codex identity、动态版本、UA、过载重试 | HTTP、透传、WS、探针、模型列表、账号测试和 alpha-search 共用身份来源；重试边界保留 final account/model 和错误语义。 |
 | Ent/Wire、Go/pnpm 依赖、CSP/deploy 配置、migrations | source-driven generation、依赖工具、两轮无 diff、完整 filename、排序/checksum 和本机 integration。 |
+| Grok SSO/refresh-token、默认模型、跨客户端 mapping 和密码授权 | `grok_oauth_*`、`pkg/xai/models.go`、setting parse/update、account mapping；默认无 wildcard，显式开启即时生效，密码 API 固定拒绝。 |
+| Grok media/Voice/search、free gate、team+model 冷却和调度阈值 | `grok_media*`、`grok_audio*`、`gateway_web_search.go`、`grok_free_quota_gate.go`、scheduler/ratelimit；保持 sticky/failover、body、usage 和恢复语义。 |
+| Channel Monitor V2 与用户隐私 | V1/V2 runner、aggregation/repository/API、`features/channel-monitor-v2`；默认 V1、runner 互斥、admin 完整指标、普通用户吞吐脱敏。 |
+| Grok pricing 与 173 migrations | group video/audio/search schema、Ent、frontend price matrix、194-206/217-220；同号 migration 共存，220 先备份且只清理非 Grok/非 composite 视频残值。 |
 
 ### Task 1: 固定 source/execution 双基线和隔离状态
 
@@ -758,7 +809,7 @@ Commit-NamedPaths -Message 'fix: preserve frontend customization after v0.1.170'
 1. 核对五个完整 migration filename，确认旧的本地 191/192 blob identity 没有被 merge 改写：
 
 ```powershell
-foreach ($entry in $requiredMigrationSources.GetEnumerator()) {
+foreach ($entry in $requiredMigrationSources171.GetEnumerator()) {
     $name = $entry.Key
     $sourceRef = $entry.Value
     git cat-file -e "HEAD:backend/migrations/$name"
@@ -1267,7 +1318,7 @@ if ($LASTEXITCODE -ne 0) { throw 'failed to read v0.1.171 merge parents' }
 
 ```powershell
 if ((Get-Content -Raw backend/cmd/server/VERSION).Trim() -ne '0.1.171.1') { throw 'final VERSION mismatch' }
-foreach ($entry in $requiredMigrationSources.GetEnumerator()) {
+foreach ($entry in $requiredMigrationSources171.GetEnumerator()) {
     $name = $entry.Key
     $sourceRef = $entry.Value
     git cat-file -e "HEAD:backend/migrations/$name"
@@ -1330,9 +1381,9 @@ Assert-CleanGate
 
 ## v0.1.172 扩展任务
 
-### Task 19: 固定 v0.1.172 manifest、重叠面和新基线
+### Task 19: 固定 v0.1.172/v0.1.173 manifest、重叠面和新基线
 
-- [ ] Task 19: 固定 v0.1.172 manifest、重叠面和新基线
+- [ ] Task 19: 固定 v0.1.172/v0.1.173 manifest、重叠面和新基线
 
 **映射 OpenSpec：**5.1
 
@@ -1340,28 +1391,65 @@ Assert-CleanGate
 
 **接口：**
 - Consumes: 已验证 171 HEAD、`$tag171`、固定远端 `upstream=https://github.com/Wei-Shaw/sub2api`。
-- Produces: `$tag172`/`$tag172Object`、208 changed files、113 overlap、第三阶段能力矩阵和可复现 171 baseline。
+- Produces: `$tag172`/`$tag172Object`、`$tag173`/`$tag173Object`、四 tag 严格祖先链、172 的 208/113、173 的 300 与初步重叠记录、第三/四阶段能力矩阵和可复现 171 baseline。
 
 **步骤：**
 
-1. 重新运行统一检查命令，确认工作树除当前 change runtime 状态外无 dirty path，HEAD 包含设计提交 `9b96ebf71`，VERSION 仍为 `0.1.171.1`。
+1. 重新运行统一检查命令与 `Assert-CleanGate`，固定扩展 execution base，拒绝 extension range 中的 merge commit，并确认 `77a9a548b26ff3290339fefce4c7ac48a7d9fbe8..HEAD` 逐父只含本次 173 规划文档：
 
-2. fetch 并固定 tag 身份、祖先链和 latest release：
+```powershell
+Assert-CleanGate
+git merge-base --is-ancestor $extensionPlanningBase HEAD
+if ($LASTEXITCODE -ne 0) { throw '173 planning HEAD does not descend from fixed 77a9a548b extension base' }
+$extensionExecutionBase = (git rev-parse HEAD).Trim()
+$extensionMerges = @(git rev-list --merges "$extensionPlanningBase..$extensionExecutionBase")
+if ($LASTEXITCODE -ne 0) { throw 'cannot inspect 173 planning merge history' }
+if ($extensionMerges.Count -ne 0) { throw "merge commits are not allowed in 173 planning range: $($extensionMerges -join ', ')" }
+$allowed173PlanningPaths = @(
+    "$changeDir/proposal.md",
+    "$changeDir/design.md",
+    "$changeDir/specs/upstream-release-sync/spec.md",
+    "$changeDir/tasks.md",
+    $designDoc,
+    $planFile
+)
+$extensionHistoryPaths = @(git log -m --format= --name-only "$extensionPlanningBase..$extensionExecutionBase" | Where-Object { $_.Trim() } | Sort-Object -Unique)
+if ($LASTEXITCODE -ne 0) { throw 'cannot enumerate 173 planning history paths' }
+$unexpectedExtensionPaths = @($extensionHistoryPaths | Where-Object { $_ -notin $allowed173PlanningPaths })
+if ($unexpectedExtensionPaths.Count -ne 0) { throw "173 planning history touched unexpected paths: $($unexpectedExtensionPaths -join ', ')" }
+if ((Get-Content -Raw backend/cmd/server/VERSION).Trim() -ne '0.1.171.1') { throw 'unexpected extension baseline VERSION' }
+```
+
+2. fetch 并固定两个新增 tag 身份、祖先链和 latest release：
 
 ```powershell
 Invoke-CheckedNative 'fetch upstream tags for v0.1.172' { git fetch upstream --prune --tags }
-$actualTagObject = (git rev-parse 'refs/tags/v0.1.172').Trim()
-$actualTagCommit = (git rev-parse 'v0.1.172^{}').Trim()
-if ($actualTagObject -ne $tag172Object -or $actualTagCommit -ne $tag172) {
-    throw "v0.1.172 identity mismatch: object=$actualTagObject commit=$actualTagCommit"
+$expectedTags = [ordered]@{
+    'v0.1.172' = @{ Object = $tag172Object; Commit = $tag172 }
+    'v0.1.173' = @{ Object = $tag173Object; Commit = $tag173 }
+}
+foreach ($entry in $expectedTags.GetEnumerator()) {
+    $actualObject = (git rev-parse "refs/tags/$($entry.Key)").Trim()
+    $actualCommit = (git rev-parse "$($entry.Key)^{}").Trim()
+    if ($actualObject -ne $entry.Value.Object -or $actualCommit -ne $entry.Value.Commit) {
+        throw "$($entry.Key) identity mismatch: object=$actualObject commit=$actualCommit"
+    }
 }
 git merge-base --is-ancestor $tag171 $tag172
 if ($LASTEXITCODE -ne 0) { throw 'v0.1.172 is not a strict descendant of v0.1.171' }
+git merge-base --is-ancestor $tag172 $tag173
+if ($LASTEXITCODE -ne 0) { throw 'v0.1.173 is not a strict descendant of v0.1.172' }
 $latestRelease = (gh api repos/Wei-Shaw/sub2api/releases/latest --jq '.tag_name').Trim()
-if ($LASTEXITCODE -ne 0 -or $latestRelease -ne 'v0.1.172') { throw "latest official release is $latestRelease" }
+if ($LASTEXITCODE -ne 0 -or $latestRelease -ne 'v0.1.173') { throw "latest official release is $latestRelease" }
+$formalTags = @(git for-each-ref refs/tags --merged=upstream/main --format='%(refname:short)' |
+    Where-Object { $_ -match '^v0\.1\.\d+$' } |
+    Sort-Object { [version]$_.Substring(1) } -Descending)
+if ($LASTEXITCODE -ne 0 -or $formalTags.Count -eq 0 -or $formalTags[0] -ne 'v0.1.173') {
+    throw "highest formal upstream tag is $(if ($formalTags.Count -gt 0) { $formalTags[0] } else { '<none>' })"
+}
 ```
 
-3. 重算文件面并写入 ledger；数量变化必须停止，不得静默扩大：
+3. 重算文件面并写入 ledger；release changed-file 数量变化必须停止。173 overlap 在 172 尚未合入时只记录 discovery snapshot，不作为硬门禁；Task 25 在 172 成为祖先后重算精确值：
 
 ```powershell
 $files172 = @(git diff --name-only "$tag171..$tag172")
@@ -1372,6 +1460,13 @@ $overlap172 = @($files172 | Where-Object { $localAfter171 -contains $_ } | Sort-
 if ($overlap172.Count -ne 113) { throw "unexpected v0.1.172 overlap count: $($overlap172.Count)" }
 $files172 | Set-Variable -Name files172Manifest
 $overlap172 | Set-Variable -Name overlap172Manifest
+$files173 = @(git diff --name-only "$tag172..$tag173")
+if ($LASTEXITCODE -ne 0 -or $files173.Count -ne 300) { throw "unexpected v0.1.173 file count: $($files173.Count)" }
+$preMergeLocalAgainst172 = @(git diff --name-only "$tag172...HEAD")
+if ($LASTEXITCODE -ne 0) { throw 'cannot enumerate preliminary local delta against v0.1.172' }
+$preliminaryOverlap173 = @($files173 | Where-Object { $preMergeLocalAgainst172 -contains $_ } | Sort-Object -Unique)
+$files173 | Set-Variable -Name files173Manifest
+$preliminaryOverlap173 | Set-Variable -Name preliminaryOverlap173Manifest
 ```
 
 4. 在 merge 前重跑 171 baseline，证明新增失败可归属 172：
@@ -1383,13 +1478,13 @@ Invoke-CheckedNative 'pre-172 backend lint' { Push-Location backend; try { golan
 Assert-NoConflictArtifacts
 ```
 
-5. ledger 记录旧 Verify 只绑定至 171、Docker/cgo 现状、tag manifest、208/113 清单和四能力簇；仅提交 ledger：
+5. ledger 记录旧 Verify 只绑定至 171、`$extensionPlanningBase`/`$extensionExecutionBase` 与规划路径清单、Docker/cgo 现状、两个新增 tag manifest、172 的 208/113、173 的 300/初步 overlap 清单和八个能力簇；仅提交 ledger：
 
 ```powershell
-Commit-NamedPaths -Message 'docs: record v0.1.172 baseline' -Paths @($buildLedger)
+Commit-NamedPaths -Message 'docs: record v0.1.173 merge baseline' -Paths @($buildLedger)
 ```
 
-**提交边界：**`docs: record v0.1.172 baseline` 只含 build ledger。**检查点：**tag、latest release、祖先链、208/113 或 baseline 任一不符均阻塞 merge。
+**提交边界：**`docs: record v0.1.173 merge baseline` 只含 build ledger。**检查点：**tag、latest release、祖先链、172 的 208/113、173 的 300 或 baseline 任一不符均阻塞 merge。
 
 ### Task 20: 创建纯 v0.1.172 merge 节点
 
@@ -1411,9 +1506,12 @@ Commit-NamedPaths -Message 'docs: record v0.1.172 baseline' -Paths @($buildLedge
 $pre172MergeHead = (git rev-parse HEAD).Trim()
 git merge --no-ff --no-commit v0.1.172
 $mergeExit = $LASTEXITCODE
-if ($mergeExit -ne 0 -and -not (Test-Path .git/MERGE_HEAD)) { throw "v0.1.172 merge failed before conflict state: $mergeExit" }
-if ((Get-Content -Raw .git/MERGE_HEAD).Trim() -ne $tag172) { throw 'MERGE_HEAD is not fixed v0.1.172 commit' }
 $unmerged172 = @(git diff --name-only --diff-filter=U)
+$mergeHead = (@(git rev-parse -q --verify MERGE_HEAD 2>$null) -join '').Trim()
+if ($mergeExit -ne 0 -and $mergeHead -eq '') { throw "v0.1.172 merge failed before conflict state: $mergeExit" }
+Assert-AnnotatedTagMergeHead -TagName 'v0.1.172' -TagObject $tag172Object -PeeledCommit $tag172
+if ($mergeExit -notin @(0,1)) { throw "v0.1.172 merge failed fatally: $mergeExit" }
+if ($mergeExit -eq 1 -and $unmerged172.Count -eq 0) { throw 'v0.1.172 merge failed without resolvable conflicts' }
 ```
 
 2. 对 `$unmerged172` 每个路径记录 ours/theirs/融合结果。适用硬规则：VERSION 保留 `0.1.171.1`；OAuth pending 安全 guard 必须存在；订阅日窗口保留实际时刻锚点；194/195 与既有 migrations 共存；schema/provider 源先融合再生成。无法同时保留且未被设计裁决的用户可见语义立即暂停。
@@ -1422,8 +1520,24 @@ $unmerged172 = @(git diff --name-only --diff-filter=U)
 
 ```powershell
 Invoke-CheckedNative 'v0.1.172 merge generate' { make -C backend generate }
+git add -- backend/ent backend/cmd/server/wire_gen.go
+if ($LASTEXITCODE -ne 0) { throw 'failed to stage v0.1.172 Ent/Wire outputs' }
+$stagedGoMod172 = @(git diff --cached --name-only -- backend/go.mod)
+if ($stagedGoMod172.Count -gt 0) {
+    Push-Location backend; try { Invoke-CheckedNative 'v0.1.172 go mod tidy' { go mod tidy } } finally { Pop-Location }
+    git add -- backend/go.mod backend/go.sum
+    if ($LASTEXITCODE -ne 0) { throw 'failed to stage v0.1.172 Go module outputs' }
+}
+$stagedFrontendManifest172 = @(git diff --cached --name-only -- frontend/package.json)
+if ($stagedFrontendManifest172.Count -gt 0) {
+    Invoke-CheckedNative 'v0.1.172 pnpm lock refresh' { pnpm --dir frontend install --lockfile-only }
+    git add -- frontend/package.json frontend/pnpm-lock.yaml
+    if ($LASTEXITCODE -ne 0) { throw 'failed to stage v0.1.172 frontend manifest outputs' }
+}
+git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go backend/go.mod backend/go.sum frontend/package.json frontend/pnpm-lock.yaml
+if ($LASTEXITCODE -ne 0) { throw 'v0.1.172 generated/tool outputs remain unstaged' }
 if ((Get-Content -Raw backend/cmd/server/VERSION).Trim() -ne '0.1.171.1') { throw 'merge changed intermediate VERSION' }
-if (@(git diff --name-only --diff-filter=U).Count -ne 0) { throw 'unresolved v0.1.172 conflicts remain' }
+Assert-NoConflictArtifacts
 Invoke-CheckedNative 'v0.1.172 merge compile' { Push-Location backend; try { go test ./internal/handler/... ./internal/service/... ./internal/repository/... -run '^$' } finally { Pop-Location } }
 ```
 
@@ -1512,7 +1626,9 @@ if ($task21ChangedPaths.Count -gt 0) { Commit-NamedPaths -Message 'fix: preserve
 1. merge 后先运行精确锚点 tests，预期上游 midnight 实现导致 RED；必须保存具体失败断言：
 
 ```powershell
-Invoke-CheckedNative 'subscription exact-anchor RED' { Push-Location backend; try { go test -tags unit ./internal/service -run '(TestAdminResetQuota_ResetBoth|TestAssignOrExtendSubscription_ExpiredDailyCardStartsNewOneTimeQuota|TestUserSubscriptionNeedsDailyReset_MultiDaySubscriptionStillRefreshes|TestAutomaticWindowPreservesPersistedManualAnchor)' -count=1 } finally { Pop-Location } }
+$subscriptionRedLog = Join-Path $env:TEMP 'sub2api-v0.1.172-subscription-anchor-red.log'
+$subscriptionRed = Invoke-ExpectedRed -Label 'subscription exact-anchor RED' -LogPath $subscriptionRedLog -ExpectedFailPattern '^--- FAIL: (TestAdminResetQuota_ResetBoth|TestAssignOrExtendSubscription_ExpiredDailyCardStartsNewOneTimeQuota|TestUserSubscriptionNeedsDailyReset_MultiDaySubscriptionStillRefreshes|TestAutomaticWindowPreservesPersistedManualAnchor)' -Command { Push-Location backend; try { go test -tags unit ./internal/service -run '(TestAdminResetQuota_ResetBoth|TestAssignOrExtendSubscription_ExpiredDailyCardStartsNewOneTimeQuota|TestUserSubscriptionNeedsDailyReset_MultiDaySubscriptionStillRefreshes|TestAutomaticWindowPreservesPersistedManualAnchor)' -count=1 } finally { Pop-Location } }
+$subscriptionRed
 ```
 
 2. 确认测试断言固定非 midnight 时刻，禁止把期望改成 `StartOfDay`：
@@ -1624,13 +1740,19 @@ type UsageLog struct {
 }
 ```
 
-3. 从 `backend/ent/schema/usage_log.go` 生成 Ent；确认所有 SQL insert 形态同时增加 2 列/2 参数，194/195 文件保持 tag blob：
+3. 从 `backend/ent/schema/usage_log.go` 生成 Ent；确认所有 SQL insert 形态同时增加 2 列/2 参数，并在提交前对当前工作树校验 172 阶段全部 7 个 migration blob：
 
 ```powershell
 Invoke-CheckedNative 'UsageLog Ent generation' { make -C backend generate }
-foreach ($name in @('194_add_usage_log_upstream_response_model.sql','195_add_usage_log_upstream_model_mismatch_index_notx.sql')) {
-    $expected = (git rev-parse "${tag172}:backend/migrations/$name").Trim()
-    $actual = (git rev-parse "HEAD:backend/migrations/$name").Trim()
+if ($requiredMigrationSources172.Count -ne 7) { throw 'unexpected v0.1.172 migration set size' }
+foreach ($entry in $requiredMigrationSources172.GetEnumerator()) {
+    $name = $entry.Key
+    $expectedOutput = @(git rev-parse "$($entry.Value):backend/migrations/$name" 2>&1)
+    if ($LASTEXITCODE -ne 0) { throw "cannot resolve v0.1.172 authoritative migration: $name" }
+    $actualOutput = @(git hash-object -- "backend/migrations/$name" 2>&1)
+    if ($LASTEXITCODE -ne 0) { throw "cannot hash v0.1.172 migration worktree file: $name" }
+    $expected = ($expectedOutput -join '').Trim()
+    $actual = ($actualOutput -join '').Trim()
     if ($expected -ne $actual) { throw "v0.1.172 migration identity mismatch: $name" }
 }
 ```
@@ -1640,17 +1762,17 @@ foreach ($name in @('194_add_usage_log_upstream_response_model.sql','195_add_usa
 5. 重跑 backend repository/service/handler focused tests、frontend 3 suites/typecheck/ESLint、两轮 generate 零 diff。仅有真实兼容 diff 时提交，schema 与生成输出必须同提交：
 
 ```powershell
-$task24ChangedPaths = @(git diff --name-only -- backend/ent backend/internal/handler/admin backend/internal/handler/dto backend/internal/repository backend/internal/service/usage_log.go backend/internal/service/upstream_response_model.go backend/internal/service/upstream_response_model_test.go backend/migrations frontend/src/api/admin/usage.ts frontend/src/components/admin/usage frontend/src/i18n frontend/src/types/index.ts frontend/src/views/admin)
+$task24ChangedPaths = @(git diff --name-only -- backend/ent backend/internal/handler/admin backend/internal/handler/dto backend/internal/repository backend/internal/service/usage_log.go backend/internal/service/upstream_response_model.go backend/internal/service/upstream_response_model_test.go frontend/src/api/admin/usage.ts frontend/src/components/admin/usage frontend/src/i18n frontend/src/types/index.ts frontend/src/views/admin)
 if ($task24ChangedPaths.Count -gt 0) { Commit-NamedPaths -Message 'fix: preserve usage audit after v0.1.172' -Paths $task24ChangedPaths }
 ```
 
-**提交边界：**response-model audit 的 source/generated/migration/frontend 闭合在一个能力提交；不得手工改 Ent 或 migration。**检查点：**三态语义、59-column insert 口径、query/filter/UI 或 migration identity 任一不一致均阻塞。
+**提交边界：**response-model audit 的 source/generated/frontend 与 migration integration test 闭合在一个能力提交；172 SQL blob 只来自 merge，不得手工改 Ent 或 migration。**检查点：**三态语义、59-column insert 口径、query/filter/UI 或 migration identity 任一不一致均阻塞。
 
-### Task 25: 运行 v0.1.172 全量门禁并关闭矩阵
+### Task 25: 运行 v0.1.172 全量门禁并冻结 v0.1.173 精确矩阵
 
-- [ ] Task 25: 运行 v0.1.172 全量门禁并关闭矩阵
+- [ ] Task 25: 运行 v0.1.172 全量门禁并冻结 v0.1.173 精确矩阵
 
-**映射 OpenSpec：**5.7
+**映射 OpenSpec：**5.7、5.8
 
 **文件：**默认只更新 build ledger；门禁发现回归时按首次能力簇派发 remediation，Task 25 保持未勾选。
 
@@ -1687,19 +1809,419 @@ Assert-NoConflictArtifacts
 
 3. Docker preflight 按既有 helper 执行；不可用只记 `unverified`，真实目标 integration failure 必须修复。逐行关闭第三阶段能力矩阵，`gap` 必须为 0。
 
-4. 仅提交 ledger：
+4. 确认 172 已成为 HEAD 祖先且 VERSION 仍为 `0.1.171.1`，再重算第四阶段精确 overlap 和能力矩阵；不为 overlap 预设数量，但完整列表必须写入 ledger：
 
 ```powershell
-Commit-NamedPaths -Message 'docs: record v0.1.172 gates' -Paths @($buildLedger)
+git merge-base --is-ancestor $tag172 HEAD
+if ($LASTEXITCODE -ne 0) { throw 'v0.1.172 is not an ancestor after stage gate' }
+if ((Get-Content -Raw backend/cmd/server/VERSION).Trim() -ne '0.1.171.1') { throw '172 stage changed intermediate VERSION' }
+$files173 = @(git diff --name-only "$tag172..$tag173")
+if ($LASTEXITCODE -ne 0 -or $files173.Count -ne 300) { throw 'v0.1.173 manifest drifted' }
+$localAfter172 = @(git diff --name-only "$tag172...HEAD")
+if ($LASTEXITCODE -ne 0) { throw 'cannot enumerate local delta after v0.1.172' }
+$overlap173 = @($files173 | Where-Object { $localAfter172 -contains $_ } | Sort-Object -Unique)
+$overlap173
+```
+
+5. 仅提交 ledger：
+
+```powershell
+Commit-NamedPaths -Message 'docs: record v0.1.172 gates and v0.1.173 matrix' -Paths @($buildLedger)
+```
+
+**提交边界：**报告提交与 remediation 分离。**检查点：**全部非 Docker gate PASS、generate stable、第三阶段 gap=0、第四阶段精确 overlap/矩阵已记录后才能 merge 173；不得 bump VERSION。
+
+### Task 26: 创建纯 v0.1.173 merge 节点
+
+- [ ] Task 26: 创建纯 v0.1.173 merge 节点
+
+**映射 OpenSpec：**6.1
+
+**文件：**由真实 merge 冲突决定；只允许 173 tag 树和完成冲突融合必需的路径。禁止混入 ledger、plan/tasks、兼容修复或 VERSION bump。
+
+**接口：**
+- Consumes: Task 25 固定的 `$tag173`、精确第四阶段冲突台账与 `VERSION=0.1.171.1`。
+- Produces: 唯一 first-parent merge commit，第二父精确为 `$tag173`。
+
+**步骤：**
+
+1. 重新运行统一检查命令与 `Assert-CleanGate`，确认 `$tag172` 是 HEAD 祖先、`$tag173` 尚不是 HEAD 祖先，记录 pre-merge HEAD：
+
+```powershell
+git merge-base --is-ancestor $tag172 HEAD
+if ($LASTEXITCODE -ne 0) { throw 'v0.1.172 stage is not closed' }
+git merge-base --is-ancestor $tag173 HEAD
+if ($LASTEXITCODE -eq 0) { throw 'v0.1.173 was already merged outside this task' }
+$pre173MergeHead = (git rev-parse HEAD).Trim()
+```
+
+2. 启动唯一 merge 并固定 annotated tag 身份：
+
+```powershell
+git merge --no-ff --no-commit v0.1.173
+$merge173Exit = $LASTEXITCODE
+$unmerged173 = @(git diff --name-only --diff-filter=U)
+Assert-AnnotatedTagMergeHead -TagName 'v0.1.173' -TagObject $tag173Object -PeeledCommit $tag173
+if ($merge173Exit -notin @(0,1)) { throw "v0.1.173 merge failed fatally: $merge173Exit" }
+if ($merge173Exit -eq 1 -and $unmerged173.Count -eq 0) { throw 'merge failed without resolvable conflicts' }
+```
+
+3. 对每个冲突记录 ours/theirs/最小融合。VERSION 保留 `0.1.171.1`；本地 subscription 锚点、scheduler/sticky/body/audit/settings/frontend 不得被删除；同号 migration 按完整文件名共存。Grok mapping/password 的 release/tag 偏差留给 Task 27 独立 RED/GREEN 修复，不把无冲突语义修复混入 merge。
+
+4. 显式暂存每个 resolved path；融合 schema/Wire/manifest 源后用现有工具再生输出，运行 compile gate：
+
+```powershell
+Invoke-CheckedNative 'v0.1.173 merge generate' { make -C backend generate }
+git add -- backend/ent backend/cmd/server/wire_gen.go
+if ($LASTEXITCODE -ne 0) { throw 'failed to stage v0.1.173 Ent/Wire outputs' }
+$stagedGoMod173 = @(git diff --cached --name-only -- backend/go.mod)
+if ($stagedGoMod173.Count -gt 0) {
+    Push-Location backend; try { Invoke-CheckedNative 'v0.1.173 go mod tidy' { go mod tidy } } finally { Pop-Location }
+    git add -- backend/go.mod backend/go.sum
+    if ($LASTEXITCODE -ne 0) { throw 'failed to stage v0.1.173 Go module outputs' }
+}
+$stagedFrontendManifest173 = @(git diff --cached --name-only -- frontend/package.json)
+if ($stagedFrontendManifest173.Count -gt 0) {
+    Invoke-CheckedNative 'v0.1.173 pnpm lock refresh' { pnpm --dir frontend install --lockfile-only }
+    git add -- frontend/package.json frontend/pnpm-lock.yaml
+    if ($LASTEXITCODE -ne 0) { throw 'failed to stage v0.1.173 frontend manifest outputs' }
+}
+git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go backend/go.mod backend/go.sum frontend/package.json frontend/pnpm-lock.yaml
+if ($LASTEXITCODE -ne 0) { throw 'v0.1.173 generated/tool outputs remain unstaged' }
+if ((Get-Content -Raw backend/cmd/server/VERSION).Trim() -ne '0.1.171.1') { throw 'v0.1.173 merge changed intermediate VERSION' }
+Assert-NoConflictArtifacts
+Invoke-CheckedNative 'v0.1.173 merge compile' { Push-Location backend; try { go test ./internal/handler/... ./internal/service/... ./internal/repository/... -run '^$' } finally { Pop-Location } }
+```
+
+5. 审查暂存 diff 无报告、任务、runtime 和兼容修复后提交并验证父节点：
+
+```powershell
+git commit -m 'merge: integrate upstream v0.1.173'
+if ($LASTEXITCODE -ne 0) { throw 'v0.1.173 merge commit failed' }
+if ((git rev-parse 'HEAD^1').Trim() -ne $pre173MergeHead) { throw 'v0.1.173 first parent mismatch' }
+if ((git rev-parse 'HEAD^2').Trim() -ne $tag173) { throw 'v0.1.173 second parent mismatch' }
+```
+
+**提交边界：**唯一提交 `merge: integrate upstream v0.1.173`。**检查点：**merge review 必须确认第二父、生成源归属和纯 merge 边界。
+
+### Task 27: 固定 Grok 授权与模型映射安全默认
+
+- [ ] Task 27: 固定 Grok 授权与模型映射安全默认
+
+**映射 OpenSpec：**6.2
+
+**文件：**`backend/internal/pkg/xai/models.go`、`models_test.go`、`backend/internal/service/setting_parse.go`、新建 `backend/internal/service/setting_grok_mapping_test.go`、`grok_oauth_service.go`、`grok_oauth_service_test.go`、`backend/internal/handler/admin/grok_oauth_handler_test.go`、account mapping tests、`frontend/src/views/admin/SettingsView.vue`、对应 Vitest。
+
+**接口：**
+- Consumes: `xai.ModelMappingOptions`、`xai.SetRuntimeModelMappingOptions`、`SettingKeyGrokCrossClientModelMapEnabled`、`GrokOAuthService.GetCapabilities/AuthorizePassword`。
+- Produces: 设置缺失/空值/false 时无跨客户端 wildcard；显式 true 时映射至配置默认模型；账号显式 mapping 优先；密码 capability 固定 false且 API 固定 403。
+
+**步骤：**
+
+1. 在 `setting_grok_mapping_test.go` 先写默认关闭与显式开启测试，并把 handler 中“配置 true 成功登录”改为“配置 true 仍拒绝且 OAuth client 零调用”；`grokOAuthHandlerClient.LoginWithPassword` 增加调用计数，403 响应不得回显密码：
+
+```go
+func TestParseSettingsGrokCrossClientMappingDefaultsOff(t *testing.T) {
+	original := xai.RuntimeModelMappingOptions()
+	t.Cleanup(func() { xai.SetRuntimeModelMappingOptions(original) })
+	s := &SettingService{}
+	got := s.parseSettings(map[string]string{})
+	require.False(t, got.GrokCrossClientModelMapEnabled)
+	_, hasGPT := xai.DefaultModelMapping()["gpt-*"]
+	require.False(t, hasGPT)
+}
+
+func TestParseSettingsGrokCrossClientMappingExplicitTrue(t *testing.T) {
+	original := xai.RuntimeModelMappingOptions()
+	t.Cleanup(func() { xai.SetRuntimeModelMappingOptions(original) })
+	s := &SettingService{}
+	got := s.parseSettings(map[string]string{SettingKeyGrokCrossClientModelMapEnabled: "true"})
+	require.True(t, got.GrokCrossClientModelMapEnabled)
+	require.Equal(t, "grok-4.5", xai.DefaultModelMapping()["claude-*"])
+}
+
+type grokOAuthHandlerClient struct {
+	passwordLoginCalls int
+}
+
+func (c *grokOAuthHandlerClient) LoginWithPassword(_ context.Context, email, _ string, _ string) (*service.GrokPasswordLoginResult, error) {
+	c.passwordLoginCalls++
+	return &service.GrokPasswordLoginResult{Email: email, SSOToken: "sso-from-password"}, nil
+}
+
+func TestGrokOAuthHandlerAuthorizePasswordRemainsDisabledWhenConfigTrue(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	oauthClient := &grokOAuthHandlerClient{}
+	cfg := &config.Config{}
+	cfg.Gateway.Grok.PasswordAuthEnabled = true
+	oauthService := service.NewGrokOAuthService(nil, oauthClient, cfg)
+	defer oauthService.Stop()
+	handler := NewGrokOAuthHandler(oauthService, nil, nil, nil)
+	router := gin.New()
+	router.POST("/api/v1/admin/grok/oauth/password", handler.AuthorizePassword)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/grok/oauth/password", strings.NewReader(`{"email":"user@example.com","password":"super-secret"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Zero(t, oauthClient.passwordLoginCalls)
+	require.NotContains(t, rec.Body.String(), "super-secret")
+}
+```
+
+```powershell
+$grokAuthRedLog = Join-Path $env:TEMP 'sub2api-v0.1.173-grok-auth-red.log'
+$grokAuthRed = Invoke-ExpectedRed -Label 'Grok mapping/password RED' -LogPath $grokAuthRedLog -ExpectedFailPattern '^--- FAIL: (TestParseSettingsGrokCrossClientMappingDefaultsOff|TestGrokOAuthHandlerAuthorizePasswordRemainsDisabledWhenConfigTrue)' -Command { Push-Location backend; try { go test ./internal/pkg/xai ./internal/service ./internal/handler/admin -run '(GrokCrossClient|DefaultModelMapping|GrokOAuthHandlerAuthorizePassword|PasswordCapability|MessagesDispatchModel)' -count=1 } finally { Pop-Location } }
+$grokAuthRed
+```
+
+预期：default-off 与 config-true-hard-disable 至少一项在原 173 tag 行为上 FAIL；不得放宽断言。
+
+2. 最小修复初始化与解析默认，并让 password capability 忽略兼容配置：
+
+```go
+SettingKeyGrokCrossClientModelMapEnabled: "false",
+```
+
+```go
+result.GrokCrossClientModelMapEnabled = settings[SettingKeyGrokCrossClientModelMapEnabled] == "true"
+```
+
+```go
+func (s *GrokOAuthService) passwordAuthEnabled() bool {
+	return false
+}
+```
+
+3. 重跑 focused tests，并验证账号显式 mapping、设置 API round-trip、前端开关 payload 和密码入口隐藏：
+
+```powershell
+Invoke-CheckedNative 'Grok mapping/password GREEN' { Push-Location backend; try { go test ./internal/pkg/xai ./internal/service ./internal/handler/admin ./internal/server -run '(GrokCrossClient|DefaultModelMapping|ExplicitModelMapping|GrokOAuthHandlerAuthorizePassword|PasswordCapability|MessagesDispatchModel|Settings)' -count=1 } finally { Pop-Location } }
+Invoke-CheckedNative 'Grok settings frontend GREEN' { pnpm --dir frontend exec vitest run src/views/admin/__tests__/SettingsView.spec.ts src/components/account/__tests__/CreateAccountModal.grok.spec.ts src/components/admin/account/__tests__/ReAuthAccountModal.grok.spec.ts src/composables/__tests__/useGrokOAuth.spec.ts }
+```
+
+4. backend lint、frontend typecheck/ESLint 通过后只提交实际 auth/mapping diff：
+
+```powershell
+$task27Paths = @(git diff --name-only -- backend/internal/pkg/xai backend/internal/service/setting_parse.go backend/internal/service/setting_grok_mapping_test.go backend/internal/service/grok_oauth_service.go backend/internal/service/grok_oauth_service_test.go backend/internal/handler/admin/grok_oauth_handler_test.go backend/internal/server frontend/src/views/admin/SettingsView.vue frontend/src/views/admin/__tests__/SettingsView.spec.ts frontend/src/components/account frontend/src/components/admin/account frontend/src/composables)
+Commit-NamedPaths -Message 'fix: enforce Grok authorization defaults after v0.1.173' -Paths $task27Paths
+```
+
+**提交边界：**只含 Grok auth/model mapping 和直接测试。**检查点：**默认关闭、显式开启、显式账号 mapping、密码硬禁用四项都必须有行为证据。
+
+### Task 28: 融合 Grok 媒体、Voice、搜索与网关契约
+
+- [ ] Task 28: 融合 Grok 媒体、Voice、搜索与网关契约
+
+**映射 OpenSpec：**6.3
+
+**文件：**`backend/internal/handler/grok_media.go`、`grok_audio.go`、`gateway_web_search.go`、`backend/internal/service/grok_media*.go`、`grok_audio*.go`、`grok_search_count.go`、`openai_gateway_grok*.go`、`openai_images.go`、`backend/internal/pkg/xai/billing.go` 及对应 tests。
+
+**接口：**
+- Consumes: Grok account model mapping、gateway request-body handle、`OpenAIRecordUsageInput`、统一 audit、sticky/failover context。
+- Produces: 图片/视频/Voice/search 路由使用最终账号和模型；异步视频只在成功完成时计费；search 只计一次；body/stream 恰好释放一次。
+
+**步骤：**
+
+1. 运行上游新增与本地保护测试，保存任何 RED：
+
+```powershell
+Invoke-CheckedNative 'Grok media/voice/search RED/protection' { Push-Location backend; try { go test -tags unit ./internal/handler ./internal/service ./internal/pkg/xai -run '(GrokMedia|GrokAudio|Voice|Video|WebSearch|SearchCount|SearchSurcharge|ImageGeneration|RequestBody|Sticky|Failover|RecordUsage)' -count=1 } finally { Pop-Location } }
+```
+
+2. 调用链审查必须确认：multipart/JSON/media status routes 经过 SSRF/base URL 约束；异步 pending/failed 不扣费且成功不重复扣费；Voice TTS/STT/Realtime 和 custom voices 不落敏感 payload；JSON/SSE search count 去重；每个 usage 输入携带最终 model/account、media/search 维度与 `QuotaPlatform`。
+
+3. 仅对真实兼容 RED 做最小修复，重跑上述命令及本地 Images/audit/body tests；无 RED 不创建生产 diff：
+
+```powershell
+Invoke-CheckedNative 'Grok gateway local contracts' { Push-Location backend; try { go test -tags unit ./internal/handler ./internal/service -run '(OpenAIImages|SecurityAudit|PromptAudit|RequestBody|BodyRetention|Grok.*Billing|Search.*Billing|OpenAIRecordUsageInputsCarryQuotaPlatform)' -count=1 } finally { Pop-Location } }
+$task28Paths = @(git diff --name-only -- backend/internal/handler backend/internal/service backend/internal/pkg/xai)
+if ($task28Paths.Count -gt 0) { Commit-NamedPaths -Message 'fix: preserve Grok gateway contracts after v0.1.173' -Paths $task28Paths }
+```
+
+**提交边界：**Grok media/Voice/search gateway 与直接测试；pricing schema/UI 留给 Task 31。**检查点：**最终账号/模型、审计、body 生命周期或单次计费不明确时不得通过。
+
+### Task 29: 融合 Grok free gate、冷却与调度阈值
+
+- [ ] Task 29: 融合 Grok free gate、冷却与调度阈值
+
+**映射 OpenSpec：**6.4
+
+**文件：**`backend/internal/service/grok_free_quota_gate.go`、`grok_team_rate_limit.go`、`grok_stream_idle.go`、`grok_model_quota_block.go`、`openai_account_scheduler.go`、`ratelimit_service*.go`、`setting_*`、token refresh/quota files 及 tests；`frontend/src/views/admin/SettingsView.vue` 与 `GrokQuotaProbeCell.vue`。
+
+**接口：**
+- Consumes: 本地 scheduler/sticky/pool/WaitPlan、Grok quota snapshots、`AccountSchedulingThresholds`、订阅 quota windows。
+- Produces: free 24h gate 只作用于明确 free 账号；team+model 冷却不牵连兄弟模型；阈值默认 100=禁用；临时下线可恢复且不改变订阅锚点。
+
+**步骤：**
+
+1. 运行调度和设置聚焦测试：
+
+```powershell
+Invoke-CheckedNative 'Grok scheduler RED/protection' { Push-Location backend; try { go test -tags unit ./internal/service -run '(GrokFreeQuota|GrokTeamRateLimit|GrokStreamIdle|GrokModelQuota|SchedulingThreshold|SelectAccountWithScheduler|Layered|Sticky|WaitPlan|TokenRefresh|GrokQuota)' -count=1 } finally { Pop-Location } }
+```
+
+2. 新增或保留一条跨域保护：Grok free rolling 24h 判断不得调用 subscription `automaticWindowStartAt`，订阅 exact-anchor tests 必须继续 GREEN：
+
+```powershell
+Invoke-CheckedNative 'subscription anchor isolation' { Push-Location backend; try { go test -tags unit ./internal/service -run '(TestAdminResetQuota_ResetBoth|TestAssignOrExtendSubscription_ExpiredDailyCardStartsNewOneTimeQuota|TestAutomaticWindowPreservesPersistedManualAnchor|GrokFreeQuota)' -count=1 } finally { Pop-Location } }
+```
+
+3. 审查默认值与恢复边界：free gate miss/failure fail-open 且异步刷新；明确耗尽产生可恢复 temporary reason；pool mode 保留既有不变异账号规则；7d/30d 阈值只支持 OpenAI/Anthropic/Grok，默认 100 不停调；设置更新即时刷新 cache。
+
+4. 只修复真实 RED，重跑 backend focused/full package、Settings/GrokQuota 前端 tests；有 diff 时提交：
+
+```powershell
+Invoke-CheckedNative 'Grok scheduler frontend' { pnpm --dir frontend exec vitest run src/views/admin/__tests__/SettingsView.spec.ts src/components/account/__tests__/GrokQuotaProbeCell.spec.ts }
+$task29Paths = @(git diff --name-only -- backend/internal/service frontend/src/views/admin/SettingsView.vue frontend/src/views/admin/__tests__/SettingsView.spec.ts frontend/src/components/account/GrokQuotaProbeCell.vue)
+if ($task29Paths.Count -gt 0) { Commit-NamedPaths -Message 'fix: preserve Grok scheduling after v0.1.173' -Paths $task29Paths }
+```
+
+**提交边界：**Grok scheduling/quota/settings 与直接测试。**检查点：**sticky/pool/WaitPlan、可恢复状态和订阅锚点必须保持。
+
+### Task 30: 融合 Channel Monitor V2 与隐私默认
+
+- [ ] Task 30: 融合 Channel Monitor V2 与隐私默认
+
+**映射 OpenSpec：**6.5
+
+**文件：**`backend/internal/service/channel_monitor_*`、`backend/internal/repository/channel_monitor_v2_*`、`backend/internal/handler/channel_monitor_*`、routes guard、setting parse/public/update、`frontend/src/features/channel-monitor-v2/`、`api/channelMonitorV2.ts`、`views/admin/ChannelMonitorView.vue` 及 tests。
+
+**接口：**
+- Consumes: `channel_monitor_mode`、V1 runner、gateway usage logs、user/admin scope。
+- Produces: 缺失设置默认为 V1；V1/V2 runner 互斥；V2 rollup 幂等；admin 指标完整，普通用户 RPM/TPM 默认归零/隐藏。
+
+**步骤：**
+
+1. 运行 backend V1/V2、feature guard、repository 和 privacy tests：
+
+```powershell
+Invoke-CheckedNative 'Channel Monitor V2 backend RED/protection' { Push-Location backend; try { go test ./internal/service ./internal/repository ./internal/handler ./internal/server/routes -run '(ChannelMonitor|MonitorMode|RedactChannelMonitorV2|HideThroughput)' -count=1 } finally { Pop-Location } }
+```
+
+2. 审查并用测试锁定：`normalizeChannelMonitorMode("")==v1`；V1 只在 mode=v1 发主动探测，V2 aggregator 只在 mode=v2 运行；用户 scope 不泄露其它用户身份；rate 使用覆盖窗口；ignored categories、histogram merge 和 retention 幂等。
+
+3. 运行前端 API、format、matrix、view tests 与 typecheck：
+
+```powershell
+Invoke-CheckedNative 'Channel Monitor V2 frontend' { pnpm --dir frontend exec vitest run src/api/__tests__/channelMonitorV2.spec.ts src/features/channel-monitor-v2/__tests__ src/views/admin/__tests__/ChannelMonitorView.duplicate.spec.ts src/views/admin/__tests__/ChannelMonitorView.grok.spec.ts }
+Invoke-CheckedNative 'Channel Monitor V2 typecheck' { pnpm --dir frontend run typecheck }
+```
+
+4. 只对真实本地兼容回归做最小修复并提交；migration 文件留给 Task 31 统一 identity/integration：
+
+```powershell
+$task30Paths = @(git diff --name-only -- backend/internal/service backend/internal/repository backend/internal/handler backend/internal/server/routes frontend/src/api/channelMonitorV2.ts frontend/src/api/__tests__/channelMonitorV2.spec.ts frontend/src/features/channel-monitor-v2 frontend/src/views/admin/ChannelMonitorView.vue frontend/src/views/admin/__tests__)
+if ($task30Paths.Count -gt 0) { Commit-NamedPaths -Message 'fix: preserve channel monitoring after v0.1.173' -Paths $task30Paths }
+```
+
+**提交边界：**Channel Monitor backend/frontend 与直接 tests。**检查点：**默认 V1、runner 互斥和用户吞吐脱敏缺一不可。
+
+### Task 31: 闭合 Grok 定价、生成物与 173 migrations
+
+- [ ] Task 31: 闭合 Grok 定价、生成物与 173 migrations
+
+**映射 OpenSpec：**6.6
+
+**文件：**`backend/ent/schema/group.go`、生成 Ent、group service/handler/DTO、`video_billing*.go`、`billing_search_audio_cost_test.go`、auth cache snapshot、`backend/migrations/194_channel_monitor_v2.sql` 至 `206_*`、`217_*` 至 `220_*`、migration integration test、`frontend/src/views/admin/groupsVideoModelPricing.ts`、Groups/Settings UI/tests。
+
+**接口：**
+- Produces: model family × resolution video pricing、audio/Voice/search pricing、auth snapshot v19 fields、24 个受保护 migration blobs。
+- Consumes: Task 28 的 usage dimensions、Task 30 的 Channel Monitor schema、既有完整文件名 migration runner。
+
+**步骤：**
+
+1. 运行定价、auth snapshot、API contract 和前端矩阵 tests：
+
+```powershell
+Invoke-CheckedNative 'Grok pricing backend RED/protection' { Push-Location backend; try { go test -tags unit ./internal/service ./internal/handler/admin ./internal/server -run '(VideoBilling|VideoModelPrice|Audio|Voice|Search.*Cost|Search.*Price|AuthCache.*Profit|APIContract)' -count=1 } finally { Pop-Location } }
+Invoke-CheckedNative 'Grok pricing frontend' { pnpm --dir frontend exec vitest run src/views/admin/__tests__/groupsVideoModelPricing.spec.ts src/views/admin/__tests__/GroupsView.columnSettings.spec.ts src/utils/__tests__/billingMode.spec.ts }
+```
+
+2. 融合 schema/provider 源后运行 generate；不手工编辑 Ent。确认 group DTO、cache snapshot、repository insert/update 和前端 payload 同时携带 `video_model_prices`、audio/Voice、`search_price_per_1k`。
+
+```powershell
+Invoke-CheckedNative 'v0.1.173 pricing generate' { make -C backend generate }
+```
+
+3. 对 `$requiredMigrationSourcesFinal` 全部 24 个文件比较当前工作树 blob 与权威 ref；同号 194/195 必须同时存在，任何 SQL 工作树修改立即阻塞提交：
+
+```powershell
+if ($requiredMigrationSourcesFinal.Count -ne 24) { throw "expected 24 protected migrations, got $($requiredMigrationSourcesFinal.Count)" }
+foreach ($entry in $requiredMigrationSourcesFinal.GetEnumerator()) {
+    $name = $entry.Key
+    $sourceRef = $entry.Value
+    $expectedOutput = @(git rev-parse "${sourceRef}:backend/migrations/$name" 2>&1)
+    if ($LASTEXITCODE -ne 0) { throw "cannot resolve authoritative migration: $name" }
+    $actualOutput = @(git hash-object -- "backend/migrations/$name" 2>&1)
+    if ($LASTEXITCODE -ne 0) { throw "cannot hash migration worktree file: $name" }
+    $expected = ($expectedOutput -join '').Trim()
+    $actual = ($actualOutput -join '').Trim()
+    if ($expected -ne $actual) { throw "migration identity mismatch: $name" }
+}
+```
+
+4. 扩展固定 migration integration：种子包含 Grok、composite、OpenAI 三类 group，并给 OpenAI 行同时写入 `audio_realtime_price_per_min`、`audio_tts_price_per_million_chars`、`audio_stt_price_per_hour`、`search_price_per_1k`。执行 220 后 Grok/composite 视频价格保持，OpenAI 视频价格清空且 `groups_video_price_backup_220` 保留原值；四个 audio/search 字段逐值保持。Docker 可用时必须看到目标 top-level test 真实 PASS；不可用时把 schema、backup、清理边界、其它定价不变、幂等/checksum 记为 `unverified`。
+
+5. 两轮 generate 零 diff、focused tests 和 frontend lint/typecheck 通过后，只提交真实兼容 diff；tag migration 文件不得修改：
+
+```powershell
+$task31Paths = @(git diff --name-only -- backend/ent backend/internal/handler/admin backend/internal/handler/dto backend/internal/repository backend/internal/service frontend/src/views/admin frontend/src/utils frontend/src/types)
+if ($task31Paths.Count -gt 0) { Commit-NamedPaths -Message 'fix: preserve pricing and migrations after v0.1.173' -Paths $task31Paths }
+```
+
+**提交边界：**pricing schema/source/generated/frontend 与 migration integration test；17 个 173 SQL blob 只能来自 merge。**检查点：**24 个 identity、生成归属和 220 backup/平台边界必须闭合。
+
+### Task 32: 运行 v0.1.173 全量门禁并关闭矩阵
+
+- [ ] Task 32: 运行 v0.1.173 全量门禁并关闭矩阵
+
+**映射 OpenSpec：**6.7
+
+**文件：**默认只更新 build ledger；门禁发现回归时按 Tasks 27-31 所属能力簇派发 remediation，Task 32 保持未勾选。
+
+**步骤：**
+
+1. 重跑第四阶段五个 canonical focused bundles：
+
+```powershell
+Invoke-CheckedNative 'gate Grok auth/mapping' { Push-Location backend; try { go test ./internal/pkg/xai ./internal/service ./internal/handler/admin -run '(GrokCrossClient|DefaultModelMapping|GrokOAuth|PasswordCapability|MessagesDispatchModel)' -count=1 } finally { Pop-Location } }
+Invoke-CheckedNative 'gate Grok gateway' { Push-Location backend; try { go test -tags unit ./internal/handler ./internal/service ./internal/pkg/xai -run '(GrokMedia|GrokAudio|Voice|Video|WebSearch|SearchCount|RequestBody|Sticky|Failover|RecordUsage)' -count=1 } finally { Pop-Location } }
+Invoke-CheckedNative 'gate Grok scheduler' { Push-Location backend; try { go test -tags unit ./internal/service -run '(GrokFreeQuota|GrokTeamRateLimit|GrokStreamIdle|SchedulingThreshold|Layered|Sticky|WaitPlan|Subscription.*Anchor)' -count=1 } finally { Pop-Location } }
+Invoke-CheckedNative 'gate Channel Monitor V2' { Push-Location backend; try { go test ./internal/service ./internal/repository ./internal/handler ./internal/server/routes -run '(ChannelMonitor|HideThroughput)' -count=1 } finally { Pop-Location } }
+Invoke-CheckedNative 'gate 173 frontend' { pnpm --dir frontend exec vitest run src/views/admin/__tests__/SettingsView.spec.ts src/components/account/__tests__/CreateAccountModal.grok.spec.ts src/components/admin/account/__tests__/ReAuthAccountModal.grok.spec.ts src/api/__tests__/channelMonitorV2.spec.ts src/features/channel-monitor-v2/__tests__ src/views/admin/__tests__/ChannelMonitorView.grok.spec.ts src/views/admin/__tests__/groupsVideoModelPricing.spec.ts }
+```
+
+2. 在中间 VERSION 上运行完整门禁和两轮生成：
+
+```powershell
+Invoke-CheckedNative 'v0.1.173 make test' { make test }
+Invoke-CheckedNative 'v0.1.173 intermediate build' { make 'VERSION=0.1.171.1' 'SHELL=D:/scoop/shims/bash.exe' build }
+Invoke-CheckedNative 'v0.1.173 backend lint' { Push-Location backend; try { golangci-lint run ./... } finally { Pop-Location } }
+Invoke-CheckedNative 'v0.1.173 frontend lint' { pnpm --dir frontend run lint:check }
+Invoke-CheckedNative 'v0.1.173 frontend typecheck' { pnpm --dir frontend run typecheck }
+Invoke-CheckedNative 'v0.1.173 first generate' { make -C backend generate }
+git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
+if ($LASTEXITCODE -ne 0) { throw 'first v0.1.173 generate changed output' }
+Invoke-CheckedNative 'v0.1.173 second generate' { make -C backend generate }
+git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
+if ($LASTEXITCODE -ne 0) { throw 'second v0.1.173 generate changed output' }
+Assert-NoConflictArtifacts
+```
+
+3. 执行 Docker 条件 integration；不可用只记 `unverified`，目标真实失败阻塞。逐行关闭第四阶段能力矩阵，`gap=0` 后提交 ledger：
+
+```powershell
+Commit-NamedPaths -Message 'docs: record v0.1.173 gates' -Paths @($buildLedger)
 ```
 
 **提交边界：**报告提交与 remediation 分离。**检查点：**全部非 Docker gate PASS、generate stable、gap=0 后才能 bump VERSION。
 
-### Task 26: 将最终版本更新为 0.1.172.1
+### Task 33: 将最终版本更新为 0.1.173.1
 
-- [ ] Task 26: 将最终版本更新为 0.1.172.1
+- [ ] Task 33: 将最终版本更新为 0.1.173.1
 
-**映射 OpenSpec：**5.8
+**映射 OpenSpec：**6.8
 
 **文件：**仅 `backend/cmd/server/VERSION`。
 
@@ -1708,99 +2230,112 @@ Commit-NamedPaths -Message 'docs: record v0.1.172 gates' -Paths @($buildLedger)
 1. 确认当前值为中间版本并写入唯一新值：
 
 ```powershell
-if ((Get-Content -Raw backend/cmd/server/VERSION).Trim() -ne '0.1.171.1') { throw 'unexpected pre-172 VERSION' }
+if ((Get-Content -Raw backend/cmd/server/VERSION).Trim() -ne '0.1.171.1') { throw 'unexpected pre-173 VERSION' }
 ```
 
 ```diff
 -0.1.171.1
-+0.1.172.1
++0.1.173.1
 ```
 
 2. 提交并复核：
 
 ```powershell
-if ((Get-Content -Raw backend/cmd/server/VERSION).Trim() -ne '0.1.172.1') { throw 'VERSION write failed' }
-Commit-NamedPaths -Message 'chore: bump version to 0.1.172.1' -Paths @('backend/cmd/server/VERSION')
+if ((Get-Content -Raw backend/cmd/server/VERSION).Trim() -ne '0.1.173.1') { throw 'VERSION write failed' }
+Commit-NamedPaths -Message 'chore: bump version to 0.1.173.1' -Paths @('backend/cmd/server/VERSION')
 ```
 
-**提交边界：**版本提交只有一个文件。**检查点：**不创建 `0.1.172` 或其他过程版本。
+**提交边界：**版本提交只有一个文件。**检查点：**不创建 `0.1.172.1` 或其他过程版本。
 
-### Task 27: 在最终 172 HEAD 重跑门禁并验证三段拓扑
+### Task 34: 在最终 173 HEAD 重跑门禁并验证四段拓扑
 
-- [ ] Task 27: 在最终 172 HEAD 重跑门禁并验证三段拓扑
+- [ ] Task 34: 在最终 173 HEAD 重跑门禁并验证四段拓扑
 
-**映射 OpenSpec：**5.8
+**映射 OpenSpec：**6.8
 
-**文件：**无产品修改；结果由 Task 28 记录。
+**文件：**无产品修改；结果由 Task 35 记录。
 
 **步骤：**
 
-1. 在 VERSION commit 后运行以下完整命令，不得继承 Task 25 的结论：
+1. 在 VERSION commit 后重新运行完整命令，不继承 Task 32 结论：
 
 ```powershell
-Invoke-CheckedNative 'final 172 make test' { make test }
-Invoke-CheckedNative 'final 172 build' { make 'VERSION=0.1.172.1' 'SHELL=D:/scoop/shims/bash.exe' build }
-Invoke-CheckedNative 'final 172 backend lint' { Push-Location backend; try { golangci-lint run ./... } finally { Pop-Location } }
-Invoke-CheckedNative 'final 172 frontend lint' { pnpm --dir frontend run lint:check }
-Invoke-CheckedNative 'final 172 frontend typecheck' { pnpm --dir frontend run typecheck }
-Invoke-CheckedNative 'final 172 first generate' { make -C backend generate }
+Invoke-CheckedNative 'final 173 make test' { make test }
+Invoke-CheckedNative 'final 173 build' { make 'VERSION=0.1.173.1' 'SHELL=D:/scoop/shims/bash.exe' build }
+Invoke-CheckedNative 'final 173 backend lint' { Push-Location backend; try { golangci-lint run ./... } finally { Pop-Location } }
+Invoke-CheckedNative 'final 173 frontend lint' { pnpm --dir frontend run lint:check }
+Invoke-CheckedNative 'final 173 frontend typecheck' { pnpm --dir frontend run typecheck }
+Invoke-CheckedNative 'final 173 first generate' { make -C backend generate }
 git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
 if ($LASTEXITCODE -ne 0) { throw 'final first generate changed output' }
-Invoke-CheckedNative 'final 172 second generate' { make -C backend generate }
+Invoke-CheckedNative 'final 173 second generate' { make -C backend generate }
 git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go
 if ($LASTEXITCODE -ne 0) { throw 'final second generate changed output' }
 Assert-NoConflictArtifacts
 ```
 
-2. 验证三个 tag 和唯一 first-parent merge 第二父：
+2. 验证四个 tag 和唯一 first-parent merge 第二父：
 
 ```powershell
-foreach ($tag in @($tag170,$tag171,$tag172)) {
+$targetTags = @($tag170,$tag171,$tag172,$tag173)
+foreach ($tag in $targetTags) {
     git merge-base --is-ancestor $tag HEAD
     if ($LASTEXITCODE -ne 0) { throw "target tag is not ancestor: $tag" }
 }
 $firstParentMerges = @(git rev-list --first-parent --merges "$sourceBase..HEAD")
-$targetTags = @($tag170,$tag171,$tag172)
-$targetNodes = foreach ($tag in $targetTags) {
+foreach ($tag in $targetTags) {
     $nodes = @($firstParentMerges | Where-Object { (git rev-parse "$_^2").Trim() -eq $tag })
     if ($nodes.Count -ne 1) { throw "expected one merge node for $tag, got $($nodes.Count)" }
-    $nodes[0]
 }
-if ((Get-Content -Raw backend/cmd/server/VERSION).Trim() -ne '0.1.172.1') { throw 'final VERSION mismatch' }
+if ((Get-Content -Raw backend/cmd/server/VERSION).Trim() -ne '0.1.173.1') { throw 'final VERSION mismatch' }
 ```
 
-3. 对 `$requiredMigrationSources` 全部 7 个文件比较 HEAD blob 与权威 source ref，并执行 Docker 条件 integration。任何 filename/blob mismatch 阻塞。
+3. 重跑 `$requiredMigrationSourcesFinal` 24 个 committed blob identity 和 Docker 条件 integration；任何 filename/blob mismatch 或真实 integration failure 阻塞：
 
-**提交边界：**无提交。**检查点：**最终 gates、三 merge、VERSION、七 migration identities 全部闭合。
+```powershell
+if ($requiredMigrationSourcesFinal.Count -ne 24) { throw 'final protected migration count mismatch' }
+foreach ($entry in $requiredMigrationSourcesFinal.GetEnumerator()) {
+    $name = $entry.Key
+    $expectedOutput = @(git rev-parse "$($entry.Value):backend/migrations/$name" 2>&1)
+    if ($LASTEXITCODE -ne 0) { throw "cannot resolve final authoritative migration: $name" }
+    $actualOutput = @(git rev-parse "HEAD:backend/migrations/$name" 2>&1)
+    if ($LASTEXITCODE -ne 0) { throw "cannot resolve final committed migration: $name" }
+    if (($expectedOutput -join '').Trim() -ne ($actualOutput -join '').Trim()) { throw "final migration identity mismatch: $name" }
+}
+$finalIntegration = Invoke-MigrationUpgradeIntegration -Stage 'v0.1.173-final'
+$finalIntegration
+```
 
-### Task 28: 完成 v0.1.172 thorough review 和最终 Verify 报告
+**提交边界：**无提交。**检查点：**最终 gates、四 merge、VERSION、24 migration identities 全部闭合。
 
-- [ ] Task 28: 完成 v0.1.172 thorough review 和最终 Verify 报告
+### Task 35: 完成 v0.1.173 thorough review 和最终 Verify 报告
 
-**映射 OpenSpec：**5.8
+- [ ] Task 35: 完成 v0.1.173 thorough review 和最终 Verify 报告
+
+**映射 OpenSpec：**6.8
 
 **文件：**修改 build ledger 和现有 verify report；旧 171 Verify 章节保留为历史证据。
 
 **步骤：**
 
-1. 逐行复核三阶段能力矩阵，特别记录 OAuth pending 0day、三 captcha providers、实际时刻 quota anchor、billing quantization、response-model audit、capacity failover、body/sticky/usage、transport timeout、194/195、frontend local customizations；`gap=0`。
+1. 逐行复核四阶段能力矩阵，特别记录 172 OAuth pending/实际时刻 anchor/response-model audit，以及 173 Grok mapping/password、media/Voice/search、free gate/threshold、Channel Monitor V2/privacy、pricing 和 24 migrations；`gap=0`。
 
 2. 运行 strict validation：
 
 ```powershell
-Invoke-CheckedNative 'v0.1.172 OpenSpec strict validation' { comet classic openspec -- validate staged-merge-upstream-v0-1-171 --strict }
+Invoke-CheckedNative 'v0.1.173 OpenSpec strict validation' { comet classic openspec -- validate staged-merge-upstream-v0-1-171 --strict }
 ```
 
-3. 派发 fresh thorough reviewer，范围覆盖 Task 19 execution base 至 final HEAD；CRITICAL/IMPORTANT 自动回到所属能力簇 remediation，最多按 Comet review-fix 轮次处理。Docker/cgo 仅作为环境 residual，不伪装 PASS。
+3. 派发 fresh thorough reviewer，范围覆盖 Task 19 execution base 至 final HEAD；CRITICAL/IMPORTANT 回到所属能力簇 remediation。Docker/cgo 仅作为环境 residual，不伪装 PASS。
 
-4. verify report 记录固定 tag/object、208/113、三个 merge parents、VERSION、focused/full gates、生成稳定性、migration blobs/integration、review verdict、无远程操作，并提交两份报告：
+4. verify report 记录四个 tag object/SHA、172/173 文件面、四个 merge parents、VERSION、focused/full gates、生成稳定性、24 migration blobs/integration、review verdict和无远程操作，提交两份报告：
 
 ```powershell
-Commit-NamedPaths -Message 'docs: record v0.1.172 verification' -Paths @($buildLedger,$verifyReport)
+Commit-NamedPaths -Message 'docs: record v0.1.173 verification' -Paths @($buildLedger,$verifyReport)
 Assert-CleanGate
 ```
 
-**提交边界：**只含两份报告。**完成检查点：**reviewer APPROVED、所有非 Docker gate 新鲜 PASS、三段拓扑精确、`gap=0`，然后进入 Comet Verify；仍不 push/tag/release/deploy。
+**提交边界：**只含两份报告。**完成检查点：**reviewer APPROVED、所有非 Docker gate 新鲜 PASS、四段拓扑精确、`gap=0`，然后进入 Comet Verify；仍不 push/tag/release/deploy。
 
 ## 任务覆盖核对
 
@@ -1831,4 +2366,12 @@ Assert-CleanGate
 | 5.5 | Task 23 |
 | 5.6 | Task 24 |
 | 5.7 | Task 25 |
-| 5.8 | Tasks 26-28 |
+| 5.8 | Task 25 |
+| 6.1 | Task 26 |
+| 6.2 | Task 27 |
+| 6.3 | Task 28 |
+| 6.4 | Task 29 |
+| 6.5 | Task 30 |
+| 6.6 | Task 31 |
+| 6.7 | Task 32 |
+| 6.8 | Tasks 33-35 |
