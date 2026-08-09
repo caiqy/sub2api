@@ -99,6 +99,31 @@ describe('CaptchaChallenge', () => {
     await expect(exposed(wrapper).verifyAction()).resolves.toBeNull()
   })
 
+  it('renders no provider and fails closed when one enabled provider is complete but another enabled provider is not', async () => {
+    turnstileResetMock.mockReset()
+    const wrapper = mount(CaptchaChallenge, {
+      props: {
+        turnstileEnabled: true,
+        turnstileSiteKey: 'site-key',
+        tencentEnabled: true,
+        tencentAppId: '',
+        aliyunEnabled: false
+      },
+      global: {
+        stubs: {
+          TurnstileWidget: TurnstileWidgetStub,
+          TencentCaptchaGate: true,
+          AliyunCaptchaWidget: true
+        }
+      }
+    })
+
+    expect(wrapper.findComponent(TurnstileWidgetStub).exists()).toBe(false)
+    expect(wrapper.findComponent({ name: 'TencentCaptchaGate' }).exists()).toBe(false)
+    expect(wrapper.findComponent({ name: 'AliyunCaptchaWidget' }).exists()).toBe(false)
+    await expect(exposed(wrapper).verifyAction()).resolves.toBeNull()
+  })
+
   it('renders no provider and fails closed when the only enabled provider is incompletely configured', async () => {
     turnstileResetMock.mockReset()
     const wrapper = mount(CaptchaChallenge, {

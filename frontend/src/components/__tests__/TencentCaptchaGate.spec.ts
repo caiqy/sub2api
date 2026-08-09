@@ -167,6 +167,34 @@ describe('TencentCaptchaGate', () => {
     await expect(after).resolves.toEqual({ ticket: 'second-ticket', randstr: 'second-rand' })
   })
 
+  it('starts a fresh challenge after a claimed pending rejects', async () => {
+    let callback: ((result: CaptchaResult) => void) | undefined
+    let constructorCount = 0
+    window.TencentCaptcha = class {
+      constructor(_appId: string, resultCallback: (result: CaptchaResult) => void) {
+        constructorCount += 1
+        callback = resultCallback
+      }
+      show = vi.fn()
+      destroy = vi.fn()
+    }
+    const wrapper = mount(TencentCaptchaGate, { props: { appId: '123456789' } })
+
+    const first = wrapper.vm.verify()
+    const second = wrapper.vm.verify()
+    await flushPromises()
+    callback?.({ ret: 0, ticket: 'trerror_1001_123456789', randstr: '@fallback', errorCode: 1001 })
+    await expect(first).rejects.toThrow('Tencent Captcha verification failed')
+    await expect(second).resolves.toBeNull()
+    expect(constructorCount).toBe(1)
+
+    const after = wrapper.vm.verify()
+    await flushPromises()
+    expect(constructorCount).toBe(2)
+    callback?.({ ret: 0, ticket: 'second-ticket', randstr: 'second-rand' })
+    await expect(after).resolves.toEqual({ ticket: 'second-ticket', randstr: 'second-rand' })
+  })
+
   it('starts a fresh challenge after reset clears a claimed pending', async () => {
     let callback: ((result: CaptchaResult) => void) | undefined
     let constructorCount = 0

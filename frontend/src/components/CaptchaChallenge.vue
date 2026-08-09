@@ -62,15 +62,21 @@ const tencentRef = ref<InstanceType<typeof TencentCaptchaGate> | null>(null)
 const aliyunRef = ref<InstanceType<typeof AliyunCaptchaWidget> | null>(null)
 const turnstileToken = ref('')
 
-// 恰好一个 provider 启用且其必需配置完整时才有效，否则 fail-closed：
+// 先独立统计三个 enabled 开关：数量不等于 1 时直接 fail-closed，
+// 防止「一个 enabled 但配置残缺」被另一个 enabled 且完整的 provider 静默掩盖。
+// 恰好一个 enabled 后，再校验该 provider 的必需配置字段，残缺同样 fail-closed。
 // 模板渲染与 verifyAction 共用同一判定，避免多 provider 或残缺配置被部分消费。
 type ProviderKind = 'turnstile' | 'tencent' | 'aliyun'
 const validProvider = computed<ProviderKind | null>(() => {
-  const candidates: ProviderKind[] = []
-  if (props.turnstileEnabled && props.turnstileSiteKey) candidates.push('turnstile')
-  if (props.tencentEnabled && props.tencentAppId) candidates.push('tencent')
-  if (props.aliyunEnabled && props.aliyunSceneId && props.aliyunPrefix) candidates.push('aliyun')
-  return candidates.length === 1 ? candidates[0] : null
+  const enabled: ProviderKind[] = []
+  if (props.turnstileEnabled) enabled.push('turnstile')
+  if (props.tencentEnabled) enabled.push('tencent')
+  if (props.aliyunEnabled) enabled.push('aliyun')
+  if (enabled.length !== 1) return null
+  const provider = enabled[0]
+  if (provider === 'turnstile') return props.turnstileSiteKey ? provider : null
+  if (provider === 'tencent') return props.tencentAppId ? provider : null
+  return props.aliyunSceneId && props.aliyunPrefix ? provider : null
 })
 
 watch(
