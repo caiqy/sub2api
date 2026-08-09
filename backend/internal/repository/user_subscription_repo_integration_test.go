@@ -637,7 +637,7 @@ func (s *UserSubscriptionRepoSuite) TestUsageResets_ReturnStrictlyMonotonicRowVe
 	})
 
 	resetter, ok := any(s.repo).(interface {
-		ResetUsageWindowsWithVersion(context.Context, int64, bool, bool, bool, time.Time) (int64, error)
+		ResetUsageWindowsWithVersion(context.Context, int64, bool, bool, bool, time.Time, time.Time) (int64, error)
 		ResetDailyUsageWithVersion(context.Context, int64, *time.Time, time.Time) (int64, error)
 		ResetWeeklyUsageWithVersion(context.Context, int64, *time.Time, time.Time) (int64, error)
 		ResetMonthlyUsageWithVersion(context.Context, int64, *time.Time, time.Time) (int64, error)
@@ -645,7 +645,7 @@ func (s *UserSubscriptionRepoSuite) TestUsageResets_ReturnStrictlyMonotonicRowVe
 	s.Require().True(ok, "reset writes must expose their committed row version")
 
 	resetAt := time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC)
-	v1, err := resetter.ResetUsageWindowsWithVersion(s.ctx, sub.ID, true, true, true, resetAt)
+	v1, err := resetter.ResetUsageWindowsWithVersion(s.ctx, sub.ID, true, true, true, resetAt, resetAt)
 	s.Require().NoError(err)
 	v2, err := resetter.ResetDailyUsageWithVersion(s.ctx, sub.ID, &resetAt, resetAt.Add(24*time.Hour))
 	s.Require().NoError(err)
