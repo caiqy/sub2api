@@ -7,7 +7,7 @@
 - Current task: `Task 29: 融合 Grok free gate、冷却与调度阈值`
 - OpenSpec mapping: `6.4`
 - Stage: `task-fix`
-- Review/fix round: `1/2`
+- Review/fix round: `2/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `dfb7d8542a9ac3585d30cc36281eed1cd0eb3282`
 - Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-29-brief.md`
@@ -126,4 +126,19 @@
 - Task 29 reviewer `ses_014a78483ffeuXkO6Wa4X2HWgv`: five Important findings (legacy/Gateway gaps, final canonical alias + DB recheck, pool retry blocked by premature mutation, configurable/non-recoverable free gate, missing 7d/30d threshold) and two Minor findings; `Spec: FAIL`, `Quality: CHANGES_REQUIRED`
 - Task 29 adjudication: accept Important 1-5 and overly broad quota request assertion Minor; reject progress/report-checkpoint Minor because Classic controller owns progress and report checkpoint is the implementation entry
 - Task 29 fix-1 brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-29-fix-1-brief.md`
-- Task 29 status: review fix round 1 pending
+- Task 29 fix-1 agent `ses_0149c09c9ffewy6OfFXaRTgWdK`: returned `DONE`
+- Task 29 fix-1 commits: `4f31de4f4`, `e58396e9e`, `6d61102b2`, `e7f3f4682`, `cd3d9041c`, `bea98010a`
+- Task 29 fix-1 RED/GREEN: legacy/layered/Gateway cooldown paths, final Grok alias, pool stream idle mutation, non-24h/TTL=0 free gate and 7d/30d billing thresholds all observed RED then focused GREEN
+- Task 29 fix-1 scope: shared final-model eligibility at initial/fresh boundaries; pool mutation deferred; finite rolling-24h cache; billing threshold candidates; exact quota endpoints/real expiry tests
+- Task 29 fix-1 implementer gates: both required backend baselines, new focused service/handler tests, frontend 40 tests/typecheck/lint PASS; golangci-lint 0 issues; diff/VERSION PASS
+- Task 29 fix-1 risk signals: 19 backend files, 406 insertions/75 deletions split across six logical commits; existing process-local mutex/cache state retained; no API/schema/migration/dependency change
+- Task 29 controller-fix agent `ses_014753ac4ffesLAbGJV9Vn7aFr`: returned `DONE`
+- Task 29 controller-fix commits: `cdf804416 fix: restore OpenAI passthrough routing hint`; `b6139763b test: fix account usage batch repository stub`
+- Task 29 controller-fix root causes: passthrough builder omitted final-body routing-hint synthesis; AccountUsage batch test dispatched `GetByIDs` through a nil embedded repository stub; free-gate finite-TTL comment was stale
+- Task 29 controller-fix RED/GREEN: existing passthrough routing-hint tests and AccountUsage batch test reproduced the exact failures, then passed after minimal production/test-fixture fixes; implementer full service package PASS
+- Task 29 final controller gates: both focused regressions, both required backend baselines, full service package PASS; golangci-lint 0 issues; frontend 40 tests/typecheck/lint PASS; diff check PASS; VERSION unchanged
+- Task 29 review package: `.superpowers/sdd/review-d21e47e0b..b6139763b.diff`
+- Task 29 re-reviewer `ses_014a78483ffeuXkO6Wa4X2HWgv`: three Important findings (pool generic timeout mutation before same-account retry; Gateway non-load-aware sticky fast-path bypass; fresh DB explicit-free gate bypass); `Spec: FAIL`, `Quality: CHANGES_REQUIRED`
+- Task 29 fix-2 adjudication: accept all three findings after controller source/call-path verification
+- Task 29 fix-2 brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-29-fix-2-brief.md`
+- Task 29 status: fix-2 implementation pending
