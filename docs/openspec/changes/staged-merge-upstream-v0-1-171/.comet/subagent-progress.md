@@ -4,18 +4,18 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Current task: `Task 25: 运行 v0.1.172 全量门禁并冻结 v0.1.173 精确矩阵`
-- OpenSpec mapping: `5.7、5.8`
-- Stage: `task-complete`
-- Review/fix round: `3/3 (user-authorized evidence-only)`
+- Current task: `Task 26: 创建纯 v0.1.173 merge 节点`
+- OpenSpec mapping: `6.1`
+- Stage: `task-implement`
+- Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
-- Task start HEAD: `ecac7fe5ad9dae69475acacc83925a9fbea1f96b`
-- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-25-brief.md`
-- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-25-report.md`
-- Dependency: Tasks 20-24 final source HEAD and their reviewed capability evidence
-- TDD rule: this task is validation-only; any genuine product failure returns BLOCKED and is remediated in a separate test-first task/commit
-- Risk signals: full backend/frontend gates、generated stability、migration identity、topology、capability matrix、cross-module
-- Hard boundary: all non-Docker gates PASS, two generate passes stable, v0.1.172 gap=0, VERSION remains 0.1.171.1, exact v0.1.173 matrix recorded before any 173 merge
+- Task start HEAD: `41d5c86e5ec788169346257d20c266b70da34db6`
+- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-26-brief.md`
+- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-26-report.md`
+- Dependency: Task 25 closed v0.1.172 gap=0 and froze the exact 352/140 v0.1.173 matrix
+- TDD rule: pure merge only; no no-conflict semantic remediation in the merge commit
+- Risk signals: merge topology、semantic conflicts、generated outputs、dependency locks、migration filenames、cross-module
+- Hard boundary: one no-ff merge commit, first parent fixed pre-merge HEAD, second parent fixed peeled v0.1.173, VERSION remains 0.1.171.1
 - Implementer: `ses_016a4ff6affeoRN1EoiY0Sy1px` returned `DONE_WITH_CONCERNS`
 - Implementation commit: `ff58b07e14d563296477c74bfb3573e765bec20c` (parent `3f1fda732af1fb59d32f2afcd6dbba6caf88ab9b`)
 - Genuine RED: paginated UsageLog SQLMock fixtures exposed 59 persisted values versus 61 list scan targets (generated id + has_detail)
@@ -65,3 +65,6 @@
 - Task 25 final reviewer: `ses_016336266ffeIPwFZfPDPASWl4` returned `Spec: PASS`, `Quality: APPROVED`, no findings
 - Controller verification: four backend focused bundles PASS; frontend focused 100 tests and full 1842 tests PASS; build/lint/typecheck/two generate passes/topology/seven migration identities/352-1237-140 digest checks PASS
 - Task 25 status: complete; Docker-backed 194/195 execution remains `UNVERIFIED`
+- Task 26 tag object/peeled commit: `9e2a27ad39201a14074982bae331c4610161586a` / `29009f0b2ea14edf3b11ae2564fb617ff91a03b4`
+- Task 26 preflight: v0.1.172 ancestor yes; v0.1.173 ancestor no; VERSION `0.1.171.1`; only selector untracked
+- Task 26 status: merge implementer pending
