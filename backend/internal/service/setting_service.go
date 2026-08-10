@@ -162,6 +162,7 @@ type SettingService struct {
 
 	channelMonitorRuntimeListenersMu sync.Mutex
 	channelMonitorRuntimeListeners   []func()
+	channelMonitorModeAdmission      channelMonitorModeAdmission
 }
 
 // DefaultPlatformQuotaSetting 单 platform 三档限额（nil = 沿用上层；0 = 显式禁用；>0 = 上限）
@@ -400,8 +401,8 @@ func (s *SettingService) SetOnUpdateCallback(callback func()) {
 
 // SubscribeChannelMonitorRuntime registers a listener that is invoked after
 // settings are successfully persisted (and process caches refreshed).
-// Used by ChannelMonitorRunner / ChannelMonitorV2Aggregator for immediate
-// mode flips without waiting for poll intervals.
+// The mode admission gate changes before listeners run, so workers cannot
+// admit stale work while they drain or reschedule after a mode flip.
 func (s *SettingService) SubscribeChannelMonitorRuntime(listener func()) (unsubscribe func()) {
 	if s == nil || listener == nil {
 		return func() {}
@@ -424,6 +425,7 @@ func (s *SettingService) notifyChannelMonitorRuntimeListeners() {
 	if s == nil {
 		return
 	}
+	s.channelMonitorModeAdmission.setMode(channelMonitorRuntimeMode(s.GetChannelMonitorRuntime(context.Background())))
 	s.channelMonitorRuntimeListenersMu.Lock()
 	listeners := make([]func(), 0, len(s.channelMonitorRuntimeListeners))
 	for _, l := range s.channelMonitorRuntimeListeners {
@@ -442,6 +444,122 @@ func (s *SettingService) notifyChannelMonitorRuntimeListeners() {
 			fn()
 		}(l)
 	}
+}
+
+type channelMonitorModeAdmission struct {
+	mu      sync.Mutex
+	desired string
+	active  map[string]int
+	changed chan struct{}
+}
+
+func channelMonitorRuntimeMode(runtime ChannelMonitorRuntime) string {
+	if !runtime.Enabled {
+		return ""
+	}
+	if runtime.Mode == ChannelMonitorModeV1 || runtime.Mode == ChannelMonitorModeV2 {
+		return runtime.Mode
+	}
+	return ""
+}
+
+func (g *channelMonitorModeAdmission) setMode(mode string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.desired == mode {
+		return
+	}
+	g.desired = mode
+	g.signalLocked()
+}
+
+func (g *channelMonitorModeAdmission) enter(ctx context.Context, mode string) (func(), bool) {
+	for {
+		g.mu.Lock()
+		if g.desired != mode {
+			g.mu.Unlock()
+			return nil, false
+		}
+		conflict := false
+		for activeMode, count := range g.active {
+			if activeMode != mode && count > 0 {
+				conflict = true
+				break
+			}
+		}
+		if !conflict {
+			if g.active == nil {
+				g.active = make(map[string]int)
+			}
+			g.active[mode]++
+			g.mu.Unlock()
+			var once sync.Once
+			return func() {
+				once.Do(func() {
+					g.mu.Lock()
+					g.active[mode]--
+					if g.active[mode] == 0 {
+						delete(g.active, mode)
+					}
+					g.signalLocked()
+					g.mu.Unlock()
+				})
+			}, true
+		}
+		if g.changed == nil {
+			g.changed = make(chan struct{})
+		}
+		changed := g.changed
+		g.mu.Unlock()
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return nil, false
+		}
+	}
+}
+
+func (g *channelMonitorModeAdmission) signalLocked() {
+	if g.changed != nil {
+		close(g.changed)
+	}
+	g.changed = make(chan struct{})
+}
+
+type channelMonitorModeAdmissionProvider interface {
+	admitChannelMonitorMode(ctx context.Context, mode string) (func(), bool)
+}
+
+func (s *SettingService) admitChannelMonitorMode(ctx context.Context, mode string) (func(), bool) {
+	runtimeMode := channelMonitorRuntimeMode(s.GetChannelMonitorRuntime(ctx))
+	s.channelMonitorModeAdmission.setMode(runtimeMode)
+	if runtimeMode != mode {
+		return nil, false
+	}
+	release, admitted := s.channelMonitorModeAdmission.enter(ctx, mode)
+	if !admitted {
+		return nil, false
+	}
+	if channelMonitorRuntimeMode(s.GetChannelMonitorRuntime(ctx)) == mode {
+		return release, true
+	}
+	release()
+	s.channelMonitorModeAdmission.setMode(channelMonitorRuntimeMode(s.GetChannelMonitorRuntime(ctx)))
+	return nil, false
+}
+
+func admitChannelMonitorMode(ctx context.Context, settings channelMonitorRuntimeReader, mode string) (func(), bool) {
+	if settings == nil {
+		return func() {}, true
+	}
+	if provider, ok := settings.(channelMonitorModeAdmissionProvider); ok {
+		return provider.admitChannelMonitorMode(ctx, mode)
+	}
+	runtime := settings.GetChannelMonitorRuntime(ctx)
+	if channelMonitorRuntimeMode(runtime) != mode {
+		return nil, false
+	}
+	return func() {}, true
 }
 
 // SetVersion sets the application version for injection into public settings

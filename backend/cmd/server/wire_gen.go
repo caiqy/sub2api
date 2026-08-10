@@ -618,7 +618,7 @@ func provideCleanup(
 				}
 				return nil
 			}},
-			{name: "ChannelMonitorRunner", run: func(context.Context) error {
+			{name: "ChannelMonitorV2Aggregator", run: func(context.Context) error {
 				if channelMonitorV2Aggregator != nil {
 					channelMonitorV2Aggregator.Stop()
 				}

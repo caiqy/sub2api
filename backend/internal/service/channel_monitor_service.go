@@ -462,6 +462,14 @@ func (s *ChannelMonitorService) RunCheck(ctx context.Context, id int64) ([]*Chec
 	if !rt.ActiveProbesAllowed() {
 		return nil, ErrChannelMonitorActiveProbesRetired
 	}
+	release, admitted := admitChannelMonitorMode(ctx, s.settings, ChannelMonitorModeV1)
+	if !admitted {
+		if !s.probeRuntime(ctx).Enabled {
+			return nil, ErrChannelMonitorDisabled
+		}
+		return nil, ErrChannelMonitorActiveProbesRetired
+	}
+	defer release()
 	m, err := s.Get(ctx, id) // 已解密 APIKey
 	if err != nil {
 		return nil, err

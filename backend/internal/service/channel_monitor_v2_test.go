@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,6 +30,56 @@ type channelMonitorV2RuntimeStub struct {
 
 func (s channelMonitorV2RuntimeStub) GetChannelMonitorRuntime(context.Context) ChannelMonitorRuntime {
 	return s.rt
+}
+
+type mutableChannelMonitorV2RuntimeStub struct {
+	mu sync.RWMutex
+	rt ChannelMonitorRuntime
+}
+
+func (s *mutableChannelMonitorV2RuntimeStub) GetChannelMonitorRuntime(context.Context) ChannelMonitorRuntime {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.rt
+}
+
+func (s *mutableChannelMonitorV2RuntimeStub) set(rt ChannelMonitorRuntime) {
+	s.mu.Lock()
+	s.rt = rt
+	s.mu.Unlock()
+}
+
+type modeFlipChannelMonitorV2RepoStub struct {
+	channelMonitorV2RepoStub
+	watermarkStarted chan struct{}
+	watermarkRelease chan struct{}
+}
+
+func (s *modeFlipChannelMonitorV2RepoStub) GetAggregationWatermark(context.Context) (*ChannelMonitorV2AggregationWatermark, error) {
+	s.watermarkStarted <- struct{}{}
+	<-s.watermarkRelease
+	return &ChannelMonitorV2AggregationWatermark{}, nil
+}
+
+type blockingChannelMonitorV2RepoStub struct {
+	channelMonitorV2RepoStub
+	recomputeStarted chan struct{}
+	cancelled        chan struct{}
+	recomputeRelease chan struct{}
+	waitForCancel    bool
+}
+
+func (s *blockingChannelMonitorV2RepoStub) RecomputeRange(ctx context.Context, _, _ time.Time) error {
+	s.recomputeStarted <- struct{}{}
+	if s.waitForCancel {
+		<-ctx.Done()
+		s.cancelled <- struct{}{}
+	}
+	<-s.recomputeRelease
+	if s.waitForCancel {
+		return ctx.Err()
+	}
+	return nil
 }
 
 func (s *channelMonitorV2RepoStub) GetConfig(context.Context) (*ChannelMonitorV2Config, error) {
@@ -136,6 +187,61 @@ func TestChannelMonitorV2AggregatorDoesNotRecomputeOutsideV2Mode(t *testing.T) {
 	aggregator.runOnce()
 
 	require.Zero(t, repo.recomputeCalls)
+}
+
+func TestChannelMonitorV2AggregatorRechecksModeImmediatelyBeforeRecompute(t *testing.T) {
+	runtime := &mutableChannelMonitorV2RuntimeStub{rt: ChannelMonitorRuntime{Enabled: true, Mode: ChannelMonitorModeV2}}
+	repo := &modeFlipChannelMonitorV2RepoStub{
+		watermarkStarted: make(chan struct{}, 1),
+		watermarkRelease: make(chan struct{}),
+	}
+	aggregator := NewChannelMonitorV2Aggregator(repo, nil, runtime)
+	done := make(chan struct{})
+	go func() {
+		aggregator.runOnce()
+		close(done)
+	}()
+
+	<-repo.watermarkStarted
+	runtime.set(ChannelMonitorRuntime{Enabled: true, Mode: ChannelMonitorModeV1})
+	close(repo.watermarkRelease)
+	<-done
+
+	require.Zero(t, repo.recomputeCalls, "a V2 transaction must not start after the mode flips to V1")
+}
+
+func TestChannelMonitorV2AggregatorStopWaitsForCancelledRecompute(t *testing.T) {
+	repo := &blockingChannelMonitorV2RepoStub{
+		channelMonitorV2RepoStub: channelMonitorV2RepoStub{config: ChannelMonitorV2Config{Enabled: true}},
+		recomputeStarted:         make(chan struct{}, 1),
+		cancelled:                make(chan struct{}, 1),
+		recomputeRelease:         make(chan struct{}),
+		waitForCancel:            true,
+	}
+	aggregator := NewChannelMonitorV2Aggregator(repo, nil, channelMonitorV2RuntimeStub{
+		rt: ChannelMonitorRuntime{Enabled: true, Mode: ChannelMonitorModeV2},
+	})
+	aggregator.Start()
+	<-repo.recomputeStarted
+
+	stopped := make(chan struct{})
+	go func() {
+		aggregator.Stop()
+		close(stopped)
+	}()
+
+	select {
+	case <-stopped:
+		t.Error("Stop returned before the cancelled recompute unwound")
+	case <-time.After(100 * time.Millisecond):
+	}
+	<-repo.cancelled
+	close(repo.recomputeRelease)
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not return after the recompute unwound")
+	}
 }
 
 func TestChannelMonitorV2ParseFilterDefaultsAndBuckets(t *testing.T) {

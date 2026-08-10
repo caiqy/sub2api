@@ -51,6 +51,7 @@ type ChannelMonitorV2Aggregator struct {
 	kickCh    chan struct{}
 	startOnce sync.Once
 	stopOnce  sync.Once
+	wg        sync.WaitGroup
 	mu        sync.Mutex
 	// backfillAt is the earliest minute already recomputed (mirrors DB cursor).
 	// Zero means "not yet loaded from durable watermark this process".
@@ -109,7 +110,11 @@ func (s *ChannelMonitorV2Aggregator) Start() {
 				unsub()
 			}
 		}
-		go s.loop()
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.loop()
+		}()
 	})
 }
 
@@ -131,6 +136,7 @@ func (s *ChannelMonitorV2Aggregator) Stop() {
 			unsub()
 		}
 		close(s.stopCh)
+		s.wg.Wait()
 	})
 }
 
@@ -248,7 +254,11 @@ func (s *ChannelMonitorV2Aggregator) runOnce() {
 	if !hasData || cursor.IsZero() {
 		start := now.Add(-channelMonitorV2BootstrapFirst)
 		started := time.Now()
-		if err := s.repo.RecomputeRange(ctx, start, now); err != nil {
+		ran, err := s.recomputeRange(ctx, start, now)
+		if !ran {
+			return
+		}
+		if err != nil {
 			logger.LegacyPrintf("service.channel_monitor_v2", "[ChannelMonitorV2] bootstrap recent aggregation failed: %v", err)
 			s.recordBackfillFailure(now, cursor)
 			return
@@ -258,7 +268,11 @@ func (s *ChannelMonitorV2Aggregator) runOnce() {
 	}
 
 	// Always refresh the trailing overlap so late usage/error writes land in 1m facts.
-	if err := s.repo.RecomputeRange(ctx, now.Add(-channelMonitorV2RecentOverlap), now); err != nil {
+	ran, err := s.recomputeRange(ctx, now.Add(-channelMonitorV2RecentOverlap), now)
+	if !ran {
+		return
+	}
+	if err != nil {
 		logger.LegacyPrintf("service.channel_monitor_v2", "[ChannelMonitorV2] overlap aggregation failed: %v", err)
 		return
 	}
@@ -299,12 +313,25 @@ func (s *ChannelMonitorV2Aggregator) runOnce() {
 		return
 	}
 	started := time.Now()
-	if err := s.repo.RecomputeRange(ctx, start, end); err != nil {
+	ran, err = s.recomputeRange(ctx, start, end)
+	if !ran {
+		return
+	}
+	if err != nil {
 		logger.LegacyPrintf("service.channel_monitor_v2", "[ChannelMonitorV2] backfill failed %s..%s: %v", start, end, err)
 		s.recordBackfillFailure(now, end)
 		return
 	}
 	s.recordBackfillSuccess(start, time.Since(started), now)
+}
+
+func (s *ChannelMonitorV2Aggregator) recomputeRange(ctx context.Context, start, end time.Time) (bool, error) {
+	release, admitted := admitChannelMonitorMode(ctx, s.settings, ChannelMonitorModeV2)
+	if !admitted {
+		return false, nil
+	}
+	defer release()
+	return true, s.repo.RecomputeRange(ctx, start, end)
 }
 
 // channelMonitorV2MaxChunkForDepth returns the hard ceiling for a historical

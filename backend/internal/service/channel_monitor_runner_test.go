@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // stubMonitorSvc 实现 monitorRunnerSvc，用于隔离 runner 与真实 service/repo。
@@ -18,6 +20,59 @@ type stubMonitorSvc struct {
 	runErr     error
 	listErr    error
 	runHoldFor time.Duration // RunCheck 内额外阻塞的时长，用来测试 Stop 等待行为
+}
+
+type runnerRuntimeSettingsRepo struct {
+	mu     sync.RWMutex
+	values map[string]string
+}
+
+func (s *runnerRuntimeSettingsRepo) Get(context.Context, string) (*Setting, error) {
+	panic("unexpected Get call")
+}
+
+func (s *runnerRuntimeSettingsRepo) GetValue(context.Context, string) (string, error) {
+	panic("unexpected GetValue call")
+}
+
+func (s *runnerRuntimeSettingsRepo) Set(context.Context, string, string) error {
+	panic("unexpected Set call")
+}
+
+func (s *runnerRuntimeSettingsRepo) GetMultiple(_ context.Context, keys []string) (map[string]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make(map[string]string, len(keys))
+	for _, key := range keys {
+		values[key] = s.values[key]
+	}
+	return values, nil
+}
+
+func (s *runnerRuntimeSettingsRepo) SetMultiple(context.Context, map[string]string) error {
+	panic("unexpected SetMultiple call")
+}
+
+func (s *runnerRuntimeSettingsRepo) GetAll(context.Context) (map[string]string, error) {
+	panic("unexpected GetAll call")
+}
+
+func (s *runnerRuntimeSettingsRepo) Delete(context.Context, string) error {
+	panic("unexpected Delete call")
+}
+
+func (s *runnerRuntimeSettingsRepo) setMode(mode string) {
+	s.mu.Lock()
+	s.values[SettingKeyChannelMonitorMode] = mode
+	s.mu.Unlock()
+}
+
+func newRunnerRuntimeSettings(mode string) (*SettingService, *runnerRuntimeSettingsRepo) {
+	repo := &runnerRuntimeSettingsRepo{values: map[string]string{
+		SettingKeyChannelMonitorEnabled: "true",
+		SettingKeyChannelMonitorMode:    mode,
+	}}
+	return &SettingService{settingRepo: repo}, repo
 }
 
 func (s *stubMonitorSvc) ListEnabledMonitors(_ context.Context) ([]*ChannelMonitor, error) {
@@ -282,6 +337,68 @@ func TestStart_SkipsDecryptFailedMonitor(t *testing.T) {
 	}
 
 	stoppedWithin(t, r, 3*time.Second)
+}
+
+func TestChannelMonitorRunnerModeFlipsDrainAndRestoreScheduledTasks(t *testing.T) {
+	settings, settingsRepo := newRunnerRuntimeSettings(ChannelMonitorModeV1)
+	svc := &stubMonitorSvc{enabled: []*ChannelMonitor{{ID: 1, Enabled: true, IntervalSeconds: 60}}}
+	runner := newChannelMonitorRunner(svc, settings)
+	runner.Start()
+	waitFor(t, time.Second, "V1 task scheduled", func() bool { return runnerTaskCount(runner) == 1 })
+
+	settingsRepo.setMode(ChannelMonitorModeV2)
+	settings.notifyChannelMonitorRuntimeListeners()
+	waitFor(t, time.Second, "V2 task drain", func() bool { return runnerTaskCount(runner) == 0 })
+
+	runner.Schedule(&ChannelMonitor{ID: 2, Enabled: true, IntervalSeconds: 60})
+	require.Zero(t, runnerTaskCount(runner), "CRUD scheduling must remain inert in V2")
+
+	settingsRepo.setMode(ChannelMonitorModeV1)
+	settings.notifyChannelMonitorRuntimeListeners()
+	waitFor(t, time.Second, "V1 tasks restored", func() bool { return runnerTaskCount(runner) == 1 })
+
+	runner.Stop()
+}
+
+func TestChannelMonitorModeFlipWaitsForV2RecomputeBeforeV1RunCheck(t *testing.T) {
+	settings, settingsRepo := newRunnerRuntimeSettings(ChannelMonitorModeV2)
+	repo := &blockingChannelMonitorV2RepoStub{
+		channelMonitorV2RepoStub: channelMonitorV2RepoStub{config: ChannelMonitorV2Config{Enabled: true}},
+		recomputeStarted:         make(chan struct{}, 1),
+		cancelled:                make(chan struct{}, 1),
+		recomputeRelease:         make(chan struct{}),
+	}
+	aggregator := NewChannelMonitorV2Aggregator(repo, nil, settings)
+	aggregator.Start()
+	<-repo.recomputeStarted
+
+	settingsRepo.setMode(ChannelMonitorModeV1)
+	settings.notifyChannelMonitorRuntimeListeners()
+	runnerSvc := &stubMonitorSvc{
+		enabled:   []*ChannelMonitor{{ID: 1, Enabled: true, IntervalSeconds: 60}},
+		runCalled: make(chan int64, 1),
+	}
+	runner := newChannelMonitorRunner(runnerSvc, settings)
+	runner.Start()
+
+	overlapped := false
+	select {
+	case <-runnerSvc.runCalled:
+		overlapped = true
+		t.Error("V1 RunCheck overlapped the in-flight V2 recompute")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(repo.recomputeRelease)
+	if !overlapped {
+		select {
+		case <-runnerSvc.runCalled:
+		case <-time.After(time.Second):
+			t.Fatal("V1 RunCheck did not proceed after the V2 recompute drained")
+		}
+	}
+
+	aggregator.Stop()
+	runner.Stop()
 }
 
 // TestStop_DrainsAllGoroutines 验证 Stop 会等待所有调度 goroutine 退出（无游离）。
