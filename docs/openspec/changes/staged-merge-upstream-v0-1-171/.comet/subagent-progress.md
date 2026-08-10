@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 24: 闭合 response-model audit、194/195 和前端展示`
 - OpenSpec mapping: `5.6 融合 UsageLog schema/Ent、194/195 migration、单条/批量/best-effort insert、查询筛选和管理端展示，并审查模型广场、错误时间范围及既有本地 frontend 定制`
-- Stage: `task-review`
+- Stage: `task-fix`
 - Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `fd01acfe966a2fa482f6a8ba199c40892c6e2ee2`
@@ -23,4 +23,8 @@
 - Audit evidence: tri-state service/repository/query/admin/frontend chain, all insert variants, model plaza/error range, seven authoritative migration blobs and two stable generation rounds reviewed
 - Final gates: backend focused/tagged compile/lint, frontend suites/typecheck/lint, generation/static checks PASS
 - Concern: Docker-backed 194/195 schema/index/upgrade/idempotency/checksum execution remains `UNVERIFIED`
-- Status: fresh thorough task reviewer pending
+- Reviewer: `ses_016945e6bffeeLhgk9UrIXSrpM` returned `Needs fixes`
+- Important findings accepted: endpoint/path stats omit mismatch filter; UsageTable hides matched=false and conflates it with NULL; migration baseline leaves 192-195 pending instead of only 194/195
+- Minor coverage finding accepted: add focused false/NULL filter and table tri-state regressions
+- Environment boundary unchanged: Docker-backed migration execution remains `UNVERIFIED`
+- Status: fresh Task 24 fix implementer pending
