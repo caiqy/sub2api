@@ -6,8 +6,8 @@
 - TDD mode: `tdd`
 - Current task: `Task 30: 融合 Channel Monitor V2 与隐私默认`
 - OpenSpec mapping: `6.5`
-- Stage: `task-review`
-- Review/fix round: `1/2`
+- Stage: `task-fix`
+- Review/fix round: `2/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `47ea52002c521f12f480df43205b0bb854675eb9`
 - Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-30-brief.md`
@@ -170,4 +170,8 @@
 - Task 30 fix-1 scope: per-SettingService process-local admission/drain, V1 runtime subscription, per-transaction V2 admission, aggregator join, first-bucket overlap query, authoritative frontend success rate, direct tests and cleanup label
 - Task 30 fix-1 implementer gates: required backend focused, lifecycle unit tests, four-package lint, frontend 9 files/40 tests/typecheck/lint, diff/VERSION/generated/migration boundaries PASS
 - Task 30 fix-1 controller gates: required backend four-package focused, four lifecycle regressions, partial-rollup repository behavior, four-package lint, frontend 40 tests/typecheck/lint, diff/VERSION/generated/migration boundaries PASS
-- Task 30 status: same-reviewer re-review pending
+- Task 30 fix-1 review package: `.superpowers/sdd/review-8787b3908..f7d573abf.diff`
+- Task 30 re-reviewer `ses_0142345edffeWULc5mZakLjkAc`: three Important and one Minor findings; `Spec: FAIL`, `Quality: CHANGES_REQUIRED`
+- Task 30 fix-2 adjudication: accept Schedule/drain lock-domain TOCTOU, admission stale-read desired rollback, unchanged-runtime reload/probe burst, and stale success-rate comment
+- Task 30 fix-2 brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-30-fix-2-brief.md`
+- Task 30 status: final review fix round 2 pending
