@@ -13,6 +13,7 @@ import (
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 // supportedGrokVoiceHTTPEndpoints are xAI Voice HTTP paths we forward as-is.
@@ -20,6 +21,10 @@ var supportedGrokVoiceHTTPEndpoints = map[string]struct{}{
 	"tts":           {},
 	"stt":           {},
 	"custom-voices": {},
+}
+
+func GrokVoiceRequestModel(body []byte) string {
+	return strings.TrimSpace(gjson.GetBytes(body, "model").String())
 }
 
 // ForwardGrokVoice forwards the official xAI Voice HTTP APIs (/tts, /stt, and
@@ -50,6 +55,20 @@ func (s *OpenAIGatewayService) ForwardGrokVoice(ctx context.Context, c *gin.Cont
 	for _, part := range parts[1:] {
 		if part == "" || part == "." || part == ".." || strings.ContainsAny(part, "?#\\") {
 			return nil, fmt.Errorf("invalid grok voice endpoint path")
+		}
+	}
+	requestModel := GrokVoiceRequestModel(body)
+	upstreamModel := requestModel
+	var err error
+	if requestModel != "" {
+		if mappedModel := strings.TrimSpace(account.GetMappedModel(requestModel)); mappedModel != "" {
+			upstreamModel = mappedModel
+		}
+		if upstreamModel != requestModel {
+			body, err = sjson.SetBytes(body, "model", upstreamModel)
+			if err != nil {
+				return nil, fmt.Errorf("rewrite grok voice account mapped model: %w", err)
+			}
 		}
 	}
 	token, _, err := s.getRequestCredential(ctx, c, account)
@@ -108,8 +127,8 @@ func (s *OpenAIGatewayService) ForwardGrokVoice(ctx context.Context, c *gin.Cont
 	return &OpenAIForwardResult{
 		// Forced durable money-event id so usage_billing_dedup cannot collapse under a reused client id.
 		RequestID:     StableGrokAudioBillingRequestID(upstreamID),
-		Model:         baseEndpoint,
-		UpstreamModel: baseEndpoint,
+		Model:         firstNonEmpty(requestModel, baseEndpoint),
+		UpstreamModel: firstNonEmpty(upstreamModel, baseEndpoint),
 		Duration:      time.Since(started),
 		AudioUsage:    audioUsage,
 	}, nil

@@ -43,13 +43,17 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 		h.errorResponse(c, status, code, message)
 		return
 	}
+	model := c.Query("model")
+	if strings.TrimSpace(model) == "" {
+		model = "grok-voice-latest"
+	}
 
 	selection, _, err := h.gatewayService.SelectAccountWithSchedulerForCapability(
 		c.Request.Context(),
 		apiKey.GroupID,
 		"",
 		"",
-		"grok-4.5",
+		model,
 		nil,
 		service.OpenAIUpstreamTransportHTTPSSE,
 		// Grok only advertises chat_completions + media capabilities on HEAD.
@@ -84,12 +88,12 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 	}
 	defer func() { _ = conn.CloseNow() }()
 
-	model := c.Query("model")
-	if strings.TrimSpace(model) == "" {
-		model = "grok-voice-latest"
+	upstreamModel := model
+	if mappedModel := strings.TrimSpace(selection.Account.GetMappedModel(model)); mappedModel != "" {
+		upstreamModel = mappedModel
 	}
 	started := time.Now()
-	proxyErr := h.gatewayService.ProxyGrokRealtime(c.Request.Context(), c, conn, selection.Account, token, model)
+	proxyErr := h.gatewayService.ProxyGrokRealtime(c.Request.Context(), c, conn, selection.Account, token, upstreamModel)
 	elapsed := time.Since(started)
 	if proxyErr != nil {
 		reqLog.Info("grok_realtime.proxy_failed", zap.Error(proxyErr))
@@ -103,10 +107,11 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 	if elapsed > 0 {
 		result := &service.OpenAIForwardResult{
 			// One durable id per WS session so retries cannot collapse or double under client ids.
-			RequestID:  service.StableGrokRealtimeBillingRequestID(""),
-			Model:      model,
-			Duration:   elapsed,
-			AudioUsage: &service.AudioUsage{Mode: "realtime", DurationOrUnits: elapsed.Minutes()},
+			RequestID:     service.StableGrokRealtimeBillingRequestID(""),
+			Model:         model,
+			UpstreamModel: upstreamModel,
+			Duration:      elapsed,
+			AudioUsage:    &service.AudioUsage{Mode: "realtime", DurationOrUnits: elapsed.Minutes()},
 		}
 		h.recordGrokVoiceUsage(c, apiKey, selection.Account, subscription, "realtime", nil, result)
 	}
@@ -176,7 +181,10 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 	failed := map[int64]struct{}{}
 	var last *service.UpstreamFailoverError
 	reqLog := requestLogger(c, "handler.openai_gateway.grok_voice", zap.String("endpoint", endpoint))
-	selectionModel := "grok-4.5"
+	selectionModel := service.GrokVoiceRequestModel(body)
+	if selectionModel == "" {
+		selectionModel = "grok-4.5"
+	}
 
 	for attempts := 0; attempts < 4; attempts++ {
 		selection, _, selectErr := h.gatewayService.SelectAccountWithSchedulerForCapability(
