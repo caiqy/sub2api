@@ -6,8 +6,8 @@
 - TDD mode: `tdd`
 - Current task: `Task 30: 融合 Channel Monitor V2 与隐私默认`
 - OpenSpec mapping: `6.5`
-- Stage: `task-review`
-- Review/fix round: `0/2`
+- Stage: `task-fix`
+- Review/fix round: `1/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `47ea52002c521f12f480df43205b0bb854675eb9`
 - Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-30-brief.md`
@@ -160,4 +160,8 @@
 - Task 30 scope: `channel_monitor_v2_aggregator.go`, `channel_monitor_v2_repo.go` and two direct test files only; no migration/frontend production/settings/schema/dependency change
 - Task 30 controller gates: required backend focused, both direct regressions, four-package golangci-lint, frontend 38 tests/typecheck, diff/VERSION/migration boundary PASS
 - Task 30 concern for reviewer: no new V2 work starts after mode is observed outside V2, but an atomic recompute already in progress can finish under its existing 55-second context after a mode flip
-- Task 30 status: thorough review pending
+- Task 30 review package: `.superpowers/sdd/review-e84c93cbe..1de5700b1.diff`
+- Task 30 reviewer `ses_0142345edffeWULc5mZakLjkAc`: four Important and two Minor findings; `Spec: FAIL`, `Quality: CHANGES_REQUIRED`
+- Task 30 adjudication: accept mode admission/drain plus V1 hot-update lifecycle, first partial fixed-rollup bucket, frontend authoritative `success_rate`, aggregator Stop join and cleanup label; reject controller-owned progress as implementation scope violation
+- Task 30 fix-1 brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-30-fix-1-brief.md`
+- Task 30 status: review fix round 1 pending
