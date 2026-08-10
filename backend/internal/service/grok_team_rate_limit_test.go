@@ -51,11 +51,17 @@ func TestGrokTeamModelRateLimit_Expires(t *testing.T) {
 		ID: 201, Platform: PlatformGrok, Type: AccountTypeOAuth,
 		Credentials: map[string]any{"team_id": team},
 	}
-	past := time.Now().Add(-time.Minute)
-	markGrokTeamModelRateLimit(a, "grok-4.5", past)
-	// mark clamps expired until into default TTL from "now" — use direct store inject via past+recheck
-	// After mark with past, resolveGrokTeamRateLimitUntil path isn't used; mark uses now+default when until not after now.
-	require.True(t, isGrokTeamModelRateLimited(a, "grok-4.5", time.Now()))
+	now := time.Now()
+	key := grokTeamModelRateLimitKey(grokTeamFingerprint(team), "grok-4.5")
+	globalGrokTeamModelRateLimits.mu.Lock()
+	globalGrokTeamModelRateLimits.items[key] = grokTeamModelRateLimit{Until: now.Add(-time.Minute)}
+	globalGrokTeamModelRateLimits.mu.Unlock()
+
+	require.False(t, isGrokTeamModelRateLimited(a, "grok-4.5", now))
+	globalGrokTeamModelRateLimits.mu.Lock()
+	_, found := globalGrokTeamModelRateLimits.items[key]
+	globalGrokTeamModelRateLimits.mu.Unlock()
+	require.False(t, found)
 }
 
 func TestGrokTeamModelRateLimitFilterUsesMappedUpstreamModel(t *testing.T) {
@@ -72,4 +78,21 @@ func TestGrokTeamModelRateLimitFilterUsesMappedUpstreamModel(t *testing.T) {
 	markGrokTeamModelRateLimit(account, "grok-4.5", now.Add(time.Hour))
 
 	require.Empty(t, filterGrokTeamModelRateLimitedAccounts([]Account{*account}, "gpt-5", now))
+}
+
+func TestGrokSchedulingEligibilityUsesFinalResponsesModelID(t *testing.T) {
+	now := time.Now()
+	account := &Account{
+		ID:       302,
+		Platform: PlatformGrok,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"team_id":       "team-final-model-302",
+			"model_mapping": map[string]any{"gpt-*": "grok-4.20-multi-agent"},
+		},
+	}
+	markGrokTeamModelRateLimit(account, "grok-4.20-multi-agent-0309", now.Add(time.Hour))
+
+	require.False(t, isGrokSchedulingEligible(account, "gpt-5", now))
+	require.Equal(t, "", canonicalOpenAIAccountSchedulingModel(account, ""))
 }

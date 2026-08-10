@@ -208,6 +208,37 @@ func TestOpenAIGetSchedulableAccount_AppliesGrokFreeSoftGate(t *testing.T) {
 	}, 2*time.Second, 10*time.Millisecond, "OpenAI legacy sticky must apply free soft-gate after cache warm")
 }
 
+func TestGrokWebSearchSelectionSkipsCooledStickyAccount(t *testing.T) {
+	groupID := int64(8803)
+	team := "gateway-search-cooldown-" + time.Now().Format("150405.000000000")
+	blocked := Account{
+		ID: 88031, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, GroupIDs: []int64{groupID},
+		Credentials: map[string]any{"team_id": team},
+	}
+	fallback := Account{
+		ID: 88032, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 10, GroupIDs: []int64{groupID},
+	}
+	cache := &mockGatewayCacheForPlatform{sessionBindings: map[string]int64{"web-search-grok": blocked.ID}}
+	svc := &GatewayService{
+		cfg: &config.Config{RunMode: config.RunModeSimple},
+		accountRepo: &mockAccountRepoForPlatform{
+			accounts:     []Account{blocked, fallback},
+			accountsByID: map[int64]*Account{blocked.ID: &blocked, fallback.ID: &fallback},
+		},
+		groupRepo: &mockGroupRepoForGateway{groups: map[int64]*Group{
+			groupID: {ID: groupID, Name: "grok-web-search", Platform: PlatformGrok},
+		}},
+		cache: cache,
+	}
+
+	markGrokTeamModelRateLimit(&blocked, "grok-4.5", time.Now().Add(time.Hour))
+	account, err := svc.SelectAccountForModel(context.Background(), &groupID, "web-search-grok", "grok-4.5")
+
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Equal(t, fallback.ID, account.ID)
+}
+
 func TestCountGrokNativeSearchCallsFromJSON_MessagesStyleBody(t *testing.T) {
 	// Proves the same counter used by Anthropic-buffered Grok /v1/messages path.
 	body := []byte(`{"id":"r1","output":[{"type":"web_search_call","id":"ws1"},{"type":"message","role":"assistant"}]}`)

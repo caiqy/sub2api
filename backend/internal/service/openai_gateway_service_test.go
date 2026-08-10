@@ -1657,6 +1657,37 @@ func TestOpenAISelectAccountWithLoadAwareness_AllFullWaitPlan(t *testing.T) {
 	}
 }
 
+func TestOpenAISelectAccountWithLoadAwareness_GrokCooldownSkipsStickyAndWaitPlan(t *testing.T) {
+	groupID := int64(1)
+	team := "legacy-grok-cooldown-" + time.Now().Format("150405.000000000")
+	blocked := Account{
+		ID: 91001, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0,
+		Credentials: map[string]any{"team_id": team, "model_mapping": map[string]any{"gpt-*": "grok-4.5"}},
+	}
+	fallback := Account{
+		ID: 91002, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 10,
+		Credentials: map[string]any{"model_mapping": map[string]any{"gpt-*": "grok-4.3"}},
+	}
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	cfg.Gateway.Sticky.OpenAI.Enabled = true
+	cache := &stubGatewayCache{sessionBindings: map[string]int64{"openai:legacy-grok-cooldown": blocked.ID}}
+	svc := &OpenAIGatewayService{
+		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{blocked, fallback}},
+		cache:              cache,
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(stubConcurrencyCache{acquireResults: map[int64]bool{blocked.ID: false, fallback.ID: false}}),
+	}
+
+	markGrokTeamModelRateLimit(&blocked, "grok-4.5", time.Now().Add(time.Hour))
+	selection, err := svc.selectAccountWithLoadAwareness(context.Background(), &groupID, PlatformGrok, "legacy-grok-cooldown", "gpt-5", nil, false, OpenAIEndpointCapabilityChatCompletions)
+
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.WaitPlan)
+	require.Equal(t, fallback.ID, selection.Account.ID)
+	require.Equal(t, fallback.ID, selection.WaitPlan.AccountID)
+}
+
 func TestOpenAISelectAccountWithLoadAwareness_LoadBatchErrorNoAcquire(t *testing.T) {
 	groupID := int64(1)
 	repo := stubOpenAIAccountRepo{

@@ -441,6 +441,68 @@ func TestLayered_GrokTeamCooldownBypassesSessionSticky(t *testing.T) {
 	}
 }
 
+type grokFreshRecheckRepo struct {
+	schedulerTestOpenAIAccountRepo
+	freshByID map[int64]*Account
+}
+
+func (r grokFreshRecheckRepo) GetByID(ctx context.Context, id int64) (*Account, error) {
+	if account := r.freshByID[id]; account != nil {
+		copy := *account
+		return &copy, nil
+	}
+	return r.schedulerTestOpenAIAccountRepo.GetByID(ctx, id)
+}
+
+func TestLayered_GrokCooldownRechecksFreshMappingBeforeStickyWeightedWaitPlan(t *testing.T) {
+	groupID := int64(920152)
+	team := "layered-fresh-grok-" + time.Now().Format("150405.000000000")
+	stale := Account{
+		ID: 92015201, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, GroupIDs: []int64{groupID},
+		Credentials: map[string]any{"team_id": team, "model_mapping": map[string]any{"gpt-*": "grok-4.3"}},
+	}
+	fresh := stale
+	fresh.Credentials = map[string]any{"team_id": team, "model_mapping": map[string]any{"gpt-*": "grok-4.5"}}
+	fallback := Account{
+		ID: 92015202, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 10, GroupIDs: []int64{groupID},
+		Credentials: map[string]any{"model_mapping": map[string]any{"gpt-*": "grok-4.3"}},
+	}
+	repo := grokFreshRecheckRepo{
+		schedulerTestOpenAIAccountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{stale, fallback}},
+		freshByID:                      map[int64]*Account{stale.ID: &fresh, fallback.ID: &fallback},
+	}
+	cfg := newOpenAIStickyEnabledTestConfig()
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	snapshotCfg := &config.Config{}
+	snapshotCfg.Gateway.Scheduling.DbFallbackEnabled = true
+	svc := &OpenAIGatewayService{
+		accountRepo: repo,
+		cfg:         cfg,
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{
+			acquireResults: map[int64]bool{stale.ID: false, fallback.ID: false},
+		}),
+	}
+	svc.schedulerSnapshot = NewSchedulerSnapshotService(nil, nil, repo, schedulerTestGroupRepo{groups: map[int64]*Group{
+		groupID: {ID: groupID, Name: "fresh-grok", Platform: PlatformGrok},
+	}}, snapshotCfg)
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	markGrokTeamModelRateLimit(&fresh, "grok-4.5", time.Now().Add(time.Hour))
+	selection, _, err := svc.getOpenAIAccountScheduler().Select(context.Background(), OpenAIAccountScheduleRequest{
+		GroupID:         &groupID,
+		Platform:        PlatformGrok,
+		RequestedModel:  "gpt-5",
+		StickyWeighted:  true,
+		StickyAccountID: stale.ID,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.WaitPlan)
+	require.Equal(t, fallback.ID, selection.Account.ID)
+	require.Equal(t, fallback.ID, selection.WaitPlan.AccountID)
+}
+
 // TestLayered_TTFTPenalty_SharedEvaluatorUsesConsistentGroupBaseline verifies
 // that the shared evaluator helpers compute and apply the same group-level TTFT
 // baseline regardless of which account is being evaluated. This covers helper
