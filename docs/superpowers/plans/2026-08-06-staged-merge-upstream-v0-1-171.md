@@ -1677,7 +1677,7 @@ if ($task22ChangedPaths.Count -gt 0) { Commit-NamedPaths -Message 'fix: preserve
 
 ### Task 23: 融合 gateway、transport 和 protocol 修复
 
-- [ ] Task 23: 融合 gateway、transport 和 protocol 修复
+- [x] Task 23: 融合 gateway、transport 和 protocol 修复
 
 **映射 OpenSpec：**5.5
 

@@ -34,7 +34,7 @@
 - [x] 5.2 使用 `git merge --no-ff --no-commit v0.1.172`，逐文件语义融合实际冲突并创建第二父为固定 `155c494964c3ea6ecc31f52679525c1034bf0f16` 的纯 merge commit
 - [x] 5.3 以 TDD 审查 OAuth pending 账号接管修复、腾讯验证码 region/ticket/CSP 与本地 Turnstile/Tencent/Aliyun 互斥 provider、OAuth/passkey 和前端 challenge 生命周期的交互
 - [x] 5.4 以 TDD 审查金额量化、订阅/usage persistence 与本地 quota receipt/outbox/cache；明确保留新购及用户/管理员手动重置的实际操作时刻锚点和后续 24 小时滚动窗口
-- [ ] 5.5 以 TDD 审查 upstream response model audit、Codex identity/capacity failover、transport timeout、body replay/release、sticky/final account、WS prewarm、count_tokens、Grok、图片 cooldown 和协议清洗
+- [x] 5.5 以 TDD 审查 upstream response model audit、Codex identity/capacity failover、transport timeout、body replay/release、sticky/final account、WS prewarm、count_tokens、Grok、图片 cooldown 和协议清洗
 - [ ] 5.6 融合 UsageLog schema/Ent、194/195 migration、单条/批量/best-effort insert、查询筛选和管理端展示，并审查模型广场、错误时间范围及既有本地 frontend 定制
 - [ ] 5.7 运行 v0.1.172 全部能力聚焦测试、`make test`、版本锁定 build、backend/frontend lint、typecheck、两轮 generate、静态冲突与适用的本机 integration，关闭能力矩阵 gap
 - [ ] 5.8 保持中间 VERSION `0.1.171.1`，记录 172 阶段门禁、第三个 merge 第二父和 191/192/193/194/195 migration identity，关闭第三阶段能力矩阵后才允许进入 173
