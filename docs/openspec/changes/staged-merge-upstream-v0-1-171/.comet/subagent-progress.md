@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 28: 融合 Grok 媒体、Voice、搜索与网关契约`
 - OpenSpec mapping: `6.3`
-- Stage: `task-implement`
+- Stage: `task-review`
 - Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `67be08211`
@@ -92,4 +92,8 @@
 - Task 27 status: complete; OpenSpec 6.2 complete
 - Task 28 baseline: broad media/Voice/search command RED only in edit_success/edit_upstream_4xx expected body; local contracts command PASS
 - Task 28 RED classification: v0.1.173 canonical multipart conversion adds required image.type=image_url; update two stale expected fixtures, do not revert production normalization
-- Task 28 status: implementer pending
+- Task 28 implementer `ses_0157159bbffeu86xousdw23wax`: fixture `06b997492`; Voice snapshot `18437349c`; Voice mapping `752d8b082`; native search mapping `c5ffbed56`
+- Task 28 production REDs: TTS audio retained in usage snapshot; Voice failover stale model; native search stale selected-account model
+- Task 28 controller gates: both required matrices PASS; UsageDetailCapture direct tests PASS; related golangci-lint 0 issues; VERSION unchanged
+- Task 28 review package: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-28-review-package.md`
+- Task 28 status: reviewer pending
