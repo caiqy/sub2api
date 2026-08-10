@@ -6,8 +6,8 @@
 - TDD mode: `tdd`
 - Current task: `Task 25: 运行 v0.1.172 全量门禁并冻结 v0.1.173 精确矩阵`
 - OpenSpec mapping: `5.7、5.8`
-- Stage: `task-implement`
-- Review/fix round: `1/2`
+- Stage: `task-fix`
+- Review/fix round: `2/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `ecac7fe5ad9dae69475acacc83925a9fbea1f96b`
 - Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-25-brief.md`
@@ -52,4 +52,9 @@
 - Task 25 remediation commit: `4dab3b6c575a49ab471b527b40da9c7baf6805c3`
 - Task 25 remediation evidence: focused RED retained; focused GREEN, full openai_ws_v2 package, and isolated-key `make test` PASS
 - Task 25 remediation reviewer: `ses_0164b59faffe6o2vl9ujAr2RfW` returned `Spec: PASS`, `Quality: APPROVED`, no findings
-- Task 25 status: full focused/full gate rerun and ledger update pending from remediation HEAD
+- Task 25 rerun implementer: `ses_016657249ffePt2IrAyDUsWM4s` returned `DONE_WITH_CONCERNS`
+- Task 25 ledger commit: `d88b421ad`; fresh non-Docker gates PASS, generate stable, v0.1.172 gap=0, v0.1.173 manifest/overlap=352/140
+- Task 25 reviewer: `ses_016336266ffeIPwFZfPDPASWl4` returned `Spec: FAIL`, `Quality: NEEDS_FIXES`
+- Reviewer adjudication: reject stale midnight claim because current session/OpenSpec 5.4 bind admin reset to actual operation time; accept final report status, reproducible overlap command/exit evidence, and fresh warning evidence
+- Task 25 final fix brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-25-fix-2-brief.md`
+- Task 25 status: final evidence fix pending; any new Important after this round must be escalated
