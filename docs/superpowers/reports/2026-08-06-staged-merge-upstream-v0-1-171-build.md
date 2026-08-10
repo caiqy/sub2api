@@ -1962,3 +1962,222 @@ Makefile
 - Docker：`Get-Command docker` 显示 unavailable；未运行 Docker/Testcontainers、未连接远程机器补验。CGO：`go env CGO_ENABLED` 为 `0`；未运行 cgo/race 依赖验证。
 - 风险信号：跨模块为是（172/173 manifests 横跨 gateway、auth、scheduler、schema/migration 与 frontend）；security、concurrency、schema/API 均为后续 merge 前的显式审查面；本 Task 无产品 diff。`DONE_WITH_CONCERNS` 仅因 Docker/CGO residual 与失效 `OPENAI_API_KEY` 使远程可选 comparison 未验证；ledger diff 大于 200 行是完整、可审计 manifest 清单所必需。
 - 禁止操作确认：未 merge 172/173，未修改产品、测试、VERSION、plan、OpenSpec 或 Comet runtime；未 push/tag/release/deploy，未构建或发布镜像，未操作服务器、数据库、Redis 或 Nginx。
+
+## Task 25: Fresh v0.1.172 gates and v0.1.173 matrix
+
+- Status: `DONE_WITH_CONCERNS` at checkpoint `f6390df5f5f5eb58a00fe8157b47c0fb7ef0bcd4`. This is a fresh rerun after remediation `4dab3b6c575a49ab471b527b40da9c7baf6805c3`; no Task 25 result from the failed pre-remediation checkpoint was reused.
+- Starting and pre-commit worktree evidence: `git status --short` contained only the pre-existing `?? .comet/current-change.json`. It remains untouched and is not part of this ledger commit.
+
+### Fresh Focused and Full Gates
+
+| Command | Exit | Result |
+| --- | ---: | --- |
+| `Push-Location backend; try { go test ./internal/handler ./internal/service ./internal/repository ./internal/server/middleware -run '(PendingOAuth|Captcha|Turnstile|Tencent|Aliyun|Passkey)' -count=1 } finally { Pop-Location }` | 0 | PASS: handler, service, repository, middleware. |
+| `Push-Location backend; try { go test -tags unit ./internal/service ./internal/repository -run '(Subscription|Quota|UsageBilling|Quantize|Receipt|Outbox)' -count=1 } finally { Pop-Location }` | 0 | PASS: service, repository. |
+| `Push-Location backend; try { go test -tags unit ./internal/handler ./internal/service ./internal/repository ./internal/pkg/apicompat ./internal/pkg/proxyutil -run '(Capacity|Codex|Prewarm|CountTokens|Grok|Cooldown|Anthropic|Dial|Timeout|RequestBody|Sticky|Failover)' -count=1 } finally { Pop-Location }` | 0 | PASS: handler, service, repository, apicompat, proxyutil. |
+| `Push-Location backend; try { go test -tags unit ./internal/service ./internal/repository ./internal/handler -run '(UpstreamResponseModel|UpstreamModelMismatch|PreservesRequestedAndUpstreamModels|UsageLog|UsageHandler)' -count=1 } finally { Pop-Location }` | 0 | PASS: service, repository, handler. |
+| `pnpm --dir frontend exec vitest run src/components/__tests__/CaptchaChallenge.spec.ts src/components/__tests__/TencentCaptchaGate.spec.ts src/components/auth/__tests__/PendingOAuthCreateAccountForm.spec.ts src/components/admin/usage/__tests__/UsageFilters.spec.ts src/components/admin/usage/__tests__/UsageTable.spec.ts src/views/admin/__tests__/UsageView.spec.ts src/views/auth/__tests__/TencentCaptchaActionGate.spec.ts src/views/auth/__tests__/TencentCaptchaForgotPassword.spec.ts src/views/auth/__tests__/EmailVerifyView.spec.ts` | 0 | PASS: 9 files, 100 tests. |
+| `cmd /d /s /c 'set "OPENAI_API_KEY=" && make test'` | 0 | PASS: the inherited key was blank only in this child process; backend passed and frontend reported 239 files / 1842 tests. No optional remote comparison was activated. |
+| `make 'VERSION=0.1.171.1' 'SHELL=D:/scoop/shims/bash.exe' build` | 0 | PASS: backend build, `vue-tsc -b`, and Vite production build; 1052 modules transformed. |
+| `golangci-lint run ./...` in `backend` | 0 | PASS: `0 issues.` |
+| `pnpm --dir frontend run lint:check` | 0 | PASS. |
+| `pnpm --dir frontend run typecheck` | 0 | PASS. |
+| `make -C backend generate` | 0 | PASS: first generator pass. |
+| `git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` | 0 | PASS after first generator pass. |
+| `make -C backend generate` | 0 | PASS: second generator pass. |
+| `git diff --exit-code -- backend/ent backend/cmd/server/wire_gen.go` | 0 | PASS after second generator pass. |
+| `git ls-files -u` | 0 | PASS: no unmerged index entries. |
+| `git diff --check` | 0 | PASS: no whitespace errors. |
+| `git grep -nE '^(<<<<<<< |=======([[:space:]]*)$|>>>>>>> )' -- .` | 1 | PASS: expected no-match tracked conflict-marker scan. |
+
+Warnings: focused frontend tests and build emitted the existing Browserslist data-age warning. The production build also emitted existing dynamic/static import and chunk-size warnings. An initial deliberately broad equals-prefix scan found a string literal at `backend/internal/pkg/antigravity/request_transformer.go:267`; the standard conflict-marker scan above is the authoritative clean check.
+
+### Docker, Topology, and Migration Identity
+
+- `if ($null -eq (Get-Command docker -ErrorAction SilentlyContinue)) { 'docker=unavailable' } else { docker version --format '{{.Client.Version}} {{.Server.Version}}' }` exit `0`: `docker=unavailable`. No Docker/Testcontainers or remote host was used. Execution of 194/195 schema/index/upgrade/idempotency/checksum remains `UNVERIFIED`.
+- `git rev-parse 'v0.1.172^{commit}' 'v0.1.173^{commit}'` exit `0`: `155c494964c3ea6ecc31f52679525c1034bf0f16` and `29009f0b2ea14edf3b11ae2564fb617ff91a03b4`.
+- `git merge-base --is-ancestor 155c494964c3ea6ecc31f52679525c1034bf0f16 HEAD` exit `0`. `git show -s --format='%H%n%P%n%s' 95fa00f99` exit `0` records merge `95fa00f99b3f0d3509e02f6a5f9d29fbed96c984` with second parent `155c494964c3ea6ecc31f52679525c1034bf0f16` and subject `merge: integrate upstream v0.1.172`.
+- `git show HEAD:backend/cmd/server/VERSION` exit `0`: exactly `0.1.171.1`.
+- `git ls-tree HEAD --` for the protected migration paths exited `0`; current blobs are:
+
+```text
+522b16b5bba12aedb9c4198d2d4ef082c8ea718f backend/migrations/191_passkey_credentials.sql
+c22d47d79cbbaf4bc40524d42ef52e6cc8ac3af6 backend/migrations/191_subscription_quota_advance_receipts.sql
+072b3c5db17accfd5197ea72f9a49fd6bdf446b4 backend/migrations/192_group_profit_control.sql
+502ecec1caf9f76e022c2e83acf3707190539301 backend/migrations/192_subscription_cache_invalidation_outbox.sql
+f32f6e6f8b6d026b2e8620c90954336e30550c41 backend/migrations/193_group_profit_control_auth_cache_invalidation.sql
+a5865aca179fbc4467b68ab184bc75103a3fa8eb backend/migrations/194_add_usage_log_upstream_response_model.sql
+811ca8786c46e0c7b360fc8d23299b47efd6cf3f backend/migrations/195_add_usage_log_upstream_model_mismatch_index_notx.sql
+```
+
+### v0.1.172 Capability Closure
+
+| # | Capability cluster | Fresh evidence | Status |
+| ---: | --- | --- | --- |
+| 1 | usage, upstream response model, dashboard, UsageLog migration | Focused upstream-model/UsageLog gate and focused Usage frontend tests passed; 194/195 names and blobs are protected. Docker execution remains unverified. | `manual` |
+| 2 | OpenAI/Codex, Anthropic/Antigravity, request compatibility | Focused capacity/Codex/Grok/Anthropic/timeout/request-body/sticky/failover gate and full suite passed. | `protected` |
+| 3 | auth, captcha, settings, CSP, security cache | Focused auth/captcha gate, focused frontend captcha/OAuth tests, and full suite passed. | `protected` |
+| 4 | subscription, payment, billing, scheduler cross-surface | Focused subscription/quota/billing gate and full suite passed. The existing actual-operation-time daily-window anchor remains the review contract. | `protected` |
+
+Totals: `protected=3`, `manual=1`, Docker-only row `unverified=0`, `gap=0`. The separate Docker residual above is not promoted to PASS.
+
+### v0.1.173 Manifest and Pre-Merge Freeze
+
+- Fresh `git diff --name-only v0.1.172..v0.1.173` recomputation produced exactly `352` files; `git diff --shortstat v0.1.172..v0.1.173` exit `0` reported `352 files changed, 33307 insertions(+), 2271 deletions(-)`. The complete immutable 352-file manifest remains recorded in the Task 19 `v0.1.173 Manifest (352)` section above.
+- Fresh `git diff --name-only v0.1.172...HEAD` produced a 1237-file local delta. Sorted-unique intersection with the recomputed 352-file manifest is `140`, explicitly superseding the preliminary `138` snapshot from before the v0.1.172 merge.
+
+| # | Pre-merge review contract | Status |
+| ---: | --- | --- |
+| 1 | Grok mapping default is off: missing, empty, or false `grok_cross_client_model_map_enabled` must not add cross-client wildcards; only explicit true or account `model_mapping` may do so. Password authorization is always hard-rejected. | `manual` |
+| 2 | Grok media, Voice, and search retain request-body, usage, recovery, cooldown, sticky/failover, and concurrent scheduling boundaries. | `manual` |
+| 3 | Channel Monitor defaults to V1; V1/V2 runner ownership stays mutually exclusive and ordinary-user throughput stays private. | `manual` |
+| 4 | Ent/Wire output, dependency locks, pricing schema, and migrations retain exact identities; Docker migration execution remains unverified. | `unverified` |
+
+These are review contracts only, not claims that v0.1.173 has been implemented.
+
+### v0.1.173 Exact Overlap (140)
+
+```text
+.gitignore
+backend/cmd/server/VERSION
+backend/cmd/server/wire_gen_test.go
+backend/cmd/server/wire_gen.go
+backend/cmd/server/wire.go
+backend/ent/group_create.go
+backend/ent/group_update.go
+backend/ent/group.go
+backend/ent/group/group.go
+backend/ent/group/where.go
+backend/ent/migrate/schema.go
+backend/ent/mutation.go
+backend/ent/runtime/runtime.go
+backend/ent/schema/group.go
+backend/go.sum
+backend/internal/config/config_test.go
+backend/internal/config/config.go
+backend/internal/handler/admin/account_handler.go
+backend/internal/handler/admin/group_handler.go
+backend/internal/handler/admin/setting_handler_update.go
+backend/internal/handler/admin/setting_handler.go
+backend/internal/handler/auth_oauth_pending_flow_test.go
+backend/internal/handler/dto/mappers.go
+backend/internal/handler/dto/settings.go
+backend/internal/handler/dto/types.go
+backend/internal/handler/gateway_handler.go
+backend/internal/handler/grok_media_test.go
+backend/internal/handler/grok_media.go
+backend/internal/handler/handler.go
+backend/internal/handler/openai_gateway_handler_test.go
+backend/internal/handler/openai_gateway_handler.go
+backend/internal/handler/wire.go
+backend/internal/repository/api_key_repo.go
+backend/internal/repository/group_repo.go
+backend/internal/repository/http_upstream.go
+backend/internal/repository/migrations_runner.go
+backend/internal/repository/user_repo_email_alias_test.go
+backend/internal/repository/user_repo_integration_test.go
+backend/internal/repository/user_repo.go
+backend/internal/repository/wire.go
+backend/internal/server/api_contract_test.go
+backend/internal/server/routes/admin.go
+backend/internal/server/routes/gateway_test.go
+backend/internal/server/routes/gateway.go
+backend/internal/server/routes/user.go
+backend/internal/service/account_service.go
+backend/internal/service/account_usage_service.go
+backend/internal/service/account.go
+backend/internal/service/admin_account.go
+backend/internal/service/admin_group.go
+backend/internal/service/admin_service_delete_test.go
+backend/internal/service/admin_service.go
+backend/internal/service/antigravity_gateway_gemini.go
+backend/internal/service/antigravity_gateway_service_test.go
+backend/internal/service/api_key_auth_cache_impl.go
+backend/internal/service/api_key_auth_cache_profit_test.go
+backend/internal/service/api_key_auth_cache.go
+backend/internal/service/auth_service.go
+backend/internal/service/billing_service.go
+backend/internal/service/domain_constants.go
+backend/internal/service/gateway_hotpath_optimization_test.go
+backend/internal/service/gateway_multiplatform_test.go
+backend/internal/service/gateway_scheduling.go
+backend/internal/service/gateway_service.go
+backend/internal/service/gateway_usage_billing.go
+backend/internal/service/gemini_chat_completions_compat_service.go
+backend/internal/service/gemini_messages_compat_service.go
+backend/internal/service/gemini_multiplatform_test.go
+backend/internal/service/grok_media.go
+backend/internal/service/group.go
+backend/internal/service/openai_account_scheduler_test.go
+backend/internal/service/openai_account_scheduler.go
+backend/internal/service/openai_gateway_chat_completions_raw.go
+backend/internal/service/openai_gateway_chat_completions.go
+backend/internal/service/openai_gateway_count_tokens_test.go
+backend/internal/service/openai_gateway_forward.go
+backend/internal/service/openai_gateway_grok_chat_bridge.go
+backend/internal/service/openai_gateway_grok_test.go
+backend/internal/service/openai_gateway_grok.go
+backend/internal/service/openai_gateway_messages.go
+backend/internal/service/openai_gateway_passthrough.go
+backend/internal/service/openai_gateway_record_usage_test.go
+backend/internal/service/openai_gateway_request_body.go
+backend/internal/service/openai_gateway_response_handling.go
+backend/internal/service/openai_gateway_scheduling.go
+backend/internal/service/openai_gateway_service_test.go
+backend/internal/service/openai_gateway_service.go
+backend/internal/service/openai_gateway_usage.go
+backend/internal/service/openai_images_test.go
+backend/internal/service/openai_images.go
+backend/internal/service/openai_ws_forwarder_ingress.go
+backend/internal/service/openai_ws_forwarder_success_test.go
+backend/internal/service/openai_ws_forwarder_v2.go
+backend/internal/service/openai_ws_http_bridge_test.go
+backend/internal/service/openai_ws_http_bridge.go
+backend/internal/service/openai_ws_v2_passthrough_adapter.go
+backend/internal/service/setting_features.go
+backend/internal/service/setting_gateway_runtime.go
+backend/internal/service/setting_parse.go
+backend/internal/service/setting_service_public_test.go
+backend/internal/service/setting_service.go
+backend/internal/service/setting_update.go
+backend/internal/service/settings_view.go
+backend/internal/service/user_service.go
+backend/internal/service/wire.go
+backend/internal/testutil/stubs.go
+deploy/config.example.yaml
+frontend/pnpm-lock.yaml
+frontend/src/api/__tests__/admin.system.rollback.spec.ts
+frontend/src/api/admin/settings.ts
+frontend/src/components/account/__tests__/AccountUsageCell.spec.ts
+frontend/src/components/account/__tests__/CreateAccountModal.grok.spec.ts
+frontend/src/components/account/CreateAccountModal.vue
+frontend/src/components/account/EditAccountModal.vue
+frontend/src/components/admin/account/ReAuthAccountModal.vue
+frontend/src/i18n/locales/en/admin/accounts.ts
+frontend/src/i18n/locales/en/admin/overview.ts
+frontend/src/i18n/locales/en/admin/settings.ts
+frontend/src/i18n/locales/en/common.ts
+frontend/src/i18n/locales/en/dashboard.ts
+frontend/src/i18n/locales/en/index.ts
+frontend/src/i18n/locales/zh/admin/accounts.ts
+frontend/src/i18n/locales/zh/admin/overview.ts
+frontend/src/i18n/locales/zh/admin/settings.ts
+frontend/src/i18n/locales/zh/common.ts
+frontend/src/i18n/locales/zh/dashboard.ts
+frontend/src/i18n/locales/zh/index.ts
+frontend/src/types/index.ts
+frontend/src/views/admin/__tests__/GroupsView.columnSettings.spec.ts
+frontend/src/views/admin/__tests__/GroupsView.duplicate.spec.ts
+frontend/src/views/admin/__tests__/SettingsView.spec.ts
+frontend/src/views/admin/AccountsView.vue
+frontend/src/views/admin/GroupsView.vue
+frontend/src/views/admin/SettingsView.vue
+frontend/src/views/auth/__tests__/EmailVerifyView.spec.ts
+frontend/src/views/auth/__tests__/RegisterView.spec.ts
+frontend/src/views/auth/EmailVerifyView.vue
+frontend/src/views/auth/RegisterView.vue
+frontend/src/views/user/UsageView.vue
+Makefile
+```
+
+- Scope confirmation: no product/test/VERSION/plan/OpenSpec/progress/Comet runtime change; no push, tag, release, deploy, image build, remote service, or version bump. This Task 25 commit contains only this ledger.
