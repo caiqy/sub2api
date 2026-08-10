@@ -4,18 +4,18 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Current task: `Task 26: 创建纯 v0.1.173 merge 节点`
-- OpenSpec mapping: `6.1`
-- Stage: `task-complete`
+- Current task: `Task 27: 固定 Grok 授权与模型映射安全默认`
+- OpenSpec mapping: `6.2`
+- Stage: `task-implement`
 - Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
-- Task start HEAD: `41d5c86e5ec788169346257d20c266b70da34db6`
-- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-26-brief.md`
-- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-26-report.md`
-- Dependency: Task 25 closed v0.1.172 gap=0 and froze the exact 352/140 v0.1.173 matrix
-- TDD rule: pure merge only; no no-conflict semantic remediation in the merge commit
-- Risk signals: merge topology、semantic conflicts、generated outputs、dependency locks、migration filenames、cross-module
-- Hard boundary: one no-ff merge commit, first parent fixed pre-merge HEAD, second parent fixed peeled v0.1.173, VERSION remains 0.1.171.1
+- Task start HEAD: `121240c564ca826919d8ceebcd9e9e6046af21b9`
+- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-27-brief.md`
+- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-27-report.md`
+- Dependency: Task 26 merged v0.1.173 tag content while deferring mapping/password compatibility
+- TDD rule: prove default-on and config-enabled password behavior RED before minimal safe-default fixes
+- Risk signals: security、settings runtime、global mapping cache、account precedence、API/frontend
+- Hard boundary: mapping missing/empty/false off, explicit true on, account explicit mapping wins, password capability/API always disabled
 - Implementer: `ses_016a4ff6affeoRN1EoiY0Sy1px` returned `DONE_WITH_CONCERNS`
 - Implementation commit: `ff58b07e14d563296477c74bfb3573e765bec20c` (parent `3f1fda732af1fb59d32f2afcd6dbba6caf88ab9b`)
 - Genuine RED: paginated UsageLog SQLMock fixtures exposed 59 persisted values versus 61 list scan targets (generated id + has_detail)
@@ -72,3 +72,5 @@
 - Task 26 reviewer: `ses_015c8e991ffeO5gGz5sSMgzGVH` returned `Spec: PASS`, `Quality: APPROVED`, no findings
 - Controller verification: compile PASS; Ent/Wire generate stable; first/second parent, v0.1.173 ancestry, VERSION and conflict-marker checks PASS
 - Task 26 status: complete; Grok mapping/password and Channel Monitor compatibility remain post-merge tasks
+- Task 27 current facts: xAI wildcard builder is opt-in, but settings default/parse are default-on and password compatibility config re-enables service/handler flow
+- Task 27 status: implementer pending
