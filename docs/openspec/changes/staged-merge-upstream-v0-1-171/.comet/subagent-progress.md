@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 28: 融合 Grok 媒体、Voice、搜索与网关契约`
 - OpenSpec mapping: `6.3`
-- Stage: `task-review`
+- Stage: `task-complete`
 - Review/fix round: `2/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `67be08211`
@@ -111,4 +111,7 @@
 - Task 28 fix-2 TDD: no-model TTS/custom-voices with a non-empty Voice-only mapping RED at 503, then GREEN with model-neutral scheduling and no synthetic upstream model
 - Task 28 final controller gates: focused Voice, both required broad matrices, UsageDetailCapture tests PASS; related lint 0 issues; diff check PASS; VERSION unchanged
 - Task 28 final review package: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-28-review-fix-2-package.md`
-- Task 28 status: same-reviewer final review pending
+- Task 28 final reviewer `ses_0153f668bffebYIBELre0q07By`: no findings; `Spec: PASS`, `Quality: APPROVED`
+- Task 28 residual gaps: Redis SET NX has no repository integration test; no-model Voice endpoint regression is not duplicated under advanced/layered scheduler; both are low risk and deferred until those layers next change
+- Task 28 accepted commits: `06b997492`, `18437349c`, `752d8b082`, `c5ffbed56`, `81ec3e6d7`, `d61f7e2d9`, `70ed46a8c`
+- Task 28 status: complete; OpenSpec 6.3 complete

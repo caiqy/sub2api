@@ -2016,7 +2016,7 @@ Commit-NamedPaths -Message 'fix: enforce Grok authorization defaults after v0.1.
 
 ### Task 28: 融合 Grok 媒体、Voice、搜索与网关契约
 
-- [ ] Task 28: 融合 Grok 媒体、Voice、搜索与网关契约
+- [x] Task 28: 融合 Grok 媒体、Voice、搜索与网关契约
 
 **映射 OpenSpec：**6.3
 
