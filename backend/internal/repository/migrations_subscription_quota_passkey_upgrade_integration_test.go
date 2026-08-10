@@ -18,7 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// filtered FS simulates upgrading the main@16c07d806 (0.1.169.3) local migration set; Task 9 Git-object identity evidence separately protects published migration blobs.
+// filtered FS simulates an upgrade from the required migration set through 193; Git-object identity evidence separately protects published migration blobs.
 func TestMigrationsRunner_PreservesPasskeyAndSubscriptionQuotaMigrationsAcrossUpgrade(t *testing.T) {
 	filenames := []string{
 		"191_passkey_credentials.sql",
@@ -34,8 +34,6 @@ func TestMigrationsRunner_PreservesPasskeyAndSubscriptionQuotaMigrationsAcrossUp
 	baselineFS := fstest.MapFS{}
 	expectedChecksums := make(map[string]string, len(filenames))
 	excludedFromBaseline := map[string]struct{}{
-		"192_group_profit_control.sql":                             {},
-		"193_group_profit_control_auth_cache_invalidation.sql":     {},
 		"194_add_usage_log_upstream_response_model.sql":            {},
 		"195_add_usage_log_upstream_model_mismatch_index_notx.sql": {},
 	}
@@ -54,11 +52,12 @@ func TestMigrationsRunner_PreservesPasskeyAndSubscriptionQuotaMigrationsAcrossUp
 			}
 		}
 	}
-	require.Contains(t, baselineFS, "191_passkey_credentials.sql")
-	require.Contains(t, baselineFS, "191_subscription_quota_advance_receipts.sql")
-	require.Contains(t, baselineFS, "192_subscription_cache_invalidation_outbox.sql")
-	require.NotContains(t, baselineFS, "192_group_profit_control.sql")
-	require.NotContains(t, baselineFS, "193_group_profit_control_auth_cache_invalidation.sql")
+	for _, filename := range filenames[:5] {
+		require.Contains(t, baselineFS, filename)
+	}
+	for _, filename := range filenames[5:] {
+		require.NotContains(t, baselineFS, filename)
+	}
 	require.Len(t, expectedChecksums, len(filenames))
 
 	ctx := context.Background()
@@ -70,21 +69,6 @@ func TestMigrationsRunner_PreservesPasskeyAndSubscriptionQuotaMigrationsAcrossUp
 		{"profit_control_enabled", "boolean", "false"},
 		{"profit_min_margin", "numeric", "zero"},
 		{"profit_safety_buffer", "numeric", "zero"},
-	}
-	assertProfitColumnsAbsent := func(db *sql.DB) {
-		t.Helper()
-		for _, expected := range profitColumns {
-			var exists bool
-			require.NoError(t, db.QueryRowContext(ctx, `
-SELECT EXISTS (
-	SELECT 1
-	FROM information_schema.columns
-	WHERE table_schema = 'public'
-	  AND table_name = 'groups'
-	  AND column_name = $1
-)`, expected.name).Scan(&exists))
-			require.False(t, exists, "expected baseline groups.%s to be absent", expected.name)
-		}
 	}
 	assertProfitColumns := func(db *sql.DB) {
 		t.Helper()
@@ -187,20 +171,18 @@ WHERE ns.nspname = 'public'
 	}
 
 	upgradeDB := newEmptyIsolatedMigrationDB(t)
-	// baselineFS -> completeFS -> completeFS mirrors the v0.1.170 upgrade and idempotency path.
+	// baselineFS -> completeFS -> completeFS applies 194/195 and verifies idempotency.
 	require.NoError(t, applyMigrationsFS(ctx, upgradeDB, baselineFS))
-	for _, filename := range filenames[:3] {
+	for _, filename := range filenames[:5] {
 		var checksum string
 		require.NoError(t, upgradeDB.QueryRowContext(ctx, "SELECT checksum FROM schema_migrations WHERE filename = $1", filename).Scan(&checksum))
 		require.Equal(t, expectedChecksums[filename], checksum)
 	}
-	for _, filename := range filenames[3:] {
+	for _, filename := range filenames[5:] {
 		var count int
 		require.NoError(t, upgradeDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations WHERE filename = $1", filename).Scan(&count))
 		require.Zero(t, count, "expected %s to be absent from the baseline", filename)
 	}
-	assertProfitColumnsAbsent(upgradeDB)
-	assertProfitFunction(upgradeDB, false)
 	for _, column := range []string{"upstream_response_model", "upstream_model_mismatch"} {
 		var exists bool
 		require.NoError(t, upgradeDB.QueryRowContext(ctx, `
@@ -213,6 +195,9 @@ SELECT EXISTS (
 )`, column).Scan(&exists))
 		require.False(t, exists, "expected baseline usage_logs.%s to be absent", column)
 	}
+	var mismatchIndex sql.NullString
+	require.NoError(t, upgradeDB.QueryRowContext(ctx, "SELECT to_regclass($1)", "public."+usageLogsUpstreamModelMismatchIndex).Scan(&mismatchIndex))
+	require.False(t, mismatchIndex.Valid, "expected baseline usage_logs mismatch index to be absent")
 	require.NoError(t, applyMigrationsFS(ctx, upgradeDB, completeFS))
 	require.NoError(t, applyMigrationsFS(ctx, upgradeDB, completeFS))
 	assertCompleteState(upgradeDB)

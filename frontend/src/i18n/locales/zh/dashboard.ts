@@ -305,6 +305,8 @@ export default {
 	  upstreamModelMismatch: '上游响应模型不一致',
 	  modelVariant: '疑似版本变体',
 	  modelMismatch: '模型不一致',
+	  modelMatched: '匹配',
+	  modelUnobserved: '未观察到',
     reasoningEffort: '推理强度',
     endpoint: '端点',
     endpointDistribution: '端点分布',

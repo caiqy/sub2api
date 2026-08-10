@@ -300,6 +300,8 @@ export default {
 	  upstreamModelMismatch: 'Response model mismatch',
 	  modelVariant: 'Possible version variant',
 	  modelMismatch: 'Different model',
+	  modelMatched: 'Matched',
+	  modelUnobserved: 'Not observed',
     reasoningEffort: 'Reasoning Effort',
     endpoint: 'Endpoint',
     endpointDistribution: 'Endpoint Distribution',

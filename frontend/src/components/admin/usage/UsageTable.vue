@@ -72,19 +72,33 @@
             </div>
             <span v-else class="font-medium text-gray-900 dark:text-white">{{ row.model }}</span>
             <div
-              v-if="row.upstream_model_mismatch === true && row.upstream_response_model"
+              v-if="row.upstream_response_model?.trim()"
               class="break-all pl-3 text-[11px]"
-              :class="isLikelyModelVariant(row) ? 'text-amber-600 dark:text-amber-400' : 'text-orange-600 dark:text-orange-400'"
+              :class="row.upstream_model_mismatch === true
+                ? (isLikelyModelVariant(row) ? 'text-amber-600 dark:text-amber-400' : 'text-orange-600 dark:text-orange-400')
+                : row.upstream_model_mismatch === false ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-500 dark:text-gray-400'"
               :title="modelAuditTitle(row)"
             >
               <span class="mr-1">↳ {{ t('usage.upstreamResponseModel') }}:</span>{{ row.upstream_response_model }}
               <span
                 class="ml-1 inline-flex rounded px-1 py-px text-[10px] font-medium ring-1 ring-inset"
-                :class="isLikelyModelVariant(row)
-                  ? 'bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-500/30'
-                  : 'bg-orange-50 text-orange-700 ring-orange-200 dark:bg-orange-500/10 dark:text-orange-300 dark:ring-orange-500/30'"
+                :class="row.upstream_model_mismatch === true
+                  ? (isLikelyModelVariant(row)
+                    ? 'bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-500/30'
+                    : 'bg-orange-50 text-orange-700 ring-orange-200 dark:bg-orange-500/10 dark:text-orange-300 dark:ring-orange-500/30')
+                  : row.upstream_model_mismatch === false
+                    ? 'bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-500/30'
+                    : 'bg-gray-100 text-gray-600 ring-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:ring-gray-600'"
               >
-                {{ isLikelyModelVariant(row) ? t('usage.modelVariant') : t('usage.modelMismatch') }}
+                {{ row.upstream_model_mismatch === true
+                  ? (isLikelyModelVariant(row) ? t('usage.modelVariant') : t('usage.modelMismatch'))
+                  : row.upstream_model_mismatch === false ? t('usage.modelMatched') : t('usage.modelUnobserved') }}
+              </span>
+            </div>
+            <div v-else class="break-all pl-3 text-[11px] text-gray-500 dark:text-gray-400">
+              <span class="mr-1">↳ {{ t('usage.upstreamResponseModel') }}:</span>
+              <span class="inline-flex rounded bg-gray-100 px-1 py-px text-[10px] font-medium text-gray-600 ring-1 ring-inset ring-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:ring-gray-600">
+                {{ t('usage.modelUnobserved') }}
               </span>
             </div>
           </div>

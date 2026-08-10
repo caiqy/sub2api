@@ -57,6 +57,8 @@ const messages: Record<string, string> = {
 	'usage.upstreamResponseModel': 'Upstream response',
 	'usage.modelVariant': 'Possible version variant',
 	'usage.modelMismatch': 'Different model',
+	'usage.modelMatched': 'Matched',
+	'usage.modelUnobserved': 'Not observed',
 }
 
 vi.mock('vue-i18n', async () => {
@@ -247,7 +249,52 @@ describe('admin UsageTable tooltip', () => {
     expect(text).toContain('claude-sonnet-4-20250514')
   })
 
-	it.each([
+  it('shows observed model and a distinct status for mismatched, matched, and unobserved rows', () => {
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [
+          {
+            request_id: 'req-mismatched',
+            model: 'requested-mismatch',
+            upstream_model: 'sent-mismatch',
+            upstream_response_model: 'observed-mismatch',
+            upstream_model_mismatch: true,
+          },
+          {
+            request_id: 'req-matched',
+            model: 'requested-match',
+            upstream_model: 'sent-match',
+            upstream_response_model: 'observed-match',
+            upstream_model_mismatch: false,
+          },
+          {
+            request_id: 'req-unobserved',
+            model: 'requested-unobserved',
+            upstream_model_mismatch: null,
+          },
+        ],
+        loading: false,
+        columns: [],
+      },
+      global: {
+        stubs: {
+          DataTable: DataTableStub,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    const text = wrapper.text()
+    expect(text).toContain('observed-mismatch')
+    expect(text).toContain('Different model')
+    expect(text).toContain('observed-match')
+    expect(text).toContain('Matched')
+    expect(text).toContain('Not observed')
+  })
+
+  it.each([
 		{
 			name: 'possible version variant',
 			responseModel: 'gpt-5.5-2026-08-01',

@@ -541,6 +541,37 @@ func TestUsageLogRepositoryGetStatsWithFiltersRequestedModelSource(t *testing.T)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestUsageLogRepositoryGetStatsWithFiltersAppliesMismatchFilterToEndpointAggregations(t *testing.T) {
+	for _, mismatch := range []bool{true, false} {
+		t.Run(fmt.Sprintf("mismatch_%t", mismatch), func(t *testing.T) {
+			db, mock := newSQLMock(t)
+			repo := &usageLogRepository{sql: db}
+			condition := upstreamModelMismatchCondition("upstream_model_mismatch", mismatch)
+
+			mock.ExpectQuery("FROM usage_logs\\s+WHERE " + condition).
+				WillReturnRows(sqlmock.NewRows([]string{
+					"total_requests", "total_input_tokens", "total_output_tokens",
+					"total_cache_tokens", "total_cache_creation_tokens", "total_cache_read_tokens",
+					"total_cost", "total_actual_cost", "total_account_cost", "avg_duration_ms",
+				}).AddRow(int64(0), int64(0), int64(0), int64(0), int64(0), int64(0), 0.0, 0.0, 0.0, 0.0))
+			for _, endpointColumn := range []string{"inbound_endpoint", "upstream_endpoint"} {
+				mock.ExpectQuery(fmt.Sprintf("(?s)SELECT COALESCE\\(NULLIF\\(TRIM\\(%s\\), ''\\), 'unknown'\\) AS endpoint.*WHERE created_at >= \\$1 AND created_at < \\$2 AND %s", endpointColumn, condition)).
+					WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).
+					WillReturnRows(sqlmock.NewRows([]string{"endpoint", "requests", "total_tokens", "cost", "actual_cost"}))
+			}
+			mock.ExpectQuery("(?s)SELECT CONCAT\\(.*WHERE created_at >= \\$1 AND created_at < \\$2 AND "+condition).
+				WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg()).
+				WillReturnRows(sqlmock.NewRows([]string{"endpoint", "requests", "total_tokens", "cost", "actual_cost"}))
+
+			_, err := repo.GetStatsWithFilters(context.Background(), usagestats.UsageLogFilters{
+				UpstreamModelMismatch: &mismatch,
+			})
+			require.NoError(t, err)
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
 func TestUsageLogRepositoryGetStatsWithFiltersRequestTypePriority(t *testing.T) {
 	db, mock := newSQLMock(t)
 	repo := &usageLogRepository{sql: db}
