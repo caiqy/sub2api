@@ -6,8 +6,8 @@
 - TDD mode: `tdd`
 - Current task: `Task 27: 固定 Grok 授权与模型映射安全默认`
 - OpenSpec mapping: `6.2`
-- Stage: `task-implement`
-- Review/fix round: `0/2`
+- Stage: `task-fix`
+- Review/fix round: `1/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `121240c564ca826919d8ceebcd9e9e6046af21b9`
 - Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-27-brief.md`
@@ -73,4 +73,8 @@
 - Controller verification: compile PASS; Ent/Wire generate stable; first/second parent, v0.1.173 ancestry, VERSION and conflict-marker checks PASS
 - Task 26 status: complete; Grok mapping/password and Channel Monitor compatibility remain post-merge tasks
 - Task 27 current facts: xAI wildcard builder is opt-in, but settings default/parse are default-on and password compatibility config re-enables service/handler flow
-- Task 27 status: implementer pending
+- Task 27 implementer: `ses_015bd9edeffebDBf3U6OvOxyWx` committed `5825a53aa63d3f0ae44952b1bbe245a127d589e1`
+- Task 27 RED/GREEN: default-on mapping and legacy password 200 RED; mapping/password focused and frontend 49 tests GREEN
+- Task 27 blockers: full lint exposes missing ChannelMonitorV2Aggregator nil in cleanup test; isolated Grok base URL setting write test fails because admin request/response omit all three Grok setting fields
+- Task 27 fix brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-27-fix-1-brief.md`
+- Task 27 status: separate cleanup-fixture and Grok-settings remediation pending
