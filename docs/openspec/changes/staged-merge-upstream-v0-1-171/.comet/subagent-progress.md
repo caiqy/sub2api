@@ -99,4 +99,7 @@
 - Task 28 reviewer `ses_0153f668bffebYIBELre0q07By`: native search usage identity, multipart/default Voice identity, JSON search dedupe, and async video claim/release evidence incomplete; `Spec: FAIL`, `Quality: CHANGES_REQUIRED`
 - Task 28 review clarification: do not synthesize upstream models for no-model TTS/custom-voices; fix explicit multipart STT, empty UpstreamModel, and Realtime coverage instead
 - Task 28 fix brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-28-fix-1-brief.md`
-- Task 28 status: review fix round 1 pending
+- Task 28 fix-1 commit: `81ec3e6d7a479f168c4b4fcad64eec37ce90fbe0`
+- Task 28 controller self-review: Realtime model is mapped in both handler and service, allowing unintended chain mapping
+- Task 28 controller fix brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-28-controller-fix-1-brief.md`
+- Task 28 status: controller self-review fix pending before re-review
