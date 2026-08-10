@@ -4,16 +4,16 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Current task: `Task 27: 固定 Grok 授权与模型映射安全默认`
-- OpenSpec mapping: `6.2`
-- Stage: `task-complete`
-- Review/fix round: `2/2`
+- Current task: `Task 28: 融合 Grok 媒体、Voice、搜索与网关契约`
+- OpenSpec mapping: `6.3`
+- Stage: `task-implement`
+- Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
-- Task start HEAD: `121240c564ca826919d8ceebcd9e9e6046af21b9`
-- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-27-brief.md`
-- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-27-report.md`
-- Dependency: Task 26 merged v0.1.173 tag content while deferring mapping/password compatibility
-- TDD rule: prove default-on and config-enabled password behavior RED before minimal safe-default fixes
+- Task start HEAD: `67be08211`
+- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-28-brief.md`
+- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-28-report.md`
+- Dependency: Task 27 fixed Grok mapping/password defaults and settings round-trip
+- TDD rule: clear the classified fixture RED; any newly found production gap requires a direct RED before the minimal fix
 - Risk signals: security、settings runtime、global mapping cache、account precedence、API/frontend
 - Hard boundary: mapping missing/empty/false off, explicit true on, account explicit mapping wins, password capability/API always disabled
 - Implementer: `ses_016a4ff6affeoRN1EoiY0Sy1px` returned `DONE_WITH_CONCERNS`
@@ -90,3 +90,6 @@
 - Task 27 final reviewer `ses_0159748bdffeInLyjSZtuIH3lA`: no findings; `Spec: PASS`, `Quality: APPROVED`
 - Task 27 accepted commits: `5825a53aa63d3f0ae44952b1bbe245a127d589e1`, `930a19cb954d61a5b41c92d9f37a5cc8a29dd8a7`, `3637265ba5edfc66609af724710993e580ef1367`, `9e4b7efe8c2548a60a79bde7c86fcceeba9d916d`
 - Task 27 status: complete; OpenSpec 6.2 complete
+- Task 28 baseline: broad media/Voice/search command RED only in edit_success/edit_upstream_4xx expected body; local contracts command PASS
+- Task 28 RED classification: v0.1.173 canonical multipart conversion adds required image.type=image_url; update two stale expected fixtures, do not revert production normalization
+- Task 28 status: implementer pending
