@@ -2215,3 +2215,222 @@ Makefile
 | `pnpm --dir frontend exec vitest run src/components/__tests__/CaptchaChallenge.spec.ts src/components/__tests__/TencentCaptchaGate.spec.ts src/components/auth/__tests__/PendingOAuthCreateAccountForm.spec.ts src/components/admin/usage/__tests__/UsageFilters.spec.ts src/components/admin/usage/__tests__/UsageTable.spec.ts src/views/admin/__tests__/UsageView.spec.ts src/views/auth/__tests__/TencentCaptchaActionGate.spec.ts src/views/auth/__tests__/TencentCaptchaForgotPassword.spec.ts src/views/auth/__tests__/EmailVerifyView.spec.ts` | `0` | PASS: 9 files, 100 tests. |
 
 - Fresh warnings: Browserslist reported `caniuse-lite` data is 8 months old. The known `UsageView` chart-data stderr did appear: `Failed to load chart data: TypeError: Cannot read properties of undefined (reading 'trend')` from `loadChartData`; it did not fail the test process.
+
+### Task 25 Evidence-Only Fix 3: v0.1.173 Overlap Identity
+
+- Recomputed at current checkpoint `22a539b31e941f6026a65b4da6798f0e41577e2f`. The ledger block, fresh sorted-unique overlap, count, exact membership, and normalized digest all match. No existing list or prior Task 25 evidence was rewritten.
+
+```powershell
+$ErrorActionPreference = 'Stop'
+try {
+  $expectedHead = '22a539b31'
+  $ledgerPath = Join-Path (Get-Location) 'docs/superpowers/reports/2026-08-06-staged-merge-upstream-v0-1-171-build.md'
+  $head = (git rev-parse --verify HEAD).Trim()
+  if ($LASTEXITCODE -ne 0) { throw "git rev-parse HEAD failed with exit $LASTEXITCODE" }
+  if (-not $head.StartsWith($expectedHead, [System.StringComparison]::OrdinalIgnoreCase)) { throw "Expected HEAD $expectedHead; got $head" }
+
+  $ledgerText = [System.IO.File]::ReadAllText($ledgerPath, [System.Text.UTF8Encoding]::new($false))
+  $sections = [regex]::Matches($ledgerText, '(?ms)^### v0\.1\.173 Exact Overlap \(140\)\r?\n\r?\n```text\r?\n(?<paths>.*?)\r?\n```[ \t]*$')
+  if ($sections.Count -ne 1) { throw "Expected exactly one v0.1.173 Exact Overlap (140) fenced block; got $($sections.Count)" }
+  $recorded = @($sections[0].Groups['paths'].Value -split "`r?`n")
+  if ($recorded.Count -ne 140) { throw "Expected recorded overlap count 140; got $($recorded.Count)" }
+  foreach ($path in $recorded) {
+    if ([string]::IsNullOrWhiteSpace($path) -or $path -ne $path.Trim() -or $path -match '[\r\n\\]' -or $path.StartsWith('/') -or $path.Contains('//') -or $path -match '(^|/)\.\.($|/)') { throw "Malformed recorded overlap path: <$path>" }
+  }
+  $recordedSorted = @($recorded | Sort-Object -Unique)
+  if ($recordedSorted.Count -ne 140) { throw "Recorded overlap is not 140 unique paths; got $($recordedSorted.Count) unique paths" }
+  for ($i = 0; $i -lt $recorded.Count; $i++) {
+    if ($recorded[$i] -cne $recordedSorted[$i]) { throw "Recorded overlap is not sorted unique at index ${i}: <$($recorded[$i])>" }
+  }
+
+  $manifest = @(git diff --name-only v0.1.172..v0.1.173 | Sort-Object -Unique)
+  if ($LASTEXITCODE -ne 0) { throw "git diff v0.1.172..v0.1.173 failed with exit $LASTEXITCODE" }
+  $localDelta = @(git diff --name-only v0.1.172...HEAD | Sort-Object -Unique)
+  if ($LASTEXITCODE -ne 0) { throw "git diff v0.1.172...HEAD failed with exit $LASTEXITCODE" }
+  $fresh = @(Compare-Object -ReferenceObject $manifest -DifferenceObject $localDelta -IncludeEqual -ExcludeDifferent | ForEach-Object { $_.InputObject } | Sort-Object -Unique)
+  if ($fresh.Count -ne 140) { throw "Expected fresh overlap count 140; got $($fresh.Count)" }
+
+  $membershipDiff = @(Compare-Object -ReferenceObject $recordedSorted -DifferenceObject $fresh)
+  if ($membershipDiff.Count -ne 0) {
+    $membershipDiff | Format-Table -AutoSize | Out-String | Write-Error
+    throw "Recorded and fresh overlap membership differ in $($membershipDiff.Count) path(s)"
+  }
+
+  $normalized = [string]::Join("`n", [string[]]$fresh)
+  $utf8 = [System.Text.UTF8Encoding]::new($false)
+  $sha256 = [System.Security.Cryptography.SHA256]::Create()
+  try { $digest = ([System.BitConverter]::ToString($sha256.ComputeHash($utf8.GetBytes($normalized)))).Replace('-', '').ToLowerInvariant() } finally { $sha256.Dispose() }
+
+  "checkpoint_head=$head"
+  "recorded_count=$($recorded.Count)"
+  "recorded_unique_count=$($recordedSorted.Count)"
+  "fresh_overlap_count=$($fresh.Count)"
+  "fresh_overlap_unique_count=$(@($fresh | Sort-Object -Unique).Count)"
+  'membership_difference_count=0'
+  'membership_equal=true'
+  "normalized_utf8_sha256=$digest"
+  'fresh_overlap_begin'
+  $fresh
+  'fresh_overlap_end'
+  'assertion_exit=0'
+} catch {
+  [Console]::Error.WriteLine($_.Exception.Message)
+  exit 1
+}
+```
+
+Exit `0`:
+
+```text
+checkpoint_head=22a539b31e941f6026a65b4da6798f0e41577e2f
+recorded_count=140
+recorded_unique_count=140
+fresh_overlap_count=140
+fresh_overlap_unique_count=140
+membership_difference_count=0
+membership_equal=true
+normalized_utf8_sha256=5fcf4efe2c3198d17165fbb9028be86ade644089330decd5f240b002ba122637
+fresh_overlap_begin
+.gitignore
+backend/cmd/server/VERSION
+backend/cmd/server/wire_gen_test.go
+backend/cmd/server/wire_gen.go
+backend/cmd/server/wire.go
+backend/ent/group_create.go
+backend/ent/group_update.go
+backend/ent/group.go
+backend/ent/group/group.go
+backend/ent/group/where.go
+backend/ent/migrate/schema.go
+backend/ent/mutation.go
+backend/ent/runtime/runtime.go
+backend/ent/schema/group.go
+backend/go.sum
+backend/internal/config/config_test.go
+backend/internal/config/config.go
+backend/internal/handler/admin/account_handler.go
+backend/internal/handler/admin/group_handler.go
+backend/internal/handler/admin/setting_handler_update.go
+backend/internal/handler/admin/setting_handler.go
+backend/internal/handler/auth_oauth_pending_flow_test.go
+backend/internal/handler/dto/mappers.go
+backend/internal/handler/dto/settings.go
+backend/internal/handler/dto/types.go
+backend/internal/handler/gateway_handler.go
+backend/internal/handler/grok_media_test.go
+backend/internal/handler/grok_media.go
+backend/internal/handler/handler.go
+backend/internal/handler/openai_gateway_handler_test.go
+backend/internal/handler/openai_gateway_handler.go
+backend/internal/handler/wire.go
+backend/internal/repository/api_key_repo.go
+backend/internal/repository/group_repo.go
+backend/internal/repository/http_upstream.go
+backend/internal/repository/migrations_runner.go
+backend/internal/repository/user_repo_email_alias_test.go
+backend/internal/repository/user_repo_integration_test.go
+backend/internal/repository/user_repo.go
+backend/internal/repository/wire.go
+backend/internal/server/api_contract_test.go
+backend/internal/server/routes/admin.go
+backend/internal/server/routes/gateway_test.go
+backend/internal/server/routes/gateway.go
+backend/internal/server/routes/user.go
+backend/internal/service/account_service.go
+backend/internal/service/account_usage_service.go
+backend/internal/service/account.go
+backend/internal/service/admin_account.go
+backend/internal/service/admin_group.go
+backend/internal/service/admin_service_delete_test.go
+backend/internal/service/admin_service.go
+backend/internal/service/antigravity_gateway_gemini.go
+backend/internal/service/antigravity_gateway_service_test.go
+backend/internal/service/api_key_auth_cache_impl.go
+backend/internal/service/api_key_auth_cache_profit_test.go
+backend/internal/service/api_key_auth_cache.go
+backend/internal/service/auth_service.go
+backend/internal/service/billing_service.go
+backend/internal/service/domain_constants.go
+backend/internal/service/gateway_hotpath_optimization_test.go
+backend/internal/service/gateway_multiplatform_test.go
+backend/internal/service/gateway_scheduling.go
+backend/internal/service/gateway_service.go
+backend/internal/service/gateway_usage_billing.go
+backend/internal/service/gemini_chat_completions_compat_service.go
+backend/internal/service/gemini_messages_compat_service.go
+backend/internal/service/gemini_multiplatform_test.go
+backend/internal/service/grok_media.go
+backend/internal/service/group.go
+backend/internal/service/openai_account_scheduler_test.go
+backend/internal/service/openai_account_scheduler.go
+backend/internal/service/openai_gateway_chat_completions_raw.go
+backend/internal/service/openai_gateway_chat_completions.go
+backend/internal/service/openai_gateway_count_tokens_test.go
+backend/internal/service/openai_gateway_forward.go
+backend/internal/service/openai_gateway_grok_chat_bridge.go
+backend/internal/service/openai_gateway_grok_test.go
+backend/internal/service/openai_gateway_grok.go
+backend/internal/service/openai_gateway_messages.go
+backend/internal/service/openai_gateway_passthrough.go
+backend/internal/service/openai_gateway_record_usage_test.go
+backend/internal/service/openai_gateway_request_body.go
+backend/internal/service/openai_gateway_response_handling.go
+backend/internal/service/openai_gateway_scheduling.go
+backend/internal/service/openai_gateway_service_test.go
+backend/internal/service/openai_gateway_service.go
+backend/internal/service/openai_gateway_usage.go
+backend/internal/service/openai_images_test.go
+backend/internal/service/openai_images.go
+backend/internal/service/openai_ws_forwarder_ingress.go
+backend/internal/service/openai_ws_forwarder_success_test.go
+backend/internal/service/openai_ws_forwarder_v2.go
+backend/internal/service/openai_ws_http_bridge_test.go
+backend/internal/service/openai_ws_http_bridge.go
+backend/internal/service/openai_ws_v2_passthrough_adapter.go
+backend/internal/service/setting_features.go
+backend/internal/service/setting_gateway_runtime.go
+backend/internal/service/setting_parse.go
+backend/internal/service/setting_service_public_test.go
+backend/internal/service/setting_service.go
+backend/internal/service/setting_update.go
+backend/internal/service/settings_view.go
+backend/internal/service/user_service.go
+backend/internal/service/wire.go
+backend/internal/testutil/stubs.go
+deploy/config.example.yaml
+frontend/pnpm-lock.yaml
+frontend/src/api/__tests__/admin.system.rollback.spec.ts
+frontend/src/api/admin/settings.ts
+frontend/src/components/account/__tests__/AccountUsageCell.spec.ts
+frontend/src/components/account/__tests__/CreateAccountModal.grok.spec.ts
+frontend/src/components/account/CreateAccountModal.vue
+frontend/src/components/account/EditAccountModal.vue
+frontend/src/components/admin/account/ReAuthAccountModal.vue
+frontend/src/i18n/locales/en/admin/accounts.ts
+frontend/src/i18n/locales/en/admin/overview.ts
+frontend/src/i18n/locales/en/admin/settings.ts
+frontend/src/i18n/locales/en/common.ts
+frontend/src/i18n/locales/en/dashboard.ts
+frontend/src/i18n/locales/en/index.ts
+frontend/src/i18n/locales/zh/admin/accounts.ts
+frontend/src/i18n/locales/zh/admin/overview.ts
+frontend/src/i18n/locales/zh/admin/settings.ts
+frontend/src/i18n/locales/zh/common.ts
+frontend/src/i18n/locales/zh/dashboard.ts
+frontend/src/i18n/locales/zh/index.ts
+frontend/src/types/index.ts
+frontend/src/views/admin/__tests__/GroupsView.columnSettings.spec.ts
+frontend/src/views/admin/__tests__/GroupsView.duplicate.spec.ts
+frontend/src/views/admin/__tests__/SettingsView.spec.ts
+frontend/src/views/admin/AccountsView.vue
+frontend/src/views/admin/GroupsView.vue
+frontend/src/views/admin/SettingsView.vue
+frontend/src/views/auth/__tests__/EmailVerifyView.spec.ts
+frontend/src/views/auth/__tests__/RegisterView.spec.ts
+frontend/src/views/auth/EmailVerifyView.vue
+frontend/src/views/auth/RegisterView.vue
+frontend/src/views/user/UsageView.vue
+Makefile
+fresh_overlap_end
+assertion_exit=0
+```
