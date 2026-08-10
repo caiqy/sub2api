@@ -425,7 +425,7 @@ func (s *SettingService) notifyChannelMonitorRuntimeListeners() {
 	if s == nil {
 		return
 	}
-	s.channelMonitorModeAdmission.setMode(channelMonitorRuntimeMode(s.GetChannelMonitorRuntime(context.Background())))
+	s.channelMonitorModeAdmission.publish(channelMonitorRuntimeMode(s.GetChannelMonitorRuntime(context.Background())))
 	s.channelMonitorRuntimeListenersMu.Lock()
 	listeners := make([]func(), 0, len(s.channelMonitorRuntimeListeners))
 	for _, l := range s.channelMonitorRuntimeListeners {
@@ -447,10 +447,11 @@ func (s *SettingService) notifyChannelMonitorRuntimeListeners() {
 }
 
 type channelMonitorModeAdmission struct {
-	mu      sync.Mutex
-	desired string
-	active  map[string]int
-	changed chan struct{}
+	mu         sync.Mutex
+	desired    string
+	generation uint64
+	active     map[string]int
+	changed    chan struct{}
 }
 
 func channelMonitorRuntimeMode(runtime ChannelMonitorRuntime) string {
@@ -463,14 +464,35 @@ func channelMonitorRuntimeMode(runtime ChannelMonitorRuntime) string {
 	return ""
 }
 
-func (g *channelMonitorModeAdmission) setMode(mode string) {
+func (g *channelMonitorModeAdmission) publish(mode string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.generation++
 	if g.desired == mode {
 		return
 	}
 	g.desired = mode
 	g.signalLocked()
+}
+
+func (g *channelMonitorModeAdmission) currentGeneration() uint64 {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.generation
+}
+
+func (g *channelMonitorModeAdmission) setModeIfGeneration(mode string, generation uint64) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.generation != generation {
+		return false
+	}
+	if g.desired == mode {
+		return true
+	}
+	g.desired = mode
+	g.signalLocked()
+	return true
 }
 
 func (g *channelMonitorModeAdmission) enter(ctx context.Context, mode string) (func(), bool) {
@@ -531,21 +553,31 @@ type channelMonitorModeAdmissionProvider interface {
 }
 
 func (s *SettingService) admitChannelMonitorMode(ctx context.Context, mode string) (func(), bool) {
-	runtimeMode := channelMonitorRuntimeMode(s.GetChannelMonitorRuntime(ctx))
-	s.channelMonitorModeAdmission.setMode(runtimeMode)
-	if runtimeMode != mode {
+	for {
+		generation := s.channelMonitorModeAdmission.currentGeneration()
+		runtimeMode := channelMonitorRuntimeMode(s.GetChannelMonitorRuntime(ctx))
+		if !s.channelMonitorModeAdmission.setModeIfGeneration(runtimeMode, generation) {
+			continue
+		}
+		if runtimeMode != mode {
+			return nil, false
+		}
+		release, admitted := s.channelMonitorModeAdmission.enter(ctx, mode)
+		if !admitted {
+			return nil, false
+		}
+		generation = s.channelMonitorModeAdmission.currentGeneration()
+		runtimeMode = channelMonitorRuntimeMode(s.GetChannelMonitorRuntime(ctx))
+		if !s.channelMonitorModeAdmission.setModeIfGeneration(runtimeMode, generation) {
+			release()
+			continue
+		}
+		if runtimeMode == mode {
+			return release, true
+		}
+		release()
 		return nil, false
 	}
-	release, admitted := s.channelMonitorModeAdmission.enter(ctx, mode)
-	if !admitted {
-		return nil, false
-	}
-	if channelMonitorRuntimeMode(s.GetChannelMonitorRuntime(ctx)) == mode {
-		return release, true
-	}
-	release()
-	s.channelMonitorModeAdmission.setMode(channelMonitorRuntimeMode(s.GetChannelMonitorRuntime(ctx)))
-	return nil, false
 }
 
 func admitChannelMonitorMode(ctx context.Context, settings channelMonitorRuntimeReader, mode string) (func(), bool) {

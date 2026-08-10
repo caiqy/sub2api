@@ -359,7 +359,7 @@ function rowKey(row: MonitorMatrixRow): string {
 
 function successRate(metrics: MonitorMetric): string {
   // Empty traffic: no request count and no throughput signal.
-  // When throughput is hidden for privacy, still show success from error_rate.
+  // When throughput is hidden for privacy, success still comes from backend success_rate.
   const noCount = metrics.request_count <= 0
   const noTP = (metrics.rpm || 0) <= 0 && (metrics.tpm || 0) <= 0
   if (noCount && noTP && props.showThroughput) return '-'

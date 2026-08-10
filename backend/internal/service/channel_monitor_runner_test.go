@@ -23,8 +23,11 @@ type stubMonitorSvc struct {
 }
 
 type runnerRuntimeSettingsRepo struct {
-	mu     sync.RWMutex
-	values map[string]string
+	mu                 sync.RWMutex
+	values             map[string]string
+	blockRuntimeRead   bool
+	runtimeReadStarted chan struct{}
+	runtimeReadRelease chan struct{}
 }
 
 func (s *runnerRuntimeSettingsRepo) Get(context.Context, string) (*Setting, error) {
@@ -39,12 +42,23 @@ func (s *runnerRuntimeSettingsRepo) Set(context.Context, string, string) error {
 	panic("unexpected Set call")
 }
 
-func (s *runnerRuntimeSettingsRepo) GetMultiple(_ context.Context, keys []string) (map[string]string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+func (s *runnerRuntimeSettingsRepo) GetMultiple(ctx context.Context, keys []string) (map[string]string, error) {
+	s.mu.Lock()
 	values := make(map[string]string, len(keys))
 	for _, key := range keys {
 		values[key] = s.values[key]
+	}
+	_, hasDeadline := ctx.Deadline()
+	block := s.blockRuntimeRead && !hasDeadline
+	started := s.runtimeReadStarted
+	release := s.runtimeReadRelease
+	if block {
+		s.blockRuntimeRead = false
+	}
+	s.mu.Unlock()
+	if block {
+		started <- struct{}{}
+		<-release
 	}
 	return values, nil
 }
@@ -64,6 +78,21 @@ func (s *runnerRuntimeSettingsRepo) Delete(context.Context, string) error {
 func (s *runnerRuntimeSettingsRepo) setMode(mode string) {
 	s.mu.Lock()
 	s.values[SettingKeyChannelMonitorMode] = mode
+	s.mu.Unlock()
+}
+
+func (s *runnerRuntimeSettingsRepo) blockNextRuntimeRead() (chan struct{}, chan struct{}) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.blockRuntimeRead = true
+	s.runtimeReadStarted = make(chan struct{}, 1)
+	s.runtimeReadRelease = make(chan struct{})
+	return s.runtimeReadStarted, s.runtimeReadRelease
+}
+
+func (s *runnerRuntimeSettingsRepo) clearRuntimeReadBarrier() {
+	s.mu.Lock()
+	s.blockRuntimeRead = false
 	s.mu.Unlock()
 }
 
@@ -357,6 +386,61 @@ func TestChannelMonitorRunnerModeFlipsDrainAndRestoreScheduledTasks(t *testing.T
 	settings.notifyChannelMonitorRuntimeListeners()
 	waitFor(t, time.Second, "V1 tasks restored", func() bool { return runnerTaskCount(runner) == 1 })
 
+	runner.Stop()
+}
+
+func TestChannelMonitorRunnerScheduleDoesNotReinsertAfterV2Drain(t *testing.T) {
+	settings, settingsRepo := newRunnerRuntimeSettings(ChannelMonitorModeV1)
+	svc := &stubMonitorSvc{enabled: []*ChannelMonitor{{ID: 1, Enabled: true, IntervalSeconds: 60}}}
+	runner := newChannelMonitorRunner(svc, settings)
+	runner.Start()
+	require.Equal(t, 1, runnerTaskCount(runner))
+
+	readStarted, readRelease := settingsRepo.blockNextRuntimeRead()
+	scheduled := make(chan struct{})
+	go func() {
+		runner.Schedule(&ChannelMonitor{ID: 2, Enabled: true, IntervalSeconds: 60})
+		close(scheduled)
+	}()
+
+	select {
+	case <-readStarted:
+		settingsRepo.setMode(ChannelMonitorModeV2)
+		settings.notifyChannelMonitorRuntimeListeners()
+		require.Zero(t, runnerTaskCount(runner), "V2 transition must drain existing tasks")
+		close(readRelease)
+	case <-scheduled:
+		// The runner-local state fix does not need a runtime read in Schedule.
+		settingsRepo.clearRuntimeReadBarrier()
+		settingsRepo.setMode(ChannelMonitorModeV2)
+		settings.notifyChannelMonitorRuntimeListeners()
+	}
+	<-scheduled
+
+	require.Zero(t, runnerTaskCount(runner), "a stale V1 Schedule must not restore a task after V2 drains it")
+	runner.Stop()
+}
+
+func TestChannelMonitorRunnerIgnoresUnchangedV1RuntimeNotification(t *testing.T) {
+	settings, _ := newRunnerRuntimeSettings(ChannelMonitorModeV1)
+	svc := &stubMonitorSvc{
+		enabled:   []*ChannelMonitor{{ID: 1, Enabled: true, IntervalSeconds: 60}},
+		runCalled: make(chan int64, 2),
+	}
+	runner := newChannelMonitorRunner(svc, settings)
+	runner.Start()
+	first := runnerTaskPtr(runner, 1)
+	require.NotNil(t, first)
+	<-svc.runCalled
+
+	settings.notifyChannelMonitorRuntimeListeners()
+
+	require.Same(t, first, runnerTaskPtr(runner, 1), "unchanged V1 runtime must keep its existing timer")
+	select {
+	case id := <-svc.runCalled:
+		t.Fatalf("unchanged V1 runtime triggered an extra immediate RunCheck for monitor %d", id)
+	default:
+	}
 	runner.Stop()
 }
 

@@ -53,12 +53,16 @@ type ChannelMonitorRunner struct {
 	parentCtx    context.Context
 	parentCancel context.CancelFunc
 
-	mu      sync.Mutex
-	tasks   map[int64]*scheduledMonitor
-	wg      sync.WaitGroup
-	started bool
-	stopped bool
-	unsub   func()
+	mu                sync.Mutex
+	tasks             map[int64]*scheduledMonitor
+	wg                sync.WaitGroup
+	started           bool
+	stopped           bool
+	unsub             func()
+	runtimeKnown      bool
+	runtimeEnabled    bool
+	runtimeMode       string
+	schedulingEnabled bool
 
 	// inFlight 跟踪正在执行的 monitor.ID。fire 调度前会检查避免重复提交，
 	// 防止单次检测耗时 > interval 时同一 monitor 被并发执行。
@@ -103,13 +107,14 @@ func NewChannelMonitorRunner(svc *ChannelMonitorService, settingService *Setting
 func newChannelMonitorRunner(svc monitorRunnerSvc, settingService *SettingService) *ChannelMonitorRunner {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ChannelMonitorRunner{
-		svc:            svc,
-		settingService: settingService,
-		pool:           pond.NewPool(monitorWorkerConcurrency),
-		parentCtx:      ctx,
-		parentCancel:   cancel,
-		tasks:          make(map[int64]*scheduledMonitor),
-		inFlight:       make(map[int64]struct{}),
+		svc:               svc,
+		settingService:    settingService,
+		pool:              pond.NewPool(monitorWorkerConcurrency),
+		parentCtx:         ctx,
+		parentCancel:      cancel,
+		tasks:             make(map[int64]*scheduledMonitor),
+		inFlight:          make(map[int64]struct{}),
+		schedulingEnabled: settingService == nil,
 	}
 }
 
@@ -137,23 +142,45 @@ func (r *ChannelMonitorRunner) Start() {
 		}
 		r.unsub = unsub
 		r.mu.Unlock()
+		r.handleRuntimeChange()
+	} else {
+		r.reloadEnabledMonitors()
 	}
-	slog.Info("channel_monitor: runner started", "scheduled_tasks", r.reloadEnabledMonitors())
+	r.mu.Lock()
+	scheduledTasks := len(r.tasks)
+	r.mu.Unlock()
+	slog.Info("channel_monitor: runner started", "scheduled_tasks", scheduledTasks)
 }
 
 func (r *ChannelMonitorRunner) handleRuntimeChange() {
 	if r == nil {
 		return
 	}
-	if !r.activeProbesAllowed(context.Background()) {
-		r.clearScheduledTasks()
+	runtime := r.settingService.GetChannelMonitorRuntime(context.Background())
+	r.mu.Lock()
+	if r.stopped || (r.runtimeKnown && r.runtimeEnabled == runtime.Enabled && r.runtimeMode == runtime.Mode) {
+		r.mu.Unlock()
 		return
 	}
-	r.reloadEnabledMonitors()
+	r.runtimeKnown = true
+	r.runtimeEnabled = runtime.Enabled
+	r.runtimeMode = runtime.Mode
+	r.schedulingEnabled = runtime.ActiveProbesAllowed()
+	if r.schedulingEnabled {
+		r.mu.Unlock()
+		r.reloadEnabledMonitors()
+		return
+	}
+	tasks := r.tasks
+	r.tasks = make(map[int64]*scheduledMonitor)
+	r.mu.Unlock()
+	for _, task := range tasks {
+		task.cancel()
+	}
 }
 
 func (r *ChannelMonitorRunner) reloadEnabledMonitors() int {
-	if r == nil || r.svc == nil || !r.activeProbesAllowed(context.Background()) {
+	if r == nil || r.svc == nil || !r.schedulingAllowed() {
 		return 0
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), monitorStartupLoadTimeout)
@@ -173,16 +200,13 @@ func (r *ChannelMonitorRunner) activeProbesAllowed(ctx context.Context) bool {
 	return r.settingService == nil || r.settingService.GetChannelMonitorRuntime(ctx).ActiveProbesAllowed()
 }
 
-func (r *ChannelMonitorRunner) clearScheduledTasks() {
+func (r *ChannelMonitorRunner) schedulingAllowed() bool {
+	if r == nil {
+		return false
+	}
 	r.mu.Lock()
-	tasks := r.tasks
-	if r.tasks != nil {
-		r.tasks = make(map[int64]*scheduledMonitor)
-	}
-	r.mu.Unlock()
-	for _, task := range tasks {
-		task.cancel()
-	}
+	defer r.mu.Unlock()
+	return r.schedulingEnabled
 }
 
 // Schedule 为指定监控创建（或重置）独立定时任务。
@@ -194,10 +218,6 @@ func (r *ChannelMonitorRunner) Schedule(m *ChannelMonitor) {
 		return
 	}
 	if !m.Enabled || m.APIKeyDecryptFailed {
-		r.Unschedule(m.ID)
-		return
-	}
-	if !r.activeProbesAllowed(context.Background()) {
 		r.Unschedule(m.ID)
 		return
 	}
@@ -227,6 +247,10 @@ func (r *ChannelMonitorRunner) Schedule(m *ChannelMonitor) {
 		r.mu.Unlock()
 		slog.Warn("channel_monitor: schedule before runner started, skip",
 			"monitor_id", m.ID, "name", m.Name)
+		return
+	}
+	if !r.schedulingEnabled {
+		r.mu.Unlock()
 		return
 	}
 	if existing, ok := r.tasks[m.ID]; ok {
@@ -312,11 +336,8 @@ func (r *ChannelMonitorRunner) runScheduled(ctx context.Context, task *scheduled
 // fire 提交一次检测到 worker 池。功能开关关闭时跳过本次（不取消任务，
 // 重新启用时立即恢复）；池满或重复在飞时也跳过。
 func (r *ChannelMonitorRunner) fire(ctx context.Context, task *scheduledMonitor) {
-	if r.settingService != nil {
-		rt := r.settingService.GetChannelMonitorRuntime(ctx)
-		if !rt.ActiveProbesAllowed() {
-			return
-		}
+	if !r.activeProbesAllowed(ctx) {
+		return
 	}
 	if !r.tryAcquireInFlight(task.id) {
 		slog.Debug("channel_monitor: skip already in-flight",
