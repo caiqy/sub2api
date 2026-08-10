@@ -135,14 +135,29 @@ func (r *usageBatchLogRepoStub) GetDailyStatsAggregated(context.Context, int64, 
 	return nil, nil
 }
 
+type usageBatchAccountRepoStub struct {
+	AccountRepository
+	accounts map[int64]*Account
+}
+
+func (r *usageBatchAccountRepoStub) GetByIDs(_ context.Context, ids []int64) ([]*Account, error) {
+	accounts := make([]*Account, 0, len(ids))
+	for _, id := range ids {
+		if account := r.accounts[id]; account != nil {
+			accounts = append(accounts, account)
+		}
+	}
+	return accounts, nil
+}
+
 func TestAccountUsageService_GetUsageBatch_BestEffortByAccount(t *testing.T) {
 	t.Parallel()
 
 	resetAt := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
 
-	repo := &stubOpenAIAccountRepo{
-		accounts: []Account{
-			{
+	repo := &usageBatchAccountRepoStub{
+		accounts: map[int64]*Account{
+			7001: {
 				ID:       7001,
 				Platform: PlatformAnthropic,
 				Type:     AccountTypeOAuth,
@@ -150,7 +165,7 @@ func TestAccountUsageService_GetUsageBatch_BestEffortByAccount(t *testing.T) {
 					"passive_usage_7d_utilization": 0.62,
 				},
 			},
-			{
+			7002: {
 				ID:       7002,
 				Platform: PlatformOpenAI,
 				Type:     AccountTypeOAuth,
@@ -165,7 +180,7 @@ func TestAccountUsageService_GetUsageBatch_BestEffortByAccount(t *testing.T) {
 					"openai_snapshot_version": "test",
 				},
 			},
-			{
+			7003: {
 				ID:       7003,
 				Platform: PlatformOpenAI,
 				Type:     AccountTypeAPIKey,
