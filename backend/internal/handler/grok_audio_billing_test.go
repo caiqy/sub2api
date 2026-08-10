@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -103,6 +104,54 @@ func TestGrokVoice_TTSFailoverUsesSelectedAccountMappedModel(t *testing.T) {
 	require.Len(t, upstream.bodies, 2)
 	require.Equal(t, "first-voice-model", gjson.GetBytes(upstream.bodies[0], "model").String())
 	require.Equal(t, "second-voice-model", gjson.GetBytes(upstream.bodies[1], "model").String())
+}
+
+func TestGrokVoice_NoModelRoutesScheduleVoiceOnlyMappedAccountNeutrally(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for _, tt := range []struct {
+		endpoint string
+		body     string
+	}{
+		{endpoint: "tts", body: `{"input":"speak"}`},
+		{endpoint: "custom-voices", body: `{"name":"voice profile"}`},
+	} {
+		t.Run(tt.endpoint, func(t *testing.T) {
+			group := &service.Group{ID: 4051, Platform: service.PlatformGrok, Status: service.StatusActive, Hydrated: true}
+			account := &service.Account{
+				ID: 4052, Platform: service.PlatformGrok, Type: service.AccountTypeAPIKey,
+				Status: service.StatusActive, Schedulable: true, Concurrency: 1,
+				Credentials: map[string]any{
+					"api_key": "voice-key", "base_url": "https://api.x.ai/v1",
+					"model_mapping": map[string]any{"grok-voice-latest": "mapped-voice-model"},
+				},
+			}
+			upstream := &grokMediaRequestRecorder{}
+			env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &terminalUsageGrokAccountRepo{openAIRetryAccountRepoStub{accounts: []*service.Account{account}}}, upstream)
+
+			recorder := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/"+tt.endpoint, strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			env.router("/"+tt.endpoint, func(c *gin.Context) { env.handler.GrokVoice(c, tt.endpoint) }).ServeHTTP(recorder, req)
+
+			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+			upstream.mu.Lock()
+			require.Equal(t, []int64{account.ID}, upstream.accountIDs)
+			require.Len(t, upstream.bodies, 1)
+			require.Empty(t, gjson.GetBytes(upstream.bodies[0], "model").String())
+			upstream.mu.Unlock()
+
+			if tt.endpoint == "tts" {
+				select {
+				case usageLog := <-env.usageRepo.created:
+					require.Equal(t, "tts", usageLog.Model)
+					require.Nil(t, usageLog.UpstreamModel)
+				case <-time.After(time.Second):
+					t.Fatal("TTS usage was not recorded")
+				}
+			}
+		})
+	}
 }
 
 func TestGrokVoice_STTMultipartFailoverUsesMappedModelAndPreservesAudio(t *testing.T) {
