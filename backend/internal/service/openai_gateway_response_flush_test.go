@@ -282,7 +282,7 @@ func TestOpenAIResponseFlush_PreambleWithoutTerminalRemainsBufferedForFailover(t
 
 	var failoverErr *UpstreamFailoverError
 	require.ErrorAs(t, err, &failoverErr)
-	require.NotNil(t, result)
+	require.Nil(t, result)
 	gotBody, flushes := recorder.snapshot()
 	require.Empty(t, gotBody)
 	require.Empty(t, flushes)

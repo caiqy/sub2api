@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/stretchr/testify/require"
 )
 
@@ -53,6 +54,27 @@ func TestBuildUpstreamTransportKeepsDialContextWithSOCKS5Proxy(t *testing.T) {
 	transport, err := buildUpstreamTransport(defaultPoolSettings(nil), proxyURL, upstreamProtocolModeDefault)
 	require.NoError(t, err)
 	require.NotNil(t, transport.DialContext)
+}
+
+// TLS fingerprint transports own the whole TLS connection, so each supported
+// route must retain a context-aware TLS dialer instead of falling back to an
+// unbounded default transport dial path.
+func TestBuildUpstreamTransportWithTLSFingerprintSetsDialTLSContext(t *testing.T) {
+	cases := []string{"", "http://127.0.0.1:1080", "socks5h://127.0.0.1:1080"}
+	for _, rawProxyURL := range cases {
+		t.Run(rawProxyURL, func(t *testing.T) {
+			var proxyURL *url.URL
+			if rawProxyURL != "" {
+				var err error
+				proxyURL, err = url.Parse(rawProxyURL)
+				require.NoError(t, err)
+			}
+
+			transport, err := buildUpstreamTransportWithTLSFingerprint(defaultPoolSettings(nil), proxyURL, &tlsfingerprint.Profile{})
+			require.NoError(t, err)
+			require.NotNil(t, transport.DialTLSContext)
+		})
+	}
 }
 
 // Timeout 字段确实被 net.Dialer 用于建连：拨一个已被 close 的本地监听端口，

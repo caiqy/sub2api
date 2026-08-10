@@ -17,6 +17,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestCodexDefaultOriginatorIsTUI(t *testing.T) {
+	require.Equal(t, "codex-tui", openai.CodexDefaultOriginator)
+}
+
 func TestProbe_SendProbeRequest_OAuthUsesCodexResponsesEndpoint(t *testing.T) {
 	upstream := &openAIHTTPUpstreamRecorder{
 		resp: &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("data: {\"id\":\"resp_123\",\"type\":\"response.created\"}\n\n"))},
