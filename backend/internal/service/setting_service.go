@@ -160,9 +160,10 @@ type SettingService struct {
 	openAIQuotaAutoPauseSettingsCache atomic.Value // *cachedOpenAIQuotaAutoPauseSettings
 	openAIQuotaAutoPauseSettingsSF    singleflight.Group
 
-	channelMonitorRuntimeListenersMu sync.Mutex
-	channelMonitorRuntimeListeners   []func()
-	channelMonitorModeAdmission      channelMonitorModeAdmission
+	channelMonitorRuntimeListenersMu    sync.Mutex
+	channelMonitorRuntimeListeners      []func()
+	channelMonitorRuntimeNotificationMu sync.Mutex
+	channelMonitorModeAdmission         channelMonitorModeAdmission
 }
 
 // DefaultPlatformQuotaSetting 单 platform 三档限额（nil = 沿用上层；0 = 显式禁用；>0 = 上限）
@@ -425,6 +426,8 @@ func (s *SettingService) notifyChannelMonitorRuntimeListeners() {
 	if s == nil {
 		return
 	}
+	s.channelMonitorRuntimeNotificationMu.Lock()
+	defer s.channelMonitorRuntimeNotificationMu.Unlock()
 	s.channelMonitorModeAdmission.publish(channelMonitorRuntimeMode(s.GetChannelMonitorRuntime(context.Background())))
 	s.channelMonitorRuntimeListenersMu.Lock()
 	listeners := make([]func(), 0, len(s.channelMonitorRuntimeListeners))

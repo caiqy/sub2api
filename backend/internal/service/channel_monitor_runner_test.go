@@ -23,11 +23,12 @@ type stubMonitorSvc struct {
 }
 
 type runnerRuntimeSettingsRepo struct {
-	mu                 sync.RWMutex
-	values             map[string]string
-	blockRuntimeRead   bool
-	runtimeReadStarted chan struct{}
-	runtimeReadRelease chan struct{}
+	mu                  sync.RWMutex
+	values              map[string]string
+	blockRuntimeRead    bool
+	runtimeReadStarted  chan struct{}
+	runtimeReadRelease  chan struct{}
+	runtimeReadBarriers []chan struct{}
 }
 
 func (s *runnerRuntimeSettingsRepo) Get(context.Context, string) (*Setting, error) {
@@ -49,14 +50,22 @@ func (s *runnerRuntimeSettingsRepo) GetMultiple(ctx context.Context, keys []stri
 		values[key] = s.values[key]
 	}
 	_, hasDeadline := ctx.Deadline()
-	block := s.blockRuntimeRead && !hasDeadline
+	var barrier chan struct{}
+	if len(s.runtimeReadBarriers) > 0 {
+		barrier = s.runtimeReadBarriers[0]
+		s.runtimeReadBarriers = s.runtimeReadBarriers[1:]
+	}
+	block := barrier == nil && s.blockRuntimeRead && !hasDeadline
 	started := s.runtimeReadStarted
 	release := s.runtimeReadRelease
 	if block {
 		s.blockRuntimeRead = false
 	}
 	s.mu.Unlock()
-	if block {
+	if barrier != nil {
+		started <- struct{}{}
+		<-barrier
+	} else if block {
 		started <- struct{}{}
 		<-release
 	}
@@ -94,6 +103,14 @@ func (s *runnerRuntimeSettingsRepo) clearRuntimeReadBarrier() {
 	s.mu.Lock()
 	s.blockRuntimeRead = false
 	s.mu.Unlock()
+}
+
+func (s *runnerRuntimeSettingsRepo) queueRuntimeReadBarriers(barriers ...chan struct{}) chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.runtimeReadBarriers = append(s.runtimeReadBarriers, barriers...)
+	s.runtimeReadStarted = make(chan struct{}, len(barriers))
+	return s.runtimeReadStarted
 }
 
 func newRunnerRuntimeSettings(mode string) (*SettingService, *runnerRuntimeSettingsRepo) {
@@ -157,6 +174,15 @@ func runnerTaskPtr(r *ChannelMonitorRunner, id int64) *scheduledMonitor {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.tasks[id]
+}
+
+func notificationFinishedBeforeRelease(done <-chan struct{}) bool {
+	select {
+	case <-done:
+		return true
+	case <-time.After(100 * time.Millisecond):
+		return false
+	}
 }
 
 // TestSchedule_AddsTaskAndFiresOnce 验证 Schedule 后立即触发一次首检测，并把任务记入 tasks 表。
@@ -441,6 +467,70 @@ func TestChannelMonitorRunnerIgnoresUnchangedV1RuntimeNotification(t *testing.T)
 		t.Fatalf("unchanged V1 runtime triggered an extra immediate RunCheck for monitor %d", id)
 	default:
 	}
+	runner.Stop()
+}
+
+func TestChannelMonitorRuntimeNotificationsSerializeStaleReads(t *testing.T) {
+	settings, settingsRepo := newRunnerRuntimeSettings(ChannelMonitorModeV1)
+	oldReadStarted, oldReadRelease := settingsRepo.blockNextRuntimeRead()
+	oldDone := make(chan struct{})
+	go func() {
+		settings.notifyChannelMonitorRuntimeListeners()
+		close(oldDone)
+	}()
+	<-oldReadStarted
+
+	settingsRepo.setMode(ChannelMonitorModeV2)
+	newDone := make(chan struct{})
+	go func() {
+		settings.notifyChannelMonitorRuntimeListeners()
+		close(newDone)
+	}()
+	newerFinishedFirst := notificationFinishedBeforeRelease(newDone)
+	close(oldReadRelease)
+	<-oldDone
+	<-newDone
+
+	if newerFinishedFirst {
+		t.Error("newer notification completed before the stale notification read was released")
+	}
+	settings.channelMonitorModeAdmission.mu.Lock()
+	desired := settings.channelMonitorModeAdmission.desired
+	settings.channelMonitorModeAdmission.mu.Unlock()
+	require.Equal(t, ChannelMonitorModeV2, desired)
+}
+
+func TestChannelMonitorRuntimeNotificationsSerializeRunnerCallbacks(t *testing.T) {
+	settings, settingsRepo := newRunnerRuntimeSettings(ChannelMonitorModeV1)
+	svc := &stubMonitorSvc{enabled: []*ChannelMonitor{{ID: 1, Enabled: true, IntervalSeconds: 60}}}
+	runner := newChannelMonitorRunner(svc, settings)
+	runner.Start()
+	require.Equal(t, 1, runnerTaskCount(runner))
+
+	oldCallbackRelease := make(chan struct{})
+	oldCallbackStarted := settingsRepo.queueRuntimeReadBarriers(nil, oldCallbackRelease)
+	oldDone := make(chan struct{})
+	go func() {
+		settings.notifyChannelMonitorRuntimeListeners()
+		close(oldDone)
+	}()
+	<-oldCallbackStarted
+
+	settingsRepo.setMode(ChannelMonitorModeV2)
+	newDone := make(chan struct{})
+	go func() {
+		settings.notifyChannelMonitorRuntimeListeners()
+		close(newDone)
+	}()
+	newerFinishedFirst := notificationFinishedBeforeRelease(newDone)
+	close(oldCallbackRelease)
+	<-oldDone
+	<-newDone
+
+	if newerFinishedFirst {
+		t.Error("newer notification completed before the stale runner callback was released")
+	}
+	require.Zero(t, runnerTaskCount(runner), "the latest V2 notification must leave runner scheduling disabled")
 	runner.Stop()
 }
 
