@@ -749,7 +749,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			}
 			logger.LegacyPrintf("service.openai_gateway", "Stream data interval timeout: account=%d model=%s interval=%s", account.ID, originalModel, streamInterval)
 			// 处理流超时，可能标记账户为临时不可调度或错误状态
-			if s.rateLimitService != nil {
+			poolSameAccountRetry := account != nil && account.Platform == PlatformGrok && account.IsPoolMode() &&
+				!openAIStreamClientOutputStarted(c, clientOutputStarted) && !eventShouldFlush
+			if s.rateLimitService != nil && !poolSameAccountRetry {
 				s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
 			}
 			// Grok: short cool + account failover when no client-visible bytes
