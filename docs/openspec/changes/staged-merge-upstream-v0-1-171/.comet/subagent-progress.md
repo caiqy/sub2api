@@ -35,4 +35,9 @@
 - Re-reviewer: `ses_016d8f8faffe7NmLbm6cWFW8u7` returned `Needs fixes`
 - Original findings resolved; remaining Important: HTTP CONNECT blocking write/read only observes deadline, not explicit context cancellation before that deadline
 - Final-round scope: cancellation watcher closes CONNECT socket and returns `ctx.Err()`; deterministic blocked-write and response-read explicit-cancel tests
-- Status: final Task 23 fix implementer pending
+- Final fix implementer: `ses_016c70db1ffeICbgbL4XHWDwCC`
+- Final fix commit: `cd5fa10db6640ef7b984931853ee7a20667d87e9` (parent `5f67d9f809dde6c478f19fcebe2d4cda77a9a6ca`)
+- Final fix evidence: explicit-cancel blocked CONNECT write/read RED, then GREEN with CONNECT-stage close watcher and `ctx.Err()` propagation
+- Additional broad-run RED reproduced by coordinator: `TestNilConfigResponseHeaderTimeoutFallback` expects stale 10m while authoritative code fallback/comment is 5m
+- Routed concerns: UsageLog sqlmock destination drift belongs Task 24; external OpenAI token-parity tests are not local-only gates
+- Status: final-round test-only timeout expectation follow-up pending before re-review
