@@ -2048,7 +2048,7 @@ if ($task28Paths.Count -gt 0) { Commit-NamedPaths -Message 'fix: preserve Grok g
 
 ### Task 29: 融合 Grok free gate、冷却与调度阈值
 
-- [ ] Task 29: 融合 Grok free gate、冷却与调度阈值
+- [x] Task 29: 融合 Grok free gate、冷却与调度阈值
 
 **映射 OpenSpec：**6.4
 

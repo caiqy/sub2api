@@ -147,4 +147,7 @@
 - Task 29 fix-2 implementer gates: direct service/handler regressions, both required backend baselines, full service package, golangci-lint, frontend 40 tests/typecheck/lint, diff and VERSION gates PASS
 - Task 29 fix-2 final controller gates: all three direct regressions PASS; handler pool PASS; both required backend baselines PASS; full service package PASS; golangci-lint 0 issues; frontend 40 tests/typecheck/lint PASS; diff check PASS; VERSION unchanged
 - Task 29 fix-2 scope/risk: six Go files, three production boundary checks and direct tests; no new helper/dependency/schema/migration/subscription/frontend production/VERSION change; existing frontend warnings remain non-failing
-- Task 29 status: final same-reviewer re-review pending
+- Task 29 final review package: `.superpowers/sdd/review-d21e47e0b..cd9eb5069.diff`
+- Task 29 final reviewer `ses_014a78483ffeuXkO6Wa4X2HWgv`: no Critical/Important/Minor findings; `Spec: PASS`, `Quality: APPROVED`
+- Task 29 accepted implementation commits: `dc48eeb96`, `6a4ef4864`, `4f31de4f4`, `e58396e9e`, `6d61102b2`, `e7f3f4682`, `cd3d9041c`, `bea98010a`, `cdf804416`, `b6139763b`, `f4aab0017`, `57e651504`, `26fee091c`
+- Task 29 status: complete; OpenSpec 6.4 complete
