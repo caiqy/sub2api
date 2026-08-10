@@ -1714,7 +1714,7 @@ if ($task23ChangedPaths.Count -gt 0) { Commit-NamedPaths -Message 'fix: preserve
 
 ### Task 24: 闭合 response-model audit、194/195 和前端展示
 
-- [ ] Task 24: 闭合 response-model audit、194/195 和前端展示
+- [x] Task 24: 闭合 response-model audit、194/195 和前端展示
 
 **映射 OpenSpec：**5.6
 
