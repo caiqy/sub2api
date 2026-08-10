@@ -71,6 +71,7 @@ function metrics(requestCount: number): MonitorMetric {
     rpm: 1.5,
     tpm: 10.2,
     error_rate: requestCount ? 1 / requestCount : 0,
+    success_rate: requestCount ? (requestCount - 1) / requestCount : 0,
     cache_rate: 0.5,
     cache_rate_numerator: 50,
     cache_rate_denominator: 100,
@@ -82,7 +83,35 @@ function metrics(requestCount: number): MonitorMetric {
 }
 
 describe('RelayPulseMatrix', () => {
-  it('shows privacy-safe hover tooltips and multi-band colors without click modal', async () => {
+  it('uses the authoritative success_rate when ignored failures lower scored error_rate', () => {
+    const ignoredFailureMetrics = { ...metrics(10), success_rate: 0.8 }
+    const wrapper = mount(RelayPulseMatrix, {
+      props: {
+        rows: [{
+          platform: 'openai',
+          metrics: ignoredFailureMetrics,
+          health,
+          buckets: [{ bucket_start: '2026-08-01T00:00:00Z', metrics: ignoredFailureMetrics, health }],
+        }],
+        coverage: {
+          requested_start: '2026-08-01T00:00:00Z',
+          requested_end: '2026-08-01T00:01:00Z',
+          coverage_start: '2026-08-01T00:00:00Z',
+          data_through: '2026-08-01T00:01:00Z',
+          computed_at: '2026-08-01T00:01:00Z',
+          aggregation_lag_seconds: 0,
+          coverage_complete: true,
+          bucket_seconds: 60,
+        },
+        healthMode: 'overall',
+      },
+    })
+
+    expect(wrapper.find('.summary-value').text()).toBe('80.0%')
+    expect(wrapper.find('.pulse-cell').text()).toContain('成功率 80.0%')
+  })
+
+	it('shows privacy-safe hover tooltips and multi-band colors without click modal', async () => {
     const wrapper = mount(RelayPulseMatrix, {
       props: {
         rows: [{

@@ -41,6 +41,7 @@ export interface MonitorMetric {
   rpm: number
   tpm: number
   error_rate: number
+  success_rate: number
   cache_rate: number
   cache_rate_numerator: number
   cache_rate_denominator: number
