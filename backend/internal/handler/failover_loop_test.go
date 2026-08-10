@@ -517,6 +517,25 @@ func TestHandleFailoverError_TempUnschedule(t *testing.T) {
 	})
 }
 
+func TestHandleFailoverError_GrokPool429DefersMutationUntilSameAccountRetryExhaustion(t *testing.T) {
+	mock := &mockTempUnscheduler{}
+	state := NewFailoverState(2, false)
+	failoverErr := &service.UpstreamFailoverError{StatusCode: http.StatusTooManyRequests, RetryableOnSameAccount: true}
+
+	action := state.HandleFailoverError(context.Background(), mock, 8804, service.PlatformGrok, 1, failoverErr)
+
+	require.Equal(t, FailoverContinue, action)
+	require.Equal(t, 1, state.SameAccountRetryCount[8804])
+	require.Empty(t, state.FailedAccountIDs)
+	require.Empty(t, mock.calls)
+
+	action = state.HandleFailoverError(context.Background(), mock, 8804, service.PlatformGrok, 1, failoverErr)
+
+	require.Equal(t, FailoverContinue, action)
+	require.Contains(t, state.FailedAccountIDs, int64(8804))
+	require.Len(t, mock.calls, 1)
+}
+
 // ---------------------------------------------------------------------------
 // HandleFailoverError — Context 取消
 // ---------------------------------------------------------------------------
