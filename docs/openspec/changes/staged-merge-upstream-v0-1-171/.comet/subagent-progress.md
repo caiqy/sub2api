@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 26: 创建纯 v0.1.173 merge 节点`
 - OpenSpec mapping: `6.1`
-- Stage: `task-implement`
+- Stage: `task-complete`
 - Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `41d5c86e5ec788169346257d20c266b70da34db6`
@@ -67,4 +67,8 @@
 - Task 25 status: complete; Docker-backed 194/195 execution remains `UNVERIFIED`
 - Task 26 tag object/peeled commit: `9e2a27ad39201a14074982bae331c4610161586a` / `29009f0b2ea14edf3b11ae2564fb617ff91a03b4`
 - Task 26 preflight: v0.1.172 ancestor yes; v0.1.173 ancestor no; VERSION `0.1.171.1`; only selector untracked
-- Task 26 status: merge implementer pending
+- Task 26 implementer: `ses_015e53e50ffe4PgymDzyBI3rK5` returned `DONE_WITH_CONCERNS`
+- Task 26 merge commit: `c939a4ca0e33eb4896e6df6907e205a5a91c42a3`; 35 conflicts; compile PASS
+- Task 26 reviewer: `ses_015c8e991ffeO5gGz5sSMgzGVH` returned `Spec: PASS`, `Quality: APPROVED`, no findings
+- Controller verification: compile PASS; Ent/Wire generate stable; first/second parent, v0.1.173 ancestry, VERSION and conflict-marker checks PASS
+- Task 26 status: complete; Grok mapping/password and Channel Monitor compatibility remain post-merge tasks

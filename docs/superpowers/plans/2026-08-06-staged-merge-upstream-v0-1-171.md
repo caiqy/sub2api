@@ -1838,7 +1838,7 @@ Commit-NamedPaths -Message 'docs: record v0.1.172 gates and v0.1.173 matrix' -Pa
 
 ### Task 26: 创建纯 v0.1.173 merge 节点
 
-- [ ] Task 26: 创建纯 v0.1.173 merge 节点
+- [x] Task 26: 创建纯 v0.1.173 merge 节点
 
 **映射 OpenSpec：**6.1
 
