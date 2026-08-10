@@ -4,18 +4,18 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Current task: `Task 30: 融合 Channel Monitor V2 与隐私默认`
-- OpenSpec mapping: `6.5`
-- Stage: `task-review`
-- Review/fix round: `3/3 (user-authorized)`
+- Current task: `Task 31: 闭合 Grok 定价、生成物与 173 migrations`
+- OpenSpec mapping: `6.6`
+- Stage: `task-start`
+- Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
-- Task start HEAD: `47ea52002c521f12f480df43205b0bb854675eb9`
-- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-30-brief.md`
-- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-30-report.md`
-- Dependency: Task 29 / OpenSpec 6.4 complete; v0.1.173 Channel Monitor code is present for compatibility review
+- Task start HEAD: `eaf4134da87cbdf77305a94867079f17033c39c8`
+- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-31-brief.md`
+- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-31-report.md`
+- Dependency: Task 28 usage dimensions and Task 30 Channel Monitor schema/privacy are complete
 - TDD rule: baseline first; every concrete compatibility gap requires direct RED before minimal production fix
-- Risk signals: concurrent V1/V2 runners、rollup idempotency、user-scope privacy、settings hot update、frontend metric visibility
-- Hard boundary: missing/invalid mode defaults V1; V2 only explicit opt-in; ordinary-user throughput redacted in backend; no migration changes
+- Risk signals: pricing field parity、Ent ownership、auth cache snapshot、24 migration blobs、Docker-only migration behavior
+- Hard boundary: no migration SQL edits; source and generated output share ownership; migration 220 backs up before platform-scoped cleanup; no remote integration
 - Implementer: `ses_016a4ff6affeoRN1EoiY0Sy1px` returned `DONE_WITH_CONCERNS`
 - Implementation commit: `ff58b07e14d563296477c74bfb3573e765bec20c` (parent `3f1fda732af1fb59d32f2afcd6dbba6caf88ab9b`)
 - Genuine RED: paginated UsageLog SQLMock fixtures exposed 59 persisted values versus 61 list scan targets (generated id + has_detail)
@@ -200,3 +200,6 @@
 - Task 30 accepted implementation commits: `1aed5304f`, `93e7dcf90`, `22473cd57`, `a4e0fbe6c`, `367799d9f`, `30bd91d5b`
 - Task 30 residual: focused `-race` remains `UNVERIFIED` because local CGO/GCC toolchain is unavailable; all required gates PASS
 - Task 30 status: complete; OpenSpec 6.5 complete
+- Task 31 brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-31-brief.md`
+- Task 31 protected migration set: 24 full filenames across source base, tag 170, tag 172 and tag 173; SQL worktree edits forbidden
+- Task 31 status: baseline, pricing chain, generate ownership and migration identity/integration audit pending
