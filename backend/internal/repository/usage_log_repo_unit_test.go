@@ -87,6 +87,8 @@ func TestListUsageLogsWithPagination_UsesHasDetailWhenDetailTableExists(t *testi
 	logs, page, err := repo.listUsageLogsWithPagination(context.Background(), "WHERE user_id = $1", []any{int64(7)}, pagination.PaginationParams{Page: 1, PageSize: 10})
 	require.NoError(t, err)
 	require.Len(t, logs, 1)
+	require.Equal(t, "claude-3.5", *logs[0].UpstreamResponseModel)
+	require.True(t, *logs[0].UpstreamModelMismatch)
 	require.True(t, logs[0].HasDetail)
 	require.NotNil(t, page)
 	require.Equal(t, int64(1), page.Total)
@@ -162,7 +164,7 @@ func TestScanUsageLog_SelectColumnsMatchScanDestinations(t *testing.T) {
 
 func usageLogListRowColumns() []string {
 	return []string{
-		"id", "user_id", "api_key_id", "account_id", "request_id", "model", "requested_model", "upstream_model", "group_id", "subscription_id",
+		"id", "user_id", "api_key_id", "account_id", "request_id", "model", "requested_model", "upstream_model", "upstream_response_model", "upstream_model_mismatch", "group_id", "subscription_id",
 		"input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens", "cache_creation_5m_tokens", "cache_creation_1h_tokens",
 		"image_output_tokens", "image_output_cost", "image_input_tokens", "image_input_cost", "input_cost", "output_cost", "cache_creation_cost", "cache_read_cost", "total_cost", "actual_cost", "rate_multiplier",
 		"account_rate_multiplier", "billing_type", "request_type", "stream", "openai_ws_mode", "duration_ms", "first_token_ms",
@@ -175,7 +177,7 @@ func usageLogListRowColumns() []string {
 func usageLogListRowValues(hasDetail bool) []driver.Value {
 	createdAt := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
 	return []driver.Value{
-		int64(101), int64(7), int64(8), int64(9), "req-list", "claude-3", nil, nil, nil, nil,
+		int64(101), int64(7), int64(8), int64(9), "req-list", "claude-3", nil, nil, "claude-3.5", true, nil, nil,
 		10, 20, 0, 0, 0, 0,
 		0, 0.0, 0, 0.0, 0.1, 0.2, 0.0, 0.0, 0.3, 0.3, 1.0,
 		nil, int16(0), int16(service.RequestTypeSync), false, false, nil, nil,

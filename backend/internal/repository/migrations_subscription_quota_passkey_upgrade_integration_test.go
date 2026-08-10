@@ -26,14 +26,18 @@ func TestMigrationsRunner_PreservesPasskeyAndSubscriptionQuotaMigrationsAcrossUp
 		"192_subscription_cache_invalidation_outbox.sql",
 		"192_group_profit_control.sql",
 		"193_group_profit_control_auth_cache_invalidation.sql",
+		"194_add_usage_log_upstream_response_model.sql",
+		"195_add_usage_log_upstream_model_mismatch_index_notx.sql",
 	}
 
 	completeFS := dbmigrations.FS
 	baselineFS := fstest.MapFS{}
 	expectedChecksums := make(map[string]string, len(filenames))
 	excludedFromBaseline := map[string]struct{}{
-		"192_group_profit_control.sql":                         {},
-		"193_group_profit_control_auth_cache_invalidation.sql": {},
+		"192_group_profit_control.sql":                             {},
+		"193_group_profit_control_auth_cache_invalidation.sql":     {},
+		"194_add_usage_log_upstream_response_model.sql":            {},
+		"195_add_usage_log_upstream_model_mismatch_index_notx.sql": {},
 	}
 	files, err := fs.Glob(completeFS, "*.sql")
 	require.NoError(t, err)
@@ -130,6 +134,45 @@ WHERE table_schema = 'public'
 		}
 		assertProfitColumns(db)
 		assertProfitFunction(db, true)
+		for _, column := range []struct {
+			name     string
+			dataType string
+			maxLen   int64
+		}{
+			{"upstream_response_model", "character varying", 200},
+			{"upstream_model_mismatch", "boolean", 0},
+		} {
+			var actualType, nullable string
+			var actualMaxLen sql.NullInt64
+			require.NoError(t, db.QueryRowContext(ctx, `
+SELECT data_type, character_maximum_length, is_nullable
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND table_name = 'usage_logs'
+  AND column_name = $1`, column.name).Scan(&actualType, &actualMaxLen, &nullable))
+			require.Equal(t, column.dataType, actualType)
+			require.Equal(t, "YES", nullable)
+			if column.maxLen > 0 {
+				require.True(t, actualMaxLen.Valid)
+				require.Equal(t, column.maxLen, actualMaxLen.Int64)
+			}
+		}
+
+		var mismatchIndexValid bool
+		var mismatchIndexDefinition string
+		require.NoError(t, db.QueryRowContext(ctx, `
+SELECT i.indisvalid, pg_get_indexdef(i.indexrelid)
+FROM pg_class idx
+JOIN pg_index i ON i.indexrelid = idx.oid
+JOIN pg_class tbl ON tbl.oid = i.indrelid
+JOIN pg_namespace ns ON ns.oid = tbl.relnamespace
+WHERE ns.nspname = 'public'
+  AND tbl.relname = 'usage_logs'
+  AND idx.relname = $1`, usageLogsUpstreamModelMismatchIndex).Scan(&mismatchIndexValid, &mismatchIndexDefinition))
+		require.True(t, mismatchIndexValid)
+		require.Contains(t, mismatchIndexDefinition, "created_at DESC")
+		require.Contains(t, mismatchIndexDefinition, "id DESC")
+		require.Contains(t, mismatchIndexDefinition, "WHERE (upstream_model_mismatch IS TRUE)")
 		for _, relation := range []string{
 			"passkey_user_handles",
 			"passkey_credentials",
@@ -158,6 +201,18 @@ WHERE table_schema = 'public'
 	}
 	assertProfitColumnsAbsent(upgradeDB)
 	assertProfitFunction(upgradeDB, false)
+	for _, column := range []string{"upstream_response_model", "upstream_model_mismatch"} {
+		var exists bool
+		require.NoError(t, upgradeDB.QueryRowContext(ctx, `
+SELECT EXISTS (
+	SELECT 1
+	FROM information_schema.columns
+	WHERE table_schema = 'public'
+	  AND table_name = 'usage_logs'
+	  AND column_name = $1
+)`, column).Scan(&exists))
+		require.False(t, exists, "expected baseline usage_logs.%s to be absent", column)
+	}
 	require.NoError(t, applyMigrationsFS(ctx, upgradeDB, completeFS))
 	require.NoError(t, applyMigrationsFS(ctx, upgradeDB, completeFS))
 	assertCompleteState(upgradeDB)
