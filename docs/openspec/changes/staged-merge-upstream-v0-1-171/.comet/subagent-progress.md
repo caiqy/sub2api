@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 31: 闭合 Grok 定价、生成物与 173 migrations`
 - OpenSpec mapping: `6.6`
-- Stage: `task-start`
+- Stage: `blocked`
 - Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `eaf4134da87cbdf77305a94867079f17033c39c8`
@@ -202,4 +202,11 @@
 - Task 30 status: complete; OpenSpec 6.5 complete
 - Task 31 brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-31-brief.md`
 - Task 31 protected migration set: 24 full filenames across source base, tag 170, tag 172 and tag 173; SQL worktree edits forbidden
-- Task 31 status: baseline, pricing chain, generate ownership and migration identity/integration audit pending
+- Task 31 implementer `ses_01323c59effeR9bqNA8Bjw3AB7`: initial false identity block corrected, resumed result `BLOCKED`
+- Task 31 migration identity: corrected 201/202 names; all 24 authoritative/worktree blobs PASS
+- Task 31 baseline remediation: stale Grok expected default corrected to false; Settings API restored current scheduling-threshold and Channel Monitor mode/privacy fields; group handler pricing field propagation direct RED/GREEN complete
+- Task 31 migration integration: test extended for Grok/composite/OpenAI and migration 220 backup/cleanup/other-pricing semantics; runtime `UNVERIFIED` because local Docker is unavailable
+- Task 31 generated ownership blocker: required first generate changes only `backend/cmd/server/wire_gen.go`, reflecting Task 30 source commit `93e7dcf90` cleanup-label change in `backend/cmd/server/wire.go`; original source-owning commit omitted generated output
+- Task 31 uncommitted scope preserved: handler/API tests, group pricing test, migration integration test and generated wire diff; no SQL/VERSION/dependency changes
+- Task 31 required resolution: rebuild unshared history so `93e7dcf90` source and generated output share one commit, replay descendants, rerun Task 30 review and Task 31 gates; historical rewrite requires explicit user authorization
+- Task 31 status: BLOCKED pending branch-history rewrite decision
