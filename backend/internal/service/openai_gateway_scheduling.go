@@ -1415,6 +1415,9 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDB(ctx context.Co
 	if !isGrokSchedulingEligible(latest, requestedModel, time.Now()) {
 		return nil
 	}
+	if len(s.filterGrokFreeQuotaAccountsForOpenAI(ctx, []Account{*latest})) == 0 {
+		return nil
+	}
 	if !parentHealthyForShadow(latest, s.parentAccountLookup(ctx)) {
 		return nil
 	}

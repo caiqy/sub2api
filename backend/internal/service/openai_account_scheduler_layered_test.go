@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -446,6 +447,8 @@ type grokFreshRecheckRepo struct {
 	freshByID map[int64]*Account
 }
 
+type grokFreshFreeTierUsageRepo struct{ UsageLogRepository }
+
 func (r grokFreshRecheckRepo) GetByID(ctx context.Context, id int64) (*Account, error) {
 	if account := r.freshByID[id]; account != nil {
 		copy := *account
@@ -501,6 +504,82 @@ func TestLayered_GrokCooldownRechecksFreshMappingBeforeStickyWeightedWaitPlan(t 
 	require.NotNil(t, selection.WaitPlan)
 	require.Equal(t, fallback.ID, selection.Account.ID)
 	require.Equal(t, fallback.ID, selection.WaitPlan.AccountID)
+}
+
+func TestLayered_GrokFreshFreeTierRecheckSkipsOverGateAccount(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		acquired bool
+	}{
+		{name: "acquired slot", acquired: true},
+		{name: "wait plan", acquired: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			groupID := int64(920153)
+			stale := Account{
+				ID: 92015301, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, GroupIDs: []int64{groupID},
+				Credentials: map[string]any{"subscription_tier": "pro"},
+			}
+			fresh := stale
+			fresh.Credentials = map[string]any{"subscription_tier": "free"}
+			fallback := Account{
+				ID: 92015302, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 10, GroupIDs: []int64{groupID},
+				Credentials: map[string]any{"subscription_tier": "pro"},
+			}
+			repo := grokFreshRecheckRepo{
+				schedulerTestOpenAIAccountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{stale, fallback}},
+				freshByID:                      map[int64]*Account{stale.ID: &fresh, fallback.ID: &fallback},
+			}
+			cfg := newOpenAIStickyEnabledTestConfig()
+			cfg.RunMode = config.RunModeSimple
+			cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+			cfg.Gateway.Grok.FreeQuotaSoftGateEnabled = true
+			cfg.Gateway.Grok.FreeQuotaTokenLimit = 500_000
+			cfg.Gateway.Grok.FreeQuotaSoftGatePercent = 95
+			cfg.Gateway.Grok.FreeQuotaStatsCacheSeconds = 60
+			openaiGrokFreeQuotaGateCache = sync.Map{}
+			openaiGrokFreeQuotaGateCache.Store(stale.ID, grokFreeQuotaGateCacheEntry{tokens: 480_000, checkedAt: time.Now().UTC(), known: true})
+			t.Cleanup(func() { openaiGrokFreeQuotaGateCache = sync.Map{} })
+			snapshotCfg := &config.Config{}
+			snapshotCfg.Gateway.Scheduling.DbFallbackEnabled = true
+			svc := &OpenAIGatewayService{
+				accountRepo:        repo,
+				cfg:                cfg,
+				usageLogRepo:       &grokFreshFreeTierUsageRepo{},
+				concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{acquireResults: map[int64]bool{stale.ID: tc.acquired, fallback.ID: tc.acquired}}),
+			}
+			svc.schedulerSnapshot = NewSchedulerSnapshotService(&openAISnapshotCacheStub{
+				snapshotAccounts: []*Account{&stale, &fallback},
+				accountsByID: map[int64]*Account{
+					stale.ID:    &stale,
+					fallback.ID: &fallback,
+				},
+			}, nil, repo, schedulerTestGroupRepo{groups: map[int64]*Group{
+				groupID: {ID: groupID, Name: "fresh-free-grok", Platform: PlatformGrok},
+			}}, snapshotCfg)
+			t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+			selection, _, err := svc.getOpenAIAccountScheduler().Select(context.Background(), OpenAIAccountScheduleRequest{
+				GroupID:        &groupID,
+				Platform:       PlatformGrok,
+				RequestedModel: "grok-4.5",
+			})
+
+			require.NoError(t, err)
+			require.NotNil(t, selection)
+			require.NotNil(t, selection.Account)
+			require.Equal(t, fallback.ID, selection.Account.ID)
+			if tc.acquired {
+				require.True(t, selection.Acquired)
+				require.Nil(t, selection.WaitPlan)
+				selection.ReleaseFunc()
+			} else {
+				require.False(t, selection.Acquired)
+				require.NotNil(t, selection.WaitPlan)
+				require.Equal(t, fallback.ID, selection.WaitPlan.AccountID)
+			}
+		})
+	}
 }
 
 // TestLayered_TTFTPenalty_SharedEvaluatorUsesConsistentGroupBaseline verifies
