@@ -220,6 +220,9 @@ func (s *ChannelMonitorV2Aggregator) runOnce() {
 	if parent == nil {
 		parent = context.Background()
 	}
+	if !s.passiveAggregationAllowed(parent) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(parent, 55*time.Second)
 	defer cancel()
 	release, acquired := tryAcquireSingletonLeaderLock(ctx, nil, s.db, channelMonitorV2AggregatorLockKey, s.instanceID, 2*time.Minute)

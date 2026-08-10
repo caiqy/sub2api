@@ -10,17 +10,26 @@ import (
 )
 
 type channelMonitorV2RepoStub struct {
-	config serviceChannelMonitorV2ConfigAlias
-	users  *ChannelMonitorV2List[ChannelMonitorV2UserRow]
-	matrix *ChannelMonitorV2Matrix
-	errors *ChannelMonitorV2List[ChannelMonitorV2ErrorRow]
-	snap   *ChannelMonitorV2Snapshot
-	group  ChannelMonitorV2GroupBy
-	admin  bool
+	config         serviceChannelMonitorV2ConfigAlias
+	users          *ChannelMonitorV2List[ChannelMonitorV2UserRow]
+	matrix         *ChannelMonitorV2Matrix
+	errors         *ChannelMonitorV2List[ChannelMonitorV2ErrorRow]
+	snap           *ChannelMonitorV2Snapshot
+	group          ChannelMonitorV2GroupBy
+	admin          bool
+	recomputeCalls int
 }
 
 // Alias keeps composite literals readable without introducing another package.
 type serviceChannelMonitorV2ConfigAlias = ChannelMonitorV2Config
+
+type channelMonitorV2RuntimeStub struct {
+	rt ChannelMonitorRuntime
+}
+
+func (s channelMonitorV2RuntimeStub) GetChannelMonitorRuntime(context.Context) ChannelMonitorRuntime {
+	return s.rt
+}
 
 func (s *channelMonitorV2RepoStub) GetConfig(context.Context) (*ChannelMonitorV2Config, error) {
 	cfg := ChannelMonitorV2Config(s.config)
@@ -77,6 +86,7 @@ func (s *channelMonitorV2RepoStub) GetUsers(context.Context, ChannelMonitorV2Fil
 	return s.users, nil
 }
 func (s *channelMonitorV2RepoStub) RecomputeRange(context.Context, time.Time, time.Time) error {
+	s.recomputeCalls++
 	return nil
 }
 func (s *channelMonitorV2RepoStub) GetAggregationWatermark(context.Context) (*ChannelMonitorV2AggregationWatermark, error) {
@@ -114,6 +124,18 @@ func TestChannelMonitorV2BootstrapProgress(t *testing.T) {
 		b := ChannelMonitorV2BootstrapProgress(now, covered, true)
 		require.Nil(t, b)
 	})
+}
+
+func TestChannelMonitorV2AggregatorDoesNotRecomputeOutsideV2Mode(t *testing.T) {
+	repo := &channelMonitorV2RepoStub{}
+	aggregator := NewChannelMonitorV2Aggregator(repo, nil, channelMonitorV2RuntimeStub{
+		rt: ChannelMonitorRuntime{Enabled: true, Mode: ChannelMonitorModeV1},
+	})
+
+	// This catches a settings flip after loop checked V2 but before runOnce began.
+	aggregator.runOnce()
+
+	require.Zero(t, repo.recomputeCalls)
 }
 
 func TestChannelMonitorV2ParseFilterDefaultsAndBuckets(t *testing.T) {

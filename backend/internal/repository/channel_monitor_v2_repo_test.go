@@ -127,6 +127,18 @@ func TestChannelMonitorV2RatesUseCoveredWindow(t *testing.T) {
 	require.Equal(t, coverage.DataThrough, effective.End)
 }
 
+func TestChannelMonitorV2BucketRatesUseCoveredWindow(t *testing.T) {
+	start := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	filter := service.ChannelMonitorV2Filter{Start: start, End: start.Add(10 * time.Minute), Bucket: 5 * time.Minute}
+	coverage := service.ChannelMonitorV2Coverage{CoverageStart: start, DataThrough: start.Add(6 * time.Minute)}
+
+	minutes := channelMonitorV2BucketCoveredMinutes(start.Add(5*time.Minute), filter, coverage)
+	metric := (&metricAccumulator{success: 5}).metric(minutes, false)
+
+	require.Equal(t, 1.0, minutes)
+	require.InDelta(t, 5.0, metric.RPM, 0.0001)
+}
+
 func TestChannelMonitorV2HistoryCoverageCompleteIgnoresTrailingLag(t *testing.T) {
 	start := time.Date(2026, 8, 7, 2, 20, 0, 0, time.UTC)
 	// History reaches the window start → complete even if data_through is behind filter.End.

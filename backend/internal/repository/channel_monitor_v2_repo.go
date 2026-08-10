@@ -267,7 +267,7 @@ func (r *channelMonitorV2Repository) GetSnapshot(ctx context.Context, filter ser
 	sort.Strings(keys)
 	for _, key := range keys {
 		bucket, _ := time.Parse(time.RFC3339Nano, key)
-		m := byBucket[key].metric(filter.Bucket.Minutes(), admin)
+		m := byBucket[key].metric(channelMonitorV2BucketCoveredMinutes(bucket, filter, *coverage), admin)
 		applyIgnoredErrors(&m, ignoredByBucket[key])
 		result.Trend = append(result.Trend, service.ChannelMonitorV2TrendPoint{BucketStart: bucket, Metrics: m, Health: service.ChannelMonitorV2HealthForWithThresholds(m, cfg.HealthThresholds)})
 	}
@@ -457,7 +457,7 @@ func (r *channelMonitorV2Repository) GetMatrix(ctx context.Context, filter servi
 			if parseErr != nil {
 				continue
 			}
-			bucketMetrics := acc.buckets[bucketKey].metric(filter.Bucket.Minutes(), admin)
+			bucketMetrics := acc.buckets[bucketKey].metric(channelMonitorV2BucketCoveredMinutes(bucketStart, filter, *coverage), admin)
 			applyIgnoredErrors(&bucketMetrics, ignoredByDimBucket[key][bucketKey])
 			row.Buckets = append(row.Buckets, service.ChannelMonitorV2TrendPoint{BucketStart: bucketStart, Metrics: bucketMetrics, Health: service.ChannelMonitorV2HealthForWithThresholds(bucketMetrics, cfg.HealthThresholds)})
 		}
@@ -1226,6 +1226,22 @@ func channelMonitorV2CoveredMinutes(filter service.ChannelMonitorV2Filter, cover
 		return 1
 	}
 	return end.Sub(start).Minutes()
+}
+
+func channelMonitorV2BucketCoveredMinutes(bucketStart time.Time, filter service.ChannelMonitorV2Filter, coverage service.ChannelMonitorV2Coverage) float64 {
+	if filter.Bucket <= 0 {
+		return 1
+	}
+	bucket := filter
+	bucket.Start = bucketStart
+	bucket.End = bucketStart.Add(filter.Bucket)
+	if filter.Start.After(bucket.Start) {
+		bucket.Start = filter.Start
+	}
+	if filter.End.Before(bucket.End) {
+		bucket.End = filter.End
+	}
+	return channelMonitorV2CoveredMinutes(bucket, coverage)
 }
 
 // Usage and error sources can have different retention windows. Composite
