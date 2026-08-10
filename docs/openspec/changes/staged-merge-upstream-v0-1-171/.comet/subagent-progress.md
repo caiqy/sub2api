@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 29: 融合 Grok free gate、冷却与调度阈值`
 - OpenSpec mapping: `6.4`
-- Stage: `implementing`
+- Stage: `task-review`
 - Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `dfb7d8542a9ac3585d30cc36281eed1cd0eb3282`
@@ -115,3 +115,12 @@
 - Task 28 residual gaps: Redis SET NX has no repository integration test; no-model Voice endpoint regression is not duplicated under advanced/layered scheduler; both are low risk and deferred until those layers next change
 - Task 28 accepted commits: `06b997492`, `18437349c`, `752d8b082`, `c5ffbed56`, `81ec3e6d7`, `d61f7e2d9`, `70ed46a8c`
 - Task 28 status: complete; OpenSpec 6.3 complete
+- Task 29 implementer `ses_014c8e326ffeBX1uHLEZdNReUC`: report records `DONE_WITH_CONCERNS`; nested agent final text misrouted to Native after completing work, so controller recovered facts from Git/report
+- Task 29 implementation commits: `dc48eeb96 fix: preserve Grok scheduling after v0.1.173`; `6a4ef4864 test: stabilize Grok quota focused tests`
+- Task 29 genuine RED: layered ordinary candidates and session-sticky selection chose team/model-cooled Grok accounts; direct tests failed on the blocked high-priority/sticky account identity
+- Task 29 GREEN: layered candidate/sticky cooldown tests PASS; free-gate and observed-model async tests stabilized and pass at count=10; both required backend baselines, related lint, frontend 40 tests/typecheck/lint, diff and VERSION gates PASS in implementer report
+- Task 29 changed files: `openai_account_scheduler_layered.go`, layered tests, `grok_free_quota_gate_test.go`, `grok_quota_service_test.go`
+- Task 29 risk signals: implementer result is `DONE_WITH_CONCERNS`; existing process-local cooldown/cache concurrency is exercised but no new shared state/API/schema was added; diff under 200 lines
+- Task 29 concern: SettingsView retains unrelated passing-test router-link/AggregateError noise; no Task 29 production contract impact
+- Task 29 controller gates: focused cooldown/free-gate tests, both required backend baselines, async stability count=10, frontend 40 tests/typecheck/lint PASS; golangci-lint 0 issues; diff check PASS; VERSION unchanged
+- Task 29 status: thorough task review pending
