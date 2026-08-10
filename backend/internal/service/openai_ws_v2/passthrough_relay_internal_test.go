@@ -516,8 +516,11 @@ func TestObserveUpstreamMessage_BindsOnlyResponseCreated(t *testing.T) {
 func TestObserveUpstreamMessage_ResponseModelIsTurnLocalAndTerminalWins(t *testing.T) {
 	t.Parallel()
 
-	state := &relayState{requestModel: "gpt-5.6-sol"}
 	startAt := time.Unix(0, 0)
+	state := &relayState{
+		requestModel: "gpt-5.6-sol",
+		activeTurn:   &relayTurnTiming{startAt: startAt, requestModel: "gpt-5.6-sol"},
+	}
 	now := startAt
 	nowFn := func() time.Time {
 		now = now.Add(5 * time.Millisecond)
@@ -549,6 +552,7 @@ func TestObserveUpstreamMessage_ResponseModelIsTurnLocalAndTerminalWins(t *testi
 	require.Equal(t, "gpt-5.4", firstTurn.ResponseModel)
 	require.True(t, firstTurn.ResponseModelConflict)
 
+	state.activeTurn = &relayTurnTiming{startAt: now, requestModel: "gpt-5.6-sol"}
 	observeUpstreamMessage(
 		state,
 		[]byte(`{"type":"response.created","response":{"id":"resp_2","model":"gpt-5.3"}}`),
