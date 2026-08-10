@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 29: 融合 Grok free gate、冷却与调度阈值`
 - OpenSpec mapping: `6.4`
-- Stage: `task-fix`
+- Stage: `task-review`
 - Review/fix round: `2/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `dfb7d8542a9ac3585d30cc36281eed1cd0eb3282`
@@ -141,4 +141,10 @@
 - Task 29 re-reviewer `ses_014a78483ffeuXkO6Wa4X2HWgv`: three Important findings (pool generic timeout mutation before same-account retry; Gateway non-load-aware sticky fast-path bypass; fresh DB explicit-free gate bypass); `Spec: FAIL`, `Quality: CHANGES_REQUIRED`
 - Task 29 fix-2 adjudication: accept all three findings after controller source/call-path verification
 - Task 29 fix-2 brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-29-fix-2-brief.md`
-- Task 29 status: fix-2 implementation pending
+- Task 29 fix-2 agent `ses_01455b935ffei1wVOxyzrlTazX`: returned `DONE`
+- Task 29 fix-2 commits: `f4aab0017 fix: defer pool stream timeout mutation`; `57e651504 fix: filter cooled Grok sticky fast path`; `26fee091c fix: recheck fresh Grok free quota gate`
+- Task 29 fix-2 RED/GREEN: active generic timeout policy mutated pool account before same-account retry; non-load-aware Gateway outer entry returned cooled sticky for acquire/WaitPlan; fresh explicit-free DB account with known over-gate cache was returned for acquire/WaitPlan; all three direct tests passed after minimum boundary checks
+- Task 29 fix-2 implementer gates: direct service/handler regressions, both required backend baselines, full service package, golangci-lint, frontend 40 tests/typecheck/lint, diff and VERSION gates PASS
+- Task 29 fix-2 final controller gates: all three direct regressions PASS; handler pool PASS; both required backend baselines PASS; full service package PASS; golangci-lint 0 issues; frontend 40 tests/typecheck/lint PASS; diff check PASS; VERSION unchanged
+- Task 29 fix-2 scope/risk: six Go files, three production boundary checks and direct tests; no new helper/dependency/schema/migration/subscription/frontend production/VERSION change; existing frontend warnings remain non-failing
+- Task 29 status: final same-reviewer re-review pending
