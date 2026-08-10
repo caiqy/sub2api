@@ -6,8 +6,8 @@
 - TDD mode: `tdd`
 - Current task: `Task 28: 融合 Grok 媒体、Voice、搜索与网关契约`
 - OpenSpec mapping: `6.3`
-- Stage: `task-review`
-- Review/fix round: `0/2`
+- Stage: `task-fix`
+- Review/fix round: `1/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `67be08211`
 - Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-28-brief.md`
@@ -96,4 +96,7 @@
 - Task 28 production REDs: TTS audio retained in usage snapshot; Voice failover stale model; native search stale selected-account model
 - Task 28 controller gates: both required matrices PASS; UsageDetailCapture direct tests PASS; related golangci-lint 0 issues; VERSION unchanged
 - Task 28 review package: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-28-review-package.md`
-- Task 28 status: reviewer pending
+- Task 28 reviewer `ses_0153f668bffebYIBELre0q07By`: native search usage identity, multipart/default Voice identity, JSON search dedupe, and async video claim/release evidence incomplete; `Spec: FAIL`, `Quality: CHANGES_REQUIRED`
+- Task 28 review clarification: do not synthesize upstream models for no-model TTS/custom-voices; fix explicit multipart STT, empty UpstreamModel, and Realtime coverage instead
+- Task 28 fix brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-28-fix-1-brief.md`
+- Task 28 status: review fix round 1 pending
