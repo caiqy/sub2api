@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 30: 融合 Channel Monitor V2 与隐私默认`
 - OpenSpec mapping: `6.5`
-- Stage: `task-start`
+- Stage: `task-review`
 - Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `47ea52002c521f12f480df43205b0bb854675eb9`
@@ -153,4 +153,11 @@
 - Task 29 status: complete; OpenSpec 6.4 complete
 - Task 30 brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-30-brief.md`
 - Task 30 boundary: Channel Monitor backend/frontend and direct tests only; migrations remain Task 31
-- Task 30 status: baseline and implementation audit pending
+- Task 30 implementer `ses_014322821ffeEhs0OrrjiF2kxo`: returned `DONE_WITH_CONCERNS`
+- Task 30 implementation commit: `1aed5304f fix: preserve channel monitoring after v0.1.173`
+- Task 30 baseline: required backend four-package focused gate, frontend 8 files/38 tests, typecheck, diff/VERSION/migration boundary PASS before fixes
+- Task 30 RED/GREEN: V2 `runOnce` recomputed after loop-to-run mode flip; partial trend bucket divided by configured bucket instead of actual covered minute; direct service/repository tests RED then GREEN
+- Task 30 scope: `channel_monitor_v2_aggregator.go`, `channel_monitor_v2_repo.go` and two direct test files only; no migration/frontend production/settings/schema/dependency change
+- Task 30 controller gates: required backend focused, both direct regressions, four-package golangci-lint, frontend 38 tests/typecheck, diff/VERSION/migration boundary PASS
+- Task 30 concern for reviewer: no new V2 work starts after mode is observed outside V2, but an atomic recompute already in progress can finish under its existing 55-second context after a mode flip
+- Task 30 status: thorough review pending
