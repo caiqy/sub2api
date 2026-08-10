@@ -1355,10 +1355,15 @@ func (s *GatewayService) DoGrokNativeResponsesJSON(ctx context.Context, account 
 		return nil, err
 	}
 	if json.Valid(body) {
-		if model := strings.TrimSpace(gjson.GetBytes(body, "model").String()); model == "" {
-			if patched, patchErr := sjson.SetBytes(body, "model", xai.DefaultTextModel); patchErr == nil {
-				body = patched
-			}
+		model := strings.TrimSpace(gjson.GetBytes(body, "model").String())
+		if model == "" {
+			model = xai.DefaultTextModel
+		}
+		if mappedModel := strings.TrimSpace(account.GetMappedModel(model)); mappedModel != "" {
+			model = mappedModel
+		}
+		if patched, patchErr := sjson.SetBytes(body, "model", model); patchErr == nil {
+			body = patched
 		}
 	}
 	upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))

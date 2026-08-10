@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -16,7 +17,33 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
+
+func TestDoGrokNativeResponsesJSONAppliesSelectedAccountModelMapping(t *testing.T) {
+	account := &Account{
+		ID:          9900,
+		Platform:    PlatformGrok,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":       "search-key",
+			"base_url":      "https://api.x.ai/v1",
+			"model_mapping": map[string]any{"grok-4.5": "mapped-search-model"},
+		},
+	}
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"output":[]}`)),
+	}}
+	svc := &GatewayService{httpUpstream: upstream}
+
+	_, err := svc.DoGrokNativeResponsesJSON(context.Background(), account, []byte(`{"model":"grok-4.5","input":"search"}`))
+
+	require.NoError(t, err)
+	require.Equal(t, "mapped-search-model", gjson.GetBytes(upstream.lastBody, "model").String())
+}
 
 func TestForwardGrokResponses_PropagatesSearchCountFromJSON(t *testing.T) {
 	gin.SetMode(gin.TestMode)
