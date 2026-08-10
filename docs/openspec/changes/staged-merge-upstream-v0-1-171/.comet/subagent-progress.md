@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 25: 运行 v0.1.172 全量门禁并冻结 v0.1.173 精确矩阵`
 - OpenSpec mapping: `5.7、5.8`
-- Stage: `task-fix`
+- Stage: `task-complete`
 - Review/fix round: `3/3 (user-authorized evidence-only)`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `ecac7fe5ad9dae69475acacc83925a9fbea1f96b`
@@ -61,4 +61,7 @@
 - Task 25 re-review: `ses_016336266ffeIPwFZfPDPASWl4` returned one Important because count assertions did not verify 140-path membership identity
 - User decision: explicitly authorized a third evidence-only fix
 - Task 25 authorized fix brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-25-fix-3-brief.md`
-- Task 25 status: overlap membership identity evidence pending
+- Task 25 authorized evidence commit: `9eb903dde52829b053a2a75a5070f4e4252e21fd`; 140 recorded/fresh paths equal, difference 0, SHA-256 `5fcf4efe2c3198d17165fbb9028be86ade644089330decd5f240b002ba122637`
+- Task 25 final reviewer: `ses_016336266ffeIPwFZfPDPASWl4` returned `Spec: PASS`, `Quality: APPROVED`, no findings
+- Controller verification: four backend focused bundles PASS; frontend focused 100 tests and full 1842 tests PASS; build/lint/typecheck/two generate passes/topology/seven migration identities/352-1237-140 digest checks PASS
+- Task 25 status: complete; Docker-backed 194/195 execution remains `UNVERIFIED`

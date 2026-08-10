@@ -1775,7 +1775,7 @@ if ($task24ChangedPaths.Count -gt 0) { Commit-NamedPaths -Message 'fix: preserve
 
 ### Task 25: 运行 v0.1.172 全量门禁并冻结 v0.1.173 精确矩阵
 
-- [ ] Task 25: 运行 v0.1.172 全量门禁并冻结 v0.1.173 精确矩阵
+- [x] Task 25: 运行 v0.1.172 全量门禁并冻结 v0.1.173 精确矩阵
 
 **映射 OpenSpec：**5.7、5.8
 
