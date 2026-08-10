@@ -165,8 +165,8 @@ func filterGrokFreeQuotaAccountsCore(
 			entry, valid := cached.(grokFreeQuotaGateCacheEntry)
 			if valid {
 				age := now.Sub(entry.checkedAt)
-				// cacheTTL == 0 means "no expiry" for known entries (still fail-open
-				// on first miss; refresh is only scheduled when missing/stale).
+				// cacheTTL is normalized to a finite one-minute default when configuration
+				// is zero or negative.
 				fresh := settings.cacheTTL <= 0 || (age >= 0 && age < settings.cacheTTL)
 				if fresh {
 					if entry.known {
