@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 import UsageView from '../UsageView.vue'
+import UsageTable from '@/components/admin/usage/UsageTable.vue'
 
 const {
   query,
@@ -205,6 +206,30 @@ describe('user UsageView', () => {
     }))
     expect(list).toHaveBeenCalledWith(1, 100)
     expect(getAvailable).toHaveBeenCalled()
+  })
+
+  it('passes upstream endpoint visibility as false to the rendered usage table', async () => {
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: simpleStub,
+          Pagination: true,
+          Select: true,
+          DateRangePicker: true,
+          Icon: true,
+          DataTable: true,
+          EmptyState: true,
+          UsageStatsCards: chartStub,
+          ModelDistributionChart: chartStub,
+          GroupDistributionChart: chartStub,
+          EndpointDistributionChart: chartStub,
+          TokenUsageTrend: chartStub,
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.getComponent(UsageTable).props('showUpstreamEndpoint')).toBe(false)
   })
 
   it('exports csv with current filters and without admin-only fields', async () => {

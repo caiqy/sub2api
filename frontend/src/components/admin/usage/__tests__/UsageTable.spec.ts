@@ -294,6 +294,53 @@ describe('admin UsageTable tooltip', () => {
     expect(text).toContain('Not observed')
   })
 
+  it('hides response-model audit details when upstream endpoint visibility is disabled', () => {
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [
+          {
+            request_id: 'req-hidden-mismatch',
+            model: 'requested-mismatch',
+            upstream_model: 'sent-mismatch',
+            upstream_response_model: 'observed-mismatch',
+            upstream_model_mismatch: true,
+          },
+          {
+            request_id: 'req-hidden-match',
+            model: 'requested-match',
+            upstream_model: 'sent-match',
+            upstream_response_model: 'observed-match',
+            upstream_model_mismatch: false,
+          },
+          {
+            request_id: 'req-hidden-unobserved',
+            model: 'requested-unobserved',
+            upstream_model_mismatch: null,
+          },
+        ],
+        loading: false,
+        columns: [],
+        showUpstreamEndpoint: false,
+      },
+      global: {
+        stubs: {
+          DataTable: DataTableStub,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    const text = wrapper.text()
+    expect(text).not.toContain('observed-mismatch')
+    expect(text).not.toContain('observed-match')
+    expect(text).not.toContain('Different model')
+    expect(text).not.toContain('Matched')
+    expect(text).not.toContain('Not observed')
+    expect(wrapper.html()).not.toContain('Requested:')
+  })
+
   it.each([
 		{
 			name: 'possible version variant',
