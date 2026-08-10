@@ -160,3 +160,5 @@ output/
 input.txt
 result.txt
 knowledge-base/
+# Vitest / Vite cache at repo root
+.vite/

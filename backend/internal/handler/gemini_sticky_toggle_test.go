@@ -191,6 +191,22 @@ func (c *geminiStickyGatewayCacheStub) DeleteSessionAccountID(_ context.Context,
 	return nil
 }
 
+func (*geminiStickyGatewayCacheStub) SetGrokVideoPendingBilling(context.Context, string, []byte, time.Duration) error {
+	return nil
+}
+
+func (*geminiStickyGatewayCacheStub) GetGrokVideoPendingBilling(context.Context, string) ([]byte, error) {
+	return nil, nil
+}
+
+func (*geminiStickyGatewayCacheStub) ClaimGrokVideoBilled(context.Context, string, time.Duration) (bool, error) {
+	return true, nil
+}
+
+func (*geminiStickyGatewayCacheStub) ReleaseGrokVideoBilled(context.Context, string) error {
+	return nil
+}
+
 func newGeminiStickyToggleHandler(t *testing.T, enabled bool, cache service.GatewayCache, digestStore *service.DigestSessionStore) *GatewayHandler {
 	t.Helper()
 	cfg := &config.Config{}

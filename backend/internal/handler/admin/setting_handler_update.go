@@ -2116,6 +2116,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		RegistrationEnabled:                                  updatedSettings.RegistrationEnabled,
 		EmailVerifyEnabled:                                   updatedSettings.EmailVerifyEnabled,
 		RegistrationEmailSuffixWhitelist:                     updatedSettings.RegistrationEmailSuffixWhitelist,
+		RegistrationEmailDomainQuotaEnabled:                  updatedSettings.RegistrationEmailDomainQuotaEnabled,
 		PromoCodeEnabled:                                     updatedSettings.PromoCodeEnabled,
 		PasswordResetEnabled:                                 updatedSettings.PasswordResetEnabled,
 		FrontendURL:                                          updatedSettings.FrontendURL,

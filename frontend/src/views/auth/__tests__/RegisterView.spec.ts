@@ -3,10 +3,12 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import RegisterView from '@/views/auth/RegisterView.vue'
 
-const { getPublicSettingsMock, startOAuthLoginMock, verifyActionMock } = vi.hoisted(() => ({
-  getPublicSettingsMock: vi.fn(),
-  startOAuthLoginMock: vi.fn(),
-  verifyActionMock: vi.fn()
+const { getPublicSettingsMock, startOAuthLoginMock, verifyActionMock, registerMock, showErrorMock } = vi.hoisted(() => ({
+	getPublicSettingsMock: vi.fn(),
+	startOAuthLoginMock: vi.fn(),
+	registerMock: vi.fn(),
+	verifyActionMock: vi.fn(),
+	showErrorMock: vi.fn()
 }))
 
 const locationState = { href: 'http://localhost/register' }
@@ -40,15 +42,18 @@ vi.mock('vue-i18n', () => ({
     }
   }),
   useI18n: () => ({
-    t: (key: string) => key,
+    t: (key: string) =>
+      key === 'auth.emailDomainRegistrationLimit'
+        ? '该邮箱域名无法注册新账户。请使用主流邮箱注册；如需使用企业邮箱，请联系客服添加域名白名单。'
+        : key,
     locale: { value: 'en' }
   })
 }))
 
 vi.mock('@/stores', () => ({
-  useAuthStore: () => ({ register: vi.fn() }),
+  useAuthStore: () => ({ register: (...args: unknown[]) => registerMock(...args) }),
   useAppStore: () => ({
-    showError: vi.fn(),
+    showError: (...args: unknown[]) => showErrorMock(...args),
     showSuccess: vi.fn(),
     showWarning: vi.fn()
   })
@@ -102,17 +107,20 @@ function mountRegister() {
 
 describe('RegisterView invitation layout', () => {
   beforeEach(() => {
-    getPublicSettingsMock.mockReset()
-    startOAuthLoginMock.mockReset()
-    verifyActionMock.mockReset()
-    getPublicSettingsMock.mockResolvedValue(publicSettings)
-    startOAuthLoginMock.mockResolvedValue({ authorize_url: 'https://github.example/authorize' })
-    verifyActionMock.mockResolvedValue({ token: 'turnstile-token', randstr: '' })
-    locationState.href = 'http://localhost/register'
-    Object.defineProperty(window, 'location', {
-      configurable: true,
-      value: locationState
-    })
+	getPublicSettingsMock.mockReset()
+	startOAuthLoginMock.mockReset()
+	verifyActionMock.mockReset()
+	startOAuthLoginMock.mockResolvedValue({ authorize_url: 'https://github.example/authorize' })
+	verifyActionMock.mockResolvedValue({ token: 'turnstile-token', randstr: '' })
+	registerMock.mockReset()
+	showErrorMock.mockReset()
+	getPublicSettingsMock.mockResolvedValue(publicSettings)
+	registerMock.mockResolvedValue({})
+	locationState.href = 'http://localhost/register'
+	Object.defineProperty(window, 'location', {
+		configurable: true,
+		value: locationState
+	})
   })
 
   it('keeps the optional affiliate invitation field before Turnstile', async () => {
@@ -143,7 +151,7 @@ describe('RegisterView invitation layout', () => {
     expect(wrapper.get('#invitation_code').exists()).toBe(true)
   })
 
-  it('starts OAuth through the Turnstile gate with its completed token', async () => {
+	it('starts OAuth through the Turnstile gate with its completed token', async () => {
     getPublicSettingsMock.mockResolvedValueOnce({
       ...publicSettings,
       github_oauth_enabled: true
@@ -174,8 +182,94 @@ describe('RegisterView invitation layout', () => {
     await wrapper.get('[data-testid="oauth-start"]').trigger('click')
     await flushPromises()
 
-    expect(verifyActionMock).toHaveBeenCalledOnce()
-    expect(startOAuthLoginMock).not.toHaveBeenCalled()
-    expect(locationState.href).toBe('http://localhost/register')
+		expect(verifyActionMock).toHaveBeenCalledOnce()
+		expect(startOAuthLoginMock).not.toHaveBeenCalled()
+		expect(locationState.href).toBe('http://localhost/register')
+	})
+
+	it('submits a non-whitelist email domain so the backend can enforce its registration quota', async () => {
+    getPublicSettingsMock.mockResolvedValueOnce({
+      ...publicSettings,
+      turnstile_enabled: false,
+      registration_email_suffix_whitelist: ['allowed.com'],
+      registration_email_domain_quota_enabled: true
+    })
+
+    const wrapper = mountRegister()
+    await flushPromises()
+    await wrapper.get('#email').setValue('first@custom.example')
+    await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(registerMock).toHaveBeenCalledWith(
+      expect.objectContaining({ email: 'first@custom.example' })
+    )
+    expect(showErrorMock).not.toHaveBeenCalled()
   })
+
+  it('shows the localized registration domain quota message returned by the backend', async () => {
+    getPublicSettingsMock.mockResolvedValueOnce({
+      ...publicSettings,
+      turnstile_enabled: false,
+      registration_email_suffix_whitelist: ['allowed.com'],
+      registration_email_domain_quota_enabled: true
+    })
+    registerMock.mockRejectedValueOnce({
+      reason: 'EMAIL_DOMAIN_REGISTRATION_LIMIT',
+      message: 'raw backend message'
+    })
+
+    const wrapper = mountRegister()
+    await flushPromises()
+    await wrapper.get('#email').setValue('second@custom.example')
+    await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(showErrorMock).toHaveBeenCalledWith(
+      '该邮箱域名无法注册新账户。请使用主流邮箱注册；如需使用企业邮箱，请联系客服添加域名白名单。'
+    )
+  })
+
+  // 域名限量注册开关默认关闭：恢复 PR5423 之前的客户端白名单预检，非白名单域名不发起注册请求。
+  it('rejects a non-whitelist email domain locally when the domain quota switch is disabled', async () => {
+    getPublicSettingsMock.mockResolvedValueOnce({
+      ...publicSettings,
+      turnstile_enabled: false,
+      registration_email_suffix_whitelist: ['allowed.com']
+    })
+
+    const wrapper = mountRegister()
+    await flushPromises()
+    await wrapper.get('#email').setValue('first@custom.example')
+    await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(registerMock).not.toHaveBeenCalled()
+    // 校验失败通过 validationToastMessage watcher 弹 toast
+    expect(showErrorMock).toHaveBeenCalledWith('auth.emailSuffixNotAllowedWithAllowed')
+    expect(wrapper.get('#email').classes()).toContain('input-error')
+  })
+
+  it('still submits whitelisted email domains when the domain quota switch is disabled', async () => {
+    getPublicSettingsMock.mockResolvedValueOnce({
+      ...publicSettings,
+      turnstile_enabled: false,
+      registration_email_suffix_whitelist: ['allowed.com']
+    })
+
+    const wrapper = mountRegister()
+    await flushPromises()
+    await wrapper.get('#email').setValue('user@allowed.com')
+    await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+		expect(registerMock).toHaveBeenCalledWith(
+			expect.objectContaining({ email: 'user@allowed.com' })
+		)
+		expect(showErrorMock).not.toHaveBeenCalled()
+	})
 })

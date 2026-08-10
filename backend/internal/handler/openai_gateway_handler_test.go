@@ -12,6 +12,7 @@ import (
 	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	coderws "github.com/coder/websocket"
@@ -645,6 +646,9 @@ func TestResolveOpenAIMessagesDispatchMappedModel(t *testing.T) {
 	})
 
 	t.Run("grok_group_maps_claude_cli_model_to_grok_default", func(t *testing.T) {
+		original := xai.RuntimeModelMappingOptions()
+		t.Cleanup(func() { xai.SetRuntimeModelMappingOptions(original) })
+		xai.SetRuntimeModelMappingOptions(xai.ModelMappingOptions{EnableCrossClientMap: true})
 		apiKey := &service.APIKey{
 			Group: &service.Group{
 				Platform: service.PlatformGrok,
@@ -5990,6 +5994,22 @@ func (openAIChatCompletionsGatewayCacheStub) RefreshSessionTTL(context.Context, 
 }
 
 func (openAIChatCompletionsGatewayCacheStub) DeleteSessionAccountID(context.Context, int64, string) error {
+	return nil
+}
+
+func (openAIChatCompletionsGatewayCacheStub) SetGrokVideoPendingBilling(context.Context, string, []byte, time.Duration) error {
+	return nil
+}
+
+func (openAIChatCompletionsGatewayCacheStub) GetGrokVideoPendingBilling(context.Context, string) ([]byte, error) {
+	return nil, nil
+}
+
+func (openAIChatCompletionsGatewayCacheStub) ClaimGrokVideoBilled(context.Context, string, time.Duration) (bool, error) {
+	return true, nil
+}
+
+func (openAIChatCompletionsGatewayCacheStub) ReleaseGrokVideoBilled(context.Context, string) error {
 	return nil
 }
 
