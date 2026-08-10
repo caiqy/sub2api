@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 27: 固定 Grok 授权与模型映射安全默认`
 - OpenSpec mapping: `6.2`
-- Stage: `task-fix`
+- Stage: `task-review`
 - Review/fix round: `2/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `121240c564ca826919d8ceebcd9e9e6046af21b9`
@@ -84,4 +84,7 @@
 - Task 27 reviewer `ses_0159748bdffeInLyjSZtuIH3lA`: `Spec: FAIL`, `Quality: CHANGES_REQUIRED`
 - Task 27 accepted finding: empty or malformed password request returns 400 before permanent service denial; stale policy comments remain
 - Task 27 fix-2 brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-27-fix-2-brief.md`
-- Task 27 status: review fix round 2 pending
+- Task 27 fix-2 commit: `9e4b7efe8c2548a60a79bde7c86fcceeba9d916d`
+- Task 27 fix-2 controller gates: exact valid/empty/malformed password tests PASS; backend focused untagged/unit-tagged PASS; full lint 0 issues; frontend 49/49, typecheck and lint PASS; VERSION unchanged
+- Task 27 fix-2 review package: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-27-review-fix-2-package.md`
+- Task 27 status: same-reviewer re-review pending
