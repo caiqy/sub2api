@@ -251,23 +251,39 @@ func TestGrokOAuthHandlerValidateSSOTokenReturnsTokenInfo(t *testing.T) {
 func TestGrokOAuthHandlerAuthorizePasswordStaysDisabledWhenLegacyConfigEnablesIt(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	oauthClient := &grokOAuthHandlerClient{}
-	cfg := &config.Config{}
-	cfg.Gateway.Grok.PasswordAuthEnabled = true
-	oauthService := service.NewGrokOAuthService(nil, oauthClient, cfg)
-	defer oauthService.Stop()
-	handler := NewGrokOAuthHandler(oauthService, nil, nil, nil)
+	tests := []struct {
+		name   string
+		body   string
+		secret string
+	}{
+		{name: "valid", body: `{"email":"user@example.com","password":"super-secret"}`, secret: "super-secret"},
+		{name: "empty body"},
+		{name: "malformed JSON", body: `{"email":"user@example.com","password":"malformed-secret"`, secret: "malformed-secret"},
+	}
 
-	router := gin.New()
-	router.POST("/api/v1/admin/grok/oauth/password", handler.AuthorizePassword)
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/grok/oauth/password", strings.NewReader(`{"email":"user@example.com","password":"super-secret"}`))
-	req.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(rec, req)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			oauthClient := &grokOAuthHandlerClient{}
+			cfg := &config.Config{}
+			cfg.Gateway.Grok.PasswordAuthEnabled = true
+			oauthService := service.NewGrokOAuthService(nil, oauthClient, cfg)
+			defer oauthService.Stop()
+			handler := NewGrokOAuthHandler(oauthService, nil, nil, nil)
 
-	require.Equal(t, http.StatusForbidden, rec.Code)
-	require.NotContains(t, rec.Body.String(), "super-secret")
-	require.Zero(t, oauthClient.loginCalls)
+			router := gin.New()
+			router.POST("/api/v1/admin/grok/oauth/password", handler.AuthorizePassword)
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/grok/oauth/password", strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusForbidden, rec.Code)
+			if tt.secret != "" {
+				require.NotContains(t, rec.Body.String(), tt.secret)
+			}
+			require.Zero(t, oauthClient.loginCalls)
+		})
+	}
 }
 
 func TestGrokOAuthHandlerPasswordCapabilityDefaultsToDisabled(t *testing.T) {

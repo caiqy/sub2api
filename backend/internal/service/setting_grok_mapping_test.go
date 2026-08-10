@@ -72,6 +72,8 @@ func TestSettingServiceParseGrokCrossClientMapping(t *testing.T) {
 		{name: "missing", enabled: false, defaultM: "grok-4.5"},
 		{name: "empty", value: grokMappingStringPtr(""), enabled: false, defaultM: "grok-4.5"},
 		{name: "false", value: grokMappingStringPtr("false"), enabled: false, defaultM: "grok-4.5"},
+		{name: "uppercase true", value: grokMappingStringPtr("TRUE"), enabled: false, defaultM: "grok-4.5"},
+		{name: "spaced true", value: grokMappingStringPtr(" true "), enabled: false, defaultM: "grok-4.5"},
 		{name: "true", value: grokMappingStringPtr("true"), enabled: true, defaultM: "grok-4.5"},
 	}
 

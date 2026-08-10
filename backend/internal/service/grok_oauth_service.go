@@ -264,8 +264,8 @@ func (s *GrokOAuthService) ConvertFromSSO(ctx context.Context, ssoToken string, 
 	return s.ValidateSSOToken(ctx, ssoToken, proxyID)
 }
 
-// AuthorizePassword logs in with email/password, converts the resulting SSO cookie
-// to Build OAuth, and returns OAuth tokens only. Password and raw SSO are never persisted.
+// AuthorizePassword is retained for compatibility but password authorization is hard-disabled.
+// The legacy route and config cannot enable password-to-SSO conversion.
 func (s *GrokOAuthService) AuthorizePassword(ctx context.Context, email, password string, proxyID *int64) (*GrokTokenInfo, error) {
 	if !s.passwordAuthEnabled() {
 		return nil, infraerrors.New(http.StatusForbidden, "GROK_OAUTH_PASSWORD_AUTH_DISABLED", "Grok password authorization is disabled")

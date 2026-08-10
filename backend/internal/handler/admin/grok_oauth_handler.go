@@ -104,12 +104,6 @@ type GrokSSOTokenRequest struct {
 	ProxyID  *int64 `json:"proxy_id"`
 }
 
-type GrokPasswordAuthorizeRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-	ProxyID  *int64 `json:"proxy_id"`
-}
-
 func (h *GrokOAuthHandler) RefreshToken(c *gin.Context) {
 	var req GrokRefreshTokenRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -162,20 +156,14 @@ func (h *GrokOAuthHandler) ValidateSSOToken(c *gin.Context) {
 	response.Success(c, tokenInfo)
 }
 
-// AuthorizePassword exchanges email/password for Build OAuth tokens via SSO conversion.
-// Response never includes password or raw sso_token.
+// AuthorizePassword is retained as a compatibility route and is permanently disabled.
+// It does not read the request body and returns the service policy error.
 func (h *GrokOAuthHandler) AuthorizePassword(c *gin.Context) {
-	var req GrokPasswordAuthorizeRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "Invalid request: "+err.Error())
-		return
-	}
-	tokenInfo, err := h.grokOAuthService.AuthorizePassword(c.Request.Context(), req.Email, req.Password, req.ProxyID)
+	_, err := h.grokOAuthService.AuthorizePassword(c.Request.Context(), "", "", nil)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, tokenInfo)
 }
 
 func (h *GrokOAuthHandler) RefreshAccountToken(c *gin.Context) {
