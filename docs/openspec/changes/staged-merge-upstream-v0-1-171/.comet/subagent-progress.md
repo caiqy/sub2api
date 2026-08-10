@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 27: 固定 Grok 授权与模型映射安全默认`
 - OpenSpec mapping: `6.2`
-- Stage: `task-review`
+- Stage: `task-complete`
 - Review/fix round: `2/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `121240c564ca826919d8ceebcd9e9e6046af21b9`
@@ -87,4 +87,6 @@
 - Task 27 fix-2 commit: `9e4b7efe8c2548a60a79bde7c86fcceeba9d916d`
 - Task 27 fix-2 controller gates: exact valid/empty/malformed password tests PASS; backend focused untagged/unit-tagged PASS; full lint 0 issues; frontend 49/49, typecheck and lint PASS; VERSION unchanged
 - Task 27 fix-2 review package: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-27-review-fix-2-package.md`
-- Task 27 status: same-reviewer re-review pending
+- Task 27 final reviewer `ses_0159748bdffeInLyjSZtuIH3lA`: no findings; `Spec: PASS`, `Quality: APPROVED`
+- Task 27 accepted commits: `5825a53aa63d3f0ae44952b1bbe245a127d589e1`, `930a19cb954d61a5b41c92d9f37a5cc8a29dd8a7`, `3637265ba5edfc66609af724710993e580ef1367`, `9e4b7efe8c2548a60a79bde7c86fcceeba9d916d`
+- Task 27 status: complete; OpenSpec 6.2 complete

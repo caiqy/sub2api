@@ -42,7 +42,7 @@
 ## 6. 分段合入 v0.1.173
 
 - [x] 6.1 使用 `git merge --no-ff --no-commit v0.1.173`，逐文件语义融合实际冲突并创建第二父为固定 `29009f0b2ea14edf3b11ae2564fb617ff91a03b4` 的纯 merge commit
-- [ ] 6.2 以 TDD 融合 Grok SSO/refresh-token、默认文本模型和运行时映射；缺失/未配置的跨客户端映射默认关闭，显式开启与账号显式映射有效，邮箱密码授权 UI 隐藏且服务端硬拒绝
+- [x] 6.2 以 TDD 融合 Grok SSO/refresh-token、默认文本模型和运行时映射；缺失/未配置的跨客户端映射默认关闭，显式开启与账号显式映射有效，邮箱密码授权 UI 隐藏且服务端硬拒绝
 - [ ] 6.3 以 TDD 审查 Grok 图片/视频、Voice TTS/STT/Realtime、custom voices、web search 与本地 routing、sticky/failover、body 生命周期、审计和单次计费语义
 - [ ] 6.4 以 TDD 审查 Grok free 24h 软门禁、team+model 冷却、流式空闲换号、7d/30d 调度阈值、routing hints 与本地 scheduler/usage/settings 热更新；不得改写订阅实际时刻额度锚点
 - [ ] 6.5 融合 Channel Monitor V2 被动聚合、V1/V2 互斥开关、普通用户吞吐脱敏、admin 完整指标、rollup/cache/API/UI；默认保持 V1，V2 仅显式启用

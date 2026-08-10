@@ -1911,7 +1911,7 @@ if ((git rev-parse 'HEAD^2').Trim() -ne $tag173) { throw 'v0.1.173 second parent
 
 ### Task 27: 固定 Grok 授权与模型映射安全默认
 
-- [ ] Task 27: 固定 Grok 授权与模型映射安全默认
+- [x] Task 27: 固定 Grok 授权与模型映射安全默认
 
 **映射 OpenSpec：**6.2
 
