@@ -168,20 +168,20 @@ func (s *OpenAIGatewayService) ForwardGrokVoice(ctx context.Context, c *gin.Cont
 // ProxyGrokRealtime relays JSON Realtime events to xAI's native Voice WS.
 // Audio is carried as base64 inside JSON events, so preserving the JSON bytes
 // is sufficient and avoids translating protocol event types.
-func (s *OpenAIGatewayService) ProxyGrokRealtime(ctx context.Context, c *gin.Context, client *coderws.Conn, account *Account, token, model string) error {
+func (s *OpenAIGatewayService) ProxyGrokRealtime(ctx context.Context, c *gin.Context, client *coderws.Conn, account *Account, token, model string) (string, error) {
 	if s == nil || client == nil || account == nil {
-		return fmt.Errorf("realtime service, client, and account are required")
+		return "", fmt.Errorf("realtime service, client, and account are required")
 	}
 	if account.Platform != PlatformGrok {
-		return fmt.Errorf("account platform %s is not supported for grok realtime", account.Platform)
+		return "", fmt.Errorf("account platform %s is not supported for grok realtime", account.Platform)
 	}
 	base, err := buildGrokVoiceURL(account, s.cfg, "realtime")
 	if err != nil {
-		return err
+		return "", err
 	}
 	u, err := url.Parse(base)
 	if err != nil {
-		return err
+		return "", err
 	}
 	u.Scheme = "wss"
 	model = firstNonEmpty(model, "grok-voice-latest")
@@ -205,7 +205,7 @@ func (s *OpenAIGatewayService) ProxyGrokRealtime(ctx context.Context, c *gin.Con
 	}
 	upstream, _, _, err := dialer.Dial(ctx, u.String(), headers, proxyURL)
 	if err != nil {
-		return err
+		return model, err
 	}
 	defer func() { _ = upstream.Close() }()
 
@@ -251,7 +251,7 @@ func (s *OpenAIGatewayService) ProxyGrokRealtime(ctx context.Context, c *gin.Con
 		}
 	}()
 
-	return <-errCh
+	return model, <-errCh
 }
 
 // estimateGrokVoiceAudioUsage derives billing units from the request/response.

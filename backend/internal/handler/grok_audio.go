@@ -88,12 +88,8 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 	}
 	defer func() { _ = conn.CloseNow() }()
 
-	upstreamModel := model
-	if mappedModel := strings.TrimSpace(selection.Account.GetMappedModel(model)); mappedModel != "" {
-		upstreamModel = mappedModel
-	}
 	started := time.Now()
-	proxyErr := h.gatewayService.ProxyGrokRealtime(c.Request.Context(), c, conn, selection.Account, token, upstreamModel)
+	upstreamModel, proxyErr := h.gatewayService.ProxyGrokRealtime(c.Request.Context(), c, conn, selection.Account, token, model)
 	elapsed := time.Since(started)
 	if proxyErr != nil {
 		reqLog.Info("grok_realtime.proxy_failed", zap.Error(proxyErr))

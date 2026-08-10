@@ -90,6 +90,11 @@ func (d *grokVoiceRealtimeTestDialer) Dial(_ context.Context, wsURL string, _ ht
 	return &grokVoiceRealtimeTestConn{}, 0, nil, nil
 }
 
+type grokVoiceRealtimeProxyResult struct {
+	model string
+	err   error
+}
+
 func TestProxyGrokRealtimeUsesMappedModelInUpstreamURL(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	dialer := &grokVoiceRealtimeTestDialer{}
@@ -99,18 +104,19 @@ func TestProxyGrokRealtimeUsesMappedModelInUpstreamURL(t *testing.T) {
 		Type:     AccountTypeAPIKey,
 		Credentials: map[string]any{
 			"api_key":       "voice-key",
-			"model_mapping": map[string]any{"grok-voice-latest": "mapped-realtime"},
+			"model_mapping": map[string]any{"grok-voice-latest": "first-realtime", "first-realtime": "second-realtime"},
 		},
 	}
-	result := make(chan error, 1)
+	result := make(chan grokVoiceRealtimeProxyResult, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		client, err := coderws.Accept(w, r, nil)
 		if err != nil {
-			result <- err
+			result <- grokVoiceRealtimeProxyResult{err: err}
 			return
 		}
 		defer func() { _ = client.CloseNow() }()
-		result <- svc.ProxyGrokRealtime(r.Context(), nil, client, account, "token", "grok-voice-latest")
+		model, proxyErr := svc.ProxyGrokRealtime(r.Context(), nil, client, account, "token", "grok-voice-latest")
+		result <- grokVoiceRealtimeProxyResult{model: model, err: proxyErr}
 	}))
 	defer server.Close()
 
@@ -120,7 +126,9 @@ func TestProxyGrokRealtimeUsesMappedModelInUpstreamURL(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = client.CloseNow() }()
 	_, _, _ = client.Read(ctx)
-	<-result
+	returned := <-result
 
-	require.Contains(t, dialer.lastURL, "model=mapped-realtime")
+	require.Error(t, returned.err)
+	require.Equal(t, "first-realtime", returned.model)
+	require.Contains(t, dialer.lastURL, "model=first-realtime")
 }
