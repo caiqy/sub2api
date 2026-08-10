@@ -4,18 +4,18 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Current task: `Task 29: 融合 Grok free gate、冷却与调度阈值`
-- OpenSpec mapping: `6.4`
-- Stage: `task-review`
-- Review/fix round: `2/2`
+- Current task: `Task 30: 融合 Channel Monitor V2 与隐私默认`
+- OpenSpec mapping: `6.5`
+- Stage: `task-start`
+- Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
-- Task start HEAD: `dfb7d8542a9ac3585d30cc36281eed1cd0eb3282`
-- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-29-brief.md`
-- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-29-report.md`
-- Dependency: Task 28 completed Grok media/Voice/search routing, usage identity, snapshots and single-bill contracts
+- Task start HEAD: `47ea52002c521f12f480df43205b0bb854675eb9`
+- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-30-brief.md`
+- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-30-report.md`
+- Dependency: Task 29 / OpenSpec 6.4 complete; v0.1.173 Channel Monitor code is present for compatibility review
 - TDD rule: baseline first; every concrete compatibility gap requires direct RED before minimal production fix
-- Risk signals: concurrent process-local cooldown stores、runtime settings cache、multi-scheduler selection、frontend settings contract
-- Hard boundary: explicit-free rolling 24h gate only; team+model/account+model isolation; default threshold 100 disabled; subscription exact-operation anchor unchanged
+- Risk signals: concurrent V1/V2 runners、rollup idempotency、user-scope privacy、settings hot update、frontend metric visibility
+- Hard boundary: missing/invalid mode defaults V1; V2 only explicit opt-in; ordinary-user throughput redacted in backend; no migration changes
 - Implementer: `ses_016a4ff6affeoRN1EoiY0Sy1px` returned `DONE_WITH_CONCERNS`
 - Implementation commit: `ff58b07e14d563296477c74bfb3573e765bec20c` (parent `3f1fda732af1fb59d32f2afcd6dbba6caf88ab9b`)
 - Genuine RED: paginated UsageLog SQLMock fixtures exposed 59 persisted values versus 61 list scan targets (generated id + has_detail)
@@ -151,3 +151,6 @@
 - Task 29 final reviewer `ses_014a78483ffeuXkO6Wa4X2HWgv`: no Critical/Important/Minor findings; `Spec: PASS`, `Quality: APPROVED`
 - Task 29 accepted implementation commits: `dc48eeb96`, `6a4ef4864`, `4f31de4f4`, `e58396e9e`, `6d61102b2`, `e7f3f4682`, `cd3d9041c`, `bea98010a`, `cdf804416`, `b6139763b`, `f4aab0017`, `57e651504`, `26fee091c`
 - Task 29 status: complete; OpenSpec 6.4 complete
+- Task 30 brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-30-brief.md`
+- Task 30 boundary: Channel Monitor backend/frontend and direct tests only; migrations remain Task 31
+- Task 30 status: baseline and implementation audit pending
