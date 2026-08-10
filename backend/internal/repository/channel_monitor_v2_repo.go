@@ -1118,7 +1118,14 @@ func channelMonitorV2WhereWithRollup(filter service.ChannelMonitorV2Filter, cfg 
 	bucketSeconds := channelMonitorV2FixedBucketSeconds(filter)
 	if bucketSeconds > 0 {
 		args = append(args, bucketSeconds)
-		where += fmt.Sprintf(" AND %s.bucket_seconds = $%d", alias, len(args))
+		bucketArg := len(args)
+		where = strings.Replace(
+			where,
+			fmt.Sprintf("%s.bucket_start >= $1", alias),
+			fmt.Sprintf("%s.bucket_start + ($%d * INTERVAL '1 second') > $1", alias, bucketArg),
+			1,
+		)
+		where += fmt.Sprintf(" AND %s.bucket_seconds = $%d", alias, bucketArg)
 	}
 	return where, args, bucketSeconds
 }

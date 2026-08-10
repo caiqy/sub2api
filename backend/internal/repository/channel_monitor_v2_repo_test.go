@@ -1,10 +1,12 @@
 package repository
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -137,6 +139,38 @@ func TestChannelMonitorV2BucketRatesUseCoveredWindow(t *testing.T) {
 
 	require.Equal(t, 1.0, minutes)
 	require.InDelta(t, 5.0, metric.RPM, 0.0001)
+}
+
+func TestChannelMonitorV2SnapshotIncludesFirstPartialFixedRollupBucket(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	start := time.Date(2026, 8, 1, 10, 34, 0, 0, time.UTC)
+	end := start.Truncate(time.Hour).Add(time.Hour)
+	mock.ExpectQuery("channel_monitor_v2_watermarks").WillReturnRows(sqlmock.NewRows([]string{
+		"usage_coverage_start", "error_coverage_start", "data_through", "last_successful_at", "backfill_cursor",
+	}).AddRow(start, start, end, end, start))
+	mock.ExpectQuery(`m\.bucket_start \+ \(\$4 \* INTERVAL '1 second'\) > \$1`).WillReturnRows(sqlmock.NewRows([]string{
+		"bucket_start", "platform", "group_id", "group_name", "model", "success_requests", "error_requests", "upstream_affected_requests", "upstream_attempt_count", "input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens", "ttft_sum_ms", "ttft_count", "duration_sum_ms", "duration_count",
+	}).AddRow(start.Truncate(time.Hour), "openai", 0, "", "gpt-5", 26, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+	mock.ExpectQuery("channel_monitor_v2_latency_histograms_rollup").WillReturnRows(sqlmock.NewRows([]string{
+		"bucket_start", "platform", "group_id", "model", "user_id", "metric", "upper_bound_ms", "sample_count",
+	}))
+	repo := &channelMonitorV2Repository{db: db}
+	snapshot, err := repo.GetSnapshot(context.Background(), service.ChannelMonitorV2Filter{
+		Start:  start,
+		End:    end,
+		Bucket: time.Hour,
+	}, service.ChannelMonitorV2Config{
+		Platforms: []service.ChannelMonitorV2PlatformConfig{{Platform: "openai", Enabled: true}},
+	}, false)
+
+	require.NoError(t, err)
+	require.Len(t, snapshot.Trend, 1)
+	require.Equal(t, start.Truncate(time.Hour), snapshot.Trend[0].BucketStart)
+	require.InDelta(t, 1.0, snapshot.Trend[0].Metrics.RPM, 0.0001, "the 10:00 bucket covers only 10:34..11:00")
+	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestChannelMonitorV2HistoryCoverageCompleteIgnoresTrailingLag(t *testing.T) {
