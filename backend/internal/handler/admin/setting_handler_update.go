@@ -216,11 +216,14 @@ type UpdateSettingsRequest struct {
 	ForceEmailOnThirdPartySignup              *bool                             `json:"force_email_on_third_party_signup"`
 
 	// Model fallback configuration
-	EnableModelFallback      bool   `json:"enable_model_fallback"`
-	FallbackModelAnthropic   string `json:"fallback_model_anthropic"`
-	FallbackModelOpenAI      string `json:"fallback_model_openai"`
-	FallbackModelGemini      string `json:"fallback_model_gemini"`
-	FallbackModelAntigravity string `json:"fallback_model_antigravity"`
+	EnableModelFallback            bool   `json:"enable_model_fallback"`
+	FallbackModelAnthropic         string `json:"fallback_model_anthropic"`
+	FallbackModelOpenAI            string `json:"fallback_model_openai"`
+	FallbackModelGemini            string `json:"fallback_model_gemini"`
+	FallbackModelAntigravity       string `json:"fallback_model_antigravity"`
+	GrokDefaultTextModel           string `json:"grok_default_text_model"`
+	GrokCrossClientModelMapEnabled bool   `json:"grok_cross_client_model_map_enabled"`
+	GrokDefaultBaseURLMode         string `json:"grok_default_base_url_mode"`
 
 	// Identity patch configuration (Claude -> Gemini)
 	EnableIdentityPatch bool   `json:"enable_identity_patch"`
@@ -1636,6 +1639,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		FallbackModelOpenAI:                                  req.FallbackModelOpenAI,
 		FallbackModelGemini:                                  req.FallbackModelGemini,
 		FallbackModelAntigravity:                             req.FallbackModelAntigravity,
+		GrokDefaultTextModel:                                 req.GrokDefaultTextModel,
+		GrokCrossClientModelMapEnabled:                       req.GrokCrossClientModelMapEnabled,
+		GrokDefaultBaseURLMode:                               req.GrokDefaultBaseURLMode,
 		EnableIdentityPatch:                                  req.EnableIdentityPatch,
 		IdentityPatchPrompt:                                  req.IdentityPatchPrompt,
 		MinClaudeCodeVersion:                                 req.MinClaudeCodeVersion,
@@ -2255,6 +2261,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		FallbackModelOpenAI:                                  updatedSettings.FallbackModelOpenAI,
 		FallbackModelGemini:                                  updatedSettings.FallbackModelGemini,
 		FallbackModelAntigravity:                             updatedSettings.FallbackModelAntigravity,
+		GrokDefaultTextModel:                                 updatedSettings.GrokDefaultTextModel,
+		GrokCrossClientModelMapEnabled:                       updatedSettings.GrokCrossClientModelMapEnabled,
+		GrokDefaultBaseURLMode:                               updatedSettings.GrokDefaultBaseURLMode,
 		EnableIdentityPatch:                                  updatedSettings.EnableIdentityPatch,
 		IdentityPatchPrompt:                                  updatedSettings.IdentityPatchPrompt,
 		OpsMonitoringEnabled:                                 updatedSettings.OpsMonitoringEnabled,

@@ -3,11 +3,15 @@
 package admin
 
 import (
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -68,14 +72,48 @@ func TestUpdateSettingsSMTPFromAliasIsWritable(t *testing.T) {
 
 func TestUpdateSettingsGrokDefaultBaseURLModeIsWritable(t *testing.T) {
 	h, repo := newStepUpSwitchTestHandler(t, map[string]string{
-		service.SettingKeyGrokDefaultBaseURLMode: service.GrokDefaultBaseURLModeCLI,
+		service.SettingKeyGrokDefaultTextModel:           "grok-stored",
+		service.SettingKeyGrokCrossClientModelMapEnabled: "true",
+		service.SettingKeyGrokDefaultBaseURLMode:         service.GrokDefaultBaseURLModeCLI,
+		service.SettingKeySiteName:                       "Example Gateway",
 	})
 
 	rec := doUpdateSettings(t, h, map[string]any{
-		"grok_default_base_url_mode": service.GrokDefaultBaseURLModeEUWest1,
+		"grok_default_text_model":             "grok-4.3",
+		"grok_cross_client_model_map_enabled": false,
+		"grok_default_base_url_mode":          service.GrokDefaultBaseURLModeEUWest1,
 	}, nil)
 	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "grok-4.3", repo.values[service.SettingKeyGrokDefaultTextModel])
+	require.Equal(t, "false", repo.values[service.SettingKeyGrokCrossClientModelMapEnabled])
 	require.Equal(t, service.GrokDefaultBaseURLModeEUWest1, repo.values[service.SettingKeyGrokDefaultBaseURLMode])
+	require.Equal(t, "Example Gateway", repo.values[service.SettingKeySiteName])
+	requireGrokSettingsResponse(t, rec, "grok-4.3", false, service.GrokDefaultBaseURLModeEUWest1)
+
+	getRec := httptest.NewRecorder()
+	getContext, _ := gin.CreateTestContext(getRec)
+	getContext.Request = httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings", nil)
+	h.GetSettings(getContext)
+	require.Equal(t, http.StatusOK, getRec.Code)
+	requireGrokSettingsResponse(t, getRec, "grok-4.3", false, service.GrokDefaultBaseURLModeEUWest1)
+
+	rec = doUpdateSettings(t, h, map[string]any{"grok_default_text_model": ""}, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "grok-4.5", repo.values[service.SettingKeyGrokDefaultTextModel])
+	require.Equal(t, "false", repo.values[service.SettingKeyGrokCrossClientModelMapEnabled])
+	require.Equal(t, service.GrokDefaultBaseURLModeEUWest1, repo.values[service.SettingKeyGrokDefaultBaseURLMode])
+	require.Equal(t, "Example Gateway", repo.values[service.SettingKeySiteName])
+}
+
+func requireGrokSettingsResponse(t *testing.T, rec *httptest.ResponseRecorder, defaultText string, crossClientEnabled bool, baseURLMode string) {
+	t.Helper()
+	var resp response.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	data, ok := resp.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, defaultText, data["grok_default_text_model"])
+	require.Equal(t, crossClientEnabled, data["grok_cross_client_model_map_enabled"])
+	require.Equal(t, baseURLMode, data["grok_default_base_url_mode"])
 }
 
 func TestUpdateSettingsRejectsTwoCaptchaProviders(t *testing.T) {
