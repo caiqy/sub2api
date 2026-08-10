@@ -92,6 +92,103 @@ func TestHTTPProxyDialerCONNECTHonorsContextDeadline(t *testing.T) {
 	awaitSignal(t, peerClosed, "HTTP CONNECT connection close")
 }
 
+func TestHTTPProxyDialerCONNECTWriteHonorsContextCancellation(t *testing.T) {
+	client, proxy := net.Pipe()
+	writeStarted := make(chan struct{})
+	closeSignal := &closeSignalConn{Conn: client, closed: make(chan struct{})}
+	conn := &writeSignalConn{Conn: closeSignal, started: writeStarted}
+	dialer := &HTTPProxyDialer{
+		proxyURL: &url.URL{Scheme: "http", Host: "proxy.test:80"},
+		dialContext: func(context.Context, string, string) (net.Conn, error) {
+			return conn, nil
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	finished := make(chan struct{})
+	t.Cleanup(func() {
+		_ = client.Close()
+		_ = proxy.Close()
+		select {
+		case <-finished:
+		case <-time.After(time.Second):
+			t.Error("CONNECT write dial goroutine leaked")
+		}
+	})
+	go func() {
+		defer close(finished)
+		result, err := dialer.DialTLSContext(ctx, "tcp", "example.test:443")
+		if result != nil {
+			_ = result.Close()
+		}
+		done <- err
+	}()
+
+	awaitSignal(t, writeStarted, "HTTP CONNECT request write")
+	cancel()
+	awaitCanceledDial(t, done, "HTTP CONNECT request write")
+	awaitSignal(t, closeSignal.closed, "HTTP CONNECT request write connection close")
+}
+
+func TestHTTPProxyDialerCONNECTResponseReadHonorsContextCancellation(t *testing.T) {
+	client, proxy := net.Pipe()
+	readStarted := make(chan struct{})
+	closeSignal := &closeSignalConn{Conn: client, closed: make(chan struct{})}
+	conn := &readSignalConn{Conn: closeSignal, started: readStarted}
+	dialer := &HTTPProxyDialer{
+		proxyURL: &url.URL{Scheme: "http", Host: "proxy.test:80"},
+		dialContext: func(context.Context, string, string) (net.Conn, error) {
+			return conn, nil
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	requestRead := make(chan error, 1)
+	go func() {
+		req, err := http.ReadRequest(bufio.NewReader(proxy))
+		if err == nil && req.Method != http.MethodConnect {
+			err = errors.New("proxy received a non-CONNECT request")
+		}
+		requestRead <- err
+	}()
+
+	done := make(chan error, 1)
+	finished := make(chan struct{})
+	t.Cleanup(func() {
+		_ = client.Close()
+		_ = proxy.Close()
+		select {
+		case <-finished:
+		case <-time.After(time.Second):
+			t.Error("CONNECT response read dial goroutine leaked")
+		}
+	})
+	go func() {
+		defer close(finished)
+		result, err := dialer.DialTLSContext(ctx, "tcp", "example.test:443")
+		if result != nil {
+			_ = result.Close()
+		}
+		done <- err
+	}()
+
+	select {
+	case err := <-requestRead:
+		if err != nil {
+			t.Fatalf("proxy read CONNECT request: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for proxy to read CONNECT request")
+	}
+	awaitSignal(t, readStarted, "HTTP CONNECT response read")
+	cancel()
+	awaitCanceledDial(t, done, "HTTP CONNECT response read")
+	awaitSignal(t, closeSignal.closed, "HTTP CONNECT response read connection close")
+}
+
 func TestUTLSHandshakeSetsContextDeadline(t *testing.T) {
 	client, server := net.Pipe()
 	t.Cleanup(func() {
@@ -170,6 +267,18 @@ func awaitDialError(t *testing.T, done <-chan error, release func()) {
 	}
 }
 
+func awaitCanceledDial(t *testing.T, done <-chan error, phase string) {
+	t.Helper()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("%s error = %v, want context.Canceled", phase, err)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("%s remained blocked after explicit cancellation", phase)
+	}
+}
+
 func startStalledProxy(t *testing.T, readCONNECT bool) (string, <-chan struct{}, <-chan struct{}, func()) {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -239,6 +348,39 @@ type deadlineRecordingConn struct {
 	net.Conn
 	mu        sync.Mutex
 	deadlines []time.Time
+}
+
+type writeSignalConn struct {
+	net.Conn
+	started chan struct{}
+	once    sync.Once
+}
+
+func (c *writeSignalConn) Write(p []byte) (int, error) {
+	c.once.Do(func() { close(c.started) })
+	return c.Conn.Write(p)
+}
+
+type closeSignalConn struct {
+	net.Conn
+	closed chan struct{}
+	once   sync.Once
+}
+
+func (c *closeSignalConn) Close() error {
+	c.once.Do(func() { close(c.closed) })
+	return c.Conn.Close()
+}
+
+type readSignalConn struct {
+	net.Conn
+	started chan struct{}
+	once    sync.Once
+}
+
+func (c *readSignalConn) Read(p []byte) (int, error) {
+	c.once.Do(func() { close(c.started) })
+	return c.Conn.Read(p)
 }
 
 func (c *deadlineRecordingConn) SetDeadline(deadline time.Time) error {
