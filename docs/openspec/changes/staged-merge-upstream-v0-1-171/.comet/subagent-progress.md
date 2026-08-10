@@ -6,8 +6,8 @@
 - TDD mode: `tdd`
 - Current task: `Task 25: 运行 v0.1.172 全量门禁并冻结 v0.1.173 精确矩阵`
 - OpenSpec mapping: `5.7、5.8`
-- Stage: `task-implement`
-- Review/fix round: `0/2`
+- Stage: `task-fix`
+- Review/fix round: `1/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `ecac7fe5ad9dae69475acacc83925a9fbea1f96b`
 - Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-25-brief.md`
@@ -44,4 +44,8 @@
 - Status: Task 24 complete; Docker-backed migration runtime remains `UNVERIFIED`
 - Task 25 boundary: ledger-only when all gates pass; any product failure returns BLOCKED for a separate remediation commit
 - Task 25 residual rule: local Docker unavailable remains `UNVERIFIED`; no remote substitution
-- Task 25 status: implementer pending
+- Task 25 implementer: `ses_016657249ffePt2IrAyDUsWM4s` returned `BLOCKED`; five focused gates PASS, full `make test` exit 2
+- Task 25 blocker: `TestObserveUpstreamMessage_ResponseModelIsTurnLocalAndTerminalWins` lacks the active turn that production arms before accepting `response.created`
+- Task 25 remediation: test-only fixture correction for both turns; production foreign-response ownership remains unchanged
+- Task 25 fix brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-25-fix-1-brief.md`
+- Task 25 status: remediation implementer pending
