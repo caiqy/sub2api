@@ -4,18 +4,18 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Current task: `Task 24: 闭合 response-model audit、194/195 和前端展示`
-- OpenSpec mapping: `5.6 融合 UsageLog schema/Ent、194/195 migration、单条/批量/best-effort insert、查询筛选和管理端展示，并审查模型广场、错误时间范围及既有本地 frontend 定制`
-- Stage: `task-complete`
-- Review/fix round: `2/2`
+- Current task: `Task 25: 运行 v0.1.172 全量门禁并冻结 v0.1.173 精确矩阵`
+- OpenSpec mapping: `5.7、5.8`
+- Stage: `task-implement`
+- Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
-- Task start HEAD: `fd01acfe966a2fa482f6a8ba199c40892c6e2ee2`
-- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-24-brief.md`
-- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-24-report.md`
-- Dependency: Task 23 freezes response model/conflict before protocol translation and routed two UsageLog sqlmock destination drifts to this task
-- TDD rule: run backend/frontend protection suites before edits; use current schema/SQL/migration facts to resolve the apparent 59-value versus 61-scan-destination distinction
-- Risk signals: schema、generated code、migration、persistence、API/frontend、cross-module
-- Hard boundary: requested/upstream/upstream-response model remain separate structured fields; NULL/false/true mismatch tri-state preserved; all insert/query/filter/UI variants aligned; migrations 194/195 blobs immutable; Docker-backed upgrade evidence remains UNVERIFIED if unavailable
+- Task start HEAD: `ecac7fe5ad9dae69475acacc83925a9fbea1f96b`
+- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-25-brief.md`
+- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-25-report.md`
+- Dependency: Tasks 20-24 final source HEAD and their reviewed capability evidence
+- TDD rule: this task is validation-only; any genuine product failure returns BLOCKED and is remediated in a separate test-first task/commit
+- Risk signals: full backend/frontend gates、generated stability、migration identity、topology、capability matrix、cross-module
+- Hard boundary: all non-Docker gates PASS, two generate passes stable, v0.1.172 gap=0, VERSION remains 0.1.171.1, exact v0.1.173 matrix recorded before any 173 merge
 - Implementer: `ses_016a4ff6affeoRN1EoiY0Sy1px` returned `DONE_WITH_CONCERNS`
 - Implementation commit: `ff58b07e14d563296477c74bfb3573e765bec20c` (parent `3f1fda732af1fb59d32f2afcd6dbba6caf88ab9b`)
 - Genuine RED: paginated UsageLog SQLMock fixtures exposed 59 persisted values versus 61 list scan targets (generated id + has_detail)
@@ -42,3 +42,6 @@
 - Final fix TDD: ordinary-user hidden-audit test RED then GREEN; focused 23 tests and full usage 44 tests PASS; frontend typecheck/lint PASS
 - Final reviewer: `ses_01678519affe9osiHP5hmRcpHX` returned `Spec: PASS`, `Quality: APPROVED`, no Critical/Important/Minor findings
 - Status: Task 24 complete; Docker-backed migration runtime remains `UNVERIFIED`
+- Task 25 boundary: ledger-only when all gates pass; any product failure returns BLOCKED for a separate remediation commit
+- Task 25 residual rule: local Docker unavailable remains `UNVERIFIED`; no remote substitution
+- Task 25 status: implementer pending
