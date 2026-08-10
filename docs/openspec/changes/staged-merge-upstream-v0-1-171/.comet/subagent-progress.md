@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 23: 融合 gateway、transport 和 protocol 修复`
 - OpenSpec mapping: `5.5 以 TDD 审查 upstream response model audit、Codex identity/capacity failover、transport timeout、body replay/release、sticky/final account、WS prewarm、count_tokens、Grok、图片 cooldown 和协议清洗`
-- Stage: `task-fix`
+- Stage: `task-review`
 - Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `f5c1a00a2333cad7b53c78b5373640a8a02ca981`
@@ -27,4 +27,9 @@
 - Important findings accepted: pre-output SSE capacity failover returns a non-nil usage result; TLS-fingerprint direct/SOCKS5/HTTP CONNECT/uTLS paths bypass bounded dial/handshake deadlines
 - Minor finding accepted: add an independent literal invariant fixing the canonical default originator to `codex-tui`
 - Concern disposition: reviewer confirmed identity-enforcement opt-out semantics are intentional and non-official UA falls back canonical; no production identity fix needed
-- Status: fresh Task 23 fix implementer pending
+- Fix implementer: `ses_0183c3994ffesJCOKIHM5P3Ukk`
+- Fix commit: `066eb18b8aaa589422968b722e4481261ca7f8e2` (parent `901f893afe3a869168c23703ba98997d010cee31`)
+- Fix scope: normalize stream `UpstreamFailoverError` result to nil; bound direct/SOCKS5/HTTP CONNECT/uTLS fingerprint dialing; repository/capacity/probe regressions
+- TDD evidence: capacity non-nil result RED; direct deadline, SOCKS5/CONNECT cancellation, uTLS deadline/clear RED; all GREEN after implementation
+- Final gates: Task 23 focused sets, tlsfingerprint/repository timeout tests, compile, full backend lint and static checks PASS
+- Status: fresh thorough re-review pending
