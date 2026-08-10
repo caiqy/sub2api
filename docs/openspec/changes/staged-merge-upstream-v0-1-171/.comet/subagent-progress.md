@@ -6,8 +6,8 @@
 - TDD mode: `tdd`
 - Current task: `Task 23: 融合 gateway、transport 和 protocol 修复`
 - OpenSpec mapping: `5.5 以 TDD 审查 upstream response model audit、Codex identity/capacity failover、transport timeout、body replay/release、sticky/final account、WS prewarm、count_tokens、Grok、图片 cooldown 和协议清洗`
-- Stage: `task-review`
-- Review/fix round: `0/2`
+- Stage: `task-fix`
+- Review/fix round: `1/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `f5c1a00a2333cad7b53c78b5373640a8a02ca981`
 - Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-23-brief.md`
@@ -32,4 +32,7 @@
 - Fix scope: normalize stream `UpstreamFailoverError` result to nil; bound direct/SOCKS5/HTTP CONNECT/uTLS fingerprint dialing; repository/capacity/probe regressions
 - TDD evidence: capacity non-nil result RED; direct deadline, SOCKS5/CONNECT cancellation, uTLS deadline/clear RED; all GREEN after implementation
 - Final gates: Task 23 focused sets, tlsfingerprint/repository timeout tests, compile, full backend lint and static checks PASS
-- Status: fresh thorough re-review pending
+- Re-reviewer: `ses_016d8f8faffe7NmLbm6cWFW8u7` returned `Needs fixes`
+- Original findings resolved; remaining Important: HTTP CONNECT blocking write/read only observes deadline, not explicit context cancellation before that deadline
+- Final-round scope: cancellation watcher closes CONNECT socket and returns `ctx.Err()`; deterministic blocked-write and response-read explicit-cancel tests
+- Status: final Task 23 fix implementer pending
