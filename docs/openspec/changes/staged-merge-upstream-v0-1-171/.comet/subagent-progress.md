@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 30: 融合 Channel Monitor V2 与隐私默认`
 - OpenSpec mapping: `6.5`
-- Stage: `task-fix`
+- Stage: `task-review`
 - Review/fix round: `1/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `47ea52002c521f12f480df43205b0bb854675eb9`
@@ -164,4 +164,10 @@
 - Task 30 reviewer `ses_0142345edffeWULc5mZakLjkAc`: four Important and two Minor findings; `Spec: FAIL`, `Quality: CHANGES_REQUIRED`
 - Task 30 adjudication: accept mode admission/drain plus V1 hot-update lifecycle, first partial fixed-rollup bucket, frontend authoritative `success_rate`, aggregator Stop join and cleanup label; reject controller-owned progress as implementation scope violation
 - Task 30 fix-1 brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-30-fix-1-brief.md`
-- Task 30 status: review fix round 1 pending
+- Task 30 fix-1 agent `ses_01418ac8effeNMeoRxRsMDKjSR`: returned `DONE`
+- Task 30 fix-1 commits: `93e7dcf90 fix: preserve channel monitoring after v0.1.173`; `22473cd57 fix: include partial channel monitor rollups`; `a4e0fbe6c fix: display authoritative channel monitor success rate`
+- Task 30 fix-1 RED/GREEN: V2 transaction-after-flip, cross-mode overlap, V1 task lifecycle, Stop join, first partial fixed-rollup bucket, and ignored-error success displays all observed direct RED then GREEN
+- Task 30 fix-1 scope: per-SettingService process-local admission/drain, V1 runtime subscription, per-transaction V2 admission, aggregator join, first-bucket overlap query, authoritative frontend success rate, direct tests and cleanup label
+- Task 30 fix-1 implementer gates: required backend focused, lifecycle unit tests, four-package lint, frontend 9 files/40 tests/typecheck/lint, diff/VERSION/generated/migration boundaries PASS
+- Task 30 fix-1 controller gates: required backend four-package focused, four lifecycle regressions, partial-rollup repository behavior, four-package lint, frontend 40 tests/typecheck/lint, diff/VERSION/generated/migration boundaries PASS
+- Task 30 status: same-reviewer re-review pending
