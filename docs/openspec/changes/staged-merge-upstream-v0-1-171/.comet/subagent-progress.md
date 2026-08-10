@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 30: 融合 Channel Monitor V2 与隐私默认`
 - OpenSpec mapping: `6.5`
-- Stage: `task-fix`
+- Stage: `task-review`
 - Review/fix round: `3/3 (user-authorized)`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `47ea52002c521f12f480df43205b0bb854675eb9`
@@ -188,4 +188,11 @@
 - Task 30 user decision: explicitly authorized a third focused fix for notification/listener generation linearization
 - Task 30 fix-3 brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-30-fix-3-brief.md`
 - Task 30 fix-3 boundary: one per-SettingService notification mutex plus stale-notification/stale-callback deterministic tests; no broader architecture change
-- Task 30 status: user-authorized final fix pending
+- Task 30 fix-3 agent `ses_0133a89eeffes8FFVt00KWac4r`: returned `DONE_WITH_CONCERNS`
+- Task 30 fix-3 commit: `30bd91d5b fix: serialize channel monitor notifications`
+- Task 30 fix-3 RED/GREEN: stale V1 notification read and stale actual runner callback both completed after newer V2 paths and restored old state; per-SettingService serialized notification chain made both deterministic tests GREEN
+- Task 30 fix-3 scope: one private notification mutex covering persisted runtime read, admission publish, listener snapshot and synchronous callbacks; two direct tests only
+- Task 30 fix-3 implementer gates: focused/full Task 30 backend, four-package lint, frontend 9 files/40 tests/typecheck/lint, diff/VERSION/generated/migration boundaries PASS
+- Task 30 fix-3 controller gates: six direct concurrency regressions, required backend four-package focused, four-package lint, frontend 40 tests/typecheck/lint, diff/VERSION/generated/migration boundaries PASS
+- Task 30 residual: focused `-race` remains `UNVERIFIED` because local CGO/GCC toolchain is unavailable
+- Task 30 status: user-authorized final same-reviewer re-review pending
