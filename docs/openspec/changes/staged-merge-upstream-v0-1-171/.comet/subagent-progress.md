@@ -6,8 +6,8 @@
 - TDD mode: `tdd`
 - Current task: `Task 29: 融合 Grok free gate、冷却与调度阈值`
 - OpenSpec mapping: `6.4`
-- Stage: `task-review`
-- Review/fix round: `0/2`
+- Stage: `task-fix`
+- Review/fix round: `1/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `dfb7d8542a9ac3585d30cc36281eed1cd0eb3282`
 - Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-29-brief.md`
@@ -123,4 +123,7 @@
 - Task 29 risk signals: implementer result is `DONE_WITH_CONCERNS`; existing process-local cooldown/cache concurrency is exercised but no new shared state/API/schema was added; diff under 200 lines
 - Task 29 concern: SettingsView retains unrelated passing-test router-link/AggregateError noise; no Task 29 production contract impact
 - Task 29 controller gates: focused cooldown/free-gate tests, both required backend baselines, async stability count=10, frontend 40 tests/typecheck/lint PASS; golangci-lint 0 issues; diff check PASS; VERSION unchanged
-- Task 29 status: thorough task review pending
+- Task 29 reviewer `ses_014a78483ffeuXkO6Wa4X2HWgv`: five Important findings (legacy/Gateway gaps, final canonical alias + DB recheck, pool retry blocked by premature mutation, configurable/non-recoverable free gate, missing 7d/30d threshold) and two Minor findings; `Spec: FAIL`, `Quality: CHANGES_REQUIRED`
+- Task 29 adjudication: accept Important 1-5 and overly broad quota request assertion Minor; reject progress/report-checkpoint Minor because Classic controller owns progress and report checkpoint is the implementation entry
+- Task 29 fix-1 brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-29-fix-1-brief.md`
+- Task 29 status: review fix round 1 pending
