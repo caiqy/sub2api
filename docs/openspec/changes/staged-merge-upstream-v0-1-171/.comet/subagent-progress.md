@@ -7,7 +7,7 @@
 - Current task: `Task 28: 融合 Grok 媒体、Voice、搜索与网关契约`
 - OpenSpec mapping: `6.3`
 - Stage: `task-review`
-- Review/fix round: `1/2`
+- Review/fix round: `2/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `67be08211`
 - Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-28-brief.md`
@@ -105,4 +105,10 @@
 - Task 28 controller fix commit: `d61f7e2d9481093a18ede4861d4a249c9811e168`
 - Task 28 post-fix controller gates: both required matrices PASS; UsageDetailCapture tests PASS; related lint 0 issues; VERSION unchanged
 - Task 28 re-review package: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-28-review-fix-1-package.md`
-- Task 28 status: same-reviewer re-review pending
+- Task 28 second reviewer finding: no-model Voice uses non-empty grok-4.5 scheduler input and rejects Voice-only model allowlists; `Spec: FAIL`, `Quality: CHANGES_REQUIRED`
+- Task 28 fix-2 brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-28-fix-2-brief.md`
+- Task 28 fix-2 implementer `ses_014e9edf0ffeHBgwG6C9hekzJN`: commit `70ed46a8cf99262246b85b8c70cd95d12cd1df8c`
+- Task 28 fix-2 TDD: no-model TTS/custom-voices with a non-empty Voice-only mapping RED at 503, then GREEN with model-neutral scheduling and no synthetic upstream model
+- Task 28 final controller gates: focused Voice, both required broad matrices, UsageDetailCapture tests PASS; related lint 0 issues; diff check PASS; VERSION unchanged
+- Task 28 final review package: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-28-review-fix-2-package.md`
+- Task 28 status: same-reviewer final review pending
