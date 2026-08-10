@@ -183,7 +183,8 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			if stickyAccountID > 0 && (len(routingAccountIDs) == 0 || containsInt64(routingAccountIDs, stickyAccountID)) {
 				account, _ = s.getSchedulableAccount(ctx, stickyAccountID)
 			}
-			if account == nil || !account.IsSchedulableForModelWithContext(ctx, requestedModel) {
+			if account == nil || !account.IsSchedulableForModelWithContext(ctx, requestedModel) ||
+				(platform == PlatformGrok && !isGrokSchedulingEligible(account, requestedModel, time.Now())) {
 				account, err = s.SelectAccountForModelWithExclusions(ctx, groupID, sessionHash, requestedModel, localExcluded)
 			} else {
 				err = nil

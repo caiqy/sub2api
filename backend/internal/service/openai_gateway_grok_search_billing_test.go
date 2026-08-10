@@ -239,6 +239,59 @@ func TestGrokWebSearchSelectionSkipsCooledStickyAccount(t *testing.T) {
 	require.Equal(t, fallback.ID, account.ID)
 }
 
+func TestGrokWebSearchLoadAwareSelectionSkipsCooledStickyAccount(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		acquired bool
+	}{
+		{name: "acquired slot", acquired: true},
+		{name: "wait plan", acquired: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			groupID := int64(8804)
+			team := "gateway-load-aware-search-cooldown-" + tc.name + time.Now().Format("150405.000000000")
+			blocked := Account{
+				ID: 88041, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, GroupIDs: []int64{groupID},
+				Credentials: map[string]any{"team_id": team},
+			}
+			fallback := Account{
+				ID: 88042, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 10, GroupIDs: []int64{groupID},
+			}
+			cfg := &config.Config{RunMode: config.RunModeSimple}
+			cfg.Gateway.Scheduling.LoadBatchEnabled = false
+			svc := &GatewayService{
+				cfg: cfg,
+				accountRepo: &mockAccountRepoForPlatform{
+					accounts:     []Account{blocked, fallback},
+					accountsByID: map[int64]*Account{blocked.ID: &blocked, fallback.ID: &fallback},
+				},
+				groupRepo: &mockGroupRepoForGateway{groups: map[int64]*Group{
+					groupID: {ID: groupID, Name: "grok-web-search", Platform: PlatformGrok},
+				}},
+				cache:              &mockGatewayCacheForPlatform{sessionBindings: map[string]int64{"web-search-grok": blocked.ID}},
+				concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{acquireResults: map[int64]bool{blocked.ID: tc.acquired, fallback.ID: tc.acquired}}),
+			}
+
+			markGrokTeamModelRateLimit(&blocked, "grok-4.5", time.Now().Add(time.Hour))
+			selection, err := svc.SelectAccountWithLoadAwareness(context.Background(), &groupID, "web-search-grok", "grok-4.5", nil, "", 0)
+
+			require.NoError(t, err)
+			require.NotNil(t, selection)
+			require.NotNil(t, selection.Account)
+			require.Equal(t, fallback.ID, selection.Account.ID)
+			if tc.acquired {
+				require.True(t, selection.Acquired)
+				require.Nil(t, selection.WaitPlan)
+				selection.ReleaseFunc()
+			} else {
+				require.False(t, selection.Acquired)
+				require.NotNil(t, selection.WaitPlan)
+				require.Equal(t, fallback.ID, selection.WaitPlan.AccountID)
+			}
+		})
+	}
+}
+
 func TestCountGrokNativeSearchCallsFromJSON_MessagesStyleBody(t *testing.T) {
 	// Proves the same counter used by Anthropic-buffered Grok /v1/messages path.
 	body := []byte(`{"id":"r1","output":[{"type":"web_search_call","id":"ws1"},{"type":"message","role":"assistant"}]}`)
