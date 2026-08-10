@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 27: 固定 Grok 授权与模型映射安全默认`
 - OpenSpec mapping: `6.2`
-- Stage: `task-fix`
+- Stage: `task-review`
 - Review/fix round: `1/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `121240c564ca826919d8ceebcd9e9e6046af21b9`
@@ -77,4 +77,8 @@
 - Task 27 RED/GREEN: default-on mapping and legacy password 200 RED; mapping/password focused and frontend 49 tests GREEN
 - Task 27 blockers: full lint exposes missing ChannelMonitorV2Aggregator nil in cleanup test; isolated Grok base URL setting write test fails because admin request/response omit all three Grok setting fields
 - Task 27 fix brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-27-fix-1-brief.md`
-- Task 27 status: separate cleanup-fixture and Grok-settings remediation pending
+- Task 27 cleanup fixture fix: `930a19cb954d61a5b41c92d9f37a5cc8a29dd8a7`
+- Task 27 Grok settings API fix: `3637265ba5edfc66609af724710993e580ef1367`
+- Task 27 controller gates: backend untagged/unit-tagged focused PASS; cleanup PASS; full golangci-lint 0 issues; frontend 49/49, typecheck and lint PASS; VERSION unchanged
+- Task 27 review package: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-27-review-package.md`
+- Task 27 status: reviewer pending
