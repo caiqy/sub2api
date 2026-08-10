@@ -4,45 +4,16 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Current task: `Task 23: 融合 gateway、transport 和 protocol 修复`
-- OpenSpec mapping: `5.5 以 TDD 审查 upstream response model audit、Codex identity/capacity failover、transport timeout、body replay/release、sticky/final account、WS prewarm、count_tokens、Grok、图片 cooldown 和协议清洗`
-- Stage: `task-complete`
-- Review/fix round: `2/2`
+- Current task: `Task 24: 闭合 response-model audit、194/195 和前端展示`
+- OpenSpec mapping: `5.6 融合 UsageLog schema/Ent、194/195 migration、单条/批量/best-effort insert、查询筛选和管理端展示，并审查模型广场、错误时间范围及既有本地 frontend 定制`
+- Stage: `implementing`
+- Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
-- Task start HEAD: `f5c1a00a2333cad7b53c78b5373640a8a02ca981`
-- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-23-brief.md`
-- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-23-report.md`
-- Dependency: Tasks 20-22 complete; Task 21 routed stale `TestProbe_SendProbeRequest_OAuthUsesCodexResponsesEndpoint` expectation to this Codex/gateway task
-- TDD rule: run upstream/local protection sets before edits and preserve genuine RED; do not rewrite production identity to satisfy a stale test when canonical `codex-tui` is correct
-- Risk signals: cross-module、security、concurrency、network transport、request-body lifecycle、billing
-- Hard boundary: pre-output capacity may fail over; post-output errors never switch account or double bill; per-attempt response-model observer reset; direct/TLS/SOCKS5 timeouts bounded; final account/model and sticky consistent; request body released exactly once; count_tokens fallback does not cool OAuth
-- Implementer: `ses_01858602dffevLBONForfY3E1M` returned `DONE_WITH_CONCERNS`
-- Implementation commit: `0b8eefb416f548bda25a7f45b7417917dc88637f` (parent `08a6f3b9cce1e4dc19684a20c328c1c0eabe729f`)
-- Genuine RED: routed Codex probe assertion expected historical `codex_cli_rs`; actual enforced outbound identity is canonical `codex-tui`
-- Fix scope: test expectation now references `openai.CodexDefaultOriginator`; no production or Task 24 paths changed
-- Audit evidence: capacity failover/output boundary, per-attempt observer, timeout variants, count_tokens fallback, cooldown, prewarm, body lifecycle, sticky/final account/model and QuotaPlatform construction points reviewed
-- Final gates: both focused protection sets, compile, service lint and static checks PASS
-- Concern: disabling identity enforcement plus non-official custom UA can expose historical probe seed; reported as existing opt-out configuration semantics
-- Reviewer: `ses_01847b5f0ffeAfj0ycjZ0zaDXD` returned `Needs fixes`
-- Important findings accepted: pre-output SSE capacity failover returns a non-nil usage result; TLS-fingerprint direct/SOCKS5/HTTP CONNECT/uTLS paths bypass bounded dial/handshake deadlines
-- Minor finding accepted: add an independent literal invariant fixing the canonical default originator to `codex-tui`
-- Concern disposition: reviewer confirmed identity-enforcement opt-out semantics are intentional and non-official UA falls back canonical; no production identity fix needed
-- Fix implementer: `ses_0183c3994ffesJCOKIHM5P3Ukk`
-- Fix commit: `066eb18b8aaa589422968b722e4481261ca7f8e2` (parent `901f893afe3a869168c23703ba98997d010cee31`)
-- Fix scope: normalize stream `UpstreamFailoverError` result to nil; bound direct/SOCKS5/HTTP CONNECT/uTLS fingerprint dialing; repository/capacity/probe regressions
-- TDD evidence: capacity non-nil result RED; direct deadline, SOCKS5/CONNECT cancellation, uTLS deadline/clear RED; all GREEN after implementation
-- Final gates: Task 23 focused sets, tlsfingerprint/repository timeout tests, compile, full backend lint and static checks PASS
-- Re-reviewer: `ses_016d8f8faffe7NmLbm6cWFW8u7` returned `Needs fixes`
-- Original findings resolved; remaining Important: HTTP CONNECT blocking write/read only observes deadline, not explicit context cancellation before that deadline
-- Final-round scope: cancellation watcher closes CONNECT socket and returns `ctx.Err()`; deterministic blocked-write and response-read explicit-cancel tests
-- Final fix implementer: `ses_016c70db1ffeICbgbL4XHWDwCC`
-- Final fix commit: `cd5fa10db6640ef7b984931853ee7a20667d87e9` (parent `5f67d9f809dde6c478f19fcebe2d4cda77a9a6ca`)
-- Final fix evidence: explicit-cancel blocked CONNECT write/read RED, then GREEN with CONNECT-stage close watcher and `ctx.Err()` propagation
-- Additional broad-run RED reproduced by coordinator: `TestNilConfigResponseHeaderTimeoutFallback` expects stale 10m while authoritative code fallback/comment is 5m
-- Routed concerns: UsageLog sqlmock destination drift belongs Task 24; external OpenAI token-parity tests are not local-only gates
-- Timeout expectation follow-up commit: `fcb11a809d5803467712754d6805fa04096108f2` (parent `8a91d829e112d0b0c16060cf7d926344c487f0d4`)
-- Follow-up scope: nil-config response-header fallback test now references authoritative 5m constant; production unchanged
-- Follow-up gates: exact fallback, repository timeout and Task 23 repository-focused tests PASS
-- Final re-reviewer: `ses_016ab7af2ffevRITR1TJj7oldB` returned `Task quality: Approved`; all findings addressed, no new Critical/Important/Minor
-- Routed concerns: UsageLog sqlmock 59→61 belongs Task 24; external OpenAI token parity remains non-local optional
-- Status: Task 23 complete; Plan Task 23 and OpenSpec 5.5 checked off
+- Task start HEAD: `fd01acfe966a2fa482f6a8ba199c40892c6e2ee2`
+- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-24-brief.md`
+- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-24-report.md`
+- Dependency: Task 23 freezes response model/conflict before protocol translation and routed two UsageLog sqlmock destination drifts to this task
+- TDD rule: run backend/frontend protection suites before edits; use current schema/SQL/migration facts to resolve the apparent 59-value versus 61-scan-destination distinction
+- Risk signals: schema、generated code、migration、persistence、API/frontend、cross-module
+- Hard boundary: requested/upstream/upstream-response model remain separate structured fields; NULL/false/true mismatch tri-state preserved; all insert/query/filter/UI variants aligned; migrations 194/195 blobs immutable; Docker-backed upgrade evidence remains UNVERIFIED if unavailable
+- Status: fresh Task 24 implementer dispatch pending
