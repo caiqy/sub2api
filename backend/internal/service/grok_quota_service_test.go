@@ -742,10 +742,13 @@ func TestGrokQuotaServiceQueryQuotaFreeFallsBackToGrok45(t *testing.T) {
 	require.True(t, result.HeadersObserved)
 
 	requests, bodies := upstream.snapshot()
-	require.Len(t, requests, 3)
 	responseCalls := 0
+	billingCalls := 0
 	for i, req := range requests {
 		if req.URL.Path != "/v1/responses" {
+			if req.URL.Path != "/v1/models" {
+				billingCalls++
+			}
 			continue
 		}
 		responseCalls++
@@ -757,6 +760,7 @@ func TestGrokQuotaServiceQueryQuotaFreeFallsBackToGrok45(t *testing.T) {
 		require.False(t, gjson.GetBytes(bodies[i], "max_output_tokens").Exists())
 		require.False(t, gjson.GetBytes(bodies[i], "store").Exists())
 	}
+	require.Equal(t, 2, billingCalls)
 	require.Equal(t, 1, responseCalls)
 }
 
