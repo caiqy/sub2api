@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 24: 闭合 response-model audit、194/195 和前端展示`
 - OpenSpec mapping: `5.6 融合 UsageLog schema/Ent、194/195 migration、单条/批量/best-effort insert、查询筛选和管理端展示，并审查模型广场、错误时间范围及既有本地 frontend 定制`
-- Stage: `task-fix`
+- Stage: `task-review`
 - Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `fd01acfe966a2fa482f6a8ba199c40892c6e2ee2`
@@ -27,4 +27,10 @@
 - Important findings accepted: endpoint/path stats omit mismatch filter; UsageTable hides matched=false and conflates it with NULL; migration baseline leaves 192-195 pending instead of only 194/195
 - Minor coverage finding accepted: add focused false/NULL filter and table tri-state regressions
 - Environment boundary unchanged: Docker-backed migration execution remains `UNVERIFIED`
-- Status: fresh Task 24 fix implementer pending
+- Fix implementer: `ses_0168cbf99ffeHNGPHSpRXKFuvh`
+- Fix commit: `d0b08bf17b32c52e7139ef70ca96239e4a875c93` (parent `cfe3c271838eb50920e0f66a5106e56e0aea28a1`)
+- Fix scope: mismatch filters propagated to endpoint/path stats; UsageTable true/false/NULL states with en/zh labels; baseline includes migrations through 193 and excludes only 194/195
+- TDD evidence: stats true/false conditions RED then GREEN; table matched/mismatched/unobserved RED then GREEN
+- Final gates: backend focused/stats/tagged compile/lint, frontend 39 tests/typecheck/lint, two stable generates, seven blob identities and static checks PASS
+- Concern: migration runtime remains `UNVERIFIED` because Docker is unavailable
+- Status: fresh thorough re-review pending
