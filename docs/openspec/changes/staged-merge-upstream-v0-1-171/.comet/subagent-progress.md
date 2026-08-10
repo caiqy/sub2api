@@ -6,8 +6,8 @@
 - TDD mode: `tdd`
 - Current task: `Task 24: 闭合 response-model audit、194/195 和前端展示`
 - OpenSpec mapping: `5.6 融合 UsageLog schema/Ent、194/195 migration、单条/批量/best-effort insert、查询筛选和管理端展示，并审查模型广场、错误时间范围及既有本地 frontend 定制`
-- Stage: `task-review`
-- Review/fix round: `0/2`
+- Stage: `task-fix`
+- Review/fix round: `2/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `fd01acfe966a2fa482f6a8ba199c40892c6e2ee2`
 - Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-24-brief.md`
@@ -33,4 +33,8 @@
 - TDD evidence: stats true/false conditions RED then GREEN; table matched/mismatched/unobserved RED then GREEN
 - Final gates: backend focused/stats/tagged compile/lint, frontend 39 tests/typecheck/lint, two stable generates, seven blob identities and static checks PASS
 - Concern: migration runtime remains `UNVERIFIED` because Docker is unavailable
-- Status: fresh thorough re-review pending
+- Re-reviewer: `ses_01678519affe9osiHP5hmRcpHX` returned `Needs fixes`
+- Important finding accepted: the shared UsageTable renders upstream response-model audit details for the ordinary user UsageView even though that caller sets `show-upstream-endpoint=false`
+- Final fix scope: add a user-view regression and guard the entire response-model audit block with the existing upstream visibility prop; do not change admin tri-state behavior
+- Final fix brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-24-fix-2-brief.md`
+- Status: final fix implementer pending; a new Important after this round must be escalated instead of starting a third fix round
