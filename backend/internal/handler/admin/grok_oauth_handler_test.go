@@ -204,7 +204,9 @@ func TestGrokOAuthHandlerRuntimeSanityDoesNotExposeSecrets(t *testing.T) {
 	require.NotContains(t, rec.Body.String(), "client-secret-like-value")
 }
 
-type grokOAuthHandlerClient struct{}
+type grokOAuthHandlerClient struct {
+	loginCalls int
+}
 
 func (c *grokOAuthHandlerClient) ExchangeCode(context.Context, string, string, string, string, string) (*xai.TokenResponse, error) {
 	return nil, errors.New("unexpected exchange")
@@ -215,6 +217,7 @@ func (c *grokOAuthHandlerClient) RefreshToken(context.Context, string, string, s
 }
 
 func (c *grokOAuthHandlerClient) LoginWithPassword(_ context.Context, email, _ string, _ string) (*service.GrokPasswordLoginResult, error) {
+	c.loginCalls++
 	return &service.GrokPasswordLoginResult{
 		Email:    email,
 		SSOToken: "sso-from-password",
@@ -245,7 +248,7 @@ func TestGrokOAuthHandlerValidateSSOTokenReturnsTokenInfo(t *testing.T) {
 	require.NotContains(t, rec.Body.String(), `"sso_token"`)
 }
 
-func TestGrokOAuthHandlerAuthorizePasswordReturnsTokenInfoWithoutPassword(t *testing.T) {
+func TestGrokOAuthHandlerAuthorizePasswordStaysDisabledWhenLegacyConfigEnablesIt(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	oauthClient := &grokOAuthHandlerClient{}
@@ -262,9 +265,9 @@ func TestGrokOAuthHandlerAuthorizePasswordReturnsTokenInfoWithoutPassword(t *tes
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.Contains(t, rec.Body.String(), `"access_token":"access-token"`)
+	require.Equal(t, http.StatusForbidden, rec.Code)
 	require.NotContains(t, rec.Body.String(), "super-secret")
+	require.Zero(t, oauthClient.loginCalls)
 }
 
 func TestGrokOAuthHandlerPasswordCapabilityDefaultsToDisabled(t *testing.T) {

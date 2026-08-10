@@ -24,6 +24,25 @@ func TestGrokAccountModelMappingCacheInvalidatesWithRuntimeSettings(t *testing.T
 	requireMappedModel(t, account, "claude-sonnet-4-5", "grok-build-0.1")
 }
 
+func TestGrokAccountExplicitModelMappingOverridesRuntimeDefault(t *testing.T) {
+	original := xai.RuntimeModelMappingOptions()
+	t.Cleanup(func() { xai.SetRuntimeModelMappingOptions(original) })
+	xai.SetRuntimeModelMappingOptions(xai.ModelMappingOptions{
+		DefaultText:          "grok-runtime-default",
+		EnableCrossClientMap: true,
+	})
+
+	account := &Account{
+		Platform: PlatformGrok,
+		Credentials: map[string]any{
+			"model_mapping": map[string]any{"gpt-*": "grok-account-explicit"},
+		},
+	}
+
+	requireMappedModel(t, account, "gpt-5", "grok-account-explicit")
+	requireMappedModel(t, account, "claude-sonnet-4-5", "claude-sonnet-4-5")
+}
+
 func requireMappedModel(t *testing.T, account *Account, requested, expected string) {
 	t.Helper()
 	if actual := account.GetMappedModel(requested); actual != expected {
