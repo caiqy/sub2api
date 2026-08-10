@@ -282,15 +282,14 @@ func anthropicThresholdCandidates(account *Account) []*accountSchedulingThreshol
 // kiro_sched_* / antigravity_sched_* extras are still written purely as
 // observability snapshots.
 
-// grokThresholdCandidates uses only header-projected
-// grok_sched_utilization / grok_sched_reset_at (rolling quota window, reset
-// capped at ~25h when written). Official billing 7d/30d windows are not used
-// for auto-pause here.
+// grokThresholdCandidates combines the header-projected rolling quota window
+// with persisted billing 7d and 30d windows. Billing reset timestamps are
+// already upstream absolute times and must not use the header reset clamp.
 func grokThresholdCandidates(account *Account) []*accountSchedulingThresholdCandidate {
 	if account == nil {
 		return nil
 	}
-	return []*accountSchedulingThresholdCandidate{
+	candidates := []*accountSchedulingThresholdCandidate{
 		{
 			window:      "quota",
 			scope:       "grok",
@@ -298,6 +297,27 @@ func grokThresholdCandidates(account *Account) []*accountSchedulingThresholdCand
 			until:       parseSchedulingResetAt(account.Extra["grok_sched_reset_at"]),
 		},
 	}
+	billing, err := grokBillingSnapshotFromExtra(account.Extra)
+	if err != nil || billing == nil {
+		return candidates
+	}
+	if billing.UsagePercent != nil {
+		candidates = append(candidates, &accountSchedulingThresholdCandidate{
+			window:      "7d",
+			scope:       "grok",
+			usedPercent: *billing.UsagePercent,
+			until:       parseSchedulingResetAt(billing.PeriodEnd),
+		})
+	}
+	if billing.UsedPercent != nil {
+		candidates = append(candidates, &accountSchedulingThresholdCandidate{
+			window:      "30d",
+			scope:       "grok",
+			usedPercent: *billing.UsedPercent,
+			until:       parseSchedulingResetAt(billing.BillingPeriodEnd),
+		})
+	}
+	return candidates
 }
 
 func pickLatestResetSchedulingCandidate(candidates []*accountSchedulingThresholdCandidate, threshold int, now time.Time) *accountSchedulingThresholdCandidate {
