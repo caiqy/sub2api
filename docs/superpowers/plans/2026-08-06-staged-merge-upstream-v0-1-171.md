@@ -2086,7 +2086,7 @@ if ($task29Paths.Count -gt 0) { Commit-NamedPaths -Message 'fix: preserve Grok s
 
 ### Task 30: 融合 Channel Monitor V2 与隐私默认
 
-- [ ] Task 30: 融合 Channel Monitor V2 与隐私默认
+- [x] Task 30: 融合 Channel Monitor V2 与隐私默认
 
 **映射 OpenSpec：**6.5
 

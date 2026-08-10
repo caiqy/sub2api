@@ -45,7 +45,7 @@
 - [x] 6.2 以 TDD 融合 Grok SSO/refresh-token、默认文本模型和运行时映射；缺失/未配置的跨客户端映射默认关闭，显式开启与账号显式映射有效，邮箱密码授权 UI 隐藏且服务端硬拒绝
 - [x] 6.3 以 TDD 审查 Grok 图片/视频、Voice TTS/STT/Realtime、custom voices、web search 与本地 routing、sticky/failover、body 生命周期、审计和单次计费语义
 - [x] 6.4 以 TDD 审查 Grok free 24h 软门禁、team+model 冷却、流式空闲换号、7d/30d 调度阈值、routing hints 与本地 scheduler/usage/settings 热更新；不得改写订阅实际时刻额度锚点
-- [ ] 6.5 融合 Channel Monitor V2 被动聚合、V1/V2 互斥开关、普通用户吞吐脱敏、admin 完整指标、rollup/cache/API/UI；默认保持 V1，V2 仅显式启用
+- [x] 6.5 融合 Channel Monitor V2 被动聚合、V1/V2 互斥开关、普通用户吞吐脱敏、admin 完整指标、rollup/cache/API/UI；默认保持 V1，V2 仅显式启用
 - [ ] 6.6 融合 Grok 媒体/Voice/search 定价 schema、Ent、前端价矩阵和 173 的 Channel Monitor 194-206、pricing 217-220 migrations；保留 172 同号 UsageLog 194/195，验证 migration 220 先备份且只清理非 Grok/非 composite 视频价格残值
 - [ ] 6.7 运行 v0.1.173 全部能力聚焦测试、`make test`、中间版本 build、backend/frontend lint、typecheck、两轮 generate、静态冲突与适用的本机 integration，关闭第四阶段能力矩阵 gap
 - [ ] 6.8 四段全部闭合后将 VERSION 更新为 `0.1.173.1`，校验四个 tag 祖先与 merge 第二父、全部 24 个受保护 migration identity，完成 thorough review 和新的最终 Verify 报告
