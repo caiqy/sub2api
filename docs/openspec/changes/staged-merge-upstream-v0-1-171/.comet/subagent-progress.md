@@ -7,7 +7,7 @@
 - Current task: `Task 25: 运行 v0.1.172 全量门禁并冻结 v0.1.173 精确矩阵`
 - OpenSpec mapping: `5.7、5.8`
 - Stage: `task-fix`
-- Review/fix round: `2/2`
+- Review/fix round: `3/3 (user-authorized evidence-only)`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `ecac7fe5ad9dae69475acacc83925a9fbea1f96b`
 - Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-25-brief.md`
@@ -57,4 +57,8 @@
 - Task 25 reviewer: `ses_016336266ffeIPwFZfPDPASWl4` returned `Spec: FAIL`, `Quality: NEEDS_FIXES`
 - Reviewer adjudication: reject stale midnight claim because current session/OpenSpec 5.4 bind admin reset to actual operation time; accept final report status, reproducible overlap command/exit evidence, and fresh warning evidence
 - Task 25 final fix brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-25-fix-2-brief.md`
-- Task 25 status: final evidence fix pending; any new Important after this round must be escalated
+- Task 25 final evidence commit: `56193d4f520923362204283ce83d4695dc5accf6`; top-level report finalized, count commands and fresh warning evidence recorded
+- Task 25 re-review: `ses_016336266ffeIPwFZfPDPASWl4` returned one Important because count assertions did not verify 140-path membership identity
+- User decision: explicitly authorized a third evidence-only fix
+- Task 25 authorized fix brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-25-fix-3-brief.md`
+- Task 25 status: overlap membership identity evidence pending
