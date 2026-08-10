@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 24: 闭合 response-model audit、194/195 和前端展示`
 - OpenSpec mapping: `5.6 融合 UsageLog schema/Ent、194/195 migration、单条/批量/best-effort insert、查询筛选和管理端展示，并审查模型广场、错误时间范围及既有本地 frontend 定制`
-- Stage: `implementing`
+- Stage: `task-review`
 - Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `fd01acfe966a2fa482f6a8ba199c40892c6e2ee2`
@@ -16,4 +16,11 @@
 - TDD rule: run backend/frontend protection suites before edits; use current schema/SQL/migration facts to resolve the apparent 59-value versus 61-scan-destination distinction
 - Risk signals: schema、generated code、migration、persistence、API/frontend、cross-module
 - Hard boundary: requested/upstream/upstream-response model remain separate structured fields; NULL/false/true mismatch tri-state preserved; all insert/query/filter/UI variants aligned; migrations 194/195 blobs immutable; Docker-backed upgrade evidence remains UNVERIFIED if unavailable
-- Status: fresh Task 24 implementer dispatch pending
+- Implementer: `ses_016a4ff6affeoRN1EoiY0Sy1px` returned `DONE_WITH_CONCERNS`
+- Implementation commit: `ff58b07e14d563296477c74bfb3573e765bec20c` (parent `3f1fda732af1fb59d32f2afcd6dbba6caf88ab9b`)
+- Genuine RED: paginated UsageLog SQLMock fixtures exposed 59 persisted values versus 61 list scan targets (generated id + has_detail)
+- Fix scope: align fixtures and round-trip assertions; extend migration upgrade required set/assertions through 194/195; no production/generated/migration SQL changes
+- Audit evidence: tri-state service/repository/query/admin/frontend chain, all insert variants, model plaza/error range, seven authoritative migration blobs and two stable generation rounds reviewed
+- Final gates: backend focused/tagged compile/lint, frontend suites/typecheck/lint, generation/static checks PASS
+- Concern: Docker-backed 194/195 schema/index/upgrade/idempotency/checksum execution remains `UNVERIFIED`
+- Status: fresh thorough task reviewer pending
