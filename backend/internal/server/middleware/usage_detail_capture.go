@@ -118,7 +118,7 @@ func buildUsageDetailSnapshot(c *gin.Context) *UsageDetailSnapshot {
 	}).Normalize()
 }
 func (c *usageDetailCollector) captureResponseChunk(data []byte) {
-	if c == nil || len(data) == 0 {
+	if c == nil || c.hasOverride || len(data) == 0 {
 		return
 	}
 	_, _ = c.responseBody.Write(data)
@@ -156,6 +156,7 @@ func (c *usageDetailCollector) SetUsageResponseSnapshot(headers, body string) {
 	if c == nil {
 		return
 	}
+	c.responseBody.Reset()
 	c.overrideHeaders = headers
 	c.overrideBody = body
 	c.hasOverride = true
