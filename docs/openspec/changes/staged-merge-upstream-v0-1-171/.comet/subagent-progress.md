@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 25: 运行 v0.1.172 全量门禁并冻结 v0.1.173 精确矩阵`
 - OpenSpec mapping: `5.7、5.8`
-- Stage: `task-fix`
+- Stage: `task-implement`
 - Review/fix round: `1/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `ecac7fe5ad9dae69475acacc83925a9fbea1f96b`
@@ -48,4 +48,8 @@
 - Task 25 blocker: `TestObserveUpstreamMessage_ResponseModelIsTurnLocalAndTerminalWins` lacks the active turn that production arms before accepting `response.created`
 - Task 25 remediation: test-only fixture correction for both turns; production foreign-response ownership remains unchanged
 - Task 25 fix brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-25-fix-1-brief.md`
-- Task 25 status: remediation implementer pending
+- Task 25 remediation implementer: `ses_0165a40e6ffepjNjgkitbgxulV` returned `DONE_WITH_CONCERNS`
+- Task 25 remediation commit: `4dab3b6c575a49ab471b527b40da9c7baf6805c3`
+- Task 25 remediation evidence: focused RED retained; focused GREEN, full openai_ws_v2 package, and isolated-key `make test` PASS
+- Task 25 remediation reviewer: `ses_0164b59faffe6o2vl9ujAr2RfW` returned `Spec: PASS`, `Quality: APPROVED`, no findings
+- Task 25 status: full focused/full gate rerun and ledger update pending from remediation HEAD
