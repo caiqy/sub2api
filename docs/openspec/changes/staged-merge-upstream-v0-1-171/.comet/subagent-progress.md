@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 28: 融合 Grok 媒体、Voice、搜索与网关契约`
 - OpenSpec mapping: `6.3`
-- Stage: `task-fix`
+- Stage: `task-review`
 - Review/fix round: `1/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `67be08211`
@@ -102,4 +102,7 @@
 - Task 28 fix-1 commit: `81ec3e6d7a479f168c4b4fcad64eec37ce90fbe0`
 - Task 28 controller self-review: Realtime model is mapped in both handler and service, allowing unintended chain mapping
 - Task 28 controller fix brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-28-controller-fix-1-brief.md`
-- Task 28 status: controller self-review fix pending before re-review
+- Task 28 controller fix commit: `d61f7e2d9481093a18ede4861d4a249c9811e168`
+- Task 28 post-fix controller gates: both required matrices PASS; UsageDetailCapture tests PASS; related lint 0 issues; VERSION unchanged
+- Task 28 re-review package: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-28-review-fix-1-package.md`
+- Task 28 status: same-reviewer re-review pending
