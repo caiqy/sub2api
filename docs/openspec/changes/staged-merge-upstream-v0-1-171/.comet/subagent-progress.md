@@ -6,8 +6,8 @@
 - TDD mode: `tdd`
 - Current task: `Task 23: 融合 gateway、transport 和 protocol 修复`
 - OpenSpec mapping: `5.5 以 TDD 审查 upstream response model audit、Codex identity/capacity failover、transport timeout、body replay/release、sticky/final account、WS prewarm、count_tokens、Grok、图片 cooldown 和协议清洗`
-- Stage: `task-fix`
-- Review/fix round: `1/2`
+- Stage: `task-review`
+- Review/fix round: `2/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `f5c1a00a2333cad7b53c78b5373640a8a02ca981`
 - Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-23-brief.md`
@@ -40,4 +40,7 @@
 - Final fix evidence: explicit-cancel blocked CONNECT write/read RED, then GREEN with CONNECT-stage close watcher and `ctx.Err()` propagation
 - Additional broad-run RED reproduced by coordinator: `TestNilConfigResponseHeaderTimeoutFallback` expects stale 10m while authoritative code fallback/comment is 5m
 - Routed concerns: UsageLog sqlmock destination drift belongs Task 24; external OpenAI token-parity tests are not local-only gates
-- Status: final-round test-only timeout expectation follow-up pending before re-review
+- Timeout expectation follow-up commit: `fcb11a809d5803467712754d6805fa04096108f2` (parent `8a91d829e112d0b0c16060cf7d926344c487f0d4`)
+- Follow-up scope: nil-config response-header fallback test now references authoritative 5m constant; production unchanged
+- Follow-up gates: exact fallback, repository timeout and Task 23 repository-focused tests PASS
+- Status: final fresh thorough re-review pending; another Important finding requires escalation
