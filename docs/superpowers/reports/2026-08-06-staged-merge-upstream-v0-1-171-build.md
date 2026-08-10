@@ -2181,3 +2181,37 @@ Makefile
 ```
 
 - Scope confirmation: no product/test/VERSION/plan/OpenSpec/progress/Comet runtime change; no push, tag, release, deploy, image build, remote service, or version bump. This Task 25 commit contains only this ledger.
+
+### Task 25 Final Evidence Fix
+
+- Recomputed from checkpoint `3136af0646ebb404245d63b4e17f4cd70c2a9031` before this ledger-only evidence commit. The existing Docker 194/195 execution status remains `UNVERIFIED`; `VERSION` remains `0.1.171.1`; v0.1.172 capability closure remains `protected=3`, `manual=1`, `gap=0`; and the pre-merge contracts above are unchanged.
+
+#### Reproducible v0.1.173 Counts
+
+```powershell
+& {
+  $ErrorActionPreference = 'Stop'
+  $manifest = @(git diff --name-only v0.1.172..v0.1.173 | Sort-Object -Unique)
+  if ($LASTEXITCODE -ne 0) { throw "v0.1.172..v0.1.173 manifest command failed with exit $LASTEXITCODE" }
+  $localDelta = @(git diff --name-only v0.1.172...HEAD | Sort-Object -Unique)
+  if ($LASTEXITCODE -ne 0) { throw "v0.1.172...HEAD local delta command failed with exit $LASTEXITCODE" }
+  $overlap = @(Compare-Object -ReferenceObject $manifest -DifferenceObject $localDelta -IncludeEqual -ExcludeDifferent | ForEach-Object { $_.InputObject } | Sort-Object -Unique)
+  if ($manifest.Count -ne 352) { throw "Expected manifest count 352; got $($manifest.Count)" }
+  if ($localDelta.Count -ne 1237) { throw "Expected local delta count 1237; got $($localDelta.Count)" }
+  if ($overlap.Count -ne 140) { throw "Expected sorted-unique overlap count 140; got $($overlap.Count)" }
+  "manifest_count=$($manifest.Count)"
+  "local_delta_count=$($localDelta.Count)"
+  "sorted_unique_overlap_count=$($overlap.Count)"
+}
+```
+
+- Exit `0`: both Git diff commands exited `0`; all three assertions passed with `manifest_count=352`, `local_delta_count=1237`, and `sorted_unique_overlap_count=140`.
+- `$overlap` is sorted and unique. Its complete 140-path output remains recorded unchanged in [v0.1.173 Exact Overlap (140)](#v01173-exact-overlap-140) above.
+
+#### Fresh Focused Frontend Gate
+
+| Command | Exit | Result |
+| --- | ---: | --- |
+| `pnpm --dir frontend exec vitest run src/components/__tests__/CaptchaChallenge.spec.ts src/components/__tests__/TencentCaptchaGate.spec.ts src/components/auth/__tests__/PendingOAuthCreateAccountForm.spec.ts src/components/admin/usage/__tests__/UsageFilters.spec.ts src/components/admin/usage/__tests__/UsageTable.spec.ts src/views/admin/__tests__/UsageView.spec.ts src/views/auth/__tests__/TencentCaptchaActionGate.spec.ts src/views/auth/__tests__/TencentCaptchaForgotPassword.spec.ts src/views/auth/__tests__/EmailVerifyView.spec.ts` | `0` | PASS: 9 files, 100 tests. |
+
+- Fresh warnings: Browserslist reported `caniuse-lite` data is 8 months old. The known `UsageView` chart-data stderr did appear: `Failed to load chart data: TypeError: Cannot read properties of undefined (reading 'trend')` from `loadChartData`; it did not fail the test process.
