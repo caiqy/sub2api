@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 )
 
 const (
@@ -265,7 +267,10 @@ func canonicalOpenAIAccountSchedulingModel(account *Account, requestedModel stri
 		return model
 	}
 	if mapped := strings.TrimSpace(account.GetMappedModel(model)); mapped != "" {
-		return mapped
+		model = mapped
+	}
+	if account.Platform == PlatformGrok {
+		return xai.ResolveGrokTextResponsesModelID(model, grokDefaultResponsesModel)
 	}
 	return model
 }

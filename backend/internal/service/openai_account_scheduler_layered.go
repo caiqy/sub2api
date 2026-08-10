@@ -458,12 +458,7 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 }
 
 func (s *layeredOpenAIAccountScheduler) filterGrokSchedulingAccounts(accounts []Account, requestedModel string) []Account {
-	now := time.Now()
-	accounts = filterGrokTeamModelRateLimitedAccounts(accounts, requestedModel, now)
-	if len(accounts) == 0 {
-		return nil
-	}
-	return filterGrokModelQuotaBlockedAccounts(accounts, requestedModel, now)
+	return filterGrokSchedulingAccounts(accounts, requestedModel, time.Now())
 }
 
 func (s *layeredOpenAIAccountScheduler) selectStickyWeightedTopKCandidate(ctx context.Context, available []accountWithLoad, req OpenAIAccountScheduleRequest) *accountWithLoad {
@@ -645,6 +640,9 @@ func (s *layeredOpenAIAccountScheduler) recheckSessionStickyAccountFromDB(
 	if s.service.schedulerSnapshot == nil || s.service.accountRepo == nil {
 		fresh := s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
 		if fresh == nil {
+			if !isGrokSchedulingEligible(account, req.RequestedModel, time.Now()) {
+				return nil, true
+			}
 			return nil, false
 		}
 		return s.classifySessionStickyAccount(ctx, fresh, req, schedGroup)
@@ -667,6 +665,9 @@ func (s *layeredOpenAIAccountScheduler) classifySessionStickyAccount(
 		return nil, true
 	}
 	if shouldClearStickySession(account, req.RequestedModel) || account.Platform != normalizeOpenAICompatiblePlatform(req.Platform) || !account.IsSchedulable() {
+		return nil, true
+	}
+	if !isGrokSchedulingEligible(account, req.RequestedModel, time.Now()) {
 		return nil, true
 	}
 	if !accountSatisfiesPrivacyRequirement(account, schedGroup) {

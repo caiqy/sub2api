@@ -112,6 +112,32 @@ func isGrokTeamModelRateLimited(account *Account, model string, now time.Time) b
 	return true
 }
 
+// isGrokSchedulingEligible is the shared final check for model-scoped Grok
+// cooldowns. Call it after an account is refreshed, before it can be bound,
+// acquired, or used to create a wait plan.
+func isGrokSchedulingEligible(account *Account, requestedModel string, now time.Time) bool {
+	if account == nil {
+		return false
+	}
+	if account.Platform != PlatformGrok {
+		return true
+	}
+	upstreamModel := canonicalOpenAIAccountSchedulingModel(account, requestedModel)
+	return !isGrokTeamModelRateLimited(account, upstreamModel, now) &&
+		!isGrokModelQuotaBlocked(account.ID, upstreamModel, now)
+}
+
+func filterGrokSchedulingAccounts(accounts []Account, requestedModel string, now time.Time) []Account {
+	if len(accounts) == 0 {
+		return accounts
+	}
+	accounts = filterGrokTeamModelRateLimitedAccounts(accounts, requestedModel, now)
+	if len(accounts) == 0 {
+		return nil
+	}
+	return filterGrokModelQuotaBlockedAccounts(accounts, requestedModel, now)
+}
+
 // filterGrokTeamModelRateLimitedAccounts drops candidates whose team is under a
 // model-scoped rate-limit cool. Accounts without team_id pass through.
 func filterGrokTeamModelRateLimitedAccounts(accounts []Account, model string, now time.Time) []Account {
