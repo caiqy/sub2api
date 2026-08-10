@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 30: 融合 Channel Monitor V2 与隐私默认`
 - OpenSpec mapping: `6.5`
-- Stage: `task-fix`
+- Stage: `task-review`
 - Review/fix round: `2/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `47ea52002c521f12f480df43205b0bb854675eb9`
@@ -174,4 +174,11 @@
 - Task 30 re-reviewer `ses_0142345edffeWULc5mZakLjkAc`: three Important and one Minor findings; `Spec: FAIL`, `Quality: CHANGES_REQUIRED`
 - Task 30 fix-2 adjudication: accept Schedule/drain lock-domain TOCTOU, admission stale-read desired rollback, unchanged-runtime reload/probe burst, and stale success-rate comment
 - Task 30 fix-2 brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-30-fix-2-brief.md`
-- Task 30 status: final review fix round 2 pending
+- Task 30 fix-2 agent `ses_013e83e28ffetDQ4p0tc6UVhw4`: returned `DONE`
+- Task 30 fix-2 commit: `367799d9f fix: preserve channel monitoring after v0.1.173`
+- Task 30 fix-2 RED/GREEN: Schedule-after-drain reinsertion, unchanged-V1 notification timer/probe burst, and stale runtime read desired-mode rollback all observed deterministic RED then GREEN
+- Task 30 fix-2 scope: runner-local scheduling state linearized under `r.mu`; unchanged runtime notification no-op; admission generation conditional publication/retry; Relay matrix comment corrected
+- Task 30 fix-2 implementer gates: all required backend/frontend tests, typecheck and lints PASS
+- Task 30 fix-2 controller gates: seven direct lifecycle regressions, required backend four-package focused, four-package lint, frontend 9 files/40 tests/typecheck/lint, diff/VERSION/generated/migration boundaries PASS
+- Task 30 extra race gate: `UNVERIFIED`; default CGO disabled and explicit CGO retry lacks local `gcc`; required gates unaffected
+- Task 30 status: final same-reviewer re-review pending
