@@ -1091,7 +1091,8 @@ type GatewayGrokConfig struct {
 	FreeQuotaTokenLimit int64 `mapstructure:"free_quota_token_limit"`
 	// FreeQuotaSoftGatePercent stops new scheduling before the nominal limit.
 	FreeQuotaSoftGatePercent int `mapstructure:"free_quota_soft_gate_percent"`
-	// FreeQuotaWindowHours controls the local rolling usage window.
+	// FreeQuotaWindowHours is retained for config compatibility. The free gate
+	// always queries the fixed rolling 24-hour window.
 	FreeQuotaWindowHours int `mapstructure:"free_quota_window_hours"`
 	// FreeQuotaStatsCacheSeconds is the soft-gate stats cache TTL. Hot path never
 	// waits on usage_logs; misses fail open and refresh asynchronously.

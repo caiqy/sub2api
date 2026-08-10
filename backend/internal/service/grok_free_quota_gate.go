@@ -18,7 +18,7 @@ import (
 //   - free_quota_soft_gate_enabled     (bool, default true)
 //   - free_quota_token_limit           (int64, default 500_000)
 //   - free_quota_soft_gate_percent     (int, default 95) — stop scheduling before the nominal limit
-//   - free_quota_window_hours          (int, default 24) — local usage rolling window
+//   - free_quota_window_hours          (legacy compatibility input; free gate is always rolling 24h)
 //   - free_quota_stats_cache_seconds   (int, default 60) — stats cache TTL; hot path never waits on DB
 //
 // Soft-gate applies only to *explicit* free OAuth (subscription_tier/plan_type ==
@@ -50,26 +50,34 @@ type grokFreeQuotaGateCacheEntry struct {
 var grokFreeQuotaGateQueryFailureTotal atomic.Int64
 var grokFreeQuotaGateBlockedTotal atomic.Int64
 
+const (
+	grokFreeQuotaGateWindow          = 24 * time.Hour
+	grokFreeQuotaGateDefaultCacheTTL = time.Minute
+)
+
 func resolveGrokFreeQuotaGateSettings(cfg *config.Config) (grokFreeQuotaGateSettings, bool) {
 	if cfg == nil || !cfg.Gateway.Grok.FreeQuotaSoftGateEnabled {
 		return grokFreeQuotaGateSettings{}, false
 	}
 	limit := cfg.Gateway.Grok.FreeQuotaTokenLimit
 	percent := cfg.Gateway.Grok.FreeQuotaSoftGatePercent
-	windowHours := cfg.Gateway.Grok.FreeQuotaWindowHours
 	cacheSeconds := cfg.Gateway.Grok.FreeQuotaStatsCacheSeconds
-	if limit <= 0 || percent < 1 || percent > 100 || windowHours <= 0 || cacheSeconds < 0 {
+	if limit <= 0 || percent < 1 || percent > 100 {
 		return grokFreeQuotaGateSettings{}, false
 	}
 	gate := calculateGrokFreeQuotaSoftGateTokens(limit, percent)
 	if gate <= 0 {
 		return grokFreeQuotaGateSettings{}, false
 	}
+	cacheTTL := time.Duration(cacheSeconds) * time.Second
+	if cacheTTL <= 0 {
+		cacheTTL = grokFreeQuotaGateDefaultCacheTTL
+	}
 	return grokFreeQuotaGateSettings{
 		limitTokens: limit,
 		gateTokens:  gate,
-		window:      time.Duration(windowHours) * time.Hour,
-		cacheTTL:    time.Duration(cacheSeconds) * time.Second,
+		window:      grokFreeQuotaGateWindow,
+		cacheTTL:    cacheTTL,
 	}, true
 }
 

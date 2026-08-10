@@ -190,6 +190,51 @@ func TestResolveGrokFreeQuotaGateSettingsDefaultsToNinetyFivePercent(t *testing.
 	require.Equal(t, 24*time.Hour, settings.window)
 }
 
+func TestGrokFreeQuotaGateAlwaysQueriesRollingTwentyFourHours(t *testing.T) {
+	cfg := grokFreeQuotaTestConfig()
+	cfg.Gateway.Grok.FreeQuotaWindowHours = 6
+	repo := &grokFreeQuotaUsageRepoStub{stats: map[int64]*usagestats.AccountStats{1: {Tokens: 1}}}
+	var cache sync.Map
+	accounts := []Account{{
+		ID: 1, Platform: PlatformGrok, Type: AccountTypeOAuth,
+		Credentials: map[string]any{"subscription_tier": "free"},
+	}}
+
+	_ = filterGrokFreeQuotaAccountsCore(context.Background(), cfg, repo, &cache, accounts)
+
+	require.Eventually(t, func() bool {
+		repo.mu.Lock()
+		defer repo.mu.Unlock()
+		return repo.calls == 1
+	}, 2*time.Second, 10*time.Millisecond)
+	repo.mu.Lock()
+	start := repo.start
+	repo.mu.Unlock()
+	require.WithinDuration(t, time.Now().UTC().Add(-24*time.Hour), start, time.Second)
+}
+
+func TestGrokFreeQuotaGateZeroCacheTTLRefreshesExpiredOverGateEntry(t *testing.T) {
+	cfg := grokFreeQuotaTestConfig()
+	cfg.Gateway.Grok.FreeQuotaStatsCacheSeconds = 0
+	repo := &grokFreeQuotaUsageRepoStub{stats: map[int64]*usagestats.AccountStats{1: {Tokens: 100_000}}}
+	var cache sync.Map
+	cache.Store(int64(1), grokFreeQuotaGateCacheEntry{
+		tokens: 500_000, checkedAt: time.Now().Add(-2 * time.Minute), known: true,
+	})
+	accounts := []Account{{
+		ID: 1, Platform: PlatformGrok, Type: AccountTypeOAuth,
+		Credentials: map[string]any{"subscription_tier": "free"},
+	}}
+
+	filtered := filterGrokFreeQuotaAccountsCore(context.Background(), cfg, repo, &cache, accounts)
+
+	require.Equal(t, []int64{1}, accountIDs(filtered), "expired entries fail open while refresh runs")
+	require.Eventually(t, func() bool {
+		filtered = filterGrokFreeQuotaAccountsCore(context.Background(), cfg, repo, &cache, accounts)
+		return len(filtered) == 1 && filtered[0].ID == 1
+	}, 2*time.Second, 10*time.Millisecond)
+}
+
 func TestIsExplicitGrokFreeOAuthAccount_OnlyExactFree(t *testing.T) {
 	t.Parallel()
 	require.False(t, isExplicitGrokFreeOAuthAccount(nil))
