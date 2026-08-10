@@ -3,7 +3,10 @@
 package handler
 
 import (
+	"bytes"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -100,6 +103,143 @@ func TestGrokVoice_TTSFailoverUsesSelectedAccountMappedModel(t *testing.T) {
 	require.Len(t, upstream.bodies, 2)
 	require.Equal(t, "first-voice-model", gjson.GetBytes(upstream.bodies[0], "model").String())
 	require.Equal(t, "second-voice-model", gjson.GetBytes(upstream.bodies[1], "model").String())
+}
+
+func TestGrokVoice_STTMultipartFailoverUsesMappedModelAndPreservesAudio(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 4021, Platform: service.PlatformGrok, Status: service.StatusActive, Hydrated: true}
+	accounts := []*service.Account{
+		{
+			ID: 4022, Platform: service.PlatformGrok, Type: service.AccountTypeAPIKey,
+			Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1,
+			Credentials: map[string]any{
+				"api_key": "first-key", "base_url": "https://api.x.ai/v1",
+				"model_mapping": map[string]any{"grok-stt": "first-stt-model"},
+			},
+		},
+		{
+			ID: 4023, Platform: service.PlatformGrok, Type: service.AccountTypeAPIKey,
+			Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 2,
+			Credentials: map[string]any{
+				"api_key": "second-key", "base_url": "https://api.x.ai/v1",
+				"model_mapping": map[string]any{"grok-stt": "second-stt-model"},
+			},
+		},
+	}
+	upstream := &grokMediaRequestRecorder{statuses: []int{http.StatusInternalServerError, http.StatusOK}}
+	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &terminalUsageGrokAccountRepo{openAIRetryAccountRepoStub{accounts: accounts}}, upstream)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	require.NoError(t, writer.WriteField("model", "grok-stt"))
+	require.NoError(t, writer.WriteField("language", "en"))
+	audio, err := writer.CreateFormFile("file", "speech.wav")
+	require.NoError(t, err)
+	_, err = audio.Write([]byte("stt-audio-bytes"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/stt", bytes.NewReader(body.Bytes()))
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	env.router("/stt", func(c *gin.Context) { env.handler.GrokVoice(c, "stt") }).ServeHTTP(recorder, req)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	upstream.mu.Lock()
+	defer upstream.mu.Unlock()
+	require.Equal(t, []int64{4022, 4023}, upstream.accountIDs)
+	require.Len(t, upstream.bodies, 2)
+	for i, wantModel := range []string{"first-stt-model", "second-stt-model"} {
+		model, audioBytes := grokVoiceMultipartModelAndAudio(t, upstream.bodies[i], upstream.contentTypes[i])
+		require.Equal(t, wantModel, model)
+		require.Equal(t, []byte("stt-audio-bytes"), audioBytes)
+	}
+}
+
+func TestForwardGrokVoice_NoModelUsesEndpointWithoutFalseUpstreamModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 4031, Platform: service.PlatformGrok, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{
+		ID: 4032, Platform: service.PlatformGrok, Type: service.AccountTypeAPIKey,
+		Status: service.StatusActive, Schedulable: true, Concurrency: 1,
+		Credentials: map[string]any{"api_key": "voice-key", "base_url": "https://api.x.ai/v1"},
+	}
+	upstream := &grokMediaRequestRecorder{}
+	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &terminalUsageGrokAccountRepo{openAIRetryAccountRepoStub{accounts: []*service.Account{account}}}, upstream)
+
+	for _, tt := range []struct {
+		endpoint string
+		body     string
+	}{
+		{endpoint: "tts", body: `{"text":"hello","language":"en"}`},
+		{endpoint: "custom-voices", body: `{"name":"voice profile"}`},
+	} {
+		t.Run(tt.endpoint, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/"+tt.endpoint, strings.NewReader(tt.body))
+			result, err := env.handler.gatewayService.ForwardGrokVoice(c.Request.Context(), c, account, tt.endpoint, []byte(tt.body), "application/json")
+			require.NoError(t, err)
+			require.Equal(t, tt.endpoint, result.Model)
+			require.Empty(t, result.UpstreamModel)
+		})
+	}
+
+	upstream.mu.Lock()
+	defer upstream.mu.Unlock()
+	for _, body := range upstream.bodies {
+		require.Empty(t, gjson.GetBytes(body, "model").String())
+	}
+}
+
+func TestRecordGrokVoiceUsage_RealtimePreservesMappedUpstreamModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 4041, Platform: service.PlatformGrok, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{
+		ID: 4042, Platform: service.PlatformGrok, Type: service.AccountTypeAPIKey,
+		Status: service.StatusActive, Schedulable: true, Concurrency: 1,
+		Credentials: map[string]any{"api_key": "voice-key", "base_url": "https://api.x.ai/v1"},
+	}
+	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &terminalUsageGrokAccountRepo{openAIRetryAccountRepoStub{accounts: []*service.Account{account}}}, &grokMediaRequestRecorder{})
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/realtime?model=grok-voice-latest", nil)
+	result := &service.OpenAIForwardResult{
+		Model:         "grok-voice-latest",
+		UpstreamModel: "mapped-realtime",
+		AudioUsage:    &service.AudioUsage{Mode: "realtime", DurationOrUnits: 1},
+	}
+
+	env.handler.recordGrokVoiceUsage(c, env.apiKey, account, nil, "realtime", nil, result)
+	usageLog := <-env.usageRepo.created
+	require.Equal(t, "grok-voice-latest", usageLog.Model)
+	require.NotNil(t, usageLog.UpstreamModel)
+	require.Equal(t, "mapped-realtime", *usageLog.UpstreamModel)
+}
+
+func grokVoiceMultipartModelAndAudio(t *testing.T, body []byte, contentType string) (string, []byte) {
+	t.Helper()
+	_, params, err := mime.ParseMediaType(contentType)
+	require.NoError(t, err)
+	reader := multipart.NewReader(bytes.NewReader(body), params["boundary"])
+	var model, audio []byte
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+		data, err := io.ReadAll(part)
+		require.NoError(t, err)
+		switch part.FormName() {
+		case "model":
+			model = data
+		case "file":
+			audio = data
+		}
+		require.NoError(t, part.Close())
+	}
+	return string(model), audio
 }
 
 func TestIsExpectedGrokRealtimeClose(t *testing.T) {

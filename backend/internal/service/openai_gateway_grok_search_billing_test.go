@@ -39,9 +39,10 @@ func TestDoGrokNativeResponsesJSONAppliesSelectedAccountModelMapping(t *testing.
 	}}
 	svc := &GatewayService{httpUpstream: upstream}
 
-	_, err := svc.DoGrokNativeResponsesJSON(context.Background(), account, []byte(`{"model":"grok-4.5","input":"search"}`))
+	_, upstreamModel, err := svc.DoGrokNativeResponsesJSON(context.Background(), account, []byte(`{"model":"grok-4.5","input":"search"}`))
 
 	require.NoError(t, err)
+	require.Equal(t, "mapped-search-model", upstreamModel)
 	require.Equal(t, "mapped-search-model", gjson.GetBytes(upstream.lastBody, "model").String())
 }
 

@@ -207,10 +207,24 @@ func countGrokNativeSearchCallsInOutputArray(output gjson.Result) int {
 		return 0
 	}
 	count := 0
+	seen := make(map[string]struct{})
 	output.ForEach(func(_, item gjson.Result) bool {
-		if isGrokNativeSearchOutputItem(item) {
-			count++
+		if !isGrokNativeSearchOutputItem(item) {
+			return true
 		}
+		key := firstNonEmpty(
+			strings.TrimSpace(item.Get("call_id").String()),
+			strings.TrimSpace(item.Get("id").String()),
+			strings.TrimSpace(item.Get("item.call_id").String()),
+			strings.TrimSpace(item.Get("item.id").String()),
+		)
+		if key != "" {
+			if _, duplicate := seen[key]; duplicate {
+				return true
+			}
+			seen[key] = struct{}{}
+		}
+		count++
 		return true
 	})
 	return count

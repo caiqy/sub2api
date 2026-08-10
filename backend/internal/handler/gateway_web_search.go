@@ -111,6 +111,7 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 	var accountReleaseFunc func()
 	var nativeResp *websearch.SearchResponse
 	var providerName string
+	var upstreamModel string
 	var err error
 
 	// Acquire + release holder for the whole handler (including failover retries).
@@ -159,7 +160,7 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 		account = selected.Account
 		accountReleaseFunc = release
 
-		nativeResp, providerName, err = h.doGrokNativeWebSearch(c.Request.Context(), c, account, req.Query, req.MaxResults)
+		nativeResp, providerName, upstreamModel, err = h.doGrokNativeWebSearch(c.Request.Context(), c, account, req.Query, req.MaxResults)
 		if err == nil {
 			break
 		}
@@ -210,10 +211,11 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 	h.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 		if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 			Result: &service.ForwardResult{
-				RequestID:   searchRequestID,
-				Model:       "grok-web-search",
-				SearchCount: 1,
-				Duration:    0,
+				RequestID:     searchRequestID,
+				Model:         "grok-web-search",
+				UpstreamModel: upstreamModel,
+				SearchCount:   1,
+				Duration:      0,
 			},
 			APIKey:             apiKey,
 			User:               apiKey.User,
@@ -299,7 +301,7 @@ func (h *GatewayHandler) acquireWebSearchAccountSlot(
 
 // doGrokNativeWebSearch executes web search using the Grok account's native capability
 // by calling the responses endpoint with web_search tool, then normalizes sources to unified format.
-func (h *GatewayHandler) doGrokNativeWebSearch(ctx context.Context, c *gin.Context, account *service.Account, query string, maxResults int) (*websearch.SearchResponse, string, error) {
+func (h *GatewayHandler) doGrokNativeWebSearch(ctx context.Context, c *gin.Context, account *service.Account, query string, maxResults int) (*websearch.SearchResponse, string, string, error) {
 	maxResults = normalizeGrokWebSearchMaxResults(maxResults)
 
 	// Build a minimal responses request that triggers Grok web search tool.
@@ -314,9 +316,9 @@ func (h *GatewayHandler) doGrokNativeWebSearch(ctx context.Context, c *gin.Conte
 	}
 	bodyBytes, _ := json.Marshal(searchBody)
 
-	respBytes, err := h.gatewayService.DoGrokNativeResponsesJSON(ctx, account, bodyBytes)
+	respBytes, upstreamModel, err := h.gatewayService.DoGrokNativeResponsesJSON(ctx, account, bodyBytes)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 
 	// Extract sources from Grok responses output.
@@ -326,7 +328,7 @@ func (h *GatewayHandler) doGrokNativeWebSearch(ctx context.Context, c *gin.Conte
 	return &websearch.SearchResponse{
 		Results: results,
 		Query:   query,
-	}, "grok-native", nil
+	}, "grok-native", upstreamModel, nil
 }
 
 func normalizeGrokWebSearchMaxResults(maxResults int) int {

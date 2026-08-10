@@ -5,6 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strings"
@@ -13,7 +16,6 @@ import (
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
 
 // supportedGrokVoiceHTTPEndpoints are xAI Voice HTTP paths we forward as-is.
@@ -23,8 +25,37 @@ var supportedGrokVoiceHTTPEndpoints = map[string]struct{}{
 	"custom-voices": {},
 }
 
-func GrokVoiceRequestModel(body []byte) string {
-	return strings.TrimSpace(gjson.GetBytes(body, "model").String())
+func GrokVoiceRequestModel(body []byte, contentType string) string {
+	if gjson.ValidBytes(body) {
+		return strings.TrimSpace(gjson.GetBytes(body, "model").String())
+	}
+	mediaType, params, err := mime.ParseMediaType(contentType)
+	if err != nil || !strings.EqualFold(mediaType, "multipart/form-data") {
+		return ""
+	}
+	boundary := strings.TrimSpace(params["boundary"])
+	if boundary == "" {
+		return ""
+	}
+	reader := multipart.NewReader(bytes.NewReader(body), boundary)
+	for {
+		part, partErr := reader.NextPart()
+		if partErr == io.EOF {
+			return ""
+		}
+		if partErr != nil {
+			return ""
+		}
+		if part.FormName() == "model" && part.FileName() == "" {
+			model, readErr := io.ReadAll(part)
+			_ = part.Close()
+			if readErr != nil {
+				return ""
+			}
+			return strings.TrimSpace(string(model))
+		}
+		_ = part.Close()
+	}
 }
 
 // ForwardGrokVoice forwards the official xAI Voice HTTP APIs (/tts, /stt, and
@@ -57,7 +88,7 @@ func (s *OpenAIGatewayService) ForwardGrokVoice(ctx context.Context, c *gin.Cont
 			return nil, fmt.Errorf("invalid grok voice endpoint path")
 		}
 	}
-	requestModel := GrokVoiceRequestModel(body)
+	requestModel := GrokVoiceRequestModel(body, contentType)
 	upstreamModel := requestModel
 	var err error
 	if requestModel != "" {
@@ -65,7 +96,7 @@ func (s *OpenAIGatewayService) ForwardGrokVoice(ctx context.Context, c *gin.Cont
 			upstreamModel = mappedModel
 		}
 		if upstreamModel != requestModel {
-			body, err = sjson.SetBytes(body, "model", upstreamModel)
+			body, contentType, err = rewriteOpenAIImagesModel(body, contentType, upstreamModel)
 			if err != nil {
 				return nil, fmt.Errorf("rewrite grok voice account mapped model: %w", err)
 			}
@@ -128,7 +159,7 @@ func (s *OpenAIGatewayService) ForwardGrokVoice(ctx context.Context, c *gin.Cont
 		// Forced durable money-event id so usage_billing_dedup cannot collapse under a reused client id.
 		RequestID:     StableGrokAudioBillingRequestID(upstreamID),
 		Model:         firstNonEmpty(requestModel, baseEndpoint),
-		UpstreamModel: firstNonEmpty(upstreamModel, baseEndpoint),
+		UpstreamModel: upstreamModel,
 		Duration:      time.Since(started),
 		AudioUsage:    audioUsage,
 	}, nil
@@ -153,7 +184,11 @@ func (s *OpenAIGatewayService) ProxyGrokRealtime(ctx context.Context, c *gin.Con
 		return err
 	}
 	u.Scheme = "wss"
-	u.RawQuery = "model=" + url.QueryEscape(firstNonEmpty(model, "grok-voice-latest"))
+	model = firstNonEmpty(model, "grok-voice-latest")
+	if mappedModel := strings.TrimSpace(account.GetMappedModel(model)); mappedModel != "" {
+		model = mappedModel
+	}
+	u.RawQuery = "model=" + url.QueryEscape(model)
 	headers := http.Header{"Authorization": []string{"Bearer " + token}}
 	// Match media/voice HTTP: CLI headers only on CLI proxy hosts.
 	if account.IsGrokOAuth() && isGrokCLIProxyTarget(u.String()) {

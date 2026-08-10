@@ -31,6 +31,19 @@ func TestCountGrokNativeSearchCallsFromJSONBytes_FallsBackWhenNestedOutputNull(t
 	require.Equal(t, 1, countGrokNativeSearchCallsFromJSONBytes(body))
 }
 
+func TestCountGrokNativeSearchCallsFromJSONBytes_DedupsStableIDsButKeepsIDLessCalls(t *testing.T) {
+	t.Parallel()
+	body := []byte(`{"output":[
+		{"type":"web_search_call","call_id":"same-call"},
+		{"type":"web_search_call","call_id":"same-call"},
+		{"type":"x_search_call","id":"same-id"},
+		{"type":"x_search_call","id":"same-id"},
+		{"type":"tool_search_call"},
+		{"type":"tool_search_call"}
+	]}`)
+	require.Equal(t, 4, countGrokNativeSearchCallsFromJSONBytes(body))
+}
+
 func TestCountGrokNativeSearchCallsFromSSEBodyDedups(t *testing.T) {
 	t.Parallel()
 	sse := stringsJoin(

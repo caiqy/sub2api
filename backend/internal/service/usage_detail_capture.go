@@ -200,6 +200,8 @@ func SetUsageUpstreamRequestHeaders(c *gin.Context, req *http.Request) {
 	collector.SetUsageUpstreamRequestHeaders(FormatUsageDetailRequestHeadersText(req))
 }
 
+// SetUsageResponseSnapshot replaces captured response data, including with explicit empty values.
+// The override is terminal, so later response writes are intentionally ignored.
 func SetUsageResponseSnapshot(c *gin.Context, headers, body string) {
 	if c == nil {
 		return

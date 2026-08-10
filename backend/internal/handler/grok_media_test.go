@@ -24,6 +24,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
+	"go.uber.org/zap"
 )
 
 type grokMediaSpoolSwitchReadCloser struct {
@@ -53,6 +54,79 @@ type grokMediaRequestRecorder struct {
 	paths        []string
 	statuses     []int
 	cancel       context.CancelFunc
+}
+
+type grokVideoClaimCache struct {
+	openAIChatCompletionsGatewayCacheStub
+	mu      sync.Mutex
+	claimed map[string]bool
+}
+
+type grokVideoBillingErrorRepo struct{ service.UsageBillingRepository }
+
+func (grokVideoBillingErrorRepo) Apply(context.Context, *service.UsageBillingCommand) (*service.UsageBillingApplyResult, error) {
+	return nil, errors.New("billing write failed")
+}
+
+func (c *grokVideoClaimCache) ClaimGrokVideoBilled(_ context.Context, key string, _ time.Duration) (bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.claimed[key] {
+		return false, nil
+	}
+	c.claimed[key] = true
+	return true, nil
+}
+
+func (c *grokVideoClaimCache) ReleaseGrokVideoBilled(_ context.Context, key string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.claimed, key)
+	return nil
+}
+
+func TestPrepareGrokVideoCompletionBilling_ClaimsOnceAcrossDuplicatePolls(t *testing.T) {
+	cache := &grokVideoClaimCache{claimed: make(map[string]bool)}
+	group := &service.Group{ID: 4041, Platform: service.PlatformGrok, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 4042, Platform: service.PlatformGrok, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "video-key", "base_url": "https://api.x.ai/v1"}}
+	env := newTerminalUsageOpenAIEnvWithUpstreamAndGatewayCache(t, group, &terminalUsageGrokAccountRepo{openAIRetryAccountRepoStub{accounts: []*service.Account{account}}}, &grokMediaRequestRecorder{}, cache)
+	status := &service.OpenAIForwardResult{ResponseID: "video-claim-1", Model: "grok-imagine-video", VideoCount: 1, VideoDurationSeconds: 8}
+	subject := middleware.AuthSubject{UserID: env.apiKey.UserID}
+
+	first := prepareGrokVideoCompletionBilling(context.Background(), env.handler, zap.NewNop(), env.apiKey, subject, status.ResponseID, status)
+	require.NotNil(t, first)
+	require.Equal(t, 1, first.VideoCount)
+	require.Nil(t, prepareGrokVideoCompletionBilling(context.Background(), env.handler, zap.NewNop(), env.apiKey, subject, status.ResponseID, status))
+}
+
+func TestRecordGrokMediaUsage_ReleasesVideoClaimAfterBillingError(t *testing.T) {
+	cache := &grokVideoClaimCache{claimed: make(map[string]bool)}
+	group := &service.Group{ID: 4051, Platform: service.PlatformGrok, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{ID: 4052, Platform: service.PlatformGrok, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "video-key", "base_url": "https://api.x.ai/v1"}}
+	repo := &terminalUsageGrokAccountRepo{openAIRetryAccountRepoStub{accounts: []*service.Account{account}}}
+	cfg := &config.Config{Default: config.DefaultConfig{RateMultiplier: 1}}
+	billingCache := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(billingCache.Stop)
+	concurrency := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
+	gateway := service.NewOpenAIGatewayService(
+		repo, &openAIChatCompletionsUsageLogRepoStub{}, grokVideoBillingErrorRepo{}, nil, nil, nil,
+		cache, cfg, nil, concurrency, service.NewBillingService(cfg, nil), nil, billingCache,
+		&grokMediaRequestRecorder{}, service.NewDeferredService(repo, nil, 0), nil, service.NewGrokTokenProvider(repo, nil),
+	)
+	h := NewOpenAIGatewayHandler(gateway, concurrency, billingCache, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
+	apiKey := &service.APIKey{ID: 4053, UserID: 4054, Status: service.StatusActive, GroupID: &group.ID, Group: group, User: &service.User{ID: 4054, Status: service.StatusActive, Concurrency: 1}}
+	status := &service.OpenAIForwardResult{ResponseID: "video-claim-retry", Model: "grok-imagine-video", VideoCount: 1, VideoDurationSeconds: 8}
+	subject := middleware.AuthSubject{UserID: apiKey.UserID}
+	prepared := prepareGrokVideoCompletionBilling(context.Background(), h, zap.NewNop(), apiKey, subject, status.ResponseID, status)
+	require.NotNil(t, prepared)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/videos/video-claim-retry", nil)
+	recordGrokMediaUsage(c, h, zap.NewNop(), apiKey, subject, nil, account, prepared, "grok-imagine-video", "payload", status.ResponseID)
+
+	reclaimed := prepareGrokVideoCompletionBilling(context.Background(), h, zap.NewNop(), apiKey, subject, status.ResponseID, status)
+	require.NotNil(t, reclaimed, "billing errors must release the video claim for a later poll")
 }
 
 func TestGrokImagesCompositeMultipartUsesResolvedUpstreamModel(t *testing.T) {

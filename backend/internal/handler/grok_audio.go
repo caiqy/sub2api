@@ -181,8 +181,9 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 	failed := map[int64]struct{}{}
 	var last *service.UpstreamFailoverError
 	reqLog := requestLogger(c, "handler.openai_gateway.grok_voice", zap.String("endpoint", endpoint))
-	selectionModel := service.GrokVoiceRequestModel(body)
+	selectionModel := service.GrokVoiceRequestModel(body, contentType)
 	if selectionModel == "" {
+		// No-model Voice routes use this only to select a capable account; it must not reach upstream or usage identity.
 		selectionModel = "grok-4.5"
 	}
 
