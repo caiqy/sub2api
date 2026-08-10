@@ -4,18 +4,18 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Current task: `Task 28: 融合 Grok 媒体、Voice、搜索与网关契约`
-- OpenSpec mapping: `6.3`
-- Stage: `task-complete`
-- Review/fix round: `2/2`
+- Current task: `Task 29: 融合 Grok free gate、冷却与调度阈值`
+- OpenSpec mapping: `6.4`
+- Stage: `implementing`
+- Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
-- Task start HEAD: `67be08211`
-- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-28-brief.md`
-- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-28-report.md`
-- Dependency: Task 27 fixed Grok mapping/password defaults and settings round-trip
-- TDD rule: clear the classified fixture RED; any newly found production gap requires a direct RED before the minimal fix
-- Risk signals: security、settings runtime、global mapping cache、account precedence、API/frontend
-- Hard boundary: mapping missing/empty/false off, explicit true on, account explicit mapping wins, password capability/API always disabled
+- Task start HEAD: `dfb7d8542a9ac3585d30cc36281eed1cd0eb3282`
+- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-29-brief.md`
+- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-29-report.md`
+- Dependency: Task 28 completed Grok media/Voice/search routing, usage identity, snapshots and single-bill contracts
+- TDD rule: baseline first; every concrete compatibility gap requires direct RED before minimal production fix
+- Risk signals: concurrent process-local cooldown stores、runtime settings cache、multi-scheduler selection、frontend settings contract
+- Hard boundary: explicit-free rolling 24h gate only; team+model/account+model isolation; default threshold 100 disabled; subscription exact-operation anchor unchanged
 - Implementer: `ses_016a4ff6affeoRN1EoiY0Sy1px` returned `DONE_WITH_CONCERNS`
 - Implementation commit: `ff58b07e14d563296477c74bfb3573e765bec20c` (parent `3f1fda732af1fb59d32f2afcd6dbba6caf88ab9b`)
 - Genuine RED: paginated UsageLog SQLMock fixtures exposed 59 persisted values versus 61 list scan targets (generated id + has_detail)
