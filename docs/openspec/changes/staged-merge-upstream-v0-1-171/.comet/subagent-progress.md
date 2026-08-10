@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 30: 融合 Channel Monitor V2 与隐私默认`
 - OpenSpec mapping: `6.5`
-- Stage: `task-review`
+- Stage: `blocked`
 - Review/fix round: `2/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `47ea52002c521f12f480df43205b0bb854675eb9`
@@ -181,4 +181,8 @@
 - Task 30 fix-2 implementer gates: all required backend/frontend tests, typecheck and lints PASS
 - Task 30 fix-2 controller gates: seven direct lifecycle regressions, required backend four-package focused, four-package lint, frontend 9 files/40 tests/typecheck/lint, diff/VERSION/generated/migration boundaries PASS
 - Task 30 extra race gate: `UNVERIFIED`; default CGO disabled and explicit CGO retry lacks local `gcc`; required gates unaffected
-- Task 30 status: final same-reviewer re-review pending
+- Task 30 fix-2 final review package: `.superpowers/sdd/review-8a5ca0bfa..425dc0362.diff`
+- Task 30 final reviewer `ses_0142345edffeWULc5mZakLjkAc`: one Important stale concurrent notification/callback generation finding; `Spec: FAIL`, `Quality: CHANGES_REQUIRED`
+- Task 30 remaining blocker: old V1 notification runtime read/callback may complete after newer V2 publish and restore admission desired mode plus V1 scheduled tasks
+- Task 30 review/fix budget: exhausted `2/2`; third focused fix requires explicit user authorization
+- Task 30 status: BLOCKED pending authorization for a third focused fix
