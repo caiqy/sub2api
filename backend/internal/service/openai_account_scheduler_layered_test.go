@@ -357,6 +357,90 @@ func TestLayered_ErrorPenaltyDoesNotApplyToGrokWithoutProbeSupport(t *testing.T)
 	}
 }
 
+func TestLayered_GrokModelCooldownsSkipBlockedCandidates(t *testing.T) {
+	baseID := time.Now().UnixNano()%1_000_000 + 7_000_000
+	team := "layered-grok-team-" + time.Now().Format("150405.000000000")
+	accounts := []Account{
+		{
+			ID: baseID, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0,
+			Credentials: map[string]any{"team_id": team, "model_mapping": map[string]any{"gpt-*": "grok-4.5"}},
+		},
+		{
+			ID: baseID + 1, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 10,
+			Credentials: map[string]any{"model_mapping": map[string]any{"gpt-*": "grok-4.5"}},
+		},
+		{
+			ID: baseID + 2, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 20,
+			Credentials: map[string]any{"model_mapping": map[string]any{"gpt-*": "grok-4.5"}},
+		},
+	}
+	svc := newLayeredTestService(accounts)
+	svc.cfg.RunMode = config.RunModeSimple
+	scheduler := svc.getOpenAIAccountScheduler()
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	until := time.Now().Add(time.Hour)
+	markGrokTeamModelRateLimit(&accounts[0], "grok-4.5", until)
+	markGrokModelQuotaBlock(accounts[1].ID, "grok-4.5", until)
+
+	selection, _, err := scheduler.Select(context.Background(), OpenAIAccountScheduleRequest{
+		Platform:       PlatformGrok,
+		RequestedModel: "gpt-5",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, accounts[2].ID, selection.Account.ID)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func TestLayered_GrokTeamCooldownBypassesSessionSticky(t *testing.T) {
+	baseID := time.Now().UnixNano()%1_000_000 + 9_000_000
+	team := "layered-grok-sticky-" + time.Now().Format("150405.000000000")
+	groupID := int64(920151)
+	stickyAccount := Account{
+		ID: baseID, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, GroupIDs: []int64{groupID},
+		Credentials: map[string]any{"team_id": team},
+	}
+	fallbackAccount := Account{ID: baseID + 1, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 10, GroupIDs: []int64{groupID}}
+	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:layered-grok-cooldown": stickyAccount.ID}}
+	cfg := newOpenAIStickyEnabledTestConfig()
+	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{stickyAccount, fallbackAccount}},
+		cache:              cache,
+		cfg:                cfg,
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+	}
+	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
+
+	markGrokTeamModelRateLimit(&stickyAccount, "grok-4.5", time.Now().Add(time.Hour))
+	selection, decision, err := svc.SelectAccountWithSchedulerForCapability(
+		context.Background(),
+		&groupID,
+		"",
+		"layered-grok-cooldown",
+		"grok-4.5",
+		nil,
+		OpenAIUpstreamTransportAny,
+		OpenAIEndpointCapabilityChatCompletions,
+		false,
+		false,
+		PlatformGrok,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, fallbackAccount.ID, selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.Equal(t, 1, cache.deletedSessions["openai:layered-grok-cooldown"])
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
 // TestLayered_TTFTPenalty_SharedEvaluatorUsesConsistentGroupBaseline verifies
 // that the shared evaluator helpers compute and apply the same group-level TTFT
 // baseline regardless of which account is being evaluated. This covers helper

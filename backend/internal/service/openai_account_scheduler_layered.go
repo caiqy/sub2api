@@ -210,6 +210,12 @@ func (s *layeredOpenAIAccountScheduler) selectBySessionHash(
 		}
 		return nil, req, nil
 	}
+	if normalizeOpenAICompatiblePlatform(req.Platform) == PlatformGrok &&
+		(len(s.service.filterGrokFreeQuotaAccountsForOpenAI(ctx, []Account{*account})) == 0 ||
+			len(s.filterGrokSchedulingAccounts([]Account{*account}, req.RequestedModel)) == 0) {
+		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
+		return nil, req, nil
+	}
 	if reason, errorRate, ttft, shouldEscape := s.shouldEscapeStickyAccount(accountID); shouldEscape {
 		slog.Info("sticky_escape_triggered",
 			"account_id", accountID,
@@ -272,6 +278,12 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 	}
 	if len(accounts) == 0 {
 		return nil, 0, 0, noAvailableOpenAISelectionError(req.RequestedModel, false, "")
+	}
+	if normalizeOpenAICompatiblePlatform(req.Platform) == PlatformGrok {
+		accounts = s.filterGrokSchedulingAccounts(accounts, req.RequestedModel)
+		if len(accounts) == 0 {
+			return nil, 0, 0, noAvailableOpenAISelectionError(req.RequestedModel, false, "")
+		}
 	}
 
 	// 1. 过滤候选
@@ -443,6 +455,15 @@ func (s *layeredOpenAIAccountScheduler) selectByLayeredFilter(
 	}
 
 	return nil, len(candidates), loadSkew, ErrNoAvailableAccounts
+}
+
+func (s *layeredOpenAIAccountScheduler) filterGrokSchedulingAccounts(accounts []Account, requestedModel string) []Account {
+	now := time.Now()
+	accounts = filterGrokTeamModelRateLimitedAccounts(accounts, requestedModel, now)
+	if len(accounts) == 0 {
+		return nil
+	}
+	return filterGrokModelQuotaBlockedAccounts(accounts, requestedModel, now)
 }
 
 func (s *layeredOpenAIAccountScheduler) selectStickyWeightedTopKCandidate(ctx context.Context, available []accountWithLoad, req OpenAIAccountScheduleRequest) *accountWithLoad {
