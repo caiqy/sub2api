@@ -2,10 +2,10 @@
 
 ## Context
 
-Task 35 thorough review found four Important gaps in the v0.1.173 extension:
+Task 35 thorough review initially reported four Important findings in the v0.1.173 extension; the STT item was later scope-corrected by the user as inherited upstream behavior:
 
 1. Voice/Realtime and native web search do not pass a session hash into their existing schedulers.
-2. STT fallback selects request latency before client-duration and body-size evidence.
+2. STT fallback ordering was initially flagged, but the user later confirmed that this staged merge must preserve upstream behavior rather than repair an inherited upstream billing policy.
 3. Grok Realtime forwards prompt-bearing client events without unified security audit.
 4. Native web search returns failover errors without invoking existing Grok cooldown reconciliation.
 
@@ -15,7 +15,7 @@ Task 35 thorough review found four Important gaps in the v0.1.173 extension:
 
 Use the existing scheduler, sticky cache, audit coordinator, rate-limit service and tests. Make two owning remediation commits:
 
-- Task 28: Voice/search session sticky, STT duration fallback and Realtime prompt audit.
+- Task 28: Voice/search session sticky, preservation of upstream STT duration ordering and Realtime prompt audit.
 - Task 29: native search upstream-error reconciliation and cooldown.
 
 No dependency, schema, migration, generated, VERSION or frontend change is needed.
@@ -35,11 +35,11 @@ No dependency, schema, migration, generated, VERSION or frontend change is neede
 For STT billing seconds:
 
 1. Read a positive upstream response duration when present.
-2. Compute the lower bound as `max(client duration_seconds, request-size estimate)`.
-3. Use the larger of upstream duration and that lower bound.
-4. Use request elapsed time only when no response, client or request-size duration evidence exists.
+2. Otherwise use request elapsed time.
+3. Otherwise use positive client `duration_seconds`.
+4. Otherwise use the inherited request-size estimate.
 
-This prevents fast transcription of long audio from underbilling without treating network latency as the primary audio duration.
+This is the exact upstream v0.1.173 ordering. The staged merge does not add a WAV parser or otherwise change the inherited missing-duration billing policy. In particular, client/body estimates must never override an authoritative upstream duration.
 
 ### Realtime Audit
 
@@ -60,14 +60,14 @@ This reuses current account state, Grok team+model 429 cooldown, reset parsing a
 - Sticky cache read/write failure remains best effort and cannot block a request.
 - Audit block prevents only the current prompt-bearing Realtime event and terminates that socket; it does not persist account failure state.
 - Search cooldown reconciliation never replaces the current `UpstreamFailoverError`; the current request may still select another account.
-- STT returns no audio usage only when all duration evidence is non-positive, preserving existing nil behavior.
+- STT keeps the upstream fallback and nil behavior unchanged.
 
 ## TDD And Verification
 
 Add focused RED tests before implementation:
 
 - Voice and web search pass a non-empty standard session hash into selection and reuse an existing sticky account; no voice-ID ownership assertion.
-- STT without response duration uses client/body evidence before elapsed time.
+- STT preserves upstream response/elapsed/client/body precedence and never inflates an upstream duration with request size.
 - Realtime text/instruction events are audited before upstream write, blocked text is not forwarded, and audio-only events bypass prompt extraction.
 - Native search 429 invokes existing reconciliation and makes a subsequent scheduler selection exclude the cooled team/model account.
 
@@ -78,5 +78,6 @@ After each owning commit, run its focused Task 28 or Task 29 canonical bundle an
 - Persistent or TTL voice-ID ownership mapping.
 - New sticky/cache abstraction.
 - New cooldown policy or storage.
+- Fixing inherited upstream STT missing-duration billing heuristics.
 - Realtime audio transcription or audio-content moderation.
 - Pricing, schema, migration, generated, dependency, frontend or VERSION changes.

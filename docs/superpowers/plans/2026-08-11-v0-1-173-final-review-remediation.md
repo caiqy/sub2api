@@ -57,9 +57,9 @@ func TestGatewayHandler_WebSearchReusesStandardSessionStickyAccount(t *testing.T
 Add a table test for the STT estimator and relay/audit tests for Realtime:
 
 ```go
-func TestEstimateGrokVoiceAudioUsage_STTPrefersAudioEvidenceOverElapsed(t *testing.T) {
-    got := estimateGrokVoiceAudioUsage("stt", bytes.Repeat([]byte("a"), 160000), "audio/wav", nil, 500*time.Millisecond)
-    require.InDelta(t, 10.0/3600.0, got.DurationOrUnits, 1e-9)
+func TestEstimateGrokVoiceAudioUsage_STTPreservesUpstreamDurationOverRequestSize(t *testing.T) {
+    got := estimateGrokVoiceAudioUsage("stt", bytes.Repeat([]byte("a"), 160000), "audio/wav", []byte(`{"duration":2}`), 500*time.Millisecond)
+    require.InDelta(t, 2.0/3600.0, got.DurationOrUnits, 1e-9)
 }
 
 func TestGrokRealtimeAuditBodyExtractsPromptTextButNotAudio(t *testing.T) {
@@ -82,10 +82,10 @@ Run from `backend`:
 
 ```powershell
 go test -tags unit ./internal/handler -run '^(TestGrokVoice_ReusesStandardSessionStickyAccount|TestGatewayHandler_WebSearchReusesStandardSessionStickyAccount|TestGrokRealtimeAuditBodyExtractsPromptTextButNotAudio|TestGrokRealtimeAuditUsesIndependentEventStages)$' -count=1
-go test ./internal/service -run '^(TestEstimateGrokVoiceAudioUsage_STTPrefersAudioEvidenceOverElapsed|TestProxyGrokRealtimeGuardBlocksBeforeUpstreamWrite)$' -count=1
+go test ./internal/service -run '^(TestEstimateGrokVoiceAudioUsage_STTPreservesUpstreamDurationOverRequestSize|TestProxyGrokRealtimeGuardBlocksBeforeUpstreamWrite)$' -count=1
 ```
 
-Expected: failures caused by empty session hashes, elapsed-first STT units, absent Realtime prompt extraction/guard, or missing signatures. Preserve the exact RED output in the ignored Task 35 remediation report.
+Expected: failures caused by empty session hashes, request-size inflation of upstream STT duration, absent Realtime prompt extraction/guard, or missing signatures. Preserve the exact RED output in the ignored Task 35 remediation report.
 
 - [ ] **Step 4: Pass standard session hashes into existing schedulers**
 
@@ -99,21 +99,23 @@ sessionHash := h.gatewayService.GenerateSessionHash(c, body)
 
 In `GrokRealtime`, use `GenerateSessionHash(c, nil)` so only existing explicit session signals apply. In `WebSearch`, use the already-wired `openAIGatewayService` to hash the normalized audited query body and pass that hash to `SelectAccountWithLoadAwareness`; nil service falls back to an empty hash.
 
-- [ ] **Step 5: Correct STT duration precedence**
+- [ ] **Step 5: Preserve upstream STT duration precedence**
 
-Replace the elapsed-first branch with the approved order:
+Restore the exact upstream v0.1.173 order after the local remediation overrode it:
 
 ```go
-floor := max(clientSecs, sizeFloor)
-if secs < floor {
-    secs = floor
-}
 if secs <= 0 {
     secs = elapsed.Seconds()
 }
+if secs <= 0 {
+    secs = clientSecs
+}
+if secs <= 0 {
+    secs = sizeFloor
+}
 ```
 
-Keep upstream response duration when it exceeds the floor. Keep nil usage when every value is non-positive. Update the existing comment to describe this order.
+Do not add an audio parser or otherwise repair inherited upstream fallback heuristics. Keep nil usage when every value is non-positive and restore the upstream comment.
 
 - [ ] **Step 6: Guard prompt-bearing Realtime events before forwarding**
 
