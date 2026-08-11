@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 31: 闭合 Grok 定价、生成物与 173 migrations`
 - OpenSpec mapping: `6.6`
-- Stage: `task-start`
+- Stage: `implementation`
 - Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `d4d9e4ab9af1cf26acf7c876be092ca50588483c`
@@ -217,4 +217,10 @@
 - Task 30 fourth-fix decision: user explicitly authorized one minimal frontend correction and final re-review
 - Task 30 fix-4 brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-30-fix-4-brief.md`
 - Task 30 fix-4 boundary: explicit V2 wrapper selection plus obsolete zero-caller formatter deletion and direct tests; no backend/schema/migration/generated/VERSION/dependency change
-- Task 31 status: paused while authorized Task 30 fix-4 executes; Task 31 uncommitted scope remains preserved and unstaged
+- Task 30 fix-4 implementer `ses_011a24226ffe5bLwoUdhLQu6VO`: returned `DONE`; commit `9c51b5c1c fix: require explicit Channel Monitor V2 mode`
+- Task 30 fix-4 RED/GREEN: false combined V2 predicate initially rendered V2, then rendered V1 after wrapper inversion; focused wrapper/formatter 2 files/13 tests PASS
+- Task 30 fix-4 gates: frontend original 38 and expanded 40 tests, typecheck/lint, both backend focused commands, four-package lint, two generates, diff/VERSION/migration/generated boundaries PASS
+- Task 30 fix-4 review package: `.superpowers/sdd/review-dc775f969..9c51b5c1c.diff`
+- Task 30 fix-4 reviewer `ses_01196a966ffenNdHQKS8AEVWWv`: evidence-placement issue corrected; final no Critical/Important/Minor findings, `Spec: PASS`, `Quality: APPROVED`
+- Task 30 status: complete after ownership reconstruction and authorized fix-4; focused `-race` remains the existing local CGO/GCC `UNVERIFIED` residual
+- Task 31 status: resumed; uncommitted implementation scope remains preserved and unstaged
