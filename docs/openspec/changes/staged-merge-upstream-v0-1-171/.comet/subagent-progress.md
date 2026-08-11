@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 31: 闭合 Grok 定价、生成物与 173 migrations`
 - OpenSpec mapping: `6.6`
-- Stage: `blocked`
+- Stage: `task-start`
 - Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `d4d9e4ab9af1cf26acf7c876be092ca50588483c`
@@ -214,4 +214,7 @@
 - Task 30 ownership-repair reviewer `ses_0142345edffeWULc5mZakLjkAc`: one Important disabled-state-to-V2 fallthrough and one Minor unused error-derived success formatter; `Spec: FAIL`, `Quality: CHANGES_REQUIRED`
 - Task 30 re-review adjudication: both findings accepted after direct code/call-site verification; `ChannelStatusView` uses V2 for every non-V1 result including disabled, while `formatMonitorSuccessRateFromError` has no production caller and contradicts authoritative backend success semantics
 - Task 30 review/fix authority: configured `2/2` plus the separately authorized third fix are exhausted; a fourth focused fix requires explicit user authorization
-- Task 31 status: BLOCKED pending Task 30 fourth-fix decision; Task 31 uncommitted scope remains preserved and unstaged
+- Task 30 fourth-fix decision: user explicitly authorized one minimal frontend correction and final re-review
+- Task 30 fix-4 brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-30-fix-4-brief.md`
+- Task 30 fix-4 boundary: explicit V2 wrapper selection plus obsolete zero-caller formatter deletion and direct tests; no backend/schema/migration/generated/VERSION/dependency change
+- Task 31 status: paused while authorized Task 30 fix-4 executes; Task 31 uncommitted scope remains preserved and unstaged
