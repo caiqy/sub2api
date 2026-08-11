@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -307,7 +306,7 @@ func estimateGrokVoiceAudioUsage(endpoint string, reqBody []byte, contentType st
 		}
 		return &AudioUsage{Mode: "tts", DurationOrUnits: float64(chars) / 1_000_000.0}
 	case "stt":
-		// Bill max(upstream duration, client/body floor); elapsed is only a fallback.
+		// Prefer response duration, then elapsed time, client duration, and body size.
 		secs := 0.0
 		if gjson.ValidBytes(respBody) {
 			for _, path := range []string{"duration", "duration_seconds", "audio_duration", "usage.seconds"} {
@@ -328,12 +327,14 @@ func estimateGrokVoiceAudioUsage(endpoint string, reqBody []byte, contentType st
 				clientSecs = v.Float()
 			}
 		}
-		floor := math.Max(clientSecs, sizeFloor)
-		if secs < floor {
-			secs = floor
-		}
 		if secs <= 0 {
 			secs = elapsed.Seconds()
+		}
+		if secs <= 0 {
+			secs = clientSecs
+		}
+		if secs <= 0 {
+			secs = sizeFloor
 		}
 		if secs <= 0 {
 			return nil
