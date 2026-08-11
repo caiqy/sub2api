@@ -6,10 +6,10 @@
 - TDD mode: `tdd`
 - Current task: `Task 31: 闭合 Grok 定价、生成物与 173 migrations`
 - OpenSpec mapping: `6.6`
-- Stage: `blocked`
+- Stage: `implementation`
 - Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
-- Task start HEAD: `eaf4134da87cbdf77305a94867079f17033c39c8`
+- Task start HEAD: `d4d9e4ab9af1cf26acf7c876be092ca50588483c`
 - Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-31-brief.md`
 - Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-31-report.md`
 - Dependency: Task 28 usage dimensions and Task 30 Channel Monitor schema/privacy are complete
@@ -165,23 +165,23 @@
 - Task 30 adjudication: accept mode admission/drain plus V1 hot-update lifecycle, first partial fixed-rollup bucket, frontend authoritative `success_rate`, aggregator Stop join and cleanup label; reject controller-owned progress as implementation scope violation
 - Task 30 fix-1 brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-30-fix-1-brief.md`
 - Task 30 fix-1 agent `ses_01418ac8effeNMeoRxRsMDKjSR`: returned `DONE`
-- Task 30 fix-1 commits: `93e7dcf90 fix: preserve channel monitoring after v0.1.173`; `22473cd57 fix: include partial channel monitor rollups`; `a4e0fbe6c fix: display authoritative channel monitor success rate`
+- Task 30 fix-1 commits: `48fe97c4c fix: preserve channel monitoring after v0.1.173`; `e7f46e389 fix: include partial channel monitor rollups`; `cd85e9134 fix: display authoritative channel monitor success rate`
 - Task 30 fix-1 RED/GREEN: V2 transaction-after-flip, cross-mode overlap, V1 task lifecycle, Stop join, first partial fixed-rollup bucket, and ignored-error success displays all observed direct RED then GREEN
 - Task 30 fix-1 scope: per-SettingService process-local admission/drain, V1 runtime subscription, per-transaction V2 admission, aggregator join, first-bucket overlap query, authoritative frontend success rate, direct tests and cleanup label
 - Task 30 fix-1 implementer gates: required backend focused, lifecycle unit tests, four-package lint, frontend 9 files/40 tests/typecheck/lint, diff/VERSION/generated/migration boundaries PASS
 - Task 30 fix-1 controller gates: required backend four-package focused, four lifecycle regressions, partial-rollup repository behavior, four-package lint, frontend 40 tests/typecheck/lint, diff/VERSION/generated/migration boundaries PASS
-- Task 30 fix-1 review package: `.superpowers/sdd/review-8787b3908..f7d573abf.diff`
+- Task 30 fix-1 review package: `.superpowers/sdd/review-8787b3908..6c4820fc9.diff`
 - Task 30 re-reviewer `ses_0142345edffeWULc5mZakLjkAc`: three Important and one Minor findings; `Spec: FAIL`, `Quality: CHANGES_REQUIRED`
 - Task 30 fix-2 adjudication: accept Schedule/drain lock-domain TOCTOU, admission stale-read desired rollback, unchanged-runtime reload/probe burst, and stale success-rate comment
 - Task 30 fix-2 brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-30-fix-2-brief.md`
 - Task 30 fix-2 agent `ses_013e83e28ffetDQ4p0tc6UVhw4`: returned `DONE`
-- Task 30 fix-2 commit: `367799d9f fix: preserve channel monitoring after v0.1.173`
+- Task 30 fix-2 commit: `d4afb2df6 fix: preserve channel monitoring after v0.1.173`
 - Task 30 fix-2 RED/GREEN: Schedule-after-drain reinsertion, unchanged-V1 notification timer/probe burst, and stale runtime read desired-mode rollback all observed deterministic RED then GREEN
 - Task 30 fix-2 scope: runner-local scheduling state linearized under `r.mu`; unchanged runtime notification no-op; admission generation conditional publication/retry; Relay matrix comment corrected
 - Task 30 fix-2 implementer gates: all required backend/frontend tests, typecheck and lints PASS
 - Task 30 fix-2 controller gates: seven direct lifecycle regressions, required backend four-package focused, four-package lint, frontend 9 files/40 tests/typecheck/lint, diff/VERSION/generated/migration boundaries PASS
 - Task 30 extra race gate: `UNVERIFIED`; default CGO disabled and explicit CGO retry lacks local `gcc`; required gates unaffected
-- Task 30 fix-2 final review package: `.superpowers/sdd/review-8a5ca0bfa..425dc0362.diff`
+- Task 30 fix-2 final review package: `.superpowers/sdd/review-8789c6e2b..9380bb792.diff`
 - Task 30 final reviewer `ses_0142345edffeWULc5mZakLjkAc`: one Important stale concurrent notification/callback generation finding; `Spec: FAIL`, `Quality: CHANGES_REQUIRED`
 - Task 30 remaining blocker: old V1 notification runtime read/callback may complete after newer V2 publish and restore admission desired mode plus V1 scheduled tasks
 - Task 30 review/fix budget: exhausted `2/2`; third focused fix requires explicit user authorization
@@ -189,15 +189,15 @@
 - Task 30 fix-3 brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-30-fix-3-brief.md`
 - Task 30 fix-3 boundary: one per-SettingService notification mutex plus stale-notification/stale-callback deterministic tests; no broader architecture change
 - Task 30 fix-3 agent `ses_0133a89eeffes8FFVt00KWac4r`: returned `DONE_WITH_CONCERNS`
-- Task 30 fix-3 commit: `30bd91d5b fix: serialize channel monitor notifications`
+- Task 30 fix-3 commit: `3157ba442 fix: serialize channel monitor notifications`
 - Task 30 fix-3 RED/GREEN: stale V1 notification read and stale actual runner callback both completed after newer V2 paths and restored old state; per-SettingService serialized notification chain made both deterministic tests GREEN
 - Task 30 fix-3 scope: one private notification mutex covering persisted runtime read, admission publish, listener snapshot and synchronous callbacks; two direct tests only
 - Task 30 fix-3 implementer gates: focused/full Task 30 backend, four-package lint, frontend 9 files/40 tests/typecheck/lint, diff/VERSION/generated/migration boundaries PASS
 - Task 30 fix-3 controller gates: six direct concurrency regressions, required backend four-package focused, four-package lint, frontend 40 tests/typecheck/lint, diff/VERSION/generated/migration boundaries PASS
 - Task 30 residual: focused `-race` remains `UNVERIFIED` because local CGO/GCC toolchain is unavailable
-- Task 30 authorized final review package: `.superpowers/sdd/review-159cd92ac..2b9636f95.diff`
+- Task 30 authorized final review package: `.superpowers/sdd/review-645c80f99..fbce507b8.diff`
 - Task 30 final reviewer `ses_0142345edffeWULc5mZakLjkAc`: no Critical/Important/Minor findings; `Spec: PASS`, `Quality: APPROVED`
-- Task 30 accepted implementation commits: `1aed5304f`, `93e7dcf90`, `22473cd57`, `a4e0fbe6c`, `367799d9f`, `30bd91d5b`
+- Task 30 accepted implementation commits: `1aed5304f`, `48fe97c4c`, `e7f46e389`, `cd85e9134`, `d4afb2df6`, `3157ba442`
 - Task 30 residual: focused `-race` remains `UNVERIFIED` because local CGO/GCC toolchain is unavailable; all required gates PASS
 - Task 30 status: complete; OpenSpec 6.5 complete
 - Task 31 brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-31-brief.md`
@@ -206,7 +206,8 @@
 - Task 31 migration identity: corrected 201/202 names; all 24 authoritative/worktree blobs PASS
 - Task 31 baseline remediation: stale Grok expected default corrected to false; Settings API restored current scheduling-threshold and Channel Monitor mode/privacy fields; group handler pricing field propagation direct RED/GREEN complete
 - Task 31 migration integration: test extended for Grok/composite/OpenAI and migration 220 backup/cleanup/other-pricing semantics; runtime `UNVERIFIED` because local Docker is unavailable
-- Task 31 generated ownership blocker: required first generate changes only `backend/cmd/server/wire_gen.go`, reflecting Task 30 source commit `93e7dcf90` cleanup-label change in `backend/cmd/server/wire.go`; original source-owning commit omitted generated output
-- Task 31 uncommitted scope preserved: handler/API tests, group pricing test, migration integration test and generated wire diff; no SQL/VERSION/dependency changes
-- Task 31 required resolution: rebuild unshared history so `93e7dcf90` source and generated output share one commit, replay descendants, rerun Task 30 review and Task 31 gates; historical rewrite requires explicit user authorization
-- Task 31 status: BLOCKED pending branch-history rewrite decision
+- Task 31 generated ownership root cause: first required generate exposed Task 30 source commit `93e7dcf90` omitting the matching `backend/cmd/server/wire_gen.go` cleanup-label output
+- Task 31 ownership resolution: user explicitly authorized unshared-history reconstruction; corrected source-owning commit is `48fe97c4c`, original history is retained at `safety/20260811-task31-pre-ownership-rewrite`, and replayed branch tree differs only by the expected generated line
+- Task 31 uncommitted scope restored from the dedicated stash: handler/API tests, group pricing test and migration integration test; no SQL/VERSION/dependency changes
+- Task 31 required follow-up: rerun Task 30 review, then rerun Task 31 generate and all current gates
+- Task 31 status: resumed after generated-ownership repair
