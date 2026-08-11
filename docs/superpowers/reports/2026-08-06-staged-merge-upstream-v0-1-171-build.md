@@ -2434,3 +2434,34 @@ Makefile
 fresh_overlap_end
 assertion_exit=0
 ```
+
+## Task 32: v0.1.173 Gate Closure
+
+- Fresh checkpoint: `88be579175606226d6fa79a379e76c869327b9e5`.
+- Initial worktree contained only prohibited untracked
+  `.comet/current-change.json`; no VERSION, SQL migration, generated output,
+  dependency, plan, OpenSpec task, progress, or selector change was made.
+- Remediation commits reviewed before this run: locale `551a4c0a4`, Channel
+  Monitor `78ee57d73`, OAuth fixture `7caa068ef`, settings fixture
+  `b48bd392b`, middleware fixture `de5297e28`, and OpenAI live opt-in
+  `88be57917`.
+
+| Gate | Exit | Fresh result |
+| --- | ---: | --- |
+| Five canonical focused bundles | 0 | PASS; frontend bundle: 11 files, 83 tests. |
+| `make test` | 0 | PASS on serial run; frontend: 251 files, 1,893 tests. |
+| `make VERSION=0.1.171.1 SHELL=D:/scoop/shims/bash.exe build` | 0 | PASS; Vite warnings only. |
+| `golangci-lint run ./...`, frontend lint, frontend typecheck | 0 | PASS; backend lint reported 0 issues. |
+| Two `make -C backend generate` rounds plus Ent/Wire diff checks | 0 | PASS; zero generated diff after each round. |
+| Full frontend and full service unit suites | 0 | PASS: 251 files/1,893 tests; service in 191.291 s. |
+| `git diff --check`, conflict scan, protected boundary diff | 0 | PASS; no tracked conflicts or protected-path diff. |
+| 24 protected migration identity comparisons | 0 | PASS: 24/24 blobs match their authoritative refs. |
+
+- A concurrent first `make test` attempt exhausted the Windows paging file while
+  starting Go's linker; the clean serial rerun passed and is the accepted gate
+  result.
+- Capability matrix: Tasks 27-31 all PASS, `gap=0`.
+- Docker probe: `docker` is not on `PATH`. The migration 220 integration target
+  exits through the harness's Docker-unavailable skip path, so Docker/
+  Testcontainers integration remains `UNVERIFIED`; no remote substitute was
+  used.
