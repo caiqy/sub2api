@@ -4005,11 +4005,48 @@ func TestOpenAIResponsesWebSocketOAuthFailedUsageUsesNormalizedOutboundModel(t *
 	oauthAccount.Type = service.AccountTypeOAuth
 	env.replaceAccount(oauthAccount)
 
+	originalHTTPClient := http.DefaultClient
+	baseTransport := originalHTTPClient.Transport
+	if baseTransport == nil {
+		baseTransport = http.DefaultTransport
+	}
+	var oauthTargetHit atomic.Bool
+	fixtureHTTPClient := *originalHTTPClient
+	fixtureHTTPClient.Transport = openAIWSOAuthHandshakeTransportFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.String() != "https://chatgpt.com/backend-api/codex/responses" {
+			return baseTransport.RoundTrip(req)
+		}
+		oauthTargetHit.Store(true)
+		rewritten := req.Clone(req.Context())
+		rewrittenURL := *req.URL
+		rewrittenURL.Scheme = "http"
+		rewrittenURL.Host = strings.TrimPrefix(env.upstream.URL, "http://")
+		rewritten.URL = &rewrittenURL
+		rewritten.Host = ""
+		return baseTransport.RoundTrip(rewritten)
+	})
+	http.DefaultClient = &fixtureHTTPClient
+	t.Cleanup(func() { http.DefaultClient = originalHTTPClient })
+
 	clientConn := env.dial(t)
 	defer func() { _ = clientConn.CloseNow() }()
 	env.writeMessage(t, clientConn, `{"type":"response.create","model":"gpt-5.6","stream":false}`)
+	require.Equal(t, "response.completed", gjson.GetBytes(env.readMessage(t, clientConn), "type").String())
+	select {
+	case <-usageRepo.created:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first OAuth turn usage was not recorded")
+	}
+	select {
+	case payload := <-env.upstreamMessages:
+		require.Equal(t, "gpt-5.6-sol", gjson.GetBytes(payload, "model").String())
+	case <-time.After(5 * time.Second):
+		t.Fatal("first OAuth turn was not captured upstream")
+	}
+	env.writeMessage(t, clientConn, `{"type":"response.create","model":"gpt-5.6","stream":false}`)
 	env.readCloseError(t, clientConn, coderws.StatusTryAgainLater)
 	env.waitRequestDone(t)
+	require.True(t, oauthTargetHit.Load(), "OAuth websocket handshake did not target ChatGPT Codex")
 
 	var log *service.UsageLog
 	select {
@@ -4032,6 +4069,12 @@ func TestOpenAIResponsesWebSocketOAuthFailedUsageUsesNormalizedOutboundModel(t *
 		t.Fatalf("duplicate failed usage log: %+v", duplicate)
 	default:
 	}
+}
+
+type openAIWSOAuthHandshakeTransportFunc func(*http.Request) (*http.Response, error)
+
+func (f openAIWSOAuthHandshakeTransportFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 func TestOpenAIResponsesWebSocketPassthroughFailedUsageUsesActualFirstFrameModel(t *testing.T) {
