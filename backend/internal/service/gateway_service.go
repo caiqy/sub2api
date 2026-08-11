@@ -1394,6 +1394,15 @@ func (s *GatewayService) DoGrokNativeResponsesJSON(ctx context.Context, account 
 			Reason:     GatewayFailureReason("grok_search_read"),
 		}
 	}
+	if s.rateLimitService != nil {
+		s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBytes, upstreamModel)
+		if resp.StatusCode >= http.StatusBadRequest {
+			(&OpenAIGatewayService{
+				accountRepo:      s.accountRepo,
+				rateLimitService: s.rateLimitService,
+			}).handleGrokAccountUpstreamError(withGrokTeamRateLimitModel(ctx, upstreamModel), account, resp.StatusCode, resp.Header, respBytes)
+		}
+	}
 	if resp.StatusCode >= 400 {
 		msg := string(respBytes)
 		if len(msg) > 200 {

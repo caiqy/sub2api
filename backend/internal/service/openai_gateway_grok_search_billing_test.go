@@ -46,6 +46,37 @@ func TestDoGrokNativeResponsesJSONAppliesSelectedAccountModelMapping(t *testing.
 	require.Equal(t, "mapped-search-model", gjson.GetBytes(upstream.lastBody, "model").String())
 }
 
+func TestDoGrokNativeResponsesJSON_ReconcilesRateLimitBeforeFailover(t *testing.T) {
+	team := "native-search-cooldown-" + time.Now().Format("150405.000000000")
+	account := healthyGrokOAuthGatewayTestAccount(9903, "search-token")
+	account.Credentials["team_id"] = team
+	account.Credentials["model_mapping"] = map[string]any{"grok-4.5": "mapped-search-model"}
+	key := grokTeamModelRateLimitKey(grokTeamFingerprint(team), "mapped-search-model")
+	t.Cleanup(func() {
+		globalGrokTeamModelRateLimits.mu.Lock()
+		delete(globalGrokTeamModelRateLimits.items, key)
+		globalGrokTeamModelRateLimits.mu.Unlock()
+	})
+
+	repo := &mockAccountRepoForPlatform{accountsByID: map[int64]*Account{account.ID: account}}
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Header:     http.Header{"Retry-After": []string{"60"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"rate limited"}}`)),
+	}}
+	svc := &GatewayService{
+		httpUpstream:     upstream,
+		rateLimitService: NewRateLimitService(repo, nil, &config.Config{}, nil, nil),
+	}
+
+	_, _, err := svc.DoGrokNativeResponsesJSON(context.Background(), account, []byte(`{"model":"grok-4.5","input":"search"}`))
+
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusTooManyRequests, failoverErr.StatusCode)
+	require.True(t, isGrokTeamModelRateLimited(account, "mapped-search-model", time.Now()))
+}
+
 func TestForwardGrokResponses_PropagatesSearchCountFromJSON(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"grok","input":"search something","tools":[{"type":"web_search"}],"stream":false}`)
