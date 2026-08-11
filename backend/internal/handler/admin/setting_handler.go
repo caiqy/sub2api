@@ -387,7 +387,9 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		PaymentAlipayMobilePrecreateDeepLink:                         paymentCfg.AlipayMobilePrecreateDeepLink,
 
 		ChannelMonitorEnabled:                settings.ChannelMonitorEnabled,
+		ChannelMonitorMode:                   settings.ChannelMonitorMode,
 		ChannelMonitorDefaultIntervalSeconds: settings.ChannelMonitorDefaultIntervalSeconds,
+		ChannelMonitorHideThroughput:         settings.ChannelMonitorHideThroughput,
 
 		AvailableChannelsEnabled: settings.AvailableChannelsEnabled,
 
@@ -413,6 +415,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 	} else {
 		payload.DefaultPlatformQuotas = platformQuotas
 	}
+	payload.AccountSchedulingThresholds = settings.AccountSchedulingThresholds
 
 	response.Success(c, systemSettingsResponseData(payload, authSourceDefaults))
 }
