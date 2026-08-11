@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 31: 闭合 Grok 定价、生成物与 173 migrations`
 - OpenSpec mapping: `6.6`
-- Stage: `implementation`
+- Stage: `blocked`
 - Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `d4d9e4ab9af1cf26acf7c876be092ca50588483c`
@@ -210,4 +210,8 @@
 - Task 31 ownership resolution: user explicitly authorized unshared-history reconstruction; corrected source-owning commit is `48fe97c4c`, original history is retained at `safety/20260811-task31-pre-ownership-rewrite`, and replayed branch tree differs only by the expected generated line
 - Task 31 uncommitted scope restored from the dedicated stash: handler/API tests, group pricing test and migration integration test; no SQL/VERSION/dependency changes
 - Task 31 required follow-up: rerun Task 30 review, then rerun Task 31 generate and all current gates
-- Task 31 status: resumed after generated-ownership repair
+- Task 30 ownership-repair controller gates: backend unit/focused tests PASS, four-package lint `0 issues`, frontend 9 files/40 tests PASS, typecheck/lint PASS, generate zero diff, VERSION `0.1.171.1`
+- Task 30 ownership-repair reviewer `ses_0142345edffeWULc5mZakLjkAc`: one Important disabled-state-to-V2 fallthrough and one Minor unused error-derived success formatter; `Spec: FAIL`, `Quality: CHANGES_REQUIRED`
+- Task 30 re-review adjudication: both findings accepted after direct code/call-site verification; `ChannelStatusView` uses V2 for every non-V1 result including disabled, while `formatMonitorSuccessRateFromError` has no production caller and contradicts authoritative backend success semantics
+- Task 30 review/fix authority: configured `2/2` plus the separately authorized third fix are exhausted; a fourth focused fix requires explicit user authorization
+- Task 31 status: BLOCKED pending Task 30 fourth-fix decision; Task 31 uncommitted scope remains preserved and unstaged
