@@ -34,7 +34,13 @@ func (s *settingUpdateRepoStub) Set(ctx context.Context, key, value string) erro
 }
 
 func (s *settingUpdateRepoStub) GetMultiple(ctx context.Context, keys []string) (map[string]string, error) {
-	panic("unexpected GetMultiple call")
+	values := make(map[string]string)
+	for _, key := range keys {
+		if value, ok := s.updates[key]; ok {
+			values[key] = value
+		}
+	}
+	return values, nil
 }
 
 func (s *settingUpdateRepoStub) SetMultiple(ctx context.Context, settings map[string]string) error {
