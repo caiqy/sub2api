@@ -224,6 +224,137 @@ WHERE ns.nspname = 'public'
 	requireColumn(t, tx, "user_allowed_groups", "created_at", "timestamp with time zone", 0, false)
 }
 
+func TestMigration220PreservesGrokCompositePricingAndClearsOtherVideoPrices(t *testing.T) {
+	ctx := context.Background()
+	const migration220 = "220_clear_non_grok_video_generation_config.sql"
+
+	// A new database must apply the complete pricing migration sequence.
+	newDB := newEmptyIsolatedMigrationDB(t)
+	require.NoError(t, ApplyMigrations(ctx, newDB))
+	newTx, err := newDB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	for _, name := range []string{
+		"217_group_video_model_prices.sql",
+		"218_group_audio_voice_pricing.sql",
+		"219_group_search_price_per_1k.sql",
+		migration220,
+	} {
+		requireMigrationApplied(t, newTx, name)
+	}
+	require.NoError(t, newTx.Rollback())
+
+	// Simulate an upgrade that has data after 219 but before the cleanup in 220.
+	before220 := fstest.MapFS{}
+	files, err := fs.Glob(dbmigrations.FS, "*.sql")
+	require.NoError(t, err)
+	for _, name := range files {
+		if name == migration220 {
+			continue
+		}
+		content, readErr := dbmigrations.FS.ReadFile(name)
+		require.NoError(t, readErr)
+		before220[name] = &fstest.MapFile{Data: content}
+	}
+
+	upgradeDB := newEmptyIsolatedMigrationDB(t)
+	require.NoError(t, applyMigrationsFS(ctx, upgradeDB, before220))
+
+	insertGroup := func(name, platform, videoPrices string, price480, price720, price1080, search, realtime, tts, stt *float64) int64 {
+		var id int64
+		err := upgradeDB.QueryRowContext(ctx, `
+INSERT INTO groups (
+    name, platform, video_price_480p, video_price_720p, video_price_1080p,
+    video_model_prices, search_price_per_1k, audio_realtime_price_per_min,
+    audio_tts_price_per_million_chars, audio_stt_price_per_hour
+) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10)
+RETURNING id`, name, platform, price480, price720, price1080, videoPrices, search, realtime, tts, stt).Scan(&id)
+		require.NoError(t, err)
+		return id
+	}
+
+	grok480 := 0.05
+	composite720 := 0.14
+	openAI480, openAI720, openAI1080 := 0.09, 0.19, 0.29
+	openAISearch, openAIRealtime, openAITTS, openAISTT := 13.0, 0.11, 16.0, 0.5
+	grokID := insertGroup("grok-220", "grok", `{"grok-imagine-video":{"480p":0.05}}`, &grok480, nil, nil, nil, nil, nil, nil)
+	compositeID := insertGroup("composite-220", "composite", `{"grok-imagine-video-1.5":{"720p":0.14}}`, nil, &composite720, nil, nil, nil, nil, nil)
+	openAIID := insertGroup("openai-220", "openai", `{"legacy":{"1080p":0.29}}`, &openAI480, &openAI720, &openAI1080, &openAISearch, &openAIRealtime, &openAITTS, &openAISTT)
+
+	migrationSQL, err := dbmigrations.FS.ReadFile(migration220)
+	require.NoError(t, err)
+	only220 := fstest.MapFS{migration220: &fstest.MapFile{Data: migrationSQL}}
+	require.NoError(t, applyMigrationsFS(ctx, upgradeDB, only220))
+
+	type videoConfig struct {
+		price480  sql.NullFloat64
+		price720  sql.NullFloat64
+		price1080 sql.NullFloat64
+		model     sql.NullString
+	}
+	loadVideoConfig := func(id int64) videoConfig {
+		var got videoConfig
+		err := upgradeDB.QueryRowContext(ctx, `
+SELECT video_price_480p, video_price_720p, video_price_1080p, video_model_prices::text
+FROM groups WHERE id = $1`, id).Scan(&got.price480, &got.price720, &got.price1080, &got.model)
+		require.NoError(t, err)
+		return got
+	}
+
+	grok := loadVideoConfig(grokID)
+	require.True(t, grok.price480.Valid)
+	require.InDelta(t, grok480, grok.price480.Float64, 1e-12)
+	require.True(t, grok.model.Valid)
+	require.JSONEq(t, `{"grok-imagine-video":{"480p":0.05}}`, grok.model.String)
+
+	composite := loadVideoConfig(compositeID)
+	require.True(t, composite.price720.Valid)
+	require.InDelta(t, composite720, composite.price720.Float64, 1e-12)
+	require.True(t, composite.model.Valid)
+	require.JSONEq(t, `{"grok-imagine-video-1.5":{"720p":0.14}}`, composite.model.String)
+
+	openAI := loadVideoConfig(openAIID)
+	require.False(t, openAI.price480.Valid)
+	require.False(t, openAI.price720.Valid)
+	require.False(t, openAI.price1080.Valid)
+	require.False(t, openAI.model.Valid)
+
+	var gotSearch, gotRealtime, gotTTS, gotSTT float64
+	err = upgradeDB.QueryRowContext(ctx, `
+SELECT search_price_per_1k, audio_realtime_price_per_min,
+       audio_tts_price_per_million_chars, audio_stt_price_per_hour
+FROM groups WHERE id = $1`, openAIID).Scan(&gotSearch, &gotRealtime, &gotTTS, &gotSTT)
+	require.NoError(t, err)
+	require.InDelta(t, openAISearch, gotSearch, 1e-12)
+	require.InDelta(t, openAIRealtime, gotRealtime, 1e-12)
+	require.InDelta(t, openAITTS, gotTTS, 1e-12)
+	require.InDelta(t, openAISTT, gotSTT, 1e-12)
+
+	var backupPlatform string
+	var backup480, backup720, backup1080 sql.NullFloat64
+	var backupModels sql.NullString
+	err = upgradeDB.QueryRowContext(ctx, `
+SELECT platform, video_price_480p, video_price_720p, video_price_1080p, video_model_prices::text
+FROM groups_video_price_backup_220 WHERE group_id = $1`, openAIID).Scan(&backupPlatform, &backup480, &backup720, &backup1080, &backupModels)
+	require.NoError(t, err)
+	require.Equal(t, "openai", backupPlatform)
+	require.InDelta(t, openAI480, backup480.Float64, 1e-12)
+	require.InDelta(t, openAI720, backup720.Float64, 1e-12)
+	require.InDelta(t, openAI1080, backup1080.Float64, 1e-12)
+	require.JSONEq(t, `{"legacy":{"1080p":0.29}}`, backupModels.String)
+
+	tracked := []string{
+		"217_group_video_model_prices.sql",
+		"218_group_audio_voice_pricing.sql",
+		"219_group_search_price_per_1k.sql",
+		migration220,
+	}
+	checksums, count := migrationChecksumsAndCount(t, upgradeDB, tracked)
+	require.NoError(t, applyMigrationsFS(ctx, upgradeDB, only220))
+	actualChecksums, actualCount := migrationChecksumsAndCount(t, upgradeDB, tracked)
+	require.Equal(t, count, actualCount)
+	require.Equal(t, checksums, actualChecksums)
+}
+
 func TestSubscriptionQuotaAdvanceReceiptMigration_IsIdempotentAndUpgradeCompatible(t *testing.T) {
 	db := newEmptyIsolatedMigrationDB(t)
 	ctx := context.Background()
