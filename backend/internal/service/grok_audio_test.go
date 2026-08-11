@@ -202,6 +202,7 @@ func TestEstimateGrokVoiceAudioUsage_STTPreservesUpstreamDurationOverRequestSize
 	bodyWithHighClientDuration = append(bodyWithHighClientDuration, []byte(`"}`)...)
 	bodyWithLowClientDuration := append([]byte(`{"duration_seconds":2,"padding":"`), bytes.Repeat([]byte("a"), 159965)...)
 	bodyWithLowClientDuration = append(bodyWithLowClientDuration, []byte(`"}`)...)
+	bodyWithNegativeClientDuration := []byte(`{"duration_seconds":-2,"padding":"a"}`)
 	bodyOnly := bytes.Repeat([]byte("a"), 160000)
 
 	for _, tt := range []struct {
@@ -218,6 +219,8 @@ func TestEstimateGrokVoiceAudioUsage_STTPreservesUpstreamDurationOverRequestSize
 		{name: "under-reported client duration uses body size floor", reqBody: bodyWithLowClientDuration, wantSecs: 10},
 		{name: "body size fallback", reqBody: bodyOnly, wantSecs: 10},
 		{name: "all evidence non-positive", respBody: []byte(`{"duration":0}`), wantNil: true},
+		{name: "negative response and elapsed", respBody: []byte(`{"duration":-2}`), elapsed: -time.Second, wantNil: true},
+		{name: "negative client duration falls back to body size", reqBody: bodyWithNegativeClientDuration, elapsed: -time.Second, wantSecs: float64(len(bodyWithNegativeClientDuration)) / 16000.0},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			got := estimateGrokVoiceAudioUsage("stt", tt.reqBody, "audio/wav", tt.respBody, tt.elapsed)
