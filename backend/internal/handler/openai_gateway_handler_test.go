@@ -4005,6 +4005,7 @@ func TestOpenAIResponsesWebSocketOAuthFailedUsageUsesNormalizedOutboundModel(t *
 	oauthAccount.Type = service.AccountTypeOAuth
 	env.replaceAccount(oauthAccount)
 
+	// Keep this test sequential while it replaces the process-global default client.
 	originalHTTPClient := http.DefaultClient
 	baseTransport := originalHTTPClient.Transport
 	if baseTransport == nil {
