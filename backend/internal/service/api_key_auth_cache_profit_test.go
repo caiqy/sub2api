@@ -16,6 +16,10 @@ import (
 
 func profitAuthTestAPIKey() *APIKey {
 	groupID := int64(50)
+	searchPrice := 12.5
+	audioRealtimePrice := 0.1
+	audioTTSPrice := 15.75
+	audioSTTPrice := 0.36
 	return &APIKey{
 		ID:      82,
 		UserID:  40,
@@ -40,6 +44,14 @@ func profitAuthTestAPIKey() *APIKey {
 			ProfitControlEnabled: true,
 			ProfitMinMargin:      0.2,
 			ProfitSafetyBuffer:   0.05,
+			VideoModelPrices: map[string]map[string]float64{
+				"grok-imagine-video-1.5": {"720p": 0.14, "1080p": 0.28},
+				"grok-video-2":           {"480p": 0.07},
+			},
+			SearchPricePer1k:             &searchPrice,
+			AudioRealtimePricePerMin:     &audioRealtimePrice,
+			AudioTTSPricePerMillionChars: &audioTTSPrice,
+			AudioSTTPricePerHour:         &audioSTTPrice,
 		},
 	}
 }
@@ -70,6 +82,17 @@ func TestAPIKeyAuthSnapshotProfitControlRoundtrip(t *testing.T) {
 	require.InDelta(t, 0.2, materialized.Group.ProfitMinMargin, 1e-12)
 	require.InDelta(t, 0.05, materialized.Group.ProfitSafetyBuffer, 1e-12)
 	require.InDelta(t, 0.06, materialized.Group.RateMultiplier, 1e-12)
+	require.Equal(t, 0.14, materialized.Group.VideoModelPrices["grok-imagine-video-1.5"]["720p"])
+	require.Equal(t, 0.28, materialized.Group.VideoModelPrices["grok-imagine-video-1.5"]["1080p"])
+	require.Equal(t, 0.07, materialized.Group.VideoModelPrices["grok-video-2"]["480p"])
+	require.NotNil(t, materialized.Group.SearchPricePer1k)
+	require.NotNil(t, materialized.Group.AudioRealtimePricePerMin)
+	require.NotNil(t, materialized.Group.AudioTTSPricePerMillionChars)
+	require.NotNil(t, materialized.Group.AudioSTTPricePerHour)
+	require.InDelta(t, 12.5, *materialized.Group.SearchPricePer1k, 1e-12)
+	require.InDelta(t, 0.1, *materialized.Group.AudioRealtimePricePerMin, 1e-12)
+	require.InDelta(t, 15.75, *materialized.Group.AudioTTSPricePerMillionChars, 1e-12)
+	require.InDelta(t, 0.36, *materialized.Group.AudioSTTPricePerHour, 1e-12)
 
 	// 中间件语义：materialized.Group 进请求 ctx → 门必须按快照配置装上。
 	ctx := context.WithValue(context.Background(), ctxkey.Group, materialized.Group)
