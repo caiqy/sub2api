@@ -198,9 +198,37 @@ func TestProxyGrokRealtimeUsesMappedModelInUpstreamURL(t *testing.T) {
 }
 
 func TestEstimateGrokVoiceAudioUsage_STTPreservesUpstreamDurationOverRequestSize(t *testing.T) {
-	got := estimateGrokVoiceAudioUsage("stt", bytes.Repeat([]byte("a"), 160000), "audio/wav", []byte(`{"duration":2}`), 500*time.Millisecond)
-	require.NotNil(t, got)
-	require.InDelta(t, 2.0/3600.0, got.DurationOrUnits, 1e-9)
+	bodyWithHighClientDuration := append([]byte(`{"duration_seconds":30,"padding":"`), bytes.Repeat([]byte("a"), 159964)...)
+	bodyWithHighClientDuration = append(bodyWithHighClientDuration, []byte(`"}`)...)
+	bodyWithLowClientDuration := append([]byte(`{"duration_seconds":2,"padding":"`), bytes.Repeat([]byte("a"), 159965)...)
+	bodyWithLowClientDuration = append(bodyWithLowClientDuration, []byte(`"}`)...)
+	bodyOnly := bytes.Repeat([]byte("a"), 160000)
+
+	for _, tt := range []struct {
+		name     string
+		reqBody  []byte
+		respBody []byte
+		elapsed  time.Duration
+		wantSecs float64
+		wantNil  bool
+	}{
+		{name: "authoritative response duration", reqBody: bodyWithHighClientDuration, respBody: []byte(`{"duration":2}`), elapsed: 20 * time.Second, wantSecs: 2},
+		{name: "elapsed before client duration", reqBody: bodyWithHighClientDuration, elapsed: 3 * time.Second, wantSecs: 3},
+		{name: "client duration before body size", reqBody: bodyWithHighClientDuration, wantSecs: 30},
+		{name: "under-reported client duration uses body size floor", reqBody: bodyWithLowClientDuration, wantSecs: 10},
+		{name: "body size fallback", reqBody: bodyOnly, wantSecs: 10},
+		{name: "all evidence non-positive", respBody: []byte(`{"duration":0}`), wantNil: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := estimateGrokVoiceAudioUsage("stt", tt.reqBody, "audio/wav", tt.respBody, tt.elapsed)
+			if tt.wantNil {
+				require.Nil(t, got)
+				return
+			}
+			require.NotNil(t, got)
+			require.InDelta(t, tt.wantSecs/3600.0, got.DurationOrUnits, 1e-9)
+		})
+	}
 }
 
 func TestProxyGrokRealtimeGuardBlocksBeforeUpstreamWriteAndWaitsForPumps(t *testing.T) {

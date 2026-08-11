@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -306,7 +307,8 @@ func estimateGrokVoiceAudioUsage(endpoint string, reqBody []byte, contentType st
 		}
 		return &AudioUsage{Mode: "tts", DurationOrUnits: float64(chars) / 1_000_000.0}
 	case "stt":
-		// Prefer response duration, then elapsed time, client duration, and body size.
+		// Prefer response duration when present; do not trust client duration_seconds alone
+		// (under-report would underbill). Floor against body-size heuristic and elapsed.
 		secs := 0.0
 		if gjson.ValidBytes(respBody) {
 			for _, path := range []string{"duration", "duration_seconds", "audio_duration", "usage.seconds"} {
@@ -335,6 +337,14 @@ func estimateGrokVoiceAudioUsage(endpoint string, reqBody []byte, contentType st
 		}
 		if secs <= 0 {
 			secs = sizeFloor
+		}
+		// Cap untrusted client under-report: if client duration is much smaller than
+		// size/elapsed floors, bill the larger of floors (anti underbill).
+		if clientSecs > 0 && secs == clientSecs {
+			floor := math.Max(sizeFloor, elapsed.Seconds())
+			if floor > 0 && clientSecs < floor*0.5 {
+				secs = floor
+			}
 		}
 		if secs <= 0 {
 			return nil
