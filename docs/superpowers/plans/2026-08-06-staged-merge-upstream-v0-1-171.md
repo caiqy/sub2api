@@ -2179,7 +2179,7 @@ if ($task31Paths.Count -gt 0) { Commit-NamedPaths -Message 'fix: preserve pricin
 
 ### Task 32: 运行 v0.1.173 全量门禁并关闭矩阵
 
-- [ ] Task 32: 运行 v0.1.173 全量门禁并关闭矩阵
+- [x] Task 32: 运行 v0.1.173 全量门禁并关闭矩阵
 
 **映射 OpenSpec：**6.7
 

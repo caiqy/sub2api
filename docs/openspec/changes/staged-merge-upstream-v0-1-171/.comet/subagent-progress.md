@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 32: 运行 v0.1.173 全量门禁并关闭矩阵`
 - OpenSpec mapping: `6.7`
-- Stage: `remediation`
+- Stage: `task-complete`
 - Review/fix round: `1/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `96454a7503f3bb02cd9a0a45f9e636b23dabf2d7`
@@ -251,3 +251,12 @@
 - Task 32 locale brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-32-remediation-locale-brief.md`
 - Task 32 Channel Monitor brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-32-remediation-channel-monitor-brief.md`
 - Task 32 status: authorized remediation in progress; ledger remains ineligible until all non-Docker gates PASS and matrix `gap=0`
+- Task 32 accepted remediations: `551a4c0a4` locale paths; `78ee57d73` typed-nil admission/backend-mode stub; `7caa068ef` OAuth WS fixture; `b48bd392b` settings update stub; `de5297e28` middleware settings stub; `88be57917` OpenAI live opt-in; `17356482c` OAuth seam invariant comment
+- Task 32 remediation reviews: locale `ses_011109abeffeqBrH82y9sm0Mar`, Channel Monitor `ses_010a31354ffektLaI6UbGfoHvs`, OAuth fixture `ses_010910b63ffeRVlBNVH93k1aR2`, settings stub `ses_0107efbbbffeFRr6JmYkzA6Rak`, middleware stub `ses_01054ef74ffeKoOELORVANaNc2`, live opt-in `ses_0101c6738ffeT7Vffr5CEBaS6Z`; all final `Spec: PASS`, `Quality: APPROVED`
+- Task 32 final verifier `ses_011449f8effePib4V01F5Hh4M1`: all five canonical bundles, `make test`, intermediate build, backend full lint, frontend lint/typecheck, two-pass generate, full frontend 251/1893, full service, conflicts/boundaries and 24/24 identities PASS; matrix `gap=0`
+- Task 32 ledger commit: `9467938e1 docs: record v0.1.173 gates`
+- Task 32 controller fresh gates at ledger HEAD: 5/5 canonical, serial `make test` (frontend 251/1893 and service PASS), intermediate build, full backend lint `0 issues`, frontend lint/typecheck, two stable generate rounds, conflict/protected boundaries and 24/24 identities PASS
+- Task 32 aggregate reviewer `ses_00fec4432ffe7ADCTKZ07MWjdu`: `Spec: PASS`; one Important stale-progress and one Minor OAuth sequential-invariant documentation finding; both corrected by final routing update and `17356482c`
+- Task 32 aggregate re-review `ses_00fec4432ffe7ADCTKZ07MWjdu`: no Critical/Important/Minor findings; `Spec: PASS`, `Quality: APPROVED`
+- Task 32 Docker residual: Docker absent from PATH and migration 220 integration target exits through explicit skip; runtime remains `UNVERIFIED`, no remote substitute used
+- Task 32 status: complete; OpenSpec 6.7 complete; matrix `gap=0`
