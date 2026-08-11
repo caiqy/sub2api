@@ -2124,7 +2124,7 @@ if ($task30Paths.Count -gt 0) { Commit-NamedPaths -Message 'fix: preserve channe
 
 ### Task 31: 闭合 Grok 定价、生成物与 173 migrations
 
-- [ ] Task 31: 闭合 Grok 定价、生成物与 173 migrations
+- [x] Task 31: 闭合 Grok 定价、生成物与 173 migrations
 
 **映射 OpenSpec：**6.6
 

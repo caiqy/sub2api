@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 31: 闭合 Grok 定价、生成物与 173 migrations`
 - OpenSpec mapping: `6.6`
-- Stage: `blocked`
+- Stage: `task-complete`
 - Review/fix round: `1/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `d4d9e4ab9af1cf26acf7c876be092ca50588483c`
@@ -231,4 +231,12 @@
 - Task 31 reviewer `ses_0116522b8ffeAYOtvNPZ9qSkMb`: one Important scope finding and one Minor auth-cache test-evidence gap; `Spec: FAIL`, `Quality: CHANGES_REQUIRED`
 - Task 31 review adjudication: accepted; Settings handler and API snapshot changes belong to prior policy tasks and cannot remain inside the Task 31 commit, while auth cache needs a direct five-field characterization test
 - Task 31 required resolution: reconstruct only latest unshared commit into a separately reviewed Settings API baseline-prerequisite commit plus a pure Task 31 commit, then add/review the auth-cache test; history rewrite and cross-task prerequisite require explicit user authorization
-- Task 31 status: BLOCKED pending latest-commit split authorization
+- Task 31 scope-split decision: user explicitly authorized latest unshared history reconstruction and the separate Settings API baseline prerequisite; original history retained at `safety/20260811-task31-pre-scope-split`
+- Settings API baseline prerequisite: `965497bdc fix: restore settings API contracts after v0.1.173`; package `.superpowers/sdd/review-853ca4a23..965497bdc.diff`; reviewer `ses_0115b5e5cffeZ1lXvguoKEU1yd` no findings, `Spec: PASS`, `Quality: APPROVED`
+- Task 31 accepted implementation: `205a47b6b fix: preserve pricing and migrations after v0.1.173`; test fix `e64edbc47 test: cover auth cache pricing roundtrip`
+- Task 31 corrected review packages: `.superpowers/sdd/review-965497bdc..205a47b6b.diff` and `.superpowers/sdd/review-99673e8a7..e64edbc47.diff`
+- Task 31 final reviewer `ses_0116522b8ffeAYOtvNPZ9qSkMb`: no Critical/Important/Minor findings; `Spec: PASS`, `Quality: APPROVED`
+- Task 31 controller fresh gates: filtered backend baseline, handler/auth-cache direct tests, frontend 3 files/12 tests, typecheck/lint, relevant backend lint, two-pass generate, 24/24 migration identity, SQL/VERSION/generated/diff boundaries PASS
+- Task 31 migration integration: exact top-level command compiled but TestMain skipped because Docker is unavailable; migration 220 runtime remains `UNVERIFIED`
+- Task 31 non-blocking residuals: full frontend locale-key and full service Channel Monitor failures have no Task 31 diff and are deferred to later full verification/owning scope
+- Task 31 status: complete; OpenSpec 6.6 complete
