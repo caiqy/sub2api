@@ -6,8 +6,8 @@
 - TDD mode: `tdd`
 - Current task: `Task 31: 闭合 Grok 定价、生成物与 173 migrations`
 - OpenSpec mapping: `6.6`
-- Stage: `implementation`
-- Review/fix round: `0/2`
+- Stage: `blocked`
+- Review/fix round: `1/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `d4d9e4ab9af1cf26acf7c876be092ca50588483c`
 - Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-31-brief.md`
@@ -224,3 +224,11 @@
 - Task 30 fix-4 reviewer `ses_01196a966ffenNdHQKS8AEVWWv`: evidence-placement issue corrected; final no Critical/Important/Minor findings, `Spec: PASS`, `Quality: APPROVED`
 - Task 30 status: complete after ownership reconstruction and authorized fix-4; focused `-race` remains the existing local CGO/GCC `UNVERIFIED` residual
 - Task 31 status: resumed; uncommitted implementation scope remains preserved and unstaged
+- Task 31 resumed implementer `ses_01323c59effeR9bqNA8Bjw3AB7`: returned `DONE_WITH_CONCERNS`; commit `af8a97768 fix: preserve pricing and migrations after v0.1.173`
+- Task 31 resumed gates: filtered backend baseline, direct pricing regression, frontend 3 files/12 tests, typecheck/lint, relevant backend lint, two-pass generate and boundaries PASS; Docker-backed migration runtime remains `UNVERIFIED`
+- Task 31 extra non-required suites: full frontend has two pre-existing scheduling locale-key failures; full service has four Channel Monitor timing failures and one stale `GetMultiple` mock panic, with no Task 31 diff in those paths
+- Task 31 review package: `.superpowers/sdd/review-853ca4a23..af8a97768.diff`
+- Task 31 reviewer `ses_0116522b8ffeAYOtvNPZ9qSkMb`: one Important scope finding and one Minor auth-cache test-evidence gap; `Spec: FAIL`, `Quality: CHANGES_REQUIRED`
+- Task 31 review adjudication: accepted; Settings handler and API snapshot changes belong to prior policy tasks and cannot remain inside the Task 31 commit, while auth cache needs a direct five-field characterization test
+- Task 31 required resolution: reconstruct only latest unshared commit into a separately reviewed Settings API baseline-prerequisite commit plus a pure Task 31 commit, then add/review the auth-cache test; history rewrite and cross-task prerequisite require explicit user authorization
+- Task 31 status: BLOCKED pending latest-commit split authorization
