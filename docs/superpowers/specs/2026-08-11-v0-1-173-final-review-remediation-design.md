@@ -36,7 +36,7 @@ For STT billing seconds:
 
 1. Read a positive upstream response duration when present.
 2. Otherwise use request elapsed time.
-3. Otherwise use positive client `duration_seconds`.
+3. Otherwise use positive client `duration_seconds`, retaining upstream's under-report safeguard: when that client value is less than half of the larger request-size/elapsed estimate, use the estimate instead.
 4. Otherwise use the inherited request-size estimate.
 
 This is the exact upstream v0.1.173 ordering. The staged merge does not add a WAV parser or otherwise change the inherited missing-duration billing policy. In particular, client/body estimates must never override an authoritative upstream duration.

@@ -113,9 +113,15 @@ if secs <= 0 {
 if secs <= 0 {
     secs = sizeFloor
 }
+if clientSecs > 0 && secs == clientSecs {
+    floor := max(sizeFloor, elapsed.Seconds())
+    if floor > 0 && clientSecs < floor*0.5 {
+        secs = floor
+    }
+}
 ```
 
-Do not add an audio parser or otherwise repair inherited upstream fallback heuristics. Keep nil usage when every value is non-positive and restore the upstream comment.
+Do not add an audio parser or otherwise repair inherited upstream fallback heuristics, including the client under-report safeguard. Keep nil usage when every value is non-positive and restore the upstream comment.
 
 - [ ] **Step 6: Guard prompt-bearing Realtime events before forwarding**
 
