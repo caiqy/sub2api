@@ -587,6 +587,9 @@ func admitChannelMonitorMode(ctx context.Context, settings channelMonitorRuntime
 	if settings == nil {
 		return func() {}, true
 	}
+	if settingService, ok := settings.(*SettingService); ok && settingService == nil {
+		return func() {}, true
+	}
 	if provider, ok := settings.(channelMonitorModeAdmissionProvider); ok {
 		return provider.admitChannelMonitorMode(ctx, mode)
 	}
