@@ -4,18 +4,18 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Current task: `Task 33: 将最终版本更新为 0.1.173.1`
+- Current task: `Task 34: 在最终 173 HEAD 重跑门禁并验证四段拓扑`
 - OpenSpec mapping: `6.8`
-- Stage: `task-complete`
+- Stage: `task-start`
 - Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
-- Task start HEAD: `39e70df96888b54ec540593d37a20f516d6bab27`
-- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-33-brief.md`
-- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-33-report.md`
-- Dependency: Task 32 and OpenSpec 6.7 are complete with matrix `gap=0`
-- TDD rule: not applicable to the one-line version authority update; Task 34 performs fresh post-commit verification
-- Risk signals: wrong pre-version, extra file in commit, process version, or stale Task 32 evidence reused after bump
-- Hard boundary: only `backend/cmd/server/VERSION`; no product/generated/migration/dependency/selector edits
+- Task start HEAD: `36d12f9c0653862cdb82cc942668db1cc4a33ec0`
+- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-34-brief.md`
+- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-34-report.md`
+- Dependency: Tasks 32-33 complete; VERSION committed as `0.1.173.1`
+- TDD rule: verification-only; any failure blocks and returns to the owning task instead of being fixed here
+- Risk signals: stale pre-bump evidence, full gate failure, generated drift, wrong merge second parent, duplicate merge node, migration identity mismatch or Docker skip misreported as PASS
+- Hard boundary: no file modifications or commits; no remote integration
 - Implementer: `ses_016a4ff6affeoRN1EoiY0Sy1px` returned `DONE_WITH_CONCERNS`
 - Implementation commit: `ff58b07e14d563296477c74bfb3573e765bec20c` (parent `3f1fda732af1fb59d32f2afcd6dbba6caf88ab9b`)
 - Genuine RED: paginated UsageLog SQLMock fixtures exposed 59 persisted values versus 61 list scan targets (generated id + has_detail)
@@ -266,3 +266,6 @@
 - Task 33 commit: `8f91a80f2 chore: bump version to 0.1.173.1`; exactly one file changed
 - Task 33 verification: committed VERSION is `0.1.173.1`; no intermediate `0.1.172.1` was created; worktree only prohibited selector
 - Task 33 status: complete; OpenSpec 6.8 remains pending Tasks 34-35 final gates/topology/review/report
+- Task 34 brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-34-brief.md`
+- Task 34 start HEAD: `36d12f9c0653862cdb82cc942668db1cc4a33ec0`
+- Task 34 status: final gates, four-stage topology, 24 committed migration identities and Docker-conditional integration pending
