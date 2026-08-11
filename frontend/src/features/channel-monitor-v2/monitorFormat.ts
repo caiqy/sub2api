@@ -73,10 +73,6 @@ export function formatMonitorSuccessRate(successRequests: number, requestCount: 
   return formatMonitorPercent(successRequests / requestCount)
 }
 
-export function formatMonitorSuccessRateFromError(errorRate: number): string {
-  return formatMonitorPercent(1 - (errorRate || 0))
-}
-
 /**
  * Map continuous 0–100 score to 11 fine bands for multi-stop green→yellow→red.
  * score10 = best (green), score0 = worst (red).
