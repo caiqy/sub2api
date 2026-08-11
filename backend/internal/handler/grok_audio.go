@@ -12,6 +12,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	coderws "github.com/coder/websocket"
@@ -90,24 +91,16 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 	defer func() { _ = conn.CloseNow() }()
 
 	subject, _ := middleware2.GetAuthSubjectFromContext(c)
-	auditBlocked := errors.New("grok realtime event blocked by security audit")
-	eventGuard := func(event []byte) error {
-		auditBody := grokRealtimeAuditBody(event)
-		if len(auditBody) == 0 {
-			return nil
-		}
-		if decision := h.checkSecurityAuditStage(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, model, auditBody, "grok_realtime_turn"); decision != nil && !decision.AllowNextStage {
-			return auditBlocked
-		}
-		return nil
-	}
+	eventGuard := h.grokRealtimeEventGuard(c, reqLog, apiKey, subject, model)
 	started := time.Now()
 	upstreamModel, proxyErr := h.gatewayService.ProxyGrokRealtime(c.Request.Context(), c, conn, selection.Account, token, model, eventGuard)
 	elapsed := time.Since(started)
 	if proxyErr != nil {
 		reqLog.Info("grok_realtime.proxy_failed", zap.Error(proxyErr))
-		if errors.Is(proxyErr, auditBlocked) {
-			_ = conn.Close(coderws.StatusPolicyViolation, "Request blocked by content policy")
+		var auditErr *grokRealtimeAuditTermination
+		if errors.As(proxyErr, &auditErr) {
+			status, reason := grokRealtimeAuditClose(auditErr.decision)
+			_ = conn.Close(status, reason)
 			return
 		}
 		if !isExpectedGrokRealtimeClose(proxyErr) {
@@ -140,6 +133,51 @@ func isExpectedGrokRealtimeClose(err error) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+type grokRealtimeAuditTermination struct {
+	decision *securityaudit.Decision
+}
+
+func (e *grokRealtimeAuditTermination) Error() string {
+	if e == nil {
+		return "grok realtime audit terminated"
+	}
+	return securityAuditWSCloseReason(e.decision)
+}
+
+func grokRealtimeAuditClose(decision *securityaudit.Decision) (coderws.StatusCode, string) {
+	if decision != nil && (decision.Kind == securityaudit.DecisionBlock || (decision.Legacy != nil && decision.Legacy.Blocked)) {
+		return coderws.StatusPolicyViolation, securityAuditWSCloseReason(decision)
+	}
+	return securityAuditWSCloseStatus(decision), securityAuditWSCloseReason(decision)
+}
+
+func (h *OpenAIGatewayHandler) grokRealtimeEventGuard(
+	c *gin.Context,
+	reqLog *zap.Logger,
+	apiKey *service.APIKey,
+	subject middleware2.AuthSubject,
+	model string,
+) func(context.Context, []byte) error {
+	if h == nil || c == nil {
+		return nil
+	}
+	auditContext := c.Copy()
+	return func(relayCtx context.Context, event []byte) error {
+		auditBody := grokRealtimeAuditBody(event)
+		if len(auditBody) == 0 {
+			return nil
+		}
+		eventContext := auditContext.Copy()
+		if eventContext.Request != nil {
+			eventContext.Request = eventContext.Request.Clone(relayCtx)
+		}
+		if decision := h.checkSecurityAuditStage(eventContext, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, model, auditBody, "grok_realtime_turn"); decision != nil && !decision.AllowNextStage {
+			return &grokRealtimeAuditTermination{decision: decision}
+		}
+		return nil
 	}
 }
 

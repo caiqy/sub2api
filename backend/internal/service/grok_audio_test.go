@@ -98,7 +98,8 @@ type grokVoiceRealtimeProxyResult struct {
 }
 
 type grokVoiceRealtimeGuardTestConn struct {
-	writes int
+	writes     int
+	readExited chan struct{}
 }
 
 func (c *grokVoiceRealtimeGuardTestConn) WriteJSON(context.Context, any) error {
@@ -106,8 +107,11 @@ func (c *grokVoiceRealtimeGuardTestConn) WriteJSON(context.Context, any) error {
 	return nil
 }
 
-func (*grokVoiceRealtimeGuardTestConn) ReadMessage(ctx context.Context) ([]byte, error) {
+func (c *grokVoiceRealtimeGuardTestConn) ReadMessage(ctx context.Context) ([]byte, error) {
 	<-ctx.Done()
+	if c.readExited != nil {
+		close(c.readExited)
+	}
 	return nil, ctx.Err()
 }
 
@@ -161,14 +165,41 @@ func TestProxyGrokRealtimeUsesMappedModelInUpstreamURL(t *testing.T) {
 }
 
 func TestEstimateGrokVoiceAudioUsage_STTPrefersAudioEvidenceOverElapsed(t *testing.T) {
-	got := estimateGrokVoiceAudioUsage("stt", bytes.Repeat([]byte("a"), 160000), "audio/wav", nil, 500*time.Millisecond)
-	require.InDelta(t, 10.0/3600.0, got.DurationOrUnits, 1e-9)
+	bodySizeFloor := append([]byte(`{"duration_seconds":2,"padding":"`), bytes.Repeat([]byte("a"), 159965)...)
+	bodySizeFloor = append(bodySizeFloor, []byte(`"}`)...)
+	bodyWithClientDuration := append([]byte(`{"duration_seconds":30,"padding":"`), bytes.Repeat([]byte("a"), 159965)...)
+	bodyWithClientDuration = append(bodyWithClientDuration, []byte(`"}`)...)
+
+	for _, tt := range []struct {
+		name     string
+		reqBody  []byte
+		respBody []byte
+		elapsed  time.Duration
+		wantSecs float64
+		wantNil  bool
+	}{
+		{name: "larger upstream duration", reqBody: bodyWithClientDuration, respBody: []byte(`{"duration":45}`), elapsed: 500 * time.Millisecond, wantSecs: 45},
+		{name: "body size exceeds client duration", reqBody: bodySizeFloor, elapsed: 500 * time.Millisecond, wantSecs: 10},
+		{name: "client duration exceeds body size", reqBody: bodyWithClientDuration, elapsed: 500 * time.Millisecond, wantSecs: 30},
+		{name: "elapsed fallback", elapsed: 2500 * time.Millisecond, wantSecs: 2.5},
+		{name: "all non-positive", respBody: []byte(`{"duration":0}`), wantNil: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := estimateGrokVoiceAudioUsage("stt", tt.reqBody, "audio/wav", tt.respBody, tt.elapsed)
+			if tt.wantNil {
+				require.Nil(t, got)
+				return
+			}
+			require.NotNil(t, got)
+			require.InDelta(t, tt.wantSecs/3600.0, got.DurationOrUnits, 1e-9)
+		})
+	}
 }
 
-func TestProxyGrokRealtimeGuardBlocksBeforeUpstreamWrite(t *testing.T) {
+func TestProxyGrokRealtimeGuardBlocksBeforeUpstreamWriteAndWaitsForPumps(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	sentinel := errors.New("blocked realtime event")
-	upstream := &grokVoiceRealtimeGuardTestConn{}
+	upstream := &grokVoiceRealtimeGuardTestConn{readExited: make(chan struct{})}
 	svc := &OpenAIGatewayService{openaiWSPassthroughDialer: &grokVoiceRealtimeGuardTestDialer{conn: upstream}}
 	account := &Account{Platform: PlatformGrok, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "voice-key"}}
 	result := make(chan grokVoiceRealtimeProxyResult, 1)
@@ -179,7 +210,10 @@ func TestProxyGrokRealtimeGuardBlocksBeforeUpstreamWrite(t *testing.T) {
 			return
 		}
 		defer func() { _ = client.CloseNow() }()
-		model, proxyErr := svc.ProxyGrokRealtime(r.Context(), nil, client, account, "token", "grok-voice-latest", func([]byte) error { return sentinel })
+		model, proxyErr := svc.ProxyGrokRealtime(r.Context(), nil, client, account, "token", "grok-voice-latest", func(relayCtx context.Context, _ []byte) error {
+			require.NotNil(t, relayCtx)
+			return sentinel
+		})
 		result <- grokVoiceRealtimeProxyResult{model: model, err: proxyErr}
 	}))
 	defer server.Close()
@@ -194,4 +228,9 @@ func TestProxyGrokRealtimeGuardBlocksBeforeUpstreamWrite(t *testing.T) {
 	returned := <-result
 	require.ErrorIs(t, returned.err, sentinel)
 	require.Zero(t, upstream.writes)
+	select {
+	case <-upstream.readExited:
+	case <-time.After(time.Second):
+		t.Fatal("upstream-to-client pump did not exit before relay return")
+	}
 }

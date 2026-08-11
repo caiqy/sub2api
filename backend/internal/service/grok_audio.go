@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	coderws "github.com/coder/websocket"
@@ -169,7 +170,7 @@ func (s *OpenAIGatewayService) ForwardGrokVoice(ctx context.Context, c *gin.Cont
 // ProxyGrokRealtime relays JSON Realtime events to xAI's native Voice WS.
 // Audio is carried as base64 inside JSON events, so preserving the JSON bytes
 // is sufficient and avoids translating protocol event types.
-func (s *OpenAIGatewayService) ProxyGrokRealtime(ctx context.Context, c *gin.Context, client *coderws.Conn, account *Account, token, model string, eventGuard func([]byte) error) (string, error) {
+func (s *OpenAIGatewayService) ProxyGrokRealtime(ctx context.Context, c *gin.Context, client *coderws.Conn, account *Account, token, model string, eventGuard func(context.Context, []byte) error) (string, error) {
 	if s == nil || client == nil || account == nil {
 		return "", fmt.Errorf("realtime service, client, and account are required")
 	}
@@ -210,31 +211,40 @@ func (s *OpenAIGatewayService) ProxyGrokRealtime(ctx context.Context, c *gin.Con
 	}
 	defer func() { _ = upstream.Close() }()
 
-	ctx, cancel := context.WithCancel(ctx)
+	relayCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	errCh := make(chan error, 2)
+	type relayExit struct {
+		err   error
+		guard bool
+	}
+	exits := make(chan relayExit, 2)
+	var pumps sync.WaitGroup
 
 	// Upstream → client
+	pumps.Add(1)
 	go func() {
+		defer pumps.Done()
 		for {
-			msg, readErr := upstream.ReadMessage(ctx)
+			msg, readErr := upstream.ReadMessage(relayCtx)
 			if readErr != nil {
-				errCh <- readErr
+				exits <- relayExit{err: readErr}
 				return
 			}
-			if writeErr := client.Write(ctx, coderws.MessageText, msg); writeErr != nil {
-				errCh <- writeErr
+			if writeErr := client.Write(relayCtx, coderws.MessageText, msg); writeErr != nil {
+				exits <- relayExit{err: writeErr}
 				return
 			}
 		}
 	}()
 
 	// Client → upstream (JSON events only)
+	pumps.Add(1)
 	go func() {
+		defer pumps.Done()
 		for {
-			kind, msg, readErr := client.Read(ctx)
+			kind, msg, readErr := client.Read(relayCtx)
 			if readErr != nil {
-				errCh <- readErr
+				exits <- relayExit{err: readErr}
 				return
 			}
 			if kind != coderws.MessageText && kind != coderws.MessageBinary {
@@ -242,23 +252,35 @@ func (s *OpenAIGatewayService) ProxyGrokRealtime(ctx context.Context, c *gin.Con
 			}
 			var raw json.RawMessage
 			if unmarshalErr := json.Unmarshal(msg, &raw); unmarshalErr != nil {
-				errCh <- fmt.Errorf("invalid realtime event: %w", unmarshalErr)
+				exits <- relayExit{err: fmt.Errorf("invalid realtime event: %w", unmarshalErr)}
 				return
 			}
 			if eventGuard != nil {
-				if guardErr := eventGuard(msg); guardErr != nil {
-					errCh <- guardErr
+				if guardErr := eventGuard(relayCtx, msg); guardErr != nil {
+					exits <- relayExit{err: guardErr, guard: true}
 					return
 				}
 			}
-			if writeErr := upstream.WriteJSON(ctx, raw); writeErr != nil {
-				errCh <- writeErr
+			if writeErr := upstream.WriteJSON(relayCtx, raw); writeErr != nil {
+				exits <- relayExit{err: writeErr}
 				return
 			}
 		}
 	}()
 
-	return model, <-errCh
+	// Both pumps must finish before the handler resumes and releases its Gin context.
+	first := <-exits
+	cancel()
+	_ = upstream.Close()
+	second := <-exits
+	pumps.Wait()
+	if first.guard {
+		return model, first.err
+	}
+	if second.guard {
+		return model, second.err
+	}
+	return model, first.err
 }
 
 // estimateGrokVoiceAudioUsage derives billing units from the request/response.
@@ -285,7 +307,7 @@ func estimateGrokVoiceAudioUsage(endpoint string, reqBody []byte, contentType st
 		}
 		return &AudioUsage{Mode: "tts", DurationOrUnits: float64(chars) / 1_000_000.0}
 	case "stt":
-		// Prefer response duration, then client/body audio evidence; elapsed is only a fallback.
+		// Bill max(upstream duration, client/body floor); elapsed is only a fallback.
 		secs := 0.0
 		if gjson.ValidBytes(respBody) {
 			for _, path := range []string{"duration", "duration_seconds", "audio_duration", "usage.seconds"} {

@@ -29,6 +29,33 @@ type grokRealtimeAuditPromptEngine struct {
 	enqueues int
 }
 
+type grokRealtimeAuditDecisionEngine struct {
+	mu       sync.Mutex
+	decision *securityaudit.PromptDecision
+	ctx      context.Context
+}
+
+func (*grokRealtimeAuditDecisionEngine) EffectiveMode() securityaudit.Mode {
+	return securityaudit.ModeBlocking
+}
+
+func (*grokRealtimeAuditDecisionEngine) Enqueue(context.Context, securityaudit.Request) error {
+	return nil
+}
+
+func (p *grokRealtimeAuditDecisionEngine) Evaluate(ctx context.Context, _ securityaudit.Request) (*securityaudit.PromptDecision, error) {
+	p.mu.Lock()
+	p.ctx = ctx
+	p.mu.Unlock()
+	return p.decision, nil
+}
+
+func (p *grokRealtimeAuditDecisionEngine) relayContext() context.Context {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.ctx
+}
+
 type inMemoryGatewayCache struct {
 	openAIChatCompletionsGatewayCacheStub
 	mu       sync.Mutex
@@ -132,8 +159,109 @@ func TestGrokVoice_ReusesStandardSessionStickyAccount(t *testing.T) {
 }
 
 func TestGrokRealtimeAuditBodyExtractsPromptTextButNotAudio(t *testing.T) {
-	require.Contains(t, string(grokRealtimeAuditBody([]byte(`{"type":"session.update","session":{"instructions":"safe text"}}`))), "safe text")
-	require.Nil(t, grokRealtimeAuditBody([]byte(`{"type":"input_audio_buffer.append","audio":"base64-secret"}`)))
+	for _, tt := range []struct {
+		name     string
+		event    string
+		contains []string
+		excludes []string
+		nilBody  bool
+	}{
+		{
+			name:     "session instructions",
+			event:    `{"type":"session.update","session":{"instructions":"safe text","audio":"base64-secret"}}`,
+			contains: []string{"safe text"},
+			excludes: []string{"base64-secret"},
+		},
+		{
+			name:     "conversation text and transcript",
+			event:    `{"type":"conversation.item.create","item":{"content":[{"type":"input_text","text":"conversation text"},{"type":"input_audio","audio":"base64-secret","transcript":"recognized transcript","metadata":{"audio":"nested-audio-secret"}}]}}`,
+			contains: []string{"conversation text", "recognized transcript"},
+			excludes: []string{"base64-secret", "nested-audio-secret"},
+		},
+		{
+			name:     "response instructions and input",
+			event:    `{"type":"response.create","response":{"instructions":"response instruction","input":[{"content":[{"type":"input_text","text":"response input"},{"type":"input_audio","audio":"base64-secret","transcript":"response transcript","metadata":{"audio":"nested-audio-secret"}}]}]}}`,
+			contains: []string{"response instruction", "response input", "response transcript"},
+			excludes: []string{"base64-secret", "nested-audio-secret"},
+		},
+		{
+			name:    "audio only",
+			event:   `{"type":"input_audio_buffer.append","audio":"base64-secret"}`,
+			nilBody: true,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			auditBody := grokRealtimeAuditBody([]byte(tt.event))
+			if tt.nilBody {
+				require.Nil(t, auditBody)
+				return
+			}
+			auditText := string(auditBody)
+			for _, want := range tt.contains {
+				require.Contains(t, auditText, want)
+			}
+			for _, secret := range tt.excludes {
+				require.NotContains(t, auditText, secret)
+			}
+		})
+	}
+}
+
+func TestGrokRealtimeAuditCloseClassifiesDecision(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		decision   *securityaudit.Decision
+		wantStatus coderws.StatusCode
+		wantReason string
+	}{
+		{
+			name:       "block is policy violation",
+			decision:   &securityaudit.Decision{Kind: securityaudit.DecisionBlock, ErrorCode: securityaudit.ErrorCodeBlocked},
+			wantStatus: coderws.StatusPolicyViolation,
+			wantReason: securityaudit.ErrorCodeBlocked,
+		},
+		{
+			name:       "unavailable retries",
+			decision:   &securityaudit.Decision{Kind: securityaudit.DecisionUnavailable, ErrorCode: securityaudit.ErrorCodeUnavailable},
+			wantStatus: coderws.StatusTryAgainLater,
+			wantReason: securityaudit.ErrorCodeUnavailable,
+		},
+		{
+			name:       "invalid retries",
+			decision:   &securityaudit.Decision{Kind: securityaudit.DecisionInvalid, ErrorCode: securityaudit.ErrorCodeInvalidResponse},
+			wantStatus: coderws.StatusTryAgainLater,
+			wantReason: securityaudit.ErrorCodeInvalidResponse,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			status, reason := grokRealtimeAuditClose(tt.decision)
+			require.Equal(t, tt.wantStatus, status)
+			require.Equal(t, tt.wantReason, reason)
+			require.False(t, isExpectedGrokRealtimeClose(coderws.CloseError{Code: status}))
+		})
+	}
+}
+
+func TestGrokRealtimeAuditGuardBindsRelayContextAndPreservesDecision(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/realtime", nil)
+	prompt := &grokRealtimeAuditDecisionEngine{decision: &securityaudit.PromptDecision{Kind: securityaudit.DecisionBlock, ErrorCode: securityaudit.ErrorCodeBlocked}}
+	h := &OpenAIGatewayHandler{securityAuditCoordinator: securityaudit.NewCoordinator(nil, prompt)}
+	apiKey := &service.APIKey{ID: 4066, UserID: 4067, GroupID: new(int64), User: &service.User{ID: 4067, Status: service.StatusActive}}
+	*apiKey.GroupID = 4061
+	relayCtx := context.WithValue(context.Background(), "realtime-audit", "relay")
+
+	err := h.grokRealtimeEventGuard(c, nil, apiKey, middleware.AuthSubject{UserID: apiKey.UserID}, "grok-voice-latest")(relayCtx, []byte(`{"type":"session.update","session":{"instructions":"blocked"}}`))
+	var auditErr *grokRealtimeAuditTermination
+	require.ErrorAs(t, err, &auditErr)
+	require.NotNil(t, auditErr.decision)
+	require.Equal(t, securityaudit.DecisionBlock, auditErr.decision.Kind)
+	require.Equal(t, relayCtx, prompt.relayContext())
+	status, reason := grokRealtimeAuditClose(auditErr.decision)
+	require.Equal(t, coderws.StatusPolicyViolation, status)
+	require.Equal(t, securityaudit.ErrorCodeBlocked, reason)
 }
 
 func TestGrokRealtimeAuditUsesIndependentEventStages(t *testing.T) {
