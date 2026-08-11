@@ -1,6 +1,12 @@
-# v0.1.171 Final Verification Report
+# Staged Upstream Merge Final Verification Report
 
-## Outcome
+## Current Outcome
+
+`PASS - v0.1.173 staged merge verified at 79ff083b5ea987a22c16bbcc2a6bef9c0b142685`
+
+The current final result is recorded in the appended `v0.1.173 Final Verification` section. The original v0.1.171 verification below is retained unchanged as historical evidence.
+
+## Historical v0.1.171 Outcome
 
 `历史通过：仅覆盖至 v0.1.171；已被 v0.1.172 范围扩展取代`
 
@@ -306,3 +312,125 @@ This change was not pushed, tagged, released, deployed, or used to operate any s
 原 full-change reviewer `ses_020707aafffeli3vLaRDsqQmoa` 复核后撤回 administrator-midnight finding，确认 Turnstile finding 已关闭：无 CRITICAL、IMPORTANT 或 WARNING；spec compliance `PASS`、code quality `APPROVED`、Ready for archive `YES`。
 
 两个非阻断 hygiene 建议：共享历史前可按需 squash `6f98da6e3 fixup! ...`；Verify guard 将刷新仍描述 Build exit 的 runtime handoff。两者均不影响行为或归档就绪性。
+
+## v0.1.173 Final Verification
+
+### Outcome
+
+- Verdict: `PASS`.
+- Tested HEAD: `79ff083b5ea987a22c16bbcc2a6bef9c0b142685`.
+- VERSION: `0.1.173.1`.
+- Capability matrix: `12/12 closed`, `gap=0`.
+- Final review: `open findings: 0`, `Spec: PASS`, `Quality: APPROVED`, `Ready for final report: YES`.
+- Conditional residuals: migration 220 Docker integration and Task 30 race verification remain `UNVERIFIED`.
+
+### Current Provenance
+
+| Binding | Value |
+| --- | --- |
+| Initial immutable ancestry root | `b576f73a22c4bf23d61727fc93950766a7e33929` |
+| Restored local source base | `16c07d8064b0b4604e9f47ef782e7d29534402d3` |
+| Final tested HEAD | `79ff083b5ea987a22c16bbcc2a6bef9c0b142685` (`docs: clarify upstream STT safeguards`) |
+| VERSION commit | `8f91a80f2`; exactly `backend/cmd/server/VERSION` |
+| Final VERSION | `0.1.173.1` |
+| Worktree at final gates | Only prohibited untracked `?? .comet/current-change.json`; no tracked or staged diff |
+| v0.1.172 file surface | 208 release files; 113 pre-merge local-overlap files |
+| v0.1.173 file surface | 352 release files; 140 final pre-merge local-overlap files |
+
+### Four-Stage Tags And Topology
+
+| Tag | Annotated object | Peeled commit | Stage merge and parents |
+| --- | --- | --- | --- |
+| `v0.1.170` | `60286d35e4b6dc6851ab69f890c2d1b7b7a3bcb8` | `c043c24774228ba891ddf90d783aa6dc7d0855b5` | `98c7b04874361a1cf95b8dea90ed1c4db2f05d4d 30528a82e32bfedc011d741e870964beb5743aa4 c043c24774228ba891ddf90d783aa6dc7d0855b5` |
+| `v0.1.171` | `afd154b92aac36c6dafb1fa8e181ca827c78c465` | `f0e7a9c7a23a7d02fb159b62fa809621eb0475a6` | `cca37e01eb719d65ce81dc7569b190fe9550ae5d 5f505520ded16114e3f2850f7b856a0650a82755 f0e7a9c7a23a7d02fb159b62fa809621eb0475a6` |
+| `v0.1.172` | `61ba94d2e85a00ba639fc870b91946b1bd2f990d` | `155c494964c3ea6ecc31f52679525c1034bf0f16` | `95fa00f99b3f0d3509e02f6a5f9d29fbed96c984 825c546fe314ce860c8c9b5a8b2458a88301478b 155c494964c3ea6ecc31f52679525c1034bf0f16` |
+| `v0.1.173` | `9e2a27ad39201a14074982bae331c4610161586a` | `29009f0b2ea14edf3b11ae2564fb617ff91a03b4` | `c939a4ca0e33eb4896e6df6907e205a5a91c42a3 8ff909a8f1b0dedb79edc6a33f7b478c554bd028 29009f0b2ea14edf3b11ae2564fb617ff91a03b4` |
+
+All four peeled commits and the initial ancestry root are ancestors of the tested HEAD. After the initial root, each peeled tag occurs exactly once as the second parent of a first-parent merge, in chronological order v0.1.170 through v0.1.173.
+
+### Fresh Final Gates
+
+| Command / check | Result |
+| --- | --- |
+| `make test` | PASS; backend packages passed, frontend 251 files / 1,893 tests passed. |
+| `make VERSION=0.1.173.1 SHELL=D:/scoop/shims/bash.exe build` | PASS; existing Vite dynamic-import/chunk warnings only. |
+| `golangci-lint run ./...` from `backend` | PASS, `0 issues`. |
+| Frontend `lint:check` and `typecheck` | PASS. |
+| `make -C backend generate` round 1 + Ent/Wire diff | PASS, zero diff. |
+| `make -C backend generate` round 2 + Ent/Wire diff | PASS, zero diff. |
+| Unmerged index/worktree, tracked conflict markers, whitespace, full tracked diff | PASS. |
+| VERSION, migration, Ent/Wire generated, Go dependency, frontend manifest/lock boundaries | PASS, no drift. |
+| `comet classic openspec -- validate staged-merge-upstream-v0-1-171 --strict` | PASS: `Change 'staged-merge-upstream-v0-1-171' is valid`. |
+
+Focused Task 28 Voice/search sticky, Realtime audit and STT compatibility gates passed. Focused Task 29 native-search cooldown, mapped-model, policy and snapshot-throttle gates passed. Their owning reviewers and the STT scope-correction reviewer each returned open findings 0, Spec PASS and Quality APPROVED.
+
+### Protected Migration Identities
+
+| Filename | Blob OID |
+| --- | --- |
+| `191_passkey_credentials.sql` | `522b16b5bba12aedb9c4198d2d4ef082c8ea718f` |
+| `191_subscription_quota_advance_receipts.sql` | `c22d47d79cbbaf4bc40524d42ef52e6cc8ac3af6` |
+| `192_subscription_cache_invalidation_outbox.sql` | `502ecec1caf9f76e022c2e83acf3707190539301` |
+| `192_group_profit_control.sql` | `072b3c5db17accfd5197ea72f9a49fd6bdf446b4` |
+| `193_group_profit_control_auth_cache_invalidation.sql` | `f32f6e6f8b6d026b2e8620c90954336e30550c41` |
+| `194_add_usage_log_upstream_response_model.sql` | `a5865aca179fbc4467b68ab184bc75103a3fa8eb` |
+| `195_add_usage_log_upstream_model_mismatch_index_notx.sql` | `811ca8786c46e0c7b360fc8d23299b47efd6cf3f` |
+| `194_channel_monitor_v2.sql` | `4e18ab152c1c6d8ec7ff481c70b0ca539d9443a0` |
+| `195_channel_monitor_mode.sql` | `ba3d2f95daec9ae9fa82848fe003832aa4359704` |
+| `196_channel_monitor_v2_ignored_error_categories.sql` | `c3e65f26a413ba308b94fe0b3d5e7fd710396978` |
+| `197_channel_monitor_v2_seed_popular_models.sql` | `248f2afbf3846a872909e296c55d65f1892c45f4` |
+| `198_channel_monitor_v2_health_thresholds.sql` | `dad533104a92ec3afb531a2df738133039479514` |
+| `199_channel_monitor_v2_fixed_rollups.sql` | `f033401e069bed44a77d5bcda06dd7ffdf4585fa` |
+| `200_channel_monitor_v2_rollup_permissions.sql` | `26cc54f09b01fe4176f25cae3701600f8761dfdd` |
+| `201_channel_monitor_v2_refresh_5m.sql` | `7bd67e4a949e6f10ac3b5453b3436c29f411f531` |
+| `202_channel_monitor_v2_full_table_permissions.sql` | `a19b8722df997ab9d25cfa1a2690770aa5a75917` |
+| `203_channel_monitor_v2_default_ignore_and_cache.sql` | `4a03f0054ffa14e628ceda2ba999a9052426e8bc` |
+| `204_channel_monitor_hide_throughput.sql` | `194eb7ce60f68f45843685b03bbbf5652b1401ea` |
+| `205_channel_monitor_v2_reset_factory_cache_thresholds.sql` | `f30e4e71f0629d6cccc6891d911f32a3688d0ae6` |
+| `206_channel_monitor_v2_privacy_defaults.sql` | `278e90b49afd08a0385ceddb3de20e148ad5fd8f` |
+| `217_group_video_model_prices.sql` | `61080015d4c8e008bd126f73cf5050c114ef1c65` |
+| `218_group_audio_voice_pricing.sql` | `c1b86522655b2d4b05fede03951c1a57968b7cb8` |
+| `219_group_search_price_per_1k.sql` | `54b6ef81f4d935182464d5fa50846a4abcb40d4e` |
+| `220_clear_non_grok_video_generation_config.sql` | `05571d3709d82df4a339cddbeb625d9e6ab731e5` |
+
+Result: `24/24` committed HEAD blobs match their authoritative OIDs.
+
+### Capability Matrix
+
+| # | Cluster | Final status |
+| ---: | --- | --- |
+| 1 | Four-stage topology and VERSION | closed |
+| 2 | Scheduler/sticky/fallback/WaitPlan/DB recheck | closed |
+| 3 | Codex HTTP/WS/body/usage/failover | closed |
+| 4 | Auth/captcha/settings/session/step-up | closed |
+| 5 | Subscription/refund/receipt/outbox/time anchor | closed; Docker-backed DB execution remains `UNVERIFIED` where noted |
+| 6 | OAuth pending ownership | closed |
+| 7 | Response-model audit/privacy | closed; migration runtime remains `UNVERIFIED` where noted |
+| 8 | Grok authorization/model mapping | closed |
+| 9 | Grok media/Voice/search/audit/billing | closed; inherited STT missing-duration heuristic retained by explicit scope |
+| 10 | Grok free gate/cooldown/threshold | closed |
+| 11 | Channel Monitor V2/privacy | closed; Task 30 race verification remains `UNVERIFIED` |
+| 12 | Pricing/schema/generated/migrations | closed statically; migration 220 Docker execution remains `UNVERIFIED` |
+
+Matrix result: `12/12 closed`, `gap=0`.
+
+### Thorough Review
+
+Final reviewer `ses_00fbde930ffe5kGRbFCuWCmQxP` rechecked the original four Important findings, the later STT overcharge finding, all remediation commits, focused reviews and fresh final evidence. Final verdict:
+
+```text
+open findings: 0
+gap=0
+Spec: PASS
+Quality: APPROVED
+Ready for final report: YES
+```
+
+Voice/search standard sticky, Realtime prompt audit and native-search cooldown findings are resolved. The STT item was scope-corrected by the user: this merge preserves exact upstream v0.1.173 behavior rather than repairing its inherited missing-duration heuristic. The local response-duration inflation regression was removed, and the complete inherited fallback/safeguard behavior has direct regression coverage.
+
+### Residuals And Non-Operations
+
+- Migration 220 command exited 0 only because Docker was unavailable and the harness skipped before the target test body. It is `UNVERIFIED`, not PASS.
+- Task 30 race verification remains `UNVERIFIED` because the local CGO/GCC prerequisite was unavailable.
+- The inherited upstream STT body-size heuristic can misestimate duration when stronger evidence is absent. This is an accepted upstream risk under the confirmed merge-only scope.
+- No remote substitute was used. No push, tag, release, deployment, server operation, database operation, Redis operation, Nginx operation, or production traffic operation was performed.

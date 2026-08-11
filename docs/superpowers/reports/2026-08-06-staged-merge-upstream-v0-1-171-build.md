@@ -1,4 +1,4 @@
-# v0.1.171 Build Ledger
+# Staged Upstream Merge Build Ledger
 
 ## 阶段 0：基线
 
@@ -2465,3 +2465,31 @@ assertion_exit=0
   exits through the harness's Docker-unavailable skip path, so Docker/
   Testcontainers integration remains `UNVERIFIED`; no remote substitute was
   used.
+
+## Tasks 33-35: Final v0.1.173 Closure
+
+- Final verified product/docs HEAD: `79ff083b5ea987a22c16bbcc2a6bef9c0b142685`.
+- VERSION commit: `8f91a80f2` (`chore: bump version to 0.1.173.1`); its only changed path is `backend/cmd/server/VERSION`.
+- Final VERSION: `0.1.173.1`.
+- v0.1.172 surface: `208` release files, `113` pre-merge local-overlap files.
+- v0.1.173 surface: `352` release files, `140` final pre-merge local-overlap files.
+- Task 35 remediation commits: `2871d2cb5`, `b43ba7bf7`, `a8272ca60`, `a2043ff2e`, `7498ac410`, `196e73bbc`, `eace586e6`, `e09a2d2d5`, and `0ad987668`.
+- STT scope follows the user's final decision: preserve the complete upstream v0.1.173 response/elapsed/client/body-size behavior and inherited client under-report safeguard; do not add a local audio parser or replacement billing policy.
+
+| Final gate | Result |
+| --- | --- |
+| Task 28 focused/canonical tests and lint | PASS; reviewer `ses_00f6ecb1effejQvEh9TudxMC1g` reported open findings 0, Spec PASS, Quality APPROVED. |
+| Task 29 focused/policy/canonical tests and lint | PASS; reviewer `ses_00f3ff64bffe7cqn7yQ4HlS1k3` reported open findings 0, Spec PASS, Quality APPROVED. |
+| STT scope correction | PASS; reviewer `ses_00ed4b488ffeAZb7H8ewoM3I9B` reported open findings 0, Spec PASS, Quality APPROVED. |
+| `make test` | PASS; backend packages and frontend 251 files / 1,893 tests. |
+| `make VERSION=0.1.173.1 SHELL=D:/scoop/shims/bash.exe build` | PASS; existing Vite warnings only. |
+| Backend lint, frontend lint, frontend typecheck | PASS; backend `0 issues`. |
+| Two backend generate rounds and Ent/Wire diff checks | PASS; zero diff after each round. |
+| 24 protected migration identities | PASS, 24/24 exact blob matches. |
+| Four-stage tag ancestry and first-parent merge topology | PASS; each peeled tag is an ancestor and appears exactly once as the second parent of its stage merge. |
+| Static/unmerged/conflict/whitespace/protected-boundary checks | PASS; final worktree status contains only `?? .comet/current-change.json`. |
+| Strict OpenSpec validation | PASS: `Change 'staged-merge-upstream-v0-1-171' is valid`. |
+
+Final thorough reviewer `ses_00fbde930ffe5kGRbFCuWCmQxP` concluded `open findings: 0`, `gap=0`, `Spec: PASS`, `Quality: APPROVED`, and `Ready for final report: YES`.
+
+Migration 220 execution remains `UNVERIFIED`: Docker is unavailable and the integration harness skipped before the target test body. Task 30 race verification remains `UNVERIFIED` because the local CGO/GCC condition was not met. No remote substitute, push, tag, release, deployment, server operation, database operation, Redis operation, or Nginx operation was performed.
