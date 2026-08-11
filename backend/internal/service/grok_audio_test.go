@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -126,6 +127,38 @@ func (d *grokVoiceRealtimeGuardTestDialer) Dial(context.Context, string, http.He
 	return d.conn, 0, nil, nil
 }
 
+type grokVoiceRealtimeOrderingTestConn struct {
+	guardEntered <-chan struct{}
+	readExited   chan struct{}
+	writes       atomic.Int64
+}
+
+func (c *grokVoiceRealtimeOrderingTestConn) WriteJSON(context.Context, any) error {
+	c.writes.Add(1)
+	return nil
+}
+
+func (c *grokVoiceRealtimeOrderingTestConn) ReadMessage(ctx context.Context) ([]byte, error) {
+	select {
+	case <-c.guardEntered:
+		close(c.readExited)
+		return nil, errors.New("ordinary upstream pump exit")
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (*grokVoiceRealtimeOrderingTestConn) Ping(context.Context) error { return nil }
+func (*grokVoiceRealtimeOrderingTestConn) Close() error               { return nil }
+
+type grokVoiceRealtimeOrderingTestDialer struct {
+	conn *grokVoiceRealtimeOrderingTestConn
+}
+
+func (d *grokVoiceRealtimeOrderingTestDialer) Dial(context.Context, string, http.Header, string) (openAIWSClientConn, int, http.Header, error) {
+	return d.conn, 0, nil, nil
+}
+
 func TestProxyGrokRealtimeUsesMappedModelInUpstreamURL(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	dialer := &grokVoiceRealtimeTestDialer{}
@@ -179,6 +212,7 @@ func TestEstimateGrokVoiceAudioUsage_STTPrefersAudioEvidenceOverElapsed(t *testi
 		wantNil  bool
 	}{
 		{name: "larger upstream duration", reqBody: bodyWithClientDuration, respBody: []byte(`{"duration":45}`), elapsed: 500 * time.Millisecond, wantSecs: 45},
+		{name: "positive upstream duration is floored by client evidence", reqBody: bodyWithClientDuration, respBody: []byte(`{"duration":5}`), elapsed: 500 * time.Millisecond, wantSecs: 30},
 		{name: "body size exceeds client duration", reqBody: bodySizeFloor, elapsed: 500 * time.Millisecond, wantSecs: 10},
 		{name: "client duration exceeds body size", reqBody: bodyWithClientDuration, elapsed: 500 * time.Millisecond, wantSecs: 30},
 		{name: "elapsed fallback", elapsed: 2500 * time.Millisecond, wantSecs: 2.5},
@@ -233,4 +267,56 @@ func TestProxyGrokRealtimeGuardBlocksBeforeUpstreamWriteAndWaitsForPumps(t *test
 	case <-time.After(time.Second):
 		t.Fatal("upstream-to-client pump did not exit before relay return")
 	}
+}
+
+func TestProxyGrokRealtimePrefersGuardAfterOrdinaryPumpExit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	guardEntered := make(chan struct{})
+	guardExited := make(chan struct{})
+	upstream := &grokVoiceRealtimeOrderingTestConn{guardEntered: guardEntered, readExited: make(chan struct{})}
+	svc := &OpenAIGatewayService{openaiWSPassthroughDialer: &grokVoiceRealtimeOrderingTestDialer{conn: upstream}}
+	account := &Account{Platform: PlatformGrok, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "voice-key"}}
+	sentinel := errors.New("guard termination")
+	result := make(chan grokVoiceRealtimeProxyResult, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		client, err := coderws.Accept(w, r, nil)
+		if err != nil {
+			result <- grokVoiceRealtimeProxyResult{err: err}
+			return
+		}
+		defer func() { _ = client.CloseNow() }()
+		model, proxyErr := svc.ProxyGrokRealtime(r.Context(), nil, client, account, "token", "grok-voice-latest", func(relayCtx context.Context, _ []byte) error {
+			close(guardEntered)
+			<-relayCtx.Done()
+			close(guardExited)
+			return sentinel
+		})
+		result <- grokVoiceRealtimeProxyResult{model: model, err: proxyErr}
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	require.NoError(t, err)
+	defer func() { _ = client.CloseNow() }()
+	require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"session.update","session":{"instructions":"blocked"}}`)))
+
+	select {
+	case returned := <-result:
+		require.ErrorIs(t, returned.err, sentinel)
+	case <-ctx.Done():
+		t.Fatal("relay did not return after both pumps exited")
+	}
+	select {
+	case <-upstream.readExited:
+	case <-ctx.Done():
+		t.Fatal("ordinary upstream pump did not exit")
+	}
+	select {
+	case <-guardExited:
+	case <-ctx.Done():
+		t.Fatal("guard pump did not exit")
+	}
+	require.Zero(t, upstream.writes.Load())
 }

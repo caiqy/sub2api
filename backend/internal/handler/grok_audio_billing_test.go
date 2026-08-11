@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -262,6 +263,103 @@ func TestGrokRealtimeAuditGuardBindsRelayContextAndPreservesDecision(t *testing.
 	status, reason := grokRealtimeAuditClose(auditErr.decision)
 	require.Equal(t, coderws.StatusPolicyViolation, status)
 	require.Equal(t, securityaudit.ErrorCodeBlocked, reason)
+}
+
+func TestGrokRealtimeBlockingAuditClosesWithoutUpstreamWriteOrUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstreamConnected := make(chan struct{})
+	upstreamDone := make(chan struct{})
+	var upstreamWrites atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := coderws.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		close(upstreamConnected)
+		defer close(upstreamDone)
+		defer func() { _ = conn.CloseNow() }()
+		for {
+			_, _, readErr := conn.Read(r.Context())
+			if readErr != nil {
+				return
+			}
+			upstreamWrites.Add(1)
+		}
+	}))
+	defer upstream.Close()
+
+	originalClient := http.DefaultClient
+	baseTransport := originalClient.Transport
+	if baseTransport == nil {
+		baseTransport = http.DefaultTransport
+	}
+	fixtureClient := *originalClient
+	fixtureClient.Transport = openAIWSOAuthHandshakeTransportFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Host != "api.x.ai" {
+			return baseTransport.RoundTrip(req)
+		}
+		rewritten := req.Clone(req.Context())
+		rewrittenURL := *req.URL
+		rewrittenURL.Scheme = "http"
+		rewrittenURL.Host = strings.TrimPrefix(upstream.URL, "http://")
+		rewritten.URL = &rewrittenURL
+		rewritten.Host = ""
+		return baseTransport.RoundTrip(rewritten)
+	})
+	http.DefaultClient = &fixtureClient
+	t.Cleanup(func() { http.DefaultClient = originalClient })
+
+	group := &service.Group{ID: 4071, Platform: service.PlatformGrok, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{
+		ID: 4072, Platform: service.PlatformGrok, Type: service.AccountTypeAPIKey,
+		Status: service.StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{group.ID},
+		Credentials: map[string]any{"api_key": "upstream-key", "base_url": "https://api.x.ai/v1", "model_mapping": map[string]any{"grok-voice-latest": "grok-voice-latest"}},
+	}
+	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &terminalUsageGrokAccountRepo{openAIRetryAccountRepoStub{accounts: []*service.Account{account}}}, &grokMediaRequestRecorder{})
+	env.handler.securityAuditCoordinator = securityaudit.NewCoordinator(nil, &grokRealtimeAuditDecisionEngine{decision: &securityaudit.PromptDecision{Kind: securityaudit.DecisionBlock, ErrorCode: securityaudit.ErrorCodeBlocked}})
+	handlerDone := make(chan struct{})
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), env.apiKey)
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: env.apiKey.UserID, Concurrency: env.apiKey.User.Concurrency})
+		c.Next()
+	})
+	router.GET("/realtime", func(c *gin.Context) {
+		defer close(handlerDone)
+		env.handler.GrokRealtime(c)
+	})
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/realtime?model=grok-voice-latest", nil)
+	require.NoError(t, err)
+	defer func() { _ = client.CloseNow() }()
+	select {
+	case <-upstreamConnected:
+	case <-ctx.Done():
+		t.Fatal("handler did not establish the upstream websocket")
+	}
+	require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"session.update","session":{"instructions":"blocked"}}`)))
+	_, _, readErr := client.Read(ctx)
+	require.Equal(t, coderws.StatusPolicyViolation, coderws.CloseStatus(readErr))
+	select {
+	case <-handlerDone:
+	case <-ctx.Done():
+		t.Fatal("handler did not finish after the audit block")
+	}
+	select {
+	case <-upstreamDone:
+	case <-ctx.Done():
+		t.Fatal("upstream relay did not finish after the audit block")
+	}
+	require.Zero(t, upstreamWrites.Load())
+	select {
+	case usage := <-env.usageRepo.created:
+		t.Fatalf("unexpected usage record: %#v", usage)
+	default:
+	}
 }
 
 func TestGrokRealtimeAuditUsesIndependentEventStages(t *testing.T) {
