@@ -47,12 +47,13 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 	if strings.TrimSpace(model) == "" {
 		model = "grok-voice-latest"
 	}
+	sessionHash := h.gatewayService.GenerateSessionHash(c, nil)
 
 	selection, _, err := h.gatewayService.SelectAccountWithSchedulerForCapability(
 		c.Request.Context(),
 		apiKey.GroupID,
 		"",
-		"",
+		sessionHash,
 		model,
 		nil,
 		service.OpenAIUpstreamTransportHTTPSSE,
@@ -70,7 +71,7 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 
 	var streamStarted bool
 	reqLog := requestLogger(c, "handler.openai_gateway.grok_realtime")
-	release, slotStatus := h.acquireResponsesAccountSlot(c, apiKey.GroupID, "", selection, true, &streamStarted, reqLog)
+	release, slotStatus := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, true, &streamStarted, reqLog)
 	if slotStatus != openAISlotAcquireOK {
 		return
 	}
@@ -88,11 +89,27 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 	}
 	defer func() { _ = conn.CloseNow() }()
 
+	subject, _ := middleware2.GetAuthSubjectFromContext(c)
+	auditBlocked := errors.New("grok realtime event blocked by security audit")
+	eventGuard := func(event []byte) error {
+		auditBody := grokRealtimeAuditBody(event)
+		if len(auditBody) == 0 {
+			return nil
+		}
+		if decision := h.checkSecurityAuditStage(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, model, auditBody, "grok_realtime_turn"); decision != nil && !decision.AllowNextStage {
+			return auditBlocked
+		}
+		return nil
+	}
 	started := time.Now()
-	upstreamModel, proxyErr := h.gatewayService.ProxyGrokRealtime(c.Request.Context(), c, conn, selection.Account, token, model)
+	upstreamModel, proxyErr := h.gatewayService.ProxyGrokRealtime(c.Request.Context(), c, conn, selection.Account, token, model, eventGuard)
 	elapsed := time.Since(started)
 	if proxyErr != nil {
 		reqLog.Info("grok_realtime.proxy_failed", zap.Error(proxyErr))
+		if errors.Is(proxyErr, auditBlocked) {
+			_ = conn.Close(coderws.StatusPolicyViolation, "Request blocked by content policy")
+			return
+		}
 		if !isExpectedGrokRealtimeClose(proxyErr) {
 			_ = conn.Close(coderws.StatusInternalError, "upstream realtime websocket failed")
 			return
@@ -151,6 +168,7 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
 	}
+	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
 	if endpoint == "tts" {
 		subject, _ := middleware2.GetAuthSubjectFromContext(c)
 		reqLog := requestLogger(c, "handler.openai_gateway.grok_voice", zap.String("endpoint", endpoint))
@@ -184,7 +202,7 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 			c.Request.Context(),
 			apiKey.GroupID,
 			"",
-			"",
+			sessionHash,
 			selectionModel,
 			failed,
 			service.OpenAIUpstreamTransportHTTPSSE,
@@ -204,7 +222,7 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 		}
 		account := selection.Account
 		var started bool
-		release, status := h.acquireResponsesAccountSlot(c, apiKey.GroupID, "", selection, false, &started, reqLog)
+		release, status := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, false, &started, reqLog)
 		if status == openAISlotAcquireProfitVetoed {
 			failed[account.ID] = struct{}{}
 			continue
@@ -336,4 +354,58 @@ func extractGrokTTSInputText(body []byte) string {
 		}
 	}
 	return ""
+}
+
+func grokRealtimeAuditBody(event []byte) []byte {
+	var payload map[string]any
+	if err := json.Unmarshal(event, &payload); err != nil {
+		return nil
+	}
+
+	var text []string
+	switch payload["type"] {
+	case "session.update":
+		if session, ok := payload["session"].(map[string]any); ok {
+			text = appendGrokRealtimeAuditText(text, session["instructions"])
+		}
+	case "conversation.item.create":
+		if item, ok := payload["item"].(map[string]any); ok {
+			text = appendGrokRealtimeAuditText(text, item["transcript"])
+			text = appendGrokRealtimeAuditText(text, item["content"])
+		}
+	case "response.create":
+		if response, ok := payload["response"].(map[string]any); ok {
+			text = appendGrokRealtimeAuditText(text, response["instructions"])
+			text = appendGrokRealtimeAuditText(text, response["input"])
+		}
+	default:
+		return nil
+	}
+
+	if len(text) == 0 {
+		return nil
+	}
+	auditBody, err := json.Marshal(map[string]string{"input": strings.Join(text, "\n")})
+	if err != nil {
+		return nil
+	}
+	return auditBody
+}
+
+func appendGrokRealtimeAuditText(text []string, value any) []string {
+	switch value := value.(type) {
+	case string:
+		if value = strings.TrimSpace(value); value != "" {
+			return append(text, value)
+		}
+	case []any:
+		for _, item := range value {
+			text = appendGrokRealtimeAuditText(text, item)
+		}
+	case map[string]any:
+		for _, key := range []string{"instructions", "input_text", "text", "transcript", "content", "input"} {
+			text = appendGrokRealtimeAuditText(text, value[key])
+		}
+	}
+	return text
 }

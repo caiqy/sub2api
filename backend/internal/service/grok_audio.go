@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -168,7 +169,7 @@ func (s *OpenAIGatewayService) ForwardGrokVoice(ctx context.Context, c *gin.Cont
 // ProxyGrokRealtime relays JSON Realtime events to xAI's native Voice WS.
 // Audio is carried as base64 inside JSON events, so preserving the JSON bytes
 // is sufficient and avoids translating protocol event types.
-func (s *OpenAIGatewayService) ProxyGrokRealtime(ctx context.Context, c *gin.Context, client *coderws.Conn, account *Account, token, model string) (string, error) {
+func (s *OpenAIGatewayService) ProxyGrokRealtime(ctx context.Context, c *gin.Context, client *coderws.Conn, account *Account, token, model string, eventGuard func([]byte) error) (string, error) {
 	if s == nil || client == nil || account == nil {
 		return "", fmt.Errorf("realtime service, client, and account are required")
 	}
@@ -244,6 +245,12 @@ func (s *OpenAIGatewayService) ProxyGrokRealtime(ctx context.Context, c *gin.Con
 				errCh <- fmt.Errorf("invalid realtime event: %w", unmarshalErr)
 				return
 			}
+			if eventGuard != nil {
+				if guardErr := eventGuard(msg); guardErr != nil {
+					errCh <- guardErr
+					return
+				}
+			}
 			if writeErr := upstream.WriteJSON(ctx, raw); writeErr != nil {
 				errCh <- writeErr
 				return
@@ -278,8 +285,7 @@ func estimateGrokVoiceAudioUsage(endpoint string, reqBody []byte, contentType st
 		}
 		return &AudioUsage{Mode: "tts", DurationOrUnits: float64(chars) / 1_000_000.0}
 	case "stt":
-		// Prefer response duration when present; do not trust client duration_seconds alone
-		// (under-report would underbill). Floor against body-size heuristic and elapsed.
+		// Prefer response duration, then client/body audio evidence; elapsed is only a fallback.
 		secs := 0.0
 		if gjson.ValidBytes(respBody) {
 			for _, path := range []string{"duration", "duration_seconds", "audio_duration", "usage.seconds"} {
@@ -300,25 +306,12 @@ func estimateGrokVoiceAudioUsage(endpoint string, reqBody []byte, contentType st
 				clientSecs = v.Float()
 			}
 		}
+		floor := math.Max(clientSecs, sizeFloor)
+		if secs < floor {
+			secs = floor
+		}
 		if secs <= 0 {
 			secs = elapsed.Seconds()
-		}
-		if secs <= 0 {
-			secs = clientSecs
-		}
-		if secs <= 0 {
-			secs = sizeFloor
-		}
-		// Cap untrusted client under-report: if client duration is much smaller than
-		// size/elapsed floors, bill the larger of floors (anti underbill).
-		if clientSecs > 0 && secs == clientSecs {
-			floor := sizeFloor
-			if elapsed.Seconds() > floor {
-				floor = elapsed.Seconds()
-			}
-			if floor > 0 && clientSecs < floor*0.5 {
-				secs = floor
-			}
 		}
 		if secs <= 0 {
 			return nil

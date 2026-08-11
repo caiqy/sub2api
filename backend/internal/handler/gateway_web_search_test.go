@@ -30,6 +30,83 @@ func (r grokWebSearchGroupRepo) GetByIDLite(context.Context, int64) (*service.Gr
 	return r.group, nil
 }
 
+func TestGatewayHandler_WebSearchReusesStandardSessionStickyAccount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 4211, Platform: service.PlatformGrok, Status: service.StatusActive, Hydrated: true}
+	accounts := []*service.Account{
+		{ID: 4212, Platform: service.PlatformGrok, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "first-key", "base_url": "https://api.x.ai/v1"}},
+		{ID: 4213, Platform: service.PlatformGrok, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 2, Credentials: map[string]any{"api_key": "second-key", "base_url": "https://api.x.ai/v1"}},
+	}
+	cfg := &config.Config{
+		RunMode:     config.RunModeSimple,
+		Default:     config.DefaultConfig{RateMultiplier: 1},
+		Gateway:     config.GatewayConfig{Scheduling: config.GatewaySchedulingConfig{LoadBatchEnabled: false}},
+		Concurrency: config.ConcurrencyConfig{PingInterval: 0},
+	}
+	accountRepo := &terminalUsageGrokAccountRepo{openAIRetryAccountRepoStub{accounts: accounts}}
+	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
+	cache := newInMemoryGatewayCache()
+	concurrency := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
+	billingCache := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(billingCache.Stop)
+	upstream := &grokMediaRequestRecorder{}
+	gateway := service.NewGatewayService(
+		accountRepo, grokWebSearchGroupRepo{group: group}, usageRepo, nil, nil, nil, nil, cache, cfg, nil,
+		concurrency, service.NewBillingService(cfg, nil), nil, billingCache, nil, upstream,
+		service.NewDeferredService(accountRepo, nil, 0), nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil,
+	)
+	openAIGateway := service.NewOpenAIGatewayService(
+		accountRepo, usageRepo, nil, nil, nil, nil, cache, cfg, nil, concurrency,
+		service.NewBillingService(cfg, nil), nil, billingCache, upstream,
+		service.NewDeferredService(accountRepo, nil, 0), nil, service.NewGrokTokenProvider(accountRepo, nil), nil, nil,
+	)
+	h := &GatewayHandler{
+		gatewayService:       gateway,
+		openAIGatewayService: openAIGateway,
+		billingCacheService:  billingCache,
+		apiKeyService:        &service.APIKeyService{},
+		concurrencyHelper:    NewConcurrencyHelper(concurrency, SSEPingFormatNone, 0),
+		cfg:                  cfg,
+	}
+	apiKey := &service.APIKey{
+		ID: 4214, UserID: 4215, Status: service.StatusActive, GroupID: &group.ID,
+		User:  &service.User{ID: 4215, Status: service.StatusActive, Concurrency: 1},
+		Group: group,
+	}
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.UserID, Concurrency: 1})
+		c.Next()
+	})
+	router.POST("/web_search", h.WebSearch)
+
+	request := func() {
+		recorder := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/web_search", strings.NewReader(`{"query":"sticky search"}`)).WithContext(context.Background())
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("session_id", "search-sticky-session")
+		router.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+		select {
+		case <-usageRepo.created:
+		case <-time.After(time.Second):
+			t.Fatal("web search usage was not recorded")
+		}
+	}
+
+	request()
+	accounts[0].Priority, accounts[1].Priority = 2, 1
+	request()
+
+	upstream.mu.Lock()
+	require.Equal(t, []int64{4212, 4212}, upstream.accountIDs)
+	upstream.mu.Unlock()
+	require.NotEmpty(t, cache.sessionKeys())
+	require.NotContains(t, cache.sessionKeys(), "")
+}
+
 func TestGatewayHandler_WebSearchFailoverRecordsFinalMappedUpstreamModel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	group := &service.Group{ID: 4201, Platform: service.PlatformGrok, Status: service.StatusActive, Hydrated: true}

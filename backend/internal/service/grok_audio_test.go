@@ -1,7 +1,9 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -95,6 +97,31 @@ type grokVoiceRealtimeProxyResult struct {
 	err   error
 }
 
+type grokVoiceRealtimeGuardTestConn struct {
+	writes int
+}
+
+func (c *grokVoiceRealtimeGuardTestConn) WriteJSON(context.Context, any) error {
+	c.writes++
+	return nil
+}
+
+func (*grokVoiceRealtimeGuardTestConn) ReadMessage(ctx context.Context) ([]byte, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (*grokVoiceRealtimeGuardTestConn) Ping(context.Context) error { return nil }
+func (*grokVoiceRealtimeGuardTestConn) Close() error               { return nil }
+
+type grokVoiceRealtimeGuardTestDialer struct {
+	conn *grokVoiceRealtimeGuardTestConn
+}
+
+func (d *grokVoiceRealtimeGuardTestDialer) Dial(context.Context, string, http.Header, string) (openAIWSClientConn, int, http.Header, error) {
+	return d.conn, 0, nil, nil
+}
+
 func TestProxyGrokRealtimeUsesMappedModelInUpstreamURL(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	dialer := &grokVoiceRealtimeTestDialer{}
@@ -115,7 +142,7 @@ func TestProxyGrokRealtimeUsesMappedModelInUpstreamURL(t *testing.T) {
 			return
 		}
 		defer func() { _ = client.CloseNow() }()
-		model, proxyErr := svc.ProxyGrokRealtime(r.Context(), nil, client, account, "token", "grok-voice-latest")
+		model, proxyErr := svc.ProxyGrokRealtime(r.Context(), nil, client, account, "token", "grok-voice-latest", nil)
 		result <- grokVoiceRealtimeProxyResult{model: model, err: proxyErr}
 	}))
 	defer server.Close()
@@ -131,4 +158,40 @@ func TestProxyGrokRealtimeUsesMappedModelInUpstreamURL(t *testing.T) {
 	require.Error(t, returned.err)
 	require.Equal(t, "first-realtime", returned.model)
 	require.Contains(t, dialer.lastURL, "model=first-realtime")
+}
+
+func TestEstimateGrokVoiceAudioUsage_STTPrefersAudioEvidenceOverElapsed(t *testing.T) {
+	got := estimateGrokVoiceAudioUsage("stt", bytes.Repeat([]byte("a"), 160000), "audio/wav", nil, 500*time.Millisecond)
+	require.InDelta(t, 10.0/3600.0, got.DurationOrUnits, 1e-9)
+}
+
+func TestProxyGrokRealtimeGuardBlocksBeforeUpstreamWrite(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	sentinel := errors.New("blocked realtime event")
+	upstream := &grokVoiceRealtimeGuardTestConn{}
+	svc := &OpenAIGatewayService{openaiWSPassthroughDialer: &grokVoiceRealtimeGuardTestDialer{conn: upstream}}
+	account := &Account{Platform: PlatformGrok, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "voice-key"}}
+	result := make(chan grokVoiceRealtimeProxyResult, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		client, err := coderws.Accept(w, r, nil)
+		if err != nil {
+			result <- grokVoiceRealtimeProxyResult{err: err}
+			return
+		}
+		defer func() { _ = client.CloseNow() }()
+		model, proxyErr := svc.ProxyGrokRealtime(r.Context(), nil, client, account, "token", "grok-voice-latest", func([]byte) error { return sentinel })
+		result <- grokVoiceRealtimeProxyResult{model: model, err: proxyErr}
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	require.NoError(t, err)
+	defer func() { _ = client.CloseNow() }()
+	require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"session.update","session":{"instructions":"blocked"}}`)))
+
+	returned := <-result
+	require.ErrorIs(t, returned.err, sentinel)
+	require.Zero(t, upstream.writes)
 }

@@ -79,6 +79,10 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 			"role": "user", "content": req.Query,
 		}},
 	})
+	sessionHash := ""
+	if h.openAIGatewayService != nil {
+		sessionHash = h.openAIGatewayService.GenerateSessionHash(c, auditBody)
+	}
 	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolOpenAIChat, xai.DefaultTextModel, auditBody); decision != nil && !decision.AllowNextStage {
 		status := decision.HTTPStatus
 		if status == 0 {
@@ -124,7 +128,7 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 	// First attempt + up to 3 failover accounts (max 4 total).
 	for attempt := 0; attempt < 4; attempt++ {
 		selected, selectErr := h.gatewayService.SelectAccountWithLoadAwareness(
-			c.Request.Context(), groupID, "", xai.DefaultTextModel, failedAccounts, "", 0,
+			c.Request.Context(), groupID, sessionHash, xai.DefaultTextModel, failedAccounts, "", 0,
 		)
 		if selectErr != nil {
 			if attempt == 0 {

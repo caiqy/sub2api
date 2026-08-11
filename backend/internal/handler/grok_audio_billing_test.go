@@ -4,15 +4,19 @@ package handler
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"io"
 	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	coderws "github.com/coder/websocket"
@@ -20,6 +24,136 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+type grokRealtimeAuditPromptEngine struct {
+	enqueues int
+}
+
+type inMemoryGatewayCache struct {
+	openAIChatCompletionsGatewayCacheStub
+	mu       sync.Mutex
+	sessions map[string]int64
+	keys     []string
+}
+
+func newInMemoryGatewayCache() *inMemoryGatewayCache {
+	return &inMemoryGatewayCache{sessions: make(map[string]int64)}
+}
+
+func (c *inMemoryGatewayCache) GetSessionAccountID(_ context.Context, groupID int64, sessionHash string) (int64, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.keys = append(c.keys, sessionHash)
+	accountID, ok := c.sessions[fmt.Sprintf("%d:%s", groupID, sessionHash)]
+	if !ok {
+		return 0, service.ErrStickySessionNotFound
+	}
+	return accountID, nil
+}
+
+func (c *inMemoryGatewayCache) SetSessionAccountID(_ context.Context, groupID int64, sessionHash string, accountID int64, _ time.Duration) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.keys = append(c.keys, sessionHash)
+	c.sessions[fmt.Sprintf("%d:%s", groupID, sessionHash)] = accountID
+	return nil
+}
+
+func (c *inMemoryGatewayCache) RefreshSessionTTL(_ context.Context, groupID int64, sessionHash string, _ time.Duration) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.keys = append(c.keys, sessionHash)
+	return nil
+}
+
+func (c *inMemoryGatewayCache) DeleteSessionAccountID(_ context.Context, groupID int64, sessionHash string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.keys = append(c.keys, sessionHash)
+	delete(c.sessions, fmt.Sprintf("%d:%s", groupID, sessionHash))
+	return nil
+}
+
+func (c *inMemoryGatewayCache) sessionKeys() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.keys...)
+}
+
+func (*grokRealtimeAuditPromptEngine) EffectiveMode() securityaudit.Mode {
+	return securityaudit.ModeAsync
+}
+
+func (p *grokRealtimeAuditPromptEngine) Enqueue(context.Context, securityaudit.Request) error {
+	p.enqueues++
+	return nil
+}
+
+func (*grokRealtimeAuditPromptEngine) Evaluate(context.Context, securityaudit.Request) (*securityaudit.PromptDecision, error) {
+	return nil, nil
+}
+
+func TestGrokVoice_ReusesStandardSessionStickyAccount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 4061, Platform: service.PlatformGrok, Status: service.StatusActive, Hydrated: true}
+	accounts := []*service.Account{
+		{ID: 4062, Platform: service.PlatformGrok, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, GroupIDs: []int64{4061}, Credentials: map[string]any{"api_key": "first-key", "base_url": "https://api.x.ai/v1", "model_mapping": map[string]any{"grok-voice-latest": "first-voice-model"}}},
+		{ID: 4063, Platform: service.PlatformGrok, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 2, GroupIDs: []int64{4061}, Credentials: map[string]any{"api_key": "second-key", "base_url": "https://api.x.ai/v1", "model_mapping": map[string]any{"grok-voice-latest": "second-voice-model"}}},
+	}
+	upstream := &grokMediaRequestRecorder{}
+	cache := newInMemoryGatewayCache()
+	env := newTerminalUsageOpenAIEnvWithUpstreamAndGatewayCache(t, group, &terminalUsageGrokAccountRepo{openAIRetryAccountRepoStub{accounts: accounts}}, upstream, cache)
+	env.handler.cfg.Gateway.Sticky.OpenAI.Enabled = true
+	router := env.router("/tts", func(c *gin.Context) { env.handler.GrokVoice(c, "tts") })
+
+	request := func() {
+		recorder := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/tts", strings.NewReader(`{"model":"grok-voice-latest","input":"sticky voice"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("session_id", "voice-sticky-session")
+		router.ServeHTTP(recorder, req)
+		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+		select {
+		case <-env.usageRepo.created:
+		case <-time.After(time.Second):
+			t.Fatal("voice usage was not recorded")
+		}
+	}
+
+	request()
+	accounts[0].Priority, accounts[1].Priority = 2, 1
+	request()
+
+	upstream.mu.Lock()
+	require.NotEmpty(t, cache.sessionKeys())
+	require.NotContains(t, cache.sessionKeys(), "")
+	require.Equal(t, []int64{4062, 4062}, upstream.accountIDs)
+	upstream.mu.Unlock()
+}
+
+func TestGrokRealtimeAuditBodyExtractsPromptTextButNotAudio(t *testing.T) {
+	require.Contains(t, string(grokRealtimeAuditBody([]byte(`{"type":"session.update","session":{"instructions":"safe text"}}`))), "safe text")
+	require.Nil(t, grokRealtimeAuditBody([]byte(`{"type":"input_audio_buffer.append","audio":"base64-secret"}`)))
+}
+
+func TestGrokRealtimeAuditUsesIndependentEventStages(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/realtime", nil)
+	prompt := &grokRealtimeAuditPromptEngine{}
+	h := &OpenAIGatewayHandler{securityAuditCoordinator: securityaudit.NewCoordinator(nil, prompt)}
+	apiKey := &service.APIKey{ID: 4064, UserID: 4065, GroupID: new(int64), User: &service.User{ID: 4065, Status: service.StatusActive}}
+	*apiKey.GroupID = 4061
+	subject := middleware.AuthSubject{UserID: apiKey.UserID}
+
+	for range 2 {
+		decision := h.checkSecurityAuditStage(c, nil, apiKey, subject, service.ContentModerationProtocolOpenAIResponses, "grok-voice-latest", []byte(`{"input":"safe text"}`), "grok_realtime_turn")
+		require.NotNil(t, decision)
+		require.True(t, decision.AllowNextStage)
+	}
+	require.Equal(t, 2, prompt.enqueues)
+}
 
 func TestGrokVoice_TTSAudioIsOmittedFromUsageSnapshots(t *testing.T) {
 	gin.SetMode(gin.TestMode)
