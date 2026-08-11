@@ -491,13 +491,14 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 // handleGrokUpstreamError is the shared Grok error policy seam. Callers pass
 // the final upstream model so the existing team/model cooldown uses the same
 // scheduler key that was sent upstream.
-func (s *RateLimitService) handleGrokUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, upstreamModel string) {
+func (s *RateLimitService) handleGrokUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, upstreamModel string, snapshotThrottle *accountWriteThrottle) {
 	if s == nil || account == nil || statusCode < http.StatusBadRequest {
 		return
 	}
 	(&OpenAIGatewayService{
-		accountRepo:      s.accountRepo,
-		rateLimitService: s,
+		accountRepo:           s.accountRepo,
+		rateLimitService:      s,
+		codexSnapshotThrottle: snapshotThrottle,
 	}).applyGrokAccountUpstreamErrorPolicy(withGrokTeamRateLimitModel(ctx, upstreamModel), account, statusCode, headers, responseBody)
 }
 

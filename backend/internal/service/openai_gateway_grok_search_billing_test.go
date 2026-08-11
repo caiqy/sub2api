@@ -90,6 +90,7 @@ func TestDoGrokNativeResponsesJSON_ReconcilesRateLimitBeforeFailover(t *testing.
 	var failoverErr *UpstreamFailoverError
 	require.ErrorAs(t, err, &failoverErr)
 	require.Equal(t, http.StatusTooManyRequests, failoverErr.StatusCode)
+	require.Equal(t, "mapped-search-model", gjson.GetBytes(upstream.lastBody, "model").String())
 	require.True(t, isGrokTeamModelRateLimited(account, "mapped-search-model", time.Now()))
 	require.Equal(t, 1, repo.rateLimitedCalls)
 	require.Equal(t, 1, repo.updateExtraCalls)

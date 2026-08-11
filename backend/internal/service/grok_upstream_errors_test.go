@@ -296,6 +296,25 @@ func TestHandleGrokAccountUpstreamErrorEntitlement403KeepsDefaultCooldown(t *tes
 	require.Less(t, repo.lastTempUnschedUntil, before.Add(31*time.Minute))
 }
 
+func TestHandleGrokAccountUpstreamErrorPreservesSnapshotThrottle(t *testing.T) {
+	repo := &grokQuotaAccountRepo{}
+	svc := &OpenAIGatewayService{
+		accountRepo:           repo,
+		codexSnapshotThrottle: newAccountWriteThrottle(time.Hour),
+	}
+	account := &Account{ID: 4719, Platform: PlatformGrok, Type: AccountTypeOAuth}
+	headers := http.Header{
+		"X-Ratelimit-Limit-Requests":     []string{"10"},
+		"X-Ratelimit-Remaining-Requests": []string{"9"},
+	}
+	body := []byte(`{"error":{"message":"invalid tool schema"}}`)
+
+	svc.handleGrokAccountUpstreamError(context.Background(), account, http.StatusBadRequest, headers, body)
+	svc.handleGrokAccountUpstreamError(context.Background(), account, http.StatusBadRequest, headers, body)
+
+	require.Equal(t, 1, repo.updateCalls)
+}
+
 func TestHandleGrokAccountUpstreamErrorDefaultCooldownsRespectPoolMode(t *testing.T) {
 	for _, statusCode := range []int{
 		http.StatusUnauthorized,

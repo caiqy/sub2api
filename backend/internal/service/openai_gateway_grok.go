@@ -1666,7 +1666,7 @@ func withGrokTeamRateLimitModel(ctx context.Context, model string) context.Conte
 
 func (s *OpenAIGatewayService) handleGrokAccountUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte) {
 	if rateLimits := s.grokRateLimitService(); rateLimits != nil {
-		rateLimits.handleGrokUpstreamError(ctx, account, statusCode, headers, responseBody, "")
+		rateLimits.handleGrokUpstreamError(ctx, account, statusCode, headers, responseBody, "", s.getCodexSnapshotThrottle())
 	}
 }
 

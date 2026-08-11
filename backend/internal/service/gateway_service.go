@@ -1395,7 +1395,7 @@ func (s *GatewayService) DoGrokNativeResponsesJSON(ctx context.Context, account 
 		}
 	}
 	if resp.StatusCode >= http.StatusBadRequest && s.rateLimitService != nil {
-		s.rateLimitService.handleGrokUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBytes, upstreamModel)
+		s.rateLimitService.handleGrokUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBytes, upstreamModel, defaultOpenAICodexSnapshotPersistThrottle)
 	}
 	if resp.StatusCode >= 400 {
 		msg := string(respBytes)
