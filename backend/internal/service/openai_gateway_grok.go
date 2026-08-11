@@ -1567,25 +1567,8 @@ func persistGrokRateLimit(ctx context.Context, repo AccountRepository, account *
 }
 
 func (s *OpenAIGatewayService) rateLimitGrok(ctx context.Context, account *Account, resetAt time.Time) {
-	if s == nil || account == nil {
-		return
-	}
-	now := time.Now()
-	resetAt = normalizeGrokRateLimitResetAt(account, resetAt, now)
-
-	runtimeUntil := resetAt
-	if account.TempUnschedulableUntil != nil && account.TempUnschedulableUntil.After(runtimeUntil) {
-		runtimeUntil = *account.TempUnschedulableUntil
-	}
-	s.BlockAccountScheduling(account, runtimeUntil, "429")
-	persistGrokRateLimit(ctx, s.accountRepo, account, resetAt)
-
-	// Propagate a short team+model cool so sibling OAuth accounts on the same
-	// xAI team skip the hot model without waiting for each to hit 429 alone.
-	// Model is taken from the latest request context when available; empty is a
-	// no-op inside markGrokTeamModelRateLimit.
-	if model, _ := ctx.Value(grokTeamRateLimitModelContextKey{}).(string); model != "" {
-		markGrokTeamModelRateLimit(account, model, resolveGrokTeamRateLimitUntil(resetAt, now))
+	if rateLimits := s.grokRateLimitService(); rateLimits != nil {
+		rateLimits.rateLimitGrok(ctx, account, resetAt)
 	}
 }
 
@@ -1682,6 +1665,12 @@ func withGrokTeamRateLimitModel(ctx context.Context, model string) context.Conte
 }
 
 func (s *OpenAIGatewayService) handleGrokAccountUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte) {
+	if rateLimits := s.grokRateLimitService(); rateLimits != nil {
+		rateLimits.handleGrokUpstreamError(ctx, account, statusCode, headers, responseBody, "")
+	}
+}
+
+func (s *OpenAIGatewayService) applyGrokAccountUpstreamErrorPolicy(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte) {
 	if s == nil || account == nil {
 		return
 	}
@@ -1771,17 +1760,19 @@ func isGrokSpendingLimitError(responseBody []byte) bool {
 }
 
 func (s *OpenAIGatewayService) tempUnscheduleGrok(ctx context.Context, account *Account, cooldown time.Duration, reason string) {
-	if s == nil || account == nil {
-		return
+	if rateLimits := s.grokRateLimitService(); rateLimits != nil {
+		rateLimits.tempUnscheduleGrok(ctx, account, cooldown, reason)
 	}
-	until := time.Now().Add(cooldown)
-	if account.TempUnschedulableUntil != nil && account.TempUnschedulableUntil.After(until) {
-		until = *account.TempUnschedulableUntil
+}
+
+func (s *OpenAIGatewayService) grokRateLimitService() *RateLimitService {
+	if s == nil {
+		return nil
 	}
-	s.BlockAccountScheduling(account, until, reason)
-	if s.accountRepo != nil {
-		stateCtx, cancel := openAIAccountStateContext(ctx)
-		defer cancel()
-		_ = s.accountRepo.SetTempUnschedulable(stateCtx, account.ID, until, reason)
+	if s.rateLimitService != nil {
+		return s.rateLimitService
 	}
+	rateLimits := NewRateLimitService(s.accountRepo, s.usageLogRepo, s.cfg, nil, nil)
+	rateLimits.SetAccountRuntimeBlocker(s)
+	return rateLimits
 }

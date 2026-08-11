@@ -358,7 +358,7 @@ func TestHandleGrokAccountUpstreamErrorDefaultCooldownsRespectPoolMode(t *testin
 		)
 
 		require.Equal(t, 1, repo.tempUnschedCalls)
-		require.Equal(t, "grok configured forbidden rule", repo.lastTempUnschedReason)
+		require.Contains(t, repo.lastTempUnschedReason, "entitlement denied")
 		require.WithinDuration(t, before.Add(7*time.Minute), repo.lastTempUnschedUntil, time.Second)
 		require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
 	})

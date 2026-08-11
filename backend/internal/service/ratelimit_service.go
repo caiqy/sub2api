@@ -488,6 +488,54 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 	return shouldDisable
 }
 
+// handleGrokUpstreamError is the shared Grok error policy seam. Callers pass
+// the final upstream model so the existing team/model cooldown uses the same
+// scheduler key that was sent upstream.
+func (s *RateLimitService) handleGrokUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, upstreamModel string) {
+	if s == nil || account == nil || statusCode < http.StatusBadRequest {
+		return
+	}
+	(&OpenAIGatewayService{
+		accountRepo:      s.accountRepo,
+		rateLimitService: s,
+	}).applyGrokAccountUpstreamErrorPolicy(withGrokTeamRateLimitModel(ctx, upstreamModel), account, statusCode, headers, responseBody)
+}
+
+func (s *RateLimitService) rateLimitGrok(ctx context.Context, account *Account, resetAt time.Time) {
+	if s == nil || account == nil {
+		return
+	}
+	now := time.Now()
+	resetAt = normalizeGrokRateLimitResetAt(account, resetAt, now)
+
+	runtimeUntil := resetAt
+	if account.TempUnschedulableUntil != nil && account.TempUnschedulableUntil.After(runtimeUntil) {
+		runtimeUntil = *account.TempUnschedulableUntil
+	}
+	s.notifyAccountSchedulingBlocked(account, runtimeUntil, "429")
+	persistGrokRateLimit(ctx, s.accountRepo, account, resetAt)
+
+	if model, _ := ctx.Value(grokTeamRateLimitModelContextKey{}).(string); model != "" {
+		markGrokTeamModelRateLimit(account, model, resolveGrokTeamRateLimitUntil(resetAt, now))
+	}
+}
+
+func (s *RateLimitService) tempUnscheduleGrok(ctx context.Context, account *Account, cooldown time.Duration, reason string) {
+	if s == nil || account == nil {
+		return
+	}
+	until := time.Now().Add(cooldown)
+	if account.TempUnschedulableUntil != nil && account.TempUnschedulableUntil.After(until) {
+		until = *account.TempUnschedulableUntil
+	}
+	s.notifyAccountSchedulingBlocked(account, until, reason)
+	if s.accountRepo != nil {
+		stateCtx, cancel := openAIAccountStateContext(ctx)
+		defer cancel()
+		_ = s.accountRepo.SetTempUnschedulable(stateCtx, account.ID, until, reason)
+	}
+}
+
 // PreCheckUsage proactively checks local quota before dispatching a request.
 // Returns false when the account should be skipped.
 func (s *RateLimitService) PreCheckUsage(ctx context.Context, account *Account, requestedModel string) (bool, error) {

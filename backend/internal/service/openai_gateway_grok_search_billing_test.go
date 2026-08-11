@@ -5,6 +5,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -51,6 +52,12 @@ func TestDoGrokNativeResponsesJSON_ReconcilesRateLimitBeforeFailover(t *testing.
 	account := healthyGrokOAuthGatewayTestAccount(9903, "search-token")
 	account.Credentials["team_id"] = team
 	account.Credentials["model_mapping"] = map[string]any{"grok-4.5": "mapped-search-model"}
+	groupID := int64(9903)
+	account.GroupIDs = []int64{groupID}
+	fallback := Account{
+		ID: 9904, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 10, GroupIDs: []int64{groupID},
+		Credentials: map[string]any{"team_id": "native-search-fallback-" + team},
+	}
 	key := grokTeamModelRateLimitKey(grokTeamFingerprint(team), "mapped-search-model")
 	t.Cleanup(func() {
 		globalGrokTeamModelRateLimits.mu.Lock()
@@ -58,15 +65,24 @@ func TestDoGrokNativeResponsesJSON_ReconcilesRateLimitBeforeFailover(t *testing.
 		globalGrokTeamModelRateLimits.mu.Unlock()
 	})
 
-	repo := &mockAccountRepoForPlatform{accountsByID: map[int64]*Account{account.ID: account}}
+	repo := &grokNativePolicyRepoSpy{mockAccountRepoForPlatform: &mockAccountRepoForPlatform{
+		accounts:     []Account{*account, fallback},
+		accountsByID: map[int64]*Account{account.ID: account, fallback.ID: &fallback},
+	}}
+	blocker := &runtimeBlockRecorder{}
+	rateLimits := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	rateLimits.SetAccountRuntimeBlocker(blocker)
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusTooManyRequests,
 		Header:     http.Header{"Retry-After": []string{"60"}},
 		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"rate limited"}}`)),
 	}}
 	svc := &GatewayService{
+		cfg:              &config.Config{RunMode: config.RunModeSimple},
+		accountRepo:      repo,
+		groupRepo:        &mockGroupRepoForGateway{groups: map[int64]*Group{groupID: {ID: groupID, Name: "native-search", Platform: PlatformGrok}}},
 		httpUpstream:     upstream,
-		rateLimitService: NewRateLimitService(repo, nil, &config.Config{}, nil, nil),
+		rateLimitService: rateLimits,
 	}
 
 	_, _, err := svc.DoGrokNativeResponsesJSON(context.Background(), account, []byte(`{"model":"grok-4.5","input":"search"}`))
@@ -75,6 +91,134 @@ func TestDoGrokNativeResponsesJSON_ReconcilesRateLimitBeforeFailover(t *testing.
 	require.ErrorAs(t, err, &failoverErr)
 	require.Equal(t, http.StatusTooManyRequests, failoverErr.StatusCode)
 	require.True(t, isGrokTeamModelRateLimited(account, "mapped-search-model", time.Now()))
+	require.Equal(t, 1, repo.rateLimitedCalls)
+	require.Equal(t, 1, repo.updateExtraCalls)
+	require.Len(t, blocker.accounts, 1)
+
+	selected, err := svc.SelectAccountForModel(context.Background(), &groupID, "", "grok-4.5")
+	require.NoError(t, err)
+	require.Equal(t, fallback.ID, selected.ID)
+}
+
+func TestDoGrokNativeResponsesJSON_2xxSkipsGrokErrorPolicy(t *testing.T) {
+	account := &Account{
+		ID:          9905,
+		Platform:    PlatformGrok,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":                    "search-key",
+			"base_url":                   "https://api.x.ai/v1",
+			"custom_error_codes_enabled": true,
+			"custom_error_codes":         []any{float64(http.StatusOK)},
+		},
+	}
+	repo := &grokNativePolicyRepoSpy{mockAccountRepoForPlatform: &mockAccountRepoForPlatform{accountsByID: map[int64]*Account{account.ID: account}}}
+	blocker := &runtimeBlockRecorder{}
+	rateLimits := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	rateLimits.SetAccountRuntimeBlocker(blocker)
+	svc := &GatewayService{
+		httpUpstream: &httpUpstreamRecorder{resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"output":[]}`)),
+		}},
+		rateLimitService: rateLimits,
+	}
+
+	_, _, err := svc.DoGrokNativeResponsesJSON(context.Background(), account, []byte(`{"model":"grok-4.5","input":"search"}`))
+
+	require.NoError(t, err)
+	require.Zero(t, repo.setErrorCalls)
+	require.Zero(t, repo.rateLimitedCalls)
+	require.Zero(t, repo.tempUnschedCalls)
+	require.Zero(t, repo.updateExtraCalls)
+	require.Empty(t, blocker.accounts)
+}
+
+func TestDoGrokNativeResponsesJSON_ContentPolicy403SkipsGrokErrorPolicy(t *testing.T) {
+	account := healthyGrokOAuthGatewayTestAccount(9906, "search-token")
+	repo := &grokNativePolicyRepoSpy{mockAccountRepoForPlatform: &mockAccountRepoForPlatform{accountsByID: map[int64]*Account{account.ID: account}}}
+	blocker := &runtimeBlockRecorder{}
+	rateLimits := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	rateLimits.SetAccountRuntimeBlocker(blocker)
+	svc := &GatewayService{
+		httpUpstream: &httpUpstreamRecorder{resp: &http.Response{
+			StatusCode: http.StatusForbidden,
+			Header:     http.Header{},
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"code":"new_sensitive","message":"text is sensitive"}}`)),
+		}},
+		rateLimitService: rateLimits,
+	}
+
+	_, _, err := svc.DoGrokNativeResponsesJSON(context.Background(), account, []byte(`{"model":"grok-4.5","input":"search"}`))
+
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusForbidden, failoverErr.StatusCode)
+	require.Zero(t, repo.setErrorCalls)
+	require.Zero(t, repo.rateLimitedCalls)
+	require.Zero(t, repo.tempUnschedCalls)
+	require.Zero(t, repo.updateExtraCalls)
+	require.Empty(t, blocker.accounts)
+}
+
+func TestDoGrokNativeResponsesJSON_5xxKeepsRuntimeBlockWhenDurableWriteFails(t *testing.T) {
+	account := healthyGrokOAuthGatewayTestAccount(9907, "search-token")
+	repo := &grokNativePolicyRepoSpy{
+		mockAccountRepoForPlatform: &mockAccountRepoForPlatform{accountsByID: map[int64]*Account{account.ID: account}},
+		tempUnschedErr:             errors.New("durable write failed"),
+	}
+	blocker := &runtimeBlockRecorder{}
+	rateLimits := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	rateLimits.SetAccountRuntimeBlocker(blocker)
+	svc := &GatewayService{
+		httpUpstream: &httpUpstreamRecorder{resp: &http.Response{
+			StatusCode: http.StatusServiceUnavailable,
+			Header:     http.Header{},
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"upstream unavailable"}}`)),
+		}},
+		rateLimitService: rateLimits,
+	}
+
+	_, _, err := svc.DoGrokNativeResponsesJSON(context.Background(), account, []byte(`{"model":"grok-4.5","input":"search"}`))
+
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusServiceUnavailable, failoverErr.StatusCode)
+	require.Equal(t, 1, repo.tempUnschedCalls)
+	require.Len(t, blocker.accounts, 1)
+	require.Equal(t, account.ID, blocker.accounts[0].ID)
+}
+
+type grokNativePolicyRepoSpy struct {
+	*mockAccountRepoForPlatform
+	updateExtraCalls int
+	rateLimitedCalls int
+	tempUnschedCalls int
+	setErrorCalls    int
+	tempUnschedErr   error
+	rateLimitedErr   error
+}
+
+func (r *grokNativePolicyRepoSpy) UpdateExtra(_ context.Context, _ int64, _ map[string]any) error {
+	r.updateExtraCalls++
+	return nil
+}
+
+func (r *grokNativePolicyRepoSpy) SetRateLimited(_ context.Context, _ int64, _ time.Time) error {
+	r.rateLimitedCalls++
+	return r.rateLimitedErr
+}
+
+func (r *grokNativePolicyRepoSpy) SetTempUnschedulable(_ context.Context, _ int64, _ time.Time, _ string) error {
+	r.tempUnschedCalls++
+	return r.tempUnschedErr
+}
+
+func (r *grokNativePolicyRepoSpy) SetError(_ context.Context, _ int64, _ string) error {
+	r.setErrorCalls++
+	return nil
 }
 
 func TestForwardGrokResponses_PropagatesSearchCountFromJSON(t *testing.T) {
