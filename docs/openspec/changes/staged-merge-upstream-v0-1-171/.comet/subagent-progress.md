@@ -4,18 +4,18 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Current task: `Task 31: 闭合 Grok 定价、生成物与 173 migrations`
-- OpenSpec mapping: `6.6`
-- Stage: `task-complete`
-- Review/fix round: `1/2`
+- Current task: `Task 32: 运行 v0.1.173 全量门禁并关闭矩阵`
+- OpenSpec mapping: `6.7`
+- Stage: `task-start`
+- Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
-- Task start HEAD: `d4d9e4ab9af1cf26acf7c876be092ca50588483c`
-- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-31-brief.md`
-- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-31-report.md`
-- Dependency: Task 28 usage dimensions and Task 30 Channel Monitor schema/privacy are complete
-- TDD rule: baseline first; every concrete compatibility gap requires direct RED before minimal production fix
-- Risk signals: pricing field parity、Ent ownership、auth cache snapshot、24 migration blobs、Docker-only migration behavior
-- Hard boundary: no migration SQL edits; source and generated output share ownership; migration 220 backs up before platform-scoped cleanup; no remote integration
+- Task start HEAD: `96454a7503f3bb02cd9a0a45f9e636b23dabf2d7`
+- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-32-brief.md`
+- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-32-report.md`
+- Dependency: Tasks 27-31 and OpenSpec 6.2-6.6 are complete
+- TDD rule: verification-only by default; any product failure is isolated into an owning-capability remediation with direct RED before a minimal fix
+- Risk signals: fresh full-suite failures, intermediate build, full lint/typecheck, generate stability, conflict artifacts, Docker-only integration and matrix gaps
+- Hard boundary: no product remediation inside Task 32; no VERSION/migration SQL/generated/dependency/selector edits and no remote integration
 - Implementer: `ses_016a4ff6affeoRN1EoiY0Sy1px` returned `DONE_WITH_CONCERNS`
 - Implementation commit: `ff58b07e14d563296477c74bfb3573e765bec20c` (parent `3f1fda732af1fb59d32f2afcd6dbba6caf88ab9b`)
 - Genuine RED: paginated UsageLog SQLMock fixtures exposed 59 persisted values versus 61 list scan targets (generated id + has_detail)
@@ -240,3 +240,7 @@
 - Task 31 migration integration: exact top-level command compiled but TestMain skipped because Docker is unavailable; migration 220 runtime remains `UNVERIFIED`
 - Task 31 non-blocking residuals: full frontend locale-key and full service Channel Monitor failures have no Task 31 diff and are deferred to later full verification/owning scope
 - Task 31 status: complete; OpenSpec 6.6 complete
+- Task 32 brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-32-brief.md`
+- Task 32 start HEAD: `96454a750`
+- Task 32 boundary: verification and build-ledger only; any product failure returns BLOCKED for a separate owning-capability remediation
+- Task 32 status: five canonical focused bundles, full local gates, generation stability, conflict scan, conditional integration and v0.1.173 matrix closure pending
