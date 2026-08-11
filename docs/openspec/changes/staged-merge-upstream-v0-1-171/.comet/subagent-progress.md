@@ -4,18 +4,18 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Current task: `Task 34: 在最终 173 HEAD 重跑门禁并验证四段拓扑`
+- Current task: `Task 35: 完成 v0.1.173 thorough review 和最终 Verify 报告`
 - OpenSpec mapping: `6.8`
 - Stage: `task-start`
 - Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
-- Task start HEAD: `36d12f9c0653862cdb82cc942668db1cc4a33ec0`
-- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-34-brief.md`
-- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-34-report.md`
-- Dependency: Tasks 32-33 complete; VERSION committed as `0.1.173.1`
-- TDD rule: verification-only; any failure blocks and returns to the owning task instead of being fixed here
-- Risk signals: stale pre-bump evidence, full gate failure, generated drift, wrong merge second parent, duplicate merge node, migration identity mismatch or Docker skip misreported as PASS
-- Hard boundary: no file modifications or commits; no remote integration
+- Task start HEAD: `cd2879c7b13016fcba950eddf85975ffa2617191`
+- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-35-brief.md`
+- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-35-report.md`
+- Dependency: Task 34 verifier PASS and reviewer `Spec: PASS`, `Quality: APPROVED`
+- TDD rule: verification/report-only; any Critical/Important product finding returns to the owning capability task
+- Risk signals: incomplete extension-range review, stale historical Verify promoted to current, matrix gap, missing strict validation, Docker skip misreported as PASS or report commit scope drift
+- Hard boundary: final evidence commit contains only existing build ledger and verify report; no product/selector/remote operations
 - Implementer: `ses_016a4ff6affeoRN1EoiY0Sy1px` returned `DONE_WITH_CONCERNS`
 - Implementation commit: `ff58b07e14d563296477c74bfb3573e765bec20c` (parent `3f1fda732af1fb59d32f2afcd6dbba6caf88ab9b`)
 - Genuine RED: paginated UsageLog SQLMock fixtures exposed 59 persisted values versus 61 list scan targets (generated id + has_detail)
@@ -269,3 +269,9 @@
 - Task 34 brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-34-brief.md`
 - Task 34 start HEAD: `36d12f9c0653862cdb82cc942668db1cc4a33ec0`
 - Task 34 status: final gates, four-stage topology, 24 committed migration identities and Docker-conditional integration pending
+- Task 34 verifier `ses_00fdd8205ffeYVhzYIBXa6it6J`: fresh full gates, final build, lint/typecheck, two stable generates, 24/24 identities and four-stage topology PASS; migration 220 Docker path `UNVERIFIED`
+- Task 34 initial reviewer `ses_00fc7c887ffeEsZaIyNGkodXyv`: requested exact integration/boundary command transcription; ignored report corrected from a fresh lightweight recheck
+- Task 34 final reviewer `ses_00fc7c887ffeEsZaIyNGkodXyv`: no findings; `Spec: PASS`, `Quality: APPROVED`
+- Task 34 status: complete; no product or tracked evidence commit by design
+- Task 35 brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-35-brief.md`
+- Task 35 status: strict validation, full extension-range review, matrix reconciliation and two-report evidence commit pending

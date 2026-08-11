@@ -2254,7 +2254,7 @@ Commit-NamedPaths -Message 'chore: bump version to 0.1.173.1' -Paths @('backend/
 
 ### Task 34: 在最终 173 HEAD 重跑门禁并验证四段拓扑
 
-- [ ] Task 34: 在最终 173 HEAD 重跑门禁并验证四段拓扑
+- [x] Task 34: 在最终 173 HEAD 重跑门禁并验证四段拓扑
 
 **映射 OpenSpec：**6.8
 
