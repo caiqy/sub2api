@@ -4,18 +4,18 @@
 - Plan: `docs/superpowers/plans/2026-08-06-staged-merge-upstream-v0-1-171.md`
 - Review mode: `thorough`
 - TDD mode: `tdd`
-- Current task: `Task 32: 运行 v0.1.173 全量门禁并关闭矩阵`
-- OpenSpec mapping: `6.7`
-- Stage: `task-complete`
-- Review/fix round: `1/2`
+- Current task: `Task 33: 将最终版本更新为 0.1.173.1`
+- OpenSpec mapping: `6.8`
+- Stage: `task-start`
+- Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
-- Task start HEAD: `96454a7503f3bb02cd9a0a45f9e636b23dabf2d7`
-- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-32-brief.md`
-- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-32-report.md`
-- Dependency: Tasks 27-31 and OpenSpec 6.2-6.6 are complete
-- TDD rule: verification-only by default; any product failure is isolated into an owning-capability remediation with direct RED before a minimal fix
-- Risk signals: fresh full-suite failures, intermediate build, full lint/typecheck, generate stability, conflict artifacts, Docker-only integration and matrix gaps
-- Hard boundary: no product remediation inside Task 32; no VERSION/migration SQL/generated/dependency/selector edits and no remote integration
+- Task start HEAD: `39e70df96888b54ec540593d37a20f516d6bab27`
+- Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-33-brief.md`
+- Report: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-33-report.md`
+- Dependency: Task 32 and OpenSpec 6.7 are complete with matrix `gap=0`
+- TDD rule: not applicable to the one-line version authority update; Task 34 performs fresh post-commit verification
+- Risk signals: wrong pre-version, extra file in commit, process version, or stale Task 32 evidence reused after bump
+- Hard boundary: only `backend/cmd/server/VERSION`; no product/generated/migration/dependency/selector edits
 - Implementer: `ses_016a4ff6affeoRN1EoiY0Sy1px` returned `DONE_WITH_CONCERNS`
 - Implementation commit: `ff58b07e14d563296477c74bfb3573e765bec20c` (parent `3f1fda732af1fb59d32f2afcd6dbba6caf88ab9b`)
 - Genuine RED: paginated UsageLog SQLMock fixtures exposed 59 persisted values versus 61 list scan targets (generated id + has_detail)
@@ -260,3 +260,6 @@
 - Task 32 aggregate re-review `ses_00fec4432ffe7ADCTKZ07MWjdu`: no Critical/Important/Minor findings; `Spec: PASS`, `Quality: APPROVED`
 - Task 32 Docker residual: Docker absent from PATH and migration 220 integration target exits through explicit skip; runtime remains `UNVERIFIED`, no remote substitute used
 - Task 32 status: complete; OpenSpec 6.7 complete; matrix `gap=0`
+- Task 33 brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-33-brief.md`
+- Task 33 precondition: VERSION exactly `0.1.171.1`; worktree only prohibited selector
+- Task 33 status: final version write and one-file commit pending
