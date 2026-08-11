@@ -6,8 +6,8 @@
 - TDD mode: `tdd`
 - Current task: `Task 32: 运行 v0.1.173 全量门禁并关闭矩阵`
 - OpenSpec mapping: `6.7`
-- Stage: `task-start`
-- Review/fix round: `0/2`
+- Stage: `remediation`
+- Review/fix round: `1/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `96454a7503f3bb02cd9a0a45f9e636b23dabf2d7`
 - Brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-32-brief.md`
@@ -244,3 +244,10 @@
 - Task 32 start HEAD: `96454a750`
 - Task 32 boundary: verification and build-ledger only; any product failure returns BLOCKED for a separate owning-capability remediation
 - Task 32 status: five canonical focused bundles, full local gates, generation stability, conflict scan, conditional integration and v0.1.173 matrix closure pending
+- Task 32 verifier `ses_011449f8effePib4V01F5Hh4M1`: returned `BLOCKED`; 5/5 focused, build, lint/typecheck, generate, boundaries and 24 identities PASS; `make test`, full frontend and full service FAIL; Docker `UNVERIFIED`; matrix `gap=2`
+- Task 32 blocker attribution: historical OAuth WebSocket test fixture leaks to external ChatGPT; Task 29 locale keys are nested below `accounts.status`; Task 30 typed-nil settings admission panics and one legacy settings stub lacks current `GetMultiple` behavior
+- Task 32 remediation decision: user approved three independent minimal designs with separate commits and reviews
+- Task 32 OAuth fixture brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-32-remediation-oauth-ws-brief.md`
+- Task 32 locale brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-32-remediation-locale-brief.md`
+- Task 32 Channel Monitor brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-32-remediation-channel-monitor-brief.md`
+- Task 32 status: authorized remediation in progress; ledger remains ineligible until all non-Docker gates PASS and matrix `gap=0`
