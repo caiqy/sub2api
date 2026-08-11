@@ -2315,7 +2315,7 @@ $finalIntegration
 
 ### Task 35: 完成 v0.1.173 thorough review 和最终 Verify 报告
 
-- [ ] Task 35: 完成 v0.1.173 thorough review 和最终 Verify 报告
+- [x] Task 35: 完成 v0.1.173 thorough review 和最终 Verify 报告
 
 **映射 OpenSpec：**6.8
 

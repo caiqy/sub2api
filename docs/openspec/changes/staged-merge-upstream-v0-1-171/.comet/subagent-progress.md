@@ -275,3 +275,11 @@
 - Task 34 status: complete; no product or tracked evidence commit by design
 - Task 35 brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-35-brief.md`
 - Task 35 status: strict validation, full extension-range review, matrix reconciliation and two-report evidence commit pending
+- Task 35 remediation: Voice/search sticky, Realtime audit and native-search cooldown findings closed; STT restored to exact upstream v0.1.173 behavior per user-confirmed merge-only scope
+- Task 35 focused reviewers: `ses_00f6ecb1effejQvEh9TudxMC1g`, `ses_00f3ff64bffe7cqn7yQ4HlS1k3`, and `ses_00ed4b488ffeAZb7H8ewoM3I9B` each finished with open findings 0, `Spec: PASS`, `Quality: APPROVED`
+- Task 35 final tested HEAD: `79ff083b5ea987a22c16bbcc2a6bef9c0b142685`; VERSION `0.1.173.1`
+- Task 35 fresh gates: `make test`, final build, backend/frontend lint, frontend typecheck, two stable generates, 24/24 migration identities, four-stage topology, static boundaries and strict validation PASS
+- Task 35 residuals: migration 220 Docker integration and Task 30 race verification remain `UNVERIFIED`; no remote substitute used
+- Task 35 thorough reviewer `ses_00fbde930ffe5kGRbFCuWCmQxP`: `open findings: 0`, `gap=0`, `Spec: PASS`, `Quality: APPROVED`, `Ready for final report: YES`
+- Task 35 report commit: `4ce518ac1 docs: record v0.1.173 verification`; exactly the build ledger and verify report
+- Task 35 status: complete; OpenSpec 6.8 complete; next Comet Verify routing pending; no push/tag/release/deploy/archive performed
