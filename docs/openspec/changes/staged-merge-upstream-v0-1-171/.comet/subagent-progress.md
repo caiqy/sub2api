@@ -6,7 +6,7 @@
 - TDD mode: `tdd`
 - Current task: `Task 33: 将最终版本更新为 0.1.173.1`
 - OpenSpec mapping: `6.8`
-- Stage: `task-start`
+- Stage: `task-complete`
 - Review/fix round: `0/2`
 - Model: Task 工具当前未暴露 model 参数，使用平台默认 model
 - Task start HEAD: `39e70df96888b54ec540593d37a20f516d6bab27`
@@ -263,3 +263,6 @@
 - Task 33 brief: `.superpowers/sdd/2026-08-06-staged-merge-upstream-v0-1-171/task-33-brief.md`
 - Task 33 precondition: VERSION exactly `0.1.171.1`; worktree only prohibited selector
 - Task 33 status: final version write and one-file commit pending
+- Task 33 commit: `8f91a80f2 chore: bump version to 0.1.173.1`; exactly one file changed
+- Task 33 verification: committed VERSION is `0.1.173.1`; no intermediate `0.1.172.1` was created; worktree only prohibited selector
+- Task 33 status: complete; OpenSpec 6.8 remains pending Tasks 34-35 final gates/topology/review/report

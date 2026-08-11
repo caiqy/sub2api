@@ -2224,7 +2224,7 @@ Commit-NamedPaths -Message 'docs: record v0.1.173 gates' -Paths @($buildLedger)
 
 ### Task 33: 将最终版本更新为 0.1.173.1
 
-- [ ] Task 33: 将最终版本更新为 0.1.173.1
+- [x] Task 33: 将最终版本更新为 0.1.173.1
 
 **映射 OpenSpec：**6.8
 
