@@ -105,6 +105,123 @@ func TestUpdateSettingsGrokDefaultBaseURLModeIsWritable(t *testing.T) {
 	require.Equal(t, "Example Gateway", repo.values[service.SettingKeySiteName])
 }
 
+func TestUpdateSettingsChannelMonitorModeAndThroughputAreWritable(t *testing.T) {
+	h, repo := newStepUpSwitchTestHandler(t, map[string]string{
+		service.SettingKeyChannelMonitorMode:           service.ChannelMonitorModeV1,
+		service.SettingKeyChannelMonitorHideThroughput: "true",
+	})
+
+	rec := doUpdateSettings(t, h, map[string]any{
+		"channel_monitor_mode": service.ChannelMonitorModeV2,
+	}, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, service.ChannelMonitorModeV2, repo.values[service.SettingKeyChannelMonitorMode])
+	require.Equal(t, "true", repo.values[service.SettingKeyChannelMonitorHideThroughput])
+
+	rec = doUpdateSettings(t, h, map[string]any{
+		"channel_monitor_hide_throughput": false,
+	}, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, service.ChannelMonitorModeV2, repo.values[service.SettingKeyChannelMonitorMode])
+	require.Equal(t, "false", repo.values[service.SettingKeyChannelMonitorHideThroughput])
+
+	rec = httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings", nil)
+	h.GetSettings(c)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp response.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	data, ok := resp.Data.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, service.ChannelMonitorModeV2, data["channel_monitor_mode"])
+	require.Equal(t, false, data["channel_monitor_hide_throughput"])
+}
+
+func TestDiffSettingsIncludesChannelMonitorModeAndThroughput(t *testing.T) {
+	changed := diffSettings(
+		&service.SystemSettings{
+			ChannelMonitorMode:           service.ChannelMonitorModeV1,
+			ChannelMonitorHideThroughput: true,
+		},
+		&service.SystemSettings{
+			ChannelMonitorMode:           service.ChannelMonitorModeV2,
+			ChannelMonitorHideThroughput: false,
+		},
+		&service.AuthSourceDefaultSettings{},
+		&service.AuthSourceDefaultSettings{},
+		UpdateSettingsRequest{},
+	)
+
+	require.Contains(t, changed, "channel_monitor_mode")
+	require.Contains(t, changed, "channel_monitor_hide_throughput")
+}
+
+func TestUpdateSettingsRegistrationEmailDomainQuotaIsWritableAndPreserved(t *testing.T) {
+	h, repo := newStepUpSwitchTestHandler(t, map[string]string{
+		service.SettingKeyRegistrationEmailDomainQuotaEnabled: "true",
+		service.SettingKeySiteName:                            "Example Gateway",
+	})
+
+	rec := doUpdateSettings(t, h, map[string]any{"site_name": "Updated Gateway"}, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "true", repo.values[service.SettingKeyRegistrationEmailDomainQuotaEnabled])
+
+	for _, enabled := range []bool{false, true} {
+		rec = doUpdateSettings(t, h, map[string]any{
+			"registration_email_domain_quota_enabled": enabled,
+		}, nil)
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Equal(t, jsonBool(enabled), repo.values[service.SettingKeyRegistrationEmailDomainQuotaEnabled])
+		require.Equal(t, enabled, settingsResponseData(t, rec)["registration_email_domain_quota_enabled"])
+	}
+}
+
+func TestUpdateSettingsAccountSchedulingThresholdsAreWritableAndPreserved(t *testing.T) {
+	h, repo := newStepUpSwitchTestHandler(t, map[string]string{
+		service.SettingKeyAccountSchedulingThresholds: `{"openai":85,"anthropic":86,"grok":87}`,
+	})
+
+	rec := doUpdateSettings(t, h, map[string]any{
+		"account_scheduling_thresholds": map[string]int{"openai": 91},
+	}, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.JSONEq(t, `{"openai":91,"anthropic":100,"grok":100}`, repo.values[service.SettingKeyAccountSchedulingThresholds])
+	require.Equal(t, map[string]any{
+		"openai": float64(91), "anthropic": float64(100), "grok": float64(100),
+	}, settingsResponseData(t, rec)["account_scheduling_thresholds"])
+
+	rec = doUpdateSettings(t, h, map[string]any{"site_name": "Threshold Gateway"}, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.JSONEq(t, `{"openai":91,"anthropic":100,"grok":100}`, repo.values[service.SettingKeyAccountSchedulingThresholds])
+
+	getRec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(getRec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings", nil)
+	h.GetSettings(c)
+	require.Equal(t, http.StatusOK, getRec.Code)
+	require.Equal(t, map[string]any{
+		"openai": float64(91), "anthropic": float64(100), "grok": float64(100),
+	}, settingsResponseData(t, getRec)["account_scheduling_thresholds"])
+}
+
+func jsonBool(value bool) string {
+	if value {
+		return "true"
+	}
+	return "false"
+}
+
+func settingsResponseData(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
+	t.Helper()
+	var resp response.Response
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	data, ok := resp.Data.(map[string]any)
+	require.True(t, ok)
+	return data
+}
+
 func requireGrokSettingsResponse(t *testing.T, rec *httptest.ResponseRecorder, defaultText string, crossClientEnabled bool, baseURLMode string) {
 	t.Helper()
 	var resp response.Response
@@ -136,6 +253,22 @@ func TestUpdateSettingsRejectsTwoCaptchaProviders(t *testing.T) {
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Contains(t, rec.Body.String(), "cannot be enabled at the same time")
+}
+
+func TestUpdateSettingsRejectsClearingEnabledTurnstileSiteKey(t *testing.T) {
+	for _, siteKey := range []string{"", "   "} {
+		t.Run(siteKey, func(t *testing.T) {
+			h, repo := newStepUpSwitchTestHandler(t, map[string]string{
+				service.SettingKeyTurnstileEnabled:   "true",
+				service.SettingKeyTurnstileSiteKey:   "site-key",
+				service.SettingKeyTurnstileSecretKey: "secret-key",
+			})
+
+			rec := doUpdateSettings(t, h, map[string]any{"turnstile_site_key": siteKey}, nil)
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			require.Equal(t, "site-key", repo.values[service.SettingKeyTurnstileSiteKey])
+		})
+	}
 }
 
 func TestUpdateSettingsRequiresFourTencentCaptchaCredentialsWhenEnabled(t *testing.T) {

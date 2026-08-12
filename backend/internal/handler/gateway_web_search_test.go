@@ -75,6 +75,7 @@ func TestGatewayHandler_WebSearchReusesStandardSessionStickyAccount(t *testing.T
 		Group: group,
 	}
 	router := gin.New()
+	router.Use(middleware.UsageDetailCapture())
 	router.Use(func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.UserID, Concurrency: 1})
@@ -160,6 +161,7 @@ func TestGatewayHandler_WebSearchFailoverRecordsFinalMappedUpstreamModel(t *test
 		Group: group,
 	}
 	router := gin.New()
+	router.Use(middleware.UsageDetailCapture())
 	router.Use(func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.UserID, Concurrency: 1})
@@ -183,6 +185,10 @@ func TestGatewayHandler_WebSearchFailoverRecordsFinalMappedUpstreamModel(t *test
 		require.Equal(t, "grok-web-search", usageLog.Model)
 		require.NotNil(t, usageLog.UpstreamModel)
 		require.Equal(t, "second-search-model", *usageLog.UpstreamModel)
+		require.NotNil(t, usageLog.DetailSnapshot)
+		requireRequestPreviewSnapshot(t, usageLog.DetailSnapshot.RequestBody, `{"query":"latest news","max_results":5}`)
+		require.Contains(t, usageLog.DetailSnapshot.ResponseBody, `"query":"latest news"`)
+		require.Contains(t, usageLog.DetailSnapshot.ResponseBody, `"results"`)
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for native search usage record")
 	}

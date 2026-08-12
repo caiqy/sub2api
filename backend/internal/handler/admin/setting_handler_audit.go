@@ -2,6 +2,7 @@ package admin
 
 import (
 	"log/slog"
+	"slices"
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -10,12 +11,16 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func (h *SettingHandler) auditSettingsUpdate(c *gin.Context, before *service.SystemSettings, after *service.SystemSettings, beforeAuthSourceDefaults *service.AuthSourceDefaultSettings, afterAuthSourceDefaults *service.AuthSourceDefaultSettings, req UpdateSettingsRequest) {
+func (h *SettingHandler) auditSettingsUpdate(c *gin.Context, before *service.SystemSettings, after *service.SystemSettings, beforeAuthSourceDefaults *service.AuthSourceDefaultSettings, afterAuthSourceDefaults *service.AuthSourceDefaultSettings, req UpdateSettingsRequest, omitted service.OmittedSettingKeys) {
 	if before == nil || after == nil {
 		return
 	}
 
 	changed := diffSettings(before, after, beforeAuthSourceDefaults, afterAuthSourceDefaults, req)
+	changed = slices.DeleteFunc(changed, func(key string) bool {
+		_, skip := omitted[key]
+		return skip
+	})
 	if len(changed) == 0 {
 		return
 	}
@@ -570,8 +575,14 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.ChannelMonitorEnabled != after.ChannelMonitorEnabled {
 		changed = append(changed, "channel_monitor_enabled")
 	}
+	if before.ChannelMonitorMode != after.ChannelMonitorMode {
+		changed = append(changed, "channel_monitor_mode")
+	}
 	if before.ChannelMonitorDefaultIntervalSeconds != after.ChannelMonitorDefaultIntervalSeconds {
 		changed = append(changed, "channel_monitor_default_interval_seconds")
+	}
+	if before.ChannelMonitorHideThroughput != after.ChannelMonitorHideThroughput {
+		changed = append(changed, "channel_monitor_hide_throughput")
 	}
 	if before.AvailableChannelsEnabled != after.AvailableChannelsEnabled {
 		changed = append(changed, "available_channels_enabled")

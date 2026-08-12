@@ -183,6 +183,138 @@ func TestOpenAIAgentIdentityErrorRedactionDoesNotLeakCredentialValues(t *testing
 	require.NotContains(t, string(redacted), oauthValue)
 	require.NotContains(t, string(redacted), "AgentAssertion abc123")
 	require.Contains(t, string(redacted), "[redacted]")
+
+	account.Credentials["access_token"] = key.runtimeID + "-overlap-secret"
+	redacted = svc.redactAgentIdentitySensitiveBody(context.Background(), account, []byte(key.runtimeID+"-overlap-secret"))
+	require.Equal(t, "[redacted]", string(redacted))
+}
+
+func TestOpenAIAgentIdentityShadowRedactionFailsClosedWhenParentCannotResolve(t *testing.T) {
+	parentID := int64(99)
+	shadow := &Account{
+		ID:              25,
+		Platform:        PlatformOpenAI,
+		Type:            AccountTypeOAuth,
+		ParentAccountID: &parentID,
+	}
+	svc := &OpenAIGatewayService{accountRepo: newStubCredRepo(&Account{
+		ID:       parentID,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+	})}
+
+	redacted := svc.redactAgentIdentitySensitiveBody(context.Background(), shadow, []byte("must-not-leak"))
+	require.Equal(t, "[agent identity error body omitted]", string(redacted))
+}
+
+func TestOpenAIAgentIdentityPassthroughErrorsAreRedactedBeforeCapture(t *testing.T) {
+	key, privateKey := newTestAgentIdentityKey(t)
+	oauthValue := key.runtimeID + "-oauth-value"
+	account := &Account{
+		ID:       25,
+		Name:     "agent-identity",
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"auth_mode":         OpenAIAuthModeAgentIdentity,
+			"agent_runtime_id":  key.runtimeID,
+			"agent_private_key": privateKey,
+			"task_id":           key.taskID,
+			"access_token":      oauthValue,
+		},
+	}
+	secrets := []string{key.runtimeID, key.taskID, oauthValue, "AgentAssertion fake-secret"}
+	upstreamBody := `{"error":{"message":"` + strings.Join(secrets, " ") + `"}}`
+	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{
+		LogUpstreamErrorBody:         true,
+		LogUpstreamErrorBodyMaxBytes: 4096,
+	}}}
+
+	t.Run("ordinary", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		collector := &usageDetailCollectorStub{}
+		c.Set(UsageDetailCaptureContextKey, collector)
+		resp := &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+		}
+
+		require.Error(t, svc.handleErrorResponsePassthrough(context.Background(), resp, c, account, nil))
+		assertAgentIdentitySecretsRedacted(t, secrets, collector.responseBody, collector.upstreamBody, lastOpsUpstreamError(t, c).Detail)
+	})
+
+	t.Run("failover", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		resp := &http.Response{
+			StatusCode: http.StatusServiceUnavailable,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+		}
+
+		err := svc.handleFailoverErrorResponsePassthrough(context.Background(), resp, c, account, nil)
+		var failoverErr *UpstreamFailoverError
+		require.ErrorAs(t, err, &failoverErr)
+		assertAgentIdentitySecretsRedacted(t, secrets, string(failoverErr.ResponseBody), lastOpsUpstreamError(t, c).Detail)
+	})
+}
+
+func TestOpenAIAgentIdentityForwardFailoverMessageIsRedacted(t *testing.T) {
+	key, privateKey := newTestAgentIdentityKey(t)
+	account := &Account{
+		ID: 26, Name: "agent-identity", Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Status: StatusActive, Schedulable: true, Concurrency: 1,
+		Credentials: map[string]any{
+			"auth_mode":          OpenAIAuthModeAgentIdentity,
+			"agent_runtime_id":   key.runtimeID,
+			"agent_private_key":  privateKey,
+			"task_id":            key.taskID,
+			"chatgpt_account_id": "account-agent-forward",
+		},
+	}
+	upstreamBody := `{"error":{"message":"temporary failure for ` + key.runtimeID + `"}}`
+	svc := &OpenAIGatewayService{
+		cfg:         &config.Config{Gateway: config.GatewayConfig{LogUpstreamErrorBody: true}},
+		accountRepo: &agentIdentityForwardRepo{account: account},
+		httpUpstream: &httpUpstreamRecorder{resp: &http.Response{
+			StatusCode: http.StatusServiceUnavailable,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+		}},
+	}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"gpt-5.4","input":"hello","stream":false}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+
+	_, err := svc.Forward(context.Background(), c, account, body)
+	require.Error(t, err)
+	event := lastOpsUpstreamError(t, c)
+	require.NotContains(t, event.Message, key.runtimeID)
+	require.Contains(t, event.Message, "[redacted]")
+}
+
+func lastOpsUpstreamError(t *testing.T, c *gin.Context) *OpsUpstreamErrorEvent {
+	t.Helper()
+	raw, ok := c.Get(OpsUpstreamErrorsKey)
+	require.True(t, ok)
+	events, ok := raw.([]*OpsUpstreamErrorEvent)
+	require.True(t, ok)
+	require.NotEmpty(t, events)
+	return events[len(events)-1]
+}
+
+func assertAgentIdentitySecretsRedacted(t *testing.T, secrets []string, values ...string) {
+	t.Helper()
+	joined := strings.Join(values, "\n")
+	for _, secret := range secrets {
+		require.NotContains(t, joined, secret)
+	}
+	require.Contains(t, joined, "[redacted]")
 }
 
 func TestOpenAIAuthenticationHeadersPreserveOAuthPATAndAPIKeyBearerModes(t *testing.T) {

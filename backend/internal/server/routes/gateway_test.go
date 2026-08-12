@@ -526,6 +526,47 @@ func TestGatewayRoutesBareOpenAIImagesPathsInstallUsageDetailCapture(t *testing.
 	}
 }
 
+func TestGatewayRoutesBareVoiceAndSearchPathsInstallUsageDetailCapture(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	seen := map[string]bool{}
+
+	RegisterGatewayRoutes(
+		router,
+		&handler.Handlers{
+			Gateway:       &handler.GatewayHandler{},
+			OpenAIGateway: &handler.OpenAIGatewayHandler{},
+		},
+		servermiddleware.APIKeyAuthMiddleware(func(c *gin.Context) {
+			_, ok := c.Get(service.UsageDetailCaptureContextKey)
+			seen[c.Request.URL.Path] = ok
+			groupID := int64(1)
+			c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{
+				GroupID: &groupID,
+				Group:   &service.Group{Platform: service.PlatformGrok},
+			})
+			c.Next()
+		}),
+		nil, nil, nil, nil, nil, nil,
+		&config.Config{},
+	)
+
+	for _, route := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/tts"},
+		{http.MethodPost, "/stt"},
+		{http.MethodGet, "/realtime"},
+		{http.MethodPost, "/web_search"},
+	} {
+		req := httptest.NewRequest(route.method, route.path, strings.NewReader(`{"query":"test"}`))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(httptest.NewRecorder(), req)
+		require.True(t, seen[route.path], "path=%s should install usageDetailCapture before apiKeyAuth", route.path)
+	}
+}
+
 func TestGatewayRoutesOpenAICountTokensPathIsRegistered(t *testing.T) {
 	router := newGatewayRoutesTestRouter(service.PlatformOpenAI)
 

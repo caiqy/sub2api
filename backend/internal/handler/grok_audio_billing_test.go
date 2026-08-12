@@ -426,6 +426,19 @@ func TestGrokVoice_TTSAudioIsOmittedFromUsageSnapshots(t *testing.T) {
 		require.NotContains(t, snapshot, prompt)
 		require.NotContains(t, snapshot, audio)
 	}
+
+	usageLog := <-env.usageRepo.created
+	require.NotNil(t, usageLog.DetailSnapshot)
+	require.Contains(t, usageLog.DetailSnapshot.ResponseBody, "[voice payload omitted]")
+	for _, snapshot := range []string{
+		usageLog.DetailSnapshot.RequestBody,
+		usageLog.DetailSnapshot.UpstreamRequestBody,
+		usageLog.DetailSnapshot.UpstreamResponseBody,
+		usageLog.DetailSnapshot.ResponseBody,
+	} {
+		require.NotContains(t, snapshot, prompt)
+		require.NotContains(t, snapshot, audio)
+	}
 }
 
 func TestGrokVoice_TTSFailoverUsesSelectedAccountMappedModel(t *testing.T) {
@@ -610,20 +623,26 @@ func TestRecordGrokVoiceUsage_RealtimePreservesMappedUpstreamModel(t *testing.T)
 		Credentials: map[string]any{"api_key": "voice-key", "base_url": "https://api.x.ai/v1"},
 	}
 	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &terminalUsageGrokAccountRepo{openAIRetryAccountRepoStub{accounts: []*service.Account{account}}}, &grokMediaRequestRecorder{})
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodGet, "/realtime?model=grok-voice-latest", nil)
 	result := &service.OpenAIForwardResult{
 		Model:         "grok-voice-latest",
 		UpstreamModel: "mapped-realtime",
 		AudioUsage:    &service.AudioUsage{Mode: "realtime", DurationOrUnits: 1},
 	}
-
-	env.handler.recordGrokVoiceUsage(c, env.apiKey, account, nil, "realtime", nil, result)
+	router := gin.New()
+	router.Use(middleware.UsageDetailCapture())
+	router.GET("/realtime", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "completed"})
+		env.handler.recordGrokVoiceUsage(c, env.apiKey, account, nil, "realtime", nil, result)
+	})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/realtime?model=grok-voice-latest", nil))
+	require.Equal(t, http.StatusOK, recorder.Code)
 	usageLog := <-env.usageRepo.created
 	require.Equal(t, "grok-voice-latest", usageLog.Model)
 	require.NotNil(t, usageLog.UpstreamModel)
 	require.Equal(t, "mapped-realtime", *usageLog.UpstreamModel)
+	require.NotNil(t, usageLog.DetailSnapshot)
+	require.Contains(t, usageLog.DetailSnapshot.ResponseBody, "completed")
 }
 
 func grokVoiceMultipartModelAndAudio(t *testing.T, body []byte, contentType string) (string, []byte) {

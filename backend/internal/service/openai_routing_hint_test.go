@@ -243,6 +243,9 @@ func TestOpenAIRoutingDiagnosticsUseFinalDerivedValuesOnly(t *testing.T) {
 	c.Request.Header.Set(openAICodexRoutingHintHeader, "model=caller-secret")
 	_, err := svc.buildUpstreamRequest(context.Background(), c, account, body, "oauth-secret", false, "", true)
 	require.NoError(t, err)
+	passthroughReq, err := svc.buildUpstreamRequestOpenAIPassthrough(context.Background(), c, account, body, body, "oauth-secret")
+	require.NoError(t, err)
+	defer passthroughReq.Body.Close()
 
 	decision := OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2}
 	_, _, err = svc.buildOpenAIWSHeaders(
@@ -257,6 +260,7 @@ func TestOpenAIRoutingDiagnosticsUseFinalDerivedValuesOnly(t *testing.T) {
 	require.True(t, logSink.ContainsFieldValue("final_service_tier", "priority"))
 	require.True(t, logSink.ContainsFieldValue("routing_hint_generated", "true"))
 	require.True(t, logSink.ContainsFieldValue("transport", "http"))
+	require.True(t, logSink.ContainsFieldValue("transport", "http_passthrough"))
 	require.True(t, logSink.ContainsFieldValue("transport", string(OpenAIUpstreamTransportResponsesWebsocketV2)))
 	require.True(t, logSink.ContainsFieldValue("ws_affinity_decision", "not_applicable"))
 	require.True(t, logSink.ContainsFieldValue("ws_affinity_decision", "soft_routing_hint"))

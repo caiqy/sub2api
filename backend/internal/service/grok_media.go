@@ -764,6 +764,7 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 		}
 		upstreamReq.Header.Set("Content-Type", contentType)
 	}
+	account.ApplyHeaderOverrides(upstreamReq.Header)
 	upstreamPreview := bodyHandle.PreviewString()
 	if originalMultipart {
 		upstreamPreview = "[multipart body omitted]"

@@ -10,6 +10,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type cancelAwareSettingRepo struct{ *mockSettingRepo }
+
+func (r *cancelAwareSettingRepo) GetAll(ctx context.Context) (map[string]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return r.mockSettingRepo.GetAll(ctx)
+}
+
 func newSettingServiceForPlatformThresholdTest(seed map[string]string) *SettingService {
 	accountSchedulingThresholdsSF.Forget(SettingKeyAccountSchedulingThresholds)
 	accountSchedulingThresholdsCache.Store(&cachedAccountSchedulingThresholds{})
@@ -122,6 +131,26 @@ func TestUpdateSettings_OmittedAccountSchedulingThresholdsDoesNotCacheDefaults(t
 	require.Equal(t, 85, got[PlatformOpenAI])
 	require.Equal(t, 88, got[PlatformGrok])
 	require.NotContains(t, got, "kiro")
+}
+
+func TestUpdateSettingsOmittingRefreshesRuntimeAfterRequestCancellation(t *testing.T) {
+	repo := &cancelAwareSettingRepo{mockSettingRepo: newMockSettingRepo()}
+	repo.data[SettingKeyChannelMonitorEnabled] = "true"
+	repo.data[SettingKeyChannelMonitorMode] = ChannelMonitorModeV1
+	svc := NewSettingService(repo, &config.Config{})
+	svc.channelMonitorModeAdmission.desired = ChannelMonitorModeV1
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := svc.UpdateSettingsOmitting(ctx, &SystemSettings{ChannelMonitorEnabled: true, ChannelMonitorMode: ChannelMonitorModeV2}, OmittedSettingKeys{
+		SettingKeySiteName: {},
+	})
+	require.NoError(t, err)
+
+	svc.channelMonitorModeAdmission.mu.Lock()
+	desired := svc.channelMonitorModeAdmission.desired
+	svc.channelMonitorModeAdmission.mu.Unlock()
+	require.Equal(t, ChannelMonitorModeV2, desired)
 }
 
 func TestAccountSchedulingThresholds_InvalidStoredValueUsesSameDefaultsInSettingsAndCache(t *testing.T) {

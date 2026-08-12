@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -472,15 +473,18 @@ func redactAgentIdentitySensitiveBodyForAccount(ctx context.Context, repo Accoun
 		return body
 	}
 	credAccount := account
-	if account != nil && account.IsShadow() {
-		if resolved, err := resolveCredentialAccount(ctx, repo, account); err == nil && resolved != nil {
-			credAccount = resolved
+	if account.IsShadow() {
+		resolved, err := resolveCredentialAccount(ctx, repo, account)
+		if err != nil || resolved == nil {
+			return []byte("[agent identity error body omitted]")
 		}
+		credAccount = resolved
 	}
 	if credAccount == nil || !credAccount.IsOpenAIAgentIdentity() {
 		return body
 	}
-	redacted := string(body)
+	values := make([]string, 0, 9)
+	seen := make(map[string]struct{}, 9)
 	for _, key := range []string{
 		"agent_private_key",
 		"agent_runtime_id",
@@ -493,8 +497,16 @@ func redactAgentIdentitySensitiveBodyForAccount(ctx context.Context, repo Accoun
 		"cookie",
 	} {
 		if value := strings.TrimSpace(credAccount.GetCredential(key)); value != "" {
-			redacted = strings.ReplaceAll(redacted, value, "[redacted]")
+			if _, exists := seen[value]; !exists {
+				seen[value] = struct{}{}
+				values = append(values, value)
+			}
 		}
+	}
+	slices.SortFunc(values, func(a, b string) int { return len(b) - len(a) })
+	redacted := string(body)
+	for _, value := range values {
+		redacted = strings.ReplaceAll(redacted, value, "[redacted]")
 	}
 	const assertionPrefix = "AgentAssertion "
 	for offset := 0; offset < len(redacted); {
@@ -515,8 +527,5 @@ func redactAgentIdentitySensitiveBodyForAccount(ctx context.Context, repo Accoun
 }
 
 func (s *OpenAIGatewayService) redactAgentIdentitySensitiveBody(ctx context.Context, account *Account, body []byte) []byte {
-	if !s.isAgentIdentityAccount(ctx, account) {
-		return body
-	}
 	return redactAgentIdentitySensitiveBodyForAccount(ctx, s.accountRepo, account, body)
 }

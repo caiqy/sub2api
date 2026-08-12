@@ -42,6 +42,8 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 		return
 	}
 	req.MaxResults = normalizeGrokWebSearchMaxResults(req.MaxResults)
+	requestBody, _ := json.Marshal(req)
+	service.SetUsageRequestBody(c, service.RequestBodyPreviewSnapshot(string(requestBody), int64(len(requestBody))))
 
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
 	if !ok || apiKey == nil {
@@ -212,6 +214,13 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 			).Info("gateway.web_search.search_price_per_1k_explicit_free")
 		}
 	}
+	c.JSON(http.StatusOK, gin.H{
+		"query":       req.Query,
+		"results":     nativeResp.Results,
+		"provider":    providerName,
+		"max_results": req.MaxResults,
+	})
+	detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
 	h.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 		if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 			Result: &service.ForwardResult{
@@ -232,6 +241,7 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 			RequestPayloadHash: requestPayloadHash,
 			APIKeyService:      h.apiKeyService,
 			QuotaPlatform:      quotaPlatform,
+			DetailSnapshot:     detailSnapshot,
 		}); err != nil {
 			logger.L().With(
 				zap.String("component", "handler.gateway.web_search"),
@@ -240,13 +250,6 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 				zap.Int64("account_id", account.ID),
 			).Error("gateway.web_search.record_usage_failed", zap.Error(err))
 		}
-	})
-
-	c.JSON(http.StatusOK, gin.H{
-		"query":       req.Query,
-		"results":     nativeResp.Results,
-		"provider":    providerName,
-		"max_results": req.MaxResults,
 	})
 }
 

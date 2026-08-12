@@ -328,6 +328,7 @@ func (h *OpenAIGatewayHandler) recordGrokVoiceUsage(
 	inboundEndpoint := GetInboundEndpoint(c)
 	upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 	quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
+	detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
 	model := strings.TrimSpace(result.Model)
 	if model == "" {
 		model = endpoint
@@ -348,6 +349,7 @@ func (h *OpenAIGatewayHandler) recordGrokVoiceUsage(
 			APIKeyService:      h.apiKeyService,
 			QuotaPlatform:      quotaPlatform,
 			SessionID:          sessionID,
+			DetailSnapshot:     detailSnapshot,
 			ChannelUsageFields: clientRequestedUsageFields(c, service.ChannelMappingResult{}, model, result.UpstreamModel),
 		}); err != nil {
 			logger.L().With(

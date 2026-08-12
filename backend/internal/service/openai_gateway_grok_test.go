@@ -1019,8 +1019,13 @@ func TestForwardGrokMediaImagesGenerationNormalizesImagineAlias(t *testing.T) {
 		Type:        AccountTypeAPIKey,
 		Concurrency: 1,
 		Credentials: map[string]any{
-			"api_key":  "api-key",
-			"base_url": "https://xai.test/v1",
+			"api_key":                 "api-key",
+			"base_url":                "https://xai.test/v1",
+			"header_override_enabled": true,
+			"header_overrides": map[string]any{
+				"user-agent":    "relay-client/2.0",
+				"x-relay-token": "relay-secret",
+			},
 		},
 	}
 	upstream := &httpUpstreamRecorder{resp: &http.Response{
@@ -1039,8 +1044,9 @@ func TestForwardGrokMediaImagesGenerationNormalizesImagineAlias(t *testing.T) {
 	require.Equal(t, http.MethodPost, upstream.lastReq.Method)
 	require.Equal(t, "Bearer api-key", upstream.lastReq.Header.Get("Authorization"))
 	require.Equal(t, "application/json", upstream.lastReq.Header.Get("Content-Type"))
+	require.Equal(t, "relay-client/2.0", upstream.lastReq.Header.Get("User-Agent"))
+	require.Equal(t, []string{"relay-secret"}, upstream.lastReq.Header["x-relay-token"])
 	require.Empty(t, upstream.lastReq.Header.Get("X-Grok-Client-Version"))
-	require.NotEqual(t, grokUpstreamUserAgent, upstream.lastReq.Header.Get("User-Agent"))
 	require.JSONEq(t, `{"model":"grok-imagine-image-quality","prompt":"draw a cat"}`, string(upstream.lastBody))
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.JSONEq(t, `{"data":[{"url":"https://images.test/cat.png"}]}`, recorder.Body.String())

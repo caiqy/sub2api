@@ -90,7 +90,9 @@ func (s *SettingService) refreshCachedSettingsAfterWrite(ctx context.Context, se
 		s.refreshCachedSettings(settings)
 		return
 	}
-	stored, err := s.GetAllSettings(ctx)
+	reloadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	stored, err := s.GetAllSettings(reloadCtx)
 	if err != nil {
 		slog.Warn("refresh cached settings after partial update failed", "error", err)
 		return
