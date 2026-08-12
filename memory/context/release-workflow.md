@@ -12,7 +12,7 @@
 4. 如果用户只说“发布下一个版本”，先确定当前 `HEAD` 已包含的最高上游三段式 tag，再发布该基准下一个本地四段式 tag。
 5. 默认给当前目标提交打 tag，并执行 `git push origin <tag>` 推送到远端。
 6. 推送后校验远端 tag 已存在。
-7. 推送 tag 后显式执行一次 `gh workflow run release.yml --repo caiqy/sub2api --ref <tag> -f tag=<tag>`；推送 tag 本身不会触发发布。
+7. 推送 tag 后显式执行一次 `gh workflow run release.yml --repo caiqy/sub2api --ref main -f tag=<tag>`；推送 tag 本身不会触发发布，workflow 内各构建 job 仍 checkout `<tag>`。
 8. 使用 `gh run view/watch` 跟进 Release workflow 到最终结果；成功后核验 release assets 包含 `sub2api_<version>_linux_amd64.tar.gz` 和 `checksums.txt`。
 
 ## 下一个本地版本号算法
