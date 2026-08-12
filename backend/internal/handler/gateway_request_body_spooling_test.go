@@ -277,6 +277,62 @@ func TestGatewayHandler_RequestBodySpoolOpenFailureMapsTo503(t *testing.T) {
 	}
 }
 
+func TestRequestBodyCleanupRetrySucceedsAfterTransientFailure(t *testing.T) {
+	calls := 0
+	err := retryRequestBodyCleanup(func() error {
+		calls++
+		if calls == 1 {
+			return errors.New("file is busy")
+		}
+		return nil
+	})
+
+	if err != nil {
+		t.Fatalf("retry cleanup: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("cleanup calls = %d, want 2", calls)
+	}
+}
+
+func TestRequestBodyCleanupOnceBoundsConcurrentRetries(t *testing.T) {
+	var cleanup requestBodyCleanupOnce
+	var mu sync.Mutex
+	calls := 0
+	thirdCall := make(chan struct{})
+	cleanupFn := func() error {
+		mu.Lock()
+		calls++
+		if calls == 3 {
+			close(thirdCall)
+		}
+		mu.Unlock()
+		return errors.New("file is busy")
+	}
+
+	var callers sync.WaitGroup
+	for range 10 {
+		callers.Add(1)
+		go func() {
+			defer callers.Done()
+			cleanup.run(cleanupFn)
+		}()
+	}
+	callers.Wait()
+	select {
+	case <-thirdCall:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for bounded cleanup retries")
+	}
+	time.Sleep(2 * requestBodyCleanupRetryDelay)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 3 {
+		t.Fatalf("cleanup calls = %d, want 3", calls)
+	}
+}
+
 func TestGatewayHandler_ParserSecondHandleReadFailureMapsTo503(t *testing.T) {
 	spoolDir := t.TempDir()
 	handle, err := service.NewRequestBodyHandleFromBytes(
@@ -1249,7 +1305,7 @@ func TestGatewayHandler_ResponsesAntigravityTransformedSpoolOpenFailureReturns50
 	}
 }
 
-func TestGatewayHandler_MessagesGeminiMaterializationFailureReturns503WithoutUpstream(t *testing.T) {
+func TestGatewayHandler_MessagesGeminiSessionHashSpoolFailureReturns503BeforeAccountSelection(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rawDir := t.TempDir()
 	oldOptions := jsonRequestBodyHandleOptions
@@ -1289,8 +1345,8 @@ func TestGatewayHandler_MessagesGeminiMaterializationFailureReturns503WithoutUps
 	if upstream.calls != 0 {
 		t.Fatalf("upstream calls = %d, want 0", upstream.calls)
 	}
-	if cache.accountReleases != 1 {
-		t.Fatalf("account releases = %d, want 1", cache.accountReleases)
+	if cache.accountReleases != 0 {
+		t.Fatalf("account releases = %d, want 0 before account selection", cache.accountReleases)
 	}
 }
 

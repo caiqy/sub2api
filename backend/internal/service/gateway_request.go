@@ -389,34 +389,37 @@ func ParseGatewayRequest(body *RequestBodyRef, protocol string) (*ParsedRequest,
 	return parsed, nil
 }
 
-func (p *ParsedRequest) raw(r jsonRange) []byte {
+func (p *ParsedRequest) raw(r jsonRange) ([]byte, error) {
 	if p == nil || p.Body == nil || !r.exists() {
-		return nil
+		return nil, nil
 	}
 	body, err := p.Body.ReadAll()
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	if r.end > len(body) {
-		return nil
+		return nil, fmt.Errorf("request body range [%d:%d] exceeds body size %d", r.start, r.end, len(body))
 	}
-	return body[r.start:r.end]
+	return body[r.start:r.end], nil
 }
 
-func (p *ParsedRequest) SystemRaw() []byte {
+func (p *ParsedRequest) SystemRaw() ([]byte, error) {
 	return p.raw(p.systemRange)
 }
 
-func (p *ParsedRequest) MessagesRaw() []byte {
+func (p *ParsedRequest) MessagesRaw() ([]byte, error) {
 	return p.raw(p.messagesRange)
 }
 
-func (p *ParsedRequest) InputRaw() []byte {
+func (p *ParsedRequest) InputRaw() ([]byte, error) {
 	return p.raw(p.inputRange)
 }
 
 func (p *ParsedRequest) DecodeSystem(dst any) error {
-	raw := p.SystemRaw()
+	raw, err := p.SystemRaw()
+	if err != nil {
+		return err
+	}
 	if len(raw) == 0 {
 		return nil
 	}
@@ -424,23 +427,29 @@ func (p *ParsedRequest) DecodeSystem(dst any) error {
 }
 
 func (p *ParsedRequest) DecodeMessages(dst any) error {
-	raw := p.MessagesRaw()
+	raw, err := p.MessagesRaw()
+	if err != nil {
+		return err
+	}
 	if len(raw) == 0 {
 		return nil
 	}
 	return json.Unmarshal(raw, dst)
 }
 
-func (p *ParsedRequest) SystemValue() (any, bool) {
-	raw := p.SystemRaw()
+func (p *ParsedRequest) SystemValue() (any, bool, error) {
+	raw, err := p.SystemRaw()
+	if err != nil {
+		return nil, false, err
+	}
 	if len(raw) == 0 {
-		return nil, false
+		return nil, false, nil
 	}
 	var system any
 	if err := json.Unmarshal(raw, &system); err != nil {
-		return nil, false
+		return nil, false, err
 	}
-	return system, true
+	return system, true, nil
 }
 
 // CloneForHandle borrows a request-scoped handle for a single account attempt.

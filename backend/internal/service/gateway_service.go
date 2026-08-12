@@ -921,9 +921,9 @@ func NewGatewayService(
 }
 
 // GenerateSessionHash 从预解析请求计算粘性会话 hash
-func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
+func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) (string, error) {
 	if parsed == nil {
-		return ""
+		return "", nil
 	}
 
 	// 1. 最高优先级：从 metadata.user_id 提取 session_xxx
@@ -936,7 +936,7 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 				"device_id", uid.DeviceID,
 				"is_new_format", uid.IsNewFormat,
 			)
-			return uid.SessionID
+			return uid.SessionID, nil
 		}
 		slog.Info("sticky.hash_metadata_parse_failed",
 			"metadata_user_id", parsed.MetadataUserID,
@@ -945,14 +945,17 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 	}
 
 	// 2. 提取带 cache_control: {type: "ephemeral"} 的内容
-	cacheableContent := s.extractCacheableContent(parsed)
+	cacheableContent, err := s.extractCacheableContent(parsed)
+	if err != nil {
+		return "", err
+	}
 	if cacheableContent != "" {
 		hash := s.hashContent(cacheableContent)
 		slog.Info("sticky.hash_source",
 			"source", "cacheable_content",
 			"hash", hash,
 		)
-		return hash
+		return hash, nil
 	}
 
 	// 3. 最后 fallback: 使用 session上下文 + system + 所有消息的完整摘要串
@@ -966,13 +969,25 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 		_, _ = combined.WriteString(strconv.FormatInt(parsed.SessionContext.APIKeyID, 10))
 		_, _ = combined.WriteString("|")
 	}
-	if systemText := extractTextFromSystemRaw(parsed.SystemRaw()); systemText != "" {
+	systemRaw, err := parsed.SystemRaw()
+	if err != nil {
+		return "", err
+	}
+	if systemText := extractTextFromSystemRaw(systemRaw); systemText != "" {
 		_, _ = combined.WriteString(systemText)
 	}
 	contentStart := combined.Len()
-	appendMessageTextsFromRaw(&combined, parsed.MessagesRaw())
+	messagesRaw, err := parsed.MessagesRaw()
+	if err != nil {
+		return "", err
+	}
+	appendMessageTextsFromRaw(&combined, messagesRaw)
 	if combined.Len() == contentStart {
-		appendResponsesSessionAnchorFromRaw(&combined, parsed.InputRaw())
+		inputRaw, err := parsed.InputRaw()
+		if err != nil {
+			return "", err
+		}
+		appendResponsesSessionAnchorFromRaw(&combined, inputRaw)
 	}
 	if combined.Len() > 0 {
 		hash := s.hashContent(combined.String())
@@ -981,10 +996,10 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 			"hash", hash,
 			"content_len", combined.Len(),
 		)
-		return hash
+		return hash, nil
 	}
 
-	return ""
+	return "", nil
 }
 
 // BindStickySession sets session -> account binding with standard TTL.
@@ -1077,16 +1092,24 @@ func (s *GatewayService) SaveAnthropicSession(_ context.Context, groupID int64, 
 	return nil
 }
 
-func (s *GatewayService) extractCacheableContent(parsed *ParsedRequest) string {
+func (s *GatewayService) extractCacheableContent(parsed *ParsedRequest) (string, error) {
 	if parsed == nil {
-		return ""
+		return "", nil
 	}
 
-	systemText := extractCacheableTextFromSystemRaw(parsed.SystemRaw())
-	if messageText := extractCacheableTextFromMessagesRaw(parsed.MessagesRaw()); messageText != "" {
-		return messageText
+	systemRaw, err := parsed.SystemRaw()
+	if err != nil {
+		return "", err
 	}
-	return systemText
+	systemText := extractCacheableTextFromSystemRaw(systemRaw)
+	messagesRaw, err := parsed.MessagesRaw()
+	if err != nil {
+		return "", err
+	}
+	if messageText := extractCacheableTextFromMessagesRaw(messagesRaw); messageText != "" {
+		return messageText, nil
+	}
+	return systemText, nil
 }
 
 func extractTextFromSystemRaw(raw []byte) string {

@@ -8,8 +8,11 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
@@ -21,12 +24,22 @@ const multipartUploadPartLimit = 20 << 20
 // ParseMultipartForm adds 10MB for non-file values; leave metadata room so a 20MB text part reaches the explicit limit.
 const multipartParseMemoryBudget = (10 << 20) + (1 << 20)
 
+const (
+	requestBodyCleanupRetryDelay    = 100 * time.Millisecond
+	requestBodyCleanupRetryAttempts = 2
+)
+
 type requestBodyCoordinator struct {
 	raw            *service.RequestBodyHandle
 	effective      *service.RequestBodyHandle
 	oauth          *service.RequestBodyHandle
 	form           *multipart.Form
 	multipartModel string
+	multipartClean requestBodyCleanupOnce
+}
+
+type requestBodyCleanupOnce struct {
+	once sync.Once
 }
 
 func newJSONRequestBody(req *http.Request) (*requestBodyCoordinator, error) {
@@ -84,7 +97,7 @@ func newMultipartRequestBody(req *http.Request, maxMemory int64) (*requestBodyCo
 	for _, files := range parsed.MultipartForm.File {
 		for _, file := range files {
 			if file.Size > multipartUploadPartLimit {
-				_ = parsed.MultipartForm.RemoveAll()
+				cleanupMultipartForm(parsed.MultipartForm)
 				service.CleanupRequestBodyHandle(raw)
 				return nil, &http.MaxBytesError{Limit: multipartUploadPartLimit}
 			}
@@ -93,7 +106,7 @@ func newMultipartRequestBody(req *http.Request, maxMemory int64) (*requestBodyCo
 	for _, values := range parsed.MultipartForm.Value {
 		for _, value := range values {
 			if len(value) > multipartUploadPartLimit {
-				_ = parsed.MultipartForm.RemoveAll()
+				cleanupMultipartForm(parsed.MultipartForm)
 				service.CleanupRequestBodyHandle(raw)
 				return nil, &http.MaxBytesError{Limit: multipartUploadPartLimit}
 			}
@@ -266,12 +279,50 @@ func uniqueRequestBodyHandles(handles ...*service.RequestBodyHandle) []*service.
 	return unique
 }
 
+func cleanupMultipartForm(form *multipart.Form) {
+	if form == nil {
+		return
+	}
+	cleanup := &requestBodyCleanupOnce{}
+	cleanup.run(form.RemoveAll)
+}
+
+func (c *requestBodyCleanupOnce) run(cleanup func() error) {
+	if c == nil || cleanup == nil {
+		return
+	}
+	c.once.Do(func() {
+		if err := cleanup(); err != nil {
+			logger.LegacyPrintf("handler.request_body_coordinator", "multipart cleanup failed: %v", err)
+			go func() {
+				if retryErr := retryRequestBodyCleanup(cleanup); retryErr != nil {
+					logger.LegacyPrintf("handler.request_body_coordinator", "multipart cleanup retry failed: %v", retryErr)
+				}
+			}()
+		}
+	})
+}
+
+func retryRequestBodyCleanup(cleanup func() error) error {
+	if cleanup == nil {
+		return nil
+	}
+	var err error
+	for attempt := 0; attempt < requestBodyCleanupRetryAttempts; attempt++ {
+		time.Sleep(requestBodyCleanupRetryDelay)
+		if err = cleanup(); err == nil {
+			return nil
+		}
+	}
+	return err
+}
+
 func (c *requestBodyCoordinator) Cleanup() {
 	if c == nil {
 		return
 	}
 	if c.form != nil {
-		_ = c.form.RemoveAll()
+		c.multipartClean.run(c.form.RemoveAll)
 	}
 	for _, handle := range uniqueRequestBodyHandles(c.raw, c.effective, c.oauth) {
 		service.CleanupRequestBodyHandle(handle)

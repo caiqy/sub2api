@@ -547,7 +547,10 @@ func compositeTargetPlatformMiddleware(resolver *service.EffectiveGatewayRouteRe
 				return
 			}
 		}
-		handler.SetClaudeCodeClientContext(c, body, nil)
+		if err := handler.SetClaudeCodeClientContext(c, body, nil); err != nil {
+			abortCompositeRequestBodySpoolError(c)
+			return
+		}
 		if c.Request.Method == http.MethodGet && apiKey.Group.Platform == service.PlatformComposite && !apiKey.Group.ClaudeCodeOnly {
 			c.Next()
 			return

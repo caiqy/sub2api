@@ -535,3 +535,60 @@ func TestRequestBodyHandle_CleanupStaleRequestBodySpoolFiles(t *testing.T) {
 	require.FileExists(t, fresh)
 	require.FileExists(t, other)
 }
+
+func TestRequestBodyHandle_StaleCleanupContinuesAfterRemoveFailure(t *testing.T) {
+	dir := t.TempDir()
+	first := filepath.Join(dir, "sub2api-test-1")
+	second := filepath.Join(dir, "sub2api-test-2")
+	require.NoError(t, os.WriteFile(first, []byte("first"), 0o600))
+	require.NoError(t, os.WriteFile(second, []byte("second"), 0o600))
+	now := time.Now()
+	require.NoError(t, os.Chtimes(first, now.Add(-2*time.Hour), now.Add(-2*time.Hour)))
+	require.NoError(t, os.Chtimes(second, now.Add(-2*time.Hour), now.Add(-2*time.Hour)))
+
+	removeErr := errors.New("file is busy")
+	err := cleanupStaleRequestBodySpoolMatches(
+		[]string{first, second},
+		"sub2api-test-",
+		time.Hour,
+		now,
+		os.Stat,
+		func(path string) error {
+			if path == first {
+				return removeErr
+			}
+			return os.Remove(path)
+		},
+	)
+
+	require.ErrorIs(t, err, removeErr)
+	require.FileExists(t, first)
+	require.NoFileExists(t, second)
+}
+
+func TestRequestBodyHandle_StaleCleanupGateRetriesAfterInterval(t *testing.T) {
+	var gate requestBodySpoolCleanupGate
+	now := time.Now()
+	calls := 0
+	cleanupErr := errors.New("cleanup failed")
+	cleanup := func() error {
+		calls++
+		return cleanupErr
+	}
+
+	require.ErrorIs(t, gate.run(now, cleanup), cleanupErr)
+	require.NoError(t, gate.run(now.Add(30*time.Minute), cleanup))
+	require.ErrorIs(t, gate.run(now.Add(time.Hour), cleanup), cleanupErr)
+	require.Equal(t, 2, calls)
+}
+
+func TestRequestBodyHandle_StaleCleanupReportsDirectoryReadFailure(t *testing.T) {
+	err := CleanupStaleRequestBodySpoolFiles(
+		filepath.Join(t.TempDir(), "missing"),
+		"sub2api-test-",
+		time.Hour,
+		time.Now(),
+	)
+
+	require.Error(t, err)
+}

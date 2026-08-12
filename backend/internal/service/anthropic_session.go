@@ -25,18 +25,25 @@ func AnthropicSessionTTL() time.Duration {
 // BuildAnthropicDigestChain 根据 Anthropic 请求生成摘要链
 // 格式: s:<hash>-u:<hash>-a:<hash>-u:<hash>-...
 // s = system, u = user, a = assistant
-func BuildAnthropicDigestChain(parsed *ParsedRequest) string {
+func BuildAnthropicDigestChain(parsed *ParsedRequest) (string, error) {
 	if parsed == nil {
-		return ""
+		return "", nil
 	}
 
 	var parts []string
 
-	if systemRaw := parsed.SystemRaw(); len(systemRaw) > 0 && string(systemRaw) != "null" {
+	systemRaw, err := parsed.SystemRaw()
+	if err != nil {
+		return "", err
+	}
+	if len(systemRaw) > 0 && string(systemRaw) != "null" {
 		parts = append(parts, "s:"+shortHash(canonicalAnthropicDigestJSON(systemRaw)))
 	}
 
-	messages := parsed.MessagesRaw()
+	messages, err := parsed.MessagesRaw()
+	if err != nil {
+		return "", err
+	}
 	if len(messages) > 0 {
 		gjson.ParseBytes(messages).ForEach(func(_, msg gjson.Result) bool {
 			prefix := rolePrefix(msg.Get("role").String())
@@ -46,7 +53,7 @@ func BuildAnthropicDigestChain(parsed *ParsedRequest) string {
 		})
 	}
 
-	return strings.Join(parts, "-")
+	return strings.Join(parts, "-"), nil
 }
 
 // canonicalAnthropicDigestJSON 保持 digest 对 JSON key 顺序和空白不敏感。

@@ -204,7 +204,7 @@ func TestSetClaudeCodeClientContext_FastPathAndStrictPath(t *testing.T) {
 		c, _ := newHelperTestContext(http.MethodPost, "/v1/messages")
 		c.Request.Header.Set("User-Agent", "curl/8.6.0")
 
-		SetClaudeCodeClientContext(c, validClaudeCodeBodyJSON(), nil)
+		require.NoError(t, SetClaudeCodeClientContext(c, validClaudeCodeBodyJSON(), nil))
 		require.False(t, service.IsClaudeCodeClient(c.Request.Context()))
 	})
 
@@ -212,7 +212,7 @@ func TestSetClaudeCodeClientContext_FastPathAndStrictPath(t *testing.T) {
 		c, _ := newHelperTestContext(http.MethodGet, "/v1/models")
 		c.Request.Header.Set("User-Agent", "claude-cli/1.0.1")
 
-		SetClaudeCodeClientContext(c, nil, nil)
+		require.NoError(t, SetClaudeCodeClientContext(c, nil, nil))
 		require.True(t, service.IsClaudeCodeClient(c.Request.Context()))
 	})
 
@@ -223,7 +223,7 @@ func TestSetClaudeCodeClientContext_FastPathAndStrictPath(t *testing.T) {
 		c.Request.Header.Set("anthropic-beta", "message-batches-2024-09-24")
 		c.Request.Header.Set("anthropic-version", "2023-06-01")
 
-		SetClaudeCodeClientContext(c, validClaudeCodeBodyJSON(), nil)
+		require.NoError(t, SetClaudeCodeClientContext(c, validClaudeCodeBodyJSON(), nil))
 		require.True(t, service.IsClaudeCodeClient(c.Request.Context()))
 	})
 
@@ -231,7 +231,7 @@ func TestSetClaudeCodeClientContext_FastPathAndStrictPath(t *testing.T) {
 		c, _ := newHelperTestContext(http.MethodPost, "/v1/messages")
 		c.Request.Header.Set("User-Agent", "claude-cli/1.0.1")
 		// 缺少严格校验所需 header + body 字段
-		SetClaudeCodeClientContext(c, []byte(`{"model":"x"}`), nil)
+		require.NoError(t, SetClaudeCodeClientContext(c, []byte(`{"model":"x"}`), nil))
 		require.False(t, service.IsClaudeCodeClient(c.Request.Context()))
 	})
 }
@@ -248,7 +248,7 @@ func TestSetClaudeCodeClientContext_ReuseParsedRequest(t *testing.T) {
 		require.NoError(t, err)
 
 		// body 非法 JSON，如果函数复用 parsedReq 成功则仍应判定为 Claude Code。
-		SetClaudeCodeClientContext(c, []byte(`{invalid`), parsedReq)
+		require.NoError(t, SetClaudeCodeClientContext(c, []byte(`{invalid`), parsedReq))
 		require.True(t, service.IsClaudeCodeClient(c.Request.Context()))
 	})
 }

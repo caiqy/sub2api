@@ -19,18 +19,17 @@ import (
 // claudeCodeValidator is a singleton validator for Claude Code client detection
 var claudeCodeValidator = service.NewClaudeCodeValidator()
 
-// SetClaudeCodeClientContext 检查请求是否来自 Claude Code 客户端，并设置到 context 中
-// 返回更新后的 context
-func SetClaudeCodeClientContext(c *gin.Context, body []byte, parsedReq *service.ParsedRequest) {
+// SetClaudeCodeClientContext 检查请求是否来自 Claude Code 客户端，并更新 request context。
+func SetClaudeCodeClientContext(c *gin.Context, body []byte, parsedReq *service.ParsedRequest) error {
 	if c == nil || c.Request == nil {
-		return
+		return nil
 	}
 	ua := c.GetHeader("User-Agent")
 	// Fast path：非 Claude CLI UA 直接判定 false，避免热路径二次 JSON 反序列化。
 	if !claudeCodeValidator.ValidateUserAgent(ua) {
 		ctx := service.SetClaudeCodeClient(c.Request.Context(), false)
 		c.Request = c.Request.WithContext(ctx)
-		return
+		return nil
 	}
 
 	isClaudeCode := false
@@ -39,7 +38,10 @@ func SetClaudeCodeClientContext(c *gin.Context, body []byte, parsedReq *service.
 		isClaudeCode = true
 	} else {
 		// 仅在确认为 Claude CLI 且 messages 路径时再做 body 解析。
-		bodyMap := claudeCodeBodyMapFromParsedRequest(parsedReq)
+		bodyMap, err := claudeCodeBodyMapFromParsedRequest(parsedReq)
+		if err != nil {
+			return err
+		}
 		if bodyMap == nil && len(body) > 0 {
 			_ = json.Unmarshal(body, &bodyMap)
 		}
@@ -57,17 +59,22 @@ func SetClaudeCodeClientContext(c *gin.Context, body []byte, parsedReq *service.
 	}
 
 	c.Request = c.Request.WithContext(ctx)
+	return nil
 }
 
-func claudeCodeBodyMapFromParsedRequest(parsedReq *service.ParsedRequest) map[string]any {
+func claudeCodeBodyMapFromParsedRequest(parsedReq *service.ParsedRequest) (map[string]any, error) {
 	if parsedReq == nil {
-		return nil
+		return nil, nil
 	}
 	bodyMap := map[string]any{
 		"model": parsedReq.Model,
 	}
 	if parsedReq.HasSystem {
-		if system, ok := parsedReq.SystemValue(); ok {
+		system, ok, err := parsedReq.SystemValue()
+		if err != nil {
+			return nil, err
+		}
+		if ok {
 			bodyMap["system"] = system
 		} else {
 			bodyMap["system"] = nil
@@ -76,7 +83,7 @@ func claudeCodeBodyMapFromParsedRequest(parsedReq *service.ParsedRequest) map[st
 	if parsedReq.MetadataUserID != "" {
 		bodyMap["metadata"] = map[string]any{"user_id": parsedReq.MetadataUserID}
 	}
-	return bodyMap
+	return bodyMap, nil
 }
 
 // 并发槽位等待相关常量

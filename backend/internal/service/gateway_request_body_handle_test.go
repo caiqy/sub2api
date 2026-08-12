@@ -17,7 +17,7 @@ import (
 )
 
 func TestRequestBodyRefHandleReadErrorPropagates(t *testing.T) {
-	handle, err := NewRequestBodyHandleFromReader(bytes.NewReader([]byte(`{"model":"claude-test","messages":[]}`)), RequestBodyHandleOptions{
+	handle, err := NewRequestBodyHandleFromReader(bytes.NewReader([]byte(`{"model":"claude-test","system":"instructions","messages":[{"role":"user","content":"hello"}]}`)), RequestBodyHandleOptions{
 		SpoolThresholdBytes: 1,
 		TempDir:             t.TempDir(),
 	})
@@ -25,20 +25,66 @@ func TestRequestBodyRefHandleReadErrorPropagates(t *testing.T) {
 		t.Fatalf("create handle: %v", err)
 	}
 	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+	ref := NewRequestBodyRefFromHandle(handle)
+	parsed, err := ParseGatewayRequest(ref, "")
+	if err != nil {
+		t.Fatalf("parse request before spool failure: %v", err)
+	}
 	if err := os.Remove(handle.spoolPath); err != nil {
 		t.Fatalf("remove spool file: %v", err)
 	}
 
-	ref := NewRequestBodyRefFromHandle(handle)
 	if _, err := ref.ReadAll(); !errors.Is(err, ErrRequestBodySpool) {
 		t.Fatalf("ReadAll error = %v, want ErrRequestBodySpool", err)
 	}
 	if _, err := ParseGatewayRequest(ref, ""); !errors.Is(err, ErrRequestBodySpool) {
 		t.Fatalf("ParseGatewayRequest error = %v, want ErrRequestBodySpool", err)
 	}
-	parsed := &ParsedRequest{Body: ref}
+	if _, err := parsed.SystemRaw(); !errors.Is(err, ErrRequestBodySpool) {
+		t.Fatalf("SystemRaw error = %v, want ErrRequestBodySpool", err)
+	}
+	if _, err := parsed.MessagesRaw(); !errors.Is(err, ErrRequestBodySpool) {
+		t.Fatalf("MessagesRaw error = %v, want ErrRequestBodySpool", err)
+	}
+	if _, _, err := parsed.SystemValue(); !errors.Is(err, ErrRequestBodySpool) {
+		t.Fatalf("SystemValue error = %v, want ErrRequestBodySpool", err)
+	}
+	if _, err := (&GatewayService{}).GenerateSessionHash(parsed); !errors.Is(err, ErrRequestBodySpool) {
+		t.Fatalf("GenerateSessionHash error = %v, want ErrRequestBodySpool", err)
+	}
+	if _, err := BuildAnthropicDigestChain(parsed); !errors.Is(err, ErrRequestBodySpool) {
+		t.Fatalf("BuildAnthropicDigestChain error = %v, want ErrRequestBodySpool", err)
+	}
+	if _, err := IsRealUserMessage(parsed); !errors.Is(err, ErrRequestBodySpool) {
+		t.Fatalf("IsRealUserMessage error = %v, want ErrRequestBodySpool", err)
+	}
 	if _, err := parsed.CloneForHandle(handle); !errors.Is(err, ErrRequestBodySpool) {
 		t.Fatalf("CloneForHandle error = %v, want ErrRequestBodySpool", err)
+	}
+}
+
+func TestResponsesInputHandleReadErrorPropagates(t *testing.T) {
+	handle, err := NewRequestBodyHandleFromReader(bytes.NewReader([]byte(`{"model":"gpt-5","input":[{"role":"user","content":"hello"}]}`)), RequestBodyHandleOptions{
+		SpoolThresholdBytes: 1,
+		TempDir:             t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("create handle: %v", err)
+	}
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+	parsed, err := ParseGatewayRequest(NewRequestBodyRefFromHandle(handle), "responses")
+	if err != nil {
+		t.Fatalf("parse request before spool failure: %v", err)
+	}
+	if err := os.Remove(handle.spoolPath); err != nil {
+		t.Fatalf("remove spool file: %v", err)
+	}
+
+	if _, err := parsed.InputRaw(); !errors.Is(err, ErrRequestBodySpool) {
+		t.Fatalf("InputRaw error = %v, want ErrRequestBodySpool", err)
+	}
+	if _, err := (&GatewayService{}).GenerateSessionHash(parsed); !errors.Is(err, ErrRequestBodySpool) {
+		t.Fatalf("GenerateSessionHash error = %v, want ErrRequestBodySpool", err)
 	}
 }
 

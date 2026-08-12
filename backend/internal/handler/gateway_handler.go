@@ -318,7 +318,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	}
 
 	// 检查是否为 Claude Code 客户端，设置到 context 中（复用已解析请求，避免二次反序列化）。
-	SetClaudeCodeClientContext(c, body, parsedReq)
+	if err := SetClaudeCodeClientContext(c, body, parsedReq); err != nil {
+		h.handleMessagesParseError(c, err, false)
+		return
+	}
 	isClaudeCodeClient := service.IsClaudeCodeClient(c.Request.Context())
 
 	// 版本检查：仅对 Claude Code 客户端，拒绝低于最低版本的请求
@@ -460,7 +463,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		UserAgent: c.GetHeader("User-Agent"),
 		APIKeyID:  apiKey.ID,
 	}
-	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
+	sessionHash, err := h.gatewayService.GenerateSessionHash(parsedReq)
+	if err != nil {
+		h.handleMessagesParseError(c, err, streamStarted)
+		return
+	}
 
 	// [DEBUG-STICKY] 打印会话 hash 生成结果
 	reqLog.Info("sticky.session_hash_generated",
@@ -1044,7 +1051,14 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 			// ===== 用户消息串行队列 START =====
 			var queueRelease func()
-			umqMode := h.getUserMsgQueueMode(account, attemptParsedReq)
+			umqMode, err := h.getUserMsgQueueMode(account, attemptParsedReq)
+			if err != nil {
+				if accountReleaseFunc != nil {
+					accountReleaseFunc()
+				}
+				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body", streamStarted || service.IsResponseCommitted(c))
+				return
+			}
 
 			switch umqMode {
 			case config.UMQModeSerialize:
@@ -2555,7 +2569,10 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	cloneGatewayParsedRequestScalars(parsedReq)
 	body = nil
 	// count_tokens 走 messages 严格校验时，复用已解析请求，避免二次反序列化。
-	SetClaudeCodeClientContext(c, body, parsedReq)
+	if err := SetClaudeCodeClientContext(c, body, parsedReq); err != nil {
+		h.handleMessagesParseError(c, err, false)
+		return
+	}
 	clientRequestModel := clientRequestedModel(c, parsedReq.Model)
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	route, hasRoute := service.EffectiveGatewayRouteFromContext(c.Request.Context())
@@ -2656,7 +2673,11 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		UserAgent: c.GetHeader("User-Agent"),
 		APIKeyID:  apiKey.ID,
 	}
-	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
+	sessionHash, err := h.gatewayService.GenerateSessionHash(parsedReq)
+	if err != nil {
+		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+		return
+	}
 
 	// 选择支持该模型的账号
 	account, err := h.gatewayService.SelectAccountForModel(c.Request.Context(), apiKey.GroupID, sessionHash, parsedReq.Model)
@@ -3066,21 +3087,25 @@ func (h *GatewayHandler) submitMandatoryUsageRecordTask(parent context.Context, 
 
 // getUserMsgQueueMode 获取当前请求的 UMQ 模式
 // 返回 "serialize" | "throttle" | ""
-func (h *GatewayHandler) getUserMsgQueueMode(account *service.Account, parsed *service.ParsedRequest) string {
+func (h *GatewayHandler) getUserMsgQueueMode(account *service.Account, parsed *service.ParsedRequest) (string, error) {
 	if h.userMsgQueueHelper == nil {
-		return ""
+		return "", nil
 	}
 	// 仅适用于 Anthropic OAuth/SetupToken 账号
 	if !account.IsAnthropicOAuthOrSetupToken() {
-		return ""
+		return "", nil
 	}
-	if !service.IsRealUserMessage(parsed) {
-		return ""
+	isReal, err := service.IsRealUserMessage(parsed)
+	if err != nil {
+		return "", err
+	}
+	if !isReal {
+		return "", nil
 	}
 	// 账号级模式优先，fallback 到全局配置
 	mode := account.GetUserMsgQueueMode()
 	if mode == "" {
 		mode = h.cfg.Gateway.UserMessageQueue.GetEffectiveMode()
 	}
-	return mode
+	return mode, nil
 }

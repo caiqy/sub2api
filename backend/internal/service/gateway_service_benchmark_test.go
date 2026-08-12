@@ -24,7 +24,10 @@ func BenchmarkGenerateSessionHash_Metadata(b *testing.B) {
 		if err != nil {
 			b.Fatalf("解析请求失败: %v", err)
 		}
-		benchmarkStringSink = svc.GenerateSessionHash(parsed)
+		benchmarkStringSink, err = svc.GenerateSessionHash(parsed)
+		if err != nil {
+			b.Fatalf("生成会话哈希失败: %v", err)
+		}
 	}
 }
 
@@ -41,7 +44,11 @@ func BenchmarkParseGatewayRequest_LargeAnthropicMessages(b *testing.B) {
 				if err != nil {
 					b.Fatalf("解析 Anthropic 请求失败: %v", err)
 				}
-				benchmarkIntSink = len(parsed.MessagesRaw())
+				messages, err := parsed.MessagesRaw()
+				if err != nil {
+					b.Fatalf("读取 Anthropic messages 失败: %v", err)
+				}
+				benchmarkIntSink = len(messages)
 			}
 		})
 	}
@@ -60,7 +67,11 @@ func BenchmarkParseGatewayRequest_LargeGeminiContents(b *testing.B) {
 				if err != nil {
 					b.Fatalf("解析 Gemini 请求失败: %v", err)
 				}
-				benchmarkIntSink = len(parsed.MessagesRaw())
+				messages, err := parsed.MessagesRaw()
+				if err != nil {
+					b.Fatalf("读取 Gemini contents 失败: %v", err)
+				}
+				benchmarkIntSink = len(messages)
 			}
 		})
 	}
@@ -80,7 +91,10 @@ func BenchmarkGenerateSessionHash_LargeAnthropicMessages(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				benchmarkStringSink = svc.GenerateSessionHash(parsed)
+				benchmarkStringSink, err = svc.GenerateSessionHash(parsed)
+				if err != nil {
+					b.Fatalf("生成会话哈希失败: %v", err)
+				}
 			}
 		})
 	}
@@ -208,7 +222,11 @@ func BenchmarkExtractCacheableContent_System(b *testing.B) {
 
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		benchmarkStringSink = svc.extractCacheableContent(req)
+		var err error
+		benchmarkStringSink, err = svc.extractCacheableContent(req)
+		if err != nil {
+			b.Fatalf("提取可缓存内容失败: %v", err)
+		}
 	}
 }
 

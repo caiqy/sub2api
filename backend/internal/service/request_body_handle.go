@@ -28,6 +28,8 @@ const (
 	requestBodyPreviewOmittedMarker             = "[inline binary payload omitted]"
 	requestBodyCleanupRetryDelay                = 100 * time.Millisecond
 	requestBodyCleanupRetryAttempts             = 2
+	requestBodyStaleCleanupInterval             = time.Hour
+	requestBodyStaleAge                         = 24 * time.Hour
 )
 
 type requestBodyPreviewSnapshot struct {
@@ -37,7 +39,7 @@ type requestBodyPreviewSnapshot struct {
 	Size      int64  `json:"size"`
 }
 
-var requestBodySpoolCleanupOnce sync.Once
+var requestBodySpoolCleanup requestBodySpoolCleanupGate
 
 var ErrRequestBodySpool = errors.New("request body spool failed")
 
@@ -59,6 +61,11 @@ type RequestBodyHandle struct {
 	spoolReaders int
 	cleaned      bool
 	retrying     bool
+}
+
+type requestBodySpoolCleanupGate struct {
+	mu          sync.Mutex
+	nextAttempt time.Time
 }
 
 type requestBodySpoolReadCloser struct {
@@ -95,7 +102,7 @@ func NewRequestBodyHandleFromReader(r io.Reader, opts RequestBodyHandleOptions) 
 		return NewRequestBodyHandleFromBytes(nil, opts)
 	}
 	opts = normalizeRequestBodyHandleOptions(opts)
-	runRequestBodySpoolCleanupOnce()
+	maybeCleanupStaleRequestBodySpoolFiles()
 
 	tempDir := opts.TempDir
 	prefix := opts.FilePrefix
@@ -507,11 +514,24 @@ func normalizeRequestBodyHandleOptions(opts RequestBodyHandleOptions) RequestBod
 	return opts
 }
 
-func runRequestBodySpoolCleanupOnce() {
-	requestBodySpoolCleanupOnce.Do(func() {
-		// ponytail: best-effort startup sweep; dedicated scheduler if temp churn ever matters.
-		_ = CleanupStaleRequestBodySpoolFiles(os.TempDir(), defaultRequestBodySpoolPrefix, 24*time.Hour, time.Now())
+func (g *requestBodySpoolCleanupGate) run(now time.Time, cleanup func() error) error {
+	g.mu.Lock()
+	if now.Before(g.nextAttempt) {
+		g.mu.Unlock()
+		return nil
+	}
+	g.nextAttempt = now.Add(requestBodyStaleCleanupInterval)
+	g.mu.Unlock()
+	return cleanup()
+}
+
+func maybeCleanupStaleRequestBodySpoolFiles() {
+	err := requestBodySpoolCleanup.run(time.Now(), func() error {
+		return CleanupStaleRequestBodySpoolFiles(os.TempDir(), defaultRequestBodySpoolPrefix, requestBodyStaleAge, time.Now())
 	})
+	if err != nil {
+		logger.LegacyPrintf("service.request_body_handle", "[RequestBodyHandle] stale spool cleanup failed: %v", err)
+	}
 }
 
 func (h *RequestBodyHandle) Open() (io.ReadCloser, error) {
@@ -677,17 +697,36 @@ func CleanupStaleRequestBodySpoolFiles(dir, prefix string, olderThan time.Durati
 	if dir == "" || prefix == "" {
 		return nil
 	}
-	matches, err := filepath.Glob(filepath.Join(dir, prefix+"*"))
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return err
 	}
+	matches := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), prefix) {
+			matches = append(matches, filepath.Join(dir, entry.Name()))
+		}
+	}
+	return cleanupStaleRequestBodySpoolMatches(matches, prefix, olderThan, now, os.Stat, os.Remove)
+}
+
+func cleanupStaleRequestBodySpoolMatches(
+	matches []string,
+	prefix string,
+	olderThan time.Duration,
+	now time.Time,
+	stat func(string) (os.FileInfo, error),
+	remove func(string) error,
+) error {
+	var cleanupErr error
 	for _, path := range matches {
-		info, err := os.Stat(path)
+		info, err := stat(path)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
 		if err != nil {
-			return err
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("stat stale spool %q: %w", path, err))
+			continue
 		}
 		if info.IsDir() || strings.TrimPrefix(filepath.Base(path), prefix) == filepath.Base(path) {
 			continue
@@ -695,9 +734,9 @@ func CleanupStaleRequestBodySpoolFiles(dir, prefix string, olderThan time.Durati
 		if now.Sub(info.ModTime()) <= olderThan {
 			continue
 		}
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
+		if err := remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("remove stale spool %q: %w", path, err))
 		}
 	}
-	return nil
+	return cleanupErr
 }

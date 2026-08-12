@@ -384,7 +384,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	}
 	reqModel := modelResult.String()
 	clientModel := clientRequestedModel(c, reqModel)
-	SetClaudeCodeClientContext(c, body, nil)
+	_ = SetClaudeCodeClientContext(c, body, nil)
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	route, hasRoute := service.EffectiveGatewayRouteFromContext(c.Request.Context())
 	if !hasRoute {
@@ -1105,7 +1105,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	}
 	reqModel := strings.Clone(modelResult.String())
 	clientModel := clientRequestedModel(c, reqModel)
-	SetClaudeCodeClientContext(c, body, nil)
+	_ = SetClaudeCodeClientContext(c, body, nil)
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	route, hasRoute := service.EffectiveGatewayRouteFromContext(c.Request.Context())
 	if !hasRoute {

@@ -60,18 +60,21 @@ func NewUserMessageQueueService(cache UserMsgQueueCache, rpmCache RPMCache, cfg 
 // 1. messages 非空
 // 2. 最后一条消息 role == "user"
 // 3. 最后一条消息 content（如果是数组）中不含 type:"tool_result" / "tool_use_result"
-func IsRealUserMessage(parsed *ParsedRequest) bool {
+func IsRealUserMessage(parsed *ParsedRequest) (bool, error) {
 	if parsed == nil {
-		return false
+		return false, nil
 	}
-	messagesRaw := parsed.MessagesRaw()
+	messagesRaw, err := parsed.MessagesRaw()
+	if err != nil {
+		return false, err
+	}
 	if len(messagesRaw) == 0 {
-		return false
+		return false, nil
 	}
 
 	messages := gjson.ParseBytes(messagesRaw)
 	if !messages.IsArray() {
-		return false
+		return false, nil
 	}
 	lastMsg := gjson.Result{}
 	messages.ForEach(func(_, msg gjson.Result) bool {
@@ -79,18 +82,18 @@ func IsRealUserMessage(parsed *ParsedRequest) bool {
 		return true
 	})
 	if !lastMsg.Exists() || !lastMsg.IsObject() {
-		return false
+		return false, nil
 	}
 	if lastMsg.Get("role").String() != "user" {
-		return false
+		return false, nil
 	}
 
 	content := lastMsg.Get("content")
 	if !content.Exists() {
-		return true
+		return true, nil
 	}
 	if !content.IsArray() {
-		return true
+		return true, nil
 	}
 
 	isReal := true
@@ -102,7 +105,7 @@ func IsRealUserMessage(parsed *ParsedRequest) bool {
 		}
 		return true
 	})
-	return isReal
+	return isReal, nil
 }
 
 // TryAcquire 尝试立即获取串行锁

@@ -171,7 +171,11 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		UserAgent: c.GetHeader("User-Agent"),
 		APIKeyID:  apiKey.ID,
 	}
-	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
+	sessionHash, err := h.gatewayService.GenerateSessionHash(parsedReq)
+	if err != nil {
+		h.responsesErrorResponse(c, http.StatusServiceUnavailable, "server_error", "Failed to spool request body")
+		return
+	}
 
 	// Error passthrough binding
 	if h.errorPassthroughService != nil {

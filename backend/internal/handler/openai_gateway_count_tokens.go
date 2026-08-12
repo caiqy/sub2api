@@ -147,7 +147,10 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 
 	reqModel := parsedReq.Model
 	clientModel := clientRequestedModel(c, reqModel)
-	SetClaudeCodeClientContext(c, nil, parsedReq)
+	if err := SetClaudeCodeClientContext(c, nil, parsedReq); err != nil {
+		h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
+		return
+	}
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	route, hasRoute := service.EffectiveGatewayRouteFromContext(c.Request.Context())
 	if !hasRoute {

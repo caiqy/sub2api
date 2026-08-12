@@ -730,7 +730,9 @@ func (h *GatewayHandler) prepareGeminiStickySelectionFromRequest(c *gin.Context,
 				APIKeyID:  apiKey.ID,
 			}
 		}
-		sessionHash = h.gatewayService.GenerateSessionHash(parsedReq)
+		if generated, err := h.gatewayService.GenerateSessionHash(parsedReq); err == nil {
+			sessionHash = generated
+		}
 	}
 	sessionKey := sessionHash
 	if sessionHash != "" {
