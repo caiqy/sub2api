@@ -12,7 +12,7 @@
 4. 如果用户只说“发布下一个版本”，先确定当前 `HEAD` 已包含的最高上游三段式 tag，再发布该基准下一个本地四段式 tag。
 5. 默认给当前目标提交打 tag，并执行 `git push origin <tag>` 推送到远端。
 6. 推送后校验远端 tag 已存在。
-7. 推送 tag 后由 Release workflow 自动发版；需要手动重跑时，执行 `gh workflow run release.yml --repo caiqy/sub2api --ref <tag> -f tag=<tag>`。
+7. 推送 tag 后显式执行一次 `gh workflow run release.yml --repo caiqy/sub2api --ref <tag> -f tag=<tag>`；推送 tag 本身不会触发发布。
 8. 使用 `gh run view/watch` 跟进 Release workflow 到最终结果；成功后核验 release assets 包含 `sub2api_<version>_linux_amd64.tar.gz` 和 `checksums.txt`。
 
 ## 下一个本地版本号算法
@@ -36,7 +36,7 @@
 
 ## 仓库行为
 
-- `.github/workflows/release.yml` 会在 `push.tags: 'v*'` 时自动触发 Release workflow。
+- `.github/workflows/release.yml` 只接受带必填 `tag` 输入的 `workflow_dispatch`，不响应 tag push。
 - workflow 内部可能会执行 VERSION 同步，并产生包含 `[skip ci]` 的自动提交；这是仓库既有行为，不等于手动发版时可以自行加 `[skip ci]`。
 - `backend/cmd/server/VERSION` 可作为主线版本判断的重要参考之一，但最终仍需结合最新 tag 与用户指令共同判断。
 

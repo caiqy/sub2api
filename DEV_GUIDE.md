@@ -49,7 +49,7 @@ npm install -g pnpm
 |----------|----------|----------|
 | **backend-ci.yml** | push, pull_request | 单元测试 + 集成测试 + golangci-lint v2.7 |
 | **security-scan.yml** | push, pull_request, 每周一 | govulncheck + gosec + pnpm audit |
-| **release.yml** | tag `v*` | 构建发布（PR 不触发） |
+| **release.yml** | 手动 `workflow_dispatch`（必填 tag） | 构建发布（tag push 和 PR 不触发） |
 
 ### CI 要求
 
