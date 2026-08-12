@@ -105,6 +105,28 @@ func TestUpdateSettingsGrokDefaultBaseURLModeIsWritable(t *testing.T) {
 	require.Equal(t, "Example Gateway", repo.values[service.SettingKeySiteName])
 }
 
+func TestDiffSettingsIncludesGrokDefaults(t *testing.T) {
+	changed := diffSettings(
+		&service.SystemSettings{
+			GrokDefaultTextModel:           "grok-4.1",
+			GrokCrossClientModelMapEnabled: true,
+			GrokDefaultBaseURLMode:         service.GrokDefaultBaseURLModeCLI,
+		},
+		&service.SystemSettings{
+			GrokDefaultTextModel:           "grok-4.3",
+			GrokCrossClientModelMapEnabled: false,
+			GrokDefaultBaseURLMode:         service.GrokDefaultBaseURLModeEUWest1,
+		},
+		&service.AuthSourceDefaultSettings{},
+		&service.AuthSourceDefaultSettings{},
+		UpdateSettingsRequest{},
+	)
+
+	require.Contains(t, changed, service.SettingKeyGrokDefaultTextModel)
+	require.Contains(t, changed, service.SettingKeyGrokCrossClientModelMapEnabled)
+	require.Contains(t, changed, service.SettingKeyGrokDefaultBaseURLMode)
+}
+
 func TestUpdateSettingsChannelMonitorModeAndThroughputAreWritable(t *testing.T) {
 	h, repo := newStepUpSwitchTestHandler(t, map[string]string{
 		service.SettingKeyChannelMonitorMode:           service.ChannelMonitorModeV1,

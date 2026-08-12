@@ -553,6 +553,15 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.OpenAIAdvancedSchedulerWeightSessionSticky != after.OpenAIAdvancedSchedulerWeightSessionSticky {
 		changed = append(changed, "openai_advanced_scheduler_weight_session_sticky")
 	}
+	if before.GrokDefaultTextModel != after.GrokDefaultTextModel {
+		changed = append(changed, service.SettingKeyGrokDefaultTextModel)
+	}
+	if before.GrokCrossClientModelMapEnabled != after.GrokCrossClientModelMapEnabled {
+		changed = append(changed, service.SettingKeyGrokCrossClientModelMapEnabled)
+	}
+	if before.GrokDefaultBaseURLMode != after.GrokDefaultBaseURLMode {
+		changed = append(changed, service.SettingKeyGrokDefaultBaseURLMode)
+	}
 	// 余额、订阅到期与账号限额通知
 	if before.BalanceLowNotifyEnabled != after.BalanceLowNotifyEnabled {
 		changed = append(changed, "balance_low_notify_enabled")

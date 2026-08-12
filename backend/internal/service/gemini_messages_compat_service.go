@@ -690,6 +690,7 @@ func (s *GeminiMessagesCompatService) prepareMessagesCompatForward(ctx context.C
 // Transformed outbound handles created here are owned and cleaned before return.
 func (s *GeminiMessagesCompatService) ForwardHandle(ctx context.Context, c *gin.Context, account *Account, bodyHandle *RequestBodyHandle) (*ForwardResult, error) {
 	beginUpstreamResponseModelObservation(c)
+	beginGeminiImageOutputObservation(c)
 	startTime := time.Now()
 	prepared, err := s.prepareMessagesCompatForward(ctx, c, account, bodyHandle)
 	if err != nil {
