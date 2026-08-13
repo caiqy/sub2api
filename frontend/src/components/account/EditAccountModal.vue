@@ -4559,6 +4559,7 @@ function applyOpenAIExtra(extra: Record<string, unknown>) {
   }
 
   if (props.account.type === 'oauth') {
+    // 默认 session 不写入：删除字段，后端缺失时默认 session。
     if (codexFingerprintMode.value !== 'session') {
       extra.codex_fingerprint_mode = codexFingerprintMode.value
     } else {
