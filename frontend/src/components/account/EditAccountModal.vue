@@ -4557,6 +4557,14 @@ function applyOpenAIExtra(extra: Record<string, unknown>) {
       delete extra.codex_cli_only_allow_app_server
     }
   }
+
+  if (props.account.type === 'oauth') {
+    if (codexFingerprintMode.value !== 'session') {
+      extra.codex_fingerprint_mode = codexFingerprintMode.value
+    } else {
+      delete extra.codex_fingerprint_mode
+    }
+  }
 }
 
 function applyQuotaLimitExtra(extra: Record<string, unknown>) {
@@ -5011,198 +5019,6 @@ const handleSubmit = async () => {
       updatePayload.extra = {}
     } else {
       delete updatePayload.extra
-    }
-
-    // For Anthropic API Key accounts, handle passthrough mode + web search emulation in extra
-    if (props.account.platform === 'anthropic' && props.account.type === 'apikey') {
-      const currentExtra = (updatePayload.extra as Record<string, unknown>) || (props.account.extra as Record<string, unknown>) || {}
-      const newExtra: Record<string, unknown> = { ...currentExtra }
-      if (anthropicPassthroughEnabled.value) {
-        newExtra.anthropic_passthrough = true
-      } else {
-        delete newExtra.anthropic_passthrough
-      }
-      if (anthropicAPIKeyAuthScheme.value === 'authorization_bearer') {
-        newExtra.anthropic_apikey_auth_scheme = 'authorization_bearer'
-      } else {
-        delete newExtra.anthropic_apikey_auth_scheme
-      }
-      if (webSearchEmulationMode.value === 'default') {
-        delete newExtra.web_search_emulation
-      } else {
-        newExtra.web_search_emulation = webSearchEmulationMode.value
-      }
-      updatePayload.extra = newExtra
-    }
-
-    // For OpenAI OAuth/SetupToken/API Key accounts, handle passthrough mode in extra
-    if (props.account.platform === 'openai' && (props.account.type === 'oauth' || props.account.type === 'setup-token' || props.account.type === 'apikey')) {
-      const currentExtra = (updatePayload.extra as Record<string, unknown>) || (props.account.extra as Record<string, unknown>) || {}
-      const newExtra: Record<string, unknown> = { ...currentExtra }
-      const hadCodexCLIOnlyEnabled = currentExtra.codex_cli_only === true
-      if (props.account.type === 'oauth' || props.account.type === 'setup-token') {
-        newExtra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
-        newExtra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)
-      } else if (props.account.type === 'apikey') {
-        newExtra.openai_apikey_responses_websockets_v2_mode = openaiAPIKeyResponsesWebSocketV2Mode.value
-        newExtra.openai_apikey_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiAPIKeyResponsesWebSocketV2Mode.value)
-      }
-      delete newExtra.responses_websockets_v2_enabled
-      delete newExtra.openai_ws_enabled
-      if (openaiPassthroughEnabled.value) {
-        newExtra.openai_passthrough = true
-      } else {
-        delete newExtra.openai_passthrough
-        delete newExtra.openai_oauth_passthrough
-      }
-      // 缺省即保留 namespace，不写空值，避免 extra 里堆积默认项
-      if (props.account.type === 'oauth' && openaiFlattenNamespacesEnabled.value) {
-        newExtra.openai_responses_flatten_namespaces = true
-      } else {
-        delete newExtra.openai_responses_flatten_namespaces
-      }
-      if (isSparkShadow.value) {
-        delete newExtra.openai_long_context_billing_enabled
-      } else {
-        newExtra.openai_long_context_billing_enabled = openAILongContextBillingEnabled.value
-      }
-      if (openAICompactMode.value === 'auto') {
-        delete newExtra.openai_compact_mode
-      } else {
-        newExtra.openai_compact_mode = openAICompactMode.value
-      }
-		if (props.account.type === 'apikey') {
-        if (!openAITextGenerationCapabilityEnabled.value || openAIResponsesMode.value === 'auto') {
-          delete newExtra.openai_responses_mode
-        } else {
-          newExtra.openai_responses_mode = openAIResponsesMode.value
-        }
-		}
-		if (autoPause5hThreshold.value != null && autoPause5hThreshold.value > 0) {
-			newExtra.auto_pause_5h_threshold = autoPause5hThreshold.value / 100
-		} else {
-			delete newExtra.auto_pause_5h_threshold
-		}
-		if (autoPause7dThreshold.value != null && autoPause7dThreshold.value > 0) {
-			newExtra.auto_pause_7d_threshold = autoPause7dThreshold.value / 100
-		} else {
-			delete newExtra.auto_pause_7d_threshold
-		}
-		if (autoPause5hDisabled.value) {
-			newExtra.auto_pause_5h_disabled = true
-		} else {
-			delete newExtra.auto_pause_5h_disabled
-		}
-		if (autoPause7dDisabled.value) {
-			newExtra.auto_pause_7d_disabled = true
-		} else {
-			delete newExtra.auto_pause_7d_disabled
-		}
-
-		delete newExtra.codex_image_generation_bridge_enabled
-      switch (codexImageToolMode.value) {
-        case 'enabled':
-        case 'disabled':
-          newExtra.codex_image_generation_bridge = codexImageToolMode.value === 'enabled'
-          delete newExtra.codex_image_generation_explicit_tool_policy
-          break
-        case 'block':
-          newExtra.codex_image_generation_explicit_tool_policy = 'strip'
-          delete newExtra.codex_image_generation_bridge
-          break
-        default:
-          delete newExtra.codex_image_generation_bridge
-          delete newExtra.codex_image_generation_explicit_tool_policy
-      }
-
-      if (props.account.type === 'oauth' || props.account.type === 'setup-token') {
-        if (codexCLIOnlyEnabled.value) {
-          newExtra.codex_cli_only = true
-        } else if (hadCodexCLIOnlyEnabled) {
-          // 关闭时显式写 false，避免 extra 为空被后端忽略导致旧值无法清除
-          newExtra.codex_cli_only = false
-        } else {
-          delete newExtra.codex_cli_only
-        }
-        // Claude Code 插件放行已迁移到全局 codex_cli_only_whitelist，编辑时清理废弃账号级快捷字段。
-        delete newExtra.codex_cli_only_allowed_clients
-        if (codexCLIOnlyEnabled.value && codexCLIOnlyAppServerEnabled.value) {
-          newExtra.codex_cli_only_allow_app_server = true
-        } else {
-          delete newExtra.codex_cli_only_allow_app_server
-        }
-      }
-
-      // 指纹收敛模式：默认 session，不写入；非默认值显式写入（包括 off）
-      if (props.account.type === 'oauth') {
-        if (codexFingerprintMode.value !== 'session') {
-          newExtra.codex_fingerprint_mode = codexFingerprintMode.value
-        } else {
-          delete newExtra.codex_fingerprint_mode
-        }
-      }
-
-      updatePayload.extra = newExtra
-    }
-
-    // For apikey/bedrock accounts, handle quota_limit in extra
-    if (props.account.type === 'apikey' || props.account.type === 'bedrock') {
-      const currentExtra = (updatePayload.extra as Record<string, unknown>) ||
-        (props.account.extra as Record<string, unknown>) || {}
-      const newExtra: Record<string, unknown> = { ...currentExtra }
-      // 上游倍率自动探测对全部 API-key 平台开放（sub2api 上游即可应答），
-      // Bedrock 凭证无静态 Key 不参与。
-      if (props.account.type === 'apikey') {
-        delete newExtra.upstream_billing_probe_enabled
-        delete newExtra.upstream_billing_rate_sync_enabled
-      }
-      // Total quota
-      if (editQuotaLimit.value != null && editQuotaLimit.value > 0) {
-        newExtra.quota_limit = editQuotaLimit.value
-      } else {
-        delete newExtra.quota_limit
-      }
-      // Daily quota
-      if (editQuotaDailyLimit.value != null && editQuotaDailyLimit.value > 0) {
-        newExtra.quota_daily_limit = editQuotaDailyLimit.value
-      } else {
-        delete newExtra.quota_daily_limit
-        delete newExtra.quota_daily_used
-        delete newExtra.quota_daily_start
-      }
-      // Weekly quota
-      if (editQuotaWeeklyLimit.value != null && editQuotaWeeklyLimit.value > 0) {
-        newExtra.quota_weekly_limit = editQuotaWeeklyLimit.value
-      } else {
-        delete newExtra.quota_weekly_limit
-        delete newExtra.quota_weekly_used
-        delete newExtra.quota_weekly_start
-      }
-      // Quota reset mode config
-      if (editDailyResetMode.value === 'fixed') {
-        newExtra.quota_daily_reset_mode = 'fixed'
-        newExtra.quota_daily_reset_hour = editDailyResetHour.value ?? 0
-      } else {
-        delete newExtra.quota_daily_reset_mode
-        delete newExtra.quota_daily_reset_hour
-      }
-      if (editWeeklyResetMode.value === 'fixed') {
-        newExtra.quota_weekly_reset_mode = 'fixed'
-        newExtra.quota_weekly_reset_day = editWeeklyResetDay.value ?? 1
-        newExtra.quota_weekly_reset_hour = editWeeklyResetHour.value ?? 0
-      } else {
-        delete newExtra.quota_weekly_reset_mode
-        delete newExtra.quota_weekly_reset_day
-        delete newExtra.quota_weekly_reset_hour
-      }
-      if (editDailyResetMode.value === 'fixed' || editWeeklyResetMode.value === 'fixed') {
-        newExtra.quota_reset_timezone = editResetTimezone.value || 'UTC'
-      } else {
-        delete newExtra.quota_reset_timezone
-      }
-      // Quota notify config
-      writeQuotaNotifyToExtra(newExtra, 'update')
-      updatePayload.extra = newExtra
     }
 
     const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {
