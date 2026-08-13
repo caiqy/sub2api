@@ -429,15 +429,18 @@ func TestChannelMonitorRunnerScheduleDoesNotReinsertAfterV2Drain(t *testing.T) {
 		close(scheduled)
 	}()
 
+	// The barrier can be captured by the existing task's immediate fire rather
+	// than Schedule. Always release it before synchronously notifying V2.
+	releaseRead := sync.OnceFunc(func() { close(readRelease) })
 	select {
 	case <-readStarted:
 		settingsRepo.setMode(ChannelMonitorModeV2)
+		releaseRead()
 		settings.notifyChannelMonitorRuntimeListeners()
 		require.Zero(t, runnerTaskCount(runner), "V2 transition must drain existing tasks")
-		close(readRelease)
 	case <-scheduled:
-		// The runner-local state fix does not need a runtime read in Schedule.
 		settingsRepo.clearRuntimeReadBarrier()
+		releaseRead()
 		settingsRepo.setMode(ChannelMonitorModeV2)
 		settings.notifyChannelMonitorRuntimeListeners()
 	}
