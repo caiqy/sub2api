@@ -122,6 +122,9 @@ func TestGetAccountSchedulingThresholds_MissingSettingUsesDefaultsAndNormalCache
 	svc := newSettingServiceForPlatformThresholdTest(nil)
 	repo := svc.settingRepo.(*mockSettingRepo)
 	repo.getValueErr = ErrSettingNotFound
+	// fork 的 NewSettingService 构造时会急切加载 gateway runtime/control 设置
+	// （14 次 GetValue）；计数只针对本次热路径读取，与上游纯构造器契约不同。
+	repo.getValueCalls = 0
 
 	got := svc.GetAccountSchedulingThresholds(context.Background())
 	require.Equal(t, defaultAccountSchedulingThresholds(), got)
