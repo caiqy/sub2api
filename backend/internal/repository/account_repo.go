@@ -2372,8 +2372,7 @@ func (r *accountRepository) ClearTempUnschedulable(ctx context.Context, id int64
 	return nil
 }
 
-func (r *accountRepository) ClearTempUnschedulableIfSource(ctx context.Context, id int64, source string) (bool, error) {
-	sourcePattern := "%\"source\":\"" + source + "\"%"
+func (r *accountRepository) ClearTempUnschedulableIfReason(ctx context.Context, id int64, reason string) (bool, error) {
 	result, err := r.sql.ExecContext(ctx, `
 		UPDATE accounts
 		SET temp_unschedulable_until = NULL,
@@ -2381,8 +2380,8 @@ func (r *accountRepository) ClearTempUnschedulableIfSource(ctx context.Context, 
 			updated_at = NOW()
 		WHERE id = $1
 			AND deleted_at IS NULL
-			AND temp_unschedulable_reason LIKE $2
-	`, id, sourcePattern)
+			AND temp_unschedulable_reason = $2
+	`, id, reason)
 	if err != nil {
 		return false, err
 	}

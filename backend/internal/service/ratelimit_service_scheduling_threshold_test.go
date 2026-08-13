@@ -178,6 +178,25 @@ type thresholdReleaseAccountRepoStub struct {
 	listErr                error
 }
 
+type thresholdReleaseOrderCache struct {
+	onDelete func(int64)
+}
+
+func (c *thresholdReleaseOrderCache) SetTempUnsched(context.Context, int64, *TempUnschedState) error {
+	return nil
+}
+
+func (c *thresholdReleaseOrderCache) GetTempUnsched(context.Context, int64) (*TempUnschedState, error) {
+	return nil, nil
+}
+
+func (c *thresholdReleaseOrderCache) DeleteTempUnsched(_ context.Context, accountID int64) error {
+	if c.onDelete != nil {
+		c.onDelete(accountID)
+	}
+	return nil
+}
+
 func (r *thresholdReleaseAccountRepoStub) ListTempUnschedulableByPlatform(_ context.Context, platform string, now time.Time) ([]Account, error) {
 	if r.listErr != nil {
 		return nil, r.listErr
@@ -196,11 +215,19 @@ func (r *thresholdReleaseAccountRepoStub) ClearTempUnschedulable(_ context.Conte
 	return nil
 }
 
-func (r *thresholdReleaseAccountRepoStub) ClearTempUnschedulableIfSource(_ context.Context, id int64, source string) (bool, error) {
-	if source != AccountSchedulingThresholdReasonSource {
+func (r *thresholdReleaseAccountRepoStub) ClearTempUnschedulableIfReason(_ context.Context, id int64, reason string) (bool, error) {
+	if !IsAccountSchedulingThresholdReason(reason) {
 		return false, nil
 	}
 	r.conditionalClearCalls = append(r.conditionalClearCalls, id)
+	if r.conditionalClearResult && r.conditionalClearErr == nil {
+		for i := range r.paused {
+			if r.paused[i].ID == id {
+				r.paused[i].TempUnschedulableUntil = nil
+				r.paused[i].TempUnschedulableReason = ""
+			}
+		}
+	}
 	return r.conditionalClearResult, r.conditionalClearErr
 }
 
@@ -267,15 +294,17 @@ func TestRateLimitService_ReleaseAccountSchedulingThresholdPauses_DBFailureRetai
 		paused:              []Account{{ID: 5008, Platform: PlatformOpenAI, TempUnschedulableUntil: &until, TempUnschedulableReason: thresholdReason}},
 	}
 	cache := &tempUnschedCacheRecorder{}
-	blocker := &runtimeBlockRecorder{}
 	rl := NewRateLimitService(repo, nil, &config.Config{}, nil, cache)
-	rl.SetAccountRuntimeBlocker(blocker)
+	account := &Account{ID: 5008, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	gateway := &OpenAIGatewayService{}
+	gateway.BlockAccountScheduling(account, until, AccountSchedulingThresholdReasonSource)
+	rl.SetAccountRuntimeBlocker(gateway)
 
 	rl.ReleaseAccountSchedulingThresholdPauses(context.Background(), []string{PlatformOpenAI})
 
 	require.Equal(t, []int64{5008}, repo.conditionalClearCalls)
-	require.Empty(t, blocker.clearedIDs)
 	require.Empty(t, cache.deletedIDs)
+	require.True(t, gateway.isOpenAIAccountRuntimeBlocked(account), "DB clear failure must not broad-clear the real gateway runtime block")
 }
 
 func TestRateLimitService_ReleaseAccountSchedulingThresholdPauses_ClearsRuntimeOnlyThresholdBlock(t *testing.T) {
@@ -303,6 +332,77 @@ func TestRateLimitService_ReleaseAccountSchedulingThresholdPauses_RetainsNewerNo
 	rl.ReleaseAccountSchedulingThresholdPauses(context.Background(), []string{PlatformOpenAI})
 
 	require.True(t, gateway.isOpenAIAccountRuntimeBlocked(account), "a newer non-threshold runtime pause must survive threshold release")
+}
+
+func TestRateLimitService_ReleaseAccountSchedulingThresholdPauses_RetainsLaterShorterNonThresholdRuntimeBlock(t *testing.T) {
+	now := time.Now().UTC()
+	thresholdUntil := now.Add(time.Hour)
+	thresholdReason := BuildDetailedAccountSchedulingThresholdReason(AccountSchedulingThresholdReasonInput{
+		Platform: PlatformOpenAI, Window: "7d", ThresholdPercent: 90, UsedPercent: 95, Until: thresholdUntil, Now: now,
+	})
+	account := &Account{ID: 5010, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	gateway := &OpenAIGatewayService{}
+	gateway.BlockAccountScheduling(account, thresholdUntil, AccountSchedulingThresholdReasonSource)
+	// The shorter DB pause supersedes the persisted threshold state while the
+	// runtime fast path retains its longer threshold deadline.
+	gateway.BlockAccountScheduling(account, now.Add(5*time.Minute), "rate_limit")
+	repo := &thresholdReleaseAccountRepoStub{
+		conditionalClearResult: false,
+		paused:                 []Account{{ID: account.ID, Platform: PlatformOpenAI, TempUnschedulableUntil: &thresholdUntil, TempUnschedulableReason: thresholdReason}},
+	}
+	rl := NewRateLimitService(repo, nil, &config.Config{}, nil, &tempUnschedCacheRecorder{})
+	rl.SetAccountRuntimeBlocker(gateway)
+
+	rl.ReleaseAccountSchedulingThresholdPauses(context.Background(), []string{PlatformOpenAI})
+
+	require.True(t, gateway.isOpenAIAccountRuntimeBlocked(account), "a conditional DB miss must keep the existing runtime block regardless of its stale threshold provenance")
+}
+
+func TestRateLimitService_ReleaseAccountSchedulingThresholdPauses_RedisFailureKeepsDBAndRuntimeReleased(t *testing.T) {
+	now := time.Now().UTC()
+	until := now.Add(time.Hour)
+	thresholdReason := BuildDetailedAccountSchedulingThresholdReason(AccountSchedulingThresholdReasonInput{
+		Platform: PlatformOpenAI, Window: "7d", ThresholdPercent: 90, UsedPercent: 95, Until: until, Now: now,
+	})
+	account := &Account{ID: 5011, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	gateway := &OpenAIGatewayService{}
+	gateway.BlockAccountScheduling(account, until, AccountSchedulingThresholdReasonSource)
+	repo := &thresholdReleaseAccountRepoStub{
+		conditionalClearResult: true,
+		paused:                 []Account{{ID: account.ID, Platform: PlatformOpenAI, TempUnschedulableUntil: &until, TempUnschedulableReason: thresholdReason}},
+	}
+	cache := &tempUnschedCacheRecorder{deleteErr: errors.New("redis unavailable")}
+	rl := NewRateLimitService(repo, nil, &config.Config{}, nil, cache)
+	rl.SetAccountRuntimeBlocker(gateway)
+
+	rl.ReleaseAccountSchedulingThresholdPauses(context.Background(), []string{PlatformOpenAI})
+
+	require.Equal(t, []int64{account.ID}, cache.deletedIDs)
+	require.Nil(t, repo.paused[0].TempUnschedulableUntil, "successful DB transition remains authoritative when best-effort Redis deletion fails")
+	require.False(t, gateway.isOpenAIAccountRuntimeBlocked(account), "runtime block must clear with the successful DB transition; Redis temp status is not a scheduler input")
+}
+
+func TestRateLimitService_ReleaseAccountSchedulingThresholdPauses_ClearsRuntimeBeforeRedisDeletion(t *testing.T) {
+	now := time.Now().UTC()
+	until := now.Add(time.Hour)
+	thresholdReason := BuildDetailedAccountSchedulingThresholdReason(AccountSchedulingThresholdReasonInput{
+		Platform: PlatformOpenAI, Window: "7d", ThresholdPercent: 90, UsedPercent: 95, Until: until, Now: now,
+	})
+	account := &Account{ID: 5012, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	gateway := &OpenAIGatewayService{}
+	gateway.BlockAccountScheduling(account, until, AccountSchedulingThresholdReasonSource)
+	repo := &thresholdReleaseAccountRepoStub{
+		conditionalClearResult: true,
+		paused:                 []Account{{ID: account.ID, Platform: PlatformOpenAI, TempUnschedulableUntil: &until, TempUnschedulableReason: thresholdReason}},
+	}
+	cache := &thresholdReleaseOrderCache{onDelete: func(id int64) {
+		require.Equal(t, account.ID, id)
+		require.False(t, gateway.isOpenAIAccountRuntimeBlocked(account), "Redis deletion must observe the completed DB/runtime release transition")
+	}}
+	rl := NewRateLimitService(repo, nil, &config.Config{}, nil, cache)
+	rl.SetAccountRuntimeBlocker(gateway)
+
+	rl.ReleaseAccountSchedulingThresholdPauses(context.Background(), []string{PlatformOpenAI})
 }
 
 func TestRateLimitService_ReleaseAccountSchedulingThresholdPauses_ExpiredPausesNotTouched(t *testing.T) {

@@ -2393,6 +2393,74 @@ func TestOpenAIGatewayService_OAuthPassthrough_OffPreservesClientFingerprint(t *
 	require.Equal(t, "Bearer oauth-token", upstream.lastReq.Header.Get("Authorization"), "非指纹凭证仍须被替换保护，客户端 Authorization 不得透传")
 }
 
+func TestOpenAIGatewayService_OAuthPassthrough_OffPreservesFingerprintAfterAccountRules(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+	c.Request.Header.Set("session_id", "client-session")
+	c.Request.Header.Set("session-id", "client-session")
+	c.Request.Header.Set("conversation_id", "client-conversation")
+	c.Request.Header.Set("thread-id", "client-thread")
+	c.Request.Header.Set("x-codex-installation-id", "client-installation")
+	c.Request.Header.Set("x-codex-window-id", "client-window")
+	c.Request.Header.Set("x-codex-turn-metadata", `{"installation_id":"client-installation","session_id":"client-session","thread_id":"client-thread","turn_id":"client-turn"}`)
+	c.Request.Header.Set("Authorization", "Bearer inbound-must-not-forward")
+
+	inputBody := []byte(`{"model":"gpt-5.2","stream":false,"store":true,"input":[{"type":"text","text":"hi"}],"client_metadata":{"x-codex-installation-id":"client-installation","session_id":"client-session","thread_id":"client-thread","turn_id":"client-turn","x-codex-window-id":"client-window","x-codex-turn-metadata":"{\"installation_id\":\"client-installation\",\"session_id\":\"client-session\",\"thread_id\":\"client-thread\",\"turn_id\":\"client-turn\"}"}}`)
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid"}},
+		Body:       io.NopCloser(strings.NewReader("data: [DONE]\n\n")),
+	}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	account := &Account{
+		ID: 127, Name: "off-account-rules", Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Concurrency: 1, Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
+		Status: StatusActive, Schedulable: true, RateMultiplier: f64p(1),
+		Extra: map[string]any{
+			"openai_passthrough": true, "codex_fingerprint_mode": "off", "passthrough_fields_enabled": true,
+			"passthrough_field_rules": []any{
+				map[string]any{"target": "body", "key": "client_metadata.session_id", "mode": "inject", "value": "injected-session"},
+				map[string]any{"target": "body", "key": "client_metadata.thread_id", "mode": "delete"},
+				map[string]any{"target": "body", "key": "client_metadata.turn_id", "mode": "forward"},
+				map[string]any{"target": "body", "key": "client_metadata.passthrough_note", "mode": "inject", "value": "kept"},
+				map[string]any{"target": "header", "key": "x-codex-installation-id", "mode": "inject", "value": "injected-installation"},
+				map[string]any{"target": "header", "key": "thread-id", "mode": "delete"},
+				map[string]any{"target": "header", "key": "conversation_id", "mode": "inject", "value": "injected-conversation"},
+				map[string]any{"target": "header", "key": "x-codex-window-id", "mode": "forward"},
+				map[string]any{"target": "header", "key": "x-passthrough-note", "mode": "inject", "value": "kept"},
+			},
+		},
+	}
+
+	_, err := svc.Forward(context.Background(), c, account, inputBody)
+	require.NoError(t, err)
+	require.NotNil(t, upstream.lastReq)
+
+	require.Equal(t, "client-session", upstream.lastReq.Header.Get("session_id"))
+	require.Equal(t, "client-session", upstream.lastReq.Header.Get("session-id"))
+	require.Equal(t, "client-conversation", upstream.lastReq.Header.Get("conversation_id"))
+	require.Equal(t, "client-thread", upstream.lastReq.Header.Get("thread-id"))
+	require.Equal(t, "client-installation", upstream.lastReq.Header.Get("x-codex-installation-id"))
+	require.Equal(t, "client-window", upstream.lastReq.Header.Get("x-codex-window-id"))
+	require.Equal(t, `{"installation_id":"client-installation","session_id":"client-session","thread_id":"client-thread","turn_id":"client-turn"}`, upstream.lastReq.Header.Get("x-codex-turn-metadata"))
+	require.Equal(t, "kept", upstream.lastReq.Header.Get("x-passthrough-note"), "非指纹 header 规则必须保持有效")
+	require.Equal(t, "Bearer oauth-token", upstream.lastReq.Header.Get("Authorization"))
+
+	var outbound map[string]any
+	require.NoError(t, json.Unmarshal(upstream.lastBody, &outbound))
+	metadata := outbound["client_metadata"].(map[string]any)
+	require.Equal(t, "client-installation", metadata["x-codex-installation-id"])
+	require.Equal(t, "client-session", metadata["session_id"])
+	require.Equal(t, "client-thread", metadata["thread_id"])
+	require.Equal(t, "client-turn", metadata["turn_id"])
+	require.Equal(t, "client-window", metadata["x-codex-window-id"])
+	require.Equal(t, `{"installation_id":"client-installation","session_id":"client-session","thread_id":"client-thread","turn_id":"client-turn"}`, metadata["x-codex-turn-metadata"])
+	require.Equal(t, "kept", metadata["passthrough_note"], "非指纹 body 规则必须保持有效")
+}
+
 func TestOpenAIGatewayService_OAuthPassthrough_EnforcesFingerprintAfterAccountBodyRules(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

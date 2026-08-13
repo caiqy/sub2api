@@ -170,8 +170,8 @@ func (r *thresholdReleaseSchedulerRepo) ListTempUnschedulableByPlatform(_ contex
 	return out, nil
 }
 
-func (r *thresholdReleaseSchedulerRepo) ClearTempUnschedulableIfSource(_ context.Context, id int64, source string) (bool, error) {
-	if source != AccountSchedulingThresholdReasonSource {
+func (r *thresholdReleaseSchedulerRepo) ClearTempUnschedulableIfReason(_ context.Context, id int64, reason string) (bool, error) {
+	if !IsAccountSchedulingThresholdReason(reason) {
 		return false, nil
 	}
 	for i := range r.paused {

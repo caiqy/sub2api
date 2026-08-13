@@ -368,3 +368,41 @@ func applyCodexFingerprintClientMetadataBytes(body []byte, ids *codexFingerprint
 	}
 	return sjson.SetBytes(out, "client_metadata.x-codex-turn-metadata", string(rebuilt))
 }
+
+func restoreCodexFingerprintPassthroughHeaders(outbound, inbound http.Header) {
+	if outbound == nil || inbound == nil {
+		return
+	}
+	for _, name := range []string{
+		"session-id", "session_id", "conversation_id", "thread-id", "thread_id", "x-client-request-id",
+		"x-codex-installation-id", "x-codex-window-id", "x-codex-turn-metadata",
+	} {
+		outbound.Del(name)
+		for _, value := range inbound.Values(name) {
+			outbound.Add(name, value)
+		}
+	}
+}
+
+func restoreCodexFingerprintPassthroughFields(body, sourceBody []byte) ([]byte, error) {
+	if len(sourceBody) == 0 {
+		return body, nil
+	}
+	out := body
+	for _, field := range []string{
+		"x-codex-installation-id", "session_id", "thread_id", "turn_id", "x-codex-window-id", "x-codex-turn-metadata",
+	} {
+		path := "client_metadata." + field
+		value := gjson.GetBytes(sourceBody, path)
+		var err error
+		if value.Exists() {
+			out, err = sjson.SetRawBytes(out, path, []byte(value.Raw))
+		} else {
+			out, err = sjson.DeleteBytes(out, path)
+		}
+		if err != nil {
+			return body, err
+		}
+	}
+	return out, nil
+}

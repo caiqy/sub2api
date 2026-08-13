@@ -209,6 +209,8 @@ func (s *OpenAIGatewayService) blockAccountSchedulingLocked(account *Account, un
 			continue
 		}
 		if !blockUntil.After(currentUntil) {
+			s.openaiAccountRuntimeBlockReason.Store(account.ID, reason)
+			s.openaiAccountRuntimeBlockPlatform.Store(account.ID, account.Platform)
 			return generation, false
 		}
 		if s.openaiAccountRuntimeBlockUntil.CompareAndSwap(account.ID, current, blockUntil) {
@@ -237,7 +239,7 @@ func (s *OpenAIGatewayService) ClearAccountSchedulingBlockIfReason(accountID int
 	return true
 }
 
-func (s *OpenAIGatewayService) ReleaseAccountSchedulingThresholdBlocks(platforms []string) {
+func (s *OpenAIGatewayService) ReleaseAccountSchedulingThresholdBlocks(platforms []string, persistedAccountIDs map[int64]struct{}) {
 	if s == nil || len(platforms) == 0 {
 		return
 	}
@@ -256,6 +258,9 @@ func (s *OpenAIGatewayService) ReleaseAccountSchedulingThresholdBlocks(platforms
 			return true
 		}
 		if _, ok := allowed[platform]; !ok {
+			return true
+		}
+		if _, persisted := persistedAccountIDs[accountID]; persisted {
 			return true
 		}
 		s.ClearAccountSchedulingBlockIfReason(accountID, AccountSchedulingThresholdReasonSource)

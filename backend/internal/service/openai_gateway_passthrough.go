@@ -425,7 +425,13 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	if err != nil {
 		return nil, err
 	}
-	if account.Type == AccountTypeOAuth && account.GetCodexFingerprintMode() != codexFingerprintOff && c != nil {
+	if account.Type == AccountTypeOAuth && account.GetCodexFingerprintMode() == codexFingerprintOff {
+		body, err = restoreCodexFingerprintPassthroughFields(body, sourceBody)
+		if err != nil {
+			return nil, err
+		}
+		restoreCodexFingerprintPassthroughHeaders(outboundHeader, inboundHeader)
+	} else if account.Type == AccountTypeOAuth && c != nil {
 		if fpIDs, ok := c.Get("codex_fingerprint_ids"); ok {
 			if ids, ok := fpIDs.(*codexFingerprintIDs); ok {
 				body, err = applyCodexFingerprintClientMetadataBytes(body, ids)
