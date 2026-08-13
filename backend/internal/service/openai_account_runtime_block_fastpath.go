@@ -221,22 +221,33 @@ func (s *OpenAIGatewayService) blockAccountSchedulingLocked(account *Account, un
 	}
 }
 
-func (s *OpenAIGatewayService) ClearAccountSchedulingBlockIfReason(accountID int64, reason string) bool {
+type AccountSchedulingBlockClearResult uint8
+
+const (
+	AccountSchedulingBlockClearAbsent AccountSchedulingBlockClearResult = iota
+	AccountSchedulingBlockClearMismatch
+	AccountSchedulingBlockClearMatched
+)
+
+func (s *OpenAIGatewayService) ClearAccountSchedulingBlockIfReason(accountID int64, reason string) AccountSchedulingBlockClearResult {
 	if s == nil || accountID <= 0 {
-		return false
+		return AccountSchedulingBlockClearAbsent
 	}
 	mu := s.openAIAccountRuntimeBlockLock(accountID)
 	mu.Lock()
 	defer mu.Unlock()
+	if _, ok := s.openaiAccountRuntimeBlockUntil.Load(accountID); !ok {
+		return AccountSchedulingBlockClearAbsent
+	}
 	currentReason, ok := s.openaiAccountRuntimeBlockReason.Load(accountID)
 	if !ok || currentReason != reason {
-		return false
+		return AccountSchedulingBlockClearMismatch
 	}
 	s.openaiAccountRuntimeBlockUntil.Delete(accountID)
 	s.openaiAccountRuntimeBlockReason.Delete(accountID)
 	s.openaiAccountRuntimeBlockPlatform.Delete(accountID)
 	s.openaiAccountRuntimeBlockGeneration.Store(accountID, s.openaiAccountRuntimeBlockSequence.Add(1))
-	return true
+	return AccountSchedulingBlockClearMatched
 }
 
 func (s *OpenAIGatewayService) ReleaseAccountSchedulingThresholdBlocks(platforms []string, persistedAccountIDs map[int64]struct{}) {

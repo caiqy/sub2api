@@ -143,22 +143,26 @@ type accountSchedulingThresholdConditionalPauseClearer interface {
 }
 
 type accountSchedulingThresholdRuntimeBlockClearer interface {
-	ClearAccountSchedulingBlockIfReason(accountID int64, reason string) bool
+	ClearAccountSchedulingBlockIfReason(accountID int64, reason string) AccountSchedulingBlockClearResult
 }
 
 type accountSchedulingThresholdRuntimePauseReleaser interface {
 	ReleaseAccountSchedulingThresholdBlocks(platforms []string, persistedAccountIDs map[int64]struct{})
 }
 
-func (s *RateLimitService) notifyAccountSchedulingThresholdBlockCleared(accountID int64) {
+type accountSchedulingThresholdCacheCompareDeleter interface {
+	CompareDeleteTempUnsched(ctx context.Context, accountID int64, expected *TempUnschedState) (bool, error)
+}
+
+func (s *RateLimitService) notifyAccountSchedulingThresholdBlockCleared(accountID int64) AccountSchedulingBlockClearResult {
 	if s == nil || s.runtimeBlocker == nil || accountID <= 0 {
-		return
+		return AccountSchedulingBlockClearAbsent
 	}
 	if blocker, ok := s.runtimeBlocker.(accountSchedulingThresholdRuntimeBlockClearer); ok {
-		blocker.ClearAccountSchedulingBlockIfReason(accountID, AccountSchedulingThresholdReasonSource)
-		return
+		return blocker.ClearAccountSchedulingBlockIfReason(accountID, AccountSchedulingThresholdReasonSource)
 	}
 	s.runtimeBlocker.ClearAccountSchedulingBlock(accountID)
+	return AccountSchedulingBlockClearMatched
 }
 
 // ApplyAccountSchedulingThreshold evaluates admin-configured per-platform
@@ -289,11 +293,17 @@ func (s *RateLimitService) ReleaseAccountSchedulingThresholdPauses(ctx context.C
 				if !cleared {
 					continue
 				}
-				s.notifyAccountSchedulingThresholdBlockCleared(account.ID)
-				if s.tempUnschedCache != nil {
-					if err := s.tempUnschedCache.DeleteTempUnsched(ctx, account.ID); err != nil {
-						slog.Warn("release_account_scheduling_threshold_pauses_cache_delete_failed", "account_id", account.ID, "error", err)
+				runtimeClear := s.notifyAccountSchedulingThresholdBlockCleared(account.ID)
+				if runtimeClear == AccountSchedulingBlockClearMismatch {
+					continue
+				}
+				if cache, ok := s.tempUnschedCache.(accountSchedulingThresholdCacheCompareDeleter); ok {
+					expected := tempUnschedStateFromStoredReason(account.TempUnschedulableReason, account.TempUnschedulableUntil.Unix())
+					if _, err := cache.CompareDeleteTempUnsched(ctx, account.ID, expected); err != nil {
+						slog.Warn("release_account_scheduling_threshold_pauses_cache_compare_delete_failed", "account_id", account.ID, "error", err)
 					}
+				} else if s.tempUnschedCache != nil {
+					slog.Warn("release_account_scheduling_threshold_pauses_cache_compare_delete_unsupported", "account_id", account.ID)
 				}
 				slog.Info("account_scheduling_threshold_pause_released", "account_id", account.ID, "platform", platform)
 			}

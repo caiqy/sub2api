@@ -85,6 +85,11 @@ func (c *tempUnschedCacheRecorder) DeleteTempUnsched(ctx context.Context, accoun
 	return c.deleteErr
 }
 
+func (c *tempUnschedCacheRecorder) CompareDeleteTempUnsched(_ context.Context, accountID int64, _ *TempUnschedState) (bool, error) {
+	c.deletedIDs = append(c.deletedIDs, accountID)
+	return c.deleteErr == nil, c.deleteErr
+}
+
 func (s *recoverTokenInvalidatorStub) InvalidateToken(ctx context.Context, account *Account) error {
 	s.accounts = append(s.accounts, account)
 	return s.err
