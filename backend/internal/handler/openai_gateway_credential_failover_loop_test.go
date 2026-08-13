@@ -448,6 +448,25 @@ func (u *responsesFinalHandleReplayUpstream) snapshot() ([]int64, [][]byte) {
 	return append([]int64(nil), u.accountIDs...), bodies
 }
 
+func requireOpenAIRequestBodiesEqualExceptFingerprint(t *testing.T, first, second []byte) {
+	t.Helper()
+	var firstPayload, secondPayload map[string]any
+	require.NoError(t, json.Unmarshal(first, &firstPayload))
+	require.NoError(t, json.Unmarshal(second, &secondPayload))
+	delete(firstPayload, "client_metadata")
+	delete(secondPayload, "client_metadata")
+	require.Equal(t, firstPayload, secondPayload)
+}
+
+func requireOpenAIFingerprintsDiffer(t *testing.T, first, second []byte) {
+	t.Helper()
+	firstFingerprint := gjson.GetBytes(first, "client_metadata")
+	secondFingerprint := gjson.GetBytes(second, "client_metadata")
+	require.True(t, firstFingerprint.Exists())
+	require.True(t, secondFingerprint.Exists())
+	require.NotEqual(t, firstFingerprint.Value(), secondFingerprint.Value())
+}
+
 func TestResponsesFinalHandleReplayAcrossFailover(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	upstream := &responsesFinalHandleReplayUpstream{}
@@ -474,7 +493,8 @@ func TestResponsesFinalHandleReplayAcrossFailover(t *testing.T) {
 	accountIDs, bodies := upstream.snapshot()
 	require.Equal(t, []int64{1, 2}, accountIDs)
 	require.Len(t, bodies, 2)
-	require.JSONEq(t, string(bodies[0]), string(bodies[1]))
+	requireOpenAIRequestBodiesEqualExceptFingerprint(t, bodies[0], bodies[1])
+	requireOpenAIFingerprintsDiffer(t, bodies[0], bodies[1])
 	for _, body := range bodies {
 		require.Equal(t, "routed-model", gjson.GetBytes(body, "model").String())
 		require.Equal(t, "high", gjson.GetBytes(body, "reasoning.effort").String())

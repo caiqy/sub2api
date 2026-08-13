@@ -2339,6 +2339,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_ReusesFingerprintForSameAccountRe
 		{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: [DONE]\n\n"))},
 		{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: [DONE]\n\n"))},
 		{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: [DONE]\n\n"))},
+		{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: [DONE]\n\n"))},
 	}}
 	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
 	account := &Account{
@@ -2356,12 +2357,28 @@ func TestOpenAIGatewayService_OAuthPassthrough_ReusesFingerprintForSameAccountRe
 	require.Len(t, upstream.bodies, 2)
 	require.JSONEq(t, string(upstream.bodies[0]), string(upstream.bodies[1]))
 
-	_, err = svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5.2","stream":true,"store":true,"input":[{"type":"text","text":"next"}]}`))
+	secondAccount := *account
+	secondAccount.ID = 124
+	secondAccount.Credentials = map[string]any{"access_token": "oauth-token-second", "chatgpt_account_id": "chatgpt-acc-second"}
+	_, err = svc.Forward(context.Background(), c, &secondAccount, body)
 	require.NoError(t, err)
 	require.Len(t, upstream.bodies, 3)
+	var firstBody, secondAccountBody map[string]any
+	require.NoError(t, json.Unmarshal(upstream.bodies[0], &firstBody))
+	require.NoError(t, json.Unmarshal(upstream.bodies[2], &secondAccountBody))
+	firstFingerprint := firstBody["client_metadata"]
+	secondFingerprint := secondAccountBody["client_metadata"]
+	delete(firstBody, "client_metadata")
+	delete(secondAccountBody, "client_metadata")
+	require.Equal(t, firstBody, secondAccountBody)
+	require.NotEqual(t, firstFingerprint, secondFingerprint)
+
+	_, err = svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5.2","stream":true,"store":true,"input":[{"type":"text","text":"next"}]}`))
+	require.NoError(t, err)
+	require.Len(t, upstream.bodies, 4)
 	require.NotEqual(t,
 		gjson.GetBytes(upstream.bodies[1], "client_metadata.turn_id").String(),
-		gjson.GetBytes(upstream.bodies[2], "client_metadata.turn_id").String(),
+		gjson.GetBytes(upstream.bodies[3], "client_metadata.turn_id").String(),
 	)
 }
 

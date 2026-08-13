@@ -114,9 +114,14 @@ func TestOpenAIGatewayHandler_ResponsesHTTPCapacityShedRetriesSameAccountBeforeF
 			require.Len(t, env.upstream.requests, len(wantAccountIDs))
 			firstBody, err := io.ReadAll(env.upstream.requests[0].Body)
 			require.NoError(t, err)
-			for _, upstreamRequest := range env.upstream.requests[1:] {
+			for i, upstreamRequest := range env.upstream.requests[1:] {
 				forwarded, err := io.ReadAll(upstreamRequest.Body)
 				require.NoError(t, err)
+				if tt.accountType == service.AccountTypeOAuth && i == len(env.upstream.requests)-2 {
+					requireOpenAIRequestBodiesEqualExceptFingerprint(t, firstBody, forwarded)
+					requireOpenAIFingerprintsDiffer(t, firstBody, forwarded)
+					continue
+				}
 				require.JSONEq(t, string(firstBody), string(forwarded))
 			}
 		})

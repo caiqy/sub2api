@@ -207,7 +207,7 @@ func (r *blockingCyberModerationSettings) GetValue(context.Context, string) (str
 func (r *blockingCyberModerationSettings) GetMultiple(context.Context, []string) (map[string]string, error) {
 	return map[string]string{
 		service.SettingKeyRiskControlEnabled:      "true",
-		service.SettingKeyContentModerationConfig: "",
+		service.SettingKeyContentModerationConfig: `{"all_groups":false,"group_ids":[1],"model_filter":{"type":"include","models":["gpt-5"]},"cyber_policy_exclude_from_ban_count":true}`,
 	}, nil
 }
 
@@ -260,7 +260,8 @@ func TestRecordCyberPolicyIfMarkedBillsBeforeBlockingModeration(t *testing.T) {
 	c := newTestGinContext()
 	c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
 	service.MarkOpsCyberPolicy(c, service.CyberPolicyMark{Message: "blocked", UpstreamStatus: 400, UpstreamInTok: 100, UpstreamOutTok: 20})
-	apiKey := &service.APIKey{ID: 2, User: &service.User{ID: 1}, Group: &service.Group{RateMultiplier: 1}}
+	groupID := int64(1)
+	apiKey := &service.APIKey{ID: 2, GroupID: &groupID, User: &service.User{ID: 1}, Group: &service.Group{ID: groupID, RateMultiplier: 1}}
 
 	h.recordCyberPolicyIfMarked(c, apiKey, &service.Account{ID: 3, Platform: service.PlatformOpenAI}, nil, "gpt-5", true, "", service.ChannelUsageFields{}, "")
 
