@@ -193,21 +193,33 @@ func (c *stagedPassthroughConn) Close() error {
 }
 
 type stagedPassthroughDialer struct {
-	conn openAIWSClientConn
+	conn        openAIWSClientConn
+	mu          sync.Mutex
+	lastHeaders http.Header
 }
 
-func (d *stagedPassthroughDialer) Dial(context.Context, string, http.Header, string) (openAIWSClientConn, int, http.Header, error) {
+func (d *stagedPassthroughDialer) Dial(_ context.Context, _ string, headers http.Header, _ string) (openAIWSClientConn, int, http.Header, error) {
+	d.mu.Lock()
+	d.lastHeaders = headers.Clone()
+	d.mu.Unlock()
 	return d.conn, http.StatusSwitchingProtocols, http.Header{}, nil
 }
 
+func (d *stagedPassthroughDialer) Headers() http.Header {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.lastHeaders.Clone()
+}
+
 func newPassthroughLifecycleService(cfg *config.Config, upstream *stagedPassthroughConn) *OpenAIGatewayService {
+	dialer := &stagedPassthroughDialer{conn: upstream}
 	return &OpenAIGatewayService{
 		cfg:                       cfg,
 		httpUpstream:              &httpUpstreamRecorder{},
 		cache:                     &stubGatewayCache{},
 		openaiWSResolver:          NewOpenAIWSProtocolResolver(cfg),
 		toolCorrector:             NewCodexToolCorrector(),
-		openaiWSPassthroughDialer: &stagedPassthroughDialer{conn: upstream},
+		openaiWSPassthroughDialer: dialer,
 	}
 }
 
@@ -251,6 +263,17 @@ func startPassthroughLifecycleServer(
 	account *Account,
 	hooks ...*OpenAIWSIngressHooks,
 ) (*httptest.Server, <-chan error) {
+	return startPassthroughLifecycleServerWithHeaders(t, controlCtx, svc, account, nil, hooks...)
+}
+
+func startPassthroughLifecycleServerWithHeaders(
+	t *testing.T,
+	controlCtx context.Context,
+	svc *OpenAIGatewayService,
+	account *Account,
+	requestHeaders http.Header,
+	hooks ...*OpenAIWSIngressHooks,
+) (*httptest.Server, <-chan error) {
 	t.Helper()
 	serverErr := make(chan error, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -281,6 +304,12 @@ func startPassthroughLifecycleServer(
 		ginCtx, _ := gin.CreateTestContext(recorder)
 		req := r.Clone(controlCtx)
 		req.Header = req.Header.Clone()
+		for key, values := range requestHeaders {
+			req.Header.Del(key)
+			for _, value := range values {
+				req.Header.Add(key, value)
+			}
+		}
 		ginCtx.Request = req
 		var hook *OpenAIWSIngressHooks
 		if len(hooks) > 0 {
@@ -296,16 +325,146 @@ func dialPassthroughLifecycleClient(t *testing.T, server *httptest.Server) *code
 }
 
 func dialPassthroughLifecycleClientWithModel(t *testing.T, server *httptest.Server, model string) *coderws.Conn {
+	return dialPassthroughLifecycleClientWithHeaders(t, server, model, nil)
+}
+
+func dialPassthroughLifecycleClientWithHeaders(t *testing.T, server *httptest.Server, model string, headers http.Header) *coderws.Conn {
+	return dialPassthroughLifecycleClientWithFirstFrame(t, server, []byte(`{"type":"response.create","model":"`+model+`","stream":false}`), headers)
+}
+
+func dialPassthroughLifecycleClientWithFirstFrame(t *testing.T, server *httptest.Server, firstFrame []byte, headers http.Header) *coderws.Conn {
 	t.Helper()
 	dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
-	clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(server.URL, "http"), &coderws.DialOptions{HTTPHeader: headers})
 	cancelDial()
 	require.NoError(t, err)
 	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
-	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"`+model+`","stream":false}`))
+	err = clientConn.Write(writeCtx, coderws.MessageText, firstFrame)
 	cancelWrite()
 	require.NoError(t, err)
 	return clientConn
+}
+
+func TestPassthroughLifecycle_OAuthFingerprintRewritesInitialAndLaterResponseCreateFrames(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	upstream := newStagedPassthroughConn()
+	svc := newPassthroughLifecycleService(passthroughLifecycleConfig(), upstream)
+	svc.cfg.Gateway.OpenAIWS.OAuthEnabled = true
+	account := &Account{
+		ID:          902,
+		Name:        "oauth-passthrough-fingerprint",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
+		Extra: map[string]any{
+			"codex_fingerprint_mode":                    "session",
+			"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModePassthrough,
+		},
+	}
+	server, serverErr := startPassthroughLifecycleServer(t, ctx, svc, account)
+	defer server.Close()
+	client := dialPassthroughLifecycleClientWithFirstFrame(t, server, []byte(`{"type":"response.create","model":"gpt-5.1","stream":false,"client_metadata":{"session_id":"initial-session","x-codex-installation-id":"initial-installation","thread_id":"initial-thread","x-codex-turn-metadata":"{\"installation_id\":\"initial-installation\",\"session_id\":\"initial-session\",\"thread_id\":\"initial-thread\",\"turn_id\":\"initial-turn\"}"}}`), http.Header{
+		"session-id":              []string{"client-session"},
+		"x-codex-installation-id": []string{"client-installation"},
+		"x-codex-turn-metadata":   []string{`{"installation_id":"client-installation","session_id":"client-session","thread_id":"client-thread","turn_id":"client-turn"}`},
+		"authorization":           []string{"Bearer inbound-must-not-forward"},
+	})
+	defer func() { _ = client.CloseNow() }()
+
+	first := requirePassthroughUpstreamWrite(t, upstream, time.Second)
+	headers := svc.getOpenAIWSPassthroughDialer().(*stagedPassthroughDialer).Headers()
+	require.Equal(t, headers.Get("session_id"), gjson.GetBytes(first, "client_metadata.session_id").String())
+	require.Equal(t, headers.Get("x-codex-installation-id"), gjson.GetBytes(first, "client_metadata.x-codex-installation-id").String())
+	require.Equal(t, headers.Get("thread-id"), gjson.GetBytes(first, "client_metadata.thread_id").String())
+	var headerMetadata map[string]any
+	require.NoError(t, json.Unmarshal([]byte(headers.Get("x-codex-turn-metadata")), &headerMetadata))
+	var firstBodyMetadata map[string]any
+	require.NoError(t, json.Unmarshal([]byte(gjson.GetBytes(first, "client_metadata.x-codex-turn-metadata").String()), &firstBodyMetadata))
+	require.Equal(t, headerMetadata["turn_id"], firstBodyMetadata["turn_id"], "handshake and initial frame must share one attempt ID set")
+
+	upstream.Send(`{"type":"response.created","response":{"id":"resp_first","model":"gpt-5.1"}}`)
+	_, err := readPassthroughLifecycleFrame(t, client, time.Second)
+	require.NoError(t, err)
+	writeCtx, cancelWrite := context.WithTimeout(context.Background(), time.Second)
+	err = client.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.cancel","response_id":"resp_first","client_metadata":{"session_id":"cancel-session"}}`))
+	cancelWrite()
+	require.NoError(t, err)
+	cancelFrame := requirePassthroughUpstreamWrite(t, upstream, time.Second)
+	require.Equal(t, "cancel-session", gjson.GetBytes(cancelFrame, "client_metadata.session_id").String(), "non-response.create frames must remain unchanged")
+
+	upstream.Send(`{"type":"response.completed","response":{"id":"resp_first","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`)
+	_, err = readPassthroughLifecycleFrame(t, client, time.Second)
+	require.NoError(t, err)
+	writeCtx, cancelWrite = context.WithTimeout(context.Background(), time.Second)
+	err = client.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","client_metadata":{"session_id":"later-session","x-codex-installation-id":"later-installation","thread_id":"later-thread"}}`))
+	cancelWrite()
+	require.NoError(t, err)
+	later := requirePassthroughUpstreamWrite(t, upstream, time.Second)
+	require.Equal(t, headers.Get("session_id"), gjson.GetBytes(later, "client_metadata.session_id").String())
+	require.Equal(t, headers.Get("x-codex-installation-id"), gjson.GetBytes(later, "client_metadata.x-codex-installation-id").String())
+	require.Equal(t, headers.Get("thread-id"), gjson.GetBytes(later, "client_metadata.thread_id").String())
+
+	upstream.Send(`{"type":"response.created","response":{"id":"resp_later","model":"gpt-5.1"}}`)
+	upstream.Send(`{"type":"response.completed","response":{"id":"resp_later","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`)
+	_, err = readPassthroughLifecycleFrame(t, client, time.Second)
+	require.NoError(t, err)
+	_, err = readPassthroughLifecycleFrame(t, client, time.Second)
+	require.NoError(t, err)
+	require.NoError(t, client.Close(coderws.StatusNormalClosure, "done"))
+	<-serverErr
+}
+
+func TestPassthroughLifecycle_OAuthOffPreservesBothClientSessionHeaderForms(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		header http.Header
+		key    string
+		value  string
+	}{
+		{name: "hyphen", header: http.Header{"Session-Id": []string{"client-hyphen"}}, key: "session-id", value: "client-hyphen"},
+		{name: "underscore", header: http.Header{"Session_id": []string{"client-underscore"}}, key: "session_id", value: "client-underscore"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := newStagedPassthroughConn()
+			svc := newPassthroughLifecycleService(passthroughLifecycleConfig(), upstream)
+			svc.cfg.Gateway.OpenAIWS.OAuthEnabled = true
+			account := &Account{
+				ID: 903, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1,
+				Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
+				Extra: map[string]any{
+					"codex_fingerprint_mode":                    "off",
+					"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModePassthrough,
+				},
+			}
+			tc.header.Set("authorization", "Bearer inbound-must-not-forward")
+			server, serverErr := startPassthroughLifecycleServerWithHeaders(t, context.Background(), svc, account, tc.header)
+			defer server.Close()
+			client := dialPassthroughLifecycleClientWithHeaders(t, server, "gpt-5.1", nil)
+			defer func() { _ = client.CloseNow() }()
+
+			first := requirePassthroughUpstreamWrite(t, upstream, time.Second)
+			headers := svc.getOpenAIWSPassthroughDialer().(*stagedPassthroughDialer).Headers()
+			require.Equal(t, tc.value, headers.Get(tc.key))
+			require.Equal(t, "Bearer sk-test", headers.Get("authorization"))
+			require.Equal(t, "", gjson.GetBytes(first, "client_metadata.session_id").String())
+			upstream.Send(`{"type":"response.created","response":{"id":"resp_off","model":"gpt-5.1"}}`)
+			upstream.Send(`{"type":"response.completed","response":{"id":"resp_off","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`)
+			_, err := readPassthroughLifecycleFrame(t, client, time.Second)
+			require.NoError(t, err)
+			_, err = readPassthroughLifecycleFrame(t, client, time.Second)
+			require.NoError(t, err)
+			_ = client.Close(coderws.StatusNormalClosure, "done")
+			select {
+			case <-serverErr:
+			case <-time.After(2 * time.Second):
+				t.Fatal("passthrough off relay did not exit")
+			}
+		})
+	}
 }
 
 func readPassthroughLifecycleFrame(t *testing.T, clientConn *coderws.Conn, timeout time.Duration) ([]byte, error) {

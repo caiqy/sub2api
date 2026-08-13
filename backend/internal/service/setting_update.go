@@ -87,7 +87,9 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsOmitting(ctx contex
 // from the request struct.
 func (s *SettingService) refreshCachedSettingsAfterWrite(ctx context.Context, settings *SystemSettings, omitted OmittedSettingKeys) {
 	if len(omitted) == 0 {
-		s.refreshCachedSettings(ctx, settings)
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		s.refreshCachedSettings(cleanupCtx, settings)
 		return
 	}
 	reloadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)

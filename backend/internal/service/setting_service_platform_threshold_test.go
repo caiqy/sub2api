@@ -207,11 +207,13 @@ func TestGetAccountSchedulingThresholds_NilRepoReturnsDefaults(t *testing.T) {
 type schedulingThresholdReleaserStub struct {
 	calls     int
 	platforms []string
+	ctxErr    error
 }
 
-func (r *schedulingThresholdReleaserStub) ReleaseAccountSchedulingThresholdPauses(_ context.Context, platforms []string) {
+func (r *schedulingThresholdReleaserStub) ReleaseAccountSchedulingThresholdPauses(ctx context.Context, platforms []string) {
 	r.calls++
 	r.platforms = append(r.platforms, platforms...)
+	r.ctxErr = ctx.Err()
 }
 
 func TestUpdateSettings_RaisedThresholdReleasesOnlyDisabledPlatforms(t *testing.T) {
@@ -256,4 +258,19 @@ func TestUpdateSettings_OmittedThresholdsDoNotReleasePauses(t *testing.T) {
 	err := svc.UpdateSettings(context.Background(), &SystemSettings{SiteName: "x"})
 	require.NoError(t, err)
 	require.Equal(t, 0, releaser.calls, "未携带阈值字段的更新不得触发解除")
+}
+
+func TestUpdateSettings_CanceledRequestStillReleasesThresholdPauses(t *testing.T) {
+	svc := newSettingServiceForPlatformThresholdTest(map[string]string{
+		SettingKeyAccountSchedulingThresholds: `{"openai":90}`,
+	})
+	releaser := &schedulingThresholdReleaserStub{}
+	svc.SetAccountSchedulingThresholdPauseReleaser(releaser)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := svc.UpdateSettings(ctx, &SystemSettings{AccountSchedulingThresholds: map[string]int{}})
+	require.NoError(t, err)
+	require.Equal(t, 1, releaser.calls)
+	require.NoError(t, releaser.ctxErr, "accepted settings update must run bounded cleanup after client cancellation")
 }

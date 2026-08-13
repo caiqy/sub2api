@@ -104,6 +104,13 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	if account != nil && account.Type == AccountTypeOAuth {
 		apiKeyID := getAPIKeyIDFromContext(c)
 		if account.GetCodexFingerprintMode() == codexFingerprintOff {
+			if c != nil && c.Request != nil {
+				for _, name := range [...]string{"session-id", "session_id"} {
+					if value := strings.TrimSpace(c.Request.Header.Get(name)); value != "" {
+						headers.Set(name, value)
+					}
+				}
+			}
 			if sessionResolution.SessionID != "" {
 				headers.Set("session_id", sessionResolution.SessionID)
 			}

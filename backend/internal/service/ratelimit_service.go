@@ -138,6 +138,29 @@ func (s *RateLimitService) notifyAccountSchedulingBlockCleared(accountID int64) 
 	s.runtimeBlocker.ClearAccountSchedulingBlock(accountID)
 }
 
+type accountSchedulingThresholdConditionalPauseClearer interface {
+	ClearTempUnschedulableIfSource(ctx context.Context, id int64, source string) (bool, error)
+}
+
+type accountSchedulingThresholdRuntimeBlockClearer interface {
+	ClearAccountSchedulingBlockIfReason(accountID int64, reason string) bool
+}
+
+type accountSchedulingThresholdRuntimePauseReleaser interface {
+	ReleaseAccountSchedulingThresholdBlocks(platforms []string)
+}
+
+func (s *RateLimitService) notifyAccountSchedulingThresholdBlockCleared(accountID int64) {
+	if s == nil || s.runtimeBlocker == nil || accountID <= 0 {
+		return
+	}
+	if blocker, ok := s.runtimeBlocker.(accountSchedulingThresholdRuntimeBlockClearer); ok {
+		blocker.ClearAccountSchedulingBlockIfReason(accountID, AccountSchedulingThresholdReasonSource)
+		return
+	}
+	s.runtimeBlocker.ClearAccountSchedulingBlock(accountID)
+}
+
 // ApplyAccountSchedulingThreshold evaluates admin-configured per-platform
 // utilization thresholds and, when breached, parks the account as temp-
 // unschedulable until the winning window resets. Returns true when the account
@@ -238,25 +261,42 @@ func (s *RateLimitService) ReleaseAccountSchedulingThresholdPauses(ctx context.C
 	if s == nil || s.accountRepo == nil || len(platforms) == 0 {
 		return
 	}
-	now := time.Now().UTC()
-	for _, platform := range platforms {
-		accounts, err := s.accountRepo.ListTempUnschedulableByPlatform(ctx, platform, now)
-		if err != nil {
-			slog.Warn("release_account_scheduling_threshold_pauses_list_failed", "platform", platform, "error", err)
-			continue
-		}
-		for i := range accounts {
-			account := &accounts[i]
-			if !IsAccountSchedulingThresholdReason(account.TempUnschedulableReason) {
+	clearer, ok := s.accountRepo.(accountSchedulingThresholdConditionalPauseClearer)
+	if !ok {
+		slog.Warn("release_account_scheduling_threshold_pauses_conditional_clear_unsupported")
+	} else {
+		now := time.Now().UTC()
+		for _, platform := range platforms {
+			accounts, err := s.accountRepo.ListTempUnschedulableByPlatform(ctx, platform, now)
+			if err != nil {
+				slog.Warn("release_account_scheduling_threshold_pauses_list_failed", "platform", platform, "error", err)
 				continue
 			}
-			if err := s.accountRepo.ClearTempUnschedulable(ctx, account.ID); err != nil {
-				slog.Warn("release_account_scheduling_threshold_pauses_clear_failed", "account_id", account.ID, "error", err)
-				continue
+			for i := range accounts {
+				account := &accounts[i]
+				if !IsAccountSchedulingThresholdReason(account.TempUnschedulableReason) {
+					continue
+				}
+				cleared, err := clearer.ClearTempUnschedulableIfSource(ctx, account.ID, AccountSchedulingThresholdReasonSource)
+				if err != nil {
+					slog.Warn("release_account_scheduling_threshold_pauses_clear_failed", "account_id", account.ID, "error", err)
+					continue
+				}
+				if !cleared {
+					continue
+				}
+				if s.tempUnschedCache != nil {
+					if err := s.tempUnschedCache.DeleteTempUnsched(ctx, account.ID); err != nil {
+						slog.Warn("release_account_scheduling_threshold_pauses_cache_delete_failed", "account_id", account.ID, "error", err)
+					}
+				}
+				s.notifyAccountSchedulingThresholdBlockCleared(account.ID)
+				slog.Info("account_scheduling_threshold_pause_released", "account_id", account.ID, "platform", platform)
 			}
-			s.notifyAccountSchedulingBlockCleared(account.ID)
-			slog.Info("account_scheduling_threshold_pause_released", "account_id", account.ID, "platform", platform)
 		}
+	}
+	if releaser, ok := s.runtimeBlocker.(accountSchedulingThresholdRuntimePauseReleaser); ok {
+		releaser.ReleaseAccountSchedulingThresholdBlocks(platforms)
 	}
 }
 

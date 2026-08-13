@@ -681,6 +681,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		}
 		firstClientMessage = liteFirstMessage
 	}
+	if account.Type == AccountTypeOAuth && c != nil && c.Request != nil {
+		if _, ok := c.Get("codex_fingerprint_ids"); !ok {
+			c.Set("codex_fingerprint_ids", resolveCodexFingerprintIDsFromRequest(account, c.Request.Header))
+		}
+	}
 	if hooks != nil && (hooks.MaxReasoningEffort != "" || len(hooks.ReasoningEffortMappings) > 0) {
 		if capped, changed := ApplyOpenAIReasoningEffortPolicy(firstClientMessage, hooks.MaxReasoningEffort, hooks.ReasoningEffortMappings); changed {
 			firstClientMessage = capped
@@ -762,6 +767,17 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, blocked.Message, blocked)
 	}
 	firstClientMessage = updatedFirst
+	if account.Type == AccountTypeOAuth && c != nil {
+		if fpIDs, ok := c.Get("codex_fingerprint_ids"); ok {
+			if ids, ok := fpIDs.(*codexFingerprintIDs); ok {
+				if rewritten, rewriteErr := applyCodexFingerprintClientMetadataBytes(firstClientMessage, ids); rewriteErr != nil {
+					return fmt.Errorf("rewrite first ws fingerprint metadata: %w", rewriteErr)
+				} else {
+					firstClientMessage = rewritten
+				}
+			}
+		}
+	}
 
 	// 在 policy filter 之后再提取 service_tier / reasoning_effort 用于
 	// usage 上报：filter
@@ -809,11 +825,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if c != nil {
 		turnState = strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader))
 		turnMetadata = strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader))
-	}
-	// 指纹收敛：relay 级解析一次 IDs，握手头（buildOpenAIWSHeaders）使用同一份；
-	// off 模式显式写入 nil 清除残留（review-fix B/D）。
-	if account.Type == AccountTypeOAuth && c != nil && c.Request != nil {
-		c.Set("codex_fingerprint_ids", resolveCodexFingerprintIDsFromRequest(account, c.Request.Header))
 	}
 	headers, _, buildHdrErr := s.buildOpenAIWSHeaders(
 		ctx,
@@ -1082,6 +1093,17 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			//     覆盖（Store(nil)），因为 OpenAI 上游对该帧实际不传
 			//     service_tier 时按 default 处理，billing 应如实反映。
 			if policyErr == nil && blocked == nil && isResponseCreate {
+				if account.Type == AccountTypeOAuth && c != nil {
+					if fpIDs, ok := c.Get("codex_fingerprint_ids"); ok {
+						if ids, ok := fpIDs.(*codexFingerprintIDs); ok {
+							if rewritten, rewriteErr := applyCodexFingerprintClientMetadataBytes(out, ids); rewriteErr != nil {
+								return out, nil, rewriteErr
+							} else {
+								out = rewritten
+							}
+						}
+					}
+				}
 				usageMeta.updateFromResponseCreate(out, model, requestModelForThisFrame)
 				SetOpsUpstreamAttempted(c, true)
 				if hooks != nil && hooks.OnOutboundRequest != nil {

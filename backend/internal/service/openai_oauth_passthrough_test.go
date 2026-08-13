@@ -2393,6 +2393,62 @@ func TestOpenAIGatewayService_OAuthPassthrough_OffPreservesClientFingerprint(t *
 	require.Equal(t, "Bearer oauth-token", upstream.lastReq.Header.Get("Authorization"), "非指纹凭证仍须被替换保护，客户端 Authorization 不得透传")
 }
 
+func TestOpenAIGatewayService_OAuthPassthrough_EnforcesFingerprintAfterAccountBodyRules(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+	c.Request.Header.Set("session-id", "client-session")
+	c.Request.Header.Set("x-codex-installation-id", "client-installation")
+	c.Request.Header.Set("x-codex-turn-metadata", `{"installation_id":"client-installation","session_id":"client-session","thread_id":"client-thread","turn_id":"client-turn"}`)
+
+	inputBody := []byte(`{"model":"gpt-5.2","stream":false,"store":true,"input":[{"type":"text","text":"hi"}],"client_metadata":{"x-codex-installation-id":"client-installation","session_id":"client-session","thread_id":"client-thread","turn_id":"client-turn","x-codex-window-id":"client-window"}}`)
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid"}},
+		Body:       io.NopCloser(strings.NewReader("data: [DONE]\n\n")),
+	}}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: false}},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:             126,
+		Name:           "acc",
+		Platform:       PlatformOpenAI,
+		Type:           AccountTypeOAuth,
+		Concurrency:    1,
+		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
+		Status:         StatusActive,
+		Schedulable:    true,
+		RateMultiplier: f64p(1),
+		Extra: map[string]any{
+			"openai_passthrough":         true,
+			"codex_fingerprint_mode":     "session",
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []any{
+				map[string]any{"target": "body", "key": "client_metadata.session_id", "mode": "inject", "value": "injected-session"},
+				map[string]any{"target": "body", "key": "client_metadata.thread_id", "mode": "forward"},
+				map[string]any{"target": "body", "key": "client_metadata.thread_id", "mode": "delete"},
+			},
+		},
+	}
+
+	_, err := svc.Forward(context.Background(), c, account, inputBody)
+	require.NoError(t, err)
+	require.NotNil(t, upstream.lastReq)
+
+	var outbound map[string]any
+	require.NoError(t, json.Unmarshal(upstream.lastBody, &outbound))
+	metadata := outbound["client_metadata"].(map[string]any)
+	require.Equal(t, upstream.lastReq.Header.Get("session_id"), metadata["session_id"])
+	require.Equal(t, upstream.lastReq.Header.Get("x-codex-installation-id"), metadata["x-codex-installation-id"])
+	require.Equal(t, upstream.lastReq.Header.Get("thread-id"), metadata["thread_id"])
+	require.NotEqual(t, "injected-session", metadata["session_id"], "account inject rule must not win over final fingerprint enforcement")
+	require.NotEmpty(t, metadata["thread_id"], "account delete rule must not remove final fingerprint fields")
+}
+
 // --- review-fix D：同一 gin.Context failover 重入时，session/full → off 的残留 IDs 必须被清除 ---
 
 func TestOpenAIGatewayService_ForwardReEntry_OffAccountClearsStaleFingerprintIDs(t *testing.T) {
