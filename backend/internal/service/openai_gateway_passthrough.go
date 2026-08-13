@@ -90,7 +90,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	// off 模式 ids 为 nil：不改写 body，并显式写入 nil 清除同一 gin.Context 上
 	// 上一 account attempt 的残留（review-fix D）。
 	if account.Type == AccountTypeOAuth && c != nil && !isOpenAIResponsesCompactPath(c) {
-		fpIDs := resolveCodexFingerprintIDsFromRequest(account, c.Request.Header)
+		fpIDs := resolveOpenAIAttemptFingerprintIDs(c, account, body)
 		if fpIDs != nil {
 			fpBody, fpErr := applyCodexFingerprintClientMetadataBytes(body, fpIDs)
 			if fpErr != nil {
@@ -98,7 +98,6 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			}
 			body = fpBody
 		}
-		c.Set("codex_fingerprint_ids", fpIDs)
 	}
 
 	sanitizedBody, sanitized, err := sanitizeEmptyBase64InputImagesInOpenAIBody(body)

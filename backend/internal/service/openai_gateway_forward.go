@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +17,36 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
+
+const codexFingerprintAccountIDContextKey = "codex_fingerprint_account_id"
+const codexFingerprintBodyHashContextKey = "codex_fingerprint_body_hash"
+
+func resolveOpenAIAttemptFingerprintIDs(c *gin.Context, account *Account, body []byte) *codexFingerprintIDs {
+	bodyHash := sha256.Sum256(body)
+	if c != nil && account != nil {
+		cachedAccountID, accountMatches := c.Get(codexFingerprintAccountIDContextKey)
+		cachedBodyHash, bodyMatches := c.Get(codexFingerprintBodyHashContextKey)
+		if accountMatches && bodyMatches && cachedAccountID == account.ID && cachedBodyHash == bodyHash {
+			if cached, ok := c.Get("codex_fingerprint_ids"); ok {
+				if ids, ok := cached.(*codexFingerprintIDs); ok {
+					return ids
+				}
+			}
+		}
+	}
+
+	var clientHeaders http.Header
+	if c != nil && c.Request != nil {
+		clientHeaders = c.Request.Header
+	}
+	ids := resolveCodexFingerprintIDsFromRequest(account, clientHeaders)
+	if c != nil && account != nil {
+		c.Set("codex_fingerprint_ids", ids)
+		c.Set(codexFingerprintAccountIDContextKey, account.ID)
+		c.Set(codexFingerprintBodyHashContextKey, bodyHash)
+	}
+	return ids
+}
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
@@ -416,23 +447,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			markDecodedModified()
 		}
 		// 指纹收敛：一次性解析收敛 ID，请求体和出站头共享同一份 IDs（保证 turn_id 等随机字段一致）。
-		// fingerprintIDs 在此处解析，后续 buildUpstreamRequest 中使用同一份。
+		// 同账号重试复用 IDs，切号后重新解析，保证请求重放和最终账号隔离。
 		if !isCompactRequest {
-			var clientHeaders http.Header
-			if c != nil && c.Request != nil {
-				clientHeaders = c.Request.Header
-			}
-			fpIDs := resolveCodexFingerprintIDsFromRequest(account, clientHeaders)
+			fpIDs := resolveOpenAIAttemptFingerprintIDs(c, account, body)
 			if fpIDs != nil {
 				if applyCodexFingerprintClientMetadata(decoded, fpIDs) {
 					markDecodedModified()
 				}
-			}
-			// 将 fpIDs 存入 gin context，供出站请求头改写使用；每次 account attempt
-			// 显式覆盖（off/compact → nil），避免同一 gin.Context failover 重入时
-			// 残留上一账号的预计算 IDs（review-fix D）。
-			if c != nil {
-				c.Set("codex_fingerprint_ids", fpIDs)
 			}
 		}
 		if codexResult.NormalizedModel != "" {

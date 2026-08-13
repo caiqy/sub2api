@@ -2329,6 +2329,42 @@ func TestOpenAIGatewayService_OAuthPassthrough_ConvergesCodexFingerprintHeaderAn
 	require.Equal(t, headerMeta["session_id"], bodyMeta["session_id"])
 }
 
+func TestOpenAIGatewayService_OAuthPassthrough_ReusesFingerprintForSameAccountRetry(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+	c.Request.Header.Set("session-id", "client-sess-1")
+
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: [DONE]\n\n"))},
+		{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: [DONE]\n\n"))},
+		{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: [DONE]\n\n"))},
+	}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	account := &Account{
+		ID: 123, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
+		Extra:       map[string]any{"openai_passthrough": true, "codex_fingerprint_mode": "session"},
+		Status:      StatusActive, Schedulable: true, RateMultiplier: f64p(1),
+	}
+	body := []byte(`{"model":"gpt-5.2","stream":true,"store":true,"input":[{"type":"text","text":"hi"}]}`)
+
+	_, err := svc.Forward(context.Background(), c, account, body)
+	require.NoError(t, err)
+	_, err = svc.Forward(context.Background(), c, account, body)
+	require.NoError(t, err)
+	require.Len(t, upstream.bodies, 2)
+	require.JSONEq(t, string(upstream.bodies[0]), string(upstream.bodies[1]))
+
+	_, err = svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5.2","stream":true,"store":true,"input":[{"type":"text","text":"next"}]}`))
+	require.NoError(t, err)
+	require.Len(t, upstream.bodies, 3)
+	require.NotEqual(t,
+		gjson.GetBytes(upstream.bodies[1], "client_metadata.turn_id").String(),
+		gjson.GetBytes(upstream.bodies[2], "client_metadata.turn_id").String(),
+	)
+}
+
 // --- review-fix C：显式 off 的 OAuth 透传路径原样透传客户端指纹，且仍保护非指纹凭证 ---
 
 func TestOpenAIGatewayService_OAuthPassthrough_OffPreservesClientFingerprint(t *testing.T) {
