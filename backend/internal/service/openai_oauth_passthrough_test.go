@@ -2366,12 +2366,26 @@ func TestOpenAIGatewayService_OAuthPassthrough_ReusesFingerprintForSameAccountRe
 	var firstBody, secondAccountBody map[string]any
 	require.NoError(t, json.Unmarshal(upstream.bodies[0], &firstBody))
 	require.NoError(t, json.Unmarshal(upstream.bodies[2], &secondAccountBody))
-	firstFingerprint := firstBody["client_metadata"]
-	secondFingerprint := secondAccountBody["client_metadata"]
+	fields := []string{
+		"x-codex-installation-id",
+		"session_id",
+		"thread_id",
+		"x-codex-window-id",
+	}
+	different := false
+	for _, field := range fields {
+		firstValue := gjson.GetBytes(upstream.bodies[0], "client_metadata."+field)
+		secondValue := gjson.GetBytes(upstream.bodies[2], "client_metadata."+field)
+		require.True(t, firstValue.Exists(), "first fingerprint must include %s", field)
+		require.True(t, secondValue.Exists(), "second fingerprint must include %s", field)
+		require.NotEmpty(t, firstValue.String(), "first fingerprint %s must be non-empty", field)
+		require.NotEmpty(t, secondValue.String(), "second fingerprint %s must be non-empty", field)
+		different = different || firstValue.String() != secondValue.String()
+	}
+	require.True(t, different, "different accounts must change an account-derived fingerprint field")
 	delete(firstBody, "client_metadata")
 	delete(secondAccountBody, "client_metadata")
 	require.Equal(t, firstBody, secondAccountBody)
-	require.NotEqual(t, firstFingerprint, secondFingerprint)
 
 	_, err = svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5.2","stream":true,"store":true,"input":[{"type":"text","text":"next"}]}`))
 	require.NoError(t, err)
