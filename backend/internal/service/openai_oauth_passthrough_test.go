@@ -2324,7 +2324,9 @@ func TestOpenAIGatewayService_OAuthPassthrough_ConvergesCodexFingerprintHeaderAn
 
 	var headerMeta, bodyMeta map[string]any
 	require.NoError(t, json.Unmarshal([]byte(upstream.lastReq.Header.Get("x-codex-turn-metadata")), &headerMeta))
-	require.NoError(t, json.Unmarshal([]byte(cm["x-codex-turn-metadata"].(string)), &bodyMeta))
+	bodyMetaRaw, ok := cm["x-codex-turn-metadata"].(string)
+	require.True(t, ok, "body must include x-codex-turn-metadata")
+	require.NoError(t, json.Unmarshal([]byte(bodyMetaRaw), &bodyMeta))
 	require.Equal(t, headerMeta["turn_id"], bodyMeta["turn_id"], "头/体 turn_id 必须同源收敛（同一组预计算 IDs）")
 	require.Equal(t, headerMeta["session_id"], bodyMeta["session_id"])
 }
@@ -2518,7 +2520,8 @@ func TestOpenAIGatewayService_OAuthPassthrough_OffPreservesFingerprintAfterAccou
 
 	var outbound map[string]any
 	require.NoError(t, json.Unmarshal(upstream.lastBody, &outbound))
-	metadata := outbound["client_metadata"].(map[string]any)
+	metadata, ok := outbound["client_metadata"].(map[string]any)
+	require.True(t, ok, "body must include client_metadata")
 	require.Equal(t, "client-installation", metadata["x-codex-installation-id"])
 	require.Equal(t, "client-session", metadata["session_id"])
 	require.Equal(t, "client-thread", metadata["thread_id"])
@@ -2576,7 +2579,8 @@ func TestOpenAIGatewayService_OAuthPassthrough_EnforcesFingerprintAfterAccountBo
 
 	var outbound map[string]any
 	require.NoError(t, json.Unmarshal(upstream.lastBody, &outbound))
-	metadata := outbound["client_metadata"].(map[string]any)
+	metadata, ok := outbound["client_metadata"].(map[string]any)
+	require.True(t, ok, "body must include client_metadata")
 	require.Equal(t, upstream.lastReq.Header.Get("session_id"), metadata["session_id"])
 	require.Equal(t, upstream.lastReq.Header.Get("x-codex-installation-id"), metadata["x-codex-installation-id"])
 	require.Equal(t, upstream.lastReq.Header.Get("thread-id"), metadata["thread_id"])

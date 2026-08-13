@@ -376,7 +376,9 @@ func TestPassthroughLifecycle_OAuthFingerprintRewritesInitialAndLaterResponseCre
 	defer func() { _ = client.CloseNow() }()
 
 	first := requirePassthroughUpstreamWrite(t, upstream, time.Second)
-	headers := svc.getOpenAIWSPassthroughDialer().(*stagedPassthroughDialer).Headers()
+	dialer, ok := svc.getOpenAIWSPassthroughDialer().(*stagedPassthroughDialer)
+	require.True(t, ok, "test service must use staged passthrough dialer")
+	headers := dialer.Headers()
 	require.Equal(t, headers.Get("session_id"), gjson.GetBytes(first, "client_metadata.session_id").String())
 	require.Equal(t, headers.Get("x-codex-installation-id"), gjson.GetBytes(first, "client_metadata.x-codex-installation-id").String())
 	require.Equal(t, headers.Get("thread-id"), gjson.GetBytes(first, "client_metadata.thread_id").String())
@@ -447,7 +449,9 @@ func TestPassthroughLifecycle_OAuthOffPreservesBothClientSessionHeaderForms(t *t
 			defer func() { _ = client.CloseNow() }()
 
 			first := requirePassthroughUpstreamWrite(t, upstream, time.Second)
-			headers := svc.getOpenAIWSPassthroughDialer().(*stagedPassthroughDialer).Headers()
+			dialer, ok := svc.getOpenAIWSPassthroughDialer().(*stagedPassthroughDialer)
+			require.True(t, ok, "test service must use staged passthrough dialer")
+			headers := dialer.Headers()
 			require.Equal(t, tc.value, headers.Get(tc.key))
 			require.Equal(t, "Bearer sk-test", headers.Get("authorization"))
 			require.Equal(t, "", gjson.GetBytes(first, "client_metadata.session_id").String())

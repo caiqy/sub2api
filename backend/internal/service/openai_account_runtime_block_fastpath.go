@@ -263,9 +263,9 @@ func (s *OpenAIGatewayService) ReleaseAccountSchedulingThresholdBlocks(platforms
 		if !ok {
 			return true
 		}
-		platformValue, ok := s.openaiAccountRuntimeBlockPlatform.Load(accountID)
+		platformValue, found := s.openaiAccountRuntimeBlockPlatform.Load(accountID)
 		platform, ok := platformValue.(string)
-		if !ok {
+		if !found || !ok {
 			return true
 		}
 		if _, ok := allowed[platform]; !ok {

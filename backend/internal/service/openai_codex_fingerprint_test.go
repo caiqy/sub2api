@@ -609,7 +609,8 @@ func TestBuildOpenAIWSHeaders_UsesPrecomputedFingerprintIDsFromContext(t *testin
 	)
 	require.NoError(t, err)
 
-	cm := payload["client_metadata"].(map[string]any)
+	cm, ok := payload["client_metadata"].(map[string]any)
+	require.True(t, ok, "WS body must include client_metadata")
 	require.Equal(t, cm["session_id"], headers.Get("session_id"), "WS 头/体 session_id 必须同源收敛")
 	require.Equal(t, cm["x-codex-window-id"], headers.Get("x-codex-window-id"), "WS 头/体 window_id 必须同源收敛")
 	require.Equal(t, cm["thread_id"], headers.Get("thread-id"), "WS 头/体 thread_id 必须同源收敛")
@@ -617,7 +618,9 @@ func TestBuildOpenAIWSHeaders_UsesPrecomputedFingerprintIDsFromContext(t *testin
 	// WS 约定：turn metadata 走 body client_metadata（非握手头）——内嵌元数据必须
 	// 与头部各标识收敛到同一组 IDs（turn_id 等随机字段不漂移）。
 	var bodyMeta map[string]any
-	require.NoError(t, json.Unmarshal([]byte(cm["x-codex-turn-metadata"].(string)), &bodyMeta))
+	bodyMetaRaw, ok := cm["x-codex-turn-metadata"].(string)
+	require.True(t, ok, "WS body must include x-codex-turn-metadata")
+	require.NoError(t, json.Unmarshal([]byte(bodyMetaRaw), &bodyMeta))
 	require.Equal(t, ids.turnID, bodyMeta["turn_id"], "WS body turn_id 必须收敛且与预计算 IDs 一致")
 	require.Equal(t, cm["session_id"], bodyMeta["session_id"], "WS body 内嵌 session_id 必须与收敛值一致")
 }
