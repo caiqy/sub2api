@@ -245,7 +245,7 @@ func TestOpenAIRoutingDiagnosticsUseFinalDerivedValuesOnly(t *testing.T) {
 	require.NoError(t, err)
 	passthroughReq, err := svc.buildUpstreamRequestOpenAIPassthrough(context.Background(), c, account, body, body, "oauth-secret")
 	require.NoError(t, err)
-	defer passthroughReq.Body.Close()
+	defer func() { require.NoError(t, passthroughReq.Body.Close()) }()
 
 	decision := OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2}
 	_, _, err = svc.buildOpenAIWSHeaders(
