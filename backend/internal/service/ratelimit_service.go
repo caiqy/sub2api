@@ -229,6 +229,37 @@ func accountHasSameSchedulingThresholdPause(account *Account, until time.Time, r
 	return existing == next
 }
 
+// ReleaseAccountSchedulingThresholdPauses 在调度阈值设置被清空或提高到 100 时，
+// 只解除 account_scheduling_threshold 来源的暂停（DB temp-unschedulable + 进程内
+// runtime block），使下一次候选立即恢复；rate-limit/管理员/探针等其它来源的暂停不受影响。
+// 解除后下一轮候选评估会按当前阈值重新判定（仍超限的账号会立即重新暂停，属预期）。
+// 生命周期：由 SettingService 在阈值设置热更新时触发（review-fix E）。
+func (s *RateLimitService) ReleaseAccountSchedulingThresholdPauses(ctx context.Context, platforms []string) {
+	if s == nil || s.accountRepo == nil || len(platforms) == 0 {
+		return
+	}
+	now := time.Now().UTC()
+	for _, platform := range platforms {
+		accounts, err := s.accountRepo.ListTempUnschedulableByPlatform(ctx, platform, now)
+		if err != nil {
+			slog.Warn("release_account_scheduling_threshold_pauses_list_failed", "platform", platform, "error", err)
+			continue
+		}
+		for i := range accounts {
+			account := &accounts[i]
+			if !IsAccountSchedulingThresholdReason(account.TempUnschedulableReason) {
+				continue
+			}
+			if err := s.accountRepo.ClearTempUnschedulable(ctx, account.ID); err != nil {
+				slog.Warn("release_account_scheduling_threshold_pauses_clear_failed", "account_id", account.ID, "error", err)
+				continue
+			}
+			s.notifyAccountSchedulingBlockCleared(account.ID)
+			slog.Info("account_scheduling_threshold_pause_released", "account_id", account.ID, "platform", platform)
+		}
+	}
+}
+
 // ErrorPolicyResult 表示错误策略检查的结果
 type ErrorPolicyResult int
 

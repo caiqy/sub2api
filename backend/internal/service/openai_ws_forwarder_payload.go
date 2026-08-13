@@ -100,13 +100,23 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 		}
 	}
 	// OAuth 账号：将 apiKeyID 混入 session 标识符，防止跨用户会话碰撞。
+	// off 模式（管理员显式关闭指纹收敛）不隔离，原样透传客户端会话（review-fix C）。
 	if account != nil && account.Type == AccountTypeOAuth {
 		apiKeyID := getAPIKeyIDFromContext(c)
-		if sessionResolution.SessionID != "" {
-			headers.Set("session_id", isolateOpenAISessionID(apiKeyID, sessionResolution.SessionID))
-		}
-		if sessionResolution.ConversationID != "" {
-			headers.Set("conversation_id", isolateOpenAISessionID(apiKeyID, sessionResolution.ConversationID))
+		if account.GetCodexFingerprintMode() == codexFingerprintOff {
+			if sessionResolution.SessionID != "" {
+				headers.Set("session_id", sessionResolution.SessionID)
+			}
+			if sessionResolution.ConversationID != "" {
+				headers.Set("conversation_id", sessionResolution.ConversationID)
+			}
+		} else {
+			if sessionResolution.SessionID != "" {
+				headers.Set("session_id", isolateOpenAISessionID(apiKeyID, sessionResolution.SessionID))
+			}
+			if sessionResolution.ConversationID != "" {
+				headers.Set("conversation_id", isolateOpenAISessionID(apiKeyID, sessionResolution.ConversationID))
+			}
 		}
 	} else {
 		if sessionResolution.SessionID != "" {
@@ -149,6 +159,15 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	}
 	if s != nil && s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
 		headers.Set("user-agent", codexCLIUserAgent)
+	}
+	// 指纹收敛：与 HTTP /responses 路径一致，使用同一 gin.Context 中预计算的 IDs
+	// 改写出站头；off 模式 ids 为 nil 不触发改写，也跳过残留（review-fix B/C/D）。
+	if account != nil && account.Type == AccountTypeOAuth && account.GetCodexFingerprintMode() != codexFingerprintOff && c != nil {
+		if fpIDs, ok := c.Get("codex_fingerprint_ids"); ok {
+			if ids, ok := fpIDs.(*codexFingerprintIDs); ok {
+				applyCodexFingerprintHeaders(headers, ids)
+			}
+		}
 	}
 	// 终态收口：WS 握手与 HTTP 出站共用同一套身份语义，账号级自定义 UA 同样作为
 	// 管理员显式配置传入（上面写进 headers 的值只在强制统一被关闭时才参与配对）。

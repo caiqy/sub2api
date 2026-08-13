@@ -86,6 +86,16 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		turnMetadata = strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader))
 	}
 	setOpenAIWSTurnMetadata(payload, turnMetadata)
+	// 指纹收敛：每个 account attempt 解析一次 IDs，头（buildOpenAIWSHeaders）与
+	// response.create body 共用同一份（review-fix B）；off 模式显式写入 nil，
+	// 清除同一 gin.Context 上上一 attempt 的残留（review-fix D）。
+	if account.Type == AccountTypeOAuth && c != nil && c.Request != nil {
+		fpIDs := resolveCodexFingerprintIDsFromRequest(account, c.Request.Header)
+		if fpIDs != nil {
+			applyCodexFingerprintClientMetadata(payload, fpIDs)
+		}
+		c.Set("codex_fingerprint_ids", fpIDs)
+	}
 	payloadEventType := openAIWSPayloadString(payload, "type")
 	if payloadEventType == "" {
 		payloadEventType = "response.create"

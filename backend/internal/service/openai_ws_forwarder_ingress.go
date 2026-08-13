@@ -144,6 +144,13 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	debugEnabled := isOpenAIWSModeDebugEnabled()
 	isCodexCLI := openai.IsCodexOfficialClientByHeaders(c.GetHeader("User-Agent"), c.GetHeader("originator")) || (s.cfg != nil && s.cfg.Gateway.ForceCodexCLI)
 
+	// 指纹收敛：WS session 级解析一次 IDs，握手头（buildOpenAIWSHeaders 两处调用）
+	// 与每个 response.create 帧（sendAndRelay）共用同一份；off 模式显式写入 nil，
+	// 清除上一 session/attempt 的残留（review-fix B/D）。
+	if account.Type == AccountTypeOAuth && c != nil && c.Request != nil {
+		c.Set("codex_fingerprint_ids", resolveCodexFingerprintIDsFromRequest(account, c.Request.Header))
+	}
+
 	type openAIWSClientPayload struct {
 		payloadRaw         []byte
 		rawForHash         []byte
@@ -821,6 +828,16 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		responseModelObserver := &upstreamResponseModelObserver{}
 		if lease == nil {
 			return nil, errors.New("upstream websocket lease is nil")
+		}
+		// 指纹收敛：帧体与握手头共用同一组预计算 IDs（review-fix B）；off 模式 ids 为 nil 不改写。
+		if c != nil {
+			if fpIDs, ok := c.Get("codex_fingerprint_ids"); ok {
+				if ids, ok := fpIDs.(*codexFingerprintIDs); ok && ids != nil {
+					if rewritten, rewriteErr := applyCodexFingerprintClientMetadataBytes(payload, ids); rewriteErr == nil {
+						payload = rewritten
+					}
+				}
+			}
 		}
 		turnStart := time.Now()
 		wroteDownstream := false

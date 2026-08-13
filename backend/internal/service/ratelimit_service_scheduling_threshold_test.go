@@ -164,3 +164,71 @@ func TestRateLimitService_ApplyAccountSchedulingThreshold_UnsupportedPlatformDoe
 	require.Nil(t, account.TempUnschedulableUntil)
 	require.Empty(t, account.TempUnschedulableReason)
 }
+
+// --- review-fix E：阈值清空/提高到 100 后，只解除 account_scheduling_threshold 来源的暂停 ---
+
+type thresholdReleaseAccountRepoStub struct {
+	rateLimitAccountRepoStub
+	paused  []Account
+	cleared []int64
+}
+
+func (r *thresholdReleaseAccountRepoStub) ListTempUnschedulableByPlatform(_ context.Context, platform string, now time.Time) ([]Account, error) {
+	var out []Account
+	for _, a := range r.paused {
+		if a.Platform == platform && a.TempUnschedulableUntil != nil && a.TempUnschedulableUntil.After(now) {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+func (r *thresholdReleaseAccountRepoStub) ClearTempUnschedulable(_ context.Context, id int64) error {
+	r.cleared = append(r.cleared, id)
+	return nil
+}
+
+func TestRateLimitService_ReleaseAccountSchedulingThresholdPauses_OnlyClearsThresholdSource(t *testing.T) {
+	now := time.Now().UTC()
+	until := now.Add(2 * time.Hour)
+	thresholdReason := BuildDetailedAccountSchedulingThresholdReason(AccountSchedulingThresholdReasonInput{
+		Platform: PlatformOpenAI, Window: "7d", ThresholdPercent: 90, UsedPercent: 95, Until: until, Now: now,
+	})
+
+	repo := &thresholdReleaseAccountRepoStub{
+		paused: []Account{
+			{ID: 5001, Platform: PlatformOpenAI, TempUnschedulableUntil: &until, TempUnschedulableReason: thresholdReason},
+			{ID: 5002, Platform: PlatformOpenAI, TempUnschedulableUntil: &until, TempUnschedulableReason: BuildTempUnschedReasonPayload("rate_limit", "rate limited")},
+			{ID: 5003, Platform: PlatformAnthropic, TempUnschedulableUntil: &until, TempUnschedulableReason: thresholdReason},
+			{ID: 5004, Platform: PlatformGrok, TempUnschedulableUntil: &until, TempUnschedulableReason: BuildTempUnschedReasonPayload("layered_probe", "probe failed")},
+		},
+	}
+	blocker := &runtimeBlockRecorder{}
+	rl := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	rl.SetAccountRuntimeBlocker(blocker)
+
+	// 只把 openai 阈值提高到 100：只解除 openai 来源暂停，其余平台与其它来源不受影响。
+	rl.ReleaseAccountSchedulingThresholdPauses(context.Background(), []string{PlatformOpenAI})
+
+	require.ElementsMatch(t, []int64{5001}, repo.cleared, "只应解除 account_scheduling_threshold 来源的暂停")
+	require.ElementsMatch(t, []int64{5001}, blocker.clearedIDs, "runtime block 必须同步解除")
+}
+
+func TestRateLimitService_ReleaseAccountSchedulingThresholdPauses_ExpiredPausesNotTouched(t *testing.T) {
+	now := time.Now().UTC()
+	past := now.Add(-time.Hour)
+	thresholdReason := BuildDetailedAccountSchedulingThresholdReason(AccountSchedulingThresholdReasonInput{
+		Platform: PlatformOpenAI, Window: "7d", ThresholdPercent: 90, UsedPercent: 95, Until: now.Add(2 * time.Hour), Now: now,
+	})
+
+	repo := &thresholdReleaseAccountRepoStub{
+		paused: []Account{
+			{ID: 5005, Platform: PlatformOpenAI, TempUnschedulableUntil: &past, TempUnschedulableReason: thresholdReason},
+		},
+	}
+	rl := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+
+	rl.ReleaseAccountSchedulingThresholdPauses(context.Background(), []string{PlatformOpenAI})
+
+	require.Empty(t, repo.cleared, "已过期的暂停不在 ListTempUnschedulableByPlatform 结果中，不应产生 Clear 调用")
+}

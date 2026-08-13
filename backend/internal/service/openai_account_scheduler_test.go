@@ -2205,7 +2205,7 @@ func TestOpenAIGatewayService_GetOpenAIAccountScheduler_RuntimeRefreshRecreatesA
 	scheduler := svc.getOpenAIAccountSchedulerWithContext(ctx)
 	require.IsType(t, &defaultOpenAIAccountScheduler{}, scheduler)
 
-	settingSvc.refreshCachedSettings(&SystemSettings{
+	settingSvc.refreshCachedSettings(context.Background(), &SystemSettings{
 		OpenAIAdvancedSchedulerEnabled:                       true,
 		GatewayStickyOpenAIEnabled:                           true,
 		GatewayStickyGeminiEnabled:                           true,
@@ -2224,7 +2224,7 @@ func TestOpenAIGatewayService_GetOpenAIAccountScheduler_RuntimeRefreshRecreatesA
 	scheduler = svc.getOpenAIAccountSchedulerWithContext(ctx)
 	require.IsType(t, &layeredOpenAIAccountScheduler{}, scheduler)
 
-	settingSvc.refreshCachedSettings(&SystemSettings{
+	settingSvc.refreshCachedSettings(context.Background(), &SystemSettings{
 		OpenAIAdvancedSchedulerEnabled: false,
 	})
 
@@ -2323,7 +2323,7 @@ func TestOpenAIGatewayService_SettingsRefreshRecreatesLayeredSchedulerOnProbeInt
 	require.True(t, ok)
 	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
 
-	settingSvc.refreshCachedSettings(&SystemSettings{
+	settingSvc.refreshCachedSettings(context.Background(), &SystemSettings{
 		OpenAIAdvancedSchedulerEnabled:                       true,
 		GatewayStickyOpenAIEnabled:                           true,
 		GatewayStickyGeminiEnabled:                           true,

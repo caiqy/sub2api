@@ -85,6 +85,22 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		reqStream = gjson.GetBytes(body, "stream").Bool()
 	}
 
+	// 指纹收敛：与 /responses 非透传路径一致，每个 account attempt 解析一次 IDs，
+	// 出站请求头（buildUpstreamRequestOpenAIPassthrough）与请求体共用同一份（review-fix A）。
+	// off 模式 ids 为 nil：不改写 body，并显式写入 nil 清除同一 gin.Context 上
+	// 上一 account attempt 的残留（review-fix D）。
+	if account.Type == AccountTypeOAuth && c != nil && !isOpenAIResponsesCompactPath(c) {
+		fpIDs := resolveCodexFingerprintIDsFromRequest(account, c.Request.Header)
+		if fpIDs != nil {
+			fpBody, fpErr := applyCodexFingerprintClientMetadataBytes(body, fpIDs)
+			if fpErr != nil {
+				return nil, fpErr
+			}
+			body = fpBody
+		}
+		c.Set("codex_fingerprint_ids", fpIDs)
+	}
+
 	sanitizedBody, sanitized, err := sanitizeEmptyBase64InputImagesInOpenAIBody(body)
 	if err != nil {
 		return nil, err
@@ -470,18 +486,29 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 		if req.Header.Get("originator") == "" {
 			req.Header.Set("originator", openai.CodexDefaultOriginator)
 		}
-		// 用隔离后的 session 标识符覆盖客户端透传值，防止跨用户会话碰撞。
-		if clientSessionID == "" {
-			clientSessionID = promptCacheKey
-		}
-		if clientConversationID == "" {
-			clientConversationID = promptCacheKey
-		}
-		if clientSessionID != "" {
-			req.Header.Set("session_id", isolateOpenAISessionID(apiKeyID, clientSessionID))
-		}
-		if clientConversationID != "" {
-			req.Header.Set("conversation_id", isolateOpenAISessionID(apiKeyID, clientConversationID))
+		// 收敛模式：用隔离后的 session 标识符覆盖客户端透传值，防止跨用户会话碰撞。
+		// off 模式（管理员显式关闭指纹收敛）：原样透传客户端 session/conversation，
+		// 不隔离、不改写（review-fix C）。
+		if account.GetCodexFingerprintMode() == codexFingerprintOff {
+			if clientSessionID != "" {
+				req.Header.Set("session_id", clientSessionID)
+			}
+			if clientConversationID != "" {
+				req.Header.Set("conversation_id", clientConversationID)
+			}
+		} else {
+			if clientSessionID == "" {
+				clientSessionID = promptCacheKey
+			}
+			if clientConversationID == "" {
+				clientConversationID = promptCacheKey
+			}
+			if clientSessionID != "" {
+				req.Header.Set("session_id", isolateOpenAISessionID(apiKeyID, clientSessionID))
+			}
+			if clientConversationID != "" {
+				req.Header.Set("conversation_id", isolateOpenAISessionID(apiKeyID, clientConversationID))
+			}
 		}
 	} else if isOpenAIResponsesCompactPath(c) {
 		// 透传白名单会放行客户端的 Accept: text/event-stream；compact 上游是
@@ -497,6 +524,16 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	}
 	if s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
 		req.Header.Set("user-agent", codexCLIUserAgent)
+	}
+	// 指纹收敛：使用 forwardOpenAIPassthrough 预计算的同一组 IDs 改写出站头，
+	// 与请求体 client_metadata 保持一致（review-fix A）。
+	// off 模式不读取（并跳过残留的 ctx IDs），保证显式 off 原样透传（review-fix C/D）。
+	if account.Type == AccountTypeOAuth && account.GetCodexFingerprintMode() != codexFingerprintOff && c != nil {
+		if fpIDs, ok := c.Get("codex_fingerprint_ids"); ok {
+			if ids, ok := fpIDs.(*codexFingerprintIDs); ok {
+				applyCodexFingerprintHeaders(req.Header, ids)
+			}
+		}
 	}
 	// 终态收口：透传路径的 OAuth 与非透传完全一致，同样强制统一出站身份
 	// （User-Agent / originator / version 同源自洽），客户端自报身份不会到达上游。

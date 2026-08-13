@@ -810,6 +810,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		turnState = strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader))
 		turnMetadata = strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader))
 	}
+	// 指纹收敛：relay 级解析一次 IDs，握手头（buildOpenAIWSHeaders）使用同一份；
+	// off 模式显式写入 nil 清除残留（review-fix B/D）。
+	if account.Type == AccountTypeOAuth && c != nil && c.Request != nil {
+		c.Set("codex_fingerprint_ids", resolveCodexFingerprintIDsFromRequest(account, c.Request.Header))
+	}
 	headers, _, buildHdrErr := s.buildOpenAIWSHeaders(
 		ctx,
 		c,

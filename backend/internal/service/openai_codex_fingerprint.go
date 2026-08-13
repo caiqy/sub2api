@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 // codexFingerprintMode 控制 OAuth 账号出站请求的设备指纹收敛强度。
@@ -19,7 +21,9 @@ import (
 type codexFingerprintMode string
 
 const (
-	// codexFingerprintOff 不做任何收敛，原样透传客户端标识（默认行为）。
+	// codexFingerprintOff 不做任何收敛，原样透传客户端标识。
+	// 注意：off 不是默认值——OAuth 账号缺失/空/非法配置均默认 codexFingerprintSession，
+	// 只有管理员显式配置 "off" 才关闭收敛（review-fix C/F）。
 	codexFingerprintOff codexFingerprintMode = "off"
 	// codexFingerprintDevice 仅收敛 installation_id 为账号级恒定值。
 	// 上游看到 1 台设备 + 多会话（每用户各自的 session）。
@@ -298,4 +302,69 @@ func rewriteClientMetadataEmbeddedTurnMetadata(clientMetadata map[string]any, fi
 	if rebuilt, err := json.Marshal(metadata); err == nil {
 		clientMetadata["x-codex-turn-metadata"] = string(rebuilt)
 	}
+}
+
+// applyCodexFingerprintClientMetadataBytes 对透传路径的原始 JSON 字节做定点改写，
+// 语义与 applyCodexFingerprintClientMetadata 一致（同一组预计算 IDs、off 模式 nil 不改写），
+// 但保留 body 中所有非 fingerprint 字段与原始 JSON 形态（review-fix A）。
+func applyCodexFingerprintClientMetadataBytes(body []byte, ids *codexFingerprintIDs) ([]byte, error) {
+	if len(body) == 0 || ids == nil {
+		return body, nil
+	}
+	out := body
+	setField := func(path string, value any) error {
+		next, err := sjson.SetBytes(out, path, value)
+		if err != nil {
+			return err
+		}
+		out = next
+		return nil
+	}
+	if ids.installationID != "" {
+		if err := setField("client_metadata.x-codex-installation-id", ids.installationID); err != nil {
+			return body, err
+		}
+	}
+	if ids.mode != codexFingerprintDevice {
+		for _, field := range []struct {
+			path  string
+			value any
+		}{
+			{"client_metadata.session_id", ids.sessionID},
+			{"client_metadata.thread_id", ids.threadID},
+			{"client_metadata.turn_id", ids.turnID},
+			{"client_metadata.x-codex-window-id", ids.windowID},
+		} {
+			if err := setField(field.path, field.value); err != nil {
+				return body, err
+			}
+		}
+	}
+	// 内嵌 x-codex-turn-metadata JSON 字符串：与头改写保持同一组字段。
+	raw := gjson.GetBytes(out, "client_metadata.x-codex-turn-metadata").String()
+	if raw == "" {
+		return out, nil
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
+		return out, nil
+	}
+	fields := map[string]any{
+		"installation_id":         ids.installationID,
+		"turn_started_at_unix_ms": time.Now().UnixMilli(),
+	}
+	if ids.mode != codexFingerprintDevice {
+		fields["session_id"] = ids.sessionID
+		fields["thread_id"] = ids.threadID
+		fields["turn_id"] = ids.turnID
+		fields["window_id"] = ids.windowID
+	}
+	for k, v := range fields {
+		metadata[k] = v
+	}
+	rebuilt, err := json.Marshal(metadata)
+	if err != nil {
+		return out, nil
+	}
+	return sjson.SetBytes(out, "client_metadata.x-codex-turn-metadata", string(rebuilt))
 }

@@ -201,3 +201,59 @@ func TestGetAccountSchedulingThresholds_NilRepoReturnsDefaults(t *testing.T) {
 		PlatformGrok:      100,
 	}, got)
 }
+
+// --- review-fix E：阈值热更新时沿 SettingService/update → AccountRepo/调度边界解除暂停 ---
+
+type schedulingThresholdReleaserStub struct {
+	calls     int
+	platforms []string
+}
+
+func (r *schedulingThresholdReleaserStub) ReleaseAccountSchedulingThresholdPauses(_ context.Context, platforms []string) {
+	r.calls++
+	r.platforms = append(r.platforms, platforms...)
+}
+
+func TestUpdateSettings_RaisedThresholdReleasesOnlyDisabledPlatforms(t *testing.T) {
+	svc := newSettingServiceForPlatformThresholdTest(map[string]string{
+		SettingKeyAccountSchedulingThresholds: `{"openai":90,"grok":80}`,
+	})
+	releaser := &schedulingThresholdReleaserStub{}
+	svc.SetAccountSchedulingThresholdPauseReleaser(releaser)
+
+	// grok 提到 100（+anthropic 缺省 100）：只解除这两个平台的阈值来源暂停，openai 仍为 90 不解除。
+	err := svc.UpdateSettings(context.Background(), &SystemSettings{
+		AccountSchedulingThresholds: map[string]int{PlatformOpenAI: 90, PlatformGrok: 100},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, releaser.calls)
+	require.ElementsMatch(t, []string{PlatformAnthropic, PlatformGrok}, releaser.platforms)
+}
+
+func TestUpdateSettings_EmptyThresholdsMapReleasesAllPlatforms(t *testing.T) {
+	svc := newSettingServiceForPlatformThresholdTest(map[string]string{
+		SettingKeyAccountSchedulingThresholds: `{"openai":90,"grok":80}`,
+	})
+	releaser := &schedulingThresholdReleaserStub{}
+	svc.SetAccountSchedulingThresholdPauseReleaser(releaser)
+
+	// 清空阈值（空 map → 全平台默认 100，不再产生暂停）：解除全部平台的阈值来源暂停。
+	err := svc.UpdateSettings(context.Background(), &SystemSettings{
+		AccountSchedulingThresholds: map[string]int{},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, releaser.calls)
+	require.ElementsMatch(t, []string{PlatformOpenAI, PlatformAnthropic, PlatformGrok}, releaser.platforms)
+}
+
+func TestUpdateSettings_OmittedThresholdsDoNotReleasePauses(t *testing.T) {
+	svc := newSettingServiceForPlatformThresholdTest(map[string]string{
+		SettingKeyAccountSchedulingThresholds: `{"openai":90}`,
+	})
+	releaser := &schedulingThresholdReleaserStub{}
+	svc.SetAccountSchedulingThresholdPauseReleaser(releaser)
+
+	err := svc.UpdateSettings(context.Background(), &SystemSettings{SiteName: "x"})
+	require.NoError(t, err)
+	require.Equal(t, 0, releaser.calls, "未携带阈值字段的更新不得触发解除")
+}

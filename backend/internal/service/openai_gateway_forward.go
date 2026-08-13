@@ -411,7 +411,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			markDecodedModified()
 		}
 		// 带真实 device_id 时补齐 client_metadata 安装标识，与真实 Codex 对齐（compact 形态不同，跳过）。
-		if !isCompactRequest && applyCodexClientMetadata(decoded, account) {
+		// 显式 off 模式（原样透传客户端指纹）不注入管理员 device_id，避免改写 fingerprint metadata（review-fix C）。
+		if !isCompactRequest && account.GetCodexFingerprintMode() != codexFingerprintOff && applyCodexClientMetadata(decoded, account) {
 			markDecodedModified()
 		}
 		// 指纹收敛：一次性解析收敛 ID，请求体和出站头共享同一份 IDs（保证 turn_id 等随机字段一致）。
@@ -427,8 +428,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					markDecodedModified()
 				}
 			}
-			// 将 fpIDs 存入 gin context，供 buildUpstreamRequest 中头改写使用
-			if c != nil && fpIDs != nil {
+			// 将 fpIDs 存入 gin context，供出站请求头改写使用；每次 account attempt
+			// 显式覆盖（off/compact → nil），避免同一 gin.Context failover 重入时
+			// 残留上一账号的预计算 IDs（review-fix D）。
+			if c != nil {
 				c.Set("codex_fingerprint_ids", fpIDs)
 			}
 		}

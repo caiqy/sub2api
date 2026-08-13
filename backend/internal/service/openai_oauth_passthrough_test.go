@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -2265,4 +2266,203 @@ func TestOpenAIGatewayService_OAuthPassthrough_AllowTimeoutHeadersWhenConfigured
 	require.NotNil(t, upstream.lastReq)
 	require.Equal(t, "120000", upstream.lastReq.Header.Get("x-stainless-timeout"))
 	require.Empty(t, upstream.lastReq.Header.Get("X-Test"))
+}
+
+// --- review-fix A：OAuth 透传路径在 final account 下用同一组预计算 IDs 收敛头与 body ---
+
+func TestOpenAIGatewayService_OAuthPassthrough_ConvergesCodexFingerprintHeaderAndBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+	c.Request.Header.Set("session-id", "client-sess-1")
+	c.Request.Header.Set("x-codex-installation-id", "client-install-1")
+	c.Request.Header.Set("x-codex-turn-metadata", `{"installation_id":"client-install-1","session_id":"client-sess-1","thread_id":"client-thread-1","turn_id":"client-turn-1"}`)
+
+	inputBody := []byte(`{"model":"gpt-5.2","stream":false,"store":true,"input":[{"type":"text","text":"hi"}],"client_metadata":{"x-codex-installation-id":"client-install-1","session_id":"client-sess-1","thread_id":"client-thread-1","turn_id":"client-turn-1","x-codex-window-id":"client-window-1","x-codex-turn-metadata":"{\"installation_id\":\"client-install-1\",\"session_id\":\"client-sess-1\",\"thread_id\":\"client-thread-1\",\"turn_id\":\"client-turn-1\"}"}}`)
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid"}},
+		Body:       io.NopCloser(strings.NewReader("data: [DONE]\n\n")),
+	}}
+
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: false}},
+		httpUpstream: upstream,
+	}
+
+	account := &Account{
+		ID:             123,
+		Name:           "acc",
+		Platform:       PlatformOpenAI,
+		Type:           AccountTypeOAuth,
+		Concurrency:    1,
+		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
+		Extra:          map[string]any{"openai_passthrough": true, "codex_fingerprint_mode": "session"},
+		Status:         StatusActive,
+		Schedulable:    true,
+		RateMultiplier: f64p(1),
+	}
+
+	_, err := svc.Forward(context.Background(), c, account, inputBody)
+	require.NoError(t, err)
+	require.NotNil(t, upstream.lastReq)
+
+	headerSession := upstream.lastReq.Header.Get("session_id")
+	require.NotEqual(t, "client-sess-1", headerSession, "session 模式必须收敛 session_id")
+	require.NotEqual(t, "client-install-1", upstream.lastReq.Header.Get("x-codex-installation-id"), "session 模式必须收敛 installation_id")
+
+	var outbound map[string]any
+	require.NoError(t, json.Unmarshal(upstream.lastBody, &outbound))
+	cm, ok := outbound["client_metadata"].(map[string]any)
+	require.True(t, ok, "body 应含 client_metadata")
+	require.Equal(t, headerSession, cm["session_id"], "头/体 session_id 必须同源收敛")
+	require.Equal(t, upstream.lastReq.Header.Get("x-codex-window-id"), cm["x-codex-window-id"], "头/体 window_id 必须同源收敛")
+	require.Equal(t, upstream.lastReq.Header.Get("x-codex-installation-id"), cm["x-codex-installation-id"], "头/体 installation_id 必须同源收敛")
+
+	var headerMeta, bodyMeta map[string]any
+	require.NoError(t, json.Unmarshal([]byte(upstream.lastReq.Header.Get("x-codex-turn-metadata")), &headerMeta))
+	require.NoError(t, json.Unmarshal([]byte(cm["x-codex-turn-metadata"].(string)), &bodyMeta))
+	require.Equal(t, headerMeta["turn_id"], bodyMeta["turn_id"], "头/体 turn_id 必须同源收敛（同一组预计算 IDs）")
+	require.Equal(t, headerMeta["session_id"], bodyMeta["session_id"])
+}
+
+// --- review-fix C：显式 off 的 OAuth 透传路径原样透传客户端指纹，且仍保护非指纹凭证 ---
+
+func TestOpenAIGatewayService_OAuthPassthrough_OffPreservesClientFingerprint(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+	c.Request.Header.Set("session_id", "client-sess-1")
+	c.Request.Header.Set("session-id", "client-sess-1")
+	c.Request.Header.Set("conversation_id", "client-conv-1")
+	c.Request.Header.Set("x-codex-installation-id", "client-install-1")
+	c.Request.Header.Set("x-codex-window-id", "client-window-1")
+	c.Request.Header.Set("x-codex-turn-metadata", `{"installation_id":"client-install-1","session_id":"client-sess-1","turn_id":"client-turn-1"}`)
+	c.Request.Header.Set("Authorization", "Bearer inbound-must-not-forward")
+
+	inputBody := []byte(`{"model":"gpt-5.2","stream":false,"store":true,"input":[{"type":"text","text":"hi"}],"client_metadata":{"x-codex-installation-id":"client-install-1","session_id":"client-sess-1","turn_id":"client-turn-1","x-codex-window-id":"client-window-1"}}`)
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid"}},
+		Body:       io.NopCloser(strings.NewReader("data: [DONE]\n\n")),
+	}}
+
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: false}},
+		httpUpstream: upstream,
+	}
+
+	account := &Account{
+		ID:             123,
+		Name:           "acc",
+		Platform:       PlatformOpenAI,
+		Type:           AccountTypeOAuth,
+		Concurrency:    1,
+		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
+		Extra:          map[string]any{"openai_passthrough": true, "codex_fingerprint_mode": "off"},
+		Status:         StatusActive,
+		Schedulable:    true,
+		RateMultiplier: f64p(1),
+	}
+
+	_, err := svc.Forward(context.Background(), c, account, inputBody)
+	require.NoError(t, err)
+	require.NotNil(t, upstream.lastReq)
+
+	require.Equal(t, "client-sess-1", upstream.lastReq.Header.Get("session_id"), "off 模式 session_id 必须原样透传（不隔离）")
+	require.Equal(t, "client-sess-1", upstream.lastReq.Header.Get("session-id"), "off 模式 session-id 必须原样透传")
+	require.Equal(t, "client-conv-1", upstream.lastReq.Header.Get("conversation_id"), "off 模式 conversation_id 必须原样透传")
+	require.Equal(t, "client-install-1", upstream.lastReq.Header.Get("x-codex-installation-id"), "off 模式安装标识必须原样透传")
+	require.Equal(t, "client-window-1", upstream.lastReq.Header.Get("x-codex-window-id"), "off 模式 window_id 必须原样透传")
+	require.Equal(t, `{"installation_id":"client-install-1","session_id":"client-sess-1","turn_id":"client-turn-1"}`, upstream.lastReq.Header.Get("x-codex-turn-metadata"), "off 模式 turn metadata 必须原样透传")
+
+	var outbound map[string]any
+	require.NoError(t, json.Unmarshal(upstream.lastBody, &outbound))
+	cm, ok := outbound["client_metadata"].(map[string]any)
+	require.True(t, ok, "body 应含 client_metadata")
+	require.Equal(t, "client-sess-1", cm["session_id"], "off 模式 body session_id 必须原样透传")
+	require.Equal(t, "client-install-1", cm["x-codex-installation-id"], "off 模式 body 安装标识必须原样透传")
+	require.Equal(t, "client-turn-1", cm["turn_id"], "off 模式 body turn_id 必须原样透传")
+
+	require.Equal(t, "Bearer oauth-token", upstream.lastReq.Header.Get("Authorization"), "非指纹凭证仍须被替换保护，客户端 Authorization 不得透传")
+}
+
+// --- review-fix D：同一 gin.Context failover 重入时，session/full → off 的残留 IDs 必须被清除 ---
+
+func TestOpenAIGatewayService_ForwardReEntry_OffAccountClearsStaleFingerprintIDs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+	c.Request.Header.Set("session_id", "client-sess-1")
+	c.Request.Header.Set("originator", "codex-tui")
+
+	inputBody := []byte(`{"model":"gpt-5.2","stream":true,"store":false,"input":[{"type":"text","text":"hi"}]}`)
+
+	upstream := &httpUpstreamRecorder{
+		responses: []*http.Response{
+			{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid"}},
+				Body:       io.NopCloser(strings.NewReader("data: [DONE]\n\n")),
+			},
+			{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid"}},
+				Body:       io.NopCloser(strings.NewReader("data: [DONE]\n\n")),
+			},
+		},
+	}
+
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: false}},
+		httpUpstream: upstream,
+	}
+
+	sessionAccount := &Account{
+		ID:             123,
+		Name:           "acc-session",
+		Platform:       PlatformOpenAI,
+		Type:           AccountTypeOAuth,
+		Concurrency:    1,
+		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
+		Extra:          map[string]any{"codex_fingerprint_mode": "session"},
+		Status:         StatusActive,
+		Schedulable:    true,
+		RateMultiplier: f64p(1),
+	}
+	offAccount := &Account{
+		ID:             124,
+		Name:           "acc-off",
+		Platform:       PlatformOpenAI,
+		Type:           AccountTypeOAuth,
+		Concurrency:    1,
+		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
+		Extra:          map[string]any{"codex_fingerprint_mode": "off"},
+		Status:         StatusActive,
+		Schedulable:    true,
+		RateMultiplier: f64p(1),
+	}
+
+	// attempt 1：session 模式账号，收敛 IDs 写入 gin.Context。
+	_, err := svc.Forward(context.Background(), c, sessionAccount, inputBody)
+	require.NoError(t, err)
+	require.NotNil(t, upstream.lastReq)
+	require.NotEqual(t, "client-sess-1", upstream.lastReq.Header.Get("session_id"), "attempt 1 应收敛")
+	require.NotEmpty(t, upstream.lastReq.Header.Get("x-codex-window-id"))
+
+	// attempt 2：failover 到 off 模式账号（同一 gin.Context），不得残留 attempt 1 的收敛。
+	_, err = svc.Forward(context.Background(), c, offAccount, inputBody)
+	require.NoError(t, err)
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, "client-sess-1", upstream.lastReq.Header.Get("session_id"), "off 模式必须原样透传，不得使用上一账号的收敛 session")
+	require.Empty(t, upstream.lastReq.Header.Get("x-codex-window-id"), "off 模式不得残留上一账号的收敛 window_id")
+	require.Empty(t, upstream.lastReq.Header.Get("thread-id"), "off 模式不得残留上一账号的收敛 thread_id")
 }

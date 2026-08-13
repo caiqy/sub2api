@@ -1,13 +1,17 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func newTestOAuthAccount(id int64, extra map[string]any) *Account {
@@ -457,4 +461,199 @@ func TestExtractClientSessionID(t *testing.T) {
 			assert.Equal(t, tt.expected, extractClientSessionID(tt.headers))
 		})
 	}
+}
+
+// --- review-fix A：透传路径字节级 client_metadata 收敛 ---
+
+func TestApplyCodexFingerprintClientMetadataBytes_SessionConvergesAndPreservesRest(t *testing.T) {
+	account := newTestOAuthAccount(42, map[string]any{codexFingerprintModeExtraKey: "session"})
+	ids := resolveCodexFingerprintIDsFromRequest(account, nil)
+	require.NotNil(t, ids)
+
+	body := []byte(`{"model":"gpt-5.2","stream":false,"input":[{"type":"text","text":"hi"}],"instructions":"Reply OK","client_metadata":{"session_id":"client-sess-1","x-codex-window-id":"client-window-1","sandbox":"seccomp","x-codex-turn-metadata":"{\"installation_id\":\"client-install-1\",\"session_id\":\"client-sess-1\",\"turn_id\":\"client-turn-1\",\"sandbox\":\"seccomp\"}"}}`)
+
+	out, err := applyCodexFingerprintClientMetadataBytes(body, ids)
+	require.NoError(t, err)
+
+	require.Equal(t, "Reply OK", gjson.GetBytes(out, "instructions").String(), "非 fingerprint 字段必须原样保留")
+	require.Equal(t, "seccomp", gjson.GetBytes(out, "client_metadata.sandbox").String(), "非 fingerprint 字段必须原样保留")
+	require.Equal(t, "gpt-5.2", gjson.GetBytes(out, "model").String())
+
+	cmSession := gjson.GetBytes(out, "client_metadata.session_id").String()
+	cmWindow := gjson.GetBytes(out, "client_metadata.x-codex-window-id").String()
+	require.Equal(t, resolveConvergedSessionID(account), cmSession, "session 模式必须收敛 body session_id")
+	require.NotEqual(t, "client-window-1", cmWindow, "session 模式必须收敛 body window_id")
+
+	var headerMeta, bodyMeta map[string]any
+	require.NoError(t, json.Unmarshal([]byte(gjson.GetBytes(out, "client_metadata.x-codex-turn-metadata").String()), &bodyMeta))
+	require.Equal(t, ids.turnID, bodyMeta["turn_id"], "内嵌 turn metadata 的 turn_id 必须收敛且与 ids 一致")
+	require.Equal(t, cmSession, bodyMeta["session_id"])
+	require.Equal(t, "seccomp", bodyMeta["sandbox"], "内嵌 turn metadata 非 fingerprint 字段必须保留")
+	headerMeta = bodyMeta // keep naming symmetric
+	_ = headerMeta
+}
+
+func TestApplyCodexFingerprintClientMetadataBytes_DeviceModeOnlyConvergesInstallation(t *testing.T) {
+	account := newTestOAuthAccount(43, map[string]any{codexFingerprintModeExtraKey: "device"})
+	ids := resolveCodexFingerprintIDsFromRequest(account, nil)
+	require.NotNil(t, ids)
+
+	body := []byte(`{"model":"gpt-5.2","client_metadata":{"session_id":"client-sess-1","thread_id":"client-thread-1","x-codex-installation-id":"client-install-1"}}`)
+	out, err := applyCodexFingerprintClientMetadataBytes(body, ids)
+	require.NoError(t, err)
+
+	require.Equal(t, ids.installationID, gjson.GetBytes(out, "client_metadata.x-codex-installation-id").String(), "device 模式必须收敛 installation_id")
+	require.Equal(t, "client-sess-1", gjson.GetBytes(out, "client_metadata.session_id").String(), "device 模式不得改写 session_id")
+	require.Equal(t, "client-thread-1", gjson.GetBytes(out, "client_metadata.thread_id").String(), "device 模式不得改写 thread_id")
+}
+
+// --- review-fix C：off 模式 HTTP 非透传路径原样透传客户端指纹 ---
+
+func TestBuildUpstreamRequest_OffModePreservesClientSessionAndFingerprintHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set("session_id", "client-sess-1")
+	c.Request.Header.Set("session-id", "client-sess-1")
+	c.Request.Header.Set("x-codex-installation-id", "client-install-1")
+	c.Request.Header.Set("x-codex-window-id", "client-window-1")
+	c.Request.Header.Set("x-codex-turn-metadata", `{"installation_id":"client-install-1","session_id":"client-sess-1","turn_id":"client-turn-1"}`)
+	c.Request.Header.Set("originator", "codex-tui")
+
+	account := newTestOAuthAccount(79, map[string]any{codexFingerprintModeExtraKey: "off"})
+	account.Credentials = map[string]any{"access_token": "t", "chatgpt_account_id": "chatgpt-off"}
+
+	svc := &OpenAIGatewayService{}
+	offBody := []byte(`{"model":"gpt-5.2","input":[],"stream":false,"prompt_cache_key":"pk"}`)
+	req, err := svc.buildUpstreamRequestOpenAIPassthrough(context.Background(), c, account, offBody, offBody, "")
+	require.NoError(t, err)
+
+	require.Equal(t, "client-sess-1", req.Header.Get("session_id"), "off 模式 session_id 必须原样透传，不得隔离")
+	require.Equal(t, "client-sess-1", req.Header.Get("session-id"), "off 模式 session-id 必须原样透传")
+	require.Equal(t, "client-install-1", req.Header.Get("x-codex-installation-id"), "off 模式安装标识必须原样透传")
+	require.Equal(t, "client-window-1", req.Header.Get("x-codex-window-id"), "off 模式 window_id 必须原样透传")
+	require.Equal(t, `{"installation_id":"client-install-1","session_id":"client-sess-1","turn_id":"client-turn-1"}`, req.Header.Get("x-codex-turn-metadata"), "off 模式 turn metadata 必须原样透传")
+}
+
+// --- review-fix D：同一 gin.Context 重入时，残留的旧 attempt IDs 不得作用于 off 模式账号 ---
+
+func TestBuildUpstreamRequest_StaleContextIDsDoNotConvergeOffModeAccount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set("session_id", "client-sess-1")
+	c.Request.Header.Set("originator", "codex-tui")
+
+	// 模拟上一 account attempt（session 模式）在 gin.Context 中留下的预计算 IDs。
+	staleAccount := newTestOAuthAccount(77, map[string]any{codexFingerprintModeExtraKey: "session"})
+	c.Set("codex_fingerprint_ids", resolveCodexFingerprintIDsFromRequest(staleAccount, c.Request.Header))
+
+	offAccount := newTestOAuthAccount(78, map[string]any{codexFingerprintModeExtraKey: "off"})
+	offAccount.Credentials = map[string]any{"access_token": "t", "chatgpt_account_id": "chatgpt-off"}
+
+	svc := &OpenAIGatewayService{}
+	staleBody := []byte(`{"model":"gpt-5.2","input":[],"stream":false}`)
+	req, err := svc.buildUpstreamRequestOpenAIPassthrough(context.Background(), c, offAccount, staleBody, staleBody, "token")
+	require.NoError(t, err)
+
+	require.Equal(t, "client-sess-1", req.Header.Get("session_id"), "off 模式 session_id 必须原样透传")
+	require.Empty(t, req.Header.Get("x-codex-window-id"), "off 模式不得应用残留的收敛 IDs")
+	require.Empty(t, req.Header.Get("thread-id"), "off 模式不得应用残留的收敛 IDs")
+	require.Empty(t, req.Header.Get("x-client-request-id"), "off 模式不得应用残留的收敛 IDs")
+}
+
+// --- review-fix B：WS 握手头与 response.create body 共用同一组预计算 IDs ---
+
+func TestBuildOpenAIWSHeaders_UsesPrecomputedFingerprintIDsFromContext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set("session-id", "client-sess-1")
+	c.Request.Header.Set("x-codex-turn-metadata", `{"installation_id":"client-install-1","session_id":"client-sess-1","thread_id":"client-thread-1","turn_id":"client-turn-1"}`)
+	c.Request.Header.Set("originator", "codex-tui")
+
+	account := newTestOAuthAccount(66, map[string]any{codexFingerprintModeExtraKey: "session"})
+	account.Credentials = map[string]any{"access_token": "t", "chatgpt_account_id": "chatgpt-ws"}
+
+	// 生产链路（forwardOpenAIWSV2）：body 构造后、头构造前解析一次 IDs 并放入 gin.Context。
+	ids := resolveCodexFingerprintIDsFromRequest(account, c.Request.Header)
+	require.NotNil(t, ids)
+	payload := map[string]any{
+		"model":  "gpt-5.2",
+		"stream": true,
+		"client_metadata": map[string]any{
+			"x-codex-installation-id": "client-install-1",
+			"session_id":              "client-sess-1",
+			"x-codex-turn-metadata":   `{"installation_id":"client-install-1","session_id":"client-sess-1","thread_id":"client-thread-1","turn_id":"client-turn-1"}`,
+		},
+	}
+	require.True(t, applyCodexFingerprintClientMetadata(payload, ids))
+	c.Set("codex_fingerprint_ids", ids)
+
+	svc := &OpenAIGatewayService{}
+	headers, _, err := svc.buildOpenAIWSHeaders(
+		context.Background(),
+		c,
+		account,
+		"token",
+		OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2},
+		true,
+		"",
+		"",
+		"",
+		"",
+		"",
+	)
+	require.NoError(t, err)
+
+	cm := payload["client_metadata"].(map[string]any)
+	require.Equal(t, cm["session_id"], headers.Get("session_id"), "WS 头/体 session_id 必须同源收敛")
+	require.Equal(t, cm["x-codex-window-id"], headers.Get("x-codex-window-id"), "WS 头/体 window_id 必须同源收敛")
+	require.Equal(t, cm["thread_id"], headers.Get("thread-id"), "WS 头/体 thread_id 必须同源收敛")
+
+	// WS 约定：turn metadata 走 body client_metadata（非握手头）——内嵌元数据必须
+	// 与头部各标识收敛到同一组 IDs（turn_id 等随机字段不漂移）。
+	var bodyMeta map[string]any
+	require.NoError(t, json.Unmarshal([]byte(cm["x-codex-turn-metadata"].(string)), &bodyMeta))
+	require.Equal(t, ids.turnID, bodyMeta["turn_id"], "WS body turn_id 必须收敛且与预计算 IDs 一致")
+	require.Equal(t, cm["session_id"], bodyMeta["session_id"], "WS body 内嵌 session_id 必须与收敛值一致")
+}
+
+// --- review-fix C：off 模式 WS 握手头不隔离、不改写客户端会话 ---
+
+func TestBuildOpenAIWSHeaders_OffModeDoesNotIsolateClientSession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set("session_id", "client-sess-1")
+	c.Request.Header.Set("conversation_id", "client-conv-1")
+	c.Request.Header.Set("x-codex-installation-id", "client-install-1")
+	c.Request.Header.Set("originator", "codex-tui")
+
+	account := newTestOAuthAccount(67, map[string]any{codexFingerprintModeExtraKey: "off"})
+	account.Credentials = map[string]any{"access_token": "t", "chatgpt_account_id": "chatgpt-ws-off"}
+
+	svc := &OpenAIGatewayService{}
+	headers, _, err := svc.buildOpenAIWSHeaders(
+		context.Background(),
+		c,
+		account,
+		"token",
+		OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2},
+		true,
+		"",
+		"",
+		"",
+		"",
+		"",
+	)
+	require.NoError(t, err)
+
+	require.Equal(t, "client-sess-1", headers.Get("session_id"), "off 模式 WS session_id 必须原样透传")
+	require.Equal(t, "client-conv-1", headers.Get("conversation_id"), "off 模式 WS conversation_id 必须原样透传")
+	require.Equal(t, "client-install-1", headers.Get("x-codex-installation-id"), "off 模式安装标识必须原样透传")
 }
