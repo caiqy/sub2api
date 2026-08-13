@@ -432,8 +432,8 @@ func TestChannelMonitorRunnerScheduleDoesNotReinsertAfterV2Drain(t *testing.T) {
 	}
 
 	// The target Schedule registers task 2 before its immediate fire reads V1.
-	// Hold that exact read, drain synchronously to V2, then release the stale fire.
-	// This establishes Schedule -> target read -> V2 drain -> stale-fire completion.
+	// Hold that exact read, synchronously drain to V2, then release the stale fire.
+	// Waiting on runner.wg confirms runScheduled returned after that fire completed.
 	targetReadRelease := make(chan struct{})
 	targetReadStarted := settingsRepo.queueRuntimeReadBarriers(targetReadRelease)
 	scheduled := make(chan struct{})
@@ -456,7 +456,17 @@ func TestChannelMonitorRunnerScheduleDoesNotReinsertAfterV2Drain(t *testing.T) {
 	settingsRepo.setMode(ChannelMonitorModeV2)
 	settings.notifyChannelMonitorRuntimeListeners()
 	require.Zero(t, runnerTaskCount(runner), "V2 transition must drain existing tasks")
+	staleFireFinished := make(chan struct{})
+	go func() {
+		runner.wg.Wait()
+		close(staleFireFinished)
+	}()
 	close(targetReadRelease)
+	select {
+	case <-staleFireFinished:
+	case <-time.After(time.Second):
+		t.Fatal("stale V1 fire did not finish after its runtime read was released")
+	}
 	require.Zero(t, runnerTaskCount(runner), "a stale V1 Schedule must not restore a task after V2 drains it")
 	runner.Stop()
 }
