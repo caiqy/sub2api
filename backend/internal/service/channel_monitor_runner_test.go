@@ -417,35 +417,46 @@ func TestChannelMonitorRunnerModeFlipsDrainAndRestoreScheduledTasks(t *testing.T
 
 func TestChannelMonitorRunnerScheduleDoesNotReinsertAfterV2Drain(t *testing.T) {
 	settings, settingsRepo := newRunnerRuntimeSettings(ChannelMonitorModeV1)
-	svc := &stubMonitorSvc{enabled: []*ChannelMonitor{{ID: 1, Enabled: true, IntervalSeconds: 60}}}
+	svc := &stubMonitorSvc{
+		enabled:   []*ChannelMonitor{{ID: 1, Enabled: true, IntervalSeconds: 60}},
+		runCalled: make(chan int64, 2),
+	}
 	runner := newChannelMonitorRunner(svc, settings)
 	runner.Start()
 	require.Equal(t, 1, runnerTaskCount(runner))
+	select {
+	case id := <-svc.runCalled:
+		require.Equal(t, int64(1), id, "the existing task must finish its initial runtime read first")
+	case <-time.After(time.Second):
+		t.Fatal("existing V1 task did not complete its initial fire")
+	}
 
-	readStarted, readRelease := settingsRepo.blockNextRuntimeRead()
+	// The target Schedule registers task 2 before its immediate fire reads V1.
+	// Hold that exact read, drain synchronously to V2, then release the stale fire.
+	// This establishes Schedule -> target read -> V2 drain -> stale-fire completion.
+	targetReadRelease := make(chan struct{})
+	targetReadStarted := settingsRepo.queueRuntimeReadBarriers(targetReadRelease)
 	scheduled := make(chan struct{})
 	go func() {
 		runner.Schedule(&ChannelMonitor{ID: 2, Enabled: true, IntervalSeconds: 60})
 		close(scheduled)
 	}()
 
-	// The barrier can be captured by the existing task's immediate fire rather
-	// than Schedule. Always release it before synchronously notifying V2.
-	releaseRead := sync.OnceFunc(func() { close(readRelease) })
 	select {
-	case <-readStarted:
-		settingsRepo.setMode(ChannelMonitorModeV2)
-		releaseRead()
-		settings.notifyChannelMonitorRuntimeListeners()
-		require.Zero(t, runnerTaskCount(runner), "V2 transition must drain existing tasks")
 	case <-scheduled:
-		settingsRepo.clearRuntimeReadBarrier()
-		releaseRead()
-		settingsRepo.setMode(ChannelMonitorModeV2)
-		settings.notifyChannelMonitorRuntimeListeners()
+	case <-time.After(time.Second):
+		t.Fatal("target V1 Schedule did not register")
 	}
-	<-scheduled
+	select {
+	case <-targetReadStarted:
+	case <-time.After(time.Second):
+		t.Fatal("target task did not enter its controlled V1 runtime read")
+	}
 
+	settingsRepo.setMode(ChannelMonitorModeV2)
+	settings.notifyChannelMonitorRuntimeListeners()
+	require.Zero(t, runnerTaskCount(runner), "V2 transition must drain existing tasks")
+	close(targetReadRelease)
 	require.Zero(t, runnerTaskCount(runner), "a stale V1 Schedule must not restore a task after V2 drains it")
 	runner.Stop()
 }
