@@ -189,8 +189,23 @@ func TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState(t *testing
 	}
 	source.LongContextPricingEnabled = true
 	source.ModelPricing = []ChannelModelPricing{{
-		Platform: PlatformOpenAI,
-		Models:   []string{"gpt-5.4"},
+		Platform:         PlatformOpenAI,
+		Models:           []string{"gpt-5.4"},
+		InputPrice:       groupDuplicateTestPointer(0.01),
+		OutputPrice:      groupDuplicateTestPointer(0.02),
+		CacheWritePrice:  groupDuplicateTestPointer(0.03),
+		CacheReadPrice:   groupDuplicateTestPointer(0.04),
+		ImageInputPrice:  groupDuplicateTestPointer(0.05),
+		ImageOutputPrice: groupDuplicateTestPointer(0.06),
+		PerRequestPrice:  groupDuplicateTestPointer(0.07),
+		Intervals: []PricingInterval{{
+			MaxTokens:       groupDuplicateTestPointer(128000),
+			InputPrice:      groupDuplicateTestPointer(0.11),
+			OutputPrice:     groupDuplicateTestPointer(0.12),
+			CacheWritePrice: groupDuplicateTestPointer(0.13),
+			CacheReadPrice:  groupDuplicateTestPointer(0.14),
+			PerRequestPrice: groupDuplicateTestPointer(0.15),
+		}},
 	}}
 	repo := newDuplicateGroupRepoStub(source)
 	repo.sourceBindings[source.ID] = []AccountGroup{
@@ -234,6 +249,44 @@ func TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState(t *testing
 
 	duplicate.ModelRouting["gpt-*"][0] = 999
 	duplicate.ModelPricing[0].Models[0] = "changed"
+	sourcePrices := []*float64{
+		source.ModelPricing[0].InputPrice,
+		source.ModelPricing[0].OutputPrice,
+		source.ModelPricing[0].CacheWritePrice,
+		source.ModelPricing[0].CacheReadPrice,
+		source.ModelPricing[0].ImageInputPrice,
+		source.ModelPricing[0].ImageOutputPrice,
+		source.ModelPricing[0].PerRequestPrice,
+		source.ModelPricing[0].Intervals[0].InputPrice,
+		source.ModelPricing[0].Intervals[0].OutputPrice,
+		source.ModelPricing[0].Intervals[0].CacheWritePrice,
+		source.ModelPricing[0].Intervals[0].CacheReadPrice,
+		source.ModelPricing[0].Intervals[0].PerRequestPrice,
+	}
+	duplicatePrices := []*float64{
+		duplicate.ModelPricing[0].InputPrice,
+		duplicate.ModelPricing[0].OutputPrice,
+		duplicate.ModelPricing[0].CacheWritePrice,
+		duplicate.ModelPricing[0].CacheReadPrice,
+		duplicate.ModelPricing[0].ImageInputPrice,
+		duplicate.ModelPricing[0].ImageOutputPrice,
+		duplicate.ModelPricing[0].PerRequestPrice,
+		duplicate.ModelPricing[0].Intervals[0].InputPrice,
+		duplicate.ModelPricing[0].Intervals[0].OutputPrice,
+		duplicate.ModelPricing[0].Intervals[0].CacheWritePrice,
+		duplicate.ModelPricing[0].Intervals[0].CacheReadPrice,
+		duplicate.ModelPricing[0].Intervals[0].PerRequestPrice,
+	}
+	for i, sourcePrice := range sourcePrices {
+		require.NotSame(t, sourcePrice, duplicatePrices[i])
+		original := *sourcePrice
+		*duplicatePrices[i] = original + 1
+		require.Equal(t, original, *sourcePrice)
+	}
+	require.NotSame(t, source.ModelPricing[0].Intervals[0].MaxTokens, duplicate.ModelPricing[0].Intervals[0].MaxTokens)
+	originalMaxTokens := *source.ModelPricing[0].Intervals[0].MaxTokens
+	*duplicate.ModelPricing[0].Intervals[0].MaxTokens = originalMaxTokens + 1
+	require.Equal(t, originalMaxTokens, *source.ModelPricing[0].Intervals[0].MaxTokens)
 	duplicate.VideoModelPrices[VideoPriceFamilyGrokImagineVideo15][VideoBillingResolution720P] = 999
 	duplicate.SupportedModelScopes[0] = "changed"
 	duplicate.MessagesDispatchModelConfig.ExactModelMappings["claude-special"] = "changed"

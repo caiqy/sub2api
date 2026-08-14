@@ -89,6 +89,21 @@ func cloneGroupModelPricing(value []ChannelModelPricing) []ChannelModelPricing {
 	cloned := make([]ChannelModelPricing, len(value))
 	for i := range value {
 		cloned[i] = value[i].Clone()
+		cloned[i].InputPrice = cloneGroupValuePointer(value[i].InputPrice)
+		cloned[i].OutputPrice = cloneGroupValuePointer(value[i].OutputPrice)
+		cloned[i].CacheWritePrice = cloneGroupValuePointer(value[i].CacheWritePrice)
+		cloned[i].CacheReadPrice = cloneGroupValuePointer(value[i].CacheReadPrice)
+		cloned[i].ImageInputPrice = cloneGroupValuePointer(value[i].ImageInputPrice)
+		cloned[i].ImageOutputPrice = cloneGroupValuePointer(value[i].ImageOutputPrice)
+		cloned[i].PerRequestPrice = cloneGroupValuePointer(value[i].PerRequestPrice)
+		for j := range value[i].Intervals {
+			cloned[i].Intervals[j].MaxTokens = cloneGroupValuePointer(value[i].Intervals[j].MaxTokens)
+			cloned[i].Intervals[j].InputPrice = cloneGroupValuePointer(value[i].Intervals[j].InputPrice)
+			cloned[i].Intervals[j].OutputPrice = cloneGroupValuePointer(value[i].Intervals[j].OutputPrice)
+			cloned[i].Intervals[j].CacheWritePrice = cloneGroupValuePointer(value[i].Intervals[j].CacheWritePrice)
+			cloned[i].Intervals[j].CacheReadPrice = cloneGroupValuePointer(value[i].Intervals[j].CacheReadPrice)
+			cloned[i].Intervals[j].PerRequestPrice = cloneGroupValuePointer(value[i].Intervals[j].PerRequestPrice)
+		}
 	}
 	return cloned
 }
