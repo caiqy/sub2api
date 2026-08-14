@@ -99,3 +99,19 @@ func TestGroupHandlerForwardsPricingFields(t *testing.T) {
 		})
 	}
 }
+
+func TestGroupHandlerDefaultsLongContextPricingEnabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := &pricingGroupAdminServiceStub{}
+	router := gin.New()
+	router.POST("/groups", NewGroupHandler(svc, nil, nil).Create)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/groups", bytes.NewBufferString(`{"name":"default long context","platform":"grok"}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.NotNil(t, svc.createInput)
+	require.True(t, svc.createInput.LongContextPricingEnabled)
+}
