@@ -209,8 +209,6 @@ func (s *OpenAIGatewayService) blockAccountSchedulingLocked(account *Account, un
 			continue
 		}
 		if !blockUntil.After(currentUntil) {
-			s.openaiAccountRuntimeBlockReason.Store(account.ID, reason)
-			s.openaiAccountRuntimeBlockPlatform.Store(account.ID, account.Platform)
 			return generation, false
 		}
 		if s.openaiAccountRuntimeBlockUntil.CompareAndSwap(account.ID, current, blockUntil) {

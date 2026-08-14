@@ -387,6 +387,66 @@ func TestOpenAIRuntimeBlock_DoesNotShortenExistingBlock(t *testing.T) {
 	require.WithinDuration(t, longUntil, actualUntil, time.Second)
 }
 
+func TestOpenAIRuntimeBlock_PreservesLongestDeadlineOwnerAcrossReasons(t *testing.T) {
+	now := time.Now()
+	longUntil := now.Add(time.Hour)
+	shortUntil := now.Add(5 * time.Minute)
+
+	tests := []struct {
+		name               string
+		firstUntil         time.Time
+		firstReason        string
+		secondUntil        time.Time
+		secondReason       string
+		wantReason         string
+		wantThresholdClear AccountSchedulingBlockClearResult
+		wantBlocked        bool
+	}{
+		{
+			name:               "threshold long then rate limit short",
+			firstUntil:         longUntil,
+			firstReason:        AccountSchedulingThresholdReasonSource,
+			secondUntil:        shortUntil,
+			secondReason:       "rate_limit",
+			wantReason:         AccountSchedulingThresholdReasonSource,
+			wantThresholdClear: AccountSchedulingBlockClearMatched,
+			wantBlocked:        false,
+		},
+		{
+			name:               "rate limit long then threshold short",
+			firstUntil:         longUntil,
+			firstReason:        "rate_limit",
+			secondUntil:        shortUntil,
+			secondReason:       AccountSchedulingThresholdReasonSource,
+			wantReason:         "rate_limit",
+			wantThresholdClear: AccountSchedulingBlockClearMismatch,
+			wantBlocked:        true,
+		},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := &OpenAIGatewayService{}
+			account := &Account{ID: int64(48 + i), Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+
+			svc.BlockAccountScheduling(account, tt.firstUntil, tt.firstReason)
+			svc.BlockAccountScheduling(account, tt.secondUntil, tt.secondReason)
+
+			value, ok := svc.openaiAccountRuntimeBlockUntil.Load(account.ID)
+			require.True(t, ok)
+			actualUntil, ok := value.(time.Time)
+			require.True(t, ok)
+			require.WithinDuration(t, longUntil, actualUntil, time.Second)
+			reason, ok := svc.openaiAccountRuntimeBlockReason.Load(account.ID)
+			require.True(t, ok)
+			require.Equal(t, tt.wantReason, reason)
+
+			require.Equal(t, tt.wantThresholdClear, svc.ClearAccountSchedulingBlockIfReason(account.ID, AccountSchedulingThresholdReasonSource))
+			require.Equal(t, tt.wantBlocked, svc.isOpenAIAccountRuntimeBlocked(account))
+		})
+	}
+}
+
 func TestOpenAIRuntimeBlock_ClearAccountSchedulingBlock(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	account := &Account{ID: 47, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
