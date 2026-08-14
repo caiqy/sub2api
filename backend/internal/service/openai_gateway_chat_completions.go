@@ -257,6 +257,13 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		return nil, policyErr
 	}
 	responsesBody = updatedBody
+	if account.Type == AccountTypeOAuth {
+		fpIDs := resolveOpenAIAttemptFingerprintIDs(c, account, responsesBody)
+		if c != nil {
+			// Final compat body and outbound headers must share this attempt's IDs; off clears stale IDs.
+			c.Set("codex_fingerprint_ids", fpIDs)
+		}
+	}
 	var responseServiceTier *string
 	if responsesReq.ServiceTier != "" {
 		value := responsesReq.ServiceTier
@@ -286,7 +293,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
-	if promptCacheKey != "" {
+	if promptCacheKey != "" && account.Type != AccountTypeOAuth {
 		apiKeyID := getAPIKeyIDFromContext(c)
 		upstreamReq.Header.Set("session_id", generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey)))
 	}
