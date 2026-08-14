@@ -291,14 +291,6 @@ func (s *OpenAIGatewayService) ProxyGrokRealtime(ctx context.Context, c *gin.Con
 	return model, audioObserved.Load(), first.err
 }
 
-func awaitGrokRealtimeAudioObserved(errCh <-chan error, audioObserved *atomic.Bool) (bool, error) {
-	err := <-errCh
-	if audioObserved == nil {
-		return false, err
-	}
-	return audioObserved.Load(), err
-}
-
 func grokRealtimeEventHasAudio(msg []byte) bool {
 	if !gjson.ValidBytes(msg) {
 		return false

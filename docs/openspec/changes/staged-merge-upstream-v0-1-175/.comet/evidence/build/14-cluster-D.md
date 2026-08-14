@@ -57,3 +57,38 @@
 ## Residual Risk
 
 - Focused unit tests and `go build` do not call a live xAI upstream or run PostgreSQL/Redis-backed usage persistence. The local audit, failover, request lifecycle, and single-record paths are exercised with in-process fixtures.
+
+## Round 1 Follow-up
+
+### x_search behavior coverage
+
+- Added `TestGatewayHandler_XSearchRecordsSourcesUsageAndSnapshot`, which invokes `GatewayHandler.XSearch` through Gin with `UsageDetailCapture` installed. It verifies `x_search_call.action.sources` reaches the client result, a native x_search upstream body is sent once, the recorded usage has an `x_search:` request ID, one configured search-price unit is charged, and the preview request plus response-body snapshots retain x_search fields and the extracted source.
+- Added `TestGatewayHandler_XSearchAuditRejectsBeforeDispatch`, which invokes the same handler with a blocking audit coordinator and verifies the 403 block plus the audited query body before scheduling or dispatch.
+- Mutation RED command: temporarily change the standalone search result from `SearchCount: 1` to `SearchCount: 0`, then run `go -C backend test -tags=unit -count=1 -run '^TestGatewayHandler_XSearchRecordsSourcesUsageAndSnapshot$' ./internal/handler`.
+- Observed RED: `gateway_web_search_test.go:286` reported an expected total cost of `1` and actual `0`, proving the test observes the single-search surcharge rather than only response formatting.
+- GREEN: restored the existing `SearchCount: 1`; `go -C backend test -tags=unit -count=1 -run '^(TestGatewayHandler_XSearchRecordsSourcesUsageAndSnapshot|TestGatewayHandler_XSearchAuditRejectsBeforeDispatch|TestGatewayHandler_WebSearchFailoverRecordsFinalMappedUpstreamModel)$' ./internal/handler` passed.
+
+### Realtime production entry and comment
+
+- Replaced the unused `awaitGrokRealtimeAudioObserved` helper test with `TestProxyGrokRealtimeReadsAudioObservedAfterRelayExit`. Its controlled relay holds the upstream pump until the proxy is already waiting, sends an audio event, and verifies the direct `ProxyGrokRealtime` return reports `audioObserved=true` only after relay exit.
+- Removed the now-unused helper. No relay production behavior was changed.
+- Updated `DoGrokNativeResponsesJSON` documentation to name both `/v1/web_search` and `/x_search` callers.
+
+### Probe Decision Boundary
+
+- Per the main-window ruling, `responsesProbeVerdictIsConclusive` and its behavior were not modified. The implementation remains limited to `status=failed` and `status=incomplete` with `incomplete_details.reason=max_output_tokens` retaining unknown; all other statuses retain their existing behavior.
+
+### Round 1 Verification
+
+- `go -C backend test -tags=unit -count=1 -run '^(TestGatewayHandler_XSearchRecordsSourcesUsageAndSnapshot|TestGatewayHandler_XSearchAuditRejectsBeforeDispatch|TestGatewayHandler_WebSearchFailoverRecordsFinalMappedUpstreamModel)$' ./internal/handler`: PASS.
+- `go -C backend test -tags=unit -count=1 -run '^(TestProxyGrokRealtimeReadsAudioObservedAfterRelayExit|TestProxyGrokRealtimeUsesMappedModelInUpstreamURL|TestProxyGrokRealtimeGuardBlocksBeforeUpstreamWriteAndWaitsForPumps|TestProxyGrokRealtimePrefersGuardAfterOrdinaryPumpExit|TestDoGrokNativeResponsesJSON)' ./internal/service`: PASS.
+- `go -C backend build ./...`: PASS.
+- `git diff --check`: PASS.
+
+### Round 1 Expected Paths
+
+- `backend/internal/handler/gateway_web_search_test.go`
+- `backend/internal/service/gateway_service.go`
+- `backend/internal/service/grok_audio.go`
+- `backend/internal/service/grok_audio_test.go`
+- `docs/openspec/changes/staged-merge-upstream-v0-1-175/.comet/evidence/build/14-cluster-D.md`

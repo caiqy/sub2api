@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -69,18 +68,6 @@ func TestForwardGrokVoice_RejectsNonGrok(t *testing.T) {
 	require.Contains(t, err.Error(), "not supported")
 }
 
-func TestAwaitGrokRealtimeAudioObservedReadsFlagAfterRelayExits(t *testing.T) {
-	errCh := make(chan error, 1)
-	var observed atomic.Bool
-	go func() {
-		observed.Store(true)
-		errCh <- io.EOF
-	}()
-	got, err := awaitGrokRealtimeAudioObserved(errCh, &observed)
-	require.ErrorIs(t, err, io.EOF)
-	require.True(t, got, "audioObserved must be read after the relay returns, not before <-errCh")
-}
-
 func TestGrokRealtimeEventHasAudio(t *testing.T) {
 	require.False(t, grokRealtimeEventHasAudio([]byte(`{"type":"session.created"}`)))
 	require.False(t, grokRealtimeEventHasAudio([]byte(`{"type":"response.audio_transcript.delta","delta":"hi"}`)))
@@ -96,10 +83,26 @@ func TestForwardGrokVoice_RejectsUnknownEndpoint(t *testing.T) {
 	require.Contains(t, err.Error(), "unsupported")
 }
 
-type grokVoiceRealtimeTestConn struct{}
+type grokVoiceRealtimeTestConn struct {
+	audioReady  <-chan struct{}
+	readStarted chan struct{}
+	sentAudio   bool
+}
 
 func (*grokVoiceRealtimeTestConn) WriteJSON(context.Context, any) error { return nil }
-func (*grokVoiceRealtimeTestConn) ReadMessage(context.Context) ([]byte, error) {
+func (c *grokVoiceRealtimeTestConn) ReadMessage(ctx context.Context) ([]byte, error) {
+	if c.audioReady != nil && !c.sentAudio {
+		c.sentAudio = true
+		if c.readStarted != nil {
+			close(c.readStarted)
+		}
+		select {
+		case <-c.audioReady:
+			return []byte(`{"type":"response.audio.delta","delta":"audio"}`), nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	return nil, context.DeadlineExceeded
 }
 func (*grokVoiceRealtimeTestConn) Ping(context.Context) error { return nil }
@@ -107,16 +110,21 @@ func (*grokVoiceRealtimeTestConn) Close() error               { return nil }
 
 type grokVoiceRealtimeTestDialer struct {
 	lastURL string
+	conn    *grokVoiceRealtimeTestConn
 }
 
 func (d *grokVoiceRealtimeTestDialer) Dial(_ context.Context, wsURL string, _ http.Header, _ string) (openAIWSClientConn, int, http.Header, error) {
 	d.lastURL = wsURL
+	if d.conn != nil {
+		return d.conn, 0, nil, nil
+	}
 	return &grokVoiceRealtimeTestConn{}, 0, nil, nil
 }
 
 type grokVoiceRealtimeProxyResult struct {
-	model string
-	err   error
+	model         string
+	audioObserved bool
+	err           error
 }
 
 type grokVoiceRealtimeGuardTestConn struct {
@@ -216,6 +224,46 @@ func TestProxyGrokRealtimeUsesMappedModelInUpstreamURL(t *testing.T) {
 	require.Error(t, returned.err)
 	require.Equal(t, "first-realtime", returned.model)
 	require.Contains(t, dialer.lastURL, "model=first-realtime")
+}
+
+func TestProxyGrokRealtimeReadsAudioObservedAfterRelayExit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	readStarted := make(chan struct{})
+	audioReady := make(chan struct{})
+	dialer := &grokVoiceRealtimeTestDialer{conn: &grokVoiceRealtimeTestConn{audioReady: audioReady, readStarted: readStarted}}
+	svc := &OpenAIGatewayService{openaiWSPassthroughDialer: dialer}
+	account := &Account{Platform: PlatformGrok, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "voice-key"}}
+	result := make(chan grokVoiceRealtimeProxyResult, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		client, err := coderws.Accept(w, r, nil)
+		if err != nil {
+			result <- grokVoiceRealtimeProxyResult{err: err}
+			return
+		}
+		defer func() { _ = client.CloseNow() }()
+		model, audioObserved, proxyErr := svc.ProxyGrokRealtime(r.Context(), nil, client, account, "token", "grok-voice-latest", nil)
+		result <- grokVoiceRealtimeProxyResult{model: model, audioObserved: audioObserved, err: proxyErr}
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	require.NoError(t, err)
+	defer func() { _ = client.CloseNow() }()
+	select {
+	case <-readStarted:
+	case <-ctx.Done():
+		t.Fatal("upstream-to-client pump did not start")
+	}
+	close(audioReady)
+	_, message, err := client.Read(ctx)
+	require.NoError(t, err)
+	require.Contains(t, string(message), `"response.audio.delta"`)
+	returned := <-result
+
+	require.Error(t, returned.err)
+	require.True(t, returned.audioObserved, "audioObserved must be read after the relay exits")
 }
 
 func TestEstimateGrokVoiceAudioUsage_STTPreservesUpstreamDurationOverRequestSize(t *testing.T) {
