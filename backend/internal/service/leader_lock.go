@@ -55,8 +55,9 @@ func tryAcquireSingletonLeaderLock(ctx context.Context, cache LeaderLockCache, d
 			}
 			return release, true
 		}
-		// Cache error: fall through to the DB advisory lock so a flaky Redis does
-		// not stampede the job across every instance.
+		// Cache error: Redis and Postgres are independent best-effort lock domains.
+		// The fallback prevents concurrency only when every instance reaches the
+		// same backend; asymmetric partial failures can split-brain and run concurrently.
 	}
 
 	if db != nil {

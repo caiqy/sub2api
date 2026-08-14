@@ -2,12 +2,39 @@ package service
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/require"
 )
+
+const (
+	advisoryLockQuery   = `SELECT pg_try_advisory_lock\(\$1\)`
+	advisoryUnlockQuery = `SELECT pg_advisory_unlock\(\$1\)`
+)
+
+func newLeaderLockSQLMock(t *testing.T) (*sql.DB, sqlmock.Sqlmock) {
+	t.Helper()
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		mock.ExpectClose()
+		require.NoError(t, db.Close())
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
+	return db, mock
+}
+
+func newFailingLeaderLockDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db, mock := newLeaderLockSQLMock(t)
+	mock.ExpectQuery(advisoryLockQuery).WithArgs(sqlmock.AnyArg()).WillReturnError(errors.New("advisory lock unavailable"))
+	return db
+}
 
 // fakeLeaderLockCache is an in-memory LeaderLockCache for unit tests. It models the
 // compare-and-delete release semantics of the real Redis-backed implementation.
@@ -84,6 +111,25 @@ func TestTryAcquireSingletonLeaderLock_CacheErrorFallsThrough(t *testing.T) {
 	require.True(t, ok, "cache error with no DB must run ungated, not skip")
 	require.NotNil(t, release)
 	require.NotPanics(t, release)
+}
+
+func TestTryAcquireSingletonLeaderLock_DBQueryFailureSkips(t *testing.T) {
+	release, ok := tryAcquireSingletonLeaderLock(context.Background(), nil, newFailingLeaderLockDB(t), "k", "inst", time.Minute)
+	require.False(t, ok, "a configured but unavailable DB must not run ungated")
+	require.Nil(t, release)
+}
+
+func TestTryAcquireSingletonLeaderLock_CacheErrorUsesDBFallback(t *testing.T) {
+	db, mock := newLeaderLockSQLMock(t)
+	mock.ExpectQuery(advisoryLockQuery).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"pg_try_advisory_lock"}).AddRow(true))
+	mock.ExpectExec(advisoryUnlockQuery).WithArgs(sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
+
+	release, ok := tryAcquireSingletonLeaderLock(context.Background(), &fakeLeaderLockCache{acquireErr: context.DeadlineExceeded}, db, "k", "inst", time.Minute)
+	require.True(t, ok)
+	require.NotNil(t, release)
+	release()
 }
 
 func TestSubscriptionExpiryService_ReminderSkipsScanWhenNotLeader(t *testing.T) {

@@ -679,6 +679,38 @@ func TestBackupService_RunScheduledBackup_LeaderElection(t *testing.T) {
 		require.Equal(t, "completed", records[0].Status)
 		require.Empty(t, cache.heldBy(backupScheduledLeaderLockKey), "leader releases the lock when done")
 	})
+
+	t.Run("leader failure releases", func(t *testing.T) {
+		repo := newMockSettingRepo()
+		seedS3Config(t, repo)
+		store := newMockObjectStore()
+		svc := newTestBackupService(repo, &mockDumper{dumpErr: fmt.Errorf("pg_dump failed")}, store)
+
+		cache := &fakeLeaderLockCache{}
+		svc.SetLeaderLock(cache, nil)
+		svc.runScheduledBackup()
+
+		require.Empty(t, cache.heldBy(backupScheduledLeaderLockKey), "leader releases the lock after backup failure")
+	})
+}
+
+func TestBackupService_RunScheduledBackup_DBLockQueryFailureSkips(t *testing.T) {
+	repo := newMockSettingRepo()
+	seedS3Config(t, repo)
+	store := newMockObjectStore()
+	svc := newTestBackupService(repo, &mockDumper{dumpData: []byte("data")}, store)
+
+	// A configured DB whose advisory-lock query fails must skip rather than run ungated.
+	svc.SetLeaderLock(nil, newFailingLeaderLockDB(t))
+	svc.runScheduledBackup()
+
+	store.mu.Lock()
+	require.Empty(t, store.objects, "DB lock failure must not upload a backup")
+	store.mu.Unlock()
+
+	records, err := svc.ListBackups(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, records, "DB lock failure must not create a backup record")
 }
 
 func TestBackupService_RestoreBackup_Streaming(t *testing.T) {
