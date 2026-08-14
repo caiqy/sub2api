@@ -181,12 +181,15 @@ describe('admin UsageTable tooltip', () => {
     ])
     expect(wrapper.text()).toContain('59m 59s')
     expect(speedCells[0].classes()).toEqual(expect.arrayContaining([
+      'whitespace-nowrap',
+      'text-[11px]',
+      'leading-3',
+    ]))
+    expect(speedCells[0].classes()).not.toEqual(expect.arrayContaining([
       '[contain:inline-size]',
       'min-w-0',
       'whitespace-normal',
       'break-words',
-      'text-[11px]',
-      'leading-3',
     ]))
     expect(speedCells[0].classes()).not.toContain('absolute')
     expect(speedCells[0].classes()).not.toContain('min-h-6')

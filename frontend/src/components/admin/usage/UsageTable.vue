@@ -250,7 +250,7 @@
               <span
                 v-if="showOutputSpeed"
                 data-testid="usage-output-speed"
-                class="[contain:inline-size] min-w-0 whitespace-normal break-words text-[11px] leading-3 font-medium tabular-nums text-sky-500 dark:text-sky-400"
+                class="whitespace-nowrap text-[11px] leading-3 font-medium tabular-nums text-sky-500 dark:text-sky-400"
               >{{ formatOutputSpeed(row) }}</span>
             </div>
           </div>
