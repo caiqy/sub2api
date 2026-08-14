@@ -1,7 +1,7 @@
 package service
 
-// 本文件由 openai_gateway_service.go 纯移动拆分而来：粘性会话哈希、账号选择与
-// 负载感知调度、配额自动暂停判定、并发槽位获取。仅做代码搬迁，无任何行为变更。
+// 本文件承载 OpenAI 网关的会话粘性与账号调度：候选选择、选择后 DB recheck、
+// profit gate、配额自动暂停、runtime block 和并发槽位获取。
 
 import (
 	"context"
