@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +17,36 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
+
+const codexFingerprintAccountIDContextKey = "codex_fingerprint_account_id"
+const codexFingerprintBodyHashContextKey = "codex_fingerprint_body_hash"
+
+func resolveOpenAIAttemptFingerprintIDs(c *gin.Context, account *Account, body []byte) *codexFingerprintIDs {
+	bodyHash := sha256.Sum256(body)
+	if c != nil && account != nil {
+		cachedAccountID, accountMatches := c.Get(codexFingerprintAccountIDContextKey)
+		cachedBodyHash, bodyMatches := c.Get(codexFingerprintBodyHashContextKey)
+		if accountMatches && bodyMatches && cachedAccountID == account.ID && cachedBodyHash == bodyHash {
+			if cached, ok := c.Get("codex_fingerprint_ids"); ok {
+				if ids, ok := cached.(*codexFingerprintIDs); ok {
+					return ids
+				}
+			}
+		}
+	}
+
+	var clientHeaders http.Header
+	if c != nil && c.Request != nil {
+		clientHeaders = c.Request.Header
+	}
+	ids := resolveCodexFingerprintIDsFromRequest(account, clientHeaders)
+	if c != nil && account != nil {
+		c.Set("codex_fingerprint_ids", ids)
+		c.Set(codexFingerprintAccountIDContextKey, account.ID)
+		c.Set(codexFingerprintBodyHashContextKey, bodyHash)
+	}
+	return ids
+}
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
@@ -411,8 +442,19 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			markDecodedModified()
 		}
 		// 带真实 device_id 时补齐 client_metadata 安装标识，与真实 Codex 对齐（compact 形态不同，跳过）。
-		if !isCompactRequest && applyCodexClientMetadata(decoded, account) {
+		// 显式 off 模式（原样透传客户端指纹）不注入管理员 device_id，避免改写 fingerprint metadata（review-fix C）。
+		if !isCompactRequest && account.GetCodexFingerprintMode() != codexFingerprintOff && applyCodexClientMetadata(decoded, account) {
 			markDecodedModified()
+		}
+		// 指纹收敛：一次性解析收敛 ID，请求体和出站头共享同一份 IDs（保证 turn_id 等随机字段一致）。
+		// 同账号重试复用 IDs，切号后重新解析，保证请求重放和最终账号隔离。
+		if !isCompactRequest {
+			fpIDs := resolveOpenAIAttemptFingerprintIDs(c, account, body)
+			if fpIDs != nil {
+				if applyCodexFingerprintClientMetadata(decoded, fpIDs) {
+					markDecodedModified()
+				}
+			}
 		}
 		if codexResult.NormalizedModel != "" {
 			upstreamModel = codexResult.NormalizedModel
@@ -922,8 +964,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
 
-			upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
-			upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 			upstreamCode := extractUpstreamErrorCode(respBody)
 			var requestBody []byte
 			var readErr error
@@ -936,7 +976,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				continue
 			}
 			respBody = s.redactAgentIdentitySensitiveBody(ctx, account, respBody)
-			upstreamMsg = strings.TrimSpace(extractUpstreamErrorMessage(respBody))
+			upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 			upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
 			if !httpInvalidEncryptedContentRetryTried && resp.StatusCode == http.StatusBadRequest && upstreamCode == "invalid_encrypted_content" {
@@ -1253,6 +1293,15 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	// 用于网关未透传/改写 User-Agent 时，仍能命中 Codex 侧识别逻辑。
 	if s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
 		req.Header.Set("user-agent", codexCLIUserAgent)
+	}
+
+	// 指纹收敛：使用 Forward() 中预计算的收敛 ID 改写出站头，与请求体使用同一份 IDs。
+	if account.Type == AccountTypeOAuth && c != nil {
+		if fpIDs, ok := c.Get("codex_fingerprint_ids"); ok {
+			if ids, ok := fpIDs.(*codexFingerprintIDs); ok {
+				applyCodexFingerprintHeaders(req.Header, ids)
+			}
+		}
 	}
 
 	// 终态收口：强制统一 OAuth 出站身份（User-Agent / originator / version 同源自洽）。

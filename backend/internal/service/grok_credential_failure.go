@@ -574,6 +574,8 @@ func (s *OpenAIGatewayService) blockGrokCredentialRuntime(account *Account, unti
 	mu := s.openAIAccountRuntimeBlockLock(account.ID)
 	mu.Lock()
 	before, hadBefore := s.openaiAccountRuntimeBlockUntil.Load(account.ID)
+	beforeReason, hadBeforeReason := s.openaiAccountRuntimeBlockReason.Load(account.ID)
+	beforePlatform, hadBeforePlatform := s.openaiAccountRuntimeBlockPlatform.Load(account.ID)
 	installedGeneration, changed := s.blockAccountSchedulingLocked(account, until, reason)
 	installed, installedOK := s.openaiAccountRuntimeBlockUntil.Load(account.ID)
 	installedUntil, isTime := installed.(time.Time)
@@ -600,10 +602,22 @@ func (s *OpenAIGatewayService) blockGrokCredentialRuntime(account *Account, unti
 		}
 		if hadBefore {
 			s.openaiAccountRuntimeBlockUntil.Store(account.ID, before)
+			if hadBeforeReason {
+				s.openaiAccountRuntimeBlockReason.Store(account.ID, beforeReason)
+			} else {
+				s.openaiAccountRuntimeBlockReason.Delete(account.ID)
+			}
+			if hadBeforePlatform {
+				s.openaiAccountRuntimeBlockPlatform.Store(account.ID, beforePlatform)
+			} else {
+				s.openaiAccountRuntimeBlockPlatform.Delete(account.ID)
+			}
 			s.openaiAccountRuntimeBlockGeneration.Store(account.ID, s.openaiAccountRuntimeBlockSequence.Add(1))
 			return
 		}
 		s.openaiAccountRuntimeBlockUntil.Delete(account.ID)
+		s.openaiAccountRuntimeBlockReason.Delete(account.ID)
+		s.openaiAccountRuntimeBlockPlatform.Delete(account.ID)
 		s.openaiAccountRuntimeBlockGeneration.Store(account.ID, s.openaiAccountRuntimeBlockSequence.Add(1))
 	}
 }

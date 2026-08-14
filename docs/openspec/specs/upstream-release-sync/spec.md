@@ -97,3 +97,82 @@
 - **WHEN** 用户明确授权从已通过 full verify 的隔离分支发布本地四段式 tag，并将 CI 镜像更新到指定测试服务器验收
 - **THEN** Release workflow MUST 正常产出精确版本二进制、checksum 与镜像，但 MUST 在同步默认分支 VERSION 前验证 tag commit 是默认分支 HEAD 的祖先；不满足时 MUST 跳过同步，禁止产生 VERSION-only 主线提交
 - **AND** 测试服务器 MUST 只拉取 CI 发布的镜像，更新前 MUST 记录旧 image digest 并备份测试数据库，更新后 MUST 验证 health、revision/migration 与关键页面；不得在服务器构建 Sub2API 镜像或把失败烟测记为通过
+
+### Requirement: 合入最新正式 tag v0.1.175
+维护流程 SHALL 从已包含 `v0.1.173` 的固定本地主线基线合入 upstream 正式 tag `v0.1.175`，并在合并结果中同时保留该 release 的修复与本地定制能力。
+
+#### Scenario: 不为缺失的 v0.1.174 建立虚构阶段
+- **WHEN** upstream 的 `v0.1.173` 后下一个正式 release tag 是 `v0.1.175`，且不存在正式 `v0.1.174` tag
+- **THEN** 维护流程 MUST 从固定 execution base 和干净 index/worktree 建立第一父精确匹配该 base、第二父精确匹配 `v0.1.175` peeled SHA 的 `--no-ff` merge 节点，不得建立 `v0.1.174` 阶段，也不得合入 `v0.1.175` 后的 `upstream/main`
+
+#### Scenario: 确定性基线门禁缺陷先独立修复
+- **WHEN** 固定 source base 的 merge 前门禁因已在更早本地基线复现的确定性 lint 缺陷失败，且用户批准先修复再换 execution base
+- **THEN** 维护流程 MUST 仅以独立 baseline-fix commit 修复已确认的未检查 `Close` 返回值和死赋值，重跑完整 merge 前门禁并将该提交固定为 execution base；该提交不得混入 merge commit 或任一能力簇兼容提交
+
+#### Scenario: Codex 指纹与本地身份语义共存
+- **WHEN** `v0.1.175` 的 Codex OAuth 设备指纹收敛、User-Agent 校验和账号调度阈值进入本地 OpenAI 调用链
+- **THEN** 合并结果 MUST 保持各 HTTP、透传、WebSocket、探针和模型列表入口的身份一致性，并保留本地 sticky/failover、请求体重放与释放、最终账号及动态 settings 语义
+
+#### Scenario: Codex 指纹缺失配置默认 session
+- **WHEN** 既有或新建 OpenAI OAuth 账号未配置 `codex_fingerprint_mode`，或该值为空或无效
+- **THEN** 系统 MUST 按 `session` 模式收敛 installation/session 标识并按账号 ID 与客户端原始 session 确定性派生 thread；管理员显式配置 `off` 时 MUST 原样透传客户端指纹
+
+#### Scenario: Response-model billing 与本地单次计费共存
+- **WHEN** `v0.1.175` 按安全的上游响应模型参与计费，并处理 nested usage、service-tier price、缺失 usage 或流式失败
+- **THEN** 合并结果 MUST 区分请求模型、实际 outbound 模型和可信上游响应模型，保持本地 usage persistence、倍率、失败落库和每个请求最多一次计费的契约
+
+#### Scenario: OpenAI 错误与审计修复不绕过本地保护
+- **WHEN** `v0.1.175` 的确定性 400、HTML 403、OAuth image stream、空 completed stream、TTFT、WebSocket audit、cyber policy scope 或 risk-control 行为进入网关调用链
+- **THEN** 合并结果 MUST 保持正确的可重试边界、账号处罚边界、统一 security/prompt audit、请求体生命周期和 client-facing 错误契约，且同一请求不得重复执行 legacy 审核或重复记录 turn audit
+
+#### Scenario: Capacity、pool auth 与调度阈值保持有界
+- **WHEN** 账号 capacity backoff、pool auth retry、模型级 runtime block 或调度阈值缓存影响候选选择
+- **THEN** capacity shed 和账号允许状态码内的 pool retry MUST 在同一账号、同一请求中共享 `pool_mode_retry_count` 预算，该值默认 3 且限制为 0 至 10，`0` 表示不重试；初始请求不计入预算，每个 `RetryableOnSameAccount` 错误消耗一次共享预算，请求级 capacity shed 从 500ms 指数退避且单次不超过 8s，普通 pool retry 固定等待 500ms，预算耗尽后才临时排除并切换账号，且不得据此处罚账号；模型级阻断不得扩大到其它模型，阈值清空或运行时更新 MUST 立即影响后续候选且不得绕过 sticky、fallback、DB recheck 或 profit gate
+
+#### Scenario: 备份分卷与现有恢复契约共存
+- **WHEN** `v0.1.175` 引入大文件备份分卷上传、恢复和 S3 part 存储
+- **THEN** 合并结果 MUST 保持现有备份格式和管理端操作兼容，分卷失败不得产生可误认为完整备份的数据，恢复过程必须校验缺失或损坏 part 并返回明确失败
+
+#### Scenario: API key quota 与 expiry 输入校验
+- **WHEN** 用户通过通用 API key 创建或更新入口提交 quota、5h/1d/7d rate limit 或创建时的 expiry days
+- **THEN** quota 和 rate limit MUST 是有限非负数且 `0` 表示 unlimited，创建 expiry days MUST 大于 0；本 change 不增加 upstream 契约之外的应用层最大值，底层无法表示的值 MUST 使整个创建或更新失败且不得持久化部分更新；负数、NaN、正负无穷或非正 expiry days MUST 在 handler 与 service 信任边界被拒绝
+
+#### Scenario: Subscription quota cycle reset 不发生回归
+- **WHEN** `v0.1.175` 的网关、usage 或计费改动进入 fork，而该 release 区间没有直接修改 subscription schema 或窗口实现
+- **THEN** 既有实际操作时刻锚点、24 小时推进、receipt、outbox 和 cache invalidation 行为 MUST 保持不变，并由能力矩阵与现有回归测试记录为保护项
+
+#### Scenario: 前端运维增强保留本地定制
+- **WHEN** `v0.1.175` 增加账号调度阈值、usage request ID、备份和运营监控展示
+- **THEN** 管理端 MUST 提供对应字段与状态，同时保持本地菜单、权限、渠道、设置和移动端布局定制，不得向普通用户暴露管理员专属指标
+
+#### Scenario: 最终版本和验证闭合
+- **WHEN** `v0.1.175` merge、必要兼容修复和能力级审查全部完成
+- **THEN** 维护流程 MUST 将 `VERSION` 更新为 `0.1.175.1`，确认 `v0.1.175` 是结果 HEAD 的祖先、merge 第一父匹配固定 execution base、第二父匹配固定 peeled SHA，并确认每个产生代码修复的能力簇有独立兼容提交且不存在跨簇 omnibus commit；未运行的 Docker-backed integration MUST 明确记录为残余风险
+
+### Requirement: 追加合入正式 tag v0.1.176
+维护流程 SHALL 在 `v0.1.175` 验证闭合后追加合入 upstream 正式 tag `v0.1.176`（23 commits、101 files），并在合并结果中同时保留该 release 的修复与本地定制能力。
+
+#### Scenario: v0.1.176 链式合入不破坏既有 merge 节点
+- **WHEN** upstream 发布 `v0.1.176`，且 `v0.1.175` 是其严格祖先
+- **THEN** 维护流程 MUST 在 `v0.1.175` merge 节点基础上建立 `--no-ff` merge，第一父精确匹配合入前 feature HEAD、第二父精确匹配 `v0.1.176` peeled SHA `e803e3851c0a7e222cfadeafad7b8636ab959d11`，不得改写或压缩既有 merge 节点，也不得合入 `v0.1.176` 之后的 `upstream/main`
+
+#### Scenario: Grok JWT tier 与定价体系保留本地语义
+- **WHEN** `v0.1.176` 的 Grok JWT tier 识别、grok-4.6 目录与官方定价、快照徽章、分组逐模型定价、长上下文阶梯开关和容量抖动只封单模型进入本地 Grok 调用链
+- **THEN** 合并结果 MUST 保持本地 Grok 平台账号、订阅档位、价卡回退和渠道定制定价语义，未登记模型回退与阶梯计费不得绕过本地单次计费契约
+
+#### Scenario: 渠道缓存失效与定价冲突对齐
+- **WHEN** `v0.1.176` 的渠道缓存失效（分组平台变更）和定价冲突检测对齐定价缓存 key 进入渠道管理
+- **THEN** 合并结果 MUST 保持本地渠道管理前端定制与管理员权限边界，缓存失效不得产生跨分组串扰
+
+#### Scenario: 定时备份 leader 锁与本地分卷共存
+- **WHEN** `v0.1.176` 为定时备份增加 best-effort 单实例 leader 锁（Redis SET NX 优先，Redis 异常时回退 PostgreSQL advisory lock），避免多实例重复备份
+- **THEN** 合并结果 MUST 与本地大文件备份分卷、S3 part 上传/恢复契约共存，未获锁时在建记录和上传前退出，锁失败或超时不得产生部分持久化或可误认为完整备份的数据；双锁域非对称故障下的 split-brain 为忠实保留上游 best-effort 语义的已知残余风险，MUST 在验证报告记录
+
+#### Scenario: x_search 与 Responses 探测不破坏本地网关契约
+- **WHEN** `v0.1.176` 的 Chat→Responses 往返保留 x_search、新增独立 /x_search、Realtime 仅在观察到音频后计费、探测判据不成立（`status=failed` 或 `incomplete/reason=max_output_tokens`）时保持 unknown 不落标「不支持 Responses」进入本地 OpenAI 网关
+- **THEN** 合并结果 MUST 保持本地错误改写、审计、请求体重放与释放和每请求最多一次计费契约；探测语义 MUST 忠实保留上游 `responsesProbeVerdictIsConclusive` 边界（其余 2xx 仍按 output 有无 function_call 下结论，completed 只回 reasoning 的上游仍落标不支持）
+
+#### Scenario: v0.1.176 最终版本和验证闭合
+- **WHEN** `v0.1.176` merge、必要兼容修复和能力级审查全部完成
+- **THEN** 维护流程 MUST 将 `VERSION` 更新为 `0.1.176.1`，确认 `v0.1.176` 是结果 HEAD 的祖先、merge 第一父匹配合入前 feature HEAD、第二父匹配固定 peeled SHA，每个产生代码修复的能力簇有独立兼容提交，未运行的 Docker-backed integration MUST 明确记录为残余风险
+

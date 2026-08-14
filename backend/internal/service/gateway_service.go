@@ -1353,7 +1353,7 @@ func (s *GatewayService) getOAuthToken(ctx context.Context, account *Account) (s
 // It aggregates model_mapping keys from all schedulable accounts in the group
 
 // DoGrokNativeResponsesJSON POSTs a non-streaming Responses body to the account's
-// Grok upstream and returns the raw JSON body plus the model sent upstream. Used by /v1/web_search.
+// Grok upstream and returns the raw JSON body plus the model sent upstream. Used by /v1/web_search and /x_search.
 // Gin-free: UA is always the pinned Grok CLI identity (resolveGrokUpstreamUserAgent ignores inbound).
 func (s *GatewayService) DoGrokNativeResponsesJSON(ctx context.Context, account *Account, body []byte) ([]byte, string, error) {
 	if s == nil || s.httpUpstream == nil {

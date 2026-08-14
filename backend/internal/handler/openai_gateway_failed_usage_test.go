@@ -548,11 +548,11 @@ func TestOpenAIGatewayHandler_ImagesForwardFailedUsageLogCreated(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusBadGateway, rec.Code)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.NotContains(t, rec.Body.String(), "event:", "non-stream OAuth images 4xx response must not append SSE after JSON fallback")
 	var clientBody map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &clientBody), "client response must remain a single JSON object")
-	require.Equal(t, "upstream_error", gjson.Get(rec.Body.String(), "error.type").String())
+	require.Equal(t, "invalid_request_error", gjson.Get(rec.Body.String(), "error.type").String())
 	log := waitForOpenAIFailedUsageLog(t, usageRepo)
 	require.NotNil(t, log, "failed usage log should be created for non-failover image errors")
 	require.NotNil(t, log.DurationMs)
@@ -608,7 +608,10 @@ func TestOpenAIGatewayHandler_ImagesEditMultipartForwardFailedUsageLogUsesMetada
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	router.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusBadGateway, rec.Code)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	var clientBody map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &clientBody), "client response must remain a single JSON object")
+	require.Equal(t, "invalid_request_error", gjson.Get(rec.Body.String(), "error.type").String())
 	log := waitForOpenAIFailedUsageLog(t, usageRepo)
 	require.NotNil(t, log, "failed usage log should be created for multipart edit errors")
 	require.NotNil(t, log.DetailSnapshot)
@@ -1173,7 +1176,7 @@ func TestOpenAIGatewayHandler_UpstreamErrorStillCreatesUsageLog(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusBadGateway, rec.Code)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.NotNil(t, usageRepo.lastLog)
 	require.Equal(t, 0, usageRepo.lastLog.InputTokens)
 	require.Equal(t, 0, usageRepo.lastLog.OutputTokens)

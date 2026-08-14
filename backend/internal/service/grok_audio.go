@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	coderws "github.com/coder/websocket"
@@ -170,20 +171,20 @@ func (s *OpenAIGatewayService) ForwardGrokVoice(ctx context.Context, c *gin.Cont
 // ProxyGrokRealtime relays JSON Realtime events to xAI's native Voice WS.
 // Audio is carried as base64 inside JSON events, so preserving the JSON bytes
 // is sufficient and avoids translating protocol event types.
-func (s *OpenAIGatewayService) ProxyGrokRealtime(ctx context.Context, c *gin.Context, client *coderws.Conn, account *Account, token, model string, eventGuard func(context.Context, []byte) error) (string, error) {
+func (s *OpenAIGatewayService) ProxyGrokRealtime(ctx context.Context, c *gin.Context, client *coderws.Conn, account *Account, token, model string, eventGuard func(context.Context, []byte) error) (string, bool, error) {
 	if s == nil || client == nil || account == nil {
-		return "", fmt.Errorf("realtime service, client, and account are required")
+		return "", false, fmt.Errorf("realtime service, client, and account are required")
 	}
 	if account.Platform != PlatformGrok {
-		return "", fmt.Errorf("account platform %s is not supported for grok realtime", account.Platform)
+		return "", false, fmt.Errorf("account platform %s is not supported for grok realtime", account.Platform)
 	}
 	base, err := buildGrokVoiceURL(account, s.cfg, "realtime")
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	u, err := url.Parse(base)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	u.Scheme = "wss"
 	model = firstNonEmpty(model, "grok-voice-latest")
@@ -207,7 +208,7 @@ func (s *OpenAIGatewayService) ProxyGrokRealtime(ctx context.Context, c *gin.Con
 	}
 	upstream, _, _, err := dialer.Dial(ctx, u.String(), headers, proxyURL)
 	if err != nil {
-		return model, err
+		return model, false, err
 	}
 	defer func() { _ = upstream.Close() }()
 
@@ -219,6 +220,7 @@ func (s *OpenAIGatewayService) ProxyGrokRealtime(ctx context.Context, c *gin.Con
 	}
 	exits := make(chan relayExit, 2)
 	var pumps sync.WaitGroup
+	var audioObserved atomic.Bool
 
 	// Upstream → client
 	pumps.Add(1)
@@ -229,6 +231,9 @@ func (s *OpenAIGatewayService) ProxyGrokRealtime(ctx context.Context, c *gin.Con
 			if readErr != nil {
 				exits <- relayExit{err: readErr}
 				return
+			}
+			if grokRealtimeEventHasAudio(msg) {
+				audioObserved.Store(true)
 			}
 			if writeErr := client.Write(relayCtx, coderws.MessageText, msg); writeErr != nil {
 				exits <- relayExit{err: writeErr}
@@ -249,6 +254,9 @@ func (s *OpenAIGatewayService) ProxyGrokRealtime(ctx context.Context, c *gin.Con
 			}
 			if kind != coderws.MessageText && kind != coderws.MessageBinary {
 				continue
+			}
+			if grokRealtimeEventHasAudio(msg) {
+				audioObserved.Store(true)
 			}
 			var raw json.RawMessage
 			if unmarshalErr := json.Unmarshal(msg, &raw); unmarshalErr != nil {
@@ -275,12 +283,29 @@ func (s *OpenAIGatewayService) ProxyGrokRealtime(ctx context.Context, c *gin.Con
 	second := <-exits
 	pumps.Wait()
 	if first.guard {
-		return model, first.err
+		return model, audioObserved.Load(), first.err
 	}
 	if second.guard {
-		return model, second.err
+		return model, audioObserved.Load(), second.err
 	}
-	return model, first.err
+	return model, audioObserved.Load(), first.err
+}
+
+func grokRealtimeEventHasAudio(msg []byte) bool {
+	if !gjson.ValidBytes(msg) {
+		return false
+	}
+	eventType := strings.ToLower(strings.TrimSpace(gjson.GetBytes(msg, "type").String()))
+	if !strings.Contains(eventType, "audio") || strings.Contains(eventType, "transcript") {
+		return false
+	}
+	for _, path := range []string{"audio", "delta", "data"} {
+		value := gjson.GetBytes(msg, path)
+		if value.Type == gjson.String && strings.TrimSpace(value.String()) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // estimateGrokVoiceAudioUsage derives billing units from the request/response.

@@ -375,6 +375,13 @@ func (s *OpenAIGatewayService) forwardAsAnthropicHandle(
 				}
 			}
 		}
+		if account.Type == AccountTypeOAuth && account.Platform != PlatformGrok {
+			fpIDs := resolveOpenAIAttemptFingerprintIDs(c, account, attemptBody)
+			if c != nil {
+				// Final compat body and outbound headers must share this attempt's IDs; off clears stale IDs.
+				c.Set("codex_fingerprint_ids", fpIDs)
+			}
+		}
 
 		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 		var upstreamReq *http.Request
@@ -388,9 +395,9 @@ func (s *OpenAIGatewayService) forwardAsAnthropicHandle(
 			return nil, fmt.Errorf("build upstream request: %w", err)
 		}
 
-		// Override session_id with a deterministic UUID derived from the isolated
-		// session key, ensuring different API keys produce different upstream sessions.
-		if account.Platform != PlatformGrok && promptCacheKey != "" {
+		// OAuth fingerprint IDs take precedence over the legacy isolated session ID;
+		// non-OAuth compatibility accounts retain the pre-existing isolation behavior.
+		if account.Platform != PlatformGrok && account.Type != AccountTypeOAuth && promptCacheKey != "" {
 			isolatedSessionID := generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey))
 			upstreamReq.Header.Set("session_id", isolatedSessionID)
 			if upstreamReq.Header.Get("conversation_id") != "" {
@@ -519,7 +526,7 @@ func (s *OpenAIGatewayService) forwardAsAnthropicHandle(
 		return s.handleAnthropicErrorResponse(resp, c, account, billingModel)
 	}
 	if account.Platform == PlatformGrok && account.Type == AccountTypeOAuth && !account.IsShadow() {
-		s.updateGrokUsageFromResponse(ctx, account, resp.Header, resp.StatusCode)
+		s.updateGrokUsageFromResponse(withGrokTeamRateLimitModel(ctx, upstreamModel), account, resp.Header, resp.StatusCode)
 	}
 
 	if account.Type == AccountTypeOAuth && promptCacheKey != "" {

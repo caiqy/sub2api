@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1417,6 +1418,69 @@ func TestOpenAIGatewayService_APIKeyPassthrough_PoolModeConfigured5xxRetriesSame
 	require.False(t, c.Writer.Written())
 }
 
+func TestOpenAIGatewayService_APIKeyPassthrough_PoolModeAuthErrorsTriggerFailover(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name        string
+		statusCode  int
+		credentials map[string]any
+	}{
+		{
+			name:       "configured_401",
+			statusCode: http.StatusUnauthorized,
+			credentials: map[string]any{
+				"pool_mode_retry_status_codes": []any{float64(http.StatusUnauthorized)},
+			},
+		},
+		{
+			name:        "default_403",
+			statusCode:  http.StatusForbidden,
+			credentials: map[string]any{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+
+			upstreamBody := `{"error":{"message":"upstream credential rejected"}}`
+			svc := &OpenAIGatewayService{
+				cfg:              &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: false}},
+				rateLimitService: NewRateLimitService(transientCooldownAccountRepo{}, nil, &config.Config{}, nil, nil),
+				httpUpstream: &httpUpstreamRecorder{resp: &http.Response{
+					StatusCode: tt.statusCode,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+				}},
+			}
+			credentials := map[string]any{
+				"api_key":   "sk-test",
+				"base_url":  "https://api.example.test",
+				"pool_mode": true,
+			}
+			for key, value := range tt.credentials {
+				credentials[key] = value
+			}
+			account := &Account{
+				ID: 129, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1,
+				Credentials: credentials,
+				Extra:       map[string]any{"openai_passthrough": true}, Status: StatusActive, Schedulable: true,
+			}
+
+			_, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5.2","input":"hello"}`))
+
+			var failoverErr *UpstreamFailoverError
+			require.ErrorAs(t, err, &failoverErr)
+			require.Equal(t, tt.statusCode, failoverErr.StatusCode)
+			require.True(t, failoverErr.RetryableOnSameAccount)
+			require.False(t, c.Writer.Written(), "pool-mode auth failure must fail over before committing a response")
+			require.False(t, IsResponseCommitted(c))
+		})
+	}
+}
+
 func TestOpenAIGatewayService_OpenAIPassthrough_CompactNetworkErrorsTriggerFailover(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -2202,4 +2266,398 @@ func TestOpenAIGatewayService_OAuthPassthrough_AllowTimeoutHeadersWhenConfigured
 	require.NotNil(t, upstream.lastReq)
 	require.Equal(t, "120000", upstream.lastReq.Header.Get("x-stainless-timeout"))
 	require.Empty(t, upstream.lastReq.Header.Get("X-Test"))
+}
+
+// --- review-fix A：OAuth 透传路径在 final account 下用同一组预计算 IDs 收敛头与 body ---
+
+func TestOpenAIGatewayService_OAuthPassthrough_ConvergesCodexFingerprintHeaderAndBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+	c.Request.Header.Set("session-id", "client-sess-1")
+	c.Request.Header.Set("x-codex-installation-id", "client-install-1")
+	c.Request.Header.Set("x-codex-turn-metadata", `{"installation_id":"client-install-1","session_id":"client-sess-1","thread_id":"client-thread-1","turn_id":"client-turn-1"}`)
+
+	inputBody := []byte(`{"model":"gpt-5.2","stream":false,"store":true,"input":[{"type":"text","text":"hi"}],"client_metadata":{"x-codex-installation-id":"client-install-1","session_id":"client-sess-1","thread_id":"client-thread-1","turn_id":"client-turn-1","x-codex-window-id":"client-window-1","x-codex-turn-metadata":"{\"installation_id\":\"client-install-1\",\"session_id\":\"client-sess-1\",\"thread_id\":\"client-thread-1\",\"turn_id\":\"client-turn-1\"}"}}`)
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid"}},
+		Body:       io.NopCloser(strings.NewReader("data: [DONE]\n\n")),
+	}}
+
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: false}},
+		httpUpstream: upstream,
+	}
+
+	account := &Account{
+		ID:             123,
+		Name:           "acc",
+		Platform:       PlatformOpenAI,
+		Type:           AccountTypeOAuth,
+		Concurrency:    1,
+		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
+		Extra:          map[string]any{"openai_passthrough": true, "codex_fingerprint_mode": "session"},
+		Status:         StatusActive,
+		Schedulable:    true,
+		RateMultiplier: f64p(1),
+	}
+
+	_, err := svc.Forward(context.Background(), c, account, inputBody)
+	require.NoError(t, err)
+	require.NotNil(t, upstream.lastReq)
+
+	headerSession := upstream.lastReq.Header.Get("session_id")
+	require.NotEqual(t, "client-sess-1", headerSession, "session 模式必须收敛 session_id")
+	require.NotEqual(t, "client-install-1", upstream.lastReq.Header.Get("x-codex-installation-id"), "session 模式必须收敛 installation_id")
+
+	var outbound map[string]any
+	require.NoError(t, json.Unmarshal(upstream.lastBody, &outbound))
+	cm, ok := outbound["client_metadata"].(map[string]any)
+	require.True(t, ok, "body 应含 client_metadata")
+	require.Equal(t, headerSession, cm["session_id"], "头/体 session_id 必须同源收敛")
+	require.Equal(t, upstream.lastReq.Header.Get("x-codex-window-id"), cm["x-codex-window-id"], "头/体 window_id 必须同源收敛")
+	require.Equal(t, upstream.lastReq.Header.Get("x-codex-installation-id"), cm["x-codex-installation-id"], "头/体 installation_id 必须同源收敛")
+
+	var headerMeta, bodyMeta map[string]any
+	require.NoError(t, json.Unmarshal([]byte(upstream.lastReq.Header.Get("x-codex-turn-metadata")), &headerMeta))
+	bodyMetaRaw, ok := cm["x-codex-turn-metadata"].(string)
+	require.True(t, ok, "body must include x-codex-turn-metadata")
+	require.NoError(t, json.Unmarshal([]byte(bodyMetaRaw), &bodyMeta))
+	require.Equal(t, headerMeta["turn_id"], bodyMeta["turn_id"], "头/体 turn_id 必须同源收敛（同一组预计算 IDs）")
+	require.Equal(t, headerMeta["session_id"], bodyMeta["session_id"])
+}
+
+func TestOpenAIGatewayService_OAuthPassthrough_ReusesFingerprintForSameAccountRetry(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+	c.Request.Header.Set("session-id", "client-sess-1")
+
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: [DONE]\n\n"))},
+		{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: [DONE]\n\n"))},
+		{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: [DONE]\n\n"))},
+		{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: [DONE]\n\n"))},
+	}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	account := &Account{
+		ID: 123, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
+		Extra:       map[string]any{"openai_passthrough": true, "codex_fingerprint_mode": "session"},
+		Status:      StatusActive, Schedulable: true, RateMultiplier: f64p(1),
+	}
+	body := []byte(`{"model":"gpt-5.2","stream":true,"store":true,"input":[{"type":"text","text":"hi"}]}`)
+
+	_, err := svc.Forward(context.Background(), c, account, body)
+	require.NoError(t, err)
+	_, err = svc.Forward(context.Background(), c, account, body)
+	require.NoError(t, err)
+	require.Len(t, upstream.bodies, 2)
+	require.JSONEq(t, string(upstream.bodies[0]), string(upstream.bodies[1]))
+
+	secondAccount := *account
+	secondAccount.ID = 124
+	secondAccount.Credentials = map[string]any{"access_token": "oauth-token-second", "chatgpt_account_id": "chatgpt-acc-second"}
+	_, err = svc.Forward(context.Background(), c, &secondAccount, body)
+	require.NoError(t, err)
+	require.Len(t, upstream.bodies, 3)
+	var firstBody, secondAccountBody map[string]any
+	require.NoError(t, json.Unmarshal(upstream.bodies[0], &firstBody))
+	require.NoError(t, json.Unmarshal(upstream.bodies[2], &secondAccountBody))
+	fields := []string{
+		"x-codex-installation-id",
+		"session_id",
+		"thread_id",
+		"x-codex-window-id",
+	}
+	different := false
+	for _, field := range fields {
+		firstValue := gjson.GetBytes(upstream.bodies[0], "client_metadata."+field)
+		secondValue := gjson.GetBytes(upstream.bodies[2], "client_metadata."+field)
+		require.True(t, firstValue.Exists(), "first fingerprint must include %s", field)
+		require.True(t, secondValue.Exists(), "second fingerprint must include %s", field)
+		require.NotEmpty(t, firstValue.String(), "first fingerprint %s must be non-empty", field)
+		require.NotEmpty(t, secondValue.String(), "second fingerprint %s must be non-empty", field)
+		different = different || firstValue.String() != secondValue.String()
+	}
+	require.True(t, different, "different accounts must change an account-derived fingerprint field")
+	delete(firstBody, "client_metadata")
+	delete(secondAccountBody, "client_metadata")
+	require.Equal(t, firstBody, secondAccountBody)
+
+	_, err = svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5.2","stream":true,"store":true,"input":[{"type":"text","text":"next"}]}`))
+	require.NoError(t, err)
+	require.Len(t, upstream.bodies, 4)
+	require.NotEqual(t,
+		gjson.GetBytes(upstream.bodies[1], "client_metadata.turn_id").String(),
+		gjson.GetBytes(upstream.bodies[3], "client_metadata.turn_id").String(),
+	)
+}
+
+// --- review-fix C：显式 off 的 OAuth 透传路径原样透传客户端指纹，且仍保护非指纹凭证 ---
+
+func TestOpenAIGatewayService_OAuthPassthrough_OffPreservesClientFingerprint(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+	c.Request.Header.Set("session_id", "client-sess-1")
+	c.Request.Header.Set("session-id", "client-sess-1")
+	c.Request.Header.Set("conversation_id", "client-conv-1")
+	c.Request.Header.Set("x-codex-installation-id", "client-install-1")
+	c.Request.Header.Set("x-codex-window-id", "client-window-1")
+	c.Request.Header.Set("x-codex-turn-metadata", `{"installation_id":"client-install-1","session_id":"client-sess-1","turn_id":"client-turn-1"}`)
+	c.Request.Header.Set("Authorization", "Bearer inbound-must-not-forward")
+
+	inputBody := []byte(`{"model":"gpt-5.2","stream":false,"store":true,"input":[{"type":"text","text":"hi"}],"client_metadata":{"x-codex-installation-id":"client-install-1","session_id":"client-sess-1","turn_id":"client-turn-1","x-codex-window-id":"client-window-1"}}`)
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid"}},
+		Body:       io.NopCloser(strings.NewReader("data: [DONE]\n\n")),
+	}}
+
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: false}},
+		httpUpstream: upstream,
+	}
+
+	account := &Account{
+		ID:             123,
+		Name:           "acc",
+		Platform:       PlatformOpenAI,
+		Type:           AccountTypeOAuth,
+		Concurrency:    1,
+		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
+		Extra:          map[string]any{"openai_passthrough": true, "codex_fingerprint_mode": "off"},
+		Status:         StatusActive,
+		Schedulable:    true,
+		RateMultiplier: f64p(1),
+	}
+
+	_, err := svc.Forward(context.Background(), c, account, inputBody)
+	require.NoError(t, err)
+	require.NotNil(t, upstream.lastReq)
+
+	require.Equal(t, "client-sess-1", upstream.lastReq.Header.Get("session_id"), "off 模式 session_id 必须原样透传（不隔离）")
+	require.Equal(t, "client-sess-1", upstream.lastReq.Header.Get("session-id"), "off 模式 session-id 必须原样透传")
+	require.Equal(t, "client-conv-1", upstream.lastReq.Header.Get("conversation_id"), "off 模式 conversation_id 必须原样透传")
+	require.Equal(t, "client-install-1", upstream.lastReq.Header.Get("x-codex-installation-id"), "off 模式安装标识必须原样透传")
+	require.Equal(t, "client-window-1", upstream.lastReq.Header.Get("x-codex-window-id"), "off 模式 window_id 必须原样透传")
+	require.Equal(t, `{"installation_id":"client-install-1","session_id":"client-sess-1","turn_id":"client-turn-1"}`, upstream.lastReq.Header.Get("x-codex-turn-metadata"), "off 模式 turn metadata 必须原样透传")
+
+	var outbound map[string]any
+	require.NoError(t, json.Unmarshal(upstream.lastBody, &outbound))
+	cm, ok := outbound["client_metadata"].(map[string]any)
+	require.True(t, ok, "body 应含 client_metadata")
+	require.Equal(t, "client-sess-1", cm["session_id"], "off 模式 body session_id 必须原样透传")
+	require.Equal(t, "client-install-1", cm["x-codex-installation-id"], "off 模式 body 安装标识必须原样透传")
+	require.Equal(t, "client-turn-1", cm["turn_id"], "off 模式 body turn_id 必须原样透传")
+
+	require.Equal(t, "Bearer oauth-token", upstream.lastReq.Header.Get("Authorization"), "非指纹凭证仍须被替换保护，客户端 Authorization 不得透传")
+}
+
+func TestOpenAIGatewayService_OAuthPassthrough_OffPreservesFingerprintAfterAccountRules(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+	c.Request.Header.Set("session_id", "client-session")
+	c.Request.Header.Set("session-id", "client-session")
+	c.Request.Header.Set("conversation_id", "client-conversation")
+	c.Request.Header.Set("thread-id", "client-thread")
+	c.Request.Header.Set("x-codex-installation-id", "client-installation")
+	c.Request.Header.Set("x-codex-window-id", "client-window")
+	c.Request.Header.Set("x-codex-turn-metadata", `{"installation_id":"client-installation","session_id":"client-session","thread_id":"client-thread","turn_id":"client-turn"}`)
+	c.Request.Header.Set("Authorization", "Bearer inbound-must-not-forward")
+
+	inputBody := []byte(`{"model":"gpt-5.2","stream":false,"store":true,"input":[{"type":"text","text":"hi"}],"client_metadata":{"x-codex-installation-id":"client-installation","session_id":"client-session","thread_id":"client-thread","turn_id":"client-turn","x-codex-window-id":"client-window","x-codex-turn-metadata":"{\"installation_id\":\"client-installation\",\"session_id\":\"client-session\",\"thread_id\":\"client-thread\",\"turn_id\":\"client-turn\"}"}}`)
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid"}},
+		Body:       io.NopCloser(strings.NewReader("data: [DONE]\n\n")),
+	}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	account := &Account{
+		ID: 127, Name: "off-account-rules", Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Concurrency: 1, Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
+		Status: StatusActive, Schedulable: true, RateMultiplier: f64p(1),
+		Extra: map[string]any{
+			"openai_passthrough": true, "codex_fingerprint_mode": "off", "passthrough_fields_enabled": true,
+			"passthrough_field_rules": []any{
+				map[string]any{"target": "body", "key": "client_metadata.session_id", "mode": "inject", "value": "injected-session"},
+				map[string]any{"target": "body", "key": "client_metadata.thread_id", "mode": "delete"},
+				map[string]any{"target": "body", "key": "client_metadata.turn_id", "mode": "forward"},
+				map[string]any{"target": "body", "key": "client_metadata.passthrough_note", "mode": "inject", "value": "kept"},
+				map[string]any{"target": "header", "key": "x-codex-installation-id", "mode": "inject", "value": "injected-installation"},
+				map[string]any{"target": "header", "key": "thread-id", "mode": "delete"},
+				map[string]any{"target": "header", "key": "conversation_id", "mode": "inject", "value": "injected-conversation"},
+				map[string]any{"target": "header", "key": "x-codex-window-id", "mode": "forward"},
+				map[string]any{"target": "header", "key": "x-passthrough-note", "mode": "inject", "value": "kept"},
+			},
+		},
+	}
+
+	_, err := svc.Forward(context.Background(), c, account, inputBody)
+	require.NoError(t, err)
+	require.NotNil(t, upstream.lastReq)
+
+	require.Equal(t, "client-session", upstream.lastReq.Header.Get("session_id"))
+	require.Equal(t, "client-session", upstream.lastReq.Header.Get("session-id"))
+	require.Equal(t, "client-conversation", upstream.lastReq.Header.Get("conversation_id"))
+	require.Equal(t, "client-thread", upstream.lastReq.Header.Get("thread-id"))
+	require.Equal(t, "client-installation", upstream.lastReq.Header.Get("x-codex-installation-id"))
+	require.Equal(t, "client-window", upstream.lastReq.Header.Get("x-codex-window-id"))
+	require.Equal(t, `{"installation_id":"client-installation","session_id":"client-session","thread_id":"client-thread","turn_id":"client-turn"}`, upstream.lastReq.Header.Get("x-codex-turn-metadata"))
+	require.Equal(t, "kept", upstream.lastReq.Header.Get("x-passthrough-note"), "非指纹 header 规则必须保持有效")
+	require.Equal(t, "Bearer oauth-token", upstream.lastReq.Header.Get("Authorization"))
+
+	var outbound map[string]any
+	require.NoError(t, json.Unmarshal(upstream.lastBody, &outbound))
+	metadata, ok := outbound["client_metadata"].(map[string]any)
+	require.True(t, ok, "body must include client_metadata")
+	require.Equal(t, "client-installation", metadata["x-codex-installation-id"])
+	require.Equal(t, "client-session", metadata["session_id"])
+	require.Equal(t, "client-thread", metadata["thread_id"])
+	require.Equal(t, "client-turn", metadata["turn_id"])
+	require.Equal(t, "client-window", metadata["x-codex-window-id"])
+	require.Equal(t, `{"installation_id":"client-installation","session_id":"client-session","thread_id":"client-thread","turn_id":"client-turn"}`, metadata["x-codex-turn-metadata"])
+	require.Equal(t, "kept", metadata["passthrough_note"], "非指纹 body 规则必须保持有效")
+}
+
+func TestOpenAIGatewayService_OAuthPassthrough_EnforcesFingerprintAfterAccountBodyRules(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+	c.Request.Header.Set("session-id", "client-session")
+	c.Request.Header.Set("x-codex-installation-id", "client-installation")
+	c.Request.Header.Set("x-codex-turn-metadata", `{"installation_id":"client-installation","session_id":"client-session","thread_id":"client-thread","turn_id":"client-turn"}`)
+
+	inputBody := []byte(`{"model":"gpt-5.2","stream":false,"store":true,"input":[{"type":"text","text":"hi"}],"client_metadata":{"x-codex-installation-id":"client-installation","session_id":"client-session","thread_id":"client-thread","turn_id":"client-turn","x-codex-window-id":"client-window"}}`)
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid"}},
+		Body:       io.NopCloser(strings.NewReader("data: [DONE]\n\n")),
+	}}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: false}},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:             126,
+		Name:           "acc",
+		Platform:       PlatformOpenAI,
+		Type:           AccountTypeOAuth,
+		Concurrency:    1,
+		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
+		Status:         StatusActive,
+		Schedulable:    true,
+		RateMultiplier: f64p(1),
+		Extra: map[string]any{
+			"openai_passthrough":         true,
+			"codex_fingerprint_mode":     "session",
+			"passthrough_fields_enabled": true,
+			"passthrough_field_rules": []any{
+				map[string]any{"target": "body", "key": "client_metadata.session_id", "mode": "inject", "value": "injected-session"},
+				map[string]any{"target": "body", "key": "client_metadata.thread_id", "mode": "forward"},
+				map[string]any{"target": "body", "key": "client_metadata.thread_id", "mode": "delete"},
+			},
+		},
+	}
+
+	_, err := svc.Forward(context.Background(), c, account, inputBody)
+	require.NoError(t, err)
+	require.NotNil(t, upstream.lastReq)
+
+	var outbound map[string]any
+	require.NoError(t, json.Unmarshal(upstream.lastBody, &outbound))
+	metadata, ok := outbound["client_metadata"].(map[string]any)
+	require.True(t, ok, "body must include client_metadata")
+	require.Equal(t, upstream.lastReq.Header.Get("session_id"), metadata["session_id"])
+	require.Equal(t, upstream.lastReq.Header.Get("x-codex-installation-id"), metadata["x-codex-installation-id"])
+	require.Equal(t, upstream.lastReq.Header.Get("thread-id"), metadata["thread_id"])
+	require.NotEqual(t, "injected-session", metadata["session_id"], "account inject rule must not win over final fingerprint enforcement")
+	require.NotEmpty(t, metadata["thread_id"], "account delete rule must not remove final fingerprint fields")
+}
+
+// --- review-fix D：同一 gin.Context failover 重入时，session/full → off 的残留 IDs 必须被清除 ---
+
+func TestOpenAIGatewayService_ForwardReEntry_OffAccountClearsStaleFingerprintIDs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+	c.Request.Header.Set("session_id", "client-sess-1")
+	c.Request.Header.Set("originator", "codex-tui")
+
+	inputBody := []byte(`{"model":"gpt-5.2","stream":true,"store":false,"input":[{"type":"text","text":"hi"}]}`)
+
+	upstream := &httpUpstreamRecorder{
+		responses: []*http.Response{
+			{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid"}},
+				Body:       io.NopCloser(strings.NewReader("data: [DONE]\n\n")),
+			},
+			{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid"}},
+				Body:       io.NopCloser(strings.NewReader("data: [DONE]\n\n")),
+			},
+		},
+	}
+
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: false}},
+		httpUpstream: upstream,
+	}
+
+	sessionAccount := &Account{
+		ID:             123,
+		Name:           "acc-session",
+		Platform:       PlatformOpenAI,
+		Type:           AccountTypeOAuth,
+		Concurrency:    1,
+		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
+		Extra:          map[string]any{"codex_fingerprint_mode": "session"},
+		Status:         StatusActive,
+		Schedulable:    true,
+		RateMultiplier: f64p(1),
+	}
+	offAccount := &Account{
+		ID:             124,
+		Name:           "acc-off",
+		Platform:       PlatformOpenAI,
+		Type:           AccountTypeOAuth,
+		Concurrency:    1,
+		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
+		Extra:          map[string]any{"codex_fingerprint_mode": "off"},
+		Status:         StatusActive,
+		Schedulable:    true,
+		RateMultiplier: f64p(1),
+	}
+
+	// attempt 1：session 模式账号，收敛 IDs 写入 gin.Context。
+	_, err := svc.Forward(context.Background(), c, sessionAccount, inputBody)
+	require.NoError(t, err)
+	require.NotNil(t, upstream.lastReq)
+	require.NotEqual(t, "client-sess-1", upstream.lastReq.Header.Get("session_id"), "attempt 1 应收敛")
+	require.NotEmpty(t, upstream.lastReq.Header.Get("x-codex-window-id"))
+
+	// attempt 2：failover 到 off 模式账号（同一 gin.Context），不得残留 attempt 1 的收敛。
+	_, err = svc.Forward(context.Background(), c, offAccount, inputBody)
+	require.NoError(t, err)
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, "client-sess-1", upstream.lastReq.Header.Get("session_id"), "off 模式必须原样透传，不得使用上一账号的收敛 session")
+	require.Empty(t, upstream.lastReq.Header.Get("x-codex-window-id"), "off 模式不得残留上一账号的收敛 window_id")
+	require.Empty(t, upstream.lastReq.Header.Get("thread-id"), "off 模式不得残留上一账号的收敛 thread_id")
 }

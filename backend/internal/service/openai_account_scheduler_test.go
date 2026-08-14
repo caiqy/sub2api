@@ -155,6 +155,35 @@ type schedulerTestOpenAIAccountRepo struct {
 	setErrors map[int64]string
 }
 
+type thresholdReleaseSchedulerRepo struct {
+	schedulerTestOpenAIAccountRepo
+	paused []Account
+}
+
+func (r *thresholdReleaseSchedulerRepo) ListTempUnschedulableByPlatform(_ context.Context, platform string, now time.Time) ([]Account, error) {
+	var out []Account
+	for _, account := range r.paused {
+		if account.Platform == platform && account.TempUnschedulableUntil != nil && account.TempUnschedulableUntil.After(now) {
+			out = append(out, account)
+		}
+	}
+	return out, nil
+}
+
+func (r *thresholdReleaseSchedulerRepo) ClearTempUnschedulableIfReason(_ context.Context, id int64, reason string) (bool, error) {
+	if !IsAccountSchedulingThresholdReason(reason) {
+		return false, nil
+	}
+	for i := range r.paused {
+		if r.paused[i].ID == id && IsAccountSchedulingThresholdReason(r.paused[i].TempUnschedulableReason) {
+			r.paused[i].TempUnschedulableUntil = nil
+			r.paused[i].TempUnschedulableReason = ""
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (r schedulerTestOpenAIAccountRepo) GetByID(ctx context.Context, id int64) (*Account, error) {
 	for i := range r.accounts {
 		if r.accounts[i].ID == id {
@@ -2205,7 +2234,7 @@ func TestOpenAIGatewayService_GetOpenAIAccountScheduler_RuntimeRefreshRecreatesA
 	scheduler := svc.getOpenAIAccountSchedulerWithContext(ctx)
 	require.IsType(t, &defaultOpenAIAccountScheduler{}, scheduler)
 
-	settingSvc.refreshCachedSettings(&SystemSettings{
+	settingSvc.refreshCachedSettings(context.Background(), &SystemSettings{
 		OpenAIAdvancedSchedulerEnabled:                       true,
 		GatewayStickyOpenAIEnabled:                           true,
 		GatewayStickyGeminiEnabled:                           true,
@@ -2224,7 +2253,7 @@ func TestOpenAIGatewayService_GetOpenAIAccountScheduler_RuntimeRefreshRecreatesA
 	scheduler = svc.getOpenAIAccountSchedulerWithContext(ctx)
 	require.IsType(t, &layeredOpenAIAccountScheduler{}, scheduler)
 
-	settingSvc.refreshCachedSettings(&SystemSettings{
+	settingSvc.refreshCachedSettings(context.Background(), &SystemSettings{
 		OpenAIAdvancedSchedulerEnabled: false,
 	})
 
@@ -2323,7 +2352,7 @@ func TestOpenAIGatewayService_SettingsRefreshRecreatesLayeredSchedulerOnProbeInt
 	require.True(t, ok)
 	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
 
-	settingSvc.refreshCachedSettings(&SystemSettings{
+	settingSvc.refreshCachedSettings(context.Background(), &SystemSettings{
 		OpenAIAdvancedSchedulerEnabled:                       true,
 		GatewayStickyOpenAIEnabled:                           true,
 		GatewayStickyGeminiEnabled:                           true,
@@ -2526,6 +2555,42 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyRuntimeBlo
 			}
 		})
 	}
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_ThresholdReleaseRecoversNextCandidate(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	ctx := context.Background()
+	until := time.Now().Add(time.Hour)
+	thresholdReason := BuildDetailedAccountSchedulingThresholdReason(AccountSchedulingThresholdReasonInput{
+		Platform: PlatformOpenAI, Window: "7d", ThresholdPercent: 90, UsedPercent: 95, Until: until, Now: time.Now(),
+	})
+	primary := Account{ID: 31021, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0}
+	backup := Account{ID: 31022, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 5}
+	repo := &thresholdReleaseSchedulerRepo{
+		schedulerTestOpenAIAccountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{primary, backup}},
+		paused:                         []Account{{ID: primary.ID, Platform: PlatformOpenAI, TempUnschedulableUntil: &until, TempUnschedulableReason: thresholdReason}},
+	}
+	gateway := &OpenAIGatewayService{
+		accountRepo:        repo,
+		cfg:                &config.Config{},
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+	}
+	gateway.BlockAccountScheduling(&primary, until, AccountSchedulingThresholdReasonSource)
+	before, _, err := gateway.SelectAccountWithScheduler(ctx, nil, "", "", "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
+	require.NoError(t, err)
+	require.Equal(t, backup.ID, before.Account.ID)
+	if before.ReleaseFunc != nil {
+		before.ReleaseFunc()
+	}
+
+	rl := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	rl.SetAccountRuntimeBlocker(gateway)
+	rl.ReleaseAccountSchedulingThresholdPauses(ctx, []string{PlatformOpenAI})
+	after, _, err := gateway.SelectAccountWithScheduler(ctx, nil, "", "", "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
+	require.NoError(t, err)
+	require.Equal(t, primary.ID, after.Account.ID)
 }
 
 func TestLayeredOpenAIAccountSchedulerSessionStickyRuntimeBlockedAccountFallsBackWithoutRebinding(t *testing.T) {

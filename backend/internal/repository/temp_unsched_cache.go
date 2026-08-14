@@ -33,6 +33,14 @@ var tempUnschedSetScript = redis.NewScript(`
 	return 1
 `)
 
+var tempUnschedCompareDeleteScript = redis.NewScript(`
+	local existing = redis.call('GET', KEYS[1])
+	if not existing or existing ~= ARGV[1] then
+		return 0
+	end
+	return redis.call('DEL', KEYS[1])
+`)
+
 type tempUnschedCache struct {
 	rdb *redis.Client
 }
@@ -88,4 +96,17 @@ func (c *tempUnschedCache) GetTempUnsched(ctx context.Context, accountID int64) 
 func (c *tempUnschedCache) DeleteTempUnsched(ctx context.Context, accountID int64) error {
 	key := fmt.Sprintf("%s%d", tempUnschedPrefix, accountID)
 	return c.rdb.Del(ctx, key).Err()
+}
+
+func (c *tempUnschedCache) CompareDeleteTempUnsched(ctx context.Context, accountID int64, expected *service.TempUnschedState) (bool, error) {
+	if expected == nil {
+		return false, nil
+	}
+	expectedJSON, err := json.Marshal(expected)
+	if err != nil {
+		return false, fmt.Errorf("marshal expected state: %w", err)
+	}
+	key := fmt.Sprintf("%s%d", tempUnschedPrefix, accountID)
+	deleted, err := tempUnschedCompareDeleteScript.Run(ctx, c.rdb, []string{key}, string(expectedJSON)).Int()
+	return deleted == 1, err
 }

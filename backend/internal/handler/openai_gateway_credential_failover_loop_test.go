@@ -474,7 +474,8 @@ func TestResponsesFinalHandleReplayAcrossFailover(t *testing.T) {
 	accountIDs, bodies := upstream.snapshot()
 	require.Equal(t, []int64{1, 2}, accountIDs)
 	require.Len(t, bodies, 2)
-	require.JSONEq(t, string(bodies[0]), string(bodies[1]))
+	requireOpenAIRequestBodiesEqualExceptFingerprint(t, bodies[0], bodies[1])
+	requireOpenAIFingerprintsDiffer(t, bodies[0], bodies[1])
 	for _, body := range bodies {
 		require.Equal(t, "routed-model", gjson.GetBytes(body, "model").String())
 		require.Equal(t, "high", gjson.GetBytes(body, "reasoning.effort").String())

@@ -187,6 +187,26 @@ func TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState(t *testing
 		DuplicateOperationID:    "old-operation-must-not-copy",
 		AccountGroups:           []AccountGroup{{AccountID: 13, GroupID: 41, Priority: 37}},
 	}
+	source.LongContextPricingEnabled = true
+	source.ModelPricing = []ChannelModelPricing{{
+		Platform:         PlatformOpenAI,
+		Models:           []string{"gpt-5.4"},
+		InputPrice:       groupDuplicateTestPointer(0.01),
+		OutputPrice:      groupDuplicateTestPointer(0.02),
+		CacheWritePrice:  groupDuplicateTestPointer(0.03),
+		CacheReadPrice:   groupDuplicateTestPointer(0.04),
+		ImageInputPrice:  groupDuplicateTestPointer(0.05),
+		ImageOutputPrice: groupDuplicateTestPointer(0.06),
+		PerRequestPrice:  groupDuplicateTestPointer(0.07),
+		Intervals: []PricingInterval{{
+			MaxTokens:       groupDuplicateTestPointer(128000),
+			InputPrice:      groupDuplicateTestPointer(0.11),
+			OutputPrice:     groupDuplicateTestPointer(0.12),
+			CacheWritePrice: groupDuplicateTestPointer(0.13),
+			CacheReadPrice:  groupDuplicateTestPointer(0.14),
+			PerRequestPrice: groupDuplicateTestPointer(0.15),
+		}},
+	}}
 	repo := newDuplicateGroupRepoStub(source)
 	repo.sourceBindings[source.ID] = []AccountGroup{
 		{AccountID: 13, GroupID: source.ID, Priority: 37},
@@ -206,6 +226,8 @@ func TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState(t *testing
 	require.Equal(t, source.RateMultiplier, duplicate.RateMultiplier)
 	require.Equal(t, source.PeakRateMultiplier, duplicate.PeakRateMultiplier)
 	require.Equal(t, source.DefaultValidityDays, duplicate.DefaultValidityDays)
+	require.True(t, duplicate.LongContextPricingEnabled)
+	require.Equal(t, source.ModelPricing, duplicate.ModelPricing)
 	require.Equal(t, source.ImagePrice4K, duplicate.ImagePrice4K)
 	require.Equal(t, source.VideoModelPrices, duplicate.VideoModelPrices)
 	require.Equal(t, source.WebSearchPricePerCall, duplicate.WebSearchPricePerCall)
@@ -226,6 +248,45 @@ func TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState(t *testing
 	}, repo.createdBindings[duplicate.ID])
 
 	duplicate.ModelRouting["gpt-*"][0] = 999
+	duplicate.ModelPricing[0].Models[0] = "changed"
+	sourcePrices := []*float64{
+		source.ModelPricing[0].InputPrice,
+		source.ModelPricing[0].OutputPrice,
+		source.ModelPricing[0].CacheWritePrice,
+		source.ModelPricing[0].CacheReadPrice,
+		source.ModelPricing[0].ImageInputPrice,
+		source.ModelPricing[0].ImageOutputPrice,
+		source.ModelPricing[0].PerRequestPrice,
+		source.ModelPricing[0].Intervals[0].InputPrice,
+		source.ModelPricing[0].Intervals[0].OutputPrice,
+		source.ModelPricing[0].Intervals[0].CacheWritePrice,
+		source.ModelPricing[0].Intervals[0].CacheReadPrice,
+		source.ModelPricing[0].Intervals[0].PerRequestPrice,
+	}
+	duplicatePrices := []*float64{
+		duplicate.ModelPricing[0].InputPrice,
+		duplicate.ModelPricing[0].OutputPrice,
+		duplicate.ModelPricing[0].CacheWritePrice,
+		duplicate.ModelPricing[0].CacheReadPrice,
+		duplicate.ModelPricing[0].ImageInputPrice,
+		duplicate.ModelPricing[0].ImageOutputPrice,
+		duplicate.ModelPricing[0].PerRequestPrice,
+		duplicate.ModelPricing[0].Intervals[0].InputPrice,
+		duplicate.ModelPricing[0].Intervals[0].OutputPrice,
+		duplicate.ModelPricing[0].Intervals[0].CacheWritePrice,
+		duplicate.ModelPricing[0].Intervals[0].CacheReadPrice,
+		duplicate.ModelPricing[0].Intervals[0].PerRequestPrice,
+	}
+	for i, sourcePrice := range sourcePrices {
+		require.NotSame(t, sourcePrice, duplicatePrices[i])
+		original := *sourcePrice
+		*duplicatePrices[i] = original + 1
+		require.Equal(t, original, *sourcePrice)
+	}
+	require.NotSame(t, source.ModelPricing[0].Intervals[0].MaxTokens, duplicate.ModelPricing[0].Intervals[0].MaxTokens)
+	originalMaxTokens := *source.ModelPricing[0].Intervals[0].MaxTokens
+	*duplicate.ModelPricing[0].Intervals[0].MaxTokens = originalMaxTokens + 1
+	require.Equal(t, originalMaxTokens, *source.ModelPricing[0].Intervals[0].MaxTokens)
 	duplicate.VideoModelPrices[VideoPriceFamilyGrokImagineVideo15][VideoBillingResolution720P] = 999
 	duplicate.SupportedModelScopes[0] = "changed"
 	duplicate.MessagesDispatchModelConfig.ExactModelMappings["claude-special"] = "changed"
@@ -233,6 +294,7 @@ func TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState(t *testing
 	duplicate.ReasoningEffortMappings[0].To = "changed"
 	*duplicate.DailyLimitUSD = 999
 	require.Equal(t, int64(13), source.ModelRouting["gpt-*"][0])
+	require.Equal(t, "gpt-5.4", source.ModelPricing[0].Models[0])
 	require.Equal(t, 0.14, source.VideoModelPrices[VideoPriceFamilyGrokImagineVideo15][VideoBillingResolution720P])
 	require.Equal(t, "claude", source.SupportedModelScopes[0])
 	require.Equal(t, "gpt-special", source.MessagesDispatchModelConfig.ExactModelMappings["claude-special"])

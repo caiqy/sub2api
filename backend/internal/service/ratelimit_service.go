@@ -138,6 +138,33 @@ func (s *RateLimitService) notifyAccountSchedulingBlockCleared(accountID int64) 
 	s.runtimeBlocker.ClearAccountSchedulingBlock(accountID)
 }
 
+type accountSchedulingThresholdConditionalPauseClearer interface {
+	ClearTempUnschedulableIfReason(ctx context.Context, id int64, reason string) (bool, error)
+}
+
+type accountSchedulingThresholdRuntimeBlockClearer interface {
+	ClearAccountSchedulingBlockIfReason(accountID int64, reason string) AccountSchedulingBlockClearResult
+}
+
+type accountSchedulingThresholdRuntimePauseReleaser interface {
+	ReleaseAccountSchedulingThresholdBlocks(platforms []string, persistedAccountIDs map[int64]struct{})
+}
+
+type accountSchedulingThresholdCacheCompareDeleter interface {
+	CompareDeleteTempUnsched(ctx context.Context, accountID int64, expected *TempUnschedState) (bool, error)
+}
+
+func (s *RateLimitService) notifyAccountSchedulingThresholdBlockCleared(accountID int64) AccountSchedulingBlockClearResult {
+	if s == nil || s.runtimeBlocker == nil || accountID <= 0 {
+		return AccountSchedulingBlockClearAbsent
+	}
+	if blocker, ok := s.runtimeBlocker.(accountSchedulingThresholdRuntimeBlockClearer); ok {
+		return blocker.ClearAccountSchedulingBlockIfReason(accountID, AccountSchedulingThresholdReasonSource)
+	}
+	s.runtimeBlocker.ClearAccountSchedulingBlock(accountID)
+	return AccountSchedulingBlockClearMatched
+}
+
 // ApplyAccountSchedulingThreshold evaluates admin-configured per-platform
 // utilization thresholds and, when breached, parks the account as temp-
 // unschedulable until the winning window resets. Returns true when the account
@@ -227,6 +254,64 @@ func accountHasSameSchedulingThresholdPause(account *Account, until time.Time, r
 	existing.TriggeredAtUnix = 0
 	next.TriggeredAtUnix = 0
 	return existing == next
+}
+
+// ReleaseAccountSchedulingThresholdPauses 在调度阈值设置被清空或提高到 100 时，
+// 只解除 account_scheduling_threshold 来源的暂停（DB temp-unschedulable + 进程内
+// runtime block），使下一次候选立即恢复；rate-limit/管理员/探针等其它来源的暂停不受影响。
+// 解除后下一轮候选评估会按当前阈值重新判定（仍超限的账号会立即重新暂停，属预期）。
+// 生命周期：由 SettingService 在阈值设置热更新时触发（review-fix E）。
+func (s *RateLimitService) ReleaseAccountSchedulingThresholdPauses(ctx context.Context, platforms []string) {
+	if s == nil || s.accountRepo == nil || len(platforms) == 0 {
+		return
+	}
+	clearer, ok := s.accountRepo.(accountSchedulingThresholdConditionalPauseClearer)
+	if !ok {
+		slog.Warn("release_account_scheduling_threshold_pauses_conditional_clear_unsupported")
+	} else {
+		now := time.Now().UTC()
+		persistedAccountIDs := make(map[int64]struct{})
+		listedPlatforms := make([]string, 0, len(platforms))
+		for _, platform := range platforms {
+			accounts, err := s.accountRepo.ListTempUnschedulableByPlatform(ctx, platform, now)
+			if err != nil {
+				slog.Warn("release_account_scheduling_threshold_pauses_list_failed", "platform", platform, "error", err)
+				continue
+			}
+			listedPlatforms = append(listedPlatforms, platform)
+			for i := range accounts {
+				account := &accounts[i]
+				persistedAccountIDs[account.ID] = struct{}{}
+				if !IsAccountSchedulingThresholdReason(account.TempUnschedulableReason) {
+					continue
+				}
+				cleared, err := clearer.ClearTempUnschedulableIfReason(ctx, account.ID, account.TempUnschedulableReason)
+				if err != nil {
+					slog.Warn("release_account_scheduling_threshold_pauses_clear_failed", "account_id", account.ID, "error", err)
+					continue
+				}
+				if !cleared {
+					continue
+				}
+				runtimeClear := s.notifyAccountSchedulingThresholdBlockCleared(account.ID)
+				if runtimeClear == AccountSchedulingBlockClearMismatch {
+					continue
+				}
+				if cache, ok := s.tempUnschedCache.(accountSchedulingThresholdCacheCompareDeleter); ok {
+					expected := tempUnschedStateFromStoredReason(account.TempUnschedulableReason, account.TempUnschedulableUntil.Unix())
+					if _, err := cache.CompareDeleteTempUnsched(ctx, account.ID, expected); err != nil {
+						slog.Warn("release_account_scheduling_threshold_pauses_cache_compare_delete_failed", "account_id", account.ID, "error", err)
+					}
+				} else if s.tempUnschedCache != nil {
+					slog.Warn("release_account_scheduling_threshold_pauses_cache_compare_delete_unsupported", "account_id", account.ID)
+				}
+				slog.Info("account_scheduling_threshold_pause_released", "account_id", account.ID, "platform", platform)
+			}
+		}
+		if releaser, ok := s.runtimeBlocker.(accountSchedulingThresholdRuntimePauseReleaser); ok {
+			releaser.ReleaseAccountSchedulingThresholdBlocks(listedPlatforms, persistedAccountIDs)
+		}
+	}
 }
 
 // ErrorPolicyResult 表示错误策略检查的结果
@@ -963,6 +1048,28 @@ func (s *RateLimitService) handle403(ctx context.Context, account *Account, upst
 }
 
 func (s *RateLimitService) handleOpenAI403(ctx context.Context, account *Account, upstreamMsg string, responseBody []byte) (shouldDisable bool) {
+	// 上游代理 / CDN 在请求到达 OpenAI API 之前就拦下时，回的是 HTML 403 页面而不是
+	// {"error":{...}} 结构化错误。这类响应描述的是「这条链路 / 这个端点被挡了」，
+	// 不构成账号凭据或权限失效的证据——例如无效的 /v1/responses 子路径（#5334）。
+	//
+	// 据此写账号状态会把请求级错误放大成账号级处罚：首次即 temp-unschedulable，
+	// 连续 openAI403DisableThreshold 次直接永久禁用；而 403 又在 failover 状态集里，
+	// 同一个坏请求会被逐个账号重放，足以把整组账号打下线。
+	//
+	// 与既有口径一致：count_tokens 路径的 isOpenAIOAuthInputTokensUnsupported 已把
+	// 「HTML 403 page without a structured error」按端点级响应处理；
+	// shouldApplyOpenAIAlphaSearchAccountErrorSideEffects 的不变式也是端点级错误
+	// 只换号、不写账号错误状态。这里只跳过账号处罚，不改变 failover 行为——
+	// 换个走不同代理的账号仍有可能成功。
+	if isHTMLResponse(responseBody) {
+		slog.Warn(
+			"openai_403_html_body_skips_account_penalty",
+			"account_id", account.ID,
+			"upstream_message", upstreamMsg,
+		)
+		return false
+	}
+
 	msg := buildForbiddenErrorMessage(
 		"Access forbidden (403):",
 		upstreamMsg,

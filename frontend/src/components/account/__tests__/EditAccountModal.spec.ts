@@ -1039,6 +1039,42 @@ describe('EditAccountModal', () => {
     )
   })
 
+  it('removes the persisted OAuth fingerprint mode for session without dropping unrelated extra', async () => {
+    const account = buildAccount({
+      type: 'oauth',
+      extra: {
+        codex_fingerprint_mode: 'full',
+        local_apply_sentinel: 'preserve-me'
+      }
+    })
+    const wrapper = mountModal(account)
+
+    await wrapper.get('[data-testid="edit-codex-fingerprint-mode-select"]').setValue('session')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(extra).not.toHaveProperty('codex_fingerprint_mode')
+    expect(extra?.local_apply_sentinel).toBe('preserve-me')
+  })
+
+  it.each(['off', 'device', 'full'] as const)(
+    'persists the explicit OpenAI OAuth Codex fingerprint mode %s',
+    async (mode) => {
+      const account = buildAccount({ type: 'oauth' })
+      const wrapper = mountModal(account)
+
+      await wrapper.get('[data-testid="edit-codex-fingerprint-mode-select"]').setValue(mode)
+      await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+      await flushPromises()
+
+      expect(updateAccountMock).toHaveBeenCalledTimes(1)
+      const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+      expect(extra?.codex_fingerprint_mode).toBe(mode)
+    }
+  )
+
   it('hides the Codex namespace flatten toggle for non-OAuth OpenAI accounts', async () => {
     const account = buildAccount()
     const wrapper = mountModal(account)

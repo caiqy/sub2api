@@ -16,7 +16,8 @@ const {
   appState,
   adminSettingsState,
   onboardingState,
-  fetchMock
+  fetchMock,
+  setMobileOpenMock
 } = vi.hoisted(() => ({
   routeState: { path: '/dashboard' },
   authState: {
@@ -50,7 +51,8 @@ const {
     isCurrentStep: vi.fn(() => false),
     nextStep: vi.fn()
   },
-  fetchMock: vi.fn()
+  fetchMock: vi.fn(),
+  setMobileOpenMock: vi.fn()
 }))
 
 vi.mock('vue-router', async (importOriginal) => {
@@ -79,7 +81,7 @@ vi.mock('@/stores', () => ({
   useAppStore: () => ({
     ...appState,
     toggleSidebar: vi.fn(),
-    setMobileOpen: vi.fn()
+    setMobileOpen: setMobileOpenMock
   }),
   useAdminSettingsStore: () => ({
     ...adminSettingsState,
@@ -201,6 +203,7 @@ describe('AppSidebar header styles', () => {
 describe('AppSidebar images entry wiring', () => {
   beforeEach(() => {
     fetchMock.mockReset()
+    setMobileOpenMock.mockReset()
     onboardingState.isCurrentStep.mockClear()
     onboardingState.nextStep.mockClear()
     vi.stubGlobal('matchMedia', vi.fn(() => ({
@@ -287,5 +290,46 @@ describe('AppSidebar images entry wiring', () => {
 
     expect(wrapper.findAll('[data-to="/purchase"]')).toHaveLength(1)
     expect(wrapper.findAll('[data-to="/custom/docs"]')).toHaveLength(1)
+  })
+
+  it('renders enabled admin operations, channel children, and admin custom menu only for admins', async () => {
+    setScenario({ isAdmin: true, isSimpleMode: false })
+    adminSettingsState.opsMonitoringEnabled = true
+    adminSettingsState.customMenuItems = [
+      { id: 'admin-tools', label: 'Admin tools', visibility: 'admin', sort_order: 1 }
+    ]
+
+    const wrapper = mountSidebar()
+
+    expect(wrapper.findAll('[data-to="/admin/ops"]')).toHaveLength(1)
+    expect(wrapper.findAll('[data-to="/custom/admin-tools"]')).toHaveLength(1)
+    expect(wrapper.findAll('[data-to="/admin/channels/pricing"]')).toHaveLength(0)
+
+    const channelGroup = wrapper.findAll('button').find(button =>
+      button.text().includes('nav.channelManagement')
+    )
+    expect(channelGroup).toBeDefined()
+    await channelGroup!.trigger('click')
+
+    expect(wrapper.findAll('[data-to="/admin/channels/pricing"]')).toHaveLength(1)
+    expect(wrapper.findAll('[data-to="/admin/channels/monitor"]')).toHaveLength(1)
+
+    setScenario({ isAdmin: false, isSimpleMode: false })
+    const userWrapper = mountSidebar()
+    expect(userWrapper.findAll('[data-to="/admin/ops"]')).toHaveLength(0)
+    expect(userWrapper.findAll('[data-to="/admin/channels/pricing"]')).toHaveLength(0)
+    expect(userWrapper.findAll('[data-to="/custom/admin-tools"]')).toHaveLength(0)
+  })
+
+  it('closes the mobile sidebar from its overlay', async () => {
+    setScenario({ isAdmin: false, isSimpleMode: false })
+    appState.mobileOpen = true
+    const wrapper = mountSidebar()
+
+    const overlay = wrapper.findAll('div').find(element => element.classes().includes('z-30'))
+    expect(overlay).toBeDefined()
+    await overlay!.trigger('click')
+
+    expect(setMobileOpenMock).toHaveBeenCalledWith(false)
   })
 })

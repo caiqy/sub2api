@@ -119,6 +119,12 @@ type UsageLogDetailPruner interface {
 	PruneToConfiguredLimits(ctx context.Context) error
 }
 
+// AccountSchedulingThresholdPauseReleaser 解除 account_scheduling_threshold 来源暂停的
+// 调度边界实现（由持有 AccountRepo 与 runtime blocker 的 RateLimitService 提供）。
+type AccountSchedulingThresholdPauseReleaser interface {
+	ReleaseAccountSchedulingThresholdPauses(ctx context.Context, platforms []string)
+}
+
 // WebSearchManagerBuilder creates a websearch.Manager from config (injected by infra layer).
 // proxyURLs maps proxy ID to resolved URL for provider-level proxy support.
 type WebSearchManagerBuilder func(cfg *WebSearchEmulationConfig, proxyURLs map[int64]string)
@@ -164,6 +170,7 @@ type SettingService struct {
 	channelMonitorRuntimeListeners      []func()
 	channelMonitorRuntimeNotificationMu sync.Mutex
 	channelMonitorModeAdmission         channelMonitorModeAdmission
+	schedulingThresholdPauseReleaser    AccountSchedulingThresholdPauseReleaser
 }
 
 // DefaultPlatformQuotaSetting 单 platform 三档限额（nil = 沿用上层；0 = 显式禁用；>0 = 上限）
@@ -398,6 +405,14 @@ func (s *SettingService) GetAllSettings(ctx context.Context) (*SystemSettings, e
 // This is used for cache invalidation (e.g., HTML cache in frontend server)
 func (s *SettingService) SetOnUpdateCallback(callback func()) {
 	s.onUpdate = callback
+}
+
+// SetAccountSchedulingThresholdPauseReleaser 注入调度阈值暂停解除器（可选依赖）。
+// 阈值设置被清空或提高到 100 时由 update 路径调用（review-fix E）。
+func (s *SettingService) SetAccountSchedulingThresholdPauseReleaser(releaser AccountSchedulingThresholdPauseReleaser) {
+	if s != nil {
+		s.schedulingThresholdPauseReleaser = releaser
+	}
 }
 
 // SubscribeChannelMonitorRuntime registers a listener that is invoked after

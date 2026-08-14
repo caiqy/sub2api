@@ -78,6 +78,7 @@ var openaiAllowedHeaders = map[string]bool{
 	"user-agent":              true,
 	"originator":              true,
 	"session_id":              true,
+	"session-id":              true,
 	"x-codex-beta-features":   true,
 	"x-codex-installation-id": true,
 	"x-codex-turn-state":      true,
@@ -97,6 +98,7 @@ var openaiPassthroughAllowedHeaders = map[string]bool{
 	"user-agent":              true,
 	"originator":              true,
 	"session_id":              true,
+	"session-id":              true,
 	"x-codex-beta-features":   true,
 	"x-codex-installation-id": true,
 	"x-codex-turn-state":      true,
@@ -470,6 +472,8 @@ type OpenAIGatewayService struct {
 
 	openaiWSFallbackUntil               sync.Map // key: int64(accountID), value: time.Time
 	openaiAccountRuntimeBlockUntil      sync.Map // key: int64(accountID), value: time.Time
+	openaiAccountRuntimeBlockReason     sync.Map // key: int64(accountID), value: string
+	openaiAccountRuntimeBlockPlatform   sync.Map // key: int64(accountID), value: string
 	openaiAccountRuntimeBlockLocks      sync.Map // key: int64(accountID), value: *sync.Mutex
 	openaiAccountRuntimeBlockGeneration sync.Map // key: int64(accountID), value: uint64
 	openaiAccountRuntimeBlockSequence   atomic.Uint64

@@ -87,7 +87,9 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsOmitting(ctx contex
 // from the request struct.
 func (s *SettingService) refreshCachedSettingsAfterWrite(ctx context.Context, settings *SystemSettings, omitted OmittedSettingKeys) {
 	if len(omitted) == 0 {
-		s.refreshCachedSettings(settings)
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		s.refreshCachedSettings(cleanupCtx, settings)
 		return
 	}
 	reloadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
@@ -97,7 +99,7 @@ func (s *SettingService) refreshCachedSettingsAfterWrite(ctx context.Context, se
 		slog.Warn("refresh cached settings after partial update failed", "error", err)
 		return
 	}
-	s.refreshCachedSettings(stored)
+	s.refreshCachedSettings(reloadCtx, stored)
 }
 
 func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, settings *SystemSettings) (map[string]string, error) {
@@ -691,7 +693,7 @@ func (s *SettingService) buildAuthSourceDefaultUpdates(ctx context.Context, sett
 	return updates, nil
 }
 
-func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
+func (s *SettingService) refreshCachedSettings(ctx context.Context, settings *SystemSettings) {
 	if settings == nil {
 		return
 	}
@@ -776,8 +778,10 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		})
 	}
 	accountSchedulingThresholdsSF.Forget(SettingKeyAccountSchedulingThresholds)
+	normalizedThresholds := defaultAccountSchedulingThresholds()
 	if settings.AccountSchedulingThresholds != nil {
-		normalizedThresholds, err := validateAndNormalizeAccountSchedulingThresholds(settings.AccountSchedulingThresholds)
+		var err error
+		normalizedThresholds, err = validateAndNormalizeAccountSchedulingThresholds(settings.AccountSchedulingThresholds)
 		if err != nil {
 			normalizedThresholds = defaultAccountSchedulingThresholds()
 		}
@@ -788,6 +792,20 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	} else {
 		// Partial/omitted payload: clear cache so the next hot-path read reloads from DB.
 		accountSchedulingThresholdsCache.Store(&cachedAccountSchedulingThresholds{})
+	}
+	// 阈值被清空（空 map → 全平台默认 100）或提高到 100 时，只解除对应平台
+	// account_scheduling_threshold 来源的暂停，使下一次候选立即恢复；rate-limit/管理员/
+	// 探针等其它来源暂停不受影响。未携带阈值字段的更新不触发（review-fix E）。
+	if s.schedulingThresholdPauseReleaser != nil && settings.AccountSchedulingThresholds != nil {
+		var disabled []string
+		for _, platform := range AllowedSchedulingThresholdPlatforms {
+			if normalizedThresholds[platform] >= 100 {
+				disabled = append(disabled, platform)
+			}
+		}
+		if len(disabled) > 0 {
+			s.schedulingThresholdPauseReleaser.ReleaseAccountSchedulingThresholdPauses(ctx, disabled)
+		}
 	}
 	if s.cfg != nil {
 		runtime := s.cfg.GatewayControlRuntime()
