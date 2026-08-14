@@ -155,7 +155,7 @@ func TestNormalizeResponsesBodyServiceTier(t *testing.T) {
 	require.False(t, gjson.GetBytes(body, "service_tier").Exists())
 }
 
-func TestForwardAsChatCompletions_OAuthPromptCacheKeyKeepsAPIKeyIsolatedSessionID(t *testing.T) {
+func TestForwardAsChatCompletions_OAuthPromptCacheKeyKeepsAPIKeyIsolatedConversationIDAndConvergesSessionID(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -189,7 +189,7 @@ func TestForwardAsChatCompletions_OAuthPromptCacheKeyKeepsAPIKeyIsolatedSessionI
 
 	isolationSeed := isolateOpenAISessionID(apiKey.ID, promptCacheKey)
 	require.Equal(t, isolationSeed, upstream.lastReq.Header.Get("conversation_id"))
-	require.Equal(t, generateSessionUUID(isolationSeed), upstream.lastReq.Header.Get("session_id"))
+	require.Equal(t, resolveConvergedSessionID(account), upstream.lastReq.Header.Get("session_id"))
 }
 
 func TestForwardAsChatCompletions_UnknownModelDoesNotUseDefaultMappedModel(t *testing.T) {

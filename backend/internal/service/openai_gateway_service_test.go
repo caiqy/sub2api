@@ -3872,7 +3872,7 @@ func TestForwardAsAnthropic_CapturesFinalSessionAndTurnStateHeaders(t *testing.T
 
 	_, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, cacheKey, "gpt-5.4")
 	require.Error(t, err)
-	require.Contains(t, collector.headers, "Session_id: "+generateSessionUUID(isolateOpenAISessionID(0, cacheKey)))
+	require.Contains(t, collector.headers, "Session_id: "+resolveConvergedSessionID(account))
 	require.Contains(t, collector.headers, "X-Codex-Turn-State: turn-state-final")
 	require.True(t, HasOpsUpstreamAttempted(c))
 }
