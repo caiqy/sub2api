@@ -118,10 +118,11 @@ func (e *plainEncryptor) Decrypt(ciphertext string) (string, error) {
 }
 
 type mockDumper struct {
-	dumpData []byte
-	dumpErr  error
-	restored []byte
-	restErr  error
+	dumpData     []byte
+	dumpErr      error
+	restored     []byte
+	restErr      error
+	restoreCalls int
 }
 
 func (m *mockDumper) Dump(_ context.Context) (io.ReadCloser, error) {
@@ -132,6 +133,7 @@ func (m *mockDumper) Dump(_ context.Context) (io.ReadCloser, error) {
 }
 
 func (m *mockDumper) Restore(_ context.Context, data io.Reader) error {
+	m.restoreCalls++
 	if m.restErr != nil {
 		return m.restErr
 	}
@@ -712,6 +714,45 @@ func TestBackupService_RestoreBackup_SplitPartsMissingPartDoesNotRestore(t *test
 	require.Empty(t, dumper.restored)
 }
 
+func TestBackupService_RestoreBackup_SplitPartsRequiresSHA256BeforeDumper(t *testing.T) {
+	repo := newMockSettingRepo()
+	seedS3Config(t, repo)
+	dumper := &mockDumper{}
+	store := newMockObjectStore()
+	svc := newTestBackupService(repo, dumper, store)
+
+	parts := splitBackupBytes(gzipBackupBytes(t, entropyBackupFixture(256)), 11)
+	corruptIndex := len(parts) - 1
+	replacement := append([]byte(nil), parts[corruptIndex]...)
+	replacement[len(replacement)-1] ^= 0x01
+	require.Len(t, replacement, len(parts[corruptIndex]))
+
+	recordParts := make([]BackupPart, 0, len(parts))
+	for i, data := range parts {
+		key := fmt.Sprintf("backups/split-missing-sha/payload.part-%06d", i+1)
+		if i == corruptIndex {
+			data = replacement
+		}
+		store.objects[key] = data
+		part := BackupPart{
+			Index:     i + 1,
+			S3Key:     key,
+			SizeBytes: int64(len(data)),
+			SHA256:    fmt.Sprintf("%x", sha256.Sum256(parts[i])),
+		}
+		if i == corruptIndex {
+			part.SHA256 = ""
+		}
+		recordParts = append(recordParts, part)
+	}
+	record := &BackupRecord{ID: "split-missing-sha", Status: "completed", Parts: recordParts}
+	require.NoError(t, svc.saveRecord(context.Background(), record))
+
+	err := svc.RestoreBackup(context.Background(), record.ID)
+	require.ErrorContains(t, err, "SHA-256")
+	require.Zero(t, dumper.restoreCalls)
+}
+
 func TestBackupService_DownloadBackupPartsRejectsMismatchedMetadata(t *testing.T) {
 	tests := []struct {
 		name string
@@ -720,12 +761,17 @@ func TestBackupService_DownloadBackupPartsRejectsMismatchedMetadata(t *testing.T
 	}{
 		{
 			name: "size",
-			part: BackupPart{Index: 1, S3Key: "backups/mismatch/size", SizeBytes: 4},
+			part: BackupPart{Index: 1, S3Key: "backups/mismatch/size", SizeBytes: 4, SHA256: fmt.Sprintf("%x", sha256.Sum256([]byte("abc")))},
 			want: "size mismatch",
 		},
 		{
+			name: "sha256 length",
+			part: BackupPart{Index: 1, S3Key: "backups/mismatch/sha256-length", SizeBytes: 3, SHA256: "bad-checksum"},
+			want: "invalid backup part SHA-256",
+		},
+		{
 			name: "checksum",
-			part: BackupPart{Index: 1, S3Key: "backups/mismatch/checksum", SizeBytes: 3, SHA256: "bad-checksum"},
+			part: BackupPart{Index: 1, S3Key: "backups/mismatch/checksum", SizeBytes: 3, SHA256: fmt.Sprintf("%064x", 0)},
 			want: "checksum mismatch",
 		},
 	}

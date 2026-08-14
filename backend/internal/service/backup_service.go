@@ -1018,6 +1018,10 @@ func (s *BackupService) downloadBackupParts(ctx context.Context, objectStore Bac
 		if part.Index != i+1 || part.S3Key == "" || part.SizeBytes <= 0 {
 			return "", fmt.Errorf("invalid backup part metadata at index %d", i+1)
 		}
+		checksum, decodeErr := hex.DecodeString(part.SHA256)
+		if decodeErr != nil || len(checksum) != sha256.Size {
+			return "", fmt.Errorf("invalid backup part SHA-256 at index %d", i+1)
+		}
 	}
 
 	archive, err := os.CreateTemp("", "sub2api-restore-*.sql.gz")
