@@ -48,7 +48,7 @@ func TestOAuthCompatPaths_ConvergeCodexFingerprintModes(t *testing.T) {
 				require.Error(t, entry.forward(svc, c, account, entry.body))
 				require.Len(t, upstream.requests, 1)
 				require.Equal(t, mode.expected, account.GetCodexFingerprintMode())
-				requireOAuthCompatFingerprintAttempt(t, entry.name, mode.expected, upstream.lastReq, upstream.lastBody)
+				requireOAuthCompatFingerprintAttempt(t, entry.name, account, mode.expected, upstream.lastReq, upstream.lastBody)
 			})
 		}
 	}
@@ -64,13 +64,14 @@ func TestOAuthCompatPaths_ClearFingerprintOnOffFailoverReentry(t *testing.T) {
 			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
 
 			require.Error(t, entry.forward(svc, c, newOAuthCompatFingerprintAccount(4102, nil), entry.body))
-			require.Error(t, entry.forward(svc, c, newOAuthCompatFingerprintAccount(4103, map[string]any{codexFingerprintModeExtraKey: "off"}), entry.body))
+			offAccount := newOAuthCompatFingerprintAccount(4103, map[string]any{codexFingerprintModeExtraKey: "off"})
+			require.Error(t, entry.forward(svc, c, offAccount, entry.body))
 			require.Len(t, upstream.requests, 2)
 
 			ids, exists := c.Get("codex_fingerprint_ids")
 			require.True(t, exists)
 			require.Nil(t, ids)
-			requireOAuthCompatFingerprintAttempt(t, entry.name, codexFingerprintOff, upstream.lastReq, upstream.lastBody)
+			requireOAuthCompatFingerprintAttempt(t, entry.name, offAccount, codexFingerprintOff, upstream.lastReq, upstream.lastBody)
 		})
 	}
 }
@@ -117,7 +118,7 @@ func newOAuthCompatFingerprintAccount(id int64, extra map[string]any) *Account {
 	return account
 }
 
-func requireOAuthCompatFingerprintAttempt(t *testing.T, entry string, mode codexFingerprintMode, req *http.Request, body []byte) {
+func requireOAuthCompatFingerprintAttempt(t *testing.T, entry string, account *Account, mode codexFingerprintMode, req *http.Request, body []byte) {
 	t.Helper()
 	require.NotNil(t, req)
 
@@ -146,4 +147,16 @@ func requireOAuthCompatFingerprintAttempt(t *testing.T, entry string, mode codex
 	require.Equal(t, req.Header.Get("session_id"), metadata.Get("session_id").String())
 	require.Equal(t, req.Header.Get("thread-id"), metadata.Get("thread_id").String())
 	require.Equal(t, req.Header.Get("x-codex-window-id"), metadata.Get("x-codex-window-id").String())
+
+	turnMetadata := gjson.Parse(req.Header.Get("x-codex-turn-metadata"))
+	require.True(t, turnMetadata.Exists())
+	require.NotEqual(t, "client-turn", turnMetadata.Get("turn_id").String())
+	require.Equal(t, turnMetadata.Get("turn_id").String(), metadata.Get("turn_id").String())
+
+	if mode == codexFingerprintSession {
+		require.Equal(t, resolveConvergedThreadID(account, "client-session-hyphen"), req.Header.Get("thread-id"))
+	}
+	if mode == codexFingerprintFull {
+		require.Equal(t, resolveConvergedSessionID(account), req.Header.Get("thread-id"))
+	}
 }
