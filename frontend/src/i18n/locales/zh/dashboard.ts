@@ -332,6 +332,7 @@ export default {
     latency: '延迟',
     latencyFirstToken: '首字',
     latencyDuration: '总耗时',
+    latencyOutputSpeed: '速度',
     time: '时间',
     ws: 'WS',
     stream: '流式',

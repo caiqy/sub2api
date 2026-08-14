@@ -90,6 +90,7 @@ const DataTableStub = {
         <slot name="cell-billing_mode" :row="row" />
         <slot name="cell-tokens" :row="row" />
         <slot name="cell-cost" :row="row" />
+        <slot name="cell-latency" :row="row" />
         <slot name="cell-actions" :row="row" />
         <slot name="cell-request_id" :row="row" />
       </div>
@@ -138,6 +139,66 @@ describe('admin UsageTable tooltip', () => {
       height: 20,
       toJSON: () => ({}),
     } as DOMRect)
+  })
+
+  it('keeps the original latency grid with normal-flow contained output speed and invalid latency data', () => {
+    const speedRows = [
+      { request_id: 'req-speed-valid', output_tokens: 2016, duration_ms: 34520, first_token_ms: 5960 },
+      { request_id: 'req-speed-missing-first-token', output_tokens: 120, duration_ms: 1800, first_token_ms: null },
+      { request_id: 'req-speed-no-generation-window', output_tokens: 120, duration_ms: 100, first_token_ms: 100 },
+      { request_id: 'req-speed-zero-output', output_tokens: 0, duration_ms: 1800, first_token_ms: 100 },
+      { request_id: 'req-speed-missing-duration', output_tokens: 120, duration_ms: null, first_token_ms: 100 },
+      { request_id: 'req-speed-negative-output', output_tokens: -1, duration_ms: 1800, first_token_ms: 100 },
+      { request_id: 'req-speed-nan-output', output_tokens: Number.NaN, duration_ms: 1800, first_token_ms: 100 },
+      { request_id: 'req-speed-infinite-duration', output_tokens: 120, duration_ms: Number.POSITIVE_INFINITY, first_token_ms: 100 },
+      { request_id: 'req-speed-nan-first-token', output_tokens: 120, duration_ms: 1800, first_token_ms: Number.NaN },
+      { request_id: 'req-speed-overflow', output_tokens: Number.MAX_VALUE, duration_ms: 1, first_token_ms: 0 },
+      { request_id: 'req-speed-long-duration', output_tokens: 120, duration_ms: 3_599_000, first_token_ms: 0 },
+      { request_id: 'req-speed-narrow-window', output_tokens: 1, duration_ms: 1, first_token_ms: 0 },
+    ]
+    const global = {
+      stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true },
+    }
+    const wrapper = mount(UsageTable, {
+      props: { data: speedRows, loading: false, columns: [], showOutputSpeed: true },
+      global,
+    })
+
+    const speedCells = wrapper.findAll('[data-testid="usage-output-speed"]')
+    expect(speedCells.map((cell) => cell.text())).toEqual([
+      '70.6 tok/s',
+      '-',
+      '-',
+      '0.0 tok/s',
+      '-',
+      '-',
+      '-',
+      '-',
+      '-',
+      '-',
+      '0.0 tok/s',
+      '1000.0 tok/s',
+    ])
+    expect(wrapper.text()).toContain('59m 59s')
+    expect(speedCells[0].classes()).toEqual(expect.arrayContaining([
+      '[contain:inline-size]',
+      'min-w-0',
+      'whitespace-normal',
+      'break-words',
+      'text-[11px]',
+      'leading-3',
+    ]))
+    expect(speedCells[0].classes()).not.toContain('absolute')
+    expect(speedCells[0].classes()).not.toContain('min-h-6')
+    expect(speedCells[0].classes()).not.toContain('w-10')
+    expect(speedCells[0].element.parentElement?.className).toContain('grid-cols-[max-content_max-content]')
+
+    const defaultWrapper = mount(UsageTable, {
+      props: { data: speedRows, loading: false, columns: [] },
+      global,
+    })
+    expect(defaultWrapper.find('[data-testid="usage-output-speed"]').exists()).toBe(false)
+    expect(defaultWrapper.find('.grid').classes()).toContain('grid-cols-[max-content_max-content]')
   })
 
   it('marks only usage rows that actually applied long-context billing', () => {

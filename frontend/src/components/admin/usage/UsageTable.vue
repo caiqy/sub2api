@@ -246,6 +246,12 @@
               <span v-else class="text-gray-400 dark:text-gray-500">-</span>
               <span class="text-gray-400 dark:text-gray-500">{{ t('usage.latencyDuration') }}</span>
               <span class="font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[durationSeverity(row.duration_ms ?? 0)]">{{ formatDuration(row.duration_ms) }}</span>
+              <span v-if="showOutputSpeed" class="text-gray-400 dark:text-gray-500">{{ t('usage.latencyOutputSpeed') }}</span>
+              <span
+                v-if="showOutputSpeed"
+                data-testid="usage-output-speed"
+                class="[contain:inline-size] min-w-0 whitespace-normal break-words text-[11px] leading-3 font-medium tabular-nums text-sky-500 dark:text-sky-400"
+              >{{ formatOutputSpeed(row) }}</span>
             </div>
           </div>
         </template>
@@ -588,6 +594,7 @@ interface Props {
   defaultSortOrder?: 'asc' | 'desc'
   showAccountBilling?: boolean
   showUpstreamEndpoint?: boolean
+  showOutputSpeed?: boolean
   /** 嵌入统一卡片内使用：去掉自身卡片外观 */
   flat?: boolean
 }
@@ -599,6 +606,7 @@ const props = withDefaults(defineProps<Props>(), {
   defaultSortOrder: 'asc',
   showAccountBilling: true,
   showUpstreamEndpoint: true,
+  showOutputSpeed: false,
   flat: false
 })
 const emit = defineEmits<{
@@ -612,6 +620,7 @@ const appStore = useAppStore()
 const copiedRequestId = ref<string | null>(null)
 const showAccountBilling = props.showAccountBilling
 const showUpstreamEndpoint = props.showUpstreamEndpoint
+const showOutputSpeed = props.showOutputSpeed
 const ipGeoBatchLoading = ref(false)
 
 const showIpGeoToolbar = computed(() => props.columns.some((col) => col.key === 'ip_address'))
@@ -716,6 +725,18 @@ const formatDuration = (ms: number | null | undefined): string => {
   const totalSec = Math.round(ms / 1000)
   if (totalSec < 3600) return `${Math.floor(totalSec / 60)}m ${totalSec % 60}s`
   return `${Math.floor(totalSec / 3600)}h ${Math.floor((totalSec % 3600) / 60)}m`
+}
+
+const formatOutputSpeed = (row: AdminUsageLog): string => {
+  const { output_tokens: outputTokens, duration_ms: durationMs, first_token_ms: firstTokenMs } = row
+  if (
+    typeof outputTokens !== 'number' || !Number.isFinite(outputTokens) || outputTokens < 0 ||
+    typeof durationMs !== 'number' || !Number.isFinite(durationMs) ||
+    typeof firstTokenMs !== 'number' || !Number.isFinite(firstTokenMs) ||
+    durationMs <= firstTokenMs
+  ) return '-'
+  const speed = outputTokens * 1000 / (durationMs - firstTokenMs)
+  return Number.isFinite(speed) ? `${speed.toFixed(1)} tok/s` : '-'
 }
 
 // Cost tooltip functions

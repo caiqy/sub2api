@@ -230,6 +230,7 @@ describe('user UsageView', () => {
     await flushPromises()
 
     expect(wrapper.getComponent(UsageTable).props('showUpstreamEndpoint')).toBe(false)
+    expect(wrapper.getComponent(UsageTable).props('showOutputSpeed')).toBe(false)
   })
 
   it('exports csv with current filters and without admin-only fields', async () => {

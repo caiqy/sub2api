@@ -1,0 +1,419 @@
+schema: comet.native.v4
+name: admin-usage-output-speed
+language: zh-CN
+phase: archive
+status: done
+state_version: 7
+brief: brief.md
+spec_changes:
+  - capability: admin-usage-output-speed
+    operation: create
+    source: specs/admin-usage-output-speed/spec.md
+workspace:
+  isolation: current
+  change_branch: main
+  target_branch: main
+  finish: null
+loop:
+  stage: done
+  goal_cycle: 1
+  iteration: 1
+  attempt: 1
+  retry_epoch: 0
+  failed_iteration_count: 0
+  no_progress_count: 0
+  execution_failure_count: 0
+  previous_unresolved_ids: []
+  next_action: null
+acceptance:
+  - id: A1
+    source: brief.md
+    text: A1：管理员记录的 `output_tokens=2016`、`duration_ms=34520`、`first_token_ms=5960`
+      时，“延迟”单元格第三行显示“速度 70.6 tok/s”。
+    result: passed
+    reason:
+      text: UsageTable.vue 的 formatOutputSpeed 按 2016*1000/(34520-5960) 计算，组件测试断言显示
+        70.6 tok/s。
+      truncated: false
+  - id: A2
+    source: brief.md
+    text: A2：管理员记录缺少 `first_token_ms` 或 `duration_ms`，或 `duration_ms <=
+      first_token_ms` 时，第三行仍保持布局并显示“速度 -”。
+    result: passed
+    reason:
+      text: 格式化函数对缺失 duration_ms、缺失 first_token_ms 及 duration_ms<=first_token_ms 均返回
+        -；测试覆盖缺失字段和相等窗口，速度行仍渲染。
+      truncated: false
+  - id: A3
+    source: brief.md
+    text: A3：输出 Token 为 0 且计时区间有效时显示“速度 0.0 tok/s”。
+    result: passed
+    reason:
+      text: 有效窗口内 output_tokens=0 通过校验并经 toFixed(1) 显示 0.0 tok/s，已有组件断言。
+      truncated: false
+  - id: A4
+    source: brief.md
+    text: A4：管理员表格不增加新列，现有首字/总耗时健康色条和文本颜色行为保持不变。
+    result: passed
+    reason:
+      text: 延迟模板仅在既有两行后追加条件渲染内容，健康色条、首字/总耗时颜色表达式和 allColumns 列集合未改。
+      truncated: false
+  - id: A5
+    source: brief.md
+    text: A5：普通用户使用记录不出现“速度”行，后端响应结构保持不变。
+    result: passed
+    reason:
+      text: 用户 UsageView 未传 show-output-speed，测试断言该属性为 false；变更范围仅含七个前端文件，没有后端契约文件。
+      truncated: false
+  - id: A6
+    source: specs/admin-usage-output-speed/spec.md
+    text: 管理员使用记录表格应在不增加表格列宽的前提下展示每次请求生成阶段的输出速度，帮助管理员同时判断首字延迟、总耗时和持续生成性能。
+    result: passed
+    reason:
+      text: 速度值保留在既有 latency 单元格和两列网格中，并使用 contain:inline-size 与 min-w-0
+        排除其固有宽度贡献；结构测试验证该布局约束。
+      truncated: false
+  - id: A7
+    source: specs/admin-usage-output-speed/spec.md
+    text: 输出速度仅在管理员使用记录表格展示。
+    result: passed
+    reason:
+      text: 共享组件属性默认关闭，只有管理员 UsageView 显式传入 show-output-speed，用户 UsageView 保持关闭。
+      truncated: false
+  - id: A8
+    source: specs/admin-usage-output-speed/spec.md
+    text: 现有“延迟”单元格保持左侧健康色条，并按“首字”“总耗时”“速度”三行排列。
+    result: passed
+    reason:
+      text: 延迟单元格继续保留左侧健康色条，并在同一两列网格中依次渲染首字、总耗时和速度三组标签/值。
+      truncated: false
+  - id: A9
+    source: specs/admin-usage-output-speed/spec.md
+    text: “速度”标签使用与已有标签相同的次要文本样式。
+    result: passed
+    reason:
+      text: 速度标签使用与首字和总耗时标签完全相同的次要文本类。
+      truncated: false
+  - id: A10
+    source: specs/admin-usage-output-speed/spec.md
+    text: 有效速度使用一位小数、等宽数字和 `tok/s` 单位，例如 `70.6 tok/s`。
+    result: passed
+    reason:
+      text: 有效结果使用 speed.toFixed(1)、tok/s 后缀及 tabular-nums；测试验证 70.6、0.0 和 1000.0 等输出。
+      truncated: false
+  - id: A11
+    source: specs/admin-usage-output-speed/spec.md
+    text: 速度文本可使用天蓝色与耗时健康度颜色区分，但不表达快慢等级。
+    result: passed
+    reason:
+      text: 速度值固定使用天蓝色文本，没有根据速度值计算或切换等级颜色。
+      truncated: false
+  - id: A12
+    source: specs/admin-usage-output-speed/spec.md
+    text: 无法计算时显示 `-`，并保留第三行以维持各记录对齐。
+    result: passed
+    reason:
+      text: showOutputSpeed 开启后标签和值节点始终存在；无法计算时 formatOutputSpeed 返回 -，因此第三行不会被移除。
+      truncated: false
+  - id: A13
+    source: specs/admin-usage-output-speed/spec.md
+    text: 输出速度定义为：
+    result: passed
+    reason:
+      text: 实现公式为 outputTokens*1000/(durationMs-firstTokenMs)，与规格定义一致。
+      truncated: false
+  - id: A14
+    source: specs/admin-usage-output-speed/spec.md
+    text: 只有以下条件同时满足时才计算：
+    result: passed
+    reason:
+      text: 计算前使用单一守卫同时验证 token、两个计时字段及正生成窗口，任一条件失败即返回 -。
+      truncated: false
+  - id: A15
+    source: specs/admin-usage-output-speed/spec.md
+    text: "`output_tokens` 是有限且不小于 0 的数；"
+    result: passed
+    reason:
+      text: 守卫要求 output_tokens 类型为 number、Number.isFinite 为真且不小于 0；测试覆盖负数和 NaN。
+      truncated: false
+  - id: A16
+    source: specs/admin-usage-output-speed/spec.md
+    text: "`duration_ms` 和 `first_token_ms` 均为有限数；"
+    result: passed
+    reason:
+      text: 守卫分别要求 duration_ms 和 first_token_ms 为有限 number；测试覆盖缺失值、无限 duration 和 NaN
+        first token。
+      truncated: false
+  - id: A17
+    source: specs/admin-usage-output-speed/spec.md
+    text: "`duration_ms > first_token_ms`。"
+    result: passed
+    reason:
+      text: 守卫明确以 durationMs<=firstTokenMs 返回 -，因此只有 duration_ms>first_token_ms 才计算。
+      truncated: false
+  - id: A18
+    source: specs/admin-usage-output-speed/spec.md
+    text: 结果必须为有限数。有效区间内 `output_tokens=0` 的结果显示为 `0.0 tok/s`。
+    result: passed
+    reason:
+      text: 计算后再次用 Number.isFinite 校验结果，溢出测试返回 -；有效零输出测试返回 0.0 tok/s。
+      truncated: false
+  - id: A19
+    source: specs/admin-usage-output-speed/spec.md
+    text: 共享 `UsageTable` 提供默认关闭的管理员输出速度展示属性。
+    result: passed
+    reason:
+      text: UsageTable Props 新增可选 showOutputSpeed，withDefaults 将其设为 false。
+      truncated: false
+  - id: A20
+    source: specs/admin-usage-output-speed/spec.md
+    text: 管理员 `UsageView` 显式开启该属性。
+    result: passed
+    reason:
+      text: 管理员 UsageView 的 UsageTable 明确传入 show-output-speed，管理员视图测试断言解析后的属性为 true。
+      truncated: false
+  - id: A21
+    source: specs/admin-usage-output-speed/spec.md
+    text: 普通用户 `UsageView` 不开启该属性，因此现有布局与内容保持不变。
+    result: passed
+    reason:
+      text: 普通用户 UsageView 未传该属性，组件默认值保持 false，用户视图测试明确验证速度关闭。
+      truncated: false
+  - id: A22
+    source: specs/admin-usage-output-speed/spec.md
+    text: 后端 DTO、API、持久化、Excel 导出、筛选和排序均不改变。
+    result: passed
+    reason:
+      text: 工作树变更仅包含七个前端文件；无后端 DTO/API/持久化、导出、筛选、排序或列定义改动。
+      truncated: false
+  - id: A23
+    source: specs/admin-usage-output-speed/spec.md
+    text: A1：`2016 * 1000 / (34520 - 5960)` 显示为 `70.6 tok/s`。
+    result: passed
+    reason:
+      text: 针对指定 2016、34520、5960 输入的 focused Vitest 断言实际文本为 70.6 tok/s。
+      truncated: false
+  - id: A24
+    source: specs/admin-usage-output-speed/spec.md
+    text: A2：缺少任一计时字段或生成阶段耗时非正时显示 `-`。
+    result: passed
+    reason:
+      text: 组件测试对缺失 first_token_ms、缺失 duration_ms 和非正生成窗口均断言 -，实现的 <= 分支同时覆盖小于情况。
+      truncated: false
+  - id: A25
+    source: specs/admin-usage-output-speed/spec.md
+    text: A3：有效计时区间内零输出显示 `0.0 tok/s`。
+    result: passed
+    reason:
+      text: 组件测试对 output_tokens=0、duration_ms=1800、first_token_ms=100 断言 0.0 tok/s。
+      truncated: false
+  - id: A26
+    source: specs/admin-usage-output-speed/spec.md
+    text: A4：管理员延迟单元格保留既有健康色条及耗时颜色，且表格列集合不变。
+    result: passed
+    reason:
+      text: 实际 diff 未修改健康色条、耗时文本颜色表达式或管理员 allColumns；仅向 latency 单元格内部追加默认关闭的第三行。
+      truncated: false
+  - id: A27
+    source: specs/admin-usage-output-speed/spec.md
+    text: A5：普通用户记录不展示速度，后端契约无变化。
+    result: passed
+    reason:
+      text: 用户端隔离测试断言 showOutputSpeed=false，变更文件列表不含后端文件，响应契约未发生变化。
+      truncated: false
+builder_handoff:
+  candidate_id: c580ef85-724a-42a5-be34-26fdd557de14
+  identity_provider: skill-coordinated
+  builder_execution_ref: skill-coordinated:builder:eb73106c-5450-4843-a4d2-d9abe077ccbd
+  iteration: 1
+  summary:
+    text: 管理员使用记录延迟单元格已增加默认关闭的输出速度第三行；管理员页面显式开启，普通用户保持关闭。前端按 output_tokens * 1000 /
+      (duration_ms - first_token_ms) 计算，覆盖缺失、非有限、非正窗口、零输出和溢出；使用 inline-size
+      containment 保持原列宽并让换行正常撑高。
+    truncated: false
+  addressed_acceptance_ids:
+    - A1
+    - A2
+    - A3
+    - A4
+    - A5
+    - A6
+    - A7
+    - A8
+    - A9
+    - A10
+    - A11
+    - A12
+    - A13
+    - A14
+    - A15
+    - A16
+    - A17
+    - A18
+    - A19
+    - A20
+    - A21
+    - A22
+    - A23
+    - A24
+    - A25
+    - A26
+    - A27
+  checks:
+    - name:
+        text: focused-vitest
+        truncated: false
+      result: passed
+      note:
+        text: "pnpm -C frontend exec vitest run
+          src/components/admin/usage/__tests__/UsageTable.spec.ts
+          src/views/admin/__tests__/UsageView.spec.ts
+          src/views/user/__tests__/UsageView.spec.ts: 44/44 passed"
+        truncated: false
+    - name:
+        text: frontend-typecheck
+        truncated: false
+      result: passed
+      note:
+        text: pnpm -C frontend typecheck exited 0
+        truncated: false
+    - name:
+        text: scoped-eslint
+        truncated: false
+      result: passed
+      note:
+        text: Scoped ESLint for all seven changed frontend files exited 0
+        truncated: false
+    - name:
+        text: independent-code-review
+        truncated: false
+      result: passed
+      note:
+        text: "Final read-only reviewer: Ready to merge Yes; no Critical, Important, or
+          Minor findings"
+        truncated: false
+  checks_truncated: false
+  known_limits:
+    - text: Vitest prints the repository's existing Browserslist data-age warning;
+        tests remain passing.
+      truncated: false
+  known_limits_truncated: false
+  submitted_at: 2026-08-14T21:31:23.240Z
+blockers: []
+verification:
+  candidate_id: c580ef85-724a-42a5-be34-26fdd557de14
+  identity_provider: skill-coordinated
+  verifier_execution_ref: skill-coordinated:verifier:a3c52345-6de0-4660-8272-d7f13e162de2
+  iteration: 1
+  attempt: 1
+  assurance: skill-coordinated
+  verdict: pass
+  checks:
+    - id: focused-vitest
+      name:
+        text: focused-vitest
+        truncated: false
+      argv_display:
+        - text: -C
+          truncated: false
+        - text: frontend
+          truncated: false
+        - text: exec
+          truncated: false
+        - text: vitest
+          truncated: false
+        - text: run
+          truncated: false
+        - text: src/components/admin/usage/__tests__/UsageTable.spec.ts
+          truncated: false
+        - text: src/views/admin/__tests__/UsageView.spec.ts
+          truncated: false
+        - text: src/views/user/__tests__/UsageView.spec.ts
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 7968
+    - id: frontend-typecheck
+      name:
+        text: frontend-typecheck
+        truncated: false
+      argv_display:
+        - text: -C
+          truncated: false
+        - text: frontend
+          truncated: false
+        - text: typecheck
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 29393
+    - id: scoped-eslint
+      name:
+        text: scoped-eslint
+        truncated: false
+      argv_display:
+        - text: -C
+          truncated: false
+        - text: frontend
+          truncated: false
+        - text: exec
+          truncated: false
+        - text: eslint
+          truncated: false
+        - text: src/components/admin/usage/UsageTable.vue
+          truncated: false
+        - text: src/components/admin/usage/__tests__/UsageTable.spec.ts
+          truncated: false
+        - text: src/views/admin/UsageView.vue
+          truncated: false
+        - text: src/views/admin/__tests__/UsageView.spec.ts
+          truncated: false
+        - text: src/views/user/__tests__/UsageView.spec.ts
+          truncated: false
+        - text: src/i18n/locales/zh/dashboard.ts
+          truncated: false
+        - text: src/i18n/locales/en/dashboard.ts
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 3550
+  summary:
+    text: A1-A27 全部通过；Runtime 的 focused Vitest 44/44、frontend typecheck 与 scoped
+      ESLint 均通过。
+    truncated: false
+  risks:
+    - text: 未执行真实浏览器像素级列宽对比；列宽不变由 CSS inline-size containment 语义、当前模板结构及组件回归断言共同验证。
+      truncated: false
+  risks_truncated: false
+  completed_at: 2026-08-14T21:52:12.041Z
+history:
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 1
+    outcome: pass
+    unresolved_ids: []
+    summary:
+      text: A1-A27 全部通过；Runtime 的 focused Vitest 44/44、frontend typecheck 与 scoped
+        ESLint 均通过。
+      truncated: false
+    completed_at: 2026-08-14T21:52:12.041Z
+history_overflow:
+  dropped_entries: 0
+  first_dropped_at: null
+  last_dropped_at: null
+  outcome_counts:
+    pass: 0
+    fail: 0
+    blocked: 0
+    execution-error: 0
+    recovery: 0
+verification_result: pass
+verification_report: verification.md
+archived: true
+created_at: 2026-08-14T20:32:02.387Z
