@@ -236,6 +236,12 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 			).Info("gateway.web_search.search_price_per_1k_explicit_free")
 		}
 	}
+	c.JSON(http.StatusOK, gin.H{
+		"query":       req.Query,
+		"results":     nativeResp.Results,
+		"provider":    providerName,
+		"max_results": maxResults,
+	})
 	detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
 	h.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 		if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
@@ -266,12 +272,6 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 				zap.Int64("account_id", account.ID),
 			).Error("gateway.web_search.record_usage_failed", zap.Error(err))
 		}
-	})
-	c.JSON(http.StatusOK, gin.H{
-		"query":       req.Query,
-		"results":     nativeResp.Results,
-		"provider":    providerName,
-		"max_results": maxResults,
 	})
 }
 

@@ -559,6 +559,7 @@ func TestGatewayRoutesBareVoiceAndSearchPathsInstallUsageDetailCapture(t *testin
 		{http.MethodPost, "/stt"},
 		{http.MethodGet, "/realtime"},
 		{http.MethodPost, "/web_search"},
+		{http.MethodPost, "/x_search"},
 	} {
 		req := httptest.NewRequest(route.method, route.path, strings.NewReader(`{"query":"test"}`))
 		req.Header.Set("Content-Type", "application/json")

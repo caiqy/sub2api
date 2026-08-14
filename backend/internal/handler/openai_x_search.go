@@ -11,14 +11,14 @@ import (
 
 type grokStandaloneSearchRequest struct {
 	Query                    string   `json:"query"`
-	Input                    string   `json:"input"`
+	Input                    string   `json:"input,omitempty"`
 	MaxResults               *int     `json:"max_results"`
-	AllowedXHandles          []string `json:"allowed_x_handles"`
-	ExcludedXHandles         []string `json:"excluded_x_handles"`
-	FromDate                 string   `json:"from_date"`
-	ToDate                   string   `json:"to_date"`
-	EnableImageUnderstanding *bool    `json:"enable_image_understanding"`
-	EnableVideoUnderstanding *bool    `json:"enable_video_understanding"`
+	AllowedXHandles          []string `json:"allowed_x_handles,omitempty"`
+	ExcludedXHandles         []string `json:"excluded_x_handles,omitempty"`
+	FromDate                 string   `json:"from_date,omitempty"`
+	ToDate                   string   `json:"to_date,omitempty"`
+	EnableImageUnderstanding *bool    `json:"enable_image_understanding,omitempty"`
+	EnableVideoUnderstanding *bool    `json:"enable_video_understanding,omitempty"`
 }
 
 // XSearch marks the standalone endpoint so WebSearch can use native x_search
