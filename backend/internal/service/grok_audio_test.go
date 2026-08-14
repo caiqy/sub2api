@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -66,6 +67,26 @@ func TestForwardGrokVoice_RejectsNonGrok(t *testing.T) {
 	_, err := svc.ForwardGrokVoice(context.Background(), nil, &Account{Platform: PlatformOpenAI}, "tts", []byte(`{}`), "application/json")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not supported")
+}
+
+func TestAwaitGrokRealtimeAudioObservedReadsFlagAfterRelayExits(t *testing.T) {
+	errCh := make(chan error, 1)
+	var observed atomic.Bool
+	go func() {
+		observed.Store(true)
+		errCh <- io.EOF
+	}()
+	got, err := awaitGrokRealtimeAudioObserved(errCh, &observed)
+	require.ErrorIs(t, err, io.EOF)
+	require.True(t, got, "audioObserved must be read after the relay returns, not before <-errCh")
+}
+
+func TestGrokRealtimeEventHasAudio(t *testing.T) {
+	require.False(t, grokRealtimeEventHasAudio([]byte(`{"type":"session.created"}`)))
+	require.False(t, grokRealtimeEventHasAudio([]byte(`{"type":"response.audio_transcript.delta","delta":"hi"}`)))
+	require.False(t, grokRealtimeEventHasAudio([]byte(`{"type":"response.audio.delta","delta":""}`)))
+	require.True(t, grokRealtimeEventHasAudio([]byte(`{"type":"response.audio.delta","delta":"abc"}`)))
+	require.True(t, grokRealtimeEventHasAudio([]byte(`{"type":"response.output_audio.delta","audio":"abc"}`)))
 }
 
 func TestForwardGrokVoice_RejectsUnknownEndpoint(t *testing.T) {
@@ -179,7 +200,7 @@ func TestProxyGrokRealtimeUsesMappedModelInUpstreamURL(t *testing.T) {
 			return
 		}
 		defer func() { _ = client.CloseNow() }()
-		model, proxyErr := svc.ProxyGrokRealtime(r.Context(), nil, client, account, "token", "grok-voice-latest", nil)
+		model, _, proxyErr := svc.ProxyGrokRealtime(r.Context(), nil, client, account, "token", "grok-voice-latest", nil)
 		result <- grokVoiceRealtimeProxyResult{model: model, err: proxyErr}
 	}))
 	defer server.Close()
@@ -248,7 +269,7 @@ func TestProxyGrokRealtimeGuardBlocksBeforeUpstreamWriteAndWaitsForPumps(t *test
 			return
 		}
 		defer func() { _ = client.CloseNow() }()
-		model, proxyErr := svc.ProxyGrokRealtime(r.Context(), nil, client, account, "token", "grok-voice-latest", func(relayCtx context.Context, _ []byte) error {
+		model, _, proxyErr := svc.ProxyGrokRealtime(r.Context(), nil, client, account, "token", "grok-voice-latest", func(relayCtx context.Context, _ []byte) error {
 			require.NotNil(t, relayCtx)
 			return sentinel
 		})
@@ -289,7 +310,7 @@ func TestProxyGrokRealtimePrefersGuardAfterOrdinaryPumpExit(t *testing.T) {
 			return
 		}
 		defer func() { _ = client.CloseNow() }()
-		model, proxyErr := svc.ProxyGrokRealtime(r.Context(), nil, client, account, "token", "grok-voice-latest", func(relayCtx context.Context, _ []byte) error {
+		model, _, proxyErr := svc.ProxyGrokRealtime(r.Context(), nil, client, account, "token", "grok-voice-latest", func(relayCtx context.Context, _ []byte) error {
 			close(guardEntered)
 			<-relayCtx.Done()
 			close(guardExited)
