@@ -777,6 +777,43 @@ func TestStageCodexFingerprintIDs_NilOverwritesPreviousAccount(t *testing.T) {
 	assert.Empty(t, h.Get("x-codex-installation-id"))
 }
 
+func TestResolveOpenAIAttemptFingerprintIDs_ReusesStagedIDsForWSRetry(t *testing.T) {
+	c := newFingerprintStageTestContext(t)
+	c.Request.Header.Set("session-id", "client-session-ws-retry")
+	account := newTestOAuthAccount(1005, map[string]any{codexFingerprintModeExtraKey: "session"})
+
+	first := resolveOpenAIAttemptFingerprintIDs(c, account, []byte(`{"model":"gpt-5.6-sol","input":[]}`))
+	retry := resolveOpenAIAttemptFingerprintIDs(c, account, nil)
+
+	require.NotNil(t, first)
+	require.Same(t, first, retry, "同一账号的 WS 重试必须复用已暂存的 fingerprint IDs")
+}
+
+func TestResolveOpenAIAttemptFingerprintIDs_WSRetryRecomputesAfterAccountSwitch(t *testing.T) {
+	c := newFingerprintStageTestContext(t)
+	c.Request.Header.Set("session-id", "client-session-ws-switch")
+	firstAccount := newTestOAuthAccount(1006, map[string]any{codexFingerprintModeExtraKey: "session"})
+	secondAccount := newTestOAuthAccount(1007, map[string]any{codexFingerprintModeExtraKey: "session"})
+
+	first := resolveOpenAIAttemptFingerprintIDs(c, firstAccount, []byte(`{"model":"gpt-5.6-sol","input":[]}`))
+	retry := resolveOpenAIAttemptFingerprintIDs(c, secondAccount, nil)
+
+	require.NotNil(t, first)
+	require.NotNil(t, retry)
+	require.NotSame(t, first, retry, "切换账号后不得复用上一账号的 fingerprint IDs")
+	require.Equal(t, resolveConvergedSessionID(secondAccount), retry.sessionID)
+}
+
+func TestResolveOpenAIAttemptFingerprintIDs_WSRetryClearsOffMode(t *testing.T) {
+	c := newFingerprintStageTestContext(t)
+	c.Request.Header.Set("session-id", "client-session-ws-off")
+	firstAccount := newTestOAuthAccount(1008, map[string]any{codexFingerprintModeExtraKey: "session"})
+	offAccount := newTestOAuthAccount(1009, map[string]any{codexFingerprintModeExtraKey: "off"})
+
+	require.NotNil(t, resolveOpenAIAttemptFingerprintIDs(c, firstAccount, []byte(`{"model":"gpt-5.6-sol","input":[]}`)))
+	require.Nil(t, resolveOpenAIAttemptFingerprintIDs(c, offAccount, nil), "off 账号不得保留上一账号的 fingerprint IDs")
+}
+
 func TestApplyStagedCodexFingerprintHeaders_SkipsNonOAuthAccount(t *testing.T) {
 	c := newFingerprintStageTestContext(t)
 	oauthIDs := resolveCodexFingerprintIDs(newTestOAuthAccount(1003, nil), "sess-y", codexFingerprintSession)

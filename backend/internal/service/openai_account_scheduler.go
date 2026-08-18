@@ -146,7 +146,7 @@ func accountSatisfiesPrivacyRequirement(account *Account, group *Group) bool {
 }
 
 func recordPrivacyRequirementError(ctx context.Context, service *OpenAIGatewayService, account *Account, group *Group) {
-	if service == nil || service.accountRepo == nil || account == nil || group == nil || !group.RequirePrivacySet {
+	if service == nil || service.accountRepo == nil || account == nil || group == nil || !group.RequirePrivacySet || accountSatisfiesPrivacyRequirement(account, group) {
 		return
 	}
 	_ = service.accountRepo.SetError(ctx, account.ID,
@@ -1228,6 +1228,7 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 	budget *openAISelectionProbeBudget,
 ) (*AccountSelectionResult, bool, error) {
 	compactBlocked := false
+	schedGroup := schedulerGroupForRequest(ctx, s.service, req.GroupID)
 	release := func(result *AcquireResult) {
 		if result != nil && result.ReleaseFunc != nil {
 			result.ReleaseFunc()
@@ -1257,7 +1258,8 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 			break
 		}
 		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.GroupID, req.Platform, req.RequestedModel, false, req.RequiredCapability)
-		if fresh == nil || (fresh.GroupIDs != nil && !openAIStickyAccountMatchesGroup(fresh, req.GroupID)) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
+		if fresh == nil || (fresh.GroupIDs != nil && !openAIStickyAccountMatchesGroup(fresh, req.GroupID)) || !accountSatisfiesPrivacyRequirement(fresh, schedGroup) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
+			recordPrivacyRequirementError(ctx, s.service, fresh, schedGroup)
 			release(result)
 			continue
 		}
@@ -1310,6 +1312,7 @@ func (s *defaultOpenAIAccountScheduler) tryFallbackToWeightedSticky(
 	if !req.StickyWeighted {
 		return nil, nil
 	}
+	schedGroup := schedulerGroupForRequest(ctx, s.service, req.GroupID)
 	for _, accountID := range []int64{req.StickyPreviousAccountID, req.StickyAccountID} {
 		if accountID <= 0 {
 			continue
@@ -1327,7 +1330,8 @@ func (s *defaultOpenAIAccountScheduler) tryFallbackToWeightedSticky(
 			continue
 		}
 		account = s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
-		if account == nil || !s.isAccountRequestCompatible(ctx, account, req) || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
+		if account == nil || !accountSatisfiesPrivacyRequirement(account, schedGroup) || !s.isAccountRequestCompatible(ctx, account, req) || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
+			recordPrivacyRequirementError(ctx, s.service, account, schedGroup)
 			continue
 		}
 		// 粘性绑定只证明绑定时账号在分组内；账号被移出分组后绑定仍会在 TTL 内存活，
@@ -1673,6 +1677,7 @@ func (s *defaultOpenAIAccountScheduler) finishLoadBalanceSelectionFallback(
 	candidateCount := attempt.candidateCount
 	topK := attempt.topK
 	loadSkew := attempt.loadSkew
+	schedGroup := schedulerGroupForRequest(ctx, s.service, req.GroupID)
 
 	if len(attempt.selectionOrder) == 0 {
 		return nil, candidateCount, topK, loadSkew, noAvailableOpenAISelectionError(req.RequestedModel, attempt.compactBlocked, filterStats.summary("selection_order_empty"))
@@ -1713,7 +1718,8 @@ func (s *defaultOpenAIAccountScheduler) finishLoadBalanceSelectionFallback(
 				return nil, candidateCount, topK, loadSkew, noAvailableOpenAISelectionError(req.RequestedModel, compactBlocked, filterStats.summary("selection_order_exhausted"))
 			}
 			fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.GroupID, req.Platform, req.RequestedModel, false, req.RequiredCapability)
-			if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
+			if fresh == nil || !accountSatisfiesPrivacyRequirement(fresh, schedGroup) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
+				recordPrivacyRequirementError(ctx, s.service, fresh, schedGroup)
 				continue
 			}
 			if req.RequireCompact && openAICompactSupportTier(fresh) == 0 {

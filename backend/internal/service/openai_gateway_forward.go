@@ -25,9 +25,19 @@ func resolveOpenAIAttemptFingerprintIDs(c *gin.Context, account *Account, body [
 	bodyHash := sha256.Sum256(body)
 	if c != nil && account != nil {
 		cachedAccountID, accountMatches := c.Get(codexFingerprintAccountIDContextKey)
+		if accountMatches && cachedAccountID == account.ID && body == nil {
+			if cached, ok := c.Get(codexFingerprintIDsContextKey); ok {
+				if cached == nil {
+					return nil
+				}
+				if ids, ok := cached.(*codexFingerprintIDs); ok {
+					return ids
+				}
+			}
+		}
 		cachedBodyHash, bodyMatches := c.Get(codexFingerprintBodyHashContextKey)
 		if accountMatches && bodyMatches && cachedAccountID == account.ID && cachedBodyHash == bodyHash {
-			if cached, ok := c.Get("codex_fingerprint_ids"); ok {
+			if cached, ok := c.Get(codexFingerprintIDsContextKey); ok {
 				if ids, ok := cached.(*codexFingerprintIDs); ok {
 					return ids
 				}
@@ -41,7 +51,7 @@ func resolveOpenAIAttemptFingerprintIDs(c *gin.Context, account *Account, body [
 	}
 	ids := resolveCodexFingerprintIDsFromRequest(account, clientHeaders)
 	if c != nil && account != nil {
-		c.Set("codex_fingerprint_ids", ids)
+		stageCodexFingerprintIDs(c, ids)
 		c.Set(codexFingerprintAccountIDContextKey, account.ID)
 		c.Set(codexFingerprintBodyHashContextKey, bodyHash)
 	}
