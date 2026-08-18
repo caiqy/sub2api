@@ -163,3 +163,5 @@ result.txt
 knowledge-base/
 # Vitest / Vite cache at repo root
 .vite/
+.agents/
+.playwright-mcp/
