@@ -1368,6 +1368,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 		},
 		Extra: map[string]any{
 			"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModePassthrough,
+			"codex_fingerprint_mode":                    "session",
 		},
 	}
 
@@ -1448,7 +1449,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 		t.Fatal("等待 passthrough websocket 结束超时")
 	}
 
-	// 默认 session 指纹模式：session_id 收敛为账号级恒定值（头/体共享同一组预计算
+	// 显式 session 指纹模式：session_id 收敛为账号级恒定值（头/体共享同一组预计算
 	// IDs，见 review-fix B）；prompt_cache_key 回退仅在 off 模式保留。
 	require.Equal(t, resolveConvergedSessionID(account), captureDialer.lastHeaders.Get("session_id"))
 	require.Equal(t, "turn-state-1", captureDialer.lastHeaders.Get(openAIWSTurnStateHeader))

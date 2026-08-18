@@ -3867,6 +3867,7 @@ func TestForwardAsAnthropic_CapturesFinalSessionAndTurnStateHeaders(t *testing.T
 
 	svc := &OpenAIGatewayService{httpUpstream: &openAIErroringUpstreamNoClose{}}
 	account := openAITestOAuthAccount()
+	account.Extra = map[string]any{codexFingerprintModeExtraKey: "session"}
 	const cacheKey = "snapshot-turn-state"
 	svc.bindOpenAICompatSessionTurnState(context.Background(), c, account, cacheKey, "turn-state-final")
 

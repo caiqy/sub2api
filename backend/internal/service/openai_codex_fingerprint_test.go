@@ -809,7 +809,7 @@ func TestBuildUpstreamRequestOpenAIPassthrough_AppliesStagedFingerprint(t *testi
 	stageCodexFingerprintIDs(c, ids)
 
 	body := []byte(`{"model":"gpt-5.6-sol","input":[],"stream":true}`)
-	req, err := svc.buildUpstreamRequestOpenAIPassthrough(context.Background(), c, account, body, "test-token")
+	req, err := svc.buildUpstreamRequestOpenAIPassthrough(context.Background(), c, account, body, body, "test-token")
 	require.NoError(t, err)
 
 	assert.Equal(t, ids.sessionID, req.Header.Get("session_id"), "session 模式下出站 session_id 应为账号级收敛值")
@@ -838,7 +838,7 @@ func TestBuildUpstreamRequestOpenAIPassthrough_OffModeKeepsIsolatedSession(t *te
 	stageCodexFingerprintIDs(c, ids)
 
 	body := []byte(`{"model":"gpt-5.6-sol","input":[],"stream":true}`)
-	req, err := svc.buildUpstreamRequestOpenAIPassthrough(context.Background(), c, account, body, "test-token")
+	req, err := svc.buildUpstreamRequestOpenAIPassthrough(context.Background(), c, account, body, body, "test-token")
 	require.NoError(t, err)
 
 	assert.NotEmpty(t, req.Header.Get("session_id"))

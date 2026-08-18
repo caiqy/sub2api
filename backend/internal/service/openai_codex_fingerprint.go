@@ -34,7 +34,7 @@ func stageCodexFingerprintIDs(c *gin.Context, ids *codexFingerprintIDs) {
 // 非透传与透传两个请求构造器共用本函数，防止应用语义漂移。仅 OAuth 账号
 // 生效（stale 键在账号类型混合 failover 下由该门挡住）。
 func applyStagedCodexFingerprintHeaders(c *gin.Context, account *Account, h http.Header) {
-	if c == nil || account == nil || account.Type != AccountTypeOAuth {
+	if c == nil || account == nil || account.Type != AccountTypeOAuth || account.GetCodexFingerprintMode() == codexFingerprintOff {
 		return
 	}
 	value, ok := c.Get(codexFingerprintIDsContextKey)

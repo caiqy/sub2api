@@ -117,6 +117,7 @@ func TestOpenAIAgentIdentityPassthroughKeepsSessionAndPromptCacheHeaders(t *test
 			"task_id":            key.taskID,
 			"chatgpt_account_id": "account-agent-passthrough",
 		},
+		Extra: map[string]any{codexFingerprintModeExtraKey: "session"},
 	}
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -149,6 +150,7 @@ func TestOpenAIAgentIdentityPassthroughKeepsSessionAndPromptCacheHeaders(t *test
 		Credentials: map[string]any{
 			"chatgpt_account_id": "account-oauth-passthrough",
 		},
+		Extra: map[string]any{codexFingerprintModeExtraKey: "session"},
 	}
 	oauthRecorder := httptest.NewRecorder()
 	oauthContext, _ := gin.CreateTestContext(oauthRecorder)
