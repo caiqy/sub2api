@@ -230,6 +230,12 @@ type OpenAIWSIngressHooks struct {
 	// frame and effectiveModel is the actual model for that turn (including a
 	// passthrough session model when the frame itself omits model).
 	OnOutboundRequest func(turn int, payload []byte, effectiveModel string)
+	// OnClientRequest runs for follow-up client response.create frames before
+	// account mapping or other outbound rewrites are applied. The initial frame
+	// is captured by the WebSocket handler before session routing can rewrite it.
+	OnClientRequest func(turn int, payload []byte)
+	// OnClientResponse runs after an upstream event was successfully written to the client.
+	OnClientResponse func(payload []byte, writeErr error)
 	// MapRequestModel resolves the current turn's client model to the model
 	// that must be written into the upstream response.create frame.
 	MapRequestModel func(turn int, originalModel string) (string, error)

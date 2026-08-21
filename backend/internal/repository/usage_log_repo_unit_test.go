@@ -90,6 +90,10 @@ func TestListUsageLogsWithPagination_UsesHasDetailWhenDetailTableExists(t *testi
 	require.Equal(t, "claude-3.5", *logs[0].UpstreamResponseModel)
 	require.True(t, *logs[0].UpstreamModelMismatch)
 	require.True(t, logs[0].HasDetail)
+	require.NotNil(t, logs[0].RequestBodySize)
+	require.Equal(t, int64(1536), *logs[0].RequestBodySize)
+	require.NotNil(t, logs[0].ResponseBodySize)
+	require.Equal(t, int64(2048), *logs[0].ResponseBodySize)
 	require.NotNil(t, page)
 	require.Equal(t, int64(1), page.Total)
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -104,7 +108,7 @@ func TestListUsageLogsWithPagination_DegradesWhenDetailTableMissing(t *testing.T
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(1)))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT to_regclass('public.usage_log_details') IS NOT NULL")).
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT "+usageLogSelectColumns+", FALSE AS has_detail FROM usage_logs WHERE user_id = $1 ORDER BY id DESC LIMIT $2 OFFSET $3")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT "+usageLogSelectColumns+", request_body_size, response_body_size, FALSE AS has_detail FROM usage_logs WHERE user_id = $1 ORDER BY id DESC LIMIT $2 OFFSET $3")).
 		WithArgs(int64(7), 10, 0).
 		WillReturnRows(sqlmock.NewRows(usageLogListRowColumns()).AddRow(usageLogListRowValues(false)...))
 
@@ -162,6 +166,21 @@ func TestScanUsageLog_SelectColumnsMatchScanDestinations(t *testing.T) {
 	require.Equal(t, len(strings.Split(usageLogSelectColumns, ", ")), scanner.count)
 }
 
+func TestPrepareUsageLogInsertPersistsBodySizes(t *testing.T) {
+	log := &service.UsageLog{
+		DetailSnapshot: &service.UsageLogDetailSnapshot{
+			RequestBody:      service.RequestBodyPreviewSnapshot(`{"prompt":"hello"}`, 1536),
+			ResponseBody:     strings.Repeat("r", 2048),
+			ResponseBodySize: func() *int64 { size := int64(2048); return &size }(),
+		},
+	}
+
+	prepared := prepareUsageLogInsert(log)
+
+	require.Equal(t, int64(1536), *prepared.args[len(prepared.args)-3].(*int64))
+	require.Equal(t, int64(2048), *prepared.args[len(prepared.args)-2].(*int64))
+}
+
 func usageLogListRowColumns() []string {
 	return []string{
 		"id", "user_id", "api_key_id", "account_id", "request_id", "model", "requested_model", "upstream_model", "upstream_response_model", "upstream_model_mismatch", "group_id", "subscription_id",
@@ -170,7 +189,7 @@ func usageLogListRowColumns() []string {
 		"account_rate_multiplier", "billing_type", "request_type", "stream", "openai_ws_mode", "duration_ms", "first_token_ms",
 		"user_agent", "ip_address", "image_count", "image_size", "image_input_size", "image_output_size", "image_size_source", "image_size_breakdown",
 		"video_count", "video_resolution", "video_duration_seconds", "service_tier", "reasoning_effort",
-		"inbound_endpoint", "upstream_endpoint", "cache_ttl_overridden", "long_context_billing_applied", "channel_id", "model_mapping_chain", "billing_tier", "billing_mode", "account_stats_cost", "session_id", "created_at", "has_detail",
+		"inbound_endpoint", "upstream_endpoint", "cache_ttl_overridden", "long_context_billing_applied", "channel_id", "model_mapping_chain", "billing_tier", "billing_mode", "account_stats_cost", "session_id", "created_at", "request_body_size", "response_body_size", "has_detail",
 	}
 }
 
@@ -182,6 +201,6 @@ func usageLogListRowValues(hasDetail bool) []driver.Value {
 		0, 0.0, 0, 0.0, 0.1, 0.2, 0.0, 0.0, 0.3, 0.3, 1.0,
 		nil, int16(0), int16(service.RequestTypeSync), false, false, nil, nil,
 		nil, nil, 0, nil, nil, nil, nil, nil, 0, nil, nil, nil, nil,
-		nil, nil, false, false, nil, nil, nil, nil, nil, nil, createdAt, hasDetail,
+		nil, nil, false, false, nil, nil, nil, nil, nil, nil, createdAt, int64(1536), int64(2048), hasDetail,
 	}
 }

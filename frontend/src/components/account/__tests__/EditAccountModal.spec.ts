@@ -663,7 +663,7 @@ describe('EditAccountModal', () => {
     }))
   })
 
-  it('submits empty extra object when the last extra setting is cleared', async () => {
+  it('keeps explicit OpenAI WebSocket off mode when the last editable extra setting is cleared', async () => {
     const wrapper = mountModal(buildAccount({
       extra: {
         passthrough_fields_enabled: true,
@@ -679,7 +679,11 @@ describe('EditAccountModal', () => {
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
     expect(updateAccountMock.mock.calls[0]?.[1]).toEqual(expect.objectContaining({
-      extra: { openai_long_context_billing_enabled: false }
+      extra: {
+        openai_long_context_billing_enabled: false,
+        openai_apikey_responses_websockets_v2_mode: 'off',
+        openai_apikey_responses_websockets_v2_enabled: false
+      }
     }))
   })
 
@@ -1039,7 +1043,7 @@ describe('EditAccountModal', () => {
     )
   })
 
-  it('removes the persisted OAuth fingerprint mode for session without dropping unrelated extra', async () => {
+  it('removes the persisted OAuth fingerprint mode for off without dropping unrelated extra', async () => {
     const account = buildAccount({
       type: 'oauth',
       extra: {
@@ -1049,7 +1053,7 @@ describe('EditAccountModal', () => {
     })
     const wrapper = mountModal(account)
 
-    await wrapper.get('[data-testid="edit-codex-fingerprint-mode-select"]').setValue('session')
+    await wrapper.get('[data-testid="edit-codex-fingerprint-mode-select"]').setValue('off')
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     await flushPromises()
 
@@ -1059,7 +1063,7 @@ describe('EditAccountModal', () => {
     expect(extra?.local_apply_sentinel).toBe('preserve-me')
   })
 
-  it.each(['off', 'device', 'full'] as const)(
+  it.each(['device', 'session', 'full'] as const)(
     'persists the explicit OpenAI OAuth Codex fingerprint mode %s',
     async (mode) => {
       const account = buildAccount({ type: 'oauth' })

@@ -64,6 +64,14 @@ func (UsageLog) Fields() []ent.Field {
 		field.Bool("upstream_model_mismatch").
 			Optional().
 			Nillable(),
+		field.Int64("request_body_size").
+			Optional().
+			Nillable().
+			Comment("请求体大小（字节）"),
+		field.Int64("response_body_size").
+			Optional().
+			Nillable().
+			Comment("响应体大小（字节）"),
 		field.Int64("channel_id").Optional().Nillable().Comment("渠道 ID"),
 		field.String("model_mapping_chain").MaxLen(500).Optional().Nillable().Comment("模型映射链"),
 		field.String("billing_tier").MaxLen(50).Optional().Nillable().Comment("计费层级标签"),

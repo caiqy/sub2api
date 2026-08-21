@@ -69,6 +69,12 @@ const messages: Record<string, string> = {
 	'usage.modelMismatch': 'Different model',
 	'usage.modelMatched': 'Matched',
 	'usage.modelUnobserved': 'Not observed',
+  'usage.requestBodySize': 'Request body',
+  'usage.responseBodySize': 'Response body',
+  'usage.bodySize': 'Body size',
+  'usage.bodySizeInput': 'Input',
+  'usage.bodySizeOutput': 'Output',
+  'usage.bodySizeTotal': 'Total',
 }
 
 vi.mock('vue-i18n', async () => {
@@ -90,6 +96,7 @@ const DataTableStub = {
         <slot name="cell-billing_mode" :row="row" />
         <slot name="cell-tokens" :row="row" />
         <slot name="cell-cost" :row="row" />
+        <slot name="cell-body_size" :row="row" />
         <slot name="cell-latency" :row="row" />
         <slot name="cell-actions" :row="row" />
         <slot name="cell-request_id" :row="row" />
@@ -578,6 +585,33 @@ describe('admin UsageTable tooltip', () => {
     expect(text).toContain('Per-image price')
     expect(text).toContain('not recorded')
     expect(text).not.toContain('(2K)')
+  })
+})
+
+describe('admin UsageTable body sizes', () => {
+  it('renders input, output, and total sizes as a compact summary', () => {
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [{ request_id: 'req-body-size', request_body_size: 1536, response_body_size: 2048 }],
+        loading: false,
+        columns: [],
+      },
+      global: {
+        stubs: {
+          DataTable: DataTableStub,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('Input:')
+    expect(wrapper.text()).toContain('1.5 KB')
+    expect(wrapper.text()).toContain('Output:')
+    expect(wrapper.text()).toContain('2 KB')
+    expect(wrapper.text()).toContain('Total:')
+    expect(wrapper.text()).toContain('3.5 KB')
   })
 })
 

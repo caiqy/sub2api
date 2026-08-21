@@ -81,8 +81,10 @@ type OpenAIAccountScheduleRequest struct {
 	RequiredTransport       OpenAIUpstreamTransport
 	RequiredCapability      OpenAIEndpointCapability
 	RequiredImageCapability OpenAIImagesCapability
-	RequireCompact          bool
-	ExcludedIDs             map[int64]struct{}
+	// RequireCompact is only for legacy /responses/compact capability filtering
+	// and compact_model_mapping; native remote compaction v2 leaves it false.
+	RequireCompact bool
+	ExcludedIDs    map[int64]struct{}
 }
 
 type OpenAIAccountScheduleDecision struct {
@@ -144,7 +146,7 @@ func accountSatisfiesPrivacyRequirement(account *Account, group *Group) bool {
 }
 
 func recordPrivacyRequirementError(ctx context.Context, service *OpenAIGatewayService, account *Account, group *Group) {
-	if service == nil || service.accountRepo == nil || account == nil || group == nil || !group.RequirePrivacySet {
+	if service == nil || service.accountRepo == nil || account == nil || group == nil || !group.RequirePrivacySet || accountSatisfiesPrivacyRequirement(account, group) {
 		return
 	}
 	_ = service.accountRepo.SetError(ctx, account.ID,
@@ -1226,6 +1228,7 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 	budget *openAISelectionProbeBudget,
 ) (*AccountSelectionResult, bool, error) {
 	compactBlocked := false
+	schedGroup := schedulerGroupForRequest(ctx, s.service, req.GroupID)
 	release := func(result *AcquireResult) {
 		if result != nil && result.ReleaseFunc != nil {
 			result.ReleaseFunc()
@@ -1255,7 +1258,8 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 			break
 		}
 		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.GroupID, req.Platform, req.RequestedModel, false, req.RequiredCapability)
-		if fresh == nil || (fresh.GroupIDs != nil && !openAIStickyAccountMatchesGroup(fresh, req.GroupID)) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
+		if fresh == nil || (fresh.GroupIDs != nil && !openAIStickyAccountMatchesGroup(fresh, req.GroupID)) || !accountSatisfiesPrivacyRequirement(fresh, schedGroup) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
+			recordPrivacyRequirementError(ctx, s.service, fresh, schedGroup)
 			release(result)
 			continue
 		}
@@ -1308,6 +1312,7 @@ func (s *defaultOpenAIAccountScheduler) tryFallbackToWeightedSticky(
 	if !req.StickyWeighted {
 		return nil, nil
 	}
+	schedGroup := schedulerGroupForRequest(ctx, s.service, req.GroupID)
 	for _, accountID := range []int64{req.StickyPreviousAccountID, req.StickyAccountID} {
 		if accountID <= 0 {
 			continue
@@ -1325,7 +1330,8 @@ func (s *defaultOpenAIAccountScheduler) tryFallbackToWeightedSticky(
 			continue
 		}
 		account = s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
-		if account == nil || !s.isAccountRequestCompatible(ctx, account, req) || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
+		if account == nil || !accountSatisfiesPrivacyRequirement(account, schedGroup) || !s.isAccountRequestCompatible(ctx, account, req) || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
+			recordPrivacyRequirementError(ctx, s.service, account, schedGroup)
 			continue
 		}
 		// 粘性绑定只证明绑定时账号在分组内；账号被移出分组后绑定仍会在 TTL 内存活，
@@ -1671,6 +1677,7 @@ func (s *defaultOpenAIAccountScheduler) finishLoadBalanceSelectionFallback(
 	candidateCount := attempt.candidateCount
 	topK := attempt.topK
 	loadSkew := attempt.loadSkew
+	schedGroup := schedulerGroupForRequest(ctx, s.service, req.GroupID)
 
 	if len(attempt.selectionOrder) == 0 {
 		return nil, candidateCount, topK, loadSkew, noAvailableOpenAISelectionError(req.RequestedModel, attempt.compactBlocked, filterStats.summary("selection_order_empty"))
@@ -1711,7 +1718,8 @@ func (s *defaultOpenAIAccountScheduler) finishLoadBalanceSelectionFallback(
 				return nil, candidateCount, topK, loadSkew, noAvailableOpenAISelectionError(req.RequestedModel, compactBlocked, filterStats.summary("selection_order_exhausted"))
 			}
 			fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.GroupID, req.Platform, req.RequestedModel, false, req.RequiredCapability)
-			if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
+			if fresh == nil || !accountSatisfiesPrivacyRequirement(fresh, schedGroup) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
+				recordPrivacyRequirementError(ctx, s.service, fresh, schedGroup)
 				continue
 			}
 			if req.RequireCompact && openAICompactSupportTier(fresh) == 0 {
@@ -2328,11 +2336,9 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	// 入口已在请求开始经 WithOpenAIRequestPricingContext 装门并固定 pricingAt，
 	// 此处对同分组门直接复用（failover 重入阈值稳定），仅为不经 handler 装配的
 	// 内部调用兜底。图片/视频调度不在利润门范围：requiredImageCapability 非空的
-	// Images 调度不装门；requiredCapability == OpenAIEndpointCapabilityResponses
-	// 当前仅显式生图意图的 /v1/responses 设置（HTTP openAIResponsesRequiredCapability
-	// 与 WS 桥同款判定），同样不装门——若未来把该 capability 用于非生图流量，
-	// 需要同步收窄本条件（有测试钉死该映射）。
-	if requiredImageCapability == "" && requiredCapability != OpenAIEndpointCapabilityResponses {
+	// Images 调度不装门；其他使用 Responses 能力的文本请求（包括原生远程压缩）
+	// 仍须装门。其余媒体路径通过 WithOpenAIProfitControlSuppressed 显式跳过。
+	if requiredImageCapability == "" {
 		ctx = s.withOpenAIProfitControlGate(ctx, groupID)
 	}
 	platform = normalizeOpenAICompatiblePlatform(platform)

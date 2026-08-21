@@ -569,7 +569,9 @@ type UsageLog struct {
 type AdminUsageLog struct {
 	UsageLog
 
-	HasDetail bool `json:"has_detail"`
+	HasDetail        bool   `json:"has_detail"`
+	RequestBodySize  *int64 `json:"request_body_size,omitempty"`
+	ResponseBodySize *int64 `json:"response_body_size,omitempty"`
 	// UpstreamModel is the actual model sent to the upstream provider after mapping.
 	// Omitted when no mapping was applied (requested model was used as-is).
 	UpstreamModel *string `json:"upstream_model,omitempty"`

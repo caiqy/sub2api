@@ -1841,6 +1841,9 @@ export interface UsageLogAccountSummary {
 export interface AdminUsageLog extends UsageLog {
   // 是否存在明细数据（仅管理员可见）
   has_detail: boolean
+  // 请求/响应体大小快照（字节），独立于可清理的详情记录
+  request_body_size?: number | null
+  response_body_size?: number | null
   upstream_model?: string | null
   upstream_response_model?: string | null
   upstream_model_mismatch?: boolean | null

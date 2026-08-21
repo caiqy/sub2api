@@ -230,6 +230,20 @@
           </div>
         </template>
 
+        <template #cell-body_size="{ row }">
+          <div class="flex items-stretch gap-2 py-0.5">
+            <span class="w-1 shrink-0 rounded-full bg-emerald-500" aria-hidden="true"></span>
+            <div class="grid grid-cols-[max-content_max-content] items-baseline gap-x-2 gap-y-0.5 text-xs leading-4">
+              <span class="text-gray-400 dark:text-gray-500">{{ t('usage.bodySizeInput') }}:</span>
+              <span class="whitespace-nowrap font-medium tabular-nums text-emerald-500 dark:text-emerald-400">{{ formatBodySize(row.request_body_size) }}</span>
+              <span class="text-gray-400 dark:text-gray-500">{{ t('usage.bodySizeOutput') }}:</span>
+              <span class="whitespace-nowrap font-medium tabular-nums text-sky-500 dark:text-sky-400">{{ formatBodySize(row.response_body_size) }}</span>
+              <span class="text-gray-400 dark:text-gray-500">{{ t('usage.bodySizeTotal') }}:</span>
+              <span class="whitespace-nowrap font-medium tabular-nums text-cyan-500 dark:text-cyan-400">{{ formatTotalBodySize(row) }}</span>
+            </div>
+          </div>
+        </template>
+
         <!-- 合并首字/总耗时的健康度列：左侧色条上端随首字档、下端随总耗时档，中段(40%-60%)短渐变过渡，便于纵向扫视整体健康状况 -->
         <template #cell-latency="{ row }">
           <div class="flex items-stretch gap-2">
@@ -534,7 +548,7 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
-import { formatDateTime, formatReasoningEffort } from '@/utils/format'
+import { formatBytes, formatDateTime, formatReasoningEffort } from '@/utils/format'
 import { formatCacheTokens, formatMultiplier } from '@/utils/formatters'
 import { formatTokenPricePerMillion } from '@/utils/usagePricing'
 import { getUsageServiceTierLabel } from '@/utils/usageServiceTier'
@@ -715,6 +729,22 @@ const getRequestTypeBadgeClass = (row: AdminUsageLog): string => {
 
 const formatUserAgent = (ua: string): string => {
   return ua
+}
+
+const formatBodySize = (bytes: number | null | undefined): string => {
+  if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return '-'
+  return formatBytes(bytes, 1)
+}
+
+const formatTotalBodySize = (row: AdminUsageLog): string => {
+  const input = row.request_body_size
+  const output = row.response_body_size
+  if (
+    input == null || output == null ||
+    !Number.isFinite(input) || !Number.isFinite(output) ||
+    input < 0 || output < 0
+  ) return '-'
+  return formatBytes(input + output, 1)
 }
 
 // 超过 1 分钟简化为 "Xm Ys"，免去人工换算（超过 1 小时再进位为 "Xh Ym"）

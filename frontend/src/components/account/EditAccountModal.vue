@@ -3034,7 +3034,7 @@ const autoPause7dDisabled = ref(false)
 const upstreamBillingAutoProbeEnabled = ref(false)
 const upstreamBillingRateSyncEnabled = ref(false)
 type CodexFingerprintMode = 'off' | 'device' | 'session' | 'full'
-const codexFingerprintMode = ref<CodexFingerprintMode>('session')
+const codexFingerprintMode = ref<CodexFingerprintMode>('off')
 type CodexImageToolMode = 'inherit' | 'enabled' | 'disabled' | 'block'
 const codexImageToolMode = ref<CodexImageToolMode>('inherit')
 type AnthropicAPIKeyAuthScheme = 'x_api_key' | 'authorization_bearer'
@@ -3463,7 +3463,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   codexCLIOnlyEnabled.value = false
   codexCLIOnlyAppServerEnabled.value = false
-  codexFingerprintMode.value = 'session'
+  codexFingerprintMode.value = 'off'
   codexImageToolMode.value = 'inherit'
   anthropicPassthroughEnabled.value = false
   anthropicAPIKeyAuthScheme.value = 'x_api_key'
@@ -3519,9 +3519,10 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     }
     if (newAccount.type === 'oauth') {
       const fpMode = extra?.codex_fingerprint_mode as string | undefined
+      // 缺省/非法值按 off 呈现，与后端 GetCodexFingerprintMode 的 opt-in 语义一致（#5610）
       codexFingerprintMode.value = (['off', 'device', 'session', 'full'].includes(fpMode || '')
         ? fpMode as CodexFingerprintMode
-        : 'session')
+        : 'off')
     }
     const compactMappings = credentials?.compact_model_mapping as Record<string, string> | undefined
     if (compactMappings && typeof compactMappings === 'object') {
@@ -4439,21 +4440,11 @@ function applyOpenAIExtra(extra: Record<string, unknown>) {
   const hadCodexCLIOnlyEnabled = (props.account.extra as Record<string, unknown> | undefined)?.codex_cli_only === true
 
   if (props.account.type === 'oauth' || props.account.type === 'setup-token') {
-    if (openaiOAuthResponsesWebSocketV2Mode.value === OPENAI_WS_MODE_OFF) {
-      delete extra.openai_oauth_responses_websockets_v2_mode
-      delete extra.openai_oauth_responses_websockets_v2_enabled
-    } else {
-      extra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
-      extra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)
-    }
+    extra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
+    extra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)
   } else {
-    if (openaiAPIKeyResponsesWebSocketV2Mode.value === OPENAI_WS_MODE_OFF) {
-      delete extra.openai_apikey_responses_websockets_v2_mode
-      delete extra.openai_apikey_responses_websockets_v2_enabled
-    } else {
-      extra.openai_apikey_responses_websockets_v2_mode = openaiAPIKeyResponsesWebSocketV2Mode.value
-      extra.openai_apikey_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiAPIKeyResponsesWebSocketV2Mode.value)
-    }
+    extra.openai_apikey_responses_websockets_v2_mode = openaiAPIKeyResponsesWebSocketV2Mode.value
+    extra.openai_apikey_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiAPIKeyResponsesWebSocketV2Mode.value)
   }
 
   delete extra.responses_websockets_v2_enabled
@@ -4559,8 +4550,8 @@ function applyOpenAIExtra(extra: Record<string, unknown>) {
   }
 
   if (props.account.type === 'oauth') {
-    // 默认 session 不写入：删除字段，后端缺失时默认 session。
-    if (codexFingerprintMode.value !== 'session') {
+    // 默认 off 不写入；device/session/full 必须显式 opt-in。
+    if (codexFingerprintMode.value !== 'off') {
       extra.codex_fingerprint_mode = codexFingerprintMode.value
     } else {
       delete extra.codex_fingerprint_mode

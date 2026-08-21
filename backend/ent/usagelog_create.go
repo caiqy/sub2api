@@ -114,6 +114,34 @@ func (_c *UsageLogCreate) SetNillableUpstreamModelMismatch(v *bool) *UsageLogCre
 	return _c
 }
 
+// SetRequestBodySize sets the "request_body_size" field.
+func (_c *UsageLogCreate) SetRequestBodySize(v int64) *UsageLogCreate {
+	_c.mutation.SetRequestBodySize(v)
+	return _c
+}
+
+// SetNillableRequestBodySize sets the "request_body_size" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableRequestBodySize(v *int64) *UsageLogCreate {
+	if v != nil {
+		_c.SetRequestBodySize(*v)
+	}
+	return _c
+}
+
+// SetResponseBodySize sets the "response_body_size" field.
+func (_c *UsageLogCreate) SetResponseBodySize(v int64) *UsageLogCreate {
+	_c.mutation.SetResponseBodySize(v)
+	return _c
+}
+
+// SetNillableResponseBodySize sets the "response_body_size" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableResponseBodySize(v *int64) *UsageLogCreate {
+	if v != nil {
+		_c.SetResponseBodySize(*v)
+	}
+	return _c
+}
+
 // SetChannelID sets the "channel_id" field.
 func (_c *UsageLogCreate) SetChannelID(v int64) *UsageLogCreate {
 	_c.mutation.SetChannelID(v)
@@ -1011,6 +1039,14 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 		_spec.SetField(usagelog.FieldUpstreamModelMismatch, field.TypeBool, value)
 		_node.UpstreamModelMismatch = &value
 	}
+	if value, ok := _c.mutation.RequestBodySize(); ok {
+		_spec.SetField(usagelog.FieldRequestBodySize, field.TypeInt64, value)
+		_node.RequestBodySize = &value
+	}
+	if value, ok := _c.mutation.ResponseBodySize(); ok {
+		_spec.SetField(usagelog.FieldResponseBodySize, field.TypeInt64, value)
+		_node.ResponseBodySize = &value
+	}
 	if value, ok := _c.mutation.ChannelID(); ok {
 		_spec.SetField(usagelog.FieldChannelID, field.TypeInt64, value)
 		_node.ChannelID = &value
@@ -1437,6 +1473,54 @@ func (u *UsageLogUpsert) UpdateUpstreamModelMismatch() *UsageLogUpsert {
 // ClearUpstreamModelMismatch clears the value of the "upstream_model_mismatch" field.
 func (u *UsageLogUpsert) ClearUpstreamModelMismatch() *UsageLogUpsert {
 	u.SetNull(usagelog.FieldUpstreamModelMismatch)
+	return u
+}
+
+// SetRequestBodySize sets the "request_body_size" field.
+func (u *UsageLogUpsert) SetRequestBodySize(v int64) *UsageLogUpsert {
+	u.Set(usagelog.FieldRequestBodySize, v)
+	return u
+}
+
+// UpdateRequestBodySize sets the "request_body_size" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateRequestBodySize() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldRequestBodySize)
+	return u
+}
+
+// AddRequestBodySize adds v to the "request_body_size" field.
+func (u *UsageLogUpsert) AddRequestBodySize(v int64) *UsageLogUpsert {
+	u.Add(usagelog.FieldRequestBodySize, v)
+	return u
+}
+
+// ClearRequestBodySize clears the value of the "request_body_size" field.
+func (u *UsageLogUpsert) ClearRequestBodySize() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldRequestBodySize)
+	return u
+}
+
+// SetResponseBodySize sets the "response_body_size" field.
+func (u *UsageLogUpsert) SetResponseBodySize(v int64) *UsageLogUpsert {
+	u.Set(usagelog.FieldResponseBodySize, v)
+	return u
+}
+
+// UpdateResponseBodySize sets the "response_body_size" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateResponseBodySize() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldResponseBodySize)
+	return u
+}
+
+// AddResponseBodySize adds v to the "response_body_size" field.
+func (u *UsageLogUpsert) AddResponseBodySize(v int64) *UsageLogUpsert {
+	u.Add(usagelog.FieldResponseBodySize, v)
+	return u
+}
+
+// ClearResponseBodySize clears the value of the "response_body_size" field.
+func (u *UsageLogUpsert) ClearResponseBodySize() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldResponseBodySize)
 	return u
 }
 
@@ -2314,6 +2398,62 @@ func (u *UsageLogUpsertOne) UpdateUpstreamModelMismatch() *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) ClearUpstreamModelMismatch() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearUpstreamModelMismatch()
+	})
+}
+
+// SetRequestBodySize sets the "request_body_size" field.
+func (u *UsageLogUpsertOne) SetRequestBodySize(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetRequestBodySize(v)
+	})
+}
+
+// AddRequestBodySize adds v to the "request_body_size" field.
+func (u *UsageLogUpsertOne) AddRequestBodySize(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddRequestBodySize(v)
+	})
+}
+
+// UpdateRequestBodySize sets the "request_body_size" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateRequestBodySize() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateRequestBodySize()
+	})
+}
+
+// ClearRequestBodySize clears the value of the "request_body_size" field.
+func (u *UsageLogUpsertOne) ClearRequestBodySize() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearRequestBodySize()
+	})
+}
+
+// SetResponseBodySize sets the "response_body_size" field.
+func (u *UsageLogUpsertOne) SetResponseBodySize(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetResponseBodySize(v)
+	})
+}
+
+// AddResponseBodySize adds v to the "response_body_size" field.
+func (u *UsageLogUpsertOne) AddResponseBodySize(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddResponseBodySize(v)
+	})
+}
+
+// UpdateResponseBodySize sets the "response_body_size" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateResponseBodySize() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateResponseBodySize()
+	})
+}
+
+// ClearResponseBodySize clears the value of the "response_body_size" field.
+func (u *UsageLogUpsertOne) ClearResponseBodySize() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearResponseBodySize()
 	})
 }
 
@@ -3470,6 +3610,62 @@ func (u *UsageLogUpsertBulk) UpdateUpstreamModelMismatch() *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) ClearUpstreamModelMismatch() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearUpstreamModelMismatch()
+	})
+}
+
+// SetRequestBodySize sets the "request_body_size" field.
+func (u *UsageLogUpsertBulk) SetRequestBodySize(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetRequestBodySize(v)
+	})
+}
+
+// AddRequestBodySize adds v to the "request_body_size" field.
+func (u *UsageLogUpsertBulk) AddRequestBodySize(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddRequestBodySize(v)
+	})
+}
+
+// UpdateRequestBodySize sets the "request_body_size" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateRequestBodySize() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateRequestBodySize()
+	})
+}
+
+// ClearRequestBodySize clears the value of the "request_body_size" field.
+func (u *UsageLogUpsertBulk) ClearRequestBodySize() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearRequestBodySize()
+	})
+}
+
+// SetResponseBodySize sets the "response_body_size" field.
+func (u *UsageLogUpsertBulk) SetResponseBodySize(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetResponseBodySize(v)
+	})
+}
+
+// AddResponseBodySize adds v to the "response_body_size" field.
+func (u *UsageLogUpsertBulk) AddResponseBodySize(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddResponseBodySize(v)
+	})
+}
+
+// UpdateResponseBodySize sets the "response_body_size" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateResponseBodySize() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateResponseBodySize()
+	})
+}
+
+// ClearResponseBodySize clears the value of the "response_body_size" field.
+func (u *UsageLogUpsertBulk) ClearResponseBodySize() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearResponseBodySize()
 	})
 }
 

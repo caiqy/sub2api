@@ -767,6 +767,7 @@ func TestProxyResponsesWebSocketFromClientForGrokUsesXAIHTTPBridgeAndPreservesMa
 	}
 
 	errCh := make(chan error, 1)
+	var clientRequests [][]byte
 	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := coderws.Accept(w, r, &coderws.AcceptOptions{CompressionMode: coderws.CompressionContextTakeover})
 		if err != nil {
@@ -795,6 +796,9 @@ func TestProxyResponsesWebSocketFromClientForGrokUsesXAIHTTPBridgeAndPreservesMa
 		ginCtx.Set("api_key", &APIKey{ID: 7101})
 
 		errCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "access-token", firstMessage, &OpenAIWSIngressHooks{
+			OnClientRequest: func(_ int, payload []byte) {
+				clientRequests = append(clientRequests, append([]byte(nil), payload...))
+			},
 			MapRequestModel: func(_ int, originalModel string) (string, error) {
 				if originalModel == "channel-alias" {
 					return "grok-4.3", nil
@@ -869,6 +873,9 @@ func TestProxyResponsesWebSocketFromClientForGrokUsesXAIHTTPBridgeAndPreservesMa
 
 	require.Len(t, upstream.requests, 3)
 	require.Len(t, upstream.bodies, 3)
+	require.Len(t, clientRequests, 2)
+	require.Equal(t, "channel-alias", gjson.GetBytes(clientRequests[0], "model").String())
+	require.Equal(t, "grok-4.3", gjson.GetBytes(clientRequests[1], "model").String())
 	require.Equal(t, xai.DefaultCLIBaseURL+"/responses", upstream.lastReq.URL.String())
 	require.Equal(t, "Bearer access-token", upstream.lastReq.Header.Get("Authorization"))
 	require.Equal(t, xai.CLIUserAgent(xai.CLIClientVersion), upstream.lastReq.Header.Get("User-Agent"))

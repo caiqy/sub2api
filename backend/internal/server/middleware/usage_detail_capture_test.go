@@ -187,6 +187,8 @@ func TestUsageDetailCaptureMiddleware_CapturesRequestAndResponse(t *testing.T) {
 	require.Equal(t, "request-preview", snapshotRequest.RequestBody)
 	require.Contains(t, snapshotRequest.ResponseHeaders, "X-Trace: abc")
 	require.Equal(t, "hello world", snapshotRequest.ResponseBody)
+	require.NotNil(t, snapshotRequest.ResponseBodySize)
+	require.Equal(t, int64(len("hello world")), *snapshotRequest.ResponseBodySize)
 }
 
 func TestUsageDetailCaptureMiddleware_RequestHeadersIncludeMethodAndAbsoluteURL(t *testing.T) {
@@ -401,6 +403,34 @@ func TestUsageDetailCapture_SetUsageResponseSnapshot_AllowsExplicitEmptyOverride
 	require.NotNil(t, snapshot)
 	require.Equal(t, "", snapshot.ResponseHeaders)
 	require.Equal(t, "", snapshot.ResponseBody)
+	require.Nil(t, snapshot.ResponseBodySize)
+}
+
+func TestUsageDetailCapture_ResetUsageResponseStartsNewTurnSnapshot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var first, second *UsageDetailSnapshot
+	r := gin.New()
+	r.Use(UsageDetailCapture())
+	r.GET("/turns", func(c *gin.Context) {
+		service.SetUsageRequestBody(c, "first request")
+		_, err := c.Writer.Write([]byte("first response"))
+		require.NoError(t, err)
+		first = BuildUsageDetailSnapshot(c)
+
+		service.ResetUsageResponse(c)
+		service.SetUsageRequestBody(c, "second request")
+		_, err = c.Writer.Write([]byte("second response"))
+		require.NoError(t, err)
+		second = BuildUsageDetailSnapshot(c)
+	})
+
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/turns", nil))
+	require.Equal(t, "first request", first.RequestBody)
+	require.Equal(t, "first response", first.ResponseBody)
+	require.Equal(t, "second request", second.RequestBody)
+	require.Equal(t, "second response", second.ResponseBody)
+	require.Equal(t, int64(len("second response")), *second.ResponseBodySize)
 }
 
 type failingReadCloser struct {

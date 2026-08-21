@@ -100,6 +100,16 @@ func UpstreamModelMismatch(v bool) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldUpstreamModelMismatch, v))
 }
 
+// RequestBodySize applies equality check predicate on the "request_body_size" field. It's identical to RequestBodySizeEQ.
+func RequestBodySize(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldRequestBodySize, v))
+}
+
+// ResponseBodySize applies equality check predicate on the "response_body_size" field. It's identical to ResponseBodySizeEQ.
+func ResponseBodySize(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldResponseBodySize, v))
+}
+
 // ChannelID applies equality check predicate on the "channel_id" field. It's identical to ChannelIDEQ.
 func ChannelID(v int64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldChannelID, v))
@@ -718,6 +728,106 @@ func UpstreamModelMismatchIsNil() predicate.UsageLog {
 // UpstreamModelMismatchNotNil applies the NotNil predicate on the "upstream_model_mismatch" field.
 func UpstreamModelMismatchNotNil() predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldNotNull(FieldUpstreamModelMismatch))
+}
+
+// RequestBodySizeEQ applies the EQ predicate on the "request_body_size" field.
+func RequestBodySizeEQ(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldRequestBodySize, v))
+}
+
+// RequestBodySizeNEQ applies the NEQ predicate on the "request_body_size" field.
+func RequestBodySizeNEQ(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldRequestBodySize, v))
+}
+
+// RequestBodySizeIn applies the In predicate on the "request_body_size" field.
+func RequestBodySizeIn(vs ...int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldRequestBodySize, vs...))
+}
+
+// RequestBodySizeNotIn applies the NotIn predicate on the "request_body_size" field.
+func RequestBodySizeNotIn(vs ...int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldRequestBodySize, vs...))
+}
+
+// RequestBodySizeGT applies the GT predicate on the "request_body_size" field.
+func RequestBodySizeGT(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldRequestBodySize, v))
+}
+
+// RequestBodySizeGTE applies the GTE predicate on the "request_body_size" field.
+func RequestBodySizeGTE(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldRequestBodySize, v))
+}
+
+// RequestBodySizeLT applies the LT predicate on the "request_body_size" field.
+func RequestBodySizeLT(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldRequestBodySize, v))
+}
+
+// RequestBodySizeLTE applies the LTE predicate on the "request_body_size" field.
+func RequestBodySizeLTE(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldRequestBodySize, v))
+}
+
+// RequestBodySizeIsNil applies the IsNil predicate on the "request_body_size" field.
+func RequestBodySizeIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldRequestBodySize))
+}
+
+// RequestBodySizeNotNil applies the NotNil predicate on the "request_body_size" field.
+func RequestBodySizeNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldRequestBodySize))
+}
+
+// ResponseBodySizeEQ applies the EQ predicate on the "response_body_size" field.
+func ResponseBodySizeEQ(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldResponseBodySize, v))
+}
+
+// ResponseBodySizeNEQ applies the NEQ predicate on the "response_body_size" field.
+func ResponseBodySizeNEQ(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldResponseBodySize, v))
+}
+
+// ResponseBodySizeIn applies the In predicate on the "response_body_size" field.
+func ResponseBodySizeIn(vs ...int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldResponseBodySize, vs...))
+}
+
+// ResponseBodySizeNotIn applies the NotIn predicate on the "response_body_size" field.
+func ResponseBodySizeNotIn(vs ...int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldResponseBodySize, vs...))
+}
+
+// ResponseBodySizeGT applies the GT predicate on the "response_body_size" field.
+func ResponseBodySizeGT(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldResponseBodySize, v))
+}
+
+// ResponseBodySizeGTE applies the GTE predicate on the "response_body_size" field.
+func ResponseBodySizeGTE(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldResponseBodySize, v))
+}
+
+// ResponseBodySizeLT applies the LT predicate on the "response_body_size" field.
+func ResponseBodySizeLT(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldResponseBodySize, v))
+}
+
+// ResponseBodySizeLTE applies the LTE predicate on the "response_body_size" field.
+func ResponseBodySizeLTE(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldResponseBodySize, v))
+}
+
+// ResponseBodySizeIsNil applies the IsNil predicate on the "response_body_size" field.
+func ResponseBodySizeIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldResponseBodySize))
+}
+
+// ResponseBodySizeNotNil applies the NotNil predicate on the "response_body_size" field.
+func ResponseBodySizeNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldResponseBodySize))
 }
 
 // ChannelIDEQ applies the EQ predicate on the "channel_id" field.

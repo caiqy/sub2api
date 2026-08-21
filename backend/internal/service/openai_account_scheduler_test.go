@@ -1987,6 +1987,158 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_PrivacyRecheckRecordsAc
 	require.Contains(t, repo.setErrors[stickySnapshot.ID], "Privacy not set")
 }
 
+func TestDefaultOpenAIAccountScheduler_RechecksPrivacyAfterDBRefresh(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	ctx := context.Background()
+	groupID := int64(101132)
+	staleSnapshotAccount := Account{
+		ID:          37141,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    0,
+		GroupIDs:    []int64{groupID},
+		Extra:       map[string]any{"privacy_mode": PrivacyModeTrainingOff},
+	}
+	staleDBAccount := staleSnapshotAccount
+	staleDBAccount.Extra = map[string]any{}
+	backupAccount := Account{
+		ID:          37142,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    5,
+		GroupIDs:    []int64{groupID},
+		Extra:       map[string]any{"privacy_mode": PrivacyModeTrainingOff},
+	}
+	repo := schedulerTestOpenAIAccountRepo{
+		accounts:  []Account{staleDBAccount, backupAccount},
+		setErrors: map[int64]string{},
+	}
+	acquiredIDs := []int64{}
+	releasedIDs := []int64{}
+	snapshotCfg := &config.Config{}
+	snapshotCfg.Gateway.Scheduling.DbFallbackEnabled = true
+	svc := &OpenAIGatewayService{
+		accountRepo: repo,
+		cfg:         newOpenAIStickyEnabledTestConfig(),
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{
+			acquiredIDs: &acquiredIDs,
+			releasedIDs: &releasedIDs,
+		}),
+		schedulerSnapshot: NewSchedulerSnapshotService(&openAISnapshotCacheStub{
+			snapshotAccounts: []*Account{&staleSnapshotAccount, &backupAccount},
+			accountsByID: map[int64]*Account{
+				staleSnapshotAccount.ID: &staleSnapshotAccount,
+				backupAccount.ID:        &backupAccount,
+			},
+		}, nil, repo, schedulerTestGroupRepo{groups: map[int64]*Group{
+			groupID: {ID: groupID, Name: "privacy-required", RequirePrivacySet: true},
+		}}, snapshotCfg),
+	}
+
+	scheduler := &defaultOpenAIAccountScheduler{service: svc}
+	selection, _, err := scheduler.tryAcquireOpenAISelectionOrder(ctx, OpenAIAccountScheduleRequest{
+		GroupID:        &groupID,
+		RequestedModel: "gpt-5.1",
+	}, []openAIAccountCandidateScore{
+		{account: &staleSnapshotAccount, loadInfo: &AccountLoadInfo{AccountID: staleSnapshotAccount.ID}},
+		{account: &backupAccount, loadInfo: &AccountLoadInfo{AccountID: backupAccount.ID}},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, backupAccount.ID, selection.Account.ID)
+	require.Contains(t, acquiredIDs, staleSnapshotAccount.ID)
+	require.Contains(t, releasedIDs, staleSnapshotAccount.ID)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func TestDefaultOpenAIAccountScheduler_DBRecheckTransportMismatchDoesNotRecordPrivacyError(t *testing.T) {
+	ctx := context.Background()
+	groupID := int64(101133)
+	primarySnapshot := &Account{
+		ID:          37151,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    0,
+		GroupIDs:    []int64{groupID},
+		Extra: map[string]any{
+			"privacy_mode": PrivacyModeTrainingOff,
+			"openai_apikey_responses_websockets_v2_enabled": true,
+		},
+	}
+	primaryDB := *primarySnapshot
+	primaryDB.Extra = map[string]any{"privacy_mode": PrivacyModeTrainingOff}
+	backup := Account{
+		ID:          37152,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    5,
+		GroupIDs:    []int64{groupID},
+		Extra: map[string]any{
+			"privacy_mode": PrivacyModeTrainingOff,
+			"openai_apikey_responses_websockets_v2_enabled": true,
+		},
+	}
+	repo := schedulerTestOpenAIAccountRepo{
+		accounts:  []Account{primaryDB, backup},
+		setErrors: map[int64]string{},
+	}
+	acquiredIDs, releasedIDs := []int64{}, []int64{}
+	cfg := newSchedulerTestOpenAIWSV2Config()
+	svc := &OpenAIGatewayService{
+		accountRepo: repo,
+		cfg:         cfg,
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{
+			acquiredIDs: &acquiredIDs,
+			releasedIDs: &releasedIDs,
+		}),
+		schedulerSnapshot: NewSchedulerSnapshotService(&openAISnapshotCacheStub{
+			snapshotAccounts: []*Account{primarySnapshot, &backup},
+			accountsByID: map[int64]*Account{
+				primarySnapshot.ID: primarySnapshot,
+				backup.ID:          &backup,
+			},
+		}, nil, repo, schedulerTestGroupRepo{groups: map[int64]*Group{
+			groupID: {ID: groupID, Name: "privacy-required", RequirePrivacySet: true},
+		}}, cfg),
+	}
+	scheduler := &defaultOpenAIAccountScheduler{service: svc}
+
+	selection, _, err := scheduler.tryAcquireOpenAISelectionOrder(ctx, OpenAIAccountScheduleRequest{
+		GroupID:           &groupID,
+		Platform:          PlatformOpenAI,
+		RequestedModel:    "gpt-5.1",
+		RequiredTransport: OpenAIUpstreamTransportResponsesWebsocketV2Ingress,
+	}, []openAIAccountCandidateScore{
+		{account: primarySnapshot, loadInfo: &AccountLoadInfo{AccountID: primarySnapshot.ID}},
+		{account: &backup, loadInfo: &AccountLoadInfo{AccountID: backup.ID}},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.Equal(t, backup.ID, selection.Account.ID)
+	require.Contains(t, acquiredIDs, primarySnapshot.ID)
+	require.Contains(t, releasedIDs, primarySnapshot.ID)
+	require.NotContains(t, repo.setErrors, primarySnapshot.ID, "transport mismatch is not a privacy violation")
+	selection.ReleaseFunc()
+}
+
 func TestOpenAIGatewayService_SelectAccountWithSchedulerForImages_NativeFallbackKeepsBasicBridgeAccountDespiteModelMapping(t *testing.T) {
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 

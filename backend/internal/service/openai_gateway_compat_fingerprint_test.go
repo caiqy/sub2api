@@ -29,9 +29,9 @@ func TestOAuthCompatPaths_ConvergeCodexFingerprintModes(t *testing.T) {
 		extra    map[string]any
 		expected codexFingerprintMode
 	}{
-		{name: "missing defaults to session", expected: codexFingerprintSession},
-		{name: "empty defaults to session", extra: map[string]any{codexFingerprintModeExtraKey: ""}, expected: codexFingerprintSession},
-		{name: "invalid defaults to session", extra: map[string]any{codexFingerprintModeExtraKey: "invalid"}, expected: codexFingerprintSession},
+		{name: "missing defaults to off", expected: codexFingerprintOff},
+		{name: "empty defaults to off", extra: map[string]any{codexFingerprintModeExtraKey: ""}, expected: codexFingerprintOff},
+		{name: "invalid defaults to off", extra: map[string]any{codexFingerprintModeExtraKey: "invalid"}, expected: codexFingerprintOff},
 		{name: "off preserves client values", extra: map[string]any{codexFingerprintModeExtraKey: "off"}, expected: codexFingerprintOff},
 		{name: "device converges installation", extra: map[string]any{codexFingerprintModeExtraKey: "device"}, expected: codexFingerprintDevice},
 		{name: "full converges all identifiers", extra: map[string]any{codexFingerprintModeExtraKey: "full"}, expected: codexFingerprintFull},
@@ -63,7 +63,7 @@ func TestOAuthCompatPaths_ClearFingerprintOnOffFailoverReentry(t *testing.T) {
 			upstream := &httpUpstreamRecorder{err: errors.New("upstream unavailable")}
 			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
 
-			require.Error(t, entry.forward(svc, c, newOAuthCompatFingerprintAccount(4102, nil), entry.body))
+			require.Error(t, entry.forward(svc, c, newOAuthCompatFingerprintAccount(4102, map[string]any{codexFingerprintModeExtraKey: "session"}), entry.body))
 			offAccount := newOAuthCompatFingerprintAccount(4103, map[string]any{codexFingerprintModeExtraKey: "off"})
 			require.Error(t, entry.forward(svc, c, offAccount, entry.body))
 			require.Len(t, upstream.requests, 2)

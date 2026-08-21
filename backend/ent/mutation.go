@@ -44148,6 +44148,10 @@ type UsageLogMutation struct {
 	upstream_model               *string
 	upstream_response_model      *string
 	upstream_model_mismatch      *bool
+	request_body_size            *int64
+	addrequest_body_size         *int64
+	response_body_size           *int64
+	addresponse_body_size        *int64
 	channel_id                   *int64
 	addchannel_id                *int64
 	model_mapping_chain          *string
@@ -44695,6 +44699,146 @@ func (m *UsageLogMutation) UpstreamModelMismatchCleared() bool {
 func (m *UsageLogMutation) ResetUpstreamModelMismatch() {
 	m.upstream_model_mismatch = nil
 	delete(m.clearedFields, usagelog.FieldUpstreamModelMismatch)
+}
+
+// SetRequestBodySize sets the "request_body_size" field.
+func (m *UsageLogMutation) SetRequestBodySize(i int64) {
+	m.request_body_size = &i
+	m.addrequest_body_size = nil
+}
+
+// RequestBodySize returns the value of the "request_body_size" field in the mutation.
+func (m *UsageLogMutation) RequestBodySize() (r int64, exists bool) {
+	v := m.request_body_size
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRequestBodySize returns the old "request_body_size" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldRequestBodySize(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRequestBodySize is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRequestBodySize requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRequestBodySize: %w", err)
+	}
+	return oldValue.RequestBodySize, nil
+}
+
+// AddRequestBodySize adds i to the "request_body_size" field.
+func (m *UsageLogMutation) AddRequestBodySize(i int64) {
+	if m.addrequest_body_size != nil {
+		*m.addrequest_body_size += i
+	} else {
+		m.addrequest_body_size = &i
+	}
+}
+
+// AddedRequestBodySize returns the value that was added to the "request_body_size" field in this mutation.
+func (m *UsageLogMutation) AddedRequestBodySize() (r int64, exists bool) {
+	v := m.addrequest_body_size
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearRequestBodySize clears the value of the "request_body_size" field.
+func (m *UsageLogMutation) ClearRequestBodySize() {
+	m.request_body_size = nil
+	m.addrequest_body_size = nil
+	m.clearedFields[usagelog.FieldRequestBodySize] = struct{}{}
+}
+
+// RequestBodySizeCleared returns if the "request_body_size" field was cleared in this mutation.
+func (m *UsageLogMutation) RequestBodySizeCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldRequestBodySize]
+	return ok
+}
+
+// ResetRequestBodySize resets all changes to the "request_body_size" field.
+func (m *UsageLogMutation) ResetRequestBodySize() {
+	m.request_body_size = nil
+	m.addrequest_body_size = nil
+	delete(m.clearedFields, usagelog.FieldRequestBodySize)
+}
+
+// SetResponseBodySize sets the "response_body_size" field.
+func (m *UsageLogMutation) SetResponseBodySize(i int64) {
+	m.response_body_size = &i
+	m.addresponse_body_size = nil
+}
+
+// ResponseBodySize returns the value of the "response_body_size" field in the mutation.
+func (m *UsageLogMutation) ResponseBodySize() (r int64, exists bool) {
+	v := m.response_body_size
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldResponseBodySize returns the old "response_body_size" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldResponseBodySize(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldResponseBodySize is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldResponseBodySize requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldResponseBodySize: %w", err)
+	}
+	return oldValue.ResponseBodySize, nil
+}
+
+// AddResponseBodySize adds i to the "response_body_size" field.
+func (m *UsageLogMutation) AddResponseBodySize(i int64) {
+	if m.addresponse_body_size != nil {
+		*m.addresponse_body_size += i
+	} else {
+		m.addresponse_body_size = &i
+	}
+}
+
+// AddedResponseBodySize returns the value that was added to the "response_body_size" field in this mutation.
+func (m *UsageLogMutation) AddedResponseBodySize() (r int64, exists bool) {
+	v := m.addresponse_body_size
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearResponseBodySize clears the value of the "response_body_size" field.
+func (m *UsageLogMutation) ClearResponseBodySize() {
+	m.response_body_size = nil
+	m.addresponse_body_size = nil
+	m.clearedFields[usagelog.FieldResponseBodySize] = struct{}{}
+}
+
+// ResponseBodySizeCleared returns if the "response_body_size" field was cleared in this mutation.
+func (m *UsageLogMutation) ResponseBodySizeCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldResponseBodySize]
+	return ok
+}
+
+// ResetResponseBodySize resets all changes to the "response_body_size" field.
+func (m *UsageLogMutation) ResetResponseBodySize() {
+	m.response_body_size = nil
+	m.addresponse_body_size = nil
+	delete(m.clearedFields, usagelog.FieldResponseBodySize)
 }
 
 // SetChannelID sets the "channel_id" field.
@@ -46932,7 +47076,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 47)
+	fields := make([]string, 0, 49)
 	if m.user != nil {
 		fields = append(fields, usagelog.FieldUserID)
 	}
@@ -46959,6 +47103,12 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.upstream_model_mismatch != nil {
 		fields = append(fields, usagelog.FieldUpstreamModelMismatch)
+	}
+	if m.request_body_size != nil {
+		fields = append(fields, usagelog.FieldRequestBodySize)
+	}
+	if m.response_body_size != nil {
+		fields = append(fields, usagelog.FieldResponseBodySize)
 	}
 	if m.channel_id != nil {
 		fields = append(fields, usagelog.FieldChannelID)
@@ -47100,6 +47250,10 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.UpstreamResponseModel()
 	case usagelog.FieldUpstreamModelMismatch:
 		return m.UpstreamModelMismatch()
+	case usagelog.FieldRequestBodySize:
+		return m.RequestBodySize()
+	case usagelog.FieldResponseBodySize:
+		return m.ResponseBodySize()
 	case usagelog.FieldChannelID:
 		return m.ChannelID()
 	case usagelog.FieldModelMappingChain:
@@ -47203,6 +47357,10 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldUpstreamResponseModel(ctx)
 	case usagelog.FieldUpstreamModelMismatch:
 		return m.OldUpstreamModelMismatch(ctx)
+	case usagelog.FieldRequestBodySize:
+		return m.OldRequestBodySize(ctx)
+	case usagelog.FieldResponseBodySize:
+		return m.OldResponseBodySize(ctx)
 	case usagelog.FieldChannelID:
 		return m.OldChannelID(ctx)
 	case usagelog.FieldModelMappingChain:
@@ -47350,6 +47508,20 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetUpstreamModelMismatch(v)
+		return nil
+	case usagelog.FieldRequestBodySize:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRequestBodySize(v)
+		return nil
+	case usagelog.FieldResponseBodySize:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetResponseBodySize(v)
 		return nil
 	case usagelog.FieldChannelID:
 		v, ok := value.(int64)
@@ -47625,6 +47797,12 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 // this mutation.
 func (m *UsageLogMutation) AddedFields() []string {
 	var fields []string
+	if m.addrequest_body_size != nil {
+		fields = append(fields, usagelog.FieldRequestBodySize)
+	}
+	if m.addresponse_body_size != nil {
+		fields = append(fields, usagelog.FieldResponseBodySize)
+	}
 	if m.addchannel_id != nil {
 		fields = append(fields, usagelog.FieldChannelID)
 	}
@@ -47696,6 +47874,10 @@ func (m *UsageLogMutation) AddedFields() []string {
 // was not set, or was not defined in the schema.
 func (m *UsageLogMutation) AddedField(name string) (ent.Value, bool) {
 	switch name {
+	case usagelog.FieldRequestBodySize:
+		return m.AddedRequestBodySize()
+	case usagelog.FieldResponseBodySize:
+		return m.AddedResponseBodySize()
 	case usagelog.FieldChannelID:
 		return m.AddedChannelID()
 	case usagelog.FieldInputTokens:
@@ -47747,6 +47929,20 @@ func (m *UsageLogMutation) AddedField(name string) (ent.Value, bool) {
 // type.
 func (m *UsageLogMutation) AddField(name string, value ent.Value) error {
 	switch name {
+	case usagelog.FieldRequestBodySize:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddRequestBodySize(v)
+		return nil
+	case usagelog.FieldResponseBodySize:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddResponseBodySize(v)
+		return nil
 	case usagelog.FieldChannelID:
 		v, ok := value.(int64)
 		if !ok {
@@ -47914,6 +48110,12 @@ func (m *UsageLogMutation) ClearedFields() []string {
 	if m.FieldCleared(usagelog.FieldUpstreamModelMismatch) {
 		fields = append(fields, usagelog.FieldUpstreamModelMismatch)
 	}
+	if m.FieldCleared(usagelog.FieldRequestBodySize) {
+		fields = append(fields, usagelog.FieldRequestBodySize)
+	}
+	if m.FieldCleared(usagelog.FieldResponseBodySize) {
+		fields = append(fields, usagelog.FieldResponseBodySize)
+	}
 	if m.FieldCleared(usagelog.FieldChannelID) {
 		fields = append(fields, usagelog.FieldChannelID)
 	}
@@ -47993,6 +48195,12 @@ func (m *UsageLogMutation) ClearField(name string) error {
 		return nil
 	case usagelog.FieldUpstreamModelMismatch:
 		m.ClearUpstreamModelMismatch()
+		return nil
+	case usagelog.FieldRequestBodySize:
+		m.ClearRequestBodySize()
+		return nil
+	case usagelog.FieldResponseBodySize:
+		m.ClearResponseBodySize()
 		return nil
 	case usagelog.FieldChannelID:
 		m.ClearChannelID()
@@ -48082,6 +48290,12 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldUpstreamModelMismatch:
 		m.ResetUpstreamModelMismatch()
+		return nil
+	case usagelog.FieldRequestBodySize:
+		m.ResetRequestBodySize()
+		return nil
+	case usagelog.FieldResponseBodySize:
+		m.ResetResponseBodySize()
 		return nil
 	case usagelog.FieldChannelID:
 		m.ResetChannelID()

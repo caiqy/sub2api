@@ -86,15 +86,14 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		turnMetadata = strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader))
 	}
 	setOpenAIWSTurnMetadata(payload, turnMetadata)
-	// 指纹收敛：每个 account attempt 解析一次 IDs，头（buildOpenAIWSHeaders）与
-	// response.create body 共用同一份（review-fix B）；off 模式显式写入 nil，
-	// 清除同一 gin.Context 上上一 attempt 的残留（review-fix D）。
+	// 指纹收敛：WS retry 没有稳定的 canonical body，因此同账号复用 Forward
+	// 已暂存的 IDs；切换账号时才重新解析。头与 response.create body 继续共用
+	// 同一份 IDs；off 模式显式写入 nil，清除上一 attempt 的残留。
 	if account.Type == AccountTypeOAuth && c != nil && c.Request != nil {
-		fpIDs := resolveCodexFingerprintIDsFromRequest(account, c.Request.Header)
+		fpIDs := resolveOpenAIAttemptFingerprintIDs(c, account, nil)
 		if fpIDs != nil {
 			applyCodexFingerprintClientMetadata(payload, fpIDs)
 		}
-		c.Set("codex_fingerprint_ids", fpIDs)
 	}
 	payloadEventType := openAIWSPayloadString(payload, "type")
 	if payloadEventType == "" {

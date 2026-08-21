@@ -32,6 +32,10 @@ const (
 	FieldUpstreamResponseModel = "upstream_response_model"
 	// FieldUpstreamModelMismatch holds the string denoting the upstream_model_mismatch field in the database.
 	FieldUpstreamModelMismatch = "upstream_model_mismatch"
+	// FieldRequestBodySize holds the string denoting the request_body_size field in the database.
+	FieldRequestBodySize = "request_body_size"
+	// FieldResponseBodySize holds the string denoting the response_body_size field in the database.
+	FieldResponseBodySize = "response_body_size"
 	// FieldChannelID holds the string denoting the channel_id field in the database.
 	FieldChannelID = "channel_id"
 	// FieldModelMappingChain holds the string denoting the model_mapping_chain field in the database.
@@ -178,6 +182,8 @@ var Columns = []string{
 	FieldUpstreamModel,
 	FieldUpstreamResponseModel,
 	FieldUpstreamModelMismatch,
+	FieldRequestBodySize,
+	FieldResponseBodySize,
 	FieldChannelID,
 	FieldModelMappingChain,
 	FieldBillingTier,
@@ -352,6 +358,16 @@ func ByUpstreamResponseModel(opts ...sql.OrderTermOption) OrderOption {
 // ByUpstreamModelMismatch orders the results by the upstream_model_mismatch field.
 func ByUpstreamModelMismatch(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldUpstreamModelMismatch, opts...).ToFunc()
+}
+
+// ByRequestBodySize orders the results by the request_body_size field.
+func ByRequestBodySize(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldRequestBodySize, opts...).ToFunc()
+}
+
+// ByResponseBodySize orders the results by the response_body_size field.
+func ByResponseBodySize(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldResponseBodySize, opts...).ToFunc()
 }
 
 // ByChannelID orders the results by the channel_id field.

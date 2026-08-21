@@ -843,6 +843,7 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthStoreFalseByDefault(t *testing.T
 		},
 		Extra: map[string]any{
 			"responses_websockets_v2_enabled": true,
+			"codex_fingerprint_mode":          "session",
 		},
 	}
 
@@ -861,10 +862,121 @@ func TestOpenAIGatewayService_Forward_WSv2_OAuthStoreFalseByDefault(t *testing.T
 	require.Equal(t, "native-wsv2", gjson.Get(requestJSON, "input.0.namespace").String(), "OAuth WSv2 应保留原生 namespace")
 	require.Equal(t, openAIWSBetaV2Value, captureDialer.lastHeaders.Get("OpenAI-Beta"))
 	require.Equal(t, "remote_compaction_v2", captureDialer.lastHeaders.Get("x-codex-beta-features"))
-	// 默认 session 指纹模式：session_id 收敛为账号级恒定值（头/体共享同一组预计算
+	// 显式 session 指纹模式：session_id 收敛为账号级恒定值（头/体共享同一组预计算
 	// IDs，见 review-fix B）；conversation_id 不属于收敛指纹集，仍按隔离语义处理。
 	require.Equal(t, resolveConvergedSessionID(account), captureDialer.lastHeaders.Get("session_id"))
 	require.Equal(t, isolateOpenAISessionID(0, "conv-oauth-1"), captureDialer.lastHeaders.Get("conversation_id"))
+}
+
+func TestOpenAIGatewayService_Forward_WSv2OAuthRetryReusesFingerprintIDs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	type attempt struct {
+		headers http.Header
+		body    string
+	}
+	attempts := make(chan attempt, 2)
+	var connectionCount atomic.Int64
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		connectionIndex := connectionCount.Add(1)
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade websocket failed: %v", err)
+			return
+		}
+		defer func() {
+			_ = conn.Close()
+		}()
+
+		var request map[string]any
+		if err := conn.ReadJSON(&request); err != nil {
+			t.Errorf("read websocket request failed: %v", err)
+			return
+		}
+		attempts <- attempt{headers: cloneHeader(r.Header), body: requestToJSONString(request)}
+		if connectionIndex == 1 {
+			_ = conn.UnderlyingConn().Close()
+			return
+		}
+		if err := conn.WriteJSON(map[string]any{
+			"type": "response.completed",
+			"response": map[string]any{
+				"id":    "resp_oauth_retry",
+				"model": "gpt-5.1",
+				"usage": map[string]any{"input_tokens": 1, "output_tokens": 1},
+			},
+		}); err != nil {
+			t.Errorf("write websocket response failed: %v", err)
+		}
+	}))
+	defer wsServer.Close()
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.98.0")
+	c.Request.Header.Set("session-id", "oauth-retry-session")
+	c.Request.Header.Set("x-codex-turn-metadata", `{"installation_id":"client-install","session_id":"oauth-retry-session","thread_id":"client-thread","turn_id":"client-turn"}`)
+
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.OAuthEnabled = true
+	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.RetryBackoffInitialMS = 1
+	cfg.Gateway.OpenAIWS.RetryBackoffMaxMS = 1
+	cfg.Gateway.OpenAIWS.RetryJitterRatio = 0
+	pool := newOpenAIWSConnPool(cfg)
+	pool.setClientDialerForTest(&openAIWSRedirectDialer{
+		targetURL: strings.Replace(wsServer.URL, "http://", "ws://", 1),
+		dialer:    newDefaultOpenAIWSClientDialer(),
+	})
+	t.Cleanup(pool.Close)
+
+	svc := &OpenAIGatewayService{
+		cfg:              cfg,
+		httpUpstream:     &httpUpstreamRecorder{},
+		cache:            &stubGatewayCache{},
+		openaiWSResolver: NewOpenAIWSProtocolResolver(cfg),
+		toolCorrector:    NewCodexToolCorrector(),
+		openaiWSPool:     pool,
+	}
+	account := &Account{
+		ID:          2901,
+		Name:        "openai-oauth-retry",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token": "oauth-token",
+		},
+		Extra: map[string]any{
+			"responses_websockets_v2_enabled": true,
+			"codex_fingerprint_mode":          "session",
+		},
+	}
+
+	body := []byte(`{"model":"gpt-5.1","stream":false,"input":[{"type":"input_text","text":"hello"}],"client_metadata":{"x-codex-turn-metadata":"{\"installation_id\":\"client-install\",\"session_id\":\"oauth-retry-session\",\"thread_id\":\"client-thread\",\"turn_id\":\"client-turn\"}"}}`)
+	result, err := svc.Forward(context.Background(), c, account, body)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "resp_oauth_retry", result.RequestID)
+
+	require.Equal(t, int64(2), connectionCount.Load(), "the closed first upstream connection must trigger a real reconnect")
+	firstAttempt := <-attempts
+	secondAttempt := <-attempts
+
+	require.Equal(t, firstAttempt.headers.Get("session_id"), secondAttempt.headers.Get("session_id"))
+	require.Equal(t, firstAttempt.headers.Get("x-codex-window-id"), secondAttempt.headers.Get("x-codex-window-id"))
+	require.Equal(t, gjson.Get(firstAttempt.body, "client_metadata.turn_id").String(), gjson.Get(secondAttempt.body, "client_metadata.turn_id").String())
+	require.Equal(t, firstAttempt.headers.Get("session_id"), gjson.Get(firstAttempt.body, "client_metadata.session_id").String())
+	require.Equal(t, secondAttempt.headers.Get("session_id"), gjson.Get(secondAttempt.body, "client_metadata.session_id").String())
 }
 
 func TestOpenAIGatewayService_Forward_WSv2_OAuthOriginatorCompatibility(t *testing.T) {
@@ -1077,6 +1189,7 @@ func TestOpenAIGatewayService_Forward_WSv2_HeaderSessionFallbackFromPromptCacheK
 		},
 		Extra: map[string]any{
 			"responses_websockets_v2_enabled": true,
+			"codex_fingerprint_mode":          "session",
 		},
 	}
 
@@ -1086,7 +1199,7 @@ func TestOpenAIGatewayService_Forward_WSv2_HeaderSessionFallbackFromPromptCacheK
 	require.NotNil(t, result)
 	require.Equal(t, "resp_prompt_cache_key", result.RequestID)
 
-	// 默认 session 指纹模式：session_id 收敛为账号级恒定值（不再 isolate prompt_cache_key；
+	// 显式 session 指纹模式：session_id 收敛为账号级恒定值（不再 isolate prompt_cache_key；
 	// 头/体共享同一组预计算 IDs，见 review-fix B）。
 	require.Equal(t, resolveConvergedSessionID(account), captureDialer.lastHeaders.Get("session_id"))
 	require.Empty(t, captureDialer.lastHeaders.Get("conversation_id"))
@@ -1829,6 +1942,15 @@ type openAIWSCaptureDialer struct {
 	lastHeaders http.Header
 	handshake   http.Header
 	dialCount   int
+}
+
+type openAIWSRedirectDialer struct {
+	targetURL string
+	dialer    openAIWSClientDialer
+}
+
+func (d *openAIWSRedirectDialer) Dial(ctx context.Context, _ string, headers http.Header, proxyURL string) (openAIWSClientConn, int, http.Header, error) {
+	return d.dialer.Dial(ctx, d.targetURL, headers, proxyURL)
 }
 
 func (d *openAIWSCaptureDialer) Dial(

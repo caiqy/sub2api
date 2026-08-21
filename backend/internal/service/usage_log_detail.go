@@ -73,10 +73,13 @@ type UsageLogDetail struct {
 type UsageLogDetailSnapshot struct {
 	RequestHeaders          string
 	RequestBody             string
+	RequestBodySize         *int64
 	UpstreamRequestHeaders  string
 	UpstreamRequestBody     string
 	ResponseHeaders         string
 	ResponseBody            string
+	ResponseBodySize        *int64
+	ResponseBodySizeUnknown bool
 	UpstreamResponseHeaders string
 	UpstreamResponseBody    string
 }
