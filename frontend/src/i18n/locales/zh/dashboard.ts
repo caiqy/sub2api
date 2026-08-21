@@ -327,7 +327,7 @@ export default {
     type: '类型',
     requestBodySize: '请求体大小',
     responseBodySize: '响应体大小',
-    bodySize: '体积',
+    bodySize: '请求体',
     bodySizeInput: '输入',
     bodySizeOutput: '输出',
     bodySizeTotal: '总计',

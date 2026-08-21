@@ -322,7 +322,7 @@ export default {
     type: 'Type',
     requestBodySize: 'Request body size',
     responseBodySize: 'Response body size',
-    bodySize: 'Body size',
+    bodySize: 'Request body',
     bodySizeInput: 'Input',
     bodySizeOutput: 'Output',
     bodySizeTotal: 'Total',
