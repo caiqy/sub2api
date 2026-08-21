@@ -1711,7 +1711,7 @@ func TestOpenAISelectAccountWithLoadAwareness_GrokCooldownSkipsStickyAndWaitPlan
 	}
 
 	markGrokTeamModelRateLimit(&blocked, "grok-4.5", time.Now().Add(time.Hour))
-	selection, err := svc.selectAccountWithLoadAwareness(context.Background(), &groupID, PlatformGrok, "legacy-grok-cooldown", "gpt-5", nil, false, OpenAIEndpointCapabilityChatCompletions)
+	selection, err := svc.selectAccountWithLoadAwareness(context.Background(), &groupID, PlatformGrok, "legacy-grok-cooldown", "gpt-5", nil, false, OpenAIEndpointCapabilityChatCompletions, false)
 
 	require.NoError(t, err)
 	require.NotNil(t, selection)
@@ -3867,7 +3867,10 @@ func TestForwardAsAnthropic_CapturesFinalSessionAndTurnStateHeaders(t *testing.T
 
 	svc := &OpenAIGatewayService{httpUpstream: &openAIErroringUpstreamNoClose{}}
 	account := openAITestOAuthAccount()
-	account.Extra = map[string]any{codexFingerprintModeExtraKey: "session"}
+	account.Extra = map[string]any{
+		codexFingerprintModeExtraKey: string(codexFingerprintSession),
+		codexFingerprintSeedExtraKey: testCodexFingerprintSeed,
+	}
 	const cacheKey = "snapshot-turn-state"
 	svc.bindOpenAICompatSessionTurnState(context.Background(), c, account, cacheKey, "turn-state-final")
 

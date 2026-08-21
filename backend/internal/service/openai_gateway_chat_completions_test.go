@@ -177,7 +177,10 @@ func TestForwardAsChatCompletions_OAuthPromptCacheKeyKeepsAPIKeyIsolatedConversa
 		Schedulable: true,
 		Concurrency: 1,
 		Credentials: map[string]any{"access_token": "oauth-token"},
-		Extra:       map[string]any{codexFingerprintModeExtraKey: "session"},
+		Extra: map[string]any{
+			codexFingerprintModeExtraKey: "session",
+			codexFingerprintSeedExtraKey: testCodexFingerprintSeed,
+		},
 	}
 	body := []byte(`{"model":"gpt-5.1","messages":[{"role":"user","content":"hello"}],"stream":true}`)
 	promptCacheKey := "pk_chat_branch_001"

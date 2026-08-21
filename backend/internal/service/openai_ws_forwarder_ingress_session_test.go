@@ -1369,6 +1369,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 		Extra: map[string]any{
 			"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModePassthrough,
 			"codex_fingerprint_mode":                    "session",
+			codexFingerprintSeedExtraKey:                testCodexFingerprintSeed,
 		},
 	}
 
@@ -1453,7 +1454,10 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PassthroughHeade
 	// IDs，见 review-fix B）；prompt_cache_key 回退仅在 off 模式保留。
 	require.Equal(t, resolveConvergedSessionID(account), captureDialer.lastHeaders.Get("session_id"))
 	require.Equal(t, "turn-state-1", captureDialer.lastHeaders.Get(openAIWSTurnStateHeader))
-	require.Equal(t, "turn-meta-1", captureDialer.lastHeaders.Get(openAIWSTurnMetadataHeader))
+	turnMetadata := captureDialer.lastHeaders.Get(openAIWSTurnMetadataHeader)
+	require.Equal(t, captureDialer.lastHeaders.Get("session_id"), gjson.Get(turnMetadata, "session_id").String())
+	require.Equal(t, captureDialer.lastHeaders.Get("x-codex-installation-id"), gjson.Get(turnMetadata, "installation_id").String())
+	require.NotEmpty(t, gjson.Get(turnMetadata, "turn_id").String())
 	require.Len(t, upstreamConn.writes, 1)
 	forwarded := requestToJSONString(upstreamConn.writes[0])
 	require.False(t, gjson.Get(forwarded, `tools.#(type=="namespace")`).Exists())

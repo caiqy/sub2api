@@ -88,6 +88,7 @@ func provideCleanup(
 	schedulerSnapshot *service.SchedulerSnapshotService,
 	tokenRefresh *service.TokenRefreshService,
 	accountExpiry *service.AccountExpiryService,
+	cnProviderBalanceCheck *service.CNProviderBalanceCheckService,
 	codexVersionSync *service.OpenAICodexVersionSyncService,
 	proxyExpiry *service.ProxyExpiryService,
 	subscriptionExpiry *service.SubscriptionExpiryService,
@@ -250,6 +251,12 @@ func provideCleanup(
 			{name: "OpenAICodexVersionSyncService", run: func(context.Context) error {
 				if codexVersionSync != nil {
 					codexVersionSync.Stop()
+				}
+				return nil
+			}},
+			{name: "CNProviderBalanceCheckService", run: func(context.Context) error {
+				if cnProviderBalanceCheck != nil {
+					cnProviderBalanceCheck.Stop()
 				}
 				return nil
 			}},

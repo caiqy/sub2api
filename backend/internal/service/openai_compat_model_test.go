@@ -986,7 +986,10 @@ func TestForwardAsAnthropic_ReusesOAuthCodexTurnState(t *testing.T) {
 			"access_token":       "oauth-token",
 			"chatgpt_account_id": "chatgpt-acc",
 		},
-		Extra: map[string]any{codexFingerprintModeExtraKey: "session"},
+		Extra: map[string]any{
+			codexFingerprintModeExtraKey: string(codexFingerprintSession),
+			codexFingerprintSeedExtraKey: testCodexFingerprintSeed,
+		},
 	}
 
 	firstBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"first"}],"stream":false}`)
@@ -1094,7 +1097,10 @@ func TestForwardAsAnthropic_OAuthDigestFallbackReusesTurnStateWithoutExplicitKey
 			"access_token":       "oauth-token",
 			"chatgpt_account_id": "chatgpt-acc",
 		},
-		Extra: map[string]any{codexFingerprintModeExtraKey: "session"},
+		Extra: map[string]any{
+			codexFingerprintModeExtraKey: string(codexFingerprintSession),
+			codexFingerprintSeedExtraKey: testCodexFingerprintSeed,
+		},
 	}
 
 	firstBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"first"}],"stream":false}`)
@@ -1153,7 +1159,10 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesDigestPrefixRewrite(t *t
 			"access_token":       "oauth-token",
 			"chatgpt_account_id": "chatgpt-acc",
 		},
-		Extra: map[string]any{codexFingerprintModeExtraKey: "session"},
+		Extra: map[string]any{
+			codexFingerprintModeExtraKey: string(codexFingerprintSession),
+			codexFingerprintSeedExtraKey: testCodexFingerprintSeed,
+		},
 	}
 	metadata := `{"user_id":"{\"device_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"account_uuid\":\"\",\"session_id\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\"}"}`
 
@@ -1211,7 +1220,10 @@ func TestForwardAsAnthropic_OAuthMetadataSessionSurvivesChangingCacheControlAnch
 			"access_token":       "oauth-token",
 			"chatgpt_account_id": "chatgpt-acc",
 		},
-		Extra: map[string]any{codexFingerprintModeExtraKey: "session"},
+		Extra: map[string]any{
+			codexFingerprintModeExtraKey: string(codexFingerprintSession),
+			codexFingerprintSeedExtraKey: testCodexFingerprintSeed,
+		},
 	}
 	metadata := `{"user_id":"{\"device_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"account_uuid\":\"\",\"session_id\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\"}"}`
 

@@ -83,8 +83,14 @@ func TestOpenAIGatewayHandler_ResponsesHTTPCapacityShedRetriesSameAccountBeforeF
 				{ID: 72, Platform: service.PlatformOpenAI, Type: tt.accountType, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 2, Credentials: secondCredentials},
 			}
 			if tt.accountType == service.AccountTypeOAuth {
-				accounts[0].Extra = map[string]any{"codex_fingerprint_mode": "session"}
-				accounts[1].Extra = map[string]any{"codex_fingerprint_mode": "session"}
+				accounts[0].Extra = map[string]any{
+					"codex_fingerprint_mode": "session",
+					"codex_fingerprint_seed": "00000000-0000-4000-8000-000000000071",
+				}
+				accounts[1].Extra = map[string]any{
+					"codex_fingerprint_mode": "session",
+					"codex_fingerprint_seed": "00000000-0000-4000-8000-000000000072",
+				}
 			}
 			env := newOpenAIResponsesRetentionTestEnv(t, nil, nil, nil, nil, nil, accounts)
 			errorResponse := `{"error":{"code":"` + tt.code + `","message":"retry later"}}`

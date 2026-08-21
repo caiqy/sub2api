@@ -68,6 +68,10 @@ func (*openAIImagesModerationRepo) CountFlaggedByUserSince(context.Context, int6
 	return 0, nil
 }
 
+func (*openAIImagesModerationRepo) CleanupExpiredLogs(context.Context, time.Time, time.Time) (*service.ContentModerationCleanupResult, error) {
+	return nil, nil
+}
+
 type openAIImagesModerationHashCache struct {
 	service.ContentModerationHashCache
 }

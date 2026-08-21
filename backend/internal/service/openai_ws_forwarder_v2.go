@@ -62,6 +62,14 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 
 	payload := s.buildOpenAIWSCreatePayload(reqBody, account)
 	payloadStrategy, removedKeys := applyOpenAIWSRetryPayloadStrategy(payload, attempt)
+	turnState := ""
+	turnMetadata := ""
+	if c != nil && c.Request != nil {
+		turnState = strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader))
+		turnMetadata = strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader))
+	}
+	setOpenAIWSTurnMetadata(payload, turnMetadata)
+	applyStagedCodexFingerprintClientMetadata(c, account, payload)
 	previousResponseID := openAIWSPayloadString(payload, "previous_response_id")
 	previousResponseIDKind := ClassifyOpenAIPreviousResponseIDKind(previousResponseID)
 	promptCacheKey := openAIWSPayloadString(payload, "prompt_cache_key")
@@ -78,22 +86,6 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	streamValue := "-"
 	if raw, ok := payload["stream"]; ok {
 		streamValue = normalizeOpenAIWSLogValue(strings.TrimSpace(fmt.Sprintf("%v", raw)))
-	}
-	turnState := ""
-	turnMetadata := ""
-	if c != nil && c.Request != nil {
-		turnState = strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader))
-		turnMetadata = strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader))
-	}
-	setOpenAIWSTurnMetadata(payload, turnMetadata)
-	// 指纹收敛：WS retry 没有稳定的 canonical body，因此同账号复用 Forward
-	// 已暂存的 IDs；切换账号时才重新解析。头与 response.create body 继续共用
-	// 同一份 IDs；off 模式显式写入 nil，清除上一 attempt 的残留。
-	if account.Type == AccountTypeOAuth && c != nil && c.Request != nil {
-		fpIDs := resolveOpenAIAttemptFingerprintIDs(c, account, nil)
-		if fpIDs != nil {
-			applyCodexFingerprintClientMetadata(payload, fpIDs)
-		}
 	}
 	payloadEventType := openAIWSPayloadString(payload, "type")
 	if payloadEventType == "" {

@@ -711,6 +711,10 @@ func (geminiModerationRepo) CreateLog(context.Context, *service.ContentModeratio
 	return nil
 }
 
+func (geminiModerationRepo) CleanupExpiredLogs(context.Context, time.Time, time.Time) (*service.ContentModerationCleanupResult, error) {
+	return nil, nil
+}
+
 type geminiModerationHashCache struct {
 	service.ContentModerationHashCache
 }

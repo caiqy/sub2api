@@ -362,6 +362,7 @@ func TestPassthroughLifecycle_OAuthFingerprintRewritesInitialAndLaterResponseCre
 		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
 		Extra: map[string]any{
 			"codex_fingerprint_mode":                    "session",
+			codexFingerprintSeedExtraKey:                testCodexFingerprintSeed,
 			"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModePassthrough,
 		},
 	}

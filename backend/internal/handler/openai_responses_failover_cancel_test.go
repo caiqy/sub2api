@@ -62,7 +62,10 @@ func newOpenAIResponsesFailoverTestHandler(t *testing.T, upstream service.HTTPUp
 			Concurrency: 0,
 			Priority:    0,
 			Credentials: map[string]any{"access_token": "token-1"},
-			Extra:       map[string]any{"codex_fingerprint_mode": "session"},
+			Extra: map[string]any{
+				"codex_fingerprint_mode": "session",
+				"codex_fingerprint_seed": "00000000-0000-4000-8000-000000000001",
+			},
 		},
 		{
 			ID:          2,
@@ -74,7 +77,10 @@ func newOpenAIResponsesFailoverTestHandler(t *testing.T, upstream service.HTTPUp
 			Concurrency: 0,
 			Priority:    1,
 			Credentials: map[string]any{"access_token": "token-2"},
-			Extra:       map[string]any{"codex_fingerprint_mode": "session"},
+			Extra: map[string]any{
+				"codex_fingerprint_mode": "session",
+				"codex_fingerprint_seed": "00000000-0000-4000-8000-000000000002",
+			},
 		},
 	}
 	accountRepo := openAIImagesFailoverAccountRepo{accounts: accounts}
@@ -90,7 +96,7 @@ func newOpenAIResponsesFailoverTestHandler(t *testing.T, upstream service.HTTPUp
 		cfg,
 		nil,
 		nil,
-		nil,
+		service.NewBillingService(cfg, nil),
 		nil,
 		nil,
 		upstream,

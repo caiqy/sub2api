@@ -14,7 +14,6 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-// TODO(upstream): when upstream merges its auth-snapshot pricing fix, prefer the upstream implementation.
 const apiKeyAuthSnapshotVersion = 22 // v22: preserves group long-context and per-model pricing policies
 
 type apiKeyAuthCacheConfig struct {

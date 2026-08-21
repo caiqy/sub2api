@@ -225,6 +225,10 @@ func (r *blockingCyberModerationRepo) CreateLog(ctx context.Context, _ *service.
 	return ctx.Err()
 }
 
+func (*blockingCyberModerationRepo) CleanupExpiredLogs(context.Context, time.Time, time.Time) (*service.ContentModerationCleanupResult, error) {
+	return nil, nil
+}
+
 type cyberBillingContextRepo struct {
 	service.UsageBillingRepository
 	contexts chan error
