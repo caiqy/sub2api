@@ -183,6 +183,60 @@ func (_u *UsageLogUpdate) ClearUpstreamModelMismatch() *UsageLogUpdate {
 	return _u
 }
 
+// SetRequestBodySize sets the "request_body_size" field.
+func (_u *UsageLogUpdate) SetRequestBodySize(v int64) *UsageLogUpdate {
+	_u.mutation.ResetRequestBodySize()
+	_u.mutation.SetRequestBodySize(v)
+	return _u
+}
+
+// SetNillableRequestBodySize sets the "request_body_size" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableRequestBodySize(v *int64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetRequestBodySize(*v)
+	}
+	return _u
+}
+
+// AddRequestBodySize adds value to the "request_body_size" field.
+func (_u *UsageLogUpdate) AddRequestBodySize(v int64) *UsageLogUpdate {
+	_u.mutation.AddRequestBodySize(v)
+	return _u
+}
+
+// ClearRequestBodySize clears the value of the "request_body_size" field.
+func (_u *UsageLogUpdate) ClearRequestBodySize() *UsageLogUpdate {
+	_u.mutation.ClearRequestBodySize()
+	return _u
+}
+
+// SetResponseBodySize sets the "response_body_size" field.
+func (_u *UsageLogUpdate) SetResponseBodySize(v int64) *UsageLogUpdate {
+	_u.mutation.ResetResponseBodySize()
+	_u.mutation.SetResponseBodySize(v)
+	return _u
+}
+
+// SetNillableResponseBodySize sets the "response_body_size" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableResponseBodySize(v *int64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetResponseBodySize(*v)
+	}
+	return _u
+}
+
+// AddResponseBodySize adds value to the "response_body_size" field.
+func (_u *UsageLogUpdate) AddResponseBodySize(v int64) *UsageLogUpdate {
+	_u.mutation.AddResponseBodySize(v)
+	return _u
+}
+
+// ClearResponseBodySize clears the value of the "response_body_size" field.
+func (_u *UsageLogUpdate) ClearResponseBodySize() *UsageLogUpdate {
+	_u.mutation.ClearResponseBodySize()
+	return _u
+}
+
 // SetChannelID sets the "channel_id" field.
 func (_u *UsageLogUpdate) SetChannelID(v int64) *UsageLogUpdate {
 	_u.mutation.ResetChannelID()
@@ -1191,6 +1245,24 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if _u.mutation.UpstreamModelMismatchCleared() {
 		_spec.ClearField(usagelog.FieldUpstreamModelMismatch, field.TypeBool)
 	}
+	if value, ok := _u.mutation.RequestBodySize(); ok {
+		_spec.SetField(usagelog.FieldRequestBodySize, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedRequestBodySize(); ok {
+		_spec.AddField(usagelog.FieldRequestBodySize, field.TypeInt64, value)
+	}
+	if _u.mutation.RequestBodySizeCleared() {
+		_spec.ClearField(usagelog.FieldRequestBodySize, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.ResponseBodySize(); ok {
+		_spec.SetField(usagelog.FieldResponseBodySize, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedResponseBodySize(); ok {
+		_spec.AddField(usagelog.FieldResponseBodySize, field.TypeInt64, value)
+	}
+	if _u.mutation.ResponseBodySizeCleared() {
+		_spec.ClearField(usagelog.FieldResponseBodySize, field.TypeInt64)
+	}
 	if value, ok := _u.mutation.ChannelID(); ok {
 		_spec.SetField(usagelog.FieldChannelID, field.TypeInt64, value)
 	}
@@ -1748,6 +1820,60 @@ func (_u *UsageLogUpdateOne) SetNillableUpstreamModelMismatch(v *bool) *UsageLog
 // ClearUpstreamModelMismatch clears the value of the "upstream_model_mismatch" field.
 func (_u *UsageLogUpdateOne) ClearUpstreamModelMismatch() *UsageLogUpdateOne {
 	_u.mutation.ClearUpstreamModelMismatch()
+	return _u
+}
+
+// SetRequestBodySize sets the "request_body_size" field.
+func (_u *UsageLogUpdateOne) SetRequestBodySize(v int64) *UsageLogUpdateOne {
+	_u.mutation.ResetRequestBodySize()
+	_u.mutation.SetRequestBodySize(v)
+	return _u
+}
+
+// SetNillableRequestBodySize sets the "request_body_size" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableRequestBodySize(v *int64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetRequestBodySize(*v)
+	}
+	return _u
+}
+
+// AddRequestBodySize adds value to the "request_body_size" field.
+func (_u *UsageLogUpdateOne) AddRequestBodySize(v int64) *UsageLogUpdateOne {
+	_u.mutation.AddRequestBodySize(v)
+	return _u
+}
+
+// ClearRequestBodySize clears the value of the "request_body_size" field.
+func (_u *UsageLogUpdateOne) ClearRequestBodySize() *UsageLogUpdateOne {
+	_u.mutation.ClearRequestBodySize()
+	return _u
+}
+
+// SetResponseBodySize sets the "response_body_size" field.
+func (_u *UsageLogUpdateOne) SetResponseBodySize(v int64) *UsageLogUpdateOne {
+	_u.mutation.ResetResponseBodySize()
+	_u.mutation.SetResponseBodySize(v)
+	return _u
+}
+
+// SetNillableResponseBodySize sets the "response_body_size" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableResponseBodySize(v *int64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetResponseBodySize(*v)
+	}
+	return _u
+}
+
+// AddResponseBodySize adds value to the "response_body_size" field.
+func (_u *UsageLogUpdateOne) AddResponseBodySize(v int64) *UsageLogUpdateOne {
+	_u.mutation.AddResponseBodySize(v)
+	return _u
+}
+
+// ClearResponseBodySize clears the value of the "response_body_size" field.
+func (_u *UsageLogUpdateOne) ClearResponseBodySize() *UsageLogUpdateOne {
+	_u.mutation.ClearResponseBodySize()
 	return _u
 }
 
@@ -2788,6 +2914,24 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if _u.mutation.UpstreamModelMismatchCleared() {
 		_spec.ClearField(usagelog.FieldUpstreamModelMismatch, field.TypeBool)
+	}
+	if value, ok := _u.mutation.RequestBodySize(); ok {
+		_spec.SetField(usagelog.FieldRequestBodySize, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedRequestBodySize(); ok {
+		_spec.AddField(usagelog.FieldRequestBodySize, field.TypeInt64, value)
+	}
+	if _u.mutation.RequestBodySizeCleared() {
+		_spec.ClearField(usagelog.FieldRequestBodySize, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.ResponseBodySize(); ok {
+		_spec.SetField(usagelog.FieldResponseBodySize, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedResponseBodySize(); ok {
+		_spec.AddField(usagelog.FieldResponseBodySize, field.TypeInt64, value)
+	}
+	if _u.mutation.ResponseBodySizeCleared() {
+		_spec.ClearField(usagelog.FieldResponseBodySize, field.TypeInt64)
 	}
 	if value, ok := _u.mutation.ChannelID(); ok {
 		_spec.SetField(usagelog.FieldChannelID, field.TypeInt64, value)

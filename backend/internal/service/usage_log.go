@@ -179,6 +179,11 @@ type UsageLog struct {
 	// HasDetail 是列表/查询侧的投影字段，表示当前 usage log 已存在持久化详情。
 	// 它反映的是读模型状态，不表示本次写入路径是否携带了待落库快照。
 	HasDetail bool
+	// RequestBodySize and ResponseBodySize are durable byte-size snapshots of the
+	// captured/forwarded request and client response payloads. They survive
+	// usage_log_details retention and are nil when the size is unknown.
+	RequestBodySize  *int64
+	ResponseBodySize *int64
 
 	// DetailSnapshot 是写入路径附带的待持久化详情快照。
 	// 它用于把原始请求/响应内容交给 repository 持久化，不等价于“数据库中已经有详情”。

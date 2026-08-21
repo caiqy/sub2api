@@ -63,6 +63,33 @@ func TestRequestBodyHandle_MemoryAndFileModes(t *testing.T) {
 	})
 }
 
+func TestUsageLogBodySizesPreservesExplicitAndUnknownResponseSizes(t *testing.T) {
+	requestSize := int64(12)
+	responseSize := int64(34)
+	request, response := UsageLogBodySizes(&UsageLogDetailSnapshot{
+		RequestBody:      RequestBodyPreviewSnapshot("{}", requestSize),
+		ResponseBodySize: &responseSize,
+		RequestBodySize:  &requestSize,
+	})
+	require.Equal(t, requestSize, *request)
+	require.Equal(t, responseSize, *response)
+
+	request, response = UsageLogBodySizes(&UsageLogDetailSnapshot{
+		RequestBody:  RequestBodyPreviewSnapshot("{}", requestSize),
+		ResponseBody: "[voice payload omitted]",
+	})
+	require.Equal(t, requestSize, *request)
+	require.Nil(t, response)
+
+	request, response = UsageLogBodySizes(&UsageLogDetailSnapshot{
+		RequestBody:             RequestBodyPreviewSnapshot("{}", requestSize),
+		ResponseBody:            "upstream error body",
+		ResponseBodySizeUnknown: true,
+	})
+	require.Equal(t, requestSize, *request)
+	require.Nil(t, response)
+}
+
 func TestRequestBodyHandle_CleanupRemovesSpoolFile(t *testing.T) {
 	body := []byte(strings.Repeat("z", 2048))
 	dir := t.TempDir()

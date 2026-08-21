@@ -722,6 +722,8 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 	return &AdminUsageLog{
 		UsageLog:              usageLog,
 		HasDetail:             l.HasDetail,
+		RequestBodySize:       l.RequestBodySize,
+		ResponseBodySize:      l.ResponseBodySize,
 		UpstreamModel:         l.UpstreamModel,
 		UpstreamResponseModel: l.UpstreamResponseModel,
 		UpstreamModelMismatch: l.UpstreamModelMismatch,

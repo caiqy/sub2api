@@ -5239,6 +5239,7 @@ func TestOpenAIGatewayHandler_ImagesEditDetailSnapshotSanitizesMultipartMetadata
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body.Bytes()))
 	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.ContentLength = -1
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusOK, rec.Code)
@@ -5247,6 +5248,7 @@ func TestOpenAIGatewayHandler_ImagesEditDetailSnapshotSanitizesMultipartMetadata
 	require.NotContains(t, usageRepo.lastLog.DetailSnapshot.RequestBody, "raw-source-image-bytes")
 	require.NotContains(t, usageRepo.lastLog.DetailSnapshot.RequestBody, "raw-mask-bytes")
 	requestMetadata := gjson.Get(usageRepo.lastLog.DetailSnapshot.RequestBody, "preview").String()
+	require.Equal(t, int64(len(body.Bytes())), gjson.Get(usageRepo.lastLog.DetailSnapshot.RequestBody, "size").Int())
 	require.Equal(t, "gpt-image-2", gjson.Get(requestMetadata, "model").String())
 	require.Empty(t, gjson.Get(requestMetadata, "prompt").String())
 	require.Equal(t, "1536x1024", gjson.Get(requestMetadata, "size").String())

@@ -70,6 +70,12 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		return
 	}
 	defer coordinator.Cleanup()
+	requestBodySize := (*int64)(nil)
+	if coordinator.raw != nil {
+		size := coordinator.raw.Size()
+		requestBodySize = &size
+		service.SetUsageRequestBodySize(c, size)
+	}
 	var body []byte
 	var parsed *service.OpenAIImagesRequest
 	if multipartRequest {
@@ -494,7 +500,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
-		detailSnapshot := buildOpenAIImagesDetailSnapshot(c, parsed)
+		detailSnapshot := buildOpenAIImagesDetailSnapshot(c, parsed, requestBodySize)
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
@@ -551,7 +557,7 @@ func (h *OpenAIGatewayHandler) openAIImagesJSONKeepaliveInterval() time.Duration
 
 const multipartMetadataPromptPreviewLimitBytes = 512 << 10
 
-func buildOpenAIImagesDetailSnapshot(c *gin.Context, parsed *service.OpenAIImagesRequest) *middleware2.UsageDetailSnapshot {
+func buildOpenAIImagesDetailSnapshot(c *gin.Context, parsed *service.OpenAIImagesRequest, requestBodySize *int64) *middleware2.UsageDetailSnapshot {
 	snapshot := middleware2.BuildUsageDetailSnapshot(c)
 	if snapshot == nil || parsed == nil {
 		return snapshot
@@ -589,11 +595,18 @@ func buildOpenAIImagesDetailSnapshot(c *gin.Context, parsed *service.OpenAIImage
 	if err != nil {
 		return snapshot
 	}
+	if requestBodySize == nil && c != nil && c.Request != nil && c.Request.ContentLength > 0 {
+		size := c.Request.ContentLength
+		requestBodySize = &size
+	}
 	size := int64(0)
-	if c != nil && c.Request != nil && c.Request.ContentLength > 0 {
-		size = c.Request.ContentLength
+	if requestBodySize != nil {
+		size = *requestBodySize
 	}
 	snapshot.RequestBody = service.RequestBodyPreviewSnapshot(string(requestBody), size, true)
+	if requestBodySize != nil {
+		snapshot.RequestBodySize = requestBodySize
+	}
 	return snapshot
 }
 
@@ -623,7 +636,7 @@ func (h *OpenAIGatewayHandler) submitOpenAIImagesFailedUsageLogWithResponse(c *g
 		service.SetUsageResponseSnapshot(c, headersText, string(responseBody))
 		service.SetUsageUpstreamResponse(c, upstreamStatusCode, responseHeaders, string(responseBody))
 	}
-	detailSnapshot := buildOpenAIImagesDetailSnapshot(c, parsed)
+	detailSnapshot := buildOpenAIImagesDetailSnapshot(c, parsed, nil)
 	input := &service.FailedUsageLogInput{
 		APIKey:             apiKey,
 		User:               apiKey.User,

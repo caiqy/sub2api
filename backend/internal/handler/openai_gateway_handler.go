@@ -1977,6 +1977,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		return
 	}
 	service.SetUsageRequestBody(c, openAIRequestBodyPreviewSnapshot(firstMessage))
+	service.SetUsageRequestBodySize(c, int64(len(firstMessage)))
 	reqModel := strings.TrimSpace(gjson.GetBytes(firstMessage, "model").String())
 	if reqModel == "" {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "model is required in first response.create payload")
@@ -2388,6 +2389,15 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			OnOutboundRequest: func(_ int, _ []byte, effectiveModel string) {
 				setOpenAIFailedUsageExactUpstreamModel(c, effectiveModel)
 			},
+			OnClientRequest: func(_ int, payload []byte) {
+				service.SetUsageRequestBody(c, openAIRequestBodyPreviewSnapshot(payload))
+				service.SetUsageRequestBodySize(c, int64(len(payload)))
+			},
+			OnClientResponse: func(payload []byte, writeErr error) {
+				if writeErr == nil {
+					service.AddUsageResponseSize(c, int64(len(payload)))
+				}
+			},
 			MapRequestModel: func(turn int, originalModel string) (string, error) {
 				model := strings.TrimSpace(originalModel)
 				if model == "" {
@@ -2399,6 +2409,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			},
 			BeforeTurn: func(turn int) error {
 				resetOpenAIWSFailedUsageTurn(c)
+				service.ResetUsageResponse(c)
 				// turn==1 的会话屏蔽已由握手层检查覆盖；连接内 flag 只拦截后续 turn。
 				if cyberBlockedThisConn {
 					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, cyberSessionBlockedClientMsg, nil)

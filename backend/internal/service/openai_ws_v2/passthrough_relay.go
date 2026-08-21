@@ -78,10 +78,13 @@ type RelayOptions struct {
 	BeforeWriteClient   func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) error
 	BeforeClientWrite   func(msgType coderws.MessageType, payload []byte)
 	AfterClientWrite    func(msgType coderws.MessageType, payload []byte, writeErr error)
-	BeforeRelayCancel   func(exit RelayExit)
-	ReadClientFrame     func(ctx context.Context, clientConn FrameConn) (coderws.MessageType, []byte, error)
-	OnTrace             func(event RelayTraceEvent)
-	Now                 func() time.Time
+	// AfterClientWriteSuccess runs after the frame write succeeds and before
+	// OnTurnComplete publishes a terminal turn.
+	AfterClientWriteSuccess func(msgType coderws.MessageType, payload []byte)
+	BeforeRelayCancel       func(exit RelayExit)
+	ReadClientFrame         func(ctx context.Context, clientConn FrameConn) (coderws.MessageType, []byte, error)
+	OnTrace                 func(event RelayTraceEvent)
+	Now                     func() time.Time
 }
 
 type RelayTraceEvent struct {
@@ -341,6 +344,7 @@ func Relay(
 		options.BeforeWriteClient,
 		options.BeforeClientWrite,
 		options.AfterClientWrite,
+		options.AfterClientWriteSuccess,
 		func(msgType coderws.MessageType, payload []byte) {
 			if options.StartClientAfterFirstDownstream {
 				startClientReader()
@@ -564,6 +568,7 @@ func runUpstreamToClient(
 	beforeWriteClient func(msgType coderws.MessageType, payload []byte, wroteDownstream bool) error,
 	beforeClientWrite func(msgType coderws.MessageType, payload []byte),
 	afterClientWrite func(msgType coderws.MessageType, payload []byte, writeErr error),
+	afterClientWriteSuccess func(msgType coderws.MessageType, payload []byte),
 	afterWriteClient func(msgType coderws.MessageType, payload []byte),
 	dropDownstreamWrites *atomic.Bool,
 	forwardedFrames *atomic.Int64,
@@ -704,6 +709,9 @@ func runUpstreamToClient(
 			return
 		}
 		wroteDownstream = true
+		if afterClientWriteSuccess != nil {
+			afterClientWriteSuccess(msgType, payload)
+		}
 		emitTurnComplete(onTurnComplete, state, observedEvent)
 		if observedEvent.completedActiveTurn && releaseTurn != nil {
 			releaseTurn()

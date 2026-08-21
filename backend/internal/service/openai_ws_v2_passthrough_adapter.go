@@ -968,6 +968,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
 			isResponseCreate := eventType == "response.create"
 			acceptedTurn := false
+			turnNo := int(completedTurns.Load()) + 1
+			if turnNo < 2 {
+				turnNo = 2
+			}
 			if isResponseCreate {
 				if !turnLifecycle.beginResponseCreate(clientFrameConn.markTurnStarted) {
 					err := errors.New("overlapping response.create is not supported")
@@ -979,10 +983,12 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					}
 				}()
 				if hooks != nil && hooks.BeforeTurn != nil {
-					turnNo := int(completedTurns.Load()) + 1
 					if err := hooks.BeforeTurn(turnNo); err != nil {
 						return payload, nil, err
 					}
+				}
+				if hooks != nil && hooks.OnClientRequest != nil {
+					hooks.OnClientRequest(turnNo, append([]byte(nil), payload...))
 				}
 			}
 			if isResponseCreate {
@@ -998,10 +1004,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 						payload = capped
 					}
 				}
-			}
-			turnNo := int(completedTurns.Load()) + 1
-			if turnNo < 2 {
-				turnNo = 2
 			}
 			requestModelForThisFrame := ""
 			preserveChannelMappedModel := false
@@ -1249,6 +1251,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			AfterClientWrite: func(msgType coderws.MessageType, payload []byte, writeErr error) {
 				if msgType == coderws.MessageText && openAIWSPassthroughIsTerminalOutput(payload) {
 					turnLifecycle.finishTerminalWrite(writeErr == nil, clientFrameConn.markTurnCompleted)
+				}
+			},
+			AfterClientWriteSuccess: func(_ coderws.MessageType, payload []byte) {
+				if hooks != nil && hooks.OnClientResponse != nil {
+					hooks.OnClientResponse(payload, nil)
 				}
 			},
 			BeforeRelayCancel: func(exit openaiwsv2.RelayExit) {

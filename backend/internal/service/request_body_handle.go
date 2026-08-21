@@ -26,6 +26,7 @@ const (
 	defaultRequestBodySpoolPrefix               = "sub2api-request-body-"
 	requestBodyPreviewSnapshotKind              = "request_body_preview"
 	requestBodyPreviewOmittedMarker             = "[inline binary payload omitted]"
+	usageLogResponseBodyOmittedMarker           = "[voice payload omitted]"
 	requestBodyCleanupRetryDelay                = 100 * time.Millisecond
 	requestBodyCleanupRetryAttempts             = 2
 	requestBodyStaleCleanupInterval             = time.Hour
@@ -211,6 +212,34 @@ func RequestBodyPreviewSnapshot(preview string, size int64, forceTruncated ...bo
 	}
 	truncated := size > int64(providedBytes) || len(forceTruncated) > 0 && forceTruncated[0]
 	return marshalRequestBodyPreviewSnapshot(preview, size, truncated, int(DefaultRequestBodyPreviewLimitBytes))
+}
+
+// UsageLogBodySizes returns durable byte-size snapshots from a usage detail snapshot.
+func UsageLogBodySizes(snapshot *UsageLogDetailSnapshot) (requestSize, responseSize *int64) {
+	if snapshot == nil {
+		return nil, nil
+	}
+
+	var requestBytes *int64
+	if snapshot.RequestBodySize != nil {
+		value := *snapshot.RequestBodySize
+		requestBytes = &value
+	} else {
+		value := int64(len(snapshot.RequestBody))
+		if preview, ok := parseRequestBodyPreviewSnapshot(snapshot.RequestBody); ok {
+			value = preview.Size
+		}
+		requestBytes = &value
+	}
+	if snapshot.ResponseBodySize != nil {
+		value := *snapshot.ResponseBodySize
+		return requestBytes, &value
+	}
+	if snapshot.ResponseBodySizeUnknown || snapshot.ResponseBody == "" || snapshot.ResponseBody == usageLogResponseBodyOmittedMarker {
+		return requestBytes, nil
+	}
+	responseBytes := int64(len(snapshot.ResponseBody))
+	return requestBytes, &responseBytes
 }
 
 func marshalRequestBodyPreviewSnapshot(preview string, size int64, truncated bool, maxBytes int) string {

@@ -12,18 +12,23 @@ import (
 type UsageDetailSnapshot = service.UsageLogDetailSnapshot
 
 type usageDetailCollector struct {
-	requestHeaders      string
-	requestBody         string
-	originalRequestBody string
-	upstreamHeaders     string
-	upstreamBody        string
-	upstreamRespHeaders string
-	upstreamRespBody    string
-	responseHeaders     string
-	responseBody        bytes.Buffer
-	overrideHeaders     string
-	overrideBody        string
-	hasOverride         bool
+	requestHeaders          string
+	requestBody             string
+	requestBodySize         *int64
+	originalRequestBody     string
+	upstreamHeaders         string
+	upstreamBody            string
+	upstreamRespHeaders     string
+	upstreamRespBody        string
+	responseHeaders         string
+	responseBody            bytes.Buffer
+	responseBodySize        int64
+	responseBodySizeSet     bool
+	responseBodySizeLocked  bool
+	responseBodySizeUnknown bool
+	overrideHeaders         string
+	overrideBody            string
+	hasOverride             bool
 }
 
 type usageDetailResponseWriter struct {
@@ -96,6 +101,11 @@ func buildUsageDetailSnapshot(c *gin.Context) *UsageDetailSnapshot {
 	}
 	responseHeaders := collector.responseHeaders
 	responseBody := collector.responseBody.String()
+	responseBodySize := collector.responseBodySize
+	var responseBodySizePtr *int64
+	if collector.responseBodySizeSet {
+		responseBodySizePtr = &responseBodySize
+	}
 	if collector.hasOverride {
 		responseHeaders = collector.overrideHeaders
 	}
@@ -109,18 +119,27 @@ func buildUsageDetailSnapshot(c *gin.Context) *UsageDetailSnapshot {
 	return (&service.UsageLogDetailSnapshot{
 		RequestHeaders:          collector.requestHeaders,
 		RequestBody:             requestBody,
+		RequestBodySize:         collector.requestBodySize,
 		UpstreamRequestHeaders:  collector.upstreamHeaders,
 		UpstreamRequestBody:     collector.upstreamBody,
 		UpstreamResponseHeaders: collector.upstreamRespHeaders,
 		UpstreamResponseBody:    collector.upstreamRespBody,
 		ResponseHeaders:         responseHeaders,
 		ResponseBody:            responseBody,
+		ResponseBodySize:        responseBodySizePtr,
+		ResponseBodySizeUnknown: collector.responseBodySizeUnknown,
 	}).Normalize()
 }
 func (c *usageDetailCollector) captureResponseChunk(data []byte) {
-	if c == nil || c.hasOverride || len(data) == 0 {
+	if c == nil || len(data) == 0 {
 		return
 	}
+	if c.responseBodySizeLocked || c.hasOverride {
+		return
+	}
+	c.responseBodySize += int64(len(data))
+	c.responseBodySizeSet = true
+	c.responseBodySizeUnknown = false
 	_, _ = c.responseBody.Write(data)
 }
 
@@ -129,6 +148,13 @@ func (c *usageDetailCollector) SetUsageRequestBody(body string) {
 		return
 	}
 	c.requestBody = body
+}
+
+func (c *usageDetailCollector) SetUsageRequestBodySize(size int64) {
+	if c == nil || size < 0 {
+		return
+	}
+	c.requestBodySize = &size
 }
 
 func (c *usageDetailCollector) SetUsageOriginalRequestBody(body string) {
@@ -157,9 +183,47 @@ func (c *usageDetailCollector) SetUsageResponseSnapshot(headers, body string) {
 		return
 	}
 	c.responseBody.Reset()
+	if !c.responseBodySizeLocked {
+		c.responseBodySize = 0
+		c.responseBodySizeSet = false
+	}
+	c.responseBodySizeUnknown = !c.responseBodySizeLocked
 	c.overrideHeaders = headers
 	c.overrideBody = body
 	c.hasOverride = true
+}
+
+func (c *usageDetailCollector) SetUsageResponseSize(size int64) {
+	if c == nil || size < 0 {
+		return
+	}
+	c.responseBodySize = size
+	c.responseBodySizeSet = true
+	c.responseBodySizeLocked = true
+	c.responseBodySizeUnknown = false
+}
+
+func (c *usageDetailCollector) AddUsageResponseSize(size int64) {
+	if c == nil || size < 0 || c.responseBodySizeLocked {
+		return
+	}
+	c.responseBodySize += size
+	c.responseBodySizeSet = true
+	c.responseBodySizeUnknown = false
+}
+
+func (c *usageDetailCollector) ResetUsageResponse() {
+	if c == nil {
+		return
+	}
+	c.responseBody.Reset()
+	c.responseBodySize = 0
+	c.responseBodySizeSet = false
+	c.responseBodySizeLocked = false
+	c.responseBodySizeUnknown = false
+	c.overrideHeaders = ""
+	c.overrideBody = ""
+	c.hasOverride = false
 }
 
 func (c *usageDetailCollector) SetUsageUpstreamResponse(headers, body string) {

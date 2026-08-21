@@ -23,6 +23,22 @@ type usageDetailRequestBodySetter interface {
 	SetUsageRequestBody(body string)
 }
 
+type usageDetailRequestBodySizeSetter interface {
+	SetUsageRequestBodySize(size int64)
+}
+
+type usageDetailResponseResetter interface {
+	ResetUsageResponse()
+}
+
+type usageDetailResponseSizeAdder interface {
+	AddUsageResponseSize(size int64)
+}
+
+type usageDetailResponseSizeSetter interface {
+	SetUsageResponseSize(size int64)
+}
+
 type usageDetailOriginalRequestBodySetter interface {
 	SetUsageOriginalRequestBody(body string)
 }
@@ -149,6 +165,21 @@ func SetUsageRequestBody(c *gin.Context, body string) {
 	collector.SetUsageRequestBody(body)
 }
 
+func SetUsageRequestBodySize(c *gin.Context, size int64) {
+	if c == nil || size < 0 {
+		return
+	}
+	v, ok := c.Get(UsageDetailCaptureContextKey)
+	if !ok {
+		return
+	}
+	collector, ok := v.(usageDetailRequestBodySizeSetter)
+	if !ok || collector == nil {
+		return
+	}
+	collector.SetUsageRequestBodySize(size)
+}
+
 func SetUsageOriginalRequestBody(c *gin.Context, body string) {
 	if c == nil {
 		return
@@ -215,6 +246,51 @@ func SetUsageResponseSnapshot(c *gin.Context, headers, body string) {
 		return
 	}
 	collector.SetUsageResponseSnapshot(headers, body)
+}
+
+func SetUsageResponseSize(c *gin.Context, size int64) {
+	if c == nil || size < 0 {
+		return
+	}
+	v, ok := c.Get(UsageDetailCaptureContextKey)
+	if !ok {
+		return
+	}
+	collector, ok := v.(usageDetailResponseSizeSetter)
+	if !ok || collector == nil {
+		return
+	}
+	collector.SetUsageResponseSize(size)
+}
+
+func AddUsageResponseSize(c *gin.Context, size int64) {
+	if c == nil || size < 0 {
+		return
+	}
+	v, ok := c.Get(UsageDetailCaptureContextKey)
+	if !ok {
+		return
+	}
+	collector, ok := v.(usageDetailResponseSizeAdder)
+	if !ok || collector == nil {
+		return
+	}
+	collector.AddUsageResponseSize(size)
+}
+
+func ResetUsageResponse(c *gin.Context) {
+	if c == nil {
+		return
+	}
+	v, ok := c.Get(UsageDetailCaptureContextKey)
+	if !ok {
+		return
+	}
+	collector, ok := v.(usageDetailResponseResetter)
+	if !ok || collector == nil {
+		return
+	}
+	collector.ResetUsageResponse()
 }
 
 func SetUsageUpstreamResponse(c *gin.Context, statusCode int, headers http.Header, body string) {
