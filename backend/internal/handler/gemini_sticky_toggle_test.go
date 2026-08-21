@@ -207,6 +207,14 @@ func (*geminiStickyGatewayCacheStub) ReleaseGrokVideoBilled(context.Context, str
 	return nil
 }
 
+func (*geminiStickyGatewayCacheStub) SetReasoningContent(context.Context, string, string, time.Duration) error {
+	return nil
+}
+
+func (*geminiStickyGatewayCacheStub) GetReasoningContent(context.Context, string) (string, error) {
+	return "", service.ErrReasoningContentNotFound
+}
+
 func newGeminiStickyToggleHandler(t *testing.T, enabled bool, cache service.GatewayCache, digestStore *service.DigestSessionStore) *GatewayHandler {
 	t.Helper()
 	cfg := &config.Config{}

@@ -1380,12 +1380,17 @@ func TestOpenAIGatewayHandler_ResponsesCyberPolicyCreatesSingleUsageLog(t *testi
 	var createdCount atomic.Int32
 	httpUpstream := &openAIChatCompletionsHTTPUpstreamStub{
 		response: &http.Response{
-			StatusCode: http.StatusBadRequest,
+			StatusCode: http.StatusOK,
 			Header: http.Header{
-				"Content-Type": []string{"application/json"},
+				"Content-Type": []string{"text/event-stream"},
 				"X-Request-Id": []string{"req_cyber_123"},
 			},
-			Body: io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_request_error","code":"cyber_policy","message":"cyber upstream rejected payload"}}`)),
+			Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+				`data: {"type":"response.created","response":{"id":"resp_cyber_123"}}`,
+				"",
+				`data: {"type":"response.failed","response":{"id":"resp_cyber_123","error":{"code":"cyber_policy","message":"cyber upstream rejected payload"},"usage":{"input_tokens":17,"output_tokens":3}}}`,
+				"",
+			}, "\n"))),
 		},
 	}
 	accountRepo := &openAIChatCompletionsAccountRepoStub{account: account}
@@ -1437,7 +1442,7 @@ func TestOpenAIGatewayHandler_ResponsesCyberPolicyCreatesSingleUsageLog(t *testi
 	router.Use(middleware.UsageDetailCapture())
 	router.POST("/v1/responses", h.Responses)
 
-	reqBody := `{"model":"gpt-5.4","stream":false,"input":"hello cyber"}`
+	reqBody := `{"model":"gpt-5.4","stream":true,"input":"hello cyber"}`
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
@@ -1449,11 +1454,11 @@ func TestOpenAIGatewayHandler_ResponsesCyberPolicyCreatesSingleUsageLog(t *testi
 		case <-usageRepo.created:
 			createdCount.Add(1)
 		default:
-			require.Equal(t, http.StatusBadRequest, rec.Code)
+			require.Equal(t, http.StatusOK, rec.Code)
 			require.NotNil(t, usageRepo.lastLog)
 			require.Equal(t, int32(1), createdCount.Load(), "cyber request should create exactly one usage log")
-			require.Equal(t, 0, usageRepo.lastLog.InputTokens)
-			require.Equal(t, 0, usageRepo.lastLog.OutputTokens)
+			require.Equal(t, 17, usageRepo.lastLog.InputTokens)
+			require.Equal(t, 3, usageRepo.lastLog.OutputTokens)
 			return
 		}
 	}

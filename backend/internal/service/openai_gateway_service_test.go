@@ -191,7 +191,7 @@ func (r stubOpenAIAccountRepo) ListTempUnschedulableByPlatform(ctx context.Conte
 	return result, nil
 }
 
-func TestOpenAIGatewayService_ForwardAsAnthropic_TempUnschedulableReturnsFailoverWithoutCommit(t *testing.T) {
+func TestOpenAIGatewayService_ForwardAsAnthropic_CapacityShedReturnsRequestScopedFailoverWithoutCommit(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	body := []byte(`{"model":"gpt-5.4","max_tokens":32,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
@@ -249,8 +249,10 @@ func TestOpenAIGatewayService_ForwardAsAnthropic_TempUnschedulableReturnsFailove
 	require.ErrorAs(t, err, &failoverErr)
 	require.Equal(t, http.StatusBadRequest, failoverErr.StatusCode)
 	require.True(t, failoverErr.ShouldRetryNextAccount())
-	require.Equal(t, account.ID, repo.modelRateLimitAccountID, "temporary unschedulability should exclude this account from reselection")
-	require.Equal(t, "gpt-5.4", repo.modelRateLimitKey)
+	require.True(t, failoverErr.RetryableOnSameAccount)
+	require.True(t, failoverErr.RequestScopedTransient)
+	require.Zero(t, repo.modelRateLimitAccountID, "request-scoped capacity shedding must not change account health")
+	require.Empty(t, repo.modelRateLimitKey)
 	require.False(t, IsResponseCommitted(c))
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Empty(t, rec.Body.String())
@@ -280,17 +282,17 @@ func TestFailoverOpenAIUpstreamHTTPError_NilContextSkipsTempUnschedulablePolicy(
 			"temp_unschedulable_enabled": true,
 			"temp_unschedulable_rules": []any{map[string]any{
 				"error_code":       float64(http.StatusBadRequest),
-				"keywords":         []any{"servers are currently overloaded"},
+				"keywords":         []any{"custom temporary outage"},
 				"duration_minutes": float64(1),
 			}},
 		},
 	}
-	body := []byte(`{"error":{"message":"Our servers are currently overloaded."}}`)
+	body := []byte(`{"error":{"message":"Custom temporary outage."}}`)
 	resp := &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{}}
 
 	got := svc.failoverOpenAIUpstreamHTTPError(
 		context.Background(), nil, account, resp, body,
-		"Our servers are currently overloaded.", "gpt-5.4",
+		"Custom temporary outage.", "gpt-5.4",
 	)
 
 	require.Nil(t, got)
@@ -994,6 +996,13 @@ func (*stubGatewayCache) ClaimGrokVideoBilled(context.Context, string, time.Dura
 
 func (*stubGatewayCache) ReleaseGrokVideoBilled(context.Context, string) error {
 	return nil
+}
+
+func (c *stubGatewayCache) SetReasoningContent(_ context.Context, _ string, _ string, _ time.Duration) error {
+	return nil
+}
+func (c *stubGatewayCache) GetReasoningContent(_ context.Context, _ string) (string, error) {
+	return "", ErrReasoningContentNotFound
 }
 
 func TestOpenAISelectAccountWithLoadAwareness_FiltersUnschedulable(t *testing.T) {
@@ -2700,7 +2709,7 @@ func TestOpenAIStreamingMissingTerminalEventReturnsIncompleteError(t *testing.T)
 
 	go func() {
 		defer func() { _ = pw.Close() }()
-		_, _ = pw.Write([]byte("data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"message\"},\"output_index\":0}\n\n"))
+		_, _ = pw.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\",\"output_index\":0}\n\n"))
 	}()
 
 	_, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, &Account{ID: 1}, time.Now(), "model", "model")
@@ -2732,7 +2741,7 @@ func TestOpenAIStreamingPassthroughMissingTerminalEventReturnsIncompleteError(t 
 
 	go func() {
 		defer func() { _ = pw.Close() }()
-		_, _ = pw.Write([]byte("data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"message\"},\"output_index\":0}\n\n"))
+		_, _ = pw.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\",\"output_index\":0}\n\n"))
 	}()
 
 	_, err := svc.handleStreamingResponsePassthrough(c.Request.Context(), resp, c, &Account{ID: 1}, time.Now(), "", "")

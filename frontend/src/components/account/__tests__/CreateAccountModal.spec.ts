@@ -11,7 +11,10 @@ const {
   getSettingsMock,
   getWebSearchEmulationConfigMock,
   showErrorMock,
-  showInfoMock
+  showInfoMock,
+  importCodexSessionMock,
+  createOpenAICodexPATMock,
+  authIsSimpleMode
 } = vi.hoisted(() => ({
   createAccountMock: vi.fn(),
   probeUpstreamBillingMock: vi.fn(),
@@ -19,7 +22,10 @@ const {
   getSettingsMock: vi.fn(),
   getWebSearchEmulationConfigMock: vi.fn(),
   showErrorMock: vi.fn(),
-  showInfoMock: vi.fn()
+  importCodexSessionMock: vi.fn(),
+  createOpenAICodexPATMock: vi.fn(),
+  showInfoMock: vi.fn(),
+  authIsSimpleMode: { value: true },
 }))
 
 vi.mock('@/stores/app', () => ({
@@ -33,7 +39,9 @@ vi.mock('@/stores/app', () => ({
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
-    isSimpleMode: true
+    get isSimpleMode() {
+      return authIsSimpleMode.value
+    }
   })
 }))
 
@@ -42,11 +50,16 @@ vi.mock('@/api/admin', () => ({
     accounts: {
       create: createAccountMock,
       probeUpstreamBilling: probeUpstreamBillingMock,
-      checkMixedChannelRisk: checkMixedChannelRiskMock
+      checkMixedChannelRisk: checkMixedChannelRiskMock,
+      importCodexSession: importCodexSessionMock,
+      createOpenAICodexPAT: createOpenAICodexPATMock
     },
     settings: {
       getSettings: getSettingsMock,
       getWebSearchEmulationConfig: getWebSearchEmulationConfigMock
+    },
+    tlsFingerprintProfiles: {
+      list: vi.fn().mockResolvedValue([])
     }
   }
 }))
@@ -133,16 +146,23 @@ const ConfirmDialogStub = defineComponent({
   template: '<div v-if="show"><slot /><slot name="footer" /></div>'
 })
 
-const ModelWhitelistSelectorStub = defineComponent({
-  name: 'ModelWhitelistSelector',
+const OAuthAuthorizationFlowStub = defineComponent({
+  name: 'OAuthAuthorizationFlow',
   props: {
-    modelValue: {
-      type: Array,
-      default: () => []
-    }
+    showManualOption: Boolean,
+    showCodexSessionImportOption: Boolean,
+    showAgentIdentityOption: Boolean,
+    showCodexPatOption: Boolean,
+    initialInputMethod: String
   },
-  emits: ['update:modelValue'],
-  template: '<div />'
+  data: () => ({ inputMethod: 'manual' }),
+  emits: ['import-codex-session', 'import-codex-pat'],
+  template: `
+    <div>
+      <button data-testid="import-codex-session" @click="$emit('import-codex-session', 'session-json')">session</button>
+      <button data-testid="import-codex-pat" @click="$emit('import-codex-pat', 'pat-token')">pat</button>
+    </div>
+  `
 })
 
 const ProxySelectorStub = defineComponent({
@@ -151,18 +171,6 @@ const ProxySelectorStub = defineComponent({
     modelValue: {
       type: Number,
       default: null
-    }
-  },
-  emits: ['update:modelValue'],
-  template: '<div />'
-})
-
-const GroupSelectorStub = defineComponent({
-  name: 'GroupSelector',
-  props: {
-    modelValue: {
-      type: Array,
-      default: () => []
     }
   },
   emits: ['update:modelValue'],
@@ -254,25 +262,57 @@ const SelectStub = defineComponent({
   `
 })
 
-function mountModal() {
-  return mount(CreateAccountModal, {
-    props: {
-      show: true,
-      proxies: [],
-      groups: []
+const GroupSelectorStub = defineComponent({
+  name: 'GroupSelector',
+  props: {
+    modelValue: {
+      type: Array,
+      default: () => [],
     },
+  },
+  emits: ['update:modelValue'],
+  template: `
+    <button
+      type="button"
+      data-testid="select-pricing-groups"
+      @click="$emit('update:modelValue', [1, 2])"
+    >
+      groups
+    </button>
+  `,
+})
+
+const ModelWhitelistSelectorStub = defineComponent({
+  name: 'ModelWhitelistSelector',
+  props: {
+    modelValue: {
+      type: Array,
+      default: () => [],
+    },
+    platform: String,
+    syncCredentials: Object,
+  },
+  emits: ['update:modelValue'],
+  template: '<div data-testid="model-whitelist-selector" />',
+})
+
+function mountModal(groups: any[] = []) {
+  return mount(CreateAccountModal, {
+    props: { show: true, proxies: [], groups },
     global: {
       stubs: {
         BaseDialog: BaseDialogStub,
         ConfirmDialog: ConfirmDialogStub,
         Select: SelectStub,
         Icon: true,
+        PlatformIcon: true,
         ProxySelector: ProxySelectorStub,
+        ProxyAdBanner: true,
         GroupSelector: GroupSelectorStub,
         ModelWhitelistSelector: ModelWhitelistSelectorStub,
         QuotaLimitCard: QuotaLimitCardStub,
-        OAuthAuthorizationFlow: true
-      }
+        OAuthAuthorizationFlow: OAuthAuthorizationFlowStub
+      },
     }
   })
 }
@@ -289,6 +329,46 @@ async function switchToAntigravityUpstream(wrapper: ReturnType<typeof mountModal
   await wrapper.get('[data-tour="account-form-name"]').setValue('Antigravity upstream')
   await wrapper.get('input[placeholder="https://cloudcode-pa.googleapis.com"]').setValue('https://cloudcode-pa.googleapis.com')
   await wrapper.get('input[placeholder="sk-..."]').setValue('sk-antigravity-test')
+}
+
+async function selectButtonByText(wrapper: ReturnType<typeof mountModal>, text: string) {
+  const button = wrapper.findAll('button').find((candidate) => candidate.text().includes(text))
+  expect(button).toBeDefined()
+  await button?.trigger('click')
+}
+
+async function submitApiKeyAccount(
+  platform: 'openai' | 'anthropic',
+  enableLongContextBilling = false,
+  disableUpstreamBillingProbe = false
+) {
+  const wrapper = mountModal()
+  await selectButtonByText(wrapper, platform === 'openai' ? 'OpenAI' : 'admin.accounts.claudeConsole')
+  if (platform === 'openai') {
+    await selectButtonByText(wrapper, 'API Key')
+  }
+  await wrapper.get('form#create-account-form input[type="text"]').setValue(`${platform} account`)
+  await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
+  if (enableLongContextBilling) {
+    await wrapper.get('[data-testid="openai-long-context-billing-toggle"]').trigger('click')
+  }
+  if (disableUpstreamBillingProbe) {
+    await wrapper.get('[data-testid="upstream-billing-auto-probe"]').trigger('click')
+  }
+  await wrapper.get('form#create-account-form').trigger('submit.prevent')
+  await flushPromises()
+  return wrapper
+}
+
+async function openCodexImportStep(toggleClicks = 0) {
+  const wrapper = mountModal()
+  await selectButtonByText(wrapper, 'OpenAI')
+  for (let click = 0; click < toggleClicks; click += 1) {
+    await wrapper.get('[data-testid="openai-long-context-billing-toggle"]').trigger('click')
+  }
+  await wrapper.get('form#create-account-form input[type="text"]').setValue('Codex import')
+  await wrapper.get('form#create-account-form').trigger('submit.prevent')
+  return wrapper
 }
 
 async function setPassthroughState(
@@ -313,16 +393,21 @@ async function setPassthroughState(
 
 describe('CreateAccountModal', () => {
   beforeEach(() => {
-    createAccountMock.mockReset()
-    createAccountMock.mockResolvedValue({ id: 1 })
-    probeUpstreamBillingMock.mockReset()
-    probeUpstreamBillingMock.mockResolvedValue({})
-    checkMixedChannelRiskMock.mockReset()
-    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
-    getSettingsMock.mockReset()
-    getSettingsMock.mockResolvedValue({ account_quota_notify_enabled: true })
-    getWebSearchEmulationConfigMock.mockReset()
-    getWebSearchEmulationConfigMock.mockResolvedValue({ enabled: true, providers: ['brave'] })
+    authIsSimpleMode.value = true
+    createAccountMock.mockReset().mockResolvedValue({ id: 1, platform: 'openai', type: 'apikey' })
+    probeUpstreamBillingMock.mockReset().mockResolvedValue({})
+    importCodexSessionMock.mockReset().mockResolvedValue({
+      created: 1,
+      updated: 0,
+      skipped: 0,
+      failed: 0,
+      errors: [],
+      warnings: []
+    })
+    createOpenAICodexPATMock.mockReset().mockResolvedValue({})
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    getSettingsMock.mockReset().mockResolvedValue({ account_quota_notify_enabled: true })
+    getWebSearchEmulationConfigMock.mockReset().mockResolvedValue({ enabled: true, providers: ['brave'] })
     showErrorMock.mockReset()
     showInfoMock.mockReset()
   })
@@ -367,6 +452,79 @@ describe('CreateAccountModal', () => {
         quota_notify_total_threshold_type: 'percentage'
       })
     }))
+  })
+
+  it('sends an explicit disabled state when the create toggle is turned off', async () => {
+    await submitApiKeyAccount('openai', false, true)
+
+    expect(createAccountMock.mock.calls[0]?.[0]?.upstream_billing_probe_enabled).toBe(false)
+    expect(probeUpstreamBillingMock).not.toHaveBeenCalled()
+  })
+
+  it('submits adaptive Kimi protocol endpoints', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'Kimi')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Kimi adaptive')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('sk-kimi')
+
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    expect(createAccountMock.mock.calls[0]?.[0]?.credentials).toMatchObject({
+      account_mode: 'payg',
+      api_protocol: 'adaptive',
+      base_url: 'https://api.moonshot.cn/v1',
+      api_base_urls: {
+        chat_completions: 'https://api.moonshot.cn/v1',
+        anthropic: 'https://api.moonshot.cn/anthropic'
+      }
+    })
+  })
+
+  it('uses the edited adaptive Chat endpoint when previewing upstream models', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'Kimi')
+    await wrapper
+      .get('[data-testid="cn-adaptive-base-url-chat_completions"]')
+      .setValue('https://relay.example.com/v1')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('sk-relay')
+
+    expect(wrapper.getComponent(ModelWhitelistSelectorStub).props('syncCredentials')).toMatchObject({
+      platform: 'kimi',
+      type: 'apikey',
+      base_url: 'https://relay.example.com/v1',
+      api_key: 'sk-relay'
+    })
+  })
+
+  it('exposes Agent Identity in the OpenAI authorization methods', async () => {
+    const wrapper = mountModal()
+
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('OpenAI account')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+
+    const flow = wrapper.getComponent(OAuthAuthorizationFlowStub)
+    expect(flow.props('showManualOption')).toBe(true)
+    expect(flow.props('showCodexSessionImportOption')).toBe(true)
+    expect(flow.props('showAgentIdentityOption')).toBe(true)
+    expect(flow.props('showCodexPatOption')).toBe(true)
+    expect(flow.props('initialInputMethod')).toBe('manual')
+  })
+
+  it.each([
+    ['camelCase', { authMode: 'agentIdentity', agentIdentity: { agentRuntimeId: 'runtime' } }],
+    ['nested identity without auth_mode', { agent_identity: { agent_runtime_id: 'runtime' } }]
+  ])('accepts backend-compatible %s Agent Identity imports', async (_name, content) => {
+    const wrapper = await openCodexImportStep()
+    const flow = wrapper.getComponent(OAuthAuthorizationFlowStub)
+    flow.vm.inputMethod = 'agent_identity'
+
+    flow.vm.$emit('import-codex-session', JSON.stringify(content))
+    await flushPromises()
+
+    expect(importCodexSessionMock).toHaveBeenCalledTimes(1)
   })
 
   it('submits passthrough field rules for API key accounts only', async () => {

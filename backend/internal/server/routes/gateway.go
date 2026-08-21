@@ -77,9 +77,6 @@ func RegisterGatewayRoutes(
 			return false
 		}
 	}
-	isOpenAIGatewayPlatform := func(c *gin.Context) bool {
-		return getGroupPlatform(c) == service.PlatformOpenAI
-	}
 	countTokensHandler := func(c *gin.Context) {
 		switch getGroupPlatform(c) {
 		case service.PlatformOpenAI, service.PlatformKimi, service.PlatformZhipu, service.PlatformDeepseek:
@@ -91,9 +88,12 @@ func RegisterGatewayRoutes(
 		}
 	}
 	modelsHandler := func(c *gin.Context) {
-		if isOpenAIGatewayPlatform(c) && c.Query("client_version") != "" {
-			h.OpenAIGateway.CodexModels(c)
-			return
+		if c.Query("client_version") != "" {
+			switch getGroupPlatform(c) {
+			case service.PlatformOpenAI, service.PlatformComposite:
+				h.OpenAIGateway.CodexModels(c)
+				return
+			}
 		}
 		h.Gateway.Models(c)
 	}
@@ -176,6 +176,28 @@ func RegisterGatewayRoutes(
 		}
 		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
 		c.JSON(http.StatusNotFound, gin.H{"error": gin.H{"type": "not_found_error", "message": "Videos API is not supported for this platform"}})
+	}
+	// /responses/*subpath 的子路径会被转发到上游同名端点之后，因此在入口就拒掉
+	// 不可转发的子路径，不让它进入调度与转发流程。可转发的判定见
+	// service.IsForwardableOpenAIResponsesRequestPath 及 upstream_path_guard.go。
+	guardResponsesSubpath := func(next gin.HandlerFunc) gin.HandlerFunc {
+		return func(c *gin.Context) {
+			if !service.IsForwardableOpenAIResponsesRequestPath(c) {
+				service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
+				c.AbortWithStatusJSON(http.StatusNotFound, gin.H{
+					"error": gin.H{
+						"type":    "not_found_error",
+						"message": "Unsupported responses subpath",
+					},
+				})
+				return
+			}
+			if service.IsOpenAIResponsesInputTokensRequestPath(c) && isOpenAIResponsesCompatibleGatewayPlatform(c) {
+				h.OpenAIGateway.ResponsesInputTokens(c)
+				return
+			}
+			next(c)
+		}
 	}
 	// API网关（Claude API兼容）
 	gateway := r.Group("/v1")
@@ -580,25 +602,51 @@ func compositeTargetPlatformMiddleware(resolver *service.EffectiveGatewayRouteRe
 			c.Request.Context(), apiKey, subscription, nil,
 			clientModel, compositeRouteEndpointForPath(c.Request.URL.Path),
 		)
+		routeResolved := err == nil
 		if err != nil {
-			c.Request = c.Request.WithContext(originalCtx)
-			if errors.Is(err, service.ErrCompositeModelInvalid) {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"type": "server_error", "message": "Failed to resolve composite model route"}})
+			// Composite groups retain the historical detector fallback for known
+			// platform models when no explicit route exists.
+			if apiKey.Group.Platform == service.PlatformComposite && !errors.Is(err, service.ErrCompositeModelInvalid) {
+				if platform, detected := service.DetectModelPlatform(clientModel); detected {
+					decision := service.CompositeRouteDecision{
+						Matched:        true,
+						Source:         service.CompositeRouteSourceDetector,
+						GroupID:        apiKey.Group.ID,
+						PublicModel:    clientModel,
+						TargetPlatform: platform,
+						UpstreamModel:  clientModel,
+						Endpoint:       compositeRouteEndpointForPath(c.Request.URL.Path),
+					}
+					c.Request = c.Request.WithContext(service.WithCompositeRouteDecision(service.WithoutCompositeRouteDecision(c.Request.Context()), decision))
+				} else {
+					c.Request = c.Request.WithContext(originalCtx)
+					middleware.AbortWithError(c, pkgerrors.Code(err), pkgerrors.Reason(err), pkgerrors.Message(err))
+					c.Abort()
+					return
+				}
 			} else {
-				middleware.AbortWithError(c, pkgerrors.Code(err), pkgerrors.Reason(err), pkgerrors.Message(err))
+				c.Request = c.Request.WithContext(originalCtx)
+				if errors.Is(err, service.ErrCompositeModelInvalid) {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"type": "server_error", "message": "Failed to resolve composite model route"}})
+				} else {
+					middleware.AbortWithError(c, pkgerrors.Code(err), pkgerrors.Reason(err), pkgerrors.Message(err))
+				}
+				c.Abort()
+				return
 			}
-			c.Abort()
-			return
-		}
-		middleware.ApplyEffectiveGatewayRoute(c, route)
-		if route.Decision != nil {
-			if snapshot := compositeOriginalRequestBodySnapshot(c.GetHeader("Content-Type"), body); snapshot != "" {
-				service.SetUsageOriginalRequestBody(c, snapshot)
+		} else {
+			middleware.ApplyEffectiveGatewayRoute(c, route)
+			if route.Decision != nil {
+				if snapshot := compositeOriginalRequestBodySnapshot(c.GetHeader("Content-Type"), body); snapshot != "" {
+					service.SetUsageOriginalRequestBody(c, snapshot)
+				}
 			}
 		}
-		if route.RoutingModel != "" && route.RoutingModel != clientModel && gjson.ValidBytes(body) {
-			if rewritten, rewriteErr := sjson.SetBytes(body, "model", route.RoutingModel); rewriteErr == nil {
-				body = rewritten
+		if routeResolved && route.RoutingModel != "" && route.RoutingModel != clientModel && gjson.ValidBytes(body) {
+			if _, modelPath := compositeJSONRequestModel(body); modelPath != "" {
+				if rewritten, rewriteErr := sjson.SetBytes(body, modelPath, route.RoutingModel); rewriteErr == nil {
+					body = rewritten
+				}
 			}
 		}
 		if c.Request.Method != http.MethodGet {
@@ -661,10 +709,23 @@ func compositeWebSocketRouteResolverMiddleware(resolver *service.CompositeRouteR
 }
 
 func compositeRequestModelFromBody(contentType string, body []byte) string {
-	if model := strings.TrimSpace(gjson.GetBytes(body, "model").String()); model != "" {
+	if model, _ := compositeJSONRequestModel(body); model != "" {
 		return model
 	}
 	return compositeMultipartModelFromBody(contentType, body)
+}
+
+func compositeJSONRequestModel(body []byte) (string, string) {
+	for _, path := range []string{"model", "session.model"} {
+		model := gjson.GetBytes(body, path)
+		if model.Type != gjson.String {
+			continue
+		}
+		if value := strings.TrimSpace(model.String()); value != "" {
+			return value, path
+		}
+	}
+	return "", ""
 }
 
 func compositeMultipartModelFromBody(contentType string, body []byte) string {
@@ -685,14 +746,22 @@ func compositeMultipartModelFromBody(contentType string, body []byte) string {
 		if err != nil {
 			return ""
 		}
-		if part.FormName() != "model" || part.FileName() != "" {
+		fieldName := part.FormName()
+		if part.FileName() != "" || (fieldName != "model" && fieldName != "session") {
 			continue
 		}
 		data, err := io.ReadAll(part)
 		if err != nil {
 			return ""
 		}
-		return strings.TrimSpace(string(data))
+		switch fieldName {
+		case "model":
+			return strings.TrimSpace(string(data))
+		case "session":
+			if model, _ := compositeJSONRequestModel(data); model != "" {
+				return model
+			}
+		}
 	}
 }
 
@@ -762,7 +831,10 @@ func compositeRouteEndpointForPath(path string) string {
 		return service.CompositeRouteEndpointCountTokens
 	case strings.Contains(path, "/messages"):
 		return service.CompositeRouteEndpointMessages
-	case strings.Contains(path, "/responses"):
+	case strings.Contains(path, "/responses"),
+		strings.Contains(path, "/alpha/search"),
+		strings.Contains(path, "/realtime/calls"),
+		strings.HasSuffix(strings.TrimRight(path, "/"), "/live"):
 		return service.CompositeRouteEndpointResponses
 	case strings.Contains(path, "/chat/completions"):
 		return service.CompositeRouteEndpointChatCompletions
