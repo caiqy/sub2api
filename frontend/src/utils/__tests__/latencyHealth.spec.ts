@@ -23,7 +23,7 @@ describe('latencyHealth', () => {
     expect(durationSeverity(300_000)).toBe('critical')
   })
 
-  it('classifies request body size with 1MiB green boundary', () => {
+  it('classifies request body size with 1/10/30MiB boundaries', () => {
     const mib = 1024 * 1024
 
     expect(requestBodySizeSeverity(null)).toBeNull()
@@ -32,9 +32,9 @@ describe('latencyHealth', () => {
     expect(requestBodySizeSeverity(0)).toBe('good')
     expect(requestBodySizeSeverity(mib)).toBe('good')
     expect(requestBodySizeSeverity(mib + 1)).toBe('warn')
-    expect(requestBodySizeSeverity(2 * mib)).toBe('warn')
-    expect(requestBodySizeSeverity(2 * mib + 1)).toBe('slow')
-    expect(requestBodySizeSeverity(4 * mib)).toBe('slow')
-    expect(requestBodySizeSeverity(4 * mib + 1)).toBe('critical')
+    expect(requestBodySizeSeverity(10 * mib)).toBe('warn')
+    expect(requestBodySizeSeverity(10 * mib + 1)).toBe('slow')
+    expect(requestBodySizeSeverity(30 * mib)).toBe('slow')
+    expect(requestBodySizeSeverity(30 * mib + 1)).toBe('critical')
   })
 })

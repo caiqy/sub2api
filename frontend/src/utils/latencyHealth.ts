@@ -40,10 +40,10 @@ export const durationSeverity = (ms: number): LatencySeverity =>
 export const requestBodySizeSeverity = (bytes: number | null | undefined): LatencySeverity | null => {
   if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return null
 
-  // ponytail: fixed 1/2/4 MiB bands keep the visual scale predictable without a separate color algorithm.
+  // ponytail: fixed 1/10/30 MiB bands keep the visual scale predictable without a separate color algorithm.
   const mib = 1024 * 1024
-  if (bytes > 4 * mib) return 'critical'
-  if (bytes > 2 * mib) return 'slow'
+  if (bytes > 30 * mib) return 'critical'
+  if (bytes > 10 * mib) return 'slow'
   if (bytes > mib) return 'warn'
   return 'good'
 }
