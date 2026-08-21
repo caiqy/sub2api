@@ -232,7 +232,7 @@
 
         <template #cell-body_size="{ row }">
           <div class="flex items-stretch gap-2 py-0.5">
-            <span class="w-1 shrink-0 rounded-full bg-emerald-500" aria-hidden="true"></span>
+            <span class="w-1 shrink-0 rounded-full" :class="requestBodyBarClass(row.request_body_size)" aria-hidden="true"></span>
             <div class="grid grid-cols-[max-content_max-content] items-baseline gap-x-2 gap-y-0.5 text-xs leading-4">
               <span class="text-gray-400 dark:text-gray-500">{{ t('usage.bodySizeInput') }}:</span>
               <span class="whitespace-nowrap font-medium tabular-nums text-emerald-500 dark:text-emerald-400">{{ formatBodySize(row.request_body_size) }}</span>
@@ -560,6 +560,7 @@ import {
   LATENCY_TEXT_CLASSES,
   durationSeverity,
   firstTokenSeverity,
+  requestBodySizeSeverity,
 } from '@/utils/latencyHealth'
 import {
   BILLING_MODE_TOKEN,
@@ -745,6 +746,11 @@ const formatTotalBodySize = (row: AdminUsageLog): string => {
     input < 0 || output < 0
   ) return '-'
   return formatBytes(input + output, 1)
+}
+
+const requestBodyBarClass = (bytes: number | null | undefined): string => {
+  const severity = requestBodySizeSeverity(bytes)
+  return severity ? LATENCY_BAR_CLASSES[severity] : 'bg-gray-300 dark:bg-gray-600'
 }
 
 // 超过 1 分钟简化为 "Xm Ys"，免去人工换算（超过 1 小时再进位为 "Xh Ym"）

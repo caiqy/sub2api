@@ -37,6 +37,17 @@ export const firstTokenSeverity = (ms: number): LatencySeverity =>
 export const durationSeverity = (ms: number): LatencySeverity =>
   classify(ms, DURATION_THRESHOLDS_MS)
 
+export const requestBodySizeSeverity = (bytes: number | null | undefined): LatencySeverity | null => {
+  if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return null
+
+  // ponytail: fixed 1/2/4 MiB bands keep the visual scale predictable without a separate color algorithm.
+  const mib = 1024 * 1024
+  if (bytes > 4 * mib) return 'critical'
+  if (bytes > 2 * mib) return 'slow'
+  if (bytes > mib) return 'warn'
+  return 'good'
+}
+
 export const LATENCY_TEXT_CLASSES: Record<LatencySeverity, string> = {
   good: 'text-emerald-600 dark:text-emerald-400',
   warn: 'text-amber-600 dark:text-amber-400',
