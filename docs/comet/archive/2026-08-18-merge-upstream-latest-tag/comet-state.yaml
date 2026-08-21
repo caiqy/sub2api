@@ -1,0 +1,650 @@
+schema: comet.native.v4
+name: merge-upstream-latest-tag
+language: zh-CN
+phase: archive
+status: done
+state_version: 15
+brief: brief.md
+spec_changes:
+  - capability: upstream-release-sync
+    operation: create
+    source: specs/upstream-release-sync/spec.md
+workspace:
+  isolation: branch
+  change_branch: feature/20260818/staged-merge-upstream-v0-1-177
+  target_branch: main
+  finish: merge
+loop:
+  stage: done
+  goal_cycle: 1
+  iteration: 3
+  attempt: 1
+  retry_epoch: 0
+  failed_iteration_count: 1
+  no_progress_count: 0
+  execution_failure_count: 0
+  previous_unresolved_ids: []
+  next_action: null
+acceptance:
+  - id: A1
+    source: brief.md
+    text: A1：结果历史包含一个 `--no-ff` 合并节点，其第一父为合并前的集成分支 HEAD，第二父为 `v0.1.177` 的 peeled
+      SHA；`v0.1.177` 是结果 HEAD 的祖先。
+    result: passed
+    reason:
+      text: Merge parent and tag ancestor runtime checks passed.
+      truncated: false
+  - id: A2
+    source: brief.md
+    text: A2：合并结果包含 `v0.1.177` 的 17 个提交和 76 个文件更新，不包含该 tag 之后的 `upstream/main` 提交。
+    result: passed
+    reason:
+      text: Runtime checks confirm 17 commits, 76 files, and excluded post-tag
+        upstream commits.
+      truncated: false
+  - id: A3
+    source: brief.md
+    text: A3：合并前本地质量门禁通过；被上游触及且缺少断言的高风险本地能力有最小回归测试保护。
+    result: passed
+    reason:
+      text: Focused regressions, go vet, and full make test passed.
+      truncated: false
+  - id: A4
+    source: brief.md
+    text: A4：冲突和语义审查同时保留上游的 Codex turn-state、fingerprint/compaction、分组用量日汇总与
+      migration 更新，以及本地 scheduler、sticky/fallback、请求体重放、审计、计费和前端定制语义。
+    result: passed
+    reason:
+      text: Source review confirms upstream and local critical semantics remain.
+      truncated: false
+  - id: A5
+    source: brief.md
+    text: A5：每个合并阶段通过冲突标记检查、受影响能力测试、Ent/Wire 两次生成稳定性检查、`make test` 和 `make build`。
+    result: passed
+    reason:
+      text: generate-first and generate-second-independent are two passing independent
+        Ent and Wire generation runs.
+      truncated: false
+  - id: A6
+    source: brief.md
+    text: A6：最终通过后端默认与 unit 测试、后端 lint、前端 ESLint、前端单测、前端类型检查和构建验证，并完成受影响能力专项审查。
+    result: passed
+    reason:
+      text: Backend default/unit/lint, frontend ESLint/typecheck/Vitest, and build
+        passed.
+      truncated: false
+  - id: A7
+    source: brief.md
+    text: A7：`backend/cmd/server/VERSION` 为 `0.1.177.1`；不创建或推送 release tag。
+    result: passed
+    reason:
+      text: VERSION is 0.1.177.1 and no local derived release tag exists.
+      truncated: false
+  - id: A8
+    source: brief.md
+    text: A8：若 Docker-backed integration 未执行，其命令、原因和受影响的 migration/repository
+      契约在验收报告中明确列为残余风险，不得记为通过。
+    result: passed
+    reason:
+      text: Docker integration was explicitly not run and recorded with its impact as
+        residual risk.
+      truncated: false
+  - id: A9
+    source: specs/upstream-release-sync/spec.md
+    text: 合入 v0.1.177 - **WHEN** 当前本地 VERSION 为 `0.1.176.4`，upstream 最新正式 tag 为
+      `v0.1.177` - **THEN** 流程必须以 `073e92d17178a1ccdb0a27017f572f10c9c7ab62`
+      为唯一上游合并父提交，并排除该 tag 之后的 `upstream/main` 提交
+    result: passed
+    reason:
+      text: The sole upstream merge parent is the specified v0.1.177 peeled SHA.
+      truncated: false
+  - id: A10
+    source: specs/upstream-release-sync/spec.md
+    text: 建立 v0.1.177 merge 节点 - **WHEN** 合并开始时本地基线和 index 均干净 - **THEN** 结果 merge
+      节点的第一父必须是合并前临时集成分支 HEAD，第二父必须是 `v0.1.177` 的 peeled SHA，且 `v0.1.177` 必须是结果
+      HEAD 的祖先
+    result: passed
+    reason:
+      text: Reflog proves isolated branch creation from main and the target merge
+        node.
+      truncated: false
+  - id: A11
+    source: specs/upstream-release-sync/spec.md
+    text: 上游与本地调用链重叠 - **WHEN** 上游更新和本地定制修改同一文件或调用链 - **THEN** 结果必须保持 scheduler、平台
+      sticky、fallback/WaitPlan、DB
+      recheck、审计、请求体重放与清理、每请求最多一次计费、运行时设置及前端本地定制语义，除非用户明确批准某项能力移除
+    result: passed
+    reason:
+      text: DB transport mismatch no longer records a privacy error; missing privacy
+        still rejects, releases the slot, and selects a backup.
+      truncated: false
+  - id: A12
+    source: specs/upstream-release-sync/spec.md
+    text: OpenAI 调用链集成 - **WHEN** compaction、turn-state、fingerprint、网关转发或 usage
+      路径发生合并 - **THEN** 原生与 legacy compaction 路由、远端 compaction
+      v2、`x-codex-turn-state` 的账号隔离、请求体生命周期、审计和计费边界都必须可由自动测试或专项审查证明
+    result: passed
+    reason:
+      text: A real local WebSocket double-upgrade through the production dialer
+        verifies retry and fingerprint ID reuse.
+      truncated: false
+  - id: A13
+    source: specs/upstream-release-sync/spec.md
+    text: 分组用量与 migration 集成 - **WHEN** 日汇总和时区 migration 进入本地 repository、service
+      与管理端调用链 - **THEN** 新库和已有本地记录升级路径不得破坏现有统计、缓存、权限或界面定制
+    result: passed
+    reason:
+      text: Rollup/timezone migration, repository, service, frontend code, and local
+        coverage remain; Docker PostgreSQL integration is not claimed as passed.
+      truncated: false
+  - id: A14
+    source: specs/upstream-release-sync/spec.md
+    text: Docker 不可用的本机验证 - **WHEN** Docker/Testcontainers 在本机不可用 - **THEN**
+      流程必须执行其余本机门禁，并在验收报告中记录未执行的 Docker-backed migration/repository
+      integration、环境原因和受影响契约；这些 integration 不得记为通过
+    result: passed
+    reason:
+      text: Docker/Testcontainers absence is recorded and all remaining local gates
+        ran.
+      truncated: false
+  - id: A15
+    source: specs/upstream-release-sync/spec.md
+    text: 集成完成但尚未发布 - **WHEN** 全部可执行门禁和专项审查完成 - **THEN**
+      `backend/cmd/server/VERSION` 必须为 `0.1.177.1`，流程不得创建或推送 Git tag、触发 release
+      workflow 或部署
+    result: passed
+    reason:
+      text: No release tag was created or pushed and no release workflow or deployment
+        ran.
+      truncated: false
+  - id: A16
+    source: specs/upstream-release-sync/spec.md
+    text: 将上游正式 release 安全地集成到本地定制分支，保留双方行为并留下可审计的验证结论。
+    result: passed
+    reason:
+      text: All executable gates, focused source review, and two generation runs are
+        closed.
+      truncated: false
+  - id: A17
+    source: specs/upstream-release-sync/spec.md
+    text: 维护流程必须在合并前确认本地版本、upstream 最新正式 release tag 及其 peeled SHA；不得以滚动的
+      `upstream/main` 代替已确认的 release tag。
+    result: passed
+    reason:
+      text: Verification uses the formal release tag, not rolling upstream/main.
+      truncated: false
+  - id: A18
+    source: specs/upstream-release-sync/spec.md
+    text: 维护流程必须从干净的本地 `main` 创建临时集成分支，在该分支执行 `--no-ff` merge；不得直接改写 `main`。
+    result: passed
+    reason:
+      text: The merge was performed on the temporary integration branch without
+        directly rewriting main.
+      truncated: false
+  - id: A19
+    source: specs/upstream-release-sync/spec.md
+    text: 首次上游 merge
+      前必须通过既有本地质量门禁，并为被上游触及而缺少行为断言的高风险本地能力补充最小回归测试。冲突和无文本冲突的语义审查必须同时保留上游更新与本地定制；无法共存时必须暂停请求用户选择。
+    result: passed
+    reason:
+      text: High-risk local behavior has regression coverage and overlapping
+        call-chain semantics were reviewed.
+      truncated: false
+  - id: A20
+    source: specs/upstream-release-sync/spec.md
+    text: 合并结果必须保留 `v0.1.177` 的 OpenAI compaction、Codex turn-state 与 opt-in
+      fingerprint 行为，以及分组用量日汇总、时区 migration 和管理端相关更新，同时不绕过本地能力保护。
+    result: passed
+    reason:
+      text: Compaction, turn-state, opt-in fingerprint, group rollup/timezone, and
+        admin updates remain.
+      truncated: false
+  - id: A21
+    source: specs/upstream-release-sync/spec.md
+    text: 每个合并阶段必须完成冲突标记检查、受影响能力测试、Ent/Wire 两次生成稳定性检查、`make test` 和 `make
+      build`。最终阶段必须执行后端默认与 unit 测试、后端 lint、前端
+      ESLint、前端单测、前端类型检查和构建验证，并记录能力级审查证据。
+    result: passed
+    reason:
+      text: Two generation runs, focused tests, vet, full make test, and versioned
+        production build passed.
+      truncated: false
+builder_handoff:
+  candidate_id: 976fa611-f166-468c-812c-a436c1c5ebad
+  identity_provider: skill-coordinated
+  builder_execution_ref: skill-coordinated:builder:0d88a69c-d005-4cfa-b7d8-0ca99ab22763
+  iteration: 3
+  summary:
+    text: "Repaired the two substantive verifier findings.
+      recordPrivacyRequirementError now persists an error only when the account
+      actually fails RequirePrivacySet, so a DB-rechecked transport or request
+      incompatibility cannot permanently disable a privacy-compliant account.
+      The OAuth WS retry regression now creates two real local WebSocket
+      handshakes through the production coder/websocket dialer and connection:
+      the first upstream TCP connection is closed after response.create,
+      production retry establishes the second handshake, and both handshake/body
+      fingerprint IDs are asserted equal. A test-only redirect dialer changes
+      only the hard-coded OAuth destination to the local server; it delegates
+      all dialing and connection behavior to newDefaultOpenAIWSClientDialer.
+      Re-ran exact merge audit, generation twice, focused tests, make test, go
+      vet, diff checks, and versioned production build. No release tag, push,
+      workflow dispatch, or deployment was performed."
+    truncated: false
+  addressed_acceptance_ids:
+    - A1
+    - A2
+    - A3
+    - A4
+    - A5
+    - A6
+    - A7
+    - A8
+    - A9
+    - A10
+    - A11
+    - A12
+    - A13
+    - A14
+    - A15
+    - A16
+    - A17
+    - A18
+    - A19
+    - A20
+    - A21
+  checks:
+    - name:
+        text: DB recheck privacy and transport regression
+        truncated: false
+      result: passed
+      note:
+        text: Targeted scheduler tests verify a DB-rechecked missing privacy setting
+          releases the acquired slot and selects a compliant backup, while a
+          DB-rechecked WebSocket transport mismatch does not call SetError for
+          Privacy not set.
+        truncated: false
+    - name:
+        text: Real OAuth WebSocket retry fingerprint regression
+        truncated: false
+      result: passed
+      note:
+        text: A local WebSocket server observes two actual protocol upgrades through
+          newDefaultOpenAIWSClientDialer after the first TCP connection is
+          closed; session, window, and random turn IDs match across retries.
+        truncated: false
+    - name:
+        text: Exact merge audit
+        truncated: false
+      result: passed
+      note:
+        text: 457c2debc parents are bd7585a9cbd12ab76554881176220d17bf822cf0 and
+          073e92d17178a1ccdb0a27017f572f10c9c7ab62; v0.1.177 is an ancestor of
+          HEAD; the second-parent delta has 17 commits and the merge
+          first-parent diff has 76 files. Five commits after v0.1.177 on
+          upstream/main remain excluded.
+        truncated: false
+    - name:
+        text: Generation stability
+        truncated: false
+      result: passed
+      note:
+        text: make -C backend generate completed twice and final status contains only
+          the six intended OpenAI service/test files.
+        truncated: false
+    - name:
+        text: Final make test
+        truncated: false
+      result: passed
+      note:
+        text: "make test passed after repairs: golangci-lint reported 0 issues, backend
+          default and unit suites passed, and frontend Vitest reported 254 files
+          and 1921 tests passed."
+        truncated: false
+    - name:
+        text: Static analysis
+        truncated: false
+      result: passed
+      note:
+        text: go vet ./... passed.
+        truncated: false
+    - name:
+        text: Final production build
+        truncated: false
+      result: passed
+      note:
+        text: make SHELL=D:/scoop/shims/bash.exe VERSION=0.1.177.1 build passed; backend
+          linked main.Version=0.1.177.1 and Vite production build completed.
+        truncated: false
+    - name:
+        text: Diff and release guard
+        truncated: false
+      result: passed
+      note:
+        text: git diff --check and cached diff check are clean;
+          backend/cmd/server/VERSION remains 0.1.177.1; no release tag was
+          created or pushed.
+        truncated: false
+    - name:
+        text: Docker-backed integration
+        truncated: false
+      result: not-run
+      note:
+        text: make test-integration was not run because Docker is not installed on this
+          machine.
+        truncated: false
+  checks_truncated: false
+  known_limits:
+    - text: Docker/Testcontainers is unavailable, so migration and repository
+        integration contracts were not exercised against a real
+        Docker/PostgreSQL environment.
+      truncated: false
+    - text: The Go race detector cannot run in this environment because CGO is
+        disabled and no supported C compiler is installed.
+      truncated: false
+    - text: An existing upstream fingerprint timestamp assertion may be
+        timing-sensitive across a millisecond boundary; it passed the final make
+        test and was intentionally not modified.
+      truncated: false
+  known_limits_truncated: false
+  submitted_at: 2026-08-18T16:46:09.837Z
+blockers: []
+verification:
+  candidate_id: 976fa611-f166-468c-812c-a436c1c5ebad
+  identity_provider: skill-coordinated
+  verifier_execution_ref: skill-coordinated:verifier:45aece8f-5013-477a-bb25-416be9473092
+  iteration: 3
+  attempt: 1
+  assurance: skill-coordinated
+  verdict: pass
+  checks:
+    - id: merge-parents
+      name:
+        text: Verify merge parents
+        truncated: false
+      argv_display:
+        - text: show
+          truncated: false
+        - text: -s
+          truncated: false
+        - text: --format=%P
+          truncated: false
+        - text: 457c2debc
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 201
+    - id: tag-ancestor
+      name:
+        text: Verify v0.1.177 ancestor
+        truncated: false
+      argv_display:
+        - text: merge-base
+          truncated: false
+        - text: --is-ancestor
+          truncated: false
+        - text: v0.1.177
+          truncated: false
+        - text: HEAD
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 141
+    - id: tag-commit-count
+      name:
+        text: Verify tag commit delta
+        truncated: false
+      argv_display:
+        - text: rev-list
+          truncated: false
+        - text: --count
+          truncated: false
+        - text: 457c2debc^1..457c2debc^2
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 118
+    - id: merge-file-delta
+      name:
+        text: Inspect merge file delta
+        truncated: false
+      argv_display:
+        - text: diff
+          truncated: false
+        - text: --name-only
+          truncated: false
+        - text: 457c2debc^1
+          truncated: false
+        - text: 457c2debc
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 116
+    - id: post-tag-upstream
+      name:
+        text: Inspect excluded post-tag upstream commits
+        truncated: false
+      argv_display:
+        - text: rev-list
+          truncated: false
+        - text: --oneline
+          truncated: false
+        - text: v0.1.177..upstream/main
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 96
+    - id: working-diff-check
+      name:
+        text: Check working diff whitespace
+        truncated: false
+      argv_display:
+        - text: diff
+          truncated: false
+        - text: --check
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 124
+    - id: generate-first
+      name:
+        text: Run Ent and Wire generation first pass
+        truncated: false
+      argv_display:
+        - text: SHELL=D:/scoop/shims/bash.exe
+          truncated: false
+        - text: -C
+          truncated: false
+        - text: backend
+          truncated: false
+        - text: generate
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 37761
+    - id: focused-openai-regressions
+      name:
+        text: Run scheduler and real OAuth WS retry regressions
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: ./internal/service
+          truncated: false
+        - text: -run
+          truncated: false
+        - text: TestDefaultOpenAIAccountScheduler_RechecksPrivacyAfterDBRefresh|TestDefaultOpenAIAccountScheduler_DBRecheckTransportMismatchDoesNotRecordPrivacyError|TestOpenAIGatewayService_Forward_WSv2OAuthRetryReusesFingerprintIDs|TestResolveOpenAIAttemptFingerprintIDs_WSRetry
+          truncated: false
+        - text: -count=1
+          truncated: false
+      argv_truncated: false
+      cwd_ref: backend
+      status: passed
+      exit_code: 0
+      duration_ms: 7978
+    - id: go-vet
+      name:
+        text: Run Go vet
+        truncated: false
+      argv_display:
+        - text: vet
+          truncated: false
+        - text: ./...
+          truncated: false
+      argv_truncated: false
+      cwd_ref: backend
+      status: passed
+      exit_code: 0
+      duration_ms: 5264
+    - id: full-test
+      name:
+        text: Run full local test gate
+        truncated: false
+      argv_display:
+        - text: SHELL=D:/scoop/shims/bash.exe
+          truncated: false
+        - text: test
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 531737
+    - id: production-build
+      name:
+        text: Run versioned production build
+        truncated: false
+      argv_display:
+        - text: SHELL=D:/scoop/shims/bash.exe
+          truncated: false
+        - text: VERSION=0.1.177.1
+          truncated: false
+        - text: build
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 41966
+    - id: generate-second-independent
+      name:
+        text: Run Ent and Wire generation second independent pass
+        truncated: false
+      argv_display:
+        - text: SHELL=D:/scoop/shims/bash.exe
+          truncated: false
+        - text: generate
+          truncated: false
+      argv_truncated: false
+      cwd_ref: backend
+      status: passed
+      exit_code: 0
+      duration_ms: 46926
+  summary:
+    text: Iteration 3 passed final verification. The prior scheduler privacy-state
+      and real OAuth WebSocket retry concerns are covered by source review and
+      focused regressions; the second independent generation run closes the
+      remaining evidence gap.
+    truncated: false
+  risks:
+    - text: Docker/Testcontainers is unavailable, so make test-integration did not
+        exercise real PostgreSQL migration and repository contracts.
+      truncated: false
+    - text: The Go race detector cannot run because CGO is disabled and no supported C
+        compiler is installed.
+      truncated: false
+    - text: An existing upstream fingerprint timestamp assertion may be
+        timing-sensitive across a millisecond boundary; this full make test
+        passed.
+      truncated: false
+  risks_truncated: false
+  completed_at: 2026-08-18T17:12:04.917Z
+history:
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 1
+    outcome: pass
+    unresolved_ids: []
+    summary:
+      text: A1-A21 all pass for the current candidate. Merge ancestry, version,
+        upstream exclusion, compatibility implementation, and local automated
+        gates are closed; Docker-backed integration remains an explicit residual
+        risk and is not claimed as passed.
+      truncated: false
+    completed_at: 2026-08-18T13:54:47.835Z
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 1
+    outcome: recovery
+    unresolved_ids: []
+    summary:
+      text: "Implementation changed after the previously verified candidate: scheduler
+        DB privacy recheck and Codex WebSocket retry fingerprint stability fixes
+        plus focused regression tests require a new candidate."
+      truncated: false
+    completed_at: 2026-08-18T16:01:58.825Z
+  - goal_cycle: 1
+    iteration: 2
+    attempt: 1
+    outcome: fail
+    unresolved_ids:
+      - A2
+      - A3
+      - A4
+      - A5
+      - A6
+      - A9
+      - A11
+      - A12
+      - A13
+      - A14
+      - A16
+      - A17
+      - A19
+      - A20
+      - A21
+    summary:
+      text: "Failed: the scheduler can permanently disable an account for a
+        non-privacy rejection, and required real OAuth WebSocket reconnect
+        coverage is absent."
+      truncated: false
+    completed_at: 2026-08-18T16:19:24.381Z
+  - goal_cycle: 1
+    iteration: 3
+    attempt: 1
+    outcome: pass
+    unresolved_ids: []
+    summary:
+      text: Iteration 3 passed final verification. The prior scheduler privacy-state
+        and real OAuth WebSocket retry concerns are covered by source review and
+        focused regressions; the second independent generation run closes the
+        remaining evidence gap.
+      truncated: false
+    completed_at: 2026-08-18T17:12:04.917Z
+history_overflow:
+  dropped_entries: 0
+  first_dropped_at: null
+  last_dropped_at: null
+  outcome_counts:
+    pass: 0
+    fail: 0
+    blocked: 0
+    execution-error: 0
+    recovery: 0
+verification_result: pass
+verification_report: verification.md
+archived: true
+created_at: 2026-08-18T12:24:49.645Z
