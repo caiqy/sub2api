@@ -2,7 +2,6 @@ package service
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	pluginv1 "github.com/Wei-Shaw/sub2api/pkg/pluginapi/v1"
@@ -15,6 +14,7 @@ type PluginHostInfo struct {
 }
 
 func EvaluatePluginCompatibility(manifest PluginManifest, host PluginHostInfo) PluginCompatibility {
+	hostVersion := normalizePluginHostSemver(host.Version)
 	result := PluginCompatibility{
 		CurrentSub2API:     host.Version,
 		RequiredSub2API:    manifest.Requires.Sub2API,
@@ -30,14 +30,14 @@ func EvaluatePluginCompatibility(manifest PluginManifest, host PluginHostInfo) P
 		result.Message = "插件协议版本与当前 Sub2API 不兼容"
 		return result
 	}
-	if !matchesSemverRange(host.Version, manifest.Requires.Sub2API) {
+	if !matchesSemverRange(hostVersion, manifest.Requires.Sub2API) {
 		result.Status = "incompatible"
 		result.Message = fmt.Sprintf("当前 Sub2API %s 不满足插件要求 %s", host.Version, manifest.Requires.Sub2API)
 		return result
 	}
 	result.Compatible = true
 	for _, tested := range manifest.Requires.TestedSub2APIVersions {
-		if normalizeSemver(tested) == normalizeSemver(host.Version) {
+		if normalizeSemver(tested) == hostVersion {
 			result.Tested = true
 			break
 		}
@@ -60,18 +60,26 @@ func normalizeSemver(version string) string {
 	if !strings.HasPrefix(v, "v") {
 		v = "v" + v
 	}
-	if semver.IsValid(v) {
-		return v
-	}
-	if parts := strings.Split(strings.TrimPrefix(v, "v"), "."); len(parts) == 4 {
-		if _, err := strconv.ParseUint(parts[3], 10, 64); err == nil {
-			v = "v" + strings.Join(parts[:3], ".")
-		}
-	}
 	if !semver.IsValid(v) {
 		return ""
 	}
 	return v
+}
+
+func normalizePluginHostSemver(version string) string {
+	if normalized := normalizeSemver(version); normalized != "" {
+		return normalized
+	}
+	v := strings.TrimSpace(version)
+	if !strings.HasPrefix(v, "v") {
+		v = "v" + v
+	}
+	if parts := strings.Split(strings.TrimPrefix(v, "v"), "."); len(parts) == 4 {
+		if parts[3] != "" && strings.IndexFunc(parts[3], func(r rune) bool { return r < '0' || r > '9' }) == -1 {
+			return normalizeSemver(strings.Join(parts[:3], "."))
+		}
+	}
+	return ""
 }
 
 func matchesSemverRange(version, expression string) bool {
