@@ -65,12 +65,11 @@ func (s *GeminiMessagesCompatService) ForwardAsChatCompletions(
 		return nil, fmt.Errorf("marshal chat completions compat request: %w", err)
 	}
 
-	reasoningEffort := extractCCReasoningEffortFromBody(body)
 	thinkingEnabled := OpenAIBodyHasThinkingEnabled(body)
 	imageInputSize := s.extractImageInputSize(claudeBody)
 	ccReq = apicompat.ChatCompletionsRequest{}
 	anthropicReq = nil
-	return s.forwardClaudeBodyAsChatCompletions(ctx, c, account, claudeBody, originalModel, clientStream, includeUsage, startTime, reasoningEffort, thinkingEnabled, imageInputSize)
+	return s.forwardClaudeBodyAsChatCompletions(ctx, c, account, claudeBody, originalModel, clientStream, includeUsage, startTime, body, thinkingEnabled, imageInputSize)
 }
 
 func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
@@ -82,7 +81,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 	clientStream bool,
 	includeUsage bool,
 	startTime time.Time,
-	reasoningEffort *string,
+	originalChatBody []byte,
 	thinkingEnabled bool,
 	imageInputSize string,
 ) (*ForwardResult, error) {
@@ -101,9 +100,9 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 	if account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount {
 		mappedModel = account.GetMappedModel(req.Model)
 	}
-	if reasoningEffort == nil && thinkingEnabled {
-		reasoningEffort = DefaultEffortForThinkingEnabled(mappedModel)
-	}
+	reasoningEffort := extractCCReasoningEffortFromBody(originalChatBody, mappedModel, originalModel)
+	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, originalChatBody, mappedModel)
+	originalChatBody = nil //nolint:ineffassign // Derived scalar billing fields replace the full request.
 
 	geminiReq, err := convertClaudeMessagesToGeminiGenerateContent(claudeBody)
 	if err != nil {
@@ -115,6 +114,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		return nil, fmt.Errorf("spool Gemini request body: %w", err)
 	}
 	defer CleanupRequestBodyHandle(geminiHandle)
+	claudeBody = nil //nolint:ineffassign // The Gemini handle owns the converted request.
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -134,6 +134,7 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		clientStream,
 		useUpstreamStream,
 	)
+	geminiReq = nil //nolint:ineffassign // The replay closure consumes its first in-memory body before forwarding.
 
 	var resp *http.Response
 	for attempt := 1; attempt <= geminiMaxRetries; attempt++ {

@@ -352,7 +352,7 @@ func (s *OpenAIGatewayService) createUpstreamLiveCallHandle(
 	upstreamReq.Header.Set(liveAttestationHeader, attestation)
 	applyLiveUpstreamIdentityHeaders(upstreamReq.Header)
 
-	resp, err := s.httpUpstream.Do(upstreamReq, resolveAccountProxyURL(account), account.ID, account.Concurrency)
+	resp, err := s.doOpenAIUpstream(upstreamReq, resolveAccountProxyURL(account), account)
 	closeOpenAIRequestBody(upstreamReq)
 	if err != nil {
 		if resp != nil && resp.Body != nil {

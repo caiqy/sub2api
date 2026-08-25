@@ -141,7 +141,7 @@ func TestGatewayHandler_WebSearchFailoverRecordsFinalMappedUpstreamModel(t *test
 			Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1,
 			Credentials: map[string]any{
 				"api_key": "first-key", "base_url": "https://api.x.ai/v1",
-				"model_mapping": map[string]any{"grok-4.5": "first-search-model"},
+				"model_mapping": map[string]any{"grok-4.6": "first-search-model"},
 			},
 		},
 		{
@@ -149,7 +149,7 @@ func TestGatewayHandler_WebSearchFailoverRecordsFinalMappedUpstreamModel(t *test
 			Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 2,
 			Credentials: map[string]any{
 				"api_key": "second-key", "base_url": "https://api.x.ai/v1",
-				"model_mapping": map[string]any{"grok-4.5": "second-search-model"},
+				"model_mapping": map[string]any{"grok-4.6": "second-search-model"},
 			},
 		},
 	}

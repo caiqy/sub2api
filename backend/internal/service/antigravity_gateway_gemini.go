@@ -239,7 +239,7 @@ func (s *AntigravityGatewayService) forwardGeminiHandle(ctx context.Context, c *
 						return nil, fmt.Errorf("create fallback gemini request body handle: %w", handleErr)
 					}
 					fallbackParams := antigravityRetryLoopParams{ctx: ctx, action: upstreamAction, accessToken: accessToken, payloadHandle: fallbackHandle, extraHeaders: extraHeaders}
-					fallbackReq, buildErr := newAntigravityFallbackPayloadRequest(&fallbackParams, resolveAntigravityForwardBaseURL())
+					fallbackReq, buildErr := newAntigravityFallbackPayloadRequest(&fallbackParams, resolveAntigravityForwardBaseURL(account))
 					if errors.Is(buildErr, ErrRequestBodySpool) {
 						CleanupRequestBodyHandle(fallbackHandle)
 						return nil, buildErr

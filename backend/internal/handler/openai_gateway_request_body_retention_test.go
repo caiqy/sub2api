@@ -340,16 +340,27 @@ func (c *openAIResponsesRetentionGatewayCache) SetSessionAccountID(_ context.Con
 	return nil
 }
 
-func (c *openAIResponsesRetentionGatewayCache) SetCyberSessionBlocked(_ context.Context, key string, _ time.Duration) error {
+func (c *openAIResponsesRetentionGatewayCache) SetCyberSessionBlocked(_ context.Context, _ string, keys []string, _ time.Duration) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	c.cyberKey = keys[0]
 	if c.blocked != nil {
-		c.blocked <- key
+		c.blocked <- keys[0]
 	}
 	return nil
 }
 
-func (c *openAIResponsesRetentionGatewayCache) IsCyberSessionBlocked(_ context.Context, key string) (bool, error) {
-	c.cyberKey = key
+func (*openAIResponsesRetentionGatewayCache) IsCyberSessionScopeActive(context.Context, string) (bool, error) {
 	return false, nil
+}
+
+func (c *openAIResponsesRetentionGatewayCache) FindCyberSessionBlocked(_ context.Context, keys []string) (string, error) {
+	if len(keys) == 0 {
+		return "", nil
+	}
+	c.cyberKey = keys[0]
+	return "", nil
 }
 
 type openAIResponsesRetentionSettingRepo struct {

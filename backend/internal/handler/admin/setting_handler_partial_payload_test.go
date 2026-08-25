@@ -99,7 +99,7 @@ func TestUpdateSettingsGrokDefaultBaseURLModeIsWritable(t *testing.T) {
 
 	rec = doUpdateSettings(t, h, map[string]any{"grok_default_text_model": ""}, nil)
 	require.Equal(t, http.StatusOK, rec.Code)
-	require.Equal(t, "grok-4.5", repo.values[service.SettingKeyGrokDefaultTextModel])
+	require.Equal(t, "grok-4.6", repo.values[service.SettingKeyGrokDefaultTextModel])
 	require.Equal(t, "false", repo.values[service.SettingKeyGrokCrossClientModelMapEnabled])
 	require.Equal(t, service.GrokDefaultBaseURLModeEUWest1, repo.values[service.SettingKeyGrokDefaultBaseURLMode])
 	require.Equal(t, "Example Gateway", repo.values[service.SettingKeySiteName])

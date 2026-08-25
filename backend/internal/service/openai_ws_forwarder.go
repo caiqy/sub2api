@@ -278,6 +278,9 @@ type OpenAIWSIngressHooks struct {
 	// MapRequestModel resolves the current turn's client model to the model
 	// that must be written into the upstream response.create frame.
 	MapRequestModel func(turn int, originalModel string) (string, error)
+	// ChannelModelIsFinal prevents passthrough from applying account mapping a
+	// second time after MapRequestModel has applied a non-composite channel map.
+	ChannelModelIsFinal bool
 	// AfterTurn runs once after a delivered terminal completion, before next-turn
 	// admission opens, or once with turnErr when the turn ends before delivery.
 	AfterTurn func(turn int, result *OpenAIForwardResult, turnErr error)

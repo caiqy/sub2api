@@ -36,6 +36,9 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 		return nil, fmt.Errorf("read alpha search request body: %w", err)
 	}
 	sourceBody := body
+	if _, err := s.prepareCodexAccountIdentitySource(ctx, c, account); err != nil {
+		return nil, err
+	}
 	modelResult := gjson.GetBytes(body, "model")
 	requestedModel := strings.Clone(strings.TrimSpace(modelResult.String()))
 	if modelResult.Type != gjson.String || requestedModel == "" {
@@ -45,6 +48,10 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	upstreamModel := normalizeOpenAIModelForUpstream(account, account.GetMappedModel(requestedModel))
 	if upstreamModel != "" && upstreamModel != requestedModel {
 		body = ReplaceModelInBody(body, upstreamModel)
+	}
+	body, err = sanitizeOpenAIAlphaSearchBody(body)
+	if err != nil {
+		return nil, fmt.Errorf("sanitize alpha search request body: %w", err)
 	}
 	bodyHandle, bodyHandleOwned, err := openAIRequestBodyHandleForContext(c, body)
 	if err != nil {
@@ -65,6 +72,12 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	if err := s.ensureOpenAIAlphaSearchAuthMetadata(ctx, account, token, proxyURL); err != nil {
 		return nil, err
 	}
+	SetOpsUpstreamModel(c, upstreamModel)
+
+	// Codex Personal Access Token（at-...）目前可访问 ChatGPT Codex
+	// /responses，但会被 standalone /alpha/search 的 access enforcement
+	// 拒绝为 no_matching_rule。对 PAT 账号使用等价的 hosted web_search
+	// Responses 路径兜底，避免把可用账号误判为搜索不可用。
 	if account.IsOpenAIPersonalAccessToken() {
 		return s.forwardAlphaSearchViaResponsesWebSearch(ctx, c, account, bodyHandle, token, proxyURL, requestedModel, upstreamModel)
 	}
@@ -75,7 +88,7 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	}
 
 	upstreamStart := time.Now()
-	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+	resp, err := s.doOpenAIUpstream(req, proxyURL, account)
 	closeOpenAIRequestBody(req)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
@@ -103,13 +116,16 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 			// 真正的凭据失效由普通 Responses 请求或 whoami 校验判定。
 			shouldDisable := false
 			if shouldApplyOpenAIAlphaSearchAccountErrorSideEffects(resp.StatusCode) {
-				shouldDisable = s.handleFailoverSideEffects(ctx, resp, account, respBody, upstreamModel)
+				shouldDisable = s.handleFailoverSideEffects(ctx, resp, account, respBody, openAIAlphaSearchSchedulingModel(account, requestedModel))
 			}
-			return nil, &UpstreamFailoverError{
-				StatusCode:             resp.StatusCode,
-				ResponseBody:           respBody,
-				RetryableOnSameAccount: !shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
+			retryableOnSameAccount := !shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode)
+			if account.IsOpenAIOAuthLike() && resp.StatusCode == http.StatusTooManyRequests {
+				return nil, s.newOpenAIAccountFailoverError(account, resp.StatusCode, resp.Header, respBody, upstreamMessage, shouldDisable, retryableOnSameAccount)
 			}
+			if isOpenAIHTTPUpstreamAccessStateError(resp.StatusCode, upstreamMessage, respBody) {
+				return nil, newOpenAIUpstreamFailoverError(resp.StatusCode, resp.Header, respBody, upstreamMessage, retryableOnSameAccount)
+			}
+			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, RetryableOnSameAccount: retryableOnSameAccount}
 		}
 	}
 
@@ -160,7 +176,7 @@ func (s *OpenAIGatewayService) forwardAlphaSearchViaResponsesWebSearch(ctx conte
 	SetActualOpenAIUpstreamEndpoint(c, "/v1/responses")
 
 	upstreamStart := time.Now()
-	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+	resp, err := s.doOpenAIUpstream(req, proxyURL, account)
 	closeOpenAIRequestBody(req)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
@@ -182,13 +198,16 @@ func (s *OpenAIGatewayService) forwardAlphaSearchViaResponsesWebSearch(ctx conte
 			// 仍按 alpha/search 工具请求处理：PAT 的工具链路失败不能直接永久置错。
 			shouldDisable := false
 			if shouldApplyOpenAIAlphaSearchAccountErrorSideEffects(resp.StatusCode) {
-				shouldDisable = s.handleFailoverSideEffects(ctx, resp, account, respBody, upstreamModel)
+				shouldDisable = s.handleFailoverSideEffects(ctx, resp, account, respBody, openAIAlphaSearchSchedulingModel(account, requestedModel))
 			}
-			return nil, &UpstreamFailoverError{
-				StatusCode:             resp.StatusCode,
-				ResponseBody:           respBody,
-				RetryableOnSameAccount: !shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
+			retryableOnSameAccount := !shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode)
+			if account.IsOpenAIOAuthLike() && resp.StatusCode == http.StatusTooManyRequests {
+				return nil, s.newOpenAIAccountFailoverError(account, resp.StatusCode, resp.Header, respBody, upstreamMessage, shouldDisable, retryableOnSameAccount)
 			}
+			if isOpenAIHTTPUpstreamAccessStateError(resp.StatusCode, upstreamMessage, respBody) {
+				return nil, newOpenAIUpstreamFailoverError(resp.StatusCode, resp.Header, respBody, upstreamMessage, retryableOnSameAccount)
+			}
+			return nil, &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: respBody, RetryableOnSameAccount: retryableOnSameAccount}
 		}
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
@@ -273,10 +292,11 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchResponsesWebSearchRequest(c
 	}
 	apiKeyID := getAPIKeyIDFromContext(c)
 	if sessionID != "" {
-		isolated := isolateOpenAISessionID(apiKeyID, sessionID)
+		isolated := isolateOpenAIUpstreamSessionID(apiKeyID, codexAccountIdentitySource(c, account), sessionID)
 		req.Header.Set("Session_ID", isolated)
 		req.Header.Set("Conversation_ID", isolated)
 	}
+	applyCodexAccountIdentityHeaders(req.Header, codexAccountIdentitySource(c, account), apiKeyID)
 	enforceCodexIdentityHeadersWithUA(req.Header, s.codexIdentityOverrideUA(account))
 	account.ApplyHeaderOverrides(req.Header)
 	cleanupOnError = false
@@ -304,17 +324,40 @@ func buildOpenAIAlphaSearchResponsesWebSearchBody(alphaBody []byte, model string
 	})
 }
 
+func openAIAlphaSearchSchedulingModel(account *Account, requestedModel string) string {
+	return canonicalOpenAIAccountSchedulingModel(account, requestedModel)
+}
+
 func openAIAlphaSearchResponsesWebSearchPrompt(alphaBody []byte) string {
 	var b strings.Builder
-	_, _ = b.WriteString("Execute this Codex standalone web.run request for another model.\nUse the hosted web_search tool when web/current information is needed.\nReturn concise source-backed results. Include titles, URLs, dates, and direct answers when available.\n")
-	for _, field := range []string{"commands", "settings", "input"} {
-		if value := strings.TrimSpace(gjson.GetBytes(alphaBody, field).Raw); value != "" {
-			_, _ = fmt.Fprintf(&b, "\n%s JSON:\n%s", field, value)
-		}
+	_, _ = b.WriteString("Execute this Codex standalone web.run request for another model.\n")
+	_, _ = b.WriteString("Use the hosted web_search tool when web/current information is needed.\n")
+	_, _ = b.WriteString("Return concise source-backed results. Include titles, URLs, dates, and direct answers when available.\n")
+	if commands := strings.TrimSpace(gjson.GetBytes(alphaBody, "commands").Raw); commands != "" {
+		_, _ = b.WriteString("\nCommands JSON:\n")
+		_, _ = b.WriteString(truncateOpenAIAlphaSearchPromptJSON(commands, 12000))
+	}
+	if settings := strings.TrimSpace(gjson.GetBytes(alphaBody, "settings").Raw); settings != "" {
+		_, _ = b.WriteString("\n\nSearch settings JSON:\n")
+		_, _ = b.WriteString(truncateOpenAIAlphaSearchPromptJSON(settings, 4000))
+	}
+	if input := strings.TrimSpace(gjson.GetBytes(alphaBody, "input").Raw); input != "" {
+		_, _ = b.WriteString("\n\nRecent conversation/input JSON:\n")
+		_, _ = b.WriteString(truncateOpenAIAlphaSearchPromptJSON(input, 8000))
+	}
+	if b.Len() == 0 {
+		return "Execute the requested web search and return concise source-backed results."
 	}
 	return b.String()
 }
 
+func truncateOpenAIAlphaSearchPromptJSON(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if limit <= 0 || len(value) <= limit {
+		return value
+	}
+	return value[:limit] + "\n...<truncated>"
+}
 func openAIAlphaSearchInboundHeader(c *gin.Context, key string) string {
 	if c == nil {
 		return ""
@@ -322,6 +365,39 @@ func openAIAlphaSearchInboundHeader(c *gin.Context, key string) string {
 	return strings.TrimSpace(c.GetHeader(key))
 }
 
+var openAIAlphaSearchUnsupportedBodyFields = [...]string{
+	// Codex alpha/search 是 SearchRequest 独立协议，不是 /responses 子请求。
+	// 新版 Codex/第三方代理可能把 Responses 公共字段误带到搜索请求里；ChatGPT
+	// alpha/search 会对这些字段返回 Unknown parameter（例如 prompt_cache_key）。
+	"prompt_cache_key",
+	"prompt_cache_retention",
+	"store",
+}
+
+func sanitizeOpenAIAlphaSearchBody(body []byte) ([]byte, error) {
+	if len(body) == 0 {
+		return body, nil
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(body, &obj); err != nil || obj == nil {
+		return body, nil
+	}
+	changed := false
+	for _, field := range openAIAlphaSearchUnsupportedBodyFields {
+		if _, ok := obj[field]; ok {
+			delete(obj, field)
+			changed = true
+		}
+	}
+	if !changed {
+		return body, nil
+	}
+	out, err := json.Marshal(obj)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
 func (s *OpenAIGatewayService) ensureOpenAIAlphaSearchAuthMetadata(ctx context.Context, account *Account, token string, proxyURL string) error {
 	if s == nil || account == nil || !account.IsOpenAIPersonalAccessToken() || strings.TrimSpace(account.GetChatGPTAccountID()) != "" || s.openAITokenProvider == nil || s.openAITokenProvider.openAIOAuthService == nil {
 		return nil
@@ -380,36 +456,74 @@ func openAIAlphaSearchResponseFromResponsesSSE(body []byte) ([]byte, error) {
 }
 
 func parseOpenAIResponsesSSEForAlphaSearch(body []byte) (string, []any) {
+	text := strings.ReplaceAll(string(body), "\r\n", "\n")
 	var output strings.Builder
+	var completedResponse any
 	results := make([]any, 0)
 	seenURLs := make(map[string]struct{})
-	for _, block := range strings.Split(strings.ReplaceAll(string(body), "\r\n", "\n"), "\n\n") {
+
+	for _, block := range strings.Split(text, "\n\n") {
 		data := openAIAlphaSearchSSEData(block)
 		if data == "" || data == "[DONE]" {
 			continue
 		}
 		var event map[string]any
-		if json.Unmarshal([]byte(data), &event) != nil {
+		if err := json.Unmarshal([]byte(data), &event); err != nil {
 			continue
 		}
-		if event["type"] == "response.output_text.delta" {
-			if delta, _ := event["delta"].(string); delta != "" {
-				_, _ = output.WriteString(delta)
-			}
+		if delta, _ := event["delta"].(string); delta != "" && event["type"] == "response.output_text.delta" {
+			_, _ = output.WriteString(delta)
+		}
+		if event["type"] == "response.completed" {
+			completedResponse = event["response"]
 		}
 		collectOpenAIAlphaSearchURLCitations(event, &results, seenURLs)
 	}
-	return output.String(), results
+
+	out := output.String()
+	if strings.TrimSpace(out) == "" && completedResponse != nil {
+		out = extractOpenAIResponsesCompletedText(completedResponse)
+		collectOpenAIAlphaSearchURLCitations(completedResponse, &results, seenURLs)
+	}
+	return out, results
 }
 
 func openAIAlphaSearchSSEData(block string) string {
 	var lines []string
 	for _, line := range strings.Split(block, "\n") {
-		if strings.HasPrefix(line, "data:") {
-			lines = append(lines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+		line = strings.TrimRight(line, "\r")
+		if !strings.HasPrefix(line, "data:") {
+			continue
 		}
+		lines = append(lines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func extractOpenAIResponsesCompletedText(response any) string {
+	resp, ok := response.(map[string]any)
+	if !ok {
+		return ""
+	}
+	outputItems, _ := resp["output"].([]any)
+	var b strings.Builder
+	for _, item := range outputItems {
+		itemMap, ok := item.(map[string]any)
+		if !ok || itemMap["type"] != "message" {
+			continue
+		}
+		contentItems, _ := itemMap["content"].([]any)
+		for _, content := range contentItems {
+			contentMap, ok := content.(map[string]any)
+			if !ok || contentMap["type"] != "output_text" {
+				continue
+			}
+			if text, _ := contentMap["text"].(string); text != "" {
+				_, _ = b.WriteString(text)
+			}
+		}
+	}
+	return b.String()
 }
 
 func collectOpenAIAlphaSearchURLCitations(value any, results *[]any, seen map[string]struct{}) {
@@ -472,11 +586,11 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchRequest(ctx context.Context
 	}
 	if version := strings.TrimSpace(c.GetHeader("Version")); version != "" {
 		req.Header.Set("Version", version)
-	} else if account.Type == AccountTypeOAuth {
-		req.Header.Set("Version", codexCLIVersion)
+	} else if account.UsesOpenAICodexProtocol() {
+		req.Header.Set("Version", CodexCanonicalClientVersion())
 	}
 	stripOpenAIAlphaSearchResponsesHeaders(req.Header)
-	if account.Type == AccountTypeOAuth {
+	if account.UsesOpenAICodexProtocol() {
 		enforceCodexIdentityHeadersWithUA(req.Header, s.codexIdentityOverrideUA(account))
 	}
 	return req, nil
@@ -503,7 +617,7 @@ func (s *OpenAIGatewayService) openAIAlphaSearchURL(account *Account) (string, e
 		return "", fmt.Errorf("account is required")
 	}
 	switch account.Type {
-	case AccountTypeOAuth:
+	case AccountTypeOAuth, AccountTypeSetupToken:
 		return chatgptCodexAlphaSearchURL, nil
 	case AccountTypeAPIKey:
 		baseURL := account.GetOpenAIBaseURL()

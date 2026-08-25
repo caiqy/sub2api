@@ -162,6 +162,11 @@ func runMainServer() {
 	}
 	handlerTracker := newActiveHandlerTracker()
 	app.Server.Handler = handlerTracker.Wrap(app.Server.Handler)
+	if app.PluginManager != nil {
+		if err := app.PluginManager.Start(context.Background()); err != nil {
+			log.Printf("Plugin manager started in degraded state: %v", err)
+		}
+	}
 	if app.PromptAudit != nil {
 		if err := app.PromptAudit.Start(context.Background()); err != nil {
 			// Startup continues so unrelated APIs stay up. Fail-closed (unavailable)

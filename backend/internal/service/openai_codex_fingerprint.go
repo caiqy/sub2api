@@ -21,6 +21,7 @@ import (
 // 构造器读取用于出站头改写——请求体与出站头必须共享同一份 IDs，保证
 // turn_id 等随机字段一致。
 const codexFingerprintIDsContextKey = "codex_fingerprint_ids"
+const codexFingerprintCachedIDsContextKey = "codex_fingerprint_cached_ids"
 
 // stageCodexFingerprintIDs 将本 attempt 解析出的收敛 ID 暂存到 gin context。
 // 必须无条件覆写（含 nil）：failover 从收敛账号切到 off 账号时，上一账号的
@@ -32,7 +33,7 @@ func stageCodexFingerprintIDs(c *gin.Context, ids *codexFingerprintIDs) {
 }
 
 func stagedCodexFingerprintIDs(c *gin.Context, account *Account) *codexFingerprintIDs {
-	if c == nil || account == nil || account.Type != AccountTypeOAuth || isOpenAIResponsesCompactPath(c) {
+	if c == nil || account == nil || !account.UsesOpenAICodexProtocol() || isOpenAIResponsesCompactPath(c) {
 		return nil
 	}
 	value, ok := c.Get(codexFingerprintIDsContextKey)
@@ -141,7 +142,7 @@ func codexFingerprintSeed(extra map[string]any) (string, bool) {
 
 func prepareCodexFingerprintExtraForCreate(platform, accountType string, extra map[string]any) map[string]any {
 	prepared := stripCodexFingerprintSeed(extra)
-	if platform != PlatformOpenAI || accountType != AccountTypeOAuth || !codexFingerprintModeRequiresSeed(codexFingerprintModeFromExtra(prepared)) {
+	if platform != PlatformOpenAI || (accountType != AccountTypeOAuth && accountType != AccountTypeSetupToken) || !codexFingerprintModeRequiresSeed(codexFingerprintModeFromExtra(prepared)) {
 		return prepared
 	}
 	if prepared == nil {
@@ -153,7 +154,7 @@ func prepareCodexFingerprintExtraForCreate(platform, accountType string, extra m
 
 func prepareCodexFingerprintExtraForUpdate(account *Account, extra map[string]any) map[string]any {
 	prepared := stripCodexFingerprintSeed(extra)
-	if account == nil || account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth {
+	if account == nil || !account.IsOpenAIOAuthLike() {
 		return prepared
 	}
 	if seed, ok := codexFingerprintSeed(account.Extra); ok {
@@ -203,7 +204,7 @@ func ShouldEnsureCodexFingerprintSeedForExtraUpdates(updates map[string]any) boo
 // 的 A/B 实测。上游的配额判定策略不可观测，因此这里取兼容安全的一侧：
 // 不显式 opt-in 就保持 v0.1.175 之前的客户端身份（#5610）。
 func (a *Account) GetCodexFingerprintMode() codexFingerprintMode {
-	if a == nil || !a.IsOpenAIOAuth() {
+	if a == nil || !a.IsOpenAIOAuthLike() {
 		return codexFingerprintOff
 	}
 	return codexFingerprintModeFromExtra(a.Extra)

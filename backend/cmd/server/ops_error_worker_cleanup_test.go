@@ -105,7 +105,7 @@ func TestProvideCleanupDrainsOpsErrorsBeforeEntTeardown(t *testing.T) {
 		&service.UsageRecordWorkerPool{}, nil, &service.SubscriptionService{}, oauthSvc, openAIOAuthSvc, geminiOAuthSvc, antigravityOAuthSvc,
 		nil, nil, nil, nil, nil, nil,
 		nil, // channelMonitorV2Aggregator
-		nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil,
 	)
 
 	cleanupDone := make(chan struct{})

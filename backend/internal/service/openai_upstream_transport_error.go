@@ -98,8 +98,7 @@ func classifyOpenAITransportError(err error) openAITransportErrorClass {
 //     temporarily unschedules the account (DB + in-memory) and logs a stable
 //     warn event that alert rules can key on;
 //  3. returns an error that is *UpstreamFailoverError (so the handler fails over
-//     to a healthy account) for all non-canceled errors, or a plain error for
-//     context.Canceled (client gone — no failover, no eviction).
+//     to a healthy account) unless the client/plugin has made failover unsafe.
 //
 // It deliberately does NOT write to the response: the handler owns the response
 // (failover, or a protocol-correct error once failover is exhausted).
@@ -120,8 +119,8 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 }
 
 // recordOpenAIUpstreamTransportError preserves the health and Ops effects of a
-// transport failure. It returns true when the client canceled the request, in
-// which case callers must neither fail over nor emit a replacement client event.
+// transport failure. It returns true when callers must neither fail over nor
+// emit a replacement client event.
 func (s *OpenAIGatewayService) recordOpenAIUpstreamTransportError(ctx context.Context, c *gin.Context, account *Account, err error, passthrough bool) bool {
 	safeErr := sanitizeUpstreamErrorMessage(err.Error())
 	setOpsUpstreamError(c, 0, safeErr, "")
@@ -137,13 +136,20 @@ func (s *OpenAIGatewayService) recordOpenAIUpstreamTransportError(ctx context.Co
 
 	// Client disconnected: do NOT fail over to another account and do NOT evict
 	// this one — the upstream never had a chance to exhibit a fault.
-	if errors.Is(err, context.Canceled) {
+	if errors.Is(err, context.Canceled) ||
+		(errors.Is(err, context.DeadlineExceeded) && ctx != nil && errors.Is(ctx.Err(), context.DeadlineExceeded)) {
 		return true
 	}
 
 	// Transport attempt reached the network path; count as Ollama Cloud activity.
 	if s != nil {
 		scheduleOllamaCloudUsageActivity(s.deferredService, account)
+	}
+
+	// 插件已把请求交给上游时，自动切换账号可能造成重复扣费或重复执行。
+	var pluginErr *PluginTransportError
+	if errors.As(err, &pluginErr) && pluginErr.RequestSent {
+		return true
 	}
 
 	if classifyOpenAITransportError(err).Persistent {

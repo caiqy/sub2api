@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
@@ -184,6 +185,8 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 	}
 	effectiveHandle := coordinator.Effective()
 	service.BindOpenAIRequestBodyHandle(c, effectiveHandle)
+	body = nil          //nolint:ineffassign // Explicitly release the full request before upstream waits.
+	effectiveBody = nil //nolint:ineffassign // Explicitly release a mapped full request before upstream waits.
 
 	// Error passthrough binding
 	if h.errorPassthroughService != nil {
@@ -240,6 +243,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		if err != nil {
 			if len(fs.FailedAccountIDs) == 0 {
 				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, groupPlatform)
+				cls = classifySelectionFailureError(err, cls)
 				if !cls.ModelNotFound {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 				}
@@ -495,6 +499,14 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 	if lastErr != nil && lastErr.IsCredentialFailure() {
 		status, message := credentialFailoverClientResponse(lastErr)
 		h.chatCompletionsErrorResponse(c, status, "server_error", message)
+		return
+	}
+	if lastErr != nil && lastErr.IsOpenAICapacityShed() && strings.TrimSpace(lastErr.ClientMessage) != "" {
+		status := lastErr.ClientStatusCode
+		if status <= 0 {
+			status = http.StatusServiceUnavailable
+		}
+		h.chatCompletionsErrorResponse(c, status, "server_error", lastErr.ClientMessage)
 		return
 	}
 	statusCode := http.StatusBadGateway
