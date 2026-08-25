@@ -345,6 +345,11 @@ func dialPassthroughLifecycleClientWithFirstFrame(t *testing.T, server *httptest
 	return clientConn
 }
 
+func dialPassthroughLifecycleClientWithPayload(t *testing.T, server *httptest.Server, payload string) *coderws.Conn {
+	t.Helper()
+	return dialPassthroughLifecycleClientWithFirstFrame(t, server, []byte(payload), nil)
+}
+
 func TestPassthroughLifecycle_OAuthFingerprintRewritesInitialAndLaterResponseCreateFrames(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -488,6 +493,35 @@ func requirePassthroughUpstreamWrite(t *testing.T, upstream *stagedPassthroughCo
 	case <-time.After(timeout):
 		t.Fatal("passthrough request was not forwarded upstream")
 		return nil
+	}
+}
+
+func TestPassthroughLifecycle_ResponsesLiteFirstFramePinsParallelToolCalls(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	controlCtx, cancelControl := context.WithCancelCause(context.Background())
+	defer cancelControl(context.Canceled)
+	upstream := newStagedPassthroughConn()
+	upstream.Send(`{"type":"response.completed","response":{"id":"resp_lite","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`)
+	server, serverErr := startPassthroughLifecycleServer(t, controlCtx, newPassthroughLifecycleService(passthroughLifecycleConfig(), upstream), passthroughLifecycleAccount())
+	defer server.Close()
+	clientConn := dialPassthroughLifecycleClientWithPayload(t, server, `{
+		"type":"response.create","model":"gpt-5.1","stream":false,
+		"parallel_tool_calls":true,
+		"client_metadata":{"ws_request_header_x_openai_internal_codex_responses_lite":"true"}
+	}`)
+	defer func() { _ = clientConn.CloseNow() }()
+
+	upstreamBody := requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)
+	require.Equal(t, gjson.False, gjson.GetBytes(upstreamBody, "parallel_tool_calls").Type, string(upstreamBody))
+
+	event, err := readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
+	require.NoError(t, err)
+	require.Equal(t, "response.completed", gjson.GetBytes(event, "type").String())
+	require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
+	select {
+	case <-serverErr:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Lite 首帧测试等待 passthrough 退出超时")
 	}
 }
 
