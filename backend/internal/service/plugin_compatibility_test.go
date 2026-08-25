@@ -39,6 +39,25 @@ func TestEvaluatePluginCompatibilityRejectsProtocolMismatch(t *testing.T) {
 	assert.Equal(t, "incompatible", result.Status)
 }
 
+func TestEvaluatePluginCompatibilityAcceptsForkReleaseVersion(t *testing.T) {
+	for _, tt := range []struct {
+		host   string
+		tested string
+	}{{"0.1.180.1", "0.1.180"}, {"0.1.181.1", "0.1.181"}} {
+		t.Run(tt.host, func(t *testing.T) {
+			manifest := testPluginManifest(nil)
+			manifest.Requires.Sub2API = ">=0.1.180 <0.2.0"
+			manifest.Requires.TestedSub2APIVersions = []string{tt.tested}
+
+			result := EvaluatePluginCompatibility(manifest, PluginHostInfo{Version: tt.host, BuildType: "release"})
+
+			require.True(t, result.Compatible)
+			assert.True(t, result.Tested)
+			assert.Equal(t, "compatible", result.Status)
+		})
+	}
+}
+
 func TestMatchesSemverRange(t *testing.T) {
 	assert.True(t, matchesSemverRange("0.1.179", ">=0.1.170, <0.2.0"))
 	assert.True(t, matchesSemverRange("v1.2.3", "=1.2.3"))

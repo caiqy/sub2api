@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	pluginv1 "github.com/Wei-Shaw/sub2api/pkg/pluginapi/v1"
@@ -58,6 +59,14 @@ func normalizeSemver(version string) string {
 	}
 	if !strings.HasPrefix(v, "v") {
 		v = "v" + v
+	}
+	if semver.IsValid(v) {
+		return v
+	}
+	if parts := strings.Split(strings.TrimPrefix(v, "v"), "."); len(parts) == 4 {
+		if _, err := strconv.ParseUint(parts[3], 10, 64); err == nil {
+			v = "v" + strings.Join(parts[:3], ".")
+		}
 	}
 	if !semver.IsValid(v) {
 		return ""
