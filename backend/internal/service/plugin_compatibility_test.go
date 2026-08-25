@@ -77,6 +77,19 @@ func TestPluginCompatibilityRejectsForkVersionSyntaxInManifestDeclarations(t *te
 	}
 }
 
+func TestPluginManifestSemverValidationRejectsSchemaInvalidForms(t *testing.T) {
+	for _, version := range []string{" 1.2.3 ", "1.2.3-01"} {
+		manifest := testPluginManifest(nil)
+		manifest.Version = version
+		require.Error(t, manifest.Validate(), version)
+	}
+	for _, versionRange := range []string{">=0.1.180,,<0.2.0", ">=1.2.3-01 <2.0.0"} {
+		manifest := testPluginManifest(nil)
+		manifest.Requires.Sub2API = versionRange
+		require.Error(t, manifest.Validate(), versionRange)
+	}
+}
+
 func TestMatchesSemverRange(t *testing.T) {
 	assert.True(t, matchesSemverRange("0.1.179", ">=0.1.170, <0.2.0"))
 	assert.True(t, matchesSemverRange("v1.2.3", "=1.2.3"))

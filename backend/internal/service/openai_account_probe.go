@@ -803,7 +803,7 @@ func (p *openAIAccountProbe) sendProbeRequest(ctx context.Context, account *Acco
 	}
 
 	start := time.Now()
-	resp, err := p.service.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+	resp, err := p.service.doOpenAIUpstream(req, proxyURL, account)
 	if err != nil {
 		return probeResult{err: fmt.Errorf("do request: %w", err)}
 	}

@@ -163,7 +163,7 @@ func (m PluginManifest) Validate() error {
 	if !validSemverRange(m.Requires.Sub2API) {
 		return errors.New("requires.sub2api 必须是有效的语义化版本范围")
 	}
-	if recommended := strings.TrimSpace(m.Requires.RecommendedSub2APIVersion); recommended != "" && normalizeSemver(recommended) == "" {
+	if recommended := m.Requires.RecommendedSub2APIVersion; recommended != "" && normalizeSemver(recommended) == "" {
 		return errors.New("recommended_sub2api_version 必须是有效的语义化版本")
 	}
 	for _, tested := range m.Requires.TestedSub2APIVersions {

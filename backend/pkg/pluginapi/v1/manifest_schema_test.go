@@ -35,11 +35,17 @@ func TestManifestSchemaVersionPatternsRejectForkSyntax(t *testing.T) {
 		t.Fatal("Schema 缺少 $defs")
 	}
 	for name, values := range map[string]struct {
-		valid   string
-		invalid string
+		valid   []string
+		invalid []string
 	}{
-		"semver":      {"0.1.180", "0.1.180.1"},
-		"semverRange": {">=0.1.180 <0.2.0", ">=0.1.180.1 <0.2.0"},
+		"semver": {
+			valid:   []string{"0.1.180", "1.2.3-alpha.1", "1.2.3+fork.1"},
+			invalid: []string{"0.1.180.1", " 1.2.3 ", "1.2.3-01"},
+		},
+		"semverRange": {
+			valid:   []string{">=0.1.180 <0.2.0"},
+			invalid: []string{">=0.1.180.1 <0.2.0", ">=0.1.180,,<0.2.0", ">=1.2.3-01 <2.0.0"},
+		},
 	} {
 		definition, ok := defs[name].(map[string]any)
 		if !ok {
@@ -53,8 +59,15 @@ func TestManifestSchemaVersionPatternsRejectForkSyntax(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Schema %s pattern 无效: %v", name, err)
 		}
-		if !compiled.MatchString(values.valid) || compiled.MatchString(values.invalid) {
-			t.Fatalf("Schema %s 未严格区分 %q 和 %q", name, values.valid, values.invalid)
+		for _, value := range values.valid {
+			if !compiled.MatchString(value) {
+				t.Fatalf("Schema %s 拒绝合法值 %q", name, value)
+			}
+		}
+		for _, value := range values.invalid {
+			if compiled.MatchString(value) {
+				t.Fatalf("Schema %s 接受非法值 %q", name, value)
+			}
 		}
 	}
 }

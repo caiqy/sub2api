@@ -63,6 +63,25 @@ func TestProbe_SendProbeRequest_OAuthUsesCodexResponsesEndpoint(t *testing.T) {
 	require.NotContains(t, string(upstream.lastBody), "messages")
 }
 
+func TestProbe_SendProbeRequest_OAuthPluginUnavailableFailsClosed(t *testing.T) {
+	upstream := &openAIHTTPUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader("data: {\"id\":\"resp_123\",\"type\":\"response.created\"}\n\n")),
+	}}
+	manager := &PluginManager{}
+	manager.route.Store(&pluginRoute{pluginID: 42, rolloutPercent: 100, unavailable: "插件版本不兼容"})
+	probe := &openAIAccountProbe{service: &OpenAIGatewayService{httpUpstream: upstream, pluginManager: manager}}
+	account := &Account{
+		ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+	}
+
+	result := probe.sendProbeRequest(context.Background(), account, "gpt-4o-mini", GatewayOpenAIWSSchedulerLayeredConfig{ProbeTimeoutSeconds: 1})
+
+	require.ErrorContains(t, result.err, "插件不可用")
+	require.Nil(t, upstream.lastReq)
+}
+
 func TestProbe_SendProbeRequest_OAuthUsesCustomUserAgentWhenConfigured(t *testing.T) {
 	upstream := &openAIHTTPUpstreamRecorder{
 		resp: &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("data: {\"id\":\"resp_123\",\"type\":\"response.created\"}\n\n"))},

@@ -53,7 +53,7 @@ func EvaluatePluginCompatibility(manifest PluginManifest, host PluginHostInfo) P
 }
 
 func normalizeSemver(version string) string {
-	v := strings.TrimSpace(version)
+	v := version
 	if v == "" {
 		return ""
 	}
@@ -118,6 +118,11 @@ func matchesSemverRange(version, expression string) bool {
 }
 
 func validSemverRange(expression string) bool {
+	for _, segment := range strings.Split(expression, ",") {
+		if strings.TrimSpace(segment) == "" {
+			return false
+		}
+	}
 	tokens := strings.Fields(strings.ReplaceAll(expression, ",", " "))
 	if len(tokens) == 0 {
 		return false

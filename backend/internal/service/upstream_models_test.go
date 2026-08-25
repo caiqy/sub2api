@@ -206,6 +206,24 @@ func TestFetchUpstreamSupportedModelsParsesOpenAIOAuthManifest(t *testing.T) {
 	require.Equal(t, "Bearer openai-oauth-token", upstream.lastReq.Header.Get("Authorization"))
 }
 
+func TestFetchUpstreamSupportedModelsOpenAIPluginUnavailableFailsClosed(t *testing.T) {
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(`{"models":[{"slug":"gpt-5.6-sol"}]}`)),
+	}}
+	manager := &PluginManager{}
+	manager.route.Store(&pluginRoute{pluginID: 42, rolloutPercent: 100, unavailable: "插件版本不兼容"})
+	svc := &AccountTestService{httpUpstream: upstream, pluginManager: manager, cfg: upstreamModelSyncTestConfig()}
+
+	_, err := svc.FetchUpstreamSupportedModels(context.Background(), &Account{
+		ID: 12, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Credentials: map[string]any{"access_token": "openai-oauth-token"},
+	})
+
+	require.ErrorContains(t, err, "插件不可用")
+	require.Nil(t, upstream.lastReq)
+}
+
 func TestExtractGrokUpstreamModelIDs(t *testing.T) {
 	t.Parallel()
 
