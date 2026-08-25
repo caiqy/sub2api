@@ -160,6 +160,17 @@ func (m PluginManifest) Validate() error {
 	if strings.TrimSpace(m.Requires.Sub2API) == "" {
 		return errors.New("插件必须声明 requires.sub2api")
 	}
+	if !validSemverRange(m.Requires.Sub2API) {
+		return errors.New("requires.sub2api 必须是有效的语义化版本范围")
+	}
+	if recommended := strings.TrimSpace(m.Requires.RecommendedSub2APIVersion); recommended != "" && normalizeSemver(recommended) == "" {
+		return errors.New("recommended_sub2api_version 必须是有效的语义化版本")
+	}
+	for _, tested := range m.Requires.TestedSub2APIVersions {
+		if normalizeSemver(tested) == "" {
+			return errors.New("tested_sub2api_versions 必须只包含有效的语义化版本")
+		}
+	}
 	if m.Requires.PluginProtocol != pluginv1.ProtocolVersion ||
 		m.Requires.TransportAPI != pluginv1.TransportAPIVersion ||
 		m.Requires.UIBridge != pluginv1.UIBridgeVersion {

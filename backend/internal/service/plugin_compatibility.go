@@ -84,13 +84,10 @@ func normalizePluginHostSemver(version string) string {
 
 func matchesSemverRange(version, expression string) bool {
 	v := normalizeSemver(version)
-	if v == "" {
+	if v == "" || !validSemverRange(expression) {
 		return false
 	}
 	tokens := strings.Fields(strings.ReplaceAll(expression, ",", " "))
-	if len(tokens) == 0 {
-		return false
-	}
 	for _, token := range tokens {
 		op := "="
 		raw := token
@@ -114,6 +111,26 @@ func matchesSemverRange(version, expression string) bool {
 			"=":  comparison == 0,
 		}[op]
 		if !matched {
+			return false
+		}
+	}
+	return true
+}
+
+func validSemverRange(expression string) bool {
+	tokens := strings.Fields(strings.ReplaceAll(expression, ",", " "))
+	if len(tokens) == 0 {
+		return false
+	}
+	for _, token := range tokens {
+		raw := token
+		for _, candidate := range []string{">=", "<=", ">", "<", "="} {
+			if strings.HasPrefix(token, candidate) {
+				raw = strings.TrimSpace(strings.TrimPrefix(token, candidate))
+				break
+			}
+		}
+		if normalizeSemver(raw) == "" {
 			return false
 		}
 	}

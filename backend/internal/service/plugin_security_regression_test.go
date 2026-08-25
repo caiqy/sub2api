@@ -42,6 +42,10 @@ func (r *pluginTokenRepository) GetByID(context.Context, int64) (*PluginInstalla
 	return &copy, nil
 }
 
+func (r *pluginTokenRepository) GetArtifact(context.Context, int64) ([]byte, error) {
+	return nil, errors.New("不应读取插件 artifact")
+}
+
 type pluginTokenEncryptor struct{}
 
 func (pluginTokenEncryptor) Encrypt(plaintext string) (string, error) {
@@ -107,6 +111,44 @@ func TestPluginReconcileFailsClosedWhenDesiredStateCannotBeRead(t *testing.T) {
 	})
 	require.True(t, handled)
 	require.ErrorContains(t, routeErr, "插件不可用")
+}
+
+func TestPluginReconcileFailsClosedWhenEnabledPluginIsIncompatible(t *testing.T) {
+	manifest := testPluginManifest(nil)
+	manifest.Requires.Sub2API = ">=0.2.0 <0.3.0"
+	repo := &pluginTokenRepository{installation: &PluginInstallation{
+		ID: 42, State: PluginStateStarting, Manifest: manifest, UpdatedAt: time.Now(),
+		Bindings: []PluginBinding{{
+			Capability: PluginCapabilityOpenAIOAuthOutbound, Platform: PlatformOpenAI,
+			AccountType: AccountTypeOAuth, Enabled: true, RolloutPercent: 100,
+		}},
+	}}
+	manager := &PluginManager{
+		repo: repo, hostInfo: PluginHostInfo{Version: "0.1.180.1"},
+		runtimes: make(map[int64]*pluginRuntime), localInstallations: make(map[int64]*PluginInstallation),
+	}
+
+	err := manager.reconcileOnce(context.Background())
+
+	require.ErrorContains(t, err, "不满足插件要求")
+	require.True(t, manager.ShouldRouteOpenAIOAuth(&Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}))
+	route := manager.route.Load()
+	require.NotNil(t, route)
+	require.Contains(t, route.unavailable, "不满足插件要求")
+}
+
+func TestPluginManagerEnableDoesNotAcceptInvalidUntestedDeclaration(t *testing.T) {
+	manifest := testPluginManifest(nil)
+	manifest.Requires.TestedSub2APIVersions = []string{"0.1.180.1"}
+	manager := NewPluginManager(
+		&pluginTokenRepository{installation: &PluginInstallation{
+			ID: 42, State: PluginStateDisabled, Manifest: manifest,
+		}}, pluginTokenEncryptor{}, testPluginConfig(t.TempDir(), true), PluginHostInfo{Version: "0.1.180.1"},
+	)
+
+	_, err := manager.Enable(context.Background(), 42, true, 100)
+
+	require.ErrorContains(t, err, "语义化版本")
 }
 
 type normalizingPluginClient struct {

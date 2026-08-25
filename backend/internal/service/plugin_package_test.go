@@ -118,6 +118,19 @@ func TestPluginPackageInstallerKeepsHostVersionMismatchDisabled(t *testing.T) {
 	assert.False(t, installation.Compatibility.Compatible)
 }
 
+func TestPluginPackageInstallerRejectsInvalidVersionDeclarations(t *testing.T) {
+	installer := NewPluginPackageInstaller(testPluginConfig(t.TempDir(), true), PluginHostInfo{Version: "0.1.180.1"})
+	for _, mutate := range []func(*PluginManifest){
+		func(m *PluginManifest) { m.Requires.Sub2API = ">=0.1.180.1 <0.2.0" },
+		func(m *PluginManifest) { m.Requires.TestedSub2APIVersions = []string{"0.1.180.1"} },
+	} {
+		manifest := testPluginManifest(nil)
+		mutate(&manifest)
+		_, err := installer.Install(context.Background(), bytes.NewReader(buildPluginArchive(t, manifest, nil, "", nil)), nil)
+		require.Error(t, err)
+	}
+}
+
 func TestPluginPackageInstallerRejectsHashMismatch(t *testing.T) {
 	cfg := testPluginConfig(t.TempDir(), true)
 	installer := NewPluginPackageInstaller(cfg, PluginHostInfo{Version: "0.1.179"})

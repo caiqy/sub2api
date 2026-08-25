@@ -301,6 +301,16 @@ func (m *PluginManager) reconcileOnce(ctx context.Context) error {
 	}
 
 	rollout := bindingRollout(enabled.Bindings)
+	if err := enabled.Manifest.Validate(); err != nil {
+		message := fmt.Sprintf("插件清单无效: %v", err)
+		m.publishUnavailableRoute(enabled.ID, rollout, message)
+		return errors.New(message)
+	}
+	compatibility := EvaluatePluginCompatibility(enabled.Manifest, m.hostInfo)
+	if !compatibility.Compatible {
+		m.publishUnavailableRoute(enabled.ID, rollout, compatibility.Message)
+		return errors.New(compatibility.Message)
+	}
 	current := m.route.Load()
 	if current != nil && current.pluginID == enabled.ID && current.runtime != nil &&
 		!current.runtime.client.Exited() && current.rolloutPercent == rollout &&
@@ -557,6 +567,9 @@ func (m *PluginManager) Enable(ctx context.Context, id int64, acceptUntested boo
 	installation, err := m.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if err := installation.Manifest.Validate(); err != nil {
+		return nil, fmt.Errorf("插件清单无效: %w", err)
 	}
 	if active := m.route.Load(); active != nil && active.pluginID != id {
 		return nil, errors.New("OpenAI OAuth 出站能力已有启用插件，请先停用当前插件")

@@ -9,7 +9,7 @@
     "schema_version": { "const": 1 },
     "id": { "type": "string", "maxLength": 160, "pattern": "^[a-z0-9]+([._-][a-z0-9]+)+$" },
     "name": { "type": "string", "minLength": 1, "maxLength": 160 },
-    "version": { "type": "string", "pattern": "^v?(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$" },
+    "version": { "$ref": "#/$defs/semver" },
     "description": { "type": "string" },
     "author": { "type": "string", "maxLength": 160 },
     "requires": {
@@ -17,9 +17,9 @@
       "additionalProperties": false,
       "required": ["sub2api", "plugin_protocol", "transport_api", "ui_bridge"],
       "properties": {
-        "sub2api": { "type": "string", "minLength": 1 },
-        "recommended_sub2api_version": { "type": "string" },
-        "tested_sub2api_versions": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "sub2api": { "$ref": "#/$defs/semverRange" },
+        "recommended_sub2api_version": { "$ref": "#/$defs/semver" },
+        "tested_sub2api_versions": { "type": "array", "items": { "$ref": "#/$defs/semver" }, "uniqueItems": true },
         "plugin_protocol": { "const": 1 },
         "transport_api": { "const": 1 },
         "ui_bridge": { "const": 1 }
@@ -66,6 +66,14 @@
     }
   },
   "$defs": {
+    "semver": {
+      "type": "string",
+      "pattern": "^v?(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "semverRange": {
+      "type": "string",
+      "pattern": "^\\s*(?:(?:>=|<=|>|<|=)?v?(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?)(?:(?:\\s*,\\s*|\\s+)(?:(?:>=|<=|>|<|=)?v?(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?))*\\s*$"
+    },
     "safePath": {
       "type": "string",
       "minLength": 1,
