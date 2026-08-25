@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -109,6 +111,23 @@ func TestPluginReconcileFailsClosedWhenDesiredStateCannotBeRead(t *testing.T) {
 	_, handled, routeErr := manager.RoundTripOpenAIOAuth(context.Background(), request, "", &Account{
 		ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
 	})
+	require.True(t, handled)
+	require.ErrorContains(t, routeErr, "插件不可用")
+}
+
+func TestPluginManagerStartFailsClosedWhenRuntimeDirectoryCannotBeCreated(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "not-a-directory")
+	require.NoError(t, os.WriteFile(root, []byte("file"), 0o600))
+	manager := NewPluginManager(&pluginTokenRepository{}, pluginTokenEncryptor{}, testPluginConfig(root, true), PluginHostInfo{Version: "0.1.180.1"})
+
+	err := manager.Start(context.Background())
+
+	require.ErrorContains(t, err, "创建插件运行目录")
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	require.True(t, manager.ShouldRouteOpenAIOAuth(account))
+	request, requestErr := http.NewRequestWithContext(context.Background(), http.MethodPost, "https://example.com/v1/responses", nil)
+	require.NoError(t, requestErr)
+	_, handled, routeErr := manager.RoundTripOpenAIOAuth(context.Background(), request, "", account)
 	require.True(t, handled)
 	require.ErrorContains(t, routeErr, "插件不可用")
 }

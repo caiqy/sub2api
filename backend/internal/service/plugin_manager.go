@@ -85,6 +85,7 @@ func (m *PluginManager) Start(ctx context.Context) error {
 		return nil
 	}
 	if err := os.MkdirAll(filepath.Join(m.installer.RootDir(), "runtime"), 0o700); err != nil {
+		m.route.Store(&pluginRoute{rolloutPercent: 100, unavailable: "插件运行目录不可用"})
 		m.mu.Unlock()
 		m.operationMu.Unlock()
 		return fmt.Errorf("创建插件运行目录: %w", err)
