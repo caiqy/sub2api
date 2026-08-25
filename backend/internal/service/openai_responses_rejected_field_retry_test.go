@@ -749,6 +749,27 @@ func TestOpenAIGatewayService_ComposesProactiveNamespaceStripWithRejectedFieldRe
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "max_output_tokens").Exists())
 }
 
+func TestOpenAIGatewayService_RetriesInvalidParameterCacheBreakpoint(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.5","stream":false,"prompt_cache_breakpoint":{"type":"message_start"},"input":"hello"}`)
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		newOpenAIRejectedFieldTestResponse(http.StatusBadRequest, `{"error":{"code":"invalid_parameter","message":"prompt_cache_breakpoint is not supported on this model","param":"prompt_cache_breakpoint"}}`),
+		newOpenAIRejectedFieldTestResponse(http.StatusOK, `{"output":[],"usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`),
+	}}
+
+	result, err := newOpenAIRejectedFieldTestService(upstream).Forward(
+		context.Background(),
+		newOpenAIRejectedFieldTestContext(body),
+		newOpenAIRejectedFieldTestAccount(),
+		body,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, upstream.bodies, 2)
+	require.True(t, gjson.GetBytes(upstream.bodies[0], "prompt_cache_breakpoint").Exists())
+	require.False(t, gjson.GetBytes(upstream.bodies[1], "prompt_cache_breakpoint").Exists())
+}
+
 func newOpenAIRejectedFieldTestService(upstream HTTPUpstream) *OpenAIGatewayService {
 	return &OpenAIGatewayService{
 		cfg: &config.Config{Security: config.SecurityConfig{

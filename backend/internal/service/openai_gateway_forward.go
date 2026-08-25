@@ -1195,7 +1195,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				}
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Skip non-WSv2 invalid_encrypted_content retry because encrypted reasoning items are missing (account: %s)", account.Name)
 			}
-			if resp.StatusCode == http.StatusBadRequest && isExplicitOpenAIResponsesFieldRejection(upstreamCode, upstreamMsg) {
+			if resp.StatusCode == http.StatusBadRequest {
 				if requestBody == nil {
 					requestBody, readErr = attemptHandle.ReadAll()
 					if readErr != nil {
