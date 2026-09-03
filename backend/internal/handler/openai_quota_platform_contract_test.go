@@ -68,12 +68,15 @@ func TestGeminiUsageInputSnapshotsForceCacheBilling(t *testing.T) {
 	file, err := parser.ParseFile(fset, filepath.Join(".", "gemini_v1beta_handler.go"), nil, 0)
 	require.NoError(t, err)
 
-	var directFailoverStateReads []token.Position
+	var matches int
+	var invalidSnapshots []token.Position
 	ast.Inspect(file, func(node ast.Node) bool {
 		literal, ok := node.(*ast.CompositeLit)
-		if !ok || !isServiceInputLiteral(literal.Type, "RecordUsageLongContextInput") {
+		if !ok || !isServiceInputLiteral(literal.Type, "RecordUsageInput") {
 			return true
 		}
+		matches++
+		found := false
 		for _, elt := range literal.Elts {
 			pair, ok := elt.(*ast.KeyValueExpr)
 			if !ok {
@@ -83,19 +86,20 @@ func TestGeminiUsageInputSnapshotsForceCacheBilling(t *testing.T) {
 			if !ok || key.Name != "ForceCacheBilling" {
 				continue
 			}
-			value, ok := pair.Value.(*ast.SelectorExpr)
-			if !ok || value.Sel.Name != "ForceCacheBilling" {
-				continue
+			found = true
+			value, ok := pair.Value.(*ast.Ident)
+			if !ok || value.Name != "forceCacheBilling" {
+				invalidSnapshots = append(invalidSnapshots, fset.Position(pair.Value.Pos()))
 			}
-			owner, ok := value.X.(*ast.Ident)
-			if ok && owner.Name == "fs" {
-				directFailoverStateReads = append(directFailoverStateReads, fset.Position(value.Pos()))
-			}
+		}
+		if !found {
+			invalidSnapshots = append(invalidSnapshots, fset.Position(literal.Lbrace))
 		}
 		return true
 	})
 
-	require.Empty(t, directFailoverStateReads, "usage worker must receive a request-time ForceCacheBilling snapshot")
+	require.Positive(t, matches, "Gemini usage must use RecordUsageInput")
+	require.Empty(t, invalidSnapshots, "usage worker must receive a request-time ForceCacheBilling snapshot")
 }
 
 func isOpenAIRecordUsageInputLiteral(expr ast.Expr) bool {
