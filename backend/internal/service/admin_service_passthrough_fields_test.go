@@ -207,6 +207,9 @@ func (m *passthroughAdminAccountRepo) IncrementQuotaUsed(ctx context.Context, id
 	return nil
 }
 func (m *passthroughAdminAccountRepo) ResetQuotaUsed(ctx context.Context, id int64) error { return nil }
+func (m *passthroughAdminAccountRepo) ResetQuotaUsedAndClearRateLimitCooldown(ctx context.Context, id int64) error {
+	return nil
+}
 
 var _ AccountRepository = (*passthroughAdminAccountRepo)(nil)
 

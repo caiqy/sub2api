@@ -9,26 +9,28 @@ import (
 // FailedUsageLogInput 描述失败请求的零成本 usage log 写入参数。
 // 该路径只负责保留审计/诊断信息，不参与扣费。
 type FailedUsageLogInput struct {
-	APIKey              *APIKey
-	User                *User
-	Account             *Account
-	Model               string
-	RequestedModel      string
-	UpstreamModel       string
-	ReasoningEffort     *string
-	Stream              bool
-	OpenAIWSMode        bool
-	InboundEndpoint     string
-	UpstreamEndpoint    string
-	UserAgent           string
-	IPAddress           string
-	DetailSnapshot      *UsageLogDetailSnapshot
-	Duration            time.Duration
-	InputTokens         int
-	OutputTokens        int
-	CacheCreationTokens int
-	CacheReadTokens     int
-	ImageOutputTokens   int
+	APIKey                   *APIKey
+	User                     *User
+	Account                  *Account
+	Model                    string
+	RequestedModel           string
+	UpstreamModel            string
+	ReasoningEffort          *string
+	RequestedReasoningEffort *string
+	NativeCompactionV2       bool
+	Stream                   bool
+	OpenAIWSMode             bool
+	InboundEndpoint          string
+	UpstreamEndpoint         string
+	UserAgent                string
+	IPAddress                string
+	DetailSnapshot           *UsageLogDetailSnapshot
+	Duration                 time.Duration
+	InputTokens              int
+	OutputTokens             int
+	CacheCreationTokens      int
+	CacheReadTokens          int
+	ImageOutputTokens        int
 	ChannelUsageFields
 }
 
@@ -56,32 +58,34 @@ func WriteFailedUsageLogBestEffort(ctx context.Context, repo UsageLogRepository,
 		upstreamModel = &value
 	}
 	usageLog := &UsageLog{
-		UserID:                input.User.ID,
-		APIKeyID:              input.APIKey.ID,
-		AccountID:             input.Account.ID,
-		RequestID:             resolveUsageBillingRequestID(ctx, ""),
-		Model:                 model,
-		RequestedModel:        requestedModel,
-		UpstreamModel:         upstreamModel,
-		ModelMappingChain:     optionalTrimmedStringPtr(input.ModelMappingChain),
-		ReasoningEffort:       input.ReasoningEffort,
-		InboundEndpoint:       optionalTrimmedStringPtr(input.InboundEndpoint),
-		UpstreamEndpoint:      optionalTrimmedStringPtr(input.UpstreamEndpoint),
-		TotalCost:             0,
-		ActualCost:            0,
-		RateMultiplier:        1,
-		AccountRateMultiplier: &accountRateMultiplier,
-		BillingType:           BillingTypeBalance,
-		DetailSnapshot:        input.DetailSnapshot.Normalize(),
-		Stream:                input.Stream,
-		OpenAIWSMode:          input.OpenAIWSMode,
-		DurationMs:            &durationMs,
-		InputTokens:           input.InputTokens,
-		OutputTokens:          input.OutputTokens,
-		CacheCreationTokens:   input.CacheCreationTokens,
-		CacheReadTokens:       input.CacheReadTokens,
-		ImageOutputTokens:     input.ImageOutputTokens,
-		CreatedAt:             time.Now(),
+		UserID:                   input.User.ID,
+		APIKeyID:                 input.APIKey.ID,
+		AccountID:                input.Account.ID,
+		RequestID:                resolveUsageBillingRequestID(ctx, ""),
+		Model:                    model,
+		RequestedModel:           requestedModel,
+		UpstreamModel:            upstreamModel,
+		ModelMappingChain:        optionalTrimmedStringPtr(input.ModelMappingChain),
+		ReasoningEffort:          input.ReasoningEffort,
+		RequestedReasoningEffort: input.RequestedReasoningEffort,
+		InboundEndpoint:          optionalTrimmedStringPtr(input.InboundEndpoint),
+		UpstreamEndpoint:         optionalTrimmedStringPtr(input.UpstreamEndpoint),
+		TotalCost:                0,
+		ActualCost:               0,
+		RateMultiplier:           1,
+		AccountRateMultiplier:    &accountRateMultiplier,
+		BillingType:              BillingTypeBalance,
+		DetailSnapshot:           input.DetailSnapshot.Normalize(),
+		Stream:                   input.Stream,
+		OpenAIWSMode:             input.OpenAIWSMode,
+		NativeCompactionV2:       input.NativeCompactionV2,
+		DurationMs:               &durationMs,
+		InputTokens:              input.InputTokens,
+		OutputTokens:             input.OutputTokens,
+		CacheCreationTokens:      input.CacheCreationTokens,
+		CacheReadTokens:          input.CacheReadTokens,
+		ImageOutputTokens:        input.ImageOutputTokens,
+		CreatedAt:                time.Now(),
 	}
 	usageLog.SyncRequestTypeAndLegacyFields()
 

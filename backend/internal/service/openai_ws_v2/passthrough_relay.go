@@ -149,6 +149,7 @@ type observedUpstreamEvent struct {
 type relayTurnTiming struct {
 	startAt               time.Time
 	requestModel          string
+	terminalEligible      bool
 	responseID            string
 	firstTokenMs          *int
 	firstResponseModel    string
@@ -162,6 +163,7 @@ type relayTurnTiming struct {
 type relayTurnStart struct {
 	payload []byte
 	startAt time.Time
+	ready   chan struct{}
 }
 
 type relayUpstreamFrame struct {
@@ -241,16 +243,35 @@ func Relay(
 		return clientConn.WriteFrame(writeCtx, msgType, payload)
 	}
 	turnStartCh := make(chan relayTurnStart, 8)
+	upstreamRelayStarted := atomic.Bool{}
 	startTurn := func(payload []byte, startedAt time.Time) {
 		requestModel := strings.TrimSpace(gjson.GetBytes(payload, "model").String())
 		state.setRequestModel(requestModel)
 		state.activeTurn = &relayTurnTiming{
-			startAt:      startedAt,
-			requestModel: requestModel,
+			startAt:          startedAt,
+			requestModel:     requestModel,
+			terminalEligible: true,
 		}
 	}
-	publishTurn := func(payload []byte, startedAt time.Time) {
-		turnStartCh <- relayTurnStart{payload: append([]byte(nil), payload...), startAt: startedAt}
+	publishTurn := func(payload []byte, startedAt time.Time, waitForArm bool) error {
+		var ready chan struct{}
+		if waitForArm {
+			ready = make(chan struct{})
+		}
+		select {
+		case turnStartCh <- relayTurnStart{payload: append([]byte(nil), payload...), startAt: startedAt, ready: ready}:
+		case <-relayCtx.Done():
+			return relayCtx.Err()
+		}
+		if ready == nil {
+			return nil
+		}
+		select {
+		case <-ready:
+			return nil
+		case <-relayCtx.Done():
+			return relayCtx.Err()
+		}
 	}
 	resolveTurnStartedAt := func() time.Time {
 		if startedAt := state.consumePendingTurnStartedAt(); !startedAt.IsZero() {
@@ -297,7 +318,10 @@ func Relay(
 					return err
 				}
 			}
-			publishTurn(payload, resolveTurnStartedAt())
+			if err := publishTurn(payload, resolveTurnStartedAt(), upstreamRelayStarted.Load()); err != nil {
+				releaseTurn()
+				return err
+			}
 		}
 		if err := writeUpstream(msgType, payload); err != nil {
 			if held {
@@ -366,11 +390,9 @@ func Relay(
 		}
 		go runClientToUpstream(relayCtx, clientConn, options.ReadClientFrame, writeTurnUpstream, markActivity, clientToUpstreamFrames, onTrace, exitCh)
 	}
-	if !options.StartClientAfterFirstDownstream {
-		startClientReader()
-	}
 	upstreamDone := make(chan struct{})
 	upstreamReadDone := make(chan struct{})
+	upstreamRelayStarted.Store(true)
 	go func() {
 		defer close(upstreamDone)
 		runUpstreamToClient(
@@ -402,6 +424,9 @@ func Relay(
 			upstreamReadDone,
 		)
 	}()
+	if !options.StartClientAfterFirstDownstream {
+		startClientReader()
+	}
 	go runIdleWatchdog(relayCtx, nowFn, options.IdleTimeout, &lastActivity, onTrace, exitCh)
 
 	firstExit := <-exitCh
@@ -669,6 +694,9 @@ func runUpstreamToClient(
 		select {
 		case turn := <-turnStartCh:
 			armTurn(turn)
+			if turn.ready != nil {
+				close(turn.ready)
+			}
 			continue
 		case next, ok := <-upstreamFrames:
 			if !ok {
@@ -902,8 +930,14 @@ func observeUpstreamMessage(
 	recordsFirstToken := isTokenEvent(eventType) && !isTerminalEvent(eventType)
 	var turnTiming *relayTurnTiming
 	if responseID != "" {
-		if state.activeTurn != nil && state.activeTurn.responseID == "" && eventType != "response.created" && state.pendingBareError == nil {
+		if eventType != "response.created" && state.lastResponseID != "" && responseID == state.lastResponseID {
 			return observedUpstreamEvent{}
+		}
+		if state.activeTurn != nil && state.activeTurn.responseID == "" && eventType != "response.created" && state.pendingBareError == nil {
+			currentTurnTerminal := isTerminalEvent(eventType) && state.activeTurn.terminalEligible
+			if !currentTurnTerminal {
+				return observedUpstreamEvent{}
+			}
 		}
 		if state.activeTurn == nil && state.lastResponseID != "" && eventType != "response.created" {
 			return observedUpstreamEvent{}

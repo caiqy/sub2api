@@ -8,6 +8,40 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+func TestCanonicalRequestedReasoningEffort(t *testing.T) {
+	t.Parallel()
+
+	max := CanonicalRequestedReasoningEffort([]byte(`{"model":"gpt-5.4","reasoning":{"effort":"MAX"}}`), "gpt-5.4")
+	require.NotNil(t, max)
+	require.Equal(t, "max", *max)
+
+	fromSuffix := CanonicalRequestedReasoningEffort([]byte(`{"model":"gpt-5.4-max"}`), "gpt-5.4-max")
+	require.NotNil(t, fromSuffix)
+	require.Equal(t, "max", *fromSuffix)
+
+	claude := CanonicalRequestedReasoningEffort([]byte(`{"model":"claude-sonnet-4","output_config":{"effort":"high"}}`))
+	require.NotNil(t, claude)
+	require.Equal(t, "high", *claude)
+
+	require.Nil(t, CanonicalRequestedReasoningEffort([]byte(`{"model":"gpt-5.4"}`), "gpt-5.4"))
+}
+
+func TestRequestedReasoningEffortContext(t *testing.T) {
+	t.Parallel()
+
+	require.Nil(t, RequestedReasoningEffortFromContext(context.Background()))
+	ctx := WithRequestedReasoningEffort(context.Background(), " max ")
+	got := RequestedReasoningEffortFromContext(ctx)
+	require.NotNil(t, got)
+	require.Equal(t, "max", *got)
+	require.True(t, RequestedReasoningEffortCaptured(ctx))
+
+	cleared := WithRequestedReasoningEffort(ctx, "")
+	require.True(t, RequestedReasoningEffortCaptured(cleared))
+	require.Nil(t, RequestedReasoningEffortFromContext(cleared))
+	require.False(t, RequestedReasoningEffortCaptured(context.Background()))
+}
+
 func TestNormalizeMaxReasoningEffort(t *testing.T) {
 	tests := []struct {
 		name string

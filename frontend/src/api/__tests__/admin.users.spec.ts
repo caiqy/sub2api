@@ -137,6 +137,7 @@ describe('admin users api auth identity binding', () => {
       balance: 10,
       concurrency: 2,
       allowed_groups: [1, 2],
+      restrict_public_groups: true,
     }
     post.mockResolvedValue({ data: payload })
 

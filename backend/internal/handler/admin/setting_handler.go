@@ -291,6 +291,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		MaxClaudeCodeVersion:                                 settings.MaxClaudeCodeVersion,
 		AllowUngroupedKeyScheduling:                          settings.AllowUngroupedKeyScheduling,
 		BackendModeEnabled:                                   settings.BackendModeEnabled,
+		OpenAITTFTMode:                                       settings.OpenAITTFTMode,
 		GatewayStickyOpenAIEnabled:                           settings.GatewayStickyOpenAIEnabled,
 		GatewayStickyGeminiEnabled:                           settings.GatewayStickyGeminiEnabled,
 		GatewayStickyAnthropicEnabled:                        settings.GatewayStickyAnthropicEnabled,

@@ -31,7 +31,11 @@ type User struct {
 	HiddenPurchasePage          bool
 	HiddenCustomMenuResourceIDs []int64
 	HiddenCustomMenuIDs         []string
-	TokenVersion                int64 // Incremented on password change to invalidate existing tokens
+	// RestrictPublicGroups narrows the public groups this user may bind to the
+	// ones listed in AllowedGroups. False keeps the default, where every public
+	// group is bindable.
+	RestrictPublicGroups bool
+	TokenVersion         int64 // Incremented on password change to invalidate existing tokens
 	// TokenVersionResolved indicates TokenVersion already contains the fingerprint-derived
 	// value expected in JWT claims and refresh-token state.
 	TokenVersionResolved bool
@@ -82,8 +86,9 @@ func (u *User) IsActive() bool {
 
 // CanBindGroup checks whether a user can bind to a given group.
 // For standard groups:
-// - Public groups (non-exclusive): all users can bind unless explicitly blocked
-// - Exclusive groups: only users with the group in AllowedGroups can bind
+//   - Public groups (non-exclusive): all users can bind unless explicitly blocked
+//     or RestrictPublicGroups requires an explicit grant.
+//   - Exclusive groups: only users with the group in AllowedGroups can bind
 func (u *User) CanBindGroup(groupID int64, isExclusive bool) bool {
 	// 公开分组（非专属）：默认可绑定，除非按用户禁用
 	if !isExclusive {
@@ -92,9 +97,11 @@ func (u *User) CanBindGroup(groupID int64, isExclusive bool) bool {
 				return false
 			}
 		}
-		return true
+		if !u.RestrictPublicGroups {
+			return true
+		}
 	}
-	// 专属分组：需要在 AllowedGroups 中
+	// 专属分组，以及受限用户的公开分组：需要在 AllowedGroups 中
 	for _, id := range u.AllowedGroups {
 		if id == groupID {
 			return true

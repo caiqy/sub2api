@@ -160,6 +160,8 @@ func (s *adminServiceImpl) CreateUser(ctx context.Context, input *CreateUserInpu
 		RPMLimit:      input.RPMLimit,
 		Status:        StatusActive,
 		AllowedGroups: input.AllowedGroups,
+
+		RestrictPublicGroups: input.RestrictPublicGroups,
 	}
 	if err := user.SetPassword(input.Password); err != nil {
 		return nil, err
@@ -313,6 +315,12 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		user.HiddenCustomMenuResourceIDs = customMenuIDsToResourceIDs(*input.HiddenCustomMenuIDs)
 	}
 
+	oldRestrictPublicGroups := user.RestrictPublicGroups
+	if input.RestrictPublicGroups != nil {
+		user.RestrictPublicGroups = *input.RestrictPublicGroups
+		fields.RestrictPublicGroups = true
+	}
+
 	updateCtx := ctx
 	var tx *dbent.Tx
 	if (input.BlockedGroups != nil || input.HiddenPurchasePage != nil || input.HiddenCustomMenuIDs != nil) && s.entClient != nil {
@@ -363,7 +371,8 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	if s.authCacheInvalidator != nil {
 		// RPMLimit 直接参与 billing_cache_service.checkRPM 的三级级联，
 		// 分组权限与隐藏资源参与用户鉴权快照；不失效缓存会让修改在一个 L2 TTL 内失去效果。
-		if user.Concurrency != oldConcurrency || user.Status != oldStatus || user.Role != oldRole || user.RPMLimit != oldRPMLimit || !sameInt64Set(user.AllowedGroups, oldAllowedGroups) || !sameInt64Set(user.BlockedGroups, oldBlockedGroups) || user.HiddenPurchasePage != oldHiddenPurchasePage || !sameInt64Set(user.HiddenCustomMenuResourceIDs, oldHiddenCustomMenuResourceIDs) {
+		// allowed_groups/restrict_public_groups 参与 API Key 专属分组授权判断。
+		if user.Concurrency != oldConcurrency || user.Status != oldStatus || user.Role != oldRole || user.RPMLimit != oldRPMLimit || user.RestrictPublicGroups != oldRestrictPublicGroups || !sameInt64Set(user.AllowedGroups, oldAllowedGroups) || !sameInt64Set(user.BlockedGroups, oldBlockedGroups) || user.HiddenPurchasePage != oldHiddenPurchasePage || !sameInt64Set(user.HiddenCustomMenuResourceIDs, oldHiddenCustomMenuResourceIDs) {
 			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, user.ID)
 		}
 	}

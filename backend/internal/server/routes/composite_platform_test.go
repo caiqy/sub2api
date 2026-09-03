@@ -310,6 +310,55 @@ func TestCompositeTargetPlatformMiddlewareUsesExplicitRouteAndRewritesBody(t *te
 	require.Equal(t, http.StatusNoContent, w.Code)
 }
 
+func TestCompositeTargetPlatformMiddlewarePreservesRequestedReasoningEffortBeforeRewrite(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	groupID := int64(1)
+	apiKey := &service.APIKey{
+		GroupID: &groupID,
+		Group:   &service.Group{ID: groupID, Platform: service.PlatformComposite, Status: service.StatusActive},
+		User:    &service.User{ID: 1},
+	}
+	resolver := service.NewCompositeRouteResolver(compositeRouteRepoStub{
+		routes: []service.CompositeModelRoute{
+			{
+				ID:             2,
+				GroupID:        groupID,
+				PublicModel:    "gpt-5.4-max",
+				MatchType:      service.CompositeRouteMatchExact,
+				TargetPlatform: service.PlatformOpenAI,
+				UpstreamModel:  "gpt-5.4",
+				Endpoint:       service.CompositeRouteEndpointResponses,
+				Priority:       100,
+				Enabled:        true,
+			},
+		},
+	})
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(servermiddleware.ContextKeyAPIKey), apiKey)
+		c.Next()
+	})
+	router.Use(compositeTargetPlatformMiddleware(effectiveCompositeRouteResolverForTest(resolver)))
+	router.POST("/v1/responses", func(c *gin.Context) {
+		body, err := io.ReadAll(c.Request.Body)
+		require.NoError(t, err)
+		require.JSONEq(t, `{"model":"gpt-5.4"}`, string(body))
+
+		requested := service.RequestedReasoningEffortFromContext(c.Request.Context())
+		require.NotNil(t, requested)
+		require.Equal(t, "max", *requested)
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.4-max"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNoContent, w.Code)
+}
+
 func TestCompositeTargetPlatformMiddlewareRewritesNestedLiveModel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()

@@ -39,24 +39,29 @@ func TestWriteFailedUsageLogBestEffort_CreatesZeroCostUsageLog(t *testing.T) {
 		ResponseBody:    `{"error":{"type":"upstream_error","message":"boom"}}`,
 	}
 	groupID := int64(11)
+	effectiveReasoningEffort := "xhigh"
+	requestedReasoningEffort := "max"
 	ctx := context.WithValue(context.Background(), ctxkey.ClientRequestID, "failed-client-req")
 
 	WriteFailedUsageLogBestEffort(ctx, repo, &FailedUsageLogInput{
-		APIKey:              &APIKey{ID: 101, GroupID: &groupID},
-		User:                &User{ID: 202},
-		Account:             &Account{ID: 303},
-		Model:               "gpt-5.4",
-		Stream:              false,
-		InboundEndpoint:     "/v1/responses",
-		UpstreamEndpoint:    "/v1/responses",
-		UserAgent:           "curl/8.0",
-		IPAddress:           "127.0.0.1",
-		DetailSnapshot:      detail,
-		Duration:            time.Second,
-		InputTokens:         7,
-		OutputTokens:        2,
-		CacheCreationTokens: 3,
-		OpenAIWSMode:        true,
+		APIKey:                   &APIKey{ID: 101, GroupID: &groupID},
+		User:                     &User{ID: 202},
+		Account:                  &Account{ID: 303},
+		Model:                    "gpt-5.4",
+		ReasoningEffort:          &effectiveReasoningEffort,
+		RequestedReasoningEffort: &requestedReasoningEffort,
+		NativeCompactionV2:       true,
+		Stream:                   false,
+		InboundEndpoint:          "/v1/responses",
+		UpstreamEndpoint:         "/v1/responses",
+		UserAgent:                "curl/8.0",
+		IPAddress:                "127.0.0.1",
+		DetailSnapshot:           detail,
+		Duration:                 time.Second,
+		InputTokens:              7,
+		OutputTokens:             2,
+		CacheCreationTokens:      3,
+		OpenAIWSMode:             true,
 		ChannelUsageFields: ChannelUsageFields{
 			OriginalModel:      "client-model",
 			ChannelMappedModel: "channel-model",
@@ -74,6 +79,11 @@ func TestWriteFailedUsageLogBestEffort_CreatesZeroCostUsageLog(t *testing.T) {
 	require.Equal(t, "client:failed-client-req", repo.lastLog.RequestID)
 	require.Equal(t, "channel-model", repo.lastLog.Model)
 	require.Equal(t, "client-model", repo.lastLog.RequestedModel)
+	require.NotNil(t, repo.lastLog.ReasoningEffort)
+	require.Equal(t, effectiveReasoningEffort, *repo.lastLog.ReasoningEffort)
+	require.NotNil(t, repo.lastLog.RequestedReasoningEffort)
+	require.Equal(t, requestedReasoningEffort, *repo.lastLog.RequestedReasoningEffort)
+	require.True(t, repo.lastLog.NativeCompactionV2)
 	require.NotNil(t, repo.lastLog.UpstreamModel)
 	require.Equal(t, "provider-model", *repo.lastLog.UpstreamModel)
 	require.NotNil(t, repo.lastLog.ModelMappingChain)

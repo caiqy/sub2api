@@ -58,6 +58,7 @@ type ExpectedCreateUserRequest = {
   concurrency?: number
   rpm_limit?: number
   allowed_groups?: number[] | null
+  restrict_public_groups?: boolean
 }
 
 const userBalanceNotifyThresholdTypeExact: Assert<

@@ -177,8 +177,8 @@ func TestPrepareUsageLogInsertPersistsBodySizes(t *testing.T) {
 
 	prepared := prepareUsageLogInsert(log)
 
-	require.Equal(t, int64(1536), *prepared.args[len(prepared.args)-3].(*int64))
-	require.Equal(t, int64(2048), *prepared.args[len(prepared.args)-2].(*int64))
+	require.Equal(t, int64(1536), *prepared.args[len(prepared.args)-4].(*int64))
+	require.Equal(t, int64(2048), *prepared.args[len(prepared.args)-3].(*int64))
 }
 
 func usageLogListRowColumns() []string {
@@ -188,8 +188,8 @@ func usageLogListRowColumns() []string {
 		"image_output_tokens", "image_output_cost", "image_input_tokens", "image_input_cost", "input_cost", "output_cost", "cache_creation_cost", "cache_read_cost", "total_cost", "actual_cost", "rate_multiplier",
 		"account_rate_multiplier", "billing_type", "request_type", "stream", "openai_ws_mode", "duration_ms", "first_token_ms",
 		"user_agent", "ip_address", "image_count", "image_size", "image_input_size", "image_output_size", "image_size_source", "image_size_breakdown",
-		"video_count", "video_resolution", "video_duration_seconds", "service_tier", "reasoning_effort",
-		"inbound_endpoint", "upstream_endpoint", "cache_ttl_overridden", "long_context_billing_applied", "channel_id", "model_mapping_chain", "billing_tier", "billing_mode", "account_stats_cost", "session_id", "created_at", "request_body_size", "response_body_size", "has_detail",
+		"video_count", "video_resolution", "video_duration_seconds", "service_tier", "reasoning_effort", "requested_reasoning_effort",
+		"inbound_endpoint", "upstream_endpoint", "cache_ttl_overridden", "long_context_billing_applied", "channel_id", "model_mapping_chain", "billing_tier", "billing_mode", "account_stats_cost", "session_id", "native_compaction_v2", "created_at", "request_body_size", "response_body_size", "has_detail",
 	}
 }
 
@@ -200,7 +200,7 @@ func usageLogListRowValues(hasDetail bool) []driver.Value {
 		10, 20, 0, 0, 0, 0,
 		0, 0.0, 0, 0.0, 0.1, 0.2, 0.0, 0.0, 0.3, 0.3, 1.0,
 		nil, int16(0), int16(service.RequestTypeSync), false, false, nil, nil,
-		nil, nil, 0, nil, nil, nil, nil, nil, 0, nil, nil, nil, nil,
-		nil, nil, false, false, nil, nil, nil, nil, nil, nil, createdAt, int64(1536), int64(2048), hasDetail,
+		nil, nil, 0, nil, nil, nil, nil, nil, 0, nil, nil, nil, nil, nil,
+		nil, nil, false, false, nil, nil, nil, nil, nil, nil, false, createdAt, int64(1536), int64(2048), hasDetail,
 	}
 }

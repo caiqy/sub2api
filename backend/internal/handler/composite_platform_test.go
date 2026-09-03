@@ -143,6 +143,9 @@ func TestOpenAIReasoningEffortPolicyForCompositeTarget(t *testing.T) {
 	got, changed := applyOpenAIReasoningEffortPolicyForRequest(openAICtx, apiKey, body)
 	require.True(t, changed)
 	require.JSONEq(t, `{"reasoning":{"effort":"medium"}}`, string(got))
+	requested := service.RequestedReasoningEffortFromContext(openAICtx.Request.Context())
+	require.NotNil(t, requested)
+	require.Equal(t, "max", *requested)
 
 	bindOpenAIReasoningEffortPolicyForMessagesRequest(openAICtx, apiKey, []byte(`{"output_config":{"effort":"max"}}`))
 	bound, changed := service.ApplyOpenAIReasoningEffortPolicyFromContext(openAICtx.Request.Context(), body)
@@ -163,6 +166,25 @@ func TestOpenAIReasoningEffortPolicyForCompositeTarget(t *testing.T) {
 	got, changed = applyOpenAIReasoningEffortPolicyForRequest(grokCtx, apiKey, body)
 	require.False(t, changed)
 	require.Equal(t, body, got)
+}
+
+func TestBindRequestedReasoningEffortOnlyCapturesHTTPRequestOnce(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+
+	bindRequestedReasoningEffort(c, []byte(`{"model":"gpt-5.4-max"}`), "gpt-5.4-max")
+	bindRequestedReasoningEffort(c, []byte(`{"model":"gpt-5.4","reasoning":{"effort":"high"}}`), "gpt-5.4")
+
+	got := service.RequestedReasoningEffortFromContext(c.Request.Context())
+	require.NotNil(t, got)
+	require.Equal(t, "max", *got)
+
+	noEffort, _ := gin.CreateTestContext(httptest.NewRecorder())
+	noEffort.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+	bindRequestedReasoningEffort(noEffort, []byte(`{"model":"gpt-5.4"}`), "gpt-5.4")
+	require.True(t, service.RequestedReasoningEffortCaptured(noEffort.Request.Context()))
+	require.Nil(t, service.RequestedReasoningEffortFromContext(noEffort.Request.Context()))
 }
 
 func TestClientRequestedModelUsesCompositePublicModel(t *testing.T) {

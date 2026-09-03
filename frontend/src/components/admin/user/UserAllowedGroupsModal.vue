@@ -95,11 +95,23 @@
 
         <!-- 公开分组区域 -->
         <div v-if="publicGroups.length > 0">
-          <div class="mb-3 flex items-center gap-2">
+          <div class="mb-3 flex flex-wrap items-center gap-2">
             <div class="h-1.5 w-1.5 rounded-full bg-green-500"></div>
-            <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-300">{{ t('admin.users.publicGroups') }}</h4>
+            <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-300">
+              {{ restrictPublicGroups ? t('admin.users.publicGroupsRestricted') : t('admin.users.publicGroups') }}
+            </h4>
             <span class="text-xs text-gray-400">({{ publicGroupConfigs.length }})</span>
+            <label class="ml-auto flex cursor-pointer items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+              <input
+                type="checkbox"
+                :checked="restrictPublicGroups"
+                @change="toggleRestrictPublicGroups"
+                class="h-4 w-4 cursor-pointer rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500"
+              />
+              {{ t('admin.users.restrictPublicGroups') }}
+            </label>
           </div>
+          <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.users.restrictPublicGroupsHint') }}</p>
           <div class="grid gap-3">
             <div
               v-for="config in publicGroupConfigs"
@@ -117,7 +129,7 @@
                     <input
                       type="checkbox"
                       :checked="config.isSelected"
-                      @change="toggleGroup(config.groupId)"
+                      @change="restrictPublicGroups ? togglePublicGroup(config.groupId) : toggleGroup(config.groupId)"
                       class="peer sr-only"
                     />
                     <div class="h-5 w-5 rounded-md border-2 border-gray-300 transition-all peer-checked:border-green-500 peer-checked:bg-green-500 dark:border-dark-500 peer-checked:dark:border-green-600">
@@ -248,6 +260,7 @@ const hiddenPurchasePage = ref(false)
 const hiddenCustomMenuIds = ref<string[]>([])
 const loading = ref(false)
 const submitting = ref(false)
+const restrictPublicGroups = ref(false)
 
 // 分离专属分组和公开分组
 const exclusiveGroups = computed(() => groups.value.filter((g) => g.is_exclusive))
@@ -284,6 +297,7 @@ const load = async () => {
       : customMenuItems.value
         .filter((item) => hiddenResources.includes(customMenuResourceID(item.id)))
         .map((item) => item.id)
+    restrictPublicGroups.value = props.user?.restrict_public_groups ?? false
 
     // 保存原始专属倍率，用于检测删除操作
     originalGroupRates.value = { ...userGroupRates }
@@ -295,8 +309,12 @@ const load = async () => {
       isExclusive: g.is_exclusive,
       defaultRate: g.rate_multiplier,
       customRate: userGroupRates[g.id] ?? null,
-      // 专属分组：检查是否在 allowed_groups 中；公开分组：未 blocked 即选中
-      isSelected: g.is_exclusive ? userAllowedGroups.includes(g.id) : !userBlockedGroups.includes(g.id),
+      // 专属分组按 allowed_groups；公开分组同时兼容限制开关与 fork 的 blocked_groups 定制。
+      isSelected: g.is_exclusive
+        ? userAllowedGroups.includes(g.id)
+        : restrictPublicGroups.value
+          ? userAllowedGroups.includes(g.id)
+          : !userBlockedGroups.includes(g.id),
     }))
   } catch (error) {
     console.error('Failed to load groups:', error)
@@ -322,6 +340,23 @@ const toggleGroup = (groupId: number, exclusiveOnly = false) => {
   }
 }
 
+const togglePublicGroup = (groupId: number) => {
+  const config = groupConfigs.value.find((c) => c.groupId === groupId)
+  if (config && !config.isExclusive) {
+    config.isSelected = !config.isSelected
+  }
+}
+
+// 关闭限制时把公开分组全部勾回，避免保存出一份"限制已关但只勾了两个"的误导状态。
+const toggleRestrictPublicGroups = () => {
+  restrictPublicGroups.value = !restrictPublicGroups.value
+  if (!restrictPublicGroups.value) {
+    for (const config of groupConfigs.value) {
+      if (!config.isExclusive) config.isSelected = true
+    }
+  }
+}
+
 const updateCustomRate = (groupId: number, value: string) => {
   const config = groupConfigs.value.find((c) => c.groupId === groupId)
   if (config) {
@@ -339,8 +374,10 @@ const handleSave = async () => {
   submitting.value = true
 
   try {
-    // 构建 allowed_groups（仅包含专属分组中被勾选的）
-    const allowedGroups = groupConfigs.value.filter((c) => c.isExclusive && c.isSelected).map((c) => c.groupId)
+    // 构建 allowed_groups：专属分组中被勾选的，以及开启限制后被勾选的公开分组。
+    const allowedGroups = groupConfigs.value
+      .filter((c) => c.isSelected && (c.isExclusive || restrictPublicGroups.value))
+      .map((c) => c.groupId)
     const blockedGroups = groupConfigs.value.filter((c) => !c.isExclusive && !c.isSelected).map((c) => c.groupId)
 
     // 构建 group_rates
@@ -364,6 +401,7 @@ const handleSave = async () => {
       blocked_groups: blockedGroups,
       hidden_purchase_page: hiddenPurchasePage.value,
       hidden_custom_menu_ids: hiddenCustomMenuIds.value,
+      restrict_public_groups: restrictPublicGroups.value,
       group_rates: Object.keys(groupRates).length > 0 ? groupRates : undefined,
     })
 

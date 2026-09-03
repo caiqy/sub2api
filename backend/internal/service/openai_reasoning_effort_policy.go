@@ -17,6 +17,7 @@ const (
 var openAIReasoningEffortValues = []string{"minimal", "low", "medium", "high", "xhigh", "max"}
 
 type openAIReasoningEffortPolicyContextKey struct{}
+type requestedReasoningEffortContextKey struct{}
 
 type openAIReasoningEffortPolicy struct {
 	maxEffort string
@@ -134,6 +135,44 @@ func NormalizeReasoningEffortMappings(platform string, raw []ReasoningEffortMapp
 		normalized = append(normalized, ReasoningEffortMapping{From: from, To: to})
 	}
 	return normalized, nil
+}
+
+// WithRequestedReasoningEffort stores the client-requested effort captured from
+// the inbound body before group policy or model-family remapping. An empty
+// effort records that capture without a requested value.
+func WithRequestedReasoningEffort(ctx context.Context, effort string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	effort = strings.TrimSpace(effort)
+	return context.WithValue(ctx, requestedReasoningEffortContextKey{}, effort)
+}
+
+// RequestedReasoningEffortCaptured reports whether ctx has a requested-effort
+// marker, including the marker's empty value.
+func RequestedReasoningEffortCaptured(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	_, ok := ctx.Value(requestedReasoningEffortContextKey{}).(string)
+	return ok
+}
+
+// RequestedReasoningEffortFromContext returns the inbound requested effort bound
+// to ctx, or nil when it was not captured or was captured without a value.
+func RequestedReasoningEffortFromContext(ctx context.Context) *string {
+	if ctx == nil {
+		return nil
+	}
+	value, ok := ctx.Value(requestedReasoningEffortContextKey{}).(string)
+	if !ok {
+		return nil
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return &value
 }
 
 // WithOpenAIReasoningEffortPolicy binds a group policy to a request after its

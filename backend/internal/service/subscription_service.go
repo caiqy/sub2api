@@ -1607,6 +1607,12 @@ func (s *SubscriptionService) calculateProgress(sub *UserSubscription, group *Gr
 		if nextReset := sub.FutureWeeklyResetTime(now); nextReset != nil {
 			resetsAt = *nextReset
 		}
+		legacyAnchor := startOfDay(sub.StartsAt)
+		if !sub.ExpiresAt.After(now) && !sub.StartsAt.IsZero() && legacyAnchor.Before(sub.StartsAt) && sub.WeeklyWindowStart.Equal(legacyAnchor) {
+			if weeklyResetTime := sub.WeeklyResetTime(); weeklyResetTime != nil {
+				resetsAt = *weeklyResetTime
+			}
+		}
 		progress.Weekly = &UsageWindowProgress{
 			LimitUSD:        limit,
 			UsedUSD:         usedUSD,
@@ -1636,6 +1642,12 @@ func (s *SubscriptionService) calculateProgress(sub *UserSubscription, group *Gr
 		resetsAt := windowStart.Add(30 * 24 * time.Hour)
 		if nextReset := sub.FutureMonthlyResetTime(now); nextReset != nil {
 			resetsAt = *nextReset
+		}
+		legacyAnchor := startOfDay(sub.StartsAt)
+		if !sub.ExpiresAt.After(now) && !sub.StartsAt.IsZero() && legacyAnchor.Before(sub.StartsAt) && sub.MonthlyWindowStart.Equal(legacyAnchor) {
+			if monthlyResetTime := sub.MonthlyResetTime(); monthlyResetTime != nil {
+				resetsAt = *monthlyResetTime
+			}
 		}
 		progress.Monthly = &UsageWindowProgress{
 			LimitUSD:        limit,

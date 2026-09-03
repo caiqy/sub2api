@@ -70,6 +70,39 @@ func TestOpenAIGatewayHandler_SubmitFailedUsageLog_UsesMessagesFallbackModelAsUp
 	require.Equal(t, fallbackModel, *log.UpstreamModel)
 }
 
+func TestOpenAIGatewayHandler_SubmitFailedUsageLog_PreservesFailedUsageMetadata(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
+	gatewayService := service.NewOpenAIGatewayService(nil, usageRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := NewOpenAIGatewayHandler(gatewayService, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	apiKey := &service.APIKey{ID: 101, UserID: 202, User: &service.User{ID: 202}}
+	account := &service.Account{ID: 11, Platform: service.PlatformOpenAI, Credentials: map[string]any{"api_key": "sk-test"}}
+	effectiveReasoningEffort := "xhigh"
+
+	router := gin.New()
+	router.Use(middleware.UsageDetailCapture())
+	router.POST("/v1/responses", func(c *gin.Context) {
+		c.Request = c.Request.WithContext(service.WithRequestedReasoningEffort(c.Request.Context(), "max"))
+		service.MarkOpenAINativeCompactionV2(c)
+		h.submitFailedUsageLog(c, apiKey, account, "gpt-5.4", true, http.StatusBadGateway, nil, nil, 0, &effectiveReasoningEffort, "handler.openai_gateway.responses")
+		c.Status(http.StatusBadGateway)
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.4"}`))
+	router.ServeHTTP(rec, req)
+
+	log := waitForOpenAIFailedUsageLog(t, usageRepo)
+	require.NotNil(t, log)
+	require.True(t, log.NativeCompactionV2)
+	require.NotNil(t, log.ReasoningEffort)
+	require.Equal(t, effectiveReasoningEffort, *log.ReasoningEffort)
+	require.NotNil(t, log.RequestedReasoningEffort)
+	require.Equal(t, "max", *log.RequestedReasoningEffort)
+}
+
 func TestOpenAIGatewayHandler_SubmitFailoverFailedUsageLog_UsesChatCompletionsFallbackModelAsUpstreamModel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -178,6 +211,82 @@ func TestOpenAIGatewayHandler_SubmitFailedUsageLog_PreservesCompositeModelTriple
 	require.Equal(t, "gpt-5", log.Model)
 	require.NotNil(t, log.UpstreamModel)
 	require.Equal(t, "gpt-5.2", *log.UpstreamModel)
+}
+
+func TestOpenAIGatewayHandler_CompositeReasoningSuffixPersistsInSuccessUsage(t *testing.T) {
+	log, status := runOpenAICompositeResponsesReasoningUsageCase(t, &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"id":"resp_composite","object":"response","status":"completed","model":"gpt-5.4","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)),
+	})
+
+	require.Equal(t, http.StatusOK, status)
+	require.NotNil(t, log)
+	require.NotNil(t, log.RequestedReasoningEffort)
+	require.Equal(t, "max", *log.RequestedReasoningEffort)
+}
+
+func TestOpenAIGatewayHandler_CompositeReasoningSuffixPersistsInFailedUsage(t *testing.T) {
+	log, status := runOpenAICompositeResponsesReasoningUsageCase(t, &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"rate_limit_error","message":"upstream rate limited"}}`)),
+	})
+
+	require.Equal(t, http.StatusTooManyRequests, status)
+	require.NotNil(t, log)
+	require.NotNil(t, log.RequestedReasoningEffort)
+	require.Equal(t, "max", *log.RequestedReasoningEffort)
+}
+
+func runOpenAICompositeResponsesReasoningUsageCase(t *testing.T, response *http.Response) (*service.UsageLog, int) {
+	t.Helper()
+	groupID := int64(9301)
+	group := &service.Group{ID: groupID, Platform: service.PlatformComposite, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{
+		ID: 9302, Name: "composite-openai-reasoning", Platform: service.PlatformOpenAI,
+		Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true,
+		Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "sk-composite"},
+	}
+	env := newTerminalUsageOpenAIEnv(t, group, &openAIChatCompletionsAccountRepoStub{account: account}, response)
+	decision := service.CompositeRouteDecision{
+		Matched:        true,
+		Source:         service.CompositeRouteSourceExplicit,
+		GroupID:        groupID,
+		PublicModel:    "gpt-5.4-max",
+		TargetPlatform: service.PlatformOpenAI,
+		UpstreamModel:  "gpt-5.4",
+		Endpoint:       service.CompositeRouteEndpointResponses,
+	}
+	route := service.EffectiveGatewayRoute{
+		APIKey:        env.apiKey,
+		Group:         group,
+		GroupID:       &groupID,
+		ClientModel:   "gpt-5.4-max",
+		RoutingModel:  "gpt-5.4",
+		UpstreamModel: "gpt-5.4",
+		Platform:      service.PlatformOpenAI,
+		Decision:      &decision,
+	}
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyAPIKey), env.apiKey)
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: env.apiKey.UserID, Concurrency: 1})
+		ctx := service.WithEffectiveGatewayRoute(c.Request.Context(), route)
+		ctx = service.WithCompositeRouteDecision(ctx, decision)
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	})
+	router.Use(middleware.UsageDetailCapture())
+	router.POST("/v1/responses", env.handler.Responses)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.4-max","input":"hello","stream":false}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+
+	return waitForOpenAIFailedUsageLog(t, env.usageRepo), recorder.Code
 }
 
 func TestOpenAIGatewayHandler_SubmitFailedUsageLogSnapshotsCompositeModelsBeforeQueue(t *testing.T) {

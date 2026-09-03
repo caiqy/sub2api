@@ -71,6 +71,10 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		defer CleanupRequestBodyHandle(sourceHandle)
 	}
 	beginUpstreamResponseModelObservation(c)
+	ClearActualOpenAIUpstreamEndpoint(c)
+	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
+		SetActualOpenAIUpstreamEndpoint(c, "/v1/chat/completions")
+	}
 	setCodexToolNameReverse(c, nil)
 	if _, err := s.prepareCodexAccountIdentitySource(ctx, c, account); err != nil {
 		return nil, err
@@ -312,6 +316,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		return nil, policyErr
 	}
 	responsesBody = updatedBody
+	serviceTier := extractOpenAIServiceTierFromBody(responsesBody)
 	if account.Type == AccountTypeOAuth {
 		fpIDs := resolveOpenAIAttemptFingerprintIDs(c, account, responsesBody)
 		if c != nil {
@@ -361,8 +366,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	}
 	SetUsageUpstreamRequest(c, upstreamReq, openAIUpstreamRequestBodyPreview(upstreamReq, []byte(outboundHandle.PreviewString())))
 	SetOpsUpstreamAttempted(c, true)
-	body = nil //nolint:ineffassign // The source handle owns the request across upstream waits.
-	responsesBody = nil
+	body = nil        //nolint:ineffassign // The source handle owns the request across upstream waits.
 	updatedBody = nil //nolint:ineffassign // The outbound handle owns the policy-adjusted request.
 	chatReq = apicompat.ChatCompletionsRequest{}
 	responsesReq = nil
@@ -433,7 +437,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	// fast policy filter/force 之后）里的 tier，policy filter 删掉字段后不再
 	// 按原请求 Fast 计费。
 	if handleErr == nil && result != nil {
-		result.ServiceTier = resolvedOpenAIUpstreamServiceTier(c, extractOpenAIServiceTierFromBody(responsesBody))
+		result.ServiceTier = resolvedOpenAIUpstreamServiceTier(c, serviceTier)
 		result.ReasoningEffort = responseReasoningEffort
 	}
 
@@ -554,7 +558,7 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 		}
 		message := openAICompatFailedResponseMessage(finalResponse)
 		if openAIStreamFailedEventShouldFailover(payload, message) {
-			return nil, s.newOpenAIStreamFailoverError(c, account, false, requestID, payload, message, resp.Header)
+			return nil, s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, payload, message, upstreamModel, resp.Header)
 		}
 		message = s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", payload, message)
 		// response.failed 到达在 HTTP 200 SSE 流上，无真实 HTTP 错误码；统一走语义
@@ -809,7 +813,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				shouldFailover = openAIStreamErrorEventShouldFailover(payloadBytes, message)
 			}
 			if !clientOutputStarted && shouldFailover {
-				streamFailoverErr = s.newOpenAIStreamFailoverError(c, account, false, requestID, payloadBytes, message, resp.Header)
+				streamFailoverErr = s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, payloadBytes, message, upstreamModel, resp.Header)
 				return true
 			}
 			message = s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", payloadBytes, message)

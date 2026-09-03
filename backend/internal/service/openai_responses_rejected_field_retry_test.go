@@ -11,13 +11,47 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+type requestBodySourceSequenceRecorder struct {
+	bodies      [][]byte
+	bodySources []string
+	responses   []*http.Response
+}
+
+func (u *requestBodySourceSequenceRecorder) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	source := ""
+	if req != nil && req.Body != nil {
+		if spool, ok := req.Body.(requestBodySpoolReadCloser); ok {
+			if file, ok := spool.ReadCloser.(*os.File); ok {
+				source = file.Name()
+			}
+		}
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		u.bodies = append(u.bodies, body)
+		_ = req.Body.Close()
+		req.Body = io.NopCloser(bytes.NewReader(body))
+	} else {
+		u.bodies = append(u.bodies, nil)
+	}
+	u.bodySources = append(u.bodySources, source)
+	return u.responses[len(u.bodies)-1], nil
+}
+
+func (u *requestBodySourceSequenceRecorder) DoWithTLS(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, proxyURL, accountID, accountConcurrency)
+}
 
 func TestOpenAIResponsesRejectedFieldRetryStateRejectsDuplicateBodyAndCap(t *testing.T) {
 	initialBody := []byte(`{"model":"gpt-5.5"}`)
@@ -539,6 +573,34 @@ func TestOpenAIGatewayService_APIKeyStripsAllIndexedNamespacesBeforeFirstForward
 	require.False(t, gjson.GetBytes(upstream.bodies[0], "input.1.namespace").Exists())
 }
 
+func TestOpenAIGatewayServiceProactivelyStripsCrossProviderReasoningContent(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.5","stream":false,"store":true,"input":[` +
+		`{"type":"message","role":"user","content":"one"},` +
+		`{"type":"message","role":"assistant","content":"two"},` +
+		`{"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"},` +
+		`{"type":"function_call_output","call_id":"call_1","output":"ok"},` +
+		`{"type":"message","role":"user","content":"five"},` +
+		`{"type":"reasoning","summary":[{"type":"summary_text","text":"keep"}],"content":[{"type":"reasoning_text","text":"remove"}]}` +
+		`]}`)
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{
+		newOpenAIRejectedFieldTestResponse(http.StatusOK, `{"output":[],"usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`),
+	}}
+
+	result, err := newOpenAIRejectedFieldTestService(upstream).Forward(
+		context.Background(),
+		newOpenAIRejectedFieldTestContext(body),
+		newOpenAIRejectedFieldTestAccount(),
+		body,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, upstream.bodies, 1, "reasoning content should be normalized before the first upstream request")
+	require.Equal(t, "reasoning", gjson.GetBytes(upstream.bodies[0], "input.5.type").String())
+	require.False(t, gjson.GetBytes(upstream.bodies[0], "input.5.content").Exists())
+	require.Equal(t, "keep", gjson.GetBytes(upstream.bodies[0], "input.5.summary.0.text").String())
+}
+
 func TestOpenAIGatewayService_OpenAIHTTPStripsInputNamespacesBeforeFirstForward(t *testing.T) {
 	accounts := []struct {
 		name    string
@@ -602,6 +664,41 @@ func TestOpenAIGatewayService_RetriesExplicitMaxOutputTokensRejection(t *testing
 	require.Equal(t, int64(4096), gjson.GetBytes(upstream.bodies[0], "max_output_tokens").Int())
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "max_output_tokens").Exists())
 	require.Equal(t, "keep", gjson.GetBytes(upstream.bodies[1], "input.0.content.max_output_tokens").String())
+}
+
+func TestOpenAIGatewayService_RejectedFieldRetryCleansReplacementSpool(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.5","stream":false,"instructions":"test","max_output_tokens":4096,"input":"` + strings.Repeat("x", (1<<20)+1) + `"}`)
+	upstream := &requestBodySourceSequenceRecorder{responses: []*http.Response{
+		newOpenAIRejectedFieldTestResponse(http.StatusBadRequest, `{"error":{"code":"unsupported_parameter","message":"Unsupported parameter: max_output_tokens","param":"max_output_tokens","type":"invalid_request_error"}}`),
+		newOpenAIRejectedFieldTestResponse(http.StatusOK, `{"output":[],"usage":{"input_tokens":1,"output_tokens":1,"input_tokens_details":{"cached_tokens":0}}}`),
+	}}
+	c := newOpenAIRejectedFieldTestContext(body)
+
+	result, err := newOpenAIRejectedFieldTestService(upstream).forwardOpenAIPassthrough(
+		context.Background(),
+		c,
+		newOpenAIRejectedFieldTestAccount(),
+		body,
+		body,
+		"gpt-5.5",
+		false,
+		nil,
+		false,
+		time.Now(),
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, upstream.bodies, 2)
+	require.Equal(t, int64(4096), gjson.GetBytes(upstream.bodies[0], "max_output_tokens").Int())
+	require.False(t, gjson.GetBytes(upstream.bodies[1], "max_output_tokens").Exists())
+	require.Len(t, upstream.bodySources, 2)
+	require.NotEmpty(t, upstream.bodySources[0])
+	require.NotEmpty(t, upstream.bodySources[1])
+	require.NotEqual(t, upstream.bodySources[0], upstream.bodySources[1])
+	t.Cleanup(func() { _ = os.Remove(upstream.bodySources[1]) })
+	_, err = os.Stat(upstream.bodySources[1])
+	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
 func TestOpenAIGatewayService_RejectedFieldRetryReturnsSpoolError(t *testing.T) {
