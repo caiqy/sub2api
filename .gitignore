@@ -174,10 +174,10 @@ knowledge-base/
 .agents/
 .playwright-mcp/
 opencode.json
+# 本地闭源插件开发目录及构建产物不进入 Sub2API 仓库
+/plugins/
 # >>> Comet managed project state >>>
 !/.comet/
 /.comet/*
 !/.comet/config.yaml
 # <<< Comet managed project state <<<
-# 本地闭源插件开发目录及构建产物不进入 Sub2API 仓库
-/plugins/
