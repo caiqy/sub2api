@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -124,6 +125,44 @@ func TestPassthroughLifecycle_FirstWriteFailureCallsAfterTurnOnce(t *testing.T) 
 		t.Fatal("passthrough write failure did not return")
 	}
 	require.Equal(t, 1, called)
+}
+
+func TestPassthroughLifecycle_CleanUpstreamCloseBeforeOutputReturnsFailoverError(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{name: "eof", err: io.EOF},
+		{name: "normal_close", err: coderws.CloseError{Code: coderws.StatusNormalClosure}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := newStagedPassthroughConn()
+			server, serverErr := startPassthroughLifecycleServer(
+				t,
+				context.Background(),
+				newPassthroughLifecycleService(passthroughLifecycleConfig(), upstream),
+				passthroughLifecycleAccount(),
+			)
+			defer server.Close()
+			client := dialPassthroughLifecycleClient(t, server)
+			defer func() { _ = client.CloseNow() }()
+			readCtx, cancelRead := context.WithCancel(context.Background())
+			defer cancelRead()
+			go func() { _, _, _ = client.Read(readCtx) }()
+
+			require.Equal(t, "response.create", gjson.GetBytes(requirePassthroughUpstreamWrite(t, upstream, time.Second), "type").String())
+			upstream.Fail(tc.err)
+
+			select {
+			case err := <-serverErr:
+				var failoverErr *UpstreamFailoverError
+				require.ErrorAs(t, err, &failoverErr)
+				require.True(t, failoverErr.ShouldRetryNextAccount())
+			case <-time.After(6 * time.Second):
+				t.Fatal("clean upstream close did not return from passthrough")
+			}
+		})
+	}
 }
 
 func TestPassthroughLifecycle_ClientDisconnectDrainsSecondTurnCompletionOnce(t *testing.T) {
@@ -1281,4 +1320,26 @@ func TestPassthroughLifecycle_SecondTurnTimeoutIsNotFailoverSafe(t *testing.T) {
 	case <-time.After(2500 * time.Millisecond):
 		t.Fatal("second turn first semantic output was left unbounded")
 	}
+}
+
+func TestOpenAIWSSessionModelEchoQueuePreservesUpdateOrder(t *testing.T) {
+	var queue openAIWSSessionModelEchoQueue
+	require.True(t, queue.push(""))
+	require.True(t, queue.push("model-a"))
+	require.True(t, queue.push("model-b"))
+	model, queued := queue.pop()
+	require.True(t, queued)
+	require.Empty(t, model)
+	model, queued = queue.pop()
+	require.True(t, queued)
+	require.Equal(t, "model-a", model)
+	model, queued = queue.pop()
+	require.True(t, queued)
+	require.Equal(t, "model-b", model)
+	_, queued = queue.pop()
+	require.False(t, queued)
+	for i := 0; i < openAIWSSessionModelEchoQueueLimit; i++ {
+		require.True(t, queue.push("model"))
+	}
+	require.False(t, queue.push("over-limit"))
 }

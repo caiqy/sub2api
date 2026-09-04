@@ -56,6 +56,9 @@ var openAIWSLogValueReplacer = strings.NewReplacer(
 
 var openAIWSIngressPreflightPingIdle = 20 * time.Second
 
+// ErrOpenAIWSSessionUpdateBacklog identifies a client-local session update flood.
+var ErrOpenAIWSSessionUpdateBacklog = errors.New("too many unacknowledged websocket session updates")
+
 // openAIWSFallbackError 表示可安全回退到 HTTP 的 WS 错误（尚未写下游）。
 type openAIWSFallbackError struct {
 	Reason string
@@ -255,6 +258,9 @@ type OpenAIWSIngressHooks struct {
 	InitialTurnStartedAt time.Time
 	// MaxReasoningEffort limits explicit reasoning effort values for this WS session.
 	MaxReasoningEffort string
+	// MaxReasoningEffortOverLimit is the access control when an explicit effort
+	// exceeds the ceiling: downgrade (default) or deny.
+	MaxReasoningEffortOverLimit string
 	// ReasoningEffortMappings rewrites explicit effort values for this WS session.
 	ReasoningEffortMappings []ReasoningEffortMapping
 	TurnStarted             func(turn int, startedAt time.Time)
@@ -278,9 +284,19 @@ type OpenAIWSIngressHooks struct {
 	// MapRequestModel resolves the current turn's client model to the model
 	// that must be written into the upstream response.create frame.
 	MapRequestModel func(turn int, originalModel string) (string, error)
+	// MapSessionModel resolves session.update.session.model before it is
+	// forwarded upstream. It is used when session-level routing differs from
+	// the client-facing model namespace.
+	MapSessionModel func(turn int, payload []byte, originalModel string) (OpenAIWSSessionModelMapping, error)
+	// CommitSessionModel freezes the pending session route for a model-less
+	// response.create after turn admission succeeds.
+	CommitSessionModel func(turn int, originalModel string) (OpenAIWSSessionModelMapping, error)
 	// ChannelModelIsFinal prevents passthrough from applying account mapping a
 	// second time after MapRequestModel has applied a non-composite channel map.
 	ChannelModelIsFinal bool
+	// ChannelModelMapped reports whether the specified turn actually matched a
+	// channel mapping; account mapping still applies when it did not.
+	ChannelModelMapped func(turn int) bool
 	// AfterTurn runs once after a delivered terminal completion, before next-turn
 	// admission opens, or once with turnErr when the turn ends before delivery.
 	AfterTurn func(turn int, result *OpenAIForwardResult, turnErr error)
@@ -289,6 +305,11 @@ type OpenAIWSIngressHooks struct {
 type OpenAIWSRequestRewrite struct {
 	Payload       []byte
 	OriginalModel string
+}
+
+type OpenAIWSSessionModelMapping struct {
+	Model         string
+	ChannelMapped bool
 }
 
 func applyOpenAIWSRequestRewrite(hooks *OpenAIWSIngressHooks, turn int, payload []byte, originalModel string) ([]byte, string, error) {

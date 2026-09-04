@@ -64,7 +64,10 @@ func newOpenAIWSUnsupportedModelSwitchError(model string) error {
 }
 
 func shouldReportOpenAIWSProxyAccountFailure(err error) bool {
-	return err != nil && !errors.Is(err, errOpenAIWSUnsupportedModelSwitch) && !service.IsOpenAIWSSessionPreemptedError(err)
+	return err != nil &&
+		!errors.Is(err, errOpenAIWSUnsupportedModelSwitch) &&
+		!errors.Is(err, service.ErrOpenAIWSSessionUpdateBacklog) &&
+		!service.IsOpenAIWSSessionPreemptedError(err)
 }
 
 // openAIWSIngressEndedByClient reports whether a finished ingress WebSocket turn
@@ -555,8 +558,17 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Model is not supported by this OpenAI-compatible endpoint for composite groups")
 		return
 	}
-	if cappedBody, changed := applyOpenAIReasoningEffortPolicyForRequest(c, apiKey, body); changed {
+	if cappedBody, changed, err := applyOpenAIReasoningEffortPolicyForRequest(c, apiKey, body); err != nil {
+		respondOpenAIReasoningEffortPolicyError(c, err, h.errorResponse)
+		return
+	} else if changed {
 		body = cappedBody
+	}
+	if normalizedBody, changed := normalizeCodexAutomationBootstrap(body); changed {
+		body = normalizedBody
+		reqLog.Info("openai.codex_automation_bootstrap_normalized",
+			zap.String("normalization", "call_output_to_user_message"),
+		)
 	}
 	if normalizedBody, changed := normalizeCodexDelegationBootstrap(body); changed {
 		body = normalizedBody
@@ -1873,6 +1885,14 @@ func (h *OpenAIGatewayHandler) validateFunctionCallOutputRequest(c *gin.Context,
 }
 
 func normalizeCodexDelegationBootstrap(body []byte) ([]byte, bool) {
+	return normalizeCodexCallOutputBootstrap(body, isCodexDelegationCandidate)
+}
+
+func normalizeCodexAutomationBootstrap(body []byte) ([]byte, bool) {
+	return normalizeCodexCallOutputBootstrap(body, isCodexAutomationCandidate)
+}
+
+func normalizeCodexCallOutputBootstrap(body []byte, isCandidate func(map[string]any) bool) ([]byte, bool) {
 	if !hasUniqueJSONMembers(body) {
 		return body, false
 	}
@@ -1911,7 +1931,7 @@ func normalizeCodexDelegationBootstrap(body []byte) ([]byte, bool) {
 			if exists && (!isString || strings.TrimSpace(callID) != "") {
 				return body, false
 			}
-			if !isCodexDelegationCandidate(item) {
+			if !isCandidate(item) {
 				return body, false
 			}
 		}
@@ -1920,11 +1940,11 @@ func normalizeCodexDelegationBootstrap(body []byte) ([]byte, bool) {
 	changed := false
 	for i, raw := range input {
 		item, ok := raw.(map[string]any)
-		if !ok || !isCodexDelegationCandidate(item) {
+		if !ok || !isCandidate(item) {
 			continue
 		}
 		output, ok := item["output"].(string)
-		if !ok || !validCodexDelegationEnvelope(output) {
+		if !ok {
 			continue
 		}
 		input[i] = map[string]any{
@@ -2014,6 +2034,16 @@ func isCodexDelegationCandidate(item map[string]any) bool {
 	return ok && validCodexDelegationEnvelope(output)
 }
 
+func isCodexAutomationCandidate(item map[string]any) bool {
+	if stringField(item, "type") != "function_call_output" ||
+		stringField(item, "namespace") != "codex_app" ||
+		stringField(item, "name") != "automation_update" {
+		return false
+	}
+	output, ok := item["output"].(string)
+	return ok && validCodexAutomationBootstrap(output)
+}
+
 func stringField(item map[string]any, key string) string {
 	value, _ := item[key].(string)
 	return value
@@ -2022,6 +2052,71 @@ func stringField(item map[string]any, key string) string {
 func isCodexDelegationTool(namespace, name string) bool {
 	return (namespace == "codex_app" || namespace == "codex_tui") &&
 		(name == "create_thread" || name == "send_message_to_thread")
+}
+
+func validCodexAutomationBootstrap(value string) bool {
+	normalized := strings.ReplaceAll(value, "\r\n", "\n")
+	if strings.ContainsRune(normalized, '\r') {
+		return false
+	}
+	lines := strings.Split(normalized, "\n")
+	if len(lines) < 6 {
+		return false
+	}
+	if _, ok := codexAutomationHeaderValue(lines[0], "Automation: "); !ok {
+		return false
+	}
+	automationID, ok := codexAutomationHeaderValue(lines[1], "Automation ID: ")
+	if !ok || !validCodexAutomationID(automationID) {
+		return false
+	}
+	expectedMemory := "Automation memory: $CODEX_HOME/automations/" + automationID + "/memory.md"
+	if lines[2] != expectedMemory {
+		return false
+	}
+	lastRun, ok := codexAutomationHeaderValue(lines[3], "Last run: ")
+	if !ok || !validCodexAutomationLastRun(lastRun) || lines[4] != "" {
+		return false
+	}
+	return strings.TrimSpace(strings.Join(lines[5:], "\n")) != ""
+}
+
+func codexAutomationHeaderValue(line, prefix string) (string, bool) {
+	if !strings.HasPrefix(line, prefix) {
+		return "", false
+	}
+	value := strings.TrimPrefix(line, prefix)
+	return value, value != "" && strings.TrimSpace(value) == value
+}
+
+func validCodexAutomationID(value string) bool {
+	if len(value) == 0 || len(value) > 128 || value == "." || value == ".." {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func validCodexAutomationLastRun(value string) bool {
+	if value == "never" {
+		return true
+	}
+	separator := strings.LastIndex(value, " (")
+	if separator <= 0 || !strings.HasSuffix(value, ")") {
+		return false
+	}
+	runAt, err := time.Parse(time.RFC3339Nano, value[:separator])
+	if err != nil {
+		return false
+	}
+	epochMillis, err := strconv.ParseInt(value[separator+2:len(value)-1], 10, 64)
+	return err == nil && runAt.UnixMilli() == epochMillis
 }
 
 func validCodexDelegationEnvelope(value string) bool {
@@ -2491,6 +2586,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "model is required in first response.create payload")
 		return
 	}
+	initialRequestModel := reqModel
 	replaceRequestedReasoningEffortForTurn(c, service.CanonicalRequestedReasoningEffort(firstMessage, reqModel))
 	ctx = c.Request.Context()
 	if apiKey.Group != nil && apiKey.Group.Platform == service.PlatformComposite {
@@ -2575,6 +2671,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	wsForwardModel := reqModel
 	if channelMappingWS.Mapped && strings.TrimSpace(channelMappingWS.MappedModel) != "" {
 		wsForwardModel = strings.TrimSpace(channelMappingWS.MappedModel)
+		if apiKey.Group != nil && apiKey.Group.Platform == service.PlatformComposite {
+			firstMessage = service.ReplaceModelInBody(firstMessage, wsForwardModel)
+			setCyberTurnBody(1, firstMessage)
+		}
 	}
 	if channelMappingWS.Mapped {
 		setOpsRequestContext(c, channelMappingWS.MappedModel, true)
@@ -2869,7 +2969,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			zap.Int("candidate_count", scheduleDecision.CandidateCount),
 		)
 
-		maxReasoningEffort, reasoningEffortMappings, _ := openAIReasoningEffortPolicyForRequest(c, apiKey)
+		maxReasoningEffort, reasoningEffortMappings, maxReasoningEffortOverLimit, _ := openAIReasoningEffortPolicyForRequest(c, apiKey)
 		var requestPayloadHash string
 		var turnStartsMu sync.Mutex
 		turnStarts := make(map[int]time.Time, 4)
@@ -2892,16 +2992,82 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		// turn-tagged slot preserves the exact mapping used for the in-flight request.
 		var turnChannelMapping atomic.Pointer[openAIWSTurnChannelMappingSnapshot]
 		turnChannelMapping.Store(&openAIWSTurnChannelMappingSnapshot{turn: 1, mapping: channelMappingWS})
+		type frozenOpenAIWSSessionModel struct {
+			originalModel string
+			resolved      service.OpenAIWSSessionModelMapping
+			mapping       service.ChannelMappingResult
+			decision      *service.CompositeRouteDecision
+		}
+		// The latest session.update snapshot intentionally survives multiple
+		// model-less turns until another session.update replaces it.
+		var frozenSessionModel atomic.Pointer[frozenOpenAIWSSessionModel]
+		commitSessionModel := func(turn int, frozen *frozenOpenAIWSSessionModel) service.OpenAIWSSessionModelMapping {
+			if frozen == nil {
+				return service.OpenAIWSSessionModelMapping{}
+			}
+			if frozen.decision != nil {
+				ctx = service.WithCompositeRouteDecision(ctx, *frozen.decision)
+				c.Request = c.Request.WithContext(ctx)
+			}
+			channelMappingWS = frozen.mapping
+			turnChannelMapping.Store(&openAIWSTurnChannelMappingSnapshot{turn: turn, mapping: frozen.mapping})
+			setChannelUsageFields(c, clientRequestedUsageFields(c, frozen.mapping, frozen.originalModel, ""))
+			setOpsRequestContext(c, frozen.resolved.Model, true)
+			return frozen.resolved
+		}
+		resolveCompositeWSModel := func(turn int, publicModel string, commit bool) (service.OpenAIWSSessionModelMapping, error) {
+			resolver, ok := service.CompositeRouteResolverFromContext(ctx)
+			if !ok {
+				resolver = service.NewCompositeRouteResolver(nil)
+			}
+			decision, err := resolver.Resolve(ctx, apiKey.Group.ID, publicModel, service.CompositeRouteEndpointResponses)
+			if err != nil {
+				return service.OpenAIWSSessionModelMapping{}, service.NewOpenAIWSClientCloseError(coderws.StatusInternalError, "failed to resolve composite model route", err)
+			}
+			if !decision.Matched || (decision.TargetPlatform != service.PlatformOpenAI && decision.TargetPlatform != service.PlatformGrok) {
+				return service.OpenAIWSSessionModelMapping{}, service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "Responses WebSocket API only supports OpenAI-compatible models for composite groups", nil)
+			}
+			if decision.TargetPlatform != account.Platform {
+				return service.OpenAIWSSessionModelMapping{}, service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "websocket model targets a different provider", nil)
+			}
+			routeModel := strings.TrimSpace(decision.UpstreamModel)
+			mapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(ctx, apiKey.GroupID, routeModel)
+			if mapping.Mapped {
+				routeModel = mapping.MappedModel
+			}
+			if !account.IsModelSupported(routeModel) {
+				return service.OpenAIWSSessionModelMapping{}, newOpenAIWSUnsupportedModelSwitchError(routeModel)
+			}
+			resolved := service.OpenAIWSSessionModelMapping{Model: routeModel, ChannelMapped: mapping.Mapped}
+			decisionCopy := decision
+			frozen := &frozenOpenAIWSSessionModel{
+				originalModel: publicModel,
+				resolved:      resolved,
+				mapping:       mapping,
+				decision:      &decisionCopy,
+			}
+			if commit {
+				commitSessionModel(turn, frozen)
+			} else {
+				frozenSessionModel.Store(frozen)
+			}
+			return resolved, nil
+		}
 		// turn 级定价：BeforeTurn 重新冻结 pricingAt 并按最新门复核当前账号；
 		// passthrough 没有 BeforeTurn 时，AfterTurn 回退到 TurnStarted 的所属 turn 时刻。
 		var turnPricing openAIWSTurnPricing
 		hooks := &service.OpenAIWSIngressHooks{
-			ClientLifecycleContext:  clientLifecycleCtx,
-			InitialRequestModel:     reqModel,
-			InitialTurnStartedAt:    firstTurnStartedAt,
-			MaxReasoningEffort:      maxReasoningEffort,
-			ReasoningEffortMappings: reasoningEffortMappings,
-			ChannelModelIsFinal:     apiKey.Group == nil || apiKey.Group.Platform != service.PlatformComposite,
+			ClientLifecycleContext:      clientLifecycleCtx,
+			InitialRequestModel:         initialRequestModel,
+			InitialTurnStartedAt:        firstTurnStartedAt,
+			MaxReasoningEffort:          maxReasoningEffort,
+			MaxReasoningEffortOverLimit: maxReasoningEffortOverLimit,
+			ReasoningEffortMappings:     reasoningEffortMappings,
+			ChannelModelIsFinal:         apiKey.Group == nil || apiKey.Group.Platform != service.PlatformComposite,
+			ChannelModelMapped: func(turn int) bool {
+				snapshot := turnChannelMapping.Load()
+				return snapshot != nil && snapshot.turn == turn && snapshot.mapping.Mapped
+			},
 			RewriteRequest: func(turn int, payload []byte, originalModel string) (service.OpenAIWSRequestRewrite, error) {
 				resetOpenAIWSFailedUsageTurn(c)
 				if turn < 2 || apiKey.Group == nil || apiKey.Group.Platform != service.PlatformComposite {
@@ -2911,34 +3077,37 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if publicModel == "" {
 					return service.OpenAIWSRequestRewrite{Payload: payload, OriginalModel: originalModel}, nil
 				}
-				resolver, ok := service.CompositeRouteResolverFromContext(ctx)
-				if !ok {
-					resolver = service.NewCompositeRouteResolver(nil)
-				}
-				decision, err := resolver.Resolve(ctx, apiKey.Group.ID, publicModel, service.CompositeRouteEndpointResponses)
+				resolved, err := resolveCompositeWSModel(turn, publicModel, true)
 				if err != nil {
-					return service.OpenAIWSRequestRewrite{}, service.NewOpenAIWSClientCloseError(coderws.StatusInternalError, "failed to resolve composite model route", err)
+					return service.OpenAIWSRequestRewrite{}, err
 				}
-				if !decision.Matched || (decision.TargetPlatform != service.PlatformOpenAI && decision.TargetPlatform != service.PlatformGrok) {
-					return service.OpenAIWSRequestRewrite{}, service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "Responses WebSocket API only supports OpenAI-compatible models for composite groups", nil)
-				}
-				if decision.TargetPlatform != account.Platform {
-					return service.OpenAIWSRequestRewrite{}, service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "response.create model targets a different provider", nil)
-				}
-				ctx = service.WithCompositeRouteDecision(ctx, decision)
-				c.Request = c.Request.WithContext(ctx)
-				routeModel := strings.TrimSpace(decision.UpstreamModel)
-				mapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(ctx, apiKey.GroupID, routeModel)
-				if mapping.Mapped {
-					routeModel = mapping.MappedModel
-				}
-				channelMappingWS = mapping
-				setChannelUsageFields(c, clientRequestedUsageFields(c, mapping, routeModel, ""))
-				setOpsRequestContext(c, routeModel, true)
+				routeModel := resolved.Model
 				return service.OpenAIWSRequestRewrite{
 					Payload:       h.gatewayService.ReplaceModelInBody(payload, routeModel),
 					OriginalModel: routeModel,
 				}, nil
+			},
+			MapSessionModel: func(turn int, payload []byte, originalModel string) (service.OpenAIWSSessionModelMapping, error) {
+				if !hasUniqueJSONMembers(payload) {
+					return service.OpenAIWSSessionModelMapping{}, service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "duplicate JSON members are not allowed", nil)
+				}
+				if strings.TrimSpace(originalModel) == "" {
+					return service.OpenAIWSSessionModelMapping{}, nil
+				}
+				if apiKey.Group == nil || apiKey.Group.Platform != service.PlatformComposite {
+					mapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(ctx, apiKey.GroupID, originalModel)
+					resolved := service.OpenAIWSSessionModelMapping{Model: mapping.MappedModel, ChannelMapped: mapping.Mapped}
+					frozenSessionModel.Store(&frozenOpenAIWSSessionModel{originalModel: originalModel, resolved: resolved, mapping: mapping})
+					return resolved, nil
+				}
+				return resolveCompositeWSModel(turn, originalModel, false)
+			},
+			CommitSessionModel: func(turn int, originalModel string) (service.OpenAIWSSessionModelMapping, error) {
+				frozen := frozenSessionModel.Load()
+				if frozen == nil || frozen.originalModel != strings.TrimSpace(originalModel) {
+					return service.OpenAIWSSessionModelMapping{}, service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "session model route is unavailable; resend session.update", nil)
+				}
+				return commitSessionModel(turn, frozen), nil
 			},
 			TurnStarted: recordTurnStart,
 			BeforeRequest: func(turn int, payload []byte, originalModel string) error {

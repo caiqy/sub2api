@@ -403,15 +403,17 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 		}
 		if resp.StatusCode >= 400 {
-			errorBody := s.readUpstreamErrorBody(resp)
+			// Probe once for recovery/retry classification, then pass the same body
+			// through error handling so a spooled request is not consumed twice.
+			probeBody := s.readUpstreamErrorBody(resp)
 			_ = resp.Body.Close()
-			resp.Body = io.NopCloser(bytes.NewReader(errorBody))
+			resp.Body = io.NopCloser(bytes.NewReader(probeBody))
 			errorRequestBody, readErr := currentHandle.ReadAll()
 			if readErr != nil {
 				return nil, fmt.Errorf("read OpenAI passthrough error body: %w", readErr)
 			}
-			upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(errorBody)))
-			if retryBody, reason, changed, retryErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, errorRequestBody, errorBody); retryErr != nil {
+			upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(probeBody)))
+			if retryBody, reason, changed, retryErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, errorRequestBody, probeBody); retryErr != nil {
 				return nil, fmt.Errorf("normalize passthrough rejected Responses field retry body: %w", retryErr)
 			} else if changed && rejectedFieldRetryState.Allow(retryBody) {
 				retryHandle, _, handleErr := openAIRequestBodyHandleForBytes(currentHandle, retryBody)
@@ -425,7 +427,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Retrying passthrough request after %s (account: %s)", reason, account.Name)
 				continue
 			}
-			if !agentTaskRecoveryTried && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, errorBody) {
+			if !agentTaskRecoveryTried && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, probeBody) {
 				agentTaskRecoveryTried = true
 				if recoveryErr := s.recoverAgentIdentityTask(ctx, account, account.GetCredential("task_id")); recoveryErr != nil {
 					return nil, fmt.Errorf("agent identity task recovery failed: %w", recoveryErr)
@@ -433,9 +435,10 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 				continue
 			}
 			if retryBody, fallbackModel, retry := s.prepareOpenAICompactFallbackRetry(
-				c, account, requestedModel, errorRequestBody, resp.StatusCode, upstreamMsg, errorBody, compactModelFallbackRetried,
+				c, account, requestedModel, errorRequestBody, resp.StatusCode, upstreamMsg, probeBody, compactModelFallbackRetried,
 			); retry {
-				s.appendOpenAICompactFallbackRetryOps(c, account, resp, errorBody, upstreamMsg, true)
+				s.appendOpenAICompactFallbackRetryOps(c, account, resp, probeBody, upstreamMsg, true)
+				fromModel := strings.TrimSpace(gjson.GetBytes(errorRequestBody, "model").String())
 				retryHandle, _, handleErr := openAIRequestBodyHandleForBytes(currentHandle, retryBody)
 				if handleErr != nil {
 					return nil, handleErr
@@ -447,18 +450,23 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 				upstreamPassthroughModel = fallbackModel
 				compactModelFallbackRetried = true
 				SetOpsUpstreamModel(c, fallbackModel)
+				logger.LegacyPrintf(
+					"service.openai_gateway",
+					"[OpenAI passthrough] Retrying explicit compact request once with fallback model (account: %s, from: %s, to: %s, upstream_code: %s)",
+					account.Name, fromModel, fallbackModel, extractUpstreamErrorCode(probeBody),
+				)
 				continue
 			}
-			shouldFailover := shouldFailoverOpenAIPassthroughResponse(account, resp.StatusCode, errorBody)
-			if isOpenAIUpstreamCapacityShedEvent(errorBody) {
+			shouldFailover := shouldFailoverOpenAIPassthroughResponse(account, resp.StatusCode, probeBody)
+			if isOpenAIUpstreamCapacityShedEvent(probeBody) {
 				shouldFailover = true
 			}
 			if shouldFailover {
-				handleErr := s.handleFailoverErrorResponsePassthrough(ctx, resp, c, account, errorRequestBody)
+				handleErr := s.handleFailoverErrorResponsePassthrough(ctx, resp, c, account, errorRequestBody, probeBody)
 				_ = resp.Body.Close()
 				return nil, handleErr
 			}
-			handleErr := s.handleErrorResponsePassthrough(ctx, resp, c, account, errorRequestBody)
+			handleErr := s.handleErrorResponsePassthrough(ctx, resp, c, account, errorRequestBody, probeBody)
 			_ = resp.Body.Close()
 			return nil, handleErr
 		}
@@ -467,7 +475,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
 				maxLineSize = s.cfg.Gateway.MaxLineSize
 			}
-			resp.Body = newResponsesClientToolStreamBody(resp.Body, mapping, maxLineSize)
+			resp.Body = newGrokResponsesClientToolStreamBody(resp.Body, mapping, maxLineSize)
 		}
 
 		// x-codex-turn-state 溯源：下游回传由 writeOpenAIPassthroughResponseHeaders
@@ -509,9 +517,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 					_ = resp.Body.Close()
 					compactResp, compactBody := openAICompactFallbackErrorResponse(resp, signal)
 					if shouldFailoverOpenAIPassthroughResponse(account, compactResp.StatusCode, compactBody) {
-						return nil, s.handleFailoverErrorResponsePassthrough(ctx, compactResp, c, account, lastAttemptBody)
+						return nil, s.handleFailoverErrorResponsePassthrough(ctx, compactResp, c, account, lastAttemptBody, compactBody)
 					}
-					return nil, s.handleErrorResponsePassthrough(ctx, compactResp, c, account, lastAttemptBody)
+					return nil, s.handleErrorResponsePassthrough(ctx, compactResp, c, account, lastAttemptBody, compactBody)
 				}
 				return nil, err
 			}
@@ -541,9 +549,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 					_ = resp.Body.Close()
 					compactResp, compactBody := openAICompactFallbackErrorResponse(resp, signal)
 					if shouldFailoverOpenAIPassthroughResponse(account, compactResp.StatusCode, compactBody) {
-						return nil, s.handleFailoverErrorResponsePassthrough(ctx, compactResp, c, account, lastAttemptBody)
+						return nil, s.handleFailoverErrorResponsePassthrough(ctx, compactResp, c, account, lastAttemptBody, compactBody)
 					}
-					return nil, s.handleErrorResponsePassthrough(ctx, compactResp, c, account, lastAttemptBody)
+					return nil, s.handleErrorResponsePassthrough(ctx, compactResp, c, account, lastAttemptBody, compactBody)
 				}
 				return nil, err
 			}
@@ -658,7 +666,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 		}
 	case AccountTypeAPIKey:
 		baseURL := account.GetOpenAIBaseURL()
-		if account.Platform == PlatformDeepseek && account.IsAdaptiveAPIProtocol() {
+		if account.UsesNativeCNResponses() && account.IsAdaptiveAPIProtocol() {
 			baseURL = account.GetCNProtocolBaseURL(APIProtocolResponses)
 		}
 		if baseURL != "" {
@@ -687,7 +695,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 		return nil, err
 	}
 	bodyHandleMatchesInput := bodyHandle != nil && (bodyHandleKnown || openAIRequestBodyHandleMatchesBytes(bodyHandle, inputBody))
-	// DeepSeek 原生 Responses 端点为无状态实现（见 normalizeDeepSeekResponsesRequestBody）。
+	// DeepSeek / Kimi 原生 Responses 端点为无状态实现（见 normalizeDeepSeekResponsesRequestBody）。
 	body = normalizeDeepSeekResponsesRequestBody(account, body)
 	if account.Type == AccountTypeOAuth && account.GetCodexFingerprintMode() == codexFingerprintOff {
 		body, err = restoreCodexFingerprintPassthroughFields(body, sourceBody)
@@ -965,14 +973,55 @@ func validOpenAIPassthroughRetryAfter(raw string, now time.Time) bool {
 	return err == nil && parsed.After(now)
 }
 
+func writeSanitizedOpenAIPassthroughError(c *gin.Context, upstreamStatus int, upstreamHeaders http.Header) {
+	downstreamStatus := upstreamStatus
+	message := "Upstream request failed"
+	switch upstreamStatus {
+	case http.StatusUnauthorized:
+		downstreamStatus = http.StatusBadGateway
+		message = "Upstream authentication failed"
+	case http.StatusForbidden:
+		downstreamStatus = http.StatusBadGateway
+		message = "Upstream access denied"
+	default:
+		if upstreamStatus >= http.StatusInternalServerError {
+			message = "Upstream service temporarily unavailable"
+		}
+	}
+	writeOpenAIPassthroughErrorEnvelope(c, downstreamStatus, upstreamHeaders, message)
+}
+
+func writeOpenAIPassthroughErrorEnvelope(c *gin.Context, downstreamStatus int, upstreamHeaders http.Header, message string) {
+	if c == nil {
+		return
+	}
+	body, _ := json.Marshal(gin.H{
+		"error": gin.H{
+			"type":    "upstream_error",
+			"message": message,
+		},
+	})
+	if writeOpenAICompactSSEBridge(c, downstreamStatus, body) {
+		return
+	}
+	writeOpenAIPassthroughErrorHeaders(c.Writer.Header(), upstreamHeaders)
+	c.Data(downstreamStatus, "application/json; charset=utf-8", body)
+}
+
 func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 	ctx context.Context,
 	resp *http.Response,
 	c *gin.Context,
 	account *Account,
 	requestBody []byte,
+	responseBodies ...[]byte,
 ) error {
-	body := s.readUpstreamErrorBody(resp)
+	body := []byte(nil)
+	if len(responseBodies) > 0 && responseBodies[0] != nil {
+		body = responseBodies[0]
+	} else {
+		body = s.readUpstreamErrorBody(resp)
+	}
 	body = s.redactAgentIdentitySensitiveBody(ctx, account, body)
 
 	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(body))
@@ -1026,9 +1075,15 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 	c *gin.Context,
 	account *Account,
 	requestBody []byte,
+	responseBodies ...[]byte,
 ) error {
 	MarkResponseCommitted(c)
-	body := s.readUpstreamErrorBody(resp)
+	body := []byte(nil)
+	if len(responseBodies) > 0 && responseBodies[0] != nil {
+		body = responseBodies[0]
+	} else {
+		body = s.readUpstreamErrorBody(resp)
+	}
 	body = s.redactAgentIdentitySensitiveBody(ctx, account, body)
 
 	// cyber_policy：透传账号本就把原始 body 回给客户端（下方 c.Data），此处仅打标记，
@@ -1062,7 +1117,8 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 	// 避免粘性路由继续复用刚被限流的账号。cyber 例外：不冷却账号。
 	if !cyberHit {
 		reqModel, _, _ := extractOpenAIRequestMetaFromBody(requestBody)
-		_ = s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body, reqModel)
+		canonicalModel := canonicalOpenAIAccountSchedulingModel(account, reqModel)
+		_ = s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body, canonicalModel)
 	}
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 		Platform:             account.Platform,
@@ -1077,32 +1133,25 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 		UpstreamResponseBody: upstreamDetail,
 	})
 
-	statusCode := resp.StatusCode
-	errMsg := "Upstream request failed"
+	if isOpenAIContextWindowError(upstreamMsg, body) && upstreamMsg != "" {
+		writeOpenAIPassthroughErrorEnvelope(c, resp.StatusCode, resp.Header, upstreamMsg)
+	} else {
+		writeSanitizedOpenAIPassthroughError(c, resp.StatusCode, resp.Header)
+	}
+	internalErrMsg := "Upstream request failed"
 	switch resp.StatusCode {
 	case http.StatusUnauthorized:
-		statusCode = http.StatusBadGateway
-		errMsg = "Upstream authentication failed"
+		internalErrMsg = "Upstream authentication failed"
 	case http.StatusForbidden:
-		statusCode = http.StatusBadGateway
-		errMsg = "Upstream access denied"
+		internalErrMsg = "Upstream access denied"
 	default:
 		if resp.StatusCode >= http.StatusInternalServerError {
-			errMsg = "Upstream service temporarily unavailable"
+			internalErrMsg = "Upstream service temporarily unavailable"
 		}
 	}
 	if isOpenAIContextWindowError(upstreamMsg, body) && upstreamMsg != "" {
-		errMsg = upstreamMsg
+		internalErrMsg = upstreamMsg
 	}
-	responseBody, _ := marshalOpenAIUpstreamJSON(gin.H{"error": gin.H{
-		"type":    "upstream_error",
-		"message": errMsg,
-	}})
-	writeOpenAIPassthroughErrorHeaders(c.Writer.Header(), resp.Header)
-	if !writeOpenAICompactSSEBridge(c, statusCode, responseBody) {
-		c.Data(statusCode, "application/json; charset=utf-8", responseBody)
-	}
-	internalErrMsg := errMsg
 	if strings.EqualFold(upstreamMsg, http.StatusText(resp.StatusCode)) {
 		internalErrMsg = strings.ToLower(upstreamMsg)
 	}

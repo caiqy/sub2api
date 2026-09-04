@@ -1448,7 +1448,8 @@ func TestOpenAIGatewayHandler_ChatCompletionsHashesBeforeChannelMapping(t *testi
 	}
 	apiKey := env.apiKey
 	requestContext := env.requestContext
-	policyBody, changed := service.ApplyOpenAIReasoningEffortPolicy(rawBody, "high", nil)
+	policyBody, changed, err := service.ApplyOpenAIReasoningEffortPolicy(rawBody, "high", nil, service.ReasoningEffortOverLimitDowngrade)
+	require.NoError(t, err)
 	require.True(t, changed)
 	wantUsageHash := service.HashUsageRequestPayload(policyBody)
 	wantCyberKey := service.CyberSessionBlockKey(apiKey.ID, requestContext, rawBody)

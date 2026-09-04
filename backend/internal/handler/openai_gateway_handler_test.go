@@ -1811,6 +1811,15 @@ func TestShouldReportOpenAIWSProxyAccountFailure(t *testing.T) {
 		require.True(t, shouldReportOpenAIWSProxyAccountFailure(err))
 	})
 
+	t.Run("local session update backlog does not penalize account", func(t *testing.T) {
+		err := service.NewOpenAIWSClientCloseError(
+			coderws.StatusPolicyViolation,
+			"too many unacknowledged session updates",
+			service.ErrOpenAIWSSessionUpdateBacklog,
+		)
+		require.False(t, shouldReportOpenAIWSProxyAccountFailure(err))
+	})
+
 	t.Run("generic proxy failure still penalizes account", func(t *testing.T) {
 		require.True(t, shouldReportOpenAIWSProxyAccountFailure(errors.New("upstream websocket read failed")))
 	})
@@ -2894,6 +2903,84 @@ func TestOpenAIResponsesWebSocket_FirstOutputTimeoutWithoutDownstreamReusesClien
 	require.NotContains(t, accountRepo.rateLimitedIDs, int64(9913), "healthy failover account must not be penalized")
 }
 
+func TestOpenAIResponsesWebSocket_PassthroughNormalCloseBeforeOutputFailsOverOnSameClient(t *testing.T) {
+	cache := &concurrencyCacheMock{
+		acquireUserSlotFn: func(context.Context, int64, int, string) (bool, error) { return true, nil },
+		acquireAccountSlotFn: func(context.Context, int64, int, string) (bool, error) {
+			return true, nil
+		},
+	}
+	secondUpstreamMessage := make(chan []byte, 1)
+	secondUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := coderws.Accept(w, r, &coderws.AcceptOptions{CompressionMode: coderws.CompressionContextTakeover})
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+
+		readCtx, cancelRead := context.WithTimeout(r.Context(), 3*time.Second)
+		_, payload, readErr := conn.Read(readCtx)
+		cancelRead()
+		if readErr != nil {
+			return
+		}
+		secondUpstreamMessage <- append([]byte(nil), payload...)
+
+		writeCtx, cancelWrite := context.WithTimeout(r.Context(), 3*time.Second)
+		writeErr := conn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.completed","response":{"id":"resp_clean_close_failover","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`))
+		cancelWrite()
+		if writeErr != nil {
+			return
+		}
+		<-r.Context().Done()
+	}))
+	defer secondUpstream.Close()
+
+	env := newOpenAIWSRegressionEnv(t, cache, openAIWSRegressionEnvOptions{
+		Passthrough:                 true,
+		UpstreamNormalCloseOnTurn:   1,
+		CaptureFirstUpstreamMessage: true,
+	})
+	defer env.Close()
+	env.apiKey.Group.Platform = service.PlatformOpenAI
+	env.apiKey.Group.Status = service.StatusActive
+	env.apiKey.Group.Hydrated = true
+
+	account2 := cloneOpenAIWSRegressionAccount(env.account)
+	account2.ID = 12
+	account2.Name = "openai-ws-clean-close-failover-account"
+	account2.Priority = 2
+	account2.Credentials = map[string]any{
+		"api_key":  "sk-test-2",
+		"base_url": secondUpstream.URL,
+	}
+	env.accountRepo.accounts = []*service.Account{env.account, account2}
+
+	clientConn := env.dial(t)
+	defer func() { _ = clientConn.CloseNow() }()
+	env.writeMessage(t, clientConn, `{"type":"response.create","model":"gpt-5.1","stream":false}`)
+
+	event := env.readMessage(t, clientConn)
+	require.Equal(t, "response.completed", gjson.GetBytes(event, "type").String())
+	require.Equal(t, "resp_clean_close_failover", gjson.GetBytes(event, "response.id").String())
+
+	select {
+	case payload := <-env.firstUpstreamMessage:
+		require.Equal(t, "response.create", gjson.GetBytes(payload, "type").String())
+	case <-time.After(5 * time.Second):
+		t.Fatal("first upstream did not receive response.create")
+	}
+	select {
+	case payload := <-secondUpstreamMessage:
+		require.Equal(t, "response.create", gjson.GetBytes(payload, "type").String())
+	case <-time.After(5 * time.Second):
+		t.Fatal("second upstream did not receive replayed response.create")
+	}
+
+	require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
+	env.waitRequestDone(t)
+}
+
 func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSUsageLogCase) openAIResponsesWSUsageLogResult {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -3747,6 +3834,7 @@ type openAIWSRegressionEnvOptions struct {
 	UpstreamCreatedBeforeError  bool
 	UpstreamErrorOnTurn         int
 	UpstreamDisconnectOnTurn    int
+	UpstreamNormalCloseOnTurn   int
 	KeepUpstreamOpenOnError     bool
 	Passthrough                 bool
 	CaptureFirstUpstreamMessage bool
@@ -3872,6 +3960,10 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 				}
 				turn++
 				if opts.UpstreamDisconnectOnTurn == turn {
+					return
+				}
+				if opts.UpstreamNormalCloseOnTurn == turn {
+					_ = conn.Close(coderws.StatusNormalClosure, "upstream closed before terminal event")
 					return
 				}
 				upstreamErrorsThisTurn := opts.UpstreamError && (opts.UpstreamErrorOnTurn == 0 || opts.UpstreamErrorOnTurn == turn)
@@ -4807,7 +4899,7 @@ func (e *openAIWSRegressionEnv) readMessage(t *testing.T, conn *coderws.Conn) []
 	return message
 }
 
-func (e *openAIWSRegressionEnv) readCloseError(t *testing.T, conn *coderws.Conn, closeCode coderws.StatusCode) {
+func (e *openAIWSRegressionEnv) readCloseError(t *testing.T, conn *coderws.Conn, closeCode coderws.StatusCode) string {
 	t.Helper()
 	readCtx, cancelRead := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelRead()
@@ -4817,6 +4909,7 @@ func (e *openAIWSRegressionEnv) readCloseError(t *testing.T, conn *coderws.Conn,
 	require.ErrorAs(t, err, &closeErr)
 	t.Logf("websocket close reason: %s", closeErr.Reason)
 	require.Equal(t, closeCode, closeErr.Code)
+	return closeErr.Reason
 }
 
 func (e *openAIWSRegressionEnv) waitRequestDone(t *testing.T) {

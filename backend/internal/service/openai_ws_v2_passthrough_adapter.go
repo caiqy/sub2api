@@ -17,6 +17,7 @@ import (
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 type openAIWSClientFrameConn struct {
@@ -86,9 +87,8 @@ func (c *openAIWSPolicyEnforcingFrameConn) Close() error {
 	return c.inner.Close()
 }
 
-// openAIWSPassthroughPolicyModelForFrame returns the model actually forwarded
-// by a passthrough WS frame. Passthrough only replaces authentication, so an
-// account's ordinary model_mapping and Codex aliases must not rewrite it.
+// openAIWSPassthroughPolicyModelForFrame returns the frame's current top-level
+// model for policy evaluation. Channel and account mapping may rewrite it later.
 func openAIWSPassthroughPolicyModelForFrame(account *Account, payload []byte) string {
 	if account == nil || len(payload) == 0 {
 		return ""
@@ -100,8 +100,8 @@ func openAIWSPassthroughPolicyModelForFrame(account *Account, payload []byte) st
 	return original
 }
 
-// openAIWSPassthroughPolicyModelFromSessionFrame returns the upstream model
-// derived from a session.update frame's session.model field. Returns "" when
+// openAIWSPassthroughPolicyModelFromSessionFrame returns the current model from
+// a session.update frame's session.model field. Returns "" when
 // the frame is not a session.update event or carries no session.model. Used
 // by the per-frame policy filter (client→upstream direction) to keep
 // capturedSessionModel in sync with the session-level model the client may
@@ -143,6 +143,16 @@ func openAIWSPassthroughFastPolicyModel(account *Account, model string, payload 
 	return model
 }
 
+func openAIWSChannelModelIsFinal(hooks *OpenAIWSIngressHooks, turn int, mapped bool) bool {
+	if hooks == nil {
+		return false
+	}
+	if hooks.ChannelModelMapped != nil {
+		mapped = hooks.ChannelModelMapped(turn)
+	}
+	return mapped && (hooks.ChannelModelMapped == nil || hooks.ChannelModelIsFinal)
+}
+
 type openAIWSPassthroughUsageMeta struct {
 	serviceTier              atomic.Pointer[string]
 	reasoningEffort          atomic.Pointer[string]
@@ -150,18 +160,67 @@ type openAIWSPassthroughUsageMeta struct {
 	requestModel             atomic.Pointer[string]
 	upstreamModel            atomic.Pointer[string]
 
-	// 仅在 client->upstream filter goroutine 中读写；Load 侧通过上方原子指针同步。
-	sessionRequestModel string
+	sessionRequestModel atomic.Pointer[string]
+}
+
+type openAIWSSessionModelEchoQueue struct {
+	mu     sync.Mutex
+	models []string
+}
+
+const openAIWSSessionModelEchoQueueLimit = 64
+
+func (q *openAIWSSessionModelEchoQueue) push(model string) bool {
+	model = strings.TrimSpace(model)
+	if q == nil {
+		return false
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.models) >= openAIWSSessionModelEchoQueueLimit {
+		return false
+	}
+	q.models = append(q.models, model)
+	return true
+}
+
+func (q *openAIWSSessionModelEchoQueue) pop() (string, bool) {
+	if q == nil {
+		return "", false
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.models) == 0 {
+		return "", false
+	}
+	model := q.models[0]
+	q.models[0] = ""
+	if len(q.models) == 1 {
+		q.models = nil
+	} else {
+		q.models = q.models[1:]
+	}
+	return model, true
 }
 
 func newOpenAIWSPassthroughUsageMeta(initialRequestModel string, firstFrame []byte) *openAIWSPassthroughUsageMeta {
-	meta := &openAIWSPassthroughUsageMeta{
-		sessionRequestModel: strings.TrimSpace(initialRequestModel),
+	meta := &openAIWSPassthroughUsageMeta{}
+	sessionRequestModel := strings.TrimSpace(initialRequestModel)
+	if sessionRequestModel == "" {
+		sessionRequestModel = openAIWSPassthroughRequestModelForFrame(firstFrame)
 	}
-	if meta.sessionRequestModel == "" {
-		meta.sessionRequestModel = openAIWSPassthroughRequestModelForFrame(firstFrame)
-	}
+	meta.sessionRequestModel.Store(openAIWSTrimmedStringPtr(sessionRequestModel))
 	return meta
+}
+
+func (m *openAIWSPassthroughUsageMeta) currentSessionRequestModel() string {
+	if m == nil {
+		return ""
+	}
+	if model := m.sessionRequestModel.Load(); model != nil {
+		return strings.TrimSpace(*model)
+	}
+	return ""
 }
 
 func (m *openAIWSPassthroughUsageMeta) initFromFirstFrame(policyOutput []byte, mappedModel string) {
@@ -169,8 +228,9 @@ func (m *openAIWSPassthroughUsageMeta) initFromFirstFrame(policyOutput []byte, m
 		return
 	}
 	m.serviceTier.Store(extractOpenAIServiceTierFromBody(policyOutput))
-	m.reasoningEffort.Store(extractOpenAIReasoningEffortFromBody(policyOutput, mappedModel, m.sessionRequestModel))
-	m.storeTurnModels(m.sessionRequestModel, policyOutput)
+	sessionRequestModel := m.currentSessionRequestModel()
+	m.reasoningEffort.Store(extractOpenAIReasoningEffortFromBody(policyOutput, mappedModel, sessionRequestModel))
+	m.storeTurnModels(sessionRequestModel, policyOutput, mappedModel)
 }
 
 func (m *openAIWSPassthroughUsageMeta) captureRequestedReasoningEffort(originalBody []byte, modelCandidates ...string) {
@@ -185,7 +245,7 @@ func (m *openAIWSPassthroughUsageMeta) updateSessionRequestModel(payload []byte)
 		return
 	}
 	if model := openAIWSPassthroughRequestModelFromSessionFrame(payload); model != "" {
-		m.sessionRequestModel = model
+		m.sessionRequestModel.Store(openAIWSTrimmedStringPtr(model))
 	}
 }
 
@@ -196,7 +256,7 @@ func (m *openAIWSPassthroughUsageMeta) requestModelForFrame(payload []byte) stri
 	if model := openAIWSPassthroughRequestModelForFrame(payload); model != "" {
 		return model
 	}
-	return m.sessionRequestModel
+	return m.currentSessionRequestModel()
 }
 
 func (m *openAIWSPassthroughUsageMeta) updateFromResponseCreate(policyOutput []byte, mappedModel string, requestModelForFrame string) {
@@ -205,15 +265,18 @@ func (m *openAIWSPassthroughUsageMeta) updateFromResponseCreate(policyOutput []b
 	}
 	m.serviceTier.Store(extractOpenAIServiceTierFromBody(policyOutput))
 	m.reasoningEffort.Store(extractOpenAIReasoningEffortFromBody(policyOutput, mappedModel, requestModelForFrame))
-	m.storeTurnModels(requestModelForFrame, policyOutput)
+	m.storeTurnModels(requestModelForFrame, policyOutput, mappedModel)
 }
 
-func (m *openAIWSPassthroughUsageMeta) storeTurnModels(requestModel string, upstreamPayload []byte) {
+func (m *openAIWSPassthroughUsageMeta) storeTurnModels(requestModel string, upstreamPayload []byte, upstreamModelFallback string) {
 	if m == nil {
 		return
 	}
 	requestModel = strings.TrimSpace(requestModel)
 	upstreamModel := strings.TrimSpace(gjson.GetBytes(upstreamPayload, "model").String())
+	if upstreamModel == "" {
+		upstreamModel = strings.TrimSpace(upstreamModelFallback)
+	}
 	if upstreamModel == "" {
 		upstreamModel = requestModel
 	}
@@ -708,11 +771,18 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if account.Type == AccountTypeOAuth && c != nil && c.Request != nil {
 		stageCodexFingerprintIDs(c, resolveCodexFingerprintIDsFromRequest(account, c.Request.Header))
 	}
+	initialRequestModel := ""
+	if hooks != nil {
+		initialRequestModel = strings.TrimSpace(hooks.InitialRequestModel)
+	}
+	if initialRequestModel == "" {
+		initialRequestModel = openAIWSPassthroughRequestModelForFrame(firstClientMessage)
+	}
 	originalFirstClientMessage := firstClientMessage
-	if hooks != nil && (hooks.MaxReasoningEffort != "" || len(hooks.ReasoningEffortMappings) > 0) {
-		if capped, changed := ApplyOpenAIReasoningEffortPolicy(firstClientMessage, hooks.MaxReasoningEffort, hooks.ReasoningEffortMappings); changed {
-			firstClientMessage = capped
-		}
+	if next, policyErr := applyOpenAIWSReasoningEffortPolicy(firstClientMessage, hooks, initialRequestModel); policyErr != nil {
+		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, policyErr.Error(), policyErr)
+	} else {
+		firstClientMessage = next
 	}
 	requestModel := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "model").String())
 	requestPreviousResponseID := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "previous_response_id").String())
@@ -738,33 +808,26 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	// negotiated at session.update time. Without this fallback, an empty
 	// model would miss any admin-configured model whitelist and be silently
 	// passed through, defeating that policy on every frame after the first.
-	capturedSessionModel := openAIWSPassthroughPolicyModelForFrame(account, firstClientMessage)
 	outboundSessionModel := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "model").String())
 	sessionModelUpdated := false
 	preserveChannelMappedFirstModel := false
-	initialRequestModel := ""
-	if hooks != nil {
-		initialRequestModel = strings.TrimSpace(hooks.InitialRequestModel)
-	}
-	if initialRequestModel == "" {
-		initialRequestModel = openAIWSPassthroughRequestModelForFrame(firstClientMessage)
-	}
-	if hooks != nil && hooks.MapRequestModel != nil {
+	firstModelMapped := false
+	// A differing first-frame model was already resolved by the composite router.
+	if hooks != nil && hooks.MapRequestModel != nil && (outboundSessionModel == "" || outboundSessionModel == initialRequestModel) {
 		mappedModel, mapErr := hooks.MapRequestModel(1, initialRequestModel)
 		if mapErr != nil {
 			return mapErr
 		}
 		if mappedModel = strings.TrimSpace(mappedModel); mappedModel != "" {
+			firstModelMapped = mappedModel != initialRequestModel
 			firstClientMessage = s.ReplaceModelInBody(firstClientMessage, mappedModel)
-			if originalModel, matched := account.ResolveMappedModel(initialRequestModel); matched && originalModel == initialRequestModel {
-				capturedSessionModel = mappedModel
-				preserveChannelMappedFirstModel = true
-			}
 		}
 	}
+	preserveChannelMappedFirstModel = openAIWSChannelModelIsFinal(hooks, 1, firstModelMapped)
 	if !preserveChannelMappedFirstModel {
-		capturedSessionModel = openAIWSPassthroughPolicyModelForFrame(account, firstClientMessage)
+		firstClientMessage = applyOpenAIWSAccountModelMapping(account, firstClientMessage)
 	}
+	capturedSessionModel := openAIWSPassthroughPolicyModelForFrame(account, firstClientMessage)
 	if capturedSessionModel != "" && capturedSessionModel != strings.TrimSpace(gjson.GetBytes(firstClientMessage, "model").String()) {
 		firstClientMessage = s.ReplaceModelInBody(firstClientMessage, capturedSessionModel)
 	}
@@ -836,7 +899,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	// goroutine）和 OnTurnComplete / final result（runUpstreamToClient
 	// goroutine）之间同步当前 turn 的 usage metadata。
 	usageMeta.initFromFirstFrame(firstClientMessage, capturedSessionModel)
-	usageMeta.captureRequestedReasoningEffort(originalFirstClientMessage, capturedSessionModel)
+	if c != nil && c.Request != nil && RequestedReasoningEffortCaptured(c.Request.Context()) {
+		usageMeta.requestedReasoningEffort.Store(RequestedReasoningEffortFromContext(c.Request.Context()))
+	} else {
+		usageMeta.captureRequestedReasoningEffort(originalFirstClientMessage, initialRequestModel)
+	}
 	_, initialUpstreamModel := usageMeta.turnModels(initialRequestModel)
 	SetOpsUpstreamModel(c, initialUpstreamModel)
 	wsURL, err := s.buildOpenAIResponsesWSURL(account)
@@ -983,6 +1050,15 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	completedTurns := atomic.Int32{}
 	turnLifecycle := newOpenAIWSPassthroughTurnLifecycle(true)
 	var acceptedTurnStartedAt atomic.Pointer[time.Time]
+	var sessionUpstreamModel atomic.Pointer[string]
+	sessionUpstreamModel.Store(openAIWSTrimmedStringPtr(capturedSessionModel))
+	var sessionModelEchoes openAIWSSessionModelEchoQueue
+	currentSessionUpstreamModel := func() string {
+		if model := sessionUpstreamModel.Load(); model != nil {
+			return strings.TrimSpace(*model)
+		}
+		return ""
+	}
 	clientFrameConn := &openAIWSClientFrameConn{
 		conn:                 clientConn,
 		controlCtx:           ctx,
@@ -990,6 +1066,17 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		interTurnStarted:     make(chan struct{}, 1),
 		restoreResponseModel: func(payload []byte) []byte {
 			eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
+			if eventType == "session.updated" {
+				sessionModel, queued := sessionModelEchoes.pop()
+				if !queued {
+					sessionModel = usageMeta.currentSessionRequestModel()
+				}
+				if sessionModel != "" {
+					if restored, err := sjson.SetBytes(payload, "session.model", sessionModel); err == nil {
+						return restored
+					}
+				}
+			}
 			if !openAIWSEventMayContainModel(eventType) {
 				return payload
 			}
@@ -1002,22 +1089,22 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	}
 	policyClientConn := &openAIWSPolicyEnforcingFrameConn{
 		inner: clientFrameConn,
-		// 注意线程安全：filter 仅在 runClientToUpstream 这一条
-		// goroutine 中被调用（passthrough_relay.go: ReadFrame loop），
-		// capturedSessionModel 的读写都发生在该 goroutine 内，因此无需
-		// 加锁/原子化。
+		// filter runs only in the client-to-upstream goroutine. Session models
+		// consumed by the upstream goroutine are published through atomic snapshots.
 		filter: func(msgType coderws.MessageType, payload []byte) (out []byte, blocked *OpenAIFastBlockedError, filterErr error) {
 			if msgType != coderws.MessageText && msgType != coderws.MessageBinary {
 				return payload, nil, nil
 			}
 			eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
 			isResponseCreate := eventType == "response.create"
+			sessionRequestModel := ""
 			responseCreateAt := time.Time{}
 			acceptedTurn := false
 			turnNo := int(completedTurns.Load()) + 1
 			if turnNo < 2 {
 				turnNo = 2
 			}
+			requestModelForThisFrame := ""
 			if isResponseCreate {
 				responseCreateAt = time.Now()
 				if !turnLifecycle.beginResponseCreate(clientFrameConn.markTurnStarted) {
@@ -1036,6 +1123,27 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 				if hooks != nil && hooks.OnClientRequest != nil {
 					hooks.OnClientRequest(turnNo, append([]byte(nil), payload...))
+				}
+			}
+			if eventType == "session.update" {
+				sessionRequestModel = strings.TrimSpace(openAIWSPassthroughRequestModelFromSessionFrame(payload))
+				if hooks != nil && hooks.MapSessionModel != nil {
+					mapping, err := hooks.MapSessionModel(turnNo, payload, sessionRequestModel)
+					if err != nil {
+						return payload, nil, err
+					}
+					mappedModel := strings.TrimSpace(mapping.Model)
+					if mappedModel = strings.TrimSpace(mappedModel); mappedModel != "" {
+						if !hooks.ChannelModelIsFinal || !mapping.ChannelMapped {
+							mappedModel = normalizeOpenAIModelForUpstream(account, account.GetMappedModel(mappedModel))
+						}
+					}
+					if mappedModel != "" && mappedModel != sessionRequestModel {
+						payload, err = sjson.SetBytes(payload, "session.model", mappedModel)
+						if err != nil {
+							return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid session.update model", err)
+						}
+					}
 				}
 			}
 			responsesLite := isResponseCreate && isOpenAIResponsesLiteWebSocketPayload(payload)
@@ -1074,20 +1182,19 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					payload = litePayload
 				}
 				originalResponseCreate := payload
-				if hooks != nil && (hooks.MaxReasoningEffort != "" || len(hooks.ReasoningEffortMappings) > 0) {
-					if capped, changed := ApplyOpenAIReasoningEffortPolicy(payload, hooks.MaxReasoningEffort, hooks.ReasoningEffortMappings); changed {
-						payload = capped
-					}
+				requestModelForThisFrame = usageMeta.requestModelForFrame(originalResponseCreate)
+				if requestModelForThisFrame == "" {
+					requestModelForThisFrame = currentSessionUpstreamModel()
+				}
+				if next, policyErr := applyOpenAIWSReasoningEffortPolicy(payload, hooks, requestModelForThisFrame); policyErr != nil {
+					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, policyErr.Error(), policyErr)
+				} else {
+					payload = next
 				}
 				usageMeta.captureRequestedReasoningEffort(originalResponseCreate)
 			}
-			requestModelForThisFrame := ""
 			preserveChannelMappedModel := false
 			if isResponseCreate {
-				requestModelForThisFrame = usageMeta.requestModelForFrame(payload)
-				if requestModelForThisFrame == "" {
-					requestModelForThisFrame = capturedSessionModel
-				}
 				policyModel := requestModelForThisFrame
 				if hooks != nil {
 					rewritten, rewrittenModel, rewriteErr := applyOpenAIWSRequestRewrite(hooks, turnNo, payload, policyModel)
@@ -1098,21 +1205,24 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					if rewrittenModel = strings.TrimSpace(rewrittenModel); rewrittenModel != "" {
 						policyModel = rewrittenModel
 					}
-					if hooks.MapRequestModel != nil && (!sessionModelUpdated || strings.TrimSpace(gjson.GetBytes(payload, "model").String()) != "") {
+					explicitModel := strings.TrimSpace(gjson.GetBytes(payload, "model").String()) != ""
+					if sessionModelUpdated && !explicitModel && hooks.CommitSessionModel != nil {
+						mapping, err := hooks.CommitSessionModel(turnNo, requestModelForThisFrame)
+						if err != nil {
+							return payload, nil, err
+						}
+						policyModel = strings.TrimSpace(mapping.Model)
+					} else if hooks.MapRequestModel != nil && (!sessionModelUpdated || explicitModel) && policyModel == requestModelForThisFrame {
 						upstreamModel, err := hooks.MapRequestModel(turnNo, policyModel)
 						if err != nil {
 							return payload, nil, err
 						}
 						if upstreamModel = strings.TrimSpace(upstreamModel); upstreamModel != "" {
-							// An identity account mapping marks the client model as a valid
-							// channel-mapping source. Preserve the channel target on every
-							// explicit turn so later frames cannot apply account mapping again.
-							accountModel, matched := account.ResolveMappedModel(policyModel)
-							preserveChannelMappedModel = matched && accountModel == policyModel
+							preserveChannelMappedModel = openAIWSChannelModelIsFinal(hooks, turnNo, upstreamModel != policyModel)
 							payload = s.ReplaceModelInBody(payload, upstreamModel)
 						}
 					}
-					if !preserveChannelMappedModel && (hooks == nil || !hooks.ChannelModelIsFinal) {
+					if !preserveChannelMappedModel {
 						payload = applyOpenAIWSAccountModelMapping(account, payload)
 					}
 					if hooks.BeforeRequest != nil {
@@ -1130,13 +1240,16 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			// 绕过路径。这里只看 session.update 事件中的 session.model
 			// 字段，response.create 自己的 model 仍然由其本帧字段决定。
 			if updated := openAIWSPassthroughPolicyModelFromSessionFrame(account, payload); updated != "" {
-				capturedSessionModel = updated
+				sessionUpstreamModel.Store(openAIWSTrimmedStringPtr(updated))
 			}
 			if updated := strings.TrimSpace(openAIWSPassthroughRequestModelFromSessionFrame(payload)); updated != "" {
 				outboundSessionModel = updated
 				sessionModelUpdated = true
 			}
 			usageMeta.updateSessionRequestModel(payload)
+			if sessionRequestModel != "" {
+				usageMeta.sessionRequestModel.Store(openAIWSTrimmedStringPtr(sessionRequestModel))
+			}
 			if requestModelForThisFrame == "" {
 				requestModelForThisFrame = usageMeta.requestModelForFrame(payload)
 			}
@@ -1150,12 +1263,22 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				model = strings.TrimSpace(gjson.GetBytes(payload, "model").String())
 			}
 			if model == "" {
-				model = capturedSessionModel
+				model = currentSessionUpstreamModel()
 			}
 			if isResponseCreate && model != "" && (!sessionModelUpdated || strings.TrimSpace(gjson.GetBytes(payload, "model").String()) != "") && model != strings.TrimSpace(gjson.GetBytes(payload, "model").String()) {
 				payload = s.ReplaceModelInBody(payload, model)
 			}
-			out, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, openAIWSPassthroughFastPolicyModel(account, model, payload), payload)
+			fastPolicyModel := model
+			finalSessionModel := isResponseCreate && sessionModelUpdated && hooks != nil && hooks.MapSessionModel != nil && strings.TrimSpace(gjson.GetBytes(payload, "model").String()) == ""
+			if !finalSessionModel {
+				fastPolicyModel = openAIWSPassthroughFastPolicyModel(account, model, payload)
+			}
+			out, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, fastPolicyModel, payload)
+			if policyErr == nil && blocked == nil && eventType == "session.update" {
+				if !sessionModelEchoes.push(sessionRequestModel) {
+					return out, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "too many unacknowledged session updates", ErrOpenAIWSSessionUpdateBacklog)
+				}
+			}
 			// 多轮 passthrough usage：仅在成功（non-block / non-err）
 			// 的 response.create 帧上更新 usageMeta，使用
 			// filter 处理后的 payload，与首帧 policy-after-extract 语义
@@ -1238,7 +1361,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			}
 			if msgType == coderws.MessageText {
 				if updated := openAIWSPassthroughPolicyModelFromSessionFrame(account, payload); updated != "" {
-					capturedSessionModel = updated
+					sessionUpstreamModel.Store(openAIWSTrimmedStringPtr(updated))
 				}
 				if updated := strings.TrimSpace(openAIWSPassthroughRequestModelFromSessionFrame(payload)); updated != "" {
 					outboundSessionModel = updated
@@ -1385,7 +1508,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(payload)
 				isPreOutputRateLimit := eventType == "error" && !wroteDownstream && isOpenAIWSRateLimitError(errCodeRaw, errTypeRaw, errMsgRaw)
 				if (eventType == "error" || eventType == "response.failed") && !failureAccountSideEffectsApplied && !isPreOutputRateLimit {
-					failureAccountSideEffectsApplied = s.handleOpenAIWSFailureAccountSideEffects(ctx, account, capturedSessionModel, handshakeHeaders, payload)
+					_, failureModel := usageMeta.turnModels(currentSessionUpstreamModel())
+					failureAccountSideEffectsApplied = s.handleOpenAIWSFailureAccountSideEffects(ctx, account, failureModel, handshakeHeaders, payload)
 				}
 				if eventType != "error" {
 					return nil
@@ -1397,7 +1521,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 						errors.New("upstream websocket error event"),
 					)
 				}
-				s.persistOpenAIWSRateLimitSignal(ctx, account, handshakeHeaders, payload, errCodeRaw, errTypeRaw, errMsgRaw, capturedSessionModel)
+				_, failureModel := usageMeta.turnModels(currentSessionUpstreamModel())
+				s.persistOpenAIWSRateLimitSignal(ctx, account, handshakeHeaders, payload, errCodeRaw, errTypeRaw, errMsgRaw, failureModel)
 				logOpenAIWSV2Passthrough(
 					"relay_rate_limit_failover account_id=%d err_code=%s err_type=%s err_message=%s",
 					account.ID,
@@ -1549,6 +1674,20 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			relayErr,
 		)
 	}
+	var failoverErr *UpstreamFailoverError
+	var clientCloseErr *OpenAIWSClientCloseError
+	if relayExit.Stage == "read_upstream" && !relayExit.Graceful && turnCount == 0 && !relayExit.WroteDownstream &&
+		!errors.As(relayErr, &failoverErr) && !errors.As(relayErr, &clientCloseErr) {
+		relayErr = s.newOpenAIAccountFailoverError(
+			account,
+			http.StatusBadGateway,
+			handshakeHeaders,
+			nil,
+			relayErrorText(relayErr),
+			false,
+			false,
+		)
+	}
 	turnErr := wrapOpenAIWSIngressTurnError(
 		relayExit.Stage,
 		relayErr,
@@ -1580,6 +1719,9 @@ func openAIWSPassthroughRelayClientClose(exit openaiwsv2.RelayExit, completedTur
 		return 0, "", false
 	}
 	if !exit.Graceful && exit.Stage == "read_upstream" {
+		if completedTurns == 0 && !exit.WroteDownstream {
+			return 0, "", false
+		}
 		return coderws.StatusInternalError, "upstream websocket proxy failed", true
 	}
 	return 0, "", false
