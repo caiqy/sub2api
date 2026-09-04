@@ -194,6 +194,51 @@ func TestGatewayServiceRecordUsage_PreservesRequestedAndUpstreamModels(t *testin
 	require.Equal(t, mappedModel, *usageRepo.lastLog.UpstreamModel)
 }
 
+func TestGatewayServiceRecordUsage_AccountStatsUsesCacheWrite1hPrice(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	svc := newGatewayRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})
+	groupID := int64(10)
+	svc.channelService = newTestChannelServiceForStats(t, &Channel{
+		ID:     1,
+		Status: StatusActive,
+		AccountStatsPricingRules: []AccountStatsPricingRule{{
+			GroupIDs: []int64{groupID},
+			Pricing: []ChannelModelPricing{{
+				Platform:          PlatformAnthropic,
+				Models:            []string{"claude-sonnet-4"},
+				BillingMode:       BillingModeToken,
+				CacheWritePrice:   testPtrFloat64(0.003),
+				CacheWrite1hPrice: testPtrFloat64(0.005),
+			}},
+		}},
+	}, groupID, PlatformAnthropic)
+
+	err := svc.RecordUsage(context.Background(), &RecordUsageInput{
+		Result: &ForwardResult{
+			RequestID: "gateway_account_stats_cache_write_1h",
+			Model:     "claude-sonnet-4",
+			Usage: ClaudeUsage{
+				CacheCreationInputTokens: 1,
+				CacheCreation1hTokens:    1,
+			},
+			Duration: time.Second,
+		},
+		APIKey: &APIKey{
+			ID:      501,
+			Quota:   100,
+			GroupID: &groupID,
+			Group:   &Group{ID: groupID, Platform: PlatformAnthropic, RateMultiplier: 1},
+		},
+		User:    &User{ID: 601},
+		Account: &Account{ID: 701},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.NotNil(t, usageRepo.lastLog.AccountStatsCost)
+	require.InDelta(t, 0.005, *usageRepo.lastLog.AccountStatsCost, 1e-12)
+}
+
 func TestGatewayServiceRecordUsage_CompositeRequestedAliasFallsBackToConcretePricing(t *testing.T) {
 	const (
 		publicModel   = "team/claude"
