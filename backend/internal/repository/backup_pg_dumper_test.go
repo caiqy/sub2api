@@ -16,6 +16,7 @@ import (
 )
 
 func pgDumperTestCommand(ctx context.Context, output string, exitCode int) *exec.Cmd {
+	// #nosec G702 -- test helper re-executes this test binary with controlled arguments.
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestPgDumperHelperProcess$", "--", output, strconv.Itoa(exitCode))
 	cmd.Env = append(os.Environ(), "GO_WANT_PG_DUMPER_HELPER=1")
 	return cmd

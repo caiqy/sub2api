@@ -2507,12 +2507,11 @@ func (h *GatewayHandler) handleStreamingAwareErrorWithCode(c *gin.Context, statu
 		flusher, ok := c.Writer.(http.Flusher)
 		if ok {
 			// SSE 错误事件固定 schema，使用 Quote 直拼可避免额外 Marshal 分配。
-			errorEvent := `data: {"type":"error","error":{"type":` + strconv.Quote(errType) + `,"message":` + strconv.Quote(message) + `}}` + "\n\n"
 			errorCode := ""
 			if code != "" {
 				errorCode = `,"code":` + strconv.Quote(code)
 			}
-			errorEvent = `data: {"type":"error","error":{"type":` + strconv.Quote(errType) + errorCode + `,"message":` + strconv.Quote(message) + `}}` + "\n\n"
+			errorEvent := `data: {"type":"error","error":{"type":` + strconv.Quote(errType) + errorCode + `,"message":` + strconv.Quote(message) + `}}` + "\n\n"
 			if c.Writer.Written() {
 				errorEvent = "event: error\n" + errorEvent
 			}
