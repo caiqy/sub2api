@@ -1301,44 +1301,46 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					continue
 				}
 			}
+			if !compactModelFallbackRetried && isOpenAICompactModelFailure(resp.StatusCode, upstreamMsg, respBody) {
+				if requestBody == nil {
+					requestBody, readErr = attemptHandle.ReadAll()
+					if readErr != nil {
+						return nil, readErr
+					}
+				}
+				if retryBody, fallbackModel, retry := s.prepareOpenAICompactFallbackRetry(
+					c, account, requestedModel, requestBody, resp.StatusCode, upstreamMsg, respBody, false,
+				); retry {
+					s.appendOpenAICompactFallbackRetryOps(c, account, resp, respBody, upstreamMsg, false)
+					retryHandle, retryHandleOwned, handleErr := openAIRequestBodyHandleForBytes(attemptHandle, retryBody)
+					if handleErr != nil {
+						return nil, handleErr
+					}
+					if attemptHandleOwned && retryHandle != attemptHandle {
+						CleanupRequestBodyHandle(attemptHandle)
+					}
+					if retryHandle != attemptHandle {
+						attemptHandle = retryHandle
+						attemptHandleOwned = retryHandleOwned
+					}
+					fromModel := strings.TrimSpace(gjson.GetBytes(requestBody, "model").String())
+					body = retryBody
+					firstAttemptBody = retryBody
+					requestView = newOpenAIRequestView(body)
+					reqBody = nil
+					upstreamModel = fallbackModel
+					compactModelFallbackRetried = true
+					SetOpsUpstreamModel(c, fallbackModel)
+					logger.LegacyPrintf(
+						"service.openai_gateway",
+						"[OpenAI] Retrying explicit compact request once with fallback model (account: %s, from: %s, to: %s, upstream_code: %s)",
+						account.Name, fromModel, fallbackModel, upstreamCode,
+					)
+					continue
+				}
+			}
 			if s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody) || isOpenAIUpstreamCapacityShedEvent(respBody) {
 				return nil, makeFailoverError()
-			}
-			if requestBody == nil {
-				requestBody, readErr = attemptHandle.ReadAll()
-				if readErr != nil {
-					return nil, readErr
-				}
-			}
-			if retryBody, fallbackModel, retry := s.prepareOpenAICompactFallbackRetry(
-				c, account, requestedModel, requestBody, resp.StatusCode, upstreamMsg, respBody, compactModelFallbackRetried,
-			); retry {
-				s.appendOpenAICompactFallbackRetryOps(c, account, resp, respBody, upstreamMsg, false)
-				retryHandle, retryHandleOwned, handleErr := openAIRequestBodyHandleForBytes(attemptHandle, retryBody)
-				if handleErr != nil {
-					return nil, handleErr
-				}
-				if attemptHandleOwned && retryHandle != attemptHandle {
-					CleanupRequestBodyHandle(attemptHandle)
-				}
-				if retryHandle != attemptHandle {
-					attemptHandle = retryHandle
-					attemptHandleOwned = retryHandleOwned
-				}
-				fromModel := strings.TrimSpace(gjson.GetBytes(requestBody, "model").String())
-				body = retryBody
-				firstAttemptBody = retryBody
-				requestView = newOpenAIRequestView(body)
-				reqBody = nil
-				upstreamModel = fallbackModel
-				compactModelFallbackRetried = true
-				SetOpsUpstreamModel(c, fallbackModel)
-				logger.LegacyPrintf(
-					"service.openai_gateway",
-					"[OpenAI] Retrying explicit compact request once with fallback model (account: %s, from: %s, to: %s, upstream_code: %s)",
-					account.Name, fromModel, fallbackModel, upstreamCode,
-				)
-				continue
 			}
 			if requestBody == nil {
 				requestBody, readErr = attemptHandle.ReadAll()

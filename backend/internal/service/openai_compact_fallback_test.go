@@ -189,7 +189,7 @@ func TestOpenAIGatewayForwardRetriesExplicitNativeCompactHTTPFailureOnce(t *test
 		{
 			StatusCode: http.StatusBadRequest,
 			Header:     http.Header{"Content-Type": []string{"application/json"}},
-			Body:       io.NopCloser(strings.NewReader(`{"error":{"code":"context_length_exceeded","message":"context window exceeded"}}`)),
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"code":"model_not_found","message":"model not found"}}`)),
 		},
 		{
 			StatusCode: http.StatusOK,
@@ -197,14 +197,15 @@ func TestOpenAIGatewayForwardRetriesExplicitNativeCompactHTTPFailureOnce(t *test
 			Body:       io.NopCloser(strings.NewReader(`{"id":"resp_compact","status":"completed","model":"gpt-5.4","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`)),
 		},
 	}}
-	svc := &OpenAIGatewayService{
-		cfg:          &config.Config{Gateway: config.GatewayConfig{OpenAICompactModel: "gpt-5.4"}},
-		httpUpstream: upstream,
-	}
 	account := &Account{
 		ID: 1, Name: "openai-oauth", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
 		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"},
 		Status:      StatusActive, Schedulable: true,
+	}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Gateway: config.GatewayConfig{OpenAICompactModel: "gpt-5.4"}},
+		httpUpstream: upstream,
+		accountRepo:  schedulerTestOpenAIAccountRepo{accounts: []Account{*account}},
 	}
 
 	result, err := svc.Forward(context.Background(), c, account, body)
