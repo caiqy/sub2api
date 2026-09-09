@@ -1116,11 +1116,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 						turnLifecycle.cancelResponseCreate()
 					}
 				}()
-				if hooks != nil && hooks.BeforeTurn != nil {
-					if err := hooks.BeforeTurn(turnNo); err != nil {
-						return payload, nil, err
-					}
-				}
 				if hooks != nil && hooks.OnClientRequest != nil {
 					hooks.OnClientRequest(turnNo, append([]byte(nil), payload...))
 				}
@@ -1227,6 +1222,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					}
 					if hooks.BeforeRequest != nil {
 						if err := hooks.BeforeRequest(turnNo, payload, policyModel); err != nil {
+							return payload, nil, err
+						}
+					}
+					if hooks.BeforeTurn != nil {
+						if err := hooks.BeforeTurn(turnNo); err != nil {
 							return payload, nil, err
 						}
 					}
@@ -1530,6 +1530,13 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					truncateOpenAIWSLogValue(errTypeRaw, openAIWSLogValueMaxLen),
 					truncateOpenAIWSLogValue(errMsgRaw, openAIWSLogValueMaxLen),
 				)
+				if completedTurns.Load() > 0 {
+					return NewOpenAIWSClientCloseError(
+						coderws.StatusTryAgainLater,
+						"upstream rate limit exceeded; please reconnect",
+						errors.New("later passthrough turn was rate limited before output"),
+					)
+				}
 				return s.newOpenAIWSRateLimitFailoverError(account, handshakeHeaders, payload, errMsgRaw)
 			},
 			OnTrace: func(event openaiwsv2.RelayTraceEvent) {

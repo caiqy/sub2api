@@ -110,6 +110,7 @@ type RelayTraceEvent struct {
 type relayState struct {
 	usage                   Usage
 	turnUsage               Usage
+	turnWroteDownstream     atomic.Bool
 	requestModelMu          sync.RWMutex
 	requestModel            string
 	pendingTurnStart        atomic.Pointer[time.Time]
@@ -312,19 +313,29 @@ func Relay(
 			return err
 		}
 		if held {
+			state.setRequestModel(strings.TrimSpace(gjson.GetBytes(payload, "model").String()))
+			// The policy-enforcing client connection has accepted this turn.
+			// Reset before the write so an immediate upstream response cannot race
+			// with the transport returning from WriteFrame.
+			state.turnWroteDownstream.Store(false)
 			if options.BeforeWriteUpstream != nil {
 				if err := options.BeforeWriteUpstream(msgType, payload); err != nil {
+					state.turnWroteDownstream.Store(true)
 					releaseTurn()
 					return err
 				}
 			}
 			if err := publishTurn(payload, resolveTurnStartedAt(), upstreamRelayStarted.Load()); err != nil {
+				state.turnWroteDownstream.Store(true)
 				releaseTurn()
 				return err
 			}
 		}
 		if err := writeUpstream(msgType, payload); err != nil {
 			if held {
+				// The relay exits on this error, but retain the previous turn's state
+				// for accurate diagnostics while the two relay goroutines settle.
+				state.turnWroteDownstream.Store(true)
 				releaseTurn()
 			}
 			return err
@@ -347,6 +358,7 @@ func Relay(
 			return result, &RelayExit{Stage: "write_upstream", Err: err}
 		}
 		if held {
+			state.turnWroteDownstream.Store(false)
 			startTurn(firstClientMessage, resolveTurnStartedAt())
 		}
 		emitRelayTrace(onTrace, RelayTraceEvent{
@@ -665,7 +677,7 @@ func runUpstreamToClient(
 	armTurn := func(turn relayTurnStart) {
 		requestModel := strings.TrimSpace(gjson.GetBytes(turn.payload, "model").String())
 		state.setRequestModel(requestModel)
-		state.activeTurn = &relayTurnTiming{startAt: turn.startAt, requestModel: requestModel}
+		state.activeTurn = &relayTurnTiming{startAt: turn.startAt, requestModel: requestModel, terminalEligible: true}
 	}
 	upstreamFrames := make(chan relayUpstreamFrame, 1)
 	var upstreamReadDone chan<- struct{}
@@ -720,7 +732,7 @@ func runUpstreamToClient(
 			// the upstream has started a Responses turn, success still requires a
 			// terminal protocol event. Treat an early 1000/EOF as a relay failure so
 			// the adapter does not report relay_completed with an active turn.
-			if graceful && state.activeTurn != nil {
+			if graceful && state.hasUnfinishedTurn() {
 				graceful = false
 				err = errors.New("upstream websocket closed before terminal event: " + err.Error())
 			}
@@ -741,7 +753,11 @@ func runUpstreamToClient(
 		}
 		markActivity()
 		if beforeWriteClient != nil {
-			if err := beforeWriteClient(msgType, payload, wroteDownstream); err != nil {
+			wroteDownstreamInTurn := wroteDownstream
+			if state != nil {
+				wroteDownstreamInTurn = state.turnWroteDownstream.Load()
+			}
+			if err := beforeWriteClient(msgType, payload, wroteDownstreamInTurn); err != nil {
 				emitRelayTrace(onTrace, RelayTraceEvent{
 					Stage:           "upstream_message_rejected",
 					Direction:       "upstream_to_client",
@@ -767,7 +783,14 @@ func runUpstreamToClient(
 			}
 			observedEvent = observeUpstreamMessage(state, payload, startAt, nowFn, onUsageParseFailure)
 		case coderws.MessageBinary:
-			// binary frame 直接透传，不进入 JSON 观测路径（避免无效解析开销）。
+			// Binary frames remain opaque for usage/result observation, but a JSON
+			// terminal still settles relay lifecycle. Otherwise the pending-turn
+			// disconnect guard would turn an already-delivered terminal into a false
+			// missing-terminal failure when the upstream closes normally.
+			if isTerminalEvent(strings.TrimSpace(gjson.GetBytes(payload, "type").String())) {
+				state.consumePendingTurnStartedAt()
+				openAIWSRelayDiscardActiveTurnTiming(state)
+			}
 		}
 		if dropDownstreamWrites != nil && dropDownstreamWrites.Load() {
 			if droppedFrames != nil {
@@ -815,6 +838,9 @@ func runUpstreamToClient(
 			return
 		}
 		wroteDownstream = true
+		if state != nil {
+			state.turnWroteDownstream.Store(true)
+		}
 		if afterClientWriteSuccess != nil {
 			afterClientWriteSuccess(msgType, payload)
 		}
@@ -1219,6 +1245,13 @@ func (s *relayState) consumePendingTurnStartedAt() time.Time {
 		return time.Time{}
 	}
 	return *startedAt
+}
+
+func (s *relayState) hasUnfinishedTurn() bool {
+	if s == nil {
+		return false
+	}
+	return s.pendingTurnStart.Load() != nil || s.activeTurn != nil
 }
 
 func openAIWSRelayDeleteTurnTiming(state *relayState, responseID string) (relayTurnTiming, bool) {

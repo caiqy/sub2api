@@ -47,15 +47,16 @@ func newJSONRequestBody(req *http.Request) (*requestBodyCoordinator, error) {
 	if err != nil {
 		return nil, err
 	}
-	if reader != nil {
-		defer func() { _ = reader.Close() }()
-	}
 
 	raw, err := service.NewRequestBodyHandleFromReader(reader, jsonRequestBodyHandleOptions)
+	if reader != nil {
+		_ = reader.Close()
+	}
 	if err != nil {
 		return nil, err
 	}
 	if req != nil {
+		req.Body = http.NoBody
 		req.Header.Del("Content-Encoding")
 		req.Header.Del("Content-Length")
 		req.ContentLength = raw.Size()
@@ -67,7 +68,10 @@ func newMultipartRequestBody(req *http.Request, maxMemory int64) (*requestBodyCo
 	if req == nil || req.Body == nil {
 		return nil, errors.New("multipart request body is required")
 	}
-	raw, err := service.NewRequestBodyHandleFromReader(req.Body, jsonRequestBodyHandleOptions)
+	source := req.Body
+	raw, err := service.NewRequestBodyHandleFromReader(source, jsonRequestBodyHandleOptions)
+	_ = source.Close()
+	req.Body = http.NoBody
 	if err != nil {
 		return nil, err
 	}

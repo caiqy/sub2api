@@ -18,6 +18,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -84,6 +85,25 @@ func TestRequestBodyCoordinator_JSON(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestRequestBodyCoordinatorDetachesPrereadBodyAfterOwnershipTransfer(t *testing.T) {
+	body := requestBodyCoordinatorJSON(9 << 20)
+	preread := httputil.NewPrereadBody(body)
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", preread)
+
+	coordinator, err := newJSONRequestBody(req)
+	if err != nil {
+		t.Fatalf("newJSONRequestBody: %v", err)
+	}
+	defer coordinator.Cleanup()
+
+	if req.Body != http.NoBody {
+		t.Fatalf("request body remained attached after ownership transfer: %T", req.Body)
+	}
+	if coordinator.raw.Size() != int64(len(body)) {
+		t.Fatalf("coordinator size = %d, want %d", coordinator.raw.Size(), len(body))
 	}
 }
 

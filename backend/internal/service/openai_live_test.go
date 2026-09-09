@@ -312,18 +312,19 @@ func TestLiveSidebandNormalCloseEndsCall(t *testing.T) {
 
 func TestOpenAILiveCreateFailoverUsesExistingOpenAIPolicy(t *testing.T) {
 	service := &OpenAIGatewayService{}
-	require.False(t, service.shouldFailoverLiveCreateError(fmt.Errorf("read Live request body: %w", ErrRequestBodySpool)))
-	require.False(t, service.shouldFailoverLiveCreateError(&UpstreamFailoverError{
+	account := newOpenAIUpstreamErrorTestAccount()
+	require.False(t, service.shouldFailoverLiveCreateError(account, fmt.Errorf("read Live request body: %w", ErrRequestBodySpool)))
+	require.False(t, service.shouldFailoverLiveCreateError(account, &UpstreamFailoverError{
 		StatusCode:   http.StatusBadRequest,
 		ResponseBody: []byte(`{"error":{"message":"invalid session"}}`),
 	}))
-	require.True(t, service.shouldFailoverLiveCreateError(&UpstreamFailoverError{
+	require.True(t, service.shouldFailoverLiveCreateError(account, &UpstreamFailoverError{
 		StatusCode: http.StatusForbidden,
 	}))
-	require.True(t, service.shouldFailoverLiveCreateError(&UpstreamFailoverError{
+	require.True(t, service.shouldFailoverLiveCreateError(account, &UpstreamFailoverError{
 		StatusCode: http.StatusBadGateway,
 	}))
-	require.True(t, service.shouldFailoverLiveCreateError(errors.New("transport failed")))
+	require.True(t, service.shouldFailoverLiveCreateError(account, errors.New("transport failed")))
 }
 
 func TestLiveCallIDFromLocation(t *testing.T) {

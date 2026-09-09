@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 23 // v23: user/group access, Fast billing, reasoning policies, and group codex_models_manifest_config
+const apiKeyAuthSnapshotVersion = 25 // v25: combined model allowlist and fork policy/concurrency projection
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -427,7 +427,7 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			MessagesDispatchModelConfig:     apiKey.Group.MessagesDispatchModelConfig,
 			UserConcurrencyEnabled:          apiKey.Group.UserConcurrencyEnabled,
 			UserConcurrencyLimit:            apiKey.Group.UserConcurrencyLimit,
-			ModelsListConfig:                apiKey.Group.ModelsListConfig,
+			ModelAllowlist:                  apiKey.Group.ModelAllowlist,
 			CodexModelsManifestConfig:       apiKey.Group.CodexModelsManifestConfig,
 			RPMLimit:                        apiKey.Group.RPMLimit,
 			MaxReasoningEffort:              apiKey.Group.MaxReasoningEffort,
@@ -534,7 +534,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			MessagesDispatchModelConfig:     snapshot.Group.MessagesDispatchModelConfig,
 			UserConcurrencyEnabled:          snapshot.Group.UserConcurrencyEnabled,
 			UserConcurrencyLimit:            snapshot.Group.UserConcurrencyLimit,
-			ModelsListConfig:                snapshot.Group.ModelsListConfig,
+			ModelAllowlist:                  snapshot.Group.ModelAllowlist,
 			CodexModelsManifestConfig:       snapshot.Group.CodexModelsManifestConfig,
 			RPMLimit:                        snapshot.Group.RPMLimit,
 			MaxReasoningEffort:              snapshot.Group.MaxReasoningEffort,
