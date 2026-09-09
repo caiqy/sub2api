@@ -504,7 +504,7 @@ func TestOpenAIGatewayHandler_ChatCompletionsFinalHandleReplayAcrossFailover(t *
 			ModelMapping: map[string]map[string]string{service.PlatformOpenAI: {"client-model": "mapped-model"}},
 		},
 		groupPlatforms: map[int64]string{groupID: service.PlatformOpenAI},
-	}, nil, nil, nil)
+	}, nil, nil, nil, nil)
 	env := newOpenAIResponsesRetentionTestEnv(t, nil, nil, nil, nil, channelService, accounts)
 	env.upstream.responses = []*http.Response{
 		{

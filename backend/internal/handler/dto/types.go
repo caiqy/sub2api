@@ -577,6 +577,25 @@ func (f *NullableInt64Field) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+type NullableStringField struct {
+	Set   bool
+	Value *string
+}
+
+func (f *NullableStringField) UnmarshalJSON(data []byte) error {
+	f.Set = true
+	if string(data) == "null" {
+		f.Value = nil
+		return nil
+	}
+	var value string
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	f.Value = &value
+	return nil
+}
+
 type BatchUpdateRedeemCodeFields struct {
 	Status    *string            `json:"status,omitempty"`
 	ExpiresAt NullableTimeField  `json:"expires_at,omitempty"`

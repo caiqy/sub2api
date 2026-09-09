@@ -197,6 +197,12 @@ func (r *thresholdReleaseSchedulerRepo) ClearTempUnschedulableIfReason(_ context
 		if r.paused[i].ID == id && IsAccountSchedulingThresholdReason(r.paused[i].TempUnschedulableReason) {
 			r.paused[i].TempUnschedulableUntil = nil
 			r.paused[i].TempUnschedulableReason = ""
+			for j := range r.accounts {
+				if r.accounts[j].ID == id {
+					r.accounts[j].TempUnschedulableUntil = nil
+					r.accounts[j].TempUnschedulableReason = ""
+				}
+			}
 			return true, nil
 		}
 	}
@@ -340,7 +346,7 @@ func newSchedulerTestChannelService(ch Channel, groupPlatforms map[int64]string)
 	return NewChannelService(&schedulerChannelRepoStub{
 		channels:       []Channel{ch},
 		groupPlatforms: groupPlatforms,
-	}, nil, nil, nil)
+	}, nil, nil, nil, nil)
 }
 
 type schedulerGroupAwareOpenAIAccountRepo struct {
@@ -2787,19 +2793,23 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyRateLimite
 	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
 }
 
-func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyRuntimeBlockedAccountFallsBackWithoutRebinding(t *testing.T) {
+func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyRuntimeBlockedAccountFallsBack(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(101011)
 	const requestedModel = "gpt-5.1"
 
 	testCases := []struct {
-		name  string
-		block func(*OpenAIGatewayService, *Account)
+		name        string
+		block       func(*OpenAIGatewayService, *Account)
+		clearSticky bool
 	}{
 		{
-			name: "global runtime cooldown",
+			name:        "global runtime cooldown",
+			clearSticky: true,
 			block: func(svc *OpenAIGatewayService, account *Account) {
-				svc.BlockAccountScheduling(account, time.Now().Add(time.Minute), "test")
+				until := time.Now().Add(time.Minute)
+				account.TempUnschedulableUntil = &until
+				svc.BlockAccountScheduling(account, until, "test")
 			},
 		},
 		{
@@ -2829,6 +2839,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyRuntimeBlo
 				concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{acquiredIDs: &acquiredIDs}),
 			}
 			tc.block(svc, &sticky)
+			svc.accountRepo = schedulerTestOpenAIAccountRepo{accounts: []Account{sticky, backup}}
 
 			scheduler := &defaultOpenAIAccountScheduler{service: svc}
 			stickySelection, stickyReq, err := scheduler.selectBySessionHash(ctx, OpenAIAccountScheduleRequest{
@@ -2836,9 +2847,14 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyRuntimeBlo
 			})
 			require.NoError(t, err)
 			require.Nil(t, stickySelection)
-			require.True(t, stickyReq.SkipStickyBind)
-			require.Equal(t, sticky.ID, cache.sessionBindings[sessionKey])
-			require.Zero(t, cache.deletedSessions[sessionKey])
+			require.Equal(t, !tc.clearSticky, stickyReq.SkipStickyBind)
+			if tc.clearSticky {
+				require.Zero(t, cache.sessionBindings[sessionKey])
+				require.Equal(t, 1, cache.deletedSessions[sessionKey])
+			} else {
+				require.Equal(t, sticky.ID, cache.sessionBindings[sessionKey])
+				require.Zero(t, cache.deletedSessions[sessionKey])
+			}
 			require.Empty(t, acquiredIDs)
 
 			selection, decision, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", sessionHash, requestedModel, nil, OpenAIUpstreamTransportAny, false)
@@ -2848,8 +2864,13 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyRuntimeBlo
 			require.Equal(t, backup.ID, selection.Account.ID)
 			require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
 			require.Equal(t, []int64{backup.ID}, acquiredIDs)
-			require.Equal(t, sticky.ID, cache.sessionBindings[sessionKey])
-			require.Zero(t, cache.deletedSessions[sessionKey])
+			if tc.clearSticky {
+				require.Equal(t, backup.ID, cache.sessionBindings[sessionKey])
+				require.Equal(t, 1, cache.deletedSessions[sessionKey])
+			} else {
+				require.Equal(t, sticky.ID, cache.sessionBindings[sessionKey])
+				require.Zero(t, cache.deletedSessions[sessionKey])
+			}
 			if selection.ReleaseFunc != nil {
 				selection.ReleaseFunc()
 			}
@@ -2866,7 +2887,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_ThresholdReleaseRecover
 	thresholdReason := BuildDetailedAccountSchedulingThresholdReason(AccountSchedulingThresholdReasonInput{
 		Platform: PlatformOpenAI, Window: "7d", ThresholdPercent: 90, UsedPercent: 95, Until: until, Now: time.Now(),
 	})
-	primary := Account{ID: 31021, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0}
+	primary := Account{ID: 31021, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, TempUnschedulableUntil: &until, TempUnschedulableReason: thresholdReason}
 	backup := Account{ID: 31022, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 5}
 	repo := &thresholdReleaseSchedulerRepo{
 		schedulerTestOpenAIAccountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{primary, backup}},
@@ -2893,19 +2914,23 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_ThresholdReleaseRecover
 	require.Equal(t, primary.ID, after.Account.ID)
 }
 
-func TestLayeredOpenAIAccountSchedulerSessionStickyRuntimeBlockedAccountFallsBackWithoutRebinding(t *testing.T) {
+func TestLayeredOpenAIAccountSchedulerSessionStickyRuntimeBlockedAccountFallsBack(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(101012)
 	const requestedModel = "gpt-5.1"
 
 	testCases := []struct {
-		name  string
-		block func(*OpenAIGatewayService, *Account)
+		name        string
+		block       func(*OpenAIGatewayService, *Account)
+		clearSticky bool
 	}{
 		{
-			name: "global runtime cooldown",
+			name:        "global runtime cooldown",
+			clearSticky: true,
 			block: func(svc *OpenAIGatewayService, account *Account) {
-				svc.BlockAccountScheduling(account, time.Now().Add(time.Minute), "test")
+				until := time.Now().Add(time.Minute)
+				account.TempUnschedulableUntil = &until
+				svc.BlockAccountScheduling(account, until, "test")
 			},
 		},
 		{
@@ -2938,6 +2963,7 @@ func TestLayeredOpenAIAccountSchedulerSessionStickyRuntimeBlockedAccountFallsBac
 			}
 			t.Cleanup(svc.StopOpenAIAccountScheduler)
 			tc.block(svc, &sticky)
+			svc.accountRepo = schedulerTestOpenAIAccountRepo{accounts: []Account{sticky, backup}}
 
 			selection, decision, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", sessionHash, requestedModel, nil, OpenAIUpstreamTransportAny, false)
 			require.NoError(t, err)
@@ -2946,8 +2972,13 @@ func TestLayeredOpenAIAccountSchedulerSessionStickyRuntimeBlockedAccountFallsBac
 			require.Equal(t, backup.ID, selection.Account.ID)
 			require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
 			require.Equal(t, []int64{backup.ID}, acquiredIDs)
-			require.Equal(t, sticky.ID, cache.sessionBindings[sessionKey])
-			require.Zero(t, cache.deletedSessions[sessionKey])
+			if tc.clearSticky {
+				require.Equal(t, backup.ID, cache.sessionBindings[sessionKey])
+				require.Equal(t, 1, cache.deletedSessions[sessionKey])
+			} else {
+				require.Equal(t, sticky.ID, cache.sessionBindings[sessionKey])
+				require.Zero(t, cache.deletedSessions[sessionKey])
+			}
 			if selection.ReleaseFunc != nil {
 				selection.ReleaseFunc()
 			}

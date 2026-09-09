@@ -58,10 +58,13 @@ func TestCNProviderBalanceCheckRunOnceProbesCodingPlanQuota(t *testing.T) {
 	// 临时阈值停调仍需刷新快照，以便额度恢复后调度器能放开账号。
 	zhipuCoding := Account{ID: 4, Platform: PlatformZhipu, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, TempUnschedulableUntil: &thresholdPausedUntil,
 		Credentials: map[string]any{"account_mode": "coding"}}
+	minimaxCoding := Account{ID: 5, Platform: PlatformMiniMax, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true,
+		Credentials: map[string]any{"account_mode": "coding"}}
 
 	repo := &fakeCNCheckRepo{byPlatform: map[string][]Account{
-		PlatformKimi:  {kimiActive, kimiPaused, kimiInactive},
-		PlatformZhipu: {zhipuCoding},
+		PlatformKimi:    {kimiActive, kimiPaused, kimiInactive},
+		PlatformZhipu:   {zhipuCoding},
+		PlatformMiniMax: {minimaxCoding},
 	}}
 	prober := &fakeCNQuotaProber{}
 	svc := &CNProviderBalanceCheckService{
@@ -72,7 +75,7 @@ func TestCNProviderBalanceCheckRunOnceProbesCodingPlanQuota(t *testing.T) {
 
 	svc.runOnce()
 
-	require.ElementsMatch(t, []int64{1, 4}, prober.probedIDs())
+	require.ElementsMatch(t, []int64{1, 4, 5}, prober.probedIDs())
 }
 
 // runOnceZhipuQuota 在 quotaService 缺失时安全跳过（Start 门控不启动的老部署路径）。

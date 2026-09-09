@@ -19,7 +19,10 @@ vi.mock('vue-router', () => ({
 }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ isAdmin: false }) }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError: vi.fn() }) }))
-vi.mock('@/utils/featureFlags', () => ({ isChannelMonitorThroughputHidden: () => false }))
+vi.mock('@/utils/featureFlags', () => ({
+  isChannelMonitorThroughputHidden: () => false,
+  isChannelMonitorUserRankingHidden: () => false,
+}))
 vi.mock('vue-i18n', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-i18n')>()
   return {

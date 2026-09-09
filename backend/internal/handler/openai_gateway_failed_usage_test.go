@@ -1414,7 +1414,7 @@ func TestOpenAIGatewayHandler_ChatCompletionsHashesBeforeChannelMapping(t *testi
 			ModelMapping: map[string]map[string]string{service.PlatformOpenAI: {"client-model": "mapped-model"}},
 		},
 		groupPlatforms: map[int64]string{groupID: service.PlatformOpenAI},
-	}, nil, nil, nil)
+	}, nil, nil, nil, nil)
 	env := newOpenAIResponsesRetentionTestEnv(t, &service.Group{MaxReasoningEffort: "high"}, cache, nil, settings, channelService, nil)
 	env.billingRepo.applied = make(chan *service.UsageBillingCommand, 1)
 	env.upstream.responses = []*http.Response{{
@@ -1752,7 +1752,7 @@ func TestOpenAIGatewayHandler_ResponsesFailedUsageUsesFinalOutboundModel(t *test
 			},
 		},
 		groupPlatforms: map[int64]string{groupID: service.PlatformOpenAI},
-	}, nil, nil, nil)
+	}, nil, nil, nil, nil)
 
 	gatewayService := service.NewOpenAIGatewayService(
 		accountRepo,
@@ -1837,7 +1837,7 @@ func TestOpenAIGatewayHandler_GrokResponsesFailedUsageUsesFinalOutboundModel(t *
 			ModelMapping: map[string]map[string]string{service.PlatformGrok: {"grok-client": "grok-channel"}},
 		},
 		groupPlatforms: map[int64]string{groupID: service.PlatformGrok},
-	}, nil, nil, nil)
+	}, nil, nil, nil, nil)
 	gatewayService := service.NewOpenAIGatewayService(
 		accountRepo, usageRepo, nil, nil, nil, nil, openAIChatCompletionsGatewayCacheStub{}, cfg, nil,
 		concurrencyService, service.NewBillingService(cfg, nil), nil, billingCacheService, httpUpstream,
@@ -1917,7 +1917,7 @@ func TestOpenAIGatewayHandler_Responses429FastStopCreatesUsageLog(t *testing.T) 
 			},
 		},
 		groupPlatforms: map[int64]string{groupID: service.PlatformOpenAI},
-	}, nil, nil, nil)
+	}, nil, nil, nil, nil)
 
 	gatewayService := service.NewOpenAIGatewayService(
 		accountRepo,

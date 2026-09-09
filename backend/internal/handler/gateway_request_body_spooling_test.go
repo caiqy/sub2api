@@ -549,7 +549,7 @@ func TestOpenAIGatewayHandler_CountTokensParseSpoolFailuresReturn503WithoutSideE
 						ModelMapping: map[string]map[string]string{service.PlatformOpenAI: {"client-model": "mapped-model"}},
 					},
 					groupPlatforms: map[int64]string{groupID: service.PlatformOpenAI},
-				}, nil, nil, nil)
+				}, nil, nil, nil, nil)
 				env := newOpenAIResponsesRetentionTestEnv(t, nil, nil, nil, nil, channelService, nil)
 				env.apiKey.Group.AllowMessagesDispatch = true
 				return env
