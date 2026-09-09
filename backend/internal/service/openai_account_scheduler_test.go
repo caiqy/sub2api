@@ -145,6 +145,17 @@ func (s *openAIWSStateStoreSpy) DeleteSessionConn(groupID int64, sessionHash str
 	delete(s.sessionConnections, sessionHash)
 }
 
+func (s *openAIWSStateStoreSpy) MarkSessionInvalidEncryptedContent(int64, string, []string, time.Duration) {
+}
+
+func (s *openAIWSStateStoreSpy) GetSessionInvalidEncryptedContentDigests(int64, string) map[string]struct{} {
+	return nil
+}
+
+func (s *openAIWSStateStoreSpy) HasAnySessionInvalidEncryptedContent() bool {
+	return false
+}
+
 func newOpenAIStickyEnabledTestConfig() *config.Config {
 	cfg := &config.Config{}
 	cfg.Gateway.Sticky.OpenAI.Enabled = true

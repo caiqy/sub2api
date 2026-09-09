@@ -112,6 +112,7 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		SetUserConcurrencyEnabled(groupIn.UserConcurrencyEnabled).
 		SetUserConcurrencyLimit(groupIn.UserConcurrencyLimit).
 		SetModelsListConfig(groupIn.ModelsListConfig).
+		SetCodexModelsManifestConfig(groupIn.CodexModelsManifestConfig).
 		SetRpmLimit(groupIn.RPMLimit).
 		SetMaxReasoningEffort(groupIn.MaxReasoningEffort).
 		SetMaxReasoningEffortOverLimit(groupIn.MaxReasoningEffortOverLimit).
@@ -370,6 +371,7 @@ func updateGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		SetUserConcurrencyEnabled(groupIn.UserConcurrencyEnabled).
 		SetUserConcurrencyLimit(groupIn.UserConcurrencyLimit).
 		SetModelsListConfig(groupIn.ModelsListConfig).
+		SetCodexModelsManifestConfig(groupIn.CodexModelsManifestConfig).
 		SetRpmLimit(groupIn.RPMLimit).
 		SetMaxReasoningEffort(groupIn.MaxReasoningEffort).
 		SetMaxReasoningEffortOverLimit(groupIn.MaxReasoningEffortOverLimit).

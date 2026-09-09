@@ -65,6 +65,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 	defer coordinator.Cleanup()
+	c.Request.Body = http.NoBody
 	body, err := coordinator.ReadRaw()
 	if err != nil {
 		if status, ok := requestBodyReadErrorStatus(err); ok {
@@ -101,7 +102,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		h.responsesErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "model is required")
 		return
 	}
-	reqModel := modelResult.String()
+	reqModel := strings.Clone(modelResult.String())
 	bindRequestedReasoningEffort(c, body, reqModel)
 	ensureCompositeTargetPlatform(c, apiKey, reqModel)
 	if !compositeTargetPlatformResolved(c, apiKey, reqModel) {
@@ -155,6 +156,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		h.responsesSecurityAuditError(c, decision)
 		return
 	}
+	body = nil //nolint:ineffassign // The replayable handle owns the request while waiting.
 
 	// Parse and hash before queueing so waits retain only the replayable handle.
 	bodyRef := service.NewRequestBodyRefFromHandle(effectiveBody)
@@ -497,11 +499,11 @@ func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastEr
 		// In that case a terminal frame is still required; once any semantic or
 		// official terminal bytes exist, preserve them without appending a second
 		// generic response.failed.
-		_, opsErrorAlreadyMarked := service.GetOpsStreamError(c)
 		terminalAlreadyWritten := service.HasOpenAIResponseTerminalWritten(c)
+		_, opsErrorAlreadyMarked := service.GetOpsStreamError(c)
 		service.MarkOpsStreamError(c, code, message, status)
 		if !opsErrorAlreadyMarked && !terminalAlreadyWritten && c != nil && c.Writer != nil {
-			writeResponsesFailedSSE(c, code, message)
+			writeResponsesFailedSSE(c, code, "", message)
 		}
 		return
 	}

@@ -118,7 +118,7 @@ func TestSanitizeOpsUpstreamErrorsBoundsAndSanitizesEveryEventBody(t *testing.T)
 	require.NotNil(t, entry.UpstreamErrorsJSON)
 	stored, err := ParseOpsUpstreamErrors(*entry.UpstreamErrorsJSON)
 	require.NoError(t, err)
-	require.Len(t, stored, 16)
+	require.Len(t, stored, len(events))
 	for _, event := range stored {
 		require.LessOrEqual(t, len(event.UpstreamRequestBody), opsMaxStoredErrorBodyBytes)
 		require.LessOrEqual(t, len(event.UpstreamResponseBody), opsMaxStoredErrorBodyBytes)

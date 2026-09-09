@@ -33,7 +33,7 @@ func newSessionIDUsageLog(sessionID *string) *service.UsageLog {
 // is five positions before the end (the two body sizes and native compaction
 // flag precede created_at).
 func TestPrepareUsageLogInsert_SessionIDArgWiring(t *testing.T) {
-	require.Len(t, usageLogInsertArgTypes, 63, "arg-type table must include session_id, body sizes, and native compaction")
+	require.Len(t, usageLogInsertArgTypes, 64, "arg-type table must include upstream request ID, session ID, body sizes, and native compaction")
 	sessionID := "sess-persisted-123"
 	prepared := prepareUsageLogInsert(newSessionIDUsageLog(&sessionID))
 
