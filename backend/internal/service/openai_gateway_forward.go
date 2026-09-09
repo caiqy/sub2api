@@ -649,6 +649,13 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 		}
 	}
+	// WS 不经过 HTTP request builder，需在此 clamp；HTTP 在账号字段规则应用后按最终
+	// wire model/body clamp，避免规则改写 model 后沿用这里的旧判定。
+	if wsDecision.Transport == OpenAIUpstreamTransportResponsesWebsocketV2 {
+		if clampedCap, ok := ollamaCloudResponsesMaxOutputTokensClamp(account, upstreamModel, body); ok {
+			markPatchSet("max_output_tokens", clampedCap)
+		}
+	}
 	if wsDecision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 &&
 		!account.IsOpenAIApiKey() && gjson.GetBytes(body, "previous_response_id").Exists() {
 		markPatchDelete("previous_response_id")

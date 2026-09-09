@@ -771,7 +771,7 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_BearerAuthScheme(t *testing.T
 		Type:     AccountTypeAPIKey,
 		Credentials: map[string]any{
 			"api_key":  "ollama-key",
-			"base_url": "https://ollama.com",
+			"base_url": "https://ollama.com/v1/",
 		},
 		Extra: map[string]any{
 			"anthropic_passthrough":        true,

@@ -695,6 +695,12 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	if err != nil {
 		return nil, err
 	}
+	if cap, ok := ollamaCloudResponsesMaxOutputTokensClamp(account, gjson.GetBytes(body, "model").String(), body); ok {
+		body, err = sjson.SetBytes(body, "max_output_tokens", cap)
+		if err != nil {
+			return nil, err
+		}
+	}
 	bodyHandleMatchesInput := bodyHandle != nil && (bodyHandleKnown || openAIRequestBodyHandleMatchesBytes(bodyHandle, inputBody))
 	// DeepSeek / Kimi 原生 Responses 端点为无状态实现（见 normalizeDeepSeekResponsesRequestBody）。
 	body = normalizeDeepSeekResponsesRequestBody(account, body)

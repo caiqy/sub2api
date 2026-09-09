@@ -1052,6 +1052,10 @@ func isOllamaCloudBaseURL(raw string) bool {
 	return parsed.Path == "" || parsed.Path == "/v1"
 }
 
+func isOllamaCloudUpstreamBaseURL(raw string) bool {
+	return isOllamaCloudBaseURL(strings.TrimRight(strings.TrimSpace(raw), "/"))
+}
+
 func ollamaCloudUsageIdentity(account *Account) map[string]any {
 	if !IsOllamaCloudUsageAccount(account) {
 		return nil
