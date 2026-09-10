@@ -1494,9 +1494,6 @@ func (s *OpenAIGatewayService) bindHTTPResponseAccount(ctx context.Context, c *g
 	if s == nil || account == nil || account.ID <= 0 {
 		return
 	}
-	if !s.openAIStickyEnabled() {
-		return
-	}
 	responseID = strings.TrimSpace(responseID)
 	if responseID == "" {
 		return
@@ -1507,7 +1504,9 @@ func (s *OpenAIGatewayService) bindHTTPResponseAccount(ctx context.Context, c *g
 	}
 	groupID := getOpenAIGroupIDFromContext(c)
 	ttl := s.openAIWSResponseStickyTTL()
-	logOpenAIWSBindResponseAccountWarn(groupID, account.ID, responseID, store.BindResponseAccount(ctx, groupID, responseID, account.ID, ttl))
+	if s.openAIStickyEnabled() {
+		logOpenAIWSBindResponseAccountWarn(groupID, account.ID, responseID, store.BindResponseAccount(ctx, groupID, responseID, account.ID, ttl))
+	}
 	if c != nil {
 		if rawOwner, ok := c.Get(openAIHTTPResponseOwnerContextKey); ok {
 			if owner, ok := rawOwner.(openAIHTTPResponseOwner); ok && owner.userID > 0 && owner.apiKeyID > 0 {
