@@ -1,0 +1,164 @@
+schema: comet.native.v4
+name: admin-user-usage-excel-export
+language: zh-CN
+phase: archive
+status: done
+state_version: 10
+brief: brief.md
+shape_confirmation_hash: 08eebad73661a955499fbbff0d6608ebc0edf54b5a1cb146d57913b816bc4889
+spec_changes:
+  - capability: admin-user-token-ranking
+    operation: create
+    source: specs/admin-user-token-ranking/spec.md
+workspace:
+  isolation: current
+  change_branch: main
+  target_branch: main
+  finish: null
+loop:
+  stage: done
+  goal_cycle: 2
+  iteration: 1
+  attempt: 1
+  retry_epoch: 0
+  failed_iteration_count: 0
+  no_progress_count: 0
+  execution_failure_count: 0
+  previous_unresolved_ids: []
+  next_action: null
+acceptance:
+  - id: A1
+    source: brief.md
+    text: A1：在“用户排行”表格中，“#”序号列后、“用户”列前显示“用户名”列；用户有 username 时展示其用户名，无 username
+      时回退展示邮箱（若两者均无展示 `-`）。
+    result: passed
+    reason:
+      text: "UserTokenRanking.vue 在 # 与 用户 列之间增加 用户名 列；有 username 显示
+        username，为空回退显示邮箱，均无显示 -。"
+      truncated: false
+  - id: A2
+    source: brief.md
+    text: A2：在“用户排行”工具栏右侧展示“导出 Excel”按钮；当列表无数据或正在加载时，按钮处于禁用状态。
+    result: passed
+    reason:
+      text: 工具栏存在导出按钮，在 loading、exporting 或无数据时处于 disabled 状态。
+      truncated: false
+  - id: A3
+    source: brief.md
+    text: A3：在列表有数据时点击“导出 Excel”，触发生成并下载 Excel 文件（.xlsx）。
+    result: passed
+    reason:
+      text: 有数据时点击导出按钮动态导入 xlsx 和 file-saver，构建工作簿并触发 saveAs 下载 xlsx 文件。
+      truncated: false
+  - id: A4
+    source: brief.md
+    text: A4：导出的 Excel 文件表头为 `用户名`、`请求数(次)`、`总Token(亿)`、`计费额度(美元)`；“用户名”列优先为
+      username，为空时填入邮箱；数据行中总Token换算为以“亿”为单位并保留4位小数，计费额度保留4位小数。
+    result: passed
+    reason:
+      text: 中文表头与需求完全一致；数据行用户名为空时回退邮箱，总 Token 换算为亿且设置 0.0000 格式，计费额度设置 0.0000 格式。
+      truncated: false
+  - id: A5
+    source: brief.md
+    text: A5：在中英文语言切换下，表格列名与操作按钮文案均正确适配国际化，键名保持完整。
+    result: passed
+    reason:
+      text: 中英文 resources.ts 键名结构对齐且通过 check:i18n 完整性检查。
+      truncated: false
+builder_handoff:
+  candidate_id: 0cbcd63f-76e1-4869-a122-6ccba4b787f3
+  identity_provider: skill-coordinated
+  builder_execution_ref: skill-coordinated:builder:1e72f539-3c18-472e-af7c-f2497d5dea9c
+  iteration: 1
+  summary:
+    text: 在用户排行表格中增加用户名列并在为空时回退展示邮箱，增加导出 Excel
+      按钮并导出包含用户名、请求数(次)、总Token(亿)、计费额度(美元)四列的 xlsx
+      文件，总Token与费用格式化为4位小数单元格，中英文国际化与针对性测试全部通过
+    truncated: false
+  addressed_acceptance_ids:
+    - A1
+    - A2
+    - A3
+    - A4
+    - A5
+  checks:
+    - name:
+        text: unit-tests
+        truncated: false
+      result: passed
+      note:
+        text: UserTokenRanking.spec.ts 5 项测试全部通过
+        truncated: false
+    - name:
+        text: i18n-check
+        truncated: false
+      result: passed
+      note:
+        text: check:i18n 验证中英文字典完整对齐
+        truncated: false
+    - name:
+        text: typecheck
+        truncated: false
+      result: passed
+      note:
+        text: vue-tsc 检查无类型错误
+        truncated: false
+  checks_truncated: false
+  known_limits: []
+  known_limits_truncated: false
+  review:
+    status: passed
+    summary:
+      text: 只读复核通过：A1-A5 全部覆盖，0.0000 单元格数字格式妥善处理，无阻断性问题
+      truncated: false
+    reviewer_execution_ref: ses_f75f736f6ffeRiRUbEXwNTA89D
+  submitted_at: 2026-09-10T06:40:39.152Z
+blockers: []
+verification:
+  candidate_id: 0cbcd63f-76e1-4869-a122-6ccba4b787f3
+  identity_provider: skill-coordinated
+  verifier_execution_ref: skill-coordinated:verifier:85e96cae-bfe4-4ce6-a2ec-6b0a835da812
+  iteration: 1
+  attempt: 1
+  assurance: skill-coordinated
+  verdict: pass
+  checks: []
+  summary:
+    text: 全部 5 项验收标准通过，代码与测试均符合规格。
+    truncated: false
+  risks: []
+  risks_truncated: false
+  completed_at: 2026-09-10T06:44:45.337Z
+history:
+  - goal_cycle: 1
+    iteration: 0
+    attempt: 0
+    outcome: recovery
+    unresolved_ids: []
+    summary:
+      text: Native confirmed acceptance criteria changed
+      truncated: false
+    completed_at: 2026-09-10T06:25:47.312Z
+  - goal_cycle: 2
+    iteration: 1
+    attempt: 1
+    outcome: pass
+    unresolved_ids: []
+    summary:
+      text: 全部 5 项验收标准通过，代码与测试均符合规格。
+      truncated: false
+    completed_at: 2026-09-10T06:44:45.337Z
+history_overflow:
+  dropped_entries: 0
+  first_dropped_at: null
+  last_dropped_at: null
+  outcome_counts:
+    pass: 0
+    fail: 0
+    blocked: 0
+    execution-error: 0
+    recovery: 0
+verification_result: pass
+verification_report: verification.md
+archived: true
+created_at: 2026-09-10T06:17:13.964Z
