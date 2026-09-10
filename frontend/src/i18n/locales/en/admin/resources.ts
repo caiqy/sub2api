@@ -579,6 +579,7 @@ export default {
         exportExcel: 'Export Excel',
         exportSuccess: 'Export successful',
         exportFailed: 'Export failed',
+        exportTotal: 'Total',
         columns: {
           username: 'Username',
           user: 'User',

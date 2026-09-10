@@ -23,7 +23,7 @@ vi.mock('file-saver', () => ({
   saveAs: saveAsMock,
 }))
 
-vi.mock('xlsx', () => ({
+vi.mock('xlsx-js-style', () => ({
   utils: {
     aoa_to_sheet: aoaToSheetMock,
     book_new: bookNewMock,
@@ -174,7 +174,7 @@ describe('UserTokenRanking', () => {
     expect(exportBtn.attributes('disabled')).toBeUndefined()
   })
 
-  it('exports excel with correct headers, 100M token scale, 4 decimal cost, and username fallback', async () => {
+  it('exports excel sorted by billed cost desc with headers, 100M token scale, and username fallback', async () => {
     getUserBreakdown.mockResolvedValue({
       users: [
         { ...item(1, 840000000, 'alice', 1778.2539), requests: 27643 },
@@ -195,30 +195,55 @@ describe('UserTokenRanking', () => {
     expect(aoaToSheetMock).toHaveBeenCalledTimes(1)
     const passedAoa = aoaToSheetMock.mock.calls[0][0] as unknown[][]
 
+    const border = {
+      top: expect.objectContaining({ style: 'thin' }),
+      bottom: expect.objectContaining({ style: 'thin' }),
+      left: expect.objectContaining({ style: 'thin' }),
+      right: expect.objectContaining({ style: 'thin' }),
+    }
+    const alignment = { horizontal: 'left', vertical: 'center' }
+    const baseStyle = expect.objectContaining({ border, alignment })
+    const numStyle = expect.objectContaining({ border, alignment, numFmt: '0.0000' })
+    const boldStyle = expect.objectContaining({ font: expect.objectContaining({ bold: true }) })
+    const boldNumStyle = expect.objectContaining({ border, alignment, numFmt: '0.0000', font: expect.objectContaining({ bold: true }) })
+
     // Check header
     expect(passedAoa[0]).toEqual([
-      'admin.usage.tokenRanking.exportHeaders.username',
-      'admin.usage.tokenRanking.exportHeaders.requests',
-      'admin.usage.tokenRanking.exportHeaders.totalTokens',
-      'admin.usage.tokenRanking.exportHeaders.billedCost',
+      { t: 's', v: 'admin.usage.tokenRanking.exportHeaders.username', s: baseStyle },
+      { t: 's', v: 'admin.usage.tokenRanking.exportHeaders.requests', s: baseStyle },
+      { t: 's', v: 'admin.usage.tokenRanking.exportHeaders.totalTokens', s: baseStyle },
+      { t: 's', v: 'admin.usage.tokenRanking.exportHeaders.billedCost', s: baseStyle },
     ])
 
-    // Row 1: alice, requests: 27643, 8.4亿 (840,000,000 / 1e8 = 8.4), cost: 1778.2539, 4-decimal format
-    expect(passedAoa[1]).toEqual([
-      'alice',
-      27643,
-      { t: 'n', v: 8.4, z: '0.0000' },
-      { t: 'n', v: 1778.2539, z: '0.0000' },
-    ])
-
-    // Row 2: username empty -> falls back to email 'wangpingmo@scqtkj.com'
+    // Sorted by billed cost desc: 1968.5476 before 1778.2539
+    // Row 1: username empty -> falls back to email 'wangpingmo@scqtkj.com'
     // 460,000,000 / 1e8 = 4.6
-    expect(passedAoa[2]).toEqual([
-      'wangpingmo@scqtkj.com',
-      29315,
-      { t: 'n', v: 4.6, z: '0.0000' },
-      { t: 'n', v: 1968.5476, z: '0.0000' },
+    expect(passedAoa[1]).toEqual([
+      { t: 's', v: 'wangpingmo@scqtkj.com', s: baseStyle },
+      { t: 'n', v: 29315, s: baseStyle },
+      { t: 'n', v: 4.6, s: numStyle },
+      { t: 'n', v: 1968.5476, s: numStyle },
     ])
+
+    // Row 2: alice, requests: 27643, 8.4亿 (840,000,000 / 1e8 = 8.4), cost: 1778.2539, 4-decimal format
+    expect(passedAoa[2]).toEqual([
+      { t: 's', v: 'alice', s: baseStyle },
+      { t: 'n', v: 27643, s: baseStyle },
+      { t: 'n', v: 8.4, s: numStyle },
+      { t: 'n', v: 1778.2539, s: numStyle },
+    ])
+
+    // Total row with SUM formulas over the data rows and bold style
+    expect(passedAoa[3]).toEqual([
+      { t: 's', v: 'admin.usage.tokenRanking.exportTotal', s: boldStyle },
+      { t: 'n', v: 56958, f: 'SUM(B2:B3)', s: boldStyle },
+      { t: 'n', v: 13, f: 'SUM(C2:C3)', s: boldNumStyle },
+      { t: 'n', v: 3746.8015, f: 'SUM(D2:D3)', s: boldNumStyle },
+    ])
+
+    // Column widths match the reference table
+    const sheet = aoaToSheetMock.mock.results[0].value as { '!cols'?: unknown[] }
+    expect(sheet['!cols']).toEqual([{ width: 16.75 }, { width: 21.875 }, { width: 21.75 }, { width: 28.875 }])
 
     expect(saveAsMock).toHaveBeenCalledTimes(1)
     const fileName = saveAsMock.mock.calls[0][1]

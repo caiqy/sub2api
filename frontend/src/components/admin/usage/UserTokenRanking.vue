@@ -155,24 +155,70 @@ let reqSeq = 0
 const fmtTokens = (v: number) => formatCompactNumber(v)
 const fmtCost = (v: number) => formatCostFixed(v, 4)
 
+// 导出样式：与参考表格一致（全表细边框、左对齐垂直居中、总计行加粗、C/D 列四位小数）
+const EXPORT_BORDER_SIDE = { style: 'thin', color: { auto: 1 } }
+const EXPORT_BORDER = {
+  top: EXPORT_BORDER_SIDE,
+  bottom: EXPORT_BORDER_SIDE,
+  left: EXPORT_BORDER_SIDE,
+  right: EXPORT_BORDER_SIDE,
+}
+const EXPORT_FONT = { name: '宋体', sz: 12 }
+const EXPORT_BASE_STYLE = {
+  font: EXPORT_FONT,
+  border: EXPORT_BORDER,
+  alignment: { horizontal: 'left', vertical: 'center' },
+}
+const EXPORT_NUM_STYLE = { ...EXPORT_BASE_STYLE, numFmt: '0.0000' }
+const EXPORT_TOTAL_STYLE = { ...EXPORT_BASE_STYLE, font: { ...EXPORT_FONT, bold: true } }
+const EXPORT_TOTAL_NUM_STYLE = { ...EXPORT_NUM_STYLE, font: { ...EXPORT_FONT, bold: true } }
+
 const exportToExcel = async () => {
   if (exporting.value || items.value.length === 0) return
   exporting.value = true
   try {
-    const XLSX = await import('xlsx')
+    const XLSX = await import('xlsx-js-style')
     const headers = [
       t('admin.usage.tokenRanking.exportHeaders.username'),
       t('admin.usage.tokenRanking.exportHeaders.requests'),
       t('admin.usage.tokenRanking.exportHeaders.totalTokens'),
       t('admin.usage.tokenRanking.exportHeaders.billedCost'),
     ]
-    const rows = items.value.map((item) => [
-      item.username || item.email || '',
-      item.requests,
-      { t: 'n', v: Number((item.total_tokens / 1e8).toFixed(4)), z: '0.0000' },
-      { t: 'n', v: Number(item.actual_cost.toFixed(4)), z: '0.0000' },
+    // 导出按计费额度倒序，并在末尾追加总计行（SUM 公式）
+    const sorted = [...items.value].sort((a, b) => b.actual_cost - a.actual_cost)
+    const tokens = sorted.map((item) => Number((item.total_tokens / 1e8).toFixed(4)))
+    const costs = sorted.map((item) => Number(item.actual_cost.toFixed(4)))
+    const rows = sorted.map((item, i) => [
+      { t: 's', v: item.username || item.email || '', s: EXPORT_BASE_STYLE },
+      { t: 'n', v: item.requests, s: EXPORT_BASE_STYLE },
+      { t: 'n', v: tokens[i], s: EXPORT_NUM_STYLE },
+      { t: 'n', v: costs[i], s: EXPORT_NUM_STYLE },
     ])
-    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows])
+    const lastDataRow = rows.length + 1
+    const totalRow = [
+      { t: 's', v: t('admin.usage.tokenRanking.exportTotal'), s: EXPORT_TOTAL_STYLE },
+      {
+        t: 'n',
+        v: sorted.reduce((sum, item) => sum + item.requests, 0),
+        f: `SUM(B2:B${lastDataRow})`,
+        s: EXPORT_TOTAL_STYLE,
+      },
+      {
+        t: 'n',
+        v: Number(tokens.reduce((sum, v) => sum + v, 0).toFixed(4)),
+        f: `SUM(C2:C${lastDataRow})`,
+        s: EXPORT_TOTAL_NUM_STYLE,
+      },
+      {
+        t: 'n',
+        v: Number(costs.reduce((sum, v) => sum + v, 0).toFixed(4)),
+        f: `SUM(D2:D${lastDataRow})`,
+        s: EXPORT_TOTAL_NUM_STYLE,
+      },
+    ]
+    const headerRow = headers.map((v) => ({ t: 's', v, s: EXPORT_BASE_STYLE }))
+    const ws = XLSX.utils.aoa_to_sheet([headerRow, ...rows, totalRow])
+    ws['!cols'] = [{ width: 16.75 }, { width: 21.875 }, { width: 21.75 }, { width: 28.875 }]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Ranking')
     const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })

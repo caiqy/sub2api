@@ -576,6 +576,7 @@ export default {
         exportExcel: '导出 Excel',
         exportSuccess: '导出成功',
         exportFailed: '导出失败',
+        exportTotal: '总计',
         columns: {
           username: '用户名',
           user: '用户',
