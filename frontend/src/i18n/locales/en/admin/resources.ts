@@ -576,7 +576,11 @@ export default {
         subtitle: 'Per-user token usage for the current filters and time range',
         rowHint: "Click to view this user's usage details",
         userCount: '{count} users',
+        exportExcel: 'Export Excel',
+        exportSuccess: 'Export successful',
+        exportFailed: 'Export failed',
         columns: {
+          username: 'Username',
           user: 'User',
           requests: 'Requests',
           inputTokens: 'Input Tokens',
@@ -584,6 +588,12 @@ export default {
           cacheTokens: 'Cache Tokens',
           totalTokens: 'Total Tokens',
           cost: 'Cost'
+        },
+        exportHeaders: {
+          username: 'Username',
+          requests: 'Requests (Count)',
+          totalTokens: 'Total Tokens (100M)',
+          billedCost: 'Billed Amount (USD)'
         }
       },
       cleanup: {

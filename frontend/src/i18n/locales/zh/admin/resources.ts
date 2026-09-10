@@ -573,7 +573,11 @@ export default {
         subtitle: '按当前筛选与时间范围统计每个用户的 Token 用量',
         rowHint: '点击查看该用户的用量明细',
         userCount: '共 {count} 位用户',
+        exportExcel: '导出 Excel',
+        exportSuccess: '导出成功',
+        exportFailed: '导出失败',
         columns: {
+          username: '用户名',
           user: '用户',
           requests: '请求数',
           inputTokens: '输入 Token',
@@ -581,6 +585,12 @@ export default {
           cacheTokens: '缓存 Token',
           totalTokens: '总 Token',
           cost: '费用'
+        },
+        exportHeaders: {
+          username: '用户名',
+          requests: '请求数(次)',
+          totalTokens: '总Token(亿)',
+          billedCost: '计费额度(美元)'
         }
       },
       cleanup: {

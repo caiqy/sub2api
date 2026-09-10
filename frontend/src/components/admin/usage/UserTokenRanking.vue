@@ -11,6 +11,14 @@
         <div class="w-28">
           <Select v-model="limit" :options="limitOptions" @change="load" />
         </div>
+        <button
+          type="button"
+          class="btn btn-secondary text-xs py-1.5 px-3"
+          :disabled="loading || exporting || items.length === 0"
+          @click="exportToExcel"
+        >
+          {{ exporting ? t('usage.exporting') : t('admin.usage.tokenRanking.exportExcel') }}
+        </button>
       </div>
     </div>
 
@@ -20,6 +28,9 @@
         <thead class="bg-gray-50 dark:bg-dark-800">
           <tr>
             <th class="w-16 px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-dark-400 sm:px-6">#</th>
+            <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-dark-400">
+              {{ t('admin.usage.tokenRanking.columns.username') }}
+            </th>
             <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-dark-400">
               {{ t('admin.usage.tokenRanking.columns.user') }}
             </th>
@@ -37,12 +48,12 @@
         </thead>
         <tbody class="divide-y divide-gray-200 bg-white dark:divide-dark-700 dark:bg-dark-900">
           <tr v-if="loading">
-            <td :colspan="sortableColumns.length + 2" class="py-12 text-center">
+            <td :colspan="sortableColumns.length + 3" class="py-12 text-center">
               <LoadingSpinner />
             </td>
           </tr>
           <tr v-else-if="items.length === 0">
-            <td :colspan="sortableColumns.length + 2" class="py-12 text-center text-sm text-gray-400">
+            <td :colspan="sortableColumns.length + 3" class="py-12 text-center text-sm text-gray-400">
               {{ t('admin.dashboard.noDataAvailable') }}
             </td>
           </tr>
@@ -61,6 +72,9 @@
                 :class="RANK_BADGE_CLASSES[index]"
               >{{ index + 1 }}</span>
               <span v-else class="inline-block w-6 text-center text-sm tabular-nums text-gray-400">{{ index + 1 }}</span>
+            </td>
+            <td class="max-w-[200px] truncate px-4 py-3 text-sm text-gray-900 dark:text-gray-100" :title="item.username || item.email || '-'">
+              {{ item.username || item.email || '-' }}
             </td>
             <td class="max-w-[260px] truncate px-4 py-3 text-sm font-medium text-gray-700 dark:text-gray-200" :title="item.email">
               {{ item.email || `User #${item.user_id}` }}
@@ -82,8 +96,10 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { saveAs } from 'file-saver'
 import { getUserBreakdown, type UserBreakdownParams } from '@/api/admin/dashboard'
 import { formatCompactNumber, formatCostFixed } from '@/utils/format'
+import { useAppStore } from '@/stores/app'
 import type { UserBreakdownItem } from '@/types'
 import Select from '@/components/common/Select.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
@@ -98,6 +114,12 @@ const props = defineProps<{
 defineEmits<{ (e: 'select-user', userId: number, email: string): void }>()
 
 const { t } = useI18n()
+let appStore: ReturnType<typeof useAppStore> | null = null
+try {
+  appStore = useAppStore()
+} catch {
+  // outside pinia context
+}
 
 type SortKey = NonNullable<UserBreakdownParams['sort_by']>
 const sortableColumns: { key: SortKey; label: string }[] = [
@@ -125,12 +147,47 @@ const RANK_BADGE_CLASSES = [
 
 const items = ref<UserBreakdownItem[]>([])
 const loading = ref(false)
+const exporting = ref(false)
 const sortBy = ref<SortKey>('total_tokens')
 const limit = ref(50)
 let reqSeq = 0
 
 const fmtTokens = (v: number) => formatCompactNumber(v)
 const fmtCost = (v: number) => formatCostFixed(v, 4)
+
+const exportToExcel = async () => {
+  if (exporting.value || items.value.length === 0) return
+  exporting.value = true
+  try {
+    const XLSX = await import('xlsx')
+    const headers = [
+      t('admin.usage.tokenRanking.exportHeaders.username'),
+      t('admin.usage.tokenRanking.exportHeaders.requests'),
+      t('admin.usage.tokenRanking.exportHeaders.totalTokens'),
+      t('admin.usage.tokenRanking.exportHeaders.billedCost'),
+    ]
+    const rows = items.value.map((item) => [
+      item.username || item.email || '',
+      item.requests,
+      { t: 'n', v: Number((item.total_tokens / 1e8).toFixed(4)), z: '0.0000' },
+      { t: 'n', v: Number(item.actual_cost.toFixed(4)), z: '0.0000' },
+    ])
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows])
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Ranking')
+    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
+    saveAs(
+      new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+      `user_token_ranking_${props.startDate}_to_${props.endDate}.xlsx`
+    )
+    appStore?.showSuccess(t('admin.usage.tokenRanking.exportSuccess'))
+  } catch (error) {
+    console.error('Failed to export token ranking:', error)
+    appStore?.showError(t('admin.usage.tokenRanking.exportFailed'))
+  } finally {
+    exporting.value = false
+  }
+}
 
 const setSort = (key: SortKey) => {
   if (sortBy.value === key) return
@@ -168,5 +225,5 @@ watch(
   { immediate: true }
 )
 
-defineExpose({ reload: load })
+defineExpose({ reload: load, exportToExcel })
 </script>
