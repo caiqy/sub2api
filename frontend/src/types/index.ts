@@ -1907,6 +1907,8 @@ export interface UsageLogAccountSummary {
 }
 
 export interface AdminUsageLog extends UsageLog {
+  // 管理员接口返回的用户信息（含管理员备注）
+  user?: User & { notes?: string }
   // 是否存在明细数据（仅管理员可见）
   has_detail: boolean
   // 请求/响应体大小快照（字节），独立于可清理的详情记录

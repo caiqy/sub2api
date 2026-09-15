@@ -767,8 +767,10 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 	}
 	usageLog := usageLogFromServiceUser(l)
 	usageLog.UpstreamEndpoint = l.UpstreamEndpoint
+	usageLog.User = nil
 	return &AdminUsageLog{
 		UsageLog:                usageLog,
+		User:                    UserFromServiceAdmin(l.User),
 		HasDetail:               l.HasDetail,
 		RequestBodySize:         l.RequestBodySize,
 		ResponseBodySize:        l.ResponseBodySize,

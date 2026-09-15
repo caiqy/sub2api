@@ -699,6 +699,8 @@ type UsageLog struct {
 type AdminUsageLog struct {
 	UsageLog
 
+	User *AdminUser `json:"user,omitempty"`
+
 	HasDetail        bool   `json:"has_detail"`
 	RequestBodySize  *int64 `json:"request_body_size,omitempty"`
 	ResponseBodySize *int64 `json:"response_body_size,omitempty"`

@@ -350,6 +350,38 @@ func TestUsageLogFromService_PreservesHistoricalMissingImageSize(t *testing.T) {
 	require.NotContains(t, string(body), `"image_size":"2K"`)
 }
 
+func TestUsageLogFromServiceAdmin_IncludesUserNotes(t *testing.T) {
+	t.Parallel()
+
+	log := &service.UsageLog{
+		RequestID: "req_user_notes",
+		Model:     "gpt-5",
+		User: &service.User{
+			ID:       81,
+			Email:    "1982873708@qq.com",
+			Username: "testuser",
+			Notes:    "VIP customer remark",
+		},
+	}
+
+	userDTO := UsageLogFromService(log)
+	require.NotNil(t, userDTO.User)
+	require.Equal(t, "testuser", userDTO.User.Username)
+	userBody, err := json.Marshal(userDTO)
+	require.NoError(t, err)
+	require.NotContains(t, string(userBody), "VIP customer remark")
+
+	adminDTO := UsageLogFromServiceAdmin(log)
+	require.NotNil(t, adminDTO.User)
+	require.Equal(t, "testuser", adminDTO.User.Username)
+	require.Equal(t, "VIP customer remark", adminDTO.User.Notes)
+
+	adminBody, err := json.Marshal(adminDTO)
+	require.NoError(t, err)
+	require.Contains(t, string(adminBody), `"notes":"VIP customer remark"`)
+	require.Contains(t, string(adminBody), `"username":"testuser"`)
+}
+
 func f64Ptr(value float64) *float64 {
 	return &value
 }

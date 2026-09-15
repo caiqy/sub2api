@@ -97,6 +97,7 @@ const DataTableStub = {
   template: `
     <div>
       <div v-for="row in data" :key="row.request_id">
+        <slot name="cell-user" :row="row" />
         <slot name="cell-model" :row="row" :value="row.model" />
         <slot name="cell-reasoning_effort" :row="row" :value="row.reasoning_effort" />
         <slot name="cell-billing_mode" :row="row" />
@@ -996,5 +997,79 @@ describe('admin UsageTable detail action', () => {
 
     await buttons[0]!.trigger('click')
     expect(wrapper.emitted('detail')).toEqual([[[{ request_id: 'req-1', has_detail: true }][0]]])
+  })
+})
+
+describe('UsageTable user column', () => {
+  it('renders user note on a second line when present', () => {
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [
+          {
+            request_id: 'req-user-1',
+            user_id: 81,
+            user: {
+              id: 81,
+              email: '1982873708@qq.com',
+              username: 'testuser',
+              notes: 'VIP customer remark',
+            },
+          },
+        ],
+        loading: false,
+        columns: [],
+      },
+      global: {
+        stubs: {
+          DataTable: DataTableStub,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('testuser')
+    expect(wrapper.text()).toContain('#81')
+    expect(wrapper.text()).toContain('VIP customer remark')
+
+    const noteEl = wrapper.find('[data-test="user-notes"]')
+    expect(noteEl.exists()).toBe(true)
+    expect(noteEl.text()).toBe('VIP customer remark')
+    expect(noteEl.attributes('title')).toBe('VIP customer remark')
+    expect(noteEl.classes()).toContain('text-xs')
+  })
+
+  it('omits second line when user has no notes', () => {
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [
+          {
+            request_id: 'req-user-2',
+            user_id: 1,
+            user: {
+              id: 1,
+              email: 'admin@example.com',
+              username: 'admin',
+              notes: '',
+            },
+          },
+        ],
+        loading: false,
+        columns: [],
+      },
+      global: {
+        stubs: {
+          DataTable: DataTableStub,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('admin')
+    expect(wrapper.text()).toContain('#1')
+    expect(wrapper.find('[data-test="user-notes"]').exists()).toBe(false)
   })
 })
