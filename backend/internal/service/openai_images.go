@@ -750,8 +750,8 @@ func (s *OpenAIGatewayService) PrepareOpenAIImagesOAuthBody(parsed *OpenAIImages
 	if err := validateOpenAIImagesModel(requestModel); err != nil {
 		return nil, err
 	}
-	body, _, err := buildOpenAIImagesOAuthPayload(parsed, requestModel)
-	return body, err
+	// 缓存可重放的 Images 参数；最终协议由转发时的账号映射决定。
+	return buildOpenAIImagesJSONPayload(parsed, requestModel)
 }
 
 func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(

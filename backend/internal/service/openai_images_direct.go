@@ -41,15 +41,20 @@ func usesCodexDirectImages(model string) bool {
 
 // 正式转发与后台测试共用同一份端点选择和请求构造。
 func buildOpenAIImagesOAuthPayload(parsed *OpenAIImagesRequest, model string) ([]byte, string, error) {
-	if parsed == nil {
-		return nil, "", fmt.Errorf("parsed images request is required")
-	}
 	if !usesCodexDirectImages(model) {
 		body, err := buildOpenAIImagesResponsesRequest(parsed, model)
 		return body, chatgptCodexURL, err
 	}
+	body, err := buildOpenAIImagesJSONPayload(parsed, model)
+	return body, openAIImagesDirectTargetURL(parsed), err
+}
+
+func buildOpenAIImagesJSONPayload(parsed *OpenAIImagesRequest, model string) ([]byte, error) {
+	if parsed == nil {
+		return nil, fmt.Errorf("parsed images request is required")
+	}
 	if strings.TrimSpace(parsed.Prompt) == "" {
-		return nil, "", fmt.Errorf("prompt is required")
+		return nil, fmt.Errorf("prompt is required")
 	}
 	// 只把已解析并校验的图片字段发送给上游，避免客户端注入任意 JSON 字段。
 	payload := make(map[string]any, 16)
@@ -95,12 +100,12 @@ func buildOpenAIImagesOAuthPayload(parsed *OpenAIImagesRequest, model string) ([
 		for _, upload := range parsed.Uploads {
 			url, err := openAIImageUploadToDataURL(upload)
 			if err != nil {
-				return nil, "", err
+				return nil, err
 			}
 			images = append(images, map[string]string{"image_url": url})
 		}
 		if len(images) == 0 {
-			return nil, "", fmt.Errorf("image input is required")
+			return nil, fmt.Errorf("image input is required")
 		}
 		payload["images"] = images
 		mask := strings.TrimSpace(parsed.MaskImageURL)
@@ -108,7 +113,7 @@ func buildOpenAIImagesOAuthPayload(parsed *OpenAIImagesRequest, model string) ([
 			var err error
 			mask, err = openAIImageUploadToDataURL(*parsed.MaskUpload)
 			if err != nil {
-				return nil, "", err
+				return nil, err
 			}
 		}
 		if mask != "" {
@@ -117,9 +122,9 @@ func buildOpenAIImagesOAuthPayload(parsed *OpenAIImagesRequest, model string) ([
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return nil, "", fmt.Errorf("marshal Codex Images request: %w", err)
+		return nil, fmt.Errorf("marshal Codex Images request: %w", err)
 	}
-	return body, openAIImagesDirectTargetURL(parsed), nil
+	return body, nil
 }
 
 func openAIImagesDirectTargetURL(parsed *OpenAIImagesRequest) string {
