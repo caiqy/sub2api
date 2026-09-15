@@ -35,6 +35,8 @@ func (r usageLogDetailRepoResult) LastInsertId() (int64, error) { return int64(r
 func (r usageLogDetailRepoResult) RowsAffected() (int64, error) { return int64(r), nil }
 
 func TestUsageLogRepositoryCreateSingle_SkipsDetailPersistenceWhenDisabled(t *testing.T) {
+	resetUsageLogDetailRetentionLimitsForRepositoryTest(t)
+	service.SetUsageLogDetailRetentionLimits(0, 0)
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
@@ -109,6 +111,7 @@ func TestUsageLogRepositoryFlushCreateBatch_FallbackUsesOriginalRequestContextFo
 }
 
 func TestUsageLogDetailRepositoryCreate_WrapsInsertError(t *testing.T) {
+	resetUsageLogDetailRetentionLimitsForRepositoryTest(t)
 	insertErr := errors.New("insert boom")
 	repo := newUsageLogDetailRepositoryWithSQL(&usageLogDetailRepoExecStub{
 		execFn: func(ctx context.Context, query string, args ...any) (sql.Result, error) {
@@ -123,6 +126,7 @@ func TestUsageLogDetailRepositoryCreate_WrapsInsertError(t *testing.T) {
 }
 
 func TestUsageLogDetailRepositoryCreate_WrapsPruneError(t *testing.T) {
+	resetUsageLogDetailRetentionLimitsForRepositoryTest(t)
 	pruneErr := errors.New("prune boom")
 	repo := newUsageLogDetailRepositoryWithSQL(&usageLogDetailRepoExecStub{
 		execFn: func(ctx context.Context, query string, args ...any) (sql.Result, error) {

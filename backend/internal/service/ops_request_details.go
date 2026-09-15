@@ -26,8 +26,9 @@ type OpsRequestDetail struct {
 	// UpstreamModel is the model ultimately sent to the upstream provider.
 	UpstreamModel string `json:"upstream_model,omitempty"`
 
-	DurationMs *int `json:"duration_ms,omitempty"`
-	StatusCode *int `json:"status_code,omitempty"`
+	DurationMs   *int `json:"duration_ms,omitempty"`
+	FirstTokenMs *int `json:"first_token_ms,omitempty"`
+	StatusCode   *int `json:"status_code,omitempty"`
 
 	// When Kind == "error", ErrorID links to /admin/ops/errors/:id.
 	ErrorID *int64 `json:"error_id,omitempty"`
@@ -65,7 +66,7 @@ type OpsRequestDetailFilter struct {
 	MinDurationMs *int
 	MaxDurationMs *int
 
-	// Sort: created_at_desc (default) or duration_desc.
+	// Sort: created_at_desc (default), duration_desc or ttft_desc.
 	Sort string
 
 	Page     int

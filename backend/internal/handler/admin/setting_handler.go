@@ -395,6 +395,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		ChannelMonitorHideUserRanking:        settings.ChannelMonitorHideUserRanking,
 
 		AvailableChannelsEnabled: settings.AvailableChannelsEnabled,
+		SubscriptionEnabled:      settings.SubscriptionEnabled,
 
 		ModelPlazaEnabled:       settings.ModelPlazaEnabled,
 		ModelPlazaRequireAuth:   settings.ModelPlazaRequireAuth,

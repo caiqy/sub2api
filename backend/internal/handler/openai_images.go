@@ -127,17 +127,19 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	}
 	service.BindOpenAIRequestBodyHandle(c, coordinator.Effective())
 	if parsed.Prompt != "" {
-		oauthBody, prepareErr := h.gatewayService.PrepareOpenAIImagesOAuthBody(parsed, channelMapping.MappedModel)
+		prepareErr := func() error {
+			oauthBody, err := h.gatewayService.PrepareOpenAIImagesOAuthBody(parsed, channelMapping.MappedModel)
+			if err != nil {
+				return err
+			}
+			return coordinator.SetOAuthBytes(oauthBody)
+		}()
 		if prepareErr != nil {
 			if errors.Is(prepareErr, service.ErrRequestBodySpool) {
 				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 				return
 			}
 			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", prepareErr.Error())
-			return
-		}
-		if err := coordinator.SetOAuthBytes(oauthBody); err != nil {
-			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 			return
 		}
 	}

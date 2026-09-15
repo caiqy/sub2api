@@ -144,6 +144,11 @@ func (s *AntigravityGatewayService) forwardGeminiHandle(ctx context.Context, c *
 		return nil, s.writeGoogleError(c, http.StatusBadRequest, err.Error())
 	}
 
+	// Antigravity v1internal rejects built-in + functionDeclarations mixes (#6464).
+	if reconciled, err := enableMixedGeminiToolInvocations(injectedBody); err == nil {
+		injectedBody = reconciled
+	}
+
 	// 包装请求
 	wrappedBody, err := s.wrapV1InternalRequest(projectID, mappedModel, injectedBody)
 	if err != nil {

@@ -3,12 +3,13 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import RegisterView from '@/views/auth/RegisterView.vue'
 
-const { getPublicSettingsMock, startOAuthLoginMock, verifyActionMock, registerMock, showErrorMock } = vi.hoisted(() => ({
-	getPublicSettingsMock: vi.fn(),
-	startOAuthLoginMock: vi.fn(),
-	registerMock: vi.fn(),
-	verifyActionMock: vi.fn(),
-	showErrorMock: vi.fn()
+const { getPublicSettingsMock, registerMock, showErrorMock, pushMock, startOAuthLoginMock, verifyActionMock } = vi.hoisted(() => ({
+  getPublicSettingsMock: vi.fn(),
+  registerMock: vi.fn(),
+  showErrorMock: vi.fn(),
+  pushMock: vi.fn(),
+  startOAuthLoginMock: vi.fn(),
+  verifyActionMock: vi.fn()
 }))
 
 const locationState = { href: 'http://localhost/register' }
@@ -31,7 +32,7 @@ const publicSettings = {
 }
 
 vi.mock('vue-router', () => ({
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: pushMock }),
   useRoute: () => ({ query: {} })
 }))
 
@@ -71,7 +72,7 @@ vi.mock('@/api/auth', async () => {
 const CaptchaChallengeStub = defineComponent({
   setup(_, { expose }) {
     expose({ verifyAction: verifyActionMock, reset: vi.fn() })
-    return () => h('div')
+    return () => h('div', { 'data-testid': 'turnstile-widget' })
   }
 })
 
@@ -105,22 +106,96 @@ function mountRegister() {
   })
 }
 
-describe('RegisterView invitation layout', () => {
+describe('RegisterView', () => {
   beforeEach(() => {
-	getPublicSettingsMock.mockReset()
-	startOAuthLoginMock.mockReset()
-	verifyActionMock.mockReset()
-	startOAuthLoginMock.mockResolvedValue({ authorize_url: 'https://github.example/authorize' })
-	verifyActionMock.mockResolvedValue({ token: 'turnstile-token', randstr: '' })
-	registerMock.mockReset()
-	showErrorMock.mockReset()
-	getPublicSettingsMock.mockResolvedValue(publicSettings)
-	registerMock.mockResolvedValue({})
-	locationState.href = 'http://localhost/register'
-	Object.defineProperty(window, 'location', {
-		configurable: true,
-		value: locationState
-	})
+    getPublicSettingsMock.mockReset()
+    registerMock.mockReset()
+    showErrorMock.mockReset()
+    pushMock.mockReset()
+    verifyActionMock.mockReset()
+    startOAuthLoginMock.mockReset()
+    sessionStorage.removeItem('register_data')
+    verifyActionMock.mockResolvedValue({ token: 'ticket', randstr: 'randstr' })
+    startOAuthLoginMock.mockResolvedValue({ authorize_url: 'https://github.example/authorize' })
+    getPublicSettingsMock.mockResolvedValue(publicSettings)
+    registerMock.mockResolvedValue({})
+    locationState.href = 'http://localhost/register'
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: locationState
+    })
+  })
+
+  it.each([
+    ['', 'auth.confirmPasswordRequired'],
+    ['different-password', 'auth.passwordsDoNotMatch']
+  ])('blocks invalid confirmation %j before captcha and allows correction', async (confirmation, error) => {
+    getPublicSettingsMock.mockResolvedValueOnce({
+      ...publicSettings,
+      turnstile_enabled: false,
+      tencent_captcha_enabled: true,
+      tencent_captcha_app_id: 'app-id'
+    })
+    const wrapper = mountRegister()
+    await flushPromises()
+    await wrapper.get('#email').setValue('user@example.com')
+    await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('#confirmPassword').setValue(confirmation)
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(showErrorMock).toHaveBeenCalledWith(error)
+    expect(wrapper.get('#confirmPassword').classes()).toContain('input-error')
+    expect(registerMock).not.toHaveBeenCalled()
+    expect(verifyActionMock).not.toHaveBeenCalled()
+    expect(pushMock).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem('register_data')).toBeNull()
+
+    await wrapper.get('#confirmPassword').setValue('secret-123')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(wrapper.get('#confirmPassword').classes()).not.toContain('input-error')
+    expect(verifyActionMock).toHaveBeenCalledOnce()
+    expect(registerMock).toHaveBeenCalledWith({
+      email: 'user@example.com',
+      password: 'secret-123',
+      turnstile_token: undefined,
+      tencent_captcha_ticket: 'ticket',
+      tencent_captcha_randstr: 'randstr',
+      promo_code: undefined,
+      invitation_code: undefined
+    })
+    expect(pushMock).toHaveBeenCalledWith('/dashboard')
+  })
+
+  it('requires matching confirmation before storing only the registration fields for email verification', async () => {
+    getPublicSettingsMock.mockResolvedValueOnce({
+      ...publicSettings,
+      turnstile_enabled: false,
+      email_verify_enabled: true
+    })
+    const wrapper = mountRegister()
+    await flushPromises()
+    await wrapper.get('#email').setValue('user@example.com')
+    await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('#confirmPassword').setValue('different-password')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(sessionStorage.getItem('register_data')).toBeNull()
+    expect(pushMock).not.toHaveBeenCalled()
+
+    await wrapper.get('#confirmPassword').setValue('secret-123')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(JSON.parse(sessionStorage.getItem('register_data')!)).toEqual({
+      email: 'user@example.com',
+      password: 'secret-123'
+    })
+    expect(pushMock).toHaveBeenCalledWith('/email-verify')
+    expect(registerMock).not.toHaveBeenCalled()
   })
 
   it('keeps the optional affiliate invitation field before Turnstile', async () => {
@@ -151,11 +226,12 @@ describe('RegisterView invitation layout', () => {
     expect(wrapper.get('#invitation_code').exists()).toBe(true)
   })
 
-	it('starts OAuth through the Turnstile gate with its completed token', async () => {
+  it('starts OAuth through the Turnstile gate with its completed token', async () => {
     getPublicSettingsMock.mockResolvedValueOnce({
       ...publicSettings,
       github_oauth_enabled: true
     })
+    verifyActionMock.mockResolvedValueOnce({ token: 'turnstile-token', randstr: '' })
     const wrapper = mountRegister()
     await flushPromises()
 
@@ -199,6 +275,7 @@ describe('RegisterView invitation layout', () => {
     await flushPromises()
     await wrapper.get('#email').setValue('first@custom.example')
     await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('#confirmPassword').setValue('secret-123')
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
 
@@ -224,6 +301,7 @@ describe('RegisterView invitation layout', () => {
     await flushPromises()
     await wrapper.get('#email').setValue('second@custom.example')
     await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('#confirmPassword').setValue('secret-123')
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
 
@@ -244,6 +322,7 @@ describe('RegisterView invitation layout', () => {
     await flushPromises()
     await wrapper.get('#email').setValue('first@custom.example')
     await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('#confirmPassword').setValue('secret-123')
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
 
@@ -264,6 +343,7 @@ describe('RegisterView invitation layout', () => {
     await flushPromises()
     await wrapper.get('#email').setValue('user@allowed.com')
     await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('#confirmPassword').setValue('secret-123')
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
 
