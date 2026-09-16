@@ -980,6 +980,9 @@ func (s *SubscriptionService) ExtendSubscription(ctx context.Context, subscripti
 		sub = locked
 
 		now := time.Now()
+		if s.now != nil {
+			now = s.now()
+		}
 		isExpired := !sub.ExpiresAt.After(now)
 
 		// 如果订阅已过期，不允许负向调整
@@ -1014,6 +1017,11 @@ func (s *SubscriptionService) ExtendSubscription(ctx context.Context, subscripti
 		} else {
 			if err := s.userSubRepo.ExtendExpiry(txCtx, subscriptionID, newExpiresAt); err != nil {
 				return err
+			}
+			if sub.Status == SubscriptionStatusExpired {
+				if err := s.userSubRepo.UpdateStatus(txCtx, subscriptionID, SubscriptionStatusActive); err != nil {
+					return err
+				}
 			}
 		}
 

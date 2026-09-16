@@ -319,7 +319,9 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 						Host:           proxy.Host,
 						Port:           proxy.Port,
 						Username:       proxy.Username,
+						UsernameSet:    true,
 						Password:       proxy.Password,
+						PasswordSet:    true,
 					})
 				}
 			}
@@ -395,7 +397,9 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 				Host:           created.Host,
 				Port:           created.Port,
 				Username:       created.Username,
+				UsernameSet:    true,
 				Password:       created.Password,
+				PasswordSet:    true,
 			})
 		}
 	}

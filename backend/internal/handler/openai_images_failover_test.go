@@ -172,7 +172,7 @@ func TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhen
 
 	var body bytes.Buffer
 	form := multipart.NewWriter(&body)
-	require.NoError(t, form.WriteField("model", "gpt-image-2"))
+	require.NoError(t, form.WriteField("model", "gpt-image-1"))
 	require.NoError(t, form.WriteField("prompt", "draw a cat"))
 	require.NoError(t, form.WriteField("quality", "high"))
 	require.NoError(t, form.WriteField("size", "1536x1024"))

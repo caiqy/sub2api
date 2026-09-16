@@ -252,6 +252,19 @@ func (r *releaseAfterEOFBody) Close() error {
 	return nil
 }
 
+//go:noinline
+func newLargeMultipartReleaseAfterEOFRequest(t *testing.T) *http.Request {
+	t.Helper()
+	const textStart, textMiddle = "multipart-gc-secret-start-", "multipart-gc-secret-middle-"
+	var payload bytes.Buffer
+	writer := multipart.NewWriter(&payload)
+	require.NoError(t, writer.WriteField("prompt", textStart+strings.Repeat("x", (20<<20)-len(textStart)-len(textMiddle))+textMiddle))
+	require.NoError(t, writer.Close())
+	request := httptest.NewRequest(http.MethodPost, "/v1/images/generations", &releaseAfterEOFBody{data: append([]byte(nil), payload.Bytes()...)})
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	return request
+}
+
 type generatedJSONBody struct {
 	prefix    []byte
 	remaining int
@@ -580,14 +593,7 @@ func TestOpenAIImages_MultipartTextIsReleasedBeforeBlockedUpstream(t *testing.T)
 	var before runtime.MemStats
 	runtime.ReadMemStats(&before)
 
-	const textStart, textMiddle = "multipart-gc-secret-start-", "multipart-gc-secret-middle-"
-	var payload bytes.Buffer
-	writer := multipart.NewWriter(&payload)
-	require.NoError(t, writer.WriteField("prompt", textStart+strings.Repeat("x", (20<<20)-len(textStart)-len(textMiddle))+textMiddle))
-	require.NoError(t, writer.Close())
-	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", &releaseAfterEOFBody{data: append([]byte(nil), payload.Bytes()...)})
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	payload.Reset()
+	req := newLargeMultipartReleaseAfterEOFRequest(t)
 
 	upstream := &openAIImagesHashingUpstream{started: make(chan struct{}), release: make(chan struct{})}
 	group := &service.Group{ID: 950, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
@@ -619,6 +625,7 @@ func TestOpenAIImages_MultipartTextIsReleasedBeforeBlockedUpstream(t *testing.T)
 	}
 	require.Empty(t, requestContext.Request.MultipartForm.Value)
 	require.Positive(t, upstream.size)
+	runtime.GC()
 	runtime.GC()
 	var after runtime.MemStats
 	runtime.ReadMemStats(&after)

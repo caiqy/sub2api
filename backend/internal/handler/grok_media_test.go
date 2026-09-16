@@ -359,7 +359,7 @@ func TestGrokVideoStatus_UsesNoRequestBodyHandle(t *testing.T) {
 	require.NoDirExists(t, missingRawDir)
 }
 
-func TestGrokVideoStatus_RejectsSchedulerAccountOtherThanOwnerBinding(t *testing.T) {
+func TestGrokVideoStatus_PinsOwnerBindingBeforeScheduling(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	group := &service.Group{ID: 910, Platform: service.PlatformGrok, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
 	parentID := int64(913)
@@ -385,8 +385,8 @@ func TestGrokVideoStatus_RejectsSchedulerAccountOtherThanOwnerBinding(t *testing
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/videos/req_123", nil))
 
-	require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
-	require.Empty(t, upstream.accountIDs)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, []int64{owner.ID}, upstream.accountIDs)
 }
 
 func TestGrokMedia_GenerateEditVideoRejectUpstreamFailoverPreserveRequestSemantics(t *testing.T) {

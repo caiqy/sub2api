@@ -178,12 +178,14 @@ func (h *ProxyHandler) ImportData(c *gin.Context) {
 					ClearBackupID:  existingBackupProxyID == nil,
 					ExpiryWarnDays: &item.ExpiryWarnDays,
 					// 保留已存在代理的网络配置字段
-					Name:     existing.Name,
-					Protocol: existing.Protocol,
-					Host:     existing.Host,
-					Port:     existing.Port,
-					Username: existing.Username,
-					Password: existing.Password,
+					Name:        existing.Name,
+					Protocol:    existing.Protocol,
+					Host:        existing.Host,
+					Port:        existing.Port,
+					Username:    existing.Username,
+					UsernameSet: true,
+					Password:    existing.Password,
+					PasswordSet: true,
 				}
 				if _, err := h.adminService.UpdateProxy(ctx, existing.ID, updateInput); err != nil {
 					result.Errors = append(result.Errors, DataImportError{
@@ -267,7 +269,9 @@ func (h *ProxyHandler) ImportData(c *gin.Context) {
 				Host:           created.Host,
 				Port:           created.Port,
 				Username:       created.Username,
+				UsernameSet:    true,
 				Password:       created.Password,
+				PasswordSet:    true,
 			}); err != nil {
 				result.Errors = append(result.Errors, DataImportError{
 					Kind:     "proxy",

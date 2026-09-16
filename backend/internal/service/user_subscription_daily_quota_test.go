@@ -1086,7 +1086,7 @@ func TestExtendSubscription_ActiveDoesNotRechargeQuotaWindows(t *testing.T) {
 	require.False(t, subRepo.updateStatusCalled, "活跃订阅续期不应调用 UpdateStatus")
 }
 
-func TestExtendSubscription_UnexpiredDoesNotReactivateExpiredStatus(t *testing.T) {
+func TestExtendSubscription_UnexpiredReactivatesExpiredStatus(t *testing.T) {
 	now := time.Now().UTC()
 	start := now.Add(-3 * 24 * time.Hour)
 	oldExpiresAt := now.Add(4 * 24 * time.Hour)
@@ -1114,8 +1114,8 @@ func TestExtendSubscription_UnexpiredDoesNotReactivateExpiredStatus(t *testing.T
 
 	require.NoError(t, err)
 	require.Equal(t, oldExpiresAt.AddDate(0, 0, 7), renewed.ExpiresAt)
-	require.Equal(t, SubscriptionStatusExpired, renewed.Status)
-	require.False(t, subRepo.updateStatusCalled, "未过期 ExtendSubscription 只延长 ExpiresAt，不应恢复 active")
+	require.Equal(t, SubscriptionStatusActive, renewed.Status)
+	require.True(t, subRepo.updateStatusCalled, "未过期但状态为 expired 的订阅延长后应恢复 active")
 }
 
 func TestCheckAndResetWindows_StaleMonthlyUsesNextWindowStartNotStartOfDay(t *testing.T) {
