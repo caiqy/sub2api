@@ -1,0 +1,515 @@
+schema: comet.native.v4
+name: merge-upstream-v0-2-5
+language: zh-CN
+phase: archive
+status: done
+state_version: 15
+brief: brief.md
+shape_confirmation_hash: 3fbba6fb5023cbb095733a9f27ba379de68dd7df9dacb7763a256255664a91bf
+spec_changes:
+  - capability: upstream-release-sync
+    operation: modify
+    source: specs/upstream-release-sync/spec.md
+workspace:
+  isolation: branch
+  change_branch: comet/merge-upstream-v0-2-5
+  target_branch: main
+  finish: merge
+loop:
+  stage: done
+  goal_cycle: 1
+  iteration: 2
+  attempt: 2
+  retry_epoch: 0
+  failed_iteration_count: 0
+  no_progress_count: 0
+  execution_failure_count: 0
+  previous_unresolved_ids: []
+  next_action: null
+acceptance:
+  - id: A1
+    source: brief.md
+    text: "A1: Git 历史包含一个独立 `--no-ff` merge，其第二父为
+      `86f93c28ee34cc74b629dafb748bd5ac5ca8c5ea`；最终 HEAD 包含 `v0.2.5` 且不包含
+      post-`v0.2.5` upstream 提交。"
+    result: passed
+    reason:
+      text: HEAD 478371caa 为独立修复提交；原 merge 3fb0a6123 的第二父为 86f93c28e，v0.2.5 可达且未发现
+        post-tag upstream 提交。
+      truncated: false
+  - id: A2
+    source: brief.md
+    text: "A2: 合并后完成冲突标记检查、受影响能力测试、后端默认与 unit 测试、后端 lint、前端
+      ESLint/i18n/单测/类型检查、前后端构建和独立只读回归审计；发现的 fork 合并回归先用失败测试和最小修复闭合。"
+    result: passed
+    reason:
+      text: Runtime dispatch-r2 八项完整门禁及独立只读审查全部通过。
+      truncated: false
+  - id: A3
+    source: brief.md
+    text: "A3: `v0.2.5` 的 OpenAI/Codex WebSocket 执行作用域、池生命周期、抢占与心跳，原生
+      Images、Responses Lite namespace、模型映射、配额窗口和 OpenCode Go 能力成立。"
+    result: passed
+    reason:
+      text: upstream 能力与 fork 回归证据保留，未发现本轮修复引入的能力回归。
+      truncated: false
+  - id: A4
+    source: brief.md
+    text: "A4: `v0.2.5` 的 Antigravity/Gemini 模型与流式兼容、DeepSeek 模型校验与定价、Ollama Cloud
+      限流窗口、Grok media/Responses 及协议转换行为成立。"
+    result: passed
+    reason:
+      text: 指定模型、流式、DeepSeek、Ollama Cloud、Grok 与协议转换能力由测试和源码审查覆盖。
+      truncated: false
+  - id: A5
+    source: brief.md
+    text: "A5: `v0.2.5` 的订阅与 API Key 批量操作、注册密码确认、站点类型开关、监控与 Ops、代理凭据、支付及相关前端行为成立。"
+    result: passed
+    reason:
+      text: OAuth Images 生成、编辑、stream、multipart、映射和回退行为已通过正式回归。
+      truncated: false
+  - id: A6
+    source: brief.md
+    text: "A6: fork 的 scheduler、sticky/fallback、DB
+      recheck、请求体重放与清理、审计、每请求计费、运行时设置、插件边界、网关透传和前端定制语义保持成立。"
+    result: passed
+    reason:
+      text: scheduler、sticky/fallback、DB recheck、请求体生命周期、审计计费、运行时设置、插件、网关和前端定制未发现回归。
+      truncated: false
+  - id: A7
+    source: brief.md
+    text: "A7: 管理员用量记录继续展示仅管理员可见的用户备注，普通用户接口不泄露备注；用户 token 排名 Excel
+      导出的用户名、排序与样式定制保持成立。"
+    result: passed
+    reason:
+      text: 原始 overlay、OAuth 与 SetupToken 路径均通过。
+      truncated: false
+  - id: A8
+    source: brief.md
+    text: "A8: `backend/cmd/server/VERSION` 为 `0.2.5.1`，且没有创建或推送 tag、触发 release
+      workflow 或部署。"
+    result: passed
+    reason:
+      text: VERSION 为 0.2.5.1，未创建或推送 tag，未触发 release workflow，未部署。
+      truncated: false
+  - id: A9
+    source: brief.md
+    text: "A9: migrations、Ent/Wire 两次生成结果稳定；环境不支持的检查明确记录未覆盖范围；最终由新的只读 Verifier
+      对全部验收项给出独立结论。"
+    result: passed
+    reason:
+      text: generation、build、merge-boundary 及完整 Runtime 验证通过，结果保持在 v0.2.5 边界。
+      truncated: false
+  - id: A10
+    source: brief.md
+    text: "A10: `memory/context/upstream-merge-workflow.md`
+      仅在本轮产生经验证的新复用经验时增量更新，否则保持不变。"
+    result: passed
+    reason:
+      text: memory/context/upstream-merge-workflow.md 增量记录了本轮真实验证出的 Images 请求体缓存经验。
+      truncated: false
+  - id: A11
+    source: specs/upstream-release-sync/spec.md
+    text: 单一可追溯 merge 节点 - **WHEN** 当前 fork 基线已包含 `v0.2.4` - **THEN** 结果 merge
+      节点的第二父为 `86f93c28ee34cc74b629dafb748bd5ac5ca8c5ea`，`v0.2.5` 是结果 HEAD
+      的祖先，且结果不包含 post-`v0.2.5` upstream 提交
+    result: passed
+    reason:
+      text: v0.2.5 merge 节点及 candidate 修复提交的历史归因可审计。
+      truncated: false
+  - id: A12
+    source: specs/upstream-release-sync/spec.md
+    text: 合并审计发现 fork 回归 - **WHEN** 测试、构建或能力级源码审查发现合并结果破坏 fork 既有行为 - **THEN**
+      流程必须停留在 `v0.2.5` 边界，以失败测试和最小修复闭合问题后重新执行受影响及完整门禁
+    result: passed
+    reason:
+      text: 发现 Images fork 回归后先以失败测试复现，再以最小修复闭合并完成完整重跑。
+      truncated: false
+  - id: A13
+    source: specs/upstream-release-sync/spec.md
+    text: 发现 upstream 原样问题 - **WHEN** 审查发现问题在 `v0.2.5` peeled commit 中已原样存在，且本次合并与
+      fork 定制没有扩大或改变该问题 - **THEN** 记录该问题及证据但不在本 change 主动修复，不得以修复 upstream
+      既有问题为由扩大范围
+    result: passed
+    reason:
+      text: 逐版能力、fork 回归和独立只读审查证据均已提供。
+      truncated: false
+  - id: A14
+    source: specs/upstream-release-sync/spec.md
+    text: v0.2.5 能力验证 - **WHEN** `v0.2.5` merge 完成并准备交付 - **THEN** 该 tag 的主要能力由对应
+      upstream 测试、fork 回归测试和能力级源码审查覆盖
+    result: passed
+    reason:
+      text: 重叠调用链由正式 Images 回归测试及独立 reviewer 复核证明成立。
+      truncated: false
+  - id: A15
+    source: specs/upstream-release-sync/spec.md
+    text: upstream 修改重叠调用链 - **WHEN** upstream 更新触及上述 fork 能力所在文件或调用路径 - **THEN**
+      合并结果必须由现有或新增回归测试、或明确源码审查证明双方行为仍成立
+    result: passed
+    reason:
+      text: Docker/Testcontainers 未运行范围已明确记录，其余可执行门禁全部通过。
+      truncated: false
+  - id: A16
+    source: specs/upstream-release-sync/spec.md
+    text: 管理员备注和导出定制保持 - **WHEN** 合并后的管理员用量接口、普通用户用量接口和用户 token 排名导出被验证 - **THEN**
+      管理员仍可查看用户备注、普通用户响应不包含备注，且导出的用户名、排序和样式符合 fork 当前行为
+    result: passed
+    reason:
+      text: 管理员备注、普通用户隐私和导出定制未被本轮变更破坏，既有证据成立。
+      truncated: false
+  - id: A17
+    source: specs/upstream-release-sync/spec.md
+    text: 环境不支持部分检查 - **WHEN** 本机缺少 Docker/Testcontainers 或其他必要运行条件 - **THEN**
+      必须执行其余门禁并明确记录未运行范围，不得将其记为通过
+    result: passed
+    reason:
+      text: 未发生额外发布、部署或越过授权 upstream 边界的动作。
+      truncated: false
+  - id: A18
+    source: specs/upstream-release-sync/spec.md
+    text: 集成完成但不发布 - **WHEN** `v0.2.5` 合并及全部可执行验证通过 - **THEN** 项目保留可审计的集成提交和
+      `0.2.5.1` 版本文件，不创建或推送 Git tag、不触发 release workflow、不部署，并在任何后续 upstream tag
+      或 post-`v0.2.5` 提交前停止等待用户授权
+    result: passed
+    reason:
+      text: 项目保留可审计 merge 与 0.2.5.1 版本文件，并停止在 v0.2.5 边界。
+      truncated: false
+  - id: A19
+    source: specs/upstream-release-sync/spec.md
+    text: 本轮没有新的可复用经验 - **WHEN** 本轮实际过程没有超出现有项目记忆的有效原则 - **THEN**
+      `memory/context/upstream-merge-workflow.md` 保持不变，并在 Builder 交接中明确说明未产生新增记忆
+    result: passed
+    reason:
+      text: 本轮产生并验证了新的可复用 memory 经验，因此无经验分支不适用。
+      truncated: false
+builder_handoff:
+  candidate_id: 946e6d5f-f87c-487a-95bd-c5623560ab3b
+  identity_provider: skill-coordinated
+  builder_execution_ref: skill-coordinated:builder:6489291f-d20d-4af0-bd74-516711da4476
+  iteration: 2
+  summary:
+    text: 修复候选 478371caa：OAuth Images 缓存改为共享的规范化 Images JSON 参数，最终账号映射后才构造直连或
+      Responses
+      协议。正式回归测试先红后绿，覆盖生图/流式/JSON与multipart编辑、通道映射、账号映射与切换、释放后重放、404回退、mask和控制参数、共享缓存不变。增量记录真实的新合并经验。原始
+      merge 节点 3fb0a6123 保持不变，修复为其后的单独提交。
+    truncated: false
+  addressed_acceptance_ids:
+    - A1
+    - A2
+    - A3
+    - A4
+    - A5
+    - A6
+    - A7
+    - A8
+    - A9
+    - A10
+    - A11
+    - A12
+    - A13
+    - A14
+    - A15
+    - A16
+    - A17
+    - A18
+    - A19
+  checks:
+    - name:
+        text: 正式图片重放回归测试
+        truncated: false
+      result: passed
+      note:
+        text: 修改前生成、JSON编辑、multipart编辑的gpt-image-1映射场景均失败；修改后12个输入组合及各自3种路由通过。
+        truncated: false
+    - name:
+        text: 原始 overlay 复现
+        truncated: false
+      result: passed
+      note:
+        text: OAuth和SetupToken的4个原始场景均通过。
+        truncated: false
+    - name:
+        text: Images与请求体专项
+        truncated: false
+      result: passed
+      note:
+        text: service专项通过；handler初次直接go test超时，改用仓库scripts/test.ps1后18秒通过。
+        truncated: false
+    - name:
+        text: 独立只读复核
+        truncated: false
+      result: passed
+      note:
+        text: 新的reviewer ses_f59cb4d86ffeJllq2GmtwX8ARJ 审查全部修改和调用链，并运行4组相关现有测试通过。
+        truncated: false
+    - name:
+        text: 完整质量门禁
+        truncated: false
+      result: not-run
+      note:
+        text: 本候选待Runtime统一执行后端默认/unit、lint、前端全部门禁、构建、两轮生成和精确merge边界检查。
+        truncated: false
+  checks_truncated: false
+  known_limits:
+    - text: Docker未安装，Testcontainers/integration未运行；unit仍仅排除已在pristine upstream
+        v0.2.5复现的Ollama CAS失败。
+      truncated: false
+    - text: 未推送、未创建tag、未发布、未部署。
+      truncated: false
+  known_limits_truncated: false
+  review:
+    status: passed
+    summary:
+      text: 未发现参数丢失、协议选择、APIKey/SetupToken、错误回退、共享缓存或释放生命周期的新回归；只读专项测试通过。
+      truncated: false
+    reviewer_execution_ref: ses_f59cb4d86ffeJllq2GmtwX8ARJ
+  submitted_at: 2026-09-15T18:04:25.234Z
+blockers: []
+verification:
+  candidate_id: 946e6d5f-f87c-487a-95bd-c5623560ab3b
+  identity_provider: skill-coordinated
+  verifier_execution_ref: skill-coordinated:verifier:a6112d31-ca41-4684-afb5-9a6580c77c82
+  iteration: 2
+  attempt: 2
+  assurance: skill-coordinated
+  verdict: pass
+  checks:
+    - id: backend-default
+      name:
+        text: 后端默认测试
+        truncated: false
+      argv_display:
+        - text: -NoProfile
+          truncated: false
+        - text: -ExecutionPolicy
+          truncated: false
+        - text: Bypass
+          truncated: false
+        - text: -File
+          truncated: false
+        - text: scripts/test.ps1
+          truncated: false
+        - text: ./...
+          truncated: false
+      argv_truncated: false
+      cwd_ref: backend
+      status: passed
+      exit_code: 0
+      duration_ms: 186743
+    - id: backend-unit
+      name:
+        text: 后端unit强制新执行（排除已证实的upstream Ollama CAS失败）
+        truncated: false
+      argv_display:
+        - text: -NoProfile
+          truncated: false
+        - text: -ExecutionPolicy
+          truncated: false
+        - text: Bypass
+          truncated: false
+        - text: -File
+          truncated: false
+        - text: scripts/test.ps1
+          truncated: false
+        - text: -tags=unit
+          truncated: false
+        - text: -skip=^TestOllamaProbeCallback_StaleLongDoesNotOverrideNewShort$
+          truncated: false
+        - text: -count=1
+          truncated: false
+        - text: ./...
+          truncated: false
+      argv_truncated: false
+      cwd_ref: backend
+      status: passed
+      exit_code: 0
+      duration_ms: 235958
+    - id: backend-lint
+      name:
+        text: 后端静态检查
+        truncated: false
+      argv_display:
+        - text: run
+          truncated: false
+        - text: ./...
+          truncated: false
+      argv_truncated: false
+      cwd_ref: backend
+      status: passed
+      exit_code: 0
+      duration_ms: 48792
+    - id: frontend-gates
+      name:
+        text: 前端lint、类型、全量测试及构建
+        truncated: false
+      argv_display:
+        - text: -NoProfile
+          truncated: false
+        - text: -Command
+          truncated: false
+        - text: pnpm run lint:check && pnpm run typecheck && pnpm run test:run && pnpm run
+            build
+          truncated: false
+      argv_truncated: false
+      cwd_ref: frontend
+      status: passed
+      exit_code: 0
+      duration_ms: 296529
+    - id: backend-build
+      name:
+        text: 后端构建
+        truncated: false
+      argv_display:
+        - text: -NoProfile
+          truncated: false
+        - text: -Command
+          truncated: false
+        - text: if (-not (Test-Path -LiteralPath bin)) { throw 'missing bin directory' };
+            $env:CGO_ENABLED='0'; go build -ldflags='-s -w -X
+            main.Version=0.2.5.1' -trimpath -o bin/server.exe ./cmd/server; exit
+            $LASTEXITCODE
+          truncated: false
+      argv_truncated: false
+      cwd_ref: backend
+      status: passed
+      exit_code: 0
+      duration_ms: 5451
+    - id: generation
+      name:
+        text: Ent/Wire两轮生成稳定性
+        truncated: false
+      argv_display:
+        - text: -NoProfile
+          truncated: false
+        - text: -Command
+          truncated: false
+        - text: go generate ./ent; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; go
+            generate ./cmd/server; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE
+            }; git diff --exit-code -- ent cmd/server/wire_gen.go; if
+            ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; go generate ./ent; if
+            ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; go generate
+            ./cmd/server; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; git
+            diff --exit-code -- ent cmd/server/wire_gen.go; exit $LASTEXITCODE
+          truncated: false
+      argv_truncated: false
+      cwd_ref: backend
+      status: passed
+      exit_code: 0
+      duration_ms: 59516
+    - id: merge-boundary
+      name:
+        text: 原始merge节点、修复边界及版本
+        truncated: false
+      argv_display:
+        - text: -NoProfile
+          truncated: false
+        - text: -Command
+          truncated: false
+        - text: if ((git rev-parse 3fb0a6123^1) -ne
+            '240cd0702ca9eac1ac2d2915bbd789fac0cead32') { throw 'unexpected fork
+            parent' }; if ((git rev-parse 3fb0a6123^2) -ne
+            '86f93c28ee34cc74b629dafb748bd5ac5ca8c5ea') { throw 'unexpected
+            upstream parent' }; if ((git rev-parse HEAD^1) -ne
+            '3fb0a61232246290110cc5cb738cec1aa13e5398') { throw 'unexpected
+            repair parent' }; if ((git show
+            HEAD:backend/cmd/server/VERSION).Trim() -ne '0.2.5.1') { throw
+            'unexpected version' }; git merge-base --is-ancestor
+            86f93c28ee34cc74b629dafb748bd5ac5ca8c5ea HEAD; if ($LASTEXITCODE -ne
+            0) { exit $LASTEXITCODE }; git diff 240cd0702 HEAD --check; exit
+            $LASTEXITCODE
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 1310
+    - id: images-replay-regression
+      name:
+        text: 图片缓存映射、释放重放及回退专项
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: ./internal/service
+          truncated: false
+        - text: -run
+          truncated: false
+        - text: ^(TestOpenAIImagesPreparedBodyAccountMappingAndReplay|TestCodexDirectImagesMappingBeforeRouting|TestCodexDirectImagesHTTPErrorFallbacksOnlyWhenEndpointUnavailable|TestOpenAISetupTokenImagesUsesOAuthDirectPath)$
+          truncated: false
+        - text: -count=1
+          truncated: false
+      argv_truncated: false
+      cwd_ref: backend
+      status: passed
+      exit_code: 0
+      duration_ms: 6030
+  summary:
+    text: 最终验证通过。478371caa 修复 OAuth Images 在最终账号模型映射前过早固定协议的问题；正式回归、独立只读审查、Runtime
+      八项门禁、双父归因、版本与不发布边界均成立。
+    truncated: false
+  risks:
+    - text: Docker/Testcontainers 未运行。
+      truncated: false
+    - text: 首次 backend-unit 曾出现 OAuth Images HeapAlloc 116.09 MiB > 108.15 MiB；后续
+        memory count5 与强制全量 unit 均通过，代码期间未变，该不确定性保留。
+      truncated: false
+    - text: Ollama CAS 与 Images DONE 为 pristine v0.2.5 原有问题，不归因于 candidate。
+      truncated: false
+  risks_truncated: false
+  completed_at: 2026-09-15T23:34:55.371Z
+history:
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 1
+    outcome: pass
+    unresolved_ids: []
+    summary:
+      text: 独立核实候选 3fb0a612 的 merge 边界、版本、正式 Runtime 门禁、关键 fork 语义和上游原样问题归因；未发现本轮合并或
+        fork 交互引入的问题。
+      truncated: false
+    completed_at: 2026-09-15T17:12:22.742Z
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 1
+    outcome: recovery
+    unresolved_ids: []
+    summary:
+      text: 用户同意按第二轮审查建议修复：OAuth Images 账号映射跨协议时缓存的 Responses body 被发送到直连 Images
+        端点。将补正式失败测试，统一最终模型、payload和端点选择，复核释放重放及failover。
+      truncated: false
+    completed_at: 2026-09-15T17:48:16.857Z
+  - goal_cycle: 1
+    iteration: 2
+    attempt: 1
+    outcome: execution-error
+    unresolved_ids: []
+    summary:
+      text: "Native Verifier response was invalid: Native verification cannot pass
+        before every required check succeeds"
+      truncated: false
+    completed_at: 2026-09-15T18:39:35.728Z
+  - goal_cycle: 1
+    iteration: 2
+    attempt: 2
+    outcome: pass
+    unresolved_ids: []
+    summary:
+      text: 最终验证通过。478371caa 修复 OAuth Images 在最终账号模型映射前过早固定协议的问题；正式回归、独立只读审查、Runtime
+        八项门禁、双父归因、版本与不发布边界均成立。
+      truncated: false
+    completed_at: 2026-09-15T23:34:55.371Z
+history_overflow:
+  dropped_entries: 0
+  first_dropped_at: null
+  last_dropped_at: null
+  outcome_counts:
+    pass: 0
+    fail: 0
+    blocked: 0
+    execution-error: 0
+    recovery: 0
+verification_result: pass
+verification_report: verification.md
+archived: true
+created_at: 2026-09-15T09:57:21.060Z
