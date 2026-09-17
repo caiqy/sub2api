@@ -152,6 +152,75 @@ func TestSendCCUpstreamRequestHandleClosesErrorResponseBody(t *testing.T) {
 	require.True(t, respBody.closed)
 }
 
+func TestSendCCUpstreamRequestHandleForwardsOpenCodeSession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}]}`)
+
+	tests := []struct {
+		name         string
+		target       string
+		clientSess   string
+		wantSess     string
+		wantGenerate bool
+	}{
+		{
+			name:       "official opencode target keeps client session",
+			target:     "https://opencode.ai/zen/go/v1/chat/completions",
+			clientSess: "ses_abc123",
+			wantSess:   "ses_abc123",
+		},
+		{
+			name:         "official opencode target generates session without client value",
+			target:       "https://opencode.ai/zen/go/v1/chat/completions",
+			wantGenerate: true,
+		},
+		{
+			name:       "relay target still forwards client session",
+			target:     "https://relay.example.com/v1/chat/completions",
+			clientSess: "ses_relay456",
+			wantSess:   "ses_relay456",
+		},
+		{
+			name:   "third-party target without client session stays clean",
+			target: "https://api.deepseek.com/v1/chat/completions",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handle, err := NewRequestBodyHandleFromBytes(body, openAIRequestBodyHandleOptions())
+			require.NoError(t, err)
+			t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+			if tt.clientSess != "" {
+				c.Request.Header.Set(openCodeSessionHeader, tt.clientSess)
+			}
+
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": {"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"choices":[],"usage":{}}`)),
+			}}
+			svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+
+			resp, err := svc.sendCCUpstreamRequestHandle(context.Background(), c, rawChatCompletionsTestAccount(), tt.target, handle, "gpt-5.4", false, "token", "", "")
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+			_ = resp.Body.Close()
+
+			got := upstream.lastReq.Header.Get(openCodeSessionHeader)
+			if tt.wantGenerate {
+				require.NotEmpty(t, got)
+				return
+			}
+			require.Equal(t, tt.wantSess, got)
+		})
+	}
+}
+
 func TestForwardAsRawChatCompletions_ForcesStreamUsageUpstreamAndPassesUsageDownstream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

@@ -81,6 +81,15 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequestHandle(
 		applyGrokCacheHeaders(upstreamReq.Header, grokCacheIdentity)
 	}
 	account.ApplyHeaderOverrides(upstreamReq.Header)
+	// 入站 body 的 session hint 已由入口 rememberOpenCodeInboundBody 记录，
+	// 此处无需再传 body。
+	applyOpenCodeSessionHeader(c, account, targetURL, upstreamReq.Header)
+	// relay 链路（sub2api→sub2api）的目标不是 opencode.ai，
+	// applyOpenCodeSessionHeader 会按目标域跳过；客户端显式提供的会话 ID 仍需
+	// 原样带走，否则 per-conversation 亲和性在本地这跳丢失。其它上游忽略未知头。
+	if sessionID := sanitizeSessionID(c.GetHeader(openCodeSessionHeader)); sessionID != "" {
+		upstreamReq.Header.Set(openCodeSessionHeader, sessionID)
+	}
 	proxyURL := ""
 	if account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
