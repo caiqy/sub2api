@@ -94,6 +94,9 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequestHandle(
 	if account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
+	// 每次发送都覆盖实际端点（与旧 sendCCUpstreamRequest 对齐），避免 failover
+	// 尝试之间残留旧值；OpenCodeGo 的 messages/responses→CC 回退入口不会设置它。
+	SetActualOpenAIUpstreamEndpoint(c, "/v1/chat/completions")
 	SetUsageUpstreamRequest(c, upstreamReq, bodyHandle.PreviewString())
 	upstreamReq = upstreamReq.WithContext(context.WithValue(upstreamReq.Context(), openAIFinalUpstreamModelContextKey{}, strings.TrimSpace(upstreamModel)))
 	publishOpenAIFinalUpstreamModel(c, upstreamReq)

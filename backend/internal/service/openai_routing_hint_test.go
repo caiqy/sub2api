@@ -113,7 +113,7 @@ func TestOpenAIOAuthHTTPBuildersSendRoutingHintFromFinalBody(t *testing.T) {
 					if passthrough {
 						req, err = svc.buildUpstreamRequestOpenAIPassthrough(context.Background(), c, oauthAccount, tt.body, tt.body, "test-token")
 					} else {
-						req, err = svc.buildUpstreamRequest(context.Background(), c, oauthAccount, tt.body, "test-token", false, "", true)
+						req, err = svc.buildUpstreamRequestWithSourceBody(context.Background(), c, oauthAccount, tt.body, tt.body, "test-token", false, "", true)
 					}
 					require.NoError(t, err)
 					require.Equal(t, tt.want, req.Header.Get(openAICodexRoutingHintHeader))
@@ -244,7 +244,7 @@ func TestOpenAIRoutingDiagnosticsUseFinalDerivedValuesOnly(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
 	c.Request.Header.Set("Authorization", "Bearer caller-secret")
 	c.Request.Header.Set(openAICodexRoutingHintHeader, "model=caller-secret")
-	_, err := svc.buildUpstreamRequest(context.Background(), c, account, body, "oauth-secret", false, "", true)
+	_, err := svc.buildUpstreamRequestWithSourceBody(context.Background(), c, account, body, body, "oauth-secret", false, "", true)
 	require.NoError(t, err)
 	passthroughReq, err := svc.buildUpstreamRequestOpenAIPassthrough(context.Background(), c, account, body, body, "oauth-secret")
 	require.NoError(t, err)

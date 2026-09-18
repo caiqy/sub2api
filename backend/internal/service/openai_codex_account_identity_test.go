@@ -100,7 +100,12 @@ func TestCodexAccountIdentitySourceResolvesShadowAndOverwritesFailoverContext(t 
 		"chatgpt_account_id": "team-account",
 		"chatgpt_user_id":    "user-1",
 	}}
-	shadow := &Account{ID: 111, ParentAccountID: &parentID, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	// 指纹收敛是显式 opt-in；开启 session 模式以验证收敛模式下 session_id 按解析
+	// 出的父账号身份隔离（off 模式按设计原样透传、不隔离）。
+	shadow := &Account{
+		ID: 111, ParentAccountID: &parentID, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Extra: map[string]any{codexFingerprintModeExtraKey: string(codexFingerprintSession)},
+	}
 	service := &OpenAIGatewayService{accountRepo: &codexAccountIdentityRepoStub{account: parent}}
 
 	resolved, err := service.prepareCodexAccountIdentitySource(context.Background(), c, shadow)
@@ -108,10 +113,9 @@ func TestCodexAccountIdentitySourceResolvesShadowAndOverwritesFailoverContext(t 
 	require.Same(t, parent, resolved)
 	require.Same(t, parent, codexAccountIdentitySource(c, shadow))
 
-	req, err := service.buildUpstreamRequest(
-		context.Background(), c, shadow,
-		[]byte(`{"model":"gpt-5.6-codex","stream":true,"prompt_cache_key":"client-session"}`),
-		"token", true, "client-session", true,
+	body := []byte(`{"model":"gpt-5.6-codex","stream":true,"prompt_cache_key":"client-session"}`)
+	req, err := service.buildUpstreamRequestWithSourceBody(
+		context.Background(), c, shadow, body, body, "token", true, "client-session", true,
 	)
 	require.NoError(t, err)
 	require.Equal(t, isolateOpenAIUpstreamSessionID(0, parent, "client-session"), req.Header.Get("session_id"))
@@ -131,14 +135,24 @@ func TestBuildOpenAIWSHeadersNamespacesCodexIdentityByOAuthAccount(t *testing.T)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
-	c.Set("api_key_id", int64(77))
+	c.Set("api_key", &APIKey{ID: 77})
 	c.Request.Header.Set("x-codex-installation-id", "client-installation")
 	c.Request.Header.Set("thread-id", "client-thread")
 	c.Request.Header.Set("x-codex-window-id", "client-window")
 	c.Request.Header.Set("x-client-request-id", "client-request")
 
-	account11 := &Account{ID: 11, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"chatgpt_account_id": "chatgpt-account-11"}}
-	account19 := &Account{ID: 19, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"chatgpt_account_id": "chatgpt-account-19"}}
+	// 指纹收敛显式 opt-in：开启 session 模式后，HTTP 与 WS 都必须按账号基础身份
+	// 隔离同一个原始会话值（off 模式下两侧都按设计原样透传）。
+	account11 := &Account{
+		ID: 11, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Credentials: map[string]any{"chatgpt_account_id": "chatgpt-account-11"},
+		Extra:       map[string]any{codexFingerprintModeExtraKey: string(codexFingerprintSession)},
+	}
+	account19 := &Account{
+		ID: 19, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Credentials: map[string]any{"chatgpt_account_id": "chatgpt-account-19"},
+		Extra:       map[string]any{codexFingerprintModeExtraKey: string(codexFingerprintSession)},
+	}
 	service := &OpenAIGatewayService{}
 	build := func(account *Account) http.Header {
 		headers, _, err := service.buildOpenAIWSHeaders(
@@ -159,10 +173,9 @@ func TestBuildOpenAIWSHeadersNamespacesCodexIdentityByOAuthAccount(t *testing.T)
 		require.NotEqual(t, first.Get(header), second.Get(header), header)
 	}
 
-	httpRequest, err := service.buildUpstreamRequest(
-		context.Background(), c, account11,
-		[]byte(`{"model":"gpt-5.6-codex","stream":true,"prompt_cache_key":"client-session"}`),
-		"token", true, "client-session", true,
+	httpBody := []byte(`{"model":"gpt-5.6-codex","stream":true,"prompt_cache_key":"client-session"}`)
+	httpRequest, err := service.buildUpstreamRequestWithSourceBody(
+		context.Background(), c, account11, httpBody, httpBody, "token", true, "client-session", true,
 	)
 	require.NoError(t, err)
 	require.Equal(t, httpRequest.Header.Get("session_id"), first.Get("session_id"), "HTTP and WS must derive the same identity from the raw client key")
@@ -195,8 +208,8 @@ func TestBuildUpstreamRequestNamespacesCodexIdentityByOAuthAccount(t *testing.T)
 				"chatgpt_account_id": chatgptAccountID,
 			},
 		}
-		req, err := svc.buildUpstreamRequest(
-			context.Background(), c, account, body, "oauth-token", true, "client-session", true,
+		req, err := svc.buildUpstreamRequestWithSourceBody(
+			context.Background(), c, account, body, body, "oauth-token", true, "client-session", true,
 		)
 		require.NoError(t, err)
 		return req.Header

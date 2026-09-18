@@ -2683,7 +2683,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "too many open websocket connections, please retry later")
 		return
 	}
-	wsConn.SetReadLimit(16 * 1024 * 1024)
+	// 必须走配置：单条消息上限需大于 HTTP bridge 阈值（默认 15MiB）才能让大请求
+	// 落到 bridge；固定值曾导致 >16MiB 输入在入口被 1009 拒绝（上游 v0.1.134 语义）。
+	wsConn.SetReadLimit(service.ResolveOpenAIWSClientReadLimitBytes(h.cfg))
 
 	firstMessageTimeout := service.ResolveOpenAIWSClientFirstMessageTimeout(h.cfg)
 	readCtx, cancel := context.WithTimeout(ctx, firstMessageTimeout)

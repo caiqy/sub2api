@@ -127,6 +127,32 @@ func TestSendCCUpstreamRequestHandleReplaysSpoolBackedBody(t *testing.T) {
 	require.JSONEq(t, string(body), string(upstream.lastBody))
 }
 
+func TestSendCCUpstreamRequestHandleRecordsActualEndpoint(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}]}`)
+	handle, err := NewRequestBodyHandleFromBytes(body, openAIRequestBodyHandleOptions())
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	// 模拟 OpenCodeGo 的 messages/responses→CC 回退：入口不会设置 endpoint。
+	ClearActualOpenAIUpstreamEndpoint(c)
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": {"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"choices":[],"usage":{}}`)),
+	}}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+
+	resp, err := svc.sendCCUpstreamRequestHandle(context.Background(), c, rawChatCompletionsTestAccount(), "http://upstream.example/v1/chat/completions", handle, "gpt-5.4", false, "token", "", "")
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	_ = resp.Body.Close()
+	require.Equal(t, "/v1/chat/completions", GetActualOpenAIUpstreamEndpoint(c))
+}
+
 func TestSendCCUpstreamRequestHandleClosesErrorResponseBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}]}`)

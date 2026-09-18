@@ -237,7 +237,7 @@ func TestOpenCodeSessionForwardedByResponsesBuildersAfterAccountOverride(t *test
 		{
 			name: "normal responses",
 			build: func(c *gin.Context) (*http.Request, error) {
-				return svc.buildUpstreamRequest(context.Background(), c, account, body, "token", false, "", false)
+				return svc.buildUpstreamRequestWithSourceBody(context.Background(), c, account, body, body, "token", false, "", false)
 			},
 		},
 		{
@@ -271,7 +271,7 @@ func TestOpenCodeSessionForwardedFromPromptCacheKeyWithoutCallerHeader(t *testin
 	}
 	c := newOpenCodeSessionTestContext(t, "")
 	body := []byte(`{"model":"gpt-5","prompt_cache_key":"stable-cache-key","input":"hello"}`)
-	req, err := svc.buildUpstreamRequest(context.Background(), c, account, body, "token", false, "", false)
+	req, err := svc.buildUpstreamRequestWithSourceBody(context.Background(), c, account, body, body, "token", false, "", false)
 	require.NoError(t, err)
 	requireSingleOpenCodeSessionHeader(t, req.Header, "stable-cache-key")
 }
@@ -282,9 +282,9 @@ func TestOpenCodeSessionMissingCallerValueKeepsExistingOverrideBehavior(t *testi
 	account := openCodeSessionTestAccount("https://opencode.ai/zen/v1")
 	c := newOpenCodeSessionTestContext(t, "")
 
-	req, err := svc.buildUpstreamRequest(
-		context.Background(), c, account,
-		[]byte(`{"model":"gpt-5","input":"hello"}`), "token", false, "", false,
+	body := []byte(`{"model":"gpt-5","input":"hello"}`)
+	req, err := svc.buildUpstreamRequestWithSourceBody(
+		context.Background(), c, account, body, body, "token", false, "", false,
 	)
 	require.NoError(t, err)
 	require.Equal(t, "fixed-account-value", getHeaderRaw(req.Header, "x-opencode-session"))
@@ -315,10 +315,15 @@ func TestOpenCodeSessionForwardedByRawChatCompletionsAfterAccountOverride(t *tes
 	account := openCodeSessionTestAccount("https://opencode.ai/zen/v1")
 	c := newOpenCodeSessionTestContext(t, "conversation-789")
 
-	resp, err := svc.sendCCUpstreamRequest(
+	body := []byte(`{"model":"gpt-5"}`)
+	handle, err := NewRequestBodyHandleFromBytes(body, openAIRequestBodyHandleOptions())
+	require.NoError(t, err)
+	defer CleanupRequestBodyHandle(handle)
+
+	resp, err := svc.sendCCUpstreamRequestHandle(
 		context.Background(), c, account,
-		"https://opencode.ai/zen/v1/chat/completions", []byte(`{"model":"gpt-5"}`),
-		false, "token", "", "",
+		"https://opencode.ai/zen/v1/chat/completions", handle,
+		"gpt-5", false, "token", "", "",
 	)
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
@@ -344,9 +349,34 @@ func TestOpenCodeSessionIsNotForwardedToOtherUpstreams(t *testing.T) {
 				Credentials: map[string]any{"base_url": baseURL},
 			}
 			c := newOpenCodeSessionTestContext(t, "private-conversation")
-			req, err := svc.buildUpstreamRequest(context.Background(), c, account, body, "token", false, "", false)
+			req, err := svc.buildUpstreamRequestWithSourceBody(context.Background(), c, account, body, body, "token", false, "", false)
 			require.NoError(t, err)
 			require.Empty(t, req.Header.Get(openCodeSessionHeader))
 		})
 	}
+}
+
+func TestOpenCodeSessionLiveBuilderDerivesFromRememberedInboundBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := openCodeSessionTestService()
+	account := openCodeSessionTestAccount("https://opencode.ai/zen/go/v1")
+	c := newOpenCodeSessionTestContext(t, "")
+	rememberOpenCodeInboundBody(c, []byte(`{"prompt_cache_key":"stable-key"}`))
+
+	rewritten := []byte(`{"model":"gpt-5","input":"hello"}`)
+	req, err := svc.buildUpstreamRequestWithSourceBody(context.Background(), c, account, rewritten, rewritten, "token", false, "", false)
+	require.NoError(t, err)
+	requireSingleOpenCodeSessionHeader(t, req.Header, "stable-key")
+}
+
+func TestOpenCodeSessionLiveBuilderCallerHeaderBeatsAccountOverride(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := openCodeSessionTestService()
+	account := openCodeSessionTestAccount("https://opencode.ai/zen/go/v1")
+	c := newOpenCodeSessionTestContext(t, "client-session")
+
+	body := []byte(`{"model":"gpt-5","input":"hello"}`)
+	req, err := svc.buildUpstreamRequestWithSourceBody(context.Background(), c, account, body, body, "token", false, "", false)
+	require.NoError(t, err)
+	requireSingleOpenCodeSessionHeader(t, req.Header, "client-session")
 }

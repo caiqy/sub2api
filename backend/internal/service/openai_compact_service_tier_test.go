@@ -61,8 +61,8 @@ func TestOpenAIOAuthCompactHTTPBuildersUsePreservedServiceTierInRoutingHint(t *t
 		{
 			name: "ordinary",
 			build: func(c *gin.Context) (*http.Request, error) {
-				return svc.buildUpstreamRequest(
-					context.Background(), c, account, normalized, "test-token",
+				return svc.buildUpstreamRequestWithSourceBody(
+					context.Background(), c, account, normalized, normalized, "test-token",
 					false, "", true,
 				)
 			},

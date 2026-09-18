@@ -308,6 +308,9 @@ func buildGrokResponsesRequestWithHandle(ctx context.Context, c *gin.Context, ac
 	if err != nil {
 		return nil, err
 	}
+	// 与 buildGrokResponsesRequest 对齐：Grok 需要独立的传输 profile（首字节
+	// 超时与连接池隔离），handle 路径漏设会让主链路回落到默认 600s 超时。
+	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileGrok))
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
