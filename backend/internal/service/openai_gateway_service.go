@@ -71,6 +71,8 @@ const (
 )
 
 // OpenAI allowed headers whitelist (for non-passthrough).
+//
+//nolint:unused // Kept with the legacy builder for compatibility.
 var openaiAllowedHeaders = map[string]bool{
 	"accept-language":         true,
 	"content-type":            true,

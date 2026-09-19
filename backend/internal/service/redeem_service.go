@@ -724,3 +724,8 @@ func (s *RedeemService) reduceOrCancelSubscription(ctx context.Context, userID, 
 		return s.subscriptionService.userSubRepo.Update(txCtx, &updated)
 	})
 }
+
+// GetUserHistoryPaginated returns all redemption types for the authenticated user.
+func (s *RedeemService) GetUserHistoryPaginated(ctx context.Context, userID int64, params pagination.PaginationParams) ([]RedeemCode, *pagination.PaginationResult, error) {
+	return s.redeemRepo.ListByUserPaginated(ctx, userID, params, "")
+}

@@ -1,0 +1,280 @@
+schema: comet.native.v4
+name: merge-upstream-v0-2-7
+language: zh-CN
+phase: archive
+status: done
+state_version: 15
+brief: brief.md
+shape_confirmation_hash: 0db8be5c12afe50542abbb68127d06acf02f3af981f09000f821806c75459715
+spec_changes: []
+workspace:
+  isolation: branch
+  change_branch: comet/merge-upstream-v0-2-7
+  target_branch: main
+  finish: merge
+loop:
+  stage: done
+  goal_cycle: 1
+  iteration: 1
+  attempt: 3
+  retry_epoch: 0
+  failed_iteration_count: 0
+  no_progress_count: 0
+  execution_failure_count: 0
+  previous_unresolved_ids: []
+  next_action: null
+acceptance:
+  - id: A1
+    source: brief.md
+    text: "A1: Git 历史包含一个独立 `--no-ff` merge，其第一父为合并前 fork HEAD，第二父为
+      `aea725f2ea644d5592d0bbb1d63b607efa7e200a`；`v0.2.7` 是结果 HEAD 的祖先，且不包含
+      post-`v0.2.7` upstream 提交。"
+    result: passed
+    reason:
+      text: 77d3ff495 的第一父为 32cf04f319，第二父精确为 v0.2.7 peeled commit
+        aea725f2ea；最终候选边界证明通过。
+      truncated: false
+  - id: A2
+    source: brief.md
+    text: "A2: 合并后完成冲突标记检查、受影响能力测试、后端默认与 unit 测试、后端 lint、前端
+      ESLint/i18n/单测/类型检查、前后端构建、migrations 与 Ent/Wire 两轮生成稳定性检查和独立只读回归审计。"
+    result: passed
+    reason:
+      text: 后端默认测试、构建、前端全量门禁、生成稳定性、lint 和当前候选 merge 边界均通过；unit 首次 Runtime
+        执行失败后，同一命令在当前工作树手动完整重跑通过，专项测试也通过。
+      truncated: false
+  - id: A3
+    source: brief.md
+    text: "A3: `v0.2.7` upstream 主要能力由 upstream 测试、fork 回归测试和能力级源码审查覆盖，未被 fork 定制破坏。"
+    result: passed
+    reason:
+      text: Seedance、Gemini、Grok、DeepSeek、OpenAI fallback、插件 KV 及前端 capability 均有
+        upstream 测试、fork 回归或源码审查覆盖。
+      truncated: false
+  - id: A4
+    source: brief.md
+    text: "A4: fork 的 scheduler、sticky/fallback、DB
+      recheck、请求体生命周期、审计计费、运行时设置、插件、网关透传和前端定制语义保持成立；管理员备注仍只对管理员可见，用户 token
+      排名导出保持用户名、排序和样式定制。"
+    result: passed
+    reason:
+      text: scheduler、sticky/fallback、DB recheck、请求体生命周期、审计计费、runtime
+        settings、插件、网关、管理员备注和 token ranking/export 定制通过专项测试或源码审查。
+      truncated: false
+  - id: A5
+    source: brief.md
+    text: "A5: 发现由合并、冲突处理或 fork 定制引入的回归时，先以失败测试复现，再以最小修复闭合并重跑受影响及完整门禁；upstream
+      原样问题只记录证据，不扩大范围。"
+    result: passed
+    reason:
+      text: Grok 大 body 生命周期、DeepSeek request-body handle 占位、Seedance 查询/删除空 body
+        三个回归均以最小修复闭合。
+      truncated: false
+  - id: A6
+    source: brief.md
+    text: "A6: `backend/cmd/server/VERSION` 为 `0.2.7.1`，且没有创建或推送 tag、触发 release
+      workflow 或部署。"
+    result: passed
+    reason:
+      text: backend/cmd/server/VERSION 为 0.2.7.1；未创建或推送 tag，未触发 release workflow，未部署。
+      truncated: false
+  - id: A7
+    source: brief.md
+    text: "A7: Docker/Testcontainers、race detector 或其他环境不支持的检查明确记录未运行范围，不将其记为通过。"
+    result: passed
+    reason:
+      text: Docker/Testcontainers、race detector 等外部环境检查未运行，已明确记录为限制。
+      truncated: false
+  - id: A8
+    source: brief.md
+    text: "A8: `memory/context/upstream-merge-workflow.md`
+      仅在本轮产生经验证的新复用经验时增量更新，否则保持不变并在交接中说明。"
+    result: passed
+    reason:
+      text: memory/context/upstream-merge-workflow.md 已增量记录 request-body handle
+        协议归一化和异步媒体请求体生命周期经验。
+      truncated: false
+  - id: A9
+    source: brief.md
+    text: "A9: 最终由新的独立只读 Verifier 对全部验收项给出独立结论。"
+    result: passed
+    reason:
+      text: 新的独立只读 Verifier 已对全部 A1-A9 给出结论，最终边界和 lint Runtime check 均通过。
+      truncated: false
+builder_handoff:
+  candidate_id: b33b58fe-9938-4201-9f6b-d976ffd8ab81
+  identity_provider: skill-coordinated
+  builder_execution_ref: skill-coordinated:builder:ad69a587-6441-43b7-b8b7-f97b5c2030c0
+  iteration: 1
+  summary:
+    text: 候选提交 1040fbf81：以独立 --no-ff merge 提交 77d3ff495 将 upstream v0.2.7（第二父
+      aea725f2ea644d5592d0bbb1d63b607efa7e200a）合入 fork。保留 upstream
+      Seedance、Gemini、Grok、插件 KV、模型和前端能力；保留 fork 的
+      scheduler、sticky、请求体生命周期、OpenAI response
+      binding、管理员/导出定制。合并回归已用失败测试闭合：释放普通 Grok 阻塞请求的原始 body、在 request-body handle
+      创建前补 DeepSeek reasoning 占位、Seedance 仅创建端解析 body。VERSION 为
+      0.2.7.1，未发布、未部署、未创建或推送 tag。
+    truncated: false
+  addressed_acceptance_ids:
+    - A1
+    - A2
+    - A3
+    - A4
+    - A5
+    - A6
+    - A7
+    - A8
+    - A9
+  checks:
+    - name:
+        text: 精确 merge 边界与冲突检查
+        truncated: false
+      result: passed
+      note:
+        text: 77d3ff495 的第一父为 32cf04f319，第二父为 aea725f2ea；v0.2.7 可达；git diff --check
+          通过；无未解决冲突。
+        truncated: false
+    - name:
+        text: 后端 handler 生命周期专项
+        truncated: false
+      result: passed
+      note:
+        text: go test ./internal/handler -run
+          'TestSeedanceHandlerLifecycleAndOwnership|TestGrokMedia_SessionSeedReleasedBeforeBlockedUpstream'
+          -count=1 通过。
+        truncated: false
+    - name:
+        text: 后端 service 专项
+        truncated: false
+      result: passed
+      note:
+        text: go test ./internal/service 通过，包含 DeepSeek fallback、OpenAI response
+          binding、request-body handle 和插件 KV 回归。
+        truncated: false
+    - name:
+        text: 后端 routes 专项
+        truncated: false
+      result: passed
+      note:
+        text: go test ./internal/server/routes 通过；Seedance 原生路由已覆盖。
+        truncated: false
+    - name:
+        text: 前端定向回归
+        truncated: false
+      result: passed
+      note:
+        text: EditAccountModal、ChannelMonitorView.grok、RegisterView 共 104 个测试通过。
+        truncated: false
+    - name:
+        text: 完整 Runtime 质量门禁
+        truncated: false
+      result: not-run
+      note:
+        text: 后端默认/unit/lint/build、前端全量 lint/i18n/typecheck/test/build、生成稳定性和最终 verifier
+          检查交由 Runtime Verify 执行。
+        truncated: false
+  checks_truncated: false
+  known_limits:
+    - text: Docker/Testcontainers、race detector 及其他需要额外环境的检查尚未运行，不能视为通过。
+      truncated: false
+    - text: 未创建或推送 tag，未触发 release workflow，未部署。
+      truncated: false
+  known_limits_truncated: false
+  review:
+    status: passed
+    summary:
+      text: 独立只读复核确认 v0.2.7 第二父、Seedance 查询/删除生命周期、Grok body 释放、OpenAI
+        bindCtx、DeepSeek handle fallback、VERSION、插件 KV 和前端 capability 均无剩余问题。
+      truncated: false
+    reviewer_execution_ref: ses_f461cd6a2ffebzjuUlgHZfnSZi
+  submitted_at: 2026-09-19T13:56:31.542Z
+blockers: []
+verification:
+  candidate_id: b33b58fe-9938-4201-9f6b-d976ffd8ab81
+  identity_provider: skill-coordinated
+  verifier_execution_ref: skill-coordinated:verifier:fc7290ba-3721-44ca-ab37-9125764a10e6
+  iteration: 1
+  attempt: 3
+  assurance: skill-coordinated
+  verdict: pass
+  checks:
+    - id: final-merge-boundary-proof
+      name:
+        text: 最终候选 merge 边界证明
+        truncated: false
+      argv_display:
+        - text: -NoProfile
+          truncated: false
+        - text: -Command
+          truncated: false
+        - text: $merge = '77d3ff49501ace4f428937ac8b2f7f1e7731b558'; $expected =
+            'aea725f2ea644d5592d0bbb1d63b607efa7e200a'; $parents = @(git
+            rev-parse "$merge^1" "$merge^2"); if ($parents[1] -ne $expected) {
+            throw 'second parent mismatch' }; git merge-base --is-ancestor
+            $expected HEAD; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; if
+            ((git show HEAD:backend/cmd/server/VERSION).Trim() -ne '0.2.7.1') {
+            throw 'VERSION mismatch' }; exit 0
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 695
+    - id: final-lint-proof
+      name:
+        text: 最终候选 lint 证明
+        truncated: false
+      argv_display:
+        - text: run
+          truncated: false
+        - text: ./...
+          truncated: false
+      argv_truncated: false
+      cwd_ref: backend
+      status: passed
+      exit_code: 0
+      duration_ms: 17431
+  summary:
+    text: v0.2.7 精确 no-ff merge、冲突解决、回归修复、版本边界和可执行门禁均达到交付条件；未运行的外部环境检查已明确记录。
+    truncated: false
+  risks:
+    - text: Docker/Testcontainers、race detector 及其他需要额外环境的检查未运行。
+      truncated: false
+    - text: Runtime 首次 unit 检查报告瞬态执行失败，但同一命令在当前候选上手动完整重跑通过；Runtime 不允许重复等价句柄。
+      truncated: false
+  risks_truncated: false
+  completed_at: 2026-09-19T15:45:43.931Z
+history:
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 2
+    outcome: execution-error
+    unresolved_ids: []
+    summary:
+      text: "Native Verifier response was invalid: Native Verifier repeatedly
+        requested only equivalent checks"
+      truncated: false
+    completed_at: 2026-09-19T15:29:54.470Z
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 3
+    outcome: pass
+    unresolved_ids: []
+    summary:
+      text: v0.2.7 精确 no-ff merge、冲突解决、回归修复、版本边界和可执行门禁均达到交付条件；未运行的外部环境检查已明确记录。
+      truncated: false
+    completed_at: 2026-09-19T15:45:43.931Z
+history_overflow:
+  dropped_entries: 0
+  first_dropped_at: null
+  last_dropped_at: null
+  outcome_counts:
+    pass: 0
+    fail: 0
+    blocked: 0
+    execution-error: 0
+    recovery: 0
+verification_result: pass
+verification_report: verification.md
+archived: true
+created_at: 2026-09-19T12:51:54.323Z
