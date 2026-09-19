@@ -160,7 +160,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		}
 		contentType = forwardContentType
 	}
-	if endpoint.IsSeedance() {
+	if endpoint == service.SeedanceEndpointCreate {
 		parsedRequestInfo, parseErr := service.ParseSeedanceRequest(body)
 		if parseErr != nil {
 			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", parseErr.Error())
