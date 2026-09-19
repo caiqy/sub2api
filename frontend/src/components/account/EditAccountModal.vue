@@ -3779,15 +3779,36 @@ const openAITextEndpointCapabilityLabel = computed(() => {
 })
 const openAIEndpointCapabilityOptions = computed<{ value: OpenAIEndpointCapability; label: string }[]>(() => [
   { value: 'chat_completions', label: openAITextEndpointCapabilityLabel.value },
-  { value: 'embeddings', label: t('admin.accounts.openai.capabilityEmbeddings') }
+  { value: 'embeddings', label: t('admin.accounts.openai.capabilityEmbeddings') },
+  { value: 'seedance', label: 'Seedance (Ark)' }
 ])
 const openAITextGenerationCapabilityEnabled = computed(() =>
   openAIEndpointCapabilities.value.includes('chat_completions')
 )
 const normalizeOpenAIEndpointCapabilities = (values: OpenAIEndpointCapability[]) => {
-  const allowed: OpenAIEndpointCapability[] = ['chat_completions', 'embeddings']
+  const allowed: OpenAIEndpointCapability[] = ['chat_completions', 'embeddings', 'seedance']
   const selected = allowed.filter((value) => values.includes(value))
-  return selected.length > 0 ? selected : allowed
+  return selected.length > 0 ? selected : ['chat_completions', 'embeddings'] as OpenAIEndpointCapability[]
+}
+
+const readOpenAIEndpointCapabilities = (credentials?: Record<string, unknown>): OpenAIEndpointCapability[] => {
+  const raw = credentials?.openai_capabilities
+  if (Array.isArray(raw)) {
+    return normalizeOpenAIEndpointCapabilities(
+      raw.filter((value): value is OpenAIEndpointCapability =>
+        value === 'chat_completions' || value === 'embeddings' || value === 'seedance'
+      )
+    )
+  }
+  if (raw !== null && typeof raw === 'object') {
+    const capabilityMap = raw as Record<string, unknown>
+    return normalizeOpenAIEndpointCapabilities(
+      openAIEndpointCapabilityOptions.value
+        .map((option) => option.value)
+        .filter((value) => capabilityMap[value] === true)
+    )
+  }
+  return ['chat_completions', 'embeddings']
 }
 const toggleOpenAIEndpointCapability = (capability: OpenAIEndpointCapability, event?: Event) => {
   if (openAIEndpointCapabilities.value.includes(capability)) {
@@ -3806,7 +3827,7 @@ const toggleOpenAIEndpointCapability = (capability: OpenAIEndpointCapability, ev
 }
 const applyOpenAIEndpointCapabilities = (credentials: Record<string, unknown>) => {
   const capabilities = normalizeOpenAIEndpointCapabilities(openAIEndpointCapabilities.value)
-  if (capabilities.length === 2) {
+  if (capabilities.length === 2 && !capabilities.includes('seedance')) {
     delete credentials.openai_capabilities
     return
   }
@@ -4096,11 +4117,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     openAIProbeModel.value = typeof extra?.openai_probe_model === 'string' ? extra.openai_probe_model : ''
     if (newAccount.type === 'apikey') {
       openAIResponsesMode.value = normalizeOpenAIResponsesMode(extra?.openai_responses_mode)
-      openAIEndpointCapabilities.value = normalizeOpenAIEndpointCapabilities(
-        Array.isArray(credentials?.openai_capabilities)
-          ? credentials.openai_capabilities as OpenAIEndpointCapability[]
-          : ['chat_completions', 'embeddings']
-      )
+      openAIEndpointCapabilities.value = readOpenAIEndpointCapabilities(credentials)
     }
     const codexImageGenerationBridgeValue = typeof extra?.codex_image_generation_bridge === 'boolean'
       ? extra.codex_image_generation_bridge

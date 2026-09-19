@@ -118,7 +118,7 @@ func TestPluginReconcileFailsClosedWhenDesiredStateCannotBeRead(t *testing.T) {
 func TestPluginManagerStartFailsClosedWhenRuntimeDirectoryCannotBeCreated(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "not-a-directory")
 	require.NoError(t, os.WriteFile(root, []byte("file"), 0o600))
-	manager := NewPluginManager(&pluginTokenRepository{}, pluginTokenEncryptor{}, testPluginConfig(root, true), PluginHostInfo{Version: "0.1.180.1"})
+	manager := NewPluginManager(&pluginTokenRepository{}, pluginTokenEncryptor{}, testPluginConfig(root, true), PluginHostInfo{Version: "0.1.180.1"}, nil)
 
 	err := manager.Start(context.Background())
 
@@ -162,7 +162,7 @@ func TestPluginManagerEnableDoesNotAcceptInvalidUntestedDeclaration(t *testing.T
 	manager := NewPluginManager(
 		&pluginTokenRepository{installation: &PluginInstallation{
 			ID: 42, State: PluginStateDisabled, Manifest: manifest,
-		}}, pluginTokenEncryptor{}, testPluginConfig(t.TempDir(), true), PluginHostInfo{Version: "0.1.180.1"},
+		}}, pluginTokenEncryptor{}, testPluginConfig(t.TempDir(), true), PluginHostInfo{Version: "0.1.180.1"}, nil,
 	)
 
 	_, err := manager.Enable(context.Background(), 42, true, 100)
