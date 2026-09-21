@@ -724,6 +724,143 @@ describe("admin SettingsView payment visible method controls", () => {
     adminSettingsFetch.mockResolvedValue(undefined);
   });
 
+  it("loads and submits the Codex ticket harvest settings", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      openai_codex_ticket_enabled: false,
+      openai_codex_ticket_target_length: 384,
+      openai_codex_ticket_ttl_seconds: 7200,
+      openai_codex_ticket_refresh_before_seconds: 900,
+      openai_codex_ticket_probe_interval_seconds: 12,
+      openai_codex_ticket_max_concurrent_probes: 16,
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    expect(wrapper.get<HTMLInputElement>("#codex-ticket-target-length").element.value).toBe("384");
+    expect(wrapper.get<HTMLInputElement>("#codex-ticket-ttl-seconds").element.value).toBe("7200");
+    expect(wrapper.get<HTMLInputElement>("#codex-ticket-refresh-before-seconds").element.value).toBe("900");
+    expect(wrapper.get<HTMLInputElement>("#codex-ticket-probe-interval-seconds").element.value).toBe("12");
+    expect(wrapper.get<HTMLInputElement>("#codex-ticket-max-concurrent-probes").element.value).toBe("16");
+    const toggle = wrapper.get("#codex-ticket-enabled");
+    await toggle.setValue(true);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      openai_codex_ticket_enabled: true,
+      openai_codex_ticket_target_length: 384,
+      openai_codex_ticket_ttl_seconds: 7200,
+      openai_codex_ticket_refresh_before_seconds: 900,
+      openai_codex_ticket_probe_interval_seconds: 12,
+      openai_codex_ticket_max_concurrent_probes: 16,
+    }));
+    wrapper.unmount();
+  });
+
+  it("loads the masked Codex harvest proxy and submits a replacement URL", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      openai_codex_ticket_harvest_proxy_url: "http://user:***@old.example.com:8080",
+      openai_codex_ticket_harvest_proxy_configured: true,
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    const input = wrapper.get<HTMLInputElement>("#codex-ticket-harvest-proxy");
+    expect(input.element.value).toBe("http://user:***@old.example.com:8080");
+    await input.setValue("socks5h://user:new-secret@new.example.com:1080");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings.mock.calls[0]?.[0].openai_codex_ticket_harvest_proxy_url)
+      .toBe("socks5h://user:new-secret@new.example.com:1080");
+    expect(updateSettings.mock.calls[0]?.[0]).not.toHaveProperty("openai_codex_ticket_harvest_proxy_configured");
+    wrapper.unmount();
+  });
+
+  it("preserves zero Codex refresh lead time through loading, saving and response readback", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      openai_codex_ticket_refresh_before_seconds: 0,
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    const refresh = wrapper.get<HTMLInputElement>("#codex-ticket-refresh-before-seconds");
+    expect(refresh.element.value).toBe("0");
+    await wrapper.get("#codex-ticket-target-length").setValue("32");
+    await wrapper.get("#codex-ticket-ttl-seconds").setValue("60");
+    await wrapper.get("#codex-ticket-probe-interval-seconds").setValue("1");
+    await wrapper.get("#codex-ticket-max-concurrent-probes").setValue("1");
+    await wrapper.get("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      openai_codex_ticket_refresh_before_seconds: 0,
+      openai_codex_ticket_ttl_seconds: 60,
+    }));
+    expect(refresh.element.value).toBe("0");
+    wrapper.unmount();
+  });
+
+  it.each([
+    ...["target-length", "ttl-seconds", "probe-interval-seconds", "max-concurrent-probes"]
+      .flatMap((field) => ["", "0", "-1", "1.5"].map((value) => [field, value])),
+    ...["", "-1", "0.5"].map((value) => ["refresh-before-seconds", value]),
+  ])("rejects invalid Codex %s value %s before saving", async (field, value) => {
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.get(`#codex-ticket-${field}`).setValue(value);
+    await wrapper.get("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).not.toHaveBeenCalled();
+    expect(showError).toHaveBeenCalledWith("admin.settings.gatewayForwarding.codexTicketIntegerError");
+    wrapper.unmount();
+  });
+
+  it("enforces inclusive Codex parameter bounds before saving", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.get("#codex-ticket-refresh-before-seconds").setValue("0");
+    const bounds = [
+      ["target-length", 32, 4096],
+      ["ttl-seconds", 60, 86400],
+      ["refresh-before-seconds", 0, 43200],
+      ["probe-interval-seconds", 1, 3600],
+      ["max-concurrent-probes", 1, 256],
+    ] as const;
+    for (const [field, min, max] of bounds) {
+      const input = wrapper.get(`#codex-ticket-${field}`);
+      for (const value of [min - 1, max + 1, min, max]) {
+        updateSettings.mockClear();
+        showError.mockClear();
+        await input.setValue(String(value));
+        await wrapper.get("form").trigger("submit.prevent");
+        await flushPromises();
+        if (value < min || value > max) {
+          expect(updateSettings).not.toHaveBeenCalled();
+          expect(showError).toHaveBeenCalledWith("admin.settings.gatewayForwarding.codexTicketIntegerError");
+        } else {
+          expect(updateSettings).toHaveBeenCalledTimes(1);
+          expect(showError).not.toHaveBeenCalled();
+        }
+      }
+    }
+    wrapper.unmount();
+  });
+
+  it.each([3600, 3601])("rejects Codex refresh %s at or above TTL and allows correction", async (refresh) => {
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.get("#codex-ticket-refresh-before-seconds").setValue(String(refresh));
+    await wrapper.get("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).not.toHaveBeenCalled();
+    expect(showError).toHaveBeenCalledWith("admin.settings.gatewayForwarding.codexTicketRefreshError");
+    await wrapper.get("#codex-ticket-refresh-before-seconds").setValue("3599");
+    await wrapper.get("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      openai_codex_ticket_refresh_before_seconds: 3599,
+    }));
+    wrapper.unmount();
+  });
+
   it("loads and saves the open button visibility for each custom menu", async () => {
     const menuItems = [
       { id: "docs", label: "Docs", url: "https://example.com/docs", icon_svg: "", visibility: "user", sort_order: 0 },

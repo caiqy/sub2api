@@ -487,6 +487,27 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.AntigravityUserAgentVersion != after.AntigravityUserAgentVersion {
 		changed = append(changed, "antigravity_user_agent_version")
 	}
+	if before.OpenAICodexTicketEnabled != after.OpenAICodexTicketEnabled {
+		changed = append(changed, "openai_codex_ticket_enabled")
+	}
+	if before.OpenAICodexTicketHarvestProxyURL != after.OpenAICodexTicketHarvestProxyURL {
+		changed = append(changed, "openai_codex_ticket_harvest_proxy_url")
+	}
+	if before.OpenAICodexTicketTargetLength != after.OpenAICodexTicketTargetLength {
+		changed = append(changed, "openai_codex_ticket_target_length")
+	}
+	if before.OpenAICodexTicketTTLSeconds != after.OpenAICodexTicketTTLSeconds {
+		changed = append(changed, "openai_codex_ticket_ttl_seconds")
+	}
+	if before.OpenAICodexTicketRefreshBeforeSeconds != after.OpenAICodexTicketRefreshBeforeSeconds {
+		changed = append(changed, "openai_codex_ticket_refresh_before_seconds")
+	}
+	if before.OpenAICodexTicketProbeIntervalSeconds != after.OpenAICodexTicketProbeIntervalSeconds {
+		changed = append(changed, "openai_codex_ticket_probe_interval_seconds")
+	}
+	if before.OpenAICodexTicketMaxConcurrentProbes != after.OpenAICodexTicketMaxConcurrentProbes {
+		changed = append(changed, "openai_codex_ticket_max_concurrent_probes")
+	}
 	if before.OpenAICodexUserAgent != after.OpenAICodexUserAgent {
 		changed = append(changed, "openai_codex_user_agent")
 	}

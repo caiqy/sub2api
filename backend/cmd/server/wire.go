@@ -333,6 +333,12 @@ func provideCleanup(
 				}
 				return nil
 			}},
+			{name: "OpenAICodexTicketHarvester", run: func(context.Context) error {
+				if openAIGateway != nil {
+					openAIGateway.StopOpenAICodexTicketHarvester()
+				}
+				return nil
+			}},
 			{name: "ScheduledTestRunnerService", run: func(context.Context) error {
 				if scheduledTestRunner != nil {
 					scheduledTestRunner.Stop()

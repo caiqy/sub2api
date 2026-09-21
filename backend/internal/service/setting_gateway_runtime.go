@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
@@ -443,6 +444,286 @@ func (s *SettingService) GetAntigravityUserAgentVersion(ctx context.Context) str
 		return version
 	}
 	return fallback
+}
+
+type cachedOpenAICodexTicketEnabled struct {
+	value     bool
+	expiresAt int64
+}
+
+const openAICodexTicketEnabledCacheTTL = 5 * time.Second
+
+// GetOpenAICodexTicketEnabled 返回后台 292 打票总开关。
+// 设置键存在时以后台为准；缺失则回退 yaml/env。
+func (s *SettingService) GetOpenAICodexTicketEnabled(ctx context.Context, fallback bool) bool {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if ctx.Err() != nil {
+		return fallback
+	}
+	if s == nil || s.settingRepo == nil {
+		return fallback
+	}
+	if cached, ok := s.openAICodexTicketEnabledCache.Load().(*cachedOpenAICodexTicketEnabled); ok && cached != nil {
+		if time.Now().UnixNano() < cached.expiresAt {
+			return cached.value
+		}
+	}
+	resultCh := s.openAICodexTicketEnabledSF.DoChan(SettingKeyOpenAICodexTicketEnabled, func() (any, error) {
+		if cached, ok := s.openAICodexTicketEnabledCache.Load().(*cachedOpenAICodexTicketEnabled); ok && cached != nil {
+			if time.Now().UnixNano() < cached.expiresAt {
+				return cached.value, nil
+			}
+		}
+		dbCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		value, err := s.settingRepo.GetValue(dbCtx, SettingKeyOpenAICodexTicketEnabled)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if err != nil && !errors.Is(err, ErrSettingNotFound) {
+			if cached, ok := s.openAICodexTicketEnabledCache.Load().(*cachedOpenAICodexTicketEnabled); ok && cached != nil {
+				return cached.value, nil
+			}
+			return fallback, nil
+		}
+		enabled := fallback
+		if err == nil && strings.TrimSpace(value) != "" {
+			enabled = value == "true"
+		}
+		s.openAICodexTicketEnabledCache.Store(&cachedOpenAICodexTicketEnabled{
+			value:     enabled,
+			expiresAt: time.Now().Add(openAICodexTicketEnabledCacheTTL).UnixNano(),
+		})
+		return enabled, nil
+	})
+	select {
+	case <-ctx.Done():
+		return fallback
+	case result := <-resultCh:
+		if v, ok := result.Val.(bool); ok && result.Err == nil {
+			return v
+		}
+		return fallback
+	}
+}
+
+func (s *SettingService) InvalidateOpenAICodexTicketEnabledCache() {
+	if s == nil {
+		return
+	}
+	s.openAICodexTicketEnabledSF.Forget(SettingKeyOpenAICodexTicketEnabled)
+	if cached, ok := s.openAICodexTicketEnabledCache.Load().(*cachedOpenAICodexTicketEnabled); ok && cached != nil {
+		s.openAICodexTicketEnabledCache.Store(&cachedOpenAICodexTicketEnabled{value: cached.value})
+	}
+}
+
+type cachedOpenAICodexTicketHarvestProxy struct {
+	value     string
+	expiresAt int64
+}
+
+const openAICodexTicketHarvestProxyCacheTTL = 5 * time.Second
+
+// GetOpenAICodexTicketHarvestProxyURL 返回后台配置的 292 打票代理。空则调用方回退 yaml/env。
+func (s *SettingService) GetOpenAICodexTicketHarvestProxyURL(ctx context.Context) string {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if ctx.Err() != nil {
+		return ""
+	}
+	if s == nil || s.settingRepo == nil {
+		return ""
+	}
+	if cached, ok := s.openAICodexTicketHarvestProxyCache.Load().(*cachedOpenAICodexTicketHarvestProxy); ok && cached != nil {
+		if time.Now().UnixNano() < cached.expiresAt {
+			return cached.value
+		}
+	}
+	resultCh := s.openAICodexTicketHarvestProxySF.DoChan(SettingKeyOpenAICodexTicketHarvestProxyURL, func() (any, error) {
+		if cached, ok := s.openAICodexTicketHarvestProxyCache.Load().(*cachedOpenAICodexTicketHarvestProxy); ok && cached != nil {
+			if time.Now().UnixNano() < cached.expiresAt {
+				return cached.value, nil
+			}
+		}
+		dbCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		value, err := s.settingRepo.GetValue(dbCtx, SettingKeyOpenAICodexTicketHarvestProxyURL)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if err != nil && !errors.Is(err, ErrSettingNotFound) {
+			// Keep the last known proxy during transient storage failures.
+			if cached, ok := s.openAICodexTicketHarvestProxyCache.Load().(*cachedOpenAICodexTicketHarvestProxy); ok && cached != nil {
+				value = cached.value
+			}
+			s.openAICodexTicketHarvestProxyCache.Store(&cachedOpenAICodexTicketHarvestProxy{
+				value:     value,
+				expiresAt: time.Now().Add(time.Second).UnixNano(),
+			})
+			return value, nil
+		}
+		value = strings.TrimSpace(value)
+		s.openAICodexTicketHarvestProxyCache.Store(&cachedOpenAICodexTicketHarvestProxy{
+			value:     value,
+			expiresAt: time.Now().Add(openAICodexTicketHarvestProxyCacheTTL).UnixNano(),
+		})
+		return value, nil
+	})
+	select {
+	case <-ctx.Done():
+		return ""
+	case result := <-resultCh:
+		if v, ok := result.Val.(string); ok && result.Err == nil {
+			return v
+		}
+		return ""
+	}
+}
+
+func (s *SettingService) InvalidateOpenAICodexTicketHarvestProxyCache() {
+	if s == nil {
+		return
+	}
+	s.openAICodexTicketHarvestProxySF.Forget(SettingKeyOpenAICodexTicketHarvestProxyURL)
+	if cached, ok := s.openAICodexTicketHarvestProxyCache.Load().(*cachedOpenAICodexTicketHarvestProxy); ok && cached != nil {
+		s.openAICodexTicketHarvestProxyCache.Store(&cachedOpenAICodexTicketHarvestProxy{value: cached.value})
+	}
+}
+
+type cachedOpenAICodexTicketRuntime struct {
+	value     OpenAICodexTicketRuntimeSettings
+	expiresAt int64
+}
+
+const openAICodexTicketRuntimeCacheTTL = 5 * time.Second
+
+func normalizeOpenAICodexTicketRuntimeDefaults(settings OpenAICodexTicketRuntimeSettings) OpenAICodexTicketRuntimeSettings {
+	// A positive TTL identifies initialized config, where refresh zero is intentional.
+	if settings.RefreshBeforeSeconds < 0 || (settings.RefreshBeforeSeconds == 0 && settings.TTLSeconds <= 0) {
+		settings.RefreshBeforeSeconds = 600
+	}
+	for target, fallback := range map[*int]int{
+		&settings.TargetLength:         292,
+		&settings.TTLSeconds:           3600,
+		&settings.ProbeIntervalSeconds: 6,
+		&settings.MaxConcurrentProbes:  8,
+	} {
+		if *target <= 0 {
+			*target = fallback
+		}
+	}
+	return settings
+}
+
+func (s *SettingService) cachedOpenAICodexTicketRuntime() *cachedOpenAICodexTicketRuntime {
+	if s == nil {
+		return nil
+	}
+	cached, ok := s.openAICodexTicketRuntimeCache.Load().(*cachedOpenAICodexTicketRuntime)
+	if !ok || cached == nil || time.Now().UnixNano() >= cached.expiresAt {
+		return nil
+	}
+	return cached
+}
+
+// GetOpenAICodexTicketRuntimeSettings 返回后台配置的打票运行参数；缺失项逐项回退 fallback。
+// 缓存有效期为 5 秒；后台改写后立即失效，存储故障时保留最后已知值。
+func (s *SettingService) GetOpenAICodexTicketRuntimeSettings(ctx context.Context, fallback OpenAICodexTicketRuntimeSettings) OpenAICodexTicketRuntimeSettings {
+	fallback = normalizeOpenAICodexTicketRuntimeDefaults(fallback)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if ctx.Err() != nil || s == nil || s.settingRepo == nil {
+		return fallback
+	}
+	if cached := s.cachedOpenAICodexTicketRuntime(); cached != nil {
+		return cached.value
+	}
+	resultCh := s.openAICodexTicketRuntimeSF.DoChan(SettingKeyOpenAICodexTicketTargetLength, func() (any, error) {
+		if cached := s.cachedOpenAICodexTicketRuntime(); cached != nil {
+			return cached.value, nil
+		}
+		dbCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		settings := fallback
+		keys := map[string]*int{
+			SettingKeyOpenAICodexTicketTargetLength:  &settings.TargetLength,
+			SettingKeyOpenAICodexTicketTTLSeconds:    &settings.TTLSeconds,
+			SettingKeyOpenAICodexTicketRefreshBefore: &settings.RefreshBeforeSeconds,
+			SettingKeyOpenAICodexTicketProbeInterval: &settings.ProbeIntervalSeconds,
+			SettingKeyOpenAICodexTicketMaxConcurrent: &settings.MaxConcurrentProbes,
+		}
+		for key, target := range keys {
+			value, err := s.settingRepo.GetValue(dbCtx, key)
+			if err != nil {
+				if errors.Is(err, ErrSettingNotFound) {
+					continue
+				}
+				// 存储瞬时故障：保留上次已知值，避免探针节流被清零。
+				if cached, ok := s.openAICodexTicketRuntimeCache.Load().(*cachedOpenAICodexTicketRuntime); ok && cached != nil {
+					return cached.value, nil
+				}
+				return fallback, nil
+			}
+			if key == SettingKeyOpenAICodexTicketRefreshBefore && strings.TrimSpace(value) == "0" {
+				*target = 0
+			} else {
+				applyPositiveIntSettingWithDefault(target, value, *target)
+			}
+		}
+		s.openAICodexTicketRuntimeCache.Store(&cachedOpenAICodexTicketRuntime{
+			value:     settings,
+			expiresAt: time.Now().Add(openAICodexTicketRuntimeCacheTTL).UnixNano(),
+		})
+		return settings, nil
+	})
+	select {
+	case <-ctx.Done():
+		return fallback
+	case result := <-resultCh:
+		if v, ok := result.Val.(OpenAICodexTicketRuntimeSettings); ok && result.Err == nil {
+			return v
+		}
+		return fallback
+	}
+}
+
+func (s *SettingService) InvalidateOpenAICodexTicketRuntimeCache() {
+	if s == nil {
+		return
+	}
+	s.openAICodexTicketRuntimeSF.Forget(SettingKeyOpenAICodexTicketTargetLength)
+	if cached, ok := s.openAICodexTicketRuntimeCache.Load().(*cachedOpenAICodexTicketRuntime); ok && cached != nil {
+		s.openAICodexTicketRuntimeCache.Store(&cachedOpenAICodexTicketRuntime{value: cached.value})
+	}
+}
+
+// ApplyOpenAICodexTicketOverrides 把后台热更新值叠加到基线上，供网关与账号状态展示共用。
+// 未在后台覆盖的项保持基线值。
+func (s *SettingService) ApplyOpenAICodexTicketOverrides(ctx context.Context, base config.OpenAICodexTicketConfig) config.OpenAICodexTicketConfig {
+	if s == nil {
+		return base
+	}
+	base.Enabled = s.GetOpenAICodexTicketEnabled(ctx, base.Enabled)
+	if proxy := strings.TrimSpace(s.GetOpenAICodexTicketHarvestProxyURL(ctx)); proxy != "" {
+		base.HarvestProxyURL = proxy
+	}
+	runtime := s.GetOpenAICodexTicketRuntimeSettings(ctx, OpenAICodexTicketRuntimeSettings{
+		TargetLength:         base.TargetLength,
+		TTLSeconds:           base.TTLSeconds,
+		RefreshBeforeSeconds: base.RefreshBeforeSeconds,
+		ProbeIntervalSeconds: base.HarvestProbeIntervalSeconds,
+		MaxConcurrentProbes:  base.MaxConcurrentProbes,
+	})
+	base.TargetLength = runtime.TargetLength
+	base.TTLSeconds = runtime.TTLSeconds
+	base.RefreshBeforeSeconds = runtime.RefreshBeforeSeconds
+	base.HarvestProbeIntervalSeconds = runtime.ProbeIntervalSeconds
+	base.MaxConcurrentProbes = runtime.MaxConcurrentProbes
+	return base
 }
 
 // GetOpenAICodexUserAgent 返回 OpenAI Codex 上游请求使用的 User-Agent。

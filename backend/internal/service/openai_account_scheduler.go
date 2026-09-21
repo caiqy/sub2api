@@ -644,7 +644,7 @@ func (s *defaultOpenAIAccountScheduler) classifySessionStickyAccount(
 	if isOpenAIAccountUpstreamRestrictedByChannel(ctx, s.service, account, req) {
 		return nil, true
 	}
-	if s.service != nil && s.service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel) {
+	if s.service != nil && s.service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel, req.RequireCompact) {
 		return nil, false
 	}
 	if req.RequestedModel != "" && !account.IsModelSupported(req.RequestedModel) {
@@ -1326,7 +1326,7 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 		if result == nil || !result.Acquired {
 			continue
 		}
-		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, req.Platform, req.RequestedModel, false, req.RequiredCapability)
+		fresh := s.service.resolveFreshSchedulableOpenAIAccountForRequest(ctx, candidate.account, req.Platform, req.RequestedModel, req.RequireCompact, false, req.RequiredCapability)
 		if fresh == nil || !s.service.openAIStickyAccountMatchesSchedulingGroup(ctx, fresh, req.GroupID) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
 			release(result)
 			continue
@@ -1335,7 +1335,7 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 			release(result)
 			break
 		}
-		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.GroupID, req.Platform, req.RequestedModel, false, req.RequiredCapability)
+		fresh = s.service.recheckSelectedOpenAIAccountFromDBForRequest(ctx, fresh, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, false, req.RequiredCapability)
 		if fresh == nil || !s.service.openAIStickyAccountMatchesSchedulingGroup(ctx, fresh, req.GroupID) || !accountSatisfiesPrivacyRequirement(fresh, schedGroup) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
 			if !accountSatisfiesPrivacyRequirement(fresh, schedGroup) && s.isAccountTransportCompatible(fresh, req.RequiredTransport) {
 				recordPrivacyRequirementError(ctx, s.service, fresh, schedGroup)
@@ -1562,7 +1562,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 			filterStats.exclude("platform_mismatch")
 			continue
 		}
-		if s.service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel) {
+		if s.service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel, req.RequireCompact) {
 			filterStats.exclude("runtime_blocked")
 			continue
 		}
@@ -1791,14 +1791,14 @@ func (s *defaultOpenAIAccountScheduler) finishLoadBalanceSelectionFallback(
 					continue
 				}
 			}
-			fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, req.Platform, req.RequestedModel, false, req.RequiredCapability)
+			fresh := s.service.resolveFreshSchedulableOpenAIAccountForRequest(ctx, candidate.account, req.Platform, req.RequestedModel, req.RequireCompact, false, req.RequiredCapability)
 			if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
 				continue
 			}
 			if !s.consumeOpenAISelectionDBRecheck(budget) {
 				return nil, candidateCount, topK, loadSkew, noAvailableOpenAISelectionError(req.RequestedModel, compactBlocked, filterStats.summary("selection_order_exhausted"))
 			}
-			fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.GroupID, req.Platform, req.RequestedModel, false, req.RequiredCapability)
+			fresh = s.service.recheckSelectedOpenAIAccountFromDBForRequest(ctx, fresh, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, false, req.RequiredCapability)
 			if fresh == nil || !accountSatisfiesPrivacyRequirement(fresh, schedGroup) || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
 				recordPrivacyRequirementError(ctx, s.service, fresh, schedGroup)
 				continue
@@ -1883,7 +1883,7 @@ func openAIAccountRequestCompatibilityReason(ctx context.Context, service *OpenA
 	if req.RequirePrivacySet && !account.IsPrivacySet() {
 		return false, "privacy_not_set"
 	}
-	if service != nil && service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel) {
+	if service != nil && service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel, req.RequireCompact) {
 		return false, "runtime_blocked"
 	}
 	if service != nil && service.isOpenAIProxyStreamQuarantined(ctx, account) {

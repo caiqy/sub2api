@@ -113,6 +113,7 @@ func TestRecordGrokMediaUsage_ReleasesVideoClaimAfterBillingError(t *testing.T) 
 		cache, cfg, nil, concurrency, service.NewBillingService(cfg, nil), nil, billingCache,
 		&grokMediaRequestRecorder{}, service.NewDeferredService(repo, nil, 0), nil, service.NewGrokTokenProvider(repo, nil),
 	)
+	t.Cleanup(gateway.StopOpenAICodexTicketHarvester)
 	h := NewOpenAIGatewayHandler(gateway, concurrency, billingCache, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 	apiKey := &service.APIKey{ID: 4053, UserID: 4054, Status: service.StatusActive, GroupID: &group.ID, Group: group, User: &service.User{ID: 4054, Status: service.StatusActive, Concurrency: 1}}
 	status := &service.OpenAIForwardResult{ResponseID: "video-claim-retry", Model: "grok-imagine-video", VideoCount: 1, VideoDurationSeconds: 8}
@@ -374,6 +375,7 @@ func TestGrokVideoStatus_PinsOwnerBindingBeforeScheduling(t *testing.T) {
 	concurrency := service.NewConcurrencyService(openAIChatCompletionsConcurrencyCacheStub{})
 	repo := &terminalUsageGrokAccountRepo{openAIRetryAccountRepoStub{accounts: []*service.Account{selected, owner, parent}}}
 	gateway := service.NewOpenAIGatewayService(repo, nil, nil, nil, nil, nil, cache, cfg, nil, concurrency, nil, nil, billing, upstream, nil, nil, service.NewGrokTokenProvider(repo, nil), nil, nil)
+	t.Cleanup(gateway.StopOpenAICodexTicketHarvester)
 	h := NewOpenAIGatewayHandler(gateway, concurrency, billing, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 
 	router := gin.New()

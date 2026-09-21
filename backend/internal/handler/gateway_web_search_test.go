@@ -85,6 +85,7 @@ func TestGatewayHandler_WebSearchReusesStandardSessionStickyAccount(t *testing.T
 		service.NewBillingService(cfg, nil), nil, billingCache, upstream,
 		service.NewDeferredService(accountRepo, nil, 0), nil, service.NewGrokTokenProvider(accountRepo, nil), nil, nil,
 	)
+	t.Cleanup(openAIGateway.StopOpenAICodexTicketHarvester)
 	h := &GatewayHandler{
 		gatewayService:       gateway,
 		openAIGatewayService: openAIGateway,

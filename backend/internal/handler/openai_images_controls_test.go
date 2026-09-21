@@ -648,6 +648,8 @@ func TestOpenAIImages_OAuthTextIsReleasedBeforeBlockedUpstream(t *testing.T) {
 	jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: rawDir, FilePrefix: "sub2api-test-"}
 	t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
 
+	// Drain sync.Pool victim caches before measuring request-owned memory.
+	runtime.GC()
 	runtime.GC()
 	var before runtime.MemStats
 	runtime.ReadMemStats(&before)
@@ -685,6 +687,8 @@ func TestOpenAIImages_OAuthTextIsReleasedBeforeBlockedUpstream(t *testing.T) {
 		t.Fatal("timed out waiting for OAuth images upstream")
 	}
 	require.GreaterOrEqual(t, upstream.size, int64(promptSize), "upstream body must include the complete prompt")
+	// JSON encoding buffers survive one GC in sync.Pool's victim cache.
+	runtime.GC()
 	runtime.GC()
 	var after runtime.MemStats
 	runtime.ReadMemStats(&after)
@@ -1176,6 +1180,7 @@ func TestOpenAIGatewayHandlerImages_OAuthBadRequestPassesThroughUpstreamImageErr
 		nil,
 		nil,
 	)
+	t.Cleanup(gatewayService.StopOpenAICodexTicketHarvester)
 	billingService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
 	t.Cleanup(billingService.Stop)
 	h := NewOpenAIGatewayHandler(

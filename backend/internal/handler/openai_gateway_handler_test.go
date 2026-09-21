@@ -2018,6 +2018,7 @@ func newOpenAIHandlerForPreviousResponseIDValidation(t *testing.T, cache *concur
 		nil,
 		nil,
 	)
+	t.Cleanup(gatewayService.StopOpenAICodexTicketHarvester)
 	t.Cleanup(func() {
 		billingCacheService.Stop()
 	})
@@ -2326,6 +2327,7 @@ func TestOpenAIResponses_APIKeyPassthroughPool5xxRetriesThenExhaustsMaxSwitches(
 		nil,
 		nil,
 	)
+	t.Cleanup(gatewaySvc.StopOpenAICodexTicketHarvester)
 	h := NewOpenAIGatewayHandler(
 		gatewaySvc,
 		service.NewConcurrencyService(nil),
@@ -2428,6 +2430,7 @@ func TestOpenAIResponses_APIKeyPassthroughPoolAuthFailureRetriesThenSwitchesToHe
 				nil,
 				nil,
 			)
+			t.Cleanup(gatewaySvc.StopOpenAICodexTicketHarvester)
 			h := NewOpenAIGatewayHandler(
 				gatewaySvc,
 				service.NewConcurrencyService(nil),
@@ -2511,6 +2514,7 @@ func TestOpenAIResponses_APIKeyPassthroughSSERateLimitUsesConfiguredPoolRetry(t 
 		nil,
 		nil,
 	)
+	t.Cleanup(gatewaySvc.StopOpenAICodexTicketHarvester)
 	h := NewOpenAIGatewayHandler(
 		gatewaySvc,
 		service.NewConcurrencyService(nil),
@@ -2672,6 +2676,7 @@ func TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent(t *testing.T
 		nil,
 		nil,
 	)
+	t.Cleanup(gatewaySvc.StopOpenAICodexTicketHarvester)
 
 	cache := &concurrencyCacheMock{
 		acquireUserSlotFn: func(ctx context.Context, userID int64, maxConcurrency int, requestID string) (bool, error) {
@@ -2861,6 +2866,7 @@ func TestOpenAIResponsesWebSocket_FirstOutputTimeoutWithoutDownstreamReusesClien
 		service.NewBillingService(cfg, nil), rateLimitSvc, billingCacheSvc,
 		nil, &service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil,
 	)
+	t.Cleanup(gatewaySvc.StopOpenAICodexTicketHarvester)
 	cache := &concurrencyCacheMock{
 		acquireUserSlotFn: func(context.Context, int64, int, string) (bool, error) { return true, nil },
 		acquireAccountSlotFn: func(context.Context, int64, int, string) (bool, error) {
@@ -3209,6 +3215,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		nil,
 		nil,
 	)
+	t.Cleanup(gatewaySvc.StopOpenAICodexTicketHarvester)
 
 	cache := &concurrencyCacheMock{
 		acquireUserSlotFn: func(ctx context.Context, userID int64, maxConcurrency int, requestID string) (bool, error) {
@@ -4159,6 +4166,7 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 		channelService,
 		nil,
 	)
+	t.Cleanup(gatewayService.StopOpenAICodexTicketHarvester)
 	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 
 	groupID := int64(2)
@@ -5077,6 +5085,7 @@ func TestOpenAIGatewayHandler_ChatCompletionsPassesDetailSnapshotToRecordUsage(t
 		nil,
 		nil,
 	)
+	t.Cleanup(gatewayService.StopOpenAICodexTicketHarvester)
 	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 
 	apiKey := &service.APIKey{
@@ -5185,6 +5194,7 @@ func TestOpenAIGatewayHandler_ResponsesRequiresChatCompletionsCapability(t *test
 		nil,
 		nil,
 	)
+	t.Cleanup(gatewayService.StopOpenAICodexTicketHarvester)
 	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 
 	apiKey := &service.APIKey{
@@ -5288,6 +5298,7 @@ func TestOpenAIGatewayHandler_ResponsesUsesGrokRequestPlatform(t *testing.T) {
 		nil,
 		nil,
 	)
+	t.Cleanup(gatewayService.StopOpenAICodexTicketHarvester)
 	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 
 	apiKey := &service.APIKey{
@@ -5497,6 +5508,7 @@ func TestOpenAIGatewayHandler_ChatCompletionsUsageTaskUsesCapturedEndpointAndSna
 		nil,
 		nil,
 	)
+	t.Cleanup(gatewayService.StopOpenAICodexTicketHarvester)
 	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, pool, nil, nil, nil, cfg, nil)
 
 	apiKey := &service.APIKey{
@@ -5712,6 +5724,7 @@ func TestOpenAIGatewayHandler_RetryPathStoresLastOutboundRequestOnly(t *testing.
 		nil,
 		nil,
 	)
+	t.Cleanup(gatewayService.StopOpenAICodexTicketHarvester)
 	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 
 	apiKey := &service.APIKey{
@@ -5826,6 +5839,7 @@ func TestOpenAIGatewayHandler_UsageDetailStoresInjectedUpstreamRequestBody(t *te
 		nil,
 		nil,
 	)
+	t.Cleanup(gatewayService.StopOpenAICodexTicketHarvester)
 	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 
 	apiKey := &service.APIKey{
@@ -5921,6 +5935,7 @@ func runOpenAIEffectiveRouteSnapshotTest(
 		}},
 		service.NewDeferredService(accountRepo, nil, 0), nil,
 	)
+	t.Cleanup(gatewayService.StopOpenAICodexTicketHarvester)
 	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 	clientModel := gjson.Get(requestBody, "model").String()
 	route := service.EffectiveGatewayRoute{
@@ -6162,6 +6177,7 @@ func newOpenAIResponsesRequestBodyTestRouter(t *testing.T) (*gin.Engine, *openAI
 		nil,
 		nil,
 	)
+	t.Cleanup(gatewayService.StopOpenAICodexTicketHarvester)
 	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 	apiKey := &service.APIKey{
 		ID:      101,
@@ -6245,6 +6261,7 @@ func newOpenAIImagesHandlerTestRouter(t *testing.T, route string, upstreamRespon
 		nil,
 		nil,
 	)
+	t.Cleanup(gatewayService.StopOpenAICodexTicketHarvester)
 	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 
 	apiKey := &service.APIKey{

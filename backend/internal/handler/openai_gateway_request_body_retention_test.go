@@ -298,6 +298,7 @@ func newOpenAIResponsesRetentionTestEnv(
 		service.NewBillingService(cfg, nil), nil, billingCacheService, upstream, service.NewDeferredService(accountRepo, nil, 0), nil,
 		settingService, channelService,
 	)
+	t.Cleanup(gatewayService.StopOpenAICodexTicketHarvester)
 	handler := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 	apiKey := &service.APIKey{
 		ID: 101, UserID: 202, Status: service.StatusActive, GroupID: &groupID,
@@ -453,6 +454,7 @@ func TestOpenAIGatewayHandler_ResponsesPassesPreviewSnapshotAndStableHash(t *tes
 		nil,
 		nil,
 	)
+	t.Cleanup(gatewayService.StopOpenAICodexTicketHarvester)
 	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 
 	apiKey := &service.APIKey{

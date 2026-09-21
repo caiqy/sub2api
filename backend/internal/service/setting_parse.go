@@ -245,6 +245,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyOpenAICodexClientVersion:                           "",
 		SettingKeyOpenAICodexClientVersionSynced:                     "",
 		SettingKeyOpenAICodexVersionAutoSyncEnabled:                  "true",
+		SettingKeyOpenAICodexTicketHarvestProxyURL:                   "",
 		SettingPaymentVisibleMethodAlipaySource:                      "",
 		SettingPaymentVisibleMethodWxpaySource:                       "",
 		SettingPaymentVisibleMethodAlipayEnabled:                     "false",
@@ -947,6 +948,38 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	} else {
 		result.OpenAICodexVersionAutoSyncEnabled = true
 	}
+	if v, ok := settings[SettingKeyOpenAICodexTicketEnabled]; ok && v != "" {
+		result.OpenAICodexTicketEnabled = v == "true"
+	} else if s != nil && s.cfg != nil {
+		result.OpenAICodexTicketEnabled = s.cfg.Gateway.OpenAICodexTicket.Enabled
+	}
+	result.OpenAICodexTicketHarvestProxyURL = strings.TrimSpace(settings[SettingKeyOpenAICodexTicketHarvestProxyURL])
+	// 运行参数：后台缺失/为空时回退到 yaml/env，保证面板展示的就是当前生效值。
+	ticketConfig := config.OpenAICodexTicketConfig{}
+	if s != nil && s.cfg != nil {
+		ticketConfig = s.cfg.Gateway.OpenAICodexTicket
+	}
+	ticketFallback := normalizeOpenAICodexTicketRuntimeDefaults(OpenAICodexTicketRuntimeSettings{
+		TargetLength:         ticketConfig.TargetLength,
+		TTLSeconds:           ticketConfig.TTLSeconds,
+		RefreshBeforeSeconds: ticketConfig.RefreshBeforeSeconds,
+		ProbeIntervalSeconds: ticketConfig.HarvestProbeIntervalSeconds,
+		MaxConcurrentProbes:  ticketConfig.MaxConcurrentProbes,
+	})
+	result.OpenAICodexTicketTargetLength = ticketFallback.TargetLength
+	result.OpenAICodexTicketTTLSeconds = ticketFallback.TTLSeconds
+	result.OpenAICodexTicketRefreshBeforeSeconds = ticketFallback.RefreshBeforeSeconds
+	result.OpenAICodexTicketProbeIntervalSeconds = ticketFallback.ProbeIntervalSeconds
+	result.OpenAICodexTicketMaxConcurrentProbes = ticketFallback.MaxConcurrentProbes
+	applyPositiveIntSettingWithDefault(&result.OpenAICodexTicketTargetLength, settings[SettingKeyOpenAICodexTicketTargetLength], ticketFallback.TargetLength)
+	applyPositiveIntSettingWithDefault(&result.OpenAICodexTicketTTLSeconds, settings[SettingKeyOpenAICodexTicketTTLSeconds], ticketFallback.TTLSeconds)
+	applyPositiveIntSettingWithDefault(&result.OpenAICodexTicketRefreshBeforeSeconds, settings[SettingKeyOpenAICodexTicketRefreshBefore], ticketFallback.RefreshBeforeSeconds)
+	if strings.TrimSpace(settings[SettingKeyOpenAICodexTicketRefreshBefore]) == "0" {
+		result.OpenAICodexTicketRefreshBeforeSeconds = 0
+	}
+	result.OpenAICodexTicketRefreshBeforeSecondsSet = true
+	applyPositiveIntSettingWithDefault(&result.OpenAICodexTicketProbeIntervalSeconds, settings[SettingKeyOpenAICodexTicketProbeInterval], ticketFallback.ProbeIntervalSeconds)
+	applyPositiveIntSettingWithDefault(&result.OpenAICodexTicketMaxConcurrentProbes, settings[SettingKeyOpenAICodexTicketMaxConcurrent], ticketFallback.MaxConcurrentProbes)
 	// codex_cli_only 加固
 	result.MinCodexVersion = settings[SettingKeyMinCodexVersion]
 	result.MaxCodexVersion = settings[SettingKeyMaxCodexVersion]

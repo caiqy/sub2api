@@ -275,6 +275,13 @@ type UpdateSettingsRequest struct {
 	OpenAICodexUserAgent                   *string `json:"openai_codex_user_agent"`
 	OpenAICodexClientVersion               *string `json:"openai_codex_client_version"`
 	OpenAICodexVersionAutoSyncEnabled      *bool   `json:"openai_codex_version_auto_sync_enabled"`
+	OpenAICodexTicketEnabled               *bool   `json:"openai_codex_ticket_enabled"`
+	OpenAICodexTicketHarvestProxyURL       string  `json:"openai_codex_ticket_harvest_proxy_url"`
+	OpenAICodexTicketTargetLength          *int    `json:"openai_codex_ticket_target_length" binding:"omitempty,min=32,max=4096"`
+	OpenAICodexTicketTTLSeconds            *int    `json:"openai_codex_ticket_ttl_seconds" binding:"omitempty,min=60,max=86400"`
+	OpenAICodexTicketRefreshBeforeSeconds  *int    `json:"openai_codex_ticket_refresh_before_seconds" binding:"omitempty,min=0,max=43200"`
+	OpenAICodexTicketProbeIntervalSeconds  *int    `json:"openai_codex_ticket_probe_interval_seconds" binding:"omitempty,min=1,max=3600"`
+	OpenAICodexTicketMaxConcurrentProbes   *int    `json:"openai_codex_ticket_max_concurrent_probes" binding:"omitempty,min=1,max=256"`
 
 	// codex_cli_only 加固（global-only）
 	MinCodexVersion                      string `json:"min_codex_version"`
@@ -1805,10 +1812,29 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.OpenAICodexVersionAutoSyncEnabled
 		}(),
-		MinCodexVersion:       strings.TrimSpace(req.MinCodexVersion),
-		MaxCodexVersion:       strings.TrimSpace(req.MaxCodexVersion),
-		CodexCLIOnlyBlacklist: strings.TrimSpace(req.CodexCLIOnlyBlacklist),
-		CodexCLIOnlyWhitelist: strings.TrimSpace(req.CodexCLIOnlyWhitelist),
+		OpenAICodexTicketEnabled: func() bool {
+			if req.OpenAICodexTicketEnabled != nil {
+				return *req.OpenAICodexTicketEnabled
+			}
+			return previousSettings.OpenAICodexTicketEnabled
+		}(),
+		OpenAICodexTicketHarvestProxyURL: func() string {
+			next := strings.TrimSpace(req.OpenAICodexTicketHarvestProxyURL)
+			if service.IsMaskedProxyURL(next) {
+				return previousSettings.OpenAICodexTicketHarvestProxyURL
+			}
+			return next
+		}(),
+		OpenAICodexTicketTargetLength:            codexTicketIntSetting(req.OpenAICodexTicketTargetLength, previousSettings.OpenAICodexTicketTargetLength),
+		OpenAICodexTicketTTLSeconds:              codexTicketIntSetting(req.OpenAICodexTicketTTLSeconds, previousSettings.OpenAICodexTicketTTLSeconds),
+		OpenAICodexTicketRefreshBeforeSeconds:    codexTicketIntSetting(req.OpenAICodexTicketRefreshBeforeSeconds, previousSettings.OpenAICodexTicketRefreshBeforeSeconds),
+		OpenAICodexTicketRefreshBeforeSecondsSet: req.OpenAICodexTicketRefreshBeforeSeconds != nil,
+		OpenAICodexTicketProbeIntervalSeconds:    codexTicketIntSetting(req.OpenAICodexTicketProbeIntervalSeconds, previousSettings.OpenAICodexTicketProbeIntervalSeconds),
+		OpenAICodexTicketMaxConcurrentProbes:     codexTicketIntSetting(req.OpenAICodexTicketMaxConcurrentProbes, previousSettings.OpenAICodexTicketMaxConcurrentProbes),
+		MinCodexVersion:                          strings.TrimSpace(req.MinCodexVersion),
+		MaxCodexVersion:                          strings.TrimSpace(req.MaxCodexVersion),
+		CodexCLIOnlyBlacklist:                    strings.TrimSpace(req.CodexCLIOnlyBlacklist),
+		CodexCLIOnlyWhitelist:                    strings.TrimSpace(req.CodexCLIOnlyWhitelist),
 		CodexCLIOnlyAllowAppServerClients: func() bool {
 			if req.CodexCLIOnlyAllowAppServerClients != nil {
 				return *req.CodexCLIOnlyAllowAppServerClients
@@ -2370,6 +2396,14 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		OpenAICodexClientVersion:                                     updatedSettings.OpenAICodexClientVersion,
 		OpenAICodexClientVersionSynced:                               updatedSettings.OpenAICodexClientVersionSynced,
 		OpenAICodexVersionAutoSyncEnabled:                            updatedSettings.OpenAICodexVersionAutoSyncEnabled,
+		OpenAICodexTicketEnabled:                                     updatedSettings.OpenAICodexTicketEnabled,
+		OpenAICodexTicketHarvestProxyURL:                             service.MaskProxyURL(updatedSettings.OpenAICodexTicketHarvestProxyURL),
+		OpenAICodexTicketHarvestProxyConfigured:                      strings.TrimSpace(updatedSettings.OpenAICodexTicketHarvestProxyURL) != "",
+		OpenAICodexTicketTargetLength:                                updatedSettings.OpenAICodexTicketTargetLength,
+		OpenAICodexTicketTTLSeconds:                                  updatedSettings.OpenAICodexTicketTTLSeconds,
+		OpenAICodexTicketRefreshBeforeSeconds:                        updatedSettings.OpenAICodexTicketRefreshBeforeSeconds,
+		OpenAICodexTicketProbeIntervalSeconds:                        updatedSettings.OpenAICodexTicketProbeIntervalSeconds,
+		OpenAICodexTicketMaxConcurrentProbes:                         updatedSettings.OpenAICodexTicketMaxConcurrentProbes,
 		MinCodexVersion:                                              updatedSettings.MinCodexVersion,
 		MaxCodexVersion:                                              updatedSettings.MaxCodexVersion,
 		CodexCLIOnlyBlacklist:                                        updatedSettings.CodexCLIOnlyBlacklist,
@@ -2554,4 +2588,12 @@ func (h *SettingHandler) ensureUserAttributeDefinition(ctx context.Context, key,
 		return
 	}
 	slog.Info("dingtalk: created user attribute definition", "key", key, "name", name, "type", attrType)
+}
+
+// codexTicketIntSetting 保留未提交的打票运行参数：只有显式提交的字段才覆盖旧值。
+func codexTicketIntSetting(next *int, previous int) int {
+	if next == nil {
+		return previous
+	}
+	return *next
 }

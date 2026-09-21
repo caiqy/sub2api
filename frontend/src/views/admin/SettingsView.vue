@@ -4688,6 +4688,122 @@
               </h2>
             </div>
             <div class="p-6 space-y-4">
+                <div class="flex items-center justify-between gap-4">
+                  <div class="min-w-0">
+                    <h3 class="text-base font-semibold text-gray-900 dark:text-white">
+                      {{ t("admin.settings.gatewayForwarding.codexTicketEnabled") }}
+                    </h3>
+                    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.gatewayForwarding.codexTicketEnabledDesc") }}
+                    </p>
+                  </div>
+                  <Toggle
+                    id="codex-ticket-enabled"
+                    v-model="form.openai_codex_ticket_enabled"
+                  />
+                </div>
+                <div>
+                  <h3 class="text-base font-semibold text-gray-900 dark:text-white">
+                    {{ t("admin.settings.gatewayForwarding.codexTicketHarvestProxy") }}
+                  </h3>
+                  <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.gatewayForwarding.codexTicketHarvestProxyDesc") }}
+                  </p>
+                  <input
+                    id="codex-ticket-harvest-proxy"
+                    v-model="form.openai_codex_ticket_harvest_proxy_url"
+                    type="text"
+                    class="input mt-3 w-full font-mono text-sm"
+                    :placeholder="t('admin.settings.gatewayForwarding.codexTicketHarvestProxyPlaceholder')"
+                    autocomplete="off"
+                  />
+                  <p
+                    v-if="form.openai_codex_ticket_harvest_proxy_configured"
+                    class="mt-1.5 text-xs text-gray-500 dark:text-gray-400"
+                  >
+                    {{ t("admin.settings.gatewayForwarding.codexTicketHarvestProxyConfigured") }}
+                  </p>
+                </div>
+                <div>
+                  <h3 class="text-base font-semibold text-gray-900 dark:text-white">
+                    {{ t("admin.settings.gatewayForwarding.codexTicketRuntimeTitle") }}
+                  </h3>
+                  <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.gatewayForwarding.codexTicketRuntimeDesc") }}
+                  </p>
+                  <div class="mt-3 grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        {{ t("admin.settings.gatewayForwarding.codexTicketTargetLength") }}
+                      </label>
+                      <input
+                        id="codex-ticket-target-length"
+                        v-model.number="form.openai_codex_ticket_target_length"
+                        type="number"
+                        min="32"
+                        max="4096"
+                        step="1"
+                        class="input w-full"
+                      />
+                    </div>
+                    <div>
+                      <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        {{ t("admin.settings.gatewayForwarding.codexTicketTTLSeconds") }}
+                      </label>
+                      <input
+                        id="codex-ticket-ttl-seconds"
+                        v-model.number="form.openai_codex_ticket_ttl_seconds"
+                        type="number"
+                        min="60"
+                        max="86400"
+                        step="1"
+                        class="input w-full"
+                      />
+                    </div>
+                    <div>
+                      <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        {{ t("admin.settings.gatewayForwarding.codexTicketRefreshBeforeSeconds") }}
+                      </label>
+                      <input
+                        id="codex-ticket-refresh-before-seconds"
+                        v-model.number="form.openai_codex_ticket_refresh_before_seconds"
+                        type="number"
+                        min="0"
+                        :max="Math.min(43200, form.openai_codex_ticket_ttl_seconds - 1)"
+                        step="1"
+                        class="input w-full"
+                      />
+                    </div>
+                    <div>
+                      <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        {{ t("admin.settings.gatewayForwarding.codexTicketProbeIntervalSeconds") }}
+                      </label>
+                      <input
+                        id="codex-ticket-probe-interval-seconds"
+                        v-model.number="form.openai_codex_ticket_probe_interval_seconds"
+                        type="number"
+                        min="1"
+                        max="3600"
+                        step="1"
+                        class="input w-full"
+                      />
+                    </div>
+                    <div>
+                      <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        {{ t("admin.settings.gatewayForwarding.codexTicketMaxConcurrentProbes") }}
+                      </label>
+                      <input
+                        id="codex-ticket-max-concurrent-probes"
+                        v-model.number="form.openai_codex_ticket_max_concurrent_probes"
+                        type="number"
+                        min="1"
+                        max="256"
+                        step="1"
+                        class="input w-full"
+                      />
+                    </div>
+                  </div>
+                </div>
                 <div>
                   <h3 class="text-base font-semibold text-gray-900 dark:text-white">
                     {{ t("admin.settings.gatewayForwarding.codexClientRestrictionTitle") }}
@@ -10090,6 +10206,14 @@ const form = reactive<SettingsForm>({
   // 只读展示：自动同步任务写入的官方最新稳定版，不参与提交（提交载荷按字段显式构造）
   openai_codex_client_version_synced: "",
   openai_codex_version_auto_sync_enabled: true,
+  openai_codex_ticket_enabled: false,
+  openai_codex_ticket_harvest_proxy_url: "",
+  openai_codex_ticket_harvest_proxy_configured: false,
+  openai_codex_ticket_target_length: 292,
+  openai_codex_ticket_ttl_seconds: 3600,
+  openai_codex_ticket_refresh_before_seconds: 600,
+  openai_codex_ticket_probe_interval_seconds: 6,
+  openai_codex_ticket_max_concurrent_probes: 8,
   // codex_cli_only 加固
   min_codex_version: "",
   max_codex_version: "",
@@ -11343,6 +11467,23 @@ const siteBillingModeHint = computed(() =>
 async function saveSettings() {
   saving.value = true;
   try {
+    if (
+      [
+        [form.openai_codex_ticket_target_length, 32, 4096],
+        [form.openai_codex_ticket_ttl_seconds, 60, 86400],
+        [form.openai_codex_ticket_refresh_before_seconds, 0, 43200],
+        [form.openai_codex_ticket_probe_interval_seconds, 1, 3600],
+        [form.openai_codex_ticket_max_concurrent_probes, 1, 256],
+      ].some(([value, min, max]) => !Number.isInteger(value) || value < min || value > max)
+    ) {
+      appStore.showError(t("admin.settings.gatewayForwarding.codexTicketIntegerError"));
+      return;
+    }
+    if (form.openai_codex_ticket_refresh_before_seconds >= form.openai_codex_ticket_ttl_seconds) {
+      appStore.showError(t("admin.settings.gatewayForwarding.codexTicketRefreshError"));
+      return;
+    }
+
     const normalizedTableDefaultPageSize = Math.floor(
       Number(form.table_default_page_size),
     );
@@ -11715,6 +11856,19 @@ async function saveSettings() {
         form.openai_codex_client_version?.trim() || "",
       openai_codex_version_auto_sync_enabled:
         form.openai_codex_version_auto_sync_enabled,
+      openai_codex_ticket_enabled: form.openai_codex_ticket_enabled,
+      openai_codex_ticket_harvest_proxy_url:
+        form.openai_codex_ticket_harvest_proxy_url?.trim() || "",
+      openai_codex_ticket_target_length:
+        form.openai_codex_ticket_target_length,
+      openai_codex_ticket_ttl_seconds:
+        form.openai_codex_ticket_ttl_seconds,
+      openai_codex_ticket_refresh_before_seconds:
+        form.openai_codex_ticket_refresh_before_seconds,
+      openai_codex_ticket_probe_interval_seconds:
+        form.openai_codex_ticket_probe_interval_seconds,
+      openai_codex_ticket_max_concurrent_probes:
+        form.openai_codex_ticket_max_concurrent_probes,
       min_codex_version: form.min_codex_version?.trim() || "",
       max_codex_version: form.max_codex_version?.trim() || "",
       codex_cli_only_allow_app_server_clients:

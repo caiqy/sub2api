@@ -554,6 +554,23 @@ export default {
         openaiCodexVersionAutoSyncHint: '每 6 小时从官方仓库获取最新稳定版客户端版本号，无需为了跟版本而升级本服务。关闭后仅使用上方手填版本或内置版本。',
         openaiCodexVersionSyncedValue: '当前同步到：{version}',
         codexHardeningTitle: 'Codex 设置',
+        codexTicketEnabled: '292 打票',
+        codexTicketEnabledDesc:
+          '关闭后不打票、不注入 x-codex-turn-state，按原链路转发。开启后后台打票，并在业务请求中覆盖该头。',
+        codexTicketHarvestProxy: '292 打票代理',
+        codexTicketHarvestProxyDesc:
+          '仅在门票功能开启时用于打票，保存后后续探测会使用新代理，无需重启。日常业务仍走账号自己的住宅代理。填写完整代理 URL（http 或 socks5h，含用户名和密码）。代理服务商需自行负责出口 IP 轮换。留空并保存表示不改已保存的值。',
+        codexTicketHarvestProxyPlaceholder: "http://user:pass{'@'}proxy.example.com:1080",
+        codexTicketHarvestProxyConfigured: '已配置（密码已隐藏）。要更换请整段粘贴新的代理 URL。',
+        codexTicketRuntimeTitle: '打票运行参数',
+        codexTicketRuntimeDesc: '探测周期与并发上限共同约束后台探针；修改后下个周期生效，无需重启。',
+        codexTicketTargetLength: '门票目标长度',
+        codexTicketTTLSeconds: '门票有效期（秒）',
+        codexTicketRefreshBeforeSeconds: '提前刷新（秒）',
+        codexTicketProbeIntervalSeconds: '探测周期（秒）',
+        codexTicketMaxConcurrentProbes: '探针并发上限',
+        codexTicketIntegerError: '门票参数必须为范围内的整数：目标长度 32–4096，有效期 60–86400 秒，提前刷新 0–43200 秒，探测周期 1–3600 秒，并发上限 1–256。',
+        codexTicketRefreshError: '提前刷新秒数必须小于门票有效期。',
         codexClientRestrictionTitle: 'Codex 客户端限制',
         codexHardeningDesc:
           '仅对已开启「仅允许 Codex 官方客户端」的 OpenAI OAuth 账号生效（全局）。在 User-Agent/Originator 之外，用版本区间、引擎指纹门与黑/白名单巩固判定。',

@@ -2366,6 +2366,62 @@
         </div>
       </div>
 
+      <!-- Codex 292 打票（仅 OpenAI OAuth / setup-token） -->
+      <div
+        v-if="account?.platform === 'openai' && !isSparkShadow && (account?.type === 'oauth' || account?.type === 'setup-token')"
+        class="border-t border-gray-200 pt-4 dark:border-dark-600"
+      >
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <label class="input-label mb-0">{{ t('admin.accounts.openai.codexTurnTicketEnabled') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.codexTurnTicketEnabledDesc') }}
+            </p>
+          </div>
+          <button
+            type="button"
+            data-testid="edit-codex-ticket-enabled-toggle"
+            role="switch"
+            :aria-label="t('admin.accounts.openai.codexTurnTicketEnabled')"
+            :aria-checked="codexTicketEnabled"
+            @click="codexTicketEnabled = !codexTicketEnabled"
+            :class="[
+              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+              codexTicketEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+            ]"
+          >
+            <span
+              :class="[
+                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                codexTicketEnabled ? 'translate-x-5' : 'translate-x-0'
+              ]"
+            />
+          </button>
+        </div>
+        <label class="mt-4 block input-label mb-0">{{ t('admin.accounts.openai.codexTurnTicket') }}</label>
+        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+          {{ t('admin.accounts.openai.codexTurnTicketDesc') }}
+        </p>
+        <div v-if="codexTurnTickets.length" class="mt-3 space-y-1.5">
+          <div v-for="ticket in codexTurnTickets" :key="ticket.model" class="flex flex-wrap items-center justify-between gap-x-2 text-sm">
+            <span class="font-medium">{{ ticket.model }}</span>
+            <span v-if="ticket.ready" class="text-emerald-600 dark:text-emerald-400">
+              {{ t('admin.accounts.openai.codexTurnTicketReady', { time: formatCodexTicketRemaining(ticket.remaining_seconds) }) }}
+            </span>
+            <span v-else-if="ticket.blocked" class="text-amber-600 dark:text-amber-400">
+              {{ t('admin.accounts.openai.codexTurnTicketPaused') }}
+            </span>
+            <span v-else class="text-gray-500">{{ t('admin.accounts.openai.codexTurnTicketMissing') }}</span>
+            <p v-if="ticket.last_error" class="w-full break-words text-xs text-amber-600 dark:text-amber-400">
+              {{ t('admin.accounts.openai.codexTurnTicketLastError') }}: {{ ticket.last_error }}
+            </p>
+            <p v-if="ticket.last_attempt_at" class="w-full text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.codexTurnTicketLastAttempt') }}: {{ formatDateTime(ticket.last_attempt_at) }}
+            </p>
+          </div>
+        </div>
+      </div>
+
       <!-- Codex 指纹收敛模式（仅 OpenAI OAuth） -->
       <div
         v-if="account?.platform === 'openai' && account?.type === 'oauth'"
@@ -3256,6 +3312,15 @@ const selectableGroups = computed(() => {
 // 故隐藏代理选择器。
 const isSparkShadow = computed(() => props.account?.parent_account_id != null)
 
+const codexTurnTickets = computed(() => props.account?.codex_turn_tickets ?? [])
+
+function formatCodexTicketRemaining(seconds: number) {
+  const total = Math.max(0, Math.floor(seconds || 0))
+  const m = Math.floor(total / 60)
+  const s = total % 60
+  return `${m}m${String(s).padStart(2, '0')}s`
+}
+
 const hideAccountLongContextBilling = computed(() => {
   return allSelectedGroupsEnableLongContextPricing(form.group_ids, props.groups)
 })
@@ -3602,6 +3667,7 @@ const openaiPassthroughEnabled = ref(false)
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
+const codexTicketEnabled = ref(false)
 // OpenAI 订阅档位（Plus / Pro 20x / Pro 5x / Business Standard / Business Premium / Free）手动覆盖值,
 // 存于 credentials.plan_type;'' 表示清空/自动识别
 const editPlanType = ref<string>('')
@@ -4085,6 +4151,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   openaiPassthroughEnabled.value = false
   openaiFlattenNamespacesEnabled.value = false
   openAILongContextBillingEnabled.value = false
+  codexTicketEnabled.value = false
   editPlanType.value = ''
   openAICompactMode.value = 'auto'
   openAIProbeEnabled.value = true
@@ -4142,6 +4209,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       defaultMode: OPENAI_WS_MODE_OFF
     })
     if (newAccount.type === 'oauth' || newAccount.type === 'setup-token') {
+      codexTicketEnabled.value = extra?.codex_ticket_enabled === true
       codexCLIOnlyEnabled.value = extra?.codex_cli_only === true
       codexCLIOnlyAppServerEnabled.value =
         extra?.codex_cli_only_allow_app_server === true
@@ -5263,6 +5331,7 @@ function applyOpenAIExtra(extra: Record<string, unknown>) {
   }
 
   if (props.account.type === 'oauth' || props.account.type === 'setup-token') {
+    extra.codex_ticket_enabled = codexTicketEnabled.value
     if (codexCLIOnlyEnabled.value) {
       extra.codex_cli_only = true
     } else if (hadCodexCLIOnlyEnabled) {
@@ -5277,6 +5346,8 @@ function applyOpenAIExtra(extra: Record<string, unknown>) {
     } else {
       delete extra.codex_cli_only_allow_app_server
     }
+  } else {
+    delete extra.codex_ticket_enabled
   }
 
   if (props.account.type === 'oauth') {

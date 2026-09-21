@@ -2653,6 +2653,7 @@ func TestOpenAIGatewayService_SettingsRefreshRecreatesLayeredSchedulerOnProbeInt
 	}}, cfg)
 	rateLimitSvc := &RateLimitService{settingService: settingSvc}
 	svc := NewOpenAIGatewayService(nil, nil, nil, nil, nil, nil, nil, cfg, nil, nil, nil, rateLimitSvc, nil, nil, nil, nil, nil, nil, nil)
+	t.Cleanup(svc.StopOpenAICodexTicketHarvester)
 	first := svc.getOpenAIAccountSchedulerWithContext(ctx)
 	firstLayered, ok := first.(*layeredOpenAIAccountScheduler)
 	require.True(t, ok)

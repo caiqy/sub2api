@@ -186,7 +186,7 @@ func TestGatewayServiceRecordUsage_ResponseModelSafeFallbacks(t *testing.T) {
 func TestOpenAIGatewayServiceRecordUsage_ResponseModelBillsCheaperResponseModel(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	userRepo := &openAIRecordUsageUserRepoStub{}
-	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
+	svc := newOpenAIRecordUsageServiceForTest(t, usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
 	tokens := UsageTokens{InputTokens: 20, OutputTokens: 10}
 	cheaper, pricier, cheaperCost, _ := orderedResponseBillingModels(t, svc.billingService, tokens, openAICheapFixtureModel, openAIPriceyFixtureModel)
 
@@ -226,7 +226,7 @@ func TestOpenAIGatewayServiceRecordUsage_ResponseModelBillsCheaperResponseModel(
 func TestOpenAIGatewayServiceRecordUsage_ResponseModelRejectsPricierResponseModel(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	userRepo := &openAIRecordUsageUserRepoStub{}
-	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
+	svc := newOpenAIRecordUsageServiceForTest(t, usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
 	tokens := UsageTokens{InputTokens: 20, OutputTokens: 10}
 	cheaper, pricier, cheaperCost, _ := orderedResponseBillingModels(t, svc.billingService, tokens, openAICheapFixtureModel, openAIPriceyFixtureModel)
 
@@ -290,7 +290,7 @@ func TestOpenAIGatewayServiceRecordUsage_ResponseModelSafeFallbacks(t *testing.T
 		t.Run(tt.name, func(t *testing.T) {
 			usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 			userRepo := &openAIRecordUsageUserRepoStub{}
-			svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
+			svc := newOpenAIRecordUsageServiceForTest(t, usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
 			tokens := UsageTokens{InputTokens: 20, OutputTokens: 10}
 			cheaper, pricier, _, pricierCost := orderedResponseBillingModels(t, svc.billingService, tokens, openAICheapFixtureModel, openAIPriceyFixtureModel)
 
@@ -422,7 +422,7 @@ func TestGatewayServiceRecordUsage_ResponseModelRejectsUnidentifiedFamilyName(t 
 func TestOpenAIGatewayServiceRecordUsage_ResponseModelRejectsUnidentifiedFamilyName(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	userRepo := &openAIRecordUsageUserRepoStub{}
-	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
+	svc := newOpenAIRecordUsageServiceForTest(t, usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
 	tokens := UsageTokens{InputTokens: 20, OutputTokens: 10}
 	const forged = "totally-made-up-haiku-v9"
 
@@ -550,7 +550,7 @@ func TestGatewayServiceRecordUsage_ResponseModelSkippedForSearchSurchargedReques
 func TestOpenAIGatewayServiceRecordUsage_ResponseModelSkippedForSearchSurchargedRequest(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	userRepo := &openAIRecordUsageUserRepoStub{}
-	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
+	svc := newOpenAIRecordUsageServiceForTest(t, usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
 	tokens := UsageTokens{InputTokens: 20, OutputTokens: 10}
 	cheaper, pricier, _, pricierCost := orderedResponseBillingModels(t, svc.billingService, tokens, openAICheapFixtureModel, openAIPriceyFixtureModel)
 

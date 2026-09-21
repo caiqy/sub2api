@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import AccountUsageCell from '../AccountUsageCell.vue'
 import type { Account } from '@/types'
+import { formatDateTime } from '@/utils/format'
 
 const { getUsage } = vi.hoisted(() => ({
   getUsage: vi.fn()
@@ -104,6 +105,49 @@ describe('AccountUsageCell', () => {
         dispatchEvent: vi.fn(),
       }))
     })
+  })
+
+  it.each(['oauth', 'setup-token'] as const)('renders Codex ticket status for OpenAI %s accounts', async (type) => {
+    getUsage.mockResolvedValue({})
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({
+          id: type === 'oauth' ? 9701 : 9702,
+          platform: 'openai',
+          type,
+          extra: { codex_turn_ticket_state: 'gAAAAA-secret-ticket-ciphertext' },
+          codex_turn_tickets: [
+            { model: 'gpt-6-astra', ready: true, remaining_seconds: 2520, blocked: false },
+            { model: 'gpt-5.6-sol', ready: false, remaining_seconds: 0, blocked: true,
+              last_error: 'probe_timeout', last_attempt_at: '2026-09-21T08:30:00Z' },
+            { model: 'custom-model', ready: false, remaining_seconds: 0, blocked: false },
+          ],
+        }),
+      },
+      global: { stubs: {
+        OpenAIQuotaResetCell: { template: '<div data-test="quota-reset" />' },
+        UsageProgressBar: true,
+        AccountQuotaInfo: true,
+      } },
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('42m00s')
+    expect(wrapper.text()).toContain('admin.accounts.openai.codexTurnTicketPaused')
+    expect(wrapper.text()).toContain('admin.accounts.openai.codexTurnTicketMissing')
+    expect(wrapper.text()).toContain('probe_timeout')
+    expect(wrapper.html()).not.toContain('gAAAAA-secret-ticket-ciphertext')
+    expect(wrapper.text()).toContain(formatDateTime('2026-09-21T08:30:00Z'))
+    expect(wrapper.text()).toContain('admin.accounts.openai.codexTurnTicketLastError')
+    expect(wrapper.text()).toContain('admin.accounts.openai.codexTurnTicketLastAttempt')
+    if (type === 'setup-token') {
+      expect(getUsage).not.toHaveBeenCalled()
+      expect(wrapper.find('[data-test="quota-reset"]').exists()).toBe(false)
+    }
+    await wrapper.setProps({ account: { ...wrapper.props('account'), codex_turn_tickets: [] } })
+    expect(wrapper.text()).not.toContain('codexTurnTicket')
+    expect(wrapper.text()).not.toContain('42m00s')
+    expect(wrapper.text()).not.toContain('probe_timeout')
+    wrapper.unmount()
   })
 
   it('renders eligible Ollama Cloud state and forwards query updates', async () => {

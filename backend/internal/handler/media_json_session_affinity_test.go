@@ -120,6 +120,7 @@ func runMediaJSONSessionAffinity(t *testing.T, route, kind, body string, headers
 		accountRepo, nil, nil, nil, nil, nil, cache, cfg,
 		nil, concurrency, nil, nil, billing, upstream, nil, nil, service.NewGrokTokenProvider(accountRepo, nil), nil, nil,
 	)
+	t.Cleanup(gateway.StopOpenAICodexTicketHarvester)
 	h := NewOpenAIGatewayHandler(gateway, concurrency, billing, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 	h.grokMediaEligibilityProber = &grokMediaEligibilityProberStub{eligible: true, reason: "eligible"}
 	h.maxAccountSwitches = 1

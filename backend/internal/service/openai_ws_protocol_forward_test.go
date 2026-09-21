@@ -756,6 +756,7 @@ func TestNewOpenAIGatewayService_InitializesOpenAIWSResolver(t *testing.T) {
 		nil,
 		nil, // userPlatformQuotaRepo
 	)
+	t.Cleanup(svc.StopOpenAICodexTicketHarvester)
 
 	decision := svc.getOpenAIWSProtocolResolver().Resolve(nil)
 	require.Equal(t, OpenAIUpstreamTransportHTTPSSE, decision.Transport)

@@ -97,6 +97,7 @@ func TestOpenAIGatewayHandler_ImagesAcquiresUserGroupSlotWhenEnabled(t *testing.
 		nil,
 		nil,
 	)
+	t.Cleanup(gatewayService.StopOpenAICodexTicketHarvester)
 	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
 
 	apiKey := &service.APIKey{

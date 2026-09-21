@@ -44,7 +44,7 @@ func TestAstraForwardPreservesMaxInPayloadAndUsage(t *testing.T) {
 				require.Equal(t, "max", *result.ReasoningEffort)
 				usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 				billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
-				usageService := newOpenAIRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+				usageService := newOpenAIRecordUsageServiceWithBillingRepoForTest(t, usageRepo, billingRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
 				err = usageService.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
 					Result: result, Account: account, User: &User{ID: 21}, APIKey: &APIKey{ID: 22, Group: &Group{RateMultiplier: 1}},
 				})

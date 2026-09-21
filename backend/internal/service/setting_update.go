@@ -43,6 +43,9 @@ func (s *SettingService) UpdateSettingsOmitting(ctx context.Context, settings *S
 		return err
 	}
 	omitted.dropFrom(updates)
+	if err := s.validateOpenAICodexTicketRuntimeUpdates(ctx, updates); err != nil {
+		return err
+	}
 
 	if err := s.settingRepo.SetMultiple(ctx, updates); err != nil {
 		return err
@@ -73,6 +76,9 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsOmitting(ctx contex
 		updates[key] = value
 	}
 	omitted.dropFrom(updates)
+	if err := s.validateOpenAICodexTicketRuntimeUpdates(ctx, updates); err != nil {
+		return err
+	}
 
 	if err := s.settingRepo.SetMultiple(ctx, updates); err != nil {
 		return err
@@ -100,6 +106,29 @@ func (s *SettingService) refreshCachedSettingsAfterWrite(ctx context.Context, se
 		return
 	}
 	s.refreshCachedSettings(reloadCtx, stored)
+}
+
+func (s *SettingService) validateOpenAICodexTicketRuntimeUpdates(ctx context.Context, updates map[string]string) error {
+	ttl, ttlSet := updates[SettingKeyOpenAICodexTicketTTLSeconds]
+	refresh, refreshSet := updates[SettingKeyOpenAICodexTicketRefreshBefore]
+	if !ttlSet && !refreshSet {
+		return nil
+	}
+	// Validate the effective pair, including stored values and deployment defaults.
+	current, err := s.GetAllSettings(ctx)
+	if err != nil {
+		return err
+	}
+	if ttlSet {
+		current.OpenAICodexTicketTTLSeconds, _ = strconv.Atoi(ttl)
+	}
+	if refreshSet {
+		current.OpenAICodexTicketRefreshBeforeSeconds, _ = strconv.Atoi(refresh)
+	}
+	if current.OpenAICodexTicketRefreshBeforeSeconds >= current.OpenAICodexTicketTTLSeconds {
+		return infraerrors.BadRequest("INVALID_CODEX_TICKET_RUNTIME_SETTINGS", "refresh_before_seconds must be smaller than ttl_seconds")
+	}
+	return nil
 }
 
 func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, settings *SystemSettings) (map[string]string, error) {
@@ -502,6 +531,32 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyOpenAICodexUserAgent] = strings.TrimSpace(settings.OpenAICodexUserAgent)
 	updates[SettingKeyOpenAICodexClientVersion] = NormalizeCodexClientVersion(settings.OpenAICodexClientVersion)
 	updates[SettingKeyOpenAICodexVersionAutoSyncEnabled] = strconv.FormatBool(settings.OpenAICodexVersionAutoSyncEnabled)
+	updates[SettingKeyOpenAICodexTicketEnabled] = strconv.FormatBool(settings.OpenAICodexTicketEnabled)
+	if err := ValidateOpenAICodexTicketHarvestProxyURL(settings.OpenAICodexTicketHarvestProxyURL); err != nil {
+		return nil, infraerrors.BadRequest("INVALID_CODEX_HARVEST_PROXY", err.Error())
+	}
+	updates[SettingKeyOpenAICodexTicketHarvestProxyURL] = strings.TrimSpace(settings.OpenAICodexTicketHarvestProxyURL)
+	// Legacy partial service updates omit zero values unless refresh zero is explicit.
+	for _, item := range []struct {
+		key   string
+		value int
+		min   int
+		max   int
+	}{
+		{SettingKeyOpenAICodexTicketTargetLength, settings.OpenAICodexTicketTargetLength, openAICodexTicketMinTargetLength, openAICodexTicketMaxTargetLength},
+		{SettingKeyOpenAICodexTicketTTLSeconds, settings.OpenAICodexTicketTTLSeconds, openAICodexTicketMinTTLSeconds, openAICodexTicketMaxTTLSeconds},
+		{SettingKeyOpenAICodexTicketRefreshBefore, settings.OpenAICodexTicketRefreshBeforeSeconds, 0, openAICodexTicketMaxRefreshBefore},
+		{SettingKeyOpenAICodexTicketProbeInterval, settings.OpenAICodexTicketProbeIntervalSeconds, openAICodexTicketMinProbeInterval, openAICodexTicketMaxProbeInterval},
+		{SettingKeyOpenAICodexTicketMaxConcurrent, settings.OpenAICodexTicketMaxConcurrentProbes, openAICodexTicketMinConcurrency, openAICodexTicketMaxConcurrency},
+	} {
+		if item.value == 0 && (item.key != SettingKeyOpenAICodexTicketRefreshBefore || !settings.OpenAICodexTicketRefreshBeforeSecondsSet) {
+			continue
+		}
+		if item.value < item.min || item.value > item.max {
+			return nil, infraerrors.BadRequest("INVALID_CODEX_TICKET_RUNTIME_SETTINGS", item.key+" is out of range")
+		}
+		updates[item.key] = strconv.Itoa(item.value)
+	}
 	// SettingKeyOpenAICodexClientVersionSynced 由自动同步任务独占写入，此处不得覆盖，
 	// 否则面板保存会把同步结果清空。
 	// codex_cli_only 加固
@@ -756,6 +811,9 @@ func (s *SettingService) refreshCachedSettings(ctx context.Context, settings *Sy
 	// 版本号缓存只做失效，不在此重算：生效值还取决于自动同步写入的 synced 键，
 	// 这里没有它的最新值，重算会把同步结果覆盖成陈旧值。
 	s.InvalidateOpenAICodexClientVersionCache()
+	s.InvalidateOpenAICodexTicketEnabledCache()
+	s.InvalidateOpenAICodexTicketHarvestProxyCache()
+	s.InvalidateOpenAICodexTicketRuntimeCache()
 	openAIAdvancedSchedulerSettingSF.Forget(openAIAdvancedSchedulerSettingKey)
 	openAIAdvancedSchedulerSettingCache.Store(&cachedOpenAIAdvancedSchedulerSetting{
 		lowUpstreamRatePriorityEnabled: settings.OpenAILowUpstreamRatePriorityEnabled,

@@ -3,6 +3,7 @@ import { defineComponent } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { formatDateTime } from '@/utils/format'
 
 const {
   updateAccountMock,
@@ -1400,6 +1401,54 @@ describe('EditAccountModal', () => {
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_long_context_billing_enabled).toBe(false)
+  })
+
+  it('submits the OpenAI OAuth Codex ticket toggle, including the default false value', async () => {
+    const enabledWrapper = mountModal(buildOpenAIOAuthParentAccount())
+    const enabledToggle = enabledWrapper.get('[data-testid="edit-codex-ticket-enabled-toggle"]')
+    expect(enabledToggle.attributes('aria-checked')).toBe('false')
+    expect(enabledToggle.attributes('role')).toBe('switch')
+    expect(enabledToggle.attributes('aria-label')).toBe('admin.accounts.openai.codexTurnTicketEnabled')
+
+    await enabledToggle.trigger('click')
+    expect(enabledToggle.attributes('aria-checked')).toBe('true')
+    await enabledWrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.codex_ticket_enabled).toBe(true)
+    enabledWrapper.unmount()
+
+    updateAccountMock.mockClear()
+    const defaultWrapper = mountModal(buildOpenAIOAuthParentAccount())
+    expect(defaultWrapper.get('[data-testid="edit-codex-ticket-enabled-toggle"]').attributes('aria-checked')).toBe('false')
+
+    await defaultWrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.codex_ticket_enabled).toBe(false)
+    defaultWrapper.unmount()
+  })
+
+  it.each(['oauth', 'setup-token'] as const)('shows Codex failure and attempt time without ciphertext for %s', async (type) => {
+    const account = buildOpenAIOAuthParentAccount()
+    account.type = type
+    account.extra = { ...account.extra, codex_turn_ticket_state: 'gAAAAA-secret-ticket-ciphertext' }
+    account.codex_turn_tickets = [{
+      model: 'gpt-6-astra', ready: false, blocked: true, remaining_seconds: 0,
+      last_error: 'probe_timeout', last_attempt_at: '2026-09-21T08:30:00Z',
+    }]
+    const wrapper = mountModal(account)
+    expect(wrapper.text()).toContain('admin.accounts.openai.codexTurnTicketPaused')
+    expect(wrapper.text()).toContain('admin.accounts.openai.codexTurnTicketLastError')
+    expect(wrapper.text()).toContain('probe_timeout')
+    expect(wrapper.text()).toContain('admin.accounts.openai.codexTurnTicketLastAttempt')
+    expect(wrapper.text()).toContain(formatDateTime('2026-09-21T08:30:00Z'))
+    expect(wrapper.html()).not.toContain('gAAAAA-secret-ticket-ciphertext')
+    await wrapper.setProps({ account: { ...account, codex_turn_tickets: [{
+      model: 'gpt-6-astra', ready: true, blocked: false, remaining_seconds: 60,
+    }] } })
+    expect(wrapper.text()).toContain('admin.accounts.openai.codexTurnTicketReady')
+    expect(wrapper.text()).not.toContain('admin.accounts.openai.codexTurnTicketLastError')
+    expect(wrapper.text()).not.toContain('admin.accounts.openai.codexTurnTicketLastAttempt')
+    wrapper.unmount()
   })
 
   it('loads and clears the OAuth-only Codex namespace flatten toggle', async () => {

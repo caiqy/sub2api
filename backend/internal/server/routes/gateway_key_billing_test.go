@@ -44,7 +44,7 @@ func (r *keyBillingRouteRateRepo) GetRPMOverrideByUserAndGroup(context.Context, 
 	return nil, nil
 }
 
-func newKeyBillingRouteTestRouter(runMode string) (*gin.Engine, *keyBillingRouteRateRepo, string) {
+func newKeyBillingRouteTestRouter(t *testing.T, runMode string) (*gin.Engine, *keyBillingRouteRateRepo, string) {
 	gin.SetMode(gin.TestMode)
 	group := &service.Group{
 		ID:               42,
@@ -83,6 +83,7 @@ func newKeyBillingRouteTestRouter(runMode string) (*gin.Engine, *keyBillingRoute
 		nil, nil, nil, nil, nil, rateRepo, nil, cfg, nil, nil, nil,
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
 	)
+	t.Cleanup(openAIGatewayService.StopOpenAICodexTicketHarvester)
 	gatewayHandler := handler.NewGatewayHandler(
 		gatewayService, openAIGatewayService, nil, nil, nil, nil, nil, nil,
 		apiKeyService, nil, nil, nil, nil, cfg, nil, nil,
@@ -122,7 +123,7 @@ func TestGatewayRoutesKeyBillingInfoPathIsRegistered(t *testing.T) {
 
 func TestGatewayRoutesKeyBillingInfoEndToEnd(t *testing.T) {
 	t.Run("missing credentials", func(t *testing.T) {
-		router, rateRepo, _ := newKeyBillingRouteTestRouter(config.RunModeStandard)
+		router, rateRepo, _ := newKeyBillingRouteTestRouter(t, config.RunModeStandard)
 		w := httptest.NewRecorder()
 
 		router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/sub2api/billing", nil))
@@ -134,7 +135,7 @@ func TestGatewayRoutesKeyBillingInfoEndToEnd(t *testing.T) {
 	})
 
 	t.Run("standard mode", func(t *testing.T) {
-		router, rateRepo, key := newKeyBillingRouteTestRouter(config.RunModeStandard)
+		router, rateRepo, key := newKeyBillingRouteTestRouter(t, config.RunModeStandard)
 		req := httptest.NewRequest(http.MethodGet, "/v1/sub2api/billing", nil)
 		req.Header.Set("Authorization", "Bearer "+key)
 		w := httptest.NewRecorder()
@@ -153,7 +154,7 @@ func TestGatewayRoutesKeyBillingInfoEndToEnd(t *testing.T) {
 	})
 
 	t.Run("simple mode", func(t *testing.T) {
-		router, rateRepo, key := newKeyBillingRouteTestRouter(config.RunModeSimple)
+		router, rateRepo, key := newKeyBillingRouteTestRouter(t, config.RunModeSimple)
 		req := httptest.NewRequest(http.MethodGet, "/v1/sub2api/billing", nil)
 		req.Header.Set("x-api-key", key)
 		w := httptest.NewRecorder()

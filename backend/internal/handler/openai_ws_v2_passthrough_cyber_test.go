@@ -76,6 +76,7 @@ func newOpenAIWSPassthroughHandlerHarness(t *testing.T, upstreamURL string) *ope
 		service.NewBillingService(cfg, nil), nil, billingCacheSvc, nil, &service.DeferredService{},
 		nil, nil, nil, nil, nil, settingSvc, nil,
 	)
+	t.Cleanup(gatewaySvc.StopOpenAICodexTicketHarvester)
 	concurrencyCache := &concurrencyCacheMock{
 		acquireUserSlotFn:    func(context.Context, int64, int, string) (bool, error) { return true, nil },
 		acquireAccountSlotFn: func(context.Context, int64, int, string) (bool, error) { return true, nil },

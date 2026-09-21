@@ -61,7 +61,7 @@ func recordUsageWithChannelPricing(t *testing.T, requestedModel string, subscrip
 	const groupID = int64(777)
 
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
-	svc := newOpenAIRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+	svc := newOpenAIRecordUsageServiceForTest(t, usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
 	cs := newChannelServiceWithPricings(groupID, pricings)
 	svc.channelService = cs
 	svc.resolver = NewModelPricingResolver(cs, svc.billingService)
