@@ -322,6 +322,139 @@ func TestAccountTestService_DeepSeekResponsesRoutesToOpenAIProbe(t *testing.T) {
 	require.Equal(t, "https://relay.example.com/v1/responses", upstream.requests[0].URL.String())
 }
 
+func TestAccountTestService_OpenCodeURLResponsesTestInjectsSessionHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := newTestContext()
+	ctx.Request.Header.Set("X-OpenCode-Session", "caller-session-94")
+
+	resp := newJSONResponse(http.StatusOK, "")
+	resp.Body = io.NopCloser(strings.NewReader(`data: {"type":"response.completed"}
+
+`))
+	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
+	svc := &AccountTestService{
+		httpUpstream: upstream,
+		cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+	}
+	account := &Account{
+		ID:          94,
+		Platform:    PlatformDeepseek,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":      "sk-opencode-test",
+			"base_url":     "https://opencode.ai/zen/go/v1",
+			"api_protocol": APIProtocolResponses,
+			"header_overrides": map[string]any{
+				"x-opencode-session": "override-session-should-be-superseded",
+			},
+		},
+		Extra: map[string]any{
+			openai_compat.ExtraKeyResponsesSupported: true,
+		},
+	}
+	repo := &openAIAccountTestRepo{
+		mockAccountRepoForGemini: mockAccountRepoForGemini{
+			accountsByID: map[int64]*Account{94: account},
+		},
+	}
+	svc.accountRepo = repo
+
+	err := svc.TestAccountConnection(ctx, account.ID, "deepseek-v4.1-flash", "hi", "")
+	require.NoError(t, err)
+	require.Len(t, upstream.requests, 1)
+	req := upstream.requests[0]
+	require.Equal(t, "https://opencode.ai/zen/go/v1/responses", req.URL.String())
+	// Context 中的 session 必须传递给 helper 并优先于账号级 header override
+	require.Equal(t, "caller-session-94", req.Header.Get("X-OpenCode-Session"))
+	body, err := io.ReadAll(req.Body)
+	require.NoError(t, err)
+	storeVal := gjson.GetBytes(body, "store")
+	require.True(t, storeVal.Exists(), "store 字段必须显式写入")
+	require.Equal(t, gjson.False, storeVal.Type)
+}
+
+func TestAccountTestService_OpenAICompactOpenCodeBaseURLInjectsSessionHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := newTestContext()
+
+	resp := newJSONResponse(http.StatusOK, "")
+	resp.Body = io.NopCloser(strings.NewReader(`data: {"type":"response.output_item.done","item":{"type":"compaction"}}
+data: {"type":"response.completed"}
+
+`))
+	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
+	svc := &AccountTestService{
+		httpUpstream: upstream,
+		cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+	}
+	account := &Account{
+		ID:          95,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "sk-opencode-test",
+			"base_url": "https://opencode.ai/zen/go/v1",
+		},
+	}
+	repo := &openAIAccountTestRepo{
+		mockAccountRepoForGemini: mockAccountRepoForGemini{
+			accountsByID: map[int64]*Account{95: account},
+		},
+	}
+	svc.accountRepo = repo
+
+	err := svc.TestAccountConnection(ctx, account.ID, "gpt-5.4", "", AccountTestModeCompact)
+	require.NoError(t, err)
+	require.Len(t, upstream.requests, 1)
+	req := upstream.requests[0]
+	require.Equal(t, "https://opencode.ai/zen/go/v1/responses", req.URL.String())
+	require.NotEmpty(t, req.Header.Get("X-OpenCode-Session"))
+}
+
+func TestAccountTestService_ClaudeAPIKeyOpenCodeBaseURLInjectsSessionHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := newTestContext()
+
+	resp := newJSONResponse(http.StatusOK, "")
+	resp.Body = io.NopCloser(strings.NewReader(`event: message_start
+data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant"}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+`))
+	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
+	svc := &AccountTestService{
+		httpUpstream: upstream,
+		cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+	}
+	account := &Account{
+		ID:          96,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "sk-ant-test",
+			"base_url": "https://opencode.ai/zen/go/v1",
+		},
+	}
+	repo := &openAIAccountTestRepo{
+		mockAccountRepoForGemini: mockAccountRepoForGemini{
+			accountsByID: map[int64]*Account{96: account},
+		},
+	}
+	svc.accountRepo = repo
+
+	err := svc.TestAccountConnection(ctx, account.ID, "claude-sonnet-4-6", "hi", "")
+	require.NoError(t, err)
+	require.Len(t, upstream.requests, 1)
+	req := upstream.requests[0]
+	require.Equal(t, "https://opencode.ai/zen/go/v1/messages?beta=true", req.URL.String())
+	require.NotEmpty(t, req.Header.Get("X-OpenCode-Session"))
+}
+
 func TestAccountTestService_DeepSeekDefaultBaseURLUsesNativeResponsesPath(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()

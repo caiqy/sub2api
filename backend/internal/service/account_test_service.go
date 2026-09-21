@@ -550,8 +550,9 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 		setAnthropicAPIKeyAuthHeader(req.Header, account, authToken, account.GetBaseURL())
 	}
 
-	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
+	// 账号级请求头覆写与会话收口：测试请求与真实转发保持一致的最终头
 	account.ApplyHeaderOverrides(req.Header)
+	applyOpenCodeSessionHeader(c, account, apiURL, req.Header, payloadBytes)
 
 	// Get proxy URL
 	proxyURL := ""
@@ -848,6 +849,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	}
 	payload := createOpenAITestPayload(upstreamTestModelID, isOAuth)
 	payloadBytes, _ := json.Marshal(payload)
+	payloadBytes = normalizeDeepSeekResponsesRequestBody(credentialAccount, payloadBytes)
 
 	// Send test_start event once. A task-invalid Agent Identity response may
 	// restart this probe after registering a replacement task.
@@ -898,8 +900,9 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		enforceCodexIdentityHeadersWithUA(req.Header, credentialAccount.GetOpenAIUserAgent())
 	}
 
-	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
+	// 账号级请求头覆写与会话收口：测试请求与真实转发保持一致的最终头
 	credentialAccount.ApplyHeaderOverrides(req.Header)
+	applyOpenCodeSessionHeader(c, credentialAccount, apiURL, req.Header, payloadBytes)
 
 	// Get proxy URL
 	proxyURL := ""
@@ -2237,8 +2240,9 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		}
 	}
 
-	// 账号级请求头覆写：测试请求与真实转发保持一致的最终头
+	// 账号级请求头覆写与会话收口：测试请求与真实转发保持一致的最终头
 	account.ApplyHeaderOverrides(req.Header)
+	applyOpenCodeSessionHeader(c, credentialAccount, apiURL, req.Header, payloadBytes)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {

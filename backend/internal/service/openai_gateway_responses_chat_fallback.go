@@ -82,11 +82,15 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	if err != nil {
 		return nil, err
 	}
-	recap := len(effectiveTools) == 0 && adaptOpenCodeCodexRecap(c, targetURL, &responsesReq, chatReq)
+	var codexOutput *codexStringOutputSpec
+	if len(effectiveTools) == 0 {
+		codexOutput = adaptOpenCodeCodexStringOutput(c, targetURL, &responsesReq, chatReq)
+	}
 	upstreamStream := chatReq.Stream
-	if recap {
-		logger.L().Info("openai responses: downgraded Codex recap to json_object",
-			zap.Int64("account_id", account.ID), zap.String("upstream_model", upstreamModel))
+	if codexOutput != nil {
+		logger.L().Info("openai responses: downgraded Codex structured output to json_object",
+			zap.Int64("account_id", account.ID), zap.String("upstream_model", upstreamModel),
+			zap.String("field", codexOutput.field))
 	}
 
 	chatBody, err := json.Marshal(chatReq)
@@ -144,11 +148,11 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 		return s.handleErrorResponse(ctx, resp, c, account, errorBody, billingModel)
 	}
 
-	if clientStream && !recap {
+	if clientStream && codexOutput == nil {
 		result, streamErr := s.streamChatCompletionsAsResponses(upstreamCtx, c, resp, originalModel, customTools, functionTools, toolSearch, namespaceTools, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
 		return result, streamErr
 	}
-	return s.bufferChatCompletionsAsResponses(c, resp, originalModel, customTools, functionTools, toolSearch, namespaceTools, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime, recap, clientStream)
+	return s.bufferChatCompletionsAsResponses(c, resp, originalModel, customTools, functionTools, toolSearch, namespaceTools, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime, codexOutput, clientStream)
 }
 
 func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
@@ -164,13 +168,13 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 	reasoningEffort *string,
 	serviceTier *string,
 	startTime time.Time,
-	recap bool,
+	codexOutput *codexStringOutputSpec,
 	clientStream bool,
 ) (*OpenAIForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
 	ccResp, usage, err := s.readCCUpstreamJSONResponse(c, resp, writeOpenAIResponsesFallbackError)
 	if err != nil {
-		if recap && c.Writer.Written() {
+		if codexOutput != nil && c.Writer.Written() {
 			// The shared JSON reader already sent an error; do not let the
 			// Responses handler append a second, SSE-formatted error to it.
 			MarkResponseCommitted(c)
@@ -190,13 +194,13 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 		Stream:                      clientStream,
 		Duration:                    time.Since(startTime),
 	}
-	if recap {
-		content, validationErr := validateCodexRecapResponse(ccResp)
-		logger.L().Info("openai responses: Codex recap validation",
+	if codexOutput != nil {
+		content, validationErr := validateCodexStringOutputResponse(ccResp, codexOutput)
+		logger.L().Info("openai responses: Codex structured output validation",
 			zap.String("request_id", requestID), zap.String("upstream_model", upstreamModel),
 			zap.Bool("valid", validationErr == nil))
 		if validationErr != nil {
-			const message = "Upstream returned an invalid Codex recap after JSON compatibility conversion"
+			const message = "Upstream returned invalid Codex structured output after JSON compatibility conversion"
 			setOpsUpstreamError(c, http.StatusBadGateway, message, "")
 			MarkResponseCommitted(c)
 			writeOpenAIResponsesFallbackError(c, http.StatusBadGateway, "upstream_error", message)
@@ -206,7 +210,7 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 			firstTokenMs := int(time.Since(startTime).Milliseconds())
 			result.FirstTokenMs = &firstTokenMs
 			s.newStreamHeaderWriter(c, resp.Header)()
-			err := s.writeCodexRecapStream(c, ccResp, originalModel, content)
+			err := s.writeCodexStringOutputStream(c, ccResp, originalModel, content)
 			result.Duration = time.Since(startTime)
 			return result, err
 		}

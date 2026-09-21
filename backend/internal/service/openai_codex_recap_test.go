@@ -19,6 +19,8 @@ import (
 
 const codexRecapTestRequest = `{"model":"deepseek-v4.1-flash","instructions":"Keep the user's language.","input":"Write a brief catch-up.","tools":[],"tool_choice":"auto","stream":false,"reasoning":{"effort":"high"},"text":{"format":{"type":"json_schema","strict":true,"name":"codex_output_schema","schema":{"type":"object","properties":{"recap":{"type":"string","minLength":1,"maxLength":320}},"required":["recap"],"additionalProperties":false}}}}`
 
+const codexTitleTestRequest = `{"model":"deepseek-v4.1-flash","instructions":"Generate a concise task title.","input":"Connect to the 185 server.","tools":[],"tool_choice":"auto","stream":false,"reasoning":{"effort":"xhigh"},"text":{"format":{"type":"json_schema","strict":true,"name":"codex_output_schema","schema":{"type":"object","properties":{"title":{"type":"string","minLength":1,"maxLength":36}},"required":["title"],"additionalProperties":false}}}}`
+
 func codexRecapTestAccount() *Account {
 	return &Account{ID: 368, Platform: PlatformDeepseek, Type: AccountTypeAPIKey, Credentials: map[string]any{
 		"api_key": "test-key", "base_url": "https://opencode.ai/zen/go/v1/chat/completions", "api_protocol": APIProtocolChatCompletions,
@@ -92,6 +94,35 @@ func TestForwardResponses_CodexRecap(t *testing.T) {
 			require.Equal(t, "response.completed", types[len(types)-1])
 			require.Contains(t, types, "response.output_item.added")
 			require.Contains(t, types, "response.output_text.done")
+		})
+	}
+}
+
+func TestForwardResponses_CodexTitle(t *testing.T) {
+	content := `{"title":"连接 185 服务器"}`
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprint(stream), func(t *testing.T) {
+			body, err := sjson.Set(codexTitleTestRequest, "stream", stream)
+			require.NoError(t, err)
+			rec, upstream, result, err := runCodexRecapTest(t, body, codexRecapTestResponse(content, "stop"), "codex_cli_rs/0.149.0", codexRecapTestAccount())
+			require.NoError(t, err)
+			require.Equal(t, "json_object", gjson.GetBytes(upstream.lastBody, "response_format.type").String())
+			require.Equal(t, stream, result.Stream)
+			require.Contains(t, rec.Body.String(), "连接 185 服务器")
+		})
+	}
+}
+
+func TestForwardResponses_CodexTitleRejectsInvalidOutput(t *testing.T) {
+	for name, content := range map[string]string{
+		"wrong_field": `{"recap":"ok"}`,
+		"too_long":    `{"title":"` + strings.Repeat("中", 37) + `"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec, _, result, err := runCodexRecapTest(t, codexTitleTestRequest, codexRecapTestResponse(content, "stop"), "codex_cli_rs/0.149.0", codexRecapTestAccount())
+			require.Error(t, err)
+			require.Equal(t, http.StatusBadGateway, rec.Code)
+			require.NotNil(t, result, "失败时仍保留已消耗用量")
 		})
 	}
 }
@@ -194,14 +225,14 @@ func TestValidateCodexRecapResponseBoundaries(t *testing.T) {
 		content := `{"recap":"` + strings.Repeat("😀", length) + `"}`
 		var response apicompat.ChatCompletionsResponse
 		require.NoError(t, json.Unmarshal([]byte(codexRecapTestResponse(content, "stop")), &response))
-		got, err := validateCodexRecapResponse(&response)
+		got, err := validateCodexStringOutputResponse(&response, &codexStringOutputSpecs[0])
 		require.NoError(t, err)
 		require.Equal(t, content, got)
 	}
 	var response apicompat.ChatCompletionsResponse
 	raw := strings.Replace(codexRecapTestResponse(`{"recap":"ok"}`, "stop"), "ok", string([]byte{0xff}), 1)
 	require.NoError(t, json.Unmarshal([]byte(raw), &response))
-	_, err := validateCodexRecapResponse(&response)
+	_, err := validateCodexStringOutputResponse(&response, &codexStringOutputSpecs[0])
 	require.Error(t, err, "在解码替换非法 UTF-8 之前拒绝响应")
 }
 
