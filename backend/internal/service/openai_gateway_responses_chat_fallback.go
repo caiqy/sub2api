@@ -78,6 +78,16 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	if clientStream {
 		chatReq.StreamOptions = &apicompat.ChatStreamOptions{IncludeUsage: true}
 	}
+	apiKey, targetURL, err := s.resolveCCFallbackTarget(account)
+	if err != nil {
+		return nil, err
+	}
+	recap := len(effectiveTools) == 0 && adaptOpenCodeCodexRecap(c, targetURL, &responsesReq, chatReq)
+	upstreamStream := chatReq.Stream
+	if recap {
+		logger.L().Info("openai responses: downgraded Codex recap to json_object",
+			zap.Int64("account_id", account.ID), zap.String("upstream_model", upstreamModel))
+	}
 
 	chatBody, err := json.Marshal(chatReq)
 	if err != nil {
@@ -114,14 +124,10 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	SetOpsUpstreamModel(c, upstreamModel)
 
 	// Build and send upstream request via the shared CC pipeline
-	apiKey, targetURL, err := s.resolveCCFallbackTarget(account)
-	if err != nil {
-		return nil, err
-	}
 	upstreamCtx := ctx
 	responsesReq = apicompat.ResponsesRequest{}
 	chatReq = nil
-	resp, err := s.sendCCUpstreamRequestHandle(upstreamCtx, c, account, targetURL, outboundHandle, upstreamModel, clientStream, apiKey, account.GetOpenAIUserAgent(), "")
+	resp, err := s.sendCCUpstreamRequestHandle(upstreamCtx, c, account, targetURL, outboundHandle, upstreamModel, upstreamStream, apiKey, account.GetOpenAIUserAgent(), "")
 	if err != nil {
 		return nil, err
 	}
@@ -138,11 +144,11 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 		return s.handleErrorResponse(ctx, resp, c, account, errorBody, billingModel)
 	}
 
-	if clientStream {
+	if clientStream && !recap {
 		result, streamErr := s.streamChatCompletionsAsResponses(upstreamCtx, c, resp, originalModel, customTools, functionTools, toolSearch, namespaceTools, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
 		return result, streamErr
 	}
-	return s.bufferChatCompletionsAsResponses(c, resp, originalModel, customTools, functionTools, toolSearch, namespaceTools, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+	return s.bufferChatCompletionsAsResponses(c, resp, originalModel, customTools, functionTools, toolSearch, namespaceTools, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime, recap, clientStream)
 }
 
 func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
@@ -158,21 +164,20 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 	reasoningEffort *string,
 	serviceTier *string,
 	startTime time.Time,
+	recap bool,
+	clientStream bool,
 ) (*OpenAIForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
 	ccResp, usage, err := s.readCCUpstreamJSONResponse(c, resp, writeOpenAIResponsesFallbackError)
 	if err != nil {
+		if recap && c.Writer.Written() {
+			// The shared JSON reader already sent an error; do not let the
+			// Responses handler append a second, SSE-formatted error to it.
+			MarkResponseCommitted(c)
+		}
 		return nil, err
 	}
-	responsesResp := apicompat.ChatCompletionsResponseToResponses(ccResp, originalModel, customTools, functionTools, toolSearch, namespaceTools)
-	s.cacheReasoningItemsFromOutput(responsesResp.Output)
-
-	if s.responseHeaderFilter != nil {
-		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
-	}
-	c.JSON(http.StatusOK, responsesResp)
-
-	return &OpenAIForwardResult{
+	result := &OpenAIForwardResult{
 		RequestID:                   requestID,
 		UpstreamHeaders:             resp.Header,
 		Usage:                       usage,
@@ -182,9 +187,37 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 		ReasoningEffort:             reasoningEffort,
 		UpstreamResponseServiceTier: observedUpstreamResponseServiceTier(c),
 		ServiceTier:                 resolvedOpenAIUpstreamServiceTier(c, serviceTier),
-		Stream:                      false,
+		Stream:                      clientStream,
 		Duration:                    time.Since(startTime),
-	}, nil
+	}
+	if recap {
+		content, validationErr := validateCodexRecapResponse(ccResp)
+		logger.L().Info("openai responses: Codex recap validation",
+			zap.String("request_id", requestID), zap.String("upstream_model", upstreamModel),
+			zap.Bool("valid", validationErr == nil))
+		if validationErr != nil {
+			const message = "Upstream returned an invalid Codex recap after JSON compatibility conversion"
+			setOpsUpstreamError(c, http.StatusBadGateway, message, "")
+			MarkResponseCommitted(c)
+			writeOpenAIResponsesFallbackError(c, http.StatusBadGateway, "upstream_error", message)
+			return result, validationErr
+		}
+		if clientStream {
+			firstTokenMs := int(time.Since(startTime).Milliseconds())
+			result.FirstTokenMs = &firstTokenMs
+			s.newStreamHeaderWriter(c, resp.Header)()
+			err := s.writeCodexRecapStream(c, ccResp, originalModel, content)
+			result.Duration = time.Since(startTime)
+			return result, err
+		}
+	}
+	responsesResp := apicompat.ChatCompletionsResponseToResponses(ccResp, originalModel, customTools, functionTools, toolSearch, namespaceTools)
+	s.cacheReasoningItemsFromOutput(responsesResp.Output)
+	if s.responseHeaderFilter != nil {
+		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	}
+	c.JSON(http.StatusOK, responsesResp)
+	return result, nil
 }
 
 func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
