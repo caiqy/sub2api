@@ -123,35 +123,6 @@ func (s *ProxyExpirySuite) TestSweep_ProxyMode_Healthy() {
 	s.Require().Equal(pid, *origin)
 }
 
-func (s *ProxyExpirySuite) TestSweep_ProxyChangeClearsOpenCodeGoSnapshot() {
-	for _, mode := range []string{service.FallbackModeDirect, service.FallbackModeProxy} {
-		s.Run(mode, func() {
-			past := time.Now().Add(-time.Hour)
-			var backupID *int64
-			if mode == service.FallbackModeProxy {
-				future := time.Now().Add(time.Hour)
-				id := s.mkProxy("backup", service.FallbackModeNone, &future, nil)
-				backupID = &id
-			}
-			origin := s.mkProxy("origin", mode, &past, backupID)
-			account := s.mkAccountWithProxy(origin)
-			_, err := s.tx.ExecContext(s.ctx, `UPDATE accounts SET platform='opencode_go', type='apikey', extra='{"opencode_go_usage_auto_refresh":true,"opencode_go_usage_snapshot":{"status":"ok"},"keep_me":true}'::jsonb WHERE id=$1`, account)
-			s.Require().NoError(err)
-
-			_, err = s.repo.SweepExpiredProxies(s.ctx, time.Now())
-			s.Require().NoError(err)
-			s.Require().Equal(backupID, s.accountProxyID(account))
-			var raw []byte
-			s.Require().NoError(scanSingleRow(s.ctx, s.tx, `SELECT extra FROM accounts WHERE id=$1`, []any{account}, &raw))
-			var extra map[string]any
-			s.Require().NoError(json.Unmarshal(raw, &extra))
-			s.NotContains(extra, "opencode_go_usage_snapshot")
-			s.Equal(true, extra["opencode_go_usage_auto_refresh"])
-			s.Equal(true, extra["keep_me"])
-		})
-	}
-}
-
 func (s *ProxyExpirySuite) TestSweep_NoneMode_KeepsAccount() {
 	past := time.Now().Add(-time.Hour)
 	pid := s.mkProxy("p-none", service.FallbackModeNone, &past, nil)

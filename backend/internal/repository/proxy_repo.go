@@ -770,8 +770,8 @@ func (r *proxyRepository) sweepOneExpiredProxyOnExec(ctx context.Context, exec s
 		rows, err = exec.QueryContext(ctx, `
 			UPDATE accounts SET proxy_id=NULL, proxy_fallback_origin_id=COALESCE(proxy_fallback_origin_id,$1),
 				extra=CASE
-					WHEN type='apikey'
-					THEN extra - 'upstream_billing_probe' - 'opencode_go_usage_snapshot'
+					WHEN type='apikey' AND extra ? 'upstream_billing_probe'
+					THEN extra - 'upstream_billing_probe'
 					ELSE extra
 				END,
 				updated_at=NOW()
@@ -781,8 +781,8 @@ func (r *proxyRepository) sweepOneExpiredProxyOnExec(ctx context.Context, exec s
 		rows, err = exec.QueryContext(ctx, `
 			UPDATE accounts SET proxy_id=$2, proxy_fallback_origin_id=COALESCE(proxy_fallback_origin_id,$1),
 				extra=CASE
-					WHEN type='apikey'
-					THEN extra - 'upstream_billing_probe' - 'opencode_go_usage_snapshot'
+					WHEN type='apikey' AND extra ? 'upstream_billing_probe'
+					THEN extra - 'upstream_billing_probe'
 					ELSE extra
 				END,
 				updated_at=NOW()

@@ -56,50 +56,6 @@ func TestProxyUpdateInvalidatesBoundProbeSnapshotsAndEnqueuesOutboxAtomically(t 
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestProxyFallbackClearsOpenCodeGoSnapshotForDirectAndBackup(t *testing.T) {
-	backupID := int64(42)
-	for _, tc := range []struct {
-		name   string
-		target *int64
-	}{
-		{"direct", nil},
-		{"backup", &backupID},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			db, mock, err := sqlmock.New()
-			require.NoError(t, err)
-			defer db.Close()
-			now := time.Now()
-			mock.ExpectExec(`UPDATE proxies SET status=`).WillReturnResult(sqlmock.NewResult(0, 1))
-			query := mock.ExpectQuery(`(?s)UPDATE accounts SET proxy_id=.*extra=CASE\s+WHEN type='apikey'\s+THEN extra - 'upstream_billing_probe' - 'opencode_go_usage_snapshot'.*WHERE proxy_id=\$1.*RETURNING id`)
-			if tc.target == nil {
-				query.WithArgs(int64(9))
-			} else {
-				query.WithArgs(int64(9), *tc.target)
-			}
-			query.WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(17)))
-
-			ids, err := (&proxyRepository{}).sweepOneExpiredProxyOnExec(context.Background(), db,
-				service.Proxy{ID: 9, ExpiresAt: &now, Status: service.StatusActive}, now, tc.target, true)
-			require.NoError(t, err)
-			require.Equal(t, []int64{17}, ids)
-			require.NoError(t, mock.ExpectationsWereMet())
-		})
-	}
-}
-
-func TestRevertProxyFallbackClearsOpenCodeGoSnapshotOnlyOnProxyChange(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	require.NoError(t, err)
-	defer db.Close()
-	mock.ExpectExec(`(?s)UPDATE accounts SET.*type='apikey' AND proxy_id IS DISTINCT FROM proxy_fallback_origin_id.*- 'upstream_billing_probe'.*- 'opencode_go_usage_snapshot'.*proxy_id=proxy_fallback_origin_id`).
-		WithArgs(int64(17)).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox")).WillReturnResult(sqlmock.NewResult(0, 1))
-
-	require.NoError(t, (&accountRepository{sql: db}).RevertProxyFallback(context.Background(), 17))
-	require.NoError(t, mock.ExpectationsWereMet())
-}
-
 func TestProxyUpdateRollsBackWhenProbeInvalidationOutboxFails(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
