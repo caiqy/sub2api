@@ -282,6 +282,8 @@ type UpdateSettingsRequest struct {
 	OpenAICodexTicketRefreshBeforeSeconds  *int    `json:"openai_codex_ticket_refresh_before_seconds" binding:"omitempty,min=0,max=43200"`
 	OpenAICodexTicketProbeIntervalSeconds  *int    `json:"openai_codex_ticket_probe_interval_seconds" binding:"omitempty,min=1,max=3600"`
 	OpenAICodexTicketMaxConcurrentProbes   *int    `json:"openai_codex_ticket_max_concurrent_probes" binding:"omitempty,min=1,max=256"`
+	ClaudeCodeClientVersion                *string `json:"claude_code_client_version"`
+	ClaudeCodeVersionAutoSyncEnabled       *bool   `json:"claude_code_version_auto_sync_enabled"`
 
 	// codex_cli_only 加固（global-only）
 	MinCodexVersion                      string `json:"min_codex_version"`
@@ -1475,6 +1477,15 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		}
 		req.OpenAICodexClientVersion = &normalized
 	}
+	if req.ClaudeCodeClientVersion != nil {
+		// 该值会被拼进出站 User-Agent 与 billing attribution，必须是合法版本号；空串表示跟随自动同步。
+		normalized := strings.TrimSpace(*req.ClaudeCodeClientVersion)
+		if normalized != "" && service.NormalizeClaudeCodeClientVersion(normalized) == "" {
+			response.Error(c, http.StatusBadRequest, "claude_code_client_version must be empty or a valid version (e.g. 2.1.258)")
+			return
+		}
+		req.ClaudeCodeClientVersion = &normalized
+	}
 
 	// codex_cli_only 加固：最低/最高 Codex 版本（空=禁用，或合法 semver；max>=min）
 	if req.MinCodexVersion != "" && !semverPattern.MatchString(req.MinCodexVersion) {
@@ -1831,10 +1842,24 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		OpenAICodexTicketRefreshBeforeSecondsSet: req.OpenAICodexTicketRefreshBeforeSeconds != nil,
 		OpenAICodexTicketProbeIntervalSeconds:    codexTicketIntSetting(req.OpenAICodexTicketProbeIntervalSeconds, previousSettings.OpenAICodexTicketProbeIntervalSeconds),
 		OpenAICodexTicketMaxConcurrentProbes:     codexTicketIntSetting(req.OpenAICodexTicketMaxConcurrentProbes, previousSettings.OpenAICodexTicketMaxConcurrentProbes),
-		MinCodexVersion:                          strings.TrimSpace(req.MinCodexVersion),
-		MaxCodexVersion:                          strings.TrimSpace(req.MaxCodexVersion),
-		CodexCLIOnlyBlacklist:                    strings.TrimSpace(req.CodexCLIOnlyBlacklist),
-		CodexCLIOnlyWhitelist:                    strings.TrimSpace(req.CodexCLIOnlyWhitelist),
+		ClaudeCodeClientVersion: func() string {
+			if req.ClaudeCodeClientVersion != nil {
+				return *req.ClaudeCodeClientVersion
+			}
+			return previousSettings.ClaudeCodeClientVersion
+		}(),
+		// 同步值由自动同步任务独占写入，面板保存时原样带回，避免被清空。
+		ClaudeCodeClientVersionSynced: previousSettings.ClaudeCodeClientVersionSynced,
+		ClaudeCodeVersionAutoSyncEnabled: func() bool {
+			if req.ClaudeCodeVersionAutoSyncEnabled != nil {
+				return *req.ClaudeCodeVersionAutoSyncEnabled
+			}
+			return previousSettings.ClaudeCodeVersionAutoSyncEnabled
+		}(),
+		MinCodexVersion:       strings.TrimSpace(req.MinCodexVersion),
+		MaxCodexVersion:       strings.TrimSpace(req.MaxCodexVersion),
+		CodexCLIOnlyBlacklist: strings.TrimSpace(req.CodexCLIOnlyBlacklist),
+		CodexCLIOnlyWhitelist: strings.TrimSpace(req.CodexCLIOnlyWhitelist),
 		CodexCLIOnlyAllowAppServerClients: func() bool {
 			if req.CodexCLIOnlyAllowAppServerClients != nil {
 				return *req.CodexCLIOnlyAllowAppServerClients
@@ -1872,9 +1897,10 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.OpenAILowUpstreamRatePriorityEnabled
 		}(),
-		OpenAIOAuthSchedulingRateMultiplier: func() float64 {
-			if req.OpenAIOAuthSchedulingRateMultiplier != nil {
-				return *req.OpenAIOAuthSchedulingRateMultiplier
+		OpenAIOAuthSchedulingRateMultiplier: func() *float64 {
+			// Omitted fields preserve the override; explicit null clears it.
+			if _, sent := sentFields[service.SettingKeyOpenAIOAuthSchedulingRateMultiplier]; sent {
+				return req.OpenAIOAuthSchedulingRateMultiplier
 			}
 			return previousSettings.OpenAIOAuthSchedulingRateMultiplier
 		}(),
@@ -2369,6 +2395,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		MaxClaudeCodeVersion:                                 updatedSettings.MaxClaudeCodeVersion,
 		AllowUngroupedKeyScheduling:                          updatedSettings.AllowUngroupedKeyScheduling,
 		BackendModeEnabled:                                   updatedSettings.BackendModeEnabled,
+		OpenAITTFTMode:                                       updatedSettings.OpenAITTFTMode,
 		GatewayStickyOpenAIEnabled:                           updatedSettings.GatewayStickyOpenAIEnabled,
 		GatewayStickyGeminiEnabled:                           updatedSettings.GatewayStickyGeminiEnabled,
 		GatewayStickyAnthropicEnabled:                        updatedSettings.GatewayStickyAnthropicEnabled,
@@ -2396,6 +2423,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		OpenAICodexClientVersion:                                     updatedSettings.OpenAICodexClientVersion,
 		OpenAICodexClientVersionSynced:                               updatedSettings.OpenAICodexClientVersionSynced,
 		OpenAICodexVersionAutoSyncEnabled:                            updatedSettings.OpenAICodexVersionAutoSyncEnabled,
+		ClaudeCodeClientVersion:                                      updatedSettings.ClaudeCodeClientVersion,
+		ClaudeCodeClientVersionSynced:                                updatedSettings.ClaudeCodeClientVersionSynced,
+		ClaudeCodeVersionAutoSyncEnabled:                             updatedSettings.ClaudeCodeVersionAutoSyncEnabled,
 		OpenAICodexTicketEnabled:                                     updatedSettings.OpenAICodexTicketEnabled,
 		OpenAICodexTicketHarvestProxyURL:                             service.MaskProxyURL(updatedSettings.OpenAICodexTicketHarvestProxyURL),
 		OpenAICodexTicketHarvestProxyConfigured:                      strings.TrimSpace(updatedSettings.OpenAICodexTicketHarvestProxyURL) != "",
@@ -2469,7 +2499,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		PaymentCancelRateLimitUnit:                                   updatedPaymentCfg.CancelRateLimitUnit,
 		PaymentCancelRateLimitMode:                                   updatedPaymentCfg.CancelRateLimitMode,
 		PaymentAlipayForceQRCode:                                     updatedPaymentCfg.AlipayForceQRCode,
-		PaymentAlipayMobilePrecreateDeepLink:                         updatedPaymentCfg.AlipayMobilePrecreateDeepLink,
 
 		ChannelMonitorEnabled:                updatedSettings.ChannelMonitorEnabled,
 		ChannelMonitorMode:                   updatedSettings.ChannelMonitorMode,

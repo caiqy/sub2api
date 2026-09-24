@@ -704,19 +704,18 @@ func (s *RedeemService) reduceOrCancelSubscription(ctx context.Context, userID, 
 		}
 
 		now := time.Now()
-		remaining := int(sub.ExpiresAt.Sub(now).Hours() / 24)
-		if remaining < 0 {
-			remaining = 0
+		if s.subscriptionService.now != nil {
+			now = s.subscriptionService.now()
 		}
-
+		newExpiresAt := sub.ExpiresAt.AddDate(0, 0, -reduceDays)
 		updated := *sub
-		if remaining <= reduceDays {
+		if !newExpiresAt.After(now) {
 			// 剩余天数不足，直接取消订阅
 			updated.Status = SubscriptionStatusExpired
 			updated.ExpiresAt = now
 		} else {
 			// 缩短天数
-			updated.ExpiresAt = sub.ExpiresAt.AddDate(0, 0, -reduceDays)
+			updated.ExpiresAt = newExpiresAt
 		}
 		updated.Notes = appendSubscriptionNotes(sub.Notes, notes)
 

@@ -58,6 +58,22 @@ func TestExtractContentModerationInput_AnthropicMultiTurnExtractsAllAuditableCon
 	require.Equal(t, "Q1 A1 Q2 A2 Q2 A3 Q3 A4 Q4 A5 Q5 A6 Q6", input.Text)
 }
 
+func TestExtractContentModerationInput_AnthropicTrailingSystemKeepsAuditableTurns(t *testing.T) {
+	body := []byte(`{
+		"messages": [
+			{"role":"user","content":"Q1"},
+			{"role":"assistant","content":"A1"},
+			{"role":"user","content":"Q2"},
+			{"role":"system","content":"request metadata"}
+		]
+	}`)
+
+	input := ExtractContentModerationInput(ContentModerationProtocolAnthropicMessages, body)
+
+	require.Equal(t, "Q1 A1 Q2", input.Text)
+	require.NotContains(t, input.Text, "request metadata")
+}
+
 func TestExtractContentModerationInput_AnthropicStreamResendExtractsResend(t *testing.T) {
 	body := []byte(`{
 		"messages": [
@@ -185,6 +201,20 @@ func TestExtractContentModerationInput_ResponsesToolOutputItemFiltered(t *testin
 	input := ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, body)
 
 	require.Equal(t, "运行测试", input.Text)
+}
+
+func TestExtractContentModerationInput_ResponsesInputTextCannotOverrideSystemToolRoles(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, want string
+	}{
+		{"array", `{"input":[{"role":"system","type":"input_text","text":"system secret"},{"role":"tool","type":"input_text","text":"tool result"},{"role":"developer","type":"input_text","text":"developer secret"},{"role":"user","type":"input_text","text":"user text"},{"role":"assistant","type":"input_text","text":"assistant text"},{"type":"input_text","text":"roleless text"}]}`, "user text assistant text roleless text"},
+		{"object", `{"input":{"role":"system","type":"input_text","text":"system secret"}}`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, ExtractContentModerationInput(ContentModerationProtocolOpenAIResponses, []byte(tc.body)).Text)
+			require.Equal(t, tc.want, extractContentModerationKeywordText(ContentModerationProtocolOpenAIResponses, []byte(tc.body)))
+		})
+	}
 }
 
 func TestExtractContentModerationInput_ResponsesAllAuditableContentExtracted(t *testing.T) {

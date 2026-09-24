@@ -109,6 +109,9 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 		return nil, s.writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
 	geminiReq = ensureGeminiFunctionCallThoughtSignatures(geminiReq)
+	if effort := extractGeminiReasoningEffortFromBody(geminiReq); effort != nil {
+		reasoningEffort = effort
+	}
 	geminiHandle, err := NewRequestBodyHandleFromBytes(geminiReq, RequestBodyHandleOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("spool Gemini request body: %w", err)
@@ -166,23 +169,24 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 				return nil, err
 			}
 			safeErr := sanitizeUpstreamErrorMessage(err.Error())
-			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-				ProxyID:            opsUpstreamProxyID(account),
-				ProxyName:          opsUpstreamProxyName(account),
-				Platform:           account.Platform,
-				AccountID:          account.ID,
-				AccountName:        account.Name,
-				UpstreamStatusCode: 0,
-				Kind:               "request_error",
-				Message:            safeErr,
-			})
+			if attempt < geminiMaxRetries {
+				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+					ProxyID:            opsUpstreamProxyID(account),
+					ProxyName:          opsUpstreamProxyName(account),
+					Platform:           account.Platform,
+					AccountID:          account.ID,
+					AccountName:        account.Name,
+					UpstreamStatusCode: 0,
+					Kind:               "request_error",
+					Message:            safeErr,
+				})
+			}
 			if attempt < geminiMaxRetries {
 				logger.LegacyPrintf("service.gemini_chat_completions", "Gemini account %d: upstream request failed, retry %d/%d: %v", account.ID, attempt, geminiMaxRetries, err)
 				sleepGeminiBackoff(attempt, ctx)
 				continue
 			}
-			setOpsUpstreamError(c, 0, safeErr, "")
-			return nil, s.writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed after retries: "+safeErr)
+			return nil, s.handleUpstreamTransportError(ctx, c, account, err)
 		}
 
 		if matched, rebuilt := s.checkErrorPolicyInLoop(ctx, account, resp, mappedModel); matched {
