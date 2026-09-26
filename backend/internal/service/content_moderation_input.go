@@ -11,16 +11,17 @@ import (
 )
 
 type contentModerationInputCollector struct {
-	textSegments []string
-	textRunes    int
-	images       []string
-	maxImages    int
-	seenImages   map[string]struct{}
+	filterReminders bool
+	textSegments    []string
+	textRunes       int
+	images          []string
+	maxImages       int
+	seenImages      map[string]struct{}
 }
 
 func (c *contentModerationInputCollector) AddText(text string) {
 	text = strings.TrimSpace(text)
-	if text == "" || strings.Contains(text, "<system-reminder>") {
+	if text == "" || (c.filterReminders && strings.Contains(text, "<system-reminder>")) {
 		return
 	}
 	text = normalizeContentModerationText(trimLatestRunesNoAlloc(text, maxModerationInputRunes))
@@ -98,10 +99,20 @@ func ExtractContentModerationText(protocol string, body []byte) string {
 }
 
 func ExtractContentModerationInput(protocol string, body []byte) ContentModerationInput {
+	return extractContentModerationInput(protocol, body, true)
+}
+
+// Keyword checks share semantic moderation's current-user boundaries, but must
+// inspect client-supplied reminder blocks as ordinary user text.
+func extractContentModerationKeywordText(protocol string, body []byte) string {
+	return extractContentModerationInput(protocol, body, false).Text
+}
+
+func extractContentModerationInput(protocol string, body []byte, filterReminders bool) ContentModerationInput {
 	if len(body) == 0 || !gjson.ValidBytes(body) {
 		return ContentModerationInput{}
 	}
-	collector := contentModerationInputCollector{maxImages: maxContentModerationInputImages}
+	collector := contentModerationInputCollector{filterReminders: filterReminders, maxImages: maxContentModerationInputImages}
 	switch protocol {
 	case ContentModerationProtocolAnthropicMessages:
 		collectAllAnthropicMessages(gjson.GetBytes(body, "messages"), &collector)
@@ -150,7 +161,7 @@ func collectAnthropicUserContentValue(value gjson.Result, collector *contentMode
 	case !value.Exists():
 		return
 	case value.Type == gjson.String:
-		if !isAnthropicSystemReminderText(value.String()) {
+		if !collector.filterReminders || !isAnthropicSystemReminderText(value.String()) {
 			collector.AddText(value.String())
 		}
 	case value.IsArray():
@@ -162,7 +173,7 @@ func collectAnthropicUserContentValue(value gjson.Result, collector *contentMode
 		typ := strings.ToLower(strings.TrimSpace(value.Get("type").String()))
 		switch typ {
 		case "", "text", "input_text", "message":
-			if value.Get("text").Exists() && !isAnthropicSystemReminderText(value.Get("text").String()) {
+			if value.Get("text").Exists() && (!collector.filterReminders || !isAnthropicSystemReminderText(value.Get("text").String())) {
 				collector.AddText(value.Get("text").String())
 			}
 			if value.Get("content").Exists() {
@@ -244,6 +255,9 @@ func collectAllResponsesInput(input gjson.Result, collector *contentModerationIn
 func isResponsesAuditableItem(item gjson.Result) bool {
 	typ := strings.ToLower(strings.TrimSpace(item.Get("type").String()))
 	role := strings.ToLower(strings.TrimSpace(item.Get("role").String()))
+	if role != "" && role != "user" && role != "assistant" {
+		return false
+	}
 	if typ == "function_call" || typ == "function_call_output" || typ == "item_reference" {
 		return false
 	}

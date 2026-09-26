@@ -93,6 +93,10 @@
 
 当 upstream 新增可重放 request-body handle 的发送路径时，协议专属归一化（例如 DeepSeek `reasoning_content` 占位）必须在创建 handle 前完成；只修复旧的直接发送函数会让 handle 路径绕过语义修复。测试应覆盖实际的 Responses→Chat fallback handle 路径，而不是只调用低层转换函数。新增异步媒体协议时，还要在进入阻塞上游前释放普通媒体请求的原始大 body，仅为确实需要原文的协议保留独立副本。
 
+### 11. 合并上游发布工具时核对 fork 的版本和构建矩阵
+
+`v0.2.8` 带来的发布脚本默认只接受三段式 tag、构建多个架构，但 fork 的派生 tag 为四段式且 `.goreleaser.yaml` 只构建 `linux/amd64`。合并时同步检查版本解析、镜像架构、归档和 checksum 的目标矩阵；本轮以四段式 tag 和单架构发布脚本测试验证了这些边界。发布入口仍只在推送目标 tag 后手动触发一次 `release.yml`。
+
 ## 建议的合并后验证
 
 至少执行：

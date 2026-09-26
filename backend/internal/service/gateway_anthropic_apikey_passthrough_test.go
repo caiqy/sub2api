@@ -1404,7 +1404,7 @@ func TestGatewayService_AnthropicOAuthMimic_RewritesSystemWithBillingBlock(t *te
 				require.Truef(t, anthropicBetaTokensContains(finalBeta, beta), "missing mimic beta %s", beta)
 			}
 			require.False(t, anthropicBetaTokensContains(finalBeta, "client-only-beta"))
-			for key, value := range claude.DefaultHeaders {
+			for key, value := range claude.DefaultHeaders() {
 				require.Equal(t, value, getHeaderRaw(upstream.lastReq.Header, key), "mimic fingerprint header %s", key)
 			}
 			require.NotEmpty(t, getHeaderRaw(upstream.lastReq.Header, "x-client-request-id"))
@@ -2549,6 +2549,50 @@ func TestGatewayService_ForwardFirstAttemptReusesMaterializedBody(t *testing.T) 
 	require.Less(t, forwardAlloc, 2*oneReadAlloc+(16<<20), "first Forward attempt must reuse its initial materialization")
 }
 
+func TestGatewayService_ForwardReadsSpooledBodyOnceBeforeValidation(t *testing.T) {
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"` + strings.Repeat("x", 16<<20) + `"}]}`)
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	_, err = handle.ReadAll()
+	require.NoError(t, err)
+	runtime.ReadMemStats(&after)
+	oneReadAlloc := after.TotalAlloc - before.TotalAlloc
+	runtime.GC()
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	svc := &GatewayService{
+		cfg:              cfg,
+		httpUpstream:     discardGatewayForwardUpstream{},
+		rateLimitService: &RateLimitService{},
+		settingService:   NewSettingService(upstreamPreviewSettingRepo{}, cfg),
+	}
+	account := &Account{ID: 511, Name: "single-body-read", Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Concurrency: 1, Credentials: map[string]any{"api_key": "upstream-key"}}
+	parsed := &ParsedRequest{Body: NewRequestBodyRefFromHandle(handle), Model: "claude-sonnet-4-5"}
+
+	runtime.ReadMemStats(&before)
+	_, err = svc.Forward(context.Background(), c, account, parsed)
+	runtime.ReadMemStats(&after)
+	require.NoError(t, err)
+	forwardAlloc := after.TotalAlloc - before.TotalAlloc
+	t.Logf("one_read_alloc=%d forward_alloc=%d", oneReadAlloc, forwardAlloc)
+	require.Less(t, forwardAlloc, 3*oneReadAlloc, "Forward must not materialize the source handle twice")
+
+	broken, err := NewRequestBodyHandleFromBytes(body[:128], RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
+	require.NoError(t, err)
+	CleanupRequestBodyHandle(broken)
+	failedContext, _ := gin.CreateTestContext(httptest.NewRecorder())
+	failedContext.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	_, err = svc.Forward(context.Background(), failedContext, account, &ParsedRequest{Body: NewRequestBodyRefFromHandle(broken), Model: "claude-sonnet-4-5"})
+	require.ErrorContains(t, err, "read request body: request body handle has been cleaned up")
+}
+
 func TestGatewayService_BedrockFirstAttemptReusesMaterializedBody(t *testing.T) {
 	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"` + strings.Repeat("x", 89<<20/10) + `"}]}`)
 	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: t.TempDir()})
@@ -2827,4 +2871,46 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_Non2xxRecordsOllamaActivity(t
 	_, _ = svc.forwardAnthropicAPIKeyPassthrough(context.Background(), c, account, []byte(`{"model":"x"}`), "x", "x", false, time.Now())
 	_, ok := deferred.lastUsedUpdates.Load(int64(604))
 	require.True(t, ok)
+}
+
+func TestOpus55RejectsUnsupportedParametersBeforeMimicry(t *testing.T) {
+	for _, typ := range []string{AccountTypeOAuth, AccountTypeAPIKey} {
+		for _, field := range []string{`"thinking":{"type":"disabled"}`, `"thinking":{"type":"enabled","budget_tokens":1024}`, `"tool_choice":{"type":"any"}`, `"tool_choice":{"type":"tool","name":"lookup"}`} {
+			for _, count := range []bool{false, true} {
+				rec := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rec)
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+				model := "claude-opus-5-5"
+				account := &Account{ID: 1, Platform: PlatformAnthropic, Type: typ}
+				if typ == AccountTypeAPIKey {
+					model = "public-opus"
+					account.Credentials = map[string]any{"model_mapping": map[string]any{model: "claude-opus-5-5"}}
+				}
+				body := []byte(`{"model":"` + model + `","messages":[{"role":"user","content":"hello"}],` + field + `}`)
+				parsed := &ParsedRequest{Model: model, Body: NewRequestBodyRef(body)}
+				svc := &GatewayService{}
+				var err error
+				if count {
+					err = svc.ForwardCountTokens(context.Background(), c, account, parsed)
+				} else {
+					_, err = svc.Forward(context.Background(), c, account, parsed)
+				}
+				require.Error(t, err)
+				require.Equal(t, http.StatusBadRequest, rec.Code)
+				require.Contains(t, rec.Body.String(), "invalid_request_error")
+			}
+		}
+	}
+}
+
+func TestOpus55ThinkingDefaultPreservesSignedHistory(t *testing.T) {
+	body := []byte(`{"model":"claude-opus-5-5","messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"","signature":"signed"},{"type":"redacted_thinking","data":"encrypted"},{"type":"tool_use","id":"toolu_1","name":"lookup","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"ok"}]}],"tool_choice":{"type":"none"},"thinking":{"type":"adaptive","display":"omitted"}}`)
+	require.Equal(t, string(body), string(FilterThinkingBlocks(body, "claude-opus-5-5")))
+	withoutThinking, _ := deleteJSONPathBytes(body, "thinking")
+	require.Equal(t, string(withoutThinking), string(FilterThinkingBlocks(withoutThinking, "claude-opus-5-5")))
+	out, _ := normalizeClaudeOAuthRequestBody(body, "claude-opus-5-5", claudeOAuthNormalizeOptions{})
+	require.Equal(t, "none", gjson.GetBytes(out, "tool_choice.type").String())
+	require.False(t, gjson.GetBytes(out, "output_config.effort").Exists(), "omission uses the official medium default")
+	require.Equal(t, "omitted", gjson.GetBytes(out, "thinking.display").String())
+	require.JSONEq(t, gjson.GetBytes(body, "messages").Raw, gjson.GetBytes(out, "messages").Raw)
 }

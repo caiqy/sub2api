@@ -1,0 +1,504 @@
+schema: comet.native.v4
+name: merge-upstream-v0-2-8
+language: zh-CN
+phase: archive
+status: done
+state_version: 13
+brief: brief.md
+document_constraints_version: 1
+shape_confirmation_hash: 1a04317f747d50400965e039c0929356123b1e6986fb9fa300f1bcc4a06d79ab
+spec_changes:
+  - capability: upstream-release-sync
+    operation: modify
+    source: specs/upstream-release-sync/spec.md
+workspace:
+  isolation: branch
+  change_branch: comet/merge-upstream-v0-2-8
+  target_branch: main
+  finish: merge
+loop:
+  stage: done
+  goal_cycle: 2
+  iteration: 1
+  attempt: 1
+  retry_epoch: 0
+  failed_iteration_count: 0
+  no_progress_count: 0
+  execution_failure_count: 0
+  previous_unresolved_ids: []
+  next_action: null
+acceptance:
+  - id: A1
+    source: brief.md
+    text: "A1: Git 历史存在独立 `--no-ff` merge，其第一父为合并前 fork HEAD
+      `0c03d2ef2f9f63d164d59ec459f2d5387196ec57`，第二父精确为
+      `fd80b08c90b55edcad5b00171b53f08721d30da1`；结果包含 `v0.2.8`，不包含该 tag
+      之后的上游提交。"
+    result: passed
+    reason:
+      text: merge 1ae957894 的双亲精确匹配；上游 tag peeled commit 已与远端核对，post-tag 提交不在 HEAD
+        祖先中。
+      truncated: false
+  - id: A2
+    source: brief.md
+    text: "A2: 冲突标记、无文本冲突的重叠调用链及双方新增行为经过能力级审查；`v0.2.8` 的模型、OpenCode Go
+      用量、推理计费、备份、内容审计、插件和管理端/前端等主要变化有对应 upstream 测试或专项验证。"
+    result: passed
+    reason:
+      text: 审查了内容审计、OpenCode
+        Go、Gemini/Anthropic/Images、计费、管理端和发布工具重叠路径；相关测试包含在正式通过的门禁中，未发现合并新增缺陷。
+      truncated: false
+  - id: A3
+    source: brief.md
+    text: "A3: fork 的 scheduler、sticky/fallback、DB
+      recheck、请求体重放与清理、审计与逐请求计费、运行时设置、插件、网关透传和前端定制保持可用；管理员备注仅管理员可见，用户 token
+      排名导出保留用户名、排序及样式，Codex 打票及 OpenCode 会话定制不丢失。"
+    result: passed
+    reason:
+      text: 核查调度与代理回退、请求体、用量 DTO 权限及排名导出；管理员备注未进入用户用量 DTO，OpenCode 同 key 快照未因代理切换被清除。
+      truncated: false
+  - id: A4
+    source: brief.md
+    text: "A4: 由合并、冲突处理或 fork 定制引入的回归先用失败测试复现，再做最小修复，并重跑相关测试及完整门禁；tag
+      原样问题记录证据，不扩大修复范围。"
+    result: passed
+    reason:
+      text: 新增回归测试与修复前代码的冲突可由差异确认；Builder 交接记录先红后绿，修复候选的相关及完整 Runtime 检查通过。
+      truncated: false
+  - id: A5
+    source: brief.md
+    text: "A5: 后端默认与 unit 测试、lint、构建，前端 ESLint/i18n/单测/类型检查与构建，以及
+      migrations、Ent/Wire 两轮生成稳定性检查在本机可执行范围内完成；独立只读 Verifier 对全部验收项给出结论。"
+    result: passed
+    reason:
+      text: 同一候选操作的 12/12 Runtime 检查通过，覆盖后端、前端、发布矩阵及 Ent/Wire 两轮生成；迁移测试包含在 Go 全包中。
+      truncated: false
+  - id: A6
+    source: brief.md
+    text: "A6: `backend/cmd/server/VERSION` 为 `0.2.8.1`，且未创建或推送 tag、未触发 release
+      workflow、未部署。"
+    result: passed
+    reason:
+      text: VERSION 为 0.2.8.1；未见派生 tag，近期 release workflow 运行均早于本轮变更；本次未执行发布或部署。
+      truncated: false
+  - id: A7
+    source: brief.md
+    text: "A7: Docker/Testcontainers、race detector 或其他环境不支持的检查明确记录为未运行，不视为通过。"
+    result: passed
+    reason:
+      text: Docker/Testcontainers、race、actionlint 和真实发布均明确记录为未运行，没有计为通过。
+      truncated: false
+  - id: A8
+    source: brief.md
+    text: "A8: `memory/context/upstream-merge-workflow.md`
+      仅在本轮验证出新的可复用经验时增量更新，否则保持不变并说明。"
+    result: passed
+    reason:
+      text: 经验文档仅增补本轮验证出的四段式版本与单架构发布矩阵边界。
+      truncated: false
+  - id: A9
+    source: specs/upstream-release-sync/spec.md
+    text: 可追溯的发布边界 - **WHEN** 在当前 fork 基线上完成合并 - **THEN** 结果有独立 merge 节点，包含精确的
+      `v0.2.8` 祖先，不包含之后的上游提交
+    result: passed
+    reason:
+      text: 独立 merge 节点包含精确 v0.2.8 祖先，不包含 tag 后的 upstream/main 提交。
+      truncated: false
+  - id: A10
+    source: specs/upstream-release-sync/spec.md
+    text: 上游行为与本地行为有重叠 - **WHEN** upstream 修改了上述定制所在文件或调用路径 - **THEN** 以相关 upstream
+      测试、fork 回归测试与能力级源码审查证明双方行为仍成立；若无法共存则暂停请求用户决定
+    result: passed
+    reason:
+      text: 对重叠网关、审计、代理、计费和前端能力核对源码及回归测试，未发现无法共存的语义冲突。
+      truncated: false
+  - id: A11
+    source: specs/upstream-release-sync/spec.md
+    text: 合并引入回归 - **WHEN** 检查或专项审查发现合并或 fork 定制引入的问题 - **THEN**
+      先用失败测试复现，再最小修复并重跑相关及完整检查
+    result: passed
+    reason:
+      text: 合并新增回归有针对性失败测试与最小修复，候选上的后端、前端完整门禁重新通过。
+      truncated: false
+  - id: A12
+    source: specs/upstream-release-sync/spec.md
+    text: 上游 tag 原样问题 - **WHEN** 问题在 `v0.2.8` commit 中原样存在且未受合并或 fork 定制影响 -
+      **THEN** 记录证据但不扩大本次修复范围
+    result: passed
+    reason:
+      text: 未将未受 fork 修改的 upstream tag 自身行为纳入修复；没有发现需要另行登记的 tag 原样问题。
+      truncated: false
+  - id: A13
+    source: specs/upstream-release-sync/spec.md
+    text: 本机不支持外部检查 - **WHEN** Docker/Testcontainers、race detector 或其他检查缺少运行条件 -
+      **THEN** 其余门禁仍执行，无法执行的检查记为未运行而非通过
+    result: passed
+    reason:
+      text: 缺少 Docker 等运行条件的检查如实标为未运行，其余可执行门禁均有正式通过回执。
+      truncated: false
+  - id: A14
+    source: specs/upstream-release-sync/spec.md
+    text: 集成完成但不发布 - **WHEN** 合并及可执行验证均完成 - **THEN** 版本为
+      `0.2.8.1`，保留可审计的集成提交，且没有任何发布或部署动作
+    result: passed
+    reason:
+      text: 集成提交可追溯，VERSION=0.2.8.1；没有本轮 tag、发布工作流或部署动作。
+      truncated: false
+  - id: A15
+    source: specs/upstream-release-sync/spec.md
+    text: 没有新增的可复用经验 - **WHEN** 本轮经验没有超出现有合并经验文档 - **THEN** 文档保持不变，Builder 交接注明没有新经验
+    result: passed
+    reason:
+      text: 本轮确有新的可复用发布矩阵经验，因此没有新增经验这一前提不成立；文档按 A8 增量更新。
+      truncated: false
+builder_handoff:
+  candidate_id: b30a3136-f5fc-4c2a-9dc0-955e5401bd0f
+  identity_provider: skill-coordinated
+  builder_execution_ref: skill-coordinated:builder:0adaeb57-b86c-4290-8baa-fd1e1b2841a6
+  iteration: 1
+  summary:
+    text: 候选为 merge 1ae957894 + 当前 Builder 工作树修复；第一父 0c03d2ef2，第二父 upstream v0.2.8
+      peeled fd80b08c9，VERSION=0.2.8.1。保留 fork 网关、调度、Codex、管理员隐私和有界多轮审计，上游
+      OpenCode Go 同 key 快照按原样；接入模型、推理计费、备份、插件和管理端能力。通过失败测试复现并修复 Anthropic
+      请求体重复物化、Gemini 阻塞期间请求体保持、Gemini transport/fallback 与 Chat 计费、兼容图片模型和
+      SetupToken 编辑、前端池模式状态码与管理员充值返利、简化发布说明页及 DockerHub 通知；适配 unit 测试装配，Codex
+      错误文案小写以满足 lint。发布矩阵为四段式版本单 linux/amd64，经验文档已增量更新。未创建或推送 tag、未发布、未部署。
+    truncated: false
+  addressed_acceptance_ids:
+    - A1
+    - A2
+    - A3
+    - A4
+    - A5
+    - A6
+    - A7
+    - A8
+    - A9
+    - A10
+    - A11
+    - A12
+    - A13
+    - A14
+    - A15
+  checks:
+    - name:
+        text: 精确 merge 与候选差异
+        truncated: false
+      result: passed
+      note:
+        text: merge 第一父和第二父符合精确 tag，VERSION=0.2.8.1；Builder 工作树含待归档修复，git diff --check
+          通过。
+        truncated: false
+    - name:
+        text: 后端定向红绿回归
+        truncated: false
+      result: passed
+      note:
+        text: Claude/Gemini 请求体、Gemini transport/fallback 与努力计费、兼容图片和 SetupToken
+          multipart 的失败测试先红后绿；原有内容审计/OpenCode Go/repository 相关测试通过。
+        truncated: false
+    - name:
+        text: 开发期后端全量检查
+        truncated: false
+      result: passed
+      note:
+        text: 最终两处 Images 修复前，go test ./... -count=1 和 go test -tags=unit ./... -count=1
+          均通过；最终补丁后相关定向测试、golangci-lint run ./...、go build ./cmd/server
+          通过。冻结候选上重新全量执行以形成正式证据。
+        truncated: false
+    - name:
+        text: 开发期前端完整门禁
+        truncated: false
+      result: passed
+      note:
+        text: pnpm run lint:check、check:i18n、typecheck、test:run（363 文件/2908 项）和 build
+          均通过。
+        truncated: false
+    - name:
+        text: 发布工具与生成稳定性
+        truncated: false
+      result: passed
+      note:
+        text: Python 发布矩阵 12 项测试与 bash -n 通过；Ent/Wire 连续两轮生成后无漂移；最后 Images 修复后由 Runtime
+          再次复核。
+        truncated: false
+  checks_truncated: false
+  known_limits:
+    - text: Docker 不在本机 PATH，未运行 Docker/Testcontainers 集成检查。
+      truncated: false
+    - text: race detector、GitHub Actions/GoReleaser 真正发布和 Docker 镜像推送未运行，不记为通过；本次不创建
+        tag 或触发发布。
+      truncated: false
+    - text: actionlint 不在本机可用范围，发布工作流仅经 Python YAML 测试与脚本 bash -n 静态核对。
+      truncated: false
+  known_limits_truncated: false
+  review:
+    status: passed
+    summary:
+      text: 新独立只读 reviewer 逐项对照第一父、上游 tag 与当前修复，确认 Images SetupToken/API-Key
+        边界、Gemini/Claude 请求体、fork 审计、前端编辑和发布模式无可证实的合并新增正确性或安全回归；正式验收仍由 Runtime
+        Verifier 独立执行。
+      truncated: false
+    reviewer_execution_ref: ses_f2ce52939ffeCutywJNUeymre0
+  submitted_at: 2026-09-24T11:25:47.791Z
+blockers: []
+verification:
+  candidate_id: b30a3136-f5fc-4c2a-9dc0-955e5401bd0f
+  identity_provider: skill-coordinated
+  verifier_execution_ref: skill-coordinated:verifier:06e1a535-2cd1-49d0-82bf-092563cc6816
+  iteration: 1
+  attempt: 1
+  assurance: skill-coordinated
+  verdict: pass
+  checks:
+    - id: merge-boundary
+      name:
+        text: 合并父提交和 VERSION
+        truncated: false
+      argv_display:
+        - text: -NoProfile
+          truncated: false
+        - text: -Command
+          truncated: false
+        - text: $parents = @(git rev-parse '1ae957894^1' '1ae957894^2'); if ($parents[0]
+            -ne '0c03d2ef2f9f63d164d59ec459f2d5387196ec57' -or $parents[1] -ne
+            'fd80b08c90b55edcad5b00171b53f08721d30da1') { exit 1 }; git
+            merge-base --is-ancestor fd80b08c90b55edcad5b00171b53f08721d30da1
+            HEAD; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; if ((git show
+            HEAD:backend/cmd/server/VERSION).Trim() -ne '0.2.8.1') { exit 1 };
+            git diff --check '0c03d2ef2f9f63d164d59ec459f2d5387196ec57' HEAD; if
+            ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; git diff --check; exit
+            $LASTEXITCODE
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 1113
+    - id: backend-default-tests
+      name:
+        text: 后端默认测试
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: ./...
+          truncated: false
+        - text: -count=1
+          truncated: false
+      argv_truncated: false
+      cwd_ref: backend
+      status: passed
+      exit_code: 0
+      duration_ms: 199215
+    - id: backend-unit-tests
+      name:
+        text: 后端 unit 测试
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: -tags=unit
+          truncated: false
+        - text: ./...
+          truncated: false
+        - text: -count=1
+          truncated: false
+      argv_truncated: false
+      cwd_ref: backend
+      status: passed
+      exit_code: 0
+      duration_ms: 258845
+    - id: backend-lint
+      name:
+        text: 后端 lint
+        truncated: false
+      argv_display:
+        - text: run
+          truncated: false
+        - text: ./...
+          truncated: false
+      argv_truncated: false
+      cwd_ref: backend
+      status: passed
+      exit_code: 0
+      duration_ms: 20268
+    - id: backend-build
+      name:
+        text: 后端构建
+        truncated: false
+      argv_display:
+        - text: build
+          truncated: false
+        - text: -o
+          truncated: false
+        - text: C:\Users\caiqy\AppData\Local\Temp\opencode\sub2api-v028-check.exe
+          truncated: false
+        - text: ./cmd/server
+          truncated: false
+      argv_truncated: false
+      cwd_ref: backend
+      status: passed
+      exit_code: 0
+      duration_ms: 6434
+    - id: frontend-lint
+      name:
+        text: 前端 ESLint
+        truncated: false
+      argv_display:
+        - text: run
+          truncated: false
+        - text: lint:check
+          truncated: false
+      argv_truncated: false
+      cwd_ref: frontend
+      status: passed
+      exit_code: 0
+      duration_ms: 63434
+    - id: frontend-i18n
+      name:
+        text: 前端 i18n
+        truncated: false
+      argv_display:
+        - text: run
+          truncated: false
+        - text: check:i18n
+          truncated: false
+      argv_truncated: false
+      cwd_ref: frontend
+      status: passed
+      exit_code: 0
+      duration_ms: 38244
+    - id: frontend-tests
+      name:
+        text: 前端全量单测
+        truncated: false
+      argv_display:
+        - text: run
+          truncated: false
+        - text: test:run
+          truncated: false
+      argv_truncated: false
+      cwd_ref: frontend
+      status: passed
+      exit_code: 0
+      duration_ms: 108508
+    - id: frontend-typecheck
+      name:
+        text: 前端类型检查
+        truncated: false
+      argv_display:
+        - text: run
+          truncated: false
+        - text: typecheck
+          truncated: false
+      argv_truncated: false
+      cwd_ref: frontend
+      status: passed
+      exit_code: 0
+      duration_ms: 37276
+    - id: frontend-build
+      name:
+        text: 前端构建
+        truncated: false
+      argv_display:
+        - text: run
+          truncated: false
+        - text: build
+          truncated: false
+      argv_truncated: false
+      cwd_ref: frontend
+      status: passed
+      exit_code: 0
+      duration_ms: 95489
+    - id: release-tools-tests
+      name:
+        text: 发布矩阵回归
+        truncated: false
+      argv_display:
+        - text: -m
+          truncated: false
+        - text: unittest
+          truncated: false
+        - text: discover
+          truncated: false
+        - text: -s
+          truncated: false
+        - text: .github/release-tools
+          truncated: false
+        - text: -p
+          truncated: false
+        - text: "[REDACTED]"
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 2144
+    - id: generated-stability
+      name:
+        text: Ent/Wire 生成稳定性
+        truncated: false
+      argv_display:
+        - text: -NoProfile
+          truncated: false
+        - text: -Command
+          truncated: false
+        - text: go generate ./ent; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; go
+            generate ./cmd/server; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE
+            }; go generate ./ent; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE
+            }; go generate ./cmd/server; if ($LASTEXITCODE -ne 0) { exit
+            $LASTEXITCODE }; git diff --exit-code -- ent cmd/server/wire_gen.go
+            cmd/server/wire.go; exit $LASTEXITCODE
+          truncated: false
+      argv_truncated: false
+      cwd_ref: backend
+      status: passed
+      exit_code: 0
+      duration_ms: 76168
+  summary:
+    text: 候选 HEAD 3821ce20d 加当前工作树补丁未发现可证实的合并新增回归；精确 merge、版本和 Runtime 12/12
+      检查回执有效。15 项均给出结论，外部环境检查保留未运行风险。
+    truncated: false
+  risks:
+    - text: Docker/Testcontainers 集成测试、race detector、actionlint 和真实 GitHub/GoReleaser
+        发布未运行，不能从静态审查推断这些环境中的结果。
+      truncated: false
+    - text: 先红后绿的历史执行顺序依据 Builder 交接记录；独立核对了测试与修复前后代码及候选绿灯，但未取得单独保存的红灯日志。
+      truncated: false
+  risks_truncated: false
+  completed_at: 2026-09-24T11:54:11.562Z
+history:
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 0
+    outcome: recovery
+    unresolved_ids: []
+    summary:
+      text: Native Shape artifacts changed
+      truncated: false
+    completed_at: 2026-09-24T08:16:00.168Z
+  - goal_cycle: 2
+    iteration: 1
+    attempt: 1
+    outcome: pass
+    unresolved_ids: []
+    summary:
+      text: 候选 HEAD 3821ce20d 加当前工作树补丁未发现可证实的合并新增回归；精确 merge、版本和 Runtime 12/12
+        检查回执有效。15 项均给出结论，外部环境检查保留未运行风险。
+      truncated: false
+    completed_at: 2026-09-24T11:54:11.562Z
+history_overflow:
+  dropped_entries: 0
+  first_dropped_at: null
+  last_dropped_at: null
+  outcome_counts:
+    pass: 0
+    fail: 0
+    blocked: 0
+    execution-error: 0
+    recovery: 0
+verification_result: pass
+verification_report: verification.md
+archived: true
+created_at: 2026-09-24T05:57:10.125Z

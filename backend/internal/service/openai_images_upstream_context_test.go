@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -61,6 +63,41 @@ func openAIImagesJSONResponse() *http.Response {
 			`{"created":1710000000,"data":[{"b64_json":"aGVsbG8="}],"usage":{"input_tokens":10,"output_tokens":20,"total_tokens":30}}`,
 		)),
 	}
+}
+
+func TestForwardOpenAIImagesAPIKeyMultipartReusesBoundHandle(t *testing.T) {
+	var payload bytes.Buffer
+	writer := multipart.NewWriter(&payload)
+	require.NoError(t, writer.WriteField("model", "gpt-image-2"))
+	image, err := writer.CreateFormFile("image", "source.png")
+	require.NoError(t, err)
+	_, err = image.Write(bytes.Repeat([]byte("x"), 16<<20))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	handle, err := NewRequestBodyHandleFromBytes(payload.Bytes(), RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+	parsed := &OpenAIImagesRequest{Model: "gpt-image-2", Endpoint: openAIImagesEditsEndpoint, ContentType: writer.FormDataContentType(), Multipart: true}
+	measure := func(body []byte) uint64 {
+		c, _ := newOpenAIImagesTestContext(t, nil)
+		c.Request.URL.Path = "/v1/images/edits"
+		BindOpenAIRequestBodyHandle(c, handle)
+		upstream := &httpUpstreamRecorder{resp: openAIImagesJSONResponse()}
+		svc := newOpenAIImagesTestService(upstream)
+		runtime.GC()
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		result, err := svc.ForwardImages(context.Background(), c, newOpenAIImagesAPIKeyAccount(), body, parsed, "")
+		runtime.ReadMemStats(&after)
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.Len(t, upstream.lastBody, payload.Len())
+		return after.TotalAlloc - before.TotalAlloc
+	}
+	explicitAlloc := measure(payload.Bytes())
+	boundAlloc := measure(nil)
+	t.Logf("explicit_alloc=%d bound_alloc=%d", explicitAlloc, boundAlloc)
+	require.Less(t, boundAlloc, explicitAlloc+uint64(payload.Len()/2), "bound multipart handle must not materialize a second full body")
 }
 
 // issue #5411：生图是长耗时、上游侧已经产生实际成本的操作。客户端中途断开时，

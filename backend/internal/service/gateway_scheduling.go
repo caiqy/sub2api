@@ -1908,10 +1908,10 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 		s.logStickyDisabledBypass(platform, "gateway_legacy_single", "lookup", groupID, sessionHash)
 	}
 
-	// require_privacy_set: 获取分组信息
+	// require_privacy_set: 获取分组配置。GetByID 会聚合账号计数，旧选号路径不能用它。
 	var schedGroup *Group
 	if groupID != nil && s.groupRepo != nil {
-		schedGroup, _ = s.groupRepo.GetByID(ctx, *groupID)
+		schedGroup, _ = s.groupRepo.GetByIDLite(ctx, *groupID)
 	}
 
 	var accounts []Account
@@ -2188,10 +2188,10 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 		s.logStickyDisabledBypass(nativePlatform, "gateway_legacy_mixed", "lookup", groupID, sessionHash)
 	}
 
-	// require_privacy_set: 获取分组信息
+	// require_privacy_set: 获取分组配置。GetByID 会聚合账号计数，旧选号路径不能用它。
 	var schedGroup *Group
 	if groupID != nil && s.groupRepo != nil {
-		schedGroup, _ = s.groupRepo.GetByID(ctx, *groupID)
+		schedGroup, _ = s.groupRepo.GetByIDLite(ctx, *groupID)
 	}
 
 	var accounts []Account

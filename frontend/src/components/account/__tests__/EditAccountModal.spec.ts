@@ -406,6 +406,49 @@ describe('EditAccountModal', () => {
     updateAccountMock.mockResolvedValue(buildAccount())
   })
 
+  it.each(['apikey', 'bedrock'] as const)('loads, edits and clears retry status codes for %s', async (type) => {
+    const account = buildAccount({
+      platform: type === 'bedrock' ? 'anthropic' : 'openai',
+      type,
+      credentials: {
+        pool_mode: true,
+        pool_mode_retry_status_codes: [429, 503],
+        ...(type === 'bedrock' ? { auth_mode: 'apikey', aws_region: 'us-east-1' } : {})
+      }
+    })
+    const wrapper = mountModal(account)
+    const input = wrapper.get<HTMLInputElement>('input[placeholder="401, 403, 429"]')
+    expect(input.element.value).toBe('429, 503')
+
+    await input.setValue('503, 401, 503, 99, invalid')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.pool_mode_retry_status_codes).toEqual([401, 503])
+
+    updateAccountMock.mockClear()
+    await input.setValue('')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).not.toHaveProperty('pool_mode_retry_status_codes')
+  })
+
+  it.each(['apikey', 'bedrock'] as const)('clears retry status codes when %s pool mode is disabled', async (type) => {
+    const wrapper = mountModal(buildAccount({
+      platform: type === 'bedrock' ? 'anthropic' : 'openai',
+      type,
+      credentials: {
+        pool_mode: true,
+        pool_mode_retry_status_codes: [429],
+        ...(type === 'bedrock' ? { auth_mode: 'apikey', aws_region: 'us-east-1' } : {})
+      }
+    }))
+    const label = wrapper.findAll('label').find(node => node.text() === 'admin.accounts.poolMode')!
+    await label.element.parentElement!.parentElement!.querySelector('button')!.click()
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).not.toHaveProperty('pool_mode_retry_status_codes')
+  })
+
   it('keeps unsaved edits when Ollama usage changes', async () => {
     const account = buildAccount()
     const wrapper = mountModal(account)
