@@ -23,7 +23,7 @@ func TestSimpleModeRecordUsageWindowOptIn(t *testing.T) {
 					user := &User{ID: 2, Balance: 0}
 					account := &Account{ID: 3, Type: AccountTypeAPIKey}
 					if openAI {
-						svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(logs, billing, users, subs, nil)
+						svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(t, logs, billing, users, subs, nil)
 						svc.cfg.RunMode = config.RunModeSimple
 						svc.cfg.SimpleModeKeyRateLimitEnabled = enabled
 						err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{

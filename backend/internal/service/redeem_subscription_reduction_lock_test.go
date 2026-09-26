@@ -27,13 +27,13 @@ type failingReductionLockRepo struct {
 	err error
 }
 
-func (r *failingReductionLockRepo) GetByIDForUpdate(context.Context, int64) (*UserSubscription, error) {
+func (r *failingReductionLockRepo) GetByUserIDAndGroupIDForUpdate(context.Context, int64, int64) (*UserSubscription, error) {
 	return nil, r.err
 }
 func TestRedeemReductionLockFailureDoesNotWrite(t *testing.T) {
 	sub := UserSubscription{ID: 7, ExpiresAt: time.Now().AddDate(0, 0, 10), Status: SubscriptionStatusActive, Notes: "unchanged"}
 	repo := &failingReductionLockRepo{lockingRenewalRepo: &lockingRenewalRepo{stale: sub, current: sub}, err: errors.New("lock failed")}
 	svc := &RedeemService{subscriptionService: NewSubscriptionService(nil, repo, nil, nil, nil)}
-	require.ErrorIs(t, svc.reduceOrCancelSubscription(context.Background(), 11, 13, 1, "deduct"), repo.err)
+	require.ErrorIs(t, svc.reduceOrCancelSubscription(context.Background(), 11, 13, 1, "deduct"), ErrSubscriptionNotFound)
 	require.Equal(t, sub, repo.current)
 }

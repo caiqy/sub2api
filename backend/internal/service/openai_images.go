@@ -753,7 +753,7 @@ func (s *OpenAIGatewayService) ForwardImages(
 	}
 	switch account.Type {
 	case AccountTypeAPIKey:
-		if len(body) == 0 {
+		if len(body) == 0 && (!parsed.Multipart || getOpenAIRequestBodyHandle(c) == nil) {
 			var err error
 			body, err = openAIRequestBodyBytes(c, nil)
 			if err != nil {

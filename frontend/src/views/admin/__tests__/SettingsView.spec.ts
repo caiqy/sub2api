@@ -1316,6 +1316,27 @@ describe("admin SettingsView payment visible method controls", () => {
     );
   });
 
+  it("loads and toggles the admin recharge affiliate rebate setting", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      affiliate_enabled: true,
+      affiliate_admin_recharge_enabled: true,
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    const featuresTab = wrapper.findAll("button").find(node => node.text().includes("admin.settings.tabs.features"));
+    await featuresTab!.trigger("click");
+    const label = wrapper.findAll("label").find(node => node.text() === "admin.settings.features.affiliate.adminRechargeRebate");
+    expect(label).toBeDefined();
+    const toggle = wrapper.findAll<HTMLInputElement>("input.toggle-stub").find(node =>
+      node.element === label!.element.parentElement!.parentElement!.querySelector("input.toggle-stub"))!;
+    expect(toggle.element.checked).toBe(true);
+    await toggle.setValue(false);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ affiliate_admin_recharge_enabled: false }));
+  });
+
   it("submits Anthropic cache TTL injection gateway setting", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,

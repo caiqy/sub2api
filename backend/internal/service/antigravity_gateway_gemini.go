@@ -170,6 +170,7 @@ func (s *AntigravityGatewayService) forwardGeminiHandle(ctx context.Context, c *
 	}
 	defer CleanupRequestBodyHandle(outboundHandle)
 	hasThoughtSignature := bytes.Contains(injectedBody, []byte(`"thoughtSignature"`))
+	reasoningEffort := extractGeminiReasoningEffortFromBody(injectedBody)
 	accessToken, err := s.getAntigravityAccessToken(ctx, account)
 	if err != nil {
 		return nil, err
@@ -546,7 +547,7 @@ handleSuccess:
 		UpstreamResponseModel:         observedUpstreamResponseModel(c),
 		UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
 		Stream:                        stream,
-		ReasoningEffort:               extractGeminiReasoningEffortFromBody(injectedBody),
+		ReasoningEffort:               reasoningEffort,
 		Duration:                      time.Since(startTime),
 		FirstTokenMs:                  firstTokenMs,
 		ClientDisconnect:              clientDisconnect,

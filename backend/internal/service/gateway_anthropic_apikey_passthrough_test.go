@@ -2549,6 +2549,50 @@ func TestGatewayService_ForwardFirstAttemptReusesMaterializedBody(t *testing.T) 
 	require.Less(t, forwardAlloc, 2*oneReadAlloc+(16<<20), "first Forward attempt must reuse its initial materialization")
 }
 
+func TestGatewayService_ForwardReadsSpooledBodyOnceBeforeValidation(t *testing.T) {
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"` + strings.Repeat("x", 16<<20) + `"}]}`)
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	_, err = handle.ReadAll()
+	require.NoError(t, err)
+	runtime.ReadMemStats(&after)
+	oneReadAlloc := after.TotalAlloc - before.TotalAlloc
+	runtime.GC()
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	svc := &GatewayService{
+		cfg:              cfg,
+		httpUpstream:     discardGatewayForwardUpstream{},
+		rateLimitService: &RateLimitService{},
+		settingService:   NewSettingService(upstreamPreviewSettingRepo{}, cfg),
+	}
+	account := &Account{ID: 511, Name: "single-body-read", Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Concurrency: 1, Credentials: map[string]any{"api_key": "upstream-key"}}
+	parsed := &ParsedRequest{Body: NewRequestBodyRefFromHandle(handle), Model: "claude-sonnet-4-5"}
+
+	runtime.ReadMemStats(&before)
+	_, err = svc.Forward(context.Background(), c, account, parsed)
+	runtime.ReadMemStats(&after)
+	require.NoError(t, err)
+	forwardAlloc := after.TotalAlloc - before.TotalAlloc
+	t.Logf("one_read_alloc=%d forward_alloc=%d", oneReadAlloc, forwardAlloc)
+	require.Less(t, forwardAlloc, 3*oneReadAlloc, "Forward must not materialize the source handle twice")
+
+	broken, err := NewRequestBodyHandleFromBytes(body[:128], RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
+	require.NoError(t, err)
+	CleanupRequestBodyHandle(broken)
+	failedContext, _ := gin.CreateTestContext(httptest.NewRecorder())
+	failedContext.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	_, err = svc.Forward(context.Background(), failedContext, account, &ParsedRequest{Body: NewRequestBodyRefFromHandle(broken), Model: "claude-sonnet-4-5"})
+	require.ErrorContains(t, err, "read request body: request body handle has been cleaned up")
+}
+
 func TestGatewayService_BedrockFirstAttemptReusesMaterializedBody(t *testing.T) {
 	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"` + strings.Repeat("x", 89<<20/10) + `"}]}`)
 	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: t.TempDir()})

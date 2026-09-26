@@ -126,7 +126,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		requestPayloadHash = service.HashUsageRequestPayload([]byte(stickySessionSeed))
 	}
 	service.BindOpenAIRequestBodyHandle(c, coordinator.Effective())
-	if parsed.Prompt != "" {
+	if parsed.Prompt != "" && parsed.RequiredCapabilityForModel(channelMapping.MappedModel) != service.OpenAIImagesCapabilityAPIKey {
 		prepareErr := func() error {
 			oauthBody, err := h.gatewayService.PrepareOpenAIImagesOAuthBody(parsed, channelMapping.MappedModel)
 			if err != nil {
@@ -360,7 +360,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 				}
 				service.BindOpenAIRequestBodyHandle(c, coordinator.Effective())
 			}
-			if account.Type == service.AccountTypeOAuth {
+			if account.Type == service.AccountTypeOAuth || account.Type == service.AccountTypeSetupToken {
 				service.BindOpenAIRequestBodyHandle(c, coordinator.OAuth())
 			}
 			return h.gatewayService.ForwardImages(requestCtx, c, account, nil, parsed, channelMapping.MappedModel)

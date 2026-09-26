@@ -84,7 +84,7 @@ func TestCompositeCompatibleImagesEndToEnd(t *testing.T) {
 			const model = "gemini-3.1-flash-image"
 			groupID := int64(101)
 			price := 0.17
-			group := &service.Group{ID: groupID, Platform: service.PlatformComposite, AllowImageGeneration: scenario != "disabled", RateMultiplier: 1, ImagePrice1K: &price, ImagePrice2K: &price, ImagePrice4K: &price}
+			group := &service.Group{ID: groupID, Platform: service.PlatformComposite, Status: service.StatusActive, AllowImageGeneration: scenario != "disabled", RateMultiplier: 1, ImagePrice1K: &price, ImagePrice2K: &price, ImagePrice4K: &price}
 			accounts := []service.Account{}
 			// Native accounts deliberately advertise the same model and have higher
 			// priority, proving the image capability fence controls selection.
@@ -104,19 +104,21 @@ func TestCompositeCompatibleImagesEndToEnd(t *testing.T) {
 			billingCache := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
 			t.Cleanup(billingCache.Stop)
 			gateway := service.NewOpenAIGatewayService(repo, usage, nil, nil, nil, nil, nil, cfg, nil, nil, service.NewBillingService(cfg, nil), nil, billingCache, upstream, &service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil)
-			imagesHandler := handler.NewOpenAIGatewayHandler(gateway, service.NewConcurrencyService(nil), billingCache, service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg), nil, nil, nil, nil, cfg)
 			publicModel := model
 			if scenario == "multipart_alias" {
 				publicModel = "public-image"
 			}
 			resolver := service.NewCompositeRouteResolver(compositeRouteRepoStub{routes: []service.CompositeModelRoute{{ID: 1, GroupID: groupID, PublicModel: publicModel, MatchType: service.CompositeRouteMatchExact, TargetPlatform: service.PlatformOpenAI, UpstreamModel: model, Endpoint: service.CompositeRouteEndpointImages, Enabled: true}}})
+			apiKeyService := service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg)
+			effectiveResolver := service.NewEffectiveGatewayRouteResolver(apiKeyService, resolver, cfg)
+			imagesHandler := handler.NewOpenAIGatewayHandler(gateway, service.NewConcurrencyService(nil), billingCache, apiKeyService, nil, nil, nil, nil, cfg, effectiveResolver)
 			router := gin.New()
 			router.Use(func(c *gin.Context) {
 				c.Set(string(servermiddleware.ContextKeyAPIKey), &service.APIKey{ID: 202, GroupID: &groupID, Group: group, User: &service.User{ID: 303}})
 				c.Set(string(servermiddleware.ContextKeyUser), servermiddleware.AuthSubject{UserID: 303})
 				c.Next()
 			})
-			router.Use(compositeTargetPlatformMiddleware(resolver))
+			router.Use(compositeTargetPlatformMiddleware(effectiveResolver))
 			router.POST("/v1/images/generations", imagesHandler.Images)
 			router.POST("/v1/images/edits", imagesHandler.Images)
 			endpoint, contentType := "/v1/images/generations", "application/json"

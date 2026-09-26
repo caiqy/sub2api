@@ -263,11 +263,11 @@ jobs:
             echo "$DELIMITER"
           } >> "$GITHUB_OUTPUT"
       - name: Prepare publication-only GoReleaser config
-        if: ${{ env.SIMPLE_RELEASE != 'true' || env.DRY_RUN == 'true' }}
         run: |
-          python "$RUNNER_TEMP/release-tools/release_matrix.py" config publish --output "$RUNNER_TEMP/goreleaser.publisher.yaml"
+          args=(publish --output "$RUNNER_TEMP/goreleaser.publisher.yaml")
+          if [[ "$SIMPLE_RELEASE" == true && "$DRY_RUN" != true ]]; then args+=(--simple); fi
+          python "$RUNNER_TEMP/release-tools/release_matrix.py" config "${args[@]}"
       - name: Publish existing archives and release notes
-        if: ${{ env.SIMPLE_RELEASE != 'true' || env.DRY_RUN == 'true' }}
         uses: goreleaser/goreleaser-action@v7
         with:
           version: '~> v2'
@@ -311,7 +311,7 @@ jobs:
           TAG_MESSAGE: ${{ steps.tag_message.outputs.message }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_USERNAME: ${{ env.DOCKERHUB_READY == 'true' && secrets.DOCKERHUB_USERNAME || '' }}
         continue-on-error: true
         run: |
           # 检查必要的环境变量

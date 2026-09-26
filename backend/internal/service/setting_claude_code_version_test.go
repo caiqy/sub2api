@@ -43,7 +43,7 @@ func TestUpdateSettingsClaudeCodeVersionTakesEffectImmediately(t *testing.T) {
 	}}
 	svc := NewSettingService(repo, &config.Config{})
 	resetGatewayForwardingSettingsCacheForTest(t)
-	defer svc.refreshCachedSettings(&SystemSettings{})
+	defer svc.refreshCachedSettings(ctx, &SystemSettings{})
 	require.Equal(t, "2.1.281", svc.GetClaudeCodeClientVersion(ctx))
 
 	settings := &SystemSettings{

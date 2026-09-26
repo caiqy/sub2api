@@ -1071,6 +1071,36 @@ func TestOpenAIGatewayHandlerImages_OAuthMultipartSkipsEffectiveSpool(t *testing
 	require.Equal(t, "application/json", upstream.contentType())
 }
 
+func TestOpenAIGatewayHandlerImages_SetupTokenMultipartEditUsesPreparedJSON(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	require.NoError(t, writer.WriteField("model", "gpt-image-2"))
+	require.NoError(t, writer.WriteField("prompt", "edit this"))
+	image, err := writer.CreateFormFile("image", "source.png")
+	require.NoError(t, err)
+	_, err = image.Write([]byte("image"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	group := &service.Group{ID: 931, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
+	account := &service.Account{ID: 932, Name: "setup-images", Platform: service.PlatformOpenAI, Type: service.AccountTypeSetupToken, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"access_token": "setup-token", "chatgpt_account_id": "setup-account"}}
+	upstream := &openAIImagesReplayUpstream{succeedFirst: true}
+	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body.Bytes()))
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rec := httptest.NewRecorder()
+	env.router("/v1/images/edits", env.handler.Images).ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, []int64{account.ID}, upstream.accountIDs)
+	require.Equal(t, []string{"application/json"}, upstream.contentTypes)
+	require.Len(t, upstream.bodies, 1)
+	require.Equal(t, "edit this", gjson.GetBytes(upstream.bodies[0], "prompt").String())
+	require.Equal(t, "data:application/octet-stream;base64,aW1hZ2U=", gjson.GetBytes(upstream.bodies[0], "images.0.image_url").String())
+	require.Contains(t, rec.Body.String(), "aGVsbG8=")
+}
+
 func TestOpenAIGatewayHandlerImages_MultipartReplayUsesMappedEffectiveBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rawDir := t.TempDir()

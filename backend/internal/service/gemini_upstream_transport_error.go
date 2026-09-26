@@ -37,7 +37,10 @@ func (s *GeminiMessagesCompatService) handleUpstreamTransportError(ctx context.C
 	event.ProxyID, event.ProxyName = opsUpstreamProxyAttribution(account)
 	appendOpsUpstreamError(c, event)
 
-	if errors.Is(err, context.Canceled) || (errors.Is(err, context.DeadlineExceeded) && errors.Is(ctx.Err(), context.DeadlineExceeded)) {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	if errors.Is(err, context.Canceled) {
 		return err
 	}
 

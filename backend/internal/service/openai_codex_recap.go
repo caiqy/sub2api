@@ -82,15 +82,15 @@ func adaptOpenCodeCodexStringOutput(c *gin.Context, targetURL string, req *apico
 
 func validateCodexStringOutputResponse(resp *apicompat.ChatCompletionsResponse, spec *codexStringOutputSpec) (string, error) {
 	if len(resp.Choices) != 1 || resp.Choices[0].FinishReason != "stop" {
-		return "", errors.New("Codex structured output did not complete normally")
+		return "", errors.New("codex structured output did not complete normally")
 	}
 	message := resp.Choices[0].Message
 	if message.Role != "assistant" || len(message.ToolCalls) != 0 || message.FunctionCall != nil {
-		return "", errors.New("Codex structured output is not an assistant text message")
+		return "", errors.New("codex structured output is not an assistant text message")
 	}
 	var content string
 	if !utf8.Valid(message.Content) || json.Unmarshal(message.Content, &content) != nil || !json.Valid([]byte(content)) {
-		return "", errors.New("Codex structured output is not valid JSON text")
+		return "", errors.New("codex structured output is not valid JSON text")
 	}
 	// Decode exactly one key/value pair, rejecting duplicates as well as extra
 	// fields. Length is measured in Unicode code points, as JSON Schema requires.
@@ -104,10 +104,10 @@ func validateCodexStringOutputResponse(resp *apicompat.ChatCompletionsResponse, 
 	}
 	end, err := d.Token()
 	if err != nil || end != json.Delim('}') {
-		return "", errors.New("Codex structured output contains extra or duplicate fields")
+		return "", errors.New("codex structured output contains extra or duplicate fields")
 	}
 	if _, err := d.Token(); err != io.EOF {
-		return "", errors.New("Codex structured output contains trailing data")
+		return "", errors.New("codex structured output contains trailing data")
 	}
 	return content, nil
 }

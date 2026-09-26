@@ -901,27 +901,6 @@ func (s *GeminiMessagesCompatService) ForwardHandle(ctx context.Context, c *gin.
 			if errors.Is(err, ErrRequestBodySpool) {
 				return nil, fmt.Errorf("send Gemini upstream request: %w", err)
 			}
-			safeErr := sanitizeUpstreamErrorMessage(err.Error())
-			if attempt < geminiMaxRetries {
-				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-					ProxyID:            opsUpstreamProxyID(account),
-					ProxyName:          opsUpstreamProxyName(account),
-					Platform:           account.Platform,
-					AccountID:          account.ID,
-					AccountName:        account.Name,
-					UpstreamStatusCode: 0,
-					Kind:               "request_error",
-					Message:            safeErr,
-				})
-			}
-			if attempt < geminiMaxRetries {
-				logger.LegacyPrintf("service.gemini_messages_compat", "Gemini account %d: upstream request failed, retry %d/%d: %v", account.ID, attempt, geminiMaxRetries, err)
-				sleepGeminiBackoff(attempt, ctx)
-				if err := ctx.Err(); err != nil {
-					return nil, err
-				}
-				continue
-			}
 			return nil, s.handleUpstreamTransportError(ctx, c, account, err)
 		}
 
@@ -1577,27 +1556,6 @@ func (s *GeminiMessagesCompatService) ForwardNativeHandle(ctx context.Context, c
 			}
 			if errors.Is(err, ErrRequestBodySpool) {
 				return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
-			}
-			safeErr := sanitizeUpstreamErrorMessage(err.Error())
-			if attempt < geminiMaxRetries {
-				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-					ProxyID:            opsUpstreamProxyID(account),
-					ProxyName:          opsUpstreamProxyName(account),
-					Platform:           account.Platform,
-					AccountID:          account.ID,
-					AccountName:        account.Name,
-					UpstreamStatusCode: 0,
-					Kind:               "request_error",
-					Message:            safeErr,
-				})
-			}
-			if attempt < geminiMaxRetries {
-				logger.LegacyPrintf("service.gemini_messages_compat", "Gemini account %d: upstream request failed, retry %d/%d: %v", account.ID, attempt, geminiMaxRetries, err)
-				sleepGeminiBackoff(attempt, ctx)
-				if err := ctx.Err(); err != nil {
-					return nil, err
-				}
-				continue
 			}
 			transportErr := s.handleUpstreamTransportError(ctx, c, account, err)
 			// countTokens 的上游链路故障由本地估算兜底，不触发换号。

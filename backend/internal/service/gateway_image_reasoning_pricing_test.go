@@ -31,7 +31,7 @@ func TestRecordUsage_ImageReasoningPricing(t *testing.T) {
 							}
 							resolver := newOpenAIImageChannelPricingResolverForTest(t, groupID, model, price)
 							cache := resolver.channelService.cache.Load().(*channelCache)
-							cache.pricingByGroupModel[channelModelKey{groupID: groupID, model: model}] = &pricing
+							cache.pricingByGroupModel[channelModelKey{groupID: groupID, platform: PlatformOpenAI, model: model}] = &pricing
 							group := &Group{
 								ID: groupID, Platform: platform, Status: StatusActive, Hydrated: true,
 								RateMultiplier: 0.5, ImageRateIndependent: independent, ImageRateMultiplier: 0.25,
@@ -59,7 +59,7 @@ func TestRecordUsage_ImageReasoningPricing(t *testing.T) {
 									APIKey: apiKey, User: user, Account: account,
 								}))
 							} else {
-								svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, subRepo, nil)
+								svc := newOpenAIRecordUsageServiceForTest(t, usageRepo, userRepo, subRepo, nil)
 								svc.resolver = resolver
 								require.NoError(t, svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
 									Result: &OpenAIForwardResult{
@@ -101,7 +101,7 @@ func TestCalculateRecordUsageCost_MediaReasoningPricing(t *testing.T) {
 				price := 0.25
 				resolver := newOpenAIImageChannelPricingResolverForTest(t, groupID, model, price)
 				cache := resolver.channelService.cache.Load().(*channelCache)
-				pricing := cache.pricingByGroupModel[channelModelKey{groupID: groupID, model: model}]
+				pricing := cache.pricingByGroupModel[channelModelKey{groupID: groupID, platform: PlatformOpenAI, model: model}]
 				pricing.BillingMode = BillingModePerRequest
 				pricing.ReasoningEffortMultipliers = map[string]float64{"high": 2}
 				wantTotal := 1.0 // Two units at $0.25, with high=2.

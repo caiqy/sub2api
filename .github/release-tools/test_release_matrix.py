@@ -85,7 +85,9 @@ class ReleaseMatrixTest(unittest.TestCase):
                 if simple:
                     self.assertTrue(data['checksum']['disable'])
                     self.assertTrue(data['release']['skip_upload'])
+                    self.assertNotIn('extra_files', data['release'])
                 else:
+                    self.assertNotIn('skip_upload', data['release'])
                     self.assertEqual(data['checksum']['extra_files'], data['release']['extra_files'])
 
     def test_collect_and_verify_hash_and_source_binding(self):
@@ -214,8 +216,15 @@ class ReleaseMatrixTest(unittest.TestCase):
         self.assertEqual(list(workflow[True]), ['workflow_dispatch'])
         steps = {step.get('name'): step for step in workflow['jobs']['release']['steps']}
         for name in ('Prepare publication-only GoReleaser config', 'Publish existing archives and release notes'):
-            self.assertIn("env.SIMPLE_RELEASE != 'true' || env.DRY_RUN == 'true'", steps[name]['if'])
+            self.assertNotIn('if', steps[name])
+        config_run = steps['Prepare publication-only GoReleaser config']['run']
+        self.assertIn('"$SIMPLE_RELEASE" == true && "$DRY_RUN" != true', config_run)
+        self.assertIn('args+=(--simple)', config_run)
         self.assertIn(',publish,announce', steps['Publish existing archives and release notes']['with']['args'])
+        notify = steps['Send Telegram Notification']
+        self.assertIn("env.DOCKERHUB_READY == 'true'", notify['env']['DOCKERHUB_USERNAME'])
+        self.assertIn("|| ''", notify['env']['DOCKERHUB_USERNAME'])
+        self.assertIn("env.SIMPLE_RELEASE != 'true'", notify['if'])
         self.assertIn("needs.prepare.outputs.dry_run != 'true'", workflow['jobs']['sync-version-file']['if'])
         sync = workflow['jobs']['sync-version-file']['steps']
         self.assertTrue(any('merge-base --is-ancestor' in step.get('run', '') for step in sync))

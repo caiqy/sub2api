@@ -247,8 +247,7 @@ func TestOpenAIStreamKeepaliveOnlyFailureDoesNotRecordFirstToken(t *testing.T) {
 			} else {
 				var result *openaiStreamingResult
 				result, err = svc.handleStreamingResponse(c.Request.Context(), resp, c, account, time.Now(), "model", "model")
-				require.NotNil(t, result)
-				require.Nil(t, result.firstTokenMs)
+				require.Nil(t, result)
 			}
 			var failoverErr *UpstreamFailoverError
 			require.ErrorAs(t, err, &failoverErr)
