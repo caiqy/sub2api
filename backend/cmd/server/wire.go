@@ -132,6 +132,7 @@ func provideCleanup(
 	openAIAutoReset *service.OpenAIQuotaAutoResetService,
 	promptAudit *securityaudit.PromptService,
 	pluginManager *service.PluginManager,
+	modelTrace *service.ModelTraceService,
 ) func() {
 	return func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -139,6 +140,12 @@ func provideCleanup(
 
 		// 独立 producers 可并行停止；usage、quota、billing 和基础设施必须按依赖顺序 drain。
 		producerSteps := []cleanupPhase{
+			{name: "ModelTraceService", run: func(ctx context.Context) error {
+				if modelTrace != nil {
+					return modelTrace.Shutdown(ctx)
+				}
+				return nil
+			}},
 			{name: "PluginManager", run: func(context.Context) error {
 				if pluginManager != nil {
 					pluginManager.Stop()

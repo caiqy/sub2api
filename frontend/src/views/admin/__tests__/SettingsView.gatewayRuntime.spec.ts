@@ -105,6 +105,7 @@ function createWrapper() {
   return mount(SettingsView, {
     global: {
       stubs: {
+        ModelTraceSettings: true,
         AppLayout: { template: '<div><slot /></div>' },
         Icon: true,
         RouterLink: true,

@@ -67,6 +67,7 @@ const DataTableStub = defineComponent({
     <div>
       <div v-for="row in data" :key="row.id" :data-account-name="row.name">
         <slot name="cell-groups" :row="row" />
+        <slot name="cell-status" :row="row" />
         <slot name="cell-actions" :row="row" />
       </div>
     </div>
@@ -110,6 +111,7 @@ function mountView(stubActionMenu = true) {
         ImportDataModal: true,
         ReAuthAccountModal: true,
         AccountTestModal: AccountTestModalStub,
+        ModelTraceModal: { props: ['show', 'account', 'initialTab'], template: '<div data-test="modeltrace-modal" :data-show="show" :data-tab="initialTab">{{ account?.name }}</div>' },
         AccountStatsModal: AccountStatsModalStub,
         ScheduledTestsPanel: true,
         SyncFromCrsModal: true,
@@ -211,6 +213,32 @@ describe('admin AccountsView lite account list', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-test="account-groups"]').text()).toBe('codex')
+    wrapper.unmount()
+  })
+
+  it('opens ModelTrace history from the IQ row without fetching account details', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    const iq = wrapper.findAll('button').find(button => button.text() === 'admin.modeltrace.iq')!
+    await iq.trigger('click')
+    const modal = wrapper.get('[data-test="modeltrace-modal"]')
+    expect(modal.attributes('data-show')).toBe('true')
+    expect(modal.attributes('data-tab')).toBe('history')
+    expect(modal.text()).toBe(listRow.name)
+    expect(getById).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('opens the start tab from the OpenAI more-actions menu', async () => {
+    const wrapper = mountView(false)
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'common.more')!.trigger('click')
+    await flushPromises()
+    const menu = new DOMWrapper(document.body.querySelector('.action-menu-content')!)
+    await menu.findAll('button').find(button => button.text() === 'admin.modeltrace.title')!.trigger('click')
+    expect(wrapper.get('[data-test="modeltrace-modal"]').attributes('data-show')).toBe('true')
+    expect(wrapper.get('[data-test="modeltrace-modal"]').attributes('data-tab')).toBe('start')
+    expect(wrapper.findComponent(AccountActionMenu).props('show')).toBe(false)
     wrapper.unmount()
   })
 

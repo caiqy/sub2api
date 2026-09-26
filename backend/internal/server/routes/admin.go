@@ -111,6 +111,11 @@ func RegisterAdminRoutes(
 
 		// 定时测试计划
 		registerScheduledTestRoutes(admin, h)
+		admin.GET("/modeltrace/models", h.Admin.ModelTrace.Models)
+		admin.GET("/modeltrace/settings", h.Admin.ModelTrace.GetSettings)
+		admin.PUT("/modeltrace/settings", h.Admin.ModelTrace.PutSettings)
+		admin.POST("/accounts/:id/modeltrace", h.Admin.ModelTrace.Create)
+		admin.GET("/accounts/:id/modeltrace", h.Admin.ModelTrace.History)
 
 		// 渠道管理
 		registerChannelRoutes(admin, h)

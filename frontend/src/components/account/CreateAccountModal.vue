@@ -3504,6 +3504,14 @@
         </button>
       </div>
 
+      <div v-if="form.platform === 'openai'" class="flex items-center justify-between gap-4">
+        <div>
+          <label for="create-modeltrace-enabled" class="input-label mb-0">{{ t('admin.modeltrace.accountEnabled') }}</label>
+          <p id="create-modeltrace-hint" class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.modeltrace.accountEnabledHint') }}</p>
+        </div>
+        <Toggle id="create-modeltrace-enabled" v-model="modelTraceEnabled" data-testid="modeltrace-enabled" :aria-label="t('admin.modeltrace.accountEnabled')" aria-describedby="create-modeltrace-hint" />
+      </div>
+
       <div>
         <div class="flex items-center justify-between">
           <div>
@@ -4499,6 +4507,7 @@ const applyGrokOAuthUpstreamConfig = (credentials: Record<string, unknown>) => {
 }
 const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(true)
+const modelTraceEnabled = ref(false)
 const openaiPassthroughEnabled = ref(false)
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
@@ -5461,6 +5470,7 @@ const resetForm = () => {
   grokOAuthBaseUrl.value = ''
   interceptWarmupRequests.value = false
   autoPauseOnExpired.value = true
+  modelTraceEnabled.value = false
   openaiPassthroughEnabled.value = false
   openaiFlattenNamespacesEnabled.value = false
   openAILongContextBillingEnabled.value = false
@@ -5535,6 +5545,7 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
   }
 
   const extra: Record<string, unknown> = { ...(base || {}) }
+  extra.modeltrace_enabled = modelTraceEnabled.value
   if (accountCategory.value === 'oauth-based') {
     extra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
     extra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)

@@ -566,6 +566,30 @@ describe('CreateAccountModal', () => {
     expect(createAccountMock.mock.calls[0]?.[0]?.extra).not.toHaveProperty('upstream_request_id_header')
   })
 
+  it('defaults ModelTrace to false and submits the independent OpenAI automatic switch', async () => {
+    await submitApiKeyAccount('openai')
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra?.modeltrace_enabled).toBe(false)
+    createAccountMock.mockClear()
+    const wrapper = mountModal()
+    await switchToOpenAIApiKey(wrapper)
+    await wrapper.get('[data-tour="account-form-name"]').setValue('ModelTrace account')
+    const toggle = wrapper.get('[data-testid="modeltrace-enabled"]')
+    expect(toggle.attributes('aria-checked')).toBe('false')
+    await toggle.trigger('click')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra?.modeltrace_enabled).toBe(true)
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true })
+    await switchToOpenAIApiKey(wrapper)
+    expect(wrapper.get('[data-testid="modeltrace-enabled"]').attributes('aria-checked')).toBe('false')
+  })
+
+  it('does not show the ModelTrace switch on non-OpenAI accounts', () => {
+    const wrapper = mountModal()
+    expect(wrapper.find('[data-testid="modeltrace-enabled"]').exists()).toBe(false)
+  })
+
   it('sends the trimmed upstream request id header in extra when filled', async () => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'OpenAI')

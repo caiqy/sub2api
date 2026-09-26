@@ -2658,6 +2658,14 @@
         </div>
       </div>
 
+      <div v-if="account?.platform === 'openai'" class="flex items-center justify-between gap-4">
+        <div>
+          <label for="edit-modeltrace-enabled" class="input-label mb-0">{{ t('admin.modeltrace.accountEnabled') }}</label>
+          <p id="edit-modeltrace-hint" class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.modeltrace.accountEnabledHint') }}</p>
+        </div>
+        <Toggle id="edit-modeltrace-enabled" v-model="modelTraceEnabled" data-testid="modeltrace-enabled" :aria-label="t('admin.modeltrace.accountEnabled')" aria-describedby="edit-modeltrace-hint" />
+      </div>
+
       <div>
         <div class="flex items-center justify-between">
           <div>
@@ -3798,6 +3806,7 @@ const fillHeaderOverrideTemplate = () => {
 }
 const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(false)
+const modelTraceEnabled = ref(false)
 const mixedScheduling = ref(false) // For antigravity accounts: enable mixed scheduling
 // 上游ID：直接上游声明请求标识的响应头名，留空不记录。
 const upstreamRequestIdHeader = ref('')
@@ -4325,6 +4334,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   mixedScheduling.value = false
   allowOverages.value = false
   const extra = newAccount.extra as Record<string, unknown> | undefined
+  modelTraceEnabled.value = newAccount.platform === 'openai' && extra?.modeltrace_enabled === true
   mixedScheduling.value = extra?.mixed_scheduling === true
   allowOverages.value = extra?.allow_overages === true
   passthroughFieldsEnabled.value = extra?.passthrough_fields_enabled === true
@@ -6088,6 +6098,7 @@ const handleSubmit = async () => {
     applyQuotaControlExtra(nextExtra)
     applyAnthropicPassthroughExtra(nextExtra)
     applyOpenAIExtra(nextExtra)
+    if (props.account.platform === 'openai') nextExtra.modeltrace_enabled = modelTraceEnabled.value
     applyQuotaLimitExtra(nextExtra)
     applyPassthroughFieldExtra(nextExtra, props.account.type)
     if (props.account.platform === 'grok' && props.account.type === 'oauth') {
@@ -6113,6 +6124,9 @@ const handleSubmit = async () => {
       }
       updatePayload.extra = newExtra
     }
+
+    // The latest result is owned by the backend, never send a stale editor snapshot.
+    if (updatePayload.extra) delete (updatePayload.extra as Record<string, unknown>).modeltrace_latest
 
     const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {
       await submitUpdateAccount(accountID, updatePayload)

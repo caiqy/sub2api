@@ -203,6 +203,7 @@
 
         <!-- Tab: Gateway -->
         <div v-show="activeTab === 'gateway'" class="space-y-6">
+          <ModelTraceSettings />
           <!-- Gateway Runtime Settings -->
           <div class="card">
             <div
@@ -9335,6 +9336,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, watch } from "vue";
+import ModelTraceSettings from "./settings/ModelTraceSettings.vue";
 import { useI18n } from "vue-i18n";
 import { adminAPI } from "@/api";
 import {

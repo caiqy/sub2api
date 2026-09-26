@@ -106,6 +106,7 @@ func TestProvideCleanupDrainsOpsErrorsBeforeEntTeardown(t *testing.T) {
 		nil, nil, nil, nil, nil, nil,
 		nil, // channelMonitorV2Aggregator
 		nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, // modelTrace
 	)
 
 	cleanupDone := make(chan struct{})

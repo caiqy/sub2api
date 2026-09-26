@@ -1107,7 +1107,8 @@ describe('EditAccountModal', () => {
       extra: {
         openai_long_context_billing_enabled: false,
         openai_apikey_responses_websockets_v2_mode: 'off',
-        openai_apikey_responses_websockets_v2_enabled: false
+        openai_apikey_responses_websockets_v2_enabled: false,
+        modeltrace_enabled: false
       }
     }))
   })
@@ -1444,6 +1445,32 @@ describe('EditAccountModal', () => {
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_long_context_billing_enabled).toBe(false)
+  })
+
+  it.each([undefined, false, 'true', 1, true])('enables ModelTrace only for literal true: %s', async value => {
+    const wrapper = mountModal(buildAccount({ extra: { modeltrace_enabled: value, unrelated: 'preserved', modeltrace_latest: { result: 'normal', task_id: 10 } } }))
+    expect(wrapper.get('[data-testid="modeltrace-enabled"]').attributes('aria-checked')).toBe(String(value === true))
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(extra.modeltrace_enabled).toBe(value === true)
+    expect(extra.unrelated).toBe('preserved')
+    expect(extra).not.toHaveProperty('modeltrace_latest')
+  })
+
+  it.each(['apikey', 'oauth', 'setup-token', 'upstream'])('supports the independent switch for OpenAI %s accounts', async type => {
+    const wrapper = mountModal(buildAccount({ type }))
+    await wrapper.get('[data-testid="modeltrace-enabled"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra.modeltrace_enabled).toBe(true)
+  })
+
+  it('supports OpenAI shadows and hides the switch for other platforms', async () => {
+    const wrapper = mountModal(buildOpenAISparkShadowAccount())
+    expect(wrapper.find('[data-testid="modeltrace-enabled"]').exists()).toBe(true)
+    await wrapper.setProps({ account: buildAccount({ platform: 'anthropic' }) })
+    expect(wrapper.find('[data-testid="modeltrace-enabled"]').exists()).toBe(false)
   })
 
   it('submits the OpenAI OAuth Codex ticket toggle, including the default false value', async () => {
