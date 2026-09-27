@@ -56,6 +56,8 @@ type ModelTraceRepository interface {
 	Maintain(ctx context.Context) error
 	Candidates(ctx context.Context, interval int, after int64) ([]int64, error)
 	History(ctx context.Context, accountID int64, page, pageSize int) (*ModelTraceHistory, error)
+	ReadFingerprint(ctx context.Context) (string, []byte, error)
+	TryUpdateFingerprint(ctx context.Context, fetch func(context.Context) (string, []byte, error)) (string, []byte, bool, error)
 }
 
 type modelTraceProber interface {
@@ -71,16 +73,17 @@ type modelTraceEpoch struct {
 }
 
 type ModelTraceService struct {
-	repo      ModelTraceRepository
-	accounts  AccountRepository
-	settings  *SettingService
-	prober    modelTraceProber
-	epochMu   sync.RWMutex
-	epoch     *modelTraceEpoch
-	ctx       context.Context
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
-	scanAfter int64
+	repo             ModelTraceRepository
+	accounts         AccountRepository
+	settings         *SettingService
+	prober           modelTraceProber
+	epochMu          sync.RWMutex
+	epoch            *modelTraceEpoch
+	ctx              context.Context
+	cancel           context.CancelFunc
+	wg               sync.WaitGroup
+	scanAfter        int64
+	fetchFingerprint func(context.Context) (string, []byte, error)
 }
 
 func NewModelTraceService(repo ModelTraceRepository, accounts AccountRepository, settings *SettingService, prober *AccountTestService) (*ModelTraceService, error) {
@@ -92,8 +95,11 @@ func NewModelTraceService(repo ModelTraceRepository, accounts AccountRepository,
 		s.cancel()
 		return nil, err
 	}
-	s.wg.Add(5)
+	s.fetchFingerprint = fetchModelTraceFingerprint
+	s.syncFingerprint(ctx)
+	s.wg.Add(6)
 	go s.control()
+	go s.fingerprintLoop()
 	for i := 0; i < 4; i++ {
 		go s.worker()
 	}
@@ -204,7 +210,7 @@ func (s *ModelTraceService) enqueue(ctx context.Context, accountID int64, model 
 	if !slices.Contains(modeltrace.Models(), target) {
 		return nil, infraerrors.BadRequest("MODELTRACE_TARGET_UNSUPPORTED", "mapped target is not supported by the fingerprint library")
 	}
-	task := &ModelTraceTask{AccountID: accountID, Source: source, Model: model, TargetModel: target, Rounds: rounds, Version: modeltrace.Version}
+	task := &ModelTraceTask{AccountID: accountID, Source: source, Model: model, TargetModel: target, Rounds: rounds, Version: modeltrace.Current().Version()}
 	return s.repo.Enqueue(ctx, task, epoch.owner, cfg.IntervalMinutes)
 }
 
@@ -344,6 +350,16 @@ func (s *ModelTraceService) execute(epochCtx context.Context, owner string, task
 		task.Error = "account or model configuration changed before execution"
 		return
 	}
+	snapshot := modeltrace.Current()
+	if !slices.Contains(snapshot.Models(), target) {
+		task.Error = "mapped target is not supported by the fingerprint library"
+		return
+	}
+	task.Version = snapshot.Version()
+	if err := s.repo.Progress(ctx, task, owner); err != nil {
+		task.Error = "task interrupted while saving fingerprint version"
+		return
+	}
 	samples := make([]modeltrace.Sample, 0, task.Rounds)
 	for i := 0; i < task.Rounds; i++ {
 		// Deletion must stop subsequent rounds; never switch to an account pool.
@@ -374,7 +390,7 @@ func (s *ModelTraceService) execute(epochCtx context.Context, owner string, task
 			return
 		}
 		sample := modeltrace.Sample{Output: output, ExpectedCount: challenge.ExpectedCount}
-		if _, err := modeltrace.ScoreSamples([]modeltrace.Sample{sample}); err != nil {
+		if _, err := snapshot.ScoreSamples([]modeltrace.Sample{sample}); err != nil {
 			task.Error = "invalid or incomplete model output"
 			return
 		}
@@ -385,7 +401,7 @@ func (s *ModelTraceService) execute(epochCtx context.Context, owner string, task
 			return
 		}
 	}
-	result, err := modeltrace.ScoreSamples(samples)
+	result, err := snapshot.ScoreSamples(samples)
 	if err != nil {
 		task.Error = "model output scoring failed"
 		return

@@ -2,9 +2,13 @@ package modeltrace
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"math"
+	"reflect"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -29,7 +33,7 @@ func TestUpstreamAstraReference(t *testing.T) {
 			t.Fatalf("%d samples: unexpected result %+v", n, got)
 		}
 		for model, want := range map[string]float64{"gpt-6-astra": wantAstra[n-1], "gpt-6-sol": wantSol[n-1]} {
-			if math.Abs(got.Probabilities[model]-want) > math.Max(1e-12, want*1e-6) {
+			if !finite(got.Probabilities[model]) || math.Abs(got.Probabilities[model]-want) > math.Max(1e-12, want*1e-6) {
 				t.Errorf("%d samples: P(%s) = %.15g, upstream %.15g", n, model, got.Probabilities[model], want)
 			}
 		}
@@ -60,5 +64,445 @@ func TestChallengeAndInvalidSamples(t *testing.T) {
 	}
 	if _, err := ScoreSamples([]Sample{{Output: strings.Repeat("7,", 80), ExpectedCount: 300}}); err == nil {
 		t.Fatal("truncated response should not meet the expected-count threshold")
+	}
+}
+
+func snapshotData(t *testing.T, edit func(map[string]any)) []byte {
+	t.Helper()
+	data, err := bankFS.ReadFile("unified_bank.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatal(err)
+	}
+	if edit != nil {
+		edit(document)
+	}
+	data, err = json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+func TestSnapshotActivation(t *testing.T) {
+	old := Current()
+	t.Cleanup(func() { Activate(old) })
+	if old.Version() != Version {
+		t.Fatalf("initial version: %s", old.Version())
+	}
+	want, err := old.ScoreSamples(astraReference)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := snapshotData(t, func(document map[string]any) {
+		for _, calibration := range document["calibration"].(map[string]any) {
+			calibration.(map[string]any)["beta"] = 0.5
+		}
+	})
+	next, err := ParseSnapshot(strings.Repeat("a", 40), data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Neither the input buffer nor a returned model list owns snapshot storage.
+	clear(data)
+	models := next.Models()
+	models[0] = "changed"
+	if !reflect.DeepEqual(next.Models(), old.Models()) {
+		t.Fatal("model list mutation escaped")
+	}
+	Activate(next)
+	if Current() != next || Current().Version() != strings.Repeat("a", 40) {
+		t.Fatal("snapshot was not activated")
+	}
+	got, err := old.ScoreSamples(astraReference)
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("old snapshot changed: %+v, %v", got, err)
+	}
+	updated, err := ScoreSamples(astraReference)
+	if err != nil || reflect.DeepEqual(updated, want) {
+		t.Fatalf("package scoring did not switch: %+v, %v", updated, err)
+	}
+	if direct, err := next.ScoreSamples(astraReference); err != nil || !reflect.DeepEqual(direct, updated) {
+		t.Fatalf("package scoring differs from snapshot: %+v, %v", direct, err)
+	}
+	outputs := []string{astraReference[0].Output}
+	if legacy, err := Score(outputs); err != nil {
+		t.Fatal(err)
+	} else if direct, err := next.ScoreSamples([]Sample{{Output: outputs[0]}}); err != nil || !reflect.DeepEqual(legacy, direct) {
+		t.Fatal("legacy Score did not use current snapshot")
+	}
+	Activate(nil)
+	Activate(&Snapshot{})
+	if Current() != next {
+		t.Fatal("invalid activation replaced current snapshot")
+	}
+}
+
+func TestParseSnapshotCompatibility(t *testing.T) {
+	initial := Current()
+	valid := snapshotData(t, nil)
+	for _, version := range []string{"", "abc", strings.Repeat("g", 40), strings.Repeat("a", 41), " " + Version} {
+		if _, err := ParseSnapshot(version, valid); err == nil {
+			t.Errorf("accepted invalid version %q", version)
+		}
+	}
+	for _, data := range [][]byte{nil, []byte("{"), []byte("null"), append(append([]byte(nil), valid...), []byte(" {}")...)} {
+		if _, err := ParseSnapshot(Version, data); err == nil {
+			t.Error("accepted invalid JSON")
+		}
+	}
+	type mutation struct {
+		name string
+		edit func(map[string]any)
+	}
+	tests := []mutation{
+		{"schema", func(d map[string]any) { d["schema"] = "other" }},
+		{"missing method", func(d map[string]any) { delete(d, "method") }},
+		{"queries", func(d map[string]any) { d["recommended_queries"] = 4 }},
+		{"minimum", func(d map[string]any) { d["minimum_valid_numbers"] = 1 }},
+		{"empty models", func(d map[string]any) { d["models"] = []any{} }},
+		{"duplicate ID", func(d map[string]any) {
+			models := d["models"].([]any)
+			models[1].(map[string]any)["id"] = models[0].(map[string]any)["id"]
+			d["robust"].(map[string]any)["model_order"].([]any)[1] = models[0].(map[string]any)["id"]
+		}},
+		{"empty ID", func(d map[string]any) { d["models"].([]any)[0].(map[string]any)["id"] = "" }},
+		{"lost GPT", func(d map[string]any) { d["models"].([]any)[0].(map[string]any)["family"] = "other" }},
+		{"replaced GPT", func(d map[string]any) {
+			d["models"].([]any)[0].(map[string]any)["id"] = "gpt-replacement"
+			d["robust"].(map[string]any)["model_order"].([]any)[0] = "gpt-replacement"
+		}},
+		{"missing calibration", func(d map[string]any) { delete(d["calibration"].(map[string]any), "2") }},
+		{"zero beta", func(d map[string]any) { d["calibration"].(map[string]any)["1"].(map[string]any)["beta"] = 0 }},
+		{"negative beta", func(d map[string]any) { d["calibration"].(map[string]any)["1"].(map[string]any)["beta"] = -1 }},
+	}
+	var document map[string]any
+	if err := json.Unmarshal(valid, &document); err != nil {
+		t.Fatal(err)
+	}
+	for field := range document["method"].(map[string]any) {
+		tests = append(tests, mutation{"method " + field, func(d map[string]any) { d["method"].(map[string]any)[field] = nil }})
+	}
+	tests = append(tests, mutation{"unknown method", func(d map[string]any) { d["method"].(map[string]any)["future_rule"] = "unsupported" }})
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := ParseSnapshot(Version, snapshotData(t, test.edit)); err == nil {
+				t.Fatal("accepted incompatible bank")
+			}
+		})
+	}
+	robustTests := []mutation{
+		{"order", func(r map[string]any) { r["model_order"].([]any)[0] = "other" }},
+		{"order length", func(r map[string]any) { r["model_order"] = []any{} }},
+		{"not ready", func(r map[string]any) { r["robust_ready"] = false }},
+		{"environments", func(r map[string]any) { r["complete_environments"] = []any{} }},
+		{"environment order", func(r map[string]any) { r["hellinger"].(map[string]any)["nuisance_environments"].([]any)[0] = "other" }},
+		{"duplicate environment", func(r map[string]any) {
+			r["complete_environments"].([]any)[1] = r["complete_environments"].([]any)[0]
+			r["hellinger"].(map[string]any)["nuisance_environments"].([]any)[1] = r["complete_environments"].([]any)[0]
+		}},
+		{"weight", func(r map[string]any) { r["ordered_blocks"].(map[string]any)["weight"] = 0.5 }},
+		{"feature rule", func(r map[string]any) { r["ordered_blocks"].(map[string]any)["feature"] = "other" }},
+		{"missing environment centroids", func(r map[string]any) { delete(r["ordered_blocks"].(map[string]any), "environment_centroids") }},
+		{"environment count", func(r map[string]any) { r["ordered_blocks"].(map[string]any)["environment_centroids"] = []any{} }},
+		{"environment models", func(r map[string]any) {
+			r["ordered_blocks"].(map[string]any)["environment_centroids"].([]any)[0] = []any{}
+		}},
+		{"environment dimension", func(r map[string]any) {
+			r["ordered_blocks"].(map[string]any)["environment_centroids"].([]any)[0].([]any)[0] = []any{1.0}
+		}},
+	}
+	for _, name := range []string{"hellinger", "ordered_blocks"} {
+		for _, field := range []string{"feature_mean", "feature_scale", "nuisance_basis", "centroids"} {
+			robustTests = append(robustTests, mutation{name + " " + field, func(r map[string]any) { r[name].(map[string]any)[field] = []any{} }})
+		}
+		robustTests = append(robustTests,
+			mutation{name + " centroid dimension", func(r map[string]any) { r[name].(map[string]any)["centroids"].([]any)[0] = []any{1.0} }},
+			mutation{name + " basis dimension", func(r map[string]any) { r[name].(map[string]any)["nuisance_basis"].([]any)[0] = []any{1.0} }},
+			mutation{name + " rank", func(r map[string]any) { r[name].(map[string]any)["nuisance_rank"] = 100 }},
+			mutation{name + " missing rank", func(r map[string]any) { delete(r[name].(map[string]any), "nuisance_rank") }})
+		for _, value := range []any{0.0, -1.0, nil} {
+			robustTests = append(robustTests, mutation{fmt.Sprintf("%s scale %v", name, value), func(r map[string]any) { r[name].(map[string]any)["feature_scale"].([]any)[0] = value }})
+		}
+		robustTests = append(robustTests, mutation{name + " null mean", func(r map[string]any) { r[name].(map[string]any)["feature_mean"].([]any)[0] = nil }})
+	}
+	for _, test := range robustTests {
+		t.Run(test.name, func(t *testing.T) {
+			data := snapshotData(t, func(d map[string]any) { test.edit(d["robust"].(map[string]any)) })
+			if _, err := ParseSnapshot(Version, data); err == nil {
+				t.Fatal("accepted incompatible robust data")
+			}
+		})
+	}
+	for _, field := range []string{"beta", "weight", "feature_mean"} {
+		data := snapshotData(t, func(d map[string]any) {
+			if field == "beta" {
+				d["calibration"].(map[string]any)["1"].(map[string]any)[field] = "invalid-number"
+			} else if field == "weight" {
+				d["robust"].(map[string]any)["ordered_blocks"].(map[string]any)[field] = "invalid-number"
+			} else {
+				d["robust"].(map[string]any)["hellinger"].(map[string]any)[field].([]any)[0] = "invalid-number"
+			}
+		})
+		for _, invalid := range []string{"1e999", "NaN", "Infinity"} {
+			if _, err := ParseSnapshot(Version, []byte(strings.Replace(string(data), `"invalid-number"`, invalid, 1))); err == nil {
+				t.Errorf("accepted %s %s", field, invalid)
+			}
+		}
+	}
+	if Current() != initial {
+		t.Fatal("parsing changed the active snapshot")
+	}
+}
+
+func TestSnapshotAllowsNewModels(t *testing.T) {
+	data := snapshotData(t, func(d map[string]any) {
+		models := d["models"].([]any)
+		d["models"] = append(models, map[string]any{"id": "gpt-future", "family": "gpt"})
+		robust := d["robust"].(map[string]any)
+		robust["model_order"] = append(robust["model_order"].([]any), "gpt-future")
+		for _, name := range []string{"hellinger", "ordered_blocks"} {
+			artifact := robust[name].(map[string]any)
+			centroids := artifact["centroids"].([]any)
+			artifact["centroids"] = append(centroids, centroids[0])
+			if name == "ordered_blocks" {
+				for i, environment := range artifact["environment_centroids"].([]any) {
+					rows := environment.([]any)
+					artifact["environment_centroids"].([]any)[i] = append(rows, rows[0])
+				}
+			}
+		}
+	})
+	next, err := ParseSnapshot(strings.Repeat("b", 40), data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(next.Models()) != 9 || next.Models()[8] != "gpt-future" {
+		t.Fatalf("new model missing: %v", next.Models())
+	}
+	got, err := next.ScoreSamples(astraReference)
+	if err != nil || len(got.Probabilities) != 17 {
+		t.Fatalf("new model not scored: %+v, %v", got, err)
+	}
+}
+
+func TestConcurrentSnapshotScoring(t *testing.T) {
+	old := Current()
+	t.Cleanup(func() { Activate(old) })
+	next, err := ParseSnapshot(strings.Repeat("c", 40), snapshotData(t, func(d map[string]any) {
+		robust := d["robust"].(map[string]any)
+		// Permute both scoring branches, keeping IDs aligned with every matrix.
+		models := d["models"].([]any)
+		models[0], models[5] = models[5], models[0]
+		order := robust["model_order"].([]any)
+		order[0], order[5] = order[5], order[0]
+		for _, name := range []string{"hellinger", "ordered_blocks"} {
+			artifact := robust[name].(map[string]any)
+			rows := artifact["centroids"].([]any)
+			rows[0], rows[5] = rows[5], rows[0]
+			if name == "ordered_blocks" {
+				for _, environment := range artifact["environment_centroids"].([]any) {
+					rows := environment.([]any)
+					rows[0], rows[5] = rows[5], rows[0]
+				}
+			}
+		}
+		for _, calibration := range d["calibration"].(map[string]any) {
+			calibration.(map[string]any)["beta"] = 0.5
+		}
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantOld, err := old.ScoreSamples(astraReference)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantNew, err := next.ScoreSamples(astraReference)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop := make(chan struct{})
+	var writer, readers sync.WaitGroup
+	writer.Go(func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				Activate(next)
+				runtime.Gosched()
+				Activate(old)
+				runtime.Gosched()
+			}
+		}
+	})
+	for range 4 {
+		readers.Go(func() {
+			for range 100 {
+				got, err := ScoreSamples(astraReference)
+				if err != nil || (!reflect.DeepEqual(got, wantOld) && !reflect.DeepEqual(got, wantNew)) {
+					t.Errorf("mixed scoring banks: %+v, %v", got, err)
+					return
+				}
+				if got, err := old.ScoreSamples(astraReference); err != nil || !reflect.DeepEqual(got, wantOld) {
+					t.Errorf("captured snapshot changed: %+v, %v", got, err)
+					return
+				}
+			}
+		})
+	}
+	readers.Wait()
+	close(stop)
+	writer.Wait()
+}
+
+func TestSnapshotRejectsNonFiniteScore(t *testing.T) {
+	data := snapshotData(t, func(d map[string]any) {
+		d["calibration"].(map[string]any)["1"].(map[string]any)["beta"] = math.MaxFloat64
+	})
+	if _, err := ParseSnapshot(Version, data); err == nil {
+		t.Fatal("extreme calibration must be rejected during parsing")
+	}
+	var bank fingerprintBank
+	if err := json.Unmarshal(data, &bank); err != nil {
+		t.Fatal(err)
+	}
+	next := &Snapshot{version: Version, bank: bank}
+	if _, err := next.ScoreSamples(astraReference[:1]); err == nil {
+		t.Fatal("calibration overflow must not produce NaN probabilities")
+	}
+}
+
+func TestFingerprintNumericalRanges(t *testing.T) {
+	for _, name := range []string{"hellinger", "ordered_blocks"} {
+		for _, test := range []struct {
+			name  string
+			field string
+			value float64
+		}{
+			{"negative mean", "feature_mean", -0.01},
+			{"large mean", "feature_mean", 1.01},
+			{"small scale", "feature_scale", 1e-13},
+			{"large scale", "feature_scale", 1.01},
+		} {
+			t.Run(name+"/"+test.name, func(t *testing.T) {
+				data := snapshotData(t, func(d map[string]any) {
+					d["robust"].(map[string]any)[name].(map[string]any)[test.field].([]any)[0] = test.value
+				})
+				if _, err := ParseSnapshot(Version, data); err == nil {
+					t.Fatal("accepted number outside upstream feature range")
+				}
+			})
+		}
+		for _, field := range []string{"nuisance_basis", "centroids"} {
+			t.Run(name+"/"+field+" norm", func(t *testing.T) {
+				data := snapshotData(t, func(d map[string]any) {
+					row := d["robust"].(map[string]any)[name].(map[string]any)[field].([]any)[0].([]any)
+					row[0], row[1] = 1.0, 1.0
+				})
+				if _, err := ParseSnapshot(Version, data); err == nil {
+					t.Fatal("accepted excessive norm with individually valid components")
+				}
+			})
+		}
+	}
+	for _, beta := range []float64{0.01, 13, 1e200} {
+		data := snapshotData(t, func(d map[string]any) {
+			d["calibration"].(map[string]any)["1"].(map[string]any)["beta"] = beta
+		})
+		if _, err := ParseSnapshot(Version, data); err == nil {
+			t.Errorf("accepted beta outside upstream search range: %g", beta)
+		}
+	}
+	for _, bounds := range []struct {
+		mean, scale, beta float64
+	}{{0, 1e-12, 0.05}, {1, 1, 12}} {
+		data := snapshotData(t, func(d map[string]any) {
+			for _, name := range []string{"hellinger", "ordered_blocks"} {
+				artifact := d["robust"].(map[string]any)[name].(map[string]any)
+				for i := range artifact["feature_mean"].([]any) {
+					artifact["feature_mean"].([]any)[i] = bounds.mean
+					artifact["feature_scale"].([]any)[i] = bounds.scale
+				}
+			}
+			for _, calibration := range d["calibration"].(map[string]any) {
+				calibration.(map[string]any)["beta"] = bounds.beta
+			}
+		})
+		next, err := ParseSnapshot(Version, data)
+		if err != nil {
+			t.Fatalf("rejected valid numeric boundary %+v: %v", bounds, err)
+		}
+		for n := 1; n <= 3; n++ {
+			got, err := next.ScoreSamples(astraReference[:n])
+			if err != nil {
+				t.Fatalf("numeric boundary %+v, %d samples: %v", bounds, n, err)
+			}
+			var total float64
+			for _, probability := range got.Probabilities {
+				if !finite(probability) || probability < 0 || probability > 1 {
+					t.Fatalf("invalid boundary probability: %g", probability)
+				}
+				total += probability
+			}
+			if math.Abs(total-1) > 1e-12 {
+				t.Fatalf("probabilities sum to %g", total)
+			}
+		}
+	}
+}
+
+func TestExtremeFingerprintNumbers(t *testing.T) {
+	initial := Current()
+	for _, name := range []string{"hellinger", "ordered_blocks"} {
+		for _, test := range []struct {
+			name string
+			edit func(map[string]any)
+		}{
+			{"mean", func(a map[string]any) { a["feature_mean"].([]any)[0] = 1e200 }},
+			{"tiny scale", func(a map[string]any) { a["feature_scale"].([]any)[0] = 1e-200 }},
+			{"basis", func(a map[string]any) { a["nuisance_basis"].([]any)[0].([]any)[0] = 1e200 }},
+			{"centroid", func(a map[string]any) { a["centroids"].([]any)[0].([]any)[0] = 1e200 }},
+		} {
+			t.Run(name+"/"+test.name, func(t *testing.T) {
+				data := snapshotData(t, func(d map[string]any) { test.edit(d["robust"].(map[string]any)[name].(map[string]any)) })
+				if _, err := ParseSnapshot(Version, data); err == nil {
+					t.Error("extreme finite number must be rejected during parsing")
+				}
+				// Bypass parsing to exercise the scoring guard on the real reference outputs.
+				var bank fingerprintBank
+				if err := json.Unmarshal(data, &bank); err != nil {
+					t.Fatal(err)
+				}
+				invalid := &Snapshot{version: Version, bank: bank}
+				if got, err := invalid.ScoreSamples(astraReference); err == nil {
+					t.Fatalf("overflow silently produced winner %s: %+v", got.Winner, got.Probabilities)
+				} else if !reflect.DeepEqual(got, Result{}) {
+					t.Fatalf("failed scoring returned a partial conclusion: %+v", got)
+				}
+			})
+		}
+	}
+	t.Run("environment centroid", func(t *testing.T) {
+		data := snapshotData(t, func(d map[string]any) {
+			d["robust"].(map[string]any)["ordered_blocks"].(map[string]any)["environment_centroids"].([]any)[0].([]any)[0].([]any)[0] = 1e200
+		})
+		if _, err := ParseSnapshot(Version, data); err == nil {
+			t.Error("extreme environment centroid must be rejected")
+		}
+		var bank fingerprintBank
+		if err := json.Unmarshal(data, &bank); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := (&Snapshot{version: Version, bank: bank}).ScoreSamples(astraReference); err == nil {
+			t.Fatalf("environment overflow silently produced winner %s", got.Winner)
+		}
+	})
+	if Current() != initial {
+		t.Fatal("failed parsing changed the current snapshot")
 	}
 }

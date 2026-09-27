@@ -13,9 +13,12 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"unicode"
 )
 
@@ -26,30 +29,58 @@ const dimension = 355
 //go:embed unified_bank.json
 var bankFS embed.FS
 
+// vector rejects null elements, which encoding/json otherwise turns into zeros.
+type vector []float64
+
+func (v *vector) UnmarshalJSON(data []byte) error {
+	var values []*float64
+	if err := json.Unmarshal(data, &values); err != nil {
+		return err
+	}
+	*v = make(vector, len(values))
+	for i, value := range values {
+		if value == nil || !finite(*value) {
+			return errors.New("modeltrace: vector requires finite numbers")
+		}
+		(*v)[i] = *value
+	}
+	return nil
+}
+
 type artifact struct {
-	FeatureMean          []float64     `json:"feature_mean"`
-	FeatureScale         []float64     `json:"feature_scale"`
-	NuisanceBasis        [][]float64   `json:"nuisance_basis"`
-	Centroids            [][]float64   `json:"centroids"`
-	EnvironmentCentroids [][][]float64 `json:"environment_centroids"`
-	Weight               float64       `json:"weight"`
+	FeatureMean          vector     `json:"feature_mean"`
+	FeatureScale         vector     `json:"feature_scale"`
+	NuisanceRank         *int       `json:"nuisance_rank"`
+	NuisanceEnvironments []string   `json:"nuisance_environments"`
+	NuisanceBasis        []vector   `json:"nuisance_basis"`
+	Centroids            []vector   `json:"centroids"`
+	EnvironmentCentroids [][]vector `json:"environment_centroids"`
+	Feature              string     `json:"feature"`
+	Weight               float64    `json:"weight"`
 }
 
 type fingerprintBank struct {
-	Models []struct {
+	Schema              string         `json:"schema"`
+	Method              map[string]any `json:"method"`
+	RecommendedQueries  int            `json:"recommended_queries"`
+	MinimumValidNumbers int            `json:"minimum_valid_numbers"`
+	Models              []struct {
 		ID     string `json:"id"`
 		Family string `json:"family"`
 	} `json:"models"`
 	Robust struct {
-		Hellinger     artifact `json:"hellinger"`
-		OrderedBlocks artifact `json:"ordered_blocks"`
+		ModelOrder           []string `json:"model_order"`
+		Ready                bool     `json:"robust_ready"`
+		CompleteEnvironments []string `json:"complete_environments"`
+		Hellinger            artifact `json:"hellinger"`
+		OrderedBlocks        artifact `json:"ordered_blocks"`
 	} `json:"robust"`
 	Calibration map[string]struct {
 		Beta float64 `json:"beta"`
 	} `json:"calibration"`
 }
 
-var bank = func() fingerprintBank {
+var embeddedBank = func() fingerprintBank {
 	data, err := bankFS.ReadFile("unified_bank.json")
 	if err != nil {
 		panic(err)
@@ -61,9 +92,166 @@ var bank = func() fingerprintBank {
 	return b
 }()
 
+// Snapshot owns a validated fingerprint bank. Its data is never mutated or exposed.
+type Snapshot struct {
+	version string
+	bank    fingerprintBank
+}
+
+var current atomic.Pointer[Snapshot]
+
+func init() {
+	if err := validateBank(&embeddedBank); err != nil {
+		panic(err)
+	}
+	current.Store(&Snapshot{version: Version, bank: embeddedBank})
+}
+
+// Current captures the active snapshot for a complete detection run.
+func Current() *Snapshot { return current.Load() }
+
+var commitSHA = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
+
+// ParseSnapshot validates compatibility without changing the active snapshot.
+func ParseSnapshot(version string, data []byte) (*Snapshot, error) {
+	if !commitSHA.MatchString(version) {
+		return nil, errors.New("modeltrace: version must be a full commit SHA")
+	}
+	var bank fingerprintBank
+	if err := json.Unmarshal(data, &bank); err != nil {
+		return nil, fmt.Errorf("modeltrace: invalid fingerprint JSON: %w", err)
+	}
+	if err := validateBank(&bank); err != nil {
+		return nil, err
+	}
+	return &Snapshot{version: version, bank: bank}, nil
+}
+
+// Activate atomically publishes a parsed snapshot; nil and zero values are ignored.
+func Activate(snapshot *Snapshot) {
+	if snapshot != nil && snapshot.version != "" {
+		current.Store(snapshot)
+	}
+}
+
+func (s *Snapshot) Version() string { return s.version }
+
+func finite(value float64) bool { return !math.IsNaN(value) && !math.IsInf(value, 0) }
+
+func validateBank(bank *fingerprintBank) error {
+	if bank.Schema != embeddedBank.Schema || !reflect.DeepEqual(bank.Method, embeddedBank.Method) ||
+		bank.RecommendedQueries != embeddedBank.RecommendedQueries || bank.MinimumValidNumbers != embeddedBank.MinimumValidNumbers {
+		return errors.New("modeltrace: incompatible schema or scoring method")
+	}
+	if !bank.Robust.Ready || len(bank.Models) == 0 || len(bank.Robust.ModelOrder) != len(bank.Models) {
+		return errors.New("modeltrace: missing robust models or model order")
+	}
+	models := make(map[string]string, len(bank.Models))
+	for i, model := range bank.Models {
+		if model.ID == "" || strings.TrimSpace(model.ID) != model.ID || model.Family == "" || bank.Robust.ModelOrder[i] != model.ID {
+			return fmt.Errorf("modeltrace: invalid model or order at %d", i)
+		}
+		if _, exists := models[model.ID]; exists {
+			return fmt.Errorf("modeltrace: duplicate model %q", model.ID)
+		}
+		models[model.ID] = model.Family
+	}
+	for _, model := range embeddedBank.Models {
+		if model.Family == "gpt" && models[model.ID] != "gpt" {
+			return fmt.Errorf("modeltrace: missing built-in GPT model %q", model.ID)
+		}
+	}
+	environments := bank.Robust.CompleteEnvironments
+	if len(environments) == 0 || !slices.Equal(bank.Robust.Hellinger.NuisanceEnvironments, environments) {
+		return errors.New("modeltrace: missing or inconsistent environments")
+	}
+	seen := make(map[string]bool, len(environments))
+	for _, environment := range environments {
+		if strings.TrimSpace(environment) == "" || seen[environment] {
+			return errors.New("modeltrace: invalid or duplicate environment")
+		}
+		seen[environment] = true
+	}
+	ordered := &bank.Robust.OrderedBlocks
+	if !finite(ordered.Weight) || ordered.Weight != embeddedBank.Robust.OrderedBlocks.Weight ||
+		ordered.Feature != embeddedBank.Robust.OrderedBlocks.Feature || len(ordered.EnvironmentCentroids) != len(environments) {
+		return errors.New("modeltrace: incompatible ordered-block rule or environments")
+	}
+	for _, item := range []struct {
+		name      string
+		artifact  *artifact
+		dimension int
+	}{{"hellinger", &bank.Robust.Hellinger, dimension}, {"ordered_blocks", ordered, 74}} {
+		a, size := item.artifact, item.dimension
+		if len(a.FeatureMean) != size || len(a.FeatureScale) != size || a.NuisanceRank == nil ||
+			*a.NuisanceRank < 0 || *a.NuisanceRank > size || a.NuisanceBasis == nil || len(a.NuisanceBasis) != *a.NuisanceRank {
+			return fmt.Errorf("modeltrace: invalid %s feature dimensions or nuisance rank", item.name)
+		}
+		// Upstream features are square-root probabilities; the builder replaces
+		// standard deviations below 1e-12 with 1, not an arbitrarily small divisor.
+		for i, mean := range a.FeatureMean {
+			if !finite(mean) || mean < 0 || mean > 1 {
+				return fmt.Errorf("modeltrace: invalid %s feature mean", item.name)
+			}
+			scale := a.FeatureScale[i]
+			if !finite(scale) || scale < 1e-12 || scale > 1 {
+				return fmt.Errorf("modeltrace: invalid %s feature scale", item.name)
+			}
+		}
+		if err := validateMatrix(a.NuisanceBasis, *a.NuisanceRank, size); err != nil {
+			return fmt.Errorf("modeltrace: %s nuisance basis: %w", item.name, err)
+		}
+		if err := validateMatrix(a.Centroids, len(bank.Models), size); err != nil {
+			return fmt.Errorf("modeltrace: %s centroids: %w", item.name, err)
+		}
+		for _, environment := range a.EnvironmentCentroids {
+			if err := validateMatrix(environment, len(bank.Models), size); err != nil {
+				return fmt.Errorf("modeltrace: %s environment centroids: %w", item.name, err)
+			}
+		}
+	}
+	for n := 1; n <= 3; n++ {
+		beta := bank.Calibration[strconv.Itoa(n)].Beta
+		// fit_beta in the pinned upstream builder searches [0.05, 12].
+		if !finite(beta) || beta < 0.05 || beta > 12 {
+			return fmt.Errorf("modeltrace: invalid calibration beta for %d samples", n)
+		}
+	}
+	return nil
+}
+
+func validateMatrix(matrix []vector, rows, columns int) error {
+	if len(matrix) != rows {
+		return errors.New("invalid row count")
+	}
+	for _, row := range matrix {
+		if len(row) != columns {
+			return errors.New("invalid column count")
+		}
+		var normSquared float64
+		for _, value := range row {
+			if !finite(value) || math.Abs(value) > 1+1e-9 {
+				return errors.New("vector component outside normalized range")
+			}
+			normSquared += value * value
+		}
+		// SVD basis vectors are unit length; normalized centroids can be shorter
+		// when the upstream 1e-12 norm floor applies. Allow serialization roundoff.
+		if !finite(normSquared) || normSquared > 1+1e-9 {
+			return errors.New("vector norm exceeds normalized range")
+		}
+	}
+	return nil
+}
+
 // Models lists GPT candidates with fingerprints; scoring retains every
 // candidate in the upstream unified bank, including Claude competitors.
 func Models() []string {
+	return Current().Models()
+}
+
+func (s *Snapshot) Models() []string {
+	bank := &s.bank
 	models := make([]string, 0, len(bank.Models))
 	for _, model := range bank.Models {
 		if model.Family == "gpt" {
@@ -127,12 +315,17 @@ func Score(outputs []string) (Result, error) {
 	for i, output := range outputs {
 		samples[i] = Sample{Output: output}
 	}
-	return ScoreSamples(samples)
+	return Current().ScoreSamples(samples)
 }
 
 // ScoreSamples rejects a partial run rather than producing a conclusion from
 // fewer rounds. ExpectedCount should be copied from each sent Challenge.
 func ScoreSamples(samples []Sample) (Result, error) {
+	return Current().ScoreSamples(samples)
+}
+
+func (s *Snapshot) ScoreSamples(samples []Sample) (Result, error) {
+	bank := &s.bank
 	if len(samples) < 1 || len(samples) > 3 {
 		return Result{}, errors.New("modeltrace: require 1 to 3 samples")
 	}
@@ -149,8 +342,14 @@ func ScoreSamples(samples []Sample) (Result, error) {
 		if len(numbers) < minimum {
 			return Result{}, fmt.Errorf("modeltrace: sample %d: parsed %d numbers, need %d", i+1, len(numbers), minimum)
 		}
-		marginal := hellingerScores(numbers)
-		ordered := orderedScores(numbers)
+		marginal, err := hellingerScores(bank, numbers)
+		if err != nil {
+			return Result{}, fmt.Errorf("modeltrace: sample %d hellinger: %w", i+1, err)
+		}
+		ordered, err := orderedScores(bank, numbers)
+		if err != nil {
+			return Result{}, fmt.Errorf("modeltrace: sample %d ordered blocks: %w", i+1, err)
+		}
 		for j := range combined {
 			combined[j] += (1-bank.Robust.OrderedBlocks.Weight)*marginal[j] + bank.Robust.OrderedBlocks.Weight*ordered[j]
 		}
@@ -161,12 +360,22 @@ func ScoreSamples(samples []Sample) (Result, error) {
 	beta := bank.Calibration[strconv.Itoa(len(samples))].Beta
 	for i := range combined {
 		combined[i] *= beta / float64(len(samples))
+		if !finite(combined[i]) {
+			return Result{}, errors.New("modeltrace: non-finite calibrated score")
+		}
 		maxScore = max(maxScore, combined[i])
 	}
 	for i, score := range combined {
-		p := math.Exp(score - maxScore)
+		difference := score - maxScore
+		if !finite(difference) {
+			return Result{}, errors.New("modeltrace: non-finite softmax difference")
+		}
+		p := math.Exp(difference)
 		probabilities[bank.Models[i].ID] = p
 		total += p
+	}
+	if !finite(total) || total <= 0 {
+		return Result{}, errors.New("modeltrace: invalid probability total")
 	}
 	winner := 0
 	for i, model := range bank.Models {
@@ -202,21 +411,27 @@ func parseNumbers(text string) []int {
 	return best
 }
 
-func standardize(values []float64) []float64 {
+func standardize(values []float64) ([]float64, error) {
 	mean := 0.0
 	for _, value := range values {
 		mean += value
+	}
+	if len(values) == 0 || !finite(mean) {
+		return nil, errors.New("non-finite score mean")
 	}
 	mean /= float64(len(values))
 	variance := 0.0
 	for _, value := range values {
 		variance += (value - mean) * (value - mean)
 	}
+	if !finite(variance) {
+		return nil, errors.New("non-finite score variance")
+	}
 	scale := max(math.Sqrt(variance/float64(len(values))), 1e-12)
 	for i := range values {
 		values[i] = (values[i] - mean) / scale
 	}
-	return values
+	return values, nil
 }
 
 func dot(left, right []float64) float64 {
@@ -227,23 +442,35 @@ func dot(left, right []float64) float64 {
 	return result
 }
 
-func project(feature []float64, basis [][]float64) {
+func project(feature []float64, basis []vector) error {
 	for _, vector := range basis {
 		projection := dot(feature, vector)
+		if !finite(projection) {
+			return errors.New("non-finite nuisance projection")
+		}
 		for i := range feature {
 			feature[i] -= projection * vector[i]
+			if !finite(feature[i]) {
+				return errors.New("non-finite projected feature")
+			}
 		}
 	}
+	return nil
 }
 
-func normalize(feature []float64) {
-	scale := max(math.Sqrt(dot(feature, feature)), 1e-12)
+func normalize(feature []float64) error {
+	normSquared := dot(feature, feature)
+	if !finite(normSquared) {
+		return errors.New("non-finite feature norm")
+	}
+	scale := max(math.Sqrt(normSquared), 1e-12)
 	for i := range feature {
 		feature[i] /= scale
 	}
+	return nil
 }
 
-func scores(feature []float64, centroids [][]float64) []float64 {
+func scores(feature []float64, centroids []vector) ([]float64, error) {
 	values := make([]float64, len(centroids))
 	for i, centroid := range centroids {
 		values[i] = dot(feature, centroid)
@@ -251,7 +478,7 @@ func scores(feature []float64, centroids [][]float64) []float64 {
 	return standardize(values)
 }
 
-func hellingerScores(numbers []int) []float64 {
+func hellingerScores(bank *fingerprintBank, numbers []int) ([]float64, error) {
 	var counts [dimension]int
 	for _, value := range numbers {
 		counts[value-1]++
@@ -262,12 +489,16 @@ func hellingerScores(numbers []int) []float64 {
 	for i := range feature {
 		feature[i] = (math.Sqrt((float64(counts[i])+0.5)/total) - artifact.FeatureMean[i]) / artifact.FeatureScale[i]
 	}
-	project(feature, artifact.NuisanceBasis)
-	normalize(feature)
+	if err := project(feature, artifact.NuisanceBasis); err != nil {
+		return nil, err
+	}
+	if err := normalize(feature); err != nil {
+		return nil, err
+	}
 	return scores(feature, artifact.Centroids)
 }
 
-func orderedScores(numbers []int) []float64 {
+func orderedScores(bank *fingerprintBank, numbers []int) ([]float64, error) {
 	artifact := bank.Robust.OrderedBlocks
 	feature := make([]float64, 0, 74)
 	base, remainder, start := len(numbers)/4, len(numbers)%4, 0
@@ -296,18 +527,33 @@ func orderedScores(numbers []int) []float64 {
 		feature[i] = (feature[i] - artifact.FeatureMean[i]) / artifact.FeatureScale[i]
 	}
 	templateFeature := append([]float64(nil), feature...)
-	normalize(templateFeature)
+	if err := normalize(templateFeature); err != nil {
+		return nil, err
+	}
 	template := make([]float64, len(bank.Models))
 	for i := range template {
 		template[i] = math.Inf(-1)
 		for _, environment := range artifact.EnvironmentCentroids {
-			template[i] = max(template[i], dot(templateFeature, environment[i]))
+			value := dot(templateFeature, environment[i])
+			if !finite(value) {
+				return nil, errors.New("non-finite environment score")
+			}
+			template[i] = max(template[i], value)
 		}
 	}
-	standardize(template)
-	project(feature, artifact.NuisanceBasis)
-	normalize(feature)
-	nuisance := scores(feature, artifact.Centroids)
+	if _, err := standardize(template); err != nil {
+		return nil, err
+	}
+	if err := project(feature, artifact.NuisanceBasis); err != nil {
+		return nil, err
+	}
+	if err := normalize(feature); err != nil {
+		return nil, err
+	}
+	nuisance, err := scores(feature, artifact.Centroids)
+	if err != nil {
+		return nil, err
+	}
 	for i := range template {
 		template[i] = 0.5*template[i] + 0.5*nuisance[i]
 	}

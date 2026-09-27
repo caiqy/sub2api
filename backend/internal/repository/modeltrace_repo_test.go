@@ -41,8 +41,8 @@ func TestModelTraceLeaseAndProgressCannotResurrect(t *testing.T) {
 		WithArgs("expired").WillReturnResult(sqlmock.NewResult(0, 0))
 	require.Error(t, repo.Renew(context.Background(), "expired"))
 	mock.ExpectExec(`(?s)UPDATE modeltrace_tasks SET completed_rounds.*owner = \$2 AND status = 'running' AND deadline > NOW\(\).*expires_at > NOW\(\)`).
-		WithArgs(int64(1), "expired", 2).WillReturnResult(sqlmock.NewResult(0, 0))
-	require.Error(t, repo.Progress(context.Background(), &service.ModelTraceTask{ID: 1, CompletedRounds: 2}, "expired"))
+		WithArgs(int64(1), "expired", 2, "fingerprint-version").WillReturnResult(sqlmock.NewResult(0, 0))
+	require.Error(t, repo.Progress(context.Background(), &service.ModelTraceTask{ID: 1, CompletedRounds: 2, Version: "fingerprint-version"}, "expired"))
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

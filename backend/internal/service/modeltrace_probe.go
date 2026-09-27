@@ -69,7 +69,7 @@ func (s *AccountTestService) ProbeModelTrace(ctx context.Context, account *Accou
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	if account == nil || !account.IsOpenAI() || !account.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityChatCompletions) || s.httpUpstream == nil || !slices.Contains(modeltrace.Models(), target) {
+	if account == nil || !account.IsOpenAI() || !account.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityChatCompletions) || s.httpUpstream == nil || target == "" {
 		return "", errors.New("invalid ModelTrace probe configuration")
 	}
 	credential, err := resolveCredentialAccount(ctx, s.accountRepo, account)

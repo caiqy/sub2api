@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -40,18 +41,24 @@ func (r *modelTraceAccountsStub) GetByID(context.Context, int64) (*Account, erro
 
 type modelTraceTasksStub struct {
 	ModelTraceRepository
-	finished       *ModelTraceTask
-	active         *ModelTraceTask
-	progress       int
-	enqueued       int
-	maintained     int
-	candidateCalls int
-	ids            []int64
-	claims         atomic.Int32
-	released       atomic.Bool
-	checks         int
-	failCheckAt    int
-	onCheck        func(context.Context)
+	finished           *ModelTraceTask
+	active             *ModelTraceTask
+	progress           int
+	progressVersions   []string
+	enqueued           int
+	maintained         int
+	candidateCalls     int
+	ids                []int64
+	claims             atomic.Int32
+	released           atomic.Bool
+	checks             int
+	failCheckAt        int
+	onCheck            func(context.Context)
+	fingerprintVersion string
+	fingerprintData    []byte
+	fingerprintErr     error
+	updateErr          error
+	updateCalls        int
 }
 
 func (r *modelTraceTasksStub) Check(ctx context.Context, _ int64, _ string) error {
@@ -78,6 +85,7 @@ func (r *modelTraceTasksStub) Claim(context.Context, string) (*ModelTraceTask, e
 
 func (r *modelTraceTasksStub) Progress(_ context.Context, task *ModelTraceTask, _ string) error {
 	r.progress = task.CompletedRounds
+	r.progressVersions = append(r.progressVersions, task.Version)
 	return nil
 }
 func (r *modelTraceTasksStub) Finish(_ context.Context, task *ModelTraceTask, _ string) error {
@@ -93,6 +101,27 @@ func (r *modelTraceTasksStub) Enqueue(_ context.Context, task *ModelTraceTask, _
 	return task, nil
 }
 func (r *modelTraceTasksStub) Maintain(context.Context) error { r.maintained++; return nil }
+func (r *modelTraceTasksStub) ReadFingerprint(context.Context) (string, []byte, error) {
+	if r.fingerprintErr != nil {
+		return "", nil, r.fingerprintErr
+	}
+	if r.fingerprintVersion == "" {
+		return "", nil, sql.ErrNoRows
+	}
+	return r.fingerprintVersion, r.fingerprintData, nil
+}
+func (r *modelTraceTasksStub) TryUpdateFingerprint(ctx context.Context, fetch func(context.Context) (string, []byte, error)) (string, []byte, bool, error) {
+	r.updateCalls++
+	if r.updateErr != nil {
+		return "", nil, false, r.updateErr
+	}
+	version, data, err := fetch(ctx)
+	if err != nil {
+		return "", nil, false, err
+	}
+	r.fingerprintVersion, r.fingerprintData = version, data
+	return version, data, true, nil
+}
 func (r *modelTraceTasksStub) Candidates(context.Context, int, int64) ([]int64, error) {
 	r.candidateCalls++
 	if r.candidateCalls > 1 {

@@ -174,9 +174,9 @@ func (r *modelTraceRepository) Claim(ctx context.Context, owner string) (*servic
 }
 
 func (r *modelTraceRepository) Progress(ctx context.Context, task *service.ModelTraceTask, owner string) error {
-	result, err := r.db.ExecContext(ctx, `UPDATE modeltrace_tasks SET completed_rounds = $3
-        WHERE id = $1 AND owner = $2 AND status = 'running' AND deadline > NOW()
-        AND EXISTS (SELECT 1 FROM modeltrace_instances WHERE id = $2 AND expires_at > NOW())`, task.ID, owner, task.CompletedRounds)
+	result, err := r.db.ExecContext(ctx, `UPDATE modeltrace_tasks SET completed_rounds = $3, version = $4
+		WHERE id = $1 AND owner = $2 AND status = 'running' AND deadline > NOW()
+		AND EXISTS (SELECT 1 FROM modeltrace_instances WHERE id = $2 AND expires_at > NOW())`, task.ID, owner, task.CompletedRounds, task.Version)
 	return modelTraceAffected(result, err)
 }
 
