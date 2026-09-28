@@ -3,12 +3,14 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 	"github.com/stretchr/testify/require"
 )
 
@@ -63,6 +65,38 @@ func TestModelTraceEnqueueRechecksLockedAccountInterval(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, task)
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestModelTraceRetryEnqueueKeepsAccountGuardAndUsesFailedTask(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprint("enabled-", enabled), func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer db.Close()
+			repo := &modelTraceRepository{db: db}
+			mock.ExpectBegin()
+			mock.ExpectQuery(`(?s)SELECT a.platform.*FOR NO KEY UPDATE`).
+				WithArgs(60, int64(42)).WillReturnRows(sqlmock.NewRows([]string{"platform", "enabled", "interval"}).AddRow(service.PlatformOpenAI, enabled, 60))
+			mock.ExpectQuery(`SELECT .* FROM modeltrace_tasks`).
+				WithArgs(int64(42)).WillReturnError(sql.ErrNoRows)
+			if !enabled {
+				mock.ExpectRollback()
+				task, err := repo.Enqueue(context.Background(), &service.ModelTraceTask{AccountID: 42, Source: "auto", Retry: true, RetryAfterID: 7}, "owner", 60)
+				require.NoError(t, err)
+				require.Nil(t, task)
+			} else {
+				mock.ExpectQuery(`(?s)SELECT EXISTS.*status = 'failed'.*finished_at <= NOW\(\) - INTERVAL '5 minutes'.*newer.source = 'auto'`).
+					WithArgs(int64(7), int64(42)).WillReturnRows(sqlmock.NewRows([]string{"due"}).AddRow(true))
+				mock.ExpectQuery(`INSERT INTO modeltrace_tasks`).
+					WithArgs(int64(42), "auto", "gpt-6-astra", "gpt-6-astra", false, 1, "v", "owner").
+					WillReturnError(sql.ErrConnDone)
+				mock.ExpectRollback()
+				_, err := repo.Enqueue(context.Background(), &service.ModelTraceTask{AccountID: 42, Source: "auto", Model: "gpt-6-astra", TargetModel: "gpt-6-astra", Retry: true, RetryAfterID: 7, Rounds: 1, Version: "v"}, "owner", 60)
+				require.ErrorIs(t, err, sql.ErrConnDone)
+			}
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
 }
 
 func TestModelTraceFinishOnlyLatestEnabledResultChangesQuarantine(t *testing.T) {
@@ -192,14 +226,31 @@ func TestModelTraceMaintenanceUsesExpiredLeasesAndKeepsIndependentState(t *testi
 	defer db.Close()
 	repo := &modelTraceRepository{db: db}
 	mock.ExpectBegin()
-	mock.ExpectExec(`(?s)WITH interrupted AS.*status = 'queued' AND NOT EXISTS.*i.expires_at > NOW\(\).*status = 'running' AND LEAST\(deadline, COALESCE.*NOW\(\) - \(\$1 \* INTERVAL '1 second'\).*INSERT INTO modeltrace_account_state.*source = 'auto'`).
-		WithArgs(int64(100)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`(?s)WITH interrupted AS.*status = 'queued' AND NOT EXISTS.*i.expires_at > NOW\(\).*status = 'running' AND LEAST\(deadline, COALESCE.*NOW\(\) - \(\$1 \* INTERVAL '1 second'\).*INSERT INTO modeltrace_account_state.*source = 'auto'.*RETURNING account_id.*SELECT interrupted.id, interrupted.account_id`).
+		WithArgs(int64(100)).WillReturnRows(sqlmock.NewRows([]string{"id", "account_id", "finished_at"}).AddRow(7, 1, time.Now()))
 	mock.ExpectExec(`DELETE FROM modeltrace_tasks WHERE finished_at < NOW\(\) - INTERVAL '30 days'`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`(?s)DELETE FROM modeltrace_instances i WHERE expires_at <= NOW\(\).*NOT EXISTS`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
-	require.NoError(t, repo.Maintain(context.Background()))
+	interrupted, err := repo.Maintain(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, int64(7), interrupted[0].ID)
+	require.Equal(t, int64(1), interrupted[0].AccountID)
+	require.False(t, interrupted[0].FinishedAt.IsZero())
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestModelTraceFinishedReadsOnlyTerminalAutoTasks(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+	finishedAt := time.Now()
+	mock.ExpectQuery(`(?s)SELECT id, account_id, status, finished_at FROM modeltrace_tasks.*id = ANY\(\$1\) AND source = 'auto' AND status IN`).
+		WithArgs(pq.Array([]int64{7})).WillReturnRows(sqlmock.NewRows([]string{"id", "account_id", "status", "finished_at"}).AddRow(int64(7), int64(1), "failed", finishedAt))
+	tasks, err := (&modelTraceRepository{db: db}).Finished(context.Background(), []int64{7})
+	require.NoError(t, err)
+	require.Equal(t, []service.ModelTraceFinishedTask{{ID: 7, AccountID: 1, Status: "failed", FinishedAt: finishedAt}}, tasks)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

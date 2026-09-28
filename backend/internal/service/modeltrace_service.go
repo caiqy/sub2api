@@ -14,7 +14,11 @@ import (
 	"github.com/google/uuid"
 )
 
-const ModelTraceProbeTimeout = 90 * time.Second
+const (
+	ModelTraceProbeTimeout          = 90 * time.Second
+	modelTraceRetryDelay            = 5 * time.Minute
+	modelTraceMaxConsecutiveFailure = 6
+)
 
 type ModelTraceTask struct {
 	ID              int64              `json:"id"`
@@ -24,6 +28,9 @@ type ModelTraceTask struct {
 	Model           string             `json:"model"`
 	TargetModel     string             `json:"target_model"`
 	ModelOverride   bool               `json:"-"`
+	Retry           bool               `json:"-"`
+	RetryAfterID    int64              `json:"-"`
+	Created         bool               `json:"-"`
 	Rounds          int                `json:"rounds"`
 	CompletedRounds int                `json:"completed_rounds"`
 	Result          string             `json:"result"`
@@ -55,11 +62,25 @@ type ModelTraceRepository interface {
 	Check(ctx context.Context, taskID int64, owner string) error
 	Progress(ctx context.Context, task *ModelTraceTask, owner string) error
 	Finish(ctx context.Context, task *ModelTraceTask, owner string) error
-	Maintain(ctx context.Context) error
+	Maintain(ctx context.Context) ([]ModelTraceInterruptedTask, error)
+	Finished(ctx context.Context, ids []int64) ([]ModelTraceFinishedTask, error)
 	Candidates(ctx context.Context, interval int, after int64) ([]int64, error)
 	History(ctx context.Context, accountID int64, page, pageSize int) (*ModelTraceHistory, error)
 	ReadFingerprint(ctx context.Context) (string, []byte, error)
 	TryUpdateFingerprint(ctx context.Context, fetch func(context.Context) (string, []byte, error)) (string, []byte, bool, error)
+}
+
+type ModelTraceInterruptedTask struct {
+	ID         int64
+	AccountID  int64
+	FinishedAt time.Time
+}
+
+type ModelTraceFinishedTask struct {
+	ID         int64
+	AccountID  int64
+	Status     string
+	FinishedAt time.Time
 }
 
 type modelTraceProber interface {
@@ -74,6 +95,12 @@ type modelTraceEpoch struct {
 	lastRenewed time.Time
 }
 
+type modelTraceRetryState struct {
+	failures int
+	nextAt   time.Time
+	taskID   int64
+}
+
 type ModelTraceService struct {
 	repo             ModelTraceRepository
 	accounts         AccountRepository
@@ -86,10 +113,12 @@ type ModelTraceService struct {
 	wg               sync.WaitGroup
 	scanAfter        int64
 	fetchFingerprint func(context.Context) (string, []byte, error)
+	retryMu          sync.Mutex
+	retries          map[int64]modelTraceRetryState
 }
 
 func NewModelTraceService(repo ModelTraceRepository, accounts AccountRepository, settings *SettingService, prober *AccountTestService) (*ModelTraceService, error) {
-	s := &ModelTraceService{repo: repo, accounts: accounts, settings: settings, prober: prober}
+	s := &ModelTraceService{repo: repo, accounts: accounts, settings: settings, prober: prober, retries: make(map[int64]modelTraceRetryState)}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	ctx, cancel := context.WithTimeout(s.ctx, 10*time.Second)
 	defer cancel()
@@ -119,7 +148,8 @@ func (s *ModelTraceService) Shutdown(ctx context.Context) error {
 		if epoch := s.currentEpoch(); epoch != nil {
 			return s.repo.Release(ctx, epoch.owner)
 		}
-		return s.repo.Maintain(ctx)
+		_, err := s.repo.Maintain(ctx)
+		return err
 	}
 }
 
@@ -175,6 +205,10 @@ func (s *ModelTraceService) Create(ctx context.Context, accountID int64, model s
 }
 
 func (s *ModelTraceService) enqueue(ctx context.Context, accountID int64, model string, rounds int, source string, cfg ModelTraceSettings) (*ModelTraceTask, error) {
+	return s.enqueueWithRetry(ctx, accountID, model, rounds, source, cfg, false)
+}
+
+func (s *ModelTraceService) enqueueWithRetry(ctx context.Context, accountID int64, model string, rounds int, source string, cfg ModelTraceSettings, retry bool) (*ModelTraceTask, error) {
 	if s.ctx.Err() != nil {
 		return nil, infraerrors.ServiceUnavailable("MODELTRACE_STOPPED", "ModelTrace worker is stopped")
 	}
@@ -208,13 +242,39 @@ func (s *ModelTraceService) enqueue(ctx context.Context, accountID int64, model 
 	if history.Active != nil {
 		return history.Active, nil
 	}
-	if source == "auto" && !s.autoEligibleForTarget(ctx, account, cfg, model) {
-		return nil, nil
+	if source == "auto" {
+		var eligible bool
+		if retry {
+			eligible = s.autoEligibleForRetry(ctx, account, cfg)
+		} else {
+			eligible = s.autoEligibleForTarget(ctx, account, cfg, model)
+		}
+		if !eligible {
+			return nil, nil
+		}
 	}
 	configuredModel, hasOverride := account.Extra[ModelTraceModelExtraKey].(string)
 	hasOverride = source == "auto" && hasOverride && strings.TrimSpace(configuredModel) != ""
-	task := &ModelTraceTask{AccountID: accountID, Source: source, Model: model, TargetModel: model, ModelOverride: hasOverride, Rounds: rounds, Version: modeltrace.Current().Version()}
-	return s.repo.Enqueue(ctx, task, epoch.owner, cfg.IntervalMinutes)
+	// Keep database creation and local task registration atomic to the worker.
+	s.retryMu.Lock()
+	defer s.retryMu.Unlock()
+	retryAfterID := int64(0)
+	if retry {
+		state, ok := s.retries[accountID]
+		if !ok || state.failures == 0 || state.taskID == 0 || !state.nextAt.IsZero() {
+			return nil, nil
+		}
+		retryAfterID = state.taskID
+	}
+	task := &ModelTraceTask{AccountID: accountID, Source: source, Model: model, TargetModel: model, ModelOverride: hasOverride, Retry: retry, RetryAfterID: retryAfterID, Rounds: rounds, Version: modeltrace.Current().Version()}
+	queued, err := s.repo.Enqueue(ctx, task, epoch.owner, cfg.IntervalMinutes)
+	if queued != nil && queued.Created {
+		queued.Retry = retry
+		if source == "auto" {
+			s.trackAutoTaskLocked(queued)
+		}
+	}
+	return queued, err
 }
 
 func (s *ModelTraceService) History(ctx context.Context, accountID int64, page, pageSize int) (*ModelTraceHistory, error) {
@@ -262,14 +322,24 @@ func (s *ModelTraceService) control() {
 func (s *ModelTraceService) scan() {
 	ctx, cancel := context.WithTimeout(s.ctx, 25*time.Second)
 	defer cancel()
-	if err := s.repo.Maintain(ctx); err != nil {
+	interrupted, err := s.repo.Maintain(ctx)
+	if err != nil {
 		log.Print("[ModelTrace] maintenance failed")
 		return
 	}
+	for _, task := range interrupted {
+		s.recordMaintainedFailure(task)
+	}
+	s.reconcileAutoTasks(ctx)
 	cfg, err := s.settings.GetModelTraceSettings(ctx)
-	if err != nil || !cfg.Enabled {
+	if err != nil {
 		return
 	}
+	if !cfg.Enabled {
+		s.clearRetryStates()
+		return
+	}
+	s.scanRetries(ctx, cfg)
 	for ctx.Err() == nil {
 		ids, err := s.repo.Candidates(ctx, cfg.IntervalMinutes, s.scanAfter)
 		if err != nil {
@@ -289,6 +359,179 @@ func (s *ModelTraceService) scan() {
 			s.scanAfter = id
 		}
 	}
+}
+
+func (s *ModelTraceService) scanRetries(ctx context.Context, cfg ModelTraceSettings) {
+	now := time.Now()
+	s.retryMu.Lock()
+	ids := make([]int64, 0, len(s.retries))
+	for accountID, state := range s.retries {
+		if !state.nextAt.IsZero() && !now.Before(state.nextAt) {
+			ids = append(ids, accountID)
+		}
+	}
+	s.retryMu.Unlock()
+
+	for _, accountID := range ids {
+		if ctx.Err() != nil {
+			return
+		}
+		account, err := s.accounts.GetByID(ctx, accountID)
+		if err != nil {
+			if errors.Is(err, ErrAccountNotFound) {
+				s.clearRetry(accountID)
+			}
+			continue
+		}
+		if !modelTraceAutoEligible(account, cfg) {
+			s.clearRetry(accountID)
+			continue
+		}
+		previousTaskID, ok := s.claimRetry(accountID)
+		if !ok {
+			continue
+		}
+		model := modelTraceModelForAccount(account, cfg)
+		task, err := s.enqueueWithRetry(ctx, accountID, model, cfg.Rounds, "auto", cfg, true)
+		if err != nil || task == nil {
+			s.releaseRetry(accountID)
+		} else if !task.Created && task.ID > previousTaskID {
+			s.clearRetry(accountID)
+		} else if !task.Created {
+			s.releaseRetry(accountID)
+		}
+	}
+}
+
+func (s *ModelTraceService) trackAutoTask(task *ModelTraceTask, _ bool) {
+	s.retryMu.Lock()
+	defer s.retryMu.Unlock()
+	s.trackAutoTaskLocked(task)
+}
+
+func (s *ModelTraceService) trackAutoTaskLocked(task *ModelTraceTask) {
+	if s.retries == nil {
+		s.retries = make(map[int64]modelTraceRetryState)
+	}
+	state := s.retries[task.AccountID]
+	state.nextAt = time.Time{}
+	state.taskID = task.ID
+	s.retries[task.AccountID] = state
+}
+
+func (s *ModelTraceService) reconcileAutoTasks(ctx context.Context) {
+	s.retryMu.Lock()
+	ids := make([]int64, 0, len(s.retries))
+	for _, state := range s.retries {
+		if state.taskID != 0 && state.nextAt.IsZero() {
+			ids = append(ids, state.taskID)
+		}
+	}
+	s.retryMu.Unlock()
+	if len(ids) == 0 {
+		return
+	}
+	tasks, err := s.repo.Finished(ctx, ids)
+	if err != nil {
+		return
+	}
+	for _, task := range tasks {
+		if task.Status == "completed" {
+			s.retryMu.Lock()
+			state, ok := s.retries[task.AccountID]
+			if ok && state.taskID == task.ID && state.nextAt.IsZero() {
+				delete(s.retries, task.AccountID)
+			}
+			s.retryMu.Unlock()
+		} else {
+			s.recordMaintainedFailure(ModelTraceInterruptedTask{ID: task.ID, AccountID: task.AccountID, FinishedAt: task.FinishedAt})
+		}
+	}
+}
+
+func (s *ModelTraceService) claimRetry(accountID int64) (int64, bool) {
+	s.retryMu.Lock()
+	defer s.retryMu.Unlock()
+	state, ok := s.retries[accountID]
+	if !ok || state.nextAt.IsZero() || time.Now().Before(state.nextAt) {
+		return 0, false
+	}
+	state.nextAt = time.Time{}
+	s.retries[accountID] = state
+	return state.taskID, true
+}
+
+func (s *ModelTraceService) releaseRetry(accountID int64) {
+	s.retryMu.Lock()
+	defer s.retryMu.Unlock()
+	state, ok := s.retries[accountID]
+	if ok && state.failures > 0 && state.nextAt.IsZero() {
+		state.nextAt = time.Now().Add(30 * time.Second)
+		s.retries[accountID] = state
+	}
+}
+
+func (s *ModelTraceService) recordAutoFailure(accountID, taskID int64) {
+	s.recordAutoFailureAt(accountID, taskID, time.Now())
+}
+
+func (s *ModelTraceService) recordAutoFailureAt(accountID, taskID int64, failedAt time.Time) {
+	if accountID == 0 {
+		return
+	}
+	if failedAt.IsZero() {
+		failedAt = time.Now()
+	}
+	s.retryMu.Lock()
+	defer s.retryMu.Unlock()
+	if s.retries == nil {
+		s.retries = make(map[int64]modelTraceRetryState)
+	}
+	state := s.retries[accountID]
+	if taskID != 0 && state.taskID != 0 && state.taskID != taskID {
+		return
+	}
+	if taskID != 0 {
+		state.taskID = taskID
+	}
+	state.failures++
+	if state.failures >= modelTraceMaxConsecutiveFailure {
+		delete(s.retries, accountID)
+		log.Printf("[ModelTrace] automatic detection retry limit reached: account_id=%d failures=%d", accountID, state.failures)
+		return
+	}
+	state.nextAt = failedAt.Add(modelTraceRetryDelay)
+	s.retries[accountID] = state
+	log.Printf("[ModelTrace] automatic detection retry scheduled: account_id=%d failures=%d next_retry_at=%s", accountID, state.failures, state.nextAt.Format(time.RFC3339))
+}
+
+func (s *ModelTraceService) recordMaintainedFailure(task ModelTraceInterruptedTask) {
+	s.retryMu.Lock()
+	state, ok := s.retries[task.AccountID]
+	s.retryMu.Unlock()
+	if !ok || state.taskID != task.ID || !state.nextAt.IsZero() {
+		return
+	}
+	s.recordAutoFailureAt(task.AccountID, task.ID, task.FinishedAt)
+}
+
+func (s *ModelTraceService) clearRetry(accountID int64) {
+	s.retryMu.Lock()
+	delete(s.retries, accountID)
+	s.retryMu.Unlock()
+}
+
+func (s *ModelTraceService) clearRetryStates() {
+	s.retryMu.Lock()
+	s.retries = make(map[int64]modelTraceRetryState)
+	s.retryMu.Unlock()
+}
+
+func (s *ModelTraceService) isRetrying(accountID, taskID int64) bool {
+	s.retryMu.Lock()
+	defer s.retryMu.Unlock()
+	state, ok := s.retries[accountID]
+	return ok && state.failures > 0 && state.taskID == taskID
 }
 
 func (s *ModelTraceService) worker() {
@@ -319,6 +562,7 @@ func (s *ModelTraceService) execute(epochCtx context.Context, owner string, task
 	defer cancel()
 	task.Status = "failed"
 	task.Probabilities = map[string]float64{}
+	retry := task.Source == "auto" && s.isRetrying(task.AccountID, task.ID)
 	defer func() {
 		if recover() != nil {
 			task.Error = "internal detection failure"
@@ -334,6 +578,16 @@ func (s *ModelTraceService) execute(epochCtx context.Context, owner string, task
 		defer finishCancel()
 		if err := s.repo.Finish(finishCtx, task, owner); err != nil {
 			log.Print("[ModelTrace] task finalization failed; lease recovery will mark it interrupted")
+		} else if task.Source == "auto" {
+			if task.Status == "completed" {
+				s.clearRetry(task.AccountID)
+			} else {
+				finishedAt := time.Time{}
+				if task.FinishedAt != nil {
+					finishedAt = *task.FinishedAt
+				}
+				s.recordAutoFailureAt(task.AccountID, task.ID, finishedAt)
+			}
 		}
 	}()
 	original, err := s.accounts.GetByID(ctx, task.AccountID)
@@ -359,7 +613,17 @@ func (s *ModelTraceService) execute(epochCtx context.Context, owner string, task
 	}
 	if task.Source == "auto" {
 		cfg, err := s.settings.GetModelTraceSettings(ctx)
-		if err != nil || !s.autoEligibleForTarget(ctx, original, cfg, task.Model) {
+		if err != nil {
+			task.Error = "automatic detection disabled or account is not schedulable"
+			return
+		}
+		var eligible bool
+		if retry {
+			eligible = s.autoEligibleForRetry(ctx, original, cfg)
+		} else {
+			eligible = s.autoEligibleForTarget(ctx, original, cfg, task.Model)
+		}
+		if !eligible {
 			task.Error = "automatic detection disabled or account is not schedulable"
 			return
 		}

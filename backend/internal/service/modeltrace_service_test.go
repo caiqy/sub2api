@@ -54,6 +54,7 @@ type modelTraceTasksStub struct {
 	maintained         int
 	candidateCalls     int
 	ids                []int64
+	finishedTasks      []ModelTraceFinishedTask
 	claims             atomic.Int32
 	released           atomic.Bool
 	checks             int
@@ -103,9 +104,16 @@ func (r *modelTraceTasksStub) History(context.Context, int64, int, int) (*ModelT
 }
 func (r *modelTraceTasksStub) Enqueue(_ context.Context, task *ModelTraceTask, _ string, _ int) (*ModelTraceTask, error) {
 	r.enqueued++
+	task.Created = true
 	return task, nil
 }
-func (r *modelTraceTasksStub) Maintain(context.Context) error { r.maintained++; return nil }
+func (r *modelTraceTasksStub) Maintain(context.Context) ([]ModelTraceInterruptedTask, error) {
+	r.maintained++
+	return nil, nil
+}
+func (r *modelTraceTasksStub) Finished(context.Context, []int64) ([]ModelTraceFinishedTask, error) {
+	return r.finishedTasks, nil
+}
 func (r *modelTraceTasksStub) ReadFingerprint(context.Context) (string, []byte, error) {
 	if r.fingerprintErr != nil {
 		return "", nil, r.fingerprintErr
@@ -292,15 +300,15 @@ func (r *modelTraceRecoveryTasksStub) Renew(context.Context, string) error {
 	}
 	return nil
 }
-func (r *modelTraceRecoveryTasksStub) Maintain(ctx context.Context) error {
+func (r *modelTraceRecoveryTasksStub) Maintain(ctx context.Context) ([]ModelTraceInterruptedTask, error) {
 	if r.dbDown {
-		return errors.New("database unavailable")
+		return nil, errors.New("database unavailable")
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, err
 	}
 	r.maintained++
-	return nil
+	return nil, nil
 }
 func (r *modelTraceRecoveryTasksStub) Enqueue(ctx context.Context, task *ModelTraceTask, owner string, interval int) (*ModelTraceTask, error) {
 	if r.dbDown {
@@ -396,6 +404,147 @@ func TestModelTraceScanCreatesOnlyEligibleAutoTasks(t *testing.T) {
 	tasks.candidateCalls = 0
 	s.scan()
 	require.Equal(t, 1, tasks.enqueued)
+}
+
+func TestModelTraceAutoFailureRetryBudget(t *testing.T) {
+	s := &ModelTraceService{}
+	for failures := 1; failures < modelTraceMaxConsecutiveFailure; failures++ {
+		before := time.Now().Add(modelTraceRetryDelay)
+		s.recordAutoFailure(1, 0)
+		s.retryMu.Lock()
+		state, ok := s.retries[1]
+		s.retryMu.Unlock()
+		require.True(t, ok)
+		require.Equal(t, failures, state.failures)
+		require.WithinDuration(t, before, state.nextAt, time.Second)
+	}
+	s.recordAutoFailure(1, 0)
+	s.retryMu.Lock()
+	_, ok := s.retries[1]
+	s.retryMu.Unlock()
+	require.False(t, ok, "the sixth consecutive failure returns to the normal interval")
+
+	s.recordAutoFailure(1, 0)
+	s.retryMu.Lock()
+	state := s.retries[1]
+	s.retryMu.Unlock()
+	require.Equal(t, 1, state.failures, "a new normal-interval cycle starts at one")
+}
+
+func TestModelTraceMaintainedFailureRequiresCurrentProcessTask(t *testing.T) {
+	finishedAt := time.Now().Add(-time.Minute)
+	s := &ModelTraceService{}
+	s.trackAutoTask(&ModelTraceTask{ID: 7, AccountID: 1}, false)
+	s.recordMaintainedFailure(ModelTraceInterruptedTask{ID: 7, AccountID: 1, FinishedAt: finishedAt})
+
+	s.retryMu.Lock()
+	state, ok := s.retries[1]
+	s.retryMu.Unlock()
+	require.True(t, ok)
+	require.Equal(t, 1, state.failures)
+	require.WithinDuration(t, finishedAt.Add(modelTraceRetryDelay), state.nextAt, time.Second)
+
+	fresh := &ModelTraceService{}
+	fresh.recordMaintainedFailure(ModelTraceInterruptedTask{ID: 7, AccountID: 1, FinishedAt: finishedAt})
+	fresh.retryMu.Lock()
+	_, ok = fresh.retries[1]
+	fresh.retryMu.Unlock()
+	require.False(t, ok, "a restarted service must not restore the old retry chain")
+}
+
+func TestModelTraceScanSeesFailureMaintainedByAnotherInstance(t *testing.T) {
+	settings := &SettingService{settingRepo: &modelTraceSettingsStub{}}
+	require.NoError(t, settings.SetModelTraceSettings(context.Background(), ModelTraceSettings{
+		Enabled: true, Model: "gpt-6-astra", Rounds: 1, IntervalMinutes: 60,
+	}))
+	finishedAt := time.Now().Add(-time.Minute)
+	tasks := &modelTraceTasksStub{finishedTasks: []ModelTraceFinishedTask{
+		{ID: 7, AccountID: 1, Status: "failed", FinishedAt: finishedAt},
+	}}
+	s := &ModelTraceService{ctx: context.Background(), repo: tasks, settings: settings}
+	s.trackAutoTask(&ModelTraceTask{ID: 7, AccountID: 1}, false)
+	s.scan()
+	s.retryMu.Lock()
+	state, ok := s.retries[1]
+	s.retryMu.Unlock()
+	require.True(t, ok)
+	require.Equal(t, 1, state.failures)
+	require.WithinDuration(t, finishedAt.Add(modelTraceRetryDelay), state.nextAt, time.Second)
+
+	s.scan()
+	s.retryMu.Lock()
+	state = s.retries[1]
+	s.retryMu.Unlock()
+	require.Equal(t, 1, state.failures, "the same failed task must not be counted twice")
+}
+
+func TestModelTraceRetrySkipsModelAvailabilityFilter(t *testing.T) {
+	settings := &modelTraceSettingsStub{}
+	modelSettings := ModelTraceSettings{Enabled: true, Model: "gpt-6-astra", Rounds: 1, IntervalMinutes: 60}
+	require.NoError(t, (&SettingService{settingRepo: settings}).SetModelTraceSettings(context.Background(), modelSettings))
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true,
+		Extra: map[string]any{ModelTraceEnabledExtraKey: true, modelRateLimitsKey: map[string]any{
+			"gpt-6-astra": map[string]any{"rate_limit_reset_at": time.Now().Add(time.Hour).Format(time.RFC3339)},
+		}}}
+	tasks := &modelTraceTasksStub{}
+	s := &ModelTraceService{
+		ctx: context.Background(), epoch: &modelTraceEpoch{owner: "owner", ctx: context.Background()},
+		repo: tasks, accounts: &modelTraceAccountsStub{account: account},
+		settings: &SettingService{settingRepo: settings}, retries: map[int64]modelTraceRetryState{
+			account.ID: {failures: 1, taskID: 1, nextAt: time.Now().Add(-time.Minute)},
+		},
+	}
+
+	s.scanRetries(context.Background(), modelSettings)
+	require.Equal(t, 1, tasks.enqueued)
+}
+
+func TestModelTraceRetryRechecksAutomaticEligibility(t *testing.T) {
+	settings := &modelTraceSettingsStub{}
+	modelSettings := ModelTraceSettings{Enabled: true, Model: "gpt-6-astra", Rounds: 1, IntervalMinutes: 60}
+	require.NoError(t, (&SettingService{settingRepo: settings}).SetModelTraceSettings(context.Background(), modelSettings))
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true,
+		Extra: map[string]any{ModelTraceEnabledExtraKey: false}}
+	s := &ModelTraceService{
+		ctx: context.Background(), epoch: &modelTraceEpoch{owner: "owner", ctx: context.Background()},
+		repo: &modelTraceTasksStub{}, accounts: &modelTraceAccountsStub{account: account},
+		settings: &SettingService{settingRepo: settings}, retries: map[int64]modelTraceRetryState{
+			account.ID: {failures: 1, nextAt: time.Now().Add(-time.Minute)},
+		},
+	}
+
+	s.scanRetries(context.Background(), modelSettings)
+	s.retryMu.Lock()
+	_, retained := s.retries[account.ID]
+	s.retryMu.Unlock()
+	require.False(t, retained)
+}
+
+func TestModelTraceAutoFailureSchedulesRetryAndSuccessClearsIt(t *testing.T) {
+	settings := &modelTraceSettingsStub{}
+	modelSettings := ModelTraceSettings{Enabled: true, Model: "gpt-6-astra", Rounds: 1, IntervalMinutes: 60}
+	require.NoError(t, (&SettingService{settingRepo: settings}).SetModelTraceSettings(context.Background(), modelSettings))
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true,
+		Extra: map[string]any{ModelTraceEnabledExtraKey: true}}
+	tasks := &modelTraceTasksStub{}
+	probe := &modelTraceProbeStub{account: account, target: "gpt-6-astra", failAt: 1}
+	s := &ModelTraceService{ctx: context.Background(), repo: tasks, accounts: &modelTraceAccountsStub{account: account}, settings: &SettingService{settingRepo: settings}, prober: probe}
+
+	s.execute(context.Background(), "owner", &ModelTraceTask{ID: 1, AccountID: account.ID, Source: "auto", Model: probe.target, TargetModel: probe.target, Rounds: 1})
+	s.retryMu.Lock()
+	state, ok := s.retries[account.ID]
+	s.retryMu.Unlock()
+	require.True(t, ok)
+	require.Equal(t, 1, state.failures)
+
+	probe.failAt = 0
+	s.trackAutoTask(&ModelTraceTask{ID: 2, AccountID: account.ID}, true)
+	s.execute(context.Background(), "owner", &ModelTraceTask{ID: 2, AccountID: account.ID, Source: "auto", Model: probe.target, TargetModel: probe.target, Rounds: 1})
+	s.retryMu.Lock()
+	_, ok = s.retries[account.ID]
+	s.retryMu.Unlock()
+	require.False(t, ok)
+	require.Equal(t, "completed", tasks.finished.Status)
 }
 
 func TestModelTraceExtraPreservesManagedSummaryAndSwitch(t *testing.T) {

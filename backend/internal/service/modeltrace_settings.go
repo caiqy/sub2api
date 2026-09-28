@@ -98,6 +98,13 @@ func (s *ModelTraceService) autoEligibleForTarget(ctx context.Context, account *
 	if !modelTraceAutoEligible(account, cfg) || account.isModelRateLimitedWithContext(ctx, selectedModel) {
 		return false
 	}
+	return s.autoEligibleForRetry(ctx, account, cfg)
+}
+
+func (s *ModelTraceService) autoEligibleForRetry(ctx context.Context, account *Account, cfg ModelTraceSettings) bool {
+	if !modelTraceAutoEligible(account, cfg) {
+		return false
+	}
 	ctx = withOpenAIQuotaAutoPauseSettings(ctx, s.settings.GetOpenAIQuotaAutoPauseSettings(ctx))
 	paused, _ := shouldAutoPauseOpenAIAccountByQuota(ctx, account)
 	return !paused

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 )
 
 type modelTraceRepository struct{ db *sql.DB }
@@ -86,7 +87,8 @@ func (r *modelTraceRepository) Release(ctx context.Context, owner string) error 
 	if err != nil {
 		return err
 	}
-	return r.Maintain(ctx)
+	_, err = r.Maintain(ctx)
+	return err
 }
 
 func modelTraceAffected(result sql.Result, err error) error {
@@ -123,6 +125,7 @@ func (r *modelTraceRepository) Enqueue(ctx context.Context, task *service.ModelT
 	active, err := scanModelTrace(tx.QueryRowContext(ctx, `SELECT `+modelTraceColumns+` FROM modeltrace_tasks
         WHERE account_id = $1 AND status IN ('queued', 'running')`, task.AccountID))
 	if err == nil {
+		active.Created = false
 		return active, tx.Commit()
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -136,8 +139,16 @@ func (r *modelTraceRepository) Enqueue(ctx context.Context, task *service.ModelT
 			return nil, nil
 		}
 		var due bool
-		err := tx.QueryRowContext(ctx, `SELECT NOT EXISTS (SELECT 1 FROM modeltrace_account_state
-		    WHERE account_id = $1 AND last_auto_finished_at > NOW() - ($2 * INTERVAL '1 minute'))`, task.AccountID, effectiveInterval).Scan(&due)
+		if task.Retry {
+			err = tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM modeltrace_tasks
+			    WHERE id = $1 AND account_id = $2 AND source = 'auto' AND status = 'failed'
+			      AND finished_at <= NOW() - INTERVAL '5 minutes'
+			      AND NOT EXISTS (SELECT 1 FROM modeltrace_tasks newer
+			        WHERE newer.account_id = $2 AND newer.source = 'auto' AND newer.id > $1))`, task.RetryAfterID, task.AccountID).Scan(&due)
+		} else {
+			err = tx.QueryRowContext(ctx, `SELECT NOT EXISTS (SELECT 1 FROM modeltrace_account_state
+			    WHERE account_id = $1 AND last_auto_finished_at > NOW() - ($2 * INTERVAL '1 minute'))`, task.AccountID, effectiveInterval).Scan(&due)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -156,6 +167,7 @@ func (r *modelTraceRepository) Enqueue(ctx context.Context, task *service.ModelT
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
+	task.Created = true
 	return task, nil
 }
 
@@ -301,15 +313,15 @@ func (r *modelTraceRepository) Finish(ctx context.Context, task *service.ModelTr
 	return tx.Commit()
 }
 
-func (r *modelTraceRepository) Maintain(ctx context.Context) error {
+func (r *modelTraceRepository) Maintain(ctx context.Context) ([]service.ModelTraceInterruptedTask, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	// Every send is fenced inside a pre-existing 90s context. Keep the unique active slot
 	// for 100s after the earlier lease/deadline cutoff, even if that owner was canceled.
-	if _, err := tx.ExecContext(ctx, `WITH interrupted AS (
+	rows, err := tx.QueryContext(ctx, `WITH interrupted AS (
         UPDATE modeltrace_tasks t SET status = 'failed', error = 'detection interrupted or worker lease expired',
             finished_at = NOW(), duration_ms = CASE WHEN started_at IS NULL THEN 0 ELSE
             GREATEST(0, (EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000)::bigint) END
@@ -318,22 +330,67 @@ func (r *modelTraceRepository) Maintain(ctx context.Context) error {
             OR (status = 'running' AND LEAST(deadline, COALESCE(
                 (SELECT i.expires_at FROM modeltrace_instances i WHERE i.id = t.owner), deadline))
                 <= NOW() - ($1 * INTERVAL '1 second'))
-        RETURNING account_id, source, finished_at
-        ) INSERT INTO modeltrace_account_state(account_id, last_auto_finished_at)
-        SELECT account_id, MAX(finished_at) FROM interrupted WHERE source = 'auto' GROUP BY account_id
-        ON CONFLICT (account_id) DO UPDATE SET last_auto_finished_at =
-        GREATEST(modeltrace_account_state.last_auto_finished_at, EXCLUDED.last_auto_finished_at)`,
-		int64((service.ModelTraceProbeTimeout+10*time.Second)/time.Second)); err != nil {
-		return err
+		RETURNING id, account_id, source, finished_at
+		), updated_state AS (
+		INSERT INTO modeltrace_account_state(account_id, last_auto_finished_at)
+		SELECT account_id, MAX(finished_at) FROM interrupted WHERE source = 'auto' GROUP BY account_id
+		ON CONFLICT (account_id) DO UPDATE SET last_auto_finished_at =
+		GREATEST(modeltrace_account_state.last_auto_finished_at, EXCLUDED.last_auto_finished_at)
+		RETURNING account_id
+		)
+		SELECT interrupted.id, interrupted.account_id, interrupted.finished_at
+		FROM interrupted JOIN updated_state USING (account_id)
+		WHERE interrupted.source = 'auto'`,
+		int64((service.ModelTraceProbeTimeout+10*time.Second)/time.Second))
+	if err != nil {
+		return nil, err
 	}
+	interrupted := make([]service.ModelTraceInterruptedTask, 0)
+	for rows.Next() {
+		var task service.ModelTraceInterruptedTask
+		if err := rows.Scan(&task.ID, &task.AccountID, &task.FinishedAt); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		interrupted = append(interrupted, task)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
 	if _, err := tx.ExecContext(ctx, `DELETE FROM modeltrace_tasks WHERE finished_at < NOW() - INTERVAL '30 days'`); err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM modeltrace_instances i WHERE expires_at <= NOW()
         AND NOT EXISTS (SELECT 1 FROM modeltrace_tasks t WHERE t.owner = i.id AND t.status IN ('queued','running'))`); err != nil {
-		return err
+		return nil, err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return interrupted, nil
+}
+
+func (r *modelTraceRepository) Finished(ctx context.Context, ids []int64) ([]service.ModelTraceFinishedTask, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT id, account_id, status, finished_at FROM modeltrace_tasks
+		WHERE id = ANY($1) AND source = 'auto' AND status IN ('completed', 'failed')`, pq.Array(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	tasks := make([]service.ModelTraceFinishedTask, 0)
+	for rows.Next() {
+		var task service.ModelTraceFinishedTask
+		if err := rows.Scan(&task.ID, &task.AccountID, &task.Status, &task.FinishedAt); err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks, rows.Err()
 }
 
 func (r *modelTraceRepository) Candidates(ctx context.Context, interval int, after int64) ([]int64, error) {
