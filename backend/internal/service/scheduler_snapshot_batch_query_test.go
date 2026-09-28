@@ -373,7 +373,7 @@ func TestSchedulerRebuildBatchDoesNotReuseAccountPayloadAfterLockBusy(t *testing
 	cache.lockBusy[single] = true
 	svc := newBatchQueryTestService(cache, newBatchAccountQueryRepo(), config.RunModeStandard)
 
-	require.NoError(t, svc.rebuildBuckets(context.Background(), []SchedulerBucket{single, forced}, "busy"))
+	require.ErrorIs(t, svc.rebuildBuckets(context.Background(), []SchedulerBucket{single, forced}, "busy"), ErrSchedulerBucketRebuildBusy)
 	full, idOnly := cache.reuseCounts(single)
 	require.Zero(t, full)
 	require.Zero(t, idOnly)
@@ -622,13 +622,13 @@ func TestSchedulerRebuildBatchPreservesLockBusyAndFencingPolicy(t *testing.T) {
 	single := SchedulerBucket{GroupID: groupID, Platform: PlatformOpenAI, Mode: SchedulerModeSingle}
 	forced := SchedulerBucket{GroupID: groupID, Platform: PlatformOpenAI, Mode: SchedulerModeForced}
 
-	t.Run("ordinary lock busy skips only that bucket", func(t *testing.T) {
+	t.Run("ordinary lock busy retries while other buckets continue", func(t *testing.T) {
 		cache := newBatchSnapshotCache()
 		cache.lockBusy[single] = true
 		repo := newBatchAccountQueryRepo()
 		svc := newBatchQueryTestService(cache, repo, config.RunModeStandard)
 
-		require.NoError(t, svc.rebuildBuckets(context.Background(), []SchedulerBucket{single, forced}, "test"))
+		require.ErrorIs(t, svc.rebuildBuckets(context.Background(), []SchedulerBucket{single, forced}, "test"), ErrSchedulerBucketRebuildBusy)
 		require.Equal(t, 1, repo.callCount(batchAccountQueryKey{groupID: groupID, platform: PlatformOpenAI}))
 		_, singleAttempts, _, _ := cache.bucketState(single)
 		_, forcedAttempts, forcedVersion, _ := cache.bucketState(forced)
@@ -710,7 +710,7 @@ func TestSchedulerRebuildBatchReleasesResultsAfterLastConsumer(t *testing.T) {
 	svc := newBatchQueryTestService(cache, repo, config.RunModeStandard)
 
 	err := svc.rebuildPreparedBucketTasks(context.Background(), tasks, "test", false, queries)
-	require.ErrorIs(t, err, wantLockErr)
+	require.ErrorIs(t, err, ErrSchedulerBucketRebuildBusy, "first busy bucket takes precedence while later locks are still attempted")
 	require.LessOrEqual(t, maxResident, 1, "adjacent single/forced pairs must not accumulate full-batch results")
 	require.Empty(t, queries.accounts)
 	require.Empty(t, queries.remaining)

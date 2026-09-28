@@ -1458,6 +1458,76 @@ describe('EditAccountModal', () => {
     expect(extra).not.toHaveProperty('modeltrace_latest')
   })
 
+  it('loads OpenAI policy, updates the interval and never submits runtime quarantine state', async () => {
+    const wrapper = mountModal(buildAccount({ extra: {
+      modeltrace_enabled: true,
+      modeltrace_interval_minutes: 5,
+      modeltrace_quarantine_enabled: true,
+      modeltrace_quarantined: true
+    } }))
+    expect(wrapper.get('[data-testid="modeltrace-enabled"]').attributes('aria-checked')).toBe('true')
+    expect((wrapper.get('[data-testid="modeltrace-interval"]').element as HTMLInputElement).value).toBe('5')
+    expect(wrapper.get('[data-testid="modeltrace-quarantine"]').attributes('aria-checked')).toBe('true')
+    await wrapper.get('[data-testid="modeltrace-interval"]').setValue('10080')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(extra).toMatchObject({ modeltrace_enabled: true, modeltrace_interval_minutes: 10080 })
+    expect(extra).not.toHaveProperty('modeltrace_quarantine_enabled')
+    expect(extra).not.toHaveProperty('modeltrace_quarantined')
+  })
+
+  it('clears an interval override and disables quarantine without copying stale state', async () => {
+    const wrapper = mountModal(buildAccount({ extra: {
+      modeltrace_interval_minutes: 30,
+      modeltrace_quarantine_enabled: true,
+      modeltrace_quarantined: true
+    } }))
+    await wrapper.get('[data-testid="modeltrace-interval"]').setValue('')
+    await wrapper.get('[data-testid="modeltrace-quarantine"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(extra.modeltrace_interval_minutes).toBeNull()
+    expect(extra.modeltrace_quarantine_enabled).toBe(false)
+    expect(extra).not.toHaveProperty('modeltrace_quarantined')
+  })
+
+  it('omits unchanged policy values when saving an unrelated edit', async () => {
+    const wrapper = mountModal(buildAccount({ extra: {
+      modeltrace_interval_minutes: 30,
+      modeltrace_quarantine_enabled: false
+    } }))
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(extra).not.toHaveProperty('modeltrace_interval_minutes')
+    expect(extra).not.toHaveProperty('modeltrace_quarantine_enabled')
+  })
+
+  it.each(['4', '10081', '5.5', '0', '-5', '1e2', 'abc'])('blocks an invalid OpenAI interval on edit: %s', async value => {
+    const wrapper = mountModal(buildAccount())
+    await wrapper.get('[data-testid="modeltrace-interval"]').setValue(value)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock).not.toHaveBeenCalled()
+    expect(showErrorMock).toHaveBeenCalledWith('admin.modeltrace.invalidAccountInterval')
+  })
+
+  it('rehydrates policy when switching accounts instead of retaining prior values', async () => {
+    const wrapper = mountModal(buildAccount({ id: 1, extra: {
+      modeltrace_interval_minutes: 20, modeltrace_quarantine_enabled: true
+    } }))
+    await wrapper.setProps({ account: buildAccount({ id: 2, extra: { modeltrace_interval_minutes: null } }) })
+    expect((wrapper.get('[data-testid="modeltrace-interval"]').element as HTMLInputElement).value).toBe('')
+    expect(wrapper.get('[data-testid="modeltrace-quarantine"]').attributes('aria-checked')).toBe('false')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(extra).not.toHaveProperty('modeltrace_interval_minutes')
+    expect(extra).not.toHaveProperty('modeltrace_quarantine_enabled')
+  })
+
   it.each(['apikey', 'oauth', 'setup-token', 'upstream'])('supports the independent switch for OpenAI %s accounts', async type => {
     const wrapper = mountModal(buildAccount({ type }))
     await wrapper.get('[data-testid="modeltrace-enabled"]').trigger('click')

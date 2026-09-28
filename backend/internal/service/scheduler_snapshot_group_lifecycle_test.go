@@ -706,6 +706,18 @@ func TestSchedulerGroupLifecycleFailuresDoNotMarkSeen(t *testing.T) {
 	}
 }
 
+func TestSchedulerAccountEventRetriesWhenBucketLockIsBusy(t *testing.T) {
+	cache := newGroupLifecycleTestCache()
+	cache.bucketLockBusy = true
+	svc := newGroupLifecycleTestService(cache, &groupLifecycleTestAccountRepo{},
+		&groupLifecycleTestGroupRepo{}, config.RunModeStandard)
+	err := svc.rebuildBucketWithTokenPolicyAndQueryCache(context.Background(),
+		schedulerBucketWriteTask{bucket: SchedulerBucket{GroupID: 12, Platform: PlatformOpenAI, Mode: SchedulerModeSingle}},
+		"account_change", false, nil)
+	require.ErrorIs(t, err, ErrSchedulerBucketRebuildBusy,
+		"outbox events must not advance their watermark while another writer holds the bucket lock")
+}
+
 func TestSchedulerGroupLifecycleOperationAndReleaseErrorsPreserveBothCauses(t *testing.T) {
 	const groupID int64 = 880
 	operationErr := errors.New("group query failed")

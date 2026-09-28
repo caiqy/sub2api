@@ -13,12 +13,25 @@ import (
 type modelTraceRepository struct{ db *sql.DB }
 
 func stripModelTraceLatestExtra(extra map[string]any) map[string]any {
-	if _, ok := extra[service.ModelTraceLatestExtraKey]; !ok {
+	_, latest := extra[service.ModelTraceLatestExtraKey]
+	_, quarantined := extra["modeltrace_quarantined"]
+	if !latest && !quarantined {
 		return extra
 	}
 	extra = copyJSONMap(extra)
 	delete(extra, service.ModelTraceLatestExtraKey)
+	delete(extra, "modeltrace_quarantined")
 	return extra
+}
+
+func modelTraceExtraMergeSQL(expression string, updates map[string]any) string {
+	if enabled, ok := updates[service.ModelTraceQuarantineEnabledExtraKey].(bool); ok && !enabled {
+		expression = "(" + expression + ") - 'modeltrace_quarantined'"
+	}
+	if value, exists := updates[service.ModelTraceIntervalExtraKey]; exists && value == nil {
+		expression = "(" + expression + ") - 'modeltrace_interval_minutes'"
+	}
+	return expression
 }
 
 func NewModelTraceRepository(db *sql.DB) service.ModelTraceRepository {
@@ -28,6 +41,13 @@ func NewModelTraceRepository(db *sql.DB) service.ModelTraceRepository {
 const modelTraceColumns = `id, account_id, source, status, model, target_model, rounds,
     completed_rounds, result, winner, probabilities, version, created_at, started_at,
     finished_at, duration_ms, error`
+
+// CASE guards the cast: malformed or out-of-range persisted JSON must use the global interval.
+const modelTraceIntervalSQL = `CASE WHEN jsonb_typeof(a.extra -> 'modeltrace_interval_minutes') = 'number'
+    AND a.extra ->> 'modeltrace_interval_minutes' ~ '^[0-9]{1,5}$'
+    THEN CASE WHEN (a.extra ->> 'modeltrace_interval_minutes')::int BETWEEN 5 AND 10080
+        THEN (a.extra ->> 'modeltrace_interval_minutes')::int ELSE $1 END
+    ELSE $1 END`
 
 func scanModelTrace(row interface{ Scan(...any) error }) (*service.ModelTraceTask, error) {
 	var t service.ModelTraceTask
@@ -89,8 +109,9 @@ func (r *modelTraceRepository) Enqueue(ctx context.Context, task *service.ModelT
 	// Serialize creation with deletion, summary writes, and other creators of this account.
 	var platform string
 	var enabled bool
-	if err := tx.QueryRowContext(ctx, `SELECT platform, COALESCE(extra -> 'modeltrace_enabled' = 'true'::jsonb, false)
-        FROM accounts WHERE id = $1 AND deleted_at IS NULL FOR NO KEY UPDATE`, task.AccountID).Scan(&platform, &enabled); err != nil {
+	var effectiveInterval int
+	if err := tx.QueryRowContext(ctx, `SELECT a.platform, COALESCE(a.extra -> 'modeltrace_enabled' = 'true'::jsonb, false), `+modelTraceIntervalSQL+`
+        FROM accounts a WHERE a.id = $2 AND a.deleted_at IS NULL FOR NO KEY UPDATE`, interval, task.AccountID).Scan(&platform, &enabled, &effectiveInterval); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, service.ErrAccountNotFound
 		}
@@ -113,7 +134,7 @@ func (r *modelTraceRepository) Enqueue(ctx context.Context, task *service.ModelT
 		}
 		var due bool
 		err := tx.QueryRowContext(ctx, `SELECT NOT EXISTS (SELECT 1 FROM modeltrace_account_state
-            WHERE account_id = $1 AND last_auto_finished_at > NOW() - ($2 * INTERVAL '1 minute'))`, task.AccountID, interval).Scan(&due)
+		    WHERE account_id = $1 AND last_auto_finished_at > NOW() - ($2 * INTERVAL '1 minute'))`, task.AccountID, effectiveInterval).Scan(&due)
 		if err != nil {
 			return nil, err
 		}
@@ -204,8 +225,10 @@ func (r *modelTraceRepository) Finish(ctx context.Context, task *service.ModelTr
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	var id int64
-	if err := tx.QueryRowContext(ctx, `SELECT id FROM accounts WHERE id = $1 AND deleted_at IS NULL FOR NO KEY UPDATE`, task.AccountID).Scan(&id); err != nil {
+	var quarantineEnabled, quarantined bool
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(extra -> 'modeltrace_quarantine_enabled' = 'true'::jsonb, false),
+        COALESCE(extra -> 'modeltrace_quarantined' = 'true'::jsonb, false)
+        FROM accounts WHERE id = $1 AND deleted_at IS NULL FOR NO KEY UPDATE`, task.AccountID).Scan(&quarantineEnabled, &quarantined); err != nil {
 		return err
 	}
 	probabilities, err := json.Marshal(task.Probabilities)
@@ -215,7 +238,8 @@ func (r *modelTraceRepository) Finish(ctx context.Context, task *service.ModelTr
 	if task.Status != "completed" && task.Status != "failed" {
 		return errors.New("invalid ModelTrace final status")
 	}
-	if task.Status == "completed" && (task.CompletedRounds != task.Rounds || task.Result == "" || task.Winner == "") {
+	if task.Status == "completed" && (task.CompletedRounds != task.Rounds ||
+		(task.Result != "normal" && task.Result != "degraded") || task.Winner == "") {
 		return errors.New("incomplete ModelTrace result")
 	}
 	if task.Status == "failed" {
@@ -255,9 +279,19 @@ func (r *modelTraceRepository) Finish(ctx context.Context, task *service.ModelTr
 			if err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(ctx, `UPDATE accounts SET extra = COALESCE(extra, '{}'::jsonb) ||
-                jsonb_build_object('modeltrace_latest', $2::jsonb), updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL`, task.AccountID, string(latest)); err != nil {
+			shouldQuarantine := task.Result == "degraded"
+			if _, err := tx.ExecContext(ctx, `UPDATE accounts SET extra =
+                CASE WHEN $3 THEN (COALESCE(extra, '{}'::jsonb) - 'modeltrace_quarantined') ||
+                    CASE WHEN $4 THEN '{"modeltrace_quarantined":true}'::jsonb ELSE '{}'::jsonb END
+                ELSE COALESCE(extra, '{}'::jsonb) END ||
+                jsonb_build_object('modeltrace_latest', $2::jsonb),
+                updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL`, task.AccountID, string(latest), quarantineEnabled, shouldQuarantine); err != nil {
 				return err
+			}
+			if quarantineEnabled && quarantined != shouldQuarantine {
+				if err := enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &task.AccountID, nil, nil); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -304,7 +338,7 @@ func (r *modelTraceRepository) Candidates(ctx context.Context, interval int, aft
         LEFT JOIN modeltrace_account_state s ON s.account_id = a.id
         WHERE a.id > $2 AND a.deleted_at IS NULL AND a.platform = 'openai' AND a.status = 'active'
         AND a.schedulable AND a.extra -> 'modeltrace_enabled' = 'true'::jsonb
-        AND (s.last_auto_finished_at IS NULL OR s.last_auto_finished_at <= NOW() - ($1 * INTERVAL '1 minute'))
+        AND (s.last_auto_finished_at IS NULL OR s.last_auto_finished_at <= NOW() - ((`+modelTraceIntervalSQL+`) * INTERVAL '1 minute'))
         AND NOT EXISTS (SELECT 1 FROM modeltrace_tasks t WHERE t.account_id = a.id AND t.status IN ('queued','running'))
         ORDER BY a.id LIMIT 100`, interval, after)
 	if err != nil {

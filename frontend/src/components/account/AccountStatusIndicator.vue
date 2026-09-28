@@ -31,6 +31,9 @@
         {{ statusText }}
       </span>
     </template>
+    <span v-if="isModelTraceQuarantined && (isRateLimited || isOverloaded || isTempUnschedulable)" class="badge badge-warning text-xs">
+      {{ t('admin.modeltrace.quarantinedStatus') }}
+    </span>
 
     <!-- Error Info Indicator -->
     <div v-if="hasError && account.error_message" class="group/error relative">
@@ -277,6 +280,7 @@ const isTempUnschedulable = computed(() => {
   if (!props.account.temp_unschedulable_until) return false
   return new Date(props.account.temp_unschedulable_until) > new Date()
 })
+const isModelTraceQuarantined = computed(() => props.account.extra?.modeltrace_quarantined === true)
 
 // Computed: has error status
 const hasError = computed(() => {
@@ -323,6 +327,7 @@ const statusClass = computed(() => {
   if (isTempUnschedulable.value) {
     return 'badge-warning'
   }
+  if (isModelTraceQuarantined.value) return 'badge-warning'
   if (props.account.status !== 'active') {
     return props.account.status === 'error' ? 'badge-danger' : 'badge-gray'
   }
@@ -343,6 +348,7 @@ const statusText = computed(() => {
   if (isTempUnschedulable.value) {
     return t('admin.accounts.status.tempUnschedulable')
   }
+  if (isModelTraceQuarantined.value) return t('admin.modeltrace.quarantinedStatus')
   if (props.account.status !== 'active') {
     return t(`admin.accounts.status.${props.account.status}`)
   }

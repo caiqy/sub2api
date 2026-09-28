@@ -1039,6 +1039,10 @@ func (h *AccountHandler) Create(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	if err := service.ValidateModelTraceAccountExtra(req.Extra); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	if req.RateMultiplier != nil && *req.RateMultiplier < 0 {
 		response.BadRequest(c, "rate_multiplier must be >= 0")
 		return
@@ -1179,6 +1183,10 @@ func (h *AccountHandler) Update(c *gin.Context) {
 	var req UpdateAccountRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if err := service.ValidateModelTraceAccountExtra(req.Extra); err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
 	if req.RateMultiplier != nil && *req.RateMultiplier < 0 {

@@ -179,7 +179,14 @@ func (a *Account) EffectiveLoadFactor() int {
 }
 
 func (a *Account) IsSchedulable() bool {
+	return a.isSchedulable(false)
+}
+
+func (a *Account) isSchedulable(ignoreModelTrace bool) bool {
 	if !a.IsActive() || !a.Schedulable {
+		return false
+	}
+	if !ignoreModelTrace && a.Extra[ModelTraceQuarantinedExtraKey] == true {
 		return false
 	}
 	now := time.Now()

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -398,6 +399,106 @@ func TestModelTraceExtraPreservesManagedSummaryAndSwitch(t *testing.T) {
 	got = MergeModelTraceExtra(map[string]any{ModelTraceEnabledExtraKey: false}, current)
 	require.Equal(t, false, got[ModelTraceEnabledExtraKey])
 	require.Equal(t, current[ModelTraceLatestExtraKey], got[ModelTraceLatestExtraKey])
+}
+
+func TestModelTraceQuarantineEligibilityAndPolicyMerge(t *testing.T) {
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true,
+		Extra: map[string]any{ModelTraceEnabledExtraKey: true, ModelTraceQuarantinedExtraKey: true}}
+	cfg := ModelTraceSettings{Enabled: true}
+	require.False(t, account.IsSchedulable())
+	require.True(t, modelTraceAutoEligible(account, cfg), "own quarantine must not stop recovery probes")
+	until := time.Now().Add(time.Hour)
+	account.TempUnschedulableUntil = &until
+	require.False(t, modelTraceAutoEligible(account, cfg), "another runtime blocker must still stop probes")
+	account.TempUnschedulableUntil = nil
+	account.Extra[ModelTraceEnabledExtraKey] = false
+	require.False(t, modelTraceAutoEligible(account, cfg))
+	account.Extra[ModelTraceEnabledExtraKey] = true
+	cfg.Enabled = false
+	require.False(t, modelTraceAutoEligible(account, cfg))
+
+	current := map[string]any{
+		ModelTraceQuarantineEnabledExtraKey: true, ModelTraceQuarantinedExtraKey: true,
+		ModelTraceIntervalExtraKey: 30,
+	}
+	got := MergeModelTraceExtra(map[string]any{ModelTraceQuarantinedExtraKey: false}, current)
+	require.Equal(t, true, got[ModelTraceQuarantinedExtraKey], "editor may not clear the runtime blocker")
+	require.Equal(t, 30, got[ModelTraceIntervalExtraKey], "partial edits preserve the override")
+	got = MergeModelTraceExtra(map[string]any{ModelTraceQuarantineEnabledExtraKey: false, ModelTraceIntervalExtraKey: nil}, current)
+	require.NotContains(t, got, ModelTraceQuarantinedExtraKey, "disabling policy immediately lifts only its own blocker")
+	require.NotContains(t, got, ModelTraceIntervalExtraKey, "explicit null restores global inheritance")
+}
+
+func TestModelTraceRecoveryProbeRespectsOtherBlockers(t *testing.T) {
+	settings := &SettingService{settingRepo: &modelTraceSettingsStub{}}
+	s := &ModelTraceService{settings: settings}
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true,
+		Extra: map[string]any{ModelTraceEnabledExtraKey: true, ModelTraceQuarantinedExtraKey: true}}
+	cfg := ModelTraceSettings{Enabled: true}
+	require.True(t, s.autoEligibleForTarget(context.Background(), account, cfg, "gpt-6-astra"))
+	account.Extra[modelRateLimitsKey] = map[string]any{"gpt-6-astra": map[string]any{
+		"rate_limit_reset_at": time.Now().Add(time.Hour).Format(time.RFC3339),
+	}}
+	require.False(t, s.autoEligibleForTarget(context.Background(), account, cfg, "gpt-6-astra"))
+	account.Credentials = map[string]any{"model_mapping": map[string]any{"gpt-6-astra": "gpt-6-sol", "gpt-6-sol": "gpt-6-astra"}}
+	account.Extra[modelRateLimitsKey] = map[string]any{"gpt-6-sol": map[string]any{
+		"rate_limit_reset_at": time.Now().Add(time.Hour).Format(time.RFC3339),
+	}}
+	require.False(t, s.autoEligibleForTarget(context.Background(), account, cfg, "gpt-6-astra"), "check the selected model exactly once through its mapping")
+}
+
+func TestModelTraceAccountPolicyValidation(t *testing.T) {
+	for _, interval := range []any{float64(5), 10080, nil} {
+		require.NoError(t, ValidateModelTraceAccountExtra(map[string]any{ModelTraceIntervalExtraKey: interval}))
+	}
+	for _, interval := range []any{float64(4), float64(10081), float64(5.5), "60", true} {
+		require.Error(t, ValidateModelTraceAccountExtra(map[string]any{ModelTraceIntervalExtraKey: interval}))
+	}
+	require.Error(t, ValidateModelTraceAccountExtra(map[string]any{ModelTraceQuarantineEnabledExtraKey: "true"}))
+	require.NoError(t, ValidateModelTraceAccountExtra(map[string]any{ModelTraceQuarantineEnabledExtraKey: false}))
+}
+
+func TestModelTraceUnspecifiedEditInheritsLockedPolicy(t *testing.T) {
+	readSnapshot := map[string]any{ModelTraceQuarantineEnabledExtraKey: false, ModelTraceIntervalExtraKey: 60}
+	current := map[string]any{ModelTraceQuarantineEnabledExtraKey: true, ModelTraceQuarantinedExtraKey: true,
+		ModelTraceIntervalExtraKey: 15}
+	got := MergeModelTraceExtra(modelTraceExtraWithoutUnsubmittedPolicy(readSnapshot), current)
+	require.Equal(t, true, got[ModelTraceQuarantineEnabledExtraKey])
+	require.Equal(t, true, got[ModelTraceQuarantinedExtraKey])
+	require.Equal(t, 15, got[ModelTraceIntervalExtraKey])
+	require.Equal(t, false, readSnapshot[ModelTraceQuarantineEnabledExtraKey], "omit without mutating the source snapshot")
+}
+
+type modelTracePolicyRaceRepo struct {
+	AccountRepository
+	initial *Account
+	current map[string]any
+	saved   map[string]any
+}
+
+func (r *modelTracePolicyRaceRepo) GetByID(context.Context, int64) (*Account, error) {
+	copy := *r.initial
+	copy.Extra = maps.Clone(r.initial.Extra)
+	return &copy, nil
+}
+
+func (r *modelTracePolicyRaceRepo) Update(_ context.Context, account *Account) error {
+	r.saved = MergeModelTraceExtra(maps.Clone(account.Extra), r.current)
+	return nil
+}
+
+func TestModelTraceAdminUnrelatedUpdateCannotUndoConcurrentQuarantine(t *testing.T) {
+	repo := &modelTracePolicyRaceRepo{
+		initial: &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+			Status: StatusActive, Extra: map[string]any{ModelTraceQuarantineEnabledExtraKey: false, ModelTraceIntervalExtraKey: 60}},
+		current: map[string]any{ModelTraceQuarantineEnabledExtraKey: true, ModelTraceQuarantinedExtraKey: true,
+			ModelTraceIntervalExtraKey: 15},
+	}
+	_, err := (&adminServiceImpl{accountRepo: repo}).UpdateAccount(context.Background(), 1, &UpdateAccountInput{Name: "renamed"})
+	require.NoError(t, err)
+	require.Equal(t, true, repo.saved[ModelTraceQuarantineEnabledExtraKey])
+	require.Equal(t, true, repo.saved[ModelTraceQuarantinedExtraKey])
+	require.Equal(t, 15, repo.saved[ModelTraceIntervalExtraKey])
 }
 
 func TestModelTracePaginationBounds(t *testing.T) {

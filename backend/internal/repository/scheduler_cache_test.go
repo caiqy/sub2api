@@ -20,6 +20,12 @@ func TestFilterSchedulerCredentialsKeepsSubscriptionPlanType(t *testing.T) {
 	require.NotContains(t, filtered, "refresh_token")
 }
 
+func TestFilterSchedulerExtraKeepsModelTraceQuarantine(t *testing.T) {
+	filtered := filterSchedulerExtra(map[string]any{"modeltrace_quarantined": true, "modeltrace_latest": "large"})
+	require.Equal(t, true, filtered["modeltrace_quarantined"])
+	require.NotContains(t, filtered, "modeltrace_latest")
+}
+
 func TestSchedulerMetadataAccountKeepsOpenAISubscriptionIdentity(t *testing.T) {
 	account := service.Account{
 		ID:       24,

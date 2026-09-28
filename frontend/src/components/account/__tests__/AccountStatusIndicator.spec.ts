@@ -51,6 +51,19 @@ function makeAccount(overrides: Partial<Account>): Account {
 }
 
 describe('AccountStatusIndicator', () => {
+  it('shows ModelTrace quarantine and preserves an independent temporary blocker', () => {
+    const account = makeAccount({ platform: 'openai', extra: { modeltrace_quarantined: true } })
+    const wrapper = mount(AccountStatusIndicator, { props: { account }, global: { stubs: { Icon: true } } })
+    expect(wrapper.text()).toContain('admin.modeltrace.quarantinedStatus')
+    expect(wrapper.text()).not.toContain('admin.accounts.status.active')
+
+    wrapper.setProps({ account: { ...account, temp_unschedulable_until: '2099-01-01T00:00:00Z' } })
+    return wrapper.vm.$nextTick().then(() => {
+      expect(wrapper.text()).toContain('admin.accounts.status.tempUnschedulable')
+      expect(wrapper.text()).toContain('admin.modeltrace.quarantinedStatus')
+    })
+  })
+
   it('Claude 5 模型限流时显示 Opus 和 Sonnet 的短别名', () => {
     const wrapper = mount(AccountStatusIndicator, {
       props: {

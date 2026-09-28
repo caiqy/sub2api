@@ -1040,6 +1040,7 @@ func (r *accountRepository) accountListFilteredQuery(platform, accountType, stat
 			q = q.Where(
 				dbaccount.StatusEQ(status),
 				dbaccount.SchedulableEQ(true),
+				modelTraceNotQuarantinedPredicate(),
 				dbaccount.Or(
 					dbaccount.RateLimitResetAtIsNil(),
 					dbaccount.RateLimitResetAtLTE(time.Now()),
@@ -1056,6 +1057,7 @@ func (r *accountRepository) accountListFilteredQuery(platform, accountType, stat
 			q = q.Where(
 				dbaccount.StatusEQ(service.StatusActive),
 				dbaccount.RateLimitResetAtGT(time.Now()),
+				modelTraceNotQuarantinedPredicate(),
 				dbpredicate.Account(func(s *entsql.Selector) {
 					col := s.C("temp_unschedulable_until")
 					s.Where(entsql.Or(
@@ -1067,13 +1069,13 @@ func (r *accountRepository) accountListFilteredQuery(platform, accountType, stat
 		case "temp_unschedulable":
 			q = q.Where(
 				dbaccount.StatusEQ(service.StatusActive),
-				dbpredicate.Account(func(s *entsql.Selector) {
+				dbaccount.Or(modelTraceQuarantinedPredicate(), dbpredicate.Account(func(s *entsql.Selector) {
 					col := s.C("temp_unschedulable_until")
 					s.Where(entsql.And(
 						entsql.Not(entsql.IsNull(col)),
 						entsql.GT(col, entsql.Expr("NOW()")),
 					))
-				}),
+				})),
 			)
 		case "unschedulable":
 			q = q.Where(
@@ -2107,6 +2109,7 @@ func (r *accountRepository) ListSchedulableCapacityByGroupIDs(ctx context.Contex
 			AND a.deleted_at IS NULL
 			AND a.status = $2
 			AND a.schedulable = TRUE
+			AND COALESCE(a.extra -> 'modeltrace_quarantined' = 'true'::jsonb, false) = false
 			AND (a.temp_unschedulable_until IS NULL OR a.temp_unschedulable_until <= $3)
 			AND (a.expires_at IS NULL OR a.expires_at > $3 OR a.auto_pause_on_expired = FALSE)
 			AND (a.overload_until IS NULL OR a.overload_until <= $3)
@@ -2825,6 +2828,7 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	if clearProbeSnapshot {
 		extraExpression = "(" + extraExpression + ") - 'upstream_billing_probe'"
 	}
+	extraExpression = modelTraceExtraMergeSQL(extraExpression, updates)
 	if service.ShouldEnsureCodexFingerprintSeedForExtraUpdates(updates) {
 		extraExpression = ensureCodexFingerprintSeedSQL(extraExpression)
 	}
@@ -3206,6 +3210,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			if ollamaCloudUsageSnapshotClearRequested(updates.Extra) {
 				extraExpression = "(" + extraExpression + ") - 'ollama_cloud_usage_snapshot'"
 			}
+			extraExpression = modelTraceExtraMergeSQL(extraExpression, updates.Extra)
 		}
 		eligibleAccount := "platform IN (" + ollamaCloudUsagePlatformsSQL + ") AND type = 'apikey'"
 		groupIdentityChanged := ""
@@ -3495,6 +3500,25 @@ func tempUnschedulablePredicate() dbpredicate.Account {
 			entsql.IsNull(col),
 			entsql.LTE(col, entsql.Expr("NOW()")),
 		))
+		s.Where(entsql.P(func(b *entsql.Builder) {
+			b.WriteString("COALESCE(").WriteString(s.C("extra")).WriteString(" -> 'modeltrace_quarantined' = 'true'::jsonb, false) = false")
+		}))
+	})
+}
+
+func modelTraceNotQuarantinedPredicate() dbpredicate.Account {
+	return dbpredicate.Account(func(s *entsql.Selector) {
+		s.Where(entsql.P(func(b *entsql.Builder) {
+			b.WriteString("COALESCE(").WriteString(s.C("extra")).WriteString(" -> 'modeltrace_quarantined' = 'true'::jsonb, false) = false")
+		}))
+	})
+}
+
+func modelTraceQuarantinedPredicate() dbpredicate.Account {
+	return dbpredicate.Account(func(s *entsql.Selector) {
+		s.Where(entsql.P(func(b *entsql.Builder) {
+			b.WriteString(s.C("extra")).WriteString(" -> 'modeltrace_quarantined' = 'true'::jsonb")
+		}))
 	})
 }
 

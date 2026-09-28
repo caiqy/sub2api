@@ -207,6 +207,9 @@ func (s *ModelTraceService) enqueue(ctx context.Context, accountID int64, model 
 	if err != nil {
 		return nil, infraerrors.BadRequest("MODELTRACE_TARGET_UNAVAILABLE", "account credentials or model configuration are unavailable")
 	}
+	if source == "auto" && !s.autoEligibleForTarget(ctx, account, cfg, model) {
+		return nil, nil
+	}
 	if !slices.Contains(modeltrace.Models(), target) {
 		return nil, infraerrors.BadRequest("MODELTRACE_TARGET_UNSUPPORTED", "mapped target is not supported by the fingerprint library")
 	}
@@ -349,6 +352,13 @@ func (s *ModelTraceService) execute(epochCtx context.Context, owner string, task
 	if err != nil || target != task.TargetModel || original.Platform != PlatformOpenAI {
 		task.Error = "account or model configuration changed before execution"
 		return
+	}
+	if task.Source == "auto" {
+		cfg, err := s.settings.GetModelTraceSettings(ctx)
+		if err != nil || !s.autoEligibleForTarget(ctx, original, cfg, task.Model) {
+			task.Error = "automatic detection disabled or account is not schedulable"
+			return
+		}
 	}
 	snapshot := modeltrace.Current()
 	if !slices.Contains(snapshot.Models(), target) {

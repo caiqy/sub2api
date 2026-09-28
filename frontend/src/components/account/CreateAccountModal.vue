@@ -3504,12 +3504,26 @@
         </button>
       </div>
 
-      <div v-if="form.platform === 'openai'" class="flex items-center justify-between gap-4">
-        <div>
-          <label for="create-modeltrace-enabled" class="input-label mb-0">{{ t('admin.modeltrace.accountEnabled') }}</label>
-          <p id="create-modeltrace-hint" class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.modeltrace.accountEnabledHint') }}</p>
+      <div v-if="form.platform === 'openai'" class="space-y-4">
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <label for="create-modeltrace-enabled" class="input-label mb-0">{{ t('admin.modeltrace.accountEnabled') }}</label>
+            <p id="create-modeltrace-hint" class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.modeltrace.accountEnabledHint') }}</p>
+          </div>
+          <Toggle id="create-modeltrace-enabled" v-model="modelTraceEnabled" data-testid="modeltrace-enabled" :aria-label="t('admin.modeltrace.accountEnabled')" aria-describedby="create-modeltrace-hint" />
         </div>
-        <Toggle id="create-modeltrace-enabled" v-model="modelTraceEnabled" data-testid="modeltrace-enabled" :aria-label="t('admin.modeltrace.accountEnabled')" aria-describedby="create-modeltrace-hint" />
+        <div>
+          <label for="create-modeltrace-interval" class="input-label">{{ t('admin.modeltrace.accountInterval') }}</label>
+          <input id="create-modeltrace-interval" v-model="modelTraceInterval" data-testid="modeltrace-interval" type="text" inputmode="numeric" class="input" :placeholder="t('admin.modeltrace.accountIntervalPlaceholder')" :aria-invalid="parseModelTraceInterval(modelTraceInterval) === undefined" aria-describedby="create-modeltrace-interval-hint" />
+          <p id="create-modeltrace-interval-hint" class="input-hint">{{ t('admin.modeltrace.accountIntervalHint') }}</p>
+        </div>
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <label for="create-modeltrace-quarantine" class="input-label mb-0">{{ t('admin.modeltrace.accountQuarantine') }}</label>
+            <p id="create-modeltrace-quarantine-hint" class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.modeltrace.accountQuarantineHint') }}</p>
+          </div>
+          <Toggle id="create-modeltrace-quarantine" v-model="modelTraceQuarantineEnabled" data-testid="modeltrace-quarantine" :aria-label="t('admin.modeltrace.accountQuarantine')" aria-describedby="create-modeltrace-quarantine-hint" />
+        </div>
       </div>
 
       <div>
@@ -4012,6 +4026,7 @@ import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.
 import PassthroughFieldRulesEditor from '@/components/account/PassthroughFieldRulesEditor.vue'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
 import Toggle from '@/components/common/Toggle.vue'
+import { parseModelTraceInterval } from '@/components/account/modelTraceInterval'
 import GrokBaseUrlPresets from '@/components/account/GrokBaseUrlPresets.vue'
 import CnBaseUrlPresets from '@/components/account/CnBaseUrlPresets.vue'
 import OpenCodeGoProtocolRulesEditor from '@/components/account/OpenCodeGoProtocolRulesEditor.vue'
@@ -4508,6 +4523,8 @@ const applyGrokOAuthUpstreamConfig = (credentials: Record<string, unknown>) => {
 const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(true)
 const modelTraceEnabled = ref(false)
+const modelTraceInterval = ref('')
+const modelTraceQuarantineEnabled = ref(false)
 const openaiPassthroughEnabled = ref(false)
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
@@ -5471,6 +5488,8 @@ const resetForm = () => {
   interceptWarmupRequests.value = false
   autoPauseOnExpired.value = true
   modelTraceEnabled.value = false
+  modelTraceInterval.value = ''
+  modelTraceQuarantineEnabled.value = false
   openaiPassthroughEnabled.value = false
   openaiFlattenNamespacesEnabled.value = false
   openAILongContextBillingEnabled.value = false
@@ -5546,6 +5565,12 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
 
   const extra: Record<string, unknown> = { ...(base || {}) }
   extra.modeltrace_enabled = modelTraceEnabled.value
+  const interval = parseModelTraceInterval(modelTraceInterval.value)
+  if (interval != null) extra.modeltrace_interval_minutes = interval
+  else delete extra.modeltrace_interval_minutes
+  if (modelTraceQuarantineEnabled.value) extra.modeltrace_quarantine_enabled = true
+  else delete extra.modeltrace_quarantine_enabled
+  delete extra.modeltrace_quarantined
   if (accountCategory.value === 'oauth-based') {
     extra.openai_oauth_responses_websockets_v2_mode = openaiOAuthResponsesWebSocketV2Mode.value
     extra.openai_oauth_responses_websockets_v2_enabled = isOpenAIWSModeEnabled(openaiOAuthResponsesWebSocketV2Mode.value)
@@ -5792,6 +5817,10 @@ const handleVertexServiceAccountDrop = async (event: DragEvent) => {
 }
 
 const handleSubmit = async () => {
+  if (form.platform === 'openai' && parseModelTraceInterval(modelTraceInterval.value) === undefined) {
+    appStore.showError(t('admin.modeltrace.invalidAccountInterval'))
+    return
+  }
   // For OAuth-based type, handle OAuth flow (goes to step 2)
   if (isOAuthFlow.value) {
     if (!isGrokSSOInputMethod.value && !form.name.trim()) {

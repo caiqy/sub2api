@@ -995,10 +995,7 @@ func (s *SchedulerSnapshotService) rebuildBucketWithTokenPolicyAndQueryCache(
 		return err
 	}
 	if !ok {
-		if strict {
-			return fmt.Errorf("%w: bucket=%s", ErrSchedulerBucketRebuildBusy, bucket.String())
-		}
-		return nil
+		return fmt.Errorf("%w: bucket=%s", ErrSchedulerBucketRebuildBusy, bucket.String())
 	}
 	defer func() {
 		_ = s.cache.UnlockBucket(ctx, bucket)
@@ -1223,7 +1220,7 @@ func (s *SchedulerSnapshotService) prepareAndRebuildFullSnapshot(
 	reason string,
 ) error {
 	// 首个 DB 查询前必须完成全部普通 bucket 的 token 预备；任何预备错误都不会留下部分发布。
-	// fresh Reopen task 保持严格锁与 fencing 语义，普通 captured task 继续沿用 lock busy/fence 跳过语义。
+	// fresh Reopen task 保持严格 fencing；所有 bucket 的锁忙都需重试，普通 captured task 仅跳过 fencing。
 	preparedBuckets := make(map[SchedulerBucket]struct{}, len(captured)+len(reopened))
 	for _, task := range captured {
 		preparedBuckets[task.bucket] = struct{}{}

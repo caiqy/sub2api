@@ -3373,6 +3373,15 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if cyberBlockedThisConn {
 					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, cyberSessionBlockedClientMsg, nil)
 				}
+				if turn > 1 {
+					quarantined, err := h.gatewayService.IsAccountModelTraceQuarantined(ctx, account.ID)
+					if err != nil {
+						return service.NewOpenAIWSClientCloseError(coderws.StatusInternalError, "failed to check account eligibility", err)
+					}
+					if quarantined {
+						return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "account is no longer eligible for this connection, please reconnect", nil)
+					}
+				}
 				// 长连接跨峰谷/倍率刷新防护：每个 turn 按当前时刻重装门并复核
 				// 当前账号，越线即要求客户端重连重选（连接绑定单一上游账号，
 				// 无法中途换号）。本 turn 的准入与计费共用同一 pricingAt。

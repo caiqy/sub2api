@@ -569,6 +569,9 @@ describe('CreateAccountModal', () => {
   it('defaults ModelTrace to false and submits the independent OpenAI automatic switch', async () => {
     await submitApiKeyAccount('openai')
     expect(createAccountMock.mock.calls[0]?.[0]?.extra?.modeltrace_enabled).toBe(false)
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra).not.toHaveProperty('modeltrace_interval_minutes')
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra).not.toHaveProperty('modeltrace_quarantine_enabled')
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra).not.toHaveProperty('modeltrace_quarantined')
     createAccountMock.mockClear()
     const wrapper = mountModal()
     await switchToOpenAIApiKey(wrapper)
@@ -583,6 +586,65 @@ describe('CreateAccountModal', () => {
     await wrapper.setProps({ show: true })
     await switchToOpenAIApiKey(wrapper)
     expect(wrapper.get('[data-testid="modeltrace-enabled"]').attributes('aria-checked')).toBe('false')
+  })
+
+  it('submits an OpenAI interval and quarantine policy and resets both on reopen', async () => {
+    const wrapper = mountModal()
+    await switchToOpenAIApiKey(wrapper)
+    await wrapper.get('[data-tour="account-form-name"]').setValue('Policy account')
+    await wrapper.get('[data-testid="modeltrace-interval"]').setValue('10080')
+    await wrapper.get('[data-testid="modeltrace-quarantine"]').trigger('click')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra).toMatchObject({
+      modeltrace_enabled: false,
+      modeltrace_interval_minutes: 10080,
+      modeltrace_quarantine_enabled: true
+    })
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra).not.toHaveProperty('modeltrace_quarantined')
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true })
+    await switchToOpenAIApiKey(wrapper)
+    expect((wrapper.get('[data-testid="modeltrace-interval"]').element as HTMLInputElement).value).toBe('')
+    expect(wrapper.get('[data-testid="modeltrace-quarantine"]').attributes('aria-checked')).toBe('false')
+  })
+
+  it.each(['4', '10081', '5.5', '0', '-5', '1e2', 'abc'])('blocks an invalid OpenAI interval on create: %s', async value => {
+    const wrapper = mountModal()
+    await switchToOpenAIApiKey(wrapper)
+    await wrapper.get('[data-tour="account-form-name"]').setValue('Invalid policy')
+    await wrapper.get('[data-testid="modeltrace-interval"]').setValue(value)
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock).not.toHaveBeenCalled()
+    expect(showErrorMock).toHaveBeenCalledWith('admin.modeltrace.invalidAccountInterval')
+  })
+
+  it('blocks an invalid interval before entering the OpenAI OAuth flow', async () => {
+    const wrapper = mountModal()
+    await wrapper.get('[data-testid="platform-openai"]').trigger('click')
+    await wrapper.get('[data-tour="account-form-name"]').setValue('OAuth policy')
+    await wrapper.get('[data-testid="modeltrace-interval"]').setValue('bad')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    expect(showErrorMock).toHaveBeenCalledWith('admin.modeltrace.invalidAccountInterval')
+    expect(wrapper.find('[data-testid="import-codex-session"]').exists()).toBe(false)
+  })
+
+  it('passes the OpenAI policy through the Codex session import path', async () => {
+    const wrapper = mountModal()
+    await wrapper.get('[data-testid="platform-openai"]').trigger('click')
+    await wrapper.get('[data-tour="account-form-name"]').setValue('Codex policy')
+    await wrapper.get('[data-testid="modeltrace-interval"]').setValue('5')
+    await wrapper.get('[data-testid="modeltrace-quarantine"]').trigger('click')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    wrapper.getComponent(OAuthAuthorizationFlowStub).vm.$emit('import-codex-session', 'session-json')
+    await flushPromises()
+    expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra).toMatchObject({
+      modeltrace_interval_minutes: 5,
+      modeltrace_quarantine_enabled: true
+    })
+    expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra).not.toHaveProperty('modeltrace_quarantined')
   })
 
   it('does not show the ModelTrace switch on non-OpenAI accounts', () => {

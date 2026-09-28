@@ -1059,6 +1059,7 @@ const (
 	groupAccountAvailableSQL = `a.deleted_at IS NULL
 				AND a.status = 'active'
 				AND a.schedulable = true
+				AND COALESCE(a.extra -> 'modeltrace_quarantined' = 'true'::jsonb, false) = false
 				AND (a.expires_at IS NULL OR a.expires_at > NOW() OR a.auto_pause_on_expired = FALSE)
 				AND (a.rate_limit_reset_at IS NULL OR a.rate_limit_reset_at <= NOW())
 				AND (a.overload_until IS NULL OR a.overload_until <= NOW())
@@ -1070,6 +1071,7 @@ const (
 				AND a.schedulable = true
 				AND (a.expires_at IS NULL OR a.expires_at > NOW() OR a.auto_pause_on_expired = FALSE)
 				AND (
+					a.extra -> 'modeltrace_quarantined' = 'true'::jsonb OR
 					a.rate_limit_reset_at > NOW() OR
 					a.overload_until > NOW() OR
 					a.temp_unschedulable_until > NOW()

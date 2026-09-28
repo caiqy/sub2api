@@ -13,10 +13,36 @@ import (
 
 	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 type captureEntQueryMatcher struct {
 	actual *string
+}
+
+func TestAccountListStatusQueriesIncludeModelTraceQuarantine(t *testing.T) {
+	for _, tt := range []struct {
+		status, clause string
+	}{
+		{service.StatusActive, "= false"},
+		{"rate_limited", "= false"},
+		{"temp_unschedulable", "= 'true'::jsonb"},
+	} {
+		t.Run(tt.status, func(t *testing.T) {
+			var captured string
+			db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(captureEntQueryMatcher{actual: &captured}))
+			require.NoError(t, err)
+			defer db.Close()
+			client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
+			defer client.Close()
+			mock.ExpectQuery("account count").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+			_, err = newAccountRepositoryWithSQL(client, db, nil).accountListFilteredQuery("", "", tt.status, "", 0, "").Count(context.Background())
+			require.NoError(t, err)
+			require.Contains(t, captured, "modeltrace_quarantined")
+			require.Contains(t, captured, tt.clause)
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
 }
 
 func (m captureEntQueryMatcher) Match(_, actual string) error {
@@ -68,6 +94,7 @@ func TestListSchedulableAccountLoadsUsesSingleProjectionQuery(t *testing.T) {
 		"status",
 		"schedulable",
 		"temp_unschedulable_until",
+		"modeltrace_quarantined",
 		"expires_at",
 		"auto_pause_on_expired",
 		"overload_until",

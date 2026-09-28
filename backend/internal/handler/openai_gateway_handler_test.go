@@ -3881,6 +3881,103 @@ func TestOpenAIResponsesWebSocketPassthroughSecondTurnAdmissionRejectsBeforeUpst
 	}
 }
 
+func TestOpenAIResponsesWebSocket_RechecksModelTraceQuarantineOnLaterTurns(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, passthrough := range []bool{false, true} {
+		for _, tc := range []struct {
+			name       string
+			marker     any
+			rejectTurn int
+			readErr    error
+			missing    bool
+		}{
+			{name: "quarantined", marker: true, rejectTurn: 2},
+			{name: "quarantined_after_second_turn", marker: true, rejectTurn: 3},
+			{name: "false_marker", marker: false},
+			{name: "absent_marker"},
+			{name: "non_boolean_marker", marker: "true"},
+			{name: "lookup_error", rejectTurn: 2, readErr: errors.New("private database details")},
+			{name: "missing_account", rejectTurn: 2, missing: true},
+		} {
+			t.Run(fmt.Sprintf("passthrough=%t/%s", passthrough, tc.name), func(t *testing.T) {
+				cache := &concurrencyCacheMock{
+					acquireUserSlotFn:      func(context.Context, int64, int, string) (bool, error) { return true, nil },
+					acquireUserGroupSlotFn: func(context.Context, int64, int64, int, string) (bool, error) { return true, nil },
+					acquireAccountSlotFn:   func(context.Context, int64, int, string) (bool, error) { return true, nil },
+				}
+				usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 3)}
+				env := newOpenAIWSRegressionEnv(t, cache, openAIWSRegressionEnvOptions{
+					Passthrough: passthrough, CaptureUpstreamMessages: true, UsageLogRepo: usageRepo,
+				})
+				defer env.Close()
+				latest := cloneOpenAIWSRegressionAccount(env.account)
+				// Unrelated scheduling changes must not become new connection-level gates.
+				latest.Status = service.StatusError
+				latest.Schedulable = false
+				latest.Extra[service.ModelTraceQuarantineEnabledExtraKey] = false
+				if tc.marker != nil {
+					latest.Extra[service.ModelTraceQuarantinedExtraKey] = tc.marker
+				}
+				var currentTurn, latestReads atomic.Int32
+				env.accountRepo.getByIDFn = func(_ context.Context, id int64) (*service.Account, error) {
+					if id != env.account.ID {
+						return nil, service.ErrAccountNotFound
+					}
+					turn := int(currentTurn.Load())
+					if turn < 2 {
+						return env.account, nil
+					}
+					latestReads.Add(1)
+					if tc.missing {
+						return nil, nil
+					}
+					if tc.rejectTurn == 3 && turn == 2 {
+						return env.account, nil
+					}
+					return latest, tc.readErr
+				}
+				clientConn := env.dial(t)
+				defer func() { _ = clientConn.CloseNow() }()
+				completed := 0
+				for turn := 1; turn <= 3; turn++ {
+					currentTurn.Store(int32(turn))
+					env.writeMessage(t, clientConn, `{"type":"response.create","model":"gpt-5.1","stream":false}`)
+					if turn == tc.rejectTurn {
+						code := coderws.StatusTryAgainLater
+						reason := "account is no longer eligible for this connection, please reconnect"
+						if tc.readErr != nil || tc.missing {
+							code = coderws.StatusInternalError
+							reason = "failed to check account eligibility"
+						}
+						require.Equal(t, reason, env.readCloseError(t, clientConn, code))
+						break
+					}
+					if passthrough {
+						require.Equal(t, "response.created", gjson.GetBytes(env.readMessage(t, clientConn), "type").String())
+					}
+					require.Equal(t, "response.completed", gjson.GetBytes(env.readMessage(t, clientConn), "type").String())
+					select {
+					case <-usageRepo.created:
+					case <-time.After(5 * time.Second):
+						t.Fatal("completed turn usage was not recorded")
+					}
+					completed++
+				}
+				if tc.rejectTurn == 0 {
+					require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
+				}
+				env.waitRequestDone(t)
+				require.Equal(t, currentTurn.Load()-1, latestReads.Load(), "one repository recheck per follow-up turn")
+				require.Len(t, env.upstreamMessages, completed, "rejected turns must not reach upstream")
+				require.Empty(t, usageRepo.created, "rejected turns must not record usage")
+				require.Equal(t, int32(completed), atomic.LoadInt32(&cache.releaseUserCalled))
+				require.Equal(t, int32(completed), atomic.LoadInt32(&cache.releaseUserGroupCalled))
+				require.Equal(t, int32(completed), atomic.LoadInt32(&cache.releaseAccountCalled))
+			})
+		}
+	}
+}
+
 func TestOpenAIResponsesWebSocket_GetAccessTokenFailureReleasesInitialSlotsOnce(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -6236,9 +6333,10 @@ func newOpenAIResponsesRequestBodyTestRouter(t *testing.T) (*gin.Engine, *openAI
 type openAIChatCompletionsAccountRepoStub struct {
 	service.AccountRepository
 
-	account  *service.Account
-	accounts []*service.Account
-	groupIDs []int64
+	account   *service.Account
+	accounts  []*service.Account
+	groupIDs  []int64
+	getByIDFn func(context.Context, int64) (*service.Account, error)
 }
 
 func newOpenAIImagesHandlerTestRouter(t *testing.T, route string, upstreamResponse *http.Response) (*gin.Engine, *openAIChatCompletionsUsageLogRepoStub, func()) {
@@ -6324,6 +6422,9 @@ func newOpenAIImagesHandlerTestRouter(t *testing.T, route string, upstreamRespon
 }
 
 func (s *openAIChatCompletionsAccountRepoStub) GetByID(ctx context.Context, id int64) (*service.Account, error) {
+	if s.getByIDFn != nil {
+		return s.getByIDFn(ctx, id)
+	}
 	for _, account := range s.accounts {
 		if account != nil && account.ID == id {
 			return account, nil

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
+	"math"
 	"slices"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -12,6 +14,9 @@ import (
 
 const ModelTraceEnabledExtraKey = "modeltrace_enabled"
 const ModelTraceLatestExtraKey = "modeltrace_latest"
+const ModelTraceIntervalExtraKey = "modeltrace_interval_minutes"
+const ModelTraceQuarantineEnabledExtraKey = "modeltrace_quarantine_enabled"
+const ModelTraceQuarantinedExtraKey = "modeltrace_quarantined"
 const modelTraceSettingsKey = "modeltrace_settings"
 
 type ModelTraceSettings struct {
@@ -71,11 +76,50 @@ func (s *SettingService) SetModelTraceSettings(ctx context.Context, cfg ModelTra
 }
 
 func modelTraceAutoEligible(account *Account, cfg ModelTraceSettings) bool {
-	if account == nil || account.Platform != PlatformOpenAI || !cfg.Enabled || !account.IsSchedulable() {
+	if account == nil || account.Platform != PlatformOpenAI || !cfg.Enabled || !account.isSchedulable(true) {
 		return false
 	}
 	enabled, _ := account.Extra[ModelTraceEnabledExtraKey].(bool)
 	return enabled
+}
+
+func (s *ModelTraceService) autoEligibleForTarget(ctx context.Context, account *Account, cfg ModelTraceSettings, selectedModel string) bool {
+	if !modelTraceAutoEligible(account, cfg) || account.isModelRateLimitedWithContext(ctx, selectedModel) {
+		return false
+	}
+	ctx = withOpenAIQuotaAutoPauseSettings(ctx, s.settings.GetOpenAIQuotaAutoPauseSettings(ctx))
+	paused, _ := shouldAutoPauseOpenAIAccountByQuota(ctx, account)
+	return !paused
+}
+
+// ValidateModelTraceAccountExtra rejects malformed user configuration before it reaches the scheduler.
+func ValidateModelTraceAccountExtra(extra map[string]any) error {
+	if value, ok := extra[ModelTraceIntervalExtraKey]; ok && value != nil {
+		var minutes float64
+		switch n := value.(type) {
+		case float64:
+			minutes = n
+		case int:
+			minutes = float64(n)
+		case json.Number:
+			parsed, err := n.Float64()
+			if err != nil {
+				return infraerrors.BadRequest("MODELTRACE_INTERVAL_INVALID", "account interval must be an integer between 5 and 10080")
+			}
+			minutes = parsed
+		default:
+			return infraerrors.BadRequest("MODELTRACE_INTERVAL_INVALID", "account interval must be an integer between 5 and 10080")
+		}
+		if math.IsNaN(minutes) || math.IsInf(minutes, 0) || math.Trunc(minutes) != minutes || minutes < 5 || minutes > 10080 {
+			return infraerrors.BadRequest("MODELTRACE_INTERVAL_INVALID", "account interval must be an integer between 5 and 10080")
+		}
+	}
+	if value, ok := extra[ModelTraceQuarantineEnabledExtraKey]; ok && value != nil {
+		if _, valid := value.(bool); !valid {
+			return infraerrors.BadRequest("MODELTRACE_QUARANTINE_INVALID", "quarantine policy must be a boolean")
+		}
+	}
+	return nil
 }
 
 // Managed summaries cannot be erased or forged by account edits, including stale DTOs.
@@ -84,6 +128,7 @@ func MergeModelTraceExtra(incoming, current map[string]any) map[string]any {
 		incoming = make(map[string]any)
 	}
 	delete(incoming, ModelTraceLatestExtraKey)
+	delete(incoming, ModelTraceQuarantinedExtraKey)
 	if latest, ok := current[ModelTraceLatestExtraKey]; ok {
 		incoming[ModelTraceLatestExtraKey] = latest
 	}
@@ -92,5 +137,28 @@ func MergeModelTraceExtra(incoming, current map[string]any) map[string]any {
 			incoming[ModelTraceEnabledExtraKey] = enabled
 		}
 	}
+	if _, explicit := incoming[ModelTraceQuarantineEnabledExtraKey]; !explicit {
+		if enabled, ok := current[ModelTraceQuarantineEnabledExtraKey]; ok {
+			incoming[ModelTraceQuarantineEnabledExtraKey] = enabled
+		}
+	}
+	if interval, explicit := incoming[ModelTraceIntervalExtraKey]; !explicit {
+		if saved, ok := current[ModelTraceIntervalExtraKey]; ok {
+			incoming[ModelTraceIntervalExtraKey] = saved
+		}
+	} else if interval == nil {
+		delete(incoming, ModelTraceIntervalExtraKey)
+	}
+	if incoming[ModelTraceQuarantineEnabledExtraKey] == true && current[ModelTraceQuarantinedExtraKey] == true {
+		incoming[ModelTraceQuarantinedExtraKey] = true
+	}
 	return incoming
+}
+
+func modelTraceExtraWithoutUnsubmittedPolicy(extra map[string]any) map[string]any {
+	extra = maps.Clone(extra)
+	delete(extra, ModelTraceQuarantineEnabledExtraKey)
+	delete(extra, ModelTraceIntervalExtraKey)
+	delete(extra, ModelTraceQuarantinedExtraKey)
+	return extra
 }

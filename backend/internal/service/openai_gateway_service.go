@@ -555,6 +555,19 @@ func (s *OpenAIGatewayService) UsageLogRepository() UsageLogRepository {
 	return s.usageLogRepo
 }
 
+// IsAccountModelTraceQuarantined reads only the persisted quarantine marker,
+// without re-running account selection or general scheduling eligibility.
+func (s *OpenAIGatewayService) IsAccountModelTraceQuarantined(ctx context.Context, accountID int64) (bool, error) {
+	account, err := s.accountRepo.GetByID(ctx, accountID)
+	if err != nil {
+		return false, err
+	}
+	if account == nil {
+		return false, ErrAccountNotFound
+	}
+	return account.Extra[ModelTraceQuarantinedExtraKey] == true, nil
+}
+
 func (s *OpenAIGatewayService) openAIStickyEnabled() bool {
 	if s == nil || s.cfg == nil {
 		return true

@@ -2658,12 +2658,26 @@
         </div>
       </div>
 
-      <div v-if="account?.platform === 'openai'" class="flex items-center justify-between gap-4">
-        <div>
-          <label for="edit-modeltrace-enabled" class="input-label mb-0">{{ t('admin.modeltrace.accountEnabled') }}</label>
-          <p id="edit-modeltrace-hint" class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.modeltrace.accountEnabledHint') }}</p>
+      <div v-if="account?.platform === 'openai'" class="space-y-4">
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <label for="edit-modeltrace-enabled" class="input-label mb-0">{{ t('admin.modeltrace.accountEnabled') }}</label>
+            <p id="edit-modeltrace-hint" class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.modeltrace.accountEnabledHint') }}</p>
+          </div>
+          <Toggle id="edit-modeltrace-enabled" v-model="modelTraceEnabled" data-testid="modeltrace-enabled" :aria-label="t('admin.modeltrace.accountEnabled')" aria-describedby="edit-modeltrace-hint" />
         </div>
-        <Toggle id="edit-modeltrace-enabled" v-model="modelTraceEnabled" data-testid="modeltrace-enabled" :aria-label="t('admin.modeltrace.accountEnabled')" aria-describedby="edit-modeltrace-hint" />
+        <div>
+          <label for="edit-modeltrace-interval" class="input-label">{{ t('admin.modeltrace.accountInterval') }}</label>
+          <input id="edit-modeltrace-interval" v-model="modelTraceInterval" data-testid="modeltrace-interval" type="text" inputmode="numeric" class="input" :placeholder="t('admin.modeltrace.accountIntervalPlaceholder')" :aria-invalid="parseModelTraceInterval(modelTraceInterval) === undefined" aria-describedby="edit-modeltrace-interval-hint" />
+          <p id="edit-modeltrace-interval-hint" class="input-hint">{{ t('admin.modeltrace.accountIntervalHint') }}</p>
+        </div>
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <label for="edit-modeltrace-quarantine" class="input-label mb-0">{{ t('admin.modeltrace.accountQuarantine') }}</label>
+            <p id="edit-modeltrace-quarantine-hint" class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.modeltrace.accountQuarantineHint') }}</p>
+          </div>
+          <Toggle id="edit-modeltrace-quarantine" v-model="modelTraceQuarantineEnabled" data-testid="modeltrace-quarantine" :aria-label="t('admin.modeltrace.accountQuarantine')" aria-describedby="edit-modeltrace-quarantine-hint" />
+        </div>
       </div>
 
       <div>
@@ -3363,6 +3377,7 @@ import {
 import { extractApiErrorMessage, extractI18nErrorMessage } from '@/utils/apiError'
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
 import { getAccountExpiryTimestamp } from '@/components/account/accountExpiry'
+import { parseModelTraceInterval } from '@/components/account/modelTraceInterval'
 import { allSelectedGroupsEnableLongContextPricing } from '@/components/account/longContextBilling'
 import { VERTEX_LOCATION_OPTIONS } from '@/constants/account'
 import {
@@ -3807,6 +3822,8 @@ const fillHeaderOverrideTemplate = () => {
 const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(false)
 const modelTraceEnabled = ref(false)
+const modelTraceInterval = ref('')
+const modelTraceQuarantineEnabled = ref(false)
 const mixedScheduling = ref(false) // For antigravity accounts: enable mixed scheduling
 // 上游ID：直接上游声明请求标识的响应头名，留空不记录。
 const upstreamRequestIdHeader = ref('')
@@ -4335,6 +4352,9 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   allowOverages.value = false
   const extra = newAccount.extra as Record<string, unknown> | undefined
   modelTraceEnabled.value = newAccount.platform === 'openai' && extra?.modeltrace_enabled === true
+  modelTraceInterval.value = newAccount.platform === 'openai' && extra?.modeltrace_interval_minutes != null
+    ? String(extra.modeltrace_interval_minutes) : ''
+  modelTraceQuarantineEnabled.value = newAccount.platform === 'openai' && extra?.modeltrace_quarantine_enabled === true
   mixedScheduling.value = extra?.mixed_scheduling === true
   allowOverages.value = extra?.allow_overages === true
   passthroughFieldsEnabled.value = extra?.passthrough_fields_enabled === true
@@ -5694,6 +5714,10 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
 
 const handleSubmit = async () => {
   if (!props.account) return
+  if (props.account.platform === 'openai' && parseModelTraceInterval(modelTraceInterval.value) === undefined) {
+    appStore.showError(t('admin.modeltrace.invalidAccountInterval'))
+    return
+  }
   const accountID = props.account.id
 
   if (form.status !== 'active' && form.status !== 'inactive' && form.status !== 'error') {
@@ -6098,7 +6122,21 @@ const handleSubmit = async () => {
     applyQuotaControlExtra(nextExtra)
     applyAnthropicPassthroughExtra(nextExtra)
     applyOpenAIExtra(nextExtra)
-    if (props.account.platform === 'openai') nextExtra.modeltrace_enabled = modelTraceEnabled.value
+    if (props.account.platform === 'openai') {
+      nextExtra.modeltrace_enabled = modelTraceEnabled.value
+      const interval = parseModelTraceInterval(modelTraceInterval.value)
+      const previousInterval = props.account.extra?.modeltrace_interval_minutes
+      if (interval !== (typeof previousInterval === 'number' ? previousInterval : null)) {
+        nextExtra.modeltrace_interval_minutes = interval ?? null
+      } else {
+        delete nextExtra.modeltrace_interval_minutes
+      }
+      if (modelTraceQuarantineEnabled.value !== (props.account.extra?.modeltrace_quarantine_enabled === true)) {
+        nextExtra.modeltrace_quarantine_enabled = modelTraceQuarantineEnabled.value
+      } else {
+        delete nextExtra.modeltrace_quarantine_enabled
+      }
+    }
     applyQuotaLimitExtra(nextExtra)
     applyPassthroughFieldExtra(nextExtra, props.account.type)
     if (props.account.platform === 'grok' && props.account.type === 'oauth') {
@@ -6126,7 +6164,10 @@ const handleSubmit = async () => {
     }
 
     // The latest result is owned by the backend, never send a stale editor snapshot.
-    if (updatePayload.extra) delete (updatePayload.extra as Record<string, unknown>).modeltrace_latest
+    if (updatePayload.extra) {
+      delete (updatePayload.extra as Record<string, unknown>).modeltrace_latest
+      delete (updatePayload.extra as Record<string, unknown>).modeltrace_quarantined
+    }
 
     const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {
       await submitUpdateAccount(accountID, updatePayload)

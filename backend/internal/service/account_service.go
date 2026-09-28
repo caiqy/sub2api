@@ -344,6 +344,7 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 		account.Extra = prepareCodexFingerprintExtraForUpdate(account, extra)
 	} else {
 		account.Extra = prepareCodexFingerprintExtraForUpdate(account, account.Extra)
+		account.Extra = modelTraceExtraWithoutUnsubmittedPolicy(account.Extra)
 	}
 
 	if req.ProxyID != nil {

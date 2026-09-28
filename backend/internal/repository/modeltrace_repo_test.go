@@ -2,12 +2,152 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
+
+func TestModelTraceManagedExtraCannotBeSubmitted(t *testing.T) {
+	incoming := map[string]any{"modeltrace_quarantined": true, service.ModelTraceLatestExtraKey: "forged", "ordinary": true}
+	clean := stripModelTraceLatestExtra(incoming)
+	require.Equal(t, map[string]any{"ordinary": true}, clean)
+	require.Contains(t, incoming, "modeltrace_quarantined")
+}
+
+func TestModelTraceGroupCapacityPredicates(t *testing.T) {
+	require.Contains(t, groupAccountAvailableSQL, "modeltrace_quarantined")
+	require.Contains(t, groupAccountTemporarilyLimitedSQL, "modeltrace_quarantined")
+}
+
+func TestModelTraceCandidatesUseSafeAccountInterval(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherFunc(func(_, actual string) error {
+		for _, part := range []string{
+			"jsonb_typeof(a.extra -> 'modeltrace_interval_minutes') = 'number'",
+			"'^[0-9]{1,5}$'", "::int BETWEEN 5 AND 10080", "ELSE $1 END",
+			"last_auto_finished_at <= NOW()", "modeltrace_enabled",
+		} {
+			if !strings.Contains(actual, part) {
+				return sql.ErrNoRows
+			}
+		}
+		if strings.Contains(actual, "modeltrace_quarantined") {
+			return sql.ErrNoRows
+		}
+		return nil
+	})))
+	require.NoError(t, err)
+	defer db.Close()
+	mock.ExpectQuery("candidates").WithArgs(60, int64(10)).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(11)))
+	ids, err := (&modelTraceRepository{db: db}).Candidates(context.Background(), 60, 10)
+	require.NoError(t, err)
+	require.Equal(t, []int64{11}, ids)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestModelTraceEnqueueRechecksLockedAccountInterval(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?s)SELECT a.platform.*modeltrace_interval_minutes.*FOR NO KEY UPDATE`).
+		WithArgs(60, int64(42)).WillReturnRows(sqlmock.NewRows([]string{"platform", "enabled", "interval"}).AddRow(service.PlatformOpenAI, true, 120))
+	mock.ExpectQuery(`SELECT .* FROM modeltrace_tasks`).WithArgs(int64(42)).WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(`SELECT NOT EXISTS`).WithArgs(int64(42), 120).WillReturnRows(sqlmock.NewRows([]string{"due"}).AddRow(false))
+	mock.ExpectRollback()
+	task, err := (&modelTraceRepository{db: db}).Enqueue(context.Background(), &service.ModelTraceTask{AccountID: 42, Source: "auto"}, "owner", 60)
+	require.NoError(t, err)
+	require.Nil(t, task)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestModelTraceFinishOnlyLatestEnabledResultChangesQuarantine(t *testing.T) {
+	for _, tt := range []struct {
+		name, status, result                string
+		enabled, quarantined, latest, event bool
+	}{
+		{"degraded", "completed", "degraded", true, false, true, true},
+		{"recovered", "completed", "normal", true, true, true, true},
+		{"unchanged", "completed", "degraded", true, true, true, false},
+		{"disabled", "completed", "degraded", false, false, true, false},
+		{"disabled retained", "completed", "normal", false, true, true, false},
+		{"old", "completed", "degraded", true, false, false, false},
+		{"failed", "failed", "", true, true, false, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer db.Close()
+			mock.ExpectBegin()
+			mock.ExpectQuery(`SELECT COALESCE\(extra -> 'modeltrace_quarantine_enabled'`).WithArgs(int64(42)).
+				WillReturnRows(sqlmock.NewRows([]string{"enabled", "quarantined"}).AddRow(tt.enabled, tt.quarantined))
+			winner := "target"
+			if tt.status == "failed" {
+				winner = ""
+			}
+			mock.ExpectQuery(`UPDATE modeltrace_tasks SET status`).WithArgs(int64(7), "owner", tt.status, 1, tt.result, winner, "{}", "").
+				WillReturnRows(sqlmock.NewRows([]string{"finished_at", "duration_ms"}).AddRow(time.Now(), int64(20)))
+			mock.ExpectExec(`INSERT INTO modeltrace_account_state`).WithArgs(int64(42), "manual").WillReturnResult(sqlmock.NewResult(0, 1))
+			if tt.status == "completed" {
+				affected := int64(0)
+				if tt.latest {
+					affected = 1
+				}
+				mock.ExpectExec(`UPDATE modeltrace_account_state SET latest_task_id`).WithArgs(int64(42), int64(7)).WillReturnResult(sqlmock.NewResult(0, affected))
+				if tt.latest {
+					mock.ExpectExec(`(?s)UPDATE accounts SET extra =.*modeltrace_quarantined.*modeltrace_latest`).
+						WithArgs(int64(42), sqlmock.AnyArg(), tt.enabled, tt.result == "degraded").WillReturnResult(sqlmock.NewResult(0, 1))
+					if tt.event {
+						mock.ExpectExec(`INSERT INTO scheduler_outbox`).WillReturnResult(sqlmock.NewResult(0, 1))
+					}
+				}
+			}
+			mock.ExpectCommit()
+			task := &service.ModelTraceTask{ID: 7, AccountID: 42, Source: "manual", Status: tt.status,
+				Rounds: 1, CompletedRounds: 1, Result: tt.result, Winner: "target", Probabilities: map[string]float64{}}
+			require.NoError(t, (&modelTraceRepository{db: db}).Finish(context.Background(), task, "owner"))
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
+func TestModelTraceFinishRollsBackWhenSchedulerOutboxFails(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT COALESCE\(extra -> 'modeltrace_quarantine_enabled'`).WithArgs(int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"enabled", "quarantined"}).AddRow(true, false))
+	mock.ExpectQuery(`UPDATE modeltrace_tasks SET status`).
+		WillReturnRows(sqlmock.NewRows([]string{"finished_at", "duration_ms"}).AddRow(time.Now(), int64(20)))
+	mock.ExpectExec(`INSERT INTO modeltrace_account_state`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE modeltrace_account_state SET latest_task_id`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE accounts SET extra`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`INSERT INTO scheduler_outbox`).WillReturnError(sql.ErrConnDone)
+	mock.ExpectRollback()
+	task := &service.ModelTraceTask{ID: 7, AccountID: 42, Source: "manual", Status: "completed",
+		Rounds: 1, CompletedRounds: 1, Result: "degraded", Winner: "target", Probabilities: map[string]float64{}}
+	require.ErrorIs(t, (&modelTraceRepository{db: db}).Finish(context.Background(), task, "owner"), sql.ErrConnDone)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestModelTraceFinishRejectsUnknownResultBeforeMutation(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT COALESCE\(extra -> 'modeltrace_quarantine_enabled'`).WithArgs(int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"enabled", "quarantined"}).AddRow(true, true))
+	mock.ExpectRollback()
+	task := &service.ModelTraceTask{AccountID: 42, Status: "completed", Rounds: 1, CompletedRounds: 1,
+		Result: "unknown", Winner: "target"}
+	require.ErrorContains(t, (&modelTraceRepository{db: db}).Finish(context.Background(), task, "owner"), "incomplete ModelTrace result")
+	require.NoError(t, mock.ExpectationsWereMet())
+}
 
 func TestModelTraceClaimClusterCapAndOwnerFence(t *testing.T) {
 	for _, admitted := range []bool{false, true} {

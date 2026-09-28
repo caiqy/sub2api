@@ -50,6 +50,7 @@ func TestListModelAvailabilityCandidates_GroupQueryIgnoresTransientState(t *test
 		"rate_limit_reset_at",
 		"overload_until",
 		"temp_unschedulable_until",
+		"modeltrace_quarantined",
 		"expires_at",
 		"auto_pause_on_expired",
 	} {

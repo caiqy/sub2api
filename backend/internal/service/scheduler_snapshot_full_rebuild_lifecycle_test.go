@@ -647,7 +647,7 @@ func TestSchedulerFullRebuildFreshReopenLockBusyRetriesWithoutBlockingOrdinaryTa
 	require.Equal(t, []int64{groupID}, freshCalls)
 }
 
-func TestSchedulerFullRebuildOrdinaryLockBusyKeepsExistingSkipSemantics(t *testing.T) {
+func TestSchedulerFullRebuildOrdinaryLockBusyReturnsRetryableError(t *testing.T) {
 	busyBucket := schedulerCanonicalBuckets(0)[0]
 	cache := newFullRebuildLifecycleCache()
 	cache.lockBusyOnce[busyBucket.String()] = true
@@ -655,7 +655,7 @@ func TestSchedulerFullRebuildOrdinaryLockBusyKeepsExistingSkipSemantics(t *testi
 	accounts := &fullRebuildAccountRepo{}
 	svc := newFullRebuildLifecycleService(cache, nil, accounts, groups, config.RunModeStandard)
 
-	require.NoError(t, svc.rebuildFullSnapshot(context.Background(), "test"))
+	require.ErrorIs(t, svc.rebuildFullSnapshot(context.Background(), "test"), ErrSchedulerBucketRebuildBusy)
 	require.Equal(t, schedulerCanonicalAccountQueryCount(), accounts.callCount())
 	attempts, published := cache.counts(busyBucket)
 	require.Zero(t, attempts)
