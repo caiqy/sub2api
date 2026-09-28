@@ -1,0 +1,496 @@
+schema: comet.native.v4
+name: modeltrace-per-account-policy
+language: zh-CN
+phase: archive
+status: done
+state_version: 13
+brief: brief.md
+document_constraints_version: 1
+shape_confirmation_hash: 14af84984a7c5a933436145405650b0c61b174110b708fb1837a25331a693fd7
+spec_changes:
+  - capability: modeltrace-degradation-detection
+    operation: modify
+    source: specs/modeltrace-degradation-detection/spec.md
+workspace:
+  isolation: current
+  change_branch: main
+  target_branch: main
+  finish: null
+loop:
+  stage: done
+  goal_cycle: 1
+  iteration: 2
+  attempt: 1
+  retry_epoch: 1
+  failed_iteration_count: 0
+  no_progress_count: 0
+  execution_failure_count: 0
+  previous_unresolved_ids: []
+  next_action: null
+acceptance:
+  - id: A1
+    source: brief.md
+    text: 两个自动检测已开启的账号按各自的有效间隔独立产生任务；未覆盖的账号继承全局间隔。
+    result: passed
+    reason:
+      text: Per-account interval SQL and locked enqueue recheck, inherited global
+        fallback; candidate-bound backend and PostgreSQL tests passed.
+      truncated: false
+  - id: A2
+    source: brief.md
+    text: 开启隔离策略的账号在手动或自动检测得到有效降智结论时退出整个账号业务调度；检测失败或超时不触发隔离。
+    result: passed
+    reason:
+      text: Effective degraded completion sets account-wide quarantine
+        transactionally; failed completion leaves the latest effective result
+        unchanged; backend and PostgreSQL tests passed.
+      truncated: false
+  - id: A3
+    source: brief.md
+    text: 因 ModelTrace 降智被隔离的账号仍按有效间隔参加自动复检；只有有效正常结论才恢复业务调用，失败和超时不解除隔离。
+    result: passed
+    reason:
+      text: Auto eligibility ignores only ModelTrace's own quarantine; normal
+        completion lifts it while failure and timeout do not; backend and
+        PostgreSQL tests passed.
+      truncated: false
+  - id: A4
+    source: brief.md
+    text: 账号只按最新有效结论维持降智/正常隔离状态：模型 A 有效降智后，即使模型 B 有效正常，也解除 ModelTrace
+      隔离；任一模型后续有效降智则重新隔离。失败不改变状态。
+    result: passed
+    reason:
+      text: Finish uses latest valid task ID and account-wide result rather than
+        model-specific quarantine; failure never updates latest; backend tests
+        passed.
+      truncated: false
+  - id: A5
+    source: brief.md
+    text: 关闭隔离策略立即撤销由 ModelTrace 设置的隔离；关闭自动检测则保留隔离，并允许手动检测恢复。其他独立的不可调用原因不受影响。
+    result: passed
+    reason:
+      text: Policy-off extra merge removes only the managed quarantine marker, not
+        independent runtime blockers; disabling auto retains quarantine; backend
+        and PostgreSQL tests passed.
+      truncated: false
+  - id: A6
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 账号和模型隔离 - **WHEN** 管理员选择某 OpenAI 账号及一个支持的模型发起检测 - **THEN**
+      探针使用该账号的凭据归属、协议及业务代理，记录选择模型与有效目标模型；不得换用其他账号并将其结果归入所选账号。
+    result: passed
+    reason:
+      text: Probe resolves selected account and its credential owner, uses selected
+        account proxy and configured protocol, records selected and mapped
+        target; focused backend tests passed.
+      truncated: false
+  - id: A7
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 单轮与多轮评分 - **WHEN** 分别完成 1、2 或 3 轮有效挑战 - **THEN**
+      各自使用相应样本数校准，归因第一名等于有效目标则记录正常，否则记录降智；概率和指纹库版本可查询。
+    result: passed
+    reason:
+      text: Versioned scoring uses per-round challenge samples and sample-count
+        calibration for one to three rounds; target comparison and probabilities
+        have candidate-bound scoring tests.
+      truncated: false
+  - id: A8
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 部分失败 - **WHEN** 请求 3 轮检测但仅 2 轮有效，或上游返回错误 - **THEN**
+      历史记录为失败并展示有效轮次和脱敏原因，不自动补发、不覆盖账号此前有效结论。
+    result: passed
+    reason:
+      text: Partial failure records completed rounds with redacted error, no hidden
+        retry or new effective result; service and repository tests passed.
+      truncated: false
+  - id: A9
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 关闭并重新打开 - **WHEN** 手动任务执行中关闭弹窗再重新打开 - **THEN**
+      任务继续运行，界面恢复其进度或结果，不因打开动作重复发起模型请求。
+    result: passed
+    reason:
+      text: Modal reloads active task from history and polls after reopen without
+        creating a new request; frontend modal tests passed.
+      truncated: false
+  - id: A10
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 热更新和关闭 - **WHEN** 管理员保存有效设置或关闭自动检测 - **THEN**
+      后续调度使用新配置，关闭后不再启动排队或新自动任务，手动检测仍然可用；非法参数拒绝保存且不改变原配置。
+    result: passed
+    reason:
+      text: Settings validation rejects invalid values without saving; scheduler
+        reloads configuration and worker rechecks queued-auto eligibility,
+        manual path remains available; backend tests passed.
+      truncated: false
+  - id: A11
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 开关组合 - **WHEN** 全局开启但账号独立开关关闭，或全局关闭而账号开关开启 - **THEN**
+      该账号不被自动检测，但管理员仍可发起手动检测；只有两个开关均开启且账号符合资格时才自动检测。
+    result: passed
+    reason:
+      text: Auto eligibility requires both global and account switches; manual
+        execution ignores those switches; candidate-bound backend tests passed.
+      truncated: false
+  - id: A12
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 账号独立频率 - **WHEN** 两个账号分别配置覆盖间隔和留空继承全局间隔 - **THEN**
+      各自按上次自动任务结束时间与各自生效的间隔调度；修改全局间隔仅改变继承者的后续调度。
+    result: passed
+    reason:
+      text: Database candidate scan and locked enqueue use effective per-account
+        interval against last_auto_finished_at; manual completion does not
+        advance clock; PostgreSQL test passed.
+      truncated: false
+  - id: A13
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 手动与自动降智 - **WHEN** 已开启隔离策略的账号完成手动或自动检测且有效结论为降智 - **THEN**
+      整个账号进入临时不可调用状态；其他模型也不被业务调度选中，检测历史仍记录原始结论。
+    result: passed
+    reason:
+      text: Valid manual or auto degraded result sets an account-wide scheduler
+        exclusion marker and outbox event, while history keeps source and
+        result; backend and PostgreSQL tests passed.
+      truncated: false
+  - id: A14
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 隔离期间仍可自动复检 - **WHEN** 账号仅因 ModelTrace 降智处于临时不可调用状态且自动检测开关仍开启 - **THEN**
+      账号按其有效间隔继续接受 ModelTrace 复检；有效正常结论可解除该隔离，失败、超时或继续降智不得放开业务调度。
+    result: passed
+    reason:
+      text: Only the ModelTrace marker is bypassed for auto recovery probes; unrelated
+        blockers remain enforced and failed rechecks do not clear isolation;
+        backend and PostgreSQL tests passed.
+      truncated: false
+  - id: A15
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 手动恢复与策略关闭 - **WHEN** 管理员手动检测得到有效正常结论，或关闭该账号的降智隔离策略 - **THEN** 解除仅由
+      ModelTrace 造成的隔离；若存在其他独立原因，账号仍保持不可调用。
+    result: passed
+    reason:
+      text: Normal completion and policy-off remove the managed marker without
+        clearing independent temporary-unavailability fields; backend and
+        PostgreSQL tests passed.
+      truncated: false
+  - id: A16
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 自动检测关闭 - **WHEN** 账号已因降智被隔离，自动检测被关闭 - **THEN** 已有隔离继续保持；可以手动复检或关闭隔离策略来恢复。
+    result: passed
+    reason:
+      text: Automatic detection switches are independent from stored quarantine and
+        manual task creation; backend policy tests passed.
+      truncated: false
+  - id: A17
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 账号级最新有效结论 - **WHEN** 同账号模型 A 有效降智、随后模型 B 有效正常，接着发生一次失败的检测 - **THEN** 模型 A
+      的降智先使账号隔离，模型 B 的正常解除 ModelTrace 隔离，最后的失败不重新隔离；评分历史仍保留各次模型与结论。
+    result: passed
+    reason:
+      text: Latest completed valid task governs account-wide quarantine across models;
+        failed task preserves prior summary and historical entries; backend
+        tests passed.
+      truncated: false
+  - id: A18
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 来源和持久化 - **WHEN** 同账号先后执行手动与自动检测后刷新页面或重启服务 - **THEN** 30
+      天内的记录可分页查询并准确区分来源、模型、轮次及结论；非管理员不能读取或触发检测。
+    result: passed
+    reason:
+      text: Repository persists sourced tasks, paginates history and prunes at 30 days
+        without removing latest summary; admin handlers validate access and
+        bounds; backend and PostgreSQL tests passed.
+      truncated: false
+  - id: A19
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 多模型最近结果 - **WHEN** 同账号 Astra 检测降智后 Sol 检测正常，再发生一次请求失败 - **THEN**
+      状态列显示最近有效的正常结果并标明 Sol 和检测时间，历史保留 Astra 降智及最新失败；点击状态进入该账号历史页签。
+    result: passed
+    reason:
+      text: OpenAI status reads latest valid summary and opens the history tab; a
+        subsequent failure leaves summary intact; frontend and repository tests
+        passed.
+      truncated: false
+  - id: A20
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 并发与中断 - **WHEN** 多实例或手动/自动同时请求检测同一账号，或执行中服务中断 - **THEN**
+      同账号最多一个任务执行，其他触发复用或等待既有任务；中断留下可查询的失败结果，不以正常/降智掩盖故障，也不自动重发已经发送的轮次。
+    result: passed
+    reason:
+      text: Current-candidate Runtime PostgreSQL check backend-modeltrace-postgres
+        executed successfully (exit 0, 9.16s). Integration test exercises
+        concurrent enqueue and separate owner identities, claim fencing, expired
+        lease/deadline interruption recorded as failed, no replay and rejection
+        of stale finishes; service recovery tests passed. Actual process
+        kill/restart was not run.
+      truncated: false
+builder_handoff:
+  candidate_id: 858f64f3-5f1d-42da-9938-fa418fa6de0b
+  identity_provider: skill-coordinated
+  builder_execution_ref: skill-coordinated:builder:8af8f5ec-52bf-4d44-8c64-83f9aa186678
+  iteration: 2
+  summary:
+    text: 修正 PostgreSQL 隔离集成测试对待消费 scheduler outbox 去重的错误计数假设；模拟调度器释放旧事件去重键后再次检验每次
+      ModelTrace 隔离状态切换。真实独立临时 PostgreSQL 17.6 下三项集成测试均已通过，未更改业务实现。
+    truncated: false
+  addressed_acceptance_ids:
+    - A1
+    - A2
+    - A3
+    - A4
+    - A5
+    - A6
+    - A7
+    - A8
+    - A9
+    - A10
+    - A11
+    - A12
+    - A13
+    - A14
+    - A15
+    - A16
+    - A17
+    - A18
+    - A19
+    - A20
+  checks:
+    - name:
+        text: 本机隔离 PostgreSQL 集成测试
+        truncated: false
+      result: passed
+      note:
+        text: SUB2API_MODELTRACE_POSTGRES=1 go test -tags modeltrace_postgres
+          ./internal/repository -run
+          'TestModelTraceAccountIntervalAndQuarantine|TestModelTraceExtraMergeClearsOnlyManagedPolicyState|TestModelTracePersistenceLeasesRetentionAndDeletion'
+          -count=1 -v 通过；每轮创建的独立测试库均自动删除。
+        truncated: false
+    - name:
+        text: 已通过的代码检查
+        truncated: false
+      result: passed
+      note:
+        text: 服务、仓储、管理和 WebSocket 后端全包测试，176项账号前端用例、类型检查、构建、go vet、带unit标签的调度测试均通过。
+        truncated: false
+  checks_truncated: false
+  known_limits:
+    - text: 真实上游账号未消耗额度实测。既有 scheduler outbox 提交乱序可能延迟跨实例缓存收敛，默认周期重建提供兜底，禁用重建时不保证自动收敛。
+      truncated: false
+  known_limits_truncated: false
+  review: null
+  submitted_at: 2026-09-28T03:01:38.473Z
+blockers: []
+verification:
+  candidate_id: 858f64f3-5f1d-42da-9938-fa418fa6de0b
+  identity_provider: skill-coordinated
+  verifier_execution_ref: skill-coordinated:verifier:c948807f-8573-4bd2-99ab-e44f37d48cd7
+  iteration: 2
+  attempt: 1
+  assurance: skill-coordinated
+  verdict: pass
+  checks:
+    - id: backend-modeltrace-policy
+      name:
+        text: 后端账号策略与调度回归
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: ./internal/service
+          truncated: false
+        - text: ./internal/repository
+          truncated: false
+        - text: ./internal/handler
+          truncated: false
+        - text: ./internal/handler/admin
+          truncated: false
+        - text: ./cmd/server
+          truncated: false
+        - text: -run
+          truncated: false
+        - text: ModelTrace|SchedulerAccountEventRetriesWhenBucketLockIsBusy|OpenAIResponsesWebSocket_RechecksModelTraceQuarantineOnLaterTurns
+          truncated: false
+        - text: -count=1
+          truncated: false
+      argv_truncated: false
+      cwd_ref: backend
+      status: passed
+      exit_code: 0
+      duration_ms: 12489
+    - id: frontend-modeltrace-policy
+      name:
+        text: 前端账号策略回归
+        truncated: false
+      argv_display:
+        - text: exec
+          truncated: false
+        - text: vitest
+          truncated: false
+        - text: --
+          truncated: false
+        - text: run
+          truncated: false
+        - text: src/components/account/__tests__/CreateAccountModal.spec.ts
+          truncated: false
+        - text: src/components/account/__tests__/EditAccountModal.spec.ts
+          truncated: false
+        - text: src/components/account/__tests__/AccountStatusIndicator.spec.ts
+          truncated: false
+      argv_truncated: false
+      cwd_ref: frontend
+      status: passed
+      exit_code: 0
+      duration_ms: 13336
+    - id: frontend-modeltrace-modal-status
+      name:
+        text: ModelTrace modal and IQ status regression
+        truncated: false
+      argv_display:
+        - text: exec
+          truncated: false
+        - text: vitest
+          truncated: false
+        - text: --
+          truncated: false
+        - text: run
+          truncated: false
+        - text: src/components/account/__tests__/ModelTraceModal.spec.ts
+          truncated: false
+        - text: src/components/account/__tests__/ModelTraceStatus.spec.ts
+          truncated: false
+      argv_truncated: false
+      cwd_ref: frontend
+      status: passed
+      exit_code: 0
+      duration_ms: 5288
+    - id: frontend-modeltrace-typecheck
+      name:
+        text: Frontend typecheck
+        truncated: false
+      argv_display:
+        - text: run
+          truncated: false
+        - text: typecheck
+          truncated: false
+      argv_truncated: false
+      cwd_ref: frontend
+      status: passed
+      exit_code: 0
+      duration_ms: 38381
+    - id: backend-modeltrace-scoring-quota
+      name:
+        text: ModelTrace calibrated scoring and quota exclusion
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: ./internal/pkg/modeltrace
+          truncated: false
+        - text: ./internal/service
+          truncated: false
+        - text: -run
+          truncated: false
+        - text: TestUpstreamAstraReference|TestChallengeAndInvalidSamples|TestShouldAutoPauseOpenAIAccountByQuota_AutoResetCreditStates|TestModelTraceRecoveryProbeRespectsOtherBlockers
+          truncated: false
+        - text: -count=1
+          truncated: false
+      argv_truncated: false
+      cwd_ref: backend
+      status: passed
+      exit_code: 0
+      duration_ms: 5971
+    - id: backend-modeltrace-postgres
+      name:
+        text: ModelTrace isolated PostgreSQL integration
+        truncated: false
+      argv_display:
+        - text: -NoProfile
+          truncated: false
+        - text: -Command
+          truncated: false
+        - text: $env:SUB2API_MODELTRACE_POSTGRES='1'; go test -tags modeltrace_postgres
+            ./internal/repository -run
+            'TestModelTracePersistenceLeasesRetentionAndDeletion|TestModelTraceAccountIntervalAndQuarantine|TestModelTraceExtraMergeClearsOnlyManagedPolicyState|TestModelTraceFingerprintPostgres'
+            -count=1; exit $LASTEXITCODE
+          truncated: false
+      argv_truncated: false
+      cwd_ref: backend
+      status: passed
+      exit_code: 0
+      duration_ms: 9160
+  summary:
+    text: Independent read-only review of all A1-A20 passed. Six current-candidate
+      Runtime checks passed, including real isolated PostgreSQL integration; the
+      new test adjustment releases consumed outbox dedup keys before checking
+      each quarantine transition. No product files changed and no actual
+      upstream request or process kill was claimed.
+    truncated: false
+  risks:
+    - text: No live upstream account probe or physical multi-process kill/restart; A20
+        uses real PostgreSQL with multiple owner identities and simulated
+        lease/deadline expiry.
+      truncated: false
+    - text: Existing scheduler outbox commit-ordering can delay cross-instance cache
+        convergence until the default periodic rebuild; disabling that rebuild
+        removes this fallback.
+      truncated: false
+  risks_truncated: false
+  completed_at: 2026-09-28T03:13:34.559Z
+history:
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 1
+    outcome: blocked
+    unresolved_ids:
+      - A20
+    summary:
+      text: "Independent read-only review: A1-A19 passed with source and five
+        candidate-bound Runtime checks; A20 blocked on unavailable real
+        PostgreSQL multi-instance/restart verification. No project files
+        changed; no acceptance or archive action taken."
+      truncated: false
+    completed_at: 2026-09-28T01:48:56.865Z
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 1
+    outcome: recovery
+    unresolved_ids: []
+    summary:
+      text: 发现并启动隔离的本机 PostgreSQL 17.6；实际运行三个 ModelTrace 集成测试全部通过，唯一失败是测试把待消费 outbox
+        去重事件误算成两行，已修正测试断言并重跑。测试数据库已删除；A20 外部验收阻塞已解除，进入独立复验。
+      truncated: false
+    completed_at: 2026-09-28T02:52:33.913Z
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 1
+    outcome: recovery
+    unresolved_ids: []
+    summary:
+      text: Native check input changed after the candidate was built; a new Builder
+        candidate is required before checks can run again.
+      truncated: false
+    completed_at: 2026-09-28T03:00:38.309Z
+  - goal_cycle: 1
+    iteration: 2
+    attempt: 1
+    outcome: pass
+    unresolved_ids: []
+    summary:
+      text: Independent read-only review of all A1-A20 passed. Six current-candidate
+        Runtime checks passed, including real isolated PostgreSQL integration;
+        the new test adjustment releases consumed outbox dedup keys before
+        checking each quarantine transition. No product files changed and no
+        actual upstream request or process kill was claimed.
+      truncated: false
+    completed_at: 2026-09-28T03:13:34.559Z
+history_overflow:
+  dropped_entries: 0
+  first_dropped_at: null
+  last_dropped_at: null
+  outcome_counts:
+    pass: 0
+    fail: 0
+    blocked: 0
+    execution-error: 0
+    recovery: 0
+verification_result: pass
+verification_report: verification.md
+archived: true
+created_at: 2026-09-27T16:50:18.554Z
