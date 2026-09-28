@@ -10,6 +10,7 @@ const {
   checkMixedChannelRiskMock,
   authIsSimpleMode,
   getSettingsMock,
+  getModelTraceModelsMock,
   getWebSearchEmulationConfigMock,
   listTLSFingerprintProfilesMock,
   showErrorMock,
@@ -20,6 +21,7 @@ const {
   checkMixedChannelRiskMock: vi.fn(),
   authIsSimpleMode: { value: true },
   getSettingsMock: vi.fn(),
+  getModelTraceModelsMock: vi.fn(),
   getWebSearchEmulationConfigMock: vi.fn(),
   listTLSFingerprintProfilesMock: vi.fn(),
   showErrorMock: vi.fn(),
@@ -61,6 +63,10 @@ vi.mock('@/api/admin', () => ({
 
 vi.mock('@/api/admin/accounts', () => ({
   getAntigravityDefaultModelMapping: vi.fn()
+}))
+
+vi.mock('@/api/admin/modeltrace', () => ({
+  default: { getModels: getModelTraceModelsMock }
 }))
 
 vi.mock('vue-i18n', async () => {
@@ -395,6 +401,7 @@ describe('EditAccountModal', () => {
     checkMixedChannelRiskMock.mockReset()
     getSettingsMock.mockReset()
     getSettingsMock.mockResolvedValue({ account_quota_notify_enabled: true })
+    getModelTraceModelsMock.mockReset().mockResolvedValue({ models: ['gpt-6-astra', 'gpt-6-sol'], version: 'v1' })
     getWebSearchEmulationConfigMock.mockReset()
     getWebSearchEmulationConfigMock.mockResolvedValue({ enabled: true, providers: ['brave'] })
     showErrorMock.mockReset()
@@ -1475,6 +1482,16 @@ describe('EditAccountModal', () => {
     expect(extra).toMatchObject({ modeltrace_enabled: true, modeltrace_interval_minutes: 10080 })
     expect(extra).not.toHaveProperty('modeltrace_quarantine_enabled')
     expect(extra).not.toHaveProperty('modeltrace_quarantined')
+  })
+
+  it('loads and updates the account ModelTrace model override', async () => {
+    const wrapper = mountModal(buildAccount({ extra: { modeltrace_model: 'gpt-6-astra' } }))
+    await flushPromises()
+    expect((wrapper.get('[data-testid="modeltrace-model"]').element as HTMLSelectElement).value).toBe('gpt-6-astra')
+    await wrapper.get('[data-testid="modeltrace-model"]').setValue('gpt-6-sol')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({ modeltrace_model: 'gpt-6-sol' })
   })
 
   it('clears an interval override and disables quarantine without copying stale state', async () => {

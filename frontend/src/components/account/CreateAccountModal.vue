@@ -3513,6 +3513,14 @@
           <Toggle id="create-modeltrace-enabled" v-model="modelTraceEnabled" data-testid="modeltrace-enabled" :aria-label="t('admin.modeltrace.accountEnabled')" aria-describedby="create-modeltrace-hint" />
         </div>
         <div>
+          <label for="create-modeltrace-model" class="input-label">{{ t('admin.modeltrace.accountModel') }}</label>
+          <select id="create-modeltrace-model" v-model="modelTraceModel" data-testid="modeltrace-model" class="input w-full" :disabled="modelTraceModelsLoading">
+            <option value="">{{ t('admin.modeltrace.accountModelPlaceholder') }}</option>
+            <option v-for="name in modelTraceModels" :key="name" :value="name">{{ name }}</option>
+          </select>
+          <p id="create-modeltrace-model-hint" class="input-hint">{{ t('admin.modeltrace.accountModelHint') }}</p>
+        </div>
+        <div>
           <label for="create-modeltrace-interval" class="input-label">{{ t('admin.modeltrace.accountInterval') }}</label>
           <input id="create-modeltrace-interval" v-model="modelTraceInterval" data-testid="modeltrace-interval" type="text" inputmode="numeric" class="input" :placeholder="t('admin.modeltrace.accountIntervalPlaceholder')" :aria-invalid="parseModelTraceInterval(modelTraceInterval) === undefined" aria-describedby="create-modeltrace-interval-hint" />
           <p id="create-modeltrace-interval-hint" class="input-hint">{{ t('admin.modeltrace.accountIntervalHint') }}</p>
@@ -3990,6 +3998,7 @@ import {
   isValidWildcardPattern
 } from '@/composables/useModelWhitelist'
 import { adminAPI } from '@/api/admin'
+import modeltraceAPI from '@/api/admin/modeltrace'
 import { useQuotaNotifyState } from '@/composables/useQuotaNotifyState'
 import {
   useAccountOAuth,
@@ -4523,8 +4532,23 @@ const applyGrokOAuthUpstreamConfig = (credentials: Record<string, unknown>) => {
 const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(true)
 const modelTraceEnabled = ref(false)
+const modelTraceModel = ref('')
 const modelTraceInterval = ref('')
 const modelTraceQuarantineEnabled = ref(false)
+const modelTraceModels = ref<string[]>([])
+const modelTraceModelsLoading = ref(false)
+
+async function loadModelTraceModels() {
+  if (form.platform !== 'openai') return
+  modelTraceModelsLoading.value = true
+  try {
+    modelTraceModels.value = (await modeltraceAPI.getModels()).models
+  } catch {
+    modelTraceModels.value = []
+  } finally {
+    modelTraceModelsLoading.value = false
+  }
+}
 const openaiPassthroughEnabled = ref(false)
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
@@ -4894,6 +4918,7 @@ watch(
         .catch(() => { tlsFingerprintProfiles.value = [] })
       // Modal opened - fill related models
       allowedModels.value = [...getModelsByPlatform(form.platform)]
+      void loadModelTraceModels()
       // Antigravity: 默认使用映射模式并填充默认映射
       if (form.platform === 'antigravity') {
         antigravityModelRestrictionMode.value = 'mapping'
@@ -4941,6 +4966,7 @@ watch(
 watch(
   () => form.platform,
   (newPlatform) => {
+    if (newPlatform === 'openai') void loadModelTraceModels()
     // Reset base URL based on platform
     if (isCNProviderPlatform(newPlatform) || newPlatform === 'opencode_go') {
       const mode = newPlatform === 'opencode_go' ? openCodeAccountMode.value : accountMode.value
@@ -5488,6 +5514,7 @@ const resetForm = () => {
   interceptWarmupRequests.value = false
   autoPauseOnExpired.value = true
   modelTraceEnabled.value = false
+  modelTraceModel.value = ''
   modelTraceInterval.value = ''
   modelTraceQuarantineEnabled.value = false
   openaiPassthroughEnabled.value = false
@@ -5565,6 +5592,8 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
 
   const extra: Record<string, unknown> = { ...(base || {}) }
   extra.modeltrace_enabled = modelTraceEnabled.value
+  if (modelTraceModel.value) extra.modeltrace_model = modelTraceModel.value
+  else delete extra.modeltrace_model
   const interval = parseModelTraceInterval(modelTraceInterval.value)
   if (interval != null) extra.modeltrace_interval_minutes = interval
   else delete extra.modeltrace_interval_minutes
@@ -5819,6 +5848,10 @@ const handleVertexServiceAccountDrop = async (event: DragEvent) => {
 const handleSubmit = async () => {
   if (form.platform === 'openai' && parseModelTraceInterval(modelTraceInterval.value) === undefined) {
     appStore.showError(t('admin.modeltrace.invalidAccountInterval'))
+    return
+  }
+  if (form.platform === 'openai' && modelTraceModel.value && modelTraceModels.value.length && !modelTraceModels.value.includes(modelTraceModel.value)) {
+    appStore.showError(t('admin.modeltrace.invalidAccountModel'))
     return
   }
   // For OAuth-based type, handle OAuth flow (goes to step 2)

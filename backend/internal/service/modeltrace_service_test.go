@@ -30,10 +30,14 @@ func (r *modelTraceSettingsStub) Set(_ context.Context, _, raw string) error { r
 
 type modelTraceAccountsStub struct {
 	AccountRepository
-	account *Account
+	account   *Account
+	getByIDFn func() (*Account, error)
 }
 
 func (r *modelTraceAccountsStub) GetByID(context.Context, int64) (*Account, error) {
+	if r.getByIDFn != nil {
+		return r.getByIDFn()
+	}
 	if r.account == nil {
 		return nil, ErrAccountNotFound
 	}
@@ -139,6 +143,7 @@ type modelTraceProbeStub struct {
 	resolveErr error
 	invalid    bool
 	received   *Account
+	afterProbe func(int)
 }
 
 func (p *modelTraceProbeStub) ResolveModelTraceTarget(context.Context, int64, string) (*Account, string, error) {
@@ -147,6 +152,9 @@ func (p *modelTraceProbeStub) ResolveModelTraceTarget(context.Context, int64, st
 func (p *modelTraceProbeStub) ProbeModelTrace(ctx context.Context, account *Account, _ string, challenge modeltrace.Challenge) (string, error) {
 	p.calls++
 	p.received = account
+	if p.afterProbe != nil {
+		p.afterProbe(p.calls)
+	}
 	if p.calls == p.failAt {
 		return "", errors.New("https://user:password@proxy upstream api_key=secret cookie=secret")
 	}
@@ -456,6 +464,113 @@ func TestModelTraceAccountPolicyValidation(t *testing.T) {
 	}
 	require.Error(t, ValidateModelTraceAccountExtra(map[string]any{ModelTraceQuarantineEnabledExtraKey: "true"}))
 	require.NoError(t, ValidateModelTraceAccountExtra(map[string]any{ModelTraceQuarantineEnabledExtraKey: false}))
+	require.NoError(t, ValidateModelTraceAccountExtra(map[string]any{ModelTraceModelExtraKey: "gpt-6-sol"}))
+	require.NoError(t, ValidateModelTraceAccountExtra(map[string]any{ModelTraceModelExtraKey: ""}))
+	require.Error(t, ValidateModelTraceAccountExtra(map[string]any{ModelTraceModelExtraKey: "claude-sonnet-4-6"}))
+}
+
+func TestModelTraceAccountModelUsesOverrideOrGlobal(t *testing.T) {
+	cfg := ModelTraceSettings{Model: "gpt-6-astra"}
+	account := &Account{Extra: map[string]any{}}
+	require.Equal(t, "gpt-6-astra", modelTraceModelForAccount(account, cfg))
+	account.Extra[ModelTraceModelExtraKey] = "gpt-6-sol"
+	require.Equal(t, "gpt-6-sol", modelTraceModelForAccount(account, cfg))
+	account.Extra[ModelTraceModelExtraKey] = ""
+	require.Equal(t, "gpt-6-astra", modelTraceModelForAccount(account, cfg))
+}
+
+func TestModelTraceAutoTaskSnapshotsAccountModelOverride(t *testing.T) {
+	tasks := &modelTraceTasksStub{}
+	settings := &SettingService{settingRepo: &modelTraceSettingsStub{}}
+	cfg := ModelTraceSettings{Enabled: true, Model: "gpt-6-astra", Rounds: 1, IntervalMinutes: 60}
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true,
+		Extra: map[string]any{ModelTraceEnabledExtraKey: true, ModelTraceModelExtraKey: "gpt-6-sol"}}
+	s := &ModelTraceService{ctx: context.Background(), repo: tasks, accounts: &modelTraceAccountsStub{account: account}, settings: settings,
+		epoch: &modelTraceEpoch{owner: "owner", ctx: context.Background()}}
+	task, err := s.enqueue(context.Background(), account.ID, cfg.Model, 1, "auto", cfg)
+	require.NoError(t, err)
+	require.Equal(t, "gpt-6-sol", task.Model)
+	require.True(t, task.ModelOverride)
+}
+
+func TestModelTraceClearedOverrideInvalidatesQueuedTask(t *testing.T) {
+	tasks := &modelTraceTasksStub{}
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true, Extra: map[string]any{ModelTraceEnabledExtraKey: true}}
+	probe := &modelTraceProbeStub{account: account, target: "gpt-6-sol"}
+	settings := &SettingService{settingRepo: &modelTraceSettingsStub{}}
+	require.NoError(t, settings.SetModelTraceSettings(context.Background(), ModelTraceSettings{Enabled: true, Model: "gpt-6-astra", Rounds: 1, IntervalMinutes: 60}))
+	s := &ModelTraceService{ctx: context.Background(), repo: tasks, accounts: &modelTraceAccountsStub{account: account}, settings: settings, prober: probe}
+	s.execute(context.Background(), "owner", &ModelTraceTask{AccountID: account.ID, Source: "auto", Model: "gpt-6-sol", TargetModel: "gpt-6-sol", ModelOverride: true, Rounds: 1})
+	require.Equal(t, "automatic detection model changed before execution", tasks.finished.Error)
+	require.Zero(t, probe.calls)
+}
+
+func TestModelTraceAutoRechecksModelBeforeProbe(t *testing.T) {
+	tasks := &modelTraceTasksStub{}
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true,
+		Extra: map[string]any{ModelTraceEnabledExtraKey: true, ModelTraceModelExtraKey: "gpt-6-sol"}}
+	reads := 0
+	accounts := &modelTraceAccountsStub{getByIDFn: func() (*Account, error) {
+		reads++
+		if reads == 2 {
+			delete(account.Extra, ModelTraceModelExtraKey)
+		}
+		return account, nil
+	}}
+	settings := &SettingService{settingRepo: &modelTraceSettingsStub{}}
+	require.NoError(t, settings.SetModelTraceSettings(context.Background(), ModelTraceSettings{Enabled: true, Model: "gpt-6-astra", Rounds: 1, IntervalMinutes: 60}))
+	probe := &modelTraceProbeStub{account: account, target: "gpt-6-sol"}
+	s := &ModelTraceService{ctx: context.Background(), repo: tasks, accounts: accounts, settings: settings, prober: probe}
+	s.execute(context.Background(), "owner", &ModelTraceTask{AccountID: 1, Source: "auto", Model: "gpt-6-sol", TargetModel: "gpt-6-sol", ModelOverride: true, Rounds: 1})
+	require.Equal(t, "automatic detection model changed before execution", tasks.finished.Error)
+	require.Zero(t, probe.calls)
+}
+
+func TestModelTraceSentAutoTaskKeepsModelAfterOverrideChanges(t *testing.T) {
+	tasks := &modelTraceTasksStub{}
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true,
+		Extra: map[string]any{ModelTraceEnabledExtraKey: true, ModelTraceModelExtraKey: "gpt-6-sol"}}
+	settings := &SettingService{settingRepo: &modelTraceSettingsStub{}}
+	require.NoError(t, settings.SetModelTraceSettings(context.Background(), ModelTraceSettings{Enabled: true, Model: "gpt-6-astra", Rounds: 2, IntervalMinutes: 60}))
+	probe := &modelTraceProbeStub{account: account, target: "gpt-6-sol", afterProbe: func(calls int) {
+		if calls == 1 {
+			delete(account.Extra, ModelTraceModelExtraKey)
+		}
+	}}
+	s := &ModelTraceService{ctx: context.Background(), repo: tasks, accounts: &modelTraceAccountsStub{account: account}, settings: settings, prober: probe}
+	s.execute(context.Background(), "owner", &ModelTraceTask{AccountID: 1, Source: "auto", Model: "gpt-6-sol", TargetModel: "gpt-6-sol", ModelOverride: true, Rounds: 2})
+	require.Equal(t, 2, probe.calls)
+	require.Equal(t, "completed", tasks.finished.Status)
+}
+
+func TestModelTraceCreateDefersCredentialFailureToHistory(t *testing.T) {
+	tasks := &modelTraceTasksStub{}
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true}
+	probe := &modelTraceProbeStub{resolveErr: errors.New("credentials unavailable")}
+	s := &ModelTraceService{ctx: context.Background(), repo: tasks, accounts: &modelTraceAccountsStub{account: account}, prober: probe,
+		epoch: &modelTraceEpoch{owner: "owner", ctx: context.Background()}}
+	task, err := s.Create(context.Background(), account.ID, "gpt-6-sol", 1)
+	require.NoError(t, err)
+	require.Equal(t, "gpt-6-sol", task.Model)
+	s.execute(context.Background(), "owner", task)
+	require.Equal(t, "failed", tasks.finished.Status)
+	require.Empty(t, tasks.finished.Result)
+}
+
+func TestModelTraceModelsDoNotFilterAccountMappings(t *testing.T) {
+	account := &Account{ID: 1, Platform: PlatformOpenAI, Credentials: map[string]any{
+		"model_mapping": map[string]any{"gpt-6-astra": "gpt-6-sol"},
+	}}
+	s := &ModelTraceService{accounts: &modelTraceAccountsStub{account: account}}
+	models, err := s.Models(context.Background(), account.ID)
+	require.NoError(t, err)
+	require.Equal(t, modeltrace.Models(), models)
+
+	nonOpenAI := &Account{ID: 2, Platform: PlatformAnthropic}
+	s.accounts = &modelTraceAccountsStub{account: nonOpenAI}
+	models, err = s.Models(context.Background(), nonOpenAI.ID)
+	require.NoError(t, err)
+	require.Empty(t, models)
 }
 
 func TestModelTraceUnspecifiedEditInheritsLockedPolicy(t *testing.T) {

@@ -88,7 +88,7 @@ func TestModelTraceProbeProtocolsAndSol(t *testing.T) {
 	}
 }
 
-func TestModelTraceProbeShadowMappingAndNoRetry(t *testing.T) {
+func TestModelTraceProbeShadowCredentialsAndNoRetry(t *testing.T) {
 	parentID, proxyID := int64(31), int64(5)
 	parent := &Account{ID: parentID, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "parent-secret"}}
 	shadow := &Account{ID: 32, Platform: PlatformOpenAI, Type: AccountTypeOAuth, ParentAccountID: &parentID, ProxyID: &proxyID, Proxy: &Proxy{Protocol: "http", Host: "proxy.example", Port: 8080}, Credentials: map[string]any{"model_mapping": map[string]any{"gpt-6-astra": "gpt-5.6-sol"}}}
@@ -96,7 +96,7 @@ func TestModelTraceProbeShadowMappingAndNoRetry(t *testing.T) {
 	s := &AccountTestService{accountRepo: &modelTraceCredentialRepo{accounts: map[int64]*Account{31: parent, 32: shadow}}, httpUpstream: u}
 	account, target, err := s.ResolveModelTraceTarget(context.Background(), 32, "gpt-6-astra")
 	require.NoError(t, err)
-	require.Equal(t, "gpt-5.6-sol", target)
+	require.Equal(t, "gpt-6-astra", target)
 	_, err = s.ProbeModelTrace(context.Background(), account, target, modeltrace.Challenge{Prompt: "probe"})
 	require.Error(t, err)
 	require.Equal(t, 1, u.calls)
@@ -105,8 +105,9 @@ func TestModelTraceProbeShadowMappingAndNoRetry(t *testing.T) {
 	require.Equal(t, shadow.ID, u.accountID)
 	// Embedded repository methods panic if the probe tries SetError or cooldown mutation.
 	shadow.Credentials = map[string]any{"model_mapping": map[string]any{"gpt-6-astra": "unsupported-model"}}
-	_, _, err = s.ResolveModelTraceTarget(context.Background(), 32, "gpt-6-astra")
-	require.Error(t, err)
+	_, target, err = s.ResolveModelTraceTarget(context.Background(), 32, "gpt-6-astra")
+	require.NoError(t, err)
+	require.Equal(t, "gpt-6-astra", target)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err = s.ProbeModelTrace(ctx, account, target, modeltrace.Challenge{Prompt: "probe"})

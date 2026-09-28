@@ -9,6 +9,7 @@ const {
   probeUpstreamBillingMock,
   checkMixedChannelRiskMock,
   getSettingsMock,
+  getModelTraceModelsMock,
   getWebSearchEmulationConfigMock,
   showErrorMock,
   showInfoMock,
@@ -22,6 +23,7 @@ const {
   probeUpstreamBillingMock: vi.fn(),
   checkMixedChannelRiskMock: vi.fn(),
   getSettingsMock: vi.fn(),
+  getModelTraceModelsMock: vi.fn(),
   getWebSearchEmulationConfigMock: vi.fn(),
   showErrorMock: vi.fn(),
   syncUpstreamModelsMock: vi.fn(),
@@ -67,6 +69,10 @@ vi.mock('@/api/admin', () => ({
       list: vi.fn().mockResolvedValue([])
     }
   }
+}))
+
+vi.mock('@/api/admin/modeltrace', () => ({
+  default: { getModels: getModelTraceModelsMock }
 }))
 
 vi.mock('@/composables/useModelWhitelist', () => ({
@@ -433,6 +439,7 @@ describe('CreateAccountModal', () => {
     createOpenAICodexPATMock.mockReset().mockResolvedValue({})
     checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
     getSettingsMock.mockReset().mockResolvedValue({ account_quota_notify_enabled: true })
+    getModelTraceModelsMock.mockReset().mockResolvedValue({ models: ['gpt-6-astra', 'gpt-6-sol'], version: 'v1' })
     getWebSearchEmulationConfigMock.mockReset().mockResolvedValue({ enabled: true, providers: ['brave'] })
     showErrorMock.mockReset()
     showInfoMock.mockReset()
@@ -608,6 +615,16 @@ describe('CreateAccountModal', () => {
     await switchToOpenAIApiKey(wrapper)
     expect((wrapper.get('[data-testid="modeltrace-interval"]').element as HTMLInputElement).value).toBe('')
     expect(wrapper.get('[data-testid="modeltrace-quarantine"]').attributes('aria-checked')).toBe('false')
+  })
+
+  it('submits an optional account ModelTrace model override', async () => {
+    const wrapper = mountModal()
+    await switchToOpenAIApiKey(wrapper)
+    await wrapper.get('[data-tour="account-form-name"]').setValue('Model override')
+    await wrapper.get('[data-testid="modeltrace-model"]').setValue('gpt-6-sol')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra).toMatchObject({ modeltrace_model: 'gpt-6-sol' })
   })
 
   it.each(['4', '10081', '5.5', '0', '-5', '1e2', 'abc'])('blocks an invalid OpenAI interval on create: %s', async value => {

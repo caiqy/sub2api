@@ -45,6 +45,13 @@ describe('ModelTrace modal lifecycle', () => {
     expect(api.start).toHaveBeenCalledWith(1, { model: 'gpt-6-astra', rounds: 1 })
     expect(w.get('[data-testid="modeltrace-start"]').attributes('disabled')).toBeDefined()
   })
+  it('shows the complete ModelTrace list returned for the OpenAI account', async () => {
+    const w = open()
+    await flushPromises()
+    expect(w.get('select').text()).toContain('gpt-6-sol')
+    expect(w.get('select').text()).toContain('gpt-5.6-sol')
+  })
+
   it('restores an active task, uses one serial polling loop and stops after completion', async () => {
     const poll = deferred<ReturnType<typeof history>>()
     api.list.mockResolvedValueOnce(history(task(), [task()])).mockReturnValueOnce(poll.promise).mockResolvedValue(history(null, [task('completed')]))

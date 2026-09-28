@@ -31,6 +31,9 @@ func modelTraceExtraMergeSQL(expression string, updates map[string]any) string {
 	if value, exists := updates[service.ModelTraceIntervalExtraKey]; exists && value == nil {
 		expression = "(" + expression + ") - 'modeltrace_interval_minutes'"
 	}
+	if value, exists := updates[service.ModelTraceModelExtraKey]; exists && value == nil {
+		expression = "(" + expression + ") - 'modeltrace_model'"
+	}
 	return expression
 }
 
@@ -38,7 +41,7 @@ func NewModelTraceRepository(db *sql.DB) service.ModelTraceRepository {
 	return &modelTraceRepository{db: db}
 }
 
-const modelTraceColumns = `id, account_id, source, status, model, target_model, rounds,
+const modelTraceColumns = `id, account_id, source, status, model, target_model, model_override, rounds,
     completed_rounds, result, winner, probabilities, version, created_at, started_at,
     finished_at, duration_ms, error`
 
@@ -53,7 +56,7 @@ func scanModelTrace(row interface{ Scan(...any) error }) (*service.ModelTraceTas
 	var t service.ModelTraceTask
 	var probabilities []byte
 	err := row.Scan(&t.ID, &t.AccountID, &t.Source, &t.Status, &t.Model, &t.TargetModel,
-		&t.Rounds, &t.CompletedRounds, &t.Result, &t.Winner, &probabilities, &t.Version,
+		&t.ModelOverride, &t.Rounds, &t.CompletedRounds, &t.Result, &t.Winner, &probabilities, &t.Version,
 		&t.CreatedAt, &t.StartedAt, &t.FinishedAt, &t.DurationMS, &t.Error)
 	if err != nil {
 		return nil, err
@@ -143,10 +146,10 @@ func (r *modelTraceRepository) Enqueue(ctx context.Context, task *service.ModelT
 		}
 	}
 	task, err = scanModelTrace(tx.QueryRowContext(ctx, `INSERT INTO modeltrace_tasks
-        (account_id, source, model, target_model, rounds, version, owner)
-        SELECT $1, $2, $3, $4, $5, $6, $7 WHERE EXISTS
-        (SELECT 1 FROM modeltrace_instances WHERE id = $7 AND expires_at > NOW())
-        RETURNING `+modelTraceColumns, task.AccountID, task.Source, task.Model, task.TargetModel, task.Rounds, task.Version, owner))
+        (account_id, source, model, target_model, model_override, rounds, version, owner)
+        SELECT $1, $2, $3, $4, $5, $6, $7, $8 WHERE EXISTS
+        (SELECT 1 FROM modeltrace_instances WHERE id = $8 AND expires_at > NOW())
+        RETURNING `+modelTraceColumns, task.AccountID, task.Source, task.Model, task.TargetModel, task.ModelOverride, task.Rounds, task.Version, owner))
 	if err != nil {
 		return nil, err
 	}

@@ -7,6 +7,7 @@ import (
 	"maps"
 	"math"
 	"slices"
+	"strings"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/modeltrace"
@@ -15,6 +16,7 @@ import (
 const ModelTraceEnabledExtraKey = "modeltrace_enabled"
 const ModelTraceLatestExtraKey = "modeltrace_latest"
 const ModelTraceIntervalExtraKey = "modeltrace_interval_minutes"
+const ModelTraceModelExtraKey = "modeltrace_model"
 const ModelTraceQuarantineEnabledExtraKey = "modeltrace_quarantine_enabled"
 const ModelTraceQuarantinedExtraKey = "modeltrace_quarantined"
 const modelTraceSettingsKey = "modeltrace_settings"
@@ -83,6 +85,15 @@ func modelTraceAutoEligible(account *Account, cfg ModelTraceSettings) bool {
 	return enabled
 }
 
+func modelTraceModelForAccount(account *Account, cfg ModelTraceSettings) string {
+	if account != nil {
+		if model, ok := account.Extra[ModelTraceModelExtraKey].(string); ok && strings.TrimSpace(model) != "" {
+			return strings.TrimSpace(model)
+		}
+	}
+	return cfg.Model
+}
+
 func (s *ModelTraceService) autoEligibleForTarget(ctx context.Context, account *Account, cfg ModelTraceSettings, selectedModel string) bool {
 	if !modelTraceAutoEligible(account, cfg) || account.isModelRateLimitedWithContext(ctx, selectedModel) {
 		return false
@@ -90,6 +101,12 @@ func (s *ModelTraceService) autoEligibleForTarget(ctx context.Context, account *
 	ctx = withOpenAIQuotaAutoPauseSettings(ctx, s.settings.GetOpenAIQuotaAutoPauseSettings(ctx))
 	paused, _ := shouldAutoPauseOpenAIAccountByQuota(ctx, account)
 	return !paused
+}
+
+func modelTraceAutoModelChanged(account *Account, task *ModelTraceTask) bool {
+	configured, configuredOK := account.Extra[ModelTraceModelExtraKey].(string)
+	configured = strings.TrimSpace(configured)
+	return (task.ModelOverride && (!configuredOK || configured == "")) || (configured != "" && configured != task.Model)
 }
 
 // ValidateModelTraceAccountExtra rejects malformed user configuration before it reaches the scheduler.
@@ -117,6 +134,12 @@ func ValidateModelTraceAccountExtra(extra map[string]any) error {
 	if value, ok := extra[ModelTraceQuarantineEnabledExtraKey]; ok && value != nil {
 		if _, valid := value.(bool); !valid {
 			return infraerrors.BadRequest("MODELTRACE_QUARANTINE_INVALID", "quarantine policy must be a boolean")
+		}
+	}
+	if value, ok := extra[ModelTraceModelExtraKey]; ok && value != nil {
+		model, valid := value.(string)
+		if !valid || (strings.TrimSpace(model) != "" && !slices.Contains(modeltrace.Models(), strings.TrimSpace(model))) {
+			return infraerrors.BadRequest("MODELTRACE_MODEL_INVALID", "account model must be empty or supported by the fingerprint library")
 		}
 	}
 	return nil
@@ -149,6 +172,16 @@ func MergeModelTraceExtra(incoming, current map[string]any) map[string]any {
 	} else if interval == nil {
 		delete(incoming, ModelTraceIntervalExtraKey)
 	}
+	if model, explicit := incoming[ModelTraceModelExtraKey]; !explicit {
+		if saved, ok := current[ModelTraceModelExtraKey]; ok {
+			incoming[ModelTraceModelExtraKey] = saved
+		}
+	} else {
+		value, ok := model.(string)
+		if model == nil || (ok && strings.TrimSpace(value) == "") {
+			delete(incoming, ModelTraceModelExtraKey)
+		}
+	}
 	if incoming[ModelTraceQuarantineEnabledExtraKey] == true && current[ModelTraceQuarantinedExtraKey] == true {
 		incoming[ModelTraceQuarantinedExtraKey] = true
 	}
@@ -159,6 +192,7 @@ func modelTraceExtraWithoutUnsubmittedPolicy(extra map[string]any) map[string]an
 	extra = maps.Clone(extra)
 	delete(extra, ModelTraceQuarantineEnabledExtraKey)
 	delete(extra, ModelTraceIntervalExtraKey)
+	delete(extra, ModelTraceModelExtraKey)
 	delete(extra, ModelTraceQuarantinedExtraKey)
 	return extra
 }

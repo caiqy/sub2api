@@ -24,7 +24,7 @@ func (s *AccountTestService) ResolveModelTraceTarget(ctx context.Context, id int
 	if err != nil {
 		return nil, "", err
 	}
-	if account == nil || !account.IsOpenAI() || account.IsSyntheticUITest() || !account.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityChatCompletions) || !account.IsModelSupported(model) {
+	if account == nil || !account.IsOpenAI() || account.IsSyntheticUITest() || !account.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityChatCompletions) {
 		return nil, "", errors.New("account does not support ModelTrace model")
 	}
 	credential, err := resolveCredentialAccount(ctx, s.accountRepo, account)
@@ -34,14 +34,10 @@ func (s *AccountTestService) ResolveModelTraceTarget(ctx context.Context, id int
 	if _, err := modelTraceBearer(credential); err != nil {
 		return nil, "", err
 	}
-	target := model
-	if !account.IsOpenAIPassthroughEnabled() {
-		target = normalizeOpenAIModelForUpstream(credential, account.GetMappedModel(model))
+	if !slices.Contains(modeltrace.Models(), model) {
+		return nil, "", errors.New("model has no ModelTrace fingerprint")
 	}
-	if !slices.Contains(modeltrace.Models(), target) {
-		return nil, "", errors.New("mapped target has no ModelTrace fingerprint")
-	}
-	return account, target, nil
+	return account, model, nil
 }
 
 func modelTraceBearer(account *Account) (string, error) {

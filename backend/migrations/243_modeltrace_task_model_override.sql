@@ -1,0 +1,2 @@
+ALTER TABLE modeltrace_tasks
+    ADD COLUMN IF NOT EXISTS model_override BOOLEAN NOT NULL DEFAULT FALSE;

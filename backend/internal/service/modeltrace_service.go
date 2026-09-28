@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +23,7 @@ type ModelTraceTask struct {
 	Status          string             `json:"status"`
 	Model           string             `json:"model"`
 	TargetModel     string             `json:"target_model"`
+	ModelOverride   bool               `json:"-"`
 	Rounds          int                `json:"rounds"`
 	CompletedRounds int                `json:"completed_rounds"`
 	Result          string             `json:"result"`
@@ -158,17 +160,14 @@ func (s *ModelTraceService) Models(ctx context.Context, accountID int64) ([]stri
 	if accountID == 0 {
 		return models, nil
 	}
-	if _, err := s.accounts.GetByID(ctx, accountID); err != nil {
+	account, err := s.accounts.GetByID(ctx, accountID)
+	if err != nil {
 		return nil, err
 	}
-	available := make([]string, 0, len(models))
-	for _, model := range models {
-		_, target, err := s.prober.ResolveModelTraceTarget(ctx, accountID, model)
-		if err == nil && slices.Contains(models, target) {
-			available = append(available, model)
-		}
+	if account.Platform != PlatformOpenAI {
+		return []string{}, nil
 	}
-	return available, nil
+	return models, nil
 }
 
 func (s *ModelTraceService) Create(ctx context.Context, accountID int64, model string, rounds int) (*ModelTraceTask, error) {
@@ -193,6 +192,12 @@ func (s *ModelTraceService) enqueue(ctx context.Context, accountID int64, model 
 	if account.Platform != PlatformOpenAI {
 		return nil, infraerrors.BadRequest("MODELTRACE_ACCOUNT_UNSUPPORTED", "only OpenAI accounts support ModelTrace")
 	}
+	if source == "auto" {
+		model = modelTraceModelForAccount(account, cfg)
+		if err := validateModelTraceRequest(model, rounds); err != nil {
+			return nil, nil
+		}
+	}
 	if source == "auto" && !modelTraceAutoEligible(account, cfg) {
 		return nil, nil
 	}
@@ -203,17 +208,12 @@ func (s *ModelTraceService) enqueue(ctx context.Context, accountID int64, model 
 	if history.Active != nil {
 		return history.Active, nil
 	}
-	_, target, err := s.prober.ResolveModelTraceTarget(ctx, accountID, model)
-	if err != nil {
-		return nil, infraerrors.BadRequest("MODELTRACE_TARGET_UNAVAILABLE", "account credentials or model configuration are unavailable")
-	}
 	if source == "auto" && !s.autoEligibleForTarget(ctx, account, cfg, model) {
 		return nil, nil
 	}
-	if !slices.Contains(modeltrace.Models(), target) {
-		return nil, infraerrors.BadRequest("MODELTRACE_TARGET_UNSUPPORTED", "mapped target is not supported by the fingerprint library")
-	}
-	task := &ModelTraceTask{AccountID: accountID, Source: source, Model: model, TargetModel: target, Rounds: rounds, Version: modeltrace.Current().Version()}
+	configuredModel, hasOverride := account.Extra[ModelTraceModelExtraKey].(string)
+	hasOverride = source == "auto" && hasOverride && strings.TrimSpace(configuredModel) != ""
+	task := &ModelTraceTask{AccountID: accountID, Source: source, Model: model, TargetModel: model, ModelOverride: hasOverride, Rounds: rounds, Version: modeltrace.Current().Version()}
 	return s.repo.Enqueue(ctx, task, epoch.owner, cfg.IntervalMinutes)
 }
 
@@ -347,6 +347,10 @@ func (s *ModelTraceService) execute(epochCtx context.Context, owner string, task
 			task.Error = "automatic detection disabled or account is not schedulable"
 			return
 		}
+		if modelTraceAutoModelChanged(original, task) {
+			task.Error = "automatic detection model changed before execution"
+			return
+		}
 	}
 	account, target, err := s.prober.ResolveModelTraceTarget(ctx, task.AccountID, task.Model)
 	if err != nil || target != task.TargetModel || original.Platform != PlatformOpenAI {
@@ -392,6 +396,14 @@ func (s *ModelTraceService) execute(epochCtx context.Context, owner string, task
 			roundCancel()
 			task.Error = "task interrupted before sending probe"
 			return
+		}
+		if task.Source == "auto" && task.CompletedRounds == 0 {
+			latest, latestErr := s.accounts.GetByID(ctx, task.AccountID)
+			if latestErr != nil || latest == nil || modelTraceAutoModelChanged(latest, task) {
+				roundCancel()
+				task.Error = "automatic detection model changed before execution"
+				return
+			}
 		}
 		output, err := s.prober.ProbeModelTrace(roundCtx, account, target, challenge)
 		roundCancel()

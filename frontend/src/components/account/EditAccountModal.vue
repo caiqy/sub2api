@@ -2667,6 +2667,14 @@
           <Toggle id="edit-modeltrace-enabled" v-model="modelTraceEnabled" data-testid="modeltrace-enabled" :aria-label="t('admin.modeltrace.accountEnabled')" aria-describedby="edit-modeltrace-hint" />
         </div>
         <div>
+          <label for="edit-modeltrace-model" class="input-label">{{ t('admin.modeltrace.accountModel') }}</label>
+          <select id="edit-modeltrace-model" v-model="modelTraceModel" data-testid="modeltrace-model" class="input w-full" :disabled="modelTraceModelsLoading">
+            <option value="">{{ t('admin.modeltrace.accountModelPlaceholder') }}</option>
+            <option v-for="name in modelTraceModels" :key="name" :value="name">{{ name }}</option>
+          </select>
+          <p id="edit-modeltrace-model-hint" class="input-hint">{{ t('admin.modeltrace.accountModelHint') }}</p>
+        </div>
+        <div>
           <label for="edit-modeltrace-interval" class="input-label">{{ t('admin.modeltrace.accountInterval') }}</label>
           <input id="edit-modeltrace-interval" v-model="modelTraceInterval" data-testid="modeltrace-interval" type="text" inputmode="numeric" class="input" :placeholder="t('admin.modeltrace.accountIntervalPlaceholder')" :aria-invalid="parseModelTraceInterval(modelTraceInterval) === undefined" aria-describedby="edit-modeltrace-interval-hint" />
           <p id="edit-modeltrace-interval-hint" class="input-hint">{{ t('admin.modeltrace.accountIntervalHint') }}</p>
@@ -3375,6 +3383,7 @@ import {
   parseDateTimeLocalInput
 } from '@/utils/format'
 import { extractApiErrorMessage, extractI18nErrorMessage } from '@/utils/apiError'
+import modeltraceAPI from '@/api/admin/modeltrace'
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
 import { getAccountExpiryTimestamp } from '@/components/account/accountExpiry'
 import { parseModelTraceInterval } from '@/components/account/modelTraceInterval'
@@ -3822,8 +3831,23 @@ const fillHeaderOverrideTemplate = () => {
 const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(false)
 const modelTraceEnabled = ref(false)
+const modelTraceModel = ref('')
 const modelTraceInterval = ref('')
 const modelTraceQuarantineEnabled = ref(false)
+const modelTraceModels = ref<string[]>([])
+const modelTraceModelsLoading = ref(false)
+
+async function loadModelTraceModels() {
+  if (props.account?.platform !== 'openai') return
+  modelTraceModelsLoading.value = true
+  try {
+    modelTraceModels.value = (await modeltraceAPI.getModels()).models
+  } catch {
+    modelTraceModels.value = []
+  } finally {
+    modelTraceModelsLoading.value = false
+  }
+}
 const mixedScheduling = ref(false) // For antigravity accounts: enable mixed scheduling
 // 上游ID：直接上游声明请求标识的响应头名，留空不记录。
 const upstreamRequestIdHeader = ref('')
@@ -4352,6 +4376,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   allowOverages.value = false
   const extra = newAccount.extra as Record<string, unknown> | undefined
   modelTraceEnabled.value = newAccount.platform === 'openai' && extra?.modeltrace_enabled === true
+  modelTraceModel.value = newAccount.platform === 'openai' && typeof extra?.modeltrace_model === 'string'
+    ? extra.modeltrace_model : ''
   modelTraceInterval.value = newAccount.platform === 'openai' && extra?.modeltrace_interval_minutes != null
     ? String(extra.modeltrace_interval_minutes) : ''
   modelTraceQuarantineEnabled.value = newAccount.platform === 'openai' && extra?.modeltrace_quarantine_enabled === true
@@ -4755,6 +4781,7 @@ watch(
         appStore.showInfo(PASSTHROUGH_FIELDS_REMOVAL_MESSAGE)
       }
       syncFormFromAccount(newAccount)
+      void loadModelTraceModels()
       lastSyncedAccount = newAccount
       loadTLSProfiles()
     }
@@ -5718,6 +5745,10 @@ const handleSubmit = async () => {
     appStore.showError(t('admin.modeltrace.invalidAccountInterval'))
     return
   }
+  if (props.account.platform === 'openai' && modelTraceModel.value && modelTraceModels.value.length && !modelTraceModels.value.includes(modelTraceModel.value)) {
+    appStore.showError(t('admin.modeltrace.invalidAccountModel'))
+    return
+  }
   const accountID = props.account.id
 
   if (form.status !== 'active' && form.status !== 'inactive' && form.status !== 'error') {
@@ -6124,6 +6155,12 @@ const handleSubmit = async () => {
     applyOpenAIExtra(nextExtra)
     if (props.account.platform === 'openai') {
       nextExtra.modeltrace_enabled = modelTraceEnabled.value
+      const previousModel = typeof props.account.extra?.modeltrace_model === 'string' ? props.account.extra.modeltrace_model : ''
+      if (modelTraceModel.value !== previousModel) {
+        nextExtra.modeltrace_model = modelTraceModel.value || null
+      } else {
+        delete nextExtra.modeltrace_model
+      }
       const interval = parseModelTraceInterval(modelTraceInterval.value)
       const previousInterval = props.account.extra?.modeltrace_interval_minutes
       if (interval !== (typeof previousInterval === 'number' ? previousInterval : null)) {
