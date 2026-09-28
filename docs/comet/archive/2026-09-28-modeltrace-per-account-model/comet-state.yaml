@@ -1,0 +1,547 @@
+schema: comet.native.v4
+name: modeltrace-per-account-model
+language: zh-CN
+phase: archive
+status: done
+state_version: 19
+brief: brief.md
+document_constraints_version: 1
+shape_confirmation_hash: e6af2813b954c782cc9ccbfc9e7cd57b91398ae2aad28e32d96e188d503b4224
+spec_changes:
+  - capability: modeltrace-degradation-detection
+    operation: modify
+    source: specs/modeltrace-degradation-detection/spec.md
+workspace:
+  isolation: current
+  change_branch: main
+  target_branch: main
+  finish: null
+loop:
+  stage: done
+  goal_cycle: 1
+  iteration: 5
+  attempt: 1
+  retry_epoch: 0
+  failed_iteration_count: 4
+  no_progress_count: 0
+  execution_failure_count: 0
+  previous_unresolved_ids: []
+  next_action: null
+acceptance:
+  - id: A1
+    source: brief.md
+    text: "**WHEN** 账号未配置独立检测模型且全局模型为 `gpt-6-astra`"
+    result: passed
+    reason:
+      text: An absent account override resolves to the global default.
+      truncated: false
+  - id: A2
+    source: brief.md
+    text: "**THEN** 后续自动任务使用 `gpt-6-astra`；修改全局模型只影响未配置账号的后续任务。 ### Scenario:
+      账号模型覆盖全局模型"
+    result: passed
+    reason:
+      text: Automatic enqueue snapshots the inherited global model for subsequent
+        tasks.
+      truncated: false
+  - id: A3
+    source: brief.md
+    text: "**WHEN** 账号配置 `gpt-6-sol` 且全局模型为 `gpt-6-astra`"
+    result: passed
+    reason:
+      text: A configured GPT account override is accepted independently of the global
+        model.
+      truncated: false
+  - id: A4
+    source: brief.md
+    text: "**THEN** 后续自动任务使用 `gpt-6-sol`，不使用全局模型。 ### Scenario: 模型配置快照与排队任务"
+    result: passed
+    reason:
+      text: Automatic enqueue selects and persists the account override, not the
+        global model.
+      truncated: false
+  - id: A5
+    source: brief.md
+    text: "**WHEN** 账号模型配置在任务排队后、探针发送前发生变化"
+    result: passed
+    reason:
+      text: Queued automatic tasks compare persisted override provenance and selected
+        model before the first send.
+      truncated: false
+  - id: A6
+    source: brief.md
+    text: "**THEN** 旧排队任务不发送请求并记录失败或跳过原因；已发送任务不被强行取消，完成后保留原模型历史。 ### Scenario:
+      手动模型列表按平台限定"
+    result: passed
+    reason:
+      text: The final first-round check after the repository fence records a failed
+        unsent task on override change; completed first rounds continue on their
+        snapshot.
+      truncated: false
+  - id: A7
+    source: brief.md
+    text: "**WHEN** 管理员打开 OpenAI 账号的手动检测弹窗或全局 ModelTrace 设置"
+    result: passed
+    reason:
+      text: Global settings and OpenAI manual modal obtain the ModelTrace model
+        catalog.
+      truncated: false
+  - id: A8
+    source: brief.md
+    text: "**THEN** 列表来自 ModelTrace 当前 GPT 模型，包含未被该账号映射配置的模型，但不包含 Claude 等非 OpenAI
+      模型。 ### Scenario: 直接调用所选模型"
+    result: passed
+    reason:
+      text: The catalog selects GPT family fingerprints and is not filtered by account
+        mappings.
+      truncated: false
+  - id: A9
+    source: brief.md
+    text: "**WHEN** 管理员或自动任务选择 `gpt-6-sol` 发起检测"
+    result: passed
+    reason:
+      text: Manual and automatic requests retain their selected GPT model ID.
+      truncated: false
+  - id: A10
+    source: brief.md
+    text: "**THEN** 探针使用所选账号的凭据、协议、代理，并将 `gpt-6-sol` 作为实际上游模型
+      ID；不得改用账号映射目标、全局模型或其他账号。 ### Scenario: 所选模型暂不可调用"
+    result: passed
+    reason:
+      text: Probe payload uses the selected ID with the selected account's credential
+        owner, protocol, and proxy; no mapping substitution.
+      truncated: false
+  - id: A11
+    source: brief.md
+    text: "**WHEN** 配置模型仍属于 ModelTrace 列表，但账号凭据、协议或上游不支持该模型"
+    result: passed
+    reason:
+      text: Catalog validation permits configuration without current account
+        capability or credentials.
+      truncated: false
+  - id: A12
+    source: brief.md
+    text: "**THEN** 配置仍可保存；检测实际尝试所选模型，失败时记录脱敏失败原因，不静默换用其他模型。"
+    result: passed
+    reason:
+      text: Credential and upstream failures become sanitized task history; no
+        fallback target is selected.
+      truncated: false
+  - id: A13
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 账号和模型隔离 - **WHEN** 管理员选择某 OpenAI 账号及一个当前 ModelTrace GPT 模型发起检测 - **THEN**
+      探针使用该账号的凭据归属、协议及业务代理，直接发送选择的模型 ID，不得换用其他账号、映射目标或全局模型。
+    result: passed
+    reason:
+      text: Probe and transport tests verify account identity, parent credential
+        ownership, proxy and unmodified target.
+      truncated: false
+  - id: A14
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: OpenAI 模型列表 - **WHEN** 管理员打开全局 ModelTrace 设置或 OpenAI 账号的手动检测弹窗 - **THEN**
+      列表来自当前 ModelTrace GPT 模型，包含未被账号映射配置的模型，不包含 Claude 或其他非 OpenAI 家族模型。
+    result: passed
+    reason:
+      text: Global and account-specific model APIs expose the GPT-only fingerprint
+        list without mapping filtering.
+      truncated: false
+  - id: A15
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 不可调用模型 - **WHEN** 所选模型仍在 ModelTrace GPT 列表中，但账号凭据、协议或上游暂不支持该模型 - **THEN**
+      配置可以保存，检测实际尝试该模型并记录脱敏失败原因，不改用其他模型。
+    result: passed
+    reason:
+      text: Valid catalog choices save without capability checks and failed probes
+        preserve a sanitized failure without substitution.
+      truncated: false
+  - id: A16
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 单轮与多轮评分 - **WHEN** 分别完成 1、2 或 3 轮有效挑战 - **THEN**
+      各自使用相应样本数校准，归因第一名等于实际所选模型则记录正常，否则记录降智；概率和指纹库版本可查询。
+    result: passed
+    reason:
+      text: All requested valid samples are scored with sample-count calibration and
+        the selected target determines normal versus degraded.
+      truncated: false
+  - id: A17
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 部分失败 - **WHEN** 请求 3 轮检测但仅 2 轮有效，或实际所选模型返回上游错误 - **THEN**
+      历史记录为失败并展示有效轮次和脱敏原因，不自动补发、不覆盖账号此前有效结论。
+    result: passed
+    reason:
+      text: Partial rounds and upstream errors finish as failures without publishing a
+        new conclusion or hidden retry.
+      truncated: false
+  - id: A18
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 关闭并重新打开 - **WHEN** 手动任务执行中关闭弹窗再重新打开 - **THEN**
+      任务继续运行，界面恢复其进度或结果，不因打开动作重复发起模型请求。
+    result: passed
+    reason:
+      text: The modal restores active task history after reopening without starting
+        another request.
+      truncated: false
+  - id: A19
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 热更新和关闭 - **WHEN** 管理员保存有效设置或关闭自动检测 - **THEN**
+      后续调度使用新配置，关闭后不再启动排队或新自动任务，手动检测仍可用；非法参数拒绝保存且不改变原配置。
+    result: passed
+    reason:
+      text: Settings validation rejects invalid updates; hot reads and automatic
+        eligibility honor the global switch while manual starts remain
+        available.
+      truncated: false
+  - id: A20
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 开关和模型继承 - **WHEN** 全局开启但账号自动开关关闭，或账号未配置模型覆盖 - **THEN**
+      账号在前一种情况下不自动检测但仍可手动检测；在后一种情况下使用当前全局模型创建后续自动任务。
+    result: passed
+    reason:
+      text: Account auto switch gates scheduling; absent override inherits the global
+        model; manual starts ignore automatic switches.
+      truncated: false
+  - id: A21
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 账号模型覆盖 - **WHEN** 全局模型为 `gpt-6-astra`，账号覆盖模型为 `gpt-6-sol` - **THEN**
+      该账号后续自动任务使用 `gpt-6-sol`，不使用全局模型。
+    result: passed
+    reason:
+      text: Account model selection takes precedence over the global setting at
+        automatic task creation.
+      truncated: false
+  - id: A22
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 模型配置快照 - **WHEN** 账号模型覆盖在自动任务排队后、探针发送前发生变化 - **THEN**
+      旧排队任务不发送请求并记录配置变化原因；已发送任务使用创建时模型完成，历史保留其模型。
+    result: passed
+    reason:
+      text: Last check before first probe skips changed overrides; after a valid first
+        round no override recheck aborts later rounds, preserving the task
+        snapshot and history.
+      truncated: false
+  - id: A23
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 账号模型暂不可用 - **WHEN** 账号保存了合法 ModelTrace 模型但当前凭据、协议或上游不能调用它 - **THEN**
+      保存成功，自动或手动检测实际调用该模型并记录失败，不回退其他模型。
+    result: passed
+    reason:
+      text: Unsupported current account credentials or upstream capability fail
+        against the selected model without fallback.
+      truncated: false
+  - id: A24
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 手动与自动降智 - **WHEN** 已开启隔离策略的账号完成手动或自动检测且有效结论为降智 - **THEN**
+      整个账号进入临时不可调用状态，其他模型也不被业务调度选中，检测历史记录所选模型。
+    result: passed
+    reason:
+      text: Latest successful degraded result applies account-level quarantine and
+        retains the selected model in history.
+      truncated: false
+  - id: A25
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 隔离期间仍可自动复检 - **WHEN** 账号仅因 ModelTrace 降智处于临时不可调用状态且自动检测开关仍开启 - **THEN**
+      账号按其有效间隔继续接受使用有效账号模型的 ModelTrace 复检；有效正常结论可解除隔离，失败、超时或继续降智不得放开业务调度。
+    result: passed
+    reason:
+      text: Own ModelTrace quarantine does not prevent scheduled recovery probes,
+        while independent account blockers still do.
+      truncated: false
+  - id: A26
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 手动恢复与策略关闭 - **WHEN** 管理员手动检测得到有效正常结论，或关闭账号的降智隔离策略 - **THEN** 解除仅由
+      ModelTrace 造成的隔离；若存在其他独立原因，账号仍保持不可调用。
+    result: passed
+    reason:
+      text: Successful normal detection or disabling the policy clears only ModelTrace
+        quarantine, retaining other blockers.
+      truncated: false
+  - id: A27
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 账号级最新有效结论 - **WHEN** 同账号模型 A 有效降智、随后模型 B 有效正常，接着发生一次失败检测 - **THEN** 模型 A
+      的降智先使账号隔离，模型 B 的正常解除隔离，最后失败不重新隔离；评分历史保留各次模型与结论。
+    result: passed
+    reason:
+      text: The latest successful task updates the account summary/quarantine;
+        subsequent failures leave it unchanged.
+      truncated: false
+  - id: A28
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 来源和持久化 - **WHEN** 同账号先后执行手动与自动检测后刷新页面或重启服务 - **THEN** 30
+      天内的记录可分页查询并准确区分来源、所选模型、实际请求模型、轮次及结论；非管理员不能读取或触发检测。
+    result: passed
+    reason:
+      text: 241 matches its committed original blob exactly; embedded 243 adds
+        model_override for existing databases, repository scans and paginated
+        history include it without exposing secrets; existing admin boundary
+        remains.
+      truncated: false
+  - id: A29
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 多模型最近结果 - **WHEN** 同账号 Astra 检测降智后 Sol 检测正常，再发生一次请求失败 - **THEN**
+      状态列显示最近有效的正常结果并标明 Sol 和检测时间，历史保留 Astra 降智及最新失败；点击状态进入该账号历史页签。
+    result: passed
+    reason:
+      text: Account status uses the retained latest valid model/time and the history
+        entry point; failed tasks do not replace the summary.
+      truncated: false
+  - id: A30
+    source: specs/modeltrace-degradation-detection/spec.md
+    text: 并发与中断 - **WHEN** 多实例或手动/自动同时请求检测同一账号，或执行中服务中断 - **THEN**
+      同账号最多一个任务执行，其他触发复用或等待既有任务；中断留下可查询的失败结果，不以正常/降智掩盖故障，也不自动重发已经发送的轮次。
+    result: passed
+    reason:
+      text: Database lease, account active-slot and interruption recovery prevent
+        overlapping or replayed tasks; focused checks passed.
+      truncated: false
+builder_handoff:
+  candidate_id: 47d2c174-7909-4ce5-af80-7bb8daf50347
+  identity_provider: skill-coordinated
+  builder_execution_ref: skill-coordinated:builder:1f02b3e2-6892-4f70-bd54-a30fafb27cd5
+  iteration: 5
+  summary:
+    text: Runtime 上一轮的 PostgreSQL 检查因复杂 PowerShell 参数解析失败，产品代码和手工 PostgreSQL 集成均已通过且
+      55479 已关闭。本轮保持最终实现不变，重新交接 A6/A22/A28：首轮发送前模型覆盖最后校验、首轮已发送多轮任务继续使用快照、241
+      原始迁移不变且 243 单独增量迁移。Runtime 计划移除该复杂外部脚本，仅重跑其余可重复检查；PostgreSQL 手工通过证据交由
+      Verifier 审阅，迁移完整性由 Verifier 直接核对。
+    truncated: false
+  addressed_acceptance_ids:
+    - A6
+    - A22
+    - A28
+  checks:
+    - name:
+        text: 最终 ModelTrace 服务与仓储定向测试
+        truncated: false
+      result: passed
+      note:
+        text: TestModelTrace* 与账号状态查询回归通过，包含发送前变更和已发送多轮任务回归。
+        truncated: false
+    - name:
+        text: PostgreSQL 集成测试
+        truncated: false
+      result: passed
+      note:
+        text: 手工临时 PostgreSQL 17.6 三项集成测试通过；测试库删除，55479 已确认关闭。
+        truncated: false
+    - name:
+        text: 迁移与差异检查
+        truncated: false
+      result: passed
+      note:
+        text: 241 原始迁移未修改，243 增量迁移存在；gofmt 和 git diff --check 通过。
+        truncated: false
+  checks_truncated: false
+  known_limits:
+    - text: 未执行真实上游账号调用；探针直接模型 ID、失败不回退和账号凭据/代理归属使用传输层测试覆盖。
+      truncated: false
+  known_limits_truncated: false
+  review: null
+  submitted_at: 2026-09-28T07:37:33.413Z
+blockers: []
+verification:
+  candidate_id: 47d2c174-7909-4ce5-af80-7bb8daf50347
+  identity_provider: skill-coordinated
+  verifier_execution_ref: skill-coordinated:verifier:3d6965eb-9855-4069-9597-cb4b15e6c00c
+  iteration: 5
+  attempt: 1
+  assurance: skill-coordinated
+  verdict: pass
+  checks:
+    - id: backend-modeltrace-model-policy
+      name:
+        text: 后端 ModelTrace regression
+        truncated: false
+      argv_display:
+        - text: test
+          truncated: false
+        - text: ./internal/service
+          truncated: false
+        - text: ./internal/repository
+          truncated: false
+        - text: ./internal/handler
+          truncated: false
+        - text: ./internal/handler/admin
+          truncated: false
+        - text: ./cmd/server
+          truncated: false
+        - text: -count=1
+          truncated: false
+      argv_truncated: false
+      cwd_ref: backend
+      status: passed
+      exit_code: 0
+      duration_ms: 186507
+    - id: backend-modeltrace-vet
+      name:
+        text: Backend vet
+        truncated: false
+      argv_display:
+        - text: vet
+          truncated: false
+        - text: ./internal/service
+          truncated: false
+        - text: ./internal/repository
+          truncated: false
+        - text: ./internal/handler
+          truncated: false
+        - text: ./internal/handler/admin
+          truncated: false
+      argv_truncated: false
+      cwd_ref: backend
+      status: passed
+      exit_code: 0
+      duration_ms: 3486
+    - id: frontend-modeltrace-tests
+      name:
+        text: Frontend ModelTrace tests
+        truncated: false
+      argv_display:
+        - text: exec
+          truncated: false
+        - text: vitest
+          truncated: false
+        - text: --
+          truncated: false
+        - text: --run
+          truncated: false
+        - text: src/components/account/__tests__/CreateAccountModal.spec.ts
+          truncated: false
+        - text: src/components/account/__tests__/EditAccountModal.spec.ts
+          truncated: false
+        - text: src/components/account/__tests__/ModelTraceModal.spec.ts
+          truncated: false
+      argv_truncated: false
+      cwd_ref: frontend
+      status: passed
+      exit_code: 0
+      duration_ms: 13464
+    - id: frontend-modeltrace-typecheck
+      name:
+        text: Frontend typecheck
+        truncated: false
+      argv_display:
+        - text: run
+          truncated: false
+        - text: typecheck
+          truncated: false
+      argv_truncated: false
+      cwd_ref: frontend
+      status: passed
+      exit_code: 0
+      duration_ms: 36068
+    - id: frontend-modeltrace-build
+      name:
+        text: Frontend build
+        truncated: false
+      argv_display:
+        - text: run
+          truncated: false
+        - text: build
+          truncated: false
+      argv_truncated: false
+      cwd_ref: frontend
+      status: passed
+      exit_code: 0
+      duration_ms: 100647
+  summary:
+    text: Independent read-only fifth-round review of A1-A30, complete brief/Spec,
+      prior four outcomes, candidate source and current five passed Runtime
+      receipts. The A6/A22 first-send fence and in-flight multi-round behavior,
+      and the A28 immutable 241 plus additive 243 upgrade path, are satisfied.
+    truncated: false
+  risks:
+    - text: No live upstream account call was authorized. Temporary PostgreSQL
+        integration was reported manually passed for this candidate and port
+        55479 is closed, but that run is not a formal Runtime receipt; this
+        round independently inspected migration and repository behavior instead.
+      truncated: false
+  risks_truncated: false
+  completed_at: 2026-09-28T07:53:55.420Z
+history:
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 1
+    outcome: fail
+    unresolved_ids:
+      - A5
+      - A6
+      - A12
+      - A15
+      - A22
+      - A23
+    summary:
+      text: 独立只读核验 30 项：24 passed、6
+        failed。清除账号覆盖时旧排队任务未失效；凭据缺失时入队前拒绝而非记录失败历史。当前候选绑定的六项 Runtime
+        检查通过；未调用真实上游，55479 已关闭。
+      truncated: false
+    completed_at: 2026-09-28T06:18:43.910Z
+  - goal_cycle: 1
+    iteration: 2
+    attempt: 1
+    outcome: fail
+    unresolved_ids:
+      - A5
+      - A6
+      - A22
+    summary:
+      text: 独立核验 30 项：27 passed、3 failed（A5/A6/A22）。持久化覆盖快照、延迟凭据解析和 PostgreSQL
+        列扫描修复有效；自动任务覆盖检查后至实际发送前仍存在配置变更竞态。六项 Runtime 正式检查均 passed。
+      truncated: false
+    completed_at: 2026-09-28T06:57:06.414Z
+  - goal_cycle: 1
+    iteration: 3
+    attempt: 1
+    outcome: fail
+    unresolved_ids:
+      - A6
+      - A22
+      - A28
+    summary:
+      text: "Fresh independent read-only third-round verifier reviewed all A1-A30, the
+        complete brief and target Spec, both preserved Runtime failure
+        histories, actual implementation, and all six current-candidate Runtime
+        checks/logs. Result: 27 passed, 3 failed (A6, A22, A28). The
+        post-repo.Check first-send override fence and deferred
+        credential-failure history are implemented, but multi-round in-flight
+        completion regresses and editing applied migration 241 breaks
+        existing-database upgrades. All six Runtime checks passed, including
+        fresh temporary PostgreSQL; no additional checks or code changes were
+        made."
+      truncated: false
+    completed_at: 2026-09-28T07:22:55.759Z
+  - goal_cycle: 1
+    iteration: 4
+    attempt: 0
+    outcome: recovery
+    unresolved_ids: []
+    summary:
+      text: "Builder handoff Runtime checks failed: backend-modeltrace-postgres"
+      truncated: false
+    completed_at: 2026-09-28T07:34:55.990Z
+  - goal_cycle: 1
+    iteration: 5
+    attempt: 1
+    outcome: pass
+    unresolved_ids: []
+    summary:
+      text: Independent read-only fifth-round review of A1-A30, complete brief/Spec,
+        prior four outcomes, candidate source and current five passed Runtime
+        receipts. The A6/A22 first-send fence and in-flight multi-round
+        behavior, and the A28 immutable 241 plus additive 243 upgrade path, are
+        satisfied.
+      truncated: false
+    completed_at: 2026-09-28T07:53:55.420Z
+history_overflow:
+  dropped_entries: 0
+  first_dropped_at: null
+  last_dropped_at: null
+  outcome_counts:
+    pass: 0
+    fail: 0
+    blocked: 0
+    execution-error: 0
+    recovery: 0
+verification_result: pass
+verification_report: verification.md
+archived: true
+created_at: 2026-09-28T04:56:30.491Z
